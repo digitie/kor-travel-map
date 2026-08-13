@@ -14,6 +14,12 @@
   membership만 Dagster observation command로 수용하고 archive는 dependent rule candidate를 같은
   SERIALIZABLE transaction에서 reconcile한다. catalog command effect는 append-only claim으로 한 command의
   다중 resource 재사용을 거부한다.
+- **REMOVED**: caller가 임의 시점에 legacy overlay를 갱신하던 admin rule apply API와
+  `curated_features_refresh` Dagster 일일 asset/job/schedule을 제거했다. 후보 generation은
+  authoritative provider terminal receipt 또는 typed catalog command만 시작한다.
+- **SECURITY**: provider observation은 authoritative full-snapshot child job을 한 번만 소비하는
+  append-only receipt를 사용한다. 동일 job replay는 timestamp/revision을 갱신하지 않으며 catalog
+  command effect와 terminal result는 같은 command row lock으로 직렬화한다.
 
 ### retained curation theme CAS API (2026-08-13, T-VN-40)
 

@@ -238,6 +238,8 @@ LANGUAGE plpgsql
 SET search_path = pg_catalog, ops
 AS $claim$
 BEGIN
+  PERFORM 1 FROM ops.domain_commands AS command
+  WHERE command.command_id = p_command_id FOR UPDATE;
   IF EXISTS (
     SELECT 1 FROM ops.domain_command_results AS result
     WHERE result.command_id = p_command_id
@@ -510,7 +512,7 @@ BEGIN
     RAISE EXCEPTION 'archived rule cannot be patched'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_rule_active';
   END IF;
-  IF v_rule.owner_kind <> 'operator' THEN
+  IF v_rule.owner_kind IS DISTINCT FROM 'operator' THEN
     RAISE EXCEPTION 'provider-owned rule cannot be patched by an admin command'
       USING ERRCODE = '42501';
   END IF;
@@ -678,7 +680,7 @@ BEGIN
     RAISE EXCEPTION 'rule revision mismatch'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_expected_revision';
   END IF;
-  IF v_rule.owner_kind <> 'operator' THEN
+  IF v_rule.owner_kind IS DISTINCT FROM 'operator' THEN
     RAISE EXCEPTION 'provider-owned rule cannot be archived by an admin command'
       USING ERRCODE = '42501';
   END IF;
@@ -747,6 +749,10 @@ def upgrade() -> None:
     )
     op.execute(
         "GRANT SELECT ON TABLE ops.domain_command_results "
+        "TO ktm_curation_command_owner"
+    )
+    op.execute(
+        "GRANT SELECT, UPDATE (command_id) ON TABLE ops.domain_commands "
         "TO ktm_curation_command_owner"
     )
     _execute_commands(_COMMAND_PROCEDURES_SQL)

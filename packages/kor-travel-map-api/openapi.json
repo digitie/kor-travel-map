@@ -10472,6 +10472,10 @@
             ],
             "title": "Category"
           },
+          "command_etag": {
+            "title": "Command Etag",
+            "type": "string"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -10509,6 +10513,32 @@
             "additionalProperties": true,
             "title": "Metadata",
             "type": "object"
+          },
+          "owner_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "operator",
+                  "provider_dataset"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Kind"
+          },
+          "owner_provider_dataset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Provider Dataset Id"
           },
           "place_kind": {
             "anyOf": [
@@ -10581,6 +10611,7 @@
           "enabled",
           "metadata",
           "row_revision",
+          "command_etag",
           "created_at",
           "updated_at"
         ],
@@ -10636,6 +10667,10 @@
               }
             ],
             "title": "Archived At"
+          },
+          "command_etag": {
+            "title": "Command Etag",
+            "type": "string"
           },
           "created_at": {
             "format": "date-time",
@@ -10816,7 +10851,8 @@
           "updated_at",
           "row_revision",
           "observation_revision",
-          "representation_etag"
+          "representation_etag",
+          "command_etag"
         ],
         "title": "CuratedSourceView",
         "type": "object"
@@ -10995,6 +11031,10 @@
             ],
             "title": "Archived At"
           },
+          "command_etag": {
+            "title": "Command Etag",
+            "type": "string"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -11081,7 +11121,8 @@
           "metadata",
           "created_at",
           "updated_at",
-          "row_revision"
+          "row_revision",
+          "command_etag"
         ],
         "title": "CuratedThemeView",
         "type": "object"
@@ -29077,42 +29118,6 @@
         "title": "ReviewSourceDetailRecord",
         "type": "object"
       },
-      "RuleApplyData": {
-        "additionalProperties": false,
-        "properties": {
-          "inserted_or_updated": {
-            "title": "Inserted Or Updated",
-            "type": "integer"
-          },
-          "rule_id": {
-            "title": "Rule Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "rule_id",
-          "inserted_or_updated"
-        ],
-        "title": "RuleApplyData",
-        "type": "object"
-      },
-      "RuleApplyResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/RuleApplyData"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "title": "RuleApplyResponse",
-        "type": "object"
-      },
       "SigunguByRadiusScope": {
         "additionalProperties": false,
         "description": "kor-travel-geo가 계산한 반경 교차 시군구 기준 갱신 scope.",
@@ -31433,7 +31438,7 @@
             }
           },
           {
-            "description": "직전 단건 GET/성공 응답의 catalog row_revision strong ETag.",
+            "description": "직전 단건 GET body의 data.command_etag 또는 성공 응답 ETag.",
             "in": "header",
             "name": "If-Match",
             "required": true,
@@ -31612,7 +31617,7 @@
             }
           },
           {
-            "description": "직전 단건 GET/성공 응답의 catalog row_revision strong ETag.",
+            "description": "직전 단건 GET body의 data.command_etag 또는 성공 응답 ETag.",
             "in": "header",
             "name": "If-Match",
             "required": true,
@@ -31697,75 +31702,6 @@
           }
         ],
         "summary": "Patch Admin Curated Source Rule Route",
-        "tags": [
-          "admin-curated"
-        ]
-      }
-    },
-    "/v1/admin/curated-source-rules/{rule_id}/apply": {
-      "post": {
-        "operationId": "apply_admin_curated_source_rule_route_v1_admin_curated_source_rules__rule_id__apply_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "rule_id",
-            "required": true,
-            "schema": {
-              "title": "Rule Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": true,
-            "schema": {
-              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
-              "format": "uuid",
-              "title": "Idempotency-Key",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RuleApplyResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "security": [
-          {
-            "AdminBFF": []
-          }
-        ],
-        "summary": "Apply Admin Curated Source Rule Route",
         "tags": [
           "admin-curated"
         ]
@@ -31973,7 +31909,7 @@
             }
           },
           {
-            "description": "직전 단건 GET/성공 응답의 catalog row_revision strong ETag.",
+            "description": "직전 단건 GET body의 data.command_etag 또는 성공 응답 ETag.",
             "in": "header",
             "name": "If-Match",
             "required": true,
@@ -32147,7 +32083,7 @@
             }
           },
           {
-            "description": "직전 단건 GET/성공 응답의 catalog row_revision strong ETag.",
+            "description": "직전 단건 GET body의 data.command_etag 또는 성공 응답 ETag.",
             "in": "header",
             "name": "If-Match",
             "required": true,
@@ -32436,7 +32372,7 @@
             }
           },
           {
-            "description": "직전 단건 GET/성공 응답의 catalog row_revision strong ETag.",
+            "description": "직전 단건 GET body의 data.command_etag 또는 성공 응답 ETag.",
             "in": "header",
             "name": "If-Match",
             "required": true,
@@ -32615,7 +32551,7 @@
             }
           },
           {
-            "description": "직전 단건 GET/성공 응답의 catalog row_revision strong ETag.",
+            "description": "직전 단건 GET body의 data.command_etag 또는 성공 응답 ETag.",
             "in": "header",
             "name": "If-Match",
             "required": true,

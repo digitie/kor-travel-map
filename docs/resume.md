@@ -49,9 +49,11 @@ metadata-only catalog revision과 candidate semantic proof를 분리해 정상 �
 오인되지 않게 했다. retained source catalog도 operator CAS revision과 provider observation revision을
 분리하고 API create/patch/archive와 Dagster exact import-job observation을 서로 다른 executor의 named
 command로 결선했다. theme/source/rule 공통 append-only effect claim은 terminal/open command의 다중
-resource 재사용을 차단하며 provider-owned theme/rule은 admin command로 수정할 수 없다. 다음은 raw
-catalog DML과 legacy rule apply/Dagster writer를 typed provider command로 전환한 뒤 runtime privilege를
-SELECT-only로 회수하는 것이다. T-VN-40 paired consumer receipt는 현재 `pending`이며 Map user/
+resource 재사용을 차단하며 provider-owned/NULL-owner theme/rule은 admin command로 수정할 수 없다.
+source observation은 authoritative full-snapshot child job당 immutable receipt 한 건으로 제한했고,
+caller-driven admin rule apply와 독립 `curated_features_refresh` Dagster job/client export를 제거했다.
+다음은 남은 raw catalog DML을 회수하고 provider load terminal transaction에 typed observation·candidate
+generation을 직접 결선하는 것이다. T-VN-40 paired consumer receipt는 현재 `pending`이며 Map user/
 service/full spec hash를 고정하고 n150 installer가 complete 전에는 fail-close한다.
 fresh 0001→0111 actual-login theme/source/rule/candidate 통합을 통과했다.
 A/B/C는 하나의 forward-only PR/release로 유지하며, 누적 구현은 DB/동시성과

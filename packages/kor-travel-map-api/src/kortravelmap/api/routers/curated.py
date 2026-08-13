@@ -113,6 +113,7 @@ class CuratedThemeView(BaseModel):
     created_at: datetime
     updated_at: datetime
     row_revision: str = Field(pattern=r"^[1-9][0-9]*$")
+    command_etag: str
     archived_at: datetime | None = None
     owner_kind: Literal["operator", "provider_dataset"] | None = None
     owner_provider_dataset_id: int | None = None
@@ -145,6 +146,7 @@ class CuratedSourceView(BaseModel):
     observation_revision: str = Field(pattern=r"^[1-9][0-9]*$")
     archived_at: datetime | None = None
     representation_etag: str
+    command_etag: str
 
 
 class CuratedSourceRuleView(BaseModel):
@@ -168,9 +170,12 @@ class CuratedSourceRuleView(BaseModel):
     enabled: bool
     metadata: dict[str, Any]
     row_revision: str
+    command_etag: str
     archived_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+    owner_kind: Literal["operator", "provider_dataset"] | None = None
+    owner_provider_dataset_id: int | None = None
 
 
 class CuratedFeatureView(BaseModel):
@@ -442,20 +447,6 @@ class CuratedPlaceSearchResponse(BaseModel):
     meta: Meta
 
 
-class RuleApplyData(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    rule_id: str
-    inserted_or_updated: int
-
-
-class RuleApplyResponse(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    data: RuleApplyData
-    meta: Meta
-
-
 class CuratedThemeCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -621,6 +612,7 @@ class CuratedFeatureStatusRequest(BaseModel):
 def _theme_view(row: curated_repo.CuratedTheme) -> CuratedThemeView:
     payload = dict(row.__dict__)
     payload["row_revision"] = str(row.row_revision)
+    payload["command_etag"] = revision_etag(row.row_revision)
     return CuratedThemeView.model_validate(payload)
 
 
@@ -628,6 +620,7 @@ def _source_view(row: curated_repo.CuratedSource) -> CuratedSourceView:
     payload = dict(row.__dict__)
     payload["row_revision"] = str(row.row_revision)
     payload["observation_revision"] = str(row.observation_revision)
+    payload["command_etag"] = revision_etag(row.row_revision)
     representation_hash = hashlib.sha256(
         json.dumps(
             payload,
@@ -644,6 +637,7 @@ def _source_view(row: curated_repo.CuratedSource) -> CuratedSourceView:
 def _rule_view(row: curated_repo.CuratedSourceRule) -> CuratedSourceRuleView:
     payload = dict(row.__dict__)
     payload["row_revision"] = str(row.row_revision)
+    payload["command_etag"] = revision_etag(row.row_revision)
     return CuratedSourceRuleView.model_validate(payload)
 
 
@@ -773,7 +767,7 @@ _CATALOG_IF_MATCH_OPENAPI_PARAMETER = {
     "name": "If-Match",
     "in": "header",
     "required": True,
-    "description": "직전 단건 GET/성공 응답의 catalog row_revision strong ETag.",
+    "description": "직전 단건 GET body의 data.command_etag 또는 성공 응답 ETag.",
     "schema": {"type": "string"},
 }
 
@@ -1958,26 +1952,5 @@ async def archive_admin_curated_source_rule_route(
     response.headers["ETag"] = revision_etag(row.row_revision)
     return CuratedSourceRuleResponse(
         data=_rule_view(row),
-        meta=make_meta(started_at=started_at),
-    )
-
-
-@admin_router.post(
-    "/curated-source-rules/{rule_id}/apply",
-    response_model=RuleApplyResponse,
-)
-@idempotent_domain_command("admin.curated-source-rule.apply")
-async def apply_admin_curated_source_rule_route(
-    rule_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> RuleApplyResponse:
-    started_at = perf_counter()
-    async with domain_command_transaction(session):
-        result = await curated_repo.apply_curated_source_rule(session, rule_id=rule_id)
-    return RuleApplyResponse(
-        data=RuleApplyData(
-            rule_id=result.rule_id,
-            inserted_or_updated=result.inserted_or_updated,
-        ),
         meta=make_meta(started_at=started_at),
     )

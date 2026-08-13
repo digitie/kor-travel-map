@@ -167,23 +167,6 @@ export interface paths {
         patch: operations["patch_admin_curated_source_rule_route_v1_admin_curated_source_rules__rule_id__patch"];
         trace?: never;
     };
-    "/v1/admin/curated-source-rules/{rule_id}/apply": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Apply Admin Curated Source Rule Route */
-        post: operations["apply_admin_curated_source_rule_route_v1_admin_curated_source_rules__rule_id__apply_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/admin/curated-sources": {
         parameters: {
             query?: never;
@@ -6837,6 +6820,8 @@ export interface components {
             archived_at?: string | null;
             /** Category */
             category?: string | null;
+            /** Command Etag */
+            command_etag: string;
             /**
              * Created At
              * Format: date-time
@@ -6859,6 +6844,10 @@ export interface components {
             metadata: {
                 [key: string]: unknown;
             };
+            /** Owner Kind */
+            owner_kind?: ("operator" | "provider_dataset") | null;
+            /** Owner Provider Dataset Id */
+            owner_provider_dataset_id?: number | null;
             /** Place Kind */
             place_kind?: string | null;
             /** Priority */
@@ -6913,6 +6902,8 @@ export interface components {
         CuratedSourceView: {
             /** Archived At */
             archived_at?: string | null;
+            /** Command Etag */
+            command_etag: string;
             /**
              * Created At
              * Format: date-time
@@ -7047,6 +7038,8 @@ export interface components {
         CuratedThemeView: {
             /** Archived At */
             archived_at?: string | null;
+            /** Command Etag */
+            command_etag: string;
             /**
              * Created At
              * Format: date-time
@@ -13472,18 +13465,6 @@ export interface components {
             /** Source Role */
             source_role?: string | null;
         };
-        /** RuleApplyData */
-        RuleApplyData: {
-            /** Inserted Or Updated */
-            inserted_or_updated: number;
-            /** Rule Id */
-            rule_id: string;
-        };
-        /** RuleApplyResponse */
-        RuleApplyResponse: {
-            data: components["schemas"]["RuleApplyData"];
-            meta: components["schemas"]["Meta"];
-        };
         /**
          * SigunguByRadiusScope
          * @description kor-travel-geo가 계산한 반경 교차 시군구 기준 갱신 scope.
@@ -14521,7 +14502,7 @@ export interface operations {
             header: {
                 /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
                 "Idempotency-Key": string;
-                /** @description 직전 단건 GET/성공 응답의 catalog row_revision strong ETag. */
+                /** @description 직전 단건 GET body의 data.command_etag 또는 성공 응답 ETag. */
                 "If-Match": string;
             };
             path: {
@@ -14590,7 +14571,7 @@ export interface operations {
             header: {
                 /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
                 "Idempotency-Key": string;
-                /** @description 직전 단건 GET/성공 응답의 catalog row_revision strong ETag. */
+                /** @description 직전 단건 GET body의 data.command_etag 또는 성공 응답 ETag. */
                 "If-Match": string;
             };
             path: {
@@ -14635,49 +14616,6 @@ export interface operations {
             };
             /** @description If-Match 누락 */
             428: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
-    apply_admin_curated_source_rule_route_v1_admin_curated_source_rules__rule_id__apply_post: {
-        parameters: {
-            query?: never;
-            header: {
-                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
-                "Idempotency-Key": string;
-            };
-            path: {
-                rule_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["RuleApplyResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -14838,7 +14776,7 @@ export interface operations {
             header: {
                 /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
                 "Idempotency-Key": string;
-                /** @description 직전 단건 GET/성공 응답의 catalog row_revision strong ETag. */
+                /** @description 직전 단건 GET body의 data.command_etag 또는 성공 응답 ETag. */
                 "If-Match": string;
             };
             path: {
@@ -14907,7 +14845,7 @@ export interface operations {
             header: {
                 /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
                 "Idempotency-Key": string;
-                /** @description 직전 단건 GET/성공 응답의 catalog row_revision strong ETag. */
+                /** @description 직전 단건 GET body의 data.command_etag 또는 성공 응답 ETag. */
                 "If-Match": string;
             };
             path: {
@@ -15107,7 +15045,7 @@ export interface operations {
             header: {
                 /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
                 "Idempotency-Key": string;
-                /** @description 직전 단건 GET/성공 응답의 catalog row_revision strong ETag. */
+                /** @description 직전 단건 GET body의 data.command_etag 또는 성공 응답 ETag. */
                 "If-Match": string;
             };
             path: {
@@ -15176,7 +15114,7 @@ export interface operations {
             header: {
                 /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
                 "Idempotency-Key": string;
-                /** @description 직전 단건 GET/성공 응답의 catalog row_revision strong ETag. */
+                /** @description 직전 단건 GET body의 data.command_etag 또는 성공 응답 ETag. */
                 "If-Match": string;
             };
             path: {

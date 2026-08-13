@@ -182,7 +182,7 @@ def test_curated_routes_are_in_openapi() -> None:
     assert "/v1/admin/features/curated/{curated_feature_id}/select" in paths
     assert "/v1/admin/curated-features" not in paths
     assert "/v1/admin/curated-features/{curated_feature_id}/select" not in paths
-    assert "/v1/admin/curated-source-rules/{rule_id}/apply" in paths
+    assert "/v1/admin/curated-source-rules/{rule_id}/apply" not in paths
     assert {"get", "patch", "delete"}.issubset(
         paths["/v1/admin/curated-source-rules/{rule_id}"]
     )
@@ -465,7 +465,10 @@ def test_retained_source_http_commands_separate_representation_and_cas_etags(
     patched = client.patch(
         f"/v1/admin/curated-sources/{source_id}",
         json={"source_name": "변경"},
-        headers={"Idempotency-Key": f"{key_prefix}3", "If-Match": '"3"'},
+        headers={
+            "Idempotency-Key": f"{key_prefix}3",
+            "If-Match": fetched.json()["data"]["command_etag"],
+        },
     )
     archived = client.request(
         "DELETE",
@@ -478,6 +481,7 @@ def test_retained_source_http_commands_separate_representation_and_cas_etags(
     assert representation_etag.startswith('"sha256:')
     assert fetched.json()["data"]["row_revision"] == "3"
     assert fetched.json()["data"]["observation_revision"] == "7"
+    assert fetched.json()["data"]["command_etag"] == '"3"'
     assert cached.status_code == 304
     assert (created.status_code, created.headers["etag"]) == (201, '"3"')
     assert missing.status_code == 428

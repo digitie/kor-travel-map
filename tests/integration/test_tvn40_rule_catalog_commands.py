@@ -210,6 +210,9 @@ async def test_rule_create_patch_archive_is_cas_bound_and_reconciled(
     provider_patch_command = await _domain_command(
         migrated_engine, actor=actor, operation="admin.curated-source-rule.patch"
     )
+    provider_archive_command = await _domain_command(
+        migrated_engine, actor=actor, operation="admin.curated-source-rule.archive"
+    )
     archive_command = await _domain_command(
         migrated_engine, actor=actor, operation="admin.curated-source-rule.archive"
     )
@@ -262,6 +265,27 @@ async def test_rule_create_patch_archive_is_cas_bound_and_reconciled(
                     },
                 )
             assert getattr(forbidden_owner.value.orig, "sqlstate", None) == "42501"
+            await transaction.rollback()
+        async with api.connect() as connection:
+            transaction = await connection.begin()
+            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            with pytest.raises(DBAPIError) as forbidden_archive:
+                await connection.execute(
+                    text(
+                        """
+                        CALL feature.archive_curated_source_rule_command(
+                          CAST(:rule_id AS uuid), 1, :command_id,
+                          'operator_retired', :actor, NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    {
+                        "actor": actor,
+                        "command_id": provider_archive_command,
+                        "rule_id": provider_rule_id,
+                    },
+                )
+            assert getattr(forbidden_archive.value.orig, "sqlstate", None) == "42501"
             await transaction.rollback()
 
         async with api.begin() as connection:

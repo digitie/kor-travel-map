@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-13 — T-VN-40: legacy rule apply와 독립 curated Dagster job 제거
+
+적대 리뷰에서 확인한 source observation 재사용, GET representation ETag와 command CAS token 혼동,
+NULL owner fail-open, archived catalog 공개 노출, terminal result/effect TOCTOU를 theme/source/rule 전 범위에
+수리했다. source observation은 authoritative full-snapshot child job당 append-only receipt 한 건이며
+`finished_at`을 관측 시각으로 사용하고 exact replay는 no-op이다. catalog 응답은 `command_etag`를 body에
+별도 노출한다.
+
+caller-driven admin rule apply route와 독립 `curated_features_refresh` Dagster asset/job/schedule/client
+export를 제거했다. 이 경로는 authoritative provider terminal receipt와 무관하게 legacy overlay를 직접
+갱신했으므로 T-VN-40 candidate generation 경계와 공존할 수 없었다. fresh 0001→0111 actual-login
+theme/source/rule 통합 3개, focused static 97개, Dagster definitions 24개가 통과했다.
+
 ## 2026-08-13 — T-VN-40: retained source CAS와 provider observation 분리
 
 retained source catalog의 operator revision과 provider observation revision을 분리했다. API는

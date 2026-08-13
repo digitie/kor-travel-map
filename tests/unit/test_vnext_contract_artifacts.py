@@ -44,11 +44,11 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     ),
     # 2026-08-13 T-VN-40 — public legacy catalog 제거, scoped service snapshot/mapping,
     # admin catalog/import/candidate ETag·412/428 목표 diff를 machine freeze했다.
-    "openapi-diff-v1.json": ("647f6b18787a6487def0f4a06f5e5810c101907bba3ef20c2e9cac5cd6b1e94b"),
+    "openapi-diff-v1.json": ("97143266f10e862769adf5eb48227eb80c75b606c375bb4dc0f197537a7e2582"),
     # 2026-08-13 T-VN-36 — receipt가 리베이스로 폐기된 커밋(c1fa5a4d)과 그때의
     # spec sha를 가리키고 있었다. 현재 head로 재핀했다.
     "consumer-rollout-v1.json": (
-        "e33808939b594e5e1808b245d28b33c39d0341cf8234ef02ba4fe3b89a82dd92"
+        "435a33b3def52671ac1f356203515c3a081af1bc90fdb06b42b435621a8d6076"
     ),
     "violation-fixtures-v1.sql": (
         "84cca48b776387e4b6fd00b702e40b3412c9731f6abcdd250a5c126c2ea155d8"
@@ -165,9 +165,15 @@ def test_openapi_diff_referenced_operations_exist() -> None:
                 assert entry.get("basis"), f"{surface}/{key} 항목에 basis 누락: {entry}"
                 operation = entry.get("operation")
                 if operation is not None:
-                    assert _operation_exists(spec, operation), (
-                        f"{surface}/{key}가 참조한 현행 operation 부재: {operation}"
-                    )
+                    operation_exists = _operation_exists(spec, operation)
+                    if key == "removed" and entry.get("applied") is True:
+                        assert not operation_exists, (
+                            f"{surface}/{key}의 applied operation 잔존: {operation}"
+                        )
+                    else:
+                        assert operation_exists, (
+                            f"{surface}/{key}가 참조한 현행 operation 부재: {operation}"
+                        )
                 target = entry.get("target_operation")
                 if target is not None:
                     target_exists = _operation_exists(spec, target)

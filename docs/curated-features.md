@@ -498,17 +498,11 @@ Admin UI는 `/admin/features/curated` 화면에서 기존 feature/admin 흐름 �
 - collection 상세는 연결/미연결 item을 모두 표시한다. Feature 지도·목록·상세는 한
   Feature에 연결된 여러 회차·출처 membership과 여러 provider 현재 관측을 모두 표시한다.
 
-## 7. Dagster 묶음
+## 7. Dagster 경계
 
-Dagster asset group은 `curated_features`다. provider 원천 asset이 먼저 실행되고,
-그 다음 curated metadata/rule/sweep/cache 순서로 실행된다(T-223c-2 구현).
-
-구현 asset:
-
-- `curated_source_metadata` — source URL, 수정일, row_count, license, update_cycle refresh
-- `curated_feature_candidates` — `curated_source_rules`를 feature에 적용
-- `curated_feature_status_sweep` — deleted/inactive feature와 curated overlay 정합성 점검
-- `curated_pinvi_copy_snapshots` — PinVi copy endpoint와 같은 snapshot materialize/cache
+T-VN-40부터 독립 curated metadata/rule/sweep/cache asset은 제거한다. authoritative provider
+full-snapshot terminal transaction만 source observation과 candidate generation을 시작할 수 있다.
+catalog semantic 변경은 typed command가 affected rule reconcile을 같은 transaction에서 수행한다.
 
 중요 규칙:
 
