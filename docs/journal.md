@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-13 — T-VN-40: retained rule typed command와 원자 reconcile
+
+retained `curated_source_rules`의 create/patch/archive를 raw DML에서 실제 API LOGIN만 실행할 수
+있는 named SECURITY DEFINER command로 전환했다. 각 명령은 bigint domain command의 operation·
+actor, strong expected revision과 SERIALIZABLE transaction을 검증하고, 영향받는 Feature advisory
+fence를 정렬 선획득한 뒤 catalog CAS·immutable reconcile receipt·set-based candidate generation을
+한 transaction에서 완료한다. 동일 payload no-op은 revision과 generation을 올리지 않으며 stale
+revision은 constraint identity가 있는 23514로 거부한다. generation 경로도 공통 catalog advisory
+fence를 사용해 rule mutation과 lock order를 맞췄다.
+
+fresh 0001→0109 DB에서 실제 API create→no-op→semantic patch→stale 거부→archive와 Dagster
+교차 EXECUTE 거부를 검증했고, 기존 candidate command/generation 회귀를 합쳐 9개가 통과했다.
+
 ## 2026-08-13 — T-VN-40: effective rule input 정본 단일화
 
 candidate snapshot·generation·향후 catalog reconcile이 서로 다른 rule hash를 만들지 않도록

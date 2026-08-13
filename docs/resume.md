@@ -36,6 +36,11 @@ provider full-snapshot/비권위 거부와 feature operation repo를 합친 DB 1
 MCST unit 41개도 통과했고 관련 Python source의 ruff/mypy가 통과했다.
 candidate snapshot과 generation의 rule hash도 DB helper 하나로 수렴시켜 referenced theme/source
 revision·archive·owner/provider 의미를 canonical input version 2에 포함했다.
+retained rule create/patch/archive도 actual API LOGIN 전용 typed command로 전환했다. 각 명령은
+domain command·strong revision·SERIALIZABLE을 검증하고 sorted Feature prelock 뒤 catalog CAS와
+immutable reconcile receipt, set-based generation을 같은 transaction에 결박한다. fresh 0109 head의
+rule command와 기존 candidate 회귀 9개가 통과했다. 다음 구현 단위는 이 procedure를 admin
+repository/API strong ETag 표면에 연결한 뒤 theme/source catalog command로 같은 경계를 확장하는 것이다.
 A/B/C는 하나의 forward-only PR/release로 유지하며, 누적 구현은 DB/동시성과
 API·consumer/ACL 관점의 독립 적대 리뷰어 2명이 같은 고정 SHA에서 검증한다.
 상세 계약은

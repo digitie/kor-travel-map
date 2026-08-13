@@ -679,6 +679,12 @@
         "0107_tvn40_candidate_promotion"
       ],
       "revision": "0108_tvn40_rule_generation"
+    },
+    {
+      "down_revision": [
+        "0108_tvn40_rule_generation"
+      ],
+      "revision": "0109_tvn40_rule_catalog_commands"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"
