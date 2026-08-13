@@ -496,8 +496,9 @@ SELECT
           AND count_item.source_present
           AND (
               NOT CAST(:public_only AS boolean)
-              OR count_item.feature_id IS NULL
               OR (
+                  count_item.feature_id IS NOT NULL
+                  AND
                   {_trusted_link_sql("count_item")}
                   AND EXISTS (
                       SELECT 1
@@ -517,8 +518,9 @@ SELECT
           AND public_count_item.status = 'included'
           AND (
               NOT CAST(:public_only AS boolean)
-              OR public_count_item.feature_id IS NULL
               OR (
+                  public_count_item.feature_id IS NOT NULL
+                  AND
                   {_trusted_link_sql("public_count_item")}
                   AND EXISTS (
                       SELECT 1
@@ -703,8 +705,9 @@ WHERE i.collection_id = CAST(:collection_id AS uuid)
   )
   AND (
       NOT CAST(:public_only AS boolean)
-      OR i.feature_id IS NULL
       OR (
+          i.feature_id IS NOT NULL
+          AND
           {_trusted_link_sql("i")}
           AND EXISTS (
               SELECT 1

@@ -346,6 +346,50 @@ async def test_same_feature_returns_every_edition_and_subcourse_membership(
     assert hidden_matches == {1: (), 2: ()}
 
 
+async def test_public_collection_excludes_unlinked_included_item_everywhere(
+    migrated_session: AsyncSession,
+) -> None:
+    """T-VN-40 공개 술어는 linked public Feature+trusted decision을 필수로 한다."""
+
+    theme_id, source_id = await _seed_foundations(migrated_session)
+    collection = await create_curation_collection(
+        migrated_session,
+        collection_key="tvn40-unlinked-public",
+        theme_id=theme_id,
+        source_id=source_id,
+        title="연결되지 않은 공개 항목",
+        edition_key="2026",
+        status="published",
+        visibility="public",
+    )
+    await add_curation_item(
+        migrated_session,
+        collection_id=collection.collection_id,
+        feature_id=None,
+        external_item_id="unlinked-included",
+        place_name="미연결 장소",
+        status="included",
+    )
+
+    public = await get_curation_collection(
+        migrated_session,
+        collection_id=collection.collection_id,
+        public_only=True,
+    )
+    admin = await get_curation_collection(
+        migrated_session,
+        collection_id=collection.collection_id,
+    )
+
+    assert public is not None
+    assert public[0].item_count == 0
+    assert public[0].public_item_count == 0
+    assert public[1] == ()
+    assert admin is not None
+    assert len(admin[1]) == 1
+    assert admin[1][0].feature_id is None
+
+
 def test_collection_cursor_rejects_non_uuid_tie_breaker() -> None:
     payload = base64.urlsafe_b64encode(
         b'{"updated_at":"2026-07-13T00:00:00+00:00","collection_id":"x"}'

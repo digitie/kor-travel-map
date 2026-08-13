@@ -2,6 +2,14 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-13 — T-VN-40: 공개 canonical membership fail-close
+
+공개 collection의 count와 item 조회에서 `feature_id IS NULL`인 included item이 trusted accepted
+link decision과 `public_features` 검증을 우회하던 경로를 제거했다. 이제 공개 count·detail은
+모두 linked public Feature와 trusted decision을 요구하고, admin 조회만 미연결 항목을 보존한다.
+미연결 included item을 함께 심는 PostgreSQL 통합 회귀 테스트가 공개 count/list 0과 admin
+보존을 동시에 검증한다.
+
 ## 2026-08-13 — T-VN-40: SERIALIZABLE domain command 경계
 
 공통 domain-command policy에 operation별 transaction isolation을 추가했다. T-VN-40 catalog
