@@ -2016,8 +2016,10 @@ async def test_provider_cancellation_lifecycle_requires_typed_api_command(
         await dagster.dispose()
 
 
+@pytest.mark.parametrize("drift_after_seal", [False, True])
 async def test_provider_cancellation_success_finalizes_authoritative_root(
     migrated_engine: AsyncEngine,
+    drift_after_seal: bool,
 ) -> None:
     seeded = await _seed_candidate(migrated_engine, create_candidate=False)
     membership = ProviderDatasetOperationMembership(
@@ -2047,7 +2049,9 @@ async def test_provider_cancellation_success_finalizes_authoritative_root(
             seeded,
         )
 
-    run_id = f"tvn40-cancellation-success-{seeded['suffix']}"
+    run_id = (
+        f"tvn40-cancellation-success-{int(drift_after_seal)}-{seeded['suffix']}"
+    )
     started_at = datetime(2026, 8, 13, 6, tzinfo=UTC)
     finished_at = started_at + timedelta(seconds=3)
     dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
@@ -2100,6 +2104,20 @@ async def test_provider_cancellation_success_finalizes_authoritative_root(
             )
         cancellation_id = detail.attempt.cancellation_id
 
+        if drift_after_seal:
+            async with migrated_engine.begin() as connection:
+                await connection.execute(
+                    text(
+                        """
+                        UPDATE provider_sync.source_links
+                        SET match_method = 'manual', confidence = 55
+                        WHERE source_entity_key = :source_entity_key
+                          AND feature_id = :feature_id
+                        """
+                    ),
+                    seeded,
+                )
+
         async with async_sessionmaker(api, expire_on_commit=False).begin() as session:
             await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
             assert await set_pipeline_cancellation_run_result(
@@ -2127,17 +2145,44 @@ async def test_provider_cancellation_success_finalizes_authoritative_root(
             )
 
         async with migrated_engine.connect() as connection:
-            assert (
-                await connection.scalar(
+            root = (
+                await connection.execute(
                     text(
                         """
-                        SELECT count(*) FROM ops.curation_provider_root_receipts
-                        WHERE root_job_id = CAST(:root_job_id AS uuid)
+                        SELECT status, current_stage FROM ops.import_jobs
+                        WHERE job_id = CAST(:root_job_id AS uuid)
                         """
                     ),
                     {"root_job_id": root_job_id},
                 )
-            ) == 1
+            ).one()
+            member_terminal = await connection.scalar(
+                text(
+                    """
+                    SELECT terminal_status FROM ops.pipeline_cancellation_members
+                    WHERE cancellation_id = CAST(:cancellation_id AS uuid)
+                      AND job_id = CAST(:root_job_id AS uuid)
+                    """
+                ),
+                {"cancellation_id": cancellation_id, "root_job_id": root_job_id},
+            )
+            receipt_count = await connection.scalar(
+                text(
+                    """
+                    SELECT count(*) FROM ops.curation_provider_root_receipts
+                    WHERE root_job_id = CAST(:root_job_id AS uuid)
+                    """
+                ),
+                {"root_job_id": root_job_id},
+            )
+        if drift_after_seal:
+            assert root == ("failed", "stale_input")
+            assert member_terminal == "failed"
+            assert receipt_count == 0
+        else:
+            assert root == ("done", "completed")
+            assert member_terminal == "done"
+            assert receipt_count == 1
     finally:
         await api.dispose()
         await dagster.dispose()

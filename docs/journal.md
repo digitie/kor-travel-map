@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-14 — T-VN-40: stale cancellation 수렴과 retry observation 분리
+
+`already_terminal/SUCCESS` cancellation finalizer가 sealed input drift를 발견하면 transaction을
+예외로 되돌리지 않고 root와 cancellation member를 `failed/stale_input`으로 원자 수렴시킨다.
+정상 입력은 root receipt를 만들고, stale 입력은 done-without-receipt를 남기지 않는 실제 API LOGIN
+회귀를 함께 고정했다.
+
+streaming address validation의 dropped 총계는 unique ID 수가 아니라 실제 제거된 bundle 행 수로
+집계하고, bounded metadata는 unique Feature ID 표본으로 분리했다. 같은 ID의 batch 내 중복·batch 간
+반복·표본 cap을 하나의 회귀로 검증한다. Dagster step retry는 최초 run identity를 보존하면서 retry
+번호를 observation external ID에 추가한다. 같은 run의 strict 실패 뒤 clean retry가 독립 generation으로
+과거 finding을 resolved 처리하며 receipt count와 observation row 수가 일치한다.
+
 ## 2026-08-14 — T-VN-40: cancellation SUCCESS finalizer와 validation evidence 보존
 
 provider cancellation이 이미 성공한 Dagster root를 `done/SUCCESS`로 확정할 때도 일반 terminal

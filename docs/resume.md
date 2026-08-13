@@ -1,5 +1,11 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+두 적대 리뷰가 재현한 provider cancellation stale-input과 streaming duplicate-ID count도
+폐쇄했다. cancellation SUCCESS finalizer가 causal drift를 발견하면 raw 예외로 rollback하지 않고
+root/member를 `failed/stale_input` terminal로 원자 수렴시킨다. streaming drop 총계는 실제 bundle
+행 수, metadata 표본은 unique Feature ID로 분리한다. strict 실패 뒤 같은 Dagster run의 step retry는
+attempt별 immutable observation identity를 써서 clean retry가 실패 finding을 정상 close한다.
+
 T-VN-40 provider cancellation의 `already_terminal/SUCCESS` 경로도 일반 terminal sensor와
 동일하게 root curation finalizer를 같은 SERIALIZABLE transaction에서 수행한다. authoritative
 child receipt 누락은 0-child 성공으로 축약되지 않으며 cancellation member/run 증거와 exact root를
