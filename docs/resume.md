@@ -2,13 +2,14 @@
 
 T-VN-40 provider operation은 child seal↔authoritative flag, root terminal↔전체 receipt set을
 DB procedure에서 양방향 검증하도록 보강했다. provider attempt event도 typed append-only command로
-옮겼고 API runtime은 frozen cancellation attempt가 소유한 제한된 transition 외 provider row를 raw
-변경할 수 없다. MOIS 대용량 authoritative load도 단일 transaction 인과성을 유지하면서 1,000건
+옮겼고 cancellation marker를 제외한 provider lifecycle 전이도 active attempt·frozen run·engine
+timestamp를 검증하는 typed command로만 수행한다. API runtime의 raw lifecycle 변경은 `42501`이다.
+MOIS 대용량 authoritative load도 단일 transaction 인과성을 유지하면서 1,000건
 async batch memory로 전환했다. validation issue는 고정 표본, finding은 batch spool로 제한한다.
 retained theme/source/rule raw DML은 실제 API·Dagster LOGIN에서 회수했다. collection/item HTTP도
 representation ETag와 command CAS를 분리하고 `If-Match` 428/412 및 terminal replay를 연결했다.
-다음 checkpoint는 cancellation lifecycle의 남은 raw transition을 typed command로 옮긴 뒤
-collection/item/import/merge DB writer를 named command로 수렴하고 legacy overlay writer를 제거하는 것이다.
+다음 checkpoint는 collection/item/import/merge DB writer를 named command로 수렴하고 legacy overlay
+writer를 제거하는 것이다.
 
 ## 2026-08-13 — T-VN-40 A/B/C 단일 PR 구현 시작
 

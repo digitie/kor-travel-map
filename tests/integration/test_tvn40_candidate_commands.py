@@ -19,6 +19,13 @@ from kortravelmap.infra.feature_operation_repo import (
     finish_dagster_feature_membership,
     reconcile_dagster_feature_run,
 )
+from kortravelmap.infra.pipeline_cancellation_repo import (
+    create_pipeline_cancellation_attempt,
+    finish_pipeline_cancellation_attempt,
+    resolve_pipeline_cancellation_scope,
+    set_pipeline_cancellation_run_result,
+    transition_pipeline_cancellation_member,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -1861,3 +1868,149 @@ async def test_provider_operation_rows_require_typed_dagster_commands(
                 {"root_job_id": root_job_id},
             )
         ) == 0
+
+
+async def test_provider_cancellation_lifecycle_requires_typed_api_command(
+    migrated_engine: AsyncEngine,
+) -> None:
+    seeded = await _seed_candidate(migrated_engine, create_candidate=False)
+    membership = ProviderDatasetOperationMembership(
+        provider_dataset_id=int(seeded["dataset_id"]),
+        sync_scope="dataset_wide",
+        operation_key="load",
+    )
+    async with migrated_engine.begin() as connection:
+        await connection.execute(
+            text(
+                """
+                INSERT INTO provider_sync.provider_dataset_operations (
+                  provider_dataset_id, operation_key, operation_kind, is_enabled, config
+                ) VALUES (:dataset_id, 'load', 'refresh', true, '{}'::jsonb)
+                """
+            ),
+            seeded,
+        )
+        await connection.execute(
+            text(
+                """
+                INSERT INTO provider_sync.provider_dataset_operation_scopes (
+                  provider_dataset_id, sync_scope, operation_key, operation_kind
+                ) VALUES (:dataset_id, 'dataset_wide', 'load', 'refresh')
+                """
+            ),
+            seeded,
+        )
+
+    run_id = f"tvn40-cancellation-{seeded['suffix']}"
+    started_at = datetime(2026, 8, 13, 5, tzinfo=UTC)
+    finished_at = started_at + timedelta(seconds=3)
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    try:
+        async with async_sessionmaker(dagster, expire_on_commit=False).begin() as session:
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            operation = await ensure_dagster_feature_operation(
+                session,
+                dagster_run_id=run_id,
+                trigger_kind="schedule",
+                selected_memberships=(membership,),
+                operation_key="load",
+                engine_created_at=started_at - timedelta(seconds=1),
+                engine_started_at=started_at,
+                observed_status="STARTED",
+            )
+        member_ids = (
+            operation.operation.root_job_id,
+            operation.operation.members[0].job_id,
+        )
+
+        async with async_sessionmaker(api, expire_on_commit=False).begin() as session:
+            scope = await resolve_pipeline_cancellation_scope(
+                session,
+                kind="import_job",
+                execution_id=operation.operation.root_job_id,
+            )
+            detail = await create_pipeline_cancellation_attempt(
+                session,
+                scope=scope,
+                requested_by="admin:tvn40-cancellation",
+                reason="typed cancellation boundary regression",
+            )
+        cancellation_id = detail.attempt.cancellation_id
+
+        for raw_update in (
+            "started_at = started_at - interval '1 hour'",
+            "status = 'done', dagster_run_status = 'SUCCESS', "
+            "finished_at = clock_timestamp(), progress = 100, current_stage = 'completed'",
+        ):
+            async with api.connect() as connection:
+                transaction = await connection.begin()
+                with pytest.raises(DBAPIError) as denied:
+                    await connection.execute(
+                        text(
+                            f"UPDATE ops.import_jobs SET {raw_update} "  # noqa: S608
+                            "WHERE job_id = CAST(:job_id AS uuid)"
+                        ),
+                        {"job_id": operation.operation.root_job_id},
+                    )
+                assert getattr(denied.value.orig, "sqlstate", None) == "42501"
+                await transaction.rollback()
+
+        async with async_sessionmaker(api, expire_on_commit=False).begin() as session:
+            assert await set_pipeline_cancellation_run_result(
+                session,
+                cancellation_id=cancellation_id,
+                dagster_run_id=run_id,
+                result="cancelled",
+                initial_status="STARTED",
+                terminal_status="CANCELED",
+                error=None,
+                engine_started_at=started_at,
+                engine_finished_at=finished_at,
+            )
+            for job_id in member_ids:
+                assert await transition_pipeline_cancellation_member(
+                    session,
+                    cancellation_id=cancellation_id,
+                    job_id=job_id,
+                    dagster_run_id=run_id,
+                    expected_status="running",
+                    target_status="cancelled",
+                    result="cancelled",
+                    dagster_terminal_status="CANCELED",
+                    engine_started_at=started_at,
+                    engine_finished_at=finished_at,
+                )
+            assert await finish_pipeline_cancellation_attempt(
+                session,
+                cancellation_id=cancellation_id,
+                status="completed",
+                error=None,
+            ) is not None
+
+        async with migrated_engine.connect() as connection:
+            terminal = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT job_id::text, status, dagster_run_status, progress,
+                               current_stage, started_at, finished_at
+                        FROM ops.import_jobs
+                        WHERE job_id = ANY(CAST(:job_ids AS uuid[]))
+                        ORDER BY job_id
+                        """
+                    ),
+                    {"job_ids": list(member_ids)},
+                )
+            ).all()
+        assert len(terminal) == 2
+        assert all(row.status == "cancelled" for row in terminal)
+        assert {row.dagster_run_status for row in terminal} == {None, "CANCELED"}
+        assert all(row.current_stage == "cancelled" for row in terminal)
+        assert all(
+            row.started_at == started_at and row.finished_at == finished_at
+            for row in terminal
+        )
+    finally:
+        await api.dispose()
+        await dagster.dispose()

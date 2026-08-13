@@ -415,7 +415,9 @@ WITH dedicated_routine(signature, owner_role) AS (
       ('ops.ensure_provider_feature_operation_command(text,text,text,jsonb,timestamptz,timestamptz,text)', 'ktm_curation_command_owner'),
       ('ops.finish_provider_feature_membership_command(uuid,bigint,text,text,boolean,timestamptz)', 'ktm_curation_command_owner'),
       ('ops.append_provider_feature_attempt_event_command(text,bigint,text,text,integer,text,jsonb)', 'ktm_curation_command_owner'),
-      ('ops.transition_provider_feature_operation_terminal_command(uuid,text,text,text,text,timestamptz,timestamptz,boolean)', 'ktm_curation_command_owner')
+      ('ops.transition_provider_feature_operation_terminal_command(uuid,text,text,text,text,timestamptz,timestamptz,boolean)', 'ktm_curation_command_owner'),
+      ('ops.fill_provider_cancellation_starts_command(uuid,text,timestamptz)', 'ktm_curation_command_owner'),
+      ('ops.transition_provider_cancellation_job_command(uuid,uuid,text,text[],text,text,text,timestamptz,timestamptz,boolean,text,text[])', 'ktm_curation_command_owner')
 ), existing AS (
     SELECT signature, owner_role, pg_proc.prokind
     FROM dedicated_routine

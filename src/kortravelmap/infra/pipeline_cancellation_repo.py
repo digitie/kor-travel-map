@@ -49,6 +49,7 @@ from kortravelmap.infra.pipeline_cancellation_queries import (
     _RESOLVE_SCOPE_SQL,
     _RUNS_SQL,
     _TRANSITION_JOB_MEMBER_SQL,
+    _TRANSITION_PROVIDER_JOB_MEMBER_SQL,
     _UPDATE_MEMBER_SQL,
     _UPDATE_RUN_SQL,
 )
@@ -1196,42 +1197,55 @@ async def transition_pipeline_cancellation_member(
         raise PipelineCancellationConflict(
             "running base marker/status/run mapping diverged"
         )
-    row = (
-        await session.execute(
-            text(_TRANSITION_JOB_MEMBER_SQL),
-            {
-                "cancellation_id": _uuid(cancellation_id),
-                "job_id": _uuid(job_id),
-                "dagster_run_id": dagster_run_id,
-                "expected_statuses": list(expected_statuses),
-                "target_status": target_status,
-                "error_message": error_message,
-                "dagster_terminal_status": dagster_terminal_status,
-                "engine_started_at": engine_started_at,
-                "engine_finished_at": engine_finished_at,
-                "success_tracking_invariant": success_tracking_invariant,
-            },
+    params = {
+        "cancellation_id": _uuid(cancellation_id),
+        "job_id": _uuid(job_id),
+        "dagster_run_id": dagster_run_id,
+        "expected_statuses": list(expected_statuses),
+        "target_status": target_status,
+        "error_message": error_message,
+        "dagster_terminal_status": dagster_terminal_status,
+        "engine_started_at": engine_started_at,
+        "engine_finished_at": engine_finished_at,
+        "success_tracking_invariant": success_tracking_invariant,
+    }
+    if member.operation_kind in {
+        "provider_feature_load_run",
+        "provider_feature_load",
+    }:
+        changed = bool(
+            await session.scalar(
+                text(_TRANSITION_PROVIDER_JOB_MEMBER_SQL),
+                {
+                    **params,
+                    "result": normalized_result,
+                    "expected_member_results": [member.result],
+                },
+            )
         )
-    ).one_or_none()
-    if row is None:
-        return False
-    updated = (
-        await session.execute(
-            text(_UPDATE_MEMBER_SQL),
-            {
-                "cancellation_id": _uuid(cancellation_id),
-                "job_id": _uuid(job_id),
-                "result": normalized_result,
-                "terminal_status": target_status,
-                "error": None,
-                "expected_results": [member.result],
-            },
-        )
-    ).one_or_none()
-    if updated is None:
-        raise PipelineCancellationInvariantError(
-            "base member transitioned but normalized member result CAS failed"
-        )
+        if not changed:
+            return False
+    else:
+        row = (await session.execute(text(_TRANSITION_JOB_MEMBER_SQL), params)).one_or_none()
+        if row is None:
+            return False
+        updated = (
+            await session.execute(
+                text(_UPDATE_MEMBER_SQL),
+                {
+                    "cancellation_id": _uuid(cancellation_id),
+                    "job_id": _uuid(job_id),
+                    "result": normalized_result,
+                    "terminal_status": target_status,
+                    "error": None,
+                    "expected_results": [member.result],
+                },
+            )
+        ).one_or_none()
+        if updated is None:
+            raise PipelineCancellationInvariantError(
+                "base member transitioned but normalized member result CAS failed"
+            )
     await record_system_log(
         session,
         level="info",
@@ -1296,42 +1310,57 @@ async def cancel_queued_pipeline_cancellation_member(
         raise PipelineCancellationConflict(
             "queued base marker/status/run mapping diverged"
         )
-    transitioned = (
-        await session.execute(
-            text(_TRANSITION_JOB_MEMBER_SQL),
-            {
-                "cancellation_id": _uuid(cancellation_id),
-                "job_id": _uuid(job_id),
-                "dagster_run_id": member.dagster_run_id,
-                "expected_statuses": ["queued"],
-                "target_status": "cancelled",
-                "error_message": None,
-                "dagster_terminal_status": None,
-                "engine_started_at": None,
-                "engine_finished_at": None,
-                "success_tracking_invariant": False,
-            },
+    params = {
+        "cancellation_id": _uuid(cancellation_id),
+        "job_id": _uuid(job_id),
+        "dagster_run_id": member.dagster_run_id,
+        "expected_statuses": ["queued"],
+        "target_status": "cancelled",
+        "error_message": None,
+        "dagster_terminal_status": None,
+        "engine_started_at": None,
+        "engine_finished_at": None,
+        "success_tracking_invariant": False,
+    }
+    if member.operation_kind in {
+        "provider_feature_load_run",
+        "provider_feature_load",
+    }:
+        changed = bool(
+            await session.scalar(
+                text(_TRANSITION_PROVIDER_JOB_MEMBER_SQL),
+                {
+                    **params,
+                    "result": "cancelled",
+                    "expected_member_results": ["pending"],
+                },
+            )
         )
-    ).one_or_none()
-    if transitioned is None:
-        return False
-    updated = (
-        await session.execute(
-            text(_UPDATE_MEMBER_SQL),
-            {
-                "cancellation_id": _uuid(cancellation_id),
-                "job_id": _uuid(job_id),
-                "result": "cancelled",
-                "terminal_status": "cancelled",
-                "error": None,
-                "expected_results": ["pending"],
-            },
-        )
-    ).one_or_none()
-    if updated is None:
-        raise PipelineCancellationInvariantError(
-            "queued base transitioned but normalized member result CAS failed"
-        )
+        if not changed:
+            return False
+    else:
+        transitioned = (
+            await session.execute(text(_TRANSITION_JOB_MEMBER_SQL), params)
+        ).one_or_none()
+        if transitioned is None:
+            return False
+        updated = (
+            await session.execute(
+                text(_UPDATE_MEMBER_SQL),
+                {
+                    "cancellation_id": _uuid(cancellation_id),
+                    "job_id": _uuid(job_id),
+                    "result": "cancelled",
+                    "terminal_status": "cancelled",
+                    "error": None,
+                    "expected_results": ["pending"],
+                },
+            )
+        ).one_or_none()
+        if updated is None:
+            raise PipelineCancellationInvariantError(
+                "queued base transitioned but normalized member result CAS failed"
+            )
     await record_system_log(
         session,
         level="info",

@@ -2,6 +2,15 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-14 — T-VN-40: provider cancellation lifecycle typed command
+
+API runtime에 남아 있던 provider operation cancellation lifecycle raw UPDATE 예외를 제거했다.
+취소 marker만 제한적으로 raw 기록하고, Dagster terminal 증거에 따른 `started_at` 보충과
+job/member terminal 전이는 `ktm_curation_command_owner` 소유 SECURITY DEFINER 함수만 수행한다.
+함수는 active attempt, frozen member/run, engine timestamp와 terminal mapping을 다시 잠금·검증하며
+API/Dagster runtime은 provider lifecycle column을 직접 바꾸면 `42501`이다. fresh migration 뒤 실제
+API LOGIN으로 raw timeline/status 위조 거부와 정상 cancel→member/root terminal 원자 전이를 확인했다.
+
 ## 2026-08-14 — T-VN-40: collection/item CAS와 대용량 finding bounded memory
 
 admin collection/item 응답에 decimal `row_revision`과 그대로 재사용하는 `command_etag`을 추가하고,
