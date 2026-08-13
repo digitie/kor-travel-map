@@ -291,6 +291,26 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
     ): _domain("admin.curation-item.archive", _MUTATION_RESULT),
     (
         "POST",
+        "/v1/admin/theme-feature-candidates/{candidate_id}/promote",
+    ): _domain(
+        "admin.theme-feature-candidate.promote",
+        _MUTATION_RESULT,
+        replay_headers=("ETag",),
+        fingerprint_headers=("If-Match",),
+        transaction_isolation="serializable",
+    ),
+    (
+        "POST",
+        "/v1/admin/theme-feature-candidates/{candidate_id}/reject",
+    ): _domain(
+        "admin.theme-feature-candidate.reject",
+        _MUTATION_RESULT,
+        replay_headers=("ETag",),
+        fingerprint_headers=("If-Match",),
+        transaction_isolation="serializable",
+    ),
+    (
+        "POST",
         "/v1/admin/curations/quarantine/{collection_id}/reclassify",
     ): _domain("admin.curation-quarantine.reclassify", _MUTATION_RESULT),
     (

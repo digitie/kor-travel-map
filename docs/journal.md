@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-13 — T-VN-40: admin candidate HTTP 검토 표면
+
+DB의 candidate read/reject/promotion 경계를 admin API에 연결했다. 목록은 rule/theme/source/
+review/eligibility/Feature 조건을 AND로 결합한 keyset이고, 상세는 candidate CAS용 raw revision
+ETag와 candidate·rule·Feature typed detail을 묶은 representation ETag를 분리한다. transition과
+BIGINT revision/identity는 JavaScript 정밀도 손실을 막기 위해 decimal string으로 직렬화한다.
+
+reject/promotion은 `If-Match`와 `Idempotency-Key`를 domain ledger fingerprint/replay에 포함하고,
+SERIALIZABLE transaction에서 named procedure만 호출한다. 목록·상세 304·transition·428/CAS·promotion
+전달축 테스트와 route-policy/domain-command/OpenAPI gate 96개가 통과했고 admin OpenAPI를
+재생성했다. 이 작업트리에는 Node 의존성이 없어 generated TypeScript 갱신은 다음 frontend
+체크포인트에서 exact `openapi-typescript 7.13.0` 환경으로 함께 수행한다.
+
 ## 2026-08-13 — T-VN-40: DB set-based rule reconcile generation
 
 `rule_reconcile` 후보 generation을 단일 named SECURITY DEFINER procedure로 구현했다. 호출자는

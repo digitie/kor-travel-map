@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import json
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from time import perf_counter
@@ -37,10 +38,10 @@ from kortravelmap.curation_provenance import (
     provenance_row_payload,
     requires_lighthouse_provenance,
 )
-from kortravelmap.infra import curation_repo, feature_identity
+from kortravelmap.infra import curation_candidate_repo, curation_repo, feature_identity
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api import domain_command_service
@@ -51,13 +52,18 @@ from kortravelmap.api.domain_command_service import (
     idempotent_domain_command,
 )
 from kortravelmap.api.feature_ref import resolve_feature_ref_or_error
+from kortravelmap.api.http_revision import parse_revision_header, revision_etag
 from kortravelmap.api.identity_projection import response_feature_id
 from kortravelmap.api.response import Meta, make_meta
 
-__all__ = ["admin_router", "router"]
+__all__ = ["admin_router", "candidate_router", "router"]
 
 router = APIRouter(prefix="/curations", tags=["curations"])
 admin_router = APIRouter(prefix="/admin/curations", tags=["admin-curations"])
+candidate_router = APIRouter(
+    prefix="/admin/theme-feature-candidates",
+    tags=["admin-curation-candidates"],
+)
 
 CollectionStatus = Literal["draft", "published", "archived"]
 ActiveCollectionStatus = Literal["draft", "published"]
@@ -76,6 +82,148 @@ CurationRelation = Literal[
     "theme_area_anchor",
 ]
 ReusePolicy = Literal["allowed", "blocked", "manual_review"]
+CandidateReviewState = Literal["open", "promoted", "rejected"]
+_ETAG_RESPONSE_HEADER = {
+    "ETag": {
+        "description": "현재 resource의 raw strong entity tag.",
+        "schema": {"type": "string"},
+    }
+}
+
+
+class AdminThemeCandidateView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: UUID
+    rule_id: UUID
+    theme_id: UUID
+    theme_slug: str
+    theme_name: str
+    source_id: UUID
+    source_name: str
+    provider_dataset_id: int
+    source_entity_key: str
+    feature_id: str
+    feature_uuid: UUID
+    feature_name: str
+    feature_kind: str
+    feature_category: str
+    feature_detail: dict[str, Any]
+    lifecycle_state: str
+    publication_state: str
+    quality_state: str
+    source_record_key: str
+    source_record_hash: str
+    rule_row_revision: str
+    rule_input_hash: str
+    candidate_input_hash: str
+    review_state: CandidateReviewState
+    eligibility_present: bool
+    disposition: str
+    rank_score: str
+    proposal_title: str | None
+    proposal_summary: str | None
+    match_evidence: dict[str, Any]
+    candidate_revision: str
+    candidate_etag: str
+    feature_row_revision: str
+    representation_etag: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class AdminThemeCandidatePageData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[AdminThemeCandidateView]
+
+
+class AdminThemeCandidatePageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: AdminThemeCandidatePageData
+    meta: Meta
+
+
+class AdminThemeCandidateResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: AdminThemeCandidateView
+    meta: Meta
+
+
+class AdminThemeCandidateTransitionView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    transition_id: str
+    candidate_id: UUID
+    transition_kind: str
+    from_review_state: str | None
+    to_review_state: str
+    from_eligibility_present: bool | None
+    to_eligibility_present: bool
+    candidate_revision: str
+    generation_id: UUID | None
+    command_id: str | None
+    actor: str
+    reason_code: str
+    causation_ref: dict[str, Any]
+    occurred_at: datetime
+
+
+class AdminThemeCandidateTransitionPageData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[AdminThemeCandidateTransitionView]
+
+
+class AdminThemeCandidateTransitionPageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: AdminThemeCandidateTransitionPageData
+    meta: Meta
+
+
+class ThemeCandidateRejectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason_code: str = Field(min_length=1, max_length=128)
+
+
+class ThemeCandidatePromoteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    collection_id: UUID
+    collection_revision: str = Field(pattern=r"^[1-9][0-9]*$")
+    item_revision: str | None = Field(default=None, pattern=r"^[1-9][0-9]*$")
+    external_item_id: str = Field(min_length=1, max_length=512)
+    external_component_id: str = Field(min_length=1, max_length=512)
+    place_name: str = Field(min_length=1, max_length=512)
+    address_hint: str | None = None
+    item_title: str | None = None
+    item_summary: str | None = None
+    sort_order: int = Field(ge=0)
+    curation_relation: CurationRelation
+    reuse_policy: ReusePolicy
+    item_status: Literal["candidate", "included"]
+    reason_code: str = Field(min_length=1, max_length=128)
+
+
+class ThemeCandidateCommandData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: UUID
+    candidate_revision: str
+    transition_id: str
+    curation_item_id: UUID | None = None
+    curation_item_revision: str | None = None
+
+
+class ThemeCandidateCommandResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: ThemeCandidateCommandData
+    meta: Meta
 
 
 class PublicCurationCollectionView(BaseModel):
@@ -893,6 +1041,108 @@ def _conflict(exc: IntegrityError) -> HTTPException:
     return HTTPException(status_code=409, detail="curation constraint violation")
 
 
+def _theme_candidate_view(
+    row: curation_candidate_repo.ThemeCandidateRecord,
+) -> AdminThemeCandidateView:
+    representation_payload = {
+        "candidate_id": row.candidate_id,
+        "candidate_revision": str(row.row_revision),
+        "rule_row_revision": str(row.rule_row_revision),
+        "rule_input_hash": row.rule_input_hash,
+        "candidate_input_hash": row.candidate_input_hash,
+        "feature_row_revision": str(row.feature_row_revision),
+        "feature_detail": row.feature_detail,
+    }
+    representation_hash = hashlib.sha256(
+        json.dumps(
+            representation_payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+    return AdminThemeCandidateView(
+        candidate_id=UUID(row.candidate_id),
+        rule_id=UUID(row.rule_id),
+        theme_id=UUID(row.theme_id),
+        theme_slug=row.theme_slug,
+        theme_name=row.theme_name,
+        source_id=UUID(row.source_id),
+        source_name=row.source_name,
+        provider_dataset_id=row.provider_dataset_id,
+        source_entity_key=row.source_entity_key,
+        feature_id=response_feature_id(row),
+        feature_uuid=UUID(row.feature_uuid),
+        feature_name=row.feature_name,
+        feature_kind=row.feature_kind,
+        feature_category=row.feature_category,
+        feature_detail=row.feature_detail,
+        lifecycle_state=row.lifecycle_state,
+        publication_state=row.publication_state,
+        quality_state=row.quality_state,
+        source_record_key=row.source_record_key,
+        source_record_hash=row.source_record_hash,
+        rule_row_revision=str(row.rule_row_revision),
+        rule_input_hash=row.rule_input_hash,
+        candidate_input_hash=row.candidate_input_hash,
+        review_state=row.review_state,
+        eligibility_present=row.eligibility_present,
+        disposition=row.disposition,
+        rank_score=row.rank_score,
+        proposal_title=row.proposal_title,
+        proposal_summary=row.proposal_summary,
+        match_evidence=row.match_evidence,
+        candidate_revision=str(row.row_revision),
+        candidate_etag=revision_etag(row.row_revision),
+        feature_row_revision=str(row.feature_row_revision),
+        representation_etag=f'"sha256:{representation_hash}"',
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _theme_candidate_transition_view(
+    row: curation_candidate_repo.ThemeCandidateTransitionRecord,
+) -> AdminThemeCandidateTransitionView:
+    return AdminThemeCandidateTransitionView(
+        transition_id=str(row.transition_id),
+        candidate_id=UUID(row.candidate_id),
+        transition_kind=row.transition_kind,
+        from_review_state=row.from_review_state,
+        to_review_state=row.to_review_state,
+        from_eligibility_present=row.from_eligibility_present,
+        to_eligibility_present=row.to_eligibility_present,
+        candidate_revision=str(row.candidate_row_revision),
+        generation_id=UUID(row.generation_id) if row.generation_id else None,
+        command_id=str(row.command_id) if row.command_id is not None else None,
+        actor=row.actor,
+        reason_code=row.reason_code,
+        causation_ref=row.causation_ref,
+        occurred_at=row.occurred_at,
+    )
+
+
+def _candidate_command_error(exc: DBAPIError) -> HTTPException:
+    message = str(exc.orig)
+    sqlstate = getattr(exc.orig, "sqlstate", None)
+    if "revision mismatch" in message or "expected candidate revision" in message:
+        return HTTPException(status_code=412, detail="candidate revision이 변경됐습니다.")
+    if sqlstate == "23505":
+        return HTTPException(status_code=409, detail="curation item identity conflict")
+    if sqlstate == "P0002":
+        return HTTPException(status_code=404, detail="candidate 또는 target resource 없음")
+    if sqlstate == "23514" and any(
+        token in message
+        for token in ("stale", "no longer", "only an active", "does not exist", "archived")
+    ):
+        return HTTPException(status_code=409, detail=message)
+    if sqlstate in {"23514", "22023"}:
+        return HTTPException(status_code=422, detail=message)
+    if sqlstate == "42501":
+        return HTTPException(status_code=403, detail="candidate command 권한이 없습니다.")
+    raise exc
+
+
 def _issue_view(issue: CurationImportIssue) -> CurationImportIssueView:
     return CurationImportIssueView.model_validate(issue, from_attributes=True)
 
@@ -1625,6 +1875,214 @@ async def import_admin_curations(
     )
     await session.commit()
     return response
+
+
+@candidate_router.get("", response_model=AdminThemeCandidatePageResponse)
+async def list_admin_theme_candidates(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    rule_id: Annotated[UUID | None, Query()] = None,
+    theme_id: Annotated[UUID | None, Query()] = None,
+    source_id: Annotated[UUID | None, Query()] = None,
+    review_state: Annotated[CandidateReviewState | None, Query()] = None,
+    eligibility_present: Annotated[bool | None, Query()] = None,
+    feature_id: Annotated[str | None, Query()] = None,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 100,
+    cursor: Annotated[str | None, Query()] = None,
+) -> AdminThemeCandidatePageResponse:
+    started_at = perf_counter()
+    try:
+        page = await curation_candidate_repo.list_theme_candidates(
+            session,
+            rule_id=str(rule_id) if rule_id else None,
+            theme_id=str(theme_id) if theme_id else None,
+            source_id=str(source_id) if source_id else None,
+            review_state=review_state,
+            eligibility_present=eligibility_present,
+            feature_id=feature_id,
+            limit=page_size,
+            cursor=cursor,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return AdminThemeCandidatePageResponse(
+        data=AdminThemeCandidatePageData(
+            items=[_theme_candidate_view(row) for row in page.items]
+        ),
+        meta=make_meta(
+            request,
+            started_at=started_at,
+            page_size=page_size,
+            next_cursor=page.next_cursor,
+        ),
+    )
+
+
+@candidate_router.get(
+    "/{candidate_id}",
+    response_model=AdminThemeCandidateResponse,
+    responses={304: {"description": "representation ETag 일치"}},
+)
+async def get_admin_theme_candidate(
+    request: Request,
+    candidate_id: UUID,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AdminThemeCandidateResponse | Response:
+    started_at = perf_counter()
+    row = await curation_candidate_repo.get_theme_candidate(
+        session, candidate_id=str(candidate_id)
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="theme candidate 없음")
+    view = _theme_candidate_view(row)
+    if request.headers.get("if-none-match") == view.representation_etag:
+        return Response(status_code=304, headers={"ETag": view.representation_etag})
+    response.headers["ETag"] = view.representation_etag
+    return AdminThemeCandidateResponse(
+        data=view,
+        meta=make_meta(request, started_at=started_at),
+    )
+
+
+@candidate_router.get(
+    "/{candidate_id}/transitions",
+    response_model=AdminThemeCandidateTransitionPageResponse,
+)
+async def list_admin_theme_candidate_transitions(
+    request: Request,
+    candidate_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    before_transition_id: Annotated[int | None, Query(gt=0)] = None,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 100,
+) -> AdminThemeCandidateTransitionPageResponse:
+    started_at = perf_counter()
+    if await curation_candidate_repo.get_theme_candidate(
+        session, candidate_id=str(candidate_id)
+    ) is None:
+        raise HTTPException(status_code=404, detail="theme candidate 없음")
+    page = await curation_candidate_repo.list_theme_candidate_transitions(
+        session,
+        candidate_id=str(candidate_id),
+        before_transition_id=before_transition_id,
+        limit=page_size,
+    )
+    return AdminThemeCandidateTransitionPageResponse(
+        data=AdminThemeCandidateTransitionPageData(
+            items=[_theme_candidate_transition_view(row) for row in page.items]
+        ),
+        meta=make_meta(
+            request,
+            started_at=started_at,
+            page_size=page_size,
+            next_cursor=str(page.next_cursor) if page.next_cursor else None,
+        ),
+    )
+
+
+@candidate_router.post(
+    "/{candidate_id}/reject",
+    response_model=ThemeCandidateCommandResponse,
+    responses={
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+        412: {"description": "stale candidate If-Match"},
+        428: {"description": "If-Match 누락"},
+    },
+)
+@idempotent_domain_command("admin.theme-feature-candidate.reject")
+async def reject_admin_theme_candidate(
+    request: Request,
+    candidate_id: UUID,
+    body: ThemeCandidateRejectRequest,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+) -> ThemeCandidateCommandResponse:
+    started_at = perf_counter()
+    expected_revision = parse_revision_header(request, "If-Match", required=True)
+    assert expected_revision is not None
+    try:
+        async with domain_command_transaction(session):
+            result = await curation_candidate_repo.reject_theme_candidate(
+                session,
+                candidate_id=str(candidate_id),
+                expected_revision=expected_revision,
+                command_id=domain_command_service.current_domain_command().command_id,
+                reason_code=body.reason_code,
+                principal=context.actor,
+            )
+    except DBAPIError as exc:
+        raise _candidate_command_error(exc) from exc
+    response.headers["ETag"] = revision_etag(result[1])
+    return ThemeCandidateCommandResponse(
+        data=ThemeCandidateCommandData(
+            candidate_id=UUID(result[0]),
+            candidate_revision=str(result[1]),
+            transition_id=str(result[2]),
+        ),
+        meta=make_meta(request, started_at=started_at),
+    )
+
+
+@candidate_router.post(
+    "/{candidate_id}/promote",
+    response_model=ThemeCandidateCommandResponse,
+    responses={
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+        412: {"description": "stale candidate/collection/item revision"},
+        428: {"description": "If-Match 누락"},
+    },
+)
+@idempotent_domain_command("admin.theme-feature-candidate.promote")
+async def promote_admin_theme_candidate(
+    request: Request,
+    candidate_id: UUID,
+    body: ThemeCandidatePromoteRequest,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+) -> ThemeCandidateCommandResponse:
+    started_at = perf_counter()
+    expected_revision = parse_revision_header(request, "If-Match", required=True)
+    assert expected_revision is not None
+    try:
+        async with domain_command_transaction(session):
+            result = await curation_candidate_repo.promote_theme_candidate(
+                session,
+                candidate_id=str(candidate_id),
+                collection_id=str(body.collection_id),
+                external_item_id=body.external_item_id,
+                external_component_id=body.external_component_id,
+                place_name=body.place_name,
+                address_hint=body.address_hint,
+                item_title=body.item_title,
+                item_summary=body.item_summary,
+                sort_order=body.sort_order,
+                curation_relation=body.curation_relation,
+                reuse_policy=body.reuse_policy,
+                item_status=body.item_status,
+                expected_candidate_revision=expected_revision,
+                expected_collection_revision=int(body.collection_revision),
+                expected_item_revision=(
+                    int(body.item_revision) if body.item_revision else None
+                ),
+                command_id=domain_command_service.current_domain_command().command_id,
+                reason_code=body.reason_code,
+                principal=context.actor,
+            )
+    except DBAPIError as exc:
+        raise _candidate_command_error(exc) from exc
+    response.headers["ETag"] = revision_etag(result[1])
+    return ThemeCandidateCommandResponse(
+        data=ThemeCandidateCommandData(
+            candidate_id=UUID(result[0]),
+            candidate_revision=str(result[1]),
+            curation_item_id=UUID(result[2]),
+            curation_item_revision=str(result[3]),
+            transition_id=str(result[4]),
+        ),
+        meta=make_meta(request, started_at=started_at),
+    )
 
 
 @router.get("", response_model=FeatureCurationGroupsResponse)

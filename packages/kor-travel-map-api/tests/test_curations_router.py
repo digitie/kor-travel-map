@@ -16,6 +16,12 @@ from uuid import NAMESPACE_URL, uuid5
 import pytest
 from fastapi.testclient import TestClient
 from kortravelmap.curation_import import CURATION_CSV_HEADERS, parse_curation_csv
+from kortravelmap.infra.curation_candidate_repo import (
+    ThemeCandidatePage,
+    ThemeCandidateRecord,
+    ThemeCandidateTransitionPage,
+    ThemeCandidateTransitionRecord,
+)
 from kortravelmap.infra.curation_repo import (
     CurationCollection,
     CurationImportBatch,
@@ -42,10 +48,51 @@ from kortravelmap.api.settings import ApiSettings
 
 COLLECTION_ID = "11111111-1111-4111-8111-111111111111"
 ITEM_ID = "22222222-2222-4222-8222-222222222222"
+CANDIDATE_ID = "33333333-3333-4333-8333-333333333333"
 
 
 def _uuid(label: str) -> str:
     return str(uuid5(NAMESPACE_URL, label))
+
+
+def _theme_candidate() -> ThemeCandidateRecord:
+    now = datetime(2026, 8, 13, tzinfo=UTC)
+    return ThemeCandidateRecord(
+        candidate_id=CANDIDATE_ID,
+        rule_id=_uuid("rule"),
+        theme_id=_uuid("theme"),
+        theme_slug="coastal-cafes",
+        theme_name="해안 카페",
+        source_id=_uuid("source"),
+        source_name="provider source",
+        provider_dataset_id=101,
+        source_entity_key="entity-1",
+        feature_id="feature:one",
+        feature_uuid=_uuid("feature:one"),
+        feature_name="바다 카페",
+        feature_kind="place",
+        feature_category="01070100",
+        feature_detail={"place_type": "cafe"},
+        lifecycle_state="active",
+        publication_state="published",
+        quality_state="valid",
+        source_record_key="record-1",
+        source_record_hash="a" * 64,
+        rule_row_revision=4,
+        rule_input_hash="b" * 64,
+        candidate_input_hash="c" * 64,
+        review_state="open",
+        eligibility_present=True,
+        disposition="active",
+        rank_score="0.750000",
+        proposal_title="바다 카페",
+        proposal_summary=None,
+        match_evidence={"selector": "category"},
+        row_revision=7,
+        feature_row_revision=9,
+        created_at=now,
+        updated_at=now,
+    )
 
 
 class _FakeCatalogRow:
@@ -101,6 +148,8 @@ class _FakeSession:
         dataset까지 공식 등대로 오판돼 모든 import가 provenance 422가 된다.
         """
         sql = str(statement)
+        if sql == "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE":
+            return _FakeResult(())
         if "provider_sync.provider_datasets" not in sql:
             raise AssertionError(f"stub이 모르는 질의입니다: {sql}")
         bound = params or {}
@@ -1945,3 +1994,230 @@ def test_reclassify_rejects_action_field_mismatch(
     assert response.status_code == 422
     move.assert_not_awaited()
     confirm.assert_not_awaited()
+
+
+@pytest.mark.unit
+def test_admin_theme_candidate_list_uses_and_filters_and_decimal_revisions(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    listing = AsyncMock(
+        return_value=ThemeCandidatePage((_theme_candidate(),), "opaque-next")
+    )
+    monkeypatch.setattr(
+        module.curation_candidate_repo,
+        "list_theme_candidates",
+        listing,
+    )
+
+    response = client.get(
+        "/v1/admin/theme-feature-candidates",
+        params={
+            "rule_id": _uuid("rule"),
+            "theme_id": _uuid("theme"),
+            "source_id": _uuid("source"),
+            "review_state": "open",
+            "eligibility_present": "true",
+            "feature_id": "feature:one",
+            "page_size": 25,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["items"][0]["feature_id"] == _uuid("feature:one")
+    assert body["data"]["items"][0]["candidate_revision"] == "7"
+    assert body["data"]["items"][0]["feature_row_revision"] == "9"
+    assert body["meta"]["page"]["page_size"] == 25
+    assert body["meta"]["page"]["next_cursor"] == "opaque-next"
+    assert listing.await_args.kwargs == {
+        "rule_id": _uuid("rule"),
+        "theme_id": _uuid("theme"),
+        "source_id": _uuid("source"),
+        "review_state": "open",
+        "eligibility_present": True,
+        "feature_id": "feature:one",
+        "limit": 25,
+        "cursor": None,
+    }
+
+
+@pytest.mark.unit
+def test_admin_theme_candidate_detail_has_separate_representation_etag_and_304(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    detail = AsyncMock(return_value=_theme_candidate())
+    monkeypatch.setattr(module.curation_candidate_repo, "get_theme_candidate", detail)
+    path = f"/v1/admin/theme-feature-candidates/{CANDIDATE_ID}"
+
+    first = client.get(path)
+
+    assert first.status_code == 200
+    representation_etag = first.headers["etag"]
+    assert representation_etag.startswith('"sha256:')
+    assert first.json()["data"]["candidate_etag"] == '"7"'
+    assert first.json()["data"]["representation_etag"] == representation_etag
+
+    cached = client.get(path, headers={"If-None-Match": representation_etag})
+
+    assert cached.status_code == 304
+    assert cached.content == b""
+    assert cached.headers["etag"] == representation_etag
+
+
+@pytest.mark.unit
+def test_admin_theme_candidate_transition_ids_are_decimal_strings(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    now = datetime(2026, 8, 13, tzinfo=UTC)
+    monkeypatch.setattr(
+        module.curation_candidate_repo,
+        "get_theme_candidate",
+        AsyncMock(return_value=_theme_candidate()),
+    )
+    listing = AsyncMock(
+        return_value=ThemeCandidateTransitionPage(
+            (
+                ThemeCandidateTransitionRecord(
+                    transition_id=9_007_199_254_740_993,
+                    candidate_id=CANDIDATE_ID,
+                    transition_kind="admin_reject",
+                    from_review_state="open",
+                    to_review_state="rejected",
+                    from_eligibility_present=True,
+                    to_eligibility_present=True,
+                    candidate_row_revision=8,
+                    generation_id=None,
+                    command_id=9_007_199_254_740_995,
+                    actor="local-dev",
+                    reason_code="not_relevant",
+                    causation_ref={"command_id": 9_007_199_254_740_995},
+                    occurred_at=now,
+                ),
+            ),
+            9_007_199_254_740_993,
+        )
+    )
+    monkeypatch.setattr(
+        module.curation_candidate_repo,
+        "list_theme_candidate_transitions",
+        listing,
+    )
+
+    response = client.get(
+        f"/v1/admin/theme-feature-candidates/{CANDIDATE_ID}/transitions"
+    )
+
+    assert response.status_code == 200
+    row = response.json()["data"]["items"][0]
+    assert row["transition_id"] == "9007199254740993"
+    assert row["command_id"] == "9007199254740995"
+    assert response.json()["meta"]["page"]["next_cursor"] == "9007199254740993"
+
+
+@pytest.mark.unit
+def test_admin_theme_candidate_reject_requires_revision_and_returns_new_etag(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    reject = AsyncMock(return_value=(CANDIDATE_ID, 8, 101))
+    monkeypatch.setattr(
+        module.curation_candidate_repo,
+        "reject_theme_candidate",
+        reject,
+    )
+    path = f"/v1/admin/theme-feature-candidates/{CANDIDATE_ID}/reject"
+
+    missing = client.post(path, json={"reason_code": "not_relevant"})
+    accepted = client.post(
+        path,
+        headers={"If-Match": '"7"'},
+        json={"reason_code": "not_relevant"},
+    )
+
+    assert missing.status_code == 428
+    assert accepted.status_code == 200
+    assert accepted.headers["etag"] == '"8"'
+    assert accepted.json()["data"] == {
+        "candidate_id": CANDIDATE_ID,
+        "candidate_revision": "8",
+        "transition_id": "101",
+        "curation_item_id": None,
+        "curation_item_revision": None,
+    }
+    assert reject.await_args.kwargs == {
+        "candidate_id": CANDIDATE_ID,
+        "expected_revision": 7,
+        "command_id": 1,
+        "reason_code": "not_relevant",
+        "principal": "local-dev",
+    }
+
+
+@pytest.mark.unit
+def test_admin_theme_candidate_promote_passes_all_cas_axes(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    item_id = _uuid("promoted-item")
+    promote = AsyncMock(return_value=(CANDIDATE_ID, 8, item_id, 3, 102))
+    monkeypatch.setattr(
+        module.curation_candidate_repo,
+        "promote_theme_candidate",
+        promote,
+    )
+
+    response = client.post(
+        f"/v1/admin/theme-feature-candidates/{CANDIDATE_ID}/promote",
+        headers={"If-Match": '"7"'},
+        json={
+            "collection_id": COLLECTION_ID,
+            "collection_revision": "11",
+            "item_revision": None,
+            "external_item_id": "candidate-1",
+            "external_component_id": "primary",
+            "place_name": "바다 카페",
+            "sort_order": 2,
+            "curation_relation": "nearby_option",
+            "reuse_policy": "manual_review",
+            "item_status": "included",
+            "reason_code": "approved",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["etag"] == '"8"'
+    assert response.json()["data"]["curation_item_id"] == item_id
+    assert response.json()["data"]["curation_item_revision"] == "3"
+    assert promote.await_args.kwargs == {
+        "candidate_id": CANDIDATE_ID,
+        "collection_id": COLLECTION_ID,
+        "external_item_id": "candidate-1",
+        "external_component_id": "primary",
+        "place_name": "바다 카페",
+        "address_hint": None,
+        "item_title": None,
+        "item_summary": None,
+        "sort_order": 2,
+        "curation_relation": "nearby_option",
+        "reuse_policy": "manual_review",
+        "item_status": "included",
+        "expected_candidate_revision": 7,
+        "expected_collection_revision": 11,
+        "expected_item_revision": None,
+        "command_id": 1,
+        "reason_code": "approved",
+        "principal": "local-dev",
+    }
