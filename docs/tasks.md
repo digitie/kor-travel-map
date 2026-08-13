@@ -811,6 +811,17 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   - 러너는 GitHub 아카이브에서 자체 스냅샷을 설치한다(`$INSTALL_BASE/$SOURCE_COMMIT`,
     root-owned/read-only 검증 포함). 따라서 러너를 고쳤으면 **푸시한 뒤 그 커밋을**
     `E2E_SOURCE_COMMIT`으로 줘야 한다 — 로컬 편집은 반영되지 않는다.
+  - **fixture 자체가 결함이면 in-band 복구 경로가 없다.** `recover`는 fixture를
+    BLOCKED가 기록한 `source_commit`에 고정하는데(`FIXTURE_HELPER=
+    "$INSTALL_BASE/$blocked_source/..."`), 결함이 바로 그 버전에 있으면 recover도
+    같은 지점에서 죽는다. `abort`는 phase가
+    `direct-cleanup-running`/`test-failed-restored`/`failed-resource-finalizing`일
+    때만 허용하므로 hard-purge 중 죽은 상태는 받지 못한다. 스냅샷은
+    `validate_snapshot`이 지키는 신뢰 경계라 손대서도 안 된다.
+    남는 것은 clone DB 재구축(일회용이므로 45s)뿐이고, BLOCKED와 checkpoint는
+    지우지 말고 `archive-0104-blocked-*`로 보존한다.
+    → 하네스 개선 여지: recover가 **더 새 fixture**를 쓸 수 있게 하거나
+    (`--fixture-source-commit`), abort가 hard-purge 단계를 받아들이게 하는 것.
 
 ### T-VN-37D — notice empty range 표현 (보류)
 
