@@ -24,6 +24,8 @@ from kortravelmap.infra.domain_command_repo import (
     lock_domain_command,
 )
 from pydantic import BaseModel
+from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from kortravelmap.api.auth import (
     AdminProxyContext,
@@ -67,6 +69,35 @@ _ACTIVE_DOMAIN_COMMAND: ContextVar[DomainCommandHandle | None] = ContextVar(
     "kor_travel_map_active_domain_command",
     default=None,
 )
+_SERIALIZATION_ATTEMPTS = 3
+
+
+def _sqlstate(error: BaseException) -> str | None:
+    """SQLAlchemy/asyncpg wrapper chain에서 PostgreSQL SQLSTATE를 찾는다."""
+
+    current: BaseException | None = error
+    seen: set[int] = set()
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        for candidate in (
+            current,
+            getattr(current, "orig", None),
+            getattr(current, "__cause__", None),
+            getattr(current, "__context__", None),
+        ):
+            if candidate is None:
+                continue
+            value = getattr(candidate, "sqlstate", None) or getattr(
+                candidate, "pgcode", None
+            )
+            if value is not None:
+                return str(value)
+        current = getattr(current, "orig", None) or getattr(
+            current, "__cause__", None
+        )
+    return None
+
+
 class DomainCommandError(Exception):
     """Domain command claim/replay base error."""
 
@@ -351,34 +382,51 @@ def idempotent_domain_command(
                 kwargs,
                 fingerprint_headers=policy.fingerprint_headers,
             )
-            async with session.begin():
-                token = _ACTIVE_DOMAIN_SESSION.set(session)
+            for attempt in range(_SERIALIZATION_ATTEMPTS):
+                command_token = None
                 try:
-                    command = await begin_domain_command(
-                        session,
-                        actor=context.actor,
-                        operation=operation,
-                        idempotency_key=idempotency_key,
-                        payload=payload,
-                    )
-                    command_token = _ACTIVE_DOMAIN_COMMAND.set(command)
-                    result = await function(*args, **kwargs)
-                    route_response = kwargs.get("response")
-                    await complete_domain_command(
-                        session,
-                        command=command,
-                        response=result,
-                        status_code=success_status,
-                        response_headers=_material_response_headers(
-                            route_response,
-                            header_names=policy.replay_headers,
-                        ),
-                    )
-                finally:
-                    if "command_token" in locals():
-                        _ACTIVE_DOMAIN_COMMAND.reset(command_token)
-                    _ACTIVE_DOMAIN_SESSION.reset(token)
-            return result
+                    async with session.begin():
+                        # PostgreSQL은 transaction의 첫 query 뒤 isolation 변경을
+                        # 거부한다. claim advisory lock/ledger SELECT보다 반드시 앞이다.
+                        if policy.transaction_isolation == "serializable":
+                            await session.execute(
+                                text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+                            )
+                        token = _ACTIVE_DOMAIN_SESSION.set(session)
+                        try:
+                            command = await begin_domain_command(
+                                session,
+                                actor=context.actor,
+                                operation=operation,
+                                idempotency_key=idempotency_key,
+                                payload=payload,
+                            )
+                            command_token = _ACTIVE_DOMAIN_COMMAND.set(command)
+                            result = await function(*args, **kwargs)
+                            route_response = kwargs.get("response")
+                            await complete_domain_command(
+                                session,
+                                command=command,
+                                response=result,
+                                status_code=success_status,
+                                response_headers=_material_response_headers(
+                                    route_response,
+                                    header_names=policy.replay_headers,
+                                ),
+                            )
+                        finally:
+                            if command_token is not None:
+                                _ACTIVE_DOMAIN_COMMAND.reset(command_token)
+                            _ACTIVE_DOMAIN_SESSION.reset(token)
+                    return result
+                except DBAPIError as error:
+                    if (
+                        policy.transaction_isolation != "serializable"
+                        or _sqlstate(error) != "40001"
+                        or attempt + 1 == _SERIALIZATION_ATTEMPTS
+                    ):
+                        raise
+            raise AssertionError("serialization retry loop exhausted")
 
         wrapped.__signature__ = exposed_signature  # type: ignore[attr-defined]
         return wrapped

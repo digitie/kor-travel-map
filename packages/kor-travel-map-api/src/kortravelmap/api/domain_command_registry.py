@@ -44,6 +44,7 @@ class CommandPolicy:
     success_status: int | None = None
     replay_headers: tuple[str, ...] = ()
     fingerprint_headers: tuple[str, ...] = ()
+    transaction_isolation: str | None = None
 
     def __post_init__(self) -> None:
         if self.kind in {
@@ -75,10 +76,16 @@ class CommandPolicy:
                     "unsupported fingerprint headers: "
                     f"{sorted(unsupported_fingerprint_headers)}"
                 )
+            if self.transaction_isolation not in {None, "serializable"}:
+                raise ValueError(
+                    "unsupported domain transaction isolation: "
+                    f"{self.transaction_isolation}"
+                )
         elif (
             self.success_status is not None
             or self.replay_headers
             or self.fingerprint_headers
+            or self.transaction_isolation is not None
         ):
             raise ValueError(
                 f"{self.kind.value} policy must not declare terminal response contract"
@@ -92,6 +99,7 @@ def _domain(
     success_status: int = 200,
     replay_headers: tuple[str, ...] = (),
     fingerprint_headers: tuple[str, ...] = (),
+    transaction_isolation: str | None = None,
 ) -> CommandPolicy:
     return CommandPolicy(
         kind=CommandPolicyKind.DOMAIN_LEDGER,
@@ -100,6 +108,7 @@ def _domain(
         success_status=success_status,
         replay_headers=replay_headers,
         fingerprint_headers=fingerprint_headers,
+        transaction_isolation=transaction_isolation,
     )
 
 
@@ -216,27 +225,36 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
     ("POST", "/v1/admin/curated-themes"): _domain(
         "admin.curated-theme.create",
         _MUTATION_RESULT,
+        transaction_isolation="serializable",
     ),
     ("PATCH", "/v1/admin/curated-themes/{theme_id}"): _domain(
         "admin.curated-theme.patch",
         _MUTATION_RESULT,
+        transaction_isolation="serializable",
     ),
     ("POST", "/v1/admin/curated-sources"): _domain(
         "admin.curated-source.create",
         _MUTATION_RESULT,
+        transaction_isolation="serializable",
     ),
     ("PATCH", "/v1/admin/curated-sources/{source_id}"): _domain(
         "admin.curated-source.patch",
         _MUTATION_RESULT,
+        transaction_isolation="serializable",
     ),
     ("POST", "/v1/admin/curated-source-rules"): _domain(
         "admin.curated-source-rule.create",
         _MUTATION_RESULT,
+        transaction_isolation="serializable",
     ),
     (
         "PATCH",
         "/v1/admin/curated-source-rules/{rule_id}",
-    ): _domain("admin.curated-source-rule.patch", _MUTATION_RESULT),
+    ): _domain(
+        "admin.curated-source-rule.patch",
+        _MUTATION_RESULT,
+        transaction_isolation="serializable",
+    ),
     (
         "POST",
         "/v1/admin/curated-source-rules/{rule_id}/apply",

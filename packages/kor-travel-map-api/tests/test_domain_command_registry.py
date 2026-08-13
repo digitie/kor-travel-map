@@ -210,6 +210,14 @@ def test_policy_requires_operation_only_for_ledger_kinds() -> None:
             success_status=200,
             fingerprint_headers=("Cookie",),
         )
+    with pytest.raises(ValueError, match="unsupported domain transaction isolation"):
+        CommandPolicy(
+            kind=CommandPolicyKind.DOMAIN_LEDGER,
+            reason="unsafe isolation",
+            operation="admin.test",
+            success_status=200,
+            transaction_isolation="read-committed",
+        )
 
 
 def test_command_policy_fails_closed_for_unregistered_write() -> None:

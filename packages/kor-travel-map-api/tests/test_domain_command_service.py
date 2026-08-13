@@ -16,6 +16,7 @@ from kortravelmap.infra.domain_command_repo import (
     canonical_domain_command_fingerprint,
 )
 from pydantic import BaseModel
+from sqlalchemy.exc import DBAPIError
 
 from kortravelmap.api import domain_command_service as service
 from kortravelmap.api.auth import AdminProxyContext
@@ -185,6 +186,21 @@ class _Session:
 
     def in_transaction(self) -> bool:
         return False
+
+
+class _SqlStateError(Exception):
+    def __init__(self, sqlstate: str) -> None:
+        super().__init__(sqlstate)
+        self.sqlstate = sqlstate
+
+
+class _SerializableSession(_Session):
+    def __init__(self, events: list[str]) -> None:
+        super().__init__()
+        self.events = events
+
+    async def execute(self, statement: object) -> None:
+        self.events.append(f"sql:{statement}")
 
 
 def _request(*, headers: dict[str, str] | None = None) -> Request:
@@ -378,6 +394,69 @@ async def test_route_decorator_uses_operation_success_status_without_response_pa
         status_code=201,
         response_headers={},
     )
+
+
+@pytest.mark.asyncio
+async def test_serializable_policy_sets_first_statement_and_retries_whole_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operation = "admin.curated-source-rule.patch"
+    events: list[str] = []
+    command = service.DomainCommandHandle(
+        command_id=1,
+        actor=_ACTOR,
+        operation=operation,
+        idempotency_key=str(_KEY),
+        request_fingerprint="a" * 64,
+    )
+
+    async def begin(*_args: object, **_kwargs: object) -> service.DomainCommandHandle:
+        events.append("claim")
+        return command
+
+    async def complete(*_args: object, **_kwargs: object) -> None:
+        events.append("terminal")
+
+    monkeypatch.setattr(service, "begin_domain_command", begin)
+    monkeypatch.setattr(service, "complete_domain_command", complete)
+    route_attempts = 0
+
+    @service.idempotent_domain_command(operation)
+    async def _route(
+        context: AdminProxyContext,
+        session: _SerializableSession,
+        request: Request,
+    ) -> _Response:
+        nonlocal route_attempts
+        route_attempts += 1
+        events.append("mutation")
+        if route_attempts < 3:
+            raise DBAPIError(None, None, _SqlStateError("40001"), False)
+        return _Response(data={"rule_id": "rule-1"})
+
+    session = _SerializableSession(events)
+    result = await _route(
+        context=AdminProxyContext(actor=_ACTOR),
+        session=session,
+        request=_request(),
+        __domain_idempotency_key=_KEY,
+    )
+
+    assert result.data == {"rule_id": "rule-1"}
+    assert session.begin_count == 3
+    assert route_attempts == 3
+    assert events == [
+        "sql:SET TRANSACTION ISOLATION LEVEL SERIALIZABLE",
+        "claim",
+        "mutation",
+        "sql:SET TRANSACTION ISOLATION LEVEL SERIALIZABLE",
+        "claim",
+        "mutation",
+        "sql:SET TRANSACTION ISOLATION LEVEL SERIALIZABLE",
+        "claim",
+        "mutation",
+        "terminal",
+    ]
 
 
 @pytest.mark.asyncio

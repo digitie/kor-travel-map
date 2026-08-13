@@ -2,6 +2,14 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-13 — T-VN-40: SERIALIZABLE domain command 경계
+
+공통 domain-command policy에 operation별 transaction isolation을 추가했다. T-VN-40 catalog
+command는 `session.begin()` 직후, advisory claim/ledger SQL보다 먼저 PostgreSQL
+`SERIALIZABLE`을 설정한다. `40001`은 동일 actor·Idempotency-Key·fingerprint로 claim부터
+terminal result까지 transaction 전체를 최대 3회 재실행하고 다른 SQLSTATE는 재시도하지 않는다.
+unit 22개와 실제 PostgreSQL claim/mutation/result 단일 transaction integration 1개가 통과했다.
+
 ## 2026-08-13 — T-VN-40: vNext machine contract 최종형 재동결
 
 적대 리뷰가 확인한 machine 정본 drift를 닫았다. `target-schema-v1.sql`은 retained catalog와

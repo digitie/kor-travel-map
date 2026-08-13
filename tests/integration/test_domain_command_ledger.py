@@ -179,6 +179,72 @@ async def test_backup_maintenance_lock_fails_fast_when_exact_key_is_busy(
             assert unlocked is True
 
 
+async def test_serializable_domain_policy_claims_and_completes_in_one_transaction(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """T-VN-40 policy가 ledger SQL 전에 SERIALIZABLE을 설정한다."""
+
+    from fastapi import Request
+    from kortravelmap.api.auth import AdminProxyContext
+    from kortravelmap.api.domain_command_service import idempotent_domain_command
+    from pydantic import BaseModel
+
+    class _Result(BaseModel):
+        isolation: str
+
+    @idempotent_domain_command("admin.curated-source-rule.patch")
+    async def _route(
+        *,
+        context: AdminProxyContext,
+        session: AsyncSession,
+        request: Request,
+    ) -> _Result:
+        isolation = await session.scalar(text("SELECT current_setting('transaction_isolation')"))
+        assert isolation is not None
+        return _Result(isolation=str(isolation))
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "PATCH",
+            "path": "/v1/admin/curated-source-rules/rule-1",
+            "headers": [],
+            "query_string": b"",
+            "server": ("testserver", 80),
+            "client": ("127.0.0.1", 1),
+            "scheme": "http",
+        }
+    )
+    key = uuid4()
+    sessions = async_sessionmaker(migrated_engine, expire_on_commit=False)
+    async with sessions() as session:
+        result = await _route(
+            context=AdminProxyContext(actor="admin:tvn40-serializable"),
+            session=session,
+            request=request,
+            __domain_idempotency_key=key,
+        )
+
+    assert result.isolation == "serializable"
+    async with sessions() as session:
+        row = (
+            await session.execute(
+                text(
+                    """
+                    SELECT command.operation, result.response_body->>'isolation'
+                    FROM ops.domain_commands AS command
+                    JOIN ops.domain_command_results AS result
+                      ON result.command_id = command.command_id
+                    WHERE command.actor = 'admin:tvn40-serializable'
+                      AND command.idempotency_key = CAST(:key AS uuid)
+                    """
+                ),
+                {"key": str(key)},
+            )
+        ).one()
+    assert tuple(row) == ("admin.curated-source-rule.patch", "serializable")
+
+
 async def test_stale_prepared_retry_rereads_phase_without_second_fence_adoption(
     migrated_engine: AsyncEngine,
     tmp_path: Path,
