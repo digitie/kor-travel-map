@@ -2,6 +2,15 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-13 — T-VN-40: effective rule input 정본 단일화
+
+candidate snapshot·generation·향후 catalog reconcile이 서로 다른 rule hash를 만들지 않도록
+`feature.current_curation_rule_input()`을 DB 정본으로 추가했다. schema version 2 input은 rule의
+selector/category/region/default action뿐 아니라 referenced theme/source revision·archive와 immutable
+owner/provider 축까지 담는다. 따라서 theme/source archive나 owner drift가 current head가 같다는 이유로
+stale candidate replay로 오인되지 않는다. helper는 command owner만 실행할 수 있고 public/runtime
+EXECUTE는 제거했다. fresh migration을 포함한 candidate/target focused test 8개가 통과했다.
+
 ## 2026-08-13 — T-VN-40: authoritative provider snapshot 후보 generation 결선
 
 Dagster의 canonical dataset membership 완료가 `authoritative_snapshot_complete=true`인

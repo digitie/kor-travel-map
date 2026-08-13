@@ -251,9 +251,9 @@ feature_uuid, row_revision, lifecycle_state, publication_state, quality_state,
 effective_rule_field_digest)` tuple set을 직접 SHA-256으로 계산한다. effective digest에는 해당 rule이
 읽는 kind/category/region/typed detail의 T-VN-36 effective value와 winning override lineage가 포함된다.
 따라서 head가 그대로여도 admin override/state transition/merge/source-link retarget은 generation
-input hash를 바꾸며 exact replay로 오인되지 않는다. `rule_input`은 canonicalization version,
-rule revision, selector/region/category/kind/source/theme/enabled/priority/**`default_action`**의 ordered
-JSON을 고정해
+input hash를 바꾸며 exact replay로 오인되지 않는다. `rule_input`은 canonicalization version 2와
+rule revision, selector/region/category/kind/enabled/priority/**`default_action`**, referenced
+theme/source id·revision·archive·immutable owner/provider 축의 ordered JSON을 고정해
 mutable rule row의 과거 의미를 복원하며 `rule_input_hash`는 그 canonical JSON의 검증 digest다.
 `default_action='candidate'`인 rule만 expected match를 materialize한다. `candidate → ignore`는 old scope의
 eligibility를 false로 만들고 `ignore → candidate`는 new scope를 materialize하므로 두 방향 모두 semantic
