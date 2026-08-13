@@ -612,6 +612,12 @@
       "down_revision": [
         "0097_tvn34c_final_cutover"
       ],
+      "revision": "0098_admin_scope_indexes"
+    },
+    {
+      "down_revision": [
+        "0098_admin_scope_indexes"
+      ],
       "revision": "0098_tvn36_override_lineage"
     },
     {

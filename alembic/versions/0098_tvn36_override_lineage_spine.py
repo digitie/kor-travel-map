@@ -20,7 +20,7 @@ from sqlalchemy import column, table
 from alembic import op
 
 revision: str = "0098_tvn36_override_lineage"
-down_revision: str | Sequence[str] | None = "0097_tvn34c_final_cutover"
+down_revision: str | Sequence[str] | None = "0098_admin_scope_indexes"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
