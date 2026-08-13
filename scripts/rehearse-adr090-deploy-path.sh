@@ -42,13 +42,20 @@ EXPECTED_HEAD="$KTM_REHEARSAL_EXPECTED_HEAD"
 
 secret() { openssl rand -hex 24; }
 
-# entrypoint가 profile 검사에서 요구하는 값들. 이 리허설의 대상이 아니므로 매번
-# 새로 만든다 — 값 자체는 출력하지 않는다.
+# entrypoint가 **DSN/head 게이트보다 먼저** 통과를 요구하는 값들. 이 리허설의
+# 대상이 아니므로 매번 새로 만든다 — 값 자체는 출력하지 않는다.
+#
+# 이걸 안 채우면 네 경우 모두 ops profile 검사(ADR-066)에서 먼저 죽는다. exit code만
+# 보면 "게이트가 닫혔다"로 보이지만 정작 재려던 축에는 **도달조차 못 한 것**이다.
+# 그래서 아래 각 case는 exit code에 더해 **거부 사유 문자열**까지 확인한다.
 common_env() {
   printf -- '-e\nKOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=%s\n' "$(secret)"
   printf -- '-e\nKOR_TRAVEL_MAP_API_SERVICE_TOKEN=%s\n' "$(secret)"
   printf -- '-e\nKOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET=%s\n' "$(secret)"
   printf -- '-e\nKOR_TRAVEL_MAP_API_METRICS_TOKEN=%s\n' "$(secret)"
+  printf -- '-e\nKOR_TRAVEL_MAP_API_OPS_READ_TOKEN=%s\n' "$(secret)"
+  printf -- '-e\nKOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN=%s\n' "$(secret)"
+  printf -- '-e\nKOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN=%s\n' "$(secret)"
 }
 
 run_case() {
