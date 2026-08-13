@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-13 — T-VN-40: typed candidate reject와 audit 경계
+
+candidate reject를 `SERIALIZABLE`·candidate revision·domain command actor/operation을 검증하는
+named SECURITY DEFINER procedure로 구현했다. API runtime만 실행할 수 있고 Dagster runtime과
+일반 runtime은 거부된다. 상태 변경과 append-only transition은 같은 transaction에서 일어나며
+응답은 candidate revision과 transition id를 함께 반환한다.
+
+검증 중 PostgreSQL routine을 NOLOGIN 전용 owner로 이전한 뒤 schema owner가 ACL을 다시 바꾸면
+경고만 남고 기본 `PUBLIC EXECUTE`가 유지되는 동일 패턴 결함을 확인했다. audit writer와 command
+owner로 명시적으로 `SET ROLE`한 뒤 0105 guard 3개, transition helper, reject procedure의 exact
+ACL을 재고정했다. 실제 API/Dagster LOGIN, stale CAS, 직접 audit helper 거부, 원자 audit를 포함한
+통합 테스트 5개가 통과했다.
+
 ## 2026-08-13 — T-VN-40: 공개 canonical membership fail-close
 
 공개 collection의 count와 item 조회에서 `feature_id IS NULL`인 included item이 trusted accepted

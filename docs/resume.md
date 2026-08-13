@@ -5,14 +5,18 @@
 **다음 한 작업**: PR #977 head 위 bootstrap과 0105 expand DB spine을 구현하고,
 T-VN-40 final schema/API/cutover를 서로 다르게 승인하던
 `target-schema-v1.sql`·`recovery-preflight-v1.json`·`openapi-diff-v1.json`을 최종 정본으로
-원자 재동결하고 SERIALIZABLE domain-command transaction policy까지 구현했다. 다음은 이
-machine contract에 맞춘 set-based generation/typed command procedure를 구현한다. bootstrap은
+원자 재동결하고 SERIALIZABLE domain-command transaction policy까지 구현했다. candidate reject는
+실제 API LOGIN만 실행 가능한 named SECURITY DEFINER procedure와 append-only audit writer로
+전환했다. 다음은 promotion command와 set-based generation procedure를 구현한다. bootstrap은
 populated DB에서 2회, 0105는 fresh 0001→head와 실제 ROLE ACL/append-only gate로 검증했다.
 frozen artifact unit 10개와 target SQL/violation/head-equivalence integration 11개도 통과했다.
 SERIALIZABLE 정책 unit 22개와 실제 PostgreSQL transaction integration 1개도 통과했다.
 공개 canonical reader의 미연결 included item 우회도 닫아 public count/detail은 linked public
 Feature와 trusted accepted decision을 공통으로 요구한다. PostgreSQL 통합 회귀가 공개 0건과
 admin 보존을 함께 확인했다.
+candidate reject actual-LOGIN/CAS/교차-role 통합 5개도 통과했다. routine 소유권 이전 뒤 남던
+기본 `PUBLIC EXECUTE`는 audit owner·command owner 역할로 직접 전환한 exact ACL 재설정으로
+0105/0106 guard·helper·procedure 전체에서 제거했다.
 A/B/C는 하나의 forward-only PR/release로 유지하며, 누적 구현은 DB/동시성과
 API·consumer/ACL 관점의 독립 적대 리뷰어 2명이 같은 고정 SHA에서 검증한다.
 상세 계약은
