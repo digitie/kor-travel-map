@@ -649,8 +649,41 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     `ktm_feature_dagster_runtime`으로 바꿔 해결했다. docker-manager #172 브랜치는 이미
     이 문제를 올바르게 풀어둔 형상이다(세 서비스 각자의 runtime principal).
 
+  **후속 처리 (2026-08-13, 같은 날 이어서)**
+
+  - **공개 API 키 재발급 완료** — `ops.public_api_keys`가 0행이라 공개 표면이 401이었다.
+    `python-vworld-api/.env`의 `VWORLD_API_KEY`를 등록했다(사용자 지시). 키는 평문 미저장
+    (`sha256` + 끝 6자 hint), 발급 경로는 `POST /v1/admin/public-api-keys`뿐인데 그건
+    서버가 난수 32자를 **생성**할 뿐 지정 값을 받지 못하므로 직접 INSERT했다.
+    검증: `/v1/features` 200(실제 feature 반환) · `/v1/categories` 200 ·
+    `/v1/providers` 200 · 키 없음/오류 키 401 유지.
+    - `~/.secrets/kor-travel-map-public-api-key`가 401이던 이유가 밝혀졌다 — 그건
+      map 자체 공개 키가 아니라 **map→geo 소비자 키**다(`kor_travel_geo`의 active 행과
+      일치). `docs/dev-environment.md` §10.7 ①의 서술과 같다.
+    - **마찰로 남긴다**: 등록한 값은 4곳(python-vworld-api/.env, map .env ×2, geo
+      컨테이너)에서 공유되는 업스트림 자격증명이라 하나가 새면 둘 다 샌다. 설계 의도는
+      "UI에서 생성한 전용 키를 DB에 저장"이므로, admin BFF로 난수 전용 키를 발급하고 이
+      행을 revoke하는 회전 경로가 열려 있다.
+  - **prod 지오코딩이 죽어 있었다 — 고쳤다.** `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY`에
+    VWorld 키가 결선돼 있어 geo가 401로 거부했다(실측: VWorld 키 401 / `~/.secrets` 키
+    200). 즉 map의 정/역지오코딩 호출이 전부 실패하고 있었다. 올바른 값으로 교체 후
+    api 재생성, healthy·DB 오류 0 확인. `docs/dev-environment.md` §10.7 ①이 경고하던
+    혼동이 prod에 실제로 박혀 있었다.
+  - **H43 기준선 확보** — 백업 없이 마이그레이션했으므로 `0104` 복구점이 없었다.
+    §9·§10 규약("migration 동반 릴리스 뒤")대로 만들었다:
+    `~/backups/kor-travel-map/2026-08-13-h43-postdeploy-0104.dump`, **586MB / 78초**,
+    sha256 `8a9bae95…`, `pg_restore -l` 목차 1197항목, `public_api_keys` TOC 확인.
+    manifest: head `0104_tvn36_final_fence` · features 1,008,852 ·
+    source_records 1,009,157 · source_links 1,008,852 · public_api_keys 1.
+    - **§9 규약 정정 필요**: manifest 필수 항목 `weather_values`는 이제
+      `feature.weather_values`가 아니라 **`feature.feature_weather_values`**다
+      (T-VN-35 typed subtype 분해에서 개명). 규약대로 조회하면 relation 부재로 실패한다.
+      이번 manifest는 새 이름으로 기록했다(값 0, `current_weather_summary`도 0).
+    - 백업 **스코프 자체는 이미 올발랐다** — `ops.public_api_keys`는 2026-08-05 소실
+      이후 manifest 필수 + TOC 확인 항목이다. 공백은 스코프가 아니라 "최신 기준선이
+      `0083` 시절이었다"는 것이었다.
+
   **잔여**
-  - `ops.public_api_keys`가 **0행**이라 공개 표면이 401이다. 마이그레이션 이전에도 0이었다.
   - prod는 아직 **공유** PostgreSQL(`kor-travel-geo-postgres:5432`)에 있다. docker-manager
     #172는 전용 인스턴스(`:12703`)를 전제하므로 그 배포 전에 **데이터 이동이 선행**돼야
     한다 — 안 그러면 빈 DB를 보게 된다. 순서는 #172 코멘트에 적었다.
