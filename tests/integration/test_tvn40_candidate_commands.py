@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from uuid import uuid4
 
 import pytest
@@ -27,6 +28,7 @@ async def _seed_candidate(
     engine: AsyncEngine,
     *,
     operation: str = "admin.theme-feature-candidate.reject",
+    create_candidate: bool = True,
 ) -> dict[str, object]:
     suffix = uuid4().hex
     feature_id = f"feature:tvn40-candidate-{suffix}"
@@ -198,10 +200,12 @@ async def _seed_candidate(
                 {"theme_id": theme_id, "source_id": source_id},
             )
         )
-        candidate_id = str(
-            await connection.scalar(
-                text(
-                    """
+        candidate_id: str | None = None
+        if create_candidate:
+            candidate_id = str(
+                await connection.scalar(
+                    text(
+                        """
                     INSERT INTO feature.theme_feature_candidates (
                       rule_id, source_entity_key, feature_id, source_record_key,
                       rule_row_revision, rule_input_hash, source_record_hash,
@@ -213,19 +217,19 @@ async def _seed_candidate(
                       repeat('c', 64), 'open', true, 'active', 10,
                       jsonb_build_object('schema_version', 1)
                     ) RETURNING candidate_id
-                    """
-                ),
-                {
-                    "feature_id": feature_id,
-                    "rule_id": rule_id,
-                    "source_entity_key": source_entity_key,
-                    "source_record_key": source_record_key,
-                },
+                        """
+                    ),
+                    {
+                        "feature_id": feature_id,
+                        "rule_id": rule_id,
+                        "source_entity_key": source_entity_key,
+                        "source_record_key": source_record_key,
+                    },
+                )
             )
-        )
-        await connection.execute(
-            text(
-                """
+            await connection.execute(
+                text(
+                    """
                 UPDATE feature.theme_feature_candidates AS candidate
                 SET rule_row_revision = snapshot.rule_row_revision,
                     rule_input_hash = snapshot.rule_input_hash,
@@ -237,15 +241,15 @@ async def _seed_candidate(
                   CAST(:rule_id AS uuid), :source_entity_key, :feature_id
                 ) AS snapshot
                 WHERE candidate.candidate_id = CAST(:candidate_id AS uuid)
-                """
-            ),
-            {
-                "candidate_id": candidate_id,
-                "feature_id": feature_id,
-                "rule_id": rule_id,
-                "source_entity_key": source_entity_key,
-            },
-        )
+                    """
+                ),
+                {
+                    "candidate_id": candidate_id,
+                    "feature_id": feature_id,
+                    "rule_id": rule_id,
+                    "source_entity_key": source_entity_key,
+                },
+            )
         command_id = int(
             await connection.scalar(
                 text(
@@ -267,8 +271,110 @@ async def _seed_candidate(
         "command_id": command_id,
         "collection_id": collection_id,
         "feature_id": feature_id,
+        "rule_id": rule_id,
+        "source_entity_key": source_entity_key,
         "source_record_key": source_record_key,
     }
+
+
+def _scope_hash(members: list[tuple[str, str, str | None, str | None]]) -> str:
+    payload = b"".join(
+        kind.encode()
+        + b"\0"
+        + key.encode()
+        + b"\0"
+        + (before or "").encode()
+        + b"\0"
+        + (after or "").encode()
+        + b"\n"
+        for kind, key, before, after in sorted(members)
+    )
+    return hashlib.sha256(payload).hexdigest()
+
+
+async def _seed_rule_reconcile_operation(
+    engine: AsyncEngine,
+    seeded: dict[str, object],
+    *,
+    include_feature: bool = True,
+) -> str:
+    async with engine.begin() as connection:
+        snapshot = (
+            await connection.execute(
+                text(
+                    """
+                    SELECT rule_input_hash, candidate_input_hash
+                    FROM feature.current_theme_candidate_snapshot(
+                      CAST(:rule_id AS uuid), :source_entity_key, :feature_id
+                    )
+                    """
+                ),
+                seeded,
+            )
+        ).one()
+        members = [
+            (
+                "source_entity",
+                str(seeded["source_entity_key"]),
+                None,
+                "a" * 64,
+            )
+        ]
+        if include_feature:
+            members.append(
+                (
+                    "feature",
+                    str(seeded["feature_id"]),
+                    None,
+                    str(snapshot.candidate_input_hash),
+                )
+            )
+        operation_id = str(uuid4())
+        await connection.execute(
+            text(
+                """
+                INSERT INTO ops.curation_rule_reconcile_operations (
+                  operation_id, rule_id, operation_kind,
+                  before_rule_revision, after_rule_revision,
+                  before_rule_input_hash, after_rule_input_hash,
+                  command_id, system_operation_key, actor,
+                  scope_member_count, scope_members_hash
+                ) VALUES (
+                  CAST(:operation_id AS uuid), CAST(:rule_id AS uuid), 'create',
+                  NULL, 1, NULL, :rule_input_hash,
+                  :command_id, NULL, :actor, :member_count, :members_hash
+                )
+                """
+            ),
+            {
+                **seeded,
+                "operation_id": operation_id,
+                "rule_input_hash": snapshot.rule_input_hash,
+                "member_count": len(members),
+                "members_hash": _scope_hash(members),
+            },
+        )
+        for kind, key, before, after in members:
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO ops.curation_rule_reconcile_scope_members (
+                      operation_id, member_kind, member_key,
+                      before_identity_hash, after_identity_hash
+                    ) VALUES (
+                      CAST(:operation_id AS uuid), :kind, :key, :before, :after
+                    )
+                    """
+                ),
+                {
+                    "after": after,
+                    "before": before,
+                    "key": key,
+                    "kind": kind,
+                    "operation_id": operation_id,
+                },
+            )
+    return operation_id
 
 
 async def test_admin_runtime_reject_is_atomic_and_audited(
@@ -655,3 +761,196 @@ async def test_promotion_rejects_stale_typed_feature_detail(
         assert state == ("open", 1, 0, 0)
     finally:
         await api.dispose()
+
+
+async def test_rule_reconcile_generation_is_server_derived_and_replay_safe(
+    migrated_engine: AsyncEngine,
+) -> None:
+    seeded = await _seed_candidate(
+        migrated_engine,
+        operation="admin.curation-rule.create",
+        create_candidate=False,
+    )
+    operation_id = await _seed_rule_reconcile_operation(migrated_engine, seeded)
+    params = {**seeded, "operation_id": operation_id}
+    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    try:
+        async with api.begin() as connection:
+            await connection.execute(
+                text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+            )
+            first = (
+                await connection.execute(
+                    text(
+                        """
+                        CALL feature.materialize_theme_candidate_generation(
+                          CAST(:rule_id AS uuid), 'rule_reconcile', NULL,
+                          CAST(:operation_id AS uuid), :command_id, NULL,
+                          '{}'::jsonb, NULL, NULL, NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    params,
+                )
+            ).mappings().one()
+        assert int(first["o_observed_candidate_count"]) == 1
+        assert int(first["o_eligibility_removed_candidate_count"]) == 0
+        assert len(str(first["o_generation_input_set_hash"])) == 64
+        assert first["o_replayed"] is False
+
+        async with api.begin() as connection:
+            await connection.execute(
+                text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+            )
+            replay = (
+                await connection.execute(
+                    text(
+                        """
+                        CALL feature.materialize_theme_candidate_generation(
+                          CAST(:rule_id AS uuid), 'rule_reconcile', NULL,
+                          CAST(:operation_id AS uuid), :command_id, NULL,
+                          '{}'::jsonb, NULL, NULL, NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    params,
+                )
+            ).mappings().one()
+        assert replay["o_generation_id"] == first["o_generation_id"]
+        assert replay["o_generation_input_set_hash"] == (
+            first["o_generation_input_set_hash"]
+        )
+        assert replay["o_replayed"] is True
+
+        async with migrated_engine.connect() as connection:
+            row = (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT candidate.review_state,
+                               candidate.eligibility_present,
+                               candidate.disposition,
+                               candidate.row_revision,
+                               generation.generation_kind,
+                               generation.command_id,
+                               count(observation.candidate_id),
+                               count(transition.transition_id)
+                        FROM feature.theme_feature_candidates AS candidate
+                        JOIN feature.theme_candidate_generations AS generation
+                          ON generation.generation_id = CAST(:generation_id AS uuid)
+                        LEFT JOIN feature.theme_candidate_generation_observations AS observation
+                          ON observation.generation_id = generation.generation_id
+                         AND observation.candidate_id = candidate.candidate_id
+                        LEFT JOIN feature.theme_feature_candidate_transitions AS transition
+                          ON transition.candidate_id = candidate.candidate_id
+                         AND transition.generation_id = generation.generation_id
+                        WHERE candidate.rule_id = CAST(:rule_id AS uuid)
+                          AND candidate.source_entity_key = :source_entity_key
+                          AND candidate.feature_id = :feature_id
+                        GROUP BY candidate.review_state,
+                                 candidate.eligibility_present,
+                                 candidate.disposition,
+                                 candidate.row_revision,
+                                 generation.generation_kind,
+                                 generation.command_id
+                        """
+                    ),
+                    {**seeded, "generation_id": first["o_generation_id"]},
+                )
+            ).one()
+        assert row == (
+            "open",
+            True,
+            "active",
+            1,
+            "rule_reconcile",
+            seeded["command_id"],
+            1,
+            1,
+        )
+    finally:
+        await api.dispose()
+
+
+async def test_rule_reconcile_scope_omission_and_cross_executor_fail_closed(
+    migrated_engine: AsyncEngine,
+) -> None:
+    seeded = await _seed_candidate(
+        migrated_engine,
+        operation="admin.curation-rule.create",
+        create_candidate=False,
+    )
+    operation_id = await _seed_rule_reconcile_operation(
+        migrated_engine,
+        seeded,
+        include_feature=False,
+    )
+    params = {**seeded, "operation_id": operation_id}
+    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
+    try:
+        async with api.connect() as connection:
+            transaction = await connection.begin()
+            await connection.execute(
+                text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+            )
+            with pytest.raises(DBAPIError) as omitted:
+                await connection.execute(
+                    text(
+                        """
+                        CALL feature.materialize_theme_candidate_generation(
+                          CAST(:rule_id AS uuid), 'rule_reconcile', NULL,
+                          CAST(:operation_id AS uuid), :command_id, NULL,
+                          '{}'::jsonb, NULL, NULL, NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    params,
+                )
+            assert getattr(omitted.value.orig, "sqlstate", None) == "23514"
+            assert "DB-derived scope" in str(omitted.value.orig)
+            await transaction.rollback()
+
+        async with dagster.connect() as connection:
+            assert not await connection.scalar(
+                text(
+                    """
+                    SELECT has_function_privilege(
+                      session_user,
+                      'feature.materialize_theme_candidate_generation(uuid,text,uuid,uuid,bigint,text,jsonb)'::regprocedure,
+                      'EXECUTE'
+                    )
+                    """
+                )
+            )
+
+        async with migrated_engine.connect() as connection:
+            assert (
+                await connection.scalar(
+                    text(
+                        """
+                        SELECT count(*)
+                        FROM feature.theme_candidate_generations
+                        WHERE reconcile_operation_id = CAST(:operation_id AS uuid)
+                        """
+                    ),
+                    params,
+                )
+                == 0
+            )
+            assert (
+                await connection.scalar(
+                    text(
+                        """
+                        SELECT count(*)
+                        FROM feature.theme_feature_candidates
+                        WHERE rule_id = CAST(:rule_id AS uuid)
+                        """
+                    ),
+                    params,
+                )
+                == 0
+            )
+    finally:
+        await api.dispose()
+        await dagster.dispose()

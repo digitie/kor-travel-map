@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-13 — T-VN-40: DB set-based rule reconcile generation
+
+`rule_reconcile` 후보 generation을 단일 named SECURITY DEFINER procedure로 구현했다. 호출자는
+candidate 행·점수·증거를 제출하지 않고 immutable reconcile operation id만 전달한다. DB가 현재
+rule/source/head/record/link/Feature 3축·typed subtype·override lineage를 읽어 expected set과 hash를
+계산하고, 전체 touched Feature advisory fence를 정렬 선획득한 뒤 immutable generation receipt를 먼저
+기록한다. 이후 candidate/observation/transition을 같은 transaction에서 만들고 양방향 completeness를
+검증한다.
+
+operation parent의 scope count/hash와 child member set도 DB-derived source entity/Feature set과 대조한다.
+정상 materialize와 동일 operation exact replay, scope feature 누락 전체 rollback, API/Dagster 교차
+EXECUTE 거부를 포함한 candidate 통합 테스트 7개가 fresh 0001→0108 DB에서 통과했다.
+
 ## 2026-08-13 — T-VN-40: candidate promotion과 trusted membership 원자 경계
 
 candidate promotion을 `SERIALIZABLE`·candidate/collection/item revision·domain command를
