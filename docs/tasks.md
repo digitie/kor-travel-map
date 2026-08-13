@@ -23,7 +23,7 @@ barrier로 직렬화한다.
   - [/] `T-VN-41F1D-D` → [ ] `T-VN-41F1D-D2`(격리 리허설·data-dependent live UI E2E)
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환) ∥ [ ] `T-VN-41S`
 - **Wave 2 barrier 이후**
-  - Lane A: [ ] `T-VN-35/34/36-deploy`(세 배포를 `0104` 단일 단계로 통합) → [ ] `T-VN-37D`
+  - Lane A: [x] `T-VN-35/34/36-deploy`(`0104` prod cutover 완료 2026-08-13) → [ ] `T-VN-37D`
   - Lane B: [x] `T-VN-34A` → [x] `T-VN-34B` → [x] `T-VN-34C` →
     [x] `T-VN-36A` → [x] `T-VN-36B` → [x] `T-VN-36C` → [x] `T-VN-36D` →
     [x] `T-VN-36-live`(격리 clone 인수 완주 — 2026-08-13)
@@ -619,10 +619,48 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > [`tasks-done.md`](tasks-done.md)에 있다. 남은 것은 prod 배포 하나뿐인데 어느 열린
 > task도 소유하고 있지 않아 여기에 명시적으로 둔다(2026-08-07 재대조에서 발견).
 
-- [ ] T-VN-35/34/36-deploy — **`0104` prod cutover — 폐기·재생성 + provider 재적재**
+- [x] T-VN-35/34/36-deploy — **`0104` prod cutover 완료 (2026-08-13)**
 
-  > **2026-08-13 방식 결정(사용자)**: migrate-in-place가 아니라 **DB 폐기·재생성 후
-  > provider 재적재**다. `0078`(2026-08-04) 전례와 같다. 근거는 아래 두 실측이다.
+  > **최종 방식(사용자 지시)**: 백업 없는 **in-place 마이그레이션**. 하루 사이에 판단이
+  > 두 번 바뀌었으므로 순서대로 남긴다 — ① 처음엔 migrate-in-place 전제 → ② 아래 두
+  > 실측으로 "폐기·재생성 + provider 재적재"로 전환 → ③ 최종적으로 사용자가 "어차피
+  > 되돌리지 않으므로 측정·리허설 없이 강제로 마이그레이션"으로 확정. 재적재 소요
+  > 시간을 재는 비용보다 그냥 밀어붙이는 편이 싸다는 판단이다.
+
+  **실행 결과 (2026-08-13)**
+
+  | 단계 | 결과 |
+  |---|---|
+  | ADR-090 bootstrap (공유 `kor-travel-geo-postgres`) | exit 0, 7 principal, `kor_travel_map` DB·`public.alembic_version` 소유권 → `ktm_feature_schema_owner`, 비소유 relation 0 |
+  | `alembic upgrade head` `0087` → `0104` | **1시간 32분 39초**, feature 1,008,852 손실 0 |
+  | 런타임 배포 (api/ui/dagster/daemon) | 4/4 healthy, DB 오류 0 |
+
+  - 마이그레이션은 **독립 컨테이너**로 돌렸다. entrypoint 인라인으로는 완주할 수 없다 —
+    `0095` 3축 backfill 하나가 **58분 18초**(전체의 63%)이고 api healthcheck 창은
+    `start_period 20s + interval 10s × retries 20` = 약 3.5분이다.
+  - 공유 서버 영향 없음: `kor_travel_geo`(33GB) 소유자는 `addr` 그대로다.
+  - `0097` fence(`user_request` receipt)와 `0103` replay 대상 모두 prod 0건이라 통과했다.
+  - 3축 분포: `active/published/valid` 1,008,848 · `retired/suppressed/valid` 4.
+  - **되돌릴 수 없는 지점을 지났다**: bootstrap이 소유권을 넘기면서 기존 런타임 role
+    `krtour_map`은 `feature.features`를 읽을 수 없게 됐다(`SELECT = f`). 배포는 선택이
+    아니라 필수였다.
+  - 배포 중 발견: `dagster`/`daemon`이 `KOR_TRAVEL_MAP_PG_DSN`을 그대로 쓰므로 api와 달리
+    entrypoint의 runtime DSN 교체 경로가 없다. `KOR_TRAVEL_MAP_DOCKER_PG_DSN`을
+    `ktm_feature_dagster_runtime`으로 바꿔 해결했다. docker-manager #172 브랜치는 이미
+    이 문제를 올바르게 풀어둔 형상이다(세 서비스 각자의 runtime principal).
+
+  **잔여**
+  - `ops.public_api_keys`가 **0행**이라 공개 표면이 401이다. 마이그레이션 이전에도 0이었다.
+  - prod는 아직 **공유** PostgreSQL(`kor-travel-geo-postgres:5432`)에 있다. docker-manager
+    #172는 전용 인스턴스(`:12703`)를 전제하므로 그 배포 전에 **데이터 이동이 선행**돼야
+    한다 — 안 그러면 빈 DB를 보게 된다. 순서는 #172 코멘트에 적었다.
+  - 배포 스냅샷(`/home/digitie/kor-travel-docker-manager`)은 git이 아니다. 거기 넣은 임시
+    결선은 다음 manager 배포에서 저장소 형상으로 대체된다(그쪽이 더 옳다).
+
+  ---
+
+  아래는 방식 ②(폐기·재생성)를 뒷받침했던 실측이다. in-place로 되돌아갔어도 **`0095`가
+  왜 58분인지**와 **base 계보가 왜 비어 있는지**는 그대로 유효하므로 남긴다.
   >
   > **① 마이그레이션 체인에 base lineage backfill이 없다.**
   > `INSERT INTO feature.feature_base_field_values`는 `0099`/`0102`의 **procedure

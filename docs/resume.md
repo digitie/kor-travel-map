@@ -1,8 +1,26 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-13 — T-VN-36 prod cutover 완료
+
+**prod가 `0104_tvn36_final_fence`다.** 백업 없는 in-place 마이그레이션(사용자 지시),
+`0087` → `0104` 1시간 32분, feature 1,008,852 손실 0, 런타임 4/4 healthy.
+상세는 `docs/tasks.md` `T-VN-35/34/36-deploy`.
+
+**다음 한 작업**: 공개 API 키 발급 — `ops.public_api_keys`가 0행이라 공개 표면이
+401이다(마이그레이션 이전에도 0이었다). 그 다음이 전용 PostgreSQL 이행
+(docker-manager #172)이고, 그건 **데이터 이동이 선행**돼야 한다 — 저장소 형상은
+DSN이 `:12703`을 가리키는 전제인데 prod 데이터는 공유 `:5432`에 있다.
+
+배포에서 배운 것 둘:
+- 마이그레이션은 **독립 컨테이너**로 돌려야 한다. `0095` 3축 backfill 하나가 58분이고
+  api healthcheck 창은 3.5분이라 entrypoint 인라인으로는 구조적으로 완주 불가다.
+- `dagster`/`daemon`은 api와 달리 entrypoint의 runtime DSN 교체 경로가 없어
+  `KOR_TRAVEL_MAP_PG_DSN`을 그대로 쓴다. bootstrap 이후 `krtour_map`이 권한을 잃으므로
+  이걸 안 바꾸면 조용히 못 읽는다.
+
 ## 2026-08-13 — T-VN-34·T-VN-36 머지 + live 인수 완주
 
-**다음 한 작업**: PR #977을 머지한 뒤 alembic squash를 별도 PR로 잡는다. prod
+**이전 다음 작업**: PR #977을 머지한 뒤 alembic squash를 별도 PR로 잡는다. prod
 cutover가 폐기·재생성으로 확정됐으므로 `0001→0104` 체인은 앞으로 어떤 DB에서도
 실행되지 않는다 — 그 체인이 지고 있는 sha 상호 고정과 fence/replay/backfill이
 통째로 죽은 코드가 된다. `contracts/vnext/target-schema-fingerprints-v1.json`이
