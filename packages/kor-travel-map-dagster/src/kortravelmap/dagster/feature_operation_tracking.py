@@ -535,6 +535,13 @@ async def run_tracked_feature_asset(
     mutation = await guard.client.finish_dagster_feature_membership(
         dagster_run_id=guard.dagster_run_id,
         membership=membership,
+        authoritative_snapshot_complete=bool(
+            getattr(
+                getattr(result, "observation_receipt", None),
+                "authoritative_snapshot_complete",
+                False,
+            )
+        ),
     )
     _raise_if_blocked(guard.dagster_run_id, mutation)
     return result
@@ -554,6 +561,8 @@ async def ensure_tracked_multi_member_asset(
 async def finish_tracked_feature_membership(
     guard: FeatureOperationExecutionGuard,
     membership: ProviderDatasetOperationMembership,
+    *,
+    authoritative_snapshot_complete: bool = False,
 ) -> None:
     """multi-member callback이 성공한 canonical member만 완료한다."""
     if membership not in guard.memberships:
@@ -564,6 +573,7 @@ async def finish_tracked_feature_membership(
     mutation = await guard.client.finish_dagster_feature_membership(
         dagster_run_id=guard.dagster_run_id,
         membership=membership,
+        authoritative_snapshot_complete=authoritative_snapshot_complete,
     )
     _raise_if_blocked(guard.dagster_run_id, mutation)
 

@@ -177,7 +177,11 @@ async def feature_place_mcst_culture(
         raise
     if guard is not None:
         for membership in completed_memberships:
-            await finish_tracked_feature_membership(guard, membership)
+            await finish_tracked_feature_membership(
+                guard,
+                membership,
+                authoritative_snapshot_complete=True,
+            )
     return result
 
 

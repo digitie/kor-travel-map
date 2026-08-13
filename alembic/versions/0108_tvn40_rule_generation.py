@@ -48,6 +48,7 @@ DECLARE
   v_rule feature.curated_source_rules%ROWTYPE;
   v_source feature.curated_sources%ROWTYPE;
   v_operation ops.curation_rule_reconcile_operations%ROWTYPE;
+  v_source_job ops.import_jobs%ROWTYPE;
   v_existing_generation feature.theme_candidate_generations%ROWTYPE;
   v_candidate feature.theme_feature_candidates%ROWTYPE;
   v_expected record;
@@ -65,20 +66,35 @@ DECLARE
   v_candidate_revision bigint;
   v_transition_kind text;
   v_reason_code text;
+  v_actor text;
+  v_is_provider boolean;
 BEGIN
   IF current_setting('transaction_isolation') <> 'serializable' THEN
     RAISE EXCEPTION 'candidate generation requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
-  IF p_generation_kind <> 'rule_reconcile'
-     OR p_source_job_id IS NOT NULL
-     OR p_reconcile_operation_id IS NULL THEN
-    RAISE EXCEPTION 'this entrypoint currently accepts only rule_reconcile receipts'
+  v_is_provider := p_generation_kind = 'provider_full_snapshot';
+  IF NOT (
+       (v_is_provider
+        AND p_source_job_id IS NOT NULL
+        AND p_reconcile_operation_id IS NULL
+        AND p_command_id IS NULL)
+       OR
+       (p_generation_kind = 'rule_reconcile'
+        AND p_source_job_id IS NULL
+        AND p_reconcile_operation_id IS NOT NULL)
+     ) THEN
+    RAISE EXCEPTION 'generation origin does not match its typed receipt'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_generation_kind';
   END IF;
-  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
-     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
-    RAISE EXCEPTION 'rule reconcile generation requires the admin executor'
+  IF (v_is_provider AND (
+        NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
+        OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+      )) OR (NOT v_is_provider AND (
+        NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+        OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
+      )) THEN
+    RAISE EXCEPTION 'generation receipt is not executable by this runtime principal'
       USING ERRCODE = '42501';
   END IF;
   IF p_context IS NULL OR jsonb_typeof(p_context) <> 'object' THEN
@@ -169,27 +185,29 @@ BEGIN
   WHERE candidate.rule_id = p_rule_id
   ORDER BY candidate.feature_id, candidate.candidate_id FOR UPDATE;
 
-  SELECT operation.* INTO STRICT v_operation
-  FROM ops.curation_rule_reconcile_operations AS operation
-  WHERE operation.operation_id = p_reconcile_operation_id
-  FOR SHARE;
-  IF v_operation.rule_id <> p_rule_id
+  IF NOT v_is_provider THEN
+    SELECT operation.* INTO STRICT v_operation
+    FROM ops.curation_rule_reconcile_operations AS operation
+    WHERE operation.operation_id = p_reconcile_operation_id
+    FOR SHARE;
+    IF v_operation.rule_id <> p_rule_id
      OR v_operation.after_rule_revision <> v_rule.row_revision
      OR v_operation.command_id IS DISTINCT FROM p_command_id THEN
     RAISE EXCEPTION 'reconcile operation does not match the locked rule/command'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_reconcile_operation';
-  END IF;
-  IF p_command_id IS NOT NULL AND NOT EXISTS (
+    END IF;
+    IF p_command_id IS NOT NULL AND NOT EXISTS (
     SELECT 1
     FROM ops.domain_commands AS command_receipt
     WHERE command_receipt.command_id = p_command_id
       AND command_receipt.actor = v_operation.actor
-  ) THEN
-    RAISE EXCEPTION 'reconcile command actor does not match its operation receipt'
-      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_reconcile_command';
-  END IF;
+    ) THEN
+      RAISE EXCEPTION 'reconcile command actor does not match its operation receipt'
+        USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_reconcile_command';
+    END IF;
+    v_actor := v_operation.actor;
 
-  SELECT count(*), encode(
+    SELECT count(*), encode(
     x_extension.digest(
       COALESCE(
         string_agg(
@@ -209,13 +227,13 @@ BEGIN
   INTO STRICT v_scope_member_count, v_scope_members_hash
   FROM ops.curation_rule_reconcile_scope_members AS member
   WHERE member.operation_id = p_reconcile_operation_id;
-  IF v_scope_member_count <> v_operation.scope_member_count
+    IF v_scope_member_count <> v_operation.scope_member_count
      OR v_scope_members_hash <> v_operation.scope_members_hash THEN
     RAISE EXCEPTION 'reconcile operation scope receipt is not sealed'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_reconcile_scope_hash';
-  END IF;
+    END IF;
 
-  SELECT count(*) INTO STRICT v_expected_scope_member_count
+    SELECT count(*) INTO STRICT v_expected_scope_member_count
   FROM (
     SELECT 'source_entity'::text AS member_kind, entity.source_entity_key AS member_key
     FROM provider_sync.source_entities AS entity
@@ -227,7 +245,7 @@ BEGIN
       ON link.source_entity_key = entity.source_entity_key
     WHERE entity.provider_dataset_id = v_provider_dataset_id
   ) AS expected_scope;
-  IF v_expected_scope_member_count <> v_scope_member_count
+    IF v_expected_scope_member_count <> v_scope_member_count
      OR EXISTS (
        (SELECT member.member_kind, member.member_key
         FROM ops.curation_rule_reconcile_scope_members AS member
@@ -267,6 +285,43 @@ BEGIN
      ) THEN
     RAISE EXCEPTION 'reconcile operation scope does not equal the DB-derived scope'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_reconcile_scope_set';
+    END IF;
+  ELSE
+    SELECT job.* INTO STRICT v_source_job
+    FROM ops.import_jobs AS job
+    WHERE job.job_id = p_source_job_id
+    FOR SHARE;
+    IF v_source_job.kind <> 'provider_feature_load'
+       OR v_source_job.status <> 'done'
+       OR v_source_job.parent_job_id IS NULL
+       OR v_source_job.cancellation_id IS NOT NULL
+       OR v_source_job.quarantined_at IS NOT NULL
+       OR COALESCE(
+         (v_source_job.payload ->> 'authoritative_snapshot_complete')::boolean,
+         false
+       ) IS NOT TRUE
+       OR NOT EXISTS (
+         SELECT 1
+         FROM ops.import_jobs AS root
+         WHERE root.job_id = v_source_job.parent_job_id
+           AND root.kind = 'provider_feature_load_run'
+           AND root.dagster_run_id = v_source_job.dagster_run_id
+           AND root.cancellation_id IS NULL
+           AND root.quarantined_at IS NULL
+       )
+       OR (SELECT count(*) FROM ops.import_job_datasets AS member
+           WHERE member.job_id = p_source_job_id) <> 1
+       OR NOT EXISTS (
+         SELECT 1
+         FROM ops.import_job_datasets AS member
+         WHERE member.job_id = p_source_job_id
+           AND member.provider_dataset_id = v_provider_dataset_id
+           AND member.sync_scope = 'dataset_wide'
+       ) THEN
+      RAISE EXCEPTION 'provider generation requires an authoritative done single-member dataset snapshot'
+        USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_provider_job';
+    END IF;
+    v_actor := 'provider:' || v_provider_dataset_id::text;
   END IF;
 
   v_rule_input := jsonb_build_object(
@@ -286,7 +341,8 @@ BEGIN
   v_rule_input_hash := encode(
     x_extension.digest(convert_to(v_rule_input::text, 'UTF8'), 'sha256'), 'hex'
   );
-  IF v_operation.after_rule_input_hash <> v_rule_input_hash THEN
+  IF NOT v_is_provider
+     AND v_operation.after_rule_input_hash <> v_rule_input_hash THEN
     RAISE EXCEPTION 'reconcile operation rule hash is stale'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_reconcile_rule_hash';
   END IF;
@@ -326,10 +382,14 @@ BEGIN
     WHERE entity.provider_dataset_id = v_provider_dataset_id
   ) AS expected;
 
-  v_expected_generation_key := 'rule-reconcile:' || encode(
+  v_expected_generation_key := CASE
+    WHEN v_is_provider THEN 'provider-full-snapshot:'
+    ELSE 'rule-reconcile:'
+  END || encode(
     x_extension.digest(
       convert_to(
-        p_rule_id::text || ':' || p_reconcile_operation_id::text || ':' ||
+        p_rule_id::text || ':' ||
+        COALESCE(p_source_job_id::text, p_reconcile_operation_id::text) || ':' ||
         v_rule.row_revision::text || ':' || v_rule_input_hash || ':' ||
         o_generation_input_set_hash,
         'UTF8'
@@ -347,9 +407,17 @@ BEGIN
   SELECT generation.* INTO v_existing_generation
   FROM feature.theme_candidate_generations AS generation
   WHERE generation.rule_id = p_rule_id
-    AND generation.reconcile_operation_id = p_reconcile_operation_id;
+    AND (
+      (v_is_provider AND generation.source_job_id = p_source_job_id)
+      OR
+      (NOT v_is_provider
+       AND generation.reconcile_operation_id = p_reconcile_operation_id)
+    );
   IF FOUND THEN
-    IF v_existing_generation.generation_kind <> 'rule_reconcile'
+    IF v_existing_generation.generation_kind <> p_generation_kind
+       OR v_existing_generation.source_job_id IS DISTINCT FROM p_source_job_id
+       OR v_existing_generation.reconcile_operation_id
+          IS DISTINCT FROM p_reconcile_operation_id
        OR v_existing_generation.command_id IS DISTINCT FROM p_command_id
        OR v_existing_generation.generation_key <> v_expected_generation_key
        OR v_existing_generation.rule_row_revision <> v_rule.row_revision
@@ -454,8 +522,9 @@ BEGIN
     rule_input_hash, rule_input, generation_input_set_hash,
     observed_candidate_count, eligibility_removed_candidate_count
   ) VALUES (
-    o_generation_id, p_rule_id, v_rule.row_revision, 'rule_reconcile',
-    NULL, p_reconcile_operation_id, p_command_id, v_expected_generation_key,
+    o_generation_id, p_rule_id, v_rule.row_revision, p_generation_kind,
+    p_source_job_id, p_reconcile_operation_id, p_command_id,
+    v_expected_generation_key,
     v_rule_input_hash, v_rule_input, o_generation_input_set_hash,
     v_expected_candidate_count, v_expected_removed_count
   );
@@ -505,12 +574,13 @@ BEGIN
         v_expected.candidate_input_hash, o_generation_id,
         v_provider_dataset_id, v_expected.source_record_key,
         v_expected.source_record_hash, NULL, NULL, NULL,
-        v_operation.actor, 'rule_match',
-        jsonb_build_object(
+        v_actor, 'rule_match',
+        jsonb_strip_nulls(jsonb_build_object(
           'schema_version', 1,
-          'generation_kind', 'rule_reconcile',
+          'generation_kind', p_generation_kind,
+          'source_job_id', p_source_job_id::text,
           'reconcile_operation_id', p_reconcile_operation_id::text
-        )
+        ))
       );
     ELSE
       IF v_candidate.disposition <> 'active' THEN
@@ -552,12 +622,13 @@ BEGIN
           v_rule_input_hash, v_expected.candidate_input_hash,
           o_generation_id, v_provider_dataset_id,
           v_expected.source_record_key, v_expected.source_record_hash,
-          NULL, NULL, NULL, v_operation.actor, 'rule_match',
-          jsonb_build_object(
+          NULL, NULL, NULL, v_actor, 'rule_match',
+          jsonb_strip_nulls(jsonb_build_object(
             'schema_version', 1,
-            'generation_kind', 'rule_reconcile',
+            'generation_kind', p_generation_kind,
+            'source_job_id', p_source_job_id::text,
             'reconcile_operation_id', p_reconcile_operation_id::text
-          )
+          ))
         );
       END IF;
     END IF;
@@ -614,12 +685,13 @@ BEGIN
       v_rule_input_hash, v_candidate.candidate_input_hash,
       o_generation_id, v_provider_dataset_id,
       v_candidate.source_record_key, v_candidate.source_record_hash,
-      NULL, NULL, NULL, v_operation.actor, v_reason_code,
-      jsonb_build_object(
+      NULL, NULL, NULL, v_actor, v_reason_code,
+      jsonb_strip_nulls(jsonb_build_object(
         'schema_version', 1,
-        'generation_kind', 'rule_reconcile',
+        'generation_kind', p_generation_kind,
+        'source_job_id', p_source_job_id::text,
         'reconcile_operation_id', p_reconcile_operation_id::text
-      )
+      ))
     );
   END LOOP;
 
@@ -663,11 +735,13 @@ def upgrade() -> None:
     op.execute(f"ALTER PROCEDURE {_SIGNATURE} OWNER TO ktm_curation_command_owner")
     op.execute(
         "GRANT SELECT ON TABLE ops.curation_rule_reconcile_operations, "
-        "ops.curation_rule_reconcile_scope_members TO ktm_curation_command_owner"
+        "ops.curation_rule_reconcile_scope_members, ops.import_jobs, "
+        "ops.import_job_datasets TO ktm_curation_command_owner"
     )
     for relation, column in (
         ("feature.curated_themes", "row_revision"),
         ("ops.curation_rule_reconcile_operations", "operation_id"),
+        ("ops.import_jobs", "job_id"),
     ):
         op.execute(
             f"GRANT UPDATE ({column}) ON TABLE {relation} "
@@ -677,11 +751,11 @@ def upgrade() -> None:
     op.execute(
         f"REVOKE ALL ON PROCEDURE {_SIGNATURE} FROM PUBLIC, "
         "ktm_feature_runtime, ktm_feature_api_runtime, "
-        "ktm_feature_dagster_runtime, ktm_curation_provider_executor"
+        "ktm_feature_dagster_runtime"
     )
     op.execute(
         f"GRANT EXECUTE ON PROCEDURE {_SIGNATURE} "
-        "TO ktm_curation_admin_executor"
+        "TO ktm_curation_admin_executor, ktm_curation_provider_executor"
     )
     op.execute("SET ROLE ktm_feature_schema_owner")
 

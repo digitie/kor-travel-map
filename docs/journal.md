@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-13 — T-VN-40: authoritative provider snapshot 후보 generation 결선
+
+Dagster의 canonical dataset membership 완료가 `authoritative_snapshot_complete=true`인
+경우에만 child import job을 같은 SERIALIZABLE transaction에서 `done`으로 만들고, 해당
+dataset의 활성 candidate rule을 DB-derived set-based generation procedure로 실행하도록 결선했다.
+procedure는 `done/SUCCESS` 계보, 취소·격리 없음, 단일 `dataset_wide` membership, 동일 provider
+dataset을 직접 검증하며 provider executor 이외의 호출과 비권위 snapshot을 거부한다. 각 rule
+generation id·input hash의 정렬 digest도 child receipt에 함께 고정한다.
+
+single-member wrapper는 실제 load result의 observation receipt를 전달하고, MCST multi-member
+wrapper도 각 authoritative member에 같은 축을 명시한다. 실제 Dagster LOGIN 정상·exact replay·
+비권위 receipt 거부, feature operation repo triple, Dagster wrapper/MCST를 포함해 DB 15개와
+Dagster unit 41개가 통과했다. PostgreSQL `FOR SHARE` lock에는 command owner의
+`ops.import_jobs.job_id` 한정 UPDATE 권한만 추가해 broad DML 권한을 만들지 않았다.
+
 ## 2026-08-13 — T-VN-40: admin candidate HTTP 검토 표면
 
 DB의 candidate read/reject/promotion 경계를 admin API에 연결했다. 목록은 rule/theme/source/

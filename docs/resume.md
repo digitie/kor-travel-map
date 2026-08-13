@@ -11,7 +11,11 @@ reject와 promotion은 실제 API LOGIN만 실행 가능한 named SECURITY DEFIN
 해시해 stale 후보를 원자 거부하고, canonical item·trusted accepted decision·candidate transition을
 한 transaction으로 결박한다. `rule_reconcile` set-based generation도 caller 후보 입력 없이
 DB-derived expected set/scope hash, immutable receipt-first, observation completeness와 exact replay로
-구현했다. 다음은 provider full-snapshot generation과 Dagster terminal receipt 결선을 구현한다. bootstrap은
+구현했다. provider full-snapshot generation도 Dagster terminal receipt에 결선했다. authoritative
+child import job의 exact dataset membership을 DB가 재검증하고, 해당 dataset의 rule별 generation과
+정렬 receipt hash를 같은 SERIALIZABLE transaction에 기록한다. single-member와 MCST multi-member
+wrapper 모두 실제 observation receipt에서 authoritative 축을 전달한다. 다음은 retained catalog와
+collection/item의 typed CAS command 경계를 구현한다. bootstrap은
 populated DB에서 2회, 0105는 fresh 0001→head와 실제 ROLE ACL/append-only gate로 검증했다.
 frozen artifact unit 10개와 target SQL/violation/head-equivalence integration 11개도 통과했다.
 SERIALIZABLE 정책 unit 22개와 실제 PostgreSQL transaction integration 1개도 통과했다.
@@ -28,6 +32,8 @@ typed detail을 포함한 representation ETag를 분리하고, BIGINT는 decimal
 API/route-policy/domain-command/OpenAPI focused gate 96개가 통과했으며 admin OpenAPI를
 재생성했다. Node 의존성이 없는 현재 worktree에서 generated TypeScript 갱신은 보류되어 다음
 frontend 체크포인트에서 exact `openapi-typescript 7.13.0`으로 수행한다.
+provider full-snapshot/비권위 거부와 feature operation repo를 합친 DB 15개, Dagster wrapper·
+MCST unit 41개도 통과했고 관련 Python source의 ruff/mypy가 통과했다.
 A/B/C는 하나의 forward-only PR/release로 유지하며, 누적 구현은 DB/동시성과
 API·consumer/ACL 관점의 독립 적대 리뷰어 2명이 같은 고정 SHA에서 검증한다.
 상세 계약은
