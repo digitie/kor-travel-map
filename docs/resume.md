@@ -1,5 +1,14 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+admin `/admin/curations/candidates` 후보 검토 화면을 구현했다. keyset 목록과 rule/theme/source/Feature
+필터, current typed Feature evidence, immutable transition timeline, reject와 canonical collection 승격을
+한 화면에서 수행한다. 후보·collection의 raw command ETag/revision과 고정 Idempotency-Key를 그대로
+보존하고 409/412/428은 자동 재시도하지 않은 채 명시적 reload를 요구한다. 기존 collection item
+수정·archive도 item `command_etag`를 실제 If-Match에 전달한다. 전체 frontend lint/type-check,
+idempotency 단위 회귀와 mocked Chromium 승격·stale CAS 시나리오가 통과했다. 다음 checkpoint는 두
+적대 리뷰의 fixed-SHA 승인을 받은 뒤 collection/item/import/merge named DB writer와 legacy overlay
+제거를 계속하는 것이다.
+
 두 적대 리뷰가 재현한 provider cancellation stale-input과 drop metadata, strict observation 경계를
 폐쇄했다. cancellation SUCCESS finalizer가 causal drift를 발견하면 root/member를
 `failed/stale_input`으로 수렴시키고, DB의 typed stage 증거를 확인한 경우에만 cancellation attempt를

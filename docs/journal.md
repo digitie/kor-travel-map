@@ -2,6 +2,18 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-14 — T-VN-40: admin candidate review UI
+
+admin 후보 검토 화면에 keyset 목록·필터, typed Feature/current rule evidence, immutable transition
+timeline, reject와 canonical collection 승격 흐름을 연결했다. 후보 `candidate_etag`, collection/item
+`command_etag`와 decimal revision을 요청 시점에 고정해 Idempotency-Key·If-Match와 함께 전송하며,
+409/412/428은 자동 재시도하지 않고 운영자가 현재 상태를 다시 읽도록 한다. 기존 collection item
+수정·archive도 raw command ETag를 실제 CAS header로 전달하도록 보강했다.
+
+Linux ext4 격리 frontend에서 ESLint·전체 TypeScript·Vitest 313건·production build를 통과했고,
+mocked Chromium은 인증 setup·승격 exact header/body·stale 412 무자동재시도와 명시적 reload 3건을
+통과했다.
+
 ## 2026-08-14 — T-VN-40: stale cancellation 수렴과 retry observation 분리
 
 `already_terminal/SUCCESS` cancellation finalizer가 sealed input drift를 발견하면 transaction을
