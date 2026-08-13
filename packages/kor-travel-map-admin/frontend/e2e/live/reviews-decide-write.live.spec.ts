@@ -1,4 +1,10 @@
-import { expect, test, type Locator, type Page, type Response } from "@playwright/test";
+import {
+  expect,
+  test,
+  type Locator,
+  type Page,
+  type Response,
+} from "@playwright/test";
 
 import type { components } from "../../src/api/types";
 import * as F from "./_fixtures";
@@ -117,7 +123,10 @@ async function waitForListQuery(
 async function browserFetch<T>(
   page: Page,
   path: string,
-  options: { body?: unknown; method?: "GET" | "POST" | "PATCH" | "DELETE" } = {},
+  options: {
+    body?: unknown;
+    method?: "GET" | "POST" | "PATCH" | "DELETE";
+  } = {},
 ): Promise<BrowserFetchResult<T>> {
   return page.evaluate(
     async ({ body, method, path }) => {
@@ -211,8 +220,8 @@ function reviewRow(page: Page, reviewId: string): Locator {
 /**
  * `status-badge.tsx`의 `statusLabel` 미러. #600에서 status 뱃지/`statusLabel(...)`로
  * 렌더되는 상태 텍스트가 한글화됐다 — 큐 행의 status 뱃지(`<StatusBadge>`)와 상세
- * 다이얼로그의 feature status(`statusLabel(feature.status)`)는 이제 한글로 노출되므로
- * "렌더된 텍스트"를 단언할 때 이 변환을 거친다. (API/DTO enum 값은 여전히 영문이라
+ * 다이얼로그의 Feature 상태 축은 별도 상태 패널에서 렌더한다. 이 helper는 review
+ * 뱃지의 "렌더된 텍스트"만 단언할 때 쓴다. (API/DTO enum 값은 여전히 영문이라
  * 응답 body·쿼리·selectOption 단언에는 쓰지 않는다 — 화면 텍스트 단언 전용.)
  */
 function koStatus(status: string): string {
@@ -364,7 +373,8 @@ async function runReadRoundTrip(page: Page, s: Surface): Promise<void> {
       await expect(dialog).toContainText(body.data.feature_b.name);
       await expect(dialog).toContainText(body.data.total_score.toFixed(1));
     } else {
-      const body = (await detailResponse.json()) as EnrichmentReviewDetailResponse;
+      const body =
+        (await detailResponse.json()) as EnrichmentReviewDetailResponse;
       // 1차 target(datagokr) + 2차 source(visitkorea) + 점수가 노출된다.
       await expect(dialog).toContainText(body.data.target.feature_id);
       await expect(dialog).toContainText(body.data.source.source_entity_id);
@@ -492,8 +502,8 @@ test.describe("dedup + enrichment reviews — real reject decision (gated)", () 
       `/v1/admin/features/${encodeURIComponent(featureAId)}`,
     );
     if (feature.status === 200) {
-      expect(["active", "inactive"]).toContain(
-        feature.body?.data.feature.status,
+      expect(["active", "retired"]).toContain(
+        feature.body?.data.feature.lifecycle_state,
       );
     }
 
@@ -607,8 +617,8 @@ test.describe("dedup + enrichment reviews — real reject decision (gated)", () 
       `/v1/admin/features/${encodeURIComponent(targetFeatureId)}`,
     );
     if (feature.status === 200) {
-      expect(["active", "inactive"]).toContain(
-        feature.body?.data.feature.status,
+      expect(["active", "retired"]).toContain(
+        feature.body?.data.feature.lifecycle_state,
       );
     }
 
@@ -739,10 +749,15 @@ async function runDeepPagination(page: Page, s: Surface): Promise<void> {
 
   if (total > 25) {
     const totalPages = Math.max(1, Math.ceil(total / 25));
-    const lastWait = waitForListQuery(page, s.listPath, {
-      page: String(totalPages),
-      page_size: "25",
-    }, UI_TIMEOUT).catch(() => null);
+    const lastWait = waitForListQuery(
+      page,
+      s.listPath,
+      {
+        page: String(totalPages),
+        page_size: "25",
+      },
+      UI_TIMEOUT,
+    ).catch(() => null);
     await lastBtn.click();
     const lastResp = await lastWait;
     if (lastResp) expect(lastResp.status()).toBe(200);
@@ -750,10 +765,15 @@ async function runDeepPagination(page: Page, s: Surface): Promise<void> {
     await expect(page.getByLabel(s.nextLabel).first()).toBeDisabled(T);
     await expect(lastBtn).toBeDisabled(T);
 
-    const firstWait = waitForListQuery(page, s.listPath, {
-      page: "1",
-      page_size: "25",
-    }, UI_TIMEOUT).catch(() => null);
+    const firstWait = waitForListQuery(
+      page,
+      s.listPath,
+      {
+        page: "1",
+        page_size: "25",
+      },
+      UI_TIMEOUT,
+    ).catch(() => null);
     await firstBtn.click();
     const firstResp = await firstWait;
     if (firstResp) expect(firstResp.status()).toBe(200);
@@ -790,7 +810,10 @@ test.describe("dedup + enrichment reviews — 추가 필터 + score-band 경계 
       });
       await page.getByLabel("dedup provider").fill("datagokr");
       expect((await wait).status()).toBe(200);
-      await expect(page.getByLabel("dedup provider")).toHaveValue("datagokr", T);
+      await expect(page.getByLabel("dedup provider")).toHaveValue(
+        "datagokr",
+        T,
+      );
       await expectEmptyOrTable(page, DEDUP);
     });
 
@@ -909,11 +932,9 @@ test.describe("dedup + enrichment reviews — 상세 비교 다이얼로그 필�
     if (typeof body.data.distance_m === "number") {
       await expect(dialog).toContainText(fmtDistance(body.data.distance_m));
     }
-    // feature 별 kind/status/origin(+category) 필드 노출.
+    // feature 별 kind/origin(+category) 필드 노출. review DTO는 공개 상태 축을 노출하지 않는다.
     for (const f of [a, b]) {
       await expect(dialog).toContainText(f.kind);
-      // status는 다이얼로그에서 statusLabel(feature.status)로 한글 렌더된다(#600).
-      await expect(dialog).toContainText(koStatus(f.status));
       await expect(dialog).toContainText(f.data_origin);
       if (f.category) await expect(dialog).toContainText(f.category);
       // 좌표 — 숫자일 때만 toFixed(6)으로 노출.
@@ -946,17 +967,16 @@ test.describe("dedup + enrichment reviews — 상세 비교 다이얼로그 필�
       ENRICHMENT,
       items[0].review_id,
     );
-    const body = (await detailResponse.json()) as EnrichmentReviewDetailResponse;
+    const body =
+      (await detailResponse.json()) as EnrichmentReviewDetailResponse;
     const dialog = page.getByRole("dialog", { name: ENRICHMENT.dialogName });
     const t = body.data.target;
     const src = body.data.source;
 
-    // 1차 target: id/name/kind/status(+category/좌표).
+    // 1차 target: id/name/kind(+category/좌표). 공개 상태 축은 DTO에 없다.
     await expect(dialog).toContainText(t.feature_id);
     await expect(dialog).toContainText(t.name);
     await expect(dialog).toContainText(t.kind);
-    // status는 다이얼로그에서 statusLabel(target.status)로 한글 렌더된다(#600).
-    await expect(dialog).toContainText(koStatus(t.status));
     if (t.category) await expect(dialog).toContainText(t.category);
     if (typeof t.lon === "number") {
       await expect(dialog).toContainText(t.lon.toFixed(6));
@@ -1095,8 +1115,8 @@ test.describe("dedup + enrichment reviews — real accept decision (gated)", () 
       `/v1/admin/features/${encodeURIComponent(featureAId)}`,
     );
     if (feature.status === 200) {
-      expect(["active", "inactive"]).toContain(
-        feature.body?.data.feature.status,
+      expect(["active", "retired"]).toContain(
+        feature.body?.data.feature.lifecycle_state,
       );
     }
 
@@ -1225,8 +1245,8 @@ test.describe("dedup + enrichment reviews — real accept decision (gated)", () 
       `/v1/admin/features/${encodeURIComponent(targetFeatureId)}`,
     );
     if (feature.status === 200) {
-      expect(["active", "inactive"]).toContain(
-        feature.body?.data.feature.status,
+      expect(["active", "retired"]).toContain(
+        feature.body?.data.feature.lifecycle_state,
       );
     }
 

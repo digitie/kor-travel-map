@@ -53,7 +53,9 @@ function makeAdminFeatureMapItem(
     marker_color: "P-01",
     marker_icon: "marker",
     name: MOCK_NAME,
-    status: "active",
+    lifecycle_state: "active",
+    publication_state: "published",
+    quality_state: "valid",
     ...overrides,
   };
 }
@@ -89,32 +91,33 @@ function makeAdminFeaturesInBoundsResponse(
   };
 }
 
-async function setMapZoom(
-  page: Page,
-  zoom: number,
-  center?: [number, number],
-) {
+async function setMapZoom(page: Page, zoom: number, center?: [number, number]) {
   await expect
     .poll(
       () =>
         page.evaluate(() => {
           const container = document.querySelector(
             '[data-testid="map-canvas-container"]',
-          ) as (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map }) | null;
+          ) as
+            | (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map })
+            | null;
           return Boolean(container?._maplibreMap);
         }),
       { timeout: 20_000 },
     )
     .toBe(true);
-  await page.evaluate(({ nextZoom, nextCenter }) => {
-    const container = document.querySelector(
-      '[data-testid="map-canvas-container"]',
-    ) as (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map }) | null;
-    container?._maplibreMap?.jumpTo({
-      ...(nextCenter ? { center: nextCenter } : {}),
-      zoom: nextZoom,
-    });
-  }, { nextCenter: center, nextZoom: zoom });
+  await page.evaluate(
+    ({ nextZoom, nextCenter }) => {
+      const container = document.querySelector(
+        '[data-testid="map-canvas-container"]',
+      ) as (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map }) | null;
+      container?._maplibreMap?.jumpTo({
+        ...(nextCenter ? { center: nextCenter } : {}),
+        zoom: nextZoom,
+      });
+    },
+    { nextCenter: center, nextZoom: zoom },
+  );
 }
 
 function makeAdminSource(
@@ -215,7 +218,9 @@ function makeAdminFeatureDetailResponse(
         name: MOCK_NAME,
         raw_refs: [],
         row_revision: 1,
-        status: "active",
+        lifecycle_state: "active",
+        publication_state: "published",
+        quality_state: "valid",
         updated_at: MOCK_UPDATED_AT,
         urls: {},
         ...featureOverrides,
@@ -224,6 +229,7 @@ function makeAdminFeatureDetailResponse(
       issues: [],
       overrides: [],
       sources: [makeAdminSource()],
+      state_transitions: [],
       versions: [],
     },
     meta: makeMeta({ request_id: "e2e-admin-feature-detail" }),
@@ -302,7 +308,10 @@ interface FeaturesRouteOptions {
  * (admin-ops idiom).
  * 반환된 카운터로 요청 shape를 expect.poll 단언한다.
  */
-async function mockFeatureRoutes(page: Page, options: FeaturesRouteOptions = {}) {
+async function mockFeatureRoutes(
+  page: Page,
+  options: FeaturesRouteOptions = {},
+) {
   await mockOpsDatasetCatalog(page);
   const items = options.items ?? [makeAdminFeatureMapItem()];
   const requests = {
@@ -317,9 +326,13 @@ async function mockFeatureRoutes(page: Page, options: FeaturesRouteOptions = {})
     clusterKinds: [] as string[][],
     /** route/area geometry 요청 여부 기록. */
     listIncludeGeometry: [] as string[],
-    /** 운영 상태 필터 요청 shape. */
-    listStatuses: [] as string[][],
-    clusterStatuses: [] as string[][],
+    /** 직교 상태 축 필터 요청 shape. */
+    listLifecycleStates: [] as string[][],
+    listPublicationStates: [] as string[][],
+    listQualityStates: [] as string[][],
+    clusterLifecycleStates: [] as string[][],
+    clusterPublicationStates: [] as string[][],
+    clusterQualityStates: [] as string[][],
   };
 
   await page.route("**/v1/admin/features/**", async (route) => {
@@ -361,11 +374,27 @@ async function mockFeatureRoutes(page: Page, options: FeaturesRouteOptions = {})
       if (clustered) {
         requests.cluster += 1;
         requests.clusterKinds.push(url.searchParams.getAll("kind"));
-        requests.clusterStatuses.push(url.searchParams.getAll("status"));
+        requests.clusterLifecycleStates.push(
+          url.searchParams.getAll("lifecycle_state"),
+        );
+        requests.clusterPublicationStates.push(
+          url.searchParams.getAll("publication_state"),
+        );
+        requests.clusterQualityStates.push(
+          url.searchParams.getAll("quality_state"),
+        );
       } else {
         requests.list += 1;
         requests.listKinds.push(url.searchParams.getAll("kind"));
-        requests.listStatuses.push(url.searchParams.getAll("status"));
+        requests.listLifecycleStates.push(
+          url.searchParams.getAll("lifecycle_state"),
+        );
+        requests.listPublicationStates.push(
+          url.searchParams.getAll("publication_state"),
+        );
+        requests.listQualityStates.push(
+          url.searchParams.getAll("quality_state"),
+        );
         requests.listIncludeGeometry.push(
           url.searchParams.get("include_geometry") ?? "",
         );
@@ -406,7 +435,9 @@ async function mockFeatureRoutes(page: Page, options: FeaturesRouteOptions = {})
       return;
     }
 
-    throw new Error(`Unhandled admin features route: ${request.method()} ${url}`);
+    throw new Error(
+      `Unhandled admin features route: ${request.method()} ${url}`,
+    );
   });
 
   return requests;
@@ -417,7 +448,9 @@ test.describe("/features map interactions", () => {
     await installInertOpsLiveWebSocket(page);
   });
 
-  test("map<->table 탭 토글 — 두 뷰가 같은 bbox 데이터를 공유", async ({ page }) => {
+  test("map<->table 탭 토글 — 두 뷰가 같은 bbox 데이터를 공유", async ({
+    page,
+  }) => {
     const requests = await mockFeatureRoutes(page);
 
     await page.goto("/features");
@@ -466,14 +499,16 @@ test.describe("/features map interactions", () => {
     await page.goto("/features");
     await setMapZoom(page, 14);
 
-    await expect
-      .poll(() => requests.listIncludeGeometry.at(-1))
-      .toBe("false");
+    await expect.poll(() => requests.listIncludeGeometry.at(-1)).toBe("false");
 
     // 빈 kind set은 API에서 "전체 kind"이므로 route/area geometry도 다시 포함한다.
     const kindFilter = page.getByTestId("kind-filter");
-    await kindFilter.getByRole("button", { name: "weather", exact: true }).click();
-    await kindFilter.getByRole("button", { name: "notice", exact: true }).click();
+    await kindFilter
+      .getByRole("button", { name: "weather", exact: true })
+      .click();
+    await kindFilter
+      .getByRole("button", { name: "notice", exact: true })
+      .click();
     await expect.poll(() => requests.listIncludeGeometry.at(-1)).toBe("true");
   });
 
@@ -492,7 +527,9 @@ test.describe("/features map interactions", () => {
         page.evaluate((id) => {
           const container = document.querySelector(
             '[data-testid="map-canvas-container"]',
-          ) as (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map }) | null;
+          ) as
+            | (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map })
+            | null;
           const map = container?._maplibreMap;
           return Boolean(map?.getSource(id) && map.isSourceLoaded(id));
         }, sourceId),
@@ -505,9 +542,11 @@ test.describe("/features map interactions", () => {
         page.evaluate((id) => {
           const container = document.querySelector(
             '[data-testid="map-canvas-container"]',
-          ) as (HTMLElement & {
-            _maplibreMap?: import("maplibre-gl").Map;
-          }) | null;
+          ) as
+            | (HTMLElement & {
+                _maplibreMap?: import("maplibre-gl").Map;
+              })
+            | null;
           return container?._maplibreMap?.querySourceFeatures(id).length ?? 0;
         }, sourceId),
       )
@@ -523,9 +562,11 @@ test.describe("/features map interactions", () => {
         page.evaluate(() => {
           const container = document.querySelector(
             '[data-testid="map-canvas-container"]',
-          ) as (HTMLElement & {
-            _maplibreMap?: import("maplibre-gl").Map;
-          }) | null;
+          ) as
+            | (HTMLElement & {
+                _maplibreMap?: import("maplibre-gl").Map;
+              })
+            | null;
           const map = container?._maplibreMap;
           return Boolean(map?.areTilesLoaded() && !map.isMoving());
         }),
@@ -536,14 +577,15 @@ test.describe("/features map interactions", () => {
       const container = document.querySelector(
         '[data-testid="map-canvas-container"]',
       ) as (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map }) | null;
-      if (!container?._maplibreMap) throw new Error("maplibre map is not ready");
+      if (!container?._maplibreMap)
+        throw new Error("maplibre map is not ready");
       const map = container._maplibreMap;
 
       type InstrumentedMap = {
         fire: (type: string, properties: Record<string, unknown>) => unknown;
-        querySourceFeatures: (sourceId: string) => ReturnType<
-          typeof map.querySourceFeatures
-        >;
+        querySourceFeatures: (
+          sourceId: string,
+        ) => ReturnType<typeof map.querySourceFeatures>;
       };
       const instrumentedMap = map as unknown as InstrumentedMap;
       const nextFrame = () =>
@@ -575,7 +617,10 @@ test.describe("/features map interactions", () => {
         if (nextSourceId !== id) return features;
         return forceEmptyFeatureSource ? [] : [...features, ...features];
       };
-      const fireSourceData = (nextSourceId: string, isSourceLoaded: boolean) => {
+      const fireSourceData = (
+        nextSourceId: string,
+        isSourceLoaded: boolean,
+      ) => {
         instrumentedMap.fire("sourcedata", {
           dataType: "source",
           isSourceLoaded,
@@ -687,7 +732,9 @@ test.describe("/features map interactions", () => {
     await page.goto("/features");
     await expect(page.getByTestId("map-canvas-container")).toBeVisible();
     const kindFilter = page.getByTestId("kind-filter");
-    await kindFilter.getByRole("button", { name: "route", exact: true }).click();
+    await kindFilter
+      .getByRole("button", { name: "route", exact: true })
+      .click();
     await kindFilter.getByRole("button", { name: "area", exact: true }).click();
 
     await setMapZoom(page, 14);
@@ -713,7 +760,9 @@ test.describe("/features map interactions", () => {
         page.evaluate(({ sourceId, routeLayerId, areaLayerId }) => {
           const container = document.querySelector(
             '[data-testid="map-canvas-container"]',
-          ) as (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map }) | null;
+          ) as
+            | (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map })
+            | null;
           const map = container?._maplibreMap;
           if (!map) return null;
           const source = map.getSource(sourceId) as
@@ -798,9 +847,9 @@ test.describe("/features map interactions", () => {
     const row = table.getByRole("row", { name: new RegExp(MOCK_NAME) });
     await expect(row).toBeVisible();
 
-    // name 셀의 Link는 stopPropagation이라 row onRowClick을 막는다 → 비-Link 영역(status 셀)을
+    // name 셀의 Link는 stopPropagation이라 row onRowClick을 막는다 → 비-Link 영역(상태 축 셀)을
     // 클릭해 setSelectedFeatureId를 발화시킨다.
-    await row.getByRole("cell", { name: "활성" }).click();
+    await row.getByRole("cell", { name: /active/ }).click();
 
     // '지도' 탭으로 전환 → 상세 패널 노출. CardDescription에 선택 feature_id(mono) 표시.
     await page.getByRole("tab", { name: "지도" }).click();
@@ -810,23 +859,35 @@ test.describe("/features map interactions", () => {
     await expect(panel.getByText("선택 Feature")).toBeVisible();
     await expect(panel.getByText(FEATURE_ID)).toBeVisible();
 
-    // admin 상세 응답으로 name/badge kind·status·category를 렌더한다.
+    // admin 상세 응답으로 name/badge kind·세 상태 축·category를 렌더한다.
     await expect(
       panel.getByRole("heading", { level: 2, name: MOCK_NAME }),
     ).toBeVisible();
     await expect(
-      panel.locator('[data-slot="badge"]').filter({ hasText: /^place$/ }).first(),
+      panel
+        .locator('[data-slot="badge"]')
+        .filter({ hasText: /^place$/ })
+        .first(),
     ).toBeVisible();
     await expect(
-      panel.locator('[data-slot="badge"]').filter({ hasText: /^활성$/ }).first(),
+      panel
+        .locator('[data-slot="badge"]')
+        .filter({ hasText: /^active$/ })
+        .first(),
     ).toBeVisible();
     await expect(panel.getByRole("link", { name: "상세 열기" })).toBeVisible();
     await expect.poll(() => requests.adminDetail).toBeGreaterThanOrEqual(1);
     const associations = panel.getByTestId("feature-associations");
-    await expect(associations.getByText("Admin-only map collection")).toBeVisible();
-    await expect(associations.getByText("admin-provider").first()).toBeVisible();
+    await expect(
+      associations.getByText("Admin-only map collection"),
+    ).toBeVisible();
+    await expect(
+      associations.getByText("admin-provider").first(),
+    ).toBeVisible();
     await associations.getByText("membership 전체 정보").click();
-    await expect(associations.getByText("admin-map-only-collection")).toBeVisible();
+    await expect(
+      associations.getByText("admin-map-only-collection"),
+    ).toBeVisible();
 
     // '닫기' → setSelectedFeatureId(null) → 패널 hidden.
     // (NOTE: marker(WebGL canvas) 클릭 기반 선택은 의도적으로 out-of-scope — uncertainties.)
@@ -834,7 +895,9 @@ test.describe("/features map interactions", () => {
     await expect(page.getByTestId("feature-detail-panel")).toBeHidden();
   });
 
-  test("admin 상세 실패를 source 없음으로 숨기지 않고 오류로 표시", async ({ page }) => {
+  test("admin 상세 실패를 source 없음으로 숨기지 않고 오류로 표시", async ({
+    page,
+  }) => {
     const requests = await mockFeatureRoutes(page, { adminDetailStatus: 500 });
 
     await page.goto("/features");
@@ -948,7 +1011,9 @@ test.describe("/features map interactions", () => {
     await expect(priceMarker).not.toContainText("경 1,650 · 과거");
     await expect(priceMarker).toContainText("고 2,050 · 과거 6/26");
 
-    await page.getByRole("button", { name: /서울주유소 유가.*휘 1,820/ }).click();
+    await page
+      .getByRole("button", { name: /서울주유소 유가.*휘 1,820/ })
+      .click();
     const panel = page.getByTestId("feature-detail-panel");
     await expect(panel).toBeVisible();
     await expect.poll(() => requests.price).toBeGreaterThanOrEqual(1);
@@ -956,10 +1021,9 @@ test.describe("/features map interactions", () => {
     await expect(
       panel
         .getByTestId("feature-price-panel")
-        .getByText(
-          "휘발유 · python-opinet-api/opinet_gas_station 1,820",
-          { exact: true },
-        ),
+        .getByText("휘발유 · python-opinet-api/opinet_gas_station 1,820", {
+          exact: true,
+        }),
     ).toBeVisible();
     await expect(panel.getByText("History")).toBeVisible();
     const graph = panel.getByRole("img", { name: "price history graph" });
@@ -992,9 +1056,11 @@ test.describe("/features map interactions", () => {
 
     // 헤더 status 영역에도 동일 문구가 표기됨을 상태 텍스트 locator로 확인(스모크 idiom).
     await expect(
-      page.locator(
-        "text=/건 표시|feature 로딩 중|지도 로딩 중|feature 호출 실패|클러스터 로딩 중|개 지역/",
-      ).first(),
+      page
+        .locator(
+          "text=/건 표시|feature 로딩 중|지도 로딩 중|feature 호출 실패|클러스터 로딩 중|개 지역/",
+        )
+        .first(),
     ).toBeVisible();
   });
 
@@ -1017,25 +1083,35 @@ test.describe("/features map interactions", () => {
     await expect(page.getByText("표시할 feature가 없습니다.")).toBeVisible();
   });
 
-  test("비공개 운영 상태 필터 — inactive 쿼리와 테이블 상태를 함께 반영", async ({
+  test("비공개 운영 상태 축 필터 — retired/suppressed 쿼리와 테이블 축을 함께 반영", async ({
     page,
   }) => {
     const requests = await mockFeatureRoutes(page, {
-      items: [makeAdminFeatureMapItem({ status: "inactive" })],
+      items: [
+        makeAdminFeatureMapItem({
+          lifecycle_state: "retired",
+          publication_state: "suppressed",
+          quality_state: "valid",
+        }),
+      ],
     });
 
     await page.goto("/features");
-    await page.getByLabel("상태 필터").selectOption("inactive");
+    await page.getByLabel("수명주기 필터").selectOption("retired");
+    await page.getByLabel("공개 상태 필터").selectOption("suppressed");
     await setMapZoom(page, 14);
 
     await expect
-      .poll(() => requests.listStatuses.at(-1))
-      .toEqual(["inactive"]);
+      .poll(() => requests.listLifecycleStates.at(-1))
+      .toEqual(["retired"]);
+    await expect
+      .poll(() => requests.listPublicationStates.at(-1))
+      .toEqual(["suppressed"]);
     await page.getByRole("tab", { name: "테이블" }).click();
     const row = page
       .getByRole("table", { name: "이름순 feature" })
       .getByRole("row", { name: new RegExp(MOCK_NAME) });
-    await expect(row.getByRole("cell", { name: "비활성" })).toBeVisible();
+    await expect(row.getByRole("cell", { name: /retired/ })).toBeVisible();
   });
 
   test("초기 저zoom bbox fetch 1회 + 기본 kind 필터가 cluster 요청에 적용", async ({

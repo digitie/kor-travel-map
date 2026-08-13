@@ -24,7 +24,7 @@ barrier로 직렬화한다.
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환) ∥ [ ] `T-VN-41S`
 - **Wave 2 barrier 이후**
   - Lane A: [ ] `T-VN-35-deploy` → [ ] `T-VN-37D`
-  - Lane B: [ ] `T-VN-34A` → [ ] `T-VN-34B` → [ ] `T-VN-34C` →
+  - Lane B: [x] `T-VN-34A` → [x] `T-VN-34B` → [x] `T-VN-34C` →
     [ ] `T-VN-36A` → [ ] `T-VN-36B` → [ ] `T-VN-36C`
   - 32~38 join barrier 뒤 Lane B: [ ] `T-VN-40A` → [ ] `T-VN-40B` →
     [ ] `T-VN-40C`
@@ -525,20 +525,78 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
 ### T-VN-34 — 직교 상태 모델 전환 (Lane B)
 
-- [ ] T-VN-34A — **3축 상태 schema·backfill**
+> 정본 계획·상태 진리표·writer ownership·검증 matrix는
+> [`reports/t-vn-34-orthogonal-state-plan-2026-08-09.md`](reports/t-vn-34-orthogonal-state-plan-2026-08-09.md),
+> 구조 결정은 ADR-090이다. A/B/C는 T-VN-38 parent 위의 stacked draft다. A/B는 단독으로
+> 배포·main 병합하지 않고 C final head에서 한 번에 forward-only cutover한다. 서비스 전 단계이므로
+> dual-write, shadow/held rollback, old contract 보존은 만들지 않으며 final schema는 ETL로 재적재한다.
 
-  lifecycle/publication/quality를 별도 typed column으로 추가하고 기존 status를 무손실 매핑한다.
-  허용되지 않는 결합을 DB CHECK로 거부한다.
+- [x] T-VN-34A — **3축 상태 schema·backfill**
 
-- [ ] T-VN-34B — **public projection·partial index cutover**
+  여덟 legal tuple의 typed axis/DB CHECK와 `feature_state_transitions` append-only trigger를
+  target contract·actual migration에 고정한다. legacy tuple diagnostics와 one-shot mapping/backfill
+  audit, axis context/principal/reason/revision fence, provider/override canonical writer 전환을 소유한다.
+  bootstrap owner와 분리된 migrator/API/Dagster runtime role·DSN/preflight까지 함께 전환한다. P0 repair
+  `9f16599f`는 provider receipt DB 파생·typed lifecycle override command·provider version materializer와
+  실제 runtime `load_bundle` 권한 검증까지 반영했다. 후속 보강은 source head currentness, user-fenced
+  provider baseline 보존, Dagster webserver preflight와 target freeze 재동결을 포함한다. `81d04024` 기준
+  DB/ACL·contract/runtime 적대 리뷰 2명이 P0/P1 없이 GO를 판정했다. A는 완료됐지만 B/C와 함께만
+  final cutover로 배포·병합하는 stack 내부 checkpoint다.
 
-  `public_features` view를 3축 predicate 정본으로 바꾸고 실제 hot predicate와 일치하는 partial
-  index를 추가한다.
+- [x] T-VN-34B — **public projection·partial index cutover**
 
-- [ ] T-VN-34C — **writer/API/UI cutover·legacy status fence**
+  명시 열 `public_features` projection과 service 5-state classifier를 3축 정본으로 전환한다.
+  route/area subtype-local geometry와 core tuple의 cross-table index 불가를 trigger-owned
+  `public_ready` projection flag로 해소한다. 새 subtype attach만 parent `FOR UPDATE`로 current flag를
+  산출하고 existing subtype identity는 DB 불변으로 막아 payload UPDATE와 state transition의 역순 lock을
+  없앤다. route/area grant는 table UPDATE 없이 mutable business column만 허용하며 identity UPDATE와
+  DELETE를 거부한다. core point/category/keyset/text는 exact 3축 partial predicate를, route/area GiST는
+  `WHERE public_ready`를 사용한다. `EXPLAIN` gate와 public reader, two-session·direct-flag privilege
+  regression을 소유한다. `c54e1807`과 `3a0155e2` 기준 fresh public projection/target freeze 36건,
+  runtime API·Dagster LOGIN ACL 3건, artifact/target freeze 18건을 통과했고 DB/동시성·contract/security
+  적대 리뷰 2명이 P0/P1 없이 GO를 판정했다. B도 stack 내부 checkpoint다.
 
-  provider/admin writer와 admin/user DTO/UI를 3축으로 전환하고 old status 신규 write를 차단한다.
-  legacy column/index는 held component rollback을 위해 유지하고 T-VN-39 removal manifest에 넣는다.
+- [x] T-VN-34C — **writer/API/UI cutover·legacy status fence**
+
+  admin state command·OpenAPI/generated type·Map/PinVi/admin UI·merge/Dagster/fixture/live runner의
+  모든 남은 writer를 cutover한다. admin state HTTP union(`retire` 또는 axis patch)은 strong If-Match,
+  `reason_code`, 422/404/409/412/428 semantics와 audit/ETag response를 OpenAPI/UI/E2E로 고정한다. legacy
+  deactivate/status default filter는 제거하고 admin axis filter는 AND로 결합한다. `features_detailed`는 leaf view가 아니므로 먼저 public view를 typed
+  core+subtype assembly로 재구성하고, non-public reader와 두 security-definer materializer도 같은 typed
+  table assembly로 재배선한다. user request retry receipt는 request→receipt→Feature lock order와 request
+  역방향 UPDATE/DELETE trigger를 가진 `feature_versions` immutable receipt로 옮겨 exactly-once를 보장한다.
+  provider/admin reactivation evidence는 source link/current head를 source→Feature lock order로 고정한다.
+  그 뒤에만 current private `features_detailed`와 runtime SELECT grant·closed
+  ACL allowlist·startup preflight assertion을 제거한다. 이어 legacy `status`, delete/user-change metadata와
+  관련 CHECK/index/trigger/query를 물리 삭제하고 static normal-path gate와 n150 destructive fresh-reload
+  live E2E를 통과한다. `data_origin`/`data_version`, `feature_versions`와 materializer bridge는 T-VN-36의
+  materialization 입력으로 남기며 T-VN-36C가 제거한다. post-34/pre-36 executable contract와 dedicated
+  `0096→C` integration/artifact runner가 legacy catalog zero·ordered public allowlist·typed direct
+  dependency·receipt unique/immutability·runtime ACL을 fail-close하고, post-T36 final target contract를
+  약화하거나 앞당기지 않는다. Map OpenAPI export 뒤
+  clean PinVi worktree에서 C exact Map head를 re-vendor하고 paired SHA/compile/no-legacy gate를 남긴다.
+  C만 배포·병합 가능하다.
+
+  Map `fe12e8da` / PinVi `e37eda94` immutable source pair의 n150 fresh `0097` PostGIS·actual
+  Dagster runtime ETL·Noble Playwright destructive main/recovery(2/2)·PinVi public probe가 통과했다.
+  runner 자동 cleanup 뒤 `BLOCKED.json`, 해당 compose container와 volume이 모두 없음도 확인했다.
+
+  **배포 선행 조건 (2026-08-12 n150 prod 실측)** — T-VN-34는 현행 prod 결선으로는 기동하지
+  않는다. 후보 이미지를 올렸더니 api가 **DB에 접속하기도 전에** 거부하고 crashloop에 들어갔다
+  (그래서 DB는 무손상이었고 즉시 원상복구했다):
+
+  ```
+  ./docker/api-entrypoint.sh: 260: KOR_TRAVEL_MAP_MIGRATOR_PG_DSN: KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required
+  ```
+
+  ADR-090이 단일 `KOR_TRAVEL_MAP_PG_DSN`을 권한 분리된 principal로 쪼갠 결과다. entrypoint는
+  `KOR_TRAVEL_MAP_MIGRATOR_PG_DSN`과 `KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN`을 **fallback 없이**
+  하드 요구한다 — 한 값으로 둘을 대체하는 경로는 권한 경계를 지우므로 의도적으로 없다.
+  DSN을 넣는 것만으로도 부족하고 `docker/postgres-role-bootstrap.sh`의 7롤이 **미리 존재**해야
+  한다. n150 map DB는 `kor-travel-geo-postgres`에 geo와 **공유**돼 있어 bootstrap이 공유 서버의
+  권한 모델을 바꾸므로, 전용 인스턴스 분리 여부는 Manager 판단 사항이다 —
+  docker-manager #171. 이 결선 전까지 tvn34의 live 검증은 격리 clone 스택
+  (`scripts/run-admin-feature-clone-live-acceptance.sh`)에서만 가능하다.
 
 ### T-VN-35 — kind별 typed subtype 분해 (Lane A) — 배포 잔여
 
@@ -571,8 +629,8 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 - [ ] T-VN-36C — **effective projection 단일화·legacy freeze fence**
 
   read model을 한 effective projection으로 통일하고 repository별 중복 `CASE` write/read 분기를
-  비활성화한다. whole-row freeze column/trigger는 rollback shadow로 유지하고 물리 삭제 목록을
-  T-VN-39에 넘긴다.
+  비활성화한다. 서비스 전 final migration에서 whole-row freeze column/trigger와 `data_origin`/
+  `data_version`을 물리 삭제한다. rollback shadow와 T-VN-39 이관은 만들지 않는다.
 
 ### T-VN-37D — notice empty range 표현 (보류)
 

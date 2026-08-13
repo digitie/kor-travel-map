@@ -1,15 +1,13 @@
-"""ADR-067 단일 공개 projection(``feature.public_features``) 상태 matrix 통합 테스트.
+"""ADR-067 공개 projection의 3축 상태 matrix 통합 테스트.
 
-T-VN-04 (F-1 양방향):
-
-- **방향 1 (retired 은닉)**: provider retire(inactive + deleted_at)는 모든 공개
-  경로에서 **일관되게** 비공개다 — 경로별로 다른 술어가 없다.
-- **방향 2 (draft/broken 노출)**: admin deactivate(inactive, deleted_at 없음)·
-  draft·broken·hidden은 어떤 공개 경로에서도 노출되지 않는다.
+T-VN-34B에서 ``feature.public_features``는 lifecycle=active,
+publication=published, quality=valid의 교집합만 노출한다. retired lifecycle은
+항상 숨기고, active지만 draft/suppressed publication 또는 quarantined quality인
+행도 같은 공개 경로 어디에서도 노출하지 않는다.
 
 상태별 fixture × 공개 read 경로(detail/batch/bbox/cluster/search/nearby/
 in-area/collection/curated/weather anchor/public views) 교차 검사.
-공개 술어는 alembic 0059의 VIEW 한 곳에만 정의된다 — 본 테스트는 그 술어의
+공개 술어는 alembic 0096의 VIEW 한 곳에만 정의된다 — 본 테스트는 그 술어의
 소비자들이 전부 같은 판정을 내리는지 검증한다.
 """
 
@@ -17,7 +15,7 @@ from __future__ import annotations
 
 import json
 import re
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 from hashlib import md5
 from typing import TYPE_CHECKING, Any
@@ -37,6 +35,7 @@ from kortravelmap.infra import (
 )
 from kortravelmap.infra.poi_cache_target_repo import upsert_poi_cache_target
 from tests.integration._subtype_seed import seed_feature_subtype
+from tests.integration.perf_gate import explain_plan, index_names
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -56,13 +55,15 @@ async def _ins_feature(
     *,
     feature_id: str,
     name: str,
-    status: str = "active",
-    soft_deleted: bool = False,
+    lifecycle_state: str = "active",
+    publication_state: str = "published",
+    quality_state: str = "valid",
     kind: str = "place",
     category: str = "06020000",
     lon: float = 126.978,
     lat: float = 37.5665,
     detail: str = "{}",
+    geom_wkt: str | None = None,
     sido: str = "11",
     sigungu: str = "11140",
     bjd: str = "1114010100",
@@ -71,8 +72,9 @@ async def _ins_feature(
         text(
             """
             INSERT INTO feature.features (
-                feature_id, kind, name, category, coord, status,
-                sido_code, sigungu_code, legal_dong_code, updated_at, deleted_at
+                feature_id, kind, name, category, coord,
+                lifecycle_state, publication_state, quality_state,
+                sido_code, sigungu_code, legal_dong_code, updated_at
             )
             VALUES (
                 :feature_id, :kind, :name, :category,
@@ -83,12 +85,8 @@ async def _ins_feature(
                     ),
                     4326
                 ),
-                :status,
-                :sido, :sigungu, :bjd, CAST(:updated_at AS timestamptz),
-                CASE
-                    WHEN CAST(:soft_deleted AS boolean)
-                    THEN CAST(:updated_at AS timestamptz)
-                END
+                :lifecycle_state, :publication_state, :quality_state,
+                :sido, :sigungu, :bjd, CAST(:updated_at AS timestamptz)
             )
             """
         ),
@@ -99,51 +97,56 @@ async def _ins_feature(
             "category": category,
             "lon": lon,
             "lat": lat,
-            "status": status,
+            "lifecycle_state": lifecycle_state,
+            "publication_state": publication_state,
+            "quality_state": quality_state,
             "sido": sido,
             "sigungu": sigungu,
             "bjd": bjd,
             "updated_at": _NOW,
-            "soft_deleted": soft_deleted,
         },
     )
     # T-VN-35(ADR-086): kind별 값의 정본은 subtype이다 — core INSERT만으로는
     # 조립 뷰가 돌려주는 detail이 비어 있다.
     await seed_feature_subtype(
-        session, feature_id=feature_id, kind=kind, detail=json.loads(detail)
+        session,
+        feature_id=feature_id,
+        kind=kind,
+        detail=json.loads(detail),
+        geom_wkt=geom_wkt,
     )
     await session.flush()
 
 
-# 상태 matrix: (suffix, status, soft_deleted, 기대 공개 여부).
-# - retired          → provider retire 경로 (F-1 방향 1)
-# - admin-inactive   → admin deactivate 경로: deleted_at 미세팅 (F-1 방향 2)
-# - active+deleted_at → 결합 CHECK 부재로 가능한 비정합 조합 — 방어적으로 비공개
-_STATE_MATRIX: tuple[tuple[str, str, bool, bool], ...] = (
-    ("active", "active", False, True),
-    ("retired", "inactive", True, False),
-    ("admin-inactive", "inactive", False, False),
-    ("draft", "draft", False, False),
-    ("broken", "broken", False, False),
-    ("hidden", "hidden", False, False),
-    ("deleted", "deleted", True, False),
-    ("active-souldel", "active", True, False),
+# 유효한 3축 tuple 전체: active 3×2 조합과 retired/suppressed 2조합.
+_STATE_MATRIX: tuple[tuple[str, str, str, str, bool], ...] = (
+    ("active", "active", "published", "valid", True),
+    ("quarantined", "active", "published", "quarantined", False),
+    ("draft", "active", "draft", "valid", False),
+    ("draft-quarantined", "active", "draft", "quarantined", False),
+    ("suppressed", "active", "suppressed", "valid", False),
+    ("suppressed-quarantined", "active", "suppressed", "quarantined", False),
+    ("retired", "retired", "suppressed", "valid", False),
+    ("retired-quarantined", "retired", "suppressed", "quarantined", False),
 )
 
 
 async def _seed_matrix(
     session: AsyncSession, prefix: str, *, name_token: str, **kw: Any
 ) -> dict[str, str]:
-    """상태 matrix fixture 8종을 넣고 suffix→feature_id 매핑을 돌려준다."""
+    """유효 3축 상태 matrix 8종을 넣고 suffix→feature_id 매핑을 돌려준다."""
     ids: dict[str, str] = {}
-    for i, (suffix, status, soft_deleted, _public) in enumerate(_STATE_MATRIX):
+    for i, (suffix, lifecycle_state, publication_state, quality_state, _public) in enumerate(
+        _STATE_MATRIX
+    ):
         fid = f"{prefix}:{suffix}"
         await _ins_feature(
             session,
             feature_id=fid,
             name=f"{name_token} {suffix}",
-            status=status,
-            soft_deleted=soft_deleted,
+            lifecycle_state=lifecycle_state,
+            publication_state=publication_state,
+            quality_state=quality_state,
             # 같은 좌표에 몰리지 않게 미세 offset (bbox/반경 안 유지).
             lon=126.978 + i * 0.0001,
             lat=37.5665 + i * 0.0001,
@@ -154,19 +157,25 @@ async def _seed_matrix(
 
 
 def _expected_public(ids: dict[str, str]) -> set[str]:
-    return {ids[suffix] for suffix, _s, _d, public in _STATE_MATRIX if public}
+    return {ids[suffix] for suffix, _l, _p, _q, public in _STATE_MATRIX if public}
 
 
 async def test_view_exists_with_single_predicate(migrated_session: AsyncSession) -> None:
-    """0059가 만든 view의 술어가 ADR-067 매핑(status='active' AND deleted_at IS NULL)이다."""
+    """0096 view가 ADR-067의 3축 공개 predicate를 단독으로 가진다."""
     viewdef = (
         await migrated_session.execute(
             text("SELECT pg_get_viewdef('feature.public_features'::regclass, true)")
         )
     ).scalar_one()
-    # pg_get_viewdef는 text 캐스트를 명시해 돌려준다: status::text = 'active'::text
-    assert re.search(r"status(::text)? = 'active'(::text)?", viewdef)
-    assert "deleted_at IS NULL" in viewdef
+    for column, value in (
+        ("lifecycle_state", "active"),
+        ("publication_state", "published"),
+        ("quality_state", "valid"),
+    ):
+        assert re.search(rf"{column}(::text)? = '{value}'(::text)?", viewdef)
+    # legacy status는 반환 shape에 남아도 predicate가 되어서는 안 된다.
+    assert re.search(r"\bstatus(::text)?\s*=", viewdef) is None
+    assert re.search(r"\bdeleted_at\s+IS\s+NULL\b", viewdef) is None
 
 
 async def test_view_membership_matches_state_matrix(migrated_session: AsyncSession) -> None:
@@ -225,25 +234,19 @@ async def test_bbox_cluster_search_nearby_share_projection(
     )
     assert {item.feature_id for item in nearby.items} == public
 
-    # 공개 status 필터는 projection과 교집합 — 비공개 status 요청은 노출이 아니라 빈 결과.
-    nearby_inactive = await feature_repo.features_nearby(
-        migrated_session,
-        lon=126.978,
-        lat=37.5665,
-        radius_m=500.0,
-        statuses=("inactive",),
-        limit=50,
-    )
-    assert nearby_inactive.items == ()
+    # 과도기에는 ``features_nearby(statuses=...)``가 남아 있었고, 여기서 "그 인자를
+    # 넘겨도 3축 공개 membership이 흔들리지 않는다"를 단언했다. T-VN-34C가 인자
+    # 자체를 없앴으므로 그 단언은 이제 signature가 대신한다 — 존재하지 않는 인자는
+    # 결과를 좁힐 수도 넓힐 수도 없다. 호출을 남기면 legacy status를 공개 경로의
+    # 입력으로 되살리는 셈이라 삭제한다. 위 ``nearby`` 단언이 공개 집합의 정본이다.
 
 
 async def test_detail_and_batch_rows_use_projection(migrated_session: AsyncSession) -> None:
     """단건(detail)·batch가 F-1 양방향 모두에서 view와 같은 판정을 내린다."""
     ids = await _seed_matrix(migrated_session, "pfv:detail", name_token="상세장소")
 
-    # 방향 2: admin-inactive/draft/broken/hidden은 found로 노출되면 안 된다.
-    # 방향 1: retired는 일관되게 비공개(payload 없음)다.
-    for suffix, _status, _deleted, public in _STATE_MATRIX:
+    # active지만 비공개 tuple과 retired tuple 모두 payload 없이 숨긴다.
+    for suffix, _lifecycle, _publication, _quality, public in _STATE_MATRIX:
         row = await feature_repo.get_public_feature_row(migrated_session, ids[suffix])
         assert (row is not None) is public, f"single read mismatch for {suffix}"
 
@@ -271,7 +274,10 @@ async def test_service_batch_classifies_five_states_in_request_order(
     requested = (
         (ids["active"], None),
         (ids["retired"], None),
-        (ids["admin-inactive"], None),
+        (ids["retired-quarantined"], None),
+        (ids["draft"], None),
+        (ids["suppressed"], None),
+        (ids["quarantined"], None),
         ("pfv:service:ghost", None),
         (unchanged_id, int(unchanged_row["row_revision"])),
     )
@@ -281,6 +287,9 @@ async def test_service_batch_classifies_five_states_in_request_order(
     assert [item.state for item in batch] == [
         "found",
         "retired",
+        "retired",
+        "suppressed",
+        "suppressed",
         "suppressed",
         "missing",
         "unchanged",
@@ -299,8 +308,11 @@ async def test_service_batch_classifies_five_states_in_request_order(
     assert batch[0].row_revision is not None
     assert batch[1].row_revision is not None
     assert batch[2].row_revision is not None
-    assert batch[3].row_revision is None
-    assert batch[4].row_revision == unchanged_row["row_revision"]
+    assert batch[3].row_revision is not None
+    assert batch[4].row_revision is not None
+    assert batch[5].row_revision is not None
+    assert batch[6].row_revision is None
+    assert batch[7].row_revision == unchanged_row["row_revision"]
     assert all(item.trip_card is None for item in batch[1:])
 
 
@@ -323,18 +335,30 @@ async def test_nearby_by_target_uses_projection(migrated_session: AsyncSession) 
 async def test_contained_in_area_uses_projection(migrated_session: AsyncSession) -> None:
     ids = await _seed_matrix(migrated_session, "pfv:area", name_token="구역내장소")
     polygon = "POLYGON((126.9 37.5, 127.1 37.5, 127.1 37.7, 126.9 37.7, 126.9 37.5))"
-    for area_id, area_status in (("pfv:area:zone", "active"), ("pfv:area:zone-off", "inactive")):
+    for area_id, lifecycle_state, publication_state in (
+        ("pfv:area:zone", "active", "published"),
+        ("pfv:area:zone-off", "retired", "suppressed"),
+    ):
         # T-VN-35(ADR-086): geometry 정본은 ``feature_areas``다(core에 geom 없음).
         await migrated_session.execute(
             text(
                 """
                 INSERT INTO feature.features (
-                    feature_id, kind, name, category, status, updated_at
+                    feature_id, kind, name, category,
+                    lifecycle_state, publication_state, quality_state, updated_at
                 )
-                VALUES (:fid, 'area', '검증 구역', '03000000', :status, :ts)
+                VALUES (
+                    :fid, 'area', '검증 구역', '03000000',
+                    :lifecycle_state, :publication_state, 'valid', :ts
+                )
                 """
             ),
-            {"fid": area_id, "status": area_status, "ts": _NOW},
+            {
+                "fid": area_id,
+                "lifecycle_state": lifecycle_state,
+                "publication_state": publication_state,
+                "ts": _NOW,
+            },
         )
         await seed_feature_subtype(
             migrated_session,
@@ -383,9 +407,158 @@ async def test_public_beach_views_use_projection(migrated_session: AsyncSession)
     marker_ids = {m.feature_id for m in markers if m.feature_id.startswith("pfv:beach:")}
     assert marker_ids == _expected_public(ids)
 
-    for suffix, _status, _deleted, public in _STATE_MATRIX:
+    for suffix, _lifecycle, _publication, _quality, public in _STATE_MATRIX:
         row = await public_views_repo.get_public_beach(migrated_session, feature_id=ids[suffix])
         assert (row is not None) is public, f"beach detail mismatch for {suffix}"
+
+
+async def test_public_bbox_geometry_arms_use_ready_partial_indexes(
+    migrated_session: AsyncSession,
+) -> None:
+    """실제 공개 bbox SQL이 core·route·area partial GiST를 모두 사용한다."""
+
+    await _ins_feature(
+        migrated_session,
+        feature_id="pfv:bbox:place",
+        name="bbox 장소",
+        kind="place",
+        category="06020000",
+    )
+    # The generated public reader must be measured at a selective cardinality.
+    # A three-row relation makes PostgreSQL pick an arbitrary public partial
+    # index once seq scans are disabled for the route/area eligibility proof;
+    # it does not prove the 4326 bbox access path.  These core-only place rows
+    # are valid detailed-view inputs and keep the one in-bounds point highly
+    # selective without coupling this planner test to any subtype payload.
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.features (
+                feature_id, kind, name, category, coord,
+                lifecycle_state, publication_state, quality_state
+            )
+            SELECT
+                'pfv:bbox:bulk:' || g::text,
+                'place', 'bbox planner noncandidate', '06020000',
+                x_extension.st_setsrid(
+                    x_extension.st_makepoint(128.0 + g * 0.00001, 35.0), 4326
+                ),
+                'active', 'published', 'valid'
+            FROM generate_series(1, 3200) AS g
+            """
+        )
+    )
+
+    await _ins_feature(
+        migrated_session,
+        feature_id="pfv:bbox:route",
+        name="bbox 경로",
+        kind="route",
+        category="06070000",
+        geom_wkt="MULTILINESTRING((126.96 37.55,126.99 37.58))",
+    )
+    await _ins_feature(
+        migrated_session,
+        feature_id="pfv:bbox:area",
+        name="bbox 구역",
+        kind="area",
+        category="06050000",
+        geom_wkt=(
+            "MULTIPOLYGON(((126.96 37.55,126.99 37.55,126.99 37.58,"
+            "126.96 37.55)))"
+        ),
+    )
+    await migrated_session.execute(text("ANALYZE feature.feature_routes"))
+    await migrated_session.execute(text("ANALYZE feature.feature_areas"))
+    await migrated_session.execute(text("ANALYZE feature.features"))
+
+    plan = await explain_plan(
+        migrated_session,
+        feature_repo._FEATURES_IN_BBOX_SQL,  # noqa: PLC2701 - generated public SQL gate
+        {
+            "min_lon": 126.95,
+            "min_lat": 37.54,
+            "max_lon": 127.00,
+            "max_lat": 37.59,
+            "kinds": ["route", "area"],
+            "categories": None,
+            "providers": None,
+            "cursor_feature_id": None,
+            "limit": 100,
+            "price_stale_hide_days": 4,
+        },
+        planner_default=False,
+    )
+    assert {
+        "idx_feature_routes_geom_gist",
+        "idx_feature_areas_geom_gist",
+    } <= index_names(plan)
+
+    # The route/area proof deliberately disables seq scans to verify partial
+    # index eligibility.  Restore the production planner before asserting the
+    # generated point reader's actual 4326 GiST choice.
+    await migrated_session.execute(text("SET LOCAL enable_seqscan = on"))
+    point_plan = await explain_plan(
+        migrated_session,
+        feature_repo._FEATURES_IN_BBOX_SQL,  # noqa: PLC2701 - generated public SQL gate
+        {
+            "min_lon": 126.95,
+            "min_lat": 37.54,
+            "max_lon": 127.00,
+            "max_lat": 37.59,
+            "kinds": ["place"],
+            "categories": None,
+            "providers": None,
+            "cursor_feature_id": None,
+            "limit": 100,
+            "price_stale_hide_days": 4,
+        },
+        planner_default=True,
+    )
+    assert "idx_features_coord_gist" in index_names(point_plan), index_names(point_plan)
+
+
+async def test_public_festival_views_use_projection(migrated_session: AsyncSession) -> None:
+    """축제 목록·marker·상세도 같은 public view membership만 소비한다."""
+
+    ids = await _seed_matrix(
+        migrated_session,
+        "pfv:festival",
+        name_token="축제",
+        kind="event",
+        category="02010000",
+        detail=(
+            '{"event_kind": "festival", "starts_on": "2026-07-01", '
+            '"ends_on": "2026-07-31"}'
+        ),
+    )
+    page = await public_views_repo.list_public_festivals_monthly(
+        migrated_session,
+        month_start=date(2026, 7, 1),
+        month_end=date(2026, 7, 31),
+    )
+    listed = {
+        row.feature_id for row in page.items if row.feature_id.startswith("pfv:festival:")
+    }
+    assert listed == _expected_public(ids)
+
+    markers = await public_views_repo.list_public_festival_markers(
+        migrated_session,
+        month_start=date(2026, 7, 1),
+        month_end=date(2026, 7, 31),
+    )
+    marker_ids = {
+        marker.feature_id
+        for marker in markers
+        if marker.feature_id.startswith("pfv:festival:")
+    }
+    assert marker_ids == _expected_public(ids)
+
+    for suffix, _lifecycle, _publication, _quality, public in _STATE_MATRIX:
+        row = await public_views_repo.get_public_festival(
+            migrated_session, feature_id=ids[suffix]
+        )
+        assert (row is not None) is public, f"festival detail mismatch for {suffix}"
 
 
 async def test_weather_anchor_skips_non_public_features(
@@ -399,12 +572,12 @@ async def test_weather_anchor_skips_non_public_features(
         lon=126.978,
         lat=37.5665,
     )
-    # 더 가까운 hidden anchor + 더 먼 active anchor — hidden이 이기면 leak.
+    # 더 가까운 suppressed anchor + 더 먼 public anchor — 전자가 이기면 leak.
     await _ins_feature(
         migrated_session,
-        feature_id="pfv:wx:hidden-near",
+        feature_id="pfv:wx:suppressed-near",
         name="비공개 관측점",
-        status="hidden",
+        publication_state="suppressed",
         lon=126.9781,
         lat=37.5666,
     )
@@ -436,7 +609,7 @@ async def test_weather_anchor_skips_non_public_features(
     )
     raw_data = {
         "metric": "T1H",
-        "feature_ids": ["pfv:wx:hidden-near", "pfv:wx:active-far"],
+        "feature_ids": ["pfv:wx:suppressed-near", "pfv:wx:active-far"],
     }
     payload_hash = make_payload_hash(raw_data)
     source_entity_id = f"pfv-weather:{payload_hash[:20]}"
@@ -471,7 +644,7 @@ async def test_weather_anchor_skips_non_public_features(
                 issued_at=selected_at,
                 valid_at=selected_at,
             )
-            for feature_id in ("pfv:wx:hidden-near", "pfv:wx:active-far")
+            for feature_id in ("pfv:wx:suppressed-near", "pfv:wx:active-far")
         ],
         provider_dataset_id=dataset_id,
         source_record=source_record,
@@ -492,10 +665,10 @@ async def test_weather_anchor_skips_non_public_features(
     assert by_feature.feature_id == "pfv:wx:active-far"
 
     # 비공개 feature를 target으로 한 anchor 탐색은 빈 결과(존재 은닉).
-    hidden_target = await weather_repo.nearest_weather_feature_for_feature(
-        migrated_session, feature_id="pfv:wx:hidden-near", radius_m=50_000
+    suppressed_target = await weather_repo.nearest_weather_feature_for_feature(
+        migrated_session, feature_id="pfv:wx:suppressed-near", radius_m=50_000
     )
-    assert hidden_target is None
+    assert suppressed_target is None
 
 
 async def _dataset_id(session: AsyncSession, provider: str, dataset_key: str) -> int:
@@ -584,14 +757,26 @@ async def test_curation_group_reads_use_projection(migrated_session: AsyncSessio
         status="published",
         visibility="public",
     )
-    # add_curation_item의 write-side 검증(NOT IN deleted/hidden)은 admin 계약 —
-    # draft/inactive 연결은 허용된다. 공개 read가 그걸 숨기는지가 이 테스트의 대상.
-    for suffix in ("active", "admin-inactive", "draft"):
+    # 연결 자체의 admin 검증과 별개로, active/published/valid 밖의 tuple은
+    # public read에서 숨겨져야 한다.
+    #
+    # 아래 `test_curated_public_read_uses_projection_admin_unchanged`와 같은 이유로
+    # 항목을 먼저 만들고 상태를 나중에 옮긴다. ``add_curation_item``의 가드는 legacy
+    # ``deleted_at IS NULL AND status NOT IN ('deleted','hidden')``의 3축 등가물
+    # (lifecycle='active' AND publication <> 'suppressed')이라 suppressed feature에
+    # 새 항목을 다는 것 자체를 막는다. 이 테스트가 재는 것은 "이미 큐레이션된 feature가
+    # 공개 밖으로 나갔을 때 공개 read에서 사라지는가"이므로, 공개 상태에서 연결한 뒤
+    # feature만 목표 축으로 옮겨야 의도한 최종 상태가 된다(draft는 가드가 허용하므로
+    # 두 단계 어느 쪽이든 같지만, 세 경우를 한 경로로 둔다).
+    for suffix, publication_state in (
+        ("active", "published"),
+        ("suppressed", "suppressed"),
+        ("draft", "draft"),
+    ):
         await _ins_feature(
             migrated_session,
             feature_id=f"pfv:cur:{suffix}",
             name=f"큐레이션 {suffix}",
-            status={"active": "active", "admin-inactive": "inactive", "draft": "draft"}[suffix],
         )
         await curation_repo.add_curation_item(
             migrated_session,
@@ -601,6 +786,18 @@ async def test_curation_group_reads_use_projection(migrated_session: AsyncSessio
             status="included",
             sort_order=1,
         )
+        if publication_state != "published":
+            await migrated_session.execute(
+                text(
+                    "UPDATE feature.features SET publication_state = :publication_state "
+                    "WHERE feature_id = :feature_id"
+                ),
+                {
+                    "publication_state": publication_state,
+                    "feature_id": f"pfv:cur:{suffix}",
+                },
+            )
+            await migrated_session.flush()
 
     groups, _cursor = await curation_repo.list_feature_curation_groups(
         migrated_session, public_only=True, theme_slug="pfv-matrix-theme"
@@ -611,7 +808,7 @@ async def test_curation_group_reads_use_projection(migrated_session: AsyncSessio
         migrated_session, feature_id="pfv:cur:active", public_only=True
     )
     assert active_group is not None
-    for hidden in ("pfv:cur:admin-inactive", "pfv:cur:draft"):
+    for hidden in ("pfv:cur:suppressed", "pfv:cur:draft"):
         group = await curation_repo.get_feature_curation_group(
             migrated_session, feature_id=hidden, public_only=True
         )
@@ -623,12 +820,18 @@ async def test_curated_public_read_uses_projection_admin_unchanged(
 ) -> None:
     """공개 curated read는 public theme의 curated overlay만 노출한다 (리뷰 S1)."""
     theme_id, source_id = await _seed_curation_foundation(migrated_session)
-    for suffix, status in (("active", "active"), ("admin-inactive", "inactive")):
+    # 이 테스트가 재현하려는 상황은 "overlay가 이미 있는데 그 feature가 공개 밖으로
+    # 나갔다"이지, "공개 밖 feature에 overlay를 새로 달 수 있다"가 아니다. 두 축을
+    # 나눠야 하는 이유: ``create_curated_feature``의 생성 가드는 legacy
+    # ``status NOT IN ('deleted','hidden')``의 3축 등가물
+    # (lifecycle='active' AND publication <> 'suppressed')이라 suppressed를 생성
+    # 시점에 막는다. 그래서 공개 상태에서 overlay를 만든 뒤 feature만 suppressed로
+    # 옮긴다 — 큐레이션 후 비공개 전환이라는 실제 운영 경로와 같은 최종 상태다.
+    for suffix, publication_state in (("active", "published"), ("suppressed", "suppressed")):
         await _ins_feature(
             migrated_session,
             feature_id=f"pfv:curated:{suffix}",
             name=f"레거시 큐레이션 {suffix}",
-            status=status,
         )
         await curated_repo.create_curated_feature(
             migrated_session,
@@ -637,6 +840,18 @@ async def test_curated_public_read_uses_projection_admin_unchanged(
             source_id=source_id,
             curation_status="curated",
         )
+        if publication_state != "published":
+            await migrated_session.execute(
+                text(
+                    "UPDATE feature.features SET publication_state = :publication_state "
+                    "WHERE feature_id = :feature_id"
+                ),
+                {
+                    "publication_state": publication_state,
+                    "feature_id": f"pfv:curated:{suffix}",
+                },
+            )
+            await migrated_session.flush()
 
     admin_theme = await curated_repo.create_curated_theme(
         migrated_session,
@@ -685,20 +900,20 @@ async def test_curated_public_read_uses_projection_admin_unchanged(
     )
     assert {row.feature_id for row in admin_page.items} == {
         "pfv:curated:active",
-        "pfv:curated:admin-inactive",
+        "pfv:curated:suppressed",
         "pfv:curated:admin-theme",
         "pfv:curated:candidate",
         "pfv:curated:rejected",
     }
 
     # 단건: 공개는 비공개 feature에서 None, admin은 조회 가능.
-    inactive_curated = next(
-        row for row in admin_page.items if row.feature_id == "pfv:curated:admin-inactive"
+    suppressed_curated = next(
+        row for row in admin_page.items if row.feature_id == "pfv:curated:suppressed"
     )
     assert (
         await curated_repo.get_curated_feature(
             migrated_session,
-            curated_feature_id=inactive_curated.curated_feature_id,
+            curated_feature_id=suppressed_curated.curated_feature_id,
             public_only=True,
         )
         is None
@@ -706,7 +921,7 @@ async def test_curated_public_read_uses_projection_admin_unchanged(
     assert (
         await curated_repo.get_curated_feature(
             migrated_session,
-            curated_feature_id=inactive_curated.curated_feature_id,
+            curated_feature_id=suppressed_curated.curated_feature_id,
         )
         is not None
     )
@@ -880,9 +1095,8 @@ async def test_collection_items_redact_non_public_linked_features(
         status="published",
         visibility="public",
     )
-    # 연결 시점에는 전부 active로 넣고 이후 상태를 바꾼다 — write-side 검증
-    # (NOT IN deleted/hidden)은 admin 계약이라 "연결 후 상태 변경" 시나리오가
-    # 실제 leak 경로다.
+    # 먼저 모두 public tuple로 연결한 뒤, 연결 후 3축 상태가 바뀌어도 public read가
+    # 비공개 feature 자체를 redaction하는지 검증한다.
     for i, (suffix, *_rest) in enumerate(_STATE_MATRIX):
         await _ins_feature(
             migrated_session,
@@ -913,23 +1127,21 @@ async def test_collection_items_redact_non_public_linked_features(
         sort_order=len(_STATE_MATRIX),
         metadata={"official": True},
     )
-    for suffix, status, soft_deleted, _public in _STATE_MATRIX:
+    for suffix, lifecycle_state, publication_state, quality_state, _public in _STATE_MATRIX:
         await migrated_session.execute(
             text(
                 """
                 UPDATE feature.features
-                SET status = :status,
-                    deleted_at = CASE
-                        WHEN CAST(:soft_deleted AS boolean)
-                        THEN CAST(:ts AS timestamptz)
-                    END
+                SET lifecycle_state = :lifecycle_state,
+                    publication_state = :publication_state,
+                    quality_state = :quality_state
                 WHERE feature_id = :fid
                 """
             ),
             {
-                "status": status,
-                "soft_deleted": soft_deleted,
-                "ts": _NOW,
+                "lifecycle_state": lifecycle_state,
+                "publication_state": publication_state,
+                "quality_state": quality_state,
                 "fid": f"pfv:item:{suffix}",
             },
         )
@@ -956,22 +1168,31 @@ async def test_collection_items_redact_non_public_linked_features(
     assert admin_result is not None
     _admin_row, admin_items = admin_result
     assert len(admin_items) == len(_STATE_MATRIX) + 1
-    hidden = next(item for item in admin_items if item.external_item_id == "pfv-item-hidden")
-    assert hidden.place_name == "복제 장소명 hidden"
-    assert hidden.address_hint == "복제 주소 hidden"
-    assert hidden.metadata == {"copied_name": "아이템장소 hidden"}
+    suppressed = next(
+        item for item in admin_items if item.external_item_id == "pfv-item-suppressed"
+    )
+    assert suppressed.place_name == "복제 장소명 suppressed"
+    assert suppressed.address_hint == "복제 주소 suppressed"
+    assert suppressed.metadata == {"copied_name": "아이템장소 suppressed"}
 
 
 async def test_weather_alert_history_hides_non_public_anchor(
     migrated_session: AsyncSession,
 ) -> None:
     """특보 이력은 alert row를 보존하되 비공개 anchor의 feature 필드는 NULL이다 (리뷰 S2)."""
-    for fid, status in (("pfv:alert:active", "active"), ("pfv:alert:hidden", "hidden")):
+    for fid, publication_state in (
+        ("pfv:alert:active", "published"),
+        ("pfv:alert:suppressed", "suppressed"),
+    ):
         await _ins_feature(
-            migrated_session, feature_id=fid, name=f"특보 {status}", status=status, kind="notice"
+            migrated_session,
+            feature_id=fid,
+            name=f"특보 {publication_state}",
+            publication_state=publication_state,
+            kind="notice",
         )
     dataset_id = await _dataset_id(migrated_session, "python-kma-api", "kma_weather_alerts")
-    for i, fid in enumerate(["pfv:alert:active", "pfv:alert:hidden"]):
+    for i, fid in enumerate(["pfv:alert:active", "pfv:alert:suppressed"]):
         entity_key = f"se_pfv_alert_{i}"
         raw_data = {
             "alert_id": f"PFV-{i}",
@@ -1060,7 +1281,7 @@ async def test_weather_alert_history_hides_non_public_anchor(
     # alert row 2건 모두 생존 — 기상특보 자체는 anchor 공개 여부와 무관한 정보다.
     assert set(by_key) == {"sr_pfv_alert_0", "sr_pfv_alert_1"}
     assert by_key["sr_pfv_alert_0"].feature_id == "pfv:alert:active"
-    assert by_key["sr_pfv_alert_0"].feature_name == "특보 active"
+    assert by_key["sr_pfv_alert_0"].feature_name == "특보 published"
     # 비공개 anchor는 feature 필드가 NULL로 떨어진다 (이름/상태 leak 차단).
     assert by_key["sr_pfv_alert_1"].feature_id is None
     assert by_key["sr_pfv_alert_1"].feature_name is None

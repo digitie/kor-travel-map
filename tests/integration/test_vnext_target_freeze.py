@@ -29,7 +29,7 @@ import re
 from collections.abc import AsyncIterator, Sequence
 from pathlib import Path
 from typing import Any, Final
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import asyncpg
 import pytest
@@ -51,7 +51,7 @@ _FINGERPRINTS_JSON: Final = _CONTRACTS / "target-schema-fingerprints-v1.json"
 _VIOLATIONS_SQL: Final = _CONTRACTS / "violation-fixtures-v1.sql"
 _REJECTIONS_JSON: Final = _CONTRACTS / "expected-rejections-v1.json"
 
-_EXPECTED_INVARIANT_COUNT: Final = 53
+_EXPECTED_INVARIANT_COUNT: Final = 60
 _INVARIANT_PHASES: Final = frozenset({"pre-backfill", "post-backfill", "both"})
 
 # fingerprint 대상 — target-schema-v1.sql과 T-VN-33 reference ownership DDL의 전체 relation.
@@ -107,6 +107,13 @@ _TARGET_TABLES: Final = (
 _TARGET_RELATIONS: Final = (*_TARGET_TABLES, "feature.public_features")
 _TARGET_FUNCTIONS: Final = (
     "feature.force_features_row_revision()",
+    "feature.prepare_feature_state_context(jsonb,text)",
+    "feature.write_feature_state_transition()",
+    "feature.reject_feature_state_transition_mutation()",
+    "feature.derive_subtype_public_ready()",
+    "feature.sync_subtype_public_ready()",
+    "feature.create_feature_with_initial_state(jsonb,text,text,text,jsonb)",
+    "feature.transition_feature_state(uuid,text,text,text,bigint,jsonb)",
     "provider_sync.is_valid_provider_dataset_capabilities(jsonb)",
     "provider_sync.is_valid_provider_dataset_sync_scope(text)",
     "provider_sync.reject_provider_dataset_identity_update()",
@@ -838,6 +845,408 @@ async def test_violation_fixtures_rejected_with_expected_sqlstate(
                 assert constraint == expected["constraint"], f"case {name}: {error}"
             else:
                 assert expected["constraint"] in str(error), f"case {name}: {error}"
+
+
+async def test_uuid_state_procedure_derives_provider_receipt_and_fences_retired_override(
+    freeze_db: asyncpg.Connection,
+) -> None:
+    """final UUID procedure도 current 0095와 같은 provider proof/fence를 강제한다."""
+
+    transaction = freeze_db.transaction()
+    await transaction.start()
+    try:
+        feature_id = UUID("00000000-0000-0000-0000-000000003490")
+        dataset_id = await freeze_db.fetchval(
+            """
+            INSERT INTO provider_sync.provider_datasets (
+                provider, dataset_key, display_name, source_kind
+            ) VALUES ('target-tvn34', 'state', 'Target T-VN-34 state', 'manual')
+            RETURNING provider_dataset_id
+            """
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO feature.categories (kind, code) VALUES ('place', 'target-tvn34')
+            """
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO provider_sync.source_entities (
+                source_entity_key, provider_dataset_id, source_entity_type, source_entity_id,
+                first_seen_at, last_seen_at
+            ) VALUES ('target-tvn34-entity', $1, 'place', 'target-tvn34-source', now(), now())
+            """,
+            dataset_id,
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO provider_sync.source_records (
+                source_record_key, source_entity_key, raw_data, raw_payload_hash, fetched_at
+            ) VALUES (
+                'target-tvn34-record', 'target-tvn34-entity', '{}'::jsonb,
+                '0000000000000000000000000000000000000000000000000000000000003490', now()
+            )
+            """
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO provider_sync.source_entity_heads (
+                source_entity_key, current_source_record_key, observed_at
+            ) VALUES ('target-tvn34-entity', 'target-tvn34-record', now())
+            """
+        )
+        provider_context = {
+            "transition_kind": "provider_sync",
+            "reason_code": "provider_initial",
+            "provider_dataset_id": dataset_id,
+            "source_entity_key": "target-tvn34-entity",
+            "source_record_key": "target-tvn34-record",
+        }
+        await freeze_db.execute("SET ROLE ktm_feature_runtime")
+        try:
+            await freeze_db.fetchrow(
+                """
+                CALL feature.create_feature_with_initial_state(
+                    $1::jsonb, 'active', 'published', 'valid', $2::jsonb, NULL, NULL, NULL
+                )
+                """,
+                    {
+                        "feature_id": str(feature_id),
+                        "kind": "place",
+                        "name": "target provider feature",
+                        "category_code": "target-tvn34",
+                    },
+                    provider_context,
+                )
+            unlinked_savepoint = freeze_db.transaction()
+            await unlinked_savepoint.start()
+            try:
+                with pytest.raises(asyncpg.PostgresError) as unlinked:
+                    await freeze_db.fetchrow(
+                        """
+                        CALL feature.transition_feature_state(
+                            $1::uuid, 'retired', 'suppressed', 'valid', 1, $2::jsonb, NULL, NULL
+                        )
+                        """,
+                        feature_id,
+                        {**provider_context, "reason_code": "provider_retire"},
+                    )
+            finally:
+                await unlinked_savepoint.rollback()
+            assert unlinked.value.sqlstate == "23514"
+            assert unlinked.value.constraint_name == "ck_feature_provider_source_provenance"
+
+            forged_savepoint = freeze_db.transaction()
+            await forged_savepoint.start()
+            try:
+                with pytest.raises(asyncpg.PostgresError) as forged:
+                    await freeze_db.fetchrow(
+                        """
+                        CALL feature.transition_feature_state(
+                            $1::uuid, 'retired', 'suppressed', 'valid', 1, $2::jsonb, NULL, NULL
+                        )
+                        """,
+                        feature_id,
+                        {
+                            **provider_context,
+                            "reason_code": "provider_retire",
+                            "provider_evidence": {
+                                "authoritative_receipt": "caller-forged"
+                            },
+                        },
+                    )
+            finally:
+                await forged_savepoint.rollback()
+            assert forged.value.sqlstate == "23514"
+            assert forged.value.constraint_name == "ck_feature_state_transition_context"
+        finally:
+            await freeze_db.execute("RESET ROLE")
+
+        await freeze_db.execute(
+            """
+            INSERT INTO provider_sync.source_links (
+                feature_id, source_entity_key, source_role, match_method, confidence
+            ) VALUES ($1::uuid, 'target-tvn34-entity', 'primary', 'fixture', 100)
+            """,
+            feature_id,
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO provider_sync.source_records (
+                source_record_key, source_entity_key, raw_data, raw_payload_hash, fetched_at
+            ) VALUES (
+                'target-tvn34-record-current', 'target-tvn34-entity', '{}'::jsonb,
+                '0000000000000000000000000000000000000000000000000000000000003491',
+                now() + interval '1 minute'
+            )
+            """
+        )
+        await freeze_db.execute(
+            """
+            UPDATE provider_sync.source_entity_heads
+               SET current_source_record_key = 'target-tvn34-record-current',
+                   observed_at = observed_at + interval '1 minute'
+             WHERE source_entity_key = 'target-tvn34-entity'
+            """
+        )
+        current_provider_context = {
+            **provider_context,
+            "source_record_key": "target-tvn34-record-current",
+        }
+
+        await freeze_db.execute("SET ROLE ktm_feature_runtime")
+        try:
+            stale_savepoint = freeze_db.transaction()
+            await stale_savepoint.start()
+            try:
+                with pytest.raises(asyncpg.PostgresError) as stale:
+                    await freeze_db.fetchrow(
+                        """
+                        CALL feature.transition_feature_state(
+                            $1::uuid, 'retired', 'suppressed', 'valid', 1, $2::jsonb, NULL, NULL
+                        )
+                        """,
+                        feature_id,
+                        {**provider_context, "reason_code": "stale_provider_retire"},
+                    )
+            finally:
+                await stale_savepoint.rollback()
+            assert stale.value.sqlstate == "23514"
+            assert stale.value.constraint_name == "ck_feature_provider_source_provenance"
+        finally:
+            await freeze_db.execute("RESET ROLE")
+
+        await freeze_db.execute(
+            """
+            INSERT INTO ops.feature_override_field_paths (field_path, value_type)
+            VALUES ('lifecycle_state', 'string')
+            """
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO ops.feature_overrides (
+                feature_id, field_path, override_value, prevent_provider_reactivation, status,
+                created_by
+            ) VALUES ($1::uuid, 'lifecycle_state', '"active"'::jsonb, true, 'active',
+                      'admin:target-tvn34')
+            """,
+            feature_id,
+        )
+
+        await freeze_db.execute("SET ROLE ktm_feature_runtime")
+        try:
+            await freeze_db.fetchrow(
+                """
+                CALL feature.transition_feature_state(
+                    $1::uuid, 'retired', 'suppressed', 'valid', 1, $2::jsonb, NULL, NULL
+                )
+                """,
+                feature_id,
+                {**current_provider_context, "reason_code": "provider_retire"},
+            )
+            # ``override_value='active'``는 provider reactivation을 막지 않는다.
+            reactivated = await freeze_db.fetchrow(
+                """
+                CALL feature.transition_feature_state(
+                    $1::uuid, 'active', 'suppressed', 'valid', 2, $2::jsonb, NULL, NULL
+                )
+                """,
+                feature_id,
+                {**current_provider_context, "reason_code": "provider_reingest"},
+            )
+            assert reactivated["o_row_revision"] == 3
+            await freeze_db.fetchrow(
+                """
+                CALL feature.transition_feature_state(
+                    $1::uuid, 'retired', 'suppressed', 'valid', 3, $2::jsonb, NULL, NULL
+                )
+                """,
+                feature_id,
+                {**current_provider_context, "reason_code": "provider_retire"},
+            )
+        finally:
+            await freeze_db.execute("RESET ROLE")
+
+        await freeze_db.execute(
+            """
+            UPDATE ops.feature_overrides
+            SET override_value = '"retired"'::jsonb
+            WHERE feature_id = $1::uuid AND field_path = 'lifecycle_state' AND status = 'active'
+            """,
+            feature_id,
+        )
+        await freeze_db.execute("SET ROLE ktm_feature_runtime")
+        try:
+            fenced_savepoint = freeze_db.transaction()
+            await fenced_savepoint.start()
+            try:
+                with pytest.raises(asyncpg.PostgresError) as fenced:
+                    await freeze_db.fetchrow(
+                        """
+                        CALL feature.transition_feature_state(
+                            $1::uuid, 'active', 'suppressed', 'valid', 4, $2::jsonb, NULL, NULL
+                        )
+                        """,
+                        feature_id,
+                        {**current_provider_context, "reason_code": "provider_reingest"},
+                    )
+            finally:
+                await fenced_savepoint.rollback()
+            assert fenced.value.sqlstate == "23514"
+            assert fenced.value.constraint_name == "ck_feature_provider_reactivation_override"
+        finally:
+            await freeze_db.execute("RESET ROLE")
+
+        audit = await freeze_db.fetchrow(
+            """
+            SELECT provider_dataset_id, source_entity_key, source_record_key, provider_evidence
+            FROM feature.feature_state_transitions
+            WHERE feature_id = $1::uuid AND transition_kind = 'provider_sync'
+            ORDER BY transition_id
+            LIMIT 1
+            """,
+            feature_id,
+        )
+        assert audit is not None
+        assert dict(audit) == {
+            "provider_dataset_id": dataset_id,
+            "source_entity_key": "target-tvn34-entity",
+            "source_record_key": "target-tvn34-record",
+            "provider_evidence": {
+                "authoritative_receipt": (
+                    "00000000000000000000000000000000"
+                    "00000000000000000000000000003490"
+                )
+            },
+        }
+    finally:
+        await transaction.rollback()
+
+
+async def test_target_runtime_geometry_acl_has_extension_and_public_view_boundary(
+    freeze_db: asyncpg.Connection,
+) -> None:
+    """final target runtime은 qualified geometry DML과 public projection만 읽는다."""
+
+    transaction = freeze_db.transaction()
+    await transaction.start()
+    try:
+        # 0095/0096 current schema의 private detail assembly bridge는 final
+        # target에 없다. T-VN-34C는 모든 consumer/ACL/preflight를 함께 제거해야
+        # 하며, final schema가 이 view를 되살리는 것은 허용하지 않는다.
+        assert await freeze_db.fetchval("SELECT to_regclass('feature.features_detailed')") is None
+        feature_id = uuid4()
+        await freeze_db.execute(
+            "INSERT INTO feature.categories (kind, code) VALUES ('route', 'target-runtime')"
+        )
+        await freeze_db.execute(
+            """
+            INSERT INTO feature.features (
+                feature_id, kind, name, category_code,
+                lifecycle_state, publication_state, quality_state
+            ) VALUES ($1, 'route', 'target runtime route', 'target-runtime',
+                      'active', 'published', 'valid')
+            """,
+            feature_id,
+        )
+
+        await freeze_db.execute("SET ROLE ktm_feature_runtime")
+        try:
+            assert await freeze_db.fetchval(
+                "SELECT has_schema_privilege(current_user, 'x_extension', 'USAGE')"
+            ) is True
+            await freeze_db.execute(
+                """
+                INSERT INTO feature.feature_routes (feature_id, kind, geom, anchor)
+                VALUES (
+                    $1, 'route',
+                    x_extension.st_geomfromtext(
+                        'MULTILINESTRING((126.97 37.56,126.98 37.57))', 4326
+                    ),
+                    x_extension.st_setsrid(x_extension.st_makepoint(126.975, 37.565), 4326)
+                )
+                """,
+                feature_id,
+            )
+            await freeze_db.execute(
+                "UPDATE feature.feature_routes SET geom = geom WHERE feature_id = $1",
+                feature_id,
+            )
+            assert await freeze_db.fetchval(
+                "SELECT count(*) FROM feature.public_features WHERE feature_id = $1",
+                feature_id,
+            ) == 1
+
+            privileges = await freeze_db.fetchrow(
+                """
+                SELECT
+                    has_column_privilege(
+                        current_user, 'feature.feature_routes', 'geom', 'UPDATE'
+                    ) AS can_update_geom,
+                    has_column_privilege(
+                        current_user, 'feature.feature_routes', 'feature_id', 'UPDATE'
+                    ) AS can_update_feature_id,
+                    has_column_privilege(
+                        current_user, 'feature.feature_routes', 'kind', 'UPDATE'
+                    ) AS can_update_kind,
+                    has_column_privilege(
+                        current_user, 'feature.feature_routes', 'public_ready', 'UPDATE'
+                    ) AS can_update_public_ready,
+                    has_table_privilege(
+                        current_user, 'feature.feature_routes', 'DELETE'
+                    ) AS can_delete
+                """
+            )
+            assert dict(privileges) == {
+                "can_update_geom": True,
+                "can_update_feature_id": False,
+                "can_update_kind": False,
+                "can_update_public_ready": False,
+                "can_delete": False,
+            }
+        finally:
+            await freeze_db.execute("RESET ROLE")
+
+        with pytest.raises(asyncpg.CheckViolationError) as caught:
+            await freeze_db.execute(
+                "UPDATE feature.feature_routes SET kind = 'area' WHERE feature_id = $1",
+                feature_id,
+            )
+        assert caught.value.constraint_name == "ck_feature_subtype_identity_immutable"
+    finally:
+        await transaction.rollback()
+
+
+async def test_final_target_excludes_current_user_provenance_snapshot_bridge(
+    freeze_db: asyncpg.Connection,
+) -> None:
+    """0095 typed provenance/version bridge는 T36C 이후 final UUID target에 남지 않는다."""
+
+    routine = await freeze_db.fetchval(
+        """
+        SELECT to_regprocedure(
+            'feature.materialize_user_feature_change_provenance(text,text,uuid,text,text,bigint)'
+        )
+        """
+    )
+    assert routine is None
+    assert await freeze_db.fetchval("SELECT to_regclass('feature.feature_versions')") is None
+    legacy_columns = await freeze_db.fetchval(
+        """
+        SELECT count(*)
+        FROM information_schema.columns
+        WHERE table_schema = 'feature'
+          AND table_name = 'features'
+          AND column_name = ANY(
+              ARRAY[
+                  'data_origin', 'data_version', 'user_change_kind',
+                  'user_change_status', 'user_change_request_id',
+                  'user_deleted_at', 'user_deleted_by', 'user_change_reason'
+              ]
+          )
+        """
+    )
+    assert legacy_columns == 0
 
 
 async def test_multiple_records_with_one_head_satisfy_completeness_invariant(

@@ -314,17 +314,26 @@ _UNCOMPARED_INDEX_CONTRACTS: dict[
     tuple[str, str],
     tuple[bool, tuple[str, ...], str],
 ] = {
-    ("feature", "idx_features_dedup_refresh_keyset"): (
-        False,
-        (
-            "updated_at DESC NULLS FIRST",
-            "feature_id DESC NULLS FIRST",
-        ),
-        "deleted_at IS NULL AND status = 'active' AND coord IS NOT NULL",
-    ),
     # T-VN-33(0091)이 ``idx_source_records_kma_alert_history``를 대체 없이 drop했다
     # — 술어가 잡던 provider/dataset_key/source_entity_type 사본이 모두 사라져
     # partial index 자체가 성립하지 않는다. 계약도 함께 사라진다.
+    #
+    # T-VN-34(0096/0097)로 ``idx_features_dedup_refresh_keyset``도 이 ledger를
+    # 떠났다. 이 index가 따로 있었던 이유는 0020의 ``idx_features_updated_keyset``이
+    # **술어 없는** 전체 index였기 때문이다 — 같은 정렬축에 "살아 있고 공개된 행"
+    # 필터를 얹으려면 별도 partial index가 필요했다. 0096이 그
+    # ``idx_features_updated_keyset``을 3축 술어(``lifecycle_state='active' AND
+    # publication_state='published' AND quality_state='valid'``, 즉 legacy
+    # ``deleted_at IS NULL AND status='active'``의 등가물) partial index로 다시
+    # 만들면서 정렬축·술어가 그대로 흡수됐고, 남는 차이는 ``coord IS NOT NULL``
+    # 한 항뿐이라 같은 키를 가진 두 번째 index를 유지할 근거가 사라졌다. 0097이
+    # 술어가 이름을 부르던 ``status``/``deleted_at``을 제거하며 물리 index도 함께
+    # 사라진다. 후속 index는 ORM(``models.py``)이 선언하므로 **비교 대상**이고,
+    # 비교 제외 ledger에 들어갈 자리가 아니다.
+    #
+    # 결과적으로 이 dict는 비었지만 계약은 살아 있다: 아래 테스트가
+    # ``UNCOMPARED_INDEXES``와의 동치를 계속 확인하므로, 검증 없는 새 제외 항목은
+    # 여전히 추가될 수 없다.
 }
 
 
@@ -355,8 +364,15 @@ async def _run_alembic_upgrade(dsn: str, revision: str = "head") -> None:
     project_root = Path(__file__).resolve().parents[2]  # noqa: ASYNC240  # sync IO is trivial path-arith here
     cfg = Config(str(project_root / "alembic.ini"))
     cfg.set_main_option("script_location", str(project_root / "alembic"))
-    cfg.set_main_option("sqlalchemy.url", dsn)
-    await asyncio.to_thread(command.upgrade, cfg, revision)
+    # 배포와 같은 경로로 돈다 — bootstrap 후 migrator 자격으로 upgrade.
+    from tests.integration._tvn34_migration_bootstrap import (
+        alembic_schema_owner_role,
+        bootstrapped_migrator_dsn,
+    )
+
+    cfg.set_main_option("sqlalchemy.url", await bootstrapped_migrator_dsn(dsn))
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(command.upgrade, cfg, revision)
 
 
 def _alembic_head_revision() -> str:
@@ -440,9 +456,18 @@ async def test_alembic_creates_features_table(
     """0002 revision이 ``feature.features`` 테이블 생성 (head 기준 core 축).
 
     T-VN-35(ADR-086, alembic 0086): ``detail``/``geom``은 **core 컬럼이 아니다**.
-    kind별 값과 geometry의 정본은 subtype 5종이고 응답용 두 값은
-    ``feature.features_detailed`` 뷰가 조립한다. core에 그 컬럼이 되살아나면
-    "값이 두 곳에 있다"는 회귀이므로 부재도 함께 고정한다.
+    kind별 값과 geometry의 정본은 subtype 5종이고 응답용 두 값은 조립 SQL이
+    만든다(0097 이후로는 ``feature.public_features``와 snapshot writer가 core +
+    subtype을 직접 조립한다). core에 그 컬럼이 되살아나면 "값이 두 곳에 있다"는
+    회귀이므로 부재도 함께 고정한다.
+
+    T-VN-34(alembic 0095~0097): 상태도 같은 이유로 정본이 한 곳이어야 한다.
+    단일 ``status``와 ``deleted_at`` soft delete는 서로 다른 세 질문("살아 있나 /
+    공개되나 / 값을 믿을 만한가")을 한 열에 눌러 담고 있었고, 0095가 그것을
+    ``lifecycle_state``/``publication_state``/``quality_state`` 세 축으로 푼 뒤
+    0097이 legacy 열을 물리 제거했다. 그래서 여기서 존재를 요구하는 것은 세 축이고,
+    사라진 legacy 상태 열 8개는 부재를 함께 고정한다 — 되살아나면 같은 상태가 두
+    표기로 공존하는 회귀다.
     """
     async with pg_engine_with_migrations.connect() as conn:
         result = await conn.execute(
@@ -456,18 +481,36 @@ async def test_alembic_creates_features_table(
     # 핵심 컬럼 존재 확인.
     for required in (
         "feature_id", "kind", "name", "category", "coord", "coord_5179",
-        "coord_precision_digits", "address", "status",
+        "coord_precision_digits", "address",
+        "lifecycle_state", "publication_state", "quality_state",
         "created_at", "updated_at",
     ):
         assert required in columns, f"missing column: {required}"
     for removed in ("detail", "geom"):
         assert removed not in columns, f"core column {removed!r} came back (ADR-086)"
+    for legacy_state in (
+        "status", "deleted_at",
+        "user_deleted_at", "user_deleted_by",
+        "user_change_kind", "user_change_status",
+        "user_change_request_id", "user_change_reason",
+    ):
+        assert legacy_state not in columns, (
+            f"legacy state column {legacy_state!r} came back (T-VN-34, 0097)"
+        )
 
 
 async def test_alembic_creates_typed_subtype_tables_and_assembly_view(
     pg_engine_with_migrations: AsyncEngine,
 ) -> None:
-    """0084~0086이 subtype 5종 + 조립 뷰 2종을 만든다 (T-VN-35, ADR-086)."""
+    """head가 subtype 5종 + 조립 뷰 1종을 갖는다 (T-VN-35 ADR-086 · T-VN-34 0097).
+
+    0084~0086은 subtype 5종과 조립 뷰 2종(``features_detailed`` +
+    ``public_features``)을 만들었지만, ``features_detailed``는 0087이
+    ``detail`` 컬럼을 대신하려고 세운 **한시적 read bridge**였다. 0097이 public
+    projection과 snapshot writer를 core+subtype 직접 조립으로 옮긴 뒤 그 bridge를
+    drop했으므로, head에 남는 조립 뷰는 ``public_features`` 하나다. bridge가 다시
+    생기면 detail 조립 정본이 둘이 되는 회귀이므로 부재도 함께 고정한다.
+    """
     async with pg_engine_with_migrations.connect() as conn:
         tables = set(
             (
@@ -496,7 +539,10 @@ async def test_alembic_creates_typed_subtype_tables_and_assembly_view(
         "feature_routes",
         "feature_areas",
     } <= tables
-    assert {"features_detailed", "public_features"} <= views
+    assert "public_features" in views
+    assert "features_detailed" not in views, (
+        "0087 read bridge가 0097 이후 되살아났다 (T-VN-34)"
+    )
 
 
 async def test_alembic_coord_5179_is_generated_stored(

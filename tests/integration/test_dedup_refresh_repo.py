@@ -148,7 +148,9 @@ async def _seed_feature(
             category=_CAT,
             coord=WKTElement("POINT(129.3320 35.7900)", srid=4326),
             coord_precision_digits=coord_precision_digits,
-            status="active",
+            lifecycle_state="active",
+            publication_state="published",
+            quality_state="valid",
             created_at=_T1,
             updated_at=updated_at,
         )

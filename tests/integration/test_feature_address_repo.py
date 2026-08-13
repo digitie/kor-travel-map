@@ -38,7 +38,15 @@ def _feature_row(feature_id: str) -> FeatureRow:
         address={"road": "서울특별시 종로구 세종대로 1"},
         urls={},
         raw_refs=[],
-        status="active",
+        # 이 fixture가 원래 말하던 legacy ``status='active'``는 "공개 표면에
+        # 정상적으로 실재하는 feature"라는 뜻이었다. T-VN-34 3축에서 그 한 값은
+        # 세 축의 조합으로 흩어진다 — 살아있고(lifecycle=active), 공개돼 있으며
+        # (publication=published), 격리되지 않은(quality=valid) 상태다. 주소/좌표
+        # override SQL은 상태 축을 건드리지 않으므로 여기서는 "평범한 공개 feature"
+        # 라는 출발점만 3축으로 정확히 재현하면 된다.
+        lifecycle_state="active",
+        publication_state="published",
+        quality_state="valid",
         legal_dong_code="1111010100",
         sido_code="11",
         sigungu_code="11110",
@@ -86,7 +94,8 @@ async def test_snapshot_and_apply_override(migrated_session: AsyncSession) -> No
     assert refreshed is not None
     assert refreshed.sigungu_code == "11140"
 
-    # ops.feature_overrides active row가 field_path별로 남았는지 확인.
+    # T-VN-34A runtime은 generic feature override DML을 폐쇄한다. address core
+    # write는 유지하지만 T-VN-36 writer가 오기 전 새 override는 만들지 않는다.
     rows = (
         await migrated_session.execute(
             text(
@@ -98,15 +107,9 @@ async def test_snapshot_and_apply_override(migrated_session: AsyncSession) -> No
             {"fid": fid},
         )
     ).all()
-    by_path = {row.field_path: row for row in rows}
-    assert {"address", "coord", "legal_dong_code", "sido_code", "sigungu_code"} <= set(
-        by_path
-    )
-    assert by_path["coord"].override_value == {"lon": 126.9784, "lat": 37.5663}
-    assert by_path["legal_dong_code"].source_value == "1111010100"
-    assert by_path["address"].created_by == "tester"
+    assert rows == []
 
-    # 같은 field_path 재적용 — ON CONFLICT 갱신(중복 없음).
+    # 같은 field 재적용도 runtime의 generic override 권한을 되살리지 않는다.
     again = await apply_feature_address_override(
         migrated_session,
         fid,
@@ -125,7 +128,7 @@ async def test_snapshot_and_apply_override(migrated_session: AsyncSession) -> No
             {"fid": fid},
         )
     ).scalar_one()
-    assert active == 1
+    assert active == 0
 
 
 async def test_apply_override_missing_feature_returns_none(
@@ -147,3 +150,46 @@ async def test_apply_override_requires_a_field(
     await migrated_session.flush()
     with pytest.raises(ValueError, match="최소 1개"):
         await apply_feature_address_override(migrated_session, fid)
+
+
+async def test_address_override_reactivation_flag_is_inert_until_tvn36(
+    migrated_session: AsyncSession,
+) -> None:
+    """``prevent_provider_reactivation``이 현재 아무것도 하지 않음을 고정한다.
+
+    T-VN-34A가 runtime의 범용 ``ops.feature_overrides`` DML을 폐쇄해서 이 경로는
+    override row를 **아예 만들지 않는다.** 그런데 API/프론트는 계속 이 값을 보내고
+    라우터도 그대로 넘긴다 — 운영자 입장에서는 "provider 재적재로부터 잠갔다"고
+    믿는데 실제로는 아무것도 잠기지 않는다.
+
+    시그니처를 지우지 않은 이유는 계약을 깨면 PinVi 재vendoring까지 번지기 때문이고,
+    T-VN-36이 field override provenance를 되살릴 때 이 인자를 다시 배선할 예정이기
+    때문이다. 그때 이 테스트가 red가 되어 **의식적으로** 마주치게 만든다 — 조용히
+    살아나거나 조용히 죽은 채로 남는 것 둘 다 막는다.
+    """
+
+    overrides_before = (
+        await migrated_session.execute(
+            text("SELECT count(*) FROM ops.feature_overrides")
+        )
+    ).scalar_one()
+
+    for flag in (True, False):
+        fid = f"f_addr_inert_{int(flag)}"
+        migrated_session.add(_feature_row(fid))
+        await migrated_session.flush()
+        result = await apply_feature_address_override(
+            migrated_session,
+            fid,
+            legal_dong_code="1114010300",
+            reason="inert flag probe",
+            operator="tester",
+            prevent_provider_reactivation=flag,
+        )
+        assert result is not None, flag
+
+    assert (
+        await migrated_session.execute(
+            text("SELECT count(*) FROM ops.feature_overrides")
+        )
+    ).scalar_one() == overrides_before

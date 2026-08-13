@@ -19,10 +19,13 @@ ADR 참조
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncIterator, Iterator
 from typing import TYPE_CHECKING, Any
 
 import pytest
+
+from tests.integration._tvn34_migration_bootstrap import bootstrap_tvn34_migration_roles
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -36,6 +39,7 @@ _EXTENSIONS: tuple[str, ...] = ("postgis", "pg_trgm", "pgcrypto")
 
 # Docker image (docs/test-strategy.md §4.1)
 _POSTGIS_IMAGE: str = "postgis/postgis:16-3.5-alpine"
+_TVN34_TEST_MIGRATOR_PASSWORD = "tvn34-test-only-migrator-password"
 
 
 def _import_testcontainers() -> Any | None:
@@ -172,18 +176,62 @@ async def migrated_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
 
     from alembic.config import Config
     from sqlalchemy import event
+    from sqlalchemy.engine import make_url
 
     from alembic import command
     from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 
     raw_dsn = pg_container.get_connection_url()  # type: ignore[attr-defined]
+    # 같은 컨테이너 기본 DB를 `pg_engine`과 공유한다. 예전에는 그것이 순서 결합을
+    # 만들었다 — `pg_engine`은 app schema를 컨테이너 superuser로
+    # `CREATE SCHEMA IF NOT EXISTS`하고 이 fixture는 배포 경로
+    # (`ktm_feature_migrator` → SET ROLE `ktm_feature_schema_owner`)로 migration을
+    # 도는데, `IF NOT EXISTS`는 이미 있는 schema에 AUTHORIZATION을 적용하지 않으므로
+    # 먼저 선 쪽이 소유권을 확정했다. 그래서 "알파벳순 첫 파일이 migrated_engine을
+    # 먼저 요구하게 한다"는 파일명 규약에 기대고 있었다.
+    #
+    # 지금은 bootstrap이 `ALTER SCHEMA ... OWNER TO ktm_feature_schema_owner`로
+    # 소유권을 **확정**하므로 순서가 무의미하다. DB를 나누지 않는 이유는 CLI 계열
+    # 테스트가 컨테이너 기본 DB를 직접 가리키기 때문이다 — 나누면 그쪽이 빈 DB를 본다.
     async_dsn = normalize_async_dsn(raw_dsn)
+    bootstrap_engine = make_async_engine(async_dsn, pool_size=1)
+    try:
+        migrator_password = await bootstrap_tvn34_migration_roles(bootstrap_engine)
+    finally:
+        await bootstrap_engine.dispose()
+    migrator_dsn = make_url(async_dsn).set(
+        username="ktm_feature_migrator",
+        password=migrator_password,
+    )
 
     root = Path(__file__).resolve().parents[2]  # noqa: ASYNC240  # sync path-arith
     cfg = Config(str(root / "alembic.ini"))
     cfg.set_main_option("script_location", str(root / "alembic"))
-    cfg.set_main_option("sqlalchemy.url", async_dsn)
-    await asyncio.to_thread(command.upgrade, cfg, "head")
+    cfg.set_main_option("sqlalchemy.url", migrator_dsn.render_as_string(hide_password=False))
+    previous_role_mode = os.environ.get("KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE")
+    os.environ["KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE"] = "true"
+    try:
+        await asyncio.to_thread(command.upgrade, cfg, "head")
+    finally:
+        if previous_role_mode is None:
+            os.environ.pop("KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE", None)
+        else:
+            os.environ["KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE"] = previous_role_mode
+
+    # Production API entrypoint performs this immediately after Alembic while
+    # only the migrator DSN exists.  Keep the shared fixture on that executable
+    # path so runtime integration tests never obtain old bootstrap-owner ACLs.
+    from kortravelmap.infra.runtime_privileges import reconcile_runtime_privileges
+
+    previous_pg_dsn = os.environ.get("KOR_TRAVEL_MAP_PG_DSN")
+    os.environ["KOR_TRAVEL_MAP_PG_DSN"] = migrator_dsn.render_as_string(hide_password=False)
+    try:
+        await reconcile_runtime_privileges()
+    finally:
+        if previous_pg_dsn is None:
+            os.environ.pop("KOR_TRAVEL_MAP_PG_DSN", None)
+        else:
+            os.environ["KOR_TRAVEL_MAP_PG_DSN"] = previous_pg_dsn
 
     engine = make_async_engine(async_dsn)
 

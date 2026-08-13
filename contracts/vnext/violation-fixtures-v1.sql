@@ -8,9 +8,8 @@
 --
 -- case 앞부분의 INSERT는 위반을 재현하기 위한 최소 부모 행이며 성공해야 한다.
 --
--- (3축 불가능 조합 case는 없다 — 불가능 조합의 집합은 정본이 열거하지 않아
--- CHECK 자체가 미정(T-VN-34A 구현 소관)이다. 구현이 CHECK를 확정하면 그
--- PR에서 case를 추가한다.)
+-- T-VN-34A는 active 6 + retired/suppressed 2 tuple만 허용한다. 각 invalid
+-- retired tuple과 axis domain violation은 아래 case로 DB rejection을 고정한다.
 -- =============================================================================
 
 -- case: alias_duplicate
@@ -1099,3 +1098,142 @@ INSERT INTO feature.current_weather_summary (
      WHERE projection_kind = 'weather' AND status = 'succeeded'),
     '2026-01-01T03:00:00+00', '2026-01-01T03:00:00+00'
 );
+
+-- case: feature_state_retired_draft_valid
+INSERT INTO feature.categories (kind, code) VALUES ('place', 'state-fixture');
+INSERT INTO feature.features (
+    feature_id, kind, name, category_code,
+    lifecycle_state, publication_state, quality_state
+) VALUES (
+    '00000000-0000-0000-0000-000000000015', 'place', 'retired draft valid', 'state-fixture',
+    'retired', 'draft', 'valid'
+);
+
+-- case: feature_state_retired_draft_quarantined
+INSERT INTO feature.categories (kind, code) VALUES ('place', 'state-fixture');
+INSERT INTO feature.features (
+    feature_id, kind, name, category_code,
+    lifecycle_state, publication_state, quality_state
+) VALUES (
+    '00000000-0000-0000-0000-000000000016', 'place', 'retired draft quarantined', 'state-fixture',
+    'retired', 'draft', 'quarantined'
+);
+
+-- case: feature_state_retired_published_valid
+INSERT INTO feature.categories (kind, code) VALUES ('place', 'state-fixture');
+INSERT INTO feature.features (
+    feature_id, kind, name, category_code,
+    lifecycle_state, publication_state, quality_state
+) VALUES (
+    '00000000-0000-0000-0000-000000000017', 'place', 'retired published valid', 'state-fixture',
+    'retired', 'published', 'valid'
+);
+
+-- case: feature_state_retired_published_quarantined
+INSERT INTO feature.categories (kind, code) VALUES ('place', 'state-fixture');
+INSERT INTO feature.features (
+    feature_id, kind, name, category_code,
+    lifecycle_state, publication_state, quality_state
+) VALUES (
+    '00000000-0000-0000-0000-000000000018', 'place', 'retired published quarantined', 'state-fixture',
+    'retired', 'published', 'quarantined'
+);
+
+-- case: feature_state_invalid_lifecycle_domain
+INSERT INTO feature.categories (kind, code) VALUES ('place', 'state-fixture');
+INSERT INTO feature.features (
+    feature_id, kind, name, category_code,
+    lifecycle_state, publication_state, quality_state
+) VALUES (
+    '00000000-0000-0000-0000-000000000019', 'place', 'invalid lifecycle', 'state-fixture',
+    'paused', 'suppressed', 'valid'
+);
+
+-- case: feature_state_audit_append_only
+INSERT INTO feature.feature_state_transitions (
+    feature_id,
+    from_lifecycle_state, from_publication_state, from_quality_state,
+    to_lifecycle_state, to_publication_state, to_quality_state,
+    transition_kind, reason_code, principal, occurred_at, row_revision,
+    invoker_role, state_procedure_definer, audit_writer_definer
+) VALUES (
+    '00000000-0000-0000-0000-000000000020',
+    NULL, NULL, NULL,
+    'active', 'draft', 'valid',
+    'initial', 'fixture_initial', 'fixture:owner', now(), 1,
+    session_user::text, 'fixture', 'fixture'
+);
+UPDATE feature.feature_state_transitions
+SET reason_code = 'mutated'
+WHERE feature_id = '00000000-0000-0000-0000-000000000020';
+
+-- case: feature_state_provider_provenance_missing
+INSERT INTO feature.feature_state_transitions (
+    feature_id,
+    from_lifecycle_state, from_publication_state, from_quality_state,
+    to_lifecycle_state, to_publication_state, to_quality_state,
+    transition_kind, reason_code, principal, occurred_at, row_revision,
+    invoker_role, state_procedure_definer, audit_writer_definer
+) VALUES (
+    '00000000-0000-0000-0000-000000000021',
+    NULL, NULL, NULL,
+    'active', 'draft', 'valid',
+    'provider_sync', 'fixture_provider_initial', 'provider:fixture/state', now(), 1,
+    session_user::text, 'fixture', 'fixture'
+);
+
+-- case: feature_state_provider_receipt_caller_supplied
+CALL feature.create_feature_with_initial_state(
+    '{"feature_id":"00000000-0000-0000-0000-000000000022","kind":"place","name":"forged receipt","category_code":"fixture"}'::jsonb,
+    'active', 'draft', 'valid',
+    '{"transition_kind":"provider_sync","reason_code":"fixture_forged_receipt","provider_dataset_id":1,"source_entity_key":"fixture","source_record_key":"fixture","provider_evidence":{"authoritative_receipt":"caller-forged"}}'::jsonb,
+    NULL, NULL, NULL
+);
+
+-- case: feature_state_causation_ref_non_scalar
+CALL feature.create_feature_with_initial_state(
+    '{"feature_id":"00000000-0000-0000-0000-000000000023","kind":"place","name":"non scalar causation","category_code":"fixture"}'::jsonb,
+    'active', 'draft', 'valid',
+    '{"transition_kind":"initial","reason_code":"fixture_causation_ref","principal":"fixture:admin","causation_ref":{"forged":"object"}}'::jsonb,
+    NULL, NULL, NULL
+);
+
+-- case: feature_route_public_ready_direct_update
+INSERT INTO feature.categories (kind, code) VALUES ('route', 'public-ready-fixture');
+INSERT INTO feature.features (
+    feature_id, kind, name, category_code,
+    lifecycle_state, publication_state, quality_state
+) VALUES (
+    '00000000-0000-0000-0000-000000000024', 'route', 'route public-ready 부모',
+    'public-ready-fixture', 'active', 'published', 'valid'
+);
+INSERT INTO feature.feature_routes (feature_id, kind, geom, anchor)
+VALUES (
+    '00000000-0000-0000-0000-000000000024', 'route',
+    x_extension.st_geomfromtext('MULTILINESTRING((126.97 37.56,126.98 37.57))', 4326),
+    x_extension.st_setsrid(x_extension.st_makepoint(126.975, 37.565), 4326)
+);
+SET ROLE ktm_feature_runtime;
+UPDATE feature.feature_routes
+SET public_ready = false
+WHERE feature_id = '00000000-0000-0000-0000-000000000024';
+
+-- case: feature_area_public_ready_direct_update
+INSERT INTO feature.categories (kind, code) VALUES ('area', 'public-ready-fixture');
+INSERT INTO feature.features (
+    feature_id, kind, name, category_code,
+    lifecycle_state, publication_state, quality_state
+) VALUES (
+    '00000000-0000-0000-0000-000000000025', 'area', 'area public-ready 부모',
+    'public-ready-fixture', 'active', 'published', 'valid'
+);
+INSERT INTO feature.feature_areas (feature_id, kind, geom, anchor)
+VALUES (
+    '00000000-0000-0000-0000-000000000025', 'area',
+    x_extension.st_geomfromtext('MULTIPOLYGON(((126.97 37.56,126.98 37.56,126.98 37.57,126.97 37.56)))', 4326),
+    x_extension.st_setsrid(x_extension.st_makepoint(126.975, 37.565), 4326)
+);
+SET ROLE ktm_feature_runtime;
+UPDATE feature.feature_areas
+SET public_ready = false
+WHERE feature_id = '00000000-0000-0000-0000-000000000025';

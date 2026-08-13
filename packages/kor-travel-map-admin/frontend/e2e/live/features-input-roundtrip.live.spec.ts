@@ -1,4 +1,10 @@
-import { expect, test, type Locator, type Page, type Response } from "@playwright/test";
+import {
+  expect,
+  test,
+  type Locator,
+  type Page,
+  type Response,
+} from "@playwright/test";
 
 import * as F from "./_fixtures";
 import type { components } from "../../src/api/types";
@@ -20,7 +26,7 @@ import type { components } from "../../src/api/types";
 //   h1 heading            "Admin features"            (AdminShell title)
 //   search input          getByLabel("feature search")      → q=
 //   kind select           getByLabel("feature kind")        → kind=  (repeated)
-//   status select         getByLabel("feature status")      → status= (repeated, alias of feature_status)
+//   lifecycle select      getByLabel("feature lifecycle state") → lifecycle_state=
 //   sort select           getByLabel("feature sort")        → sort=
 //   page size select      getByLabel("feature page size")   → page_size=
 //   order buttons         getByRole("button", {name:"asc"|"desc"})  → order=
@@ -55,13 +61,6 @@ const RUN_ID = `live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const SEARCH_TERMS = F.SEARCH_TERMS.slice(0, 3); // ["공원","공항","도서관"]
 const KIND = F.KINDS_PRESENT[0] ?? "place"; // kind guaranteed present in prod data
 const PAGE_SIZE = F.PAGE_SIZES[0]; // 25
-const ALL_STATUSES = [
-  "active",
-  "inactive",
-  "hidden",
-  "broken",
-  "deleted",
-] as const;
 
 test.describe.configure({ mode: "serial" });
 
@@ -84,7 +83,10 @@ function isApiResponse(
 async function browserFetch<T>(
   page: Page,
   path: string,
-  options: { body?: unknown; method?: "GET" | "POST" | "PATCH" | "DELETE" } = {},
+  options: {
+    body?: unknown;
+    method?: "GET" | "POST" | "PATCH" | "DELETE";
+  } = {},
 ): Promise<BrowserFetchResult<T>> {
   return page.evaluate(
     async ({ body, method, path }) => {
@@ -269,7 +271,7 @@ test.describe("admin/features live — input → query param → data → UI rou
           page,
           `${ADMIN_FEATURES_PATH}?kind=${encodeURIComponent(
             KIND,
-          )}&status=active&page_size=25&sort=name&order=asc`,
+          )}&lifecycle_state=active&publication_state=published&quality_state=valid&page_size=25&sort=name&order=asc`,
         );
         const items = res.body?.data.items ?? [];
         return items.length > 0 && items.every((item) => item.kind === KIND);
@@ -277,7 +279,7 @@ test.describe("admin/features live — input → query param → data → UI rou
       .toBe(true);
   });
 
-  test("status 필터 변경(all / 단일)이 status 파라미터로 나가고 행이 반영된다", async ({
+  test("수명주기 필터 변경(all / 단일)이 lifecycle_state 파라미터로 나가고 행이 반영된다", async ({
     page,
   }) => {
     test.setTimeout(FLOW_TIMEOUT);
@@ -286,28 +288,32 @@ test.describe("admin/features live — input → query param → data → UI rou
     await page.goto(ROUTE);
     await expectListReady(page);
 
-    // "all" → 5종 status가 반복 파라미터로 전송된다.
+    // "all" → 축 파라미터를 생략한다.
     const all = await captureList(
       page,
-      () => page.getByLabel("feature status").selectOption("all"),
-      (p) => p.getAll("status").length >= ALL_STATUSES.length,
+      () => page.getByLabel("feature lifecycle state").selectOption("all"),
+      (p) => !p.has("lifecycle_state"),
     );
-    expect(new Set(all.params.getAll("status"))).toEqual(new Set(ALL_STATUSES));
-    await expect(page.getByLabel("feature status")).toHaveValue("all");
+    expect(all.params.has("lifecycle_state")).toBe(false);
+    await expect(page.getByLabel("feature lifecycle state")).toHaveValue("all");
     await expectTableReflectsBody(page, all.body);
 
-    // 단일 "inactive" → 단일 status 파라미터, 백엔드 행은 모두 inactive(또는 빈 결과).
-    const inactive = await captureList(
+    // 단일 "retired" → 단일 lifecycle_state 파라미터, 백엔드 행은 모두 retired(또는 빈 결과).
+    const retired = await captureList(
       page,
-      () => page.getByLabel("feature status").selectOption("inactive"),
-      (p) => p.getAll("status").length === 1 && p.get("status") === "inactive",
+      () => page.getByLabel("feature lifecycle state").selectOption("retired"),
+      (p) =>
+        p.getAll("lifecycle_state").length === 1 &&
+        p.get("lifecycle_state") === "retired",
     );
-    expect(inactive.params.getAll("status")).toEqual(["inactive"]);
-    await expect(page.getByLabel("feature status")).toHaveValue("inactive");
-    for (const item of inactive.body.data.items) {
-      expect(item.status).toBe("inactive");
+    expect(retired.params.getAll("lifecycle_state")).toEqual(["retired"]);
+    await expect(page.getByLabel("feature lifecycle state")).toHaveValue(
+      "retired",
+    );
+    for (const item of retired.body.data.items) {
+      expect(item.lifecycle_state).toBe("retired");
     }
-    await expectTableReflectsBody(page, inactive.body);
+    await expectTableReflectsBody(page, retired.body);
   });
 
   test("sort 필드 / asc·desc order 변경이 sort·order 파라미터로 나가고 첫 행 정렬이 바뀐다", async ({
@@ -366,8 +372,10 @@ test.describe("admin/features live — input → query param → data → UI rou
     // page size를 25로 변경 → page_size 파라미터 반영, cursor 리셋(첫 페이지).
     const sized = await captureList(
       page,
-      () => page.getByLabel("feature page size").selectOption(String(PAGE_SIZE)),
-      (p) => p.get("page_size") === String(PAGE_SIZE) && p.get("cursor") === null,
+      () =>
+        page.getByLabel("feature page size").selectOption(String(PAGE_SIZE)),
+      (p) =>
+        p.get("page_size") === String(PAGE_SIZE) && p.get("cursor") === null,
     );
     expect(sized.params.get("page_size")).toBe(String(PAGE_SIZE));
     await expect(page.getByLabel("feature page size")).toHaveValue(
@@ -380,9 +388,9 @@ test.describe("admin/features live — input → query param → data → UI rou
     expect(nextCursor).toBeTruthy();
 
     // 이동 전: 첫 페이지 버튼 비활성(pageIndex<=1).
-    await expect(
-      page.getByRole("button", { name: "첫 페이지" }),
-    ).toBeDisabled(T);
+    await expect(page.getByRole("button", { name: "첫 페이지" })).toBeDisabled(
+      T,
+    );
 
     // 다음 클릭 → cursor 파라미터가 실려 나가고 다음 페이지 행으로 바뀐다.
     const page2 = await captureList(
@@ -402,7 +410,9 @@ test.describe("admin/features live — input → query param → data → UI rou
     expect(page2First).not.toBe(page1First);
 
     // (3) UI 반영: 이동 후 첫 페이지 버튼 활성 + 테이블이 2페이지 응답을 미러링.
-    await expect(page.getByRole("button", { name: "첫 페이지" })).toBeEnabled(T);
+    await expect(page.getByRole("button", { name: "첫 페이지" })).toBeEnabled(
+      T,
+    );
     await expectTableReflectsBody(page, page2.body);
   });
 
@@ -457,10 +467,12 @@ test.describe("admin/features live — input → query param → data → UI rou
       .poll(async () => {
         const res = await browserFetch<AdminFeaturesListResponse>(
           page,
-          `${ADMIN_FEATURES_PATH}?has_issue=false&status=active&page_size=25&sort=name&order=asc`,
+          `${ADMIN_FEATURES_PATH}?has_issue=false&lifecycle_state=active&page_size=25&sort=name&order=asc`,
         );
         const items = res.body?.data.items ?? [];
-        return res.status === 200 && items.every((item) => item.issue_count === 0);
+        return (
+          res.status === 200 && items.every((item) => item.issue_count === 0)
+        );
       }, T)
       .toBe(true);
   });
@@ -547,7 +559,7 @@ test.describe("admin/features live — input → query param → data → UI rou
     }
   });
 
-  test("검색+kind+status 복합 필터가 한 요청에 q·kind·status 파라미터를 모두 싣고 행이 모두 만족한다", async ({
+  test("검색+kind+수명주기 복합 필터가 한 요청에 q·kind·lifecycle_state를 모두 싣고 행이 모두 만족한다", async ({
     page,
   }) => {
     test.setTimeout(FLOW_TIMEOUT);
@@ -557,44 +569,44 @@ test.describe("admin/features live — input → query param → data → UI rou
     await page.goto(ROUTE);
     await expectListReady(page);
 
-    // 검색어 입력(이 시점 status=active 기본). kind=place 선택이 q + kind=[place] +
-    // status=[active]를 한 요청에 함께 싣는다.
+    // 검색어 입력 뒤 active 수명주기를 고정하고 kind=place를 선택한다.
     await page.getByLabel("feature search").fill(term);
+    await page.getByLabel("feature lifecycle state").selectOption("active");
     const combined = await captureList(
       page,
       () => page.getByLabel("feature kind").selectOption(KIND),
       (p) =>
         p.get("q") === term &&
         p.getAll("kind").includes(KIND) &&
-        p.getAll("status").includes("active"),
+        p.getAll("lifecycle_state").includes("active"),
     );
     expect(combined.params.get("q")).toBe(term);
     expect(combined.params.getAll("kind")).toEqual([KIND]);
-    expect(combined.params.getAll("status")).toEqual(["active"]);
-    // 모든 행이 세 필터를 동시에 만족한다(kind=place AND status=active).
+    expect(combined.params.getAll("lifecycle_state")).toEqual(["active"]);
+    // 모든 행이 세 필터를 동시에 만족한다(kind=place AND lifecycle=active).
     for (const item of combined.body.data.items) {
       expect(item.kind).toBe(KIND);
-      expect(item.status).toBe("active");
+      expect(item.lifecycle_state).toBe("active");
     }
     await expect(page.getByLabel("feature search")).toHaveValue(term);
     await expect(page.getByLabel("feature kind")).toHaveValue(KIND);
-    await expect(page.getByLabel("feature status")).toHaveValue("active");
+    await expect(page.getByLabel("feature lifecycle state")).toHaveValue(
+      "active",
+    );
     await expectTableReflectsBody(page, combined.body);
 
-    // status를 all로 바꾸면 q+kind는 유지되고 status만 5종으로 확장된다(다중 필터 합성 유지).
+    // 수명주기를 all로 바꾸면 q+kind는 유지되고 축 파라미터만 빠진다.
     const widened = await captureList(
       page,
-      () => page.getByLabel("feature status").selectOption("all"),
+      () => page.getByLabel("feature lifecycle state").selectOption("all"),
       (p) =>
         p.get("q") === term &&
         p.getAll("kind").includes(KIND) &&
-        p.getAll("status").length >= ALL_STATUSES.length,
+        !p.has("lifecycle_state"),
     );
     expect(widened.params.get("q")).toBe(term);
     expect(widened.params.getAll("kind")).toEqual([KIND]);
-    expect(new Set(widened.params.getAll("status"))).toEqual(
-      new Set(ALL_STATUSES),
-    );
+    expect(widened.params.has("lifecycle_state")).toBe(false);
     for (const item of widened.body.data.items) {
       expect(item.kind).toBe(KIND);
     }
@@ -614,8 +626,7 @@ test.describe("admin/features live — input → query param → data → UI rou
     for (const size of [25, 100, 200, 500, 50] as const) {
       const sized = await captureList(
         page,
-        () =>
-          page.getByLabel("feature page size").selectOption(String(size)),
+        () => page.getByLabel("feature page size").selectOption(String(size)),
         (p) => p.get("page_size") === String(size) && p.get("cursor") === null,
       );
       // (1) page_size 파라미터가 선택값으로 나간다.
@@ -678,6 +689,8 @@ test.describe("admin/features live — input → query param → data → UI rou
     // (2) 백엔드: 세 페이지의 첫 행 id가 모두 다르다(연속 전진, 중복 없음).
     expect(new Set([id1, id2, id3]).size).toBe(3);
     // (3) UI: 3페이지에서 첫 페이지 버튼은 활성 상태다.
-    await expect(page.getByRole("button", { name: "첫 페이지" })).toBeEnabled(T);
+    await expect(page.getByRole("button", { name: "첫 페이지" })).toBeEnabled(
+      T,
+    );
   });
 });

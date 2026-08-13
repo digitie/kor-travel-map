@@ -16,6 +16,7 @@ alembic head(0083 포함)가 적용된 실 PostGIS에서:
 
 from __future__ import annotations
 
+import json
 import uuid as uuid_module
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
@@ -42,8 +43,9 @@ from kortravelmap.dto import (
 )
 from kortravelmap.infra import feature_identity, feature_repo
 from kortravelmap.infra.admin_feature_repo import (
-    _APPLY_FEATURE_ADD_SQL,
+    _CREATE_FEATURE_WITH_INITIAL_STATE_SQL,
     _add_params,
+    _admin_feature_create_payload,
 )
 
 if TYPE_CHECKING:
@@ -404,11 +406,33 @@ async def test_admin_add_sql_writes_uuid_and_alias(
         reason="T-VN-32C 검증",
     )
     sent = _assert_nonderived_uuid_v7(params["feature_uuid"], feature_id=feature_id)
+    # T-VN-34가 admin add를 raw INSERT에서 `feature.create_feature_with_initial_state`
+    # 프로시저로 옮겼다. 검증하려는 불변식(보낸 비파생 UUIDv7이 그대로 저장된다)은
+    # 그대로이므로 프로덕션(`_apply_change`의 add 분기)과 **같은 파라미터 매핑**으로
+    # 같은 프로시저를 태운다 — 테스트만 옛 경로를 붙잡고 있으면 정작 지금 쓰이는
+    # 경로의 회귀를 못 잡는다.
     row = (
-        await migrated_session.execute(text(_APPLY_FEATURE_ADD_SQL), params)
+        await migrated_session.execute(
+            text(_CREATE_FEATURE_WITH_INITIAL_STATE_SQL),
+            {
+                "feature_payload": _admin_feature_create_payload(params),
+                "lifecycle_state": params["lifecycle_state"],
+                "publication_state": params["publication_state"],
+                "quality_state": params["quality_state"],
+                "state_context": json.dumps(
+                    {
+                        "transition_kind": "initial",
+                        "reason_code": "user_request_add",
+                        "principal": "identity-boundary-test",
+                        "causation_ref": params["request_id"],
+                    },
+                    ensure_ascii=False,
+                ),
+            },
+        )
     ).mappings().one()
-    # RETURNING 관측값 == 보낸 후보 == 저장값 (트리거가 바꿔치기하지 않는다).
-    assert row["feature_uuid"] == sent
+    # 프로시저 OUT 값 == 보낸 후보 == 저장값 (트리거가 바꿔치기하지 않는다).
+    assert str(row["o_feature_uuid"]) == sent
     assert await _stored_feature_uuid(migrated_session, feature_id) == sent
 
     alias = (

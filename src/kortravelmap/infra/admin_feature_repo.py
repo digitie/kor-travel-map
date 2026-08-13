@@ -16,15 +16,21 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Final, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal, NoReturn
 
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from kortravelmap.infra.feature_identity import (
     candidate_feature_uuid,
     verify_feature_uuid,
 )
+from kortravelmap.infra.feature_projection import (
+    TYPED_FEATURE_DETAIL_COLUMNS_SQL,
+    typed_feature_detail_joins_sql,
+)
 from kortravelmap.infra.feature_subtype import write_subtype
+from kortravelmap.infra.feature_update_active_repo import _driver_constraint_identity
 from kortravelmap.infra.merge_repo import (
     MergeConflictError,
     MergeNotFoundError,
@@ -48,6 +54,12 @@ __all__ = [
     "AdminFeatureDetailOverride",
     "AdminFeatureDetailSource",
     "AdminFeatureDetailVersion",
+    "AdminFeatureStateTransitionAudit",
+    "AdminFeatureStateTransitionAuditPage",
+    "AdminFeatureStateConflict",
+    "AdminFeatureStateNotFound",
+    "AdminFeatureStatePreconditionFailed",
+    "AdminFeatureStateValidationError",
     "DedupReviewPage",
     "DedupReviewRow",
     "DedupReviewDetail",
@@ -57,18 +69,19 @@ __all__ = [
     "EnrichmentReviewDetail",
     "ReviewFeatureDetail",
     "ReviewSourceDetail",
-    "FeatureDeactivateResult",
-    "FeatureStateConflict",
+    "AdminFeatureStateTransition",
     "FeatureOverride",
     "FeatureChangeConflict",
     "FeaturePreconditionFailed",
     "FeatureChangeRequest",
-    "deactivate_feature",
+    "transition_admin_feature_state",
+    "reactivate_admin_feature_state",
     "submit_feature_change_request",
     "apply_feature_change_request",
     "reject_feature_change_request",
     "list_feature_change_requests",
     "get_admin_feature_detail",
+    "list_admin_feature_state_transitions",
     "admin_feature_card_target_exists",
     "get_feature_row_revision",
     "get_dedup_review_detail",
@@ -87,7 +100,6 @@ AdminFeatureSort = Literal[
     "updated_at",
     "created_at",
     "kind",
-    "status",
     "provider",
     "issue_count",
 ]
@@ -109,7 +121,9 @@ class AdminFeatureRow:
     kind: str
     name: str
     category: str
-    status: str
+    lifecycle_state: str
+    publication_state: str
+    quality_state: str
     lon: float | None
     lat: float | None
     address_label: str
@@ -141,7 +155,9 @@ class AdminFeatureDetailFeature:
     kind: str
     name: str
     category: str
-    status: str
+    lifecycle_state: str
+    publication_state: str
+    quality_state: str
     lon: float | None
     lat: float | None
     coord_precision_digits: int | None
@@ -162,15 +178,8 @@ class AdminFeatureDetailFeature:
     data_origin: str
     data_version: int
     row_revision: int
-    user_change_kind: str | None
-    user_change_status: str | None
-    user_change_request_id: str | None
-    user_deleted_at: datetime | None
-    user_deleted_by: str | None
-    user_change_reason: str | None
     created_at: datetime
     updated_at: datetime
-    deleted_at: datetime | None
     area_square_meters: float | None = None
     feature_uuid: str | None = None
 
@@ -286,6 +295,7 @@ class AdminFeatureDetail:
     versions: tuple[AdminFeatureDetailVersion, ...]
     change_requests: tuple[FeatureChangeRequest, ...]
     files: tuple[AdminFeatureDetailFile, ...]
+    state_transitions: tuple[AdminFeatureStateTransitionAudit, ...]
 
 
 @dataclass(frozen=True)
@@ -303,37 +313,72 @@ class FeatureOverride:
 
 
 @dataclass(frozen=True)
-class FeatureDeactivateResult:
-    """``POST /admin/features/{feature_id}/deactivate`` 결과."""
+class AdminFeatureStateTransition:
+    """Admin state command가 원자적으로 남긴 상태·revision·감사 식별자."""
 
     feature_id: str
-    previous_status: str
-    status: str
-    override_created: bool
-    override: FeatureOverride | None
+    lifecycle_state: str
+    publication_state: str
+    quality_state: str
+    row_revision: int
+    audit_transition_id: int
 
 
-class FeatureStateConflict(ValueError):
-    """feature 상태가 요청한 admin 전이를 허용하지 않을 때 발생."""
+@dataclass(frozen=True)
+class AdminFeatureStateTransitionAudit:
+    """Append-only state audit timeline의 한 행.
 
-    def __init__(
-        self,
-        *,
-        feature_id: str,
-        current_status: str,
-        deleted_at: datetime | None,
-        target_status: str,
-    ) -> None:
+    Legacy ``status``/tombstone을 재구성하지 않는다. 요청자가 실제로 바꾼
+    before/after tuple과 DB가 확정한 provenance를 그대로 반환한다.
+    """
+
+    transition_id: int
+    from_lifecycle_state: str | None
+    from_publication_state: str | None
+    from_quality_state: str | None
+    to_lifecycle_state: str
+    to_publication_state: str
+    to_quality_state: str
+    transition_kind: str
+    reason_code: str
+    principal: str
+    causation_ref: str | None
+    provider_dataset_id: int | None
+    source_entity_key: str | None
+    source_record_key: str | None
+    occurred_at: datetime
+    row_revision: int
+
+
+@dataclass(frozen=True)
+class AdminFeatureStateTransitionAuditPage:
+    """Newest-first audit keyset page."""
+
+    items: tuple[AdminFeatureStateTransitionAudit, ...]
+    next_cursor: int | None
+
+
+class AdminFeatureStateConflict(ValueError):
+    """DB-owned state command가 현재 tuple/provenance와 충돌할 때의 domain 오류."""
+
+
+class AdminFeatureStateNotFound(ValueError):
+    """State command target 또는 required current source evidence가 없을 때의 오류."""
+
+
+class AdminFeatureStatePreconditionFailed(ValueError):
+    """Stored procedure가 expected revision이 stale함을 확인했을 때의 오류."""
+
+    def __init__(self, *, feature_id: str, expected: int) -> None:
         self.feature_id = feature_id
-        self.current_status = current_status
-        self.deleted_at = deleted_at
-        self.target_status = target_status
-        reason = f"status={current_status!r}"
-        if deleted_at is not None:
-            reason = f"{reason}, deleted_at={deleted_at.isoformat()}"
+        self.expected = expected
         super().__init__(
-            f"feature {feature_id!r}는 {target_status!r} 전이를 허용하지 않음: {reason}"
+            f"feature {feature_id!r} If-Match 불일치: expected row_revision={expected}"
         )
+
+
+class AdminFeatureStateValidationError(ValueError):
+    """Stored procedure가 command tuple/no-op을 reject했을 때의 422 domain 오류."""
 
 
 class FeatureChangeConflict(ValueError):
@@ -344,19 +389,19 @@ class FeatureChangeConflict(ValueError):
         *,
         feature_id: str,
         action: str,
-        current_status: str | None = None,
-        user_deleted_at: datetime | None = None,
+        lifecycle_state: str | None = None,
+        publication_state: str | None = None,
+        quality_state: str | None = None,
         message: str | None = None,
     ) -> None:
         self.feature_id = feature_id
         self.action = action
-        self.current_status = current_status
-        self.user_deleted_at = user_deleted_at
+        self.lifecycle_state = lifecycle_state
+        self.publication_state = publication_state
+        self.quality_state = quality_state
         if message is None:
-            reason = f"status={current_status!r}"
-            if user_deleted_at is not None:
-                reason = f"{reason}, user_deleted_at={user_deleted_at.isoformat()}"
-            message = f"feature {feature_id!r}는 {action!r} 적용 불가: {reason}"
+            state = (lifecycle_state, publication_state, quality_state)
+            message = f"feature {feature_id!r}는 {action!r} 적용 불가: state={state!r}"
         super().__init__(message)
 
 
@@ -473,7 +518,9 @@ class ReviewFeatureDetail:
     kind: str
     name: str
     category: str
-    status: str
+    lifecycle_state: str
+    publication_state: str
+    quality_state: str
     lon: float | None
     lat: float | None
     address: dict[str, Any]
@@ -514,11 +561,10 @@ _ADMIN_FEATURE_SORT_COLUMNS: Final[dict[str, str]] = {
     "updated_at": "updated_at",
     "created_at": "created_at",
     "kind": "kind",
-    "status": "status",
     "provider": "sort_provider",
     "issue_count": "issue_count",
 }
-_TEXT_SORTS: Final[set[str]] = {"name", "kind", "status", "provider"}
+_TEXT_SORTS: Final[set[str]] = {"name", "kind", "provider"}
 _DATETIME_SORTS: Final[set[str]] = {"updated_at", "created_at"}
 
 
@@ -576,17 +622,27 @@ def _admin_bbox_coord_where_sql(alias: str) -> str:
 
 
 def _admin_bbox_filters_sql(alias: str) -> str:
-    """Admin item/cluster 공통 운영 상태·속성 필터."""
+    """Admin-any item/cluster 공통 축·속성 필터.
+
+    Admin은 공개 predicate를 재사용하지 않는다. 세 축 filter는 각각 같은 축 안에서는
+    OR, 축 사이는 AND로 결합하므로 draft/suppressed/quarantined 검토 대상을 빠뜨리지
+    않는다.
+    """
 
     if not alias.isidentifier():
         raise ValueError("feature alias must be a SQL identifier")
     return f"""
-  AND {alias}.deleted_at IS NULL
-  AND {alias}.user_deleted_at IS NULL
-  AND {alias}.status <> 'deleted'
   AND (
-    CAST(:statuses AS text[]) IS NULL
-    OR {alias}.status = ANY(CAST(:statuses AS text[]))
+    CAST(:lifecycle_states AS text[]) IS NULL
+    OR {alias}.lifecycle_state = ANY(CAST(:lifecycle_states AS text[]))
+  )
+  AND (
+    CAST(:publication_states AS text[]) IS NULL
+    OR {alias}.publication_state = ANY(CAST(:publication_states AS text[]))
+  )
+  AND (
+    CAST(:quality_states AS text[]) IS NULL
+    OR {alias}.quality_state = ANY(CAST(:quality_states AS text[]))
   )
   AND (
     CAST(:kinds AS text[]) IS NULL
@@ -641,7 +697,9 @@ candidates AS (
         f.category,
         f.marker_icon,
         f.marker_color,
-        f.status,
+        f.lifecycle_state,
+        f.publication_state,
+        f.quality_state,
         f.coord AS marker_coord,
         CAST(NULL AS jsonb) AS geometry,
         CAST(NULL AS double precision) AS area_square_meters
@@ -661,7 +719,9 @@ candidates AS (
         f.category,
         f.marker_icon,
         f.marker_color,
-        f.status,
+        f.lifecycle_state,
+        f.publication_state,
+        f.quality_state,
         x_extension.ST_PointOnSurface(
           x_extension.ST_Intersection(fg.geom, {_admin_bbox_envelope_sql()})
         ) AS marker_coord,
@@ -840,7 +900,9 @@ SELECT
     x_extension.ST_Y(c.marker_coord) AS lat,
     c.marker_icon,
     c.marker_color,
-    c.status,
+    c.lifecycle_state,
+    c.publication_state,
+    c.quality_state,
     c.geometry,
     c.area_square_meters,
     price_summaries.price_summary,
@@ -1018,8 +1080,6 @@ def _encode_cursor(item: AdminFeatureRow, *, sort: str, order: str) -> str:
         sort_value = item.created_at.isoformat()
     elif sort == "kind":
         sort_value = item.kind
-    elif sort == "status":
-        sort_value = item.status
     elif sort == "provider":
         sort_value = item.primary_provider or ""
     elif sort == "issue_count":
@@ -1256,7 +1316,9 @@ WITH base AS (
         f.name,
         lower(f.name) AS sort_name,
         f.category,
-        f.status,
+        f.lifecycle_state,
+        f.publication_state,
+        f.quality_state,
         x_extension.ST_X(f.coord) AS lon,
         x_extension.ST_Y(f.coord) AS lat,
         COALESCE(
@@ -1332,8 +1394,16 @@ WITH base AS (
         OR f.category = ANY(CAST(:categories AS text[]))
       )
       AND (
-        CAST(:statuses AS text[]) IS NULL
-        OR f.status = ANY(CAST(:statuses AS text[]))
+        CAST(:lifecycle_states AS text[]) IS NULL
+        OR f.lifecycle_state = ANY(CAST(:lifecycle_states AS text[]))
+      )
+      AND (
+        CAST(:publication_states AS text[]) IS NULL
+        OR f.publication_state = ANY(CAST(:publication_states AS text[]))
+      )
+      AND (
+        CAST(:quality_states AS text[]) IS NULL
+        OR f.quality_state = ANY(CAST(:quality_states AS text[]))
       )
       AND (
         CAST(:provider_dataset_id AS bigint) IS NULL
@@ -1375,7 +1445,9 @@ def _admin_feature_row(row: Any) -> AdminFeatureRow:
         kind=str(row["kind"]),
         name=str(row["name"]),
         category=str(row["category"]),
-        status=str(row["status"]),
+        lifecycle_state=str(row["lifecycle_state"]),
+        publication_state=str(row["publication_state"]),
+        quality_state=str(row["quality_state"]),
         lon=float(row["lon"]) if row["lon"] is not None else None,
         lat=float(row["lat"]) if row["lat"] is not None else None,
         address_label=str(row["address_label"] or ""),
@@ -1388,53 +1460,46 @@ def _admin_feature_row(row: Any) -> AdminFeatureRow:
     )
 
 
-# T-VN-35(0086): ``detail``/``geom``은 core에 없다 — subtype 5종을 조립하는
-# ``feature.features_detailed`` 뷰가 유일한 조립 정본이다. 단건 PK 조회라
-# 뷰 조인 비용이 무시할 수준이고, 조립 규칙을 repo가 복제하지 않는다.
-_ADMIN_FEATURE_DETAIL_SQL: Final[str] = """
+_ADMIN_FEATURE_DETAIL_SQL: Final[str] = f"""
 SELECT
-    feature_id,
-    CAST(feature_uuid AS text) AS feature_uuid,
-    kind,
-    name,
-    category,
-    status,
-    x_extension.ST_X(coord) AS lon,
-    x_extension.ST_Y(coord) AS lat,
-    coord_precision_digits,
+    f.feature_id,
+    CAST(f.feature_uuid AS text) AS feature_uuid,
+    f.kind,
+    f.name,
+    f.category,
+    f.lifecycle_state,
+    f.publication_state,
+    f.quality_state,
+    x_extension.ST_X(f.coord) AS lon,
+    x_extension.ST_Y(f.coord) AS lat,
+    f.coord_precision_digits,
     CASE
-      WHEN kind = 'area' AND geom IS NOT NULL
-      THEN x_extension.ST_Area(CAST(geom AS x_extension.geography))
+      WHEN f.kind = 'area' AND a.geom IS NOT NULL
+      THEN x_extension.ST_Area(CAST(a.geom AS x_extension.geography))
       ELSE NULL
     END AS area_square_meters,
-    address,
-    detail,
-    urls,
-    raw_refs,
-    legal_dong_code,
-    road_name_code,
-    road_address_management_no,
-    admin_dong_code,
-    sido_code,
-    sigungu_code,
-    marker_icon,
-    marker_color,
-    parent_feature_id,
-    sibling_group_id::text AS sibling_group_id,
-    data_origin,
-    data_version,
-    row_revision,
-    user_change_kind,
-    user_change_status,
-    user_change_request_id::text AS user_change_request_id,
-    user_deleted_at,
-    user_deleted_by,
-    user_change_reason,
-    created_at,
-    updated_at,
-    deleted_at
-FROM feature.features_detailed
-WHERE feature_id = :feature_id
+    f.address,
+    {TYPED_FEATURE_DETAIL_COLUMNS_SQL},
+    f.urls,
+    f.raw_refs,
+    f.legal_dong_code,
+    f.road_name_code,
+    f.road_address_management_no,
+    f.admin_dong_code,
+    f.sido_code,
+    f.sigungu_code,
+    f.marker_icon,
+    f.marker_color,
+    f.parent_feature_id,
+    f.sibling_group_id::text AS sibling_group_id,
+    f.data_origin,
+    f.data_version,
+    f.row_revision,
+    f.created_at,
+    f.updated_at
+FROM feature.features AS f
+{typed_feature_detail_joins_sql("f")}
+WHERE f.feature_id = :feature_id
 """
 
 _ADMIN_FEATURE_SOURCES_SQL: Final[str] = """
@@ -1592,7 +1657,9 @@ def _admin_feature_detail_feature(row: Any) -> AdminFeatureDetailFeature:
         kind=str(row["kind"]),
         name=str(row["name"]),
         category=str(row["category"]),
-        status=str(row["status"]),
+        lifecycle_state=str(row["lifecycle_state"]),
+        publication_state=str(row["publication_state"]),
+        quality_state=str(row["quality_state"]),
         lon=_float_or_none(row["lon"]),
         lat=_float_or_none(row["lat"]),
         coord_precision_digits=(
@@ -1618,15 +1685,8 @@ def _admin_feature_detail_feature(row: Any) -> AdminFeatureDetailFeature:
         data_origin=str(row["data_origin"]),
         data_version=int(row["data_version"]),
         row_revision=int(row["row_revision"]),
-        user_change_kind=row["user_change_kind"],
-        user_change_status=row["user_change_status"],
-        user_change_request_id=row["user_change_request_id"],
-        user_deleted_at=row["user_deleted_at"],
-        user_deleted_by=row["user_deleted_by"],
-        user_change_reason=row["user_change_reason"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
-        deleted_at=row["deleted_at"],
     )
 
 
@@ -1791,6 +1851,102 @@ async def get_admin_feature_detail(
         versions=tuple(_admin_feature_detail_version(row) for row in versions),
         change_requests=tuple(_feature_change_row(row) for row in change_requests),
         files=await _list_admin_feature_files(session, feature_id),
+        state_transitions=(
+            await list_admin_feature_state_transitions(session, feature_id, limit=50)
+        ).items,
+    )
+
+
+_ADMIN_FEATURE_STATE_TRANSITIONS_SQL: Final[str] = """
+SELECT
+    transition_id,
+    from_lifecycle_state,
+    from_publication_state,
+    from_quality_state,
+    to_lifecycle_state,
+    to_publication_state,
+    to_quality_state,
+    transition_kind,
+    reason_code,
+    principal,
+    causation_ref,
+    provider_dataset_id,
+    source_entity_key,
+    source_record_key,
+    occurred_at,
+    row_revision
+FROM feature.feature_state_transitions
+WHERE feature_id = :feature_id
+  AND (
+    CAST(:before_transition_id AS bigint) IS NULL
+    OR transition_id < CAST(:before_transition_id AS bigint)
+  )
+ORDER BY transition_id DESC
+LIMIT :limit_plus_one
+"""
+
+
+def _admin_feature_state_transition_audit(
+    row: Any,
+) -> AdminFeatureStateTransitionAudit:
+    return AdminFeatureStateTransitionAudit(
+        transition_id=int(row["transition_id"]),
+        from_lifecycle_state=row["from_lifecycle_state"],
+        from_publication_state=row["from_publication_state"],
+        from_quality_state=row["from_quality_state"],
+        to_lifecycle_state=str(row["to_lifecycle_state"]),
+        to_publication_state=str(row["to_publication_state"]),
+        to_quality_state=str(row["to_quality_state"]),
+        transition_kind=str(row["transition_kind"]),
+        reason_code=str(row["reason_code"]),
+        principal=str(row["principal"]),
+        causation_ref=row["causation_ref"],
+        provider_dataset_id=(
+            int(row["provider_dataset_id"])
+            if row["provider_dataset_id"] is not None
+            else None
+        ),
+        source_entity_key=row["source_entity_key"],
+        source_record_key=row["source_record_key"],
+        occurred_at=row["occurred_at"],
+        row_revision=int(row["row_revision"]),
+    )
+
+
+async def list_admin_feature_state_transitions(
+    session: AsyncSession,
+    feature_id: str,
+    *,
+    limit: int = 50,
+    before_transition_id: int | None = None,
+) -> AdminFeatureStateTransitionAuditPage:
+    """Feature별 append-only audit를 newest-first identity keyset으로 읽는다."""
+
+    if limit <= 0:
+        raise ValueError("limit must be greater than 0")
+    if before_transition_id is not None and before_transition_id <= 0:
+        raise ValueError("before_transition_id must be positive")
+    effective_limit = min(limit, 200)
+    rows = (
+        await session.execute(
+            text(_ADMIN_FEATURE_STATE_TRANSITIONS_SQL),
+            {
+                "feature_id": feature_id,
+                "before_transition_id": before_transition_id,
+                "limit_plus_one": effective_limit + 1,
+            },
+        )
+    ).mappings().all()
+    items = tuple(
+        _admin_feature_state_transition_audit(row)
+        for row in rows[:effective_limit]
+    )
+    next_cursor = (
+        items[-1].transition_id if len(rows) > effective_limit and items else None
+    )
+    return AdminFeatureStateTransitionAuditPage(
+        items=items,
+        next_cursor=next_cursor,
     )
 
 
@@ -1835,7 +1991,9 @@ def _review_feature_detail(row: AdminFeatureDetail) -> ReviewFeatureDetail:
         kind=feature.kind,
         name=feature.name,
         category=feature.category,
-        status=feature.status,
+        lifecycle_state=feature.lifecycle_state,
+        publication_state=feature.publication_state,
+        quality_state=feature.quality_state,
         lon=feature.lon,
         lat=feature.lat,
         address=feature.address,
@@ -1866,17 +2024,19 @@ async def admin_features_in_bbox(
     min_lat: float,
     max_lon: float,
     max_lat: float,
-    statuses: Sequence[str] | None = None,
+    lifecycle_states: Sequence[str] | None = None,
+    publication_states: Sequence[str] | None = None,
+    quality_states: Sequence[str] | None = None,
     kinds: Sequence[str] | None = None,
     categories: Sequence[str] | None = None,
     providers: Sequence[str] | None = None,
     include_geometry: bool = False,
     limit: int = 2000,
 ) -> list[dict[str, Any]]:
-    """삭제 전 base Feature를 bbox에서 조회한다.
+    """Admin-any base Feature를 bbox에서 조회한다.
 
-    공개 projection을 사용하지 않으며 ``draft``·``inactive``·``hidden``·``broken``을
-    운영자가 상태 필터로 찾을 수 있다. route/area는 bbox MBR 후보 뒤 exact
+    공개 projection을 사용하지 않으며 draft/suppressed/quarantined/retired를
+    축 filter로 찾을 수 있다. route/area는 bbox MBR 후보 뒤 exact
     ``ST_Intersects``를 적용하고, ``include_geometry``는 payload만 제어한다.
     """
 
@@ -1890,7 +2050,9 @@ async def admin_features_in_bbox(
                 "min_lat": min_lat,
                 "max_lon": max_lon,
                 "max_lat": max_lat,
-                "statuses": _normalize_values(statuses),
+                "lifecycle_states": _normalize_values(lifecycle_states),
+                "publication_states": _normalize_values(publication_states),
+                "quality_states": _normalize_values(quality_states),
                 "kinds": _normalize_values(kinds),
                 "categories": _normalize_values(categories),
                 "providers": _normalize_values(providers),
@@ -1910,7 +2072,9 @@ async def cluster_admin_features_in_bbox(
     max_lon: float,
     max_lat: float,
     cluster_unit: str,
-    statuses: Sequence[str] | None = None,
+    lifecycle_states: Sequence[str] | None = None,
+    publication_states: Sequence[str] | None = None,
+    quality_states: Sequence[str] | None = None,
     kinds: Sequence[str] | None = None,
     categories: Sequence[str] | None = None,
     providers: Sequence[str] | None = None,
@@ -1930,7 +2094,9 @@ async def cluster_admin_features_in_bbox(
                 "min_lat": min_lat,
                 "max_lon": max_lon,
                 "max_lat": max_lat,
-                "statuses": _normalize_values(statuses),
+                "lifecycle_states": _normalize_values(lifecycle_states),
+                "publication_states": _normalize_values(publication_states),
+                "quality_states": _normalize_values(quality_states),
                 "kinds": _normalize_values(kinds),
                 "categories": _normalize_values(categories),
                 "providers": _normalize_values(providers),
@@ -1955,7 +2121,9 @@ async def list_admin_features(
     q: str | None = None,
     kinds: Sequence[str] | None = None,
     categories: Sequence[str] | None = None,
-    statuses: Sequence[str] | None = ("active",),
+    lifecycle_states: Sequence[str] | None = None,
+    publication_states: Sequence[str] | None = None,
+    quality_states: Sequence[str] | None = None,
     provider_dataset_id: int | None = None,
     has_coord: bool | None = None,
     has_issue: bool | None = None,
@@ -1990,7 +2158,9 @@ async def list_admin_features(
         "q_exact_uuid": q_exact_uuid,
         "kinds": _normalize_values(kinds),
         "categories": _normalize_values(categories),
-        "statuses": _normalize_values(statuses),
+        "lifecycle_states": _normalize_values(lifecycle_states),
+        "publication_states": _normalize_values(publication_states),
+        "quality_states": _normalize_values(quality_states),
         "provider_dataset_id": provider_dataset_id,
         "has_coord": has_coord,
         "has_issue": has_issue,
@@ -2023,54 +2193,33 @@ async def list_admin_features(
     return AdminFeaturePage(items=items, next_cursor=next_cursor)
 
 
-_DEACTIVATE_FEATURE_SQL: Final[str] = """
-WITH locked AS (
-    SELECT feature_id, status, deleted_at
-    FROM feature.features
-    WHERE feature_id = :feature_id
-    FOR UPDATE
-),
-updated AS (
-    UPDATE feature.features AS f
-    SET status = 'inactive', updated_at = now()
-    FROM locked
-    WHERE f.feature_id = locked.feature_id
-      AND locked.deleted_at IS NULL
-      AND locked.status <> 'deleted'
-    RETURNING f.feature_id, locked.status AS previous_status, f.status
+_TRANSITION_FEATURE_STATE_SQL: Final[str] = """
+CALL feature.transition_feature_state(
+    CAST(:feature_id AS text),
+    CAST(:lifecycle_state AS text),
+    CAST(:publication_state AS text),
+    CAST(:quality_state AS text),
+    CAST(:expected_row_revision AS bigint),
+    CAST(:state_context AS jsonb),
+    NULL, NULL
 )
-SELECT feature_id, previous_status, status
-FROM updated
 """
 
-_DEACTIVATE_FEATURE_STATE_SQL: Final[str] = """
-SELECT feature_id, status, deleted_at
-FROM feature.features
-WHERE feature_id = :feature_id
-FOR UPDATE
+_AUTHOR_LIFECYCLE_OVERRIDE_SQL: Final[str] = """
+CALL feature.author_lifecycle_override(
+    CAST(:feature_id AS text),
+    CAST(:source_lifecycle_state AS text),
+    CAST(:override_lifecycle_state AS text),
+    CAST(:prevent_provider_reactivation AS boolean),
+    CAST(:reason AS text),
+    CAST(:operator AS text),
+    CAST(:expected_row_revision AS bigint),
+    NULL
+)
 """
 
-_UPSERT_STATUS_OVERRIDE_SQL: Final[str] = """
-INSERT INTO ops.feature_overrides (
-    feature_id, source_record_key, field_path,
-    source_value, override_value, prevent_provider_reactivation,
-    status, reason, created_by
-) VALUES (
-    :feature_id, NULL, 'status',
-    to_jsonb(CAST(:source_value AS text)),
-    to_jsonb('inactive'::text),
-    :prevent_provider_reactivation,
-    'active', :reason, :operator
-)
-ON CONFLICT (feature_id, field_path) WHERE status = 'active'
-DO UPDATE SET
-    source_value = EXCLUDED.source_value,
-    override_value = EXCLUDED.override_value,
-    prevent_provider_reactivation = EXCLUDED.prevent_provider_reactivation,
-    reason = EXCLUDED.reason,
-    created_by = EXCLUDED.created_by,
-    created_at = now()
-RETURNING
+_GET_ACTIVE_LIFECYCLE_OVERRIDE_SQL: Final[str] = """
+SELECT
     override_id::text,
     feature_id,
     field_path,
@@ -2079,6 +2228,10 @@ RETURNING
     reason,
     created_by,
     created_at
+FROM ops.feature_overrides
+WHERE feature_id = :feature_id
+  AND field_path = 'lifecycle_state'
+  AND status = 'active'
 """
 
 
@@ -2099,60 +2252,250 @@ def _feature_override(row: Any) -> FeatureOverride:
     )
 
 
-async def deactivate_feature(
+_TRANSITION_ADMIN_FEATURE_STATE_SQL: Final[str] = """
+CALL feature.transition_admin_feature_state(
+    CAST(:feature_id AS text),
+    CAST(:lifecycle_state AS text),
+    CAST(:publication_state AS text),
+    CAST(:quality_state AS text),
+    CAST(:expected_row_revision AS bigint),
+    CAST(:reason_code AS text),
+    CAST(:operator AS text),
+    CAST(:action AS text),
+    NULL, NULL, NULL
+)
+"""
+
+_REACTIVATE_ADMIN_FEATURE_STATE_SQL: Final[str] = """
+CALL feature.reactivate_admin_feature_state(
+    CAST(:feature_id AS text),
+    CAST(:provider_dataset_id AS bigint),
+    CAST(:source_entity_key AS text),
+    CAST(:source_record_key AS text),
+    CAST(:expected_row_revision AS bigint),
+    CAST(:reason_code AS text),
+    CAST(:operator AS text),
+    NULL, NULL, NULL
+)
+"""
+
+_ADMIN_STATE_TRANSITION_RESULT_SQL: Final[str] = """
+SELECT feature_id, lifecycle_state, publication_state, quality_state, row_revision
+FROM feature.features
+WHERE feature_id = :feature_id
+  AND row_revision = :row_revision
+"""
+
+
+def _validated_operator_and_reason_code(*, operator: str, reason_code: str) -> None:
+    if not operator.strip():
+        raise ValueError("admin state transition에는 authenticated operator가 필요합니다.")
+    if not reason_code.strip():
+        raise ValueError("admin state transition에는 non-empty reason_code가 필요합니다.")
+
+
+# asyncpg에서 constraint 이름은 ``error.orig``가 아니라 그 **__cause__**(원본
+# asyncpg 예외)에 있다. ``error.orig``는 SQLAlchemy가 만든 DBAPI 래퍼라
+# ``sqlstate``는 갖지만 ``constraint_name``도 ``diag``도 갖지 않는다. 예전
+# ``_pg_error_attribute``는 ``orig``만 봐서 constraint가 **항상 None**이었고, 그래서
+# 아래 두 집합의 이름이 하나도 매칭되지 않았다 — 매핑 전체가 죽은 코드였고
+# 모든 23514가 라우터의 except 사슬을 통과해 catch-all 500이 됐다(2026-08-12 적대
+# 리뷰 실측). 저장소에는 이미 예외 사슬을 순회하는 올바른 추출기가 있으므로
+# 두 벌을 두지 않고 그것을 쓴다.
+
+
+# 현재 tuple과 **충돌**하는 요청 — 요청 자체는 형식이 맞고, 지금 상태에서만 불가능하다.
+_ADMIN_STATE_CONFLICT_CONSTRAINTS: Final[frozenset[str]] = frozenset(
+    {
+        "ck_feature_provider_source_provenance",
+        "ck_feature_provider_reactivation_override",
+        "ck_feature_admin_reactivation",
+        # retired feature에 published/draft를 요구하는 patch. 요청 axis 값 자체는
+        # 유효하고 현재 lifecycle과의 조합만 불가능하므로 위 reactivation 충돌과
+        # 같은 부류다. 이 이름이 빠져 있는 동안 raw IntegrityError가 라우터의 except를
+        # 전부 통과해 catch-all 500이 됐다 — 선언된 응답 집합에도 없는 상태였다.
+        "ck_features_state_tuple",
+    }
+)
+
+# 요청 자체가 성립하지 않는다 — 현재 상태와 무관하게 거부된다.
+_ADMIN_STATE_VALIDATION_CONSTRAINTS: Final[frozenset[str]] = frozenset(
+    {
+        "ck_feature_admin_state_command",
+        "ck_feature_state_transition_non_noop",
+        "ck_feature_state_expected_revision",
+        # axis enum. API schema가 먼저 걸러내지만, schema와 DDL이 갈리는 순간
+        # 500으로 새지 않게 2차 방어를 둔다.
+        "ck_features_lifecycle_state",
+        "ck_features_publication_state",
+        "ck_features_quality_state",
+    }
+)
+
+
+def _raise_admin_state_procedure_error(
+    error: DBAPIError,
+    *,
+    feature_id: str,
+    expected_row_revision: int,
+) -> NoReturn:
+    """0097 state procedure의 DB contract를 HTTP-domain 오류로 보존한다.
+
+    매핑에 없는 23514는 raw로 다시 던진다 — 조용히 도메인 오류로 바꾸면 진짜
+    불변식 위반(=버그)이 정상 응답처럼 보인다. 대신 이름이 실제 DDL에 존재하는지는
+    ``test_admin_state_error_mapping_names_exist_in_ddl``이 fail-close로 지킨다.
+    """
+
+    sqlstate, constraint = _driver_constraint_identity(error)
+    if sqlstate == "P0002":
+        raise AdminFeatureStateNotFound(f"feature/source evidence 없음: {feature_id!r}") from error
+    if sqlstate == "40001":
+        raise AdminFeatureStatePreconditionFailed(
+            feature_id=feature_id,
+            expected=expected_row_revision,
+        ) from error
+    if sqlstate == "23514":
+        if constraint in _ADMIN_STATE_CONFLICT_CONSTRAINTS:
+            raise AdminFeatureStateConflict(str(error.orig)) from error
+        if constraint in _ADMIN_STATE_VALIDATION_CONSTRAINTS:
+            raise AdminFeatureStateValidationError(str(error.orig)) from error
+    raise error
+
+
+async def _admin_state_transition_result(
+    session: AsyncSession,
+    *,
+    transition: Any,
+) -> AdminFeatureStateTransition:
+    """Procedure OUT identity와 현재 tuple을 같은 revision으로 결합한다.
+
+    ``transition_id``를 "latest audit row"의 느슨한 정렬로 재조회하지 않는다.
+    security-definer procedure가 반환한 exact identity와 exact revision을 함께
+    사용하므로 다른 writer가 같은 Feature를 갱신해도 audit receipt가 바뀌지 않는다.
+    """
+
+    feature_id = str(transition["o_feature_id"])
+    row_revision = int(transition["o_row_revision"])
+    row = (
+        await session.execute(
+            text(_ADMIN_STATE_TRANSITION_RESULT_SQL),
+            {"feature_id": feature_id, "row_revision": row_revision},
+        )
+    ).mappings().one()
+    return AdminFeatureStateTransition(
+        feature_id=str(row["feature_id"]),
+        lifecycle_state=str(row["lifecycle_state"]),
+        publication_state=str(row["publication_state"]),
+        quality_state=str(row["quality_state"]),
+        row_revision=int(row["row_revision"]),
+        audit_transition_id=int(transition["o_transition_id"]),
+    )
+
+
+async def transition_admin_feature_state(
     session: AsyncSession,
     feature_id: str,
     *,
-    reason: str,
-    operator: str | None = None,
-    prevent_provider_reactivation: bool = True,
-) -> FeatureDeactivateResult | None:
-    """feature를 inactive로 전환하고, 필요 시 active status override를 남긴다."""
-    row = (
-        await session.execute(
-            text(_DEACTIVATE_FEATURE_SQL),
-            {"feature_id": feature_id},
-        )
-    ).mappings().first()
-    if row is None:
-        state_row = (
-            await session.execute(
-                text(_DEACTIVATE_FEATURE_STATE_SQL),
-                {"feature_id": feature_id},
-            )
-        ).mappings().first()
-        if state_row is not None:
-            raise FeatureStateConflict(
-                feature_id=str(state_row["feature_id"]),
-                current_status=str(state_row["status"]),
-                deleted_at=state_row["deleted_at"],
-                target_status="inactive",
-            )
-        return None
+    lifecycle_state: str | None = None,
+    publication_state: str | None = None,
+    quality_state: str | None = None,
+    expected_row_revision: int,
+    reason_code: str,
+    operator: str,
+    action: Literal["patch", "retire"],
+) -> AdminFeatureStateTransition:
+    """Admin state command를 DB-owned atomic procedure로 실행한다.
 
-    override = None
-    if prevent_provider_reactivation:
-        override_row = (
+    ``patch``는 publication/quality 중 하나 이상만 받고 lifecycle은 건드리지
+    않는다. ``retire``는 어떤 axis도 받지 않으며 DB가 current quality를 보존해
+    `(retired, suppressed, current quality)`와 lifecycle override를 한 revision으로
+    만든다. reason code는 append-only audit에 그대로 보존된다.
+    """
+
+    _validated_operator_and_reason_code(
+        operator=operator, reason_code=reason_code
+    )
+    if action == "patch":
+        if lifecycle_state is not None:
+            raise ValueError("admin state patch는 lifecycle_state를 변경할 수 없습니다.")
+        if publication_state is None and quality_state is None:
+            raise ValueError(
+                "admin state patch에는 publication_state 또는 quality_state가 필요합니다."
+            )
+    else:
+        if any(
+            value is not None
+            for value in (lifecycle_state, publication_state, quality_state)
+        ):
+            raise ValueError("admin retire action은 state axis를 함께 받을 수 없습니다.")
+
+    try:
+        transition = (
             await session.execute(
-                text(_UPSERT_STATUS_OVERRIDE_SQL),
+                text(_TRANSITION_ADMIN_FEATURE_STATE_SQL),
                 {
                     "feature_id": feature_id,
-                    "source_value": row["previous_status"],
-                    "prevent_provider_reactivation": prevent_provider_reactivation,
-                    "reason": reason,
+                    "lifecycle_state": lifecycle_state,
+                    "publication_state": publication_state,
+                    "quality_state": quality_state,
+                    "expected_row_revision": expected_row_revision,
+                    "reason_code": reason_code,
+                    "operator": operator,
+                    "action": action,
+                },
+            )
+        ).mappings().one()
+    except DBAPIError as error:
+        _raise_admin_state_procedure_error(
+            error,
+            feature_id=feature_id,
+            expected_row_revision=expected_row_revision,
+        )
+    return await _admin_state_transition_result(session, transition=transition)
+
+
+async def reactivate_admin_feature_state(
+    session: AsyncSession,
+    feature_id: str,
+    *,
+    expected_row_revision: int,
+    reason_code: str,
+    operator: str,
+    provider_dataset_id: int,
+    source_entity_key: str,
+    source_record_key: str,
+) -> AdminFeatureStateTransition:
+    """검증된 current source evidence로만 retired Feature를 재활성화한다."""
+
+    _validated_operator_and_reason_code(
+        operator=operator, reason_code=reason_code
+    )
+    if provider_dataset_id <= 0:
+        raise ValueError("provider_dataset_id must be positive")
+    if not source_entity_key.strip() or not source_record_key.strip():
+        raise ValueError("reactivation에는 current source entity/record evidence가 필요합니다.")
+    try:
+        transition = (
+            await session.execute(
+                text(_REACTIVATE_ADMIN_FEATURE_STATE_SQL),
+                {
+                    "feature_id": feature_id,
+                    "provider_dataset_id": provider_dataset_id,
+                    "source_entity_key": source_entity_key,
+                    "source_record_key": source_record_key,
+                    "expected_row_revision": expected_row_revision,
+                    "reason_code": reason_code,
                     "operator": operator,
                 },
             )
         ).mappings().one()
-        override = _feature_override(override_row)
-
-    return FeatureDeactivateResult(
-        feature_id=str(row["feature_id"]),
-        previous_status=str(row["previous_status"]),
-        status=str(row["status"]),
-        override_created=override is not None,
-        override=override,
-    )
+    except DBAPIError as error:
+        _raise_admin_state_procedure_error(
+            error,
+            feature_id=feature_id,
+            expected_row_revision=expected_row_revision,
+        )
+    return await _admin_state_transition_result(session, transition=transition)
 
 
 _INSERT_FEATURE_CHANGE_REQUEST_SQL: Final[str] = """
@@ -2198,7 +2541,7 @@ LIMIT :limit
 """
 
 _FEATURE_CHANGE_STATE_SQL: Final[str] = """
-SELECT feature_id, kind, status, user_deleted_at
+SELECT feature_id, kind, lifecycle_state, publication_state, quality_state, row_revision
 FROM feature.features
 WHERE feature_id = :feature_id
 FOR UPDATE
@@ -2214,49 +2557,23 @@ FOR UPDATE
 # ``kind IN ('place','event')``(API Literal)이라 geometry는 애초에 대상이
 # 아니다 — geometry가 필수인 kind는 route/area뿐이고 그 값은 subtype 컬럼에
 # NOT NULL로 산다.
-_APPLY_FEATURE_ADD_SQL: Final[str] = """
-INSERT INTO feature.features (
-    feature_id, feature_uuid, kind, name, category,
-    coord, coord_precision_digits,
-    address, legal_dong_code, road_name_code, road_address_management_no,
-    admin_dong_code, sido_code, sigungu_code,
-    urls, marker_icon, marker_color,
-    parent_feature_id, sibling_group_id,
-    raw_refs, status,
-    data_origin, data_version, user_change_kind, user_change_status,
-    user_change_request_id, user_deleted_at, user_deleted_by, user_change_reason,
-    created_at, updated_at, deleted_at
-) VALUES (
-    :feature_id, CAST(:feature_uuid AS uuid), :kind, :name, :category,
-    CASE WHEN CAST(:lon AS double precision) IS NULL THEN NULL
-         ELSE x_extension.ST_SetSRID(
-             x_extension.ST_MakePoint(
-                 CAST(:lon AS double precision),
-                 CAST(:lat AS double precision)
-             ),
-             4326
-         ) END,
-    :coord_precision_digits,
-    CAST(:address AS jsonb), :legal_dong_code, :road_name_code,
-    :road_address_management_no, :admin_dong_code, :sido_code, :sigungu_code,
-    CAST(:urls AS jsonb), :marker_icon, :marker_color,
-    :parent_feature_id, :sibling_group_id,
-    '[]'::jsonb, :status,
-    'user_request', 1, 'add', 'applied',
-    CAST(:request_id AS uuid), NULL, NULL, :reason,
-    now(), now(), NULL
+_CREATE_FEATURE_WITH_INITIAL_STATE_SQL: Final[str] = """
+CALL feature.create_feature_with_initial_state(
+    CAST(:feature_payload AS jsonb),
+    CAST(:lifecycle_state AS text),
+    CAST(:publication_state AS text),
+    CAST(:quality_state AS text),
+    CAST(:state_context AS jsonb),
+    NULL, NULL, NULL, NULL
 )
-ON CONFLICT (feature_id) DO NOTHING
-RETURNING feature_id, CAST(feature_uuid AS text) AS feature_uuid,
-          kind, status, user_deleted_at
 """
 
 # T-VN-35(0086): ``detail``/``geom``은 core SET 목록에서 사라졌다. 종전의
 # ``detail = CAST(:detail AS jsonb)`` 통교체는 **shape 미검증 구멍**이었다 —
 # 운영자가 보낸 임의 JSONB가 그대로 정본이 됐다. 이제 kind별 값은 subtype
 # 컬럼(typed)으로 들어가므로 컬럼·타입이 DB에서 강제된다.
-# ``kind``/``feature_uuid``를 RETURNING에 실어 subtype UPSERT가 별도 조회 없이
-# 같은 트랜잭션에서 이어진다.
+# ``kind``/``feature_uuid``/``row_revision``을 RETURNING에 실어 subtype UPSERT와
+# 좁은 provenance procedure가 별도 조회 없이 같은 transaction에서 이어진다.
 _APPLY_FEATURE_UPDATE_SQL: Final[str] = """
 UPDATE feature.features AS f
 SET
@@ -2325,56 +2642,26 @@ SET
         WHEN CAST(:sibling_group_id_set AS boolean) THEN CAST(:sibling_group_id AS uuid)
         ELSE f.sibling_group_id
     END,
-    data_origin = 'user_request',
-    data_version = GREATEST(f.data_version, 1),
-    user_change_kind = 'update',
-    user_change_status = 'applied',
-    user_change_request_id = CAST(:request_id AS uuid),
-    user_change_reason = :reason,
     updated_at = now()
 WHERE f.feature_id = :feature_id
   AND f.kind IN ('place','event')
-  AND f.status <> 'deleted'
-  AND f.user_deleted_at IS NULL
+  AND f.lifecycle_state = 'active'
 RETURNING f.feature_id, CAST(f.feature_uuid AS text) AS feature_uuid,
-          f.kind, f.status, f.user_deleted_at
+          f.kind, f.row_revision
 """
 
-# soft-delete는 core-only다 — subtype 행은 남는다. ``status='deleted'``는
-# 행을 지우지 않으므로 CASCADE 대상이 아니고, 되살릴 때 kind별 값이 그대로
-# 있어야 한다(ADR-017 무기한 보관과 같은 규약).
-_APPLY_FEATURE_DELETE_SQL: Final[str] = """
-UPDATE feature.features AS f
-SET
-    status = 'deleted',
-    deleted_at = now(),
-    data_origin = 'user_request',
-    data_version = GREATEST(f.data_version, 1),
-    user_change_kind = 'delete',
-    user_change_status = 'applied',
-    user_change_request_id = CAST(:request_id AS uuid),
-    user_deleted_at = now(),
-    user_deleted_by = :operator,
-    user_change_reason = :reason,
-    updated_at = now()
-WHERE f.feature_id = :feature_id
-  AND f.kind IN ('place','event')
-  AND f.status <> 'deleted'
-  AND f.user_deleted_at IS NULL
-RETURNING f.feature_id, f.status, f.user_deleted_at
-"""
-
-_NEXT_USER_VERSION_SQL: Final[str] = """
-SELECT COALESCE(MAX(version), 0) + 1
-FROM feature.feature_versions
-WHERE feature_id = :feature_id
-"""
-
-_SET_FEATURE_DATA_VERSION_SQL: Final[str] = """
-UPDATE feature.features
-SET data_version = :version,
-    updated_at = now()
-WHERE feature_id = :feature_id
+# runtime은 legacy user-change provenance 열 UPDATE 권한을 받지 않는다. T36의
+# 일반 core/subtype 입력 소유권은 그대로 두고, 이 routine만 좁게 materialize한다.
+_MATERIALIZE_USER_FEATURE_PROVENANCE_SQL: Final[str] = """
+CALL feature.materialize_user_feature_change_provenance(
+    CAST(:feature_id AS text),
+    CAST(:change_kind AS text),
+    CAST(:request_id AS uuid),
+    CAST(:reason AS text),
+    CAST(:operator AS text),
+    CAST(:expected_row_revision AS bigint),
+    NULL, NULL
+)
 """
 
 _GET_FEATURE_ROW_REVISION_SQL: Final[str] = """
@@ -2388,9 +2675,6 @@ SELECT EXISTS (
   SELECT 1
   FROM feature.features
   WHERE feature_id = :feature_id
-    AND deleted_at IS NULL
-    AND user_deleted_at IS NULL
-    AND status <> 'deleted'
 )
 """
 
@@ -2399,53 +2683,6 @@ SELECT row_revision
 FROM feature.features
 WHERE feature_id = :feature_id
 FOR UPDATE
-"""
-
-_INSERT_USER_VERSION_FROM_FEATURE_SQL: Final[str] = """
-INSERT INTO feature.feature_versions (
-    feature_id, version, origin, change_kind, payload, request_id, created_by
-)
-SELECT
-    f.feature_id,
-    CAST(:version AS integer),
-    'user_request',
-    :change_kind,
-    jsonb_build_object(
-        'feature_id', f.feature_id,
-        'kind', f.kind,
-        'name', f.name,
-        'category', f.category,
-        'lon', x_extension.ST_X(f.coord),
-        'lat', x_extension.ST_Y(f.coord),
-        'coord_precision_digits', f.coord_precision_digits,
-        'address', f.address,
-        'legal_dong_code', f.legal_dong_code,
-        'road_name_code', f.road_name_code,
-        'road_address_management_no', f.road_address_management_no,
-        'admin_dong_code', f.admin_dong_code,
-        'sido_code', f.sido_code,
-        'sigungu_code', f.sigungu_code,
-        'urls', f.urls,
-        'marker_icon', f.marker_icon,
-        'marker_color', f.marker_color,
-        'parent_feature_id', f.parent_feature_id,
-        'sibling_group_id', f.sibling_group_id,
-        'detail', f.detail,
-        'status', f.status,
-        'data_origin', f.data_origin,
-        'data_version', f.data_version,
-        'user_change_kind', f.user_change_kind,
-        'user_change_status', f.user_change_status,
-        'user_deleted_at', f.user_deleted_at,
-        'deleted_at', f.deleted_at,
-        'updated_at', f.updated_at
-    ),
-    CAST(:request_id AS uuid),
-    :operator
--- T-VN-35(0086): version snapshot의 ``detail``은 subtype 조립 결과다.
--- ``features_detailed``를 쓰면 snapshot이 응답 shape과 같은 정본을 남긴다.
-FROM feature.features_detailed AS f
-WHERE f.feature_id = :feature_id
 """
 
 _MARK_CHANGE_APPLIED_SQL: Final[str] = """
@@ -2544,9 +2781,33 @@ def _add_params(
         "marker_color": payload["marker_color"],
         "parent_feature_id": payload.get("parent_feature_id"),
         "sibling_group_id": payload.get("sibling_group_id"),
-        "status": payload.get("status") or "active",
-        "reason": reason,
+        "lifecycle_state": payload.get("lifecycle_state", "active"),
+        "publication_state": payload.get("publication_state", "published"),
+        "quality_state": payload.get("quality_state", "valid"),
     }
+
+
+def _admin_feature_create_payload(params: Mapping[str, Any]) -> str:
+    """Admin create payload는 core-only이며 typed procedure가 provenance를 쓴다."""
+    payload = {
+        key: (
+            json.loads(value)
+            if key in {"address", "urls"} and isinstance(value, str)
+            else value
+        )
+        for key, value in params.items()
+        if key
+        not in {
+            "request_id",
+            "reason",
+            "lifecycle_state",
+            "publication_state",
+            "quality_state",
+            "data_origin",
+            "data_version",
+        }
+    }
+    return json.dumps(payload, ensure_ascii=False, default=str)
 
 
 def _update_params(
@@ -2619,18 +2880,52 @@ async def _apply_change(
     operator: str | None,
 ) -> None:
     payload = request.payload
+    if (
+        operator is None
+        or not operator.strip()
+        or request.reason is None
+        or not request.reason.strip()
+    ):
+        raise ValueError(
+            "user add/update/delete provenance에는 authenticated operator와 "
+            "non-empty reason이 필요합니다."
+        )
     if request.action == "add":
-        row = (
+        add_params = _add_params(
+            request_id=request.request_id,
+            feature_id=request.feature_id,
+            payload=payload,
+            reason=request.reason,
+        )
+        create_row = (
             await session.execute(
-                text(_APPLY_FEATURE_ADD_SQL),
-                add_params := _add_params(
-                    request_id=request.request_id,
-                    feature_id=request.feature_id,
-                    payload=payload,
-                    reason=request.reason,
-                ),
+                text(_CREATE_FEATURE_WITH_INITIAL_STATE_SQL),
+                {
+                    "feature_payload": _admin_feature_create_payload(add_params),
+                    "lifecycle_state": add_params["lifecycle_state"],
+                    "publication_state": add_params["publication_state"],
+                    "quality_state": add_params["quality_state"],
+                    "state_context": json.dumps(
+                        {
+                            "transition_kind": "initial",
+                            "reason_code": "user_request_add",
+                            "principal": operator,
+                            "causation_ref": request.request_id,
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
             )
-        ).mappings().first()
+        ).mappings().one()
+        row: Any = (
+            {
+                "feature_id": str(create_row["o_feature_id"]),
+                "feature_uuid": str(create_row["o_feature_uuid"]),
+                "kind": str(add_params["kind"]),
+            }
+            if bool(create_row["o_inserted"])
+            else None
+        )
         if row is not None:
             # T-VN-32C fail-close — ON CONFLICT DO NOTHING이라 RETURNING 행
             # 존재 자체가 신규 insert 증거다: 관측값은 보낸 후보와 같아야
@@ -2648,6 +2943,17 @@ async def _apply_change(
                 feature_uuid=str(row["feature_uuid"]),
                 kind=str(row["kind"]),
                 detail=payload.get("detail"),
+            )
+            await session.execute(
+                text(_MATERIALIZE_USER_FEATURE_PROVENANCE_SQL),
+                {
+                    "feature_id": request.feature_id,
+                    "change_kind": "add",
+                    "request_id": request.request_id,
+                    "reason": request.reason,
+                    "operator": operator,
+                    "expected_row_revision": int(create_row["o_row_revision"]),
+                },
             )
     elif request.action == "update":
         row = (
@@ -2672,18 +2978,72 @@ async def _apply_change(
                 kind=str(row["kind"]),
                 detail=payload.get("detail"),
             )
-    else:
-        row = (
+        if row is not None:
             await session.execute(
-                text(_APPLY_FEATURE_DELETE_SQL),
+                text(_MATERIALIZE_USER_FEATURE_PROVENANCE_SQL),
                 {
-                    "request_id": request.request_id,
                     "feature_id": request.feature_id,
-                    "operator": operator,
+                    "change_kind": "update",
+                    "request_id": request.request_id,
                     "reason": request.reason,
+                    "operator": operator,
+                    "expected_row_revision": int(row["row_revision"]),
                 },
             )
-        ).mappings().first()
+    else:
+        state = await _state_for_conflict(session, request.feature_id)
+        if (
+            state is None
+            or state["kind"] not in {"place", "event"}
+            or state["lifecycle_state"] != "active"
+        ):
+            row = None
+        else:
+            transition = (
+                await session.execute(
+                    text(_TRANSITION_FEATURE_STATE_SQL),
+                    {
+                        "feature_id": request.feature_id,
+                        "lifecycle_state": "retired",
+                        "publication_state": "suppressed",
+                        "quality_state": state["quality_state"],
+                        "expected_row_revision": int(state["row_revision"]),
+                        "state_context": json.dumps(
+                            {
+                                "transition_kind": "user_request",
+                                "reason_code": "user_request_delete",
+                                "principal": operator,
+                                "causation_ref": request.request_id,
+                            },
+                            ensure_ascii=False,
+                        ),
+                    },
+                )
+            ).mappings().one()
+            await session.execute(
+                text(_AUTHOR_LIFECYCLE_OVERRIDE_SQL),
+                {
+                    "feature_id": request.feature_id,
+                    "source_lifecycle_state": "active",
+                    "override_lifecycle_state": "retired",
+                    "prevent_provider_reactivation": True,
+                    "reason": request.reason,
+                    "operator": operator,
+                    "expected_row_revision": int(transition["o_row_revision"]),
+                },
+            )
+            await session.execute(
+                text(_MATERIALIZE_USER_FEATURE_PROVENANCE_SQL),
+                {
+                    "feature_id": request.feature_id,
+                    "change_kind": "delete",
+                    "request_id": request.request_id,
+                    "reason": request.reason,
+                    "operator": operator,
+                    "expected_row_revision": int(transition["o_row_revision"]),
+                },
+            )
+            row = {"feature_id": request.feature_id}
 
     if row is None:
         state = await _state_for_conflict(session, request.feature_id)
@@ -2696,33 +3056,10 @@ async def _apply_change(
         raise FeatureChangeConflict(
             feature_id=str(state["feature_id"]),
             action=request.action,
-            current_status=str(state["status"]),
-            user_deleted_at=state["user_deleted_at"],
+            lifecycle_state=str(state["lifecycle_state"]),
+            publication_state=str(state["publication_state"]),
+            quality_state=str(state["quality_state"]),
         )
-
-    next_version = int(
-        (
-            await session.execute(
-                text(_NEXT_USER_VERSION_SQL),
-                {"feature_id": request.feature_id},
-            )
-        ).scalar_one()
-    )
-    await session.execute(
-        text(_SET_FEATURE_DATA_VERSION_SQL),
-        {"feature_id": request.feature_id, "version": next_version},
-    )
-    await session.execute(
-        text(_INSERT_USER_VERSION_FROM_FEATURE_SQL),
-        {
-            "feature_id": request.feature_id,
-            "version": next_version,
-            "request_id": request.request_id,
-            "change_kind": request.action,
-            "operator": operator,
-        },
-    )
-
 
 async def get_feature_row_revision(
     session: AsyncSession, feature_id: str
@@ -2740,7 +3077,7 @@ async def get_feature_row_revision(
 async def admin_feature_card_target_exists(
     session: AsyncSession, feature_id: str
 ) -> bool:
-    """Admin weather/price card의 삭제 전 target인지 검사한다."""
+    """Admin weather/price card의 target 존재를 admin-any로 검사한다."""
 
     return bool(
         (
@@ -2801,7 +3138,11 @@ async def submit_feature_change_request(
     if action in ("update", "delete"):
         assert expected_row_revision is not None
         await _assert_feature_revision(session, feature_id, expected_row_revision)
-    initial_state = "applied" if review_mode == "immediate" else "pending"
+    # ``materialize_user_feature_change_provenance``는 receipt 이전에 applied
+    # request를 lock해 검증한다. immediate도 pending으로 만든 뒤 같은 transaction
+    # 안에서 먼저 applied receipt를 확정해야 한다. durable receipt가 생긴 뒤 request
+    # metadata를 다시 UPDATE하면 0097의 immutable binding guard가 막는다.
+    initial_state = "pending"
     row = (
         await session.execute(
             text(_INSERT_FEATURE_CHANGE_REQUEST_SQL),
@@ -2819,13 +3160,13 @@ async def submit_feature_change_request(
     ).mappings().one()
     request = _feature_change_row(row)
     if review_mode == "immediate":
-        await _apply_change(session, request, operator=requested_by)
         applied = (
             await session.execute(
                 text(_MARK_CHANGE_APPLIED_SQL),
                 {"request_id": request.request_id, "operator": requested_by},
             )
         ).mappings().one()
+        await _apply_change(session, request, operator=requested_by)
         return _feature_change_row(applied)
     return request
 
@@ -2870,13 +3211,16 @@ async def apply_feature_change_request(
         await _assert_feature_revision(
             session, request.feature_id, request.base_row_revision
         )
-    await _apply_change(session, request, operator=operator)
     applied = (
         await session.execute(
             text(_MARK_CHANGE_APPLIED_SQL),
             {"request_id": request_id, "operator": operator},
         )
     ).mappings().one()
+    # Final materializer는 provenance request가 이미 applied인지를 DB에서
+    # 검증한다. 같은 transaction 안이므로 materialize 실패 시 이 state mark도
+    # 함께 rollback되어 pending request를 남긴다.
+    await _apply_change(session, request, operator=operator)
     return _feature_change_row(applied)
 
 
@@ -3630,8 +3974,8 @@ SELECT
     f.category AS target_category,
     x_extension.ST_X(f.coord) AS target_lon,
     x_extension.ST_Y(f.coord) AS target_lat,
-    f.detail ->> 'starts_on' AS target_start_date,
-    f.detail ->> 'ends_on' AS target_end_date,
+    event.starts_on::text AS target_start_date,
+    event.ends_on::text AS target_end_date,
     src.source_lon,
     src.source_lat,
     src.source_start_date,
@@ -3646,10 +3990,8 @@ SELECT
         )::double precision
     END AS spatial_score
 FROM reviews AS q
--- T-VN-35(0086): target_start_date/target_end_date는 event subtype
--- (``feature_events.starts_on``/``ends_on``)에서 나온다. 조립 규칙을 여기서
--- 복제하지 않도록 ``features_detailed`` 뷰의 ``detail``을 그대로 읽는다.
-LEFT JOIN feature.features_detailed AS f ON f.feature_id = q.target_feature_id
+LEFT JOIN feature.features AS f ON f.feature_id = q.target_feature_id
+LEFT JOIN feature.feature_events AS event ON event.feature_id = f.feature_id
 LEFT JOIN LATERAL (
     SELECT
         CASE
@@ -3811,8 +4153,8 @@ SELECT
     q.reviewed_by,
     q.reviewed_at,
     q.created_at,
-    f.detail ->> 'starts_on' AS target_start_date,
-    f.detail ->> 'ends_on' AS target_end_date,
+    event.starts_on::text AS target_start_date,
+    event.ends_on::text AS target_end_date,
     src.source_lon,
     src.source_lat,
     src.source_start_date,
@@ -3834,10 +4176,8 @@ JOIN provider_sync.provider_datasets AS pd
 JOIN provider_sync.source_records AS sr
   ON sr.source_entity_key = q.source_entity_key
  AND sr.source_record_key = q.source_record_key
--- T-VN-35(0086): target_start_date/target_end_date는 event subtype
--- (``feature_events.starts_on``/``ends_on``)에서 나온다. 조립 규칙을 여기서
--- 복제하지 않도록 ``features_detailed`` 뷰의 ``detail``을 그대로 읽는다.
-LEFT JOIN feature.features_detailed AS f ON f.feature_id = q.target_feature_id
+LEFT JOIN feature.features AS f ON f.feature_id = q.target_feature_id
+LEFT JOIN feature.feature_events AS event ON event.feature_id = f.feature_id
 LEFT JOIN LATERAL (
     SELECT
         CASE

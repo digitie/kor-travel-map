@@ -271,11 +271,10 @@ async def _seed_multi_lineage_feature(
     await session.execute(
         text(
             "UPDATE feature.features"
-            " SET status = 'inactive', deleted_at = :deleted_at"
+            " SET lifecycle_state = 'retired', publication_state = 'suppressed'"
             " WHERE feature_id = :feature_id"
         ),
         {
-            "deleted_at": _NOW,
             "feature_id": shared_b_source.feature.feature_id,
         },
     )
@@ -329,11 +328,10 @@ async def _attach_cross_scope_winner(
     await session.execute(
         text(
             "UPDATE feature.features"
-            " SET status = 'inactive', deleted_at = :deleted_at"
+            " SET lifecycle_state = 'retired', publication_state = 'suppressed'"
             " WHERE feature_id = :feature_id"
         ),
         {
-            "deleted_at": _NOW,
             "feature_id": cross_scope.feature.feature_id,
         },
     )
@@ -411,11 +409,10 @@ async def _seed_split_max_tuple_lineage(
     await session.execute(
         text(
             "UPDATE feature.features"
-            " SET status = 'inactive', deleted_at = :deleted_at"
+            " SET lifecycle_state = 'retired', publication_state = 'suppressed'"
             " WHERE feature_id = :feature_id"
         ),
         {
-            "deleted_at": _NOW,
             "feature_id": high.feature.feature_id,
         },
     )
@@ -425,11 +422,19 @@ async def _seed_split_max_tuple_lineage(
 
 async def _feature_state(
     session: AsyncSession, feature_id: str
-) -> tuple[str, datetime | None, Any]:
+) -> tuple[str, str, Any]:
+    """(lifecycle, publication, notice valid_end).
+
+    0097이 ``status``/``deleted_at``을 물리 삭제했다. notice supersede의 soft-delete는
+    3축에서 ``lifecycle_state='retired'``다 — 값이 아니라 **의미**를 옮긴다.
+    호출부가 지표(``[1]``)로 읽던 자리는 아래 ``_is_retired`` 로 이름을 붙였다.
+    """
+
     row = (
         await session.execute(
             text(
-                "SELECT f.status, f.deleted_at, n.valid_end_time AS valid_end"
+                "SELECT f.lifecycle_state, f.publication_state,"
+                " n.valid_end_time AS valid_end"
                 " FROM feature.features AS f"
                 " LEFT JOIN feature.feature_notices AS n"
                 "   ON n.feature_id = f.feature_id"
@@ -438,7 +443,13 @@ async def _feature_state(
             {"fid": feature_id},
         )
     ).one()
-    return row.status, row.deleted_at, row.valid_end
+    return row.lifecycle_state, row.publication_state, row.valid_end
+
+
+async def _is_retired(session: AsyncSession, feature_id: str) -> bool:
+    """legacy ``deleted_at IS NOT NULL``의 3축 등가물."""
+
+    return (await _feature_state(session, feature_id))[0] != "active"
 
 
 async def _snapshot_state(
@@ -500,13 +511,15 @@ async def test_supersede_soft_deletes_non_latest_per_lineage(
 
     assert result.superseded == 1
     assert result.closed == 0
-    status, deleted_at, _ = await _feature_state(migrated_session, old_gen.feature.feature_id)
-    assert status == "inactive"
-    assert deleted_at is not None
-    status, deleted_at, valid_end = await _feature_state(
+    lifecycle, publication, _ = await _feature_state(
+        migrated_session, old_gen.feature.feature_id
+    )
+    assert lifecycle == "retired"
+    assert publication == "suppressed"
+    lifecycle, _publication, valid_end = await _feature_state(
         migrated_session, new_gen.feature.feature_id
     )
-    assert deleted_at is None
+    assert lifecycle == "active"
     assert valid_end is None  # 계보가 살아 있으면 닫지 않는다.
 
 
@@ -533,11 +546,13 @@ async def test_reconcile_exact_tie_prefers_current_identity(
             """
             INSERT INTO feature.features (
                 feature_id, kind, name, category, coord, coord_precision_digits,
-                marker_icon, marker_color, status
+                marker_icon, marker_color,
+                lifecycle_state, publication_state, quality_state
             )
             SELECT
                 :legacy_feature_id, kind, name, category, coord,
-                coord_precision_digits, marker_icon, marker_color, status
+                coord_precision_digits, marker_icon, marker_color,
+                lifecycle_state, publication_state, quality_state
             FROM feature.features
             WHERE feature_id = :current_feature_id
             """
@@ -610,8 +625,8 @@ async def test_reconcile_exact_tie_prefers_current_identity(
         source_entity_type=_KREX_ET,
     )
     assert result.superseded == 1
-    assert (await _feature_state(migrated_session, legacy_feature_id))[1] is not None
-    assert (await _feature_state(migrated_session, current.feature.feature_id))[1] is None
+    assert await _is_retired(migrated_session, legacy_feature_id)
+    assert not await _is_retired(migrated_session, current.feature.feature_id)
 
     # 같은 snapshot/reconcile을 다시 적용해도 winner가 바뀌지 않는다.
     again = await feature_repo.supersede_stale_notice_features(
@@ -621,7 +636,7 @@ async def test_reconcile_exact_tie_prefers_current_identity(
         source_entity_type=_KREX_ET,
     )
     assert again.superseded == 0
-    assert (await _feature_state(migrated_session, current.feature.feature_id))[1] is None
+    assert not await _is_retired(migrated_session, current.feature.feature_id)
 
 
 async def test_actual_lexicographic_notice_row_wins_across_reads_and_reconcile(
@@ -646,14 +661,15 @@ async def test_actual_lexicographic_notice_row_wins_across_reads_and_reconcile(
         text(
             """
             INSERT INTO feature.features (
-                feature_id, kind, name, category, coord, status
+                feature_id, kind, name, category, coord,
+                lifecycle_state, publication_state, quality_state
             ) VALUES (
                 'notice-split-max-area', 'area', '공지 lexicographic 테스트 영역',
                 '03000000',
                 x_extension.ST_SetSRID(
                     x_extension.ST_MakePoint(127.1, 37.4), 4326
                 ),
-                'active'
+                'active', 'published', 'valid'
             )
             """
         )
@@ -763,7 +779,7 @@ async def test_actual_lexicographic_notice_row_wins_across_reads_and_reconcile(
         source_entity_type=_KREX_ET,
     )
     assert result.superseded == 1
-    assert (await _feature_state(migrated_session, actual_winner.feature.feature_id))[1] is None
+    assert not await _is_retired(migrated_session, actual_winner.feature.feature_id)
     assert (await _feature_state(migrated_session, synthesized_winner.feature.feature_id))[
         1
     ] is not None
@@ -786,9 +802,9 @@ async def test_multi_lineage_winner_survives_public_read_and_reconcile(
         source_entity_type=_KREX_ET,
     )
     assert result == feature_repo.NoticeReconcileResult(superseded=1)
-    assert (await _feature_state(migrated_session, shared.feature.feature_id))[1] is None
-    assert (await _feature_state(migrated_session, older_a.feature.feature_id))[1] is not None
-    assert (await _feature_state(migrated_session, newer_b.feature.feature_id))[1] is None
+    assert not await _is_retired(migrated_session, shared.feature.feature_id)
+    assert await _is_retired(migrated_session, older_a.feature.feature_id)
+    assert not await _is_retired(migrated_session, newer_b.feature.feature_id)
     assert await _public_notice_ids(migrated_session) == expected
 
 
@@ -841,11 +857,11 @@ async def test_snapshot_preserves_winner_differing_in_each_scope_dimension(
         closed_at=_NOW + timedelta(minutes=2),
     )
     assert scoped_absent == feature_repo.NoticeReconcileResult()
-    status, deleted_at, valid_end = await _feature_state(
+    lifecycle, publication, valid_end = await _feature_state(
         migrated_session, scoped.feature.feature_id
     )
-    assert status == "active"
-    assert deleted_at is None
+    assert lifecycle == "active"
+    assert publication == "published"
     assert valid_end is None
 
 
@@ -931,23 +947,31 @@ async def test_reconcile_preserves_cross_provider_dataset_winners(
         source_entity_type=_KREX_ET,
     )
     assert dedup == feature_repo.NoticeReconcileResult()
-    assert (
-        await _feature_state(
-            migrated_session, cross_scope_winner.feature.feature_id
-        )
-    )[1] is None
+    assert not await _is_retired(
+        migrated_session, cross_scope_winner.feature.feature_id
+    )
 
     # 과거 scope-local close/dedup 잔존을 재현한다. 현재 KREX 계보에서는
     # loser지만 다른 scope의 explicit true winner이므로 다시 열어야 한다.
-    await migrated_session.execute(
-        text(
-            "UPDATE feature.features SET status = 'inactive', deleted_at = :ended_at "
-            "WHERE feature_id = :feature_id"
-        ),
-        {
-            "ended_at": _NOW + timedelta(minutes=6),
-            "feature_id": cross_scope_winner.feature.feature_id,
-        },
+    #
+    # legacy ``status='inactive', deleted_at=<ts>``의 3축 등가물은
+    # ``lifecycle_state='retired'``(+ ``ck_features_state_tuple``이 강제하는
+    # ``publication_state='suppressed'``)다. 다만 그 두 컬럼을 직접 쓰면 **누가
+    # 억제했는지**가 남지 않는다. 3축에서 provider 재적재는 자기가 내린 억제만
+    # 되돌리므로(``feature_repo._provider_reingest_publication``: publication을
+    # 마지막으로 바꾼 전이가 ``provider_retire``일 때만 복구), 증거 없는 억제는
+    # 운영자 판단으로 읽혀 reopen 후에도 suppressed로 굳는다. 여기서 재현하려는
+    # 것은 provider dedup이 남긴 잔존이므로 provider retire 경로 그대로 만든다 —
+    # 같은 KREX scope의 primary entity를 폐업 처리하면 된다.
+    assert (
+        await feature_repo.retire_features_by_source_entity_ids(
+            migrated_session,
+            provider=_KREX,
+            dataset_key=_KREX_DS,
+            source_entity_type=_KREX_ET,
+            source_entity_ids={f"legacy::{delete_lineage}"},
+        )
+        == 1
     )
     await migrated_session.execute(
         text(
@@ -971,17 +995,17 @@ async def test_reconcile_preserves_cross_provider_dataset_winners(
         closed_at=_NOW + timedelta(minutes=10),
     )
     assert snapshot == feature_repo.NoticeReconcileResult(reopened=1)
-    status, deleted_at, valid_end = await _feature_state(
+    lifecycle, publication, valid_end = await _feature_state(
         migrated_session,
         cross_scope_winner.feature.feature_id,
     )
-    assert status == "active"
-    assert deleted_at is None
+    assert lifecycle == "active"
+    assert publication == "published"
     assert valid_end is None
-    _, deleted_at, valid_end = await _feature_state(
+    lifecycle, _publication, valid_end = await _feature_state(
         migrated_session, close_guard.feature.feature_id
     )
-    assert deleted_at is None
+    assert lifecycle == "active"
     assert valid_end is None
     assert await _public_notice_ids(migrated_session) == expected
 
@@ -1183,10 +1207,10 @@ async def test_snapshot_reconcile_serializes_cross_scope_closure(
         assert second == feature_repo.NoticeReconcileResult(closed=1)
 
         async with AsyncSession(migrated_engine) as verify:
-            _, deleted_at, valid_end = await _feature_state(
+            lifecycle, _publication, valid_end = await _feature_state(
                 verify, scope_a.feature.feature_id
             )
-        assert deleted_at is None
+        assert lifecycle == "active"
         assert valid_end is not None
     finally:
         if second_task is not None and not second_task.done():
@@ -1284,17 +1308,17 @@ async def test_snapshot_uses_only_active_winning_lineage_per_feature(
         closed_at=closed_at,
     )
     assert b_only == feature_repo.NoticeReconcileResult(superseded=1, closed=1)
-    shared_status, shared_deleted_at, shared_end = await _feature_state(
+    shared_lifecycle, shared_publication, shared_end = await _feature_state(
         migrated_session, shared.feature.feature_id
     )
-    assert shared_status == "active"
-    assert shared_deleted_at is None
+    assert shared_lifecycle == "active"
+    assert shared_publication == "published"
     assert shared_end == closed_at
-    assert (await _feature_state(migrated_session, older_a.feature.feature_id))[1] is not None
-    _, newer_deleted_at, newer_end = await _feature_state(
+    assert await _is_retired(migrated_session, older_a.feature.feature_id)
+    newer_lifecycle, _newer_publication, newer_end = await _feature_state(
         migrated_session, newer_b.feature.feature_id
     )
-    assert newer_deleted_at is None
+    assert newer_lifecycle == "active"
     assert newer_end is None
     assert await _public_notice_ids(migrated_session) == {newer_b.feature.feature_id}
 
@@ -1308,15 +1332,15 @@ async def test_snapshot_uses_only_active_winning_lineage_per_feature(
         closed_at=closed_at + timedelta(minutes=10),
     )
     assert a_only == feature_repo.NoticeReconcileResult(closed=1, reopened=1)
-    _, shared_deleted_at, shared_end = await _feature_state(
+    shared_lifecycle, _shared_publication, shared_end = await _feature_state(
         migrated_session, shared.feature.feature_id
     )
-    assert shared_deleted_at is None
+    assert shared_lifecycle == "active"
     assert shared_end is None
-    _, newer_deleted_at, newer_end = await _feature_state(
+    newer_lifecycle, _newer_publication, newer_end = await _feature_state(
         migrated_session, newer_b.feature.feature_id
     )
-    assert newer_deleted_at is None
+    assert newer_lifecycle == "active"
     assert newer_end == closed_at + timedelta(minutes=10)
     assert await _public_notice_ids(migrated_session) == {shared.feature.feature_id}
 
@@ -1351,8 +1375,10 @@ async def test_supersede_closes_lineage_missing_from_feed(
     assert result.superseded == 1  # 구세대는 여전히 중복 정리.
     assert result.closed == 1
     assert result.reopened == 0
-    _, deleted_at, valid_end = await _feature_state(migrated_session, new_gen.feature.feature_id)
-    assert deleted_at is None  # latest는 soft-delete가 아니라 '종료'.
+    lifecycle, _publication, valid_end = await _feature_state(
+        migrated_session, new_gen.feature.feature_id
+    )
+    assert lifecycle == "active"  # latest는 retire가 아니라 '종료'.
     assert valid_end is not None
     assert valid_end == closed_at
 
@@ -1368,8 +1394,10 @@ async def test_supersede_closes_lineage_missing_from_feed(
     assert reappeared.superseded == 0
     assert reappeared.closed == 0
     assert reappeared.reopened == 1
-    _, deleted_at, valid_end = await _feature_state(migrated_session, new_gen.feature.feature_id)
-    assert deleted_at is None
+    lifecycle, _publication, valid_end = await _feature_state(
+        migrated_session, new_gen.feature.feature_id
+    )
+    assert lifecycle == "active"
     assert valid_end is None
 
     # 이미 열린 상태에서 같은 snapshot을 재적용하면 no-op이다.
@@ -1393,11 +1421,11 @@ async def test_reconcile_reactivates_soft_deleted_winner_without_duplicate(
     await migrated_session.execute(
         text(
             "UPDATE feature.features"
-            " SET status = 'inactive', deleted_at = :deleted_at, updated_at = now()"
+            " SET lifecycle_state = 'retired', publication_state = 'suppressed',"
+            " updated_at = now()"
             " WHERE feature_id = :feature_id"
         ),
         {
-            "deleted_at": _NOW + timedelta(minutes=1),
             "feature_id": current.feature.feature_id,
         },
     )
@@ -1414,16 +1442,15 @@ async def test_reconcile_reactivates_soft_deleted_winner_without_duplicate(
     assert result.reopened == 1
     assert result.closed == 0
     assert result.superseded == 1
-    old_status, old_deleted_at, _ = await _feature_state(
+    old_lifecycle, _old_publication, _ = await _feature_state(
         migrated_session, old_gen.feature.feature_id
     )
-    assert old_status == "inactive"
-    assert old_deleted_at is not None
-    status, deleted_at, valid_end = await _feature_state(
+    assert old_lifecycle == "retired"
+    assert old_lifecycle != "active"
+    lifecycle, _publication, valid_end = await _feature_state(
         migrated_session, current.feature.feature_id
     )
-    assert status == "active"
-    assert deleted_at is None
+    assert lifecycle == "active"
     assert valid_end is None
 
     # 같은 snapshot은 feature 복구/중복 정리를 반복하지 않는다.
@@ -1755,12 +1782,11 @@ async def test_atomic_event_load_ignores_stale_announcement_after_lift(
     assert after_stale == before_stale
     assert after_stale.name != stale_name
     assert after_stale.severity != "5"
-    status, deleted_at, valid_end = await _feature_state(
+    lifecycle, _publication, valid_end = await _feature_state(
         migrated_session,
         bundle.feature.feature_id,
     )
-    assert status == "active"
-    assert deleted_at is None
+    assert lifecycle == "active"
     assert valid_end is None
     assert await _public_notice_ids(migrated_session) == {
         bundle.feature.feature_id
@@ -1815,12 +1841,21 @@ async def test_event_lifecycle_resolves_open_finite_unknown_and_reactivation(
 
     # 다른 scope는 lifecycle state가 없는 unknown이다. open present exact replay는
     # 과거 soft-delete 잔존을 복구하고 unknown 때문에 막히지 않는다.
-    await migrated_session.execute(
-        text(
-            "UPDATE feature.features SET status = 'inactive', deleted_at = :at "
-            "WHERE feature_id = :fid"
-        ),
-        {"at": wall_now, "fid": feature_id},
+    #
+    # 복구 대상인 "과거 soft-delete"는 provider가 남긴 것이다. 3축에서 그 등가물은
+    # ``lifecycle_state='retired'``지만, 컬럼을 직접 쓰면 억제의 주체가 기록되지
+    # 않아 provider 재적재가 publication을 되돌릴 근거를 잃는다(위
+    # ``test_reconcile_preserves_cross_provider_dataset_winners`` 주석 참고).
+    # 그래서 이 scope의 계보 entity를 provider retire 경로로 폐업시킨다.
+    assert (
+        await feature_repo.retire_features_by_source_entity_ids(
+            migrated_session,
+            provider=provider,
+            dataset_key=dataset_key,
+            source_entity_type=source_entity_type,
+            source_entity_ids={lineage_key},
+        )
+        == 1
     )
     await migrated_session.execute(
         text(
@@ -1839,11 +1874,16 @@ async def test_event_lifecycle_resolves_open_finite_unknown_and_reactivation(
         observed_at=first_at,
     )
     assert replay.reconcile == feature_repo.NoticeReconcileResult(reopened=1)
+    # legacy 기대값 ``(status, deleted_at, valid_end) == ('active', None, None)``의
+    # 3축 등가물. ``deleted_at IS NULL``은 ``lifecycle_state='active'``이고, 여기서
+    # 실제로 확인하려는 것은 "provider 억제가 통째로 풀려 공개 표면으로 돌아왔다"
+    # 이므로 publication까지 함께 못 박고 ``public_features`` 실재로 확인한다.
     assert await _feature_state(migrated_session, feature_id) == (
         "active",
-        None,
+        "published",
         None,
     )
+    assert await _public_notice_ids(migrated_session) == {feature_id}
 
     # unknown + finite는 현재 open/future 기간을 줄이지 않고 더 늦은 끝만 연장한다.
     shorter_end = wall_now + timedelta(hours=6)
@@ -1904,12 +1944,15 @@ async def test_event_lifecycle_resolves_open_finite_unknown_and_reactivation(
     )
     assert (await _feature_state(migrated_session, feature_id))[2] == extended_end
 
-    # deleted_at 없이 inactive인 잔존도 미래 finite present가 되살린다.
+    # 3축에는 "deleted_at 없는 inactive"라는 두 번째 비활성 표현이 없다 — legacy의
+    # (inactive, deleted_at NULL)과 (inactive, deleted_at 있음)이 모두 retire 하나로
+    # 합쳐진다. 되살리기 동작 자체는 그대로 검증한다.
     past_end = wall_now - timedelta(hours=1)
     await migrated_session.execute(
         text(
-            "UPDATE feature.features SET status = 'inactive', deleted_at = NULL "
-            "WHERE feature_id = :fid"
+            "UPDATE feature.features"
+            " SET lifecycle_state = 'retired', publication_state = 'suppressed'"
+            " WHERE feature_id = :fid"
         ),
         {"fid": feature_id},
     )
@@ -1937,18 +1980,18 @@ async def test_event_lifecycle_resolves_open_finite_unknown_and_reactivation(
         observed_at=first_at + timedelta(minutes=4),
     )
     assert future.reconcile == feature_repo.NoticeReconcileResult(reopened=1)
-    status, deleted_at, valid_end = await _feature_state(
+    lifecycle, _publication, valid_end = await _feature_state(
         migrated_session, feature_id
     )
-    assert status == "active"
-    assert deleted_at is None
+    assert lifecycle == "active"
     assert valid_end == future_end
 
     # 운영자 비활성화 override는 open present 재활성화를 막는다. 같은 event의
     # exact replay는 override 해제 뒤 상태를 self-heal한다.
     await migrated_session.execute(
         text(
-            "UPDATE feature.features SET status = 'inactive', deleted_at = :at "
+            "UPDATE feature.features"
+            " SET lifecycle_state = 'retired', publication_state = 'suppressed' "
             "WHERE feature_id = :fid"
         ),
         {"at": wall_now, "fid": feature_id},
@@ -1958,7 +2001,8 @@ async def test_event_lifecycle_resolves_open_finite_unknown_and_reactivation(
             "INSERT INTO ops.feature_overrides ("
             "feature_id, field_path, override_value, "
             "prevent_provider_reactivation, status) VALUES ("
-            ":fid, 'status', to_jsonb('inactive'::text), true, 'active')"
+            # 0095가 field_path를 'lifecycle_state'로 제약하고 값은 'retired'만 받는다.
+            ":fid, 'lifecycle_state', to_jsonb('retired'::text), true, 'active')"
         ),
         {"fid": feature_id},
     )
@@ -1973,11 +2017,11 @@ async def test_event_lifecycle_resolves_open_finite_unknown_and_reactivation(
         observed_at=open_at,
     )
     assert blocked.reconcile == feature_repo.NoticeReconcileResult()
-    assert (await _feature_state(migrated_session, feature_id))[0] == "inactive"
+    assert (await _feature_state(migrated_session, feature_id))[0] == "retired"
     await migrated_session.execute(
         text(
             "DELETE FROM ops.feature_overrides "
-            "WHERE feature_id = :fid AND field_path = 'status'"
+            "WHERE feature_id = :fid AND field_path = 'lifecycle_state'"
         ),
         {"fid": feature_id},
     )
@@ -1996,7 +2040,8 @@ async def test_event_lifecycle_resolves_open_finite_unknown_and_reactivation(
     # Feature를 되살리거나 Feature payload를 갱신하지 않는다.
     await migrated_session.execute(
         text(
-            "UPDATE feature.features SET status = 'inactive', deleted_at = :at "
+            "UPDATE feature.features"
+            " SET lifecycle_state = 'retired', publication_state = 'suppressed' "
             "WHERE feature_id = :fid"
         ),
         {"at": wall_now, "fid": feature_id},
@@ -2058,11 +2103,11 @@ async def test_event_lifecycle_resolves_open_finite_unknown_and_reactivation(
     assert current_source_record_key == (
         expired_bundle.source_record.source_record_key
     )
-    status, deleted_at, valid_end = await _feature_state(
+    lifecycle, _publication, valid_end = await _feature_state(
         migrated_session, feature_id
     )
-    assert status == "inactive"
-    assert deleted_at is not None
+    assert lifecycle == "retired"
+    assert lifecycle != "active"
     assert valid_end == expired_at
 
 
@@ -2131,8 +2176,10 @@ async def test_close_notice_features_kma_lift_roundtrip(
         closures={c.natural_key: c.closed_at for c in closures},
     )
     assert closed == 1
-    _, deleted_at, valid_end = await _feature_state(migrated_session, feature_id)
-    assert deleted_at is None
+    lifecycle, _publication, valid_end = await _feature_state(
+        migrated_session, feature_id
+    )
+    assert lifecycle == "active"
     assert valid_end is not None
     # 미래 예정 종료보다 이른 explicit lift가 authoritative false 시각이다.
     assert valid_end == announced_at + timedelta(hours=6)
@@ -2257,13 +2304,14 @@ async def test_public_active_reads_share_latest_and_ended_notice_filter(
         text(
             """
             INSERT INTO feature.features (
-                feature_id, kind, name, category, coord, status
+                feature_id, kind, name, category, coord,
+                lifecycle_state, publication_state, quality_state
             ) VALUES (
                 'notice-public-read-area', 'area', '공지 조회 테스트 영역', '03000000',
                 x_extension.ST_SetSRID(
                     x_extension.ST_MakePoint(127.1, 37.4), 4326
                 ),
-                'active'
+                'active', 'published', 'valid'
             )
             """
         )
@@ -2348,7 +2396,6 @@ async def test_public_active_reads_share_latest_and_ended_notice_filter(
     audit_page = await admin_feature_repo.list_admin_features(
         migrated_session,
         kinds=["notice"],
-        statuses=None,
         include_ended=True,
         page_size=100,
     )
@@ -2371,11 +2418,8 @@ async def test_purge_expired_notices(migrated_session: AsyncSession) -> None:
     purged = await feature_repo.purge_expired_notices(migrated_session)
 
     assert purged == 1
-    status, deleted_at, _ = await _feature_state(migrated_session, stale.feature.feature_id)
-    assert status == "inactive"
-    assert deleted_at is not None
-    _, deleted_at, _ = await _feature_state(migrated_session, fresh.feature.feature_id)
-    assert deleted_at is None
+    assert await _is_retired(migrated_session, stale.feature.feature_id)
+    assert not await _is_retired(migrated_session, fresh.feature.feature_id)
 
 
 async def test_read_paths_exclude_ended_notice_by_default(
@@ -2416,7 +2460,7 @@ async def test_read_paths_exclude_ended_notice_by_default(
 
     # admin 목록: 기본 제외.
     default_page = await admin_feature_repo.list_admin_features(
-        migrated_session, kinds=["notice"], statuses=None, page_size=100
+        migrated_session, kinds=["notice"], page_size=100
     )
     default_ids = {item.feature_id for item in default_page.items}
     assert active_id in default_ids
@@ -2426,7 +2470,6 @@ async def test_read_paths_exclude_ended_notice_by_default(
     audit_page = await admin_feature_repo.list_admin_features(
         migrated_session,
         kinds=["notice"],
-        statuses=None,
         include_ended=True,
         page_size=100,
     )
@@ -2471,9 +2514,8 @@ async def test_reconcile_empty_snapshot_closes_all_active_lineages(
     assert result.closed == 2
     assert result.reopened == 0
     for bundle in (a, b):
-        status, deleted_at, valid_end = await _feature_state(
+        lifecycle, _publication, valid_end = await _feature_state(
             migrated_session, bundle.feature.feature_id
         )
         assert valid_end is not None
-        assert deleted_at is None
-        assert status == "active"
+        assert lifecycle == "active"

@@ -93,7 +93,6 @@ function makeNearby(
     lat: 37.5667,
     lon: 126.9782,
     name: "인근 중복 후보",
-    status: "active",
     ...overrides,
   };
 }
@@ -270,7 +269,9 @@ test.describe("/admin/features/new (mocked routes)", () => {
       category: "01070300",
       coord: { lon: 126.978, lat: 37.5665 },
       reason: "e2e 수동 생성",
-      status: "active",
+      lifecycle_state: "active",
+      publication_state: "published",
+      quality_state: "valid",
       marker_icon: "marker",
       marker_color: "P-01",
     });
@@ -311,10 +312,7 @@ test.describe("/admin/features/new (mocked routes)", () => {
     expect(firstUrl.searchParams.get("radius_m")).toBe("150");
     expect(firstUrl.searchParams.get("page_size")).toBe("8");
     expect(firstUrl.searchParams.get("sort")).toBe("distance");
-    const statuses = firstUrl.searchParams.getAll("status");
-    expect(statuses).toContain("active");
-    expect(statuses).toContain("inactive");
-    expect(statuses).toContain("hidden");
+    expect(firstUrl.searchParams.has("status")).toBe(false);
 
     // 후보 행: feature cell의 Link + distance .toFixed(1)+'m'.
     await expect(

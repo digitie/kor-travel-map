@@ -1,6 +1,6 @@
 # ADR — Architecture Decision Records
 
-`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-089.**
+`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-091.**
 
 - ADR은 **프로그램 핵심 구조**(의존 계층·데이터/식별 모델·패키지/서비스 구조·REST 계약·
   운영 모델) 결정만 둔다. provider/ETL·도메인 taxonomy·알고리즘·process·운영 결정은 해당 topic
@@ -100,8 +100,10 @@
 | ADR-084 | Map-owned C6c cancel-probe fixture | [084-map-owned-c6c-cancel-probe-fixtures.md](084-map-owned-c6c-cancel-probe-fixtures.md) |
 | ADR-085 | 후보 API image의 설치 application schema head artifact | [085-installed-application-schema-head-artifact.md](085-installed-application-schema-head-artifact.md) |
 | ADR-086 | kind별 typed subtype 분해와 배타 arc | [086-typed-feature-subtypes.md](086-typed-feature-subtypes.md) |
-| ADR-088 | notice 계보 승자를 계보당 1회로 판정 | [087-notice-lineage-winner-once-per-lineage.md](087-notice-lineage-winner-once-per-lineage.md) |
+| ADR-087 | notice 계보 승자를 계보당 1회로 판정 | [087-notice-lineage-winner-once-per-lineage.md](087-notice-lineage-winner-once-per-lineage.md) |
 | ADR-088 | DB 소유 dataset operation과 immutable observation head | [088-provider-dataset-operation-and-observation-model.md](088-provider-dataset-operation-and-observation-model.md) |
+| ADR-089 | current summary는 불변 fact를 참조하고 rebuild receipt와 분리한다 | [089-current-summary-fact-reference-and-rebuild-receipt.md](089-current-summary-fact-reference-and-rebuild-receipt.md) |
+| ADR-090 | Feature 직교 상태의 final cutover와 DB 전이 감사 | [090-feature-state-final-cutover-and-audit.md](090-feature-state-final-cutover-and-audit.md) |
 
 ## 새 ADR 작성 규약
 

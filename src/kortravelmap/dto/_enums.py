@@ -12,7 +12,9 @@ from enum import StrEnum
 
 __all__ = [
     "FeatureKind",
-    "FeatureStatus",
+    "FeatureLifecycleState",
+    "FeaturePublicationState",
+    "FeatureQualityState",
     "SourceRole",
     "WeatherDomain",
     "ForecastStyle",
@@ -33,15 +35,26 @@ class FeatureKind(StrEnum):
     AREA = "area"
 
 
-class FeatureStatus(StrEnum):
-    """Feature 상태 (``docs/architecture/feature-model.md §2``)."""
+class FeatureLifecycleState(StrEnum):
+    """Feature 생명주기 축 (ADR-090)."""
+
+    ACTIVE = "active"
+    RETIRED = "retired"
+
+
+class FeaturePublicationState(StrEnum):
+    """Feature 공개 의도 축 (ADR-090)."""
 
     DRAFT = "draft"
-    ACTIVE = "active"
-    INACTIVE = "inactive"
-    HIDDEN = "hidden"
-    BROKEN = "broken"
-    DELETED = "deleted"
+    PUBLISHED = "published"
+    SUPPRESSED = "suppressed"
+
+
+class FeatureQualityState(StrEnum):
+    """Feature 품질 축 (ADR-090)."""
+
+    VALID = "valid"
+    QUARANTINED = "quarantined"
 
 
 class SourceRole(StrEnum):

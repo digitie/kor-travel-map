@@ -185,21 +185,21 @@ async def test_resolve_feature_ids_filters_existing_and_preserves_order(
     assert result.provider_datasets[0].feature_count == 2
 
 
-async def test_count_feature_ids_excludes_deleted_features_from_provider_counts(
+async def test_count_feature_ids_excludes_retired_features_from_provider_counts(
     migrated_session: AsyncSession,
 ) -> None:
     active = await _load(migrated_session, "SCOPE-ID-COUNT-ACTIVE", sigungu_code="11110")
-    deleted = await _load(migrated_session, "SCOPE-ID-COUNT-DELETED", sigungu_code="11140")
+    retired = await _load(migrated_session, "SCOPE-ID-COUNT-RETIRED", sigungu_code="11140")
     await migrated_session.execute(
         text(
             """
             UPDATE feature.features
-            SET status = 'inactive',
-                deleted_at = now()
+            SET lifecycle_state = 'retired',
+                publication_state = 'suppressed'
             WHERE feature_id = :feature_id
             """
         ),
-        {"feature_id": deleted.feature.feature_id},
+        {"feature_id": retired.feature.feature_id},
     )
     await migrated_session.flush()
 
@@ -209,7 +209,7 @@ async def test_count_feature_ids_excludes_deleted_features_from_provider_counts(
             "type": "feature_ids",
             "feature_ids": [
                 active.feature.feature_id,
-                deleted.feature.feature_id,
+                retired.feature.feature_id,
             ],
         },
         preview_limit=10,

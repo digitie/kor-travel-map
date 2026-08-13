@@ -1,13 +1,8 @@
 """``test_feature_repo_primary_source`` — ``get_primary_source_detail`` 결정성 검증.
 
-issue #509 Problem B 회귀. 같은 안정 식별자에 inactive+deleted_at 구 feature와
-active 신 feature가 둘 다 primary link로 남을 수 있다(re-key 정리 직전/직후, 혹은
-0029 demote 누락 시). 구 ``_GET_PRIMARY_SOURCE_DETAIL_SQL``은 ``deleted_at`` 필터도
-ORDER BY도 없는 ``LIMIT 1``이라 비활성 구 feature를 비결정적으로 반환할 수 있었다.
-
-하든 후: ``f.deleted_at IS NULL`` + 결정적 ``ORDER BY (status='active') DESC,
-imported_at DESC NULLS LAST, feature_id`` → 항상 active 신 feature 반환(반복 실행해도
-동일).
+같은 안정 식별자에 retired 구 Feature와 public 신 Feature가 둘 다 primary link로
+남을 수 있다. 이 reader는 ``feature.public_features`` 단일 projection을 조인하고
+head/record 순서로 정렬하므로, 공개 가능한 최신 Feature만 결정적으로 반환한다.
 
 Docker / testcontainers 미설치 환경에서는 conftest fixture가 ``pytest.skip``.
 """
@@ -21,6 +16,7 @@ import pytest
 from sqlalchemy import text
 
 from kortravelmap.infra.feature_repo import get_primary_source_detail
+from tests.integration._subtype_seed import seed_feature_subtype
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -39,24 +35,28 @@ async def _insert_feature(
     *,
     feature_id: str,
     category: str,
-    status: str,
-    deleted: bool,
+    lifecycle_state: str,
+    publication_state: str = "published",
+    quality_state: str = "valid",
 ) -> None:
     await session.execute(
         text(
             "INSERT INTO feature.features "
-            "(feature_id, kind, name, category, status, deleted_at) "
-            "VALUES (:fid, 'place', :name, :category, :status, "
-            " CASE WHEN :deleted THEN now() ELSE NULL END)"
+            "(feature_id, kind, name, category, lifecycle_state, "
+            " publication_state, quality_state) "
+            "VALUES (:fid, 'place', :name, :category, :lifecycle_state, "
+            " :publication_state, :quality_state)"
         ),
         {
             "fid": feature_id,
             "name": "월정리해수욕장",
             "category": category,
-            "status": status,
-            "deleted": deleted,
+            "lifecycle_state": lifecycle_state,
+            "publication_state": publication_state,
+            "quality_state": quality_state,
         },
     )
+    await seed_feature_subtype(session, feature_id=feature_id, kind="place")
 
 
 async def _insert_source_record(
@@ -129,17 +129,13 @@ async def _link_primary(
     )
 
 
-async def test_primary_source_detail_prefers_active_over_inactive(
+async def test_primary_source_detail_returns_latest_public_feature(
     migrated_session: AsyncSession,
 ) -> None:
-    """C: inactive-old + active-new 둘 다 primary link → 항상 active 반환(반복).
-
-    구 feature는 ``deleted_at`` 가드로 제외되고, 동률 방어로 ORDER BY가 active를
-    우선한다. 비결정성 제거를 보이기 위해 여러 번 실행해 동일 결과를 단언한다.
-    """
+    """retired-old + active/public/new 둘 다 primary link면 새 행만 반환한다."""
     session = migrated_session
 
-    # 구: inactive + deleted_at. (re-key cleanup 후 primary link가 아직 강등 안 된 상태)
+    # 구 행은 primary link가 남아 있어도 public projection 밖이다.
     await _insert_source_record(
         session, key="sr_old", payload_hash=md5(b"OLD").hexdigest()
     )
@@ -147,8 +143,8 @@ async def test_primary_source_detail_prefers_active_over_inactive(
         session,
         feature_id="f_old",
         category="01020300",
-        status="inactive",
-        deleted=True,
+        lifecycle_state="retired",
+        publication_state="suppressed",
     )
     await _link_primary(session, feature_id="f_old", record_key="sr_old")
 
@@ -163,13 +159,12 @@ async def test_primary_source_detail_prefers_active_over_inactive(
         session,
         feature_id="f_new",
         category="01050100",
-        status="active",
-        deleted=False,
+        lifecycle_state="active",
     )
     await _link_primary(session, feature_id="f_new", record_key="sr_new")
     await session.flush()
 
-    # 반복 실행 — 항상 active 신 feature를 결정적으로 반환.
+    # 반복 실행 — 항상 공개 가능 신 Feature를 결정적으로 반환.
     for _ in range(5):
         detail = await get_primary_source_detail(
             session,
@@ -180,15 +175,16 @@ async def test_primary_source_detail_prefers_active_over_inactive(
         )
         assert detail is not None
         assert detail["feature_id"] == "f_new"
-        assert detail["status"] == "active"
+        assert detail["lifecycle_state"] == "active"
+        assert detail["publication_state"] == "published"
+        assert detail["quality_state"] == "valid"
         assert detail["category"] == "01050100"
 
 
-async def test_primary_source_detail_skips_soft_deleted_only(
+async def test_primary_source_detail_skips_nonpublic_feature_only(
     migrated_session: AsyncSession,
 ) -> None:
-    """active 신 feature가 없고 inactive+deleted 구 feature만 남으면 None 반환
-    (deleted_at 가드 — 비활성 구 feature를 detail로 노출하지 않는다)."""
+    """공개 가능 행이 없으면 retired source link를 detail로 노출하지 않는다."""
     session = migrated_session
 
     await _insert_source_record(
@@ -198,8 +194,8 @@ async def test_primary_source_detail_skips_soft_deleted_only(
         session,
         feature_id="f_only_old",
         category="01020300",
-        status="inactive",
-        deleted=True,
+        lifecycle_state="retired",
+        publication_state="suppressed",
     )
     await _link_primary(session, feature_id="f_only_old", record_key="sr_only_old")
     await session.flush()

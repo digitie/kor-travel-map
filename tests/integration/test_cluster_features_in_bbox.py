@@ -28,11 +28,20 @@ async def _ins(
     sigungu: str,
     bjd: str,
 ) -> None:
+    """rollup 대상이 되려면 **공개 표면(`feature.public_features`)에 실재**해야 한다.
+
+    `cluster_features_in_bbox`는 `feature.features`가 아니라 공개 view를 읽으므로,
+    이 fixture가 세워야 하는 것은 "예전 `status='active'` 값"이 아니라 그 값이
+    뜻하던 상태 — 즉 view의 통과 조건인 (lifecycle=active, publication=published,
+    quality=valid) 삼중항이다. 0095 backfill도 `status='active'`를 정확히 이
+    삼중항으로 옮겼으므로 여기 세 축을 명시하는 것이 원래 의도의 등가 이식이다.
+    """
     await session.execute(
         text(
             """
             INSERT INTO feature.features (
-                feature_id, kind, name, category, coord, status, updated_at,
+                feature_id, kind, name, category, coord,
+                lifecycle_state, publication_state, quality_state, updated_at,
                 sido_code, sigungu_code, legal_dong_code
             )
             VALUES (
@@ -42,7 +51,7 @@ async def _ins(
                         CAST(:lon AS double precision), CAST(:lat AS double precision)
                     ), 4326
                 ),
-                'active', :ts, :sido, :sigungu, :bjd
+                'active', 'published', 'valid', :ts, :sido, :sigungu, :bjd
             )
             """
         ),

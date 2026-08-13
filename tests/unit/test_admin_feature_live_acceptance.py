@@ -82,8 +82,8 @@ def test_clone_recovery_purge_uses_exact_api_owned_fingerprints() -> None:
 
     assert set(fingerprints) == {
         _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "marker::draft"),  # noqa: SLF001
-        _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "marker::inactive"),  # noqa: SLF001
-        _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "marker::hidden"),  # noqa: SLF001
+        _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "marker::retired"),  # noqa: SLF001
+        _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "marker::suppressed"),  # noqa: SLF001
         _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "correction"),  # noqa: SLF001
         _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "search::alpha"),  # noqa: SLF001
         _FIXTURE_MODULE._admin_fixture_feature_id(run_id, "search::beta"),  # noqa: SLF001
@@ -639,7 +639,9 @@ def test_browser_lane_covers_nonpublic_bbox_and_stale_raw_etag() -> None:
 def test_browser_lane_covers_t_vn_15_search_contract_only_through_bff() -> None:
     spec = _SPEC.read_text()
     assert 'const SEARCH_FEATURES = ["alpha", "beta"]' in spec
-    assert 'status: "active" as const' in spec
+    assert 'lifecycleState: "active" as const' in spec
+    assert 'publicationState: "published" as const' in spec
+    assert 'qualityState: "valid" as const' in spec
     assert 'createHash("sha256")' in spec
     assert '.update(fixture.featureId, "utf8")' in spec
     assert 'fetch(`/api/proxy${path}`' in spec
@@ -663,8 +665,11 @@ def test_browser_lane_covers_t_vn_15_search_contract_only_through_bff() -> None:
 
 def test_browser_lane_covers_all_nonpublic_markers_and_cards() -> None:
     spec = _SPEC.read_text()
-    for status in ("draft", "inactive", "hidden"):
-        assert f'"{status}"' in spec
+    for state_label in ("draft", "retired", "suppressed"):
+        assert f'"{state_label}"' in spec
+    assert 'getByLabel("수명주기 필터")' in spec
+    assert 'getByLabel("공개 상태 필터")' in spec
+    assert 'getByLabel("품질 상태 필터")' in spec
     assert '/v1/admin/features/in-bounds"' in spec
     assert 'page.getByLabel(`${fixture.name} (place)`' in spec
     assert 'page.getByTestId("feature-weather-panel")' in spec

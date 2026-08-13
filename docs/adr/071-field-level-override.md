@@ -30,11 +30,12 @@ upsert 경로를 단순화할 수 있다.
 
 - **긍정**: 보정되지 않은 필드는 계속 최신화되고 override 감사·해제가 일관된다.
 - **부정**: effective projection 비용과 기존 whole-row 동결 해석의 이관이 필요하다.
-- **전환/rollback**: whole-row freeze를 field override로 materialize한 뒤 effective 결과를 대조한다.
-  projection 전환은 ADR-070 subtype 전환과 독립적으로 수행하며 rollback 시 기존 freeze 판정을
-  다시 사용하되 생성된 override 행은 삭제하지 않는다.
+- **전환**: whole-row freeze를 field override로 materialize한 뒤 effective 결과를 대조한다.
+  `data_origin`/`data_version`과 freeze column/trigger는 T-VN-36C의 forward-only final migration에서
+  물리 삭제한다. T-VN-34의 state-axis override는 이 materialization의 선행 정본이며, 생성된
+  override 행을 rollback shadow로 취급하지 않는다.
 
 ## 기존 결정과의 관계
 
 ADR-046에서 도입한 override 저장 방향(`ops.feature_overrides`)을 완결한다. ADR-070과 독립
-채택·독립 rollback한다.
+채택하며, 서비스 전 destructive cutover 규율은 ADR-090을 따른다.

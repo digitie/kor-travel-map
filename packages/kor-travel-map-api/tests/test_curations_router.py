@@ -913,7 +913,9 @@ def test_public_group_returns_all_editions(
                     lon=126.978,
                     lat=37.566,
                     address={"road": "서울특별시"},
-                    status="active",
+                    lifecycle_state="active",
+                    publication_state="published",
+                    quality_state="valid",
                     curations=(
                         _item(item_id="item-2025", edition="2025-2026"),
                         _item(item_id="item-2023", edition="2023-2024"),
@@ -932,6 +934,12 @@ def test_public_group_returns_all_editions(
     group = response.json()["data"]["items"][0]
     # T-VN-32C 값 전환 — group feature record·item feature 참조 값은 UUID 정본.
     assert group["feature"]["feature_id"] == _uuid("feature:shared")
+    # T-VN-34C: public curation은 visibility fence로만 feature를 읽는다. internal
+    # axes는 admin 표면에만 있으므로 collection response에 노출하지 않는다.
+    assert "lifecycle_state" not in group["feature"]
+    assert "publication_state" not in group["feature"]
+    assert "quality_state" not in group["feature"]
+    assert "status" not in group["feature"]
     assert group["curation_count"] == 2
     assert {item["edition_key"] for item in group["curations"]} == {
         "2023-2024",

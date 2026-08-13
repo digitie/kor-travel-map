@@ -2,29 +2,36 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from hashlib import md5
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 import pytest
 from geoalchemy2 import WKTElement
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.dto import Address, Coordinate, Feature, PlaceDetail
+from kortravelmap.infra import feature_repo
 from kortravelmap.infra.admin_feature_repo import (
-    FeatureStateConflict,
+    AdminFeatureStateConflict,
+    AdminFeatureStatePreconditionFailed,
     apply_feature_change_request,
-    deactivate_feature,
     get_feature_row_revision,
+    list_admin_feature_state_transitions,
     list_admin_features,
     list_dedup_reviews,
     merge_dedup_review,
+    reactivate_admin_feature_state,
     set_dedup_review_decision,
     submit_feature_change_request,
+    transition_admin_feature_state,
 )
+from kortravelmap.infra.db import make_async_engine
 from kortravelmap.infra.feature_repo import upsert_feature
 from kortravelmap.infra.models import (
     DedupReviewQueueRow,
@@ -49,7 +56,9 @@ def _feature_row(
     feature_id: str,
     *,
     name: str,
-    status: str = "active",
+    lifecycle_state: str = "active",
+    publication_state: str = "published",
+    quality_state: str = "valid",
 ) -> FeatureRow:
     return FeatureRow(
         feature_id=feature_id,
@@ -60,7 +69,9 @@ def _feature_row(
         address={"road": "서울특별시 종로구 세종대로 1"},
         urls={},
         raw_refs=[],
-        status=status,
+        lifecycle_state=lifecycle_state,
+        publication_state=publication_state,
+        quality_state=quality_state,
         created_at=_NOW,
         updated_at=_NOW,
     )
@@ -74,6 +85,47 @@ SELECT provider_dataset_id
 FROM provider_sync.provider_datasets
 WHERE provider = :provider AND dataset_key = :dataset_key
 """
+
+_RUNTIME_LOGIN = "ktm_feature_api_runtime"
+_RUNTIME_CREDENTIAL = uuid4().hex
+
+
+async def _provision_runtime_login(engine: AsyncEngine) -> None:
+    """Disposable integration DB에 실제 runtime LOGIN을 만들고 group만 상속한다."""
+    async with engine.begin() as connection:
+        await connection.execute(
+            text(
+                "DO $runtime_login$ "
+                "BEGIN "
+                "IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles "
+                f"WHERE rolname = '{_RUNTIME_LOGIN}') THEN "
+                f"CREATE ROLE {_RUNTIME_LOGIN} LOGIN NOINHERIT NOSUPERUSER "
+                f"NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION "
+                f"PASSWORD '{_RUNTIME_CREDENTIAL}'; "
+                "END IF; "
+                "END "
+                "$runtime_login$"
+            )
+        )
+        await connection.execute(
+            text(
+                f"ALTER ROLE {_RUNTIME_LOGIN} LOGIN NOINHERIT NOSUPERUSER "
+                f"NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION "
+                f"PASSWORD '{_RUNTIME_CREDENTIAL}'"
+            )
+        )
+        await connection.execute(
+            text(
+                f"GRANT ktm_feature_runtime TO {_RUNTIME_LOGIN} "
+                "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE"
+            )
+        )
+
+
+async def _runtime_engine(engine: AsyncEngine) -> AsyncEngine:
+    await _provision_runtime_login(engine)
+    runtime_url = engine.url.set(username=_RUNTIME_LOGIN, password=_RUNTIME_CREDENTIAL)
+    return make_async_engine(runtime_url.render_as_string(hide_password=False), pool_size=1)
 
 
 async def _provider_dataset_id(session: AsyncSession) -> int:
@@ -123,7 +175,24 @@ def _source_link(feature_id: str, source_record_key: str) -> SourceLinkRow:
     )
 
 
-def _dto(feature_id: str, *, status: str = "active") -> Feature:
+def _provider_source_membership(
+    feature_id: str,
+) -> feature_repo._ProviderSourceMembership:
+    """`_seed_feature`가 만든 canonical source proof를 writer에 전달한다."""
+    source_record_key = f"sr-{feature_id}"
+    return feature_repo._ProviderSourceMembership(
+        source_entity_key=f"se-{source_record_key}",
+        source_record_key=source_record_key,
+    )
+
+
+def _dto(
+    feature_id: str,
+    *,
+    lifecycle_state: str = "active",
+    publication_state: str = "published",
+    quality_state: str = "valid",
+) -> Feature:
     return Feature(
         feature_id=feature_id,
         kind="place",
@@ -139,7 +208,9 @@ def _dto(feature_id: str, *, status: str = "active") -> Feature:
         marker_icon="marker",
         marker_color="P-01",
         detail=PlaceDetail(feature_id=feature_id, place_kind="attraction"),
-        status=status,
+        lifecycle_state=lifecycle_state,
+        publication_state=publication_state,
+        quality_state=quality_state,
         created_at=_NOW,
         updated_at=_NOW + timedelta(minutes=5),
     )
@@ -179,86 +250,99 @@ async def _merge_dedup_review_with_short_lock_timeout(
     )
 
 
-async def test_deactivate_creates_override_and_provider_upsert_preserves_status(
+async def test_admin_retire_reactivate_is_atomic_and_auditable(
     migrated_session: AsyncSession,
 ) -> None:
     feature_id = "feature-admin-reactivation"
     await _seed_feature(migrated_session, feature_id)
+    initial_revision = await get_feature_row_revision(migrated_session, feature_id)
+    assert initial_revision is not None
 
-    result = await deactivate_feature(
+    retired = await transition_admin_feature_state(
         migrated_session,
         feature_id,
-        reason="운영상 제외",
+        expected_row_revision=initial_revision,
+        reason_code="admin_retire",
         operator="local-admin",
-        prevent_provider_reactivation=True,
+        action="retire",
     )
-    assert result is not None
-    assert result.previous_status == "active"
-    assert result.status == "inactive"
-    assert result.override is not None
-    assert result.override.field_path == "status"
+    assert (
+        retired.lifecycle_state,
+        retired.publication_state,
+        retired.quality_state,
+    ) == ("retired", "suppressed", "valid")
+    assert retired.row_revision > initial_revision
+    assert retired.audit_transition_id > 0
 
-    inserted = await upsert_feature(migrated_session, _dto(feature_id, status="active"))
+    # 일반 provider writer는 admin retirement override를 우회하지 못한다.
+    inserted = await upsert_feature(
+        migrated_session,
+        _dto(feature_id),
+        provider_dataset_id=await _provider_dataset_id(migrated_session),
+        source_membership=_provider_source_membership(feature_id),
+    )
     assert inserted is False
 
-    row = (
-        await migrated_session.execute(
-            select(FeatureRow.status, FeatureRow.deleted_at).where(
-                FeatureRow.feature_id == feature_id
-            )
-        )
-    ).one()
-    assert row.status == "inactive"
-    assert row.deleted_at is None
+    reactivation_revision = await get_feature_row_revision(
+        migrated_session, feature_id
+    )
+    assert reactivation_revision is not None
 
-    override_count = (
-        await migrated_session.execute(
-            text(
-                "SELECT count(*) FROM ops.feature_overrides "
-                "WHERE feature_id = :feature_id AND status = 'active'"
-            ),
-            {"feature_id": feature_id},
-        )
-    ).scalar_one()
-    assert override_count == 1
+    reactivated = await reactivate_admin_feature_state(
+        migrated_session,
+        feature_id,
+        expected_row_revision=reactivation_revision,
+        reason_code="admin_source_reactivated",
+        operator="local-admin",
+        provider_dataset_id=await _provider_dataset_id(migrated_session),
+        source_entity_key=f"se-sr-{feature_id}",
+        source_record_key=f"sr-{feature_id}",
+    )
+    assert (
+        reactivated.lifecycle_state,
+        reactivated.publication_state,
+        reactivated.quality_state,
+    ) == ("active", "suppressed", "valid")
+    assert reactivated.row_revision > reactivation_revision
 
-
-async def test_deactivate_rejects_deleted_feature(
-    migrated_session: AsyncSession,
-) -> None:
-    feature_id = "feature-admin-deleted"
-    await _seed_feature(migrated_session, feature_id)
-    await migrated_session.execute(
-        text(
-            """
-            UPDATE feature.features
-            SET status = 'deleted',
-                deleted_at = now(),
-                updated_at = now()
-            WHERE feature_id = :feature_id
-            """
-        ),
-        {"feature_id": feature_id},
+    timeline = await list_admin_feature_state_transitions(
+        migrated_session, feature_id, limit=10
+    )
+    assert [item.transition_id for item in timeline.items] == sorted(
+        (item.transition_id for item in timeline.items), reverse=True
+    )
+    assert {retired.audit_transition_id, reactivated.audit_transition_id}.issubset(
+        {item.transition_id for item in timeline.items}
     )
 
-    with pytest.raises(FeatureStateConflict) as exc_info:
-        await deactivate_feature(
+
+async def test_admin_state_transition_rejects_stale_revision(
+    migrated_session: AsyncSession,
+) -> None:
+    feature_id = "feature-admin-stale-revision"
+    await _seed_feature(migrated_session, feature_id)
+    revision = await get_feature_row_revision(migrated_session, feature_id)
+    assert revision is not None
+
+    await transition_admin_feature_state(
+        migrated_session,
+        feature_id,
+        publication_state="suppressed",
+        expected_row_revision=revision,
+        reason_code="admin_suppress",
+        operator="local-admin",
+        action="patch",
+    )
+    with pytest.raises(AdminFeatureStatePreconditionFailed):
+        await transition_admin_feature_state(
             migrated_session,
             feature_id,
-            reason="삭제 feature 부활 방지",
+            quality_state="quarantined",
+            expected_row_revision=revision,
+            reason_code="admin_quarantine",
             operator="local-admin",
+            action="patch",
         )
-
-    assert exc_info.value.current_status == "deleted"
-    row = (
-        await migrated_session.execute(
-            select(FeatureRow.status, FeatureRow.deleted_at).where(
-                FeatureRow.feature_id == feature_id
-            )
-        )
-    ).one()
-    assert row.status == "deleted"
-    assert row.deleted_at is not None
 
 
 async def test_user_update_version_overrides_provider_reload(
@@ -309,19 +393,21 @@ async def test_user_update_version_overrides_provider_reload(
     )
     assert second_request.state == "applied"
 
-    inserted = await upsert_feature(migrated_session, _dto(feature_id, status="active"))
+    inserted = await upsert_feature(
+        migrated_session,
+        _dto(feature_id),
+        provider_dataset_id=await _provider_dataset_id(migrated_session),
+        source_membership=_provider_source_membership(feature_id),
+    )
     assert inserted is False
 
-    row = (
+    row = await feature_repo.get_feature_row(migrated_session, feature_id)
+    assert row is not None
+    provenance = (
         await migrated_session.execute(
             text(
-                """
-                SELECT
-                    name, road_name_code, admin_dong_code, urls, detail,
-                    data_origin, data_version, user_change_kind
-                FROM feature.features_detailed
-                WHERE feature_id = :feature_id
-                """
+                "SELECT data_origin, data_version "
+                "FROM feature.features WHERE feature_id = :feature_id"
             ),
             {"feature_id": feature_id},
         )
@@ -331,9 +417,8 @@ async def test_user_update_version_overrides_provider_reload(
     assert row["admin_dong_code"] == "1111051500"
     assert row["urls"]["homepage"] == "https://example.test/user-feature"
     assert row["detail"]["payload"]["note"] == "사용자 수정 2"
-    assert row["data_origin"] == "user_request"
-    assert row["data_version"] == 2
-    assert row["user_change_kind"] == "update"
+    assert provenance["data_origin"] == "user_request"
+    assert provenance["data_version"] == 2
 
     versions = (
         await migrated_session.execute(
@@ -349,7 +434,6 @@ async def test_user_update_version_overrides_provider_reload(
         )
     ).mappings().all()
     assert [(v["version"], v["origin"], v["change_kind"]) for v in versions] == [
-        (0, "provider", "load"),
         (1, "user_request", "update"),
         (2, "user_request", "update"),
     ]
@@ -373,7 +457,198 @@ async def test_user_update_version_overrides_provider_reload(
     assert version_payloads[1]["payload"]["data_version"] == 2
 
 
-async def test_user_delete_soft_delete_prevents_provider_resurrection(
+async def test_admin_runtime_login_uses_procedures_for_add_update_delete_and_provider_lifecycle(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """runtime LOGIN은 direct provenance DML 없이 typed writer만 실행한다."""
+    feature_id = f"feature-admin-runtime-update-{uuid4().hex}"
+    async with (
+        AsyncSession(migrated_engine, expire_on_commit=False) as seed_session,
+        seed_session.begin(),
+    ):
+        await _seed_feature(seed_session, feature_id)
+        provider_dataset_id = await _provider_dataset_id(seed_session)
+
+    runtime_engine = await _runtime_engine(migrated_engine)
+    try:
+        async with (
+            AsyncSession(runtime_engine, expire_on_commit=False) as runtime_session,
+            runtime_session.begin(),
+        ):
+            expected_row_revision = await get_feature_row_revision(
+                runtime_session, feature_id
+            )
+            assert expected_row_revision is not None
+            request = await submit_feature_change_request(
+                runtime_session,
+                action="update",
+                feature_id=feature_id,
+                payload={"name": "runtime provenance writer"},
+                review_mode="immediate",
+                reason="runtime security provenance receipt",
+                requested_by="runtime-admin",
+                expected_row_revision=expected_row_revision,
+            )
+            assert request.state == "applied"
+            row = (
+                await runtime_session.execute(
+                    text(
+                        """
+                        SELECT name, data_origin, data_version
+                        FROM feature.features
+                        WHERE feature_id = :feature_id
+                        """
+                    ),
+                    {"feature_id": feature_id},
+                )
+            ).mappings().one()
+            assert dict(row) == {
+                "name": "runtime provenance writer",
+                "data_origin": "user_request",
+                "data_version": 1,
+            }
+            provider_context = json.dumps(
+                {
+                    "transition_kind": "provider_sync",
+                    "reason_code": "runtime_provider_retire",
+                    "provider_dataset_id": provider_dataset_id,
+                    "source_entity_key": f"se-sr-{feature_id}",
+                    "source_record_key": f"sr-{feature_id}",
+                },
+                ensure_ascii=False,
+            )
+            revision_before_retire = await get_feature_row_revision(
+                runtime_session, feature_id
+            )
+            assert revision_before_retire is not None
+            retired = (
+                await runtime_session.execute(
+                    text(feature_repo._TRANSITION_FEATURE_STATE_SQL),
+                    {
+                        "feature_id": feature_id,
+                        "lifecycle_state": "retired",
+                        "publication_state": "suppressed",
+                        "quality_state": "valid",
+                        "expected_row_revision": revision_before_retire,
+                        "state_context": provider_context,
+                    },
+                )
+            ).mappings().one()
+            reactivated_context = json.loads(provider_context)
+            reactivated_context["reason_code"] = "runtime_provider_reingest"
+            reactivated = (
+                await runtime_session.execute(
+                    text(feature_repo._TRANSITION_FEATURE_STATE_SQL),
+                    {
+                        "feature_id": feature_id,
+                        "lifecycle_state": "active",
+                        "publication_state": "suppressed",
+                        "quality_state": "valid",
+                        "expected_row_revision": int(retired["o_row_revision"]),
+                        "state_context": json.dumps(
+                            reactivated_context, ensure_ascii=False
+                        ),
+                    },
+                )
+            ).mappings().one()
+            assert int(reactivated["o_row_revision"]) > int(
+                retired["o_row_revision"]
+            )
+
+            delete_revision = await get_feature_row_revision(runtime_session, feature_id)
+            assert delete_revision is not None
+            delete_request = await submit_feature_change_request(
+                runtime_session,
+                action="delete",
+                feature_id=feature_id,
+                payload={},
+                review_mode="immediate",
+                reason="runtime delete provenance receipt",
+                requested_by="runtime-admin",
+                expected_row_revision=delete_revision,
+            )
+            assert delete_request.state == "applied"
+            deleted = (
+                await runtime_session.execute(
+                    text(
+                        """
+                        SELECT lifecycle_state, publication_state, data_origin, data_version
+                        FROM feature.features
+                        WHERE feature_id = :feature_id
+                        """
+                    ),
+                    {"feature_id": feature_id},
+                )
+            ).mappings().one()
+            assert dict(deleted) == {
+                "lifecycle_state": "retired",
+                "publication_state": "suppressed",
+                "data_origin": "user_request",
+                "data_version": 2,
+            }
+
+            added_feature_id = f"feature-admin-runtime-add-{uuid4().hex}"
+            add_request = await submit_feature_change_request(
+                runtime_session,
+                action="add",
+                feature_id=added_feature_id,
+                payload={
+                    "kind": "place",
+                    "name": "runtime user add",
+                    "category": "01070300",
+                    "coord": {"lon": 126.9769, "lat": 37.5759},
+                    "marker_icon": "marker",
+                    "marker_color": "P-01",
+                },
+                review_mode="immediate",
+                reason="runtime add provenance receipt",
+                requested_by="runtime-admin",
+            )
+            assert add_request.state == "applied"
+            added = (
+                await runtime_session.execute(
+                    text(
+                        """
+                        SELECT data_origin, data_version
+                        FROM feature.features
+                        WHERE feature_id = :feature_id
+                        """
+                    ),
+                    {"feature_id": added_feature_id},
+                )
+            ).mappings().one()
+            assert dict(added) == {
+                "data_origin": "user_request",
+                "data_version": 1,
+            }
+            # 0095는 runtime에서 feature_versions를 통째로 REVOKE했지만, 0097이
+            # features_detailed를 DROP하면서 admin detail 화면이 version receipt를
+            # 직접 읽게 됐다(`_ADMIN_FEATURE_VERSIONS_SQL`). 그래서 0097은 runtime에
+            # SELECT만 되돌려준다 — INV-34C-08이 정본이고, 읽기는 immutable trigger
+            # 뒤에 있으므로 provenance 무결성과 무관하다.
+            # 이 테스트가 지키려는 의미는 "runtime이 provenance를 직접 쓰지 못하고
+            # typed writer(procedure)만 거친다"이다. 그 의미는 읽기 권한의 부재가
+            # 아니라 쓰기 권한의 부재로 표현된다. has_table_privilege는 나열한 권한
+            # 중 하나라도 있으면 true이므로, 아래 한 번의 단언이 INSERT/UPDATE/DELETE
+            # 셋 모두의 부재를 뜻한다.
+            privileges = (
+                await runtime_session.execute(
+                    text(
+                        "SELECT has_table_privilege("
+                        "session_user, 'feature.feature_versions', 'SELECT') AS can_read, "
+                        "has_table_privilege("
+                        "session_user, 'feature.feature_versions', "
+                        "'INSERT, UPDATE, DELETE') AS can_write"
+                    )
+                )
+            ).mappings().one()
+            assert privileges["can_read"] is True
+            assert privileges["can_write"] is False
+    finally:
+        await runtime_engine.dispose()
+
+
+async def test_user_delete_retirement_prevents_provider_resurrection(
     migrated_session: AsyncSession,
 ) -> None:
     feature_id = "feature-admin-user-delete"
@@ -393,13 +668,18 @@ async def test_user_delete_soft_delete_prevents_provider_resurrection(
     )
     assert request.state == "applied"
 
-    await upsert_feature(migrated_session, _dto(feature_id, status="active"))
+    await upsert_feature(
+        migrated_session,
+        _dto(feature_id),
+        provider_dataset_id=await _provider_dataset_id(migrated_session),
+        source_membership=_provider_source_membership(feature_id),
+    )
 
     row = (
         await migrated_session.execute(
             text(
                 """
-                SELECT status, data_origin, data_version, user_deleted_at, user_deleted_by
+                SELECT lifecycle_state, publication_state, data_origin, data_version
                 FROM feature.features
                 WHERE feature_id = :feature_id
                 """
@@ -407,11 +687,10 @@ async def test_user_delete_soft_delete_prevents_provider_resurrection(
             {"feature_id": feature_id},
         )
     ).mappings().one()
-    assert row["status"] == "deleted"
+    assert row["lifecycle_state"] == "retired"
+    assert row["publication_state"] == "suppressed"
     assert row["data_origin"] == "user_request"
     assert row["data_version"] == 1
-    assert row["user_deleted_at"] is not None
-    assert row["user_deleted_by"] == "admin"
 
 
 async def test_review_required_add_applies_only_after_admin_approval(
@@ -457,7 +736,7 @@ async def test_review_required_add_applies_only_after_admin_approval(
         await migrated_session.execute(
             text(
                 """
-                SELECT name, data_origin, data_version, user_change_kind
+                SELECT name, data_origin, data_version
                 FROM feature.features
                 WHERE feature_id = :feature_id
                 """
@@ -468,7 +747,23 @@ async def test_review_required_add_applies_only_after_admin_approval(
     assert row["name"] == "사용자 추가 장소"
     assert row["data_origin"] == "user_request"
     assert row["data_version"] == 1
-    assert row["user_change_kind"] == "add"
+    versions = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT version, origin, change_kind, payload
+                FROM feature.feature_versions
+                WHERE feature_id = :feature_id
+                """
+            ),
+            {"feature_id": feature_id},
+        )
+    ).mappings().all()
+    assert [
+        (version["version"], version["origin"], version["change_kind"])
+        for version in versions
+    ] == [(1, "user_request", "add")]
+    assert versions[0]["payload"]["detail"]["place_kind"] == "attraction"
 
 
 async def test_list_admin_features_filters_issue_and_primary_source(
@@ -733,3 +1028,45 @@ async def test_list_dedup_reviews_cursor_rejects_filter_change(
     assert [item.review_id for item in page2.items] == [
         "00000000-0000-0000-0000-0000000000a1"
     ]
+
+
+async def test_retired_feature_publication_patch_is_a_conflict_not_a_500(
+    migrated_session: AsyncSession,
+) -> None:
+    """``ck_features_state_tuple`` 위반이 도메인 오류로 보존되는지 **실 DB로** 본다.
+
+    이 축이 없으면 매핑은 조용히 죽는다. 실제로 그랬다 — constraint 이름을
+    ``error.orig``에서만 찾았는데 asyncpg는 그것을 ``error.orig.__cause__``에 둔다.
+    그래서 두 집합의 이름 8개가 **하나도** 매칭되지 않았고 모든 23514가 라우터의
+    except 사슬을 통과해 catch-all 500이 됐다. 이름을 집합에서 빼도 게이트가 전부
+    green이었으므로 매핑에는 부하가 전혀 없었다.
+
+    단언 대상을 상태코드가 아니라 **도메인 예외 타입**으로 두는 이유는, 라우터가
+    그 타입으로 409를 만들기 때문이다(타입이 맞으면 상태코드는 라우터 테스트가 고정한다).
+    """
+
+    feature_id = "feature-retired-publication-patch"
+    await _seed_feature(migrated_session, feature_id)
+    revision = await get_feature_row_revision(migrated_session, feature_id)
+    assert revision is not None
+
+    retired = await transition_admin_feature_state(
+        migrated_session,
+        feature_id,
+        expected_row_revision=revision,
+        reason_code="admin_retire",
+        operator="local-admin",
+        action="retire",
+    )
+    assert retired.lifecycle_state == "retired"
+
+    with pytest.raises(AdminFeatureStateConflict):
+        await transition_admin_feature_state(
+            migrated_session,
+            feature_id,
+            expected_row_revision=retired.row_revision,
+            reason_code="admin_publish_retired",
+            operator="local-admin",
+            action="patch",
+            publication_state="published",
+        )

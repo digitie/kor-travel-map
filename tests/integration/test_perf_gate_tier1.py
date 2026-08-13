@@ -89,6 +89,14 @@ async def test_tier1_service_batch_query_count_is_constant(
 
 # hot query 결과 컬럼 frozen snapshot (response-shape 회귀). 값 변경은 의도적
 # 계약 변경일 때만 이 dict를 갱신한다.
+#
+# T-VN-34C(0097) — 공개 detail에서 ``status``/``deleted_at``이 빠진 것은 의도적
+# 계약 변경이다. 두 컬럼은 3축으로 이름이 바뀐 게 아니라 **공개 표면에서 사라졌다**:
+# 공개 가시성은 이제 ``feature.public_features`` 뷰의 술어(active/published/valid)가
+# 전부 결정하므로, 뷰를 통과해 나온 행은 축 값이 이미 그 하나뿐이라 실을 정보가 없다.
+# 3축 컬럼을 노출하는 쪽은 비공개(admin/감사) row shape이고, 공개 응답에 되살리면
+# 클라이언트가 뷰 밖에서 가시성을 다시 판정할 여지를 만든다. 그래서 자리를 옮기지
+# 않고 뺀다.
 _FROZEN_SHAPES: dict[str, tuple[str, ...]] = {
     "public detail (PK)": (
         "address",
@@ -97,7 +105,6 @@ _FROZEN_SHAPES: dict[str, tuple[str, ...]] = {
         "coord_5179_srid",
         "coord_precision_digits",
         "created_at",
-        "deleted_at",
         "detail",
         "feature_id",
         # T-VN-32B — UUID 정본 병행 노출(additive, 의도적 계약 변경).
@@ -115,7 +122,6 @@ _FROZEN_SHAPES: dict[str, tuple[str, ...]] = {
         "sibling_group_id",
         "sido_code",
         "sigungu_code",
-        "status",
         "updated_at",
         "urls",
     ),

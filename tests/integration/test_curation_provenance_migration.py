@@ -31,6 +31,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from alembic import command
 from kortravelmap.infra.curation_link_basis import trusted_basis_sql
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
+from tests.integration._tvn34_migration_bootstrap import (
+    alembic_schema_owner_role,
+    bootstrapped_migrator_dsn,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -54,6 +58,19 @@ def _run_alembic(dsn: str, revision: str, *, downgrade: bool = False) -> None:
         command.downgrade(config, revision)
     else:
         command.upgrade(config, revision)
+
+
+async def _upgrade_to_head(dsn: str) -> None:
+    """배포와 같은 경로로 head까지 올린다 — bootstrap 후 migrator 자격으로 upgrade.
+
+    0095 이후 fresh DB는 principal graph(schema owner / state procedure owner /
+    audit writer)가 먼저 있어야 upgrade가 성립한다. 이 모듈의 나머지 테스트는
+    0072~0074에서 멈추므로 그 선행조건이 없어도 되지만, head를 밟는 테스트는
+    공유 helper를 거쳐야 한다.
+    """
+    migrator_dsn = await bootstrapped_migrator_dsn(dsn)
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(_run_alembic, migrator_dsn, "head")
 
 
 async def _fresh_database(pg_container: Any) -> str:
@@ -614,30 +631,53 @@ async def test_downgrade_survives_a_supersedes_chain(pg_container: Any) -> None:
         await engine.dispose()
 
 
+# 이 seed만 head(0097) DB를 대상으로 한다 — 아래 병합 테스트가 현행 프로덕션
+# 코드를 부르기 때문이다. 0074 이후 세대가 이 seed의 표면을 네 군데 옮겼다.
+# 먼저 `feature.features`에서 사라진 두 컬럼:
+#   * `status='active'`가 요구하던 것은 "평범한 공개 Feature 둘"이고 그것은 3축으로
+#     (active, published, valid)이다. 그 셋이 그대로 컬럼 DEFAULT이므로 축을 적지
+#     않는 편이 원래 INSERT와 등가다 (0097이 `status`를 지웠다).
+#   * `detail`은 0087이 typed subtype 테이블로 옮기며 지웠다. 여기 값은 빈 `{}`,
+#     즉 "detail 없음"이었고 병합 경로는 detail을 보지 않으므로 생략이 등가다.
+# provider·dataset_key도 0090이 `provider_sync.provider_datasets` 한 곳으로 모으고
+# entity/source에서 지웠다. 이 seed가 요구하던 것은 "(concierge provider, youtube
+# dataset)에 속한 entity"이고, head에서 그것은 그 catalog row의 id를 참조하는 것과
+# 같다. dataset row는 0089 seed가 이미 심어 두므로 여기서 만들지 않는다.
+# raw_payload_hash는 0090이 canonical hex(`^[0-9a-f]{1,64}$`)로 좁혔다. 원래 값
+# 'h-m'/'h-l'이 뜻하던 것은 "record마다 서로 다른 payload 지문" 하나뿐이므로
+# 서로 다른 hex 두 개로 옮긴다 — 유일성은 그대로고 형식만 정본을 따른다.
+# `source_entity_heads`는 0091이 도입한, entity의 "현재 관측"을 담는 자리다. head가
+# 없으면 record가 있는 entity를 head DB가 거부한다("head must exist exactly once").
+# 이 seed의 record 둘은 각각 그 entity의 유일한 관측이므로 그대로 current head다.
 _MERGE_SEED_SQL = """
-INSERT INTO feature.features (feature_id, kind, name, category, detail, status)
+INSERT INTO feature.features (feature_id, kind, name, category)
 VALUES
-    (:master, 'place', 'H40 병합 master', '01070100', '{}'::jsonb, 'active'),
-    (:loser, 'place', 'H40 병합 loser', '01070100', '{}'::jsonb, 'active');
+    (:master, 'place', 'H40 병합 master', '01070100'),
+    (:loser, 'place', 'H40 병합 loser', '01070100');
 
 INSERT INTO provider_sync.source_entities (
-    source_entity_key, provider, dataset_key,
+    source_entity_key, provider_dataset_id,
     source_entity_type, source_entity_id, first_seen_at, last_seen_at
 )
-VALUES
-    ('h40:se:m', :provider, :dataset, 'place', 'h40-m', now(), now()),
-    ('h40:se:l', :provider, :dataset, 'place', 'h40-l', now(), now());
+SELECT key, dataset.provider_dataset_id, 'place', entity_id, now(), now()
+FROM provider_sync.provider_datasets AS dataset,
+     (VALUES ('h40:se:m', 'h40-m'), ('h40:se:l', 'h40-l')) AS seed(key, entity_id)
+WHERE dataset.provider = :provider AND dataset.dataset_key = :dataset;
 
 INSERT INTO provider_sync.source_records (
-    source_record_key, source_entity_key, provider, dataset_key,
-    source_entity_type, source_entity_id,
-    raw_name, raw_data, raw_payload_hash, fetched_at, imported_at
+    source_record_key, source_entity_key,
+    raw_data, raw_payload_hash, fetched_at, imported_at
 )
 VALUES
-    (:srk_master, 'h40:se:m', :provider, :dataset, 'place', 'h40-m',
-     'master', '{}'::jsonb, 'h-m', now(), now()),
-    (:srk_loser, 'h40:se:l', :provider, :dataset, 'place', 'h40-l',
-     'loser', '{}'::jsonb, 'h-l', now(), now());
+    (:srk_master, 'h40:se:m', '{}'::jsonb, 'd40a', now(), now()),
+    (:srk_loser, 'h40:se:l', '{}'::jsonb, 'd40b', now(), now());
+
+INSERT INTO provider_sync.source_entity_heads (
+    source_entity_key, current_source_record_key, observed_at
+)
+VALUES
+    ('h40:se:m', :srk_master, now()),
+    ('h40:se:l', :srk_loser, now());
 
 INSERT INTO feature.curated_themes (
     theme_slug, theme_name, theme_description, theme_group,
@@ -648,6 +688,12 @@ INSERT INTO feature.curated_themes (
 # prod와 같은 모양으로 넣는다 — `selection_origin='source_rule'` + 도달 가능한
 # `source_record_key`. 기존 merge 픽스처는 전부 `'admin'`이라 0073 트리거가 한 번도
 # 돌지 않는다. 그래서 merge 경로의 결함이 전부 green으로 통과했다.
+#
+# source를 고르는 조건도 위 seed와 같은 이유로 옮겼다. `curated_sources.provider`는
+# 0090이 dataset catalog로 걷어갔으므로 0031이 심은 concierge source는 catalog join
+# 으로만 지목할 수 있고, provider 하나에 dataset이 여럿일 수 있으니 dataset_key까지
+# 좁혀야 원래의 "concierge YouTube source 하나"와 등가다 — cross join이 2행을 만들면
+# 이 테스트가 세는 link 수가 통째로 달라진다.
 _MERGE_PROJECTION_SQL = """
 INSERT INTO feature.curated_features (
     theme_id, feature_id, source_id, source_record_key,
@@ -657,8 +703,13 @@ INSERT INTO feature.curated_features (
 SELECT theme.theme_id, :feature, source.source_id, :source_key,
        'curated', 'source_rule', 3, 'concierge-sync',
        :title, 'H40 병합', 'nearby_option', 'manual_review', '{}'::jsonb
-FROM feature.curated_themes AS theme, feature.curated_sources AS source
-WHERE theme.theme_slug = 'h40-merge-theme' AND source.provider = :provider
+FROM feature.curated_themes AS theme
+CROSS JOIN feature.curated_sources AS source
+JOIN provider_sync.provider_datasets AS dataset
+  ON dataset.provider_dataset_id = source.provider_dataset_id
+WHERE theme.theme_slug = 'h40-merge-theme'
+  AND dataset.provider = :provider
+  AND dataset.dataset_key = :dataset
 RETURNING curated_feature_id::text
 """
 
@@ -678,11 +729,21 @@ async def test_feature_merge_survives_source_rule_provenance(pg_container: Any) 
 
     - 병합이 예외 없이 끝난다
     - 살아남은 link은 신뢰 근거를 **유지**한다 (포인터가 NULL이 되면 안 된다)
+
+    이 모듈의 나머지 테스트와 달리 여기서는 DB를 `_TARGET_REVISION`(0074)이 아니라
+    **head**까지 올린다. 나머지는 0072~0074 세대의 DDL·트리거 표면을 raw SQL로
+    재생하므로 그 세대에 멈추는 것이 맞지만, 이 테스트가 검증하는 주체는
+    `apply_feature_merge()` — 세대별 사본이 없는 **현행 프로덕션 코드**다. 그 코드는
+    T-VN-34가 도입한 3축(`lifecycle_state`/`publication_state`/`quality_state`)을
+    읽고 `feature.transition_feature_state()`로 loser를 retire하므로, 3축이 아직
+    없는 0074 DB에 대고 부르면 검증 대상이 아니라 세대 불일치로 실패한다.
+    T-VN-H41이 건 FK ON UPDATE CASCADE는 head에도 그대로 살아 있으므로 이 테스트가
+    지키는 축(병합이 신뢰 근거를 지우지 않는다)은 바뀌지 않는다.
     """
     from kortravelmap.infra.merge_repo import apply_feature_merge
 
     dsn = await _fresh_database(pg_container)
-    await asyncio.to_thread(_run_alembic, dsn, _TARGET_REVISION)
+    await _upgrade_to_head(dsn)
     engine = make_async_engine(dsn)
     master, loser = "feature:h40-merge-master", "feature:h40-merge-loser"
     try:
@@ -707,6 +768,7 @@ async def test_feature_merge_survives_source_rule_provenance(pg_container: Any) 
                         "feature": feature,
                         "source_key": key,
                         "provider": _PROVIDER,
+                        "dataset": _DATASET,
                         "title": title,
                     },
                 )

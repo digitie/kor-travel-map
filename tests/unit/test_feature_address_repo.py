@@ -51,7 +51,9 @@ def _snap_row(**over: Any) -> dict[str, Any]:
         "sido_code": "11",
         "sigungu_code": "11110",
         "road_address_management_no": None,
-        "status": "active",
+        "lifecycle_state": "active",
+        "publication_state": "published",
+        "quality_state": "valid",
     }
     base.update(over)
     return base
@@ -96,7 +98,7 @@ async def test_apply_missing_feature_returns_none() -> None:
     assert result is None
 
 
-async def test_apply_full_override_builds_fields_and_overrides() -> None:
+async def test_apply_full_override_builds_fields_without_generic_override_dml() -> None:
     updated = _snap_row(
         address={"road": "새 주소"},
         lon=126.98,
@@ -104,8 +106,8 @@ async def test_apply_full_override_builds_fields_and_overrides() -> None:
         legal_dong_code="1114010300",
         sigungu_code="11140",
     )
-    # lock SELECT, UPDATE RETURNING, then one upsert result per overridden field (4).
-    session = _Session([_snap_row(), updated, None, None, None, None])
+    # lock SELECT, UPDATE RETURNING. Generic field override ownership is T-VN-36.
+    session = _Session([_snap_row(), updated])
     result = await repo.apply_feature_address_override(
         session,  # type: ignore[arg-type]
         "f1",
@@ -127,17 +129,11 @@ async def test_apply_full_override_builds_fields_and_overrides() -> None:
     assert result.snapshot.address == {"road": "새 주소"}
     assert result.snapshot.sigungu_code == "11140"
 
-    # lock + update + 4 override upserts.
-    assert len(session.calls) == 6
+    assert len(session.calls) == 2
     update_sql = session.calls[1]["sql"]
     assert "UPDATE feature.features SET" in update_sql
     assert "ST_MakePoint" in update_sql
-    # 직전 값이 override source_value(jsonb 문자열)에 보존됐는지.
-    legal_upsert = next(
-        c for c in session.calls[2:] if c["params"]["field_path"] == "legal_dong_code"
-    )
-    assert json.loads(legal_upsert["params"]["source_value"]) == "1111010100"
-    assert legal_upsert["params"]["operator"] == "op"
+    assert all("ops.feature_overrides" not in call["sql"] for call in session.calls)
 
 
 async def test_snapshot_parses_json_string_address() -> None:
@@ -150,7 +146,7 @@ async def test_snapshot_parses_json_string_address() -> None:
 
 async def test_apply_coord_only_with_existing_coord() -> None:
     updated = _snap_row(lon=127.0, lat=37.0)
-    session = _Session([_snap_row(), updated, None])
+    session = _Session([_snap_row(), updated])
     result = await repo.apply_feature_address_override(
         session,  # type: ignore[arg-type]
         "f1",
@@ -159,18 +155,12 @@ async def test_apply_coord_only_with_existing_coord() -> None:
     )
     assert result is not None
     assert result.overridden_fields == ("coord",)
-    coord_upsert = session.calls[2]
-    assert coord_upsert["params"]["field_path"] == "coord"
-    # 직전 좌표(lon/lat 존재)가 source_value에 보존됨.
-    assert json.loads(coord_upsert["params"]["source_value"]) == {
-        "lon": 126.97,
-        "lat": 37.57,
-    }
+    assert len(session.calls) == 2
 
 
 async def test_apply_coord_when_previous_coord_null() -> None:
     # 직전 좌표가 없으면 source_value는 null.
-    session = _Session([_snap_row(lon=None, lat=None), _snap_row(lon=127.1, lat=37.1), None])
+    session = _Session([_snap_row(lon=None, lat=None), _snap_row(lon=127.1, lat=37.1)])
     result = await repo.apply_feature_address_override(
         session,  # type: ignore[arg-type]
         "f1",
@@ -178,13 +168,12 @@ async def test_apply_coord_when_previous_coord_null() -> None:
         lat=37.1,
     )
     assert result is not None
-    coord_upsert = session.calls[2]
-    assert json.loads(coord_upsert["params"]["source_value"]) is None
+    assert len(session.calls) == 2
 
 
 async def test_apply_sido_and_road_management_no() -> None:
     updated = _snap_row(sido_code="26", road_address_management_no="RM-1")
-    session = _Session([_snap_row(), updated, None, None])
+    session = _Session([_snap_row(), updated])
     result = await repo.apply_feature_address_override(
         session,  # type: ignore[arg-type]
         "f1",
@@ -193,5 +182,4 @@ async def test_apply_sido_and_road_management_no() -> None:
     )
     assert result is not None
     assert set(result.overridden_fields) == {"sido_code", "road_address_management_no"}
-    paths = {c["params"]["field_path"] for c in session.calls[2:]}
-    assert paths == {"sido_code", "road_address_management_no"}
+    assert len(session.calls) == 2

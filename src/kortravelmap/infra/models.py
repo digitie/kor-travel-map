@@ -20,8 +20,9 @@ ORM 인스턴스 read mapping 용도로도 사용 가능.
 아직 없는 테이블: ``feature_opening_periods`` / ``feature_special_days``
 (0002의 후속 PR 항목 — 영업시간은 현재 subtype JSONB가 갖는다).
 
-뷰는 매핑하지 않는다 — ``feature.features_detailed``(조립)와
-``feature.public_features``는 alembic이 소유하고 repo가 raw SQL로 읽는다.
+뷰는 매핑하지 않는다 — ``feature.public_features``는 alembic이 소유하고 repo가
+raw SQL로 읽는다. typed detail 조립은 public projection·materializer·reader가
+각각 명시적으로 소유하며 private bridge view는 없다.
 
 ADR 참조
 --------
@@ -102,6 +103,7 @@ __all__ = [
     "metadata",
     "Base",
     "FeatureRow",
+    "FeatureStateTransitionRow",
     "FeatureAliasRow",
     "FeatureVersionRow",
     "ProviderDatasetRow",
@@ -218,8 +220,20 @@ class FeatureRow(Base):
             name="features_kind",
         ),
         CheckConstraint(
-            "status IN ('draft','active','inactive','hidden','broken','deleted')",
-            name="features_status",
+            "lifecycle_state IN ('active','retired')",
+            name="lifecycle_state",
+        ),
+        CheckConstraint(
+            "publication_state IN ('draft','published','suppressed')",
+            name="publication_state",
+        ),
+        CheckConstraint(
+            "quality_state IN ('valid','quarantined')",
+            name="quality_state",
+        ),
+        CheckConstraint(
+            "lifecycle_state = 'active' OR publication_state = 'suppressed'",
+            name="state_tuple",
         ),
         CheckConstraint(
             "data_origin IN ('provider','user_request')",
@@ -227,14 +241,6 @@ class FeatureRow(Base):
         ),
         CheckConstraint("data_version >= 0", name="ck_features_data_version"),
         CheckConstraint("row_revision >= 1", name="ck_features_row_revision"),
-        CheckConstraint(
-            "user_change_kind IS NULL OR user_change_kind IN ('add','update','delete')",
-            name="ck_features_user_change_kind",
-        ),
-        CheckConstraint(
-            "user_change_status IS NULL OR user_change_status IN ('pending','applied','rejected')",
-            name="ck_features_user_change_status",
-        ),
         CheckConstraint(
             "coord IS NULL OR ("
             "ST_X(coord) BETWEEN 124.0 AND 132.0 AND "
@@ -253,21 +259,30 @@ class FeatureRow(Base):
             "idx_features_coord_gist",
             "coord",
             postgresql_using="gist",
-            postgresql_where=text("deleted_at IS NULL"),
+            postgresql_where=text(
+                "lifecycle_state = 'active' "
+                "AND publication_state = 'published' "
+                "AND quality_state = 'valid'"
+            ),
         ),
         Index(
             "idx_features_coord_5179_gist",
             "coord_5179",
             postgresql_using="gist",
-            postgresql_where=text("deleted_at IS NULL"),
+            postgresql_where=text(
+                "lifecycle_state = 'active' "
+                "AND publication_state = 'published' "
+                "AND quality_state = 'valid'"
+            ),
         ),
         Index(
             "idx_features_public_weather_coord_5179_gist",
             "coord_5179",
             postgresql_using="gist",
             postgresql_where=text(
-                "status = 'active' "
-                "AND deleted_at IS NULL "
+                "lifecycle_state = 'active' "
+                "AND publication_state = 'published' "
+                "AND quality_state = 'valid' "
                 "AND kind = 'weather' "
                 "AND coord_5179 IS NOT NULL"
             ),
@@ -276,26 +291,63 @@ class FeatureRow(Base):
             "idx_features_kind_category",
             "kind",
             "category",
-            postgresql_where=text("deleted_at IS NULL"),
+            postgresql_where=text(
+                "lifecycle_state = 'active' "
+                "AND publication_state = 'published' "
+                "AND quality_state = 'valid'"
+            ),
         ),
         Index(
             "idx_features_updated_keyset",
             text("updated_at DESC"),
             text("feature_id DESC"),
+            postgresql_where=text(
+                "lifecycle_state = 'active' "
+                "AND publication_state = 'published' "
+                "AND quality_state = 'valid'"
+            ),
         ),
         Index(
-            "idx_features_status_updated",
-            "status",
+            "idx_features_lower_name_keyset",
+            text("lower(name)"),
+            "feature_id",
+            postgresql_where=text(
+                "lifecycle_state = 'active' "
+                "AND publication_state = 'published' "
+                "AND quality_state = 'valid'"
+            ),
+        ),
+        # admin scope 조회축. 0096이 공개 3축 partial로 좁힌 인덱스들은 admin이
+        # 쓰지 못한다 — T-VN-34C가 admin 목록의 상태 기본 필터를 제거해 admin은
+        # 상태 무필터로 읽고, 축을 지정해도 AND 결합이라 공개 술어를 함의하지 않는다.
+        # 그래서 admin 기본 화면이 Seq Scan으로 떨어졌다(alembic 0098 참조).
+        # 두 표면의 조회 의미를 맞추는 대신 admin에 자기 인덱스를 준다.
+        Index(
+            "idx_features_admin_lower_name_keyset",
+            text("lower(name)"),
+            "feature_id",
+        ),
+        Index(
+            "idx_features_admin_updated_keyset",
             text("updated_at DESC"),
             text("feature_id DESC"),
         ),
-        Index("idx_features_lower_name_keyset", text("lower(name)"), "feature_id"),
+        Index(
+            "idx_features_admin_created_keyset",
+            text("created_at DESC"),
+            text("feature_id DESC"),
+        ),
         Index("idx_features_legal_dong_code", "legal_dong_code"),
         Index(
             "idx_features_sigungu",
             "sigungu_code",
             "kind",
-            postgresql_where=text("deleted_at IS NULL"),
+            postgresql_where=text(
+                "lifecycle_state = 'active' "
+                "AND publication_state = 'published' "
+                "AND quality_state = 'valid' "
+                "AND sigungu_code IS NOT NULL"
+            ),
         ),
         Index(
             "idx_features_parent",
@@ -312,13 +364,13 @@ class FeatureRow(Base):
             "name",
             postgresql_using="gin",
             postgresql_ops={"name": "x_extension.gin_trgm_ops"},
+            postgresql_where=text(
+                "lifecycle_state = 'active' "
+                "AND publication_state = 'published' "
+                "AND quality_state = 'valid'"
+            ),
         ),
         Index("idx_features_data_origin", "data_origin", "data_version"),
-        Index(
-            "idx_features_user_deleted",
-            "user_deleted_at",
-            postgresql_where=text("user_deleted_at IS NOT NULL"),
-        ),
         UniqueConstraint("feature_uuid", name=conv("uq_features_feature_uuid")),
         # T-VN-32C(0083) — 파생 CHECK는 해제됐고(비파생 UUIDv7 generator),
         # 복합 UNIQUE가 alias 사본 일치 FK의 참조 대상이 된다.
@@ -346,7 +398,7 @@ class FeatureRow(Base):
 
     # 좌표 (ADR-012 — 양 좌표계 보유, coord_5179는 STORED generated).
     # T-VN-18(F-8/D-12-3): geoalchemy2 자동 full GiST를 끈다(spatial_index=False).
-    # 공개 술어 partial GiST(idx_features_*_gist, WHERE deleted_at IS NULL)만
+    # 공개 술어 partial GiST(idx_features_*_gist, WHERE 3축 public predicate)만
     # __table_args__에 명시적으로 유지한다 — 자동 full은 write 비용만 늘리고 공개
     # 조회는 partial로 충분하다. 0061이 DB의 자동 full 3개를 drop한다.
     coord: Mapped[Any | None] = mapped_column(Geometry("POINT", srid=4326, spatial_index=False))
@@ -394,10 +446,23 @@ class FeatureRow(Base):
         nullable=False,
         server_default=text("'[]'::jsonb"),
     )
-    status: Mapped[str] = mapped_column(
-        String,
+    # T-VN-34C(ADR-090) 직교 상태 정본. legacy status/soft-delete/user-change
+    # surrogate는 final migration에서 물리 제거했고, 재시도 receipt는
+    # ``feature_versions``의 immutable request binding이 맡는다.
+    lifecycle_state: Mapped[str] = mapped_column(
+        Text,
         nullable=False,
         server_default=text("'active'"),
+    )
+    publication_state: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'published'"),
+    )
+    quality_state: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'valid'"),
     )
     data_origin: Mapped[str] = mapped_column(
         Text,
@@ -418,13 +483,6 @@ class FeatureRow(Base):
         server_default=text("1"),
     )
 
-    user_change_kind: Mapped[str | None] = mapped_column(Text)
-    user_change_status: Mapped[str | None] = mapped_column(Text)
-    user_change_request_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
-    user_deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    user_deleted_by: Mapped[str | None] = mapped_column(Text)
-    user_change_reason: Mapped[str | None] = mapped_column(Text)
-
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -435,7 +493,110 @@ class FeatureRow(Base):
         nullable=False,
         server_default=text("now()"),
     )
-    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class FeatureStateTransitionRow(Base):
+    """``feature.feature_state_transitions`` append-only full-tuple audit (ADR-090).
+
+    ``feature_id``(현행 text business key)와 ``feature_uuid``(T39 final identity)에
+    의도적으로 Feature FK가 없다. Feature hard purge 뒤에도 두 식별자와 state
+    evidence가 남아야 하므로 cascade를 금지한다.
+    """
+
+    __tablename__ = "feature_state_transitions"
+    __table_args__ = (
+        CheckConstraint(
+            "transition_kind IN ("
+            "'initial','legacy_backfill','provider_sync','admin','user_request',"
+            "'merge','quality_validation','system'"
+            ")",
+            name="kind",
+        ),
+        CheckConstraint(
+            "btrim(reason_code) <> ''",
+            name="reason",
+        ),
+        CheckConstraint(
+            "btrim(principal) <> ''",
+            name="principal",
+        ),
+        CheckConstraint(
+            "(from_lifecycle_state IS NULL AND from_publication_state IS NULL "
+            "AND from_quality_state IS NULL) OR ("
+            "from_lifecycle_state IN ('active','retired') "
+            "AND from_publication_state IN ('draft','published','suppressed') "
+            "AND from_quality_state IN ('valid','quarantined') "
+            "AND (from_lifecycle_state = 'active' OR from_publication_state = 'suppressed')"
+            ")",
+            name="old_tuple",
+        ),
+        CheckConstraint(
+            "to_lifecycle_state IN ('active','retired') "
+            "AND to_publication_state IN ('draft','published','suppressed') "
+            "AND to_quality_state IN ('valid','quarantined') "
+            "AND (to_lifecycle_state = 'active' OR to_publication_state = 'suppressed')",
+            name="new_tuple",
+        ),
+        CheckConstraint(
+            "(from_lifecycle_state IS NULL AND transition_kind IN ("
+            "'initial','legacy_backfill','provider_sync'"
+            ")) OR (from_lifecycle_state IS NOT NULL AND transition_kind NOT IN ("
+            "'initial','legacy_backfill'"
+            "))",
+            name="initial_old_tuple",
+        ),
+        CheckConstraint(
+            "(transition_kind = 'provider_sync' "
+            "AND provider_dataset_id IS NOT NULL "
+            "AND btrim(source_entity_key) <> '' "
+            "AND btrim(source_record_key) <> '' "
+            "AND jsonb_typeof(provider_evidence) = 'object' "
+            "AND jsonb_typeof(provider_evidence -> 'authoritative_receipt') = 'string' "
+            "AND btrim(provider_evidence ->> 'authoritative_receipt') <> '') "
+            "OR (transition_kind <> 'provider_sync' "
+            "AND provider_dataset_id IS NULL AND source_entity_key IS NULL "
+            "AND source_record_key IS NULL AND provider_evidence IS NULL)",
+            name="provider_provenance",
+        ),
+        CheckConstraint(
+            "row_revision >= 1",
+            name="row_revision",
+        ),
+        Index(
+            "idx_feature_state_transitions_feature_occurred",
+            "feature_id",
+            "occurred_at",
+            "transition_id",
+        ),
+        {"schema": "feature"},
+    )
+
+    transition_id: Mapped[int] = mapped_column(
+        BigInteger,
+        Identity(always=True),
+        primary_key=True,
+    )
+    feature_id: Mapped[str] = mapped_column(Text, nullable=False)
+    feature_uuid: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    from_lifecycle_state: Mapped[str | None] = mapped_column(Text)
+    from_publication_state: Mapped[str | None] = mapped_column(Text)
+    from_quality_state: Mapped[str | None] = mapped_column(Text)
+    to_lifecycle_state: Mapped[str] = mapped_column(Text, nullable=False)
+    to_publication_state: Mapped[str] = mapped_column(Text, nullable=False)
+    to_quality_state: Mapped[str] = mapped_column(Text, nullable=False)
+    transition_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    reason_code: Mapped[str] = mapped_column(Text, nullable=False)
+    principal: Mapped[str] = mapped_column(Text, nullable=False)
+    causation_ref: Mapped[str | None] = mapped_column(Text)
+    provider_dataset_id: Mapped[int | None] = mapped_column(BigInteger)
+    source_entity_key: Mapped[str | None] = mapped_column(Text)
+    source_record_key: Mapped[str | None] = mapped_column(Text)
+    provider_evidence: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    row_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    invoker_role: Mapped[str] = mapped_column(Text, nullable=False)
+    state_procedure_definer: Mapped[str] = mapped_column(Text, nullable=False)
+    audit_writer_definer: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 # =============================================================================
@@ -450,8 +611,8 @@ class FeatureRow(Base):
 #
 # T-VN-35(ADR-086 결정 4): core ``detail``/``geom``은 0086에서 **제거됐다**.
 # kind별 값의 정본은 subtype 테이블이고, 응답용 ``detail``/``geom``은
-# ``feature.features_detailed`` 뷰가 조립한다 — 이 ORM 매핑은 core 컬럼만
-# 반영한다(뷰는 read 전용이라 매핑하지 않는다).
+# public projection과 snapshot materializer가 core+subtype을 명시적으로 직접
+# 조립한다. 별도 detail bridge view는 T-VN-34C에서 제거됐다.
 
 
 def _subtype_table_args(kind: str, *extra: Any) -> tuple[Any, ...]:
@@ -600,6 +761,7 @@ class FeatureRouteRow(_FeatureSubtypeBase):
             "idx_feature_routes_geom_gist",
             "geom",
             postgresql_using="gist",
+            postgresql_where=text("public_ready"),
         ),
     )
 
@@ -607,6 +769,10 @@ class FeatureRouteRow(_FeatureSubtypeBase):
     # (core의 GEOMETRY 느슨한 타입이 여기서 정확해진다).
     geom: Mapped[Any] = mapped_column(
         Geometry("MULTILINESTRING", srid=4326, spatial_index=False), nullable=False
+    )
+    # Core 3축의 DB-owned derived projection. Runtime은 이 열을 직접 쓸 수 없다.
+    public_ready: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
     )
     route_type: Mapped[str] = mapped_column(String, nullable=False)
     geometry_source: Mapped[str | None] = mapped_column(String)
@@ -633,11 +799,16 @@ class FeatureAreaRow(_FeatureSubtypeBase):
             "idx_feature_areas_geom_gist",
             "geom",
             postgresql_using="gist",
+            postgresql_where=text("public_ready"),
         ),
     )
 
     geom: Mapped[Any] = mapped_column(
         Geometry("MULTIPOLYGON", srid=4326, spatial_index=False), nullable=False
+    )
+    # Route와 같은 cross-relation index bridge; 독립 상태 정본이 아니다.
+    public_ready: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
     )
     area_kind: Mapped[str] = mapped_column(String, nullable=False)
     boundary_source: Mapped[str | None] = mapped_column(String)
@@ -733,8 +904,9 @@ class FeatureAliasRow(Base):
 class FeatureVersionRow(Base):
     """``feature.feature_versions`` row mapping.
 
-    provider 적재 snapshot은 version 0, 사용자/admin 요청으로 적용된 effective
-    snapshot은 version 1에 저장한다. ``feature.features``는 조회용 effective row다.
+    provider 적재 snapshot은 version 0이고, user request receipt는 feature별
+    증가 version이다. ``(feature_id, request_id)`` partial UNIQUE와 trigger가
+    applied request의 immutable replay receipt를 보장한다.
     """
 
     __tablename__ = "feature_versions"
@@ -749,6 +921,15 @@ class FeatureVersionRow(Base):
             name="ck_feature_versions_change_kind",
         ),
         Index("idx_feature_versions_request", "request_id"),
+        Index(
+            "uq_feature_versions_user_request_receipt",
+            "feature_id",
+            "request_id",
+            unique=True,
+            postgresql_where=text(
+                "origin = 'user_request' AND request_id IS NOT NULL"
+            ),
+        ),
         {"schema": "feature"},
     )
 
@@ -2490,6 +2671,13 @@ class FeatureOverrideRow(Base):
         CheckConstraint(
             "status IN ('active','inactive','superseded')",
             name="ck_overrides_status",
+        ),
+        CheckConstraint(
+            "field_path <> 'lifecycle_state' OR ("
+            "jsonb_typeof(override_value) = 'string' "
+            "AND override_value #>> '{}' IN ('active','retired')"
+            ")",
+            name="lifecycle_state_value",
         ),
         Index("idx_overrides_feature", "feature_id", "status"),
         Index("idx_overrides_field", "field_path"),

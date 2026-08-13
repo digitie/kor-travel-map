@@ -34,15 +34,13 @@ def test_kor_travel_map_subpackages_importable() -> None:
 
 @pytest.mark.unit
 def test_settings_default_values() -> None:
-    """`KorTravelMapSettings()` 환경변수 없이 기본값으로 생성."""
+    """DB DSN fallback 없이도 DB 비의존 설정은 읽을 수 있다."""
     from kortravelmap.settings import KorTravelMapSettings
 
     settings = KorTravelMapSettings()
 
-    # PostgreSQL DSN 기본값
-    assert settings.pg_dsn.get_secret_value().startswith(
-        "postgresql+asyncpg://"
-    )
+    # PostgreSQL DSN은 deployment secret으로만 주입한다.
+    assert settings.pg_dsn is None
     # 객체 저장소 기본 bucket
     assert settings.object_store_bucket == "kor-travel-map"
     assert settings.offline_upload_max_bytes == 100 * 1024 * 1024
@@ -78,8 +76,8 @@ def test_settings_secrets_are_secretstr() -> None:
 
     from kortravelmap.settings import KorTravelMapSettings
 
-    settings = KorTravelMapSettings()
+    settings = KorTravelMapSettings(pg_dsn="postgresql+asyncpg://runtime:test@db/test")
 
     assert isinstance(settings.pg_dsn, SecretStr)
     # repr는 `**********` 형태로 마스킹
-    assert "changeme" not in repr(settings.pg_dsn)
+    assert "runtime:test" not in repr(settings.pg_dsn)

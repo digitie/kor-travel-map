@@ -308,7 +308,10 @@ def _format_status(counts: StatusCounts) -> str:
 def _resolve_dsn(args: argparse.Namespace) -> str:
     if args.dsn:
         return str(args.dsn)
-    return KorTravelMapSettings().pg_dsn.get_secret_value()
+    dsn = KorTravelMapSettings().pg_dsn
+    if dsn is None:
+        raise ValueError("--dsn or KOR_TRAVEL_MAP_PG_DSN is required")
+    return dsn.get_secret_value()
 
 
 async def _cmd_status(args: argparse.Namespace) -> int:
@@ -428,7 +431,7 @@ def _format_bulk_result(result: MoisBulkJobResult) -> str:
             f"  source_records: inserted={load.source_records_inserted}",
             f"  source_links: inserted={load.source_links_inserted} "
             f"updated={load.source_links_updated}",
-            f"  deactivated (snapshot prune): {result.sync.deactivated}",
+            f"  retired (snapshot prune): {result.sync.retired}",
         ]
     )
 
@@ -463,7 +466,7 @@ def _format_closed_result(result: MoisClosedJobResult) -> str:
     return "\n".join(
         [
             f"import (closed): done (job_id={job_id})",
-            f"  deactivated (inactive 전환): {result.deactivated}",
+            f"  retired (lifecycle 전이): {result.retired}",
             f"  cursor: {result.sync_state.cursor}",
         ]
     )

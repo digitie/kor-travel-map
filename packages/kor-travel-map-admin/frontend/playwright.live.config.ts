@@ -14,6 +14,9 @@ const c7RawOutputDir = path.join(
 );
 
 const baseURL = process.env.E2E_BASE_URL ?? "http://127.0.0.1:12705";
+// `URL.canParse` 가드가 없으면 잘못된 `E2E_BASE_URL`이 config 평가 자체를
+// throw로 끝낸다. null로 두고 아래 신뢰 판정에서 명시적으로 걸러낸다.
+const parsedBaseURL = URL.canParse(baseURL) ? new URL(baseURL) : null;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const C7_READ_AUTH_SPEC = "ops-c7-read-auth.live.spec";
 const ISOLATED_EVIDENCE_ENV = "E2E_ISOLATED_LIVE_EVIDENCE";
@@ -113,6 +116,41 @@ function isLocalHost(hostname: string): boolean {
     hostname.endsWith(".localhost")
   );
 }
+
+function isTrustedIsolatedDockerOrigin(url: URL): boolean {
+  return (
+    isolatedDockerNetwork &&
+    url.protocol === "http:" &&
+    url.hostname === "candidate-ui" &&
+    url.username === "" &&
+    url.password === "" &&
+    url.pathname === "/" &&
+    url.search === "" &&
+    url.hash === ""
+  );
+}
+
+function isTrustedIsolatedDockerLoopbackOrigin(url: URL): boolean {
+  return (
+    isolatedDockerNetwork &&
+    url.protocol === "http:" &&
+    url.hostname === "localhost" &&
+    url.port === "12705" &&
+    url.username === "" &&
+    url.password === "" &&
+    url.pathname === "/" &&
+    url.search === "" &&
+    url.hash === ""
+  );
+}
+
+const isolatedHttpOrigin =
+  parsedBaseURL !== null && isTrustedIsolatedDockerOrigin(parsedBaseURL)
+    ? parsedBaseURL.origin
+    : null;
+const isolatedDockerLoopbackOrigin =
+  parsedBaseURL !== null &&
+  isTrustedIsolatedDockerLoopbackOrigin(parsedBaseURL);
 
 (function assertNotProdUnlessOptedIn() {
   let parsed: URL;
@@ -245,6 +283,20 @@ export default defineConfig({
       ],
   use: {
     baseURL,
+    // Noble Chromium은 `candidate-ui` 단일-label HTTP origin을 secure-context
+    // flag로 승격하지 않는다. runner는 `localhost` URL을 쓰되 Docker resolver로만
+    // `candidate-ui` service에 연결한다. 따라서 URL origin은 실제 loopback secure
+    // context이고, network 밖 host를 가리킬 수 없다.
+    launchOptions:
+      isolatedDockerLoopbackOrigin
+        ? { args: ["--host-resolver-rules=MAP localhost candidate-ui"] }
+        : isolatedHttpOrigin === null
+          ? undefined
+          : {
+            args: [
+              `--unsafely-treat-insecure-origin-as-secure=${isolatedHttpOrigin}`,
+            ],
+          },
     // 방어선(T-ADM-C7RUN): 기본 action/navigation timeout은 0(무제한)이라, 조건부 렌더
     // element를 기다리는 click/fill/goto가 조건이 끝내 참이 되지 않으면 spec의 30분
     // test-timeout까지 조용히 매달린다(관측된 empty-write hang의 근본 조건). 정상 UI

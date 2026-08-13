@@ -192,7 +192,8 @@ async def _insert_geometry_feature(
             INSERT INTO feature.features (
                 feature_id, kind, name, category,
                 coord, coord_precision_digits,
-                marker_icon, marker_color, status
+                marker_icon, marker_color,
+                lifecycle_state, publication_state, quality_state
             )
             VALUES (
                 :feature_id, :kind, :name, :category,
@@ -203,7 +204,7 @@ async def _insert_geometry_feature(
                              CAST(:lat AS double precision)
                          ), 4326) END,
                 CASE WHEN CAST(:lon AS double precision) IS NULL THEN NULL ELSE 6 END,
-                'park', 'P-06', 'active'
+                'park', 'P-06', 'active', 'published', 'valid'
             )
             """
         ),
@@ -338,27 +339,21 @@ async def test_load_bundle_is_idempotent(migrated_session: AsyncSession) -> None
     assert source_row["observed_at"] == before
 
 
-@pytest.mark.parametrize(
-    "deleted_at",
-    [None, _FETCHED],
-    ids=["inactive", "soft-deleted"],
-)
-async def test_identical_provider_bundle_reactivates_inactive_once(
+async def test_identical_provider_bundle_reactivates_retired_once(
     migrated_session: AsyncSession,
-    deleted_at: datetime | None,
 ) -> None:
-    """동일 payload 재등장도 provider inactive 상태를 1회만 self-heal한다."""
-    suffix = "SOFT-DELETED" if deleted_at is not None else "INACTIVE"
+    """동일 payload 재등장도 provider retired 상태를 1회만 self-heal한다."""
+    suffix = "RETIRED"
     bundle = await _bundle(f"FEST-REPO-REAPPEARED-{suffix}")
     await feature_repo.load_bundle(migrated_session, bundle)
     await migrated_session.execute(
         text(
             "UPDATE feature.features"
-            " SET status = 'inactive', deleted_at = :deleted_at, updated_at = now()"
+            " SET lifecycle_state = 'retired', publication_state = 'suppressed', "
+            "updated_at = now()"
             " WHERE feature_id = :feature_id"
         ),
         {
-            "deleted_at": deleted_at,
             "feature_id": bundle.feature.feature_id,
         },
     )
@@ -367,49 +362,22 @@ async def test_identical_provider_bundle_reactivates_inactive_once(
     assert recovered.features_inserted == 0
     assert recovered.features_updated == 1
     assert recovered.source_records_inserted == 0
-    status = (
+    state = (
         await migrated_session.execute(
             text(
-                "SELECT status, deleted_at FROM feature.features"
+                "SELECT lifecycle_state, publication_state FROM feature.features"
                 " WHERE feature_id = :feature_id"
             ),
             {"feature_id": bundle.feature.feature_id},
         )
     ).one()
-    assert status.status == "active"
-    assert status.deleted_at is None
+    assert state.lifecycle_state == "active"
+    assert state.publication_state == "suppressed"
 
     # 복구 뒤 같은 payload는 다시 feature upsert/version write를 일으키지 않는다.
     repeated = await feature_repo.load_bundle(migrated_session, bundle)
     assert repeated.features_updated == 0
     assert repeated.source_records_inserted == 0
-
-
-async def test_identical_bundle_reactivates_deactivate_without_prevention(
-    migrated_session: AsyncSession,
-) -> None:
-    """prevent=false 운영 비활성화는 다음 provider snapshot이 되살릴 수 있다."""
-    bundle = await _bundle("FEST-REPO-DEACTIVATE-ALLOW")
-    await feature_repo.load_bundle(migrated_session, bundle)
-    deactivated = await admin_feature_repo.deactivate_feature(
-        migrated_session,
-        bundle.feature.feature_id,
-        reason="provider 재활성화 허용 테스트",
-        operator="integration-test",
-        prevent_provider_reactivation=False,
-    )
-    assert deactivated is not None
-    assert deactivated.status == "inactive"
-    assert deactivated.override_created is False
-
-    recovered = await feature_repo.load_bundle(migrated_session, bundle)
-    assert recovered.features_updated == 1
-    row = await feature_repo.get_feature_row(
-        migrated_session, bundle.feature.feature_id
-    )
-    assert row is not None
-    assert row["status"] == "active"
-    assert row["deleted_at"] is None
 
 
 async def test_identical_bundle_does_not_reactivate_user_request_feature(
@@ -420,7 +388,7 @@ async def test_identical_bundle_does_not_reactivate_user_request_feature(
     await migrated_session.execute(
         text(
             "UPDATE feature.features"
-            " SET status = 'inactive', deleted_at = now(),"
+            " SET lifecycle_state = 'retired', publication_state = 'suppressed',"
             " data_origin = 'user_request', data_version = 1, updated_at = now()"
             " WHERE feature_id = :feature_id"
         ),
@@ -432,14 +400,14 @@ async def test_identical_bundle_does_not_reactivate_user_request_feature(
     row = (
         await migrated_session.execute(
             text(
-                "SELECT status, deleted_at, data_origin FROM feature.features"
+                "SELECT lifecycle_state, publication_state, data_origin FROM feature.features"
                 " WHERE feature_id = :feature_id"
             ),
             {"feature_id": bundle.feature.feature_id},
         )
     ).one()
-    assert row.status == "inactive"
-    assert row.deleted_at is not None
+    assert row.lifecycle_state == "retired"
+    assert row.publication_state == "suppressed"
     assert row.data_origin == "user_request"
 
 
@@ -451,7 +419,8 @@ async def test_identical_bundle_respects_prevent_reactivation_override(
     await migrated_session.execute(
         text(
             "UPDATE feature.features"
-            " SET status = 'inactive', deleted_at = now(), updated_at = now()"
+            " SET lifecycle_state = 'retired', publication_state = 'suppressed', "
+            "updated_at = now()"
             " WHERE feature_id = :feature_id"
         ),
         {"feature_id": bundle.feature.feature_id},
@@ -463,7 +432,7 @@ async def test_identical_bundle_respects_prevent_reactivation_override(
                 feature_id, field_path, override_value,
                 prevent_provider_reactivation, status
             ) VALUES (
-                :feature_id, 'status', to_jsonb('inactive'::text), true, 'active'
+                :feature_id, 'lifecycle_state', to_jsonb('retired'::text), true, 'active'
             )
             """
         ),
@@ -475,14 +444,14 @@ async def test_identical_bundle_respects_prevent_reactivation_override(
     row = (
         await migrated_session.execute(
             text(
-                "SELECT status, deleted_at FROM feature.features"
+                "SELECT lifecycle_state, publication_state FROM feature.features"
                 " WHERE feature_id = :feature_id"
             ),
             {"feature_id": bundle.feature.feature_id},
         )
     ).one()
-    assert row.status == "inactive"
-    assert row.deleted_at is not None
+    assert row.lifecycle_state == "retired"
+    assert row.publication_state == "suppressed"
 
 
 def _concierge_item(
@@ -545,11 +514,11 @@ def _concierge_item(
     }
 
 
-async def _inactivate_concierge_items(
+async def _retire_concierge_items(
     session: AsyncSession, items: list[dict[str, Any]]
 ) -> int:
-    """Dagster asset과 동일 경로 — reject/tombstone item → feature inactive 전환."""
-    return await feature_repo.inactivate_features_by_source_entity_ids(
+    """Dagster asset과 동일 경로 — reject/tombstone item → Feature retired 전이."""
+    return await feature_repo.retire_features_by_source_entity_ids(
         session,
         provider=KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
         dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
@@ -561,11 +530,11 @@ async def _inactivate_concierge_items(
 async def test_kor_travel_concierge_revert_reactivates_tombstoned_feature(
     migrated_session: AsyncSession,
 ) -> None:
-    """concierge #202 되돌리기 — tombstone→inactive 후 같은 payload 재-upsert가 복구한다.
+    """concierge #202 되돌리기 — tombstone→retired 후 같은 payload 재-upsert가 복구한다.
 
     concierge 검수 UI의 제거 목록/soft-delete와 되돌리기(reopen) 자체는 tombstone을
     발행하고, 재검수 **재확정 시** 같은 후보의 upsert가 재발행된다(export ledger는
-    후보당 1행 최신 operation). 소비 측은 tombstone에서 inactive 전환, 재확정
+    후보당 1행 최신 operation). 소비 측은 tombstone에서 retired 전이, 재확정
     재-upsert에서 provider self-heal 복구가 성립해야 복원된 후보가 지도에 다시
     보인다(ADR-050 #4 확장).
     """
@@ -574,35 +543,47 @@ async def test_kor_travel_concierge_revert_reactivates_tombstoned_feature(
     loaded = await feature_repo.load_bundle(migrated_session, bundle)
     assert loaded.features_inserted == 1
 
-    assert await _inactivate_concierge_items(
+    assert await _retire_concierge_items(
         migrated_session, [{**item, "operation": "tombstone"}]
     ) == 1
-    row = (
+    state = (
         await migrated_session.execute(
             text(
-                "SELECT status, deleted_at FROM feature.features"
+                "SELECT lifecycle_state, publication_state FROM feature.features"
                 " WHERE feature_id = :feature_id"
             ),
             {"feature_id": bundle.feature.feature_id},
         )
     ).one()
-    assert row.status == "inactive"
-    assert row.deleted_at is not None
+    assert state.lifecycle_state == "retired"
+    assert state.publication_state == "suppressed"
 
     # 되돌리기: 같은 payload의 재-upsert(동일 source_record_key) → fast-path 복구.
     recovered = await feature_repo.load_bundle(migrated_session, bundle)
     assert recovered.features_updated == 1
-    row = (
+    recovered_state = (
         await migrated_session.execute(
             text(
-                "SELECT status, deleted_at FROM feature.features"
+                "SELECT lifecycle_state, publication_state FROM feature.features"
                 " WHERE feature_id = :feature_id"
             ),
             {"feature_id": bundle.feature.feature_id},
         )
     ).one()
-    assert row.status == "active"
-    assert row.deleted_at is None
+    assert recovered_state.lifecycle_state == "active"
+    # provider retire가 부수적으로 내린 억제는 provider reingest가 되돌린다.
+    # docstring이 주장하는 것은 "지도에 다시 보인다"이므로, 축 값이 아니라
+    # **공개 표면에 실제로 있는지**를 단언한다 — 축만 보면 공개 술어가 바뀌었을 때
+    # 통과하면서 지도에서는 사라진 상태를 놓친다.
+    assert recovered_state.publication_state == "published"
+    assert (
+        await migrated_session.execute(
+            text(
+                "SELECT count(*) FROM feature.public_features WHERE feature_id = :feature_id"
+            ),
+            {"feature_id": bundle.feature.feature_id},
+        )
+    ).scalar_one() == 1
 
 
 async def test_kor_travel_concierge_revert_with_changed_payload_reactivates(
@@ -618,7 +599,7 @@ async def test_kor_travel_concierge_revert_with_changed_payload_reactivates(
     [bundle] = await kor_travel_concierge_items_to_bundles([item], fetched_at=_FETCHED)
     await feature_repo.load_bundle(migrated_session, bundle)
 
-    assert await _inactivate_concierge_items(
+    assert await _retire_concierge_items(
         migrated_session, [{**item, "operation": "reject"}]
     ) == 1
 
@@ -638,16 +619,26 @@ async def test_kor_travel_concierge_revert_with_changed_payload_reactivates(
     row = (
         await migrated_session.execute(
             text(
-                "SELECT status, deleted_at,"
-                " detail #>> '{facility_info,description}' AS description"
-                " FROM feature.features_detailed WHERE feature_id = :feature_id"
+                "SELECT f.lifecycle_state, f.publication_state, "
+                "p.facility_info ->> 'description' AS description "
+                "FROM feature.features AS f "
+                "LEFT JOIN feature.feature_places AS p ON p.feature_id = f.feature_id "
+                "WHERE f.feature_id = :feature_id"
             ),
             {"feature_id": bundle.feature.feature_id},
         )
     ).one()
-    assert row.status == "active"
-    assert row.deleted_at is None
+    assert row.lifecycle_state == "active"
+    assert row.publication_state == "published"
     assert row.description == "재검수로 수정된 설명"
+    assert (
+        await migrated_session.execute(
+            text(
+                "SELECT count(*) FROM feature.public_features WHERE feature_id = :feature_id"
+            ),
+            {"feature_id": bundle.feature.feature_id},
+        )
+    ).scalar_one() == 1
 
 
 async def test_kor_travel_concierge_revert_respects_admin_prevention(
@@ -658,27 +649,84 @@ async def test_kor_travel_concierge_revert_respects_admin_prevention(
     [bundle] = await kor_travel_concierge_items_to_bundles([item], fetched_at=_FETCHED)
     await feature_repo.load_bundle(migrated_session, bundle)
 
-    deactivated = await admin_feature_repo.deactivate_feature(
+    revision = await admin_feature_repo.get_feature_row_revision(
+        migrated_session, bundle.feature.feature_id
+    )
+    assert revision is not None
+    retired = await admin_feature_repo.transition_admin_feature_state(
         migrated_session,
         bundle.feature.feature_id,
-        reason="운영 판단 비노출",
+        expected_row_revision=revision,
+        reason_code="operator_retire",
         operator="integration-test",
-        prevent_provider_reactivation=True,
+        action="retire",
     )
-    assert deactivated is not None
-    assert deactivated.override_created is True
+    assert retired.lifecycle_state == "retired"
 
     protected = await feature_repo.load_bundle(migrated_session, bundle)
     assert protected.features_updated == 0
     row = (
         await migrated_session.execute(
             text(
-                "SELECT status FROM feature.features WHERE feature_id = :feature_id"
+                "SELECT lifecycle_state, publication_state FROM feature.features "
+                "WHERE feature_id = :feature_id"
             ),
             {"feature_id": bundle.feature.feature_id},
         )
     ).one()
-    assert row.status == "inactive"
+    assert row.lifecycle_state == "retired"
+    assert row.publication_state == "suppressed"
+
+
+async def test_provider_reingest_restores_the_operator_publication_not_a_default(
+    migrated_session: AsyncSession,
+) -> None:
+    """reingest 복구는 retire **직전** publication으로 돌아간다 — 기본값이 아니다.
+
+    운영자가 draft로 내려둔 feature를 provider가 retire했다가 재적재하면,
+    되돌아갈 자리는 `published`가 아니라 운영자가 정해둔 `draft`다. 복구를
+    "호출자가 선언한 값으로 무조건 덮기"로 구현하면 이 테스트가 red가 된다 —
+    공개 표면 소멸을 고치면서 반대로 운영자 의사를 덮어쓰는 실수를 막는다.
+
+    `retired + draft`는 `ck_features_state_tuple`이 막으므로 운영자 의사는
+    retire **이전**에만 표명될 수 있다. 그래서 이 순서가 유일하게 도달 가능한
+    형태다.
+    """
+    item = _concierge_item(candidate_id=9104)
+    [bundle] = await kor_travel_concierge_items_to_bundles([item], fetched_at=_FETCHED)
+    await feature_repo.load_bundle(migrated_session, bundle)
+
+    revision = await admin_feature_repo.get_feature_row_revision(
+        migrated_session, bundle.feature.feature_id
+    )
+    assert revision is not None
+    drafted = await admin_feature_repo.transition_admin_feature_state(
+        migrated_session,
+        bundle.feature.feature_id,
+        expected_row_revision=revision,
+        reason_code="operator_hold",
+        operator="integration-test",
+        action="patch",
+        publication_state="draft",
+    )
+    assert drafted.publication_state == "draft"
+
+    assert await _retire_concierge_items(
+        migrated_session, [{**item, "operation": "tombstone"}]
+    ) == 1
+
+    await feature_repo.load_bundle(migrated_session, bundle)
+    row = (
+        await migrated_session.execute(
+            text(
+                "SELECT lifecycle_state, publication_state FROM feature.features "
+                "WHERE feature_id = :feature_id"
+            ),
+            {"feature_id": bundle.feature.feature_id},
+        )
+    ).one()
+    assert row.lifecycle_state == "active"
+    assert row.publication_state == "draft"
 
 
 async def test_notice_first_probe_start_time_is_preserved_on_payload_update(
@@ -701,7 +749,13 @@ async def test_notice_first_probe_start_time_is_preserved_on_payload_update(
 
     detail = (
         await migrated_session.execute(
-            text("SELECT detail FROM feature.features_detailed WHERE feature_id = :fid"),
+            text(
+                "SELECT jsonb_build_object("
+                "'valid_start_time', to_jsonb(n.valid_start_time), "
+                "'payload', n.payload"
+                ") AS detail "
+                "FROM feature.feature_notices AS n WHERE n.feature_id = :fid"
+            ),
             {"fid": first.feature.feature_id},
         )
     ).scalar_one()
@@ -814,18 +868,19 @@ async def test_features_in_bbox_hides_stale_notice_revisions(
             INSERT INTO feature.features (
                 feature_id, kind, name, category,
                 coord, coord_precision_digits,
-                marker_icon, marker_color, status
+                marker_icon, marker_color,
+                lifecycle_state, publication_state, quality_state
             )
             VALUES
             (
                 'f_notice_legacy_old', 'notice', '이전 교통 공지', '99000000',
                 x_extension.ST_SetSRID(x_extension.ST_MakePoint(127.5678, 36.1234), 4326),
-                6, 'warning', 'P-05', 'active'
+                6, 'warning', 'P-05', 'active', 'published', 'valid'
             ),
             (
                 'f_notice_legacy_new', 'notice', '최신 교통 공지', '99000000',
                 x_extension.ST_SetSRID(x_extension.ST_MakePoint(127.5678, 36.1234), 4326),
-                6, 'warning', 'P-05', 'active'
+                6, 'warning', 'P-05', 'active', 'published', 'valid'
             )
             """
         )
@@ -1021,18 +1076,19 @@ async def test_features_contained_in_area_returns_points_inside_polygon(
             INSERT INTO feature.features (
                 feature_id, kind, name, category,
                 coord, coord_precision_digits,
-                marker_icon, marker_color, status
+                marker_icon, marker_color,
+                lifecycle_state, publication_state, quality_state
             )
             VALUES
             (
                 'f_area_inside_point', 'place', '안쪽 장소', '01000000',
                 x_extension.ST_SetSRID(x_extension.ST_MakePoint(127.04, 37.54), 4326),
-                6, 'star', 'P-03', 'active'
+                6, 'star', 'P-03', 'active', 'published', 'valid'
             ),
             (
                 'f_area_outside_point', 'place', '바깥 장소', '01000000',
                 x_extension.ST_SetSRID(x_extension.ST_MakePoint(127.5, 37.9), 4326),
-                6, 'star', 'P-03', 'active'
+                6, 'star', 'P-03', 'active', 'published', 'valid'
             )
             """
         )
@@ -1051,7 +1107,6 @@ async def test_features_contained_in_area_returns_points_inside_polygon(
     assert "f_area_outside_point" not in ids
     inside = next(row for row in rows if row["feature_id"] == "f_area_inside_point")
     assert inside["kind"] == "place"
-    assert inside["status"] == "active"
 
 
 async def test_features_in_bbox_include_geometry_matches_geom_only_branch(
@@ -1148,31 +1203,36 @@ async def test_get_feature_rows_by_ids_and_search_features(
         [first.feature.feature_id, "missing"],
     )
     assert set(rows) == {first.feature.feature_id}
-    assert rows[first.feature.feature_id]["updated_at"] == first.feature.updated_at
+    persisted_updated_at = await migrated_session.scalar(
+        text("SELECT updated_at FROM feature.features WHERE feature_id = :feature_id"),
+        {"feature_id": first.feature.feature_id},
+    )
+    assert rows[first.feature.feature_id]["updated_at"] == persisted_updated_at
 
-    # D-12(T-217b): soft-deleted(inactive) feature는 missing이 아니라 status와 함께
-    # found로 반환된다 — "철회/폐업됨"과 "미존재"를 소비자가 구분한다.
-    inactivated = await feature_repo.inactivate_features_by_source_entity_ids(
+    # retired feature도 non-public raw lookup에는 남아, "철회/폐업됨"과
+    # "미존재"를 소비자가 구분한다.
+    retired = await feature_repo.retire_features_by_source_entity_ids(
         migrated_session,
         provider=second.source_record.provider,
         dataset_key=second.source_record.dataset_key,
         source_entity_type=second.source_record.source_entity_type,
         source_entity_ids={second.source_record.source_entity_id},
     )
-    assert inactivated == 1
+    assert retired == 1
     rows_after = await feature_repo.get_feature_rows_by_ids(
         migrated_session,
         [second.feature.feature_id, "missing"],
     )
     assert set(rows_after) == {second.feature.feature_id}
-    inactive_row = rows_after[second.feature.feature_id]
-    assert inactive_row["status"] == "inactive"
-    assert inactive_row["deleted_at"] is not None
-    # 검색(목록 read)은 기존대로 active만 — 아래 search 루프가 3건 전제를 깨지
+    retired_row = rows_after[second.feature.feature_id]
+    assert retired_row["lifecycle_state"] == "retired"
+    assert retired_row["publication_state"] == "suppressed"
+    # 검색(목록 read)은 선택 가능 feature만 — 아래 search 루프가 3건 전제를 깨지
     # 않도록 다시 active로 되돌린다.
     await migrated_session.execute(
         text(
-            "UPDATE feature.features SET status='active', deleted_at=NULL "
+            "UPDATE feature.features SET lifecycle_state='active', "
+            "publication_state='published', quality_state='valid' "
             "WHERE feature_id = :fid"
         ),
         {"fid": second.feature.feature_id},
@@ -1260,7 +1320,7 @@ async def test_search_features_include_total_false_skips_count_in_postgres(
         event.remove(engine, "before_cursor_execute", _record_statement)
 
 
-async def test_inactivate_geometryless_area_features_by_source(
+async def test_retire_geometryless_area_features_by_source(
     migrated_session: AsyncSession,
 ) -> None:
     geometryless = await _bundle("AREA-NO-GEOM")
@@ -1300,13 +1360,13 @@ async def test_inactivate_geometryless_area_features_by_source(
     )
     await migrated_session.flush()
 
-    inactivated = await feature_repo.inactivate_geometryless_area_features_by_source(
+    retired = await feature_repo.retire_geometryless_area_features_by_source(
         migrated_session,
         provider=geometryless.source_record.provider,
         dataset_key=geometryless.source_record.dataset_key,
         source_entity_type=geometryless.source_record.source_entity_type,
     )
-    assert inactivated == 1
+    assert retired == 1
 
     rows = await feature_repo.get_feature_rows_by_ids(
         migrated_session,
@@ -1316,10 +1376,10 @@ async def test_inactivate_geometryless_area_features_by_source(
             place.feature.feature_id,
         ],
     )
-    assert rows[geometryless.feature.feature_id]["status"] == "inactive"
-    assert rows[geometryless.feature.feature_id]["deleted_at"] is not None
-    assert rows[with_geom.feature.feature_id]["status"] == "active"
-    assert rows[place.feature.feature_id]["status"] == "active"
+    assert rows[geometryless.feature.feature_id]["lifecycle_state"] == "retired"
+    assert rows[geometryless.feature.feature_id]["publication_state"] == "suppressed"
+    assert rows[with_geom.feature.feature_id]["lifecycle_state"] == "active"
+    assert rows[place.feature.feature_id]["lifecycle_state"] == "active"
 
 
 async def test_area_feature_geom_persists(migrated_session: AsyncSession) -> None:
@@ -1362,16 +1422,16 @@ async def test_area_feature_geom_persists(migrated_session: AsyncSession) -> Non
     ).one()
     assert row.srid == 4326
     assert row.gtype == "MULTIPOLYGON"
-    view_row = (
+    projection_row = (
         await migrated_session.execute(
             text(
                 "SELECT x_extension.GeometryType(geom) AS gtype "
-                "FROM feature.features_detailed WHERE feature_id = :fid"
+                "FROM feature.feature_areas WHERE feature_id = :fid"
             ),
             {"fid": bundle.feature.feature_id},
         )
     ).one()
-    assert view_row.gtype == "MULTIPOLYGON"
+    assert projection_row.gtype == "MULTIPOLYGON"
 
     # get_feature_row는 coord(centroid) 기반 lon/lat 반환.
     got = await feature_repo.get_feature_row(

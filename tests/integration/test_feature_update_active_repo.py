@@ -162,7 +162,27 @@ async def _create_isolated_migrated_engine(
             await autocommit.execute(text(f'CREATE DATABASE "{database}"'))
     finally:
         await admin_engine.dispose()
-    await asyncio.to_thread(_upgrade_head, target_dsn)
+
+    # T-VN-34 이후 fresh DB는 **먼저 배포와 같은 principal graph**를 갖춰야 upgrade가
+    # 선다. 0097은 state routine을 만들기 전에 ``SET ROLE
+    # ktm_feature_state_procedure_owner``로 내려간다(권한을 owner 자격에서만 쓰게
+    # 하는 ADR-090 경로). 그 role에 schema ``feature``의 CREATE를 주는 것은
+    # migration이 아니라 bootstrap이므로, bootstrap 없이 올리면 superuser DSN이어도
+    # ``permission denied for schema feature``로 죽는다 — SET ROLE 이후의 권한 판정은
+    # superuser 우회를 받지 못한다.
+    #
+    # 여기서만 다른 경로로 올리면 경합을 재는 대상 schema가 배포와 달라지므로,
+    # conftest·다른 자기-DB 테스트가 쓰는 공유 helper를 그대로 쓴다.
+    from tests.integration._tvn34_migration_bootstrap import (
+        alembic_schema_owner_role,
+        bootstrapped_migrator_dsn,
+    )
+
+    migrator_dsn = await bootstrapped_migrator_dsn(target_dsn)
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(_upgrade_head, migrator_dsn)
+    # 테스트 본문은 계속 컨테이너 admin 자격으로 붙는다 — 검증 대상은 ACL이 아니라
+    # active-scope 경합이고, migration이 남긴 소유권과 무관하게 읽고 써야 한다.
     return target_dsn, make_async_engine(target_dsn)
 
 

@@ -46,7 +46,8 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
             INSERT INTO feature.features (
                 feature_id, kind, name, category, coord,
                 address, urls, raw_refs,
-                status, legal_dong_code, sido_code, sigungu_code,
+                lifecycle_state, publication_state, quality_state,
+                legal_dong_code, sido_code, sigungu_code,
                 created_at, updated_at
             )
             SELECT
@@ -89,7 +90,21 @@ async def _seed_live_like_perf_data(session: AsyncSession, *, n: int = 3200) -> 
                 ) AS address,
                 '{}'::jsonb AS urls,
                 '[]'::jsonb AS raw_refs,
-                CASE WHEN g % 29 = 0 THEN 'inactive' ELSE 'active' END AS status,
+                -- T-VN-34(0097): 단일 ``status``가 사라지고 3축이 정본이다. 이
+                -- seed가 지키려던 것은 "29행마다 1행은 공개 표면 밖"이라는 **분포**
+                -- 이지 문자열 'inactive'가 아니다. 0095 backfill이
+                -- status='inactive' → lifecycle='retired' + publication='suppressed'
+                -- 로 옮겼고 ``ck_features_state_tuple``이 retired인 행에
+                -- publication='suppressed'를 강제하므로 두 축을 함께 뒤집어야
+                -- 같은 분포가 재현된다. legacy seed에 status='broken'이 없었으니
+                -- quality는 전 행 'valid'이고, 공개 partial index
+                -- (lifecycle='active' AND publication='published' AND
+                --  quality='valid')가 걸러내는 비율도 종전과 같다.
+                CASE WHEN g % 29 = 0 THEN 'retired' ELSE 'active' END
+                    AS lifecycle_state,
+                CASE WHEN g % 29 = 0 THEN 'suppressed' ELSE 'published' END
+                    AS publication_state,
+                'valid' AS quality_state,
                 CASE WHEN g % 11 = 0 THEN '2611010100'
                      WHEN g % 13 = 0 THEN '5011010100'
                      ELSE '1111010100' END AS legal_dong_code,
@@ -390,7 +405,8 @@ async def _seed_geom_only_perf_data(
         text(
             """
             INSERT INTO feature.features (
-                feature_id, kind, name, category, coord, status,
+                feature_id, kind, name, category, coord,
+                lifecycle_state, publication_state, quality_state,
                 sido_code, sigungu_code, legal_dong_code, created_at, updated_at
             )
             SELECT
@@ -399,7 +415,16 @@ async def _seed_geom_only_perf_data(
                 'geometry-only feature ' || g::text,
                 '02000000',
                 NULL,
+                -- 종전 status='active'의 3축 등가. 여기서는 값 자체보다 **공개
+                -- 표면 소속**이 중요하다: 0096의 subtype GiST가
+                -- ``WHERE public_ready``인데 그 플래그를 채우는 trigger가 부모의
+                -- 3축을 그대로 읽는다. 세 축이 모두 공개값이라야 route/area 행이
+                -- public_ready=true로 들어가고 이 테스트가 겨누는
+                -- ``idx_feature_routes_geom_gist``/``idx_feature_areas_geom_gist``
+                -- 가 후보를 실제로 담는다.
                 'active',
+                'published',
+                'valid',
                 '11',
                 '11110',
                 '1111010100',
@@ -613,7 +638,11 @@ async def test_t212d_feature_hot_reads_use_spatial_and_search_indexes(
             "radius_m": 7000.0,
             "kinds": ["place"],
             "categories": None,
-            "statuses": ["active"],
+            # T-VN-34: nearby는 더 이상 ``:statuses``를 받지 않는다. 종전
+            # ``statuses=['active']``이 뜻하던 "공개 표면만"은 이제 질의가 읽는
+            # ``feature.public_features``의 3축 술어에 흡수됐고, 같은 술어가
+            # ``idx_features_coord_5179_gist``의 partial 조건이기도 하다 — 즉
+            # 필터가 사라진 게 아니라 인덱스 쪽으로 내려갔다.
             "providers": None,
             "limit_plus_one": 51,
             "cursor_distance_m": None,
@@ -799,13 +828,23 @@ async def test_t212d_planner_selects_representative_indexes_without_seqscan_hint
     _assert_uses_index(in_bbox, *_COORD_SPATIAL_INDEXES)
     _assert_no_seq_scan_on(in_bbox, "features")
 
+    # admin 목록은 **상태 무필터**가 기본이다(T-VN-34C가 legacy status 기본 필터를
+    # 제거했다). 그래서 0096이 공개 3축 partial로 좁힌 `idx_features_lower_name_keyset`
+    # 로는 이 표면을 덮을 수 없다 — 축을 비우면 후보가 partial 밖으로 나가 features
+    # Seq Scan + Sort로 떨어진다. 한동안 이 gate는 파라미터에 공개 3축을 박아
+    # "통과하도록" 좁혀져 있었고, 그러면 정작 잃은 표면을 아무도 보지 않게 된다.
+    #
+    # 0098이 admin scope 전체 인덱스를 신설했으므로 여기서는 **축을 비운 그대로**
+    # 못박는다. 두 표면이 각자 인덱스를 갖는다는 것이 그 결정의 내용이다.
     admin_features_by_name = await _explain_json(
         migrated_session,
         admin_feature_repo._admin_features_sql(sort="name", order="asc"),
         {
             "kinds": None,
             "categories": None,
-            "statuses": None,
+            "lifecycle_states": None,
+            "publication_states": None,
+            "quality_states": None,
             "provider_dataset_id": None,
             "issue_types": None,
             "has_coord": None,
@@ -822,8 +861,26 @@ async def test_t212d_planner_selects_representative_indexes_without_seqscan_hint
         },
         force_index=False,
     )
-    _assert_uses_index(admin_features_by_name, "idx_features_lower_name_keyset")
+    _assert_uses_index(
+        admin_features_by_name, "idx_features_admin_lower_name_keyset"
+    )
     _assert_no_seq_scan_on(admin_features_by_name, "features")
+    # 인덱스 이름만으로는 "정렬을 인덱스가 대신한다"가 증명되지 않는다(bitmap으로
+    # 모아 놓고 다시 Sort해도 이름은 나온다). partial predicate 함의가 실제로
+    # 증명됐는지는 최상위 ``Limit`` 바로 아래에 ``Sort``가 없는 것으로 갈린다 —
+    # 3축을 비웠을 때 나타나던 노드가 정확히 그 ``Sort``다. issue 집계 LATERAL
+    # 안쪽 ``Sort``는 정렬축과 무관하므로 최상위 두 노드만 본다.
+    assert admin_features_by_name["Node Type"] == "Limit", admin_features_by_name
+    assert (
+        admin_features_by_name["Plans"][0]["Node Type"] != "Sort"
+    ), admin_features_by_name["Plans"][0]
+
+    # admin **지도**(bbox)와 이름 검색은 상태 무필터일 때 여전히 Seq Scan이다.
+    # 0098은 정렬축만 닫았다 — bbox/trgm 축은 실측 두 번이 다 실패했다(전체 인덱스는
+    # 공개 partial 보증을 깨고, 여집합 partial은 무필터 질의가 술어를 함의하지 못해
+    # 사용 불가). 근거 없는 인덱스를 남기는 대신 공백을 사실로 둔다. 닫으려면 공개
+    # partial을 전체로 되돌려 공유하거나 admin 목록에 상태 필터를 필수화해야 하고,
+    # 둘 다 표면 결정이라 별도 태스크다(alembic 0098 설계 주석 참조).
 
 
 async def test_t212d_ops_and_review_lists_use_expected_indexes(
@@ -837,7 +894,14 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
         {
             "kinds": ["place"],
             "categories": None,
-            "statuses": ["active"],
+            # 종전 ``statuses=['active']``의 3축 등가. 0095 backfill 기준으로
+            # status='active'인 행은 정확히 lifecycle='active' ∧
+            # publication='published' ∧ quality='valid'이고, 그것이 0096 공개
+            # partial index의 조건식과 글자 그대로 같다 — 그래서 이 조합만
+            # ``idx_features_updated_keyset``에 진입할 수 있다.
+            "lifecycle_states": ["active"],
+            "publication_states": ["published"],
+            "quality_states": ["valid"],
             "provider_dataset_id": None,
             "issue_types": None,
             "has_coord": True,
@@ -853,11 +917,12 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
             "limit_plus_one": 51,
         },
     )
-    _assert_uses_index(
-        admin_features,
-        "idx_features_status_updated",
-        "idx_features_updated_keyset",
-    )
+    # T-VN-34(0097): status 전용 인덱스 ``idx_features_status_updated``는 컬럼과
+    # 함께 삭제됐다. 그 자리는 0096이 만든 공개 3축 partial
+    # ``idx_features_updated_keyset``(updated_at DESC, feature_id DESC)이
+    # 대신한다 — 위 파라미터가 세 축을 공개값으로 못박았으므로 동일한 keyset
+    # 진입 경로가 그대로 남는다.
+    _assert_uses_index(admin_features, "idx_features_updated_keyset")
 
     # 완전한 feature_id 검색은 PK 등가 fast-path로 features PK 인덱스를 탄다.
     # (ILIKE 전체 스캔 + source_records 상관 서브쿼리를 건너뜀.) 런타임처럼
@@ -870,7 +935,12 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
         {
             "kinds": None,
             "categories": None,
-            "statuses": None,
+            # exact-id fast-path는 상태와 무관하게 PK 등가로 진입해야 한다 —
+            # 운영자가 retired/quarantined 행도 id로 찾아야 하므로 세 축 모두
+            # 미지정(종전 ``statuses=None``과 같은 뜻)이다.
+            "lifecycle_states": None,
+            "publication_states": None,
+            "quality_states": None,
             "provider_dataset_id": None,
             "issue_types": None,
             "has_coord": None,
@@ -900,7 +970,10 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
         {
             "kinds": None,
             "categories": None,
-            "statuses": None,
+            # exact-uuid fast-path도 같은 이유로 상태 축을 비운다.
+            "lifecycle_states": None,
+            "publication_states": None,
+            "quality_states": None,
             "provider_dataset_id": None,
             "issue_types": None,
             "has_coord": None,

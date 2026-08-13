@@ -59,38 +59,6 @@ const SERVER_CLUSTER_MARKER =
 // refetch가 누락되는 경우를 막는다. 본 spec의 어떤 타깃(서울/부산/전국)과도 겹치지 않는다.
 const ANCHOR = { lon: 126.531, lat: 33.499, zoom: 11 } as const;
 
-// 상세 패널의 status 배지는 영어 enum이 아니라 한글로 렌더된다(features-client.tsx
-// FeatureDetailPanel → `statusLabel(...)`). 렌더 텍스트를 단언하려면 같은 매핑이
-// 필요하다. 정본은 src/components/status-badge.tsx의 STATUS_LABELS — 동기화 유지.
-// (component를 직접 import하지 않는 이유: Playwright 런타임이 `@/` 별칭을 풀지 않아
-//  status-badge.tsx의 `@/lib/utils` import가 깨진다. 그래서 순수 매핑만 미러링한다.)
-const STATUS_LABELS: Record<string, string> = {
-  ok: "정상", normal: "정상", success: "성공", succeeded: "성공", done: "완료",
-  completed: "완료", active: "활성", accepted: "수락됨", merged: "병합됨",
-  resolved: "해결됨", started: "시작됨", applied: "반영됨", curated: "큐레이션됨",
-  validated: "검증됨", loaded: "적재됨", implemented: "구현됨", fresh: "최신",
-  queued: "대기", pending: "대기", loading: "로딩중", running: "실행중",
-  starting: "시작중", dry_run: "모의실행", validating: "검증중", in_progress: "진행중",
-  materializing: "구체화중", scheduled: "예정됨", planned: "예정됨", ongoing: "진행중",
-  managed: "관리됨", acknowledged: "확인됨", open: "열림", candidate: "후보",
-  uploaded: "업로드됨", canceling: "취소중", paused: "일시정지", connecting: "연결중",
-  reconnecting: "재연결중", error: "오류", failed: "실패", failure: "실패",
-  cancelled: "취소됨", canceled: "취소됨", unavailable: "사용불가", critical: "심각",
-  rejected: "거절됨", denied: "거부됨", inactive: "비활성", deleted: "삭제됨",
-  disabled: "비활성화", expired: "만료됨", archived: "보관됨", deprecated: "지원중단",
-  revoked: "폐기됨", skipped: "건너뜀", validation_failed: "검증실패",
-  load_failed: "적재실패", not_found: "없음", degraded: "저하됨",
-  manual_required: "수동 필요", provider_needed: "공급자 필요", manual_only: "수동 전용",
-  ended: "종료됨", stopped: "중지됨", ignored: "무시됨", hidden: "숨김",
-  not_started: "시작 전", stale: "오래됨", draft: "초안", unknown: "알수없음",
-  none: "없음", info: "정보", warning: "경고", debug: "디버그",
-};
-
-/** status-badge.tsx statusLabel 미러: 영어 enum → 한글(미지정은 원문 fallback). */
-function statusLabel(status: string): string {
-  return STATUS_LABELS[status.toLowerCase().replace(/-/g, "_")] ?? status;
-}
-
 test.describe.configure({ mode: "serial" });
 
 // ── gold-standard에서 verbatim 복사한 헬퍼 ─────────────────────────────────
@@ -110,7 +78,10 @@ function apiPath(response: Response): string {
 async function browserFetch<T>(
   page: Page,
   path: string,
-  options: { body?: unknown; method?: "GET" | "POST" | "PATCH" | "DELETE" } = {},
+  options: {
+    body?: unknown;
+    method?: "GET" | "POST" | "PATCH" | "DELETE";
+  } = {},
 ): Promise<BrowserFetchResult<T>> {
   return page.evaluate(
     async ({ body, method, path }) => {
@@ -220,10 +191,7 @@ function adminItemsContains(
 
 // 선택한 feature의 admin 단건 상세만 허용한다. weather/revision 등 하위 요청이나
 // 다른 feature의 상세 응답이 먼저 와도 잘못 통과하지 않는다.
-function isAdminFeatureDetail(
-  response: Response,
-  featureId: string,
-): boolean {
+function isAdminFeatureDetail(response: Response, featureId: string): boolean {
   return (
     response.request().method() === "GET" &&
     apiPath(response) === `/v1/admin/features/${featureId}`
@@ -412,10 +380,9 @@ async function waitForExactServerClusters(
 ): Promise<void> {
   expect(clusters.length).toBeGreaterThan(0);
   await expect
-    .poll(
-      async () => serverClustersMatchRenderedState(page, clusters),
-      { timeout: 30_000 },
-    )
+    .poll(async () => serverClustersMatchRenderedState(page, clusters), {
+      timeout: 30_000,
+    })
     .toBe(true);
 }
 
@@ -435,11 +402,13 @@ function expectedPointFeatureIds(
 }
 
 async function readPointMarkerFeatureIds(page: Page): Promise<string[]> {
-  return page.locator(POINT_MARKER).evaluateAll((elements) =>
-    elements
-      .map((element) => (element as HTMLElement).dataset.featureId ?? "")
-      .sort(),
-  );
+  return page
+    .locator(POINT_MARKER)
+    .evaluateAll((elements) =>
+      elements
+        .map((element) => (element as HTMLElement).dataset.featureId ?? "")
+        .sort(),
+    );
 }
 
 /** 실제 admin 응답의 전체 point Feature ID 집합과 DOM marker 집합을 exact 비교한다. */
@@ -559,9 +528,7 @@ async function expectedCoincidentFeatureIds(
 
 async function readCoincidentPopupFeatureIds(page: Page): Promise<string[]> {
   return page
-    .locator(
-      ".maplibregl-popup button:not(.maplibregl-popup-close-button)",
-    )
+    .locator(".maplibregl-popup button:not(.maplibregl-popup-close-button)")
     .evaluateAll((elements) =>
       elements
         .map((element) => (element as HTMLElement).dataset.featureId ?? "")
@@ -592,18 +559,10 @@ function expectRequestBoundsToMatchMap(
   requested: InBoundsBbox,
   bounds: { e: number; n: number; s: number; w: number },
 ): void {
-  expect(Math.abs(requested.minLon - bounds.w)).toBeLessThan(
-    REQUEST_BBOX_EPS,
-  );
-  expect(Math.abs(requested.minLat - bounds.s)).toBeLessThan(
-    REQUEST_BBOX_EPS,
-  );
-  expect(Math.abs(requested.maxLon - bounds.e)).toBeLessThan(
-    REQUEST_BBOX_EPS,
-  );
-  expect(Math.abs(requested.maxLat - bounds.n)).toBeLessThan(
-    REQUEST_BBOX_EPS,
-  );
+  expect(Math.abs(requested.minLon - bounds.w)).toBeLessThan(REQUEST_BBOX_EPS);
+  expect(Math.abs(requested.minLat - bounds.s)).toBeLessThan(REQUEST_BBOX_EPS);
+  expect(Math.abs(requested.maxLon - bounds.e)).toBeLessThan(REQUEST_BBOX_EPS);
+  expect(Math.abs(requested.maxLat - bounds.n)).toBeLessThan(REQUEST_BBOX_EPS);
 }
 
 /** DOM의 "center {lon}, {lat} · z {zoom}"에서 viewport를 읽는다(Zustand가 렌더). */
@@ -727,9 +686,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
     expect(
       placeBody.data.clusters.map(serverClusterSignature).sort(),
       "place 추가 전후 server cluster 집합이 달라야 reset 수렴을 검증할 수 있음",
-    ).not.toEqual(
-      initialBody.data.clusters.map(serverClusterSignature).sort(),
-    );
+    ).not.toEqual(initialBody.data.clusters.map(serverClusterSignature).sort());
     await waitForMapIdle(page);
     await waitForExactServerClusters(page, placeBody.data.clusters);
     await expect(reset).toBeEnabled(T);
@@ -746,9 +703,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       },
     );
     for (const request of resetCapture.requests) {
-      expect(apiPathFromUrl(request.url())).toBe(
-        ADMIN_FEATURES_IN_BOUNDS_PATH,
-      );
+      expect(apiPathFromUrl(request.url())).toBe(ADMIN_FEATURES_IN_BOUNDS_PATH);
       const bbox = inBoundsBboxFromUrl(request.url());
       expect(bbox.zoom).not.toBeNull();
       expect(bbox.zoom as number).toBeLessThanOrEqual(13);
@@ -905,8 +860,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
           isAdminFeaturesInBounds(response) &&
           inBoundsBbox(response).zoom !== null &&
           (inBoundsBbox(response).zoom as number) > 13 &&
-          inBoundsBbox(response).kinds.join(",") ===
-            "weather,notice,place",
+          inBoundsBbox(response).kinds.join(",") === "weather,notice,place",
         { timeout: FLOW_TIMEOUT },
       );
       await placeChip.click();
@@ -1057,7 +1011,9 @@ test.describe("/features live — map input round-trip (read-only)", () => {
         (await mapResponse.json()) as AdminFeaturesInBoundsResponse;
       expect(mapBody.data.mode).toBe("items");
       expect(
-        mapBody.data.items.some((item) => item.feature_id === target!.feature_id),
+        mapBody.data.items.some(
+          (item) => item.feature_id === target!.feature_id,
+        ),
       ).toBe(true);
       await waitForMapIdle(page);
       await waitForExactPointMarkers(page, mapBody.data.items);
@@ -1097,8 +1053,7 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       // 마커 클릭 → useAdminFeatureDetail이 정확한 admin 단건 상세를 호출.
       // 응답 대기 설정 후 클릭해 빠른 응답도 놓치지 않는다.
       const detailPromise = page.waitForResponse(
-        (response) =>
-          isAdminFeatureDetail(response, adminTarget!.feature_id),
+        (response) => isAdminFeatureDetail(response, adminTarget!.feature_id),
         { timeout: FLOW_TIMEOUT },
       );
       await pointMarker.click();
@@ -1130,13 +1085,16 @@ test.describe("/features live — map input round-trip (read-only)", () => {
       await expect(
         panel.getByText(picked.kind, { exact: true }).first(),
       ).toBeVisible(T);
-      // status 배지는 한글로 렌더(`statusLabel(detail.status)`) — 같은 매핑으로 단언.
-      const expectedStatusLabel = statusLabel(picked.status);
-      const statusBadge = panel
-        .locator('[data-slot="badge"]')
-        .filter({ hasText: expectedStatusLabel });
-      await expect(statusBadge).toHaveCount(1);
-      await expect(statusBadge).toHaveText(expectedStatusLabel);
+      // 세 상태 축은 각각 독립 배지로 노출된다.
+      await expect(
+        panel.locator('[data-slot="badge"]').filter({ hasText: "수명:" }),
+      ).toContainText("수명:");
+      await expect(
+        panel.locator('[data-slot="badge"]').filter({ hasText: "공개:" }),
+      ).toContainText("공개:");
+      await expect(
+        panel.locator('[data-slot="badge"]').filter({ hasText: "품질:" }),
+      ).toContainText("품질:");
 
       // (2) 백엔드 라운드트립: 패널이 가리키는 feature_id를 직접 조회 → 동일 feature.
       const confirm = await browserFetch<AdminFeatureDetailResponse>(

@@ -66,7 +66,9 @@ function makeFeatureSnapshot(
     road_address_management_no: null,
     sido_code: "11",
     sigungu_code: "11140",
-    status: "active",
+    lifecycle_state: "active",
+    publication_state: "published",
+    quality_state: "valid",
     ...overrides,
   };
 }
@@ -424,7 +426,9 @@ test.describe("admin/issues actions + pagination + errors", () => {
             makeFeatureSnapshot({
               lat: 37.5665,
               lon: 126.978,
-              status: "active",
+              lifecycle_state: "active",
+              publication_state: "published",
+              quality_state: "valid",
             }),
           ),
         );

@@ -21,9 +21,11 @@ import hashlib
 import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
-from typing import Final
+from pathlib import Path
+from typing import Any, Final
 
 import pytest
+from sqlalchemy.exc import DBAPIError
 
 from kortravelmap.core.exceptions import (
     FeatureSearchCursorInvalidError,
@@ -38,13 +40,20 @@ from kortravelmap.dto import (
     SourceLink,
     SourceRecord,
 )
-from kortravelmap.dto._enums import FeatureKind, SourceRole
+from kortravelmap.dto._enums import (
+    FeatureKind,
+    FeatureLifecycleState,
+    FeaturePublicationState,
+    FeatureQualityState,
+    SourceRole,
+)
 from kortravelmap.infra import feature_repo
 from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
     FeatureSearchRow,
     NearbyFeatureRow,
     _feature_params,
+    _provider_feature_payload,
     _source_link_params,
     _source_record_params,
 )
@@ -70,6 +79,17 @@ def _place(coord: Coordinate | None, detail: PlaceDetail | None) -> Feature:
     )
 
 
+def _provider_membership(
+    *,
+    entity_key: str = "entity:17",
+    record_key: str = "record:17",
+) -> feature_repo._ProviderSourceMembership:
+    return feature_repo._ProviderSourceMembership(
+        source_entity_key=entity_key,
+        source_record_key=record_key,
+    )
+
+
 def test_feature_params_with_coord_and_detail() -> None:
     feature = _place(
         Coordinate(lon=Decimal("126.92"), lat=Decimal("37.55")),
@@ -84,9 +104,424 @@ def test_feature_params_with_coord_and_detail() -> None:
     # address/urls/raw_refs는 JSON 문자열 (CAST AS jsonb)
     assert isinstance(params["address"], str)
     assert json.loads(params["raw_refs"]) == []
-    assert params["status"] == "active"
+    assert "lifecycle_state" not in params
+    assert "publication_state" not in params
+    assert "quality_state" not in params
     # T-VN-35: core에 detail 컬럼이 없으므로 core bind에도 없다.
     assert "detail" not in params
+
+
+@pytest.mark.parametrize(
+    ("lifecycle_state", "publication_state", "quality_state"),
+    [
+        (
+            FeatureLifecycleState.ACTIVE,
+            FeaturePublicationState.PUBLISHED,
+            FeatureQualityState.VALID,
+        ),
+        (
+            FeatureLifecycleState.ACTIVE,
+            FeaturePublicationState.DRAFT,
+            FeatureQualityState.QUARANTINED,
+        ),
+        (
+            FeatureLifecycleState.RETIRED,
+            FeaturePublicationState.SUPPRESSED,
+            FeatureQualityState.VALID,
+        ),
+    ],
+)
+def test_provider_state_is_passed_once_to_tvn34_axes(
+    lifecycle_state: FeatureLifecycleState,
+    publication_state: FeaturePublicationState,
+    quality_state: FeatureQualityState,
+) -> None:
+    """Provider conversion이 만든 3축은 repository에서 재해석하지 않는다."""
+    feature = _place(None, None).model_copy(
+        update={
+            "lifecycle_state": lifecycle_state,
+            "publication_state": publication_state,
+            "quality_state": quality_state,
+        }
+    )
+
+    actual = feature_repo._provider_feature_state(feature)
+
+    assert (
+        actual.lifecycle_state,
+        actual.publication_state,
+        actual.quality_state,
+    ) == (lifecycle_state, publication_state, quality_state)
+
+
+def test_provider_procedure_payload_excludes_legacy_state_columns() -> None:
+    params = _feature_params(_place(None, None))
+
+    payload = json.loads(_provider_feature_payload(params))
+
+    assert "status" not in payload
+    assert "deleted_at" not in payload
+    assert "geom_wkt" not in payload
+    assert "data_origin" not in payload
+    assert "data_version" not in payload
+    assert "created_at" not in payload
+    assert "updated_at" not in payload
+    assert payload["feature_id"] == "place:abc123"
+    assert payload["address"] == json.loads(params["address"])
+    assert payload["urls"] == json.loads(params["urls"])
+    assert payload["raw_refs"] == []
+
+
+def test_provider_state_context_is_dataset_derived_and_never_sends_principal() -> None:
+    context = json.loads(
+        feature_repo._provider_state_context(
+            provider_dataset_id=17,
+            reason_code="provider_reingest",
+            source_membership=_provider_membership(),
+        )
+    )
+
+    assert context == {
+        "transition_kind": "provider_sync",
+        "reason_code": "provider_reingest",
+        "provider_dataset_id": 17,
+        "source_entity_key": "entity:17",
+        "source_record_key": "record:17",
+    }
+
+
+@pytest.mark.asyncio
+async def test_provider_create_uses_procedure_and_omits_legacy_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Mappings:
+        def __init__(self, row: dict[str, Any]) -> None:
+            self._row = row
+
+        def one(self) -> dict[str, Any]:
+            return self._row
+
+    class _Result:
+        def __init__(self, row: dict[str, Any] | None = None) -> None:
+            self._row = row
+
+        def mappings(self) -> _Mappings:
+            assert self._row is not None
+            return _Mappings(self._row)
+
+    class _Session:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict[str, Any]]] = []
+
+        async def execute(self, statement: Any, params: dict[str, Any]) -> _Result:
+            sql = str(statement)
+            self.calls.append((sql, params))
+            if "create_feature_with_initial_state" in sql:
+                payload = json.loads(params["feature_payload"])
+                assert "status" not in payload
+                assert "deleted_at" not in payload
+                assert json.loads(params["state_context"]) == {
+                    "transition_kind": "provider_sync",
+                    "reason_code": "provider_initial",
+                    "provider_dataset_id": 17,
+                    "source_entity_key": "entity:17",
+                    "source_record_key": "record:17",
+                }
+                return _Result(
+                    {
+                        "o_inserted": True,
+                        "o_feature_uuid": payload["feature_uuid"],
+                    }
+                )
+            return _Result()
+
+    async def _no_subtype(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr(feature_repo, "_upsert_feature_subtype", _no_subtype)
+    session = _Session()
+
+    inserted = await feature_repo.upsert_feature(
+        session,  # type: ignore[arg-type]
+        _place(None, None),
+        provider_dataset_id=17,
+        source_membership=_provider_membership(),
+    )
+
+    assert inserted is True
+    assert "CALL feature.create_feature_with_initial_state" in session.calls[0][0]
+
+
+@pytest.mark.asyncio
+async def test_user_fenced_provider_refresh_keeps_provider_baseline_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """user effective row를 provider ``version=0`` payload로 오기록하지 않는다."""
+
+    class _Mappings:
+        def __init__(self, row: dict[str, Any] | None) -> None:
+            self._row = row
+
+        def one(self) -> dict[str, Any]:
+            assert self._row is not None
+            return self._row
+
+        def one_or_none(self) -> dict[str, Any] | None:
+            return self._row
+
+    class _Result:
+        def __init__(self, row: dict[str, Any] | None) -> None:
+            self._row = row
+
+        def mappings(self) -> _Mappings:
+            return _Mappings(self._row)
+
+    class _Session:
+        def __init__(self) -> None:
+            self.calls: list[str] = []
+            self.feature_uuid: str | None = None
+
+        async def execute(self, statement: Any, params: dict[str, Any]) -> _Result:
+            sql = str(statement)
+            self.calls.append(sql)
+            if "create_feature_with_initial_state" in sql:
+                self.feature_uuid = json.loads(params["feature_payload"])["feature_uuid"]
+                return _Result({"o_inserted": False, "o_feature_uuid": self.feature_uuid})
+            if "UPDATE feature.features AS f" in sql:
+                return _Result(None)
+            raise AssertionError(f"unexpected SQL: {sql}")
+
+    async def _no_subtype(*_args: Any, **_kwargs: Any) -> None:
+        raise AssertionError("user fence must skip subtype write")
+
+    feature = _place(None, None)
+    monkeypatch.setattr(feature_repo, "_upsert_feature_subtype", _no_subtype)
+    session = _Session()
+
+    inserted = await feature_repo.upsert_feature(
+        session,  # type: ignore[arg-type]
+        feature,
+        provider_dataset_id=17,
+        source_membership=_provider_membership(),
+    )
+
+    assert inserted is False
+    assert not any("materialize_provider_feature_version" in call for call in session.calls)
+
+
+@pytest.mark.asyncio
+async def test_provider_reactivation_skips_preexisting_lifecycle_override() -> None:
+    class _Session:
+        async def execute(self, *_args: Any, **_kwargs: Any) -> None:
+            raise AssertionError("override fence must skip the procedure call")
+
+    changed = await feature_repo._transition_provider_lifecycle_from_state(
+        _Session(),  # type: ignore[arg-type]
+        feature_id="place:override",
+        desired_state=feature_repo.ProviderFeatureState(
+            lifecycle_state="active",
+            publication_state="published",
+            quality_state="valid",
+        ),
+        provider_dataset_id=17,
+        source_membership=_provider_membership(),
+        current=feature_repo._FeatureLoadState(
+            exists=True,
+            lifecycle_state="retired",
+            publication_state="suppressed",
+            quality_state="valid",
+            row_revision=3,
+            has_provider_reactivation_override=True,
+        ),
+        retry_on_serialization=True,
+    )
+
+    assert changed is False
+
+
+@pytest.mark.asyncio
+async def test_provider_reactivation_fence_sqlstate_is_a_noop() -> None:
+    class _Nested:
+        async def __aenter__(self) -> None:
+            return None
+
+        async def __aexit__(self, *_args: Any) -> bool:
+            return False
+
+    class _DriverError(Exception):
+        sqlstate = "23514"
+
+    class _Session:
+        def __init__(self) -> None:
+            self.transition_calls = 0
+
+        def begin_nested(self) -> _Nested:
+            return _Nested()
+
+        async def execute(self, *_args: Any, **_kwargs: Any) -> None:
+            self.transition_calls += 1
+            raise DBAPIError.instance(
+                "CALL feature.transition_feature_state", {},
+                _DriverError("provider reactivation is fenced by lifecycle override"),
+                _DriverError,
+            )
+
+    session = _Session()
+    changed = await feature_repo._transition_provider_lifecycle_from_state(
+        session,  # type: ignore[arg-type]
+        feature_id="place:race-fence",
+        desired_state=feature_repo.ProviderFeatureState(
+            lifecycle_state="active",
+            publication_state="published",
+            quality_state="valid",
+        ),
+        provider_dataset_id=17,
+        source_membership=_provider_membership(),
+        current=feature_repo._FeatureLoadState(
+            exists=True,
+            lifecycle_state="retired",
+            publication_state="suppressed",
+            quality_state="valid",
+            row_revision=4,
+            has_provider_reactivation_override=False,
+        ),
+        retry_on_serialization=True,
+    )
+
+    assert changed is False
+    assert session.transition_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_provider_reactivation_conflict_rereads_without_second_transition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Nested:
+        async def __aenter__(self) -> None:
+            return None
+
+        async def __aexit__(self, *_args: Any) -> bool:
+            return False
+
+    class _DriverError(Exception):
+        sqlstate = "40001"
+
+    class _Session:
+        def __init__(self) -> None:
+            self.transition_calls = 0
+
+        def begin_nested(self) -> _Nested:
+            return _Nested()
+
+        async def execute(self, *_args: Any, **_kwargs: Any) -> None:
+            self.transition_calls += 1
+            raise DBAPIError.instance(
+                "CALL feature.transition_feature_state", {}, _DriverError("changed"), _DriverError
+            )
+
+    async def _already_advanced(*_args: Any, **_kwargs: Any) -> feature_repo._FeatureLoadState:
+        return feature_repo._FeatureLoadState(
+            exists=True,
+            lifecycle_state="active",
+            publication_state="published",
+            quality_state="valid",
+            row_revision=5,
+            has_provider_reactivation_override=False,
+        )
+
+    monkeypatch.setattr(feature_repo, "_feature_load_state", _already_advanced)
+    session = _Session()
+    changed = await feature_repo._transition_provider_lifecycle_from_state(
+        session,  # type: ignore[arg-type]
+        feature_id="place:concurrent",
+        desired_state=feature_repo.ProviderFeatureState(
+            lifecycle_state="active",
+            publication_state="published",
+            quality_state="valid",
+        ),
+        provider_dataset_id=17,
+        source_membership=_provider_membership(),
+        current=feature_repo._FeatureLoadState(
+            exists=True,
+            lifecycle_state="retired",
+            publication_state="suppressed",
+            quality_state="valid",
+            row_revision=4,
+            has_provider_reactivation_override=False,
+        ),
+        retry_on_serialization=True,
+    )
+
+    assert changed is False
+    assert session.transition_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_provider_reactivation_conflict_retries_once_when_still_retired(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _Nested:
+        async def __aenter__(self) -> None:
+            return None
+
+        async def __aexit__(self, *_args: Any) -> bool:
+            return False
+
+    class _DriverError(Exception):
+        sqlstate = "40001"
+
+    class _Session:
+        def __init__(self) -> None:
+            self.transition_calls = 0
+
+        def begin_nested(self) -> _Nested:
+            return _Nested()
+
+        async def execute(self, *_args: Any, **_kwargs: Any) -> None:
+            self.transition_calls += 1
+            if self.transition_calls == 1:
+                raise DBAPIError.instance(
+                    "CALL feature.transition_feature_state",
+                    {},
+                    _DriverError("changed"),
+                    _DriverError,
+                )
+
+    async def _still_retired(*_args: Any, **_kwargs: Any) -> feature_repo._FeatureLoadState:
+        return feature_repo._FeatureLoadState(
+            exists=True,
+            lifecycle_state="retired",
+            publication_state="suppressed",
+            quality_state="valid",
+            row_revision=5,
+            has_provider_reactivation_override=False,
+        )
+
+    monkeypatch.setattr(feature_repo, "_feature_load_state", _still_retired)
+    session = _Session()
+    changed = await feature_repo._transition_provider_lifecycle_from_state(
+        session,  # type: ignore[arg-type]
+        feature_id="place:retry",
+        desired_state=feature_repo.ProviderFeatureState(
+            lifecycle_state="active",
+            publication_state="published",
+            quality_state="valid",
+        ),
+        provider_dataset_id=17,
+        source_membership=_provider_membership(),
+        current=feature_repo._FeatureLoadState(
+            exists=True,
+            lifecycle_state="retired",
+            publication_state="suppressed",
+            quality_state="valid",
+            row_revision=4,
+            has_provider_reactivation_override=False,
+        ),
+        retry_on_serialization=True,
+    )
+
+    assert changed is True
+    assert session.transition_calls == 2
 
 
 def test_feature_params_carry_geom_wkt_for_subtype_only() -> None:
@@ -436,7 +871,6 @@ def test_nearby_cursor_round_trips_distance_name_and_updated_at() -> None:
         kind="place",
         name="A first",
         category="06020000",
-        status="active",
         lon=126.978,
         lat=37.5665,
         distance_m=12.5,
@@ -470,7 +904,6 @@ def test_nearby_cursor_rejects_malformed_or_wrong_sort() -> None:
         kind="place",
         name="A first",
         category="06020000",
-        status="active",
         lon=126.978,
         lat=37.5665,
         distance_m=12.5,
@@ -496,7 +929,6 @@ def test_feature_search_cursor_round_trips_score_and_id_modes() -> None:
         lat=37.5796,
         marker_icon="monument",
         marker_color="P-01",
-        status="active",
         score=0.95,
         score_cursor="0.9500000476837158",
     )
@@ -582,7 +1014,6 @@ def test_feature_search_cursor_fingerprint_uses_normalized_repository_contract()
             lat=37.5796,
             marker_icon="monument",
             marker_color="P-01",
-            status="active",
             score=0.95,
             score_cursor="0.9500000476837158",
         ),
@@ -614,7 +1045,6 @@ def test_feature_search_cursor_rejects_tamper_unknown_version_and_query_reuse() 
         lat=37.5796,
         marker_icon="monument",
         marker_color="P-01",
-        status="active",
         score=0.95,
         score_cursor="0.9500000476837158",
     )
@@ -807,7 +1237,6 @@ async def test_search_features_validates_before_db_call() -> None:
             lat=37.5796,
             marker_icon="monument",
             marker_color="P-01",
-            status="active",
             score=0.95,
             score_cursor="0.9500000476837158",
         ),
@@ -862,3 +1291,75 @@ async def test_search_features_include_total_false_never_executes_count() -> Non
     )
     assert counted_page.total_count == 7
     assert sum("count(*)" in statement for statement in with_total.statements) == 1
+
+
+def _load_state(
+    *, publication: str, reason_code: str | None, from_state: str | None
+) -> feature_repo._FeatureLoadState:
+    return feature_repo._FeatureLoadState(
+        exists=True,
+        lifecycle_state="retired",
+        publication_state=publication,
+        quality_state="valid",
+        row_revision=1,
+        has_provider_reactivation_override=False,
+        last_publication_reason_code=reason_code,
+        last_publication_from_state=from_state,
+    )
+
+
+_DESIRED = feature_repo.ProviderFeatureState(
+    lifecycle_state="active", publication_state="published", quality_state="valid"
+)
+
+
+def test_provider_reingest_restores_the_value_the_retire_recorded() -> None:
+    state = _load_state(
+        publication="suppressed", reason_code="provider_retire", from_state="draft"
+    )
+    assert feature_repo._provider_reingest_publication(state, _DESIRED) == "draft"
+
+
+def test_provider_reingest_recovers_rows_the_0095_backfill_handed_over() -> None:
+    """0095가 넘겨온 세대도 공개 표면으로 돌아와야 한다.
+
+    backfill은 legacy row마다 ``reason_code='legacy_provider_retire'``(또는
+    ``legacy_status_retire``) / ``from_publication_state=NULL``인 전이 하나만 남긴다.
+    되돌릴 값이 기록돼 있지 않다고 해서 복구를 포기하면, **마이그레이션이 스스로
+    만들어낸 행 전량**이 ``feature.public_features``에서 영구히 사라진다 — prod는
+    0087 + 실데이터라 그 집합이 크다. 이 축이 없으면 그 소멸이 조용히 남는다.
+    """
+
+    for reason_code in ("legacy_provider_retire", "legacy_status_retire"):
+        state = _load_state(
+            publication="suppressed", reason_code=reason_code, from_state=None
+        )
+        assert (
+            feature_repo._provider_reingest_publication(state, _DESIRED) == "published"
+        ), reason_code
+
+
+def test_provider_reingest_leaves_a_newer_non_provider_decision_alone() -> None:
+    """provider는 **자기가 내린 것만** 되돌린다."""
+
+    state = _load_state(
+        publication="suppressed", reason_code="operator_suppress", from_state="published"
+    )
+    assert feature_repo._provider_reingest_publication(state, _DESIRED) == "suppressed"
+
+
+def test_legacy_retire_reason_codes_exist_in_the_0095_backfill() -> None:
+    """복구가 보는 reason code가 실제로 0095가 쓰는 이름인지 대조한다.
+
+    이름이 갈리면 복구는 조용히 무효가 된다 — 위 테스트들은 여전히 통과하면서
+    실제 backfill 행만 복구되지 않는다.
+    """
+
+    backfill_sql = (
+        Path(__file__).resolve().parents[2]
+        / "alembic"
+        / "versions"
+        / "0095_feature_orthogonal_state_spine.py"
+    ).read_text(encoding="utf-8")
+    for reason_code in feature_repo._LEGACY_PROVIDER_RETIRE_REASON_CODES:
+        assert f"'{reason_code}'" in backfill_sql, reason_code

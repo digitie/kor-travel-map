@@ -202,7 +202,6 @@ class FeatureSummary(BaseModel):
     lat: float | None = Field(description="위도 (WGS84).")
     marker_icon: str | None = None
     marker_color: str | None = None
-    status: str
     geometry: dict[str, Any] | None = Field(
         default=None,
         description="include_geometry=true일 때 route/area용 GeoJSON geometry.",
@@ -300,7 +299,6 @@ class FeatureDetailResponse(BaseModel):
     sigungu_code: str | None = None
     marker_icon: str | None = None
     marker_color: str | None = None
-    status: str
     row_revision: int = Field(
         ge=1,
         description="server-owned feature revision. ETag과 같은 값이다.",
@@ -692,7 +690,6 @@ class NearbyFeatureSummary(BaseModel):
     kind: str
     name: str
     category: str
-    status: str
     lon: float
     lat: float
     distance_m: float
@@ -801,7 +798,6 @@ def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
         sigungu_code=row["sigungu_code"],
         marker_icon=row["marker_icon"],
         marker_color=row["marker_color"],
-        status=row["status"],
         row_revision=row["row_revision"],
         updated_at=row["updated_at"],
     )
@@ -1225,7 +1221,6 @@ async def search_public_features(
             lat=item.lat,
             marker_icon=item.marker_icon,
             marker_color=item.marker_color,
-            status=item.status,
         )
         for item in page.items
     ]
@@ -1263,17 +1258,6 @@ async def list_features_nearby(
         list[str] | None,
         Query(description="category code 반복 필터."),
     ] = None,
-    feature_status: Annotated[
-        list[str] | None,
-        Query(
-            alias="status",
-            description=(
-                "feature status 반복 필터. 기본 active. 공개 projection"
-                "(feature.public_features)과 교집합으로만 동작하므로 active 외"
-                " 값은 빈 결과를 반환한다 (T-VN-04; 파라미터 정리는 T-VN-11/34)."
-            ),
-        ),
-    ] = None,
     provider: Annotated[
         list[str] | None,
         Query(description="primary provider 반복 필터."),
@@ -1291,7 +1275,6 @@ async def list_features_nearby(
             radius_m=radius_m,
             kinds=kind,
             categories=category,
-            statuses=feature_status if feature_status is not None else ("active",),
             providers=provider,
             sort=sort,
             limit=page_size,
@@ -1306,7 +1289,6 @@ async def list_features_nearby(
             kind=item.kind,
             name=item.name,
             category=item.category,
-            status=item.status,
             lon=item.lon,
             lat=item.lat,
             distance_m=item.distance_m,
@@ -1357,17 +1339,6 @@ async def list_features_nearby_by_target(
         list[str] | None,
         Query(description="category code 반복 필터."),
     ] = None,
-    feature_status: Annotated[
-        list[str] | None,
-        Query(
-            alias="status",
-            description=(
-                "feature status 반복 필터. 기본 active. 공개 projection"
-                "(feature.public_features)과 교집합으로만 동작하므로 active 외"
-                " 값은 빈 결과를 반환한다 (T-VN-04; 파라미터 정리는 T-VN-11/34)."
-            ),
-        ),
-    ] = None,
     provider: Annotated[
         list[str] | None,
         Query(description="primary provider 반복 필터."),
@@ -1394,7 +1365,6 @@ async def list_features_nearby_by_target(
             radius_km=radius_km,
             kinds=kind,
             categories=category,
-            statuses=feature_status if feature_status is not None else ("active",),
             providers=provider,
             sort=sort,
             limit=page_size,
@@ -1409,7 +1379,6 @@ async def list_features_nearby_by_target(
             kind=item.kind,
             name=item.name,
             category=item.category,
-            status=item.status,
             lon=item.lon,
             lat=item.lat,
             distance_m=item.distance_m,

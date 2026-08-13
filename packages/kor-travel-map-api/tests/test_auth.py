@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -35,6 +36,9 @@ from kortravelmap.api.provider_catalog import (
     ProviderDatasetCatalogEntry,
     ProviderDatasetOperation,
 )
+from kortravelmap.api.routers.admin_features import (
+    require_destructive_enabled_for_retire,
+)
 from kortravelmap.api.settings import ApiSettings
 
 OPS_READ_TOKEN = "read-token-00000000000000000000000000000000"
@@ -64,6 +68,18 @@ def _api_settings(**overrides: Any) -> ApiSettings:
 
 def _request(settings: ApiSettings) -> Any:
     return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(settings=settings)))
+
+
+def _json_body_request(settings: ApiSettings, payload: dict[str, Any]) -> Any:
+    """route-level dependency 검증용 최소 request — body만 읽는다."""
+
+    async def _json() -> dict[str, Any]:
+        return payload
+
+    return SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(settings=settings)),
+        json=_json,
+    )
 
 
 def _ops_request(
@@ -1371,11 +1387,29 @@ def test_auth_event_rejects_removed_body_actor_field() -> None:
     assert response.status_code == 422
 
 
+#: ``PATCH /admin/features/{id}/state``가 요구하는 write 헤더.
+#: 이 둘이 없으면 body/header 검증이 핸들러보다 먼저 422를 내서, kill-switch가
+#: 403을 낼 기회 자체가 없다(= 게이트를 검증하지 못한다).
+_STATE_WRITE_HEADERS = {
+    "If-Match": '"1"',
+    "Idempotency-Key": "00000000-0000-4000-8000-000000000001",
+}
+
+
 @pytest.mark.unit
 def test_destructive_admin_blocked_when_disabled() -> None:
     client = _client(_api_settings(admin_destructive_enabled=False))
+    # T-VN-34가 ``POST /{id}/deactivate``를 ``PATCH /{id}/state``의 retire action으로
+    # 합쳤다. kill-switch도 그 자리로 따라가야 한다 — route-level이 아니라 action
+    # 단위로 거는 이유는, 같은 라우트의 publication/quality patch는 파괴적이지 않아
+    # 게이트를 꺼도 막히면 안 되기 때문이다(아래 대조군).
     assert (
-        client.post("/v1/admin/features/f_x/deactivate", json={"reason": "test"}).status_code == 403
+        client.patch(
+            "/v1/admin/features/f_x/state",
+            json={"action": "retire", "reason_code": "test"},
+            headers=_STATE_WRITE_HEADERS,
+        ).status_code
+        == 403
     )
     assert (
         client.request("DELETE", "/v1/admin/poi-cache-targets/external-app/key-1").status_code
@@ -1393,7 +1427,49 @@ def test_destructive_disabled_by_default_returns_403(
     assert settings.admin_destructive_enabled is False
     client = _client(settings)
     assert (
-        client.post("/v1/admin/features/f_x/deactivate", json={"reason": "test"}).status_code == 403
+        client.patch(
+            "/v1/admin/features/f_x/state",
+            json={"action": "retire", "reason_code": "test"},
+            headers=_STATE_WRITE_HEADERS,
+        ).status_code
+        == 403
+    )
+    # 대조군 — 파괴적이지 않은 patch action은 게이트를 통과해야 한다.
+    #
+    # **같은 라우트를 HTTP로 태운다.** 헬퍼를 직접 호출하면 헬퍼의 분기만 볼 뿐
+    # 라우트에 무엇이 걸려 있는지는 보지 않으므로, 배선을 `dependencies=[Depends(
+    # require_admin_destructive_enabled)]`(=라우트 전체 차단)로 되돌려도 이 테스트가
+    # red가 되지 않는다 — 즉 "retire action에만 건다"는 이 설계의 핵심 주장이
+    # 무보증으로 남는다(2026-08-12 적대 리뷰가 실제로 그 변이를 통과시켰다).
+    #
+    # `_FakeSession`은 repo 계층까지 가면 터진다. 그 예외를 응답으로 받아야
+    # "게이트를 지나 그 뒤까지 갔다"를 관찰할 수 있으므로 재던지지 않는 client를 쓴다.
+    # 게이트 통과 여부만이 관심사라 상태코드 값이 아니라 **403이 아님**을 단언한다 —
+    # 게이트에 걸리면 반드시 403이기 때문이다. 이 단언이 성립한다는 것은 patch가
+    # 인증을 이미 통과했다는 뜻이므로, 위 retire의 403이 인증 403이 아니라
+    # kill-switch 403임도 함께 고정된다.
+    passthrough_client = TestClient(
+        client.app,
+        client=("127.0.0.1", 50000),
+        raise_server_exceptions=False,
+    )
+    passthrough = passthrough_client.patch(
+        "/v1/admin/features/f_x/state",
+        json={"action": "patch", "publication_state": "draft", "reason_code": "test"},
+        headers=_STATE_WRITE_HEADERS,
+    )
+    assert passthrough.status_code != 403, (
+        "파괴적 kill-switch가 retire가 아닌 patch까지 막고 있다 — "
+        "라우트 전체 차단으로 되돌아갔다"
+    )
+    # 헬퍼 단위 축도 함께 남긴다(라우트 배선과 분기 로직을 각각 고정).
+    asyncio.run(
+        require_destructive_enabled_for_retire(
+            _json_body_request(
+                settings,
+                {"action": "patch", "publication_state": "draft", "reason_code": "test"},
+            )
+        )
     )
 
 

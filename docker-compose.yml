@@ -14,7 +14,7 @@ services:
     environment:
       POSTGRES_DB: ${KOR_TRAVEL_MAP_POSTGRES_DB:-kor_travel_map}
       POSTGRES_USER: ${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}
-      POSTGRES_PASSWORD: ${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map}
+      POSTGRES_PASSWORD: ${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-}
       KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB: ${KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB:-kor_travel_map_dagster}
     ports:
       - "${KOR_TRAVEL_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KOR_TRAVEL_MAP_POSTGRES_HOST_PORT:-5432}:5432"
@@ -38,9 +38,9 @@ services:
     environment:
       KOR_TRAVEL_MAP_POSTGRES_DB: ${KOR_TRAVEL_MAP_POSTGRES_DB:-kor_travel_map}
       KOR_TRAVEL_MAP_POSTGRES_USER: ${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}
-      KOR_TRAVEL_MAP_POSTGRES_PASSWORD: ${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map}
+      KOR_TRAVEL_MAP_POSTGRES_PASSWORD: ${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-}
       KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB: ${KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB:-kor_travel_map_dagster}
-      PGPASSWORD: ${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map}
+      PGPASSWORD: ${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-}
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
@@ -55,6 +55,29 @@ services:
           createdb -h postgres -U "$$KOR_TRAVEL_MAP_POSTGRES_USER" "$$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB"
           echo "Dagster metadata DB created: $$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB"
         fi
+
+  # T-VN-34A / ADR-090 — local dedicated DB에서만 bootstrap owner가 LOGIN
+  # migrator/runtime principal과 NOLOGIN schema owner를 provision하고 기존 object
+  # ownership을 넘긴다. API/Dagster는 이 service 뒤에만 시작한다.
+  db-role-bootstrap:
+    image: postgres:16-alpine
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_ENABLED: "true"
+      # `:?`는 profile-disabled external overlay도 interpolation 단계에서 막으므로
+      # 여기서는 빈 값을 전달하고 script가 service 실행 시 fail-closed 한다.
+      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE: ${KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE:-}
+      KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN: ${KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN:-}
+      KOR_TRAVEL_MAP_POSTGRES_DB: ${KOR_TRAVEL_MAP_POSTGRES_DB:-kor_travel_map}
+      KOR_TRAVEL_MAP_POSTGRES_USER: ${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}
+      KOR_TRAVEL_MAP_MIGRATOR_PASSWORD: ${KOR_TRAVEL_MAP_MIGRATOR_PASSWORD:-}
+      KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD: ${KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD:-}
+      KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD: ${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD:-}
+    volumes:
+      - ./docker/postgres-role-bootstrap.sh:/usr/local/bin/postgres-role-bootstrap:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/postgres-role-bootstrap"]
 
   rustfs-perms:
     image: alpine:3.20
@@ -150,7 +173,12 @@ services:
       # bridge 모드의 BFF peer를 단일 고정 주소로 제한한다. 임의의 compose
       # container subnet 전체를 신뢰하지 않는다.
       KOR_TRAVEL_MAP_API_ADMIN_TRUSTED_PROXY_CIDRS: '["172.31.254.3/32"]'
-      KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_DOCKER_PG_DSN:-postgresql+asyncpg://kor_travel_map:kor_travel_map@postgres:5432/kor_travel_map}
+      # migration은 이 process가 시작될 때만 migrator DSN을 쓰고 exec 전 unset한다.
+      # API application에는 API runtime DSN만 남는다 (fallback 금지).
+      KOR_TRAVEL_MAP_MIGRATOR_PG_DSN: ${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required}
+      KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN: ${KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN:?KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN is required}
+      KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN:?KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN is required}
+      KOR_TRAVEL_MAP_RUNTIME_DB_PREFLIGHT_REQUIRED: "true"
       KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://rustfs:9000}
       KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET: ${KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET:-kor-travel-map}
       KOR_TRAVEL_MAP_OBJECT_STORE_REGION: ${KOR_TRAVEL_MAP_OBJECT_STORE_REGION:-us-east-1}
@@ -173,6 +201,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
+      db-role-bootstrap:
+        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       rustfs-init:
@@ -250,9 +280,13 @@ services:
       secrets:
         - github_token
     command:
-      - /bin/sh
-      - -c
-      - dagster-webserver -m kortravelmap.dagster.definitions -h 0.0.0.0 -p "$${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}"
+      - dagster-webserver
+      - -m
+      - kortravelmap.dagster.definitions
+      - -h
+      - 0.0.0.0
+      - -p
+      - "${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}"
     env_file:
       - path: .env
         required: false
@@ -264,8 +298,9 @@ services:
       DAGSTER_HOME: /opt/dagster/dagster_home
       DAGSTER_DISABLE_TELEMETRY: ${DAGSTER_DISABLE_TELEMETRY:-yes}
       KOR_TRAVEL_MAP_DAGSTER_PORT: ${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}
-      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL:-postgresql://kor_travel_map:kor_travel_map@postgres:5432/kor_travel_map_dagster}
-      KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_DOCKER_PG_DSN:-postgresql+asyncpg://kor_travel_map:kor_travel_map@postgres:5432/kor_travel_map}
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL:-}
+      KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN:?KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN is required}
+      KOR_TRAVEL_MAP_RUNTIME_DB_PREFLIGHT_REQUIRED: "true"
       KOR_TRAVEL_MAP_DAGSTER_SCHEDULE_OVERRIDES_REQUIRED: "true"
       KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://rustfs:9000}
       KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET: ${KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET:-kor-travel-map}
@@ -285,6 +320,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
+      db-role-bootstrap:
+        condition: service_completed_successfully
       dagster-db-init:
         condition: service_completed_successfully
       postgres:
@@ -330,8 +367,9 @@ services:
       TMP: /tmp
       DAGSTER_HOME: /opt/dagster/dagster_home
       DAGSTER_DISABLE_TELEMETRY: ${DAGSTER_DISABLE_TELEMETRY:-yes}
-      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL:-postgresql://kor_travel_map:kor_travel_map@postgres:5432/kor_travel_map_dagster}
-      KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_DOCKER_PG_DSN:-postgresql+asyncpg://kor_travel_map:kor_travel_map@postgres:5432/kor_travel_map}
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL:-}
+      KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN:?KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN is required}
+      KOR_TRAVEL_MAP_RUNTIME_DB_PREFLIGHT_REQUIRED: "true"
       KOR_TRAVEL_MAP_DAGSTER_SCHEDULE_OVERRIDES_REQUIRED: "true"
       KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://rustfs:9000}
       KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET: ${KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET:-kor-travel-map}
@@ -352,6 +390,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
+      db-role-bootstrap:
+        condition: service_completed_successfully
       dagster-db-init:
         condition: service_completed_successfully
       postgres:
@@ -380,7 +420,7 @@ services:
     environment:
       DAGSTER_HOME: /opt/dagster/dagster_home
       DAGSTER_DISABLE_TELEMETRY: ${DAGSTER_DISABLE_TELEMETRY:-yes}
-      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL:-postgresql://kor_travel_map:kor_travel_map@postgres:5432/kor_travel_map_dagster}
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL:-}
     # external DB/infra overlay가 host.docker.internal DSN을 주입하므로 one-shot도
     # 장기 Dagster service와 같은 host gateway mapping을 가져야 한다.
     extra_hosts:

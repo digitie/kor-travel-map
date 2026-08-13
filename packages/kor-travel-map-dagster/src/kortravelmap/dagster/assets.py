@@ -941,15 +941,15 @@ async def run_feature_place_krheritage_items(
         authoritative_snapshot_complete=True,
     )
     client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
-    inactivated = await client.inactivate_geometryless_area_features_by_source(
+    retired = await client.retire_geometryless_area_features_by_source(
         provider=KRHERITAGE_PROVIDER_NAME,
         dataset_key=KRHERITAGE_DATASET_KEY,
         source_entity_type="heritage",
     )
-    if inactivated:
+    if retired:
         context.log.info(
-            "krheritage geometry 없는 area feature %d건 inactive 전환",
-            inactivated,
+            "krheritage geometry 없는 area feature %d건 retired 전이",
+            retired,
         )
     return result
 
@@ -1425,8 +1425,8 @@ async def run_feature_place_kor_travel_concierge_youtube(
     """kor-travel-concierge YouTube 장소 후보 export를 place Feature로 적재한다.
 
     ``operation=upsert``는 bundle 적재, ``reject``/``tombstone``은 대응 feature를
-    ``status='inactive'``로 전환한다(ADR-050 #4, T-217b — MOIS Step C 동형).
-    적재 후 inactivate 순서가 mid-run 검수 전이(되돌리기)의 구 operation으로 신
+    ``retired/suppressed``로 전이한다(ADR-050 #4, T-217b — MOIS Step C 동형).
+    적재 후 retire 순서가 mid-run 검수 전이(되돌리기)의 구 operation으로 신
     상태를 덮지 않도록, 후보별 마지막 관측 item으로 먼저 압축한다.
     """
     records = kor_travel_concierge_latest_items(
@@ -1472,19 +1472,19 @@ async def run_feature_place_kor_travel_concierge_youtube(
         bundles=bundles,
         authoritative_snapshot_complete=True,
     )
-    inactive_ids = kor_travel_concierge_inactive_entity_ids(records)
-    if inactive_ids:
+    retired_entity_ids = kor_travel_concierge_inactive_entity_ids(records)
+    if retired_entity_ids:
         client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
-        inactivated = await client.inactivate_features_by_source(
+        retired = await client.retire_features_by_source(
             provider=KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
             dataset_key=DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
             source_entity_type=KOR_TRAVEL_CONCIERGE_SOURCE_ENTITY_TYPE,
-            source_entity_ids=inactive_ids,
+            source_entity_ids=retired_entity_ids,
         )
         context.log.info(
-            "kor-travel-concierge reject/tombstone %d건 → feature %d건 inactive 전환",
-            len(inactive_ids),
-            inactivated,
+            "kor-travel-concierge reject/tombstone %d건 → feature %d건 retired 전이",
+            len(retired_entity_ids),
+            retired,
         )
     return result
 

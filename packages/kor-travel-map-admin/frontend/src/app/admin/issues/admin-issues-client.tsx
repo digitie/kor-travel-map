@@ -31,11 +31,11 @@ import {
   type AdminIssueSeverity,
   type AdminIssueStatus,
 } from "@/api/issues";
+import { featureStateLabel } from "@/api/features";
 import { AdminShell } from "@/components/admin-shell";
 import { CursorPager } from "@/components/pagination-bar";
 import { EntityLink } from "@/components/entity-link";
 import { StatusBadge } from "@/components/status-badge";
-import { statusLabel } from "@/lib/status-label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -105,9 +105,23 @@ function positiveInteger(value: string): number | undefined {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
 }
 
-function IssueDetailPanel({ issueId }: { issueId: string | null }) {
-  const detail = useAdminIssueDetail(issueId);
-  const action = useAdminIssueActionMutation();
+type IssueActionRunner = (
+  actionName: AdminIssueAction,
+  patch?: Partial<AdminIssuePatchRequest>,
+) => void;
+
+/** issue 상세의 "수동 보정" 폼 — 입력 state·검증·focus 이동을 자체 소유한다.
+ *
+ * 조치 mutation만은 상단 조치 버튼과 공유해야 하므로(동시 실행 방지 +
+ * 실패 alert 단일 표면) 부모에서 받는다.
+ */
+function IssueManualOverridePanel({
+  action,
+  runAction,
+}: {
+  action: ReturnType<typeof useAdminIssueActionMutation>;
+  runAction: IssueActionRunner;
+}) {
   const [manualAddress, setManualAddress] = useState("");
   const [manualLon, setManualLon] = useState("");
   const [manualLat, setManualLat] = useState("");
@@ -119,31 +133,7 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
   const manualAddressRef = useRef<HTMLTextAreaElement>(null);
   const manualLonRef = useRef<HTMLInputElement>(null);
 
-  if (!issueId) {
-    return (
-      <div className="rounded-lg border bg-background p-5 text-sm text-muted-foreground">
-        table에서 issue를 선택하면 상세 payload와 조치 버튼을 확인할 수 있습니다.
-      </div>
-    );
-  }
-
-  const issue = detail.data?.data.issue;
-  const feature = detail.data?.data.feature;
-
-  const runAction = (
-    actionName: AdminIssueAction,
-    patch: Partial<AdminIssuePatchRequest> = {},
-  ) => {
-    action.mutate({
-      issueId,
-      body: buildActionBody(actionName, patch),
-    });
-  };
-
-  const failManualOverride = (
-    field: "address" | "lon",
-    message: string,
-  ) => {
+  const failManualOverride = (field: "address" | "lon", message: string) => {
     setManualError(message);
     setManualErrorField(field);
     if (field === "address") {
@@ -161,7 +151,10 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
       try {
         address = JSON.parse(manualAddress) as Record<string, unknown>;
       } catch {
-        failManualOverride("address", "주소 보정값을 JSON 형식으로 입력하세요.");
+        failManualOverride(
+          "address",
+          "주소 보정값을 JSON 형식으로 입력하세요.",
+        );
         return;
       }
     }
@@ -178,7 +171,11 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
       failManualOverride("lon", "경도와 위도는 함께 입력하세요.");
       return;
     }
-    if (lon !== undefined && lat !== undefined && !isKoreaCoordinate(lon, lat)) {
+    if (
+      lon !== undefined &&
+      lat !== undefined &&
+      !isKoreaCoordinate(lon, lat)
+    ) {
       failManualOverride("lon", KOREA_COORD_MESSAGE);
       return;
     }
@@ -193,6 +190,86 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
         manualReason.trim().length > 0
           ? manualReason.trim()
           : "admin-ui manual override",
+    });
+  };
+
+  return (
+    <div className="rounded-lg border bg-background p-4">
+      <div className="mb-3 flex items-center gap-2 font-medium">
+        <WrenchIcon className="size-4 text-muted-foreground" />
+        수동 보정
+      </div>
+      {action.isError ? (
+        <Alert className="mb-3" variant="destructive">
+          <AlertTitle>issue 조치 실패</AlertTitle>
+          <AlertDescription>{action.error.message}</AlertDescription>
+        </Alert>
+      ) : null}
+      <div className="grid gap-3">
+        <FormTextArea
+          className="font-mono"
+          error={manualErrorField === "address" ? manualError : undefined}
+          hint="도로명/지번 주소를 JSON으로 입력합니다."
+          label="주소 보정값"
+          placeholder='{"road": "...", "jibun": "..."}'
+          ref={manualAddressRef}
+          value={manualAddress}
+          onChange={(event) => setManualAddress(event.target.value)}
+        />
+        <div className="grid gap-3 sm:grid-cols-3">
+          <FormField
+            error={manualErrorField === "lon" ? manualError : undefined}
+            inputMode="decimal"
+            label="경도"
+            ref={manualLonRef}
+            value={manualLon}
+            onChange={(event) => setManualLon(event.target.value)}
+          />
+          <FormField
+            error={manualErrorField === "lon" ? manualError : undefined}
+            inputMode="decimal"
+            label="위도"
+            value={manualLat}
+            onChange={(event) => setManualLat(event.target.value)}
+          />
+          <FormField
+            label="보정 사유"
+            value={manualReason}
+            onChange={(event) => setManualReason(event.target.value)}
+          />
+        </div>
+        <Button
+          disabled={action.isPending}
+          type="button"
+          onClick={submitManualOverride}
+        >
+          수동 보정 적용
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function IssueDetailPanel({ issueId }: { issueId: string | null }) {
+  const detail = useAdminIssueDetail(issueId);
+  const action = useAdminIssueActionMutation();
+
+  if (!issueId) {
+    return (
+      <div className="rounded-lg border bg-background p-5 text-sm text-muted-foreground">
+        table에서 issue를 선택하면 상세 payload와 조치 버튼을 확인할 수
+        있습니다.
+      </div>
+    );
+  }
+
+  const issue = detail.data?.data.issue;
+  const feature = detail.data?.data.feature;
+
+  const runAction: IssueActionRunner = (actionName, patch = {}) => {
+    action.mutate({
+      issueId,
+      body: buildActionBody(actionName, patch),
     });
   };
 
@@ -262,7 +339,7 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
                 onClick={() => runAction("resolve")}
               >
                 <CheckIcon data-icon="inline-start" />
-                  해결
+                해결
               </Button>
               <Button
                 disabled={action.isPending}
@@ -319,8 +396,15 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
                   Feature 스냅샷
                 </summary>
                 <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
-                  <dt className="text-muted-foreground">status</dt>
-                  <dd>{statusLabel(feature.status)}</dd>
+                  <dt className="text-muted-foreground">상태 축</dt>
+                  <dd>
+                    {featureStateLabel("lifecycle", feature.lifecycle_state)} ·{" "}
+                    {featureStateLabel(
+                      "publication",
+                      feature.publication_state,
+                    )}{" "}
+                    · {featureStateLabel("quality", feature.quality_state)}
+                  </dd>
                   <dt className="text-muted-foreground">coord</dt>
                   <dd className="font-mono">
                     {typeof feature.lon === "number" &&
@@ -338,66 +422,16 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
             ) : null}
 
             <details>
-              <summary className="cursor-pointer text-sm font-medium">payload</summary>
+              <summary className="cursor-pointer text-sm font-medium">
+                payload
+              </summary>
               <JsonBlock value={issue.payload} />
             </details>
           </div>
         ) : null}
       </div>
 
-      <div className="rounded-lg border bg-background p-4">
-        <div className="mb-3 flex items-center gap-2 font-medium">
-          <WrenchIcon className="size-4 text-muted-foreground" />
-          수동 보정
-        </div>
-        {action.isError ? (
-          <Alert className="mb-3" variant="destructive">
-            <AlertTitle>issue 조치 실패</AlertTitle>
-            <AlertDescription>{action.error.message}</AlertDescription>
-          </Alert>
-        ) : null}
-        <div className="grid gap-3">
-          <FormTextArea
-            className="font-mono"
-            error={manualErrorField === "address" ? manualError : undefined}
-            hint="도로명/지번 주소를 JSON으로 입력합니다."
-            label="주소 보정값"
-            placeholder='{"road": "...", "jibun": "..."}'
-            ref={manualAddressRef}
-            value={manualAddress}
-            onChange={(event) => setManualAddress(event.target.value)}
-          />
-          <div className="grid gap-3 sm:grid-cols-3">
-            <FormField
-              error={manualErrorField === "lon" ? manualError : undefined}
-              inputMode="decimal"
-              label="경도"
-              ref={manualLonRef}
-              value={manualLon}
-              onChange={(event) => setManualLon(event.target.value)}
-            />
-            <FormField
-              error={manualErrorField === "lon" ? manualError : undefined}
-              inputMode="decimal"
-              label="위도"
-              value={manualLat}
-              onChange={(event) => setManualLat(event.target.value)}
-            />
-            <FormField
-              label="보정 사유"
-              value={manualReason}
-              onChange={(event) => setManualReason(event.target.value)}
-            />
-          </div>
-          <Button
-            disabled={action.isPending || !issueId}
-            type="button"
-            onClick={submitManualOverride}
-          >
-            수동 보정 적용
-          </Button>
-        </div>
-      </div>
+      <IssueManualOverridePanel action={action} runAction={runAction} />
     </div>
   );
 }
@@ -579,9 +613,7 @@ function useAdminIssuesClientController({
           const issue = row.original;
           return (
             <>
-              <div className="font-mono text-xs">
-                {shortId(issue.issue_id)}
-              </div>
+              <div className="font-mono text-xs">{shortId(issue.issue_id)}</div>
               <div className="mt-1 text-xs text-muted-foreground">
                 {issue.violation_type}
               </div>
@@ -869,13 +901,15 @@ function AdminIssuesClientView({
             />
             <Input
               aria-invalid={
-                bbox.trim().length > 0 && Object.keys(parseBbox(bbox)).length === 0
+                bbox.trim().length > 0 &&
+                Object.keys(parseBbox(bbox)).length === 0
               }
               aria-label="bbox"
               className="w-72 shrink-0"
               placeholder="min_lon,min_lat,max_lon,max_lat"
               title={
-                bbox.trim().length > 0 && Object.keys(parseBbox(bbox)).length === 0
+                bbox.trim().length > 0 &&
+                Object.keys(parseBbox(bbox)).length === 0
                   ? "형식: minLon,minLat,maxLon,maxLat"
                   : undefined
               }

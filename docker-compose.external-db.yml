@@ -7,9 +7,9 @@
 #
 #   KOR_TRAVEL_MAP_DB_EXTERNAL=true bash scripts/docker-up.sh
 #
-# 공유 DB에는 `kor_travel_map`과 `kor_travel_map_dagster` DB가 있어야 한다. 비밀번호가
-# 기본값과 다르면 `.env`에 `KOR_TRAVEL_MAP_POSTGRES_PASSWORD` 또는 아래
-# `KOR_TRAVEL_MAP_EXTERNAL_DOCKER_*` DSN을 명시한다.
+# 공유 DB에는 `kor_travel_map`과 `kor_travel_map_dagster` DB가 있어야 한다.
+# API/Dagster runtime·migrator·Dagster metadata DSN은 모두 ignored deployment env/vault로
+# 명시한다. bootstrap password 또는 DSN의 tracked 기본값은 없다.
 services:
   postgres:
     profiles: ["local-infra"]
@@ -17,17 +17,21 @@ services:
   dagster-db-init:
     profiles: ["local-infra"]
 
+  # 공유 DB에서는 ownership transfer bootstrap을 절대 자동 실행하지 않는다.
+  # 역할은 dedicated map DB에 대해 운영자가 사전 provision해야 한다.
+  db-role-bootstrap:
+    profiles: ["local-infra"]
+
   api:
     depends_on: !override
       rustfs-init:
         condition: service_completed_successfully
     environment:
-      KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_PG_DSN:-postgresql+asyncpg://${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}:${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map}@host.docker.internal:${KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT:-5432}/${KOR_TRAVEL_MAP_POSTGRES_DB:-kor_travel_map}}
 
   dagster-storage-migrate:
     depends_on: !override {}
     environment:
-      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:-postgresql://${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}:${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map}@host.docker.internal:${KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT:-5432}/${KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB:-kor_travel_map_dagster}}
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:?KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL is required}
 
   dagster:
     depends_on: !override
@@ -38,8 +42,7 @@ services:
       api:
         condition: service_healthy
     environment:
-      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:-postgresql://${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}:${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map}@host.docker.internal:${KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT:-5432}/${KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB:-kor_travel_map_dagster}}
-      KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_PG_DSN:-postgresql+asyncpg://${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}:${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map}@host.docker.internal:${KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT:-5432}/${KOR_TRAVEL_MAP_POSTGRES_DB:-kor_travel_map}}
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:?KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL is required}
 
   dagster-daemon:
     depends_on: !override
@@ -50,5 +53,4 @@ services:
       api:
         condition: service_healthy
     environment:
-      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:-postgresql://${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}:${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map}@host.docker.internal:${KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT:-5432}/${KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB:-kor_travel_map_dagster}}
-      KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_PG_DSN:-postgresql+asyncpg://${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}:${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map}@host.docker.internal:${KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT:-5432}/${KOR_TRAVEL_MAP_POSTGRES_DB:-kor_travel_map}}
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:?KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL is required}

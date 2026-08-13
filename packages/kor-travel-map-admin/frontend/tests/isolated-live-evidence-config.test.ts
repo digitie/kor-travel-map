@@ -76,6 +76,31 @@ describe("isolated Live evidence config", () => {
 
     expect(config.use?.baseURL).toBe("http://127.0.0.1:18706");
     expect(config.use?.trace).toBe("off");
+    // loopback proxy origin은 `127.0.0.1`이라 Chromium이 **이미** secure context로
+    // 취급한다. 승격 flag가 필요 없고, 브라우저가 방문하지도 않는
+    // `http://candidate-ui:18705`를 secure로 선언하는 것은 순수한 약화다.
+    // config 자신의 주석도 "URL origin은 실제 loopback secure context"라고 진술한다.
+    expect(config.use?.launchOptions).toBeUndefined();
+  });
+
+  it("Noble 격리 runner는 localhost를 candidate-ui로만 해석한다", async () => {
+    process.env.E2E_BASE_URL = "http://localhost:12705";
+    process.env.E2E_ISOLATED_LIVE_EVIDENCE = "1";
+    process.env.E2E_ISOLATED_LIVE_DOCKER_NETWORK = "1";
+
+    const config = await loadConfig();
+
+    expect(config.use?.launchOptions).toEqual({
+      args: ["--host-resolver-rules=MAP localhost candidate-ui"],
+    });
+  });
+
+  it("일반 HTTP origin에는 secure-context 승격 옵션을 넣지 않는다", async () => {
+    process.env.E2E_BASE_URL = "http://127.0.0.1:18705";
+    process.env.E2E_ISOLATED_LIVE_EVIDENCE = "1";
+
+    const config = await loadConfig();
+
     expect(config.use?.launchOptions).toBeUndefined();
   });
 

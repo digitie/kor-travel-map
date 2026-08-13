@@ -159,7 +159,10 @@ CONSISTENCY_CASES: Final[tuple[CaseSpec, ...]] = (
             "  UNION ALL SELECT feature_id FROM feature.feature_routes "
             "  UNION ALL SELECT feature_id FROM feature.feature_areas "
             ") AS s ON s.feature_id = f.feature_id "
-            "WHERE f.deleted_at IS NULL "
+            # `deleted_at IS NULL`의 3축 등가물. 이 술어가 빠지면 retired feature가
+            # subtype row 없다는 이유로 일관성 위반으로 올라온다 — retire는 위반이
+            # 아니라 정상 종료다.
+            "WHERE f.lifecycle_state = 'active' "
             f"  AND f.kind IN ({_DETAIL_KINDS_SQL}) "
             "  AND s.feature_id IS NULL"
         ),
@@ -193,13 +196,13 @@ CONSISTENCY_CASES: Final[tuple[CaseSpec, ...]] = (
             "         jsonb_build_object('business_hours', p.business_hours) AS hours "
             "  FROM feature.feature_places p "
             "  JOIN feature.features f ON f.feature_id = p.feature_id "
-            "  WHERE f.deleted_at IS NULL AND p.business_hours IS NOT NULL "
+            "  WHERE f.lifecycle_state = 'active' AND p.business_hours IS NOT NULL "
             "  UNION ALL "
             "  SELECT e.feature_id, "
             "         jsonb_build_object('opening_hours', e.opening_hours) AS hours "
             "  FROM feature.feature_events e "
             "  JOIN feature.features f ON f.feature_id = e.feature_id "
-            "  WHERE f.deleted_at IS NULL AND e.opening_hours IS NOT NULL"
+            "  WHERE f.lifecycle_state = 'active' AND e.opening_hours IS NOT NULL"
             "), opening_periods AS ("
             "  SELECT c.feature_id, periods.period "
             "  FROM candidate_features c "
@@ -437,7 +440,9 @@ SELECT
   ff.storage_backend,
   ff.bucket,
   ff.object_key,
-  (f.feature_id IS NULL OR f.deleted_at IS NOT NULL) AS feature_missing
+  -- retired feature는 "없는 것"으로 본다(legacy `deleted_at IS NOT NULL`의 3축 등가물).
+  -- 이 축이 빠지면 retire된 feature의 첨부가 고아 파일로 보고되지 않는다.
+  (f.feature_id IS NULL OR f.lifecycle_state <> 'active') AS feature_missing
 FROM feature.feature_files AS ff
 LEFT JOIN feature.features AS f
   ON f.feature_id = ff.feature_id

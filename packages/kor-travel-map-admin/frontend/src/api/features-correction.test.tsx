@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   useAdminFeatureCorrectionBasis,
   usePatchAdminFeatureMutation,
+  usePatchAdminFeatureStateMutation,
 } from "./features";
 
 type FetchMock = (
@@ -105,6 +106,33 @@ describe("admin feature correction hooks", () => {
         (queryKey) => queryKey?.[0] === "admin-feature-correction-basis",
       ),
     ).toBe(false);
+  });
+
+  it("상태 전이는 다음 명령이 새 ETag를 읽도록 correction basis를 무효화한다", async () => {
+    const fetchMock = vi.fn<FetchMock>().mockResolvedValue(
+      response({ data: { feature_id: "feature-1" }, meta: {} }),
+    );
+    const context = hookContext(fetchMock);
+    const invalidateQueries = vi.spyOn(context.queryClient, "invalidateQueries");
+    const { result } = renderHook(() => usePatchAdminFeatureStateMutation(), {
+      wrapper: context.wrapper,
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        featureId: "feature-1",
+        entityTag: '"3"',
+        body: { action: "retire", reason_code: "admin_ui_retire" },
+      });
+    });
+
+    expect(
+      invalidateQueries.mock.calls.some(
+        ([filters]) =>
+          filters?.queryKey?.[0] === "admin-feature-correction-basis" &&
+          filters.queryKey[1] === "feature-1",
+      ),
+    ).toBe(true);
   });
 
   it("전역 query retry가 켜져 있어도 불일치 basis는 세 pair 뒤 한 번만 실패한다", async () => {

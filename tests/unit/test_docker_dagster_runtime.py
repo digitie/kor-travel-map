@@ -64,7 +64,15 @@ def test_docker_compose_uses_persistent_dagster_storage_and_daemon() -> None:
     dagster = services["dagster"]
     daemon = services["dagster-daemon"]
 
-    assert "dagster-webserver" in _command_text(dagster["command"])
+    assert dagster["command"] == [
+        "dagster-webserver",
+        "-m",
+        "kortravelmap.dagster.definitions",
+        "-h",
+        "0.0.0.0",
+        "-p",
+        "${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}",
+    ]
     assert "dagster dev" not in _command_text(dagster["command"])
     assert "dagster-daemon run" in _command_text(daemon["command"])
     for service in (dagster, daemon):
@@ -73,20 +81,89 @@ def test_docker_compose_uses_persistent_dagster_storage_and_daemon() -> None:
 
     assert dagster["environment"]["KOR_TRAVEL_MAP_DAGSTER_PG_URL"]
     assert daemon["environment"]["KOR_TRAVEL_MAP_DAGSTER_PG_URL"]
-    assert (
-        dagster["environment"][
-            "KOR_TRAVEL_MAP_DAGSTER_SCHEDULE_OVERRIDES_REQUIRED"
-        ]
-        == "true"
-    )
-    assert (
-        daemon["environment"][
-            "KOR_TRAVEL_MAP_DAGSTER_SCHEDULE_OVERRIDES_REQUIRED"
-        ]
-        == "true"
-    )
+    assert dagster["environment"]["KOR_TRAVEL_MAP_DAGSTER_SCHEDULE_OVERRIDES_REQUIRED"] == "true"
+    assert daemon["environment"]["KOR_TRAVEL_MAP_DAGSTER_SCHEDULE_OVERRIDES_REQUIRED"] == "true"
     assert "dagster-db-init" in dagster["depends_on"]
     assert "dagster-db-init" in daemon["depends_on"]
+    for service in (dagster, daemon):
+        assert service["depends_on"]["db-role-bootstrap"] == {
+            "condition": "service_completed_successfully"
+        }
+
+
+@pytest.mark.unit
+def test_tvn34_compose_never_derives_runtime_or_metadata_credentials_from_bootstrap(
+    tmp_path: Path,
+) -> None:
+    """ADR-090 principal DSN은 ignored env 입력이며 bootstrap fallback이 아니다."""
+
+    compose = _compose()["services"]
+    assert compose["api"]["environment"]["KOR_TRAVEL_MAP_MIGRATOR_PG_DSN"].endswith("is required}")
+    assert compose["api"]["environment"]["KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN"].endswith(
+        "is required}"
+    )
+    for service_name in ("dagster", "dagster-daemon"):
+        assert compose[service_name]["environment"]["KOR_TRAVEL_MAP_PG_DSN"].endswith(
+            "is required}"
+        )
+        assert compose[service_name]["depends_on"]["db-role-bootstrap"] == {
+            "condition": "service_completed_successfully"
+        }
+
+    load_env = _script("scripts/load-env.sh")
+    assert "KOR_TRAVEL_MAP_PG_DSN:-postgresql" not in load_env
+    assert "KOR_TRAVEL_MAP_PG_DSN_SYNC:-postgresql" not in load_env
+    assert "KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map" not in load_env
+
+    for compose_path in (
+        "docker-compose.yml",
+        "docker-compose.host.yml",
+        "docker-compose.external-db.yml",
+        "docker-compose.external-infra.yml",
+    ):
+        raw = _script(compose_path)
+        assert "kor_travel_map:kor_travel_map" not in raw, compose_path
+        assert "KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map" not in raw, compose_path
+
+    bootstrap = _script("docker/postgres-role-bootstrap.sh")
+    assert not any(line.strip().startswith("REASSIGN OWNED") for line in bootstrap.splitlines())
+    assert "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES" not in bootstrap
+    assert "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ktm_feature_runtime" not in bootstrap
+    assert "REVOKE ALL ON TABLES FROM ktm_feature_runtime" in bootstrap
+
+    # T-102 pg_prewarm의 **유일한** 설치 지점이다. migration 0022는 "current_user가
+    # superuser일 때만 만든다"로 짜였는데 ADR-090 이후 alembic은 NOSUPERUSER
+    # `ktm_feature_migrator`로만 돌아 그 분기가 영구 no-op이 됐다. pg_prewarm은
+    # trusted extension이 아니라 schema owner 권한으로도 만들 수 없으므로, 이 dedicated
+    # superuser 연결에서 빠지면 확장이 **어디서도** 생기지 않고 prewarm이 조용히
+    # no-op으로 남는다. 그 상태로도 게이트가 전부 green이었기 때문에 여기서 못박는다.
+    assert "CREATE EXTENSION IF NOT EXISTS pg_prewarm WITH SCHEMA x_extension" in bootstrap
+    # 관리형 Postgres에는 contrib이 없을 수 있다. 없을 때 기동을 막지 않도록
+    # available 여부를 먼저 본다는 것도 계약의 일부다.
+    assert "pg_available_extensions" in bootstrap
+
+    # wrong target confirmation must fail before a network/psql side effect.
+    result = subprocess.run(
+        ["sh", "docker/postgres-role-bootstrap.sh"],
+        cwd=ROOT,
+        env={
+            "PATH": os.environ["PATH"],
+            "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_ENABLED": "true",
+            "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN": "postgresql://unused.invalid/ktm",
+            "KOR_TRAVEL_MAP_MIGRATOR_PASSWORD": "test-only",
+            "KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD": "test-only",
+            "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD": "test-only",
+            "KOR_TRAVEL_MAP_POSTGRES_DB": "dedicated_map",
+            "KOR_TRAVEL_MAP_POSTGRES_USER": "bootstrap",
+            "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE": "other_database",
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "must equal KOR_TRAVEL_MAP_POSTGRES_DB" in result.stderr
+    assert "psql" not in result.stderr
 
 
 @pytest.mark.unit
@@ -191,6 +268,7 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         # ADR-066 결정 4 (T-VN-02) — /metrics scrape identity token도 같은
         # hard-require 패턴이다.
         "KOR_TRAVEL_MAP_API_METRICS_TOKEN",
+        "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN",
     }
     assert "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET" in api["environment"]
     # admin secret과 같은 hard-require 패턴 — host env 누락 시 compose 평가 실패.
@@ -1042,6 +1120,10 @@ _MIGRATION_BASE_ENV: Final = {
     "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": "",
     "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN": "",
     "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED": "false",
+    # Alembic와 API runtime은 같은 DB에도 서로 다른 LOGIN DSN을 반드시 쓴다.
+    # Entrypoint unit stub은 접속하지 않으므로 식별자만 있는 dummy를 준다.
+    "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": "postgresql://migrator@example.invalid/ktm",
+    "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN": "postgresql://api@example.invalid/ktm",
 }
 
 
@@ -1286,10 +1368,9 @@ def test_api_container_allows_empty_ops_tokens_when_not_required(
         cwd=ROOT,
         env={
             "PATH": _entrypoint_stub_path(tmp_path),
+            **_MIGRATION_BASE_ENV,
             "KOR_TRAVEL_MAP_API_PROFILE": "local-dev",
-            "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": (
-                "shared-secret-at-least-32-characters"
-            ),
+            "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": ("shared-secret-at-least-32-characters"),
             "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": "",
             "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": "",
             "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN": "",
@@ -1364,9 +1445,8 @@ def test_api_container_production_allows_empty_ops_pair_when_ops_surface_off(
         cwd=ROOT,
         env={
             "PATH": _entrypoint_stub_path(tmp_path),
-            "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": (
-                "shared-secret-at-least-32-characters"
-            ),
+            **_MIGRATION_BASE_ENV,
+            "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": ("shared-secret-at-least-32-characters"),
             "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED": "false",
             "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": "",
             "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN": "",
@@ -1487,9 +1567,8 @@ def test_api_container_production_ops_surface_follows_features_flag(
         cwd=ROOT,
         env={
             "PATH": _entrypoint_stub_path(tmp_path),
-            "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": (
-                "shared-secret-at-least-32-characters"
-            ),
+            **_MIGRATION_BASE_ENV,
+            "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": ("shared-secret-at-least-32-characters"),
             "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED": "false",
         },
         check=False,
@@ -1655,6 +1734,72 @@ def test_dagster_entrypoint_executes_command_without_api_ops_keys() -> None:
     assert "dagster-started" in result.stdout
 
 
+def _dagster_runtime_command_stub_path(tmp_path: Path) -> str:
+    """runtime preflight 호출과 exec target을 구분하는 disposable PATH를 만든다."""
+
+    bin_dir = tmp_path / "dagster-runtime-bin"
+    bin_dir.mkdir()
+    (bin_dir / "python").write_text(
+        "#!/bin/sh\n"
+        "if [ \"${1:-}\" = \"-m\" ] "
+        "&& [ \"${2:-}\" = \"kortravelmap.dagster.runtime_preflight\" ]; then\n"
+        "  echo runtime-preflight\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [ \"${1:-}\" = \"-c\" ]; then\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 70\n",
+        encoding="utf-8",
+    )
+    for command in ("dagster-webserver", "dagster-daemon", "ktm-dagster-storage"):
+        target = bin_dir / command
+        target.write_text(f"#!/bin/sh\necho {command}-started\n", encoding="utf-8")
+        target.chmod(0o755)
+    (bin_dir / "python").chmod(0o755)
+    return f"{bin_dir}:{os.environ['PATH']}"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("command", "requires_preflight"),
+    [
+        (
+            ["dagster-webserver", "-m", "kortravelmap.dagster.definitions"],
+            True,
+        ),
+        (
+            ["dagster-daemon", "run", "-m", "kortravelmap.dagster.definitions"],
+            True,
+        ),
+        (
+            ["sh", "-c", "dagster-webserver -m kortravelmap.dagster.definitions"],
+            True,
+        ),
+        (["dagster-daemon", "--help"], False),
+        (["ktm-dagster-storage", "migrate"], False),
+        (["sh", "-c", "echo dagster-webserver"], False),
+    ],
+)
+def test_dagster_entrypoint_preflights_only_actual_runtime_commands(
+    tmp_path: Path,
+    command: list[str],
+    *,
+    requires_preflight: bool,
+) -> None:
+    result = subprocess.run(
+        ["sh", "docker/dagster-entrypoint.sh", *command],
+        cwd=ROOT,
+        env={"PATH": _dagster_runtime_command_stub_path(tmp_path)},
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert ("runtime-preflight" in result.stdout) is requires_preflight
+
+
 @pytest.mark.unit
 def test_dagster_entrypoint_does_not_read_map_application_alembic() -> None:
     entrypoint = _script("docker/dagster-entrypoint.sh")
@@ -1808,6 +1953,15 @@ def test_external_overlays_keep_candidate_storage_migration_ordering(
         "KOR_TRAVEL_MAP_API_SERVICE_TOKEN": "resolver-dummy",
         "KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH": "resolver-dummy",
         "KOR_TRAVEL_MAP_UI_SESSION_SECRET": "resolver-dummy",
+        "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": "postgresql://migrator@example.invalid/ktm",
+        "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN": "postgresql://api@example.invalid/ktm",
+        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": "postgresql://dagster@example.invalid/ktm",
+        "KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL": (
+            "postgresql://metadata@example.invalid/ktm_dagster"
+        ),
+        "KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL": (
+            "postgresql://metadata@example.invalid/ktm_dagster"
+        ),
     }
     resolved = subprocess.run(
         [
@@ -1841,6 +1995,10 @@ def test_external_overlays_keep_candidate_storage_migration_ordering(
         assert "host.docker.internal=host-gateway" in migration["extra_hosts"]
     for name in ("dagster", "dagster-daemon"):
         depends = services[name].get("depends_on") or {}
+        # external DB/infra overlay는 ownership transfer bootstrap을 profile로
+        # 비활성화한다. 따라서 runtime은 운영자가 사전 provision한 전용 DB에만
+        # 연결하며, profile-disabled service를 readiness edge로 참조하지 않는다.
+        assert "db-role-bootstrap" not in depends, (overlay, name, depends)
         assert depends.get("dagster-storage-migrate", {}).get("condition") == (
             "service_completed_successfully"
         ), (overlay, name, depends)

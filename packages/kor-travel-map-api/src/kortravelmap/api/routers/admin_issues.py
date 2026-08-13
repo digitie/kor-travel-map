@@ -130,7 +130,9 @@ class AdminIssueFeatureSnapshot(BaseModel):
     sido_code: str | None = None
     sigungu_code: str | None = None
     road_address_management_no: str | None = None
-    status: str
+    lifecycle_state: Literal["active", "retired"]
+    publication_state: Literal["draft", "published", "suppressed"]
+    quality_state: Literal["valid", "quarantined"]
 
 
 class AdminIssueListData(BaseModel):
@@ -246,7 +248,9 @@ def _snapshot(row: FeatureAddressSnapshot | None) -> AdminIssueFeatureSnapshot |
         sido_code=row.sido_code,
         sigungu_code=row.sigungu_code,
         road_address_management_no=row.road_address_management_no,
-        status=row.status,
+        lifecycle_state=row.lifecycle_state,
+        publication_state=row.publication_state,
+        quality_state=row.quality_state,
     )
 
 

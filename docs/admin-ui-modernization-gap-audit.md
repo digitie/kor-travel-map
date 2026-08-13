@@ -27,7 +27,7 @@ T-211a의 완료 기준은 다음 두 가지다.
 
 | 파일 | 담당 계약 | 상태 |
 |------|-----------|------|
-| `src/api/features.ts` | `/features`, `/features/{feature_id}`, `/admin/features`, `/admin/features/{feature_id}/deactivate` | 기존 지도/상세 hook에 admin 목록/비활성화 mutation 추가 |
+| `src/api/features.ts` | `/features`, `/features/{feature_id}`, `/admin/features`, `/admin/features/{feature_id}/state`, `/state/reactivate`, `/state/transitions` | 기존 지도/상세 hook에 admin 3축 필터·상태 command·이력 조회를 추가 |
 | `src/api/importJobs.ts` | `/ops/import-jobs`, `/ops/import-jobs/{job_id}` | 신규. 화면 route가 admin navigation 아래여도 backend 정본은 `/ops` |
 | `src/api/ops.ts` | `/ops/metrics`, `/ops/consistency/reports`, `/ops/consistency/issues` | 신규. 홈/consistency 화면 공통 summary |
 | `src/api/dedup.ts` | `/admin/dedup-review`, `/admin/dedup-review/{review_id}` | 신규. 결정 mutation 후 feature/ops cache 무효화 |

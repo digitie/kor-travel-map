@@ -3,8 +3,8 @@ import * as F from "./_fixtures";
 
 // LIVE (non-mock) e2e for /admin/features against prod 실데이터(1.09M features).
 // Read-only only: page.goto, read assertions, and clicks restricted to nav links,
-// filter chips/selects (kind/status/sort/page-size/order), pagination 다음/이전,
-// and typing into the GET-only search box. No deactivate/refresh/submit/POST.
+// filter chips/selects (kind/3축/sort/page-size/order), pagination 다음/이전,
+// and typing into the GET-only search box. No state mutation/refresh/submit/POST.
 //
 // Selectors/headings/route are reused verbatim from the mocked depth spec
 // (e2e/features-list.spec.ts) and admin-features-client.tsx:
@@ -13,7 +13,7 @@ import * as F from "./_fixtures";
 //   nav link              getByRole("link", { name: "Feature 목록" })
 //   search input          getByLabel("feature search")
 //   kind select           getByLabel("feature kind")     all + FEATURE_KINDS
-//   status select         getByLabel("feature status")   all + FEATURE_STATUSES
+//   state selects         getByLabel("feature lifecycle state" | publication | quality)
 //   has issue select      getByLabel("has issue")        all/yes/no
 //   sort select           getByLabel("feature sort")
 //   page size select      getByLabel("feature page size")
@@ -29,13 +29,18 @@ const ROUTE = "/admin/features";
 const HEADING = "Feature 목록";
 const READY = { timeout: 15000 } as const;
 
-// Page-level statuses available in the "feature status" select (admin-features-client).
-const STATUS_FILTERS = [
-  "active",
-  "inactive",
-  "hidden",
-  "broken",
-  "deleted",
+const LIFECYCLE_STATES = ["active", "retired"] as const;
+const PUBLICATION_STATES = ["draft", "published", "suppressed"] as const;
+const QUALITY_STATES = ["valid", "quarantined"] as const;
+const STATE_TUPLES = [
+  ["active", "draft", "valid"],
+  ["active", "draft", "quarantined"],
+  ["active", "published", "valid"],
+  ["active", "published", "quarantined"],
+  ["active", "suppressed", "valid"],
+  ["active", "suppressed", "quarantined"],
+  ["retired", "suppressed", "valid"],
+  ["retired", "suppressed", "quarantined"],
 ] as const;
 // Sort fields available in the "feature sort" select.
 const SORT_FIELDS = [
@@ -43,7 +48,6 @@ const SORT_FIELDS = [
   "updated_at",
   "created_at",
   "kind",
-  "status",
   "provider",
   "issue_count",
 ] as const;
@@ -84,7 +88,11 @@ test.describe("admin/features live — page load + landmarks", () => {
     await expectListReady(page);
     await expect(page.getByLabel("feature search")).toBeVisible(READY);
     await expect(page.getByLabel("feature kind")).toBeVisible(READY);
-    await expect(page.getByLabel("feature status")).toBeVisible(READY);
+    await expect(page.getByLabel("feature lifecycle state")).toBeVisible(READY);
+    await expect(page.getByLabel("feature publication state")).toBeVisible(
+      READY,
+    );
+    await expect(page.getByLabel("feature quality state")).toBeVisible(READY);
     await expect(page.getByLabel("has issue")).toBeVisible(READY);
     await expect(page.getByLabel("feature sort")).toBeVisible(READY);
     await expect(page.getByLabel("feature page size")).toBeVisible(READY);
@@ -196,37 +204,38 @@ test.describe("admin/features live — kind filter chips", () => {
   }
 });
 
-test.describe("admin/features live — status filter", () => {
-  for (const status of STATUS_FILTERS) {
-    test(`status="${status}" filter keeps container visible`, async ({
-      page,
-    }) => {
-      await page.goto(ROUTE);
-      await expectListReady(page);
-      await page.getByLabel("feature status").selectOption(status);
-      await expect(page.getByLabel("feature status")).toHaveValue(status);
-      await expect(page.getByRole("table")).toBeVisible(READY);
-    });
-  }
+test.describe("admin/features live — three-axis filters", () => {
+  const axes = [
+    ["feature lifecycle state", LIFECYCLE_STATES],
+    ["feature publication state", PUBLICATION_STATES],
+    ["feature quality state", QUALITY_STATES],
+  ] as const;
 
-  test('status="all" shows union of statuses', async ({ page }) => {
-    await page.goto(ROUTE);
-    await expectListReady(page);
-    await page.getByLabel("feature status").selectOption("all");
-    await expect(page.getByLabel("feature status")).toHaveValue("all");
-    await expect(page.getByRole("table")).toBeVisible(READY);
-  });
-
-  for (const vp of VIEWPORTS) {
-    for (const status of STATUS_FILTERS) {
-      test(`status="${status}" at ${vp.name}`, async ({ page }) => {
-        await page.setViewportSize({ width: vp.width, height: vp.height });
+  for (const [label, values] of axes) {
+    for (const value of values) {
+      test(`${label}="${value}" filter keeps container visible`, async ({
+        page,
+      }) => {
         await page.goto(ROUTE);
         await expectListReady(page);
-        await page.getByLabel("feature status").selectOption(status);
+        await page.getByLabel(label).selectOption(value);
+        await expect(page.getByLabel(label)).toHaveValue(value);
         await expect(page.getByRole("table")).toBeVisible(READY);
       });
     }
+  }
+
+  for (const vp of VIEWPORTS) {
+    test(`retired/suppressed tuple at ${vp.name}`, async ({ page }) => {
+      await page.setViewportSize({ width: vp.width, height: vp.height });
+      await page.goto(ROUTE);
+      await expectListReady(page);
+      await page.getByLabel("feature lifecycle state").selectOption("retired");
+      await page
+        .getByLabel("feature publication state")
+        .selectOption("suppressed");
+      await expect(page.getByRole("table")).toBeVisible(READY);
+    });
   }
 });
 
@@ -339,9 +348,14 @@ test.describe("admin/features live — deeplink query params (read-only goto)", 
     });
   }
 
-  for (const status of STATUS_FILTERS) {
-    test(`deeplink ?status=${status} loads list`, async ({ page }) => {
-      await page.goto(`${ROUTE}?status=${encodeURIComponent(status)}`);
+  for (const [lifecycle, publication, quality] of STATE_TUPLES) {
+    test(`three-axis deeplink ${lifecycle}/${publication}/${quality} loads list`, async ({ page }) => {
+      const query = new URLSearchParams({
+        lifecycle_state: lifecycle,
+        publication_state: publication,
+        quality_state: quality,
+      });
+      await page.goto(`${ROUTE}?${query.toString()}`);
       await expectListReady(page);
     });
   }
@@ -390,14 +404,26 @@ test.describe("admin/features live — pagination (다음 / 첫 페이지)", () 
 });
 
 test.describe("admin/features live — combined filter matrix", () => {
-  for (const status of STATUS_FILTERS) {
+  for (const [lifecycle, publication, quality] of STATE_TUPLES) {
     for (const kind of KINDS.slice(0, 5)) {
-      test(`status="${status}" × kind="${kind}"`, async ({ page }) => {
+      test(`${lifecycle}/${publication}/${quality} × kind="${kind}"`, async ({ page }) => {
         await page.goto(ROUTE);
         await expectListReady(page);
-        await page.getByLabel("feature status").selectOption(status);
+        await page.getByLabel("feature lifecycle state").selectOption(lifecycle);
+        await page
+          .getByLabel("feature publication state")
+          .selectOption(publication);
+        await page.getByLabel("feature quality state").selectOption(quality);
         await page.getByLabel("feature kind").selectOption(kind);
-        await expect(page.getByLabel("feature status")).toHaveValue(status);
+        await expect(page.getByLabel("feature lifecycle state")).toHaveValue(
+          lifecycle,
+        );
+        await expect(page.getByLabel("feature publication state")).toHaveValue(
+          publication,
+        );
+        await expect(page.getByLabel("feature quality state")).toHaveValue(
+          quality,
+        );
         await expect(page.getByLabel("feature kind")).toHaveValue(kind);
         await expect(page.getByRole("table")).toBeVisible(READY);
       });

@@ -1,7 +1,7 @@
 {
   "artifact": "expected-rejections-v1",
   "owner": "T-VN-31C",
-  "description": "violation-fixtures-v1.sql 각 case의 기대 SQLSTATE와 제약명. target-schema-v1.sql 제약이 위반 fixture를 DB에서 거부함을 executable contract로 고정한다 (보고서 §8.1). 3축 불가능 조합 case는 CHECK 정의 자체가 미정(T-VN-34A 소관)이라 없다 — 구현이 CHECK를 확정하는 PR에서 fixture와 함께 추가한다.",
+  "description": "violation-fixtures-v1.sql 각 case의 기대 SQLSTATE와 제약명. target-schema-v1.sql 제약이 위반 fixture를 DB에서 거부함을 executable contract로 고정한다 (보고서 §8.1). T-VN-34A는 3축 불가능 조합과 provider_sync 감사의 dataset/entity/record/authoritative receipt 결손을 각각 CHECK로 거부한다.",
   "cases": {
     "alias_duplicate": {
       "sqlstate": "23505",
@@ -212,6 +212,61 @@
       "sqlstate": "23514",
       "constraint": "ck_current_weather_summary_refresh_after",
       "basis": "ADR-089"
+    },
+    "feature_state_retired_draft_valid": {
+      "sqlstate": "23514",
+      "constraint": "ck_features_state_tuple",
+      "basis": "ADR-090"
+    },
+    "feature_state_retired_draft_quarantined": {
+      "sqlstate": "23514",
+      "constraint": "ck_features_state_tuple",
+      "basis": "ADR-090"
+    },
+    "feature_state_retired_published_valid": {
+      "sqlstate": "23514",
+      "constraint": "ck_features_state_tuple",
+      "basis": "ADR-090"
+    },
+    "feature_state_retired_published_quarantined": {
+      "sqlstate": "23514",
+      "constraint": "ck_features_state_tuple",
+      "basis": "ADR-090"
+    },
+    "feature_state_invalid_lifecycle_domain": {
+      "sqlstate": "23514",
+      "constraint": "ck_features_lifecycle_state",
+      "basis": "ADR-090"
+    },
+    "feature_state_audit_append_only": {
+      "sqlstate": "42501",
+      "constraint": "ck_feature_state_transitions_append_only",
+      "basis": "ADR-090"
+    },
+    "feature_state_provider_provenance_missing": {
+      "sqlstate": "23514",
+      "constraint": "ck_feature_state_transitions_provider_provenance",
+      "basis": "ADR-090"
+    },
+    "feature_state_provider_receipt_caller_supplied": {
+      "sqlstate": "23514",
+      "constraint": "ck_feature_state_transition_context",
+      "basis": "ADR-090"
+    },
+    "feature_state_causation_ref_non_scalar": {
+      "sqlstate": "23514",
+      "constraint": "ck_feature_state_transition_context",
+      "basis": "ADR-090"
+    },
+    "feature_route_public_ready_direct_update": {
+      "sqlstate": "42501",
+      "constraint": "feature_routes",
+      "basis": "ADR-090"
+    },
+    "feature_area_public_ready_direct_update": {
+      "sqlstate": "42501",
+      "constraint": "feature_areas",
+      "basis": "ADR-090"
     }
   }
 }

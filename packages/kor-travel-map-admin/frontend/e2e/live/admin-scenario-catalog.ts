@@ -49,13 +49,15 @@ const VIEWPORTS = [
   "mobile-390",
 ] as const;
 const ORDERS = ["asc", "desc"] as const;
-const FEATURE_STATUSES = [
-  "all",
-  "active",
-  "inactive",
-  "hidden",
-  "broken",
-  "deleted",
+const FEATURE_STATE_TUPLES = [
+  ["active", "draft", "valid"],
+  ["active", "draft", "quarantined"],
+  ["active", "published", "valid"],
+  ["active", "published", "quarantined"],
+  ["active", "suppressed", "valid"],
+  ["active", "suppressed", "quarantined"],
+  ["retired", "suppressed", "valid"],
+  ["retired", "suppressed", "quarantined"],
 ] as const;
 const LOG_TABS = ["system", "api"] as const;
 const LOG_LEVELS = ["all", "info", "warning", "error"] as const;
@@ -175,11 +177,14 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     readApis: [
       "/v1/admin/features",
       "/v1/admin/features/{feature_id}",
+      "/v1/admin/features/{feature_id}/revision",
+      "/v1/admin/features/{feature_id}/state/transitions",
       "/v1/features/{feature_id}",
       "/v1/ops/datasets",
     ],
     writeApis: [
-      writeApi("POST", "/v1/admin/features/{feature_id}/deactivate"),
+      writeApi("PATCH", "/v1/admin/features/{feature_id}/state"),
+      writeApi("POST", "/v1/admin/features/{feature_id}/state/reactivate"),
       writeApi("PATCH", "/v1/admin/features/{feature_id}"),
       writeApi("DELETE", "/v1/admin/features/{feature_id}", "destructive"),
     ],
@@ -475,17 +480,19 @@ export function buildAdminLiveScenarioCatalog(): AdminLiveScenario[] {
 
   for (const term of searchTerms) {
     for (const kind of kinds) {
-      for (const status of FEATURE_STATUSES) {
+      for (const [lifecycle, publication, quality] of FEATURE_STATE_TUPLES) {
         for (const size of pageSizes) {
           for (const order of ORDERS) {
             addScenario(scenarios, {
               apiExpectation:
-                "/v1/admin/features q/kind/status/page_size/order query",
+                "/v1/admin/features q/kind/lifecycle_state/publication_state/quality_state/page_size/order query",
               idParts: [
                 "admin-features",
                 term,
                 kind,
-                status,
+                lifecycle,
+                publication,
+                quality,
                 String(size),
                 order,
               ],
@@ -494,7 +501,7 @@ export function buildAdminLiveScenarioCatalog(): AdminLiveScenario[] {
               risk: "cross_surface",
               route: "/admin/features",
               surface: "admin-features",
-              uiAction: `search=${term}, kind=${kind}, status=${status}, size=${size}, order=${order}`,
+              uiAction: `search=${term}, kind=${kind}, lifecycle=${lifecycle}, publication=${publication}, quality=${quality}, size=${size}, order=${order}`,
             });
           }
         }

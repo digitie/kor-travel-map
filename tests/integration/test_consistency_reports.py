@@ -781,10 +781,17 @@ async def test_f8_warns_for_feature_file_metadata_and_object_snapshot_mismatch(
     migrated_session: AsyncSession,
 ) -> None:
     active_feature = await _add_clean_place(migrated_session, "f8-active")
-    deleted_feature = await _add_clean_place(migrated_session, "f8-deleted")
-    deleted_feature.deleted_at = datetime.now(UTC)
+    retired_feature = await _add_clean_place(migrated_session, "f8-retired")
+    # T-VN-34(ADR-090): F8이 묻는 것은 "이 첨부의 주인이 아직 살아 있는가"이고,
+    # 3축에서 그 술어는 ``lifecycle_state <> 'active'``다(0095 backfill이
+    # ``deleted_at IS NOT NULL`` → ``retired``로 옮긴 그 축). 그래서 soft delete
+    # 시각을 찍는 대신 lifecycle 축을 내린다 — 시각은 F8의 판정에 쓰이지 않는다.
+    # ``ck_features_state_tuple``이 "retired면 publication은 반드시 suppressed"를
+    # 강제하므로 두 축을 함께 옮겨야 행이 저장된다.
+    retired_feature.lifecycle_state = "retired"
+    retired_feature.publication_state = "suppressed"
     migrated_session.add(active_feature)
-    migrated_session.add(deleted_feature)
+    migrated_session.add(retired_feature)
     await migrated_session.flush()
     await migrated_session.execute(
         text(
@@ -807,8 +814,8 @@ async def test_f8_warns_for_feature_file_metadata_and_object_snapshot_mismatch(
             "VALUES "
             "('f8-missing-object', 'f8-active', 'image', 's3', 'kor-travel-map', "
             " 'missing-object.jpg', 'gallery'), "
-            "('f8-deleted-feature', 'f8-deleted', 'image', 's3', 'kor-travel-map', "
-            " 'deleted-feature.jpg', 'gallery')"
+            "('f8-retired-feature', 'f8-retired', 'image', 's3', 'kor-travel-map', "
+            " 'retired-feature.jpg', 'gallery')"
         )
     )
     await migrated_session.flush()
@@ -817,10 +824,12 @@ async def test_f8_warns_for_feature_file_metadata_and_object_snapshot_mismatch(
         migrated_session,
         persist=False,
         known_file_objects=[
+            # 객체는 저장소에 남아 있지만 주인 feature가 retired다 →
+            # ``metadata_without_active_feature`` 한 축만 걸리는 표본.
             FileObjectRef(
                 storage_backend="s3",
                 bucket="kor-travel-map",
-                object_key="deleted-feature.jpg",
+                object_key="retired-feature.jpg",
             ),
             FileObjectRef(
                 storage_backend="s3",

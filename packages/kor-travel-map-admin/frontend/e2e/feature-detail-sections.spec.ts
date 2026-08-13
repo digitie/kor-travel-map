@@ -76,7 +76,9 @@ function makeFeature(
     row_revision: 3,
     sido_code: "11",
     sigungu_code: "11560",
-    status: "active",
+    lifecycle_state: "active",
+    publication_state: "published",
+    quality_state: "valid",
     updated_at: "2026-06-08T00:00:00.000Z",
     urls: { homepage: "https://example.test" },
     ...overrides,
@@ -273,7 +275,6 @@ function makeNearby(
     lat: 37.527,
     lon: 126.924,
     name: "인근 카페",
-    status: "active",
     ...overrides,
   };
 }
@@ -312,6 +313,7 @@ function makeDetailData(
     issues: [],
     overrides: [],
     sources: [],
+    state_transitions: [],
     versions: [],
     ...partial,
   };
@@ -403,7 +405,11 @@ async function mockFeatureDetail(
     if (request.method() === "GET" && pathname.endsWith("/weather")) {
       counters.weather += 1;
       if (options.weatherStatus && options.weatherStatus >= 400) {
-        await fulfillJson(route, { detail: "weather 조회 실패" }, options.weatherStatus);
+        await fulfillJson(
+          route,
+          { detail: "weather 조회 실패" },
+          options.weatherStatus,
+        );
         return;
       }
       await fulfillJson(route, makeWeatherResponse(options.weather));
@@ -425,7 +431,11 @@ async function mockFeatureDetail(
     if (request.method() === "GET" && pathname === NEARBY_PATH) {
       counters.nearby += 1;
       if (options.nearbyStatus && options.nearbyStatus >= 400) {
-        await fulfillJson(route, { detail: "nearby 조회 실패" }, options.nearbyStatus);
+        await fulfillJson(
+          route,
+          { detail: "nearby 조회 실패" },
+          options.nearbyStatus,
+        );
         return;
       }
       await fulfillJson(route, makeNearbyResponse(nearby));
@@ -463,7 +473,13 @@ test.describe("/features/[featureId] 섹션 깊이", () => {
       detailView.locator("section").filter({ hasText: title }).first();
 
     // 섹션 타이틀 — detail-view scope 안에서만(헤더 nav 동명 링크와 분리).
-    for (const section of ["Sources", "큐레이션", "Issues", "Overrides", "Files"]) {
+    for (const section of [
+      "Sources",
+      "큐레이션",
+      "Issues",
+      "Overrides",
+      "Files",
+    ]) {
       await expect(sectionScope(section)).toBeVisible();
     }
 
@@ -483,12 +499,18 @@ test.describe("/features/[featureId] 섹션 깊이", () => {
     ];
     for (const [column, section] of sectionColumns) {
       await expect(
-        sectionScope(section).getByRole("columnheader", { name: column, exact: true }),
+        sectionScope(section).getByRole("columnheader", {
+          name: column,
+          exact: true,
+        }),
       ).toBeVisible();
     }
     // Issues type 컬럼 헤더(violation_type가 아니라 헤더 텍스트 "type").
     await expect(
-      sectionScope("Issues").getByRole("columnheader", { name: "type", exact: true }),
+      sectionScope("Issues").getByRole("columnheader", {
+        name: "type",
+        exact: true,
+      }),
     ).toBeVisible();
 
     // 채운 행의 식별 셀 값.
@@ -504,13 +526,21 @@ test.describe("/features/[featureId] 섹션 깊이", () => {
 
     const curationSection = sectionScope("큐레이션");
     await curationSection.getByText("전체 정보").click();
-    await expect(curationSection.getByText(new RegExp(CURATION_COLLECTION_KEY))).toBeVisible();
-    await expect(curationSection.getByText(new RegExp(CURATION_METADATA_MARKER))).toBeVisible();
-    await expect(curationSection.getByText("manual_review", { exact: true })).toBeVisible();
+    await expect(
+      curationSection.getByText(new RegExp(CURATION_COLLECTION_KEY)),
+    ).toBeVisible();
+    await expect(
+      curationSection.getByText(new RegExp(CURATION_METADATA_MARKER)),
+    ).toBeVisible();
+    await expect(
+      curationSection.getByText("manual_review", { exact: true }),
+    ).toBeVisible();
 
     const sourcesSection = sectionScope("Sources");
     await sourcesSection.locator("summary").first().click();
-    await expect(sourcesSection.getByText(new RegExp("hash-source-001"))).toBeVisible();
+    await expect(
+      sourcesSection.getByText(new RegExp("hash-source-001")),
+    ).toBeVisible();
 
     // 모든 표가 비어있지 않으므로 EMPTY_MESSAGE는 0건.
     await expect(detailView.getByText("데이터가 없습니다.")).toHaveCount(0);
@@ -528,7 +558,9 @@ test.describe("/features/[featureId] 섹션 깊이", () => {
     await page.goto(`/features/${FEATURE_ID}`);
 
     const detailView = page.getByTestId("feature-detail-view");
-    await expect(detailView.getByText("History", { exact: true })).toBeVisible();
+    await expect(
+      detailView.getByText("History", { exact: true }),
+    ).toBeVisible();
 
     // version 테이블 고유 헤더 + change-request 테이블 고유 헤더.
     for (const column of ["version", "origin", "change", "request", "action"]) {
@@ -538,15 +570,23 @@ test.describe("/features/[featureId] 섹션 깊이", () => {
     }
 
     // version row: version 번호(font-mono) + origin 값.
-    await expect(detailView.getByText("3", { exact: true }).first()).toBeVisible();
-    await expect(detailView.getByText("provider", { exact: true }).first()).toBeVisible();
+    await expect(
+      detailView.getByText("3", { exact: true }).first(),
+    ).toBeVisible();
+    await expect(
+      detailView.getByText("provider", { exact: true }).first(),
+    ).toBeVisible();
 
     // change_requests row: shortId(request_id, 12) — "creq-section" (12자) + action.
     await expect(detailView.getByText("creq-section")).toBeVisible();
-    await expect(detailView.getByText("update", { exact: true }).first()).toBeVisible();
+    await expect(
+      detailView.getByText("update", { exact: true }).first(),
+    ).toBeVisible();
 
     // Section 카운트 배지 = versions.length(1) + change_requests.length(1) = 2.
-    await expect(detailView.getByText("2", { exact: true }).first()).toBeVisible();
+    await expect(
+      detailView.getByText("2", { exact: true }).first(),
+    ).toBeVisible();
   });
 
   test("Nearby — self 제외 + distance 라벨 km/m 포맷 + 카운트 배지", async ({
@@ -628,14 +668,18 @@ test.describe("/features/[featureId] 섹션 깊이", () => {
     const panel = page.getByTestId("feature-weather-panel");
     await expect(panel).toBeVisible();
     await expect(panel.getByText("Weather")).toBeVisible();
-    await expect(panel.getByText("날씨 정보와 최근 업데이트 시간")).toBeVisible();
+    await expect(
+      panel.getByText("날씨 정보와 최근 업데이트 시간"),
+    ).toBeVisible();
 
     // is_stale=true → 배지 텍스트 "stale"(fresh 아님).
     await expect(panel.getByText("stale")).toBeVisible();
     await expect(panel.getByText("fresh")).toHaveCount(0);
 
     // dl 라벨 + source_styles outline 배지(패널 scope에서 헤더 동명 라벨과 분리).
-    await expect(panel.getByText("최근 업데이트", { exact: true })).toBeVisible();
+    await expect(
+      panel.getByText("최근 업데이트", { exact: true }),
+    ).toBeVisible();
     await expect(panel.getByText("선정 시각", { exact: true })).toBeVisible();
     await expect(panel.getByText("다음 갱신", { exact: true })).toBeVisible();
     await expect(panel.getByText("styles", { exact: true })).toBeVisible();
@@ -657,7 +701,9 @@ test.describe("/features/[featureId] 섹션 깊이", () => {
     await expect(panel.getByText("weather metric이 없습니다.")).toHaveCount(0);
   });
 
-  test("Weather 호출 실패 — 패널 내부 alert + 페이지 잔존", async ({ page }) => {
+  test("Weather 호출 실패 — 패널 내부 alert + 페이지 잔존", async ({
+    page,
+  }) => {
     await mockFeatureDetail(page, {
       data: makeDetailData({ feature: makeFeature({ kind: "weather" }) }),
       weatherStatus: 500,
@@ -724,7 +770,9 @@ test.describe("/features/[featureId] 섹션 깊이", () => {
     }
 
     // detail disclosure는 <details open> — 기본으로 JSON(<pre>) 값이 보인다.
-    await expect(detailView.getByText(new RegExp(RAW_DETAIL_MARKER))).toBeVisible();
+    await expect(
+      detailView.getByText(new RegExp(RAW_DETAIL_MARKER)),
+    ).toBeVisible();
 
     // raw_refs는 닫혀 있어 처음엔 값이 숨겨져 있고, summary click 후 보인다.
     const rawRefsValue = detailView.getByText(new RegExp(RAW_REFS_MARKER));

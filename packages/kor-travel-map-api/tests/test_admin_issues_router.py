@@ -146,7 +146,9 @@ def _snapshot(
         sido_code="11",
         sigungu_code="11560",
         road_address_management_no=None,
-        status="active",
+        lifecycle_state="active",
+        publication_state="published",
+        quality_state="valid",
     )
 
 

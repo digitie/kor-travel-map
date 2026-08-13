@@ -14,7 +14,9 @@ from kortravelmap.dto import (
     EventDetail,
     Feature,
     FeatureKind,
-    FeatureStatus,
+    FeatureLifecycleState,
+    FeaturePublicationState,
+    FeatureQualityState,
     NoticeDetail,
     PlaceDetail,
     RouteDetail,
@@ -80,8 +82,29 @@ def test_feature_basic_place() -> None:
     feature = _make_place_feature()
     assert feature.feature_id == "place:test001"
     assert feature.kind == FeatureKind.PLACE
-    assert feature.status == FeatureStatus.ACTIVE
+    assert feature.lifecycle_state == FeatureLifecycleState.ACTIVE
+    assert feature.publication_state == FeaturePublicationState.PUBLISHED
+    assert feature.quality_state == FeatureQualityState.VALID
     assert feature.created_at.tzinfo is not None  # KST aware
+
+
+@pytest.mark.unit
+def test_feature_rejects_legacy_status_and_delete_timestamp() -> None:
+    """C cutover 뒤 provider DTO에는 legacy 상태 입력을 허용하지 않는다."""
+    with pytest.raises(ValidationError, match="status"):
+        _make_place_feature(status="active")
+    with pytest.raises(ValidationError, match="deleted_at"):
+        _make_place_feature(deleted_at=datetime.now(UTC))
+
+
+@pytest.mark.unit
+def test_feature_rejects_retired_with_non_suppressed_publication() -> None:
+    """DTO도 DB 3축 legality를 미리 차단한다."""
+    with pytest.raises(ValidationError, match="retired lifecycle_state"):
+        _make_place_feature(
+            lifecycle_state=FeatureLifecycleState.RETIRED,
+            publication_state=FeaturePublicationState.PUBLISHED,
+        )
 
 
 @pytest.mark.unit

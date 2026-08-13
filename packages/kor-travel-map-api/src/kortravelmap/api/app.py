@@ -32,8 +32,10 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from kortravelmap.core.exceptions import GeoAuthNotConfiguredError, GeoRequestError
 from kortravelmap.infra import CacheTargetStreamConflict
+from kortravelmap.infra.db import assert_runtime_db_privilege_boundary
 from kortravelmap.infra.feature_subtype import SubtypeDetailError
 from kortravelmap.infra.log_repo import record_api_call
+from kortravelmap.settings import KorTravelMapSettings
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import JSONResponse, Response
 
@@ -593,6 +595,14 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        core_settings = KorTravelMapSettings()
+        if core_settings.runtime_db_preflight_required:
+            from kortravelmap.api.db import get_engine
+
+            await assert_runtime_db_privilege_boundary(
+                await get_engine(),
+                expected_login="ktm_feature_api_runtime",
+            )
         try:
             yield
         finally:

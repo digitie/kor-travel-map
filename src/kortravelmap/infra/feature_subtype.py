@@ -10,8 +10,8 @@
 -------------------------------
 
 - subtype이 kind별 값의 **유일한 정본**이다. core ``detail``은 0086에서
-  제거됐고, 응답용 ``detail``은 ``feature.features_detailed`` 뷰가 subtype에서
-  조립한다. writer는 subtype에만 쓴다 — 이중 쓰기도, drift도 없다.
+  제거됐고, non-public reader는 core와 subtype을 직접 조립한다. writer는
+  subtype에만 쓴다 — 이중 쓰기도, drift도 없다.
 - 배타 arc(kind 상수 CHECK + ``(feature_id, kind)`` 복합 FK)가 "한 feature는
   최대 한 subtype" 과 "subtype이 있는 동안 core kind 불변"을 DB에서 강제한다.
 - price/weather는 subtype이 없다(detail이 비어 있고 값 정본은 별도 테이블).

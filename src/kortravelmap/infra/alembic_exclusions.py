@@ -22,10 +22,12 @@ UNMAPPED_APP_TABLES = frozenset(
     }
 )
 
-UNCOMPARED_INDEXES = frozenset(
-    {
-        ("feature", "idx_features_dedup_refresh_keyset"),
-    }
-)
+# T-VN-34(0096/0097): 마지막 항목이던 ``idx_features_dedup_refresh_keyset``이
+# 사라졌다. 0096이 ``idx_features_updated_keyset``을 같은 정렬축 + 3축 술어
+# partial index로 다시 만들어 이 index의 역할을 흡수했고, 그 후속 index는
+# ORM이 선언하므로 비교 대상이다 — 제외할 app-owned index가 더는 없다.
+# 비어 있어도 ledger는 유지한다: env.py와 계약 테스트가 이 집합을 함께 읽어
+# "계약 없는 새 제외 항목"을 계속 막는다.
+UNCOMPARED_INDEXES: frozenset[tuple[str, str]] = frozenset()
 
 __all__ = ["UNCOMPARED_INDEXES", "UNMAPPED_APP_TABLES"]

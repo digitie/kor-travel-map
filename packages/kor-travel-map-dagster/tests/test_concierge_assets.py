@@ -22,7 +22,7 @@ from kortravelmap.dagster.assets import run_feature_place_kor_travel_concierge_y
 class _FakeConciergeClient:
     def __init__(self) -> None:
         self.loaded_bundles: list[Any] = []
-        self.inactivate_calls: list[dict[str, Any]] = []
+        self.retire_calls: list[dict[str, Any]] = []
 
     async def load_feature_bundles(self, bundles: Any) -> FeatureLoadResult:
         materialized = list(bundles)
@@ -32,7 +32,7 @@ class _FakeConciergeClient:
             features_inserted=len(materialized),
         )
 
-    async def inactivate_features_by_source(
+    async def retire_features_by_source(
         self,
         *,
         provider: str,
@@ -40,7 +40,7 @@ class _FakeConciergeClient:
         source_entity_type: str,
         source_entity_ids: set[str],
     ) -> int:
-        self.inactivate_calls.append(
+        self.retire_calls.append(
             {
                 "provider": provider,
                 "dataset_key": dataset_key,
@@ -143,7 +143,7 @@ async def test_concierge_asset_revert_mid_run_keeps_latest_upsert() -> None:
     assert result.load.bundles_total == 1
     [bundle] = client.loaded_bundles
     assert bundle.source_record.source_entity_id == "9201"
-    assert client.inactivate_calls == []
+    assert client.retire_calls == []
 
 
 async def test_concierge_asset_removal_mid_run_inactivates_latest_tombstone() -> None:
@@ -158,7 +158,7 @@ async def test_concierge_asset_removal_mid_run_inactivates_latest_tombstone() ->
 
     assert result.load.bundles_total == 0
     assert client.loaded_bundles == []
-    [call] = client.inactivate_calls
+    [call] = client.retire_calls
     assert call["provider"] == "kor-travel-concierge-youtube"
     assert call["dataset_key"] == "youtube_place_candidates"
     assert call["source_entity_type"] == "extracted_place_candidate"

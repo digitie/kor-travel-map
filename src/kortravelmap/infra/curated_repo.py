@@ -17,6 +17,10 @@ from typing import TYPE_CHECKING, Any, Final, Literal
 
 from sqlalchemy import text
 
+from kortravelmap.infra.feature_projection import (
+    TYPED_FEATURE_DETAIL_COLUMNS_SQL,
+    typed_feature_detail_joins_sql,
+)
 from kortravelmap.infra.feature_repo import public_active_notice_filter_sql
 
 if TYPE_CHECKING:
@@ -372,7 +376,7 @@ _FEATURE_COLUMNS: Final[str] = """
     f.sigungu_code,
     f.legal_dong_code,
     f.address,
-    f.detail,
+    typed.detail,
     cf.source_id::text AS source_id,
     s.provider_dataset_id,
     pd.provider,
@@ -402,16 +406,19 @@ _FEATURE_COLUMNS: Final[str] = """
 # 비공개(draft/broken/hidden/inactive/soft-deleted) feature의 큐레이션 노출을 막는다
 # (T-VN-04, F-1). admin read는 기존대로 base table을 조인해 전 상태를 본다 —
 # 상태 sweep(``sweep_curated_feature_status``) 사이 창에서도 공개 read가 새지 않는다.
-# T-VN-35(0086): 응답이 ``f.detail``을 담으므로 base table이 아니라 subtype을
-# 조립하는 ``features_detailed``를 조인한다(public 쪽 ``public_features``는
-# 이미 같은 뷰 위에 서 있어 두 경로의 detail 조립 규칙이 하나로 유지된다).
-_FEATURE_FROM_SQL: Final[str] = """
+# admin reader는 core와 모든 typed subtype을 직접 LEFT JOIN해 detail을 조립한다.
+# public reader도 같은 ``typed`` alias를 제공해 두 select의 projection을 공유한다.
+_FEATURE_FROM_SQL: Final[str] = f"""
 FROM feature.curated_features AS cf
 JOIN feature.curated_themes AS t ON t.theme_id = cf.theme_id
 JOIN feature.curated_sources AS s ON s.source_id = cf.source_id
 JOIN provider_sync.provider_datasets AS pd
   ON pd.provider_dataset_id = s.provider_dataset_id
-JOIN feature.features_detailed AS f ON f.feature_id = cf.feature_id
+JOIN feature.features AS f ON f.feature_id = cf.feature_id
+{typed_feature_detail_joins_sql()}
+CROSS JOIN LATERAL (
+    SELECT {TYPED_FEATURE_DETAIL_COLUMNS_SQL}
+) AS typed
 """
 
 _PUBLIC_FEATURE_FROM_SQL: Final[str] = """
@@ -421,6 +428,7 @@ JOIN feature.curated_sources AS s ON s.source_id = cf.source_id
 JOIN provider_sync.provider_datasets AS pd
   ON pd.provider_dataset_id = s.provider_dataset_id
 JOIN feature.public_features AS f ON f.feature_id = cf.feature_id
+CROSS JOIN LATERAL (SELECT f.detail) AS typed
 """
 
 _PUBLIC_FEATURE_FILTERS_SQL: Final[str] = (
@@ -650,7 +658,8 @@ WHERE curated_feature_id = CAST(:curated_feature_id AS uuid)
 RETURNING curated_feature_id::text
 """
 
-_APPLY_RULE_SQL: Final[str] = """
+_APPLY_RULE_SQL: Final[str] = (
+    """
 WITH rule AS (
     SELECT
         r.rule_id,
@@ -685,7 +694,7 @@ candidates AS MATERIALIZED (
         rule.relation,
         rule.reuse_policy,
         f.feature_id,
-        f.detail AS feature_detail,
+        typed.detail AS feature_detail,
         pd.provider,
         pd.dataset_key,
         sr.source_record_key
@@ -702,21 +711,23 @@ candidates AS MATERIALIZED (
      AND sr.source_record_key = head.current_source_record_key
     JOIN provider_sync.source_links AS sl
       ON sl.source_entity_key = se.source_entity_key
-    -- curation source rule은 임의 JSON 경로(``rule.detail_selector``)와
-    -- ``payload``/``facility_info`` 하위를 탐침한다 — typed 컬럼으로 내릴 수
-    -- 없는 본질적 JSONB이므로 조립 뷰를 읽는다(T-VN-35). 잠금은 아래
-    -- ``locked_candidates``가 base table에 그대로 건다(뷰는 FOR KEY SHARE 불가).
-    JOIN feature.features_detailed AS f ON f.feature_id = sl.feature_id
-    LEFT JOIN feature.feature_places AS fp ON fp.feature_id = f.feature_id
-    LEFT JOIN feature.feature_events AS fe ON fe.feature_id = f.feature_id
-    WHERE f.deleted_at IS NULL
-      AND f.status = 'active'
+    JOIN feature.features AS f ON f.feature_id = sl.feature_id
+    __TYPED_FEATURE_JOINS__
+    CROSS JOIN LATERAL (
+        SELECT __TYPED_FEATURE_DETAIL_COLUMNS__
+    ) AS typed
+    -- legacy `status = 'active'`의 3축 등가물은 세 축 전부다(0095 backfill:
+    -- draft→draft / hidden→suppressed / broken→quarantined). publication을 빼면
+    -- draft·suppressed feature가 큐레이션 후보로 올라온다.
+    WHERE f.lifecycle_state = 'active'
+      AND f.publication_state = 'published'
+      AND f.quality_state = 'valid'
       AND (
         rule.place_kind IS NULL
         -- kind 판정은 typed 컬럼에서 한다 — 조립 detail을 술어로 읽으면
         -- planner가 뷰의 subtype LEFT JOIN을 제거하지 못한다(T-VN-35).
-        OR fp.place_kind = rule.place_kind
-        OR fe.event_kind = rule.place_kind
+        OR p.place_kind = rule.place_kind
+        OR e.event_kind = rule.place_kind
       )
       AND (rule.category IS NULL OR f.category = rule.category)
       AND (
@@ -730,7 +741,7 @@ candidates AS MATERIALIZED (
       )
       AND (
         rule.detail_selector IS NULL
-        OR f.detail #>> ARRAY(
+        OR typed.detail #>> ARRAY(
              SELECT jsonb_array_elements_text(rule.detail_selector -> 'path')
            ) = rule.detail_selector ->> 'value'
       )
@@ -749,8 +760,9 @@ locked_candidates AS MATERIALIZED (
     FROM candidates AS candidate
     JOIN feature.features AS locked_feature
       ON locked_feature.feature_id = candidate.feature_id
-    WHERE locked_feature.deleted_at IS NULL
-      AND locked_feature.status = 'active'
+    WHERE locked_feature.lifecycle_state = 'active'
+      AND locked_feature.publication_state = 'published'
+      AND locked_feature.quality_state = 'valid'
     ORDER BY candidate.feature_id
     FOR KEY SHARE OF locked_feature
 ),
@@ -874,6 +886,9 @@ upserted AS (
 )
 SELECT count(*)::int AS affected_count FROM upserted
 """
+    .replace("__TYPED_FEATURE_JOINS__", typed_feature_detail_joins_sql())
+    .replace("__TYPED_FEATURE_DETAIL_COLUMNS__", TYPED_FEATURE_DETAIL_COLUMNS_SQL)
+)
 
 _REFRESH_SOURCE_METADATA_SQL: Final[str] = """
 WITH source_scope AS (
@@ -939,7 +954,11 @@ WITH archived AS (
     WHERE cf.feature_id = f.feature_id
       AND cf.archived_at IS NULL
       AND cf.curation_status IN ('candidate','curated')
-      AND (f.deleted_at IS NOT NULL OR f.status <> 'active')
+      AND (
+          f.lifecycle_state <> 'active'
+          OR f.publication_state <> 'published'
+          OR f.quality_state <> 'valid'
+      )
     RETURNING cf.curated_feature_id
 )
 SELECT count(*)::int AS archived_count FROM archived
@@ -1667,16 +1686,19 @@ async def create_curated_feature(
         await session.execute(
             text(
                 "SELECT feature_id FROM feature.features "
+                # legacy `status NOT IN ('deleted','hidden')`의 등가물.
+                # deleted→retired, hidden→(active, suppressed)이므로 suppressed만
+                # 배제한다. draft와 quarantined는 legacy가 허용했으므로 유지한다.
                 "WHERE feature_id = :feature_id "
-                "AND deleted_at IS NULL "
-                "AND status NOT IN ('deleted','hidden') "
+                "AND lifecycle_state = 'active' "
+                "AND publication_state <> 'suppressed' "
                 "FOR KEY SHARE"
             ),
             {"feature_id": feature_id},
         )
     ).first()
     if active_feature is None:
-        raise ValueError("feature_id must reference an active Feature")
+        raise ValueError("feature_id must reference a selectable Feature")
     row = (
         await session.execute(
             text(_CREATE_FEATURE_SQL),
@@ -2035,11 +2057,14 @@ async def sync_concierge_themes(
                 text(
                     """
                     SELECT
-                        f.detail #>> CAST(:id_path AS text[]) AS gid,
-                        max(f.detail #>> CAST(:title_path AS text[])) AS gtitle,
+                        typed.detail #>> CAST(:id_path AS text[]) AS gid,
+                        max(typed.detail #>> CAST(:title_path AS text[])) AS gtitle,
                         count(*) AS cnt
-                    -- concierge youtube 그룹핑도 payload 하위 임의 경로다.
-                    FROM feature.features_detailed AS f
+                    FROM feature.features AS f
+                    __TYPED_FEATURE_JOINS__
+                    CROSS JOIN LATERAL (
+                        SELECT __TYPED_FEATURE_DETAIL_COLUMNS__
+                    ) AS typed
                     JOIN provider_sync.source_links AS sl
                       ON sl.feature_id = f.feature_id
                     JOIN provider_sync.source_entities AS se
@@ -2052,12 +2077,21 @@ async def sync_concierge_themes(
                       ON sr.source_entity_key = se.source_entity_key
                      AND sr.source_record_key = head.current_source_record_key
                     WHERE pd.provider_dataset_id = :provider_dataset_id
-                      AND f.deleted_at IS NULL
-                      AND f.status = 'active'
-                      AND f.detail #>> CAST(:id_path AS text[]) IS NOT NULL
-                    GROUP BY f.detail #>> CAST(:id_path AS text[])
+                      AND f.lifecycle_state = 'active'
+                      AND f.publication_state = 'published'
+                      AND f.quality_state = 'valid'
+                      AND typed.detail #>> CAST(:id_path AS text[]) IS NOT NULL
+                    GROUP BY typed.detail #>> CAST(:id_path AS text[])
                     HAVING count(*) >= :min_features
                     """
+                        .replace(
+                            "__TYPED_FEATURE_JOINS__",
+                            typed_feature_detail_joins_sql(),
+                        )
+                        .replace(
+                            "__TYPED_FEATURE_DETAIL_COLUMNS__",
+                            TYPED_FEATURE_DETAIL_COLUMNS_SQL,
+                        )
                 ),
                 {
                     "id_path": id_path,

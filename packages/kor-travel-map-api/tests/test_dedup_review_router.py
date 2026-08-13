@@ -172,7 +172,9 @@ def _feature_detail(feature_id: str, name: str) -> ReviewFeatureDetail:
         kind="place",
         name=name,
         category="01070300",
-        status="active",
+        lifecycle_state="active",
+        publication_state="published",
+        quality_state="valid",
         lon=126.9,
         lat=37.5,
         address={"legal": "서울"},
@@ -310,6 +312,10 @@ def test_get_dedup_review_detail_returns_two_feature_payloads(
     # T-VN-32C 값 전환 — 상세 비교 feature snapshot의 feature_id는 UUID 정본.
     assert data["feature_a"]["feature_id"] == _expected_uuid("feature-a")
     assert data["feature_b"]["feature_id"] == _expected_uuid("feature-b")
+    assert data["feature_a"]["lifecycle_state"] == "active"
+    assert data["feature_a"]["publication_state"] == "published"
+    assert data["feature_a"]["quality_state"] == "valid"
+    assert "status" not in data["feature_a"]
     assert data["feature_a"]["detail"]["phone"] == "02-0000-0000"
     assert data["feature_a"]["sources"][0]["provider"] == "python-mois-api"
     assert data["distance_m"] == 12.5

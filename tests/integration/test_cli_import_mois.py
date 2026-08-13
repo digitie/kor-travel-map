@@ -170,8 +170,10 @@ async def _active_feature_count(engine: AsyncEngine) -> int:
             (
                 await session.execute(
                     text(
+                        # 0097이 `deleted_at`을 물리 삭제했다. soft-delete의
+                        # 3축 등가물은 lifecycle 축이다.
                         "SELECT count(*) FROM feature.features "
-                        "WHERE deleted_at IS NULL"
+                        "WHERE lifecycle_state = 'active'"
                     )
                 )
             ).scalar_one()

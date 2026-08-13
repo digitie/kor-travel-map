@@ -23,11 +23,20 @@ pytestmark = [pytest.mark.integration, pytest.mark.perf_gate]
 
 # T-VN-35(ADR-086): core에 ``detail``이 없다 — place 값은 subtype이 정본이므로
 # seed도 core 다음에 ``feature_places``를 채운다.
+#
+# T-VN-34C(0097): 이 seed가 만들려는 것은 "공개 표면에 실리는 행"이다. 단일
+# ``status='active'``가 뜻하던 그 한 가지를 3축이 그대로 이어받는다 —
+# ``feature.public_features``의 WHERE가 곧 (lifecycle active, publication
+# published, quality valid)이므로 세 값을 다 준 행만 public projection에 뜬다.
+# 세 열의 DEFAULT가 우연히 같은 조합이지만 생략하지 않는다: 이 harness가 재는
+# 것은 "기본값 행"이 아니라 "공개 행"의 cardinality이고, 아래 단언(220건 public,
+# 200건 batch)이 성립하는 근거를 seed가 직접 밝혀야 하기 때문이다.
 _CUSTOM_PUBLIC_FEATURES_SQL = """
 INSERT INTO feature.features (
     feature_id, kind, name, category, coord,
     address, urls, raw_refs,
-    status, legal_dong_code, sido_code, sigungu_code,
+    lifecycle_state, publication_state, quality_state,
+    legal_dong_code, sido_code, sigungu_code,
     created_at, updated_at
 )
 SELECT
@@ -46,6 +55,8 @@ SELECT
     '{}'::jsonb,
     '[]'::jsonb,
     'active',
+    'published',
+    'valid',
     '1111010100',
     '11',
     '11110',
@@ -97,7 +108,12 @@ def _assert_report_cardinality(report: dict[str, object]) -> None:
 
 
 def _expected_seed_public_ids(prefix: str, rows: int) -> list[str]:
-    """``perf_gate`` seed의 매 29번째 inactive 규칙을 그대로 반영한다."""
+    """``perf_gate`` seed가 매 29번째 행을 공개 표면에서 빼는 규칙을 반영한다.
+
+    legacy seed에서는 그 행이 ``status='inactive'``였고 0097 이후에는 lifecycle
+    ``retired``(+ publication ``suppressed``)다. 이름이 무엇이든 여기서 필요한
+    의미는 하나 — ``feature.public_features``에 뜨지 않는다는 것뿐이다.
+    """
 
     return [
         f"{prefix}{index:06d}" for index in range(1, rows + 1) if index % 29 != 0

@@ -101,10 +101,10 @@ class _FakeTxSessionCM:
         return False
 
 
-async def test_inactivate_features_by_source_delegates_to_repo(
+async def test_retire_features_by_source_delegates_to_repo(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """T-217b — reject/tombstone entity 집합을 infra inactivate로 위임(ADR-050 #4)."""
+    """T-217b — reject/tombstone entity 집합을 infra retirement로 위임한다."""
     import kortravelmap.client as client_mod
 
     recorded: dict[str, object] = {}
@@ -114,11 +114,11 @@ async def test_inactivate_features_by_source_delegates_to_repo(
         return 2
 
     monkeypatch.setattr(
-        client_mod, "inactivate_features_by_source_entity_ids", _fake
+        client_mod, "retire_features_by_source_entity_ids", _fake
     )
     client = _read_client(monkeypatch)
     monkeypatch.setattr(client, "_session_factory", _FakeTxSessionCM)
-    out = await client.inactivate_features_by_source(
+    out = await client.retire_features_by_source(
         provider="kor-travel-concierge-youtube",
         dataset_key="youtube_place_candidates",
         source_entity_type="extracted_place_candidate",
@@ -131,7 +131,7 @@ async def test_inactivate_features_by_source_delegates_to_repo(
     assert recorded["source_entity_ids"] == {"201", "202"}
 
 
-async def test_inactivate_geometryless_area_features_by_source_delegates_to_repo(
+async def test_retire_geometryless_area_features_by_source_delegates_to_repo(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """geometry 없는 area 보정을 infra 메서드로 위임한다."""
@@ -144,11 +144,11 @@ async def test_inactivate_geometryless_area_features_by_source_delegates_to_repo
         return 3
 
     monkeypatch.setattr(
-        client_mod, "inactivate_geometryless_area_features_by_source", _fake
+        client_mod, "retire_geometryless_area_features_by_source", _fake
     )
     client = _read_client(monkeypatch)
     monkeypatch.setattr(client, "_session_factory", _FakeTxSessionCM)
-    out = await client.inactivate_geometryless_area_features_by_source(
+    out = await client.retire_geometryless_area_features_by_source(
         provider="python-krheritage-api",
         dataset_key="krheritage_heritage_features",
         source_entity_type="heritage",
@@ -229,7 +229,7 @@ async def test_features_nearby_target_delegates_to_repo(
     assert recorded["radius_km"] == 2.0
     assert recorded["sort"] == "name"
     assert recorded["limit"] == 20
-    assert recorded["statuses"] == ("active",)
+    assert "statuses" not in recorded
 
 
 async def test_features_nearby_coord_delegates_to_repo(
@@ -252,7 +252,7 @@ async def test_features_nearby_coord_delegates_to_repo(
     assert recorded["lat"] == 37.5
     assert recorded["radius_m"] == 1500.0
     assert recorded["sort"] == "distance"
-    assert recorded["statuses"] == ("active",)
+    assert "statuses" not in recorded
 
 
 async def test_list_poi_cache_target_coords_delegates_exact_system_filter(

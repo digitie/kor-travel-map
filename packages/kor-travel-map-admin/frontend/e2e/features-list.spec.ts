@@ -7,7 +7,7 @@ import type { components } from "../src/api/types";
 // 바뀌면 factory가 타입 불일치로 컴파일 실패 → mock-실계약 drift를 tsc가 잡는다.
 //
 // 이 파일은 /admin/features 목록 페이지의 "깊이" 검증(검색 deferred 반영, 서버
-// 정렬 미러링, cursor 페이지네이션, empty/error, deactivate kill-switch, deeplink,
+// 정렬 미러링, cursor 페이지네이션, empty/error, retire command, deeplink,
 // has_issue 필터)을 담당한다. admin-ops.spec.ts의 `/v1/admin/features` smoke는
 // 헤더/필터 표면만 보므로 중복하지 않는다.
 
@@ -17,10 +17,9 @@ type AdminFeatureRecord = components["schemas"]["AdminFeatureRecord"];
 type AdminFeatureIssueRecord = components["schemas"]["AdminFeatureIssueRecord"];
 type AdminFeaturesListResponse =
   components["schemas"]["AdminFeaturesListResponse"];
-type AdminFeatureDeactivateData =
-  components["schemas"]["AdminFeatureDeactivateData"];
-type AdminFeatureDeactivateResponse =
-  components["schemas"]["AdminFeatureDeactivateResponse"];
+type AdminFeatureStateData = components["schemas"]["AdminFeatureStateData"];
+type AdminFeatureStateResponse =
+  components["schemas"]["AdminFeatureStateResponse"];
 type AdminFeatureDetailData = components["schemas"]["AdminFeatureDetailData"];
 type AdminFeatureDetailResponse =
   components["schemas"]["AdminFeatureDetailResponse"];
@@ -92,7 +91,9 @@ function makeAdminFeature(
     name: "Mock active feature",
     primary_dataset_key: "mock_dataset",
     primary_provider: "python-kma-api",
-    status: "active",
+    lifecycle_state: "active",
+    publication_state: "published",
+    quality_state: "valid",
     updated_at: MOCK_NOW,
     ...overrides,
   };
@@ -105,19 +106,20 @@ function listResponse(
   return { data: { items }, meta: makeMeta(page) };
 }
 
-function makeDeactivateResponse(
+function makeStateResponse(
   feature: AdminFeatureRecord,
-): AdminFeatureDeactivateResponse {
-  const data: AdminFeatureDeactivateData = {
+): AdminFeatureStateResponse {
+  const data: AdminFeatureStateData = {
+    audit_transition_id: 1,
     feature_id: feature.feature_id,
-    override: null,
-    override_created: true,
-    previous_status: feature.status,
-    status: "inactive",
+    lifecycle_state: "retired",
+    publication_state: "suppressed",
+    quality_state: feature.quality_state,
+    row_revision: 2,
   };
   return {
     data,
-    meta: { duration_ms: 1, page: null, request_id: "e2e-deactivate" },
+    meta: { duration_ms: 1, page: null, request_id: "e2e-retire" },
   };
 }
 
@@ -221,7 +223,9 @@ function makeAdminFeatureDetailResponse(
         name: feature.name,
         raw_refs: [],
         row_revision: 1,
-        status: feature.status,
+        lifecycle_state: feature.lifecycle_state,
+        publication_state: feature.publication_state,
+        quality_state: feature.quality_state,
         updated_at: feature.updated_at,
         urls: {},
       },
@@ -229,6 +233,7 @@ function makeAdminFeatureDetailResponse(
       issues: [],
       overrides: [],
       sources: [makeAdminSource()],
+      state_transitions: [],
       versions: [],
       ...overrides,
     },
@@ -242,7 +247,7 @@ function makeAdminFeatureDetailResponse(
 
 /**
  * `**\/v1/admin/features**`를 단일 route로 잡되 분기는 most-specific-first.
- * 이 페이지는 GET list + POST .../deactivate만 발생시키지만 glob은 change-request
+ * 이 페이지는 GET list + PATCH .../state만 발생시키지만 glob은 change-request
  * 등도 매칭하므로 정확한 pathname으로 가드한다(admin-ops.spec.ts risk note).
  *
  * 모든 GET list URL의 searchParams를 기록한다(deferred q / sort / cursor 검증용).
@@ -255,31 +260,46 @@ async function mockFeaturesList(
   },
 ) {
   const listSearches: URLSearchParams[] = [];
-  const deactivateBodies: Record<string, unknown>[] = [];
-  const deactivateUrls: string[] = [];
+  const stateBodies: Record<string, unknown>[] = [];
+  const stateUrls: string[] = [];
 
   await page.route("**/v1/admin/features**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const pathname = apiPath(url);
 
-    // most-specific: deactivate kill-switch.
-    if (request.method() === "POST" && pathname.endsWith("/deactivate")) {
-      deactivateUrls.push(pathname);
-      deactivateBodies.push(request.postDataJSON() as Record<string, unknown>);
+    // most-specific: typed lifecycle command.
+    if (request.method() === "PATCH" && pathname.endsWith("/state")) {
+      stateUrls.push(pathname);
+      stateBodies.push(request.postDataJSON() as Record<string, unknown>);
       const featureId = decodeURIComponent(
         pathname
           .replace(/^\/v1\/admin\/features\//, "")
-          .replace(/\/deactivate$/, ""),
+          .replace(/\/state$/, ""),
       );
       await fulfillJson(
         route,
-        makeDeactivateResponse(
+        makeStateResponse(
           makeAdminFeature({
             feature_id: featureId,
           }),
         ),
       );
+      return;
+    }
+
+    if (request.method() === "GET" && pathname.endsWith("/revision")) {
+      const featureId = decodeURIComponent(
+        pathname
+          .replace(/^\/v1\/admin\/features\//, "")
+          .replace(/\/revision$/, ""),
+      );
+      await route.fulfill({
+        body: JSON.stringify({ data: { feature_id: featureId, row_revision: 1 } }),
+        contentType: "application/json",
+        headers: { ETag: '"1"' },
+        status: 200,
+      });
       return;
     }
 
@@ -305,7 +325,7 @@ async function mockFeaturesList(
   });
 
   const lastSearch = () => listSearches.at(-1);
-  return { listSearches, lastSearch, deactivateBodies, deactivateUrls };
+  return { listSearches, lastSearch, stateBodies, stateUrls };
 }
 
 test.describe("admin/features list depth", () => {
@@ -359,9 +379,9 @@ test.describe("admin/features list depth", () => {
       .toBe(true);
 
     await filter.fill("703");
-    await expect.poll(() => mocks.lastSearch()?.get("provider_dataset_id")).toBe(
-      "703",
-    );
+    await expect
+      .poll(() => mocks.lastSearch()?.get("provider_dataset_id"))
+      .toBe("703");
     expect(mocks.lastSearch()?.has("provider")).toBe(false);
     expect(mocks.lastSearch()?.has("dataset_key")).toBe(false);
   });
@@ -513,21 +533,21 @@ test.describe("admin/features list depth", () => {
     await expect(alert.getByText(/HTTP 500/)).toBeVisible();
   });
 
-  test("deactivate kill-switch fires mutation with correct body", async ({
-    page,
-  }) => {
+  test("retire command fires an atomic state transition", async ({ page }) => {
     const activeFeature = makeAdminFeature({
-      feature_id: "mock::active::deactivate-1",
+      feature_id: "mock::active::retire-1",
       name: "Mock active feature",
-      status: "active",
+      lifecycle_state: "active",
     });
-    const inactiveFeature = makeAdminFeature({
-      feature_id: "mock::inactive::guard-1",
-      name: "Mock inactive feature",
-      status: "inactive",
+    const retiredFeature = makeAdminFeature({
+      feature_id: "mock::retired::guard-1",
+      name: "Mock retired feature",
+      lifecycle_state: "retired",
+      publication_state: "suppressed",
     });
     const mocks = await mockFeaturesList(page, {
-      handler: () => listResponse([activeFeature, inactiveFeature]),
+      handler: () => listResponse([activeFeature, retiredFeature]),
+      detail: makeAdminFeatureDetailResponse(activeFeature),
     });
 
     await page.goto("/admin/features");
@@ -535,29 +555,27 @@ test.describe("admin/features list depth", () => {
     const activeRow = page.getByRole("row", { name: /Mock active feature/ });
     await expect(activeRow).toBeVisible();
 
-    // 음성 가드: inactive row의 deactivate 버튼은 비활성.
-    const inactiveRow = page.getByRole("row", {
-      name: /Mock inactive feature/,
+    // 음성 가드: 이미 retire된 행은 같은 command를 다시 보낼 수 없다.
+    const retiredRow = page.getByRole("row", {
+      name: /Mock retired feature/,
     });
     await expect(
-      inactiveRow.getByRole("button", { name: "deactivate" }),
+      retiredRow.getByRole("button", { name: "retire" }),
     ).toBeDisabled();
 
-    await activeRow.getByRole("button", { name: "deactivate" }).click();
-    // deactivate는 이제 AlertDialog 확인 — 다이얼로그의 '비활성화' 버튼 클릭.
+    await activeRow.getByRole("button", { name: "retire" }).click();
     await page
       .getByRole("alertdialog")
-      .getByRole("button", { name: "비활성화" })
+      .getByRole("button", { name: "종료" })
       .click();
 
-    await expect.poll(() => mocks.deactivateBodies.length).toBe(1);
-    expect(mocks.deactivateBodies[0]).toMatchObject({
-      prevent_provider_reactivation: true,
-      reason: "admin-ui deactivate",
+    await expect.poll(() => mocks.stateBodies.length).toBe(1);
+    expect(mocks.stateBodies[0]).toMatchObject({
+      action: "retire",
+      reason_code: "admin_ui_retire",
     });
-    expect(mocks.deactivateBodies[0]).not.toHaveProperty("operator");
-    expect(mocks.deactivateUrls[0]).toBe(
-      `/v1/admin/features/${encodeURIComponent(activeFeature.feature_id)}/deactivate`,
+    expect(mocks.stateUrls[0]).toBe(
+      `/v1/admin/features/${encodeURIComponent(activeFeature.feature_id)}/state`,
     );
   });
 

@@ -190,9 +190,7 @@ FROM provider_sync.source_records
 WHERE raw_payload_hash !~ '^[0-9a-f]{1,64}$'; -- expect: 0 -- phase: both
 
 -- -----------------------------------------------------------------------------
--- ADR-067 — 직교 3축 상태 + 단일 공개 정본 (T-VN-34)
--- (불가능 조합의 집합은 정본이 열거하지 않아 미정 — T-VN-34A 무손실 매핑
--- 소관이므로 여기에는 조합 assertion을 두지 않는다.)
+-- ADR-090 — 직교 3축 상태 + full-tuple append-only audit (T-VN-34A)
 -- -----------------------------------------------------------------------------
 
 -- [INV-067-01] 3축 값 domain 위반 없음 (CHECK VALIDATE 전 preflight).
@@ -201,6 +199,73 @@ FROM feature.features
 WHERE lifecycle_state NOT IN ('active', 'retired')
    OR publication_state NOT IN ('draft', 'published', 'suppressed')
    OR quality_state NOT IN ('valid', 'quarantined'); -- expect: 0 -- phase: both
+
+-- [INV-090-01] retired는 반드시 suppressed다. active의 여섯 tuple과
+-- retired/suppressed의 두 tuple만 남는다.
+SELECT count(*)
+FROM feature.features
+WHERE lifecycle_state = 'retired'
+  AND publication_state <> 'suppressed'; -- expect: 0 -- phase: both
+
+-- [INV-090-02] state audit의 old/new full tuple, reason/principal/revision은
+-- 모두 유효하다. old tuple NULL은 initial/legacy/provider initial만 허용한다.
+SELECT count(*)
+FROM feature.feature_state_transitions
+WHERE btrim(reason_code) = ''
+   OR btrim(principal) = ''
+   OR row_revision < 1
+   OR to_lifecycle_state NOT IN ('active', 'retired')
+   OR to_publication_state NOT IN ('draft', 'published', 'suppressed')
+   OR to_quality_state NOT IN ('valid', 'quarantined')
+   OR (to_lifecycle_state = 'retired' AND to_publication_state <> 'suppressed')
+   OR (
+       from_lifecycle_state IS NULL
+       AND transition_kind NOT IN ('initial', 'legacy_backfill', 'provider_sync')
+   )
+   OR (
+       from_lifecycle_state IS NOT NULL
+       AND transition_kind IN ('initial', 'legacy_backfill')
+   ); -- expect: 0 -- phase: both
+
+-- [INV-090-03] purge-preserving audit에는 Feature FK/cascade가 없어야 한다.
+SELECT count(*)
+FROM pg_catalog.pg_constraint AS constraint_row
+WHERE constraint_row.conrelid = 'feature.feature_state_transitions'::regclass
+  AND constraint_row.contype = 'f'; -- expect: 0 -- phase: both
+
+-- [INV-090-04] 한 transition의 audit identity 세 축은 비어 있지 않다.
+SELECT count(*)
+FROM feature.feature_state_transitions
+WHERE btrim(invoker_role) = ''
+   OR btrim(state_procedure_definer) = ''
+   OR btrim(audit_writer_definer) = ''; -- expect: 0 -- phase: both
+
+-- [INV-090-05] provider_sync audit은 purge 뒤에도 dataset/entity/record 및
+-- authoritative receipt을 한 행에 immutable evidence로 함께 남긴다. transition
+-- procedure가 write 시 current head·dataset·link·raw hash를 검증한다. audit은 raw
+-- history retention 정책과 독립적으로 purge 뒤에도 남으므로 여기서 live source를
+-- 다시 join해 존재를 요구하지 않는다.
+SELECT count(*)
+FROM feature.feature_state_transitions
+WHERE (
+        transition_kind = 'provider_sync'
+        AND (
+            provider_dataset_id IS NULL
+            OR btrim(source_entity_key) = ''
+            OR btrim(source_record_key) = ''
+            OR jsonb_typeof(provider_evidence) <> 'object'
+            OR jsonb_typeof(provider_evidence -> 'authoritative_receipt') <> 'string'
+            OR btrim(provider_evidence ->> 'authoritative_receipt') = ''
+        )
+      ) OR (
+        transition_kind <> 'provider_sync'
+        AND (
+            provider_dataset_id IS NOT NULL
+            OR source_entity_key IS NOT NULL
+            OR source_record_key IS NOT NULL
+            OR provider_evidence IS NOT NULL
+        )
+      ); -- expect: 0 -- phase: both
 
 -- [INV-067-02] 공개 view와 base 술어의 일치 — view 밖 술어 만족 행 없음.
 SELECT count(*)
@@ -211,6 +276,32 @@ WHERE f.lifecycle_state = 'active'
   AND NOT EXISTS (
       SELECT 1 FROM feature.public_features AS p WHERE p.feature_id = f.feature_id
   ); -- expect: 0 -- phase: both
+
+-- [INV-067-03] view가 core 3축을 만족하지 않는 행을 노출하지 않는다.
+SELECT count(*)
+FROM feature.public_features AS p
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM feature.features AS f
+    WHERE f.feature_id = p.feature_id
+      AND f.lifecycle_state = 'active'
+      AND f.publication_state = 'published'
+      AND f.quality_state = 'valid'
+); -- expect: 0 -- phase: both
+
+-- [INV-067-04] route/area의 public_ready cache는 core 정본 3축과 양방향 일치한다.
+SELECT count(*)
+FROM (
+    SELECT feature_id, public_ready FROM feature.feature_routes
+    UNION ALL
+    SELECT feature_id, public_ready FROM feature.feature_areas
+) AS subtype
+JOIN feature.features AS f ON f.feature_id = subtype.feature_id
+WHERE subtype.public_ready IS DISTINCT FROM (
+    f.lifecycle_state = 'active'
+    AND f.publication_state = 'published'
+    AND f.quality_state = 'valid'
+); -- expect: 0 -- phase: both
 
 -- -----------------------------------------------------------------------------
 -- ADR-070 — typed subtype (T-VN-35)
@@ -302,7 +393,7 @@ SELECT count(*)
 FROM (
     SELECT feature_id, field_path
     FROM ops.feature_overrides
-    WHERE revoked_at IS NULL
+    WHERE status = 'active'
     GROUP BY feature_id, field_path
     HAVING count(*) > 1
 ) AS duplicated; -- expect: 0 -- phase: both
@@ -313,10 +404,12 @@ FROM ops.feature_overrides AS o
 LEFT JOIN ops.feature_override_field_paths AS r ON r.field_path = o.field_path
 WHERE r.field_path IS NULL; -- expect: 0 -- phase: both
 
--- [INV-071-03] tombstone 결합 위반 없음 (revoked_at ↔ revoked_by 쌍).
+-- [INV-071-03] tombstone 결합 위반 없음 (status와 revoked_at/by 쌍).
 SELECT count(*)
 FROM ops.feature_overrides
-WHERE (revoked_at IS NULL) <> (revoked_by IS NULL); -- expect: 0 -- phase: both
+WHERE status NOT IN ('active', 'revoked')
+   OR (status = 'active' AND (revoked_at IS NOT NULL OR revoked_by IS NOT NULL))
+   OR (status = 'revoked' AND (revoked_at IS NULL OR revoked_by IS NULL)); -- expect: 0 -- phase: both
 
 -- -----------------------------------------------------------------------------
 -- T-VN-37 — typed notice state

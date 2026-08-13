@@ -22,12 +22,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 # hot read path (T-212d keyset 인덱스 + 공간 인덱스 + feature.features 본체).
 # 존재하지 않는 이름은 ``to_regclass``로 자동 skip되므로 인덱스 rename에 견고.
+#
+# T-VN-34: `idx_features_status_updated`는 0097이 지웠다(뒤따른 `status` 컬럼 drop).
+# 그 인덱스는 `(status, updated_at DESC, feature_id DESC)` — "상태로 거르고 최신순"
+# access path였는데, 3축 전환에서 상태 필터가 **인덱스 컬럼에서 partial 술어로** 옮겨갔다.
+# 0096이 같은 목록을 `WHERE lifecycle='active' AND publication='published' AND
+# quality='valid'` 부분 인덱스로 다시 만들었으므로, 그 access path의 정본은 아래
+# `idx_features_updated_keyset`이다(0096 주석대로 이름은 prewarm 설정을 위해 보존됐다).
+# 따라서 dead name을 지우기만 하면 되고 대체 항목을 새로 넣을 필요가 없다.
 DEFAULT_HOT_RELATIONS: tuple[str, ...] = (
     "feature.features",
     "feature.idx_features_coord_gist",
     "feature.idx_features_coord_5179_gist",
     "feature.idx_features_updated_keyset",
-    "feature.idx_features_status_updated",
     "feature.idx_features_name_trgm",
     "provider_sync.source_records",
     "provider_sync.source_links",

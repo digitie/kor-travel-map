@@ -19,27 +19,28 @@ import { useCallback, useMemo, useState } from "react";
 
 import { type ColumnDef, type SortingState } from "@tanstack/react-table";
 
+import { opsDatasetCatalogOptions, useOpsDatasetCatalog } from "@/api/datasets";
 import {
-  opsDatasetCatalogOptions,
-  useOpsDatasetCatalog,
-} from "@/api/datasets";
-import {
-  ADMIN_FEATURE_STATUSES,
   FEATURE_CLUSTER_MAX_ZOOM,
   FEATURE_KINDS,
+  FEATURE_LIFECYCLE_STATES,
+  FEATURE_PUBLICATION_STATES,
+  FEATURE_QUALITY_STATES,
   isAdminFeatureClusterZoom,
   useAdminFeatureClustersInBbox,
   useAdminFeatureDetail,
   useAdminFeaturesInBbox,
   type AdminFeatureMapItem,
-  type AdminFeatureStatus,
   type FeatureKind,
+  type FeatureLifecycleState,
+  type FeaturePublicationState,
+  type FeatureQualityState,
 } from "@/api/features";
 import { useOpsLiveInvalidation } from "@/api/live";
 import { AdminShell } from "@/components/admin-shell";
 import { FeatureAssociations } from "@/components/feature-associations";
 import { FeatureKindDetailPanel } from "@/components/feature-kind-detail-panel";
-import { statusLabel } from "@/lib/status-label";
+import { FeatureStateBadges } from "@/components/feature-state-badges";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -71,6 +72,7 @@ import {
 
 const VWORLD_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY;
 const AREA_GEOMETRY_MIN_ZOOM = 14;
+type AxisFilter<T extends string> = "" | T;
 
 interface Bbox {
   min_lon: number;
@@ -130,7 +132,9 @@ function FeatureDetailPanel({
         <div className="flex items-center gap-1">
           <Link
             aria-label="상세 열기"
-            className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }))}
+            className={cn(
+              buttonVariants({ variant: "ghost", size: "icon-sm" }),
+            )}
             href={featureDetailHref(featureId)}
           >
             <ExternalLinkIcon />
@@ -147,11 +151,15 @@ function FeatureDetailPanel({
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-3">
-        {adminDetailQuery.isLoading ? <Skeleton className="h-48 w-full" /> : null}
+        {adminDetailQuery.isLoading ? (
+          <Skeleton className="h-48 w-full" />
+        ) : null}
         {adminDetailQuery.isError ? (
           <Alert variant="destructive">
             <AlertTitle>상세 호출 실패</AlertTitle>
-            <AlertDescription>{adminDetailQuery.error.message}</AlertDescription>
+            <AlertDescription>
+              {adminDetailQuery.error.message}
+            </AlertDescription>
           </Alert>
         ) : null}
         {feature ? (
@@ -160,16 +168,19 @@ function FeatureDetailPanel({
               <h2 className="text-base font-semibold">{feature.name}</h2>
               <div className="flex flex-wrap gap-2">
                 <Badge>{feature.kind}</Badge>
-                <Badge variant="secondary">
-                  {statusLabel(feature.status)}
-                </Badge>
+                <FeatureStateBadges
+                  lifecycleState={feature.lifecycle_state}
+                  publicationState={feature.publication_state}
+                  qualityState={feature.quality_state}
+                />
                 <Badge variant="outline">{feature.category}</Badge>
               </div>
             </div>
             <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
               <dt className="text-muted-foreground">coord</dt>
               <dd className="font-mono">
-                {typeof feature.lon === "number" && typeof feature.lat === "number"
+                {typeof feature.lon === "number" &&
+                typeof feature.lat === "number"
                   ? `${feature.lon.toFixed(5)}, ${feature.lat.toFixed(5)}`
                   : "없음"}
               </dd>
@@ -193,11 +204,15 @@ function FeatureDetailPanel({
               </dd>
               <dt className="text-muted-foreground">data_origin</dt>
               <dd>
-                {adminDetailQuery.isError ? "조회 실패" : dataOrigin ?? "없음"}
+                {adminDetailQuery.isError
+                  ? "조회 실패"
+                  : (dataOrigin ?? "없음")}
               </dd>
             </dl>
             <details>
-              <summary className="cursor-pointer text-sm font-medium">address</summary>
+              <summary className="cursor-pointer text-sm font-medium">
+                address
+              </summary>
               <JsonBlock value={feature.address} />
             </details>
             <FeatureKindDetailPanel
@@ -215,11 +230,15 @@ function FeatureDetailPanel({
               />
             ) : null}
             <details>
-              <summary className="cursor-pointer text-sm font-medium">detail</summary>
+              <summary className="cursor-pointer text-sm font-medium">
+                detail
+              </summary>
               <JsonBlock value={feature.detail} />
             </details>
             <details>
-              <summary className="cursor-pointer text-sm font-medium">urls</summary>
+              <summary className="cursor-pointer text-sm font-medium">
+                urls
+              </summary>
               <JsonBlock value={feature.urls} />
             </details>
           </>
@@ -237,16 +256,21 @@ function useFeaturesClientController() {
   const featureViewMode = useMapStore((state) => state.featureViewMode);
   const setFeatureViewMode = useMapStore((state) => state.setFeatureViewMode);
   const selectedFeatureId = useMapStore((state) => state.selectedFeatureId);
-  const setSelectedFeatureId = useMapStore((state) => state.setSelectedFeatureId);
+  const setSelectedFeatureId = useMapStore(
+    (state) => state.setSelectedFeatureId,
+  );
   const activeFeatureKinds = useMapStore((state) => state.activeFeatureKinds);
   const toggleFeatureKind = useMapStore((state) => state.toggleFeatureKind);
   const resetFeatureKinds = useMapStore((state) => state.resetFeatureKinds);
 
   const [bbox, setBbox] = useState<Bbox | null>(null);
   const [providerFilter, setProviderFilter] = useState<string>("");
-  const [statusFilter, setStatusFilter] = useState<AdminFeatureStatus | "all">(
-    "all",
-  );
+  const [lifecycleStateFilter, setLifecycleStateFilter] =
+    useState<AxisFilter<FeatureLifecycleState>>("");
+  const [publicationStateFilter, setPublicationStateFilter] =
+    useState<AxisFilter<FeaturePublicationState>>("");
+  const [qualityStateFilter, setQualityStateFilter] =
+    useState<AxisFilter<FeatureQualityState>>("");
   const kindFilter = useMemo(
     () => Array.from(activeFeatureKinds) as FeatureKind[],
     [activeFeatureKinds],
@@ -291,7 +315,13 @@ function useFeaturesClientController() {
       ...(bbox ?? { min_lon: 0, min_lat: 0, max_lon: 0, max_lat: 0 }),
       kinds: kindFilter.length > 0 ? kindFilter : undefined,
       provider: effectiveProvider ? [effectiveProvider] : undefined,
-      statuses: statusFilter === "all" ? undefined : [statusFilter],
+      lifecycleStates: lifecycleStateFilter
+        ? [lifecycleStateFilter]
+        : undefined,
+      publicationStates: publicationStateFilter
+        ? [publicationStateFilter]
+        : undefined,
+      qualityStates: qualityStateFilter ? [qualityStateFilter] : undefined,
       includeGeometry: includeFeatureGeometry,
       zoom: viewport.zoom,
     },
@@ -302,7 +332,13 @@ function useFeaturesClientController() {
       ...(bbox ?? { min_lon: 0, min_lat: 0, max_lon: 0, max_lat: 0 }),
       kinds: kindFilter.length > 0 ? kindFilter : undefined,
       provider: effectiveProvider ? [effectiveProvider] : undefined,
-      statuses: statusFilter === "all" ? undefined : [statusFilter],
+      lifecycleStates: lifecycleStateFilter
+        ? [lifecycleStateFilter]
+        : undefined,
+      publicationStates: publicationStateFilter
+        ? [publicationStateFilter]
+        : undefined,
+      qualityStates: qualityStateFilter ? [qualityStateFilter] : undefined,
       zoom: viewport.zoom,
     },
     { enabled: bbox !== null && clusterMode },
@@ -349,9 +385,18 @@ function useFeaturesClientController() {
         cell: ({ row }) => <Badge variant="outline">{row.original.kind}</Badge>,
       },
       {
-        accessorKey: "status",
-        header: "상태",
-        cell: ({ row }) => statusLabel(row.original.status),
+        id: "state",
+        header: "상태 축",
+        enableSorting: false,
+        cell: ({ row }) => (
+          <div className="flex flex-wrap gap-1">
+            <FeatureStateBadges
+              lifecycleState={row.original.lifecycle_state}
+              publicationState={row.original.publication_state}
+              qualityState={row.original.quality_state}
+            />
+          </div>
+        ),
       },
       {
         id: "coord",
@@ -361,7 +406,8 @@ function useFeaturesClientController() {
           const feature = row.original;
           return (
             <span className="font-mono text-xs text-muted-foreground">
-              {typeof feature.lon === "number" && typeof feature.lat === "number"
+              {typeof feature.lon === "number" &&
+              typeof feature.lat === "number"
                 ? `${feature.lon.toFixed(5)}, ${feature.lat.toFixed(5)}`
                 : "없음"}
             </span>
@@ -388,7 +434,9 @@ function useFeaturesClientController() {
     if (featuresQuery.isLoading) return "feature 로딩 중";
     if (featuresQuery.isError) return "feature 호출 실패";
     const count = featuresQuery.data?.data.items.length ?? 0;
-    return featuresQuery.isFetching ? `${count}건 표시 · 갱신 중` : `${count}건 표시`;
+    return featuresQuery.isFetching
+      ? `${count}건 표시 · 갱신 중`
+      : `${count}건 표시`;
   }, [bbox, clusterMode, clustersQuery, featuresQuery]);
 
   // tiled fetch가 일부 tile 잘림/실패를 보고하면(부분 결과) 조용히 누락되지 않도록
@@ -408,17 +456,21 @@ function useFeaturesClientController() {
     featureViewMode,
     featuresQuery,
     isDefaultKindFilter,
+    lifecycleStateFilter,
     providerOptions,
+    publicationStateFilter,
+    qualityStateFilter,
     resetFeatureKinds,
     selectedFeatureId,
     setFeatureViewMode,
+    setLifecycleStateFilter,
     setProviderFilter,
+    setPublicationStateFilter,
+    setQualityStateFilter,
     setSelectedFeatureId,
-    setStatusFilter,
     setTableSorting,
     showAreaGeometry,
     status,
-    statusFilter,
     tableSorting,
     toggleFeatureKind,
     truncated,
@@ -434,18 +486,42 @@ function FeatureMapToolbar({
   effectiveProvider,
   featuresQuery,
   isDefaultKindFilter,
+  lifecycleStateFilter,
   providerOptions,
+  publicationStateFilter,
+  qualityStateFilter,
   resetFeatureKinds,
+  setLifecycleStateFilter,
   setProviderFilter,
-  setStatusFilter,
+  setPublicationStateFilter,
+  setQualityStateFilter,
   status,
-  statusFilter,
   toggleFeatureKind,
   truncated,
-}: Pick<ReturnType<typeof useFeaturesClientController>, "activeFeatureKinds" | "clusterMode" | "clustersQuery" | "effectiveProvider" | "featuresQuery" | "isDefaultKindFilter" | "providerOptions" | "resetFeatureKinds" | "setProviderFilter" | "setStatusFilter" | "status" | "statusFilter" | "toggleFeatureKind" | "truncated">) {
+}: Pick<
+  ReturnType<typeof useFeaturesClientController>,
+  | "activeFeatureKinds"
+  | "clusterMode"
+  | "clustersQuery"
+  | "effectiveProvider"
+  | "featuresQuery"
+  | "isDefaultKindFilter"
+  | "lifecycleStateFilter"
+  | "providerOptions"
+  | "publicationStateFilter"
+  | "qualityStateFilter"
+  | "resetFeatureKinds"
+  | "setLifecycleStateFilter"
+  | "setProviderFilter"
+  | "setPublicationStateFilter"
+  | "setQualityStateFilter"
+  | "status"
+  | "toggleFeatureKind"
+  | "truncated"
+>) {
   return (
     <>
-<div className="flex flex-col gap-3 border-b bg-background px-4 py-3 md:flex-row md:items-center md:justify-between">
+      <div className="flex flex-col gap-3 border-b bg-background px-4 py-3 md:flex-row md:items-center md:justify-between">
         <div className="flex flex-col gap-1">
           <div className="flex flex-wrap items-center gap-2">
             <Badge variant="secondary">Feature 지도</Badge>
@@ -503,21 +579,6 @@ function FeatureMapToolbar({
             </Button>
           </div>
           <NativeSelect
-            aria-label="상태 필터"
-            className="w-40"
-            value={statusFilter}
-            onChange={(event) =>
-              setStatusFilter(event.target.value as AdminFeatureStatus | "all")
-            }
-          >
-            <NativeSelectOption value="all">모든 운영 상태</NativeSelectOption>
-            {ADMIN_FEATURE_STATUSES.map((featureStatus) => (
-              <NativeSelectOption key={featureStatus} value={featureStatus}>
-                {statusLabel(featureStatus)}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-          <NativeSelect
             aria-label="소스 필터"
             className="w-44"
             value={effectiveProvider}
@@ -530,8 +591,59 @@ function FeatureMapToolbar({
               </NativeSelectOption>
             ))}
           </NativeSelect>
+          <NativeSelect
+            aria-label="수명주기 필터"
+            className="w-36"
+            value={lifecycleStateFilter}
+            onChange={(event) =>
+              setLifecycleStateFilter(
+                event.target.value as AxisFilter<FeatureLifecycleState>,
+              )
+            }
+          >
+            <NativeSelectOption value="">모든 수명주기</NativeSelectOption>
+            {FEATURE_LIFECYCLE_STATES.map((value) => (
+              <NativeSelectOption key={value} value={value}>
+                {value}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+          <NativeSelect
+            aria-label="공개 상태 필터"
+            className="w-36"
+            value={publicationStateFilter}
+            onChange={(event) =>
+              setPublicationStateFilter(
+                event.target.value as AxisFilter<FeaturePublicationState>,
+              )
+            }
+          >
+            <NativeSelectOption value="">모든 공개 상태</NativeSelectOption>
+            {FEATURE_PUBLICATION_STATES.map((value) => (
+              <NativeSelectOption key={value} value={value}>
+                {value}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+          <NativeSelect
+            aria-label="품질 상태 필터"
+            className="w-36"
+            value={qualityStateFilter}
+            onChange={(event) =>
+              setQualityStateFilter(
+                event.target.value as AxisFilter<FeatureQualityState>,
+              )
+            }
+          >
+            <NativeSelectOption value="">모든 품질 상태</NativeSelectOption>
+            {FEATURE_QUALITY_STATES.map((value) => (
+              <NativeSelectOption key={value} value={value}>
+                {value}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
         </div>
-        </div>
+      </div>
 
       {!clusterMode && featuresQuery.isError ? (
         <Alert className="m-4" variant="destructive">
@@ -564,10 +676,26 @@ function FeatureMapWorkspace({
   tableSorting,
   updateViewportFromMap,
   viewport,
-}: Pick<ReturnType<typeof useFeaturesClientController>, "clusterItems" | "clusterMode" | "featureColumns" | "featureItems" | "featureViewMode" | "featuresQuery" | "selectedFeatureId" | "setFeatureViewMode" | "setSelectedFeatureId" | "setTableSorting" | "showAreaGeometry" | "tableSorting" | "updateViewportFromMap" | "viewport">) {
+}: Pick<
+  ReturnType<typeof useFeaturesClientController>,
+  | "clusterItems"
+  | "clusterMode"
+  | "featureColumns"
+  | "featureItems"
+  | "featureViewMode"
+  | "featuresQuery"
+  | "selectedFeatureId"
+  | "setFeatureViewMode"
+  | "setSelectedFeatureId"
+  | "setTableSorting"
+  | "showAreaGeometry"
+  | "tableSorting"
+  | "updateViewportFromMap"
+  | "viewport"
+>) {
   return (
     <>
-<Tabs
+      <Tabs
         className="min-h-0 flex-1 p-4"
         value={featureViewMode}
         onValueChange={(value) => setFeatureViewMode(value as FeatureViewMode)}
@@ -642,15 +770,16 @@ function FeatureMapWorkspace({
             <CardHeader>
               <CardTitle>이름순 feature</CardTitle>
               <CardDescription>
-                현재 bbox와 kind 필터에 해당하는 feature를 이름순으로 표시합니다.
+                현재 bbox와 kind 필터에 해당하는 feature를 이름순으로
+                표시합니다.
               </CardDescription>
             </CardHeader>
             <CardContent className="min-h-0">
               {clusterMode ? (
                 <div className="flex h-[calc(100vh-28rem)] min-h-80 items-center justify-center px-6 text-center text-sm text-muted-foreground">
-                  저zoom에서는 개별 feature 대신 지역 클러스터로 집계됩니다. 지도를
-                  확대(zoom {FEATURE_CLUSTER_MAX_ZOOM + 1}+)하면 개별 feature 목록이
-                  표시됩니다.
+                  저zoom에서는 개별 feature 대신 지역 클러스터로 집계됩니다.
+                  지도를 확대(zoom {FEATURE_CLUSTER_MAX_ZOOM + 1}+)하면 개별
+                  feature 목록이 표시됩니다.
                 </div>
               ) : (
                 <DataTable
@@ -659,7 +788,9 @@ function FeatureMapWorkspace({
                   getRowId={(feature) => feature.feature_id}
                   isLoading={featuresQuery.isLoading}
                   emptyMessage="표시할 feature가 없습니다."
-                  onRowClick={(feature) => setSelectedFeatureId(feature.feature_id)}
+                  onRowClick={(feature) =>
+                    setSelectedFeatureId(feature.feature_id)
+                  }
                   isRowActive={(feature) =>
                     feature.feature_id === selectedFeatureId
                   }
@@ -701,17 +832,21 @@ function FeaturesClientView({
   featureViewMode,
   featuresQuery,
   isDefaultKindFilter,
+  lifecycleStateFilter,
   providerOptions,
+  publicationStateFilter,
+  qualityStateFilter,
   resetFeatureKinds,
   selectedFeatureId,
   setFeatureViewMode,
+  setLifecycleStateFilter,
   setProviderFilter,
+  setPublicationStateFilter,
+  setQualityStateFilter,
   setSelectedFeatureId,
-  setStatusFilter,
   setTableSorting,
   showAreaGeometry,
   status,
-  statusFilter,
   tableSorting,
   toggleFeatureKind,
   truncated,
@@ -770,9 +905,43 @@ function FeaturesClientView({
       title="Feature 지도"
     >
       <div className="flex min-h-[calc(100vh-12rem)] flex-col rounded-lg border bg-muted/30">
-        <FeatureMapToolbar activeFeatureKinds={activeFeatureKinds} clusterMode={clusterMode} clustersQuery={clustersQuery} effectiveProvider={effectiveProvider} featuresQuery={featuresQuery} isDefaultKindFilter={isDefaultKindFilter} providerOptions={providerOptions} resetFeatureKinds={resetFeatureKinds} setProviderFilter={setProviderFilter} setStatusFilter={setStatusFilter} status={status} statusFilter={statusFilter} toggleFeatureKind={toggleFeatureKind} truncated={truncated} />
+        <FeatureMapToolbar
+          activeFeatureKinds={activeFeatureKinds}
+          clusterMode={clusterMode}
+          clustersQuery={clustersQuery}
+          effectiveProvider={effectiveProvider}
+          featuresQuery={featuresQuery}
+          isDefaultKindFilter={isDefaultKindFilter}
+          lifecycleStateFilter={lifecycleStateFilter}
+          providerOptions={providerOptions}
+          publicationStateFilter={publicationStateFilter}
+          qualityStateFilter={qualityStateFilter}
+          resetFeatureKinds={resetFeatureKinds}
+          setLifecycleStateFilter={setLifecycleStateFilter}
+          setProviderFilter={setProviderFilter}
+          setPublicationStateFilter={setPublicationStateFilter}
+          setQualityStateFilter={setQualityStateFilter}
+          status={status}
+          toggleFeatureKind={toggleFeatureKind}
+          truncated={truncated}
+        />
 
-      <FeatureMapWorkspace clusterItems={clusterItems} clusterMode={clusterMode} featureColumns={featureColumns} featureItems={featureItems} featureViewMode={featureViewMode} featuresQuery={featuresQuery} selectedFeatureId={selectedFeatureId} setFeatureViewMode={setFeatureViewMode} setSelectedFeatureId={setSelectedFeatureId} setTableSorting={setTableSorting} showAreaGeometry={showAreaGeometry} tableSorting={tableSorting} updateViewportFromMap={updateViewportFromMap} viewport={viewport} />
+        <FeatureMapWorkspace
+          clusterItems={clusterItems}
+          clusterMode={clusterMode}
+          featureColumns={featureColumns}
+          featureItems={featureItems}
+          featureViewMode={featureViewMode}
+          featuresQuery={featuresQuery}
+          selectedFeatureId={selectedFeatureId}
+          setFeatureViewMode={setFeatureViewMode}
+          setSelectedFeatureId={setSelectedFeatureId}
+          setTableSorting={setTableSorting}
+          showAreaGeometry={showAreaGeometry}
+          tableSorting={tableSorting}
+          updateViewportFromMap={updateViewportFromMap}
+          viewport={viewport}
+        />
       </div>
     </AdminShell>
   );

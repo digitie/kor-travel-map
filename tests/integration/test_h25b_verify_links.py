@@ -126,7 +126,7 @@ async def _seed_public_scope_boundaries(
     draft_feature = await _feature(session, "draft-collection")
     admin_feature = await _feature(session, "admin-collection")
     private_theme_feature = await _feature(session, "private-theme")
-    inactive_feature = await _feature(session, "inactive")
+    retired_feature = await _feature(session, "retired")
     feature_ids = (
         public_feature,
         candidate_feature,
@@ -134,7 +134,7 @@ async def _seed_public_scope_boundaries(
         draft_feature,
         admin_feature,
         private_theme_feature,
-        inactive_feature,
+        retired_feature,
     )
 
     await add_curation_item(
@@ -210,16 +210,27 @@ async def _seed_public_scope_boundaries(
     await add_curation_item(
         session,
         collection_id=public_collection.collection_id,
-        feature_id=inactive_feature,
-        external_item_id="inactive-feature",
+        feature_id=retired_feature,
+        external_item_id="retired-feature",
         status="included",
     )
+    # 이 행이 그리려는 공개 경계는 "collection·theme 쪽은 흠잡을 데 없이 공개인데
+    # Feature 자체가 공개 모집단에 없다"이다. legacy로는 그것을 ``status='inactive'``로
+    # 적었고, 0095 backfill은 ``status IN ('inactive','deleted')``를 lifecycle
+    # ``retired``로 환산했다. retired가 되면 ``ck_features_state_tuple``이 publication을
+    # ``suppressed``로 강제하므로 두 축을 함께 쓰는 것이 곧 legacy 한 값의 등가물이다.
+    # quality는 legacy가 건드리지 않았으므로 ``valid`` 그대로 둔다 — 축을 바꿔치기하면
+    # (예: quarantined) 다른 이유로 빠지는 행이 되어 이 경계를 더 이상 재지 못한다.
+    # 결과적으로 이 Feature는 ``feature.public_features``(lifecycle=active AND
+    # publication=published AND quality=valid)에 실재하지 않고, 그래서 아래 감사
+    # 결과에서도 빠져야 한다.
     await session.execute(
         text(
-            "UPDATE feature.features SET status = 'inactive' "
+            "UPDATE feature.features "
+            "SET lifecycle_state = 'retired', publication_state = 'suppressed' "
             "WHERE feature_id = :feature_id"
         ),
-        {"feature_id": inactive_feature},
+        {"feature_id": retired_feature},
     )
     return token, public_feature, feature_ids
 
@@ -278,7 +289,8 @@ async def test_public_audit_uses_committed_repeatable_read_repository_snapshot(
             token_results[0]["evidence"]["linked_feature_is_exact_name_candidate"]
             is True
         )
-        assert report["schema_version"] == 2
+        # 보고서 result row가 legacy ``feature_status`` 대신 3축을 싣게 되어 v3다.
+        assert report["schema_version"] == 3
         assert report["scope"] == "public"
         assert report["population"]["kind"] == "public-curation-repository"
         assert report["target_count"] >= 1

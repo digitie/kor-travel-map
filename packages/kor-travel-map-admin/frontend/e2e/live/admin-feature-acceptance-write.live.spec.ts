@@ -60,11 +60,11 @@ let failureDetail: string | null = null;
 // 빈 결과가 된다(2026-07-27 c7-v6 live 재현). base 고정으로 helper·API 단언과 동기를 유지한다.
 const LON = 127.5;
 const LAT = 36.5;
-// **status marker 좌표만** RUN_ID 해시로 run-unique jitter한다: 이전 run이 cleanup 전에
-// 죽으면 동일 status·동일 좌표의 leftover place feature가 현재 run과 0.000° 거리로 client-side
+// **상태 marker 좌표만** RUN_ID 해시로 run-unique jitter한다: 이전 run이 cleanup 전에
+// 죽으면 동일 3축·동일 좌표의 leftover place feature가 현재 run과 0.000° 거리로 client-side
 // supercluster에 묶여 개별 marker aria-label이 사라진다(적대 리뷰 P2, T-VN-H12). run별
-// cleanup은 RUN_ID-scoped라 이 cross-run 충돌을 못 막으므로 좌표를 분리한다. status marker만
-// map marker로 렌더·클릭 단언되므로(assertStatusMarker) jitter를 STATUS_FEATURES에 국한한다 —
+// cleanup은 RUN_ID-scoped라 이 cross-run 충돌을 못 막으므로 좌표를 분리한다. 상태 marker만
+// map marker로 렌더·클릭 단언되므로(assertStateMarker) jitter를 STATE_FEATURES에 국한한다 —
 // weather/price/correction/search는 marker 클릭이 아니라 featureId/query 단언이라 supercluster
 // 문제가 없고 base 동기가 우선이다. 파생은 결정론적(sha256(RUN_ID), SEARCH_TOKEN과 동일 패턴)이라
 // RECOVERY_ONLY 재파생과 일관되며 cleanup은 featureId 기반이라 좌표 무관. 진폭 ±0.25°는
@@ -130,13 +130,26 @@ function providerFixtureFeatureId(kind: "weather" | "price"): string {
   );
 }
 
-const STATUS_FIXTURES = ["draft", "inactive", "hidden"] as const;
-const STATUS_FEATURES = STATUS_FIXTURES.map((status, index) => ({
-  featureId: adminFixtureFeatureId(`marker::${status}`),
+const STATE_FIXTURES = [
+  { lifecycleState: "active", publicationState: "draft", stateLabel: "draft" },
+  {
+    lifecycleState: "retired",
+    publicationState: "suppressed",
+    stateLabel: "retired",
+  },
+  {
+    lifecycleState: "active",
+    publicationState: "suppressed",
+    stateLabel: "suppressed",
+  },
+] as const;
+const STATE_FEATURES = STATE_FIXTURES.map((state, index) => ({
+  featureId: adminFixtureFeatureId(`marker::${state.stateLabel}`),
   lat: STATUS_MARKER_LAT + index * 0.001,
   lon: STATUS_MARKER_LON + index * 0.001,
-  name: `E2E ${status} marker ${RUN_ID}`,
-  status,
+  name: `E2E ${state.stateLabel} marker ${RUN_ID}`,
+  qualityState: "valid" as const,
+  ...state,
 }));
 const CORRECTION_FEATURE = {
   featureId: adminFixtureFeatureId("correction"),
@@ -148,13 +161,13 @@ const WEATHER_FEATURE = {
   featureId: providerFixtureFeatureId("weather"),
   lat: LAT,
   lon: LON + 0.002,
-  name: `E2E hidden weather ${RUN_ID}`,
+  name: `E2E suppressed weather ${RUN_ID}`,
 };
 const PRICE_FEATURE = {
   featureId: providerFixtureFeatureId("price"),
   lat: LAT,
   lon: LON - 0.002,
-  name: `E2E hidden price ${RUN_ID}`,
+  name: `E2E suppressed price ${RUN_ID}`,
 };
 // 검색 fixture 전용 토큰은 RUN_ID의 해시 파생값을 쓴다: /v1/features/search는
 // pg_trgm similarity(threshold 0.2) 기반이라, 쿼리에 RUN_ID 원문(수십 자)을
@@ -177,10 +190,13 @@ const SEARCH_FEATURES = ["alpha", "beta"].map((suffix, index) => ({
   lon: LON + 0.004 + index * 0.001,
   name: `${SEARCH_QUERY} ${suffix}`,
   suffix,
-  status: "active" as const,
+  lifecycleState: "active" as const,
+  publicationState: "published" as const,
+  qualityState: "valid" as const,
+  stateLabel: "public",
 }));
 const API_OWNED_FEATURE_IDS = [
-  ...STATUS_FEATURES.map(({ featureId }) => featureId),
+  ...STATE_FEATURES.map(({ featureId }) => featureId),
   CORRECTION_FEATURE.featureId,
   ...SEARCH_FEATURES.map(({ featureId }) => featureId),
 ];
@@ -219,16 +235,15 @@ async function responseFeatureId(
   if (cached !== undefined) return cached;
 
   const detail = requireBody(
-    await browserFetch<DetailResponse>(
-      page,
-      adminFeaturePath(legacyFeatureId),
-    ),
+    await browserFetch<DetailResponse>(page, adminFeaturePath(legacyFeatureId)),
     `${label} detail`,
   ).data.feature;
   const featureId = detail.feature_id;
   expect(detail.feature_uuid).toBe(featureId);
   if (featureId === legacyFeatureId) {
-    throw new Error(`${label} 응답 feature_id가 UUID 정본으로 치환되지 않았습니다`);
+    throw new Error(
+      `${label} 응답 feature_id가 UUID 정본으로 치환되지 않았습니다`,
+    );
   }
   responseFeatureIds.set(legacyFeatureId, featureId);
   return featureId;
@@ -396,7 +411,10 @@ async function createOwnedPlace(
     lat: number;
     lon: number;
     name: string;
-    status: "draft" | "active" | "inactive" | "hidden";
+    lifecycleState: "active" | "retired";
+    publicationState: "draft" | "published" | "suppressed";
+    qualityState: "valid" | "quarantined";
+    stateLabel: string;
   },
 ): Promise<void> {
   if (RECOVERY_ONLY) {
@@ -405,7 +423,7 @@ async function createOwnedPlace(
   // Browser 실패 증적은 의도적으로 HTTP body를 보존하지 않는다. 대신 create와
   // review 승인을 분리해 기록하면, 안전한 4xx 코드만으로도 어느 DB command
   // 경계가 실패했는지 재현 가능하다.
-  failureDetail = `create-${fixture.status}:submit`;
+  failureDetail = `create-${fixture.stateLabel}:submit`;
   const create = await browserFetch<ChangeResponse>(
     page,
     "/v1/admin/features",
@@ -421,33 +439,35 @@ async function createOwnedPlace(
         marker_color: "P-02",
         marker_icon: "marker",
         name: fixture.name,
-        reason: `${REASON} create ${fixture.status}`,
-        status: fixture.status,
+        lifecycle_state: fixture.lifecycleState,
+        publication_state: fixture.publicationState,
+        quality_state: fixture.qualityState,
+        reason: `${REASON} create ${fixture.stateLabel}`,
       },
       method: "POST",
     },
   );
-  const created = requireBody(create, `create ${fixture.status}`).data.request;
+  const created = requireBody(create, `create ${fixture.stateLabel}`).data.request;
   if (created.status !== "pending") {
     throw new Error("production review mode가 require_review가 아닙니다");
   }
-  failureDetail = `create-${fixture.status}:approve`;
+  failureDetail = `create-${fixture.stateLabel}:approve`;
   const approved = await approveOrReject(
     page,
     created.request_id,
     "approve",
-    `${REASON} approve ${fixture.status}`,
+    `${REASON} approve ${fixture.stateLabel}`,
   );
   if (approved.data.request.status !== "applied") {
-    throw new Error(`create ${fixture.status} 승인이 applied가 아닙니다`);
+    throw new Error(`create ${fixture.stateLabel} 승인이 applied가 아닙니다`);
   }
-  failureDetail = `create-${fixture.status}:detail`;
+  failureDetail = `create-${fixture.stateLabel}:detail`;
   const detail = requireBody(
     await browserFetch<DetailResponse>(
       page,
       adminFeaturePath(fixture.featureId),
     ),
-    `created ${fixture.status} detail`,
+    `created ${fixture.stateLabel} detail`,
   );
   const featureId = detail.data.feature.feature_id;
   expect(detail.data.feature.feature_uuid).toBe(featureId);
@@ -455,7 +475,9 @@ async function createOwnedPlace(
   expect(detail.data.feature).toMatchObject({
     feature_id: featureId,
     name: fixture.name,
-    status: fixture.status,
+    lifecycle_state: fixture.lifecycleState,
+    publication_state: fixture.publicationState,
+    quality_state: fixture.qualityState,
   });
 }
 
@@ -506,7 +528,7 @@ async function cleanupApiOwnedFeatures(page: Page): Promise<void> {
     const responseId = current.feature_id;
     expect(current.feature_uuid).toBe(responseId);
     responseFeatureIds.set(featureId, responseId);
-    if (current.status !== "deleted") {
+    if (current.lifecycle_state !== "retired") {
       const revision = await browserFetch<RevisionResponse>(
         page,
         revisionPath(responseId),
@@ -521,7 +543,8 @@ async function cleanupApiOwnedFeatures(page: Page): Promise<void> {
           method: "DELETE",
         },
       );
-      const deleteRequest = requireBody(deletion, "cleanup DELETE").data.request;
+      const deleteRequest = requireBody(deletion, "cleanup DELETE").data
+        .request;
       if (deleteRequest.status === "pending") {
         const approved = await approveOrReject(
           page,
@@ -544,11 +567,13 @@ async function cleanupApiOwnedFeatures(page: Page): Promise<void> {
             page,
             adminFeaturePath(responseId),
           );
-          return latest.body?.data.feature.status ?? `http:${latest.status}`;
+          return (
+            latest.body?.data.feature.lifecycle_state ?? `http:${latest.status}`
+          );
         },
         { timeout: UI_TIMEOUT },
       )
-      .toBe("deleted");
+      .toBe("retired");
     expect(
       (await browserFetch(page, publicFeaturePath(responseId))).status,
     ).toBe(404);
@@ -624,7 +649,9 @@ function tamperCursorPayload(cursor: string): string {
     segments[0].length === 0 ||
     segments[1].length === 0
   ) {
-    throw new Error("search cursor wire shape이 올바르지 않습니다 (value redacted)");
+    throw new Error(
+      "search cursor wire shape이 올바르지 않습니다 (value redacted)",
+    );
   }
   const first = segments[0][0];
   const replacement = first === "A" ? "B" : "A";
@@ -644,7 +671,9 @@ async function assertSearchProblem(
   expect(result.status).toBe(422);
   expect(result.contentType?.startsWith("application/problem+json")).toBe(true);
   if (result.body === null) {
-    throw new Error("feature search problem body가 없습니다 (response redacted)");
+    throw new Error(
+      "feature search problem body가 없습니다 (response redacted)",
+    );
   }
   expect(result.body.code).toBe(code);
   const serialized = JSON.stringify(result.body);
@@ -790,7 +819,9 @@ async function assertAdminInBoundsIncludes(
     max_lon: String(fixture.lon + 0.0005),
     min_lat: String(fixture.lat - 0.0005),
     min_lon: String(fixture.lon - 0.0005),
-    status: "hidden",
+    lifecycle_state: "active",
+    publication_state: "suppressed",
+    quality_state: "valid",
     zoom: "16",
   });
   const result = requireBody(
@@ -874,33 +905,36 @@ async function recenterMapTo(
   await expect
     .poll(
       () =>
-        page.getByTestId("map-canvas-container").evaluate((node, coord) => {
-          const map = (
-            node as HTMLDivElement & {
-              _maplibreMap?: {
-                jumpTo(options: { center: [number, number] }): void;
-              };
+        page.getByTestId("map-canvas-container").evaluate(
+          (node, coord) => {
+            const map = (
+              node as HTMLDivElement & {
+                _maplibreMap?: {
+                  jumpTo(options: { center: [number, number] }): void;
+                };
+              }
+            )._maplibreMap;
+            if (map === undefined) {
+              return false;
             }
-          )._maplibreMap;
-          if (map === undefined) {
-            return false;
-          }
-          map.jumpTo({ center: [coord.lon, coord.lat] });
-          return true;
-        }, { lon, lat }),
+            map.jumpTo({ center: [coord.lon, coord.lat] });
+            return true;
+          },
+          { lon, lat },
+        ),
       { timeout: UI_TIMEOUT },
     )
     .toBe(true);
 }
 
-async function assertStatusMarker(
+async function assertStateMarker(
   page: Page,
-  fixture: (typeof STATUS_FEATURES)[number],
+  fixture: (typeof STATE_FEATURES)[number],
 ): Promise<void> {
   const responseId = await responseFeatureId(
     page,
     fixture.featureId,
-    `${fixture.status} marker`,
+    `${fixture.stateLabel} marker`,
   );
   await page.goto("/features");
   await expect(page.getByRole("heading", { name: "Feature 지도" })).toBeVisible(
@@ -913,10 +947,10 @@ async function assertStatusMarker(
   // place를 켜기만 하고 기본 weather를 끄지 않아, 같은 run이 seed한 hidden weather
   // feature(place 마커와 ~0.004° 거리)가 함께 렌더되고 z14대에서 client-side
   // supercluster로 묶여 개별 place 마커의 aria-label이 사라졌다(2026-07-27 live 재현).
-  // place만 남기면 이 cross-kind 충돌이 사라진다. 동일 status·동일 좌표의 cross-run
-  // leftover(죽은 run 잔여)는 어떤 줌으로도 decluster 불가하므로, status marker 좌표를 RUN_ID
+  // place만 남기면 이 cross-kind 충돌이 사라진다. 동일 3축·동일 좌표의 cross-run
+  // leftover(죽은 run 잔여)는 어떤 줌으로도 decluster 불가하므로, 상태 marker 좌표를 RUN_ID
   // 해시로 run-unique jitter(STATUS_MARKER_LON/LAT)하고 아래 recenterMapTo로 map을 fixture
-  // 좌표에 맞춰 공간 충돌 자체를 제거한다(T-VN-H12). jitter는 status marker에만 국한한다.
+  // 좌표에 맞춰 공간 충돌 자체를 제거한다(T-VN-H12). jitter는 상태 marker에만 국한한다.
   const kindGroup = page.getByTestId("kind-filter");
   for (const toggle of await kindGroup.locator("button[aria-pressed]").all()) {
     const name = (await toggle.textContent())?.trim();
@@ -929,7 +963,15 @@ async function assertStatusMarker(
       await toggle.click();
     }
   }
-  await page.getByLabel("상태 필터").selectOption(fixture.status);
+  await page
+    .getByLabel("수명주기 필터")
+    .selectOption(fixture.lifecycleState);
+  await page
+    .getByLabel("공개 상태 필터")
+    .selectOption(fixture.publicationState);
+  await page
+    .getByLabel("품질 상태 필터")
+    .selectOption(fixture.qualityState);
   const inBoundsResponsePromise = page.waitForResponse(
     async (response) => {
       if (
@@ -941,15 +983,15 @@ async function assertStatusMarker(
       }
       const params = new URL(response.url()).searchParams;
       if (
-        params.get("status") !== fixture.status ||
+        params.get("lifecycle_state") !== fixture.lifecycleState ||
+        params.get("publication_state") !== fixture.publicationState ||
+        params.get("quality_state") !== fixture.qualityState ||
         Number(params.get("zoom")) < 14
       ) {
         return false;
       }
       const body = (await response.json()) as InBoundsResponse;
-      return body.data.items.some(
-        (item) => item.feature_id === responseId,
-      );
+      return body.data.items.some((item) => item.feature_id === responseId);
     },
     { timeout: FLOW_TIMEOUT },
   );
@@ -964,17 +1006,17 @@ async function assertStatusMarker(
   const detail = page.getByTestId("feature-detail-panel");
   await expect(detail).toContainText(fixture.name);
   await expect(detail).toContainText(
-    fixture.status === "draft"
-      ? "초안"
-      : fixture.status === "inactive"
-        ? "비활성"
-        : "숨김",
+    fixture.publicationState === "draft"
+      ? "공개: 초안"
+      : fixture.lifecycleState === "retired"
+        ? "수명: 종료"
+        : "공개: 비공개",
   );
   await expectDetailPanelAboveScaleControl(page, "feature-detail-panel");
 
-  expect(
-    (await browserFetch(page, publicFeaturePath(responseId))).status,
-  ).toBe(404);
+  expect((await browserFetch(page, publicFeaturePath(responseId))).status).toBe(
+    404,
+  );
   await assertPublicInBoundsExcludes(
     page,
     responseId,
@@ -995,23 +1037,18 @@ async function assertNonpublicKindCards(page: Page): Promise<void> {
       page,
       `${adminFeaturePath(weatherId)}/weather`,
     ),
-    "hidden weather admin card",
+    "suppressed weather admin card",
   );
   expect(weather.data.feature_id).toBe(weatherId);
   expect(weather.data.metrics).toHaveLength(1);
   expect(weather.data.metrics[0]).toMatchObject({ metric_key: "TMP" });
   expect(
-    (
-      await browserFetch(
-        page,
-        `${publicFeaturePath(weatherId)}/weather`,
-      )
-    ).status,
-  ).toBe(404);
-  expect(
-    (await browserFetch(page, publicFeaturePath(weatherId)))
+    (await browserFetch(page, `${publicFeaturePath(weatherId)}/weather`))
       .status,
   ).toBe(404);
+  expect((await browserFetch(page, publicFeaturePath(weatherId))).status).toBe(
+    404,
+  );
   await assertPublicInBoundsExcludes(
     page,
     weatherId,
@@ -1037,24 +1074,18 @@ async function assertNonpublicKindCards(page: Page): Promise<void> {
       page,
       `${adminFeaturePath(priceId)}/price`,
     ),
-    "hidden price admin card",
+    "suppressed price admin card",
   );
   expect(price.data.feature_id).toBe(priceId);
   expect(price.data.current).toHaveLength(1);
   expect(price.data.history).toHaveLength(1);
   expect(price.data.current[0]).toMatchObject({ product_key: "gasoline" });
   expect(
-    (
-      await browserFetch(
-        page,
-        `${publicFeaturePath(priceId)}/price`,
-      )
-    ).status,
+    (await browserFetch(page, `${publicFeaturePath(priceId)}/price`)).status,
   ).toBe(404);
-  expect(
-    (await browserFetch(page, publicFeaturePath(priceId)))
-      .status,
-  ).toBe(404);
+  expect((await browserFetch(page, publicFeaturePath(priceId))).status).toBe(
+    404,
+  );
   await assertPublicInBoundsExcludes(
     page,
     priceId,
@@ -1150,10 +1181,7 @@ async function assertStaleCorrection(page: Page): Promise<void> {
   const baselineTag = revisionResponses.at(-1)?.entityTag ?? null;
   expect(baselineTag).toMatch(/^"[1-9][0-9]*"$/);
   const baselineDetail = requireBody(
-    await browserFetch<DetailResponse>(
-      page,
-      adminFeaturePath(correctionId),
-    ),
+    await browserFetch<DetailResponse>(page, adminFeaturePath(correctionId)),
     "correction baseline detail",
   );
   expect(`"${baselineDetail.data.feature.row_revision}"`).toBe(baselineTag);
@@ -1192,10 +1220,7 @@ async function assertStaleCorrection(page: Page): Promise<void> {
   );
   expect(competingTag).not.toBe(baselineTag);
   const competingDetail = requireBody(
-    await browserFetch<DetailResponse>(
-      page,
-      adminFeaturePath(correctionId),
-    ),
+    await browserFetch<DetailResponse>(page, adminFeaturePath(correctionId)),
     "competing detail",
   );
   expect(competingDetail.data.feature.name).toBe(competingName);
@@ -1364,14 +1389,17 @@ test("@admin-feature-live-acceptance #741/#785 owned production acceptance", asy
 
   let primaryError: unknown = null;
   try {
-    for (const fixture of STATUS_FEATURES) {
-      stage = `create-${fixture.status}`;
+    for (const fixture of STATE_FEATURES) {
+      stage = `create-${fixture.stateLabel}`;
       await createOwnedPlace(page, fixture);
     }
     stage = "create-correction";
     await createOwnedPlace(page, {
       ...CORRECTION_FEATURE,
-      status: "active",
+      lifecycleState: "active",
+      publicationState: "published",
+      qualityState: "valid",
+      stateLabel: "public",
     });
     for (const fixture of SEARCH_FEATURES) {
       stage = `create-search-${
@@ -1380,13 +1408,13 @@ test("@admin-feature-live-acceptance #741/#785 owned production acceptance", asy
       await createOwnedPlace(page, fixture);
     }
 
-    for (const fixture of STATUS_FEATURES) {
-      stage = `status-marker-${fixture.status}`;
-      await test.step(`${fixture.status} admin marker와 public 음성`, () =>
-        assertStatusMarker(page, fixture));
+    for (const fixture of STATE_FEATURES) {
+      stage = `state-marker-${fixture.stateLabel}`;
+      await test.step(`${fixture.stateLabel} admin marker와 public 음성`, () =>
+        assertStateMarker(page, fixture));
     }
     stage = "nonpublic-kind-cards";
-    await test.step("hidden weather/price admin card와 UI panel", () =>
+    await test.step("suppressed weather/price admin card와 UI panel", () =>
       assertNonpublicKindCards(page));
     stage = "search-cursor-contract";
     await test.step("T-VN-15 search total/cursor/mismatch/tamper", () =>

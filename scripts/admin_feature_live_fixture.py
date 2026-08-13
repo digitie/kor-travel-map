@@ -144,10 +144,20 @@ def _admin_fixture_feature_id(run_id: str, role: str) -> str:
     )
 
 
-def _admin_marker_feature_ids(run_id: str) -> dict[str, str]:
+#: marker fixture가 만드는 3축 상태(lifecycle, publication, quality).
+#: 기대값 판정이 feature_id 문자열 패턴이 아니라 이 표를 본다 — id는 결정적 해시라
+#: ``endswith("::marker::draft")`` 같은 접미 매칭이 성립하지 않는다.
+_ADMIN_MARKER_STATES: Final[dict[str, tuple[str, str, str]]] = {
+    "draft": ("active", "draft", "valid"),
+    "retired": ("retired", "suppressed", "valid"),
+    "suppressed": ("active", "suppressed", "valid"),
+}
+
+
+def _admin_marker_feature_states(run_id: str) -> dict[str, tuple[str, str, str]]:
     return {
-        _admin_fixture_feature_id(run_id, f"marker::{status}"): status
-        for status in ("draft", "inactive", "hidden")
+        _admin_fixture_feature_id(run_id, f"marker::{label}"): state
+        for label, state in _ADMIN_MARKER_STATES.items()
     }
 
 
@@ -164,11 +174,11 @@ def _api_feature_fingerprints(
     marker_lon = _LON + coord_jitter(0)
     marker_lat = _LAT + coord_jitter(4)
     expected: dict[str, tuple[float, float, frozenset[str]]] = {}
-    for index, status in enumerate(("draft", "inactive", "hidden")):
-        expected[_admin_fixture_feature_id(run_id, f"marker::{status}")] = (
+    for index, state_label in enumerate(_ADMIN_MARKER_STATES):
+        expected[_admin_fixture_feature_id(run_id, f"marker::{state_label}")] = (
             marker_lon + index * 0.001,
             marker_lat + index * 0.001,
-            frozenset({f"E2E {status} marker {run_id}"}),
+            frozenset({f"E2E {state_label} marker {run_id}"}),
         )
     expected[_admin_fixture_feature_id(run_id, "correction")] = (
         _LON,
@@ -268,7 +278,8 @@ async def _assert_owned_or_absent(
             text(
                 """
                 SELECT
-                  feature_id, kind, name, category, status,
+                  feature_id, kind, name, category,
+                  lifecycle_state, publication_state, quality_state,
                   marker_icon, marker_color, data_origin, coord_precision_digits,
                   x_extension.ST_X(coord) AS lon,
                   x_extension.ST_Y(coord) AS lat
@@ -291,8 +302,10 @@ async def _assert_owned_or_absent(
             "lon": _LON + 0.002,
             "marker_color": "P-03",
             "marker_icon": "weather",
-            "name": f"E2E hidden weather {run_id}",
-            "status": "hidden",
+            "name": f"E2E suppressed weather {run_id}",
+            "lifecycle_state": "active",
+            "publication_state": "suppressed",
+            "quality_state": "valid",
         },
         feature_ids[1]: {
             "category": "00000000",
@@ -303,8 +316,10 @@ async def _assert_owned_or_absent(
             "lon": _LON - 0.002,
             "marker_color": "P-04",
             "marker_icon": "fuel",
-            "name": f"E2E hidden price {run_id}",
-            "status": "hidden",
+            "name": f"E2E suppressed price {run_id}",
+            "lifecycle_state": "active",
+            "publication_state": "suppressed",
+            "quality_state": "valid",
         },
     }
     present: set[str] = set()
@@ -321,7 +336,9 @@ async def _assert_owned_or_absent(
             "marker_color": str(row["marker_color"]),
             "marker_icon": str(row["marker_icon"]),
             "name": str(row["name"]),
-            "status": str(row["status"]),
+            "lifecycle_state": str(row["lifecycle_state"]),
+            "publication_state": str(row["publication_state"]),
+            "quality_state": str(row["quality_state"]),
         }
         if expected.get(feature_id) != fingerprint:
             raise RuntimeError("owned fixture ID의 소유권 fingerprint가 다릅니다")
@@ -533,7 +550,8 @@ async def _seed(
         text(
             """
             INSERT INTO feature.features (
-                feature_id, kind, name, category, coord, coord_precision_digits, status,
+                feature_id, kind, name, category, coord, coord_precision_digits,
+                lifecycle_state, publication_state, quality_state,
                 marker_icon, marker_color, data_origin, data_version,
                 updated_at
             ) VALUES
@@ -542,23 +560,23 @@ async def _seed(
                 x_extension.ST_SetSRID(
                   x_extension.ST_MakePoint(:weather_lon, :lat), 4326
                 ),
-                6, 'hidden', 'weather', 'P-03', 'user_request', 1, now()
+                6, 'active', 'suppressed', 'valid', 'weather', 'P-03', 'user_request', 1, now()
               ),
               (
                 :price_id, 'price', :price_name, '00000000',
                 x_extension.ST_SetSRID(
                   x_extension.ST_MakePoint(:price_lon, :lat), 4326
                 ),
-                6, 'hidden', 'fuel', 'P-04', 'user_request', 1, now()
+                6, 'active', 'suppressed', 'valid', 'fuel', 'P-04', 'user_request', 1, now()
               )
             """
         ),
         {
             "weather_id": weather_id,
-            "weather_name": f"E2E hidden weather {run_id}",
+            "weather_name": f"E2E suppressed weather {run_id}",
             "weather_lon": _LON + 0.002,
             "price_id": price_id,
-            "price_name": f"E2E hidden price {run_id}",
+            "price_name": f"E2E suppressed price {run_id}",
             "price_lon": _LON - 0.002,
             "lat": _LAT,
         },
@@ -727,7 +745,8 @@ async def _inspect_api_owned(
             text(
                 """
                 SELECT
-                  feature_id, kind, name, category, status,
+                  feature_id, kind, name, category,
+                  lifecycle_state, publication_state, quality_state,
                   marker_icon, marker_color, data_origin,
                   x_extension.ST_X(coord) AS lon,
                   x_extension.ST_Y(coord) AS lat
@@ -749,7 +768,9 @@ async def _inspect_api_owned(
         if (
             row["kind"] != "place"
             or row["category"] != "01070300"
-            or row["status"] != "deleted"
+            or row["lifecycle_state"] != "retired"
+            or row["publication_state"] != "suppressed"
+            or row["quality_state"] != "valid"
             or row["marker_icon"] != "marker"
             or row["marker_color"] != "P-02"
             or row["data_origin"] != "user_request"
@@ -787,10 +808,10 @@ async def _inspect_api_owned(
     ).mappings().all()
     reason_prefix = f"admin feature live acceptance {run_id} "
     allowed_reasons = {
-        f"{reason_prefix}create active",
+        f"{reason_prefix}create public",
         f"{reason_prefix}create draft",
-        f"{reason_prefix}create hidden",
-        f"{reason_prefix}create inactive",
+        f"{reason_prefix}create suppressed",
+        f"{reason_prefix}create retired",
         f"{reason_prefix}competing update",
         f"{reason_prefix}reject reapply fixture",
         f"{reason_prefix}cleanup delete",
@@ -859,12 +880,12 @@ async def _inspect_api_owned(
         ):
             raise RuntimeError("API-owned Feature version 소유권이 다릅니다")
         expected_lon, expected_lat, expected_names = fingerprint
-        expected_status = "active"
+        expected_state = ("active", "published", "valid")
         if change_kind == "delete":
-            expected_status = "deleted"
+            expected_state = ("retired", "suppressed", "valid")
         elif change_kind == "add":
-            expected_status = _admin_marker_feature_ids(run_id).get(
-                feature_id, expected_status
+            expected_state = _admin_marker_feature_states(run_id).get(
+                feature_id, expected_state
             )
         if (
             payload.get("feature_id") != feature_id
@@ -875,10 +896,30 @@ async def _inspect_api_owned(
             or payload.get("marker_color") != "P-02"
             or payload.get("coord_precision_digits") != 6
             or payload.get("data_version") != version
-            or payload.get("user_change_kind") != change_kind
-            or payload.get("user_change_status") != "applied"
             or payload.get("name") not in expected_names
-            or payload.get("status") != expected_status
+            or tuple(
+                payload.get(axis)
+                for axis in (
+                    "lifecycle_state",
+                    "publication_state",
+                    "quality_state",
+                )
+            )
+            != expected_state
+            or not isinstance(payload.get("detail"), dict)
+            or any(
+                legacy_key in payload
+                for legacy_key in (
+                    "status",
+                    "deleted_at",
+                    "user_deleted_at",
+                    "user_deleted_by",
+                    "user_change_kind",
+                    "user_change_status",
+                    "user_change_request_id",
+                    "user_change_reason",
+                )
+            )
             or not isinstance(payload.get("lon"), (int, float))
             or not isinstance(payload.get("lat"), (int, float))
             or not math.isclose(
@@ -1016,10 +1057,10 @@ async def _audit_complete_api_owned(
     reason_prefix = f"admin feature live acceptance {run_id} "
     expected_requests = Counter(
         {
-            ("add", "applied", f"{reason_prefix}create active"): 3,
+            ("add", "applied", f"{reason_prefix}create public"): 3,
             ("add", "applied", f"{reason_prefix}create draft"): 1,
-            ("add", "applied", f"{reason_prefix}create hidden"): 1,
-            ("add", "applied", f"{reason_prefix}create inactive"): 1,
+            ("add", "applied", f"{reason_prefix}create suppressed"): 1,
+            ("add", "applied", f"{reason_prefix}create retired"): 1,
             ("delete", "applied", f"{reason_prefix}cleanup delete"): 6,
             ("update", "applied", f"{reason_prefix}competing update"): 1,
             (

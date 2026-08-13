@@ -373,16 +373,49 @@ async def _links_of(engine: AsyncEngine, feature_id: str) -> set[str]:
         return {r[0] for r in result}
 
 
-async def _feature_status(engine: AsyncEngine, feature_id: str) -> tuple[str, bool]:
+async def _feature_axes(engine: AsyncEngine, feature_id: str) -> tuple[str, str, str]:
+    """Feature의 (lifecycle, publication, quality) 3축을 읽는다.
+
+    0097이 ``status``/``deleted_at``을 물리 삭제했다. 이 헬퍼가 돌려주던
+    ``(status, deleted_at IS NOT NULL)`` 쌍은 두 축으로 갈라졌다 —
+    ``deleted_at IS NULL``이 ``lifecycle_state='active'``이고, ``status='active'``는
+    세 축이 모두 공개값인 상태다. 병합이 어느 축을 건드렸는지 구분해서 봐야 하므로
+    쌍이 아니라 축 3개를 그대로 돌려준다.
+    """
+
     async with AsyncSession(engine) as session:
         row = (
             await session.execute(
-                select(FeatureRow.status, FeatureRow.deleted_at).where(
-                    FeatureRow.feature_id == feature_id
-                )
+                select(
+                    FeatureRow.lifecycle_state,
+                    FeatureRow.publication_state,
+                    FeatureRow.quality_state,
+                ).where(FeatureRow.feature_id == feature_id)
             )
         ).one()
-        return (row[0], row[1] is not None)
+        return (row[0], row[1], row[2])
+
+
+async def _is_on_public_surface(engine: AsyncEngine, feature_id: str) -> bool:
+    """``feature.public_features``에 그 Feature가 실재하는지.
+
+    "공개 표면에 보인다"의 정본 술어는 0097이 만든 이 view다. 테스트가 축 3개를
+    손으로 조합해 공개 여부를 흉내 내면 view 정의가 바뀔 때 조용히 갈라지므로,
+    공개 여부는 view 실재로만 단언한다.
+    """
+
+    async with AsyncSession(engine) as session:
+        return bool(
+            (
+                await session.execute(
+                    text(
+                        "SELECT EXISTS (SELECT 1 FROM feature.public_features "
+                        "WHERE feature_id = :feature_id)"
+                    ),
+                    {"feature_id": feature_id},
+                )
+            ).scalar_one()
+        )
 
 
 async def _reinsert_loser_only_legacy(session: AsyncSession) -> tuple[str, str]:
@@ -698,11 +731,30 @@ async def test_merge_from_review_full_flow(seeded: str, migrated_engine: AsyncEn
         ("legacy 충돌 master", "f_master", True),
     ]
     assert loser_memberships == 0
-    # loser soft-delete.
-    assert await _feature_status(migrated_engine, "f_loser") == ("deleted", True)
-    # master는 그대로 active.
-    status, _ = await _feature_status(migrated_engine, "f_master")
-    assert status == "active"
+    # loser는 T-VN-34 typed lifecycle transition으로 retire/suppress된다.
+    async with AsyncSession(migrated_engine) as session:
+        loser_axes = (
+            await session.execute(
+                text(
+                    """
+                    SELECT lifecycle_state, publication_state, quality_state
+                    FROM feature.features WHERE feature_id = 'f_loser'
+                    """
+                )
+            )
+        ).one()
+    assert tuple(loser_axes) == ("retired", "suppressed", "valid")
+    # master는 transition writer가 건드리지 않는다. legacy `status='active'`가
+    # 뜻하던 상태는 3축에서 (active, published, valid)이고, 그 셋이 곧 공개 projection
+    # 술어이므로 "축이 그대로다"와 "공개 표면에 그대로 있다"를 함께 못 박는다.
+    assert await _feature_axes(migrated_engine, "f_master") == (
+        "active",
+        "published",
+        "valid",
+    )
+    assert await _is_on_public_surface(migrated_engine, "f_master") is True
+    # loser는 반대로 공개 표면에서 사라져야 한다(legacy `deleted_at IS NOT NULL`).
+    assert await _is_on_public_surface(migrated_engine, "f_loser") is False
 
     # feature_merge_history 1행 + 큐 merged.
     async with AsyncSession(migrated_engine) as session:
@@ -734,13 +786,13 @@ async def test_merge_from_review_full_flow(seeded: str, migrated_engine: AsyncEn
                     SELECT override_value, prevent_provider_reactivation, reason, created_by
                     FROM ops.feature_overrides
                     WHERE feature_id = 'f_loser'
-                      AND field_path = 'status'
+                      AND field_path = 'lifecycle_state'
                       AND status = 'active'
                     """
                 )
             )
         ).one()
-        assert override[0] == "deleted"
+        assert override[0] == "retired"
         assert override[1] is True
         assert override[2] == "dup"
         assert override[3] == "op-1"
@@ -1478,14 +1530,17 @@ async def test_theme_slug_reuse_cannot_take_legacy_collection(
             ),
             {"theme_id": original.theme_id},
         )
+        # 이 fixture가 f_theme_reuse에 요구하는 것은 "legacy writer가 붙일 수 있는
+        # 평범한 공개 Feature" 하나뿐이다. 0097이 지운 legacy `status='active'`는
+        # 3축의 (active, published, valid)이고 그 셋이 그대로 컬럼 DEFAULT이므로,
+        # 축을 적지 않는 편이 원래 INSERT와 등가다.
         await session.execute(
             text(
                 """
                 INSERT INTO feature.features (
-                    feature_id, kind, name, category, status
+                    feature_id, kind, name, category
                 ) VALUES (
-                    'f_theme_reuse', 'place', 'slug 재사용 장소',
-                    '01070100', 'active'
+                    'f_theme_reuse', 'place', 'slug 재사용 장소', '01070100'
                 )
                 """
             )
@@ -2722,7 +2777,19 @@ async def test_merge_first_rechecks_all_membership_writer_feature_lifecycles(
         assert merge_task is not None
         await asyncio.wait_for(merge_task, timeout=5)
         assert writer_task is not None
-        with pytest.raises(ValueError, match="active Feature|Feature가 없습니다"):
+        # 단언의 본질은 "merge가 retire한 f_loser에는 어떤 membership writer도
+        # 붙지 못한다"이고, 세 writer는 각자 다른 문구로 거절한다. legacy_create만
+        # 3축 전환에서 문구가 "active Feature"→"selectable Feature"로 바뀌었는데,
+        # 그 가드가 보는 술어가 legacy `status NOT IN ('deleted','hidden')`의 등가물인
+        # `lifecycle='active' AND publication <> 'suppressed'`라서 draft·quarantined도
+        # 통과시키기 때문이다 — 'active'는 이제 lifecycle 축 이름이라 오해를 부른다.
+        # 통짜 OR 대신 writer별 문구를 못 박아, 가드가 서로 뒤바뀌는 것까지 잡는다.
+        expected_refusal = {
+            "add": "must reference an active Feature",
+            "feature_link": "Feature가 없습니다",
+            "legacy_create": "must reference a selectable Feature",
+        }[writer_kind]
+        with pytest.raises(ValueError, match=expected_refusal):
             await asyncio.wait_for(writer_task, timeout=5)
     finally:
         for task in (writer_task, merge_task):

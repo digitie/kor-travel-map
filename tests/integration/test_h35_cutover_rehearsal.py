@@ -82,6 +82,26 @@ def _run_alembic(dsn: str, revision: str) -> None:
     command.upgrade(config, revision)
 
 
+async def _run_alembic_to_head(dsn: str, revision: str) -> None:
+    """현행 head까지 올릴 때는 배포와 같은 principal 경로로 돈다 (ADR-090).
+
+    H35 리허설이 고정 세대(0063/0079)로만 올릴 때는 superuser 하나로 충분했다.
+    그 뒤 0095가 "restricted migrator는 state/audit routine owner membership을
+    **스스로** 부여하지 않는다"를 스스로 검증하게 되면서, head까지 가는 upgrade는
+    배포 bootstrap이 미리 세워 둔 principal graph를 전제로 한다. superuser로
+    올리면 그 검사에서 곧바로 죽고, 통과시켜도 0097의 grant는 owner 자격에서만
+    성립하므로 다시 죽는다. 자기 DB를 만드는 다른 통합 테스트와 같은 helper를 쓴다.
+    """
+    from tests.integration._tvn34_migration_bootstrap import (
+        alembic_schema_owner_role,
+        bootstrapped_migrator_dsn,
+    )
+
+    migrator_dsn = await bootstrapped_migrator_dsn(dsn)
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(_run_alembic, migrator_dsn, revision)
+
+
 def _explicit_feature_ids() -> tuple[str, ...]:
     manifest = json.loads(
         (_ROOT / "resources" / "curations" / "manifest.json").read_text(encoding="utf-8")
@@ -1615,7 +1635,7 @@ async def test_index_signatures_match_real_indexdef(pg_container: Any) -> None:
     admin_dsn = normalize_async_dsn(pg_container.get_connection_url())
     database, dsn = await _create_database(admin_dsn)
     try:
-        await asyncio.to_thread(_run_alembic, dsn, "head")
+        await _run_alembic_to_head(dsn, "head")
         engine = make_async_engine(dsn)
         try:
             async with engine.connect() as connection:
@@ -1667,9 +1687,12 @@ async def test_public_count_detects_source_absent_item(pg_container: Any) -> Non
     admin_dsn = normalize_async_dsn(pg_container.get_connection_url())
     database, dsn = await _create_database(admin_dsn)
     try:
-        await asyncio.to_thread(_run_alembic, dsn, _PRE_REVISION)
+        # 0063 구간도 head 구간과 **같은 principal**로 올려야 한다. superuser로 먼저
+        # 만들어 두면 그 table의 owner가 superuser라, 이어지는 head upgrade가
+        # schema owner 자격으로는 그것들을 고칠 수 없다.
+        await _run_alembic_to_head(dsn, _PRE_REVISION)
         await _seed_exact_pre_cutover_surface(dsn)
-        await asyncio.to_thread(_run_alembic, dsn, "head")
+        await _run_alembic_to_head(dsn, "head")
 
         engine = make_async_engine(dsn)
         try:

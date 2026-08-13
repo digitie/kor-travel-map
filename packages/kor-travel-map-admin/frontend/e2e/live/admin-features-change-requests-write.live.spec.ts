@@ -1,4 +1,10 @@
-import { expect, test, type Locator, type Page, type Response } from "@playwright/test";
+import {
+  expect,
+  test,
+  type Locator,
+  type Page,
+  type Response,
+} from "@playwright/test";
 
 import type { components } from "../../src/api/types";
 import * as F from "./_fixtures";
@@ -7,8 +13,8 @@ type AdminFeatureChangeResponse =
   components["schemas"]["AdminFeatureChangeResponse"];
 type AdminFeatureChangeListResponse =
   components["schemas"]["AdminFeatureChangeListResponse"];
-type AdminFeatureDeactivateResponse =
-  components["schemas"]["AdminFeatureDeactivateResponse"];
+type AdminFeatureStateResponse =
+  components["schemas"]["AdminFeatureStateResponse"];
 type AdminFeatureDetailResponse =
   components["schemas"]["AdminFeatureDetailResponse"];
 type AdminFeaturesListResponse =
@@ -38,7 +44,6 @@ const BASE_REASON = `live ui e2e admin features ${RUN_ID}`;
 const EXECUTE_ADMIN_FEATURES_WRITE =
   process.env.E2E_ADMIN_WRITE === "1" ||
   process.env.E2E_ADMIN_FEATURES_WRITE === "1";
-const CHANGE_FORM_STATUSES = ["draft", "active", "inactive", "hidden"] as const;
 const CHANGE_FORM_KINDS = ["place", "event"] as const;
 
 test.describe.configure({ mode: "serial" });
@@ -66,10 +71,7 @@ function dateTimeLocalText(value: unknown): string {
   return match ? `${match[1]}T${match[2]}` : text;
 }
 
-function recordField(
-  value: Record<string, unknown>,
-  key: string,
-): unknown {
+function recordField(value: Record<string, unknown>, key: string): unknown {
   return value[key];
 }
 
@@ -92,18 +94,18 @@ function isApiResponse(
 function isAdminFeatureListResponse(
   response: Response,
   q: string,
-  status: string,
+  lifecycleState: string,
 ): boolean {
   if (!isApiResponse(response, "GET", "/v1/admin/features")) return false;
   const params = new URL(response.url()).searchParams;
   const kinds = params.getAll("kind");
-  const statuses = params.getAll("status");
+  const lifecycleStates = params.getAll("lifecycle_state");
   return (
     params.get("q") === q &&
     kinds.length === 1 &&
     kinds[0] === "place" &&
-    statuses.length === 1 &&
-    statuses[0] === status &&
+    lifecycleStates.length === 1 &&
+    lifecycleStates[0] === lifecycleState &&
     params.get("sort") === "updated_at" &&
     params.get("order") === "desc" &&
     params.get("page_size") === "50" &&
@@ -281,21 +283,18 @@ async function expectFeaturePrefillLoaded(
   await expect(page.getByText("데이터 로드됨")).toBeVisible(T);
   await expect(page.getByLabel("change feature id")).toHaveValue(featureId);
   await expect(page.getByLabel("change name")).toHaveValue(feature.name);
-  await expect(page.getByLabel("change category")).toHaveValue(feature.category);
+  await expect(page.getByLabel("change category")).toHaveValue(
+    feature.category,
+  );
 
-  if (CHANGE_FORM_KINDS.includes(feature.kind as (typeof CHANGE_FORM_KINDS)[number])) {
+  if (
+    CHANGE_FORM_KINDS.includes(
+      feature.kind as (typeof CHANGE_FORM_KINDS)[number],
+    )
+  ) {
     await expect(page.getByLabel("change kind", { exact: true })).toHaveValue(
       feature.kind,
     );
-  }
-  if (
-    CHANGE_FORM_STATUSES.includes(
-      feature.status as (typeof CHANGE_FORM_STATUSES)[number],
-    )
-  ) {
-    await expect(
-      page.getByLabel("change feature status", { exact: true }),
-    ).toHaveValue(feature.status);
   }
 
   const lon = coordText(feature.lon);
@@ -307,9 +306,21 @@ async function expectFeaturePrefillLoaded(
     await expect(page.getByLabel("change lat")).toHaveValue(lat);
   }
 
-  await expectOptionalFieldValue(page, "change marker icon", feature.marker_icon);
-  await expectOptionalFieldValue(page, "change marker color", feature.marker_color);
-  await expectOptionalFieldValue(page, "change sigungu code", feature.sigungu_code);
+  await expectOptionalFieldValue(
+    page,
+    "change marker icon",
+    feature.marker_icon,
+  );
+  await expectOptionalFieldValue(
+    page,
+    "change marker color",
+    feature.marker_color,
+  );
+  await expectOptionalFieldValue(
+    page,
+    "change sigungu code",
+    feature.sigungu_code,
+  );
   await expectOptionalFieldValue(
     page,
     "change parent feature id",
@@ -326,9 +337,21 @@ async function expectFeaturePrefillLoaded(
     feature.coord_precision_digits,
   );
 
-  await expectOptionalFieldValue(page, "change road address", recordField(address, "road"));
-  await expectOptionalFieldValue(page, "change legal address", recordField(address, "legal"));
-  await expectOptionalFieldValue(page, "change admin address", recordField(address, "admin"));
+  await expectOptionalFieldValue(
+    page,
+    "change road address",
+    recordField(address, "road"),
+  );
+  await expectOptionalFieldValue(
+    page,
+    "change legal address",
+    recordField(address, "legal"),
+  );
+  await expectOptionalFieldValue(
+    page,
+    "change admin address",
+    recordField(address, "admin"),
+  );
   await expectOptionalFieldValue(
     page,
     "change sido code",
@@ -358,7 +381,11 @@ async function expectFeaturePrefillLoaded(
       recordField(address, "road_address_management_no"),
   );
 
-  await expectOptionalFieldValue(page, "change phone", recordField(detail, "phone"));
+  await expectOptionalFieldValue(
+    page,
+    "change phone",
+    recordField(detail, "phone"),
+  );
   await expectOptionalFieldValue(
     page,
     "change place kind",
@@ -369,7 +396,11 @@ async function expectFeaturePrefillLoaded(
     "change homepage url",
     recordField(urls, "homepage"),
   );
-  await expectOptionalFieldValue(page, "change source url", recordField(urls, "source"));
+  await expectOptionalFieldValue(
+    page,
+    "change source url",
+    recordField(urls, "source"),
+  );
 
   if (feature.kind === "event") {
     await expectOptionalFieldValue(
@@ -379,28 +410,32 @@ async function expectFeaturePrefillLoaded(
     );
     const startDate = dateTimeLocalText(recordField(detail, "starts_at"));
     const endDate = dateTimeLocalText(recordField(detail, "ends_at"));
-    await expect(page.getByLabel("change event start", { exact: true })).toBeVisible(
-      T,
-    );
-    await expect(page.getByLabel("change event end", { exact: true })).toBeVisible(
-      T,
-    );
+    await expect(
+      page.getByLabel("change event start", { exact: true }),
+    ).toBeVisible(T);
+    await expect(
+      page.getByLabel("change event end", { exact: true }),
+    ).toBeVisible(T);
     if (startDate.length > 0) {
-      await expect(page.getByLabel("change event start", { exact: true })).toHaveValue(
-        startDate,
-      );
+      await expect(
+        page.getByLabel("change event start", { exact: true }),
+      ).toHaveValue(startDate);
     }
     if (endDate.length > 0) {
-      await expect(page.getByLabel("change event end", { exact: true })).toHaveValue(
-        endDate,
-      );
+      await expect(
+        page.getByLabel("change event end", { exact: true }),
+      ).toHaveValue(endDate);
     }
     await expectOptionalFieldValue(
       page,
       "change organizer",
       recordField(detail, "organizer"),
     );
-    await expectOptionalFieldValue(page, "change venue", recordField(detail, "venue"));
+    await expectOptionalFieldValue(
+      page,
+      "change venue",
+      recordField(detail, "venue"),
+    );
   }
 }
 
@@ -474,11 +509,13 @@ async function selectPreferredOption(
   await expect
     .poll(async () => select.locator("option").count(), T)
     .toBeGreaterThan(0);
-  const values = await select.locator("option").evaluateAll((options) =>
-    options
-      .map((option) => (option as HTMLOptionElement).value)
-      .filter((value) => value.length > 0),
-  );
+  const values = await select
+    .locator("option")
+    .evaluateAll((options) =>
+      options
+        .map((option) => (option as HTMLOptionElement).value)
+        .filter((value) => value.length > 0),
+    );
   const value = values.includes(preferredValue) ? preferredValue : values[0];
   expect(value).toBeDefined();
   await select.selectOption(value);
@@ -611,18 +648,9 @@ async function expectDeletedFeatureState(
         return `http:${detail.status}`;
       }
       const feature = detail.body.data.feature;
-      return [
-        feature.status,
-        feature.deleted_at === null || feature.deleted_at === undefined
-          ? "deleted_at:missing"
-          : "deleted_at:set",
-        feature.user_deleted_at === null ||
-        feature.user_deleted_at === undefined
-          ? "user_deleted_at:missing"
-          : "user_deleted_at:set",
-      ].join("|");
+      return [feature.lifecycle_state, feature.publication_state].join("|");
     }, T)
-    .toBe("deleted|deleted_at:set|user_deleted_at:set");
+    .toBe("retired|suppressed");
 
   await expect
     .poll(async () => (await fetchPublicFeature(page, featureId)).status, T)
@@ -666,13 +694,13 @@ async function cleanupFeatureByApi(
       `cleanup detail 조회 실패: HTTP ${current.status} ${current.text}`,
     );
   }
-  if (current.body.data.feature.status === "deleted") {
+  if (current.body.data.feature.lifecycle_state === "retired") {
     await expectDeletedFeatureState(page, featureId);
     return;
   }
   if (deleteApplied) {
     throw new Error(
-      `delete request가 applied인데 ${featureId} 상태가 ${current.body.data.feature.status}입니다.`,
+      `delete request가 applied인데 ${featureId} 수명주기가 ${current.body.data.feature.lifecycle_state}입니다.`,
     );
   }
   if (deleteRequestId) {
@@ -727,13 +755,20 @@ test.describe("/admin/features + feature change requests live write workflow", (
 
     await test.step("change request 폼의 dropdown 계약을 확인한다", async () => {
       await gotoChangeRequests(page);
-      await expect(page.getByLabel("change action", { exact: true })).toBeVisible(T);
+      await expect(
+        page.getByLabel("change action", { exact: true }),
+      ).toBeVisible(T);
       await expect(page.getByLabel("change category")).toBeVisible(T);
       await expect(page.getByLabel("change marker icon")).toBeVisible(T);
       await expect(page.getByLabel("change marker color")).toBeVisible(T);
-      await expect(page.getByRole("button", { name: "위치 편집" })).toBeVisible(T);
+      await expect(page.getByRole("button", { name: "위치 편집" })).toBeVisible(
+        T,
+      );
 
-      await selectPreferredOption(page.getByLabel("change category"), "01070300");
+      await selectPreferredOption(
+        page.getByLabel("change category"),
+        "01070300",
+      );
       await page.getByLabel("change marker icon").selectOption("museum");
       await page.getByLabel("change marker color").selectOption("P-02");
       await expect(page.getByLabel("change marker color")).toHaveValue("P-02");
@@ -765,11 +800,15 @@ test.describe("/admin/features + feature change requests live write workflow", (
       const map = dialog.getByTestId("feature-change-location-map");
       await expect(map).toBeVisible(T);
       await map.locator("canvas").first().waitFor({ state: "visible" });
-      await dialog.getByLabel("marker_icon", { exact: true }).selectOption("park");
-      await dialog.getByLabel("marker_color", { exact: true }).selectOption("P-03");
-      await expect(dialog.getByLabel("marker_color", { exact: true })).toHaveValue(
-        "P-03",
-      );
+      await dialog
+        .getByLabel("marker_icon", { exact: true })
+        .selectOption("park");
+      await dialog
+        .getByLabel("marker_color", { exact: true })
+        .selectOption("P-03");
+      await expect(
+        dialog.getByLabel("marker_color", { exact: true }),
+      ).toHaveValue("P-03");
       await dialog.getByLabel("lon", { exact: true }).fill("127.123456");
       const firstMapBox = await map.boundingBox();
       expect(firstMapBox).not.toBeNull();
@@ -789,11 +828,15 @@ test.describe("/admin/features + feature change requests live write workflow", (
       await page.getByRole("button", { name: "위치 편집" }).click();
       await expect(dialog).toBeVisible(T);
       await map.locator("canvas").first().waitFor({ state: "visible" });
-      await dialog.getByLabel("marker_icon", { exact: true }).selectOption("park");
-      await dialog.getByLabel("marker_color", { exact: true }).selectOption("P-03");
-      await expect(dialog.getByLabel("marker_color", { exact: true })).toHaveValue(
-        "P-03",
-      );
+      await dialog
+        .getByLabel("marker_icon", { exact: true })
+        .selectOption("park");
+      await dialog
+        .getByLabel("marker_color", { exact: true })
+        .selectOption("P-03");
+      await expect(
+        dialog.getByLabel("marker_color", { exact: true }),
+      ).toHaveValue("P-03");
 
       await longPressAtCenter(page, map);
       await expect
@@ -809,32 +852,46 @@ test.describe("/admin/features + feature change requests live write workflow", (
       await expect(page.getByLabel("change marker icon")).toHaveValue("park");
       await expect(page.getByLabel("change marker color")).toHaveValue("P-03");
       await expect
-        .poll(async () => page.getByLabel("change sigungu code").inputValue(), T)
+        .poll(
+          async () => page.getByLabel("change sigungu code").inputValue(),
+          T,
+        )
         .toMatch(/^\d{5}$/);
     });
 
     await test.step("admin features detail의 편집 링크가 change request prefill로 이어진다", async () => {
       const sampleFeatureId = F.FEATURE_IDS[0];
-      test.skip(!sampleFeatureId, "live fixture FEATURE_IDS가 비어 있어 prefill 링크를 확인할 수 없음");
+      test.skip(
+        !sampleFeatureId,
+        "live fixture FEATURE_IDS가 비어 있어 prefill 링크를 확인할 수 없음",
+      );
       await gotoAdminFeatures(page);
       await page.getByLabel("feature search").fill(sampleFeatureId);
       const row = rowContaining(page, sampleFeatureId.slice(0, 18));
       // full feature_id 목록 검색은 부하에서 ~60s+(위 후속 과제 참조) — 넉넉히 준다.
       await expect(row).toBeVisible({ timeout: 150_000 });
       await row.getByRole("button", { name: "preview" }).click();
-      await expect(page.getByText(sampleFeatureId, { exact: true })).toBeVisible(T);
+      await expect(
+        page.getByText(sampleFeatureId, { exact: true }),
+      ).toBeVisible(T);
 
       await page.getByRole("link", { name: "편집" }).click();
-      await expect(page).toHaveURL(/\/admin\/features\/change-requests\?.*action=update/, T);
-      await expect(page.getByLabel("change action", { exact: true })).toHaveValue(
-        "update",
+      await expect(page).toHaveURL(
+        /\/admin\/features\/change-requests\?.*action=update/,
+        T,
       );
+      await expect(
+        page.getByLabel("change action", { exact: true }),
+      ).toHaveValue("update");
       await expectFeaturePrefillLoaded(page, sampleFeatureId);
     });
 
     await test.step("feature 상세 페이지의 수정 링크도 change request prefill을 로드한다", async () => {
       const sampleFeatureId = F.FEATURE_IDS[0];
-      test.skip(!sampleFeatureId, "live fixture FEATURE_IDS가 비어 있어 prefill 링크를 확인할 수 없음");
+      test.skip(
+        !sampleFeatureId,
+        "live fixture FEATURE_IDS가 비어 있어 prefill 링크를 확인할 수 없음",
+      );
       await page.goto(`/features/${encodeURIComponent(sampleFeatureId)}`);
       await expect(
         page.getByRole("heading", { level: 1, name: "Feature 상세" }),
@@ -842,15 +899,18 @@ test.describe("/admin/features + feature change requests live write workflow", (
       await expect(page.getByTestId("feature-detail-view")).toBeVisible(T);
 
       await page.getByRole("link", { name: "수정" }).click();
-      await expect(page).toHaveURL(/\/admin\/features\/change-requests\?.*action=update/, T);
-      await expect(page.getByLabel("change action", { exact: true })).toHaveValue(
-        "update",
+      await expect(page).toHaveURL(
+        /\/admin\/features\/change-requests\?.*action=update/,
+        T,
       );
+      await expect(
+        page.getByLabel("change action", { exact: true }),
+      ).toHaveValue("update");
       await expectFeaturePrefillLoaded(page, sampleFeatureId);
     });
   });
 
-  test("새 작성, 승인, 목록/상세 반영, 수정 승인/거절, 비활성화, 삭제 승인까지 실제 서비스에 반영된다", async ({
+  test("새 작성, 승인, 목록/상세 반영, 수정 승인/거절, 종료, 삭제 승인까지 실제 서비스에 반영된다", async ({
     page,
   }) => {
     test.skip(
@@ -871,30 +931,72 @@ test.describe("/admin/features + feature change requests live write workflow", (
     try {
       await test.step("change request 화면의 읽기/필터/폼 표면을 확인한다", async () => {
         await gotoChangeRequests(page);
-        await expect(page.getByLabel("change action", { exact: true })).toBeVisible(T);
-        await expect(page.getByLabel("change feature id", { exact: true })).toBeVisible(T);
-        await expect(page.getByLabel("change reason", { exact: true })).toBeVisible(T);
-        await expect(page.getByLabel("change name", { exact: true })).toBeVisible(T);
-        await expect(page.getByLabel("change category", { exact: true })).toBeVisible(T);
-        await expect(page.getByLabel("change lon", { exact: true })).toBeVisible(T);
-        await expect(page.getByLabel("change lat", { exact: true })).toBeVisible(T);
-        await expect(page.getByLabel("change parent feature id", { exact: true })).toBeVisible(T);
-        await expect(page.getByLabel("change sibling group id", { exact: true })).toBeVisible(T);
-        await expect(page.getByLabel("change coord precision digits", { exact: true })).toBeVisible(T);
-        await expect(page.getByLabel("change road address", { exact: true })).toBeVisible(T);
-        await expect(page.getByLabel("change legal address", { exact: true })).toBeVisible(T);
-        await expect(page.getByLabel("change admin address", { exact: true })).toBeVisible(T);
-        await expect(page.getByLabel("change sido code", { exact: true })).toBeVisible(T);
-        await expect(page.getByLabel("change legal dong code", { exact: true })).toBeVisible(T);
-        await expect(page.getByLabel("change admin dong code", { exact: true })).toBeVisible(T);
-        await expect(page.getByLabel("change road name code", { exact: true })).toBeVisible(T);
+        await expect(
+          page.getByLabel("change action", { exact: true }),
+        ).toBeVisible(T);
+        await expect(
+          page.getByLabel("change feature id", { exact: true }),
+        ).toBeVisible(T);
+        await expect(
+          page.getByLabel("change reason", { exact: true }),
+        ).toBeVisible(T);
+        await expect(
+          page.getByLabel("change name", { exact: true }),
+        ).toBeVisible(T);
+        await expect(
+          page.getByLabel("change category", { exact: true }),
+        ).toBeVisible(T);
+        await expect(
+          page.getByLabel("change lon", { exact: true }),
+        ).toBeVisible(T);
+        await expect(
+          page.getByLabel("change lat", { exact: true }),
+        ).toBeVisible(T);
+        await expect(
+          page.getByLabel("change parent feature id", { exact: true }),
+        ).toBeVisible(T);
+        await expect(
+          page.getByLabel("change sibling group id", { exact: true }),
+        ).toBeVisible(T);
+        await expect(
+          page.getByLabel("change coord precision digits", { exact: true }),
+        ).toBeVisible(T);
+        await expect(
+          page.getByLabel("change road address", { exact: true }),
+        ).toBeVisible(T);
+        await expect(
+          page.getByLabel("change legal address", { exact: true }),
+        ).toBeVisible(T);
+        await expect(
+          page.getByLabel("change admin address", { exact: true }),
+        ).toBeVisible(T);
+        await expect(
+          page.getByLabel("change sido code", { exact: true }),
+        ).toBeVisible(T);
+        await expect(
+          page.getByLabel("change legal dong code", { exact: true }),
+        ).toBeVisible(T);
+        await expect(
+          page.getByLabel("change admin dong code", { exact: true }),
+        ).toBeVisible(T);
+        await expect(
+          page.getByLabel("change road name code", { exact: true }),
+        ).toBeVisible(T);
         await expect(
           page.getByLabel("change road address management no", { exact: true }),
         ).toBeVisible(T);
-        await expect(page.getByLabel("change phone", { exact: true })).toBeVisible(T);
-        await expect(page.getByLabel("change place kind", { exact: true })).toBeVisible(T);
-        await expect(page.getByLabel("change homepage url", { exact: true })).toBeVisible(T);
-        await expect(page.getByLabel("change source url", { exact: true })).toBeVisible(T);
+        await expect(
+          page.getByLabel("change phone", { exact: true }),
+        ).toBeVisible(T);
+        await expect(
+          page.getByLabel("change place kind", { exact: true }),
+        ).toBeVisible(T);
+        await expect(
+          page.getByLabel("change homepage url", { exact: true }),
+        ).toBeVisible(T);
+        await expect(
+          page.getByLabel("change source url", { exact: true }),
+        ).toBeVisible(T);
         await page
           .getByLabel("change detail JSON", { exact: true })
           .locator("xpath=ancestor::details")
@@ -905,9 +1007,15 @@ test.describe("/admin/features + feature change requests live write workflow", (
           .locator("xpath=ancestor::details")
           .locator("summary")
           .click();
-        await expect(page.getByLabel("change detail JSON", { exact: true })).toBeVisible(T);
-        await expect(page.getByLabel("change urls JSON", { exact: true })).toBeVisible(T);
-        await expect(page.getByLabel("change address JSON", { exact: true })).toBeVisible(T);
+        await expect(
+          page.getByLabel("change detail JSON", { exact: true }),
+        ).toBeVisible(T);
+        await expect(
+          page.getByLabel("change urls JSON", { exact: true }),
+        ).toBeVisible(T);
+        await expect(
+          page.getByLabel("change address JSON", { exact: true }),
+        ).toBeVisible(T);
 
         await gotoChangeReviews(page);
         await expect(page.getByText("review mode")).toBeVisible(T);
@@ -915,7 +1023,9 @@ test.describe("/admin/features + feature change requests live write workflow", (
         await page.getByLabel("change page size").selectOption("25");
         await expect(page.getByLabel("change page size")).toHaveValue("25");
         await page.getByLabel("change action filter").selectOption("all");
-        await page.getByLabel("change status", { exact: true }).selectOption("all");
+        await page
+          .getByLabel("change status", { exact: true })
+          .selectOption("all");
         await expect(page.getByRole("table")).toBeVisible(T);
       });
 
@@ -933,7 +1043,9 @@ test.describe("/admin/features + feature change requests live write workflow", (
         await page.getByLabel("위도", { exact: true }).fill("37.56668");
         await page.getByLabel("마커 아이콘").selectOption("park");
         await page.getByLabel("마커 색상").selectOption("P-01");
-        await page.getByLabel("사유", { exact: true }).fill(`${BASE_REASON} add`);
+        await page
+          .getByLabel("사유", { exact: true })
+          .fill(`${BASE_REASON} add`);
         await page.getByLabel("Feature ID").fill(FEATURE_ID);
         await page.getByLabel("중복 방지 키").fill(`${RUN_ID}-add`);
         await page
@@ -1011,7 +1123,9 @@ test.describe("/admin/features + feature change requests live write workflow", (
           name: CREATE_NAME,
           sido_code: "11",
           sigungu_code: "11140",
-          status: "active",
+          lifecycle_state: "active",
+          publication_state: "published",
+          quality_state: "valid",
           urls: {
             homepage: "https://example.invalid/e2e",
             source: "https://example.invalid/source",
@@ -1023,7 +1137,9 @@ test.describe("/admin/features + feature change requests live write workflow", (
           .getByRole("status")
           .filter({ hasText: "변경 요청 생성됨" });
         await expect(successAlert).toBeVisible(T);
-        await expect(page.getByRole("heading", { name: "생성 요청" })).toBeVisible(T);
+        await expect(
+          page.getByRole("heading", { name: "생성 요청" }),
+        ).toBeVisible(T);
       });
 
       await test.step("pending add 요청을 검색, 상세 확인, 승인한다", async () => {
@@ -1055,7 +1171,10 @@ test.describe("/admin/features + feature change requests live write workflow", (
         await expect
           .poll(async () => {
             const response = await fetchAdminFeature(page, FEATURE_ID);
-            return response.body?.data.feature.status ?? `http:${response.status}`;
+            return (
+              response.body?.data.feature.lifecycle_state ??
+              `http:${response.status}`
+            );
           }, T)
           .toBe("active");
 
@@ -1080,7 +1199,9 @@ test.describe("/admin/features + feature change requests live write workflow", (
           name: CREATE_NAME,
           sido_code: "11",
           sigungu_code: "11140",
-          status: "active",
+          lifecycle_state: "active",
+          publication_state: "published",
+          quality_state: "valid",
           urls: {
             homepage: "https://example.invalid/e2e",
             source: "https://example.invalid/source",
@@ -1110,7 +1231,6 @@ test.describe("/admin/features + feature change requests live write workflow", (
           name: CREATE_NAME,
           sido_code: "11",
           sigungu_code: "11140",
-          status: "active",
           urls: {
             homepage: "https://example.invalid/e2e",
             source: "https://example.invalid/source",
@@ -1124,7 +1244,7 @@ test.describe("/admin/features + feature change requests live write workflow", (
       await test.step("admin features 목록에서 검색, 필터, preview, detail 링크를 확인한다", async () => {
         await gotoAdminFeatures(page);
         await page.getByLabel("feature kind").selectOption("place");
-        await page.getByLabel("feature status").selectOption("active");
+        await page.getByLabel("feature lifecycle state").selectOption("active");
         await page.getByLabel("has issue").selectOption("all");
         await page.getByLabel("feature sort").selectOption("updated_at");
         await page.getByRole("button", { name: "desc" }).click();
@@ -1138,37 +1258,43 @@ test.describe("/admin/features + feature change requests live write workflow", (
         expect(listResponse.status()).toBe(200);
         const listBody =
           (await listResponse.json()) as AdminFeaturesListResponse;
-        expect(
-          listBody.data.items.map((item) => item.feature_id),
-        ).toEqual([FEATURE_ID]);
+        expect(listBody.data.items.map((item) => item.feature_id)).toEqual([
+          FEATURE_ID,
+        ]);
 
         const row = rowContaining(page, CREATE_NAME);
         await expect(row).toBeVisible(T);
-        await expect(row).toContainText("활성");
+        await expect(row).toContainText("active");
         await expect(row).toContainText("place");
         await expect(row).toContainText("01070300");
 
         await row.getByRole("button", { name: "preview" }).click();
-        await expect(
-          page.getByText(FEATURE_ID, { exact: true }),
-        ).toBeVisible(T);
+        await expect(page.getByText(FEATURE_ID, { exact: true })).toBeVisible(
+          T,
+        );
         await expect(page.getByText(CREATE_NAME).last()).toBeVisible(T);
         await expect(page.getByRole("link", { name: "편집" })).toBeVisible(T);
 
         await row.getByRole("link", { name: "detail" }).click();
         await expect(page).toHaveURL(
-          new RegExp(`/features/${escapeRegExp(encodeURIComponent(FEATURE_ID))}$`),
+          new RegExp(
+            `/features/${escapeRegExp(encodeURIComponent(FEATURE_ID))}$`,
+          ),
           T,
         );
         await expect(
           page.getByRole("heading", { level: 1, name: "Feature 상세" }),
         ).toBeVisible(T);
-        await expect(page.getByText(FEATURE_ID, { exact: true })).toBeVisible(T);
+        await expect(page.getByText(FEATURE_ID, { exact: true })).toBeVisible(
+          T,
+        );
       });
 
       await test.step("update change request를 생성하고 승인 후 서비스 상세가 갱신된다", async () => {
         await gotoChangeRequests(page);
-        await page.getByLabel("change action", { exact: true }).selectOption("update");
+        await page
+          .getByLabel("change action", { exact: true })
+          .selectOption("update");
         const basisResponsePromise = waitForApiResponse(
           page,
           "GET",
@@ -1196,7 +1322,9 @@ test.describe("/admin/features + feature change requests live write workflow", (
           .fill(JSON.stringify({ e2e_phase: "update", run_id: RUN_ID }));
         await page
           .getByLabel("change urls JSON", { exact: true })
-          .fill(JSON.stringify({ homepage: "https://example.invalid/updated" }));
+          .fill(
+            JSON.stringify({ homepage: "https://example.invalid/updated" }),
+          );
         await page
           .getByLabel("change homepage url", { exact: true })
           .fill("https://example.invalid/updated");
@@ -1273,7 +1401,9 @@ test.describe("/admin/features + feature change requests live write workflow", (
         await expect
           .poll(async () => {
             const response = await fetchAdminFeature(page, FEATURE_ID);
-            return response.body?.data.feature.name ?? `http:${response.status}`;
+            return (
+              response.body?.data.feature.name ?? `http:${response.status}`
+            );
           }, T)
           .toBe(UPDATED_NAME);
 
@@ -1298,7 +1428,9 @@ test.describe("/admin/features + feature change requests live write workflow", (
           name: UPDATED_NAME,
           sido_code: "11",
           sigungu_code: "11140",
-          status: "active",
+          lifecycle_state: "active",
+          publication_state: "published",
+          quality_state: "valid",
           urls: {
             homepage: "https://example.invalid/updated",
             source: "https://example.invalid/source",
@@ -1332,7 +1464,6 @@ test.describe("/admin/features + feature change requests live write workflow", (
           name: UPDATED_NAME,
           sido_code: "11",
           sigungu_code: "11140",
-          status: "active",
           urls: {
             homepage: "https://example.invalid/updated",
             source: "https://example.invalid/source",
@@ -1348,7 +1479,9 @@ test.describe("/admin/features + feature change requests live write workflow", (
 
       await test.step("update change request를 거절하면 실제 feature 값은 바뀌지 않는다", async () => {
         await gotoChangeRequests(page);
-        await page.getByLabel("change action", { exact: true }).selectOption("update");
+        await page
+          .getByLabel("change action", { exact: true })
+          .selectOption("update");
         await page.getByLabel("change feature id").fill(FEATURE_ID);
         await page.getByLabel("change reason").fill(`${BASE_REASON} reject`);
         await page.getByLabel("change name").fill(REJECTED_NAME);
@@ -1394,10 +1527,10 @@ test.describe("/admin/features + feature change requests live write workflow", (
         expect(adminDetail.data.feature.category).toBe("01070400");
       });
 
-      await test.step("admin features 목록 deactivate 버튼이 실제 inactive 상태를 만든다", async () => {
+      await test.step("admin features 목록 retire 버튼이 실제 retired/suppressed 상태를 만든다", async () => {
         await gotoAdminFeatures(page);
         await page.getByLabel("feature kind").selectOption("place");
-        await page.getByLabel("feature status").selectOption("active");
+        await page.getByLabel("feature lifecycle state").selectOption("active");
         await page.getByLabel("has issue").selectOption("all");
         await page.getByLabel("feature sort").selectOption("updated_at");
         await page.getByRole("button", { name: "desc" }).click();
@@ -1411,60 +1544,67 @@ test.describe("/admin/features + feature change requests live write workflow", (
         expect(listResponse.status()).toBe(200);
         const listBody =
           (await listResponse.json()) as AdminFeaturesListResponse;
-        expect(
-          listBody.data.items.map((item) => item.feature_id),
-        ).toEqual([FEATURE_ID]);
+        expect(listBody.data.items.map((item) => item.feature_id)).toEqual([
+          FEATURE_ID,
+        ]);
 
         const row = rowContaining(page, UPDATED_NAME);
         await expect(row).toBeVisible(T);
 
         const responsePromise = waitForApiResponse(
           page,
-          "POST",
-          `${decodeURIComponent(adminFeaturePath(FEATURE_ID))}/deactivate`,
+          "PATCH",
+          `${decodeURIComponent(adminFeaturePath(FEATURE_ID))}/state`,
         );
-        await row.getByRole("button", { name: "deactivate" }).click();
-        // deactivate 확인 AlertDialog의 '비활성화' 버튼 클릭.
+        await row.getByRole("button", { name: "retire" }).click();
         await page
           .getByRole("alertdialog")
-          .getByRole("button", { name: "비활성화" })
+          .getByRole("button", { name: "종료" })
           .click();
         const response = await responsePromise;
         expect(response.status()).toBe(200);
-        const body = (await response.json()) as AdminFeatureDeactivateResponse;
+        const body = (await response.json()) as AdminFeatureStateResponse;
         expect(body.data).toMatchObject({
           feature_id: FEATURE_ID,
-          status: "inactive",
+          lifecycle_state: "retired",
+          publication_state: "suppressed",
         });
 
         await expect
           .poll(async () => {
             const detail = await fetchAdminFeature(page, FEATURE_ID);
-            return detail.body?.data.feature.status ?? `http:${detail.status}`;
+            return (
+              detail.body?.data.feature.lifecycle_state ??
+              `http:${detail.status}`
+            );
           }, T)
-          .toBe("inactive");
+          .toBe("retired");
 
         const inactiveListResponsePromise = page.waitForResponse(
           (response) =>
-            isAdminFeatureListResponse(response, FEATURE_ID, "inactive"),
+            isAdminFeatureListResponse(response, FEATURE_ID, "retired"),
           { timeout: FLOW_TIMEOUT },
         );
-        await page.getByLabel("feature status").selectOption("inactive");
+        await page
+          .getByLabel("feature lifecycle state")
+          .selectOption("retired");
         const inactiveListResponse = await inactiveListResponsePromise;
         expect(inactiveListResponse.status()).toBe(200);
-        const inactiveListBody =
+        const retiredListBody =
           (await inactiveListResponse.json()) as AdminFeaturesListResponse;
         expect(
-          inactiveListBody.data.items.map((item) => item.feature_id),
+          retiredListBody.data.items.map((item) => item.feature_id),
         ).toEqual([FEATURE_ID]);
-        const inactiveRow = rowContaining(page, UPDATED_NAME);
-        await expect(inactiveRow).toBeVisible(T);
-        await expect(inactiveRow).toContainText("비활성");
+        const retiredRow = rowContaining(page, UPDATED_NAME);
+        await expect(retiredRow).toBeVisible(T);
+        await expect(retiredRow).toContainText("retired");
       });
 
       await test.step("delete change request를 생성, 승인하고 public 상세에서 제거를 확인한다", async () => {
         await gotoChangeRequests(page);
-        await page.getByLabel("change action", { exact: true }).selectOption("delete");
+        await page
+          .getByLabel("change action", { exact: true })
+          .selectOption("delete");
         const basisResponsePromise = waitForApiResponse(
           page,
           "GET",
@@ -1515,13 +1655,18 @@ test.describe("/admin/features + feature change requests live write workflow", (
         await expect
           .poll(async () => {
             const detail = await fetchAdminFeature(page, FEATURE_ID);
-            return detail.body?.data.feature.status ?? `http:${detail.status}`;
+            return (
+              detail.body?.data.feature.lifecycle_state ??
+              `http:${detail.status}`
+            );
           }, T)
-          .toBe("deleted");
+          .toBe("retired");
 
         const deletedAdminDetail = await expectAdminFeature(page, FEATURE_ID);
-        expect(deletedAdminDetail.data.feature.deleted_at).not.toBeNull();
-        expect(deletedAdminDetail.data.feature.user_deleted_at).not.toBeNull();
+        expect(deletedAdminDetail.data.feature).toMatchObject({
+          lifecycle_state: "retired",
+          publication_state: "suppressed",
+        });
 
         await expect
           .poll(async () => {
@@ -1570,12 +1715,7 @@ test.describe("/admin/features + feature change requests live write workflow", (
         );
       }
       await attemptCleanup("feature tombstone", () =>
-        cleanupFeatureByApi(
-          page,
-          FEATURE_ID,
-          deleteRequestId,
-          deleteApplied,
-        ),
+        cleanupFeatureByApi(page, FEATURE_ID, deleteRequestId, deleteApplied),
       );
       await attemptCleanup("pending request audit", () =>
         expectNoPendingChangeRequests(page, FEATURE_ID),

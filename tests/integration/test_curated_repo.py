@@ -744,10 +744,28 @@ async def test_curated_status_sweep_archives_inactive_feature(
         selected_by="pytest",
     )
 
+    # 이 테스트가 재현하려는 상황은 "큐레이션된 feature가 더 이상 공개 표면에 없다"이다.
+    # 그 상황을 만들던 legacy 문장이 `status = 'inactive'`였는데, 0095 backfill은
+    # `status IN ('inactive','deleted')`를 lifecycle `retired`로 옮겼고 retired인 행은
+    # `ck_features_state_tuple`(lifecycle='active' OR publication='suppressed') 때문에
+    # publication도 반드시 `suppressed`다. 그래서 두 축을 함께 쓰는 것이 등가이며,
+    # quality는 `status='broken'`에서만 갈리므로 여기선 valid로 둔다.
     await migrated_session.execute(
-        text("UPDATE feature.features SET status = 'inactive' WHERE feature_id = :id"),
+        text(
+            "UPDATE feature.features"
+            " SET lifecycle_state = 'retired', publication_state = 'suppressed'"
+            " WHERE feature_id = :id"
+        ),
         {"id": feature_id},
     )
+    # sweep이 보는 것은 축 값 자체가 아니라 "공개 tuple에서 벗어났는가"다.
+    # 그 전제를 값이 아니라 공개 projection 실재로 못 박아 둔다.
+    still_public = await migrated_session.execute(
+        text("SELECT 1 FROM feature.public_features WHERE feature_id = :id"),
+        {"id": feature_id},
+    )
+    assert still_public.first() is None
+
     swept = await curated_repo.sweep_curated_feature_status(migrated_session)
     archived = await curated_repo.get_curated_feature(
         migrated_session,

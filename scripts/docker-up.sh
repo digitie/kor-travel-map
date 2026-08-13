@@ -20,7 +20,7 @@ external_db="${KOR_TRAVEL_MAP_DB_EXTERNAL:-false}"
 external_object_store="${KOR_TRAVEL_MAP_OBJECT_STORE_EXTERNAL:-false}"
 
 compose_files=(-f docker-compose.yml)
-services=(postgres dagster-db-init dagster-storage-migrate api frontend dagster dagster-daemon)
+services=(postgres dagster-db-init db-role-bootstrap dagster-storage-migrate api frontend dagster dagster-daemon)
 ports=("$KOR_TRAVEL_MAP_API_PORT" "$KOR_TRAVEL_MAP_ADMIN_WEB_PORT" "$KOR_TRAVEL_MAP_DAGSTER_PORT")
 
 if [[ "$external_infra" == "true" ]]; then
@@ -33,7 +33,7 @@ elif [[ "$external_db" == "true" ]]; then
 elif [[ "$external_object_store" == "true" ]]; then
   compose_files+=(-f docker-compose.external-object-store.yml)
 else
-  services=(postgres dagster-db-init rustfs rustfs-init dagster-storage-migrate api frontend dagster dagster-daemon)
+  services=(postgres dagster-db-init db-role-bootstrap rustfs rustfs-init dagster-storage-migrate api frontend dagster dagster-daemon)
   ports+=("$KOR_TRAVEL_MAP_RUSTFS_API_PORT" "$KOR_TRAVEL_MAP_RUSTFS_CONSOLE_PORT")
 fi
 
@@ -43,6 +43,44 @@ fi
 docker_network="${KOR_TRAVEL_MAP_DOCKER_NETWORK:-host}"
 if [[ "$docker_network" == "host" ]]; then
   compose_files+=(-f docker-compose.host.yml)
+fi
+
+require_env() {
+  local name="$1"
+  if [[ -z "${!name:-}" ]]; then
+    echo "$name is required from ignored deployment env or vault" >&2
+    exit 1
+  fi
+}
+
+# T-VN-34A / ADR-090 — service principal DSN은 bootstrap owner에서 유도하지 않는다.
+# compose를 직접 실행하지 않고 공식 launcher를 쓸 때도 interpolation 전에 정확한
+# deployment secret 집합을 fail-closed 한다.
+for name in \
+  KOR_TRAVEL_MAP_MIGRATOR_PG_DSN \
+  KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN \
+  KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN; do
+  require_env "$name"
+done
+
+if [[ "$external_infra" != "true" && "$external_db" != "true" ]]; then
+  for name in \
+    KOR_TRAVEL_MAP_POSTGRES_PASSWORD \
+    KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN \
+    KOR_TRAVEL_MAP_MIGRATOR_PASSWORD \
+    KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD \
+    KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD \
+    KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE; do
+    require_env "$name"
+  done
+fi
+
+if [[ "$docker_network" == "host" ]]; then
+  require_env KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL
+elif [[ "$external_infra" == "true" || "$external_db" == "true" ]]; then
+  require_env KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL
+else
+  require_env KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL
 fi
 
 # dev(기본) 기동. 고정 포트가 이미 사용 중이면 새 포트로 열지 않고 강제종료 여부를

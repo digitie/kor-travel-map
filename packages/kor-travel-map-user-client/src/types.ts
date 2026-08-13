@@ -928,8 +928,6 @@ export interface components {
             lon: number | null;
             /** Name */
             name: string;
-            /** Status */
-            status: string;
         };
         /** FeatureCurationGroupResponse */
         FeatureCurationGroupResponse: {
@@ -1020,8 +1018,6 @@ export interface components {
             sido_code?: string | null;
             /** Sigungu Code */
             sigungu_code?: string | null;
-            /** Status */
-            status: string;
             /**
              * Updated At
              * Format: date-time
@@ -1156,8 +1152,6 @@ export interface components {
              * @description kind=price일 때 provider/domain/product series별 최신 가격 요약.
              */
             price_summary?: components["schemas"]["PricePointOut"][] | null;
-            /** Status */
-            status: string;
             /** @description kind=weather일 때 현재/예보 marker 요약. */
             weather_summary?: components["schemas"]["WeatherSummaryOut"] | null;
         };
@@ -1358,8 +1352,6 @@ export interface components {
             lon: number;
             /** Name */
             name: string;
-            /** Status */
-            status: string;
         };
         /**
          * NearbyOriginSummary
@@ -3475,8 +3467,6 @@ export interface operations {
                 kind?: string[] | null;
                 /** @description category code 반복 필터. */
                 category?: string[] | null;
-                /** @description feature status 반복 필터. 기본 active. 공개 projection(feature.public_features)과 교집합으로만 동작하므로 active 외 값은 빈 결과를 반환한다 (T-VN-04; 파라미터 정리는 T-VN-11/34). */
-                status?: string[] | null;
                 /** @description primary provider 반복 필터. */
                 provider?: string[] | null;
                 page_size?: number;
@@ -3531,8 +3521,6 @@ export interface operations {
                 kind?: string[] | null;
                 /** @description category code 반복 필터. */
                 category?: string[] | null;
-                /** @description feature status 반복 필터. 기본 active. 공개 projection(feature.public_features)과 교집합으로만 동작하므로 active 외 값은 빈 결과를 반환한다 (T-VN-04; 파라미터 정리는 T-VN-11/34). */
-                status?: string[] | null;
                 /** @description primary provider 반복 필터. */
                 provider?: string[] | null;
                 page_size?: number;

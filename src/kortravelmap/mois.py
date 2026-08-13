@@ -34,9 +34,9 @@ from kortravelmap.infra.feature_operation_repo import (
 )
 from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
-    inactivate_features_by_source_entity_ids,
     load_bundles,
-    soft_delete_features_not_in_snapshot,
+    retire_features_absent_from_snapshot,
+    retire_features_by_source_entity_ids,
 )
 from kortravelmap.infra.jobs_repo import (
     ImportJob,
@@ -110,7 +110,7 @@ __all__ = [
     "MoisBulkJobResult",
     "MoisIncrementalJobResult",
     "load_mois_license_features_bulk",
-    "delete_mois_license_features_not_in",
+    "retire_mois_license_features_absent_from_snapshot",
     "sync_mois_license_features_bulk",
     "run_mois_license_bulk_job",
     "load_mois_license_features_incremental",
@@ -123,14 +123,14 @@ __all__ = [
 
 @dataclass(frozen=True)
 class MoisBulkSyncResult:
-    """``sync_mois_license_features_bulk`` 결과 — 적재 카운트 + 비활성화 수.
+    """``sync_mois_license_features_bulk`` 결과 — 적재 카운트 + retirement 수.
 
     - ``load`` — upsert 카운트 (``FeatureLoadResult``).
-    - ``deactivated`` — snapshot에 없어 soft-delete된 기존 feature 수.
+    - ``retired`` — snapshot에 없어 lifecycle retired 전이된 기존 feature 수.
     """
 
     load: FeatureLoadResult
-    deactivated: int
+    retired: int
 
 
 @dataclass(frozen=True)
@@ -167,17 +167,17 @@ class MoisIncrementalJobResult:
 
 @dataclass(frozen=True)
 class MoisClosedJobResult:
-    """``run_mois_license_closed_job`` 결과 — 작업 추적 + 비활성화 + cursor.
+    """``run_mois_license_closed_job`` 결과 — 작업 추적 + retirement + cursor.
 
     - ``acquired`` — advisory lock 획득 여부. ``False``면 skip(나머지 ``None``).
     - ``job`` — 종료 상태의 ``ImportJob``.
-    - ``deactivated`` — ``status='inactive'``로 전환된 feature 수.
+    - ``retired`` — lifecycle ``retired``로 전이된 feature 수.
     - ``sync_state`` — closed dataset cursor 전진 후 ``SyncState``.
     """
 
     acquired: bool
     job: ImportJob | None = None
-    deactivated: int = 0
+    retired: int = 0
     sync_state: SyncState | None = None
 
 
@@ -256,32 +256,32 @@ async def load_mois_license_features_bulk(
     return await load_bundles(session, bundles)
 
 
-async def delete_mois_license_features_not_in(
+async def retire_mois_license_features_absent_from_snapshot(
     session: AsyncSession,
     snapshot_source_entity_ids: set[str],
     *,
     dataset_key: str = DATASET_KEY_BULK,
 ) -> int:
-    """snapshot에 없는 mois license feature를 soft-delete (status='inactive').
+    """snapshot에 없는 mois license feature를 retired 전이한다.
 
     Step A bulk snapshot 적재 후, 이번 snapshot에서 사라진(폐업/제외) feature를
-    비활성화한다 (ADR-017 — place는 무기한 유지, status만 inactive + deleted_at).
-    이미 비활성인 feature는 건드리지 않는다. commit은 호출자 책임.
+    lifecycle ``retired`` + publication ``suppressed``로 전이한다 (ADR-017 — place는
+    무기한 유지). 이미 retired인 feature는 건드리지 않는다. commit은 호출자 책임.
 
     Parameters
     ----------
     snapshot_source_entity_ids
         이번 snapshot에 적재된 ``source_entity_id``(= ``f"{slug}::{mng_no}"``) 집합.
-        비어 있으면 해당 dataset의 모든 활성 mois license feature가 비활성화된다.
+        비어 있으면 해당 dataset의 모든 active mois license feature가 retired 전이된다.
     dataset_key
         대상 dataset (기본 ``mois_license_features_bulk``).
 
     Returns
     -------
     int
-        soft-delete된 feature 수.
+        retired 전이된 feature 수.
     """
-    return await soft_delete_features_not_in_snapshot(
+    return await retire_features_absent_from_snapshot(
         session,
         provider=PROVIDER_NAME,
         dataset_key=dataset_key,
@@ -300,12 +300,12 @@ async def sync_mois_license_features_bulk(
     address_resolver: AddressResolver | None = None,
     batch_size: int = DEFAULT_BATCH_SIZE,
 ) -> MoisBulkSyncResult:
-    """전체 영업중 snapshot 적재 + snapshot 부재 feature soft-delete (Step A bulk).
+    """전체 영업중 snapshot 적재 + snapshot 부재 feature retirement (Step A bulk).
 
     ``records``는 **이번 전체 snapshot**(영업중 PROMOTED record)이어야 한다 —
-    부분 batch에 쓰면 누락분이 전부 비활성화된다. mois source DB의 대용량 스트림을
+    부분 batch에 쓰면 누락분이 전부 retired 전이된다. mois source DB의 대용량 스트림을
     메모리 바운드로 처리하기 위해 ``batch_size``개씩 끊어 변환·upsert하며 snapshot
-    key만 누적한다. 전체 적재 후 snapshot에 없는 기존 feature를 soft-delete한다.
+    key만 누적한다. 전체 적재 후 snapshot에 없는 기존 feature를 retired 전이한다.
     commit은 호출자/감싼 transaction 소유 (한 단위 of work — 하나라도 실패하면
     전체 rollback).
 
@@ -325,14 +325,14 @@ async def sync_mois_license_features_bulk(
         )
         load_result = load_result.merge(await load_bundles(session, bundles))
         snapshot_keys.update(b.source_record.source_entity_id for b in bundles)
-    deactivated = await soft_delete_features_not_in_snapshot(
+    retired = await retire_features_absent_from_snapshot(
         session,
         provider=PROVIDER_NAME,
         dataset_key=dataset_key,
         source_entity_type=_LICENSE_ENTITY_TYPE,
         snapshot_source_entity_ids=snapshot_keys,
     )
-    return MoisBulkSyncResult(load=load_result, deactivated=deactivated)
+    return MoisBulkSyncResult(load=load_result, retired=retired)
 
 
 async def run_mois_license_bulk_job(
@@ -513,16 +513,16 @@ async def close_mois_license_features(
     *,
     target_dataset_key: str = DATASET_KEY_BULK,
 ) -> int:
-    """폐업/취소된 인허가 record에 대응하는 feature를 ``status='inactive'``로 전환.
+    """폐업/취소된 인허가 record에 대응하는 feature를 retired 전이한다.
 
     ``records``는 provider가 ``closed``/``cancelled``로 통지한 인허가다. 각 record의
     ``source_entity_id``(``{slug}::{mng_no}``)를 뽑아, **이미 적재된 feature**
-    (보통 Step A bulk의 ``target_dataset_key``)를 비활성화한다 (ADR-017 — place는
-    무기한 유지, status만 inactive). feature를 새로 만들지 않는다. 매칭 안 되는
-    record(미적재/EXCLUDED)는 무시. commit은 호출자 책임.
+    (보통 Step A bulk의 ``target_dataset_key``)를 lifecycle ``retired``와 publication
+    ``suppressed``로 전이한다 (ADR-017 — place는 무기한 유지). feature를 새로 만들지 않는다.
+    매칭 안 되는 record(미적재/EXCLUDED)는 무시. commit은 호출자 책임.
     """
     entity_ids = {license_source_entity_id(r) for r in records}
-    return await inactivate_features_by_source_entity_ids(
+    return await retire_features_by_source_entity_ids(
         session,
         provider=PROVIDER_NAME,
         dataset_key=target_dataset_key,
@@ -572,7 +572,7 @@ async def run_mois_license_closed_job(
             trigger_kind="system",
         )
         try:
-            deactivated = await close_mois_license_features(
+            retired = await close_mois_license_features(
                 session, records, target_dataset_key=target_dataset_key
             )
         except Exception as exc:
@@ -599,6 +599,6 @@ async def run_mois_license_closed_job(
         return MoisClosedJobResult(
             acquired=True,
             job=finished or job,
-            deactivated=deactivated,
+            retired=retired,
             sync_state=state,
         )

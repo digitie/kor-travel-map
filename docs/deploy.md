@@ -209,8 +209,15 @@ route, backup, CORS, metrics 설정은 API 전용 파일에만 둔다. 이 파�
 canonical API service에 literal `true`를 주입한 뒤 raw/resolved/runtime 검증으로 이를 증명한다.
 라이브 조작의 actor는 admin BFF 인증 principal로 별도 감사된다.
 PC 개발 환경에서 host `5432`는 `kor-travel-docker-manager`가 소유한
-공유 PostgreSQL/PostGIS 서버 인스턴스다. `KOR_TRAVEL_MAP_PG_DSN`을 명시하지 않으면
-`scripts/load-env.sh`가 `127.0.0.1:5432/kor_travel_map` DSN을 채운다.
+공유 PostgreSQL/PostGIS 서버 인스턴스다. `scripts/load-env.sh`는 bootstrap owner로
+`KOR_TRAVEL_MAP_PG_DSN`을 합성하지 않는다. API/Dagster runtime, Alembic migrator,
+Dagster metadata DSN은 각각 ignored deployment env 또는 vault에 명시해야 하며 누락한
+Compose 기동은 fail-closed 한다. 외부 DB/infra overlay는 ownership bootstrap을 자동 실행하지
+않으므로 dedicated map DB의 role·ownership transfer도 운영자가 사전 provision한다.
+bootstrap은 PostgreSQL system object까지 건드리는 `REASSIGN OWNED`를 쓰지 않고 map application
+object만 명시 transfer한다. API entrypoint는 Alembic 뒤 migrator `SET ROLE` 경로로 runtime ACL
+inventory를 재조정한다. `ALTER DEFAULT PRIVILEGES` fallback은 없으므로 state/audit future table이
+runtime DML을 자동으로 얻지 않는다.
 공유 DB만 쓰고 RustFS는 local compose로 띄우는 Docker 기동은
 `KOR_TRAVEL_MAP_DB_EXTERNAL=true`와 `KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT=5432`
 기준이다. 공유 DB와 공유 RustFS를 모두 쓰면 `KOR_TRAVEL_MAP_INFRA_EXTERNAL=true`를 쓴다.

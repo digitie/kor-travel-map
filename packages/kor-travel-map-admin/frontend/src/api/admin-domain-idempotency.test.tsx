@@ -45,12 +45,12 @@ import {
 import {
   useApproveAdminFeatureChangeMutation,
   useCreateAdminFeatureMutation,
-  useDeactivateAdminFeatureMutation,
   useDeleteAdminFeatureMutation,
+  usePatchAdminFeatureStateMutation,
   usePatchAdminFeatureMutation,
   useRejectAdminFeatureChangeMutation,
   type AdminFeatureCreateRequest,
-  type AdminFeatureDeactivateRequest,
+  type AdminFeatureStatePatchRequest,
   type AdminFeatureDeleteRequest,
   type AdminFeaturePatchRequest,
   type AdminFeatureReviewActionRequest,
@@ -67,8 +67,9 @@ import {
   type AdminIssuePatchRequest,
 } from "./issues";
 
-(globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT =
-  true;
+(
+  globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }
+).IS_REACT_ACT_ENVIRONMENT = true;
 
 type FetchMock = (
   input: RequestInfo | URL,
@@ -141,10 +142,12 @@ describe("admin domain idempotency consumers", () => {
 
   it("retryable admin write hooks send explicit UUID Idempotency-Key headers", async () => {
     const context = hookContext();
-    const featureReviewBody =
-      { reason: "review" } as AdminFeatureReviewActionRequest;
-    const curationStatusBody =
-      { reason: "curated status" } as CuratedFeatureStatusRequest;
+    const featureReviewBody = {
+      reason: "review",
+    } as AdminFeatureReviewActionRequest;
+    const curationStatusBody = {
+      reason: "curated status",
+    } as CuratedFeatureStatusRequest;
     const cases: Array<{ name: string; run: () => Promise<void> }> = [
       {
         name: "backup create",
@@ -194,10 +197,14 @@ describe("admin domain idempotency consumers", () => {
           runMutation(context, useLaunchOfflineUploadLoadMutation, "upload-1"),
       },
       {
-        name: "feature deactivate",
+        name: "feature retire",
         run: () =>
-          runMutation(context, useDeactivateAdminFeatureMutation, {
-            body: { reason: "deactivate" } as AdminFeatureDeactivateRequest,
+          runMutation(context, usePatchAdminFeatureStateMutation, {
+            body: {
+              action: "retire",
+              reason_code: "admin_ui_retire",
+            } as AdminFeatureStatePatchRequest,
+            entityTag: '"7"',
             featureId: "feature-1",
           }),
       },

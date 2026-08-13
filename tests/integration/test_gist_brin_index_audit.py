@@ -81,11 +81,20 @@ async def test_weather_source_record_support_index_exists(
 async def _seed_public_points(session: Any, count: int, prefix: str) -> None:
     # 전국(124.5~131.5 lon, 33.5~39.5 lat)에 고르게 뿌려 Seoul bbox/50km 반경이
     # 선택적(few match)이 되게 한다 → GiST bbox/KNN 스캔이 명확히 최적.
+    #
+    # T-VN-34(0095~0097): 옛 seed의 ``status='active'``가 여기서 하던 일은 "이 행을
+    # 공개 표면에 올려 partial GiST가 실제로 색인하게 만든다"였다. 0095 backfill이
+    # 정한 대응이 정확히 ``status='active'`` → (lifecycle active, publication
+    # published, quality valid)이고, 0096이 만든 partial GiST의 predicate도 같은 세
+    # 축이다. 그래서 이 세 값은 컬럼 DEFAULT와 같더라도 명시한다 — 하나라도
+    # 어긋나면 seed 행이 partial index에서 통째로 빠져 EXPLAIN 단언이 "index를 못
+    # 골랐다"가 아니라 "고를 행이 없었다"로 조용히 무너진다.
     await session.execute(
         text(
             """
             INSERT INTO feature.features (
-                feature_id, kind, name, category, coord, status, updated_at
+                feature_id, kind, name, category, coord,
+                lifecycle_state, publication_state, quality_state, updated_at
             )
             SELECT
                 :prefix || g, 'place', 'p', '06020000',
@@ -95,7 +104,7 @@ async def _seed_public_points(session: Any, count: int, prefix: str) -> None:
                     ),
                     4326
                 ),
-                'active', now()
+                'active', 'published', 'valid', now()
             FROM generate_series(1, :count) AS g
             """
         ),
@@ -104,6 +113,18 @@ async def _seed_public_points(session: Any, count: int, prefix: str) -> None:
     await session.flush()
     # planner가 GiST 선택도를 알도록 통계 갱신.
     await session.execute(text("ANALYZE feature.features"))
+    # 축 값을 되읽어 확인하지 않고 공개 view 실재를 확인한다. EXPLAIN 단언이 기대는
+    # 전제는 "seed가 공개 표면에 있다"이지 "세 컬럼이 이 문자열이다"가 아니며,
+    # ``feature.public_features``가 그 전제의 정본이다(공개 predicate가 바뀌면 여기서
+    # 먼저 터진다).
+    seeded = await session.execute(
+        text(
+            "SELECT count(*) FROM feature.public_features "
+            "WHERE feature_id LIKE :prefix || '%'"
+        ),
+        {"prefix": prefix},
+    )
+    assert seeded.scalar_one() == count, "seed는 공개 표면에 전부 보여야 한다"
 
 
 async def test_public_bbox_query_plans_partial_coord_gist(
@@ -178,9 +199,15 @@ def _run_alembic(dsn: str, revision: str) -> None:
     command.upgrade(config, revision)
 
 
+# T-VN-34: write-cost 측정의 전제는 "삽입되는 행이 partial GiST에도 실제로 들어간다"는
+# 것이다. 0096의 partial predicate가 (lifecycle active, publication published, quality
+# valid)이므로 그 조합이 아니면 partial 쪽 유지비가 0이 되어 6-GiST/3-GiST 비교가
+# 자기 자신과의 비교로 퇴화한다. 옛 ``status='active'``가 뜻하던 것이 바로 이
+# 조합이라(0095 backfill) 세 축을 그대로 명시한다.
 _INSERT_BATCH_SQL = """
 INSERT INTO feature.features (
-    feature_id, kind, name, category, coord, status, updated_at
+    feature_id, kind, name, category, coord,
+    lifecycle_state, publication_state, quality_state, updated_at
 )
 SELECT
     :prefix || g, 'place', 'p', '06020000',
@@ -190,7 +217,7 @@ SELECT
         ),
         4326
     ),
-    'active', now()
+    'active', 'published', 'valid', now()
 FROM generate_series(1, :count) AS g
 """
 
@@ -244,9 +271,20 @@ async def test_dropping_full_gist_reduces_write_cost(pg_container: Any) -> None:
         autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
         await autocommit.execute(text(f'CREATE DATABASE "{database}"'))
 
+    # 0095부터 fresh DB는 배포와 같은 principal graph를 먼저 갖춰야 upgrade가 선다
+    # (restricted migrator가 state/audit owner membership을 스스로 부여하지 않는지
+    # 0095가 검사한다). 자기 DB를 따로 만드는 이 테스트도 conftest와 같은 공유
+    # helper를 쓴다 — 여기서만 다른 경로로 올리면 측정 대상 schema가 배포와 달라진다.
+    from tests.integration._tvn34_migration_bootstrap import (
+        alembic_schema_owner_role,
+        bootstrapped_migrator_dsn,
+    )
+
     engine = None
     try:
-        await asyncio.to_thread(_run_alembic, target_dsn, "head")
+        migrator_dsn = await bootstrapped_migrator_dsn(target_dsn)
+        with alembic_schema_owner_role():
+            await asyncio.to_thread(_run_alembic, migrator_dsn, "head")
         engine = make_async_engine(target_dsn)
 
         # 기준 데이터(색인에 내용을 채운다).

@@ -13,6 +13,7 @@ asyncpg driver로 정규화 후 `AsyncEngine`을 만들어 마이그레이션 �
 from __future__ import annotations
 
 import asyncio
+import os
 from logging.config import fileConfig
 from typing import TYPE_CHECKING
 
@@ -61,6 +62,7 @@ else:
 target_metadata = metadata
 
 _FORWARD_ONLY_BOUNDARY = "0060_weather_integrity"
+_USE_SCHEMA_OWNER_ROLE_ENV = "KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE"
 
 
 def _revisions_include_forward_only_boundary(
@@ -242,6 +244,18 @@ def do_run_migrations(connection: Connection) -> None:
         include_object=_include_object,
     )
     with context.begin_transaction():
+        use_schema_owner_role = os.environ.get(_USE_SCHEMA_OWNER_ROLE_ENV, "false")
+        if use_schema_owner_role not in {"true", "false"}:
+            raise RuntimeError(
+                f"{_USE_SCHEMA_OWNER_ROLE_ENV} must be exactly true or false"
+            )
+        if use_schema_owner_role == "true":
+            # Bootstrap가 `ktm_feature_migrator`에게 이 NOLOGIN group으로의 SET
+            # 권한만 부여한다. Alembic의 concurrent-index autocommit block은
+            # transaction-local role을 reset하므로 dedicated migration connection
+            # 수명 동안의 session role을 쓴다. connection close 시 reset되며 runtime은
+            # 이 group membership을 절대 얻지 않는다.
+            connection.execute(text("SET ROLE ktm_feature_schema_owner"))
         # 0061+ descendant의 downgrade가 일부 commit된 뒤 0060에서 멈추지 않도록
         # destination 전체를 migration step 실행 전에 판정한다.
         _guard_forward_only_target()

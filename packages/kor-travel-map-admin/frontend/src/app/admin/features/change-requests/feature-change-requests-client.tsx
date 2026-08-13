@@ -70,11 +70,13 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { VWorldMapView, VWorldMarker } from "@/components/vworld-map-view";
-import { addressCodeError, validateAddressCodes } from "@/lib/feature-address-validation";
+import {
+  addressCodeError,
+  validateAddressCodes,
+} from "@/lib/feature-address-validation";
 import {
   FEATURE_CHANGE_ACTION_OPTIONS,
   FEATURE_KIND_OPTIONS,
-  FEATURE_STATUS_OPTIONS,
   MARKER_COLOR_OPTIONS,
   MARKER_ICON_OPTIONS,
   markerColorSelectStyle,
@@ -135,7 +137,6 @@ const SIDO_SEARCH_LABEL_BY_CODE: Record<string, string> = {
   "52": "전북특별자치도",
 };
 
-type FeatureMutationStatus = (typeof FEATURE_STATUS_OPTIONS)[number]["value"];
 type FeatureMutationKind = (typeof FEATURE_KIND_OPTIONS)[number]["value"];
 const UNSUPPORTED_MANUAL_MUTATION_KINDS = new Set(["area", "route"]);
 
@@ -187,7 +188,9 @@ interface FeatureChangeFormState {
   sigunguCode: string;
   sourceUrl: string;
   startDate: string;
-  status: FeatureMutationStatus;
+  lifecycleState: AdminFeatureCreateRequest["lifecycle_state"];
+  publicationState: AdminFeatureCreateRequest["publication_state"];
+  qualityState: AdminFeatureCreateRequest["quality_state"];
   urlsJson: string;
   venue: string;
 }
@@ -237,7 +240,9 @@ function initialForm(): FeatureChangeFormState {
     sigunguCode: "",
     sourceUrl: "",
     startDate: "",
-    status: "active",
+    lifecycleState: "active",
+    publicationState: "published",
+    qualityState: "valid",
     urlsJson: EMPTY_JSON,
     venue: "",
   };
@@ -259,10 +264,6 @@ function isUnsupportedManualMutationKind(value: string): boolean {
   return UNSUPPORTED_MANUAL_MUTATION_KINDS.has(value);
 }
 
-function isFeatureMutationStatus(value: string): value is FeatureMutationStatus {
-  return FEATURE_STATUS_OPTIONS.some((option) => option.value === value);
-}
-
 function formatCoordInput(value: number | null | undefined): string {
   return typeof value === "number" && Number.isFinite(value)
     ? value.toFixed(6)
@@ -280,7 +281,10 @@ function parseCoordInput(
   return { lon, lat };
 }
 
-function coordValidationMessage(lonValue: string, latValue: string): string | null {
+function coordValidationMessage(
+  lonValue: string,
+  latValue: string,
+): string | null {
   const hasLon = lonValue.trim().length > 0;
   const hasLat = latValue.trim().length > 0;
   if (!hasLon && !hasLat) return null;
@@ -425,8 +429,7 @@ function detailToFormPatch(
     phone: fieldText(detail.phone),
     placeKind: fieldText(detail.place_kind),
     roadAddressManagementNo: fieldText(
-      feature.road_address_management_no ??
-        address.road_address_management_no,
+      feature.road_address_management_no ?? address.road_address_management_no,
     ),
     roadNameCode: fieldText(feature.road_name_code ?? address.road_name_code),
     siblingGroupId: fieldText(feature.sibling_group_id),
@@ -434,7 +437,9 @@ function detailToFormPatch(
     sigunguCode: fieldText(feature.sigungu_code ?? address.sigungu_code),
     sourceUrl: fieldText(urls.source),
     startDate: dateTimeLocalText(detail.starts_at),
-    status: isFeatureMutationStatus(feature.status) ? feature.status : "active",
+    lifecycleState: feature.lifecycle_state,
+    publicationState: feature.publication_state,
+    qualityState: feature.quality_state,
     urlsJson: jsonObjectText(omitKeys(urls, ["homepage", "source"])),
     venue: fieldText(detail.venue),
   };
@@ -503,7 +508,10 @@ function parseOptionalCoord(
   return { lon, lat };
 }
 
-function parseOptionalInteger(label: string, value: string): number | undefined {
+function parseOptionalInteger(
+  label: string,
+  value: string,
+): number | undefined {
   const raw = value.trim();
   if (raw.length === 0) return undefined;
   const parsed = Number(raw);
@@ -619,7 +627,9 @@ function buildCreatePayload(
     ),
     marker_icon: form.markerIcon.trim(),
     marker_color: form.markerColor.trim(),
-    status: form.status,
+    lifecycle_state: form.lifecycleState,
+    publication_state: form.publicationState,
+    quality_state: form.qualityState,
     reason: form.reason.trim(),
     feature_id: optionalString(form.featureId),
     idempotency_key: optionalString(form.idempotencyKey),
@@ -640,7 +650,7 @@ function buildCreatePayload(
 // category/marker_icon/marker_color는 initialForm 기본값이 비어있지 않아 optionalString이
 // 항상 통과 → prefill 안 된 update에서 기존 feature 값을 기본값으로 덮어쓰는 사고가 났다(#613).
 // displayed add-default는 실제로 해당 폼 필드를 편집했고 baseline과 다를 때만 PATCH한다.
-// update payload의 나머지 initialForm non-null 기본값(kind/status)은 PATCH 계약에 없다.
+// update payload의 나머지 initialForm non-null 기본값(kind/세 상태 축)은 PATCH 계약에 없다.
 function patchDefaultedField(
   key: "category" | "markerColor" | "markerIcon",
   formValue: string,
@@ -728,7 +738,7 @@ function ChangeRequestDetail({
     <aside className="flex min-w-0 flex-col gap-4 rounded-lg border bg-background p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-        <div className="font-medium">요청 상세</div>
+          <div className="font-medium">요청 상세</div>
           <div className="break-all font-mono text-xs text-muted-foreground">
             {request.request_id}
           </div>
@@ -948,7 +958,9 @@ function LocationEditDialog({
                 aria-label="marker_icon"
                 label="마커 아이콘"
                 value={draft.markerIcon}
-                onChange={(event) => updateDraft("markerIcon", event.target.value)}
+                onChange={(event) =>
+                  updateDraft("markerIcon", event.target.value)
+                }
               >
                 {markerIconOptions.map((item) => (
                   <NativeSelectOption key={item} value={item}>
@@ -961,7 +973,9 @@ function LocationEditDialog({
                 label="마커 색상"
                 style={markerColorStyle}
                 value={draft.markerColor}
-                onChange={(event) => updateDraft("markerColor", event.target.value)}
+                onChange={(event) =>
+                  updateDraft("markerColor", event.target.value)
+                }
               >
                 {MARKER_COLOR_OPTIONS.map((item) => (
                   <NativeSelectOption
@@ -1035,9 +1049,12 @@ function useFeatureChangeRequestsClientController({
 }) {
   const queryPrefillKey = prefill?.key ?? "";
   const prefillFeatureId = prefill?.featureId?.trim() || null;
-  const [status, setStatus] = useState<AdminFeatureChangeStatus | "all">("pending");
+  const [status, setStatus] = useState<AdminFeatureChangeStatus | "all">(
+    "pending",
+  );
   const [action, setAction] = useState<AdminFeatureChangeAction | "all">("all");
-  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(100);
+  const [pageSize, setPageSize] =
+    useState<(typeof PAGE_SIZE_OPTIONS)[number]>(100);
   const [q, setQ] = useState("");
   const deferredQ = useDeferredValue(q.trim());
   const [selectedRequest, setSelectedRequest] =
@@ -1108,7 +1125,9 @@ function useFeatureChangeRequestsClientController({
   const categoryItems = categories.data?.data.items ?? [];
   const formCoord = parseCoordInput(form.lon, form.lat);
   const formCoordError =
-    form.action === "delete" ? null : coordValidationMessage(form.lon, form.lat);
+    form.action === "delete"
+      ? null
+      : coordValidationMessage(form.lon, form.lat);
   const formMarkerIconOptions = MARKER_ICON_OPTIONS.includes(form.markerIcon)
     ? MARKER_ICON_OPTIONS
     : [form.markerIcon, ...MARKER_ICON_OPTIONS].filter(Boolean);
@@ -1182,7 +1201,10 @@ function useFeatureChangeRequestsClientController({
   };
 
   useEffect(() => {
-    if (!queryPrefillKey || appliedQueryPrefillRef.current === queryPrefillKey) {
+    if (
+      !queryPrefillKey ||
+      appliedQueryPrefillRef.current === queryPrefillKey
+    ) {
       return;
     }
     const nextAction = prefill?.action;
@@ -1192,7 +1214,9 @@ function useFeatureChangeRequestsClientController({
     setForm((current) => ({
       ...current,
       action:
-        nextAction === "add" || nextAction === "update" || nextAction === "delete"
+        nextAction === "add" ||
+        nextAction === "update" ||
+        nextAction === "delete"
           ? nextAction
           : current.action,
       featureId: nextFeatureId || current.featureId,
@@ -1228,12 +1252,7 @@ function useFeatureChangeRequestsClientController({
         ),
       );
     });
-  }, [
-    correctionBasis.data,
-    prefillFeatureId,
-    form.action,
-    form.featureId,
-  ]);
+  }, [correctionBasis.data, prefillFeatureId, form.action, form.featureId]);
 
   const reloadCorrectionBasis = async () => {
     setFormError(null);
@@ -1244,7 +1263,10 @@ function useFeatureChangeRequestsClientController({
       result.error !== null ||
       !result.data
     ) {
-      throw result.error ?? new Error("최신 Feature 편집 기준을 불러오지 못했습니다.");
+      throw (
+        result.error ??
+        new Error("최신 Feature 편집 기준을 불러오지 못했습니다.")
+      );
     }
     const feature = result.data.detail.data.feature;
     if (
@@ -1255,7 +1277,9 @@ function useFeatureChangeRequestsClientController({
     }
     if (form.action === "update") {
       if (isUnsupportedManualMutationKind(feature.kind)) {
-        throw new Error(`${feature.kind} Feature는 수동 생성/수정 대상이 아닙니다.`);
+        throw new Error(
+          `${feature.kind} Feature는 수동 생성/수정 대상이 아닙니다.`,
+        );
       }
       setForm((current) => ({
         ...current,
@@ -1283,7 +1307,9 @@ function useFeatureChangeRequestsClientController({
         validateTextFields(form, categoryItems);
       }
       if (form.action === "add") {
-        const response = await createFeature.mutateAsync(buildCreatePayload(form));
+        const response = await createFeature.mutateAsync(
+          buildCreatePayload(form),
+        );
         setSelectedRequest(response.data.request);
       } else if (form.action === "update") {
         if (unsupportedUpdateKind) {
@@ -1333,25 +1359,31 @@ function useFeatureChangeRequestsClientController({
     }
   };
 
-  const approve = useCallback((request: AdminFeatureChangeRecord) => {
-    approveChangeRequest(
-      {
-        requestId: request.request_id,
-        body: { reason: "admin-ui approve" },
-      },
-      { onSuccess: (data) => setSelectedRequest(data.data.request) },
-    );
-  }, [approveChangeRequest]);
+  const approve = useCallback(
+    (request: AdminFeatureChangeRecord) => {
+      approveChangeRequest(
+        {
+          requestId: request.request_id,
+          body: { reason: "admin-ui approve" },
+        },
+        { onSuccess: (data) => setSelectedRequest(data.data.request) },
+      );
+    },
+    [approveChangeRequest],
+  );
 
-  const reject = useCallback((request: AdminFeatureChangeRecord) => {
-    rejectChangeRequest(
-      {
-        requestId: request.request_id,
-        body: { reason: "admin-ui reject" },
-      },
-      { onSuccess: (data) => setSelectedRequest(data.data.request) },
-    );
-  }, [rejectChangeRequest]);
+  const reject = useCallback(
+    (request: AdminFeatureChangeRecord) => {
+      rejectChangeRequest(
+        {
+          requestId: request.request_id,
+          body: { reason: "admin-ui reject" },
+        },
+        { onSuccess: (data) => setSelectedRequest(data.data.request) },
+      );
+    },
+    [rejectChangeRequest],
+  );
 
   const columns = useMemo<ColumnDef<AdminFeatureChangeRecord, unknown>[]>(
     () => [
@@ -1553,51 +1585,60 @@ function ChangeRequestFeedback({
   mutationError,
   reloadCorrectionBasis,
   setFormError,
-}: Pick<ReturnType<typeof useFeatureChangeRequestsClientController>, "changes" | "correctionBasis" | "correctionConflict" | "formError" | "mutationError" | "reloadCorrectionBasis" | "setFormError">) {
+}: Pick<
+  ReturnType<typeof useFeatureChangeRequestsClientController>,
+  | "changes"
+  | "correctionBasis"
+  | "correctionConflict"
+  | "formError"
+  | "mutationError"
+  | "reloadCorrectionBasis"
+  | "setFormError"
+>) {
   return (
     <>
-{(changes.isError ||
-          (!correctionConflict && mutationError) ||
-          correctionBasis.isError ||
-          formError) && (
-          <Alert variant="destructive">
-            <AlertTitle>Feature 변경 처리 실패</AlertTitle>
-            <AlertDescription>
-              {formError ??
-                changes.error?.message ??
-                correctionBasis.error?.message ??
-                mutationError?.message}
-            </AlertDescription>
-          </Alert>
-        )}
+      {(changes.isError ||
+        (!correctionConflict && mutationError) ||
+        correctionBasis.isError ||
+        formError) && (
+        <Alert variant="destructive">
+          <AlertTitle>Feature 변경 처리 실패</AlertTitle>
+          <AlertDescription>
+            {formError ??
+              changes.error?.message ??
+              correctionBasis.error?.message ??
+              mutationError?.message}
+          </AlertDescription>
+        </Alert>
+      )}
 
-        {correctionConflict ? (
-          <Alert>
-            <AlertTitle>서버의 Feature가 변경되었습니다</AlertTitle>
-            <AlertDescription className="flex flex-col items-start gap-3">
-              <span>
-                작성 중인 내용은 그대로 보존했습니다. 최신값을 다시 불러온 뒤 변경 내용을
-                검토하고 다시 제출하세요.
-              </span>
-              <Button
-                disabled={correctionBasis.isFetching}
-                size="sm"
-                type="button"
-                variant="outline"
-                onClick={() =>
-                  void reloadCorrectionBasis().catch((error: unknown) =>
-                    setFormError(
-                      error instanceof Error ? error.message : String(error),
-                    ),
-                  )
-                }
-              >
-                <RefreshCwIcon data-icon="inline-start" />
-                최신값으로 폼 다시 불러오기
-              </Button>
-            </AlertDescription>
-          </Alert>
-        ) : null}
+      {correctionConflict ? (
+        <Alert>
+          <AlertTitle>서버의 Feature가 변경되었습니다</AlertTitle>
+          <AlertDescription className="flex flex-col items-start gap-3">
+            <span>
+              작성 중인 내용은 그대로 보존했습니다. 최신값을 다시 불러온 뒤 변경
+              내용을 검토하고 다시 제출하세요.
+            </span>
+            <Button
+              disabled={correctionBasis.isFetching}
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={() =>
+                void reloadCorrectionBasis().catch((error: unknown) =>
+                  setFormError(
+                    error instanceof Error ? error.message : String(error),
+                  ),
+                )
+              }
+            >
+              <RefreshCwIcon data-icon="inline-start" />
+              최신값으로 폼 다시 불러오기
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
     </>
   );
 }
@@ -1611,128 +1652,138 @@ function ChangeRequestCoreFields({
   selectedCorrectionBasis,
   unsupportedUpdateKind,
   updateForm,
-}: Pick<ReturnType<typeof useFeatureChangeRequestsClientController>, "anyMutationPending" | "correctionBasis" | "correctionConflict" | "form" | "resetForm" | "selectedCorrectionBasis" | "unsupportedUpdateKind" | "updateForm">) {
+}: Pick<
+  ReturnType<typeof useFeatureChangeRequestsClientController>,
+  | "anyMutationPending"
+  | "correctionBasis"
+  | "correctionConflict"
+  | "form"
+  | "resetForm"
+  | "selectedCorrectionBasis"
+  | "unsupportedUpdateKind"
+  | "updateForm"
+>) {
   return (
     <>
-<section className="rounded-lg border bg-background p-4">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <div className="min-w-0">
-                <h2 className="font-medium">변경 요청 작성</h2>
-                <div className="mt-1 flex min-h-6 flex-wrap items-center gap-2 text-sm text-muted-foreground">
-                  {correctionBasis.isFetching ? (
-                    <Badge variant="outline">불러오는 중</Badge>
-                  ) : null}
-                  {selectedCorrectionBasis ? (
-                    <Badge variant="secondary">데이터 로드됨</Badge>
-                  ) : null}
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                  onClick={resetForm}
-                >
-                  <RotateCcwIcon data-icon="inline-start" />
-                  초기화
-                </Button>
-                <Button
-                  disabled={
-                    anyMutationPending ||
-                    correctionConflict ||
-                    ((form.action === "update" || form.action === "delete") &&
-                      (!selectedCorrectionBasis || correctionBasis.isFetching)) ||
-                    Boolean(unsupportedUpdateKind)
-                  }
-                  size="sm"
-                  type="submit"
-                >
-                  <PlusIcon data-icon="inline-start" />
-                  요청 생성
-                </Button>
-              </div>
+      <section className="rounded-lg border bg-background p-4">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h2 className="font-medium">변경 요청 작성</h2>
+            <div className="mt-1 flex min-h-6 flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              {correctionBasis.isFetching ? (
+                <Badge variant="outline">불러오는 중</Badge>
+              ) : null}
+              {selectedCorrectionBasis ? (
+                <Badge variant="secondary">데이터 로드됨</Badge>
+              ) : null}
             </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={resetForm}
+            >
+              <RotateCcwIcon data-icon="inline-start" />
+              초기화
+            </Button>
+            <Button
+              disabled={
+                anyMutationPending ||
+                correctionConflict ||
+                ((form.action === "update" || form.action === "delete") &&
+                  (!selectedCorrectionBasis || correctionBasis.isFetching)) ||
+                Boolean(unsupportedUpdateKind)
+              }
+              size="sm"
+              type="submit"
+            >
+              <PlusIcon data-icon="inline-start" />
+              요청 생성
+            </Button>
+          </div>
+        </div>
 
-            <div className="grid gap-3 lg:grid-cols-4">
-              <FormSelect
-                aria-label="change action"
-                id="change-action"
-                label="요청 종류"
-                value={form.action}
-                onChange={(event) =>
-                  updateForm(
-                    "action",
-                    event.target.value as AdminFeatureChangeAction,
-                  )
-                }
-              >
-                {FEATURE_CHANGE_ACTION_OPTIONS.map((option) => (
-                  <NativeSelectOption key={option.value} value={option.value}>
-                    {option.label}
-                  </NativeSelectOption>
-                ))}
-              </FormSelect>
-              <FormField
-                aria-label="change feature id"
-                id="change-feature-id"
-                label="Feature ID"
-                placeholder={
-                  form.action === "add" ? "비우면 자동 생성" : "수정할 Feature ID"
-                }
-                value={form.featureId}
-                onChange={(event) => updateForm("featureId", event.target.value)}
-              />
-              <FormField
-                aria-label="change reason"
-                id="change-reason"
-                label="변경 사유"
-                placeholder="예: 전화번호 수정"
-                value={form.reason}
-                onChange={(event) => updateForm("reason", event.target.value)}
-              />
-            </div>
-            <div className="mt-3 grid gap-3 lg:grid-cols-4">
-              <FormField
-                aria-label="change idempotency key"
-                id="change-idempotency-key"
-                label="중복 방지 키"
-                help="같은 요청을 한 번만 만들 때 사용합니다."
-                value={form.idempotencyKey}
-                onChange={(event) =>
-                  updateForm("idempotencyKey", event.target.value)
-                }
-              />
-              <FormField
-                aria-label="change parent feature id"
-                id="change-parent-feature-id"
-                label="상위 Feature ID"
-                value={form.parentFeatureId}
-                onChange={(event) =>
-                  updateForm("parentFeatureId", event.target.value)
-                }
-              />
-              <FormField
-                aria-label="change sibling group id"
-                id="change-sibling-group-id"
-                label="같은 그룹 ID"
-                value={form.siblingGroupId}
-                onChange={(event) =>
-                  updateForm("siblingGroupId", event.target.value)
-                }
-              />
-              <FormField
-                aria-label="change coord precision digits"
-                id="change-coord-precision-digits"
-                inputMode="numeric"
-                label="좌표 소수 자릿수"
-                value={form.coordPrecisionDigits}
-                onChange={(event) =>
-                  updateForm("coordPrecisionDigits", event.target.value)
-                }
-              />
-            </div>
-          </section>
+        <div className="grid gap-3 lg:grid-cols-4">
+          <FormSelect
+            aria-label="change action"
+            id="change-action"
+            label="요청 종류"
+            value={form.action}
+            onChange={(event) =>
+              updateForm(
+                "action",
+                event.target.value as AdminFeatureChangeAction,
+              )
+            }
+          >
+            {FEATURE_CHANGE_ACTION_OPTIONS.map((option) => (
+              <NativeSelectOption key={option.value} value={option.value}>
+                {option.label}
+              </NativeSelectOption>
+            ))}
+          </FormSelect>
+          <FormField
+            aria-label="change feature id"
+            id="change-feature-id"
+            label="Feature ID"
+            placeholder={
+              form.action === "add" ? "비우면 자동 생성" : "수정할 Feature ID"
+            }
+            value={form.featureId}
+            onChange={(event) => updateForm("featureId", event.target.value)}
+          />
+          <FormField
+            aria-label="change reason"
+            id="change-reason"
+            label="변경 사유"
+            placeholder="예: 전화번호 수정"
+            value={form.reason}
+            onChange={(event) => updateForm("reason", event.target.value)}
+          />
+        </div>
+        <div className="mt-3 grid gap-3 lg:grid-cols-4">
+          <FormField
+            aria-label="change idempotency key"
+            id="change-idempotency-key"
+            label="중복 방지 키"
+            help="같은 요청을 한 번만 만들 때 사용합니다."
+            value={form.idempotencyKey}
+            onChange={(event) =>
+              updateForm("idempotencyKey", event.target.value)
+            }
+          />
+          <FormField
+            aria-label="change parent feature id"
+            id="change-parent-feature-id"
+            label="상위 Feature ID"
+            value={form.parentFeatureId}
+            onChange={(event) =>
+              updateForm("parentFeatureId", event.target.value)
+            }
+          />
+          <FormField
+            aria-label="change sibling group id"
+            id="change-sibling-group-id"
+            label="같은 그룹 ID"
+            value={form.siblingGroupId}
+            onChange={(event) =>
+              updateForm("siblingGroupId", event.target.value)
+            }
+          />
+          <FormField
+            aria-label="change coord precision digits"
+            id="change-coord-precision-digits"
+            inputMode="numeric"
+            label="좌표 소수 자릿수"
+            value={form.coordPrecisionDigits}
+            onChange={(event) =>
+              updateForm("coordPrecisionDigits", event.target.value)
+            }
+          />
+        </div>
+      </section>
     </>
   );
 }
@@ -1748,184 +1799,203 @@ function ChangeRequestMutationFields({
   setLocationDialogOpen,
   unsupportedUpdateKind,
   updateForm,
-}: Pick<ReturnType<typeof useFeatureChangeRequestsClientController>, "applyRegionCandidate" | "categories" | "categoryItems" | "form" | "formCoord" | "formCoordError" | "formMarkerIconOptions" | "setLocationDialogOpen" | "unsupportedUpdateKind" | "updateForm">) {
+}: Pick<
+  ReturnType<typeof useFeatureChangeRequestsClientController>,
+  | "applyRegionCandidate"
+  | "categories"
+  | "categoryItems"
+  | "form"
+  | "formCoord"
+  | "formCoordError"
+  | "formMarkerIconOptions"
+  | "setLocationDialogOpen"
+  | "unsupportedUpdateKind"
+  | "updateForm"
+>) {
   return (
     <>
-{form.action !== "delete" ? (
-            <>
-              <FeatureBasicInfoSection
-                category={form.category}
-                categoryItems={categoryItems}
-                idPrefix="change"
-                kind={form.kind}
-                name={form.name}
-                placeKind={form.placeKind}
-                status={form.status}
-                onCategoryChange={(value) => updateForm("category", value)}
-                onKindChange={(value) =>
-                  updateForm("kind", value as FeatureMutationKind)
-                }
-                onNameChange={(value) => updateForm("name", value)}
-                onPlaceKindChange={(value) => updateForm("placeKind", value)}
-                onStatusChange={(value) =>
-                  updateForm("status", value as FeatureMutationStatus)
-                }
-              />
-              {categories.isError ? (
-                <div className="text-sm text-destructive">
-                  {categories.error.message}
-                </div>
-              ) : null}
-              {unsupportedUpdateKind ? (
-                <Alert variant="destructive">
-                  <AlertTitle>수동 수정 불가</AlertTitle>
-                  <AlertDescription>
-                    {unsupportedUpdateKind} Feature는 이 화면에서 생성하거나 수정할 수
-                    없습니다.
-                  </AlertDescription>
-                </Alert>
-              ) : null}
-
-              <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_28rem]">
-                <FeatureLocationPreviewSection
-                  apiKey={VWORLD_KEY}
-                  coord={formCoord}
-                  heightClassName="h-[18rem] sm:h-[24rem]"
-                  markerColor={form.markerColor}
-                  markerIcon={form.markerIcon}
-                  testId="feature-change-location-preview-map"
-                  title={form.name || "feature change point"}
-                  actions={
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setLocationDialogOpen(true)}
-                    >
-                      <MapPinIcon data-icon="inline-start" />
-                      위치 편집
-                    </Button>
-                  }
-                  onMapClick={({ lon, lat }) => {
-                    updateForm("lon", lon.toFixed(6));
-                    updateForm("lat", lat.toFixed(6));
-                  }}
-                />
-
-                <section className="rounded-lg border bg-background p-4">
-                  <h2 className="mb-3 font-medium">위치/마커</h2>
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
-                    <FormField
-                      aria-label="change lon"
-                      error={formCoordError}
-                      id="change-lon"
-                      inputMode="decimal"
-                      label="경도"
-                      value={form.lon}
-                      onChange={(event) => updateForm("lon", event.target.value)}
-                    />
-                    <FormField
-                      aria-label="change lat"
-                      error={formCoordError}
-                      id="change-lat"
-                      inputMode="decimal"
-                      label="위도"
-                      value={form.lat}
-                      onChange={(event) => updateForm("lat", event.target.value)}
-                    />
-                    <FormSelect
-                      aria-label="change marker icon"
-                      id="change-marker-icon"
-                      label="마커 아이콘"
-                      value={form.markerIcon}
-                      onChange={(event) =>
-                        updateForm("markerIcon", event.target.value)
-                      }
-                    >
-                      {formMarkerIconOptions.map((item) => (
-                        <NativeSelectOption key={item} value={item}>
-                          {markerIconLabel(item)}
-                        </NativeSelectOption>
-                      ))}
-                    </FormSelect>
-                    <FormSelect
-                      aria-label="change marker color"
-                      id="change-marker-color"
-                      label="마커 색상"
-                      style={markerColorSelectStyle(form.markerColor)}
-                      value={form.markerColor}
-                      onChange={(event) =>
-                        updateForm("markerColor", event.target.value)
-                      }
-                    >
-                      {MARKER_COLOR_OPTIONS.map((item) => (
-                        <NativeSelectOption
-                          key={item.code}
-                          style={{
-                            backgroundColor: item.hex,
-                            color: readableTextColor(item.hex),
-                          }}
-                          value={item.code}
-                        >
-                          {item.label}
-                        </NativeSelectOption>
-                      ))}
-                    </FormSelect>
-                  </div>
-                </section>
-              </section>
-
-              <section className="grid gap-4 xl:grid-cols-2">
-                <FeatureAddressSection
-                  idPrefix="change"
-                  values={{
-                    addressAdmin: form.addressAdmin,
-                    addressExtraJson: form.addressJson,
-                    addressLegal: form.addressLegal,
-                    addressRoad: form.addressRoad,
-                    adminDongCode: form.adminDongCode,
-                    legalDongCode: form.legalDongCode,
-                    roadAddressManagementNo: form.roadAddressManagementNo,
-                    roadNameCode: form.roadNameCode,
-                    sidoCode: form.sidoCode,
-                    sigunguCode: form.sigunguCode,
-                  }}
-                  onSelectRegionCandidate={applyRegionCandidate}
-                  onChange={(field, value) => {
-                    if (field === "addressExtraJson") {
-                      updateForm("addressJson", value);
-                    } else {
-                      updateForm(field, value);
-                    }
-                  }}
-                />
-                <FeatureDetailSection
-                  idPrefix="change"
-                  kind={form.kind}
-                  values={{
-                    detailExtraJson: form.detailJson,
-                    endDate: form.endDate,
-                    eventStatus: form.eventStatus,
-                    homepageUrl: form.homepageUrl,
-                    organizer: form.organizer,
-                    phone: form.phone,
-                    sourceUrl: form.sourceUrl,
-                    startDate: form.startDate,
-                    urlsExtraJson: form.urlsJson,
-                    venue: form.venue,
-                  }}
-                  onChange={(field, value) => {
-                    if (field === "detailExtraJson") {
-                      updateForm("detailJson", value);
-                    } else if (field === "urlsExtraJson") {
-                      updateForm("urlsJson", value);
-                    } else {
-                      updateForm(field, value);
-                    }
-                  }}
-                />
-              </section>
-            </>
+      {form.action !== "delete" ? (
+        <>
+          <FeatureBasicInfoSection
+            category={form.category}
+            categoryItems={categoryItems}
+            idPrefix="change"
+            kind={form.kind}
+            name={form.name}
+            placeKind={form.placeKind}
+            lifecycleState={form.lifecycleState}
+            publicationState={form.publicationState}
+            qualityState={form.qualityState}
+            showStateControls={form.action === "add"}
+            onCategoryChange={(value) => updateForm("category", value)}
+            onKindChange={(value) =>
+              updateForm("kind", value as FeatureMutationKind)
+            }
+            onNameChange={(value) => updateForm("name", value)}
+            onPlaceKindChange={(value) => updateForm("placeKind", value)}
+            onLifecycleStateChange={(value) =>
+              updateForm("lifecycleState", value)
+            }
+            onPublicationStateChange={(value) =>
+              updateForm("publicationState", value)
+            }
+            onQualityStateChange={(value) => updateForm("qualityState", value)}
+          />
+          {categories.isError ? (
+            <div className="text-sm text-destructive">
+              {categories.error.message}
+            </div>
           ) : null}
+          {unsupportedUpdateKind ? (
+            <Alert variant="destructive">
+              <AlertTitle>수동 수정 불가</AlertTitle>
+              <AlertDescription>
+                {unsupportedUpdateKind} Feature는 이 화면에서 생성하거나 수정할
+                수 없습니다.
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
+          <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_28rem]">
+            <FeatureLocationPreviewSection
+              apiKey={VWORLD_KEY}
+              coord={formCoord}
+              heightClassName="h-[18rem] sm:h-[24rem]"
+              markerColor={form.markerColor}
+              markerIcon={form.markerIcon}
+              testId="feature-change-location-preview-map"
+              title={form.name || "feature change point"}
+              actions={
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setLocationDialogOpen(true)}
+                >
+                  <MapPinIcon data-icon="inline-start" />
+                  위치 편집
+                </Button>
+              }
+              onMapClick={({ lon, lat }) => {
+                updateForm("lon", lon.toFixed(6));
+                updateForm("lat", lat.toFixed(6));
+              }}
+            />
+
+            <section className="rounded-lg border bg-background p-4">
+              <h2 className="mb-3 font-medium">위치/마커</h2>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+                <FormField
+                  aria-label="change lon"
+                  error={formCoordError}
+                  id="change-lon"
+                  inputMode="decimal"
+                  label="경도"
+                  value={form.lon}
+                  onChange={(event) => updateForm("lon", event.target.value)}
+                />
+                <FormField
+                  aria-label="change lat"
+                  error={formCoordError}
+                  id="change-lat"
+                  inputMode="decimal"
+                  label="위도"
+                  value={form.lat}
+                  onChange={(event) => updateForm("lat", event.target.value)}
+                />
+                <FormSelect
+                  aria-label="change marker icon"
+                  id="change-marker-icon"
+                  label="마커 아이콘"
+                  value={form.markerIcon}
+                  onChange={(event) =>
+                    updateForm("markerIcon", event.target.value)
+                  }
+                >
+                  {formMarkerIconOptions.map((item) => (
+                    <NativeSelectOption key={item} value={item}>
+                      {markerIconLabel(item)}
+                    </NativeSelectOption>
+                  ))}
+                </FormSelect>
+                <FormSelect
+                  aria-label="change marker color"
+                  id="change-marker-color"
+                  label="마커 색상"
+                  style={markerColorSelectStyle(form.markerColor)}
+                  value={form.markerColor}
+                  onChange={(event) =>
+                    updateForm("markerColor", event.target.value)
+                  }
+                >
+                  {MARKER_COLOR_OPTIONS.map((item) => (
+                    <NativeSelectOption
+                      key={item.code}
+                      style={{
+                        backgroundColor: item.hex,
+                        color: readableTextColor(item.hex),
+                      }}
+                      value={item.code}
+                    >
+                      {item.label}
+                    </NativeSelectOption>
+                  ))}
+                </FormSelect>
+              </div>
+            </section>
+          </section>
+
+          <section className="grid gap-4 xl:grid-cols-2">
+            <FeatureAddressSection
+              idPrefix="change"
+              values={{
+                addressAdmin: form.addressAdmin,
+                addressExtraJson: form.addressJson,
+                addressLegal: form.addressLegal,
+                addressRoad: form.addressRoad,
+                adminDongCode: form.adminDongCode,
+                legalDongCode: form.legalDongCode,
+                roadAddressManagementNo: form.roadAddressManagementNo,
+                roadNameCode: form.roadNameCode,
+                sidoCode: form.sidoCode,
+                sigunguCode: form.sigunguCode,
+              }}
+              onSelectRegionCandidate={applyRegionCandidate}
+              onChange={(field, value) => {
+                if (field === "addressExtraJson") {
+                  updateForm("addressJson", value);
+                } else {
+                  updateForm(field, value);
+                }
+              }}
+            />
+            <FeatureDetailSection
+              idPrefix="change"
+              kind={form.kind}
+              values={{
+                detailExtraJson: form.detailJson,
+                endDate: form.endDate,
+                eventStatus: form.eventStatus,
+                homepageUrl: form.homepageUrl,
+                organizer: form.organizer,
+                phone: form.phone,
+                sourceUrl: form.sourceUrl,
+                startDate: form.startDate,
+                urlsExtraJson: form.urlsJson,
+                venue: form.venue,
+              }}
+              onChange={(field, value) => {
+                if (field === "detailExtraJson") {
+                  updateForm("detailJson", value);
+                } else if (field === "urlsExtraJson") {
+                  updateForm("urlsJson", value);
+                } else {
+                  updateForm(field, value);
+                }
+              }}
+            />
+          </section>
+        </>
+      ) : null}
     </>
   );
 }
@@ -1950,36 +2020,77 @@ function ChangeRequestEditorWorkspace({
   submitChange,
   unsupportedUpdateKind,
   updateForm,
-}: Pick<ReturnType<typeof useFeatureChangeRequestsClientController>, "anyMutationPending" | "applyRegionCandidate" | "categories" | "categoryItems" | "correctionBasis" | "correctionConflict" | "form" | "formCoord" | "formCoordError" | "formMarkerIconOptions" | "locationDialogOpen" | "resetForm" | "selectedCorrectionBasis" | "selectedRequest" | "setLocationDialogOpen" | "showRequestForm" | "submitChange" | "unsupportedUpdateKind" | "updateForm">) {
+}: Pick<
+  ReturnType<typeof useFeatureChangeRequestsClientController>,
+  | "anyMutationPending"
+  | "applyRegionCandidate"
+  | "categories"
+  | "categoryItems"
+  | "correctionBasis"
+  | "correctionConflict"
+  | "form"
+  | "formCoord"
+  | "formCoordError"
+  | "formMarkerIconOptions"
+  | "locationDialogOpen"
+  | "resetForm"
+  | "selectedCorrectionBasis"
+  | "selectedRequest"
+  | "setLocationDialogOpen"
+  | "showRequestForm"
+  | "submitChange"
+  | "unsupportedUpdateKind"
+  | "updateForm"
+>) {
   return (
     <>
-{showRequestForm ? (
-          <form className="flex flex-col gap-4" onSubmit={submitChange}>
-          <ChangeRequestCoreFields anyMutationPending={anyMutationPending} correctionBasis={correctionBasis} correctionConflict={correctionConflict} form={form} resetForm={resetForm} selectedCorrectionBasis={selectedCorrectionBasis} unsupportedUpdateKind={unsupportedUpdateKind} updateForm={updateForm} />
-
-          <ChangeRequestMutationFields applyRegionCandidate={applyRegionCandidate} categories={categories} categoryItems={categoryItems} form={form} formCoord={formCoord} formCoordError={formCoordError} formMarkerIconOptions={formMarkerIconOptions} setLocationDialogOpen={setLocationDialogOpen} unsupportedUpdateKind={unsupportedUpdateKind} updateForm={updateForm} />
-        </form>
-        ) : null}
-
-        {showRequestForm && locationDialogOpen ? (
-          <LocationEditDialog
+      {showRequestForm ? (
+        <form className="flex flex-col gap-4" onSubmit={submitChange}>
+          <ChangeRequestCoreFields
+            anyMutationPending={anyMutationPending}
+            correctionBasis={correctionBasis}
+            correctionConflict={correctionConflict}
             form={form}
+            resetForm={resetForm}
+            selectedCorrectionBasis={selectedCorrectionBasis}
+            unsupportedUpdateKind={unsupportedUpdateKind}
             updateForm={updateForm}
-            onClose={() => setLocationDialogOpen(false)}
           />
-        ) : null}
 
-        {showRequestForm && selectedRequest ? (
-          <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_30rem]">
-            <Alert>
-              <AlertTitle>변경 요청 생성됨</AlertTitle>
-              <AlertDescription>
-                요청은 Feature 검수 화면에서 승인하거나 반려할 수 있습니다.
-              </AlertDescription>
-            </Alert>
-            <ChangeRequestDetail request={selectedRequest} />
-          </section>
-        ) : null}
+          <ChangeRequestMutationFields
+            applyRegionCandidate={applyRegionCandidate}
+            categories={categories}
+            categoryItems={categoryItems}
+            form={form}
+            formCoord={formCoord}
+            formCoordError={formCoordError}
+            formMarkerIconOptions={formMarkerIconOptions}
+            setLocationDialogOpen={setLocationDialogOpen}
+            unsupportedUpdateKind={unsupportedUpdateKind}
+            updateForm={updateForm}
+          />
+        </form>
+      ) : null}
+
+      {showRequestForm && locationDialogOpen ? (
+        <LocationEditDialog
+          form={form}
+          updateForm={updateForm}
+          onClose={() => setLocationDialogOpen(false)}
+        />
+      ) : null}
+
+      {showRequestForm && selectedRequest ? (
+        <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_30rem]">
+          <Alert>
+            <AlertTitle>변경 요청 생성됨</AlertTitle>
+            <AlertDescription>
+              요청은 Feature 검수 화면에서 승인하거나 반려할 수 있습니다.
+            </AlertDescription>
+          </Alert>
+          <ChangeRequestDetail request={selectedRequest} />
+        </section>
+      ) : null}
     </>
   );
 }
@@ -2001,101 +2112,125 @@ function ChangeRequestReviewWorkspace({
   setStatus,
   showReview,
   status,
-}: Pick<ReturnType<typeof useFeatureChangeRequestsClientController>, "action" | "changes" | "columns" | "highlightRequestId" | "items" | "pageSize" | "q" | "reviewMode" | "selectedRequest" | "setAction" | "setPageSize" | "setQ" | "setSelectedRequest" | "setStatus" | "showReview" | "status">) {
+}: Pick<
+  ReturnType<typeof useFeatureChangeRequestsClientController>,
+  | "action"
+  | "changes"
+  | "columns"
+  | "highlightRequestId"
+  | "items"
+  | "pageSize"
+  | "q"
+  | "reviewMode"
+  | "selectedRequest"
+  | "setAction"
+  | "setPageSize"
+  | "setQ"
+  | "setSelectedRequest"
+  | "setStatus"
+  | "showReview"
+  | "status"
+>) {
   return (
     <>
-{showReview ? (
+      {showReview ? (
         <>
-        <section className="rounded-lg border bg-background p-4">
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <h2 className="font-medium">변경 요청 목록</h2>
-            <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
-              <Badge variant="outline">review mode</Badge>
-              <StatusBadge status={reviewMode} />
-              <Badge variant="outline">rows {formatCount(items.length)}</Badge>
-              <Badge variant="outline">
-                limit {changes.data?.meta.page?.page_size ?? pageSize}
-              </Badge>
-              <Badge variant="outline">
-                duration {changes.data?.meta.duration_ms ?? 0}ms
-              </Badge>
+          <section className="rounded-lg border bg-background p-4">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+              <h2 className="font-medium">변경 요청 목록</h2>
+              <div className="flex flex-wrap gap-2 text-sm text-muted-foreground">
+                <Badge variant="outline">review mode</Badge>
+                <StatusBadge status={reviewMode} />
+                <Badge variant="outline">
+                  rows {formatCount(items.length)}
+                </Badge>
+                <Badge variant="outline">
+                  limit {changes.data?.meta.page?.page_size ?? pageSize}
+                </Badge>
+                <Badge variant="outline">
+                  duration {changes.data?.meta.duration_ms ?? 0}ms
+                </Badge>
+              </div>
             </div>
-          </div>
-          <div className="grid gap-3 md:grid-cols-[minmax(12rem,1fr)_auto_auto_auto]">
-            <div className="relative">
-              <SearchIcon className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-              <Input
-                aria-label="change search"
-                className="pl-8"
-                placeholder="feature_id, request_id, reason"
-                value={q}
-                onChange={(event) => setQ(event.target.value)}
-              />
+            <div className="grid gap-3 md:grid-cols-[minmax(12rem,1fr)_auto_auto_auto]">
+              <div className="relative">
+                <SearchIcon className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+                <Input
+                  aria-label="change search"
+                  className="pl-8"
+                  placeholder="feature_id, request_id, reason"
+                  value={q}
+                  onChange={(event) => setQ(event.target.value)}
+                />
+              </div>
+              <NativeSelect
+                aria-label="change status"
+                value={status}
+                onChange={(event) =>
+                  setStatus(
+                    event.target.value as AdminFeatureChangeStatus | "all",
+                  )
+                }
+              >
+                {CHANGE_STATUSES.map((item) => (
+                  <NativeSelectOption key={item} value={item}>
+                    {item === "all" ? "전체" : statusLabel(item)}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+              <NativeSelect
+                aria-label="change action filter"
+                value={action}
+                onChange={(event) =>
+                  setAction(
+                    event.target.value as AdminFeatureChangeAction | "all",
+                  )
+                }
+              >
+                {CHANGE_ACTIONS.map((item) => (
+                  <NativeSelectOption key={item} value={item}>
+                    {item === "all" ? "전체" : actionLabel(item)}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+              <NativeSelect
+                aria-label="change page size"
+                value={String(pageSize)}
+                onChange={(event) =>
+                  setPageSize(Number(event.target.value) as typeof pageSize)
+                }
+              >
+                {PAGE_SIZE_OPTIONS.map((item) => (
+                  <NativeSelectOption key={item} value={item}>
+                    {item}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
             </div>
-            <NativeSelect
-              aria-label="change status"
-              value={status}
-              onChange={(event) =>
-                setStatus(event.target.value as AdminFeatureChangeStatus | "all")
-              }
-            >
-              {CHANGE_STATUSES.map((item) => (
-                <NativeSelectOption key={item} value={item}>
-                  {item === "all" ? "전체" : statusLabel(item)}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            <NativeSelect
-              aria-label="change action filter"
-              value={action}
-              onChange={(event) =>
-                setAction(event.target.value as AdminFeatureChangeAction | "all")
-              }
-            >
-              {CHANGE_ACTIONS.map((item) => (
-                <NativeSelectOption key={item} value={item}>
-                  {item === "all" ? "전체" : actionLabel(item)}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            <NativeSelect
-              aria-label="change page size"
-              value={String(pageSize)}
-              onChange={(event) =>
-                setPageSize(Number(event.target.value) as typeof pageSize)
-              }
-            >
-              {PAGE_SIZE_OPTIONS.map((item) => (
-                <NativeSelectOption key={item} value={item}>
-                  {item}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </div>
-        </section>
+          </section>
 
-        <section className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_30rem]">
-          <DataTable
-            columns={columns}
-            data={items}
-            getRowId={(row) => row.request_id}
-            isLoading={changes.isLoading}
-            emptyMessage="변경 요청이 없습니다."
-            manualSorting={false}
-            containerClassName="min-w-0 overflow-auto rounded-lg border bg-background"
-            onRowClick={(row) => setSelectedRequest(row)}
-            isRowActive={(row) =>
-              selectedRequest?.request_id === row.request_id ||
-              (selectedRequest === null &&
-                highlightRequestId !== null &&
-                row.request_id === highlightRequestId)
-            }
-          />
+          <section className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_30rem]">
+            <DataTable
+              columns={columns}
+              data={items}
+              getRowId={(row) => row.request_id}
+              isLoading={changes.isLoading}
+              emptyMessage="변경 요청이 없습니다."
+              manualSorting={false}
+              containerClassName="min-w-0 overflow-auto rounded-lg border bg-background"
+              onRowClick={(row) => setSelectedRequest(row)}
+              isRowActive={(row) =>
+                selectedRequest?.request_id === row.request_id ||
+                (selectedRequest === null &&
+                  highlightRequestId !== null &&
+                  row.request_id === highlightRequestId)
+              }
+            />
 
-          <ChangeRequestDetail request={selectedRequest} />
-        </section>
+            <ChangeRequestDetail request={selectedRequest} />
+          </section>
         </>
-        ) : null}
+      ) : null}
     </>
   );
 }
@@ -2185,11 +2320,56 @@ function FeatureChangeRequestsClientView({
       title={showReview ? "Feature 검수" : "변경 요청 작성"}
     >
       <div className="flex flex-col gap-4">
-        <ChangeRequestFeedback changes={changes} correctionBasis={correctionBasis} correctionConflict={correctionConflict} formError={formError} mutationError={mutationError} reloadCorrectionBasis={reloadCorrectionBasis} setFormError={setFormError} />
+        <ChangeRequestFeedback
+          changes={changes}
+          correctionBasis={correctionBasis}
+          correctionConflict={correctionConflict}
+          formError={formError}
+          mutationError={mutationError}
+          reloadCorrectionBasis={reloadCorrectionBasis}
+          setFormError={setFormError}
+        />
 
-        <ChangeRequestEditorWorkspace anyMutationPending={anyMutationPending} applyRegionCandidate={applyRegionCandidate} categories={categories} categoryItems={categoryItems} correctionBasis={correctionBasis} correctionConflict={correctionConflict} form={form} formCoord={formCoord} formCoordError={formCoordError} formMarkerIconOptions={formMarkerIconOptions} locationDialogOpen={locationDialogOpen} resetForm={resetForm} selectedCorrectionBasis={selectedCorrectionBasis} selectedRequest={selectedRequest} setLocationDialogOpen={setLocationDialogOpen} showRequestForm={showRequestForm} submitChange={submitChange} unsupportedUpdateKind={unsupportedUpdateKind} updateForm={updateForm} />
+        <ChangeRequestEditorWorkspace
+          anyMutationPending={anyMutationPending}
+          applyRegionCandidate={applyRegionCandidate}
+          categories={categories}
+          categoryItems={categoryItems}
+          correctionBasis={correctionBasis}
+          correctionConflict={correctionConflict}
+          form={form}
+          formCoord={formCoord}
+          formCoordError={formCoordError}
+          formMarkerIconOptions={formMarkerIconOptions}
+          locationDialogOpen={locationDialogOpen}
+          resetForm={resetForm}
+          selectedCorrectionBasis={selectedCorrectionBasis}
+          selectedRequest={selectedRequest}
+          setLocationDialogOpen={setLocationDialogOpen}
+          showRequestForm={showRequestForm}
+          submitChange={submitChange}
+          unsupportedUpdateKind={unsupportedUpdateKind}
+          updateForm={updateForm}
+        />
 
-        <ChangeRequestReviewWorkspace action={action} changes={changes} columns={columns} highlightRequestId={highlightRequestId} items={items} pageSize={pageSize} q={q} reviewMode={reviewMode} selectedRequest={selectedRequest} setAction={setAction} setPageSize={setPageSize} setQ={setQ} setSelectedRequest={setSelectedRequest} setStatus={setStatus} showReview={showReview} status={status} />
+        <ChangeRequestReviewWorkspace
+          action={action}
+          changes={changes}
+          columns={columns}
+          highlightRequestId={highlightRequestId}
+          items={items}
+          pageSize={pageSize}
+          q={q}
+          reviewMode={reviewMode}
+          selectedRequest={selectedRequest}
+          setAction={setAction}
+          setPageSize={setPageSize}
+          setQ={setQ}
+          setSelectedRequest={setSelectedRequest}
+          setStatus={setStatus}
+          showReview={showReview}
+          status={status}
+        />
       </div>
     </AdminShell>
   );
@@ -2205,6 +2385,10 @@ export function FeatureChangeRequestsClient({
   /** ?request_id= 딥링크 — 목록에서 해당 요청 행을 강조한다(선택 전까지). */
   highlightRequestId?: string | null;
 }) {
-  const controller = useFeatureChangeRequestsClientController({ prefill, view, highlightRequestId });
+  const controller = useFeatureChangeRequestsClientController({
+    prefill,
+    view,
+    highlightRequestId,
+  });
   return <FeatureChangeRequestsClientView {...controller} />;
 }

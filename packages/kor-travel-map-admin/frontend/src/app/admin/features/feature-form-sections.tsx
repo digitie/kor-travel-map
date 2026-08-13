@@ -19,7 +19,6 @@ import {
 import {
   EVENT_STATUS_OPTIONS,
   FEATURE_KIND_OPTIONS,
-  FEATURE_STATUS_OPTIONS,
   PLACE_KIND_OPTIONS,
   withCurrentOption,
 } from "@/lib/feature-form-options";
@@ -36,8 +35,9 @@ import { DEFAULT_VIEWPORT } from "@/state/map";
 type CoordInput = { lon: number; lat: number } | null;
 
 type FeatureFormKind = (typeof FEATURE_KIND_OPTIONS)[number]["value"];
-type FeatureFormStatus = (typeof FEATURE_STATUS_OPTIONS)[number]["value"];
-
+type FeatureLifecycleState = "active" | "retired";
+type FeaturePublicationState = "draft" | "published" | "suppressed";
+type FeatureQualityState = "valid" | "quarantined";
 
 export interface FeatureDetailValues {
   detailExtraJson: string;
@@ -93,7 +93,12 @@ export function FeatureLocationPreviewSection({
   const zoom = coord ? zoomWhenCoord : DEFAULT_VIEWPORT.zoom;
 
   return (
-    <div className={cn("flex min-w-0 flex-col rounded-lg border bg-background", className)}>
+    <div
+      className={cn(
+        "flex min-w-0 flex-col rounded-lg border bg-background",
+        className,
+      )}
+    >
       <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
         <div>
           <h2 className="font-medium">좌표</h2>
@@ -159,12 +164,17 @@ export function FeatureBasicInfoSection({
   nameError,
   placeKind,
   required = false,
-  status,
+  lifecycleState,
+  publicationState,
+  qualityState,
+  showStateControls = true,
   onCategoryChange,
   onKindChange,
   onNameChange,
   onPlaceKindChange,
-  onStatusChange,
+  onLifecycleStateChange,
+  onPublicationStateChange,
+  onQualityStateChange,
 }: {
   actions?: ReactNode;
   category: string;
@@ -177,12 +187,17 @@ export function FeatureBasicInfoSection({
   nameError?: string;
   placeKind: string;
   required?: boolean;
-  status: string;
+  lifecycleState: FeatureLifecycleState;
+  publicationState: FeaturePublicationState;
+  qualityState: FeatureQualityState;
+  showStateControls?: boolean;
   onCategoryChange: (value: string) => void;
   onKindChange: (value: FeatureFormKind) => void;
   onNameChange: (value: string) => void;
   onPlaceKindChange: (value: string) => void;
-  onStatusChange: (value: FeatureFormStatus) => void;
+  onLifecycleStateChange: (value: FeatureLifecycleState) => void;
+  onPublicationStateChange: (value: FeaturePublicationState) => void;
+  onQualityStateChange: (value: FeatureQualityState) => void;
 }) {
   return (
     <section className={cn("rounded-lg border bg-background p-4", className)}>
@@ -196,7 +211,9 @@ export function FeatureBasicInfoSection({
           id={`${idPrefix}-kind`}
           label="Feature 종류"
           value={kind}
-          onChange={(event) => onKindChange(event.target.value as FeatureFormKind)}
+          onChange={(event) =>
+            onKindChange(event.target.value as FeatureFormKind)
+          }
         >
           {FEATURE_KIND_OPTIONS.map((item) => (
             <NativeSelectOption key={item.value} value={item.value}>
@@ -223,21 +240,51 @@ export function FeatureBasicInfoSection({
             ))}
           </FormSelect>
         ) : null}
-        <FormSelect
-          aria-label={`${idPrefix} feature status`}
-          id={`${idPrefix}-status`}
-          label="상태"
-          value={status}
-          onChange={(event) =>
-            onStatusChange(event.target.value as FeatureFormStatus)
-          }
-        >
-          {FEATURE_STATUS_OPTIONS.map((item) => (
-            <NativeSelectOption key={item.value} value={item.value}>
-              {item.label}
-            </NativeSelectOption>
-          ))}
-        </FormSelect>
+        {showStateControls ? (
+          <>
+            <FormSelect
+              aria-label={`${idPrefix} lifecycle state`}
+              id={`${idPrefix}-lifecycle-state`}
+              label="수명"
+              value={lifecycleState}
+              onChange={(event) =>
+                onLifecycleStateChange(
+                  event.target.value as FeatureLifecycleState,
+                )
+              }
+            >
+              <NativeSelectOption value="active">운영</NativeSelectOption>
+              <NativeSelectOption value="retired">종료</NativeSelectOption>
+            </FormSelect>
+            <FormSelect
+              aria-label={`${idPrefix} publication state`}
+              id={`${idPrefix}-publication-state`}
+              label="공개"
+              value={publicationState}
+              onChange={(event) =>
+                onPublicationStateChange(
+                  event.target.value as FeaturePublicationState,
+                )
+              }
+            >
+              <NativeSelectOption value="draft">초안</NativeSelectOption>
+              <NativeSelectOption value="published">공개</NativeSelectOption>
+              <NativeSelectOption value="suppressed">비공개</NativeSelectOption>
+            </FormSelect>
+            <FormSelect
+              aria-label={`${idPrefix} quality state`}
+              id={`${idPrefix}-quality-state`}
+              label="품질"
+              value={qualityState}
+              onChange={(event) =>
+                onQualityStateChange(event.target.value as FeatureQualityState)
+              }
+            >
+              <NativeSelectOption value="valid">유효</NativeSelectOption>
+              <NativeSelectOption value="quarantined">격리</NativeSelectOption>
+            </FormSelect>
+          </>
+        ) : null}
         <FormField
           aria-label={`${idPrefix} name`}
           error={nameError}
@@ -257,7 +304,9 @@ export function FeatureBasicInfoSection({
           onChange={(event) => onCategoryChange(event.target.value)}
         >
           {category && !categoryItems.some((item) => item.code === category) ? (
-            <NativeSelectOption value={category}>현재 값: {category}</NativeSelectOption>
+            <NativeSelectOption value={category}>
+              현재 값: {category}
+            </NativeSelectOption>
           ) : null}
           {categoryItems.map((item) => (
             <NativeSelectOption key={item.code} value={item.code}>
@@ -526,7 +575,9 @@ export function FeatureDetailSection({
             hint="정해진 입력칸에 없는 값만 JSON object로 입력합니다."
             placeholder='예: {"capacity": 120}'
             value={values.detailExtraJson}
-            onChange={(event) => onChange("detailExtraJson", event.target.value)}
+            onChange={(event) =>
+              onChange("detailExtraJson", event.target.value)
+            }
           />
           <FormTextArea
             aria-label={`${idPrefix} urls JSON`}

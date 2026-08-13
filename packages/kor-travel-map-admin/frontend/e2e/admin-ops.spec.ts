@@ -685,14 +685,17 @@ function featureDetailResponse(
         lon: 126.978,
         name,
         raw_refs: [],
+        lifecycle_state: "active",
+        publication_state: "published",
+        quality_state: "valid",
         row_revision: rowRevision,
-        status: "active",
         updated_at: MOCK_NOW,
         urls: {},
         ...overrides,
       },
       files: [],
       issues: [],
+      state_transitions: [],
       overrides: [],
       sources: [],
       versions: [],
@@ -1026,7 +1029,9 @@ test.describe("admin/ops pages", () => {
     ).toBeVisible();
     await expect(page.getByLabel("feature search")).toBeVisible();
     await expect(page.getByLabel("feature kind")).toBeVisible();
-    await expect(page.getByLabel("feature status")).toBeVisible();
+    await expect(page.getByLabel("feature lifecycle state")).toBeVisible();
+    await expect(page.getByLabel("feature publication state")).toBeVisible();
+    await expect(page.getByLabel("feature quality state")).toBeVisible();
     await expect(page.getByLabel("has issue")).toBeVisible();
     await expect(page.getByLabel("feature sort")).toBeVisible();
     await expect(page.getByLabel("feature page size")).toBeVisible();
@@ -1060,7 +1065,9 @@ test.describe("admin/ops pages", () => {
       "change feature id",
       "change reason",
       "change kind",
-      "change feature status",
+      "change lifecycle state",
+      "change publication state",
+      "change quality state",
       "change name",
       "change category",
       "change lon",

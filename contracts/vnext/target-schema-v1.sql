@@ -27,6 +27,10 @@
 --     features의 legacy status/user_change_* 열 등)은 목표 상태에 **존재하지
 --     않으므로** 이 파일에 없다. 물리 삭제 순서는 consumer-rollout-v1.json과
 --     T-VN-39 removal manifest가 소유한다.
+--   * 현행 0095의 `materialize_user_feature_change_provenance`와
+--     `feature_versions` whole-row snapshot은 T-VN-36 effective projection/field
+--     override lineage가 대체할 때까지만 쓰는 bridge다. 따라서 post-T36C/T39
+--     final target에는 이 procedure·legacy request/version relation을 두지 않는다.
 --
 -- 미정 표기 원칙(freeze 정직성):
 --   ADR·보고서·task 정의가 침묵하는 세부는 발명하지 않고
@@ -323,6 +327,9 @@ CREATE TRIGGER trg_provider_dataset_operations_touch
 -- =============================================================================
 -- core에는 UUID·kind·name·category FK·직교 3상태·row_revision만 남는다
 -- (ADR-070 결정 1). 좌표/geometry/detail/주소/URL 등은 subtype 소관이다.
+-- 0095 current head는 아직 text business ``feature_id``와 ``feature_uuid`` shadow를
+-- 병행한다. 이 target UUID key와 UUID procedure signature는 T39 physical re-key 뒤의
+-- final shape이며, current writer의 text procedure signature를 이 target에 섞지 않는다.
 CREATE TABLE feature.features (
     -- 애플리케이션 생성 UUID surrogate (ADR-068 결정 1). UUIDv7 채택 여부와
     -- generator 정본은 미정(T-VN-32A 구현 소관) — 따라서 DB server default를
@@ -355,10 +362,11 @@ CREATE TABLE feature.features (
         publication_state IN ('draft', 'published', 'suppressed')
     ),
     CONSTRAINT ck_features_quality_state CHECK (quality_state IN ('valid', 'quarantined')),
-    -- 불가능 조합 CHECK (ADR-067 결정 5 "불가능한 조합은 DB CHECK로 거부"):
-    -- 정본은 조합을 열거하지 않는다. 0059 view는 교집합 술어만 정본화했고 결합
-    -- 불변식은 스스로 "미보장"이라 명시하므로 여기서 특정 조합을 도출할 수 없다.
-    -- 불가능 조합의 집합과 CHECK 정의: 미정(T-VN-34A 무손실 매핑 구현 소관)
+    -- T-VN-34A: active 3×2 여섯 tuple과 retired/suppressed 2 tuple만 유효하다.
+    -- published + quarantined는 의도적으로 유효하다(quality 복구만으로 재공개).
+    CONSTRAINT ck_features_state_tuple CHECK (
+        lifecycle_state = 'active' OR publication_state = 'suppressed'
+    ),
     CONSTRAINT ck_features_row_revision CHECK (row_revision >= 1),
     CONSTRAINT fk_features_category FOREIGN KEY (kind, category_code)
         REFERENCES feature.categories (kind, code)
@@ -369,6 +377,29 @@ CREATE TABLE feature.features (
 -- 술어 자체는 본 freeze가 고정한다.
 CREATE INDEX idx_features_public_state
     ON feature.features (kind, feature_id)
+    WHERE lifecycle_state = 'active'
+      AND publication_state = 'published'
+      AND quality_state = 'valid';
+
+-- T-VN-34B: category/keyset/text hot paths도 공개 정본의 정확한 3축을 partial
+-- predicate로 직접 가진다. status/deleted_at 같은 legacy surrogate는 섞지 않는다.
+CREATE INDEX idx_features_public_kind_category
+    ON feature.features (kind, category_code)
+    WHERE lifecycle_state = 'active'
+      AND publication_state = 'published'
+      AND quality_state = 'valid';
+CREATE INDEX idx_features_public_updated_keyset
+    ON feature.features (updated_at DESC, feature_id DESC)
+    WHERE lifecycle_state = 'active'
+      AND publication_state = 'published'
+      AND quality_state = 'valid';
+CREATE INDEX idx_features_public_lower_name_keyset
+    ON feature.features (lower(name), feature_id)
+    WHERE lifecycle_state = 'active'
+      AND publication_state = 'published'
+      AND quality_state = 'valid';
+CREATE INDEX idx_features_public_name_trgm
+    ON feature.features USING gin (name x_extension.gin_trgm_ops)
     WHERE lifecycle_state = 'active'
       AND publication_state = 'published'
       AND quality_state = 'valid';
@@ -389,32 +420,507 @@ CREATE TRIGGER trg_features_row_revision
     BEFORE UPDATE ON feature.features
     FOR EACH ROW EXECUTE FUNCTION feature.force_features_row_revision();
 
--- 3.1 lifecycle 전이 감사 이력 — soft-delete 시각의 흡수처 (ADR-067 결정 5
--- "soft-delete 시각은 lifecycle 전이 감사 이력으로 흡수한다"). legacy
--- deleted_at/user_deleted_at 계열은 이 이력으로 흡수된 뒤 제거된다
--- (consumer-rollout removal manifest 참조). 최소형만 고정한다.
+-- 3.1 full-tuple 전이 감사 이력 (ADR-090). Feature purge 뒤에도 business
+-- identifier/audit evidence는 남아야 하므로 Feature FK나 cascade를 두지 않는다.
+-- current 0095 audit은 purge 보존을 위해 text legacy key와 ``feature_uuid``를 함께
+-- 기록하고, T39가 legacy key를 제거한 뒤 이 final UUID identity 열로 수렴한다.
 CREATE TABLE feature.feature_state_transitions (
     transition_id bigint GENERATED ALWAYS AS IDENTITY,
     feature_id uuid NOT NULL,
-    -- 직교 3축 중 어느 축의 전이인가
-    state_axis text NOT NULL,
-    from_state text NOT NULL,
-    to_state text NOT NULL,
-    occurred_at timestamptz NOT NULL,
+    from_lifecycle_state text,
+    from_publication_state text,
+    from_quality_state text,
+    to_lifecycle_state text NOT NULL,
+    to_publication_state text NOT NULL,
+    to_quality_state text NOT NULL,
+    transition_kind text NOT NULL,
+    reason_code text NOT NULL,
+    principal text NOT NULL,
+    causation_ref text,
+    provider_dataset_id bigint,
+    source_entity_key text,
+    source_record_key text,
+    provider_evidence jsonb,
+    occurred_at timestamptz NOT NULL DEFAULT now(),
+    row_revision bigint NOT NULL,
+    invoker_role text NOT NULL,
+    state_procedure_definer text NOT NULL,
+    audit_writer_definer text NOT NULL,
     CONSTRAINT pk_feature_state_transitions PRIMARY KEY (transition_id),
-    CONSTRAINT fk_feature_state_transitions_feature FOREIGN KEY (feature_id)
-        REFERENCES feature.features (feature_id) ON DELETE CASCADE,
-    CONSTRAINT ck_feature_state_transitions_axis CHECK (
-        state_axis IN ('lifecycle', 'publication', 'quality')
+    CONSTRAINT ck_feature_state_transitions_kind CHECK (
+        transition_kind IN (
+            'initial', 'legacy_backfill', 'provider_sync', 'admin',
+            'user_request', 'merge', 'quality_validation', 'system'
+        )
     ),
-    CONSTRAINT ck_feature_state_transitions_from CHECK (btrim(from_state) <> ''),
-    CONSTRAINT ck_feature_state_transitions_to CHECK (btrim(to_state) <> '')
-    -- 축별 상태값 결합 CHECK·actor principal·전이 사유 등 나머지 컬럼:
-    -- 미정(T-VN-34A 구현 소관)
+    CONSTRAINT ck_feature_state_transitions_reason CHECK (btrim(reason_code) <> ''),
+    CONSTRAINT ck_feature_state_transitions_principal CHECK (btrim(principal) <> ''),
+    CONSTRAINT ck_feature_state_transitions_old_tuple CHECK (
+        (from_lifecycle_state IS NULL AND from_publication_state IS NULL AND from_quality_state IS NULL)
+        OR (
+            from_lifecycle_state IN ('active', 'retired')
+            AND from_publication_state IN ('draft', 'published', 'suppressed')
+            AND from_quality_state IN ('valid', 'quarantined')
+            AND (from_lifecycle_state = 'active' OR from_publication_state = 'suppressed')
+        )
+    ),
+    CONSTRAINT ck_feature_state_transitions_new_tuple CHECK (
+        to_lifecycle_state IN ('active', 'retired')
+        AND to_publication_state IN ('draft', 'published', 'suppressed')
+        AND to_quality_state IN ('valid', 'quarantined')
+        AND (to_lifecycle_state = 'active' OR to_publication_state = 'suppressed')
+    ),
+    CONSTRAINT ck_feature_state_transitions_initial_old_tuple CHECK (
+        (
+            from_lifecycle_state IS NULL
+            AND transition_kind IN ('initial', 'legacy_backfill', 'provider_sync')
+        ) OR (
+            from_lifecycle_state IS NOT NULL
+            AND transition_kind NOT IN ('initial', 'legacy_backfill')
+        )
+    ),
+    CONSTRAINT ck_feature_state_transitions_provider_provenance CHECK (
+        (
+            transition_kind = 'provider_sync'
+            AND provider_dataset_id IS NOT NULL
+            AND btrim(source_entity_key) <> ''
+            AND btrim(source_record_key) <> ''
+            AND jsonb_typeof(provider_evidence) = 'object'
+            AND jsonb_typeof(provider_evidence -> 'authoritative_receipt') = 'string'
+            AND btrim(provider_evidence ->> 'authoritative_receipt') <> ''
+        ) OR (
+            transition_kind <> 'provider_sync'
+            AND provider_dataset_id IS NULL
+            AND source_entity_key IS NULL
+            AND source_record_key IS NULL
+            AND provider_evidence IS NULL
+        )
+    ),
+    CONSTRAINT ck_feature_state_transitions_row_revision CHECK (row_revision >= 1)
 );
 
-CREATE INDEX idx_feature_state_transitions_feature
-    ON feature.feature_state_transitions (feature_id, occurred_at);
+CREATE INDEX idx_feature_state_transitions_feature_occurred
+    ON feature.feature_state_transitions (feature_id, occurred_at, transition_id);
+
+-- T-VN-34A privilege boundary. LOGIN runtime/migrator provisioning and DSN activation
+-- are deployment-owned; these NOLOGIN roles are the schema-level grant targets.
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_state_procedure_owner') THEN
+        CREATE ROLE ktm_feature_state_procedure_owner NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_audit_writer') THEN
+        CREATE ROLE ktm_feature_audit_writer NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_runtime') THEN
+        CREATE ROLE ktm_feature_runtime NOLOGIN NOINHERIT;
+    END IF;
+END;
+$$;
+
+CREATE FUNCTION feature.prepare_feature_state_context(p_context jsonb, p_mode text)
+RETURNS void
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+DECLARE
+    v_kind text;
+    v_reason text;
+    v_principal text;
+    v_dataset_id bigint;
+    v_source_entity_key text;
+    v_source_record_key text;
+    v_provider_receipt text;
+    v_context jsonb;
+BEGIN
+    IF jsonb_typeof(p_context) IS DISTINCT FROM 'object' THEN
+        RAISE EXCEPTION 'feature state context must be an object'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM jsonb_object_keys(p_context) AS key_name(key_name)
+        WHERE key_name NOT IN (
+            'transition_kind', 'reason_code', 'principal', 'causation_ref',
+            'provider_dataset_id', 'source_entity_key', 'source_record_key',
+            'reactivation_evidence'
+        )
+    ) THEN
+        RAISE EXCEPTION 'feature state context contains an unknown key'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
+    END IF;
+    v_kind := p_context ->> 'transition_kind';
+    v_reason := p_context ->> 'reason_code';
+    IF v_kind NOT IN (
+        'initial', 'legacy_backfill', 'provider_sync', 'admin', 'user_request',
+        'merge', 'quality_validation', 'system'
+    ) OR v_reason IS NULL OR btrim(v_reason) = ''
+       OR (p_mode = 'create' AND v_kind NOT IN ('initial', 'legacy_backfill', 'provider_sync'))
+       OR (p_mode = 'transition' AND v_kind IN ('initial', 'legacy_backfill')) THEN
+        RAISE EXCEPTION 'feature state context has invalid kind, reason, or mode'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
+    END IF;
+    IF v_kind = 'provider_sync' THEN
+        IF (p_context ->> 'provider_dataset_id') !~ '^[1-9][0-9]*$'
+           OR p_context ? 'principal'
+           OR jsonb_typeof(p_context -> 'source_entity_key') IS DISTINCT FROM 'string'
+           OR btrim(p_context ->> 'source_entity_key') = ''
+           OR jsonb_typeof(p_context -> 'source_record_key') IS DISTINCT FROM 'string'
+           OR btrim(p_context ->> 'source_record_key') = '' THEN
+            RAISE EXCEPTION 'provider state principal must derive from an active dataset'
+                USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
+        END IF;
+        v_dataset_id := (p_context ->> 'provider_dataset_id')::bigint;
+        v_source_entity_key := btrim(p_context ->> 'source_entity_key');
+        v_source_record_key := btrim(p_context ->> 'source_record_key');
+        SELECT 'provider:' || provider || '/' || dataset_key INTO v_principal
+        FROM provider_sync.provider_datasets
+        WHERE provider_dataset_id = v_dataset_id AND is_active;
+        IF v_principal IS NULL THEN
+            RAISE EXCEPTION 'provider dataset must be active'
+                USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
+        END IF;
+        SELECT record.raw_payload_hash
+          INTO v_provider_receipt
+          FROM provider_sync.source_records AS record
+          JOIN provider_sync.source_entities AS entity
+            ON entity.source_entity_key = record.source_entity_key
+          JOIN provider_sync.source_entity_heads AS head
+            ON head.source_entity_key = entity.source_entity_key
+           AND head.current_source_record_key = record.source_record_key
+         WHERE record.source_record_key = v_source_record_key
+           AND record.source_entity_key = v_source_entity_key
+           AND entity.provider_dataset_id = v_dataset_id;
+        IF v_provider_receipt IS NULL OR btrim(v_provider_receipt) = '' THEN
+            RAISE EXCEPTION 'provider state context source does not belong to the active dataset'
+                USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_provider_source_provenance';
+        END IF;
+    ELSE
+        IF p_context ? 'provider_dataset_id'
+           OR jsonb_typeof(p_context -> 'principal') IS DISTINCT FROM 'string'
+           OR btrim(p_context ->> 'principal') = '' THEN
+            RAISE EXCEPTION 'non-provider state context requires authenticated principal'
+                USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
+        END IF;
+        v_principal := btrim(p_context ->> 'principal');
+    END IF;
+    IF p_context ? 'causation_ref'
+       AND jsonb_typeof(p_context -> 'causation_ref') NOT IN ('string', 'null') THEN
+        RAISE EXCEPTION 'causation_ref must be a string or null'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
+    END IF;
+    v_context := jsonb_build_object(
+        'transition_kind', v_kind,
+        'reason_code', btrim(v_reason),
+        'principal', v_principal,
+        'causation_ref', p_context -> 'causation_ref'
+    );
+    IF v_dataset_id IS NOT NULL THEN
+        v_context := v_context || jsonb_build_object(
+            'provider_dataset_id', v_dataset_id,
+            'source_entity_key', v_source_entity_key,
+            'source_record_key', v_source_record_key,
+            'provider_evidence', jsonb_build_object(
+                'authoritative_receipt', v_provider_receipt
+            )
+        );
+    END IF;
+    IF p_context ? 'reactivation_evidence' THEN
+        v_context := v_context || jsonb_build_object('reactivation_evidence', p_context -> 'reactivation_evidence');
+    END IF;
+    PERFORM set_config('feature.state_transition_context', v_context::text, true);
+    PERFORM set_config('feature.state_procedure_definer', current_user::text, true);
+END;
+$$;
+
+CREATE FUNCTION feature.write_feature_state_transition()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+DECLARE
+    v_context jsonb;
+    v_context_text text;
+    v_definer text;
+BEGIN
+    IF TG_OP = 'UPDATE'
+       AND OLD.lifecycle_state IS NOT DISTINCT FROM NEW.lifecycle_state
+       AND OLD.publication_state IS NOT DISTINCT FROM NEW.publication_state
+       AND OLD.quality_state IS NOT DISTINCT FROM NEW.quality_state THEN
+        RETURN NULL;
+    END IF;
+    v_context_text := current_setting('feature.state_transition_context', true);
+    v_definer := current_setting('feature.state_procedure_definer', true);
+    IF v_context_text IS NULL OR v_definer <> 'ktm_feature_state_procedure_owner'
+       OR current_user <> 'ktm_feature_audit_writer' THEN
+        -- migration/schema owner is outside the runtime trust boundary; fixture and
+        -- fresh target seeding use that privileged identity. Runtime grants deny DML.
+        IF EXISTS (
+            SELECT 1 FROM pg_catalog.pg_roles
+            WHERE rolname = session_user AND rolsuper
+        ) THEN
+            RETURN NULL;
+        END IF;
+        RAISE EXCEPTION 'feature state mutation requires state procedure context'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
+    END IF;
+    v_context := v_context_text::jsonb;
+    IF (v_context ->> 'transition_kind') NOT IN (
+            'initial', 'legacy_backfill', 'provider_sync', 'admin', 'user_request',
+            'merge', 'quality_validation', 'system'
+       ) OR coalesce(btrim(v_context ->> 'reason_code'), '') = ''
+       OR coalesce(btrim(v_context ->> 'principal'), '') = '' THEN
+        RAISE EXCEPTION 'feature state context is malformed'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_context';
+    END IF;
+    IF TG_OP = 'INSERT' AND (v_context ->> 'transition_kind') NOT IN (
+        'initial', 'legacy_backfill', 'provider_sync'
+    ) THEN
+        RAISE EXCEPTION 'feature insert has invalid transition kind'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_kind';
+    END IF;
+    IF TG_OP = 'UPDATE' AND (v_context ->> 'transition_kind') IN ('initial', 'legacy_backfill') THEN
+        RAISE EXCEPTION 'feature update has invalid transition kind'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_kind';
+    END IF;
+    INSERT INTO feature.feature_state_transitions (
+        feature_id,
+        from_lifecycle_state, from_publication_state, from_quality_state,
+        to_lifecycle_state, to_publication_state, to_quality_state,
+        transition_kind, reason_code, principal, causation_ref,
+        provider_dataset_id, source_entity_key, source_record_key, provider_evidence,
+        occurred_at,
+        row_revision, invoker_role, state_procedure_definer, audit_writer_definer
+    ) VALUES (
+        NEW.feature_id,
+        CASE WHEN TG_OP = 'INSERT' THEN NULL ELSE OLD.lifecycle_state END,
+        CASE WHEN TG_OP = 'INSERT' THEN NULL ELSE OLD.publication_state END,
+        CASE WHEN TG_OP = 'INSERT' THEN NULL ELSE OLD.quality_state END,
+        NEW.lifecycle_state, NEW.publication_state, NEW.quality_state,
+        v_context ->> 'transition_kind', v_context ->> 'reason_code',
+        v_context ->> 'principal', v_context ->> 'causation_ref',
+        CASE WHEN v_context ->> 'transition_kind' = 'provider_sync'
+             THEN (v_context ->> 'provider_dataset_id')::bigint END,
+        CASE WHEN v_context ->> 'transition_kind' = 'provider_sync'
+             THEN v_context ->> 'source_entity_key' END,
+        CASE WHEN v_context ->> 'transition_kind' = 'provider_sync'
+             THEN v_context ->> 'source_record_key' END,
+        CASE WHEN v_context ->> 'transition_kind' = 'provider_sync'
+             THEN v_context -> 'provider_evidence' END,
+        clock_timestamp(),
+        NEW.row_revision, session_user::text, v_definer, current_user::text
+    );
+    RETURN NULL;
+END;
+$$;
+
+CREATE FUNCTION feature.reject_feature_state_transition_mutation()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+BEGIN
+    RAISE EXCEPTION 'feature state transitions are append-only'
+        USING ERRCODE = '42501', CONSTRAINT = 'ck_feature_state_transitions_append_only';
+END;
+$$;
+
+CREATE PROCEDURE feature.create_feature_with_initial_state(
+    IN p_feature jsonb,
+    IN p_lifecycle_state text,
+    IN p_publication_state text,
+    IN p_quality_state text,
+    IN p_context jsonb,
+    OUT o_feature_id uuid,
+    OUT o_row_revision bigint,
+    OUT o_inserted boolean
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+DECLARE
+    v_feature_id uuid;
+    v_kind text;
+    v_name text;
+    v_category_code text;
+BEGIN
+    IF jsonb_typeof(p_feature) IS DISTINCT FROM 'object' THEN
+        RAISE EXCEPTION 'feature payload must be an object'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_create_payload';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM jsonb_object_keys(p_feature) AS key_name(key_name)
+        WHERE key_name NOT IN ('feature_id', 'kind', 'name', 'category_code')
+    ) OR p_feature ?| ARRAY[
+        'status', 'deleted_at', 'user_deleted_at', 'user_deleted_by',
+        'user_change_kind', 'user_change_status', 'user_change_request_id',
+        'user_change_reason', 'lifecycle_state', 'publication_state', 'quality_state'
+    ] THEN
+        RAISE EXCEPTION 'feature create payload contains a forbidden or unknown field'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_create_payload';
+    END IF;
+    v_feature_id := nullif(btrim(p_feature ->> 'feature_id'), '')::uuid;
+    v_kind := nullif(btrim(p_feature ->> 'kind'), '');
+    v_name := nullif(btrim(p_feature ->> 'name'), '');
+    v_category_code := nullif(btrim(p_feature ->> 'category_code'), '');
+    IF v_feature_id IS NULL OR v_kind IS NULL OR v_name IS NULL
+       OR v_category_code IS NULL THEN
+        RAISE EXCEPTION 'feature payload lacks required core fields'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_create_payload';
+    END IF;
+    PERFORM feature.prepare_feature_state_context(p_context, 'create');
+    INSERT INTO feature.features (
+        feature_id, kind, name, category_code,
+        lifecycle_state, publication_state, quality_state
+    ) VALUES (
+        v_feature_id, v_kind, v_name, v_category_code,
+        p_lifecycle_state, p_publication_state, p_quality_state
+    ) ON CONFLICT (feature_id) DO NOTHING
+    RETURNING feature_id, row_revision INTO o_feature_id, o_row_revision;
+    o_inserted := FOUND;
+    IF NOT o_inserted THEN
+        SELECT feature_id, row_revision INTO o_feature_id, o_row_revision
+        FROM feature.features WHERE feature_id = v_feature_id;
+    END IF;
+END;
+$$;
+
+CREATE PROCEDURE feature.transition_feature_state(
+    IN p_feature_id uuid,
+    IN p_lifecycle_state text,
+    IN p_publication_state text,
+    IN p_quality_state text,
+    IN p_expected_row_revision bigint,
+    IN p_context jsonb,
+    OUT o_feature_id uuid,
+    OUT o_row_revision bigint
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+DECLARE
+    v_current feature.features%ROWTYPE;
+BEGIN
+    IF p_expected_row_revision IS NULL OR p_expected_row_revision < 1 THEN
+        RAISE EXCEPTION 'expected row revision is required'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_expected_revision';
+    END IF;
+    PERFORM feature.prepare_feature_state_context(p_context, 'transition');
+    SELECT * INTO v_current FROM feature.features
+    WHERE feature_id = p_feature_id FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'feature does not exist' USING ERRCODE = 'P0002';
+    END IF;
+    IF v_current.row_revision <> p_expected_row_revision THEN
+        RAISE EXCEPTION 'feature revision changed' USING ERRCODE = '40001';
+    END IF;
+    IF (v_current.lifecycle_state, v_current.publication_state, v_current.quality_state)
+       IS NOT DISTINCT FROM (p_lifecycle_state, p_publication_state, p_quality_state) THEN
+        RAISE EXCEPTION 'feature state transition must change an axis'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_transition_non_noop';
+    END IF;
+    IF p_context ->> 'transition_kind' = 'provider_sync'
+       AND (
+            (v_current.lifecycle_state = 'active' AND p_lifecycle_state = 'retired')
+            OR (v_current.lifecycle_state = 'retired' AND p_lifecycle_state = 'active')
+       )
+       AND NOT EXISTS (
+            SELECT 1
+            FROM provider_sync.source_links AS link
+            JOIN provider_sync.source_entities AS entity
+              ON entity.source_entity_key = link.source_entity_key
+            JOIN provider_sync.source_records AS record
+              ON record.source_entity_key = entity.source_entity_key
+            JOIN provider_sync.source_entity_heads AS head
+              ON head.source_entity_key = entity.source_entity_key
+             AND head.current_source_record_key = record.source_record_key
+            WHERE link.feature_id = p_feature_id
+              AND link.source_entity_key = p_context ->> 'source_entity_key'
+              AND entity.provider_dataset_id = (p_context ->> 'provider_dataset_id')::bigint
+              AND record.source_record_key = p_context ->> 'source_record_key'
+       ) THEN
+        RAISE EXCEPTION 'provider lifecycle transition requires linked authoritative source evidence'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_provider_source_provenance';
+    END IF;
+    IF v_current.lifecycle_state = 'retired' AND p_lifecycle_state = 'active' THEN
+        IF p_context ->> 'transition_kind' <> 'provider_sync'
+           AND (p_context ->> 'transition_kind' NOT IN ('admin', 'user_request', 'system')
+           OR coalesce(btrim(p_context ->> 'reactivation_evidence'), '') = '') THEN
+            RAISE EXCEPTION 'retired feature may be reactivated only by explicit reingest'
+                USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_reactivation_explicit';
+        END IF;
+        IF p_context ->> 'transition_kind' = 'provider_sync' AND EXISTS (
+            SELECT 1 FROM ops.feature_overrides AS override
+            WHERE override.feature_id = p_feature_id
+              AND override.field_path = 'lifecycle_state'
+              AND override.status = 'active'
+              AND override.override_value = '"retired"'::jsonb
+              AND override.prevent_provider_reactivation
+        ) THEN
+            RAISE EXCEPTION 'provider reactivation is fenced by lifecycle override'
+                USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_provider_reactivation_override';
+        END IF;
+    END IF;
+    UPDATE feature.features
+       SET lifecycle_state = p_lifecycle_state,
+           publication_state = p_publication_state,
+           quality_state = p_quality_state,
+           updated_at = clock_timestamp()
+     WHERE feature_id = p_feature_id
+     RETURNING feature_id, row_revision INTO o_feature_id, o_row_revision;
+END;
+$$;
+
+ALTER FUNCTION feature.prepare_feature_state_context(jsonb, text)
+    OWNER TO ktm_feature_state_procedure_owner;
+ALTER PROCEDURE feature.create_feature_with_initial_state(jsonb, text, text, text, jsonb)
+    OWNER TO ktm_feature_state_procedure_owner;
+ALTER PROCEDURE feature.transition_feature_state(uuid, text, text, text, bigint, jsonb)
+    OWNER TO ktm_feature_state_procedure_owner;
+ALTER FUNCTION feature.write_feature_state_transition()
+    OWNER TO ktm_feature_audit_writer;
+ALTER FUNCTION feature.reject_feature_state_transition_mutation()
+    OWNER TO ktm_feature_audit_writer;
+
+CREATE TRIGGER trg_features_state_transition_audit
+    AFTER INSERT OR UPDATE OF lifecycle_state, publication_state, quality_state
+    ON feature.features FOR EACH ROW EXECUTE FUNCTION feature.write_feature_state_transition();
+CREATE TRIGGER trg_feature_state_transitions_append_only_row
+    BEFORE UPDATE OR DELETE ON feature.feature_state_transitions
+    FOR EACH ROW EXECUTE FUNCTION feature.reject_feature_state_transition_mutation();
+CREATE TRIGGER trg_feature_state_transitions_append_only_truncate
+    BEFORE TRUNCATE ON feature.feature_state_transitions
+    FOR EACH STATEMENT EXECUTE FUNCTION feature.reject_feature_state_transition_mutation();
+
+GRANT USAGE ON SCHEMA feature, provider_sync, ops
+    TO ktm_feature_state_procedure_owner, ktm_feature_audit_writer, ktm_feature_runtime;
+-- Runtime subtype geometry DML and qualified PostGIS reads must resolve the
+-- x_extension type/functions without inheriting an ambient search_path.
+GRANT USAGE ON SCHEMA x_extension
+    TO ktm_feature_state_procedure_owner, ktm_feature_runtime;
+GRANT SELECT, INSERT ON feature.features TO ktm_feature_state_procedure_owner;
+GRANT UPDATE (lifecycle_state, publication_state, quality_state, updated_at)
+    ON feature.features TO ktm_feature_state_procedure_owner;
+GRANT SELECT ON provider_sync.provider_datasets TO ktm_feature_state_procedure_owner;
+GRANT INSERT ON feature.feature_state_transitions TO ktm_feature_audit_writer;
+GRANT USAGE, SELECT ON SEQUENCE feature.feature_state_transitions_transition_id_seq
+    TO ktm_feature_audit_writer;
+GRANT EXECUTE ON PROCEDURE feature.create_feature_with_initial_state(jsonb, text, text, text, jsonb)
+    TO ktm_feature_runtime;
+GRANT EXECUTE ON PROCEDURE feature.transition_feature_state(uuid, text, text, text, bigint, jsonb)
+    TO ktm_feature_runtime;
+GRANT SELECT ON feature.feature_state_transitions TO ktm_feature_runtime;
+REVOKE ALL ON feature.feature_state_transitions FROM PUBLIC, ktm_feature_runtime;
+GRANT SELECT ON feature.feature_state_transitions TO ktm_feature_runtime;
+REVOKE ALL ON FUNCTION feature.prepare_feature_state_context(jsonb, text) FROM PUBLIC, ktm_feature_runtime;
+REVOKE ALL ON FUNCTION feature.write_feature_state_transition() FROM PUBLIC, ktm_feature_runtime;
+REVOKE ALL ON FUNCTION feature.reject_feature_state_transition_mutation() FROM PUBLIC, ktm_feature_runtime;
+REVOKE ALL ON PROCEDURE feature.create_feature_with_initial_state(jsonb, text, text, text, jsonb) FROM PUBLIC;
+REVOKE ALL ON PROCEDURE feature.transition_feature_state(uuid, text, text, text, bigint, jsonb) FROM PUBLIC;
 
 -- =============================================================================
 -- 4. feature.feature_aliases — legacy `f_*` alias (ADR-068 결정 3)
@@ -439,6 +945,10 @@ CREATE TABLE feature.feature_aliases (
 -- lookup index (보고서 §3) — feature → alias 역방향.
 CREATE INDEX idx_feature_aliases_feature ON feature.feature_aliases (feature_id);
 
+-- ``create_feature_with_initial_state``가 만든 core row의 alias trigger도 state
+-- procedure owner로 실행된다. alias direct DML은 runtime에 grant하지 않는다.
+GRANT SELECT, INSERT ON feature.feature_aliases TO ktm_feature_state_procedure_owner;
+
 -- =============================================================================
 -- 5. kind별 typed subtype 테이블 (ADR-070)
 -- =============================================================================
@@ -448,12 +958,11 @@ CREATE INDEX idx_feature_aliases_feature ON feature.feature_aliases (feature_id)
 --   * geometry CHECK 3종: GeometryType(typmod)·ST_IsValid·NOT ST_IsEmpty +
 --     anchor 일치 (ADR-070 결정 2)
 --   * 공간 인덱스: 정본은 "공개 술어 partial GiST만"이다(보고서 §3:379, D-12
---     결정 3 — full GiST는 write 1.6× 실측 근거로 금지). 그런데 상태 컬럼이
---     core로 분리된 목표 구조에서는 공개 술어를 subtype-local partial index로
---     표현할 수 없다(설계 공백). 따라서 본 freeze는 **어떤 공간 인덱스도 고정하지
---     않는다** — 무술어 full GiST는 정본 위반이라 넣지 않고, partial 표현 수단
---     (denorm flag vs join 유지)과 4326/5179 축 채택은
---     미정(T-VN-35D·ADR-075 결정 7 실측 소관)
+--     결정 3 — full GiST는 write 1.6× 실측 근거로 금지). point의 core geometry는
+--     3축 exact predicate를 직접 쓴다. route/area처럼 geometry가 subtype에 있는
+--     경우에는 core 정본을 복제하지 않는 DB-owned `public_ready` cache를 써
+--     subtype-local `WHERE public_ready` GiST를 고정한다. 아래 T-VN-34B DDL이
+--     그 cache, lock/identity fence, 4326 route/area index를 실행 가능하게 정의한다.
 
 -- 5.1 point subtype — place/price/weather (T-VN-35A)
 CREATE TABLE feature.feature_points (
@@ -512,6 +1021,9 @@ CREATE TABLE feature.feature_routes (
         GENERATED ALWAYS AS (x_extension.st_transform(geom, 5179)) STORED,
     -- 대표 좌표(anchor) — core 좌표와 geometry의 anchor 일치 CHECK 대상(ADR-070 결정 2)
     anchor x_extension.geometry(Point, 4326) NOT NULL,
+    -- 3축 core 상태에서만 계산되는 partial-GiST bridge. route/area 이외의
+    -- relation에는 이것과 같은 독립 공개 상태를 두지 않는다.
+    public_ready boolean NOT NULL DEFAULT false,
     CONSTRAINT pk_feature_routes PRIMARY KEY (feature_id),
     CONSTRAINT fk_feature_routes_feature FOREIGN KEY (feature_id, kind)
         REFERENCES feature.features (feature_id, kind) ON DELETE CASCADE,
@@ -534,6 +1046,8 @@ CREATE TABLE feature.feature_areas (
     geom_5179 x_extension.geometry(MultiPolygon, 5179)
         GENERATED ALWAYS AS (x_extension.st_transform(geom, 5179)) STORED,
     anchor x_extension.geometry(Point, 4326) NOT NULL,
+    -- route와 같은 DB-owned projection cache (visibility 정본은 core 3축).
+    public_ready boolean NOT NULL DEFAULT false,
     CONSTRAINT pk_feature_areas PRIMARY KEY (feature_id),
     CONSTRAINT fk_feature_areas_feature FOREIGN KEY (feature_id, kind)
         REFERENCES feature.features (feature_id, kind) ON DELETE CASCADE,
@@ -544,6 +1058,136 @@ CREATE TABLE feature.feature_areas (
         x_extension.st_intersects(x_extension.st_envelope(geom), anchor)
     )
 );
+
+-- route/area geometry와 core state는 서로 다른 relation에 있으므로 partial
+-- GiST는 join predicate를 직접 표현할 수 없다. 기존 subtype UPDATE가 parent를
+-- `FOR UPDATE`로 잠그면 state transition(parent → subtype)과 역순 40P01이 된다.
+-- 새 subtype attach만 parent를 잠가 current cache를 만든다. 이미 연결된 subtype은
+-- identity를 DB에서 immutable로 막고, payload/geometry UPDATE는 cache를 보존한다.
+-- core axis trigger만 existing cache를 변경하므로 서로 교차하는 tuple lock이 없다.
+-- supplied public_ready는 항상 DB가 재계산하거나 보존한다.
+CREATE FUNCTION feature.derive_subtype_public_ready()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+DECLARE
+    v_lifecycle_state text;
+    v_publication_state text;
+    v_quality_state text;
+BEGIN
+    IF TG_OP = 'UPDATE' THEN
+        IF NEW.feature_id IS DISTINCT FROM OLD.feature_id
+           OR NEW.kind IS DISTINCT FROM OLD.kind THEN
+            RAISE EXCEPTION 'route/area subtype identity is immutable'
+                USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_subtype_identity_immutable';
+        END IF;
+        IF NEW.public_ready IS NOT DISTINCT FROM OLD.public_ready THEN
+            RETURN NEW;
+        END IF;
+    END IF;
+
+    IF TG_OP = 'INSERT' THEN
+        SELECT lifecycle_state, publication_state, quality_state
+          INTO v_lifecycle_state, v_publication_state, v_quality_state
+          FROM feature.features
+         WHERE feature_id = NEW.feature_id
+         FOR UPDATE;
+    ELSE
+        SELECT lifecycle_state, publication_state, quality_state
+          INTO v_lifecycle_state, v_publication_state, v_quality_state
+          FROM feature.features
+         WHERE feature_id = NEW.feature_id;
+    END IF;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'route/area public projection requires a parent feature'
+            USING ERRCODE = '23503', CONSTRAINT = 'fk_feature_subtype_public_ready_parent';
+    END IF;
+    NEW.public_ready := v_lifecycle_state = 'active'
+        AND v_publication_state = 'published'
+        AND v_quality_state = 'valid';
+    RETURN NEW;
+END;
+$$;
+
+CREATE FUNCTION feature.sync_subtype_public_ready()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+DECLARE
+    v_public_ready boolean;
+BEGIN
+    v_public_ready := NEW.lifecycle_state = 'active'
+        AND NEW.publication_state = 'published'
+        AND NEW.quality_state = 'valid';
+    UPDATE feature.feature_routes
+       SET public_ready = v_public_ready
+     WHERE feature_id = NEW.feature_id
+       AND public_ready IS DISTINCT FROM v_public_ready;
+    UPDATE feature.feature_areas
+       SET public_ready = v_public_ready
+     WHERE feature_id = NEW.feature_id
+       AND public_ready IS DISTINCT FROM v_public_ready;
+    RETURN NULL;
+END;
+$$;
+
+ALTER FUNCTION feature.derive_subtype_public_ready()
+    OWNER TO ktm_feature_state_procedure_owner;
+ALTER FUNCTION feature.sync_subtype_public_ready()
+    OWNER TO ktm_feature_state_procedure_owner;
+
+CREATE TRIGGER trg_feature_routes_public_ready
+    BEFORE INSERT OR UPDATE ON feature.feature_routes
+    FOR EACH ROW EXECUTE FUNCTION feature.derive_subtype_public_ready();
+CREATE TRIGGER trg_feature_areas_public_ready
+    BEFORE INSERT OR UPDATE ON feature.feature_areas
+    FOR EACH ROW EXECUTE FUNCTION feature.derive_subtype_public_ready();
+CREATE TRIGGER trg_features_sync_subtype_public_ready
+    AFTER UPDATE OF lifecycle_state, publication_state, quality_state
+    ON feature.features FOR EACH ROW
+    WHEN (
+        OLD.lifecycle_state IS DISTINCT FROM NEW.lifecycle_state
+        OR OLD.publication_state IS DISTINCT FROM NEW.publication_state
+        OR OLD.quality_state IS DISTINCT FROM NEW.quality_state
+    )
+    EXECUTE FUNCTION feature.sync_subtype_public_ready();
+
+CREATE INDEX idx_feature_routes_geom_gist
+    ON feature.feature_routes USING gist (geom)
+    WHERE public_ready;
+CREATE INDEX idx_feature_areas_geom_gist
+    ON feature.feature_areas USING gist (geom)
+    WHERE public_ready;
+
+-- Runtime gets exactly the subtype business columns. INSERT creates the fixed
+-- subtype identity; UPDATE cannot reattach it or delete a geometry relation.
+-- Column-list grants keep table-level UPDATE false and never expose the
+-- DB-owned public_ready flag.
+REVOKE ALL ON feature.feature_routes, feature.feature_areas FROM PUBLIC, ktm_feature_runtime;
+GRANT SELECT ON feature.feature_routes, feature.feature_areas TO ktm_feature_runtime;
+GRANT INSERT (
+    feature_id, kind, geom, anchor
+) ON feature.feature_routes TO ktm_feature_runtime;
+GRANT UPDATE (
+    geom, anchor
+) ON feature.feature_routes TO ktm_feature_runtime;
+GRANT INSERT (
+    feature_id, kind, geom, anchor
+) ON feature.feature_areas TO ktm_feature_runtime;
+GRANT UPDATE (
+    geom, anchor
+) ON feature.feature_areas TO ktm_feature_runtime;
+GRANT SELECT (feature_id, public_ready), UPDATE (public_ready)
+    ON feature.feature_routes, feature.feature_areas
+    TO ktm_feature_state_procedure_owner;
+REVOKE ALL ON FUNCTION feature.derive_subtype_public_ready()
+    FROM PUBLIC, ktm_feature_runtime;
+REVOKE ALL ON FUNCTION feature.sync_subtype_public_ready()
+    FROM PUBLIC, ktm_feature_runtime;
 
 -- =============================================================================
 -- 6. 공개 정본 projection (ADR-067 결정 2·3)
@@ -564,6 +1208,7 @@ FROM feature.features AS f
 WHERE f.lifecycle_state = 'active'
   AND f.publication_state = 'published'
   AND f.quality_state = 'valid';
+GRANT SELECT ON feature.public_features TO ktm_feature_runtime;
 
 -- =============================================================================
 -- 7. source lineage 정본 (ADR-068 결정 2, ADR-069)
@@ -841,6 +1486,8 @@ CREATE TABLE ops.feature_overrides (
     -- override 값 (ADR-071 결정 2 — provider base value와 분리 저장).
     -- value_type과의 결합 검증 방식: 미정(T-VN-36B 구현 소관)
     override_value jsonb,
+    prevent_provider_reactivation boolean NOT NULL DEFAULT false,
+    status text NOT NULL DEFAULT 'active',
     -- provenance (ADR-071 결정 2) — 생성 시점 base revision과 인증 principal
     -- (ADR-066 결정 5). provenance 세부 컬럼 확장: 미정(T-VN-36A 구현 소관)
     base_row_revision bigint,
@@ -855,17 +1502,26 @@ CREATE TABLE ops.feature_overrides (
     CONSTRAINT fk_feature_overrides_field_path FOREIGN KEY (field_path)
         REFERENCES ops.feature_override_field_paths (field_path),
     CONSTRAINT ck_feature_overrides_created_by CHECK (btrim(created_by) <> ''),
+    CONSTRAINT ck_feature_overrides_status CHECK (status IN ('active', 'revoked')),
     CONSTRAINT ck_feature_overrides_tombstone_pair CHECK (
-        (revoked_at IS NULL) = (revoked_by IS NULL)
+        (status = 'active' AND revoked_at IS NULL AND revoked_by IS NULL)
+        OR (status = 'revoked' AND revoked_at IS NOT NULL AND revoked_by IS NOT NULL)
     )
 );
 
 -- `(feature_id, field_path)` active UNIQUE (ADR-071 결정 1)
 CREATE UNIQUE INDEX uq_feature_overrides_active
     ON ops.feature_overrides (feature_id, field_path)
-    WHERE revoked_at IS NULL;
+    WHERE status = 'active';
 
 CREATE INDEX idx_feature_overrides_feature ON ops.feature_overrides (feature_id);
+
+-- State procedures are declared before lineage/override tables so the frozen
+-- schema remains sectioned by ownership; grant their read dependencies only
+-- after those relations exist.
+GRANT SELECT ON provider_sync.source_entities, provider_sync.source_records,
+    provider_sync.source_entity_heads, provider_sync.source_links, ops.feature_overrides
+    TO ktm_feature_state_procedure_owner;
 
 -- =============================================================================
 -- 8A. current summary projection receipt (ADR-089, T-VN-38)

@@ -12,13 +12,6 @@ export const FEATURE_KIND_OPTIONS = [
   { value: "event", label: "행사" },
 ] as const;
 
-export const FEATURE_STATUS_OPTIONS = [
-  { value: "draft", label: "초안" },
-  { value: "active", label: "사용 중" },
-  { value: "inactive", label: "사용 안 함" },
-  { value: "hidden", label: "숨김" },
-] as const;
-
 export const FEATURE_CHANGE_ACTION_OPTIONS = [
   { value: "add", label: "새로 추가" },
   { value: "update", label: "기존 Feature 수정" },

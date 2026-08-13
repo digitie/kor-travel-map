@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-13 — T-VN-34 머지 대기: 적대 검토 3라운드 반영 완료
+
+**다음 한 작업**: PR #972를 CI green 후 merge commit으로 머지한다. 그 뒤 T-VN-36을 새
+main으로 재리베이스하되 alembic revision 번호 충돌을 먼저 푼다 — T-VN-34가
+`0098_admin_scope_indexes`를 추가했고 T-VN-36 체인도 `0098`부터 시작하므로 `0099~0105`로
+재번호 + `down_revision` 재배선이 필요하다.
+
+- 적대 검토 3라운드에서 28건을 받아 전부 반영했고 각각 변이로 증명했다. 3라운드는 실제
+  prod 리허설(0087 + 100만 행)로 배포 P0 2건을 꺼냈다 — bootstrap이 데이터 있는 DB에서
+  exit 3(identity 시퀀스), `public.alembic_version` 소유권 미이전. 둘 다 하네스가 fresh
+  DB만 써서 보이지 않던 것이고, prod 이행이 **실데이터 이관**이라 필수 경로다.
+- live E2E 러너가 T-VN-34C 자신 때문에 깨져 있었다(`user_change_reason` 조회). 이식했고
+  스크립트도 정적 차단선에 넣었다.
+- live 검증은 T-VN-36까지 머지한 뒤 한 번에 한다 — `0104`가 change-request 모델을 지우므로
+  clone-live 러너를 두 번 재작성하지 않는다.
+- 배포 결선은 docker-manager #171/#172가 Map 전용 PostgreSQL `:12703` 분리로 진행 중이며
+  bootstrap 스크립트를 Map 저장소에서 마운트하므로 위 P0 수정이 그대로 실린다.
+
 ## 2026-08-12 — T-VN-38 머지 완료·백로그 정본 정리 진행
 
 **다음 한 작업**: 완료 task 이관 문서 PR을 CI green 후 머지하고, 이미 머지되어 더 이상
@@ -45,6 +63,34 @@ API live 12/12 → n150 브라우저 admin UI live 10/10 + 라운드12 수정 li
 - 무방비 축 회귀: MOIS precheck fail-open(실 DB 7건), `_advisory_key` sync_scope,
   주소 clue 우선순위, MCST slug — 전부 변이로 KILLED 실증.
 - 경과는 `docs/journal.md` 2026-08-11.
+## 2026-08-11 — T-VN-34: 최신 T-VN-33/T-VN-38 rebase 반영
+
+**다음 한 작업**: T-VN-36을 이 T-VN-34 rebase head 위로 재base하고, migration/OpenAPI/
+consumer receipt 영향도를 다시 확인한다. 새 T-VN-34 consumer pair는 Map
+`901939bf` ↔ PinVi `197bcee`로 고정했다.
+
+- T-VN-34A `down_revision`은 upstream
+  `0095_tvn33_tvn38_head_merge`를 가리킨다. 따라서 fresh Alembic head는 T-VN-33
+  cleanup과 T-VN-38 current summaries를 누락하지 않는다.
+- target catalog/OpenAPI artifact 및 state/runtime/post-cutover contract gate를 현재
+  rebase tree에서 재동결·재실행했다.
+- user/admin-detail vendor bytes는 같은 Map source에서 deterministic 재추출·PinVi contract
+  pin-consistency로 검증했고, full admin OpenAPI digest만 receipt에서 갱신했다.
+
+## 2026-08-10 — T-VN-34C: n150 fresh destructive live gate 통과
+
+**다음 한 작업**: T-VN-34C의 구현 게이트는 완료했다. PR CI와 승인 뒤 forward-only C head를
+병합하고, 다음 Lane B 작업인 T-VN-36A를 시작한다.
+
+- T-VN-34 전용 63 commit은 최신 T-VN-33 `21b1758b` → T-VN-38 `2e78d623` 순서의
+체인 위로 재base했고, Map OpenAPI artifact는 현재 spec hash로 재freeze했다. merge는 하지 않았다.
+- Map execution source `fe12e8da` ↔ PinVi `e37eda94` consumer pair를 다시 vendor했다. receipt의
+Map commit은 runtime source pin이며, runner를 담는 후속 문서 commit과 의도적으로 다르다.
+- 새 installer/runner는 committed pair를 `git archive`로만 가져오며, `features_detailed` 부재,
+`0097_tvn34c_final_cutover`, runtime principal, exact executor label/hash를 fail-closed로 확인한다.
+- n150 immutable snapshot에서 fresh `0097` PostGIS·actual Dagster runtime ETL·Noble Playwright
+  destructive admin main/recovery(2/2)·PinVi public probe가 모두 통과했다. run과 seed 식별자는
+  해시로만 보존했고, `BLOCKED.json`, 해당 compose container, volume은 cleanup 뒤 모두 없다.
 
 ## 2026-08-09 (3) — T-VN-33: 적대 리뷰 7·8라운드 REJECT 전건 처리, 변이 배터리 32/32
 
@@ -53,7 +99,7 @@ API live 12/12 → n150 브라우저 admin UI live 10/10 + 라운드12 수정 li
 Playwright e2e(로컬·CI 어디에도 없다 — 이번에 그 사실을 명시했다).
 
 - **8라운드는 리뷰어 둘이 독립으로 같은 BLOCKER를 찍었다**: `null === ""`로
-  catalog 전용 dataset의 상세가 통째로 렌더되지 않았고, 화면이 서버와
+  catalog 전용 dataset 17~18개의 상세가 통째로 렌더되지 않았고, 화면이 서버와
   정반대(`canonical`인데 "잔존 행")를 말했다. TypeScript도 e2e 픽스처도 못 잡는
   자리였다 — 픽스처에 `operation_key: null` 축을 넣어 못 박았다.
 - **vitest 36파일 285케이스가 어느 게이트에도 없었다.** CI·로컬 둘 다에 넣었고,
@@ -130,7 +176,7 @@ Playwright e2e(로컬·CI 어디에도 없다 — 이번에 그 사실을 명시
 
 **게이트 재작성이 실제로 잡은 것**(구 스크립트는 하나도 못 봤다):
 - branch-caused ESLint red 2건
-- `operation_key=null` 행 상세가 **422**가 되는 신규 회귀(그 행은 seed에 실재한다).
+- `operation_key=null` 행 상세가 **422**가 되는 신규 회귀(74개 dataset 중 17개).
   직전 커밋이 프론트에서 고친 것을 그 다음 커밋이 서버 `min_length=1`로 다시 깨뜨렸다.
 - **기능 손실 하나** — MOIS 사전점검 경고가 통째로 사라져 있었다. 타입체크도
   테스트도 못 잡는다(아무도 안 쓰는 export가 남을 뿐이라 컴파일은 통과한다).

@@ -95,7 +95,10 @@ _NEARBY_PARAMS: dict[str, Any] = {
     "radius_m": 7000.0,
     "kinds": ["place"],
     "categories": None,
-    "statuses": ["active"],
+    # T-VN-34: nearby CTE는 ``feature.public_features``를 조인하므로 가시성 술어가
+    # 뷰 안(3축 active/published/valid)에 있다. 호출자가 넘기던 ``statuses`` 필터는
+    # 3축 어느 축으로도 옮길 자리가 없어졌다 — 옮기면 뷰가 이미 건 술어를 밖에서
+    # 한 번 더 재구현하는 것이라 F-1(공개 술어 복제)이다. 그래서 키를 뺀다.
     "providers": None,
     "limit_plus_one": 51,
     "cursor_distance_m": None,
@@ -397,14 +400,26 @@ async def measure_index_write_cost(
 # ---------------------------------------------------------------------------
 
 # T-VN-35(ADR-086): core에 ``detail``이 없다. kind별 값은 subtype 5종이 정본이고
-# 응답 ``detail``은 ``features_detailed`` 뷰가 조립한다 — seed도 같은 구조를
-# 만들어야 planner가 운영과 같은 relation 분포를 본다(place/event subtype이
-# 비어 있으면 뷰 조인이 비현실적으로 싸진다).
+# 응답 ``detail``은 공개 projection ``feature.public_features``가 subtype join으로
+# 조립한다(0097이 중간 뷰 ``features_detailed``를 없애고 그 조립을 공개 뷰로
+# 흡수했다) — seed도 같은 구조를 만들어야 planner가 운영과 같은 relation 분포를
+# 본다(place/event subtype이 비어 있으면 뷰 조인이 비현실적으로 싸진다).
+#
+# T-VN-34(0095~0097): 이 seed가 planner에게 보여야 하는 것은 "공개 표면에 들어오는
+# 행과 빠지는 행의 비율"이다. 옛 ``status``의 두 값이 그 비율을 만들었고, 0095
+# backfill 규칙상 ``'active'`` → (lifecycle active, publication published),
+# ``'inactive'`` → (lifecycle retired, publication suppressed)로 대응한다. 아래는
+# 그 대응을 그대로 쓴 것이라 ``g % 29`` 비공개 비율(≈3.4%)이 이식 전후로 동일하고,
+# 따라서 tier-1이 보는 selectivity와 index 선택도 바뀌지 않는다.
+# ``quality_state``는 명시하지 않는다 — 옛 seed가 ``status='broken'``을 만든 적이
+# 없어 3축으로는 전부 컬럼 DEFAULT인 ``'valid'``이고, 굳이 적으면 "quarantined
+# 행이 있을 수 있다"는 없는 분포를 암시하게 된다.
 _SEED_FEATURES_SQL = """
 INSERT INTO feature.features (
     feature_id, kind, name, category, coord,
     address, urls, raw_refs,
-    status, legal_dong_code, sido_code, sigungu_code,
+    lifecycle_state, publication_state,
+    legal_dong_code, sido_code, sigungu_code,
     created_at, updated_at
 )
 SELECT
@@ -432,7 +447,8 @@ SELECT
                        'legal', '서울특별시 종로구 세종로') AS address,
     '{}'::jsonb AS urls,
     '[]'::jsonb AS raw_refs,
-    CASE WHEN g % 29 = 0 THEN 'inactive' ELSE 'active' END AS status,
+    CASE WHEN g % 29 = 0 THEN 'retired' ELSE 'active' END AS lifecycle_state,
+    CASE WHEN g % 29 = 0 THEN 'suppressed' ELSE 'published' END AS publication_state,
     CASE WHEN g % 11 = 0 THEN '2611010100' WHEN g % 13 = 0 THEN '5011010100'
          ELSE '1111010100' END AS legal_dong_code,
     CASE WHEN g % 11 = 0 THEN '26' WHEN g % 13 = 0 THEN '50'

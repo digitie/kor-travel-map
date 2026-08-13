@@ -35,6 +35,21 @@ async def _seed_one_feature(session: AsyncSession) -> None:
     )
 
 
+async def _is_publicly_visible(session: AsyncSession, feature_id: str) -> bool:
+    """공개 정본 ``feature.public_features``에 이 feature가 실재하는가.
+
+    3축 spine에서 "공개에 보인다"는 축 값 하나가 아니라 세 축의 교집합
+    (active/published/valid)이라, 축 컬럼을 직접 단언하면 공개 규칙이 바뀔 때
+    테스트가 조용히 낡는다. 공개 여부는 view 실재로만 묻는다 (ADR-067).
+    """
+    return bool(
+        await session.scalar(
+            text("SELECT EXISTS (SELECT 1 FROM feature.public_features WHERE feature_id = :fid)"),
+            {"fid": feature_id},
+        )
+    )
+
+
 async def test_row_revision_defaults_to_one_and_bumps_on_every_update(
     migrated_session: AsyncSession,
 ) -> None:
@@ -57,15 +72,31 @@ async def test_row_revision_defaults_to_one_and_bumps_on_every_update(
     )
     assert await get_feature_row_revision(migrated_session, _FID) == 3
 
-    # soft-delete도 UPDATE라 revision이 이어서 증가한다 (행은 남는다).
+    # 이 단계가 확인하려는 것은 "삭제조차 DELETE가 아니라 UPDATE라서 행이 남고
+    # revision이 끊기지 않고 이어진다"이다. 0097이 legacy `deleted_at`/`status`를
+    # 물리 삭제했으므로, 같은 사실을 3축 spine의 은퇴(retire) 전이로 옮긴다.
+    # 0095 backfill이 정의한 등가는 `deleted_at IS NOT NULL` 또는
+    # `status='deleted'` ≡ `lifecycle_state='retired'`이고, 0095의
+    # `ck_features_state_tuple`(retired면 publication은 반드시 suppressed)이
+    # 두 축을 한 문장 안에서 함께 옮기도록 강제한다 — 은퇴는 두 번의 독립 write가
+    # 아니라 한 번의 원자적 전이다.
+    #
+    # 은퇴 직전까지 이 행은 공개 정본에 떠 있다. 아래 전후 대조가 "행은 남는다"의
+    # 실제 의미(base table에는 남고 공개 표면에서만 빠진다)를 축 값 문자열이 아니라
+    # 관측 가능한 표면으로 못박는다.
+    assert await _is_publicly_visible(migrated_session, _FID) is True
+
     await migrated_session.execute(
         text(
             "UPDATE feature.features "
-            "SET deleted_at = now(), status = 'deleted' WHERE feature_id = :fid"
+            "SET lifecycle_state = 'retired', publication_state = 'suppressed' "
+            "WHERE feature_id = :fid"
         ),
         {"fid": _FID},
     )
+    # 행이 살아 있으므로 revision 조회가 값을 돌려주고, 그 값은 3에서 4로 이어진다.
     assert await get_feature_row_revision(migrated_session, _FID) == 4
+    assert await _is_publicly_visible(migrated_session, _FID) is False
 
 
 async def test_assert_feature_revision_if_match_semantics(

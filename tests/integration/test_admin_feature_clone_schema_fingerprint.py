@@ -11,7 +11,15 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 
-pytestmark = pytest.mark.anyio
+# 이 모듈의 async 실행 주체는 anyio가 아니라 pytest-asyncio다.
+# pyproject의 `asyncio_mode = "auto"` + `asyncio_default_*_loop_scope = "session"`이
+# session-scope engine fixture와 function-scope async test에 같은 event loop을 물린다.
+# 여기에 `pytest.mark.anyio`를 얹으면 anyio pytest plugin이 session-scope fixture까지
+# 자기 wrapper로 감싸면서 module-scope `anyio_backend`를 요구해 setup 단계에서
+# ScopeMismatch로 죽는다(테스트 본문과 무관한 배선 사고).
+# 같은 디렉터리의 다른 통합 모듈과 동일하게 `integration` 마커만 달아
+# testcontainers 게이트(`-m integration`) 선택 대상으로 남긴다.
+pytestmark = pytest.mark.integration
 
 
 async def _constraint_key_names(
@@ -128,16 +136,23 @@ async def _raw_constraint_key(
 
 
 async def test_checkpoint_fingerprint_normalizes_dropped_attnum_gaps(
-    pg_engine: AsyncEngine,
+    migrated_engine: AsyncEngine,
 ) -> None:
-    """동등한 restore schema의 raw ordinal 차이는 fingerprint 차이가 아니다."""
+    """동등한 restore schema의 raw ordinal 차이는 fingerprint 차이가 아니다.
+
+    ``migrated_engine``을 쓴다 — 이 fixture는 배포 경로로 올린 **전용 DB**를 준다.
+    예전에는 그것이 컨테이너 기본 DB를 ``pg_engine``과 공유해서, 세션에서 먼저 선
+    쪽이 app schema owner를 확정하는 순서 결합이 있었다. 그때는 이 모듈이 알파벳순
+    첫 파일이라는 사실에 기대 배포 경로를 먼저 세웠는데, 파일 하나가 추가되거나
+    이름이 바뀌면 조용히 깨지는 장치였다. 지금은 DB가 분리돼 순서가 무의미하다.
+    """
     names = (
         "clone_digest_child_clean",
         "clone_digest_child_gap",
         "clone_digest_parent_clean",
         "clone_digest_parent_gap",
     )
-    async with pg_engine.begin() as connection:
+    async with migrated_engine.begin() as connection:
         try:
             statements = (
                 """

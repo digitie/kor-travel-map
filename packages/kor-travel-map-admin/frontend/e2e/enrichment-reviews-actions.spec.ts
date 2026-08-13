@@ -78,7 +78,9 @@ function makeMeta(): Meta {
   };
 }
 
-function makeListMeta(page: EnrichmentReviewPageMeta): EnrichmentReviewListMeta {
+function makeListMeta(
+  page: EnrichmentReviewPageMeta,
+): EnrichmentReviewListMeta {
   return {
     duration_ms: 1,
     page,
@@ -150,13 +152,17 @@ function makeTargetDetail(
     name: review.target_name,
     raw_refs: [],
     sources: [],
-    status: "active",
+    lifecycle_state: "active",
+    publication_state: "published",
+    quality_state: "valid",
     updated_at: MOCK_NOW,
     urls: { homepage: "https://datagokr.example.invalid" },
   };
 }
 
-function makeVisitkoreaSource(review: EnrichmentReviewRecord): ReviewSourceDetailRecord {
+function makeVisitkoreaSource(
+  review: EnrichmentReviewRecord,
+): ReviewSourceDetailRecord {
   return {
     confidence: null,
     dataset_key: review.source_dataset_key,
@@ -293,7 +299,8 @@ async function mockEnrichmentReviews(
           .toLowerCase();
         return (
           (!q || text.includes(q)) &&
-          (providers.length === 0 || providers.includes(item.source_provider)) &&
+          (providers.length === 0 ||
+            providers.includes(item.source_provider)) &&
           (Number.isNaN(minScore) || item.name_score >= minScore) &&
           (Number.isNaN(maxScore) || item.name_score <= maxScore)
         );
@@ -329,7 +336,9 @@ async function mockEnrichmentReviews(
       return;
     }
 
-    throw new Error(`Unhandled enrichment-review route: ${request.method()} ${url}`);
+    throw new Error(
+      `Unhandled enrichment-review route: ${request.method()} ${url}`,
+    );
   });
 
   return requests;
@@ -419,7 +428,9 @@ test.describe("admin/enrichment-reviews actions", () => {
     expect(requests.patchBodies[0]).not.toHaveProperty("reviewed_by");
   });
 
-  test("accept fires PATCH decision and row flips to 완료", async ({ page }) => {
+  test("accept fires PATCH decision and row flips to 완료", async ({
+    page,
+  }) => {
     const review = makeReview({
       review_id: "enrich-accept-1",
       target_name: "Accept Target POI",
@@ -594,8 +605,12 @@ test.describe("admin/enrichment-reviews actions", () => {
     await page.getByLabel("enrichment score filter").selectOption("high");
     await page.getByLabel("enrichment page size").selectOption("25");
 
-    await expect(page.getByRole("row", { name: /Filter Target/ })).toBeVisible();
-    await expect(page.getByRole("row", { name: /Other Target/ })).toHaveCount(0);
+    await expect(
+      page.getByRole("row", { name: /Filter Target/ }),
+    ).toBeVisible();
+    await expect(page.getByRole("row", { name: /Other Target/ })).toHaveCount(
+      0,
+    );
     await expect
       .poll(() => {
         const params = requests.listUrls.at(-1)?.searchParams;
@@ -618,7 +633,9 @@ test.describe("admin/enrichment-reviews actions", () => {
       });
   });
 
-  test("row click opens the single detail-dialog map surface", async ({ page }) => {
+  test("row click opens the single detail-dialog map surface", async ({
+    page,
+  }) => {
     const review = makeReview({
       review_id: "enrich-map-1",
       target_name: "Datagokr Map Festival",
@@ -681,7 +698,9 @@ test.describe("admin/enrichment-reviews actions", () => {
     // name_score: toFixed(1).
     await expect(row.getByText("name 8.5")).toBeVisible();
     await expect(row.getByText("distance 74.2")).toBeVisible();
-    await expect(row.getByText("2026-04-05 ~ 2026-04-12").first()).toBeVisible();
+    await expect(
+      row.getByText("2026-04-05 ~ 2026-04-12").first(),
+    ).toBeVisible();
   });
 
   test("empty list shows placeholder and disables both pager buttons", async ({
@@ -691,10 +710,7 @@ test.describe("admin/enrichment-reviews actions", () => {
       if (route.request().method() !== "GET") {
         throw new Error("empty mock only serves GET");
       }
-      await fulfillJson(
-        route,
-        listResponse([], makePageMeta({ total: 0 })),
-      );
+      await fulfillJson(route, listResponse([], makePageMeta({ total: 0 })));
     });
 
     await page.goto("/admin/features/enrichment-reviews");

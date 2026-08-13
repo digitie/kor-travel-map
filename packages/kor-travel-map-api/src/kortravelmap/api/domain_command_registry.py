@@ -163,9 +163,17 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
         replay_headers=("ETag",),
         fingerprint_headers=("If-Match",),
     ),
-    ("POST", "/v1/admin/features/{feature_id}/deactivate"): _domain(
-        "admin.feature.deactivate",
+    ("PATCH", "/v1/admin/features/{feature_id}/state"): _domain(
+        "admin.feature.state",
         _MUTATION_RESULT,
+        replay_headers=("ETag",),
+        fingerprint_headers=("If-Match",),
+    ),
+    ("POST", "/v1/admin/features/{feature_id}/state/reactivate"): _domain(
+        "admin.feature.state.reactivate",
+        _MUTATION_RESULT,
+        replay_headers=("ETag",),
+        fingerprint_headers=("If-Match",),
     ),
     (
         "POST",

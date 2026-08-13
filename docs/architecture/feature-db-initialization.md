@@ -7,65 +7,60 @@ DB를 부트스트랩하고 내부 라이브러리 client를 초기화하는 절
 ## 1. 부트스트랩 순서
 
 ```
-1. PostgreSQL 16 + PostGIS 3.5 컨테이너 기동
-2. DB 생성 (`kor_travel_map`)
-3. schema 생성 (feature, provider_sync, ops, x_extension)
-4. 확장 설치 (postgis, postgis_topology, pg_trgm, pgcrypto) — x_extension에
-5. search_path 설정 (public, x_extension)
-6. Alembic upgrade head
-7. KorTravelMapSettings 로드 + create_async_engine
-8. (선택) 객체 저장소 client + provider client 주입
-9. AsyncKorTravelMapClient 생성
+1. PostgreSQL 16 + PostGIS 3.5와 dedicated DB (`kor_travel_map`)를 준비한다.
+2. ignored deployment env/vault에서 bootstrap, migrator, API runtime, Dagster runtime의
+   서로 다른 credential을 주입한다.
+3. `db-role-bootstrap`을 명시 confirmation과 함께 한 번 실행한다. 이 단계가 NOLOGIN
+   `ktm_feature_schema_owner`와 runtime group을 만들고 기존 object/DB ownership을 schema
+   owner로 forward transfer한다.
+4. LOGIN `ktm_feature_migrator`가 전용 Alembic connection에서 `SET ROLE ktm_feature_schema_owner`로 실행한다.
+5. 같은 migrator session 계열이 `python -m kortravelmap.infra.runtime_privileges`를 실행해
+   closed table ACL inventory를 다시 부여한다. PostgreSQL default privilege는 사용하지 않는다.
+6. API/Dagster는 각 LOGIN runtime DSN으로만 연결하고 실제 catalog preflight를 통과한다.
+7. (선택) 객체 저장소 client + provider client를 주입하고 `AsyncKorTravelMapClient`를 만든다.
 ```
 
 ## 2. DB 생성
 
-```bash
-# 컨테이너 기동
-docker run -d --name krtour-postgis \
-  -p 5432:5432 \
-  -e POSTGRES_USER=kor_travel_map \
-  -e POSTGRES_PASSWORD=changeme \
-  -e POSTGRES_DB=kor_travel_map \
-  -v krtour-pgdata:/var/lib/postgresql/data \
-  postgis/postgis:16-3.5-alpine
-```
-
-DSN: `postgresql+asyncpg://kor_travel_map:changeme@localhost:5432/kor_travel_map`.
+bootstrap owner password와 모든 DSN은 repository 또는 이 문서에 기록하지 않는다.
+`docker/postgres-role-bootstrap.sh`가 dedicated DB superuser connection에만 연결하고
+`KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE`의 exact-name 확인 뒤 역할을 provision한다.
+외부/shared DB에는 이 script를 compose로 자동 실행하지 않는다.
 
 운영 환경에서도 DB는 kor-travel-map이 소유한다. PinVi는 OpenAPI로만 접근하며
 PostgreSQL에 직접 연결하지 않는다 (ADR-045).
 
 ## 3. Schema 부트스트랩
 
-```sql
--- 부트스트랩용 superuser/owner 세션에서 한 번만
-CREATE SCHEMA IF NOT EXISTS feature;
-CREATE SCHEMA IF NOT EXISTS provider_sync;
-CREATE SCHEMA IF NOT EXISTS ops;
-CREATE SCHEMA IF NOT EXISTS x_extension;
-
-CREATE EXTENSION IF NOT EXISTS postgis           SCHEMA x_extension;
-CREATE EXTENSION IF NOT EXISTS postgis_topology  SCHEMA x_extension;
-CREATE EXTENSION IF NOT EXISTS pg_trgm           SCHEMA x_extension;
-CREATE EXTENSION IF NOT EXISTS pgcrypto          SCHEMA x_extension;
-
--- DB 단위 영구 설정
-ALTER DATABASE kor_travel_map SET search_path = public, x_extension;
-
--- 라이브러리 user 권한
-GRANT USAGE  ON SCHEMA feature, provider_sync, ops, x_extension TO kor_travel_map;
-GRANT CREATE ON SCHEMA feature, provider_sync, ops TO kor_travel_map;
-GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA x_extension TO kor_travel_map;
-ALTER DEFAULT PRIVILEGES IN SCHEMA feature, provider_sync, ops
-  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO kor_travel_map;
-```
+role·ownership·membership 정본은 `docker/postgres-role-bootstrap.sh`다. 핵심은
+`ktm_feature_schema_owner`가 DB/application schema object를 소유하고,
+`ktm_feature_migrator`만 해당 NOLOGIN group으로 `SET ROLE`할 수 있다는 점이다.
+`ktm_feature_api_runtime`와 `ktm_feature_dagster_runtime`은 `ktm_feature_runtime`의
+권한만 inherit하며 `SET ROLE`하지 못한다. 0095 이후 runtime이 `EXECUTE`할 수 있는
+feature procedure는 `create_feature_with_initial_state`, `transition_feature_state`,
+`materialize_user_feature_change_provenance`, `materialize_provider_feature_version`,
+`author_lifecycle_override`, `revoke_lifecycle_override` 여섯 개뿐이고, base Feature
+axis/audit direct DML은 허용하지 않는다. provider version `0`은 마지막으로 반영된
+provider baseline만 가리킨다. user whole-row fence가 provider core/subtype 변경을 막은
+refresh는 raw source observation만 최신화하고 user effective row를 provider snapshot으로
+재기록하지 않는다. 이 임시 snapshot bridge는 T-VN-36 effective lineage가 대체한다.
+bootstrap은 `REASSIGN OWNED`를 쓰지 않는다. 초기 dedicated superuser가 PostgreSQL
+system object도 소유할 수 있으므로, map DB·`feature`/`provider_sync`/`ops`/`x_extension`
+object만 명시적으로 transfer한다. 이어지는 ACL 재조정은 `feature.features`,
+`feature.feature_state_transitions`, `feature.feature_versions`, `ops.feature_overrides`를
+direct runtime mutation policy에서 제외하고, 새 feature relation은 명시 inventory 추가 전
+deployment를 fail-closed 한다. lifecycle override author/revoke는 typed SECURITY DEFINER
+procedure만 사용하며 runtime의 raw override `UPDATE`/`DELETE`는 허용하지 않는다.
 
 ## 4. Alembic 마이그레이션
 
 ```bash
-# 마이그레이션 적용
-alembic upgrade head
+# migration runner에서만: KOR_TRAVEL_MAP_MIGRATOR_PG_DSN을
+# KOR_TRAVEL_MAP_PG_DSN으로 export하고 아래 flag를 함께 준다.
+KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE=true alembic upgrade head
+
+# 같은 migrator DSN을 유지한 직후에만: closed runtime ACL inventory 적용
+python -m kortravelmap.infra.runtime_privileges
 
 # 현재 revision 확인
 alembic current
@@ -74,7 +69,8 @@ alembic current
 alembic downgrade -1
 ```
 
-`alembic/env.py`는 다음을 강제한다:
+`alembic/env.py`는 async DSN 정규화, migration connection 수명의
+`SET ROLE ktm_feature_schema_owner`(flag가 true일 때), `search_path`를 강제한다.
 
 ```python
 import asyncio
@@ -115,7 +111,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class KorTravelMapSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="KOR_TRAVEL_MAP_", env_file=".env")
 
-    pg_dsn: SecretStr
+    pg_dsn: SecretStr | None = None
     pg_dsn_sync: SecretStr | None = None
     pg_pool_size: int = 10
     pg_max_overflow: int = 10
@@ -134,7 +130,8 @@ class KorTravelMapSettings(BaseSettings):
     log_format: Literal["json", "console"] = "json"
 ```
 
-환경변수 우선순위: 프로세스 환경 → `.env` 파일 → default. `.env`는 권한 600.
+환경변수 우선순위: 프로세스 환경 → `.env` 파일 → default다. `pg_dsn`에는 default가
+없으며 deployment API/Dagster는 전용 runtime DSN을 반드시 주입한다. `.env`는 권한 600.
 
 ## 6. AsyncEngine 생성
 
@@ -319,13 +316,15 @@ async def pg_engine(pg_container):
 - **운영**: kor-travel-map 독립 DB (`kor_travel_map`) + Dagster metadata DB
   (`kor_travel_map_dagster`)
 
-같은 라이브러리가 세 환경 모두 지원. 차이는 settings (`KOR_TRAVEL_MAP_PG_DSN`)만.
+같은 라이브러리가 세 환경 모두 지원한다. 배포 service는 API/Dagster runtime DSN을
+각각 `KOR_TRAVEL_MAP_PG_DSN`으로 주입하지만, source env가 bootstrap owner로 이를 합성하지는 않는다.
+Alembic과 그 직후 ACL 재조정은 `KOR_TRAVEL_MAP_MIGRATOR_PG_DSN`만 사용한다.
 
 ## 15. 초기화 실패 케이스
 
 | 케이스 | 검출 위치 | 조치 |
 |--------|----------|------|
-| `KOR_TRAVEL_MAP_PG_DSN` 미설정 | `KorTravelMapSettings()` 생성 시 | Settings ValidationError |
+| runtime DSN 미설정 | Compose/API/Dagster startup | required interpolation 또는 privilege preflight가 기동 차단 |
 | DB 접근 거부 | `engine.connect()` | `OperationalError` → caller 처리 |
 | schema 부재 | `client.healthz()` | warning + 사용자에게 부트스트랩 안내 |
 | Alembic 미적용 | `client.healthz()` | warning + `alembic upgrade head` 안내 |

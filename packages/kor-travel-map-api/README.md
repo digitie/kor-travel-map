@@ -138,8 +138,9 @@ Ops service principal의 감사 actor는 코드 상수 `service:pinvi`다. actor
 
 - `/health`, `/version`
 - `/v1/features/{id}`, `/v1/features/in-bounds`, `/v1/features/nearby`
-- `/v1/admin/features`, `/v1/admin/features/{id}`, `/v1/admin/features/{id}/deactivate`,
-  `/v1/admin/features/change-requests`
+- `/v1/admin/features`, `/v1/admin/features/{id}`, `/v1/admin/features/{id}/state`,
+  `/v1/admin/features/{id}/state/reactivate`,
+  `/v1/admin/features/{id}/state/transitions`, `/v1/admin/features/change-requests`
 - `/v1/admin/poi-cache-targets`, `/v1/features/nearby/by-target` (외부 POI key 기준 target
   등록/삭제/주변 feature summary 조회)
 - `/v1/features/{id}/weather`, `/v1/features/{id}/sources`, `/v1/features/{id}/files`

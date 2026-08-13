@@ -142,11 +142,50 @@ def _assert_nonderived_uuid_v7(value: object, *, feature_id: str) -> str:
 
 
 async def _upgrade(dsn: str, revision: str) -> None:
-    await asyncio.to_thread(command.upgrade, _alembic_config(dsn), revision)
+    # 배포와 같은 경로로 돈다 — bootstrap 후 migrator 자격으로 upgrade.
+    from tests.integration._tvn34_migration_bootstrap import (
+        alembic_schema_owner_role,
+        bootstrapped_migrator_dsn,
+    )
+
+    migrator_dsn = await bootstrapped_migrator_dsn(dsn)
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(
+            command.upgrade, _alembic_config(migrator_dsn), revision
+        )
 
 
 async def _downgrade(dsn: str, revision: str) -> None:
-    await asyncio.to_thread(command.downgrade, _alembic_config(dsn), revision)
+    """downgrade도 upgrade와 **같은 principal**로 돌린다 (ADR-090).
+
+    0095 이후 schema object의 owner는 ``ktm_feature_schema_owner``이고 배포는
+    upgrade·downgrade 모두 migrator LOGIN → ``SET ROLE`` schema owner 한 경로로만
+    돈다. 그런데 이 helper만 raw DSN(= DB 생성 계정, superuser)을 쓰고 있어서
+    왕복 시나리오가 principal을 갈아탔다.
+
+    superuser는 owner가 아니어도 DDL이 통과하므로 downgrade 자체는 성공하지만,
+    0081 downgrade는 ``DROP VIEW`` + ``CREATE VIEW``로 ``feature.public_features``를
+    **재생성**한다 — 새 view의 owner는 그때의 current_user, 즉 superuser가 된다.
+    그 뒤 재-upgrade는 schema owner 자격으로 0081의
+    ``CREATE OR REPLACE VIEW feature.public_features``를 걸고, PostgreSQL은
+    REPLACE에 소유권을 요구하므로 ``must be owner of view public_features``
+    (42501)로 죽는다. 즉 실패 원인은 legacy 컬럼(``status``/``deleted_at``)이
+    아니라 왕복 도중 뒤바뀐 소유권이며, 0081의 legacy 술어는 그 세대의 정본이라
+    그대로 두는 것이 맞다.
+
+    downgrade를 upgrade와 같은 자격으로 돌리면 재생성된 view의 owner가 계속
+    schema owner라 소유권이 왕복 내내 보존된다.
+    """
+    from tests.integration._tvn34_migration_bootstrap import (
+        alembic_schema_owner_role,
+        bootstrapped_migrator_dsn,
+    )
+
+    migrator_dsn = await bootstrapped_migrator_dsn(dsn)
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(
+            command.downgrade, _alembic_config(migrator_dsn), revision
+        )
 
 
 async def _create_database(admin_dsn: str, database: str) -> None:
@@ -627,7 +666,24 @@ async def test_provider_upsert_creates_uuid_and_alias_and_is_idempotent(
     # 변형하지 않고 같은 feature를 다시 upsert해도 UPDATE 분기가 실행된다
     # (upsert SQL은 feature_uuid를 SET 목록에 두지 않으므로 **버려진 새 후보**가
     # 아니라 기존 저장값이 정본으로 남는다 — 32C verify의 inserted=False 축).
-    inserted_again = await feature_repo.upsert_feature(migrated_session, bundle.feature)
+    inserted_again = await feature_repo.upsert_feature(
+        migrated_session,
+        bundle.feature,
+        provider_dataset_id=await feature_repo.resolve_active_provider_dataset_id(
+            migrated_session,
+            provider=bundle.source_record.provider,
+            dataset_key=bundle.source_record.dataset_key,
+        ),
+        source_membership=feature_repo._ProviderSourceMembership(
+            source_entity_key=feature_repo._make_source_entity_key(
+                provider=bundle.source_record.provider,
+                dataset_key=bundle.source_record.dataset_key,
+                source_entity_type=bundle.source_record.source_entity_type,
+                source_entity_id=bundle.source_record.source_entity_id,
+            ),
+            source_record_key=bundle.source_record.source_record_key,
+        ),
+    )
     assert inserted_again is False
     feature_uuid_after, alias_count_after = await _pair()
     assert feature_uuid_after == stored

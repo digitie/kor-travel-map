@@ -20,7 +20,9 @@ const FEATURE: AdminFeatureMapItem = {
   marker_color: "P-01",
   marker_icon: "marker",
   name: "Feature smoke",
-  status: "active",
+  lifecycle_state: "active",
+  publication_state: "published",
+  quality_state: "valid",
 };
 const META: Meta = {
   cluster: null,
@@ -107,7 +109,10 @@ test.describe("/features", () => {
         );
       }
       const zoom = Number(new URL(request.url()).searchParams.get("zoom"));
-      await fulfillJson(route, featuresResponse(Number.isFinite(zoom) && zoom <= 13));
+      await fulfillJson(
+        route,
+        featuresResponse(Number.isFinite(zoom) && zoom <= 13),
+      );
     });
   });
 
@@ -153,8 +158,18 @@ test.describe("/features", () => {
           /^(\d+개 지역 · [\d,]+건 집계(?: · 갱신 중)?|\d+건 표시(?: · 갱신 중)?)$/,
       }),
     ).toBeVisible();
-    for (const k of ["place", "event", "notice", "price", "weather", "route", "area"]) {
-      await expect(filter.getByRole("button", { name: k, exact: true })).toBeVisible();
+    for (const k of [
+      "place",
+      "event",
+      "notice",
+      "price",
+      "weather",
+      "route",
+      "area",
+    ]) {
+      await expect(
+        filter.getByRole("button", { name: k, exact: true }),
+      ).toBeVisible();
     }
     const weatherBtn = filter.getByRole("button", {
       name: "weather",

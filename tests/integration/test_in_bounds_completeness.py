@@ -32,6 +32,19 @@ pytestmark = pytest.mark.integration
 _KST = timezone(timedelta(hours=9))
 _NOW = datetime(2026, 7, 19, 12, 0, tzinfo=_KST)
 
+# T-VN-34(alembic 0097): core에서 ``status``가 물리 삭제되고 상태가 3축으로 갈렸다.
+# 이 파일의 seed는 전부 legacy ``status='active'``였고, 0095 backfill 기준으로 그것은
+# lifecycle=active · publication=published · quality=valid 하나뿐이다. 그리고 여기서
+# 검증하는 ``features_in_bbox``/``cluster_features_in_bbox``의 후보 집합은 ADR-067
+# 공개 projection(``feature.public_features``)이 정하는데, 그 projection의 술어가
+# 정확히 이 세 값의 곱이다 — 즉 "이 seed는 공개 표면에 보인다"가 옮겨야 할 의미이고
+# 아래 tuple이 그 의미의 3축 표기다. 축 값 자체는 이 파일의 단언 대상이 아니다.
+_PUBLIC_STATE = {
+    "lifecycle_state": "active",
+    "publication_state": "published",
+    "quality_state": "valid",
+}
+
 # 작은 조회 bbox (경도 127.0~127.1, 위도 37.0~37.1).
 _BBOX = {"min_lon": 127.0, "min_lat": 37.0, "max_lon": 127.1, "max_lat": 37.1}
 
@@ -50,7 +63,8 @@ async def _ins_point(
         text(
             """
             INSERT INTO feature.features (
-                feature_id, kind, name, category, coord, status, updated_at,
+                feature_id, kind, name, category, coord,
+                lifecycle_state, publication_state, quality_state, updated_at,
                 sido_code, sigungu_code, legal_dong_code
             )
             VALUES (
@@ -60,7 +74,8 @@ async def _ins_point(
                         CAST(:lon AS double precision), CAST(:lat AS double precision)
                     ), 4326
                 ),
-                'active', :ts, :sido_code, :sigungu_code, :legal_dong_code
+                :lifecycle_state, :publication_state, :quality_state,
+                :ts, :sido_code, :sigungu_code, :legal_dong_code
             )
             """
         ),
@@ -72,6 +87,7 @@ async def _ins_point(
             "sido_code": sido_code,
             "sigungu_code": sigungu_code,
             "legal_dong_code": legal_dong_code,
+            **_PUBLIC_STATE,
         },
     )
 
@@ -98,7 +114,8 @@ async def _ins_geom(
         text(
             """
             INSERT INTO feature.features (
-                feature_id, kind, name, category, coord, status, updated_at,
+                feature_id, kind, name, category, coord,
+                lifecycle_state, publication_state, quality_state, updated_at,
                 sido_code, sigungu_code, legal_dong_code
             )
             VALUES (
@@ -113,7 +130,8 @@ async def _ins_geom(
                     4326
                   )
                 END,
-                'active', :ts, :sido_code, :sigungu_code, :legal_dong_code
+                :lifecycle_state, :publication_state, :quality_state,
+                :ts, :sido_code, :sigungu_code, :legal_dong_code
             )
             """
         ),
@@ -126,6 +144,7 @@ async def _ins_geom(
             "sido_code": sido_code,
             "sigungu_code": sigungu_code,
             "legal_dong_code": legal_dong_code,
+            **_PUBLIC_STATE,
         },
     )
     await seed_feature_subtype(
