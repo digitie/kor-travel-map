@@ -45,14 +45,14 @@ def upgrade() -> None:
         """
     )
     op.create_check_constraint(
-        "ck_curated_themes_snapshot_text_bounds",
+        op.f("ck_curated_themes_snapshot_text_bounds"),
         "curated_themes",
         "char_length(theme_slug) BETWEEN 1 AND 128 "
         "AND char_length(theme_name) BETWEEN 1 AND 200",
         schema="feature",
     )
     op.create_check_constraint(
-        "ck_curation_collections_snapshot_text_bounds",
+        op.f("ck_curation_collections_snapshot_text_bounds"),
         "curation_collections",
         "char_length(title) BETWEEN 1 AND 300 "
         "AND char_length(edition_key) <= 100",
