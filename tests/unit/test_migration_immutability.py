@@ -14,9 +14,14 @@ pytestmark = pytest.mark.unit
 
 
 def test_0056_provider_refresh_policy_migration_is_immutable() -> None:
+    # squash(`0200`) 이후 체인은 `alembic/legacy_versions/`의 아카이브다. 원래 이
+    # 핀이 막던 위험("병합된 migration을 고쳐도 다시 실행되지 않아 DB와 어긋난다")은
+    # 아카이브 전체에 대해 사라졌다 — 이제 아무것도 실행되지 않는다. 그래도 남기는
+    # 이유는 아래 `test_poi_cache_target_metadata_matches_0058_lock_version`이 이
+    # 세대의 SQL을 근거로 삼기 때문이다. 아카이브를 지우는 날 이 핀도 함께 지운다.
     migration = (
         Path(__file__).resolve().parents[2]
-        / "alembic/versions/0056_provider_refresh_policy_revision.py"
+        / "alembic/legacy_versions/0056_provider_refresh_policy_revision.py"
     )
 
     assert hashlib.sha256(migration.read_bytes()).hexdigest() == (

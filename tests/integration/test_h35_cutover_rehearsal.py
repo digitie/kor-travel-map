@@ -78,6 +78,8 @@ _MIXED_MERKLE_ROOT = snapshot_merkle_root(
 def _run_alembic(dsn: str, revision: str) -> None:
     config = Config(str(_ROOT / "alembic.ini"))
     config.set_main_option("script_location", str(_ROOT / "alembic"))
+    # 아카이브 체인 전용 그래프 — alembic/legacy_versions/README.md 참조.
+    config.set_main_option("version_locations", str(_ROOT / "alembic" / "legacy_versions"))
     config.set_main_option("sqlalchemy.url", dsn)
     command.upgrade(config, revision)
 

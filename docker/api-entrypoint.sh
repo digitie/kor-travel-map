@@ -310,8 +310,37 @@ fi
 if ! current_raw="$(alembic current 2>&1)"; then
   case "$current_raw" in
     *"Can't locate revision"*)
+      # 원인이 두 가지인데 진단이 하나뿐이면 오도한다. squash(`0200`) 이후 이미지는
+      # `alembic/versions/`에 baseline + bridge만 담고, 옛 세대는
+      # `alembic/legacy_versions/`의 아카이브로 간다. 그래서 **이미지가 DB보다 새로운데도**
+      # 같은 오류가 난다 — `0104` 이전 복구점(예: H44 1회차 dump `0078`)으로 복원한 DB가
+      # 정확히 그 경우다. 옛 진단문("stale image")만 남기면 새벽에 그 로그를 보는 사람이
+      # 롤백을 시도하게 된다. DB의 revision이 아카이브에 있는지로 두 경우를 가른다.
+      # 판별자는 "아카이브에 있는가"만으로는 부족하다 — stale 이미지가 배포된 경우에도
+      # DB revision은 아카이브에 있을 수 있다. **이 이미지가 squash판인가**를 함께 본다:
+      # `alembic/versions/`에 baseline이 있으면 이 이미지는 `0200`에서 시작하므로,
+      # 아카이브 세대 DB를 앞으로 옮길 수 없다(= DB가 뒤처짐). baseline이 없으면
+      # 이 이미지는 옛 체인판이고 DB가 앞선 것이다(= 이미지가 뒤처짐).
+      db_revision="$(printf '%s' "$current_raw" | sed -n 's/.*Can'"'"'t locate revision identified by '"'"'\([^'"'"']*\)'"'"'.*/\1/p' | head -1)"
+      archived=""
+      # `0200`을 이름으로 박으면 **2차 squash 때 이 판별이 스스로 무효가 된다** —
+      # 그때 `0200_schema_baseline.py`는 아카이브로 가고 조건이 거짓이 되어, 없애려던
+      # 오진이 그대로 부활한다(적대 리뷰 실측 C4). 재-squash는 이 저장소가 명문화한
+      # 절차이므로(`postgres-schema.md` §8.4) 세대 번호가 아니라 **모양**으로 본다.
+      if [ -n "$db_revision" ] && [ -d alembic/legacy_versions ] \
+         && ls alembic/versions/*_schema_baseline.py >/dev/null 2>&1; then
+        archived="$(grep -l "^revision\(: str\)\? = \"${db_revision}\"" alembic/legacy_versions/*.py 2>/dev/null | head -1)"
+      fi
       echo "the DB alembic revision is not part of this image's migration chain" >&2
-      echo "(the image is older than the DB — a stale image was deployed; the DB was not touched)" >&2
+      if [ -n "$archived" ]; then
+        echo "(the DB is at ${db_revision}, a **pre-squash** generation archived in ${archived};" >&2
+        echo " this image starts from 0200_schema_baseline and cannot migrate it forward." >&2
+        echo " Restore a 0104_tvn36_final_fence-or-later backup, or rebuild the DB from the" >&2
+        echo " baseline and reload providers. Do NOT hand-edit alembic_version." >&2
+        echo " See docs/backup-restore.md and alembic/legacy_versions/README.md.)" >&2
+      else
+        echo "(the image is older than the DB — a stale image was deployed; the DB was not touched)" >&2
+      fi
       printf '%s\n' "$current_raw" >&2
       exit 1
       ;;

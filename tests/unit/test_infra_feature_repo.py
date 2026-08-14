@@ -1372,7 +1372,8 @@ def test_legacy_retire_reason_codes_exist_in_the_0095_backfill() -> None:
     backfill_sql = (
         Path(__file__).resolve().parents[2]
         / "alembic"
-        / "versions"
+        # squash(`0200`) 이후 체인은 아카이브다 — `alembic/legacy_versions/README.md`.
+        / "legacy_versions"
         / "0095_feature_orthogonal_state_spine.py"
     ).read_text(encoding="utf-8")
     for reason_code in feature_repo._LEGACY_PROVIDER_RETIRE_REASON_CODES:

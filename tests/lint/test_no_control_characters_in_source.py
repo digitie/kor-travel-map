@@ -42,11 +42,18 @@ _FORBIDDEN = frozenset(
 )
 
 
+#: `.py`만 훑으면 **모든 fresh DB에서 실행되는 SQL**이 가드 밖에 남는다.
+#: `alembic/baseline/*.sql`은 생성기의 heredoc 산출물이고, 이 저장소가 이 가드를 만든
+#: 이유(heredoc `\b`가 literal 0x08이 된 사고, 2026-08-12·08-13 2회)와 같은 생산 경로다.
+_SCANNED_SUFFIXES = ("*.py", "*.sql")
+
+
 def _python_sources() -> list[Path]:
     found: list[Path] = []
     for root in _SCANNED_ROOTS:
         if root.exists():
-            found.extend(sorted(root.rglob("*.py")))
+            for pattern in _SCANNED_SUFFIXES:
+                found.extend(sorted(root.rglob(pattern)))
     assert found, "스캔 대상을 하나도 찾지 못했다 — 경로가 틀렸다"
     return found
 

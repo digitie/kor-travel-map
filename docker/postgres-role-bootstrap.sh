@@ -323,6 +323,16 @@ WHERE nspname IN ('feature', 'provider_sync', 'ops')
 -- state/audit fence, and a later relation must never silently become mutable by
 -- API/Dagster. The migrator runs an explicit inventory reconciler post-Alembic.
 GRANT USAGE ON SCHEMA feature, provider_sync, ops TO ktm_feature_runtime;
+-- x_extension USAGE는 **런타임 필수**다. runtime의 평범한 core update SQL도 typed
+-- coordinate expression을 parse하므로 스키마 USAGE가 없으면 `ST_DWithin` 한 줄은
+-- 물론 CHECK 제약이 걸린 INSERT까지 `permission denied for schema x_extension`으로
+-- 죽는다. 체인에서는 `0095`가 줬는데(`alembic/legacy_versions/0095_…:1211`) squash
+-- baseline은 3개 스키마만 재현하므로 그 GRANT가 사라졌고, 카탈로그 오라클도
+-- 같은 3개 스키마만 보기 때문에 **검사기와 검사 대상이 같은 맹점을 공유**했다
+-- (2026-08-14 적대 리뷰 실측: 새 DB에서 runtime의 PostGIS 호출 전부 실패).
+-- 스키마와 extension을 만드는 주체가 여기이므로 그 GRANT도 여기가 정본이다.
+GRANT USAGE ON SCHEMA x_extension
+    TO ktm_feature_state_procedure_owner, ktm_feature_runtime;
 REVOKE ALL ON ALL TABLES IN SCHEMA feature, provider_sync, ops
     FROM ktm_feature_runtime;
 REVOKE ALL ON ALL SEQUENCES IN SCHEMA feature, provider_sync, ops

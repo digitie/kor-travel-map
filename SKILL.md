@@ -40,7 +40,9 @@ worktree 배치·`codegraph init/sync`·MCP 등록·수정 전 영향도 평가 
 
 부트스트랩 절차 정본 → `README.md` §빠른 시작. 최소 흐름: WSL `/mnt/f/dev/...`
 에서 `uv venv && uv pip install -e ".[dev,geo,providers]"` → `docker compose up
--d postgres` (`postgis/postgis:16-3.5`) → `alembic upgrade head` → `pytest -q`.
+-d postgres` (`postgis/postgis:16-3.5`) → **`docker compose run --rm db-role-bootstrap`**
+→ `alembic upgrade head` → `pytest -q`. bootstrap은 squash(`0200`) 이후 필수다 —
+baseline은 role/schema/extension을 만들지 않고 전제로 검증만 한다.
 
 ## 3. 디렉토리 지도
 

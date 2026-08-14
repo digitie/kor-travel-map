@@ -27,6 +27,8 @@ def _run_alembic(dsn: str, revision: str, *, downgrade: bool = False) -> None:
     root = Path(__file__).resolve().parents[2]
     config = Config(str(root / "alembic.ini"))
     config.set_main_option("script_location", str(root / "alembic"))
+    # 아카이브 체인 전용 그래프 — alembic/legacy_versions/README.md 참조.
+    config.set_main_option("version_locations", str(root / "alembic" / "legacy_versions"))
     config.set_main_option("sqlalchemy.url", dsn)
     if downgrade:
         command.downgrade(config, revision)
