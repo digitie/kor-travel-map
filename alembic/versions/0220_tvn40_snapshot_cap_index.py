@@ -40,4 +40,3 @@ def downgrade() -> None:
         "0220_tvn40_snapshot_cap_index is forward-only; "
         "rebuild with the T-VN-40 release head"
     )
-
