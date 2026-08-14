@@ -542,21 +542,52 @@ async def require_cache_target_service_principal(
 
 async def require_curation_snapshot_service_principal(
     request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
     token: Annotated[str | None, Security(_service_token_scheme)] = None,
 ) -> CurationSnapshotServicePrincipalContext:
     """PinVi snapshot token digest를 exact principal/scope로 fail-closed 해석한다."""
 
     if token is None or token == "":
-        wrong_auth_scheme_present = any(
-            request.headers.get(header)
-            for header in (
-                ADMIN_PROXY_SECRET_HEADER,
-                OPS_TOKEN_HEADER,
-                PUBLIC_API_KEY_HEADER,
-                "Authorization",
+        settings = _settings(request)
+        known_other_principal = False
+        if settings.admin_proxy_secret is not None:
+            known_other_principal = resolve_admin_proxy_context(request, settings) is not None
+
+        supplied_ops_token = (request.headers.get(OPS_TOKEN_HEADER) or "").strip()
+        if supplied_ops_token:
+            supplied_ops_digest = _token_digest(supplied_ops_token)
+            known_other_principal = known_other_principal or any(
+                other_secret is not None
+                and hmac.compare_digest(
+                    supplied_ops_digest,
+                    _token_digest(other_secret.get_secret_value()),
+                )
+                for other_secret in (
+                    settings.ops_read_token,
+                    settings.ops_cancel_token,
+                    settings.ops_fixture_token,
+                )
             )
-        )
-        if wrong_auth_scheme_present:
+
+        supplied_public_key = (request.headers.get(PUBLIC_API_KEY_HEADER) or "").strip()
+        if supplied_public_key:
+            active_hashes = await cached_active_public_api_key_hashes(
+                session,
+                ttl_seconds=settings.public_api_key_cache_ttl_s,
+            )
+            known_other_principal = known_other_principal or public_api_key_matches(
+                supplied_public_key, active_hashes
+            )
+
+        supplied_authorization = request.headers.get("Authorization") or ""
+        scheme, _, credential = supplied_authorization.partition(" ")
+        if settings.metrics_token is not None and scheme.casefold() == "bearer":
+            known_other_principal = known_other_principal or hmac.compare_digest(
+                credential.strip().encode("utf-8"),
+                settings.metrics_token.get_secret_value().encode("utf-8"),
+            )
+
+        if known_other_principal:
             raise _cache_target_auth_error(
                 status.HTTP_403_FORBIDDEN,
                 "CURATION_SNAPSHOT_SERVICE_SCOPE_FORBIDDEN",

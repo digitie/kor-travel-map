@@ -235,7 +235,11 @@ async def test_squash_boundary_rejects_stamp_below_0200_before_mutation(
         RuntimeError,
         match="0200 is forward-only",
     ):
-        await asyncio.to_thread(command.stamp, cfg, "base")
+        await asyncio.to_thread(
+            command.stamp,
+            cfg,
+            "base",
+        )  # intentional-squash-boundary-rejection
 
     assert await _admin_fetchval(
         admin_dsn,

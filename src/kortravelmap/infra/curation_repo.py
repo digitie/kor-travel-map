@@ -938,7 +938,7 @@ ORDER BY eligible_item.curation_item_id
 """
 
 _GET_SERVICE_CURATION_COLLECTION_PAGE_SQL: Final[str] = f"""
-WITH collection_row AS (
+WITH collection_row AS MATERIALIZED (
     SELECT
         collection.collection_id,
         collection.row_revision,
@@ -946,7 +946,20 @@ WITH collection_row AS (
         theme.theme_slug,
         theme.theme_name,
         collection.title,
-        collection.edition_key
+        collection.edition_key,
+        (
+            SELECT count(*) > {CURATION_SERVICE_COLLECTION_MAX_ITEMS}
+            FROM (
+                SELECT 1
+                FROM feature.curation_items AS cap_item
+                WHERE cap_item.collection_id = collection.collection_id
+                  AND cap_item.archived_at IS NULL
+                  AND cap_item.source_present
+                  AND cap_item.status = 'included'
+                  AND cap_item.feature_id IS NOT NULL
+                LIMIT {CURATION_SERVICE_COLLECTION_MAX_ITEMS + 1}
+            ) AS bounded_active_item
+        ) AS item_cap_exceeded
     FROM feature.curation_collections AS collection
     JOIN feature.curated_themes AS theme ON theme.theme_id = collection.theme_id
     LEFT JOIN feature.curated_sources AS source ON source.source_id = collection.source_id
@@ -957,8 +970,9 @@ WITH collection_row AS (
       AND theme.visibility = 'public'
       AND theme.archived_at IS NULL
       AND (collection.source_id IS NULL OR source.archived_at IS NULL)
-), eligible_item AS (
+), eligible_item AS MATERIALIZED (
     {_SERVICE_SNAPSHOT_ELIGIBLE_ITEMS_SQL}
+      AND NOT c.item_cap_exceeded
 ), bounded_eligible_item AS (
     SELECT *
     FROM eligible_item
@@ -1002,7 +1016,11 @@ WITH collection_row AS (
     FROM bounded_eligible_item AS eligible_item
 ), item_set_receipt AS (
     SELECT
-        count(*)::bigint AS item_count,
+        CASE
+            WHEN (SELECT item_cap_exceeded FROM collection_row)
+            THEN {CURATION_SERVICE_COLLECTION_MAX_ITEMS + 1}::bigint
+            ELSE count(*)::bigint
+        END AS item_count,
         encode(
             x_extension.digest(
                 convert_to(

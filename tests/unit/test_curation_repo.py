@@ -1316,3 +1316,15 @@ def test_curation_dataset_identity_accepts_the_matching_generation_key(
         (_resolved_row(**overrides),),
         frozen_h35_schema=frozen_h35_schema,
     )
+
+
+def test_service_snapshot_rejects_over_cap_collection_before_public_joins() -> None:
+    sql = repo._GET_SERVICE_CURATION_COLLECTION_PAGE_SQL
+    cap_position = sql.index("AS item_cap_exceeded")
+    public_join_position = sql.index("JOIN feature.public_features")
+
+    assert "FROM (\n                SELECT 1\n                FROM feature.curation_items" in sql
+    assert "LIMIT 2001" in sql
+    assert "AND NOT c.item_cap_exceeded" in sql
+    assert "WHEN (SELECT item_cap_exceeded FROM collection_row)" in sql
+    assert cap_position < public_join_position

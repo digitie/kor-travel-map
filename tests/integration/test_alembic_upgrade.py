@@ -651,7 +651,7 @@ def _canonical_pg_sql(value: str | None) -> str:
     return re.sub(r'[\s()"]+', "", without_casts).lower()
 
 
-async def _run_alembic_upgrade(dsn: str, revision: str = "head") -> None:
+async def _run_alembic_upgrade(dsn: str) -> None:
     """``alembic.command.upgrade``를 worker thread에서 실행.
 
     alembic은 sync API + 자체 asyncio.run(env.py)을 호출하므로 현재 pytest
@@ -679,7 +679,7 @@ async def _run_alembic_upgrade(dsn: str, revision: str = "head") -> None:
 
     cfg.set_main_option("sqlalchemy.url", await bootstrapped_migrator_dsn(dsn))
     with alembic_schema_owner_role():
-        await asyncio.to_thread(command.upgrade, cfg, revision)
+        await asyncio.to_thread(command.upgrade, cfg, "head")
 
 
 def _alembic_head_revision() -> str:

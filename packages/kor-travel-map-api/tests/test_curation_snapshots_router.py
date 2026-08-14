@@ -110,7 +110,10 @@ def _headers(token: str = TOKEN) -> dict[str, str]:
 @pytest.mark.unit
 def test_snapshot_auth_is_fail_closed_and_generic_token_cannot_cross(
     client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    from kortravelmap.infra.public_api_keys import hash_public_api_key
+
     path = f"/v1/service/curation-items/{ITEM_ID}/detail-snapshot"
     assert client.get(path).status_code == 401
     assert client.get(path, headers=_headers("generic-service-token")).status_code == 401
@@ -126,6 +129,10 @@ def test_snapshot_auth_is_fail_closed_and_generic_token_cannot_cross(
     )
     wrong_scope_app.dependency_overrides[get_session] = _fake_session
     wrong_scope_client = TestClient(wrong_scope_app)
+    monkeypatch.setattr(
+        "kortravelmap.api.auth.cached_active_public_api_key_hashes",
+        AsyncMock(return_value=frozenset({hash_public_api_key("known-public")})),
+    )
     assert (
         wrong_scope_client.get(path, headers=_headers(GENERIC_TOKEN)).status_code
         == 403
@@ -138,6 +145,18 @@ def test_snapshot_auth_is_fail_closed_and_generic_token_cannot_cross(
     assert (
         wrong_scope_client.get(path, headers={PUBLIC_API_KEY_HEADER: "known-public"}).status_code
         == 403
+    )
+    assert (
+        wrong_scope_client.get(path, headers={OPS_TOKEN_HEADER: "unknown-ops"}).status_code
+        == 401
+    )
+    assert (
+        wrong_scope_client.get(path, headers={PUBLIC_API_KEY_HEADER: "unknown-public"}).status_code
+        == 401
+    )
+    assert (
+        wrong_scope_client.get(path, headers={"Authorization": "Bearer unknown"}).status_code
+        == 401
     )
 
 
