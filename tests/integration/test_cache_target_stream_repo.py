@@ -21,6 +21,7 @@ from kortravelmap.core.cache_target_stream import (
 )
 from kortravelmap.infra import cache_target_event_repo as result_event_repo
 from kortravelmap.infra import cache_target_reconciliation_repo as snapshot_repo
+from kortravelmap.infra import cache_target_service_repo as service_repo
 from kortravelmap.infra.cache_target_event_repo import (
     CacheTargetRefreshMember,
     append_cache_target_links_reconciled_events,
@@ -74,6 +75,7 @@ from kortravelmap.infra.domain_command_repo import (
 )
 from kortravelmap.infra.feature_update_repo import enqueue_feature_update_request
 from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget
+from kortravelmap.infra.poi_cache_target_repo import upsert_poi_cache_target
 
 _SYSTEM = "pinvi-test"
 _CONSUMER = "pinvi-cache-consumer"
@@ -3476,6 +3478,138 @@ async def test_service_source_read_and_refresh_request_idempotency(
             reason="different reason",
         )
     assert conflict.value.code == "refresh_idempotency_key_reused"
+
+    # source protocol 도입 전 admin 경로가 만든 target은 source head가 없다. 이를
+    # request만 queued되고 status outbox가 0건인 거짓 성공으로 남기지 않는다.
+    legacy_target = await upsert_poi_cache_target(
+        migrated_session,
+        external_system=system,
+        target_key="legacy-refresh-target",
+        lon=126.978,
+        lat=37.5665,
+        radius_km=5,
+    )
+    requests_before = await migrated_session.scalar(
+        text("SELECT count(*) FROM ops.feature_update_requests")
+    )
+    with pytest.raises(CacheTargetStreamConflict) as missing_source:
+        await create_cache_target_refresh_request(
+            migrated_session,
+            principal_id="pinvi-service",
+            consumer_id=_CONSUMER,
+            idempotency_key="99000000-0000-0000-0000-000000000010",
+            external_system=system,
+            target_keys=[legacy_target.target_key],
+            reason="legacy target must fail closed",
+        )
+    assert missing_source.value.code == "refresh_source_head_missing"
+    assert missing_source.value.current == {
+        "external_system": system,
+        "target_keys": [legacy_target.target_key],
+    }
+    assert (
+        await migrated_session.scalar(
+            text("SELECT count(*) FROM ops.feature_update_requests")
+        )
+        == requests_before
+    )
+
+
+@pytest.mark.integration
+async def test_service_refresh_creation_serializes_stream_before_capture(
+    migrated_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """서로 다른 idempotency key도 stream lock upgrade 없이 순서대로 queue한다."""
+
+    system = "service-refresh-serialization-test"
+    async with AsyncSession(migrated_engine) as setup, setup.begin():
+        created = await _apply_snapshot_source(
+            setup,
+            external_system=system,
+            target_key="refresh-target",
+            event_id="9c100000-0000-4000-8000-000000000001",
+            idempotency_key="9c200000-0000-4000-8000-000000000001",
+        )
+        await _seed_scope_feature(
+            setup,
+            membership=await _canonical_membership(setup),
+            feature_id="f_service_refresh_serialization_anchor",
+        )
+    assert created.target is not None
+
+    first_scope_entered = asyncio.Event()
+    second_scope_entered = asyncio.Event()
+    release_first_scope = asyncio.Event()
+    release_second_scope = asyncio.Event()
+    scope_calls = 0
+    original_scope_memberships = service_repo._refresh_scope_memberships
+
+    async def _gated_scope_memberships(*args: Any, **kwargs: Any):
+        nonlocal scope_calls
+        scope_calls += 1
+        if scope_calls == 1:
+            first_scope_entered.set()
+            await release_first_scope.wait()
+        else:
+            second_scope_entered.set()
+            await release_second_scope.wait()
+        return await original_scope_memberships(*args, **kwargs)
+
+    monkeypatch.setattr(
+        service_repo,
+        "_refresh_scope_memberships",
+        _gated_scope_memberships,
+    )
+
+    async def _submit(idempotency_key: str):
+        async with AsyncSession(migrated_engine) as session, session.begin():
+            return await create_cache_target_refresh_request(
+                session,
+                principal_id="pinvi-service",
+                consumer_id=_CONSUMER,
+                idempotency_key=idempotency_key,
+                external_system=system,
+                target_keys=["refresh-target"],
+                reason="concurrent service refresh",
+            )
+
+    first = asyncio.create_task(_submit("9c300000-0000-4000-8000-000000000001"))
+    await asyncio.wait_for(first_scope_entered.wait(), timeout=5)
+    second = asyncio.create_task(_submit("9c300000-0000-4000-8000-000000000002"))
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(second_scope_entered.wait(), timeout=0.3)
+
+    release_first_scope.set()
+    first_request = await asyncio.wait_for(first, timeout=5)
+    await asyncio.wait_for(second_scope_entered.wait(), timeout=5)
+    async with AsyncSession(migrated_engine) as complete, complete.begin():
+        await complete.execute(
+            text(
+                "UPDATE ops.import_jobs AS job SET status = 'done', progress = 100, "
+                "finished_at = now() FROM ops.feature_update_requests AS request "
+                "WHERE request.request_id = CAST(:request_id AS uuid) "
+                "AND job.job_id = request.job_id"
+            ),
+            {"request_id": first_request.request_id},
+        )
+    release_second_scope.set()
+    second_request = await asyncio.wait_for(
+        second,
+        timeout=5,
+    )
+    assert first_request.request_id != second_request.request_id
+    async with AsyncSession(migrated_engine) as verify:
+        queued_event_count = await verify.scalar(
+            text(
+                "SELECT count(*) FROM ops.poi_cache_target_outbox_events "
+                "WHERE refresh_request_id::text = ANY(CAST(:request_ids AS text[]))"
+            ),
+            {
+                "request_ids": [first_request.request_id, second_request.request_id],
+            },
+        )
+    assert queued_event_count == 2
 
 
 @pytest.mark.integration

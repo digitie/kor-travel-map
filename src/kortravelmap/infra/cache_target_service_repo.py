@@ -56,6 +56,23 @@ LEFT JOIN ops.poi_cache_targets AS target
 WHERE head.external_system = :external_system AND head.target_key = :target_key
 """
 
+_MISSING_ACTIVE_REFRESH_SOURCE_HEADS_SQL = """
+SELECT target.target_key
+FROM ops.poi_cache_targets AS target
+LEFT JOIN ops.poi_cache_target_source_heads AS head
+  ON head.external_system = target.external_system
+ AND head.target_key = target.target_key
+ AND head.target_id = target.target_id
+ AND head.state = 'active'
+WHERE target.external_system = :external_system
+  AND target.target_key = ANY(CAST(:target_keys AS text[]))
+  AND target.deleted_at IS NULL
+  AND target.update_enabled
+  AND target.refresh_policy <> 'disabled'
+  AND head.target_id IS NULL
+ORDER BY target.target_key
+"""
+
 
 @dataclass(frozen=True, slots=True)
 class CacheTargetSourceRecord:
@@ -195,6 +212,37 @@ async def _refresh_scope_memberships(
     )
 
 
+async def _require_active_refresh_source_heads(
+    session: AsyncSession,
+    *,
+    external_system: str,
+    target_keys: Sequence[str],
+) -> None:
+    """활성 refresh target이 source-generation outbox 경계를 우회하지 않게 한다."""
+
+    missing_target_keys = tuple(
+        str(value)
+        for value in (
+            await session.execute(
+                text(_MISSING_ACTIVE_REFRESH_SOURCE_HEADS_SQL),
+                {
+                    "external_system": external_system,
+                    "target_keys": list(target_keys),
+                },
+            )
+        ).scalars()
+    )
+    if missing_target_keys:
+        raise CacheTargetStreamConflict(
+            "refresh_source_head_missing",
+            "활성 refresh target의 source head가 없어 요청을 queue에 넣을 수 없습니다.",
+            current={
+                "external_system": external_system,
+                "target_keys": list(missing_target_keys),
+            },
+        )
+
+
 async def create_cache_target_refresh_request(
     session: AsyncSession,
     *,
@@ -251,7 +299,7 @@ async def create_cache_target_refresh_request(
         await session.execute(
             text(
                 "SELECT consumer_id FROM ops.poi_cache_target_streams "
-                "WHERE external_system = :external_system FOR KEY SHARE"
+                "WHERE external_system = :external_system FOR UPDATE"
             ),
             {"external_system": external_system},
         )
@@ -268,6 +316,14 @@ async def create_cache_target_refresh_request(
         "external_system": external_system,
         "target_keys": list(canonical_target_keys),
     }
+    # source command도 stream을 먼저 ``FOR UPDATE``로 잡은 다음 source head를
+    # 갱신한다. 여기서 같은 강한 lock을 선점하면 capture의 stream re-lock이 lock
+    # upgrade가 되지 않고, legacy target도 source-generation outbox를 우회할 수 없다.
+    await _require_active_refresh_source_heads(
+        session,
+        external_system=external_system,
+        target_keys=canonical_target_keys,
+    )
     memberships = await _refresh_scope_memberships(
         session,
         scope=scope,
