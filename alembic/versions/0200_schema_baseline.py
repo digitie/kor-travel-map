@@ -30,9 +30,35 @@ baseline이 그것까지 떠안으면 손으로 관리하는 prologue가 생기�
 
 `alembic/baseline/*.sql`은 손으로 쓰지 않았다 — `scripts/build-baseline.sh`가
 체인으로 만든 DB에서 뽑고 결정론적으로 정규화한다. 증명은
-`scripts/compare-schema-catalogs.sh`(변조 7종 주입으로 자체 검증한 오라클)로 했고,
-서로 다른 DB에서 두 번 재현했다: 카탈로그 2486행 동일(sha256 `741b355a…`),
-seed 9개 표 328행 항목별 일치.
+`scripts/compare-schema-catalogs.sh`(변조 7종 주입으로 자체 검증한 오라클)로 했다:
+**카탈로그 2494행 동일**, seed 9개 표 항목별 일치.
+
+그 2494행에는 오라클이 원래 보지 않던 축이 들어 있다 — 모든 스키마의 소유자·ACL,
+`public` 잔여 객체, event trigger, database ACL. 원본 SQL의 namespace 필터가 pg_dump의
+`-n` 스코프와 같아서 **baseline이 재현 못 하는 것은 오라클도 못 보는** 구조였고, 실제로
+그 틈으로 `x_extension` USAGE 상실이 새어 나갔다(2026-08-14).
+
+### 제약 정의 차이 9쌍 — 판정 완료(동치)
+
+제약 **정의** 축은 별도로 낸다. 체인 DB와 baseline DB 사이에 9쌍이 다른데, 두 패턴뿐이고
+둘 다 pg_dump가 뱉은 식을 다시 파싱하면서 생기는 deparse 왕복 표현 차이다:
+
+- **A. AND 재괄호화** — `((a AND b) AND (c AND d))` vs `(a AND b AND c AND d)`
+  (`ck_dedup_scores`, `ck_poi_cache_targets_coord`, `ck_features_coord_pair`)
+- **B. cast 위치** — `ANY ((ARRAY['x'::varchar, …])::text[])` vs
+  `ANY (ARRAY[('x'::varchar)::text, …])`
+  (`ck_features_kind`, `ck_dedup_status`, `ck_enrichment_review_status`,
+  `ck_feature_consistency_reports…`, `ck_provider_sync_state_status`, `ck_source_links_role`)
+
+실측으로 판정했다(`ktm_chain_pristine`에서 실행):
+
+- B: 두 배열 리터럴이 `=`로 동일, 그리고 `= ANY` 결과가 member/non-member/빈문자열/NULL
+  전 후보에서 동일 — varchar→text는 값을 바꾸지 않는 binary-coercible cast다.
+- A: `a,b,c,d ∈ {true,false,NULL}` 81조합 전수에서 `IS NOT DISTINCT FROM` 동일.
+
+값·컬럼·연산자·집합 원소는 어느 쌍에서도 다르지 않다. 그래서 **동치로 판정**한다.
+자동으로 지우지는 않는다 — 괄호를 떼어 비교하면 `A AND (B OR C)`와 `(A AND B) OR C`
+처럼 의미가 다른 재괄호화까지 함께 지워지기 때문이다.
 
 ## ACL은 소유자로 부여한다 (그리고 그게 먹었는지 스스로 확인한다)
 
