@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### PinVi legacy curation cutover mapping export (2026-08-14, T-VN-40C)
+
+- **API(service)**: maintenance fence에서만 쓰는
+  `GET /v1/service/curation-cutover/identity-mappings`를 추가했다. legacy
+  `curated_feature_id`와 canonical collection/item UUID의 mapping을 signed keyset과
+  immutable row hash, 전체 Merkle root/count로 내보내 PinVi backfill이 Map DB에 직접 접근하지
+  않게 한다.
+- **SECURITY**: mapping export는 snapshot token과 다른 전용 ServiceToken digest를 요구하며,
+  runtime database role에는 mapping relation의 SELECT만 허용한다.
+
 ### canonical curation snapshot 문자열 계약 (2026-08-14, T-VN-40)
 
 - **DATABASE/API(service)**: Map producer가 `theme_slug 128`, `theme_name 200`, collection

@@ -13,10 +13,15 @@
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
-      "sha256": "e71e7b1112f98857a6deefe20a1ca48c689cb04647f2e9dc71664fdb69634a7b"
+      "sha256": "c6f9aba6ab4b815c394e5e1cb5fb4a2c3488d147d5bb1a7e21b92c1796f4aebd"
     }
   },
   "revisions": [
+    {
+      "date": "2026-08-14",
+      "task": "T-VN-40C",
+      "change": "maintenance fence 전용 legacy identity→canonical UUID mapping export를 service OpenAPI에 적용하고 baseline을 재동결했다. 전용 PinVi scope의 signed keyset은 row hash와 closed Merkle root/count를 결박한다. user/admin bytes와 기존 snapshot operation은 변하지 않는다."
+    },
     {
       "date": "2026-08-14",
       "task": "T-VN-40B",
@@ -338,7 +343,8 @@
           "kind": "operation",
           "target_operation": "GET /v1/service/curation-cutover/identity-mappings",
           "detail": "maintenance fence 중 legacy curated identity→canonical collection/item UUID mapping의 immutable keyset/checksum export다.",
-          "basis": "T-VN-40C"
+          "basis": "T-VN-40C",
+          "applied": true
         }
       ],
       "removed": [],

@@ -11531,6 +11531,104 @@
         "title": "CurationCollectionsResponse",
         "type": "object"
       },
+      "CurationCutoverIdentityMapping": {
+        "additionalProperties": false,
+        "description": "PinVi legacy provenance를 canonical Map UUID로 바꾸는 one-to-one evidence.",
+        "properties": {
+          "collection_id": {
+            "format": "uuid",
+            "title": "Collection Id",
+            "type": "string"
+          },
+          "curation_item_id": {
+            "format": "uuid",
+            "title": "Curation Item Id",
+            "type": "string"
+          },
+          "legacy_curated_feature_id": {
+            "format": "uuid",
+            "title": "Legacy Curated Feature Id",
+            "type": "string"
+          },
+          "mapping_kind": {
+            "enum": [
+              "legacy_projection",
+              "official_membership",
+              "manual_membership"
+            ],
+            "title": "Mapping Kind",
+            "type": "string"
+          },
+          "source_row_hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Source Row Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "legacy_curated_feature_id",
+          "collection_id",
+          "curation_item_id",
+          "mapping_kind",
+          "source_row_hash"
+        ],
+        "title": "CurationCutoverIdentityMapping",
+        "type": "object"
+      },
+      "CurationCutoverIdentityMappingExport": {
+        "additionalProperties": false,
+        "description": "Maintenance-only closed keyset envelope for the paired PinVi backfill.",
+        "properties": {
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "mapping_count": {
+            "minimum": 0.0,
+            "title": "Mapping Count",
+            "type": "integer"
+          },
+          "mapping_root": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Mapping Root",
+            "type": "string"
+          },
+          "mapping_root_version": {
+            "const": "ktm-curation-cutover-mapping-v1",
+            "title": "Mapping Root Version",
+            "type": "string"
+          },
+          "mappings": {
+            "items": {
+              "$ref": "#/components/schemas/CurationCutoverIdentityMapping"
+            },
+            "maxItems": 200,
+            "title": "Mappings",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "mapping_root_version",
+          "mapping_count",
+          "mapping_root",
+          "mappings",
+          "next_cursor",
+          "complete"
+        ],
+        "title": "CurationCutoverIdentityMappingExport",
+        "type": "object"
+      },
       "CurationFeatureView": {
         "additionalProperties": false,
         "properties": {
@@ -52335,6 +52433,96 @@
           "service-curation-snapshots"
         ],
         "x-required-service-scope": "pinvi:curation-snapshot:read"
+      }
+    },
+    "/v1/service/curation-cutover/identity-mappings": {
+      "get": {
+        "description": "Export the immutable Map→PinVi legacy identity mapping during T-VN-40C.\n\nThe relation itself is append-only and only migration owners can write it.\nA signed cursor binds every continuation page to the initial count/root;\nany maintenance-window drift is rejected instead of silently mixing maps.",
+        "operationId": "get_curation_cutover_identity_mappings_v1_service_curation_cutover_identity_mappings_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurationCutoverIdentityMappingExport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "cursor 이후 mapping count/root 변경 — 첫 page부터 maintenance export 재시작"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Get Curation Cutover Identity Mappings",
+        "tags": [
+          "service-curation-cutover"
+        ],
+        "x-required-service-scope": "pinvi:curation-cutover:read"
       }
     },
     "/v1/service/curation-items/{curation_item_id}/detail-snapshot": {

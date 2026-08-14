@@ -99,7 +99,10 @@ def test_runtime_acl_inventory_keeps_state_audit_and_its_sequence_ungranted() ->
     assert "theme_feature_candidate_transitions" not in rendered
     assert "curation_rule_reconcile_operations" not in rendered
     assert "curation_rule_reconcile_scope_members" not in rendered
-    assert "curation_cutover_identity_mappings" not in rendered
+    assert (
+        'GRANT SELECT ON TABLE "ops"."curation_cutover_identity_mappings"'
+        in rendered
+    )
     core_grants = "\n".join(_CORE_FEATURE_GRANTS)
     assert "feature_versions" not in core_grants
     assert (

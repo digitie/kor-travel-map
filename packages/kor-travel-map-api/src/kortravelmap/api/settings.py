@@ -409,6 +409,17 @@ class ApiSettings(BaseSettings):
             "env ``KOR_TRAVEL_MAP_API_PINVI_CURATION_SNAPSHOT_TOKEN_SHA256``."
         ),
     )
+    pinvi_curation_cutover_mapping_token_sha256: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        description=(
+            "T-VN-40C maintenance window에서만 쓰는 PinVi legacy identity mapping "
+            "export 전용 ServiceToken의 lowercase SHA-256 digest. canonical snapshot "
+            "read token과 공유하면 안 된다. env "
+            "``KOR_TRAVEL_MAP_API_PINVI_CURATION_CUTOVER_MAPPING_TOKEN_SHA256``."
+        ),
+    )
     cursor_signing_secret: SecretStr | None = Field(
         default=None,
         description=(
@@ -759,29 +770,33 @@ class ApiSettings(BaseSettings):
                 )
         return self
 
-    @field_validator("pinvi_curation_snapshot_token_sha256")
+    @field_validator(
+        "pinvi_curation_snapshot_token_sha256",
+        "pinvi_curation_cutover_mapping_token_sha256",
+    )
     @classmethod
-    def _validate_pinvi_curation_snapshot_token_sha256(
+    def _validate_pinvi_curation_service_token_sha256(
         cls,
         value: str | None,
     ) -> str | None:
         if value is not None and _LOWER_SHA256_HEX_PATTERN.fullmatch(value) is None:
             raise ValueError(
-                "PinVi curation snapshot service token digest must be lowercase SHA-256 hex"
+                "PinVi curation service token digest must be lowercase SHA-256 hex"
             )
         return value
 
     @model_validator(mode="after")
-    def _validate_pinvi_curation_snapshot_token_distinct(self) -> ApiSettings:
-        digest = self.pinvi_curation_snapshot_token_sha256
-        if digest is None:
-            return self
-        if digest in {
+    def _validate_pinvi_curation_service_tokens_distinct(self) -> ApiSettings:
+        digests = {
+            "snapshot": self.pinvi_curation_snapshot_token_sha256,
+            "cutover mapping": self.pinvi_curation_cutover_mapping_token_sha256,
+        }
+        configured = {name: digest for name, digest in digests.items() if digest is not None}
+        if len(configured) != len(set(configured.values())):
+            raise ValueError("PinVi curation service token digests must be distinct")
+        cache_target_digests = {
             principal.token_sha256 for principal in self.cache_target_service_principals
-        }:
-            raise ValueError(
-                "PinVi curation snapshot token digest must be distinct from cache-target tokens"
-            )
+        }
         protected_secrets = {
             "admin proxy secret": self.admin_proxy_secret,
             "service token": self.service_token,
@@ -792,18 +807,24 @@ class ApiSettings(BaseSettings):
             "cursor signing secret": self.cursor_signing_secret,
             "public API key": self.vworld_api_key,
         }
-        for protected_name, protected_secret in protected_secrets.items():
-            protected_raw = _optional_secret_text(
-                protected_secret,
-                setting_name=protected_name,
-            )
-            if protected_raw is not None and hashlib.sha256(
-                protected_raw.encode("utf-8")
-            ).hexdigest() == digest:
+        for curation_name, digest in configured.items():
+            if digest in cache_target_digests:
                 raise ValueError(
-                    "PinVi curation snapshot token digest must be distinct from "
-                    f"{protected_name}"
+                    f"PinVi curation {curation_name} token digest must be distinct from "
+                    "cache-target tokens"
                 )
+            for protected_name, protected_secret in protected_secrets.items():
+                protected_raw = _optional_secret_text(
+                    protected_secret,
+                    setting_name=protected_name,
+                )
+                if protected_raw is not None and hashlib.sha256(
+                    protected_raw.encode("utf-8")
+                ).hexdigest() == digest:
+                    raise ValueError(
+                        f"PinVi curation {curation_name} token digest must be distinct from "
+                        f"{protected_name}"
+                    )
         return self
 
     @property

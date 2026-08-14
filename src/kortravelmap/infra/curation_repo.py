@@ -23,6 +23,10 @@ from kortravelmap.core.curation_address import (
     CURATION_ADDRESS_RESOLVER_VERSION,
     address_hint_matches,
 )
+from kortravelmap.core.curation_cutover_mapping import (
+    CurationCutoverIdentityMappingDigestInput,
+    curation_cutover_identity_mapping_root,
+)
 from kortravelmap.infra.curation_link_basis import trusted_basis_sql
 from kortravelmap.infra.feature_repo import public_active_notice_filter_sql
 
@@ -39,6 +43,8 @@ __all__ = [
     "CurationImportRevisionExpectation",
     "CurationImportResult",
     "CurationImportRowReceipt",
+    "CurationCutoverIdentityMapping",
+    "CurationCutoverIdentityMappingExport",
     "CurationLinkAudit",
     "CurationItem",
     "CurationServiceCollectionSnapshot",
@@ -69,6 +75,7 @@ __all__ = [
     "get_curation_item",
     "get_curation_service_collection_snapshot",
     "get_curation_service_item_snapshot",
+    "get_curation_cutover_identity_mapping_export",
     "get_current_curation_import_row",
     "get_feature_curation_group",
     "import_curation_rows",
@@ -257,6 +264,26 @@ class CurationServiceCollectionSnapshot:
     item_count: int
     item_set_hash: str
     items: tuple[CurationServiceItemSnapshot, ...]
+
+
+@dataclass(frozen=True)
+class CurationCutoverIdentityMapping:
+    """T-VN-40C legacy Map identity에서 canonical membership으로의 one-to-one row."""
+
+    legacy_curated_feature_id: str
+    collection_id: str
+    curation_item_id: str
+    mapping_kind: str
+    source_row_hash: str
+
+
+@dataclass(frozen=True)
+class CurationCutoverIdentityMappingExport:
+    """PinVi cutover가 전 페이지에서 대조하는 immutable mapping receipt."""
+
+    mapping_count: int
+    mapping_root: str
+    mappings: tuple[CurationCutoverIdentityMapping, ...]
 
 
 @dataclass(frozen=True)
@@ -3170,6 +3197,63 @@ async def get_curation_service_item_snapshot(
     if row is None or row["curation_item_id"] is None:
         return None
     return _service_item_snapshot(row)
+
+
+_LIST_CUTOVER_IDENTITY_MAPPINGS_SQL = """
+SELECT
+  legacy_curated_feature_id,
+  collection_id,
+  curation_item_id,
+  mapping_kind,
+  source_row_hash
+FROM ops.curation_cutover_identity_mappings
+ORDER BY legacy_curated_feature_id
+"""
+
+
+async def get_curation_cutover_identity_mapping_export(
+    session: AsyncSession,
+) -> CurationCutoverIdentityMappingExport:
+    """Return the complete immutable cutover map and its closed Merkle receipt.
+
+    This is intentionally a maintenance-window read.  The HTTP layer exposes
+    it through a signed keyset cursor, while this single relation snapshot is
+    used to calculate the root that every page must carry.  Runtime has SELECT
+    only; writes remain schema-owner/migration-only and append-only.
+    """
+
+    rows = (
+        (
+            await session.execute(text(_LIST_CUTOVER_IDENTITY_MAPPINGS_SQL))
+        )
+        .mappings()
+        .all()
+    )
+    mappings = tuple(
+        CurationCutoverIdentityMapping(
+            legacy_curated_feature_id=str(row["legacy_curated_feature_id"]),
+            collection_id=str(row["collection_id"]),
+            curation_item_id=str(row["curation_item_id"]),
+            mapping_kind=str(row["mapping_kind"]),
+            source_row_hash=str(row["source_row_hash"]),
+        )
+        for row in rows
+    )
+    root = curation_cutover_identity_mapping_root(
+        CurationCutoverIdentityMappingDigestInput(
+            legacy_curated_feature_id=UUID(mapping.legacy_curated_feature_id),
+            collection_id=UUID(mapping.collection_id),
+            curation_item_id=UUID(mapping.curation_item_id),
+            mapping_kind=mapping.mapping_kind,
+            source_row_hash=mapping.source_row_hash,
+        )
+        for mapping in mappings
+    )
+    return CurationCutoverIdentityMappingExport(
+        mapping_count=len(mappings),
+        mapping_root=root,
+        mappings=mappings,
+    )
 
 
 async def get_curation_import_batch(

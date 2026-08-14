@@ -27,6 +27,18 @@ PR [#979](https://github.com/digitie/kor-travel-map/pull/979) integration green�
 docker-manager 두 브랜치(`fix/map-ui-geo-consumer-key`, issue-171)는 prod 배포가
 필요하므로 승인된 배포 경로로만 나간다.
 
+## 2026-08-14 — T-VN-40C Map cutover identity mapping export
+
+PinVi가 legacy `curated_feature_id`를 canonical collection/item UUID로 옮길 때 Map DB에
+직접 접근하지 않도록, maintenance fence 전용
+`GET /v1/service/curation-cutover/identity-mappings`를 추가했다. 이 표면은 별도
+ServiceToken digest, signed keyset cursor, immutable row hash와 전체 Merkle root/count를
+함께 반환하며 runtime은 해당 mapping relation을 읽기만 할 수 있다.
+
+**다음 한 작업**: PinVi가 이 service OpenAPI를 vendor하고 mapping root/count를 receipt에
+결박한 뒤 기존 plan/POI provenance를 backfill한다. mapping의 누락·중복·checksum 불일치는
+cutover를 즉시 fail-close해야 하며, 그 후에만 legacy import route/컬럼을 물리 제거한다.
+
 ## 2026-08-14 — prod 지오코딩 복구 + 재발 통로 제거 (T-VN-H46B/C)
 
 prod의 dagster/daemon 두 컨테이너가 geo가 401로 거절하는 VWorld 키를 들고 있었다.

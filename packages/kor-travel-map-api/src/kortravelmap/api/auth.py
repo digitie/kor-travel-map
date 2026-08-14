@@ -58,6 +58,7 @@ __all__ = [
     "OpsFixtureContext",
     "require_cache_target_service_principal",
     "require_cache_target_service_scope",
+    "require_curation_cutover_service_principal",
     "require_curation_snapshot_service_principal",
     "require_admin_frontend",
     "require_metrics_token",
@@ -540,12 +541,17 @@ async def require_cache_target_service_principal(
     )
 
 
-async def require_curation_snapshot_service_principal(
+async def _require_pinvi_curation_service_principal(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     token: Annotated[str | None, Security(_service_token_scheme)] = None,
+    *,
+    expected_digest: str | None,
+    scope: str,
+    principal_id: str,
+    error_prefix: str,
 ) -> CurationSnapshotServicePrincipalContext:
-    """PinVi snapshot token digest를 exact principal/scope로 fail-closed 해석한다."""
+    """PinVi curation service token을 정확한 one-scope principal로 해석한다."""
 
     if token is None or token == "":
         settings = _settings(request)
@@ -590,21 +596,20 @@ async def require_curation_snapshot_service_principal(
         if known_other_principal:
             raise _cache_target_auth_error(
                 status.HTTP_403_FORBIDDEN,
-                "CURATION_SNAPSHOT_SERVICE_SCOPE_FORBIDDEN",
-                "요청 principal은 pinvi:curation-snapshot:read 인증 경계가 아닙니다.",
+                f"{error_prefix}_SERVICE_SCOPE_FORBIDDEN",
+                f"요청 principal은 {scope} 인증 경계가 아닙니다.",
             )
         raise _cache_target_auth_error(
             status.HTTP_401_UNAUTHORIZED,
-            "CURATION_SNAPSHOT_SERVICE_TOKEN_REQUIRED",
+            f"{error_prefix}_SERVICE_TOKEN_REQUIRED",
             f"{SERVICE_TOKEN_HEADER} 헤더가 필요합니다.",
         )
     settings = _settings(request)
     digest = _token_digest(token)
-    expected = settings.pinvi_curation_snapshot_token_sha256
-    if expected is not None and hmac.compare_digest(digest, expected):
+    if expected_digest is not None and hmac.compare_digest(digest, expected_digest):
         return CurationSnapshotServicePrincipalContext(
-            principal_id="service:pinvi",
-            scopes=frozenset({"pinvi:curation-snapshot:read"}),
+            principal_id=principal_id,
+            scopes=frozenset({scope}),
         )
 
     known_other_scope = any(
@@ -616,6 +621,12 @@ async def require_curation_snapshot_service_principal(
             digest,
             _token_digest(settings.service_token.get_secret_value()),
         )
+    for other_digest in (
+        settings.pinvi_curation_snapshot_token_sha256,
+        settings.pinvi_curation_cutover_mapping_token_sha256,
+    ):
+        if other_digest is not None and other_digest != expected_digest:
+            known_other_scope = known_other_scope or hmac.compare_digest(digest, other_digest)
     for other_secret in (
         settings.admin_proxy_secret,
         settings.metrics_token,
@@ -631,13 +642,51 @@ async def require_curation_snapshot_service_principal(
     if known_other_scope:
         raise _cache_target_auth_error(
             status.HTTP_403_FORBIDDEN,
-            "CURATION_SNAPSHOT_SERVICE_SCOPE_FORBIDDEN",
-            "ServiceToken principal에 pinvi:curation-snapshot:read scope가 없습니다.",
+            f"{error_prefix}_SERVICE_SCOPE_FORBIDDEN",
+            f"ServiceToken principal에 {scope} scope가 없습니다.",
         )
     raise _cache_target_auth_error(
         status.HTTP_401_UNAUTHORIZED,
-        "CURATION_SNAPSHOT_SERVICE_TOKEN_INVALID",
+        f"{error_prefix}_SERVICE_TOKEN_INVALID",
         f"{SERVICE_TOKEN_HEADER} 헤더가 유효하지 않습니다.",
+    )
+
+
+async def require_curation_snapshot_service_principal(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    token: Annotated[str | None, Security(_service_token_scheme)] = None,
+) -> CurationSnapshotServicePrincipalContext:
+    """PinVi snapshot token digest를 exact principal/scope로 fail-closed 해석한다."""
+
+    settings = _settings(request)
+    return await _require_pinvi_curation_service_principal(
+        request,
+        session,
+        token,
+        expected_digest=settings.pinvi_curation_snapshot_token_sha256,
+        scope="pinvi:curation-snapshot:read",
+        principal_id="service:pinvi",
+        error_prefix="CURATION_SNAPSHOT",
+    )
+
+
+async def require_curation_cutover_service_principal(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    token: Annotated[str | None, Security(_service_token_scheme)] = None,
+) -> CurationSnapshotServicePrincipalContext:
+    """T-VN-40C mapping export의 maintenance-only PinVi principal을 확인한다."""
+
+    settings = _settings(request)
+    return await _require_pinvi_curation_service_principal(
+        request,
+        session,
+        token,
+        expected_digest=settings.pinvi_curation_cutover_mapping_token_sha256,
+        scope="pinvi:curation-cutover:read",
+        principal_id="service:pinvi:curation-cutover",
+        error_prefix="CURATION_CUTOVER",
     )
 
 

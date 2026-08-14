@@ -8,11 +8,14 @@ from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
 from kortravelmap.core.curation_snapshot import curation_snapshot_sha256
 from kortravelmap.infra.curation_repo import (
+    CurationCutoverIdentityMapping,
+    CurationCutoverIdentityMappingExport,
     CurationServiceCollectionSnapshot,
     CurationServiceItemSnapshot,
 )
@@ -30,6 +33,8 @@ from kortravelmap.api.settings import ApiSettings
 
 TOKEN = "pinvi-curation-snapshot-token-000000000000000000000"
 TOKEN_DIGEST = hashlib.sha256(TOKEN.encode()).hexdigest()
+CUTOVER_TOKEN = "pinvi-curation-cutover-token-0000000000000000000000"
+CUTOVER_TOKEN_DIGEST = hashlib.sha256(CUTOVER_TOKEN.encode()).hexdigest()
 GENERIC_TOKEN = "generic-service-token-000000000000000000000000000"
 OPS_TOKEN = "ops-read-token-000000000000000000000000000000000"
 OPS_CANCEL_TOKEN = "ops-cancel-token-000000000000000000000000000000"
@@ -105,6 +110,24 @@ def _collection(
 
 def _headers(token: str = TOKEN) -> dict[str, str]:
     return {SERVICE_TOKEN_HEADER: token}
+
+
+def _cutover_headers(token: str = CUTOVER_TOKEN) -> dict[str, str]:
+    return {SERVICE_TOKEN_HEADER: token}
+
+
+@pytest.fixture
+def cutover_client() -> TestClient:
+    app = create_app(
+        ApiSettings(
+            public_api_key_required=False,
+            vworld_api_key=None,
+            pinvi_curation_snapshot_token_sha256=TOKEN_DIGEST,
+            pinvi_curation_cutover_mapping_token_sha256=CUTOVER_TOKEN_DIGEST,
+        )
+    )
+    app.dependency_overrides[get_session] = _fake_session
+    return TestClient(app)
 
 
 @pytest.mark.unit
@@ -427,3 +450,91 @@ def test_snapshot_token_digest_must_be_lowercase_and_distinct() -> None:
             service_token=SecretStr(TOKEN),
             pinvi_curation_snapshot_token_sha256=TOKEN_DIGEST,
         )
+    with pytest.raises(ValidationError):
+        ApiSettings(
+            pinvi_curation_snapshot_token_sha256=TOKEN_DIGEST,
+            pinvi_curation_cutover_mapping_token_sha256=TOKEN_DIGEST,
+        )
+
+
+@pytest.mark.unit
+def test_cutover_mapping_export_is_scoped_keyset_and_closed(
+    cutover_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.core.curation_cutover_mapping import (
+        CurationCutoverIdentityMappingDigestInput,
+        curation_cutover_identity_mapping_root,
+    )
+
+    mappings = (
+        CurationCutoverIdentityMapping(
+            legacy_curated_feature_id="11111111-1111-4111-8111-111111111111",
+            collection_id=COLLECTION_ID,
+            curation_item_id=ITEM_ID,
+            mapping_kind="legacy_projection",
+            source_row_hash="a" * 64,
+        ),
+        CurationCutoverIdentityMapping(
+            legacy_curated_feature_id="33333333-3333-4333-8333-333333333333",
+            collection_id=COLLECTION_ID,
+            curation_item_id=ITEM_ID_2,
+            mapping_kind="official_membership",
+            source_row_hash="b" * 64,
+        ),
+    )
+    root = curation_cutover_identity_mapping_root(
+        CurationCutoverIdentityMappingDigestInput(
+            legacy_curated_feature_id=UUID(mapping.legacy_curated_feature_id),
+            collection_id=UUID(mapping.collection_id),
+            curation_item_id=UUID(mapping.curation_item_id),
+            mapping_kind=mapping.mapping_kind,
+            source_row_hash=mapping.source_row_hash,
+        )
+        for mapping in mappings
+    )
+    export = CurationCutoverIdentityMappingExport(
+        mapping_count=len(mappings),
+        mapping_root=root,
+        mappings=mappings,
+    )
+    changed = CurationCutoverIdentityMappingExport(
+        mapping_count=len(mappings),
+        mapping_root="c" * 64,
+        mappings=mappings,
+    )
+    repository = AsyncMock(side_effect=[export, export, changed])
+    monkeypatch.setattr(
+        module.curation_repo,
+        "get_curation_cutover_identity_mapping_export",
+        repository,
+    )
+
+    path = "/v1/service/curation-cutover/identity-mappings?page_size=1"
+    assert cutover_client.get(path).status_code == 401
+    assert cutover_client.get(path, headers=_headers()).status_code == 403
+
+    first = cutover_client.get(path, headers=_cutover_headers())
+    assert first.status_code == 200, first.text
+    body = first.json()
+    assert body["mapping_root_version"] == "ktm-curation-cutover-mapping-v1"
+    assert body["mapping_count"] == 2
+    assert body["mapping_root"] == root
+    assert [entry["curation_item_id"] for entry in body["mappings"]] == [ITEM_ID]
+    assert body["complete"] is False
+    assert body["next_cursor"]
+
+    second = cutover_client.get(
+        f"/v1/service/curation-cutover/identity-mappings?cursor={body['next_cursor']}",
+        headers=_cutover_headers(),
+    )
+    assert second.status_code == 200, second.text
+    assert [entry["curation_item_id"] for entry in second.json()["mappings"]] == [ITEM_ID_2]
+    assert second.json()["complete"] is True
+
+    restarted = cutover_client.get(
+        f"/v1/service/curation-cutover/identity-mappings?cursor={body['next_cursor']}",
+        headers=_cutover_headers(),
+    )
+    assert restarted.status_code == 409
+    assert repository.await_count == 3

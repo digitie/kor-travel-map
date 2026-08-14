@@ -162,7 +162,10 @@ _OPS_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "curation_provider_root_receipts": (),
     "curation_provider_snapshot_receipts": (),
     "curation_source_observation_receipts": (),
-    "curation_cutover_identity_mappings": (),
+    # T-VN-40C service export is the only runtime reader.  The immutable
+    # relation remains write-free for API/Dagster; the maintenance HTTP scope
+    # is enforced above the database role boundary.
+    "curation_cutover_identity_mappings": ("SELECT",),
     "curation_rule_reconcile_operations": (),
     "curation_rule_reconcile_scope_members": (),
     "feature_override_field_paths": ("SELECT",),

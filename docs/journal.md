@@ -79,6 +79,20 @@ PR #979의 정적 가드가 "운영자 `.env`는 못 본다"고 적어 둔 바�
 sha8이 실행마다 달라졌고, 그 오염된 해시를 근거로 "세 값이 전부 다르다"고 판정했다 —
 실제로는 둘이 같은 값이었다. `.env` 파싱은 파이썬으로 옮기고 나서야 안정됐다.
 
+## 2026-08-14 — T-VN-40C: PinVi cutover mapping export를 Map service 경계로 분리
+
+PinVi의 기존 plan/POI가 가진 legacy `curated_feature_id`는 Map의 canonical
+`collection_id`/`curation_item_id`와 별도 DB에 있어, 관계를 물리 제거하기 전에 직접 조회
+없이 전달할 immutable 증거가 필요하다. Map service에 maintenance-only
+`GET /v1/service/curation-cutover/identity-mappings`를 추가했다. 응답은 legacy UUID 순서의
+signed keyset, 각 row의 `source_row_hash`, 전체 count와 NFC/UUID framed Merkle root를 함께
+돌려준다. cursor가 다른 root/count에 재사용되면 409로 fail-close한다.
+
+snapshot consumer token과 mapping export token은 서로 다른 SHA-256 digest를 써야 하며,
+한 scope의 token을 다른 route에 쓰면 403이다. runtime DB role은 mapping relation의 SELECT만
+가지고 INSERT/UPDATE/DELETE/TRUNCATE는 계속 없다. 다음 PinVi 단계는 이 OpenAPI를 vendor하고
+mapping receipt를 먼저 고정한 다음, 기존 provenance를 1:1 backfill하는 것이다.
+
 ## 2026-08-14 — geo 소비자 키가 VWorld 키로 떨어지는 통로 제거 (T-VN-H46B/C)
 
 `kor-travel-geo`에는 성격이 다른 자격증명 두 개가 있다. **VWorld 키**는 geo가 상류

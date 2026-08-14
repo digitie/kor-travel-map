@@ -135,10 +135,11 @@ async def test_tvn40_relations_are_closed_to_runtime_and_owned_by_schema_owner(
     assert owners == {relation: "ktm_feature_schema_owner" for relation in _NEW_RELATIONS}
 
     for relation in _NEW_RELATIONS:
-        assert not await migrated_session.scalar(
+        has_runtime_select = await migrated_session.scalar(
             text("SELECT has_table_privilege('ktm_feature_runtime', :relation, 'SELECT')"),
             {"relation": relation},
         )
+        assert has_runtime_select is (relation == "ops.curation_cutover_identity_mappings")
         assert not await migrated_session.scalar(
             text("SELECT has_table_privilege('ktm_feature_runtime', :relation, 'INSERT')"),
             {"relation": relation},

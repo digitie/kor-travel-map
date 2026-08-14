@@ -19,10 +19,13 @@ from kortravelmap.infra import curation_repo
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.api.auth import require_curation_snapshot_service_principal
+from kortravelmap.api.auth import (
+    require_curation_cutover_service_principal,
+    require_curation_snapshot_service_principal,
+)
 from kortravelmap.api.db import get_session
 
-__all__ = ["service_router"]
+__all__ = ["cutover_router", "service_router"]
 
 _SNAPSHOT_SCOPE = "pinvi:curation-snapshot:read"
 _REVISION_PATTERN = r"^[1-9][0-9]*$"
@@ -30,6 +33,7 @@ _BODY_ETAG_PATTERN = r"^sha256:[0-9a-f]{64}$"
 _DIGEST_PATTERN = r"^[0-9a-f]{64}$"
 _HTTP_ETAG_PATTERN = r'^"sha256:[0-9a-f]{64}"$'
 _ITEM_SET_HASH_VERSION = "ktm-db-item-set-v1"
+_CUTOVER_MAPPING_ROOT_VERSION = "ktm-curation-cutover-mapping-v1"
 _ETAG_HEADER = {
     "ETag": {
         "description": "canonicalization v1 snapshot의 strong ETag.",
@@ -41,6 +45,12 @@ service_router = APIRouter(
     prefix="/service",
     tags=["service-curation-snapshots"],
     dependencies=[Depends(require_curation_snapshot_service_principal)],
+)
+
+cutover_router = APIRouter(
+    prefix="/service",
+    tags=["service-curation-cutover"],
+    dependencies=[Depends(require_curation_cutover_service_principal)],
 )
 
 
@@ -105,6 +115,33 @@ class CurationCollectionDetailSnapshot(BaseModel):
     item_set_hash_version: Literal["ktm-db-item-set-v1"]
     item_set_hash: Annotated[str, Field(pattern=_DIGEST_PATTERN)]
     items: Annotated[list[CurationItemDetailSnapshot], Field(max_length=200)]
+    next_cursor: str | None
+    complete: bool
+
+
+class CurationCutoverIdentityMapping(BaseModel):
+    """PinVi legacy provenance를 canonical Map UUID로 바꾸는 one-to-one evidence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    legacy_curated_feature_id: UUID
+    collection_id: UUID
+    curation_item_id: UUID
+    mapping_kind: Literal[
+        "legacy_projection", "official_membership", "manual_membership"
+    ]
+    source_row_hash: Annotated[str, Field(pattern=_DIGEST_PATTERN)]
+
+
+class CurationCutoverIdentityMappingExport(BaseModel):
+    """Maintenance-only closed keyset envelope for the paired PinVi backfill."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mapping_root_version: Literal["ktm-curation-cutover-mapping-v1"]
+    mapping_count: Annotated[int, Field(ge=0)]
+    mapping_root: Annotated[str, Field(pattern=_DIGEST_PATTERN)]
+    mappings: Annotated[list[CurationCutoverIdentityMapping], Field(max_length=200)]
     next_cursor: str | None
     complete: bool
 
@@ -214,6 +251,41 @@ def _decode_cursor(raw: str, *, key: bytes) -> dict[str, object]:
             raise ValueError
     except (TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise HTTPException(status_code=422, detail="invalid curation snapshot cursor") from exc
+    return payload
+
+
+def _decode_cutover_mapping_cursor(raw: str, *, key: bytes) -> dict[str, object]:
+    try:
+        padded = raw + "=" * (-len(raw) % 4)
+        signed = base64.urlsafe_b64decode(padded.encode("ascii"))
+        payload_bytes, signature = signed[:-32], signed[-32:]
+        if len(signature) != 32 or not hmac.compare_digest(
+            signature,
+            hmac.new(key, payload_bytes, hashlib.sha256).digest(),
+        ):
+            raise ValueError
+        payload = json.loads(payload_bytes)
+        if not isinstance(payload, dict) or set(payload) != {
+            "v",
+            "mapping_root_version",
+            "mapping_root",
+            "mapping_count",
+            "last_legacy_curated_feature_id",
+        }:
+            raise ValueError
+        if payload["v"] != 1:
+            raise ValueError
+        if payload["mapping_root_version"] != _CUTOVER_MAPPING_ROOT_VERSION:
+            raise ValueError
+        if not isinstance(payload["mapping_count"], int) or payload["mapping_count"] < 0:
+            raise ValueError
+        if not isinstance(payload["mapping_root"], str) or (
+            len(payload["mapping_root"]) != 64
+        ):
+            raise ValueError
+        UUID(str(payload["last_legacy_curated_feature_id"]))
+    except (TypeError, ValueError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=422, detail="invalid curation cutover cursor") from exc
     return payload
 
 
@@ -351,3 +423,88 @@ async def get_curation_collection_detail_snapshot(
     response.headers["ETag"] = strong_etag
     response_payload = {**payload_without_etag, "etag": collection_etag}
     return CurationCollectionDetailSnapshot.model_validate(response_payload)
+
+
+@cutover_router.get(
+    "/curation-cutover/identity-mappings",
+    response_model=CurationCutoverIdentityMappingExport,
+    responses={
+        409: {
+            "description": (
+                "cursor 이후 mapping count/root 변경 — 첫 page부터 maintenance export 재시작"
+            )
+        }
+    },
+    openapi_extra={"x-required-service-scope": "pinvi:curation-cutover:read"},
+)
+async def get_curation_cutover_identity_mappings(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    page_size: Annotated[int, Query(ge=1, le=200)] = 100,
+    cursor: Annotated[str | None, Query(min_length=1, max_length=4096)] = None,
+) -> CurationCutoverIdentityMappingExport:
+    """Export the immutable Map→PinVi legacy identity mapping during T-VN-40C.
+
+    The relation itself is append-only and only migration owners can write it.
+    A signed cursor binds every continuation page to the initial count/root;
+    any maintenance-window drift is rejected instead of silently mixing maps.
+    """
+
+    key = request.app.state.settings.cursor_signing_key
+    cursor_payload = (
+        _decode_cutover_mapping_cursor(cursor, key=key) if cursor is not None else None
+    )
+    export = await curation_repo.get_curation_cutover_identity_mapping_export(session)
+    if cursor_payload is not None and (
+        cursor_payload["mapping_root_version"] != _CUTOVER_MAPPING_ROOT_VERSION
+        or cursor_payload["mapping_root"] != export.mapping_root
+        or cursor_payload["mapping_count"] != export.mapping_count
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="curation cutover identity mapping changed; restart from first page",
+        )
+
+    after = (
+        UUID(str(cursor_payload["last_legacy_curated_feature_id"]))
+        if cursor_payload is not None
+        else None
+    )
+    candidates = [
+        mapping
+        for mapping in export.mappings
+        if after is None or UUID(mapping.legacy_curated_feature_id).bytes > after.bytes
+    ]
+    page = candidates[:page_size]
+    complete = len(candidates) <= page_size
+    next_cursor = None
+    if not complete and page:
+        next_cursor = _encode_cursor(
+            {
+                "v": 1,
+                "mapping_root_version": _CUTOVER_MAPPING_ROOT_VERSION,
+                "mapping_root": export.mapping_root,
+                "mapping_count": export.mapping_count,
+                "last_legacy_curated_feature_id": page[-1].legacy_curated_feature_id,
+            },
+            key=key,
+        )
+    return CurationCutoverIdentityMappingExport(
+        mapping_root_version=_CUTOVER_MAPPING_ROOT_VERSION,
+        mapping_count=export.mapping_count,
+        mapping_root=export.mapping_root,
+        mappings=[
+            CurationCutoverIdentityMapping.model_validate(
+                {
+                    "legacy_curated_feature_id": mapping.legacy_curated_feature_id,
+                    "collection_id": mapping.collection_id,
+                    "curation_item_id": mapping.curation_item_id,
+                    "mapping_kind": mapping.mapping_kind,
+                    "source_row_hash": mapping.source_row_hash,
+                }
+            )
+            for mapping in page
+        ],
+        next_cursor=next_cursor,
+        complete=complete,
+    )
