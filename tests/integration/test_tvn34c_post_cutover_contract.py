@@ -185,7 +185,7 @@ async def test_tvn34c_invariant_parser_runs_the_dedicated_0096_to_c_path(
         temporary_engine = make_async_engine(cutover_dsn, pool_size=1)
         config = Config(str(_ROOT / "alembic.ini"))
         config.set_main_option("script_location", str(_ROOT / "alembic"))
-        # 아카이브 체인 전용 그래프 — `alembic/legacy_versions/README.md`. `versions/`와 함께 담으면 revision이 중복된다.
+        # 아카이브 체인 전용 그래프 — alembic/legacy_versions/README.md 참조.
         config.set_main_option("version_locations", str(_ROOT / "alembic" / "legacy_versions"))
         config.set_main_option("sqlalchemy.url", await bootstrapped_migrator_dsn(cutover_dsn))
         # 0096 → 0097 두 단계 모두 migration이므로 schema-owner 전환은 그 둘을

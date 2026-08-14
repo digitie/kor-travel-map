@@ -22,6 +22,8 @@ from kortravelmap.infra.alembic_exclusions import (
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from sqlalchemy.ext.asyncio import AsyncEngine
 
 
