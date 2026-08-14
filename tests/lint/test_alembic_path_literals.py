@@ -51,6 +51,14 @@ _PATH_STYLE = re.compile(
     rf"{_QUOTE}alembic{_QUOTE}\s*/\s*{_QUOTE}{_DIRECTORY}{_QUOTE}\s*/\s*{_QUOTE}{_LEAF}{_QUOTE}"
 )
 _STRING_STYLE = re.compile(rf"{_QUOTE}alembic/{_DIRECTORY}/{_LEAF}{_QUOTE}")
+#: 따옴표 **없이** 나오는 경로. 쉘 인자·워크플로 명령·docstring에서 가장 흔한 형태이고,
+#: 앞의 두 표기만 보던 판은 이 축을 통째로 놓쳤다. 세어 보니 저장소에 9건 있었고 그중
+#: 하나가 squash로 옮겨간 파일을 그대로 가리키고 있었다(2026-08-15 실측) — 가드가 잡으라고
+#: 만들어진 바로 그 종류다.
+#:
+#: 앞에 `"`/`'`/`/`/단어문자가 오면 제외한다. 그래야 위 두 표기와 중복해 세지 않고,
+#: `docs/alembic/versions/...` 같은 다른 경로의 꼬리를 잘못 물지 않는다.
+_BARE_STYLE = re.compile(rf"(?<![\"'/\w])alembic/{_DIRECTORY}/([\w.\-*]+\.(?:py|sql))")
 
 
 def _sources() -> list[Path]:
@@ -68,10 +76,19 @@ def test_alembic_file_path_literals_resolve() -> None:
     checked = 0
     for path in _sources():
         collapsed = re.sub(r"\s+", " ", path.read_text(encoding="utf-8"))
-        for directory, name in _PATH_STYLE.findall(collapsed) + _STRING_STYLE.findall(collapsed):
+        found = (
+            _PATH_STYLE.findall(collapsed)
+            + _STRING_STYLE.findall(collapsed)
+            + _BARE_STYLE.findall(collapsed)
+        )
+        for directory, name in found:
             # f-string 보간(`{stem}`)은 정적으로 풀 수 없다. 검사하지 않는다 —
             # 억지로 판정하면 정상 코드에 빨간불이 뜨고, 사람은 가드를 끄는 쪽으로 움직인다.
             if "{" in name:
+                continue
+            # glob 패턴(`*_schema_baseline.py`, `*.sql`)은 파일 하나를 가리키지 않는다.
+            # 존재 여부로 판정하면 정상 코드가 빨개진다.
+            if "*" in name:
                 continue
             checked += 1
             if not (_ROOT / "alembic" / directory / name).exists():
