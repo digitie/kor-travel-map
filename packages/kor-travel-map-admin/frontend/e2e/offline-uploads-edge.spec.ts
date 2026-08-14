@@ -13,6 +13,8 @@ type OfflineUploadDetailResponse =
   components["schemas"]["OfflineUploadDetailResponse"];
 type OfflineUploadWriteResponse =
   components["schemas"]["OfflineUploadWriteResponse"];
+type OfflineUploadDeleteResponse =
+  components["schemas"]["OfflineUploadDeleteResponse"];
 type OfflineUploadWriteMeta = components["schemas"]["OfflineUploadWriteMeta"];
 type OfflineUploadPreviewResponse =
   components["schemas"]["OfflineUploadPreviewResponse"];
@@ -138,6 +140,15 @@ function makeWriteResponse(
   return {
     data: upload,
     meta: makeWriteMeta({ object_key: upload.storage_key, ...metaOverrides }),
+  };
+}
+
+function makeDeleteResponse(
+  upload: OfflineUploadRecord,
+): OfflineUploadDeleteResponse {
+  return {
+    data: upload,
+    meta: makeMeta({ request_id: "e2e-offline-delete" }),
   };
 }
 
@@ -762,7 +773,108 @@ test.describe("admin/offline-uploads edge depth", () => {
   });
 
   // -------------------------------------------------------------------------
-  // 6) CP949 인코딩 round-trip — UI 인디케이터 없음(정직한 gap 기록).
+  // 6) 삭제 mutation — 좀비 row를 지운 뒤 같은 파일을 다시 올릴 수 있어야 한다.
+  //    별도 live suite가 아니라 default mocked checkpoint에서 삭제 endpoint와
+  //    query invalidation을 함께 검증한다.
+  // -------------------------------------------------------------------------
+  test("deletes an upload then permits re-upload with the same file", async ({
+    page,
+  }) => {
+    let createCount = 0;
+    let deleteCount = 0;
+    let upload = makeOfflineUpload();
+    let uploads: OfflineUploadRecord[] = [];
+    const uploadPath = `/v1/admin/offline-uploads/${OFFLINE_UPLOAD_ID}`;
+
+    await page.route("**/admin/offline-uploads**", async (route) => {
+      if (isPassthrough(route)) {
+        await route.continue();
+        return;
+      }
+      const request = route.request();
+      const apiPath = bffApiPath(request.url());
+      const method = request.method();
+
+      if (method === "GET" && apiPath === "/v1/admin/offline-uploads") {
+        await fulfillJson(route, makeListResponse(uploads));
+        return;
+      }
+      if (method === "POST" && apiPath === "/v1/admin/offline-uploads") {
+        createCount += 1;
+        upload = makeOfflineUpload({
+          updated_at: `2026-06-08T00:00:0${createCount}.000Z`,
+        });
+        uploads = [upload];
+        await fulfillJson(route, makeWriteResponse(upload), 201);
+        return;
+      }
+      if (method === "GET" && apiPath === uploadPath) {
+        await fulfillJson(route, makeDetailResponse(upload));
+        return;
+      }
+      if (method === "GET" && apiPath === `${uploadPath}/preview`) {
+        await fulfillJson(route, makePreviewResponse(upload));
+        return;
+      }
+      if (method === "DELETE" && apiPath === uploadPath) {
+        deleteCount += 1;
+        uploads = [];
+        await fulfillJson(route, makeDeleteResponse(upload));
+        return;
+      }
+      throw new Error(`Unhandled route: ${method} ${apiPath}`);
+    });
+
+    await page.goto("/admin/offline-uploads");
+    await page.getByTestId("offline-upload-file-input").setInputFiles(csvFile);
+    await page.getByLabel("provider dataset ID", { exact: true }).fill("401");
+    await page.getByLabel("sync scope", { exact: true }).fill("default");
+    await page.getByRole("button", { name: "업로드" }).click();
+    await expect.poll(() => createCount).toBe(1);
+    await expect(page.getByTestId("offline-upload-row")).toBeVisible();
+
+    await page.getByTestId("offline-upload-delete").click();
+    await expect.poll(() => deleteCount).toBe(1);
+    await expect(page.getByText("업로드 삭제됨")).toBeVisible();
+    await expect(page.getByText("offline upload가 없습니다.")).toBeVisible();
+
+    await page.getByTestId("offline-upload-file-input").setInputFiles(csvFile);
+    await page.getByLabel("provider dataset ID", { exact: true }).fill("401");
+    await page.getByLabel("sync scope", { exact: true }).fill("default");
+    await page.getByRole("button", { name: "업로드" }).click();
+    await expect.poll(() => createCount).toBe(2);
+    await expect(page.getByTestId("offline-upload-row")).toBeVisible();
+  });
+
+  test("disables delete while an upload is loading", async ({ page }) => {
+    const upload = makeOfflineUpload({ status: "loading" });
+    const uploadPath = `/v1/admin/offline-uploads/${OFFLINE_UPLOAD_ID}`;
+
+    await page.route("**/admin/offline-uploads**", async (route) => {
+      if (isPassthrough(route)) {
+        await route.continue();
+        return;
+      }
+      const request = route.request();
+      const apiPath = bffApiPath(request.url());
+      if (request.method() === "GET" && apiPath === "/v1/admin/offline-uploads") {
+        await fulfillJson(route, makeListResponse([upload]));
+        return;
+      }
+      if (request.method() === "GET" && apiPath === uploadPath) {
+        await fulfillJson(route, makeDetailResponse(upload));
+        return;
+      }
+      throw new Error(`Unhandled route: ${request.method()} ${apiPath}`);
+    });
+
+    await page.goto("/admin/offline-uploads");
+    await expect(page.getByTestId("offline-upload-row")).toBeVisible();
+    await expect(page.getByTestId("offline-upload-delete")).toBeDisabled();
+  });
+
+  // -------------------------------------------------------------------------
+  // 7) CP949 인코딩 round-trip — UI 인디케이터 없음(정직한 gap 기록).
   //    component는 detected_encoding/meta.encoding을 렌더하지 않는다(grep 0건).
   //    여기서는 인코딩 배지를 단언하지 않고 한글 텍스트 round-trip + gap을 기록한다.
   // -------------------------------------------------------------------------

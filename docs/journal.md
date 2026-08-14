@@ -2,6 +2,17 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-14 — T-VN-41 F1D: PR #967을 #974 위로 재배치하고 mocked gate를 복구
+
+PR #967을 T-VN-40 PR #974 최신 head에 재배치한 뒤, 삭제된 clone-live runner를 unit
+automation이 읽어 즉시 실패하던 경로를 제거했다. offline upload의 삭제→목록 invalidation→같은
+파일 재업로드와 loading 상태 삭제 비활성화는 opt-in live spec이 아닌 기본 mocked Chromium
+suite에 다시 넣었다. 현행 browser-only live runner와 화면별 분리 e2e spec을 tasks/runbook에도
+반영해 삭제된 `admin-ops.spec.ts`·clone runner를 정본으로 남기지 않았다.
+
+관련 Python unit 151건, frontend type-check, mocked Chromium offline upload 9건이 통과했다.
+다음 단계는 이 수정 SHA의 독립 적대 재검토다.
+
 ## 2026-08-14 — T-VN-40: PR #977 영향성 후속 credential/Alembic fail-close
 
 PR #977 prod 기록을 대조해 VWorld provider key가 geo consumer key와 Map 공개 API key로 다시

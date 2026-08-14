@@ -124,7 +124,6 @@ def test_geo_credentials_never_fall_back_to_vworld_provider_key(
     geo_route = _read(
         "packages/kor-travel-map-admin/frontend/src/app/api/geo/[...path]/route.ts"
     )
-    live_acceptance = _read("scripts/run-admin-feature-clone-live-acceptance.sh")
     assert (
         'NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY=${NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY:-}"'
         in buildx
@@ -132,15 +131,6 @@ def test_geo_credentials_never_fall_back_to_vworld_provider_key(
     assert "NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY:-${NEXT_PUBLIC_VWORLD_API_KEY" not in compose
     assert "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-${NEXT_PUBLIC_VWORLD_API_KEY" not in compose
     assert "process.env.NEXT_PUBLIC_VWORLD_API_KEY" not in geo_route
-    assert "require_env E2E_KOR_TRAVEL_GEO_API_KEY" in live_acceptance
-    assert (
-        'NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY="$E2E_KOR_TRAVEL_GEO_API_KEY"'
-        in live_acceptance
-    )
-    assert (
-        'NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY="$E2E_VWORLD_API_KEY"'
-        not in live_acceptance
-    )
 
 
 @pytest.mark.unit

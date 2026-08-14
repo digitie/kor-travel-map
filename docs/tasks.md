@@ -616,7 +616,7 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   한다. n150 map DB는 `kor-travel-geo-postgres`에 geo와 **공유**돼 있어 bootstrap이 공유 서버의
   권한 모델을 바꾸므로, 전용 인스턴스 분리 여부는 Manager 판단 사항이다 —
   docker-manager #171. 이 결선 전까지 tvn34의 live 검증은 격리 clone 스택
-  (`scripts/run-admin-feature-clone-live-acceptance.sh`)에서만 가능하다.
+  (`scripts/run-admin-feature-live-acceptance.sh`)에서만 가능하다.
 
 ### T-VN-35 — kind별 typed subtype 분해 (Lane A) — 배포 잔여
 

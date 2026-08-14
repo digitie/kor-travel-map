@@ -1,5 +1,13 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-14 — T-VN-41 F1D: PR #967 rebase review P1 폐쇄
+
+PR #967은 T-VN-40 PR #974 최신 head에 재배치됐다. 삭제한 clone-live runner를 unit이
+계속 읽던 FileNotFoundError를 제거했고, offline upload 삭제→재업로드와 loading 중 삭제
+비활성화가 기본 mocked e2e에서 유지되도록 복구했다. tasks와 admin UI 화면 checklist는
+browser-only live runner 및 분리된 현재 spec을 가리킨다. Python unit 151건, frontend
+type-check, mocked Chromium 9건이 통과했으며 다음 한 작업은 새 SHA의 독립 적대 재검토다.
+
 ## 2026-08-14 — T-VN-40: PR #977 영향성 P1 폐쇄 중
 
 두 적대 리뷰가 PR #977 prod 기록에서 드러난 자격증명 혼용과 Alembic exclusion의 semantic
