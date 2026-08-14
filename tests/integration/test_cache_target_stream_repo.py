@@ -24,9 +24,11 @@ from kortravelmap.infra import cache_target_reconciliation_repo as snapshot_repo
 from kortravelmap.infra import cache_target_service_repo as service_repo
 from kortravelmap.infra.cache_target_event_repo import (
     CacheTargetRefreshMember,
+    CacheTargetRefreshProtocolViolation,
     append_cache_target_links_reconciled_events,
     append_cache_target_refresh_status_events,
     capture_cache_target_refresh_members_by_keys,
+    pinvi_cache_target_refresh_protocol_error,
 )
 from kortravelmap.infra.cache_target_outbox_repo import (
     CacheTargetAppliedReceipt,
@@ -73,7 +75,10 @@ from kortravelmap.infra.domain_command_repo import (
     canonical_domain_command_fingerprint,
     create_domain_command_claim,
 )
-from kortravelmap.infra.feature_update_repo import enqueue_feature_update_request
+from kortravelmap.infra.feature_update_repo import (
+    enqueue_feature_update_request,
+    get_update_request,
+)
 from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget
 from kortravelmap.infra.poi_cache_target_repo import upsert_poi_cache_target
 
@@ -3575,6 +3580,88 @@ async def test_service_refresh_rejects_source_head_from_prior_restore_epoch(
     assert (
         await migrated_session.scalar(text("SELECT count(*) FROM ops.feature_update_requests"))
         == requests_before
+    )
+
+
+@pytest.mark.integration
+async def test_restore_fence_rejects_previously_queued_service_refresh_status_event(
+    migrated_session: AsyncSession,
+) -> None:
+    """fence 전 정상 queue도 fence 뒤 epoch-1 status event를 다시 만들지 않는다."""
+
+    system = "pinvi"
+    await _apply_snapshot_source(
+        migrated_session,
+        external_system=system,
+        target_key="fenced-refresh-target",
+        event_id="9e100000-0000-4000-8000-000000000001",
+        idempotency_key="9e200000-0000-4000-8000-000000000001",
+    )
+    await _seed_scope_feature(
+        migrated_session,
+        membership=await _canonical_membership(migrated_session),
+        feature_id="f_fenced_service_refresh_scope_anchor",
+    )
+    request = await create_cache_target_refresh_request(
+        migrated_session,
+        principal_id="pinvi-service",
+        consumer_id=_CONSUMER,
+        idempotency_key="9e300000-0000-4000-8000-000000000001",
+        external_system=system,
+        target_keys=["fenced-refresh-target"],
+        reason="queue before restore fence",
+    )
+    fence_request = {
+        "external_system": system,
+        "expected_restore_epoch": 1,
+        "reason": "fence queued refresh",
+    }
+    fingerprint = canonical_domain_command_fingerprint(fence_request)
+    claim = await create_domain_command_claim(
+        migrated_session,
+        actor=_CONSUMER,
+        operation="cache_target.restore_fence",
+        idempotency_key="9e400000-0000-4000-8000-000000000001",
+        request_fingerprint=fingerprint,
+    )
+    await advance_cache_target_restore_fence(
+        migrated_session,
+        external_system=system,
+        consumer_id=_CONSUMER,
+        command_id=claim.command_id,
+        expected_restore_epoch=1,
+        expected_control_version=1,
+        reason=fence_request["reason"],
+        request_fingerprint=fingerprint,
+    )
+
+    protocol_error = await pinvi_cache_target_refresh_protocol_error(
+        migrated_session,
+        request_id=request.request_id,
+        external_system=system,
+        target_keys=["fenced-refresh-target"],
+    )
+    assert protocol_error is not None
+    assert "restore epoch" in protocol_error
+    stored_request = await get_update_request(migrated_session, request.request_id)
+    assert stored_request is not None
+    with pytest.raises(CacheTargetRefreshProtocolViolation, match="restore epoch"):
+        await append_cache_target_refresh_status_events(
+            migrated_session,
+            request_id=request.request_id,
+            job_id=stored_request.job_id,
+            status="running",
+        )
+    assert (
+        await migrated_session.scalar(
+            text(
+                "SELECT count(*) FROM ops.poi_cache_target_outbox_events "
+                "WHERE refresh_request_id = CAST(:request_id AS uuid) "
+                "AND payload ->> 'status' = 'running'"
+            ),
+            {"request_id": request.request_id},
+        )
+        == 0
     )
 
 

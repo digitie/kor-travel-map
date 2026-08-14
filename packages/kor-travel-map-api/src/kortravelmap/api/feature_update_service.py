@@ -825,7 +825,6 @@ async def create_feature_update_request(
         )
         body = await resolve_feature_ids_scope_refs(body, session)
         scope_payload = _scope_payload(body.scope)
-        _reject_pinvi_cache_target_generic_writer(scope_payload)
         scope, direct_memberships = _core_scope_and_memberships(scope_payload)
         update_policy = _update_policy_payload(body.update_policy)
         mapping = await get_feature_update_request_idempotency(
@@ -859,6 +858,7 @@ async def create_feature_update_request(
             replayed = True
             reused = mapping.reused_active_request
         else:
+            _reject_pinvi_cache_target_generic_writer(scope_payload)
             preview = await _preview_resolved_update_request(
                 session,
                 scope=scope,
@@ -966,7 +966,6 @@ async def run_feature_update_request_now(
     existing = await get_update_request(session, request_id)
     if existing is None:
         raise FeatureUpdateRequestNotFound(f"feature update request 없음: {request_id!r}")
-    _reject_pinvi_cache_target_generic_writer(existing.scope)
     if existing.cancellation_id is not None:
         raise FeatureUpdateDispatchStateConflict(
             request_id=existing.request_id,

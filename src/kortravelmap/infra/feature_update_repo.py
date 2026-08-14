@@ -57,6 +57,7 @@ __all__ = [
     "FeatureUpdateLockBusy",
     "canonicalize_feature_update_policy",
     "execution_scope_for_request",
+    "enqueue_cache_target_service_refresh_request",
     "enqueue_feature_update_request",
     "preview_feature_update_request",
     "peek_update_requests",
@@ -94,6 +95,10 @@ _FEATURE_UPDATE_POLICY_KEYS: Final[frozenset[str]] = frozenset(
 _TERMINAL_STATES: Final[frozenset[str]] = frozenset({"done", "failed"})
 _MAX_LIST_LIMIT: Final[int] = 200
 _MAX_PEEK_LIMIT: Final[int] = 50
+_PINVI_CACHE_TARGET_SYSTEM: Final[str] = "pinvi"
+_PINVI_CACHE_TARGET_SERVICE_REQUEST_MESSAGE: Final[str] = (
+    "PinVi cache target refresh는 cache-target ServiceToken writer로만 요청할 수 있습니다."
+)
 
 _REQUEST_RETURN_COLUMNS: Final[str] = (
     "request.request_id, request.scope_type, request.scope, "
@@ -1142,6 +1147,13 @@ async def preview_feature_update_request(
     )
 
 
+def _is_pinvi_cache_target_scope(scope: Mapping[str, Any]) -> bool:
+    return (
+        scope.get("type") == "cache_target_keys"
+        and scope.get("external_system") == _PINVI_CACHE_TARGET_SYSTEM
+    )
+
+
 async def enqueue_feature_update_request(
     session: AsyncSession,
     *,
@@ -1154,7 +1166,58 @@ async def enqueue_feature_update_request(
     reason: str | None = None,
     sigungu_resolver: SigunguByRadiusResolver | None = None,
 ) -> FeatureUpdateRequest:
-    """정규화한 scope와 canonical import job을 한 요청으로 영속화한다."""
+    """일반 writer로 정규화한 scope와 canonical import job을 영속화한다."""
+    if _is_pinvi_cache_target_scope(scope):
+        raise ValueError(_PINVI_CACHE_TARGET_SERVICE_REQUEST_MESSAGE)
+    return await _enqueue_feature_update_request(
+        session,
+        scope=scope,
+        dataset_memberships=dataset_memberships,
+        update_policy=update_policy,
+        run_mode=run_mode,
+        priority=priority,
+        operator=operator,
+        reason=reason,
+        sigungu_resolver=sigungu_resolver,
+    )
+
+
+async def enqueue_cache_target_service_refresh_request(
+    session: AsyncSession,
+    *,
+    scope: Mapping[str, Any],
+    dataset_memberships: Sequence[ImportJobDatasetTarget],
+    operator: str,
+    reason: str,
+) -> FeatureUpdateRequest:
+    """Service refresh가 검증한 cache target을 전용 outbox writer로 적재한다."""
+    if scope.get("type") != "cache_target_keys":
+        raise ValueError(
+            "cache-target service refresh는 cache_target_keys scope만 허용합니다."
+        )
+    return await _enqueue_feature_update_request(
+        session,
+        scope=scope,
+        dataset_memberships=dataset_memberships,
+        run_mode="queued",
+        operator=operator,
+        reason=reason,
+    )
+
+
+async def _enqueue_feature_update_request(
+    session: AsyncSession,
+    *,
+    scope: Mapping[str, Any],
+    dataset_memberships: Sequence[ImportJobDatasetTarget] | None = None,
+    update_policy: Mapping[str, Any] | None = None,
+    run_mode: str = "queued",
+    priority: int = 50,
+    operator: str | None = None,
+    reason: str | None = None,
+    sigungu_resolver: SigunguByRadiusResolver | None = None,
+) -> FeatureUpdateRequest:
+    """전용 writer가 검증한 scope를 canonical request/import job으로 영속화한다."""
     plan = await _resolve_feature_update_plan(
         session,
         scope=scope,
