@@ -66,23 +66,30 @@ printf '원본: %s줄\n' "$(wc -l < "$RAW")"
 # 양쪽에 그대로 들어간다. 손으로 두 번 적으면 "검사기가 검사 대상과 어긋난 채 green"이
 # 다시 생긴다.
 #
-# 정규화 2가지가 load-bearing이다:
-#   - aclitem 배열은 GRANT 순서에 따라 요소 순서가 달라진다 → 텍스트로 정렬한다.
-#   - `ALTER FUNCTION ... OWNER TO`는 NULL이던 proacl을 **기본값과 동일한 값으로
-#     물화**시킨다. 권한은 그대로인데 표현만 달라지는 것이라, 빼지 않으면 의미가 같은
-#     두 DB가 어긋난다(체인의 state_procedure_owner routine 17개 중 7개가 이 경우다).
-#     `acldefault()`와 같은 항목을 제거한다 — `compare-schema-catalogs.sh`가 쓰는
-#     정규화와 같다. 동등성의 정본은 그 오라클이고, 여기 것은 "GRANT가 실제로 먹었나"
-#     한 축만 보는 부분집합 검사다.
+# **텍스트가 아니라 유효 권한을 잰다.** 처음에는 `proacl` 문자열에서 `acldefault()`와
+# 같은 항목을 빼는 방식이었는데, 그게 정확히 이 작업이 막으려던 결함을 못 잡았다:
+# `acldefault('f', owner)`는 `{owner=X/owner, **=X/owner**}`를 돌려준다 — 함수의 기본
+# ACL에 **PUBLIC EXECUTE가 포함**된다. 그래서 회수했던 routine 10개에 PUBLIC EXECUTE를
+# 다시 부여해도 digest가 **한 글자도 변하지 않았다**(2026-08-14 적대 리뷰 실증).
+# 소유자 물화만 지우려던 차감이 명시적 PUBLIC 부여까지 함께 지운 것이다.
+#
+# 문자열 차감으로는 "기본값과 같아서 생략된 것"과 "명시적으로 부여된 것"을 가를 수
+# 없다. 그래서 `has_function_privilege()`로 **유효 권한**을 직접 묻는다 — 소유권 이전이
+# proacl을 물화시키든 말든 답이 같고, PUBLIC 부여는 그대로 드러난다. 대상은 PUBLIC과
+# 이 DB에 실재하는 `ktm_feature*` role 전부이므로 role이 늘어도 자동으로 따라온다.
 ROUTINE_ACL_DIGEST_SQL="$(cat <<'SQL'
-SELECT encode(sha256(convert_to(coalesce(string_agg(sig || '=' || acl, chr(10) ORDER BY sig), ''), 'UTF8')), 'hex')
-  FROM (SELECT n.nspname || '.' || p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' AS sig,
-               coalesce((SELECT string_agg(entry::text, ',' ORDER BY entry::text)
-                           FROM unnest(p.proacl) AS entry
-                          WHERE entry::text <> ALL (SELECT default_entry::text
-                                                      FROM unnest(pg_catalog.acldefault('f'::"char", p.proowner))
-                                                        AS default_entry)), '') AS acl
-          FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+SELECT encode(sha256(convert_to(coalesce(string_agg(line, chr(10) ORDER BY line), ''), 'UTF8')), 'hex')
+  FROM (SELECT grantee.name
+               || '|' || n.nspname || '.' || p.proname
+               || '(' || pg_get_function_identity_arguments(p.oid) || ')'
+               || '|execute=' || has_function_privilege(grantee.name, p.oid, 'EXECUTE')::text
+               || '|grantopt=' || has_function_privilege(grantee.name, p.oid, 'EXECUTE WITH GRANT OPTION')::text
+                 AS line
+          FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+          CROSS JOIN (SELECT 'public'::text AS name
+                      UNION ALL
+                      SELECT rolname::text FROM pg_catalog.pg_roles WHERE rolname LIKE 'ktm\_feature%') AS grantee
          WHERE n.nspname IN ('feature','provider_sync','ops')) s
 SQL
 )"

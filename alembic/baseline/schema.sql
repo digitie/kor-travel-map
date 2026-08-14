@@ -14827,16 +14827,20 @@ SELECT set_config('role', current_setting('ktm.baseline_prior_role'), true);
 DO $ktm_acl$
 DECLARE
     observed text;
-    expected text := 'a874c08b4866647d53cd966c0f5c56595cace2e4094c4ca734b0b23eb1939c29';
+    expected text := '35c45e6c2f21d2db23351022a543e0502aa5f8570aabebe849655a7a5c65ec81';
 BEGIN
-    observed := (SELECT encode(sha256(convert_to(coalesce(string_agg(sig || '=' || acl, chr(10) ORDER BY sig), ''), 'UTF8')), 'hex')
-  FROM (SELECT n.nspname || '.' || p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' AS sig,
-               coalesce((SELECT string_agg(entry::text, ',' ORDER BY entry::text)
-                           FROM unnest(p.proacl) AS entry
-                          WHERE entry::text <> ALL (SELECT default_entry::text
-                                                      FROM unnest(pg_catalog.acldefault('f'::"char", p.proowner))
-                                                        AS default_entry)), '') AS acl
-          FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+    observed := (SELECT encode(sha256(convert_to(coalesce(string_agg(line, chr(10) ORDER BY line), ''), 'UTF8')), 'hex')
+  FROM (SELECT grantee.name
+               || '|' || n.nspname || '.' || p.proname
+               || '(' || pg_get_function_identity_arguments(p.oid) || ')'
+               || '|execute=' || has_function_privilege(grantee.name, p.oid, 'EXECUTE')::text
+               || '|grantopt=' || has_function_privilege(grantee.name, p.oid, 'EXECUTE WITH GRANT OPTION')::text
+                 AS line
+          FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+          CROSS JOIN (SELECT 'public'::text AS name
+                      UNION ALL
+                      SELECT rolname::text FROM pg_catalog.pg_roles WHERE rolname LIKE 'ktm\_feature%') AS grantee
          WHERE n.nspname IN ('feature','provider_sync','ops')) s);
     IF observed IS DISTINCT FROM expected THEN
         RAISE EXCEPTION

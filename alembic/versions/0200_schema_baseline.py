@@ -67,7 +67,7 @@ depends_on: str | Sequence[str] | None = None
 #: sidecar SQL의 byte freeze. 손으로 고치면 여기서 막힌다 — baseline은 생성기의
 #: 산출물이지 편집 대상이 아니다. 갱신 절차는 `scripts/build-baseline.sh` 재실행 +
 #: `compare-schema-catalogs.sh`로 동등성 재증명 + 이 상수 갱신을 한 PR에서.
-_SCHEMA_SHA256: Final[str] = "984a6c21b245e605dc03b051a31cebe3e399d43a65df06c16602a895af17b3a0"
+_SCHEMA_SHA256: Final[str] = "be31154c0158030ed48f82e1ae5d619defddfc6673fe1f1459ef83315fc89aea"
 _SEED_SHA256: Final[str] = "056de28cee0f0bbc2218e49afdf74aacd36b6e21e64c6524b2683a92bed956ec"
 
 _BASELINE_DIR: Final[Path] = Path(__file__).resolve().parents[1] / "baseline"
