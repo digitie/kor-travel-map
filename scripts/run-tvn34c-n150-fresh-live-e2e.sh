@@ -243,6 +243,8 @@ write_env_files() {
   local postgres_password migrator_password api_password dagster_password
   local admin_proxy_secret service_token cursor_secret metrics_token
   local cache_target_command_token cache_target_consumer_token
+  local curation_snapshot_token curation_cutover_mapping_token
+  local curation_snapshot_digest curation_cutover_mapping_digest
   local ops_read ops_cancel ops_fixture ui_session ui_password_hash compose_ui_password_hash object_secret
   postgres_password="$(random_secret)"
   migrator_password="$(random_secret)"
@@ -254,6 +256,10 @@ write_env_files() {
   metrics_token="$(random_secret)"
   cache_target_command_token="$(random_secret)"
   cache_target_consumer_token="$(random_secret)"
+  curation_snapshot_token="$(random_secret)"
+  curation_cutover_mapping_token="$(random_secret)"
+  curation_snapshot_digest="$(printf %s "$curation_snapshot_token" | sha256sum | awk '{print $1}')"
+  curation_cutover_mapping_digest="$(printf %s "$curation_cutover_mapping_token" | sha256sum | awk '{print $1}')"
   ops_read="$(random_secret)"
   ops_cancel="$(random_secret)"
   ops_fixture="$(random_secret)"
@@ -322,6 +328,8 @@ KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED=true
 KOR_TRAVEL_MAP_API_OPS_READ_TOKEN=$ops_read
 KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN=$ops_cancel
 KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN=$ops_fixture
+KOR_TRAVEL_MAP_API_PINVI_CURATION_SNAPSHOT_TOKEN_SHA256=$curation_snapshot_digest
+KOR_TRAVEL_MAP_API_PINVI_CURATION_CUTOVER_MAPPING_TOKEN_SHA256=$curation_cutover_mapping_digest
 KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED=true
 KOR_TRAVEL_MAP_API_VWORLD_API_KEY=$(random_secret)
 KOR_TRAVEL_MAP_OBJECT_STORE_ACCESS_KEY_ID=tvn34c$RUN_KEY
@@ -351,6 +359,8 @@ PINVI_KOR_TRAVEL_MAP_CACHE_TARGET_SYNC_ENABLED=false
 PINVI_KOR_TRAVEL_MAP_CACHE_TARGET_COMMAND_TOKEN=$cache_target_command_token
 PINVI_KOR_TRAVEL_MAP_CACHE_TARGET_CONSUMER_TOKEN=$cache_target_consumer_token
 PINVI_KOR_TRAVEL_MAP_CACHE_TARGET_EXPECTED_CONTRACT_GENERATION=7
+PINVI_KOR_TRAVEL_MAP_CURATION_SNAPSHOT_TOKEN=$curation_snapshot_token
+PINVI_KOR_TRAVEL_MAP_CURATION_CUTOVER_MAPPING_TOKEN=$curation_cutover_mapping_token
 EOF
   chmod 0600 "$MAP_ENV" "$PINVI_ENV"
   cat >"$MAP_DIR/packages/kor-travel-map-api/.env" <<EOF

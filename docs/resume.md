@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-15 — T-VN-40 n150 canonical curation principal 격리
+
+isolated n150 runner는 Map API에 PinVi canonical snapshot·cutover mapping principal의
+SHA-256 digest만 주고, 서로 다른 두 원문 token은 PinVi API에만 전달하도록 고정했다.
+compose도 같은 Map API 전용 digest 경계를 선언해 원문 token이 Map API·Dagster·frontend로
+퍼지지 않는다.
+
+**다음 한 작업**: Docker Manager와 production compose도 같은 네 값(Map digest 2개,
+PinVi API 원문 token 2개)을 하나의 release transaction으로 결선하고, canonical
+import/backfill n150 live acceptance 뒤에만 T-VN-40 receipt를 complete로 전이한다.
+
 ## 2026-08-15 — T-VN-40 paired service receipt 배포 gate 강화
 
 active `deployment_receipt_task=T-VN-40`가 complete가 되려면 installer와 n150 runner가 Map의

@@ -275,6 +275,10 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN",
         "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN",
         "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED",
+        # T-VN-40C canonical curation은 PinVi 전용 token digest만 Map API에 둔다.
+        # 원문 token은 어떤 Map runtime에도 전달하지 않는다.
+        "KOR_TRAVEL_MAP_API_PINVI_CURATION_SNAPSHOT_TOKEN_SHA256",
+        "KOR_TRAVEL_MAP_API_PINVI_CURATION_CUTOVER_MAPPING_TOKEN_SHA256",
         "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN",
     }
     assert "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET" in api["environment"]
@@ -300,6 +304,16 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
     assert api["environment"]["KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED"] == (
         "${KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED:-false}"
     )
+    for name in (
+        "KOR_TRAVEL_MAP_API_PINVI_CURATION_SNAPSHOT_TOKEN_SHA256",
+        "KOR_TRAVEL_MAP_API_PINVI_CURATION_CUTOVER_MAPPING_TOKEN_SHA256",
+    ):
+        assert api["environment"][name] == f"${{{name}:-}}"
+        assert {
+            service_name
+            for service_name, service in services.items()
+            if name in service.get("environment", {})
+        } == {"api"}
     assert api["environment"]["KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED"] == (
         "${KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED:-false}"
     )

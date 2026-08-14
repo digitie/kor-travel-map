@@ -2,6 +2,15 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-15 — T-VN-40 n150 canonical curation principal 격리
+
+- isolated n150 runner가 매 실행마다 서로 다른 canonical snapshot·cutover mapping token을
+  만들고, Map API에는 두 SHA-256 digest만, PinVi API에는 두 원문 token만 전달하게 했다.
+- Map compose도 두 digest를 API service에만 선언한다. Dagster·daemon·frontend와 Map의
+  어느 runtime도 canonical curation token 원문을 받지 않는다.
+- 다음 production/Manager 결선에서도 이 네 값과 scope 분리를 유지해야 하며, paired
+  receipt complete는 그 live acceptance 뒤에만 허용한다.
+
 ## 2026-08-15 — T-VN-40 paired service receipt 배포 gate 강화
 
 - installer와 n150 runner가 active complete receipt의 정확한 key set을 요구한다. Map의
