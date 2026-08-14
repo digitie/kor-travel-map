@@ -14835,6 +14835,34 @@ GRANT UPDATE(source_entity_key) ON TABLE provider_sync.source_records TO ktm_fea
 
 SELECT set_config('role', current_setting('ktm.baseline_prior_role'), true);
 
+DO $ktm_acl_grantee$
+DECLARE
+    unknown text;
+BEGIN
+    unknown := (SELECT coalesce(string_agg(g.name, ', ' ORDER BY g.name), '')
+  FROM (SELECT DISTINCT
+               CASE WHEN a.grantee = 0 THEN 'public'
+                    ELSE pg_get_userbyid(a.grantee) END AS name
+          FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+          CROSS JOIN LATERAL
+               aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) AS a
+         WHERE n.nspname IN ('feature','provider_sync','ops')) g
+ WHERE NOT EXISTS (SELECT 1
+                     FROM (VALUES ('public'),
+                             ('ktm_feature_schema_owner'),
+                             ('ktm_feature_state_procedure_owner'),
+                             ('ktm_feature_audit_writer'),
+                             ('ktm_feature_runtime')) AS known(name)
+                    WHERE known.name = g.name));
+    IF unknown <> '' THEN
+        RAISE EXCEPTION
+            'baseline routine ACL에 digest가 재지 않는 grantee가 있다: % — routine ACL digest는 고정 grantee 목록만 재므로 이 축은 조용히 빠진다. scripts/build-baseline.sh의 ROUTINE_ACL_GRANTEE_VALUES에 추가하고 baseline을 다시 생성하라', unknown
+            USING ERRCODE = '42501';
+    END IF;
+END
+$ktm_acl_grantee$;
+
 DO $ktm_acl$
 DECLARE
     observed text;

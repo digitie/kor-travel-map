@@ -30,13 +30,24 @@ baseline이 그것까지 떠안으면 손으로 관리하는 prologue가 생기�
 
 `alembic/baseline/*.sql`은 손으로 쓰지 않았다 — `scripts/build-baseline.sh`가
 체인으로 만든 DB에서 뽑고 결정론적으로 정규화한다. 증명은
-`scripts/compare-schema-catalogs.sh`(변조 7종 주입으로 자체 검증한 오라클)로 했다:
-**카탈로그 2494행 동일**, seed 9개 표 항목별 일치.
+`scripts/compare-schema-catalogs.sh`(변조 **22종** 주입으로 자체 검증한 오라클)로 했다:
+**카탈로그 6053행 동일**, seed 9개 표 항목별 일치.
 
-그 2494행에는 오라클이 원래 보지 않던 축이 들어 있다 — 모든 스키마의 소유자·ACL,
-`public` 잔여 객체, event trigger, database ACL. 원본 SQL의 namespace 필터가 pg_dump의
-`-n` 스코프와 같아서 **baseline이 재현 못 하는 것은 오라클도 못 보는** 구조였고, 실제로
-그 틈으로 `x_extension` USAGE 상실이 새어 나갔다(2026-08-14).
+그 6053행에는 오라클이 원래 보지 않던 축이 들어 있다. 원본 SQL의 namespace 필터가
+pg_dump의 `-n` 스코프와 같아서 **baseline이 재현 못 하는 것은 오라클도 못 보는**
+구조였고, 실제로 그 틈으로 `x_extension` USAGE 상실이 새어 나갔다(2026-08-14).
+
+스코프 밖: 모든 스키마의 소유자·ACL, `public` 잔여 객체, event trigger, database
+locale/encoding·ACL. 스코프 안이지만 축이 없던 것: 제약 **정의**, routine **유효권한**
+(`has_function_privilege` — 원본은 `acldefault` 문자열 차감이라 PUBLIC EXECUTE 재부여를
+못 본다), 그리고 COMMENT · reloptions · relpersistence · attstorage/compression ·
+replica identity · attstattarget/attoptions · 확장 통계 · sequence `OWNED BY`.
+
+축을 넓히면서 자체검증도 함께 늘렸다. 축만 넓히고 변조를 안 늘리면 그 축은 **아무것도
+증명하지 않은 상태**로 남고, 이번 결함이 새어 나온 통로가 정확히 그것이었다.
+`tests/integration/test_schema_catalog_oracle_self_test.py`가 CI에서 그 자체검증을
+다시 돌린다 — 선언된 변조 수만큼 실제로 잡혔는지까지 센다(빈 DB면 전부 SKIP되어
+"잡음 0 / 놓침 0"으로 초록이 되는 함정을 막는다).
 
 ### 제약 정의 차이 9쌍 — 판정 완료(동치)
 
@@ -106,7 +117,7 @@ depends_on: str | Sequence[str] | None = None
 #: ⚠️ `0001~0104` 체인으로는 이 절차를 돌릴 수 없다. 그 체인은
 #: `alembic/legacy_versions/`에 있고 `versions/`로 되돌리면 root가 둘로 갈라진다.
 #: 최초 생성 때의 "체인 DB vs baseline DB" 대조는 squash 이전 트리에서만 재현된다.
-_SCHEMA_SHA256: Final[str] = "b5883a4556ac16d03885b0e849d5c35a91fab9155c9e86cb8b2a508b9c77ea0c"
+_SCHEMA_SHA256: Final[str] = "941819882c6afdc1af89cb495c8dfc37fa274564eb64d7404d5cac43f9a26b6f"
 _SEED_SHA256: Final[str] = "056de28cee0f0bbc2218e49afdf74aacd36b6e21e64c6524b2683a92bed956ec"
 
 _BASELINE_DIR: Final[Path] = Path(__file__).resolve().parents[1] / "baseline"

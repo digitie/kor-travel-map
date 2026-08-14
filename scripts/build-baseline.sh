@@ -82,6 +82,17 @@ printf '원본: %s줄\n' "$(wc -l < "$RAW")"
 # bootstrap은 7개(LOGIN principal 3종 포함)를 만든다. 실제로 그 차이로 CI가 죽었다.
 # 여기 넷은 `0200`의 DO block이 존재를 전제로 검증하는 role이고, LOGIN principal은
 # `ktm_feature_runtime`을 INHERIT하므로 유효 권한이 파생이라 더할 게 없다.
+# 이 목록은 **두 곳**에 들어간다: digest의 grantee 축과, 그 축이 여전히 완전한지 묻는
+# 아래 guard. 손으로 두 번 적으면 "guard가 digest와 다른 목록을 지키는" 상태가 생기므로
+# 한 번만 적고 `@GRANTEES@`로 심는다.
+# ⚠️ `scripts/compare-schema-catalogs.sh`의 `routineacl` 축도 같은 5개를 갖는다.
+#    거기가 드리프트하면 **A/B 비교라 양쪽 다 그 축을 안 보게 되어 초록이 유지된다.**
+ROUTINE_ACL_GRANTEE_VALUES="('public'),
+                             ('ktm_feature_schema_owner'),
+                             ('ktm_feature_state_procedure_owner'),
+                             ('ktm_feature_audit_writer'),
+                             ('ktm_feature_runtime')"
+
 ROUTINE_ACL_DIGEST_SQL="$(cat <<'SQL'
 SELECT encode(sha256(convert_to(coalesce(string_agg(line, chr(10) ORDER BY line), ''), 'UTF8')), 'hex')
   FROM (SELECT grantee.name
@@ -92,28 +103,60 @@ SELECT encode(sha256(convert_to(coalesce(string_agg(line, chr(10) ORDER BY line)
                  AS line
           FROM pg_proc p
           JOIN pg_namespace n ON n.oid = p.pronamespace
-          CROSS JOIN (VALUES ('public'),
-                             ('ktm_feature_schema_owner'),
-                             ('ktm_feature_state_procedure_owner'),
-                             ('ktm_feature_audit_writer'),
-                             ('ktm_feature_runtime')) AS grantee(name)
+          CROSS JOIN (VALUES @GRANTEES@) AS grantee(name)
          WHERE n.nspname IN ('feature','provider_sync','ops')) s
 SQL
 )"
+ROUTINE_ACL_DIGEST_SQL="${ROUTINE_ACL_DIGEST_SQL/@GRANTEES@/$ROUTINE_ACL_GRANTEE_VALUES}"
+
+# grantee 축이 여전히 **완전한지** 묻는다. digest는 위 5개만 재므로, baseline이 미래에
+# 새 role에 routine GRANT를 얻으면 그 축은 조용히 안 재진다 — digest는 한 글자도 안 변한다
+# (2026-08-14 적대 리뷰 지적). 그래서 "실제 ACL에 등장하는 grantee 집합 ⊆ 고정 목록"을
+# 별도로 단언한다. `pg_roles`를 긁지 않으므로 환경 role 수(테스트 5 / prod 7)와 무관하다.
+#
+# `coalesce(proacl, acldefault('f', proowner))`가 **load-bearing**이다. routine 112개 중
+# 102개가 `proacl IS NULL`(기본 ACL)이라 생 `aclexplode(proacl)`은 그 행을 통째로 못 본다:
+# 실측상 생 버전은 3개만 내놓고 **`public`과 `ktm_feature_audit_writer`를 잃는다** —
+# PUBLIC EXECUTE 재부여와 SECURITY DEFINER owner 축, 즉 이 digest가 막으려는 결함 두 개가
+# 그대로 사각지대가 된다.
+ROUTINE_ACL_GRANTEE_GUARD_SQL="$(cat <<'SQL'
+SELECT coalesce(string_agg(g.name, ', ' ORDER BY g.name), '')
+  FROM (SELECT DISTINCT
+               CASE WHEN a.grantee = 0 THEN 'public'
+                    ELSE pg_get_userbyid(a.grantee) END AS name
+          FROM pg_proc p
+          JOIN pg_namespace n ON n.oid = p.pronamespace
+          CROSS JOIN LATERAL
+               aclexplode(coalesce(p.proacl, acldefault('f', p.proowner))) AS a
+         WHERE n.nspname IN ('feature','provider_sync','ops')) g
+ WHERE NOT EXISTS (SELECT 1
+                     FROM (VALUES @GRANTEES@) AS known(name)
+                    WHERE known.name = g.name)
+SQL
+)"
+ROUTINE_ACL_GRANTEE_GUARD_SQL="${ROUTINE_ACL_GRANTEE_GUARD_SQL/@GRANTEES@/$ROUTINE_ACL_GRANTEE_VALUES}"
 
 printf '=== routine ACL digest (기대값) ===\n'
 ACL_DIGEST="$(docker exec "$CONTAINER" psql -U "$USER_NAME" -d "$DB" -tA -c "$ROUTINE_ACL_DIGEST_SQL" | tr -d '[:space:]')"
 [ ${#ACL_DIGEST} -eq 64 ] || die "routine ACL digest를 얻지 못했다: ${ACL_DIGEST:0:32}"
 printf '  %s\n' "$ACL_DIGEST"
 
+printf '=== routine ACL grantee 축 완전성 (빌드 시점) ===\n'
+UNKNOWN_GRANTEES="$(docker exec "$CONTAINER" psql -U "$USER_NAME" -d "$DB" -tA \
+  -c "$ROUTINE_ACL_GRANTEE_GUARD_SQL" | tr -d '\r')"
+[ -z "$UNKNOWN_GRANTEES" ] || die "routine ACL에 고정 grantee 목록 밖의 grantee가 있다: ${UNKNOWN_GRANTEES} — ROUTINE_ACL_GRANTEE_VALUES에 추가하고 다시 빌드하라 (추가하지 않으면 digest가 그 축을 조용히 안 잰다)"
+printf '  목록 밖 grantee 없음\n'
+
 printf '=== 정규화 ===\n'
-python3 - "$RAW" "$OUT_DIR/schema.sql" "$ACL_DIGEST" "$ROUTINE_ACL_DIGEST_SQL" <<'PY'
+python3 - "$RAW" "$OUT_DIR/schema.sql" "$ACL_DIGEST" "$ROUTINE_ACL_DIGEST_SQL" \
+  "$ROUTINE_ACL_GRANTEE_GUARD_SQL" <<'PY'
 import pathlib, re, sys
 
 raw = pathlib.Path(sys.argv[1]).read_text(encoding="utf-8")
 out_path = pathlib.Path(sys.argv[2])
 acl_digest = sys.argv[3]
 acl_digest_sql = sys.argv[4]
+acl_grantee_guard_sql = sys.argv[5]
 lines = raw.splitlines()
 kept, dropped = [], {"version": 0, "preamble": 0}
 
@@ -217,8 +260,28 @@ if not acl_started:
 out.append("")
 out.append("SELECT set_config('role', current_setting('ktm.baseline_prior_role'), true);")
 
-# 8. 자기검증. 소유자 아닌 GRANT는 경고만 내고 무시되므로 **적용 성공(exit 0)이
-#    ACL 적용의 증거가 되지 못한다.** baseline이 스스로 확인하게 한다.
+# 8-a. grantee 축 완전성. digest보다 **먼저** 낸다 — 새 grantee는 digest를 바꾸지
+#      않으므로(그게 사각지대다) digest가 먼저 통과해 버리면 이 진단이 영영 안 나온다.
+out.append(
+    "\nDO $ktm_acl_grantee$\n"
+    "DECLARE\n"
+    "    unknown text;\n"
+    "BEGIN\n"
+    f"    unknown := ({acl_grantee_guard_sql});\n"
+    "    IF unknown <> '' THEN\n"
+    "        RAISE EXCEPTION\n"
+    "            'baseline routine ACL에 digest가 재지 않는 grantee가 있다: % —"
+    " routine ACL digest는 고정 grantee 목록만 재므로 이 축은 조용히 빠진다."
+    " scripts/build-baseline.sh의 ROUTINE_ACL_GRANTEE_VALUES에 추가하고 baseline을"
+    " 다시 생성하라', unknown\n"
+    "            USING ERRCODE = '42501';\n"
+    "    END IF;\n"
+    "END\n"
+    "$ktm_acl_grantee$;"
+)
+
+# 8-b. 자기검증. 소유자 아닌 GRANT는 경고만 내고 무시되므로 **적용 성공(exit 0)이
+#      ACL 적용의 증거가 되지 못한다.** baseline이 스스로 확인하게 한다.
 out.append(
     "\nDO $ktm_acl$\n"
     "DECLARE\n"
