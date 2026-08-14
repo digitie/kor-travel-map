@@ -5,16 +5,23 @@
 
 ## [Unreleased]
 
+### canonical curation snapshot 문자열 계약 (2026-08-14, T-VN-40)
+
+- **DATABASE/API(service)**: Map producer가 `theme_slug 128`, `theme_name 200`, collection
+  `title 300`, `edition_key 100`을 넘는 canonical snapshot을 저장·반환하지 못하게 DB CHECK와
+  OpenAPI를 동일하게 고정했다. 기존 초과 행은 `0221_tvn40_snapshot_text_bounds` 적용 전에
+  fail-close하며 값 자르기나 암묵 변환은 하지 않는다.
+
 ### Alembic 0200 squash baseline 연동 (2026-08-14)
 
 - **DATABASE**: PR #978의 `0200_schema_baseline`과 revision id를 보존한
-  `0104_tvn36_final_fence` squash bridge 뒤에 T-VN-40 migration을 `0202~0220` 단일 체인으로
+  `0104_tvn36_final_fence` squash bridge 뒤에 T-VN-40 migration을 `0202~0221` 단일 체인으로
   재배치했다. 과거 `0001~0104` Python module은 읽기 전용 `legacy_versions` 증거이며 active
   migration이나 integration test에서 실행하지 않는다.
 - **DEPLOY**: live runner가 고정 revision 대신 paired Map archive의 application graph에서 유일한
   head를 읽는다. 기존 `0104` DB는 stamp·baseline 재실행 없이 bridge에 그대로 연결되어
-  `0202→0220`만 in-place 적용한다. fresh DB는
-  `0200→0104 bridge→0202…0220` 전체 체인을 적용한다.
+  `0202→0221`만 in-place 적용한다. fresh DB는
+  `0200→0104 bridge→0202…0221` 전체 체인을 적용한다.
 - **SECURITY**: PostgreSQL bootstrap이 feature/curation owner·executor 역할 속성과 membership
   option graph를 exact 재확정·검증한다.
 

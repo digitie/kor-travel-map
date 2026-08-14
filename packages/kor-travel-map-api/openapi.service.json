@@ -2688,18 +2688,25 @@
         "additionalProperties": false,
         "properties": {
           "edition_key": {
+            "maxLength": 100,
             "title": "Edition Key",
             "type": "string"
           },
           "theme_name": {
+            "maxLength": 200,
+            "minLength": 1,
             "title": "Theme Name",
             "type": "string"
           },
           "theme_slug": {
+            "maxLength": 128,
+            "minLength": 1,
             "title": "Theme Slug",
             "type": "string"
           },
           "title": {
+            "maxLength": 300,
+            "minLength": 1,
             "title": "Title",
             "type": "string"
           }

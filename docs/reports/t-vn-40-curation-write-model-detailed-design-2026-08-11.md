@@ -1006,7 +1006,11 @@ identity는 JavaScript 정밀도 손실을 피하도록 decimal string 또는 op
 ```
 
 `collection`/`item`/`feature`의 exact property·nullable/type은 Map OpenAPI와 PinVi typed consumer
-test가 freeze한다. endpoint는 canonical membership의 `item.source_present`,
+test가 freeze한다. `collection` 문자열은 기존 Map write 계약과 동일하게
+`theme_slug 1..128`, `theme_name 1..200`, `title 1..300`, `edition_key 0..100`으로 제한한다.
+Map DB CHECK·named command·service OpenAPI와 PinVi vendored model이 같은 상한을 강제하며,
+초과 값을 자르거나 대체하지 않고 fail-close한다. endpoint는 canonical membership의
+`item.source_present`,
 `item.status='included'`,
 `item.archived_at IS NULL`, collection `status='published' AND visibility='public' AND archived_at IS
 NULL`, public theme, linked `feature.public_features`, 그리고 item/Feature와

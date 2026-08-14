@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "b866ce8096c44cbacf46a33ea941579d8bea3b2eefc76229088e1a2dfcd4dddd"
+      "sha256": "e8477394cc8d01fbf18644e6d3fe08e02e29c0a3c800fafef0cdc5f672b600b4"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -13,10 +13,15 @@
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
-      "sha256": "b3211235a0a1fcd16c67772aa651a23e4ccbc66c8b82e618815ee7137267f268"
+      "sha256": "e71e7b1112f98857a6deefe20a1ca48c689cb04647f2e9dc71664fdb69634a7b"
     }
   },
   "revisions": [
+    {
+      "date": "2026-08-14",
+      "task": "T-VN-40B",
+      "change": "Map→PinVi canonical curation snapshot의 문자열 경계를 기존 관리자 write 계약과 같은 theme_slug 128, theme_name 200, title 300, edition_key 100으로 고정하고 admin/service OpenAPI bytes를 재동결했다. user spec과 operation 집합은 변하지 않는다."
+    },
     {
       "date": "2026-08-14",
       "task": "T-VN-40B",

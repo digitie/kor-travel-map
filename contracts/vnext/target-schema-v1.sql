@@ -1936,6 +1936,10 @@ CREATE TABLE feature.curated_themes (
         theme_slug <> '' AND theme_slug = btrim(theme_slug)
     ),
     CONSTRAINT ck_curated_themes_name CHECK (btrim(theme_name) <> ''),
+    CONSTRAINT ck_curated_themes_snapshot_text_bounds CHECK (
+        char_length(theme_slug) BETWEEN 1 AND 128
+        AND char_length(theme_name) BETWEEN 1 AND 200
+    ),
     CONSTRAINT ck_curated_themes_visibility CHECK (
         visibility IN ('admin_only','public')
     ),
@@ -1972,6 +1976,10 @@ CREATE TABLE feature.curation_collections (
         REFERENCES feature.curated_themes (theme_id) ON DELETE RESTRICT,
     CONSTRAINT ck_curation_collections_key CHECK (btrim(collection_key) <> ''),
     CONSTRAINT ck_curation_collections_title CHECK (btrim(title) <> ''),
+    CONSTRAINT ck_curation_collections_snapshot_text_bounds CHECK (
+        char_length(title) BETWEEN 1 AND 300
+        AND char_length(edition_key) <= 100
+    ),
     CONSTRAINT ck_curation_collections_status CHECK (
         status IN ('draft', 'published', 'archived')
     ),

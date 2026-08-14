@@ -346,7 +346,31 @@ def test_snapshot_openapi_freezes_scope_and_service_security(client: TestClient)
 
     schemas = client.get("/openapi.json").json()["components"]["schemas"]
     item_schema = schemas["CurationItemDetailSnapshot"]
+    snapshot_collection_schema = schemas["CurationSnapshotCollection"]
     collection_schema = schemas["CurationCollectionDetailSnapshot"]
+    assert snapshot_collection_schema["properties"]["theme_slug"] == {
+        "type": "string",
+        "maxLength": 128,
+        "minLength": 1,
+        "title": "Theme Slug",
+    }
+    assert snapshot_collection_schema["properties"]["theme_name"] == {
+        "type": "string",
+        "maxLength": 200,
+        "minLength": 1,
+        "title": "Theme Name",
+    }
+    assert snapshot_collection_schema["properties"]["title"] == {
+        "type": "string",
+        "maxLength": 300,
+        "minLength": 1,
+        "title": "Title",
+    }
+    assert snapshot_collection_schema["properties"]["edition_key"] == {
+        "type": "string",
+        "maxLength": 100,
+        "title": "Edition Key",
+    }
     assert item_schema["properties"]["row_revision"]["pattern"] == "^[1-9][0-9]*$"
     assert item_schema["properties"]["etag"]["pattern"] == "^sha256:[0-9a-f]{64}$"
     assert collection_schema["properties"]["row_revision"]["pattern"] == "^[1-9][0-9]*$"

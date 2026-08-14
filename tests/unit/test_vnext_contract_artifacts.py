@@ -31,25 +31,25 @@ _TVN34_CURRENT_MIGRATION: Final = (
 # artifact bytes 고정 — 갱신 절차: artifact 수정 → 통합 테스트로 fingerprint 재고정
 # → 여기 sha256 갱신 (한 PR에서 함께).
 ARTIFACT_SHA256: Final[dict[str, str]] = {
-    "target-schema-v1.sql": ("f60264418facb4289b90a2e0c5d1f8cbffd5f1e07dbea2bbd8f1ea8ee7a8e956"),
+    "target-schema-v1.sql": ("11fb6a2ec85d87ca7e32bb63155ede380ced6ebce46e3ebe6c8b34e9cfb756f4"),
     "target-invariants-v1.sql": (
         "971f656169cb1d2f21f9286d22e732daf16a3a9d79456e0f221bae4c04b86e26"
     ),
     # 2026-08-13 T-VN-40 — final catalog/receipt/generation/candidate/audit 관계를
     # target+reference SQL에 반영한 뒤 빈 PostGIS DB에서 7축을 재실측했다.
     "target-schema-fingerprints-v1.json": (
-        "15a9849429bdfcf1c792723cd062c058d5d90df250233005bb0b619d4aa7df88"
+        "084986b9b7764be8098401b6ef26dd48ed174288bec5c7a5a84b3fb63ea1313e"
     ),
     "tvn33-reference-ownership-v1.sql": (
         "2e72796b373691b4d6e10f71eceec4504df94af1a2582edbf445fb2390f20b6b"
     ),
     # 2026-08-13 T-VN-40 — public legacy catalog 제거, scoped service snapshot/mapping,
     # admin catalog/import/candidate ETag·412/428 목표 diff를 machine freeze했다.
-    "openapi-diff-v1.json": ("0398fe32c5089dd7433005f35a2aad781bd2c86f999a229896034ca5dd35db17"),
+    "openapi-diff-v1.json": ("f0eb3ff148f728c148cdfa36f0468380b42cb446f551c23f7da6dd05b451c2fd"),
     # 2026-08-13 T-VN-36 — receipt가 리베이스로 폐기된 커밋(c1fa5a4d)과 그때의
     # spec sha를 가리키고 있었다. 현재 head로 재핀했다.
     "consumer-rollout-v1.json": (
-        "bd149f35146f1f6886948b53fb2b995ab72b1ebdcf4ee9ecde9ddef362303a7b"
+        "d89aa57e3c36b62b8aa443ed3aea82d3bca9d8c08a69e51c238474a768ae0648"
     ),
     "violation-fixtures-v1.sql": (
         "84cca48b776387e4b6fd00b702e40b3412c9731f6abcdd250a5c126c2ea155d8"

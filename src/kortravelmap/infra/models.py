@@ -1388,6 +1388,11 @@ class CuratedThemeRow(Base):
             "visibility IN ('admin_only','public')",
             name="ck_curated_themes_visibility",
         ),
+        CheckConstraint(
+            "char_length(theme_slug) BETWEEN 1 AND 128 "
+            "AND char_length(theme_name) BETWEEN 1 AND 200",
+            name="snapshot_text_bounds",
+        ),
         # 0025는 inline ``TEXT NOT NULL UNIQUE``로 만들어 PostgreSQL 기본명
         # ``curated_themes_theme_slug_key``를 얻는다. 명시 constraint로 그 이름을
         # 그대로 반영한다(naming convention은 ``uq_curated_themes_theme_slug``라
@@ -1814,6 +1819,11 @@ class CurationCollectionRow(Base):
     __table_args__ = (
         CheckConstraint("btrim(collection_key) <> ''", name="key"),
         CheckConstraint("btrim(title) <> ''", name="title"),
+        CheckConstraint(
+            "char_length(title) BETWEEN 1 AND 300 "
+            "AND char_length(edition_key) <= 100",
+            name="snapshot_text_bounds",
+        ),
         CheckConstraint(
             "status IN ('draft','published','archived')",
             name="status",
