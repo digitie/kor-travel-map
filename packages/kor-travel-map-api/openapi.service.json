@@ -2581,6 +2581,11 @@
             "title": "Item Set Hash",
             "type": "string"
           },
+          "item_set_hash_version": {
+            "const": "ktm-db-item-set-v1",
+            "title": "Item Set Hash Version",
+            "type": "string"
+          },
           "items": {
             "items": {
               "$ref": "#/components/schemas/CurationItemDetailSnapshot"
@@ -2618,6 +2623,7 @@
           "updated_at",
           "collection",
           "item_count",
+          "item_set_hash_version",
           "item_set_hash",
           "items",
           "next_cursor",
@@ -6459,6 +6465,16 @@
               }
             },
             "description": "cursor 이후 collection/item set 변경 — 첫 page부터 재시작"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "collection public item 수가 service snapshot 상한을 넘음 — collection을 분할해야 함"
           },
           "422": {
             "content": {

@@ -1,8 +1,9 @@
 """PinVi canonical curation snapshot 직렬화 계약.
 
-snapshot ETag와 collection item-set digest는 같은 canonical JSON v1을 쓴다.
-문자열은 NFC, object key는 사전순, 정수 identity는 호출자가 decimal string으로
-준비하며 ``etag`` 자기 자신은 payload 조립 단계에서 제외한다.
+item/page snapshot ETag는 canonical JSON v1을 쓴다. 문자열은 NFC, object key는
+사전순, 정수 identity는 호출자가 decimal string으로 준비하며 ``etag`` 자기 자신은
+payload 조립 단계에서 제외한다. collection completeness의 opaque DB set receipt는
+별도 ``ktm-db-item-set-v1`` 계약이며 이 모듈이 재계산하지 않는다.
 """
 
 from __future__ import annotations

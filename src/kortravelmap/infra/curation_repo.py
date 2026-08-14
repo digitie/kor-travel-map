@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
+    "CURATION_SERVICE_COLLECTION_MAX_ITEMS",
     "CurationCollection",
     "CurationImportBatch",
     "CurationImportPlan",
@@ -92,6 +93,8 @@ __all__ = [
     "patch_curation_collection_command",
     "validate_resolved_curation_identities",
 ]
+
+CURATION_SERVICE_COLLECTION_MAX_ITEMS: Final = 2_000
 
 CollectionStatus = Literal["draft", "published", "archived"]
 CollectionVisibility = Literal["admin_only", "public"]
@@ -956,6 +959,11 @@ WITH collection_row AS (
       AND (collection.source_id IS NULL OR source.archived_at IS NULL)
 ), eligible_item AS (
     {_SERVICE_SNAPSHOT_ELIGIBLE_ITEMS_SQL}
+), bounded_eligible_item AS (
+    SELECT *
+    FROM eligible_item
+    ORDER BY eligible_item.curation_item_id::uuid
+    LIMIT {CURATION_SERVICE_COLLECTION_MAX_ITEMS + 1}
 ), hashed_item AS (
     SELECT
         eligible_item.*,
@@ -991,7 +999,7 @@ WITH collection_row AS (
             ),
             'hex'
         ) AS item_payload_hash
-    FROM eligible_item
+    FROM bounded_eligible_item AS eligible_item
 ), item_set_receipt AS (
     SELECT
         count(*)::bigint AS item_count,

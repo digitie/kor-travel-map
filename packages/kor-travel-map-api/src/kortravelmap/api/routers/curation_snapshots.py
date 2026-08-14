@@ -7,7 +7,7 @@ import hashlib
 import hmac
 import json
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
@@ -29,6 +29,7 @@ _REVISION_PATTERN = r"^[1-9][0-9]*$"
 _BODY_ETAG_PATTERN = r"^sha256:[0-9a-f]{64}$"
 _DIGEST_PATTERN = r"^[0-9a-f]{64}$"
 _HTTP_ETAG_PATTERN = r'^"sha256:[0-9a-f]{64}"$'
+_ITEM_SET_HASH_VERSION = "ktm-db-item-set-v1"
 _ETAG_HEADER = {
     "ETag": {
         "description": "canonicalization v1 snapshot의 strong ETag.",
@@ -98,6 +99,7 @@ class CurationCollectionDetailSnapshot(BaseModel):
     updated_at: datetime
     collection: CurationSnapshotCollection
     item_count: Annotated[int, Field(ge=0)]
+    item_set_hash_version: Literal["ktm-db-item-set-v1"]
     item_set_hash: Annotated[str, Field(pattern=_DIGEST_PATTERN)]
     items: Annotated[list[CurationItemDetailSnapshot], Field(max_length=200)]
     next_cursor: str | None
@@ -166,6 +168,7 @@ def _collection_identity_payload(
             "edition_key": snapshot.edition_key,
         },
         "item_count": snapshot.item_count,
+        "item_set_hash_version": _ITEM_SET_HASH_VERSION,
         "item_set_hash": snapshot.item_set_hash,
     }
 
@@ -191,11 +194,14 @@ def _decode_cursor(raw: str, *, key: bytes) -> dict[str, object]:
             "v",
             "collection_id",
             "collection_revision",
+            "item_set_hash_version",
             "item_set_hash",
             "last_item_id",
         }:
             raise ValueError
         if payload["v"] != 1:
+            raise ValueError
+        if payload["item_set_hash_version"] != _ITEM_SET_HASH_VERSION:
             raise ValueError
         UUID(str(payload["collection_id"]))
         UUID(str(payload["last_item_id"]))
@@ -250,6 +256,12 @@ async def get_curation_item_detail_snapshot(
             "headers": _ETAG_HEADER,
         },
         409: {"description": "cursor 이후 collection/item set 변경 — 첫 page부터 재시작"},
+        413: {
+            "description": (
+                "collection public item 수가 service snapshot 상한을 넘음 — "
+                "collection을 분할해야 함"
+            )
+        },
     },
     openapi_extra={"x-required-service-scope": _SNAPSHOT_SCOPE},
 )
@@ -280,24 +292,26 @@ async def get_curation_collection_detail_snapshot(
     )
     if snapshot is None:
         raise HTTPException(status_code=404, detail="curation collection snapshot 없음")
+    if snapshot.item_count > curation_repo.CURATION_SERVICE_COLLECTION_MAX_ITEMS:
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                "curation collection snapshot item limit exceeded: "
+                f"max={curation_repo.CURATION_SERVICE_COLLECTION_MAX_ITEMS}"
+            ),
+        )
 
     identity_payload = _collection_identity_payload(snapshot)
-    collection_etag = f"sha256:{curation_snapshot_sha256(identity_payload)}"
-    strong_etag = f'"{collection_etag}"'
-    if cursor_payload is None:
-        if if_none_match == strong_etag:
-            return Response(status_code=304, headers={"ETag": strong_etag})
-        response.headers["ETag"] = strong_etag
-    else:
-        if (
-            str(cursor_payload["collection_id"]) != snapshot.collection_id
-            or str(cursor_payload["collection_revision"]) != str(snapshot.row_revision)
-            or str(cursor_payload["item_set_hash"]) != snapshot.item_set_hash
-        ):
-            raise HTTPException(
-                status_code=409,
-                detail="curation collection snapshot changed; restart from first page",
-            )
+    if cursor_payload is not None and (
+        str(cursor_payload["collection_id"]) != snapshot.collection_id
+        or str(cursor_payload["collection_revision"]) != str(snapshot.row_revision)
+        or str(cursor_payload["item_set_hash_version"]) != _ITEM_SET_HASH_VERSION
+        or str(cursor_payload["item_set_hash"]) != snapshot.item_set_hash
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="curation collection snapshot changed; restart from first page",
+        )
 
     page = snapshot.items[:page_size]
     complete = len(snapshot.items) <= page_size
@@ -308,15 +322,15 @@ async def get_curation_collection_detail_snapshot(
                 "v": 1,
                 "collection_id": snapshot.collection_id,
                 "collection_revision": str(snapshot.row_revision),
+                "item_set_hash_version": _ITEM_SET_HASH_VERSION,
                 "item_set_hash": snapshot.item_set_hash,
                 "last_item_id": page[-1].curation_item_id,
             },
             key=key,
         )
-    response_payload = canonical_curation_snapshot_value(
+    payload_without_etag = canonical_curation_snapshot_value(
         {
             **identity_payload,
-            "etag": collection_etag,
             "items": [
                 _item_view(item).model_dump(mode="json")
                 for item in page
@@ -325,4 +339,13 @@ async def get_curation_collection_detail_snapshot(
             "complete": complete,
         }
     )
+    if not isinstance(payload_without_etag, dict):  # pragma: no cover
+        raise TypeError("curation collection snapshot payload must be an object")
+    collection_etag = f"sha256:{curation_snapshot_sha256(payload_without_etag)}"
+    strong_etag = f'"{collection_etag}"'
+    if cursor_payload is None:
+        if if_none_match == strong_etag:
+            return Response(status_code=304, headers={"ETag": strong_etag})
+        response.headers["ETag"] = strong_etag
+    response_payload = {**payload_without_etag, "etag": collection_etag}
     return CurationCollectionDetailSnapshot.model_validate(response_payload)

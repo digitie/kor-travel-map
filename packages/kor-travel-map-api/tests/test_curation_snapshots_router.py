@@ -19,7 +19,11 @@ from kortravelmap.infra.curation_repo import (
 from pydantic import SecretStr, ValidationError
 
 from kortravelmap.api.app import create_app
-from kortravelmap.api.auth import SERVICE_TOKEN_HEADER
+from kortravelmap.api.auth import (
+    OPS_TOKEN_HEADER,
+    PUBLIC_API_KEY_HEADER,
+    SERVICE_TOKEN_HEADER,
+)
 from kortravelmap.api.db import get_session
 from kortravelmap.api.routers import curation_snapshots as module
 from kortravelmap.api.settings import ApiSettings
@@ -27,6 +31,9 @@ from kortravelmap.api.settings import ApiSettings
 TOKEN = "pinvi-curation-snapshot-token-000000000000000000000"
 TOKEN_DIGEST = hashlib.sha256(TOKEN.encode()).hexdigest()
 GENERIC_TOKEN = "generic-service-token-000000000000000000000000000"
+OPS_TOKEN = "ops-read-token-000000000000000000000000000000000"
+OPS_CANCEL_TOKEN = "ops-cancel-token-000000000000000000000000000000"
+OPS_FIXTURE_TOKEN = "ops-fixture-token-00000000000000000000000000000"
 COLLECTION_ID = "11111111-1111-4111-8111-111111111111"
 ITEM_ID = "22222222-2222-4222-8222-222222222222"
 ITEM_ID_2 = "33333333-3333-4333-8333-333333333333"
@@ -111,6 +118,9 @@ def test_snapshot_auth_is_fail_closed_and_generic_token_cannot_cross(
     wrong_scope_app = create_app(
         ApiSettings(
             service_token=SecretStr(GENERIC_TOKEN),
+            ops_read_token=SecretStr(OPS_TOKEN),
+            ops_cancel_token=SecretStr(OPS_CANCEL_TOKEN),
+            ops_fixture_token=SecretStr(OPS_FIXTURE_TOKEN),
             pinvi_curation_snapshot_token_sha256=TOKEN_DIGEST,
         )
     )
@@ -118,6 +128,15 @@ def test_snapshot_auth_is_fail_closed_and_generic_token_cannot_cross(
     wrong_scope_client = TestClient(wrong_scope_app)
     assert (
         wrong_scope_client.get(path, headers=_headers(GENERIC_TOKEN)).status_code
+        == 403
+    )
+    assert wrong_scope_client.get(path, headers=_headers(OPS_TOKEN)).status_code == 403
+    assert (
+        wrong_scope_client.get(path, headers={OPS_TOKEN_HEADER: OPS_TOKEN}).status_code
+        == 403
+    )
+    assert (
+        wrong_scope_client.get(path, headers={PUBLIC_API_KEY_HEADER: "known-public"}).status_code
         == 403
     )
 
@@ -193,6 +212,9 @@ def test_collection_snapshot_pages_exact_set_and_rejects_drift(
     assert len(body["items"]) == 1
     assert body["next_cursor"]
     assert first.headers["etag"] == f'"{body["etag"]}"'
+    payload = dict(body)
+    payload.pop("etag")
+    assert body["etag"] == f"sha256:{curation_snapshot_sha256(payload)}"
 
     second = client.get(
         path,
@@ -235,6 +257,49 @@ def test_collection_first_page_supports_exact_304(
 
 
 @pytest.mark.unit
+def test_collection_etag_changes_with_page_representation(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot = _collection(_item(), _item(ITEM_ID_2, revision=8))
+    monkeypatch.setattr(
+        module.curation_repo,
+        "get_curation_service_collection_snapshot",
+        AsyncMock(return_value=snapshot),
+    )
+    path = f"/v1/service/curation-collections/{COLLECTION_ID}/detail-snapshot"
+    one = client.get(path, headers=_headers(), params={"page_size": 1})
+    two = client.get(
+        path,
+        headers={**_headers(), "If-None-Match": one.headers["etag"]},
+        params={"page_size": 2},
+    )
+
+    assert one.status_code == 200
+    assert two.status_code == 200
+    assert one.headers["etag"] != two.headers["etag"]
+    assert one.json()["complete"] is False
+    assert two.json()["complete"] is True
+
+
+@pytest.mark.unit
+def test_collection_snapshot_rejects_over_limit_set(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot = _collection(
+        item_count=module.curation_repo.CURATION_SERVICE_COLLECTION_MAX_ITEMS + 1,
+    )
+    monkeypatch.setattr(
+        module.curation_repo,
+        "get_curation_service_collection_snapshot",
+        AsyncMock(return_value=snapshot),
+    )
+    path = f"/v1/service/curation-collections/{COLLECTION_ID}/detail-snapshot"
+    assert client.get(path, headers=_headers()).status_code == 413
+
+
+@pytest.mark.unit
 def test_snapshot_openapi_freezes_scope_and_service_security(client: TestClient) -> None:
     paths = client.get("/openapi.json").json()["paths"]
     for path in (
@@ -268,7 +333,13 @@ def test_snapshot_openapi_freezes_scope_and_service_security(client: TestClient)
     assert collection_schema["properties"]["row_revision"]["pattern"] == "^[1-9][0-9]*$"
     assert collection_schema["properties"]["etag"]["pattern"] == "^sha256:[0-9a-f]{64}$"
     assert collection_schema["properties"]["item_set_hash"]["pattern"] == "^[0-9a-f]{64}$"
+    assert collection_schema["properties"]["item_set_hash_version"]["const"] == (
+        "ktm-db-item-set-v1"
+    )
     assert collection_schema["properties"]["items"]["maxItems"] == 200
+    assert "413" in paths[
+        "/v1/service/curation-collections/{collection_id}/detail-snapshot"
+    ]["get"]["responses"]
 
 
 @pytest.mark.unit

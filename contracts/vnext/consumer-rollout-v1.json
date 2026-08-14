@@ -167,8 +167,8 @@
       "pinvi_snapshot_receipt": {
         "state": "pending",
         "map_user_openapi_sha256": "6a2ee0f94ffded691f5d169ef1914144eecdf1f4170226c8bc5e963e972403c1",
-        "map_service_openapi_sha256": "4d4b50a40ed96c5bc96f6d15aed7cebc36bf1e1939a346ac32925e5fcf2bcb35",
-        "map_full_openapi_sha256": "0cc7ab3e14da8363f3161517592c5cde39122f552fe86def2a07289ea3f1b081",
+        "map_service_openapi_sha256": "39c5329725af600b698868c350df140e9d79c4617c8540642884db21b9487ca9",
+        "map_full_openapi_sha256": "06fd6ec8abd591670717d1b17daa4433d095c1794a55b8fe3b4759f9a9986e35",
         "blocking_reason": "T-VN-40 canonical curation service snapshot과 PinVi UUID import consumer의 paired commit·vendor receipt가 아직 완결되지 않았다. 이 receipt가 complete가 되기 전에는 n150 installer가 fail-close한다."
       }
     },

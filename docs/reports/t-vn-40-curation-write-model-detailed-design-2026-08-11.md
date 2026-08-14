@@ -1031,12 +1031,22 @@ record/entity가 exact-match하지 않으면 404지만, 없는 item을 암묵적
 
 PinVi의 authoritative discovery/refresh는 collection snapshot route를 쓴다. 첫 page는 ordered active
 public item `(curation_item_id,row_revision,item-payload-hash)` 전체의 `item_set_hash`, count, collection
-representation ETag, closed collection payload, item snapshot page, opaque `next_cursor`를 반환한다. cursor는
+representation ETag, closed collection payload, item snapshot page, opaque `next_cursor`를 반환한다.
+`item_set_hash_version='ktm-db-item-set-v1'`은 PostgreSQL이 ordered positional item leaf
+`[curation_item_id,row_revision,updated_at,collection/theme/Feature/item/source projection]`의 JSONB text
+SHA-256을 만들고, ordered `[curation_item_id,row_revision,leaf_hash]` JSONB vector를 다시 SHA-256한
+opaque server receipt다. 이는 canonical JSON v1 response hash가 아니며 PinVi가 재계산하지 않는다.
+PinVi는 모든 page의 version/hash/count 동일성, item id 유일성, 마지막 `complete=true`를 검증하고
+receipt에 그대로 결박한다. service snapshot 지원 상한은 public item 2,000개이며 DB query는 2,001개에서
+중단해 413을 반환한다. collection은 이 상한 안에서 분할해야 하며 API resident page는 최대 201행이다.
+cursor는
 collection id, collection revision, item set hash, last item key를 서명해 다음 page마다 current set과 exact
 equality를 다시 검증한다. 중간 변경이면 409 restart를 반환해 서로 다른 시점의 page를 섞지 않는다.
 마지막 page는 `complete=true`; PinVi는 모든 page와 count/hash가 맞을 때만 한 transaction에서 plan/POI
 authoritative set을 교체한다. 첫 요청의 `If-None-Match` exact match는 304이며 receipt는 단일 item ETag가
-아니라 collection ETag + item set hash에 결박한다. item route는 단건 조회/진단용이고 multi-item
+아니라 first-page closed response ETag + item set hash/version에 결박한다. first-page ETag는
+`page_size`, items, `next_cursor`, `complete`를 포함한 실제 response에서 `etag`만 제외하고 계산하므로
+다른 page size는 같은 validator를 공유하지 않는다. item route는 단건 조회/진단용이고 multi-item
 collection completeness의 근거가 아니다.
 
 PinVi persistence mapping은 `collection_id → curated plan`, `curation_item_id → plan POI`다. plan은

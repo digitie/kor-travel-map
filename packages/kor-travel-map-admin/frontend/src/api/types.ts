@@ -7220,6 +7220,11 @@ export interface components {
             item_count: number;
             /** Item Set Hash */
             item_set_hash: string;
+            /**
+             * Item Set Hash Version
+             * @constant
+             */
+            item_set_hash_version: "ktm-db-item-set-v1";
             /** Items */
             items: components["schemas"]["CurationItemDetailSnapshot"][];
             /** Next Cursor */
@@ -24700,6 +24705,15 @@ export interface operations {
             };
             /** @description cursor 이후 collection/item set 변경 — 첫 page부터 재시작 */
             409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description collection public item 수가 service snapshot 상한을 넘음 — collection을 분할해야 함 */
+            413: {
                 headers: {
                     [name: string]: unknown;
                 };

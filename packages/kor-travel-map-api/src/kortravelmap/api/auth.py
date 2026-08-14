@@ -547,6 +547,21 @@ async def require_curation_snapshot_service_principal(
     """PinVi snapshot token digest를 exact principal/scope로 fail-closed 해석한다."""
 
     if token is None or token == "":
+        wrong_auth_scheme_present = any(
+            request.headers.get(header)
+            for header in (
+                ADMIN_PROXY_SECRET_HEADER,
+                OPS_TOKEN_HEADER,
+                PUBLIC_API_KEY_HEADER,
+                "Authorization",
+            )
+        )
+        if wrong_auth_scheme_present:
+            raise _cache_target_auth_error(
+                status.HTTP_403_FORBIDDEN,
+                "CURATION_SNAPSHOT_SERVICE_SCOPE_FORBIDDEN",
+                "요청 principal은 pinvi:curation-snapshot:read 인증 경계가 아닙니다.",
+            )
         raise _cache_target_auth_error(
             status.HTTP_401_UNAUTHORIZED,
             "CURATION_SNAPSHOT_SERVICE_TOKEN_REQUIRED",
@@ -570,6 +585,18 @@ async def require_curation_snapshot_service_principal(
             digest,
             _token_digest(settings.service_token.get_secret_value()),
         )
+    for other_secret in (
+        settings.admin_proxy_secret,
+        settings.metrics_token,
+        settings.ops_read_token,
+        settings.ops_cancel_token,
+        settings.ops_fixture_token,
+    ):
+        if other_secret is not None:
+            known_other_scope = known_other_scope or hmac.compare_digest(
+                digest,
+                _token_digest(other_secret.get_secret_value()),
+            )
     if known_other_scope:
         raise _cache_target_auth_error(
             status.HTTP_403_FORBIDDEN,
