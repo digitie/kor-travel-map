@@ -22,10 +22,12 @@ from kortravelmap.core.feature_operation import ProviderDatasetOperationMembersh
 from kortravelmap.core.sync_scope import parse_canonical_sync_scope
 from kortravelmap.infra.advisory_lock import advisory_lock_key
 from kortravelmap.infra.cache_target_event_repo import (
+    CacheTargetRefreshProtocolViolation,
     append_cache_target_links_reconciled_events,
     append_cache_target_refresh_status_events,
     capture_cache_target_refresh_members_by_keys,
     lock_cache_target_result_streams,
+    pinvi_cache_target_refresh_protocol_error,
 )
 from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateLockBusy,
@@ -785,6 +787,7 @@ async def _finish_failed_execution(
     error_message: str,
     owner_dagster_run_id: str,
     event_code: str | None = None,
+    append_cache_target_status_events: bool = True,
 ) -> FeatureUpdateExecutionResult:
     target_ids = [target.target_id for target in plan.resolution.cache_targets]
     try:
@@ -810,13 +813,14 @@ async def _finish_failed_execution(
             )
             if failed is None:
                 raise _FeatureUpdateExecutionStopped
-            await append_cache_target_refresh_status_events(
-                session,
-                request_id=failed.request_id,
-                job_id=failed.job_id,
-                status="failed",
-                error_code=event_code,
-            )
+            if append_cache_target_status_events:
+                await append_cache_target_refresh_status_events(
+                    session,
+                    request_id=failed.request_id,
+                    job_id=failed.job_id,
+                    status="failed",
+                    error_code=event_code,
+                )
             if event_code is not None:
                 for import_job_dataset_id in await _terminal_event_member_ids(
                     session,
@@ -1010,6 +1014,7 @@ async def _execute_feature_update_request_locked(
     plan: FeatureUpdateExecutionPlan | None = None
     target_ids: list[str] = []
     results: list[ProviderDatasetRefreshResult] = []
+    protocol_error: str | None = None
     try:
         async with session.begin():
             await _guard_execution_phase(
@@ -1028,19 +1033,39 @@ async def _execute_feature_update_request_locked(
                 raise _FeatureUpdateExecutionStopped
             started = claimed
             if started.scope_type == "cache_target_keys":
-                await capture_cache_target_refresh_members_by_keys(
+                external_system = str(started.scope["external_system"])
+                target_keys = tuple(str(value) for value in started.scope["target_keys"])
+                protocol_error = await pinvi_cache_target_refresh_protocol_error(
                     session,
                     request_id=started.request_id,
-                    external_system=str(started.scope["external_system"]),
-                    target_keys=tuple(
-                        str(value) for value in started.scope["target_keys"]
-                    ),
+                    external_system=external_system,
+                    target_keys=target_keys,
                 )
-            await append_cache_target_refresh_status_events(
+                if protocol_error is None:
+                    await capture_cache_target_refresh_members_by_keys(
+                        session,
+                        request_id=started.request_id,
+                        external_system=external_system,
+                        target_keys=target_keys,
+                    )
+            if protocol_error is None:
+                await append_cache_target_refresh_status_events(
+                    session,
+                    request_id=started.request_id,
+                    job_id=started.job_id,
+                    status="running",
+                )
+
+        if protocol_error is not None:
+            return await _finish_failed_execution(
                 session,
-                request_id=started.request_id,
-                job_id=started.job_id,
-                status="running",
+                started,
+                plan=_unresolved_execution_plan(started),
+                results=results,
+                error_message=protocol_error,
+                owner_dagster_run_id=dagster_run_id,
+                event_code="CACHE_TARGET_REFRESH_PROTOCOL_VIOLATION",
+                append_cache_target_status_events=False,
             )
 
         async with session.begin():
@@ -1234,6 +1259,9 @@ async def _execute_feature_update_request_locked(
                 exc.event_code
                 if isinstance(exc, ProviderDatasetRefreshFailure)
                 else None
+            ),
+            append_cache_target_status_events=not isinstance(
+                exc, CacheTargetRefreshProtocolViolation
             ),
         )
 
