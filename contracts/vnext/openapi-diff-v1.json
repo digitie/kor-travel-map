@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "e8477394cc8d01fbf18644e6d3fe08e02e29c0a3c800fafef0cdc5f672b600b4"
+      "sha256": "a687eaacc9472e357a4f9676c75662a9b53ec387972312b4e236c0e83e8e0ddb"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -20,7 +20,7 @@
     {
       "date": "2026-08-14",
       "task": "T-VN-40C",
-      "change": "maintenance fence 전용 legacy identity→canonical UUID mapping export를 service OpenAPI에 적용하고 baseline을 재동결했다. 전용 PinVi scope의 signed keyset은 row hash와 closed Merkle root/count를 결박한다. user/admin bytes와 기존 snapshot operation은 변하지 않는다."
+      "change": "maintenance fence 전용 legacy identity→canonical UUID mapping export를 service OpenAPI에 적용하고 baseline을 재동결했다. 전용 PinVi scope의 signed keyset은 row hash와 closed Merkle root/count를 결박한다. user bytes와 기존 snapshot operation은 변하지 않으며, service router를 포함하는 full admin OpenAPI bytes는 함께 갱신한다."
     },
     {
       "date": "2026-08-14",

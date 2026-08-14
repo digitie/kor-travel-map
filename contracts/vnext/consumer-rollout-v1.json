@@ -168,7 +168,7 @@
         "state": "pending",
         "map_user_openapi_sha256": "6a2ee0f94ffded691f5d169ef1914144eecdf1f4170226c8bc5e963e972403c1",
         "map_service_openapi_sha256": "c6f9aba6ab4b815c394e5e1cb5fb4a2c3488d147d5bb1a7e21b92c1796f4aebd",
-        "map_full_openapi_sha256": "e8477394cc8d01fbf18644e6d3fe08e02e29c0a3c800fafef0cdc5f672b600b4",
+        "map_full_openapi_sha256": "a687eaacc9472e357a4f9676c75662a9b53ec387972312b4e236c0e83e8e0ddb",
         "blocking_reason": "T-VN-40 canonical curation service snapshot과 maintenance-only identity mapping export를 PinVi UUID import consumer가 paired vendor·receipt로 수용하기 전이다. 이 receipt가 complete가 되기 전에는 n150 installer가 fail-close한다."
       }
     },
