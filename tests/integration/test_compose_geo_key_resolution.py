@@ -9,6 +9,17 @@ override 파일·보간 순서를 전부 해석한 최종 값이 무엇인가.
 비운 채 `docker compose config`를 돌린다. 어떤 서비스의 geo 소비자 키에서든 그 sentinel이
 나오면 **그 경로로 VWorld 키가 실제로 흘러간다**는 뜻이다.
 
+**이 층이 보지 않는 것**(과장하지 않고 적는다):
+
+- **`env_file`의 내용.** 아래 fixture가 없는 파일을 **빈 파일로 만든다** — 해석 경로가
+  살아 있는지만 보고 그 파일의 값은 검사하지 않는다. 운영자의 실제 `.env`는 이 가드의
+  범위 밖이다. (다만 compose에서 `environment:`가 `env_file`을 항상 이기므로,
+  `packages/kor-travel-map-api/.env`에 키를 넣어도 조용히 덮인다 — 그 사실 자체가
+  별도로 다뤄야 할 함정이다.)
+- **profile로 가려진 서비스.** `docker compose config`가 출력에서 제외한다.
+- **VWorld 계열 이름 목록**(`_VWORLD_VARS`)은 손으로 고른 셋이다. 네 번째가 생기면
+  이 층은 조용히 통과한다 — 정적 층이 원문 `${…VWORLD…}`를 보므로 실질 위험은 낮다.
+
 2026-08-13 prod 장애가 정확히 그 형상이었다 — `dagster`/`dagster-daemon`만 VWorld 키를
 들고 있었고, geo는 그것을 `401 E0401`로 거절한다.
 """
@@ -51,10 +62,21 @@ def _compose_files() -> list[list[str]]:
 
     base = _ROOT / "docker-compose.yml"
     assert base.exists(), "docker-compose.yml이 없다"
+    # `docker-compose.*.yml`만 훑다가 `compose.override.yaml`을 놓쳤다 — Compose는 그
+    # 이름을 **`-f` 없이도 자동으로 얹는다**(적대 리뷰가 누출 실증). 이름 규약 전체를
+    # 본다: `compose*.y*ml` / `docker-compose*.y*ml`.
     overrides = sorted(
-        path
-        for path in _ROOT.glob("docker-compose.*.yml")
-        if path.name != "docker-compose.yml"
+        {
+            path
+            for pattern in (
+                "compose*.yml",
+                "compose*.yaml",
+                "docker-compose*.yml",
+                "docker-compose*.yaml",
+            )
+            for path in _ROOT.glob(pattern)
+            if path.name != "docker-compose.yml"
+        }
     )
     combos = [[str(base)]]
     combos.extend([str(base), str(override)] for override in overrides)

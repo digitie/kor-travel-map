@@ -26,18 +26,31 @@ VWorld 키를 `401 E0401`로 거절한다. 이름이 비슷해서 설정 사슬�
    **해석된 값**은 `tests/integration/test_compose_geo_key_resolution.py`가
    `docker compose config`로 확인한다 — 여기 정적 검사는 그 앞단이다.
 
-## 그래도 못 하는 것
+## 그래도 못 하는 것 — 과장하지 않고 적는다
 
-- **중간 변수 우회.** 값 흐름 분석이 아니다.
+세 판 연속으로 문제가 된 것이 정확히 **가드가 자기 능력을 과장한 것**이었다. 적대
+리뷰가 실증한 잔여 우회를 전부 적는다.
+
+- **중간 변수 우회.** 값 흐름 분석이 아니다. 함수로 빼서 소비자 이름 없이 VWorld를
+  돌려주는 형태(`function resolveGeoKey() { … return process.env.NEXT_PUBLIC_VWORLD_API_KEY }`)도
+  같은 부류다.
+- **동적으로 조립한 환경변수 이름.** `` process.env[`NEXT_PUBLIC_${"VWORLD"}_API_KEY`] ``는
+  템플릿 리터럴 본문이 이름 모양이 아니라 산문으로 판정돼 지워진다. 문자열 결합
+  (`"NEXT_PUBLIC_" + "VWORLD_API_KEY"`)은 잡히지만 보간은 못 잡는다.
+- **JS 객체에서 이름과 값을 형제 속성으로 쪼개는 것.** `{ name: "…GEO_API_KEY",
+  fallback: vworldKey }` — 이웃 속성 오탐을 막으려 속성 단위로 좁힌 대가다.
 - **운영자의 `.env` 파일 자체.** **2026-08-13 사고의 실제 원인이 그 축이었다** — 이
   가드는 그 사고를 막지 못했을 것이다. 저장소가 그 값을 **권하지** 않게 하는 것이
-  여기서 할 수 있는 전부이고, `.env.example`에 경고 문구를 **요구**하는 이유가 그것이다.
+  여기서 할 수 있는 전부이고, `.env.example`을 주석까지 훑는 이유가 그것이다.
 - **kor-travel-docker-manager의 compose.** prod가 실제로 쓰는 정의는 그 저장소에 있다.
+- **profile로 가려진 compose 서비스.** `docker compose config`가 출력에서 제외하므로
+  통합 층이 보지 못한다(정적 층은 본다).
 """
 
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -73,31 +86,70 @@ _ADVISORY_MARKER = "VWorld 키로는 인증되지 않는다"
 #: (`test_no_control_characters_in_source`가 금지 문자를 `chr()`로 적는 것과 같은 이유).
 _SKIP_SUFFIXES = (".md",)
 _SKIP_PATHS = ("tests/unit/test_geo_key_provenance.py",)
-_SKIP_DIRS = ("node_modules", ".next", "docs", ".git", ".venv", "__pycache__", "build", "dist")
-#: 빌드 산출물은 소스가 아니다. `pip install -e`가 만드는 `*.egg-info/PKG-INFO`는
-#: `README.md`를 그대로 담는데, 그 README에는 "VWorld 키로는 인증되지 않는다"는
-#: **경고 문구**가 있다 — 로컬 트리에는 없고 CI에만 생겨서 CI만 red가 됐다.
-#: 문서는 `_SKIP_SUFFIXES`로 빼면서 문서 사본을 안 뺀 것이 구멍이었다.
-_SKIP_DIR_SUFFIXES = (".egg-info",)
 
 _OPENERS = "([{"
 _CLOSERS = ")]}"
 
 
-def _discover() -> list[str]:
-    """소비자 변수를 언급하는 파일을 **찾는다**(손으로 고르지 않는다)."""
+#: `git ls-files`를 못 쓸 때만 쓰는 배제 목록. 이 목록이 바로 적대 리뷰가 지적한
+#: "사람이 다음에 무엇이 생길지 계속 맞혀야 하는" 표면이라 **fallback으로만** 둔다.
+_FALLBACK_SKIP_DIRS = (
+    "node_modules",
+    ".next",
+    "docs",
+    ".git",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+)
+_FALLBACK_SKIP_DIR_SUFFIXES = (".egg-info",)
 
+
+def _tracked_files() -> list[str] | None:
+    """`git ls-files` 결과. git 저장소가 아니면 ``None``."""
+
+    try:
+        listed = subprocess.run(  # noqa: S603 - 저장소 자신의 파일 목록을 얻는 것이 목적이다
+            ["git", "ls-files", "-z"],
+            cwd=_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=60,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return sorted(entry for entry in listed.split("\0") if entry)
+
+
+def _discover() -> list[str]:
+    """소비자 변수를 언급하는 **추적 파일**을 찾는다(손으로 고르지 않는다).
+
+    `git ls-files`로 뽑는다. `rglob` + 배제 목록을 쓰다가 `pip install -e`가 만드는
+    `*.egg-info/PKG-INFO`(README 사본)가 CI에서만 걸려 red가 났다 — 배제 목록은
+    "다음에 무엇이 생길지"를 사람이 계속 맞혀야 하는 목록이고, 그 실패 양식이 실제로
+    한 번 터졌다. 추적 파일만 보면 빌드 산출물·캐시가 통째로 사라진다(적대 리뷰 권고).
+    """
+
+    candidates = _tracked_files()
+    if candidates is None:
+        # CI 미러 하네스는 워크트리를 tar로 복사해 `.git`이 없다. 그때만 파일 순회로
+        # 되돌아가고 생성물을 이름으로 뺀다 — git이 있을 때는 이 목록이 쓰이지 않는다.
+        candidates = [
+            path.relative_to(_ROOT).as_posix()
+            for path in sorted(_ROOT.rglob("*"))
+            if not any(
+                part in _FALLBACK_SKIP_DIRS or part.endswith(_FALLBACK_SKIP_DIR_SUFFIXES)
+                for part in path.relative_to(_ROOT).parts
+            )
+        ]
     found: list[str] = []
-    for path in sorted(_ROOT.rglob("*")):
-        if not path.is_file() or path.suffix in _SKIP_SUFFIXES:
+    for relative in candidates:
+        if relative in _SKIP_PATHS or relative.endswith(_SKIP_SUFFIXES):
             continue
-        relative = path.relative_to(_ROOT).as_posix()
-        parts = path.relative_to(_ROOT).parts
-        if any(part in _SKIP_DIRS for part in parts):
-            continue
-        if any(part.endswith(_SKIP_DIR_SUFFIXES) for part in parts):
-            continue
-        if relative in _SKIP_PATHS:
+        path = _ROOT / relative
+        if not path.is_file():
             continue
         try:
             text = path.read_text(encoding="utf-8")
@@ -141,16 +193,28 @@ def _shell_words(line: str) -> list[str]:
 
     words: list[str] = []
     current: list[str] = []
-    single = double = False
+    single = double = backtick = False
     depth = 0
     index = 0
     while index < len(line):
         char = line[index]
         pair = line[index : index + 2]
+        # 백슬래시 이스케이프는 다음 문자를 그대로 삼킨다 — `x\ $VW`는 셸이 한 단어로 둔다.
+        if char == "\\" and not single and index + 1 < len(line):
+            current.append(line[index : index + 2])
+            index += 2
+            continue
         if not single and pair == "$(":
             depth += 1
             current.append(pair)
             index += 2
+            continue
+        # 백틱 명령치환. `$( )`만 세다가 `` `printf %s "$VW"` ``에서 단어가 끊겼다
+        # (적대 리뷰 실증). 백틱은 유효 POSIX이고 shellcheck도 style 경고일 뿐이다.
+        if char == "`" and not single:
+            backtick = not backtick
+            current.append(char)
+            index += 1
             continue
         if not single and depth > 0 and char == ")":
             depth -= 1
@@ -158,7 +222,7 @@ def _shell_words(line: str) -> list[str]:
             single = not single
         elif char == '"' and not single:
             double = not double
-        elif char.isspace() and not single and not double and depth == 0:
+        elif char.isspace() and not single and not double and not backtick and depth == 0:
             if current:
                 words.append("".join(current))
                 current = []
@@ -237,15 +301,18 @@ def _enclosing_group(text: str, index: int, *, require_dollar: bool = False) -> 
 _NAME_LIKE = re.compile(r"^[A-Za-z0-9_./:-]+$")
 
 
-def _strip_js_comments(text: str) -> str:
-    without_block = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
-    without_line = "\n".join(re.sub(r"//.*$", "", line) for line in without_block.splitlines())
-
-    def _blank_prose(match: re.Match[str]) -> str:
+def _blank_prose_strings(text: str) -> str:
+    def _blank(match: re.Match[str]) -> str:
         body = match.group(2)
         return match.group(0) if _NAME_LIKE.match(body) else f"{match.group(1)}{match.group(1)}"
 
-    return re.sub(r"([\"'`])((?:[^\\\n]|\\.)*?)\1", _blank_prose, without_line)
+    return re.sub(r"([\"'`])((?:[^\\\n]|\\.)*?)\1", _blank, text)
+
+
+def _strip_js_comments(text: str) -> str:
+    without_block = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
+    without_line = "\n".join(re.sub(r"//.*$", "", line) for line in without_block.splitlines())
+    return _blank_prose_strings(without_line)
 
 
 def _element_of(group: str, offset: int) -> str:
@@ -353,20 +420,44 @@ def _compose_passages(relative: str) -> list[str]:
 
 
 def _advisory_passages(relative: str) -> list[str]:
-    """`.env.example`은 **값**만 본다(주석은 아래 marker 요구가 따로 맡는다)."""
+    """`.env.example`은 **주석까지** 본다 — 막으려는 것이 값이 아니라 **권유**다.
+
+    한때 주석을 걷어냈더니 "현재는 `NEXT_PUBLIC_VWORLD_API_KEY`와 동일"이라는, 2026-08-13
+    사고를 손으로 재현시키던 바로 그 문안이 다시 초록이 됐다(적대 리뷰 실증). 인라인
+    주석에 **경고**를 적었다고 빨간불이 뜨는 과탐도 피해야 하므로, marker 문장을 담은
+    줄만 면제한다.
+    """
 
     return [
-        _strip_line_comment(line)
+        line
         for line in _read(relative).splitlines()
-        if _CONSUMER_RE.search(_strip_line_comment(line))
+        if _CONSUMER_RE.search(line) and _ADVISORY_MARKER not in line
     ]
+
+
+def _is_compose(relative: str) -> bool:
+    """파일명이 아니라 **내용**으로 판정한다.
+
+    `docker-compose` 접두어를 요구했더니 `compose.override.yaml`이 줄 단위 처리기로
+    떨어져 앵커 별칭을 못 봤다 — 그리고 Docker Compose는 그 이름을 `-f` 없이도
+    **자동으로 얹는다**(적대 리뷰가 `docker compose config`로 누출 실증).
+    최상위에 `services:` 매핑이 있으면 compose다.
+    """
+
+    if not relative.endswith((".yml", ".yaml")):
+        return False
+    try:
+        document = yaml.safe_load(_read(relative))
+    except yaml.YAMLError:
+        return False
+    return isinstance(document, dict) and isinstance(document.get("services"), dict)
 
 
 def _passages(relative: str) -> list[str]:
     name = Path(relative).name
     if name.endswith(".env.example"):
         return _advisory_passages(relative)
-    if name.startswith("docker-compose") and name.endswith((".yml", ".yaml")):
+    if _is_compose(relative):
         return _compose_passages(relative)
     if name.endswith((".Dockerfile", ".sh")):
         return _shell_passages(relative)
@@ -374,11 +465,14 @@ def _passages(relative: str) -> list[str]:
         return _ts_passages(relative)
     if name.endswith((".mjs", ".js", ".jsx")):
         return _js_passages(relative)
-    # 나머지(파이썬 등)는 줄 단위 + 주석 제거로 충분하다.
+    # 나머지(파이썬 등)는 줄 단위. 주석과 **산문 문자열**을 지운다 — 이 저장소의 오류
+    # 메시지는 "VWorld 키는 이 자리에 쓸 수 없다" 같은 경고 자체를 담으므로, 그대로
+    # 훑으면 올바른 코드가 자기 설명 때문에 걸리고 메시지까지 거짓이 된다(적대 리뷰
+    # 지적). 환경변수 이름 모양의 문자열은 남으므로 `os.environ["…VWORLD…"]`는 보인다.
     return [
-        _strip_line_comment(line)
+        _blank_prose_strings(_strip_line_comment(line))
         for line in _read(relative).splitlines()
-        if _CONSUMER_RE.search(_strip_line_comment(line))
+        if _CONSUMER_RE.search(_blank_prose_strings(_strip_line_comment(line)))
     ]
 
 
