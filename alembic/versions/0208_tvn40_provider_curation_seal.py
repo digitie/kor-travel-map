@@ -757,4 +757,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError("0112 is forward-only; rebuild with the T-VN-40 release head")
+    raise RuntimeError("0208_tvn40_provider_seal is forward-only; rebuild with the T-VN-40 release head")

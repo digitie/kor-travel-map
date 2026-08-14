@@ -15,6 +15,7 @@ pytestmark = pytest.mark.unit
 _ROOT = Path(__file__).resolve().parents[2]
 _ACTIVE = _ROOT / "alembic" / "versions"
 _LEGACY = _ROOT / "alembic" / "legacy_versions"
+_ENV = _ROOT / "alembic" / "env.py"
 _GRAPH = _ROOT / "src" / "kortravelmap" / "_application_migration_graph.json"
 _EXPECTED_REVISIONS = (
     "0200_schema_baseline",
@@ -68,6 +69,16 @@ def test_active_graph_is_only_0200_to_0217() -> None:
         }
         for revision, parent in zip(revisions, parents, strict=True)
     ]
+
+
+def test_active_forward_only_boundary_and_diagnostics_use_squash_revisions() -> None:
+    assert _literal(_ENV, "_FORWARD_ONLY_BOUNDARY") == "0200_schema_baseline"
+    for path in sorted(_ACTIVE.glob("02*.py")):
+        revision = str(_literal(path, "revision"))
+        source = path.read_text(encoding="utf-8")
+        assert f'"{revision} is forward-only' in source, (
+            f"{path.name}: forward-only 진단이 자기 revision을 가리켜야 한다"
+        )
 
 
 def test_legacy_archive_has_exact_109_file_digest() -> None:

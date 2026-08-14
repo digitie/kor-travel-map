@@ -61,7 +61,7 @@ else:
 # autogenerate 대상 metadata.
 target_metadata = metadata
 
-_FORWARD_ONLY_BOUNDARY = "0060_weather_integrity"
+_FORWARD_ONLY_BOUNDARY = "0200_schema_baseline"
 _USE_SCHEMA_OWNER_ROLE_ENV = "KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE"
 
 
@@ -69,7 +69,7 @@ def _revisions_include_forward_only_boundary(
     script: ScriptDirectory,
     revisions: tuple[str, ...],
 ) -> bool:
-    """revision 집합 또는 그 조상에 0060 forward-only 경계가 있는지 반환한다."""
+    """revision 집합 또는 그 조상에 0200 squash 경계가 있는지 반환한다."""
     if not revisions:
         return False
     return any(
@@ -79,7 +79,7 @@ def _revisions_include_forward_only_boundary(
 
 
 def _guard_forward_only_target() -> None:
-    """downgrade/stamp 계획이 0060 아래로 가면 첫 step 전에 거부한다."""
+    """downgrade/stamp 계획이 0200 아래로 가면 첫 step 전에 거부한다."""
     migration_context = context.get_context()
     migration_fn = migration_context.opts.get("fn")
     if migration_fn is None or migration_fn.__name__ not in {
@@ -121,8 +121,8 @@ def _guard_forward_only_target() -> None:
     )
     if crosses_boundary:
         raise RuntimeError(
-            "0060 is forward-only: restore the pre-cutover backup/PITR under a "
-            "writer fence and roll back the writer image as one operation"
+            "0200 is forward-only: recreate the application DB from the current "
+            "baseline and reload provider inputs under a writer fence"
         )
 
 
@@ -256,7 +256,7 @@ def do_run_migrations(connection: Connection) -> None:
             # 수명 동안의 session role을 쓴다. connection close 시 reset되며 runtime은
             # 이 group membership을 절대 얻지 않는다.
             connection.execute(text("SET ROLE ktm_feature_schema_owner"))
-        # 0061+ descendant의 downgrade가 일부 commit된 뒤 0060에서 멈추지 않도록
+        # 0201+ descendant의 downgrade가 일부 commit된 뒤 0200에서 멈추지 않도록
         # destination 전체를 migration step 실행 전에 판정한다.
         _guard_forward_only_target()
         # ADR-008 — search_path를 Alembic이 소유한 트랜잭션 **안에서** 설정.

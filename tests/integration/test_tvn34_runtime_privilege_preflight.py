@@ -338,6 +338,108 @@ async def test_tvn34_runtime_preflight_rejects_single_audit_or_read_view_leak(
             await connection.execute(
                 text("GRANT SELECT ON feature.public_features TO ktm_feature_runtime")
             )
+
+
+async def test_tvn40_runtime_preflight_rejects_cross_executor_and_missing_grants(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """T-VN-40 procedure 집합은 API/Dagster별 exact equality로 검증한다."""
+
+    await _provision_runtime_logins(migrated_engine)
+    api_engine = await _engine_for_runtime(
+        migrated_engine,
+        login="ktm_feature_api_runtime",
+    )
+    dagster_engine = await _engine_for_runtime(
+        migrated_engine,
+        login="ktm_feature_dagster_runtime",
+    )
+    try:
+        async with migrated_engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "GRANT EXECUTE ON PROCEDURE "
+                    "feature.finalize_provider_curation_root(uuid) "
+                    "TO ktm_feature_api_runtime"
+                )
+            )
+            await connection.execute(
+                text(
+                    "GRANT EXECUTE ON PROCEDURE "
+                    "feature.reject_theme_feature_candidate("
+                    "uuid,bigint,bigint,text,text) "
+                    "TO ktm_feature_dagster_runtime"
+                )
+            )
+
+        with pytest.raises(RuntimeDbPrivilegeBoundaryError, match="unexpected"):
+            await assert_runtime_db_privilege_boundary(
+                api_engine,
+                expected_login="ktm_feature_api_runtime",
+            )
+        with pytest.raises(RuntimeDbPrivilegeBoundaryError, match="unexpected"):
+            await assert_runtime_db_privilege_boundary(
+                dagster_engine,
+                expected_login="ktm_feature_dagster_runtime",
+            )
+
+        async with migrated_engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "REVOKE EXECUTE ON PROCEDURE "
+                    "feature.finalize_provider_curation_root(uuid) "
+                    "FROM ktm_feature_api_runtime"
+                )
+            )
+            await connection.execute(
+                text(
+                    "REVOKE EXECUTE ON PROCEDURE "
+                    "feature.reject_theme_feature_candidate("
+                    "uuid,bigint,bigint,text,text) "
+                    "FROM ktm_feature_dagster_runtime"
+                )
+            )
+            await connection.execute(
+                text(
+                    "REVOKE EXECUTE ON PROCEDURE "
+                    "feature.archive_curation_collection_command("
+                    "uuid,bigint,bigint,text) "
+                    "FROM ktm_curation_admin_executor"
+                )
+            )
+
+        with pytest.raises(RuntimeDbPrivilegeBoundaryError, match="missing expected"):
+            await assert_runtime_db_privilege_boundary(
+                api_engine,
+                expected_login="ktm_feature_api_runtime",
+            )
+    finally:
+        async with migrated_engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "REVOKE EXECUTE ON PROCEDURE "
+                    "feature.finalize_provider_curation_root(uuid) "
+                    "FROM ktm_feature_api_runtime"
+                )
+            )
+            await connection.execute(
+                text(
+                    "REVOKE EXECUTE ON PROCEDURE "
+                    "feature.reject_theme_feature_candidate("
+                    "uuid,bigint,bigint,text,text) "
+                    "FROM ktm_feature_dagster_runtime"
+                )
+            )
+            await connection.execute(
+                text(
+                    "GRANT EXECUTE ON PROCEDURE "
+                    "feature.archive_curation_collection_command("
+                    "uuid,bigint,bigint,text) "
+                    "TO ktm_curation_admin_executor"
+                )
+            )
+        await api_engine.dispose()
+        await dagster_engine.dispose()
         await api_engine.dispose()
         await dagster_engine.dispose()
 

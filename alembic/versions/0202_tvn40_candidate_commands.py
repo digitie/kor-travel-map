@@ -332,4 +332,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError("0106 is forward-only; rebuild with the T-VN-40 release head")
+    raise RuntimeError("0202_tvn40_candidate_commands is forward-only; rebuild with the T-VN-40 release head")

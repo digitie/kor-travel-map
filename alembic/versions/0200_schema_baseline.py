@@ -279,5 +279,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     raise RuntimeError(
-        "baseline은 forward-only다 — 되돌리려면 DB를 폐기하고 다시 만들어라"
+        "0200_schema_baseline is forward-only — DB를 폐기하고 다시 만들어라"
     )

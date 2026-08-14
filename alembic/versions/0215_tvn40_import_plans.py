@@ -537,4 +537,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError("0119 is forward-only; rebuild with the T-VN-40 release head")
+    raise RuntimeError("0215_tvn40_import_plans is forward-only; rebuild with the T-VN-40 release head")

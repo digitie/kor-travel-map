@@ -806,4 +806,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError("0108 is forward-only; rebuild with the T-VN-40 release head")
+    raise RuntimeError("0204_tvn40_rule_generation is forward-only; rebuild with the T-VN-40 release head")
