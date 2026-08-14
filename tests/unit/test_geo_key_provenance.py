@@ -73,7 +73,12 @@ _ADVISORY_MARKER = "VWorld 키로는 인증되지 않는다"
 #: (`test_no_control_characters_in_source`가 금지 문자를 `chr()`로 적는 것과 같은 이유).
 _SKIP_SUFFIXES = (".md",)
 _SKIP_PATHS = ("tests/unit/test_geo_key_provenance.py",)
-_SKIP_DIRS = ("node_modules", ".next", "docs", ".git", ".venv", "__pycache__")
+_SKIP_DIRS = ("node_modules", ".next", "docs", ".git", ".venv", "__pycache__", "build", "dist")
+#: 빌드 산출물은 소스가 아니다. `pip install -e`가 만드는 `*.egg-info/PKG-INFO`는
+#: `README.md`를 그대로 담는데, 그 README에는 "VWorld 키로는 인증되지 않는다"는
+#: **경고 문구**가 있다 — 로컬 트리에는 없고 CI에만 생겨서 CI만 red가 됐다.
+#: 문서는 `_SKIP_SUFFIXES`로 빼면서 문서 사본을 안 뺀 것이 구멍이었다.
+_SKIP_DIR_SUFFIXES = (".egg-info",)
 
 _OPENERS = "([{"
 _CLOSERS = ")]}"
@@ -87,7 +92,10 @@ def _discover() -> list[str]:
         if not path.is_file() or path.suffix in _SKIP_SUFFIXES:
             continue
         relative = path.relative_to(_ROOT).as_posix()
-        if any(part in _SKIP_DIRS for part in path.relative_to(_ROOT).parts):
+        parts = path.relative_to(_ROOT).parts
+        if any(part in _SKIP_DIRS for part in parts):
+            continue
+        if any(part.endswith(_SKIP_DIR_SUFFIXES) for part in parts):
             continue
         if relative in _SKIP_PATHS:
             continue
