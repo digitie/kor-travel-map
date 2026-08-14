@@ -455,15 +455,22 @@ feature 본문 결손을 메운다.** 백업 산출물이 읽히는지(절차 4)
 
    **위 네 축만으로는 4단계의 부분 복원을 보지 못한다.** F1도 카운트도 identity도
    `facility_info`를 들여다보지 않기 때문에, detail이 빈 채로 돌아와도 전부 초록이다. 그래서
-   1단계에서 `feature_uuid`·`source_entity_key`와 **함께 `detail->'facility_info'`도 받아 두고**
+   1단계에서 `feature_uuid`·`source_entity_key`와 **함께 `facility_info`도 받아 두고**
    5단계에서 대조한다. building/medical/food/culture_sports 블록이 사라졌으면 정상이다 —
    그것이 이 경로의 알려진 한계이지 드릴 실패가 아니다. 그 블록까지 돌려야 하는 복구라면
    replay가 아니라 백업 복원이 수단이다.
 
+   `facility_info`는 `feature.feature_places`의 **최상위 jsonb 컬럼**이다. DTO에서
+   `PlaceDetail.facility_info`로 읽는다고 DB에도 `detail` 아래 있는 것이 아니다 —
+   그 테이블에 `detail` 컬럼은 없다.
+
    ```sql
-   SELECT feature_id, detail->'facility_info' FROM feature.feature_places
+   SELECT feature_id, facility_info FROM feature.feature_places
     WHERE feature_id = ANY(:feature_ids);
    ```
+
+   주소 두 축은 `feature.features`에서 본다 — `address->>'zipcode'`(jsonb)와
+   최상위 컬럼 `road_address_management_no`.
 
    **`feature_uuid`는 원래 값으로 돌아오지 않는다.** 0083 이후 신규 행의 UUID는 비파생 v7이라
    replay는 새 identity를 만든다. 1단계에서 받아 둔 값과 대조해 "본문은 (detail 일부를 뺀 채)
