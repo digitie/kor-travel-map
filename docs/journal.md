@@ -24,6 +24,12 @@ in-process 로드하므로 옆의 code server가 최신이어도 소용이 없�
 나오는지. 변이로 확인했다 — daemon 태그를 빼면 3개 전부 실패하고, 한 번 빌드를 두 번
 호출로 되돌리면 후자만 실패한다. 후자가 없으면 그 회귀는 조용히 지나간다.
 
+수리된 prod가 그 형태를 그대로 보여 준다. `kor-travel-map-dagster:latest-main`과
+`kor-travel-map-dagster-daemon:latest-main`이 **같은 digest**(`443cd970c09a8b40`)를
+가리킨다 — 이름이 둘, 이미지가 하나. 두 컨테이너는 2026-08-14 00:13/00:27 UTC에
+떴고, 1분 주기 `current_weather_summary_refresh`가 그 직후부터 463회 연속 성공했다.
+그 전에는 `feature_update_request_queue_sensor`가 30초마다 죽고 있었다.
+
 ### prod DSN 경계 — 조사 중 정본 DB를 착각했다
 
 먼저 적어 둔다. 이 조사에서 한참을 `ktm-tvn36-db` 컨테이너를 정본으로 보고 결론을

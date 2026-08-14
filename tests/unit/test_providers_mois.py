@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
@@ -18,6 +19,7 @@ from typing import Any
 
 import pytest
 
+from kortravelmap.cli.records import MoisLicenseJsonRecord
 from kortravelmap.dto import Address, Coordinate, FeatureKind, SourceRole
 from kortravelmap.providers.mois import (
     EXCLUDED_SERVICE_SLUGS,
@@ -26,6 +28,8 @@ from kortravelmap.providers.mois import (
     PROMOTED_PLACE_KIND_BY_SLUG,
     PROMOTED_SERVICE_SLUGS,
     PROVIDER_NAME,
+    _facility_info,
+    _raw_data,
     license_records_to_bundles,
     resolve_license_category,
     resolve_license_place_kind,
@@ -375,3 +379,111 @@ async def test_deterministic_ids() -> None:
     [b2] = await _bundles([rec])
     assert b1.feature.feature_id == b2.feature.feature_id
     assert b1.source_record.source_record_key == b2.source_record.source_record_key
+
+
+# -- raw_data round-trip (backup-restore §10 절차 4) ---------------------------
+
+
+def _fully_populated_record() -> _Record:
+    """모든 Protocol 필드가 **비어 있지 않은** record.
+
+    필드를 손으로 나열하지 않고 dataclass 정의에서 만든다 — Protocol에 필드가 추가되면
+    이 헬퍼가 자동으로 채우고, 아래 손실 집합이 갱신되지 않으면 테스트가 실패한다.
+    """
+
+    values: dict[str, Any] = {}
+    for index, field in enumerate(dataclasses.fields(_Record), start=1):
+        annotation = str(field.type)
+        if "bool" in annotation:
+            values[field.name] = True
+        elif "date" in annotation:
+            values[field.name] = date(2020, 1, 1 + (index % 27))
+        elif "int" in annotation:
+            values[field.name] = index
+        elif "float" in annotation:
+            values[field.name] = float(index)
+        else:
+            values[field.name] = f"v{index}"
+    values["service_slug"] = "general_restaurants"
+    values["multi_use_business_place_yn"] = "Y"
+    return _Record(**values)
+
+
+#: ``_raw_data``가 **버리는** Protocol 필드. 복원 드릴(§10 절차 4)은 저장된
+#: ``source_records.raw_data``를 NDJSON으로 되먹이므로, 여기 있는 값은 replay로 돌아오지
+#: 않는다. 이 집합이 줄면 ``docs/backup-restore.md`` §10도 함께 고쳐야 한다.
+_RAW_DATA_DROPS = frozenset(
+    {
+        "bed_count",
+        "building_management_number",
+        "building_usage_name",
+        "business_type_name",
+        "culture_sports_business_type_name",
+        "designation_date",
+        "facility_area",
+        "facility_total_scale",
+        "ground_floor_count",
+        "healthcare_worker_count",
+        "hospital_room_count",
+        "lot_zip",
+        "medical_institution_type_name",
+        "medical_subject_names",
+        "multi_use_business_place_yn",
+        "road_zip",
+        "sales_method_name",
+        "sanitation_business_status_name",
+        "sickbed_count",
+        "subtype_name",
+        "total_area",
+        "total_floor_count",
+        "underground_floor_count",
+        "water_supply_facility_type_name",
+    }
+)
+
+
+def test_raw_data_round_trip_drops_exactly_the_known_fields() -> None:
+    """``raw_data`` → NDJSON → record 되먹임에서 무엇이 사라지는지 못박는다.
+
+    ``docs/backup-restore.md`` §10 절차 4는 ``source_records.raw_data``를 되먹여 결손을
+    메운다. 그런데 ``_raw_data``는 payload_hash용 canonical dict라 Protocol 45개 중 22개만
+    담고, NDJSON 래퍼(``MoisLicenseJsonRecord.__getattr__``)는 없는 key를 **조용히 None**으로
+    돌려준다. 그래서 되먹임은 실패하지 않고 **부분 복원**된다 — 이쪽이 훨씬 위험하다.
+    """
+
+    original = _fully_populated_record()
+    replayed = MoisLicenseJsonRecord(_raw_data(original, category="food"))
+
+    dropped = {
+        field.name for field in dataclasses.fields(_Record) if getattr(replayed, field.name) is None
+    }
+    assert dropped == set(_RAW_DATA_DROPS), (
+        "raw_data round-trip의 손실 집합이 바뀌었다 — docs/backup-restore.md §10 절차 4의"
+        " 경고와 절차 5의 확인 축도 함께 고쳐라.\n"
+        f"  새로 사라진 것: {sorted(dropped - set(_RAW_DATA_DROPS))}\n"
+        f"  이제 살아남는 것: {sorted(set(_RAW_DATA_DROPS) - dropped)}"
+    )
+
+
+def test_raw_data_round_trip_empties_facility_info_blocks() -> None:
+    """손실이 **본문 어디에 나타나는지**까지 고정한다.
+
+    이름 목록만 비교하면 "그래서 뭐가 나빠지나"가 안 보인다. 복원 드릴이 실제로 놓치는
+    것은 ``PlaceDetail.facility_info``의 building/medical/food/culture_sports 네 블록이다.
+    절차 5의 확인 축(F1, feature 카운트, identity 4축)은 이 손실을 전혀 보지 못한다.
+    """
+
+    original = _fully_populated_record()
+    replayed = MoisLicenseJsonRecord(_raw_data(original, category="food"))
+
+    before = _facility_info(original)
+    after = _facility_info(replayed)
+
+    assert set(before) >= {"building", "medical", "food", "culture_sports"}, (
+        "전제가 깨졌다 — 모든 필드를 채운 record인데 facility_info 블록이 안 생긴다"
+    )
+    assert set(after) == {"service_slug", "category", "subtype_name", "sales_method_name"}, (
+        f"되먹임 후 facility_info가 예상과 다르다: {sorted(after)}"
+    )
+    assert after["subtype_name"] is None
+    assert after["sales_method_name"] is None
