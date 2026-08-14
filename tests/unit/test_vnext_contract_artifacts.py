@@ -45,11 +45,11 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     ),
     # 2026-08-13 T-VN-40 — public legacy catalog 제거, scoped service snapshot/mapping,
     # admin catalog/import/candidate ETag·412/428 목표 diff를 machine freeze했다.
-    "openapi-diff-v1.json": ("53e077280027b6f814eb36bc61ee032de48d2510a105ce20ddeb2c5f77c1f005"),
+    "openapi-diff-v1.json": ("62c4b995553f4353c958fc9fd92f6f9e246f82a75809d79ed4dc9470023daf32"),
     # 2026-08-13 T-VN-36 — receipt가 리베이스로 폐기된 커밋(c1fa5a4d)과 그때의
     # spec sha를 가리키고 있었다. 현재 head로 재핀했다.
     "consumer-rollout-v1.json": (
-        "635e02919fe5906bc195047ae9266a32fa018dafd87b1517a32e01ba6c3a1385"
+        "546bab70bfb5c62e1e42e12ba4bceda4d6a756e370ccfc4a2cbf1788b1d8730e"
     ),
     "violation-fixtures-v1.sql": (
         "84cca48b776387e4b6fd00b702e40b3412c9731f6abcdd250a5c126c2ea155d8"

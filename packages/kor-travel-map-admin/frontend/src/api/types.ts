@@ -24668,7 +24668,9 @@ export interface operations {
                 page_size?: number;
                 cursor?: string | null;
             };
-            header?: never;
+            header?: {
+                "If-None-Match"?: string | null;
+            };
             path: {
                 collection_id: string;
             };
@@ -24690,6 +24692,8 @@ export interface operations {
             /** @description 첫 page collection ETag 일치 */
             304: {
                 headers: {
+                    /** @description canonicalization v1 snapshot의 strong ETag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content?: never;
@@ -24726,7 +24730,9 @@ export interface operations {
     get_curation_item_detail_snapshot_v1_service_curation_items__curation_item_id__detail_snapshot_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "If-None-Match"?: string | null;
+            };
             path: {
                 curation_item_id: string;
             };
@@ -24748,6 +24754,8 @@ export interface operations {
             /** @description ETag 일치 */
             304: {
                 headers: {
+                    /** @description canonicalization v1 snapshot의 strong ETag. */
+                    ETag?: string;
                     [name: string]: unknown;
                 };
                 content?: never;

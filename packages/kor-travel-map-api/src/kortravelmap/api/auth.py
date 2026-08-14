@@ -552,16 +552,34 @@ async def require_curation_snapshot_service_principal(
             "CURATION_SNAPSHOT_SERVICE_TOKEN_REQUIRED",
             f"{SERVICE_TOKEN_HEADER} 헤더가 필요합니다.",
         )
-    expected = _settings(request).pinvi_curation_snapshot_token_sha256
-    if expected is None or not hmac.compare_digest(_token_digest(token), expected):
-        raise _cache_target_auth_error(
-            status.HTTP_401_UNAUTHORIZED,
-            "CURATION_SNAPSHOT_SERVICE_TOKEN_INVALID",
-            f"{SERVICE_TOKEN_HEADER} 헤더가 유효하지 않습니다.",
+    settings = _settings(request)
+    digest = _token_digest(token)
+    expected = settings.pinvi_curation_snapshot_token_sha256
+    if expected is not None and hmac.compare_digest(digest, expected):
+        return CurationSnapshotServicePrincipalContext(
+            principal_id="service:pinvi",
+            scopes=frozenset({"pinvi:curation-snapshot:read"}),
         )
-    return CurationSnapshotServicePrincipalContext(
-        principal_id="service:pinvi",
-        scopes=frozenset({"pinvi:curation-snapshot:read"}),
+
+    known_other_scope = any(
+        hmac.compare_digest(digest, principal.token_sha256)
+        for principal in settings.cache_target_service_principals
+    )
+    if settings.service_token is not None:
+        known_other_scope = known_other_scope or hmac.compare_digest(
+            digest,
+            _token_digest(settings.service_token.get_secret_value()),
+        )
+    if known_other_scope:
+        raise _cache_target_auth_error(
+            status.HTTP_403_FORBIDDEN,
+            "CURATION_SNAPSHOT_SERVICE_SCOPE_FORBIDDEN",
+            "ServiceToken principal에 pinvi:curation-snapshot:read scope가 없습니다.",
+        )
+    raise _cache_target_auth_error(
+        status.HTTP_401_UNAUTHORIZED,
+        "CURATION_SNAPSHOT_SERVICE_TOKEN_INVALID",
+        f"{SERVICE_TOKEN_HEADER} 헤더가 유효하지 않습니다.",
     )
 
 

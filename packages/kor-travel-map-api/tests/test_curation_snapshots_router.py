@@ -26,6 +26,7 @@ from kortravelmap.api.settings import ApiSettings
 
 TOKEN = "pinvi-curation-snapshot-token-000000000000000000000"
 TOKEN_DIGEST = hashlib.sha256(TOKEN.encode()).hexdigest()
+GENERIC_TOKEN = "generic-service-token-000000000000000000000000000"
 COLLECTION_ID = "11111111-1111-4111-8111-111111111111"
 ITEM_ID = "22222222-2222-4222-8222-222222222222"
 ITEM_ID_2 = "33333333-3333-4333-8333-333333333333"
@@ -78,6 +79,8 @@ def _item(item_id: str = ITEM_ID, *, revision: int = 7) -> CurationServiceItemSn
 def _collection(
     *items: CurationServiceItemSnapshot,
     revision: int = 5,
+    item_count: int | None = None,
+    item_set_hash: str = "a" * 64,
 ) -> CurationServiceCollectionSnapshot:
     return CurationServiceCollectionSnapshot(
         collection_id=COLLECTION_ID,
@@ -87,6 +90,8 @@ def _collection(
         theme_name="해안 카페",
         title="동해 카페",
         edition_key="2026",
+        item_count=len(items) if item_count is None else item_count,
+        item_set_hash=item_set_hash,
         items=tuple(items),
     )
 
@@ -103,10 +108,18 @@ def test_snapshot_auth_is_fail_closed_and_generic_token_cannot_cross(
     assert client.get(path).status_code == 401
     assert client.get(path, headers=_headers("generic-service-token")).status_code == 401
 
-    unset_app = create_app(ApiSettings(service_token=SecretStr(TOKEN)))
-    unset_app.dependency_overrides[get_session] = _fake_session
-    unset_client = TestClient(unset_app)
-    assert unset_client.get(path, headers=_headers()).status_code == 401
+    wrong_scope_app = create_app(
+        ApiSettings(
+            service_token=SecretStr(GENERIC_TOKEN),
+            pinvi_curation_snapshot_token_sha256=TOKEN_DIGEST,
+        )
+    )
+    wrong_scope_app.dependency_overrides[get_session] = _fake_session
+    wrong_scope_client = TestClient(wrong_scope_app)
+    assert (
+        wrong_scope_client.get(path, headers=_headers(GENERIC_TOKEN)).status_code
+        == 403
+    )
 
 
 @pytest.mark.unit
@@ -155,8 +168,17 @@ def test_collection_snapshot_pages_exact_set_and_rejects_drift(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    snapshot = _collection(_item(), _item(ITEM_ID_2, revision=8))
-    fetch = AsyncMock(return_value=snapshot)
+    first_snapshot = _collection(_item(), _item(ITEM_ID_2, revision=8))
+    second_snapshot = _collection(
+        _item(ITEM_ID_2, revision=8),
+        item_count=2,
+    )
+    stale_snapshot = _collection(
+        _item(ITEM_ID_2, revision=8),
+        revision=6,
+        item_count=2,
+    )
+    fetch = AsyncMock(side_effect=[first_snapshot, second_snapshot, stale_snapshot])
     monkeypatch.setattr(
         module.curation_repo,
         "get_curation_service_collection_snapshot",
@@ -181,8 +203,10 @@ def test_collection_snapshot_pages_exact_set_and_rejects_drift(
     assert second.json()["complete"] is True
     assert second.json()["items"][0]["curation_item_id"] == ITEM_ID_2
     assert "etag" not in {key.lower() for key in second.headers}
+    assert fetch.await_args_list[0].kwargs["page_limit"] == 2
+    assert fetch.await_args_list[0].kwargs["after_curation_item_id"] is None
+    assert fetch.await_args_list[1].kwargs["after_curation_item_id"] == ITEM_ID
 
-    fetch.return_value = _collection(_item(), revision=6)
     stale = client.get(
         path,
         headers=_headers(),
@@ -220,6 +244,31 @@ def test_snapshot_openapi_freezes_scope_and_service_security(client: TestClient)
         operation = paths[path]["get"]
         assert operation["x-required-service-scope"] == "pinvi:curation-snapshot:read"
         assert operation["security"] == [{"ServiceToken": []}]
+        if_none_match = next(
+            parameter
+            for parameter in operation["parameters"]
+            if parameter["in"] == "header" and parameter["name"] == "If-None-Match"
+        )
+        assert if_none_match["required"] is False
+        non_null_header_schema = next(
+            schema
+            for schema in if_none_match["schema"]["anyOf"]
+            if schema.get("type") != "null"
+        )
+        assert non_null_header_schema["pattern"] == '^"sha256:[0-9a-f]{64}"$'
+        assert operation["responses"]["304"]["headers"]["ETag"]["schema"][
+            "pattern"
+        ] == '^"sha256:[0-9a-f]{64}"$'
+
+    schemas = client.get("/openapi.json").json()["components"]["schemas"]
+    item_schema = schemas["CurationItemDetailSnapshot"]
+    collection_schema = schemas["CurationCollectionDetailSnapshot"]
+    assert item_schema["properties"]["row_revision"]["pattern"] == "^[1-9][0-9]*$"
+    assert item_schema["properties"]["etag"]["pattern"] == "^sha256:[0-9a-f]{64}$"
+    assert collection_schema["properties"]["row_revision"]["pattern"] == "^[1-9][0-9]*$"
+    assert collection_schema["properties"]["etag"]["pattern"] == "^sha256:[0-9a-f]{64}$"
+    assert collection_schema["properties"]["item_set_hash"]["pattern"] == "^[0-9a-f]{64}$"
+    assert collection_schema["properties"]["items"]["maxItems"] == 200
 
 
 @pytest.mark.unit
@@ -227,6 +276,31 @@ def test_snapshot_canonicalization_normalizes_nfc() -> None:
     assert curation_snapshot_sha256({"name": "카페"}) == curation_snapshot_sha256(
         {"name": unicodedata.normalize("NFD", "카페")}
     )
+
+
+@pytest.mark.unit
+def test_snapshot_http_representation_normalizes_nfc(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    nfd_item = _item()
+    object.__setattr__(nfd_item, "feature_name", unicodedata.normalize("NFD", "카페"))
+    monkeypatch.setattr(
+        module.curation_repo,
+        "get_curation_service_item_snapshot",
+        AsyncMock(return_value=nfd_item),
+    )
+    path = f"/v1/service/curation-items/{ITEM_ID}/detail-snapshot"
+    response = client.get(path, headers=_headers())
+    assert response.status_code == 200
+    assert response.json()["feature"]["name"] == "카페"
+    assert unicodedata.is_normalized("NFC", response.json()["feature"]["name"])
+
+    cached = client.get(
+        path,
+        headers={**_headers(), "If-None-Match": response.headers["etag"]},
+    )
+    assert cached.status_code == 304
 
 
 @pytest.mark.unit

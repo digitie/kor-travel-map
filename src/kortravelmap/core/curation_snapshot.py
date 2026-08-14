@@ -14,6 +14,7 @@ from collections.abc import Mapping, Sequence
 
 __all__ = [
     "canonical_curation_snapshot_bytes",
+    "canonical_curation_snapshot_value",
     "curation_snapshot_sha256",
 ]
 
@@ -48,6 +49,12 @@ def canonical_curation_snapshot_bytes(value: object) -> bytes:
         separators=(",", ":"),
         sort_keys=True,
     ).encode("utf-8")
+
+
+def canonical_curation_snapshot_value(value: object) -> object:
+    """응답과 hash가 공유할 재귀 NFC-normalized JSON value를 반환한다."""
+
+    return _canonical_value(value)
 
 
 def curation_snapshot_sha256(value: object) -> str:

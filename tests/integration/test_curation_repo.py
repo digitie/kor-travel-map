@@ -496,19 +496,44 @@ async def test_service_snapshot_uses_public_trusted_membership_and_allows_manual
         curation_relation="primary_stop",
         actor="admin:tester",
     )
+    second_item, _ = await add_curation_item(
+        migrated_session,
+        collection_id=collection.collection_id,
+        feature_id=_FEATURE_ID,
+        source_record_key=None,
+        external_item_id="manual-public-item-2",
+        status="included",
+        curation_relation="secondary_stop",
+        actor="admin:tester",
+    )
 
     collection_snapshot = await get_curation_service_collection_snapshot(
         migrated_session,
         collection_id=collection.collection_id,
+        page_limit=1,
     )
     item_snapshot = await get_curation_service_item_snapshot(
         migrated_session,
         curation_item_id=item.curation_item_id,
     )
     assert collection_snapshot is not None
-    assert [row.curation_item_id for row in collection_snapshot.items] == [
-        item.curation_item_id
-    ]
+    assert collection_snapshot.item_count == 2
+    assert len(collection_snapshot.item_set_hash) == 64
+    assert len(collection_snapshot.items) == 1
+    second_page = await get_curation_service_collection_snapshot(
+        migrated_session,
+        collection_id=collection.collection_id,
+        after_curation_item_id=collection_snapshot.items[0].curation_item_id,
+        page_limit=1,
+    )
+    assert second_page is not None
+    assert second_page.item_count == 2
+    assert second_page.item_set_hash == collection_snapshot.item_set_hash
+    assert len(second_page.items) == 1
+    assert {
+        collection_snapshot.items[0].curation_item_id,
+        second_page.items[0].curation_item_id,
+    } == {item.curation_item_id, second_item.curation_item_id}
     assert item_snapshot is not None
     assert item_snapshot.source_record_key is None
     assert item_snapshot.feature_uuid == item.feature_uuid
@@ -526,6 +551,7 @@ async def test_service_snapshot_uses_public_trusted_membership_and_allows_manual
         collection_id=collection.collection_id,
     )
     assert hidden_collection is not None
+    assert hidden_collection.item_count == 0
     assert hidden_collection.items == ()
     assert (
         await get_curation_service_item_snapshot(

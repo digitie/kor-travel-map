@@ -2567,14 +2567,17 @@
             "type": "boolean"
           },
           "etag": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
             "title": "Etag",
             "type": "string"
           },
           "item_count": {
+            "minimum": 0.0,
             "title": "Item Count",
             "type": "integer"
           },
           "item_set_hash": {
+            "pattern": "^[0-9a-f]{64}$",
             "title": "Item Set Hash",
             "type": "string"
           },
@@ -2582,6 +2585,7 @@
             "items": {
               "$ref": "#/components/schemas/CurationItemDetailSnapshot"
             },
+            "maxItems": 200,
             "title": "Items",
             "type": "array"
           },
@@ -2597,6 +2601,7 @@
             "title": "Next Cursor"
           },
           "row_revision": {
+            "pattern": "^[1-9][0-9]*$",
             "title": "Row Revision",
             "type": "string"
           },
@@ -2638,6 +2643,7 @@
             "type": "string"
           },
           "etag": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
             "title": "Etag",
             "type": "string"
           },
@@ -2648,6 +2654,7 @@
             "$ref": "#/components/schemas/CurationSnapshotItem"
           },
           "row_revision": {
+            "pattern": "^[1-9][0-9]*$",
             "title": "Row Revision",
             "type": "string"
           },
@@ -6392,6 +6399,23 @@
               ],
               "title": "Cursor"
             }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^\"sha256:[0-9a-f]{64}\"$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
           }
         ],
         "responses": {
@@ -6415,7 +6439,16 @@
             }
           },
           "304": {
-            "description": "첫 page collection ETag 일치"
+            "description": "첫 page collection ETag 일치",
+            "headers": {
+              "ETag": {
+                "description": "canonicalization v1 snapshot의 strong ETag.",
+                "schema": {
+                  "pattern": "^\"sha256:[0-9a-f]{64}\"$",
+                  "type": "string"
+                }
+              }
+            }
           },
           "409": {
             "content": {
@@ -6473,6 +6506,23 @@
               "title": "Curation Item Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^\"sha256:[0-9a-f]{64}\"$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
           }
         ],
         "responses": {
@@ -6496,7 +6546,16 @@
             }
           },
           "304": {
-            "description": "ETag 일치"
+            "description": "ETag 일치",
+            "headers": {
+              "ETag": {
+                "description": "canonicalization v1 snapshot의 strong ETag.",
+                "schema": {
+                  "pattern": "^\"sha256:[0-9a-f]{64}\"$",
+                  "type": "string"
+                }
+              }
+            }
           },
           "422": {
             "content": {

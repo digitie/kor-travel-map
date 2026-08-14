@@ -242,7 +242,7 @@ class CurationServiceItemSnapshot:
 
 @dataclass(frozen=True)
 class CurationServiceCollectionSnapshot:
-    """한 statement snapshot에서 읽은 collection과 ordered public items."""
+    """한 statement snapshot에서 읽은 collection receipt와 bounded public page."""
 
     collection_id: str
     row_revision: int
@@ -251,6 +251,8 @@ class CurationServiceCollectionSnapshot:
     theme_name: str
     title: str
     edition_key: str
+    item_count: int
+    item_set_hash: str
     items: tuple[CurationServiceItemSnapshot, ...]
 
 
@@ -866,7 +868,7 @@ WHERE i.archived_at IS NULL
   )
 """
 
-_GET_SERVICE_CURATION_SNAPSHOT_SQL: Final[str] = f"""
+_GET_SERVICE_CURATION_ITEM_SNAPSHOT_SQL: Final[str] = f"""
 WITH collection_row AS (
     SELECT
         collection.collection_id,
@@ -930,6 +932,131 @@ SELECT
 FROM collection_row
 LEFT JOIN eligible_item ON eligible_item.collection_id = collection_row.collection_id
 ORDER BY eligible_item.curation_item_id
+"""
+
+_GET_SERVICE_CURATION_COLLECTION_PAGE_SQL: Final[str] = f"""
+WITH collection_row AS (
+    SELECT
+        collection.collection_id,
+        collection.row_revision,
+        collection.updated_at,
+        theme.theme_slug,
+        theme.theme_name,
+        collection.title,
+        collection.edition_key
+    FROM feature.curation_collections AS collection
+    JOIN feature.curated_themes AS theme ON theme.theme_id = collection.theme_id
+    LEFT JOIN feature.curated_sources AS source ON source.source_id = collection.source_id
+    WHERE collection.collection_id = CAST(:collection_id AS uuid)
+      AND collection.archived_at IS NULL
+      AND collection.status = 'published'
+      AND collection.visibility = 'public'
+      AND theme.visibility = 'public'
+      AND theme.archived_at IS NULL
+      AND (collection.source_id IS NULL OR source.archived_at IS NULL)
+), eligible_item AS (
+    {_SERVICE_SNAPSHOT_ELIGIBLE_ITEMS_SQL}
+), hashed_item AS (
+    SELECT
+        eligible_item.*,
+        encode(
+            x_extension.digest(
+                convert_to(
+                    jsonb_build_array(
+                        eligible_item.curation_item_id,
+                        eligible_item.collection_id,
+                        eligible_item.row_revision,
+                        eligible_item.updated_at,
+                        eligible_item.theme_slug,
+                        eligible_item.theme_name,
+                        eligible_item.collection_title,
+                        eligible_item.edition_key,
+                        eligible_item.feature_uuid,
+                        eligible_item.relation,
+                        eligible_item.sort_order,
+                        eligible_item.item_title,
+                        eligible_item.item_summary,
+                        eligible_item.feature_name,
+                        eligible_item.feature_category,
+                        eligible_item.feature_kind,
+                        eligible_item.lon,
+                        eligible_item.lat,
+                        eligible_item.address,
+                        eligible_item.detail,
+                        eligible_item.source_record_key
+                    )::text,
+                    'UTF8'
+                ),
+                'sha256'
+            ),
+            'hex'
+        ) AS item_payload_hash
+    FROM eligible_item
+), item_set_receipt AS (
+    SELECT
+        count(*)::bigint AS item_count,
+        encode(
+            x_extension.digest(
+                convert_to(
+                    COALESCE(
+                        jsonb_agg(
+                            jsonb_build_array(
+                                hashed_item.curation_item_id,
+                                hashed_item.row_revision,
+                                hashed_item.item_payload_hash
+                            )
+                            ORDER BY hashed_item.curation_item_id
+                        ),
+                        '[]'::jsonb
+                    )::text,
+                    'UTF8'
+                ),
+                'sha256'
+            ),
+            'hex'
+        ) AS item_set_hash
+    FROM hashed_item
+), page_item AS (
+    SELECT *
+    FROM hashed_item
+    WHERE (
+        CAST(:after_curation_item_id AS uuid) IS NULL
+        OR hashed_item.curation_item_id::uuid
+            > CAST(:after_curation_item_id AS uuid)
+    )
+    ORDER BY hashed_item.curation_item_id::uuid
+    LIMIT CAST(:page_limit AS integer)
+)
+SELECT
+    collection_row.collection_id::text AS collection_id,
+    collection_row.row_revision AS collection_row_revision,
+    collection_row.updated_at AS collection_updated_at,
+    collection_row.theme_slug,
+    collection_row.theme_name,
+    collection_row.title AS collection_title,
+    collection_row.edition_key,
+    item_set_receipt.item_count,
+    item_set_receipt.item_set_hash,
+    page_item.curation_item_id,
+    page_item.row_revision AS item_row_revision,
+    page_item.updated_at AS item_updated_at,
+    page_item.feature_uuid,
+    page_item.relation,
+    page_item.sort_order,
+    page_item.item_title,
+    page_item.item_summary,
+    page_item.feature_name,
+    page_item.feature_category,
+    page_item.feature_kind,
+    page_item.lon,
+    page_item.lat,
+    page_item.address,
+    page_item.detail,
+    page_item.source_record_key
+FROM collection_row
+CROSS JOIN item_set_receipt
+LEFT JOIN page_item ON true
+ORDER BY page_item.curation_item_id::uuid
 """
 
 _LIST_FEATURE_ITEMS_SQL: Final[str] = (
@@ -2916,19 +3043,26 @@ async def get_curation_item(
     return _item(row) if row is not None else None
 
 
-async def _get_curation_service_snapshot(
+async def get_curation_service_collection_snapshot(
     session: AsyncSession,
     *,
-    collection_id: str | None,
-    curation_item_id: str | None,
+    collection_id: str,
+    after_curation_item_id: str | None = None,
+    page_limit: int = 101,
 ) -> CurationServiceCollectionSnapshot | None:
+    """PinVi용 exact set receipt와 bounded public item page를 한 statement로 읽는다."""
+
+    if not 1 <= page_limit <= 201:
+        raise ValueError("page_limit must be between 1 and 201")
     rows = (
         (
             await session.execute(
-                text(_GET_SERVICE_CURATION_SNAPSHOT_SQL),
+                text(_GET_SERVICE_CURATION_COLLECTION_PAGE_SQL),
                 {
                     "collection_id": collection_id,
-                    "curation_item_id": curation_item_id,
+                    "curation_item_id": None,
+                    "after_curation_item_id": after_curation_item_id,
+                    "page_limit": page_limit,
                 },
             )
         )
@@ -2951,21 +3085,9 @@ async def _get_curation_service_snapshot(
         theme_name=str(first["theme_name"]),
         title=str(first["collection_title"]),
         edition_key=str(first["edition_key"]),
+        item_count=int(first["item_count"]),
+        item_set_hash=str(first["item_set_hash"]),
         items=items,
-    )
-
-
-async def get_curation_service_collection_snapshot(
-    session: AsyncSession,
-    *,
-    collection_id: str,
-) -> CurationServiceCollectionSnapshot | None:
-    """PinVi용 public collection과 exact eligible item set을 한 statement로 읽는다."""
-
-    return await _get_curation_service_snapshot(
-        session,
-        collection_id=collection_id,
-        curation_item_id=None,
     )
 
 
@@ -2976,14 +3098,22 @@ async def get_curation_service_item_snapshot(
 ) -> CurationServiceItemSnapshot | None:
     """PinVi용 public/trusted canonical item 한 건을 읽는다."""
 
-    snapshot = await _get_curation_service_snapshot(
-        session,
-        collection_id=None,
-        curation_item_id=curation_item_id,
+    row = (
+        (
+            await session.execute(
+                text(_GET_SERVICE_CURATION_ITEM_SNAPSHOT_SQL),
+                {
+                    "collection_id": None,
+                    "curation_item_id": curation_item_id,
+                },
+            )
+        )
+        .mappings()
+        .first()
     )
-    if snapshot is None or not snapshot.items:
+    if row is None or row["curation_item_id"] is None:
         return None
-    return snapshot.items[0]
+    return _service_item_snapshot(row)
 
 
 async def get_curation_import_batch(
