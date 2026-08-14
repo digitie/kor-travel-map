@@ -100,6 +100,13 @@ async def bootstrap_tvn34_migration_roles(engine: AsyncEngine) -> str:
             "ALTER SCHEMA x_extension OWNER TO ktm_feature_schema_owner",
             "GRANT USAGE, CREATE ON SCHEMA feature "
             "TO ktm_feature_state_procedure_owner, ktm_feature_audit_writer",
+            # x_extension USAGE는 런타임 필수다 — 없으면 runtime의 평범한 core
+            # update SQL도 typed coordinate expression parse에서 죽는다. 체인에서는
+            # `0095`가 줬지만 squash baseline은 3개 스키마만 재현한다. 정본은
+            # `docker/postgres-role-bootstrap.sh`이고 여기는 그 거울이다 — 어긋나면
+            # 통합 테스트만 통과하고 실제 배포가 깨지는 상태가 만들어진다.
+            "GRANT USAGE ON SCHEMA x_extension "
+            "TO ktm_feature_state_procedure_owner, ktm_feature_runtime",
         ):
             await connection.execute(text(statement))
         # PostGIS image가 initdb에서 public에 둔 non-relocatable extension은

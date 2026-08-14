@@ -20,6 +20,31 @@ PR [#979](https://github.com/digitie/kor-travel-map/pull/979).
    그래야 재빌드 없이 켤 수 있다.
 2. daemon 이미지만 재빌드에서 빠지는 파이프라인 원인(별건).
 3. 기동 시 "자기 코드 세대 vs DB alembic head" 대조 fence.
+||||||| fa3bdcd4
+## 2026-08-14 — alembic squash 완료(검증까지), prod 지오코딩 복구
+
+**alembic head가 `0200_schema_baseline` 하나다.** 체인 109개는
+`alembic/legacy_versions/`로 옮겼다(실행되지 않는 아카이브 —
+`alembic/legacy_versions/README.md`). 빈 DB 적용 4초. 동등성은 카탈로그 2486행
+전부 일치로 증명했고, 그 오라클 자체를 변조 7종으로 먼저 검증했다.
+draft PR [#978](https://github.com/digitie/kor-travel-map/pull/978).
+
+⚠️ **`target-schema-fingerprints-v1.json`으로는 이 증명을 못 한다.** 그 artifact의
+기준은 alembic head가 아니라 **빈 PostGIS DB**다
+(`tests/integration/test_vnext_target_freeze.py:574`). 아래 08-13 항목이 그것을
+증명 수단으로 적은 것은 틀렸다 — 실제 증명은 `scripts/compare-schema-catalogs.sh`가 했다.
+
+**prod 지오코딩 복구**: 08-13에 `.env`만 고치고 api만 재생성해 dagster/daemon 2개가
+401 나는 키를 들고 있었다. 재생성 후 세 컨테이너 전부 `POST /v2/reverse` HTTP 200.
+ETL이 08-07 이후 안 돌아서 아직 안 터졌을 뿐이었다.
+
+**다음 한 작업**: PR #978의 CI green 확인 후 머지. 그 다음이 전용 PostgreSQL 이행
+(docker-manager #172) — 권고 경로는 dump/restore이고, 공유 `:5432`의 DB를 남겨둔 채
+전용으로 복원·검증하고 DSN만 스위치하면 롤백이 1스텝이라 스위치 전까지 완전 가역이다.
+
+열린 후속 3건: ① `docker-compose.yml`·`scripts/load-env.sh`의 VWorld fallback 사슬
+제거(이번 drift의 재발 통로) ② daemon 로그의 `column request.providers does not exist`
+③ §10 절차 5 실행 검증(3회차).
 
 ## 2026-08-13 — T-VN-36 prod cutover 완료
 

@@ -18,6 +18,8 @@ barrier로 직렬화한다.
   - [~] `T-VN-H25B` → [ ] `T-VN-H34`(공식 curation 미연결 membership 잔여 AC)
   - [~] `T-VN-H43` → [~] `T-VN-H44`(백업 정기화·복원 드릴 재개 조건)
   - [ ] `T-VN-H45-후속`(다건 provider fetcher·quota 관찰 확장)
+  - [~] `T-VN-H46A`(alembic squash — PR #978 CI 대기) →
+    [ ] `T-VN-H46C`(VWorld fallback 사슬 제거) ∥ [ ] `T-VN-H46D`(daemon 스키마 drift)
 - **Lane B — frontend hardening·PinVi 소비 API**
   - [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox)
   - [/] `T-VN-41F1D-D` → [ ] `T-VN-41F1D-D2`(격리 리허설·data-dependent live UI E2E)
@@ -429,6 +431,64 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
   post-review cleanup 잔여(ADR-045 VWorld 불투명 자격증명 hard-gate 등)는 PinVi 저장소가
   소유한다. Map Agent A/B 실행 queue에는 넣지 않고 PinVi #215가 닫힐 때 상태만 동기화한다.
+
+### T-VN-H46 — alembic squash + 배포 위생 (2026-08-14)
+
+- [~] T-VN-H46A — **alembic squash: 체인 109개 → `0200_schema_baseline`**
+
+  draft PR [#978](https://github.com/digitie/kor-travel-map/pull/978).
+  근거·설계는 `alembic/versions/0200_schema_baseline.py` docstring과
+  `alembic/legacy_versions/README.md`가 정본. 요지만:
+  체인은 prod in-place cutover(2026-08-13) 이후 **어떤 DB에서도 실행되지 않는다.**
+  sidecar SQL은 `scripts/build-baseline.sh`의 기계 산출물이고 `0200`이 byte sha로
+  잠근다. 빈 DB 적용 4초.
+
+  동등성 증명은 `scripts/compare-schema-catalogs.sh`(변조 7종 자체검증)로 카탈로그
+  2486행 전부 일치. ⚠️ `contracts/vnext/target-schema-fingerprints-v1.json`은 이
+  증명에 **쓸 수 없다** — 그 기준은 alembic head가 아니라 빈 PostGIS DB다
+  (`tests/integration/test_vnext_target_freeze.py:574`).
+
+  중간에 나온 결함이 본론이었다: 소유자가 아닌 GRANT는 오류가 아니라 **경고 후
+  무시**라서, baseline이 `exit 0`으로 통과하면서 routine 10개를 PUBLIC EXECUTE로
+  남겼다(102 → 112). ACL 블록마다 소유자로 `SET LOCAL ROLE` 하도록 생성기를 고치고,
+  적용 성공이 ACL 적용의 증거가 되지 못한다는 사실을 digest 자기검증으로 막았다.
+
+  잔여: CI green 확인 → 머지.
+
+- [x] T-VN-H46B — **prod 지오코딩 복구** (2026-08-14 완료)
+
+  08-13에 `.env`만 고치고 api만 재생성해 dagster/daemon 2개가 401 나는 상류 VWorld
+  키를 들고 있었다. fail-open이 아니라 첫 요청에서 asset step이 통째로 실패하는
+  형태였고, ETL이 08-07 이후 안 돌아서 아직 안 터졌을 뿐이었다.
+  `up -d --no-deps --force-recreate` 후 세 컨테이너 전부 `POST /v2/reverse` HTTP 200.
+
+- [ ] T-VN-H46C — **VWorld fallback 사슬 제거** (H46B 재발 통로)
+
+  `docker-compose.yml:201,326,396`과 `scripts/load-env.sh:119-121`의
+  `${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-…:-${NEXT_PUBLIC_VWORLD_API_KEY:-…}}`가
+  **정확히 401을 받는 값**으로 떨어진다. `.env.example:152`의 낡은 주석도 같은 통로다.
+  `geocoding.py:962-979`의 `preflight()`는 존재·길이만 보므로 잘못된 키를 통과시킨다.
+
+- [ ] T-VN-H46D — **daemon 스키마 drift**: `column request.providers does not exist`
+
+  `kor-travel-map-dagster-daemon-latest` 로그에 반복되는 `asyncpg.UndefinedColumnError`
+  (feature_operation 계열 쿼리). prod는 `0104`인데 코드가 없는 컬럼을 질의한다.
+  이 경로가 실제 자산 실행 경로면 다음 ETL에서 터진다.
+
+- [x] T-VN-H46E — **공개 data.go.kr 키: 현행 유지 판정** (2026-08-14)
+
+  자격증명 1개를 **17개 별칭 / 8개 파일 / 6개 저장소**가 공유한다("4곳"이 아니었다 —
+  provider별 이름으로 갈라져 그렇게 보였다). 노출 정황은 없다: `git log --all -S`와
+  `git grep` 전 저장소 0건, prod 비밀 파일 전부 `0600`.
+
+  회전하지 않는다. 트리거가 되는 사건이 없고, data.go.kr 분리 발급은 계정 분리를
+  뜻하는데 인증 필요 오픈API가 코드 실측 약 236건이라 전건 재활용신청은 비대칭적으로
+  크다. 실제 위험은 키가 아니라 **사본 수**다.
+
+  잔여 위생(별건): `~/kor-travel-docker-manager/.env.bak-*` 4개 정리,
+  `python-krex-api`의 `.env.local` gitignore 규칙 추가, `docs/external-apis.md` §2에
+  "동일 키를 쓰는 17개 별칭" 표 추가. ⚠️ data.go.kr 콘솔 실제 상태(재발급이 기존
+  활용신청 승인을 유지하는지, 계정당 다중 키 가능 여부)는 **미확인 추정**이다.
 
 ## Lane B 상세 — b1 PinVi 결합·후속
 

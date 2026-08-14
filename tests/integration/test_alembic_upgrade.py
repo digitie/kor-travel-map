@@ -22,6 +22,8 @@ from kortravelmap.infra.alembic_exclusions import (
 )
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from sqlalchemy.ext.asyncio import AsyncEngine
 
 
@@ -359,7 +361,35 @@ def _canonical_pg_sql(value: str | None) -> str:
     return re.sub(r'[\s()"]+', "", without_casts).lower()
 
 
-async def _run_alembic_upgrade(dsn: str, revision: str = "head") -> None:
+def _archived_revisions(project_root: Path) -> frozenset[str]:
+    """아카이브가 **선언한** revision id 집합.
+
+    파일명으로 판정하면 안 된다 — 109개 중 20개 넘게 파일명과 revision id가 다르다
+    (`0071_integrity_observations`는 `0071_integrity_observation_generations.py`가
+    선언한다). 실제로 파일명 기준 판정이 그 한 건을 놓쳤다.
+    """
+
+    import re
+
+    declaration = re.compile(r'^revision(?::\s*str)?\s*=\s*"([^"]+)"', re.MULTILINE)
+
+    def declared_in(directory: str) -> set[str]:
+        return {
+            match.group(1)
+            for path in (project_root / "alembic" / directory).glob("*.py")
+            if (match := declaration.search(path.read_text(encoding="utf-8"))) is not None
+        }
+
+    live = declared_in("versions")
+    found = declared_in("legacy_versions")
+    assert found, "아카이브에서 revision id를 하나도 읽지 못했다 — 경로가 틀렸다"
+    # bridge가 옛 head id(`0104_tvn36_final_fence`)를 그대로 선언하므로 아카이브에도
+    # live 그래프에도 같은 id가 있다. 빼지 않으면 **head를 가리키는 가장 자연스러운
+    # 문자열**이 아카이브 체인 109단계로 보내진다(적대 리뷰 지적). live가 이긴다.
+    return frozenset(found - live)
+
+
+async def _run_alembic_upgrade(dsn: str, revision: str = "head", *, chain: bool = False) -> None:
     """``alembic.command.upgrade``를 worker thread에서 실행.
 
     alembic은 sync API + 자체 asyncio.run(env.py)을 호출하므로 현재 pytest
@@ -379,6 +409,16 @@ async def _run_alembic_upgrade(dsn: str, revision: str = "head") -> None:
     project_root = Path(__file__).resolve().parents[2]  # noqa: ASYNC240  # sync IO is trivial path-arith here
     cfg = Config(str(project_root / "alembic.ini"))
     cfg.set_main_option("script_location", str(project_root / "alembic"))
+    # squash(`0200`) 이후 체인은 `alembic/legacy_versions/`의 아카이브다. 아카이브
+    # revision을 요청받았거나(자동 판정) 호출자가 "DB가 체인 중간에 있다"고 알려주면
+    # (`chain=True`) 아카이브 전용 그래프로 바꾼다. `versions/`와 함께 담으면 안 된다 —
+    # bridge와 아카이브가 `0104_tvn36_final_fence`를 둘 다 선언하는데 alembic은 그것을
+    # **거부하지 않고** 경고 한 줄 뒤 head 3개짜리 손상된 맵으로 계속 간다(실측).
+    # 두 그래프의 head 문자열은 같으므로 `_alembic_head_revision()`은 그대로 둔다.
+    if chain or revision in _archived_revisions(project_root):
+        cfg.set_main_option(
+            "version_locations", str(project_root / "alembic" / "legacy_versions")
+        )
     # 배포와 같은 경로로 돈다 — bootstrap 후 migrator 자격으로 upgrade.
     from tests.integration._tvn34_migration_bootstrap import (
         alembic_schema_owner_role,
@@ -846,7 +886,8 @@ async def test_curation_provenance_migration_fail_closes_legacy_links(
         await migration_engine.dispose()
         migration_engine = None
 
-        await _run_alembic_upgrade(migration_dsn)
+        # DB가 체인 중간(`0071`)에 있으므로 아카이브 그래프로 head까지 올린다.
+        await _run_alembic_upgrade(migration_dsn, chain=True)
         migration_engine = make_async_engine(migration_dsn)
         async with migration_engine.connect() as conn:
             row = (
@@ -984,7 +1025,8 @@ async def test_weather_migration_reuses_valid_index_after_partial_failure(
         await retry_engine.dispose()
         retry_engine = None
 
-        await _run_alembic_upgrade(retry_dsn)
+        # DB가 체인 중간(`0069`)에 있으므로 아카이브 그래프로 head까지 올린다.
+        await _run_alembic_upgrade(retry_dsn, chain=True)
         retry_engine = make_async_engine(retry_dsn)
         async with retry_engine.connect() as retry_conn:
             legacy_index = (

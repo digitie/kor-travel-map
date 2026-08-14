@@ -186,7 +186,8 @@ def test_final_cutover_migration_statically_drops_source_lineage_legacy_columns(
     """0090 DDL이 manifest의 shadow ownership 열을 다시 남기지 않는다."""
 
     ddl = (
-        _ROOT / "alembic" / "versions" / "0091_tvn33_cutover_fence.py"
+        # squash(`0200`) 이후 체인은 아카이브다 — `alembic/legacy_versions/README.md`.
+        _ROOT / "alembic" / "legacy_versions" / "0091_tvn33_cutover_fence.py"
     ).read_text(encoding="utf-8")
     for table, columns in _FORBIDDEN_SOURCE_LINEAGE_COLUMNS.items():
         statements = re.findall(

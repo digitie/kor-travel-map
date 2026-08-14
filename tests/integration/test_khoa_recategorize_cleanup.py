@@ -103,7 +103,8 @@ def _cleanup_sql() -> str:
     path = (
         Path(__file__).resolve().parents[2]
         / "alembic"
-        / "versions"
+        # squash(`0200`) 이후 체인은 아카이브다 — `alembic/legacy_versions/README.md`.
+        / "legacy_versions"
         / "0027_khoa_recategorize_cleanup.py"
     )
     spec = importlib.util.spec_from_file_location("_mig_0027_cleanup", path)
