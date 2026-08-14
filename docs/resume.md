@@ -1,5 +1,32 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-14 — 빌드 파이프라인 결손 봉합 + prod 경계 실측
+
+**`scripts/docker-buildx.sh`가 `dagster-daemon` 이미지를 굽지 않았다.** 2026-08-13
+daemon 사고의 저장소 쪽 뿌리다 — `docker-build.sh`는 네 서비스를, buildx는 셋을
+빌드해 두 파일이 오래 모순이었다. 한 번 빌드에 태그 두 개로 고치고(두 번 부르면 두
+이미지가 같다는 보장이 없다), 가드를 두 층 세웠다. 브랜치
+`fix/build-script-daemon-image`(커밋 `0e5f3521`), 로컬 게이트 1360 passed.
+
+**prod 경계 실측 두 건.** api/dagster/daemon 셋 다 migrator·api_runtime DSN을 들고
+있고 셋의 `KOR_TRAVEL_MAP_PG_DSN`이 전부 dagster runtime 역할이다 — prod compose가
+git 체크아웃이 아니라 손으로 6줄 덧댄 사본이기 때문이다. 수정은 docker-manager
+`agent/issue-171-map-dedicated-postgres`에 이미 있으므로 #46 배포에 실린다(task #51).
+admin UI만 geo 소비자 키를 못 받던 것은 docker-manager
+`fix/map-ui-geo-consumer-key`로 끊었다(task #52).
+
+조사 중 한 번 크게 헛짚었다 — `127.0.0.1:5432`만 보고 `ktm-tvn36-db`를 정본으로
+착각했다. prod 호스트 5432는 `kor-travel-geo-postgres`다. 잘못된 DB에서 "runtime
+쓰기 권한 0"이라는 수치가 나왔고 정본에서는 정상이다. 정본 alembic 리비전은
+`0104_tvn36_final_fence`로, `0201_squash_bridge`가 선언한 값과 일치한다.
+
+### 다음 한 작업
+
+PR [#979](https://github.com/digitie/kor-travel-map/pull/979) integration green을
+확인하고 머지한다. 그 다음 `fix/build-script-daemon-image`를 리베이스해 PR을 연다.
+docker-manager 두 브랜치(`fix/map-ui-geo-consumer-key`, issue-171)는 prod 배포가
+필요하므로 승인된 배포 경로로만 나간다.
+
 ## 2026-08-14 — prod 지오코딩 복구 + 재발 통로 제거 (T-VN-H46B/C)
 
 prod의 dagster/daemon 두 컨테이너가 geo가 401로 거절하는 VWorld 키를 들고 있었다.
@@ -20,7 +47,6 @@ PR [#979](https://github.com/digitie/kor-travel-map/pull/979).
    그래야 재빌드 없이 켤 수 있다.
 2. daemon 이미지만 재빌드에서 빠지는 파이프라인 원인(별건).
 3. 기동 시 "자기 코드 세대 vs DB alembic head" 대조 fence.
-||||||| fa3bdcd4
 ## 2026-08-14 — alembic squash 완료(검증까지), prod 지오코딩 복구
 
 **alembic head가 `0200_schema_baseline` 하나다.** 체인 109개는
