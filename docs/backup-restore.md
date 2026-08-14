@@ -423,11 +423,46 @@ feature 본문 결손을 메운다.** 백업 산출물이 읽히는지(절차 4)
    아니라 새 feature가 생긴다(`providers/mois.py:license_record_to_bundle`).
 
    드릴 컨테이너에는 provider API 키도 네트워크도 없으므로 저장된 원문을 되먹인다: 해당
-   entity의 `provider_sync.source_records.raw_data`를 NDJSON으로 뽑아
-   `ktmctl import mois <파일> --mode incremental --dataset-key mois_license_features_bulk
-   --cursor <임의값>`으로 재주입한다(MOIS dataset일 때. `--mode bulk`는 파일에 없는 feature를
-   soft-delete하므로 쓰지 않는다). `load_bundle`이 feature 부재를 보고 본문·subtype·base field
-   value를 다시 만든다.
+   entity의 `provider_sync.source_records.raw_data`를 NDJSON으로 뽑아 `ktmctl import mois`로
+   재주입한다. `load_bundle`이 feature 부재를 보고 본문·subtype·base field value를 다시 만든다.
+
+   ⛔ **`--mode incremental --dataset-key mois_license_features_bulk`는 성립하지 않는다
+   (2026-08-14 드릴 3회차 실측).** 이전 판이 그렇게 적어 뒀는데 실행하면 이렇게 죽는다:
+
+   ```
+   FeatureOperationInvariantConflict: runtime dataset does not resolve to
+   exactly one operation membership   (match_count: 0)
+   ```
+
+   membership은 `(operation_key, provider, dataset_key)` triple로 해석되는데, mode별
+   operation key와 카탈로그(0089 seed)의 등록이 이렇게 갈린다:
+
+   | mode | 쓰는 operation key | 그 key가 등록된 dataset |
+   |---|---|---|
+   | `bulk` | `feature_place_mois_licenses_job` (`_BULK_OPERATION_KEY`) | `mois_license_features_bulk` ✅ |
+   | `incremental` | `mois_license_incremental_update` | `mois_license_features_**history**` |
+   | `closed` | `mois_license_closed_update` | `mois_license_features_closed` |
+
+   즉 incremental은 **history dataset 전용**이다. CLI 도움말도 그렇게 적고 있다
+   ("미지정 시 모드별 기본 — bulk=…bulk / incremental=…history"). bulk dataset을
+   incremental로 지목하는 조합은 카탈로그에 아예 없다.
+
+   그렇다고 `--dataset-key mois_license_features_history`로 바꾸면 구멍을 메우지 못한다 —
+   `dataset_key`가 `source_type=f"{PROVIDER_NAME}:{dataset_key}"`로 `make_feature_id`에
+   들어가므로 **다른 feature_id**가 만들어진다(`providers/mois.py:702-717`).
+
+   그래서 성립하는 replay는 **전체 스냅샷 bulk 하나뿐**이다:
+
+   ```
+   ktmctl import mois <전체.ndjson> --mode bulk --dataset-key mois_license_features_bulk
+   ```
+
+   bulk는 파일에 없는 feature를 soft-delete하므로 **그 dataset의 `source_records` 전부**를
+   넣어야 한다. 5건짜리 파일로 돌리면 나머지 98만 건이 soft-delete된다.
+
+   ⚠️ 그래서 이 경로는 **결손 5건만 고치는 수단이 아니라 dataset 전체 재적재**다. 아래
+   부분 복원 손실이 5건이 아니라 **dataset 전건에 적용된다**는 뜻이기도 하다 — 운영 복구에
+   이 경로를 쓰면 멀쩡한 feature의 detail까지 함께 깎인다.
 
    ⚠️ **이 되먹임은 본문을 부분적으로만 복원한다 (2026-08-14 코드 실측, 드릴 실행 전 확정).**
    `providers/mois.py:_raw_data`는 payload_hash용 canonical dict라 Protocol **45개 필드 중
