@@ -17,7 +17,10 @@ async function proxy(
     "";
   if (!apiKey) {
     return Response.json(
-      { detail: "kor-travel-geo 공개 API 키가 설정되지 않았습니다." },
+      {
+        detail: "kor-travel-geo 공개 API 키가 설정되지 않았습니다.",
+        code: "GEO_API_KEY_NOT_CONFIGURED",
+      },
       { status: 503 },
     );
   }

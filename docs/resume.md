@@ -25,7 +25,8 @@ PR이 병합되기 전에는 이 경계를 배포 완료로 취급하지 않는�
 
 현재 branch CI의 Geo BFF credential guard·clone runner contract·H35 wheel build 전제도 함께
 정렬했다. CI는 `uv`를 명시 설치하고, clone runner는 candidate geo를 띄우지 않는 동안 전용 Geo key를
-빈 값으로 유지한다.
+빈 값으로 유지한다. Geo BFF는 요청 시점 key를 읽되, 누락 때 `GEO_API_KEY_NOT_CONFIGURED` 사유로
+명시적으로 fail-close한다.
 
 **다음 한 작업**: #174 병합 뒤 canonical import/backfill n150 live acceptance와 paired release
 receipt의 exact Map/PinVi commit·service vendor hash를 확인하고, 그 증거가 모두 있을 때만
