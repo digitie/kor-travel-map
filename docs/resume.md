@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-15 — T-VN-40 Dagster CI 테스트 경계 정렬
+
+authoritative snapshot 적재와 curation input proof 전달을 production asset이 사용하도록 바뀐 뒤,
+Dagster asset 테스트 double과 terminal payload 기대값이 이전 호출 계약에 남아 있던 문제를 정렬했다.
+Concierge는 authoritative load·retirement를 같은 causal 경계로 모사하고, OpiNet은
+`curation_dataset` keyword를, single-member terminal은 nullable proof 필드를 명시적으로 검증한다.
+
+**다음 한 작업**: 원격 Map CI를 다시 녹색으로 만든 뒤, 세 PR의 독립 승인과 병합 순서를
+확인한다. 승인·병합 전에는 n150 live acceptance, rollout receipt completion, legacy 물리 삭제를
+수행하지 않는다.
+
 ## 2026-08-15 — T-VN-40 service OpenAPI contract test 정렬
 
 service restore-fence command는 최초 `201`과 exact `Idempotency-Key` terminal replay `200`을

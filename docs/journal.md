@@ -2,6 +2,15 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-15 — T-VN-40 Dagster CI 테스트 경계 정렬
+
+- authoritative snapshot 경로로 전환된 concierge asset의 fake client에 적재·retirement를 한
+  causal 결과로 돌려주는 구현을 추가했다. upsert와 tombstone 양쪽 asset 경로가 같은 production
+  호출 계약을 계속 검증한다.
+- OpiNet test double은 authoritative curation dataset keyword를, feature-operation terminal test는
+  nullable curation input proof 두 필드를 명시한다. production 함수의 새 proof 인자를 누락한
+  테스트 double 때문에 Python matrix CI가 막히지 않게 했다.
+
 ## 2026-08-15 — T-VN-40 service OpenAPI contract test 정렬
 
 - restore-fence는 최초 terminal `201`과 exact `Idempotency-Key` replay `200`을 모두 선언한다.

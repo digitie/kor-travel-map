@@ -128,6 +128,8 @@ def test_single_member_wrapper_finishes_canonical_membership() -> None:
             "dagster_run_id": "run-41",
             "membership": client.memberships[0],
             "authoritative_snapshot_complete": False,
+            "curation_input_member_count": None,
+            "curation_input_set_hash": None,
         },
     )
 

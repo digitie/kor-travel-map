@@ -32,6 +32,28 @@ class _FakeConciergeClient:
             features_inserted=len(materialized),
         )
 
+    async def load_authoritative_feature_snapshot(
+        self,
+        bundles: Any,
+        *,
+        provider: str,
+        dataset_key: str,
+        source_entity_type: str,
+        retired_source_entity_ids: set[str] | None = None,
+        retire_geometryless_areas: bool = False,
+    ) -> tuple[FeatureLoadResult, int]:
+        assert not retire_geometryless_areas
+        result = await self.load_feature_bundles(bundles)
+        retired = 0
+        if retired_source_entity_ids:
+            retired = await self.retire_features_by_source(
+                provider=provider,
+                dataset_key=dataset_key,
+                source_entity_type=source_entity_type,
+                source_entity_ids=retired_source_entity_ids,
+            )
+        return result, retired
+
     async def retire_features_by_source(
         self,
         *,
