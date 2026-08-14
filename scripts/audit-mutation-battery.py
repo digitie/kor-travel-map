@@ -41,17 +41,29 @@ M5~N6은 7라운드 적대 리뷰가 설계한 것으로 **전부 생존했었�
 
 from __future__ import annotations
 
+import atexit
 import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
 # 저장소 루트를 파일 위치에서 유도한다 — `/src` 하드코딩이면 pytest로 부를 수
 # 없고, 그러면 이 배터리는 **어느 게이트에도 걸리지 않는** 도구로 남는다.
 SRC = Path(__file__).resolve().parents[1]
-WORK = Path("/tmp/ktm-audit-mutation")
+# 작업 트리는 **프로세스마다 다른 경로**여야 한다. 고정 경로면 같은 머신에서 게이트를
+# 둘 이상 동시에 돌릴 때 서로의 트리를 `shutil.rmtree`로 지우다 터진다:
+#   OSError: [Errno 39] Directory not empty: '.../tests/unit/__pycache__'
+# 실패 메시지가 rmtree 스택트레이스라 원인이 "동시 실행"이라는 것을 전혀 드러내지
+# 않아, 2026-08-14에 실제로 브랜치 결함으로 오인할 뻔했다.
+#
+# 대신 종료 시 **반드시 지운다.** 고정 경로일 때는 다음 실행이 덮어써서 하나로 유지됐지만
+# 프로세스마다 새 경로를 쓰면 지우지 않는 순간 /tmp가 실행 횟수만큼 쌓인다 —
+# 트리 하나가 수십 MB다. 여기서 고친 문제를 다른 형태로 옮기지 않으려고 atexit를 건다.
+WORK = Path(tempfile.mkdtemp(prefix="ktm-audit-mutation-"))
+atexit.register(shutil.rmtree, WORK, True)
 
 _NODE_STEP = "      - name: Set up Node 22.23.1"
 _FIXTURE_BLOCK = (
