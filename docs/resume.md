@@ -7,9 +7,19 @@ prod의 dagster/daemon 두 컨테이너가 geo가 401로 거절하는 VWorld 키
 재발 통로 **7곳**(첫 판이 센 5곳 + 적대 리뷰가 찾은 2곳)을 끊고 정적 가드를 세웠다.
 PR [#979](https://github.com/digitie/kor-travel-map/pull/979).
 
-**다음 한 작업**: #979 CI green 확인 후 머지. 그 다음은 `docs/tasks.md` `T-VN-H46`의
-잔여 — daemon 이미지만 재빌드에서 빠지는 파이프라인 원인(별건), 그리고 기동 시
-"자기 코드 세대 vs DB alembic head" 대조 fence.
+**다음 한 작업**: #979 CI green 확인 후 머지.
+
+그 다음 셋:
+
+1. **prod admin UI 지오코딩은 아직 죽어 있다.** `kor-travel-map-ui` 컨테이너에 geo
+   소비자 키가 **한 개도** 들어가 있지 않다(적대 리뷰 실측). `NEXT_PUBLIC_*`은 빌드
+   시점에 번들에 박히므로 이미 구운 이미지에 키를 넣는 유일한 경로는 런타임 env
+   `KOR_TRAVEL_GEO_API_KEY`이고, 이 PR이 저장소 compose에 그 배선을 넣었다.
+   **남은 절반은 cross-repo다** — `kor-travel-docker-manager`의
+   `docker-compose.yml` `kor-travel-map-ui` 서비스에 같은 env를 추가해야 한다.
+   그래야 재빌드 없이 켤 수 있다.
+2. daemon 이미지만 재빌드에서 빠지는 파이프라인 원인(별건).
+3. 기동 시 "자기 코드 세대 vs DB alembic head" 대조 fence.
 
 ## 2026-08-13 — T-VN-36 prod cutover 완료
 

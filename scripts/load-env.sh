@@ -125,6 +125,17 @@ export_first NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY \
   KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY
 export_first KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY \
   NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY
+# 별칭이라고 적어 두기만 하면 강제되지 않는다. 키 회전에서 한쪽만 고치면 backend ETL은
+# 초록인데 admin UI만 401이 되고 아무도 모른다 — 2026-08-13 사고와 같은 모양이 한 겹
+# 위에서 재현된다. 값이 갈리면 여기서 선다. (marker: geo_alias_split_brain)
+if [[ -n "${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-}" \
+   && -n "${NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY:-}" \
+   && "${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY}" != "${NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY}" ]]; then
+  echo "load-env: geo_alias_split_brain — KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY와" \
+       "NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY가 서로 다른 값이다. 둘은 같은 자격증명의" \
+       "별칭이므로 한쪽만 회전하면 admin UI만 401이 된다." >&2
+  exit 1
+fi
 export_first KOR_TRAVEL_MAP_KAKAO_LOCAL_REST_API_KEY \
   KAKAO_LOCAL_REST_API_KEY
 export_first KOR_TRAVEL_MAP_NAVER_SEARCH_CLIENT_ID \

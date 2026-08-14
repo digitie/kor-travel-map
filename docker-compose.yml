@@ -255,6 +255,11 @@ services:
       NEXT_PUBLIC_VWORLD_API_KEY: ${NEXT_PUBLIC_VWORLD_API_KEY:-${KOR_TRAVEL_GEO_VWORLD_API_KEY:-${VWORLD_API_KEY:-}}}
       # geo 소비자 키는 VWorld 키로 떨어지지 않는다 — geo가 401(E0401)로 거절하는 값이다.
       NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY: ${NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY:-${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-}}
+      # `NEXT_PUBLIC_*`은 빌드 시점에 번들에 박힌다. 이미 구운 이미지에 키를 넣는
+      # 유일한 경로가 이 런타임 env이고, geo 프록시(`app/api/geo/[...path]/route.ts`)가
+      # 이것을 **먼저** 읽는다. 이 줄이 없으면 admin UI 지오코딩은 이미지를 다시 굽기
+      # 전까지 켤 수 없다 — prod가 지금 그 상태다(docker-manager 쪽 후속).
+      KOR_TRAVEL_GEO_API_KEY: ${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-}
       KOR_TRAVEL_MAP_API_INTERNAL_URL: ${KOR_TRAVEL_MAP_DOCKER_API_INTERNAL_URL:-http://api:${KOR_TRAVEL_MAP_API_PORT:-12701}}
       KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET: ${KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET:?KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET is required}
       KOR_TRAVEL_MAP_UI_ADMIN_USERNAME: ${KOR_TRAVEL_MAP_UI_ADMIN_USERNAME:-admin}
