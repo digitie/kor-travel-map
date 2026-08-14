@@ -22,6 +22,13 @@ OUTPUT="${KOR_TRAVEL_MAP_BUILDX_OUTPUT:-registry}"
 API_IMAGE="${KOR_TRAVEL_MAP_API_IMAGE:-$IMAGE_REGISTRY/$IMAGE_NAMESPACE-api}"
 FRONTEND_IMAGE="${KOR_TRAVEL_MAP_FRONTEND_IMAGE:-$IMAGE_REGISTRY/$IMAGE_NAMESPACE-admin}"
 DAGSTER_IMAGE="${KOR_TRAVEL_MAP_DAGSTER_IMAGE:-$IMAGE_REGISTRY/$IMAGE_NAMESPACE-dagster}"
+# daemon은 dagster와 **같은 Dockerfile·같은 build args**를 쓰고 command만 다르다
+# (compose의 두 build 블록이 동일하다). 그런데 이 스크립트는 오래 "map 이미지는 3개"라는
+# 잘못된 모델을 성문화하고 있었고, `docker-build.sh:12`는 4개를 제대로 나열해 두 파일이
+# 서로 모순됐다. 2026-08-13 prod 재빌드에서 정확히 그 누락이 나 daemon만 8일 묵은 코드로
+# 남았고, TVN33 커토버 이후 `feature_update_request_queue_sensor`가 30초마다 죽었다
+# (dagster metadata DB 실측 consecutive_failure_count=2020).
+DAGSTER_DAEMON_IMAGE="${KOR_TRAVEL_MAP_DAGSTER_DAEMON_IMAGE:-$IMAGE_REGISTRY/$IMAGE_NAMESPACE-dagster-daemon}"
 
 output_args=()
 case "$OUTPUT" in
@@ -58,21 +65,34 @@ ensure_builder() {
   docker buildx inspect --bootstrap >/dev/null
 }
 
+# 첫 인자는 **이미지 하나 이상**을 공백으로 구분한 목록이다. 같은 Dockerfile을 여러
+# 이름으로 배포해야 할 때 build를 두 번 돌리지 않고 태그만 더한다 — 두 번 돌리면 두
+# 이미지가 같다는 보장이 없고(캐시 미스·비결정적 레이어), 하필 그 "같다"가 dagster와
+# dagster-daemon에서는 요구사항이다. daemon은 자기 이미지 안의 패키지를 in-process로
+# 로드하므로 code server와 코드가 어긋나면 그대로 사고다(2026-08-13).
 build_one() {
-  local image="$1"
+  local -a images
+  read -r -a images <<<"$1"
   local dockerfile="$2"
   shift 2
-  local image_latest_args=()
-  if [[ "${KOR_TRAVEL_MAP_IMAGE_TAG_LATEST:-false}" == "true" ]]; then
-    image_latest_args=(-t "$image:latest")
+  local -a tag_args=()
+  local image
+  for image in "${images[@]}"; do
+    tag_args+=(-t "$image:$IMAGE_TAG")
+    if [[ "${KOR_TRAVEL_MAP_IMAGE_TAG_LATEST:-false}" == "true" ]]; then
+      tag_args+=(-t "$image:latest")
+    fi
+  done
+  if [[ ${#tag_args[@]} -eq 0 ]]; then
+    echo "build_one: 이미지 목록이 비었다 (dockerfile=$dockerfile)" >&2
+    exit 2
   fi
 
-  echo "Building $image:$IMAGE_TAG for $PLATFORMS"
+  echo "Building ${images[*]} :$IMAGE_TAG for $PLATFORMS"
   docker buildx build \
     --platform "$PLATFORMS" \
     -f "$dockerfile" \
-    -t "$image:$IMAGE_TAG" \
-    "${image_latest_args[@]}" \
+    "${tag_args[@]}" \
     "${output_args[@]}" \
     "$@" \
     .
@@ -91,6 +111,6 @@ build_one "$FRONTEND_IMAGE" docker/frontend.Dockerfile \
   --build-arg "NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL=${NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL:-http://127.0.0.1:12501}" \
   --build-arg "NEXT_PUBLIC_VWORLD_API_KEY=${NEXT_PUBLIC_VWORLD_API_KEY:-}" \
   --build-arg "NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY=${NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY:-}"
-build_one "$DAGSTER_IMAGE" docker/dagster.Dockerfile "${secret_args[@]}"
+build_one "$DAGSTER_IMAGE $DAGSTER_DAEMON_IMAGE" docker/dagster.Dockerfile "${secret_args[@]}"
 
 echo "Built tag: $IMAGE_TAG"
