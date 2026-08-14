@@ -24,10 +24,19 @@
 체인은 **어떤 DB에서도 다시 실행되지 않는다.** prod는 2026-08-13 in-place
 cutover로 이미 `0104`를 지나왔고, 새 DB는 `0200`에서 시작한다.
 
-여기 파일을 `versions/`로 되돌리면 alembic이 **중복 revision으로 거부한다** —
-`versions/0201_squash_bridge.py`가 `0104_tvn36_final_fence`를 선언하고 여기
-`0104_tvn36_final_fence.py`도 같은 id를 선언하기 때문이다. 두 디렉터리를 한
-`version_locations`에 함께 담는 것도 같은 이유로 불가능하다.
+여기 파일을 `versions/`로 되돌리거나 두 디렉터리를 한 `version_locations`에 함께
+담으면 **alembic이 거부하지 않는다 — 그게 문제다.** 실측:
+
+```
+UserWarning: Revision 0104_tvn36_final_fence is present more than once
+heads: ['0200_schema_baseline', '0104_tvn36_final_fence', '0104_tvn36_final_fence']
+```
+
+경고 한 줄 내고 head 3개짜리 손상된 맵으로 계속 간다. 거부보다 나쁜 결과다.
+`versions/0201_squash_bridge.py`와 여기 `0104_tvn36_final_fence.py`가 같은 revision id를
+선언하기 때문이고, `docker/api-entrypoint.sh`는 `alembic heads 2>/dev/null`로 stderr를
+버리므로 그 경고조차 보이지 않는다(다만 `head_count != 1` 검사가 그 뒤에 막는다).
+**두 디렉터리는 서로 다른 `version_locations`로만 로드해야 한다.**
 
 과거 세대의 SQL을 참조할 일이 있으면 **읽기만** 하라.
 `rg <패턴> alembic/legacy_versions/`.

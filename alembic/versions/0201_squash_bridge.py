@@ -32,11 +32,20 @@ alembic은 `public.alembic_version`에 적힌 문자열을 **script directory에
 두 경로가 **같은 head 문자열**로 수렴하는 것이 요점이다. 배포 순서에 stamp도, 핀
 갱신도, 손수술도 들어가지 않는다 — 넣지 않아도 되는 절차는 넣지 않는 편이 안전하다.
 
-## upgrade가 no-op이 아니라 검증인 이유
+## upgrade의 검증이 **닿는 범위** (오해하지 말 것)
 
-`0104`라고 적혀 있으면서 실제로는 그 세대가 아닌 DB가 있을 수 있다(손수술, 부분 복원,
-옛 dump). 그런 DB를 조용히 head로 인정하면 결손이 런타임 SQL 오류로만 드러난다.
-그래서 T-VN-36이 도입한 relation 두 개의 존재를 **확인만** 한다 — 없으면 여기서 선다.
+여기 있는 relation 확인은 **새 DB 경로에서만 돈다.** `alembic_version`이 이미
+`0104_tvn36_final_fence`인 DB는 current == head라 `alembic upgrade head`가 0스텝으로
+끝나고 이 함수는 **호출되지 않는다.** 적대 리뷰 2인이 각각 그것을 지적했고, 한쪽은
+relation 두 개를 DROP한 0104 DB에서 `upgrade head`가 exit 0으로 통과하는 것을 실측했다.
+
+그러니 이 검사를 "손수술·부분 복원·옛 dump로 어긋난 DB를 구제한다"고 읽으면 안 된다.
+그 축은 alembic 밖에 있어야 한다 — 지금은 `docker/api-entrypoint.sh`가 DB revision이
+아카이브 세대일 때를 가려 진단한다.
+
+그래도 남겨 두는 이유는 하나다: `0200`이 방금 만든 것을 **같은 트랜잭션 안에서**
+확인하므로, `schema.sql`이 어떤 이유로든 두 relation을 만들지 못한 채 성공한 경우를
+잡는다. 신규 DB 경로의 사후 확인이지 기존 DB의 구제 장치가 아니다.
 """
 
 from __future__ import annotations

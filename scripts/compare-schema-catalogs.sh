@@ -97,11 +97,33 @@ COPY (
          pg_catalog.pg_get_userbyid(evt.evtowner)
     FROM pg_catalog.pg_event_trigger AS evt
   UNION ALL
-  SELECT 'dbacl' || pg_catalog.pg_get_userbyid(db.datdba) || ':' ||
+  -- 소유자는 넣지 않는다. DB 이름과 마찬가지로 **bootstrap/provisioning이 정하는 값**이라
+  -- 스키마와 무관한 빨강을 만든다(복원 DB를 `postgres` 소유로 만들어 대조하는 경우).
+  -- locale/encoding은 넣는다 — 이 저장소는 collation이 load-bearing이다
+  -- (`tests/integration/test_alias_map_collation_glibc.py`).
+  SELECT 'dbprops' || db.encoding::text || ':' || db.datcollate || ':' || db.datctype || ':' ||
+         db.datlocprovider::text || ':' ||
          COALESCE((SELECT string_agg(entry::text, ',' ORDER BY entry::text)
                      FROM unnest(db.datacl) AS entry), '')
     FROM pg_catalog.pg_database AS db
    WHERE db.datname = current_database()
+  UNION ALL
+  -- routine 유효권한. 추출한 원본 SQL의 routine 축은 `acldefault` 문자열 차감이라
+  -- **PUBLIC EXECUTE 재부여를 못 본다**(함수 기본 ACL에 PUBLIC이 들어 있어 같이 지워진다).
+  -- `has_function_privilege()`로 직접 물어 그 구멍을 메운다.
+  SELECT 'routineacl' || grantee.name || '|' || n.nspname || '.' || p.proname
+         || '(' || pg_catalog.pg_get_function_identity_arguments(p.oid) || ')'
+         || '|execute=' || pg_catalog.has_function_privilege(grantee.name, p.oid, 'EXECUTE')::text
+         || '|grantopt=' || pg_catalog.has_function_privilege(grantee.name, p.oid,
+                                                              'EXECUTE WITH GRANT OPTION')::text
+    FROM pg_catalog.pg_proc AS p
+    JOIN pg_catalog.pg_namespace AS n ON n.oid = p.pronamespace
+    CROSS JOIN (VALUES ('public'),
+                       ('ktm_feature_schema_owner'),
+                       ('ktm_feature_state_procedure_owner'),
+                       ('ktm_feature_audit_writer'),
+                       ('ktm_feature_runtime')) AS grantee(name)
+   WHERE n.nspname IN ('feature', 'provider_sync', 'ops')
   UNION ALL
   SELECT 'constraintdef' || nsp.nspname || '.' || rel.relname || '.' || con.conname || ':' ||
          pg_catalog.pg_get_constraintdef(con.oid)
@@ -170,6 +192,19 @@ if [ "$SELF_TEST" = "1" ]; then
     "기본값 변경|ALTER TABLE feature.features ALTER COLUMN created_at SET DEFAULT '2000-01-01T00:00:00Z'::timestamptz"
     "소유권 이전|ALTER TABLE ops.feature_overrides OWNER TO ${ADMIN_USER:-postgres}"
     "함수 본문 변경|CREATE OR REPLACE FUNCTION feature.derive_subtype_public_ready() RETURNS trigger LANGUAGE plpgsql AS \$\$BEGIN RETURN NEW; END;\$\$"
+    # 보강 축 5종. 축을 넓혀 놓고 자체검증을 안 늘리면 그 축은 여전히 아무것도
+    # 증명하지 않은 상태다 — 이번 결함이 새어 나온 통로가 정확히 그것이었다.
+    "스키마 ACL 회수(스코프 밖)|REVOKE USAGE ON SCHEMA x_extension FROM ktm_feature_runtime"
+    "public에 relation 생성|CREATE TABLE public.ktm_oracle_probe (id integer)"
+    "public에 routine 생성|CREATE FUNCTION public.ktm_oracle_probe_fn() RETURNS integer LANGUAGE sql AS \$\$SELECT 1\$\$"
+    # 함수는 `x_extension`에 만든다 — 다른 축(3개 스키마 routine · public routine)에
+    # 걸리지 않아야 event trigger 축이 **혼자** 검출한 것이 된다.
+    "event trigger 생성|CREATE FUNCTION x_extension.ktm_oracle_evt_fn() RETURNS event_trigger LANGUAGE plpgsql AS \$\$BEGIN END;\$\$; CREATE EVENT TRIGGER ktm_oracle_probe_evt ON ddl_command_start EXECUTE FUNCTION x_extension.ktm_oracle_evt_fn()"
+    "DB ACL 변경|GRANT CONNECT ON DATABASE $B TO ktm_feature_runtime"
+    # routine PUBLIC EXECUTE 재부여. digest는 이제 이것을 잡지만 **오라클은 못 잡았다**
+    # (추출한 SQL의 routine 축이 `acldefault` 문자열 차감이라 PUBLIC 항목까지 지운다).
+    # 보강 축에 유효권한 행을 넣었으므로 여기서 그것이 실제로 무는지 확인한다.
+    "routine PUBLIC EXECUTE 재부여|GRANT EXECUTE ON FUNCTION feature.validate_feature_base_field_value() TO PUBLIC"
   )
   caught=0; missed=0
   for entry in "${MUTATIONS[@]}"; do

@@ -583,8 +583,9 @@ squash(2026-08-14) 이후 두 파일뿐이다.
 
 `0001~0104` 체인 109개는 `alembic/legacy_versions/`의 실행되지 않는 아카이브다
 ([README](../../alembic/legacy_versions/README.md)). **`versions/`로 되돌리지 마라** —
-bridge와 아카이브가 `0104_tvn36_final_fence`를 둘 다 선언하므로 alembic이 중복
-revision으로 거부하고, 되돌리면 root가 둘로 갈라진다.
+bridge와 아카이브가 `0104_tvn36_final_fence`를 둘 다 선언하는데, alembic은 그것을
+**거부하지 않고** `Revision … is present more than once` 경고 한 줄 뒤 head 3개짜리
+손상된 맵으로 계속 간다(실측). 거부보다 나쁘다.
 
 #### 다음 migration(`0202`~) 작성
 
@@ -594,7 +595,10 @@ revision으로 거부하고, 되돌리면 root가 둘로 갈라진다.
    앞서면서 `down_revision`은 뒤를 가리키는 파일이 생겨 읽는 사람을 오도한다.
 3. 파생 산출물을 함께 갱신한다:
    `python scripts/generate_application_migration_graph.py --write`
-   (`src/kortravelmap/_application_migration_graph.json`; `--check`가 CI 게이트다).
+   (`src/kortravelmap/_application_migration_graph.json`). 게이트는 그 스크립트의
+   `--check`가 아니라 unit 테스트
+   `tests/unit/test_application_schema_head.py::test_application_graph_artifact_matches_literal_source_graph`
+   다 — CI 워크플로에 이 스크립트를 부르는 스텝은 없다.
 4. `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`(배포 env pin)를 새 head로 올린다.
    `docker/api-entrypoint.sh`가 이미지 head와 이 값을 대조해 fail-closed한다.
 5. baseline 자체는 건드리지 않는다. baseline 갱신은 별도 결정이며 절차는

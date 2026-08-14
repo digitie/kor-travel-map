@@ -1292,17 +1292,20 @@ def test_api_container_rejects_set_but_empty_expected_head(tmp_path: Path) -> No
 def test_api_container_fails_fast_when_db_is_ahead_of_image(tmp_path: Path) -> None:
     """DB revision이 이미지 chain에 없으면 retry 없이 즉시, 이유를 말하며 죽는다 (F3).
 
-    재생성 후 stale `latest-main`(0072) 이미지가 또 배포되면 — 사고의 원인이던 바로 그
-    태그 드리프트 — DB(0078)가 이미지보다 앞서 이 경로로 떨어진다. 종전에는 30회×2s
-    동안 같은 오류를 반복한 뒤 일시 오류와 같은 종말 메시지로 죽어 원인 판별이 늦었다.
-    `alembic current`가 같은 오류를 즉시 내므로 한 번 읽어 먼저 판정한다.
+    stale 이미지 재배포 — 사고의 원인이던 태그 드리프트 — 는 DB가 이미지보다 **앞선**
+    경우다. 종전에는 30회×2s 동안 같은 오류를 반복한 뒤 일시 오류와 같은 종말 메시지로
+    죽어 원인 판별이 늦었다. `alembic current`가 같은 오류를 즉시 내므로 먼저 판정한다.
+
+    squash(`0200`) 이후 이 분기의 원인이 둘로 갈렸으므로 revision도 그에 맞게 고른다:
+    아카이브에 **없는** 이름이라야 "이미지가 뒤처졌다"가 성립한다. 아카이브에 있는
+    이름은 아래 `…_predates_the_squash_baseline`이 맡는다.
     """
     path, marker = _migration_stub_path(
         tmp_path,
-        image_head="0072_curation_provenance",
+        image_head="0104_tvn36_final_fence",
         current_script=(
             "echo \"FAILED: Can't locate revision identified by "
-            "'0078_cache_target_gc_observe'\"; exit 255"
+            "'0300_future_generation'\"; exit 255"
         ),
     )
     result = _run_entrypoint(path, {})
@@ -1313,6 +1316,35 @@ def test_api_container_fails_fast_when_db_is_ahead_of_image(tmp_path: Path) -> N
     assert "Can't locate revision" in result.stderr, (
         "실제 alembic 오류 원문이 로그에 없다 — 운영자가 원인을 추적할 수 없다."
     )
+    assert "retrying" not in result.stderr, "영구 오류를 retry 루프로 두드렸다."
+
+
+@pytest.mark.unit
+def test_api_container_says_so_when_the_db_predates_the_squash_baseline(tmp_path: Path) -> None:
+    """DB가 squash 이전 세대면 **그렇게** 말한다 — "stale image"라고 하지 않는다.
+
+    같은 `Can't locate revision` 오류가 정반대 두 원인에서 나온다. squash 이후 이미지는
+    `0200`에서 시작하므로 `0104` 이전 복구점(예: H44 1회차 dump `0078`)으로 복원한 DB를
+    앞으로 옮길 수 없다 — 이때는 **이미지가 더 새롭다.** 옛 진단문만 남기면 새벽에 그
+    로그를 보는 사람이 롤백을 시도한다(적대 리뷰 지적).
+    """
+    path, marker = _migration_stub_path(
+        tmp_path,
+        image_head="0104_tvn36_final_fence",
+        current_script=(
+            "echo \"FAILED: Can't locate revision identified by "
+            "'0078_cache_target_gc_observe'\"; exit 255"
+        ),
+    )
+    result = _run_entrypoint(path, {})
+
+    assert result.returncode != 0, result.stdout
+    assert not marker.exists(), "복구 불가 상태인데 upgrade가 실행됐다."
+    assert "pre-squash" in result.stderr, result.stderr
+    assert "stale image" not in result.stderr, (
+        "원인이 반대인데 stale-image로 진단했다 — 운영자를 롤백으로 오도한다."
+    )
+    assert "legacy_versions" in result.stderr, "아카이브 위치를 알려 주지 않는다."
     assert "retrying" not in result.stderr, "영구 오류를 retry 루프로 두드렸다."
 
 

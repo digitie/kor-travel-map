@@ -27,22 +27,34 @@ _SCANNED_ROOTS = (
     _ROOT / "packages",
     _ROOT / "alembic",
     _ROOT / "docker",
+    _ROOT / ".github",
 )
+#: `.py`만 보면 `scripts/h35/*.sh` 같은 쉘 러너가 밖에 남는다 — 그것도 같은 경로를
+#: 문자열로 들고 있고, 깨지면 배포 시점에야 드러난다.
+_SCANNED_SUFFIXES = ("*.py", "*.sh")
 #: 두 표기를 본다: Path 연산자로 이어 붙인 형태와 슬래시로 붙인 문자열 형태.
 #: 전자는 줄바꿈을 넘나들 수 있어 공백을 먼저 뭉갠다.
 #:
 #: 예시는 **적지 않는다.** 이 파일 자신이 스캔 대상이라, 예시로 적은 경로가 실재하지
 #: 않으면 가드가 자기 자신을 위반으로 잡는다 — 첫 판이 정확히 그랬다.
 #: (`test_no_control_characters_in_source`가 금지 문자를 `chr()`로 적는 것과 같은 이유다.)
-_PATH_STYLE = re.compile(r'"alembic"\s*/\s*"(versions|legacy_versions)"\s*/\s*"([^"]+\.py)"')
-_STRING_STYLE = re.compile(r'"alembic/(versions|legacy_versions)/([^"]+\.py)"')
+#: 작은따옴표도 받는다. 이 저장소는 `ruff` select에 `Q`가 없고 `ruff format --check`가
+#: `if: false`라 두 표기가 모두 합법이다 — 큰따옴표만 보면 가장 그럴듯한 우회가
+#: 그대로 열린다(적대 리뷰 실증).
+_QUOTE = "[\"']"
+_PATH_STYLE = re.compile(
+    rf"{_QUOTE}alembic{_QUOTE}\s*/\s*{_QUOTE}(versions|legacy_versions){_QUOTE}"
+    rf"\s*/\s*{_QUOTE}([^\"']+\.py){_QUOTE}"
+)
+_STRING_STYLE = re.compile(rf"{_QUOTE}alembic/(versions|legacy_versions)/([^\"']+\.py){_QUOTE}")
 
 
 def _sources() -> list[Path]:
     found: list[Path] = []
     for root in _SCANNED_ROOTS:
         if root.exists():
-            found.extend(sorted(root.rglob("*.py")))
+            for pattern in _SCANNED_SUFFIXES:
+                found.extend(sorted(root.rglob(pattern)))
     assert found, "스캔 대상을 하나도 찾지 못했다 — 경로가 틀렸다"
     return found
 
@@ -53,6 +65,10 @@ def test_alembic_file_path_literals_resolve() -> None:
     for path in _sources():
         collapsed = re.sub(r"\s+", " ", path.read_text(encoding="utf-8"))
         for directory, name in _PATH_STYLE.findall(collapsed) + _STRING_STYLE.findall(collapsed):
+            # f-string 보간(`{stem}`)은 정적으로 풀 수 없다. 검사하지 않는다 —
+            # 억지로 판정하면 정상 코드에 빨간불이 뜨고, 사람은 가드를 끄는 쪽으로 움직인다.
+            if "{" in name:
+                continue
             checked += 1
             if not (_ROOT / "alembic" / directory / name).exists():
                 missing.setdefault(str(path.relative_to(_ROOT)), []).append(

@@ -146,6 +146,7 @@ def upgrade() -> None:
     op.execute(
         """
         DO $$
+        DECLARE missing text;
         BEGIN
             IF NOT (SELECT rolsuper OR rolcreaterole FROM pg_catalog.pg_roles WHERE rolname = current_user)
                AND (
@@ -212,9 +213,16 @@ def upgrade() -> None:
                     'baseline requires bootstrap-provisioned x_extension schema with postgis'
                     USING ERRCODE = '42P01';
             END IF;
-            IF NOT has_schema_privilege('ktm_feature_runtime', 'x_extension', 'USAGE') THEN
+            -- bootstrap은 두 role에 준다. 하나만 검사하면 나머지 하나가 빠진 상태가
+            -- 그대로 통과한다(적대 리뷰 지적) — 둘 다 본다.
+            SELECT string_agg(expected.role_name, ', ' ORDER BY expected.role_name)
+              INTO missing
+              FROM (VALUES ('ktm_feature_state_procedure_owner'), ('ktm_feature_runtime'))
+                     AS expected(role_name)
+             WHERE NOT has_schema_privilege(expected.role_name, 'x_extension', 'USAGE');
+            IF missing IS NOT NULL THEN
                 RAISE EXCEPTION
-                    'baseline requires bootstrap GRANT USAGE ON SCHEMA x_extension TO ktm_feature_runtime'
+                    'baseline requires bootstrap GRANT USAGE ON SCHEMA x_extension TO %', missing
                     USING ERRCODE = '42501';
             END IF;
         END;

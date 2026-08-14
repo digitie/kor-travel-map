@@ -61,8 +61,9 @@ _ALEMBIC_CONFIG_PATH: Final = Path("alembic.ini")
 #: 캠페인 target(`0079`)이 사는 그래프. squash(`0200`) 이후 `alembic/versions/`에는
 #: baseline과 bridge만 있으므로 `0079`는 거기서 해석되지 않는다. 이 도구는 설계상
 #: **과거 세대에 앵커된** 캠페인 도구이므로(위 `_repository_campaign_revision` 주석)
-#: 아카이브가 정확한 대상이다. 두 디렉터리를 함께 담을 수는 없다 — bridge와 아카이브가
-#: `0104_tvn36_final_fence`를 둘 다 선언하므로 alembic이 중복 revision으로 거부한다.
+#: 아카이브가 정확한 대상이다. 두 디렉터리를 함께 담으면 안 된다 — bridge와 아카이브가
+#: `0104_tvn36_final_fence`를 둘 다 선언하는데, alembic은 **거부하지 않고** 경고 한 줄 뒤
+#: head 3개짜리 손상된 맵으로 계속 간다(실측). 그래서 아카이브만 담는다.
 _ALEMBIC_LEGACY_VERSIONS: Final = Path("alembic") / "legacy_versions"
 
 

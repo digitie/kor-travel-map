@@ -212,6 +212,10 @@ $EDITOR packages/kor-travel-map-api/.env
 # data 링크
 ln -s /mnt/f/dev/kor-travel-map/data data
 
+# role/schema/extension bootstrap — squash(`0200`) 이후 필수.
+# baseline은 role/schema/extension을 만들지 않고 **전제로 검증만** 한다.
+docker compose run --rm db-role-bootstrap
+
 # Alembic upgrade (스키마 적용 - 설정한 외부 DB에 반영)
 alembic upgrade head
 

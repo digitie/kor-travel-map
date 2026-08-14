@@ -72,6 +72,10 @@ uv pip install -e ".[dev,geo,providers]"
 
 # PostgreSQL + PostGIS
 docker compose up -d postgres
+# role/schema/extension bootstrap — squash(`0200`) 이후 **필수**다.
+# 체인의 `0001`이 스키마와 extension을 만들어 주던 시절과 달리, baseline은
+# 그것을 재현하지 않고 **전제로 검증만** 한다(없으면 fail-closed로 선다).
+docker compose run --rm db-role-bootstrap
 alembic upgrade head
 
 # API/admin/Dagster stack — scoped API env 필수, root cwd 직접 uvicorn 금지
