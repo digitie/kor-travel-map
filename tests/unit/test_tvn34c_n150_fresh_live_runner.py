@@ -32,13 +32,18 @@ def test_runner_uses_receipt_pinned_archives_not_its_checkout() -> None:
     assert 'readonly RECEIPT="$INSTALL_DIR/consumer-rollout-v1.json"' in runner
     assert 'task = data.get("deployment_receipt_task")' in runner
     assert 'receipt.get("state") != "complete"' in runner
+    assert '"map_service_openapi_sha256"' in runner
+    assert '"pinvi_service_vendor_sha256"' in runner
+    assert 'openapi.service.json' in runner
+    assert 'kor-travel-map-openapi-service.json' in runner
+    assert 'pinvi_admin_detail_vendor_sha256' not in runner
     assert (
         'python3 - "$RECEIPT" "$MAP_DIR" "$PINVI_DIR" "$MAP_COMMIT" "$PINVI_COMMIT"'
         in runner
     )
     assert 'safe_extract "$MAP_ARCHIVE" "$RUN_DIR"' in runner
     assert 'safe_extract "$PINVI_ARCHIVE" "$RUN_DIR"' in runner
-    assert '"version"] != 3' in runner
+    assert '"version"] != 4' in runner
     assert 'read_map_application_head' in runner
     assert '"$MAP_DIR/docker/application-schema-head.py"' in runner
     assert '"$MAP_DIR/src/kortravelmap/_application_migration_graph.json"' in runner
@@ -77,7 +82,12 @@ def test_installer_archives_exact_pair_and_installs_immutable_inputs() -> None:
     )
     assert 'task = rollout.get("deployment_receipt_task")' in installer
     assert 'receipt.get("state") != "complete"' in installer
-    assert '"version":3' in installer
+    assert '"map_service_openapi_sha256"' in installer
+    assert '"pinvi_service_vendor_sha256"' in installer
+    assert 'openapi.service.json' in installer
+    assert 'kor-travel-map-openapi-service.json' in installer
+    assert 'pinvi_admin_detail_vendor_sha256' not in installer
+    assert '"version":4' in installer
     assert 'readonly snapshot_name="${MAP_COMMIT}-${PINVI_COMMIT}-${RUNNER_COMMIT}"' in installer
     assert 'install -o root -g root -m 0500' in installer
     assert (

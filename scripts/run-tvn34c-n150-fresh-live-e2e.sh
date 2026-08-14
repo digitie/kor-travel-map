@@ -88,7 +88,7 @@ helper_path = runner_path.parent / "scripts" / "tvn34c_fresh_live_etl_seed.py"
 data = json.loads(manifest_path.read_text(encoding="utf-8"))
 pattern = re.compile(r"^[0-9a-f]{40}$")
 sha_pattern = re.compile(r"^[0-9a-f]{64}$")
-if set(data) != {"map", "pinvi", "receipt_sha256", "runner_sha256", "seed_helper_sha256", "version"} or data["version"] != 3:
+if set(data) != {"map", "pinvi", "receipt_sha256", "runner_sha256", "seed_helper_sha256", "version"} or data["version"] != 4:
     raise SystemExit(2)
 for side in ("map", "pinvi"):
     value = data[side]
@@ -164,11 +164,38 @@ if not isinstance(task, str):
 receipt = data["tasks"][task]["pinvi_snapshot_receipt"]
 if receipt.get("state") != "complete":
     raise SystemExit(1)
+expected_keys = {
+    "state",
+    "map_commit",
+    "pinvi_commit",
+    "map_user_openapi_sha256",
+    "map_service_openapi_sha256",
+    "map_full_openapi_sha256",
+    "pinvi_user_vendor_sha256",
+    "pinvi_service_vendor_sha256",
+    "verification",
+}
+if set(receipt) != expected_keys:
+    raise SystemExit(1)
+if receipt["verification"] != [
+    "PinVi user/service vendor bytes are exact",
+    "PinVi canonical curation importer has no legacy admin snapshot consumer",
+    "paired Map/PinVi n150 canonical snapshot live acceptance passed",
+]:
+    raise SystemExit(1)
 if receipt["map_commit"] != map_commit or receipt["pinvi_commit"] != pinvi_commit:
     raise SystemExit(1)
-for name in ("openapi.user.json", "openapi.json"):
+if receipt["map_user_openapi_sha256"] != receipt["pinvi_user_vendor_sha256"]:
+    raise SystemExit(1)
+if receipt["map_service_openapi_sha256"] != receipt["pinvi_service_vendor_sha256"]:
+    raise SystemExit(1)
+for name, key in (
+    ("openapi.user.json", "map_user_openapi_sha256"),
+    ("openapi.service.json", "map_service_openapi_sha256"),
+    ("openapi.json", "map_full_openapi_sha256"),
+):
     digest = hashlib.sha256((map_root / "packages" / "kor-travel-map-api" / name).read_bytes()).hexdigest()
-    expected = receipt["map_user_openapi_sha256"] if name.endswith("user.json") else receipt["map_full_openapi_sha256"]
+    expected = receipt[key]
     if digest != expected:
         raise SystemExit(2)
 for path, key in (
@@ -177,8 +204,8 @@ for path, key in (
         "pinvi_user_vendor_sha256",
     ),
     (
-        pinvi_root / "apps" / "api" / "tests" / "contract" / "kor-travel-map-openapi-admin-detail-snapshot.json",
-        "pinvi_admin_detail_vendor_sha256",
+        pinvi_root / "apps" / "api" / "tests" / "contract" / "kor-travel-map-openapi-service.json",
+        "pinvi_service_vendor_sha256",
     ),
 ):
     if hashlib.sha256(path.read_bytes()).hexdigest() != receipt[key]:

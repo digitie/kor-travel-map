@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-15 — T-VN-40 paired service receipt 배포 gate 강화
+
+active `deployment_receipt_task=T-VN-40`가 complete가 되려면 installer와 n150 runner가 Map의
+user/service/full OpenAPI와 PinVi의 user/service vendor를 모두 archive에서 다시 해시하도록
+고정했다. 이미 제거한 admin detail snapshot vendor는 더 이상 active receipt에 허용하지 않는다.
+receipt key set·검증 문구·두 vendor의 Map hash 동치를 fail-close하고, immutable install manifest도
+version 4로 올려 이전 receipt 해석과 섞이지 않게 했다.
+
+**다음 한 작업**: Map/PinVi exact commits와 두 vendor digest, canonical importer legacy-zero
+검증, n150 canonical snapshot live acceptance가 갖춰진 뒤에만 T-VN-40 receipt를 complete로
+서명한다. 그 전에는 pending 유지와 installer 거부가 정답이다.
+
 ## 2026-08-14 — 빌드 파이프라인 결손 봉합 + prod 경계 실측
 
 **`scripts/docker-buildx.sh`가 `dagster-daemon` 이미지를 굽지 않았다.** 2026-08-13
@@ -59,6 +71,7 @@ PR [#979](https://github.com/digitie/kor-travel-map/pull/979).
    그래야 재빌드 없이 켤 수 있다.
 2. daemon 이미지만 재빌드에서 빠지는 파이프라인 원인(별건).
 3. 기동 시 "자기 코드 세대 vs DB alembic head" 대조 fence.
+
 ## 2026-08-14 — alembic squash 완료(검증까지), prod 지오코딩 복구
 
 **다음 한 작업**: PR #977 head 위 bootstrap과 0105 expand DB spine을 구현하고,
@@ -154,6 +167,7 @@ PinVi legacy curated detail snapshot도 canonical `curation_item_id` 기반 proj
 DSN이 `:12703`을 가리키는 전제인데 prod 데이터는 공유 `:5432`에 있다.
 
 배포에서 배운 것 둘:
+
 - 마이그레이션은 **독립 컨테이너**로 돌려야 한다. `0095` 3축 backfill 하나가 58분이고
   api healthcheck 창은 3.5분이라 entrypoint 인라인으로는 구조적으로 완주 불가다.
 - `dagster`/`daemon`은 api와 달리 entrypoint의 runtime DSN 교체 경로가 없어
@@ -191,7 +205,9 @@ transitions 3 / commands 3). 상세와 아홉 건의 발견은 `docs/tasks.md`
 - 러너가 alembic을 직접 부르면 `SET ROLE`이 빠져 `alembic_version` 42501이 난다.
   배포 경로는 `KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE=true`가 켠다
   (`docker/api-entrypoint.sh:262`).
+
 ## 2026-08-13 — T-VN-34 머지 대기: 적대 검토 3라운드 반영 완료
+
 ## 2026-08-13 — T-VN-36: 새 T-VN-34 base 재배치 완료, 영향성 gate 재실행
 
 **다음 한 작업**: `feat/tvn36-abcd-field-overrides`를 이 재배치 head로 force-push한 뒤,
@@ -275,6 +291,7 @@ API live 12/12 → n150 브라우저 admin UI live 10/10 + 라운드12 수정 li
 - 무방비 축 회귀: MOIS precheck fail-open(실 DB 7건), `_advisory_key` sync_scope,
   주소 clue 우선순위, MCST slug — 전부 변이로 KILLED 실증.
 - 경과는 `docs/journal.md` 2026-08-11.
+
 ## 2026-08-11 — T-VN-34: 최신 T-VN-33/T-VN-38 rebase 반영
 
 **다음 한 작업**: T-VN-36을 이 T-VN-34 rebase head 위로 재base하고, migration/OpenAPI/
@@ -288,20 +305,23 @@ consumer receipt 영향도를 다시 확인한다. 새 T-VN-34 consumer pair는 
   rebase tree에서 재동결·재실행했다.
 - user/admin-detail vendor bytes는 같은 Map source에서 deterministic 재추출·PinVi contract
   pin-consistency로 검증했고, full admin OpenAPI digest만 receipt에서 갱신했다.
+
 ## 2026-08-10 — T-VN-36 A–D 단일 PR: field override 설계 착수
 
 **다음 한 작업**: provider/admin/user/address/phone/notice normal writer와 admin typed
 field override HTTP command를 registry receipt로 전환했다. 이제 detail/read/frontend를
 effective override provenance로 교체하고 whole-row request/version bridge를 물리 제거한다.
+
 ## 2026-08-10 — T-VN-36 A–D 단일 PR: final destructive fence 구현·n150 gate 준비
+
 ## 2026-08-11 — T-VN-36: T-VN-34 rebase 반영
 
 **다음 한 작업**: T-VN-40·T-VN-41을 이 rebase head 위로 각각 재base하고, schema/OpenAPI/
 PinVi pair와 Docker manager contract 영향도를 점검한다. T-VN-36 paired receipt는 Map
 `c1fa5a4d` ↔ PinVi `8f7fef1`로 갱신했다.
 
-- Alembic graph는 T-VN-33/T-VN-38 merge revision 뒤 T-VN-34 `0095`~`0097`, T-VN-36
-  `0098`~`0104` 순으로 단일 head다.
+- Alembic graph는 T-VN-33/T-VN-38 merge revision 뒤 T-VN-34 `0095`~~`0097`, T-VN-36
+  `0098`~~`0104` 순으로 단일 head다.
 - target catalog와 admin OpenAPI freeze는 current final-fence schema에서 다시 계산했고,
   final-fence 통합·target freeze·PinVi user/admin-detail contract gate를 재실행했다.
 
@@ -372,11 +392,11 @@ head gate로 분리해 검증한다.
 병합하고, 다음 Lane B 작업인 T-VN-36A를 시작한다.
 
 - T-VN-34 전용 63 commit은 최신 T-VN-33 `21b1758b` → T-VN-38 `2e78d623` 순서의
-체인 위로 재base했고, Map OpenAPI artifact는 현재 spec hash로 재freeze했다. merge는 하지 않았다.
+  체인 위로 재base했고, Map OpenAPI artifact는 현재 spec hash로 재freeze했다. merge는 하지 않았다.
 - Map execution source `fe12e8da` ↔ PinVi `e37eda94` consumer pair를 다시 vendor했다. receipt의
-Map commit은 runtime source pin이며, runner를 담는 후속 문서 commit과 의도적으로 다르다.
+  Map commit은 runtime source pin이며, runner를 담는 후속 문서 commit과 의도적으로 다르다.
 - 새 installer/runner는 committed pair를 `git archive`로만 가져오며, `features_detailed` 부재,
-`0097_tvn34c_final_cutover`, runtime principal, exact executor label/hash를 fail-closed로 확인한다.
+  `0097_tvn34c_final_cutover`, runtime principal, exact executor label/hash를 fail-closed로 확인한다.
 - n150 immutable snapshot에서 fresh `0097` PostGIS·actual Dagster runtime ETL·Noble Playwright
   destructive admin main/recovery(2/2)·PinVi public probe가 모두 통과했다. run과 seed 식별자는
   해시로만 보존했고, `BLOCKED.json`, 해당 compose container, volume은 cleanup 뒤 모두 없다.
@@ -419,6 +439,7 @@ Playwright e2e(로컬·CI 어디에도 없다 — 이번에 그 사실을 명시
 **환경을 올려 블로커를 없앴다.** WSL node가 v20이고 저장소가 22+를 요구해
 `npm audit fix`가 engine 검사로 거부됐다. 그 상태에서 "환경이 없어 못 고친다"고
 블로커로 남길 뻔했는데, Node 22.22.2를 설치하니 도구가 고치고 도구가 검증했다:
+
 - `nanoid 3.3.16 → 3.3.18`(`^3.3.16` 범위 내, advisory 요구 충족)
 - `audit:high` exit 1 → **0**, `npm ci --dry-run` **exit 0**
 
@@ -456,6 +477,7 @@ Playwright e2e(로컬·CI 어디에도 없다 — 이번에 그 사실을 명시
 잡고, 면제에는 이유 문자열을 강제한다.
 
 **현재: 24종 중 20종 통과.** 실패 4종의 귀속을 전부 실측했다:
+
 - `pytest unit+lint` 6건 / `pytest integration` 7건 = **전부 환경 노이즈**
   (docker CLI 부재 5, package.json 미마운트 1, geo live 키 미마운트 5,
   docker effect 2). 제품 실패 0건. api 1080 passed, dagster 458 passed.
@@ -464,6 +486,7 @@ Playwright e2e(로컬·CI 어디에도 없다 — 이번에 그 사실을 명시
   돌리니 **main 10건 / 이 브랜치 7건**이다. 선재이고 이 브랜치가 3건 줄였다.
 
 **게이트 재작성이 실제로 잡은 것**(구 스크립트는 하나도 못 봤다):
+
 - branch-caused ESLint red 2건
 - `operation_key=null` 행 상세가 **422**가 되는 신규 회귀(74개 dataset 중 17개).
   직전 커밋이 프론트에서 고친 것을 그 다음 커밋이 서버 `min_length=1`로 다시 깨뜨렸다.
@@ -499,6 +522,7 @@ event 축 부재. 셋 다 "형제 operation을 중복으로 규정"하는 형태
 제품 실패 0건, 4,530 passed.
 
 리뷰가 드러낸 실제 결함(보고서 24~30번) 중 이번에 닫은 것:
+
 - **CI 블로커** — openapi.json을 바꾸고 체크인된 `types.ts`를 재생성하지 않아
   `gen:types:check`가 exit 0 → 1로 뒤집혀 있었다.
 - **거짓 409** — active request 조회가 pair인데 상위 비교는 triple이라, operation만
@@ -568,6 +592,7 @@ green이고, 나머지는 대부분 **전환은 끝났으나 src 결함에 막�
 - `curated_repo.create_curated_theme` f-string 누락 · `admin_feature_repo`의 삭제 열 참조
 
 **남은 P0** (배포 시 즉시 터짐):
+
 - dagster `assets.py` 3곳이 sync-state API에 `operation_key`를 안 넘김 → provider ETL asset 전부 사망.
   설계 판단 필요: asset이 자기 operation을 어디서 얻는가(Dagster job name = operation_key인
   registry가 있다 / client에 `*_for_operation_membership` 변형이 이미 있다).
@@ -698,10 +723,10 @@ storage head를 attest하고 reset 뒤 migration을 증명한다.
 > 2026-07-26 **전면 감사**(현행 백로그 구조 성립) 이전 기록은 아래로 분리했다.
 > 검색은 `rg <패턴> docs/archive/` 로 한다. 새 엔트리는 항상 이 파일 상단에 추가한다.
 
-| 파일 | 기간 | 엔트리 | 크기 |
-| --- | --- | --- | --- |
-| [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
-| [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
+| 파일                                             | 기간                    | 엔트리 | 크기   |
+| ------------------------------------------------ | ----------------------- | ------ | ------ |
+| [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건  | 162 KB |
+| [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건   | 86 KB  |
 
 ## 2026-08-06 (1) — T-VN-35 A-D 병합 (kind별 typed subtype 분해, ADR-086)
 
@@ -808,8 +833,9 @@ EXPECTED_HEAD=0083 재핀은 dm#128 기록. 잔여 유예(CLI 플래그·derivat
 배선·service 스냅샷 재추출)는 PR-2 동봉.
 
 **다음 한 작업**: **PR-2(응답 값 전환 — read 표면 단일 원자 릴리스, 설계 §4
-+ NEW-2/3/5·F5 체크리스트)**. 부수: 신규 ingest 행 v7 확인(배포 직후 행은 구
-dagster 마지막 쓰기라 ver=5 — 다음 ingest부터 v7 기대).
+
+- NEW-2/3/5·F5 체크리스트)**. 부수: 신규 ingest 행 v7 확인(배포 직후 행은 구
+  dagster 마지막 쓰기라 ver=5 — 다음 ingest부터 v7 기대).
 
 ## 2026-08-05 (6) — 32C PR-1(비파생 UUIDv7 generator) 구현·리뷰 반영 완료
 
@@ -996,6 +1022,7 @@ csv_explicit 196), H35 실행 종료(잔여는 provider 일일 스케줄 수렴�
 **다음 한 작업**: Lane A a1 소진 — H34 잔여 1항목(H35 대기였던 것) 해제 검토 후,
 Wave 2 barrier freeze(T-VN-31A)로 진입. codex 41C prod enable 경계는 재pin(#109) 대기
 유지.
+
 ## 2026-08-04 (codex) — T-VN-41D의 0079 schema regression 정렬
 
 Map PR #935의 PostGIS CI는 858 passed/5 skipped 뒤, obsolete H35 helper가 저장소 head를
@@ -1367,6 +1394,7 @@ PR **#918**(문서·스크립트)과 **#919**(`0073`+`0074`)를 8/8 CI green으�
 
 **격리 restore clone 재측정으로 확정한 것** — prod 백업을 포트 노출 없는 임시
 컨테이너에 복원하고 `0064~0074`를 적용:
+
 - trusted link **3,266 → 3,043** (~~공백 223건~~ → **정정: 공개 공백은 222건**.
   위 2026-08-01 게이트 실증 항목 참조 — 223번째는 `rejected`라 애초에 미노출)
 - H41 FK 4개 전부 `ON UPDATE CASCADE`, decision 달린 item의 PK 재작성 실제 성공
@@ -2013,6 +2041,7 @@ full restore는 실행하지 않았다. 이후 main 34커밋을 충돌 없이 re
 
 - **완료**: `T-VN-H30A/B` — 주소 검증 결과가 `ops.data_integrity_violations`에 durable하게
   남고 `/admin/issues`에서 보인다. 실적재로 회복 검증, 배포 cursor 미설정 실증.
+
 ## 2026-07-29 (codex) — T-VN-48D 최종 gate 완료 → PR·CI·merge
 
 **완료**: 보존 clone Live의 main/recovery 2/2 증거를 전체 restore·브라우저 재실행 없이
@@ -2118,7 +2147,7 @@ drop allowlist, token 단위 이름 warning, typed quarantine 보존과
 **다음 한 작업**: `T-VN-H30A`(주소 검증 issue를 `ops.data_integrity_violations`에 durable 기록).
 이후 `T-VN-H30B/C` → `T-VN-H25B` → `T-VN-H31` → `T-VN-H22A/B/C`.
 
-- **완료**: `T-VN-H25A` — task 전제(*"158개 중 54개가 `feature.features`에 부재"*)가
+- **완료**: `T-VN-H25A` — task 전제(_"158개 중 54개가 `feature.features`에 부재"_)가
   **재현되지 않음**을 확정하고, 실제 상태를 다시 측정했다. 근거:
   [`reports/curation-unlinked-reference-evidence-2026-07-29.md`](reports/curation-unlinked-reference-evidence-2026-07-29.md).
   - 158/158 존재 + 전부 curation 링크 가능 + `created_at` 2026-06-29~07-03(측정 시점보다 앞섬).
@@ -2163,6 +2192,7 @@ drop allowlist, token 단위 이름 warning, typed quarantine 보존과
   있어 비교 근거가 못 된다는 점, (b) MOIS는 payload에 bjd가 있으면 reverse를 아예 부르지 않아
   두 축이 동시에 존재하지 않는다는 점, (c) 단건 `ValidationError`가 batch 전체를 죽인다는 점을
   찾아냈다. 셋 다 코드를 읽어야만 알 수 있고 실데이터만으로는 드러나지 않았다.
+
 ## 2026-07-29 (codex) — issue #881 Claude PR #882~#884 감사 수정
 
 **방금**: PR #884의 backend geo public-key query를 없애고 geo trusted proxy principal로
@@ -2696,7 +2726,7 @@ Lane B b0의 `T-VN-43`(admin frontend npm 보안 취약점 0-high)로 진행한�
 - 작업 중 발견한 `T-VN-43`(npm audit), `T-VN-44`(full ESLint), `T-VN-45`(live endpoint/cache drift)를
   백로그에 추가했다.
 
-## 2026-07-26 (claude) — 백로그 전면 감사 + A/B lane 재분배 (codex 7~8 : claude 2~3)
+## 2026-07-26 (claude) — 백로그 전면 감사 + A/B lane 재분배 (codex 7~~8 : claude 2~~3)
 
 **다음 한 작업**: **Lane A `T-VN-LIVE-01`** — merged targeted live acceptance lane(#792)을 n150
 production에 파괴적 실행(WSL SSH, 실데이터), cleanup/audit/evidence 0/완결 증명 →

@@ -297,8 +297,34 @@ def test_active_pinvi_receipt_describes_current_consumed_specs() -> None:
         assert "map_commit" not in receipt
         assert "pinvi_commit" not in receipt
     else:
-        assert re.fullmatch(r"[0-9a-f]{40}", receipt["map_commit"])
-        assert re.fullmatch(r"[0-9a-f]{40}", receipt["pinvi_commit"])
+        assert set(receipt) == {
+            "state",
+            "map_commit",
+            "pinvi_commit",
+            "map_user_openapi_sha256",
+            "map_service_openapi_sha256",
+            "map_full_openapi_sha256",
+            "pinvi_user_vendor_sha256",
+            "pinvi_service_vendor_sha256",
+            "verification",
+        }
+        for key in ("map_commit", "pinvi_commit"):
+            assert re.fullmatch(r"[0-9a-f]{40}", receipt[key]), key
+        for key in (
+            "map_user_openapi_sha256",
+            "map_service_openapi_sha256",
+            "map_full_openapi_sha256",
+            "pinvi_user_vendor_sha256",
+            "pinvi_service_vendor_sha256",
+        ):
+            assert re.fullmatch(r"[0-9a-f]{64}", receipt[key]), key
+        assert receipt["map_user_openapi_sha256"] == receipt["pinvi_user_vendor_sha256"]
+        assert receipt["map_service_openapi_sha256"] == receipt["pinvi_service_vendor_sha256"]
+        assert receipt["verification"] == [
+            "PinVi user/service vendor bytes are exact",
+            "PinVi canonical curation importer has no legacy admin snapshot consumer",
+            "paired Map/PinVi n150 canonical snapshot live acceptance passed",
+        ]
     entries = rollout["removal_manifest"]["entries"]
     assert entries, "removal manifest가 비어 있다"
     for entry in entries:
