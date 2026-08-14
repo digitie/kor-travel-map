@@ -40,8 +40,10 @@ def test_runner_uses_receipt_pinned_archives_not_its_checkout() -> None:
     assert 'safe_extract "$PINVI_ARCHIVE" "$RUN_DIR"' in runner
     assert '"version"] != 3' in runner
     assert 'read_map_application_head' in runner
+    assert '"$MAP_DIR/docker/application-schema-head.py"' in runner
     assert '"$MAP_DIR/src/kortravelmap/_application_migration_graph.json"' in runner
-    assert 'len(heads) != 1' in runner
+    assert 'namespace.get("_application_head")' in runner
+    assert "known = {" not in runner
     assert 'KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD=$EXPECTED_HEAD' in runner
     assert "feature.features_detailed') IS NULL" in runner
     assert "T-VN-36 final legacy Feature columns remain" in runner

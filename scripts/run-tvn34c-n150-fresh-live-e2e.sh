@@ -187,37 +187,22 @@ PY
 }
 
 read_map_application_head() {
-  EXPECTED_HEAD="$(python3 - "$MAP_DIR/src/kortravelmap/_application_migration_graph.json" <<'PY'
+  EXPECTED_HEAD="$(python3 - \
+    "$MAP_DIR/docker/application-schema-head.py" \
+    "$MAP_DIR/src/kortravelmap/_application_migration_graph.json" <<'PY'
 import json
-import re
+import runpy
 import sys
 from pathlib import Path
 
-data = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-if data.get("schema") != "kor-travel-map.application-migration-graph.v1":
+parser_path = Path(sys.argv[1])
+manifest_path = Path(sys.argv[2])
+namespace = runpy.run_path(str(parser_path), run_name="tvn40_pinned_head_parser")
+application_head = namespace.get("_application_head")
+if not callable(application_head):
     raise SystemExit(1)
-revisions = data.get("revisions")
-if not isinstance(revisions, list) or not revisions:
-    raise SystemExit(2)
-known = {
-    row.get("revision")
-    for row in revisions
-    if isinstance(row, dict) and isinstance(row.get("revision"), str)
-}
-parents = {
-    parent
-    for row in revisions
-    if isinstance(row, dict) and isinstance(row.get("down_revision"), list)
-    for parent in row["down_revision"]
-    if isinstance(parent, str)
-}
-heads = sorted(known - parents)
-if len(known) != len(revisions) or len(heads) != 1:
-    raise SystemExit(3)
-head = heads[0]
-if not re.fullmatch(r"[0-9a-z][0-9a-z_.-]{0,127}", head):
-    raise SystemExit(4)
-print(head)
+payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+print(application_head(payload))
 PY
 )" || die "Map application migration graph is invalid or ambiguous"
   [[ -n "$EXPECTED_HEAD" ]] || die "Map application migration head is empty"

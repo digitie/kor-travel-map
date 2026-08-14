@@ -1,4 +1,4 @@
-"""H35 helper가 candidate API image에 고정되는지 검증한다."""
+"""0200 squash 뒤 H35/legacy 실행 코드가 candidate image에서 격리되는지 검증한다."""
 
 from __future__ import annotations
 
@@ -11,16 +11,18 @@ pytestmark = pytest.mark.unit
 _ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_candidate_image_includes_helper_and_canonical_bundle() -> None:
+def test_candidate_image_excludes_h35_and_legacy_migration_code() -> None:
     dockerfile = (_ROOT / "docker" / "api.Dockerfile").read_text(encoding="utf-8")
 
     assert "ARG KOR_TRAVEL_MAP_GIT_COMMIT=development" in dockerfile
     assert 'LABEL org.opencontainers.image.revision="$KOR_TRAVEL_MAP_GIT_COMMIT"' in dockerfile
     assert "KOR_TRAVEL_MAP_IMAGE_REVISION=\"$KOR_TRAVEL_MAP_GIT_COMMIT\"" in dockerfile
-    assert (
-        "COPY --chown=appuser:appuser scripts/h35/h35_cutover.py "
-        "./scripts/h35/h35_cutover.py"
-    ) in dockerfile
+    assert "COPY alembic ./alembic" not in dockerfile
+    assert "COPY alembic/legacy_versions" not in dockerfile
+    assert "COPY alembic/versions ./alembic/versions" in dockerfile
+    assert "rm -f src/kortravelmap/cli/_h35_*.py" in dockerfile
+    assert "src/kortravelmap/cli/h35_cutover.py" in dockerfile
+    assert "scripts/h35/h35_cutover.py" not in dockerfile
     assert (
         "COPY --chown=appuser:appuser resources/curations ./resources/curations"
         in dockerfile

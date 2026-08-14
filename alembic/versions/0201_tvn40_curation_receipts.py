@@ -81,44 +81,108 @@ def _execute_commands(source: str) -> None:
         op.execute(statement)
 
 
-_ROLE_ASSERTIONS_SQL = r"""
-DO $tvn40_roles$
-DECLARE
-    v_role text;
+_APPLICATION_ROLE_ASSERTIONS_SQL = r"""
+DO $application_roles$
 BEGIN
-    FOREACH v_role IN ARRAY ARRAY[
-        'ktm_curation_command_owner',
-        'ktm_curation_audit_writer',
-        'ktm_curation_admin_executor',
-        'ktm_curation_provider_executor'
-    ] LOOP
-        IF NOT EXISTS (
-            SELECT 1
-            FROM pg_catalog.pg_roles
-            WHERE rolname = v_role
-              AND NOT rolcanlogin
-              AND NOT rolinherit
-              AND NOT rolsuper
-              AND NOT rolcreaterole
-              AND NOT rolcreatedb
-              AND NOT rolbypassrls
-        ) THEN
-            RAISE EXCEPTION 'T-VN-40 role % is missing or unsafe', v_role
-                USING ERRCODE = '42501';
-        END IF;
-    END LOOP;
-
-    IF NOT pg_has_role('ktm_feature_schema_owner', 'ktm_curation_command_owner', 'set')
-       OR NOT pg_has_role('ktm_feature_schema_owner', 'ktm_curation_audit_writer', 'set')
-       OR NOT pg_has_role('ktm_feature_api_runtime', 'ktm_curation_admin_executor', 'member')
-       OR NOT pg_has_role('ktm_feature_dagster_runtime', 'ktm_curation_provider_executor', 'member')
-       OR pg_has_role('ktm_feature_api_runtime', 'ktm_curation_provider_executor', 'member')
-       OR pg_has_role('ktm_feature_dagster_runtime', 'ktm_curation_admin_executor', 'member') THEN
-        RAISE EXCEPTION 'T-VN-40 role membership graph is not exact'
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_roles
+        WHERE rolname IN (
+            'ktm_feature_schema_owner', 'ktm_feature_state_procedure_owner',
+            'ktm_feature_audit_writer', 'ktm_feature_runtime',
+            'ktm_curation_command_owner', 'ktm_curation_audit_writer',
+            'ktm_curation_admin_executor', 'ktm_curation_provider_executor'
+        )
+          AND (
+              rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb
+              OR rolcreaterole OR rolbypassrls OR rolreplication
+          )
+    ) OR (
+        SELECT count(*)
+        FROM pg_catalog.pg_roles
+        WHERE rolname IN (
+            'ktm_feature_schema_owner', 'ktm_feature_state_procedure_owner',
+            'ktm_feature_audit_writer', 'ktm_feature_runtime',
+            'ktm_curation_command_owner', 'ktm_curation_audit_writer',
+            'ktm_curation_admin_executor', 'ktm_curation_provider_executor'
+        )
+    ) <> 8 THEN
+        RAISE EXCEPTION 'application NOLOGIN role is missing or unsafe'
+            USING ERRCODE = '42501';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_roles
+        WHERE rolname IN ('ktm_feature_api_runtime', 'ktm_feature_dagster_runtime')
+          AND (
+              NOT rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb
+              OR rolcreaterole OR rolbypassrls OR rolreplication
+          )
+    ) OR (
+        SELECT count(*)
+        FROM pg_catalog.pg_roles
+        WHERE rolname IN ('ktm_feature_api_runtime', 'ktm_feature_dagster_runtime')
+    ) <> 2 THEN
+        RAISE EXCEPTION 'runtime login is missing or unsafe'
+            USING ERRCODE = '42501';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_roles
+        WHERE rolname = 'ktm_feature_migrator'
+          AND rolcanlogin
+          AND NOT rolinherit
+          AND NOT rolsuper
+          AND NOT rolcreatedb
+          AND NOT rolcreaterole
+          AND NOT rolbypassrls
+          AND NOT rolreplication
+    ) THEN
+        RAISE EXCEPTION 'migrator login is missing or unsafe'
+            USING ERRCODE = '42501';
+    END IF;
+    IF EXISTS (
+        WITH expected(granted_role, member_role, admin_option, inherit_option, set_option) AS (
+            VALUES
+                ('ktm_feature_schema_owner', 'ktm_feature_migrator', false, false, true),
+                ('ktm_feature_runtime', 'ktm_feature_api_runtime', false, true, false),
+                ('ktm_feature_runtime', 'ktm_feature_dagster_runtime', false, true, false),
+                (
+                    'ktm_feature_state_procedure_owner',
+                    'ktm_feature_schema_owner', false, false, true
+                ),
+                ('ktm_feature_audit_writer', 'ktm_feature_schema_owner', false, false, true),
+                ('ktm_curation_command_owner', 'ktm_feature_schema_owner', false, false, true),
+                ('ktm_curation_audit_writer', 'ktm_feature_schema_owner', false, false, true),
+                ('ktm_curation_admin_executor', 'ktm_feature_api_runtime', false, true, false),
+                (
+                    'ktm_curation_provider_executor',
+                    'ktm_feature_dagster_runtime', false, true, false
+                )
+        ),
+        actual AS (
+            SELECT granted.rolname AS granted_role,
+                   member.rolname AS member_role,
+                   membership.admin_option,
+                   membership.inherit_option,
+                   membership.set_option
+            FROM pg_catalog.pg_auth_members AS membership
+            JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid
+            JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
+            WHERE granted.rolname LIKE 'ktm_feature_%'
+               OR granted.rolname LIKE 'ktm_curation_%'
+               OR member.rolname LIKE 'ktm_feature_%'
+               OR member.rolname LIKE 'ktm_curation_%'
+        )
+        (SELECT * FROM expected EXCEPT SELECT * FROM actual)
+        UNION ALL
+        (SELECT * FROM actual EXCEPT SELECT * FROM expected)
+    ) THEN
+        RAISE EXCEPTION 'application role membership graph is not exact'
             USING ERRCODE = '42501';
     END IF;
 END
-$tvn40_roles$;
+$application_roles$;
 """
 
 
@@ -625,7 +689,7 @@ FROM PUBLIC, ktm_feature_runtime, ktm_curation_admin_executor, ktm_curation_prov
 
 
 def upgrade() -> None:
-    op.execute(_ROLE_ASSERTIONS_SQL)
+    op.execute(_APPLICATION_ROLE_ASSERTIONS_SQL)
     _execute_commands(_REVISION_COLUMNS_SQL)
     op.execute(_CURRENT_RULE_INPUT_FUNCTION_SQL)
     op.execute(

@@ -16,6 +16,9 @@ _ROOT = Path(__file__).resolve().parents[2]
 _ACTIVE = _ROOT / "alembic" / "versions"
 _LEGACY = _ROOT / "alembic" / "legacy_versions"
 _ENV = _ROOT / "alembic" / "env.py"
+_BASELINE = _ACTIVE / "0200_schema_baseline.py"
+_RECEIPTS = _ACTIVE / "0201_tvn40_curation_receipts.py"
+_ROLE_BOOTSTRAP = _ROOT / "docker" / "postgres-role-bootstrap.sh"
 _GRAPH = _ROOT / "src" / "kortravelmap" / "_application_migration_graph.json"
 _EXPECTED_REVISIONS = (
     "0200_schema_baseline",
@@ -79,6 +82,26 @@ def test_active_forward_only_boundary_and_diagnostics_use_squash_revisions() -> 
         assert f'"{revision} is forward-only' in source, (
             f"{path.name}: forward-only 진단이 자기 revision을 가리켜야 한다"
         )
+
+
+def test_active_migrations_share_bootstrap_exact_role_contract() -> None:
+    baseline_contract = _literal(_BASELINE, "_APPLICATION_ROLE_ASSERTIONS_SQL")
+    receipts_contract = _literal(_RECEIPTS, "_APPLICATION_ROLE_ASSERTIONS_SQL")
+    assert isinstance(baseline_contract, str)
+    assert baseline_contract == receipts_contract
+
+    bootstrap = _ROLE_BOOTSTRAP.read_text(encoding="utf-8")
+    for token in (
+        "rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb",
+        "OR rolcreaterole OR rolbypassrls OR rolreplication",
+        "membership.admin_option",
+        "membership.inherit_option",
+        "membership.set_option",
+        "SELECT * FROM expected EXCEPT SELECT * FROM actual",
+        "SELECT * FROM actual EXCEPT SELECT * FROM expected",
+    ):
+        assert token in baseline_contract
+        assert token in bootstrap
 
 
 def test_legacy_archive_has_exact_109_file_digest() -> None:

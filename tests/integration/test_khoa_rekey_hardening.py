@@ -35,8 +35,8 @@ head에는 없고, 상태는 ``lifecycle_state``/``publication_state``/``quality
 
 from __future__ import annotations
 
+import ast
 import hashlib
-import importlib.util
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -140,52 +140,46 @@ def _payload_hash(seed: str) -> str:
     return hashlib.sha256(seed.encode("utf-8")).hexdigest()
 
 
-def _load_migration() -> object:
-    """0030 migration 모듈을 로드(SQL 단일 정본 유지)."""
-    path = (
-        Path(__file__).resolve().parents[2]
-        / "alembic"
-        / "legacy_versions"
-        / "0030_khoa_rekey_hardening.py"
-    )
-    spec = importlib.util.spec_from_file_location("_mig_0030_rekey", path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+def _legacy_sql_constant(filename: str, name: str) -> str:
+    """archive migration을 import/실행하지 않고 literal SQL만 읽는다."""
+
+    path = Path(__file__).resolve().parents[2] / "alembic" / "legacy_versions" / filename
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in tree.body:
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        target = node.targets[0] if isinstance(node, ast.Assign) else node.target
+        if isinstance(target, ast.Name) and target.id == name:
+            value = ast.literal_eval(node.value)
+            assert isinstance(value, str)
+            return value
+    raise AssertionError(f"{filename}: {name} literal이 없다")
 
 
 def _cleanup_sql() -> str:
-    sql = _load_migration().KHOA_REKEY_CLEANUP_SQL  # type: ignore[attr-defined]
-    assert isinstance(sql, str)
+    sql = _legacy_sql_constant(
+        "0030_khoa_rekey_hardening.py",
+        "KHOA_REKEY_CLEANUP_SQL",
+    )
     assert "source_record_key" in sql
     return _HEAD_CLEANUP_SQL
 
 
 def _demote_sql() -> str:
-    sql = _load_migration().KHOA_REKEY_DEMOTE_PRIMARY_SQL  # type: ignore[attr-defined]
-    assert isinstance(sql, str)
+    sql = _legacy_sql_constant(
+        "0030_khoa_rekey_hardening.py",
+        "KHOA_REKEY_DEMOTE_PRIMARY_SQL",
+    )
     assert "source_record_key" in sql
     return _HEAD_DEMOTE_SQL
 
 
 def _old_0027_sql() -> str:
     """0027 (구) SQL — source_record_key equality join. 대조군 단언용."""
-    path = (
-        Path(__file__).resolve().parents[2]
-        / "alembic"
-        / "legacy_versions"
-        / "0027_khoa_recategorize_cleanup.py"
+    return _legacy_sql_constant(
+        "0027_khoa_recategorize_cleanup.py",
+        "KHOA_RECATEGORIZE_CLEANUP_SQL",
     )
-    spec = importlib.util.spec_from_file_location("_mig_0027_cleanup", path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    sql = module.KHOA_RECATEGORIZE_CLEANUP_SQL
-    assert isinstance(sql, str)
-    return sql
 
 
 async def _insert_feature(

@@ -43,7 +43,7 @@ backfill(정본 mapping)을 따라 의미를 그대로 옮겼다:
 
 from __future__ import annotations
 
-import importlib.util
+import ast
 from datetime import UTC, datetime
 from hashlib import md5
 from pathlib import Path
@@ -99,22 +99,25 @@ WHERE f.lifecycle_state = 'active'
 
 
 def _cleanup_sql() -> str:
-    """0027 상수 의도를 확인하고 head source-entity 동등 SQL을 반환."""
+    """0027을 import/실행하지 않고 literal 의도만 확인한다."""
+
     path = (
         Path(__file__).resolve().parents[2]
         / "alembic"
         / "legacy_versions"
         / "0027_khoa_recategorize_cleanup.py"
     )
-    spec = importlib.util.spec_from_file_location("_mig_0027_cleanup", path)
-    assert spec is not None
-    assert spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    sql = module.KHOA_RECATEGORIZE_CLEANUP_SQL
-    assert isinstance(sql, str)
-    assert "source_record_key" in sql
-    return _HEAD_CLEANUP_SQL
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    for node in tree.body:
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        target = node.targets[0] if isinstance(node, ast.Assign) else node.target
+        if isinstance(target, ast.Name) and target.id == "KHOA_RECATEGORIZE_CLEANUP_SQL":
+            sql = ast.literal_eval(node.value)
+            assert isinstance(sql, str)
+            assert "source_record_key" in sql
+            return _HEAD_CLEANUP_SQL
+    raise AssertionError("0027 archive에 KHOA_RECATEGORIZE_CLEANUP_SQL literal이 없다")
 
 
 async def _insert_feature(
