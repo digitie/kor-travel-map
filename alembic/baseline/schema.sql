@@ -13784,6 +13784,12 @@ ALTER TABLE ONLY provider_sync.source_records
 -- Name: SCHEMA feature; Type: ACL; Schema: -; Owner: ktm_feature_schema_owner
 --
 
+-- [build-baseline] 아래부터 ACL 구간. 각 블록을 소유자로 실행한다.
+-- 트랜잭션 밖에서 돌리면 SET LOCAL이 무효가 되는데, 그 경우 아래
+-- current_setting()이 미정의로 터진다 — fail-closed다.
+SELECT set_config('ktm.baseline_prior_role', current_user, true);
+SELECT set_config('role', 'ktm_feature_schema_owner', true);
+
 GRANT ALL ON SCHEMA feature TO ktm_feature_state_procedure_owner;
 GRANT ALL ON SCHEMA feature TO ktm_feature_audit_writer;
 GRANT USAGE ON SCHEMA feature TO ktm_feature_runtime;
@@ -13810,6 +13816,7 @@ GRANT USAGE ON SCHEMA provider_sync TO ktm_feature_audit_writer;
 --
 -- Name: PROCEDURE apply_provider_feature_field_patch(IN p_feature_id text, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_applied_field_count integer); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
+SELECT set_config('role', 'ktm_feature_state_procedure_owner', true);
 
 REVOKE ALL ON PROCEDURE feature.apply_provider_feature_field_patch(IN p_feature_id text, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_applied_field_count integer) FROM PUBLIC;
 GRANT ALL ON PROCEDURE feature.apply_provider_feature_field_patch(IN p_feature_id text, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_applied_field_count integer) TO ktm_feature_runtime;
@@ -13889,6 +13896,7 @@ GRANT ALL ON FUNCTION feature.validate_feature_override_value() TO ktm_feature_s
 --
 -- Name: TABLE source_entity_heads; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
 --
+SELECT set_config('role', 'ktm_feature_schema_owner', true);
 
 GRANT SELECT ON TABLE provider_sync.source_entity_heads TO ktm_feature_state_procedure_owner;
 
@@ -14812,3 +14820,28 @@ GRANT UPDATE(source_entity_key) ON TABLE provider_sync.source_records TO ktm_fea
 --
 -- PostgreSQL database dump complete
 --
+
+
+SELECT set_config('role', current_setting('ktm.baseline_prior_role'), true);
+
+DO $ktm_acl$
+DECLARE
+    observed text;
+    expected text := 'a874c08b4866647d53cd966c0f5c56595cace2e4094c4ca734b0b23eb1939c29';
+BEGIN
+    observed := (SELECT encode(sha256(convert_to(coalesce(string_agg(sig || '=' || acl, chr(10) ORDER BY sig), ''), 'UTF8')), 'hex')
+  FROM (SELECT n.nspname || '.' || p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')' AS sig,
+               coalesce((SELECT string_agg(entry::text, ',' ORDER BY entry::text)
+                           FROM unnest(p.proacl) AS entry
+                          WHERE entry::text <> ALL (SELECT default_entry::text
+                                                      FROM unnest(pg_catalog.acldefault('f'::"char", p.proowner))
+                                                        AS default_entry)), '') AS acl
+          FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+         WHERE n.nspname IN ('feature','provider_sync','ops')) s);
+    IF observed IS DISTINCT FROM expected THEN
+        RAISE EXCEPTION
+            'baseline routine ACL이 원본과 다르다 (관측 %, 기대 %) — 소유자가 아닌 세션이 GRANT/REVOKE를 냈을 가능성이 크다', observed, expected
+            USING ERRCODE = '42501';
+    END IF;
+END
+$ktm_acl$;

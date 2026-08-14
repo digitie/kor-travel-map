@@ -33,6 +33,19 @@ baseline이 그것까지 떠안으면 손으로 관리하는 prologue가 생기�
 `scripts/compare-schema-catalogs.sh`(변조 7종 주입으로 자체 검증한 오라클)로 했고,
 서로 다른 DB에서 두 번 재현했다: 카탈로그 2486행 동일(sha256 `741b355a…`),
 seed 9개 표 328행 항목별 일치.
+
+## ACL은 소유자로 부여한다 (그리고 그게 먹었는지 스스로 확인한다)
+
+GRANT/REVOKE는 **객체 소유자만** 할 수 있다. baseline은 전 구간을
+`ktm_feature_schema_owner` 하나로 돌리는데, ADR-090의 role은 `NOINHERIT`이라
+membership이 있어도 권한이 승계되지 않는다. 그리고 소유자가 아닌 GRANT는 **오류가
+아니라 경고 후 무시**다 — 첫 시도가 정확히 그렇게 exit 0으로 통과하면서 routine
+10개가 PUBLIC EXECUTE로 남았다(체인 102 → baseline 112). 생성기가 ACL 블록마다
+소유자로 `SET LOCAL ROLE` 하도록 고쳤다.
+
+적용 성공이 ACL 적용의 증거가 되지 못하므로, `schema.sql` 끝에 routine ACL digest
+자기검증이 붙는다(기대값도 생성기가 박는다). 그 검증이 실제로 무는지는 role 전환을
+제거한 변조본으로 확인했다 — `exit 1`, `alembic_version` 미기록.
 """
 
 from __future__ import annotations
@@ -54,7 +67,7 @@ depends_on: str | Sequence[str] | None = None
 #: sidecar SQL의 byte freeze. 손으로 고치면 여기서 막힌다 — baseline은 생성기의
 #: 산출물이지 편집 대상이 아니다. 갱신 절차는 `scripts/build-baseline.sh` 재실행 +
 #: `compare-schema-catalogs.sh`로 동등성 재증명 + 이 상수 갱신을 한 PR에서.
-_SCHEMA_SHA256: Final[str] = "7c4149b6448217f454152a187730f889b6debb9d2ce90451ef444a457f7af777"
+_SCHEMA_SHA256: Final[str] = "984a6c21b245e605dc03b051a31cebe3e399d43a65df06c16602a895af17b3a0"
 _SEED_SHA256: Final[str] = "056de28cee0f0bbc2218e49afdf74aacd36b6e21e64c6524b2683a92bed956ec"
 
 _BASELINE_DIR: Final[Path] = Path(__file__).resolve().parents[1] / "baseline"
