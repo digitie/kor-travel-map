@@ -12,6 +12,10 @@ Docker Manager는 PR [#174](https://github.com/digitie/kor-travel-docker-manager
 digest만 파생하며, Map UI·Dagster·bootstrap과 PinVi Web·Dagster에는 어떤 형태도 전달하지 않는다.
 PR이 병합되기 전에는 이 경계를 배포 완료로 취급하지 않는다.
 
+현재 branch CI의 Geo BFF credential guard·clone runner contract·H35 wheel build 전제도 함께
+정렬했다. CI는 `uv`를 명시 설치하고, clone runner는 candidate geo를 띄우지 않는 동안 전용 Geo key를
+빈 값으로 유지한다.
+
 **다음 한 작업**: #174 병합 뒤 canonical import/backfill n150 live acceptance와 paired release
 receipt의 exact Map/PinVi commit·service vendor hash를 확인하고, 그 증거가 모두 있을 때만
 T-VN-40 receipt를 complete로 전이한다.

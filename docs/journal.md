@@ -2,6 +2,15 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-15 — T-VN-40 branch CI 경계 정렬
+
+- Geo BFF는 요청 시점의 전용 Geo key만 읽고, 앞선 테스트의 module cache가 다음 요청의 credential
+  판정을 오염시키지 않게 했다. VWorld provider key fallback은 계속 금지한다.
+- clone live runner는 candidate geo를 실제로 띄우지 않으므로 UI build의 Geo key를 빈 값으로 명시한다.
+  stale test expectation을 현재 fail-close 동작에 맞췄다.
+- H35 wheel contract가 호출하는 `uv`를 Python matrix CI에 명시 설치했다. CI lint와 focused Python·UI
+  test를 재실행했다.
+
 ## 2026-08-15 — T-VN-40 Manager canonical curation principal 결선 대기
 
 - Docker Manager PR [#174](https://github.com/digitie/kor-travel-docker-manager/pull/174)가 PinVi canonical

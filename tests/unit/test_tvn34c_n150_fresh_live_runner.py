@@ -65,7 +65,10 @@ def test_runner_uses_receipt_pinned_archives_not_its_checkout() -> None:
         "PINVI_KOR_TRAVEL_MAP_CURATION_CUTOVER_MAPPING_TOKEN=$curation_cutover_mapping_token"
         in runner
     )
-    assert "KOR_TRAVEL_MAP_API_PINVI_CURATION_SNAPSHOT_TOKEN_SHA256=$curation_snapshot_digest" in runner
+    assert (
+        "KOR_TRAVEL_MAP_API_PINVI_CURATION_SNAPSHOT_TOKEN_SHA256=$curation_snapshot_digest"
+        in runner
+    )
     assert (
         "KOR_TRAVEL_MAP_API_PINVI_CURATION_CUTOVER_MAPPING_TOKEN_SHA256=$curation_cutover_mapping_digest"
         in runner
