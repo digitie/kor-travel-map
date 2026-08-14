@@ -312,12 +312,14 @@ command가 결선돼 있지 않다** — 그 결선 전까지의 수동 기준�
   복원 341초, `pg_restore` 오류 1건(`schema "x_extension" already exists` — 아래
   절차 3이 정상이라 명시한 그 1건). **manifest 6항목 전 항목 일치**:
   head `0104_tvn36_final_fence` · features 1,008,852 · source_records 1,009,157 ·
-  source_links 1,008,852 · weather_values 0 · public_api_keys 1.
+  source_links 1,008,852 · feature_weather_values 0 · public_api_keys 1.
   3축 분포도 prod와 동일(`active/published/valid` 1,008,848 +
   `retired/suppressed/valid` 4), `0104`가 지운 두 테이블은 복원본에도 없다.
   → **이 dump는 복구점으로 신뢰할 수 있다.**
-  단 절차 5(결손 주입 → replay)는 아래 정정대로 relation이 바뀌어 그대로 실행할 수
-  없었다. 그 축은 미검증으로 남는다.
+  단 절차 5(결손 주입 → replay)는 실행하지 못했다 — **그 축은 여전히 미검증이다.**
+  절차 5 본문은 2026-08-14에 아래 「절차 5 상세」로 다시 썼고(근거:
+  `alembic/baseline/schema.sql` = `0104` head 기계 덤프), 다시 쓴 문안 자체도
+  아직 드릴에서 실행되지 않았다.
 
 ### 왜 격리 컨테이너인가 (원칙)
 
@@ -348,53 +350,146 @@ command가 결선돼 있지 않다** — 그 결선 전까지의 수동 기준�
    복원본을 대조한다. 1회차 실측: head `0083_nonderived_uuid_generator` ·
    features/aliases/public 각 731,765 · pair_mismatch 0 · orphan_alias 0 —
    **전 항목 일치**.
-5. **결손 주입 → 회복 replay** — 재해로 생긴 손상이 관측에 잡히고 복구되는지
-   본다. `SET session_replication_role = replica`로 fence를 우회해 alias 5건을
-   DELETE(우회 경로로 생긴 손상 모사) → `missing_alias`가 5로 관측되는지 확인 →
-   features 정본에서 alias를 재생성(INSERT는 fence가 막지 않는다) → 4축
-   (missing_uuid/missing_alias/pair_mismatch/orphan_alias) 전부 0·행수 원복 확인.
+5. **결손 주입 → provider replay 회복** — 복원본 **위에서 적재 경로가 살아 있는지**를
+   본다. provider가 다시 채울 수 있는 relation에만 결손을 내고, 같은 dataset을 재적재해
+   메워지는지 확인한다. 상세는 아래 「절차 5 상세」.
 
-### ⚠️ 2026-08-13 정정 — 이 절의 relation 이름이 낡았다
+### 절차 5 상세 — 결손 주입 → provider replay (2026-08-14 재작성)
 
-2회차 드릴(`0104`)에서 아래 함정 항목의 SQL이 **그 자리에서 깨졌다**. 세대 전환을
-문서가 따라오지 않은 것이므로, 함정 자체는 유효하되 이름을 바꿔 읽어야 한다.
+**이 절차가 검증하는 축은 하나다: 복원본 위에서 provider 적재 경로가 실제로 돌아
+feature 본문 결손을 메운다.** 백업 산출물이 읽히는지(절차 4)도, identity·운영자 행위
+기록·append-only 관측 이력이 복구되는지도 검증하지 않는다 — 뒤의 셋은 애초에 replay
+대상이 아니고 백업 복원만이 복구 수단이다(§2의 ADR-075 단서와 같은 이유).
 
-| 문서가 적은 것 | `0104` 실측 |
+**replay 가능 / 불가능의 경계.** replay 가능 = provider snapshot을 다시 적재하면 같은
+값이 다시 써지는 것 — `feature.features` 본문, 5종 typed subtype(`feature.feature_places`
+/ `feature_events` / `feature_notices` / `feature_routes` / `feature_areas`),
+`feature.feature_base_field_values`가 여기 속한다. 아래는 **replay로 돌아오지 않으므로
+결손 주입 대상으로 쓰지 않는다**:
+
+- 운영자 행위 기록 — `ops.feature_overrides`, `ops.domain_commands` /
+  `ops.domain_command_results`, `feature.feature_state_transitions`
+- 발급물 — `ops.public_api_keys`(§9의 필수 확인 항목과 같은 이유)
+- append-only 관측 이력 — `feature.feature_weather_values`, `feature.feature_price_values`
+
+절차:
+
+1. **대상 선정** — 한 provider dataset에서 feature 5건을 고른다. `ops.feature_overrides`에
+   active 행이 있거나 `feature.curated_features` / `ops.dedup_review_queue`에 걸린 feature는
+   제외한다 — 이들은 `feature.features` 삭제 때 FK CASCADE로 함께 사라지는데 replay가
+   복원하지 않는다(전체 CASCADE 목록은 덤프에서
+   `rg 'REFERENCES feature.features' alembic/baseline/schema.sql`).
+
+   ```sql
+   SELECT f.feature_id, f.feature_uuid, se.source_entity_key
+   FROM feature.features f
+   JOIN provider_sync.source_links sl
+     ON sl.feature_id = f.feature_id AND sl.source_role = 'primary'
+   JOIN provider_sync.source_entities se
+     ON se.source_entity_key = sl.source_entity_key
+   JOIN provider_sync.provider_datasets pd
+     ON pd.provider_dataset_id = se.provider_dataset_id
+   WHERE pd.dataset_key = :dataset_key
+     AND NOT EXISTS (SELECT 1 FROM ops.feature_overrides o
+                      WHERE o.feature_id = f.feature_id AND o.status = 'active')
+     AND NOT EXISTS (SELECT 1 FROM feature.curated_features c
+                      WHERE c.feature_id = f.feature_id)
+   LIMIT 5;
+   ```
+
+   `feature_uuid`와 `source_entity_key`도 함께 받아 둔다 — 4·5단계에서 쓴다.
+
+2. **주입** — 고른 5건을 `feature.features`에서 DELETE한다. **`session_replication_role`
+   조작은 필요 없다.** subtype·alias·source_link·base field value는 FK CASCADE로 함께
+   사라지고, `feature_weather_values` / `feature_price_values`의 immutability 트리거와 alias
+   delete fence는 "부모 feature가 이미 없는 cascade"를 유일한 예외로 명시 허용한다
+   (`feature.reject_weather_value_mutation`, `feature.reject_price_value_mutation`,
+   `feature.fence_feature_aliases_write`).
+
+   **subtype 행만 지우는 변형은 쓰지 않는다.** `load_bundle`은 entity head가 전진했거나
+   (`became_current`) feature가 없을 때만 본문을 다시 쓴다 — 같은 payload 재적재는 head의
+   `observed_at`만 밀고 본문을 건드리지 않는다(`infra/feature_repo.py`의
+   `_UPSERT_SOURCE_ENTITY_HEAD_SQL` 주석이 이 설계를 명시). 그래서 subtype만 비우면 replay가
+   그 구멍을 메우지 못한다.
+
+3. **결손 관측** — `ktmctl consistency-report --format json`(read-only)에서
+   **F1(orphan source_entity — `source_links` 없음)이 5로 오르는지** 확인한다. feature가
+   사라져도 `provider_sync.source_entities` / `source_records`는 남으므로 F1이 이 결손의
+   정확한 축이다. `feature.public_features` 카운트도 5 줄어야 한다. F2(subtype 결측)는 0을
+   유지한다 — core와 subtype이 함께 사라졌기 때문이다.
+
+4. **replay** — 삭제한 feature를 만든 provider 적재를 **같은 `dataset_key`로** 다시 돌린다.
+   `dataset_key`는 `feature_id`와 `source_entity_key` 계산에 들어가므로 다르면 메우는 게
+   아니라 새 feature가 생긴다(`providers/mois.py:license_record_to_bundle`).
+
+   드릴 컨테이너에는 provider API 키도 네트워크도 없으므로 저장된 원문을 되먹인다: 해당
+   entity의 `provider_sync.source_records.raw_data`를 NDJSON으로 뽑아
+   `ktmctl import mois <파일> --mode incremental --dataset-key mois_license_features_bulk
+   --cursor <임의값>`으로 재주입한다(MOIS dataset일 때. `--mode bulk`는 파일에 없는 feature를
+   soft-delete하므로 쓰지 않는다). `load_bundle`이 feature 부재를 보고 본문·subtype·base field
+   value를 다시 만든다.
+
+   ⚠️ **이 되먹임 경로는 아직 드릴에서 실행 검증되지 않았다.** `providers/mois.py:_raw_data`는
+   provider record의 부분집합이라 category에 따라 detail 일부가 round-trip하지 않을 수 있다 —
+   3회차에서 실측하고 결과를 여기 적는다.
+
+5. **회복 확인** — F1이 0으로 돌아오고 `feature.features` / `feature.public_features` 카운트가
+   원복되며 identity 4축(`missing_uuid` / `missing_alias` / `alias_pair_mismatch` /
+   `orphan_alias` — `kortravelmap.infra.feature_identity.count_features_missing_identity`)이
+   전부 0인지 확인한다.
+
+   **`feature_uuid`는 원래 값으로 돌아오지 않는다.** 0083 이후 신규 행의 UUID는 비파생 v7이라
+   replay는 새 identity를 만든다. 1단계에서 받아 둔 값과 대조해 "본문은 돌아왔고 identity는
+   바뀌었다"를 확인하는 것까지가 이 절차의 결론이다.
+
+### ⚠️ relation 개명 대조표 (T-VN-35/36)
+
+2회차 드릴(`0104`)에서 아래 이름의 SQL이 **그 자리에서 깨졌다**. 세대 전환을 문서가 따라오지
+않은 것이므로 함정 자체는 유효하고 이름만 바뀌었다. **본문(절차 5·아래 함정)은 2026-08-14에
+`alembic/baseline/schema.sql`(`0104` head 기계 덤프) 기준으로 고쳤다** — 이 표는 옛 문서·스크립트를
+만났을 때 옮겨 읽는 용도로 남긴다. 표의 대조는 덤프 정적 확인이며, 실행 검증은 3회차 소관이다.
+
+| 옛 이름 | 현행(`0104`) |
 |---|---|
-| `provider_sync.source_records.lineage_key` | **없다.** `lineage_key`는 `provider_sync.source_entity_heads`와 `provider_sync.notice_lineage_states`로 옮겨갔다 |
-| 트리거 `trg_source_record_lineage_key` | **없다.** 현행 함수는 `provider_sync.notice_lineage_key`와 `provider_sync.set_source_entity_head_lineage_key`다 |
-| `feature.weather_values` (§9 manifest) | **`feature.feature_weather_values`** (T-VN-35 개명) |
+| `feature.weather_values` (§9 manifest) | `feature.feature_weather_values` |
+| `provider_sync.source_records.lineage_key` | `provider_sync.source_entity_heads.lineage_key` (+ `provider_sync.notice_lineage_states.lineage_key`) |
+| 트리거 `trg_source_record_lineage_key` | `trg_source_entity_head_lineage_key` (`source_entity_heads`, `ENABLE ALWAYS`) |
+| 트리거 함수 (구세대) | `provider_sync.set_source_entity_head_lineage_key()` |
+| 함수 `provider_sync.notice_lineage_key(source_records)` | `provider_sync.notice_lineage_key(head provider_sync.source_entity_heads)` |
+| 인덱스 `idx_source_records_lineage` (표현식) | `idx_source_entity_heads_lineage` (일반 컬럼: `lineage_key, observed_at DESC, current_source_record_key DESC`) |
 
-즉 아래 "복원 후 반드시 `ENABLE ALWAYS`로 되돌릴 것"은 `source_records`가 아니라
-`source_entity_heads` 쪽 트리거를 대상으로 다시 확인해야 한다. **이 절의 SQL을
-그대로 복사해 쓰지 마라** — 드릴 전에 실제 relation 이름을 먼저 조회할 것.
-
-### 함정 (1회차 실측 — relation 이름은 위 정정 표를 함께 볼 것)
+### 함정 (1회차 실측 — 이름은 위 대조표 기준으로 갱신)
 
 - **`pg_restore --disable-triggers`는 계보 트리거의 `ENABLE ALWAYS`를 조용히
-  벗긴다.** `trg_source_record_lineage_key`는 `session_replication_role = replica`
+  벗긴다.** `trg_source_entity_head_lineage_key`는 `session_replication_role = replica`
   에서도 돌도록 `ENABLE ALWAYS`로 만들어 뒀는데(ADR-087), 그 옵션이 내보내는
   `DISABLE TRIGGER ALL` → `ENABLE TRIGGER ALL` 쌍을 지나면 `tgenabled`가
   `A` → `D` → **`O`(ORIGIN)**가 된다. 오류도 경고도 없다. 그 뒤로는 replica
   세션의 쓰기에서 계보 파생이 통째로 빠진다.
   복원 후 **반드시** 되돌릴 것:
-  `ALTER TABLE provider_sync.source_records
-     ENABLE ALWAYS TRIGGER trg_source_record_lineage_key;`
+  `ALTER TABLE provider_sync.source_entity_heads
+     ENABLE ALWAYS TRIGGER trg_source_entity_head_lineage_key;`
   확인: `SELECT tgenabled FROM pg_trigger
-          WHERE tgname='trg_source_record_lineage_key';` → `A`여야 한다.
-- **복원 뒤 `ANALYZE`를 반드시 돌린다.** `pg_restore`는 planner 통계를 복원하지
-  않는데, `idx_source_records_lineage`는 표현식 인덱스라 자기 통계가 없으면 비용
-  추정이 무너진다 — prod 규모 notice 목록이 **221.9ms 대 2.0ms(110배)**다.
-  오류도 경고도 없이 느려진다. `ANALYZE provider_sync.source_records;`
+          WHERE tgname='trg_source_entity_head_lineage_key';` → `A`여야 한다.
+  (덤프에도 `ALTER TABLE ... ENABLE ALWAYS TRIGGER`가 이 하나뿐이다 —
+  `rg 'ENABLE ALWAYS' alembic/baseline/schema.sql`.)
+- **복원 뒤 `ANALYZE`를 반드시 돌린다.** `pg_restore`는 planner 통계를 복원하지 않는다.
+  `ANALYZE provider_sync.source_entity_heads;` `ANALYZE provider_sync.source_records;`
   (`REINDEX` 뒤에도 같다.)
+  1회차의 **221.9ms 대 2.0ms(110배)** 실측은 `lineage_key`가 `source_records`의 표현식
+  인덱스였던 구세대 값이다. `0104`에서 `lineage_key`는 `source_entity_heads`의 일반 NOT NULL
+  컬럼이라 "표현식 인덱스에 자기 통계가 없다"는 그 기전은 더 이상 성립하지 않는다 —
+  현행 세대의 회귀 폭은 미측정이다.
 - 값 점검과 복구는 **두 단계**다. 점검은 읽기 전용이어야 한다 — UPDATE를 점검용으로
   돌리면 어긋난 행마다 row lock과 WAL이 나간다.
-  점검: `SELECT count(*) FROM provider_sync.source_records sr
-          WHERE lineage_key IS DISTINCT FROM provider_sync.notice_lineage_key(sr);`
+  점검: `SELECT count(*) FROM provider_sync.source_entity_heads h
+          WHERE h.lineage_key IS DISTINCT FROM provider_sync.notice_lineage_key(h);`
   → 0이면 전부 맞다. 0이 아닐 때만 복구:
-  `UPDATE provider_sync.source_records sr
-     SET lineage_key = provider_sync.notice_lineage_key(sr)
-   WHERE lineage_key IS DISTINCT FROM provider_sync.notice_lineage_key(sr);`
+  `UPDATE provider_sync.source_entity_heads h
+     SET lineage_key = provider_sync.notice_lineage_key(h)
+   WHERE h.lineage_key IS DISTINCT FROM provider_sync.notice_lineage_key(h);`
+  (`notice_lineage_key`는 scope 밖 entity에도 `source_entity_id`를 돌려주므로 전 행에
+  안전하게 적용된다.)
 - 컨테이너 기본 `/dev/shm`(64MB)이 작아 73만 행 병렬 집계에서
   `could not resize shared memory segment` 가 난다 — 검증 쿼리는
   `SET max_parallel_workers_per_gather=0`으로 돌리거나 `--shm-size=1g`로 띄운다.
