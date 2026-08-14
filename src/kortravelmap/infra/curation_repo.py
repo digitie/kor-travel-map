@@ -844,6 +844,7 @@ JOIN feature.public_features AS pf ON pf.feature_id = i.feature_id
 WHERE i.archived_at IS NULL
   AND i.source_present
   AND i.status = 'included'
+  {_ITEM_PUBLIC_NOTICE_FILTER_SQL}
   AND {_trusted_link_sql("i")}
   AND (
       i.source_record_key IS NULL

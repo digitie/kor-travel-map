@@ -37,7 +37,7 @@ barrier로 직렬화한다.
       2026-08-13 사용자가 ADR-092와 40A/B/C 단일 PR 구현을 승인했다. 설계·구현 정본은
       [`t-vn-40-curation-write-model-plan-2026-08-11.md`](reports/t-vn-40-curation-write-model-plan-2026-08-11.md)다.
     - PR #978 최신 `0200_schema_baseline`을 T-VN-40 branch에 재배치했다. active chain은
-      `0200→0217` 단일 head이며 과거 `0001~0104`는 read-only legacy 증거다. n150 현행
+      `0200→0218` 단일 head이며 과거 `0001~0104`는 read-only legacy 증거다. n150 현행
       `0104` DB는 stamp하지 않고 최종 배포 창에서 파괴적으로 재생성·재적재한다.
   - 최종 단일 cutover: [ ] `T-VN-39`
 - **보류/외부 추적**

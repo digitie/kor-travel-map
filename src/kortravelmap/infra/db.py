@@ -158,13 +158,55 @@ _PROVIDER_CURATION_FEATURE_PROCEDURES = frozenset(
     }
 )
 
-_EXPECTED_RUNTIME_FEATURE_PROCEDURES = {
+_PROVIDER_OPERATION_PROCEDURES = frozenset(
+    {
+        (
+            "ops.append_provider_feature_attempt_event_command("
+            "text,bigint,text,text,integer,text,jsonb)"
+        ),
+        (
+            "ops.ensure_provider_feature_operation_command("
+            "text,text,text,jsonb,timestamp with time zone,timestamp with time zone,text)"
+        ),
+        (
+            "ops.finish_provider_feature_membership_command("
+            "uuid,bigint,text,text,boolean,timestamp with time zone)"
+        ),
+        (
+            "ops.transition_provider_feature_operation_terminal_command("
+            "uuid,text,text,text,text,timestamp with time zone,timestamp with time zone,boolean)"
+        ),
+    }
+)
+
+_ADMIN_CANCELLATION_SECURITY_DEFINER_FUNCTIONS = frozenset(
+    {
+        (
+            "ops.fill_provider_cancellation_starts_command("
+            "uuid,text,timestamp with time zone)"
+        ),
+        (
+            "ops.transition_provider_cancellation_job_command("
+            "uuid,uuid,text,text[],text,text,text,timestamp with time zone,"
+            "timestamp with time zone,boolean,text,text[])"
+        ),
+    }
+)
+
+_EXPECTED_RUNTIME_APPLICATION_PROCEDURES = {
     "ktm_feature_api_runtime": (
         _SHARED_RUNTIME_FEATURE_PROCEDURES | _ADMIN_CURATION_FEATURE_PROCEDURES
     ),
     "ktm_feature_dagster_runtime": (
-        _SHARED_RUNTIME_FEATURE_PROCEDURES | _PROVIDER_CURATION_FEATURE_PROCEDURES
+        _SHARED_RUNTIME_FEATURE_PROCEDURES
+        | _PROVIDER_CURATION_FEATURE_PROCEDURES
+        | _PROVIDER_OPERATION_PROCEDURES
     ),
+}
+
+_EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS = {
+    "ktm_feature_api_runtime": _ADMIN_CANCELLATION_SECURITY_DEFINER_FUNCTIONS,
+    "ktm_feature_dagster_runtime": frozenset(),
 }
 
 
@@ -241,19 +283,34 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
             'EXECUTE'
         ) AS can_execute_admin_reactivation_procedure,
         ARRAY(
-            SELECT candidate_procedure.oid::regprocedure::text
-            FROM pg_catalog.pg_proc AS candidate_procedure
+            SELECT candidate_routine.oid::regprocedure::text
+            FROM pg_catalog.pg_proc AS candidate_routine
             JOIN pg_catalog.pg_namespace AS candidate_schema
-              ON candidate_schema.oid = candidate_procedure.pronamespace
-            WHERE candidate_schema.nspname = 'feature'
-              AND candidate_procedure.prokind = 'p'
+              ON candidate_schema.oid = candidate_routine.pronamespace
+            WHERE candidate_schema.nspname IN ('feature', 'provider_sync', 'ops')
+              AND candidate_routine.prokind = 'p'
               AND has_function_privilege(
                     session_user,
-                    candidate_procedure.oid,
+                    candidate_routine.oid,
                     'EXECUTE'
               )
-            ORDER BY candidate_procedure.oid::regprocedure::text
-        ) AS executable_feature_procedures,
+            ORDER BY candidate_routine.oid::regprocedure::text
+        ) AS executable_application_procedures,
+        ARRAY(
+            SELECT candidate_routine.oid::regprocedure::text
+            FROM pg_catalog.pg_proc AS candidate_routine
+            JOIN pg_catalog.pg_namespace AS candidate_schema
+              ON candidate_schema.oid = candidate_routine.pronamespace
+            WHERE candidate_schema.nspname IN ('feature', 'provider_sync', 'ops')
+              AND candidate_routine.prokind = 'f'
+              AND candidate_routine.prosecdef
+              AND has_function_privilege(
+                    session_user,
+                    candidate_routine.oid,
+                    'EXECUTE'
+              )
+            ORDER BY candidate_routine.oid::regprocedure::text
+        ) AS executable_application_security_definer_functions,
         has_table_privilege(session_user, 'feature.features', 'INSERT')
             AS can_insert_feature_directly,
         has_column_privilege(session_user, 'feature.features', 'lifecycle_state', 'UPDATE')
@@ -393,16 +450,16 @@ def _runtime_db_privilege_problems(
         if row.get(field_name) is not True:
             problems.append(message)
 
-    expected_procedures = _EXPECTED_RUNTIME_FEATURE_PROCEDURES.get(expected_login)
+    expected_procedures = _EXPECTED_RUNTIME_APPLICATION_PROCEDURES.get(expected_login)
     if expected_procedures is None:
         problems.append(
             f"runtime privilege preflight has no procedure allowlist for {expected_login!r}"
         )
         return problems
 
-    actual_procedures_value = row.get("executable_feature_procedures")
+    actual_procedures_value = row.get("executable_application_procedures")
     if not isinstance(actual_procedures_value, (list, tuple)):
-        problems.append("runtime feature procedure catalog must be a PostgreSQL text array")
+        problems.append("runtime application procedure catalog must be a PostgreSQL text array")
         return problems
     actual_procedures = frozenset(
         procedure
@@ -410,20 +467,63 @@ def _runtime_db_privilege_problems(
         if isinstance(procedure, str)
     )
     if len(actual_procedures) != len(actual_procedures_value):
-        problems.append("runtime feature procedure catalog must contain only text signatures")
+        problems.append("runtime application procedure catalog must contain only text signatures")
         return problems
 
     missing_procedures = sorted(expected_procedures - actual_procedures)
     if missing_procedures:
         problems.append(
-            "runtime login is missing expected feature procedures: "
+            "runtime login is missing expected application procedures: "
             + ", ".join(missing_procedures)
         )
     unexpected_procedures = sorted(actual_procedures - expected_procedures)
     if unexpected_procedures:
         problems.append(
-            "runtime login must not EXECUTE unexpected feature procedures: "
+            "runtime login must not EXECUTE unexpected application procedures: "
             + ", ".join(unexpected_procedures)
+        )
+
+    expected_functions = _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS.get(
+        expected_login
+    )
+    if expected_functions is None:
+        problems.append(
+            "runtime privilege preflight has no SECURITY DEFINER function allowlist for "
+            f"{expected_login!r}"
+        )
+        return problems
+
+    actual_functions_value = row.get(
+        "executable_application_security_definer_functions"
+    )
+    if not isinstance(actual_functions_value, (list, tuple)):
+        problems.append(
+            "runtime application SECURITY DEFINER function catalog must be a "
+            "PostgreSQL text array"
+        )
+        return problems
+    actual_functions = frozenset(
+        function for function in actual_functions_value if isinstance(function, str)
+    )
+    if len(actual_functions) != len(actual_functions_value):
+        problems.append(
+            "runtime application SECURITY DEFINER function catalog must contain only "
+            "text signatures"
+        )
+        return problems
+
+    missing_functions = sorted(expected_functions - actual_functions)
+    if missing_functions:
+        problems.append(
+            "runtime login is missing expected application SECURITY DEFINER functions: "
+            + ", ".join(missing_functions)
+        )
+    unexpected_functions = sorted(actual_functions - expected_functions)
+    if unexpected_functions:
+        problems.append(
+            "runtime login must not EXECUTE unexpected application SECURITY DEFINER "
+            "functions: "
+            + ", ".join(unexpected_functions)
         )
     return problems
 

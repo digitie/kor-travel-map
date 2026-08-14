@@ -39,6 +39,7 @@ _EXPECTED_REVISIONS = (
     "0215_tvn40_import_plans",
     "0216_tvn40_import_item_cmd",
     "0217_tvn40_metadata_check",
+    "0218_tvn40_routine_acl",
 )
 _LEGACY_ARCHIVE_SHA256 = (
     "ae65901c78ea1d38ef6f5b7a7e8532744656e73c79392251452680d35f461e42"
@@ -58,7 +59,7 @@ def _literal(path: Path, name: str) -> str | tuple[str, ...] | None:
     raise AssertionError(f"{path}: {name} literal이 없다")
 
 
-def test_active_graph_is_only_0200_to_0217() -> None:
+def test_active_graph_is_only_0200_to_0218() -> None:
     paths = sorted(_ACTIVE.glob("[0-9]*.py"))
     revisions = tuple(str(_literal(path, "revision")) for path in paths)
     parents = tuple(_literal(path, "down_revision") for path in paths)

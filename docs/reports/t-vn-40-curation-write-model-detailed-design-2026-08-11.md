@@ -887,10 +887,10 @@ preflight는 procedure별 EXECUTE allowlist, 교차 executor deny, candidate/aud
    binary를 시작하고 import fence를 해제한다. old/new cross-pair는 fail-closed이며 partial import나 요청
    유실을 허용하지 않는다. 실패 시 old route를 되살리는 rollback 대신 stopped 상태에서 forward fix 후
    동일 receipt로 재검증한다. Docker Manager writer registry에도 PinVi importer stop/drain/start를 넣는다.
-5. PR #978 squash 뒤 active graph는 `0200_schema_baseline→0201…0217`만 존재한다. n150의
+5. PR #978 squash 뒤 active graph는 `0200_schema_baseline→0201…0218`만 존재한다. n150의
    기존 `0104_tvn36_final_fence` DB를 새 root에 억지로 연결하거나 stamp하지 않는다. 서비스 전·재적재
    가능 정책대로 writer fence와 최종 backup receipt를 확인한 뒤 application DB를 폐기·재생성하고,
-   role bootstrap→fresh `0200→0217`→runtime ACL reconciliation→provider 재적재 순서로만 전환한다.
+   role bootstrap→fresh `0200→0218`→runtime ACL reconciliation→provider 재적재 순서로만 전환한다.
    기존 0104 DB를 그대로 둔 상태에서는 새 image가 unknown revision으로 fail-close해야 한다.
 
 ### 6.2 ordered migration
