@@ -1,5 +1,13 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-14 — T-VN-41 F1D: PR #967 2차 review P2 보완
+
+현행 admin UI 매트릭스는 삭제된 change-request route를 더는 `live/reviews.live.spec`에
+귀속하지 않는다. v4 compatible-pair requirement는 퇴역 완료로 기록했고, 현행 live runner는
+attested production `E2E_BASE_URL`의 browser executor다. ADR-090 rehearsal은 그 정상 경로와
+분리해 entrypoint split DSN·expected head·schema owner failure를 의도적으로 확인한다. 다음
+한 작업은 이 새 SHA의 독립 재검토와 targeted automation 검증이다.
+
 ## 2026-08-14 — T-VN-41 F1D: PR #967 rebase review P1 폐쇄
 
 PR #967은 T-VN-40 PR #974 최신 head에 재배치됐다. 삭제한 clone-live runner를 unit이

@@ -21,7 +21,7 @@ barrier로 직렬화한다.
 - **Lane B — frontend hardening·PinVi 소비 API**
   - [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox)
   - [/] `T-VN-41F1D-D` → [ ] `T-VN-41F1D-D2`(격리 리허설·data-dependent live UI E2E)
-  - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환) ∥ [ ] `T-VN-41S`
+  - [x] `T-VN-41F1D-E`(v5/v7 attestation 전환 완료) ∥ [ ] `T-VN-41S`
 - **Wave 2 barrier 이후**
   - Lane A: [x] `T-VN-35/34/36-deploy`(`0104` prod cutover 완료 2026-08-13) → [ ] `T-VN-37D`
   - Lane B: [x] `T-VN-34A` → [x] `T-VN-34B` → [x] `T-VN-34C` →
@@ -528,14 +528,14 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   image attestation이라 두 번 돌릴 값이 아니다. 반대로 D1은 curation read 경로와 무관하고
   "rebuild-from-scratch가 실제로 되는가"를 보증하므로 join barrier까지 비워두지 않는다.
 
-- [~] **T-VN-41F1D-E — v4 compatible-pair live runner 퇴역·v5/v7 attestation 전환**
+- [x] **T-VN-41F1D-E — v4 compatible-pair live runner 퇴역·v5/v7 attestation 전환 완료**
 
-  `run-c7-prod-live-e2e.sh`와 `run-admin-feature-live-acceptance.sh`가 요구하는 v4
-  `E2E_C7_COMPATIBLE_PAIR_MANIFEST`를 제거한다. root-owned snapshot은 v5
+  현행 `run-admin-feature-live-acceptance.sh`는 v4
+  `E2E_C7_COMPATIBLE_PAIR_MANIFEST`를 요구하지 않는다. root-owned snapshot은 v5
   `PinnedRuntimeManifest.active_generation`, 일곱 immutable image·Map/PinVi revision·세 schema
   head·pinset을 확인하고 v7 journal/host attestation과 함께 발행한다. v4 manifest를 억지 입력해
-  통과하는 compatibility 경로는 만들지 않는다. final schema merge/재적재와 독립적으로 unit·script
-  contract까지 완료하고, 실제 n150 data-dependent 실행은 위 F1D-D 순서를 따른다.
+  통과하는 compatibility 경로는 만들지 않는다. unit·script contract까지 완료했으며, 실제 n150
+  data-dependent 실행은 위 F1D-D 순서를 따른다.
 
 ## Wave 2 상세 — 구조 전환
 
@@ -615,8 +615,8 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   DSN을 넣는 것만으로도 부족하고 `docker/postgres-role-bootstrap.sh`의 7롤이 **미리 존재**해야
   한다. n150 map DB는 `kor-travel-geo-postgres`에 geo와 **공유**돼 있어 bootstrap이 공유 서버의
   권한 모델을 바꾸므로, 전용 인스턴스 분리 여부는 Manager 판단 사항이다 —
-  docker-manager #171. 이 결선 전까지 tvn34의 live 검증은 격리 clone 스택
-  (`scripts/run-admin-feature-live-acceptance.sh`)에서만 가능하다.
+  docker-manager #171. 이 결선 전까지 tvn34의 browser-only live 검증은 attested production
+  `E2E_BASE_URL`을 대상으로 하는 `scripts/run-admin-feature-live-acceptance.sh`에서만 가능하다.
 
 ### T-VN-35 — kind별 typed subtype 분해 (Lane A) — 배포 잔여
 
@@ -740,8 +740,8 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   걸리는 시간. rate limit 포함 실측 전에는 cutover 창을 정할 수 없다.
 
   **ADR-090 게이트 실측(2026-08-13)** — `scripts/rehearse-adr090-deploy-path.sh`.
-  clone-live 인수는 `--entrypoint python -m uvicorn` + 단일 DSN이라 이 축을 영원히
-  건드리지 않으므로 별도 리허설이 유일한 증거다. 네 case 전부 fail-close 확인:
+  browser-only live 인수는 정상 구성된 attested `E2E_BASE_URL`만 검증하므로, 의도적으로
+  잘못된 entrypoint 환경을 거부하는 별도 리허설이 필요하다. 네 case 전부 fail-close 확인:
   split DSN 누락(exit 2) / runtime DSN 단독(exit 2) / EXPECTED_HEAD 불일치(exit 1) /
   set-but-empty(exit 1).
   첫 실행에서는 네 case 모두 ops profile 검사(ADR-066)에서 **먼저** 죽어 재려던

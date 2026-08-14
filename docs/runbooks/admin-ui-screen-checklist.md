@@ -37,7 +37,6 @@ a11y·e2e 커버 관점에서 점검**하기 위한 체크리스트다. T-218(ad
 | `/features/[featureId]` (상세) | — | — | — | — | ✓ | — | — | e2e 없음 |
 | `/admin/features` | q/kind/status/has_issue | ✓ sort/order | ✓ | ✓ | ✓ | deactivate | 필터 라벨 | `features-list.spec` |
 | `/admin/features/new` (생성 폼) | — | — | — | — | ✓ | create | ✓ FormField+검증(필수/좌표/JSON) | e2e 없음 |
-| `/admin/features/change-requests` | status/action/q | — | — | ✓ | ✓ | review_mode·approve/reject | ✓ `<label htmlFor>`(기존) | `live/reviews.live.spec` |
 | `/admin/features/curated` | curation_status/enabled/provider | — | ✓ | ✓ | ✓ | select/unselect/archive·rule apply | 필터 라벨 | e2e 없음 |
 | `/admin/issues` | q/status/severity/type/provider/dataset/bbox | — | ✓ | ✓ | ✓ | manual_override | ✓ manual-override FormField(T-218b-3) | `issues-actions.spec` |
 | `/admin/features/dedup-reviews` | status/kind | — | ✓ | ✓ | ✓ | accept/reject/ignore/merge | — | `dedup-reviews-actions.spec` |
@@ -59,7 +58,7 @@ a11y·e2e 커버 관점에서 점검**하기 위한 체크리스트다. T-218(ad
 - **a11y(G-1) 갭 해소**: bare `aria-label`(visible 라벨 부재) 4개 폼 — `poi-cache-targets`,
   `feature-update-requests`, `offline-uploads`, `issues` manual-override — 전부 `FormField`/
   `FormSelect`/`FormTextArea`로 전환(`<label htmlFor>` + `aria-describedby` + `aria-invalid` +
-  첫 에러 포커스). `change-requests`는 이미 a11y 완비라 비대상.
+  첫 에러 포커스).
 - **e2e 커버(T-218 범위)**: T-218 시점의 admin/ops route(`/admin/backups` 포함 — 직전 미커버를
   T-218c로 채움)는 e2e 커버. 폼 음성 경로(JSON·필수·좌표) e2e 4폼(T-218d). **단, 그 이후
   추가된 4개 페이지** — `/admin/features/curated`, `/admin/features/new`(생성 폼),

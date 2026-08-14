@@ -2,6 +2,14 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-14 — T-VN-41 F1D: 2차 적대 재검토 문서·리허설 정합성 보완
+
+삭제된 `/admin/features/change-requests`와 approve/reject를 현행 화면 매트릭스에서
+제거했다. v4 compatible-pair manifest는 이미 퇴역한 완료 항목으로 기록하고, browser-only
+live acceptance는 격리 clone이 아니라 attested production `E2E_BASE_URL` browser executor임을
+tasks에 명시했다. ADR-090 rehearsal도 삭제된 clone-live runner 대신 현행 runner가 검증하지
+않는 entrypoint failure probe라는 근거로 갱신했다.
+
 ## 2026-08-14 — T-VN-41 F1D: PR #967을 #974 위로 재배치하고 mocked gate를 복구
 
 PR #967을 T-VN-40 PR #974 최신 head에 재배치한 뒤, 삭제된 clone-live runner를 unit
