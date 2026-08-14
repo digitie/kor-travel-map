@@ -359,6 +359,27 @@ def _canonical_pg_sql(value: str | None) -> str:
     return re.sub(r'[\s()"]+', "", without_casts).lower()
 
 
+def _archived_revisions(project_root: Path) -> frozenset[str]:
+    """아카이브가 **선언한** revision id 집합.
+
+    파일명으로 판정하면 안 된다 — 109개 중 20개 넘게 파일명과 revision id가 다르다
+    (`0071_integrity_observations`는 `0071_integrity_observation_generations.py`가
+    선언한다). 실제로 파일명 기준 판정이 그 한 건을 놓쳤다.
+    """
+
+    import re
+
+    declaration = re.compile(r'^revision(?::\s*str)?\s*=\s*"([^"]+)"', re.MULTILINE)
+    archive = project_root / "alembic" / "legacy_versions"
+    found = {
+        match.group(1)
+        for path in archive.glob("*.py")
+        if (match := declaration.search(path.read_text(encoding="utf-8"))) is not None
+    }
+    assert found, "아카이브에서 revision id를 하나도 읽지 못했다 — 경로가 틀렸다"
+    return frozenset(found)
+
+
 async def _run_alembic_upgrade(dsn: str, revision: str = "head", *, chain: bool = False) -> None:
     """``alembic.command.upgrade``를 worker thread에서 실행.
 
@@ -384,7 +405,7 @@ async def _run_alembic_upgrade(dsn: str, revision: str = "head", *, chain: bool 
     # (`chain=True`) 아카이브 전용 그래프로 바꾼다. `versions/`와 함께 담을 수는 없다 —
     # bridge와 아카이브가 `0104_tvn36_final_fence`를 둘 다 선언하므로 중복이 된다.
     # 두 그래프의 head 문자열은 같으므로 `_alembic_head_revision()`은 그대로 둔다.
-    if chain or (project_root / "alembic" / "legacy_versions" / f"{revision}.py").exists():
+    if chain or revision in _archived_revisions(project_root):
         cfg.set_main_option(
             "version_locations", str(project_root / "alembic" / "legacy_versions")
         )

@@ -14827,7 +14827,7 @@ SELECT set_config('role', current_setting('ktm.baseline_prior_role'), true);
 DO $ktm_acl$
 DECLARE
     observed text;
-    expected text := '35c45e6c2f21d2db23351022a543e0502aa5f8570aabebe849655a7a5c65ec81';
+    expected text := '5e155f38cff5d7e0eb56902eaf39336395b927f58fa46ce26a9076267023f1eb';
 BEGIN
     observed := (SELECT encode(sha256(convert_to(coalesce(string_agg(line, chr(10) ORDER BY line), ''), 'UTF8')), 'hex')
   FROM (SELECT grantee.name
@@ -14838,9 +14838,11 @@ BEGIN
                  AS line
           FROM pg_proc p
           JOIN pg_namespace n ON n.oid = p.pronamespace
-          CROSS JOIN (SELECT 'public'::text AS name
-                      UNION ALL
-                      SELECT rolname::text FROM pg_catalog.pg_roles WHERE rolname LIKE 'ktm\_feature%') AS grantee
+          CROSS JOIN (VALUES ('public'),
+                             ('ktm_feature_schema_owner'),
+                             ('ktm_feature_state_procedure_owner'),
+                             ('ktm_feature_audit_writer'),
+                             ('ktm_feature_runtime')) AS grantee(name)
          WHERE n.nspname IN ('feature','provider_sync','ops')) s);
     IF observed IS DISTINCT FROM expected THEN
         RAISE EXCEPTION

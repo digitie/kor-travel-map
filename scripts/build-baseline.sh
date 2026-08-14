@@ -75,8 +75,13 @@ printf '원본: %s줄\n' "$(wc -l < "$RAW")"
 #
 # 문자열 차감으로는 "기본값과 같아서 생략된 것"과 "명시적으로 부여된 것"을 가를 수
 # 없다. 그래서 `has_function_privilege()`로 **유효 권한**을 직접 묻는다 — 소유권 이전이
-# proacl을 물화시키든 말든 답이 같고, PUBLIC 부여는 그대로 드러난다. 대상은 PUBLIC과
-# 이 DB에 실재하는 `ktm_feature*` role 전부이므로 role이 늘어도 자동으로 따라온다.
+# proacl을 물화시키든 말든 답이 같고, PUBLIC 부여는 그대로 드러난다.
+#
+# grantee 목록은 **고정**한다. 처음에는 `pg_roles`에서 `ktm_feature%`를 긁었는데, 그러면
+# digest가 **환경에 따라 달라진다** — 통합 테스트 부트스트랩은 role 5개를 만들고 prod
+# bootstrap은 7개(LOGIN principal 3종 포함)를 만든다. 실제로 그 차이로 CI가 죽었다.
+# 여기 넷은 `0200`의 DO block이 존재를 전제로 검증하는 role이고, LOGIN principal은
+# `ktm_feature_runtime`을 INHERIT하므로 유효 권한이 파생이라 더할 게 없다.
 ROUTINE_ACL_DIGEST_SQL="$(cat <<'SQL'
 SELECT encode(sha256(convert_to(coalesce(string_agg(line, chr(10) ORDER BY line), ''), 'UTF8')), 'hex')
   FROM (SELECT grantee.name
@@ -87,9 +92,11 @@ SELECT encode(sha256(convert_to(coalesce(string_agg(line, chr(10) ORDER BY line)
                  AS line
           FROM pg_proc p
           JOIN pg_namespace n ON n.oid = p.pronamespace
-          CROSS JOIN (SELECT 'public'::text AS name
-                      UNION ALL
-                      SELECT rolname::text FROM pg_catalog.pg_roles WHERE rolname LIKE 'ktm\_feature%') AS grantee
+          CROSS JOIN (VALUES ('public'),
+                             ('ktm_feature_schema_owner'),
+                             ('ktm_feature_state_procedure_owner'),
+                             ('ktm_feature_audit_writer'),
+                             ('ktm_feature_runtime')) AS grantee(name)
          WHERE n.nspname IN ('feature','provider_sync','ops')) s
 SQL
 )"
