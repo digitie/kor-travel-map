@@ -58,6 +58,25 @@ print(sql)
 PY
 }
 
+extract_grantee_values() {
+  # routine 유효권한 축의 grantee 목록. **정본은 `build-baseline.sh`의
+  # `ROUTINE_ACL_GRANTEE_VALUES`**이고 여기서는 추출한다 — 손으로 복제하면 그쪽이
+  # 늘어났을 때 여기만 줄어들고, **A/B 비교라 양쪽 다 그 축을 안 보게 되어 초록이
+  # 유지된다.** 검사기와 검사 대상이 맹점을 공유하는 그 패턴이다. 이 파일 상단이
+  # digest SQL에 대해 선언한 "복사하지 말고 추출한다" 원칙을 목록에도 적용한다.
+  python3 - "$SCRIPT_DIR/build-baseline.sh" <<'PY'
+import re, sys
+src = open(sys.argv[1], encoding="utf-8").read()
+match = re.search(r'ROUTINE_ACL_GRANTEE_VALUES="(.*?)"', src, re.DOTALL)
+if match is None:
+    raise SystemExit("build-baseline.sh에서 ROUTINE_ACL_GRANTEE_VALUES를 찾지 못했다")
+values = " ".join(match.group(1).split())
+if values.count("(") < 2:
+    raise SystemExit(f"추출한 grantee 목록이 값 목록으로 보이지 않는다: {values[:80]!r}")
+print(values)
+PY
+}
+
 supplementary_sql() {
   # 추출한 digest SQL이 **보지 않는** 축. 그 SQL의 namespace 필터는 pg_dump의 `-n`
   # 스코프(feature/provider_sync/ops)와 정확히 같아서, **baseline이 재현하지 못하는
@@ -118,14 +137,7 @@ COPY (
                                                               'EXECUTE WITH GRANT OPTION')::text
     FROM pg_catalog.pg_proc AS p
     JOIN pg_catalog.pg_namespace AS n ON n.oid = p.pronamespace
-    -- 정본은 `scripts/build-baseline.sh`의 `ROUTINE_ACL_GRANTEE_VALUES`다. 여기가
-    -- 드리프트하면 **A/B 비교라 양쪽 다 그 축을 안 보게 되어 초록이 유지된다** —
-    -- 검사기와 검사 대상이 맹점을 공유하는 그 패턴이다.
-    CROSS JOIN (VALUES ('public'),
-                       ('ktm_feature_schema_owner'),
-                       ('ktm_feature_state_procedure_owner'),
-                       ('ktm_feature_audit_writer'),
-                       ('ktm_feature_runtime')) AS grantee(name)
+    CROSS JOIN (VALUES @GRANTEES@) AS grantee(name)
    WHERE n.nspname IN ('feature', 'provider_sync', 'ops')
   UNION ALL
   SELECT 'constraintdef' || nsp.nspname || '.' || rel.relname || '.' || con.conname || ':' ||
@@ -380,7 +392,9 @@ QUERY_FILE="$(mktemp)"
 trap 'rm -f "$QUERY_FILE" "${TMP_A:-}" "${TMP_B:-}"' EXIT
 extract_digest_sql > "$QUERY_FILE"
 printf '추출한 digest SQL: %s줄\n' "$(wc -l < "$QUERY_FILE")"
-supplementary_sql >> "$QUERY_FILE"
+GRANTEE_VALUES="$(extract_grantee_values)"
+supplementary_sql | sed "s/@GRANTEES@/${GRANTEE_VALUES//\//\\/}/" >> "$QUERY_FILE"
+grep -q '@GRANTEES@' "$QUERY_FILE" && die 'grantee 목록 치환이 남았다 — 추출/치환을 확인하라'
 printf '보강 축: 스키마 ACL(전 스키마) · public 잔여 객체 · event trigger · DB locale/ACL ·\n'
 printf '        routine 유효권한 · 제약 정의 · COMMENT · reloptions · relpersistence ·\n'
 printf '        attstorage/compression · replica identity · 컬럼 통계 설정 · 확장 통계 · sequence OWNED BY\n'

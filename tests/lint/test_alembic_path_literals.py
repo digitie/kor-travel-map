@@ -42,11 +42,15 @@ _SCANNED_SUFFIXES = ("*.py", "*.sh")
 #: `if: false`라 두 표기가 모두 합법이다 — 큰따옴표만 보면 가장 그럴듯한 우회가
 #: 그대로 열린다(적대 리뷰 실증).
 _QUOTE = "[\"']"
+#: `baseline`도 본다 — `alembic/baseline/{schema,seed}.sql`은 **모든 fresh DB에서 실제로
+#: 실행되는** 764KB다. 지금은 `0200`이 디렉터리와 파일명을 나눠 들고 있어 리터럴이
+#: 없지만(그래서 이 가드가 세는 것도 0건이다), 누가 경로를 한 줄로 적는 순간 대상이 된다.
+_DIRECTORY = "(versions|legacy_versions|baseline)"
+_LEAF = r"([^\"']+\.(?:py|sql))"
 _PATH_STYLE = re.compile(
-    rf"{_QUOTE}alembic{_QUOTE}\s*/\s*{_QUOTE}(versions|legacy_versions){_QUOTE}"
-    rf"\s*/\s*{_QUOTE}([^\"']+\.py){_QUOTE}"
+    rf"{_QUOTE}alembic{_QUOTE}\s*/\s*{_QUOTE}{_DIRECTORY}{_QUOTE}\s*/\s*{_QUOTE}{_LEAF}{_QUOTE}"
 )
-_STRING_STYLE = re.compile(rf"{_QUOTE}alembic/(versions|legacy_versions)/([^\"']+\.py){_QUOTE}")
+_STRING_STYLE = re.compile(rf"{_QUOTE}alembic/{_DIRECTORY}/{_LEAF}{_QUOTE}")
 
 
 def _sources() -> list[Path]:

@@ -323,8 +323,12 @@ if ! current_raw="$(alembic current 2>&1)"; then
       # 이 이미지는 옛 체인판이고 DB가 앞선 것이다(= 이미지가 뒤처짐).
       db_revision="$(printf '%s' "$current_raw" | sed -n 's/.*Can'"'"'t locate revision identified by '"'"'\([^'"'"']*\)'"'"'.*/\1/p' | head -1)"
       archived=""
-      if [ -n "$db_revision" ] && [ -f alembic/versions/0200_schema_baseline.py ] \
-         && [ -d alembic/legacy_versions ]; then
+      # `0200`을 이름으로 박으면 **2차 squash 때 이 판별이 스스로 무효가 된다** —
+      # 그때 `0200_schema_baseline.py`는 아카이브로 가고 조건이 거짓이 되어, 없애려던
+      # 오진이 그대로 부활한다(적대 리뷰 실측 C4). 재-squash는 이 저장소가 명문화한
+      # 절차이므로(`postgres-schema.md` §8.4) 세대 번호가 아니라 **모양**으로 본다.
+      if [ -n "$db_revision" ] && [ -d alembic/legacy_versions ] \
+         && ls alembic/versions/*_schema_baseline.py >/dev/null 2>&1; then
         archived="$(grep -l "^revision\(: str\)\? = \"${db_revision}\"" alembic/legacy_versions/*.py 2>/dev/null | head -1)"
       fi
       echo "the DB alembic revision is not part of this image's migration chain" >&2

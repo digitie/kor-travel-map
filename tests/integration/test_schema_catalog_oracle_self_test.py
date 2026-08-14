@@ -16,8 +16,12 @@ docstring "동등성 증명"). 그런데 오라클은 CI 어디에도 걸려 있
 `SKIP`만 찍고 `놓침`으로 세지 않는다(:214-217). 빈 DB를 기준으로 주면 13종 전부
 SKIP → "잡음 0 / 놓침 0" → **exit 0**이다. 그래서 이 테스트는 exit code만 보지 않고
 (a) SKIP이 하나도 없고 (b) 스크립트가 **선언한** 변조 수만큼 실제로 잡혔는지를 센다.
-기대값은 하드코딩하지 않고 스크립트에서 읽는다 — 변조를 늘리면 기대값도 같이 오르고,
-변조를 지우면 즉시 red가 된다.
+
+기대값을 스크립트에서 읽는 (b)가 잡는 것은 **비대칭 편집**이다 — 축만 지우거나 변조를
+no-op으로 만들면 `놓침 > 0`으로 선다. **변조를 통째로 지우는 것은 못 잡는다**: 선언도
+실측도 같이 줄어 `21 == 21`로 초록이 된다(적대 리뷰가 `MUTATIONS`에서 한 줄 지워
+실증했다). 그 편집은 축을 남긴 채 그 축을 증명하던 변조만 없앤다. 그래서 내려가지 않는
+하한 `_MINIMUM_MUTATIONS`를 따로 둔다.
 """
 
 from __future__ import annotations
@@ -32,7 +36,7 @@ from urllib.parse import urlsplit, urlunsplit
 import pytest
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Iterator
 
 pytestmark = pytest.mark.integration
 
@@ -85,6 +89,11 @@ async def _admin_fetch_names(default_url: str, query: str) -> list[str]:
         await conn.close()
 
 
+#: 자체검증 변조의 **하한**. 기대값을 스크립트에서 읽는 단언은 "변조를 지우면 red"를
+#: 만들지 못한다(선언과 실측이 같이 줄어든다). 이 상수는 그 비대칭을 메운다.
+_MINIMUM_MUTATIONS = 22
+
+
 def _declared_mutation_count() -> int:
     """스크립트가 **선언한** 변조 수. 정본은 스크립트 자신이다.
 
@@ -132,8 +141,35 @@ def _run(command: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
+@pytest.fixture(scope="module")
+def oracle_container() -> Iterator[Any]:
+    """**전용** PostGIS 컨테이너. 세션 공유 컨테이너를 쓰지 않는다.
+
+    자체검증은 기준 DB를 23번 `CREATE DATABASE … TEMPLATE` / `DROP` 한다. 그것을 세션
+    공유 인스턴스에서 하면 **같은 인스턴스를 재는 perf/planner 테스트가 흔들린다** —
+    실제로 CI에서 두 번, 서로 다른 테스트가 그렇게 깨졌다:
+    `test_gist_brin_index_audit`(GiST 쓰기 비용 비교가 2% 허용치를 넘음)와
+    `test_t212d_perf_explain`(planner가 기대와 다른 인덱스 선택). 같은 커밋의 로컬
+    실행과 self-test 이전 커밋의 CI는 둘 다 green이었다.
+
+    checkpoint·autovacuum·shared buffer를 공유하는 인스턴스에서 DB를 수십 개 만들고
+    지우면 그 측정이 흔들리는 것은 노이즈가 아니라 **인과**다. 격리한다.
+    """
+
+    try:
+        from testcontainers.postgres import PostgresContainer
+    except ImportError:  # pragma: no cover — dev extras 미설치
+        pytest.skip("testcontainers not installed")
+    try:
+        container = PostgresContainer("postgis/postgis:16-3.5-alpine")
+    except Exception as exc:  # pragma: no cover — Docker 없음
+        pytest.skip(f"PostgresContainer init failed (Docker?): {exc}")
+    with container:
+        yield container
+
+
 @pytest.fixture
-async def oracle_base_database(pg_container: Any) -> AsyncIterator[str]:
+async def oracle_base_database(oracle_container: Any) -> AsyncIterator[str]:
     """`CREATE DATABASE ... TEMPLATE`의 원본이 될 전용 DB. raw DSN을 돌려준다.
 
     전용이어야 하는 이유는 둘이다.
@@ -144,7 +180,7 @@ async def oracle_base_database(pg_container: Any) -> AsyncIterator[str]:
        공유한다(conftest.py:192-195). 그래서 기본 DB로는 이 게이트를 돌릴 수 없다.
     2. 스크립트가 만드는 스크래치 DB가 다른 테스트와 섞이지 않는다.
     """
-    raw_dsn = pg_container.get_connection_url()
+    raw_dsn = oracle_container.get_connection_url()
     await _admin_execute(raw_dsn, f'DROP DATABASE IF EXISTS "{_BASE_DB}" WITH (FORCE)')
     await _admin_execute(raw_dsn, f'CREATE DATABASE "{_BASE_DB}"')
     try:
@@ -171,12 +207,12 @@ async def oracle_base_database(pg_container: Any) -> AsyncIterator[str]:
 
 
 async def test_catalog_oracle_detects_every_declared_mutation(
-    pg_container: Any, oracle_base_database: str
+    oracle_container: Any, oracle_base_database: str
 ) -> None:
     """오라클이 선언한 변조를 **전부** 잡는다. 하나라도 놓치거나 건너뛰면 red다."""
     from sqlalchemy.engine import make_url
 
-    container_id = pg_container.get_wrapped_container().id
+    container_id = oracle_container.get_wrapped_container().id
     admin_user = make_url(oracle_base_database).username
     assert admin_user is not None, "컨테이너 DSN에서 관리자 이름을 읽지 못했다"
 
@@ -209,4 +245,13 @@ async def test_catalog_oracle_detects_every_declared_mutation(
     assert missed == 0, report
     assert caught == _declared_mutation_count(), (
         f"선언 {_declared_mutation_count()}종 중 {caught}종만 검증됐다\n{report}"
+    )
+    # 위 단언만으로는 **변조를 지우는 것**을 못 잡는다 — 기대값을 검사 대상과 같은
+    # 파일에서 읽으므로 한 줄을 지우면 선언도 실측도 같이 줄어 21 == 21로 초록이다
+    # (적대 리뷰가 `MUTATIONS`에서 한 줄 지워 실증했다). 그 편집은 축을 남긴 채 그
+    # 축을 증명하던 변조만 없앤다. 그래서 **내려가지 않는 하한**을 따로 둔다.
+    # 변조를 늘리면 이 값도 함께 올려라 — 줄이는 방향은 리뷰 대상이다.
+    assert caught >= _MINIMUM_MUTATIONS, (
+        f"자체검증 변조가 {_MINIMUM_MUTATIONS}종 아래로 줄었다({caught}종) —"
+        f" 축을 남긴 채 그 축을 증명하던 변조만 지운 편집이다\n{report}"
     )
