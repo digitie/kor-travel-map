@@ -7,9 +7,14 @@ SHA-256 digest만 주고, 서로 다른 두 원문 token은 PinVi API에만 전�
 compose도 같은 Map API 전용 digest 경계를 선언해 원문 token이 Map API·Dagster·frontend로
 퍼지지 않는다.
 
-**다음 한 작업**: Docker Manager와 production compose도 같은 네 값(Map digest 2개,
-PinVi API 원문 token 2개)을 하나의 release transaction으로 결선하고, canonical
-import/backfill n150 live acceptance 뒤에만 T-VN-40 receipt를 complete로 전이한다.
+Docker Manager는 PR [#174](https://github.com/digitie/kor-travel-docker-manager/pull/174)에서
+같은 네 값을 frozen C6c transaction으로 결선했다. PinVi API 원문 pair를 Manager가 받아 Map API에는
+digest만 파생하며, Map UI·Dagster·bootstrap과 PinVi Web·Dagster에는 어떤 형태도 전달하지 않는다.
+PR이 병합되기 전에는 이 경계를 배포 완료로 취급하지 않는다.
+
+**다음 한 작업**: #174 병합 뒤 canonical import/backfill n150 live acceptance와 paired release
+receipt의 exact Map/PinVi commit·service vendor hash를 확인하고, 그 증거가 모두 있을 때만
+T-VN-40 receipt를 complete로 전이한다.
 
 ## 2026-08-15 — T-VN-40 paired service receipt 배포 gate 강화
 

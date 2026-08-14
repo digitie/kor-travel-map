@@ -1056,6 +1056,10 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   T-VN-39에 catalog-zero receipt를 넘긴다. held component·old binary rollback·신규 호환 shim은
   만들지 않으며 recovery는 fresh clone/reload만 허용한다.
 
+  2026-08-15 기준 Docker Manager PR #174가 PinVi raw snapshot/mapping pair→Map digest pair의
+  C6c 결선을 구현했지만 아직 draft다. 이를 병합하고 n150 canonical import/backfill live receipt를
+  남기기 전에는 legacy surface 물리 삭제나 T-VN-40 receipt complete를 수행하지 않는다.
+
 - [ ] T-VN-39 — **KTM·PinVi write-fence cutover**
 
   consumer-first 배포, write fence와 순차 전환을 수행한다. **T-VN-33C의 legacy

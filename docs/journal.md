@@ -2,6 +2,16 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-15 — T-VN-40 Manager canonical curation principal 결선 대기
+
+- Docker Manager PR [#174](https://github.com/digitie/kor-travel-docker-manager/pull/174)가 PinVi canonical
+  snapshot·cutover mapping 원문 token pair에서 Map API 전용 SHA-256 digest를 frozen C6c environment 안에서
+  파생하도록 구현했다. Map API는 digest만 받고 원문은 ordinary PinVi API에만 남으며, UI·Dagster·bootstrap
+  및 PinVi Web·Dagster로의 이름·값 누출은 raw/resolved Compose gate가 container mutation 전에 거부한다.
+- 이 PR은 아직 draft이며 T-VN-40 rollout receipt도 `pending`이다. n150에 token을 설치하거나 receipt를
+  complete로 전이하지 않았다. 병합 뒤 canonical import/backfill live acceptance와 paired artifact receipt를
+  같이 확인하는 것이 다음 release gate다.
+
 ## 2026-08-15 — T-VN-40 n150 canonical curation principal 격리
 
 - isolated n150 runner가 매 실행마다 서로 다른 canonical snapshot·cutover mapping token을
