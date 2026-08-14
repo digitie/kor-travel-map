@@ -3516,6 +3516,69 @@ async def test_service_source_read_and_refresh_request_idempotency(
 
 
 @pytest.mark.integration
+async def test_service_refresh_rejects_source_head_from_prior_restore_epoch(
+    migrated_session: AsyncSession,
+) -> None:
+    """restore fence 뒤 남은 head로 epoch-1 delivery를 새로 만들지 않는다."""
+
+    system = "service-refresh-stale-head-test"
+    await _apply_snapshot_source(
+        migrated_session,
+        external_system=system,
+        target_key="refresh-target",
+        event_id="9d100000-0000-4000-8000-000000000001",
+        idempotency_key="9d200000-0000-4000-8000-000000000001",
+    )
+    fence_request = {
+        "external_system": system,
+        "expected_restore_epoch": 1,
+        "reason": "stale source head must not refresh",
+    }
+    fingerprint = canonical_domain_command_fingerprint(fence_request)
+    claim = await create_domain_command_claim(
+        migrated_session,
+        actor=_CONSUMER,
+        operation="cache_target.restore_fence",
+        idempotency_key="9d300000-0000-4000-8000-000000000001",
+        request_fingerprint=fingerprint,
+    )
+    fenced = await advance_cache_target_restore_fence(
+        migrated_session,
+        external_system=system,
+        consumer_id=_CONSUMER,
+        command_id=claim.command_id,
+        expected_restore_epoch=1,
+        expected_control_version=1,
+        reason=fence_request["reason"],
+        request_fingerprint=fingerprint,
+    )
+    assert fenced.restore_epoch == 2
+
+    requests_before = await migrated_session.scalar(
+        text("SELECT count(*) FROM ops.feature_update_requests")
+    )
+    with pytest.raises(CacheTargetStreamConflict) as stale_source:
+        await create_cache_target_refresh_request(
+            migrated_session,
+            principal_id="pinvi-service",
+            consumer_id=_CONSUMER,
+            idempotency_key="9d400000-0000-4000-8000-000000000001",
+            external_system=system,
+            target_keys=["refresh-target"],
+            reason="stale epoch must fail closed",
+        )
+    assert stale_source.value.code == "refresh_source_head_missing"
+    assert stale_source.value.current == {
+        "external_system": system,
+        "target_keys": ["refresh-target"],
+    }
+    assert (
+        await migrated_session.scalar(text("SELECT count(*) FROM ops.feature_update_requests"))
+        == requests_before
+    )
+
+
+@pytest.mark.integration
 async def test_service_refresh_creation_serializes_stream_before_capture(
     migrated_engine: AsyncEngine,
     monkeypatch: pytest.MonkeyPatch,
