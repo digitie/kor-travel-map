@@ -47,7 +47,31 @@ kor-travel-map API backend가 Kakao Local, NAVER Search, Google Places API를 �
 | `KOR_TRAVEL_GEO_*` | kor-travel-geo | (로컬 DB 위주, vworld 폴백 키는 kor-travel-geo가 관리) | geo 서비스 자체 설정. 본 라이브러리는 HTTP client만 사용 |
 | `KOR_TRAVEL_GEO_VWORLD_API_KEY` | kor-travel-geo (reverse geocoding), 디버그/admin UI frontend (MapLibre/VWorld), PinVi 사용자 UI (ADR-026) | VWorld (vworld.kr) | **공유 키**. 별도 발급 X. ADR-025 + ADR-026 |
 | `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY` | kor-travel-map API/Dagster/CLI의 kor-travel-geo v2 호출 | kor-travel-geo public REST v2 | `X-KTG-API-Key` header로만 전송한다. admin trusted-proxy secret/role을 Map에 위임하지 않는다. |
-| `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY` | admin frontend의 kor-travel-geo v2 직접 호출 | kor-travel-geo public REST v2 | 브라우저용 VWorld 호환 `key` query. 같은 public key를 backend 전용 env에 별도로 주입할 수 있다. |
+| `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY` | admin frontend (지금은 `/api/geo/*` 프록시 경유) | kor-travel-geo public REST v2 | ⚠️ **VWorld 키를 넣지 않는다.** geo가 `key` query를 "VWorld 호환" 형식으로 받을 뿐, 값은 geo가 발급한 소비자 키여야 한다. VWorld 키를 넣으면 `401 E0401`. §2.1 참조 |
+| `KOR_TRAVEL_GEO_API_KEY` | admin UI 컨테이너의 `/api/geo/*` 프록시 | kor-travel-geo public REST v2 | `NEXT_PUBLIC_` 접두가 없어 **런타임**에 먹는다 — 이미 구워진 이미지에도 반영되므로 키 교체 시 재빌드가 필요 없다. 프록시가 이 이름을 먼저 읽는다 |
+
+## 2.1 동일 값을 공유하는 별칭 (실측)
+
+자격증명 하나가 provider별·저장소별 이름으로 갈라져 여러 곳에 복제돼 있다. 아래는
+로컬 `F:\dev` 전체의 `.env`/`.env.local`/`.env.production`을 값의 sha256 앞 8자로
+묶은 **실측**이다(2026-08-14). 값은 싣지 않는다.
+
+| 자격증명 | sha8 | 별칭 수 | 파일 수 | 별칭 |
+|---|---|---|---|---|
+| data.go.kr 서비스 키 | `dad00595` | 18 | 18 | `DATA_GOKR_SERVICE_KEY`, `DATA_GO_KR_SERVICE_KEY`, `IIAC_SERVICE_KEY`, `KAC_SERVICE_KEY`, `KASI_SERVICE_KEY`, `KEX_GO_API_KEY`, `KMA_SERVICE_KEY`, `KTO_SERVICE_KEY`, `KTO_DATA_GO_KR_SERVICE_KEY`, `TRIPMATE_DATA_GO_SERVICE_KEY`, `KRTOUR_MAP_DATA_GO_KR_SERVICE_KEY`, `KRTOUR_MAP_KREX_GO_API_KEY`, `KRTOUR_MAP_ADMIN_{AIRKOREA,DATAGOKR,KMA,KREX,KRFOREST,VISITKOREA}_SERVICE_KEY` |
+| VWorld 키 | `e9caf390` | 14 | 15 | `VWORLD_API_KEY`, `VWORLD_SERVICE_KEY`, `VITE_VWORLD_API_KEY`, `NEXT_PUBLIC_VWORLD_API_KEY`, `NEXT_PUBLIC_VWORLD_SERVICE_KEY`, `KTG_VWORLD_API_KEY`, `KRADDR_GEO_VWORLD_API_KEY`, `PINVI_VWORLD_API_KEY`, `KOR_TRAVEL_GEO_VWORLD_API_KEY`, `KOR_TRAVEL_MAP_API_VWORLD_API_KEY`, `KOR_TRAVEL_GEO_V2_API_KEY`, **`KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY`**, **`NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY`** |
+| OpiNet 키 | `dfc07838` | 4 | 3 | `OPINET_API_KEY`, `TRIPMATE_OPINET_API_KEY`, `KRTOUR_MAP_OPINET_API_KEY`, `KRTOUR_MAP_ADMIN_OPINET_SERVICE_KEY` |
+
+**굵게 표시한 두 이름은 geo 소비자 키 자리인데 VWorld 키 값이 들어 있다.** geo는 그
+값을 `401 E0401`("VWorld 호환 인증키가 유효하지 않습니다")로 거절하고, `preflight()`는
+존재·길이만 보므로 실패가 첫 요청 시점까지 미뤄진다. 2026-08-13 prod 사고가 정확히
+이것이었고, 로컬 `.env`들에는 아직 그대로 있다. 두 자격증명은 성격이 다르다 — VWorld
+키는 **geo가 상류 VWorld로 나갈 때**, geo 소비자 키는 **map이 geo에 인증할 때** 쓴다.
+
+실제 위험은 키 자체가 아니라 **사본 수**다(회전 판정은 `docs/tasks.md` T-VN-H46E).
+회전하려면 위 표의 모든 이름을 동시에 바꿔야 하고, 하나라도 빠지면 그 서비스만 조용히
+죽는다. 표를 갱신할 때는 추정하지 말고 값의 sha8로 다시 묶을 것 — 셸 `cut`+`tr -d`로
+값을 뽑으면 따옴표 처리에서 오염돼 해시가 달라진다(실제로 그렇게 오판했다).
 
 ## 3. provider별 발급 절차 (요약)
 

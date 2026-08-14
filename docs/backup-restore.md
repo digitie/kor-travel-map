@@ -429,18 +429,45 @@ feature 본문 결손을 메운다.** 백업 산출물이 읽히는지(절차 4)
    soft-delete하므로 쓰지 않는다). `load_bundle`이 feature 부재를 보고 본문·subtype·base field
    value를 다시 만든다.
 
-   ⚠️ **이 되먹임 경로는 아직 드릴에서 실행 검증되지 않았다.** `providers/mois.py:_raw_data`는
-   provider record의 부분집합이라 category에 따라 detail 일부가 round-trip하지 않을 수 있다 —
-   3회차에서 실측하고 결과를 여기 적는다.
+   ⚠️ **이 되먹임은 본문을 부분적으로만 복원한다 (2026-08-14 코드 실측, 드릴 실행 전 확정).**
+   `providers/mois.py:_raw_data`는 payload_hash용 canonical dict라 Protocol **45개 필드 중
+   22개만** 담는다. NDJSON 래퍼 `cli/records.py:MoisLicenseJsonRecord.__getattr__`는 없는 key를
+   **조용히 `None`으로** 돌려주므로 되먹임은 **실패하지 않고** 24개 필드를 잃은 채 성공한다.
+   실패보다 이쪽이 위험하다.
+
+   잃는 24개는 전부 category별 상세다. 본문에서는 이렇게 나타난다:
+
+   - `PlaceDetail.facility_info`의 **`building` / `medical` / `food` / `culture_sports` 네 블록
+     전체**가 사라지고 `subtype_name`·`sales_method_name`이 `None`이 된다 —
+     되먹임 후 남는 key는 `service_slug`, `category` 둘뿐이다.
+   - `Address.zipcode`(`road_zip`/`lot_zip`), `Address.road_address_management_no`
+     (`building_management_number`)가 `None`이 된다.
+
+   손실 집합과 그 본문 영향은 `tests/unit/test_providers_mois.py`의
+   `test_raw_data_round_trip_drops_exactly_the_known_fields` /
+   `test_raw_data_round_trip_empties_facility_info_blocks`가 고정한다. `_raw_data`를 넓히면
+   그 테스트가 실패하니 **여기 적은 목록도 함께 고쳐라.**
 
 5. **회복 확인** — F1이 0으로 돌아오고 `feature.features` / `feature.public_features` 카운트가
    원복되며 identity 4축(`missing_uuid` / `missing_alias` / `alias_pair_mismatch` /
    `orphan_alias` — `kortravelmap.infra.feature_identity.count_features_missing_identity`)이
    전부 0인지 확인한다.
 
+   **위 네 축만으로는 4단계의 부분 복원을 보지 못한다.** F1도 카운트도 identity도
+   `facility_info`를 들여다보지 않기 때문에, detail이 빈 채로 돌아와도 전부 초록이다. 그래서
+   1단계에서 `feature_uuid`·`source_entity_key`와 **함께 `detail->'facility_info'`도 받아 두고**
+   5단계에서 대조한다. building/medical/food/culture_sports 블록이 사라졌으면 정상이다 —
+   그것이 이 경로의 알려진 한계이지 드릴 실패가 아니다. 그 블록까지 돌려야 하는 복구라면
+   replay가 아니라 백업 복원이 수단이다.
+
+   ```sql
+   SELECT feature_id, detail->'facility_info' FROM feature.feature_places
+    WHERE feature_id = ANY(:feature_ids);
+   ```
+
    **`feature_uuid`는 원래 값으로 돌아오지 않는다.** 0083 이후 신규 행의 UUID는 비파생 v7이라
-   replay는 새 identity를 만든다. 1단계에서 받아 둔 값과 대조해 "본문은 돌아왔고 identity는
-   바뀌었다"를 확인하는 것까지가 이 절차의 결론이다.
+   replay는 새 identity를 만든다. 1단계에서 받아 둔 값과 대조해 "본문은 (detail 일부를 뺀 채)
+   돌아왔고 identity는 바뀌었다"를 확인하는 것까지가 이 절차의 결론이다.
 
 ### ⚠️ relation 개명 대조표 (T-VN-35/36)
 

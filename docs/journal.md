@@ -2,6 +2,83 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-14 — dagster-daemon 이미지 누락 + prod DSN 경계 실측 (T-VN-H46D/#51)
+
+### `docker-buildx.sh`가 daemon 이미지를 굽지 않았다
+
+`scripts/docker-build.sh:12`는 네 서비스(api/frontend/dagster/dagster-daemon)를
+빌드하는데 `scripts/docker-buildx.sh`는 셋만 구웠다. 두 파일이 서로 모순인 채로 오래
+있었고, 저장소가 "map 이미지는 3개"라는 틀린 모델을 성문화하고 있었다.
+
+2026-08-13 prod 재빌드에서 그 누락이 났다. daemon은 자기 이미지 안의 패키지를
+in-process 로드하므로 옆의 code server가 최신이어도 소용이 없다. TVN33 커토버가
+`ops.feature_update_requests.providers`를 지운 뒤 daemon만 8일 묵은 코드로 남아
+`feature_update_request_queue_sensor`가 30초마다 죽었다(실측
+`consecutive_failure_count=2020`). 큐가 비어 있어 운영자에겐 무반응으로만 보였다.
+
+**한 번 빌드에 태그 두 개로 고쳤다.** `build_one`을 두 번 부르면 두 이미지가 같은
+코드라는 보장이 없는데(캐시 미스·비결정적 레이어), 그 "같음"이 바로 여기서의
+요구사항이다. 그래서 `build_one`의 첫 인자를 이미지 목록으로 바꿨다.
+
+가드도 두 층이다. Dockerfile 다중집합 비교와, 그 둘이 **같은 build 호출**에서
+나오는지. 변이로 확인했다 — daemon 태그를 빼면 3개 전부 실패하고, 한 번 빌드를 두 번
+호출로 되돌리면 후자만 실패한다. 후자가 없으면 그 회귀는 조용히 지나간다.
+
+수리된 prod가 그 형태를 그대로 보여 준다. `kor-travel-map-dagster:latest-main`과
+`kor-travel-map-dagster-daemon:latest-main`이 **같은 digest**(`443cd970c09a8b40`)를
+가리킨다 — 이름이 둘, 이미지가 하나. 두 컨테이너는 2026-08-14 00:13/00:27 UTC에
+떴고, 1분 주기 `current_weather_summary_refresh`가 그 직후부터 463회 연속 성공했다.
+그 전에는 `feature_update_request_queue_sensor`가 30초마다 죽고 있었다.
+
+### prod DSN 경계 — 조사 중 정본 DB를 착각했다
+
+먼저 적어 둔다. 이 조사에서 한참을 `ktm-tvn36-db` 컨테이너를 정본으로 보고 결론을
+냈고, 그게 틀렸다. **prod 호스트 5432는 `kor-travel-geo-postgres`다** — map이 geo와
+인스턴스를 공유한다(#46이 떼어내려는 대상). `ktm-tvn36-db`는 18736에 있는 잔여물이고
+`feature.features`가 1행이다. 그 잘못된 DB에서 "runtime 역할이 쓰기 권한 0"이라는
+겁나는 수치가 나왔는데, 정본에서는 읽기 94 / 삽입 84 / 갱신 82로 정상이다.
+`127.0.0.1:5432`라는 DSN만 보고 어느 인스턴스인지 확인하지 않은 것이 원인이다.
+
+정본 실측 — features 1,004,975행, alembic `0104_tvn36_final_fence`. 그 리비전 id는
+`0201_squash_bridge.py`가 선언한 값이고, prod가 squash된 baseline 위에서 정확히
+resolve된다는 뜻이다. 브리지 설계가 prod에서 실증됐다.
+
+경계 위반은 두 가지다. prod compose는 git 체크아웃이 아니라 `origin/main` +
+**손으로 넣은 6줄**이고, 그 6줄이 api/dagster/daemon 셋 모두에 migrator와
+api_runtime DSN을 준다. `api-entrypoint.sh`가 두 값을 폴백 없이 요구하니 api를
+띄우려고 넣은 줄을 나머지 둘에도 붙인 것으로 보인다. 그 두 이름을 읽는 코드는
+저장소에 `api-entrypoint.sh` 하나뿐이라 dagster/daemon에서는 순수한 노출이다.
+두 번째로, prod의 `KOR_TRAVEL_MAP_PG_DSN`이 세 서비스 모두 **dagster runtime**
+역할이다 — 저장소는 api의 같은 자리를 API_RUNTIME에서 채운다. 두 역할의 권한이
+동일해서 오늘 깨지는 것은 없고, 깨지는 것은 감사 추적과 한쪽만 조이는 능력이다.
+
+수정은 이미 docker-manager의 `agent/issue-171-map-dedicated-postgres`에 있다.
+별도 PR을 만들지 않고 #46 배포에 실린다.
+
+### admin UI만 geo 소비자 키를 못 받고 있었다
+
+정본 키는 api/dagster/daemon 셋에만 갔다. UI 프록시는
+`KOR_TRAVEL_GEO_API_KEY` → `NEXT_PUBLIC_…` 순으로 읽는데 둘 다 없어서 키 없이 상류에
+붙었고, geo의 `400 E0100 field=key`가 화면에는 "invalid request data"로 보인다 —
+자격증명 누락이 아니라 요청 형식 오류처럼 읽힌다. docker-manager
+`fix/map-ui-geo-consumer-key`에 런타임 이름 한 줄로 넣었다(재빌드 불필요).
+
+그리고 prod `.env`의 `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY`는 **VWorld 키 그 자체다.**
+값의 sha8이 `KOR_TRAVEL_GEO_VWORLD_API_KEY`·`NEXT_PUBLIC_VWORLD_API_KEY`·
+`PINVI_VWORLD_API_KEY`·`KOR_TRAVEL_MAP_API_VWORLD_API_KEY`와 같은 그룹이고, geo에
+걸면 `401 E0401 "VWorld 호환 인증키가 유효하지 않습니다"`가 그대로 난다. 8/13 사고를
+만든 값이 이름만 바꿔 아직 거기 있다. 지금은 어느 compose도 이 이름을 참조하지 않아
+당장 깨지는 것은 없지만, 다음 운영자가 집어 쓰면 사고가 재현된다.
+
+PR #979의 정적 가드가 "운영자 `.env`는 못 본다"고 적어 둔 바로 그 축이고, 실제로
+오염돼 있었다. 가드는 저장소가 잘못된 값을 권하지 않게 할 뿐이다.
+
+확인하다 두 번 헛짚었고 둘 다 적어 둔다. geo `/v2/reverse`는 키를 **query
+파라미터**로 받는데 본문에 넣어서 인증 이전에 `400`으로 떨어졌고, 하마터면 유효한
+키를 무효로 판정할 뻔했다. 그 전에는 셸에서 `tr -d`로 따옴표를 지우다 값이 오염돼
+sha8이 실행마다 달라졌고, 그 오염된 해시를 근거로 "세 값이 전부 다르다"고 판정했다 —
+실제로는 둘이 같은 값이었다. `.env` 파싱은 파이썬으로 옮기고 나서야 안정됐다.
+
 ## 2026-08-14 — geo 소비자 키가 VWorld 키로 떨어지는 통로 제거 (T-VN-H46B/C)
 
 `kor-travel-geo`에는 성격이 다른 자격증명 두 개가 있다. **VWorld 키**는 geo가 상류
@@ -40,7 +117,6 @@ dagster/daemon 두 컨테이너가 VWorld 키를 든 채 남았다. fail-open이
 가드가 **못 하는 것**도 문서에 적었다: 중간 변수 우회, 운영자 `.env` 파일 자체(**08-13
 사고의 실제 원인이 그 축이라 이 가드는 그 사고를 막지 못했을 것이다**),
 docker-manager의 compose.
-||||||| fa3bdcd4
 ## 2026-08-14 — alembic squash(0200) + prod 지오코딩 복구
 
 ### 체인 109개 → `0200_schema_baseline` 하나

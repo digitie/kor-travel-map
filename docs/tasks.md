@@ -485,10 +485,42 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   뜻하는데 인증 필요 오픈API가 코드 실측 약 236건이라 전건 재활용신청은 비대칭적으로
   크다. 실제 위험은 키가 아니라 **사본 수**다.
 
-  잔여 위생(별건): `~/kor-travel-docker-manager/.env.bak-*` 4개 정리,
-  `python-krex-api`의 `.env.local` gitignore 규칙 추가, `docs/external-apis.md` §2에
-  "동일 키를 쓰는 17개 별칭" 표 추가. ⚠️ data.go.kr 콘솔 실제 상태(재발급이 기존
-  활용신청 승인을 유지하는지, 계정당 다중 키 가능 여부)는 **미확인 추정**이다.
+  잔여 위생(별건): `~/kor-travel-docker-manager/.env.bak-*` **10개**(4개가 아니었다) 정리,
+  `python-krex-api`의 `.env.local` gitignore 규칙 추가, ~~`docs/external-apis.md` §2에
+  "동일 키를 쓰는 17개 별칭" 표 추가~~ → **완료(2026-08-14, §2.1)**. ⚠️ data.go.kr
+  콘솔 실제 상태(재발급이 기존 활용신청 승인을 유지하는지, 계정당 다중 키 가능 여부)는
+  **미확인 추정**이다.
+
+  표를 만들며 개수가 갱신됐다 — 로컬 `F:\dev` 전체를 값의 sha8로 다시 묶으니
+  data.go.kr 키는 **별칭 18개 / 파일 18개**다(앞의 "17/8/6"은 스캔 범위가 좁았다).
+  같이 나온 것 두 가지:
+
+  - **VWorld 키가 별칭 14개 / 파일 15개**로 퍼져 있고, 그 그룹 안에
+    `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY`와 `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY`가
+    **들어 있다**. 즉 로컬 `.env`들에서 geo 소비자 키 자리에 VWorld 값이 들어 있고,
+    geo는 그것을 `401 E0401`로 거절한다. 2026-08-13 prod 사고와 같은 형상이 개발
+    머신에 그대로 남아 있다는 뜻이다(prod의 소비자 키 자리는 복구 후 정상).
+    → 저장소가 고칠 수 있는 부분은 PR #979와 docker-manager
+    `fix/map-ui-geo-consumer-key`로 끊었다. `.env` 자체는 운영자/개발자 조치다.
+  - 일부 `.env`가 **UTF-8 BOM으로 시작**해 첫 변수 이름이 `\ufeffKMA_SERVICE_KEY`처럼
+    깨진다. 순진한 파서는 그 줄을 통째로 놓친다.
+
+  `.env.bak-*` 실태(2026-08-14 실측). 10개 전부 폐기된
+  `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY` 값을 품고 있고, 오래된 것들은
+  `KOR_TRAVEL_MAP_UI_SESSION_SECRET`·`UI_ADMIN_PASSWORD_HASH`·
+  `KOR_TRAVEL_CONCIERGE_API_KEYS`의 이전 값도 갖고 있다. 셋은 권한이 `0664`/`0775`로
+  **그룹·타인 읽기 가능**했다 — §1이 규정한 600이 아니었고, T-VN-H46E의 "prod 비밀
+  파일 전부 0600"은 이 파일들을 포함하지 않은 판정이었다. **전부 `600`으로 고쳤다.**
+  삭제는 하지 않았다: 폐기된 자격증명이라도 지우면 되돌릴 수 없고, 권한을 맞춘 뒤에는
+  급할 이유가 없다. 지울 대상은 2026-06/07의 8개이고 `tvn34`(08-12)·`tvn36`(08-13)
+  둘은 최근 롤백 지점이라 남길 것을 권한다 — 운영자 판단.
+
+  `python-krex-api`의 `.env.local` 규칙은 **손대지 않았다.** 그 저장소는
+  `fix/incident-realtime-sms`에 29개 파일이 스테이지된 진행 중 작업이라 커밋을 끼워
+  넣지 않았다. 노출 위험은 없다 — 그 이름의 파일이 지금 없고, git이 정상 동작하는 전
+  저장소를 훑어 **무시되지 않는 비밀 후보 파일은 0건**이다(worktree 포인터가 끊겨
+  git 자체가 안 도는 체크아웃이 여럿 있는데, 그런 곳은 애초에 커밋이 불가능하다).
+  넣을 규칙은 `.env*` + `!.env.example` 한 쌍.
 
 ## Lane B 상세 — b1 PinVi 결합·후속
 
