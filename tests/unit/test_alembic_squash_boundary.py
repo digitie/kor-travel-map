@@ -16,30 +16,31 @@ _ACTIVE = _ROOT / "alembic" / "versions"
 _LEGACY = _ROOT / "alembic" / "legacy_versions"
 _ENV = _ROOT / "alembic" / "env.py"
 _BASELINE = _ACTIVE / "0200_schema_baseline.py"
-_RECEIPTS = _ACTIVE / "0201_tvn40_curation_receipts.py"
+_RECEIPTS = _ACTIVE / "0202_tvn40_curation_receipts.py"
 _ROLE_BOOTSTRAP = _ROOT / "docker" / "postgres-role-bootstrap.sh"
 _GRAPH = _ROOT / "src" / "kortravelmap" / "_application_migration_graph.json"
 _EXPECTED_REVISIONS = (
     "0200_schema_baseline",
-    "0201_tvn40_curation_receipts",
-    "0202_tvn40_candidate_commands",
-    "0203_tvn40_candidate_promotion",
-    "0204_tvn40_rule_generation",
-    "0205_tvn40_rule_catalog_commands",
-    "0206_tvn40_theme_catalog",
-    "0207_tvn40_source_catalog",
-    "0208_tvn40_provider_seal",
-    "0209_tvn40_concierge_catalog",
-    "0210_tvn40_provider_ops_cmds",
-    "0211_tvn40_cancel_cmds",
-    "0212_tvn40_collection_cmds",
-    "0213_tvn40_item_cmds",
-    "0214_tvn40_import_quarantine",
-    "0215_tvn40_import_plans",
-    "0216_tvn40_import_item_cmd",
-    "0217_tvn40_metadata_check",
-    "0218_tvn40_routine_acl",
-    "0219_tvn40_snapshot_cap_index",
+    "0104_tvn36_final_fence",
+    "0202_tvn40_curation_receipts",
+    "0203_tvn40_candidate_commands",
+    "0204_tvn40_candidate_promotion",
+    "0205_tvn40_rule_generation",
+    "0206_tvn40_rule_catalog_commands",
+    "0207_tvn40_theme_catalog",
+    "0208_tvn40_source_catalog",
+    "0209_tvn40_provider_seal",
+    "0210_tvn40_concierge_catalog",
+    "0211_tvn40_provider_ops_cmds",
+    "0212_tvn40_cancel_cmds",
+    "0213_tvn40_collection_cmds",
+    "0214_tvn40_item_cmds",
+    "0215_tvn40_import_quarantine",
+    "0216_tvn40_import_plans",
+    "0217_tvn40_import_item_cmd",
+    "0218_tvn40_metadata_check",
+    "0219_tvn40_routine_acl",
+    "0220_tvn40_snapshot_cap_index",
 )
 _LEGACY_ARCHIVE_SHA256 = (
     "ae65901c78ea1d38ef6f5b7a7e8532744656e73c79392251452680d35f461e42"
@@ -227,7 +228,7 @@ def _literal(path: Path, name: str) -> str | tuple[str, ...] | None:
     raise AssertionError(f"{path}: {name} literal이 없다")
 
 
-def test_active_graph_is_only_0200_to_0219() -> None:
+def test_active_graph_is_only_0200_bridge_to_0220() -> None:
     paths = sorted(_ACTIVE.glob("[0-9]*.py"))
     revisions = tuple(str(_literal(path, "revision")) for path in paths)
     parents = tuple(_literal(path, "down_revision") for path in paths)
@@ -248,6 +249,9 @@ def test_active_forward_only_boundary_and_diagnostics_use_squash_revisions() -> 
     for path in sorted(_ACTIVE.glob("02*.py")):
         revision = str(_literal(path, "revision"))
         source = path.read_text(encoding="utf-8")
+        if path.name == "0201_squash_bridge.py":
+            assert "squash bridge는 forward-only" in source
+            continue
         assert f'"{revision} is forward-only' in source, (
             f"{path.name}: forward-only 진단이 자기 revision을 가리켜야 한다"
         )

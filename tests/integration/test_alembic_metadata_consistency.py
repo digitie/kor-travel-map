@@ -244,7 +244,7 @@ async def test_squash_boundary_rejects_stamp_below_0200_before_mutation(
     assert await _admin_fetchval(
         admin_dsn,
         "SELECT version_num FROM public.alembic_version",
-    ) == "0217_tvn40_metadata_check"
+    ) == "0220_tvn40_snapshot_cap_index"
 
 
 async def test_0200_rejects_unsafe_preprovisioned_role_before_schema_ddl(
@@ -319,7 +319,7 @@ async def test_0201_rejects_membership_option_and_extra_edge_drift(
                 DBAPIError,
                 match="application role membership graph is not exact",
             ):
-                await asyncio.to_thread(command.upgrade, cfg, "0201_tvn40_curation_receipts")
+                await asyncio.to_thread(command.upgrade, cfg, "0202_tvn40_curation_receipts")
             assert await _admin_fetchval(
                 admin_dsn,
                 "SELECT version_num FROM public.alembic_version",

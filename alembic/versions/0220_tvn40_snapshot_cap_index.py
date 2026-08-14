@@ -1,7 +1,7 @@
 """T-VN-40 public curation snapshot cap을 exact eligible set에서 판정한다.
 
-Revision ID: 0219_tvn40_snapshot_cap_index
-Revises: 0218_tvn40_routine_acl
+Revision ID: 0220_tvn40_snapshot_cap_index
+Revises: 0219_tvn40_routine_acl
 """
 
 from __future__ import annotations
@@ -10,8 +10,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0219_tvn40_snapshot_cap_index"
-down_revision: str | Sequence[str] | None = "0218_tvn40_routine_acl"
+revision: str = "0220_tvn40_snapshot_cap_index"
+down_revision: str | Sequence[str] | None = "0219_tvn40_routine_acl"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -37,7 +37,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     raise RuntimeError(
-        "0219_tvn40_snapshot_cap_index is forward-only; "
+        "0220_tvn40_snapshot_cap_index is forward-only; "
         "rebuild with the T-VN-40 release head"
     )
 

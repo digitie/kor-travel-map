@@ -1,7 +1,7 @@
 """T-VN-40 Alembic metadata reflection 경계를 닫는다.
 
-Revision ID: 0217_tvn40_metadata_check
-Revises: 0216_tvn40_import_item_cmd
+Revision ID: 0218_tvn40_metadata_check
+Revises: 0217_tvn40_import_item_cmd
 """
 
 from __future__ import annotations
@@ -10,8 +10,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0217_tvn40_metadata_check"
-down_revision: str | Sequence[str] | None = "0216_tvn40_import_item_cmd"
+revision: str = "0218_tvn40_metadata_check"
+down_revision: str | Sequence[str] | None = "0217_tvn40_import_item_cmd"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -37,6 +37,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     raise RuntimeError(
-        "0217_tvn40_metadata_check is forward-only; "
+        "0218_tvn40_metadata_check is forward-only; "
         "rebuild with the T-VN-40 release head"
     )

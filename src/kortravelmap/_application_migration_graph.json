@@ -9,6 +9,120 @@
         "0200_schema_baseline"
       ],
       "revision": "0104_tvn36_final_fence"
+    },
+    {
+      "down_revision": [
+        "0104_tvn36_final_fence"
+      ],
+      "revision": "0202_tvn40_curation_receipts"
+    },
+    {
+      "down_revision": [
+        "0202_tvn40_curation_receipts"
+      ],
+      "revision": "0203_tvn40_candidate_commands"
+    },
+    {
+      "down_revision": [
+        "0203_tvn40_candidate_commands"
+      ],
+      "revision": "0204_tvn40_candidate_promotion"
+    },
+    {
+      "down_revision": [
+        "0204_tvn40_candidate_promotion"
+      ],
+      "revision": "0205_tvn40_rule_generation"
+    },
+    {
+      "down_revision": [
+        "0205_tvn40_rule_generation"
+      ],
+      "revision": "0206_tvn40_rule_catalog_commands"
+    },
+    {
+      "down_revision": [
+        "0206_tvn40_rule_catalog_commands"
+      ],
+      "revision": "0207_tvn40_theme_catalog"
+    },
+    {
+      "down_revision": [
+        "0207_tvn40_theme_catalog"
+      ],
+      "revision": "0208_tvn40_source_catalog"
+    },
+    {
+      "down_revision": [
+        "0208_tvn40_source_catalog"
+      ],
+      "revision": "0209_tvn40_provider_seal"
+    },
+    {
+      "down_revision": [
+        "0209_tvn40_provider_seal"
+      ],
+      "revision": "0210_tvn40_concierge_catalog"
+    },
+    {
+      "down_revision": [
+        "0210_tvn40_concierge_catalog"
+      ],
+      "revision": "0211_tvn40_provider_ops_cmds"
+    },
+    {
+      "down_revision": [
+        "0211_tvn40_provider_ops_cmds"
+      ],
+      "revision": "0212_tvn40_cancel_cmds"
+    },
+    {
+      "down_revision": [
+        "0212_tvn40_cancel_cmds"
+      ],
+      "revision": "0213_tvn40_collection_cmds"
+    },
+    {
+      "down_revision": [
+        "0213_tvn40_collection_cmds"
+      ],
+      "revision": "0214_tvn40_item_cmds"
+    },
+    {
+      "down_revision": [
+        "0214_tvn40_item_cmds"
+      ],
+      "revision": "0215_tvn40_import_quarantine"
+    },
+    {
+      "down_revision": [
+        "0215_tvn40_import_quarantine"
+      ],
+      "revision": "0216_tvn40_import_plans"
+    },
+    {
+      "down_revision": [
+        "0216_tvn40_import_plans"
+      ],
+      "revision": "0217_tvn40_import_item_cmd"
+    },
+    {
+      "down_revision": [
+        "0217_tvn40_import_item_cmd"
+      ],
+      "revision": "0218_tvn40_metadata_check"
+    },
+    {
+      "down_revision": [
+        "0218_tvn40_metadata_check"
+      ],
+      "revision": "0219_tvn40_routine_acl"
+    },
+    {
+      "down_revision": [
+        "0219_tvn40_routine_acl"
+      ],
+      "revision": "0220_tvn40_snapshot_cap_index"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

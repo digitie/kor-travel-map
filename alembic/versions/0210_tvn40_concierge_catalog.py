@@ -1,7 +1,7 @@
 """T-VN-40B provider-owned concierge theme/rule catalog sync.
 
-Revision ID: 0209_tvn40_concierge_catalog
-Revises: 0208_tvn40_provider_seal
+Revision ID: 0210_tvn40_concierge_catalog
+Revises: 0209_tvn40_provider_seal
 
 The authoritative provider root derives concierge group catalog rows from the
 locked current Feature/source set.  No caller-supplied group list is trusted.
@@ -16,8 +16,8 @@ from alembic import op
 # Frozen PostgreSQL procedure text intentionally exceeds Python line length.
 # ruff: noqa: E501
 
-revision: str = "0209_tvn40_concierge_catalog"
-down_revision: str | Sequence[str] | None = "0208_tvn40_provider_seal"
+revision: str = "0210_tvn40_concierge_catalog"
+down_revision: str | Sequence[str] | None = "0209_tvn40_provider_seal"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -442,4 +442,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError("0209_tvn40_concierge_catalog is forward-only; rebuild with the T-VN-40 release head")
+    raise RuntimeError("0210_tvn40_concierge_catalog is forward-only; rebuild with the T-VN-40 release head")

@@ -1,7 +1,7 @@
 """T-VN-40B typed retained theme catalog commands.
 
-Revision ID: 0206_tvn40_theme_catalog
-Revises: 0205_tvn40_rule_catalog_commands
+Revision ID: 0207_tvn40_theme_catalog
+Revises: 0206_tvn40_rule_catalog_commands
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ from alembic import op
 # Frozen PostgreSQL procedure text intentionally exceeds Python line length.
 # ruff: noqa: E501
 
-revision: str = "0206_tvn40_theme_catalog"
-down_revision: str | Sequence[str] | None = "0205_tvn40_rule_catalog_commands"
+revision: str = "0207_tvn40_theme_catalog"
+down_revision: str | Sequence[str] | None = "0206_tvn40_rule_catalog_commands"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -536,4 +536,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError("0206_tvn40_theme_catalog is forward-only; rebuild with the T-VN-40 release head")
+    raise RuntimeError("0207_tvn40_theme_catalog is forward-only; rebuild with the T-VN-40 release head")

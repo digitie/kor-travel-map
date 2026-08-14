@@ -1,7 +1,7 @@
 """T-VN-40B typed retained source catalog and observation commands.
 
-Revision ID: 0207_tvn40_source_catalog
-Revises: 0206_tvn40_theme_catalog
+Revision ID: 0208_tvn40_source_catalog
+Revises: 0207_tvn40_theme_catalog
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ from alembic import op
 # Frozen PostgreSQL procedure text intentionally exceeds Python line length.
 # ruff: noqa: E501
 
-revision: str = "0207_tvn40_source_catalog"
-down_revision: str | Sequence[str] | None = "0206_tvn40_theme_catalog"
+revision: str = "0208_tvn40_source_catalog"
+down_revision: str | Sequence[str] | None = "0207_tvn40_theme_catalog"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -854,4 +854,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError("0207_tvn40_source_catalog is forward-only; rebuild with the T-VN-40 release head")
+    raise RuntimeError("0208_tvn40_source_catalog is forward-only; rebuild with the T-VN-40 release head")

@@ -1,7 +1,7 @@
 """T-VN-40B import/quarantine collection command fence.
 
-Revision ID: 0214_tvn40_import_quarantine
-Revises: 0213_tvn40_item_cmds
+Revision ID: 0215_tvn40_import_quarantine
+Revises: 0214_tvn40_item_cmds
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ from alembic import op
 # Frozen PostgreSQL procedure text intentionally exceeds Python line length.
 # ruff: noqa: E501
 
-revision: str = "0214_tvn40_import_quarantine"
-down_revision: str | Sequence[str] | None = "0213_tvn40_item_cmds"
+revision: str = "0215_tvn40_import_quarantine"
+down_revision: str | Sequence[str] | None = "0214_tvn40_item_cmds"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -575,4 +575,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError("0214_tvn40_import_quarantine is forward-only; rebuild with the T-VN-40 release head")
+    raise RuntimeError("0215_tvn40_import_quarantine is forward-only; rebuild with the T-VN-40 release head")

@@ -37,7 +37,7 @@
 - **DATABASE**: apply row set을 immutable plan과 exact 비교하고 같은 command의 batch/content receipt만
   terminal commit에 결박한다. provenance pointer만 바뀐 item도 item·collection revision을 갱신한다.
 - **DATABASE**: PR #977의 `0104_tvn36_final_fence` 뒤 T-VN-40 chain을 재배치하고
-  `0217_tvn40_metadata_check`에서 owner shape 제약 검증과 ORM/Alembic metadata 동등성을 닫았다.
+  `0218_tvn40_metadata_check`에서 owner shape 제약 검증과 ORM/Alembic metadata 동등성을 닫았다.
 - **REMOVED**: preview/commit에서 같은 CSV를 다시 업로드·해석하던 legacy `dry_run` import route를 제거했다.
 
 ### retained curation source CAS API (2026-08-13, T-VN-40)

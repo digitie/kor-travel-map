@@ -1,7 +1,7 @@
 """T-VN-40B provider feature-operation typed command boundary.
 
-Revision ID: 0210_tvn40_provider_ops_cmds
-Revises: 0209_tvn40_concierge_catalog
+Revision ID: 0211_tvn40_provider_ops_cmds
+Revises: 0210_tvn40_concierge_catalog
 
 The Dagster login may read canonical operation rows, but it may not forge the
 provider root/member identity or terminal evidence with raw DML.  The API
@@ -17,8 +17,8 @@ from alembic import op
 # Frozen PostgreSQL command text intentionally exceeds Python line length.
 # ruff: noqa: E501
 
-revision: str = "0210_tvn40_provider_ops_cmds"
-down_revision: str | Sequence[str] | None = "0209_tvn40_concierge_catalog"
+revision: str = "0211_tvn40_provider_ops_cmds"
+down_revision: str | Sequence[str] | None = "0210_tvn40_concierge_catalog"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -728,4 +728,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError("0210_tvn40_provider_ops_cmds is forward-only; rebuild with the T-VN-40 release head")
+    raise RuntimeError("0211_tvn40_provider_ops_cmds is forward-only; rebuild with the T-VN-40 release head")

@@ -1,7 +1,7 @@
 """T-VN-40B immutable curation import preview/commit plans.
 
-Revision ID: 0215_tvn40_import_plans
-Revises: 0214_tvn40_import_quarantine
+Revision ID: 0216_tvn40_import_plans
+Revises: 0215_tvn40_import_quarantine
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ from alembic import op
 # Frozen PostgreSQL procedure text intentionally exceeds Python line length.
 # ruff: noqa: E501
 
-revision: str = "0215_tvn40_import_plans"
-down_revision: str | Sequence[str] | None = "0214_tvn40_import_quarantine"
+revision: str = "0216_tvn40_import_plans"
+down_revision: str | Sequence[str] | None = "0215_tvn40_import_quarantine"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -537,4 +537,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError("0215_tvn40_import_plans is forward-only; rebuild with the T-VN-40 release head")
+    raise RuntimeError("0216_tvn40_import_plans is forward-only; rebuild with the T-VN-40 release head")
