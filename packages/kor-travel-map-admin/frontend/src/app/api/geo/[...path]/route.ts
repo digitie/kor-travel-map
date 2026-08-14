@@ -4,10 +4,11 @@ const GEO_BASE =
   process.env.KOR_TRAVEL_GEO_INTERNAL_URL ??
   process.env.NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL ??
   "http://127.0.0.1:12501";
+// VWorld 키로 떨어지지 않는다 — 그건 kor-travel-geo가 상류로 나갈 때 쓰는 키이고,
+// geo는 그 값을 401(E0401)로 거절한다. 비어 있으면 비어 있는 채로 둔다(T-VN-H46B).
 const GEO_API_KEY =
   process.env.KOR_TRAVEL_GEO_API_KEY?.trim() ||
   process.env.NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY?.trim() ||
-  process.env.NEXT_PUBLIC_VWORLD_API_KEY?.trim() ||
   "";
 
 type GeoProxyRequestInit = RequestInit & { duplex?: "half" };
