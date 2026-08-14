@@ -24,7 +24,8 @@ from kortravelmap.core.cache_target_stream import SnapshotMerkleRowV1
 _ROOT: Final = Path(__file__).resolve().parents[2]
 _CONTRACTS: Final = _ROOT / "contracts" / "vnext"
 _TVN34_CURRENT_MIGRATION: Final = (
-    _ROOT / "alembic" / "versions" / "0095_feature_orthogonal_state_spine.py"
+    # squash(`0200`) 이후 체인은 아카이브다 — `alembic/legacy_versions/README.md`.
+    _ROOT / "alembic" / "legacy_versions" / "0095_feature_orthogonal_state_spine.py"
 )
 
 # artifact bytes 고정 — 갱신 절차: artifact 수정 → 통합 테스트로 fingerprint 재고정

@@ -23,7 +23,13 @@ import pytest
 
 pytestmark = pytest.mark.unit
 
-VERSIONS = Path(__file__).resolve().parents[2] / "alembic" / "versions"
+_ALEMBIC = Path(__file__).resolve().parents[2] / "alembic"
+VERSIONS = _ALEMBIC / "versions"
+# squash(`0200`) 이후 체인은 실행되지 않는 아카이브다(`alembic/legacy_versions/README.md`).
+# 그래도 함께 훑는다 — 아카이브는 동결돼 있으니 비용이 0이고, 빼면 "선언과 구현이
+# 갈리지 않는다"는 이 파일의 명제가 조용히 절반짜리가 된다.
+LEGACY_VERSIONS = _ALEMBIC / "legacy_versions"
+_SEARCH_ROOTS = (VERSIONS, LEGACY_VERSIONS)
 
 # 되돌릴 수 없다고 스스로 선언한 revision. 목록을 박아 두는 이유는, 선언 문자열만
 # 검사하면 선언을 지우는 것으로 게이트를 통과할 수 있기 때문이다.
@@ -31,11 +37,20 @@ FORWARD_ONLY_REVISIONS = (
     "0090_tvn33_constraints",
     "0091_tvn33_cutover_fence",
     "0092_tvn33_offline_cleanup",
+    "0200_schema_baseline",
 )
 
 
+def _path_for(stem: str) -> Path:
+    for root in _SEARCH_ROOTS:
+        candidate = root / f"{stem}.py"
+        if candidate.exists():
+            return candidate
+    raise AssertionError(f"{stem}.py를 versions/ 에도 legacy_versions/ 에도 찾지 못했다")
+
+
 def _load(stem: str) -> ModuleType:
-    path = VERSIONS / f"{stem}.py"
+    path = _path_for(stem)
     spec = importlib.util.spec_from_file_location(f"_forward_only_{stem}", path)
     assert spec is not None
     assert spec.loader is not None
@@ -63,7 +78,8 @@ def test_every_revision_declaring_forward_only_actually_refuses() -> None:
 
     declared = sorted(
         path.stem
-        for path in VERSIONS.glob("[0-9]*.py")
+        for root in _SEARCH_ROOTS
+        for path in root.glob("[0-9]*.py")
         if "forward-only" in path.read_text(encoding="utf-8")
     )
 
@@ -84,6 +100,6 @@ def test_forward_only_downgrade_body_carries_no_ddl() -> None:
     """
 
     for stem in FORWARD_ONLY_REVISIONS:
-        source = (VERSIONS / f"{stem}.py").read_text(encoding="utf-8")
+        source = _path_for(stem).read_text(encoding="utf-8")
         body = source.split("def downgrade() -> None:", 1)[1]
         assert "op." not in body, f"{stem}: downgrade 본문에 DDL이 있다"

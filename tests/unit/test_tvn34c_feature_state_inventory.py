@@ -42,9 +42,12 @@ _FEATURE_RELATIONS = r"feature\.(?:features|public_features)"
 # status/delete/user-change 계열 8개를, 0104(T-VN-36D final fence)가 whole-row freeze
 # 잔재인 `data_origin`/`data_version`을 지운다. 뒷 세대를 더하지 않으면 차단선은
 # **직전 세대만** 보게 되고, 새로 지운 컬럼은 정적으로 무방비가 된다.
+# squash(`0200`) 이후 이 두 파일은 `alembic/legacy_versions/`에 있다 — 실행되지 않는
+# 아카이브지만 "무엇이 지워졌는가"의 정본은 여전히 이들의 SQL이다. 현행 스키마에는
+# 지워진 것이 **없다**는 사실만 남고 이름은 남지 않기 때문이다.
 _CUTOVER_MIGRATIONS = (
-    _ROOT / "alembic/versions/0097_tvn34c_final_state_cutover.py",
-    _ROOT / "alembic/versions/0104_tvn36_final_fence.py",
+    _ROOT / "alembic/legacy_versions/0097_tvn34c_final_state_cutover.py",
+    _ROOT / "alembic/legacy_versions/0104_tvn36_final_fence.py",
 )
 _DROPPED_COLUMNS = tuple(
     sorted(
@@ -80,6 +83,30 @@ _DROPPED_RELATIONS = tuple(
 assert {"feature.feature_versions", "ops.feature_change_requests"} <= set(
     _DROPPED_RELATIONS
 ), _DROPPED_RELATIONS
+
+# 아카이브에서 읽은 목록이 **현행 head와 여전히 맞는지** 확인한다. 아카이브는 다시
+# 실행되지 않으므로, 목록이 낡아도 이 파일만 보면 알 길이 없다 — 누가 `deleted_at`을
+# 같은 이름으로 되살리면 차단선이 **살아 있는 컬럼을 금지**하게 되고, 그 오류는 조용하다.
+# `alembic/baseline/schema.sql`은 head의 기계 덤프이므로 여기서 부재를 직접 확인한다.
+_BASELINE_SCHEMA = (_ROOT / "alembic/baseline/schema.sql").read_text(encoding="utf-8")
+_FEATURES_DDL = re.search(
+    r"^CREATE TABLE feature\.features \(\n(.*?)^\);", _BASELINE_SCHEMA, re.DOTALL | re.MULTILINE
+)
+assert _FEATURES_DDL, "baseline에서 feature.features DDL을 찾지 못했다"
+_HEAD_FEATURE_COLUMNS = frozenset(
+    re.findall(r"^    ([a-z_]+) ", _FEATURES_DDL.group(1), re.MULTILINE)
+)
+assert "feature_id" in _HEAD_FEATURE_COLUMNS, _HEAD_FEATURE_COLUMNS
+_RESURRECTED = _HEAD_FEATURE_COLUMNS & set(_DROPPED_COLUMNS)
+assert not _RESURRECTED, (
+    f"금지 컬럼이 head에 되살아났다 — 차단선이 살아 있는 컬럼을 막고 있다: {sorted(_RESURRECTED)}"
+)
+_RESURRECTED_RELATIONS = tuple(
+    relation
+    for relation in _DROPPED_RELATIONS
+    if re.search(rf"^CREATE TABLE {re.escape(relation)} \(", _BASELINE_SCHEMA, re.MULTILINE)
+)
+assert not _RESURRECTED_RELATIONS, _RESURRECTED_RELATIONS
 
 
 # f-string 보간 자리를 대신하는 식별자. **식별자로 유효한 형태**여야 alias 바인딩

@@ -24,7 +24,8 @@ from kortravelmap.infra.curation_link_basis import (
 _MIGRATION = (
     Path(__file__).resolve().parents[2]
     / "alembic"
-    / "versions"
+    # squash(`0200`) 이후 체인은 아카이브다 — `alembic/legacy_versions/README.md`.
+    / "legacy_versions"
     / "0073_curation_source_rule_provenance.py"
 )
 
