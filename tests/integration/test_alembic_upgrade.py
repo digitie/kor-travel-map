@@ -10,12 +10,10 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-import uuid
 from typing import TYPE_CHECKING
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 
 from kortravelmap.infra.alembic_exclusions import (
@@ -24,8 +22,6 @@ from kortravelmap.infra.alembic_exclusions import (
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
     from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 
@@ -655,35 +651,7 @@ def _canonical_pg_sql(value: str | None) -> str:
     return re.sub(r'[\s()"]+', "", without_casts).lower()
 
 
-def _archived_revisions(project_root: Path) -> frozenset[str]:
-    """아카이브가 **선언한** revision id 집합.
-
-    파일명으로 판정하면 안 된다 — 109개 중 20개 넘게 파일명과 revision id가 다르다
-    (`0071_integrity_observations`는 `0071_integrity_observation_generations.py`가
-    선언한다). 실제로 파일명 기준 판정이 그 한 건을 놓쳤다.
-    """
-
-    import re
-
-    declaration = re.compile(r'^revision(?::\s*str)?\s*=\s*"([^"]+)"', re.MULTILINE)
-
-    def declared_in(directory: str) -> set[str]:
-        return {
-            match.group(1)
-            for path in (project_root / "alembic" / directory).glob("*.py")
-            if (match := declaration.search(path.read_text(encoding="utf-8"))) is not None
-        }
-
-    live = declared_in("versions")
-    found = declared_in("legacy_versions")
-    assert found, "아카이브에서 revision id를 하나도 읽지 못했다 — 경로가 틀렸다"
-    # bridge가 옛 head id(`0104_tvn36_final_fence`)를 그대로 선언하므로 아카이브에도
-    # live 그래프에도 같은 id가 있다. 빼지 않으면 **head를 가리키는 가장 자연스러운
-    # 문자열**이 아카이브 체인 109단계로 보내진다(적대 리뷰 지적). live가 이긴다.
-    return frozenset(found - live)
-
-
-async def _run_alembic_upgrade(dsn: str, revision: str = "head", *, chain: bool = False) -> None:
+async def _run_alembic_upgrade(dsn: str, revision: str = "head") -> None:
     """``alembic.command.upgrade``를 worker thread에서 실행.
 
     alembic은 sync API + 자체 asyncio.run(env.py)을 호출하므로 현재 pytest
@@ -703,16 +671,6 @@ async def _run_alembic_upgrade(dsn: str, revision: str = "head", *, chain: bool 
     project_root = Path(__file__).resolve().parents[2]  # noqa: ASYNC240  # sync IO is trivial path-arith here
     cfg = Config(str(project_root / "alembic.ini"))
     cfg.set_main_option("script_location", str(project_root / "alembic"))
-    # squash(`0200`) 이후 체인은 `alembic/legacy_versions/`의 아카이브다. 아카이브
-    # revision을 요청받았거나(자동 판정) 호출자가 "DB가 체인 중간에 있다"고 알려주면
-    # (`chain=True`) 아카이브 전용 그래프로 바꾼다. `versions/`와 함께 담으면 안 된다 —
-    # bridge와 아카이브가 `0104_tvn36_final_fence`를 둘 다 선언하는데 alembic은 그것을
-    # **거부하지 않고** 경고 한 줄 뒤 head 3개짜리 손상된 맵으로 계속 간다(실측).
-    # 두 그래프의 head 문자열은 같으므로 `_alembic_head_revision()`은 그대로 둔다.
-    if chain or revision in _archived_revisions(project_root):
-        cfg.set_main_option(
-            "version_locations", str(project_root / "alembic" / "legacy_versions")
-        )
     # 배포와 같은 경로로 돈다 — bootstrap 후 migrator 자격으로 upgrade.
     from tests.integration._tvn34_migration_bootstrap import (
         alembic_schema_owner_role,
@@ -1080,277 +1038,6 @@ async def test_alembic_creates_feature_merge_history(
             )
         ).scalar_one()
     assert exists is not None
-
-
-async def test_curation_provenance_migration_fail_closes_legacy_links(
-    pg_container: object,
-) -> None:
-    """0072는 기존 link를 승인으로 추정하지 않고 감사 대상에 고정한다."""
-    from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
-
-    raw_dsn = pg_container.get_connection_url()  # type: ignore[attr-defined]
-    admin_dsn = normalize_async_dsn(raw_dsn)
-    database_name = f"curation_provenance_{uuid.uuid4().hex}"
-    migration_dsn = make_url(admin_dsn).set(database=database_name).render_as_string(
-        hide_password=False
-    )
-    admin_engine = make_async_engine(admin_dsn)
-    migration_engine = None
-    try:
-        async with admin_engine.connect() as raw_admin_conn:
-            admin_conn = await raw_admin_conn.execution_options(
-                isolation_level="AUTOCOMMIT"
-            )
-            await admin_conn.execute(text(f'CREATE DATABASE "{database_name}"'))
-
-        await _run_alembic_upgrade(migration_dsn, "0071_integrity_observations")
-        migration_engine = make_async_engine(migration_dsn)
-        async with migration_engine.begin() as conn:
-            await conn.execute(
-                text(
-                    """
-                    INSERT INTO feature.features (
-                        feature_id, kind, name, category,
-                        marker_icon, marker_color, detail
-                    ) VALUES (
-                        'feature:legacy-curation-link',
-                        'place',
-                        '근거 없는 기존 연결',
-                        '01070100',
-                        'place',
-                        'P-01',
-                        -- T-VN-35(ADR-086): 0084 backfill이 place_kind 결측을
-                        -- NOT NULL로 fail-close한다(sentinel 폐기). 0071 시점 seed도
-                        -- head까지 올라가려면 필수 값을 갖춰야 한다.
-                        '{"place_kind": "attraction"}'::jsonb
-                    )
-                    """
-                )
-            )
-            await conn.execute(
-                text(
-                    """
-                    INSERT INTO feature.curated_themes (
-                        theme_slug, theme_name, theme_group, visibility
-                    ) VALUES (
-                        'legacy-provenance-test',
-                        '기존 연결 감사',
-                        'test',
-                        'public'
-                    )
-                    """
-                )
-            )
-            await conn.execute(
-                text(
-                    """
-                    INSERT INTO feature.curation_collections (
-                        collection_key, theme_id, title, status, visibility
-                    )
-                    SELECT
-                        'legacy-provenance-test:2026',
-                        theme_id,
-                        '기존 연결 감사',
-                        'published',
-                        'public'
-                    FROM feature.curated_themes
-                    WHERE theme_slug = 'legacy-provenance-test'
-                    """
-                )
-            )
-            await conn.execute(
-                text(
-                    """
-                    INSERT INTO feature.curation_items (
-                        collection_id, feature_id, external_item_id,
-                        place_name, status, created_by
-                    )
-                    SELECT
-                        collection_id,
-                        'feature:legacy-curation-link',
-                        'legacy-item',
-                        '근거 없는 기존 연결',
-                        'included',
-                        'migration-fixture'
-                    FROM feature.curation_collections
-                    WHERE collection_key = 'legacy-provenance-test:2026'
-                    """
-                )
-            )
-        await migration_engine.dispose()
-        migration_engine = None
-
-        # DB가 체인 중간(`0071`)에 있으므로 아카이브 그래프로 head까지 올린다.
-        await _run_alembic_upgrade(migration_dsn, chain=True)
-        migration_engine = make_async_engine(migration_dsn)
-        async with migration_engine.connect() as conn:
-            row = (
-                await conn.execute(
-                    text(
-                        """
-                        SELECT
-                            item.accepted_link_decision_id =
-                                decision.decision_id AS exact_pointer,
-                            decision.feature_id,
-                            decision.decision_kind,
-                            decision.match_basis,
-                            decision.resolver_version,
-                            decision.actor,
-                            decision.evidence
-                        FROM feature.curation_items AS item
-                        JOIN feature.curation_link_decisions AS decision
-                          ON decision.decision_id =
-                             item.accepted_link_decision_id
-                        WHERE item.external_item_id = 'legacy-item'
-                        """
-                    )
-                )
-            ).mappings().one()
-
-        assert row["exact_pointer"]
-        assert row["feature_id"] == "feature:legacy-curation-link"
-        assert row["decision_kind"] == "accepted"
-        assert row["match_basis"] == "legacy_unattributed"
-        assert row["resolver_version"] == "pre-0072-unknown"
-        assert row["actor"] == "migration-fixture"
-        assert row["evidence"]["migration"] == "0072_curation_provenance"
-    finally:
-        if migration_engine is not None:
-            await migration_engine.dispose()
-        async with admin_engine.connect() as raw_admin_conn:
-            admin_conn = await raw_admin_conn.execution_options(
-                isolation_level="AUTOCOMMIT"
-            )
-            await admin_conn.execute(
-                text(f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)')
-            )
-        await admin_engine.dispose()
-
-
-async def test_weather_migration_reuses_valid_index_after_partial_failure(
-    pg_container: object,
-) -> None:
-    """0069 재시도는 index를 재사용하고 T-VN-38은 새 fact index로 교체한다."""
-    from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
-
-    raw_dsn = pg_container.get_connection_url()  # type: ignore[attr-defined]
-    admin_dsn = normalize_async_dsn(raw_dsn)
-    database_name = f"weather_migration_retry_{uuid.uuid4().hex}"
-    retry_dsn = make_url(admin_dsn).set(database=database_name).render_as_string(
-        hide_password=False
-    )
-    admin_engine = make_async_engine(admin_dsn)
-    retry_engine = None
-    try:
-        async with admin_engine.connect() as raw_admin_conn:
-            admin_conn = await raw_admin_conn.execution_options(
-                isolation_level="AUTOCOMMIT"
-            )
-            await admin_conn.execute(text(f'CREATE DATABASE "{database_name}"'))
-
-        await _run_alembic_upgrade(retry_dsn, "0068_integrity_last_seen")
-        retry_engine = make_async_engine(retry_dsn)
-        async with retry_engine.connect() as raw_retry_conn:
-            retry_conn = await raw_retry_conn.execution_options(
-                isolation_level="AUTOCOMMIT"
-            )
-            await retry_conn.execute(
-                text(
-                    """
-                    CREATE INDEX CONCURRENTLY idx_weather_values_feature_effective
-                    ON feature.feature_weather_values (
-                        feature_id,
-                        provider,
-                        weather_domain,
-                        forecast_style,
-                        metric_key,
-                        (
-                            COALESCE(
-                                valid_at,
-                                observed_at,
-                                valid_from,
-                                issued_at
-                            )
-                        ) DESC,
-                        issued_at DESC NULLS LAST,
-                        collected_at DESC,
-                        weather_value_key
-                    )
-                    """
-                )
-            )
-            relfilenode_before = (
-                await retry_conn.execute(
-                    text(
-                        """
-                        SELECT index_relation.relfilenode
-                        FROM pg_catalog.pg_class AS index_relation
-                        JOIN pg_catalog.pg_namespace AS namespace
-                          ON namespace.oid = index_relation.relnamespace
-                        WHERE namespace.nspname = 'feature'
-                          AND index_relation.relname =
-                              'idx_weather_values_feature_effective'
-                        """
-                    )
-                )
-            ).scalar_one()
-        await retry_engine.dispose()
-        retry_engine = None
-
-        await _run_alembic_upgrade(retry_dsn, "0069_weather_series_catalog")
-        retry_engine = make_async_engine(retry_dsn)
-        async with retry_engine.connect() as retry_conn:
-            relfilenode_after = (
-                await retry_conn.execute(
-                    text(
-                        """
-                        SELECT index_relation.relfilenode
-                        FROM pg_catalog.pg_class AS index_relation
-                        JOIN pg_catalog.pg_namespace AS namespace
-                          ON namespace.oid = index_relation.relnamespace
-                        WHERE namespace.nspname = 'feature'
-                          AND index_relation.relname =
-                              'idx_weather_values_feature_effective'
-                        """
-                    )
-                )
-            ).scalar_one()
-        assert relfilenode_after == relfilenode_before
-        await retry_engine.dispose()
-        retry_engine = None
-
-        # DB가 체인 중간(`0069`)에 있으므로 아카이브 그래프로 head까지 올린다.
-        await _run_alembic_upgrade(retry_dsn, chain=True)
-        retry_engine = make_async_engine(retry_dsn)
-        async with retry_engine.connect() as retry_conn:
-            legacy_index = (
-                await retry_conn.execute(
-                    text("SELECT to_regclass('feature.idx_weather_values_feature_effective')")
-                )
-            ).scalar_one()
-            current_index = (
-                await retry_conn.execute(
-                    text("SELECT to_regclass('feature.idx_weather_values_feature_target_known')")
-                )
-            ).scalar_one()
-            migration_head = (
-                await retry_conn.execute(text("SELECT version_num FROM alembic_version"))
-            ).scalar_one()
-
-        assert legacy_index is None
-        assert current_index is not None
-        assert migration_head == _alembic_head_revision()
-    finally:
-        if retry_engine is not None:
-            await retry_engine.dispose()
-        async with admin_engine.connect() as raw_admin_conn:
-            admin_conn = await raw_admin_conn.execution_options(
-                isolation_level="AUTOCOMMIT"
-            )
-            await admin_conn.execute(
-                text(f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)')
-            )
-        await admin_engine.dispose()
 
 
 async def _tvn40_raw_sql_catalog_sha256(

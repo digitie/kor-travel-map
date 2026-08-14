@@ -1,7 +1,7 @@
 """T-VN-40B typed candidate command boundary.
 
-Revision ID: 0106_tvn40_candidate_commands
-Revises: 0105_tvn40_curation_receipts
+Revision ID: 0202_tvn40_candidate_commands
+Revises: 0201_tvn40_curation_receipts
 
 The transition table is append-only evidence.  Runtime logins may invoke the
 named candidate procedures, but only the audit-writer helper can append a
@@ -17,8 +17,8 @@ from alembic import op
 # Frozen PostgreSQL procedure text intentionally exceeds Python line length.
 # ruff: noqa: E501
 
-revision: str = "0106_tvn40_candidate_commands"
-down_revision: str | Sequence[str] | None = "0105_tvn40_curation_receipts"
+revision: str = "0202_tvn40_candidate_commands"
+down_revision: str | Sequence[str] | None = "0201_tvn40_curation_receipts"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

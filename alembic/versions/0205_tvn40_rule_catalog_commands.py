@@ -1,7 +1,7 @@
 """T-VN-40B typed retained rule catalog commands.
 
-Revision ID: 0109_tvn40_rule_catalog_commands
-Revises: 0108_tvn40_rule_generation
+Revision ID: 0205_tvn40_rule_catalog_commands
+Revises: 0204_tvn40_rule_generation
 
 Operator rule create/patch/archive is revision-CAS protected and materializes
 the complete DB-derived candidate set in the same SERIALIZABLE transaction.
@@ -16,8 +16,8 @@ from alembic import op
 # Frozen PostgreSQL procedure text intentionally exceeds Python line length.
 # ruff: noqa: E501
 
-revision: str = "0109_tvn40_rule_catalog_commands"
-down_revision: str | Sequence[str] | None = "0108_tvn40_rule_generation"
+revision: str = "0205_tvn40_rule_catalog_commands"
+down_revision: str | Sequence[str] | None = "0204_tvn40_rule_generation"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

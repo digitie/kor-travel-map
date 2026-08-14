@@ -1,7 +1,7 @@
 """T-VN-40B server-derived rule reconcile generation.
 
-Revision ID: 0108_tvn40_rule_generation
-Revises: 0107_tvn40_candidate_promotion
+Revision ID: 0204_tvn40_rule_generation
+Revises: 0203_tvn40_candidate_promotion
 
 The runtime caller supplies only an immutable reconcile operation identity.
 PostgreSQL derives the complete current match set, writes the immutable receipt
@@ -18,8 +18,8 @@ from alembic import op
 # Frozen PostgreSQL procedure text intentionally exceeds Python line length.
 # ruff: noqa: E501
 
-revision: str = "0108_tvn40_rule_generation"
-down_revision: str | Sequence[str] | None = "0107_tvn40_candidate_promotion"
+revision: str = "0204_tvn40_rule_generation"
+down_revision: str | Sequence[str] | None = "0203_tvn40_candidate_promotion"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

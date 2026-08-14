@@ -16,7 +16,6 @@ readonly PINVI_ARCHIVE="$INSTALL_DIR/pinvi-source.tar.gz"
 readonly SEED_HELPER="$INSTALL_DIR/scripts/tvn34c_fresh_live_etl_seed.py"
 readonly STATE_ROOT="$INSTALL_DIR/runs"
 readonly BLOCKED_FILE="$INSTALL_DIR/BLOCKED.json"
-readonly EXPECTED_HEAD="0104_tvn36_final_fence"
 
 MODE="${1:-run}"
 RUN_ID=""
@@ -43,6 +42,7 @@ SEED_HELPER_SHA256=""
 MAP_E2E_FEATURE_ID=""
 UI_ADMIN_PASSWORD=""
 FINISHED=0
+EXPECTED_HEAD=""
 
 die() {
   printf 'T-VN-34C n150 fresh live failed: %s (values redacted)\n' "$1" >&2
@@ -184,6 +184,43 @@ for path, key in (
     if hashlib.sha256(path.read_bytes()).hexdigest() != receipt[key]:
         raise SystemExit(3)
 PY
+}
+
+read_map_application_head() {
+  EXPECTED_HEAD="$(python3 - "$MAP_DIR/src/kortravelmap/_application_migration_graph.json" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+data = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+if data.get("schema") != "kor-travel-map.application-migration-graph.v1":
+    raise SystemExit(1)
+revisions = data.get("revisions")
+if not isinstance(revisions, list) or not revisions:
+    raise SystemExit(2)
+known = {
+    row.get("revision")
+    for row in revisions
+    if isinstance(row, dict) and isinstance(row.get("revision"), str)
+}
+parents = {
+    parent
+    for row in revisions
+    if isinstance(row, dict) and isinstance(row.get("down_revision"), list)
+    for parent in row["down_revision"]
+    if isinstance(parent, str)
+}
+heads = sorted(known - parents)
+if len(known) != len(revisions) or len(heads) != 1:
+    raise SystemExit(3)
+head = heads[0]
+if not re.fullmatch(r"[0-9a-z][0-9a-z_.-]{0,127}", head):
+    raise SystemExit(4)
+print(head)
+PY
+)" || die "Map application migration graph is invalid or ambiguous"
+  [[ -n "$EXPECTED_HEAD" ]] || die "Map application migration head is empty"
 }
 
 random_secret() {
@@ -625,6 +662,7 @@ run() {
   safe_extract "$PINVI_ARCHIVE" "$RUN_DIR"
   [[ -d "$MAP_DIR" && -d "$PINVI_DIR" ]] || die "source archive root is invalid"
   read_pair_receipt || die "Map/PinVi pinned contract receipt mismatch"
+  read_map_application_head
   write_env_files
   configure_map_network_isolation
   write_blocked

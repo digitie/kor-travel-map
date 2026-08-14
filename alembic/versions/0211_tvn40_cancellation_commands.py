@@ -1,7 +1,7 @@
 """T-VN-40B provider cancellation lifecycle typed command boundary.
 
-Revision ID: 0115_tvn40_cancel_cmds
-Revises: 0114_tvn40_provider_ops_cmds
+Revision ID: 0211_tvn40_cancel_cmds
+Revises: 0210_tvn40_provider_ops_cmds
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ from alembic import op
 # Frozen PostgreSQL command text intentionally exceeds Python line length.
 # ruff: noqa: E501
 
-revision: str = "0115_tvn40_cancel_cmds"
-down_revision: str | Sequence[str] | None = "0114_tvn40_provider_ops_cmds"
+revision: str = "0211_tvn40_cancel_cmds"
+down_revision: str | Sequence[str] | None = "0210_tvn40_provider_ops_cmds"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

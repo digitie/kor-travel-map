@@ -1,7 +1,7 @@
 """T-VN-40B canonical curation collection commands.
 
-Revision ID: 0116_tvn40_collection_cmds
-Revises: 0115_tvn40_cancel_cmds
+Revision ID: 0212_tvn40_collection_cmds
+Revises: 0211_tvn40_cancel_cmds
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ from alembic import op
 # Frozen PostgreSQL procedure text intentionally exceeds Python line length.
 # ruff: noqa: E501
 
-revision: str = "0116_tvn40_collection_cmds"
-down_revision: str | Sequence[str] | None = "0115_tvn40_cancel_cmds"
+revision: str = "0212_tvn40_collection_cmds"
+down_revision: str | Sequence[str] | None = "0211_tvn40_cancel_cmds"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

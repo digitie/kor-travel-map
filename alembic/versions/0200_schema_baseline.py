@@ -159,27 +159,55 @@ def upgrade() -> None:
         DO $$
         DECLARE missing text;
         BEGIN
-            IF NOT (SELECT rolsuper OR rolcreaterole FROM pg_catalog.pg_roles WHERE rolname = current_user)
+            IF NOT (
+                SELECT rolsuper OR rolcreaterole
+                FROM pg_catalog.pg_roles
+                WHERE rolname = current_user
+            )
                AND (
-                   NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_schema_owner')
-                   OR NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_state_procedure_owner')
-                   OR NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_audit_writer')
-                   OR NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_runtime')
+                   NOT EXISTS (
+                       SELECT 1 FROM pg_catalog.pg_roles
+                       WHERE rolname = 'ktm_feature_schema_owner'
+                   )
+                   OR NOT EXISTS (
+                       SELECT 1 FROM pg_catalog.pg_roles
+                       WHERE rolname = 'ktm_feature_state_procedure_owner'
+                   )
+                   OR NOT EXISTS (
+                       SELECT 1 FROM pg_catalog.pg_roles
+                       WHERE rolname = 'ktm_feature_audit_writer'
+                   )
+                   OR NOT EXISTS (
+                       SELECT 1 FROM pg_catalog.pg_roles
+                       WHERE rolname = 'ktm_feature_runtime'
+                   )
                ) THEN
                 RAISE EXCEPTION
                     'baseline requires CREATEROLE or pre-provisioned ktm_feature_* roles'
                     USING ERRCODE = '42501';
             END IF;
-            IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_schema_owner') THEN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_catalog.pg_roles
+                WHERE rolname = 'ktm_feature_schema_owner'
+            ) THEN
                 CREATE ROLE ktm_feature_schema_owner NOLOGIN NOINHERIT;
             END IF;
-            IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_state_procedure_owner') THEN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_catalog.pg_roles
+                WHERE rolname = 'ktm_feature_state_procedure_owner'
+            ) THEN
                 CREATE ROLE ktm_feature_state_procedure_owner NOLOGIN NOINHERIT;
             END IF;
-            IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_audit_writer') THEN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_catalog.pg_roles
+                WHERE rolname = 'ktm_feature_audit_writer'
+            ) THEN
                 CREATE ROLE ktm_feature_audit_writer NOLOGIN NOINHERIT;
             END IF;
-            IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_runtime') THEN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_catalog.pg_roles
+                WHERE rolname = 'ktm_feature_runtime'
+            ) THEN
                 CREATE ROLE ktm_feature_runtime NOLOGIN NOINHERIT;
             END IF;
             -- Dedicated migrator runs ``SET LOCAL ROLE ktm_feature_schema_owner``.

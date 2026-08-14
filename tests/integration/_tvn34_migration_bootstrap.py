@@ -117,6 +117,14 @@ async def bootstrap_tvn34_migration_roles(engine: AsyncEngine) -> str:
             )
         )
         for statement in (
+            "ALTER ROLE ktm_feature_schema_owner NOLOGIN NOINHERIT "
+            "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+            "ALTER ROLE ktm_feature_state_procedure_owner NOLOGIN NOINHERIT "
+            "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+            "ALTER ROLE ktm_feature_audit_writer NOLOGIN NOINHERIT "
+            "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+            "ALTER ROLE ktm_feature_runtime NOLOGIN NOINHERIT "
+            "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
             "ALTER ROLE ktm_curation_command_owner NOLOGIN NOINHERIT "
             "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
             "ALTER ROLE ktm_curation_audit_writer NOLOGIN NOINHERIT "

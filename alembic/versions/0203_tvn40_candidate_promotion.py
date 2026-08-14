@@ -1,7 +1,7 @@
 """T-VN-40B typed candidate promotion and trusted membership decision.
 
-Revision ID: 0107_tvn40_candidate_promotion
-Revises: 0106_tvn40_candidate_commands
+Revision ID: 0203_tvn40_candidate_promotion
+Revises: 0202_tvn40_candidate_commands
 
 Promotion is one database command: it validates the current candidate/source
 proof, writes or updates one canonical item, appends an accepted admin-review
@@ -17,8 +17,8 @@ from alembic import op
 # Frozen PostgreSQL procedure text intentionally exceeds Python line length.
 # ruff: noqa: E501
 
-revision: str = "0107_tvn40_candidate_promotion"
-down_revision: str | Sequence[str] | None = "0106_tvn40_candidate_commands"
+revision: str = "0203_tvn40_candidate_promotion"
+down_revision: str | Sequence[str] | None = "0202_tvn40_candidate_commands"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

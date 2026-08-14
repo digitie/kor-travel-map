@@ -1,7 +1,7 @@
 """T-VN-40A curation receipt, candidate, and audit spine.
 
-Revision ID: 0105_tvn40_curation_receipts
-Revises: 0104_tvn36_final_fence
+Revision ID: 0201_tvn40_curation_receipts
+Revises: 0200_schema_baseline
 
 The final T-VN-40 cutover is forward-only.  This first revision installs the
 closed receipt/audit relations and revision columns before the later writer
@@ -18,8 +18,8 @@ from alembic import op
 # Python's line-length convention.
 # ruff: noqa: E501
 
-revision: str = "0105_tvn40_curation_receipts"
-down_revision: str | Sequence[str] | None = "0104_tvn36_final_fence"
+revision: str = "0201_tvn40_curation_receipts"
+down_revision: str | Sequence[str] | None = "0200_schema_baseline"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

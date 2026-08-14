@@ -1910,7 +1910,7 @@ CREATE TRIGGER trg_current_price_summary_active_dataset_write
 -- ops.import_jobs와 curated_source_rules가 준비된 뒤 적용하는
 -- tvn33-reference-ownership-v1.sql의 T-VN-40 final block이 고정한다.
 -- 이 executable target은 post-T-VN-40 live 검증 뒤 수행할 Alembic-000 reset의 최종
--- UUID 물리형을 선언한다. 현재 0105 expand migration은 pre-reset head의 text feature_id를
+-- UUID 물리형을 선언한다. 현재 0201 expand migration은 pre-reset head의 text feature_id를
 -- 그대로 사용하며 같은 논리 identity/receipt를 먼저 설치하고, reset에서 UUID로 수렴한다.
 
 CREATE TABLE feature.curated_themes (

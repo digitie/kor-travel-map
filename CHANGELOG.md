@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### Alembic 0200 squash baseline 연동 (2026-08-14)
+
+- **DATABASE**: PR #978의 `0200_schema_baseline` 위에 T-VN-40 migration을 `0201~0217` 단일
+  체인으로 재배치했다. `0001~0104`는 읽기 전용 `legacy_versions` 증거이며 active migration이나
+  integration test에서 실행하지 않는다.
+- **DEPLOY**: live runner가 고정 revision 대신 paired Map archive의 application graph에서 유일한
+  head를 읽는다. 기존 `0104` DB는 stamp하지 않고 T-VN-40 배포 창에서 파괴적으로 재생성한 뒤
+  fresh `0200→0217`을 적용한다.
+- **SECURITY**: PostgreSQL bootstrap이 feature/curation owner·executor 역할 속성과 membership
+  option graph를 exact 재확정·검증한다.
+
 ### provider/consumer credential 경계 (2026-08-14)
 
 - **SECURITY**: VWorld provider key를 Map 공개 API key 또는 kor-travel-geo consumer key로
@@ -26,7 +37,7 @@
 - **DATABASE**: apply row set을 immutable plan과 exact 비교하고 같은 command의 batch/content receipt만
   terminal commit에 결박한다. provenance pointer만 바뀐 item도 item·collection revision을 갱신한다.
 - **DATABASE**: PR #977의 `0104_tvn36_final_fence` 뒤 T-VN-40 chain을 재배치하고
-  `0121_tvn40_metadata_check`에서 owner shape 제약 검증과 ORM/Alembic metadata 동등성을 닫았다.
+  `0217_tvn40_metadata_check`에서 owner shape 제약 검증과 ORM/Alembic metadata 동등성을 닫았다.
 - **REMOVED**: preview/commit에서 같은 CSV를 다시 업로드·해석하던 legacy `dry_run` import route를 제거했다.
 
 ### retained curation source CAS API (2026-08-13, T-VN-40)
@@ -3475,11 +3486,11 @@
   인프라 미리 박음.
   - `alembic.ini` + `alembic/env.py` (async-compatible, asyncpg + NullPool +
     SET search_path = public, x_extension) + `alembic/script.py.mako`.
-  - `alembic/versions/0001_initial_schemas_and_extensions.py` — 4 schema
+  - `alembic/legacy_versions/0001_initial_schemas_and_extensions.py` — 4 schema
     (feature/provider_sync/ops/x_extension) + 3 extension (postgis/pg_trgm/
     pgcrypto) on `x_extension` (ADR-008). postgis는 image 기본 public 설치
     DROP CASCADE 후 재생성.
-  - `alembic/versions/0002_features_and_source_tables.py` — features (ADR-012
+  - `alembic/legacy_versions/0002_features_and_source_tables.py` — features (ADR-012
     `coord_5179` STORED generated column + 10 indexes incl. GiST/GIN partial)
     + source_records (UNIQUE 5-tuple + 4 indexes incl. BRIN) + source_links
     (FK CASCADE/RESTRICT + 3 indexes) + provider_sync_state.

@@ -1,7 +1,7 @@
 """T-VN-40B provider curation snapshot/root receipts.
 
-Revision ID: 0112_tvn40_provider_seal
-Revises: 0111_tvn40_source_catalog
+Revision ID: 0208_tvn40_provider_seal
+Revises: 0207_tvn40_source_catalog
 
 Authoritative child completion seals the exact source-head input before the
 root becomes terminal.  Root finalization prelocks the complete Feature union
@@ -17,8 +17,8 @@ from alembic import op
 # Frozen PostgreSQL procedure text intentionally exceeds Python line length.
 # ruff: noqa: E501
 
-revision: str = "0112_tvn40_provider_seal"
-down_revision: str | Sequence[str] | None = "0111_tvn40_source_catalog"
+revision: str = "0208_tvn40_provider_seal"
+down_revision: str | Sequence[str] | None = "0207_tvn40_source_catalog"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

@@ -106,6 +106,14 @@ BEGIN
 END
 $roles$;
 
+ALTER ROLE ktm_feature_schema_owner NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_feature_state_procedure_owner NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_feature_audit_writer NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_feature_runtime NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
 ALTER ROLE ktm_curation_command_owner NOLOGIN NOINHERIT
     NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
 ALTER ROLE ktm_curation_audit_writer NOLOGIN NOINHERIT
@@ -247,18 +255,26 @@ BEGIN
         SELECT 1
         FROM pg_catalog.pg_roles
         WHERE rolname IN (
+            'ktm_feature_schema_owner', 'ktm_feature_state_procedure_owner',
+            'ktm_feature_audit_writer', 'ktm_feature_runtime',
             'ktm_curation_command_owner', 'ktm_curation_audit_writer',
             'ktm_curation_admin_executor', 'ktm_curation_provider_executor'
         )
-          AND (rolcanlogin OR rolinherit OR rolsuper OR rolcreaterole OR rolbypassrls)
+          AND (
+              rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb
+              OR rolcreaterole OR rolbypassrls OR rolreplication
+          )
     ) THEN
-        RAISE EXCEPTION 'curation NOLOGIN role has an unsafe role attribute';
+        RAISE EXCEPTION 'application NOLOGIN role has an unsafe role attribute';
     END IF;
     IF EXISTS (
         SELECT 1
         FROM pg_catalog.pg_roles
         WHERE rolname IN ('ktm_feature_api_runtime', 'ktm_feature_dagster_runtime')
-          AND (NOT rolcanlogin OR rolsuper OR rolcreaterole OR rolbypassrls)
+          AND (
+              NOT rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb
+              OR rolcreaterole OR rolbypassrls OR rolreplication
+          )
     ) THEN
         RAISE EXCEPTION 'runtime login has an unsafe role attribute';
     END IF;
@@ -266,7 +282,10 @@ BEGIN
         SELECT 1
         FROM pg_catalog.pg_roles
         WHERE rolname = 'ktm_feature_migrator'
-          AND (NOT rolcanlogin OR rolsuper OR rolcreaterole OR rolbypassrls)
+          AND (
+              NOT rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb
+              OR rolcreaterole OR rolbypassrls OR rolreplication
+          )
     ) THEN
         RAISE EXCEPTION 'migrator login has an unsafe role attribute';
     END IF;
@@ -279,6 +298,39 @@ BEGIN
        OR NOT pg_has_role('ktm_feature_dagster_runtime', 'ktm_curation_provider_executor', 'member')
        OR pg_has_role('ktm_feature_dagster_runtime', 'ktm_curation_admin_executor', 'member') THEN
         RAISE EXCEPTION 'curation executor membership is unsafe';
+    END IF;
+    IF EXISTS (
+        WITH expected(granted_role, member_role, admin_option, inherit_option, set_option) AS (
+            VALUES
+                ('ktm_feature_schema_owner', 'ktm_feature_migrator', false, false, true),
+                ('ktm_feature_runtime', 'ktm_feature_api_runtime', false, true, false),
+                ('ktm_feature_runtime', 'ktm_feature_dagster_runtime', false, true, false),
+                ('ktm_feature_state_procedure_owner', 'ktm_feature_schema_owner', false, false, true),
+                ('ktm_feature_audit_writer', 'ktm_feature_schema_owner', false, false, true),
+                ('ktm_curation_command_owner', 'ktm_feature_schema_owner', false, false, true),
+                ('ktm_curation_audit_writer', 'ktm_feature_schema_owner', false, false, true),
+                ('ktm_curation_admin_executor', 'ktm_feature_api_runtime', false, true, false),
+                ('ktm_curation_provider_executor', 'ktm_feature_dagster_runtime', false, true, false)
+        ),
+        actual AS (
+            SELECT granted.rolname AS granted_role,
+                   member.rolname AS member_role,
+                   membership.admin_option,
+                   membership.inherit_option,
+                   membership.set_option
+            FROM pg_catalog.pg_auth_members AS membership
+            JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid
+            JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
+            WHERE granted.rolname LIKE 'ktm_feature_%'
+               OR granted.rolname LIKE 'ktm_curation_%'
+               OR member.rolname LIKE 'ktm_feature_%'
+               OR member.rolname LIKE 'ktm_curation_%'
+        )
+        (SELECT * FROM expected EXCEPT SELECT * FROM actual)
+        UNION ALL
+        (SELECT * FROM actual EXCEPT SELECT * FROM expected)
+    ) THEN
+        RAISE EXCEPTION 'application role membership graph is not exact';
     END IF;
 END
 $assert_roles$;
