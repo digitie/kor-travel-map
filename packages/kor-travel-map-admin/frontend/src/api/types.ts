@@ -24411,6 +24411,17 @@ export interface operations {
             };
         };
         responses: {
+            /** @description exact Idempotency-Key replay */
+            200: {
+                headers: {
+                    /** @description 현재 resource의 raw strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CacheTargetRestoreFenceResponse"];
+                };
+            };
             /** @description restore fence advanced */
             201: {
                 headers: {

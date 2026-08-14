@@ -18,6 +18,7 @@ _ENV = _ROOT / "alembic" / "env.py"
 _BASELINE = _ACTIVE / "0200_schema_baseline.py"
 _RECEIPTS = _ACTIVE / "0202_tvn40_curation_receipts.py"
 _ROLE_BOOTSTRAP = _ROOT / "docker" / "postgres-role-bootstrap.sh"
+_PRE_SQUASH_REVISIONS = _ROOT / "docker" / "pre-squash-revisions.txt"
 _GRAPH = _ROOT / "src" / "kortravelmap" / "_application_migration_graph.json"
 _EXPECTED_REVISIONS = (
     "0200_schema_baseline",
@@ -289,6 +290,16 @@ def test_legacy_archive_has_exact_109_file_digest() -> None:
     assert hashlib.sha256(payload).hexdigest() == _LEGACY_ARCHIVE_SHA256
 
 
+def test_pre_squash_revision_manifest_matches_archive_exactly() -> None:
+    archived_revisions = sorted(
+        str(_literal(path, "revision")) for path in _LEGACY.glob("[0-9]*.py")
+    )
+    manifest_revisions = _PRE_SQUASH_REVISIONS.read_text(encoding="utf-8").splitlines()
+
+    assert manifest_revisions == archived_revisions
+    assert len(manifest_revisions) == len(set(manifest_revisions)) == 109
+
+
 def test_active_integration_suite_never_targets_legacy_revision() -> None:
     violations: list[str] = []
     for path in sorted((_ROOT / "tests" / "integration").glob("*.py")):
@@ -464,3 +475,8 @@ def test_production_docker_build_context_never_copies_legacy_migrations() -> Non
         source = path.read_text(encoding="utf-8")
         assert "COPY alembic ./alembic" not in source
         assert "COPY alembic/legacy_versions" not in source
+    api = (_ROOT / "docker" / "api.Dockerfile").read_text(encoding="utf-8")
+    assert (
+        "COPY docker/pre-squash-revisions.txt ./docker/pre-squash-revisions.txt"
+        in api
+    )
