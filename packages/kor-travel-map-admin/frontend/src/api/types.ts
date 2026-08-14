@@ -2898,6 +2898,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/service/curation-cutover/identity-mappings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Curation Cutover Identity Mappings
+         * @description Export the immutable Map→PinVi legacy identity mapping during T-VN-40C.
+         *
+         *     The relation itself is append-only and only migration owners can write it.
+         *     A signed cursor binds every continuation page to the initial count/root;
+         *     any maintenance-window drift is rejected instead of silently mixing maps.
+         */
+        get: operations["get_curation_cutover_identity_mappings_v1_service_curation_cutover_identity_mappings_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/service/curation-items/{curation_item_id}/detail-snapshot": {
         parameters: {
             query?: never;
@@ -7281,6 +7305,55 @@ export interface components {
         CurationCollectionsResponse: {
             data: components["schemas"]["CurationCollectionsData"];
             meta: components["schemas"]["Meta"];
+        };
+        /**
+         * CurationCutoverIdentityMapping
+         * @description PinVi legacy provenance를 canonical Map UUID로 바꾸는 one-to-one evidence.
+         */
+        CurationCutoverIdentityMapping: {
+            /**
+             * Collection Id
+             * Format: uuid
+             */
+            collection_id: string;
+            /**
+             * Curation Item Id
+             * Format: uuid
+             */
+            curation_item_id: string;
+            /**
+             * Legacy Curated Feature Id
+             * Format: uuid
+             */
+            legacy_curated_feature_id: string;
+            /**
+             * Mapping Kind
+             * @enum {string}
+             */
+            mapping_kind: "legacy_projection" | "official_membership" | "manual_membership";
+            /** Source Row Hash */
+            source_row_hash: string;
+        };
+        /**
+         * CurationCutoverIdentityMappingExport
+         * @description Maintenance-only closed keyset envelope for the paired PinVi backfill.
+         */
+        CurationCutoverIdentityMappingExport: {
+            /** Complete */
+            complete: boolean;
+            /** Mapping Count */
+            mapping_count: number;
+            /** Mapping Root */
+            mapping_root: string;
+            /**
+             * Mapping Root Version
+             * @constant
+             */
+            mapping_root_version: "ktm-curation-cutover-mapping-v1";
+            /** Mappings */
+            mappings: components["schemas"]["CurationCutoverIdentityMapping"][];
+            /** Next Cursor */
+            next_cursor: string | null;
         };
         /** CurationFeatureView */
         CurationFeatureView: {
@@ -24725,6 +24798,56 @@ export interface operations {
             };
             /** @description collection public item 수가 service snapshot 상한을 넘음 — collection을 분할해야 함 */
             413: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_curation_cutover_identity_mappings_v1_service_curation_cutover_identity_mappings_get: {
+        parameters: {
+            query?: {
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurationCutoverIdentityMappingExport"];
+                };
+            };
+            /** @description cursor 이후 mapping count/root 변경 — 첫 page부터 maintenance export 재시작 */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

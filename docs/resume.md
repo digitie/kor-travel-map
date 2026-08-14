@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-15 — T-VN-40 admin OpenAPI 생성형 타입 동기화
+
+canonical cutover identity mapping service export가 admin OpenAPI에 추가된 뒤에도 frontend의
+생성형 타입이 이전 정본을 가리켜 GitHub `openapi-typescript --check`가 실패하던 상태를
+동기화했다. frontend가 API artifact의 mapping cursor·root·member DTO를 현재 service 정본과
+같이 검증한다.
+
+**다음 한 작업**: Map/PinVi 원격 CI를 끝까지 확인한다. Manager principal 결선의 병합과
+n150 paired live acceptance 전에는 rollout receipt completion 및 legacy source의 물리 삭제를
+수행하지 않는다.
+
 ## 2026-08-15 — T-VN-40 n150 canonical curation principal 격리
 
 isolated n150 runner는 Map API에 PinVi canonical snapshot·cutover mapping principal의
