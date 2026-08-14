@@ -3,6 +3,12 @@
     {
       "down_revision": [],
       "revision": "0200_schema_baseline"
+    },
+    {
+      "down_revision": [
+        "0200_schema_baseline"
+      ],
+      "revision": "0104_tvn36_final_fence"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"
