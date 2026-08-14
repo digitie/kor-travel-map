@@ -111,6 +111,8 @@ def _run_alembic(dsn: str, revision: str, *, downgrade: bool = False) -> None:
     root = Path(__file__).resolve().parents[2]
     config = Config(str(root / "alembic.ini"))
     config.set_main_option("script_location", str(root / "alembic"))
+    # 아카이브 체인 전용 그래프 — `alembic/legacy_versions/README.md`. `versions/`와 함께 담으면 revision이 중복된다.
+    config.set_main_option("version_locations", str(root / "alembic" / "legacy_versions"))
     config.set_main_option("sqlalchemy.url", dsn)
     if downgrade:
         command.downgrade(config, revision)
@@ -122,6 +124,8 @@ def _stamp_alembic(dsn: str, revision: str) -> None:
     root = Path(__file__).resolve().parents[2]
     config = Config(str(root / "alembic.ini"))
     config.set_main_option("script_location", str(root / "alembic"))
+    # 아카이브 체인 전용 그래프 — `alembic/legacy_versions/README.md`. `versions/`와 함께 담으면 revision이 중복된다.
+    config.set_main_option("version_locations", str(root / "alembic" / "legacy_versions"))
     config.set_main_option("sqlalchemy.url", dsn)
     command.stamp(config, revision)
 
@@ -130,6 +134,8 @@ def _alembic_config(dsn: str) -> Config:
     root = Path(__file__).resolve().parents[2]
     config = Config(str(root / "alembic.ini"))
     config.set_main_option("script_location", str(root / "alembic"))
+    # 아카이브 체인 전용 그래프 — `alembic/legacy_versions/README.md`. `versions/`와 함께 담으면 revision이 중복된다.
+    config.set_main_option("version_locations", str(root / "alembic" / "legacy_versions"))
     config.set_main_option("sqlalchemy.url", dsn)
     return config
 

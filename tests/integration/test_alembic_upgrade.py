@@ -359,7 +359,7 @@ def _canonical_pg_sql(value: str | None) -> str:
     return re.sub(r'[\s()"]+', "", without_casts).lower()
 
 
-async def _run_alembic_upgrade(dsn: str, revision: str = "head") -> None:
+async def _run_alembic_upgrade(dsn: str, revision: str = "head", *, chain: bool = False) -> None:
     """``alembic.command.upgrade``를 worker thread에서 실행.
 
     alembic은 sync API + 자체 asyncio.run(env.py)을 호출하므로 현재 pytest
@@ -379,6 +379,15 @@ async def _run_alembic_upgrade(dsn: str, revision: str = "head") -> None:
     project_root = Path(__file__).resolve().parents[2]  # noqa: ASYNC240  # sync IO is trivial path-arith here
     cfg = Config(str(project_root / "alembic.ini"))
     cfg.set_main_option("script_location", str(project_root / "alembic"))
+    # squash(`0200`) 이후 체인은 `alembic/legacy_versions/`의 아카이브다. 아카이브
+    # revision을 요청받았거나(자동 판정) 호출자가 "DB가 체인 중간에 있다"고 알려주면
+    # (`chain=True`) 아카이브 전용 그래프로 바꾼다. `versions/`와 함께 담을 수는 없다 —
+    # bridge와 아카이브가 `0104_tvn36_final_fence`를 둘 다 선언하므로 중복이 된다.
+    # 두 그래프의 head 문자열은 같으므로 `_alembic_head_revision()`은 그대로 둔다.
+    if chain or (project_root / "alembic" / "legacy_versions" / f"{revision}.py").exists():
+        cfg.set_main_option(
+            "version_locations", str(project_root / "alembic" / "legacy_versions")
+        )
     # 배포와 같은 경로로 돈다 — bootstrap 후 migrator 자격으로 upgrade.
     from tests.integration._tvn34_migration_bootstrap import (
         alembic_schema_owner_role,
@@ -846,7 +855,8 @@ async def test_curation_provenance_migration_fail_closes_legacy_links(
         await migration_engine.dispose()
         migration_engine = None
 
-        await _run_alembic_upgrade(migration_dsn)
+        # DB가 체인 중간(`0071`)에 있으므로 아카이브 그래프로 head까지 올린다.
+        await _run_alembic_upgrade(migration_dsn, chain=True)
         migration_engine = make_async_engine(migration_dsn)
         async with migration_engine.connect() as conn:
             row = (
@@ -984,7 +994,8 @@ async def test_weather_migration_reuses_valid_index_after_partial_failure(
         await retry_engine.dispose()
         retry_engine = None
 
-        await _run_alembic_upgrade(retry_dsn)
+        # DB가 체인 중간(`0069`)에 있으므로 아카이브 그래프로 head까지 올린다.
+        await _run_alembic_upgrade(retry_dsn, chain=True)
         retry_engine = make_async_engine(retry_dsn)
         async with retry_engine.connect() as retry_conn:
             legacy_index = (

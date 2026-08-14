@@ -58,6 +58,18 @@ EXPECTED_POST_PUBLIC: Final = 3_265
 # 격리 후보를 정리한 뒤 그대로 다시 돌릴 수 있다. 경계 뒤에는 관측치만 남긴다.
 EXPECTED_QUARANTINE_CANDIDATES: Final = 0
 _ALEMBIC_CONFIG_PATH: Final = Path("alembic.ini")
+#: 캠페인 target(`0079`)이 사는 그래프. squash(`0200`) 이후 `alembic/versions/`에는
+#: baseline과 bridge만 있으므로 `0079`는 거기서 해석되지 않는다. 이 도구는 설계상
+#: **과거 세대에 앵커된** 캠페인 도구이므로(위 `_repository_campaign_revision` 주석)
+#: 아카이브가 정확한 대상이다. 두 디렉터리를 함께 담을 수는 없다 — bridge와 아카이브가
+#: `0104_tvn36_final_fence`를 둘 다 선언하므로 alembic이 중복 revision으로 거부한다.
+_ALEMBIC_LEGACY_VERSIONS: Final = Path("alembic") / "legacy_versions"
+
+
+def _campaign_config() -> Config:
+    config = Config(str(_ALEMBIC_CONFIG_PATH))
+    config.set_main_option("version_locations", str(_ALEMBIC_LEGACY_VERSIONS))
+    return config
 
 _CANONICAL_WHITESPACE: Final = "".join(
     chr(codepoint)
@@ -249,8 +261,7 @@ def _repository_campaign_revision() -> str:
     만들었다(T-VN-32B에서 실측·수정). 캠페인 도구는 자신의 target에만
     앵커한다 — 실행도 head가 아니라 ``TARGET_SCHEMA``까지만 upgrade한다.
     """
-    config = Config(str(_ALEMBIC_CONFIG_PATH))
-    script = ScriptDirectory.from_config(config)
+    script = ScriptDirectory.from_config(_campaign_config())
     heads = script.get_heads()
     if len(heads) != 1:
         return "multiple_heads:" + ",".join(sorted(heads))
@@ -775,7 +786,7 @@ def _run_alembic_upgrade() -> None:
     # 추가될 때마다 캠페인 결과가 달라지는 이동 표적이다(T-VN-32B 수정).
     sink = _BoundedSink()
     with redirect_stdout(sink), redirect_stderr(sink):
-        command.upgrade(Config(str(_ALEMBIC_CONFIG_PATH)), TARGET_SCHEMA)
+        command.upgrade(_campaign_config(), TARGET_SCHEMA)
 
 
 async def run_migrate(request: H35Request) -> Receipt:

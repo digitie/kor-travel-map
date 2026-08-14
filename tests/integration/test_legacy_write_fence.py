@@ -69,6 +69,8 @@ _SEED_IDS: Final[tuple[str, ...]] = (
 def _alembic_config(dsn: str) -> Config:
     config = Config(str(_ROOT / "alembic.ini"))
     config.set_main_option("script_location", str(_ROOT / "alembic"))
+    # 아카이브 체인 전용 그래프 — `alembic/legacy_versions/README.md`. `versions/`와 함께 담으면 revision이 중복된다.
+    config.set_main_option("version_locations", str(_ROOT / "alembic" / "legacy_versions"))
     config.set_main_option("sqlalchemy.url", dsn)
     return config
 
