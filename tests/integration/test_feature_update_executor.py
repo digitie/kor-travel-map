@@ -531,6 +531,79 @@ async def test_execute_next_request_runs_provider_and_syncs_target_links(
     } <= {link.feature_id for link in links}
 
 
+async def test_execute_next_fails_historic_pinvi_generic_cache_target_request(
+    migrated_engine: AsyncEngine,
+    execution_session: AsyncSession,
+) -> None:
+    """배포 전 generic PinVi queue는 source snapshot/outbox 없이 실행하지 않는다."""
+
+    seed = await _load_seed(execution_session, "EXEC-PINVI-PROTOCOL")
+    membership = await _membership(
+        execution_session,
+        provider=seed.source_record.provider,
+        dataset_key=seed.source_record.dataset_key,
+    )
+    await upsert_poi_cache_target(
+        execution_session,
+        external_system="external-app",
+        target_key="historic-pinvi-generic",
+        lon=126.978,
+        lat=37.5665,
+        radius_km=1,
+    )
+    request = await enqueue_feature_update_request(
+        execution_session,
+        scope={
+            "type": "cache_target_keys",
+            "external_system": "external-app",
+            "target_keys": ["historic-pinvi-generic"],
+        },
+        dataset_memberships=[membership],
+    )
+    await execution_session.execute(text("SET LOCAL session_replication_role = replica"))
+    await execution_session.execute(
+        text(
+            "UPDATE ops.feature_update_requests SET scope = "
+            "jsonb_set(scope, '{external_system}', '\"pinvi\"'::jsonb) "
+            "WHERE request_id = CAST(:request_id AS uuid)"
+        ),
+        {"request_id": request.request_id},
+    )
+    await execution_session.execute(text("SET LOCAL session_replication_role = origin"))
+    await execution_session.commit()
+
+    async def runner(
+        _session: AsyncSession,
+        _scope: ProviderDatasetRefreshScope,
+    ) -> ProviderDatasetRefreshResult:
+        raise AssertionError("historic generic PinVi request must fail before provider runner")
+
+    result = await AsyncKorTravelMapClient(
+        migrated_engine
+    ).execute_next_feature_update_request(
+        runner=runner,
+        dagster_run_id="dagster-pinvi-generic-protocol",
+    )
+
+    assert result is not None
+    assert result.status == "failed"
+    assert result.error_message is not None
+    assert "cache target stream" in result.error_message
+    stored = await get_update_request(execution_session, request.request_id)
+    assert stored is not None
+    assert stored.status == "failed"
+    assert (
+        await execution_session.scalar(
+            text(
+                "SELECT count(*) FROM ops.poi_cache_target_outbox_events "
+                "WHERE refresh_request_id = CAST(:request_id AS uuid)"
+            ),
+            {"request_id": request.request_id},
+        )
+        == 0
+    )
+
+
 async def test_execute_next_request_applies_follow_system_policy_skip(
     migrated_engine: AsyncEngine,
     execution_session: AsyncSession,

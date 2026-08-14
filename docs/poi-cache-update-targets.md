@@ -461,7 +461,8 @@ feature update request는 운영자/admin 영역이다. `cache_target_keys`는 P
 운영자 소유 external system의 등록 target 묶음을 기준으로 refresh를 실행한다.
 PinVi target은 일반 ops queue가 아니라 아래 ServiceToken refresh 경로만 사용한다. 이
 구분으로 source head·refresh member·queued status outbox가 한 transaction에 남고,
-generic enqueue가 그 경계를 우회하지 못한다.
+generic ops/API/Python client enqueue가 그 경계를 우회하지 못한다. 배포 전 남은
+generic PinVi request는 executor가 provider 호출 전에 terminal fail-close한다.
 
 ```json
 {

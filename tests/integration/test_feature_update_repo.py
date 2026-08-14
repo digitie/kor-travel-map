@@ -223,6 +223,23 @@ async def test_preview_returns_plan_without_writes(
     ]
     assert preview.matched_scope["feature_count"] == 0
     assert await _count_rows(migrated_session, "ops.feature_update_requests") == 0
+
+
+async def test_generic_writer_rejects_pinvi_cache_target_scope(
+    migrated_session: AsyncSession,
+) -> None:
+    membership = await _canonical_membership(migrated_session)
+    with pytest.raises(ValueError, match="ServiceToken writer"):
+        await enqueue_feature_update_request(
+            migrated_session,
+            scope={
+                "type": "cache_target_keys",
+                "external_system": "pinvi",
+                "target_keys": ["poi-1"],
+            },
+            dataset_memberships=[membership],
+        )
+    assert await _count_rows(migrated_session, "ops.feature_update_requests") == 0
     assert await _count_rows(migrated_session, "ops.import_jobs") == 0
 
 

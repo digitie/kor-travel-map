@@ -29,12 +29,14 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CacheTargetRefreshMember",
+    "CacheTargetRefreshProtocolViolation",
     "CacheTargetResultEvent",
     "append_cache_target_links_reconciled_events",
     "append_cache_target_refresh_status_events",
     "capture_cache_target_refresh_members",
     "capture_cache_target_refresh_members_by_keys",
     "lock_cache_target_result_streams",
+    "pinvi_cache_target_refresh_protocol_error",
 ]
 
 CacheTargetResultEventType = Literal[
@@ -79,6 +81,13 @@ class CacheTargetResultEvent:
     payload: dict[str, Any]
     occurred_at: datetime
     idempotent_replay: bool = False
+
+
+class CacheTargetRefreshProtocolViolation(RuntimeError):
+    """PinVi refresh가 source snapshot/restore fence 정본을 벗어났다."""
+
+
+_PINVI_CACHE_TARGET_SYSTEM = "pinvi"
 
 
 _CAPTURE_REFRESH_MEMBERS_SQL = """
@@ -172,12 +181,28 @@ WHERE member.request_id = CAST(:request_id AS uuid)
 ORDER BY member.external_system, member.target_key, member.target_id
 """
 
+_SELECT_PINVI_REFRESH_PROTOCOL_SQL = """
+SELECT member.target_key, member.restore_epoch, stream.restore_epoch AS stream_restore_epoch
+FROM ops.poi_cache_target_refresh_members AS member
+JOIN ops.poi_cache_target_streams AS stream
+  ON stream.external_system = member.external_system
+WHERE member.request_id = CAST(:request_id AS uuid)
+  AND member.external_system = :external_system
+ORDER BY member.target_key COLLATE "C", member.target_id
+"""
+
 _LOCK_HEAD_SQL = """
 SELECT restore_epoch, source_generation, target_sequence
 FROM ops.poi_cache_target_source_heads
 WHERE external_system = :external_system
   AND target_key = :target_key
 FOR UPDATE
+"""
+
+_GET_LOCKED_STREAM_RESTORE_EPOCH_SQL = """
+SELECT restore_epoch
+FROM ops.poi_cache_target_streams
+WHERE external_system = :external_system
 """
 
 _GET_REPLAY_SQL = """
@@ -435,6 +460,57 @@ async def capture_cache_target_refresh_members_by_keys(
     )
 
 
+async def pinvi_cache_target_refresh_protocol_error(
+    session: AsyncSession,
+    *,
+    request_id: str,
+    external_system: str,
+    target_keys: Sequence[str],
+) -> str | None:
+    """PinVi queued refresh가 service snapshot과 현 restore epoch를 지키는지 확인한다.
+
+    일반 writer로 과거에 영속된 PinVi request는 member가 없으므로 실행 전에 terminal
+    fail-close한다. 이 검사는 stream ``FOR UPDATE``를 같은 transaction 끝까지 유지해
+    fence와 status event append 사이에 epoch가 바뀌지 않게 한다.
+    """
+
+    if external_system != _PINVI_CACHE_TARGET_SYSTEM:
+        return None
+    request_id = _canonical_uuid(request_id, field="request_id")
+    canonical_keys = tuple(sorted(set(target_keys)))
+    for target_key in canonical_keys:
+        validate_cache_target_key(target_key)
+    locked_streams = (
+        (
+            await session.execute(
+                text(_LOCK_RESULT_STREAMS_SQL),
+                {"external_systems": [external_system]},
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if len(locked_streams) != 1:
+        return "PinVi refresh request에 cache target stream이 없습니다."
+    rows = (
+        await session.execute(
+            text(_SELECT_PINVI_REFRESH_PROTOCOL_SQL),
+            {"request_id": request_id, "external_system": external_system},
+        )
+    ).all()
+    if not rows:
+        return "PinVi refresh request에 ServiceToken source snapshot member가 없습니다."
+    member_keys = tuple(str(row._mapping["target_key"]) for row in rows)
+    if member_keys != canonical_keys:
+        return "PinVi refresh request의 source snapshot member가 요청 target key와 다릅니다."
+    if any(
+        int(row._mapping["restore_epoch"]) != int(row._mapping["stream_restore_epoch"])
+        for row in rows
+    ):
+        return "PinVi refresh request의 source snapshot restore epoch가 현재 stream과 다릅니다."
+    return None
+
+
 async def _append_result_event(
     session: AsyncSession,
     *,
@@ -468,6 +544,16 @@ async def _append_result_event(
         session,
         external_systems=(member.external_system,),
     )
+    stream_restore_epoch = await session.scalar(
+        text(_GET_LOCKED_STREAM_RESTORE_EPOCH_SQL),
+        {"external_system": member.external_system},
+    )
+    if stream_restore_epoch is None:
+        raise RuntimeError("captured cache target stream이 사라졌습니다.")
+    if int(stream_restore_epoch) != member.restore_epoch:
+        raise CacheTargetRefreshProtocolViolation(
+            "captured cache target refresh member의 restore epoch가 현재 stream과 다릅니다."
+        )
     await session.execute(
         text("SELECT pg_advisory_xact_lock(CAST(:lock_id AS bigint))"),
         {"lock_id": lock_id},

@@ -21,7 +21,7 @@ from kortravelmap.infra.domain_command_repo import canonical_domain_command_fing
 from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateRequest,
     create_feature_update_request_idempotency,
-    enqueue_feature_update_request,
+    enqueue_cache_target_service_refresh_request,
     get_feature_update_request_idempotency,
     get_update_request,
     lock_feature_update_request_idempotency,
@@ -333,11 +333,10 @@ async def create_cache_target_refresh_request(
         scope=scope,
         external_system=external_system,
     )
-    request = await enqueue_feature_update_request(
+    request = await enqueue_cache_target_service_refresh_request(
         session,
         scope=scope,
         dataset_memberships=memberships,
-        run_mode="queued",
         operator=actor,
         reason=reason,
     )
