@@ -65,9 +65,22 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 #: sidecar SQL의 byte freeze. 손으로 고치면 여기서 막힌다 — baseline은 생성기의
-#: 산출물이지 편집 대상이 아니다. 갱신 절차는 `scripts/build-baseline.sh` 재실행 +
-#: `compare-schema-catalogs.sh`로 동등성 재증명 + 이 상수 갱신을 한 PR에서.
-_SCHEMA_SHA256: Final[str] = "0838c6fe89c4c95ab75fb5ad2954d79d9d335c0086e2116e7a6c41e0f94f8730"
+#: 산출물이지 편집 대상이 아니다.
+#:
+#: **갱신 절차** (이 값을 바꿔야 할 때):
+#:
+#: 1. `0201`+ migration을 정상적으로 추가해 head를 전진시킨다. baseline은 그 자체로
+#:    갱신하지 않는다 — 갱신은 "새 세대를 접었다"는 별도 결정이다.
+#: 2. 접기로 했다면: **직전 baseline + 그 뒤 migration**으로 세운 DB에서
+#:    `scripts/build-baseline.sh`를 돌려 새 sidecar를 뽑고,
+#: 3. `scripts/compare-schema-catalogs.sh`로 그 DB와 **새 baseline만 적용한 DB**를
+#:    대조한다. 두 DB는 서로 다른 경로로 만든 것이라야 대조가 의미를 갖는다.
+#: 4. 이 상수와 sidecar를 한 PR에서 함께 갱신한다.
+#:
+#: ⚠️ `0001~0104` 체인으로는 이 절차를 돌릴 수 없다. 그 체인은
+#: `alembic/legacy_versions/`에 있고 `versions/`로 되돌리면 root가 둘로 갈라진다.
+#: 최초 생성 때의 "체인 DB vs baseline DB" 대조는 squash 이전 트리에서만 재현된다.
+_SCHEMA_SHA256: Final[str] = "b5883a4556ac16d03885b0e849d5c35a91fab9155c9e86cb8b2a508b9c77ea0c"
 _SEED_SHA256: Final[str] = "056de28cee0f0bbc2218e49afdf74aacd36b6e21e64c6524b2683a92bed956ec"
 
 _BASELINE_DIR: Final[Path] = Path(__file__).resolve().parents[1] / "baseline"
@@ -100,9 +113,10 @@ def _execute_sql_script(sql: str) -> None:
 
 def upgrade() -> None:
     # ── bootstrap 전제 검증 ────────────────────────────────────────────────
-    # `0095`에서 verbatim으로 가져왔다. role **생성**이 아니라 "bootstrap 없이
-    # 돌리면 fail-closed"라는 검증이 본체다. 손으로 옮겨 적으면 드리프트가 생기므로
-    # 원문 그대로 둔다.
+    # 앞부분(role 존재·membership)은 `0095`에서 그대로 가져왔다. role **생성**이 아니라
+    # "bootstrap 없이 돌리면 fail-closed"라는 검증이 본체다. 뒤의 두 검사
+    # (`x_extension`+postgis, runtime USAGE)는 squash가 만든 새 실패 양식을 막으려고
+    # **여기서 추가한 것**이다 — 아래 주석 참조.
     op.execute(
         """
         DO $$
@@ -150,6 +164,31 @@ def upgrade() -> None:
             ) THEN
                 RAISE EXCEPTION
                     'baseline requires bootstrap membership of schema owner in state/audit owners'
+                    USING ERRCODE = '42501';
+            END IF;
+            -- 아래 두 검사는 `0095`에 없던 것이다. squash가 만든 새 실패 양식을 막는다.
+            --
+            -- ① `x_extension` + postgis 부재: `schema.sql`이 6천 줄쯤에서 relation 오류로
+            --    죽는다. fail-loud지만 원인이 6천 줄 뒤에 있다.
+            -- ② runtime의 `x_extension` USAGE 부재: **조용하다.** baseline은 성공하고
+            --    카탈로그 오라클도 3개 스키마만 보므로 초록인데, runtime의 평범한 core
+            --    update SQL이 typed coordinate expression parse에서 죽는다. 체인에서는
+            --    `0095`가 그 GRANT를 줬고 지금은 bootstrap이 준다 —— bootstrap이 낡으면
+            --    여기서 서야 한다(2026-08-14 적대 리뷰 실측 결함).
+            IF to_regnamespace('x_extension') IS NULL
+               OR NOT EXISTS (
+                   SELECT 1
+                   FROM pg_catalog.pg_extension AS installed
+                   JOIN pg_catalog.pg_namespace AS home ON home.oid = installed.extnamespace
+                   WHERE installed.extname = 'postgis' AND home.nspname = 'x_extension'
+               ) THEN
+                RAISE EXCEPTION
+                    'baseline requires bootstrap-provisioned x_extension schema with postgis'
+                    USING ERRCODE = '42P01';
+            END IF;
+            IF NOT has_schema_privilege('ktm_feature_runtime', 'x_extension', 'USAGE') THEN
+                RAISE EXCEPTION
+                    'baseline requires bootstrap GRANT USAGE ON SCHEMA x_extension TO ktm_feature_runtime'
                     USING ERRCODE = '42501';
             END IF;
         END;

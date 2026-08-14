@@ -58,6 +58,62 @@ print(sql)
 PY
 }
 
+supplementary_sql() {
+  # 추출한 digest SQL이 **보지 않는** 축. 그 SQL의 namespace 필터는 pg_dump의 `-n`
+  # 스코프(feature/provider_sync/ops)와 정확히 같아서, **baseline이 재현하지 못하는
+  # 것은 오라클도 검사하지 못한다.** 검사기와 검사 대상이 맹점을 공유하는 구조다.
+  #
+  # 실제로 그 틈으로 결함이 새어 나왔다(2026-08-14): 체인이 `0095`에서 주던
+  # `GRANT USAGE ON SCHEMA x_extension TO ktm_feature_runtime`이 baseline에 없어
+  # 새 DB의 runtime이 PostGIS를 통째로 잃었는데, 카탈로그는 2486행 전부 일치였다.
+  #
+  # 그래서 스코프 **밖**을 본다: 모든 스키마의 소유자·ACL, `public`에 남은 객체,
+  # event trigger, database 소유자·ACL. 그리고 스코프 안이지만 축이 빠져 있던
+  # 제약 **정의**(원본 SQL은 이름·유형·컬럼만 본다).
+  #
+  # database 이름은 넣지 않는다 — 비교 대상 두 DB는 이름이 다르므로 항상 어긋난다.
+  cat <<'SQL'
+;
+COPY (
+  SELECT 'schemaacl' || nsp.nspname || ':' || pg_catalog.pg_get_userbyid(nsp.nspowner) || ':' ||
+         COALESCE((SELECT string_agg(entry::text, ',' ORDER BY entry::text)
+                     FROM unnest(nsp.nspacl) AS entry), '')
+    FROM pg_catalog.pg_namespace AS nsp
+   WHERE nsp.nspname NOT LIKE 'pg\_%' AND nsp.nspname <> 'information_schema'
+  UNION ALL
+  SELECT 'publicrel' || cls.relkind::text || ':' || cls.relname || ':' ||
+         pg_catalog.pg_get_userbyid(cls.relowner)
+    FROM pg_catalog.pg_class AS cls
+    JOIN pg_catalog.pg_namespace AS nsp ON nsp.oid = cls.relnamespace
+   WHERE nsp.nspname = 'public'
+  UNION ALL
+  SELECT 'publicproc' || pro.proname || '(' ||
+         pg_catalog.pg_get_function_identity_arguments(pro.oid) || ')'
+    FROM pg_catalog.pg_proc AS pro
+    JOIN pg_catalog.pg_namespace AS nsp ON nsp.oid = pro.pronamespace
+   WHERE nsp.nspname = 'public'
+  UNION ALL
+  SELECT 'evttrigger' || evt.evtname || ':' || evt.evtevent || ':' || evt.evtenabled::text || ':' ||
+         pg_catalog.pg_get_userbyid(evt.evtowner)
+    FROM pg_catalog.pg_event_trigger AS evt
+  UNION ALL
+  SELECT 'dbacl' || pg_catalog.pg_get_userbyid(db.datdba) || ':' ||
+         COALESCE((SELECT string_agg(entry::text, ',' ORDER BY entry::text)
+                     FROM unnest(db.datacl) AS entry), '')
+    FROM pg_catalog.pg_database AS db
+   WHERE db.datname = current_database()
+  UNION ALL
+  SELECT 'constraintdef' || nsp.nspname || '.' || rel.relname || '.' || con.conname || ':' ||
+         pg_catalog.pg_get_constraintdef(con.oid)
+    FROM pg_catalog.pg_constraint AS con
+    JOIN pg_catalog.pg_class AS rel ON rel.oid = con.conrelid
+    JOIN pg_catalog.pg_namespace AS nsp ON nsp.oid = rel.relnamespace
+   WHERE nsp.nspname IN ('feature', 'provider_sync', 'ops')
+  ORDER BY 1
+) TO STDOUT
+SQL
+}
+
 psql_file() { # container db file
   docker exec -i "$1" psql -U "${ADMIN_USER:-postgres}" -d "$2" -tA -f "$3" 2>&1
 }
@@ -77,6 +133,8 @@ QUERY_FILE="$(mktemp)"
 trap 'rm -f "$QUERY_FILE" "${TMP_A:-}" "${TMP_B:-}"' EXIT
 extract_digest_sql > "$QUERY_FILE"
 printf '추출한 digest SQL: %s줄\n' "$(wc -l < "$QUERY_FILE")"
+supplementary_sql >> "$QUERY_FILE"
+printf '보강 축 추가: 스키마 ACL(전 스키마) · public 잔여 객체 · event trigger · DB ACL · 제약 정의\n'
 
 if [ "$SELF_TEST" = "1" ]; then
   CONTAINER="${ARGS[0]:?container required}"
@@ -148,10 +206,35 @@ TMP_A="$(mktemp)"; TMP_B="$(mktemp)"
 catalog_of "$CONTAINER" "$DB_A" "$TMP_A"
 catalog_of "$CONTAINER" "$DB_B" "$TMP_B"
 printf '%s: %s행 / %s: %s행\n' "$DB_A" "$(wc -l < "$TMP_A")" "$DB_B" "$(wc -l < "$TMP_B")"
-if diff -q "$TMP_A" "$TMP_B" >/dev/null; then
-  printf '동일 — sha256 %s\n' "$(sha256sum < "$TMP_A" | awk '{print $1}')"
-  exit 0
+
+# 제약 **정의**(`constraintdef`) 축은 따로 낸다. dump된 식을 다시 파싱하면
+# PostgreSQL이 같은 의미를 다르게 deparse한다(AND 평탄화, cast 위치). 그 표현 차이를
+# 자동으로 지우려 들면 `A AND (B OR C)` 와 `(A AND B) OR C` 처럼 **의미가 다른**
+# 재괄호화까지 함께 지워진다 — 괄호를 떼어 비교하면 두 식의 토큰 열이 같아진다.
+# 그래서 지우지 않고 **분리해서 보여 준다.** 사람이 판정하는 것이 이 축의 설계다.
+CORE_A="$(mktemp)"; CORE_B="$(mktemp)"
+CON_A="$(mktemp)"; CON_B="$(mktemp)"
+trap 'rm -f "$QUERY_FILE" "${TMP_A:-}" "${TMP_B:-}" "$CORE_A" "$CORE_B" "$CON_A" "$CON_B"' EXIT
+grep -v '^constraintdef' "$TMP_A" > "$CORE_A"; grep '^constraintdef' "$TMP_A" > "$CON_A" || true
+grep -v '^constraintdef' "$TMP_B" > "$CORE_B"; grep '^constraintdef' "$TMP_B" > "$CON_B" || true
+
+status=0
+if diff -q "$CORE_A" "$CORE_B" >/dev/null; then
+  printf '카탈로그 동일 — sha256 %s (%s행)\n' \
+    "$(sha256sum < "$CORE_A" | awk '{print $1}')" "$(wc -l < "$CORE_A")"
+else
+  printf '카탈로그 차이 %s행:\n' "$(diff "$CORE_A" "$CORE_B" | grep -c '^[<>]')"
+  diff "$CORE_A" "$CORE_B" | head -40 | cut -c1-200
+  status=1
 fi
-printf '차이 %s행:\n' "$(diff "$TMP_A" "$TMP_B" | grep -c '^[<>]')"
-diff "$TMP_A" "$TMP_B" | head -40 | cut -c1-200
-exit 1
+
+if diff -q "$CON_A" "$CON_B" >/dev/null; then
+  printf '제약 정의 동일 (%s행)\n' "$(wc -l < "$CON_A")"
+else
+  printf '\n제약 정의 차이 %s행 — **판정 필요** (deparse 표현 차이인지 의미 차이인지):\n' \
+    "$(diff "$CON_A" "$CON_B" | grep -c '^[<>]')"
+  diff "$CON_A" "$CON_B" | cut -c1-220
+  printf '판정 결과는 PR/문서에 남겨라. 자동으로 지우지 않는다.\n'
+  status=1
+fi
+exit "$status"

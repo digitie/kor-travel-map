@@ -22,12 +22,27 @@
 ## 왜 되살리면 안 되나
 
 체인은 **어떤 DB에서도 다시 실행되지 않는다.** prod는 2026-08-13 in-place
-cutover로 이미 `0104`를 지나왔고, 새 DB는 `0200`에서 시작한다. 여기 파일을
-`versions/`로 되돌리면 두 개의 root(`0001`, `0200`)를 가진 그래프가 되어
-`alembic heads`가 갈라진다.
+cutover로 이미 `0104`를 지나왔고, 새 DB는 `0200`에서 시작한다.
+
+여기 파일을 `versions/`로 되돌리면 alembic이 **중복 revision으로 거부한다** —
+`versions/0201_squash_bridge.py`가 `0104_tvn36_final_fence`를 선언하고 여기
+`0104_tvn36_final_fence.py`도 같은 id를 선언하기 때문이다. 두 디렉터리를 한
+`version_locations`에 함께 담는 것도 같은 이유로 불가능하다.
 
 과거 세대의 SQL을 참조할 일이 있으면 **읽기만** 하라.
 `rg <패턴> alembic/legacy_versions/`.
+
+## 여기를 script directory로 쓰는 곳
+
+아카이브 세대를 **실행**해야 하는 코드는 이 디렉터리만 담은 별도 Config를 만든다
+(`versions/`와 함께 담을 수 없으므로).
+
+- `tests/integration/`의 세대별 migration 테스트 28곳 —
+  `config.set_main_option("version_locations", …/"legacy_versions")`
+- `src/kortravelmap/cli/_h35_schema.py:_campaign_config()` — H35 캠페인은 설계상
+  target(`0079_cache_target_writer_drain`)에 앵커된 도구다. 이 때문에 **런타임
+  이미지에도 이 디렉터리가 실린다**(1.6MB). `.dockerignore`로 빼면 그 도구가
+  런타임에 깨지므로 그대로 둔다 — 값어치보다 새 지뢰가 크다는 판단이다.
 
 ## 이 디렉터리를 지우는 조건
 

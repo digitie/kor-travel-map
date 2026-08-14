@@ -191,9 +191,21 @@ for line in text.split("\n"):
             acl_started = True
             out.append("")
             out.append("-- [build-baseline] 아래부터 ACL 구간. 각 블록을 소유자로 실행한다.")
-            out.append("-- 트랜잭션 밖에서 돌리면 SET LOCAL이 무효가 되는데, 그 경우 아래")
-            out.append("-- current_setting()이 미정의로 터진다 — fail-closed다.")
             out.append("SELECT set_config('ktm.baseline_prior_role', current_user, true);")
+            out.append("-- 트랜잭션 밖(psql autocommit 등)에서 돌리면 `SET LOCAL`이 통째로")
+            out.append("-- 무효가 되어 ACL이 소유자 아닌 세션으로 나가고, 그래도 exit 0으로")
+            out.append("-- 끝난다. 커스텀 GUC는 미정의가 아니라 **빈 문자열**로 되돌아오므로")
+            out.append("-- 그것만으로는 터지지 않는다 — 그래서 여기서 명시적으로 막는다.")
+            out.append("DO $ktm_txn$")
+            out.append("BEGIN")
+            out.append("    IF coalesce(current_setting('ktm.baseline_prior_role', true), '') = '' THEN")
+            out.append("        RAISE EXCEPTION")
+            out.append("            'baseline은 하나의 트랜잭션 안에서 적용해야 한다 —"
+                       " 트랜잭션 밖에서는 SET LOCAL이 무효라 ACL이 소유자가 아닌 세션으로 나간다'")
+            out.append("            USING ERRCODE = '25P01';")
+            out.append("    END IF;")
+            out.append("END")
+            out.append("$ktm_txn$;")
         if pending_owner != current_role:
             current_role = pending_owner
             out.append(f"SELECT set_config('role', '{current_role}', true);")
