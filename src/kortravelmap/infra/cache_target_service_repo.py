@@ -59,11 +59,14 @@ WHERE head.external_system = :external_system AND head.target_key = :target_key
 _MISSING_ACTIVE_REFRESH_SOURCE_HEADS_SQL = """
 SELECT target.target_key
 FROM ops.poi_cache_targets AS target
+JOIN ops.poi_cache_target_streams AS stream
+  ON stream.external_system = target.external_system
 LEFT JOIN ops.poi_cache_target_source_heads AS head
   ON head.external_system = target.external_system
  AND head.target_key = target.target_key
  AND head.target_id = target.target_id
  AND head.state = 'active'
+ AND head.restore_epoch = stream.restore_epoch
 WHERE target.external_system = :external_system
   AND target.target_key = ANY(CAST(:target_keys AS text[]))
   AND target.deleted_at IS NULL
@@ -218,7 +221,7 @@ async def _require_active_refresh_source_heads(
     external_system: str,
     target_keys: Sequence[str],
 ) -> None:
-    """활성 refresh target이 source-generation outbox 경계를 우회하지 않게 한다."""
+    """활성 refresh target이 현 stream epoch outbox 경계를 우회하지 않게 한다."""
 
     missing_target_keys = tuple(
         str(value)
@@ -235,7 +238,8 @@ async def _require_active_refresh_source_heads(
     if missing_target_keys:
         raise CacheTargetStreamConflict(
             "refresh_source_head_missing",
-            "활성 refresh target의 source head가 없어 요청을 queue에 넣을 수 없습니다.",
+            "활성 refresh target의 현 restore epoch source head가 없어 요청을 "
+            "queue에 넣을 수 없습니다.",
             current={
                 "external_system": external_system,
                 "target_keys": list(missing_target_keys),
