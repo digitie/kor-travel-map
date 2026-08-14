@@ -3,7 +3,7 @@
   "owner": "T-VN-31A",
   "description": "target-schema-v1.sql과 그 직후의 tvn33-reference-ownership-v1.sql을 빈 PostGIS DB(x_extension 확장 사전 생성)에 적용한 뒤 H35 7 카테고리 catalog 질의(출처: src/kortravelmap/cli/_h35_catalog.py — schema-qualified relation 목록으로 적응)로 산출한 category별 canonical SHA-256이다. tests/integration/test_vnext_target_freeze.py가 실제 적용 직후 재계산해 drift를 fail-close한다. 2026-08-13 T-VN-40 재동결은 retained catalog·canonical collection/item revision과 immutable reconcile/generation/candidate/transition/cutover mapping relation을 최종형으로 추가하고 legacy 최소형 candidate를 제거했다. 아래 두 source SHA와 7축 fingerprint는 해당 실행 가능한 SQL을 clean PostGIS 16에서 실측한 값이다.",
   "environment": "postgis/postgis:16-3.5-alpine (PostgreSQL 16 / PostGIS 3.5)",
-  "target_schema_sql_sha256": "39d13339f521d7e24efdf11dc409b7097da49c24d0721bd20a6e62ccf5c74e9c",
+  "target_schema_sql_sha256": "5829a475afb13741a9e4ae41065623d6b4a3faec87577e606de663c5adf8b4d7",
   "tvn33_reference_ownership_sql_sha256": "2e72796b373691b4d6e10f71eceec4504df94af1a2582edbf445fb2390f20b6b",
   "fingerprints": {
     "columns": "552ba4b37b60a79aad50fad2b3fd124d079f31e28a56e3013db9f7e5e5f59082",

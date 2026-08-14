@@ -31,14 +31,14 @@ _TVN34_CURRENT_MIGRATION: Final = (
 # artifact bytes 고정 — 갱신 절차: artifact 수정 → 통합 테스트로 fingerprint 재고정
 # → 여기 sha256 갱신 (한 PR에서 함께).
 ARTIFACT_SHA256: Final[dict[str, str]] = {
-    "target-schema-v1.sql": ("39d13339f521d7e24efdf11dc409b7097da49c24d0721bd20a6e62ccf5c74e9c"),
+    "target-schema-v1.sql": ("5829a475afb13741a9e4ae41065623d6b4a3faec87577e606de663c5adf8b4d7"),
     "target-invariants-v1.sql": (
         "971f656169cb1d2f21f9286d22e732daf16a3a9d79456e0f221bae4c04b86e26"
     ),
     # 2026-08-13 T-VN-40 — final catalog/receipt/generation/candidate/audit 관계를
     # target+reference SQL에 반영한 뒤 빈 PostGIS DB에서 7축을 재실측했다.
     "target-schema-fingerprints-v1.json": (
-        "cd6eaa8a83c8280b6da217678acd40205b34aaf7cd8593e47048bcd8c1da6b9e"
+        "0d17c3545a001a119f7152f83ee583e6ffc67c0096918549b5eea620000520f4"
     ),
     "tvn33-reference-ownership-v1.sql": (
         "2e72796b373691b4d6e10f71eceec4504df94af1a2582edbf445fb2390f20b6b"
