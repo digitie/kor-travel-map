@@ -243,7 +243,7 @@ def test_collection_snapshot_pages_exact_set_and_rejects_drift(
     assert second.status_code == 200
     assert second.json()["complete"] is True
     assert second.json()["items"][0]["curation_item_id"] == ITEM_ID_2
-    assert "etag" not in {key.lower() for key in second.headers}
+    assert second.headers["etag"] == f'"{second.json()["etag"]}"'
     assert fetch.await_args_list[0].kwargs["page_limit"] == 2
     assert fetch.await_args_list[0].kwargs["after_curation_item_id"] is None
     assert fetch.await_args_list[1].kwargs["after_curation_item_id"] == ITEM_ID
@@ -355,6 +355,7 @@ def test_snapshot_openapi_freezes_scope_and_service_security(client: TestClient)
     assert collection_schema["properties"]["item_set_hash_version"]["const"] == (
         "ktm-db-item-set-v1"
     )
+    assert collection_schema["properties"]["item_count"]["maximum"] == 2000
     assert collection_schema["properties"]["items"]["maxItems"] == 200
     assert "413" in paths[
         "/v1/service/curation-collections/{collection_id}/detail-snapshot"

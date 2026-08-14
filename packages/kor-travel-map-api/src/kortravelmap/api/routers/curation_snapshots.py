@@ -98,7 +98,10 @@ class CurationCollectionDetailSnapshot(BaseModel):
     etag: Annotated[str, Field(pattern=_BODY_ETAG_PATTERN)]
     updated_at: datetime
     collection: CurationSnapshotCollection
-    item_count: Annotated[int, Field(ge=0)]
+    item_count: Annotated[
+        int,
+        Field(ge=0, le=curation_repo.CURATION_SERVICE_COLLECTION_MAX_ITEMS),
+    ]
     item_set_hash_version: Literal["ktm-db-item-set-v1"]
     item_set_hash: Annotated[str, Field(pattern=_DIGEST_PATTERN)]
     items: Annotated[list[CurationItemDetailSnapshot], Field(max_length=200)]
@@ -343,9 +346,8 @@ async def get_curation_collection_detail_snapshot(
         raise TypeError("curation collection snapshot payload must be an object")
     collection_etag = f"sha256:{curation_snapshot_sha256(payload_without_etag)}"
     strong_etag = f'"{collection_etag}"'
-    if cursor_payload is None:
-        if if_none_match == strong_etag:
-            return Response(status_code=304, headers={"ETag": strong_etag})
-        response.headers["ETag"] = strong_etag
+    if cursor_payload is None and if_none_match == strong_etag:
+        return Response(status_code=304, headers={"ETag": strong_etag})
+    response.headers["ETag"] = strong_etag
     response_payload = {**payload_without_etag, "etag": collection_etag}
     return CurationCollectionDetailSnapshot.model_validate(response_payload)
