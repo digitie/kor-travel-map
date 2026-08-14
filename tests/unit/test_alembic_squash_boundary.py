@@ -5,7 +5,6 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
-import re
 from pathlib import Path
 
 import pytest
@@ -44,6 +43,100 @@ _EXPECTED_REVISIONS = (
 _LEGACY_ARCHIVE_SHA256 = (
     "ae65901c78ea1d38ef6f5b7a7e8532744656e73c79392251452680d35f461e42"
 )
+def _module_string_constants(tree: ast.Module) -> dict[str, str]:
+    result: dict[str, str] = {}
+    for node in tree.body:
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
+            continue
+        target = node.targets[0] if isinstance(node, ast.Assign) else node.target
+        if (
+            isinstance(target, ast.Name)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            result[target.id] = node.value.value
+    return result
+
+
+def _resolved_string(node: ast.AST, constants: dict[str, str]) -> str | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.Name):
+        return constants.get(node.id)
+    return None
+
+
+def _alembic_command_target_violations(source: str, *, filename: str) -> list[str]:
+    tree = ast.parse(source, filename=filename)
+    constants = _module_string_constants(tree)
+    command_aliases = {"command"}
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.module == "alembic":
+            command_aliases.update(
+                alias.asname or alias.name
+                for alias in node.names
+                if alias.name == "command"
+            )
+        elif isinstance(node, ast.Import):
+            command_aliases.update(
+                alias.asname or alias.name.rsplit(".", 1)[-1]
+                for alias in node.names
+                if alias.name == "alembic.command"
+            )
+
+    violations: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if node.func.attr not in {"upgrade", "downgrade", "stamp"}:
+            continue
+        owner = node.func.value
+        is_alembic_command = (
+            isinstance(owner, ast.Name) and owner.id in command_aliases
+        ) or (
+            isinstance(owner, ast.Attribute)
+            and isinstance(owner.value, ast.Name)
+            and owner.value.id == "alembic"
+            and owner.attr == "command"
+        )
+        if not is_alembic_command:
+            continue
+        revision_node = next(
+            (
+                keyword.value
+                for keyword in node.keywords
+                if keyword.arg in {"revision", "revisions"}
+            ),
+            node.args[1] if len(node.args) > 1 else None,
+        )
+        if revision_node is None:
+            violations.append(f"{filename}:{node.lineno}: revision 인자 없음")
+            continue
+        revision = _resolved_string(revision_node, constants)
+        if revision == "head" or (revision is not None and revision.startswith("02")):
+            continue
+        detail = revision if revision is not None else "dynamic/unresolved"
+        violations.append(f"{filename}:{node.lineno}: {detail}")
+    return violations
+
+
+def _legacy_module_execution_violations(source: str, *, filename: str) -> list[str]:
+    tree = ast.parse(source, filename=filename)
+    references_legacy = any(
+        isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and "legacy_versions" in node.value
+        for node in ast.walk(tree)
+    )
+    if not references_legacy:
+        return []
+    return [
+        f"{filename}:{node.lineno}: legacy module execution"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in {"exec_module", "load_module"}
+    ]
 
 
 def _literal(path: Path, name: str) -> str | tuple[str, ...] | None:
@@ -118,16 +211,61 @@ def test_legacy_archive_has_exact_109_file_digest() -> None:
 
 
 def test_active_integration_suite_never_targets_legacy_revision() -> None:
-    target_pattern = re.compile(
-        r"command\.(?:upgrade|downgrade|stamp)\([^\n]*"
-        r"['\"](?:000[1-9]|00[1-9][0-9]|010[0-4])_[a-z0-9_]+['\"]"
-    )
-    violations = []
+    violations: list[str] = []
     for path in sorted((_ROOT / "tests" / "integration").glob("*.py")):
-        if target_pattern.search(path.read_text(encoding="utf-8")):
-            violations.append(path.relative_to(_ROOT).as_posix())
+        relative = path.relative_to(_ROOT).as_posix()
+        source = path.read_text(encoding="utf-8")
+        violations.extend(
+            _alembic_command_target_violations(source, filename=relative)
+        )
+        violations.extend(_legacy_module_execution_violations(source, filename=relative))
 
     assert violations == [], (
         "0200 이전 revision은 읽기 전용 archive다. active integration에서 실행하지 마라: "
         + ", ".join(violations)
     )
+
+
+def test_legacy_execution_scanner_rejects_multiline_constant_and_wrapper() -> None:
+    direct = '''
+from alembic import command
+LEGACY = "0079_cache_target_writer_drain"
+command.upgrade(
+    config,
+    LEGACY,
+)
+'''
+    wrapper = '''
+from alembic import command
+def migrate(target: str) -> None:
+    command.upgrade(config, target)
+migrate("head")
+'''
+    archive_exec = '''
+from pathlib import Path
+path = Path("alembic") / "legacy_versions" / "0079.py"
+spec.loader.exec_module(module)
+'''
+
+    direct_violations = _alembic_command_target_violations(
+        direct,
+        filename="direct.py",
+    )
+    wrapper_violations = _alembic_command_target_violations(
+        wrapper,
+        filename="wrapper.py",
+    )
+    archive_violations = _legacy_module_execution_violations(
+        archive_exec,
+        filename="archive.py",
+    )
+    assert any("0079_cache_target_writer_drain" in row for row in direct_violations)
+    assert any("dynamic/unresolved" in row for row in wrapper_violations)
+    assert archive_violations == ["archive.py:4: legacy module execution"]
+
+
+def test_production_docker_build_context_never_copies_legacy_migrations() -> None:
+    for path in sorted((_ROOT / "docker").glob("*.Dockerfile")):
+        source = path.read_text(encoding="utf-8")
+        assert "COPY alembic ./alembic" not in source
+        assert "COPY alembic/legacy_versions" not in source

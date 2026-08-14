@@ -12,7 +12,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential curl git \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml README.md ./
+COPY pyproject.toml setup.py README.md ./
 COPY src ./src
 COPY packages/kor-travel-map-dagster ./packages/kor-travel-map-dagster
 

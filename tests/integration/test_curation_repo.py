@@ -503,7 +503,7 @@ async def test_service_snapshot_uses_public_trusted_membership_and_allows_manual
         source_record_key=None,
         external_item_id="manual-public-item-2",
         status="included",
-        curation_relation="secondary_stop",
+        curation_relation="cafe_stop",
         actor="admin:tester",
     )
 

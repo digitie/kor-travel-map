@@ -9,7 +9,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml README.md alembic.ini ./
+COPY pyproject.toml setup.py README.md alembic.ini ./
 COPY alembic/env.py alembic/script.py.mako ./alembic/
 COPY alembic/baseline ./alembic/baseline
 COPY alembic/versions ./alembic/versions
