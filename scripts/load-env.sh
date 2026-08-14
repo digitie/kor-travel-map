@@ -117,6 +117,12 @@ export_first NEXT_PUBLIC_VWORLD_API_KEY \
 # 나갈 때 쓰는 것이고, geo는 그 값을 401(E0401)로 거절한다. 두 이름이 같은 사슬에 있으면
 # "설정이 있다"는 착시만 만들고 실패를 첫 요청 시점까지 미룬다 — 2026-08-13 prod에서
 # 정확히 그렇게 dagster/daemon이 죽은 키를 들고 있었다(T-VN-H46B).
+# 두 이름은 **같은 geo 소비자 자격증명의 별칭**이므로 양방향으로 채운다. 한 방향만
+# 두면 `.env.example`이 시키는 대로 `KOR_TRAVEL_MAP_…`만 설정한 개발자의 admin UI가
+# 키 없이 뜬다(적대 리뷰 지적). `export_first`는 target이 이미 있으면 그대로 두므로
+# 두 줄이 서로를 덮지 않는다.
+export_first NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY \
+  KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY
 export_first KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY \
   NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY
 export_first KOR_TRAVEL_MAP_KAKAO_LOCAL_REST_API_KEY \

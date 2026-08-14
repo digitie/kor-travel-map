@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-14 — prod 지오코딩 복구 + 재발 통로 제거 (T-VN-H46B/C)
+
+prod의 dagster/daemon 두 컨테이너가 geo가 401로 거절하는 VWorld 키를 들고 있었다.
+재생성으로 복구했고 세 컨테이너 전부 `POST /v2/reverse` HTTP 200이다. 저장소 쪽
+재발 통로 **7곳**(첫 판이 센 5곳 + 적대 리뷰가 찾은 2곳)을 끊고 정적 가드를 세웠다.
+PR [#979](https://github.com/digitie/kor-travel-map/pull/979).
+
+**다음 한 작업**: #979 CI green 확인 후 머지. 그 다음은 `docs/tasks.md` `T-VN-H46`의
+잔여 — daemon 이미지만 재빌드에서 빠지는 파이프라인 원인(별건), 그리고 기동 시
+"자기 코드 세대 vs DB alembic head" 대조 fence.
+
 ## 2026-08-13 — T-VN-36 prod cutover 완료
 
 **prod가 `0104_tvn36_final_fence`다.** 백업 없는 in-place 마이그레이션(사용자 지시),

@@ -68,8 +68,14 @@ canonical service의 literal `true`를 사용한다. 설정 enablement와 각 �
 | `DATA_GO_KR_SERVICE_KEY`, `KMA_API_KEY`           | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY`                                                                     |
 | `OPINET_API_KEY`                                  | `KOR_TRAVEL_MAP_OPINET_API_KEY`                                                                             |
 | `KEX_GO_API_KEY`, `KREX_API_KEY`                  | `KOR_TRAVEL_MAP_KREX_EX_API_KEY`, `KOR_TRAVEL_MAP_KREX_GO_API_KEY`                                          |
-| `KOR_TRAVEL_GEO_VWORLD_API_KEY`, `VWORLD_API_KEY` | `NEXT_PUBLIC_VWORLD_API_KEY`, `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY` |
-| `KOR_TRAVEL_GEO_VWORLD_API_KEY`, `VWORLD_API_KEY` | `NEXT_PUBLIC_VWORLD_API_KEY`, `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY`, `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY` |
+| `KOR_TRAVEL_GEO_VWORLD_API_KEY`, `VWORLD_API_KEY` | `NEXT_PUBLIC_VWORLD_API_KEY` |
+| `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY` ↔ `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY` | 서로의 별칭이라 **양방향**으로 채운다 |
+
+> ⚠️ geo **소비자** 키는 VWorld 키로 채우지 않는다. 두 이름이 비슷하지만 다른
+> 자격증명이고, geo는 VWorld 키를 `401 E0401`로 거절한다. 2026-08-13 prod 장애가
+> 정확히 그 혼동이었다(T-VN-H46B). 위 표의 두 줄이 예전에는 VWorld 소스를 geo 소비자
+> 키로 흘려보냈고, `scripts/load-env.sh`에서 그 경로를 걷어냈다.
+> `tests/unit/test_geo_key_provenance.py`가 재유입을 막는다.
 
 객체 저장소는 `KOR_TRAVEL_MAP_OBJECT_STORE_*`를 사용한다. Docker 내부 endpoint는
 `KOR_TRAVEL_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL`(기본 `http://rustfs:9000`)로 주입하고,

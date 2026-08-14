@@ -2,6 +2,45 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-14 — geo 소비자 키가 VWorld 키로 떨어지는 통로 제거 (T-VN-H46B/C)
+
+`kor-travel-geo`에는 성격이 다른 자격증명 두 개가 있다. **VWorld 키**는 geo가 상류
+VWorld로 나갈 때 쓰고, **geo public API key**는 소비자가 geo에 인증할 때 쓴다. geo는
+VWorld 키를 `401 E0401`로 거절한다. 이름이 비슷해서 설정 사슬이 반복적으로 둘을 이어
+왔고, 그때마다 조용히 실패했다.
+
+**prod 장애 실측**: 08-13에 `.env`의 geo 키를 올바른 값으로 고치고 **api만** 재생성해
+dagster/daemon 두 컨테이너가 VWorld 키를 든 채 남았다. fail-open이 아니다 —
+`preflight()`는 존재·길이만 보므로 리소스 초기화는 통과하고, 첫 요청에서
+`GeoAuthNotConfiguredError`가 나며 삼키는 except가 없어 asset step이 통째로 죽는다.
+`reverse_geocoder`는 사실상 모든 feature asset의 필수 리소스다. 안 터진 이유는 무결이
+아니라 미실행이었다(ETL이 08-07 이후 미가동). 컨테이너 재생성으로 복구했고 세
+컨테이너 전부 `POST /v2/reverse` HTTP 200을 확인했다.
+
+**통로는 5곳이 아니라 7곳이었다.** 첫 판은 5곳을 닫고 "다 닫았다"고 적었는데, 적대
+리뷰가 `docker-compose.yml`의 프론트 build args·environment 두 줄과
+`run-admin-feature-clone-live-acceptance.sh`의 **무조건 대입**(폴백보다 나쁘다)을 찾아냈다.
+
+**더 나쁜 것은 가드가 그 상태에서 초록이었다는 점이다.** 첫 판 가드는
+`KOR_TRAVEL_MAP_…` 이름 하나만 앵커로 잡고 `expected=3`으로 개수를 못박았다. 좁은
+앵커의 개수를 고정하니 "다 찾았다"는 착시까지 만들었다 — 이 저장소가 반복해서 당한
+바로 그 구조다. 대상 이름 전부를 훑고 개수는 고정하지 않도록 다시 썼다. 대입식의
+우변만 잘라 내므로 `unset A B`나 `--build-arg` 목록이 이어쓰기로 합쳐지는 경우에
+오탐하지 않는다. 변조 시험: 수정 전 6개 파일 판에서 8/8 검출, 현행에서 8/8 통과.
+
+**폴백을 없앤 자리에 올바른 경로를 넣었다.** `load-env.sh`가
+`NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY`를 아무것도 없는 데서 채우지 않게 되어,
+`.env.example` 대로 `KOR_TRAVEL_MAP_…`만 설정한 개발자의 admin UI가 영구히 키를 잃을
+뻔했다. 두 이름은 같은 자격증명의 별칭이므로 양방향으로 채운다.
+
+**빈 키의 실패 모드도 고쳤다.** geo는 키가 없으면 401이 아니라 400 `E0100 field=key`를
+돌려주는데, 프록시가 그대로 흘려보내면 화면에 "invalid request data"로 보여 자격증명
+누락이 아니라 요청 형식 오류처럼 읽힌다. 명시적 503 + 사유 코드로 단락시킨다.
+
+가드가 **못 하는 것**도 문서에 적었다: 중간 변수 우회, 운영자 `.env` 파일 자체(**08-13
+사고의 실제 원인이 그 축이라 이 가드는 그 사고를 막지 못했을 것이다**),
+docker-manager의 compose.
+
 ## 2026-08-12 — T-VN-38 병합과 완료 task 아카이브 정리
 
 PR [#971](https://github.com/digitie/kor-travel-map/pull/971)이 `8dc2b24a`로 머지됐다.

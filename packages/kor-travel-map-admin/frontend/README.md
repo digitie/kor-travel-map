@@ -48,7 +48,7 @@ feature 운영, provider 적재, dedup/결측 검토, 오프라인 업로드를 
 | `NEXT_PUBLIC_VWORLD_API_KEY` | VWorld API key. **`kor-travel-geo`의 `KOR_TRAVEL_GEO_VWORLD_API_KEY`와 동일 값 공유** (ADR-025 사용자 보강 2026-05-25). 별도 발급 금지. |
 | `NEXT_PUBLIC_KOR_TRAVEL_MAP_API` | 백엔드 base URL (`http://127.0.0.1:12701` 기본) |
 | `NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL` | Dagster UI/embed base URL (`http://127.0.0.1:12702` 기본) |
-| `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY` | kor-travel-geo v2 `key` query 값. 현재 `NEXT_PUBLIC_VWORLD_API_KEY`와 동일 값 |
+| `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY` | kor-travel-geo v2 `key` query 값. geo가 소비자별로 발급하는 **별도** public API key다 — VWorld 키로는 인증되지 않는다(401 `E0401`). root `.env`의 `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY`와 같은 값 |
 | `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET` | root `.env` 한 곳에서 API와 frontend가 함께 읽는 REST BFF/ops-live ticket server-only secret(32자 이상) |
 | `KOR_TRAVEL_MAP_UI_SESSION_SECRET` | admin session HMAC secret(32자 이상, browser 미노출) |
 
