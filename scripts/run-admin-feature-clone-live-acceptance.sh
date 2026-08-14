@@ -1629,10 +1629,13 @@ build_api_image() {
 build_ui_image() {
   export NEXT_PUBLIC_VWORLD_API_KEY="$E2E_VWORLD_API_KEY"
   # geo **소비자** 키는 VWorld 키와 다른 자격증명이다 — geo는 VWorld 키를 401(E0401)로
-  # 거절한다. 여기 있던 무조건 대입은 폴백보다 나빴다(적대 리뷰 지적). 전용 변수가
-  # 없으면 빈 값으로 둔다 — 이 하네스는 `candidate-geo`를 띄우지 않으므로 UI의 geo
-  # 프록시 경로 자체가 실행되지 않는다.
-  export NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY="${E2E_KOR_TRAVEL_GEO_API_KEY:-}"
+  # 거절한다. 여기 있던 무조건 대입은 폴백보다 나빴다(적대 리뷰 지적).
+  #
+  # 빈 값으로 둔다. 이 하네스는 `candidate-geo`를 띄우지 않으므로 UI의 geo 프록시
+  # 경로가 실행되지 않는다. 한때 `${E2E_KOR_TRAVEL_GEO_API_KEY:-}`를 뒀는데 그 변수는
+  # `require_env`에도, 문서에도, 위 `sudo --preserve-env` allowlist에도 없어 **채울
+  # 방법이 없었다** — 고친 것처럼 보이는 죽은 배선이었다(적대 리뷰 지적).
+  export NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY=""
   docker build --pull=false \
     --build-arg "KOR_TRAVEL_MAP_GIT_COMMIT=$SOURCE_COMMIT" \
     --build-arg "NEXT_PUBLIC_KOR_TRAVEL_MAP_API=http://candidate-api:$API_PORT" \
