@@ -41,6 +41,8 @@ from kortravelmap.infra.curation_repo import (
     encode_quarantine_item_cursor,
     get_curation_collection,
     get_curation_item,
+    get_curation_service_collection_snapshot,
+    get_curation_service_item_snapshot,
     get_feature_curation_group,
     list_curation_collections,
     list_curation_items_by_feature_ids,
@@ -468,6 +470,70 @@ async def test_public_collection_excludes_unlinked_included_item_everywhere(
     assert admin is not None
     assert len(admin[1]) == 1
     assert admin[1][0].feature_id is None
+
+
+async def test_service_snapshot_uses_public_trusted_membership_and_allows_manual_item(
+    migrated_session: AsyncSession,
+) -> None:
+    theme_id, source_id = await _seed_foundations(migrated_session)
+    collection = await create_curation_collection(
+        migrated_session,
+        collection_key="tvn40-service-snapshot",
+        theme_id=theme_id,
+        source_id=source_id,
+        title="PinVi snapshot",
+        edition_key="2026",
+        status="published",
+        visibility="public",
+    )
+    item, _ = await add_curation_item(
+        migrated_session,
+        collection_id=collection.collection_id,
+        feature_id=_FEATURE_ID,
+        source_record_key=None,
+        external_item_id="manual-public-item",
+        status="included",
+        curation_relation="primary_stop",
+        actor="admin:tester",
+    )
+
+    collection_snapshot = await get_curation_service_collection_snapshot(
+        migrated_session,
+        collection_id=collection.collection_id,
+    )
+    item_snapshot = await get_curation_service_item_snapshot(
+        migrated_session,
+        curation_item_id=item.curation_item_id,
+    )
+    assert collection_snapshot is not None
+    assert [row.curation_item_id for row in collection_snapshot.items] == [
+        item.curation_item_id
+    ]
+    assert item_snapshot is not None
+    assert item_snapshot.source_record_key is None
+    assert item_snapshot.feature_uuid == item.feature_uuid
+    assert item_snapshot.detail == {}
+
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.features SET publication_state = 'suppressed' "
+            "WHERE feature_id = :feature_id"
+        ),
+        {"feature_id": _FEATURE_ID},
+    )
+    hidden_collection = await get_curation_service_collection_snapshot(
+        migrated_session,
+        collection_id=collection.collection_id,
+    )
+    assert hidden_collection is not None
+    assert hidden_collection.items == ()
+    assert (
+        await get_curation_service_item_snapshot(
+            migrated_session,
+            curation_item_id=item.curation_item_id,
+        )
+        is None
+    )
 
 
 def test_collection_cursor_rejects_non_uuid_tie_breaker() -> None:

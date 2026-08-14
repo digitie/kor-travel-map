@@ -340,6 +340,8 @@ def test_service_policy_covers_feature_and_weather_batches() -> None:
         "/v1/service/cache-target-streams/{external_system}",
         "/v1/service/cache-target-streams/{external_system}/restore-fences",
         "/v1/service/cache-targets/{external_system}/{target_key}",
+        "/v1/service/curation-collections/{collection_id}/detail-snapshot",
+        "/v1/service/curation-items/{curation_item_id}/detail-snapshot",
         # T-VN-32C alias-map DB-to-DB 이관 표면 (ADR-068 전환·복구 경계 read).
         "/v1/service/feature-alias-maps",
         "/v1/service/feature-alias-maps/checksum",
@@ -353,6 +355,8 @@ def test_service_policy_covers_feature_and_weather_batches() -> None:
         }
         if row.path.startswith("/v1/ops/contract-fixtures/"):
             expected_enforcement = {"require_ops_fixture_principal"}
+        elif row.path.startswith("/v1/service/curation-"):
+            expected_enforcement = {"require_curation_snapshot_service_principal"}
         assert expected_enforcement & set(row.observed_enforcement)
 
 

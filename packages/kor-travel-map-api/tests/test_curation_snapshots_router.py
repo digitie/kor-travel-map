@@ -1,0 +1,240 @@
+"""PinVi canonical curation snapshot service 계약."""
+
+from __future__ import annotations
+
+import hashlib
+import unicodedata
+from collections.abc import AsyncIterator
+from datetime import UTC, datetime
+from typing import Any
+from unittest.mock import AsyncMock
+
+import pytest
+from fastapi.testclient import TestClient
+from kortravelmap.core.curation_snapshot import curation_snapshot_sha256
+from kortravelmap.infra.curation_repo import (
+    CurationServiceCollectionSnapshot,
+    CurationServiceItemSnapshot,
+)
+from pydantic import SecretStr, ValidationError
+
+from kortravelmap.api.app import create_app
+from kortravelmap.api.auth import SERVICE_TOKEN_HEADER
+from kortravelmap.api.db import get_session
+from kortravelmap.api.routers import curation_snapshots as module
+from kortravelmap.api.settings import ApiSettings
+
+TOKEN = "pinvi-curation-snapshot-token-000000000000000000000"
+TOKEN_DIGEST = hashlib.sha256(TOKEN.encode()).hexdigest()
+COLLECTION_ID = "11111111-1111-4111-8111-111111111111"
+ITEM_ID = "22222222-2222-4222-8222-222222222222"
+ITEM_ID_2 = "33333333-3333-4333-8333-333333333333"
+FEATURE_ID = "44444444-4444-4444-8444-444444444444"
+
+
+async def _fake_session() -> AsyncIterator[Any]:
+    yield object()
+
+
+@pytest.fixture
+def client() -> TestClient:
+    app = create_app(
+        ApiSettings(
+            public_api_key_required=False,
+            vworld_api_key=None,
+            pinvi_curation_snapshot_token_sha256=TOKEN_DIGEST,
+        )
+    )
+    app.dependency_overrides[get_session] = _fake_session
+    return TestClient(app)
+
+
+def _item(item_id: str = ITEM_ID, *, revision: int = 7) -> CurationServiceItemSnapshot:
+    return CurationServiceItemSnapshot(
+        curation_item_id=item_id,
+        collection_id=COLLECTION_ID,
+        row_revision=revision,
+        updated_at=datetime(2026, 8, 14, 1, 2, 3, tzinfo=UTC),
+        theme_slug="coastal-cafes",
+        theme_name="해안 카페",
+        collection_title="동해 카페",
+        edition_key="2026",
+        feature_uuid=FEATURE_ID,
+        relation="cafe_stop",
+        sort_order=3,
+        item_title=None,
+        item_summary="바다가 보이는 카페",
+        feature_name="파도 카페",
+        feature_category="01070100",
+        feature_kind="place",
+        lon=129.1,
+        lat=35.1,
+        address={"road": "해안로 1"},
+        detail={"place_kind": "cafe"},
+        source_record_key=None,
+    )
+
+
+def _collection(
+    *items: CurationServiceItemSnapshot,
+    revision: int = 5,
+) -> CurationServiceCollectionSnapshot:
+    return CurationServiceCollectionSnapshot(
+        collection_id=COLLECTION_ID,
+        row_revision=revision,
+        updated_at=datetime(2026, 8, 14, 2, 3, 4, tzinfo=UTC),
+        theme_slug="coastal-cafes",
+        theme_name="해안 카페",
+        title="동해 카페",
+        edition_key="2026",
+        items=tuple(items),
+    )
+
+
+def _headers(token: str = TOKEN) -> dict[str, str]:
+    return {SERVICE_TOKEN_HEADER: token}
+
+
+@pytest.mark.unit
+def test_snapshot_auth_is_fail_closed_and_generic_token_cannot_cross(
+    client: TestClient,
+) -> None:
+    path = f"/v1/service/curation-items/{ITEM_ID}/detail-snapshot"
+    assert client.get(path).status_code == 401
+    assert client.get(path, headers=_headers("generic-service-token")).status_code == 401
+
+    unset_app = create_app(ApiSettings(service_token=SecretStr(TOKEN)))
+    unset_app.dependency_overrides[get_session] = _fake_session
+    unset_client = TestClient(unset_app)
+    assert unset_client.get(path, headers=_headers()).status_code == 401
+
+
+@pytest.mark.unit
+def test_item_snapshot_has_exact_shape_etag_and_304(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        module.curation_repo,
+        "get_curation_service_item_snapshot",
+        AsyncMock(return_value=_item()),
+    )
+    path = f"/v1/service/curation-items/{ITEM_ID}/detail-snapshot"
+    response = client.get(path, headers=_headers())
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {
+        "curation_item_id",
+        "collection_id",
+        "row_revision",
+        "etag",
+        "updated_at",
+        "collection",
+        "item",
+        "feature",
+    }
+    assert body["row_revision"] == "7"
+    assert body["feature"]["source_record_key"] is None
+    assert body["feature"]["feature_id"] == FEATURE_ID
+    assert body["item"]["feature_id"] == FEATURE_ID
+    assert response.headers["etag"] == f'"{body["etag"]}"'
+    payload = dict(body)
+    payload.pop("etag")
+    assert body["etag"] == f"sha256:{curation_snapshot_sha256(payload)}"
+
+    cached = client.get(
+        path,
+        headers={**_headers(), "If-None-Match": response.headers["etag"]},
+    )
+    assert cached.status_code == 304
+    assert cached.content == b""
+
+
+@pytest.mark.unit
+def test_collection_snapshot_pages_exact_set_and_rejects_drift(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    snapshot = _collection(_item(), _item(ITEM_ID_2, revision=8))
+    fetch = AsyncMock(return_value=snapshot)
+    monkeypatch.setattr(
+        module.curation_repo,
+        "get_curation_service_collection_snapshot",
+        fetch,
+    )
+    path = f"/v1/service/curation-collections/{COLLECTION_ID}/detail-snapshot"
+    first = client.get(path, headers=_headers(), params={"page_size": 1})
+    assert first.status_code == 200
+    body = first.json()
+    assert body["item_count"] == 2
+    assert body["complete"] is False
+    assert len(body["items"]) == 1
+    assert body["next_cursor"]
+    assert first.headers["etag"] == f'"{body["etag"]}"'
+
+    second = client.get(
+        path,
+        headers=_headers(),
+        params={"page_size": 1, "cursor": body["next_cursor"]},
+    )
+    assert second.status_code == 200
+    assert second.json()["complete"] is True
+    assert second.json()["items"][0]["curation_item_id"] == ITEM_ID_2
+    assert "etag" not in {key.lower() for key in second.headers}
+
+    fetch.return_value = _collection(_item(), revision=6)
+    stale = client.get(
+        path,
+        headers=_headers(),
+        params={"page_size": 1, "cursor": body["next_cursor"]},
+    )
+    assert stale.status_code == 409
+
+
+@pytest.mark.unit
+def test_collection_first_page_supports_exact_304(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        module.curation_repo,
+        "get_curation_service_collection_snapshot",
+        AsyncMock(return_value=_collection(_item())),
+    )
+    path = f"/v1/service/curation-collections/{COLLECTION_ID}/detail-snapshot"
+    first = client.get(path, headers=_headers())
+    cached = client.get(
+        path,
+        headers={**_headers(), "If-None-Match": first.headers["etag"]},
+    )
+    assert cached.status_code == 304
+
+
+@pytest.mark.unit
+def test_snapshot_openapi_freezes_scope_and_service_security(client: TestClient) -> None:
+    paths = client.get("/openapi.json").json()["paths"]
+    for path in (
+        "/v1/service/curation-items/{curation_item_id}/detail-snapshot",
+        "/v1/service/curation-collections/{collection_id}/detail-snapshot",
+    ):
+        operation = paths[path]["get"]
+        assert operation["x-required-service-scope"] == "pinvi:curation-snapshot:read"
+        assert operation["security"] == [{"ServiceToken": []}]
+
+
+@pytest.mark.unit
+def test_snapshot_canonicalization_normalizes_nfc() -> None:
+    assert curation_snapshot_sha256({"name": "카페"}) == curation_snapshot_sha256(
+        {"name": unicodedata.normalize("NFD", "카페")}
+    )
+
+
+@pytest.mark.unit
+def test_snapshot_token_digest_must_be_lowercase_and_distinct() -> None:
+    with pytest.raises(ValidationError):
+        ApiSettings(pinvi_curation_snapshot_token_sha256="A" * 64)
+    with pytest.raises(ValidationError):
+        ApiSettings(
+            service_token=SecretStr(TOKEN),
+            pinvi_curation_snapshot_token_sha256=TOKEN_DIGEST,
+        )

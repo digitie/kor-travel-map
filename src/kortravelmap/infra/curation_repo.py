@@ -40,6 +40,8 @@ __all__ = [
     "CurationImportRowReceipt",
     "CurationLinkAudit",
     "CurationItem",
+    "CurationServiceCollectionSnapshot",
+    "CurationServiceItemSnapshot",
     "CurationQuarantineCollection",
     "CurationQuarantineItem",
     "CurationQuarantineItemsPreview",
@@ -64,6 +66,8 @@ __all__ = [
     "get_curation_collection",
     "get_curation_import_batch",
     "get_curation_item",
+    "get_curation_service_collection_snapshot",
+    "get_curation_service_item_snapshot",
     "get_current_curation_import_row",
     "get_feature_curation_group",
     "import_curation_rows",
@@ -207,6 +211,47 @@ class CurationItem:
     archived_at: datetime | None
     # T-VN-32C UUID 정본 병행 노출(additive) — feature 미연결/미해소면 None.
     feature_uuid: str | None = None
+
+
+@dataclass(frozen=True)
+class CurationServiceItemSnapshot:
+    """PinVi service read가 소비하는 public canonical item projection."""
+
+    curation_item_id: str
+    collection_id: str
+    row_revision: int
+    updated_at: datetime
+    theme_slug: str
+    theme_name: str
+    collection_title: str
+    edition_key: str
+    feature_uuid: str
+    relation: str
+    sort_order: int
+    item_title: str | None
+    item_summary: str | None
+    feature_name: str
+    feature_category: str
+    feature_kind: str
+    lon: float | None
+    lat: float | None
+    address: dict[str, Any]
+    detail: dict[str, Any]
+    source_record_key: str | None
+
+
+@dataclass(frozen=True)
+class CurationServiceCollectionSnapshot:
+    """한 statement snapshot에서 읽은 collection과 ordered public items."""
+
+    collection_id: str
+    row_revision: int
+    updated_at: datetime
+    theme_slug: str
+    theme_name: str
+    title: str
+    edition_key: str
+    items: tuple[CurationServiceItemSnapshot, ...]
 
 
 @dataclass(frozen=True)
@@ -768,6 +813,123 @@ WHERE i.collection_id = CAST(:collection_id AS uuid)
   )
 """
 )
+
+
+_SERVICE_SNAPSHOT_ELIGIBLE_ITEMS_SQL: Final[str] = f"""
+SELECT
+    i.curation_item_id::text AS curation_item_id,
+    i.collection_id,
+    i.row_revision,
+    i.updated_at,
+    c.theme_slug,
+    c.theme_name,
+    c.title AS collection_title,
+    c.edition_key,
+    pf.feature_uuid::text AS feature_uuid,
+    i.curation_relation AS relation,
+    i.sort_order,
+    i.item_title,
+    i.item_summary,
+    pf.name AS feature_name,
+    pf.category AS feature_category,
+    pf.kind AS feature_kind,
+    x_extension.ST_X(pf.coord) AS lon,
+    x_extension.ST_Y(pf.coord) AS lat,
+    pf.address,
+    pf.detail,
+    i.source_record_key
+FROM feature.curation_items AS i
+JOIN collection_row AS c ON c.collection_id = i.collection_id
+JOIN feature.public_features AS pf ON pf.feature_id = i.feature_id
+WHERE i.archived_at IS NULL
+  AND i.source_present
+  AND i.status = 'included'
+  AND {_trusted_link_sql("i")}
+  AND (
+      i.source_record_key IS NULL
+      OR EXISTS (
+          SELECT 1
+          FROM provider_sync.source_records AS snapshot_record
+          JOIN provider_sync.source_entity_heads AS snapshot_head
+            ON snapshot_head.source_entity_key = snapshot_record.source_entity_key
+           AND snapshot_head.current_source_record_key = snapshot_record.source_record_key
+          JOIN provider_sync.source_links AS snapshot_link
+            ON snapshot_link.source_entity_key = snapshot_record.source_entity_key
+           AND snapshot_link.feature_id = i.feature_id
+          WHERE snapshot_record.source_record_key = i.source_record_key
+      )
+  )
+  AND (
+      CAST(:curation_item_id AS uuid) IS NULL
+      OR i.curation_item_id = CAST(:curation_item_id AS uuid)
+  )
+"""
+
+_GET_SERVICE_CURATION_SNAPSHOT_SQL: Final[str] = f"""
+WITH collection_row AS (
+    SELECT
+        collection.collection_id,
+        collection.row_revision,
+        collection.updated_at,
+        theme.theme_slug,
+        theme.theme_name,
+        collection.title,
+        collection.edition_key
+    FROM feature.curation_collections AS collection
+    JOIN feature.curated_themes AS theme ON theme.theme_id = collection.theme_id
+    LEFT JOIN feature.curated_sources AS source ON source.source_id = collection.source_id
+    WHERE collection.archived_at IS NULL
+      AND collection.status = 'published'
+      AND collection.visibility = 'public'
+      AND theme.visibility = 'public'
+      AND theme.archived_at IS NULL
+      AND (collection.source_id IS NULL OR source.archived_at IS NULL)
+      AND (
+          (
+              CAST(:collection_id AS uuid) IS NOT NULL
+              AND collection.collection_id = CAST(:collection_id AS uuid)
+          )
+          OR (
+              CAST(:curation_item_id AS uuid) IS NOT NULL
+              AND EXISTS (
+                  SELECT 1
+                  FROM feature.curation_items AS requested_item
+                  WHERE requested_item.collection_id = collection.collection_id
+                    AND requested_item.curation_item_id = CAST(:curation_item_id AS uuid)
+              )
+          )
+      )
+), eligible_item AS (
+    {_SERVICE_SNAPSHOT_ELIGIBLE_ITEMS_SQL}
+)
+SELECT
+    collection_row.collection_id::text AS collection_id,
+    collection_row.row_revision AS collection_row_revision,
+    collection_row.updated_at AS collection_updated_at,
+    collection_row.theme_slug,
+    collection_row.theme_name,
+    collection_row.title AS collection_title,
+    collection_row.edition_key,
+    eligible_item.curation_item_id,
+    eligible_item.row_revision AS item_row_revision,
+    eligible_item.updated_at AS item_updated_at,
+    eligible_item.feature_uuid,
+    eligible_item.relation,
+    eligible_item.sort_order,
+    eligible_item.item_title,
+    eligible_item.item_summary,
+    eligible_item.feature_name,
+    eligible_item.feature_category,
+    eligible_item.feature_kind,
+    eligible_item.lon,
+    eligible_item.lat,
+    eligible_item.address,
+    eligible_item.detail,
+    eligible_item.source_record_key
+FROM collection_row
+LEFT JOIN eligible_item ON eligible_item.collection_id = collection_row.collection_id
+ORDER BY eligible_item.curation_item_id
+"""
 
 _LIST_FEATURE_ITEMS_SQL: Final[str] = (
     _ITEM_SELECT
@@ -2292,6 +2454,34 @@ def _item(row: RowMapping | Mapping[str, Any]) -> CurationItem:
     )
 
 
+def _service_item_snapshot(
+    row: RowMapping | Mapping[str, Any],
+) -> CurationServiceItemSnapshot:
+    return CurationServiceItemSnapshot(
+        curation_item_id=str(row["curation_item_id"]),
+        collection_id=str(row["collection_id"]),
+        row_revision=int(row["item_row_revision"]),
+        updated_at=row["item_updated_at"],
+        theme_slug=str(row["theme_slug"]),
+        theme_name=str(row["theme_name"]),
+        collection_title=str(row["collection_title"]),
+        edition_key=str(row["edition_key"]),
+        feature_uuid=str(row["feature_uuid"]),
+        relation=str(row["relation"]),
+        sort_order=int(row["sort_order"]),
+        item_title=row["item_title"],
+        item_summary=row["item_summary"],
+        feature_name=str(row["feature_name"]),
+        feature_category=str(row["feature_category"]),
+        feature_kind=str(row["feature_kind"]),
+        lon=float(row["lon"]) if row["lon"] is not None else None,
+        lat=float(row["lat"]) if row["lat"] is not None else None,
+        address=_object(row["address"]),
+        detail=_object(row["detail"]),
+        source_record_key=row["source_record_key"],
+    )
+
+
 def _feature_match(row: RowMapping | Mapping[str, Any]) -> FeatureMatch:
     return FeatureMatch(
         feature_id=str(row["feature_id"]),
@@ -2723,6 +2913,76 @@ async def get_curation_item(
         .first()
     )
     return _item(row) if row is not None else None
+
+
+async def _get_curation_service_snapshot(
+    session: AsyncSession,
+    *,
+    collection_id: str | None,
+    curation_item_id: str | None,
+) -> CurationServiceCollectionSnapshot | None:
+    rows = (
+        (
+            await session.execute(
+                text(_GET_SERVICE_CURATION_SNAPSHOT_SQL),
+                {
+                    "collection_id": collection_id,
+                    "curation_item_id": curation_item_id,
+                },
+            )
+        )
+        .mappings()
+        .all()
+    )
+    if not rows:
+        return None
+    first = rows[0]
+    items = tuple(
+        _service_item_snapshot(row)
+        for row in rows
+        if row["curation_item_id"] is not None
+    )
+    return CurationServiceCollectionSnapshot(
+        collection_id=str(first["collection_id"]),
+        row_revision=int(first["collection_row_revision"]),
+        updated_at=first["collection_updated_at"],
+        theme_slug=str(first["theme_slug"]),
+        theme_name=str(first["theme_name"]),
+        title=str(first["collection_title"]),
+        edition_key=str(first["edition_key"]),
+        items=items,
+    )
+
+
+async def get_curation_service_collection_snapshot(
+    session: AsyncSession,
+    *,
+    collection_id: str,
+) -> CurationServiceCollectionSnapshot | None:
+    """PinVi용 public collection과 exact eligible item set을 한 statement로 읽는다."""
+
+    return await _get_curation_service_snapshot(
+        session,
+        collection_id=collection_id,
+        curation_item_id=None,
+    )
+
+
+async def get_curation_service_item_snapshot(
+    session: AsyncSession,
+    *,
+    curation_item_id: str,
+) -> CurationServiceItemSnapshot | None:
+    """PinVi용 public/trusted canonical item 한 건을 읽는다."""
+
+    snapshot = await _get_curation_service_snapshot(
+        session,
+        collection_id=None,
+        curation_item_id=curation_item_id,
+    )
+    if snapshot is None or not snapshot.items:
+        return None
+    return snapshot.items[0]
 
 
 async def get_curation_import_batch(

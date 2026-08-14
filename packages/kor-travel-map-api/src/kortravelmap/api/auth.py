@@ -53,10 +53,12 @@ __all__ = [
     "SERVICE_TOKEN_HEADER",
     "AdminProxyContext",
     "CacheTargetServicePrincipalContext",
+    "CurationSnapshotServicePrincipalContext",
     "OpsOperatorContext",
     "OpsFixtureContext",
     "require_cache_target_service_principal",
     "require_cache_target_service_scope",
+    "require_curation_snapshot_service_principal",
     "require_admin_frontend",
     "require_metrics_token",
     "require_ops_operator",
@@ -165,6 +167,14 @@ class CacheTargetServicePrincipalContext:
     consumer_id: str
     scopes: frozenset[CacheTargetServiceScope]
     external_systems: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class CurationSnapshotServicePrincipalContext:
+    """PinVi canonical curation snapshot 전용 service principal."""
+
+    principal_id: str
+    scopes: frozenset[str]
 
 
 def _settings(request: Request) -> ApiSettings:
@@ -527,6 +537,31 @@ async def require_cache_target_service_principal(
         consumer_id=principal.consumer_id,
         scopes=frozenset(principal.scopes),
         external_systems=frozenset(principal.external_systems),
+    )
+
+
+async def require_curation_snapshot_service_principal(
+    request: Request,
+    token: Annotated[str | None, Security(_service_token_scheme)] = None,
+) -> CurationSnapshotServicePrincipalContext:
+    """PinVi snapshot token digest를 exact principal/scope로 fail-closed 해석한다."""
+
+    if token is None or token == "":
+        raise _cache_target_auth_error(
+            status.HTTP_401_UNAUTHORIZED,
+            "CURATION_SNAPSHOT_SERVICE_TOKEN_REQUIRED",
+            f"{SERVICE_TOKEN_HEADER} 헤더가 필요합니다.",
+        )
+    expected = _settings(request).pinvi_curation_snapshot_token_sha256
+    if expected is None or not hmac.compare_digest(_token_digest(token), expected):
+        raise _cache_target_auth_error(
+            status.HTTP_401_UNAUTHORIZED,
+            "CURATION_SNAPSHOT_SERVICE_TOKEN_INVALID",
+            f"{SERVICE_TOKEN_HEADER} 헤더가 유효하지 않습니다.",
+        )
+    return CurationSnapshotServicePrincipalContext(
+        principal_id="service:pinvi",
+        scopes=frozenset({"pinvi:curation-snapshot:read"}),
     )
 
 

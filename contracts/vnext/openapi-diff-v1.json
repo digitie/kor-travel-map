@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "1d881869dd49e363f5f2f3ac106437f7a9d635521e945b9e075ccbc37bf5acd8"
+      "sha256": "1883bf9b3280bf0c859e68ceecf8545d9d91bc5b354ff3e803f70a606a0156a1"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -13,7 +13,7 @@
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
-      "sha256": "ebe7f2afaf70727e850b21cd8163a2dbff374dc942ad0e158d574f91c1863de5"
+      "sha256": "50f34f6b88453e17d66e43f60361eef34e374c9eb54d8018ea47d7845cb405be"
     }
   },
   "revisions": [
@@ -315,18 +315,20 @@
         "deferred": 1
       },
       "added": [
+      {
+        "kind": "operation",
+        "target_operation": "GET /v1/service/curation-items/{curation_item_id}/detail-snapshot",
+        "detail": "canonical public membership과 trusted accepted link를 직접 조립하는 PinVi 전용 snapshot. exact scoped ServiceToken과 strong ETag/304를 요구한다.",
+        "basis": "ADR-092",
+        "applied": true
+      },
         {
-          "kind": "operation",
-          "target_operation": "GET /v1/service/curation-items/{curation_item_id}/detail-snapshot",
-          "detail": "canonical public membership과 trusted accepted link를 직접 조립하는 PinVi 전용 snapshot. exact scoped ServiceToken과 strong ETag/304를 요구한다.",
-          "basis": "ADR-092"
-        },
-        {
-          "kind": "operation",
-          "target_operation": "GET /v1/service/curation-collections/{collection_id}/detail-snapshot",
-          "detail": "PinVi authoritative collection discovery. signed keyset, collection ETag, item-set hash/count, complete marker와 304/409 restart를 제공한다.",
-          "basis": "ADR-092"
-        },
+        "kind": "operation",
+        "target_operation": "GET /v1/service/curation-collections/{collection_id}/detail-snapshot",
+        "detail": "PinVi authoritative collection discovery. signed keyset, collection ETag, item-set hash/count, complete marker와 304/409 restart를 제공한다.",
+        "basis": "ADR-092",
+        "applied": true
+      },
         {
           "kind": "operation",
           "target_operation": "GET /v1/service/curation-cutover/identity-mappings",

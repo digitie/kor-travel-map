@@ -2881,6 +2881,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/service/curation-collections/{collection_id}/detail-snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Curation Collection Detail Snapshot */
+        get: operations["get_curation_collection_detail_snapshot_v1_service_curation_collections__collection_id__detail_snapshot_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/curation-items/{curation_item_id}/detail-snapshot": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Curation Item Detail Snapshot */
+        get: operations["get_curation_item_detail_snapshot_v1_service_curation_items__curation_item_id__detail_snapshot_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/service/feature-alias-maps": {
         parameters: {
             query?: never;
@@ -7170,6 +7204,34 @@ export interface components {
             /** Items */
             items: components["schemas"]["PublicCurationItemView"][];
         };
+        /** CurationCollectionDetailSnapshot */
+        CurationCollectionDetailSnapshot: {
+            collection: components["schemas"]["CurationSnapshotCollection"];
+            /**
+             * Collection Id
+             * Format: uuid
+             */
+            collection_id: string;
+            /** Complete */
+            complete: boolean;
+            /** Etag */
+            etag: string;
+            /** Item Count */
+            item_count: number;
+            /** Item Set Hash */
+            item_set_hash: string;
+            /** Items */
+            items: components["schemas"]["CurationItemDetailSnapshot"][];
+            /** Next Cursor */
+            next_cursor: string | null;
+            /** Row Revision */
+            row_revision: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
         /** CurationCollectionPatchRequest */
         CurationCollectionPatchRequest: {
             /** Description */
@@ -7461,6 +7523,31 @@ export interface components {
              */
             status: "candidate" | "included" | "rejected";
         };
+        /** CurationItemDetailSnapshot */
+        CurationItemDetailSnapshot: {
+            collection: components["schemas"]["CurationSnapshotCollection"];
+            /**
+             * Collection Id
+             * Format: uuid
+             */
+            collection_id: string;
+            /**
+             * Curation Item Id
+             * Format: uuid
+             */
+            curation_item_id: string;
+            /** Etag */
+            etag: string;
+            feature: components["schemas"]["CurationSnapshotFeature"];
+            item: components["schemas"]["CurationSnapshotItem"];
+            /** Row Revision */
+            row_revision: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
         /** CurationItemPatchRequest */
         CurationItemPatchRequest: {
             /** Address Hint */
@@ -7602,6 +7689,61 @@ export interface components {
              * @enum {string}
              */
             visibility: "admin_only" | "public";
+        };
+        /** CurationSnapshotCollection */
+        CurationSnapshotCollection: {
+            /** Edition Key */
+            edition_key: string;
+            /** Theme Name */
+            theme_name: string;
+            /** Theme Slug */
+            theme_slug: string;
+            /** Title */
+            title: string;
+        };
+        /** CurationSnapshotFeature */
+        CurationSnapshotFeature: {
+            /** Address */
+            address: {
+                [key: string]: unknown;
+            };
+            /** Category */
+            category: string;
+            /** Detail */
+            detail: {
+                [key: string]: unknown;
+            };
+            /**
+             * Feature Id
+             * Format: uuid
+             */
+            feature_id: string;
+            /** Kind */
+            kind: string;
+            /** Lat */
+            lat: number | null;
+            /** Lon */
+            lon: number | null;
+            /** Name */
+            name: string;
+            /** Source Record Key */
+            source_record_key: string | null;
+        };
+        /** CurationSnapshotItem */
+        CurationSnapshotItem: {
+            /**
+             * Feature Id
+             * Format: uuid
+             */
+            feature_id: string;
+            /** Relation */
+            relation: string;
+            /** Sort Order */
+            sort_order: number;
+            /** Summary */
+            summary: string | null;
+            /** Title */
+            title: string | null;
         };
         /**
          * DagsterGraphqlError
@@ -24502,6 +24644,116 @@ export interface operations {
             };
             /** @description missing If-Match */
             428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_curation_collection_detail_snapshot_v1_service_curation_collections__collection_id__detail_snapshot_get: {
+        parameters: {
+            query?: {
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: never;
+            path: {
+                collection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description canonicalization v1 snapshot의 strong ETag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurationCollectionDetailSnapshot"];
+                };
+            };
+            /** @description 첫 page collection ETag 일치 */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description cursor 이후 collection/item set 변경 — 첫 page부터 재시작 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_curation_item_detail_snapshot_v1_service_curation_items__curation_item_id__detail_snapshot_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                curation_item_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description canonicalization v1 snapshot의 strong ETag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CurationItemDetailSnapshot"];
+                };
+            };
+            /** @description ETag 일치 */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
