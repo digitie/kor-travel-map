@@ -604,6 +604,12 @@ bridge와 아카이브가 `0104_tvn36_final_fence`를 둘 다 선언하는데, a
 5. baseline 자체는 건드리지 않는다. baseline 갱신은 별도 결정이며 절차는
    `alembic/versions/0200_schema_baseline.py`의 `_SCHEMA_SHA256` 주석에 있다.
 
+> **baseline 파일 명명 규약**: 다음에 squash를 한다면 파일 이름을
+> `NNNN_schema_baseline.py`로 지어라. `docker/api-entrypoint.sh`가 "이 이미지가
+> squash판인가"를 `alembic/versions/*_schema_baseline.py` 존재로 판별한다 — 다른
+> 이름을 쓰면 `0104` 이전 DB를 만났을 때 "이미지가 뒤처졌다"는 **반대 진단**이
+> 부활한다(세대 번호를 박았던 첫 판이 정확히 그랬다).
+
 ## 9. EXPLAIN 통합 테스트
 
 모든 hot path SQL은 `tests/integration/`에서 EXPLAIN 결과로 인덱스 사용 검증.

@@ -146,22 +146,35 @@ def oracle_container() -> Iterator[Any]:
     """**전용** PostGIS 컨테이너. 세션 공유 컨테이너를 쓰지 않는다.
 
     자체검증은 기준 DB를 23번 `CREATE DATABASE … TEMPLATE` / `DROP` 한다. 그것을 세션
-    공유 인스턴스에서 하면 **같은 인스턴스를 재는 perf/planner 테스트가 흔들린다** —
-    실제로 CI에서 두 번, 서로 다른 테스트가 그렇게 깨졌다:
-    `test_gist_brin_index_audit`(GiST 쓰기 비용 비교가 2% 허용치를 넘음)와
-    `test_t212d_perf_explain`(planner가 기대와 다른 인덱스 선택). 같은 커밋의 로컬
-    실행과 self-test 이전 커밋의 CI는 둘 다 green이었다.
+    공유 인스턴스에서 하면 같은 인스턴스를 재는 planner 테스트를 교란할 수 있다.
+    `25128842`(self-test 도입)의 CI integration에서
+    `test_t212d_perf_explain::…_index_compatible`이 깨졌고, 직전 `5d5f27c6`은 green,
+    같은 커밋의 로컬도 0 FAILED였다. 파일 정렬상 그 테스트는 이 파일 **뒤**에 돈다.
 
-    checkpoint·autovacuum·shared buffer를 공유하는 인스턴스에서 DB를 수십 개 만들고
-    지우면 그 측정이 흔들리는 것은 노이즈가 아니라 **인과**다. 격리한다.
+    ⚠️ **인과는 단일 관측이고 기전도 얇다.** 적대 리뷰가 그것을 짚었다: 그 테스트는
+    EXPLAIN 직전에 전체 `ANALYZE`를 돌리므로 "낡은 통계"로 설명되지 않고, PG16의
+    `CREATE DATABASE` 기본 전략은 `WAL_LOG`라 `FILE_COPY`가 강제하는 checkpoint도
+    없다. 남는 경로는 autovacuum worker 경합과 page cache 축출 정도다. 그리고
+    `test_gist_brin_index_audit`의 red는 **이 격리로 설명되지 않는다** — 알파벳 순서상
+    이 파일보다 먼저 돌고, 그 테스트 자신의 docstring이 "부하가 높으면 red, 낮으면
+    green, 실측 ratio 1.02x로 임계에 붙어 있다"고 적어 둔 선행 부채다.
+
+    그래도 격리한다: 공유 인스턴스에 대한 DDL을 0회로 만드는 것은 확실한 개선이고
+    되돌릴 이유가 없다. 다만 **호스트 page cache는 여전히 공유**하므로 진짜 기전이
+    그쪽이면 이것으로 해결되지 않는다는 점을 함께 적어 둔다.
     """
+
+    from tests.integration.conftest import _POSTGIS_IMAGE
 
     try:
         from testcontainers.postgres import PostgresContainer
     except ImportError:  # pragma: no cover — dev extras 미설치
         pytest.skip("testcontainers not installed")
     try:
-        container = PostgresContainer("postgis/postgis:16-3.5-alpine")
+        # 이미지 태그는 conftest가 정본이다. 여기 박으면 conftest가 올라갈 때 이
+        # 게이트만 **조용히 옛 PG에서** 돈다 — 같은 커밋이 grantee 목록에서 없앤 것과
+        # 똑같은 손 복제였다(적대 리뷰 지적).
+        container = PostgresContainer(_POSTGIS_IMAGE)
     except Exception as exc:  # pragma: no cover — Docker 없음
         pytest.skip(f"PostgresContainer init failed (Docker?): {exc}")
     with container:
