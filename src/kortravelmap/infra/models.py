@@ -1950,6 +1950,20 @@ class CurationItemRow(Base):
             "status",
             "collection_id",
         ),
+        Index(
+            "idx_curation_items_service_snapshot_candidates",
+            "collection_id",
+            "curation_item_id",
+            postgresql_include=(
+                "accepted_link_decision_id",
+                "feature_id",
+                "source_record_key",
+            ),
+            postgresql_where=text(
+                "archived_at IS NULL AND source_present AND status = 'included' "
+                "AND feature_id IS NOT NULL AND accepted_link_decision_id IS NOT NULL"
+            ),
+        ),
         ForeignKeyConstraint(
             ["current_import_row_id", "curation_item_id"],
             [

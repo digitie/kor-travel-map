@@ -2058,6 +2058,14 @@ CREATE INDEX idx_curation_items_feature_status_collection
     ON feature.curation_items (
         feature_id, source_present, status, collection_id
     );
+CREATE INDEX idx_curation_items_service_snapshot_candidates
+    ON feature.curation_items (collection_id, curation_item_id)
+    INCLUDE (accepted_link_decision_id, feature_id, source_record_key)
+    WHERE archived_at IS NULL
+      AND source_present
+      AND status = 'included'
+      AND feature_id IS NOT NULL
+      AND accepted_link_decision_id IS NOT NULL;
 
 -- =============================================================================
 -- 끝. (removal manifest 대상 — 목표 상태에 존재하지 않는 legacy 객체 목록은

@@ -562,6 +562,116 @@ async def test_service_snapshot_uses_public_trusted_membership_and_allows_manual
     )
 
 
+async def test_service_snapshot_cap_counts_only_exact_public_trusted_items(
+    migrated_session: AsyncSession,
+) -> None:
+    theme_id, source_id = await _seed_foundations(migrated_session)
+    untrusted = await create_curation_collection(
+        migrated_session,
+        collection_key="tvn40-service-cap-untrusted",
+        theme_id=theme_id,
+        source_id=source_id,
+        title="미승인 항목 cap 제외",
+        edition_key="2026",
+        status="published",
+        visibility="public",
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.curation_items (
+                collection_id, feature_id, external_item_id, place_name, status
+            )
+            SELECT
+                CAST(:collection_id AS uuid),
+                :feature_id,
+                'untrusted-' || value::text,
+                '미승인 ' || value::text,
+                'included'
+            FROM generate_series(1, 2001) AS value
+            """
+        ),
+        {"collection_id": untrusted.collection_id, "feature_id": _FEATURE_ID},
+    )
+    untrusted_snapshot = await get_curation_service_collection_snapshot(
+        migrated_session,
+        collection_id=untrusted.collection_id,
+    )
+    assert untrusted_snapshot is not None
+    assert untrusted_snapshot.item_count == 0
+    assert untrusted_snapshot.items == ()
+
+    trusted = await create_curation_collection(
+        migrated_session,
+        collection_key="tvn40-service-cap-trusted",
+        theme_id=theme_id,
+        source_id=source_id,
+        title="승인 항목 cap 적용",
+        edition_key="2026",
+        status="published",
+        visibility="public",
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.curation_items (
+                collection_id, feature_id, external_item_id, place_name, status
+            )
+            SELECT
+                CAST(:collection_id AS uuid),
+                :feature_id,
+                'trusted-' || value::text,
+                '승인 ' || value::text,
+                'included'
+            FROM generate_series(1, 2001) AS value
+            """
+        ),
+        {"collection_id": trusted.collection_id, "feature_id": _FEATURE_ID},
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.curation_link_decisions (
+                curation_item_id, feature_id, decision_kind, match_basis,
+                resolver_version, evidence, actor
+            )
+            SELECT
+                item.curation_item_id,
+                item.feature_id,
+                'accepted',
+                'admin_review',
+                'tvn40-cap-test-v1',
+                '{}'::jsonb,
+                'admin:test'
+            FROM feature.curation_items AS item
+            WHERE item.collection_id = CAST(:collection_id AS uuid)
+            """
+        ),
+        {"collection_id": trusted.collection_id},
+    )
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE feature.curation_items AS item
+            SET accepted_link_decision_id = decision.decision_id
+            FROM feature.curation_link_decisions AS decision
+            WHERE item.collection_id = CAST(:collection_id AS uuid)
+              AND decision.curation_item_id = item.curation_item_id
+              AND decision.feature_id = item.feature_id
+              AND decision.decision_kind = 'accepted'
+            """
+        ),
+        {"collection_id": trusted.collection_id},
+    )
+    trusted_snapshot = await get_curation_service_collection_snapshot(
+        migrated_session,
+        collection_id=trusted.collection_id,
+    )
+    assert trusted_snapshot is not None
+    assert trusted_snapshot.item_count == 2001
+    assert trusted_snapshot.items == ()
+
+
 def test_collection_cursor_rejects_non_uuid_tie_breaker() -> None:
     payload = base64.urlsafe_b64encode(
         b'{"updated_at":"2026-07-13T00:00:00+00:00","collection_id":"x"}'

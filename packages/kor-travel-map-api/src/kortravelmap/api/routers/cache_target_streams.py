@@ -926,6 +926,11 @@ async def get_service_cache_target_stream(
     response_model=CacheTargetRestoreFenceResponse,
     status_code=status.HTTP_201_CREATED,
     responses={
+        200: {
+            "description": "exact Idempotency-Key replay",
+            "model": CacheTargetRestoreFenceResponse,
+            "headers": _ETAG_RESPONSE_HEADER,
+        },
         201: {"description": "restore fence advanced", "headers": _ETAG_RESPONSE_HEADER},
         412: {"description": "stale stream ETag"},
         428: {"description": "missing If-Match"},
@@ -995,7 +1000,9 @@ async def create_service_restore_fence(
             session,
             command=command,
             response=response_body,
-            status_code=status.HTTP_201_CREATED,
+            # 최초 route 응답은 decorator의 201이다. ledger replay는 ADR-081의
+            # immutable receipt status 200으로 복원한다.
+            status_code=status.HTTP_200_OK,
             response_headers={"ETag": record.entity_tag},
         )
     _set_etag(response, record)

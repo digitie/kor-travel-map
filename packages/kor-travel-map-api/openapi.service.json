@@ -5863,6 +5863,24 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheTargetRestoreFenceResponse"
+                }
+              }
+            },
+            "description": "exact Idempotency-Key replay",
+            "headers": {
+              "ETag": {
+                "description": "현재 resource의 raw strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "201": {
             "content": {
               "application/json": {

@@ -1320,11 +1320,14 @@ def test_curation_dataset_identity_accepts_the_matching_generation_key(
 
 def test_service_snapshot_rejects_over_cap_collection_before_public_joins() -> None:
     sql = repo._GET_SERVICE_CURATION_COLLECTION_PAGE_SQL
-    cap_position = sql.index("AS item_cap_exceeded")
-    public_join_position = sql.index("JOIN feature.public_features")
+    key_position = sql.index("bounded_eligible_item_key AS MATERIALIZED")
+    rich_projection_position = sql.index(") AS item_payload_hash")
 
-    assert "FROM (\n                SELECT 1\n                FROM feature.curation_items" in sql
+    assert "JOIN feature.curation_link_decisions AS trusted_decision" in sql
+    assert "JOIN feature.public_features AS pf" in sql
+    assert "item.accepted_link_decision_id" in sql
     assert "LIMIT 2001" in sql
-    assert "AND NOT c.item_cap_exceeded" in sql
-    assert "WHEN (SELECT item_cap_exceeded FROM collection_row)" in sql
-    assert cap_position < public_join_position
+    assert "SELECT count(*) <= 2000" in sql
+    assert "SELECT count(*) > 2000" in sql
+    assert "FROM bounded_eligible_item_key" in sql
+    assert key_position < rich_projection_position

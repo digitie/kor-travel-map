@@ -946,20 +946,7 @@ WITH collection_row AS MATERIALIZED (
         theme.theme_slug,
         theme.theme_name,
         collection.title,
-        collection.edition_key,
-        (
-            SELECT count(*) > {CURATION_SERVICE_COLLECTION_MAX_ITEMS}
-            FROM (
-                SELECT 1
-                FROM feature.curation_items AS cap_item
-                WHERE cap_item.collection_id = collection.collection_id
-                  AND cap_item.archived_at IS NULL
-                  AND cap_item.source_present
-                  AND cap_item.status = 'included'
-                  AND cap_item.feature_id IS NOT NULL
-                LIMIT {CURATION_SERVICE_COLLECTION_MAX_ITEMS + 1}
-            ) AS bounded_active_item
-        ) AS item_cap_exceeded
+        collection.edition_key
     FROM feature.curation_collections AS collection
     JOIN feature.curated_themes AS theme ON theme.theme_id = collection.theme_id
     LEFT JOIN feature.curated_sources AS source ON source.source_id = collection.source_id
@@ -970,9 +957,49 @@ WITH collection_row AS MATERIALIZED (
       AND theme.visibility = 'public'
       AND theme.archived_at IS NULL
       AND (collection.source_id IS NULL OR source.archived_at IS NULL)
+), bounded_eligible_item_key AS MATERIALIZED (
+    SELECT item.curation_item_id
+    FROM feature.curation_items AS item
+    JOIN collection_row AS collection
+      ON collection.collection_id = item.collection_id
+    JOIN feature.curation_link_decisions AS trusted_decision
+      ON trusted_decision.decision_id = item.accepted_link_decision_id
+     AND trusted_decision.curation_item_id = item.curation_item_id
+     AND trusted_decision.feature_id = item.feature_id
+     AND trusted_decision.decision_kind = 'accepted'
+     AND {trusted_basis_sql("trusted_decision.match_basis")}
+    JOIN feature.public_features AS pf ON pf.feature_id = item.feature_id
+    WHERE item.archived_at IS NULL
+      AND item.source_present
+      AND item.status = 'included'
+      AND item.feature_id IS NOT NULL
+      {_ITEM_PUBLIC_NOTICE_FILTER_SQL}
+      AND (
+          item.source_record_key IS NULL
+          OR EXISTS (
+              SELECT 1
+              FROM provider_sync.source_records AS snapshot_record
+              JOIN provider_sync.source_entity_heads AS snapshot_head
+                ON snapshot_head.source_entity_key = snapshot_record.source_entity_key
+               AND snapshot_head.current_source_record_key = snapshot_record.source_record_key
+              JOIN provider_sync.source_links AS snapshot_link
+                ON snapshot_link.source_entity_key = snapshot_record.source_entity_key
+               AND snapshot_link.feature_id = item.feature_id
+              WHERE snapshot_record.source_record_key = item.source_record_key
+          )
+      )
+    ORDER BY item.curation_item_id
+    LIMIT {CURATION_SERVICE_COLLECTION_MAX_ITEMS + 1}
 ), eligible_item AS MATERIALIZED (
     {_SERVICE_SNAPSHOT_ELIGIBLE_ITEMS_SQL}
-      AND NOT c.item_cap_exceeded
+      AND i.curation_item_id IN (
+          SELECT bounded_key.curation_item_id
+          FROM bounded_eligible_item_key AS bounded_key
+      )
+      AND (
+          SELECT count(*) <= {CURATION_SERVICE_COLLECTION_MAX_ITEMS}
+          FROM bounded_eligible_item_key
+      )
 ), bounded_eligible_item AS (
     SELECT *
     FROM eligible_item
@@ -1017,7 +1044,10 @@ WITH collection_row AS MATERIALIZED (
 ), item_set_receipt AS (
     SELECT
         CASE
-            WHEN (SELECT item_cap_exceeded FROM collection_row)
+            WHEN (
+                SELECT count(*) > {CURATION_SERVICE_COLLECTION_MAX_ITEMS}
+                FROM bounded_eligible_item_key
+            )
             THEN {CURATION_SERVICE_COLLECTION_MAX_ITEMS + 1}::bigint
             ELSE count(*)::bigint
         END AS item_count,

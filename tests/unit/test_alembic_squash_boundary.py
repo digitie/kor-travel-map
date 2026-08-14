@@ -39,6 +39,7 @@ _EXPECTED_REVISIONS = (
     "0216_tvn40_import_item_cmd",
     "0217_tvn40_metadata_check",
     "0218_tvn40_routine_acl",
+    "0219_tvn40_snapshot_cap_index",
 )
 _LEGACY_ARCHIVE_SHA256 = (
     "ae65901c78ea1d38ef6f5b7a7e8532744656e73c79392251452680d35f461e42"
@@ -47,17 +48,25 @@ _LEGACY_ARCHIVE_SHA256 = (
 
 def _string_constants(tree: ast.Module) -> dict[str, str]:
     candidates: dict[str, set[str]] = {}
+    invalid: set[str] = set()
     for node in ast.walk(tree):
+        if isinstance(node, ast.arg):
+            invalid.add(node.arg)
+            continue
         if not isinstance(node, (ast.Assign, ast.AnnAssign)):
             continue
         target = node.targets[0] if isinstance(node, ast.Assign) else node.target
-        if (
-            isinstance(target, ast.Name)
-            and isinstance(node.value, ast.Constant)
-            and isinstance(node.value.value, str)
-        ):
+        if not isinstance(target, ast.Name):
+            continue
+        if isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
             candidates.setdefault(target.id, set()).add(node.value.value)
-    return {name: next(iter(values)) for name, values in candidates.items() if len(values) == 1}
+        else:
+            invalid.add(target.id)
+    return {
+        name: next(iter(values))
+        for name, values in candidates.items()
+        if len(values) == 1 and name not in invalid
+    }
 
 
 def _resolved_string(node: ast.AST, constants: dict[str, str]) -> str | None:
@@ -65,6 +74,11 @@ def _resolved_string(node: ast.AST, constants: dict[str, str]) -> str | None:
         return node.value
     if isinstance(node, ast.Name):
         return constants.get(node.id)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        left = _resolved_string(node.left, constants)
+        right = _resolved_string(node.right, constants)
+        if left is not None and right is not None:
+            return left + right
     return None
 
 
@@ -72,6 +86,7 @@ def _alembic_command_target_violations(source: str, *, filename: str) -> list[st
     tree = ast.parse(source, filename=filename)
     constants = _string_constants(tree)
     command_aliases = {"command"}
+    alembic_aliases = {"alembic"}
     direct_command_aliases: dict[str, str] = {}
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module == "alembic":
@@ -81,6 +96,11 @@ def _alembic_command_target_violations(source: str, *, filename: str) -> list[st
                 if alias.name == "command"
             )
         elif isinstance(node, ast.Import):
+            alembic_aliases.update(
+                alias.asname or alias.name
+                for alias in node.names
+                if alias.name == "alembic"
+            )
             command_aliases.update(
                 alias.asname or alias.name.rsplit(".", 1)[-1]
                 for alias in node.names
@@ -109,7 +129,7 @@ def _alembic_command_target_violations(source: str, *, filename: str) -> list[st
         if (
             isinstance(owner, ast.Attribute)
             and isinstance(owner.value, ast.Name)
-            and owner.value.id == "alembic"
+            and owner.value.id in alembic_aliases
             and owner.attr == "command"
         ):
             return node.attr
@@ -121,13 +141,16 @@ def _alembic_command_target_violations(source: str, *, filename: str) -> list[st
             continue
         operation = operation_for_callable(node.func)
         command_args = node.args
-        if operation is None and node.args:
-            is_to_thread = (
-                isinstance(node.func, ast.Attribute) and node.func.attr == "to_thread"
-            ) or (isinstance(node.func, ast.Name) and node.func.id == "to_thread")
-            if is_to_thread:
-                operation = operation_for_callable(node.args[0])
-                command_args = node.args[1:]
+        if operation is None:
+            escaped = [
+                (index, candidate)
+                for index, candidate in enumerate(node.args)
+                if operation_for_callable(candidate) is not None
+            ]
+            if len(escaped) == 1:
+                index, candidate = escaped[0]
+                operation = operation_for_callable(candidate)
+                command_args = node.args[index + 1 :]
         if operation is None:
             continue
         revision_node = next(
@@ -160,10 +183,10 @@ def _alembic_command_target_violations(source: str, *, filename: str) -> list[st
 
 def _legacy_module_execution_violations(source: str, *, filename: str) -> list[str]:
     tree = ast.parse(source, filename=filename)
+    constants = _string_constants(tree)
     references_legacy = any(
-        isinstance(node, ast.Constant)
-        and isinstance(node.value, str)
-        and "legacy_versions" in node.value
+        (value := _resolved_string(node, constants)) is not None
+        and "legacy_versions" in value
         for node in ast.walk(tree)
     )
     if not references_legacy:
@@ -171,10 +194,24 @@ def _legacy_module_execution_violations(source: str, *, filename: str) -> list[s
     return [
         f"{filename}:{node.lineno}: legacy module execution"
         for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Attribute)
-        and node.func.attr in {"exec_module", "load_module"}
+        if isinstance(node, ast.Call) and _is_module_execution_call(node)
     ]
+
+
+def _is_module_execution_call(node: ast.Call) -> bool:
+    if isinstance(node.func, ast.Name):
+        return node.func.id in {"exec_module", "load_module"}
+    if isinstance(node.func, ast.Attribute):
+        return node.func.attr in {"exec_module", "load_module"}
+    if not (
+        isinstance(node.func, ast.Call)
+        and isinstance(node.func.func, ast.Name)
+        and node.func.func.id == "getattr"
+        and len(node.func.args) >= 2
+    ):
+        return False
+    method = node.func.args[1]
+    return isinstance(method, ast.Constant) and method.value in {"exec_module", "load_module"}
 
 
 def _literal(path: Path, name: str) -> str | tuple[str, ...] | None:
@@ -190,7 +227,7 @@ def _literal(path: Path, name: str) -> str | tuple[str, ...] | None:
     raise AssertionError(f"{path}: {name} literal이 없다")
 
 
-def test_active_graph_is_only_0200_to_0218() -> None:
+def test_active_graph_is_only_0200_to_0219() -> None:
     paths = sorted(_ACTIVE.glob("[0-9]*.py"))
     revisions = tuple(str(_literal(path, "revision")) for path in paths)
     parents = tuple(_literal(path, "down_revision") for path in paths)
@@ -342,6 +379,54 @@ command.stamp(config, "base")
 ''',
             "base",
         ),
+        (
+            '''
+from asyncio import to_thread as run_in_thread
+from alembic import command
+run_in_thread(command.upgrade, config, "0079_cache_target_writer_drain")
+''',
+            "0079_cache_target_writer_drain",
+        ),
+        (
+            '''
+import alembic as a
+a.command.upgrade(config, "0079_cache_target_writer_drain")
+''',
+            "0079_cache_target_writer_drain",
+        ),
+        (
+            '''
+from alembic import command
+TARGET = "head"
+def migrate(TARGET: str) -> None:
+    command.upgrade(config, TARGET)
+migrate("0079_cache_target_writer_drain")
+''',
+            "dynamic/unresolved",
+        ),
+        (
+            '''
+from alembic import command
+loop.run_in_executor(None, command.upgrade, config, "0079_cache_target_writer_drain")
+''',
+            "0079_cache_target_writer_drain",
+        ),
+        (
+            '''
+import functools
+from alembic import command
+functools.partial(command.upgrade, config, "0079_cache_target_writer_drain")()
+''',
+            "0079_cache_target_writer_drain",
+        ),
+        (
+            '''
+import anyio
+from alembic import command
+anyio.to_thread.run_sync(command.upgrade, config, "0079_cache_target_writer_drain")
+''',
+            "0079_cache_target_writer_drain",
+        ),
     ],
 )
 def test_legacy_execution_scanner_rejects_indirect_and_unknown_targets(
@@ -349,6 +434,25 @@ def test_legacy_execution_scanner_rejects_indirect_and_unknown_targets(
 ) -> None:
     violations = _alembic_command_target_violations(source, filename="bypass.py")
     assert any(expected in row for row in violations)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        '''
+path = "alembic/" + "legacy_" + "versions/0079.py"
+spec.loader.exec_module(module)
+''',
+        '''
+path = "alembic/" + "legacy_" + "versions/0079.py"
+getattr(spec.loader, "exec_module")(module)
+''',
+    ],
+)
+def test_legacy_execution_scanner_rejects_computed_path_and_getattr(source: str) -> None:
+    assert _legacy_module_execution_violations(source, filename="archive.py") == [
+        "archive.py:3: legacy module execution"
+    ]
 
 
 def test_production_docker_build_context_never_copies_legacy_migrations() -> None:
