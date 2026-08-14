@@ -247,6 +247,37 @@ async def test_squash_boundary_rejects_stamp_below_0200_before_mutation(
     ) == "0220_tvn40_snapshot_cap_index"
 
 
+async def test_existing_0104_bridge_upgrades_to_tvn40_head_without_baseline_replay(
+    gate_alembic_config: Config,
+) -> None:
+    """기존 n150 `0104` revision은 baseline 재실행 없이 T-VN-40만 적용한다."""
+
+    from tests.integration._tvn34_migration_bootstrap import (
+        alembic_schema_owner_role,
+        bootstrapped_migrator_dsn,
+    )
+
+    cfg = gate_alembic_config
+    admin_dsn = cfg.get_main_option("sqlalchemy.url")
+    assert admin_dsn is not None
+    cfg.set_main_option("sqlalchemy.url", await bootstrapped_migrator_dsn(admin_dsn))
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(command.upgrade, cfg, "0200_schema_baseline")
+        # Baseline과 catalog-equal인 fixture를 기존 prod revision으로 표시한다. 이 stamp는
+        # 테스트 setup 전용이며 production 전환 절차가 아니다.
+        await asyncio.to_thread(command.stamp, cfg, "0104_tvn36_final_fence")
+        await asyncio.to_thread(command.upgrade, cfg, "head")
+
+    assert await _admin_fetchval(
+        admin_dsn,
+        "SELECT version_num FROM public.alembic_version",
+    ) == "0220_tvn40_snapshot_cap_index"
+    assert await _admin_fetchval(
+        admin_dsn,
+        "SELECT to_regclass('feature.theme_feature_candidates') IS NOT NULL",
+    ) is True
+
+
 async def test_0200_rejects_unsafe_preprovisioned_role_before_schema_ddl(
     gate_alembic_config: Config,
 ) -> None:
@@ -282,10 +313,10 @@ async def test_0200_rejects_unsafe_preprovisioned_role_before_schema_ddl(
         )
 
 
-async def test_0201_rejects_membership_option_and_extra_edge_drift(
+async def test_0202_rejects_membership_option_and_extra_edge_drift(
     gate_alembic_config: Config,
 ) -> None:
-    """0201은 expected edge option 변화와 교차 executor edge를 모두 거부한다."""
+    """0202는 expected edge option 변화와 교차 executor edge를 모두 거부한다."""
 
     from tests.integration._tvn34_migration_bootstrap import (
         alembic_schema_owner_role,
