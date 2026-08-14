@@ -464,6 +464,27 @@ feature 본문 결손을 메운다.** 백업 산출물이 읽히는지(절차 4)
    부분 복원 손실이 5건이 아니라 **dataset 전건에 적용된다**는 뜻이기도 하다 — 운영 복구에
    이 경로를 쓰면 멀쩡한 feature의 detail까지 함께 깎인다.
 
+   ⛔ **그리고 그 전체 재적재는 단일 트랜잭션이고 재개 지점이 없다 (2026-08-14 실측).**
+   `--batch-size`는 statement 크기만 나눌 뿐 트랜잭션을 끊지 않는다. 98만 건이면
+   트랜잭션 하나가 **2시간 넘게** 열려 있고, 그 사이 어떤 이유로든 클라이언트가 끊기면
+   **전부 롤백된다.** 드릴 3회차에서 실제로 났다 — ssh가 끊겨 `docker run` 클라이언트가
+   죽자 다음 흔적만 남고 live는 한 행도 늘지 않았다:
+
+   | relation | live | dead |
+   |---|---|---|
+   | `feature.feature_base_field_values` | 0 | **2,880,150** |
+   | `feature.features` | 1,009,004 | 230,417 |
+   | `feature.feature_places` | 1,005,109 | 230,417 |
+
+   운영 함의 두 가지다. (1) 이 명령은 반드시 **분리 실행**해야 한다 —
+   `docker run -d`나 `nohup`. 터미널에 붙여 놓고 돌리면 세션이 끊기는 순간 몇 시간이
+   사라진다. (2) 부분 진행이 없으므로 "절반이라도 복구"가 불가능하다. 복구 수단으로
+   삼기에는 이 성질만으로도 부적합하고, **정식 복구 수단은 백업 복원이다.**
+
+   부수 확인 — 위 dead tuple이 증명하듯 이 경로는 `feature_base_field_values`를
+   **실제로 채운다.** prod에서 그 테이블이 0행인 것은 적재 경로 결함이 아니라 provider
+   ETL이 2026-08-07 이후 돌지 않았기 때문이다(task #53).
+
    ⚠️ **이 되먹임은 본문을 부분적으로만 복원한다 (2026-08-14 코드 실측, 드릴 실행 전 확정).**
    `providers/mois.py:_raw_data`는 payload_hash용 canonical dict라 Protocol **45개 필드 중
    22개만** 담는다. NDJSON 래퍼 `cli/records.py:MoisLicenseJsonRecord.__getattr__`는 없는 key를
