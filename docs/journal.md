@@ -2,6 +2,14 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-15 — T-VN-40 service OpenAPI contract test 정렬
+
+- restore-fence는 최초 terminal `201`과 exact `Idempotency-Key` replay `200`을 모두 선언한다.
+  registry test는 replay response를 별도 성공 상태로 허용하되 상태 코드와 ETag header를
+  정책과 정확히 대조하도록 했다.
+- canonical cutover identity mapping export를 service OpenAPI exact route inventory에 넣어
+  기존 route policy·생성 artifact와 같은 표면을 검사한다.
+
 ## 2026-08-15 — T-VN-40 admin OpenAPI 생성형 타입 동기화
 
 - canonical cutover identity mapping service export를 admin frontend의 `src/api/types.ts`에

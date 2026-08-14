@@ -131,20 +131,26 @@ def test_domain_terminal_contract_matches_declared_openapi_success_response() ->
         if policy.kind is not CommandPolicyKind.DOMAIN_LEDGER:
             continue
         responses = writes[key]["responses"]
-        success_codes = {
-            int(code) for code in responses if str(code).startswith("2")
+        success_codes = {int(code) for code in responses if str(code).startswith("2")}
+        replay_codes = {
+            int(code)
+            for code, response in responses.items()
+            if response.get("description") == "exact Idempotency-Key replay"
         }
-        assert success_codes == {policy.success_status}, key
+        assert replay_codes <= {200}, key
+        assert success_codes == {policy.success_status, *replay_codes}, key
         response = responses[str(policy.success_status)]
         assert set(response.get("headers", {})) == set(policy.replay_headers), key
+        for replay_code in replay_codes:
+            response = responses[str(replay_code)]
+            assert set(response.get("headers", {})) == set(policy.replay_headers), key
 
 
 def test_domain_fingerprint_header_contract_is_explicit_and_minimal() -> None:
     assert {
         policy.operation: policy.fingerprint_headers
         for policy in COMMAND_REGISTRY.values()
-        if policy.kind is CommandPolicyKind.DOMAIN_LEDGER
-        and policy.fingerprint_headers
+        if policy.kind is CommandPolicyKind.DOMAIN_LEDGER and policy.fingerprint_headers
     } == {
         "admin.cache-target-dead-letter.replay": ("If-Match",),
         "admin.curation-collection.archive": ("If-Match",),
@@ -191,11 +197,7 @@ def test_curation_revision_commands_publish_required_if_match_header() -> None:
         "admin.theme-feature-candidate.promote",
         "admin.theme-feature-candidate.reject",
     }
-    routes = {
-        key
-        for key, policy in COMMAND_REGISTRY.items()
-        if policy.operation in operations
-    }
+    routes = {key for key, policy in COMMAND_REGISTRY.items() if policy.operation in operations}
     assert len(routes) == len(operations)
     for key in routes:
         header = _header(writes[key], "If-Match")
@@ -216,8 +218,7 @@ def test_tvn40_canonical_collection_and_item_commands_are_serializable() -> None
     policies = {
         policy.operation: policy
         for policy in COMMAND_REGISTRY.values()
-        if policy.kind is CommandPolicyKind.DOMAIN_LEDGER
-        and policy.operation in operations
+        if policy.kind is CommandPolicyKind.DOMAIN_LEDGER and policy.operation in operations
     }
     assert set(policies) == operations
     assert all(policy.transaction_isolation == "serializable" for policy in policies.values())
@@ -227,9 +228,7 @@ def test_future_h22b_quarantine_command_cannot_bypass_domain_ledger() -> None:
     for key, operation in _openapi_writes().items():
         operation_id = str(operation.get("operationId", "")).lower()
         path = key[1].lower()
-        if "reclassif" in operation_id or (
-            "quarantine" in path and key[0] in _WRITE_METHODS
-        ):
+        if "reclassif" in operation_id or ("quarantine" in path and key[0] in _WRITE_METHODS):
             assert COMMAND_REGISTRY[key].kind is CommandPolicyKind.DOMAIN_LEDGER
 
 

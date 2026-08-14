@@ -1,5 +1,15 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-15 — T-VN-40 service OpenAPI contract test 정렬
+
+service restore-fence command는 최초 `201`과 exact `Idempotency-Key` terminal replay `200`을
+함께 계약으로 둔다. registry test가 이 명시적 replay response를 잘못 거절하던 문제를 고쳤고,
+canonical cutover identity mapping export도 service OpenAPI의 exact route inventory에 추가했다.
+
+**다음 한 작업**: Map과 PinVi 원격 CI를 다시 확인한다. Manager principal 결선의 병합과 n150
+paired live acceptance 전에는 rollout receipt completion 및 legacy source의 물리 삭제를 수행하지
+않는다.
+
 ## 2026-08-15 — T-VN-40 admin OpenAPI 생성형 타입 동기화
 
 canonical cutover identity mapping service export가 admin OpenAPI에 추가된 뒤에도 frontend의
