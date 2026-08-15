@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-15 — T-VN-40 PostGIS CI runtime 격리 정렬
+
+runtime privilege preflight가 disposable LOGIN 비밀번호를 오래된 T-VN-34 값으로
+재설정해, 뒤이어 실행되는 T-VN-40 candidate command 테스트의 연결을 깨던 순서 의존성을
+제거했다. 모든 runtime LOGIN fixture는 migration bootstrap과 같은 T-VN-40 test-only 값으로
+통일했다. 공개 collection reader도 신뢰된 공개 Feature 연결 item만 반환하는 현재 정책에
+맞춰 미연결 item은 admin read에서만 보존함을 통합 회귀로 고정했다.
+
+**다음 한 작업**: 원격 PostGIS CI를 다시 녹색으로 만든 뒤, Map PR의 독립 승인과 병합
+순서를 확인한다. 승인·병합 전에는 n150 live acceptance, rollout receipt completion, legacy
+물리 삭제를 수행하지 않는다.
+
 ## 2026-08-15 — T-VN-40 Dagster CI 테스트 경계 정렬
 
 authoritative snapshot 적재와 curation input proof 전달을 production asset이 사용하도록 바뀐 뒤,

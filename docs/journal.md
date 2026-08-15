@@ -2,6 +2,15 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-15 — T-VN-40 PostGIS CI runtime 격리 정렬
+
+- runtime privilege preflight가 T-VN-40 migration bootstrap과 다른 disposable LOGIN
+  비밀번호를 재설정해 뒤 candidate command 연결을 실패시키던 순서 의존성을 제거했다.
+  모든 runtime LOGIN fixture는 bootstrap의 T-VN-40 test-only password를 사용한다.
+- public collection은 trusted public Feature에 연결된 item만 반환한다. 미연결 item은
+  public projection에서 제외하고 admin projection에 보존한다는 현재 정책을 integration
+  fixture와 count assertion에 명시했다.
+
 ## 2026-08-15 — T-VN-40 Dagster CI 테스트 경계 정렬
 
 - authoritative snapshot 경로로 전환된 concierge asset의 fake client에 적재·retirement를 한

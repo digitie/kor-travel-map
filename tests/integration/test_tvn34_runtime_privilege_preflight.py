@@ -22,7 +22,10 @@ from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
 
 pytestmark = pytest.mark.integration
 
-_PASSWORD = "tvn34-test-only-runtime-password"
+# Shared migrations recreate the disposable runtime LOGIN roles with this
+# T-VN-40 password.  Keep the preflight fixture aligned so a preceding
+# privilege test cannot invalidate later command-login connections.
+_PASSWORD = "tvn40-test-only-runtime-password"
 _RUNTIME_LOGINS = (
     "ktm_feature_api_runtime",
     "ktm_feature_dagster_runtime",
