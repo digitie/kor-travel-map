@@ -87,6 +87,127 @@ filesystem `rmtree`는 같은 lock을 marker proof와 domain command terminal re
 직접 보유한다. 경합은 무기한 대기하지 않고 `409 BACKUP_MAINTENANCE_BUSY`와
 `Retry-After: 3`으로 실패한다.
 
+### 2.1 ⛔ per-database dump가 담지 않는 것 — 새 인스턴스로 옮길 때 반드시 함께 옮긴다
+
+`pg_dump -d <db>`는 **그 데이터베이스 안의 것만** 담는다. 아래 넷은 그 밖(cluster 전역
+또는 compose 설정)이라 빠지고, **빠져도 복원은 성공한다.** 증상은 런타임에야 나온다.
+
+2026-08-15 전용 인스턴스 이행에서 넷 다 실제로 걸렸다 — **리허설이 ①②를, 커토버 후
+실제 ETL 실행이 ③④를** 드러냈다. ③④가 리허설을 통과한 이유는 아래 "왜 카탈로그 비교로는
+안 잡혔나"에 적는다.
+
+**① `ALTER DATABASE … SET`** — 특히 `search_path`.
+
+prod `kor_travel_map`은 DB 수준에 `search_path=public, x_extension`이 걸려 있다.
+복원본은 postgis 템플릿에서 온 `"$user", public, topology`를 물려받아 **`x_extension`이
+빠진다.** 그러면 `geometry`·`st_transform`을 스키마 없이 쓰는 SQL이 런타임에 깨진다.
+
+카탈로그 비교에서는 **타입 표기 차이**로 보인다 — `format_type()`이 search_path에 따라
+다르게 찍기 때문이다. 리허설 실측: digest 2486행 중 24행이 `geometry` vs
+`x_extension.geometry`로 어긋났고, `ALTER DATABASE`를 적용하자 **2486행 전 행 일치**가 됐다.
+즉 이 차이를 "표기일 뿐"이라고 넘기면 진짜 결손을 넘기는 것이다.
+
+```sql
+-- 원본에서 읽어 그대로 옮긴다
+SELECT d.datname, array_to_string(s.setconfig, ' | ')
+  FROM pg_db_role_setting s JOIN pg_database d ON d.oid = s.setdatabase
+ WHERE s.setrole = 0;
+```
+
+**② 역할 비밀번호(SCRAM 해시).**
+
+역할을 `CREATE ROLE`로 새로 만들면 비밀번호가 없다. 앱 DSN은 비밀번호로 붙으므로
+**네 서비스가 동시에 인증 실패**한다. 평문을 알 필요는 없다 — 해시를 그대로 옮긴다.
+
+```sql
+-- 원본에서: 그대로 실행 가능한 문장을 만든다
+SELECT format('ALTER ROLE %I PASSWORD %L;', rolname, rolpassword)
+  FROM pg_authid WHERE rolname ~ '^ktm_' AND rolpassword IS NOT NULL;
+```
+
+역할 **속성**(LOGIN/NOINHERIT)도 따로 옮긴다. 특히 psql은 boolean을 `t/f`가 아니라
+`true/false`로 내므로, `[ "$v" = t ]` 같은 비교는 빗나가 역할이 전부 NOLOGIN으로
+만들어진다(리허설에서 실제로 그랬다).
+
+**③ 멤버십의 `INHERIT`/`SET` 옵션 (PG16).**
+
+`GRANT a TO b;`만 실행하면 `INHERIT` 옵션이 **member의 `rolinherit`에서 정해진다.**
+이 저장소 역할은 전부 NOINHERIT이므로 `inherit=false, set=true`가 된다.
+
+그런데 원본은 `inherit=true, set=false`다 — 역할 자체는 NOINHERIT이면서 **이 멤버십만**
+상속하도록 명시돼 있다. 그래야 runtime 역할이 `SET ROLE` 없이 스키마 USAGE를 갖는다.
+옵션을 안 옮기면 ETL이 이렇게 죽는다:
+
+```
+asyncpg.exceptions.InsufficientPrivilegeError: permission denied for schema provider_sync
+```
+
+```sql
+-- 원본에서: 옵션까지 담은 GRANT 문을 만든다. boolean은 t/f로 찍히므로 CASE로 편다.
+SELECT format('GRANT %I TO %I WITH ADMIN %s, INHERIT %s, SET %s;',
+              r.rolname, m.rolname,
+              CASE WHEN am.admin_option   THEN 'TRUE' ELSE 'FALSE' END,
+              CASE WHEN am.inherit_option THEN 'TRUE' ELSE 'FALSE' END,
+              CASE WHEN am.set_option     THEN 'TRUE' ELSE 'FALSE' END)
+  FROM pg_auth_members am
+  JOIN pg_roles m ON m.oid = am.member
+  JOIN pg_roles r ON r.oid = am.roleid
+ WHERE m.rolname ~ '^ktm_';
+```
+
+**④ compose가 하드코딩한 기본 DSN.**
+
+DB 밖의 문제지만 같은 사고를 낸다. `KOR_TRAVEL_MAP_DAGSTER_PG_URL`은
+
+```yaml
+KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL:-postgresql://…@127.0.0.1:5432/kor_travel_map_dagster}
+```
+
+로 되어 있는데 그 override 이름이 **`.env`에 아예 없었다.** `.env`만 훑는 방식으로는
+안 보인다. 안 고치면 dagster가 계속 **옛 DB에 run을 기록해** 두 DB가 조용히 갈라진다.
+
+```bash
+# `.env`가 아니라 compose가 resolve한 값에서 옛 포트를 찾는다
+docker compose config | grep -E 'PG_DSN|PG_URL' | grep ':5432/'
+```
+
+### 왜 카탈로그 비교로는 ③④가 안 잡혔나
+
+`scripts/compare-schema-catalogs.sh`의 **core digest**는 relation/column/index/constraint를
+본다. 스키마 ACL·멤버십 옵션은 그 축에 없고 보조 축과 별도 검사에 있다. 그래서 커토버
+직전 "digest 2486행 전 행 일치"가 나왔지만 ③④는 남아 있었다.
+
+**오라클의 일부만 돌리고 전체를 돌린 것처럼 읽지 마라.** 이행에서는 digest 외에
+아래를 따로 대조한다.
+
+```sql
+-- 스키마 ACL
+SELECT nspname, pg_get_userbyid(nspowner), array_to_string(nspacl, ',')
+  FROM pg_namespace WHERE nspname NOT LIKE 'pg\_%' AND nspname <> 'information_schema';
+
+-- 멤버십 옵션 (③)
+SELECT m.rolname, r.rolname, am.admin_option, am.inherit_option, am.set_option
+  FROM pg_auth_members am JOIN pg_roles m ON m.oid = am.member
+                          JOIN pg_roles r ON r.oid = am.roleid;
+
+-- 유효 권한 (가장 직접적이다)
+SELECT r.rolname, n.nspname, has_schema_privilege(r.rolname, n.nspname, 'USAGE')
+  FROM pg_roles r, pg_namespace n
+ WHERE r.rolname ~ '^ktm_' AND n.nspname IN ('feature','ops','provider_sync','x_extension');
+```
+
+**확인 방법 — 스위치 후 실제 job을 한 번 돌린다.** 위 대조를 다 해도 ④처럼 DB 밖의
+축은 남을 수 있다. 커토버에서 ③④를 실제로 잡아낸 것은 카탈로그 비교가 아니라 **ETL
+1회 실행**이었다. 인증만 확인하는 것으로는 부족하다:
+
+```
+PGPASSWORD=<앱 DSN의 값> psql -h 127.0.0.1 -p <새 포트> -U ktm_feature_api_runtime \
+  -d kor_travel_map -tAc "SELECT current_user, current_setting('search_path')"
+```
+
+이 접속 시험은 ①②를 잡지만 ③④는 통과시킨다 — 접속과 `search_path`는 멀쩡하고
+스키마 USAGE에서만 막히기 때문이다.
+
 ## 3. 산출물 구조
 
 백업 디렉터리는 다음 파일을 가진다.
@@ -463,6 +584,49 @@ feature 본문 결손을 메운다.** 백업 산출물이 읽히는지(절차 4)
    ⚠️ 그래서 이 경로는 **결손 5건만 고치는 수단이 아니라 dataset 전체 재적재**다. 아래
    부분 복원 손실이 5건이 아니라 **dataset 전건에 적용된다**는 뜻이기도 하다 — 운영 복구에
    이 경로를 쓰면 멀쩡한 feature의 detail까지 함께 깎인다.
+
+   ⛔ **그리고 그 전체 재적재는 단일 트랜잭션이고 재개 지점이 없다 (2026-08-14/15 실측).**
+   `--batch-size`는 statement 크기만 나눌 뿐 트랜잭션을 끊지 않는다. 98만 건이면
+   트랜잭션 하나가 **3시간 넘게** 열려 있고, 그 사이 무엇이든 잘못되면 **전부 롤백된다.**
+
+   드릴 3회차에서 두 번 겪었다. 두 번 다 입력 파일 **12% 지점(119,408번째 줄)의 잘못된
+   JSON 한 줄** 때문이었고, 거기 닿기까지 3시간 20분이 걸렸다. 남은 흔적:
+
+   | relation | live | dead |
+   |---|---|---|
+   | `feature.feature_base_field_values` | 0 | **2,880,150** |
+   | `feature.features` | 1,009,004 | 230,417 |
+   | `feature.feature_places` | 1,005,109 | 230,417 |
+
+   ⚠️ **그 잘못된 JSON은 추출 방식이 만든 것이다 — 아래를 따르면 재현된다.**
+   `\copy (SELECT raw_data::text ...) TO '파일'`은 COPY **TEXT 포맷**이라 백슬래시를
+   `\\`로 이스케이프한다. 주소에 큰따옴표가 든 레코드(예: `물태리 290-6 "나"동`)의
+   JSON `\"`가 `\\"`가 되어 무효 JSON이 된다. 980,464줄 중 13줄이 그랬다.
+
+   ```bash
+   # 나쁨 — COPY 이스케이프가 JSON을 깨뜨린다
+   psql -c "\copy (SELECT sr.raw_data::text FROM …) TO '/tmp/full.ndjson'"
+
+   # 좋음 — 이스케이프 없음
+   psql -tA -c "SELECT sr.raw_data::text FROM …" > /tmp/full.ndjson
+   ```
+
+   그리고 **돌리기 전에 전 줄을 파싱해 본다.** 12% 지점의 오류를 3시간 뒤에 알게 되는
+   구조를 그대로 두지 않는다:
+
+   ```bash
+   python3 -c 'import json,sys; [json.loads(l) for l in open(sys.argv[1]) if l.strip()]' \
+     /tmp/full.ndjson && echo "전 줄 유효"
+   ```
+
+   운영 함의 둘. (1) 부분 진행이 없으므로 "절반이라도 복구"가 불가능하다. 복구 수단으로
+   삼기에는 이 성질만으로도 부적합하고, **정식 복구 수단은 백업 복원이다.**
+   (2) 그래도 돌려야 하면 **분리 실행**한다(`docker run -d` / `nohup`) — 터미널에 붙여
+   두면 세션이 끊기는 순간 몇 시간이 사라진다.
+
+   부수 확인 — 위 dead tuple이 증명하듯 이 경로는 `feature_base_field_values`를
+   **실제로 채운다.** prod에서 그 테이블이 0행인 것은 적재 경로 결함이 아니라 provider
+   ETL이 2026-08-07 이후 돌지 않았기 때문이다(task #53).
 
    ⚠️ **이 되먹임은 본문을 부분적으로만 복원한다 (2026-08-14 코드 실측, 드릴 실행 전 확정).**
    `providers/mois.py:_raw_data`는 payload_hash용 canonical dict라 Protocol **45개 필드 중
