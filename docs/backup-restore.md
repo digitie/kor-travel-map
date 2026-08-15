@@ -87,6 +87,52 @@ filesystem `rmtree`는 같은 lock을 marker proof와 domain command terminal re
 직접 보유한다. 경합은 무기한 대기하지 않고 `409 BACKUP_MAINTENANCE_BUSY`와
 `Retry-After: 3`으로 실패한다.
 
+### 2.1 ⛔ per-database dump가 담지 않는 것 — 새 인스턴스로 옮길 때 반드시 함께 옮긴다
+
+`pg_dump -d <db>`는 **그 데이터베이스 안의 것만** 담는다. 아래 둘은 cluster 전역
+(`pg_dumpall --globals-only` 영역)이라 빠지고, **빠져도 복원은 성공한다.** 증상은
+런타임에야 나온다. 2026-08-15 전용 인스턴스 이행 리허설에서 둘 다 실제로 걸렸다.
+
+**① `ALTER DATABASE … SET`** — 특히 `search_path`.
+
+prod `kor_travel_map`은 DB 수준에 `search_path=public, x_extension`이 걸려 있다.
+복원본은 postgis 템플릿에서 온 `"$user", public, topology`를 물려받아 **`x_extension`이
+빠진다.** 그러면 `geometry`·`st_transform`을 스키마 없이 쓰는 SQL이 런타임에 깨진다.
+
+카탈로그 비교에서는 **타입 표기 차이**로 보인다 — `format_type()`이 search_path에 따라
+다르게 찍기 때문이다. 리허설 실측: digest 2486행 중 24행이 `geometry` vs
+`x_extension.geometry`로 어긋났고, `ALTER DATABASE`를 적용하자 **2486행 전 행 일치**가 됐다.
+즉 이 차이를 "표기일 뿐"이라고 넘기면 진짜 결손을 넘기는 것이다.
+
+```sql
+-- 원본에서 읽어 그대로 옮긴다
+SELECT d.datname, array_to_string(s.setconfig, ' | ')
+  FROM pg_db_role_setting s JOIN pg_database d ON d.oid = s.setdatabase
+ WHERE s.setrole = 0;
+```
+
+**② 역할 비밀번호(SCRAM 해시).**
+
+역할을 `CREATE ROLE`로 새로 만들면 비밀번호가 없다. 앱 DSN은 비밀번호로 붙으므로
+**네 서비스가 동시에 인증 실패**한다. 평문을 알 필요는 없다 — 해시를 그대로 옮긴다.
+
+```sql
+-- 원본에서: 그대로 실행 가능한 문장을 만든다
+SELECT format('ALTER ROLE %I PASSWORD %L;', rolname, rolpassword)
+  FROM pg_authid WHERE rolname ~ '^ktm_' AND rolpassword IS NOT NULL;
+```
+
+역할 **속성**(LOGIN/NOINHERIT)과 **멤버십**도 마찬가지로 따로 옮긴다. 특히 psql은
+boolean을 `t/f`가 아니라 `true/false`로 내므로, `[ "$v" = t ]` 같은 비교는 빗나가
+역할이 전부 NOLOGIN으로 만들어진다(리허설에서 실제로 그랬다).
+
+**확인 방법** — 옮긴 뒤 실제 앱 DSN으로 붙어 본다. 스위치 전에 이것만 해도 위 둘을 다 잡는다.
+
+```
+PGPASSWORD=<앱 DSN의 값> psql -h 127.0.0.1 -p <새 포트> -U ktm_feature_api_runtime \
+  -d kor_travel_map -tAc "SELECT current_user, current_setting('search_path')"
+```
+
 ## 3. 산출물 구조
 
 백업 디렉터리는 다음 파일을 가진다.
