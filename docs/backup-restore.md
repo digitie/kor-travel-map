@@ -89,9 +89,12 @@ filesystem `rmtree`는 같은 lock을 marker proof와 domain command terminal re
 
 ### 2.1 ⛔ per-database dump가 담지 않는 것 — 새 인스턴스로 옮길 때 반드시 함께 옮긴다
 
-`pg_dump -d <db>`는 **그 데이터베이스 안의 것만** 담는다. 아래 둘은 cluster 전역
-(`pg_dumpall --globals-only` 영역)이라 빠지고, **빠져도 복원은 성공한다.** 증상은
-런타임에야 나온다. 2026-08-15 전용 인스턴스 이행 리허설에서 둘 다 실제로 걸렸다.
+`pg_dump -d <db>`는 **그 데이터베이스 안의 것만** 담는다. 아래 넷은 그 밖(cluster 전역
+또는 compose 설정)이라 빠지고, **빠져도 복원은 성공한다.** 증상은 런타임에야 나온다.
+
+2026-08-15 전용 인스턴스 이행에서 넷 다 실제로 걸렸다 — **리허설이 ①②를, 커토버 후
+실제 ETL 실행이 ③④를** 드러냈다. ③④가 리허설을 통과한 이유는 아래 "왜 카탈로그 비교로는
+안 잡혔나"에 적는다.
 
 **① `ALTER DATABASE … SET`** — 특히 `search_path`.
 
@@ -122,16 +125,88 @@ SELECT format('ALTER ROLE %I PASSWORD %L;', rolname, rolpassword)
   FROM pg_authid WHERE rolname ~ '^ktm_' AND rolpassword IS NOT NULL;
 ```
 
-역할 **속성**(LOGIN/NOINHERIT)과 **멤버십**도 마찬가지로 따로 옮긴다. 특히 psql은
-boolean을 `t/f`가 아니라 `true/false`로 내므로, `[ "$v" = t ]` 같은 비교는 빗나가
-역할이 전부 NOLOGIN으로 만들어진다(리허설에서 실제로 그랬다).
+역할 **속성**(LOGIN/NOINHERIT)도 따로 옮긴다. 특히 psql은 boolean을 `t/f`가 아니라
+`true/false`로 내므로, `[ "$v" = t ]` 같은 비교는 빗나가 역할이 전부 NOLOGIN으로
+만들어진다(리허설에서 실제로 그랬다).
 
-**확인 방법** — 옮긴 뒤 실제 앱 DSN으로 붙어 본다. 스위치 전에 이것만 해도 위 둘을 다 잡는다.
+**③ 멤버십의 `INHERIT`/`SET` 옵션 (PG16).**
+
+`GRANT a TO b;`만 실행하면 `INHERIT` 옵션이 **member의 `rolinherit`에서 정해진다.**
+이 저장소 역할은 전부 NOINHERIT이므로 `inherit=false, set=true`가 된다.
+
+그런데 원본은 `inherit=true, set=false`다 — 역할 자체는 NOINHERIT이면서 **이 멤버십만**
+상속하도록 명시돼 있다. 그래야 runtime 역할이 `SET ROLE` 없이 스키마 USAGE를 갖는다.
+옵션을 안 옮기면 ETL이 이렇게 죽는다:
+
+```
+asyncpg.exceptions.InsufficientPrivilegeError: permission denied for schema provider_sync
+```
+
+```sql
+-- 원본에서: 옵션까지 담은 GRANT 문을 만든다. boolean은 t/f로 찍히므로 CASE로 편다.
+SELECT format('GRANT %I TO %I WITH ADMIN %s, INHERIT %s, SET %s;',
+              r.rolname, m.rolname,
+              CASE WHEN am.admin_option   THEN 'TRUE' ELSE 'FALSE' END,
+              CASE WHEN am.inherit_option THEN 'TRUE' ELSE 'FALSE' END,
+              CASE WHEN am.set_option     THEN 'TRUE' ELSE 'FALSE' END)
+  FROM pg_auth_members am
+  JOIN pg_roles m ON m.oid = am.member
+  JOIN pg_roles r ON r.oid = am.roleid
+ WHERE m.rolname ~ '^ktm_';
+```
+
+**④ compose가 하드코딩한 기본 DSN.**
+
+DB 밖의 문제지만 같은 사고를 낸다. `KOR_TRAVEL_MAP_DAGSTER_PG_URL`은
+
+```yaml
+KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL:-postgresql://…@127.0.0.1:5432/kor_travel_map_dagster}
+```
+
+로 되어 있는데 그 override 이름이 **`.env`에 아예 없었다.** `.env`만 훑는 방식으로는
+안 보인다. 안 고치면 dagster가 계속 **옛 DB에 run을 기록해** 두 DB가 조용히 갈라진다.
+
+```bash
+# `.env`가 아니라 compose가 resolve한 값에서 옛 포트를 찾는다
+docker compose config | grep -E 'PG_DSN|PG_URL' | grep ':5432/'
+```
+
+### 왜 카탈로그 비교로는 ③④가 안 잡혔나
+
+`scripts/compare-schema-catalogs.sh`의 **core digest**는 relation/column/index/constraint를
+본다. 스키마 ACL·멤버십 옵션은 그 축에 없고 보조 축과 별도 검사에 있다. 그래서 커토버
+직전 "digest 2486행 전 행 일치"가 나왔지만 ③④는 남아 있었다.
+
+**오라클의 일부만 돌리고 전체를 돌린 것처럼 읽지 마라.** 이행에서는 digest 외에
+아래를 따로 대조한다.
+
+```sql
+-- 스키마 ACL
+SELECT nspname, pg_get_userbyid(nspowner), array_to_string(nspacl, ',')
+  FROM pg_namespace WHERE nspname NOT LIKE 'pg\_%' AND nspname <> 'information_schema';
+
+-- 멤버십 옵션 (③)
+SELECT m.rolname, r.rolname, am.admin_option, am.inherit_option, am.set_option
+  FROM pg_auth_members am JOIN pg_roles m ON m.oid = am.member
+                          JOIN pg_roles r ON r.oid = am.roleid;
+
+-- 유효 권한 (가장 직접적이다)
+SELECT r.rolname, n.nspname, has_schema_privilege(r.rolname, n.nspname, 'USAGE')
+  FROM pg_roles r, pg_namespace n
+ WHERE r.rolname ~ '^ktm_' AND n.nspname IN ('feature','ops','provider_sync','x_extension');
+```
+
+**확인 방법 — 스위치 후 실제 job을 한 번 돌린다.** 위 대조를 다 해도 ④처럼 DB 밖의
+축은 남을 수 있다. 커토버에서 ③④를 실제로 잡아낸 것은 카탈로그 비교가 아니라 **ETL
+1회 실행**이었다. 인증만 확인하는 것으로는 부족하다:
 
 ```
 PGPASSWORD=<앱 DSN의 값> psql -h 127.0.0.1 -p <새 포트> -U ktm_feature_api_runtime \
   -d kor_travel_map -tAc "SELECT current_user, current_setting('search_path')"
 ```
+
+이 접속 시험은 ①②를 잡지만 ③④는 통과시킨다 — 접속과 `search_path`는 멀쩡하고
+스키마 USAGE에서만 막히기 때문이다.
 
 ## 3. 산출물 구조
 
