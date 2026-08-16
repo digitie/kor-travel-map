@@ -13,6 +13,30 @@
   execution/build artifact 차단을 CI로 고정한다. 남은 VWorld fallback과 daemon drift는 열린
   `T-VN-H46C`·`T-VN-H46D`가 각각 소유한다.
 
+## 2026-08-13 — T-VN-34/35/36 Wave 2 최종 배포·인수 완료
+
+> 2026-08-13 n150 prod에서 `0087_route_area_subtypes` →
+> `0104_tvn36_final_fence` forward migration과 runtime 배포를 완료했다. 이력·정확한
+> 측정값은 [`resume.md`](resume.md)의 같은 날짜 기록과
+> [`journal.md`](journal.md)의 배포 기록이 정본이다. squash 후 실행 정본은
+> `0200_schema_baseline`과 bridge다.
+
+- [x] T-VN-34A/B/C — **직교 상태 schema·public projection·writer/API/UI cutover**
+
+  final stacked cutover와 fresh clone live 인수를 마쳤다. 3축 상태 계약, public
+  projection, runtime principal 분리는 이후 legacy write-fence까지 유지한다.
+
+- [x] T-VN-36A/B/C/D·live — **field override 단일화·destructive fence·격리 clone 인수**
+
+  effective projection 단일화와 기존 field-level freeze 경로 제거를 완료했고,
+  candidate-head clone live 인수도 통과했다.
+
+- [x] T-VN-35/34/36-deploy — **`0104` prod cutover**
+
+  1,008,852 feature를 보존한 in-place migration(1시간 32분 39초) 뒤 api/ui/dagster/daemon
+  4개 런타임이 healthy 상태로 전환됐다. post-deploy baseline dump와 manifest를 남겼으며,
+  현행 공유 PostgreSQL에서 전용 인스턴스로의 향후 이전은 별도 Docker Manager 작업이다.
+
 ## 2026-08-12 — T-VN-38 weather·price current summary 병합
 
 > PR [#971](https://github.com/digitie/kor-travel-map/pull/971), merge

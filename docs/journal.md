@@ -2,6 +2,14 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-17 — 완료된 Wave 2 task 이력 아카이브 정리
+
+- `tasks.md`에서 완료된 T-VN-34/35/36 배포·인수 블록을 제거하고
+  `tasks-done.md`에 2026-08-13 prod cutover 요약으로 이관했다. 열린 Wave 2 백로그는
+  T-VN-37D, T-VN-40 release 수용, T-VN-39만 유지한다.
+- 인덱스와 상세의 비표준 `[/]` 표기를 `[~]`로 정규화했다. 이 변경은 문서 상태 정리만이며
+  코드·DB·runtime·배포 변경은 없다.
+
 ## 2026-08-16 — T-VN-40 구현·연동 소비자 PR 병합 상태 정리
 
 - Map 구현 PR [#974](https://github.com/digitie/kor-travel-map/pull/974)는
