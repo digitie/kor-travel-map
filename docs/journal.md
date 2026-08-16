@@ -2,6 +2,16 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-16 — T-VN-40 구현·연동 소비자 PR 병합 상태 정리
+
+- Map 구현 PR [#974](https://github.com/digitie/kor-travel-map/pull/974)는
+  `170ddf57`로 병합됐고 Python 3.11/3.12/3.13, fixture replay, lint, OpenAPI, frontend,
+  PostGIS integration CI가 모두 녹색이다.
+- 연동 소비자 PinVi [#445](https://github.com/digitie/pinvi/pull/445)와 Docker Manager
+  [#174](https://github.com/digitie/kor-travel-docker-manager/pull/174)도 병합됐다. 현재
+  T-VN-40 receipt는 의도적으로 `pending`이며, 다음 실행은 n150 canonical import/backfill 실운영
+  인수다. 그 증거 전에는 receipt complete·legacy 물리 삭제를 수행하지 않는다.
+
 ## 2026-08-16 — T-VN-40 PostGIS typed runtime CI 수리
 
 - provider operation과 provider cancellation terminal 통합 회귀를 실제 Dagster/API

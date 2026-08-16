@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-16 — T-VN-40 구현·연동 소비자 병합 완료
+
+Map 구현 PR [#974](https://github.com/digitie/kor-travel-map/pull/974)는
+`170ddf57`로 병합됐고 CI 8개가 모두 녹색이다. PinVi canonical 소비자
+[#445](https://github.com/digitie/pinvi/pull/445)와 Docker Manager C6c principal 결선
+[#174](https://github.com/digitie/kor-travel-docker-manager/pull/174)도 병합됐다. 이는 source와
+연동 release artifact의 준비 완료이지 n150 cutover 완료가 아니다.
+
+**다음 한 작업**: 전용 canonical principal을 사용해 n150에서 canonical import/backfill 실운영
+인수를 실행하고, Map·PinVi exact commit/service vendor hash와 legacy-zero 결과를 receipt에
+남긴다. 그 결과가 모두 있을 때만 T-VN-40 receipt를 complete로 전이하고 final legacy 물리 삭제를
+수행한다.
+
 ## 2026-08-16 — T-VN-40 PostGIS typed runtime CI 수리
 
 실제 Dagster/API LOGIN으로 provider·cancellation typed command를 실행하도록 integration

@@ -3,6 +3,16 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-08-16 — T-VN-H46A alembic squash 병합
+
+- [x] T-VN-H46A — **alembic squash: 체인 109개 → `0200_schema_baseline`**
+
+  PR [#978](https://github.com/digitie/kor-travel-map/pull/978)이 `main`에 병합됐다. 정본은
+  `alembic/versions/0200_schema_baseline.py` docstring과
+  `alembic/legacy_versions/README.md`이며, 빈 PostGIS DB catalog 동등성·ACL digest·legacy
+  execution/build artifact 차단을 CI로 고정한다. 남은 VWorld fallback과 daemon drift는 열린
+  `T-VN-H46C`·`T-VN-H46D`가 각각 소유한다.
+
 ## 2026-08-12 — T-VN-38 weather·price current summary 병합
 
 > PR [#971](https://github.com/digitie/kor-travel-map/pull/971), merge

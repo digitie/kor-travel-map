@@ -5,7 +5,7 @@
 [`docs/resume.md`](resume.md)가 정본이다. 작성·유지 규약은
 [`docs/tasks-rule.md`](tasks-rule.md)를 따른다.
 
-## 진행 중인 작업 인덱스 (2026-08-13 T-VN-36 PR #973 머지 후 재대조)
+## 진행 중인 작업 인덱스 (2026-08-16 T-VN-40 PR #974 머지 후 재대조)
 
 완료한 `T-VN-32`·`T-VN-33`·`T-VN-37`·`T-VN-38`과 선행 운영 task는
 [`tasks-done.md`](tasks-done.md)로 이관했다. 아래에는 아직 닫히지 않은 실행 단위만 둔다.
@@ -18,8 +18,7 @@ barrier로 직렬화한다.
   - [~] `T-VN-H25B` → [ ] `T-VN-H34`(공식 curation 미연결 membership 잔여 AC)
   - [~] `T-VN-H43` → [~] `T-VN-H44`(백업 정기화·복원 드릴 재개 조건)
   - [ ] `T-VN-H45-후속`(다건 provider fetcher·quota 관찰 확장)
-  - [~] `T-VN-H46A`(alembic squash — PR #978 CI 대기) →
-    [ ] `T-VN-H46C`(VWorld fallback 사슬 제거) ∥ [ ] `T-VN-H46D`(daemon 스키마 drift)
+  - [ ] `T-VN-H46C`(VWorld fallback 사슬 제거) ∥ [ ] `T-VN-H46D`(daemon 스키마 drift)
 - **Lane B — frontend hardening·PinVi 소비 API**
   - [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox)
   - [/] `T-VN-41F1D-D` → [ ] `T-VN-41F1D-D2`(격리 리허설·data-dependent live UI E2E)
@@ -29,12 +28,17 @@ barrier로 직렬화한다.
   - Lane B: [x] `T-VN-34A` → [x] `T-VN-34B` → [x] `T-VN-34C` →
     [x] `T-VN-36A` → [x] `T-VN-36B` → [x] `T-VN-36C` → [x] `T-VN-36D` →
     [x] `T-VN-36-live`(격리 clone 인수 완주 — 2026-08-13)
-  - 32~38 join barrier 뒤 Lane B: [ ] `T-VN-40A` → [ ] `T-VN-40B` →
-    [ ] `T-VN-40C`
+  - 32~38 join barrier 뒤 Lane B: [~] `T-VN-40A` → [~] `T-VN-40B` →
+    [~] `T-VN-40C`
     - A/B/C는 logical phase이며 **하나의 forward-only implementation PR/release**로만 구현·병합한다.
       phase별 writer/migration/consumer PR 또는 중간 배포는 금지한다.
     - T-VN-36 PR #973이 `c76ceb7a`로 `main`에 병합돼 join barrier가 해소됐고,
-      2026-08-13 사용자가 ADR-092와 40A/B/C 단일 PR 구현을 승인했다. 설계·구현 정본은
+      2026-08-13 사용자가 ADR-092와 40A/B/C 단일 PR 구현을 승인했다. Map 구현 PR
+      [#974](https://github.com/digitie/kor-travel-map/pull/974)는 `170ddf57`로 병합됐고,
+      PinVi [#445](https://github.com/digitie/pinvi/pull/445) 및 Docker Manager
+      [#174](https://github.com/digitie/kor-travel-docker-manager/pull/174)도 병합됐다. 다만
+      n150 canonical import/backfill 실운영 인수·연동 receipt complete·물리 삭제는 아직
+      실행하지 않았으므로 A/B/C는 release 관점에서 부분 완료다. 설계·구현 정본은
       [`t-vn-40-curation-write-model-plan-2026-08-11.md`](reports/t-vn-40-curation-write-model-plan-2026-08-11.md)다.
     - PR #978 최신 baseline+bridge를 T-VN-40 branch에 재배치했다. active chain은
       `0200_schema_baseline→0104_tvn36_final_fence(bridge)→0202…0220` 단일 head이며,
@@ -442,27 +446,6 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   소유한다. Map Agent A/B 실행 queue에는 넣지 않고 PinVi #215가 닫힐 때 상태만 동기화한다.
 
 ### T-VN-H46 — alembic squash + 배포 위생 (2026-08-14)
-
-- [~] T-VN-H46A — **alembic squash: 체인 109개 → `0200_schema_baseline`**
-
-  draft PR [#978](https://github.com/digitie/kor-travel-map/pull/978).
-  근거·설계는 `alembic/versions/0200_schema_baseline.py` docstring과
-  `alembic/legacy_versions/README.md`가 정본. 요지만:
-  체인은 prod in-place cutover(2026-08-13) 이후 **어떤 DB에서도 실행되지 않는다.**
-  sidecar SQL은 `scripts/build-baseline.sh`의 기계 산출물이고 `0200`이 byte sha로
-  잠근다. 빈 DB 적용 4초.
-
-  동등성 증명은 `scripts/compare-schema-catalogs.sh`(변조 7종 자체검증)로 카탈로그
-  2486행 전부 일치. ⚠️ `contracts/vnext/target-schema-fingerprints-v1.json`은 이
-  증명에 **쓸 수 없다** — 그 기준은 alembic head가 아니라 빈 PostGIS DB다
-  (`tests/integration/test_vnext_target_freeze.py:574`).
-
-  중간에 나온 결함이 본론이었다: 소유자가 아닌 GRANT는 오류가 아니라 **경고 후
-  무시**라서, baseline이 `exit 0`으로 통과하면서 routine 10개를 PUBLIC EXECUTE로
-  남겼다(102 → 112). ACL 블록마다 소유자로 `SET LOCAL ROLE` 하도록 생성기를 고치고,
-  적용 성공이 ACL 적용의 증거가 되지 못한다는 사실을 digest 자기검증으로 막았다.
-
-  잔여: CI green 확인 → 머지.
 
 - [x] T-VN-H46B — **prod 지오코딩 복구** (2026-08-14 완료)
 
@@ -1039,26 +1022,34 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
 ### T-VN-40 — curation write model 단일화 (Lane B)
 
-- [ ] T-VN-40A — **legacy writer inventory·write fence**
+> Map 구현 PR [#974](https://github.com/digitie/kor-travel-map/pull/974)는
+> `170ddf57`로 병합됐고 CI 8개가 모두 녹색이다. 연동 소비자 PinVi
+> [#445](https://github.com/digitie/pinvi/pull/445)와 Docker Manager
+> [#174](https://github.com/digitie/kor-travel-docker-manager/pull/174)도 병합됐다. 그러나
+> receipt는 `pending`이며 n150 canonical import/backfill 실운영 인수와 그 증거에 따른
+> final legacy 물리 삭제가 남아 있다. 따라서 아래 A/B/C는 구현은 병합됐지만 release는 아직
+> 완료되지 않은 `[~]` 상태다.
+
+- [~] T-VN-40A — **legacy writer inventory·write fence**
 
   `curated_features` overlay를 쓰는 route/job/trigger/repository를 전수 고정하고 신규 legacy write를
   차단한다. canonical curation과 effective projection checksum을 만든다.
 
-- [ ] T-VN-40B — **candidate lifecycle 분리·consumer cutover**
+- [~] T-VN-40B — **candidate lifecycle 분리·consumer cutover**
 
   자동 후보를 `theme_feature_candidates` lifecycle로 분리하고 admin/public/PinVi consumer가
   `curation_collections/items` 정본만 읽도록 전환한다.
 
-- [ ] T-VN-40C — **legacy surface fence·removal manifest**
+- [~] T-VN-40C — **legacy surface fence·removal manifest**
 
   checksum과 consumer cutover 뒤 overlay 신규 write와 normal routing을 차단한다. exact removal
   manifest로 legacy repository/trigger/table/API/ACL을 같은 forward-only release에서 물리 삭제하고
   T-VN-39에 catalog-zero receipt를 넘긴다. held component·old binary rollback·신규 호환 shim은
   만들지 않으며 recovery는 fresh clone/reload만 허용한다.
 
-  2026-08-15 기준 Docker Manager PR #174가 PinVi raw snapshot/mapping pair→Map digest pair의
-  C6c 결선을 구현했지만 아직 draft다. 이를 병합하고 n150 canonical import/backfill live receipt를
-  남기기 전에는 legacy surface 물리 삭제나 T-VN-40 receipt complete를 수행하지 않는다.
+  Docker Manager PR #174가 PinVi raw snapshot/mapping pair→Map digest pair의 C6c 결선을
+  구현해 병합됐다. n150 canonical import/backfill live receipt를 남기기 전에는 legacy surface
+  물리 삭제나 T-VN-40 receipt complete를 수행하지 않는다.
 
 - [ ] T-VN-39 — **KTM·PinVi write-fence cutover**
 
