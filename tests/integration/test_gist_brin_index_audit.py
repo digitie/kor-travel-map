@@ -1,9 +1,18 @@
-"""T-VN-18 — 자동 full GiST 제거 + partial 유지 + write-cost 실측 (F-8 / D-12-3).
+"""T-VN-18 — 자동 full GiST 제거 + partial 유지 (F-8 / D-12-3).
 
 - head(0061)에서 자동 full GiST 3개는 사라지고 공개 술어 partial GiST 3개만 남는다.
 - 공개 bbox/nearest-weather 조회의 planner가 partial GiST를 선택한다(EXPLAIN 회귀).
 - weather source-record 지원 index(T-VN-17 이월)가 존재한다.
-- write-cost 실측(§8.3 필수): full 포함(6 GiST) vs partial만(3 GiST) INSERT 처리량.
+
+**write-cost 실측(§8.3)은 이 파일에 없다.** `df9237a3`(T-VN-40, 0200 baseline 위로
+migration 재배치)이 그 측정을 지웠는데 이 docstring만 남아 "여기서 잰다"고 계속
+말하고 있었다. 그 상태가 위험한 것은 §8.3을 근거로 이 파일을 열어 본 사람이
+**측정이 있다고 믿고 넘어가기** 때문이다 — 없는 검사를 있다고 읽는 쪽이, 검사가
+없다는 것을 아는 쪽보다 나쁘다.
+
+되살릴지는 별도 판단이다. 되살린다면 전제가 하나 있다: partial GiST의 predicate가
+(lifecycle active, publication published, quality valid)이므로 seed 행이 그 조합이
+아니면 partial 쪽 유지비가 0이 되어 비교가 자기 자신과의 비교로 퇴화한다.
 """
 
 from __future__ import annotations
