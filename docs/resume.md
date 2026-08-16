@@ -1,5 +1,15 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-17 — 완료된 Wave 2 task 이력 아카이브 정리
+
+`T-VN-34`·`T-VN-35/34/36-deploy`·`T-VN-36`과 격리 clone 인수는 2026-08-13
+prod cutover로 완료돼 [`tasks-done.md`](tasks-done.md)로 이관했다. `tasks.md`에는
+열린 `T-VN-37D`, T-VN-40 release 수용, T-VN-39만 남겼고 비표준 상태 표기도
+규약의 `[~]`로 바로잡았다. 코드·스키마·운영 환경 변경은 없다.
+
+**다음 한 작업**: 기존과 같이 T-VN-40 canonical import/backfill 실운영 인수와
+paired receipt complete를 진행한다.
+
 ## 2026-08-16 — T-VN-40 구현·연동 소비자 병합 완료
 
 Map 구현 PR [#974](https://github.com/digitie/kor-travel-map/pull/974)는
