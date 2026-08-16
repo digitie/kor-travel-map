@@ -170,7 +170,7 @@ def _validate_resolved_member(
                 )
                 or (
                     member.operation_kind == "provider_feature_load_run"
-                    and base.current_stage == "stale_input"
+                    and base.current_stage in {"stale_input", "tracking_invariant"}
                 )
             )
         ):

@@ -39,6 +39,28 @@ def _runtime_engine(engine: AsyncEngine, *, login: str) -> AsyncEngine:
     return make_async_engine(dsn, pool_size=1)
 
 
+async def _current_provider_curation_input_set(
+    engine: AsyncEngine, *, provider_dataset_id: int
+) -> dict[str, object]:
+    """sealed command의 caller payload를 만들기 위한 관리자-side test probe."""
+    async with engine.connect() as connection:
+        return dict(
+            (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT input_member_count, source_input_set_hash
+                        FROM feature.current_provider_curation_input_set(:dataset_id)
+                        """
+                    ),
+                    {"dataset_id": provider_dataset_id},
+                )
+            )
+            .mappings()
+            .one()
+        )
+
+
 async def _seed_candidate(
     engine: AsyncEngine,
     *,
@@ -1284,6 +1306,10 @@ async def test_provider_root_success_atomically_observes_generates_and_seals(
     session_factory = async_sessionmaker(dagster, expire_on_commit=False)
     source_job_id = ""
     try:
+        seal = await _current_provider_curation_input_set(
+            migrated_engine,
+            provider_dataset_id=membership.provider_dataset_id,
+        )
         async with session_factory.begin() as session:
             await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
             await ensure_dagster_feature_operation(
@@ -1296,17 +1322,6 @@ async def test_provider_root_success_atomically_observes_generates_and_seals(
                 engine_started_at=started_at,
                 observed_status="STARTED",
             )
-            seal = (
-                await session.execute(
-                    text(
-                        """
-                        SELECT input_member_count, source_input_set_hash
-                        FROM feature.current_provider_curation_input_set(:dataset_id)
-                        """
-                    ),
-                    {"dataset_id": membership.provider_dataset_id},
-                )
-            ).mappings().one()
             finished = await finish_dagster_feature_membership(
                 session,
                 dagster_run_id=run_id,
@@ -1573,6 +1588,10 @@ async def test_concierge_catalog_is_db_derived_inside_terminal_root(
     dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
     session_factory = async_sessionmaker(dagster, expire_on_commit=False)
     try:
+        seal = await _current_provider_curation_input_set(
+            migrated_engine,
+            provider_dataset_id=membership.provider_dataset_id,
+        )
         async with session_factory.begin() as session:
             await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
             await ensure_dagster_feature_operation(
@@ -1585,17 +1604,6 @@ async def test_concierge_catalog_is_db_derived_inside_terminal_root(
                 engine_started_at=created_at + timedelta(seconds=1),
                 observed_status="STARTED",
             )
-            seal = (
-                await session.execute(
-                    text(
-                        """
-                        SELECT input_member_count, source_input_set_hash
-                        FROM feature.current_provider_curation_input_set(:dataset_id)
-                        """
-                    ),
-                    seeded,
-                )
-            ).mappings().one()
             await finish_dagster_feature_membership(
                 session,
                 dagster_run_id=run_id,
@@ -1818,44 +1826,53 @@ async def test_provider_operation_rows_require_typed_dagster_commands(
     finally:
         await api.dispose()
 
-    async with session_factory.begin() as session:
-        await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
-        await session.execute(
-            text(
-                """
-                CALL ops.finish_provider_feature_membership_command(
-                  CAST(:root_job_id AS uuid), :dataset_id,
-                  'dataset_wide', 'load', false, clock_timestamp(), NULL
-                )
-                """
-            ),
-            {**seeded, "root_job_id": root_job_id},
+    terminal_dagster = _runtime_engine(
+        migrated_engine, login="ktm_feature_dagster_runtime"
+    )
+    try:
+        terminal_session_factory = async_sessionmaker(
+            terminal_dagster, expire_on_commit=False
         )
-        await session.execute(
-            text(
-                """
-                CALL ops.transition_provider_feature_operation_terminal_command(
-                  CAST(:root_job_id AS uuid), 'done', 'SUCCESS', 'completed', NULL,
-                  clock_timestamp(), clock_timestamp(), false, NULL
-                )
-                """
-            ),
-            {"root_job_id": root_job_id},
-        )
-        result = (
+        async with terminal_session_factory.begin() as session:
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
             await session.execute(
                 text(
                     """
-                    CALL feature.finalize_provider_curation_root(
-                      CAST(:root_job_id AS uuid), NULL, NULL, NULL, NULL
+                    CALL ops.finish_provider_feature_membership_command(
+                      CAST(:root_job_id AS uuid), :dataset_id,
+                      'dataset_wide', 'load', false, clock_timestamp(), NULL
+                    )
+                    """
+                ),
+                {**seeded, "root_job_id": root_job_id},
+            )
+            await session.execute(
+                text(
+                    """
+                    CALL ops.transition_provider_feature_operation_terminal_command(
+                      CAST(:root_job_id AS uuid), 'done', 'SUCCESS', 'completed', NULL,
+                      clock_timestamp(), clock_timestamp(), false, NULL
                     )
                     """
                 ),
                 {"root_job_id": root_job_id},
             )
-        ).mappings().one()
-        assert result["o_generation_count"] == 0
-        assert result["o_replayed"] is False
+            result = (
+                await session.execute(
+                    text(
+                        """
+                        CALL feature.finalize_provider_curation_root(
+                          CAST(:root_job_id AS uuid), NULL, NULL, NULL, NULL
+                        )
+                        """
+                    ),
+                    {"root_job_id": root_job_id},
+                )
+            ).mappings().one()
+            assert result["o_generation_count"] == 0
+            assert result["o_replayed"] is False
+    finally:
+        await terminal_dagster.dispose()
     async with migrated_engine.connect() as connection:
         assert (
             await connection.scalar(
@@ -2057,6 +2074,10 @@ async def test_provider_cancellation_success_finalizes_authoritative_root(
     dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
     api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
     try:
+        seal = await _current_provider_curation_input_set(
+            migrated_engine,
+            provider_dataset_id=membership.provider_dataset_id,
+        )
         async with async_sessionmaker(dagster, expire_on_commit=False).begin() as session:
             await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
             await ensure_dagster_feature_operation(
@@ -2069,17 +2090,6 @@ async def test_provider_cancellation_success_finalizes_authoritative_root(
                 engine_started_at=started_at,
                 observed_status="STARTED",
             )
-            seal = (
-                await session.execute(
-                    text(
-                        """
-                        SELECT input_member_count, source_input_set_hash
-                        FROM feature.current_provider_curation_input_set(:dataset_id)
-                        """
-                    ),
-                    seeded,
-                )
-            ).mappings().one()
             completed = await finish_dagster_feature_membership(
                 session,
                 dagster_run_id=run_id,

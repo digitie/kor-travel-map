@@ -32,8 +32,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.infra.advisory_lock import advisory_lock_key
 from kortravelmap.infra.feature_operation_repo import (
-    ensure_dagster_feature_operation,
-    finish_dagster_feature_membership,
+    ensure_dagster_feature_operation as _ensure_dagster_feature_operation,
+)
+from kortravelmap.infra.feature_operation_repo import (
+    finish_dagster_feature_membership as _finish_dagster_feature_membership,
 )
 from kortravelmap.infra.jobs_repo import enqueue_unpaired_import_job
 from kortravelmap.infra.pipeline_cancellation_repo import (
@@ -60,8 +62,23 @@ from tests.integration._membership_seed import (
     MULTI_MEMBER_OPERATION,
     memberships_for_operation,
 )
+from tests.integration.conftest import as_dagster_runtime
 
 pytestmark = pytest.mark.integration
+
+
+async def ensure_dagster_feature_operation(
+    session: AsyncSession, **kwargs: Any
+) -> Any:
+    async with as_dagster_runtime(session) as runtime_session:
+        return await _ensure_dagster_feature_operation(runtime_session, **kwargs)
+
+
+async def finish_dagster_feature_membership(
+    session: AsyncSession, **kwargs: Any
+) -> Any:
+    async with as_dagster_runtime(session) as runtime_session:
+        return await _finish_dagster_feature_membership(runtime_session, **kwargs)
 
 
 @pytest.fixture
@@ -181,6 +198,7 @@ async def _create_attempt(
 )
 async def test_canonical_same_marker_terminal_reconciles_authoritative_state(
     migrated_engine: AsyncEngine,
+    api_runtime_engine: AsyncEngine,
     terminal_status: str,
     expected_status: str,
     expected_stage: str,
@@ -237,7 +255,7 @@ async def test_canonical_same_marker_terminal_reconciles_authoritative_state(
         cancellation_id = attempt.attempt.cancellation_id
 
     try:
-        async with AsyncSession(migrated_engine) as coordinator:
+        async with AsyncSession(api_runtime_engine) as coordinator:
             async with coordinator.begin():
                 detail = await get_pipeline_cancellation_detail(
                     coordinator, cancellation_id

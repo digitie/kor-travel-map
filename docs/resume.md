@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-16 — T-VN-40 PostGIS typed runtime CI 수리
+
+실제 Dagster/API LOGIN으로 provider·cancellation typed command를 실행하도록 integration
+fixture를 분리했다. command owner가 append-only event clock을 갱신하는 최소 권한도 정렬했고,
+queued provider root의 terminal heartbeat 및 tracking-invariant 종결을 실제 cancellation
+coordinator 흐름으로 고정했다. quarantine marker NULL 비교와 committed-row test isolation,
+candidate engine dispose 순서도 fail-close로 수리했다. runtime privilege 음성 test의 API·Dagster
+engine 수명도 정확히 닫아 Python 3.13 CI가 ResourceWarning으로 실패하지 않게 했다.
+
+**다음 한 작업**: PR #974 브랜치를 푸시한 뒤 GitHub Integration/PostGIS check가 focused
+회귀와 같은 실제 runtime identity에서 녹색으로 끝나는지 확인한다. 그 전에는 rollout receipt
+completion이나 n150 live acceptance를 수행하지 않는다.
+
 ## 2026-08-15 — T-VN-40 PostGIS CI runtime 격리 정렬
 
 runtime privilege preflight가 disposable LOGIN 비밀번호를 오래된 T-VN-34 값으로

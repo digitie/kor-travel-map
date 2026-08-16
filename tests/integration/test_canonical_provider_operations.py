@@ -67,14 +67,22 @@ from kortravelmap.core.feature_operation import (
     TriggerKind,
 )
 from kortravelmap.infra.feature_operation_repo import (
-    append_dagster_feature_attempt_event,
-    ensure_dagster_feature_operation,
-    finish_dagster_feature_membership,
+    append_dagster_feature_attempt_event as _append_dagster_feature_attempt_event,
+)
+from kortravelmap.infra.feature_operation_repo import (
+    ensure_dagster_feature_operation as _ensure_dagster_feature_operation,
+)
+from kortravelmap.infra.feature_operation_repo import (
+    finish_dagster_feature_membership as _finish_dagster_feature_membership,
+)
+from kortravelmap.infra.feature_operation_repo import (
     list_feature_operation_memberships,
     list_reconcilable_dagster_feature_runs,
-    reconcile_dagster_feature_run,
     resolve_feature_operation_dataset_membership,
     resolve_feature_operation_memberships,
+)
+from kortravelmap.infra.feature_operation_repo import (
+    reconcile_dagster_feature_run as _reconcile_dagster_feature_run,
 )
 from kortravelmap.infra.jobs_repo import (
     claim_next_import_job,
@@ -112,8 +120,56 @@ from tests.integration._membership_seed import (
     membership_for_dataset,
     memberships_for_operation,
 )
+from tests.integration.conftest import as_dagster_runtime
 
 pytestmark = pytest.mark.integration
+
+@pytest.fixture(autouse=True)
+def _provider_operation_clients_use_dagster_login(
+    monkeypatch: pytest.MonkeyPatch,
+    dagster_runtime_engine: AsyncEngine,
+) -> None:
+    """이 모듈의 provider client만 실제 Dagster LOGIN으로 생성한다.
+
+    class 자체를 lambda로 바꾸면 아래의 ``AsyncKorTravelMapClient`` subclass
+    regression이 깨진다. 생성자만 바꿔 concrete/subclass 표면은 그대로 둔다.
+    """
+
+    original_init = AsyncKorTravelMapClient.__init__
+
+    def _init(self: AsyncKorTravelMapClient, _ignored_engine: AsyncEngine) -> None:
+        original_init(self, dagster_runtime_engine)
+
+    monkeypatch.setattr(AsyncKorTravelMapClient, "__init__", _init)
+
+
+async def ensure_dagster_feature_operation(
+    session: AsyncSession, **kwargs: Any
+) -> Any:
+    """Provider command은 실제 Dagster executor identity로만 실행한다."""
+    async with as_dagster_runtime(session) as runtime_session:
+        return await _ensure_dagster_feature_operation(runtime_session, **kwargs)
+
+
+async def finish_dagster_feature_membership(
+    session: AsyncSession, **kwargs: Any
+) -> Any:
+    async with as_dagster_runtime(session) as runtime_session:
+        return await _finish_dagster_feature_membership(runtime_session, **kwargs)
+
+
+async def append_dagster_feature_attempt_event(
+    session: AsyncSession, **kwargs: Any
+) -> Any:
+    async with as_dagster_runtime(session) as runtime_session:
+        return await _append_dagster_feature_attempt_event(runtime_session, **kwargs)
+
+
+async def reconcile_dagster_feature_run(
+    session: AsyncSession, **kwargs: Any
+) -> Any:
+    async with as_dagster_runtime(session) as runtime_session:
+        return await _reconcile_dagster_feature_run(runtime_session, **kwargs)
 
 
 #: attempt event를 member 행 identity로 되찾는 조인. ``ops.import_job_events``의
@@ -1168,6 +1224,7 @@ async def test_b2_mcst_partial_attempt_is_preserved_by_b3_failure_record(
 async def test_feature_operation_lifecycle_is_idempotent_and_never_reverses(
     migrated_session: AsyncSession,
 ) -> None:
+    await migrated_session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
     created_at = datetime(2026, 7, 15, 1, tzinfo=UTC)
     started_at = created_at + timedelta(seconds=2)
     finished_at = started_at + timedelta(seconds=3)

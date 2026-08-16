@@ -341,6 +341,8 @@ async def test_tvn34_runtime_preflight_rejects_single_audit_or_read_view_leak(
             await connection.execute(
                 text("GRANT SELECT ON feature.public_features TO ktm_feature_runtime")
             )
+        await api_engine.dispose()
+        await dagster_engine.dispose()
 
 
 async def test_tvn40_runtime_preflight_rejects_cross_executor_and_missing_grants(
@@ -506,8 +508,6 @@ async def test_tvn40_runtime_preflight_rejects_cross_executor_and_missing_grants
                     "uuid,text,timestamptz) TO ktm_feature_api_runtime"
                 )
             )
-        await api_engine.dispose()
-        await dagster_engine.dispose()
         await api_engine.dispose()
         await dagster_engine.dispose()
 

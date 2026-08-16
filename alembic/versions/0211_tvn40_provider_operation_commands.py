@@ -698,7 +698,7 @@ def upgrade() -> None:
     op.execute("REVOKE CREATE ON SCHEMA ops FROM ktm_curation_command_owner")
     op.execute(
         "GRANT SELECT, INSERT, UPDATE ON TABLE ops.import_jobs, ops.import_job_datasets, "
-        "ops.import_job_events "
+        "ops.import_job_events, ops.import_job_event_clock "
         "TO ktm_curation_command_owner"
     )
     op.execute(

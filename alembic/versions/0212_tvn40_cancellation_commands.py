@@ -187,7 +187,8 @@ BEGIN
       error_message = COALESCE(p_error_message, job.error_message),
       finished_at = v_finished_at,
       started_at = COALESCE(job.started_at, p_engine_started_at),
-      heartbeat_at = CASE WHEN job.status = 'running' THEN v_finished_at ELSE job.heartbeat_at END,
+      heartbeat_at = CASE WHEN job.status IN ('queued', 'running')
+        THEN v_finished_at ELSE job.heartbeat_at END,
       progress = CASE WHEN p_target_status = 'done' THEN 100 ELSE job.progress END,
       current_stage = CASE p_target_status
         WHEN 'done' THEN 'completed'

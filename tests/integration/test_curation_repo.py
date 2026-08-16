@@ -25,7 +25,6 @@ from kortravelmap.infra.curation_repo import (
     _UPSERT_COLLECTION_SQL,  # noqa: PLC2701 - concurrency regression
     CurationImportResult,
     CurationQuarantineMoveConflictError,
-    CurationQuarantineTargetArchivedError,
     FeatureMatchRequest,
     ResolvedCurationImportRow,
     _upsert_id_with_fallback,  # noqa: PLC2701 - concurrency regression
@@ -64,6 +63,7 @@ from kortravelmap.infra.models import (
     SourceRecordRow,
 )
 from tests.integration._db_cleanup import truncate_committed_test_rows
+from tests.integration.conftest import as_api_runtime
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -71,6 +71,98 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.integration
 
 _FEATURE_ID = "feature:curation-multi-test"
+
+
+async def _quarantine_command_id(session: AsyncSession, *, actor: str) -> int:
+    """격리 재분류 command receipt를 seed한다.
+
+    구형 repository 회귀는 root session으로 fixture를 심되, T-VN-40 write
+    command 자체는 아래 helper가 실제 API runtime으로 실행한다.
+    """
+
+    return int(
+        (
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO ops.domain_commands (
+                      actor, operation, idempotency_key, request_fingerprint
+                    ) VALUES (
+                      :actor, 'admin.curation-quarantine.reclassify',
+                      x_extension.gen_random_uuid(),
+                      encode(x_extension.digest(
+                        convert_to(x_extension.gen_random_uuid()::text, 'UTF8'),
+                        'sha256'
+                      ), 'hex')
+                    )
+                    RETURNING command_id
+                    """
+                ),
+                {"actor": actor},
+            )
+        ).scalar_one()
+    )
+
+
+async def _collection_revision(session: AsyncSession, collection_id: str) -> int:
+    return int(
+        await session.scalar(
+            text(
+                """
+                SELECT row_revision
+                FROM feature.curation_collections
+                WHERE collection_id = CAST(:collection_id AS uuid)
+                """
+            ),
+            {"collection_id": collection_id},
+        )
+    )
+
+
+async def _move_quarantine_as_api(
+    session: AsyncSession,
+    *,
+    actor: str,
+    collection_id: str,
+    expected_collection_revision: int,
+    target_collection_id: str | None = None,
+    expected_target_revision: int = 1,
+    item_ids: Sequence[str] | None = None,
+) -> tuple[tuple[str, ...], bool]:
+    command_id = await _quarantine_command_id(session, actor=actor)
+    async with as_api_runtime(session):
+        return await move_curation_quarantine_items(
+            session,
+            collection_id=collection_id,
+            expected_collection_revision=expected_collection_revision,
+            target_collection_id=target_collection_id,
+            expected_target_revision=expected_target_revision,
+            item_ids=item_ids,
+            command_id=command_id,
+            actor=actor,
+        )
+
+
+async def _confirm_quarantine_as_api(
+    session: AsyncSession,
+    *,
+    actor: str,
+    collection_id: str,
+    expected_collection_revision: int,
+    collection_key: str,
+    title: str,
+) -> tuple[str, str]:
+    command_id = await _quarantine_command_id(session, actor=actor)
+    async with as_api_runtime(session):
+        return await confirm_curation_quarantine_standalone(
+            session,
+            collection_id=collection_id,
+            expected_collection_revision=expected_collection_revision,
+            collection_key=collection_key,
+            title=title,
+            command_id=command_id,
+            actor=actor,
+        )
 
 
 def _payload_hash(seed: str) -> str:
@@ -5010,6 +5102,7 @@ async def test_quarantine_conflict_preview_truth_table(
 ) -> None:
     """② conflict preview 진리표 — (A)만 / (B)만 / (A) 우선 / movable / 미해결 target."""
 
+    await migrated_session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
     theme_id, source_id = await _seed_foundations(migrated_session)
     target = await create_curation_collection(
         migrated_session,
@@ -5185,14 +5278,25 @@ async def test_quarantine_conflict_preview_truth_table(
             collection_id=quarantine_id,
             target_collection_id=orphan_quarantine_id,
         )
-    with pytest.raises(ValueError, match="격리 간 이동"):
-        await move_curation_quarantine_items(
-            migrated_session,
-            collection_id=quarantine_id,
-            target_collection_id=orphan_quarantine_id,
-            item_ids=None,
-            actor="mover",
-        )
+    savepoint = await migrated_session.begin_nested()
+    try:
+        with pytest.raises(DBAPIError) as invalid_move:
+            await _move_quarantine_as_api(
+                migrated_session,
+                collection_id=quarantine_id,
+                expected_collection_revision=await _collection_revision(
+                    migrated_session, quarantine_id
+                ),
+                target_collection_id=orphan_quarantine_id,
+                expected_target_revision=await _collection_revision(
+                    migrated_session, orphan_quarantine_id
+                ),
+                item_ids=None,
+                actor="mover",
+            )
+        assert getattr(invalid_move.value.orig, "sqlstate", None) == "23514"
+    finally:
+        await savepoint.rollback()
 
 
 async def test_quarantine_move_is_atomic_and_deletes_empty_collection(
@@ -5200,6 +5304,7 @@ async def test_quarantine_move_is_atomic_and_deletes_empty_collection(
 ) -> None:
     """③ move 성공 + 빈 격리 DELETE ④ 충돌 fail-close(무변경) ⑥ actor 기록."""
 
+    await migrated_session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
     theme_id, source_id = await _seed_foundations(migrated_session)
     target = await create_curation_collection(
         migrated_session,
@@ -5277,9 +5382,15 @@ async def test_quarantine_move_is_atomic_and_deletes_empty_collection(
     # ④ 전체 이동은 충돌 1건 때문에 원자적으로 거부되고 아무 행도 안 바뀐다.
     before = await _item_states()
     with pytest.raises(CurationQuarantineMoveConflictError) as conflict_info:
-        await move_curation_quarantine_items(
+        await _move_quarantine_as_api(
             migrated_session,
             collection_id=quarantine_id,
+            expected_collection_revision=await _collection_revision(
+                migrated_session, quarantine_id
+            ),
+            expected_target_revision=await _collection_revision(
+                migrated_session, target.collection_id
+            ),
             actor="ops:h22-reviewer",
         )
     assert [
@@ -5295,27 +5406,55 @@ async def test_quarantine_move_is_atomic_and_deletes_empty_collection(
     assert await _item_states() == before
     assert before[movable_1.curation_item_id] == (quarantine_id, "seeder")
 
-    # 중복 item_ids는 422 계약(ValueError)이다.
-    with pytest.raises(ValueError, match="중복"):
-        await move_curation_quarantine_items(
-            migrated_session,
-            collection_id=quarantine_id,
-            item_ids=[movable_1.curation_item_id, movable_1.curation_item_id],
-            actor="ops:h22-reviewer",
-        )
+    # 중복 item_ids는 named command DB invariant로 거부된다.
+    savepoint = await migrated_session.begin_nested()
+    try:
+        with pytest.raises(DBAPIError) as duplicate_item_ids:
+            await _move_quarantine_as_api(
+                migrated_session,
+                collection_id=quarantine_id,
+                expected_collection_revision=await _collection_revision(
+                    migrated_session, quarantine_id
+                ),
+                expected_target_revision=await _collection_revision(
+                    migrated_session, target.collection_id
+                ),
+                item_ids=[movable_1.curation_item_id, movable_1.curation_item_id],
+                actor="ops:h22-reviewer",
+            )
+        assert getattr(duplicate_item_ids.value.orig, "sqlstate", None) == "23514"
+    finally:
+        await savepoint.rollback()
 
     # marker 없는 collection은 move 대상이 아니다 (⑦의 move 측).
-    with pytest.raises(LookupError, match="quarantine collection 없음"):
-        await move_curation_quarantine_items(
-            migrated_session,
-            collection_id=target.collection_id,
-            actor="ops:h22-reviewer",
-        )
+    savepoint = await migrated_session.begin_nested()
+    try:
+        with pytest.raises(DBAPIError) as non_quarantine:
+            await _move_quarantine_as_api(
+                migrated_session,
+                collection_id=target.collection_id,
+                expected_collection_revision=await _collection_revision(
+                    migrated_session, target.collection_id
+                ),
+                expected_target_revision=await _collection_revision(
+                    migrated_session, target.collection_id
+                ),
+                actor="ops:h22-reviewer",
+            )
+        assert getattr(non_quarantine.value.orig, "sqlstate", None) == "23514"
+    finally:
+        await savepoint.rollback()
 
     # 부분 이동(충돌 없는 subset)은 성공하고 actor가 updated_by에 박힌다 (⑥).
-    moved_ids, deleted = await move_curation_quarantine_items(
+    moved_ids, deleted = await _move_quarantine_as_api(
         migrated_session,
         collection_id=quarantine_id,
+        expected_collection_revision=await _collection_revision(
+            migrated_session, quarantine_id
+        ),
+        expected_target_revision=await _collection_revision(
+            migrated_session, target.collection_id
+        ),
         item_ids=[movable_1.curation_item_id, movable_2.curation_item_id],
         actor="ops:h22-reviewer",
     )
@@ -5332,7 +5471,7 @@ async def test_quarantine_move_is_atomic_and_deletes_empty_collection(
     )
     assert after_partial[conflicted.curation_item_id] == (quarantine_id, "seeder")
 
-    # archived target은 409 계약의 전용 예외로 거부된다.
+    # archive된 target은 named command DB invariant로 거부된다.
     archived_target = await create_curation_collection(
         migrated_session,
         collection_key="h22:archived-target",
@@ -5345,22 +5484,42 @@ async def test_quarantine_move_is_atomic_and_deletes_empty_collection(
         collection_id=archived_target.collection_id,
         actor="seeder",
     )
-    with pytest.raises(CurationQuarantineTargetArchivedError):
-        await move_curation_quarantine_items(
-            migrated_session,
-            collection_id=quarantine_id,
-            target_collection_id=archived_target.collection_id,
-            actor="ops:h22-reviewer",
-        )
+    savepoint = await migrated_session.begin_nested()
+    try:
+        with pytest.raises(DBAPIError) as archived_target_error:
+            await _move_quarantine_as_api(
+                migrated_session,
+                collection_id=quarantine_id,
+                expected_collection_revision=await _collection_revision(
+                    migrated_session, quarantine_id
+                ),
+                target_collection_id=archived_target.collection_id,
+                expected_target_revision=await _collection_revision(
+                    migrated_session, archived_target.collection_id
+                ),
+                actor="ops:h22-reviewer",
+            )
+        assert getattr(archived_target_error.value.orig, "sqlstate", None) == "23514"
+    finally:
+        await savepoint.rollback()
 
-    # 존재하지 않는 target은 404 계약(LookupError)이다.
-    with pytest.raises(LookupError, match="target collection 없음"):
-        await move_curation_quarantine_items(
-            migrated_session,
-            collection_id=quarantine_id,
-            target_collection_id=str(uuid4()),
-            actor="ops:h22-reviewer",
-        )
+    # 존재하지 않는 target은 procedure의 not-found SQLSTATE로 거부된다.
+    savepoint = await migrated_session.begin_nested()
+    try:
+        with pytest.raises(DBAPIError) as missing_target:
+            await _move_quarantine_as_api(
+                migrated_session,
+                collection_id=quarantine_id,
+                expected_collection_revision=await _collection_revision(
+                    migrated_session, quarantine_id
+                ),
+                target_collection_id=str(uuid4()),
+                expected_target_revision=1,
+                actor="ops:h22-reviewer",
+            )
+        assert getattr(missing_target.value.orig, "sqlstate", None) == "P0002"
+    finally:
+        await savepoint.rollback()
 
     # ③ 남은 item을 빈 target으로 옮기면 격리 collection 행이 DELETE된다.
     fresh_target = await create_curation_collection(
@@ -5370,10 +5529,16 @@ async def test_quarantine_move_is_atomic_and_deletes_empty_collection(
         source_id=None,
         title="새 target",
     )
-    moved_ids, deleted = await move_curation_quarantine_items(
+    moved_ids, deleted = await _move_quarantine_as_api(
         migrated_session,
         collection_id=quarantine_id,
+        expected_collection_revision=await _collection_revision(
+            migrated_session, quarantine_id
+        ),
         target_collection_id=fresh_target.collection_id,
+        expected_target_revision=await _collection_revision(
+            migrated_session, fresh_target.collection_id
+        ),
         actor="ops:h22-reviewer",
     )
     assert moved_ids == (conflicted.curation_item_id,)
@@ -5398,8 +5563,9 @@ async def test_quarantine_move_is_atomic_and_deletes_empty_collection(
 async def test_quarantine_confirm_standalone_removes_marker_only(
     migrated_session: AsyncSession,
 ) -> None:
-    """⑤ marker 키 제거 + key/title 갱신 ⑥ actor 기록 ⑦ marker 없으면 LookupError."""
+    """⑤ marker 키 제거 + key/title 갱신 ⑥ actor 기록 ⑦ marker 없으면 DB에서 거부."""
 
+    await migrated_session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
     theme_id, source_id = await _seed_foundations(migrated_session)
     original = await create_curation_collection(
         migrated_session,
@@ -5424,9 +5590,12 @@ async def test_quarantine_confirm_standalone_removes_marker_only(
         actor="seeder",
     )
 
-    confirmed_id, confirmed_key = await confirm_curation_quarantine_standalone(
+    confirmed_id, confirmed_key = await _confirm_quarantine_as_api(
         migrated_session,
         collection_id=quarantine_id,
+        expected_collection_revision=await _collection_revision(
+            migrated_session, quarantine_id
+        ),
         collection_key="  h22:standalone-confirmed  ",
         title="  독립 확정  ",
         actor="ops:h22-reviewer",
@@ -5463,22 +5632,32 @@ async def test_quarantine_confirm_standalone_removes_marker_only(
     # 확정된 collection은 더 이상 격리 정본 술어에 안 걸린다.
     rows, _ = await list_curation_quarantine_collections(migrated_session)
     assert [r.collection_id for r in rows] == []
-    with pytest.raises(LookupError, match="quarantine collection 없음"):
-        await confirm_curation_quarantine_standalone(
-            migrated_session,
-            collection_id=quarantine_id,
-            collection_key="h22:standalone-again",
-            title="재확정",
-            actor="ops:h22-reviewer",
-        )
+    savepoint = await migrated_session.begin_nested()
+    try:
+        with pytest.raises(DBAPIError) as non_quarantine:
+            await _confirm_quarantine_as_api(
+                migrated_session,
+                collection_id=quarantine_id,
+                expected_collection_revision=await _collection_revision(
+                    migrated_session, quarantine_id
+                ),
+                collection_key="h22:standalone-again",
+                title="재확정",
+                actor="ops:h22-reviewer",
+            )
+        assert getattr(non_quarantine.value.orig, "sqlstate", None) == "23514"
+    finally:
+        await savepoint.rollback()
 
-    # 빈 key/title은 422 계약(ValueError)이다.
+    # 빈 key/title은 repository input validation에서 즉시 거부된다.
     with pytest.raises(ValueError, match="required"):
         await confirm_curation_quarantine_standalone(
             migrated_session,
             collection_id=quarantine_id,
+            expected_collection_revision=2,
             collection_key="   ",
             title="제목",
+            command_id=1,
             actor="ops:h22-reviewer",
         )
 
@@ -5491,9 +5670,12 @@ async def test_quarantine_confirm_standalone_removes_marker_only(
         original_collection_id=None,
     )
     with pytest.raises(IntegrityError):
-        await confirm_curation_quarantine_standalone(
+        await _confirm_quarantine_as_api(
             migrated_session,
             collection_id=second_quarantine_id,
+            expected_collection_revision=await _collection_revision(
+                migrated_session, second_quarantine_id
+            ),
             collection_key="h22:standalone-confirmed",
             title="중복 확정",
             actor="ops:h22-reviewer",

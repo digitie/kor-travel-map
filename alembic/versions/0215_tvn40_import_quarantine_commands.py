@@ -347,8 +347,8 @@ BEGIN
   SELECT collection.* INTO STRICT v_quarantine_hint
   FROM feature.curation_collections AS collection
   WHERE collection.collection_id = p_quarantine_collection_id;
-  IF v_quarantine_hint.created_by <> 'migration:0065'
-     OR v_quarantine_hint.metadata ->> 'migration_quarantine' <> '0065' THEN
+  IF v_quarantine_hint.created_by IS DISTINCT FROM 'migration:0065'
+     OR v_quarantine_hint.metadata ->> 'migration_quarantine' IS DISTINCT FROM '0065' THEN
     RAISE EXCEPTION 'curation quarantine collection does not exist'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_quarantine_marker';
   END IF;
@@ -381,8 +381,8 @@ BEGIN
   FROM feature.curation_collections AS collection
   WHERE collection.collection_id = p_quarantine_collection_id;
   IF v_quarantine.row_revision <> p_expected_quarantine_revision
-     OR v_quarantine.created_by <> 'migration:0065'
-     OR v_quarantine.metadata ->> 'migration_quarantine' <> '0065' THEN
+     OR v_quarantine.created_by IS DISTINCT FROM 'migration:0065'
+     OR v_quarantine.metadata ->> 'migration_quarantine' IS DISTINCT FROM '0065' THEN
     RAISE EXCEPTION 'quarantine collection revision or marker changed'
       USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_quarantine_expected_revision';
   END IF;

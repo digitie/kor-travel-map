@@ -25,8 +25,12 @@ from kortravelmap.core.feature_operation import (
     ProviderDatasetOperationMembership,
 )
 from kortravelmap.infra.feature_operation_repo import (
-    ensure_dagster_feature_operation,
-    finish_dagster_feature_membership,
+    ensure_dagster_feature_operation as _ensure_dagster_feature_operation,
+)
+from kortravelmap.infra.feature_operation_repo import (
+    finish_dagster_feature_membership as _finish_dagster_feature_membership,
+)
+from kortravelmap.infra.feature_operation_repo import (
     list_feature_operation_memberships,
     resolve_feature_operation_dataset_membership,
 )
@@ -39,8 +43,23 @@ from tests.integration._membership_seed import (
     SINGLE_MEMBER_OPERATION,
     memberships_for_operation,
 )
+from tests.integration.conftest import as_dagster_runtime
 
 pytestmark = pytest.mark.integration
+
+
+async def ensure_dagster_feature_operation(
+    session: AsyncSession, **kwargs: object
+) -> object:
+    async with as_dagster_runtime(session) as runtime_session:
+        return await _ensure_dagster_feature_operation(runtime_session, **kwargs)
+
+
+async def finish_dagster_feature_membership(
+    session: AsyncSession, **kwargs: object
+) -> object:
+    async with as_dagster_runtime(session) as runtime_session:
+        return await _finish_dagster_feature_membership(runtime_session, **kwargs)
 
 #: 형제 operation은 시드에 없다(실측: 한 (dataset, sync_scope)에 refresh operation이
 #: 둘인 조합 0건). 스키마는 허용하므로 테스트가 직접 만든다.

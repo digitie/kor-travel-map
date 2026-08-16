@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-16 — T-VN-40 PostGIS typed runtime CI 수리
+
+- provider operation과 provider cancellation terminal 통합 회귀를 실제 Dagster/API
+  LOGIN으로 실행하게 정렬했다. root/migrator session이 executor ACL을 우회하던 테스트
+  경계를 없애고, API cancellation의 transaction-local finalizer 위임과 queued root의
+  heartbeat·tracking invariant 수렴을 함께 검증한다.
+- SECURITY DEFINER attempt event writer가 사용하는 `ops.import_job_event_clock` 권한을
+  command owner에만 보완했다. 격리 collection marker는 SQL NULL 비교를
+  `IS DISTINCT FROM`으로 fail-close해 제거된 marker를 다시 확정할 수 없게 했다.
+- committed operation projection test는 seed 전에도 동일한 committed-row 정리를 실행하고,
+  candidate runtime test는 dispose한 Dagster engine을 재사용하지 않도록 고쳤다. focused
+  PostGIS 회귀 100건과 변경 파일 Ruff 검사를 통과했다. runtime privilege 음성 test도
+  두 LOGIN engine을 정확히 한 번씩 dispose해 Python 3.13의 ResourceWarning 없이 끝낸다.
+
 ## 2026-08-15 — T-VN-40 PostGIS CI runtime 격리 정렬
 
 - runtime privilege preflight가 T-VN-40 migration bootstrap과 다른 disposable LOGIN
