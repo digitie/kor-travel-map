@@ -1,6 +1,6 @@
 # ADR — Architecture Decision Records
 
-`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-092.**
+`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-093.**
 
 - ADR은 **프로그램 핵심 구조**(의존 계층·데이터/식별 모델·패키지/서비스 구조·REST 계약·
   운영 모델) 결정만 둔다. provider/ETL·도메인 taxonomy·알고리즘·process·운영 결정은 해당 topic
@@ -74,7 +74,7 @@
 | ADR-058 | geocoder-의존 provider feature_id 결정성을 geocoder 필수화(F-01, re-key 없음)로 보장 | → 이관 [etl/feature-id-determinism.md](../etl/feature-id-determinism.md) |
 | ADR-059 | 벤더링된 agent/skill 설정의 언어·context-discovery 예외 정책 | → 이관 [agent-guide.md](../agent-guide.md) |
 | ADR-060 | Admin 로그인, frontend proxy, public API key | [060-admin-login-frontend-proxy-public-api-keys.md](060-admin-login-frontend-proxy-public-api-keys.md) |
-| ADR-061 | concierge YouTube 그룹핑을 curated 테마 source로(detail_selector rule) | [061-concierge-themes-as-curated-source.md](061-concierge-themes-as-curated-source.md) |
+| ADR-061 | concierge YouTube 그룹핑을 curated 테마 source로(detail_selector rule; auto-publish는 ADR-092로 superseded) | [061-concierge-themes-as-curated-source.md](061-concierge-themes-as-curated-source.md) |
 | ADR-062 | 공개 Weather API와 3년 이력 보존 | [062-public-weather-api-three-year-history.md](062-public-weather-api-three-year-history.md) |
 | ADR-063 | Feature 관측과 큐레이션 collection 분리 | [063-feature-observations-curation-collections.md](063-feature-observations-curation-collections.md) |
 | ADR-064 | admin ops 표면을 파이프라인/데이터셋 2페이지로 통합 재작성 | [064-admin-ops-consolidation-two-pages.md](064-admin-ops-consolidation-two-pages.md) |
@@ -105,6 +105,7 @@
 | ADR-089 | current summary는 불변 fact를 참조하고 rebuild receipt와 분리한다 | [089-current-summary-fact-reference-and-rebuild-receipt.md](089-current-summary-fact-reference-and-rebuild-receipt.md) |
 | ADR-090 | Feature 직교 상태의 final cutover와 DB 전이 감사 | [090-feature-state-final-cutover-and-audit.md](090-feature-state-final-cutover-and-audit.md) |
 | ADR-091 | Field override의 base/effective lineage 완결 | [091-field-override-base-effective-lineage.md](091-field-override-base-effective-lineage.md) |
+| ADR-092 | 큐레이션 membership과 자동 후보를 분리해 단일 쓰기 정본으로 만든다 | [092-curation-canonical-membership-and-candidates.md](092-curation-canonical-membership-and-candidates.md) |
 
 ## 새 ADR 작성 규약
 

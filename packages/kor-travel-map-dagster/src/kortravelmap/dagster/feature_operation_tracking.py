@@ -535,6 +535,19 @@ async def run_tracked_feature_asset(
     mutation = await guard.client.finish_dagster_feature_membership(
         dagster_run_id=guard.dagster_run_id,
         membership=membership,
+        authoritative_snapshot_complete=bool(
+            getattr(
+                getattr(result, "observation_receipt", None),
+                "authoritative_snapshot_complete",
+                False,
+            )
+        ),
+        curation_input_member_count=getattr(
+            getattr(result, "load", None), "curation_input_member_count", None
+        ),
+        curation_input_set_hash=getattr(
+            getattr(result, "load", None), "curation_input_set_hash", None
+        ),
     )
     _raise_if_blocked(guard.dagster_run_id, mutation)
     return result
@@ -554,6 +567,10 @@ async def ensure_tracked_multi_member_asset(
 async def finish_tracked_feature_membership(
     guard: FeatureOperationExecutionGuard,
     membership: ProviderDatasetOperationMembership,
+    *,
+    authoritative_snapshot_complete: bool = False,
+    curation_input_member_count: int | None = None,
+    curation_input_set_hash: str | None = None,
 ) -> None:
     """multi-member callback이 성공한 canonical member만 완료한다."""
     if membership not in guard.memberships:
@@ -564,6 +581,9 @@ async def finish_tracked_feature_membership(
     mutation = await guard.client.finish_dagster_feature_membership(
         dagster_run_id=guard.dagster_run_id,
         membership=membership,
+        authoritative_snapshot_complete=authoritative_snapshot_complete,
+        curation_input_member_count=curation_input_member_count,
+        curation_input_set_hash=curation_input_set_hash,
     )
     _raise_if_blocked(guard.dagster_run_id, mutation)
 

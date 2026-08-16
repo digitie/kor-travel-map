@@ -22,36 +22,17 @@
 ## 왜 되살리면 안 되나
 
 체인은 **어떤 DB에서도 다시 실행되지 않는다.** prod는 2026-08-13 in-place
-cutover로 이미 `0104`를 지나왔고, 새 DB는 `0200`에서 시작한다.
-
-여기 파일을 `versions/`로 되돌리거나 두 디렉터리를 한 `version_locations`에 함께
-담으면 **alembic이 거부하지 않는다 — 그게 문제다.** 실측:
-
-```
-UserWarning: Revision 0104_tvn36_final_fence is present more than once
-heads: ['0200_schema_baseline', '0104_tvn36_final_fence', '0104_tvn36_final_fence']
-```
-
-경고 한 줄 내고 head 3개짜리 손상된 맵으로 계속 간다. 거부보다 나쁜 결과다.
-`versions/0201_squash_bridge.py`와 여기 `0104_tvn36_final_fence.py`가 같은 revision id를
-선언하기 때문이고, `docker/api-entrypoint.sh`는 `alembic heads 2>/dev/null`로 stderr를
-버리므로 그 경고조차 보이지 않는다(다만 `head_count != 1` 검사가 그 뒤에 막는다).
-**두 디렉터리는 서로 다른 `version_locations`로만 로드해야 한다.**
+cutover로 이미 `0104`를 지나왔고, 새 DB는 `0200`에서 시작한다. 여기 파일을
+`versions/`로 되돌리면 두 개의 root(`0001`, `0200`)를 가진 그래프가 되어
+`alembic heads`가 갈라진다.
 
 과거 세대의 SQL을 참조할 일이 있으면 **읽기만** 하라.
 `rg <패턴> alembic/legacy_versions/`.
 
-## 여기를 script directory로 쓰는 곳
-
-아카이브 세대를 **실행**해야 하는 코드는 이 디렉터리만 담은 별도 Config를 만든다
-(`versions/`와 함께 담을 수 없으므로).
-
-- `tests/integration/`의 세대별 migration 테스트 28곳 —
-  `config.set_main_option("version_locations", …/"legacy_versions")`
-- `src/kortravelmap/cli/_h35_schema.py:_campaign_config()` — H35 캠페인은 설계상
-  target(`0079_cache_target_writer_drain`)에 앵커된 도구다. 이 때문에 **런타임
-  이미지에도 이 디렉터리가 실린다**(1.6MB). `.dockerignore`로 빼면 그 도구가
-  런타임에 깨지므로 그대로 둔다 — 값어치보다 새 지뢰가 크다는 판단이다.
+109개 파일 전체의 경로+byte digest는
+`tests/unit/test_alembic_squash_boundary.py`가 고정한다. 파일 하나라도 바꾸거나
+추가·삭제하면 archive digest가 달라진다. active integration suite가 이 revision을
+`upgrade`/`downgrade`/`stamp` 대상으로 되살리는 것도 같은 gate가 거부한다.
 
 ## 이 디렉터리를 지우는 조건
 

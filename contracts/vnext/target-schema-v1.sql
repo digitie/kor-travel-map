@@ -1905,32 +1905,68 @@ CREATE TRIGGER trg_current_price_summary_active_dataset_write
 -- =============================================================================
 -- feature.curation_collections/curation_items가 유일한 write model이다. legacy
 -- feature.curated_features overlay·단방향 trigger·legacy route는 목표 상태에
--- 존재하지 않는다(fence는 T-VN-40C, 물리 삭제는 T-VN-39 removal manifest).
--- 아래는 현행 canonical 모델의 **최소형**이다 — Wave 2 결정이 걸린 부분
--- (archive 결합 CHECK, feature_id uuid 전환)만 고정하고, 나머지 현행 컬럼
--- (source/import/link-decision 계열)은 현행 정본을 유지한다.
+-- 존재하지 않는다. fence·backfill·paired PinVi 전환·물리 삭제는 모두 T-VN-40C가
+-- 같은 release에서 소유한다. candidate/generation/transition 및 T-VN-40 receipt는
+-- ops.import_jobs와 curated_source_rules가 준비된 뒤 적용하는
+-- tvn33-reference-ownership-v1.sql의 T-VN-40 final block이 고정한다.
+-- 이 executable target은 post-T-VN-40 live 검증 뒤 수행할 Alembic-000 reset의 최종
+-- UUID 물리형을 선언한다. 현재 0201 expand migration은 pre-reset head의 text feature_id를
+-- 그대로 사용하며 같은 논리 identity/receipt를 먼저 설치하고, reset에서 UUID로 수렴한다.
 
 CREATE TABLE feature.curated_themes (
     theme_id uuid NOT NULL DEFAULT x_extension.gen_random_uuid(),
-    theme_key text NOT NULL,
-    title text NOT NULL,
+    theme_slug text NOT NULL,
+    theme_name text NOT NULL,
+    theme_description text NOT NULL DEFAULT '',
+    theme_group text NOT NULL,
+    visibility text NOT NULL DEFAULT 'admin_only',
+    metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+    row_revision bigint NOT NULL DEFAULT 1,
+    archived_at timestamptz,
+    owner_kind text NOT NULL,
+    owner_provider_dataset_id bigint,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     CONSTRAINT pk_curated_themes PRIMARY KEY (theme_id),
-    CONSTRAINT uq_curated_themes_key UNIQUE (theme_key),
-    CONSTRAINT ck_curated_themes_key_canonical CHECK (
-        theme_key <> '' AND theme_key = btrim(theme_key)
+    CONSTRAINT curated_themes_theme_slug_key UNIQUE (theme_slug),
+    CONSTRAINT fk_curated_themes_owner_provider_dataset FOREIGN KEY (
+        owner_provider_dataset_id
+    ) REFERENCES provider_sync.provider_datasets(provider_dataset_id) ON DELETE RESTRICT,
+    CONSTRAINT ck_curated_themes_slug_canonical CHECK (
+        theme_slug <> '' AND theme_slug = btrim(theme_slug)
     ),
-    CONSTRAINT ck_curated_themes_title CHECK (btrim(title) <> '')
+    CONSTRAINT ck_curated_themes_name CHECK (btrim(theme_name) <> ''),
+    CONSTRAINT ck_curated_themes_snapshot_text_bounds CHECK (
+        char_length(theme_slug) BETWEEN 1 AND 128
+        AND char_length(theme_name) BETWEEN 1 AND 200
+    ),
+    CONSTRAINT ck_curated_themes_visibility CHECK (
+        visibility IN ('admin_only','public')
+    ),
+    CONSTRAINT ck_curated_themes_metadata CHECK (jsonb_typeof(metadata) = 'object'),
+    CONSTRAINT ck_curated_themes_revision_positive CHECK (row_revision >= 1),
+    CONSTRAINT ck_curated_themes_owner_shape CHECK (
+        (owner_kind = 'operator' AND owner_provider_dataset_id IS NULL)
+        OR (owner_kind = 'provider_dataset' AND owner_provider_dataset_id IS NOT NULL)
+    )
 );
+CREATE INDEX idx_curated_themes_group_visibility
+    ON feature.curated_themes (theme_group, visibility, theme_slug);
 
 CREATE TABLE feature.curation_collections (
     collection_id uuid NOT NULL DEFAULT x_extension.gen_random_uuid(),
     collection_key text NOT NULL,
     theme_id uuid NOT NULL,
+    source_id uuid,
     title text NOT NULL,
+    edition_key text NOT NULL DEFAULT '',
+    description text,
     status text NOT NULL DEFAULT 'draft',
     visibility text NOT NULL DEFAULT 'admin_only',
+    metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_by text,
+    updated_by text,
+    row_revision bigint NOT NULL DEFAULT 1,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     archived_at timestamptz,
@@ -1940,13 +1976,20 @@ CREATE TABLE feature.curation_collections (
         REFERENCES feature.curated_themes (theme_id) ON DELETE RESTRICT,
     CONSTRAINT ck_curation_collections_key CHECK (btrim(collection_key) <> ''),
     CONSTRAINT ck_curation_collections_title CHECK (btrim(title) <> ''),
+    CONSTRAINT ck_curation_collections_snapshot_text_bounds CHECK (
+        char_length(title) BETWEEN 1 AND 300
+        AND char_length(edition_key) <= 100
+    ),
     CONSTRAINT ck_curation_collections_status CHECK (
         status IN ('draft', 'published', 'archived')
     ),
     CONSTRAINT ck_curation_collections_visibility CHECK (
         visibility IN ('admin_only', 'public')
     ),
-    -- archive 상태·archived_at 결합 CHECK (보고서 §3 curation 행 — F-16)
+    CONSTRAINT ck_curation_collections_metadata CHECK (
+        jsonb_typeof(metadata) = 'object'
+    ),
+    CONSTRAINT ck_curation_collections_revision_positive CHECK (row_revision >= 1),
     CONSTRAINT ck_curation_collections_archive_pair CHECK (
         (status = 'archived') = (archived_at IS NOT NULL)
     )
@@ -1956,44 +1999,81 @@ CREATE TABLE feature.curation_items (
     curation_item_id uuid NOT NULL DEFAULT x_extension.gen_random_uuid(),
     collection_id uuid NOT NULL,
     feature_id uuid,
+    source_record_key text,
+    current_import_row_id uuid,
+    accepted_link_decision_id uuid,
+    external_item_id text NOT NULL,
+    external_component_id text NOT NULL DEFAULT 'primary',
+    place_name text NOT NULL,
+    address_hint text,
+    source_present boolean NOT NULL DEFAULT true,
+    source_updated_at timestamptz NOT NULL DEFAULT now(),
     status text NOT NULL DEFAULT 'candidate',
     sort_order integer NOT NULL DEFAULT 0,
+    item_title text,
+    item_summary text,
+    curation_relation text NOT NULL DEFAULT 'nearby_option',
+    reuse_policy text NOT NULL DEFAULT 'manual_review',
+    metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_by text,
+    updated_by text,
+    operator_updated_by text,
+    operator_updated_at timestamptz,
+    row_revision bigint NOT NULL DEFAULT 1,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now(),
     archived_at timestamptz,
     CONSTRAINT pk_curation_items PRIMARY KEY (curation_item_id),
     CONSTRAINT fk_curation_items_collection FOREIGN KEY (collection_id)
-        REFERENCES feature.curation_collections (collection_id) ON DELETE CASCADE,
+        REFERENCES feature.curation_collections (collection_id) ON DELETE RESTRICT,
     CONSTRAINT fk_curation_items_feature FOREIGN KEY (feature_id)
         REFERENCES feature.features (feature_id) ON DELETE SET NULL,
+    CONSTRAINT fk_curation_items_source_record FOREIGN KEY (source_record_key)
+        REFERENCES provider_sync.source_records (source_record_key) ON DELETE SET NULL,
+    CONSTRAINT uq_curation_items_component_identity UNIQUE (
+        collection_id, external_item_id, external_component_id
+    ),
+    CONSTRAINT ck_curation_items_external_id CHECK (btrim(external_item_id) <> ''),
+    CONSTRAINT ck_curation_items_external_component CHECK (
+        external_component_id <> '' AND external_component_id = btrim(external_component_id)
+    ),
+    CONSTRAINT ck_curation_items_place_name CHECK (btrim(place_name) <> ''),
     CONSTRAINT ck_curation_items_status CHECK (
         status IN ('candidate', 'included', 'rejected', 'archived')
     ),
-    CONSTRAINT ck_curation_items_sort_order CHECK (sort_order >= 0)
-    -- external_item/component identity·import/link-decision 결합 제약은 현행
-    -- canonical 정본 유지(본 freeze 재정의 대상 아님).
+    CONSTRAINT ck_curation_items_sort_order CHECK (sort_order >= 0),
+    CONSTRAINT ck_curation_items_relation CHECK (
+        curation_relation IN (
+            'primary_stop','food_stop','cafe_stop','bookstore_stop','nearby_option',
+            'accessibility_support','pet_support','family_support','theme_area_anchor'
+        )
+    ),
+    CONSTRAINT ck_curation_items_reuse_policy CHECK (
+        reuse_policy IN ('allowed','blocked','manual_review')
+    ),
+    CONSTRAINT ck_curation_items_metadata CHECK (jsonb_typeof(metadata) = 'object'),
+    CONSTRAINT ck_curation_items_revision_positive CHECK (row_revision >= 1)
 );
 
-CREATE INDEX idx_curation_items_collection
-    ON feature.curation_items (collection_id, status, sort_order);
-
--- 자동 후보 lifecycle 분리 (T-VN-40B) — 신설.
--- lifecycle 값 집합·검수 전이·candidate 산출 provenance 컬럼: 미정(T-VN-40B 구현 소관)
-CREATE TABLE feature.theme_feature_candidates (
-    candidate_id uuid NOT NULL DEFAULT x_extension.gen_random_uuid(),
-    theme_id uuid NOT NULL,
-    feature_id uuid NOT NULL,
-    status text NOT NULL,
-    created_at timestamptz NOT NULL DEFAULT now(),
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    CONSTRAINT pk_theme_feature_candidates PRIMARY KEY (candidate_id),
-    CONSTRAINT fk_theme_feature_candidates_theme FOREIGN KEY (theme_id)
-        REFERENCES feature.curated_themes (theme_id) ON DELETE CASCADE,
-    CONSTRAINT fk_theme_feature_candidates_feature FOREIGN KEY (feature_id)
-        REFERENCES feature.features (feature_id) ON DELETE CASCADE,
-    CONSTRAINT uq_theme_feature_candidates_identity UNIQUE (theme_id, feature_id),
-    CONSTRAINT ck_theme_feature_candidates_status CHECK (btrim(status) <> '')
-);
+CREATE UNIQUE INDEX uq_curation_items_active_source_feature
+    ON feature.curation_items (collection_id, external_item_id, feature_id)
+    WHERE source_present AND archived_at IS NULL AND feature_id IS NOT NULL;
+CREATE INDEX idx_curation_items_collection_status_order
+    ON feature.curation_items (
+        collection_id, source_present, status, sort_order, curation_item_id
+    );
+CREATE INDEX idx_curation_items_feature_status_collection
+    ON feature.curation_items (
+        feature_id, source_present, status, collection_id
+    );
+CREATE INDEX idx_curation_items_service_snapshot_candidates
+    ON feature.curation_items (collection_id, curation_item_id)
+    INCLUDE (accepted_link_decision_id, feature_id, source_record_key)
+    WHERE archived_at IS NULL
+      AND source_present
+      AND status = 'included'
+      AND feature_id IS NOT NULL
+      AND accepted_link_decision_id IS NOT NULL;
 
 -- =============================================================================
 -- 끝. (removal manifest 대상 — 목표 상태에 존재하지 않는 legacy 객체 목록은

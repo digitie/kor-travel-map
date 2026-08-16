@@ -1,4 +1,8 @@
 import { expect, type Page, type Route, test } from "@playwright/test";
+import type { components } from "../src/api/types";
+
+type AdminCollection = components["schemas"]["AdminCurationCollectionView"];
+type AdminItem = components["schemas"]["AdminCurationItemView"];
 
 const COLLECTION_ID = "collection-lighthouse";
 const FEATURE_ID = "python-visitkorea-api::visitkorea-areas::palace-1";
@@ -12,7 +16,7 @@ async function fulfillJson(route: Route, body: unknown) {
   });
 }
 
-function collection() {
+function collection(): AdminCollection {
   return {
     collection_id: COLLECTION_ID,
     collection_key: "official-place-sample",
@@ -21,6 +25,7 @@ function collection() {
     theme_name: "공식 관광지",
     theme_group: "공식 캠페인",
     source_id: "source-official",
+    provider_dataset_id: 1,
     provider: "mcst",
     dataset_key: "official-place-sample",
     source_name: "공식 목록",
@@ -33,13 +38,17 @@ function collection() {
     metadata: {},
     item_count: 2,
     public_item_count: 2,
+    row_revision: "1",
+    command_etag: '"1"',
+    created_by: "admin:test",
+    updated_by: "admin:test",
     created_at: NOW,
     updated_at: NOW,
     archived_at: null,
   };
 }
 
-function item(overrides: Record<string, unknown>) {
+function item(overrides: Partial<AdminItem>): AdminItem {
   return {
     curation_item_id: "item-linked",
     collection_id: COLLECTION_ID,
@@ -49,6 +58,7 @@ function item(overrides: Record<string, unknown>) {
     theme_slug: "official-place",
     theme_name: "공식 관광지",
     theme_group: "공식 캠페인",
+    provider_dataset_id: 1,
     provider: "mcst",
     dataset_key: "official-place-sample",
     source_name: "공식 목록",
@@ -62,8 +72,10 @@ function item(overrides: Record<string, unknown>) {
     address: { road_address: "서울 종로구 사직로 161" },
     source_record_key: null,
     external_item_id: "official-palace",
+    external_component_id: "main",
     place_name: "경복궁",
     address_hint: "서울 종로구",
+    source_present: true,
     status: "included",
     sort_order: 1,
     item_title: "경복궁",
@@ -71,6 +83,17 @@ function item(overrides: Record<string, unknown>) {
     curation_relation: "primary_stop",
     reuse_policy: "allowed",
     metadata: {},
+    current_import_row_id: null,
+    accepted_link_decision_id: null,
+    link_match_basis: null,
+    link_resolver_version: null,
+    link_evidence: {},
+    link_actor: null,
+    link_decided_at: null,
+    row_revision: "1",
+    command_etag: '"1"',
+    created_by: "admin:test",
+    updated_by: "admin:test",
     created_at: NOW,
     updated_at: NOW,
     archived_at: null,
@@ -79,7 +102,14 @@ function item(overrides: Record<string, unknown>) {
 }
 
 async function mockAdminCurationRoutes(page: Page) {
-  const mutations = { archived: 0, patchedFeatureId: null as string | null };
+  const mutations = {
+    archived: 0,
+    archiveIdempotencyKey: null as string | null,
+    archiveIfMatch: null as string | null,
+    patchIdempotencyKey: null as string | null,
+    patchedFeatureId: null as string | null,
+    patchIfMatch: null as string | null,
+  };
   await page.route("**/api/proxy/v1/admin/curated-themes**", (route) =>
     fulfillJson(route, { data: { items: [] }, meta: {} }),
   );
@@ -92,8 +122,14 @@ async function mockAdminCurationRoutes(page: Page) {
       if (route.request().method() === "PATCH") {
         const body = route.request().postDataJSON() as { feature_id?: string };
         mutations.patchedFeatureId = body.feature_id ?? null;
+        mutations.patchIfMatch = route.request().headers()["if-match"] ?? null;
+        mutations.patchIdempotencyKey =
+          route.request().headers()["idempotency-key"] ?? null;
       } else if (route.request().method() === "DELETE") {
         mutations.archived += 1;
+        mutations.archiveIfMatch = route.request().headers()["if-match"] ?? null;
+        mutations.archiveIdempotencyKey =
+          route.request().headers()["idempotency-key"] ?? null;
       }
       await fulfillJson(route, {
         data: item({
@@ -151,9 +187,6 @@ test.describe("/admin/features/curated", () => {
     for (const label of [
       "컬렉션 키",
       "테마",
-      "새 테마 slug",
-      "새 테마 이름",
-      "새 테마 그룹",
       "제목",
       "회차/년도",
       "출처",
@@ -204,10 +237,18 @@ test.describe("/admin/features/curated", () => {
     await page.getByRole("button", { name: "Feature 연결" }).click();
     await expect(page.getByText(/Feature feature-lighthouse-ganjeolgot/)).toBeVisible();
     expect(mutations.patchedFeatureId).toBe("feature-lighthouse-ganjeolgot");
+    expect(mutations.patchIfMatch).toBe('"1"');
+    expect(mutations.patchIdempotencyKey).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
 
     page.once("dialog", async (dialog) => dialog.accept());
     await page.getByRole("button", { name: "항목 보관" }).last().click();
     await expect(page.getByText(/항목을 보관 처리했습니다/)).toBeVisible();
     expect(mutations.archived).toBe(1);
+    expect(mutations.archiveIfMatch).toBe('"1"');
+    expect(mutations.archiveIdempotencyKey).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    );
   });
 });

@@ -286,6 +286,49 @@ async def test_feature_update_asset_runner_closes_resources_when_bind_fails(
     assert isinstance(failure.__cause__, RuntimeError)
 
 
+async def test_feature_update_asset_runner_keeps_unbound_evidence_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = AsyncKorTravelMapClient(cast(Any, object()))
+    bound = AsyncKorTravelMapClient(cast(Any, object()))
+
+    async def _bind(
+        client: AsyncKorTravelMapClient,
+        _session: object,
+    ) -> AsyncKorTravelMapClient:
+        assert client is original
+        return bound
+
+    async def _run(context: object) -> _FakeAssetResult:
+        resources = cast(Any, context).resources
+        assert resources.kor_travel_map_client is bound
+        assert resources.feature_update_evidence_client is original
+        return _FakeAssetResult(
+            provider="demo",
+            dataset_key="places",
+            feature_ids=("feature-1",),
+        )
+
+    monkeypatch.setattr(runner_mod, "_bind_client_to_session", _bind)
+    runner = FeatureUpdateAssetRunner(
+        common_resources={"kor_travel_map_client": original},
+        log=_Log(),
+        settings_factory=lambda: cast(KorTravelMapSettings, object()),
+        specs=(
+            FeatureUpdateRunnerSpec(
+                operation_key="feature_place_opinet_stations_job",
+                run=_run,
+                resources=lambda _settings, _scope: RunnerResources({}),
+                asset_key="feature_place_opinet_stations",
+            ),
+        ),
+    )
+
+    result = await runner(object(), _scope())
+
+    assert result.status == "done"
+
+
 async def test_feature_update_asset_runner_types_resource_initialization_failure() -> None:
     async def _run(_context: object) -> _FakeAssetResult:
         raise AssertionError("resource 초기화 실패 뒤 asset을 실행하면 안 된다.")

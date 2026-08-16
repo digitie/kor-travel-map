@@ -5,17 +5,17 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import json
 from collections.abc import Mapping, Sequence
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from time import perf_counter
 from typing import Annotated, Any, Literal
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import (
     APIRouter,
     Depends,
     File,
-    Header,
     HTTPException,
     Query,
     Request,
@@ -37,10 +37,10 @@ from kortravelmap.curation_provenance import (
     provenance_row_payload,
     requires_lighthouse_provenance,
 )
-from kortravelmap.infra import curation_repo, feature_identity
+from kortravelmap.infra import curation_candidate_repo, curation_repo, feature_identity
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api import domain_command_service
@@ -51,13 +51,18 @@ from kortravelmap.api.domain_command_service import (
     idempotent_domain_command,
 )
 from kortravelmap.api.feature_ref import resolve_feature_ref_or_error
+from kortravelmap.api.http_revision import parse_revision_header, revision_etag
 from kortravelmap.api.identity_projection import response_feature_id
 from kortravelmap.api.response import Meta, make_meta
 
-__all__ = ["admin_router", "router"]
+__all__ = ["admin_router", "candidate_router", "router"]
 
 router = APIRouter(prefix="/curations", tags=["curations"])
 admin_router = APIRouter(prefix="/admin/curations", tags=["admin-curations"])
+candidate_router = APIRouter(
+    prefix="/admin/theme-feature-candidates",
+    tags=["admin-curation-candidates"],
+)
 
 CollectionStatus = Literal["draft", "published", "archived"]
 ActiveCollectionStatus = Literal["draft", "published"]
@@ -76,6 +81,162 @@ CurationRelation = Literal[
     "theme_area_anchor",
 ]
 ReusePolicy = Literal["allowed", "blocked", "manual_review"]
+CandidateReviewState = Literal["open", "promoted", "rejected"]
+_ETAG_RESPONSE_HEADER = {
+    "ETag": {
+        "description": "현재 응답 representation의 strong entity tag.",
+        "schema": {"type": "string"},
+    }
+}
+_IF_MATCH_OPENAPI_PARAMETER = {
+    "name": "If-Match",
+    "in": "header",
+    "required": True,
+    "schema": {"type": "string"},
+    "description": "직전 command ETag. 누락은 428, stale 값은 412.",
+}
+_IMPORT_PLAN_IF_MATCH_OPENAPI_PARAMETER = {
+    "name": "If-Match",
+    "in": "header",
+    "required": True,
+    "schema": {"type": "string", "pattern": '^"sha256:[0-9a-f]{64}"$'},
+    "description": "preview 응답의 immutable import plan strong ETag.",
+}
+
+
+class AdminThemeCandidateView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: UUID
+    rule_id: UUID
+    theme_id: UUID
+    theme_slug: str
+    theme_name: str
+    source_id: UUID
+    source_name: str
+    provider_dataset_id: int
+    source_entity_key: str
+    feature_id: str
+    feature_uuid: UUID
+    feature_name: str
+    feature_kind: str
+    feature_category: str
+    feature_detail: dict[str, Any]
+    lifecycle_state: str
+    publication_state: str
+    quality_state: str
+    source_record_key: str
+    source_record_hash: str
+    rule_row_revision: str
+    rule_input_hash: str
+    candidate_input_hash: str
+    review_state: CandidateReviewState
+    eligibility_present: bool
+    disposition: str
+    rank_score: str
+    proposal_title: str | None
+    proposal_summary: str | None
+    match_evidence: dict[str, Any]
+    candidate_revision: str
+    candidate_etag: str
+    feature_row_revision: str
+    representation_etag: str
+    created_at: datetime
+    updated_at: datetime
+
+
+class AdminThemeCandidatePageData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[AdminThemeCandidateView]
+
+
+class AdminThemeCandidatePageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: AdminThemeCandidatePageData
+    meta: Meta
+
+
+class AdminThemeCandidateResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: AdminThemeCandidateView
+    meta: Meta
+
+
+class AdminThemeCandidateTransitionView(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    transition_id: str
+    candidate_id: UUID
+    transition_kind: str
+    from_review_state: str | None
+    to_review_state: str
+    from_eligibility_present: bool | None
+    to_eligibility_present: bool
+    candidate_revision: str
+    generation_id: UUID | None
+    command_id: str | None
+    actor: str
+    reason_code: str
+    causation_ref: dict[str, Any]
+    occurred_at: datetime
+
+
+class AdminThemeCandidateTransitionPageData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    items: list[AdminThemeCandidateTransitionView]
+
+
+class AdminThemeCandidateTransitionPageResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: AdminThemeCandidateTransitionPageData
+    meta: Meta
+
+
+class ThemeCandidateRejectRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    reason_code: str = Field(min_length=1, max_length=128)
+
+
+class ThemeCandidatePromoteRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    collection_id: UUID
+    collection_revision: str = Field(pattern=r"^[1-9][0-9]*$")
+    item_revision: str | None = Field(default=None, pattern=r"^[1-9][0-9]*$")
+    external_item_id: str = Field(min_length=1, max_length=512)
+    external_component_id: str = Field(min_length=1, max_length=512)
+    place_name: str = Field(min_length=1, max_length=512)
+    address_hint: str | None = None
+    item_title: str | None = None
+    item_summary: str | None = None
+    sort_order: int = Field(ge=0)
+    curation_relation: CurationRelation
+    reuse_policy: ReusePolicy
+    item_status: Literal["candidate", "included"]
+    reason_code: str = Field(min_length=1, max_length=128)
+
+
+class ThemeCandidateCommandData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: UUID
+    candidate_revision: str
+    transition_id: str
+    curation_item_id: UUID | None = None
+    curation_item_revision: str | None = None
+
+
+class ThemeCandidateCommandResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: ThemeCandidateCommandData
+    meta: Meta
 
 
 class PublicCurationCollectionView(BaseModel):
@@ -127,6 +288,8 @@ class AdminCurationCollectionView(BaseModel):
     metadata: dict[str, Any]
     item_count: int
     public_item_count: int
+    row_revision: str = Field(pattern=r"^[1-9][0-9]*$")
+    command_etag: str
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None
@@ -215,6 +378,8 @@ class AdminCurationItemView(BaseModel):
     link_evidence: dict[str, Any]
     link_actor: str | None
     link_decided_at: datetime | None
+    row_revision: str = Field(pattern=r"^[1-9][0-9]*$")
+    command_etag: str
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None
@@ -334,10 +499,7 @@ class CurationCollectionCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     collection_key: str = Field(min_length=1, max_length=240)
-    theme_id: UUID | None = None
-    theme_slug: str | None = Field(default=None, min_length=1, max_length=200)
-    theme_name: str | None = Field(default=None, min_length=1, max_length=300)
-    theme_group: str | None = Field(default=None, min_length=1, max_length=200)
+    theme_id: UUID
     source_id: UUID | None = None
     title: str = Field(min_length=1, max_length=300)
     edition_key: str = Field(default="", max_length=100)
@@ -345,15 +507,6 @@ class CurationCollectionCreateRequest(BaseModel):
     status: ActiveCollectionStatus = "draft"
     visibility: CollectionVisibility = "admin_only"
     metadata: dict[str, Any] = Field(default_factory=dict)
-
-    @model_validator(mode="after")
-    def _theme_reference_or_definition(self) -> CurationCollectionCreateRequest:
-        if self.theme_id:
-            return self
-        if self.theme_slug and self.theme_name and self.theme_group:
-            return self
-        raise ValueError("theme_id 또는 theme_slug/theme_name/theme_group 전체가 필요합니다.")
-
 
 class CurationCollectionPatchRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -469,6 +622,9 @@ class CurationImportData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     dry_run: bool
+    import_plan_id: UUID
+    plan_etag: str
+    expires_at: datetime
     rows_total: int
     valid_rows: int
     invalid_rows: int
@@ -597,6 +753,8 @@ class CurationQuarantineOriginalCollectionView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     collection_id: UUID
+    row_revision: str | None = Field(default=None, pattern=r"^[1-9][0-9]*$")
+    command_etag: str | None = None
     title: str | None
     status: CollectionStatus | None
     visibility: CollectionVisibility | None
@@ -609,6 +767,8 @@ class AdminCurationQuarantineCollectionView(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     collection_id: UUID
+    row_revision: str = Field(pattern=r"^[1-9][0-9]*$")
+    command_etag: str
     collection_key: str
     title: str
     edition_key: str
@@ -654,6 +814,10 @@ class AdminCurationQuarantineItemsData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     target_collection_id: UUID | None
+    target_collection_revision: str | None = Field(
+        default=None, pattern=r"^[1-9][0-9]*$"
+    )
+    target_command_etag: str | None = None
     target_missing: bool
     target_archived: bool
     items: list[AdminCurationQuarantineItemView]
@@ -672,6 +836,9 @@ class AdminCurationQuarantineReclassifyRequest(BaseModel):
     action: QuarantineReclassifyAction
     # move 전용 — null target은 원본 collection, null item_ids는 전체.
     target_collection_id: UUID | None = None
+    target_collection_revision: str | None = Field(
+        default=None, pattern=r"^[1-9][0-9]*$"
+    )
     item_ids: list[UUID] | None = Field(default=None, min_length=1)
     # confirm_standalone 전용.
     collection_key: str | None = Field(default=None, min_length=1, max_length=240)
@@ -682,8 +849,14 @@ class AdminCurationQuarantineReclassifyRequest(BaseModel):
         if self.action == "move":
             if self.collection_key is not None or self.title is not None:
                 raise ValueError("move에는 collection_key/title을 쓸 수 없습니다.")
+            if self.target_collection_revision is None:
+                raise ValueError("move에는 target_collection_revision이 필요합니다.")
             return self
-        if self.target_collection_id is not None or self.item_ids is not None:
+        if (
+            self.target_collection_id is not None
+            or self.target_collection_revision is not None
+            or self.item_ids is not None
+        ):
             raise ValueError(
                 "confirm_standalone에는 target_collection_id/item_ids를 쓸 수 없습니다."
             )
@@ -721,7 +894,10 @@ def _public_collection_view(
 def _admin_collection_view(
     row: curation_repo.CurationCollection,
 ) -> AdminCurationCollectionView:
-    return AdminCurationCollectionView.model_validate(row, from_attributes=True)
+    payload = dict(row.__dict__)
+    payload["row_revision"] = str(row.row_revision)
+    payload["command_etag"] = revision_etag(row.row_revision)
+    return AdminCurationCollectionView.model_validate(payload)
 
 
 def curation_item_response_feature_id(row: curation_repo.CurationItem) -> str | None:
@@ -745,8 +921,22 @@ def _public_item_view(row: curation_repo.CurationItem) -> PublicCurationItemView
 
 
 def _admin_item_view(row: curation_repo.CurationItem) -> AdminCurationItemView:
-    view = AdminCurationItemView.model_validate(row, from_attributes=True)
+    payload = dict(row.__dict__)
+    payload.pop("feature_uuid", None)
+    payload["row_revision"] = str(row.row_revision)
+    payload["command_etag"] = revision_etag(row.row_revision)
+    view = AdminCurationItemView.model_validate(payload)
     return view.model_copy(update={"feature_id": curation_item_response_feature_id(row)})
+
+
+def _curation_representation_etag(value: BaseModel) -> str:
+    payload = json.dumps(
+        value.model_dump(mode="json"),
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode()
+    return f'"sha256:{hashlib.sha256(payload).hexdigest()}"'
 
 
 def _import_row_receipt_view(
@@ -779,6 +969,16 @@ def _quarantine_collection_view(
         CurationQuarantineOriginalCollectionView.model_validate(
             {
                 "collection_id": original.collection_id,
+                "row_revision": (
+                    str(original.row_revision)
+                    if original.row_revision is not None
+                    else None
+                ),
+                "command_etag": (
+                    revision_etag(original.row_revision)
+                    if original.row_revision is not None
+                    else None
+                ),
                 "title": original.title,
                 "status": original.status,
                 "visibility": original.visibility,
@@ -793,6 +993,8 @@ def _quarantine_collection_view(
     return AdminCurationQuarantineCollectionView.model_validate(
         {
             "collection_id": row.collection_id,
+            "row_revision": str(row.row_revision),
+            "command_etag": revision_etag(row.row_revision),
             "collection_key": row.collection_key,
             "title": row.title,
             "edition_key": row.edition_key,
@@ -891,6 +1093,192 @@ async def _lighthouse_dataset_pairs(
 
 def _conflict(exc: IntegrityError) -> HTTPException:
     return HTTPException(status_code=409, detail="curation constraint violation")
+
+
+def _import_plan_sha256(request: Request) -> str:
+    values = request.headers.getlist("If-Match")
+    if not values:
+        raise HTTPException(status_code=428, detail="If-Match header가 필요합니다.")
+    if len(values) != 1:
+        raise HTTPException(status_code=422, detail="If-Match는 정확히 하나여야 합니다.")
+    value = values[0]
+    prefix = '"sha256:'
+    if not value.startswith(prefix) or not value.endswith('"'):
+        raise HTTPException(status_code=422, detail="import plan ETag 형식이 아닙니다.")
+    digest = value[len(prefix) : -1]
+    if len(digest) != 64 or any(character not in "0123456789abcdef" for character in digest):
+        raise HTTPException(status_code=422, detail="import plan ETag 형식이 아닙니다.")
+    return digest
+
+
+def _import_plan_command_error(exc: DBAPIError) -> HTTPException:
+    message = str(exc.orig)
+    sqlstate = getattr(exc.orig, "sqlstate", None)
+    if sqlstate == "40001":
+        raise exc
+    if sqlstate == "P0002":
+        return HTTPException(status_code=404, detail="curation import plan 없음")
+    if any(
+        marker in message
+        for marker in (
+            "plan actor or ETag changed",
+            "plan expired",
+            "revision vector is stale",
+        )
+    ):
+        return HTTPException(status_code=412, detail=message)
+    if sqlstate == "23505" or "already committed" in message:
+        return HTTPException(status_code=409, detail=message)
+    if sqlstate == "42501":
+        return HTTPException(
+            status_code=403,
+            detail="curation import plan command 권한이 없습니다.",
+        )
+    if sqlstate in {"22P02", "23502", "23503", "23514", "22023"}:
+        return HTTPException(status_code=422, detail=message)
+    raise exc
+
+
+def _collection_command_error(exc: DBAPIError) -> HTTPException:
+    message = str(exc.orig)
+    sqlstate = getattr(exc.orig, "sqlstate", None)
+    if sqlstate == "40001":
+        raise exc
+    if "collection revision mismatch" in message:
+        return HTTPException(status_code=412, detail="curation collection revision이 변경됐습니다.")
+    if sqlstate == "P0002":
+        return HTTPException(status_code=404, detail="curation collection 없음")
+    if sqlstate == "23505":
+        return HTTPException(status_code=409, detail="curation collection identity conflict")
+    if sqlstate == "23514" and "archived collection" in message:
+        return HTTPException(status_code=409, detail=message)
+    if sqlstate in {"22P02", "23502", "23503", "23514", "22023"}:
+        return HTTPException(status_code=422, detail=message)
+    if sqlstate == "42501":
+        return HTTPException(status_code=403, detail="curation collection command 권한이 없습니다.")
+    raise exc
+
+
+def _item_command_error(exc: DBAPIError) -> HTTPException:
+    message = str(exc.orig)
+    sqlstate = getattr(exc.orig, "sqlstate", None)
+    if sqlstate == "40001":
+        raise exc
+    if "item identity or revision changed" in message:
+        return HTTPException(status_code=412, detail="curation item revision이 변경됐습니다.")
+    if sqlstate == "P0002":
+        return HTTPException(status_code=404, detail="curation item 또는 collection 없음")
+    if sqlstate == "23505":
+        return HTTPException(status_code=409, detail="curation item identity conflict")
+    if sqlstate == "23514" and "archived" in message:
+        return HTTPException(status_code=409, detail=message)
+    if sqlstate in {"22P02", "23502", "23503", "23514", "22023"}:
+        return HTTPException(status_code=422, detail=message)
+    if sqlstate == "42501":
+        return HTTPException(status_code=403, detail="curation item command 권한이 없습니다.")
+    raise exc
+
+
+def _theme_candidate_view(
+    row: curation_candidate_repo.ThemeCandidateRecord,
+) -> AdminThemeCandidateView:
+    representation_payload = {
+        "candidate_id": row.candidate_id,
+        "candidate_revision": str(row.row_revision),
+        "rule_row_revision": str(row.rule_row_revision),
+        "rule_input_hash": row.rule_input_hash,
+        "candidate_input_hash": row.candidate_input_hash,
+        "feature_row_revision": str(row.feature_row_revision),
+        "feature_detail": row.feature_detail,
+    }
+    representation_hash = hashlib.sha256(
+        json.dumps(
+            representation_payload,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+    return AdminThemeCandidateView(
+        candidate_id=UUID(row.candidate_id),
+        rule_id=UUID(row.rule_id),
+        theme_id=UUID(row.theme_id),
+        theme_slug=row.theme_slug,
+        theme_name=row.theme_name,
+        source_id=UUID(row.source_id),
+        source_name=row.source_name,
+        provider_dataset_id=row.provider_dataset_id,
+        source_entity_key=row.source_entity_key,
+        feature_id=response_feature_id(row),
+        feature_uuid=UUID(row.feature_uuid),
+        feature_name=row.feature_name,
+        feature_kind=row.feature_kind,
+        feature_category=row.feature_category,
+        feature_detail=row.feature_detail,
+        lifecycle_state=row.lifecycle_state,
+        publication_state=row.publication_state,
+        quality_state=row.quality_state,
+        source_record_key=row.source_record_key,
+        source_record_hash=row.source_record_hash,
+        rule_row_revision=str(row.rule_row_revision),
+        rule_input_hash=row.rule_input_hash,
+        candidate_input_hash=row.candidate_input_hash,
+        review_state=row.review_state,
+        eligibility_present=row.eligibility_present,
+        disposition=row.disposition,
+        rank_score=row.rank_score,
+        proposal_title=row.proposal_title,
+        proposal_summary=row.proposal_summary,
+        match_evidence=row.match_evidence,
+        candidate_revision=str(row.row_revision),
+        candidate_etag=revision_etag(row.row_revision),
+        feature_row_revision=str(row.feature_row_revision),
+        representation_etag=f'"sha256:{representation_hash}"',
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
+
+
+def _theme_candidate_transition_view(
+    row: curation_candidate_repo.ThemeCandidateTransitionRecord,
+) -> AdminThemeCandidateTransitionView:
+    return AdminThemeCandidateTransitionView(
+        transition_id=str(row.transition_id),
+        candidate_id=UUID(row.candidate_id),
+        transition_kind=row.transition_kind,
+        from_review_state=row.from_review_state,
+        to_review_state=row.to_review_state,
+        from_eligibility_present=row.from_eligibility_present,
+        to_eligibility_present=row.to_eligibility_present,
+        candidate_revision=str(row.candidate_row_revision),
+        generation_id=UUID(row.generation_id) if row.generation_id else None,
+        command_id=str(row.command_id) if row.command_id is not None else None,
+        actor=row.actor,
+        reason_code=row.reason_code,
+        causation_ref=row.causation_ref,
+        occurred_at=row.occurred_at,
+    )
+
+
+def _candidate_command_error(exc: DBAPIError) -> HTTPException:
+    message = str(exc.orig)
+    sqlstate = getattr(exc.orig, "sqlstate", None)
+    if "revision mismatch" in message or "expected candidate revision" in message:
+        return HTTPException(status_code=412, detail="candidate revision이 변경됐습니다.")
+    if sqlstate == "23505":
+        return HTTPException(status_code=409, detail="curation item identity conflict")
+    if sqlstate == "P0002":
+        return HTTPException(status_code=404, detail="candidate 또는 target resource 없음")
+    if sqlstate == "23514" and any(
+        token in message
+        for token in ("stale", "no longer", "only an active", "does not exist", "archived")
+    ):
+        return HTTPException(status_code=409, detail=message)
+    if sqlstate in {"23514", "22023"}:
+        return HTTPException(status_code=422, detail=message)
+    if sqlstate == "42501":
+        return HTTPException(status_code=403, detail="candidate command 권한이 없습니다.")
+    raise exc
 
 
 def _issue_view(issue: CurationImportIssue) -> CurationImportIssueView:
@@ -1121,6 +1509,16 @@ async def list_admin_curation_quarantine_items(
                 if preview.target_collection_id is not None
                 else None
             ),
+            target_collection_revision=(
+                str(preview.target_collection_revision)
+                if preview.target_collection_revision is not None
+                else None
+            ),
+            target_command_etag=(
+                revision_etag(preview.target_collection_revision)
+                if preview.target_collection_revision is not None
+                else None
+            ),
             target_missing=preview.target_missing,
             target_archived=preview.target_archived,
             items=[_quarantine_item_view(item) for item in preview.items],
@@ -1138,12 +1536,19 @@ async def list_admin_curation_quarantine_items(
     "/quarantine/{collection_id}/reclassify",
     response_model=AdminCurationQuarantineReclassifyResponse,
     status_code=200,
+    responses={
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+        412: {"description": "collection revision 불일치"},
+        428: {"description": "If-Match 헤더 누락"},
+    },
+    openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
 )
 @idempotent_domain_command("admin.curation-quarantine.reclassify")
 async def reclassify_admin_curation_quarantine(
     request: Request,
     collection_id: UUID,
     body: AdminCurationQuarantineReclassifyRequest,
+    response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> AdminCurationQuarantineReclassifyResponse:
@@ -1155,9 +1560,14 @@ async def reclassify_admin_curation_quarantine(
     """
 
     started_at = perf_counter()
+    expected_collection_revision = parse_revision_header(
+        request, "If-Match", required=True
+    )
+    assert expected_collection_revision is not None
     data: AdminCurationQuarantineReclassifyData
     try:
         async with domain_command_transaction(session):
+            command = domain_command_service.current_domain_command()
             if body.action == "move":
                 (
                     moved_item_ids,
@@ -1165,16 +1575,19 @@ async def reclassify_admin_curation_quarantine(
                 ) = await curation_repo.move_curation_quarantine_items(
                     session,
                     collection_id=str(collection_id),
+                    expected_collection_revision=expected_collection_revision,
                     target_collection_id=(
                         str(body.target_collection_id)
                         if body.target_collection_id is not None
                         else None
                     ),
+                    expected_target_revision=int(body.target_collection_revision or "0"),
                     item_ids=(
                         [str(item_id) for item_id in body.item_ids]
                         if body.item_ids is not None
                         else None
                     ),
+                    command_id=command.command_id,
                     actor=context.actor,
                 )
                 data = AdminCurationQuarantineReclassifyData(
@@ -1189,8 +1602,10 @@ async def reclassify_admin_curation_quarantine(
                 ) = await curation_repo.confirm_curation_quarantine_standalone(
                     session,
                     collection_id=str(collection_id),
+                    expected_collection_revision=expected_collection_revision,
                     collection_key=body.collection_key or "",
                     title=body.title or "",
+                    command_id=command.command_id,
                     actor=context.actor,
                 )
                 data = AdminCurationQuarantineReclassifyData(
@@ -1218,16 +1633,27 @@ async def reclassify_admin_curation_quarantine(
         ) from exc
     except curation_repo.CurationQuarantineTargetArchivedError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except DBAPIError as exc:
+        message = str(exc.orig)
+        if "revision or marker changed" in message or "target collection revision" in message:
+            raise HTTPException(
+                status_code=412,
+                detail="curation quarantine 또는 target collection revision이 변경됐습니다.",
+            ) from exc
+        mapped = _collection_command_error(exc)
+        raise mapped from exc
     except IntegrityError as exc:
         raise _conflict(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return AdminCurationQuarantineReclassifyResponse(
+    result_response = AdminCurationQuarantineReclassifyResponse(
         data=data,
         meta=make_meta(request, started_at=started_at),
     )
+    response.headers["ETag"] = _curation_representation_etag(result_response.data)
+    return result_response
 
 
 @admin_router.get(
@@ -1316,30 +1742,42 @@ async def download_curation_import_template() -> Response:
     )
 
 
-@admin_router.post("/import", response_model=CurationImportResponse)
-async def import_admin_curations(
+@admin_router.post(
+    "/imports/preview",
+    response_model=CurationImportResponse,
+    status_code=201,
+    responses={201: {"headers": _ETAG_RESPONSE_HEADER}},
+)
+@idempotent_domain_command("admin.curation-import.preview")
+async def preview_admin_curation_import(
     request: Request,
+    response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     file: Annotated[UploadFile, File(description="UTF-8 CSV 파일")],
-    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
-    dry_run: Annotated[bool, Query()] = True,
     provenance_file: Annotated[
         UploadFile | None,
         File(description="행별 source provenance JSON sidecar"),
     ] = None,
 ) -> CurationImportResponse:
-    """CSV+sidecar를 검증한 뒤 preview하거나 원자적으로 멱등 반영한다."""
+    """CSV+sidecar를 한 번 해소해 immutable import plan으로 저장한다."""
     started_at = perf_counter()
+    command = domain_command_service.current_domain_command()
     content = await file.read(CURATION_CSV_MAX_BYTES + 1)
     content_sha256 = hashlib.sha256(content).hexdigest()
-    preview = parse_curation_csv(content)
     provenance_content: bytes | None = None
     provenance_by_row: dict[int, dict[str, Any]] = {}
     if provenance_file is not None:
         provenance_content = await provenance_file.read(
             CURATION_PROVENANCE_MAX_BYTES + 1
         )
+    provenance_sha256 = (
+        hashlib.sha256(provenance_content).hexdigest()
+        if provenance_content is not None
+        else None
+    )
+    preview = parse_curation_csv(content)
+    if provenance_content is not None:
         try:
             provenance = parse_curation_provenance(
                 csv_content=content,
@@ -1362,22 +1800,7 @@ async def import_admin_curations(
                 "provenance_file이 필요합니다."
             ),
         )
-    provenance_sha256 = (
-        hashlib.sha256(provenance_content).hexdigest()
-        if provenance_content is not None
-        else None
-    )
-    command = await domain_command_service.begin_domain_command(
-        session,
-        actor=context.actor,
-        operation="admin.curation.import",
-        idempotency_key=idempotency_key,
-        payload={
-            "content_sha256": content_sha256,
-            "provenance_sha256": provenance_sha256,
-            "dry_run": dry_run,
-        },
-    )
+    dry_run = True
     # T-VN-32C PR-2 (W8) — CSV의 UUID 표기 feature 참조를 legacy 정본 키로
     # 일괄 정규화해 매칭한다 (miss는 원문 유지 → 기존 unmatched 흐름,
     # requested_feature_id echo는 CSV 원문 보존).
@@ -1550,18 +1973,17 @@ async def import_admin_curations(
         ]
 
     has_errors = preview.has_errors or bool(resolved_identity_issues)
-    if not dry_run and has_errors:
-        raise HTTPException(
-            status_code=422,
-            detail="CSV에 형식 또는 해소 후 identity 오류가 있어 전체 반영을 취소했습니다.",
-        )
-
     change_plan = curation_repo.CurationImportPlan(
         collections=0, inserted=0, updated=0, removals=()
     )
+    revisions: tuple[curation_repo.CurationImportRevisionExpectation, ...] = ()
     try:
         if not has_errors:
             change_plan = await curation_repo.preview_curation_import(
+                session,
+                rows=resolved_rows,
+            )
+            revisions = await curation_repo.build_curation_import_revision_vector(
                 session,
                 rows=resolved_rows,
             )
@@ -1574,19 +1996,9 @@ async def import_admin_curations(
             "removals": change_plan.removals,
             "import_batch_id": None,
         }
-        if not dry_run:
-            result = await curation_repo.import_curation_rows(
-                session,
-                rows=resolved_rows,
-                actor=context.actor,
-                source_content_sha256=content_sha256,
-                batch_kind="csv_upload",
-            )
     except IntegrityError as exc:
-        await session.rollback()
         raise _conflict(exc) from exc
     except ValueError as exc:
-        await session.rollback()
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     invalid_rows = sum(item.status == "invalid" for item in item_views)
@@ -1595,9 +2007,73 @@ async def import_admin_curations(
         item.status in {"unmatched", "review_required", "ambiguous"}
         for item in item_views
     )
-    response = CurationImportResponse(
+    issues = [_issue_view(issue) for issue in preview.issues] + [
+        issue for row_issues in identity_issues_by_row.values() for issue in row_issues
+    ]
+    import_plan_id = uuid4()
+    expires_at = datetime.now(UTC) + timedelta(hours=1)
+    summary = {
+        "schema_version": 1,
+        "rows_total": preview.rows_total,
+        "valid_rows": valid_rows,
+        "invalid_rows": invalid_rows,
+        "unresolved_rows": unresolved_rows,
+        "inserted": int(result["inserted"]),
+        "updated": int(result["updated"]),
+        "removed": int(result["removed"]),
+        "collections": int(result["collections"]),
+        "has_errors": has_errors,
+    }
+    plan_hash_input = {
+        "schema_version": 1,
+        "import_plan_id": str(import_plan_id),
+        "actor": context.actor,
+        "content_sha256": content_sha256,
+        "provenance_sha256": provenance_sha256,
+        "summary": summary,
+        "rows": [item.model_dump(mode="json") for item in item_views],
+        "revisions": [
+            {
+                "resource_kind": revision.resource_kind,
+                "resource_key": revision.resource_key,
+                "expected_revision": revision.expected_revision,
+            }
+            for revision in revisions
+        ],
+        "expires_at": expires_at.isoformat(),
+    }
+    plan_sha256 = hashlib.sha256(
+        json.dumps(
+            plan_hash_input,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode()
+    ).hexdigest()
+    try:
+        await curation_repo.create_curation_import_plan_command(
+            session,
+            import_plan_id=str(import_plan_id),
+            content_sha256=content_sha256,
+            provenance_sha256=provenance_sha256,
+            plan_sha256=plan_sha256,
+            summary=summary,
+            rows=resolved_rows,
+            response_rows=[item.model_dump(mode="json") for item in item_views],
+            revisions=revisions,
+            expires_at=expires_at,
+            command_id=command.command_id,
+            principal=context.actor,
+        )
+    except DBAPIError as exc:
+        raise _import_plan_command_error(exc) from exc
+    plan_etag = f'"sha256:{plan_sha256}"'
+    result_response = CurationImportResponse(
         data=CurationImportData(
             dry_run=dry_run,
+            import_plan_id=import_plan_id,
+            plan_etag=plan_etag,
+            expires_at=expires_at,
             rows_total=preview.rows_total,
             valid_rows=valid_rows,
             invalid_rows=invalid_rows,
@@ -1613,18 +2089,320 @@ async def import_admin_curations(
             ),
             removals=[_admin_item_view(item) for item in result["removals"]],
             items=item_views,
-            issues=[_issue_view(issue) for issue in preview.issues]
-            + [issue for row_issues in identity_issues_by_row.values() for issue in row_issues],
+            issues=issues,
         ),
         meta=make_meta(request, started_at=started_at),
     )
-    await domain_command_service.complete_domain_command(
-        session,
-        command=command,
-        response=response,
+    response.headers["ETag"] = plan_etag
+    return result_response
+
+
+@admin_router.post(
+    "/import-plans/{import_plan_id}/commit",
+    response_model=CurationImportResponse,
+    responses={
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+        412: {"description": "plan ETag/expiry/revision vector stale"},
+        428: {"description": "If-Match 누락"},
+    },
+    openapi_extra={"parameters": [_IMPORT_PLAN_IF_MATCH_OPENAPI_PARAMETER]},
+)
+@idempotent_domain_command("admin.curation.import")
+async def commit_admin_curation_import_plan(
+    request: Request,
+    import_plan_id: UUID,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+) -> CurationImportResponse:
+    """stored normalized plan을 재해소 없이 exact revision vector 위에서 반영한다."""
+
+    started_at = perf_counter()
+    plan_sha256 = _import_plan_sha256(request)
+    command = domain_command_service.current_domain_command()
+    try:
+        async with domain_command_transaction(session):
+            (
+                content_sha256,
+                resolved_rows,
+                summary,
+                stored_response_rows,
+                expires_at,
+            ) = await curation_repo.claim_curation_import_plan_command(
+                session,
+                import_plan_id=str(import_plan_id),
+                plan_sha256=plan_sha256,
+                command_id=command.command_id,
+                principal=context.actor,
+            )
+            result = await curation_repo.import_curation_rows(
+                session,
+                rows=resolved_rows,
+                actor=context.actor,
+                source_content_sha256=content_sha256,
+                batch_kind="csv_upload",
+                command_id=command.command_id,
+            )
+            import_batch_id = result["import_batch_id"]
+            if import_batch_id is None:
+                raise RuntimeError("curation import commit에 import batch receipt가 없습니다.")
+            item_views = [
+                CurationImportRowView.model_validate(payload)
+                for payload in stored_response_rows
+            ]
+            item_views = [
+                item.model_copy(update={"status": "imported"})
+                if item.status == "valid" and item.resolved_feature_id is not None
+                else item
+                for item in item_views
+            ]
+            issues = [issue for item in item_views for issue in item.issues]
+            plan_etag = f'"sha256:{plan_sha256}"'
+            result_response = CurationImportResponse(
+                data=CurationImportData(
+                    dry_run=False,
+                    import_plan_id=import_plan_id,
+                    plan_etag=plan_etag,
+                    expires_at=expires_at,
+                    rows_total=int(summary["rows_total"]),
+                    valid_rows=int(summary["valid_rows"]),
+                    invalid_rows=int(summary["invalid_rows"]),
+                    unresolved_rows=int(summary["unresolved_rows"]),
+                    inserted=int(result["inserted"]),
+                    updated=int(result["updated"]),
+                    removed=int(result["removed"]),
+                    collections=int(result["collections"]),
+                    import_batch_id=UUID(str(import_batch_id)),
+                    removals=[_admin_item_view(item) for item in result["removals"]],
+                    items=item_views,
+                    issues=issues,
+                ),
+                meta=make_meta(request, started_at=started_at),
+            )
+            await curation_repo.complete_curation_import_plan_command(
+                session,
+                import_plan_id=str(import_plan_id),
+                command_id=command.command_id,
+                import_batch_id=str(import_batch_id),
+                result_payload=result_response.model_dump(mode="json"),
+                principal=context.actor,
+            )
+    except DBAPIError as exc:
+        raise _import_plan_command_error(exc) from exc
+    except (IntegrityError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    response.headers["ETag"] = plan_etag
+    return result_response
+
+
+@candidate_router.get("", response_model=AdminThemeCandidatePageResponse)
+async def list_admin_theme_candidates(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    rule_id: Annotated[UUID | None, Query()] = None,
+    theme_id: Annotated[UUID | None, Query()] = None,
+    source_id: Annotated[UUID | None, Query()] = None,
+    review_state: Annotated[CandidateReviewState | None, Query()] = None,
+    eligibility_present: Annotated[bool | None, Query()] = None,
+    feature_id: Annotated[str | None, Query()] = None,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 100,
+    cursor: Annotated[str | None, Query()] = None,
+) -> AdminThemeCandidatePageResponse:
+    started_at = perf_counter()
+    try:
+        page = await curation_candidate_repo.list_theme_candidates(
+            session,
+            rule_id=str(rule_id) if rule_id else None,
+            theme_id=str(theme_id) if theme_id else None,
+            source_id=str(source_id) if source_id else None,
+            review_state=review_state,
+            eligibility_present=eligibility_present,
+            feature_id=feature_id,
+            limit=page_size,
+            cursor=cursor,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return AdminThemeCandidatePageResponse(
+        data=AdminThemeCandidatePageData(
+            items=[_theme_candidate_view(row) for row in page.items]
+        ),
+        meta=make_meta(
+            request,
+            started_at=started_at,
+            page_size=page_size,
+            next_cursor=page.next_cursor,
+        ),
     )
-    await session.commit()
-    return response
+
+
+@candidate_router.get(
+    "/{candidate_id}",
+    response_model=AdminThemeCandidateResponse,
+    responses={304: {"description": "representation ETag 일치"}},
+)
+async def get_admin_theme_candidate(
+    request: Request,
+    candidate_id: UUID,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AdminThemeCandidateResponse | Response:
+    started_at = perf_counter()
+    row = await curation_candidate_repo.get_theme_candidate(
+        session, candidate_id=str(candidate_id)
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="theme candidate 없음")
+    view = _theme_candidate_view(row)
+    if request.headers.get("if-none-match") == view.representation_etag:
+        return Response(status_code=304, headers={"ETag": view.representation_etag})
+    response.headers["ETag"] = view.representation_etag
+    return AdminThemeCandidateResponse(
+        data=view,
+        meta=make_meta(request, started_at=started_at),
+    )
+
+
+@candidate_router.get(
+    "/{candidate_id}/transitions",
+    response_model=AdminThemeCandidateTransitionPageResponse,
+)
+async def list_admin_theme_candidate_transitions(
+    request: Request,
+    candidate_id: UUID,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    before_transition_id: Annotated[int | None, Query(gt=0)] = None,
+    page_size: Annotated[int, Query(ge=1, le=200)] = 100,
+) -> AdminThemeCandidateTransitionPageResponse:
+    started_at = perf_counter()
+    if await curation_candidate_repo.get_theme_candidate(
+        session, candidate_id=str(candidate_id)
+    ) is None:
+        raise HTTPException(status_code=404, detail="theme candidate 없음")
+    page = await curation_candidate_repo.list_theme_candidate_transitions(
+        session,
+        candidate_id=str(candidate_id),
+        before_transition_id=before_transition_id,
+        limit=page_size,
+    )
+    return AdminThemeCandidateTransitionPageResponse(
+        data=AdminThemeCandidateTransitionPageData(
+            items=[_theme_candidate_transition_view(row) for row in page.items]
+        ),
+        meta=make_meta(
+            request,
+            started_at=started_at,
+            page_size=page_size,
+            next_cursor=str(page.next_cursor) if page.next_cursor else None,
+        ),
+    )
+
+
+@candidate_router.post(
+    "/{candidate_id}/reject",
+    response_model=ThemeCandidateCommandResponse,
+    responses={
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+        412: {"description": "stale candidate If-Match"},
+        428: {"description": "If-Match 누락"},
+    },
+    openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
+)
+@idempotent_domain_command("admin.theme-feature-candidate.reject")
+async def reject_admin_theme_candidate(
+    request: Request,
+    candidate_id: UUID,
+    body: ThemeCandidateRejectRequest,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+) -> ThemeCandidateCommandResponse:
+    started_at = perf_counter()
+    expected_revision = parse_revision_header(request, "If-Match", required=True)
+    assert expected_revision is not None
+    try:
+        async with domain_command_transaction(session):
+            result = await curation_candidate_repo.reject_theme_candidate(
+                session,
+                candidate_id=str(candidate_id),
+                expected_revision=expected_revision,
+                command_id=domain_command_service.current_domain_command().command_id,
+                reason_code=body.reason_code,
+                principal=context.actor,
+            )
+    except DBAPIError as exc:
+        raise _candidate_command_error(exc) from exc
+    response.headers["ETag"] = revision_etag(result[1])
+    return ThemeCandidateCommandResponse(
+        data=ThemeCandidateCommandData(
+            candidate_id=UUID(result[0]),
+            candidate_revision=str(result[1]),
+            transition_id=str(result[2]),
+        ),
+        meta=make_meta(request, started_at=started_at),
+    )
+
+
+@candidate_router.post(
+    "/{candidate_id}/promote",
+    response_model=ThemeCandidateCommandResponse,
+    responses={
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+        412: {"description": "stale candidate/collection/item revision"},
+        428: {"description": "If-Match 누락"},
+    },
+    openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
+)
+@idempotent_domain_command("admin.theme-feature-candidate.promote")
+async def promote_admin_theme_candidate(
+    request: Request,
+    candidate_id: UUID,
+    body: ThemeCandidatePromoteRequest,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+) -> ThemeCandidateCommandResponse:
+    started_at = perf_counter()
+    expected_revision = parse_revision_header(request, "If-Match", required=True)
+    assert expected_revision is not None
+    try:
+        async with domain_command_transaction(session):
+            result = await curation_candidate_repo.promote_theme_candidate(
+                session,
+                candidate_id=str(candidate_id),
+                collection_id=str(body.collection_id),
+                external_item_id=body.external_item_id,
+                external_component_id=body.external_component_id,
+                place_name=body.place_name,
+                address_hint=body.address_hint,
+                item_title=body.item_title,
+                item_summary=body.item_summary,
+                sort_order=body.sort_order,
+                curation_relation=body.curation_relation,
+                reuse_policy=body.reuse_policy,
+                item_status=body.item_status,
+                expected_candidate_revision=expected_revision,
+                expected_collection_revision=int(body.collection_revision),
+                expected_item_revision=(
+                    int(body.item_revision) if body.item_revision else None
+                ),
+                command_id=domain_command_service.current_domain_command().command_id,
+                reason_code=body.reason_code,
+                principal=context.actor,
+            )
+    except DBAPIError as exc:
+        raise _candidate_command_error(exc) from exc
+    response.headers["ETag"] = revision_etag(result[1])
+    return ThemeCandidateCommandResponse(
+        data=ThemeCandidateCommandData(
+            candidate_id=UUID(result[0]),
+            candidate_revision=str(result[1]),
+            curation_item_id=UUID(result[2]),
+            curation_item_revision=str(result[3]),
+            transition_id=str(result[4]),
+        ),
+        meta=make_meta(request, started_at=started_at),
+    )
 
 
 @router.get("", response_model=FeatureCurationGroupsResponse)
@@ -1794,12 +2572,20 @@ async def list_admin_curation_collections(
     )
 
 
-@admin_router.get("/{collection_id}", response_model=AdminCurationCollectionResponse)
+@admin_router.get(
+    "/{collection_id}",
+    response_model=AdminCurationCollectionResponse,
+    responses={
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+        304: {"description": "representation ETag 일치"},
+    },
+)
 async def get_admin_curation_collection(
     request: Request,
     collection_id: UUID,
+    response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> AdminCurationCollectionResponse:
+) -> AdminCurationCollectionResponse | Response:
     started_at = perf_counter()
     result = await curation_repo.get_curation_collection(
         session, collection_id=str(collection_id), include_archived=True
@@ -1807,43 +2593,42 @@ async def get_admin_curation_collection(
     if result is None:
         raise HTTPException(status_code=404, detail="curation collection 없음")
     collection, items = result
-    return AdminCurationCollectionResponse(
+    result_response = AdminCurationCollectionResponse(
         data=AdminCurationCollectionData(
             collection=_admin_collection_view(collection),
             items=[_admin_item_view(item) for item in items],
         ),
         meta=make_meta(request, started_at=started_at),
     )
+    representation_etag = _curation_representation_etag(result_response.data)
+    if request.headers.get("if-none-match") == representation_etag:
+        return Response(status_code=304, headers={"ETag": representation_etag})
+    response.headers["ETag"] = representation_etag
+    return result_response
 
 
-@admin_router.post("", response_model=AdminCurationCollectionResponse, status_code=201)
+@admin_router.post(
+    "",
+    response_model=AdminCurationCollectionResponse,
+    status_code=201,
+    responses={201: {"headers": _ETAG_RESPONSE_HEADER}},
+)
 @idempotent_domain_command("admin.curation-collection.create")
 async def create_admin_curation_collection(
     request: Request,
     body: CurationCollectionCreateRequest,
+    response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> AdminCurationCollectionResponse:
     started_at = perf_counter()
     try:
         async with domain_command_transaction(session):
-            theme_id: str
-            if body.theme_id is None:
-                assert body.theme_slug is not None
-                assert body.theme_name is not None
-                assert body.theme_group is not None
-                theme_id = await curation_repo.upsert_curation_theme(
-                    session,
-                    theme_slug=body.theme_slug,
-                    theme_name=body.theme_name,
-                    theme_group=body.theme_group,
-                )
-            else:
-                theme_id = str(body.theme_id)
-            collection = await curation_repo.create_curation_collection(
+            command = domain_command_service.current_domain_command()
+            collection = await curation_repo.create_curation_collection_command(
                 session,
                 collection_key=body.collection_key,
-                theme_id=theme_id,
+                theme_id=str(body.theme_id),
                 source_id=(str(body.source_id) if body.source_id is not None else None),
                 title=body.title,
                 edition_key=body.edition_key,
@@ -1851,44 +2636,66 @@ async def create_admin_curation_collection(
                 status=body.status,
                 visibility=body.visibility,
                 metadata=body.metadata,
-                actor=context.actor,
+                command_id=command.command_id,
+                principal=command.actor,
             )
+    except DBAPIError as exc:
+        raise _collection_command_error(exc) from exc
     except IntegrityError as exc:
         raise _conflict(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return AdminCurationCollectionResponse(
+    result_response = AdminCurationCollectionResponse(
         data=AdminCurationCollectionData(collection=_admin_collection_view(collection), items=[]),
         meta=make_meta(request, started_at=started_at),
     )
+    response.headers["ETag"] = _curation_representation_etag(result_response.data)
+    return result_response
 
 
-@admin_router.patch("/{collection_id}", response_model=AdminCurationCollectionResponse)
+@admin_router.patch(
+    "/{collection_id}",
+    response_model=AdminCurationCollectionResponse,
+    responses={
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+        412: {"description": "stale collection If-Match"},
+        428: {"description": "If-Match 누락"},
+    },
+    openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
+)
 @idempotent_domain_command("admin.curation-collection.patch")
 async def patch_admin_curation_collection(
     request: Request,
     collection_id: UUID,
     body: CurationCollectionPatchRequest,
+    response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> AdminCurationCollectionResponse:
     started_at = perf_counter()
+    expected_revision = parse_revision_header(request, "If-Match", required=True)
+    assert expected_revision is not None
     try:
         async with domain_command_transaction(session):
+            command = domain_command_service.current_domain_command()
             updates = body.model_dump(exclude_unset=True)
             for field in ("theme_id", "source_id"):
                 if updates.get(field) is not None:
                     updates[field] = str(updates[field])
-            collection = await curation_repo.update_curation_collection(
+            collection = await curation_repo.patch_curation_collection_command(
                 session,
                 collection_id=str(collection_id),
-                updates={
-                    **updates,
-                    "updated_by": context.actor,
-                },
+                updates=updates,
+                expected_revision=expected_revision,
+                command_id=command.command_id,
+                principal=command.actor,
             )
+    except DBAPIError as exc:
+        raise _collection_command_error(exc) from exc
     except IntegrityError as exc:
         raise _conflict(exc) from exc
+    except curation_repo.CurationRevisionConflictError as exc:
+        raise HTTPException(status_code=412, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if collection is None:
@@ -1897,53 +2704,81 @@ async def patch_admin_curation_collection(
         session, collection_id=str(collection_id), include_archived=True
     )
     assert result is not None
-    return AdminCurationCollectionResponse(
+    result_response = AdminCurationCollectionResponse(
         data=AdminCurationCollectionData(
             collection=_admin_collection_view(result[0]),
             items=[_admin_item_view(item) for item in result[1]],
         ),
         meta=make_meta(request, started_at=started_at),
     )
+    response.headers["ETag"] = _curation_representation_etag(result_response.data)
+    return result_response
 
 
-@admin_router.delete("/{collection_id}", response_model=AdminCurationCollectionResponse)
+@admin_router.delete(
+    "/{collection_id}",
+    response_model=AdminCurationCollectionResponse,
+    responses={
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+        412: {"description": "stale collection If-Match"},
+        428: {"description": "If-Match 누락"},
+    },
+    openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
+)
 @idempotent_domain_command("admin.curation-collection.archive")
 async def archive_admin_curation_collection(
     request: Request,
     collection_id: UUID,
+    response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> AdminCurationCollectionResponse:
     started_at = perf_counter()
-    async with domain_command_transaction(session):
-        collection = await curation_repo.archive_curation_collection(
-            session, collection_id=str(collection_id), actor=context.actor
-        )
+    expected_revision = parse_revision_header(request, "If-Match", required=True)
+    assert expected_revision is not None
+    try:
+        async with domain_command_transaction(session):
+            command = domain_command_service.current_domain_command()
+            collection = await curation_repo.archive_curation_collection_command(
+                session,
+                collection_id=str(collection_id),
+                expected_revision=expected_revision,
+                command_id=command.command_id,
+                principal=command.actor,
+            )
+    except DBAPIError as exc:
+        raise _collection_command_error(exc) from exc
+    except curation_repo.CurationRevisionConflictError as exc:
+        raise HTTPException(status_code=412, detail=str(exc)) from exc
     if collection is None:
         raise HTTPException(status_code=404, detail="curation collection 없음")
     result = await curation_repo.get_curation_collection(
         session, collection_id=str(collection_id), include_archived=True
     )
     assert result is not None
-    return AdminCurationCollectionResponse(
+    result_response = AdminCurationCollectionResponse(
         data=AdminCurationCollectionData(
             collection=_admin_collection_view(result[0]),
             items=[_admin_item_view(item) for item in result[1]],
         ),
         meta=make_meta(request, started_at=started_at),
     )
+    response.headers["ETag"] = _curation_representation_etag(result_response.data)
+    return result_response
 
 
 @admin_router.post(
     "/{collection_id}/items",
     response_model=AdminCurationItemResponse,
     status_code=201,
+    responses={201: {"headers": _ETAG_RESPONSE_HEADER}},
 )
 @idempotent_domain_command("admin.curation-item.create")
 async def add_admin_curation_item(
     request: Request,
     collection_id: UUID,
     body: CurationItemCreateRequest,
+    response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> AdminCurationItemResponse:
@@ -1958,32 +2793,39 @@ async def add_admin_curation_item(
         )
     try:
         async with domain_command_transaction(session):
-            item, inserted = await curation_repo.add_curation_item(
+            command = domain_command_service.current_domain_command()
+            item = await curation_repo.create_curation_item_command(
                 session,
                 collection_id=str(collection_id),
-                actor=context.actor,
+                command_id=command.command_id,
+                principal=command.actor,
                 **payload,
             )
-            if not inserted:
-                raise HTTPException(
-                    status_code=409,
-                    detail="같은 identity의 active curation item이 이미 있습니다.",
-                )
+    except DBAPIError as exc:
+        raise _item_command_error(exc) from exc
     except IntegrityError as exc:
         raise _conflict(exc) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except LookupError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return AdminCurationItemResponse(
+    result_response = AdminCurationItemResponse(
         data=_admin_item_view(item),
         meta=make_meta(request, started_at=started_at),
     )
+    response.headers["ETag"] = _curation_representation_etag(result_response.data)
+    return result_response
 
 
 @admin_router.patch(
     "/{collection_id}/items/{curation_item_id}",
     response_model=AdminCurationItemResponse,
+    responses={
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+        412: {"description": "stale item If-Match"},
+        428: {"description": "If-Match 누락"},
+    },
+    openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
 )
 @idempotent_domain_command("admin.curation-item.patch")
 async def patch_admin_curation_item(
@@ -1991,10 +2833,13 @@ async def patch_admin_curation_item(
     collection_id: UUID,
     curation_item_id: UUID,
     body: CurationItemPatchRequest,
+    response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> AdminCurationItemResponse:
     started_at = perf_counter()
+    expected_revision = parse_revision_header(request, "If-Match", required=True)
+    assert expected_revision is not None
     updates = body.model_dump(exclude_unset=True)
     # T-VN-32C PR-2 (W7) — W6과 동일한 feature 참조 정규화.
     if updates.get("feature_id") is not None:
@@ -2003,51 +2848,78 @@ async def patch_admin_curation_item(
         )
     try:
         async with domain_command_transaction(session):
-            item = await curation_repo.update_curation_item(
+            command = domain_command_service.current_domain_command()
+            item = await curation_repo.patch_curation_item_command(
                 session,
                 collection_id=str(collection_id),
                 curation_item_id=str(curation_item_id),
                 updates=updates,
-                actor=context.actor,
+                expected_revision=expected_revision,
+                command_id=command.command_id,
+                principal=command.actor,
             )
+    except DBAPIError as exc:
+        raise _item_command_error(exc) from exc
     except IntegrityError as exc:
         raise _conflict(exc) from exc
+    except curation_repo.CurationRevisionConflictError as exc:
+        raise HTTPException(status_code=412, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if item is None:
         raise HTTPException(status_code=404, detail="curation item 없음")
-    return AdminCurationItemResponse(
+    result_response = AdminCurationItemResponse(
         data=_admin_item_view(item),
         meta=make_meta(request, started_at=started_at),
     )
+    response.headers["ETag"] = _curation_representation_etag(result_response.data)
+    return result_response
 
 
 @admin_router.delete(
     "/{collection_id}/items/{curation_item_id}",
     response_model=AdminCurationItemResponse,
+    responses={
+        200: {"headers": _ETAG_RESPONSE_HEADER},
+        412: {"description": "stale item If-Match"},
+        428: {"description": "If-Match 누락"},
+    },
+    openapi_extra={"parameters": [_IF_MATCH_OPENAPI_PARAMETER]},
 )
 @idempotent_domain_command("admin.curation-item.archive")
 async def archive_admin_curation_item(
     request: Request,
     collection_id: UUID,
     curation_item_id: UUID,
+    response: Response,
     session: Annotated[AsyncSession, Depends(get_session)],
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> AdminCurationItemResponse:
     started_at = perf_counter()
+    expected_revision = parse_revision_header(request, "If-Match", required=True)
+    assert expected_revision is not None
     try:
         async with domain_command_transaction(session):
-            item = await curation_repo.archive_curation_item(
+            command = domain_command_service.current_domain_command()
+            item = await curation_repo.archive_curation_item_command(
                 session,
                 collection_id=str(collection_id),
                 curation_item_id=str(curation_item_id),
-                actor=context.actor,
+                expected_revision=expected_revision,
+                command_id=command.command_id,
+                principal=command.actor,
             )
+    except DBAPIError as exc:
+        raise _item_command_error(exc) from exc
+    except curation_repo.CurationRevisionConflictError as exc:
+        raise HTTPException(status_code=412, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if item is None:
         raise HTTPException(status_code=404, detail="curation item 없음")
-    return AdminCurationItemResponse(
+    result_response = AdminCurationItemResponse(
         data=_admin_item_view(item),
         meta=make_meta(request, started_at=started_at),
     )
+    response.headers["ETag"] = _curation_representation_etag(result_response.data)
+    return result_response

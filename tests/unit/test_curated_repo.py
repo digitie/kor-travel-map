@@ -27,6 +27,11 @@ _FEATURE_UUID = "77777777-7777-4777-8777-777777777777"
 _NOW = datetime(2026, 6, 12, 18, 0, tzinfo=_KST)
 
 
+def test_legacy_public_projection_excludes_archived_catalog() -> None:
+    assert "t.archived_at IS NULL" in curated_repo._PUBLIC_FEATURE_FILTERS_SQL
+    assert "s.archived_at IS NULL" in curated_repo._PUBLIC_FEATURE_FILTERS_SQL
+
+
 class _FakeResult:
     def __init__(self, rows: list[dict[str, Any]]) -> None:
         self._rows = rows
@@ -68,6 +73,10 @@ def _theme_row(**overrides: Any) -> dict[str, Any]:
         "metadata": {"icon": "book-open"},
         "created_at": _NOW,
         "updated_at": _NOW,
+        "row_revision": 1,
+        "archived_at": None,
+        "owner_kind": "operator",
+        "owner_provider_dataset_id": None,
     }
     row.update(overrides)
     return row
@@ -93,6 +102,9 @@ def _source_row(**overrides: Any) -> dict[str, Any]:
         "metadata": {"surface": "fileData"},
         "created_at": _NOW,
         "updated_at": _NOW,
+        "row_revision": 1,
+        "observation_revision": 1,
+        "archived_at": None,
     }
     row.update(overrides)
     return row
@@ -270,7 +282,6 @@ async def test_curated_repo_write_paths_with_fake_session() -> None:
         [_feature_row(curation_status="candidate", content_version=6)],
         [{"curated_feature_id": _CURATED_ID}],
         [_feature_row(curation_status="archived", archived_at=_NOW, content_version=7)],
-        [{"affected_count": 3}],
         [_theme_row()],
         [_theme_row(theme_name="수정 책방")],
         [{"source_id": _SOURCE_ID}],
@@ -356,130 +367,73 @@ async def test_curated_repo_write_paths_with_fake_session() -> None:
     assert archived is not None
     assert archived.archived_at == _NOW
 
-    applied = await curated_repo.apply_curated_source_rule(session, rule_id=_RULE_ID)
-    assert applied.inserted_or_updated == 3
-
-    theme = await curated_repo.create_curated_theme(
-        session,
-        theme_slug="bookstores",
-        theme_name="책방 여행",
-        theme_group="books",
-        visibility="public",
+@pytest.mark.asyncio
+async def test_retained_rule_commands_use_full_desired_cas_inputs() -> None:
+    session = _FakeSession(
+        [{"o_rule_id": _RULE_ID, "o_rule_revision": 1, "o_generation_id": "gen-1"}],
+        [_rule_row(row_revision=1)],
+        [_rule_row(row_revision=1)],
+        [{"o_rule_id": _RULE_ID, "o_rule_revision": 2, "o_generation_id": "gen-2"}],
+        [_rule_row(row_revision=2, priority=90, default_action="ignore")],
+        [_rule_row(row_revision=2, priority=90, default_action="ignore")],
+        [{"o_rule_id": _RULE_ID, "o_rule_revision": 3, "o_generation_id": "gen-3"}],
+        [
+            _rule_row(
+                row_revision=3,
+                priority=90,
+                default_action="ignore",
+                archived_at=_NOW,
+            )
+        ],
     )
-    assert theme.theme_slug == "bookstores"
 
-    updated_theme = await curated_repo.update_curated_theme(
-        session,
-        theme_id=_THEME_ID,
-        updates={"theme_name": "수정 책방"},
-    )
-    assert updated_theme is not None
-    assert updated_theme.theme_name == "수정 책방"
-
-    source = await curated_repo.create_curated_source(
-        session,
-        provider_dataset_id=101,
-        source_name="서울특별시 책방",
-        source_kind="filedata",
-    )
-    assert source.source_kind == "filedata"
-
-    updated_source = await curated_repo.update_curated_source(
-        session,
-        source_id=_SOURCE_ID,
-        updates={"source_name": "수정 source", "provider_status": "implemented"},
-    )
-    assert updated_source is not None
-    assert updated_source.source_name == "수정 source"
-
-    rule = await curated_repo.create_curated_source_rule(
+    created = await curated_repo.create_curated_source_rule_command(
         session,
         theme_id=_THEME_ID,
         source_id=_SOURCE_ID,
         region_scope={"sido_code": "11"},
-        metadata={"curation_relation": "bookstore_stop"},
+        command_id=101,
+        principal="admin:rule-test",
     )
-    assert rule.rule_id == _RULE_ID
-
-    updated_rule = await curated_repo.update_curated_source_rule(
+    patched = await curated_repo.patch_curated_source_rule_command(
         session,
         rule_id=_RULE_ID,
-        updates={
-            "priority": 99,
-            "region_scope": {"sigungu_code": "11140"},
-            "detail_selector": {
-                "path": ["payload", "channel_id"],
-                "value": "channel-A",
-            },
-        },
+        expected_revision=1,
+        updates={"priority": 90, "default_action": "ignore"},
+        command_id=102,
+        principal="admin:rule-test",
     )
-    assert updated_rule is not None
-    assert updated_rule.priority == 99
-    assert updated_rule.detail_selector == {
-        "path": ["payload", "channel_id"],
-        "value": "channel-A",
-    }
-    assert (
-        session.calls[-2][1]["detail_selector_json"]
-        == '{"path":["payload","channel_id"],"value":"channel-A"}'
-    )
-
-
-@pytest.mark.asyncio
-async def test_curated_repo_dagster_batch_paths_with_fake_session() -> None:
-    session = _FakeSession(
-        [
-            {
-                "sources_checked": 2,
-                "sources_with_records": 1,
-                "source_records_total": 7,
-            }
-        ],
-        [
-            _rule_row(),
-            _rule_row(rule_id="66666666-6666-6666-6666-666666666666"),
-        ],
-        [{"affected_count": 3}],
-        [{"affected_count": 4}],
-        [{"archived_count": 1}],
-        [_feature_row()],
-        [{"curated_feature_id": _CURATED_ID}],
-    )
-
-    refreshed = await curated_repo.refresh_curated_source_metadata(
+    archived = await curated_repo.archive_curated_source_rule_command(
         session,
-        provider_dataset_id=101,
+        rule_id=_RULE_ID,
+        expected_revision=2,
+        command_id=103,
+        reason_code="operator_retired",
+        principal="admin:rule-test",
     )
-    assert refreshed.as_metadata() == {
-        "sources_checked": 2,
-        "sources_with_records": 1,
-        "source_records_total": 7,
-    }
-    assert session.calls[0][1]["provider_dataset_id"] == 101
 
-    candidates = await curated_repo.apply_enabled_curated_source_rules(
-        session,
-        limit=50,
+    assert created.row_revision == 1
+    assert patched is not None
+    assert (patched.row_revision, patched.priority, patched.default_action) == (
+        2,
+        90,
+        "ignore",
     )
-    assert candidates.rules_applied == 2
-    assert candidates.inserted_or_updated == 7
-    assert session.calls[1][1]["enabled"] is True
-    assert session.calls[2][1]["rule_id"] == _RULE_ID
+    assert archived is not None
+    assert (archived.row_revision, archived.archived_at) == (3, _NOW)
+    command_calls = [call for call in session.calls if "CALL feature." in call[0]]
+    assert [
+        "create_curated_source_rule_command" in call[0]
+        or "patch_curated_source_rule_command" in call[0]
+        or "archive_curated_source_rule_command" in call[0]
+        for call in command_calls
+    ] == [True, True, True]
+    assert command_calls[1][1]["expected_revision"] == 1
+    assert command_calls[1][1]["priority"] == 90
+    assert command_calls[1][1]["region_scope_json"] == "{}"
+    assert command_calls[2][1]["expected_revision"] == 2
 
-    swept = await curated_repo.sweep_curated_feature_status(session)
-    assert swept.archived == 1
 
-    materialized = await curated_repo.materialize_curated_feature_detail_snapshots(
-        session,
-        theme_slug="bookstores",
-        limit=1,
-    )
-    assert materialized.curated_features_total == 1
-    assert materialized.snapshots_materialized == 1
-    snapshot_params = session.calls[-1][1]
-    assert snapshot_params["content_version"] == 2
-    assert snapshot_params["etag"].startswith("sha256:")
-    assert '"curated_feature_id"' in snapshot_params["snapshot_json"]
 
 
 @pytest.mark.asyncio
@@ -612,25 +566,3 @@ async def test_curated_repo_validation_and_empty_paths() -> None:
         )
         is None
     )
-
-    assert (
-        await curated_repo.update_curated_theme(
-            _FakeSession(),
-            theme_id=_THEME_ID,
-            updates={},
-        )
-        is None
-    )
-    with pytest.raises(ValueError, match="unsupported update field"):
-        await curated_repo.update_curated_source(
-            _FakeSession(),
-            source_id=_SOURCE_ID,
-            updates={"provider": "bad"},
-        )
-    with pytest.raises(ValueError, match="source_kind"):
-        await curated_repo.create_curated_source(
-            _FakeSession(),
-            provider_dataset_id=101,
-            source_name="s",
-            source_kind="bad",
-        )

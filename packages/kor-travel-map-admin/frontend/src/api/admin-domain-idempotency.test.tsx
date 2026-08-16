@@ -29,9 +29,10 @@ import {
 import {
   useAddCurationItemMutation,
   useArchiveCurationItemMutation,
+  useCommitCurationImportPlanMutation,
   useCreateCurationCollectionMutation,
-  useImportCurationCsvMutation,
   usePatchCurationItemMutation,
+  usePreviewCurationCsvMutation,
   type CurationItemPatchRequest,
 } from "./curations";
 import {
@@ -266,6 +267,7 @@ describe("admin domain idempotency consumers", () => {
         run: () =>
           runMutation(context, useCreateCurationCollectionMutation, {
             collection_key: "collection-key",
+            theme_id: "11111111-1111-4111-8111-111111111111",
             title: "collection title",
           }),
       },
@@ -283,6 +285,7 @@ describe("admin domain idempotency consumers", () => {
           runMutation(context, usePatchCurationItemMutation, {
             body: { item_title: "patched" } as CurationItemPatchRequest,
             collectionId: "collection-1",
+            commandEtag: '"7"',
             curationItemId: "item-1",
           }),
       },
@@ -291,15 +294,23 @@ describe("admin domain idempotency consumers", () => {
         run: () =>
           runMutation(context, useArchiveCurationItemMutation, {
             collectionId: "collection-1",
+            commandEtag: '"7"',
             curationItemId: "item-1",
           }),
       },
       {
-        name: "curation import",
+        name: "curation import preview",
         run: () =>
-          runMutation(context, useImportCurationCsvMutation, {
-            dryRun: false,
+          runMutation(context, usePreviewCurationCsvMutation, {
             file: csvFile("title,place_name\nx,y\n"),
+          }),
+      },
+      {
+        name: "curation import commit",
+        run: () =>
+          runMutation(context, useCommitCurationImportPlanMutation, {
+            importPlanId: "00000000-0000-4000-8000-000000000001",
+            planEtag: '"sha256:import-plan"',
           }),
       },
       {
@@ -350,6 +361,12 @@ describe("admin domain idempotency consumers", () => {
     for (const [index, [, init]] of context.fetchMock.mock.calls.entries()) {
       const headers = init?.headers as Record<string, string> | undefined;
       expect(headers?.["Idempotency-Key"], cases[index]?.name).toMatch(UUID_RE);
+      if (
+        cases[index]?.name === "curation item patch" ||
+        cases[index]?.name === "curation item archive"
+      ) {
+        expect(headers?.["If-Match"], cases[index]?.name).toBe('"7"');
+      }
     }
   });
 });

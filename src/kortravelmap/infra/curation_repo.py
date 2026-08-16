@@ -23,6 +23,10 @@ from kortravelmap.core.curation_address import (
     CURATION_ADDRESS_RESOLVER_VERSION,
     address_hint_matches,
 )
+from kortravelmap.core.curation_cutover_mapping import (
+    CurationCutoverIdentityMappingDigestInput,
+    curation_cutover_identity_mapping_root,
+)
 from kortravelmap.infra.curation_link_basis import trusted_basis_sql
 from kortravelmap.infra.feature_repo import public_active_notice_filter_sql
 
@@ -32,13 +36,19 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
+    "CURATION_SERVICE_COLLECTION_MAX_ITEMS",
     "CurationCollection",
     "CurationImportBatch",
     "CurationImportPlan",
+    "CurationImportRevisionExpectation",
     "CurationImportResult",
     "CurationImportRowReceipt",
+    "CurationCutoverIdentityMapping",
+    "CurationCutoverIdentityMappingExport",
     "CurationLinkAudit",
     "CurationItem",
+    "CurationServiceCollectionSnapshot",
+    "CurationServiceItemSnapshot",
     "CurationQuarantineCollection",
     "CurationQuarantineItem",
     "CurationQuarantineItemsPreview",
@@ -56,14 +66,23 @@ __all__ = [
     "add_curation_item",
     "archive_curation_item",
     "archive_curation_collection",
+    "archive_curation_collection_command",
     "confirm_curation_quarantine_standalone",
     "create_curation_collection",
+    "create_curation_collection_command",
     "get_curation_collection",
     "get_curation_import_batch",
     "get_curation_item",
+    "get_curation_service_collection_snapshot",
+    "get_curation_service_item_snapshot",
+    "get_curation_cutover_identity_mapping_export",
     "get_current_curation_import_row",
     "get_feature_curation_group",
     "import_curation_rows",
+    "build_curation_import_revision_vector",
+    "claim_curation_import_plan_command",
+    "complete_curation_import_plan_command",
+    "create_curation_import_plan_command",
     "list_curation_collections",
     "list_curation_items_by_feature_ids",
     "list_curation_quarantine_collections",
@@ -78,8 +97,11 @@ __all__ = [
     "upsert_curation_theme",
     "update_curation_item",
     "update_curation_collection",
+    "patch_curation_collection_command",
     "validate_resolved_curation_identities",
 ]
+
+CURATION_SERVICE_COLLECTION_MAX_ITEMS: Final = 2_000
 
 CollectionStatus = Literal["draft", "published", "archived"]
 CollectionVisibility = Literal["admin_only", "public"]
@@ -115,6 +137,10 @@ QUARANTINE_CONFLICT_NO_TARGET: Final = "no_target"
 QUARANTINE_CONFLICT_TARGET_MISSING: Final = "target_missing"
 
 
+class CurationRevisionConflictError(ValueError):
+    """canonical collection/item command의 expected revision이 stale이다."""
+
+
 @dataclass(frozen=True)
 class CurationCollection:
     collection_id: str
@@ -137,6 +163,7 @@ class CurationCollection:
     metadata: dict[str, Any]
     item_count: int
     public_item_count: int
+    row_revision: int
     created_by: str | None
     updated_by: str | None
     created_at: datetime
@@ -186,6 +213,7 @@ class CurationItem:
     link_evidence: dict[str, Any]
     link_actor: str | None
     link_decided_at: datetime | None
+    row_revision: int
     created_by: str | None
     updated_by: str | None
     created_at: datetime
@@ -193,6 +221,69 @@ class CurationItem:
     archived_at: datetime | None
     # T-VN-32C UUID 정본 병행 노출(additive) — feature 미연결/미해소면 None.
     feature_uuid: str | None = None
+
+
+@dataclass(frozen=True)
+class CurationServiceItemSnapshot:
+    """PinVi service read가 소비하는 public canonical item projection."""
+
+    curation_item_id: str
+    collection_id: str
+    row_revision: int
+    updated_at: datetime
+    theme_slug: str
+    theme_name: str
+    collection_title: str
+    edition_key: str
+    feature_uuid: str
+    relation: str
+    sort_order: int
+    item_title: str | None
+    item_summary: str | None
+    feature_name: str
+    feature_category: str
+    feature_kind: str
+    lon: float | None
+    lat: float | None
+    address: dict[str, Any]
+    detail: dict[str, Any]
+    source_record_key: str | None
+
+
+@dataclass(frozen=True)
+class CurationServiceCollectionSnapshot:
+    """한 statement snapshot에서 읽은 collection receipt와 bounded public page."""
+
+    collection_id: str
+    row_revision: int
+    updated_at: datetime
+    theme_slug: str
+    theme_name: str
+    title: str
+    edition_key: str
+    item_count: int
+    item_set_hash: str
+    items: tuple[CurationServiceItemSnapshot, ...]
+
+
+@dataclass(frozen=True)
+class CurationCutoverIdentityMapping:
+    """T-VN-40C legacy Map identity에서 canonical membership으로의 one-to-one row."""
+
+    legacy_curated_feature_id: str
+    collection_id: str
+    curation_item_id: str
+    mapping_kind: str
+    source_row_hash: str
+
+
+@dataclass(frozen=True)
+class CurationCutoverIdentityMappingExport:
+    """PinVi cutover가 전 페이지에서 대조하는 immutable mapping receipt."""
+
+    mapping_count: int
+    mapping_root: str
+    mappings: tuple[CurationCutoverIdentityMapping, ...]
 
 
 @dataclass(frozen=True)
@@ -279,6 +370,7 @@ class CurationQuarantineOriginalCollection:
     """
 
     collection_id: str
+    row_revision: int | None
     title: str | None
     status: str | None
     visibility: str | None
@@ -292,6 +384,7 @@ class CurationQuarantineCollection:
     """`0065` 격리 collection 목록 read model 한 건 (T-VN-H22A)."""
 
     collection_id: str
+    row_revision: int
     collection_key: str
     title: str
     edition_key: str
@@ -326,6 +419,7 @@ class CurationQuarantineItemsPreview:
     """격리 item page와 적용된 target 해석 결과."""
 
     target_collection_id: str | None
+    target_collection_revision: int | None
     target_missing: bool
     target_archived: bool
     items: tuple[CurationQuarantineItem, ...]
@@ -433,6 +527,15 @@ class CurationImportPlan:
     removals: tuple[CurationItem, ...]
 
 
+@dataclass(frozen=True)
+class CurationImportRevisionExpectation:
+    """preview가 고정한 catalog/membership optimistic revision 한 건."""
+
+    resource_kind: Literal["theme", "source", "collection", "item", "feature"]
+    resource_key: str
+    expected_revision: int | None
+
+
 class CurationImportResult(TypedDict):
     """원자적 CSV replace가 실제 반영한 item 변화."""
 
@@ -496,8 +599,9 @@ SELECT
           AND count_item.source_present
           AND (
               NOT CAST(:public_only AS boolean)
-              OR count_item.feature_id IS NULL
               OR (
+                  count_item.feature_id IS NOT NULL
+                  AND
                   {_trusted_link_sql("count_item")}
                   AND EXISTS (
                       SELECT 1
@@ -517,8 +621,9 @@ SELECT
           AND public_count_item.status = 'included'
           AND (
               NOT CAST(:public_only AS boolean)
-              OR public_count_item.feature_id IS NULL
               OR (
+                  public_count_item.feature_id IS NOT NULL
+                  AND
                   {_trusted_link_sql("public_count_item")}
                   AND EXISTS (
                       SELECT 1
@@ -529,6 +634,7 @@ SELECT
               )
           )
     ) AS public_item_count,
+    c.row_revision,
     c.created_by,
     c.updated_by,
     c.created_at,
@@ -589,6 +695,7 @@ _ITEM_SELECT_FIELDS: Final[str] = f"""
     link_decision.evidence AS link_evidence,
     link_decision.actor AS link_actor,
     link_decision.decided_at AS link_decided_at,
+    i.row_revision,
     i.created_by,
     i.updated_by,
     i.created_at,
@@ -624,6 +731,8 @@ WHERE (:include_archived OR c.archived_at IS NULL)
           c.status = 'published'
           AND c.visibility = 'public'
           AND t.visibility = 'public'
+          AND t.archived_at IS NULL
+          AND (c.source_id IS NULL OR s.archived_at IS NULL)
       )
   )
   AND (CAST(:status AS text) IS NULL OR c.status = CAST(:status AS text))
@@ -672,6 +781,8 @@ WHERE c.collection_id = CAST(:collection_id AS uuid)
           c.status = 'published'
           AND c.visibility = 'public'
           AND t.visibility = 'public'
+          AND t.archived_at IS NULL
+          AND (c.source_id IS NULL OR s.archived_at IS NULL)
       )
   )
 """
@@ -688,6 +799,8 @@ WHERE c.collection_key = :collection_key
           c.status = 'published'
           AND c.visibility = 'public'
           AND t.visibility = 'public'
+          AND t.archived_at IS NULL
+          AND (c.source_id IS NULL OR s.archived_at IS NULL)
       )
   )
 """
@@ -703,8 +816,11 @@ WHERE i.collection_id = CAST(:collection_id AS uuid)
   )
   AND (
       NOT CAST(:public_only AS boolean)
-      OR i.feature_id IS NULL
       OR (
+          i.feature_id IS NOT NULL
+          AND t.archived_at IS NULL
+          AND (c.source_id IS NULL OR s.archived_at IS NULL)
+          AND
           {_trusted_link_sql("i")}
           AND EXISTS (
               SELECT 1
@@ -730,6 +846,302 @@ WHERE i.collection_id = CAST(:collection_id AS uuid)
 """
 )
 
+
+_SERVICE_SNAPSHOT_ELIGIBLE_ITEMS_SQL: Final[str] = f"""
+SELECT
+    i.curation_item_id::text AS curation_item_id,
+    i.collection_id,
+    i.row_revision,
+    i.updated_at,
+    c.theme_slug,
+    c.theme_name,
+    c.title AS collection_title,
+    c.edition_key,
+    pf.feature_uuid::text AS feature_uuid,
+    i.curation_relation AS relation,
+    i.sort_order,
+    i.item_title,
+    i.item_summary,
+    pf.name AS feature_name,
+    pf.category AS feature_category,
+    pf.kind AS feature_kind,
+    x_extension.ST_X(pf.coord) AS lon,
+    x_extension.ST_Y(pf.coord) AS lat,
+    pf.address,
+    pf.detail,
+    i.source_record_key
+FROM feature.curation_items AS i
+JOIN collection_row AS c ON c.collection_id = i.collection_id
+JOIN feature.public_features AS pf ON pf.feature_id = i.feature_id
+WHERE i.archived_at IS NULL
+  AND i.source_present
+  AND i.status = 'included'
+  {_ITEM_PUBLIC_NOTICE_FILTER_SQL}
+  AND {_trusted_link_sql("i")}
+  AND (
+      i.source_record_key IS NULL
+      OR EXISTS (
+          SELECT 1
+          FROM provider_sync.source_records AS snapshot_record
+          JOIN provider_sync.source_entity_heads AS snapshot_head
+            ON snapshot_head.source_entity_key = snapshot_record.source_entity_key
+           AND snapshot_head.current_source_record_key = snapshot_record.source_record_key
+          JOIN provider_sync.source_links AS snapshot_link
+            ON snapshot_link.source_entity_key = snapshot_record.source_entity_key
+           AND snapshot_link.feature_id = i.feature_id
+          WHERE snapshot_record.source_record_key = i.source_record_key
+      )
+  )
+  AND (
+      CAST(:curation_item_id AS uuid) IS NULL
+      OR i.curation_item_id = CAST(:curation_item_id AS uuid)
+  )
+"""
+
+_GET_SERVICE_CURATION_ITEM_SNAPSHOT_SQL: Final[str] = f"""
+WITH collection_row AS (
+    SELECT
+        collection.collection_id,
+        collection.row_revision,
+        collection.updated_at,
+        theme.theme_slug,
+        theme.theme_name,
+        collection.title,
+        collection.edition_key
+    FROM feature.curation_collections AS collection
+    JOIN feature.curated_themes AS theme ON theme.theme_id = collection.theme_id
+    LEFT JOIN feature.curated_sources AS source ON source.source_id = collection.source_id
+    WHERE collection.archived_at IS NULL
+      AND collection.status = 'published'
+      AND collection.visibility = 'public'
+      AND theme.visibility = 'public'
+      AND theme.archived_at IS NULL
+      AND (collection.source_id IS NULL OR source.archived_at IS NULL)
+      AND (
+          (
+              CAST(:collection_id AS uuid) IS NOT NULL
+              AND collection.collection_id = CAST(:collection_id AS uuid)
+          )
+          OR (
+              CAST(:curation_item_id AS uuid) IS NOT NULL
+              AND EXISTS (
+                  SELECT 1
+                  FROM feature.curation_items AS requested_item
+                  WHERE requested_item.collection_id = collection.collection_id
+                    AND requested_item.curation_item_id = CAST(:curation_item_id AS uuid)
+              )
+          )
+      )
+), eligible_item AS (
+    {_SERVICE_SNAPSHOT_ELIGIBLE_ITEMS_SQL}
+)
+SELECT
+    collection_row.collection_id::text AS collection_id,
+    collection_row.row_revision AS collection_row_revision,
+    collection_row.updated_at AS collection_updated_at,
+    collection_row.theme_slug,
+    collection_row.theme_name,
+    collection_row.title AS collection_title,
+    collection_row.edition_key,
+    eligible_item.curation_item_id,
+    eligible_item.row_revision AS item_row_revision,
+    eligible_item.updated_at AS item_updated_at,
+    eligible_item.feature_uuid,
+    eligible_item.relation,
+    eligible_item.sort_order,
+    eligible_item.item_title,
+    eligible_item.item_summary,
+    eligible_item.feature_name,
+    eligible_item.feature_category,
+    eligible_item.feature_kind,
+    eligible_item.lon,
+    eligible_item.lat,
+    eligible_item.address,
+    eligible_item.detail,
+    eligible_item.source_record_key
+FROM collection_row
+LEFT JOIN eligible_item ON eligible_item.collection_id = collection_row.collection_id
+ORDER BY eligible_item.curation_item_id
+"""
+
+_GET_SERVICE_CURATION_COLLECTION_PAGE_SQL: Final[str] = f"""
+WITH collection_row AS MATERIALIZED (
+    SELECT
+        collection.collection_id,
+        collection.row_revision,
+        collection.updated_at,
+        theme.theme_slug,
+        theme.theme_name,
+        collection.title,
+        collection.edition_key
+    FROM feature.curation_collections AS collection
+    JOIN feature.curated_themes AS theme ON theme.theme_id = collection.theme_id
+    LEFT JOIN feature.curated_sources AS source ON source.source_id = collection.source_id
+    WHERE collection.collection_id = CAST(:collection_id AS uuid)
+      AND collection.archived_at IS NULL
+      AND collection.status = 'published'
+      AND collection.visibility = 'public'
+      AND theme.visibility = 'public'
+      AND theme.archived_at IS NULL
+      AND (collection.source_id IS NULL OR source.archived_at IS NULL)
+), bounded_eligible_item_key AS MATERIALIZED (
+    SELECT item.curation_item_id
+    FROM feature.curation_items AS item
+    JOIN collection_row AS collection
+      ON collection.collection_id = item.collection_id
+    JOIN feature.curation_link_decisions AS trusted_decision
+      ON trusted_decision.decision_id = item.accepted_link_decision_id
+     AND trusted_decision.curation_item_id = item.curation_item_id
+     AND trusted_decision.feature_id = item.feature_id
+     AND trusted_decision.decision_kind = 'accepted'
+     AND {trusted_basis_sql("trusted_decision.match_basis")}
+    JOIN feature.public_features AS pf ON pf.feature_id = item.feature_id
+    WHERE item.archived_at IS NULL
+      AND item.source_present
+      AND item.status = 'included'
+      AND item.feature_id IS NOT NULL
+      {_ITEM_PUBLIC_NOTICE_FILTER_SQL}
+      AND (
+          item.source_record_key IS NULL
+          OR EXISTS (
+              SELECT 1
+              FROM provider_sync.source_records AS snapshot_record
+              JOIN provider_sync.source_entity_heads AS snapshot_head
+                ON snapshot_head.source_entity_key = snapshot_record.source_entity_key
+               AND snapshot_head.current_source_record_key = snapshot_record.source_record_key
+              JOIN provider_sync.source_links AS snapshot_link
+                ON snapshot_link.source_entity_key = snapshot_record.source_entity_key
+               AND snapshot_link.feature_id = item.feature_id
+              WHERE snapshot_record.source_record_key = item.source_record_key
+          )
+      )
+    ORDER BY item.curation_item_id
+    LIMIT {CURATION_SERVICE_COLLECTION_MAX_ITEMS + 1}
+), eligible_item AS MATERIALIZED (
+    {_SERVICE_SNAPSHOT_ELIGIBLE_ITEMS_SQL}
+      AND i.curation_item_id IN (
+          SELECT bounded_key.curation_item_id
+          FROM bounded_eligible_item_key AS bounded_key
+      )
+      AND (
+          SELECT count(*) <= {CURATION_SERVICE_COLLECTION_MAX_ITEMS}
+          FROM bounded_eligible_item_key
+      )
+), bounded_eligible_item AS (
+    SELECT *
+    FROM eligible_item
+    ORDER BY eligible_item.curation_item_id::uuid
+    LIMIT {CURATION_SERVICE_COLLECTION_MAX_ITEMS + 1}
+), hashed_item AS (
+    SELECT
+        eligible_item.*,
+        encode(
+            x_extension.digest(
+                convert_to(
+                    jsonb_build_array(
+                        eligible_item.curation_item_id,
+                        eligible_item.collection_id,
+                        eligible_item.row_revision,
+                        eligible_item.updated_at,
+                        eligible_item.theme_slug,
+                        eligible_item.theme_name,
+                        eligible_item.collection_title,
+                        eligible_item.edition_key,
+                        eligible_item.feature_uuid,
+                        eligible_item.relation,
+                        eligible_item.sort_order,
+                        eligible_item.item_title,
+                        eligible_item.item_summary,
+                        eligible_item.feature_name,
+                        eligible_item.feature_category,
+                        eligible_item.feature_kind,
+                        eligible_item.lon,
+                        eligible_item.lat,
+                        eligible_item.address,
+                        eligible_item.detail,
+                        eligible_item.source_record_key
+                    )::text,
+                    'UTF8'
+                ),
+                'sha256'
+            ),
+            'hex'
+        ) AS item_payload_hash
+    FROM bounded_eligible_item AS eligible_item
+), item_set_receipt AS (
+    SELECT
+        CASE
+            WHEN (
+                SELECT count(*) > {CURATION_SERVICE_COLLECTION_MAX_ITEMS}
+                FROM bounded_eligible_item_key
+            )
+            THEN {CURATION_SERVICE_COLLECTION_MAX_ITEMS + 1}::bigint
+            ELSE count(*)::bigint
+        END AS item_count,
+        encode(
+            x_extension.digest(
+                convert_to(
+                    COALESCE(
+                        jsonb_agg(
+                            jsonb_build_array(
+                                hashed_item.curation_item_id,
+                                hashed_item.row_revision,
+                                hashed_item.item_payload_hash
+                            )
+                            ORDER BY hashed_item.curation_item_id
+                        ),
+                        '[]'::jsonb
+                    )::text,
+                    'UTF8'
+                ),
+                'sha256'
+            ),
+            'hex'
+        ) AS item_set_hash
+    FROM hashed_item
+), page_item AS (
+    SELECT *
+    FROM hashed_item
+    WHERE (
+        CAST(:after_curation_item_id AS uuid) IS NULL
+        OR hashed_item.curation_item_id::uuid
+            > CAST(:after_curation_item_id AS uuid)
+    )
+    ORDER BY hashed_item.curation_item_id::uuid
+    LIMIT CAST(:page_limit AS integer)
+)
+SELECT
+    collection_row.collection_id::text AS collection_id,
+    collection_row.row_revision AS collection_row_revision,
+    collection_row.updated_at AS collection_updated_at,
+    collection_row.theme_slug,
+    collection_row.theme_name,
+    collection_row.title AS collection_title,
+    collection_row.edition_key,
+    item_set_receipt.item_count,
+    item_set_receipt.item_set_hash,
+    page_item.curation_item_id,
+    page_item.row_revision AS item_row_revision,
+    page_item.updated_at AS item_updated_at,
+    page_item.feature_uuid,
+    page_item.relation,
+    page_item.sort_order,
+    page_item.item_title,
+    page_item.item_summary,
+    page_item.feature_name,
+    page_item.feature_category,
+    page_item.feature_kind,
+    page_item.lon,
+    page_item.lat,
+    page_item.address,
+    page_item.detail,
+    page_item.source_record_key
+FROM collection_row
+CROSS JOIN item_set_receipt
+LEFT JOIN page_item ON true
+ORDER BY page_item.curation_item_id::uuid
+"""
+
 _LIST_FEATURE_ITEMS_SQL: Final[str] = (
     _ITEM_SELECT
     + f"""
@@ -744,6 +1156,8 @@ WHERE i.feature_id = :feature_id
           AND c.status = 'published'
           AND c.visibility = 'public'
           AND t.visibility = 'public'
+          AND t.archived_at IS NULL
+          AND (c.source_id IS NULL OR s.archived_at IS NULL)
           AND {_trusted_link_sql("i")}
       )
   )
@@ -765,6 +1179,8 @@ WHERE i.feature_id = ANY(CAST(:feature_ids AS text[]))
           AND c.status = 'published'
           AND c.visibility = 'public'
           AND t.visibility = 'public'
+          AND t.archived_at IS NULL
+          AND (c.source_id IS NULL OR s.archived_at IS NULL)
           AND {_trusted_link_sql("i")}
       )
   )
@@ -809,6 +1225,11 @@ WHERE (
                 AND matched_collection.status = 'published'
                 AND matched_collection.visibility = 'public'
                 AND matched_theme.visibility = 'public'
+                AND matched_theme.archived_at IS NULL
+                AND (
+                    matched_collection.source_id IS NULL
+                    OR matched_source.archived_at IS NULL
+                )
                 AND {_trusted_link_sql("matched_item")}
             )
         )
@@ -1034,6 +1455,7 @@ WITH incoming AS (
     SET source_present = false,
         source_updated_at = clock_timestamp(),
         updated_by = :actor,
+        row_revision = existing.row_revision + 1,
         updated_at = now()
     FROM candidates
     WHERE existing.curation_item_id = candidates.curation_item_id
@@ -1202,6 +1624,7 @@ WITH incoming AS (
             ELSE legacy.metadata
         END,
         updated_by = :actor,
+        row_revision = legacy.row_revision + 1,
         updated_at = now()
     FROM matched
     WHERE legacy.curation_item_id = matched.curation_item_id
@@ -1270,6 +1693,7 @@ WITH incoming AS (
         item_summary = EXCLUDED.item_summary,
         metadata = EXCLUDED.metadata,
         updated_by = EXCLUDED.updated_by,
+        row_revision = feature.curation_items.row_revision + 1,
         updated_at = now()
     WHERE (
         feature.curation_items.feature_id,
@@ -1300,9 +1724,10 @@ FROM written
 
 _INSERT_IMPORT_BATCH_SQL: Final[str] = """
 INSERT INTO feature.curation_import_batches (
-    content_sha256, batch_kind, row_count, actor, metadata
+    content_sha256, batch_kind, row_count, actor, metadata, command_id
 ) VALUES (
-    :content_sha256, :batch_kind, :row_count, :actor, CAST(:metadata AS jsonb)
+    :content_sha256, :batch_kind, :row_count, :actor, CAST(:metadata AS jsonb),
+    :command_id
 )
 RETURNING import_batch_id::text
 """
@@ -1481,6 +1906,7 @@ def _quarantine_marker_sql(alias: str) -> str:
 _LIST_QUARANTINE_COLLECTIONS_SQL: Final[str] = f"""
 SELECT
     quarantine.collection_id::text AS collection_id,
+    quarantine.row_revision,
     quarantine.collection_key,
     quarantine.title,
     quarantine.edition_key,
@@ -1505,6 +1931,7 @@ SELECT
     quarantine_dataset.dataset_key AS quarantine_dataset_key,
     quarantine_source.source_name AS quarantine_source_name,
     original.collection_id::text AS original_collection_id,
+    original.row_revision AS original_row_revision,
     original.title AS original_title,
     original.status AS original_status,
     original.visibility AS original_visibility,
@@ -1822,6 +2249,21 @@ _MARK_IMPORT_REMOVALS_PRE_UUID_SQL: Final[str] = _replace_once(
     "  ON pd.provider_dataset_id = s.provider_dataset_id\n",
     "",
 )
+_MARK_IMPORT_REMOVALS_PRE_UUID_NO_REVISION_SQL: Final[str] = _replace_once(
+    _MARK_IMPORT_REMOVALS_PRE_UUID_SQL,
+    "        row_revision = existing.row_revision + 1,\n",
+    "",
+)
+_ADOPT_LEGACY_IMPORT_IDENTITIES_PRE_REVISION_SQL: Final[str] = _replace_once(
+    _ADOPT_LEGACY_IMPORT_IDENTITIES_SQL,
+    "        row_revision = legacy.row_revision + 1,\n",
+    "",
+)
+_BULK_UPSERT_ITEMS_PRE_REVISION_SQL: Final[str] = _replace_once(
+    _BULK_UPSERT_ITEMS_SQL,
+    "        row_revision = feature.curation_items.row_revision + 1,\n",
+    "",
+)
 
 _PREVIEW_IMPORT_REMOVALS_SQL: Final[str] = (
     _ITEM_SELECT
@@ -1870,66 +2312,22 @@ ORDER BY c.collection_key, i.sort_order, i.curation_item_id
 """
 )
 
-_UPSERT_THEME_SQL: Final[str] = """
-WITH written AS (
-    INSERT INTO feature.curated_themes (
-        theme_slug, theme_name, theme_description, theme_group,
-        default_curated, visibility, metadata, updated_at
-    ) VALUES (
-        :theme_slug, :theme_name, '', :theme_group, false, 'public',
-        '{}'::jsonb, now()
-    )
-    ON CONFLICT (theme_slug) DO UPDATE SET
-        theme_name = EXCLUDED.theme_name,
-        theme_group = EXCLUDED.theme_group,
-        updated_at = now()
-    WHERE (
-        feature.curated_themes.theme_name,
-        feature.curated_themes.theme_group
-    ) IS DISTINCT FROM (EXCLUDED.theme_name, EXCLUDED.theme_group)
-    RETURNING theme_id::text
-)
-SELECT theme_id FROM written
-UNION ALL
-SELECT existing.theme_id::text
-FROM feature.curated_themes AS existing
-WHERE existing.theme_slug = :theme_slug
-  AND NOT EXISTS (SELECT 1 FROM written)
-LIMIT 1
+_RESOLVE_THEME_SQL: Final[str] = """
+SELECT theme_id::text
+FROM feature.curated_themes
+WHERE theme_slug = :theme_slug
+  AND theme_name = :theme_name
+  AND theme_group = :theme_group
+  AND archived_at IS NULL
 """
 
-_UPSERT_SOURCE_SQL: Final[str] = """
-WITH written AS (
-    INSERT INTO feature.curated_sources (
-        provider_dataset_id, source_name, source_url, source_kind,
-        update_cycle, provider_status, metadata, updated_at
-    ) VALUES (
-        :provider_dataset_id, :source_name, :source_url, 'manual',
-        'unknown', 'manual_only', '{}'::jsonb, now()
-    )
-    ON CONFLICT (provider_dataset_id) DO UPDATE SET
-        source_name = EXCLUDED.source_name,
-        source_url = COALESCE(
-            EXCLUDED.source_url,
-            feature.curated_sources.source_url
-        ),
-        updated_at = now()
-    WHERE (
-        feature.curated_sources.source_name,
-        feature.curated_sources.source_url
-    ) IS DISTINCT FROM (
-        EXCLUDED.source_name,
-        COALESCE(EXCLUDED.source_url, feature.curated_sources.source_url)
-    )
-    RETURNING source_id::text
-)
-SELECT source_id FROM written
-UNION ALL
-SELECT existing.source_id::text
-FROM feature.curated_sources AS existing
-WHERE existing.provider_dataset_id = :provider_dataset_id
-  AND NOT EXISTS (SELECT 1 FROM written)
-LIMIT 1
+_RESOLVE_SOURCE_SQL: Final[str] = """
+SELECT source_id::text
+FROM feature.curated_sources
+WHERE provider_dataset_id = :provider_dataset_id
+  AND source_name = :source_name
+  AND source_url IS NOT DISTINCT FROM :source_url
+  AND archived_at IS NULL
 """
 
 _UPSERT_COLLECTION_SQL: Final[str] = """
@@ -1978,18 +2376,6 @@ FROM feature.curation_collections AS existing
 WHERE existing.collection_key = :collection_key
   AND NOT EXISTS (SELECT 1 FROM written)
 LIMIT 1
-"""
-
-_GET_THEME_ID_BY_SLUG_SQL: Final[str] = """
-SELECT theme_id::text
-FROM feature.curated_themes
-WHERE theme_slug = :theme_slug
-"""
-
-_GET_SOURCE_ID_BY_DATASET_ID_SQL: Final[str] = """
-SELECT source_id::text
-FROM feature.curated_sources
-WHERE provider_dataset_id = :provider_dataset_id
 """
 
 # h35 cutover CLI 전용 — 0063~0079 고정 세대의 ``feature.curated_sources``는
@@ -2212,6 +2598,7 @@ def _collection(row: RowMapping | Mapping[str, Any]) -> CurationCollection:
         metadata=_object(row["metadata"]),
         item_count=int(row["item_count"]),
         public_item_count=int(row["public_item_count"]),
+        row_revision=int(row["row_revision"]),
         created_by=row["created_by"],
         updated_by=row["updated_by"],
         created_at=row["created_at"],
@@ -2268,12 +2655,41 @@ def _item(row: RowMapping | Mapping[str, Any]) -> CurationItem:
         link_evidence=_object(row.get("link_evidence")),
         link_actor=str(value) if (value := row.get("link_actor")) else None,
         link_decided_at=row.get("link_decided_at"),
+        row_revision=int(row["row_revision"]),
         created_by=row["created_by"],
         updated_by=row["updated_by"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         archived_at=row["archived_at"],
         feature_uuid=(str(value) if (value := row.get("feature_uuid")) else None),
+    )
+
+
+def _service_item_snapshot(
+    row: RowMapping | Mapping[str, Any],
+) -> CurationServiceItemSnapshot:
+    return CurationServiceItemSnapshot(
+        curation_item_id=str(row["curation_item_id"]),
+        collection_id=str(row["collection_id"]),
+        row_revision=int(row["item_row_revision"]),
+        updated_at=row["item_updated_at"],
+        theme_slug=str(row["theme_slug"]),
+        theme_name=str(row["theme_name"]),
+        collection_title=str(row["collection_title"]),
+        edition_key=str(row["edition_key"]),
+        feature_uuid=str(row["feature_uuid"]),
+        relation=str(row["relation"]),
+        sort_order=int(row["sort_order"]),
+        item_title=row["item_title"],
+        item_summary=row["item_summary"],
+        feature_name=str(row["feature_name"]),
+        feature_category=str(row["feature_category"]),
+        feature_kind=str(row["feature_kind"]),
+        lon=float(row["lon"]) if row["lon"] is not None else None,
+        lat=float(row["lat"]) if row["lat"] is not None else None,
+        address=_object(row["address"]),
+        detail=_object(row["detail"]),
+        source_record_key=row["source_record_key"],
     )
 
 
@@ -2386,6 +2802,7 @@ def _quarantine_collection(
         exists = row["original_collection_id"] is not None
         original = CurationQuarantineOriginalCollection(
             collection_id=recorded_original_id,
+            row_revision=(int(row["original_row_revision"]) if exists else None),
             title=row["original_title"] if exists else None,
             status=row["original_status"] if exists else None,
             visibility=row["original_visibility"] if exists else None,
@@ -2395,6 +2812,7 @@ def _quarantine_collection(
         )
     return CurationQuarantineCollection(
         collection_id=str(row["collection_id"]),
+        row_revision=int(row["row_revision"]),
         collection_key=str(row["collection_key"]),
         title=str(row["title"]),
         edition_key=str(row["edition_key"]),
@@ -2708,6 +3126,136 @@ async def get_curation_item(
     return _item(row) if row is not None else None
 
 
+async def get_curation_service_collection_snapshot(
+    session: AsyncSession,
+    *,
+    collection_id: str,
+    after_curation_item_id: str | None = None,
+    page_limit: int = 101,
+) -> CurationServiceCollectionSnapshot | None:
+    """PinVi용 exact set receipt와 bounded public item page를 한 statement로 읽는다."""
+
+    if not 1 <= page_limit <= 201:
+        raise ValueError("page_limit must be between 1 and 201")
+    rows = (
+        (
+            await session.execute(
+                text(_GET_SERVICE_CURATION_COLLECTION_PAGE_SQL),
+                {
+                    "collection_id": collection_id,
+                    "curation_item_id": None,
+                    "after_curation_item_id": after_curation_item_id,
+                    "page_limit": page_limit,
+                },
+            )
+        )
+        .mappings()
+        .all()
+    )
+    if not rows:
+        return None
+    first = rows[0]
+    items = tuple(
+        _service_item_snapshot(row)
+        for row in rows
+        if row["curation_item_id"] is not None
+    )
+    return CurationServiceCollectionSnapshot(
+        collection_id=str(first["collection_id"]),
+        row_revision=int(first["collection_row_revision"]),
+        updated_at=first["collection_updated_at"],
+        theme_slug=str(first["theme_slug"]),
+        theme_name=str(first["theme_name"]),
+        title=str(first["collection_title"]),
+        edition_key=str(first["edition_key"]),
+        item_count=int(first["item_count"]),
+        item_set_hash=str(first["item_set_hash"]),
+        items=items,
+    )
+
+
+async def get_curation_service_item_snapshot(
+    session: AsyncSession,
+    *,
+    curation_item_id: str,
+) -> CurationServiceItemSnapshot | None:
+    """PinVi용 public/trusted canonical item 한 건을 읽는다."""
+
+    row = (
+        (
+            await session.execute(
+                text(_GET_SERVICE_CURATION_ITEM_SNAPSHOT_SQL),
+                {
+                    "collection_id": None,
+                    "curation_item_id": curation_item_id,
+                },
+            )
+        )
+        .mappings()
+        .first()
+    )
+    if row is None or row["curation_item_id"] is None:
+        return None
+    return _service_item_snapshot(row)
+
+
+_LIST_CUTOVER_IDENTITY_MAPPINGS_SQL = """
+SELECT
+  legacy_curated_feature_id,
+  collection_id,
+  curation_item_id,
+  mapping_kind,
+  source_row_hash
+FROM ops.curation_cutover_identity_mappings
+ORDER BY legacy_curated_feature_id
+"""
+
+
+async def get_curation_cutover_identity_mapping_export(
+    session: AsyncSession,
+) -> CurationCutoverIdentityMappingExport:
+    """Return the complete immutable cutover map and its closed Merkle receipt.
+
+    This is intentionally a maintenance-window read.  The HTTP layer exposes
+    it through a signed keyset cursor, while this single relation snapshot is
+    used to calculate the root that every page must carry.  Runtime has SELECT
+    only; writes remain schema-owner/migration-only and append-only.
+    """
+
+    rows = (
+        (
+            await session.execute(text(_LIST_CUTOVER_IDENTITY_MAPPINGS_SQL))
+        )
+        .mappings()
+        .all()
+    )
+    mappings = tuple(
+        CurationCutoverIdentityMapping(
+            legacy_curated_feature_id=str(row["legacy_curated_feature_id"]),
+            collection_id=str(row["collection_id"]),
+            curation_item_id=str(row["curation_item_id"]),
+            mapping_kind=str(row["mapping_kind"]),
+            source_row_hash=str(row["source_row_hash"]),
+        )
+        for row in rows
+    )
+    root = curation_cutover_identity_mapping_root(
+        CurationCutoverIdentityMappingDigestInput(
+            legacy_curated_feature_id=UUID(mapping.legacy_curated_feature_id),
+            collection_id=UUID(mapping.collection_id),
+            curation_item_id=UUID(mapping.curation_item_id),
+            mapping_kind=mapping.mapping_kind,
+            source_row_hash=mapping.source_row_hash,
+        )
+        for mapping in mappings
+    )
+    return CurationCutoverIdentityMappingExport(
+        mapping_count=len(mappings),
+        mapping_root=root,
+        mappings=mappings,
+    )
+
+
 async def get_curation_import_batch(
     session: AsyncSession,
     *,
@@ -2848,7 +3396,8 @@ async def _touch_collection(
     await session.execute(
         text(
             "UPDATE feature.curation_collections "
-            "SET updated_by = :actor, updated_at = now() "
+            "SET updated_by = :actor, updated_at = now(), "
+            "row_revision = row_revision + 1 "
             "WHERE collection_id = CAST(:collection_id AS uuid)"
         ),
         {"collection_id": collection_id, "actor": actor},
@@ -2907,6 +3456,7 @@ async def update_curation_collection(
     *,
     collection_id: str,
     updates: Mapping[str, Any],
+    expected_revision: int | None = None,
 ) -> CurationCollection | None:
     allowed = {
         "theme_id",
@@ -2940,10 +3490,17 @@ async def update_curation_collection(
         current = await get_curation_collection(
             session, collection_id=collection_id, include_archived=True
         )
+        if (
+            current is not None
+            and expected_revision is not None
+            and current[0].row_revision != expected_revision
+        ):
+            raise CurationRevisionConflictError("curation collection revision이 stale입니다.")
         return current[0] if current else None
     clauses.extend(
         [
             "updated_at = now()",
+            "row_revision = row_revision + 1",
             (
                 "archived_at = CASE WHEN :archive THEN now() "
                 "WHEN :unarchive THEN NULL ELSE archived_at END"
@@ -2952,14 +3509,23 @@ async def update_curation_collection(
     )
     params["archive"] = updates.get("status") == "archived"
     params["unarchive"] = "status" in updates and updates.get("status") != "archived"
+    params["expected_revision"] = expected_revision
     sql = f"""
     UPDATE feature.curation_collections
     SET {", ".join(clauses)}
     WHERE collection_id = CAST(:collection_id AS uuid)
+      AND (
+          CAST(:expected_revision AS bigint) IS NULL
+          OR row_revision = CAST(:expected_revision AS bigint)
+      )
     RETURNING collection_id::text
     """
     row = (await session.execute(text(sql), params)).first()
     if row is None:
+        if expected_revision is not None and await get_curation_collection(
+            session, collection_id=collection_id, include_archived=True
+        ):
+            raise CurationRevisionConflictError("curation collection revision이 stale입니다.")
         return None
     current = await get_curation_collection(
         session, collection_id=collection_id, include_archived=True
@@ -2969,13 +3535,474 @@ async def update_curation_collection(
 
 
 async def archive_curation_collection(
-    session: AsyncSession, *, collection_id: str, actor: str | None = None
+    session: AsyncSession,
+    *,
+    collection_id: str,
+    actor: str | None = None,
+    expected_revision: int | None = None,
 ) -> CurationCollection | None:
     return await update_curation_collection(
         session,
         collection_id=collection_id,
         updates={"status": "archived", "updated_by": actor},
+        expected_revision=expected_revision,
     )
+
+
+async def create_curation_collection_command(
+    session: AsyncSession,
+    *,
+    collection_key: str,
+    theme_id: str,
+    source_id: str | None,
+    title: str,
+    edition_key: str = "",
+    description: str | None = None,
+    status: str = "draft",
+    visibility: str = "admin_only",
+    metadata: Mapping[str, Any] | None = None,
+    command_id: int,
+    principal: str,
+) -> CurationCollection:
+    """domain command에 결박된 canonical collection create를 실행한다."""
+
+    if status not in {"draft", "published"} or visibility not in _VISIBILITIES:
+        raise ValueError("invalid curation collection state")
+    normalized_collection_key = collection_key.strip()
+    normalized_title = title.strip()
+    normalized_edition_key = edition_key.strip()
+    if not normalized_collection_key or not normalized_title:
+        raise ValueError("collection_key and title are required")
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.create_curation_collection_command(
+                  :collection_key, CAST(:theme_id AS uuid), CAST(:source_id AS uuid),
+                  :title, :edition_key, :description, :status, :visibility,
+                  CAST(:metadata_json AS jsonb), :command_id, :principal, NULL, NULL
+                )
+                """
+            ),
+            {
+                "collection_key": normalized_collection_key,
+                "command_id": command_id,
+                "description": description,
+                "edition_key": normalized_edition_key,
+                "metadata_json": json.dumps(dict(metadata or {})),
+                "principal": principal,
+                "source_id": source_id,
+                "status": status,
+                "theme_id": theme_id,
+                "title": normalized_title,
+                "visibility": visibility,
+            },
+        )
+    ).mappings().one()
+    created = await get_curation_collection(
+        session,
+        collection_id=str(result["o_collection_id"]),
+        include_archived=True,
+    )
+    if created is None:
+        raise RuntimeError("created curation collection could not be read")
+    return created[0]
+
+
+async def patch_curation_collection_command(
+    session: AsyncSession,
+    *,
+    collection_id: str,
+    expected_revision: int,
+    updates: Mapping[str, Any],
+    command_id: int,
+    principal: str,
+) -> CurationCollection | None:
+    """현재 collection을 full desired input으로 만들어 strong CAS patch한다."""
+
+    allowed = {
+        "theme_id",
+        "source_id",
+        "title",
+        "edition_key",
+        "description",
+        "status",
+        "visibility",
+        "metadata",
+    }
+    unknown = set(updates) - allowed
+    if unknown:
+        raise ValueError(f"unsupported curation collection fields: {sorted(unknown)}")
+    current_result = await get_curation_collection(
+        session, collection_id=collection_id, include_archived=True
+    )
+    if current_result is None:
+        return None
+    current = current_result[0]
+    desired: dict[str, Any] = {
+        "theme_id": current.theme_id,
+        "source_id": current.source_id,
+        "title": current.title,
+        "edition_key": current.edition_key,
+        "description": current.description,
+        "status": current.status,
+        "visibility": current.visibility,
+        "metadata": current.metadata,
+    }
+    desired.update(updates)
+    for field_name in ("theme_id", "title", "edition_key", "status", "visibility", "metadata"):
+        if desired[field_name] is None:
+            raise ValueError(f"{field_name} must not be null")
+    if desired["status"] not in {"draft", "published"}:
+        raise ValueError("invalid curation collection status")
+    if desired["visibility"] not in _VISIBILITIES:
+        raise ValueError("invalid curation collection visibility")
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.patch_curation_collection_command(
+                  CAST(:collection_id AS uuid), :expected_revision,
+                  CAST(:theme_id AS uuid), CAST(:source_id AS uuid), :title,
+                  :edition_key, :description, :status, :visibility,
+                  CAST(:metadata_json AS jsonb), :command_id, :principal,
+                  NULL, NULL
+                )
+                """
+            ),
+            {
+                "collection_id": collection_id,
+                "command_id": command_id,
+                "description": desired["description"],
+                "edition_key": str(desired["edition_key"]).strip(),
+                "expected_revision": expected_revision,
+                "metadata_json": json.dumps(dict(desired["metadata"])),
+                "principal": principal,
+                "source_id": desired["source_id"],
+                "status": desired["status"],
+                "theme_id": desired["theme_id"],
+                "title": str(desired["title"]).strip(),
+                "visibility": desired["visibility"],
+            },
+        )
+    ).mappings().one()
+    updated = await get_curation_collection(
+        session,
+        collection_id=str(result["o_collection_id"]),
+        include_archived=True,
+    )
+    if updated is None:
+        raise RuntimeError("patched curation collection could not be read")
+    return updated[0]
+
+
+async def archive_curation_collection_command(
+    session: AsyncSession,
+    *,
+    collection_id: str,
+    expected_revision: int,
+    command_id: int,
+    principal: str,
+) -> CurationCollection | None:
+    """canonical collection을 domain command에 결박해 archive한다."""
+
+    if await get_curation_collection(
+        session, collection_id=collection_id, include_archived=True
+    ) is None:
+        return None
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.archive_curation_collection_command(
+                  CAST(:collection_id AS uuid), :expected_revision,
+                  :command_id, :principal, NULL, NULL
+                )
+                """
+            ),
+            {
+                "collection_id": collection_id,
+                "command_id": command_id,
+                "expected_revision": expected_revision,
+                "principal": principal,
+            },
+        )
+    ).mappings().one()
+    archived = await get_curation_collection(
+        session,
+        collection_id=str(result["o_collection_id"]),
+        include_archived=True,
+    )
+    if archived is None:
+        raise RuntimeError("archived curation collection could not be read")
+    return archived[0]
+
+
+async def create_curation_item_command(
+    session: AsyncSession,
+    *,
+    collection_id: str,
+    feature_id: str | None,
+    external_item_id: str,
+    external_component_id: str = "primary",
+    place_name: str | None = None,
+    address_hint: str | None = None,
+    source_record_key: str | None = None,
+    status: str = "included",
+    sort_order: int = 0,
+    item_title: str | None = None,
+    item_summary: str | None = None,
+    curation_relation: str = "nearby_option",
+    reuse_policy: str = "manual_review",
+    metadata: Mapping[str, Any] | None = None,
+    command_id: int,
+    principal: str,
+) -> CurationItem:
+    """domain command에 결박된 canonical item create를 실행한다."""
+
+    normalized_external_item_id = external_item_id.strip()
+    normalized_external_component_id = external_component_id.strip()
+    normalized_place_name = place_name.strip() if place_name else None
+    normalized_address_hint = address_hint.strip() if address_hint else None
+    if not normalized_external_item_id or not normalized_external_component_id:
+        raise ValueError("invalid curation item identity")
+    if feature_id is None and normalized_place_name is None:
+        raise ValueError("feature_id or place_name is required")
+    if status not in {"candidate", "included", "rejected"}:
+        raise ValueError("invalid curation item status")
+    if curation_relation not in _RELATIONS or reuse_policy not in _REUSE_POLICIES:
+        raise ValueError("invalid curation item policy")
+    if not 0 <= sort_order <= _POSTGRES_INTEGER_MAX:
+        raise ValueError("invalid curation item sort order")
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.create_curation_item_command(
+                  CAST(:collection_id AS uuid), :feature_id, :source_record_key,
+                  :external_item_id, :external_component_id, :place_name,
+                  :address_hint, :status, :sort_order, :item_title, :item_summary,
+                  :curation_relation, :reuse_policy, CAST(:metadata_json AS jsonb),
+                  :command_id, :principal, NULL, NULL, NULL
+                )
+                """
+            ),
+            {
+                "address_hint": normalized_address_hint,
+                "collection_id": collection_id,
+                "command_id": command_id,
+                "curation_relation": curation_relation,
+                "external_component_id": normalized_external_component_id,
+                "external_item_id": normalized_external_item_id,
+                "feature_id": feature_id,
+                "item_summary": item_summary,
+                "item_title": item_title,
+                "metadata_json": json.dumps(dict(metadata or {})),
+                "place_name": normalized_place_name,
+                "principal": principal,
+                "reuse_policy": reuse_policy,
+                "sort_order": sort_order,
+                "source_record_key": source_record_key,
+                "status": status,
+            },
+        )
+    ).mappings().one()
+    created = await get_curation_item(
+        session,
+        collection_id=collection_id,
+        curation_item_id=str(result["o_curation_item_id"]),
+        include_archived=True,
+    )
+    if created is None:
+        raise RuntimeError("created curation item could not be read")
+    return created
+
+
+async def patch_curation_item_command(
+    session: AsyncSession,
+    *,
+    collection_id: str,
+    curation_item_id: str,
+    updates: Mapping[str, Any],
+    expected_revision: int,
+    command_id: int,
+    principal: str,
+) -> CurationItem | None:
+    """현재 item을 full desired input으로 만들어 strong CAS patch한다."""
+
+    allowed = {
+        "feature_id",
+        "source_record_key",
+        "external_item_id",
+        "external_component_id",
+        "place_name",
+        "address_hint",
+        "status",
+        "sort_order",
+        "item_title",
+        "item_summary",
+        "curation_relation",
+        "reuse_policy",
+        "metadata",
+    }
+    unknown = set(updates) - allowed
+    if unknown:
+        raise ValueError(f"unsupported curation item fields: {sorted(unknown)}")
+    current = await get_curation_item(
+        session,
+        collection_id=collection_id,
+        curation_item_id=curation_item_id,
+        include_archived=True,
+    )
+    if current is None:
+        return None
+    desired: dict[str, Any] = {
+        "feature_id": current.feature_id,
+        "source_record_key": current.source_record_key,
+        "external_item_id": current.external_item_id,
+        "external_component_id": current.external_component_id,
+        "place_name": current.place_name,
+        "address_hint": current.address_hint,
+        "status": current.status,
+        "sort_order": current.sort_order,
+        "item_title": current.item_title,
+        "item_summary": current.item_summary,
+        "curation_relation": current.curation_relation,
+        "reuse_policy": current.reuse_policy,
+        "metadata": current.metadata,
+    }
+    desired.update(updates)
+    for field_name in (
+        "external_item_id",
+        "external_component_id",
+        "place_name",
+        "status",
+        "sort_order",
+        "curation_relation",
+        "reuse_policy",
+        "metadata",
+    ):
+        if desired[field_name] is None:
+            raise ValueError(f"{field_name} must not be null")
+    desired["external_item_id"] = str(desired["external_item_id"]).strip()
+    desired["external_component_id"] = str(desired["external_component_id"]).strip()
+    desired["place_name"] = str(desired["place_name"]).strip()
+    address_hint = desired["address_hint"]
+    desired["address_hint"] = (
+        str(address_hint).strip() or None if address_hint is not None else None
+    )
+    if not (
+        desired["external_item_id"]
+        and desired["external_component_id"]
+        and desired["place_name"]
+    ):
+        raise ValueError("curation item identity and place_name must not be empty")
+    if desired["status"] not in {"candidate", "included", "rejected"}:
+        raise ValueError("invalid curation item status")
+    if desired["curation_relation"] not in _RELATIONS:
+        raise ValueError("invalid curation item relation")
+    if desired["reuse_policy"] not in _REUSE_POLICIES:
+        raise ValueError("invalid curation item reuse policy")
+    if (
+        not isinstance(desired["sort_order"], int)
+        or not 0 <= desired["sort_order"] <= _POSTGRES_INTEGER_MAX
+    ):
+        raise ValueError("invalid curation item sort order")
+    if not isinstance(desired["metadata"], Mapping):
+        raise ValueError("curation item metadata must be an object")
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.patch_curation_item_command(
+                  CAST(:collection_id AS uuid), CAST(:curation_item_id AS uuid),
+                  :expected_revision, :feature_id, :source_record_key,
+                  :external_item_id, :external_component_id, :place_name,
+                  :address_hint, :status, :sort_order, :item_title, :item_summary,
+                  :curation_relation, :reuse_policy, CAST(:metadata_json AS jsonb),
+                  :command_id, :principal, NULL, NULL, NULL
+                )
+                """
+            ),
+            {
+                "address_hint": desired["address_hint"],
+                "collection_id": collection_id,
+                "command_id": command_id,
+                "curation_item_id": curation_item_id,
+                "curation_relation": desired["curation_relation"],
+                "expected_revision": expected_revision,
+                "external_component_id": desired["external_component_id"],
+                "external_item_id": desired["external_item_id"],
+                "feature_id": desired["feature_id"],
+                "item_summary": desired["item_summary"],
+                "item_title": desired["item_title"],
+                "metadata_json": json.dumps(dict(desired["metadata"])),
+                "place_name": desired["place_name"],
+                "principal": principal,
+                "reuse_policy": desired["reuse_policy"],
+                "sort_order": desired["sort_order"],
+                "source_record_key": desired["source_record_key"],
+                "status": desired["status"],
+            },
+        )
+    ).mappings().one()
+    updated = await get_curation_item(
+        session,
+        collection_id=collection_id,
+        curation_item_id=str(result["o_curation_item_id"]),
+        include_archived=True,
+    )
+    if updated is None:
+        raise RuntimeError("patched curation item could not be read")
+    return updated
+
+
+async def archive_curation_item_command(
+    session: AsyncSession,
+    *,
+    collection_id: str,
+    curation_item_id: str,
+    expected_revision: int,
+    command_id: int,
+    principal: str,
+) -> CurationItem | None:
+    """canonical item을 domain command에 결박해 archive한다."""
+
+    if await get_curation_item(
+        session,
+        collection_id=collection_id,
+        curation_item_id=curation_item_id,
+        include_archived=True,
+    ) is None:
+        return None
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.archive_curation_item_command(
+                  CAST(:collection_id AS uuid), CAST(:curation_item_id AS uuid),
+                  :expected_revision, :command_id, :principal, NULL, NULL, NULL
+                )
+                """
+            ),
+            {
+                "collection_id": collection_id,
+                "command_id": command_id,
+                "curation_item_id": curation_item_id,
+                "expected_revision": expected_revision,
+                "principal": principal,
+            },
+        )
+    ).mappings().one()
+    archived = await get_curation_item(
+        session,
+        collection_id=collection_id,
+        curation_item_id=str(result["o_curation_item_id"]),
+        include_archived=True,
+    )
+    if archived is None:
+        raise RuntimeError("archived curation item could not be read")
+    return archived
 
 
 async def add_curation_item(
@@ -3171,6 +4198,7 @@ async def update_curation_item(
     curation_item_id: str,
     updates: Mapping[str, Any],
     actor: str | None = None,
+    expected_revision: int | None = None,
 ) -> CurationItem | None:
     """단일 membership을 부분 수정한다. 명시적 ``feature_id=null``도 보존한다."""
 
@@ -3224,6 +4252,12 @@ async def update_curation_item(
             curation_item_id=curation_item_id,
             include_archived=True,
         )
+        if (
+            current is not None
+            and expected_revision is not None
+            and current.row_revision != expected_revision
+        ):
+            raise CurationRevisionConflictError("curation item revision이 stale입니다.")
         return current if current is not None and current.archived_at is None else None
 
     source_owned_changed = bool(
@@ -3341,6 +4375,7 @@ async def update_curation_item(
         "collection_id": collection_id,
         "curation_item_id": curation_item_id,
         "actor": actor,
+        "expected_revision": expected_revision,
     }
     for key, value in normalized.items():
         if key == "metadata":
@@ -3360,7 +4395,13 @@ async def update_curation_item(
                 "operator_updated_at = clock_timestamp()",
             ]
         )
-    clauses.extend(["updated_by = :actor", "updated_at = now()"])
+    clauses.extend(
+        [
+            "updated_by = :actor",
+            "updated_at = now()",
+            "row_revision = row_revision + 1",
+        ]
+    )
     if normalized.get("status") == "archived":
         clauses.append("archived_at = now()")
     row = (
@@ -3372,6 +4413,10 @@ async def update_curation_item(
                 WHERE collection_id = CAST(:collection_id AS uuid)
                   AND curation_item_id = CAST(:curation_item_id AS uuid)
                   AND archived_at IS NULL
+                  AND (
+                      CAST(:expected_revision AS bigint) IS NULL
+                      OR row_revision = CAST(:expected_revision AS bigint)
+                  )
                 RETURNING curation_item_id::text
                 """
             ),
@@ -3379,6 +4424,13 @@ async def update_curation_item(
         )
     ).first()
     if row is None:
+        if expected_revision is not None and await get_curation_item(
+            session,
+            collection_id=collection_id,
+            curation_item_id=curation_item_id,
+            include_archived=True,
+        ):
+            raise CurationRevisionConflictError("curation item revision이 stale입니다.")
         return None
     if "feature_id" in normalized:
         requested_feature_id = normalized["feature_id"]
@@ -3485,6 +4537,7 @@ async def archive_curation_item(
     collection_id: str,
     curation_item_id: str,
     actor: str | None = None,
+    expected_revision: int | None = None,
 ) -> CurationItem | None:
     return await update_curation_item(
         session,
@@ -3492,6 +4545,7 @@ async def archive_curation_item(
         curation_item_id=curation_item_id,
         updates={"status": "archived"},
         actor=actor,
+        expected_revision=expected_revision,
     )
 
 
@@ -3704,12 +4758,13 @@ async def list_curation_quarantine_items(
         raise ValueError("target collection이 격리 collection 자신일 수 없습니다.")
     target_missing = True
     target_archived = False
+    target_collection_revision: int | None = None
     if resolved_target is not None:
         target_row = (
             (
                 await session.execute(
                     text(
-                        "SELECT archived_at, created_by, metadata "
+                        "SELECT archived_at, created_by, metadata, row_revision "
                         "FROM feature.curation_collections "
                         "WHERE collection_id = CAST(:collection_id AS uuid)"
                     ),
@@ -3727,6 +4782,7 @@ async def list_curation_quarantine_items(
                 )
             target_missing = False
             target_archived = target_row["archived_at"] is not None
+            target_collection_revision = int(target_row["row_revision"])
     unresolved_kind: str | None = None
     if resolved_target is None:
         unresolved_kind = QUARANTINE_CONFLICT_NO_TARGET
@@ -3759,6 +4815,7 @@ async def list_curation_quarantine_items(
     )
     preview = CurationQuarantineItemsPreview(
         target_collection_id=resolved_target,
+        target_collection_revision=target_collection_revision,
         target_missing=target_missing,
         target_archived=target_archived,
         items=items,
@@ -3777,213 +4834,104 @@ async def move_curation_quarantine_items(
     session: AsyncSession,
     *,
     collection_id: str,
+    expected_collection_revision: int,
     target_collection_id: str | None = None,
+    expected_target_revision: int,
     item_ids: Sequence[str] | None = None,
-    actor: str | None = None,
+    command_id: int,
+    actor: str,
 ) -> tuple[tuple[str, ...], bool]:
-    """격리 item들의 collection membership을 target으로 원자 이동한다 (T-VN-H22B).
+    """격리 membership을 typed domain command로 원자 이동한다."""
 
-    lock 순서(§4.2): 전역 advisory → 관련 collection들 collection_id 오름차순
-    FOR UPDATE → item curation_item_id 오름차순 FOR UPDATE → (A)/(B) 재검사 →
-    UPDATE/DELETE. 충돌이 하나라도 있으면
-    :class:`CurationQuarantineMoveConflictError`로 전체를 거부한다(부분 적용 금지).
-    이동 후 격리 collection에 item이 0이면 collection 행을 DELETE한다.
-    """
-
-    normalized_collection_id = str(UUID(collection_id))
-    await _lock_curation_write_boundary(session)
-    metadata = await _get_quarantine_collection_metadata(
-        session, collection_id=normalized_collection_id
-    )
-    if metadata is None:
-        raise LookupError("curation quarantine collection 없음")
-    resolved_target = (
-        str(UUID(target_collection_id))
-        if target_collection_id is not None
-        else _quarantine_original_collection_id(metadata)
-    )
-    if resolved_target is None:
-        raise LookupError("이동 target collection 없음 — 원본 collection 기록이 없습니다.")
-    if resolved_target == normalized_collection_id:
-        raise ValueError("target collection이 격리 collection 자신일 수 없습니다.")
-    locked_rows = (
-        (
-            await session.execute(
-                text(_LOCK_QUARANTINE_AND_TARGET_SQL),
-                {"collection_ids": sorted({normalized_collection_id, resolved_target})},
-            )
-        )
-        .mappings()
-        .all()
-    )
-    locked_by_id = {str(row["collection_id"]): row for row in locked_rows}
-    quarantine_row = locked_by_id.get(normalized_collection_id)
-    if quarantine_row is None or not _is_quarantine_marker_row(quarantine_row):
-        raise LookupError("curation quarantine collection 없음")
-    target_row = locked_by_id.get(resolved_target)
-    if target_row is None:
-        raise LookupError("이동 target collection 없음")
-    if _is_quarantine_marker_row(target_row):
-        # 격리 간 이동은 0065 모집단을 조용히 섞고, target의 original_collection_id
-        # 병렬 표시를 오도한다 (적대 리뷰 F3). preview와 같은 판정으로 fail-close.
-        raise ValueError(
-            "target이 또 다른 격리 collection입니다 — 격리 간 이동은 "
-            "0065 모집단을 조용히 섞으므로 허용하지 않습니다."
-        )
-    if target_row["archived_at"] is not None:
-        raise CurationQuarantineTargetArchivedError("이동 target collection이 archive 상태입니다.")
-    locked_item_ids = [
-        str(value)
-        for value in (
-            await session.execute(
-                text(
-                    "SELECT curation_item_id::text FROM feature.curation_items "
-                    "WHERE collection_id = CAST(:collection_id AS uuid) "
-                    "ORDER BY curation_item_id FOR UPDATE"
-                ),
-                {"collection_id": normalized_collection_id},
-            )
-        ).scalars()
-    ]
-    if item_ids is None:
-        moving_item_ids = locked_item_ids
-    else:
-        requested = [str(UUID(item_id)) for item_id in item_ids]
-        if len(set(requested)) != len(requested):
-            raise ValueError("item_ids에 중복이 있습니다.")
-        missing = sorted(set(requested) - set(locked_item_ids))
-        if missing:
-            raise LookupError("격리 collection에 없는 curation item: " + ", ".join(missing))
-        moving_item_ids = requested
-    if moving_item_ids:
-        conflict_rows = (
-            (
-                await session.execute(
-                    text(_QUARANTINE_MOVE_CONFLICTS_SQL),
-                    {
-                        "item_ids": moving_item_ids,
-                        "target_collection_id": resolved_target,
-                    },
-                )
-            )
-            .mappings()
-            .all()
-        )
-        if conflict_rows:
-            raise CurationQuarantineMoveConflictError(
-                tuple(
-                    CurationQuarantineMoveConflict(
-                        curation_item_id=str(row["curation_item_id"]),
-                        conflict_kind=(
-                            QUARANTINE_CONFLICT_COMPONENT
-                            if row["component_conflict_item_id"]
-                            else QUARANTINE_CONFLICT_ACTIVE_FEATURE
-                        ),
-                        conflict_item_id=str(
-                            row["component_conflict_item_id"]
-                            or row["active_feature_conflict_item_id"]
-                        ),
-                    )
-                    for row in conflict_rows
-                )
-            )
-        moved_ids = {
-            str(value)
-            for value in (
-                await session.execute(
-                    text(
-                        "UPDATE feature.curation_items "
-                        "SET collection_id = CAST(:target_collection_id AS uuid), "
-                        "    updated_by = :actor, updated_at = now() "
-                        "WHERE curation_item_id = ANY(CAST(:item_ids AS uuid[])) "
-                        "RETURNING curation_item_id::text"
-                    ),
-                    {
-                        "target_collection_id": resolved_target,
-                        "actor": actor,
-                        "item_ids": moving_item_ids,
-                    },
-                )
-            ).scalars()
-        }
-        if moved_ids != set(moving_item_ids):  # pragma: no cover — 잠근 행은 못 사라진다
-            raise RuntimeError("locked quarantine items disappeared during move")
-    quarantine_deleted = (
+    result = (
         await session.execute(
             text(
-                "DELETE FROM feature.curation_collections "
-                "WHERE collection_id = CAST(:collection_id AS uuid) "
-                "  AND NOT EXISTS ("
-                "      SELECT 1 FROM feature.curation_items AS remaining "
-                "      WHERE remaining.collection_id = CAST(:collection_id AS uuid)"
-                "  ) "
-                "RETURNING collection_id"
+                """
+                CALL feature.reclassify_curation_quarantine_command(
+                  CAST(:collection_id AS uuid), :expected_collection_revision,
+                  'move', CAST(:target_collection_id AS uuid),
+                  :expected_target_revision, CAST(:item_ids AS uuid[]),
+                  NULL, NULL, :command_id, :principal,
+                  NULL, NULL, NULL, NULL, NULL, NULL
+                )
+                """
             ),
-            {"collection_id": normalized_collection_id},
+            {
+                "collection_id": str(UUID(collection_id)),
+                "command_id": command_id,
+                "expected_collection_revision": expected_collection_revision,
+                "expected_target_revision": expected_target_revision,
+                "item_ids": (
+                    [str(UUID(item_id)) for item_id in item_ids]
+                    if item_ids is not None
+                    else None
+                ),
+                "principal": actor,
+                "target_collection_id": (
+                    str(UUID(target_collection_id))
+                    if target_collection_id is not None
+                    else None
+                ),
+            },
         )
-    ).first() is not None
-    await _touch_collection(session, collection_id=resolved_target, actor=actor)
-    if not quarantine_deleted:
-        await _touch_collection(session, collection_id=normalized_collection_id, actor=actor)
-    return tuple(moving_item_ids), quarantine_deleted
+    ).mappings().one()
+    conflicts = result["o_conflicts"] or []
+    if conflicts:
+        raise CurationQuarantineMoveConflictError(
+            tuple(
+                CurationQuarantineMoveConflict(
+                    curation_item_id=str(conflict["curation_item_id"]),
+                    conflict_kind=str(conflict["conflict_kind"]),
+                    conflict_item_id=str(conflict["conflict_item_id"]),
+                )
+                for conflict in conflicts
+            )
+        )
+    return (
+        tuple(str(value) for value in (result["o_moved_item_ids"] or ())),
+        bool(result["o_quarantine_deleted"]),
+    )
 
 
 async def confirm_curation_quarantine_standalone(
     session: AsyncSession,
     *,
     collection_id: str,
+    expected_collection_revision: int,
     collection_key: str,
     title: str,
-    actor: str | None = None,
+    command_id: int,
+    actor: str,
 ) -> tuple[str, str]:
-    """격리 collection을 정규 collection으로 확정하고 `0065` marker를 제거한다.
+    """격리 collection을 typed domain command로 standalone 확정한다."""
 
-    status/visibility는 draft/admin_only 그대로 둔다 — 이후 조정은 기존 PATCH 경로
-    소관이다. collection_key 중복은 unique 제약 IntegrityError로 fail-close한다
-    (router 409).
-    """
-
-    normalized_collection_id = str(UUID(collection_id))
     normalized_key = collection_key.strip()
     normalized_title = title.strip()
     if not normalized_key or not normalized_title:
         raise ValueError("collection_key and title are required")
-    await _lock_curation_write_boundary(session)
-    await _lock_collection_keys(session, (normalized_key,))
-    locked = (
+    result = (
         await session.execute(
-            text(_GET_QUARANTINE_COLLECTION_SQL + "FOR UPDATE OF quarantine"),
-            {"collection_id": normalized_collection_id},
+            text(
+                """
+                CALL feature.reclassify_curation_quarantine_command(
+                  CAST(:collection_id AS uuid), :expected_collection_revision,
+                  'confirm_standalone', NULL, NULL, NULL,
+                  :collection_key, :title, :command_id, :principal,
+                  NULL, NULL, NULL, NULL, NULL, NULL
+                )
+                """
+            ),
+            {
+                "collection_id": str(UUID(collection_id)),
+                "collection_key": normalized_key,
+                "command_id": command_id,
+                "expected_collection_revision": expected_collection_revision,
+                "principal": actor,
+                "title": normalized_title,
+            },
         )
-    ).first()
-    if locked is None:
-        raise LookupError("curation quarantine collection 없음")
-    updated = (
-        (
-            await session.execute(
-                text(
-                    "UPDATE feature.curation_collections "
-                    "SET collection_key = :collection_key, "
-                    "    title = :title, "
-                    "    metadata = metadata - 'migration_quarantine' "
-                    "        - 'original_collection_id', "
-                    "    updated_by = :actor, "
-                    "    updated_at = now() "
-                    "WHERE collection_id = CAST(:collection_id AS uuid) "
-                    "RETURNING collection_id::text, collection_key"
-                ),
-                {
-                    "collection_id": normalized_collection_id,
-                    "collection_key": normalized_key,
-                    "title": normalized_title,
-                    "actor": actor,
-                },
-            )
-        )
-        .mappings()
-        .one()
-    )
-    return str(updated["collection_id"]), str(updated["collection_key"])
+    ).mappings().one()
+    return str(result["o_collection_id"]), str(result["o_collection_key"])
 
 
 async def list_feature_curation_groups(
@@ -4163,7 +5111,7 @@ async def upsert_curation_theme(
     theme_name: str,
     theme_group: str,
 ) -> str:
-    """수동 입력/CSV가 공유하는 theme 안정키 upsert."""
+    """수동 입력/CSV가 참조하는 기존 retained theme을 exact match로 해소한다."""
 
     if not theme_slug.strip() or not theme_name.strip() or not theme_group.strip():
         raise ValueError("theme_slug, theme_name and theme_group are required")
@@ -4173,13 +5121,13 @@ async def upsert_curation_theme(
         "theme_name": theme_name.strip(),
         "theme_group": theme_group.strip(),
     }
-    return await _upsert_id_with_fallback(
-        session,
-        upsert_sql=_UPSERT_THEME_SQL,
-        lookup_sql=_GET_THEME_ID_BY_SLUG_SQL,
-        params=params,
-        entity="curation theme",
-    )
+    value = (await session.execute(text(_RESOLVE_THEME_SQL), params)).scalar_one_or_none()
+    if value is None:
+        raise ValueError(
+            "theme은 retained catalog에서 먼저 생성해야 하며 "
+            "slug/name/group이 정확히 일치해야 합니다."
+        )
+    return str(value)
 
 
 def validate_resolved_curation_identities(
@@ -4324,6 +5272,7 @@ async def _record_import_provenance(
     actor: str | None,
     source_content_sha256: str | None,
     batch_kind: str | None,
+    command_id: int | None,
 ) -> str:
     """current item을 exact immutable import row/decision으로 전진시킨다."""
 
@@ -4361,6 +5310,7 @@ async def _record_import_provenance(
                     "batch_kind": effective_kind,
                     "row_count": len(rows),
                     "actor": effective_actor,
+                    "command_id": command_id,
                     "metadata": json.dumps(
                         {
                             "schema_version": 1,
@@ -4622,6 +5572,481 @@ async def preview_curation_import(
     )
 
 
+async def build_curation_import_revision_vector(
+    session: AsyncSession,
+    *,
+    rows: Sequence[ResolvedCurationImportRow],
+) -> tuple[CurationImportRevisionExpectation, ...]:
+    """resolved import set이 읽은 retained catalog와 membership revision을 닫는다."""
+
+    _ensure_resolved_curation_identities(rows)
+    _ensure_curation_dataset_identity(rows, frozen_h35_schema=False)
+    expectations: dict[tuple[str, str], int | None] = {}
+    representatives: dict[str, ResolvedCurationImportRow] = {}
+    for row in rows:
+        representatives.setdefault(row.collection_key, row)
+
+    for collection_key in sorted(representatives):
+        row = representatives[collection_key]
+        theme = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT theme_id::text, row_revision "
+                        "FROM feature.curated_themes "
+                        "WHERE theme_slug = :slug AND theme_name = :name "
+                        "AND theme_group = :group AND archived_at IS NULL"
+                    ),
+                    {
+                        "slug": row.theme_slug,
+                        "name": row.theme_name,
+                        "group": row.theme_group,
+                    },
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if theme is None:
+            raise ValueError(
+                "theme은 retained catalog에서 먼저 생성해야 하며 "
+                "slug/name/group이 정확히 일치해야 합니다."
+            )
+        theme_id = str(theme["theme_id"])
+        expectations[("theme", theme_id)] = int(theme["row_revision"])
+
+        source = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT source_id::text, row_revision "
+                        "FROM feature.curated_sources "
+                        "WHERE provider_dataset_id = :dataset_id "
+                        "AND source_name = :name "
+                        "AND source_url IS NOT DISTINCT FROM :url "
+                        "AND archived_at IS NULL"
+                    ),
+                    {
+                        "dataset_id": row.provider_dataset_id,
+                        "name": row.source_name,
+                        "url": row.source_url,
+                    },
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if source is None:
+            raise ValueError(
+                "source는 retained catalog에서 먼저 생성해야 하며 "
+                "dataset/name/url이 정확히 일치해야 합니다."
+            )
+        source_id = str(source["source_id"])
+        expectations[("source", source_id)] = int(source["row_revision"])
+
+        collection = (
+            (
+                await session.execute(
+                    text(
+                        "SELECT collection_id::text, theme_id::text, source_id::text, "
+                        "title, edition_key, status, visibility, archived_at, row_revision "
+                        "FROM feature.curation_collections "
+                        "WHERE collection_key = :collection_key"
+                    ),
+                    {"collection_key": collection_key},
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if collection is None:
+            expectations[("collection", collection_key)] = None
+        else:
+            if (
+                str(collection["theme_id"]),
+                str(collection["source_id"]) if collection["source_id"] else None,
+                str(collection["title"]),
+                str(collection["edition_key"]),
+                str(collection["status"]),
+                str(collection["visibility"]),
+                collection["archived_at"] is None,
+            ) != (
+                theme_id,
+                source_id,
+                row.title,
+                row.edition_key,
+                "published",
+                "public",
+                True,
+            ):
+                raise ValueError(
+                    "기존 collection이 preview의 retained catalog 입력과 다릅니다."
+                )
+            expectations[("collection", collection_key)] = int(
+                collection["row_revision"]
+            )
+
+    for row in rows:
+        item_key = json.dumps(
+            [row.collection_key, row.source_item_key, row.source_component_key],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        item_revision = await session.scalar(
+            text(
+                "SELECT item.row_revision FROM feature.curation_items AS item "
+                "JOIN feature.curation_collections AS collection "
+                "ON collection.collection_id = item.collection_id "
+                "WHERE collection.collection_key = :collection_key "
+                "AND item.external_item_id = :item_id "
+                "AND item.external_component_id = :component_id"
+            ),
+            {
+                "collection_key": row.collection_key,
+                "item_id": row.source_item_key,
+                "component_id": row.source_component_key,
+            },
+        )
+        expectations[("item", item_key)] = (
+            int(item_revision) if item_revision is not None else None
+        )
+        if row.feature_id is not None:
+            feature_revision = await session.scalar(
+                text(
+                    "SELECT row_revision FROM feature.features "
+                    "WHERE feature_id = :feature_id"
+                ),
+                {"feature_id": row.feature_id},
+            )
+            if feature_revision is None:
+                raise ValueError("preview 대상 Feature가 더 이상 존재하지 않습니다.")
+            expectations[("feature", row.feature_id)] = int(feature_revision)
+
+    return tuple(
+        CurationImportRevisionExpectation(
+            resource_kind=resource_kind,  # type: ignore[arg-type]
+            resource_key=resource_key,
+            expected_revision=revision,
+        )
+        for (resource_kind, resource_key), revision in sorted(expectations.items())
+    )
+
+
+def _stored_import_row_payload(row: ResolvedCurationImportRow) -> dict[str, Any]:
+    payload = _canonical_import_row_payload(row)
+    payload["provenance"] = row.provenance
+    return payload
+
+
+def _resolved_import_row_from_payload(payload: Mapping[str, Any]) -> ResolvedCurationImportRow:
+    return ResolvedCurationImportRow(
+        row_number=int(payload["row_number"]),
+        collection_key=str(payload["collection_key"]),
+        theme_slug=str(payload["theme_slug"]),
+        theme_name=str(payload["theme_name"]),
+        theme_group=str(payload["theme_group"]),
+        title=str(payload["title"]),
+        edition_key=str(payload["edition_key"]),
+        provider_dataset_id=int(payload["provider_dataset_id"]),
+        source_name=str(payload["source_name"]),
+        source_url=str(payload["source_url"]) if payload.get("source_url") is not None else None,
+        source_item_key=str(payload["source_item_key"]),
+        source_component_key=str(payload["source_component_key"]),
+        feature_id=str(payload["feature_id"]) if payload.get("feature_id") is not None else None,
+        place_name=str(payload["place_name"]),
+        address_hint=(
+            str(payload["address_hint"])
+            if payload.get("address_hint") is not None
+            else None
+        ),
+        sort_order=int(payload["sort_order"]),
+        item_title=str(payload["item_title"]) if payload.get("item_title") is not None else None,
+        item_summary=(
+            str(payload["item_summary"])
+            if payload.get("item_summary") is not None
+            else None
+        ),
+        metadata=dict(payload["metadata"]),
+        provenance=(dict(payload["provenance"]) if payload.get("provenance") is not None else None),
+    )
+
+
+async def create_curation_import_plan_command(
+    session: AsyncSession,
+    *,
+    import_plan_id: str,
+    content_sha256: str,
+    provenance_sha256: str | None,
+    plan_sha256: str,
+    summary: Mapping[str, Any],
+    rows: Sequence[ResolvedCurationImportRow],
+    response_rows: Sequence[Mapping[str, Any]],
+    revisions: Sequence[CurationImportRevisionExpectation],
+    expires_at: datetime,
+    command_id: int,
+    principal: str,
+) -> None:
+    """closed preview plan을 command-owned append-only relations에 저장한다."""
+
+    normalized_by_row = {row.row_number: _stored_import_row_payload(row) for row in rows}
+    stored_rows = [
+        {
+            "row_number": int(response_row["row_number"]),
+            "normalized_payload": normalized_by_row.get(int(response_row["row_number"])),
+            "response_payload": dict(response_row),
+        }
+        for response_row in response_rows
+    ]
+    await session.execute(
+        text(
+            "CALL feature.create_curation_import_plan_command("
+            "CAST(:plan_id AS uuid), :content_sha256, :provenance_sha256, "
+            ":plan_sha256, CAST(:summary AS jsonb), CAST(:rows AS jsonb), "
+            "CAST(:revisions AS jsonb), :expires_at, :command_id, :principal)"
+        ),
+        {
+            "plan_id": import_plan_id,
+            "content_sha256": content_sha256,
+            "provenance_sha256": provenance_sha256,
+            "plan_sha256": plan_sha256,
+            "summary": json.dumps(dict(summary), ensure_ascii=False),
+            "rows": json.dumps(stored_rows, ensure_ascii=False),
+            "revisions": json.dumps(
+                [
+                    {
+                        "resource_kind": revision.resource_kind,
+                        "resource_key": revision.resource_key,
+                        "expected_revision": revision.expected_revision,
+                    }
+                    for revision in revisions
+                ],
+                ensure_ascii=False,
+            ),
+            "expires_at": expires_at,
+            "command_id": command_id,
+            "principal": principal,
+        },
+    )
+
+
+async def claim_curation_import_plan_command(
+    session: AsyncSession,
+    *,
+    import_plan_id: str,
+    plan_sha256: str,
+    command_id: int,
+    principal: str,
+) -> tuple[
+    str,
+    tuple[ResolvedCurationImportRow, ...],
+    dict[str, Any],
+    tuple[dict[str, Any], ...],
+    datetime,
+]:
+    """plan ETag/expiry/revision vector를 잠그고 stored normalized rows만 반환한다."""
+
+    result = (
+        await session.execute(
+            text(
+                "CALL feature.claim_curation_import_plan_command("
+                "CAST(:plan_id AS uuid), :plan_sha256, :command_id, :principal, "
+                "NULL, NULL, NULL, NULL, NULL)"
+            ),
+            {
+                "plan_id": import_plan_id,
+                "plan_sha256": plan_sha256,
+                "command_id": command_id,
+                "principal": principal,
+            },
+        )
+    ).mappings().one()
+    payloads = result["o_rows"]
+    return (
+        str(result["o_content_sha256"]),
+        tuple(_resolved_import_row_from_payload(payload) for payload in payloads),
+        dict(result["o_summary"]),
+        tuple(dict(payload) for payload in result["o_response_rows"]),
+        result["o_expires_at"],
+    )
+
+
+async def complete_curation_import_plan_command(
+    session: AsyncSession,
+    *,
+    import_plan_id: str,
+    command_id: int,
+    import_batch_id: str,
+    result_payload: Mapping[str, Any],
+    principal: str,
+) -> None:
+    """import batch와 immutable terminal plan receipt를 같은 transaction에 결박한다."""
+
+    await session.execute(
+        text(
+            "CALL feature.complete_curation_import_plan_command("
+            "CAST(:plan_id AS uuid), :command_id, CAST(:batch_id AS uuid), "
+            "CAST(:result AS jsonb), :principal)"
+        ),
+        {
+            "plan_id": import_plan_id,
+            "command_id": command_id,
+            "batch_id": import_batch_id,
+            "result": json.dumps(dict(result_payload), ensure_ascii=False),
+            "principal": principal,
+        },
+    )
+
+
+async def _resolve_curation_import_collection_command(
+    session: AsyncSession,
+    *,
+    collection_key: str,
+    theme_id: str,
+    source_id: str | None,
+    title: str,
+    edition_key: str,
+    command_id: int,
+    principal: str,
+) -> tuple[str, bool]:
+    """현재 import command에 collection create/reuse effect를 결박한다."""
+
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.resolve_curation_import_collection_command(
+                  :collection_key, CAST(:theme_id AS uuid), CAST(:source_id AS uuid),
+                  :title, :edition_key, :command_id, :principal,
+                  NULL, NULL, NULL
+                )
+                """
+            ),
+            {
+                "collection_key": collection_key,
+                "command_id": command_id,
+                "edition_key": edition_key,
+                "principal": principal,
+                "source_id": source_id,
+                "theme_id": theme_id,
+                "title": title,
+            },
+        )
+    ).mappings().one()
+    return str(result["o_collection_id"]), bool(result["o_created"])
+
+
+async def _curation_collection_item_state_hash(
+    session: AsyncSession,
+    *,
+    collection_id: str,
+) -> str:
+    """collection child representation의 deterministic semantic digest."""
+
+    value = (
+        await session.execute(
+            text(
+                """
+                SELECT COALESCE(jsonb_agg(jsonb_build_array(
+                  item.curation_item_id::text, item.feature_id,
+                  item.source_record_key, item.external_item_id,
+                  item.external_component_id, item.place_name, item.address_hint,
+                  item.source_present, item.status, item.sort_order,
+                  item.item_title, item.item_summary, item.curation_relation,
+                  item.reuse_policy, item.metadata, item.archived_at,
+                  item.row_revision
+                ) ORDER BY item.sort_order, item.curation_item_id), '[]'::jsonb)
+                FROM feature.curation_items AS item
+                WHERE item.collection_id = CAST(:collection_id AS uuid)
+                """
+            ),
+            {"collection_id": collection_id},
+        )
+    ).scalar_one()
+    return _canonical_json_sha256(value)
+
+
+async def _touch_curation_import_collection_command(
+    session: AsyncSession,
+    *,
+    collection_id: str,
+    command_id: int,
+    principal: str,
+) -> int:
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.touch_curation_import_collection_command(
+                  CAST(:collection_id AS uuid), :command_id, :principal, NULL
+                )
+                """
+            ),
+            {
+                "collection_id": collection_id,
+                "command_id": command_id,
+                "principal": principal,
+            },
+        )
+    ).mappings().one()
+    return int(result["o_collection_revision"])
+
+
+async def _apply_curation_import_items_command(
+    session: AsyncSession,
+    *,
+    items: Sequence[Mapping[str, Any]],
+    actor: str,
+    source_content_sha256: str,
+    batch_kind: str,
+    command_id: int,
+) -> CurationImportResult:
+    """normalized item/provenance set을 한 named DB command로 반영한다."""
+
+    result = (
+        await session.execute(
+            text(
+                "CALL feature.apply_curation_import_items_command("
+                "CAST(:items AS jsonb), :content_sha256, :batch_kind, "
+                ":command_id, :principal, NULL, NULL, NULL, NULL)"
+            ),
+            {
+                "items": json.dumps(list(items), ensure_ascii=False),
+                "content_sha256": source_content_sha256,
+                "batch_kind": batch_kind,
+                "command_id": command_id,
+                "principal": actor,
+            },
+        )
+    ).mappings().one()
+    removed_ids = [str(value) for value in (result["o_removed_item_ids"] or [])]
+    removals: tuple[CurationItem, ...] = ()
+    if removed_ids:
+        removal_rows = (
+            (
+                await session.execute(
+                    text(
+                        _ITEM_SELECT
+                        + " WHERE i.curation_item_id = ANY(CAST(:item_ids AS uuid[])) "
+                        "ORDER BY c.collection_key, i.sort_order, i.curation_item_id"
+                    ),
+                    {"item_ids": removed_ids},
+                )
+            )
+            .mappings()
+            .all()
+        )
+        removals = tuple(_item(row) for row in removal_rows)
+    return {
+        "rows": len(items),
+        "collections": len({str(item["collection_id"]) for item in items}),
+        "inserted": int(result["o_inserted"] or 0),
+        "updated": int(result["o_updated"] or 0),
+        "removed": len(removed_ids),
+        "removals": removals,
+        "import_batch_id": str(result["o_import_batch_id"]),
+    }
+
+
 async def import_curation_rows(
     session: AsyncSession,
     *,
@@ -4630,6 +6055,7 @@ async def import_curation_rows(
     source_content_sha256: str | None = None,
     batch_kind: str | None = None,
     frozen_h35_schema: bool = False,
+    command_id: int | None = None,
 ) -> CurationImportResult:
     """검증·Feature 해소가 끝난 CSV 행을 한 transaction에서 멱등 upsert한다.
 
@@ -4642,6 +6068,8 @@ async def import_curation_rows(
     _ensure_resolved_curation_identities(rows)
     _ensure_curation_dataset_identity(rows, frozen_h35_schema=frozen_h35_schema)
     collections: dict[str, str] = {}
+    created_collections: set[str] = set()
+    before_item_hashes: dict[str, str] = {}
     item_values: list[dict[str, Any]] = []
     if rows:
         # 서로 다른 CSV가 theme/source/collection lock을 역순으로 잡는 deadlock과
@@ -4678,14 +6106,15 @@ async def import_curation_rows(
                 raise ValueError(
                     "큐레이션 반영 중 Feature lifecycle이 변경되었습니다. 다시 preview하세요."
                 )
-        await session.execute(
-            text(
-                "SELECT collection_id FROM feature.curation_collections "
-                "WHERE collection_key = ANY(CAST(:collection_keys AS text[])) "
-                "ORDER BY collection_id FOR UPDATE"
-            ),
-            {"collection_keys": collection_keys},
-        )
+        if command_id is None or frozen_h35_schema:
+            await session.execute(
+                text(
+                    "SELECT collection_id FROM feature.curation_collections "
+                    "WHERE collection_key = ANY(CAST(:collection_keys AS text[])) "
+                    "ORDER BY collection_id FOR UPDATE"
+                ),
+                {"collection_keys": collection_keys},
+            )
         legacy_adoption_payload = json.dumps(
             [
                 {
@@ -4708,12 +6137,30 @@ async def import_curation_rows(
         representatives.setdefault(row.collection_key, row)
     for collection_key in sorted(representatives):
         row = representatives[collection_key]
-        theme_id = await upsert_curation_theme(
-            session,
-            theme_slug=row.theme_slug,
-            theme_name=row.theme_name,
-            theme_group=row.theme_group,
-        )
+        if frozen_h35_schema:
+            theme_id = await upsert_curation_theme(
+                session,
+                theme_slug=row.theme_slug,
+                theme_name=row.theme_name,
+                theme_group=row.theme_group,
+            )
+        else:
+            theme_value = (
+                await session.execute(
+                    text(_RESOLVE_THEME_SQL),
+                    {
+                        "theme_group": row.theme_group,
+                        "theme_name": row.theme_name,
+                        "theme_slug": row.theme_slug,
+                    },
+                )
+            ).scalar_one_or_none()
+            if theme_value is None:
+                raise ValueError(
+                    "theme은 retained catalog에서 먼저 생성해야 하며 "
+                    "slug/name/group이 정확히 일치해야 합니다."
+                )
+            theme_id = str(theme_value)
         source_params: dict[str, Any] = {
             "source_name": row.source_name,
             "source_url": row.source_url,
@@ -4723,19 +6170,24 @@ async def import_curation_rows(
             source_params["dataset_key"] = row.frozen_h35_dataset[1]
         else:
             source_params["provider_dataset_id"] = row.provider_dataset_id
-        source_id = await _upsert_id_with_fallback(
-            session,
-            upsert_sql=(
-                _FROZEN_H35_UPSERT_SOURCE_SQL if frozen_h35_schema else _UPSERT_SOURCE_SQL
-            ),
-            lookup_sql=(
-                _FROZEN_H35_GET_SOURCE_ID_BY_KEY_SQL
-                if frozen_h35_schema
-                else _GET_SOURCE_ID_BY_DATASET_ID_SQL
-            ),
-            params=source_params,
-            entity="curation source",
-        )
+        if frozen_h35_schema:
+            source_id = await _upsert_id_with_fallback(
+                session,
+                upsert_sql=_FROZEN_H35_UPSERT_SOURCE_SQL,
+                lookup_sql=_FROZEN_H35_GET_SOURCE_ID_BY_KEY_SQL,
+                params=source_params,
+                entity="curation source",
+            )
+        else:
+            source_value = (
+                await session.execute(text(_RESOLVE_SOURCE_SQL), source_params)
+            ).scalar_one_or_none()
+            if source_value is None:
+                raise ValueError(
+                    "source는 retained catalog에서 먼저 생성해야 하며 "
+                    "dataset/name/url이 정확히 일치해야 합니다."
+                )
+            source_id = str(source_value)
         collection_params = {
             "collection_key": collection_key,
             "theme_id": theme_id,
@@ -4744,16 +6196,42 @@ async def import_curation_rows(
             "edition_key": row.edition_key,
             "actor": actor,
         }
-        collections[collection_key] = await _upsert_id_with_fallback(
-            session,
-            upsert_sql=_UPSERT_COLLECTION_SQL,
-            lookup_sql=_GET_COLLECTION_ID_BY_KEY_SQL,
-            params=collection_params,
-            entity="curation collection",
-        )
+        if command_id is not None and not frozen_h35_schema:
+            principal = (actor or "").strip()
+            if not principal:
+                raise ValueError("curation import command actor is required")
+            collection_id, created = await _resolve_curation_import_collection_command(
+                session,
+                collection_key=collection_key,
+                theme_id=theme_id,
+                source_id=source_id,
+                title=row.title,
+                edition_key=row.edition_key,
+                command_id=command_id,
+                principal=principal,
+            )
+            collections[collection_key] = collection_id
+            if created:
+                created_collections.add(collection_id)
+            else:
+                before_item_hashes[collection_id] = (
+                    await _curation_collection_item_state_hash(
+                        session,
+                        collection_id=collection_id,
+                    )
+                )
+        else:
+            collections[collection_key] = await _upsert_id_with_fallback(
+                session,
+                upsert_sql=_UPSERT_COLLECTION_SQL,
+                lookup_sql=_GET_COLLECTION_ID_BY_KEY_SQL,
+                params=collection_params,
+                entity="curation collection",
+            )
     for row in rows:
         item_values.append(
             {
+                "row_number": row.row_number,
                 "collection_id": collections[row.collection_key],
                 "collection_key": row.collection_key,
                 "feature_id": row.feature_id,
@@ -4765,26 +6243,48 @@ async def import_curation_rows(
                 "item_title": row.item_title,
                 "item_summary": row.item_summary,
                 "metadata": row.metadata,
+                "provenance": row.provenance or {},
+                "row_payload": _canonical_import_row_payload(row),
             }
+        )
+    if command_id is not None and not frozen_h35_schema:
+        principal = (actor or "").strip()
+        if not principal:
+            raise ValueError("curation import command actor is required")
+        content_sha256 = (
+            _validated_sha256(source_content_sha256)
+            if source_content_sha256 is not None
+            else _canonical_json_sha256(
+                [_canonical_import_row_payload(row) for row in rows]
+            )
+        )
+        return await _apply_curation_import_items_command(
+            session,
+            items=item_values,
+            actor=principal,
+            source_content_sha256=content_sha256,
+            batch_kind=batch_kind or "normalized_rows",
+            command_id=command_id,
         )
     counts = {"inserted": 0, "updated": 0, "removed": 0}
     removals: tuple[CurationItem, ...] = ()
     if item_values:
         collection_ids = sorted(collections.values())
-        await session.execute(
-            text(
-                "SELECT collection_id FROM feature.curation_collections "
-                "WHERE collection_id = ANY(CAST(:collection_ids AS uuid[])) "
-                "ORDER BY collection_id FOR UPDATE"
-            ),
-            {"collection_ids": collection_ids},
-        )
+        if command_id is None or frozen_h35_schema:
+            await session.execute(
+                text(
+                    "SELECT collection_id FROM feature.curation_collections "
+                    "WHERE collection_id = ANY(CAST(:collection_ids AS uuid[])) "
+                    "ORDER BY collection_id FOR UPDATE"
+                ),
+                {"collection_ids": collection_ids},
+            )
         items_payload = json.dumps(item_values, ensure_ascii=False)
         removed_rows = (
             (
                 await session.execute(
                     text(
-                        _MARK_IMPORT_REMOVALS_PRE_UUID_SQL
+                        _MARK_IMPORT_REMOVALS_PRE_UUID_NO_REVISION_SQL
                         if frozen_h35_schema
                         else _MARK_IMPORT_REMOVALS_SQL
                     ),
@@ -4798,7 +6298,11 @@ async def import_curation_rows(
         adopted = int(
             (
                 await session.execute(
-                    text(_ADOPT_LEGACY_IMPORT_IDENTITIES_SQL),
+                text(
+                    _ADOPT_LEGACY_IMPORT_IDENTITIES_PRE_REVISION_SQL
+                    if frozen_h35_schema
+                    else _ADOPT_LEGACY_IMPORT_IDENTITIES_SQL
+                ),
                     {"items": items_payload, "actor": actor},
                 )
             ).scalar_one()
@@ -4806,7 +6310,11 @@ async def import_curation_rows(
         count_row = (
             (
                 await session.execute(
-                    text(_BULK_UPSERT_ITEMS_SQL),
+                text(
+                    _BULK_UPSERT_ITEMS_PRE_REVISION_SQL
+                    if frozen_h35_schema
+                    else _BULK_UPSERT_ITEMS_SQL
+                ),
                     {
                         "items": items_payload,
                         "actor": actor,
@@ -4821,7 +6329,24 @@ async def import_curation_rows(
             "updated": adopted + int(count_row["updated"] or 0),
             "removed": len(removals),
         }
-        if any(counts.values()):
+        if any(counts.values()) and command_id is not None and not frozen_h35_schema:
+            principal = (actor or "").strip()
+            for collection_id in collection_ids:
+                if collection_id in created_collections:
+                    continue
+                before_hash = before_item_hashes[collection_id]
+                after_hash = await _curation_collection_item_state_hash(
+                    session,
+                    collection_id=collection_id,
+                )
+                if after_hash != before_hash:
+                    await _touch_curation_import_collection_command(
+                        session,
+                        collection_id=collection_id,
+                        command_id=command_id,
+                        principal=principal,
+                    )
+        elif any(counts.values()):
             await session.execute(
                 text(
                     "UPDATE feature.curation_collections "
@@ -4836,6 +6361,7 @@ async def import_curation_rows(
         actor=actor,
         source_content_sha256=source_content_sha256,
         batch_kind=batch_kind,
+        command_id=command_id,
     )
     return {
         "rows": len(rows),

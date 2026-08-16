@@ -99,28 +99,6 @@ from kortravelmap.infra.consistency import (
 from kortravelmap.infra.consistency import (
     run_consistency_checks as repo_run_consistency_checks,
 )
-from kortravelmap.infra.curated_repo import (
-    ConciergeThemeSyncResult,
-    CuratedFeatureCandidatesResult,
-    CuratedFeatureDetailSnapshotMaterializeResult,
-    CuratedFeatureStatusSweepResult,
-    CuratedSourceMetadataRefreshResult,
-)
-from kortravelmap.infra.curated_repo import (
-    apply_enabled_curated_source_rules as repo_apply_enabled_curated_source_rules,
-)
-from kortravelmap.infra.curated_repo import (
-    materialize_curated_feature_detail_snapshots as repo_materialize_curated_snapshots,
-)
-from kortravelmap.infra.curated_repo import (
-    refresh_curated_source_metadata as repo_refresh_curated_source_metadata,
-)
-from kortravelmap.infra.curated_repo import (
-    sweep_curated_feature_status as repo_sweep_curated_feature_status,
-)
-from kortravelmap.infra.curated_repo import (
-    sync_concierge_themes as repo_sync_concierge_themes,
-)
 from kortravelmap.infra.db import make_async_session_factory
 from kortravelmap.infra.dedup_refresh_repo import (
     DedupRefreshScope,
@@ -178,6 +156,7 @@ from kortravelmap.infra.feature_repo import (
     NearbyFeaturePage,
     NoticeFeatureLoadResult,
     NoticeReconcileResult,
+    capture_provider_curation_input,
     close_notice_features,
     features_in_bbox,
     get_feature_row,
@@ -356,7 +335,14 @@ from kortravelmap.providers.visitkorea import (
 )
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Collection, Iterable, Mapping, Sequence
+    from collections.abc import (
+        AsyncIterable,
+        AsyncIterator,
+        Collection,
+        Iterable,
+        Mapping,
+        Sequence,
+    )
     from datetime import datetime
 
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -376,11 +362,6 @@ __all__ = [
     "AsyncKorTravelMapClient",
     "BatchDagRunResult",
     "CacheTargetSnapshotGcDrainResult",
-    "ConciergeThemeSyncResult",
-    "CuratedFeatureCandidatesResult",
-    "CuratedFeatureStatusSweepResult",
-    "CuratedSourceMetadataRefreshResult",
-    "CuratedFeatureDetailSnapshotMaterializeResult",
     "DedupRefreshResult",
     "DedupSyncResult",
     "DagsterFeatureOperationCursor",
@@ -870,12 +851,24 @@ class AsyncKorTravelMapClient:
         *,
         dagster_run_id: str,
         membership: ProviderDatasetOperationMembership,
+        authoritative_snapshot_complete: bool = False,
+        curation_input_member_count: int | None = None,
+        curation_input_set_hash: str | None = None,
     ) -> DagsterFeatureOperationMutation:
         """wrapper가 성공한 exact canonical member 하나를 완료한다."""
         try:
             async with self._session_factory() as session, session.begin():
+                if authoritative_snapshot_complete:
+                    await session.execute(
+                        text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+                    )
                 return await repo_finish_dagster_feature_membership(
-                    session, dagster_run_id=dagster_run_id, membership=membership
+                    session,
+                    dagster_run_id=dagster_run_id,
+                    membership=membership,
+                    authoritative_snapshot_complete=authoritative_snapshot_complete,
+                    curation_input_member_count=curation_input_member_count,
+                    curation_input_set_hash=curation_input_set_hash,
                 )
         except FeatureOperationInvariantConflict as exc:
             await self._record_feature_operation_conflict(exc)
@@ -921,6 +914,10 @@ class AsyncKorTravelMapClient:
         """권위 있는 Dagster terminal을 root와 남은 active child에 반영한다."""
         try:
             async with self._session_factory() as session, session.begin():
+                if terminal_status.strip().upper() == "SUCCESS":
+                    await session.execute(
+                        text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+                    )
                 return await repo_reconcile_dagster_feature_run(
                     session,
                     dagster_run_id=dagster_run_id,
@@ -995,14 +992,96 @@ class AsyncKorTravelMapClient:
                 sync_scope=sync_scope,
             )
 
-    async def load_feature_bundles(self, bundles: Iterable[FeatureBundle]) -> FeatureLoadResult:
+    async def load_feature_bundles(
+        self,
+        bundles: Iterable[FeatureBundle],
+        *,
+        curation_dataset: tuple[str, str] | None = None,
+    ) -> FeatureLoadResult:
         """``FeatureBundle`` 다수를 한 transaction으로 적재 (commit/rollback).
 
         feature → source_record → source_link 순 idempotent upsert
         (``infra.load_bundles``). 하나라도 실패하면 전체 rollback.
         """
+        materialized = list(bundles)
         async with self._session_factory() as session, session.begin():
-            return await load_bundles(session, bundles)
+            result = await load_bundles(session, materialized)
+            if curation_dataset is not None:
+                provider, dataset_key = curation_dataset
+                result = result.merge(
+                    await capture_provider_curation_input(
+                        session, provider=provider, dataset_key=dataset_key
+                    )
+                )
+            return result
+
+    async def load_feature_bundle_batches(
+        self,
+        batches: AsyncIterable[Sequence[FeatureBundle]],
+        *,
+        curation_dataset: tuple[str, str] | None = None,
+    ) -> FeatureLoadResult:
+        """async batch stream을 한 transaction으로 적재한다.
+
+        대용량 authoritative snapshot은 전체 ``FeatureBundle``을 materialize하지
+        않는다. 각 batch는 앞 batch와 같은 transaction/session에서 적재되고,
+        iterator나 DB write가 실패하면 이미 처리한 batch까지 전부 rollback한다.
+        """
+
+        result = FeatureLoadResult()
+        async with self._session_factory() as session, session.begin():
+            async for batch in batches:
+                if not batch:
+                    continue
+                result = result.merge(await load_bundles(session, batch))
+            if curation_dataset is not None:
+                provider, dataset_key = curation_dataset
+                result = result.merge(
+                    await capture_provider_curation_input(
+                        session, provider=provider, dataset_key=dataset_key
+                    )
+                )
+            return result
+
+    async def load_authoritative_feature_snapshot(
+        self,
+        bundles: Iterable[FeatureBundle],
+        *,
+        provider: str,
+        dataset_key: str,
+        source_entity_type: str,
+        retired_source_entity_ids: set[str] | None = None,
+        retire_geometryless_areas: bool = False,
+    ) -> tuple[FeatureLoadResult, int]:
+        """적재·provider lifecycle·curation seal을 한 causal transaction으로 닫는다."""
+
+        if retired_source_entity_ids and retire_geometryless_areas:
+            raise ValueError("retirement mode는 하나만 선택해야 합니다")
+        materialized = list(bundles)
+        async with self._session_factory() as session, session.begin():
+            result = await load_bundles(session, materialized)
+            retired = 0
+            if retired_source_entity_ids:
+                retired = await retire_features_by_source_entity_ids(
+                    session,
+                    provider=provider,
+                    dataset_key=dataset_key,
+                    source_entity_type=source_entity_type,
+                    source_entity_ids=retired_source_entity_ids,
+                )
+            elif retire_geometryless_areas:
+                retired = await retire_geometryless_area_features_by_source(
+                    session,
+                    provider=provider,
+                    dataset_key=dataset_key,
+                    source_entity_type=source_entity_type,
+                )
+            result = result.merge(
+                await capture_provider_curation_input(
+                    session, provider=provider, dataset_key=dataset_key
+                )
+            )
+            return result, retired
 
     async def load_authoritative_notice_snapshot(
         self,
@@ -1016,7 +1095,7 @@ class AsyncKorTravelMapClient:
     ) -> NoticeFeatureLoadResult:
         """full notice snapshot 적재와 lifecycle 반영을 한 transaction으로 수행."""
         async with self._session_factory() as session, session.begin():
-            return await repo_load_authoritative_notice_snapshot(
+            result = await repo_load_authoritative_notice_snapshot(
                 session,
                 bundles=bundles,
                 provider=provider,
@@ -1024,6 +1103,12 @@ class AsyncKorTravelMapClient:
                 source_entity_type=source_entity_type,
                 active_lineage_keys=active_lineage_keys,
                 observed_at=observed_at,
+            )
+            seal = await capture_provider_curation_input(
+                session, provider=provider, dataset_key=dataset_key
+            )
+            return NoticeFeatureLoadResult(
+                load=result.load.merge(seal), reconcile=result.reconcile
             )
 
     async def load_notice_event_bundles(
@@ -1038,7 +1123,7 @@ class AsyncKorTravelMapClient:
     ) -> NoticeFeatureLoadResult:
         """event notice 적재와 member lifecycle 반영을 한 transaction으로 수행."""
         async with self._session_factory() as session, session.begin():
-            return await repo_load_notice_event_bundles(
+            result = await repo_load_notice_event_bundles(
                 session,
                 bundles=bundles,
                 provider=provider,
@@ -1046,6 +1131,12 @@ class AsyncKorTravelMapClient:
                 source_entity_type=source_entity_type,
                 lineage_events=lineage_events,
                 observed_at=observed_at,
+            )
+            seal = await capture_provider_curation_input(
+                session, provider=provider, dataset_key=dataset_key
+            )
+            return NoticeFeatureLoadResult(
+                load=result.load.merge(seal), reconcile=result.reconcile
             )
 
     async def retire_features_by_source(
@@ -1866,66 +1957,6 @@ class AsyncKorTravelMapClient:
                 known_file_objects=known_file_objects,
             )
 
-    async def refresh_curated_source_metadata(
-        self,
-        *,
-        provider_dataset_id: int | None = None,
-    ) -> CuratedSourceMetadataRefreshResult:
-        """curated source metadata를 source_records 기준으로 갱신한다(T-223c-2)."""
-        async with self._session_factory() as session, session.begin():
-            return await repo_refresh_curated_source_metadata(
-                session,
-                provider_dataset_id=provider_dataset_id,
-            )
-
-    async def apply_curated_source_rules(
-        self,
-        *,
-        limit: int = 500,
-    ) -> CuratedFeatureCandidatesResult:
-        """enabled source rule을 적용해 curated 후보/선정 row를 갱신한다(T-223c-2)."""
-        async with self._session_factory() as session, session.begin():
-            return await repo_apply_enabled_curated_source_rules(
-                session,
-                limit=limit,
-            )
-
-    async def sync_concierge_themes(
-        self,
-        *,
-        min_features: int = 1,
-    ) -> ConciergeThemeSyncResult:
-        """concierge youtube channel/playlist 그룹핑을 curated 테마+rule로 동기화한다.
-
-        이미 적재된 concierge 후보 feature의 그룹핑 값에서 유도해 그룹핑당 public
-        테마 1개 + detail_selector rule 1개를 upsert하고 즉시 후보를 채운다(#15).
-        """
-        async with self._session_factory() as session, session.begin():
-            return await repo_sync_concierge_themes(
-                session,
-                min_features=min_features,
-            )
-
-    async def sweep_curated_feature_status(
-        self,
-    ) -> CuratedFeatureStatusSweepResult:
-        """inactive/deleted feature가 가리키는 curated overlay를 archive한다(T-223c-2)."""
-        async with self._session_factory() as session, session.begin():
-            return await repo_sweep_curated_feature_status(session)
-
-    async def materialize_curated_feature_detail_snapshots(
-        self,
-        *,
-        theme_slug: str | None = None,
-        limit: int = 500,
-    ) -> CuratedFeatureDetailSnapshotMaterializeResult:
-        """curated feature detail snapshot cache를 materialize한다(T-223c-2)."""
-        async with self._session_factory() as session, session.begin():
-            return await repo_materialize_curated_snapshots(
-                session,
-                theme_slug=theme_slug,
-                limit=limit,
-            )
 
     async def run_batch_dag_consistency_gate(
         self,

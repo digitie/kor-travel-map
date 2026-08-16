@@ -2,6 +2,93 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-16 — T-VN-40 PostGIS typed runtime CI 수리
+
+- provider operation과 provider cancellation terminal 통합 회귀를 실제 Dagster/API
+  LOGIN으로 실행하게 정렬했다. root/migrator session이 executor ACL을 우회하던 테스트
+  경계를 없애고, API cancellation의 transaction-local finalizer 위임과 queued root의
+  heartbeat·tracking invariant 수렴을 함께 검증한다.
+- SECURITY DEFINER attempt event writer가 사용하는 `ops.import_job_event_clock` 권한을
+  command owner에만 보완했다. 격리 collection marker는 SQL NULL 비교를
+  `IS DISTINCT FROM`으로 fail-close해 제거된 marker를 다시 확정할 수 없게 했다.
+- committed operation projection test는 seed 전에도 동일한 committed-row 정리를 실행하고,
+  candidate runtime test는 dispose한 Dagster engine을 재사용하지 않도록 고쳤다. focused
+  PostGIS 회귀 100건과 변경 파일 Ruff 검사를 통과했다. runtime privilege 음성 test도
+  두 LOGIN engine을 정확히 한 번씩 dispose해 Python 3.13의 ResourceWarning 없이 끝낸다.
+
+## 2026-08-15 — T-VN-40 PostGIS CI runtime 격리 정렬
+
+- runtime privilege preflight가 T-VN-40 migration bootstrap과 다른 disposable LOGIN
+  비밀번호를 재설정해 뒤 candidate command 연결을 실패시키던 순서 의존성을 제거했다.
+  모든 runtime LOGIN fixture는 bootstrap의 T-VN-40 test-only password를 사용한다.
+- public collection은 trusted public Feature에 연결된 item만 반환한다. 미연결 item은
+  public projection에서 제외하고 admin projection에 보존한다는 현재 정책을 integration
+  fixture와 count assertion에 명시했다.
+
+## 2026-08-15 — T-VN-40 Dagster CI 테스트 경계 정렬
+
+- authoritative snapshot 경로로 전환된 concierge asset의 fake client에 적재·retirement를 한
+  causal 결과로 돌려주는 구현을 추가했다. upsert와 tombstone 양쪽 asset 경로가 같은 production
+  호출 계약을 계속 검증한다.
+- OpiNet test double은 authoritative curation dataset keyword를, feature-operation terminal test는
+  nullable curation input proof 두 필드를 명시한다. production 함수의 새 proof 인자를 누락한
+  테스트 double 때문에 Python matrix CI가 막히지 않게 했다.
+
+## 2026-08-15 — T-VN-40 service OpenAPI contract test 정렬
+
+- restore-fence는 최초 terminal `201`과 exact `Idempotency-Key` replay `200`을 모두 선언한다.
+  registry test는 replay response를 별도 성공 상태로 허용하되 상태 코드와 ETag header를
+  정책과 정확히 대조하도록 했다.
+- canonical cutover identity mapping export를 service OpenAPI exact route inventory에 넣어
+  기존 route policy·생성 artifact와 같은 표면을 검사한다.
+
+## 2026-08-15 — T-VN-40 admin OpenAPI 생성형 타입 동기화
+
+- canonical cutover identity mapping service export를 admin frontend의 `src/api/types.ts`에
+  재생성했다. CI의 OpenAPI type drift gate가 현재 Map API artifact를 기준으로 검사한다.
+- backend contract를 바꾸지 않는 생성물 정렬이며, `gen:types:check`로 같은 artifact를
+  다시 확인한다.
+
+## 2026-08-15 — T-VN-40 branch CI 경계 정렬
+
+- Geo BFF는 요청 시점의 전용 Geo key만 읽고, 앞선 테스트의 module cache가 다음 요청의 credential
+  판정을 오염시키지 않게 했다. 키가 없으면 `GEO_API_KEY_NOT_CONFIGURED` 사유로 fail-close하며,
+  VWorld provider key fallback은 계속 금지한다.
+- clone live runner는 candidate geo를 실제로 띄우지 않으므로 UI build의 Geo key를 빈 값으로 명시한다.
+  stale test expectation을 현재 fail-close 동작에 맞췄다.
+- H35 wheel contract가 호출하는 `uv`를 Python matrix CI에 명시 설치했다. CI lint와 focused Python·UI
+  test를 재실행했다.
+
+## 2026-08-15 — T-VN-40 Manager canonical curation principal 결선 대기
+
+- Docker Manager PR [#174](https://github.com/digitie/kor-travel-docker-manager/pull/174)가 PinVi canonical
+  snapshot·cutover mapping 원문 token pair에서 Map API 전용 SHA-256 digest를 frozen C6c environment 안에서
+  파생하도록 구현했다. Map API는 digest만 받고 원문은 ordinary PinVi API에만 남으며, UI·Dagster·bootstrap
+  및 PinVi Web·Dagster로의 이름·값 누출은 raw/resolved Compose gate가 container mutation 전에 거부한다.
+- 이 PR은 아직 draft이며 T-VN-40 rollout receipt도 `pending`이다. n150에 token을 설치하거나 receipt를
+  complete로 전이하지 않았다. 병합 뒤 canonical import/backfill live acceptance와 paired artifact receipt를
+  같이 확인하는 것이 다음 release gate다.
+
+## 2026-08-15 — T-VN-40 n150 canonical curation principal 격리
+
+- isolated n150 runner가 매 실행마다 서로 다른 canonical snapshot·cutover mapping token을
+  만들고, Map API에는 두 SHA-256 digest만, PinVi API에는 두 원문 token만 전달하게 했다.
+- Map compose도 두 digest를 API service에만 선언한다. Dagster·daemon·frontend와 Map의
+  어느 runtime도 canonical curation token 원문을 받지 않는다.
+- 다음 production/Manager 결선에서도 이 네 값과 scope 분리를 유지해야 하며, paired
+  receipt complete는 그 live acceptance 뒤에만 허용한다.
+
+## 2026-08-15 — T-VN-40 paired service receipt 배포 gate 강화
+
+- installer와 n150 runner가 active complete receipt의 정확한 key set을 요구한다. Map의
+  `openapi.user.json`·`openapi.service.json`·`openapi.json`, PinVi의 user/service vendored
+  OpenAPI를 같은 immutable source archive에서 각각 해시하고, Map↔PinVi user/service digest
+  동치와 canonical importer·live acceptance 검증 문구도 확인한다.
+- legacy admin detail vendor는 T-VN-40 active receipt/runner에서 제거했다. 완결 receipt가
+  그것을 다시 포함하거나 service vendor를 빼면 install 전에 fail-close한다.
+- install manifest format을 version 4로 올렸다. pending receipt는 기존처럼 source archive와
+  remote 접속 전에 거부한다.
+
 ## 2026-08-14 — dagster-daemon 이미지 누락 + prod DSN 경계 실측 (T-VN-H46D/#51)
 
 ### `docker-buildx.sh`가 daemon 이미지를 굽지 않았다
@@ -79,6 +166,20 @@ PR #979의 정적 가드가 "운영자 `.env`는 못 본다"고 적어 둔 바�
 sha8이 실행마다 달라졌고, 그 오염된 해시를 근거로 "세 값이 전부 다르다"고 판정했다 —
 실제로는 둘이 같은 값이었다. `.env` 파싱은 파이썬으로 옮기고 나서야 안정됐다.
 
+## 2026-08-14 — T-VN-40C: PinVi cutover mapping export를 Map service 경계로 분리
+
+PinVi의 기존 plan/POI가 가진 legacy `curated_feature_id`는 Map의 canonical
+`collection_id`/`curation_item_id`와 별도 DB에 있어, 관계를 물리 제거하기 전에 직접 조회
+없이 전달할 immutable 증거가 필요하다. Map service에 maintenance-only
+`GET /v1/service/curation-cutover/identity-mappings`를 추가했다. 응답은 legacy UUID 순서의
+signed keyset, 각 row의 `source_row_hash`, 전체 count와 NFC/UUID framed Merkle root를 함께
+돌려준다. cursor가 다른 root/count에 재사용되면 409로 fail-close한다.
+
+snapshot consumer token과 mapping export token은 서로 다른 SHA-256 digest를 써야 하며,
+한 scope의 token을 다른 route에 쓰면 403이다. runtime DB role은 mapping relation의 SELECT만
+가지고 INSERT/UPDATE/DELETE/TRUNCATE는 계속 없다. 다음 PinVi 단계는 이 OpenAPI를 vendor하고
+mapping receipt를 먼저 고정한 다음, 기존 provenance를 1:1 backfill하는 것이다.
+
 ## 2026-08-14 — geo 소비자 키가 VWorld 키로 떨어지는 통로 제거 (T-VN-H46B/C)
 
 `kor-travel-geo`에는 성격이 다른 자격증명 두 개가 있다. **VWorld 키**는 geo가 상류
@@ -117,82 +218,27 @@ dagster/daemon 두 컨테이너가 VWorld 키를 든 채 남았다. fail-open이
 가드가 **못 하는 것**도 문서에 적었다: 중간 변수 우회, 운영자 `.env` 파일 자체(**08-13
 사고의 실제 원인이 그 축이라 이 가드는 그 사고를 막지 못했을 것이다**),
 docker-manager의 compose.
+
 ## 2026-08-14 — alembic squash(0200) + prod 지오코딩 복구
 
-### 체인 109개 → `0200_schema_baseline` 하나
+T-VN-36 PR #973이 `c76ceb7a`로 병합된 최신 `main` 위에 T-VN-40 설계 커밋만
+재배치했다. ADR-092는 source-rule 자동 결과를 admin-only 후보 lifecycle로,
+공식·수동 공개 membership을 `curation_collections/items`의 단일 정본으로 분리한다.
+사용자 승인에 따라 A/B/C는 하나의 forward-only implementation PR/release로 이어서 구현한다.
+상세 설계는 candidate stable identity `(rule_id, source_entity_key, feature_id)`, immutable
+transition audit, source-head proof, typed promotion/reject command, 전용 procedure owner,
+legacy 물리 제거와 Map/PinVi/n150 acceptance를 고정한다.
+PinVi가 소비하는 legacy curated detail snapshot은 canonical `curation_item_id` 기반의
+typed direct projection으로 같은 release에서 이관하고, legacy cache/path/type를 함께 제거한다.
 
-`0001~0104`는 앞으로 **어떤 DB에서도 실행되지 않는다.** prod는 2026-08-13 in-place
-cutover로 이미 `0104`를 지나왔고 새 DB는 baseline에서 시작한다. 남아 있던 것은
-부채였다 — migration이 서로를 sha로 잠그고 import하며(`0104`→`0102`→`0098/0099/0100`),
-존재하지 않을 데이터를 위한 backfill·fence·replay가 전부 살아 있었다. 2026-08-13
-하루에 나온 P1 3건이 전부 그 구조에서 나왔다.
-
-sidecar SQL은 `scripts/build-baseline.sh`가 체인 DB에서 뽑아 결정론적으로 정규화한다.
-`0200`이 두 파일을 byte sha로 잠그므로 손으로 고치면 선다. 빈 DB 적용 **4초**(체인
-45초, prod in-place 1시간 32분).
-
-동등성은 `scripts/compare-schema-catalogs.sh`로 증명했다 — **오라클을 먼저 증명했다**
-(변조 7종 주입 7/7 검출). 결과 카탈로그 2486행 전부 일치.
-
-**중간에 나온 결함이 이 작업의 본론이었다.** 오라클이 18행 차이를 잡았는데 표기 차이가
-아니라 **권한 차이**였다: GRANT/REVOKE는 객체 소유자만 할 수 있는데 baseline은 전
-구간을 `ktm_feature_schema_owner`로 돌린다. ADR-090의 role은 `NOINHERIT`이라 membership이
-있어도 권한이 승계되지 않고, 소유자가 아닌 GRANT는 **오류가 아니라 경고 후 무시**다 —
-`exit 0`으로 조용히 통과하면서 routine 10개가 PUBLIC EXECUTE로 남았다(102 → 112).
-
-고친 뒤 같은 함정을 하나 더 만들지 않으려고, 적용 성공이 ACL 적용의 증거가 되지 못한다는
-사실 자체를 `schema.sql` 끝의 digest 자기검증으로 막았다. 그리고 그 검증이 실제로 무는지
-role 전환을 제거한 변조본으로 확인했다(`exit 1`, `alembic_version` 미기록).
-
-체인 파일은 `alembic/legacy_versions/`로 옮겼다. 지우지 않은 이유는 이들이 여전히
-정본인 사실이 있기 때문이다 — **"무엇이 지워졌는가."** 현행 스키마에는 지워진 것이
-*없다*는 사실만 남고 이름은 남지 않는다. 다만 차단선을 아카이브에만 매달면 목록이
-낡아도 알 길이 없어서, baseline 대조를 붙였다(금지 컬럼이 head에 되살아나면 선다).
-
-검증: unit + lint 2260 passed.
-
-### 검증 절차가 낡은 산출물을 다시 쟀다
-
-ACL 수정 뒤에도 오라클 차이가 **글자 그대로 같았다.** 원인은 `scp -r`이 이미 있는
-원격 디렉터리 *안으로* 복사해 이전 트리가 그대로 쓰인 것이었다. tar 전송 + 양쪽 sha
-대조로 바꿨다. 이 부류(검사기가 자기가 검사한다고 말하는 것을 실제로 보지 않으면서
-green)를 오늘도 두 번 만났다.
-
-### `docs/backup-restore.md` §10 절차 5 재작성
-
-절차 5가 낡은 이유는 relation 이름이 아니었다 — 이름은 `0104`에도 대부분 살아 있었다.
-낡은 것은 **주입 대상의 타당성**이다. 옛 절차는 alias를 지우고 replay로 메워지는지
-봤는데, alias는 identity 파생물이지 provider replay 대상이 아니다.
-
-replay 가능/불가 경계를 먼저 긋고(가능: features 본문·typed subtype 5종·base field
-values / 불가: 운영자 행위 기록·발급물·append-only 관측 이력) 주입 단위를
-`feature.features` 행 DELETE로, 관측 축을 F1(orphan source entity)로 바꿨다.
-subtype만 지우는 변형은 `_UPSERT_SOURCE_ENTITY_HEAD_SQL`의 head 전진 게이트 때문에
-replay로 메워지지 않는다.
-
-절차 5 자체는 **여전히 미검증**이다(3회차 소관). 되먹임 경로의 round-trip 여부와
-현행 세대 ANALYZE 회귀 폭도 미측정으로 표시했다.
-
-### prod 지오코딩이 절반만 고쳐져 있었다 (복구 완료)
-
-2026-08-13 22:28에 `.env`의 geo 키를 올바른 값으로 바꾸고 **api만** 재생성했다.
-dagster / dagster-daemon은 20:31 세대 그대로여서 VWorld 상류 키를 들고 있었다 —
-geo가 401(`E0401`)로 거부하는 값이다.
-
-fail-open은 아니다. `preflight()`는 존재·길이만 보므로 리소스 초기화는 통과하고,
-첫 요청에서 `GeoAuthNotConfiguredError`가 나며 이를 삼키는 `except`가 없다. 즉 asset
-step이 통째로 실패한다. `reverse_geocoder`는 사실상 모든 feature asset의 필수
-리소스다. **아직 안 터진 이유는 무결이 아니라 미실행이다** — 최신 Dagster run이
-2026-08-07이고 현 컨테이너 세대는 08-13 20:31 기동이라, 잘못된 키를 들고 ETL이 한
-번도 돌지 않았다.
-
-compose는 결백했다(세 서비스 모두 fallback 없는 같은 변수). 두 컨테이너만
-`up -d --no-deps --force-recreate` 했고 이미지는 동일하다. 재생성 후 세 컨테이너
-전부에서 `POST /v2/reverse` **HTTP 200**을 확인했다.
-
-재발 통로는 아직 열려 있다 — `docker-compose.yml`과 `scripts/load-env.sh`의
-`${...:-${NEXT_PUBLIC_VWORLD_API_KEY:-...}}` fallback 사슬이 정확히 401을 받는 값으로
-떨어진다. 별도 처리 대상.
+구현 전 독립 적대 리뷰 2명이 설계와 현 writer를 전수 대조해, UUID로 잘못 적은 domain command,
+기존 item lost update, same-state source audit 불능, accepted link pointer 누락, PinVi snapshot의
+신뢰/공개 술어 누락, merge↔provider lock inversion, raw DML 회수 뒤 import/manual/merge 42501,
+generation completeness와 role bootstrap 공백을 확인했다. 정본은 bigint command claim,
+candidate/collection/item 세 revision, exact source transition matrix, trusted decision 원자 생성,
+T-VN-36 effective input digest, 공통 Feature advisory fence, 전체 canonical writer의 typed procedure,
+API/Dagster executor 분리로 보강했다. ADR-061의 auto-publish와 machine-readable removal/OpenAPI
+계약도 ADR-092의 same-release cutover에 맞췄다.
 
 ## 2026-08-12 — T-VN-38 병합과 완료 task 아카이브 정리
 
@@ -205,6 +251,7 @@ PR [#971](https://github.com/digitie/kor-travel-map/pull/971)이 `8dc2b24a`로 �
 `tasks.md`는 열린 백로그만 둔다는 규칙에 맞춰 이미 병합된 `T-VN-33`(#966),
 `T-VN-37`(#968), `T-VN-38`(#971) 및 `T-VN-H45` 완료 기록을 `tasks-done.md`로
 이관했다. 열린 prod 배포·운영 후속·T-VN-34/36/40/41만 남겼다.
+
 ## 2026-08-13 — T-VN-36: 새 T-VN-34 위 재배치 + 같은 부류 결함 전수 점검
 
 `feat/tvn34-state-model`(`693c5355`)을 새 base로 잡고 T-VN-36 고유 24개 commit만 다시
@@ -330,6 +377,7 @@ rebase에서 드러났다. 빈 `0095_tvn33_tvn38_head_merge`가 두 선행 revis
   내지 않는 상태를 기술하거나 존재하지 않는 분기 수를 셌다).
 
 **flake 2건을 없앴다** — 둘 다 "부하 탓"으로 넘길 수 있었던 red다.
+
 - 감사 계획 테스트의 `assert not sort_nodes`가 비결정적이었다(같은 트리·같은 명령으로
   한 번 red 한 번 green, 단독 8 passed). ANALYZE·`force_generic_plan`을 이미 걸고 있으니
   통계 문제가 아니라 top-N 정렬과 index-ordered 경로의 비용이 팽팽한 것이다. 단언을
@@ -344,6 +392,7 @@ rebase에서 드러났다. 빈 `0095_tvn33_tvn38_head_merge`가 두 선행 revis
 **최종 게이트 25/25 GREEN**: unit+lint 2192 · api 1101(cov 77.64%) · dagster 530/3skip
 (85.23%) · integration **1049 passed / 0 skipped**(geo live 실제 실행) · vitest 37파일 302 ·
 frontend 9종.
+
 ## 2026-08-11 — T-VN-36: T-VN-34 rebase와 final-fence 동결 재검증
 
 T-VN-36A~D를 T-VN-33 cleanup·T-VN-38 current summary·T-VN-34 final state cutover가
@@ -680,9 +729,9 @@ partition하고 있었고, 다음엔 반대로 "refresh-only CHECK가 막아 도
 - **0090이 재실행 안전하지 않았다(P0).** `notice_lineage_states.notice_lifecycle_scope_id`
   `ADD COLUMN`에 `IF NOT EXISTS`가 없었다. 0090은 중간에 `autocommit_block`으로 커밋되고 그
   시점 stamp는 아직 `0089`이므로, 뒤이어 0091이 실패하면 재시도가 여기서 `42701
-  duplicate_column`으로 죽는다 — forward-only라 되돌릴 길도 없다. 0091까지 적용 후 stamp를
+duplicate_column`으로 죽는다 — forward-only라 되돌릴 길도 없다. 0091까지 적용 후 stamp를
   0089로 되돌려 재현하고, 고친 뒤 재시도가 head까지 도달하는 것을 확인했다. `CREATE INDEX
-  CONCURRENTLY` 16개는 앞의 `DROP INDEX CONCURRENTLY IF EXISTS`가 이미 담당하므로 건드리지
+CONCURRENTLY` 16개는 앞의 `DROP INDEX CONCURRENTLY IF EXISTS`가 이미 담당하므로 건드리지
   않았다(`IF NOT EXISTS`를 얹으면 실패가 남긴 INVALID 인덱스를 건너뛴다).
 - offline upload writer 2개가 `:operation_key`를 bind하면서 값을 넘기지 않아 모든 업로드가
   `StatementError`로 죽는 상태였고, `ON CONFLICT`도 넓힌 멱등키와 어긋나 있었다. 멱등키는
@@ -845,15 +894,15 @@ partition하고 있었고, 다음엔 반대로 "refresh-only CHECK가 막아 도
 > 2026-07-26 **전면 감사**(현행 백로그 구조 성립) 이전 기록은 아래로 분리했다.
 > 검색은 `rg <패턴> docs/archive/` 로 한다. 새 엔트리는 항상 이 파일 상단에 추가한다.
 
-| 파일 | 기간 | 엔트리 | 크기 |
-| --- | --- | --- | --- |
-| [`journal-2026-07a.md`](archive/journal-2026-07a.md) | 2026-07-13 ~ 2026-07-24 | 115건 | 219 KB |
-| [`journal-2026-07b.md`](archive/journal-2026-07b.md) | 2026-07-01 ~ 2026-07-12 | 28건 | 45 KB |
-| [`journal-2026-06a.md`](archive/journal-2026-06a.md) | 2026-06-10 ~ 2026-06-30 | 172건 | 219 KB |
-| [`journal-2026-06b.md`](archive/journal-2026-06b.md) | 2026-06-02 ~ 2026-06-10 | 179건 | 220 KB |
-| [`journal-2026-06c.md`](archive/journal-2026-06c.md) | 2026-06-01 ~ 2026-06-02 | 36건 | 53 KB |
-| [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건 | 218 KB |
-| [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건 | 7 KB |
+| 파일                                                 | 기간                    | 엔트리 | 크기   |
+| ---------------------------------------------------- | ----------------------- | ------ | ------ |
+| [`journal-2026-07a.md`](archive/journal-2026-07a.md) | 2026-07-13 ~ 2026-07-24 | 115건  | 219 KB |
+| [`journal-2026-07b.md`](archive/journal-2026-07b.md) | 2026-07-01 ~ 2026-07-12 | 28건   | 45 KB  |
+| [`journal-2026-06a.md`](archive/journal-2026-06a.md) | 2026-06-10 ~ 2026-06-30 | 172건  | 219 KB |
+| [`journal-2026-06b.md`](archive/journal-2026-06b.md) | 2026-06-02 ~ 2026-06-10 | 179건  | 220 KB |
+| [`journal-2026-06c.md`](archive/journal-2026-06c.md) | 2026-06-01 ~ 2026-06-02 | 36건   | 53 KB  |
+| [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건   | 218 KB |
+| [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건    | 7 KB   |
 
 ## 2026-08-06 (1) — T-VN-35 A-D: kind별 typed subtype 분해 (ADR-086)
 
@@ -923,6 +972,7 @@ partition하고 있었고, 다음엔 반대로 "refresh-only CHECK가 막아 도
 - 겸사겸사 게이트 실패 메시지가 막은 축의 코드·건수·표본 id를 남기게 했다.
   `severity_max=ERROR`만으로는 운영자가 무엇을 고쳐야 할지 알 수 없고 그동안
   배치가 멈춰 있게 된다.
+
 ## 2026-08-06 (3) — T-VN-41F1J-A: response-loss 재개 증빙 보강
 
 Manager 적대적 리뷰가 PinVi cancel HTTP 응답이 유실된 뒤 Map `consumed` state를 읽어도 journal에
@@ -951,7 +1001,7 @@ counts는 바꾸지 않았고 artifact fingerprint test 7건으로 freeze 갱신
 
 - **수명주기/DB**: migration `0084_c6c_cancel_probe_fixtures`로 transaction ID를
   PK로 하고 fixture job/canonical cancellation을 각각 유일 FK로 결박했다. `armed →
-  consumed → finalized` 전이와 시각은 CHECK로, 동시 ensure는 transaction advisory
+consumed → finalized` 전이와 시각은 CHECK로, 동시 ensure는 transaction advisory
   lock으로 보장한다. 서비스 전 단계이므로 downgrade는 fixture 이력을 보전하지 않고
   table을 제거하며, 백업·복원은 최종 schema에서만 검증한다.
 - **취소·격리**: 실제 PinVi cancel의 canonical
@@ -980,7 +1030,7 @@ counts는 바꾸지 않았고 artifact fingerprint test 7건으로 freeze 갱신
 ## 2026-08-06 (1) — T-VN-41F1J: Map-owned cancel-probe fixture 결정
 
 - **관측/판정**: 신뢰된 F1D 한 회차는 `login=200 → etl_summary=200 → provider_sync=200 →
-  cancel=404`까지 도달했다. 따라서 Manager runtime, PinVi 세션, read surface는 원인이
+cancel=404`까지 도달했다. 따라서 Manager runtime, PinVi 세션, read surface는 원인이
   아니며, 설정된 정적 probe job UUID에 Map import job이 없었다. 후보를 다시 실행하지
   않고 fixture lifecycle을 고친 뒤 새 pair에서 재개한다.
 - **결정**: fixture의 생성·상태·소비·종결은 Map 소유 DB와 전용 service OpenAPI가 소유한다.
@@ -1168,8 +1218,7 @@ dagster entrypoint 기계 인터록(NEW-5) 동봉.
     **F1** PinVi cutover UUID 리터럴 자기-정본화를 **opt-in**
     (`accept_uuid_literals`, 기본 off) + `self_mapped_refs` 분리 집계·샘플로
     재설계(무검증 UUID 조용한 정본화 차단). **F8** dagster 선행 배포 금지
-    (entrypoint에 migration 게이트 없음 — 코드 0083+DB 0082면 신규 write 전면
-    23514) — 0083 docstring·배포 절 명문화. F4 PinVi 문구 모순 정정.
+    (entrypoint에 migration 게이트 없음 — 코드 0083+DB 0082면 신규 write 전면 23514) — 0083 docstring·배포 절 명문화. F4 PinVi 문구 모순 정정.
 - OpenAPI admin/service 재생성(user 무변경 — user-client 무접촉), freeze
   baseline·artifact sha 재고정, admin frontend types 재생성. perf gate에
   0083 covering index 등가 집합 반영.
@@ -1232,8 +1281,8 @@ dagster entrypoint 기계 인터록(NEW-5) 동봉.
 - **PinVi 배포**: 함정 실측 — `.env` `PINVI_REPO_DIR`가 frozen release export
   (`pinvi-release-4943282`)를 가리켜 git 체크아웃 갱신만으로는 **구코드가
   빌드**됨(1차 배포에서 신규 모듈 부재로 발각). 새 export `pinvi-release-3ff54b8`
-  + `.env` `PINVI_REPO_DIR`/`PINVI_SOURCE_REVISION` 갱신으로 수리, 리비전
-  `3ff54b8b` 실측·`20260804_0049` 적용. sync enable은 `false` 유지(41C 게이트).
+  - `.env` `PINVI_REPO_DIR`/`PINVI_SOURCE_REVISION` 갱신으로 수리, 리비전
+    `3ff54b8b` 실측·`20260804_0049` 적용. sync enable은 `false` 유지(41C 게이트).
 - **32C cutover(dry→real)**: `pinvi-feature-uuid-cutover` — **양 저장소 독립
   checksum 일치**(PinVi 재계산 root `8bd9534a…` = Map 서버 root, alias_count
   731,600). trip_day_pois **26행 UUID shadow 채움**(매칭 4 ref), unmatched 10건은
@@ -1269,7 +1318,7 @@ dagster entrypoint 기계 인터록(NEW-5) 동봉.
   로컬 재현으로 툴 버전 요인 배제). #944로 재생성만 분리 머지. 교훈: OpenAPI
   user 표면 변경 시 admin frontend와 user-client **두 곳** types 재생성.
 - **T-VN-H43 기준선 dump**: n150 `~/backups/kor-travel-map/
-  2026-08-05-h43-baseline.dump` — 435MB/54.7s, sha256 `717790c0…8a04e286`.
+2026-08-05-h43-baseline.dump` — 435MB/54.7s, sha256 `717790c0…8a04e286`.
   manifest 실측: head `0078` · features 731,599 · source_records 732,279 ·
   source_links 731,599 · weather_values 555 · **public_api_keys 1**(소실 재발
   방지 스코프 확인). `pg_restore -l` 690항목 판독. live dump라 3종 묶음 정합은
@@ -1325,7 +1374,7 @@ dagster entrypoint 기계 인터록(NEW-5) 동봉.
 
 - **MOIS bulk 수렴 완전**: source_entities 702,955 = linked 702,955 = distinct
   features 702,955 (3중 일치 실측). run 자체는 `Exceeded maximum runtime of
-  21600 seconds`(dagster 6h run 한도)로 FAILURE 마감이지만 데이터는 완주 —
+21600 seconds`(dagster 6h run 한도)로 FAILURE 마감이지만 데이터는 완주 —
   향후 동급 bulk는 run tag `dagster/max_runtime` 상향 또는 한도 재검토 필요.
   chain 로그의 licenses "비정상 종료"는 이 한도 마감의 표식.
 - **opinet 완료**: 용인·수원 bbox(126.92,37.05,127.45,37.38) 934건, job
@@ -1376,7 +1425,7 @@ dagster entrypoint 기계 인터록(NEW-5) 동봉.
 - **배포 결선 예고**: docker-manager#128 — 다음 Map 배포 시
   `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를 `0078…`→`0082_legacy_write_fence`
   로, PinVi sync enable 시 `…EXPECTED_OPENAPI_SHA256`/`…EXPECTED_SOURCE_
-  REVISION` 회전(Map 먼저 순서 제약 — 역순은 fail-close). 기존 #109/#111/#114
+REVISION` 회전(Map 먼저 순서 제약 — 역순은 fail-close). 기존 #109/#111/#114
   는 CLOSED 확인.
 - 병행: H42 MOIS licenses feature job 적재 중(총 467,697 증가 중), opinet
   chain은 MOIS 종료 marker 게이트 대기.
@@ -1447,7 +1496,7 @@ dagster entrypoint 기계 인터록(NEW-5) 동봉.
   **NFC 정규형 아니면 거부**(정규화하지 않음)·≤256자, uuid는 canonical
   lowercase hyphenated 36자만, kind는 닫힌 집합('legacy_feature_id').
   leaf = `sha256("KTMFAMLEAF\0"‖u32be(len alias)‖alias‖u32be(len kind)‖kind‖
-  uuid raw 16B)`, 정렬은 alias UTF-8 byte 오름차순(중복 거부), node =
+uuid raw 16B)`, 정렬은 alias UTF-8 byte 오름차순(중복 거부), node =
   `sha256("KTMFAMNODE\0"‖L‖R)` 홀수 승격, 빈 map = `sha256("KTMFAMEMPTY\0")`.
   파생 검증(`feature_uuid == uuid5(namespace, alias)`)은 checksum과 분리된
   별도 함수 — 둘 다 통과해야 "검증된 alias map". golden은 ASCII 2 + é/가나다
@@ -1464,13 +1513,13 @@ dagster entrypoint 기계 인터록(NEW-5) 동봉.
   fail-close): ① alias map 불변 — `feature_aliases` UPDATE 전면 거부 + 직접
   DELETE 거부(참조 feature가 이미 사라진 FK CASCADE 경유만 허용 — removal
   manifest "alias 유지" fence). ② identity 불변 — `features.feature_id/
-  feature_uuid` UPDATE 거부(재키잉은 soft-delete+신규 행). ③ legacy-only
+feature_uuid` UPDATE 거부(재키잉은 soft-delete+신규 행). ③ legacy-only
   write(uuid 없는 행 저장)는 기존 0079 fill 트리거+NOT NULL+0080 CHECK로
   **구조적으로 불가능**함을 유지 — 32B가 "32C 재평가"로 이월한 0079 트리거
   2종은 **유지** 결정(fill은 CHECK가 요구하는 유일값만 쓸 수 있어 우회로가
   아니라 강제 메커니즘, AFTER alias는 INV-068-01 원자 보장; 제거 시 무결성
-  이득 없이 raw seed 37파일만 파괴). **f_* 신규 발급 경로 fence는 의도적으로
-  32C 잔여로 순서 고정** — 발급 중단은 비파생(비저장) generator 채택과
+  이득 없이 raw seed 37파일만 파괴). _\*f_* 신규 발급 경로 fence는 의도적으로
+  32C 잔여로 순서 고정_* — 발급 중단은 비파생(비저장) generator 채택과
   불가분이고, 그 채택은 신규 행 응답에 UUID 값을 조기 누출시켜 rollout의
   "checksum 일치 후 응답 전환" 순서를 위반하며, provider upsert idempotency
   재결선(파생 resolve 또는 T-VN-33 자연키)이 필요하다. 부속: `COLLATE "C"`
@@ -1537,9 +1586,9 @@ dagster entrypoint 기계 인터록(NEW-5) 동봉.
   revision·weather·price·PATCH·DELETE·deactivate. 해석 뒤 내부 전달·조인은
   정본 키로만(ADR-068 결정 3 "alias lookup은 경계 전용"). 해석 성공이 행
   존재를 함의하므로 operator lineage의 별도 존재 확인(`_operator_feature_or_404`
-  + `get_feature_row` 쿼리 1회)은 제거 — 경로당 쿼리 수 동일하게 유지하면서
-  메커니즘은 하나로 수렴. auth 의존성보다 뒤(handler 본문)라 FastAPI 의존성
-  평가 순서에 의존하지 않는다.
+  - `get_feature_row` 쿼리 1회)은 제거 — 경로당 쿼리 수 동일하게 유지하면서
+    메커니즘은 하나로 수렴. auth 의존성보다 뒤(handler 본문)라 FastAPI 의존성
+    평가 순서에 의존하지 않는다.
 - **dual read (additive)**: alembic `0081_uuid_dual_read`가 `public_features`
   view의 SELECT * 컬럼 목록을 재고정해 `feature_uuid`를 노출(공개 술어 무변경 —
   3축 교체는 34B 소관, downgrade는 information_schema 기반 명시 컬럼 재생성으로
@@ -1666,8 +1715,8 @@ dagster entrypoint 기계 인터록(NEW-5) 동봉.
   자기완결), 불변식 44 assertion(H35 preflight 6종 패턴), catalog fingerprint
   (H35 7 카테고리), OpenAPI diff(surface×change, baseline sha256 핀), consumer
   rollout(write-fence·호환 폐기·PinVi 3 snapshot 재-vendor), 위반 fixture 9 case
-  + 기대 SQLSTATE/제약명, recovery preflight(writer registry·fence 증거·PITR
-  판정·Merkle v1).
+  - 기대 SQLSTATE/제약명, recovery preflight(writer registry·fence 증거·PITR
+    판정·Merkle v1).
 - **정직성 원칙**: ADR이 침묵하는 세부(UUID 생성기 버전, alias_kind 값 집합,
   subtype 공간 인덱스의 partial 표현, anchor 정밀 술어, capability shape,
   summary reconciliation 등)는 발명하지 않고 `-- 미정(T-VN-XX 구현 소관)` /
@@ -1712,6 +1761,7 @@ dagster entrypoint 기계 인터록(NEW-5) 동봉.
 - 프로브 교훈: geo-postgres 컨테이너 재시작 후 컨테이너 로컬 소켓이 앱 TCP 인스턴스와
   다른 것을 가리켜 "krtour_map 없음" 허위 경보 — **DB 프로브는 앱과 같은 TCP 경로로
   통일**한다. 컨테이너 내 이중 postgres 현상은 이상 신호로 기록.
+
 ## 2026-08-04 (codex) — 0079 추가에 따른 H35 synthetic regression 계약 정렬
 
 - PR #935의 GitHub PostGIS gate는 858 passed/5 skipped 뒤 H35 preflight가
@@ -1817,7 +1867,7 @@ dagster entrypoint 기계 인터록(NEW-5) 동봉.
   1회성이라 **배포 후에도 영구 0건**이다. 조사가 함께 경고한 "배포 직후 `[0065 격리]`
   collection이 admin UI에 설명 없이 등장" 문제도 collection 자체가 안 생겨 소멸한다.
 - **내 informational 쿼리에 3값 논리 버그가 있었다** — `NOT (metadata->>'migrated_from'
-  = '…' OR key LIKE 'legacy:%')`는 키가 없는 collection에서 `NULL OR false = NULL` →
+= '…' OR key LIKE 'legacy:%')`는 키가 없는 collection에서 `NULL OR false = NULL` →
   `NOT NULL = NULL`로 걸러져 "legacy 밖 486건"을 0으로 보고했다. 격리 건수는 `0065`와
   같은 **긍정형** 술어를 써서 영향 없었지만, 합이 3,044 ≠ 3,530으로 안 맞아 잡았다.
 - **전제를 배포 게이트에 박았다 — 단, 경계 앞에.** H35 **preflight**가
@@ -1912,7 +1962,7 @@ dagster entrypoint 기계 인터록(NEW-5) 동봉.
   바꿨다. NTFS 부하에서도 15초 보안 경계 timeout을 늘리지 않고 invalid argv가 결정적으로 종료되며,
   실패했던 단일 case 3회 반복이 모두 통과했다.
 - runbook/tasks의 후반 canonical 순서를 `csv5 → gc → Map API·Map Dagster web·Map Dagster daemon·
-  PinVi API·PinVi Dagster final fence → Map verify → PinVi final boundary`로 맞췄다.
+PinVi API·PinVi Dagster final fence → Map verify → PinVi final boundary`로 맞췄다.
 
 ## 2026-08-02 (codex) — H35 contract CI fixture 후속
 
@@ -2743,10 +2793,10 @@ BLOCKED, 전용 container/network/image와 loopback listener는 모두 0이고 c
 
 같은 트리, 마운트만 바꿔 실측했다:
 
-| | `/w` 마운트 | `/workspace` 마운트 |
-| --- | --- | --- |
-| pytest | 2543 passed | **3053 passed** |
-| mypy --strict | 173 files | **196 files** |
+|               | `/w` 마운트 | `/workspace` 마운트 |
+| ------------- | ----------- | ------------------- |
+| pytest        | 2543 passed | **3053 passed**     |
+| mypy --strict | 173 files   | **196 files**       |
 
 차이 510건은 실패가 아니라 **수집조차 되지 않았다** —
 `packages/kor-travel-map-dagster/tests/*`가 `from kortravelmap.dto import AdminEvidence`에서
@@ -2800,12 +2850,13 @@ curation CSV import에서 `feature_id`가 빈 행이 이름만 일치하는 후�
 
 **이번엔 반증 가능성을 먼저 설계했다.** 이 세션에서 두 번(공개 노출 0건, 탐지기 3→0) 무너진
 지점이라 측정을 만들 때 "실패했다면 다른 결과가 나오는가"를 먼저 물었다.
+
 - `blocked_autolinks`가 0이면 아무것도 안 막은 것이다.
 - `csv_specified`(222)는 리졸버가 아니라 **CSV 파일**에서 오므로, 링크를 통째로 껐다면
   이 숫자가 blocked와 **같이 움직이지 않는다**.
 - 후보 분포가 전부 0이면 조회가 죽은 것이다.
-테스트에도 음성 대조(후보 0건은 여전히 `unmatched`)와 양성 대조(CSV가 `feature_id`를 적은
-행은 그대로 링크)를 넣었다. 대조가 없으면 "전부 미연결"이 성공인지 고장인지 구별되지 않는다.
+  테스트에도 음성 대조(후보 0건은 여전히 `unmatched`)와 양성 대조(CSV가 `feature_id`를 적은
+  행은 그대로 링크)를 넣었다. 대조가 없으면 "전부 미연결"이 성공인지 고장인지 구별되지 않는다.
 
 **또 배포되지 않은 코드를 prod 동작으로 읽었다.** H33에서 나는 "prod가 0063이라 import
 자체가 실패하므로 당장 되살아나지 않는다"고 적었는데, 배포 이미지 `c8ed6164`의 import 코드에는
@@ -2897,11 +2948,11 @@ ledger는 provider 적재를 전제로 설계된 테이블이라, 다른 도메�
 본 것**이었다. 대상 feature의 실제 주소·행정코드를 확인하고 장소명을 정지오코딩해 대조하니
 3건이 오링크였다.
 
-| 장소 | 정지오코딩(권위) | DB feature | |
-| --- | --- | --- | --- |
-| 청남대 | 충북 청주 `43111` | 전남 영암 `46830` | 오링크 |
+| 장소      | 정지오코딩(권위)  | DB feature               |        |
+| --------- | ----------------- | ------------------------ | ------ |
+| 청남대    | 충북 청주 `43111` | 전남 영암 `46830`        | 오링크 |
 | 남이섬 ×2 | 강원 춘천 `51110` | 서울 중구 사무소 `11140` | 오링크 |
-| 청풍호 | 충북 제천 `43150` | 제천 `43150` | 일치 |
+| 청풍호    | 충북 제천 `43150` | 제천 `43150`             | 일치   |
 
 이름 일치로 붙은 전형적 오탐이다. 5건만 반영하고 3건은 미연결 유지
 (CSV linked 217→222 / unresolved 269→264, `manifest.json` 수치·sha256 갱신).
@@ -2947,6 +2998,7 @@ substring이라 `스카`·`스페이스` 같은 2~4글자 feature가 그걸 포�
 "수정이 통했다"처럼 보였다. 리뷰 지적을 반영한 직후의 수치 변화도 검증 대상이다.
 
 ## 2026-07-29 (claude) — Lane A a1: T-VN-H30A/B 검증 결과 durable 기록
+
 ## 2026-07-29 (codex) — T-VN-48D 최종 Mocked·clone Live 완료
 
 보존 clone의 파괴적 Live 본편·recovery-only는 이미 각각 2/2를 실행한 상태에서, 최종
@@ -3060,6 +3112,7 @@ client 메서드로 만들고 격리 clone에서 "finding 106건, 재실행에�
    `/admin/issues` 쓰기 차단·동시 run 직렬화·admin PATCH와 데드락.
 
 **재설계**. `sync_integrity_findings()`로 통합했다.
+
 - `unnest` 기반 단일 INSERT로 트리거 1회만 발화한다. batch 내 중복은 파이썬에서 제거한다.
 - `dedupe_key`를 source entity type+id 전체의 고정 길이 SHA256으로 만든다.
 - 자동 resolve sweep은 배치 경계에서 안전하지 않아 넣지 않았다(`T-VN-H32`).
@@ -3120,22 +3173,22 @@ public API key를 `X-KTG-API-Key` header로만 전달한다. `E0100 key` fallbac
 
 **1차 초안이 적대 리뷰 2건에서 기각됐다.** 근거 7개가 무효 판정을 받았고 그 지적이 옳았다.
 
-- *"dangling 0건 → 애초에 미연결"* — `curation_items.feature_id`가 **`ON DELETE SET NULL`**이라
+- _"dangling 0건 → 애초에 미연결"_ — `curation_items.feature_id`가 **`ON DELETE SET NULL`**이라
   dangling은 구조적으로 불가능하다. FK 정의의 재진술을 발견으로 제시했고, 그 결과 261개 NULL이
   *cascade로 지워진 링크*일 가능성을 배제하지 못했다. 이건 전제가 주장하는 바로 그 형태였다.
-- *"lifecycle/merge를 대조했다"* — `feature.feature_merges`/`feature.source_links`를 조회했는데
+- _"lifecycle/merge를 대조했다"_ — `feature.feature_merges`/`feature.source_links`를 조회했는데
   **둘 다 존재하지 않는 테이블**이다(실제는 `ops.feature_merge_history` /
   `provider_sync.source_links`). `except Exception`이 삼켰고, 게다가 **빈 배열**에 바인딩돼
   어떤 결과도 낼 수 없었다. 로그에는 "조회 불가" 세 줄만 남아 축을 덮은 것처럼 보였다.
-- *"자동 승인 가능 high 0건"* — high 조건이 `address_hint` 일치를 요구하는데 그 열은
+- _"자동 승인 가능 high 0건"_ — high 조건이 `address_hint` 일치를 요구하는데 그 열은
   **486행 전부 비어 있다**. 도달 불가 분기였고 0은 채점 함수의 성질이었다. 그런데 이 수치로
   H25B를 "대상 0건"이라 재정의하려 했다.
-- *"전제가 인용한 바로 그 clone에서도 0"* — clone 신원 미확인. 기록상 T-VN-47 clone은
+- _"전제가 인용한 바로 그 clone에서도 0"_ — clone 신원 미확인. 기록상 T-VN-47 clone은
   1,030,469이고 삭제됐다. 사용한 것(1,030,487)은 prod 재clone일 가능성이 크다.
-- *"구 CSV로도 158/158 → CSV 변경 배제"* — 두 리비전의 `feature_id` **집합이 동일**해 결과가
+- _"구 CSV로도 158/158 → CSV 변경 배제"_ — 두 리비전의 `feature_id` **집합이 동일**해 결과가
   보장된 공허한 대조였다.
-- *"269 vs 261"* — 전 collection 합계와 공식 CSV를 병치한 비교 불가 수치.
-- *"none 191건은 실제 부재"* — matcher가 괄호·`&` 복합명·포함 방향·`status='active'` 한정에서
+- _"269 vs 261"_ — 전 collection 합계와 공식 CSV를 병치한 비교 불가 수치.
+- _"none 191건은 실제 부재"_ — matcher가 괄호·`&` 복합명·포함 방향·`status='active'` 한정에서
   실패한다. 269건 중 최소 89건이 그 형태다.
 
 **실제 스키마로 다시 측정한 결과**(prod 단일 snapshot, `current_database()` 확인, 읽기 전용):
@@ -3174,6 +3227,7 @@ live concierge export 전량 페이징 → `kor_travel_concierge_items_to_bundle
 → `validate_feature_bundles_address`. 결과 1,477 후보 / error 380 / warning 701 — 현상 유효.
 
 error 380건 각각에 대해 세 축(payload 행정코드 · 좌표 독립 reverse · 현재 규칙 판정)을 대조:
+
 - **380건 전부 `false_positive_code_same`**. payload 시군구코드 == geo 시군구코드, 진짜 불일치
   **0건**. 후보 전체로 넓혀도 코드 불일치 0건(일치 1,424 / 코드 없음 53).
 - 380/380이 payload에 시군구·법정동 코드를 **모두** 보유. 권위 축이 있는데 규칙이 안 썼다.
@@ -3192,6 +3246,7 @@ error 380건 각각에 대해 세 축(payload 행정코드 · 좌표 독립 reve
 
 **H28B — 규칙 교체**. 13-에이전트 설계 워크플로(이해 5 → 설계 3 → 적대 심사 3 → 종합 → 비평)를
 돌렸고, 코드를 읽어야만 알 수 있는 세 가지가 나왔다.
+
 1. `_bjd_code_from_emd_code`가 region fallback 경로에서 읍면동 8자리 + `"00"`으로 법정동코드를
    **합성**한다 → 리(8:10)는 판정 근거가 못 된다. **8자리 캡**.
 2. MOIS는 payload에 bjd가 있으면 reverse를 아예 호출하지 않는다 → 두 축이 동시에 존재하지 않는
@@ -3201,6 +3256,7 @@ error 380건 각각에 대해 세 축(payload 행정코드 · 좌표 독립 reve
    죽인다**. substring 규칙보다 큰 손실 위험이었다.
 
 구현:
+
 - **`AdminEvidence`**(신규 DTO, `FeatureBundle`에 add-only): 판정 두 축을 `Address`로 병합하기
   **전에** 보존한다. 근본 원인은 병합이 두 축의 독립성을 지운 것이었다.
 - **규칙**: 코드 대 코드 접두 비교(8자리 캡, claim 정밀도만큼만). 두 축이 다 있을 때만 판정하고
@@ -3229,6 +3285,7 @@ ledger 테이블·오프라인 기하 감사·타 provider `AdminEvidence` 채�
 **검증**. n150 CI-parity — ruff / mypy --strict(core 117 · dagster 23) / dagster 494 passed +
 1 skipped / 관련 unit 179 passed. 신규 회귀 25건(오탐 재발 방지 · 단계별 탐지 · 정밀도 규칙 ·
 커버리지 집계 · allowlist 불변).
+
 ## 2026-07-29 (codex) — issue #881 Claude PR #882~#884 사후 감사 반영
 
 **결론**: PR #884의 문자열 sanitization만으로는 URL query와 frame-local secret의 생성
@@ -3278,6 +3335,7 @@ Playwright를 반복하지 않고 보존한 BLOCKED/final snapshot에서 복구�
 추가 drift가 있는가"였다. 실행 환경에 key 값이 없어 확인 자체가 불가능했다.
 
 **live 실증 (n150, 값 비출력)**. geo 컨테이너의 `KTG_VWORLD_API_KEY`를 그대로 써서 확인했다.
+
 - 배포된 Map api 컨테이너의 `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY`는 geo 컨테이너 값과 **동일**.
   즉 원래 blocker는 배포 결선 결함이 아니라 **ad-hoc/CLI 실행 환경에 값이 없던 것**이었다.
 - reverse(status=OK, cand=11, address·region 존재) / geocode(status=OK, conf=1.000, point 파싱)가
@@ -3290,12 +3348,13 @@ Playwright를 반복하지 않고 보존한 BLOCKED/final snapshot에서 복구�
 **최초 구현과 그 기각**. 호출 지점에 `preflight()`를 붙였는데, 리뷰 전 자체 점검에서 live 생성
 지점이 7곳(CLI 1 + API 4 + Dagster 2)임이 드러나 6곳을 추가하고 AST 스캐너로 회귀를 고정했다.
 적대 리뷰 2명이 **둘 다** 이 접근 자체를 기각했고 근거가 결정적이었다.
+
 - 스캐너의 `_preflighted_names`가 모듈 전역이라, `admin_issues.py`처럼 같은 이름(`client`)의
   생성이 둘 있으면 **한쪽 guard를 지워도 통과**함이 실제 mutation으로 시연됐다.
 - acceptance가 지목한 live 경로(`test_dedup_with_kraddr_geo_live.py`)는 "테스트는 mock이라
   키가 필요 없다"는 **사실과 다른** 전제로 스캔에서 제외돼 있었다.
-→ `require_api_key` 기본 `True`로 **생성 시점** 검증에 옮겼다. 7곳의 수동 guard와 스캐너를 모두
-지우고, 4경로가 별도 조치 없이 같은 규칙을 공유한다(mock transport 테스트만 명시적 opt-out).
+  → `require_api_key` 기본 `True`로 **생성 시점** 검증에 옮겼다. 7곳의 수동 guard와 스캐너를 모두
+  지우고, 4경로가 별도 조치 없이 같은 규칙을 공유한다(mock transport 테스트만 명시적 opt-out).
 
 **진단성을 고치려다 악화시킨 부분**. 결선 누락을 `ValueError`로 던지니 기존 `except ValueError`
 사다리에 걸려 `/admin/issues` 422, offline-upload 409, feature-update 422, 그리고 admin 경로는
@@ -3567,7 +3626,7 @@ dependency나 출력 필터 없이 `npm ls --all --json`의 `problems`가 0개�
 
 - **schema 호환성**: clone `ktm-tvn45-db`를 rollback 없이
   `0063_pipeline_root_id→0064_price_series_identity→0065_curation_source_presence→
-  0066_curation_component_identity`로 올렸다. main Alembic head와 일치하고 DB health가 정상이다.
+0066_curation_component_identity`로 올렸다. main Alembic head와 일치하고 DB health가 정상이다.
 - **오염·용량**: Feature 1,030,469건, 합성 Feature 22/22 deleted, incomplete tombstone 0,
   change request 80건/pending 0, POI cache target 90건이다. DB 17GB, 가용 85GB이며
   T-VN-46은 frontend dependency/gate 작업이라 기존 tombstone은 Live를 오염시키지 않는다.
@@ -3798,17 +3857,18 @@ docker-compose `$` interpolation 버그로 admin UI를 일시 잠갔다가 즉�
 ## 2026-07-27 (claude) — Lane B b4 하드닝 3건 완결 (H13·H14·H15) + H20 진행
 
 **결론**: 사용자 지시로 Lane A가 Lane B b4를 순차 대행. **H13·H14·H15**를 각 적대 리뷰어 2명(blocker 0)
-+ 회귀 테스트 + CI green 후 머지. **H20**(prod admin credential 회전)은 credential-safe 생성 완료, prod
-ktdctl 회전·검증은 사용자 실행 중.
 
-- **H13**(#699→#862): curation `_BULK_UPSERT_ITEMS_SQL` ON CONFLICT가 status/curation_relation/
+- 회귀 테스트 + CI green 후 머지. **H20**(prod admin credential 회전)은 credential-safe 생성 완료, prod
+  ktdctl 회전·검증은 사용자 실행 중.
+
+* **H13**(#699→#862): curation `_BULK_UPSERT_ITEMS_SQL` ON CONFLICT가 status/curation_relation/
   reuse_policy를 EXCLUDED default로 무조건 덮어써 운영자 편집 리셋 → 3필드를 SET/WHERE/preview 비교에서
   제거해 보존, provider 파생 필드만 갱신.
-- **H14**(#700→#863): KREX traffic notice 연속 snapshot 완전일치 즉시-실패 → sliding bounded-retry
+* **H14**(#700→#863): KREX traffic notice 연속 snapshot 완전일치 즉시-실패 → sliding bounded-retry
   (상한 4, inter-retry delay) + typed `KrexTrafficNoticeSnapshotUnstable`. 휘발 feed self-heal.
-- **H15**(#805→#864): `_public_origin` IPv6 host를 `[address.compressed]` bracket+canonical, `"%"`
+* **H15**(#805→#864): `_public_origin` IPv6 host를 `[address.compressed]` bracket+canonical, `"%"`
   zone-id 거부. `run-c7-prod-live-e2e.sh` 병렬 canonicalizer도 미러링해 divergence 방지.
-- **H20**(진행): pbkdf2_sha256(310k iter, 256bit) hash를 auth.ts와 동일 파생으로 생성하는 credential-safe
+* **H20**(진행): pbkdf2_sha256(310k iter, 256bit) hash를 auth.ts와 동일 파생으로 생성하는 credential-safe
   스크립트로 새 password 발급 — 평문→gitignored `docs/prod-access.local.md`, hash→repo 밖 scratch,
   stdout엔 경로·길이만(값 비노출). prod UI env ktdctl 회전 + login 검증은 사용자 실행.
 
@@ -3853,6 +3913,7 @@ status marker(H12 핵심)는 live 통과했고, shared base jitter가 weather/pr
 identity를 전 계층에서 닫았다. PR 승인·CI·main 머지 전이라 T-VN-44는 열린 상태다.
 
 **변경**:
+
 - React 19 hook/key 근인을 suppression 없이 해소하고 TanStack 두 함수만 compiler opt-out으로 허용했다.
   verifier는 `.mts`·`.cts`를 포함한 실제 lint 파일 집합과 module/function의
   `use no memo|use no forget`을 전수 대조한다.
@@ -3867,6 +3928,7 @@ identity를 전 계층에서 닫았다. PR 승인·CI·main 머지 전이라 T-V
   같은 branch 정정으로 제거했다.
 
 **검증**:
+
 - Python 2,362 tests(geo live 5건 포함)와 정적 gate, frontend lint/type/Vitest/build, schedule·H06 targeted E2E를
   통과했다. 적대 리뷰가 찾은 stale settle race는 B scan 완료 뒤 해제하는 controlled mutation과 독립 reconnect refetch로 재현한 Chromium 회귀도 통과했다.
 - R1 격리 실데이터 clone에서 0064 migration, 실제 가격 관측 파괴 변경, 공식 Live acceptance 2/2와
@@ -3906,6 +3968,7 @@ close 아님)이라 rubber-stamp 아님을 확인.
 map recenter로 해소. 구현 + e2e type-check + 4각도 적대 정적검증 통과. 잔여는 live-lane 실증.
 
 **수정**(`admin-feature-acceptance-write.live.spec.ts`, +57/-5):
+
 - `LON/LAT`를 상수→`sha256("acceptance-coord:"+RUN_ID)` 기반 ±0.25° jitter(`coordJitter`, SEARCH_TOKEN과
   동일 결정론 패턴). 진폭은 한국 본토 bbox [124,132]×[33,39.5](ADR-012) 중심부 유지로 create 검증·viewport
   마진 확보, cross-run 충돌 확률 ≲1e-4.
@@ -3916,6 +3979,7 @@ map recenter로 해소. 구현 + e2e type-check + 4각도 적대 정적검증 �
   T-VN-H12 후속 추적 주석(assertStatusMarker) 갱신.
 
 **검증**:
+
 - e2e type-check(`tsc -p e2e/tsconfig.json`) exit 0.
 - 적대 정적검증 워크플로우(4각도) 전부 blocker 없음: ①collision-efficacy(clusterMaxZoom=14이나 z14는
   개별 렌더 FEATURE_CLUSTER_MAX_ZOOM=13, status 단일선택이라 self-cluster 불가) ②recenter-mechanics
@@ -3933,6 +3997,7 @@ PASS했다. PinVi #392는 종결했지만 public-key C2 양성 runtime은 미검
 전체 완료를 보류한다.
 
 **접근**(설계 §5: 승인 전 정적 검사 → 승인 후 live):
+
 - **정적 감사 워크플로우**(`tvn03-c6c-readiness-audit`, 6차원 병렬 + 독립 적대 반증): route_policy
   exception 0건(`KNOWN_WIRING_EXCEPTIONS=()`), curated 4→PUBLIC_KEYED / ops 6→OPERATOR / MOIS→
   operator wiring, OpenAPI full/user 계약 일치. 5/6 PASS(반증 생존), pinvi-manifest만 UNCERTAIN
@@ -3941,6 +4006,7 @@ PASS했다. PinVi #392는 종결했지만 public-key C2 양성 runtime은 미검
   status + ops error code만 증거로 기록(§5-5). map=host-network라 trusted_cidr=127.0.0.1/32.
 
 **결과**:
+
 - curated: C1 keyless→401 · C3 service→200 · C4 admin-bff→200 · C4n secret-no-actor→401.
 - ops 6(대표 metrics/health-deep): O1 401 · O2 401 · O3 403(SCOPE) · O4 200 · O5 200 · O6 403(INVALID).
 - MOIS: M1 production unmount→404.
@@ -3948,6 +4014,7 @@ PASS했다. PinVi #392는 종결했지만 public-key C2 양성 runtime은 미검
   도달, 토큰 없으면 거부 — require_ops_operator는 peer-trust 무검사라 ops:read 필수).
 
 **규명**:
+
 - **env alias 함정**: `admin_proxy_secret` validation_alias=`KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET`(prefix
   `_API_` 없음). 첫 probe가 `_API_` 붙여 조회해 false UNSET → 정정 후 admin-BFF C4/O4 200 확인.
 - **C2(public-key 200)**: env `vworld_api_key` fallback은 운영에서 미설정이 정상(public key는
@@ -3965,6 +4032,7 @@ PASS했다. PinVi #392는 종결했지만 public-key C2 양성 runtime은 미검
 spec drift였음.
 
 **근인 3종**:
+
 - **decision PATCH `reviewed_by` 과다 기대**(6곳): client PATCH body는 `{decision, decision_reason}`
   만 전송하고 `reviewed_by`는 서버가 인증 principal(T-VN-03 경계)에서 파생 → 테스트가 client 미전송
   `reviewed_by: "local-admin"`을 기대해 toMatchObject 실패. 기대 제거.
@@ -3987,6 +4055,7 @@ BLOCKED/ACTIVE 없음, 사후 active leftover 0). marker×3(inactive/draft/hidde
 통과. issue #741·#785 close.
 
 **규명·수정 연쇄**(공식 runner가 redacted라 비-redact c7-v6 harness로 각 실패 재현):
+
 - helper 컨테이너가 host-network API runtime에 `docker network connect`(none+connect 죽은 경로) →
   host-network 직접 create(#842).
 - `/features` 지도에 navigation control 없어 zoom 클릭 불가 + items zoom param 미전송 + zoomMapTo
@@ -4175,6 +4244,7 @@ blocking gate에서 descope**. test/deploy 측 근인은 모두 규명·수정�
 admin schedule 목록의 **~90s render churn(app-side)** 하나뿐. 사용자 결정(descope+머지).
 
 **규명·수정한 근인 6개**(verbose-iterate + n150 prod 재현 ×22):
+
 1. **canReset 모델 오예측** — `waitForSchedule` 확정이 dagster canReset을 test 모델(`status !== defaultStatus`)로
    기대했으나, dagster는 명시적 start/stop마다 override를 만들어 status==defaultStatus여도 canReset=true.
    → 모델을 `command === "reset" ? false : true`로, `waitForSchedule` 비교에서 canReset 제외(파생 override 플래그,

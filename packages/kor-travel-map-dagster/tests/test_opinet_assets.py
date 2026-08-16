@@ -159,7 +159,16 @@ class _Client:
         finally:
             self.events.append(f"unlock:{key}")
 
-    async def load_feature_bundles(self, bundles: Any) -> FeatureLoadResult:
+    async def load_feature_bundles(
+        self,
+        bundles: Any,
+        *,
+        curation_dataset: tuple[str, str] | None = None,
+    ) -> FeatureLoadResult:
+        assert curation_dataset in {
+            None,
+            (OPINET_PROVIDER_NAME, OPINET_STATION_DATASET_KEY),
+        }
         materialized = list(bundles)
         self.events.append("load")
         return FeatureLoadResult(bundles_total=len(materialized))

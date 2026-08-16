@@ -56,6 +56,7 @@ function makeQuarantineCollection(
   return {
     collection_id: QUARANTINE_ID,
     collection_key: "quarantine-lighthouse-2026",
+    command_etag: '"1"',
     created_by: "migration:0065",
     edition_key: "2026",
     item_count: 2,
@@ -96,6 +97,7 @@ function makeQuarantineCollection(
       visibility: "admin_only",
     },
     status: "draft",
+    row_revision: "1",
     title: "격리: 등대 스탬프투어",
     visibility: "admin_only",
     ...overrides,
@@ -139,6 +141,8 @@ function itemsData(
     items,
     target_archived: false,
     target_collection_id: targetCollectionId,
+    target_collection_revision: targetCollectionId === null ? null : "1",
+    target_command_etag: targetCollectionId === null ? null : '"1"',
     target_missing: false,
   };
 }
@@ -150,6 +154,7 @@ function makeAdminCollection(
     archived_at: null,
     collection_id: ORIGINAL_ID,
     collection_key: "lighthouse-stamp-tour",
+    command_etag: '"1"',
     created_at: MOCK_NOW,
     created_by: "admin",
     dataset_key: "lighthouse_places",
@@ -160,6 +165,7 @@ function makeAdminCollection(
     provider: "python-khoa-api",
     provider_dataset_id: 601,
     public_item_count: 3,
+    row_revision: "1",
     source_id: "77777777-7777-4777-8777-777777777777",
     source_name: "국립해양조사원",
     source_url: null,
@@ -197,6 +203,18 @@ function moveConflictProblem() {
   };
 }
 
+function staleRevisionProblem() {
+  return {
+    type: "https://kor-travel-map/errors/precondition-failed",
+    title: "큐레이션 revision이 변경되었습니다.",
+    status: 412,
+    detail: "최신 격리 목록과 대상 collection을 다시 확인하세요.",
+    code: "CURATION_REVISION_MISMATCH",
+    request_id: "e2e-quarantine-412",
+    errors: [],
+  };
+}
+
 interface QuarantineMockOptions {
   quarantineCollections?: QuarantineCollectionView[];
   adminCollections?: AdminCollectionView[];
@@ -207,12 +225,14 @@ interface QuarantineMockOptions {
 }
 
 interface QuarantineMockState {
+  adminListRequests: number;
   itemsRequests: Array<{ collectionId: string; targetCollectionId: string | null }>;
   quarantineListRequests: number;
   reclassifyRequests: Array<{
     body: QuarantineReclassifyRequest;
     collectionId: string;
     idempotencyKey: string;
+    ifMatch: string;
   }>;
 }
 
@@ -221,6 +241,7 @@ async function mockQuarantineRoutes(
   options: QuarantineMockOptions = {},
 ): Promise<QuarantineMockState> {
   const state: QuarantineMockState = {
+    adminListRequests: 0,
     itemsRequests: [],
     quarantineListRequests: 0,
     reclassifyRequests: [],
@@ -240,6 +261,7 @@ async function mockQuarantineRoutes(
     const apiPath = bffApiPath(request.url());
 
     if (request.method() === "GET" && apiPath === "/v1/admin/curations") {
+      state.adminListRequests += 1;
       await fulfillJson(route, {
         data: { items: adminCollections },
         meta: pagedMeta("e2e-collections"),
@@ -283,6 +305,7 @@ async function mockQuarantineRoutes(
         body,
         collectionId: decodeURIComponent(reclassifyMatch[1]),
         idempotencyKey: request.headers()["idempotency-key"] ?? "",
+        ifMatch: request.headers()["if-match"] ?? "",
       });
       const outcome = options.reclassify?.(body) ?? {
         body: {
@@ -431,8 +454,10 @@ test.describe("큐레이션 quarantine 재분류 패널", () => {
       action: "move",
       item_ids: null,
       target_collection_id: ORIGINAL_ID,
+      target_collection_revision: "1",
     });
     expect(observed.idempotencyKey).toMatch(UUID_PATTERN);
+    expect(observed.ifMatch).toBe('"1"');
 
     await expect(
       page
@@ -464,6 +489,45 @@ test.describe("큐레이션 quarantine 재분류 패널", () => {
       conflicts.getByText(/구성요소 identity 충돌/),
     ).toBeVisible();
     await expect(page.getByText("재분류 실패")).toBeVisible();
+  });
+
+  test("move 412는 자동 재시도 없이 세 읽기 표면을 다시 불러온다", async ({
+    page,
+  }) => {
+    const state = await mockQuarantineRoutes(page, {
+      adminCollections: [makeAdminCollection()],
+      quarantineCollections: [makeQuarantineCollection()],
+      reclassify: () => ({ body: staleRevisionProblem(), status: 412 }),
+    });
+    await page.goto("/admin/features/curated");
+    await expect(page.getByTestId("quarantine-items-table")).toBeVisible();
+    const listRequestsBefore = state.quarantineListRequests;
+    const itemsRequestsBefore = state.itemsRequests.length;
+    const adminRequestsBefore = state.adminListRequests;
+
+    await quarantinePanel(page)
+      .getByRole("button", { name: "이동", exact: true })
+      .click();
+    await page
+      .getByRole("alertdialog")
+      .getByRole("button", { name: "이동", exact: true })
+      .click();
+
+    await expect(
+      page.getByText(
+        "다른 변경이 먼저 반영되어 격리 목록·대상·충돌 미리보기를 다시 불러왔습니다. 내용을 확인한 뒤 다시 실행하세요.",
+      ),
+    ).toBeVisible();
+    await expect.poll(() => state.quarantineListRequests).toBeGreaterThan(
+      listRequestsBefore,
+    );
+    await expect.poll(() => state.itemsRequests.length).toBeGreaterThan(
+      itemsRequestsBefore,
+    );
+    await expect.poll(() => state.adminListRequests).toBeGreaterThan(
+      adminRequestsBefore,
+    );
+    expect(state.reclassifyRequests).toHaveLength(1);
   });
 
   test("confirm_standalone 흐름 — key/제목 입력과 확정 요청을 단언한다", async ({
@@ -509,6 +573,7 @@ test.describe("큐레이션 quarantine 재분류 패널", () => {
       title: "2024 구 등대 스탬프투어",
     });
     expect(observed.idempotencyKey).toMatch(UUID_PATTERN);
+    expect(observed.ifMatch).toBe('"1"');
 
     await expect(
       page

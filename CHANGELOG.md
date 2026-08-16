@@ -5,6 +5,94 @@
 
 ## [Unreleased]
 
+### PinVi legacy curation cutover mapping export (2026-08-14, T-VN-40C)
+
+- **API(service)**: maintenance fence에서만 쓰는
+  `GET /v1/service/curation-cutover/identity-mappings`를 추가했다. legacy
+  `curated_feature_id`와 canonical collection/item UUID의 mapping을 signed keyset과
+  immutable row hash, 전체 Merkle root/count로 내보내 PinVi backfill이 Map DB에 직접 접근하지
+  않게 한다.
+- **SECURITY**: mapping export는 snapshot token과 다른 전용 ServiceToken digest를 요구하며,
+  runtime database role에는 mapping relation의 SELECT만 허용한다.
+
+### canonical curation snapshot 문자열 계약 (2026-08-14, T-VN-40)
+
+- **DATABASE/API(service)**: Map producer가 `theme_slug 128`, `theme_name 200`, collection
+  `title 300`, `edition_key 100`을 넘는 canonical snapshot을 저장·반환하지 못하게 DB CHECK와
+  OpenAPI를 동일하게 고정했다. 기존 초과 행은 `0221_tvn40_snapshot_text_bounds` 적용 전에
+  fail-close하며 값 자르기나 암묵 변환은 하지 않는다.
+
+### Alembic 0200 squash baseline 연동 (2026-08-14)
+
+- **DATABASE**: PR #978의 `0200_schema_baseline`과 revision id를 보존한
+  `0104_tvn36_final_fence` squash bridge 뒤에 T-VN-40 migration을 `0202~0221` 단일 체인으로
+  재배치했다. 과거 `0001~0104` Python module은 읽기 전용 `legacy_versions` 증거이며 active
+  migration이나 integration test에서 실행하지 않는다.
+- **DEPLOY**: live runner가 고정 revision 대신 paired Map archive의 application graph에서 유일한
+  head를 읽는다. 기존 `0104` DB는 stamp·baseline 재실행 없이 bridge에 그대로 연결되어
+  `0202→0221`만 in-place 적용한다. fresh DB는
+  `0200→0104 bridge→0202…0221` 전체 체인을 적용한다.
+- **SECURITY**: PostgreSQL bootstrap이 feature/curation owner·executor 역할 속성과 membership
+  option graph를 exact 재확정·검증한다.
+
+### provider/consumer credential 경계 (2026-08-14)
+
+- **SECURITY**: VWorld provider key를 Map 공개 API key 또는 kor-travel-geo consumer key로
+  대입하던 API·compose·build·frontend BFF fallback을 제거했다. Map 공개 API는 DB에 등록한
+  전용 active key만 받고, geo BFF는 별도 geo-issued key가 없으면 upstream 요청 전 503으로
+  fail-close한다.
+- **DATABASE TEST**: ORM에서 제외한 T-VN-40 raw-SQL receipt/effect 12개 관계의 constraint
+  정의·검증/deferrable 상태와 전체 index 정의를 exact catalog digest로 고정했다. 같은 이름의
+  `CHECK (true)` 변조가 Alembic gate를 통과하지 못한다.
+
+### immutable curation import plan (2026-08-14, T-VN-40)
+
+- **API(admin)**: CSV import를 immutable preview(201+ETag)와 stored-plan commit으로 분리했다. commit은
+  `If-Match`와 `Idempotency-Key`를 요구하고 동일 terminal receipt·ETag를 재생한다. preview도 multipart
+  byte fingerprint를 먼저 claim하고 SERIALIZABLE 충돌 시 전체 command를 재시도한다.
+- **UI(admin)**: preview 결과를 확인한 뒤 같은 plan을 명시적으로 commit한다. quarantine stale 412는
+  자동 mutation 재시도 없이 관련 목록·항목·대상을 다시 읽고 운영자의 재실행을 요구한다. 공식 등대
+  import는 CSV와 exact provenance JSON sidecar를 함께 업로드하며 plan 412는 재미리보기를 요구한다.
+- **DATABASE**: apply row set을 immutable plan과 exact 비교하고 같은 command의 batch/content receipt만
+  terminal commit에 결박한다. provenance pointer만 바뀐 item도 item·collection revision을 갱신한다.
+- **DATABASE**: PR #977의 `0104_tvn36_final_fence` 뒤 T-VN-40 chain을 재배치하고
+  `0218_tvn40_metadata_check`에서 owner shape 제약 검증과 ORM/Alembic metadata 동등성을 닫았다.
+- **REMOVED**: preview/commit에서 같은 CSV를 다시 업로드·해석하던 legacy `dry_run` import route를 제거했다.
+
+### retained curation source CAS API (2026-08-13, T-VN-40)
+
+- **API(admin)**: retained source에 단건 GET·conditional 304와 archive DELETE를 추가했다. operator
+  create/patch/archive는 raw catalog revision ETag와 If-Match 428/412를 사용하고 provider observation은
+  별도 representation ETag에 반영된다.
+- **DATABASE**: source operator revision과 provider observation revision을 분리했다. exact done import-job
+  membership만 Dagster observation command로 수용하고 archive는 dependent rule candidate를 같은
+  SERIALIZABLE transaction에서 reconcile한다. catalog command effect는 append-only claim으로 한 command의
+  다중 resource 재사용을 거부한다.
+- **REMOVED**: caller가 임의 시점에 legacy overlay를 갱신하던 admin rule apply API와
+  `curated_features_refresh` Dagster 일일 asset/job/schedule을 제거했다. 후보 generation은
+  authoritative provider terminal receipt 또는 typed catalog command만 시작한다.
+- **SECURITY**: provider observation은 authoritative full-snapshot child job을 한 번만 소비하는
+  append-only receipt를 사용한다. 동일 job replay는 timestamp/revision을 갱신하지 않으며 catalog
+  command effect와 terminal result는 같은 command row lock으로 직렬화한다.
+
+### retained curation theme CAS API (2026-08-13, T-VN-40)
+
+- **API(admin)**: retained theme에 단건 GET과 archive DELETE를 추가하고 create/patch/archive
+  응답을 strong `ETag`와 `If-Match` 428/412 경계로 통일했다. create와 terminal replay는 201이다.
+- **DATABASE**: theme archive는 affected rule candidate reconcile을 같은 SERIALIZABLE transaction에서
+  완료한다. operator catalog revision은 candidate semantic proof와 분리되어 display metadata 변경만으로
+  기존 후보가 stale 처리되지 않는다.
+
+### retained curation rule CAS API (2026-08-13, T-VN-40)
+
+- **API(admin)**: retained source rule에 단건 GET과 archive DELETE를 추가하고 create/patch/archive
+  응답에 server-owned revision strong `ETag`를 고정했다. patch/archive는 `If-Match`가 없으면
+  428, stale이면 412이며 domain-command replay가 원 성공 `ETag`를 그대로 반환한다. BIGINT
+  revision은 TypeScript 정밀도 손실을 막기 위해 응답에서 decimal string으로 직렬화한다.
+- **DATABASE**: rule create/patch/archive는 실제 API LOGIN 전용 named SECURITY DEFINER command로
+  실행되며 catalog CAS, immutable reconcile receipt, candidate generation을 SERIALIZABLE 단일
+  transaction으로 결박한다. typed API의 rule action은 `candidate|ignore`만 허용한다.
+
 ### PinVi alias-map 이관 표면·legacy write fence (2026-08-04, T-VN-32C 전반부)
 
 - **API(service)**: `GET /v1/service/feature-alias-maps`(canonical keyset
@@ -3417,11 +3505,11 @@
   인프라 미리 박음.
   - `alembic.ini` + `alembic/env.py` (async-compatible, asyncpg + NullPool +
     SET search_path = public, x_extension) + `alembic/script.py.mako`.
-  - `alembic/versions/0001_initial_schemas_and_extensions.py` — 4 schema
+  - `alembic/legacy_versions/0001_initial_schemas_and_extensions.py` — 4 schema
     (feature/provider_sync/ops/x_extension) + 3 extension (postgis/pg_trgm/
     pgcrypto) on `x_extension` (ADR-008). postgis는 image 기본 public 설치
     DROP CASCADE 후 재생성.
-  - `alembic/versions/0002_features_and_source_tables.py` — features (ADR-012
+  - `alembic/legacy_versions/0002_features_and_source_tables.py` — features (ADR-012
     `coord_5179` STORED generated column + 10 indexes incl. GiST/GIN partial)
     + source_records (UNIQUE 5-tuple + 4 indexes incl. BRIN) + source_links
     (FK CASCADE/RESTRICT + 3 indexes) + provider_sync_state.

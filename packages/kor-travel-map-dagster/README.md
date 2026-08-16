@@ -140,22 +140,12 @@ credential이 없거나 아직 guard로 남은 resource는 운영 실행 전에
 | `feature_geometry_knps_records_monthly_schedule` | `feature_geometry_knps_records_job` | `15 4 3 * *` |
 | `feature_place_kor_travel_concierge_youtube_monthly_schedule` | `feature_place_kor_travel_concierge_youtube_job` | `40 3 3 * *` |
 
-## Curated features
+## Curation candidate 갱신
 
-- Asset group: `curated_features`
-- Asset: `curated_source_metadata`
-- Asset: `curated_feature_candidates`
-- Asset: `curated_feature_status_sweep`
-- Asset: `curated_pinvi_copy_snapshots`
-- Job: `curated_features_refresh`
-- Schedule: `curated_features_refresh_daily_schedule` (`55 4 * * *`, KST, 기본
-  `STOPPED`)
-
-이 group은 `feature.curated_sources`의 row count/last checked metadata를
-`provider_sync.source_records` 기준으로 갱신하고, enabled source rule을 적용한 뒤,
-inactive/deleted feature를 가리키는 curated row를 archive한다. 마지막 asset은
-`feature.curated_pinvi_copy_snapshots`에 REST `/pinvi-copy`와 같은 payload를
-materialize/cache한다.
+T-VN-40부터 독립 `curated_features_refresh` asset/job/schedule은 없다. provider full-snapshot의
+authoritative terminal receipt가 같은 transaction에서 source observation과 candidate generation을
+시작하며, catalog semantic command는 affected rule reconcile을 직접 수행한다. 임의 시점의 daily
+rule apply/sweep/cache는 지원하지 않는다.
 
 ## Feature update queue
 

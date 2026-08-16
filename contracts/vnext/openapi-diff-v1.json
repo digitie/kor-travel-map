@@ -5,18 +5,53 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "e48b7c0ed839735b5c2936addcbac5498b113a0038ab7b53d8a186e86249ba66"
+      "sha256": "a687eaacc9472e357a4f9676c75662a9b53ec387972312b4e236c0e83e8e0ddb"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
-      "sha256": "eca7eea1dff7aa1848e50428fb8da5507e4d636c3a979b04859ef43c7f7410e7"
+      "sha256": "6a2ee0f94ffded691f5d169ef1914144eecdf1f4170226c8bc5e963e972403c1"
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
-      "sha256": "ebe7f2afaf70727e850b21cd8163a2dbff374dc942ad0e158d574f91c1863de5"
+      "sha256": "c6f9aba6ab4b815c394e5e1cb5fb4a2c3488d147d5bb1a7e21b92c1796f4aebd"
     }
   },
   "revisions": [
+    {
+      "date": "2026-08-14",
+      "task": "T-VN-40C",
+      "change": "maintenance fence 전용 legacy identity→canonical UUID mapping export를 service OpenAPI에 적용하고 baseline을 재동결했다. 전용 PinVi scope의 signed keyset은 row hash와 closed Merkle root/count를 결박한다. user bytes와 기존 snapshot operation은 변하지 않으며, service router를 포함하는 full admin OpenAPI bytes는 함께 갱신한다."
+    },
+    {
+      "date": "2026-08-14",
+      "task": "T-VN-40B",
+      "change": "Map→PinVi canonical curation snapshot의 문자열 경계를 기존 관리자 write 계약과 같은 theme_slug 128, theme_name 200, title 300, edition_key 100으로 고정하고 admin/service OpenAPI bytes를 재동결했다. user spec과 operation 집합은 변하지 않는다."
+    },
+    {
+      "date": "2026-08-14",
+      "task": "T-VN-40B",
+      "change": "import preview의 Idempotency-Key 설명을 반영한 현재 admin OpenAPI bytes를 재고정했다. user/service bytes와 operation 집합은 변하지 않는다."
+    },
+    {
+      "date": "2026-08-14",
+      "task": "T-VN-40B",
+      "change": "legacy dry_run 재업로드를 immutable import plan preview/commit으로 대체하고 quarantine 성공·재생 ETag를 고정했다. 두 신규 operation은 적용 완료로 전환했으며 user/service bytes는 변하지 않는다."
+    },
+    {
+      "date": "2026-08-14",
+      "task": "T-VN-40B",
+      "change": "canonical item command와 quarantine reclassify의 strong If-Match·revision 계약, import command의 SERIALIZABLE 실행 정책을 admin spec에 반영하고 baseline을 재고정했다. user/service bytes와 목표 diff counts는 변하지 않는다."
+    },
+    {
+      "date": "2026-08-13",
+      "task": "T-VN-40B",
+      "change": "retained source catalog의 단건 representation ETag/304, operator CAS PATCH·archive, 201 create를 적용하고 source/rule/theme UUID·enum 및 optional-non-null PATCH schema를 재고정했다."
+    },
+    {
+      "date": "2026-08-13",
+      "task": "T-VN-40B",
+      "change": "retained theme catalog에 단건 GET, strong ETag 기반 PATCH/DELETE archive, 201 create를 추가하고 admin baseline을 재고정했다. user spec은 제거 예정 legacy public theme schema의 default_curated 삭제/retained revision projection을 반영했고 service bytes는 변하지 않는다."
+    },
     {
       "date": "2026-08-12",
       "task": "T-VN-34",
@@ -87,12 +122,13 @@
     "user": {
       "counts": {
         "added": 4,
-        "removed": 13,
+        "removed": 15,
         "renamed": 2,
         "enum_changes": 8,
         "status_changes": 1,
         "error_changes": 0,
-        "deferred": 3
+        "schema_changes": 0,
+        "deferred": 2
       },
       "added": [
         {
@@ -129,6 +165,16 @@
         {
           "operation": "GET /v1/curated-features/{curated_feature_id}",
           "detail": "legacy curated_features overlay 공개 read",
+          "basis": "T-VN-40C"
+        },
+        {
+          "operation": "GET /v1/curated-themes",
+          "detail": "legacy source-rule candidate catalog 공개 read. retained catalog는 admin typed surface만 사용한다.",
+          "basis": "T-VN-40C"
+        },
+        {
+          "operation": "GET /v1/curated-sources",
+          "detail": "legacy source-rule candidate catalog 공개 read. canonical 공개 표면은 collections/items다.",
           "basis": "T-VN-40C"
         },
         {
@@ -251,13 +297,8 @@
         }
       ],
       "error_changes": [],
+      "schema_changes": [],
       "deferred": [
-        {
-          "topic": "GET /v1/curated-sources·GET /v1/curated-themes·GET /v1/curations·GET /v1/curations/features/{feature_id}",
-          "decision": "deferred-to-implementation",
-          "detail": "canonical curation 위 공개 read의 collections 표면 통합 형태는 legacy route 폐기 범위(F-16)와 별개로 미명시",
-          "owner": "T-VN-40B"
-        },
         {
           "topic": "kind-discriminated typed detail의 subtype 분해 반영(응답 필드 재배치)",
           "decision": "deferred-to-implementation",
@@ -274,15 +315,38 @@
     },
     "service": {
       "counts": {
-        "added": 0,
+        "added": 3,
         "removed": 0,
         "renamed": 0,
         "enum_changes": 2,
         "status_changes": 0,
         "error_changes": 0,
+        "schema_changes": 0,
         "deferred": 1
       },
-      "added": [],
+      "added": [
+      {
+        "kind": "operation",
+        "target_operation": "GET /v1/service/curation-items/{curation_item_id}/detail-snapshot",
+        "detail": "canonical public membership과 trusted accepted link를 직접 조립하는 PinVi 전용 snapshot. exact scoped ServiceToken과 strong ETag/304를 요구한다.",
+        "basis": "ADR-092",
+        "applied": true
+      },
+        {
+        "kind": "operation",
+        "target_operation": "GET /v1/service/curation-collections/{collection_id}/detail-snapshot",
+        "detail": "PinVi authoritative collection discovery. signed keyset, collection ETag, item-set hash/count, complete marker와 304/409 restart를 제공한다.",
+        "basis": "ADR-092",
+        "applied": true
+      },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/service/curation-cutover/identity-mappings",
+          "detail": "maintenance fence 중 legacy curated identity→canonical collection/item UUID mapping의 immutable keyset/checksum export다.",
+          "basis": "T-VN-40C",
+          "applied": true
+        }
+      ],
       "removed": [],
       "renamed": [],
       "enum_changes": [
@@ -299,6 +363,7 @@
       ],
       "status_changes": [],
       "error_changes": [],
+      "schema_changes": [],
       "deferred": [
         {
           "topic": "cache-target/refresh-request 계약",
@@ -310,12 +375,13 @@
     },
     "admin": {
       "counts": {
-        "added": 3,
-        "removed": 10,
+        "added": 16,
+        "removed": 12,
         "renamed": 0,
         "enum_changes": 4,
-        "status_changes": 0,
-        "error_changes": 0,
+        "status_changes": 6,
+        "error_changes": 7,
+        "schema_changes": 5,
         "deferred": 2
       },
       "added": [
@@ -334,6 +400,97 @@
           "operation": "POST /v1/admin/features/{feature_id}/field-overrides/revoke",
           "detail": "override 철회 → provider base 복귀 (If-Match)",
           "basis": "T-VN-36"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/admin/theme-feature-candidates",
+          "applied": true,
+          "detail": "review_state·eligibility_present AND-filter keyset 후보 목록",
+          "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/admin/theme-feature-candidates/{candidate_id}",
+          "applied": true,
+          "detail": "candidate CAS ETag와 representation ETag를 분리한 typed detail",
+          "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/admin/theme-feature-candidates/{candidate_id}/transitions",
+          "applied": true,
+          "detail": "append-only candidate transition keyset timeline",
+          "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "POST /v1/admin/theme-feature-candidates/{candidate_id}/promote",
+          "applied": true,
+          "detail": "candidate CAS + target collection/item revision을 요구하는 typed promotion",
+          "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "POST /v1/admin/theme-feature-candidates/{candidate_id}/reject",
+          "applied": true,
+          "detail": "candidate CAS + non-empty reason의 typed rejection",
+          "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/admin/curated-themes/{theme_id}",
+          "applied": true,
+          "detail": "theme raw revision ETag를 반환하는 단건 read",
+          "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "DELETE /v1/admin/curated-themes/{theme_id}",
+          "applied": true,
+          "detail": "If-Match와 Idempotency-Key를 요구하는 typed archive command",
+          "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/admin/curated-sources/{source_id}",
+          "applied": true,
+          "detail": "source operator revision과 observation revision을 분리해 반환하는 단건 read",
+          "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "DELETE /v1/admin/curated-sources/{source_id}",
+          "applied": true,
+          "detail": "If-Match와 Idempotency-Key를 요구하는 typed archive command",
+          "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/admin/curated-source-rules/{rule_id}",
+          "applied": true,
+          "detail": "rule raw revision ETag와 canonical rule-input hash를 반환하는 단건 read",
+          "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "DELETE /v1/admin/curated-source-rules/{rule_id}",
+          "applied": true,
+          "detail": "same-transaction rule reconcile을 수행하는 typed archive command",
+          "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "POST /v1/admin/curations/imports/preview",
+          "applied": true,
+          "detail": "normalized rows, content hash, touched revision vector와 plan ETag를 고정하는 immutable preview",
+          "basis": "ADR-092"
+        },
+        {
+          "kind": "operation",
+          "target_operation": "POST /v1/admin/curations/import-plans/{import_plan_id}/commit",
+          "applied": true,
+          "detail": "stored plan만 소비하며 If-Match/Idempotency-Key로 exact terminal replay하는 commit",
+          "basis": "ADR-092"
         }
       ],
       "removed": [
@@ -364,7 +521,7 @@
         },
         {
           "operation": "GET /v1/admin/features/curated/{curated_feature_id}/detail-snapshot",
-          "detail": "legacy curated_features overlay 부속 read. 주의 — PinVi admin이 런타임 소비 중(tasks-done T-VN-H07D vendored admin subset). 대체 표면은 canonical /v1/admin/curations/* read이며 PinVi caller 선전환은 T-VN-40B 소관",
+          "detail": "legacy curated_features overlay 부속 read. PinVi caller는 canonical GET /v1/service/curation-items/{curation_item_id}/detail-snapshot과 전용 ServiceToken scope로 선전환하고 exact Map/PinVi pair를 고정한다.",
           "basis": "T-VN-40C"
         },
         {
@@ -386,6 +543,18 @@
           "operation": "PATCH /v1/admin/issues/{issue_id}",
           "detail": "request field prevent_provider_reactivation — lifecycle 축 전용 제어라 주소/좌표 override 경로에서는 읽는 쪽이 없었다 (재적재 가드는 field_path='lifecycle_state' 한정). 재적재 보호 근거는 provider field patch의 active override masking이다.",
           "basis": "T-VN-36"
+        },
+        {
+          "operation": "POST /v1/admin/curated-source-rules/{rule_id}/apply",
+          "detail": "caller-driven rule apply. authoritative provider terminal receipt가 server-side generation을 호출한다.",
+          "basis": "T-VN-40C",
+          "applied": true
+        },
+        {
+          "operation": "POST /v1/admin/curations/import",
+          "applied": true,
+          "detail": "같은 파일을 preview/commit에서 재해석하는 legacy dry_run flow. immutable import plan 2단계 계약으로 대체한다.",
+          "basis": "T-VN-40C"
         }
       ],
       "renamed": [],
@@ -411,8 +580,30 @@
           "basis": "ADR-068"
         }
       ],
-      "status_changes": [],
-      "error_changes": [],
+      "status_changes": [
+        {"operation": "POST /v1/admin/curated-themes", "detail": "create success 200→201 + strong ETag", "basis": "ADR-092"},
+        {"operation": "POST /v1/admin/curated-sources", "detail": "create success 200→201 + strong ETag", "basis": "ADR-092"},
+        {"operation": "POST /v1/admin/curated-source-rules", "detail": "create success 200→201 + strong ETag", "basis": "ADR-092"},
+        {"operation": "POST /v1/admin/curations", "detail": "collection create success 200→201 + collection ETag", "basis": "ADR-092"},
+        {"operation": "POST /v1/admin/curations/{collection_id}/items", "detail": "item create success 200→201 + item ETag", "basis": "ADR-092"},
+        {"operation": "GET /v1/admin/curations/{collection_id}", "detail": "representation ETag에 대한 If-None-Match 304", "basis": "ADR-092"}
+      ],
+      "error_changes": [
+        {"operation": "PATCH /v1/admin/curated-themes/{theme_id}", "detail": "If-Match missing=428, stale=412", "basis": "ADR-092"},
+        {"operation": "PATCH /v1/admin/curated-sources/{source_id}", "detail": "If-Match missing=428, stale=412", "basis": "ADR-092"},
+        {"operation": "PATCH /v1/admin/curated-source-rules/{rule_id}", "detail": "If-Match missing=428, stale=412; semantic patch는 same-transaction reconcile", "basis": "ADR-092"},
+        {"operation": "PATCH /v1/admin/curations/{collection_id}", "detail": "collection raw If-Match missing=428, stale=412", "basis": "ADR-092"},
+        {"operation": "DELETE /v1/admin/curations/{collection_id}", "detail": "collection raw If-Match missing=428, stale=412", "basis": "ADR-092"},
+        {"operation": "PATCH /v1/admin/curations/{collection_id}/items/{curation_item_id}", "detail": "item If-Match missing=428, stale=412", "basis": "ADR-092"},
+        {"operation": "DELETE /v1/admin/curations/{collection_id}/items/{curation_item_id}", "detail": "item If-Match missing=428, stale=412", "basis": "ADR-092"}
+      ],
+      "schema_changes": [
+        {"operation": "GET /v1/admin/curated-themes", "detail": "row_revision decimal string, archived_at, immutable owner_kind/provider_dataset_id", "basis": "ADR-092"},
+        {"operation": "GET /v1/admin/curated-sources", "detail": "operator row_revision과 provider observation_revision 분리, archived_at", "basis": "ADR-092"},
+        {"operation": "GET /v1/admin/curated-source-rules", "detail": "row_revision decimal string, archived_at, owner provenance, candidate|ignore action", "basis": "ADR-092"},
+        {"operation": "GET /v1/admin/curations", "detail": "collection row_revision와 raw collection_etag", "basis": "ADR-092"},
+        {"operation": "GET /v1/admin/curations/{collection_id}", "detail": "collection representation_etag + collection_etag, item row_revision/item_etag", "basis": "ADR-092"}
+      ],
       "deferred": [
         {
           "topic": "POST /v1/admin/features/{feature_id}/deactivate의 3축 전이 재표현",

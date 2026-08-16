@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { useRef, useState, type FormEvent, type MouseEvent } from "react";
 
+import { ApiClientError } from "@/api/client";
 import { useAdminCuratedSources, useAdminCuratedThemes } from "@/api/curated";
 import {
   CURATION_IMPORT_TEMPLATE_URL,
@@ -21,7 +22,8 @@ import {
   useAdminCurationCollection,
   useAdminCurationCollections,
   useCreateCurationCollectionMutation,
-  useImportCurationCsvMutation,
+  useCommitCurationImportPlanMutation,
+  usePreviewCurationCsvMutation,
   usePatchCurationItemMutation,
   type ActiveCurationCollectionStatus,
   type CurationCollectionVisibility,
@@ -56,9 +58,6 @@ import { cn } from "@/lib/utils";
 interface CollectionFormState {
   collectionKey: string;
   themeId: string;
-  themeSlug: string;
-  themeName: string;
-  themeGroup: string;
   sourceId: string;
   title: string;
   editionKey: string;
@@ -81,9 +80,6 @@ interface ItemFormState {
 const INITIAL_COLLECTION_FORM: CollectionFormState = {
   collectionKey: "",
   themeId: "",
-  themeSlug: "",
-  themeName: "",
-  themeGroup: "",
   sourceId: "",
   title: "",
   editionKey: "",
@@ -152,7 +148,12 @@ function useCurationCollectionsClientController() {
   const addItem = useAddCurationItemMutation();
   const patchItem = usePatchCurationItemMutation();
   const archiveItem = useArchiveCurationItemMutation();
-  const importCsv = useImportCurationCsvMutation();
+  const previewImportCsv = usePreviewCurationCsvMutation();
+  const commitImportPlan = useCommitCurationImportPlanMutation();
+  const importCsv = {
+    error: previewImportCsv.error ?? commitImportPlan.error,
+    isPending: previewImportCsv.isPending || commitImportPlan.isPending,
+  };
   const submitCollectionInFlightRef = useRef(false);
   const submitItemInFlightRef = useRef(false);
 
@@ -164,6 +165,7 @@ function useCurationCollectionsClientController() {
   );
   const [itemForm, setItemForm] = useState<ItemFormState>(INITIAL_ITEM_FORM);
   const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [provenanceFile, setProvenanceFile] = useState<File | null>(null);
   const [importReport, setImportReport] =
     useState<CurationImportResponse | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -192,25 +194,16 @@ function useCurationCollectionsClientController() {
     setMessage(null);
     const collectionKey = collectionForm.collectionKey.trim();
     const themeId = collectionForm.themeId.trim();
-    const themeSlug = collectionForm.themeSlug.trim();
-    const themeName = collectionForm.themeName.trim();
-    const themeGroup = collectionForm.themeGroup.trim();
     const title = collectionForm.title.trim();
-    const hasNewTheme = Boolean(themeSlug && themeName && themeGroup);
-    if (!collectionKey || (!themeId && !hasNewTheme) || !title) {
-      setLocalError(
-        "컬렉션 키, 제목과 기존 테마 또는 새 테마의 slug/이름/그룹은 필수입니다.",
-      );
+    if (!collectionKey || !themeId || !title) {
+      setLocalError("컬렉션 키, 제목과 기존 테마 선택은 필수입니다.");
       return;
     }
     submitCollectionInFlightRef.current = true;
     try {
       const response = await createCollection.mutateAsync({
         collection_key: collectionKey,
-        theme_id: themeId || null,
-        theme_slug: themeSlug || null,
-        theme_name: themeName || null,
-        theme_group: themeGroup || null,
+        theme_id: themeId,
         source_id: collectionForm.sourceId.trim() || null,
         title,
         edition_key: collectionForm.editionKey.trim(),
@@ -292,9 +285,9 @@ function useCurationCollectionsClientController() {
     setMessage(null);
     try {
       setImportReport(
-        await importCsv.mutateAsync({
+        await previewImportCsv.mutateAsync({
           file: csvFile,
-          dryRun: true,
+          provenanceFile,
         }),
       );
     } catch {
@@ -304,7 +297,6 @@ function useCurationCollectionsClientController() {
 
   const commitCsv = async () => {
     if (
-      !csvFile ||
       !importReport ||
       importReport.data.invalid_rows > 0 ||
       importReport.data.issues.length > 0
@@ -324,20 +316,29 @@ function useCurationCollectionsClientController() {
     setLocalError(null);
     setMessage(null);
     try {
-      const response = await importCsv.mutateAsync({
-        file: csvFile,
-        dryRun: false,
+      const response = await commitImportPlan.mutateAsync({
+        importPlanId: importReport.data.import_plan_id,
+        planEtag: importReport.data.plan_etag,
       });
       setImportReport(response);
       setMessage(
         `CSV 반영 완료: 신규 ${response.data.inserted}개, 갱신 ${response.data.updated}개, 제거 ${response.data.removed}개`,
       );
-    } catch {
-      // mutationError에서 API 응답을 표시한다.
+    } catch (error) {
+      if (error instanceof ApiClientError && error.status === 412) {
+        setImportReport(null);
+        setLocalError(
+          "미리보기 이후 정본이 변경되었습니다. CSV와 provenance를 다시 미리보기하세요.",
+        );
+      }
     }
   };
 
-  const resolveItem = async (curationItemId: string, placeName: string) => {
+  const resolveItem = async (
+    curationItemId: string,
+    placeName: string,
+    commandEtag: string,
+  ) => {
     if (!activeCollectionId) return;
     const featureId = resolveFeatureIds[curationItemId]?.trim() ?? "";
     if (!featureId) {
@@ -350,6 +351,7 @@ function useCurationCollectionsClientController() {
       await patchItem.mutateAsync({
         collectionId: activeCollectionId,
         curationItemId,
+        commandEtag,
         body: { feature_id: featureId },
       });
       setResolveFeatureIds((current) => {
@@ -363,7 +365,11 @@ function useCurationCollectionsClientController() {
     }
   };
 
-  const removeItem = async (curationItemId: string, placeName: string) => {
+  const removeItem = async (
+    curationItemId: string,
+    placeName: string,
+    commandEtag: string,
+  ) => {
     if (!activeCollectionId) return;
     if (!window.confirm(`“${placeName}” 큐레이션 항목을 보관 처리할까요?`)) {
       return;
@@ -374,6 +380,7 @@ function useCurationCollectionsClientController() {
       await archiveItem.mutateAsync({
         collectionId: activeCollectionId,
         curationItemId,
+        commandEtag,
       });
       setMessage(`“${placeName}” 항목을 보관 처리했습니다.`);
     } catch {
@@ -437,9 +444,11 @@ function useCurationCollectionsClientController() {
     setCollectionForm,
     setCsvFile,
     setImportReport,
+    setProvenanceFile,
     setItemForm,
     setLocalError,
     setMessage,
+    provenanceFile,
     setResolveFeatureIds,
     setSelectedCollectionId,
     sourcesQuery,
@@ -460,15 +469,17 @@ function CurationCollectionCommands({
   message,
   mutationError,
   previewCsv,
+  provenanceFile,
   setCollectionForm,
   setCsvFile,
   setImportReport,
+  setProvenanceFile,
   setLocalError,
   setMessage,
   sourcesQuery,
   submitCollection,
   themesQuery,
-}: Pick<ReturnType<typeof useCurationCollectionsClientController>, "collectionForm" | "commitCsv" | "createCollection" | "csvFile" | "importCsv" | "importReport" | "localError" | "message" | "mutationError" | "previewCsv" | "setCollectionForm" | "setCsvFile" | "setImportReport" | "setLocalError" | "setMessage" | "sourcesQuery" | "submitCollection" | "themesQuery">) {
+}: Pick<ReturnType<typeof useCurationCollectionsClientController>, "collectionForm" | "commitCsv" | "createCollection" | "csvFile" | "importCsv" | "importReport" | "localError" | "message" | "mutationError" | "previewCsv" | "provenanceFile" | "setCollectionForm" | "setCsvFile" | "setImportReport" | "setLocalError" | "setMessage" | "setProvenanceFile" | "sourcesQuery" | "submitCollection" | "themesQuery">) {
   return (
     <>
 {localError || mutationError ? (
@@ -489,7 +500,7 @@ function CurationCollectionCommands({
 
         <div className="grid gap-6 xl:grid-cols-2">
           <SectionCard
-            description="기존 테마·출처 ID를 선택하거나 직접 붙여 넣을 수 있습니다."
+            description="typed catalog에서 만든 기존 테마와 출처를 선택합니다."
             title="컬렉션 수동 생성"
           >
             <form className="grid gap-4 md:grid-cols-2" onSubmit={submitCollection}>
@@ -506,6 +517,7 @@ function CurationCollectionCommands({
                 }
               />
               <FormField
+                required
                 label="테마"
                 list="curation-theme-options"
                 placeholder="테마 ID"
@@ -524,39 +536,6 @@ function CurationCollectionCommands({
                   </option>
                 ))}
               </datalist>
-              <FormField
-                label="새 테마 slug"
-                placeholder="korean-tourism-100"
-                value={collectionForm.themeSlug}
-                onChange={(event) =>
-                  setCollectionForm((current) => ({
-                    ...current,
-                    themeSlug: event.target.value,
-                  }))
-                }
-              />
-              <FormField
-                label="새 테마 이름"
-                placeholder="한국관광 100선"
-                value={collectionForm.themeName}
-                onChange={(event) =>
-                  setCollectionForm((current) => ({
-                    ...current,
-                    themeName: event.target.value,
-                  }))
-                }
-              />
-              <FormField
-                label="새 테마 그룹"
-                placeholder="관광 선정"
-                value={collectionForm.themeGroup}
-                onChange={(event) =>
-                  setCollectionForm((current) => ({
-                    ...current,
-                    themeGroup: event.target.value,
-                  }))
-                }
-              />
               <FormField
                 required
                 className="md:col-span-2"
@@ -661,6 +640,22 @@ function CurationCollectionCommands({
                 setLocalError(null);
               }}
             />
+            <FormField
+              accept=".json,application/json"
+              label="Provenance JSON 파일 (공식 등대)"
+              type="file"
+              onChange={(event) => {
+                setProvenanceFile(event.target.files?.[0] ?? null);
+                setImportReport(null);
+                setMessage(null);
+                setLocalError(null);
+              }}
+            />
+            {provenanceFile ? (
+              <p className="text-xs text-muted-foreground">
+                선택한 provenance: {provenanceFile.name}
+              </p>
+            ) : null}
             <div className="flex flex-wrap gap-2">
               <Button
                 disabled={!csvFile || importCsv.isPending}
@@ -1139,6 +1134,7 @@ function CurationCollectionTable({
                                       void resolveItem(
                                         item.curation_item_id,
                                         item.place_name,
+                                        item.command_etag,
                                       )
                                     }
                                   >
@@ -1156,6 +1152,7 @@ function CurationCollectionTable({
                                   void removeItem(
                                     item.curation_item_id,
                                     item.place_name,
+                                    item.command_etag,
                                   )
                                 }
                               >
@@ -1267,12 +1264,14 @@ function CurationCollectionsClientView({
   mutationError,
   patchItem,
   previewCsv,
+  provenanceFile,
   removeItem,
   resolveFeatureIds,
   resolveItem,
   setCollectionForm,
   setCsvFile,
   setImportReport,
+  setProvenanceFile,
   setItemForm,
   setLocalError,
   setMessage,
@@ -1300,7 +1299,7 @@ function CurationCollectionsClientView({
       title="큐레이션 관리"
     >
       <div className="space-y-6">
-        <CurationCollectionCommands collectionForm={collectionForm} commitCsv={commitCsv} createCollection={createCollection} csvFile={csvFile} importCsv={importCsv} importReport={importReport} localError={localError} message={message} mutationError={mutationError} previewCsv={previewCsv} setCollectionForm={setCollectionForm} setCsvFile={setCsvFile} setImportReport={setImportReport} setLocalError={setLocalError} setMessage={setMessage} sourcesQuery={sourcesQuery} submitCollection={submitCollection} themesQuery={themesQuery} />
+        <CurationCollectionCommands collectionForm={collectionForm} commitCsv={commitCsv} createCollection={createCollection} csvFile={csvFile} importCsv={importCsv} importReport={importReport} localError={localError} message={message} mutationError={mutationError} previewCsv={previewCsv} provenanceFile={provenanceFile} setCollectionForm={setCollectionForm} setCsvFile={setCsvFile} setImportReport={setImportReport} setLocalError={setLocalError} setMessage={setMessage} setProvenanceFile={setProvenanceFile} sourcesQuery={sourcesQuery} submitCollection={submitCollection} themesQuery={themesQuery} />
 
         <CurationCollectionCatalog activeCollectionId={activeCollectionId} addItem={addItem} archiveItem={archiveItem} collectionQuery={collectionQuery} collections={collections} collectionsQuery={collectionsQuery} detail={detail} itemForm={itemForm} patchItem={patchItem} removeItem={removeItem} resolveFeatureIds={resolveFeatureIds} resolveItem={resolveItem} setItemForm={setItemForm} setResolveFeatureIds={setResolveFeatureIds} setSelectedCollectionId={setSelectedCollectionId} submitItem={submitItem} />
 

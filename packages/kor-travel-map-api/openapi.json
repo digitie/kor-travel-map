@@ -345,6 +345,10 @@
             "title": "Collection Key",
             "type": "string"
           },
+          "command_etag": {
+            "title": "Command Etag",
+            "type": "string"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -421,6 +425,11 @@
           "public_item_count": {
             "title": "Public Item Count",
             "type": "integer"
+          },
+          "row_revision": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Row Revision",
+            "type": "string"
           },
           "source_id": {
             "anyOf": [
@@ -532,6 +541,8 @@
           "metadata",
           "item_count",
           "public_item_count",
+          "row_revision",
+          "command_etag",
           "created_at",
           "updated_at",
           "archived_at",
@@ -642,6 +653,10 @@
           },
           "collection_key": {
             "title": "Collection Key",
+            "type": "string"
+          },
+          "command_etag": {
+            "title": "Command Etag",
             "type": "string"
           },
           "created_at": {
@@ -893,6 +908,11 @@
             "title": "Reuse Policy",
             "type": "string"
           },
+          "row_revision": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Row Revision",
+            "type": "string"
+          },
           "sort_order": {
             "title": "Sort Order",
             "type": "integer"
@@ -1018,6 +1038,8 @@
           "link_evidence",
           "link_actor",
           "link_decided_at",
+          "row_revision",
+          "command_etag",
           "created_at",
           "updated_at",
           "archived_at",
@@ -1037,6 +1059,10 @@
           },
           "collection_key": {
             "title": "Collection Key",
+            "type": "string"
+          },
+          "command_etag": {
+            "title": "Command Etag",
             "type": "string"
           },
           "created_by": {
@@ -1092,6 +1118,11 @@
               }
             ]
           },
+          "row_revision": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Row Revision",
+            "type": "string"
+          },
           "status": {
             "enum": [
               "draft",
@@ -1116,6 +1147,8 @@
         },
         "required": [
           "collection_id",
+          "row_revision",
+          "command_etag",
           "collection_key",
           "title",
           "edition_key",
@@ -1287,6 +1320,29 @@
             ],
             "title": "Target Collection Id"
           },
+          "target_collection_revision": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Collection Revision"
+          },
+          "target_command_etag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Command Etag"
+          },
           "target_missing": {
             "title": "Target Missing",
             "type": "boolean"
@@ -1436,6 +1492,18 @@
               }
             ],
             "title": "Target Collection Id"
+          },
+          "target_collection_revision": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Collection Revision"
           },
           "title": {
             "anyOf": [
@@ -4335,6 +4403,419 @@
         "title": "AdminIssueRecord",
         "type": "object"
       },
+      "AdminThemeCandidatePageData": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminThemeCandidateView"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "AdminThemeCandidatePageData",
+        "type": "object"
+      },
+      "AdminThemeCandidatePageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminThemeCandidatePageData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "AdminThemeCandidatePageResponse",
+        "type": "object"
+      },
+      "AdminThemeCandidateResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminThemeCandidateView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "AdminThemeCandidateResponse",
+        "type": "object"
+      },
+      "AdminThemeCandidateTransitionPageData": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminThemeCandidateTransitionView"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "AdminThemeCandidateTransitionPageData",
+        "type": "object"
+      },
+      "AdminThemeCandidateTransitionPageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminThemeCandidateTransitionPageData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "AdminThemeCandidateTransitionPageResponse",
+        "type": "object"
+      },
+      "AdminThemeCandidateTransitionView": {
+        "additionalProperties": false,
+        "properties": {
+          "actor": {
+            "title": "Actor",
+            "type": "string"
+          },
+          "candidate_id": {
+            "format": "uuid",
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "candidate_revision": {
+            "title": "Candidate Revision",
+            "type": "string"
+          },
+          "causation_ref": {
+            "additionalProperties": true,
+            "title": "Causation Ref",
+            "type": "object"
+          },
+          "command_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Command Id"
+          },
+          "from_eligibility_present": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Eligibility Present"
+          },
+          "from_review_state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Review State"
+          },
+          "generation_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Generation Id"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "reason_code": {
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "to_eligibility_present": {
+            "title": "To Eligibility Present",
+            "type": "boolean"
+          },
+          "to_review_state": {
+            "title": "To Review State",
+            "type": "string"
+          },
+          "transition_id": {
+            "title": "Transition Id",
+            "type": "string"
+          },
+          "transition_kind": {
+            "title": "Transition Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "transition_id",
+          "candidate_id",
+          "transition_kind",
+          "from_review_state",
+          "to_review_state",
+          "from_eligibility_present",
+          "to_eligibility_present",
+          "candidate_revision",
+          "generation_id",
+          "command_id",
+          "actor",
+          "reason_code",
+          "causation_ref",
+          "occurred_at"
+        ],
+        "title": "AdminThemeCandidateTransitionView",
+        "type": "object"
+      },
+      "AdminThemeCandidateView": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_etag": {
+            "title": "Candidate Etag",
+            "type": "string"
+          },
+          "candidate_id": {
+            "format": "uuid",
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "candidate_input_hash": {
+            "title": "Candidate Input Hash",
+            "type": "string"
+          },
+          "candidate_revision": {
+            "title": "Candidate Revision",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "disposition": {
+            "title": "Disposition",
+            "type": "string"
+          },
+          "eligibility_present": {
+            "title": "Eligibility Present",
+            "type": "boolean"
+          },
+          "feature_category": {
+            "title": "Feature Category",
+            "type": "string"
+          },
+          "feature_detail": {
+            "additionalProperties": true,
+            "title": "Feature Detail",
+            "type": "object"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "feature_kind": {
+            "title": "Feature Kind",
+            "type": "string"
+          },
+          "feature_name": {
+            "title": "Feature Name",
+            "type": "string"
+          },
+          "feature_row_revision": {
+            "title": "Feature Row Revision",
+            "type": "string"
+          },
+          "feature_uuid": {
+            "format": "uuid",
+            "title": "Feature Uuid",
+            "type": "string"
+          },
+          "lifecycle_state": {
+            "title": "Lifecycle State",
+            "type": "string"
+          },
+          "match_evidence": {
+            "additionalProperties": true,
+            "title": "Match Evidence",
+            "type": "object"
+          },
+          "proposal_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposal Summary"
+          },
+          "proposal_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Proposal Title"
+          },
+          "provider_dataset_id": {
+            "title": "Provider Dataset Id",
+            "type": "integer"
+          },
+          "publication_state": {
+            "title": "Publication State",
+            "type": "string"
+          },
+          "quality_state": {
+            "title": "Quality State",
+            "type": "string"
+          },
+          "rank_score": {
+            "title": "Rank Score",
+            "type": "string"
+          },
+          "representation_etag": {
+            "title": "Representation Etag",
+            "type": "string"
+          },
+          "review_state": {
+            "enum": [
+              "open",
+              "promoted",
+              "rejected"
+            ],
+            "title": "Review State",
+            "type": "string"
+          },
+          "rule_id": {
+            "format": "uuid",
+            "title": "Rule Id",
+            "type": "string"
+          },
+          "rule_input_hash": {
+            "title": "Rule Input Hash",
+            "type": "string"
+          },
+          "rule_row_revision": {
+            "title": "Rule Row Revision",
+            "type": "string"
+          },
+          "source_entity_key": {
+            "title": "Source Entity Key",
+            "type": "string"
+          },
+          "source_id": {
+            "format": "uuid",
+            "title": "Source Id",
+            "type": "string"
+          },
+          "source_name": {
+            "title": "Source Name",
+            "type": "string"
+          },
+          "source_record_hash": {
+            "title": "Source Record Hash",
+            "type": "string"
+          },
+          "source_record_key": {
+            "title": "Source Record Key",
+            "type": "string"
+          },
+          "theme_id": {
+            "format": "uuid",
+            "title": "Theme Id",
+            "type": "string"
+          },
+          "theme_name": {
+            "title": "Theme Name",
+            "type": "string"
+          },
+          "theme_slug": {
+            "title": "Theme Slug",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate_id",
+          "rule_id",
+          "theme_id",
+          "theme_slug",
+          "theme_name",
+          "source_id",
+          "source_name",
+          "provider_dataset_id",
+          "source_entity_key",
+          "feature_id",
+          "feature_uuid",
+          "feature_name",
+          "feature_kind",
+          "feature_category",
+          "feature_detail",
+          "lifecycle_state",
+          "publication_state",
+          "quality_state",
+          "source_record_key",
+          "source_record_hash",
+          "rule_row_revision",
+          "rule_input_hash",
+          "candidate_input_hash",
+          "review_state",
+          "eligibility_present",
+          "disposition",
+          "rank_score",
+          "proposal_title",
+          "proposal_summary",
+          "match_evidence",
+          "candidate_revision",
+          "candidate_etag",
+          "feature_row_revision",
+          "representation_etag",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AdminThemeCandidateView",
+        "type": "object"
+      },
       "AdminWeatherAlertHistoryData": {
         "additionalProperties": false,
         "description": "operator ``GET /admin/features/weather/alerts`` data payload.",
@@ -5418,7 +5899,7 @@
         "title": "Body_create_offline_upload_request_v1_admin_offline_uploads_post",
         "type": "object"
       },
-      "Body_import_admin_curations_v1_admin_curations_import_post": {
+      "Body_preview_admin_curation_import_v1_admin_curations_imports_preview_post": {
         "properties": {
           "file": {
             "contentMediaType": "application/octet-stream",
@@ -5443,7 +5924,7 @@
         "required": [
           "file"
         ],
-        "title": "Body_import_admin_curations_v1_admin_curations_import_post",
+        "title": "Body_preview_admin_curation_import_v1_admin_curations_imports_preview_post",
         "type": "object"
       },
       "C6cCancelProbeCanonicalUnsafeOutcomeRecord": {
@@ -9629,6 +10110,22 @@
         "title": "CuratedPlaceSearchResponse",
         "type": "object"
       },
+      "CuratedSourceArchiveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason_code": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Reason Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason_code"
+        ],
+        "title": "CuratedSourceArchiveRequest",
+        "type": "object"
+      },
       "CuratedSourceCreateRequest": {
         "additionalProperties": false,
         "properties": {
@@ -9642,30 +10139,6 @@
               }
             ],
             "title": "Freshness Note"
-          },
-          "last_checked_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Checked At"
-          },
-          "last_source_modified_at": {
-            "anyOf": [
-              {
-                "format": "date",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Source Modified At"
           },
           "license": {
             "anyOf": [
@@ -9683,18 +10156,6 @@
             "title": "Metadata",
             "type": "object"
           },
-          "next_expected_at": {
-            "anyOf": [
-              {
-                "format": "date",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Expected At"
-          },
           "provider_dataset_id": {
             "exclusiveMinimum": 0.0,
             "title": "Provider Dataset Id",
@@ -9710,18 +10171,6 @@
             ],
             "title": "Provider Status",
             "type": "string"
-          },
-          "row_count": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Row Count"
           },
           "source_kind": {
             "enum": [
@@ -9788,30 +10237,6 @@
             ],
             "title": "Freshness Note"
           },
-          "last_checked_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Checked At"
-          },
-          "last_source_modified_at": {
-            "anyOf": [
-              {
-                "format": "date",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Source Modified At"
-          },
           "license": {
             "anyOf": [
               {
@@ -9824,88 +10249,36 @@
             "title": "License"
           },
           "metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Metadata"
-          },
-          "next_expected_at": {
-            "anyOf": [
-              {
-                "format": "date",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Expected At"
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
           },
           "provider_status": {
-            "anyOf": [
-              {
-                "enum": [
-                  "implemented",
-                  "provider_needed",
-                  "manual_only",
-                  "deprecated"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+            "enum": [
+              "implemented",
+              "provider_needed",
+              "manual_only",
+              "deprecated"
             ],
-            "title": "Provider Status"
-          },
-          "row_count": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Row Count"
+            "title": "Provider Status",
+            "type": "string"
           },
           "source_kind": {
-            "anyOf": [
-              {
-                "enum": [
-                  "openapi",
-                  "filedata",
-                  "standard",
-                  "internal",
-                  "manual"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+            "enum": [
+              "openapi",
+              "filedata",
+              "standard",
+              "internal",
+              "manual"
             ],
-            "title": "Source Kind"
+            "title": "Source Kind",
+            "type": "string"
           },
           "source_name": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source Name"
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Source Name",
+            "type": "string"
           },
           "source_url": {
             "anyOf": [
@@ -9919,24 +10292,17 @@
             "title": "Source Url"
           },
           "update_cycle": {
-            "anyOf": [
-              {
-                "enum": [
-                  "realtime",
-                  "daily",
-                  "weekly",
-                  "monthly",
-                  "annual",
-                  "one_time",
-                  "unknown"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+            "enum": [
+              "realtime",
+              "daily",
+              "weekly",
+              "monthly",
+              "annual",
+              "one_time",
+              "unknown"
             ],
-            "title": "Update Cycle"
+            "title": "Update Cycle",
+            "type": "string"
           }
         },
         "title": "CuratedSourcePatchRequest",
@@ -9959,6 +10325,22 @@
         "title": "CuratedSourceResponse",
         "type": "object"
       },
+      "CuratedSourceRuleArchiveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason_code": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Reason Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason_code"
+        ],
+        "title": "CuratedSourceRuleArchiveRequest",
+        "type": "object"
+      },
       "CuratedSourceRuleCreateRequest": {
         "additionalProperties": false,
         "properties": {
@@ -9977,7 +10359,6 @@
             "default": "candidate",
             "enum": [
               "candidate",
-              "curated",
               "ignore"
             ],
             "title": "Default Action",
@@ -10018,6 +10399,8 @@
           },
           "priority": {
             "default": 0,
+            "maximum": 2147483647.0,
+            "minimum": -2147483648.0,
             "title": "Priority",
             "type": "integer"
           },
@@ -10027,10 +10410,12 @@
             "type": "object"
           },
           "source_id": {
+            "format": "uuid",
             "title": "Source Id",
             "type": "string"
           },
           "theme_id": {
+            "format": "uuid",
             "title": "Theme Id",
             "type": "string"
           }
@@ -10057,136 +10442,10 @@
             "title": "Category"
           },
           "default_action": {
-            "anyOf": [
-              {
-                "enum": [
-                  "candidate",
-                  "curated",
-                  "ignore"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+            "enum": [
+              "candidate",
+              "ignore"
             ],
-            "title": "Default Action"
-          },
-          "detail_selector": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Detail Selector"
-          },
-          "enabled": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Enabled"
-          },
-          "metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Metadata"
-          },
-          "place_kind": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Place Kind"
-          },
-          "priority": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Priority"
-          },
-          "region_scope": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Region Scope"
-          }
-        },
-        "title": "CuratedSourceRulePatchRequest",
-        "type": "object"
-      },
-      "CuratedSourceRuleResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/CuratedSourceRuleView"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "title": "CuratedSourceRuleResponse",
-        "type": "object"
-      },
-      "CuratedSourceRuleView": {
-        "additionalProperties": false,
-        "description": "curated source rule view.",
-        "properties": {
-          "category": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Category"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "dataset_key": {
-            "title": "Dataset Key",
-            "type": "string"
-          },
-          "default_action": {
             "title": "Default Action",
             "type": "string"
           },
@@ -10223,6 +10482,144 @@
             "title": "Place Kind"
           },
           "priority": {
+            "maximum": 2147483647.0,
+            "minimum": -2147483648.0,
+            "title": "Priority",
+            "type": "integer"
+          },
+          "region_scope": {
+            "additionalProperties": true,
+            "title": "Region Scope",
+            "type": "object"
+          }
+        },
+        "title": "CuratedSourceRulePatchRequest",
+        "type": "object"
+      },
+      "CuratedSourceRuleResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/CuratedSourceRuleView"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "CuratedSourceRuleResponse",
+        "type": "object"
+      },
+      "CuratedSourceRuleView": {
+        "additionalProperties": false,
+        "description": "curated source rule view.",
+        "properties": {
+          "archived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "command_etag": {
+            "title": "Command Etag",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "dataset_key": {
+            "title": "Dataset Key",
+            "type": "string"
+          },
+          "default_action": {
+            "enum": [
+              "candidate",
+              "ignore"
+            ],
+            "title": "Default Action",
+            "type": "string"
+          },
+          "detail_selector": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail Selector"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "owner_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "operator",
+                  "provider_dataset"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Kind"
+          },
+          "owner_provider_dataset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Provider Dataset Id"
+          },
+          "place_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Place Kind"
+          },
+          "priority": {
             "title": "Priority",
             "type": "integer"
           },
@@ -10239,15 +10636,22 @@
             "title": "Region Scope",
             "type": "object"
           },
+          "row_revision": {
+            "title": "Row Revision",
+            "type": "string"
+          },
           "rule_id": {
+            "format": "uuid",
             "title": "Rule Id",
             "type": "string"
           },
           "source_id": {
+            "format": "uuid",
             "title": "Source Id",
             "type": "string"
           },
           "theme_id": {
+            "format": "uuid",
             "title": "Theme Id",
             "type": "string"
           },
@@ -10274,6 +10678,8 @@
           "priority",
           "enabled",
           "metadata",
+          "row_revision",
+          "command_etag",
           "created_at",
           "updated_at"
         ],
@@ -10318,6 +10724,22 @@
         "additionalProperties": false,
         "description": "curated source metadata view.",
         "properties": {
+          "archived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "command_etag": {
+            "title": "Command Etag",
+            "type": "string"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -10390,6 +10812,11 @@
             ],
             "title": "Next Expected At"
           },
+          "observation_revision": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Observation Revision",
+            "type": "string"
+          },
           "provider": {
             "title": "Provider",
             "type": "string"
@@ -10399,7 +10826,17 @@
             "type": "integer"
           },
           "provider_status": {
+            "enum": [
+              "implemented",
+              "provider_needed",
+              "manual_only",
+              "deprecated"
+            ],
             "title": "Provider Status",
+            "type": "string"
+          },
+          "representation_etag": {
+            "title": "Representation Etag",
             "type": "string"
           },
           "row_count": {
@@ -10413,11 +10850,24 @@
             ],
             "title": "Row Count"
           },
+          "row_revision": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Row Revision",
+            "type": "string"
+          },
           "source_id": {
+            "format": "uuid",
             "title": "Source Id",
             "type": "string"
           },
           "source_kind": {
+            "enum": [
+              "openapi",
+              "filedata",
+              "standard",
+              "internal",
+              "manual"
+            ],
             "title": "Source Kind",
             "type": "string"
           },
@@ -10437,6 +10887,15 @@
             "title": "Source Url"
           },
           "update_cycle": {
+            "enum": [
+              "realtime",
+              "daily",
+              "weekly",
+              "monthly",
+              "annual",
+              "one_time",
+              "unknown"
+            ],
             "title": "Update Cycle",
             "type": "string"
           },
@@ -10457,7 +10916,11 @@
           "provider_status",
           "metadata",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "row_revision",
+          "observation_revision",
+          "representation_etag",
+          "command_etag"
         ],
         "title": "CuratedSourceView",
         "type": "object"
@@ -10496,14 +10959,25 @@
         "title": "CuratedSourcesResponse",
         "type": "object"
       },
+      "CuratedThemeArchiveRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason_code": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Reason Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason_code"
+        ],
+        "title": "CuratedThemeArchiveRequest",
+        "type": "object"
+      },
       "CuratedThemeCreateRequest": {
         "additionalProperties": false,
         "properties": {
-          "default_curated": {
-            "default": false,
-            "title": "Default Curated",
-            "type": "boolean"
-          },
           "metadata": {
             "additionalProperties": true,
             "title": "Metadata",
@@ -10553,93 +11027,40 @@
       "CuratedThemePatchRequest": {
         "additionalProperties": false,
         "properties": {
-          "default_curated": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Default Curated"
-          },
           "metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Metadata"
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
           },
           "theme_description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Theme Description"
+            "title": "Theme Description",
+            "type": "string"
           },
           "theme_group": {
-            "anyOf": [
-              {
-                "maxLength": 64,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Theme Group"
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Theme Group",
+            "type": "string"
           },
           "theme_name": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Theme Name"
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Theme Name",
+            "type": "string"
           },
           "theme_slug": {
-            "anyOf": [
-              {
-                "maxLength": 128,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Theme Slug"
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Theme Slug",
+            "type": "string"
           },
           "visibility": {
-            "anyOf": [
-              {
-                "enum": [
-                  "admin_only",
-                  "public"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+            "enum": [
+              "admin_only",
+              "public"
             ],
-            "title": "Visibility"
+            "title": "Visibility",
+            "type": "string"
           }
         },
         "title": "CuratedThemePatchRequest",
@@ -10666,19 +11087,62 @@
         "additionalProperties": false,
         "description": "curated theme view.",
         "properties": {
+          "archived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "command_etag": {
+            "title": "Command Etag",
+            "type": "string"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
             "type": "string"
           },
-          "default_curated": {
-            "title": "Default Curated",
-            "type": "boolean"
-          },
           "metadata": {
             "additionalProperties": true,
             "title": "Metadata",
             "type": "object"
+          },
+          "owner_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "operator",
+                  "provider_dataset"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Kind"
+          },
+          "owner_provider_dataset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Provider Dataset Id"
+          },
+          "row_revision": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Row Revision",
+            "type": "string"
           },
           "theme_description": {
             "title": "Theme Description",
@@ -10689,6 +11153,7 @@
             "type": "string"
           },
           "theme_id": {
+            "format": "uuid",
             "title": "Theme Id",
             "type": "string"
           },
@@ -10706,6 +11171,10 @@
             "type": "string"
           },
           "visibility": {
+            "enum": [
+              "admin_only",
+              "public"
+            ],
             "title": "Visibility",
             "type": "string"
           }
@@ -10716,11 +11185,12 @@
           "theme_name",
           "theme_description",
           "theme_group",
-          "default_curated",
           "visibility",
           "metadata",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "row_revision",
+          "command_etag"
         ],
         "title": "CuratedThemeView",
         "type": "object"
@@ -10811,56 +11281,10 @@
             "title": "Status",
             "type": "string"
           },
-          "theme_group": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Theme Group"
-          },
           "theme_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Theme Id"
-          },
-          "theme_name": {
-            "anyOf": [
-              {
-                "maxLength": 300,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Theme Name"
-          },
-          "theme_slug": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Theme Slug"
+            "format": "uuid",
+            "title": "Theme Id",
+            "type": "string"
           },
           "title": {
             "maxLength": 300,
@@ -10880,6 +11304,7 @@
         },
         "required": [
           "collection_key",
+          "theme_id",
           "title"
         ],
         "title": "CurationCollectionCreateRequest",
@@ -10904,6 +11329,88 @@
           "items"
         ],
         "title": "CurationCollectionData",
+        "type": "object"
+      },
+      "CurationCollectionDetailSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "collection": {
+            "$ref": "#/components/schemas/CurationSnapshotCollection"
+          },
+          "collection_id": {
+            "format": "uuid",
+            "title": "Collection Id",
+            "type": "string"
+          },
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "etag": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Etag",
+            "type": "string"
+          },
+          "item_count": {
+            "maximum": 2000.0,
+            "minimum": 0.0,
+            "title": "Item Count",
+            "type": "integer"
+          },
+          "item_set_hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Item Set Hash",
+            "type": "string"
+          },
+          "item_set_hash_version": {
+            "const": "ktm-db-item-set-v1",
+            "title": "Item Set Hash Version",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CurationItemDetailSnapshot"
+            },
+            "maxItems": 200,
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "row_revision": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Row Revision",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "collection_id",
+          "row_revision",
+          "etag",
+          "updated_at",
+          "collection",
+          "item_count",
+          "item_set_hash_version",
+          "item_set_hash",
+          "items",
+          "next_cursor",
+          "complete"
+        ],
+        "title": "CurationCollectionDetailSnapshot",
         "type": "object"
       },
       "CurationCollectionPatchRequest": {
@@ -11022,6 +11529,104 @@
           "meta"
         ],
         "title": "CurationCollectionsResponse",
+        "type": "object"
+      },
+      "CurationCutoverIdentityMapping": {
+        "additionalProperties": false,
+        "description": "PinVi legacy provenance를 canonical Map UUID로 바꾸는 one-to-one evidence.",
+        "properties": {
+          "collection_id": {
+            "format": "uuid",
+            "title": "Collection Id",
+            "type": "string"
+          },
+          "curation_item_id": {
+            "format": "uuid",
+            "title": "Curation Item Id",
+            "type": "string"
+          },
+          "legacy_curated_feature_id": {
+            "format": "uuid",
+            "title": "Legacy Curated Feature Id",
+            "type": "string"
+          },
+          "mapping_kind": {
+            "enum": [
+              "legacy_projection",
+              "official_membership",
+              "manual_membership"
+            ],
+            "title": "Mapping Kind",
+            "type": "string"
+          },
+          "source_row_hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Source Row Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "legacy_curated_feature_id",
+          "collection_id",
+          "curation_item_id",
+          "mapping_kind",
+          "source_row_hash"
+        ],
+        "title": "CurationCutoverIdentityMapping",
+        "type": "object"
+      },
+      "CurationCutoverIdentityMappingExport": {
+        "additionalProperties": false,
+        "description": "Maintenance-only closed keyset envelope for the paired PinVi backfill.",
+        "properties": {
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "mapping_count": {
+            "minimum": 0.0,
+            "title": "Mapping Count",
+            "type": "integer"
+          },
+          "mapping_root": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Mapping Root",
+            "type": "string"
+          },
+          "mapping_root_version": {
+            "const": "ktm-curation-cutover-mapping-v1",
+            "title": "Mapping Root Version",
+            "type": "string"
+          },
+          "mappings": {
+            "items": {
+              "$ref": "#/components/schemas/CurationCutoverIdentityMapping"
+            },
+            "maxItems": 200,
+            "title": "Mappings",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "mapping_root_version",
+          "mapping_count",
+          "mapping_root",
+          "mappings",
+          "next_cursor",
+          "complete"
+        ],
+        "title": "CurationCutoverIdentityMappingExport",
         "type": "object"
       },
       "CurationFeatureView": {
@@ -11166,6 +11771,11 @@
             "title": "Dry Run",
             "type": "boolean"
           },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
           "import_batch_id": {
             "anyOf": [
               {
@@ -11177,6 +11787,11 @@
               }
             ],
             "title": "Import Batch Id"
+          },
+          "import_plan_id": {
+            "format": "uuid",
+            "title": "Import Plan Id",
+            "type": "string"
           },
           "inserted": {
             "title": "Inserted",
@@ -11199,6 +11814,10 @@
             },
             "title": "Items",
             "type": "array"
+          },
+          "plan_etag": {
+            "title": "Plan Etag",
+            "type": "string"
           },
           "removals": {
             "items": {
@@ -11230,6 +11849,9 @@
         },
         "required": [
           "dry_run",
+          "import_plan_id",
+          "plan_etag",
+          "expires_at",
           "rows_total",
           "valid_rows",
           "invalid_rows",
@@ -11666,6 +12288,57 @@
         "title": "CurationItemCreateRequest",
         "type": "object"
       },
+      "CurationItemDetailSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "collection": {
+            "$ref": "#/components/schemas/CurationSnapshotCollection"
+          },
+          "collection_id": {
+            "format": "uuid",
+            "title": "Collection Id",
+            "type": "string"
+          },
+          "curation_item_id": {
+            "format": "uuid",
+            "title": "Curation Item Id",
+            "type": "string"
+          },
+          "etag": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Etag",
+            "type": "string"
+          },
+          "feature": {
+            "$ref": "#/components/schemas/CurationSnapshotFeature"
+          },
+          "item": {
+            "$ref": "#/components/schemas/CurationSnapshotItem"
+          },
+          "row_revision": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Row Revision",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "curation_item_id",
+          "collection_id",
+          "row_revision",
+          "etag",
+          "updated_at",
+          "collection",
+          "item",
+          "feature"
+        ],
+        "title": "CurationItemDetailSnapshot",
+        "type": "object"
+      },
       "CurationItemPatchRequest": {
         "additionalProperties": false,
         "properties": {
@@ -11946,9 +12619,32 @@
             "title": "Collection Id",
             "type": "string"
           },
+          "command_etag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Command Etag"
+          },
           "exists": {
             "title": "Exists",
             "type": "boolean"
+          },
+          "row_revision": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Row Revision"
           },
           "source": {
             "anyOf": [
@@ -12125,6 +12821,169 @@
           "visibility"
         ],
         "title": "CurationQuarantineThemeView",
+        "type": "object"
+      },
+      "CurationSnapshotCollection": {
+        "additionalProperties": false,
+        "properties": {
+          "edition_key": {
+            "maxLength": 100,
+            "title": "Edition Key",
+            "type": "string"
+          },
+          "theme_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Theme Name",
+            "type": "string"
+          },
+          "theme_slug": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Theme Slug",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "theme_slug",
+          "theme_name",
+          "title",
+          "edition_key"
+        ],
+        "title": "CurationSnapshotCollection",
+        "type": "object"
+      },
+      "CurationSnapshotFeature": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "additionalProperties": true,
+            "title": "Address",
+            "type": "object"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "title": "Detail",
+            "type": "object"
+          },
+          "feature_id": {
+            "format": "uuid",
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lat"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lon"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "source_record_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Record Key"
+          }
+        },
+        "required": [
+          "feature_id",
+          "name",
+          "category",
+          "kind",
+          "lon",
+          "lat",
+          "address",
+          "detail",
+          "source_record_key"
+        ],
+        "title": "CurationSnapshotFeature",
+        "type": "object"
+      },
+      "CurationSnapshotItem": {
+        "additionalProperties": false,
+        "properties": {
+          "feature_id": {
+            "format": "uuid",
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "relation": {
+            "title": "Relation",
+            "type": "string"
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "feature_id",
+          "relation",
+          "sort_order",
+          "title",
+          "summary"
+        ],
+        "title": "CurationSnapshotItem",
         "type": "object"
       },
       "DagsterGraphqlError": {
@@ -28716,42 +29575,6 @@
         "title": "ReviewSourceDetailRecord",
         "type": "object"
       },
-      "RuleApplyData": {
-        "additionalProperties": false,
-        "properties": {
-          "inserted_or_updated": {
-            "title": "Inserted Or Updated",
-            "type": "integer"
-          },
-          "rule_id": {
-            "title": "Rule Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "rule_id",
-          "inserted_or_updated"
-        ],
-        "title": "RuleApplyData",
-        "type": "object"
-      },
-      "RuleApplyResponse": {
-        "additionalProperties": false,
-        "properties": {
-          "data": {
-            "$ref": "#/components/schemas/RuleApplyData"
-          },
-          "meta": {
-            "$ref": "#/components/schemas/Meta"
-          }
-        },
-        "required": [
-          "data",
-          "meta"
-        ],
-        "title": "RuleApplyResponse",
-        "type": "object"
-      },
       "SigunguByRadiusScope": {
         "additionalProperties": false,
         "description": "kor-travel-geo가 계산한 반경 교차 시군구 기준 갱신 scope.",
@@ -28979,6 +29802,222 @@
           "meta"
         ],
         "title": "SystemLogsResponse",
+        "type": "object"
+      },
+      "ThemeCandidateCommandData": {
+        "additionalProperties": false,
+        "properties": {
+          "candidate_id": {
+            "format": "uuid",
+            "title": "Candidate Id",
+            "type": "string"
+          },
+          "candidate_revision": {
+            "title": "Candidate Revision",
+            "type": "string"
+          },
+          "curation_item_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Curation Item Id"
+          },
+          "curation_item_revision": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Curation Item Revision"
+          },
+          "transition_id": {
+            "title": "Transition Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "candidate_id",
+          "candidate_revision",
+          "transition_id"
+        ],
+        "title": "ThemeCandidateCommandData",
+        "type": "object"
+      },
+      "ThemeCandidateCommandResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ThemeCandidateCommandData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ThemeCandidateCommandResponse",
+        "type": "object"
+      },
+      "ThemeCandidatePromoteRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "address_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Hint"
+          },
+          "collection_id": {
+            "format": "uuid",
+            "title": "Collection Id",
+            "type": "string"
+          },
+          "collection_revision": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Collection Revision",
+            "type": "string"
+          },
+          "curation_relation": {
+            "enum": [
+              "primary_stop",
+              "food_stop",
+              "cafe_stop",
+              "bookstore_stop",
+              "nearby_option",
+              "accessibility_support",
+              "pet_support",
+              "family_support",
+              "theme_area_anchor"
+            ],
+            "title": "Curation Relation",
+            "type": "string"
+          },
+          "external_component_id": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "External Component Id",
+            "type": "string"
+          },
+          "external_item_id": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "External Item Id",
+            "type": "string"
+          },
+          "item_revision": {
+            "anyOf": [
+              {
+                "pattern": "^[1-9][0-9]*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Revision"
+          },
+          "item_status": {
+            "enum": [
+              "candidate",
+              "included"
+            ],
+            "title": "Item Status",
+            "type": "string"
+          },
+          "item_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Summary"
+          },
+          "item_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Title"
+          },
+          "place_name": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Place Name",
+            "type": "string"
+          },
+          "reason_code": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "reuse_policy": {
+            "enum": [
+              "allowed",
+              "blocked",
+              "manual_review"
+            ],
+            "title": "Reuse Policy",
+            "type": "string"
+          },
+          "sort_order": {
+            "minimum": 0.0,
+            "title": "Sort Order",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "collection_id",
+          "collection_revision",
+          "external_item_id",
+          "external_component_id",
+          "place_name",
+          "sort_order",
+          "curation_relation",
+          "reuse_policy",
+          "item_status",
+          "reason_code"
+        ],
+        "title": "ThemeCandidatePromoteRequest",
+        "type": "object"
+      },
+      "ThemeCandidateRejectRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "reason_code": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Reason Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason_code"
+        ],
+        "title": "ThemeCandidateRejectRequest",
         "type": "object"
       },
       "VersionData": {
@@ -30621,6 +31660,7 @@
             "schema": {
               "anyOf": [
                 {
+                  "format": "uuid",
                   "type": "string"
                 },
                 {
@@ -30653,6 +31693,7 @@
             "schema": {
               "anyOf": [
                 {
+                  "format": "uuid",
                   "type": "string"
                 },
                 {
@@ -30777,7 +31818,7 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "content": {
               "application/json": {
                 "schema": {
@@ -30785,7 +31826,15 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 retained catalog row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "422": {
             "content": {
@@ -30820,14 +31869,15 @@
       }
     },
     "/v1/admin/curated-source-rules/{rule_id}": {
-      "patch": {
-        "operationId": "patch_admin_curated_source_rule_route_v1_admin_curated_source_rules__rule_id__patch",
+      "delete": {
+        "operationId": "archive_admin_curated_source_rule_route_v1_admin_curated_source_rules__rule_id__delete",
         "parameters": [
           {
             "in": "path",
             "name": "rule_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Rule Id",
               "type": "string"
             }
@@ -30841,6 +31891,194 @@
               "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
               "format": "uuid",
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "직전 단건 GET body의 data.command_etag 또는 성공 응답 ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CuratedSourceRuleArchiveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CuratedSourceRuleResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 retained catalog row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "stale rule If-Match"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match 누락"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Archive Admin Curated Source Rule Route",
+        "tags": [
+          "admin-curated"
+        ]
+      },
+      "get": {
+        "operationId": "get_admin_curated_source_rule_route_v1_admin_curated_source_rules__rule_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CuratedSourceRuleResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 retained catalog row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Get Admin Curated Source Rule Route",
+        "tags": [
+          "admin-curated"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_admin_curated_source_rule_route_v1_admin_curated_source_rules__rule_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Rule Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "직전 단건 GET body의 data.command_etag 또는 성공 응답 ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
               "type": "string"
             }
           }
@@ -30864,7 +32102,25 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 retained catalog row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "stale rule If-Match"
           },
           "422": {
             "content": {
@@ -30875,6 +32131,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match 누락"
           },
           "default": {
             "content": {
@@ -30893,75 +32159,6 @@
           }
         ],
         "summary": "Patch Admin Curated Source Rule Route",
-        "tags": [
-          "admin-curated"
-        ]
-      }
-    },
-    "/v1/admin/curated-source-rules/{rule_id}/apply": {
-      "post": {
-        "operationId": "apply_admin_curated_source_rule_route_v1_admin_curated_source_rules__rule_id__apply_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "rule_id",
-            "required": true,
-            "schema": {
-              "title": "Rule Id",
-              "type": "string"
-            }
-          },
-          {
-            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": true,
-            "schema": {
-              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
-              "format": "uuid",
-              "title": "Idempotency-Key",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RuleApplyResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "security": [
-          {
-            "AdminBFF": []
-          }
-        ],
-        "summary": "Apply Admin Curated Source Rule Route",
         "tags": [
           "admin-curated"
         ]
@@ -31092,7 +32289,7 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "content": {
               "application/json": {
                 "schema": {
@@ -31100,7 +32297,15 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 retained catalog row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "422": {
             "content": {
@@ -31135,14 +32340,15 @@
       }
     },
     "/v1/admin/curated-sources/{source_id}": {
-      "patch": {
-        "operationId": "patch_admin_curated_source_route_v1_admin_curated_sources__source_id__patch",
+      "delete": {
+        "operationId": "archive_admin_curated_source_route_v1_admin_curated_sources__source_id__delete",
         "parameters": [
           {
             "in": "path",
             "name": "source_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Source Id",
               "type": "string"
             }
@@ -31156,6 +32362,189 @@
               "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
               "format": "uuid",
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "직전 단건 GET body의 data.command_etag 또는 성공 응답 ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CuratedSourceArchiveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CuratedSourceResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 retained catalog row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "stale source If-Match"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match 누락"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Archive Admin Curated Source Route",
+        "tags": [
+          "admin-curated"
+        ]
+      },
+      "get": {
+        "operationId": "get_admin_curated_source_route_v1_admin_curated_sources__source_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CuratedSourceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "304": {
+            "description": "representation ETag 일치"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Get Admin Curated Source Route",
+        "tags": [
+          "admin-curated"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_admin_curated_source_route_v1_admin_curated_sources__source_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "source_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Source Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "직전 단건 GET body의 data.command_etag 또는 성공 응답 ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
               "type": "string"
             }
           }
@@ -31179,7 +32568,25 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 retained catalog row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "stale source If-Match"
           },
           "422": {
             "content": {
@@ -31190,6 +32597,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match 누락"
           },
           "default": {
             "content": {
@@ -31335,7 +32752,7 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "content": {
               "application/json": {
                 "schema": {
@@ -31343,7 +32760,15 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 retained catalog row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "422": {
             "content": {
@@ -31378,14 +32803,15 @@
       }
     },
     "/v1/admin/curated-themes/{theme_id}": {
-      "patch": {
-        "operationId": "patch_admin_curated_theme_route_v1_admin_curated_themes__theme_id__patch",
+      "delete": {
+        "operationId": "archive_admin_curated_theme_route_v1_admin_curated_themes__theme_id__delete",
         "parameters": [
           {
             "in": "path",
             "name": "theme_id",
             "required": true,
             "schema": {
+              "format": "uuid",
               "title": "Theme Id",
               "type": "string"
             }
@@ -31399,6 +32825,194 @@
               "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
               "format": "uuid",
               "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "직전 단건 GET body의 data.command_etag 또는 성공 응답 ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CuratedThemeArchiveRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CuratedThemeResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 retained catalog row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "stale theme If-Match"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match 누락"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Archive Admin Curated Theme Route",
+        "tags": [
+          "admin-curated"
+        ]
+      },
+      "get": {
+        "operationId": "get_admin_curated_theme_route_v1_admin_curated_themes__theme_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "theme_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Theme Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CuratedThemeResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 retained catalog row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Get Admin Curated Theme Route",
+        "tags": [
+          "admin-curated"
+        ]
+      },
+      "patch": {
+        "operationId": "patch_admin_curated_theme_route_v1_admin_curated_themes__theme_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "theme_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Theme Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "직전 단건 GET body의 data.command_etag 또는 성공 응답 ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
               "type": "string"
             }
           }
@@ -31422,7 +33036,25 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 retained catalog row_revision strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "stale theme If-Match"
           },
           "422": {
             "content": {
@@ -31433,6 +33065,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match 누락"
           },
           "default": {
             "content": {
@@ -31682,7 +33324,15 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 응답 representation의 strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "422": {
             "content": {
@@ -31711,85 +33361,6 @@
           }
         ],
         "summary": "Create Admin Curation Collection",
-        "tags": [
-          "admin-curations"
-        ]
-      }
-    },
-    "/v1/admin/curations/import": {
-      "post": {
-        "description": "CSV+sidecar를 검증한 뒤 preview하거나 원자적으로 멱등 반영한다.",
-        "operationId": "import_admin_curations_v1_admin_curations_import_post",
-        "parameters": [
-          {
-            "in": "query",
-            "name": "dry_run",
-            "required": false,
-            "schema": {
-              "default": true,
-              "title": "Dry Run",
-              "type": "boolean"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Idempotency-Key",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "multipart/form-data": {
-              "schema": {
-                "$ref": "#/components/schemas/Body_import_admin_curations_v1_admin_curations_import_post"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/CurationImportResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "security": [
-          {
-            "AdminBFF": []
-          }
-        ],
-        "summary": "Import Admin Curations",
         "tags": [
           "admin-curations"
         ]
@@ -31854,6 +33425,115 @@
         ]
       }
     },
+    "/v1/admin/curations/import-plans/{import_plan_id}/commit": {
+      "post": {
+        "description": "stored normalized plan을 재해소 없이 exact revision vector 위에서 반영한다.",
+        "operationId": "commit_admin_curation_import_plan_v1_admin_curations_import_plans__import_plan_id__commit_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "import_plan_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Import Plan Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "preview 응답의 immutable import plan strong ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "pattern": "^\"sha256:[0-9a-f]{64}\"$",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurationImportResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 응답 representation의 strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "plan ETag/expiry/revision vector stale"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match 누락"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Commit Admin Curation Import Plan",
+        "tags": [
+          "admin-curations"
+        ]
+      }
+    },
     "/v1/admin/curations/import-template.csv": {
       "get": {
         "description": "큐레이션 import용 UTF-8 BOM CSV header를 내려준다.",
@@ -31887,6 +33567,85 @@
           }
         ],
         "summary": "Download Curation Import Template",
+        "tags": [
+          "admin-curations"
+        ]
+      }
+    },
+    "/v1/admin/curations/imports/preview": {
+      "post": {
+        "description": "CSV+sidecar를 한 번 해소해 immutable import plan으로 저장한다.",
+        "operationId": "preview_admin_curation_import_v1_admin_curations_imports_preview_post",
+        "parameters": [
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_preview_admin_curation_import_v1_admin_curations_imports_preview_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurationImportResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 응답 representation의 strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Preview Admin Curation Import",
         "tags": [
           "admin-curations"
         ]
@@ -32235,6 +33994,15 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "description": "직전 command ETag. 누락은 428, stale 값은 412.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -32256,7 +34024,25 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 응답 representation의 strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "collection revision 불일치"
           },
           "422": {
             "content": {
@@ -32267,6 +34053,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match 헤더 누락"
           },
           "default": {
             "content": {
@@ -32315,6 +34111,15 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "description": "직전 command ETag. 누락은 428, stale 값은 412.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -32326,7 +34131,25 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 응답 representation의 strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "stale collection If-Match"
           },
           "422": {
             "content": {
@@ -32337,6 +34160,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match 누락"
           },
           "default": {
             "content": {
@@ -32382,7 +34215,18 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 응답 representation의 strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "representation ETag 일치"
           },
           "422": {
             "content": {
@@ -32439,6 +34283,15 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "description": "직전 command ETag. 누락은 428, stale 값은 412.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -32460,7 +34313,25 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 응답 representation의 strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "stale collection If-Match"
           },
           "422": {
             "content": {
@@ -32471,6 +34342,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match 누락"
           },
           "default": {
             "content": {
@@ -32540,7 +34421,15 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 응답 representation의 strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
           },
           "422": {
             "content": {
@@ -32609,6 +34498,15 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "description": "직전 command ETag. 누락은 428, stale 값은 412.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -32620,7 +34518,25 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 응답 representation의 strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "stale item If-Match"
           },
           "422": {
             "content": {
@@ -32631,6 +34547,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match 누락"
           },
           "default": {
             "content": {
@@ -32687,6 +34613,15 @@
               "title": "Idempotency-Key",
               "type": "string"
             }
+          },
+          {
+            "description": "직전 command ETag. 누락은 428, stale 값은 412.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "requestBody": {
@@ -32708,7 +34643,25 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 응답 representation의 strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "stale item If-Match"
           },
           "422": {
             "content": {
@@ -32719,6 +34672,16 @@
               }
             },
             "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match 누락"
           },
           "default": {
             "content": {
@@ -39044,6 +41007,568 @@
         "summary": "Plan Restore Swap",
         "tags": [
           "admin-backups"
+        ]
+      }
+    },
+    "/v1/admin/theme-feature-candidates": {
+      "get": {
+        "operationId": "list_admin_theme_candidates_v1_admin_theme_feature_candidates_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "rule_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Rule Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "theme_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Theme Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "source_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Source Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "review_state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "open",
+                    "promoted",
+                    "rejected"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Review State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "eligibility_present",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Eligibility Present"
+            }
+          },
+          {
+            "in": "query",
+            "name": "feature_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Feature Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminThemeCandidatePageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "List Admin Theme Candidates",
+        "tags": [
+          "admin-curation-candidates"
+        ]
+      }
+    },
+    "/v1/admin/theme-feature-candidates/{candidate_id}": {
+      "get": {
+        "operationId": "get_admin_theme_candidate_v1_admin_theme_feature_candidates__candidate_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "candidate_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Candidate Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminThemeCandidateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "304": {
+            "description": "representation ETag 일치"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Get Admin Theme Candidate",
+        "tags": [
+          "admin-curation-candidates"
+        ]
+      }
+    },
+    "/v1/admin/theme-feature-candidates/{candidate_id}/promote": {
+      "post": {
+        "operationId": "promote_admin_theme_candidate_v1_admin_theme_feature_candidates__candidate_id__promote_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "candidate_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Candidate Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "직전 command ETag. 누락은 428, stale 값은 412.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ThemeCandidatePromoteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThemeCandidateCommandResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 응답 representation의 strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "stale candidate/collection/item revision"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match 누락"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Promote Admin Theme Candidate",
+        "tags": [
+          "admin-curation-candidates"
+        ]
+      }
+    },
+    "/v1/admin/theme-feature-candidates/{candidate_id}/reject": {
+      "post": {
+        "operationId": "reject_admin_theme_candidate_v1_admin_theme_feature_candidates__candidate_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "candidate_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Candidate Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          },
+          {
+            "description": "직전 command ETag. 누락은 428, stale 값은 412.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ThemeCandidateRejectRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThemeCandidateCommandResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 응답 representation의 strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "stale candidate If-Match"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "If-Match 누락"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Reject Admin Theme Candidate",
+        "tags": [
+          "admin-curation-candidates"
+        ]
+      }
+    },
+    "/v1/admin/theme-feature-candidates/{candidate_id}/transitions": {
+      "get": {
+        "operationId": "list_admin_theme_candidate_transitions_v1_admin_theme_feature_candidates__candidate_id__transitions_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "candidate_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Candidate Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "before_transition_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "exclusiveMinimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before Transition Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminThemeCandidateTransitionPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "List Admin Theme Candidate Transitions",
+        "tags": [
+          "admin-curation-candidates"
         ]
       }
     },
@@ -49246,6 +51771,24 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheTargetRestoreFenceResponse"
+                }
+              }
+            },
+            "description": "exact Idempotency-Key replay",
+            "headers": {
+              "ETag": {
+                "description": "현재 resource의 raw strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "201": {
             "content": {
               "application/json": {
@@ -49743,6 +52286,340 @@
           "service-cache-target-streams"
         ],
         "x-required-service-scope": "cache-target:command"
+      }
+    },
+    "/v1/service/curation-collections/{collection_id}/detail-snapshot": {
+      "get": {
+        "operationId": "get_curation_collection_detail_snapshot_v1_service_curation_collections__collection_id__detail_snapshot_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Collection Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^\"sha256:[0-9a-f]{64}\"$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurationCollectionDetailSnapshot"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "canonicalization v1 snapshot의 strong ETag.",
+                "schema": {
+                  "pattern": "^\"sha256:[0-9a-f]{64}\"$",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "첫 page collection ETag 일치",
+            "headers": {
+              "ETag": {
+                "description": "canonicalization v1 snapshot의 strong ETag.",
+                "schema": {
+                  "pattern": "^\"sha256:[0-9a-f]{64}\"$",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "cursor 이후 collection/item set 변경 — 첫 page부터 재시작"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "collection public item 수가 service snapshot 상한을 넘음 — collection을 분할해야 함"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Get Curation Collection Detail Snapshot",
+        "tags": [
+          "service-curation-snapshots"
+        ],
+        "x-required-service-scope": "pinvi:curation-snapshot:read"
+      }
+    },
+    "/v1/service/curation-cutover/identity-mappings": {
+      "get": {
+        "description": "Export the immutable Map→PinVi legacy identity mapping during T-VN-40C.\n\nThe relation itself is append-only and only migration owners can write it.\nA signed cursor binds every continuation page to the initial count/root;\nany maintenance-window drift is rejected instead of silently mixing maps.",
+        "operationId": "get_curation_cutover_identity_mappings_v1_service_curation_cutover_identity_mappings_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurationCutoverIdentityMappingExport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "cursor 이후 mapping count/root 변경 — 첫 page부터 maintenance export 재시작"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Get Curation Cutover Identity Mappings",
+        "tags": [
+          "service-curation-cutover"
+        ],
+        "x-required-service-scope": "pinvi:curation-cutover:read"
+      }
+    },
+    "/v1/service/curation-items/{curation_item_id}/detail-snapshot": {
+      "get": {
+        "operationId": "get_curation_item_detail_snapshot_v1_service_curation_items__curation_item_id__detail_snapshot_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "curation_item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Curation Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^\"sha256:[0-9a-f]{64}\"$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurationItemDetailSnapshot"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "canonicalization v1 snapshot의 strong ETag.",
+                "schema": {
+                  "pattern": "^\"sha256:[0-9a-f]{64}\"$",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "ETag 일치",
+            "headers": {
+              "ETag": {
+                "description": "canonicalization v1 snapshot의 strong ETag.",
+                "schema": {
+                  "pattern": "^\"sha256:[0-9a-f]{64}\"$",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Get Curation Item Detail Snapshot",
+        "tags": [
+          "service-curation-snapshots"
+        ],
+        "x-required-service-scope": "pinvi:curation-snapshot:read"
       }
     },
     "/v1/service/feature-alias-maps": {

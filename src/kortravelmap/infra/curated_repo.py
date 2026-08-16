@@ -32,34 +32,22 @@ __all__ = [
     "CuratedSource",
     "CuratedSourceRule",
     "CuratedTheme",
-    "CuratedFeatureCandidatesResult",
-    "CuratedFeatureStatusSweepResult",
-    "CuratedSourceMetadataRefreshResult",
     "CuratedFeatureDetailItem",
     "CuratedFeatureDetailSnapshot",
-    "CuratedFeatureDetailSnapshotMaterializeResult",
-    "RuleApplyResult",
     "archive_curated_feature",
-    "apply_enabled_curated_source_rules",
-    "apply_curated_source_rule",
     "create_curated_feature",
-    "create_curated_source",
-    "create_curated_source_rule",
-    "create_curated_theme",
+    "create_curated_source_rule_command",
     "get_curated_feature",
     "get_curated_feature_detail_snapshot",
+    "get_curated_source_rule",
     "list_curated_features",
     "list_curated_source_rules",
     "list_curated_sources",
     "list_curated_themes",
-    "materialize_curated_feature_detail_snapshots",
-    "refresh_curated_source_metadata",
     "set_curated_feature_status",
-    "sweep_curated_feature_status",
     "update_curated_feature",
-    "update_curated_source",
-    "update_curated_source_rule",
-    "update_curated_theme",
+    "patch_curated_source_rule_command",
+    "archive_curated_source_rule_command",
 ]
 
 CursorKind = Literal["curated_features"]
@@ -101,6 +89,7 @@ _PROVIDER_STATUSES: Final[frozenset[str]] = frozenset(
 _RULE_ACTIONS: Final[frozenset[str]] = frozenset(
     {"candidate", "curated", "ignore"}
 )
+_TYPED_RULE_ACTIONS: Final[frozenset[str]] = frozenset({"candidate", "ignore"})
 _MAX_PAGE_SIZE: Final[int] = 200
 _MAX_LIST_LIMIT: Final[int] = 500
 _CONCIERGE_PROVIDER: Final[str] = "kor-travel-concierge-youtube"
@@ -135,11 +124,14 @@ class CuratedTheme:
     theme_name: str
     theme_description: str
     theme_group: str
-    default_curated: bool
     visibility: str
     metadata: dict[str, Any]
     created_at: datetime
     updated_at: datetime
+    row_revision: int = 1
+    archived_at: datetime | None = None
+    owner_kind: str | None = None
+    owner_provider_dataset_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -164,6 +156,9 @@ class CuratedSource:
     metadata: dict[str, Any]
     created_at: datetime
     updated_at: datetime
+    row_revision: int = 1
+    observation_revision: int = 1
+    archived_at: datetime | None = None
 
 
 @dataclass(frozen=True)
@@ -187,6 +182,10 @@ class CuratedSourceRule:
     metadata: dict[str, Any]
     created_at: datetime
     updated_at: datetime
+    row_revision: int = 1
+    archived_at: datetime | None = None
+    owner_kind: str | None = None
+    owner_provider_dataset_id: int | None = None
 
 
 @dataclass(frozen=True)
@@ -276,88 +275,26 @@ class CuratedFeatureDetailSnapshot:
     items: tuple[CuratedFeatureDetailItem, ...]
 
 
-@dataclass(frozen=True)
-class RuleApplyResult:
-    """source rule apply 결과."""
-
-    rule_id: str
-    inserted_or_updated: int
-
-
-@dataclass(frozen=True)
-class CuratedSourceMetadataRefreshResult:
-    """curated source metadata refresh 결과."""
-
-    sources_checked: int
-    sources_with_records: int
-    source_records_total: int
-
-    def as_metadata(self) -> dict[str, object]:
-        """Dagster metadata로 바로 기록할 수 있는 summary."""
-        return {
-            "sources_checked": self.sources_checked,
-            "sources_with_records": self.sources_with_records,
-            "source_records_total": self.source_records_total,
-        }
-
-
-@dataclass(frozen=True)
-class CuratedFeatureCandidatesResult:
-    """enabled curated source rule 적용 결과."""
-
-    rules_applied: int
-    inserted_or_updated: int
-
-    def as_metadata(self) -> dict[str, object]:
-        """Dagster metadata로 바로 기록할 수 있는 summary."""
-        return {
-            "rules_applied": self.rules_applied,
-            "inserted_or_updated": self.inserted_or_updated,
-        }
-
-
-@dataclass(frozen=True)
-class CuratedFeatureStatusSweepResult:
-    """underlying feature 상태 변화에 따른 curated overlay archive 결과."""
-
-    archived: int
-
-    def as_metadata(self) -> dict[str, object]:
-        """Dagster metadata로 바로 기록할 수 있는 summary."""
-        return {"archived": self.archived}
-
-
-@dataclass(frozen=True)
-class CuratedFeatureDetailSnapshotMaterializeResult:
-    """curated feature detail snapshot cache materialize 결과."""
-
-    curated_features_total: int
-    snapshots_materialized: int
-
-    def as_metadata(self) -> dict[str, object]:
-        """Dagster metadata로 바로 기록할 수 있는 summary."""
-        return {
-            "curated_features_total": self.curated_features_total,
-            "snapshots_materialized": self.snapshots_materialized,
-        }
-
 
 _THEME_COLUMNS: Final[str] = (
     "theme_id::text AS theme_id, theme_slug, theme_name, theme_description, "
-    "theme_group, default_curated, visibility, metadata, created_at, updated_at"
+    "theme_group, visibility, metadata, created_at, updated_at, row_revision, "
+    "archived_at, owner_kind, owner_provider_dataset_id"
 )
 _SOURCE_COLUMNS: Final[str] = (
     "s.source_id::text AS source_id, s.provider_dataset_id, pd.provider, pd.dataset_key, "
     "s.source_name, s.source_url, s.source_kind, s.license, s.update_cycle, "
     "s.last_source_modified_at, s.last_checked_at, s.next_expected_at, s.row_count, "
-    "s.freshness_note, s.provider_status, s.metadata, s.created_at, s.updated_at"
+    "s.freshness_note, s.provider_status, s.metadata, s.created_at, s.updated_at, "
+    "s.row_revision, s.observation_revision, s.archived_at"
 )
 _RULE_COLUMNS: Final[str] = (
     "r.rule_id::text AS rule_id, r.theme_id::text AS theme_id, t.theme_slug, "
     "r.source_id::text AS source_id, s.provider_dataset_id, pd.provider, pd.dataset_key, "
     "r.place_kind, "
     "r.category, r.region_scope, r.detail_selector, r.default_action, "
-    "r.priority, r.enabled, r.metadata, r.created_at, r.updated_at"
+    "r.priority, r.enabled, r.metadata, r.created_at, r.updated_at, "
+    "r.row_revision, r.archived_at, r.owner_kind, r.owner_provider_dataset_id"
 )
 _FEATURE_COLUMNS: Final[str] = """
     cf.curated_feature_id::text AS curated_feature_id,
@@ -405,7 +342,7 @@ _FEATURE_COLUMNS: Final[str] = """
 # 공개 read는 ADR-067 단일 공개 projection(``feature.public_features``)만 조인해
 # 비공개(draft/broken/hidden/inactive/soft-deleted) feature의 큐레이션 노출을 막는다
 # (T-VN-04, F-1). admin read는 기존대로 base table을 조인해 전 상태를 본다 —
-# 상태 sweep(``sweep_curated_feature_status``) 사이 창에서도 공개 read가 새지 않는다.
+# legacy overlay 상태와 무관하게 공개 read가 새지 않는다.
 # admin reader는 core와 모든 typed subtype을 직접 LEFT JOIN해 detail을 조립한다.
 # public reader도 같은 ``typed`` alias를 제공해 두 select의 projection을 공유한다.
 _FEATURE_FROM_SQL: Final[str] = f"""
@@ -434,6 +371,8 @@ CROSS JOIN LATERAL (SELECT f.detail) AS typed
 _PUBLIC_FEATURE_FILTERS_SQL: Final[str] = (
     """
   AND t.visibility = 'public'
+  AND t.archived_at IS NULL
+  AND s.archived_at IS NULL
   AND cf.curation_status = 'curated'
   AND cf.archived_at IS NULL
   AND NOT cf.metadata @> '{"merge_projection_detached": true}'::jsonb
@@ -444,7 +383,8 @@ _PUBLIC_FEATURE_FILTERS_SQL: Final[str] = (
 _LIST_THEMES_SQL: Final[str] = f"""
 SELECT {_THEME_COLUMNS}
 FROM feature.curated_themes
-WHERE (CAST(:visibility AS text) IS NULL OR visibility = CAST(:visibility AS text))
+WHERE (CAST(:include_archived AS boolean) OR archived_at IS NULL)
+  AND (CAST(:visibility AS text) IS NULL OR visibility = CAST(:visibility AS text))
   AND (CAST(:theme_group AS text) IS NULL OR theme_group = CAST(:theme_group AS text))
 ORDER BY theme_group, theme_slug
 LIMIT :limit
@@ -456,6 +396,9 @@ FROM feature.curated_sources AS s
 JOIN provider_sync.provider_datasets AS pd
   ON pd.provider_dataset_id = s.provider_dataset_id
 WHERE (
+    CAST(:include_archived AS boolean) OR s.archived_at IS NULL
+)
+  AND (
     CAST(:provider_dataset_id AS bigint) IS NULL
     OR s.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
 )
@@ -483,6 +426,10 @@ JOIN feature.curated_sources AS s ON s.source_id = r.source_id
 JOIN provider_sync.provider_datasets AS pd
   ON pd.provider_dataset_id = s.provider_dataset_id
 WHERE (CAST(:theme_id AS uuid) IS NULL OR r.theme_id = CAST(:theme_id AS uuid))
+  AND (
+    CAST(:include_archived AS boolean)
+    OR (r.archived_at IS NULL AND t.archived_at IS NULL AND s.archived_at IS NULL)
+  )
   AND (
     CAST(:theme_slug AS text) IS NULL
     OR t.theme_slug = CAST(:theme_slug AS text)
@@ -658,332 +605,6 @@ WHERE curated_feature_id = CAST(:curated_feature_id AS uuid)
 RETURNING curated_feature_id::text
 """
 
-_APPLY_RULE_SQL: Final[str] = (
-    """
-WITH rule AS (
-    SELECT
-        r.rule_id,
-        r.theme_id,
-        r.source_id,
-        r.place_kind,
-        r.category,
-        r.region_scope,
-        r.detail_selector,
-        r.default_action,
-        r.priority,
-        COALESCE(
-            r.metadata ->> 'curation_relation',
-            'nearby_option'
-        ) AS relation,
-        COALESCE(
-            r.metadata ->> 'reuse_policy',
-            'manual_review'
-        ) AS reuse_policy
-    FROM feature.curated_source_rules AS r
-    WHERE r.rule_id = CAST(:rule_id AS uuid)
-      AND r.enabled
-      AND r.default_action IN ('candidate','curated')
-),
-candidates AS MATERIALIZED (
-    SELECT DISTINCT ON (f.feature_id)
-        rule.rule_id,
-        rule.theme_id,
-        rule.source_id,
-        rule.default_action,
-        rule.priority,
-        rule.relation,
-        rule.reuse_policy,
-        f.feature_id,
-        typed.detail AS feature_detail,
-        pd.provider,
-        pd.dataset_key,
-        sr.source_record_key
-    FROM rule
-    JOIN feature.curated_sources AS s ON s.source_id = rule.source_id
-    JOIN provider_sync.provider_datasets AS pd
-      ON pd.provider_dataset_id = s.provider_dataset_id
-    JOIN provider_sync.source_entities AS se
-      ON se.provider_dataset_id = s.provider_dataset_id
-    JOIN provider_sync.source_entity_heads AS head
-      ON head.source_entity_key = se.source_entity_key
-    JOIN provider_sync.source_records AS sr
-      ON sr.source_entity_key = se.source_entity_key
-     AND sr.source_record_key = head.current_source_record_key
-    JOIN provider_sync.source_links AS sl
-      ON sl.source_entity_key = se.source_entity_key
-    JOIN feature.features AS f ON f.feature_id = sl.feature_id
-    __TYPED_FEATURE_JOINS__
-    CROSS JOIN LATERAL (
-        SELECT __TYPED_FEATURE_DETAIL_COLUMNS__
-    ) AS typed
-    -- legacy `status = 'active'`의 3축 등가물은 세 축 전부다(0095 backfill:
-    -- draft→draft / hidden→suppressed / broken→quarantined). publication을 빼면
-    -- draft·suppressed feature가 큐레이션 후보로 올라온다.
-    WHERE f.lifecycle_state = 'active'
-      AND f.publication_state = 'published'
-      AND f.quality_state = 'valid'
-      AND (
-        rule.place_kind IS NULL
-        -- kind 판정은 typed 컬럼에서 한다 — 조립 detail을 술어로 읽으면
-        -- planner가 뷰의 subtype LEFT JOIN을 제거하지 못한다(T-VN-35).
-        OR p.place_kind = rule.place_kind
-        OR e.event_kind = rule.place_kind
-      )
-      AND (rule.category IS NULL OR f.category = rule.category)
-      AND (
-        rule.region_scope = '{}'::jsonb
-        OR (
-          (NOT rule.region_scope ? 'sido_code'
-           OR f.sido_code = rule.region_scope ->> 'sido_code')
-          AND (NOT rule.region_scope ? 'sigungu_code'
-           OR f.sigungu_code = rule.region_scope ->> 'sigungu_code')
-        )
-      )
-      AND (
-        rule.detail_selector IS NULL
-        OR typed.detail #>> ARRAY(
-             SELECT jsonb_array_elements_text(rule.detail_selector -> 'path')
-           ) = rule.detail_selector ->> 'value'
-      )
-      AND NOT EXISTS (
-        SELECT 1
-        FROM feature.curated_features AS old_cf
-        WHERE old_cf.theme_id = rule.theme_id
-          AND old_cf.feature_id = f.feature_id
-          AND old_cf.curation_status IN ('rejected','archived')
-      )
-    ORDER BY f.feature_id, (sl.source_role = 'primary') DESC, head.observed_at DESC,
-             sr.imported_at DESC
-),
-locked_candidates AS MATERIALIZED (
-    SELECT candidate.*
-    FROM candidates AS candidate
-    JOIN feature.features AS locked_feature
-      ON locked_feature.feature_id = candidate.feature_id
-    WHERE locked_feature.lifecycle_state = 'active'
-      AND locked_feature.publication_state = 'published'
-      AND locked_feature.quality_state = 'valid'
-    ORDER BY candidate.feature_id
-    FOR KEY SHARE OF locked_feature
-),
-upserted AS (
-    INSERT INTO feature.curated_features (
-        theme_id, feature_id, source_id, source_record_key, curation_status,
-        selection_origin, selected_at, rank_score, display_title,
-        curation_relation, reuse_policy, metadata, updated_at
-    )
-    SELECT
-        candidate.theme_id,
-        candidate.feature_id,
-        candidate.source_id,
-        candidate.source_record_key,
-        candidate.default_action,
-        'source_rule',
-        CASE WHEN candidate.default_action = 'curated' THEN now() ELSE NULL END,
-        candidate.priority,
-        CASE
-            WHEN candidate.provider = 'kor-travel-concierge-youtube'
-             AND candidate.dataset_key = 'youtube_place_candidates'
-            THEN NULLIF(BTRIM(COALESCE(
-                NULLIF(
-                    candidate.feature_detail #>>
-                        '{payload,kor_travel_concierge,youtube,source_title}',
-                    ''
-                ),
-                NULLIF(
-                    candidate.feature_detail #>>
-                        '{payload,kor_travel_concierge,youtube,playlist_title}',
-                    ''
-                ),
-                NULLIF(
-                    candidate.feature_detail #>>
-                        '{payload,kor_travel_concierge,youtube,channel_title}',
-                    ''
-                ),
-                NULLIF(
-                    candidate.feature_detail #>>
-                        '{payload,kor_travel_concierge,youtube,source_search_query}',
-                    ''
-                ),
-                NULLIF(
-                    candidate.feature_detail #>>
-                        '{payload,kor_travel_concierge,youtube,corrected_search_query}',
-                    ''
-                ),
-                NULLIF(
-                    candidate.feature_detail #>>
-                        '{payload,kor_travel_concierge,youtube,search_query}',
-                    ''
-                ),
-                NULLIF(
-                    candidate.feature_detail #>>
-                        '{facility_info,youtube_playlist_title}',
-                    ''
-                ),
-                NULLIF(
-                    candidate.feature_detail #>>
-                        '{facility_info,youtube_channel_title}',
-                    ''
-                )
-            )), '')
-            WHEN candidate.provider IN (
-                'data.go.kr-standard',
-                'python-airkorea-api',
-                'python-datagokr-api',
-                'python-kasi-api',
-                'python-khoa-api',
-                'python-kma-api',
-                'python-knps-api',
-                'python-krairport-api',
-                'python-krex-api',
-                'python-krforest-api',
-                'python-krheritage-api',
-                'python-mcst-api',
-                'python-mois-api',
-                'python-opinet-api',
-                'python-visitkorea-api'
-            ) THEN candidate.provider
-            ELSE NULL
-        END,
-        CASE
-            WHEN candidate.relation IN (
-                'primary_stop','food_stop','cafe_stop','bookstore_stop',
-                'nearby_option','accessibility_support','pet_support',
-                'family_support','theme_area_anchor'
-            ) THEN candidate.relation
-            ELSE 'nearby_option'
-        END,
-        CASE
-            WHEN candidate.reuse_policy IN ('allowed','blocked','manual_review')
-            THEN candidate.reuse_policy
-            ELSE 'manual_review'
-        END,
-        jsonb_build_object(
-            'rule_id',
-            candidate.rule_id::text,
-            'applied_by',
-            'source_rule'
-        ),
-        now()
-    FROM locked_candidates AS candidate
-    ON CONFLICT (theme_id, feature_id) WHERE archived_at IS NULL
-    DO UPDATE SET
-        source_id = EXCLUDED.source_id,
-        source_record_key = EXCLUDED.source_record_key,
-        rank_score = GREATEST(feature.curated_features.rank_score, EXCLUDED.rank_score),
-        display_title = COALESCE(
-            feature.curated_features.display_title,
-            EXCLUDED.display_title
-        ),
-        -- curation_relation/reuse_policy는 운영자 소유 필드다. source rule 재적재가
-        -- 이를 덮으면 canonical collection의 durable override와 양방향 동기화할
-        -- 때 provider refresh를 운영자 수정으로 오인하게 된다.
-        metadata = feature.curated_features.metadata || EXCLUDED.metadata,
-        updated_at = now(),
-        content_version = feature.curated_features.content_version + 1
-    WHERE feature.curated_features.curation_status NOT IN ('rejected','archived')
-    RETURNING curated_feature_id
-)
-SELECT count(*)::int AS affected_count FROM upserted
-"""
-    .replace("__TYPED_FEATURE_JOINS__", typed_feature_detail_joins_sql())
-    .replace("__TYPED_FEATURE_DETAIL_COLUMNS__", TYPED_FEATURE_DETAIL_COLUMNS_SQL)
-)
-
-_REFRESH_SOURCE_METADATA_SQL: Final[str] = """
-WITH source_scope AS (
-    SELECT s.source_id, s.provider_dataset_id
-    FROM feature.curated_sources AS s
-    WHERE (
-        CAST(:provider_dataset_id AS bigint) IS NULL
-        OR s.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
-    )
-),
-counted AS (
-    SELECT
-        s.source_id,
-        count(sr.source_record_key)::int AS record_count,
-        max(sr.imported_at) AS last_imported_at
-    FROM source_scope AS s
-    LEFT JOIN provider_sync.source_entities AS se
-      ON se.provider_dataset_id = s.provider_dataset_id
-    LEFT JOIN provider_sync.source_entity_heads AS head
-      ON head.source_entity_key = se.source_entity_key
-    LEFT JOIN provider_sync.source_records AS sr
-      ON sr.source_record_key = head.current_source_record_key
-    GROUP BY s.source_id
-),
-updated AS (
-    UPDATE feature.curated_sources AS s
-    SET
-        last_checked_at = now(),
-        row_count = CASE
-            WHEN c.record_count > 0 THEN c.record_count
-            ELSE s.row_count
-        END,
-        metadata = s.metadata || jsonb_build_object(
-            'source_record_count', c.record_count,
-            'last_record_imported_at', c.last_imported_at
-        ),
-        updated_at = now()
-    FROM counted AS c
-    WHERE s.source_id = c.source_id
-    RETURNING c.record_count
-)
-SELECT
-    count(*)::int AS sources_checked,
-    count(*) FILTER (WHERE record_count > 0)::int AS sources_with_records,
-    COALESCE(sum(record_count), 0)::int AS source_records_total
-FROM updated
-"""
-
-_SWEEP_CURATED_STATUS_SQL: Final[str] = """
-WITH archived AS (
-    UPDATE feature.curated_features AS cf
-    SET
-        curation_status = 'archived',
-        operator_updated_by = 'status-sweep',
-        operator_updated_at = clock_timestamp(),
-        archived_at = COALESCE(cf.archived_at, now()),
-        updated_at = now(),
-        content_version = cf.content_version + 1,
-        metadata = cf.metadata || jsonb_build_object(
-            'status_sweep', 'underlying_feature_inactive_or_deleted'
-        )
-    FROM feature.features AS f
-    WHERE cf.feature_id = f.feature_id
-      AND cf.archived_at IS NULL
-      AND cf.curation_status IN ('candidate','curated')
-      AND (
-          f.lifecycle_state <> 'active'
-          OR f.publication_state <> 'published'
-          OR f.quality_state <> 'valid'
-      )
-    RETURNING cf.curated_feature_id
-)
-SELECT count(*)::int AS archived_count FROM archived
-"""
-
-_UPSERT_FEATURE_DETAIL_SNAPSHOT_SQL: Final[str] = """
-INSERT INTO feature.curated_feature_detail_snapshots (
-    curated_feature_id, content_version, etag, snapshot, materialized_at, updated_at
-) VALUES (
-    CAST(:curated_feature_id AS uuid), :content_version, :etag,
-    CAST(:snapshot_json AS jsonb), now(), :updated_at
-)
-ON CONFLICT (curated_feature_id)
-DO UPDATE SET
-    content_version = EXCLUDED.content_version,
-    etag = EXCLUDED.etag,
-    snapshot = EXCLUDED.snapshot,
-    materialized_at = now(),
-    updated_at = EXCLUDED.updated_at
-WHERE feature.curated_feature_detail_snapshots.content_version IS DISTINCT FROM
-      EXCLUDED.content_version
-   OR feature.curated_feature_detail_snapshots.etag IS DISTINCT FROM EXCLUDED.etag
-RETURNING curated_feature_id::text AS curated_feature_id
-"""
-
 
 def _json_object(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
@@ -1114,11 +735,18 @@ def _theme(row: Any) -> CuratedTheme:
         theme_name=str(row["theme_name"]),
         theme_description=str(row["theme_description"]),
         theme_group=str(row["theme_group"]),
-        default_curated=bool(row["default_curated"]),
         visibility=str(row["visibility"]),
         metadata=_json_object(row["metadata"]),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        row_revision=int(row["row_revision"]),
+        archived_at=row["archived_at"],
+        owner_kind=_text(row["owner_kind"]),
+        owner_provider_dataset_id=(
+            int(row["owner_provider_dataset_id"])
+            if row["owner_provider_dataset_id"] is not None
+            else None
+        ),
     )
 
 
@@ -1142,6 +770,9 @@ def _source(row: Any) -> CuratedSource:
         metadata=_json_object(row["metadata"]),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        row_revision=int(row["row_revision"]),
+        observation_revision=int(row["observation_revision"]),
+        archived_at=row["archived_at"],
     )
 
 
@@ -1168,6 +799,14 @@ def _rule(row: Any) -> CuratedSourceRule:
         metadata=_json_object(row["metadata"]),
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        row_revision=int(row.get("row_revision", 1)),
+        archived_at=row.get("archived_at"),
+        owner_kind=_text(row.get("owner_kind")),
+        owner_provider_dataset_id=(
+            int(row["owner_provider_dataset_id"])
+            if row.get("owner_provider_dataset_id") is not None
+            else None
+        ),
     )
 
 
@@ -1223,10 +862,8 @@ def _feature(row: Any) -> CuratedFeature:
 def _snapshot_feature_ref(feature: CuratedFeature) -> str:
     """snapshot payload의 feature 참조 값 — UUID 정본 (T-VN-32C PR-2).
 
-    재물질화 전에 저장된 snapshot에는 legacy 값이 남아 있다 — 배포 후
-    ``materialize_curated_feature_detail_snapshots`` 일제 재실행(R6, etag churn
-    1회는 계획 비용)으로 전환한다. uuid 결측은 projection 누락이므로 legacy
-    값을 조용히 쓰지 않고 fail-close한다.
+    legacy cached snapshot은 T-VN-40 final cutover에서 제거한다. uuid 결측은
+    projection 누락이므로 legacy 값을 조용히 쓰지 않고 fail-close한다.
     """
     if not feature.feature_uuid:
         raise ValueError(
@@ -1321,32 +958,6 @@ def _feature_detail_snapshot(feature: CuratedFeature) -> CuratedFeatureDetailSna
     )
 
 
-def _feature_detail_snapshot_payload(
-    snapshot: CuratedFeatureDetailSnapshot,
-) -> dict[str, Any]:
-    return {
-        "curated_feature_id": snapshot.curated_feature_id,
-        "version": snapshot.version,
-        "etag": snapshot.etag,
-        "updated_at": snapshot.updated_at.isoformat(),
-        "theme": snapshot.theme,
-        "content": snapshot.content,
-        "source": snapshot.source,
-        "items": [
-            {
-                "curated_feature_item_id": item.curated_feature_item_id,
-                "feature_id": item.feature_id,
-                "relation": item.relation,
-                "sort_order": item.sort_order,
-                "day_index": item.day_index,
-                "memo": item.memo,
-                "feature_snapshot": item.feature_snapshot,
-                "source_record_key": item.source_record_key,
-            }
-            for item in snapshot.items
-        ],
-    }
-
 
 def _destination_name(feature: CuratedFeature) -> str | None:
     for key in ("admin", "road", "legal"):
@@ -1403,6 +1014,7 @@ async def list_curated_themes(
     *,
     visibility: str | None = None,
     theme_group: str | None = None,
+    include_archived: bool = False,
     limit: int = 200,
 ) -> tuple[CuratedTheme, ...]:
     """curated theme 목록을 조회한다."""
@@ -1415,6 +1027,7 @@ async def list_curated_themes(
             {
                 "visibility": visibility,
                 "theme_group": theme_group,
+                "include_archived": include_archived,
                 "limit": _safe_limit(limit),
             },
         )
@@ -1422,11 +1035,34 @@ async def list_curated_themes(
     return tuple(_theme(row) for row in rows)
 
 
+async def get_curated_theme(
+    session: AsyncSession,
+    *,
+    theme_id: str,
+) -> CuratedTheme | None:
+    """retained theme 단건을 revision/owner 축과 함께 조회한다."""
+
+    row = (
+        await session.execute(
+            text(
+                f"""
+                SELECT {_THEME_COLUMNS}
+                FROM feature.curated_themes
+                WHERE theme_id = CAST(:theme_id AS uuid)
+                """
+            ),
+            {"theme_id": theme_id},
+        )
+    ).mappings().first()
+    return _theme(row) if row is not None else None
+
+
 async def list_curated_sources(
     session: AsyncSession,
     *,
     provider_dataset_id: int | None = None,
     provider_status: str | None = None,
+    include_archived: bool = False,
     limit: int = 200,
 ) -> tuple[CuratedSource, ...]:
     """curated source metadata 목록을 조회한다."""
@@ -1439,6 +1075,7 @@ async def list_curated_sources(
             {
                 "provider_dataset_id": provider_dataset_id,
                 "provider_status": provider_status,
+                "include_archived": include_archived,
                 "limit": _safe_limit(limit),
             },
         )
@@ -1446,7 +1083,11 @@ async def list_curated_sources(
     return tuple(_source(row) for row in rows)
 
 
-async def _get_source(session: AsyncSession, source_id: str) -> CuratedSource | None:
+async def get_curated_source(
+    session: AsyncSession, *, source_id: str
+) -> CuratedSource | None:
+    """retained source 단건을 operator/observation revision과 함께 조회한다."""
+
     row = (
         await session.execute(text(_GET_SOURCE_SQL), {"source_id": source_id})
     ).mappings().first()
@@ -1461,6 +1102,7 @@ async def list_curated_source_rules(
     source_id: str | None = None,
     provider_dataset_id: int | None = None,
     enabled: bool | None = None,
+    include_archived: bool = False,
     limit: int = 200,
 ) -> tuple[CuratedSourceRule, ...]:
     """curated source rule 목록을 조회한다."""
@@ -1474,11 +1116,22 @@ async def list_curated_source_rules(
                 "source_id": source_id,
                 "provider_dataset_id": provider_dataset_id,
                 "enabled": enabled,
+                "include_archived": include_archived,
                 "limit": _safe_limit(limit),
             },
         )
     ).mappings().all()
     return tuple(_rule(row) for row in rows)
+
+
+async def get_curated_source_rule(
+    session: AsyncSession,
+    *,
+    rule_id: str,
+) -> CuratedSourceRule | None:
+    """retained source rule 단건을 조회한다."""
+
+    return await _get_rule(session, rule_id)
 
 
 async def list_curated_features(
@@ -1898,402 +1551,167 @@ async def archive_curated_feature(
     )
 
 
-async def apply_curated_source_rule(
-    session: AsyncSession,
-    *,
-    rule_id: str,
-) -> RuleApplyResult:
-    """source rule을 현재 feature/source link에 적용한다."""
 
-    row = (
-        await session.execute(text(_APPLY_RULE_SQL), {"rule_id": rule_id})
-    ).mappings().one()
-    return RuleApplyResult(
-        rule_id=rule_id,
-        inserted_or_updated=int(row["affected_count"]),
-    )
-
-
-async def refresh_curated_source_metadata(
-    session: AsyncSession,
-    *,
-    provider_dataset_id: int | None = None,
-) -> CuratedSourceMetadataRefreshResult:
-    """source_records 기준으로 curated source metadata를 갱신한다."""
-
-    row = (
-        await session.execute(
-            text(_REFRESH_SOURCE_METADATA_SQL),
-            {"provider_dataset_id": provider_dataset_id},
-        )
-    ).mappings().one()
-    return CuratedSourceMetadataRefreshResult(
-        sources_checked=int(row["sources_checked"]),
-        sources_with_records=int(row["sources_with_records"]),
-        source_records_total=int(row["source_records_total"]),
-    )
-
-
-async def apply_enabled_curated_source_rules(
-    session: AsyncSession,
-    *,
-    limit: int = 500,
-) -> CuratedFeatureCandidatesResult:
-    """enabled curated source rule을 현재 feature/source link에 적용한다."""
-
-    rules = await list_curated_source_rules(
-        session,
-        enabled=True,
-        limit=limit,
-    )
-    total = 0
-    for rule in rules:
-        result = await apply_curated_source_rule(session, rule_id=rule.rule_id)
-        total += result.inserted_or_updated
-    return CuratedFeatureCandidatesResult(
-        rules_applied=len(rules),
-        inserted_or_updated=total,
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class ConciergeThemeSyncResult:
-    """concierge youtube 그룹핑 → 테마/rule 동기화 결과."""
-
-    themes_upserted: int
-    rules_created: int
-    groupings: int
-
-    def as_metadata(self) -> dict[str, object]:
-        """Dagster metadata로 바로 기록할 수 있는 summary."""
-        return {
-            "themes_upserted": self.themes_upserted,
-            "rules_created": self.rules_created,
-            "groupings": self.groupings,
-        }
-
-
-# concierge youtube 그룹핑 → curated_theme/rule 동기화 설정.
-# (kind, detail id 필드, detail title 필드, theme_slug 접두).
-_CONCIERGE_THEME_KINDS: Final[tuple[tuple[str, str, str, str], ...]] = (
-    ("channel", "channel_id", "channel_title", "concierge-yt-"),
-    ("playlist", "playlist_id", "playlist_title", "concierge-pl-"),
-)
-
-
-async def _upsert_concierge_theme(
-    session: AsyncSession, *, slug: str, name: str, metadata: Mapping[str, Any]
-) -> str:
-    """concierge 그룹핑 테마를 slug 기준 upsert하고 theme_id 반환."""
-    row = (
-        await session.execute(
-            text(
-                """
-                INSERT INTO feature.curated_themes (
-                    theme_slug, theme_name, theme_description, theme_group,
-                    default_curated, visibility, metadata, updated_at
-                ) VALUES (
-                    :slug, :name, '', 'media', true, 'public',
-                    CAST(:metadata_json AS jsonb), now()
-                )
-                ON CONFLICT (theme_slug) DO UPDATE SET
-                    theme_name = EXCLUDED.theme_name,
-                    metadata = feature.curated_themes.metadata || EXCLUDED.metadata,
-                    updated_at = now()
-                RETURNING theme_id::text AS theme_id
-                """
-            ),
-            {"slug": slug, "name": name, "metadata_json": _json_dumps(dict(metadata))},
-        )
-    ).mappings().one()
-    return str(row["theme_id"])
-
-
-async def sync_concierge_themes(
-    session: AsyncSession, *, min_features: int = 1
-) -> ConciergeThemeSyncResult:
-    """이미 적재된 concierge youtube 후보 feature의 channel/playlist 그룹핑을
-    curated_theme + detail_selector rule로 동기화한다(멱등).
-
-    새 concierge API 호출 없이 ``features.detail`` 의 youtube 그룹핑 값(id+title)에서
-    직접 유도한다. 그룹핑마다 public ``media`` 테마 1개 + 그 grouping만 고르는
-    detail_selector rule(``default_action='curated'`` — auto-publish) 1개를 upsert하고,
-    apply로 후보 feature를 즉시 채운다.
-    """
-
-    provider_dataset_id = (
-        await session.execute(
-            text(
-                "SELECT provider_dataset_id FROM provider_sync.provider_datasets "
-                "WHERE provider = :provider AND dataset_key = :dataset_key"
-            ),
-            {"provider": _CONCIERGE_PROVIDER, "dataset_key": _CONCIERGE_DATASET_KEY},
-        )
-    ).scalar_one_or_none()
-    if provider_dataset_id is None:
-        return ConciergeThemeSyncResult(
-            themes_upserted=0, rules_created=0, groupings=0
-        )
-    sources = await list_curated_sources(
-        session,
-        provider_dataset_id=int(provider_dataset_id),
-        limit=1,
-    )
-    if not sources:
-        return ConciergeThemeSyncResult(
-            themes_upserted=0, rules_created=0, groupings=0
-        )
-    source_id = sources[0].source_id
-    base = ["payload", "kor_travel_concierge", "youtube"]
-
-    themes_upserted = 0
-    rules_created = 0
-    groupings = 0
-    for _kind, id_field, title_field, slug_prefix in _CONCIERGE_THEME_KINDS:
-        id_path = [*base, id_field]
-        title_path = [*base, title_field]
-        rows = (
-            await session.execute(
-                text(
-                    """
-                    SELECT
-                        typed.detail #>> CAST(:id_path AS text[]) AS gid,
-                        max(typed.detail #>> CAST(:title_path AS text[])) AS gtitle,
-                        count(*) AS cnt
-                    FROM feature.features AS f
-                    __TYPED_FEATURE_JOINS__
-                    CROSS JOIN LATERAL (
-                        SELECT __TYPED_FEATURE_DETAIL_COLUMNS__
-                    ) AS typed
-                    JOIN provider_sync.source_links AS sl
-                      ON sl.feature_id = f.feature_id
-                    JOIN provider_sync.source_entities AS se
-                      ON se.source_entity_key = sl.source_entity_key
-                    JOIN provider_sync.provider_datasets AS pd
-                      ON pd.provider_dataset_id = se.provider_dataset_id
-                    JOIN provider_sync.source_entity_heads AS head
-                      ON head.source_entity_key = se.source_entity_key
-                    JOIN provider_sync.source_records AS sr
-                      ON sr.source_entity_key = se.source_entity_key
-                     AND sr.source_record_key = head.current_source_record_key
-                    WHERE pd.provider_dataset_id = :provider_dataset_id
-                      AND f.lifecycle_state = 'active'
-                      AND f.publication_state = 'published'
-                      AND f.quality_state = 'valid'
-                      AND typed.detail #>> CAST(:id_path AS text[]) IS NOT NULL
-                    GROUP BY typed.detail #>> CAST(:id_path AS text[])
-                    HAVING count(*) >= :min_features
-                    """
-                        .replace(
-                            "__TYPED_FEATURE_JOINS__",
-                            typed_feature_detail_joins_sql(),
-                        )
-                        .replace(
-                            "__TYPED_FEATURE_DETAIL_COLUMNS__",
-                            TYPED_FEATURE_DETAIL_COLUMNS_SQL,
-                        )
-                ),
-                {
-                    "id_path": id_path,
-                    "title_path": title_path,
-                    "provider_dataset_id": int(provider_dataset_id),
-                    "min_features": min_features,
-                },
-            )
-        ).mappings().all()
-        for row in rows:
-            gid = str(row["gid"])
-            gtitle = str(row["gtitle"]) if row["gtitle"] else f"{slug_prefix}{gid}"
-            cnt = int(row["cnt"])
-            theme_id = await _upsert_concierge_theme(
-                session,
-                slug=f"{slug_prefix}{gid}",
-                name=gtitle,
-                metadata={
-                    "concierge_kind": _kind,
-                    "concierge_value": gid,
-                    "poi_count": cnt,
-                    "seed": "sync_concierge_themes",
-                },
-            )
-            themes_upserted += 1
-            groupings += 1
-            existing = (
-                await session.execute(
-                    text(
-                        """
-                        SELECT rule_id::text AS rule_id
-                        FROM feature.curated_source_rules
-                        WHERE theme_id = CAST(:theme_id AS uuid)
-                          AND source_id = CAST(:source_id AS uuid)
-                        LIMIT 1
-                        """
-                    ),
-                    {"theme_id": theme_id, "source_id": source_id},
-                )
-            ).mappings().first()
-            if existing is None:
-                rule = await create_curated_source_rule(
-                    session,
-                    theme_id=theme_id,
-                    source_id=source_id,
-                    place_kind="youtube_place_candidate",
-                    detail_selector={"path": id_path, "value": gid},
-                    default_action="curated",
-                    priority=cnt,
-                    metadata={"curation_relation": "theme_area_anchor"},
-                )
-                rule_id = rule.rule_id
-                rules_created += 1
-            else:
-                rule_id = str(existing["rule_id"])
-            await apply_curated_source_rule(session, rule_id=rule_id)
-
-    return ConciergeThemeSyncResult(
-        themes_upserted=themes_upserted,
-        rules_created=rules_created,
-        groupings=groupings,
-    )
-
-
-async def sweep_curated_feature_status(
-    session: AsyncSession,
-) -> CuratedFeatureStatusSweepResult:
-    """inactive/deleted feature가 가리키는 curated overlay를 archive한다."""
-
-    row = (
-        await session.execute(text(_SWEEP_CURATED_STATUS_SQL))
-    ).mappings().one()
-    return CuratedFeatureStatusSweepResult(archived=int(row["archived_count"]))
-
-
-async def materialize_curated_feature_detail_snapshots(
-    session: AsyncSession,
-    *,
-    theme_slug: str | None = None,
-    limit: int = 500,
-) -> CuratedFeatureDetailSnapshotMaterializeResult:
-    """curated feature detail snapshot을 cache table에 materialize한다."""
-
-    safe_limit = _safe_limit(limit)
-    cursor: str | None = None
-    features_seen = 0
-    snapshots_materialized = 0
-    while features_seen < safe_limit:
-        page_size = min(_MAX_PAGE_SIZE, safe_limit - features_seen)
-        page = await list_curated_features(
-            session,
-            theme_slug=theme_slug,
-            curation_status="curated",
-            page_size=page_size,
-            cursor=cursor,
-        )
-        if not page.items:
-            break
-        for feature in page.items:
-            snapshot = _feature_detail_snapshot(feature)
-            row = (
-                await session.execute(
-                    text(_UPSERT_FEATURE_DETAIL_SNAPSHOT_SQL),
-                    {
-                        "curated_feature_id": snapshot.curated_feature_id,
-                        "content_version": snapshot.version,
-                        "etag": snapshot.etag,
-                        "snapshot_json": json.dumps(
-                            _feature_detail_snapshot_payload(snapshot),
-                            ensure_ascii=False,
-                            sort_keys=True,
-                            default=str,
-                        ),
-                        "updated_at": snapshot.updated_at,
-                    },
-                )
-            ).mappings().first()
-            if row is not None:
-                snapshots_materialized += 1
-        features_seen += len(page.items)
-        if page.next_cursor is None:
-            break
-        cursor = page.next_cursor
-    return CuratedFeatureDetailSnapshotMaterializeResult(
-        curated_features_total=features_seen,
-        snapshots_materialized=snapshots_materialized,
-    )
-
-
-async def create_curated_theme(
+async def create_curated_theme_command(
     session: AsyncSession,
     *,
     theme_slug: str,
     theme_name: str,
-    theme_description: str = "",
+    theme_description: str,
     theme_group: str,
-    default_curated: bool = False,
-    visibility: str = "admin_only",
-    metadata: Mapping[str, Any] | None = None,
+    visibility: str,
+    metadata: Mapping[str, Any] | None,
+    command_id: int,
+    principal: str,
 ) -> CuratedTheme:
-    """curated theme를 생성한다."""
+    """domain command에 결박된 retained theme create를 실행한다."""
 
     _validate_choice(visibility, _THEME_VISIBILITIES, "visibility")
-    row = (
+    result = (
         await session.execute(
             text(
-                f"""
-                INSERT INTO feature.curated_themes (
-                    theme_slug, theme_name, theme_description, theme_group,
-                    default_curated, visibility, metadata, updated_at
-                ) VALUES (
-                    :theme_slug, :theme_name, :theme_description, :theme_group,
-                    :default_curated, :visibility, CAST(:metadata_json AS jsonb), now()
+                """
+                CALL feature.create_curated_theme_command(
+                  :theme_slug, :theme_name, :theme_description, :theme_group,
+                  :visibility, CAST(:metadata_json AS jsonb), :command_id,
+                  :principal, NULL, NULL
                 )
-                RETURNING {_THEME_COLUMNS}
                 """
             ),
             {
-                "theme_slug": theme_slug,
-                "theme_name": theme_name,
+                "command_id": command_id,
+                "metadata_json": _json_dumps(metadata),
+                "principal": principal,
                 "theme_description": theme_description,
                 "theme_group": theme_group,
-                "default_curated": default_curated,
+                "theme_name": theme_name,
+                "theme_slug": theme_slug,
                 "visibility": visibility,
-                "metadata_json": _json_dumps(metadata),
             },
         )
     ).mappings().one()
-    return _theme(row)
+    theme = await get_curated_theme(session, theme_id=str(result["o_theme_id"]))
+    if theme is None:
+        raise RuntimeError("created curated theme could not be read")
+    return theme
 
 
-async def update_curated_theme(
+async def patch_curated_theme_command(
     session: AsyncSession,
     *,
     theme_id: str,
+    expected_revision: int,
     updates: Mapping[str, Any],
+    command_id: int,
+    principal: str,
 ) -> CuratedTheme | None:
-    """curated theme를 부분 수정한다."""
+    """현재 theme를 full desired input으로 만들어 strong CAS patch한다."""
 
     allowed = {
         "theme_slug",
         "theme_name",
         "theme_description",
         "theme_group",
-        "default_curated",
         "visibility",
         "metadata",
     }
-    row = await _update_simple(
-        session,
-        table="feature.curated_themes",
-        id_column="theme_id",
-        id_value=theme_id,
-        updates=updates,
-        allowed=allowed,
-        choice_fields={"visibility": _THEME_VISIBILITIES},
-        returning=_THEME_COLUMNS,
-    )
-    return _theme(row) if row is not None else None
+    unknown = set(updates) - allowed
+    if unknown:
+        raise ValueError(f"unsupported update fields: {sorted(unknown)}")
+    current = await get_curated_theme(session, theme_id=theme_id)
+    if current is None:
+        return None
+    desired: dict[str, Any] = {
+        "theme_slug": current.theme_slug,
+        "theme_name": current.theme_name,
+        "theme_description": current.theme_description,
+        "theme_group": current.theme_group,
+        "visibility": current.visibility,
+        "metadata": current.metadata,
+    }
+    desired.update(updates)
+    for field_name in (
+        "theme_slug",
+        "theme_name",
+        "theme_description",
+        "theme_group",
+        "visibility",
+        "metadata",
+    ):
+        if desired[field_name] is None:
+            raise ValueError(f"{field_name} must not be null")
+    _validate_choice(str(desired["visibility"]), _THEME_VISIBILITIES, "visibility")
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.patch_curated_theme_command(
+                  CAST(:theme_id AS uuid), :expected_revision, :theme_slug,
+                  :theme_name, :theme_description, :theme_group, :visibility,
+                  CAST(:metadata_json AS jsonb), :command_id, :principal,
+                  NULL, NULL, NULL
+                )
+                """
+            ),
+            {
+                "command_id": command_id,
+                "expected_revision": expected_revision,
+                "metadata_json": _json_dumps(desired["metadata"]),
+                "principal": principal,
+                "theme_description": desired["theme_description"],
+                "theme_group": desired["theme_group"],
+                "theme_id": theme_id,
+                "theme_name": desired["theme_name"],
+                "theme_slug": desired["theme_slug"],
+                "visibility": desired["visibility"],
+            },
+        )
+    ).mappings().one()
+    updated = await get_curated_theme(session, theme_id=str(result["o_theme_id"]))
+    if updated is None:
+        raise RuntimeError("patched curated theme could not be read")
+    return updated
 
 
-async def create_curated_source(
+async def archive_curated_theme_command(
+    session: AsyncSession,
+    *,
+    theme_id: str,
+    expected_revision: int,
+    command_id: int,
+    reason_code: str,
+    principal: str,
+) -> CuratedTheme | None:
+    """retained theme를 archive하고 affected rule을 원자 reconcile한다."""
+
+    if await get_curated_theme(session, theme_id=theme_id) is None:
+        return None
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.archive_curated_theme_command(
+                  CAST(:theme_id AS uuid), :expected_revision, :command_id,
+                  :reason_code, :principal, NULL, NULL, NULL
+                )
+                """
+            ),
+            {
+                "command_id": command_id,
+                "expected_revision": expected_revision,
+                "principal": principal,
+                "reason_code": reason_code,
+                "theme_id": theme_id,
+            },
+        )
+    ).mappings().one()
+    archived = await get_curated_theme(session, theme_id=str(result["o_theme_id"]))
+    if archived is None:
+        raise RuntimeError("archived curated theme could not be read")
+    return archived
+
+
+async def create_curated_source_command(
     session: AsyncSession,
     *,
     provider_dataset_id: int,
@@ -2302,67 +1720,62 @@ async def create_curated_source(
     source_kind: str,
     license: str | None = None,
     update_cycle: str = "unknown",
-    last_source_modified_at: date | None = None,
-    last_checked_at: datetime | None = None,
-    next_expected_at: date | None = None,
-    row_count: int | None = None,
     freshness_note: str | None = None,
     provider_status: str = "implemented",
     metadata: Mapping[str, Any] | None = None,
+    command_id: int,
+    principal: str,
 ) -> CuratedSource:
-    """curated source metadata를 생성한다."""
+    """operator source catalog row를 typed command로 생성한다."""
 
     _validate_choice(source_kind, _SOURCE_KINDS, "source_kind")
     _validate_choice(update_cycle, _UPDATE_CYCLES, "update_cycle")
     _validate_choice(provider_status, _PROVIDER_STATUSES, "provider_status")
-    row = (
+    result = (
         await session.execute(
             text(
                 """
-                INSERT INTO feature.curated_sources (
-                    provider_dataset_id, source_name, source_url, source_kind,
-                    license, update_cycle, last_source_modified_at, last_checked_at,
-                    next_expected_at, row_count, freshness_note, provider_status,
-                    metadata, updated_at
-                ) VALUES (
-                    :provider_dataset_id, :source_name, :source_url, :source_kind,
-                    :license, :update_cycle, :last_source_modified_at, :last_checked_at,
-                    :next_expected_at, :row_count, :freshness_note, :provider_status,
-                    CAST(:metadata_json AS jsonb), now()
+                CALL feature.create_curated_source_command(
+                  :provider_dataset_id, :source_name, :source_url, :source_kind,
+                  :license, :update_cycle, :freshness_note, :provider_status,
+                  CAST(:metadata_json AS jsonb), :command_id, :principal,
+                  NULL, NULL, NULL
                 )
-                RETURNING source_id::text AS source_id
                 """
             ),
             {
+                "command_id": command_id,
+                "freshness_note": freshness_note,
+                "license": license,
+                "metadata_json": _json_dumps(metadata),
+                "principal": principal,
                 "provider_dataset_id": provider_dataset_id,
+                "provider_status": provider_status,
+                "source_kind": source_kind,
                 "source_name": source_name,
                 "source_url": source_url,
-                "source_kind": source_kind,
-                "license": license,
                 "update_cycle": update_cycle,
-                "last_source_modified_at": last_source_modified_at,
-                "last_checked_at": last_checked_at,
-                "next_expected_at": next_expected_at,
-                "row_count": row_count,
-                "freshness_note": freshness_note,
-                "provider_status": provider_status,
-                "metadata_json": _json_dumps(metadata),
             },
         )
     ).mappings().one()
-    created = await _get_source(session, str(row["source_id"]))
+    created = await get_curated_source(
+        session, source_id=str(result["o_source_id"])
+    )
     if created is None:
         raise RuntimeError("created curated source could not be read")
     return created
 
 
-async def update_curated_source(
+async def patch_curated_source_command(
     session: AsyncSession,
     *,
     source_id: str,
+    expected_revision: int,
     updates: Mapping[str, Any],
+    command_id: int,
+    principal: str,
 ) -> CuratedSource | None:
-    """curated source metadata를 부분 수정한다."""
+    """operator source fields만 CAS patch하고 observation 필드는 보존한다."""
 
     allowed = {
         "source_name",
@@ -2370,32 +1783,110 @@ async def update_curated_source(
         "source_kind",
         "license",
         "update_cycle",
-        "last_source_modified_at",
-        "last_checked_at",
-        "next_expected_at",
-        "row_count",
         "freshness_note",
         "provider_status",
         "metadata",
     }
-    row = await _update_simple(
-        session,
-        table="feature.curated_sources",
-        id_column="source_id",
-        id_value=source_id,
-        updates=updates,
-        allowed=allowed,
-        choice_fields={
-            "source_kind": _SOURCE_KINDS,
-            "update_cycle": _UPDATE_CYCLES,
-            "provider_status": _PROVIDER_STATUSES,
-        },
-        returning="source_id::text AS source_id",
+    unknown = set(updates) - allowed
+    if unknown:
+        raise ValueError(f"unsupported update fields: {sorted(unknown)}")
+    current = await get_curated_source(session, source_id=source_id)
+    if current is None:
+        return None
+    desired: dict[str, Any] = {
+        "source_name": current.source_name,
+        "source_url": current.source_url,
+        "source_kind": current.source_kind,
+        "license": current.license,
+        "update_cycle": current.update_cycle,
+        "freshness_note": current.freshness_note,
+        "provider_status": current.provider_status,
+        "metadata": current.metadata,
+    }
+    desired.update(updates)
+    _validate_choice(str(desired["source_kind"]), _SOURCE_KINDS, "source_kind")
+    _validate_choice(str(desired["update_cycle"]), _UPDATE_CYCLES, "update_cycle")
+    _validate_choice(
+        str(desired["provider_status"]), _PROVIDER_STATUSES, "provider_status"
     )
-    return await _get_source(session, str(row["source_id"])) if row is not None else None
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.patch_curated_source_command(
+                  CAST(:source_id AS uuid), :expected_revision,
+                  :source_name, :source_url, :source_kind, :license,
+                  :update_cycle, :freshness_note, :provider_status,
+                  CAST(:metadata_json AS jsonb), :command_id, :principal,
+                  NULL, NULL, NULL
+                )
+                """
+            ),
+            {
+                "command_id": command_id,
+                "expected_revision": expected_revision,
+                "freshness_note": desired["freshness_note"],
+                "license": desired["license"],
+                "metadata_json": _json_dumps(desired["metadata"]),
+                "principal": principal,
+                "provider_status": desired["provider_status"],
+                "source_id": source_id,
+                "source_kind": desired["source_kind"],
+                "source_name": desired["source_name"],
+                "source_url": desired["source_url"],
+                "update_cycle": desired["update_cycle"],
+            },
+        )
+    ).mappings().one()
+    patched = await get_curated_source(
+        session, source_id=str(result["o_source_id"])
+    )
+    if patched is None:
+        raise RuntimeError("patched curated source could not be read")
+    return patched
 
 
-async def create_curated_source_rule(
+async def archive_curated_source_command(
+    session: AsyncSession,
+    *,
+    source_id: str,
+    expected_revision: int,
+    command_id: int,
+    reason_code: str,
+    principal: str,
+) -> CuratedSource | None:
+    """source archive와 dependent candidate reconcile을 원자 수행한다."""
+
+    if await get_curated_source(session, source_id=source_id) is None:
+        return None
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.archive_curated_source_command(
+                  CAST(:source_id AS uuid), :expected_revision, :command_id,
+                  :reason_code, :principal, NULL, NULL, NULL, NULL
+                )
+                """
+            ),
+            {
+                "command_id": command_id,
+                "expected_revision": expected_revision,
+                "principal": principal,
+                "reason_code": reason_code,
+                "source_id": source_id,
+            },
+        )
+    ).mappings().one()
+    archived = await get_curated_source(
+        session, source_id=str(result["o_source_id"])
+    )
+    if archived is None:
+        raise RuntimeError("archived curated source could not be read")
+    return archived
+
+
+async def create_curated_source_rule_command(
     session: AsyncSession,
     *,
     theme_id: str,
@@ -2408,26 +1899,23 @@ async def create_curated_source_rule(
     priority: int = 0,
     enabled: bool = True,
     metadata: Mapping[str, Any] | None = None,
+    command_id: int,
+    principal: str,
 ) -> CuratedSourceRule:
-    """curated source rule을 생성한다."""
+    """domain command에 결박된 retained source rule create를 실행한다."""
 
-    _validate_choice(default_action, _RULE_ACTIONS, "default_action")
-    row = (
+    _validate_choice(default_action, _TYPED_RULE_ACTIONS, "default_action")
+    result = (
         await session.execute(
             text(
                 """
-                INSERT INTO feature.curated_source_rules (
-                    theme_id, source_id, place_kind, category,
-                    region_scope, detail_selector, default_action, priority,
-                    enabled, metadata, updated_at
-                ) VALUES (
-                    CAST(:theme_id AS uuid), CAST(:source_id AS uuid),
-                    :place_kind, :category, CAST(:region_scope_json AS jsonb),
-                    CAST(:detail_selector_json AS jsonb),
-                    :default_action, :priority, :enabled,
-                    CAST(:metadata_json AS jsonb), now()
+                CALL feature.create_curated_source_rule_command(
+                  CAST(:theme_id AS uuid), CAST(:source_id AS uuid),
+                  :place_kind, :category, CAST(:region_scope_json AS jsonb),
+                  CAST(:detail_selector_json AS jsonb), :default_action,
+                  :priority, :enabled, CAST(:metadata_json AS jsonb),
+                  :command_id, :principal, NULL, NULL, NULL
                 )
-                RETURNING rule_id::text AS rule_id
                 """
             ),
             {
@@ -2437,35 +1925,35 @@ async def create_curated_source_rule(
                 "category": category,
                 "region_scope_json": _json_dumps(region_scope),
                 "detail_selector_json": (
-                    _json_dumps(detail_selector) if detail_selector else None
+                    _json_dumps(detail_selector)
+                    if detail_selector is not None
+                    else None
                 ),
                 "default_action": default_action,
                 "priority": priority,
                 "enabled": enabled,
                 "metadata_json": _json_dumps(metadata),
+                "command_id": command_id,
+                "principal": principal,
             },
         )
     ).mappings().one()
-    rules = await list_curated_source_rules(
-        session,
-        limit=1,
-    )
-    created = [rule for rule in rules if rule.rule_id == str(row["rule_id"])]
-    if created:
-        return created[0]
-    refreshed = await _get_rule(session, str(row["rule_id"]))
-    if refreshed is None:
+    rule = await _get_rule(session, str(result["o_rule_id"]))
+    if rule is None:
         raise RuntimeError("created curated source rule could not be read")
-    return refreshed
+    return rule
 
 
-async def update_curated_source_rule(
+async def patch_curated_source_rule_command(
     session: AsyncSession,
     *,
     rule_id: str,
+    expected_revision: int,
     updates: Mapping[str, Any],
+    command_id: int,
+    principal: str,
 ) -> CuratedSourceRule | None:
-    """curated source rule을 부분 수정한다."""
+    """현재 row를 full desired command input으로 만든 뒤 CAS patch한다."""
 
     allowed = {
         "place_kind",
@@ -2477,19 +1965,102 @@ async def update_curated_source_rule(
         "enabled",
         "metadata",
     }
-    row = await _update_simple(
-        session,
-        table="feature.curated_source_rules",
-        id_column="rule_id",
-        id_value=rule_id,
-        updates=updates,
-        allowed=allowed,
-        choice_fields={"default_action": _RULE_ACTIONS},
-        returning="rule_id::text AS rule_id",
-    )
-    if row is None:
+    unknown = set(updates) - allowed
+    if unknown:
+        raise ValueError(f"unsupported update fields: {sorted(unknown)}")
+    current = await _get_rule(session, rule_id)
+    if current is None:
         return None
-    return await _get_rule(session, str(row["rule_id"]))
+    desired: dict[str, Any] = {
+        "place_kind": current.place_kind,
+        "category": current.category,
+        "region_scope": current.region_scope,
+        "detail_selector": current.detail_selector,
+        "default_action": current.default_action,
+        "priority": current.priority,
+        "enabled": current.enabled,
+        "metadata": current.metadata,
+    }
+    desired.update(updates)
+    default_action = desired["default_action"]
+    if not isinstance(default_action, str):
+        raise ValueError("default_action must not be null")
+    _validate_choice(default_action, _TYPED_RULE_ACTIONS, "default_action")
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.patch_curated_source_rule_command(
+                  CAST(:rule_id AS uuid), :expected_revision,
+                  :place_kind, :category, CAST(:region_scope_json AS jsonb),
+                  CAST(:detail_selector_json AS jsonb), :default_action,
+                  :priority, :enabled, CAST(:metadata_json AS jsonb),
+                  :command_id, :principal, NULL, NULL, NULL
+                )
+                """
+            ),
+            {
+                "rule_id": rule_id,
+                "expected_revision": expected_revision,
+                "place_kind": desired["place_kind"],
+                "category": desired["category"],
+                "region_scope_json": _json_dumps(desired["region_scope"]),
+                "detail_selector_json": (
+                    _json_dumps(desired["detail_selector"])
+                    if desired["detail_selector"] is not None
+                    else None
+                ),
+                "default_action": default_action,
+                "priority": desired["priority"],
+                "enabled": desired["enabled"],
+                "metadata_json": _json_dumps(desired["metadata"]),
+                "command_id": command_id,
+                "principal": principal,
+            },
+        )
+    ).mappings().one()
+    updated = await _get_rule(session, str(result["o_rule_id"]))
+    if updated is None:
+        raise RuntimeError("patched curated source rule could not be read")
+    return updated
+
+
+async def archive_curated_source_rule_command(
+    session: AsyncSession,
+    *,
+    rule_id: str,
+    expected_revision: int,
+    command_id: int,
+    reason_code: str,
+    principal: str,
+) -> CuratedSourceRule | None:
+    """retained source rule을 CAS archive하고 candidate reconcile을 완료한다."""
+
+    if await _get_rule(session, rule_id) is None:
+        return None
+    result = (
+        await session.execute(
+            text(
+                """
+                CALL feature.archive_curated_source_rule_command(
+                  CAST(:rule_id AS uuid), :expected_revision, :command_id,
+                  :reason_code, :principal, NULL, NULL, NULL
+                )
+                """
+            ),
+            {
+                "rule_id": rule_id,
+                "expected_revision": expected_revision,
+                "command_id": command_id,
+                "reason_code": reason_code,
+                "principal": principal,
+            },
+        )
+    ).mappings().one()
+    archived = await _get_rule(session, str(result["o_rule_id"]))
+    if archived is None:
+        raise RuntimeError("archived curated source rule could not be read")
+    return archived
 
 
 async def _get_rule(session: AsyncSession, rule_id: str) -> CuratedSourceRule | None:

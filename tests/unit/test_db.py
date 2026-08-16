@@ -15,6 +15,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 import kortravelmap.infra.db as db_module
 from kortravelmap.infra.db import (
+    _EXPECTED_RUNTIME_APPLICATION_PROCEDURES,
+    _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS,
     _RUNTIME_DB_PRIVILEGE_SQL,
     _runtime_db_privilege_problems,
     make_async_engine,
@@ -137,12 +139,14 @@ def test_make_async_engine_passes_copied_server_settings(
 # -- ADR-090 runtime privilege preflight -----------------------------------
 
 
-def _runtime_privilege_row() -> dict[str, object]:
-    """정상 API runtime catalog receipt의 최소 모형."""
+def _runtime_privilege_row(
+    login: str = "ktm_feature_api_runtime",
+) -> dict[str, object]:
+    """정상 runtime catalog receipt의 최소 모형."""
 
     return {
-        "session_user": "ktm_feature_api_runtime",
-        "current_user": "ktm_feature_api_runtime",
+        "session_user": login,
+        "current_user": login,
         "is_superuser": False,
         "can_create_role": False,
         "bypasses_rls": False,
@@ -161,7 +165,12 @@ def _runtime_privilege_row() -> dict[str, object]:
         "can_execute_field_override_revoke_procedure": True,
         "can_execute_admin_transition_procedure": True,
         "can_execute_admin_reactivation_procedure": True,
-        "can_execute_unintended_feature_procedure": False,
+        "executable_application_procedures": sorted(
+            _EXPECTED_RUNTIME_APPLICATION_PROCEDURES[login]
+        ),
+        "executable_application_security_definer_functions": sorted(
+            _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS[login]
+        ),
         "can_insert_feature_directly": False,
         "can_update_lifecycle_directly": False,
         "can_update_publication_directly": False,
@@ -197,7 +206,20 @@ def test_runtime_privilege_preflight_requires_procedures_but_denies_direct_dml()
     row["can_execute_field_override_revoke_procedure"] = False
     row["can_execute_admin_transition_procedure"] = False
     row["can_execute_admin_reactivation_procedure"] = False
-    row["can_execute_unintended_feature_procedure"] = True
+    executable_application_procedures = row["executable_application_procedures"]
+    assert isinstance(executable_application_procedures, list)
+    row["executable_application_procedures"] = [
+        *executable_application_procedures,
+        "feature.unintended_runtime_procedure()",
+    ]
+    executable_functions = row[
+        "executable_application_security_definer_functions"
+    ]
+    assert isinstance(executable_functions, list)
+    row["executable_application_security_definer_functions"] = [
+        *executable_functions,
+        "ops.unintended_runtime_function()",
+    ]
     problems = _runtime_db_privilege_problems(
         row,
         expected_login="ktm_feature_api_runtime",
@@ -223,7 +245,70 @@ def test_runtime_privilege_preflight_requires_procedures_but_denies_direct_dml()
     assert "runtime login must EXECUTE revoke_feature_field_overrides" in problems
     assert "runtime login must EXECUTE transition_admin_feature_state" in problems
     assert "runtime login must EXECUTE reactivate_admin_feature_state" in problems
-    assert "runtime login must not EXECUTE an unintended feature procedure" in problems
+    assert any(
+        problem.startswith(
+            "runtime login must not EXECUTE unexpected application procedures: "
+        )
+        for problem in problems
+    )
+    assert any(
+        "unexpected application SECURITY DEFINER functions" in problem
+        for problem in problems
+    )
+
+
+@pytest.mark.unit
+def test_runtime_privilege_preflight_uses_role_specific_exact_procedure_sets() -> None:
+    api_row = _runtime_privilege_row()
+    dagster_row = _runtime_privilege_row("ktm_feature_dagster_runtime")
+
+    assert _runtime_db_privilege_problems(
+        api_row,
+        expected_login="ktm_feature_api_runtime",
+    ) == []
+    assert _runtime_db_privilege_problems(
+        dagster_row,
+        expected_login="ktm_feature_dagster_runtime",
+    ) == []
+
+    dagster_procedures = list(dagster_row["executable_application_procedures"])
+    dagster_procedures.append(
+        "feature.reject_theme_feature_candidate(uuid,bigint,bigint,text,text)"
+    )
+    dagster_row["executable_application_procedures"] = dagster_procedures
+    problems = _runtime_db_privilege_problems(
+        dagster_row,
+        expected_login="ktm_feature_dagster_runtime",
+    )
+    assert any("unexpected application procedures" in problem for problem in problems)
+
+    api_procedures = list(api_row["executable_application_procedures"])
+    api_procedures.remove(
+        "feature.archive_curation_collection_command(uuid,bigint,bigint,text)"
+    )
+    api_row["executable_application_procedures"] = api_procedures
+    problems = _runtime_db_privilege_problems(
+        api_row,
+        expected_login="ktm_feature_api_runtime",
+    )
+    assert any("missing expected application procedures" in problem for problem in problems)
+
+    api_functions = list(
+        api_row["executable_application_security_definer_functions"]
+    )
+    api_functions.remove(
+        "ops.fill_provider_cancellation_starts_command("
+        "uuid,text,timestamp with time zone)"
+    )
+    api_row["executable_application_security_definer_functions"] = api_functions
+    problems = _runtime_db_privilege_problems(
+        api_row,
+        expected_login="ktm_feature_api_runtime",
+    )
+    assert any(
+        "missing expected application SECURITY DEFINER functions" in problem
+        for problem in problems
+    )
 
 
 @pytest.mark.unit
@@ -240,7 +325,10 @@ def test_runtime_privilege_query_uses_postgres_function_privilege_for_procedures
     assert "revoke_feature_field_overrides" in rendered
     assert "transition_admin_feature_state" in rendered
     assert "reactivate_admin_feature_state" in rendered
-    assert "can_execute_unintended_feature_procedure" in rendered
+    assert "executable_application_procedures" in rendered
+    assert "executable_application_security_definer_functions" in rendered
+    assert "candidate_routine.oid::regprocedure::text" in rendered
+    assert "candidate_schema.nspname IN ('feature', 'provider_sync', 'ops')" in rendered
     # audit INSERT/UPDATE/DELETE/TRUNCATE 중 어느 하나라도 새면 preflight가 막는다.
     assert "'feature.feature_state_transitions', 'INSERT'" in rendered
     assert "'feature.feature_state_transitions', 'UPDATE'" in rendered

@@ -14,8 +14,15 @@ from unittest.mock import AsyncMock
 from uuid import NAMESPACE_URL, uuid5
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from kortravelmap.curation_import import CURATION_CSV_HEADERS, parse_curation_csv
+from kortravelmap.infra.curation_candidate_repo import (
+    ThemeCandidatePage,
+    ThemeCandidateRecord,
+    ThemeCandidateTransitionPage,
+    ThemeCandidateTransitionRecord,
+)
 from kortravelmap.infra.curation_repo import (
     CurationCollection,
     CurationImportBatch,
@@ -35,6 +42,7 @@ from kortravelmap.infra.curation_repo import (
     FeatureCurationGroup,
     FeatureMatch,
 )
+from kortravelmap.infra.domain_command_repo import DomainCommandRecord
 
 from kortravelmap.api.app import create_app
 from kortravelmap.api.db import get_session
@@ -42,10 +50,51 @@ from kortravelmap.api.settings import ApiSettings
 
 COLLECTION_ID = "11111111-1111-4111-8111-111111111111"
 ITEM_ID = "22222222-2222-4222-8222-222222222222"
+CANDIDATE_ID = "33333333-3333-4333-8333-333333333333"
 
 
 def _uuid(label: str) -> str:
     return str(uuid5(NAMESPACE_URL, label))
+
+
+def _theme_candidate() -> ThemeCandidateRecord:
+    now = datetime(2026, 8, 13, tzinfo=UTC)
+    return ThemeCandidateRecord(
+        candidate_id=CANDIDATE_ID,
+        rule_id=_uuid("rule"),
+        theme_id=_uuid("theme"),
+        theme_slug="coastal-cafes",
+        theme_name="해안 카페",
+        source_id=_uuid("source"),
+        source_name="provider source",
+        provider_dataset_id=101,
+        source_entity_key="entity-1",
+        feature_id="feature:one",
+        feature_uuid=_uuid("feature:one"),
+        feature_name="바다 카페",
+        feature_kind="place",
+        feature_category="01070100",
+        feature_detail={"place_type": "cafe"},
+        lifecycle_state="active",
+        publication_state="published",
+        quality_state="valid",
+        source_record_key="record-1",
+        source_record_hash="a" * 64,
+        rule_row_revision=4,
+        rule_input_hash="b" * 64,
+        candidate_input_hash="c" * 64,
+        review_state="open",
+        eligibility_present=True,
+        disposition="active",
+        rank_score="0.750000",
+        proposal_title="바다 카페",
+        proposal_summary=None,
+        match_evidence={"selector": "category"},
+        row_revision=7,
+        feature_row_revision=9,
+        created_at=now,
+        updated_at=now,
+    )
 
 
 class _FakeCatalogRow:
@@ -101,6 +150,8 @@ class _FakeSession:
         dataset까지 공식 등대로 오판돼 모든 import가 provenance 422가 된다.
         """
         sql = str(statement)
+        if sql == "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE":
+            return _FakeResult(())
         if "provider_sync.provider_datasets" not in sql:
             raise AssertionError(f"stub이 모르는 질의입니다: {sql}")
         bound = params or {}
@@ -132,6 +183,7 @@ class _FakeSession:
 @pytest.fixture
 def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     from kortravelmap.api import domain_command_service
+    from kortravelmap.api.routers import curations as curations_router
 
     app = create_app(
         ApiSettings(
@@ -161,6 +213,16 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(
         domain_command_service,
         "complete_domain_command",
+        AsyncMock(),
+    )
+    monkeypatch.setattr(
+        curations_router.curation_repo,
+        "build_curation_import_revision_vector",
+        AsyncMock(return_value=()),
+    )
+    monkeypatch.setattr(
+        curations_router.curation_repo,
+        "create_curation_import_plan_command",
         AsyncMock(),
     )
     return TestClient(
@@ -214,6 +276,7 @@ def _item(*, item_id: str, edition: str) -> CurationItem:
         link_evidence={},
         link_actor=None,
         link_decided_at=None,
+        row_revision=1,
         created_by="fixture-creator",
         updated_by="fixture-updater",
         created_at=now,
@@ -245,6 +308,7 @@ def _collection() -> CurationCollection:
         metadata={},
         item_count=2,
         public_item_count=1,
+        row_revision=1,
         created_by="fixture-creator",
         updated_by="fixture-updater",
         created_at=now,
@@ -379,14 +443,45 @@ def test_csv_preview_and_commit_keep_unresolved_official_item(
     monkeypatch.setattr(module.curation_repo, "import_curation_rows", _import)
     files = {"file": ("lighthouse.csv", _csv_content(), "text/csv")}
 
-    preview = client.post("/v1/admin/curations/import", params={"dry_run": "true"}, files=files)
-    committed = client.post("/v1/admin/curations/import", params={"dry_run": "false"}, files=files)
+    preview = client.post("/v1/admin/curations/imports/preview", files=files)
 
-    assert preview.status_code == 200
+    assert preview.status_code == 201
     assert preview.json()["data"]["unresolved_rows"] == 1
     assert preview.json()["data"]["items"][0]["status"] == "unmatched"
     assert preview.json()["data"]["removed"] == 2
     assert len(preview.json()["data"]["removals"]) == 2
+    preview_data = preview.json()["data"]
+    create_plan = module.curation_repo.create_curation_import_plan_command
+    resolved_rows = create_plan.await_args.kwargs["rows"]
+    expires_at = create_plan.await_args.kwargs["expires_at"]
+    monkeypatch.setattr(
+        module.curation_repo,
+        "claim_curation_import_plan_command",
+        AsyncMock(
+            return_value=(
+                "a" * 64,
+                resolved_rows,
+                {
+                    "rows_total": preview_data["rows_total"],
+                    "valid_rows": preview_data["valid_rows"],
+                    "invalid_rows": preview_data["invalid_rows"],
+                    "unresolved_rows": preview_data["unresolved_rows"],
+                },
+                preview_data["items"],
+                expires_at,
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        module.curation_repo,
+        "complete_curation_import_plan_command",
+        AsyncMock(),
+    )
+    committed = client.post(
+        f"/v1/admin/curations/import-plans/{preview_data['import_plan_id']}/commit",
+        headers={"If-Match": preview_data["plan_etag"]},
+    )
+
     assert committed.status_code == 200
     committed_data = committed.json()["data"]
     assert committed_data["inserted"] == 1
@@ -408,7 +503,7 @@ def test_official_lighthouse_import_requires_provenance_sidecar(
     monkeypatch.setattr(module.curation_repo, "resolve_feature_matches", matches)
 
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": "false"},
         files={
             "file": (
@@ -422,6 +517,70 @@ def test_official_lighthouse_import_requires_provenance_sidecar(
     assert response.status_code == 422
     assert "provenance_file" in response.json()["detail"]
     matches.assert_not_awaited()
+
+
+@pytest.mark.unit
+def test_import_preview_replay_finishes_before_mutable_catalog_lookup(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api import domain_command_service
+    from kortravelmap.api.routers import curations as module
+
+    monkeypatch.setattr(
+        module.curation_repo,
+        "resolve_feature_matches",
+        AsyncMock(return_value={}),
+    )
+    monkeypatch.setattr(
+        module.curation_repo,
+        "preview_curation_import",
+        AsyncMock(
+            return_value=CurationImportPlan(
+                collections=0,
+                inserted=0,
+                updated=0,
+                removals=(),
+            )
+        ),
+    )
+    csv_content = _csv_content(official_lighthouse=True)
+    files = {
+        "file": ("lighthouse.csv", csv_content, "text/csv"),
+        "provenance_file": (
+            "lighthouse.provenance.json",
+            _provenance_content(csv_content),
+            "application/json",
+        ),
+    }
+    first = client.post("/v1/admin/curations/imports/preview", files=files)
+    assert first.status_code == 201
+    etag = first.headers["ETag"]
+    terminal = DomainCommandRecord(
+        command_id=1,
+        actor="local-dev",
+        operation="admin.curation-import.preview",
+        idempotency_key="95000000-0000-4000-8000-000000000001",
+        fingerprint_version=1,
+        request_fingerprint="a" * 64,
+        response_status=201,
+        response_body=first.json(),
+        response_headers={"ETag": etag},
+        claimed_at=datetime(2026, 8, 14, tzinfo=UTC),
+        completed_at=datetime(2026, 8, 14, tzinfo=UTC),
+    )
+    begin = domain_command_service.begin_domain_command
+    assert isinstance(begin, AsyncMock)
+    begin.side_effect = domain_command_service.DomainCommandReplay(terminal)
+    mutable_lookup = AsyncMock(side_effect=AssertionError("replay 뒤 catalog 조회"))
+    monkeypatch.setattr(module, "_lighthouse_dataset_pairs", mutable_lookup)
+
+    replay = client.post("/v1/admin/curations/imports/preview", files=files)
+
+    assert replay.status_code == 201
+    assert replay.headers["ETag"] == etag
+    assert replay.json() == first.json()
+    mutable_lookup.assert_not_awaited()
 
 
 @pytest.mark.unit
@@ -441,7 +600,7 @@ def test_official_lighthouse_dataset_key_alone_requires_provenance_sidecar(
     monkeypatch.setattr(module.curation_repo, "resolve_feature_matches", matches)
 
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": "false"},
         files={
             "file": (
@@ -472,7 +631,7 @@ def test_official_lighthouse_import_rejects_mismatched_sidecar(
     monkeypatch.setattr(module.curation_repo, "resolve_feature_matches", matches)
 
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": "false"},
         files={
             "file": ("lighthouse-stamp-tour.csv", content, "text/csv"),
@@ -552,7 +711,7 @@ def test_official_lighthouse_import_persists_validated_row_provenance(
     monkeypatch.setattr(module.curation_repo, "import_curation_rows", _import)
 
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": "false"},
         files={
             "file": ("lighthouse-stamp-tour.csv", content, "text/csv"),
@@ -564,10 +723,14 @@ def test_official_lighthouse_import_persists_validated_row_provenance(
         },
     )
 
-    assert response.status_code == 200
-    assert response.json()["data"]["import_batch_id"] == (
-        "55555555-5555-4555-8555-555555555555"
+    assert response.status_code == 201
+    stored_rows = (
+        module.curation_repo.create_curation_import_plan_command.await_args.kwargs["rows"]
     )
+    assert stored_rows[0].provenance["source_csv_sha256"] == hashlib.sha256(
+        content
+    ).hexdigest()
+    assert response.json()["data"]["import_batch_id"] is None
 
 
 @pytest.mark.unit
@@ -692,7 +855,7 @@ def test_admin_import_batch_and_current_row_expose_durable_provenance(
 
 
 @pytest.mark.unit
-def test_csv_commit_rejects_whole_file_on_format_error(
+def test_csv_preview_persists_whole_file_format_errors_without_import(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from kortravelmap.api.routers import curations as module
@@ -707,12 +870,14 @@ def test_csv_commit_rejects_whole_file_on_format_error(
     monkeypatch.setattr(module.curation_repo, "import_curation_rows", _unexpected_import)
 
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": "false"},
         files={"file": ("invalid.csv", _csv_content(valid=False), "text/csv")},
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 201
+    assert response.json()["data"]["invalid_rows"] == 1
+    assert response.json()["data"]["import_batch_id"] is None
 
 
 @pytest.mark.unit
@@ -739,7 +904,7 @@ def test_csv_import_maps_legacy_adoption_conflict_to_422(
     monkeypatch.setattr(module.curation_repo, "import_curation_rows", _unexpected_import)
 
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": str(dry_run).lower()},
         files={"file": ("ambiguous.csv", _csv_content(), "text/csv")},
     )
@@ -767,7 +932,7 @@ def test_csv_zero_official_ordinal_is_preserved_as_sort_order(
     monkeypatch.setattr(module.curation_repo, "preview_curation_import", _preview)
 
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": "true"},
         files={
             "file": (
@@ -778,7 +943,7 @@ def test_csv_zero_official_ordinal_is_preserved_as_sort_order(
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 201
 
 
 @pytest.mark.unit
@@ -823,10 +988,12 @@ def test_csv_accepts_mixed_component_resolution(
         actor: str,
         source_content_sha256: str,
         batch_kind: str,
+        command_id: int,
     ) -> CurationImportResult:
         assert actor == "local-dev"
         assert len(source_content_sha256) == 64
         assert batch_kind == "csv_upload"
+        assert command_id == 1
         return {
             "rows": len(rows),
             "collections": 1,
@@ -848,13 +1015,11 @@ def test_csv_accepts_mixed_component_resolution(
         )
     }
 
-    preview = client.post("/v1/admin/curations/import", params={"dry_run": "true"}, files=files)
-    commit = client.post("/v1/admin/curations/import", params={"dry_run": "false"}, files=files)
+    preview = client.post("/v1/admin/curations/imports/preview", files=files)
 
-    assert preview.status_code == 200
+    assert preview.status_code == 201
     assert preview.json()["data"]["invalid_rows"] == 0
     assert preview.json()["data"]["unresolved_rows"] == 1
-    assert commit.status_code == 200
 
 
 @pytest.mark.unit
@@ -872,7 +1037,7 @@ def test_csv_too_many_rows_does_not_count_unprocessed_row_as_valid(
     monkeypatch.setattr(module.curation_repo, "resolve_feature_matches", _matches)
     monkeypatch.setattr(module.curation_repo, "preview_curation_import", _unexpected_preview)
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": "true"},
         files={
             "file": (
@@ -887,7 +1052,7 @@ def test_csv_too_many_rows_does_not_count_unprocessed_row_as_valid(
     )
 
     data = response.json()["data"]
-    assert response.status_code == 200
+    assert response.status_code == 201
     assert data["rows_total"] == 2_001
     assert data["valid_rows"] == 2_000
     assert data["invalid_rows"] == 0
@@ -999,14 +1164,18 @@ def test_admin_can_patch_and_archive_single_curation_item(
         calls.append(("delete", kwargs))
         return _item(item_id=kwargs["curation_item_id"], edition="2026")
 
-    monkeypatch.setattr(module.curation_repo, "update_curation_item", _update)
-    monkeypatch.setattr(module.curation_repo, "archive_curation_item", _archive)
+    monkeypatch.setattr(module.curation_repo, "patch_curation_item_command", _update)
+    monkeypatch.setattr(module.curation_repo, "archive_curation_item_command", _archive)
 
     patched = client.patch(
         f"/v1/admin/curations/{COLLECTION_ID}/items/{ITEM_ID}",
+        headers={"If-Match": '"1"'},
         json={"feature_id": "feature:resolved", "address_hint": None},
     )
-    archived = client.delete(f"/v1/admin/curations/{COLLECTION_ID}/items/{ITEM_ID}")
+    archived = client.delete(
+        f"/v1/admin/curations/{COLLECTION_ID}/items/{ITEM_ID}",
+        headers={"If-Match": '"1"'},
+    )
 
     assert patched.status_code == 200
     assert archived.status_code == 200
@@ -1016,11 +1185,15 @@ def test_admin_can_patch_and_archive_single_curation_item(
             "collection_id": COLLECTION_ID,
             "curation_item_id": ITEM_ID,
             "updates": {"feature_id": "feature:resolved", "address_hint": None},
-            "actor": "local-dev",
+            "expected_revision": 1,
+            "command_id": 1,
+            "principal": "local-dev",
         },
     )
     assert calls[1][0] == "delete"
-    assert calls[1][1]["actor"] == "local-dev"
+    assert calls[1][1]["principal"] == "local-dev"
+    assert calls[1][1]["command_id"] == 1
+    assert calls[1][1]["expected_revision"] == 1
     assert patched.json()["data"]["created_by"] == "fixture-creator"
     assert patched.json()["data"]["source_record_key"] == "source::2026"
     assert patched.json()["data"]["metadata"] == {"edition": "2026"}
@@ -1035,13 +1208,98 @@ def test_admin_empty_patch_does_not_expose_archived_curation_item(
     async def _archived_noop(_session: object, **_kwargs: Any) -> None:
         return None
 
-    monkeypatch.setattr(module.curation_repo, "update_curation_item", _archived_noop)
+    monkeypatch.setattr(module.curation_repo, "patch_curation_item_command", _archived_noop)
     response = client.patch(
         f"/v1/admin/curations/{COLLECTION_ID}/items/{ITEM_ID}",
+        headers={"If-Match": '"1"'},
         json={},
     )
 
     assert response.status_code == 404
+
+
+@pytest.mark.unit
+def test_admin_collection_representation_etag_and_command_cas_are_distinct(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    collection = _collection()
+    item = _item(item_id="etag-item", edition="2026")
+    get_collection = AsyncMock(return_value=(collection, (item,)))
+    update_collection = AsyncMock(return_value=collection)
+    monkeypatch.setattr(
+        module.curation_repo,
+        "get_curation_collection",
+        get_collection,
+    )
+    monkeypatch.setattr(
+        module.curation_repo,
+        "patch_curation_collection_command",
+        update_collection,
+    )
+
+    fetched = client.get(f"/v1/admin/curations/{COLLECTION_ID}")
+    assert fetched.status_code == 200
+    assert fetched.json()["data"]["collection"]["row_revision"] == "1"
+    assert fetched.json()["data"]["collection"]["command_etag"] == '"1"'
+    assert fetched.json()["data"]["items"][0]["command_etag"] == '"1"'
+    assert fetched.headers["etag"].startswith('"sha256:')
+
+    not_modified = client.get(
+        f"/v1/admin/curations/{COLLECTION_ID}",
+        headers={"If-None-Match": fetched.headers["etag"]},
+    )
+    assert not_modified.status_code == 304
+
+    missing = client.patch(
+        f"/v1/admin/curations/{COLLECTION_ID}",
+        json={"title": "변경"},
+    )
+    changed = client.patch(
+        f"/v1/admin/curations/{COLLECTION_ID}",
+        headers={"If-Match": '"1"'},
+        json={"title": "변경"},
+    )
+    assert missing.status_code == 428
+    assert changed.status_code == 200
+    assert changed.headers["etag"].startswith('"sha256:')
+    assert update_collection.await_args.kwargs["expected_revision"] == 1
+    assert update_collection.await_args.kwargs["principal"] == "local-dev"
+    assert isinstance(update_collection.await_args.kwargs["command_id"], int)
+
+
+@pytest.mark.unit
+def test_admin_collection_and_item_stale_revisions_return_412(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    stale = module.curation_repo.CurationRevisionConflictError("stale")
+    monkeypatch.setattr(
+        module.curation_repo,
+        "patch_curation_collection_command",
+        AsyncMock(side_effect=stale),
+    )
+    monkeypatch.setattr(
+        module.curation_repo,
+        "patch_curation_item_command",
+        AsyncMock(side_effect=stale),
+    )
+
+    collection_response = client.patch(
+        f"/v1/admin/curations/{COLLECTION_ID}",
+        headers={"If-Match": '"1"'},
+        json={"title": "변경"},
+    )
+    item_response = client.patch(
+        f"/v1/admin/curations/{COLLECTION_ID}/items/{ITEM_ID}",
+        headers={"If-Match": '"1"'},
+        json={"item_title": "변경"},
+    )
+
+    assert collection_response.status_code == 412
+    assert item_response.status_code == 412
 
 
 @pytest.mark.unit
@@ -1050,10 +1308,10 @@ def test_admin_item_post_is_create_only(
 ) -> None:
     from kortravelmap.api.routers import curations as module
 
-    async def _duplicate(_session: object, **_kwargs: Any) -> tuple[CurationItem, bool]:
-        return _item(item_id="existing-item", edition="2026"), False
+    async def _duplicate(_session: object, **_kwargs: Any) -> CurationItem:
+        raise HTTPException(status_code=409, detail="curation item identity conflict")
 
-    monkeypatch.setattr(module.curation_repo, "add_curation_item", _duplicate)
+    monkeypatch.setattr(module.curation_repo, "create_curation_item_command", _duplicate)
     response = client.post(
         f"/v1/admin/curations/{COLLECTION_ID}/items",
         json={
@@ -1135,7 +1393,7 @@ def test_curation_paths_are_in_openapi(client: TestClient) -> None:
     paths = spec["paths"]
     assert "/v1/curations" in paths
     assert "/v1/curations/features/{feature_id}" in paths
-    assert "/v1/admin/curations/import" in paths
+    assert "/v1/admin/curations/imports/preview" in paths
     assert "/v1/admin/curations/import-batches/{import_batch_id}" in paths
     assert "/v1/admin/curations/import-template.csv" in paths
     assert (
@@ -1362,12 +1620,12 @@ def test_blank_feature_id_never_autolinks_on_single_name_match(
     monkeypatch.setattr(module.curation_repo, "preview_curation_import", _preview)
 
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": "true"},
         files={"file": ("official.csv", _csv_content(), "text/csv")},
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     row = response.json()["data"]["items"][0]
     assert row["resolved_feature_id"] is None, "이름만 맞는 후보를 자동 링크했다"
     assert row["status"] == "review_required"
@@ -1405,7 +1663,7 @@ def test_blank_feature_id_with_address_hint_requires_explicit_review(
     monkeypatch.setattr(module.curation_repo, "preview_curation_import", _preview)
 
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": "true"},
         files={
             "file": (
@@ -1416,7 +1674,7 @@ def test_blank_feature_id_with_address_hint_requires_explicit_review(
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     row = response.json()["data"]["items"][0]
     assert row["resolved_feature_id"] is None
     assert row["status"] == "review_required"
@@ -1446,7 +1704,7 @@ def test_blank_feature_id_reason_names_the_candidate_region(
     monkeypatch.setattr(module.curation_repo, "preview_curation_import", _preview)
 
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": "true"},
         files={"file": ("official.csv", _csv_content(), "text/csv")},
     )
@@ -1478,7 +1736,7 @@ def test_no_candidates_still_reports_unmatched_not_name_only(
     monkeypatch.setattr(module.curation_repo, "preview_curation_import", _preview)
 
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": "true"},
         files={"file": ("official.csv", _csv_content(), "text/csv")},
     )
@@ -1509,7 +1767,7 @@ def test_explicit_feature_id_still_links(
     monkeypatch.setattr(module.curation_repo, "preview_curation_import", _preview)
 
     response = client.post(
-        "/v1/admin/curations/import",
+        "/v1/admin/curations/imports/preview",
         params={"dry_run": "true"},
         files={
             "file": (
@@ -1532,6 +1790,7 @@ def test_explicit_feature_id_still_links(
 def _quarantine_collection_row() -> CurationQuarantineCollection:
     return CurationQuarantineCollection(
         collection_id=_uuid("quarantine-collection"),
+        row_revision=7,
         collection_key=f"legacy:quarantine:{_uuid('quarantine-collection')}",
         title="[0065 격리] 등대 스탬프투어",
         edition_key="season-5",
@@ -1556,6 +1815,7 @@ def _quarantine_collection_row() -> CurationQuarantineCollection:
         ),
         original_collection=CurationQuarantineOriginalCollection(
             collection_id=_uuid("original-collection"),
+            row_revision=11,
             title="등대 스탬프투어",
             status="published",
             visibility="public",
@@ -1648,6 +1908,7 @@ def test_admin_quarantine_items_expose_conflict_preview(
 
     preview = CurationQuarantineItemsPreview(
         target_collection_id=_uuid("original-collection"),
+        target_collection_revision=11,
         target_missing=False,
         target_archived=False,
         items=(
@@ -1740,9 +2001,14 @@ def test_reclassify_idempotency_lifecycle(
     monkeypatch.setattr(module.curation_repo, "move_curation_quarantine_items", move)
     path = f"/v1/admin/curations/quarantine/{_uuid('quarantine-collection')}/reclassify"
 
-    first = client.post(path, json={"action": "move"})
+    first = client.post(
+        path,
+        headers={"If-Match": '"7"'},
+        json={"action": "move", "target_collection_revision": "11"},
+    )
 
     assert first.status_code == 200
+    assert first.headers["etag"].startswith('"sha256:')
     assert first.json()["data"] == {
         "action": "move",
         "moved_item_ids": [_uuid("moved-item")],
@@ -1752,8 +2018,11 @@ def test_reclassify_idempotency_lifecycle(
     }
     assert move.await_args.kwargs == {
         "collection_id": _uuid("quarantine-collection"),
+        "expected_collection_revision": 7,
         "target_collection_id": None,
+        "expected_target_revision": 11,
         "item_ids": None,
+        "command_id": 1,
         "actor": "local-dev",
     }
 
@@ -1767,7 +2036,7 @@ def test_reclassify_idempotency_lifecycle(
         request_fingerprint="a" * 64,
         response_status=200,
         response_body=first.json(),
-        response_headers={},
+        response_headers={"ETag": first.headers["etag"]},
         claimed_at=now,
         completed_at=now,
     )
@@ -1778,10 +2047,15 @@ def test_reclassify_idempotency_lifecycle(
     monkeypatch.setattr(domain_command_service, "begin_domain_command", _replay)
     move.reset_mock()
 
-    replayed = client.post(path, json={"action": "move"})
+    replayed = client.post(
+        path,
+        headers={"If-Match": '"7"'},
+        json={"action": "move", "target_collection_revision": "11"},
+    )
 
     assert replayed.status_code == 200
     assert replayed.headers["Idempotency-Replayed"] == "true"
+    assert replayed.headers["etag"] == first.headers["etag"]
     assert replayed.json() == first.json()
     move.assert_not_awaited()
 
@@ -1802,7 +2076,12 @@ def test_reclassify_idempotency_lifecycle(
 
     reused = client.post(
         path,
-        json={"action": "move", "item_ids": [_uuid("other-item")]},
+        headers={"If-Match": '"7"'},
+        json={
+            "action": "move",
+            "target_collection_revision": "11",
+            "item_ids": [_uuid("other-item")],
+        },
     )
 
     assert reused.status_code == 409
@@ -1831,7 +2110,8 @@ def test_reclassify_move_conflict_fails_closed_with_conflict_detail(
 
     response = client.post(
         f"/v1/admin/curations/quarantine/{_uuid('quarantine-collection')}/reclassify",
-        json={"action": "move"},
+        headers={"If-Match": '"7"'},
+        json={"action": "move", "target_collection_revision": "11"},
     )
 
     assert response.status_code == 409
@@ -1864,6 +2144,7 @@ def test_reclassify_confirm_standalone_returns_confirmed_key(
 
     response = client.post(
         f"/v1/admin/curations/quarantine/{_uuid('quarantine-collection')}/reclassify",
+        headers={"If-Match": '"7"'},
         json={
             "action": "confirm_standalone",
             "collection_key": "lighthouse:standalone",
@@ -1881,8 +2162,10 @@ def test_reclassify_confirm_standalone_returns_confirmed_key(
     }
     assert confirm.await_args.kwargs == {
         "collection_id": _uuid("quarantine-collection"),
+        "expected_collection_revision": 7,
         "collection_key": "lighthouse:standalone",
         "title": "등대 독립 확정",
+        "command_id": 1,
         "actor": "local-dev",
     }
 
@@ -1899,7 +2182,8 @@ def test_reclassify_missing_quarantine_maps_lookup_error_to_404(
 
     response = client.post(
         f"/v1/admin/curations/quarantine/{_uuid('not-quarantine')}/reclassify",
-        json={"action": "move"},
+        headers={"If-Match": '"7"'},
+        json={"action": "move", "target_collection_revision": "11"},
     )
 
     assert response.status_code == 404
@@ -1945,3 +2229,230 @@ def test_reclassify_rejects_action_field_mismatch(
     assert response.status_code == 422
     move.assert_not_awaited()
     confirm.assert_not_awaited()
+
+
+@pytest.mark.unit
+def test_admin_theme_candidate_list_uses_and_filters_and_decimal_revisions(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    listing = AsyncMock(
+        return_value=ThemeCandidatePage((_theme_candidate(),), "opaque-next")
+    )
+    monkeypatch.setattr(
+        module.curation_candidate_repo,
+        "list_theme_candidates",
+        listing,
+    )
+
+    response = client.get(
+        "/v1/admin/theme-feature-candidates",
+        params={
+            "rule_id": _uuid("rule"),
+            "theme_id": _uuid("theme"),
+            "source_id": _uuid("source"),
+            "review_state": "open",
+            "eligibility_present": "true",
+            "feature_id": "feature:one",
+            "page_size": 25,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["items"][0]["feature_id"] == _uuid("feature:one")
+    assert body["data"]["items"][0]["candidate_revision"] == "7"
+    assert body["data"]["items"][0]["feature_row_revision"] == "9"
+    assert body["meta"]["page"]["page_size"] == 25
+    assert body["meta"]["page"]["next_cursor"] == "opaque-next"
+    assert listing.await_args.kwargs == {
+        "rule_id": _uuid("rule"),
+        "theme_id": _uuid("theme"),
+        "source_id": _uuid("source"),
+        "review_state": "open",
+        "eligibility_present": True,
+        "feature_id": "feature:one",
+        "limit": 25,
+        "cursor": None,
+    }
+
+
+@pytest.mark.unit
+def test_admin_theme_candidate_detail_has_separate_representation_etag_and_304(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    detail = AsyncMock(return_value=_theme_candidate())
+    monkeypatch.setattr(module.curation_candidate_repo, "get_theme_candidate", detail)
+    path = f"/v1/admin/theme-feature-candidates/{CANDIDATE_ID}"
+
+    first = client.get(path)
+
+    assert first.status_code == 200
+    representation_etag = first.headers["etag"]
+    assert representation_etag.startswith('"sha256:')
+    assert first.json()["data"]["candidate_etag"] == '"7"'
+    assert first.json()["data"]["representation_etag"] == representation_etag
+
+    cached = client.get(path, headers={"If-None-Match": representation_etag})
+
+    assert cached.status_code == 304
+    assert cached.content == b""
+    assert cached.headers["etag"] == representation_etag
+
+
+@pytest.mark.unit
+def test_admin_theme_candidate_transition_ids_are_decimal_strings(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    now = datetime(2026, 8, 13, tzinfo=UTC)
+    monkeypatch.setattr(
+        module.curation_candidate_repo,
+        "get_theme_candidate",
+        AsyncMock(return_value=_theme_candidate()),
+    )
+    listing = AsyncMock(
+        return_value=ThemeCandidateTransitionPage(
+            (
+                ThemeCandidateTransitionRecord(
+                    transition_id=9_007_199_254_740_993,
+                    candidate_id=CANDIDATE_ID,
+                    transition_kind="admin_reject",
+                    from_review_state="open",
+                    to_review_state="rejected",
+                    from_eligibility_present=True,
+                    to_eligibility_present=True,
+                    candidate_row_revision=8,
+                    generation_id=None,
+                    command_id=9_007_199_254_740_995,
+                    actor="local-dev",
+                    reason_code="not_relevant",
+                    causation_ref={"command_id": 9_007_199_254_740_995},
+                    occurred_at=now,
+                ),
+            ),
+            9_007_199_254_740_993,
+        )
+    )
+    monkeypatch.setattr(
+        module.curation_candidate_repo,
+        "list_theme_candidate_transitions",
+        listing,
+    )
+
+    response = client.get(
+        f"/v1/admin/theme-feature-candidates/{CANDIDATE_ID}/transitions"
+    )
+
+    assert response.status_code == 200
+    row = response.json()["data"]["items"][0]
+    assert row["transition_id"] == "9007199254740993"
+    assert row["command_id"] == "9007199254740995"
+    assert response.json()["meta"]["page"]["next_cursor"] == "9007199254740993"
+
+
+@pytest.mark.unit
+def test_admin_theme_candidate_reject_requires_revision_and_returns_new_etag(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    reject = AsyncMock(return_value=(CANDIDATE_ID, 8, 101))
+    monkeypatch.setattr(
+        module.curation_candidate_repo,
+        "reject_theme_candidate",
+        reject,
+    )
+    path = f"/v1/admin/theme-feature-candidates/{CANDIDATE_ID}/reject"
+
+    missing = client.post(path, json={"reason_code": "not_relevant"})
+    accepted = client.post(
+        path,
+        headers={"If-Match": '"7"'},
+        json={"reason_code": "not_relevant"},
+    )
+
+    assert missing.status_code == 428
+    assert accepted.status_code == 200
+    assert accepted.headers["etag"] == '"8"'
+    assert accepted.json()["data"] == {
+        "candidate_id": CANDIDATE_ID,
+        "candidate_revision": "8",
+        "transition_id": "101",
+        "curation_item_id": None,
+        "curation_item_revision": None,
+    }
+    assert reject.await_args.kwargs == {
+        "candidate_id": CANDIDATE_ID,
+        "expected_revision": 7,
+        "command_id": 1,
+        "reason_code": "not_relevant",
+        "principal": "local-dev",
+    }
+
+
+@pytest.mark.unit
+def test_admin_theme_candidate_promote_passes_all_cas_axes(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import curations as module
+
+    item_id = _uuid("promoted-item")
+    promote = AsyncMock(return_value=(CANDIDATE_ID, 8, item_id, 3, 102))
+    monkeypatch.setattr(
+        module.curation_candidate_repo,
+        "promote_theme_candidate",
+        promote,
+    )
+
+    response = client.post(
+        f"/v1/admin/theme-feature-candidates/{CANDIDATE_ID}/promote",
+        headers={"If-Match": '"7"'},
+        json={
+            "collection_id": COLLECTION_ID,
+            "collection_revision": "11",
+            "item_revision": None,
+            "external_item_id": "candidate-1",
+            "external_component_id": "primary",
+            "place_name": "바다 카페",
+            "sort_order": 2,
+            "curation_relation": "nearby_option",
+            "reuse_policy": "manual_review",
+            "item_status": "included",
+            "reason_code": "approved",
+        },
+    )
+
+    assert response.status_code == 200
+    assert response.headers["etag"] == '"8"'
+    assert response.json()["data"]["curation_item_id"] == item_id
+    assert response.json()["data"]["curation_item_revision"] == "3"
+    assert promote.await_args.kwargs == {
+        "candidate_id": CANDIDATE_ID,
+        "collection_id": COLLECTION_ID,
+        "external_item_id": "candidate-1",
+        "external_component_id": "primary",
+        "place_name": "바다 카페",
+        "address_hint": None,
+        "item_title": None,
+        "item_summary": None,
+        "sort_order": 2,
+        "curation_relation": "nearby_option",
+        "reuse_policy": "manual_review",
+        "item_status": "included",
+        "expected_candidate_revision": 7,
+        "expected_collection_revision": 11,
+        "expected_item_revision": None,
+        "command_id": 1,
+        "reason_code": "approved",
+        "principal": "local-dev",
+    }

@@ -73,6 +73,7 @@ from kortravelmap.api.routers import (
     admin_backups_router,
     admin_cache_target_streams_router,
     admin_curated_router,
+    admin_curation_candidates_router,
     admin_curations_router,
     admin_features_router,
     admin_files_router,
@@ -101,6 +102,8 @@ from kortravelmap.api.routers import (
     public_status_router,
     public_views_router,
     service_cache_target_streams_router,
+    service_curation_cutover_router,
+    service_curation_snapshots_router,
     service_feature_alias_maps_router,
     weather_router,
 )
@@ -945,6 +948,14 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             service_cache_target_streams_router,
             prefix="/v1",
         )
+        application.include_router(
+            service_curation_snapshots_router,
+            prefix="/v1",
+        )
+        application.include_router(
+            service_curation_cutover_router,
+            prefix="/v1",
+        )
         # T-VN-32C alias-map DB-to-DB 이관 표면 — route-level service token gate
         # (라우터 자체 dependency), 이관·복구 경계 전용 read (ADR-068 결정 3).
         application.include_router(
@@ -996,6 +1007,11 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         )
         application.include_router(
             admin_curations_router,
+            prefix="/v1",
+            dependencies=admin_dependencies,
+        )
+        application.include_router(
+            admin_curation_candidates_router,
             prefix="/v1",
             dependencies=admin_dependencies,
         )

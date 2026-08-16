@@ -16,7 +16,6 @@ readonly PINVI_ARCHIVE="$INSTALL_DIR/pinvi-source.tar.gz"
 readonly SEED_HELPER="$INSTALL_DIR/scripts/tvn34c_fresh_live_etl_seed.py"
 readonly STATE_ROOT="$INSTALL_DIR/runs"
 readonly BLOCKED_FILE="$INSTALL_DIR/BLOCKED.json"
-readonly EXPECTED_HEAD="0104_tvn36_final_fence"
 
 MODE="${1:-run}"
 RUN_ID=""
@@ -43,6 +42,7 @@ SEED_HELPER_SHA256=""
 MAP_E2E_FEATURE_ID=""
 UI_ADMIN_PASSWORD=""
 FINISHED=0
+EXPECTED_HEAD=""
 
 die() {
   printf 'T-VN-34C n150 fresh live failed: %s (values redacted)\n' "$1" >&2
@@ -88,7 +88,7 @@ helper_path = runner_path.parent / "scripts" / "tvn34c_fresh_live_etl_seed.py"
 data = json.loads(manifest_path.read_text(encoding="utf-8"))
 pattern = re.compile(r"^[0-9a-f]{40}$")
 sha_pattern = re.compile(r"^[0-9a-f]{64}$")
-if set(data) != {"map", "pinvi", "receipt_sha256", "runner_sha256", "seed_helper_sha256", "version"} or data["version"] != 3:
+if set(data) != {"map", "pinvi", "receipt_sha256", "runner_sha256", "seed_helper_sha256", "version"} or data["version"] != 4:
     raise SystemExit(2)
 for side in ("map", "pinvi"):
     value = data[side]
@@ -158,12 +158,44 @@ pinvi_root = Path(sys.argv[3])
 map_commit = sys.argv[4]
 pinvi_commit = sys.argv[5]
 data = json.loads(path.read_text(encoding="utf-8"))
-receipt = data["tasks"]["T-VN-36"]["pinvi_snapshot_receipt"]
+task = data.get("deployment_receipt_task")
+if not isinstance(task, str):
+    raise SystemExit(1)
+receipt = data["tasks"][task]["pinvi_snapshot_receipt"]
+if receipt.get("state") != "complete":
+    raise SystemExit(1)
+expected_keys = {
+    "state",
+    "map_commit",
+    "pinvi_commit",
+    "map_user_openapi_sha256",
+    "map_service_openapi_sha256",
+    "map_full_openapi_sha256",
+    "pinvi_user_vendor_sha256",
+    "pinvi_service_vendor_sha256",
+    "verification",
+}
+if set(receipt) != expected_keys:
+    raise SystemExit(1)
+if receipt["verification"] != [
+    "PinVi user/service vendor bytes are exact",
+    "PinVi canonical curation importer has no legacy admin snapshot consumer",
+    "paired Map/PinVi n150 canonical snapshot live acceptance passed",
+]:
+    raise SystemExit(1)
 if receipt["map_commit"] != map_commit or receipt["pinvi_commit"] != pinvi_commit:
     raise SystemExit(1)
-for name in ("openapi.user.json", "openapi.json"):
+if receipt["map_user_openapi_sha256"] != receipt["pinvi_user_vendor_sha256"]:
+    raise SystemExit(1)
+if receipt["map_service_openapi_sha256"] != receipt["pinvi_service_vendor_sha256"]:
+    raise SystemExit(1)
+for name, key in (
+    ("openapi.user.json", "map_user_openapi_sha256"),
+    ("openapi.service.json", "map_service_openapi_sha256"),
+    ("openapi.json", "map_full_openapi_sha256"),
+):
     digest = hashlib.sha256((map_root / "packages" / "kor-travel-map-api" / name).read_bytes()).hexdigest()
-    expected = receipt["map_user_openapi_sha256"] if name.endswith("user.json") else receipt["map_full_openapi_sha256"]
+    expected = receipt[key]
     if digest != expected:
         raise SystemExit(2)
 for path, key in (
@@ -172,13 +204,35 @@ for path, key in (
         "pinvi_user_vendor_sha256",
     ),
     (
-        pinvi_root / "apps" / "api" / "tests" / "contract" / "kor-travel-map-openapi-admin-detail-snapshot.json",
-        "pinvi_admin_detail_vendor_sha256",
+        pinvi_root / "apps" / "api" / "tests" / "contract" / "kor-travel-map-openapi-service.json",
+        "pinvi_service_vendor_sha256",
     ),
 ):
     if hashlib.sha256(path.read_bytes()).hexdigest() != receipt[key]:
         raise SystemExit(3)
 PY
+}
+
+read_map_application_head() {
+  EXPECTED_HEAD="$(python3 - \
+    "$MAP_DIR/docker/application-schema-head.py" \
+    "$MAP_DIR/src/kortravelmap/_application_migration_graph.json" <<'PY'
+import json
+import runpy
+import sys
+from pathlib import Path
+
+parser_path = Path(sys.argv[1])
+manifest_path = Path(sys.argv[2])
+namespace = runpy.run_path(str(parser_path), run_name="tvn40_pinned_head_parser")
+application_head = namespace.get("_application_head")
+if not callable(application_head):
+    raise SystemExit(1)
+payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+print(application_head(payload))
+PY
+)" || die "Map application migration graph is invalid or ambiguous"
+  [[ -n "$EXPECTED_HEAD" ]] || die "Map application migration head is empty"
 }
 
 random_secret() {
@@ -189,6 +243,8 @@ write_env_files() {
   local postgres_password migrator_password api_password dagster_password
   local admin_proxy_secret service_token cursor_secret metrics_token
   local cache_target_command_token cache_target_consumer_token
+  local curation_snapshot_token curation_cutover_mapping_token
+  local curation_snapshot_digest curation_cutover_mapping_digest
   local ops_read ops_cancel ops_fixture ui_session ui_password_hash compose_ui_password_hash object_secret
   postgres_password="$(random_secret)"
   migrator_password="$(random_secret)"
@@ -200,6 +256,10 @@ write_env_files() {
   metrics_token="$(random_secret)"
   cache_target_command_token="$(random_secret)"
   cache_target_consumer_token="$(random_secret)"
+  curation_snapshot_token="$(random_secret)"
+  curation_cutover_mapping_token="$(random_secret)"
+  curation_snapshot_digest="$(printf %s "$curation_snapshot_token" | sha256sum | awk '{print $1}')"
+  curation_cutover_mapping_digest="$(printf %s "$curation_cutover_mapping_token" | sha256sum | awk '{print $1}')"
   ops_read="$(random_secret)"
   ops_cancel="$(random_secret)"
   ops_fixture="$(random_secret)"
@@ -268,6 +328,8 @@ KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED=true
 KOR_TRAVEL_MAP_API_OPS_READ_TOKEN=$ops_read
 KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN=$ops_cancel
 KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN=$ops_fixture
+KOR_TRAVEL_MAP_API_PINVI_CURATION_SNAPSHOT_TOKEN_SHA256=$curation_snapshot_digest
+KOR_TRAVEL_MAP_API_PINVI_CURATION_CUTOVER_MAPPING_TOKEN_SHA256=$curation_cutover_mapping_digest
 KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED=true
 KOR_TRAVEL_MAP_API_VWORLD_API_KEY=$(random_secret)
 KOR_TRAVEL_MAP_OBJECT_STORE_ACCESS_KEY_ID=tvn34c$RUN_KEY
@@ -297,6 +359,8 @@ PINVI_KOR_TRAVEL_MAP_CACHE_TARGET_SYNC_ENABLED=false
 PINVI_KOR_TRAVEL_MAP_CACHE_TARGET_COMMAND_TOKEN=$cache_target_command_token
 PINVI_KOR_TRAVEL_MAP_CACHE_TARGET_CONSUMER_TOKEN=$cache_target_consumer_token
 PINVI_KOR_TRAVEL_MAP_CACHE_TARGET_EXPECTED_CONTRACT_GENERATION=7
+PINVI_KOR_TRAVEL_MAP_CURATION_SNAPSHOT_TOKEN=$curation_snapshot_token
+PINVI_KOR_TRAVEL_MAP_CURATION_CUTOVER_MAPPING_TOKEN=$curation_cutover_mapping_token
 EOF
   chmod 0600 "$MAP_ENV" "$PINVI_ENV"
   cat >"$MAP_DIR/packages/kor-travel-map-api/.env" <<EOF
@@ -620,6 +684,7 @@ run() {
   safe_extract "$PINVI_ARCHIVE" "$RUN_DIR"
   [[ -d "$MAP_DIR" && -d "$PINVI_DIR" ]] || die "source archive root is invalid"
   read_pair_receipt || die "Map/PinVi pinned contract receipt mismatch"
+  read_map_application_head
   write_env_files
   configure_map_network_isolation
   write_blocked

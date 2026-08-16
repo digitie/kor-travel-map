@@ -7,13 +7,13 @@ PostGIS에서 깨끗하게 적용되는지 확인 + 4 schema / 3 extension / 4 �
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
-import uuid
 from typing import TYPE_CHECKING
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 
 from kortravelmap.infra.alembic_exclusions import (
@@ -22,9 +22,7 @@ from kortravelmap.infra.alembic_exclusions import (
 )
 
 if TYPE_CHECKING:
-    from pathlib import Path
-
-    from sqlalchemy.ext.asyncio import AsyncEngine
+    from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 
 pytestmark = pytest.mark.integration
@@ -181,6 +179,101 @@ _UNMAPPED_TABLE_COLUMNS: dict[
         ("detail", "text", True),
         ("recorded_at", "timestamp with time zone", True),
     },
+    ("feature", "curation_import_plans"): {
+        ("import_plan_id", "uuid", True),
+        ("preview_command_id", "bigint", True),
+        ("actor", "text", True),
+        ("content_sha256", "text", True),
+        ("provenance_sha256", "text", False),
+        ("plan_sha256", "text", True),
+        ("summary", "jsonb", True),
+        ("row_count", "integer", True),
+        ("revision_count", "integer", True),
+        ("expires_at", "timestamp with time zone", True),
+        ("created_at", "timestamp with time zone", True),
+    },
+    ("feature", "curation_import_plan_rows"): {
+        ("import_plan_id", "uuid", True),
+        ("row_number", "integer", True),
+        ("normalized_payload", "jsonb", False),
+        ("response_payload", "jsonb", True),
+    },
+    ("feature", "curation_import_plan_revisions"): {
+        ("import_plan_id", "uuid", True),
+        ("resource_kind", "text", True),
+        ("resource_key", "text", True),
+        ("expected_revision", "bigint", False),
+    },
+    ("ops", "curation_catalog_command_effects"): {
+        ("command_id", "bigint", True),
+        ("operation", "text", True),
+        ("resource_kind", "text", True),
+        ("resource_id", "uuid", True),
+        ("created_at", "timestamp with time zone", True),
+    },
+    ("ops", "curation_concierge_legacy_owner_manifest"): {
+        ("entity_kind", "text", True),
+        ("entity_id", "uuid", True),
+        ("before_row_revision", "bigint", True),
+        ("before_input_hash", "text", True),
+        ("captured_at", "timestamp with time zone", True),
+    },
+    ("ops", "curation_import_collection_effects"): {
+        ("command_id", "bigint", True),
+        ("collection_id", "uuid", True),
+        ("operation", "text", True),
+        ("created", "boolean", True),
+        ("created_at", "timestamp with time zone", True),
+    },
+    ("ops", "curation_import_collection_touches"): {
+        ("command_id", "bigint", True),
+        ("collection_id", "uuid", True),
+        ("touched_at", "timestamp with time zone", True),
+    },
+    ("ops", "curation_import_plan_claims"): {
+        ("import_plan_id", "uuid", True),
+        ("command_id", "bigint", True),
+        ("plan_sha256", "text", True),
+        ("claimed_at", "timestamp with time zone", True),
+    },
+    ("ops", "curation_import_plan_commits"): {
+        ("import_plan_id", "uuid", True),
+        ("command_id", "bigint", True),
+        ("import_batch_id", "uuid", True),
+        ("result_payload", "jsonb", True),
+        ("committed_at", "timestamp with time zone", True),
+    },
+    ("ops", "curation_provider_root_receipts"): {
+        ("root_job_id", "uuid", True),
+        ("child_receipt_count", "bigint", True),
+        ("child_receipt_set_hash", "text", True),
+        ("generation_count", "bigint", True),
+        ("generation_set_hash", "text", True),
+        ("completed_at", "timestamp with time zone", True),
+    },
+    ("ops", "curation_provider_snapshot_receipts"): {
+        ("source_job_id", "uuid", True),
+        ("root_job_id", "uuid", True),
+        ("provider_dataset_id", "bigint", True),
+        ("sync_scope", "text", True),
+        ("operation_key", "text", True),
+        ("observed_at", "timestamp with time zone", True),
+        ("source_entity_count", "bigint", True),
+        ("input_member_count", "bigint", True),
+        ("last_source_modified_at", "date", False),
+        ("source_input_set_hash", "text", True),
+    },
+    ("ops", "curation_source_observation_receipts"): {
+        ("source_id", "uuid", True),
+        ("import_job_id", "uuid", True),
+        ("observed_at", "timestamp with time zone", True),
+        ("source_revision", "bigint", True),
+        ("observation_revision", "bigint", True),
+        ("row_count", "integer", True),
+        ("last_source_modified_at", "date", False),
+        ("source_input_set_hash", "text", True),
+        ("created_at", "timestamp with time zone", True),
+    },
 }
 
 _UNMAPPED_TABLE_CONSTRAINTS: dict[tuple[str, str], set[tuple[str, str]]] = {
@@ -267,6 +360,101 @@ _UNMAPPED_TABLE_CONSTRAINTS: dict[tuple[str, str], set[tuple[str, str]]] = {
     ("ops", "tvn36_legacy_freeze_preflight_manifest"): {
         ("tvn36_legacy_freeze_preflight_manifest_pkey", "p"),
     },
+    ("feature", "curation_import_plans"): {
+        ("curation_import_plans_pkey", "p"),
+        ("curation_import_plans_preview_command_id_fkey", "f"),
+        ("curation_import_plans_preview_command_id_key", "u"),
+        ("curation_import_plans_plan_sha256_key", "u"),
+        ("curation_import_plans_actor_check", "c"),
+        ("curation_import_plans_content_sha256_check", "c"),
+        ("curation_import_plans_provenance_sha256_check", "c"),
+        ("curation_import_plans_plan_sha256_check", "c"),
+        ("curation_import_plans_summary_check", "c"),
+        ("curation_import_plans_row_count_check", "c"),
+        ("curation_import_plans_revision_count_check", "c"),
+        ("curation_import_plans_check", "c"),
+    },
+    ("feature", "curation_import_plan_rows"): {
+        ("curation_import_plan_rows_pkey", "p"),
+        ("curation_import_plan_rows_import_plan_id_fkey", "f"),
+        ("curation_import_plan_rows_row_number_check", "c"),
+        ("curation_import_plan_rows_normalized_payload_check", "c"),
+        ("curation_import_plan_rows_response_payload_check", "c"),
+    },
+    ("feature", "curation_import_plan_revisions"): {
+        ("curation_import_plan_revisions_pkey", "p"),
+        ("curation_import_plan_revisions_import_plan_id_fkey", "f"),
+        ("curation_import_plan_revisions_resource_kind_check", "c"),
+        ("curation_import_plan_revisions_resource_key_check", "c"),
+        ("curation_import_plan_revisions_expected_revision_check", "c"),
+    },
+    ("ops", "curation_catalog_command_effects"): {
+        ("curation_catalog_command_effects_pkey", "p"),
+        ("curation_catalog_command_effects_command_id_fkey", "f"),
+        ("curation_catalog_command_effects_resource_kind_check", "c"),
+    },
+    ("ops", "curation_concierge_legacy_owner_manifest"): {
+        ("curation_concierge_legacy_owner_manifest_pkey", "p"),
+        ("curation_concierge_legacy_owner_manifest_entity_kind_check", "c"),
+        ("curation_concierge_legacy_owner_manif_before_row_revision_check", "c"),
+        ("curation_concierge_legacy_owner_manifes_before_input_hash_check", "c"),
+    },
+    ("ops", "curation_import_collection_effects"): {
+        ("curation_import_collection_effects_pkey", "p"),
+        ("curation_import_collection_effects_command_id_fkey", "f"),
+        ("curation_import_collection_effects_collection_id_fkey", "f"),
+        ("curation_import_collection_effects_operation_check", "c"),
+    },
+    ("ops", "curation_import_collection_touches"): {
+        ("curation_import_collection_touches_pkey", "p"),
+        ("curation_import_collection_touche_command_id_collection_id_fkey", "f"),
+    },
+    ("ops", "curation_import_plan_claims"): {
+        ("curation_import_plan_claims_pkey", "p"),
+        ("curation_import_plan_claims_import_plan_id_fkey", "f"),
+        ("curation_import_plan_claims_command_id_fkey", "f"),
+        ("curation_import_plan_claims_command_id_key", "u"),
+        ("curation_import_plan_claims_import_plan_id_command_id_key", "u"),
+        ("curation_import_plan_claims_plan_sha256_check", "c"),
+    },
+    ("ops", "curation_import_plan_commits"): {
+        ("curation_import_plan_commits_pkey", "p"),
+        ("curation_import_plan_commits_import_plan_id_fkey", "f"),
+        ("curation_import_plan_commits_command_id_fkey", "f"),
+        ("curation_import_plan_commits_import_batch_id_fkey", "f"),
+        ("curation_import_plan_commits_import_plan_id_command_id_fkey", "f"),
+        ("curation_import_plan_commits_import_batch_id_command_id_fkey", "f"),
+        ("curation_import_plan_commits_command_id_key", "u"),
+        ("curation_import_plan_commits_import_batch_id_key", "u"),
+        ("curation_import_plan_commits_result_payload_check", "c"),
+    },
+    ("ops", "curation_provider_root_receipts"): {
+        ("curation_provider_root_receipts_pkey", "p"),
+        ("curation_provider_root_receipts_root_job_id_fkey", "f"),
+        ("curation_provider_root_receipts_child_receipt_count_check", "c"),
+        ("curation_provider_root_receipts_child_receipt_set_hash_check", "c"),
+        ("curation_provider_root_receipts_generation_count_check", "c"),
+        ("curation_provider_root_receipts_generation_set_hash_check", "c"),
+    },
+    ("ops", "curation_provider_snapshot_receipts"): {
+        ("curation_provider_snapshot_receipts_pkey", "p"),
+        ("curation_provider_snapshot_receipts_source_job_id_fkey", "f"),
+        ("curation_provider_snapshot_receipts_root_job_id_fkey", "f"),
+        ("curation_provider_snapshot_receipts_provider_dataset_id_fkey", "f"),
+        ("curation_provider_snapshot_re_root_job_id_provider_dataset__key", "u"),
+        ("curation_provider_snapshot_receipts_source_entity_count_check", "c"),
+        ("curation_provider_snapshot_receipts_input_member_count_check", "c"),
+        ("curation_provider_snapshot_receipts_source_input_set_hash_check", "c"),
+    },
+    ("ops", "curation_source_observation_receipts"): {
+        ("curation_source_observation_receipts_pkey", "p"),
+        ("curation_source_observation_receipts_source_id_fkey", "f"),
+        ("curation_source_observation_receipts_import_job_id_fkey", "f"),
+        ("curation_source_observation_receipts_source_revision_check", "c"),
+        ("curation_source_observation_receipts_observation_revision_check", "c"),
+        ("curation_source_observation_receipts_row_count_check", "c"),
+        ("curation_source_observation_receipt_source_input_set_hash_check", "c"),
+    },
 }
 
 _UNMAPPED_TABLE_INDEXES: dict[tuple[str, str], set[str]] = {
@@ -325,6 +513,108 @@ _UNMAPPED_TABLE_INDEXES: dict[tuple[str, str], set[str]] = {
     ("ops", "tvn36_legacy_freeze_preflight_manifest"): {
         "tvn36_legacy_freeze_preflight_manifest_pkey",
     },
+    ("feature", "curation_import_plans"): {
+        "curation_import_plans_pkey",
+        "curation_import_plans_preview_command_id_key",
+        "curation_import_plans_plan_sha256_key",
+    },
+    ("feature", "curation_import_plan_rows"): {
+        "curation_import_plan_rows_pkey",
+    },
+    ("feature", "curation_import_plan_revisions"): {
+        "curation_import_plan_revisions_pkey",
+    },
+    ("ops", "curation_catalog_command_effects"): {
+        "curation_catalog_command_effects_pkey",
+    },
+    ("ops", "curation_concierge_legacy_owner_manifest"): {
+        "curation_concierge_legacy_owner_manifest_pkey",
+    },
+    ("ops", "curation_import_collection_effects"): {
+        "curation_import_collection_effects_pkey",
+    },
+    ("ops", "curation_import_collection_touches"): {
+        "curation_import_collection_touches_pkey",
+    },
+    ("ops", "curation_import_plan_claims"): {
+        "curation_import_plan_claims_pkey",
+        "curation_import_plan_claims_command_id_key",
+        "curation_import_plan_claims_import_plan_id_command_id_key",
+    },
+    ("ops", "curation_import_plan_commits"): {
+        "curation_import_plan_commits_pkey",
+        "curation_import_plan_commits_command_id_key",
+        "curation_import_plan_commits_import_batch_id_key",
+    },
+    ("ops", "curation_provider_root_receipts"): {
+        "curation_provider_root_receipts_pkey",
+    },
+    ("ops", "curation_provider_snapshot_receipts"): {
+        "curation_provider_snapshot_receipts_pkey",
+        "curation_provider_snapshot_re_root_job_id_provider_dataset__key",
+    },
+    ("ops", "curation_source_observation_receipts"): {
+        "curation_source_observation_receipts_pkey",
+    },
+}
+
+_TVN40_RAW_SQL_TABLES = frozenset(
+    {
+        ("feature", "curation_import_plans"),
+        ("feature", "curation_import_plan_rows"),
+        ("feature", "curation_import_plan_revisions"),
+        ("ops", "curation_catalog_command_effects"),
+        ("ops", "curation_concierge_legacy_owner_manifest"),
+        ("ops", "curation_import_collection_effects"),
+        ("ops", "curation_import_collection_touches"),
+        ("ops", "curation_import_plan_claims"),
+        ("ops", "curation_import_plan_commits"),
+        ("ops", "curation_provider_root_receipts"),
+        ("ops", "curation_provider_snapshot_receipts"),
+        ("ops", "curation_source_observation_receipts"),
+    }
+)
+
+# pg_get_constraintdef/pg_get_indexdef 기반 exact catalog 계약. 이름만 같고 CHECK/FK
+# 의미나 index key/predicate가 달라지는 drift도 digest가 바뀐다. 값 갱신은 migration
+# DDL을 의도적으로 바꾼 PR에서만 허용한다.
+_TVN40_RAW_SQL_CATALOG_SHA256: dict[tuple[str, str], str] = {
+    ("feature", "curation_import_plan_revisions"): (
+        "38b184a208713fe52e9a3007bf98fa972c95a21c673205fe7eaa3880e5381e78"
+    ),
+    ("feature", "curation_import_plan_rows"): (
+        "8f3f66e85eca459f67f82d5fbb12ece3c0c5ce1f970376596f46a046e6d41f33"
+    ),
+    ("feature", "curation_import_plans"): (
+        "0ecff9d4d7253e6ae466feb782a0c941ab50673293c61f23e91d3fdef1fc5047"
+    ),
+    ("ops", "curation_catalog_command_effects"): (
+        "e6e19c6c0a02c44bcaa7632597d0f2ba3f4e3e4404cd67ca010f202e52137920"
+    ),
+    ("ops", "curation_concierge_legacy_owner_manifest"): (
+        "b035b26d83adb06bed61284f4a31beca80b46a2856f7b68ae07b17e976046afc"
+    ),
+    ("ops", "curation_import_collection_effects"): (
+        "489a7b22da0e46582609c066b19cea59dcc621dae33f59913a53dbda0f757984"
+    ),
+    ("ops", "curation_import_collection_touches"): (
+        "b55dea3a3fdd17744281cc1fdadd16000251db76d3052fac855310eb0c868214"
+    ),
+    ("ops", "curation_import_plan_claims"): (
+        "1a1e40ea9f266833facf386e56968e9391b6c14a313afd668ede4525a9d75bdc"
+    ),
+    ("ops", "curation_import_plan_commits"): (
+        "3cfdb8dea520650d4bd4d53dc4903b80694ebc909f167e92e4ff82ef8667bd10"
+    ),
+    ("ops", "curation_provider_root_receipts"): (
+        "f3e030279289d8e865e32577a95e6cc795280a321395df6573d7d154db26dfc2"
+    ),
+    ("ops", "curation_provider_snapshot_receipts"): (
+        "c50c9f1e4bf814d61767930f90684f0e67326e58e0d577ba9ed32b8839c4dceb"
+    ),
+    ("ops", "curation_source_observation_receipts"): (
+        "be6d2e4da5248443e0a69ec8a3783c7ea9dd57016a47b579bdc32fe20a9cd0b3"
+    ),
 }
 
 _UNCOMPARED_INDEX_CONTRACTS: dict[
@@ -361,35 +651,7 @@ def _canonical_pg_sql(value: str | None) -> str:
     return re.sub(r'[\s()"]+', "", without_casts).lower()
 
 
-def _archived_revisions(project_root: Path) -> frozenset[str]:
-    """아카이브가 **선언한** revision id 집합.
-
-    파일명으로 판정하면 안 된다 — 109개 중 20개 넘게 파일명과 revision id가 다르다
-    (`0071_integrity_observations`는 `0071_integrity_observation_generations.py`가
-    선언한다). 실제로 파일명 기준 판정이 그 한 건을 놓쳤다.
-    """
-
-    import re
-
-    declaration = re.compile(r'^revision(?::\s*str)?\s*=\s*"([^"]+)"', re.MULTILINE)
-
-    def declared_in(directory: str) -> set[str]:
-        return {
-            match.group(1)
-            for path in (project_root / "alembic" / directory).glob("*.py")
-            if (match := declaration.search(path.read_text(encoding="utf-8"))) is not None
-        }
-
-    live = declared_in("versions")
-    found = declared_in("legacy_versions")
-    assert found, "아카이브에서 revision id를 하나도 읽지 못했다 — 경로가 틀렸다"
-    # bridge가 옛 head id(`0104_tvn36_final_fence`)를 그대로 선언하므로 아카이브에도
-    # live 그래프에도 같은 id가 있다. 빼지 않으면 **head를 가리키는 가장 자연스러운
-    # 문자열**이 아카이브 체인 109단계로 보내진다(적대 리뷰 지적). live가 이긴다.
-    return frozenset(found - live)
-
-
-async def _run_alembic_upgrade(dsn: str, revision: str = "head", *, chain: bool = False) -> None:
+async def _run_alembic_upgrade(dsn: str) -> None:
     """``alembic.command.upgrade``를 worker thread에서 실행.
 
     alembic은 sync API + 자체 asyncio.run(env.py)을 호출하므로 현재 pytest
@@ -409,16 +671,6 @@ async def _run_alembic_upgrade(dsn: str, revision: str = "head", *, chain: bool 
     project_root = Path(__file__).resolve().parents[2]  # noqa: ASYNC240  # sync IO is trivial path-arith here
     cfg = Config(str(project_root / "alembic.ini"))
     cfg.set_main_option("script_location", str(project_root / "alembic"))
-    # squash(`0200`) 이후 체인은 `alembic/legacy_versions/`의 아카이브다. 아카이브
-    # revision을 요청받았거나(자동 판정) 호출자가 "DB가 체인 중간에 있다"고 알려주면
-    # (`chain=True`) 아카이브 전용 그래프로 바꾼다. `versions/`와 함께 담으면 안 된다 —
-    # bridge와 아카이브가 `0104_tvn36_final_fence`를 둘 다 선언하는데 alembic은 그것을
-    # **거부하지 않고** 경고 한 줄 뒤 head 3개짜리 손상된 맵으로 계속 간다(실측).
-    # 두 그래프의 head 문자열은 같으므로 `_alembic_head_revision()`은 그대로 둔다.
-    if chain or revision in _archived_revisions(project_root):
-        cfg.set_main_option(
-            "version_locations", str(project_root / "alembic" / "legacy_versions")
-        )
     # 배포와 같은 경로로 돈다 — bootstrap 후 migrator 자격으로 upgrade.
     from tests.integration._tvn34_migration_bootstrap import (
         alembic_schema_owner_role,
@@ -427,7 +679,7 @@ async def _run_alembic_upgrade(dsn: str, revision: str = "head", *, chain: bool 
 
     cfg.set_main_option("sqlalchemy.url", await bootstrapped_migrator_dsn(dsn))
     with alembic_schema_owner_role():
-        await asyncio.to_thread(command.upgrade, cfg, revision)
+        await asyncio.to_thread(command.upgrade, cfg, "head")
 
 
 def _alembic_head_revision() -> str:
@@ -788,275 +1040,97 @@ async def test_alembic_creates_feature_merge_history(
     assert exists is not None
 
 
-async def test_curation_provenance_migration_fail_closes_legacy_links(
-    pg_container: object,
-) -> None:
-    """0072는 기존 link를 승인으로 추정하지 않고 감사 대상에 고정한다."""
-    from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
+async def _tvn40_raw_sql_catalog_sha256(
+    conn: AsyncConnection,
+) -> dict[tuple[str, str], str]:
+    """T-VN-40 raw-SQL relation의 constraint/index 의미를 정규화해 해시한다."""
 
-    raw_dsn = pg_container.get_connection_url()  # type: ignore[attr-defined]
-    admin_dsn = normalize_async_dsn(raw_dsn)
-    database_name = f"curation_provenance_{uuid.uuid4().hex}"
-    migration_dsn = make_url(admin_dsn).set(database=database_name).render_as_string(
-        hide_password=False
+    result = await conn.execute(
+        text(
+            """
+            SELECT
+                namespace.nspname AS schema_name,
+                relation.relname AS table_name,
+                'constraint' AS object_kind,
+                constraint_.conname AS object_name,
+                jsonb_build_object(
+                    'type', constraint_.contype,
+                    'definition', pg_catalog.pg_get_constraintdef(
+                        constraint_.oid,
+                        true
+                    ),
+                    'validated', constraint_.convalidated,
+                    'deferrable', constraint_.condeferrable,
+                    'deferred', constraint_.condeferred
+                ) AS contract
+            FROM pg_catalog.pg_constraint AS constraint_
+            JOIN pg_catalog.pg_class AS relation
+              ON relation.oid = constraint_.conrelid
+            JOIN pg_catalog.pg_namespace AS namespace
+              ON namespace.oid = relation.relnamespace
+            WHERE (namespace.nspname, relation.relname) IN (
+                SELECT * FROM unnest(
+                    CAST(:schema_names AS text[]),
+                    CAST(:table_names AS text[])
+                )
+            )
+            UNION ALL
+            SELECT
+                namespace.nspname AS schema_name,
+                relation.relname AS table_name,
+                'index' AS object_kind,
+                index_relation.relname AS object_name,
+                jsonb_build_object(
+                    'definition', pg_catalog.pg_get_indexdef(index_.indexrelid),
+                    'unique', index_.indisunique,
+                    'primary', index_.indisprimary,
+                    'valid', index_.indisvalid,
+                    'ready', index_.indisready,
+                    'live', index_.indislive
+                ) AS contract
+            FROM pg_catalog.pg_index AS index_
+            JOIN pg_catalog.pg_class AS relation
+              ON relation.oid = index_.indrelid
+            JOIN pg_catalog.pg_class AS index_relation
+              ON index_relation.oid = index_.indexrelid
+            JOIN pg_catalog.pg_namespace AS namespace
+              ON namespace.oid = relation.relnamespace
+            WHERE (namespace.nspname, relation.relname) IN (
+                SELECT * FROM unnest(
+                    CAST(:schema_names AS text[]),
+                    CAST(:table_names AS text[])
+                )
+            )
+            ORDER BY schema_name, table_name, object_kind, object_name
+            """
+        ),
+        {
+            "schema_names": [key[0] for key in sorted(_TVN40_RAW_SQL_TABLES)],
+            "table_names": [key[1] for key in sorted(_TVN40_RAW_SQL_TABLES)],
+        },
     )
-    admin_engine = make_async_engine(admin_dsn)
-    migration_engine = None
-    try:
-        async with admin_engine.connect() as raw_admin_conn:
-            admin_conn = await raw_admin_conn.execution_options(
-                isolation_level="AUTOCOMMIT"
-            )
-            await admin_conn.execute(text(f'CREATE DATABASE "{database_name}"'))
-
-        await _run_alembic_upgrade(migration_dsn, "0071_integrity_observations")
-        migration_engine = make_async_engine(migration_dsn)
-        async with migration_engine.begin() as conn:
-            await conn.execute(
-                text(
-                    """
-                    INSERT INTO feature.features (
-                        feature_id, kind, name, category,
-                        marker_icon, marker_color, detail
-                    ) VALUES (
-                        'feature:legacy-curation-link',
-                        'place',
-                        '근거 없는 기존 연결',
-                        '01070100',
-                        'place',
-                        'P-01',
-                        -- T-VN-35(ADR-086): 0084 backfill이 place_kind 결측을
-                        -- NOT NULL로 fail-close한다(sentinel 폐기). 0071 시점 seed도
-                        -- head까지 올라가려면 필수 값을 갖춰야 한다.
-                        '{"place_kind": "attraction"}'::jsonb
-                    )
-                    """
-                )
-            )
-            await conn.execute(
-                text(
-                    """
-                    INSERT INTO feature.curated_themes (
-                        theme_slug, theme_name, theme_group, visibility
-                    ) VALUES (
-                        'legacy-provenance-test',
-                        '기존 연결 감사',
-                        'test',
-                        'public'
-                    )
-                    """
-                )
-            )
-            await conn.execute(
-                text(
-                    """
-                    INSERT INTO feature.curation_collections (
-                        collection_key, theme_id, title, status, visibility
-                    )
-                    SELECT
-                        'legacy-provenance-test:2026',
-                        theme_id,
-                        '기존 연결 감사',
-                        'published',
-                        'public'
-                    FROM feature.curated_themes
-                    WHERE theme_slug = 'legacy-provenance-test'
-                    """
-                )
-            )
-            await conn.execute(
-                text(
-                    """
-                    INSERT INTO feature.curation_items (
-                        collection_id, feature_id, external_item_id,
-                        place_name, status, created_by
-                    )
-                    SELECT
-                        collection_id,
-                        'feature:legacy-curation-link',
-                        'legacy-item',
-                        '근거 없는 기존 연결',
-                        'included',
-                        'migration-fixture'
-                    FROM feature.curation_collections
-                    WHERE collection_key = 'legacy-provenance-test:2026'
-                    """
-                )
-            )
-        await migration_engine.dispose()
-        migration_engine = None
-
-        # DB가 체인 중간(`0071`)에 있으므로 아카이브 그래프로 head까지 올린다.
-        await _run_alembic_upgrade(migration_dsn, chain=True)
-        migration_engine = make_async_engine(migration_dsn)
-        async with migration_engine.connect() as conn:
-            row = (
-                await conn.execute(
-                    text(
-                        """
-                        SELECT
-                            item.accepted_link_decision_id =
-                                decision.decision_id AS exact_pointer,
-                            decision.feature_id,
-                            decision.decision_kind,
-                            decision.match_basis,
-                            decision.resolver_version,
-                            decision.actor,
-                            decision.evidence
-                        FROM feature.curation_items AS item
-                        JOIN feature.curation_link_decisions AS decision
-                          ON decision.decision_id =
-                             item.accepted_link_decision_id
-                        WHERE item.external_item_id = 'legacy-item'
-                        """
-                    )
-                )
-            ).mappings().one()
-
-        assert row["exact_pointer"]
-        assert row["feature_id"] == "feature:legacy-curation-link"
-        assert row["decision_kind"] == "accepted"
-        assert row["match_basis"] == "legacy_unattributed"
-        assert row["resolver_version"] == "pre-0072-unknown"
-        assert row["actor"] == "migration-fixture"
-        assert row["evidence"]["migration"] == "0072_curation_provenance"
-    finally:
-        if migration_engine is not None:
-            await migration_engine.dispose()
-        async with admin_engine.connect() as raw_admin_conn:
-            admin_conn = await raw_admin_conn.execution_options(
-                isolation_level="AUTOCOMMIT"
-            )
-            await admin_conn.execute(
-                text(f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)')
-            )
-        await admin_engine.dispose()
-
-
-async def test_weather_migration_reuses_valid_index_after_partial_failure(
-    pg_container: object,
-) -> None:
-    """0069 재시도는 index를 재사용하고 T-VN-38은 새 fact index로 교체한다."""
-    from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
-
-    raw_dsn = pg_container.get_connection_url()  # type: ignore[attr-defined]
-    admin_dsn = normalize_async_dsn(raw_dsn)
-    database_name = f"weather_migration_retry_{uuid.uuid4().hex}"
-    retry_dsn = make_url(admin_dsn).set(database=database_name).render_as_string(
-        hide_password=False
-    )
-    admin_engine = make_async_engine(admin_dsn)
-    retry_engine = None
-    try:
-        async with admin_engine.connect() as raw_admin_conn:
-            admin_conn = await raw_admin_conn.execution_options(
-                isolation_level="AUTOCOMMIT"
-            )
-            await admin_conn.execute(text(f'CREATE DATABASE "{database_name}"'))
-
-        await _run_alembic_upgrade(retry_dsn, "0068_integrity_last_seen")
-        retry_engine = make_async_engine(retry_dsn)
-        async with retry_engine.connect() as raw_retry_conn:
-            retry_conn = await raw_retry_conn.execution_options(
-                isolation_level="AUTOCOMMIT"
-            )
-            await retry_conn.execute(
-                text(
-                    """
-                    CREATE INDEX CONCURRENTLY idx_weather_values_feature_effective
-                    ON feature.feature_weather_values (
-                        feature_id,
-                        provider,
-                        weather_domain,
-                        forecast_style,
-                        metric_key,
-                        (
-                            COALESCE(
-                                valid_at,
-                                observed_at,
-                                valid_from,
-                                issued_at
-                            )
-                        ) DESC,
-                        issued_at DESC NULLS LAST,
-                        collected_at DESC,
-                        weather_value_key
-                    )
-                    """
-                )
-            )
-            relfilenode_before = (
-                await retry_conn.execute(
-                    text(
-                        """
-                        SELECT index_relation.relfilenode
-                        FROM pg_catalog.pg_class AS index_relation
-                        JOIN pg_catalog.pg_namespace AS namespace
-                          ON namespace.oid = index_relation.relnamespace
-                        WHERE namespace.nspname = 'feature'
-                          AND index_relation.relname =
-                              'idx_weather_values_feature_effective'
-                        """
-                    )
-                )
-            ).scalar_one()
-        await retry_engine.dispose()
-        retry_engine = None
-
-        await _run_alembic_upgrade(retry_dsn, "0069_weather_series_catalog")
-        retry_engine = make_async_engine(retry_dsn)
-        async with retry_engine.connect() as retry_conn:
-            relfilenode_after = (
-                await retry_conn.execute(
-                    text(
-                        """
-                        SELECT index_relation.relfilenode
-                        FROM pg_catalog.pg_class AS index_relation
-                        JOIN pg_catalog.pg_namespace AS namespace
-                          ON namespace.oid = index_relation.relnamespace
-                        WHERE namespace.nspname = 'feature'
-                          AND index_relation.relname =
-                              'idx_weather_values_feature_effective'
-                        """
-                    )
-                )
-            ).scalar_one()
-        assert relfilenode_after == relfilenode_before
-        await retry_engine.dispose()
-        retry_engine = None
-
-        # DB가 체인 중간(`0069`)에 있으므로 아카이브 그래프로 head까지 올린다.
-        await _run_alembic_upgrade(retry_dsn, chain=True)
-        retry_engine = make_async_engine(retry_dsn)
-        async with retry_engine.connect() as retry_conn:
-            legacy_index = (
-                await retry_conn.execute(
-                    text("SELECT to_regclass('feature.idx_weather_values_feature_effective')")
-                )
-            ).scalar_one()
-            current_index = (
-                await retry_conn.execute(
-                    text("SELECT to_regclass('feature.idx_weather_values_feature_target_known')")
-                )
-            ).scalar_one()
-            migration_head = (
-                await retry_conn.execute(text("SELECT version_num FROM alembic_version"))
-            ).scalar_one()
-
-        assert legacy_index is None
-        assert current_index is not None
-        assert migration_head == _alembic_head_revision()
-    finally:
-        if retry_engine is not None:
-            await retry_engine.dispose()
-        async with admin_engine.connect() as raw_admin_conn:
-            admin_conn = await raw_admin_conn.execution_options(
-                isolation_level="AUTOCOMMIT"
-            )
-            await admin_conn.execute(
-                text(f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)')
-            )
-        await admin_engine.dispose()
+    contracts: dict[tuple[str, str], list[dict[str, object]]] = {
+        key: [] for key in _TVN40_RAW_SQL_TABLES
+    }
+    for row in result:
+        contracts[(row.schema_name, row.table_name)].append(
+            {
+                "kind": row.object_kind,
+                "name": row.object_name,
+                "contract": row.contract,
+            }
+        )
+    return {
+        key: hashlib.sha256(
+            json.dumps(
+                contracts[key],
+                ensure_ascii=True,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        for key in sorted(contracts)
+    }
 
 
 async def test_alembic_unmapped_tables_keep_structural_contract(
@@ -1067,6 +1141,7 @@ async def test_alembic_unmapped_tables_keep_structural_contract(
     assert set(_UNMAPPED_TABLE_COLUMNS) == UNMAPPED_APP_TABLES
     assert set(_UNMAPPED_TABLE_CONSTRAINTS) == UNMAPPED_APP_TABLES
     assert set(_UNMAPPED_TABLE_INDEXES) == UNMAPPED_APP_TABLES
+    assert set(_TVN40_RAW_SQL_CATALOG_SHA256) == _TVN40_RAW_SQL_TABLES
 
     async with pg_engine_with_migrations.connect() as conn:
         column_rows = await conn.execute(
@@ -1123,6 +1198,7 @@ async def test_alembic_unmapped_tables_keep_structural_contract(
             ),
             {"table_names": sorted({table for _, table in _UNMAPPED_TABLE_COLUMNS})},
         )
+        exact_catalog_sha256 = await _tvn40_raw_sql_catalog_sha256(conn)
 
     actual_columns: dict[tuple[str, str], set[tuple[str, str, bool]]] = {
         key: set() for key in _UNMAPPED_TABLE_COLUMNS
@@ -1158,6 +1234,44 @@ async def test_alembic_unmapped_tables_keep_structural_contract(
         assert required <= actual_constraints[key], f"{key} constraint drift"
     for key, required in _UNMAPPED_TABLE_INDEXES.items():
         assert required <= actual_indexes[key], f"{key} index drift"
+    assert exact_catalog_sha256 == _TVN40_RAW_SQL_CATALOG_SHA256
+
+
+async def test_tvn40_raw_sql_contract_rejects_same_name_semantic_drift(
+    pg_engine_with_migrations: AsyncEngine,
+) -> None:
+    """같은 이름의 무효 CHECK로 바꿔도 exact catalog 계약은 반드시 실패한다."""
+
+    async with pg_engine_with_migrations.connect() as conn:
+        transaction = await conn.begin()
+        try:
+            await conn.execute(
+                text(
+                    """
+                    ALTER TABLE feature.curation_import_plans
+                      DROP CONSTRAINT curation_import_plans_content_sha256_check
+                    """
+                )
+            )
+            await conn.execute(
+                text(
+                    """
+                    ALTER TABLE feature.curation_import_plans
+                      ADD CONSTRAINT curation_import_plans_content_sha256_check
+                      CHECK (true)
+                    """
+                )
+            )
+            mutated = await _tvn40_raw_sql_catalog_sha256(conn)
+            assert mutated != _TVN40_RAW_SQL_CATALOG_SHA256
+            assert (
+                mutated[("feature", "curation_import_plans")]
+                != _TVN40_RAW_SQL_CATALOG_SHA256[
+                    ("feature", "curation_import_plans")
+                ]
+            )
+        finally:
+            await transaction.rollback()
 
 
 async def test_alembic_uncompared_indexes_keep_exact_semantics(

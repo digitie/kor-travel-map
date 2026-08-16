@@ -24,6 +24,7 @@ __all__ = [
     "ApiSettings",
     "CacheTargetServicePrincipalSetting",
     "CacheTargetServiceScope",
+    "CurationSnapshotServiceScope",
 ]
 
 
@@ -55,6 +56,7 @@ CacheTargetServiceScope = Literal[
     "cache-target:recovery-replay",
 ]
 CacheTargetServiceRole = Literal["command", "consumer", "restore", "recovery"]
+CurationSnapshotServiceScope = Literal["pinvi:curation-snapshot:read"]
 
 _CACHE_TARGET_SERVICE_SCOPES: frozenset[str] = frozenset(
     {
@@ -395,6 +397,27 @@ class ApiSettings(BaseSettings):
             "principal_id/consumer_id/scope/external_system allowlist에 결박한다. "
             "기존 service_token 값만으로는 cache-target 권한을 얻지 못한다. env는 "
             "JSON 배열 ``KOR_TRAVEL_MAP_API_CACHE_TARGET_SERVICE_PRINCIPALS``."
+        ),
+    )
+    pinvi_curation_snapshot_token_sha256: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        description=(
+            "PinVi canonical curation snapshot 전용 ServiceToken의 lowercase SHA-256 "
+            "digest. generic service/cache-target/admin token은 이 권한을 얻지 못한다. "
+            "env ``KOR_TRAVEL_MAP_API_PINVI_CURATION_SNAPSHOT_TOKEN_SHA256``."
+        ),
+    )
+    pinvi_curation_cutover_mapping_token_sha256: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        description=(
+            "T-VN-40C maintenance window에서만 쓰는 PinVi legacy identity mapping "
+            "export 전용 ServiceToken의 lowercase SHA-256 digest. canonical snapshot "
+            "read token과 공유하면 안 된다. env "
+            "``KOR_TRAVEL_MAP_API_PINVI_CURATION_CUTOVER_MAPPING_TOKEN_SHA256``."
         ),
     )
     cursor_signing_secret: SecretStr | None = Field(
@@ -747,6 +770,63 @@ class ApiSettings(BaseSettings):
                 )
         return self
 
+    @field_validator(
+        "pinvi_curation_snapshot_token_sha256",
+        "pinvi_curation_cutover_mapping_token_sha256",
+    )
+    @classmethod
+    def _validate_pinvi_curation_service_token_sha256(
+        cls,
+        value: str | None,
+    ) -> str | None:
+        if value is not None and _LOWER_SHA256_HEX_PATTERN.fullmatch(value) is None:
+            raise ValueError(
+                "PinVi curation service token digest must be lowercase SHA-256 hex"
+            )
+        return value
+
+    @model_validator(mode="after")
+    def _validate_pinvi_curation_service_tokens_distinct(self) -> ApiSettings:
+        digests = {
+            "snapshot": self.pinvi_curation_snapshot_token_sha256,
+            "cutover mapping": self.pinvi_curation_cutover_mapping_token_sha256,
+        }
+        configured = {name: digest for name, digest in digests.items() if digest is not None}
+        if len(configured) != len(set(configured.values())):
+            raise ValueError("PinVi curation service token digests must be distinct")
+        cache_target_digests = {
+            principal.token_sha256 for principal in self.cache_target_service_principals
+        }
+        protected_secrets = {
+            "admin proxy secret": self.admin_proxy_secret,
+            "service token": self.service_token,
+            "ops read token": self.ops_read_token,
+            "ops cancel token": self.ops_cancel_token,
+            "ops fixture token": self.ops_fixture_token,
+            "metrics token": self.metrics_token,
+            "cursor signing secret": self.cursor_signing_secret,
+            "public API key": self.vworld_api_key,
+        }
+        for curation_name, digest in configured.items():
+            if digest in cache_target_digests:
+                raise ValueError(
+                    f"PinVi curation {curation_name} token digest must be distinct from "
+                    "cache-target tokens"
+                )
+            for protected_name, protected_secret in protected_secrets.items():
+                protected_raw = _optional_secret_text(
+                    protected_secret,
+                    setting_name=protected_name,
+                )
+                if protected_raw is not None and hashlib.sha256(
+                    protected_raw.encode("utf-8")
+                ).hexdigest() == digest:
+                    raise ValueError(
+                        f"PinVi curation {curation_name} token digest must be distinct from "
+                        f"{protected_name}"
+                    )
+        return self
+
     @property
     def cursor_signing_key(self) -> bytes:
         """설정된 cursor HMAC key 또는 local-dev process-local fallback."""
@@ -760,8 +840,8 @@ class ApiSettings(BaseSettings):
         default=False,
         description=(
             "True면 public REST surface(`/v1/features`, `/v1/public`, `/v1/categories`, "
-            "`/v1/providers`, `/v1/curated-*`)에 VWorld 호환 `key` query 검증을 "
-            "적용한다. trusted admin frontend proxy 또는 service-token 요청은 우회한다."
+            "`/v1/providers`, `/v1/curated-*`)에 DB 등록 Map 전용 API key header "
+            "검증을 적용한다. trusted admin frontend proxy 또는 service-token 요청은 우회한다."
         ),
     )
     public_api_key_cache_ttl_s: int = Field(
@@ -776,9 +856,8 @@ class ApiSettings(BaseSettings):
     vworld_api_key: SecretStr | None = Field(
         default=None,
         description=(
-            "VWorld 지도 key. public_api_keys 테이블이 비어 있을 때 초기 전환 편의를 위해 "
-            "같은 값을 public API key fallback으로 인정한다. 운영에서는 UI에서 생성한 "
-            "key를 DB에 저장해 사용한다."
+            "VWorld 지도 key. Map 공개 API 인증과는 다른 provider 자격증명이며, "
+            "ops.public_api_keys가 비어 있어도 fallback으로 인정하지 않는다."
         ),
     )
     admin_destructive_enabled: bool = Field(

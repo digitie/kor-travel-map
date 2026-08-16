@@ -9,12 +9,15 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml README.md alembic.ini ./
-COPY alembic ./alembic
+COPY pyproject.toml setup.py README.md alembic.ini ./
+COPY alembic/env.py alembic/script.py.mako ./alembic/
+COPY alembic/baseline ./alembic/baseline
+COPY alembic/versions ./alembic/versions
 COPY src ./src
 COPY packages/kor-travel-map-api ./packages/kor-travel-map-api
 
-RUN python -m pip install --no-cache-dir --upgrade pip \
+RUN rm -f src/kortravelmap/cli/_h35_*.py src/kortravelmap/cli/h35_cutover.py \
+    && python -m pip install --no-cache-dir --upgrade pip \
     && python -m pip install --no-cache-dir --prefix=/install . ./packages/kor-travel-map-api
 
 FROM python:3.12-slim AS runtime
@@ -40,14 +43,16 @@ RUN apt-get update \
 
 COPY --from=builder /install /usr/local
 COPY alembic.ini ./
-COPY alembic ./alembic
+COPY alembic/env.py alembic/script.py.mako ./alembic/
+COPY alembic/baseline ./alembic/baseline
+COPY alembic/versions ./alembic/versions
 COPY docker/api-entrypoint.sh ./docker/api-entrypoint.sh
+COPY docker/pre-squash-revisions.txt ./docker/pre-squash-revisions.txt
 COPY --chown=appuser:appuser docker/application-schema-head.py /usr/local/bin/ktm-application-schema
-COPY --chown=appuser:appuser scripts/h35/h35_cutover.py ./scripts/h35/h35_cutover.py
 COPY --chown=appuser:appuser resources/curations ./resources/curations
 
 RUN chmod 0755 /usr/local/bin/ktm-application-schema \
-    && chmod +x ./docker/api-entrypoint.sh ./scripts/h35/h35_cutover.py \
+    && chmod +x ./docker/api-entrypoint.sh \
     && chown -R appuser:appuser /app
 
 USER appuser

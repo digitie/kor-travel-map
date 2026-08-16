@@ -5,7 +5,7 @@
 [`docs/resume.md`](resume.md)가 정본이다. 작성·유지 규약은
 [`docs/tasks-rule.md`](tasks-rule.md)를 따른다.
 
-## 진행 중인 작업 인덱스 (2026-08-12 PR #971 머지 후 재대조)
+## 진행 중인 작업 인덱스 (2026-08-13 T-VN-36 PR #973 머지 후 재대조)
 
 완료한 `T-VN-32`·`T-VN-33`·`T-VN-37`·`T-VN-38`과 선행 운영 task는
 [`tasks-done.md`](tasks-done.md)로 이관했다. 아래에는 아직 닫히지 않은 실행 단위만 둔다.
@@ -31,6 +31,15 @@ barrier로 직렬화한다.
     [x] `T-VN-36-live`(격리 clone 인수 완주 — 2026-08-13)
   - 32~38 join barrier 뒤 Lane B: [ ] `T-VN-40A` → [ ] `T-VN-40B` →
     [ ] `T-VN-40C`
+    - A/B/C는 logical phase이며 **하나의 forward-only implementation PR/release**로만 구현·병합한다.
+      phase별 writer/migration/consumer PR 또는 중간 배포는 금지한다.
+    - T-VN-36 PR #973이 `c76ceb7a`로 `main`에 병합돼 join barrier가 해소됐고,
+      2026-08-13 사용자가 ADR-092와 40A/B/C 단일 PR 구현을 승인했다. 설계·구현 정본은
+      [`t-vn-40-curation-write-model-plan-2026-08-11.md`](reports/t-vn-40-curation-write-model-plan-2026-08-11.md)다.
+    - PR #978 최신 baseline+bridge를 T-VN-40 branch에 재배치했다. active chain은
+      `0200_schema_baseline→0104_tvn36_final_fence(bridge)→0202…0220` 단일 head이며,
+      과거 `0001~0104` 파일은 read-only legacy 증거다. n150 현행 `0104` DB는 bridge가
+      그대로 인식하므로 stamp나 baseline 재실행 없이 `0202…0220`만 forward upgrade한다.
   - 최종 단일 cutover: [ ] `T-VN-39`
 - **보류/외부 추적**
   - [ ] `T-VN-H27` — #819 HAProxy WebSocket tunnel timeout(**보류: 운영자 환경 필요**,
@@ -766,6 +775,10 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
       컨테이너)에서 공유되는 업스트림 자격증명이라 하나가 새면 둘 다 샌다. 설계 의도는
       "UI에서 생성한 전용 키를 DB에 저장"이므로, admin BFF로 난수 전용 키를 발급하고 이
       행을 revoke하는 회전 경로가 열려 있다.
+    - **T-VN-40 n150 배포 전 차단 조건**: admin BFF 정식 발급 경로로 Map 전용 public
+      key를 생성·안전 보관하고, VWorld 값으로 직접 등록한 임시 행을 revoke한다. 키 원문은
+      저장소·로그·채팅에 남기지 않으며 새 key 200 / VWorld key 401 / revoke key 401을
+      live probe로 확인한 뒤에만 candidate 배포 fence를 연다.
   - **prod 지오코딩이 죽어 있었다 — 고쳤다.** `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY`에
     VWorld 키가 결선돼 있어 geo가 401로 거부했다(실측: VWorld 키 401 / `~/.secrets` 키
     200). 즉 map의 정/역지오코딩 호출이 전부 실패하고 있었다. 올바른 값으로 교체 후
@@ -1038,9 +1051,14 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
 - [ ] T-VN-40C — **legacy surface fence·removal manifest**
 
-  checksum과 consumer cutover 뒤 overlay 신규 write와 normal routing을 차단한다. held component
-  rollback에 필요한 repository/trigger/table은 soak 동안 보존하고 exact removal manifest를
-  T-VN-39에 넘긴다. 신규 호환 shim은 만들지 않는다.
+  checksum과 consumer cutover 뒤 overlay 신규 write와 normal routing을 차단한다. exact removal
+  manifest로 legacy repository/trigger/table/API/ACL을 같은 forward-only release에서 물리 삭제하고
+  T-VN-39에 catalog-zero receipt를 넘긴다. held component·old binary rollback·신규 호환 shim은
+  만들지 않으며 recovery는 fresh clone/reload만 허용한다.
+
+  2026-08-15 기준 Docker Manager PR #174가 PinVi raw snapshot/mapping pair→Map digest pair의
+  C6c 결선을 구현했지만 아직 draft다. 이를 병합하고 n150 canonical import/backfill live receipt를
+  남기기 전에는 legacy surface 물리 삭제나 T-VN-40 receipt complete를 수행하지 않는다.
 
 - [ ] T-VN-39 — **KTM·PinVi write-fence cutover**
 

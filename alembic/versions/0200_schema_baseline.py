@@ -148,6 +148,111 @@ def _execute_sql_script(sql: str) -> None:
     await_only(raw_connection.execute(sql))
 
 
+_APPLICATION_ROLE_ASSERTIONS_SQL: Final[str] = r"""
+DO $application_roles$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_roles
+        WHERE rolname IN (
+            'ktm_feature_schema_owner', 'ktm_feature_state_procedure_owner',
+            'ktm_feature_audit_writer', 'ktm_feature_runtime',
+            'ktm_curation_command_owner', 'ktm_curation_audit_writer',
+            'ktm_curation_admin_executor', 'ktm_curation_provider_executor'
+        )
+          AND (
+              rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb
+              OR rolcreaterole OR rolbypassrls OR rolreplication
+          )
+    ) OR (
+        SELECT count(*)
+        FROM pg_catalog.pg_roles
+        WHERE rolname IN (
+            'ktm_feature_schema_owner', 'ktm_feature_state_procedure_owner',
+            'ktm_feature_audit_writer', 'ktm_feature_runtime',
+            'ktm_curation_command_owner', 'ktm_curation_audit_writer',
+            'ktm_curation_admin_executor', 'ktm_curation_provider_executor'
+        )
+    ) <> 8 THEN
+        RAISE EXCEPTION 'application NOLOGIN role is missing or unsafe'
+            USING ERRCODE = '42501';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_roles
+        WHERE rolname IN ('ktm_feature_api_runtime', 'ktm_feature_dagster_runtime')
+          AND (
+              NOT rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb
+              OR rolcreaterole OR rolbypassrls OR rolreplication
+          )
+    ) OR (
+        SELECT count(*)
+        FROM pg_catalog.pg_roles
+        WHERE rolname IN ('ktm_feature_api_runtime', 'ktm_feature_dagster_runtime')
+    ) <> 2 THEN
+        RAISE EXCEPTION 'runtime login is missing or unsafe'
+            USING ERRCODE = '42501';
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_roles
+        WHERE rolname = 'ktm_feature_migrator'
+          AND rolcanlogin
+          AND NOT rolinherit
+          AND NOT rolsuper
+          AND NOT rolcreatedb
+          AND NOT rolcreaterole
+          AND NOT rolbypassrls
+          AND NOT rolreplication
+    ) THEN
+        RAISE EXCEPTION 'migrator login is missing or unsafe'
+            USING ERRCODE = '42501';
+    END IF;
+    IF EXISTS (
+        WITH expected(granted_role, member_role, admin_option, inherit_option, set_option) AS (
+            VALUES
+                ('ktm_feature_schema_owner', 'ktm_feature_migrator', false, false, true),
+                ('ktm_feature_runtime', 'ktm_feature_api_runtime', false, true, false),
+                ('ktm_feature_runtime', 'ktm_feature_dagster_runtime', false, true, false),
+                (
+                    'ktm_feature_state_procedure_owner',
+                    'ktm_feature_schema_owner', false, false, true
+                ),
+                ('ktm_feature_audit_writer', 'ktm_feature_schema_owner', false, false, true),
+                ('ktm_curation_command_owner', 'ktm_feature_schema_owner', false, false, true),
+                ('ktm_curation_audit_writer', 'ktm_feature_schema_owner', false, false, true),
+                ('ktm_curation_admin_executor', 'ktm_feature_api_runtime', false, true, false),
+                (
+                    'ktm_curation_provider_executor',
+                    'ktm_feature_dagster_runtime', false, true, false
+                )
+        ),
+        actual AS (
+            SELECT granted.rolname AS granted_role,
+                   member.rolname AS member_role,
+                   membership.admin_option,
+                   membership.inherit_option,
+                   membership.set_option
+            FROM pg_catalog.pg_auth_members AS membership
+            JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid
+            JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
+            WHERE granted.rolname LIKE 'ktm_feature_%'
+               OR granted.rolname LIKE 'ktm_curation_%'
+               OR member.rolname LIKE 'ktm_feature_%'
+               OR member.rolname LIKE 'ktm_curation_%'
+        )
+        (SELECT * FROM expected EXCEPT SELECT * FROM actual)
+        UNION ALL
+        (SELECT * FROM actual EXCEPT SELECT * FROM expected)
+    ) THEN
+        RAISE EXCEPTION 'application role membership graph is not exact'
+            USING ERRCODE = '42501';
+    END IF;
+END
+$application_roles$;
+"""
+
+
 def upgrade() -> None:
     # ── bootstrap 전제 검증 ────────────────────────────────────────────────
     # 앞부분(role 존재·membership)은 `0095`에서 그대로 가져왔다. role **생성**이 아니라
@@ -159,27 +264,55 @@ def upgrade() -> None:
         DO $$
         DECLARE missing text;
         BEGIN
-            IF NOT (SELECT rolsuper OR rolcreaterole FROM pg_catalog.pg_roles WHERE rolname = current_user)
+            IF NOT (
+                SELECT rolsuper OR rolcreaterole
+                FROM pg_catalog.pg_roles
+                WHERE rolname = current_user
+            )
                AND (
-                   NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_schema_owner')
-                   OR NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_state_procedure_owner')
-                   OR NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_audit_writer')
-                   OR NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_runtime')
+                   NOT EXISTS (
+                       SELECT 1 FROM pg_catalog.pg_roles
+                       WHERE rolname = 'ktm_feature_schema_owner'
+                   )
+                   OR NOT EXISTS (
+                       SELECT 1 FROM pg_catalog.pg_roles
+                       WHERE rolname = 'ktm_feature_state_procedure_owner'
+                   )
+                   OR NOT EXISTS (
+                       SELECT 1 FROM pg_catalog.pg_roles
+                       WHERE rolname = 'ktm_feature_audit_writer'
+                   )
+                   OR NOT EXISTS (
+                       SELECT 1 FROM pg_catalog.pg_roles
+                       WHERE rolname = 'ktm_feature_runtime'
+                   )
                ) THEN
                 RAISE EXCEPTION
                     'baseline requires CREATEROLE or pre-provisioned ktm_feature_* roles'
                     USING ERRCODE = '42501';
             END IF;
-            IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_schema_owner') THEN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_catalog.pg_roles
+                WHERE rolname = 'ktm_feature_schema_owner'
+            ) THEN
                 CREATE ROLE ktm_feature_schema_owner NOLOGIN NOINHERIT;
             END IF;
-            IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_state_procedure_owner') THEN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_catalog.pg_roles
+                WHERE rolname = 'ktm_feature_state_procedure_owner'
+            ) THEN
                 CREATE ROLE ktm_feature_state_procedure_owner NOLOGIN NOINHERIT;
             END IF;
-            IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_audit_writer') THEN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_catalog.pg_roles
+                WHERE rolname = 'ktm_feature_audit_writer'
+            ) THEN
                 CREATE ROLE ktm_feature_audit_writer NOLOGIN NOINHERIT;
             END IF;
-            IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_runtime') THEN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_catalog.pg_roles
+                WHERE rolname = 'ktm_feature_runtime'
+            ) THEN
                 CREATE ROLE ktm_feature_runtime NOLOGIN NOINHERIT;
             END IF;
             -- Dedicated migrator runs ``SET LOCAL ROLE ktm_feature_schema_owner``.
@@ -240,6 +373,7 @@ def upgrade() -> None:
         $$
         """
     )
+    op.execute(_APPLICATION_ROLE_ASSERTIONS_SQL)
 
     # ── 스키마 ────────────────────────────────────────────────────────────
     _execute_sql_script(_read_sidecar("schema.sql", _SCHEMA_SHA256))
@@ -251,5 +385,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     raise RuntimeError(
-        "baseline은 forward-only다 — 되돌리려면 DB를 폐기하고 다시 만들어라"
+        "0200_schema_baseline is forward-only — DB를 폐기하고 다시 만들어라"
     )

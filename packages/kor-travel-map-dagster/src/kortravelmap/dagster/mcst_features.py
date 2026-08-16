@@ -109,10 +109,12 @@ async def run_feature_place_mcst_culture(
     geocoder = _reverse_geocoder(context)
     results: list[DagsterFeatureLoadResult] = []
     for slug, spec in MCST_FILE_DATASETS.items():
-        slug_rows = grouped.get(slug)
+        slug_rows = grouped.get(slug, [])
         if not slug_rows:
-            context.log.info("MCST %s row 없음 — skip.", spec.dataset_key)
-            continue
+            context.log.info(
+                "MCST %s row 없음 — authoritative empty snapshot으로 seal.",
+                spec.dataset_key,
+            )
         bundles = await file_rows_to_bundles(
             slug_rows,
             slug=slug,
@@ -176,8 +178,26 @@ async def feature_place_mcst_culture(
                 await append_failed_multi_member_attempt(context, guard, membership, exc)
         raise
     if guard is not None:
-        for membership in completed_memberships:
-            await finish_tracked_feature_membership(guard, membership)
+        assert guard.operation_key is not None
+        if len(result.results) != len(completed_memberships):
+            raise RuntimeError("MCST authoritative member와 load seal 수가 다름")
+        for loaded in result.results:
+            membership = await guard.client.resolve_feature_operation_dataset_membership(
+                operation_key=guard.operation_key,
+                provider=MCST_PROVIDER_NAME,
+                dataset_key=loaded.dataset_key,
+            )
+            if membership not in completed_memberships:
+                raise RuntimeError("MCST load seal이 frozen membership 밖을 가리킴")
+            await finish_tracked_feature_membership(
+                guard,
+                membership,
+                authoritative_snapshot_complete=True,
+                curation_input_member_count=(
+                    loaded.load.curation_input_member_count
+                ),
+                curation_input_set_hash=loaded.load.curation_input_set_hash,
+            )
     return result
 
 

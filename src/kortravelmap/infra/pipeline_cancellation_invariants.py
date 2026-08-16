@@ -162,10 +162,17 @@ def _validate_resolved_member(
         if (
             run.result == "already_terminal"
             and run.terminal_status == "SUCCESS"
-            and member.operation_kind
-            in {"provider_feature_load_run", "provider_feature_load"}
             and member.terminal_status == "failed"
-            and member.dagster_run_id in success_tracking_run_ids
+            and (
+                (
+                    member.operation_kind == "provider_feature_load"
+                    and member.dagster_run_id in success_tracking_run_ids
+                )
+                or (
+                    member.operation_kind == "provider_feature_load_run"
+                    and base.current_stage in {"stale_input", "tracking_invariant"}
+                )
+            )
         ):
             mapping = ("failed", "already_terminal")
         if mapping != (base.initial_status, member.result):

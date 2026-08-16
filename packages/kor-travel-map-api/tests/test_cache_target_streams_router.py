@@ -1986,7 +1986,9 @@ def test_restore_fence_uses_stream_etag_and_domain_command_claim(
     assert data["superseded_reconciliation_request_id"] == RECONCILIATION_REQUEST_ID
     assert service.restore_calls[0]["command_id"] == 123
     assert service.restore_calls[0]["expected_control_version"] == 2
-    assert captured_complete["status_code"] == 201
+    # 첫 실행은 route decorator의 201을 반환하지만 terminal ledger는 기존
+    # restore-fence exact replay 계약(200)을 보존한다.
+    assert captured_complete["status_code"] == 200
     assert captured_complete["response_headers"] == {"ETag": f'"{EXTERNAL_SYSTEM}:3"'}
 
 

@@ -84,6 +84,63 @@ def test_buildx_frontend_receives_exact_git_revision(
 
 
 @pytest.mark.unit
+def test_geo_credentials_never_fall_back_to_vworld_provider_key(
+    tmp_path: Path,
+) -> None:
+    """VWorld provider key 하나로 Geo consumer credential을 채우지 않는다."""
+
+    env = os.environ.copy()
+    for name in (
+        "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY",
+        "KOR_TRAVEL_GEO_API_KEY",
+        "NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY",
+        "NEXT_PUBLIC_VWORLD_API_KEY",
+        "KOR_TRAVEL_GEO_VWORLD_API_KEY",
+        "VWORLD_API_KEY",
+    ):
+        env.pop(name, None)
+    env["KOR_TRAVEL_MAP_ENV_FILE"] = str(tmp_path / "missing.env")
+    env["VWORLD_API_KEY"] = "vworld-provider-key"
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "source scripts/load-env.sh; "
+            "printf '%s\\n%s\\n%s\\n' "
+            '"$NEXT_PUBLIC_VWORLD_API_KEY" '
+            '"${NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY:-}" '
+            '"${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-}"',
+        ],
+        cwd=ROOT,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.splitlines() == ["vworld-provider-key", "", ""]
+
+    buildx = _read("scripts/docker-buildx.sh")
+    compose = _read("docker-compose.yml")
+    geo_route = _read(
+        "packages/kor-travel-map-admin/frontend/src/app/api/geo/[...path]/route.ts"
+    )
+    live_acceptance = _read("scripts/run-admin-feature-clone-live-acceptance.sh")
+    assert (
+        'NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY=${NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY:-}"'
+        in buildx
+    )
+    assert "NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY:-${NEXT_PUBLIC_VWORLD_API_KEY" not in compose
+    assert "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-${NEXT_PUBLIC_VWORLD_API_KEY" not in compose
+    assert "process.env.NEXT_PUBLIC_VWORLD_API_KEY" not in geo_route
+    assert "require_env E2E_KOR_TRAVEL_GEO_API_KEY" in live_acceptance
+    assert 'export NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY=""' in live_acceptance
+    assert (
+        'NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY="$E2E_VWORLD_API_KEY"'
+        not in live_acceptance
+    )
+
+
+@pytest.mark.unit
 def test_local_compose_build_paths_export_exact_git_revision() -> None:
     expected = 'export KOR_TRAVEL_MAP_GIT_COMMIT="$(git -C "$ROOT_DIR" rev-parse HEAD)"'
 

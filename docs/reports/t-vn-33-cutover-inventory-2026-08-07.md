@@ -120,7 +120,7 @@ fence, T-VN-39에서 물리 삭제.
 | --- | --- | --- |
 | `make_source_record_key` | `core/ids.py:298-360` | `sr_ + sha1(p\|d\|t\|id\|hash)[:20]` — 호출 27곳 |
 | `_make_source_entity_key` | `feature_repo.py:2083-2093` | `se_ + sha256(p\|d\|t\|id)` — **private, `core/ids.py`에 공개 대응물 없음** |
-| (동일 식, SQL) | `alembic/versions/0044_source_entities.py:20-29` | 손으로 복제됨 |
+| (동일 식, SQL) | `alembic/legacy_versions/0044_source_entities.py:20-29` | 손으로 복제됨 |
 
 ⇒ `_make_source_entity_key`를 이번 PR에서 `core/ids.py`로 올리지 않으면 `0088`에
 **세 번째 사본**이 생긴다.
@@ -264,7 +264,7 @@ registry re-key는 `FEATURE_OPERATION_REGISTRY_DIGEST` → `..._VERSION`을 바�
 
 `test_vnext_target_freeze.py`는 이미 목표 기준으로 쓰여 있고 20개 relation을
 `:55-95`에 열거한다. `test_source_entities_migration.py`와
-`alembic/versions/0044_source_entities.py`가 expand+backfill 선례다.
+`alembic/legacy_versions/0044_source_entities.py`가 expand+backfill 선례다.
 `tests/unit/test_migration_immutability.py`는 0056/0058 바이트 불변을 단언한다 —
 건드리지 말 것.
 

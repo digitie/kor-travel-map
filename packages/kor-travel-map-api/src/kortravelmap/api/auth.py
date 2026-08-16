@@ -28,7 +28,6 @@ from fastapi import Depends, Header, HTTPException, Request, Security, status
 from fastapi.security import APIKeyHeader
 from kortravelmap.infra.public_api_keys import (
     cached_active_public_api_key_hashes,
-    hash_public_api_key,
     public_api_key_matches,
 )
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,10 +53,13 @@ __all__ = [
     "SERVICE_TOKEN_HEADER",
     "AdminProxyContext",
     "CacheTargetServicePrincipalContext",
+    "CurationSnapshotServicePrincipalContext",
     "OpsOperatorContext",
     "OpsFixtureContext",
     "require_cache_target_service_principal",
     "require_cache_target_service_scope",
+    "require_curation_cutover_service_principal",
+    "require_curation_snapshot_service_principal",
     "require_admin_frontend",
     "require_metrics_token",
     "require_ops_operator",
@@ -166,6 +168,14 @@ class CacheTargetServicePrincipalContext:
     consumer_id: str
     scopes: frozenset[CacheTargetServiceScope]
     external_systems: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class CurationSnapshotServicePrincipalContext:
+    """PinVi canonical curation snapshot 전용 service principal."""
+
+    principal_id: str
+    scopes: frozenset[str]
 
 
 def _settings(request: Request) -> ApiSettings:
@@ -531,6 +541,155 @@ async def require_cache_target_service_principal(
     )
 
 
+async def _require_pinvi_curation_service_principal(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    token: Annotated[str | None, Security(_service_token_scheme)] = None,
+    *,
+    expected_digest: str | None,
+    scope: str,
+    principal_id: str,
+    error_prefix: str,
+) -> CurationSnapshotServicePrincipalContext:
+    """PinVi curation service token을 정확한 one-scope principal로 해석한다."""
+
+    if token is None or token == "":
+        settings = _settings(request)
+        known_other_principal = False
+        if settings.admin_proxy_secret is not None:
+            known_other_principal = resolve_admin_proxy_context(request, settings) is not None
+
+        supplied_ops_token = (request.headers.get(OPS_TOKEN_HEADER) or "").strip()
+        if supplied_ops_token:
+            supplied_ops_digest = _token_digest(supplied_ops_token)
+            known_other_principal = known_other_principal or any(
+                other_secret is not None
+                and hmac.compare_digest(
+                    supplied_ops_digest,
+                    _token_digest(other_secret.get_secret_value()),
+                )
+                for other_secret in (
+                    settings.ops_read_token,
+                    settings.ops_cancel_token,
+                    settings.ops_fixture_token,
+                )
+            )
+
+        supplied_public_key = (request.headers.get(PUBLIC_API_KEY_HEADER) or "").strip()
+        if supplied_public_key:
+            active_hashes = await cached_active_public_api_key_hashes(
+                session,
+                ttl_seconds=settings.public_api_key_cache_ttl_s,
+            )
+            known_other_principal = known_other_principal or public_api_key_matches(
+                supplied_public_key, active_hashes
+            )
+
+        supplied_authorization = request.headers.get("Authorization") or ""
+        scheme, _, credential = supplied_authorization.partition(" ")
+        if settings.metrics_token is not None and scheme.casefold() == "bearer":
+            known_other_principal = known_other_principal or hmac.compare_digest(
+                credential.strip().encode("utf-8"),
+                settings.metrics_token.get_secret_value().encode("utf-8"),
+            )
+
+        if known_other_principal:
+            raise _cache_target_auth_error(
+                status.HTTP_403_FORBIDDEN,
+                f"{error_prefix}_SERVICE_SCOPE_FORBIDDEN",
+                f"요청 principal은 {scope} 인증 경계가 아닙니다.",
+            )
+        raise _cache_target_auth_error(
+            status.HTTP_401_UNAUTHORIZED,
+            f"{error_prefix}_SERVICE_TOKEN_REQUIRED",
+            f"{SERVICE_TOKEN_HEADER} 헤더가 필요합니다.",
+        )
+    settings = _settings(request)
+    digest = _token_digest(token)
+    if expected_digest is not None and hmac.compare_digest(digest, expected_digest):
+        return CurationSnapshotServicePrincipalContext(
+            principal_id=principal_id,
+            scopes=frozenset({scope}),
+        )
+
+    known_other_scope = any(
+        hmac.compare_digest(digest, principal.token_sha256)
+        for principal in settings.cache_target_service_principals
+    )
+    if settings.service_token is not None:
+        known_other_scope = known_other_scope or hmac.compare_digest(
+            digest,
+            _token_digest(settings.service_token.get_secret_value()),
+        )
+    for other_digest in (
+        settings.pinvi_curation_snapshot_token_sha256,
+        settings.pinvi_curation_cutover_mapping_token_sha256,
+    ):
+        if other_digest is not None and other_digest != expected_digest:
+            known_other_scope = known_other_scope or hmac.compare_digest(digest, other_digest)
+    for other_secret in (
+        settings.admin_proxy_secret,
+        settings.metrics_token,
+        settings.ops_read_token,
+        settings.ops_cancel_token,
+        settings.ops_fixture_token,
+    ):
+        if other_secret is not None:
+            known_other_scope = known_other_scope or hmac.compare_digest(
+                digest,
+                _token_digest(other_secret.get_secret_value()),
+            )
+    if known_other_scope:
+        raise _cache_target_auth_error(
+            status.HTTP_403_FORBIDDEN,
+            f"{error_prefix}_SERVICE_SCOPE_FORBIDDEN",
+            f"ServiceToken principal에 {scope} scope가 없습니다.",
+        )
+    raise _cache_target_auth_error(
+        status.HTTP_401_UNAUTHORIZED,
+        f"{error_prefix}_SERVICE_TOKEN_INVALID",
+        f"{SERVICE_TOKEN_HEADER} 헤더가 유효하지 않습니다.",
+    )
+
+
+async def require_curation_snapshot_service_principal(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    token: Annotated[str | None, Security(_service_token_scheme)] = None,
+) -> CurationSnapshotServicePrincipalContext:
+    """PinVi snapshot token digest를 exact principal/scope로 fail-closed 해석한다."""
+
+    settings = _settings(request)
+    return await _require_pinvi_curation_service_principal(
+        request,
+        session,
+        token,
+        expected_digest=settings.pinvi_curation_snapshot_token_sha256,
+        scope="pinvi:curation-snapshot:read",
+        principal_id="service:pinvi",
+        error_prefix="CURATION_SNAPSHOT",
+    )
+
+
+async def require_curation_cutover_service_principal(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    token: Annotated[str | None, Security(_service_token_scheme)] = None,
+) -> CurationSnapshotServicePrincipalContext:
+    """T-VN-40C mapping export의 maintenance-only PinVi principal을 확인한다."""
+
+    settings = _settings(request)
+    return await _require_pinvi_curation_service_principal(
+        request,
+        session,
+        token,
+        expected_digest=settings.pinvi_curation_cutover_mapping_token_sha256,
+        scope="pinvi:curation-cutover:read",
+        principal_id="service:pinvi:curation-cutover",
+        error_prefix="CURATION_CUTOVER",
+    )
+
+
 def require_cache_target_service_scope(
     context: CacheTargetServicePrincipalContext,
     *,
@@ -557,7 +716,7 @@ async def require_public_api_key(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> None:
-    """public REST surface용 VWorld 호환 API key를 검증한다.
+    """public REST surface용 Map 전용 API key를 검증한다.
 
     ADR-066/T-VN-H01 — key는 X-Kor-Travel-Map-Api-Key 헤더로만 받는다. 이전의
     ?key= 쿼리 파라미터는 access log와 Referer 헤더로 새어 나갈 수 있어 제거됐다
@@ -584,21 +743,11 @@ async def require_public_api_key(
         session,
         ttl_seconds=settings.public_api_key_cache_ttl_s,
     )
-    effective_hashes = active_hashes or _vworld_default_key_hashes(settings)
-    if not effective_hashes or not public_api_key_matches(key, effective_hashes):
+    if not active_hashes or not public_api_key_matches(key, active_hashes):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="VWorld 호환 API 키가 유효하지 않습니다.",
+            detail="Map 공개 API 키가 유효하지 않습니다.",
         )
-
-
-def _vworld_default_key_hashes(settings: ApiSettings) -> frozenset[str]:
-    if settings.vworld_api_key is None:
-        return frozenset()
-    key = settings.vworld_api_key.get_secret_value().strip()
-    if not key:
-        return frozenset()
-    return frozenset({hash_public_api_key(key)})
 
 
 def require_metrics_token(request: Request) -> None:

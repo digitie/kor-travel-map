@@ -14,6 +14,8 @@ from kortravelmap.infra.feature_repo import FeatureLoadResult
 from kortravelmap.dagster.etl import (
     AddressFindingObservationReceipt,
     DagsterFeatureLoadResult,
+    _dagster_run_id,
+    load_feature_bundle_batches_for_dagster,
     load_feature_bundles_for_dagster,
 )
 from kortravelmap.dagster.validation import (
@@ -57,8 +59,10 @@ def _bundle(feature_id: str) -> _Bundle:
 
 
 class _Context:
-    def __init__(self) -> None:
+    def __init__(self, *, run_id: str | None = None, retry_number: int = 0) -> None:
         self.metadata: list[dict[str, object]] = []
+        self.run_id = run_id
+        self.retry_number = retry_number
 
     def add_output_metadata(self, metadata: dict[str, object]) -> None:
         self.metadata.append(dict(metadata))
@@ -67,10 +71,12 @@ class _Context:
 class _Client:
     def __init__(self) -> None:
         self.chunks: list[tuple[str, ...]] = []
+        self.finding_chunks: list[list[Any]] = []
 
     async def load_feature_bundles(
-        self, bundles: list[_Bundle]
+        self, bundles: list[_Bundle], **kwargs: object
     ) -> FeatureLoadResult:
+        del kwargs
         self.chunks.append(tuple(bundle.feature.feature_id for bundle in bundles))
         return FeatureLoadResult(
             bundles_total=len(bundles),
@@ -84,7 +90,9 @@ class _Client:
 
         ``kwargs``도 보관해 provider/dataset 정체성 배선을 검증할 수 있게 한다.
         """
-        self.recorded_findings = list(findings)  # type: ignore[arg-type]
+        current_findings = list(findings)  # type: ignore[arg-type]
+        self.finding_chunks.append(current_findings)
+        self.recorded_findings = current_findings
         self.recorded_kwargs = dict(kwargs)
         unique_count = len(
             {finding.dedupe_key for finding in self.recorded_findings}
@@ -197,6 +205,269 @@ async def test_load_feature_bundles_for_dagster_chunks_db_load(
     assert result.load.bundles_total == 5
     assert result.load.features_inserted == 5
     assert context.metadata[-1]["bundles_total"] == 5
+
+
+async def test_streaming_feature_batches_keep_one_atomic_loader_call(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _Context()
+    client = _Client()
+    yielded: list[int] = []
+    consumed: list[tuple[str, ...]] = []
+
+    async def _batches() -> Any:
+        for start in (0, 2, 4):
+            batch = [_bundle(f"feature-{index}") for index in range(start, min(5, start + 2))]
+            yielded.append(len(batch))
+            yield batch
+
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.validate_feature_bundles_address",
+        lambda items: FeatureAddressValidationSummary(
+            total=len(items),
+            issue_count=0,
+            error_count=0,
+            warning_count=0,
+            issues=(),
+        ),
+    )
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.FEATURE_ID_METADATA_LIMIT",
+        2,
+    )
+
+    async def _load_all(batches: Any) -> FeatureLoadResult:
+        result = FeatureLoadResult()
+        async for batch in batches:
+            consumed.append(tuple(item.feature.feature_id for item in batch))
+            result = result.merge(
+                FeatureLoadResult(
+                    bundles_total=len(batch),
+                    features_inserted=len(batch),
+                )
+            )
+        return result
+
+    result = await load_feature_bundle_batches_for_dagster(
+        context=context,  # type: ignore[arg-type]
+        client=client,  # type: ignore[arg-type]
+        batches=_batches(),  # type: ignore[arg-type]
+        provider="demo",
+        dataset_key="places",
+        strict_address="off",
+        load_all=_load_all,  # type: ignore[arg-type]
+    )
+
+    assert yielded == [2, 2, 1]
+    assert consumed == [
+        ("feature-0", "feature-1"),
+        ("feature-2", "feature-3"),
+        ("feature-4",),
+    ]
+    assert result.load.bundles_total == 5
+    assert result.feature_ids == ("feature-0", "feature-1")
+    assert result.feature_ids_complete is False
+    assert context.metadata[-1]["feature_ids_truncated"] is True
+    assert result.observation_receipt.authoritative_snapshot_complete is True
+
+
+async def test_streaming_clean_snapshot_records_empty_finding_observation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _Context(run_id="run-clean")
+    client = _Client()
+
+    async def _batches() -> Any:
+        yield [_bundle("feature-0")]
+
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.validate_feature_bundles_address",
+        lambda items: FeatureAddressValidationSummary(
+            total=len(items),
+            issue_count=0,
+            error_count=0,
+            warning_count=0,
+            issues=(),
+        ),
+    )
+
+    async def _load_all(batches: Any) -> FeatureLoadResult:
+        loaded = 0
+        async for batch in batches:
+            loaded += len(batch)
+        return FeatureLoadResult(bundles_total=loaded, features_inserted=loaded)
+
+    result = await load_feature_bundle_batches_for_dagster(
+        context=context,  # type: ignore[arg-type]
+        client=client,  # type: ignore[arg-type]
+        batches=_batches(),  # type: ignore[arg-type]
+        provider="demo",
+        dataset_key="places",
+        strict_address="off",
+        load_all=_load_all,  # type: ignore[arg-type]
+    )
+
+    assert client.finding_chunks == [[]]
+    assert client.recorded_kwargs["run_id"] == "run-clean"
+    assert result.observation_receipt.finding_persistence_complete is True
+
+
+def test_dagster_observation_identity_separates_step_retries() -> None:
+    assert _dagster_run_id(_Context(run_id="run-a", retry_number=0)) == "run-a"  # type: ignore[arg-type]
+    assert _dagster_run_id(_Context(run_id="run-a", retry_number=1)) == (  # type: ignore[arg-type]
+        "run-a::retry:1"
+    )
+
+
+async def test_streaming_drop_metadata_keeps_total_beyond_id_sample(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _Context(run_id="run-drop")
+    client = _Client()
+
+    async def _batches() -> Any:
+        for index in range(3):
+            yield [_bundle(f"feature-{index}")]
+
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.validate_feature_bundles_address",
+        lambda items: _error_summary(
+            items, error_feature_id=items[0].feature.feature_id
+        ),
+    )
+    monkeypatch.setattr("kortravelmap.dagster.etl.FEATURE_ID_METADATA_LIMIT", 2)
+
+    async def _load_all(batches: Any) -> FeatureLoadResult:
+        loaded = 0
+        async for batch in batches:
+            loaded += len(batch)
+        return FeatureLoadResult(bundles_total=loaded, features_inserted=loaded)
+
+    await load_feature_bundle_batches_for_dagster(
+        context=context,  # type: ignore[arg-type]
+        client=client,  # type: ignore[arg-type]
+        batches=_batches(),  # type: ignore[arg-type]
+        provider="demo",
+        dataset_key="places",
+        strict_address="drop",
+        load_all=_load_all,  # type: ignore[arg-type]
+    )
+
+    metadata = context.metadata[-1]
+    assert metadata["address_validation_dropped_count"] == 3
+    assert metadata["address_validation_dropped_feature_ids"] == [
+        "feature-0",
+        "feature-1",
+    ]
+    assert metadata["address_validation_dropped_feature_ids_truncated"] is True
+
+
+async def test_streaming_drop_counts_rows_but_samples_unique_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _Context(run_id="run-drop-duplicates")
+    client = _Client()
+
+    async def _batches() -> Any:
+        yield [_bundle("feature-dup"), _bundle("feature-dup")]
+        yield [_bundle("feature-dup"), _bundle("feature-other")]
+
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.validate_feature_bundles_address",
+        lambda items: _error_summary(
+            items, error_feature_id=items[0].feature.feature_id
+        ),
+    )
+    monkeypatch.setattr("kortravelmap.dagster.etl.FEATURE_ID_METADATA_LIMIT", 1)
+
+    async def _load_all(batches: Any) -> FeatureLoadResult:
+        loaded = 0
+        async for batch in batches:
+            loaded += len(batch)
+        return FeatureLoadResult(bundles_total=loaded, features_inserted=loaded)
+
+    await load_feature_bundle_batches_for_dagster(
+        context=context,  # type: ignore[arg-type]
+        client=client,  # type: ignore[arg-type]
+        batches=_batches(),  # type: ignore[arg-type]
+        provider="demo",
+        dataset_key="places",
+        strict_address="drop",
+        load_all=_load_all,  # type: ignore[arg-type]
+    )
+
+    metadata = context.metadata[-1]
+    assert metadata["address_validation_dropped_count"] == 3
+    assert metadata["address_validation_dropped_feature_ids"] == ["feature-dup"]
+    assert metadata["address_validation_dropped_feature_ids_truncated"] is False
+
+
+async def test_streaming_feature_batches_bound_issue_metadata_and_finding_chunks(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    context = _Context()
+    client = _Client()
+
+    async def _batches() -> Any:
+        for index in range(12):
+            yield [_bundle(f"feature-{index}")]
+
+    def _warning(items: list[_Bundle]) -> FeatureAddressValidationSummary:
+        bundle = items[0]
+        issue = FeatureAddressIssue(
+            feature_id=bundle.feature.feature_id,
+            source_record_key=bundle.source_record.source_record_key,
+            code="reverse_geocode_not_attempted",
+            severity="warning",
+            message="warning",
+            provider_address=None,
+            bjd_code="1111010100",
+            sigungu_code="11110",
+        )
+        return FeatureAddressValidationSummary(
+            total=1,
+            issue_count=1,
+            error_count=0,
+            warning_count=1,
+            issues=(issue,),
+        )
+
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.validate_feature_bundles_address",
+        _warning,
+    )
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.ADDRESS_VALIDATION_ISSUE_METADATA_LIMIT",
+        3,
+    )
+
+    async def _load_all(batches: Any) -> FeatureLoadResult:
+        result = FeatureLoadResult()
+        async for batch in batches:
+            result = result.merge(
+                FeatureLoadResult(
+                    bundles_total=len(batch),
+                    features_inserted=len(batch),
+                )
+            )
+        return result
+
+    result = await load_feature_bundle_batches_for_dagster(
+        context=context,  # type: ignore[arg-type]
+        client=client,  # type: ignore[arg-type]
+        batches=_batches(),  # type: ignore[arg-type]
+        provider="demo",
+        dataset_key="places",
+        strict_address="off",
+        load_all=_load_all,  # type: ignore[arg-type]
+    )
+
+    assert result.address_validation.issue_count == 12
+    assert len(result.address_validation.issues) == 3
+    assert len(client.finding_chunks) == 12
+    assert all(len(chunk) == 1 for chunk in client.finding_chunks)
+    assert result.observation_receipt.findings_observed == 12
+    assert len(context.metadata[-1]["address_validation_issues"]) == 3  # type: ignore[arg-type]
 
 
 async def test_nonempty_complete_snapshot_receipt_permits_stale_close(
@@ -416,7 +687,7 @@ async def test_load_strict_mode_fails_on_error_issue(
     monkeypatch: pytest.MonkeyPatch, mode: bool | str
 ) -> None:
     bundles = [_bundle(f"feature-{index}") for index in range(3)]
-    context = _Context()
+    context = _Context(run_id="strict-run", retry_number=2)
     client = _Client()
     monkeypatch.setattr(
         "kortravelmap.dagster.etl.validate_feature_bundles_address",
@@ -433,6 +704,7 @@ async def test_load_strict_mode_fails_on_error_issue(
             strict_address=mode,
         )
     assert client.chunks == []
+    assert client.recorded_kwargs["run_id"] == "strict-run::retry:2"
 
 
 async def test_load_drop_mode_quarantines_error_rows(
@@ -461,6 +733,36 @@ async def test_load_drop_mode_quarantines_error_rows(
     assert context.metadata[-1]["address_validation_dropped_feature_ids"] == [
         "feature-1"
     ]
+    assert (
+        context.metadata[-1]["address_validation_dropped_feature_ids_truncated"]
+        is False
+    )
+
+
+async def test_load_drop_mode_counts_rows_but_samples_unique_ids(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundles = [_bundle("feature-dup"), _bundle("feature-dup")]
+    context = _Context()
+    client = _Client()
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.validate_feature_bundles_address",
+        lambda items: _error_summary(items, error_feature_id="feature-dup"),
+    )
+
+    await load_feature_bundles_for_dagster(
+        context=context,  # type: ignore[arg-type]
+        client=client,  # type: ignore[arg-type]
+        bundles=bundles,  # type: ignore[arg-type]
+        provider="demo",
+        dataset_key="places",
+        strict_address="drop",
+    )
+
+    metadata = context.metadata[-1]
+    assert metadata["address_validation_dropped_count"] == 2
+    assert metadata["address_validation_dropped_feature_ids"] == ["feature-dup"]
+    assert metadata["address_validation_dropped_feature_ids_truncated"] is False
 
 
 @pytest.mark.parametrize("mode", ["off", False])

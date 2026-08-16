@@ -103,6 +103,7 @@ def _collection_row(**overrides: Any) -> dict[str, Any]:
         "metadata": {"official": True},
         "item_count": 2,
         "public_item_count": 1,
+        "row_revision": 1,
         "created_by": "creator",
         "updated_by": "editor",
         "created_at": _NOW,
@@ -149,6 +150,7 @@ def _item_row(**overrides: Any) -> dict[str, Any]:
         "curation_relation": "primary_stop",
         "reuse_policy": "allowed",
         "metadata": {"ordinal": 1},
+        "row_revision": 1,
         "created_by": "creator",
         "updated_by": "editor",
         "created_at": _NOW,
@@ -377,6 +379,21 @@ async def test_get_collection_found_missing_and_public_projection() -> None:
     assert result[1] == ()
     assert found.calls[0][1]["public_only"] is True
     assert found.calls[1][1]["public_only"] is True
+
+
+def test_public_projection_excludes_archived_parent_catalog() -> None:
+    public_sql = (
+        repo._LIST_COLLECTIONS_SQL,
+        repo._GET_COLLECTION_SQL,
+        repo._GET_COLLECTION_BY_KEY_SQL,
+        repo._LIST_COLLECTION_ITEMS_SQL,
+        repo._LIST_FEATURE_ITEMS_SQL,
+        repo._LIST_FEATURE_ITEMS_BATCH_SQL,
+        repo._LIST_GROUP_KEYS_SQL,
+    )
+
+    assert all("archived_at IS NULL" in statement for statement in public_sql)
+    assert all("source_id IS NULL" in statement for statement in public_sql)
 
 
 async def test_get_item_found_and_missing() -> None:
@@ -1063,7 +1080,7 @@ async def test_resolve_feature_matches_empty_batch_and_single() -> None:
     )
 
 
-async def test_upsert_theme_validates_and_delegates(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_upsert_theme_requires_an_exact_retained_catalog_match() -> None:
     for values in [("", "이름", "그룹"), ("slug", "", "그룹"), ("slug", "이름", "")]:
         with pytest.raises(ValueError, match="required"):
             await repo.upsert_curation_theme(
@@ -1073,9 +1090,7 @@ async def test_upsert_theme_validates_and_delegates(monkeypatch: pytest.MonkeyPa
                 theme_group=values[2],
             )
 
-    upsert = AsyncMock(return_value=_THEME_ID)
-    monkeypatch.setattr(repo, "_upsert_id_with_fallback", upsert)
-    session = _FakeSession(_FakeResult())
+    session = _FakeSession(_FakeResult(), _FakeResult(scalar=_THEME_ID))
     assert (
         await repo.upsert_curation_theme(
             session,
@@ -1085,12 +1100,19 @@ async def test_upsert_theme_validates_and_delegates(monkeypatch: pytest.MonkeyPa
         )
         == _THEME_ID
     )
-    assert upsert.await_args.kwargs["params"] == {
+    assert session.calls[1][1] == {
         "theme_slug": "slug",
         "theme_name": "이름",
         "theme_group": "그룹",
     }
     assert "curation-import" in session.calls[0][0]
+    with pytest.raises(ValueError, match="retained catalog"):
+        await repo.upsert_curation_theme(
+            _FakeSession(_FakeResult(), _FakeResult()),
+            theme_slug="missing",
+            theme_name="없음",
+            theme_group="test",
+        )
 
 
 def test_resolved_identity_validation_reports_component_and_feature_duplicates() -> None:
@@ -1186,16 +1208,12 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
         ),
         _resolved_row(row_number=4, collection_key="z:key", source_item_key="official:three"),
     )
-    theme = AsyncMock(side_effect=[_THEME_ID, _THEME_ID])
     foundations = AsyncMock(
         side_effect=[
-            _SOURCE_ID,
             "00000000-0000-4000-8000-000000000010",
-            _SOURCE_ID,
             "00000000-0000-4000-8000-000000000011",
         ]
     )
-    monkeypatch.setattr(repo, "upsert_curation_theme", theme)
     monkeypatch.setattr(repo, "_upsert_id_with_fallback", foundations)
     changed = _FakeSession(
         _FakeResult(),
@@ -1203,6 +1221,10 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
         _FakeResult(rows=["feature:one"]),
         _FakeResult(),
         _FakeResult(),
+        _FakeResult(scalar=_THEME_ID),
+        _FakeResult(scalar=_SOURCE_ID),
+        _FakeResult(scalar=_THEME_ID),
+        _FakeResult(scalar=_SOURCE_ID),
         _FakeResult(),
         _FakeResult(rows=[_item_row()]),
         _FakeResult(scalar=0),
@@ -1219,21 +1241,16 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
     assert result["import_batch_id"] == "00000000-0000-4000-8000-000000000091"
     assert "pg_advisory_xact_lock" in changed.calls[0][0]
     assert "UPDATE feature.curation_collections" in changed.calls[-1][0]
-    assert [call.kwargs["theme_slug"] for call in theme.await_args_list] == [
-        rows[1].theme_slug,
-        rows[0].theme_slug,
-    ]
-
-    theme.reset_mock(side_effect=True)
-    theme.side_effect = [_THEME_ID]
     foundations.reset_mock(side_effect=True)
-    foundations.side_effect = [_SOURCE_ID, "00000000-0000-4000-8000-000000000012"]
+    foundations.side_effect = ["00000000-0000-4000-8000-000000000012"]
     unchanged = _FakeSession(
         _FakeResult(),
         _FakeResult(),
         _FakeResult(rows=["feature:one"]),
         _FakeResult(),
         _FakeResult(),
+        _FakeResult(scalar=_THEME_ID),
+        _FakeResult(scalar=_SOURCE_ID),
         _FakeResult(),
         _FakeResult(rows=[]),
         _FakeResult(scalar=0),
@@ -1242,7 +1259,7 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
     no_change = await repo.import_curation_rows(unchanged, rows=(rows[0],))
     assert no_change["inserted"] == no_change["updated"] == no_change["removed"] == 0
     assert no_change["import_batch_id"] == "00000000-0000-4000-8000-000000000092"
-    assert len(unchanged.calls) == 9
+    assert len(unchanged.calls) == 11
 
 
 @pytest.mark.parametrize(
@@ -1299,3 +1316,18 @@ def test_curation_dataset_identity_accepts_the_matching_generation_key(
         (_resolved_row(**overrides),),
         frozen_h35_schema=frozen_h35_schema,
     )
+
+
+def test_service_snapshot_rejects_over_cap_collection_before_public_joins() -> None:
+    sql = repo._GET_SERVICE_CURATION_COLLECTION_PAGE_SQL
+    key_position = sql.index("bounded_eligible_item_key AS MATERIALIZED")
+    rich_projection_position = sql.index(") AS item_payload_hash")
+
+    assert "JOIN feature.curation_link_decisions AS trusted_decision" in sql
+    assert "JOIN feature.public_features AS pf" in sql
+    assert "item.accepted_link_decision_id" in sql
+    assert "LIMIT 2001" in sql
+    assert "SELECT count(*) <= 2000" in sql
+    assert "SELECT count(*) > 2000" in sql
+    assert "FROM bounded_eligible_item_key" in sql
+    assert key_position < rich_projection_position

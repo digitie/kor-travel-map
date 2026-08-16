@@ -428,8 +428,9 @@ async def test_curation_collection_read_hides_ended_notice_item(
         status="published",
         visibility="public",
     )
+    item_ids: dict[str, str] = {}
     for i, fid in enumerate((healthy_id, ended_id)):
-        await curation_repo.add_curation_item(
+        item, _collection = await curation_repo.add_curation_item(
             migrated_session,
             collection_id=collection.collection_id,
             feature_id=fid,
@@ -437,6 +438,7 @@ async def test_curation_collection_read_hides_ended_notice_item(
             status="included",
             sort_order=i,
         )
+        item_ids[fid] = item.curation_item_id
 
     result = await curation_repo.get_curation_collection(
         migrated_session, collection_id=collection.collection_id, public_only=True
@@ -459,6 +461,22 @@ async def test_curation_collection_read_hides_ended_notice_item(
     )
     assert listed_collection.item_count == 1
     assert listed_collection.public_item_count == 1
+
+    service_collection = await curation_repo.get_curation_service_collection_snapshot(
+        migrated_session,
+        collection_id=collection.collection_id,
+    )
+    assert service_collection is not None
+    assert {item.curation_item_id for item in service_collection.items} == {
+        item_ids[healthy_id]
+    }
+    assert (
+        await curation_repo.get_curation_service_item_snapshot(
+            migrated_session,
+            curation_item_id=item_ids[ended_id],
+        )
+        is None
+    )
 
 
 async def test_curation_feature_groups_read_hides_ended_notice(

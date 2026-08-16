@@ -31,7 +31,16 @@ from kortravelmap.api.routers.cache_target_streams import (
 from kortravelmap.api.routers.categories import router as categories_router
 from kortravelmap.api.routers.curated import admin_router as admin_curated_router
 from kortravelmap.api.routers.curated import router as curated_router
+from kortravelmap.api.routers.curation_snapshots import (
+    cutover_router as service_curation_cutover_router,
+)
+from kortravelmap.api.routers.curation_snapshots import (
+    service_router as service_curation_snapshots_router,
+)
 from kortravelmap.api.routers.curations import admin_router as admin_curations_router
+from kortravelmap.api.routers.curations import (
+    candidate_router as admin_curation_candidates_router,
+)
 from kortravelmap.api.routers.curations import router as curations_router
 from kortravelmap.api.routers.dedup_review import (
     feature_router as feature_dedup_review_router,
@@ -78,6 +87,7 @@ __all__ = [
     "admin_files_router",
     "admin_curated_router",
     "admin_curations_router",
+    "admin_curation_candidates_router",
     "admin_issues_router",
     "dedup_review_router",
     "feature_dedup_review_router",
@@ -99,6 +109,8 @@ __all__ = [
     "public_providers_router",
     "public_views_router",
     "service_cache_target_streams_router",
+    "service_curation_cutover_router",
+    "service_curation_snapshots_router",
     "service_feature_alias_maps_router",
     "weather_router",
     "curated_router",

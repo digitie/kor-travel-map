@@ -21,11 +21,15 @@ from __future__ import annotations
 
 import os
 from collections.abc import AsyncIterator, Iterator
+from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tests.integration._tvn34_migration_bootstrap import bootstrap_tvn34_migration_roles
+from tests.integration._tvn34_migration_bootstrap import (
+    _TVN40_TEST_RUNTIME_PASSWORD,
+    bootstrap_tvn34_migration_roles,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -276,3 +280,85 @@ async def migrated_session(migrated_engine: AsyncEngine) -> AsyncIterator[AsyncS
     ):
         yield session
         await session.rollback()
+
+
+@pytest.fixture(scope="session")
+async def dagster_runtime_engine(
+    migrated_engine: AsyncEngine,
+) -> AsyncIterator[AsyncEngine]:
+    """실제 Dagster LOGIN을 쓰는 integration 전용 engine.
+
+    provider operation command는 ``session_user``가 provider executor
+    membership을 가져야만 실행된다. 관리자 seed/assertion engine과 섞지 않고,
+    실제 Dagster runtime identity로 client 경로를 검증한다.
+    """
+    from kortravelmap.infra.db import make_async_engine
+
+    dsn = migrated_engine.url.set(
+        username="ktm_feature_dagster_runtime",
+        password=_TVN40_TEST_RUNTIME_PASSWORD,
+    ).render_as_string(hide_password=False)
+    engine = make_async_engine(dsn, pool_size=1)
+    try:
+        yield engine
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture(scope="session")
+async def api_runtime_engine(
+    migrated_engine: AsyncEngine,
+) -> AsyncIterator[AsyncEngine]:
+    """실제 API LOGIN을 쓰는 integration 전용 engine.
+
+    취소 terminal command는 API runtime이 실행하고, 성공한 provider root의
+    curation finalizer만 transaction-local cancellation fence로 위임한다.
+    root seed engine으로 이 경계를 우회하지 않는다.
+    """
+    from kortravelmap.infra.db import make_async_engine
+
+    dsn = migrated_engine.url.set(
+        username="ktm_feature_api_runtime",
+        password=_TVN40_TEST_RUNTIME_PASSWORD,
+    ).render_as_string(hide_password=False)
+    engine = make_async_engine(dsn, pool_size=1)
+    try:
+        yield engine
+    finally:
+        await engine.dispose()
+
+
+@asynccontextmanager
+async def as_dagster_runtime(session: AsyncSession) -> AsyncIterator[AsyncSession]:
+    """기존 seed transaction에서 provider command만 실제 runtime으로 실행한다."""
+    from sqlalchemy import text
+
+    await session.execute(
+        text("SET LOCAL SESSION AUTHORIZATION 'ktm_feature_dagster_runtime'")
+    )
+    try:
+        yield session
+    except BaseException:
+        # 기대한 DB 오류는 caller가 savepoint를 rollback해 복구한다. abort 상태에서
+        # RESET을 보내면 원래 SQLSTATE를 25P02로 덮어 쓰므로 여기서는 건드리지 않는다.
+        raise
+    else:
+        await session.execute(text("SET LOCAL SESSION AUTHORIZATION DEFAULT"))
+
+
+@asynccontextmanager
+async def as_api_runtime(session: AsyncSession) -> AsyncIterator[AsyncSession]:
+    """기존 seed transaction에서 admin command만 실제 API runtime으로 실행한다."""
+
+    from sqlalchemy import text
+
+    await session.execute(
+        text("SET LOCAL SESSION AUTHORIZATION 'ktm_feature_api_runtime'")
+    )
+    try:
+        yield session
+    except BaseException:
+        # savepoint rollback이 LOCAL authorization까지 함께 되돌린다.
+        raise
+    else:
+        await session.execute(text("SET LOCAL SESSION AUTHORIZATION DEFAULT"))

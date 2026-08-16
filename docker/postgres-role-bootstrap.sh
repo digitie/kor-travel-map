@@ -91,8 +91,37 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_runtime') THEN
         CREATE ROLE ktm_feature_runtime NOLOGIN NOINHERIT;
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_curation_command_owner') THEN
+        CREATE ROLE ktm_curation_command_owner NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_curation_audit_writer') THEN
+        CREATE ROLE ktm_curation_audit_writer NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_curation_admin_executor') THEN
+        CREATE ROLE ktm_curation_admin_executor NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_curation_provider_executor') THEN
+        CREATE ROLE ktm_curation_provider_executor NOLOGIN NOINHERIT;
+    END IF;
 END
 $roles$;
+
+ALTER ROLE ktm_feature_schema_owner NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_feature_state_procedure_owner NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_feature_audit_writer NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_feature_runtime NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_curation_command_owner NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_curation_audit_writer NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_curation_admin_executor NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_curation_provider_executor NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
 
 -- ``ktm_feature_migrator``는 superuser가 아니다. PostgreSQL 16/PostGIS extension
 -- 설치와 application schema 준비는 dedicated bootstrap connection에서만 한다.
@@ -203,20 +232,49 @@ GRANT ktm_feature_state_procedure_owner TO ktm_feature_schema_owner
     WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
 GRANT ktm_feature_audit_writer TO ktm_feature_schema_owner
     WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+GRANT ktm_curation_command_owner TO ktm_feature_schema_owner
+    WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+GRANT ktm_curation_audit_writer TO ktm_feature_schema_owner
+    WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+GRANT ktm_curation_admin_executor TO ktm_feature_api_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+GRANT ktm_curation_provider_executor TO ktm_feature_dagster_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
 -- 0095 transfers SECURITY DEFINER routines to these NOLOGIN owners. PostgreSQL
 -- requires the target owner to hold CREATE on the containing schema during
 -- ``ALTER FUNCTION/PROCEDURE ... OWNER``; neither role can authenticate and
 -- runtime memberships never allow SET ROLE into either owner group.
 GRANT USAGE, CREATE ON SCHEMA feature
-    TO ktm_feature_state_procedure_owner, ktm_feature_audit_writer;
+    TO ktm_feature_state_procedure_owner, ktm_feature_audit_writer,
+       ktm_curation_command_owner, ktm_curation_audit_writer;
+GRANT USAGE, CREATE ON SCHEMA ops TO ktm_curation_audit_writer;
 
 DO $assert_roles$
 BEGIN
     IF EXISTS (
         SELECT 1
         FROM pg_catalog.pg_roles
+        WHERE rolname IN (
+            'ktm_feature_schema_owner', 'ktm_feature_state_procedure_owner',
+            'ktm_feature_audit_writer', 'ktm_feature_runtime',
+            'ktm_curation_command_owner', 'ktm_curation_audit_writer',
+            'ktm_curation_admin_executor', 'ktm_curation_provider_executor'
+        )
+          AND (
+              rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb
+              OR rolcreaterole OR rolbypassrls OR rolreplication
+          )
+    ) THEN
+        RAISE EXCEPTION 'application NOLOGIN role has an unsafe role attribute';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_roles
         WHERE rolname IN ('ktm_feature_api_runtime', 'ktm_feature_dagster_runtime')
-          AND (NOT rolcanlogin OR rolsuper OR rolcreaterole OR rolbypassrls)
+          AND (
+              NOT rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb
+              OR rolcreaterole OR rolbypassrls OR rolreplication
+          )
     ) THEN
         RAISE EXCEPTION 'runtime login has an unsafe role attribute';
     END IF;
@@ -224,13 +282,55 @@ BEGIN
         SELECT 1
         FROM pg_catalog.pg_roles
         WHERE rolname = 'ktm_feature_migrator'
-          AND (NOT rolcanlogin OR rolsuper OR rolcreaterole OR rolbypassrls)
+          AND (
+              NOT rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb
+              OR rolcreaterole OR rolbypassrls OR rolreplication
+          )
     ) THEN
         RAISE EXCEPTION 'migrator login has an unsafe role attribute';
     END IF;
     IF pg_has_role('ktm_feature_api_runtime', 'ktm_feature_schema_owner', 'member')
        OR pg_has_role('ktm_feature_dagster_runtime', 'ktm_feature_schema_owner', 'member') THEN
         RAISE EXCEPTION 'runtime login must not belong to ktm_feature_schema_owner';
+    END IF;
+    IF NOT pg_has_role('ktm_feature_api_runtime', 'ktm_curation_admin_executor', 'member')
+       OR pg_has_role('ktm_feature_api_runtime', 'ktm_curation_provider_executor', 'member')
+       OR NOT pg_has_role('ktm_feature_dagster_runtime', 'ktm_curation_provider_executor', 'member')
+       OR pg_has_role('ktm_feature_dagster_runtime', 'ktm_curation_admin_executor', 'member') THEN
+        RAISE EXCEPTION 'curation executor membership is unsafe';
+    END IF;
+    IF EXISTS (
+        WITH expected(granted_role, member_role, admin_option, inherit_option, set_option) AS (
+            VALUES
+                ('ktm_feature_schema_owner', 'ktm_feature_migrator', false, false, true),
+                ('ktm_feature_runtime', 'ktm_feature_api_runtime', false, true, false),
+                ('ktm_feature_runtime', 'ktm_feature_dagster_runtime', false, true, false),
+                ('ktm_feature_state_procedure_owner', 'ktm_feature_schema_owner', false, false, true),
+                ('ktm_feature_audit_writer', 'ktm_feature_schema_owner', false, false, true),
+                ('ktm_curation_command_owner', 'ktm_feature_schema_owner', false, false, true),
+                ('ktm_curation_audit_writer', 'ktm_feature_schema_owner', false, false, true),
+                ('ktm_curation_admin_executor', 'ktm_feature_api_runtime', false, true, false),
+                ('ktm_curation_provider_executor', 'ktm_feature_dagster_runtime', false, true, false)
+        ),
+        actual AS (
+            SELECT granted.rolname AS granted_role,
+                   member.rolname AS member_role,
+                   membership.admin_option,
+                   membership.inherit_option,
+                   membership.set_option
+            FROM pg_catalog.pg_auth_members AS membership
+            JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid
+            JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
+            WHERE granted.rolname LIKE 'ktm_feature_%'
+               OR granted.rolname LIKE 'ktm_curation_%'
+               OR member.rolname LIKE 'ktm_feature_%'
+               OR member.rolname LIKE 'ktm_curation_%'
+        )
+        (SELECT * FROM expected EXCEPT SELECT * FROM actual)
+        UNION ALL
+        (SELECT * FROM actual EXCEPT SELECT * FROM expected)
+    ) THEN
+        RAISE EXCEPTION 'application role membership graph is not exact';
     END IF;
 END
 $assert_roles$;
@@ -307,6 +407,93 @@ SELECT format(
 FROM pg_catalog.pg_proc
 JOIN pg_catalog.pg_namespace ON pg_namespace.oid = pg_proc.pronamespace
 WHERE nspname IN ('feature', 'provider_sync', 'ops')
+  AND pg_get_userbyid(pg_proc.proowner) NOT IN (
+      'ktm_feature_state_procedure_owner', 'ktm_feature_audit_writer',
+      'ktm_curation_command_owner', 'ktm_curation_audit_writer'
+  )
+\gexec
+
+-- Older bootstrap versions transferred every routine back to the schema
+-- owner.  Repair the closed SECURITY DEFINER manifest after the ordinary
+-- ownership sweep; missing routines (for an earlier migration head) are
+-- ignored and will be created by Alembic with the same owner later.
+WITH dedicated_routine(signature, owner_role) AS (
+    VALUES
+      ('feature.prepare_feature_state_context(jsonb,text)', 'ktm_feature_state_procedure_owner'),
+      ('feature.create_feature_with_initial_state(jsonb,text,text,text,jsonb)', 'ktm_feature_state_procedure_owner'),
+      ('feature.transition_feature_state(text,text,text,text,bigint,jsonb)', 'ktm_feature_state_procedure_owner'),
+      ('feature.lock_current_provider_source_evidence(bigint,text,text)', 'ktm_feature_state_procedure_owner'),
+      ('feature.lock_current_provider_feature_source_evidence(text,bigint,text,text)', 'ktm_feature_state_procedure_owner'),
+      ('feature.transition_admin_feature_state(text,text,text,text,bigint,text,text,text)', 'ktm_feature_state_procedure_owner'),
+      ('feature.reactivate_admin_feature_state(text,bigint,text,text,bigint,text,text)', 'ktm_feature_state_procedure_owner'),
+      ('feature.author_lifecycle_override(text,text,text,boolean,text,text,bigint)', 'ktm_feature_state_procedure_owner'),
+      ('feature.revoke_lifecycle_override(text,text,bigint)', 'ktm_feature_state_procedure_owner'),
+      ('feature.has_active_feature_override(text,text)', 'ktm_feature_state_procedure_owner'),
+      ('feature.apply_provider_feature_field_patch(text,bigint,text,text,bigint,jsonb,jsonb)', 'ktm_feature_state_procedure_owner'),
+      ('feature.author_feature_field_overrides(text,bigint,text,text,bigint,jsonb,jsonb)', 'ktm_feature_state_procedure_owner'),
+      ('feature.revoke_feature_field_overrides(text,bigint,text,text,bigint,text[])', 'ktm_feature_state_procedure_owner'),
+      ('feature.derive_subtype_public_ready()', 'ktm_feature_state_procedure_owner'),
+      ('feature.sync_subtype_public_ready()', 'ktm_feature_state_procedure_owner'),
+      ('feature.reject_user_feature_version_mutation()', 'ktm_feature_state_procedure_owner'),
+      ('feature.reject_feature_change_request_receipt_mutation()', 'ktm_feature_state_procedure_owner'),
+      ('feature.write_feature_state_transition()', 'ktm_feature_audit_writer'),
+      ('feature.reject_feature_state_transition_mutation()', 'ktm_feature_audit_writer'),
+      ('feature.reject_tvn40_append_only_mutation()', 'ktm_curation_audit_writer'),
+      ('feature.reject_tvn40_truncate()', 'ktm_curation_audit_writer'),
+      ('feature.validate_theme_candidate_merge_target()', 'ktm_curation_audit_writer'),
+      ('feature.append_theme_feature_candidate_transition(uuid,text,text,uuid,text,text,text,boolean,boolean,text,text,uuid,text,bigint,bigint,text,text,uuid,bigint,text,text,uuid,uuid,bigint,text,text,jsonb)', 'ktm_curation_audit_writer'),
+      ('feature.reject_curation_provider_receipt_mutation()', 'ktm_curation_audit_writer'),
+      ('feature.current_curation_rule_input(uuid)', 'ktm_curation_command_owner'),
+      ('feature.reject_theme_feature_candidate(uuid,bigint,bigint,text,text)', 'ktm_curation_command_owner'),
+      ('feature.current_theme_candidate_snapshot(uuid,text,text)', 'ktm_curation_command_owner'),
+      ('feature.promote_theme_feature_candidate(uuid,uuid,text,text,text,text,text,text,integer,text,text,text,bigint,bigint,bigint,bigint,text,text)', 'ktm_curation_command_owner'),
+      ('feature.materialize_theme_candidate_generation(uuid,text,uuid,uuid,bigint,text,jsonb)', 'ktm_curation_command_owner'),
+      ('feature.claim_curation_catalog_command_effect(bigint,text,text,uuid)', 'ktm_curation_command_owner'),
+      ('feature.create_curation_rule_reconcile_receipt(uuid,text,bigint,bigint,text,text,bigint,text)', 'ktm_curation_command_owner'),
+      ('feature.create_curated_source_rule_command(uuid,uuid,text,text,jsonb,jsonb,text,integer,boolean,jsonb,bigint,text)', 'ktm_curation_command_owner'),
+      ('feature.patch_curated_source_rule_command(uuid,bigint,text,text,jsonb,jsonb,text,integer,boolean,jsonb,bigint,text)', 'ktm_curation_command_owner'),
+      ('feature.archive_curated_source_rule_command(uuid,bigint,bigint,text,text)', 'ktm_curation_command_owner'),
+      ('feature.create_curated_theme_command(text,text,text,text,text,jsonb,bigint,text)', 'ktm_curation_command_owner'),
+      ('feature.patch_curated_theme_command(uuid,bigint,text,text,text,text,text,jsonb,bigint,text)', 'ktm_curation_command_owner'),
+      ('feature.archive_curated_theme_command(uuid,bigint,bigint,text,text)', 'ktm_curation_command_owner'),
+      ('feature.create_curated_source_command(bigint,text,text,text,text,text,text,text,jsonb,bigint,text)', 'ktm_curation_command_owner'),
+      ('feature.patch_curated_source_command(uuid,bigint,text,text,text,text,text,text,text,jsonb,bigint,text)', 'ktm_curation_command_owner'),
+      ('feature.archive_curated_source_command(uuid,bigint,bigint,text,text)', 'ktm_curation_command_owner'),
+      ('feature.create_curation_collection_command(text,uuid,uuid,text,text,text,text,text,jsonb,bigint,text)', 'ktm_curation_command_owner'),
+      ('feature.patch_curation_collection_command(uuid,bigint,uuid,uuid,text,text,text,text,text,jsonb,bigint,text)', 'ktm_curation_command_owner'),
+      ('feature.archive_curation_collection_command(uuid,bigint,bigint,text)', 'ktm_curation_command_owner'),
+      ('feature.create_curation_item_command(uuid,text,text,text,text,text,text,text,integer,text,text,text,text,jsonb,bigint,text)', 'ktm_curation_command_owner'),
+      ('feature.patch_curation_item_command(uuid,uuid,bigint,text,text,text,text,text,text,text,integer,text,text,text,text,jsonb,bigint,text)', 'ktm_curation_command_owner'),
+      ('feature.archive_curation_item_command(uuid,uuid,bigint,bigint,text)', 'ktm_curation_command_owner'),
+      ('feature.resolve_curation_import_collection_command(text,uuid,uuid,text,text,bigint,text)', 'ktm_curation_command_owner'),
+      ('feature.touch_curation_import_collection_command(uuid,bigint,text)', 'ktm_curation_command_owner'),
+      ('feature.reclassify_curation_quarantine_command(uuid,bigint,text,uuid,bigint,uuid[],text,text,bigint,text)', 'ktm_curation_command_owner'),
+      ('ops.reject_curation_import_collection_effect_mutation()', 'ktm_curation_audit_writer'),
+      ('ops.reject_curation_import_collection_effect_truncate()', 'ktm_curation_audit_writer'),
+      ('feature.refresh_curated_source_observation(bigint,uuid)', 'ktm_curation_command_owner'),
+      ('feature.finalize_provider_curation_receipts(bigint,uuid,text,text)', 'ktm_curation_command_owner'),
+      ('feature.seal_provider_curation_snapshot_receipt(uuid,bigint,text,text,bigint,text)', 'ktm_curation_command_owner'),
+      ('feature.finalize_provider_curation_root(uuid)', 'ktm_curation_command_owner'),
+      ('feature.sync_concierge_theme_catalog(bigint,uuid)', 'ktm_curation_command_owner'),
+      ('feature.sync_concierge_catalog_after_observation()', 'ktm_curation_command_owner'),
+      ('ops.ensure_provider_feature_operation_command(text,text,text,jsonb,timestamptz,timestamptz,text)', 'ktm_curation_command_owner'),
+      ('ops.finish_provider_feature_membership_command(uuid,bigint,text,text,boolean,timestamptz)', 'ktm_curation_command_owner'),
+      ('ops.append_provider_feature_attempt_event_command(text,bigint,text,text,integer,text,jsonb)', 'ktm_curation_command_owner'),
+      ('ops.transition_provider_feature_operation_terminal_command(uuid,text,text,text,text,timestamptz,timestamptz,boolean)', 'ktm_curation_command_owner'),
+      ('ops.fill_provider_cancellation_starts_command(uuid,text,timestamptz)', 'ktm_curation_command_owner'),
+      ('ops.transition_provider_cancellation_job_command(uuid,uuid,text,text[],text,text,text,timestamptz,timestamptz,boolean,text,text[])', 'ktm_curation_command_owner')
+), existing AS (
+    SELECT signature, owner_role, pg_proc.prokind
+    FROM dedicated_routine
+    JOIN pg_catalog.pg_proc ON pg_proc.oid = to_regprocedure(signature)
+)
+SELECT format(
+    'ALTER %s %s OWNER TO %I',
+    CASE prokind WHEN 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END,
+    signature,
+    owner_role
+)
+FROM existing
 \gexec
 
 SELECT format('ALTER TYPE %I.%I OWNER TO ktm_feature_schema_owner', nspname, typname)

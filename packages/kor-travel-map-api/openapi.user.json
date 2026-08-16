@@ -558,6 +558,22 @@
         "additionalProperties": false,
         "description": "curated source metadata view.",
         "properties": {
+          "archived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "command_etag": {
+            "title": "Command Etag",
+            "type": "string"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
@@ -630,6 +646,11 @@
             ],
             "title": "Next Expected At"
           },
+          "observation_revision": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Observation Revision",
+            "type": "string"
+          },
           "provider": {
             "title": "Provider",
             "type": "string"
@@ -639,7 +660,17 @@
             "type": "integer"
           },
           "provider_status": {
+            "enum": [
+              "implemented",
+              "provider_needed",
+              "manual_only",
+              "deprecated"
+            ],
             "title": "Provider Status",
+            "type": "string"
+          },
+          "representation_etag": {
+            "title": "Representation Etag",
             "type": "string"
           },
           "row_count": {
@@ -653,11 +684,24 @@
             ],
             "title": "Row Count"
           },
+          "row_revision": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Row Revision",
+            "type": "string"
+          },
           "source_id": {
+            "format": "uuid",
             "title": "Source Id",
             "type": "string"
           },
           "source_kind": {
+            "enum": [
+              "openapi",
+              "filedata",
+              "standard",
+              "internal",
+              "manual"
+            ],
             "title": "Source Kind",
             "type": "string"
           },
@@ -677,6 +721,15 @@
             "title": "Source Url"
           },
           "update_cycle": {
+            "enum": [
+              "realtime",
+              "daily",
+              "weekly",
+              "monthly",
+              "annual",
+              "one_time",
+              "unknown"
+            ],
             "title": "Update Cycle",
             "type": "string"
           },
@@ -697,7 +750,11 @@
           "provider_status",
           "metadata",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "row_revision",
+          "observation_revision",
+          "representation_etag",
+          "command_etag"
         ],
         "title": "CuratedSourceView",
         "type": "object"
@@ -740,19 +797,62 @@
         "additionalProperties": false,
         "description": "curated theme view.",
         "properties": {
+          "archived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "command_etag": {
+            "title": "Command Etag",
+            "type": "string"
+          },
           "created_at": {
             "format": "date-time",
             "title": "Created At",
             "type": "string"
           },
-          "default_curated": {
-            "title": "Default Curated",
-            "type": "boolean"
-          },
           "metadata": {
             "additionalProperties": true,
             "title": "Metadata",
             "type": "object"
+          },
+          "owner_kind": {
+            "anyOf": [
+              {
+                "enum": [
+                  "operator",
+                  "provider_dataset"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Kind"
+          },
+          "owner_provider_dataset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owner Provider Dataset Id"
+          },
+          "row_revision": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Row Revision",
+            "type": "string"
           },
           "theme_description": {
             "title": "Theme Description",
@@ -763,6 +863,7 @@
             "type": "string"
           },
           "theme_id": {
+            "format": "uuid",
             "title": "Theme Id",
             "type": "string"
           },
@@ -780,6 +881,10 @@
             "type": "string"
           },
           "visibility": {
+            "enum": [
+              "admin_only",
+              "public"
+            ],
             "title": "Visibility",
             "type": "string"
           }
@@ -790,11 +895,12 @@
           "theme_name",
           "theme_description",
           "theme_group",
-          "default_curated",
           "visibility",
           "metadata",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "row_revision",
+          "command_etag"
         ],
         "title": "CuratedThemeView",
         "type": "object"

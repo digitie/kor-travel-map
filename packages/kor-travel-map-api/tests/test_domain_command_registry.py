@@ -42,7 +42,7 @@ def test_every_openapi_write_operation_has_exact_static_policy() -> None:
     writes = _openapi_writes()
 
     assert set(COMMAND_REGISTRY) == set(writes)
-    assert len(writes) == 72
+    assert len(writes) == 77
 
 
 def test_registered_domain_and_specialized_ledgers_have_stable_operation_names() -> None:
@@ -131,22 +131,40 @@ def test_domain_terminal_contract_matches_declared_openapi_success_response() ->
         if policy.kind is not CommandPolicyKind.DOMAIN_LEDGER:
             continue
         responses = writes[key]["responses"]
-        success_codes = {
-            int(code) for code in responses if str(code).startswith("2")
+        success_codes = {int(code) for code in responses if str(code).startswith("2")}
+        replay_codes = {
+            int(code)
+            for code, response in responses.items()
+            if response.get("description") == "exact Idempotency-Key replay"
         }
-        assert success_codes == {policy.success_status}, key
+        assert replay_codes <= {200}, key
+        assert success_codes == {policy.success_status, *replay_codes}, key
         response = responses[str(policy.success_status)]
         assert set(response.get("headers", {})) == set(policy.replay_headers), key
+        for replay_code in replay_codes:
+            response = responses[str(replay_code)]
+            assert set(response.get("headers", {})) == set(policy.replay_headers), key
 
 
 def test_domain_fingerprint_header_contract_is_explicit_and_minimal() -> None:
     assert {
         policy.operation: policy.fingerprint_headers
         for policy in COMMAND_REGISTRY.values()
-        if policy.kind is CommandPolicyKind.DOMAIN_LEDGER
-        and policy.fingerprint_headers
+        if policy.kind is CommandPolicyKind.DOMAIN_LEDGER and policy.fingerprint_headers
     } == {
         "admin.cache-target-dead-letter.replay": ("If-Match",),
+        "admin.curation-collection.archive": ("If-Match",),
+        "admin.curation-collection.patch": ("If-Match",),
+        "admin.curation-item.archive": ("If-Match",),
+        "admin.curation-item.patch": ("If-Match",),
+        "admin.curation-quarantine.reclassify": ("If-Match",),
+        "admin.curation.import": ("If-Match",),
+        "admin.curated-theme.archive": ("If-Match",),
+        "admin.curated-theme.patch": ("If-Match",),
+        "admin.curated-source.archive": ("If-Match",),
+        "admin.curated-source.patch": ("If-Match",),
+        "admin.curated-source-rule.archive": ("If-Match",),
+        "admin.curated-source-rule.patch": ("If-Match",),
         "admin.feature.patch": ("If-Match",),
         # T-VN-36: typed field override의 author/revoke도 row_revision If-Match로
         # 잠긴다 (patch와 같은 낙관적 동시성 경계).
@@ -155,6 +173,8 @@ def test_domain_fingerprint_header_contract_is_explicit_and_minimal() -> None:
         "admin.feature.delete": ("If-Match",),
         "admin.feature.state": ("If-Match",),
         "admin.feature.state.reactivate": ("If-Match",),
+        "admin.theme-feature-candidate.promote": ("If-Match",),
+        "admin.theme-feature-candidate.reject": ("If-Match",),
         "service.cache-target-dead-letter.replay": ("If-Match",),
         "service.cache-target-reconciliation.begin": (
             "If-Match",
@@ -165,13 +185,50 @@ def test_domain_fingerprint_header_contract_is_explicit_and_minimal() -> None:
     }
 
 
+def test_curation_revision_commands_publish_required_if_match_header() -> None:
+    """runtime에서 필수인 curation CAS가 OpenAPI에서도 optional로 약화되지 않는다."""
+
+    writes = _openapi_writes()
+    operations = {
+        "admin.curation-collection.archive",
+        "admin.curation-collection.patch",
+        "admin.curation-item.archive",
+        "admin.curation-item.patch",
+        "admin.theme-feature-candidate.promote",
+        "admin.theme-feature-candidate.reject",
+    }
+    routes = {key for key, policy in COMMAND_REGISTRY.items() if policy.operation in operations}
+    assert len(routes) == len(operations)
+    for key in routes:
+        header = _header(writes[key], "If-Match")
+        assert header is not None, key
+        assert header["required"] is True, key
+        assert header["schema"]["type"] == "string", key
+
+
+def test_tvn40_canonical_collection_and_item_commands_are_serializable() -> None:
+    operations = {
+        "admin.curation-collection.archive",
+        "admin.curation-collection.create",
+        "admin.curation-collection.patch",
+        "admin.curation-item.archive",
+        "admin.curation-item.create",
+        "admin.curation-item.patch",
+    }
+    policies = {
+        policy.operation: policy
+        for policy in COMMAND_REGISTRY.values()
+        if policy.kind is CommandPolicyKind.DOMAIN_LEDGER and policy.operation in operations
+    }
+    assert set(policies) == operations
+    assert all(policy.transaction_isolation == "serializable" for policy in policies.values())
+
+
 def test_future_h22b_quarantine_command_cannot_bypass_domain_ledger() -> None:
     for key, operation in _openapi_writes().items():
         operation_id = str(operation.get("operationId", "")).lower()
         path = key[1].lower()
-        if "reclassif" in operation_id or (
-            "quarantine" in path and key[0] in _WRITE_METHODS
-        ):
+        if "reclassif" in operation_id or ("quarantine" in path and key[0] in _WRITE_METHODS):
             assert COMMAND_REGISTRY[key].kind is CommandPolicyKind.DOMAIN_LEDGER
 
 
@@ -209,6 +266,14 @@ def test_policy_requires_operation_only_for_ledger_kinds() -> None:
             operation="admin.test",
             success_status=200,
             fingerprint_headers=("Cookie",),
+        )
+    with pytest.raises(ValueError, match="unsupported domain transaction isolation"):
+        CommandPolicy(
+            kind=CommandPolicyKind.DOMAIN_LEDGER,
+            reason="unsafe isolation",
+            operation="admin.test",
+            success_status=200,
+            transaction_isolation="read-committed",
         )
 
 

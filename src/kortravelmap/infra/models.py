@@ -120,6 +120,13 @@ __all__ = [
     "CuratedFeatureRow",
     "CurationCollectionRow",
     "CurationItemRow",
+    "CurationCutoverIdentityMappingRow",
+    "CurationRuleReconcileOperationRow",
+    "CurationRuleReconcileScopeMemberRow",
+    "ThemeCandidateGenerationRow",
+    "ThemeCandidateGenerationObservationRow",
+    "ThemeFeatureCandidateRow",
+    "ThemeFeatureCandidateTransitionRow",
     "CurationImportBatchRow",
     "CurationImportRowRow",
     "CurationLinkDecisionRow",
@@ -1381,6 +1388,11 @@ class CuratedThemeRow(Base):
             "visibility IN ('admin_only','public')",
             name="ck_curated_themes_visibility",
         ),
+        CheckConstraint(
+            "char_length(theme_slug) BETWEEN 1 AND 128 "
+            "AND char_length(theme_name) BETWEEN 1 AND 200",
+            name="snapshot_text_bounds",
+        ),
         # 0025는 inline ``TEXT NOT NULL UNIQUE``로 만들어 PostgreSQL 기본명
         # ``curated_themes_theme_slug_key``를 얻는다. 명시 constraint로 그 이름을
         # 그대로 반영한다(naming convention은 ``uq_curated_themes_theme_slug``라
@@ -1391,6 +1403,19 @@ class CuratedThemeRow(Base):
             "theme_group",
             "visibility",
             "theme_slug",
+        ),
+        ForeignKeyConstraint(
+            ["owner_provider_dataset_id"],
+            ["provider_sync.provider_datasets.provider_dataset_id"],
+            name="fk_curated_themes_owner_provider_dataset",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "(owner_kind IS NULL AND owner_provider_dataset_id IS NULL) OR "
+            "(owner_kind = 'operator' AND owner_provider_dataset_id IS NULL) OR "
+            "(owner_kind = 'provider_dataset' "
+            "AND owner_provider_dataset_id IS NOT NULL)",
+            name="owner_shape",
         ),
         {"schema": "feature"},
     )
@@ -1424,6 +1449,12 @@ class CuratedThemeRow(Base):
         nullable=False,
         server_default=text("'{}'::jsonb"),
     )
+    row_revision: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("1")
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    owner_kind: Mapped[str | None] = mapped_column(Text)
+    owner_provider_dataset_id: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -1503,6 +1534,13 @@ class CuratedSourceRow(Base):
         nullable=False,
         server_default=text("'implemented'"),
     )
+    row_revision: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("1")
+    )
+    observation_revision: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("1")
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     metadata_: Mapped[dict[str, Any]] = mapped_column(
         "metadata",
         JSONB,
@@ -1550,6 +1588,19 @@ class CuratedSourceRuleRow(Base):
             "enabled",
             text("priority DESC"),
         ),
+        ForeignKeyConstraint(
+            ["owner_provider_dataset_id"],
+            ["provider_sync.provider_datasets.provider_dataset_id"],
+            name="fk_curated_source_rules_owner_provider_dataset",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "(owner_kind IS NULL AND owner_provider_dataset_id IS NULL) OR "
+            "(owner_kind = 'operator' AND owner_provider_dataset_id IS NULL) OR "
+            "(owner_kind = 'provider_dataset' "
+            "AND owner_provider_dataset_id IS NOT NULL)",
+            name="owner_shape",
+        ),
         {"schema": "feature"},
     )
 
@@ -1594,6 +1645,12 @@ class CuratedSourceRuleRow(Base):
         nullable=False,
         server_default=text("true"),
     )
+    row_revision: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("1")
+    )
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    owner_kind: Mapped[str | None] = mapped_column(Text)
+    owner_provider_dataset_id: Mapped[int | None] = mapped_column(BigInteger)
     metadata_: Mapped[dict[str, Any]] = mapped_column(
         "metadata",
         JSONB,
@@ -1763,6 +1820,11 @@ class CurationCollectionRow(Base):
         CheckConstraint("btrim(collection_key) <> ''", name="key"),
         CheckConstraint("btrim(title) <> ''", name="title"),
         CheckConstraint(
+            "char_length(title) BETWEEN 1 AND 300 "
+            "AND char_length(edition_key) <= 100",
+            name="snapshot_text_bounds",
+        ),
+        CheckConstraint(
             "status IN ('draft','published','archived')",
             name="status",
         ),
@@ -1817,6 +1879,9 @@ class CurationCollectionRow(Base):
     )
     created_by: Mapped[str | None] = mapped_column(Text)
     updated_by: Mapped[str | None] = mapped_column(Text)
+    row_revision: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("1")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -1894,6 +1959,20 @@ class CurationItemRow(Base):
             "source_present",
             "status",
             "collection_id",
+        ),
+        Index(
+            "idx_curation_items_service_snapshot_candidates",
+            "collection_id",
+            "curation_item_id",
+            postgresql_include=(
+                "accepted_link_decision_id",
+                "feature_id",
+                "source_record_key",
+            ),
+            postgresql_where=text(
+                "archived_at IS NULL AND source_present AND status = 'included' "
+                "AND feature_id IS NOT NULL AND accepted_link_decision_id IS NOT NULL"
+            ),
         ),
         ForeignKeyConstraint(
             ["current_import_row_id", "curation_item_id"],
@@ -1985,6 +2064,9 @@ class CurationItemRow(Base):
     updated_by: Mapped[str | None] = mapped_column(Text)
     operator_updated_by: Mapped[str | None] = mapped_column(Text)
     operator_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    row_revision: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("1")
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -1992,6 +2074,497 @@ class CurationItemRow(Base):
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class CurationCutoverIdentityMappingRow(Base):
+    """Map legacy curated identity에서 canonical membership으로의 immutable cutover map."""
+
+    __tablename__ = "curation_cutover_identity_mappings"
+    __table_args__ = (
+        CheckConstraint(
+            "mapping_kind IN "
+            "('legacy_projection','official_membership','manual_membership')",
+            name=conv("ck_curation_cutover_identity_mapping_kind"),
+        ),
+        CheckConstraint(
+            "source_row_hash ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_curation_cutover_identity_mapping_hash"),
+        ),
+        UniqueConstraint(
+            "curation_item_id",
+            name="curation_cutover_identity_mappings_curation_item_id_key",
+        ),
+        {"schema": "ops"},
+    )
+
+    legacy_curated_feature_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), primary_key=True
+    )
+    collection_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("feature.curation_collections.collection_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    curation_item_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("feature.curation_items.curation_item_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    mapping_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    source_row_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")
+    )
+
+
+class CurationRuleReconcileOperationRow(Base):
+    """후보 재평가의 immutable command/system operation receipt."""
+
+    __tablename__ = "curation_rule_reconcile_operations"
+    __table_args__ = (
+        CheckConstraint(
+            "after_rule_revision >= 1",
+            name=conv("ck_curation_rule_reconcile_operation_revisions"),
+        ),
+        CheckConstraint(
+            "(before_rule_input_hash IS NULL OR "
+            "before_rule_input_hash ~ '^[0-9a-f]{64}$') AND "
+            "after_rule_input_hash ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_curation_rule_reconcile_operation_hashes"),
+        ),
+        CheckConstraint(
+            "operation_kind IN ('create','patch','archive')",
+            name=conv("ck_curation_rule_reconcile_operation_kind"),
+        ),
+        CheckConstraint(
+            "(operation_kind = 'create' AND before_rule_revision IS NULL "
+            "AND before_rule_input_hash IS NULL AND after_rule_revision = 1) OR "
+            "(operation_kind IN ('patch','archive') "
+            "AND before_rule_revision IS NOT NULL "
+            "AND before_rule_input_hash IS NOT NULL "
+            "AND after_rule_revision > before_rule_revision)",
+            name=conv("ck_curation_rule_reconcile_operation_revision_shape"),
+        ),
+        CheckConstraint(
+            "actor = btrim(actor) AND actor <> ''",
+            name=conv("ck_curation_rule_reconcile_operation_actor"),
+        ),
+        CheckConstraint(
+            "scope_member_count >= 0 AND scope_members_hash ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_curation_rule_reconcile_operation_scope"),
+        ),
+        CheckConstraint(
+            "(command_id IS NOT NULL AND system_operation_key IS NULL) OR "
+            "(command_id IS NULL AND system_operation_key IS NOT NULL "
+            "AND system_operation_key = btrim(system_operation_key) "
+            "AND system_operation_key <> '')",
+            name=conv("ck_curation_rule_reconcile_operation_origin"),
+        ),
+        Index(
+            "uq_curation_rule_reconcile_command",
+            "rule_id",
+            "command_id",
+            unique=True,
+            postgresql_where=text("command_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_curation_rule_reconcile_system_operation",
+            "rule_id",
+            "system_operation_key",
+            unique=True,
+            postgresql_where=text("system_operation_key IS NOT NULL"),
+        ),
+        {"schema": "ops"},
+    )
+
+    operation_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    rule_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("feature.curated_source_rules.rule_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    operation_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    before_rule_revision: Mapped[int | None] = mapped_column(BigInteger)
+    after_rule_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    before_rule_input_hash: Mapped[str | None] = mapped_column(Text)
+    after_rule_input_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    command_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey("ops.domain_commands.command_id", ondelete="RESTRICT"),
+    )
+    system_operation_key: Mapped[str | None] = mapped_column(Text)
+    actor: Mapped[str] = mapped_column(Text, nullable=False)
+    scope_member_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    scope_members_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")
+    )
+
+
+class CurationRuleReconcileScopeMemberRow(Base):
+    """재평가 operation의 정렬된 immutable source/Feature scope member."""
+
+    __tablename__ = "curation_rule_reconcile_scope_members"
+    __table_args__ = (
+        CheckConstraint(
+            "member_kind IN ('source_entity','feature')",
+            name=conv("ck_curation_rule_reconcile_scope_member_kind"),
+        ),
+        CheckConstraint(
+            "member_key = btrim(member_key) AND member_key <> ''",
+            name=conv("ck_curation_rule_reconcile_scope_member_key"),
+        ),
+        CheckConstraint(
+            "before_identity_hash IS NOT NULL OR after_identity_hash IS NOT NULL",
+            name=conv("ck_curation_rule_reconcile_scope_identity"),
+        ),
+        {"schema": "ops"},
+    )
+
+    operation_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.curation_rule_reconcile_operations.operation_id",
+            ondelete="RESTRICT",
+        ),
+        primary_key=True,
+    )
+    member_kind: Mapped[str] = mapped_column(Text, primary_key=True)
+    member_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    before_identity_hash: Mapped[str | None] = mapped_column(Text)
+    after_identity_hash: Mapped[str | None] = mapped_column(Text)
+
+
+class ThemeCandidateGenerationRow(Base):
+    """한 rule 평가의 complete immutable receipt."""
+
+    __tablename__ = "theme_candidate_generations"
+    __table_args__ = (
+        CheckConstraint(
+            "rule_row_revision >= 1",
+            name=conv("ck_theme_candidate_generation_rule_revision"),
+        ),
+        CheckConstraint(
+            "generation_kind IN ('provider_full_snapshot','scoped_reconcile',"
+            "'rule_reconcile','legacy_backfill')",
+            name=conv("ck_theme_candidate_generation_kind"),
+        ),
+        CheckConstraint(
+            "rule_input_hash ~ '^[0-9a-f]{64}$' AND "
+            "generation_input_set_hash ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_theme_candidate_generation_hashes"),
+        ),
+        CheckConstraint(
+            "jsonb_typeof(rule_input) = 'object'",
+            name=conv("ck_theme_candidate_generation_rule_input"),
+        ),
+        CheckConstraint(
+            "observed_candidate_count >= 0 AND eligibility_removed_candidate_count >= 0",
+            name=conv("ck_theme_candidate_generation_counts"),
+        ),
+        UniqueConstraint(
+            "generation_key", name="theme_candidate_generations_generation_key_key"
+        ),
+        Index(
+            "idx_theme_candidate_generations_rule_completed",
+            "rule_id",
+            text("completed_at DESC"),
+            text("generation_id DESC"),
+        ),
+        Index(
+            "uq_theme_candidate_generation_provider_job",
+            "rule_id",
+            "source_job_id",
+            unique=True,
+            postgresql_where=text("generation_kind = 'provider_full_snapshot'"),
+        ),
+        Index(
+            "uq_theme_candidate_generation_reconcile_operation",
+            "rule_id",
+            "reconcile_operation_id",
+            unique=True,
+            postgresql_where=text(
+                "generation_kind IN ('scoped_reconcile','rule_reconcile')"
+            ),
+        ),
+        {"schema": "feature"},
+    )
+
+    generation_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    rule_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("feature.curated_source_rules.rule_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    rule_row_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    generation_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    source_job_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("ops.import_jobs.job_id", ondelete="RESTRICT")
+    )
+    reconcile_operation_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.curation_rule_reconcile_operations.operation_id",
+            ondelete="RESTRICT",
+        ),
+    )
+    command_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("ops.domain_commands.command_id", ondelete="RESTRICT")
+    )
+    generation_key: Mapped[str] = mapped_column(Text, nullable=False)
+    rule_input_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    rule_input: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    generation_input_set_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    observed_candidate_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    eligibility_removed_candidate_count: Mapped[int] = mapped_column(
+        BigInteger, nullable=False
+    )
+    completed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")
+    )
+
+
+class ThemeCandidateGenerationObservationRow(Base):
+    """generation이 실제로 산출한 candidate identity/hash 한 건."""
+
+    __tablename__ = "theme_candidate_generation_observations"
+    __table_args__ = (
+        UniqueConstraint(
+            "generation_id",
+            "source_entity_key",
+            "feature_id",
+            name="uq_theme_candidate_generation_observation_identity",
+        ),
+        Index(
+            "idx_theme_candidate_generation_observations_candidate",
+            "candidate_id",
+            text("generation_id DESC"),
+        ),
+        {"schema": "feature"},
+    )
+
+    generation_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "feature.theme_candidate_generations.generation_id", ondelete="RESTRICT"
+        ),
+        primary_key=True,
+    )
+    candidate_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    source_entity_key: Mapped[str] = mapped_column(Text, nullable=False)
+    feature_id: Mapped[str] = mapped_column(Text, nullable=False)
+    source_record_key: Mapped[str] = mapped_column(Text, nullable=False)
+    candidate_input_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")
+    )
+
+
+class ThemeFeatureCandidateRow(Base):
+    """rule-derived admin review candidate current row."""
+
+    __tablename__ = "theme_feature_candidates"
+    __table_args__ = (
+        UniqueConstraint(
+            "rule_id",
+            "source_entity_key",
+            "feature_id",
+            name="uq_theme_feature_candidates_rule_entity_feature",
+        ),
+        ForeignKeyConstraint(
+            ["source_entity_key", "source_record_key"],
+            [
+                "provider_sync.source_records.source_entity_key",
+                "provider_sync.source_records.source_record_key",
+            ],
+            name="fk_theme_feature_candidates_source_record",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "review_state IN ('open','promoted','rejected')",
+            name=conv("ck_theme_feature_candidates_review_state"),
+        ),
+        CheckConstraint(
+            "disposition IN ('active','merged')",
+            name=conv("ck_theme_feature_candidates_disposition_value"),
+        ),
+        CheckConstraint(
+            "(disposition = 'active' AND merged_into_candidate_id IS NULL "
+            "AND retired_at IS NULL) OR (disposition = 'merged' "
+            "AND merged_into_candidate_id IS NOT NULL AND retired_at IS NOT NULL)",
+            name=conv("ck_theme_feature_candidates_disposition"),
+        ),
+        Index(
+            "idx_theme_feature_candidates_rule_open_keyset",
+            "rule_id",
+            text("updated_at DESC"),
+            text("candidate_id DESC"),
+            postgresql_where=text(
+                "disposition = 'active' AND review_state = 'open' AND eligibility_present"
+            ),
+        ),
+        Index(
+            "idx_theme_feature_candidates_open_keyset",
+            text("updated_at DESC"),
+            text("candidate_id DESC"),
+            postgresql_where=text(
+                "disposition = 'active' AND review_state = 'open' AND eligibility_present"
+            ),
+        ),
+        Index(
+            "idx_theme_feature_candidates_state_keyset",
+            "review_state",
+            "eligibility_present",
+            text("updated_at DESC"),
+            text("candidate_id DESC"),
+            postgresql_where=text("disposition = 'active'"),
+        ),
+        Index(
+            "idx_theme_feature_candidates_feature_state",
+            "feature_id",
+            "review_state",
+            "eligibility_present",
+            "candidate_id",
+            postgresql_where=text("disposition = 'active'"),
+        ),
+        Index(
+            "idx_theme_feature_candidates_source_entity",
+            "source_entity_key",
+            "candidate_id",
+        ),
+        {"schema": "feature"},
+    )
+
+    candidate_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    rule_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("feature.curated_source_rules.rule_id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    source_entity_key: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey("provider_sync.source_entities.source_entity_key", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    feature_id: Mapped[str] = mapped_column(
+        Text, ForeignKey("feature.features.feature_id", ondelete="RESTRICT"), nullable=False
+    )
+    source_record_key: Mapped[str] = mapped_column(Text, nullable=False)
+    rule_row_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    rule_input_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    source_record_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    candidate_input_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    review_state: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'open'")
+    )
+    eligibility_present: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+    disposition: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'active'")
+    )
+    merged_into_candidate_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("feature.theme_feature_candidates.candidate_id", ondelete="RESTRICT"),
+    )
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    rank_score: Mapped[Any] = mapped_column(
+        Numeric(10, 4), nullable=False, server_default=text("0")
+    )
+    proposal_title: Mapped[str | None] = mapped_column(Text)
+    proposal_summary: Mapped[str | None] = mapped_column(Text)
+    match_evidence: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    row_revision: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default=text("1")
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")
+    )
+
+
+class ThemeFeatureCandidateTransitionRow(Base):
+    """candidate review/eligibility/merge state의 immutable audit."""
+
+    __tablename__ = "theme_feature_candidate_transitions"
+    __table_args__ = (
+        UniqueConstraint(
+            "candidate_id",
+            "candidate_row_revision",
+            name="uq_candidate_transition_candidate_revision",
+        ),
+        Index(
+            "idx_candidate_transitions_candidate_keyset",
+            "candidate_id",
+            text("transition_id DESC"),
+        ),
+        Index(
+            "idx_candidate_transitions_command",
+            "command_id",
+            postgresql_where=text("command_id IS NOT NULL"),
+        ),
+        {"schema": "feature"},
+    )
+
+    transition_id: Mapped[int] = mapped_column(
+        BigInteger, Identity(always=True), primary_key=True
+    )
+    candidate_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    from_feature_id: Mapped[str | None] = mapped_column(Text)
+    to_feature_id: Mapped[str | None] = mapped_column(Text)
+    rule_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    source_entity_key: Mapped[str] = mapped_column(Text, nullable=False)
+    from_review_state: Mapped[str | None] = mapped_column(Text)
+    to_review_state: Mapped[str] = mapped_column(Text, nullable=False)
+    from_eligibility_present: Mapped[bool | None] = mapped_column(Boolean)
+    to_eligibility_present: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    from_disposition: Mapped[str | None] = mapped_column(Text)
+    to_disposition: Mapped[str] = mapped_column(Text, nullable=False)
+    winner_candidate_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    transition_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    candidate_row_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    rule_row_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    rule_input_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    candidate_input_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    generation_id: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey("feature.theme_candidate_generations.generation_id", ondelete="RESTRICT"),
+    )
+    provider_dataset_id: Mapped[int | None] = mapped_column(BigInteger)
+    source_record_key: Mapped[str | None] = mapped_column(Text)
+    source_record_hash: Mapped[str | None] = mapped_column(Text)
+    collection_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    curation_item_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    command_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("ops.domain_commands.command_id", ondelete="RESTRICT")
+    )
+    actor: Mapped[str] = mapped_column(Text, nullable=False)
+    reason_code: Mapped[str] = mapped_column(Text, nullable=False)
+    causation_ref: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    invoker_role: Mapped[str] = mapped_column(Text, nullable=False)
+    candidate_procedure_definer: Mapped[str] = mapped_column(Text, nullable=False)
+    audit_writer_definer: Mapped[str] = mapped_column(Text, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")
+    )
 
 
 class CurationImportBatchRow(Base):
@@ -2019,6 +2592,15 @@ class CurationImportBatchRow(Base):
             "jsonb_typeof(metadata) = 'object'",
             name=conv("ck_curation_import_batches_metadata"),
         ),
+        UniqueConstraint(
+            "command_id",
+            name=conv("uq_curation_import_batches_command"),
+        ),
+        UniqueConstraint(
+            "import_batch_id",
+            "command_id",
+            name=conv("uq_curation_import_batches_identity_command"),
+        ),
         Index(
             "idx_curation_import_batches_sha_time",
             "content_sha256",
@@ -2032,6 +2614,15 @@ class CurationImportBatchRow(Base):
         UUID(as_uuid=False),
         primary_key=True,
         server_default=text("x_extension.gen_random_uuid()"),
+    )
+    command_id: Mapped[int | None] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "ops.domain_commands.command_id",
+            name=conv("fk_curation_import_batches_command"),
+            ondelete="RESTRICT",
+        ),
+        nullable=True,
     )
     content_sha256: Mapped[str] = mapped_column(Text, nullable=False)
     batch_kind: Mapped[str] = mapped_column(Text, nullable=False)

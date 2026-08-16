@@ -545,7 +545,7 @@ def run_migrations_online():
 ### 8.3 마이그레이션 net 검증
 
 **`upgrade head → downgrade base → upgrade head` 왕복은 더 이상 성립하지 않는다.**
-squash 이후 `versions/`의 두 노드가 모두 forward-only이고 `downgrade()`가
+squash 이후 `versions/`의 모든 노드가 forward-only이고 `downgrade()`가
 `RuntimeError`를 던진다(`tests/unit/test_migration_forward_only.py`가 그 선언과 구현이
 갈리지 않는지 본다). 왕복은 애초에 "역연산이 존재한다"는 전제 위의 검증이었는데,
 파괴적 cutover가 들어온 시점부터 그 전제는 저장소 전체에서 깨져 있었다 — 아래 0044/0045
@@ -574,23 +574,25 @@ legacy에서 완전히 재구성할 수 없는 collection/item이나 감사값�
 
 #### 지금 `alembic/versions/`에 있는 것
 
-squash(2026-08-14) 이후 두 파일뿐이다.
+squash(2026-08-14) 이후 baseline과 bridge, T-VN-40 migration만 있다.
 
 - `0200_schema_baseline.py` — revision id `0200_schema_baseline`, `down_revision=None`.
   `alembic/baseline/{schema,seed}.sql`을 byte sha로 잠근 채 적용한다.
 - `0201_squash_bridge.py` — revision id는 파일명이 아니라 **`0104_tvn36_final_fence`**다.
-  이미 `0104`에 있는 DB가 이 그래프에서도 해석되게 하는 노드이며, 현재 **head**다.
+  이미 `0104`에 있는 DB가 이 그래프에서도 해석되게 하는 노드다.
+- `0202_tvn40_curation_receipts.py`부터 `0221_tvn40_snapshot_text_bounds.py`까지 —
+  bridge 뒤에 이어지는 T-VN-40 단일 체인이며, 현재 head는
+  `0221_tvn40_snapshot_text_bounds`다.
 
 `0001~0104` 체인 109개는 `alembic/legacy_versions/`의 실행되지 않는 아카이브다
 ([README](../../alembic/legacy_versions/README.md)). **`versions/`로 되돌리지 마라** —
-bridge와 아카이브가 `0104_tvn36_final_fence`를 둘 다 선언하는데, alembic은 그것을
-**거부하지 않고** `Revision … is present more than once` 경고 한 줄 뒤 head 3개짜리
-손상된 맵으로 계속 간다(실측). 거부보다 나쁘다.
+bridge와 아카이브가 `0104_tvn36_final_fence`를 둘 다 선언하면 Alembic graph가 손상된다.
 
-#### 다음 migration(`0202`~) 작성
+#### 다음 migration(`0222`~) 작성
 
-1. 파일은 `alembic/versions/0202_<name>.py`, `down_revision = "0104_tvn36_final_fence"`
-   (= 현재 head). **`0201`을 쓰지 마라** — 그건 파일명이고 revision id가 아니다.
+1. 파일은 `alembic/versions/0222_<name>.py`,
+   `down_revision = "0221_tvn40_snapshot_text_bounds"`(= 현재 head)로 잇는다.
+   **`0201`을 쓰지 마라** — 그건 bridge 파일명이고 revision id가 아니다.
 2. `0105`~`0199`처럼 아카이브와 겹치는 번호는 쓰지 않는다. 파일 정렬이 `0200`보다
    앞서면서 `down_revision`은 뒤를 가리키는 파일이 생겨 읽는 사람을 오도한다.
 3. 파생 산출물을 함께 갱신한다:
@@ -606,10 +608,7 @@ bridge와 아카이브가 `0104_tvn36_final_fence`를 둘 다 선언하는데, a
 
 > **baseline 파일 명명 규약**: 다음에 squash를 한다면 파일 이름을
 > `NNNN_schema_baseline.py`로 지어라. `docker/api-entrypoint.sh`가 "이 이미지가
-> squash판인가"를 `alembic/versions/*_schema_baseline.py` 존재로 판별한다 — 다른
-> 이름을 쓰면 `0104` 이전 DB를 만났을 때 "이미지가 뒤처졌다"는 **반대 진단**이
-> 부활한다(세대 번호를 박았던 첫 판이 정확히 그랬다).
-
+> squash판인가"를 `alembic/versions/*_schema_baseline.py` 존재로 판별한다.
 ## 9. EXPLAIN 통합 테스트
 
 모든 hot path SQL은 `tests/integration/`에서 EXPLAIN 결과로 인덱스 사용 검증.

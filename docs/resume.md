@@ -1,5 +1,95 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-16 — T-VN-40 PostGIS typed runtime CI 수리
+
+실제 Dagster/API LOGIN으로 provider·cancellation typed command를 실행하도록 integration
+fixture를 분리했다. command owner가 append-only event clock을 갱신하는 최소 권한도 정렬했고,
+queued provider root의 terminal heartbeat 및 tracking-invariant 종결을 실제 cancellation
+coordinator 흐름으로 고정했다. quarantine marker NULL 비교와 committed-row test isolation,
+candidate engine dispose 순서도 fail-close로 수리했다. runtime privilege 음성 test의 API·Dagster
+engine 수명도 정확히 닫아 Python 3.13 CI가 ResourceWarning으로 실패하지 않게 했다.
+
+**다음 한 작업**: PR #974 브랜치를 푸시한 뒤 GitHub Integration/PostGIS check가 focused
+회귀와 같은 실제 runtime identity에서 녹색으로 끝나는지 확인한다. 그 전에는 rollout receipt
+completion이나 n150 live acceptance를 수행하지 않는다.
+
+## 2026-08-15 — T-VN-40 PostGIS CI runtime 격리 정렬
+
+runtime privilege preflight가 disposable LOGIN 비밀번호를 오래된 T-VN-34 값으로
+재설정해, 뒤이어 실행되는 T-VN-40 candidate command 테스트의 연결을 깨던 순서 의존성을
+제거했다. 모든 runtime LOGIN fixture는 migration bootstrap과 같은 T-VN-40 test-only 값으로
+통일했다. 공개 collection reader도 신뢰된 공개 Feature 연결 item만 반환하는 현재 정책에
+맞춰 미연결 item은 admin read에서만 보존함을 통합 회귀로 고정했다.
+
+**다음 한 작업**: 원격 PostGIS CI를 다시 녹색으로 만든 뒤, Map PR의 독립 승인과 병합
+순서를 확인한다. 승인·병합 전에는 n150 live acceptance, rollout receipt completion, legacy
+물리 삭제를 수행하지 않는다.
+
+## 2026-08-15 — T-VN-40 Dagster CI 테스트 경계 정렬
+
+authoritative snapshot 적재와 curation input proof 전달을 production asset이 사용하도록 바뀐 뒤,
+Dagster asset 테스트 double과 terminal payload 기대값이 이전 호출 계약에 남아 있던 문제를 정렬했다.
+Concierge는 authoritative load·retirement를 같은 causal 경계로 모사하고, OpiNet은
+`curation_dataset` keyword를, single-member terminal은 nullable proof 필드를 명시적으로 검증한다.
+
+**다음 한 작업**: 원격 Map CI를 다시 녹색으로 만든 뒤, 세 PR의 독립 승인과 병합 순서를
+확인한다. 승인·병합 전에는 n150 live acceptance, rollout receipt completion, legacy 물리 삭제를
+수행하지 않는다.
+
+## 2026-08-15 — T-VN-40 service OpenAPI contract test 정렬
+
+service restore-fence command는 최초 `201`과 exact `Idempotency-Key` terminal replay `200`을
+함께 계약으로 둔다. registry test가 이 명시적 replay response를 잘못 거절하던 문제를 고쳤고,
+canonical cutover identity mapping export도 service OpenAPI의 exact route inventory에 추가했다.
+
+**다음 한 작업**: Map과 PinVi 원격 CI를 다시 확인한다. Manager principal 결선의 병합과 n150
+paired live acceptance 전에는 rollout receipt completion 및 legacy source의 물리 삭제를 수행하지
+않는다.
+
+## 2026-08-15 — T-VN-40 admin OpenAPI 생성형 타입 동기화
+
+canonical cutover identity mapping service export가 admin OpenAPI에 추가된 뒤에도 frontend의
+생성형 타입이 이전 정본을 가리켜 GitHub `openapi-typescript --check`가 실패하던 상태를
+동기화했다. frontend가 API artifact의 mapping cursor·root·member DTO를 현재 service 정본과
+같이 검증한다.
+
+**다음 한 작업**: Map/PinVi 원격 CI를 끝까지 확인한다. Manager principal 결선의 병합과
+n150 paired live acceptance 전에는 rollout receipt completion 및 legacy source의 물리 삭제를
+수행하지 않는다.
+
+## 2026-08-15 — T-VN-40 n150 canonical curation principal 격리
+
+isolated n150 runner는 Map API에 PinVi canonical snapshot·cutover mapping principal의
+SHA-256 digest만 주고, 서로 다른 두 원문 token은 PinVi API에만 전달하도록 고정했다.
+compose도 같은 Map API 전용 digest 경계를 선언해 원문 token이 Map API·Dagster·frontend로
+퍼지지 않는다.
+
+Docker Manager는 PR [#174](https://github.com/digitie/kor-travel-docker-manager/pull/174)에서
+같은 네 값을 frozen C6c transaction으로 결선했다. PinVi API 원문 pair를 Manager가 받아 Map API에는
+digest만 파생하며, Map UI·Dagster·bootstrap과 PinVi Web·Dagster에는 어떤 형태도 전달하지 않는다.
+PR이 병합되기 전에는 이 경계를 배포 완료로 취급하지 않는다.
+
+현재 branch CI의 Geo BFF credential guard·clone runner contract·H35 wheel build 전제도 함께
+정렬했다. CI는 `uv`를 명시 설치하고, clone runner는 candidate geo를 띄우지 않는 동안 전용 Geo key를
+빈 값으로 유지한다. Geo BFF는 요청 시점 key를 읽되, 누락 때 `GEO_API_KEY_NOT_CONFIGURED` 사유로
+명시적으로 fail-close한다.
+
+**다음 한 작업**: #174 병합 뒤 canonical import/backfill n150 live acceptance와 paired release
+receipt의 exact Map/PinVi commit·service vendor hash를 확인하고, 그 증거가 모두 있을 때만
+T-VN-40 receipt를 complete로 전이한다.
+
+## 2026-08-15 — T-VN-40 paired service receipt 배포 gate 강화
+
+active `deployment_receipt_task=T-VN-40`가 complete가 되려면 installer와 n150 runner가 Map의
+user/service/full OpenAPI와 PinVi의 user/service vendor를 모두 archive에서 다시 해시하도록
+고정했다. 이미 제거한 admin detail snapshot vendor는 더 이상 active receipt에 허용하지 않는다.
+receipt key set·검증 문구·두 vendor의 Map hash 동치를 fail-close하고, immutable install manifest도
+version 4로 올려 이전 receipt 해석과 섞이지 않게 했다.
+
+**다음 한 작업**: Map/PinVi exact commits와 두 vendor digest, canonical importer legacy-zero
+검증, n150 canonical snapshot live acceptance가 갖춰진 뒤에만 T-VN-40 receipt를 complete로
+서명한다. 그 전에는 pending 유지와 installer 거부가 정답이다.
+
 ## 2026-08-14 — 빌드 파이프라인 결손 봉합 + prod 경계 실측
 
 **`scripts/docker-buildx.sh`가 `dagster-daemon` 이미지를 굽지 않았다.** 2026-08-13
@@ -27,6 +117,18 @@ PR [#979](https://github.com/digitie/kor-travel-map/pull/979) integration green�
 docker-manager 두 브랜치(`fix/map-ui-geo-consumer-key`, issue-171)는 prod 배포가
 필요하므로 승인된 배포 경로로만 나간다.
 
+## 2026-08-14 — T-VN-40C Map cutover identity mapping export
+
+PinVi가 legacy `curated_feature_id`를 canonical collection/item UUID로 옮길 때 Map DB에
+직접 접근하지 않도록, maintenance fence 전용
+`GET /v1/service/curation-cutover/identity-mappings`를 추가했다. 이 표면은 별도
+ServiceToken digest, signed keyset cursor, immutable row hash와 전체 Merkle root/count를
+함께 반환하며 runtime은 해당 mapping relation을 읽기만 할 수 있다.
+
+**다음 한 작업**: PinVi가 이 service OpenAPI를 vendor하고 mapping root/count를 receipt에
+결박한 뒤 기존 plan/POI provenance를 backfill한다. mapping의 누락·중복·checksum 불일치는
+cutover를 즉시 fail-close해야 하며, 그 후에만 legacy import route/컬럼을 물리 제거한다.
+
 ## 2026-08-14 — prod 지오코딩 복구 + 재발 통로 제거 (T-VN-H46B/C)
 
 prod의 dagster/daemon 두 컨테이너가 geo가 401로 거절하는 VWorld 키를 들고 있었다.
@@ -47,30 +149,89 @@ PR [#979](https://github.com/digitie/kor-travel-map/pull/979).
    그래야 재빌드 없이 켤 수 있다.
 2. daemon 이미지만 재빌드에서 빠지는 파이프라인 원인(별건).
 3. 기동 시 "자기 코드 세대 vs DB alembic head" 대조 fence.
+
 ## 2026-08-14 — alembic squash 완료(검증까지), prod 지오코딩 복구
 
-**alembic head가 `0200_schema_baseline` 하나다.** 체인 109개는
-`alembic/legacy_versions/`로 옮겼다(실행되지 않는 아카이브 —
-`alembic/legacy_versions/README.md`). 빈 DB 적용 4초. 동등성은 카탈로그 2486행
-전부 일치로 증명했고, 그 오라클 자체를 변조 7종으로 먼저 검증했다.
-draft PR [#978](https://github.com/digitie/kor-travel-map/pull/978).
-
-⚠️ **`target-schema-fingerprints-v1.json`으로는 이 증명을 못 한다.** 그 artifact의
-기준은 alembic head가 아니라 **빈 PostGIS DB**다
-(`tests/integration/test_vnext_target_freeze.py:574`). 아래 08-13 항목이 그것을
-증명 수단으로 적은 것은 틀렸다 — 실제 증명은 `scripts/compare-schema-catalogs.sh`가 했다.
-
-**prod 지오코딩 복구**: 08-13에 `.env`만 고치고 api만 재생성해 dagster/daemon 2개가
-401 나는 키를 들고 있었다. 재생성 후 세 컨테이너 전부 `POST /v2/reverse` HTTP 200.
-ETL이 08-07 이후 안 돌아서 아직 안 터졌을 뿐이었다.
-
-**다음 한 작업**: PR #978의 CI green 확인 후 머지. 그 다음이 전용 PostgreSQL 이행
-(docker-manager #172) — 권고 경로는 dump/restore이고, 공유 `:5432`의 DB를 남겨둔 채
-전용으로 복원·검증하고 DSN만 스위치하면 롤백이 1스텝이라 스위치 전까지 완전 가역이다.
-
-열린 후속 3건: ① `docker-compose.yml`·`scripts/load-env.sh`의 VWorld fallback 사슬
-제거(이번 drift의 재발 통로) ② daemon 로그의 `column request.providers does not exist`
-③ §10 절차 5 실행 검증(3회차).
+**다음 한 작업**: PR #977 head 위 bootstrap과 0105 expand DB spine을 구현하고,
+T-VN-40 final schema/API/cutover를 서로 다르게 승인하던
+`target-schema-v1.sql`·`recovery-preflight-v1.json`·`openapi-diff-v1.json`을 최종 정본으로
+원자 재동결하고 SERIALIZABLE domain-command transaction policy까지 구현했다. candidate
+reject와 promotion은 실제 API LOGIN만 실행 가능한 named SECURITY DEFINER procedure로
+전환했다. promotion은 current source proof와 T-VN-36 typed detail/override lineage를 다시
+해시해 stale 후보를 원자 거부하고, canonical item·trusted accepted decision·candidate transition을
+한 transaction으로 결박한다. `rule_reconcile` set-based generation도 caller 후보 입력 없이
+DB-derived expected set/scope hash, immutable receipt-first, observation completeness와 exact replay로
+구현했다. provider full-snapshot generation도 Dagster terminal receipt에 결선했다. authoritative
+child import job의 exact dataset membership을 DB가 재검증하고, 해당 dataset의 rule별 generation과
+정렬 receipt hash를 같은 SERIALIZABLE transaction에 기록한다. single-member와 MCST multi-member
+wrapper 모두 실제 observation receipt에서 authoritative 축을 전달한다. 다음은 retained catalog와
+collection/item의 typed CAS command 경계를 구현한다. bootstrap은
+populated DB에서 2회, 0105는 fresh 0001→head와 실제 ROLE ACL/append-only gate로 검증했다.
+frozen artifact unit 10개와 target SQL/violation/head-equivalence integration 11개도 통과했다.
+SERIALIZABLE 정책 unit 22개와 실제 PostgreSQL transaction integration 1개도 통과했다.
+공개 canonical reader의 미연결 included item 우회도 닫아 public count/detail은 linked public
+Feature와 trusted accepted decision을 공통으로 요구한다. PostgreSQL 통합 회귀가 공개 0건과
+admin 보존을 함께 확인했다.
+candidate reject/promotion actual-LOGIN/CAS/typed-detail-stale/교차-role 통합과 receipt gate
+8개도 통과했다. rule reconcile materialize/replay/scope omission/교차-role을 포함한 candidate
+통합 테스트 7개도 fresh 0108 head에서 통과했다. routine 소유권 이전 뒤 남던
+기본 `PUBLIC EXECUTE`는 audit owner·command owner 역할로 직접 전환한 exact ACL 재설정으로
+0105/0106 guard·helper·procedure 전체에서 제거했다.
+admin candidate 목록/detail/timeline과 reject/promote API도 연결했다. raw candidate CAS ETag와
+typed detail을 포함한 representation ETag를 분리하고, BIGINT는 decimal string으로 고정했다.
+API/route-policy/domain-command/OpenAPI focused gate 96개가 통과했으며 admin OpenAPI를
+재생성했다.
+provider full-snapshot/비권위 거부와 feature operation repo를 합친 DB 15개, Dagster wrapper·
+MCST unit 41개도 통과했고 관련 Python source의 ruff/mypy가 통과했다.
+candidate snapshot과 generation의 rule hash도 DB helper 하나로 수렴시켜 referenced theme/source
+archive·owner/provider 의미를 canonical input version 3에 포함하고 display/CAS revision은 제외했다.
+retained rule create/patch/archive도 actual API LOGIN 전용 typed command로 전환했다. 각 명령은
+domain command·strong revision·SERIALIZABLE을 검증하고 sorted Feature prelock 뒤 catalog CAS와
+immutable reconcile receipt, set-based generation을 같은 transaction에 결박한다. fresh 0109 head의
+rule command와 기존 candidate 회귀 9개가 통과했다. admin repository/API도 단건 GET·archive,
+decimal revision, create/patch/archive strong ETag와 If-Match/replay 경계로 연결했다. admin OpenAPI와
+generated TypeScript를 7.13.0으로 재생성했고 Linux ext4 격리 환경의 generation check와 전체
+frontend type-check가 통과했다. 적대 리뷰의 N:M receipt 중복, metadata-only generation, create 201,
+UUID/null 422, SERIALIZABLE retry 우회와 applied OpenAPI freeze도 수정했다. retained theme catalog도
+actual API LOGIN 전용 create/patch/archive command, 단건 GET, strong ETag로
+전환했다. archive는 dependent rule generation을 같은 SERIALIZABLE transaction에서 끝내고,
+metadata-only catalog revision과 candidate semantic proof를 분리해 정상 후보 promotion이 stale로
+오인되지 않게 했다. retained source catalog도 operator CAS revision과 provider observation revision을
+분리하고 API create/patch/archive와 Dagster exact import-job observation을 서로 다른 executor의 named
+command로 결선했다. theme/source/rule 공통 append-only effect claim은 terminal/open command의 다중
+resource 재사용을 차단하며 provider-owned/NULL-owner theme/rule은 admin command로 수정할 수 없다.
+source observation은 authoritative full-snapshot child job당 immutable receipt 한 건으로 제한했고,
+caller-driven admin rule apply와 독립 `curated_features_refresh` Dagster job/client export를 제거했다.
+provider child 완료 직전 exact source-head identity/payload 집합을 append-only receipt로 봉인하고,
+root `done/SUCCESS` SERIALIZABLE transaction은 전체 child receipt와 영향 Feature 합집합을 한 번에 검증·
+정렬 선잠금한 뒤 typed source observation과 candidate rule generation 전체를 만든다. root generation 집합도
+별도 append-only receipt로 봉인한다. Dagster LOGIN의 per-rule materializer·observation 직접 EXECUTE와 두
+receipt relation의 raw DML은 회수했다. child 완료 뒤 source head가 변하면 `40001`로 root transaction 전체를
+재시도하므로 과거 job에 다른 load의 현재 head를 귀속할 수 없다. archived theme/source는 legacy와 canonical
+public projection 전 경로에서 즉시 제외한다.
+삭제된 curated schedule/UI를 전제하던 stale live Playwright spec도 제거했다. provider child seal은
+source head뿐 아니라 link identity·role·match method·confidence까지 load transaction 안에서 봉인하며,
+root 전 검증에서 committed drift가 발견되면 `stale_input` terminal로 수렴한다. provider-owned concierge
+theme/rule도 terminal observation trigger가 잠긴 DB set에서 도출하고 operator-owned slug 충돌은
+fail-close한다. `ops.import_jobs`/membership의 provider root 생성·member 완료·terminal 전이는 named
+command로 전환했고 Dagster LOGIN의 raw 증거 DML은 `42501`로 닫았다. provider load·retirement·notice·
+merge와 root finalizer는 첫 relation lock 전에 동일한 global transaction fence를 잡는다. MOIS의
+chunk별 commit 뒤 boolean 승격을 제거하고, concierge·국가유산 lifecycle 변경은 load+seal과 같은
+transaction에 넣었으며, MCST empty member도 authoritative receipt를 남긴다. 다음은 retained
+theme/source/rule relation의 runtime raw DML 권한과 남은 provider catalog writer를 전수 회수해 named
+command만 남겼다. collection create/import는 existing catalog exact match만 참조하고 API·Dagster
+LOGIN의 catalog INSERT/UPDATE/DELETE는 모두 `42501`이다. 다음은 collection/item/import/quarantine/
+merge의 raw writer를 revision CAS·domain command receipt가 있는 typed command로 전환하는 것이다.
+T-VN-40 paired consumer receipt는 현재 `pending`이며 Map user/
+service/full spec hash를 고정하고 n150 installer가 complete 전에는 fail-close한다.
+fresh 0001→0114 actual-login candidate/source 통합 15개, 관련 unit 147개와 격리 Dagster MCST
+16개를 통과했다.
+A/B/C는 하나의 forward-only PR/release로 유지하며, 누적 구현은 DB/동시성과
+API·consumer/ACL 관점의 독립 적대 리뷰어 2명이 같은 고정 SHA에서 검증한다.
+상세 계약은
+[`t-vn-40-curation-write-model-detailed-design-2026-08-11.md`](reports/t-vn-40-curation-write-model-detailed-design-2026-08-11.md)가 정본이다.
+PinVi legacy curated detail snapshot도 canonical `curation_item_id` 기반 projection으로
+같은 release에서 이관한다.
 
 ## 2026-08-13 — T-VN-36 prod cutover 완료
 
@@ -84,6 +245,7 @@ ETL이 08-07 이후 안 돌아서 아직 안 터졌을 뿐이었다.
 DSN이 `:12703`을 가리키는 전제인데 prod 데이터는 공유 `:5432`에 있다.
 
 배포에서 배운 것 둘:
+
 - 마이그레이션은 **독립 컨테이너**로 돌려야 한다. `0095` 3축 backfill 하나가 58분이고
   api healthcheck 창은 3.5분이라 entrypoint 인라인으로는 구조적으로 완주 불가다.
 - `dagster`/`daemon`은 api와 달리 entrypoint의 runtime DSN 교체 경로가 없어
@@ -121,6 +283,8 @@ transitions 3 / commands 3). 상세와 아홉 건의 발견은 `docs/tasks.md`
 - 러너가 alembic을 직접 부르면 `SET ROLE`이 빠져 `alembic_version` 42501이 난다.
   배포 경로는 `KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE=true`가 켠다
   (`docker/api-entrypoint.sh:262`).
+
+## 2026-08-13 — T-VN-34 머지 대기: 적대 검토 3라운드 반영 완료
 
 ## 2026-08-13 — T-VN-36: 새 T-VN-34 base 재배치 완료, 영향성 gate 재실행
 
@@ -205,6 +369,7 @@ API live 12/12 → n150 브라우저 admin UI live 10/10 + 라운드12 수정 li
 - 무방비 축 회귀: MOIS precheck fail-open(실 DB 7건), `_advisory_key` sync_scope,
   주소 clue 우선순위, MCST slug — 전부 변이로 KILLED 실증.
 - 경과는 `docs/journal.md` 2026-08-11.
+
 ## 2026-08-11 — T-VN-34: 최신 T-VN-33/T-VN-38 rebase 반영
 
 **다음 한 작업**: T-VN-36을 이 T-VN-34 rebase head 위로 재base하고, migration/OpenAPI/
@@ -218,20 +383,23 @@ consumer receipt 영향도를 다시 확인한다. 새 T-VN-34 consumer pair는 
   rebase tree에서 재동결·재실행했다.
 - user/admin-detail vendor bytes는 같은 Map source에서 deterministic 재추출·PinVi contract
   pin-consistency로 검증했고, full admin OpenAPI digest만 receipt에서 갱신했다.
+
 ## 2026-08-10 — T-VN-36 A–D 단일 PR: field override 설계 착수
 
 **다음 한 작업**: provider/admin/user/address/phone/notice normal writer와 admin typed
 field override HTTP command를 registry receipt로 전환했다. 이제 detail/read/frontend를
 effective override provenance로 교체하고 whole-row request/version bridge를 물리 제거한다.
+
 ## 2026-08-10 — T-VN-36 A–D 단일 PR: final destructive fence 구현·n150 gate 준비
+
 ## 2026-08-11 — T-VN-36: T-VN-34 rebase 반영
 
 **다음 한 작업**: T-VN-40·T-VN-41을 이 rebase head 위로 각각 재base하고, schema/OpenAPI/
 PinVi pair와 Docker manager contract 영향도를 점검한다. T-VN-36 paired receipt는 Map
 `c1fa5a4d` ↔ PinVi `8f7fef1`로 갱신했다.
 
-- Alembic graph는 T-VN-33/T-VN-38 merge revision 뒤 T-VN-34 `0095`~`0097`, T-VN-36
-  `0098`~`0104` 순으로 단일 head다.
+- Alembic graph는 T-VN-33/T-VN-38 merge revision 뒤 T-VN-34 `0095`~~`0097`, T-VN-36
+  `0098`~~`0104` 순으로 단일 head다.
 - target catalog와 admin OpenAPI freeze는 current final-fence schema에서 다시 계산했고,
   final-fence 통합·target freeze·PinVi user/admin-detail contract gate를 재실행했다.
 
@@ -302,11 +470,11 @@ head gate로 분리해 검증한다.
 병합하고, 다음 Lane B 작업인 T-VN-36A를 시작한다.
 
 - T-VN-34 전용 63 commit은 최신 T-VN-33 `21b1758b` → T-VN-38 `2e78d623` 순서의
-체인 위로 재base했고, Map OpenAPI artifact는 현재 spec hash로 재freeze했다. merge는 하지 않았다.
+  체인 위로 재base했고, Map OpenAPI artifact는 현재 spec hash로 재freeze했다. merge는 하지 않았다.
 - Map execution source `fe12e8da` ↔ PinVi `e37eda94` consumer pair를 다시 vendor했다. receipt의
-Map commit은 runtime source pin이며, runner를 담는 후속 문서 commit과 의도적으로 다르다.
+  Map commit은 runtime source pin이며, runner를 담는 후속 문서 commit과 의도적으로 다르다.
 - 새 installer/runner는 committed pair를 `git archive`로만 가져오며, `features_detailed` 부재,
-`0097_tvn34c_final_cutover`, runtime principal, exact executor label/hash를 fail-closed로 확인한다.
+  `0097_tvn34c_final_cutover`, runtime principal, exact executor label/hash를 fail-closed로 확인한다.
 - n150 immutable snapshot에서 fresh `0097` PostGIS·actual Dagster runtime ETL·Noble Playwright
   destructive admin main/recovery(2/2)·PinVi public probe가 모두 통과했다. run과 seed 식별자는
   해시로만 보존했고, `BLOCKED.json`, 해당 compose container, volume은 cleanup 뒤 모두 없다.
@@ -349,6 +517,7 @@ Playwright e2e(로컬·CI 어디에도 없다 — 이번에 그 사실을 명시
 **환경을 올려 블로커를 없앴다.** WSL node가 v20이고 저장소가 22+를 요구해
 `npm audit fix`가 engine 검사로 거부됐다. 그 상태에서 "환경이 없어 못 고친다"고
 블로커로 남길 뻔했는데, Node 22.22.2를 설치하니 도구가 고치고 도구가 검증했다:
+
 - `nanoid 3.3.16 → 3.3.18`(`^3.3.16` 범위 내, advisory 요구 충족)
 - `audit:high` exit 1 → **0**, `npm ci --dry-run` **exit 0**
 
@@ -386,6 +555,7 @@ Playwright e2e(로컬·CI 어디에도 없다 — 이번에 그 사실을 명시
 잡고, 면제에는 이유 문자열을 강제한다.
 
 **현재: 24종 중 20종 통과.** 실패 4종의 귀속을 전부 실측했다:
+
 - `pytest unit+lint` 6건 / `pytest integration` 7건 = **전부 환경 노이즈**
   (docker CLI 부재 5, package.json 미마운트 1, geo live 키 미마운트 5,
   docker effect 2). 제품 실패 0건. api 1080 passed, dagster 458 passed.
@@ -394,6 +564,7 @@ Playwright e2e(로컬·CI 어디에도 없다 — 이번에 그 사실을 명시
   돌리니 **main 10건 / 이 브랜치 7건**이다. 선재이고 이 브랜치가 3건 줄였다.
 
 **게이트 재작성이 실제로 잡은 것**(구 스크립트는 하나도 못 봤다):
+
 - branch-caused ESLint red 2건
 - `operation_key=null` 행 상세가 **422**가 되는 신규 회귀(74개 dataset 중 17개).
   직전 커밋이 프론트에서 고친 것을 그 다음 커밋이 서버 `min_length=1`로 다시 깨뜨렸다.
@@ -429,6 +600,7 @@ event 축 부재. 셋 다 "형제 operation을 중복으로 규정"하는 형태
 제품 실패 0건, 4,530 passed.
 
 리뷰가 드러낸 실제 결함(보고서 24~30번) 중 이번에 닫은 것:
+
 - **CI 블로커** — openapi.json을 바꾸고 체크인된 `types.ts`를 재생성하지 않아
   `gen:types:check`가 exit 0 → 1로 뒤집혀 있었다.
 - **거짓 409** — active request 조회가 pair인데 상위 비교는 triple이라, operation만
@@ -498,6 +670,7 @@ green이고, 나머지는 대부분 **전환은 끝났으나 src 결함에 막�
 - `curated_repo.create_curated_theme` f-string 누락 · `admin_feature_repo`의 삭제 열 참조
 
 **남은 P0** (배포 시 즉시 터짐):
+
 - dagster `assets.py` 3곳이 sync-state API에 `operation_key`를 안 넘김 → provider ETL asset 전부 사망.
   설계 판단 필요: asset이 자기 operation을 어디서 얻는가(Dagster job name = operation_key인
   registry가 있다 / client에 `*_for_operation_membership` 변형이 이미 있다).
@@ -628,10 +801,10 @@ storage head를 attest하고 reset 뒤 migration을 증명한다.
 > 2026-07-26 **전면 감사**(현행 백로그 구조 성립) 이전 기록은 아래로 분리했다.
 > 검색은 `rg <패턴> docs/archive/` 로 한다. 새 엔트리는 항상 이 파일 상단에 추가한다.
 
-| 파일 | 기간 | 엔트리 | 크기 |
-| --- | --- | --- | --- |
-| [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건 | 162 KB |
-| [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건 | 86 KB |
+| 파일                                             | 기간                    | 엔트리 | 크기   |
+| ------------------------------------------------ | ----------------------- | ------ | ------ |
+| [`resume-2026-07.md`](archive/resume-2026-07.md) | 2026-07-01 ~ 2026-07-24 | 128건  | 162 KB |
+| [`resume-2026-06.md`](archive/resume-2026-06.md) | 2026-06-13 ~ 2026-06-30 | 76건   | 86 KB  |
 
 ## 2026-08-06 (1) — T-VN-35 A-D 병합 (kind별 typed subtype 분해, ADR-086)
 
@@ -738,8 +911,9 @@ EXPECTED_HEAD=0083 재핀은 dm#128 기록. 잔여 유예(CLI 플래그·derivat
 배선·service 스냅샷 재추출)는 PR-2 동봉.
 
 **다음 한 작업**: **PR-2(응답 값 전환 — read 표면 단일 원자 릴리스, 설계 §4
-+ NEW-2/3/5·F5 체크리스트)**. 부수: 신규 ingest 행 v7 확인(배포 직후 행은 구
-dagster 마지막 쓰기라 ver=5 — 다음 ingest부터 v7 기대).
+
+- NEW-2/3/5·F5 체크리스트)**. 부수: 신규 ingest 행 v7 확인(배포 직후 행은 구
+  dagster 마지막 쓰기라 ver=5 — 다음 ingest부터 v7 기대).
 
 ## 2026-08-05 (6) — 32C PR-1(비파생 UUIDv7 generator) 구현·리뷰 반영 완료
 
@@ -926,6 +1100,7 @@ csv_explicit 196), H35 실행 종료(잔여는 provider 일일 스케줄 수렴�
 **다음 한 작업**: Lane A a1 소진 — H34 잔여 1항목(H35 대기였던 것) 해제 검토 후,
 Wave 2 barrier freeze(T-VN-31A)로 진입. codex 41C prod enable 경계는 재pin(#109) 대기
 유지.
+
 ## 2026-08-04 (codex) — T-VN-41D의 0079 schema regression 정렬
 
 Map PR #935의 PostGIS CI는 858 passed/5 skipped 뒤, obsolete H35 helper가 저장소 head를
@@ -1297,6 +1472,7 @@ PR **#918**(문서·스크립트)과 **#919**(`0073`+`0074`)를 8/8 CI green으�
 
 **격리 restore clone 재측정으로 확정한 것** — prod 백업을 포트 노출 없는 임시
 컨테이너에 복원하고 `0064~0074`를 적용:
+
 - trusted link **3,266 → 3,043** (~~공백 223건~~ → **정정: 공개 공백은 222건**.
   위 2026-08-01 게이트 실증 항목 참조 — 223번째는 `rejected`라 애초에 미노출)
 - H41 FK 4개 전부 `ON UPDATE CASCADE`, decision 달린 item의 PK 재작성 실제 성공
@@ -1943,6 +2119,7 @@ full restore는 실행하지 않았다. 이후 main 34커밋을 충돌 없이 re
 
 - **완료**: `T-VN-H30A/B` — 주소 검증 결과가 `ops.data_integrity_violations`에 durable하게
   남고 `/admin/issues`에서 보인다. 실적재로 회복 검증, 배포 cursor 미설정 실증.
+
 ## 2026-07-29 (codex) — T-VN-48D 최종 gate 완료 → PR·CI·merge
 
 **완료**: 보존 clone Live의 main/recovery 2/2 증거를 전체 restore·브라우저 재실행 없이
@@ -2048,7 +2225,7 @@ drop allowlist, token 단위 이름 warning, typed quarantine 보존과
 **다음 한 작업**: `T-VN-H30A`(주소 검증 issue를 `ops.data_integrity_violations`에 durable 기록).
 이후 `T-VN-H30B/C` → `T-VN-H25B` → `T-VN-H31` → `T-VN-H22A/B/C`.
 
-- **완료**: `T-VN-H25A` — task 전제(*"158개 중 54개가 `feature.features`에 부재"*)가
+- **완료**: `T-VN-H25A` — task 전제(_"158개 중 54개가 `feature.features`에 부재"_)가
   **재현되지 않음**을 확정하고, 실제 상태를 다시 측정했다. 근거:
   [`reports/curation-unlinked-reference-evidence-2026-07-29.md`](reports/curation-unlinked-reference-evidence-2026-07-29.md).
   - 158/158 존재 + 전부 curation 링크 가능 + `created_at` 2026-06-29~07-03(측정 시점보다 앞섬).
@@ -2093,6 +2270,7 @@ drop allowlist, token 단위 이름 warning, typed quarantine 보존과
   있어 비교 근거가 못 된다는 점, (b) MOIS는 payload에 bjd가 있으면 reverse를 아예 부르지 않아
   두 축이 동시에 존재하지 않는다는 점, (c) 단건 `ValidationError`가 batch 전체를 죽인다는 점을
   찾아냈다. 셋 다 코드를 읽어야만 알 수 있고 실데이터만으로는 드러나지 않았다.
+
 ## 2026-07-29 (codex) — issue #881 Claude PR #882~#884 감사 수정
 
 **방금**: PR #884의 backend geo public-key query를 없애고 geo trusted proxy principal로
@@ -2626,7 +2804,7 @@ Lane B b0의 `T-VN-43`(admin frontend npm 보안 취약점 0-high)로 진행한�
 - 작업 중 발견한 `T-VN-43`(npm audit), `T-VN-44`(full ESLint), `T-VN-45`(live endpoint/cache drift)를
   백로그에 추가했다.
 
-## 2026-07-26 (claude) — 백로그 전면 감사 + A/B lane 재분배 (codex 7~8 : claude 2~3)
+## 2026-07-26 (claude) — 백로그 전면 감사 + A/B lane 재분배 (codex 7~~8 : claude 2~~3)
 
 **다음 한 작업**: **Lane A `T-VN-LIVE-01`** — merged targeted live acceptance lane(#792)을 n150
 production에 파괴적 실행(WSL SSH, 실데이터), cleanup/audit/evidence 0/완결 증명 →

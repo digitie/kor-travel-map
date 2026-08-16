@@ -2551,6 +2551,400 @@
         "title": "ClusterMeta",
         "type": "object"
       },
+      "CurationCollectionDetailSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "collection": {
+            "$ref": "#/components/schemas/CurationSnapshotCollection"
+          },
+          "collection_id": {
+            "format": "uuid",
+            "title": "Collection Id",
+            "type": "string"
+          },
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "etag": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Etag",
+            "type": "string"
+          },
+          "item_count": {
+            "maximum": 2000.0,
+            "minimum": 0.0,
+            "title": "Item Count",
+            "type": "integer"
+          },
+          "item_set_hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Item Set Hash",
+            "type": "string"
+          },
+          "item_set_hash_version": {
+            "const": "ktm-db-item-set-v1",
+            "title": "Item Set Hash Version",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CurationItemDetailSnapshot"
+            },
+            "maxItems": 200,
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "row_revision": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Row Revision",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "collection_id",
+          "row_revision",
+          "etag",
+          "updated_at",
+          "collection",
+          "item_count",
+          "item_set_hash_version",
+          "item_set_hash",
+          "items",
+          "next_cursor",
+          "complete"
+        ],
+        "title": "CurationCollectionDetailSnapshot",
+        "type": "object"
+      },
+      "CurationCutoverIdentityMapping": {
+        "additionalProperties": false,
+        "description": "PinVi legacy provenance를 canonical Map UUID로 바꾸는 one-to-one evidence.",
+        "properties": {
+          "collection_id": {
+            "format": "uuid",
+            "title": "Collection Id",
+            "type": "string"
+          },
+          "curation_item_id": {
+            "format": "uuid",
+            "title": "Curation Item Id",
+            "type": "string"
+          },
+          "legacy_curated_feature_id": {
+            "format": "uuid",
+            "title": "Legacy Curated Feature Id",
+            "type": "string"
+          },
+          "mapping_kind": {
+            "enum": [
+              "legacy_projection",
+              "official_membership",
+              "manual_membership"
+            ],
+            "title": "Mapping Kind",
+            "type": "string"
+          },
+          "source_row_hash": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Source Row Hash",
+            "type": "string"
+          }
+        },
+        "required": [
+          "legacy_curated_feature_id",
+          "collection_id",
+          "curation_item_id",
+          "mapping_kind",
+          "source_row_hash"
+        ],
+        "title": "CurationCutoverIdentityMapping",
+        "type": "object"
+      },
+      "CurationCutoverIdentityMappingExport": {
+        "additionalProperties": false,
+        "description": "Maintenance-only closed keyset envelope for the paired PinVi backfill.",
+        "properties": {
+          "complete": {
+            "title": "Complete",
+            "type": "boolean"
+          },
+          "mapping_count": {
+            "minimum": 0.0,
+            "title": "Mapping Count",
+            "type": "integer"
+          },
+          "mapping_root": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Mapping Root",
+            "type": "string"
+          },
+          "mapping_root_version": {
+            "const": "ktm-curation-cutover-mapping-v1",
+            "title": "Mapping Root Version",
+            "type": "string"
+          },
+          "mappings": {
+            "items": {
+              "$ref": "#/components/schemas/CurationCutoverIdentityMapping"
+            },
+            "maxItems": 200,
+            "title": "Mappings",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "mapping_root_version",
+          "mapping_count",
+          "mapping_root",
+          "mappings",
+          "next_cursor",
+          "complete"
+        ],
+        "title": "CurationCutoverIdentityMappingExport",
+        "type": "object"
+      },
+      "CurationItemDetailSnapshot": {
+        "additionalProperties": false,
+        "properties": {
+          "collection": {
+            "$ref": "#/components/schemas/CurationSnapshotCollection"
+          },
+          "collection_id": {
+            "format": "uuid",
+            "title": "Collection Id",
+            "type": "string"
+          },
+          "curation_item_id": {
+            "format": "uuid",
+            "title": "Curation Item Id",
+            "type": "string"
+          },
+          "etag": {
+            "pattern": "^sha256:[0-9a-f]{64}$",
+            "title": "Etag",
+            "type": "string"
+          },
+          "feature": {
+            "$ref": "#/components/schemas/CurationSnapshotFeature"
+          },
+          "item": {
+            "$ref": "#/components/schemas/CurationSnapshotItem"
+          },
+          "row_revision": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Row Revision",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "curation_item_id",
+          "collection_id",
+          "row_revision",
+          "etag",
+          "updated_at",
+          "collection",
+          "item",
+          "feature"
+        ],
+        "title": "CurationItemDetailSnapshot",
+        "type": "object"
+      },
+      "CurationSnapshotCollection": {
+        "additionalProperties": false,
+        "properties": {
+          "edition_key": {
+            "maxLength": 100,
+            "title": "Edition Key",
+            "type": "string"
+          },
+          "theme_name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Theme Name",
+            "type": "string"
+          },
+          "theme_slug": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Theme Slug",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "theme_slug",
+          "theme_name",
+          "title",
+          "edition_key"
+        ],
+        "title": "CurationSnapshotCollection",
+        "type": "object"
+      },
+      "CurationSnapshotFeature": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "additionalProperties": true,
+            "title": "Address",
+            "type": "object"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "title": "Detail",
+            "type": "object"
+          },
+          "feature_id": {
+            "format": "uuid",
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lat"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lon"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "source_record_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Record Key"
+          }
+        },
+        "required": [
+          "feature_id",
+          "name",
+          "category",
+          "kind",
+          "lon",
+          "lat",
+          "address",
+          "detail",
+          "source_record_key"
+        ],
+        "title": "CurationSnapshotFeature",
+        "type": "object"
+      },
+      "CurationSnapshotItem": {
+        "additionalProperties": false,
+        "properties": {
+          "feature_id": {
+            "format": "uuid",
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "relation": {
+            "title": "Relation",
+            "type": "string"
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "required": [
+          "feature_id",
+          "relation",
+          "sort_order",
+          "title",
+          "summary"
+        ],
+        "title": "CurationSnapshotItem",
+        "type": "object"
+      },
       "FeatureAliasMapChecksumData": {
         "additionalProperties": false,
         "description": "저장소 전체 alias-map checksum.",
@@ -5575,6 +5969,24 @@
           "required": true
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheTargetRestoreFenceResponse"
+                }
+              }
+            },
+            "description": "exact Idempotency-Key replay",
+            "headers": {
+              "ETag": {
+                "description": "현재 resource의 raw strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
           "201": {
             "content": {
               "application/json": {
@@ -6072,6 +6484,340 @@
           "service-cache-target-streams"
         ],
         "x-required-service-scope": "cache-target:command"
+      }
+    },
+    "/v1/service/curation-collections/{collection_id}/detail-snapshot": {
+      "get": {
+        "operationId": "get_curation_collection_detail_snapshot_v1_service_curation_collections__collection_id__detail_snapshot_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Collection Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^\"sha256:[0-9a-f]{64}\"$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurationCollectionDetailSnapshot"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "canonicalization v1 snapshot의 strong ETag.",
+                "schema": {
+                  "pattern": "^\"sha256:[0-9a-f]{64}\"$",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "첫 page collection ETag 일치",
+            "headers": {
+              "ETag": {
+                "description": "canonicalization v1 snapshot의 strong ETag.",
+                "schema": {
+                  "pattern": "^\"sha256:[0-9a-f]{64}\"$",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "cursor 이후 collection/item set 변경 — 첫 page부터 재시작"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "collection public item 수가 service snapshot 상한을 넘음 — collection을 분할해야 함"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Get Curation Collection Detail Snapshot",
+        "tags": [
+          "service-curation-snapshots"
+        ],
+        "x-required-service-scope": "pinvi:curation-snapshot:read"
+      }
+    },
+    "/v1/service/curation-cutover/identity-mappings": {
+      "get": {
+        "description": "Export the immutable Map→PinVi legacy identity mapping during T-VN-40C.\n\nThe relation itself is append-only and only migration owners can write it.\nA signed cursor binds every continuation page to the initial count/root;\nany maintenance-window drift is rejected instead of silently mixing maps.",
+        "operationId": "get_curation_cutover_identity_mappings_v1_service_curation_cutover_identity_mappings_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurationCutoverIdentityMappingExport"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "cursor 이후 mapping count/root 변경 — 첫 page부터 maintenance export 재시작"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Get Curation Cutover Identity Mappings",
+        "tags": [
+          "service-curation-cutover"
+        ],
+        "x-required-service-scope": "pinvi:curation-cutover:read"
+      }
+    },
+    "/v1/service/curation-items/{curation_item_id}/detail-snapshot": {
+      "get": {
+        "operationId": "get_curation_item_detail_snapshot_v1_service_curation_items__curation_item_id__detail_snapshot_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "curation_item_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Curation Item Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "pattern": "^\"sha256:[0-9a-f]{64}\"$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CurationItemDetailSnapshot"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "canonicalization v1 snapshot의 strong ETag.",
+                "schema": {
+                  "pattern": "^\"sha256:[0-9a-f]{64}\"$",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "ETag 일치",
+            "headers": {
+              "ETag": {
+                "description": "canonicalization v1 snapshot의 strong ETag.",
+                "schema": {
+                  "pattern": "^\"sha256:[0-9a-f]{64}\"$",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Get Curation Item Detail Snapshot",
+        "tags": [
+          "service-curation-snapshots"
+        ],
+        "x-required-service-scope": "pinvi:curation-snapshot:read"
       }
     },
     "/v1/service/feature-alias-maps": {

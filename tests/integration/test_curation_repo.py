@@ -7,6 +7,7 @@ import base64
 import hashlib
 import json
 import unicodedata
+from collections.abc import Sequence
 from dataclasses import replace
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -19,14 +20,11 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from kortravelmap.infra import curated_repo
 from kortravelmap.infra.curation_repo import (
     _GET_COLLECTION_ID_BY_KEY_SQL,  # noqa: PLC2701 - concurrency regression
-    _GET_SOURCE_ID_BY_DATASET_ID_SQL,  # noqa: PLC2701 - concurrency regression
     _LIST_FEATURE_ITEMS_SQL,  # noqa: PLC2701 - EXPLAIN 대상
     _RESOLVE_FEATURES_BATCH_SQL,  # noqa: PLC2701 - EXPLAIN 대상
     _UPSERT_COLLECTION_SQL,  # noqa: PLC2701 - concurrency regression
-    _UPSERT_SOURCE_SQL,  # noqa: PLC2701 - concurrency regression
     CurationImportResult,
     CurationQuarantineMoveConflictError,
-    CurationQuarantineTargetArchivedError,
     FeatureMatchRequest,
     ResolvedCurationImportRow,
     _upsert_id_with_fallback,  # noqa: PLC2701 - concurrency regression
@@ -42,8 +40,9 @@ from kortravelmap.infra.curation_repo import (
     encode_quarantine_item_cursor,
     get_curation_collection,
     get_curation_item,
+    get_curation_service_collection_snapshot,
+    get_curation_service_item_snapshot,
     get_feature_curation_group,
-    import_curation_rows,
     list_curation_collections,
     list_curation_items_by_feature_ids,
     list_curation_quarantine_collections,
@@ -57,12 +56,14 @@ from kortravelmap.infra.curation_repo import (
     update_curation_item,
     upsert_curation_theme,
 )
+from kortravelmap.infra.curation_repo import import_curation_rows as _import_curation_rows
 from kortravelmap.infra.models import (
     SourceEntityHeadRow,
     SourceEntityRow,
     SourceRecordRow,
 )
 from tests.integration._db_cleanup import truncate_committed_test_rows
+from tests.integration.conftest import as_api_runtime
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -70,6 +71,98 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.integration
 
 _FEATURE_ID = "feature:curation-multi-test"
+
+
+async def _quarantine_command_id(session: AsyncSession, *, actor: str) -> int:
+    """격리 재분류 command receipt를 seed한다.
+
+    구형 repository 회귀는 root session으로 fixture를 심되, T-VN-40 write
+    command 자체는 아래 helper가 실제 API runtime으로 실행한다.
+    """
+
+    return int(
+        (
+            await session.execute(
+                text(
+                    """
+                    INSERT INTO ops.domain_commands (
+                      actor, operation, idempotency_key, request_fingerprint
+                    ) VALUES (
+                      :actor, 'admin.curation-quarantine.reclassify',
+                      x_extension.gen_random_uuid(),
+                      encode(x_extension.digest(
+                        convert_to(x_extension.gen_random_uuid()::text, 'UTF8'),
+                        'sha256'
+                      ), 'hex')
+                    )
+                    RETURNING command_id
+                    """
+                ),
+                {"actor": actor},
+            )
+        ).scalar_one()
+    )
+
+
+async def _collection_revision(session: AsyncSession, collection_id: str) -> int:
+    return int(
+        await session.scalar(
+            text(
+                """
+                SELECT row_revision
+                FROM feature.curation_collections
+                WHERE collection_id = CAST(:collection_id AS uuid)
+                """
+            ),
+            {"collection_id": collection_id},
+        )
+    )
+
+
+async def _move_quarantine_as_api(
+    session: AsyncSession,
+    *,
+    actor: str,
+    collection_id: str,
+    expected_collection_revision: int,
+    target_collection_id: str | None = None,
+    expected_target_revision: int = 1,
+    item_ids: Sequence[str] | None = None,
+) -> tuple[tuple[str, ...], bool]:
+    command_id = await _quarantine_command_id(session, actor=actor)
+    async with as_api_runtime(session):
+        return await move_curation_quarantine_items(
+            session,
+            collection_id=collection_id,
+            expected_collection_revision=expected_collection_revision,
+            target_collection_id=target_collection_id,
+            expected_target_revision=expected_target_revision,
+            item_ids=item_ids,
+            command_id=command_id,
+            actor=actor,
+        )
+
+
+async def _confirm_quarantine_as_api(
+    session: AsyncSession,
+    *,
+    actor: str,
+    collection_id: str,
+    expected_collection_revision: int,
+    collection_key: str,
+    title: str,
+) -> tuple[str, str]:
+    command_id = await _quarantine_command_id(session, actor=actor)
+    async with as_api_runtime(session):
+        return await confirm_curation_quarantine_standalone(
+            session,
+            collection_id=collection_id,
+            expected_collection_revision=expected_collection_revision,
+            collection_key=collection_key,
+            title=title,
+            command_id=command_id,
+            actor=actor,
+        )
 
 
 def _payload_hash(seed: str) -> str:
@@ -121,6 +214,87 @@ async def _catalog_dataset_id(
         dataset_id = await _dataset_id(catalog, provider, dataset_key)
         await catalog.commit()
     return dataset_id
+
+
+async def _seed_retained_import_catalog(
+    session: AsyncSession,
+    rows: Sequence[ResolvedCurationImportRow],
+) -> None:
+    """일반 curation 회귀가 참조할 retained catalog를 명시적으로 준비한다."""
+
+    themes = sorted(
+        {(row.theme_slug, row.theme_name, row.theme_group) for row in rows}
+    )
+    for theme_slug, theme_name, theme_group in themes:
+        await session.execute(
+            text(
+                """
+                INSERT INTO feature.curated_themes (
+                    theme_slug, theme_name, theme_group,
+                    default_curated, visibility, metadata
+                ) VALUES (
+                    :theme_slug, :theme_name, :theme_group,
+                    false, 'public', '{}'::jsonb
+                )
+                ON CONFLICT (theme_slug) DO NOTHING
+                """
+            ),
+            {
+                "theme_slug": theme_slug,
+                "theme_name": theme_name,
+                "theme_group": theme_group,
+            },
+        )
+    sources = sorted(
+        {
+            (row.provider_dataset_id, row.source_name, row.source_url)
+            for row in rows
+        },
+        key=lambda item: item[0],
+    )
+    for provider_dataset_id, source_name, source_url in sources:
+        await session.execute(
+            text(
+                """
+                INSERT INTO feature.curated_sources (
+                    provider_dataset_id, source_name, source_url,
+                    source_kind, update_cycle, provider_status, metadata
+                ) VALUES (
+                    :provider_dataset_id, :source_name, :source_url,
+                    'manual', 'unknown', 'manual_only', '{}'::jsonb
+                )
+                ON CONFLICT (provider_dataset_id) DO NOTHING
+                """
+            ),
+            {
+                "provider_dataset_id": provider_dataset_id,
+                "source_name": source_name,
+                "source_url": source_url,
+            },
+        )
+
+
+async def import_curation_rows(
+    session: AsyncSession,
+    *,
+    rows: Sequence[ResolvedCurationImportRow],
+    actor: str | None = None,
+    source_content_sha256: str | None = None,
+    batch_kind: str | None = None,
+    frozen_h35_schema: bool = False,
+) -> CurationImportResult:
+    """테스트용 retained catalog를 준비한 뒤 실제 import 경계를 호출한다."""
+
+    if rows and not frozen_h35_schema:
+        await _seed_retained_import_catalog(session, rows)
+    return await _import_curation_rows(
+        session,
+        rows=rows,
+        actor=actor,
+        source_content_sha256=source_content_sha256,
+        batch_kind=batch_kind,
+        frozen_h35_schema=frozen_h35_schema,
+    )
 
 
 async def _seed_foundations(session: AsyncSession) -> tuple[str, str]:
@@ -344,6 +518,250 @@ async def test_same_feature_returns_every_edition_and_subcourse_membership(
         ),
     )
     assert hidden_matches == {1: (), 2: ()}
+
+
+async def test_public_collection_excludes_unlinked_included_item_everywhere(
+    migrated_session: AsyncSession,
+) -> None:
+    """T-VN-40 공개 술어는 linked public Feature+trusted decision을 필수로 한다."""
+
+    theme_id, source_id = await _seed_foundations(migrated_session)
+    collection = await create_curation_collection(
+        migrated_session,
+        collection_key="tvn40-unlinked-public",
+        theme_id=theme_id,
+        source_id=source_id,
+        title="연결되지 않은 공개 항목",
+        edition_key="2026",
+        status="published",
+        visibility="public",
+    )
+    await add_curation_item(
+        migrated_session,
+        collection_id=collection.collection_id,
+        feature_id=None,
+        external_item_id="unlinked-included",
+        place_name="미연결 장소",
+        status="included",
+    )
+
+    public = await get_curation_collection(
+        migrated_session,
+        collection_id=collection.collection_id,
+        public_only=True,
+    )
+    admin = await get_curation_collection(
+        migrated_session,
+        collection_id=collection.collection_id,
+    )
+
+    assert public is not None
+    assert public[0].item_count == 0
+    assert public[0].public_item_count == 0
+    assert public[1] == ()
+    assert admin is not None
+    assert len(admin[1]) == 1
+    assert admin[1][0].feature_id is None
+
+
+async def test_service_snapshot_uses_public_trusted_membership_and_allows_manual_item(
+    migrated_session: AsyncSession,
+) -> None:
+    theme_id, source_id = await _seed_foundations(migrated_session)
+    collection = await create_curation_collection(
+        migrated_session,
+        collection_key="tvn40-service-snapshot",
+        theme_id=theme_id,
+        source_id=source_id,
+        title="PinVi snapshot",
+        edition_key="2026",
+        status="published",
+        visibility="public",
+    )
+    item, _ = await add_curation_item(
+        migrated_session,
+        collection_id=collection.collection_id,
+        feature_id=_FEATURE_ID,
+        source_record_key=None,
+        external_item_id="manual-public-item",
+        status="included",
+        curation_relation="primary_stop",
+        actor="admin:tester",
+    )
+    second_item, _ = await add_curation_item(
+        migrated_session,
+        collection_id=collection.collection_id,
+        feature_id=_FEATURE_ID,
+        source_record_key=None,
+        external_item_id="manual-public-item-2",
+        status="included",
+        curation_relation="cafe_stop",
+        actor="admin:tester",
+    )
+
+    collection_snapshot = await get_curation_service_collection_snapshot(
+        migrated_session,
+        collection_id=collection.collection_id,
+        page_limit=1,
+    )
+    item_snapshot = await get_curation_service_item_snapshot(
+        migrated_session,
+        curation_item_id=item.curation_item_id,
+    )
+    assert collection_snapshot is not None
+    assert collection_snapshot.item_count == 2
+    assert len(collection_snapshot.item_set_hash) == 64
+    assert len(collection_snapshot.items) == 1
+    second_page = await get_curation_service_collection_snapshot(
+        migrated_session,
+        collection_id=collection.collection_id,
+        after_curation_item_id=collection_snapshot.items[0].curation_item_id,
+        page_limit=1,
+    )
+    assert second_page is not None
+    assert second_page.item_count == 2
+    assert second_page.item_set_hash == collection_snapshot.item_set_hash
+    assert len(second_page.items) == 1
+    assert {
+        collection_snapshot.items[0].curation_item_id,
+        second_page.items[0].curation_item_id,
+    } == {item.curation_item_id, second_item.curation_item_id}
+    assert item_snapshot is not None
+    assert item_snapshot.source_record_key is None
+    assert item_snapshot.feature_uuid == item.feature_uuid
+    assert item_snapshot.detail == {}
+
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.features SET publication_state = 'suppressed' "
+            "WHERE feature_id = :feature_id"
+        ),
+        {"feature_id": _FEATURE_ID},
+    )
+    hidden_collection = await get_curation_service_collection_snapshot(
+        migrated_session,
+        collection_id=collection.collection_id,
+    )
+    assert hidden_collection is not None
+    assert hidden_collection.item_count == 0
+    assert hidden_collection.items == ()
+    assert (
+        await get_curation_service_item_snapshot(
+            migrated_session,
+            curation_item_id=item.curation_item_id,
+        )
+        is None
+    )
+
+
+async def test_service_snapshot_cap_counts_only_exact_public_trusted_items(
+    migrated_session: AsyncSession,
+) -> None:
+    theme_id, source_id = await _seed_foundations(migrated_session)
+    untrusted = await create_curation_collection(
+        migrated_session,
+        collection_key="tvn40-service-cap-untrusted",
+        theme_id=theme_id,
+        source_id=source_id,
+        title="미승인 항목 cap 제외",
+        edition_key="2026",
+        status="published",
+        visibility="public",
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.curation_items (
+                collection_id, feature_id, external_item_id, place_name, status
+            )
+            SELECT
+                CAST(:collection_id AS uuid),
+                :feature_id,
+                'untrusted-' || value::text,
+                '미승인 ' || value::text,
+                'included'
+            FROM generate_series(1, 2001) AS value
+            """
+        ),
+        {"collection_id": untrusted.collection_id, "feature_id": _FEATURE_ID},
+    )
+    untrusted_snapshot = await get_curation_service_collection_snapshot(
+        migrated_session,
+        collection_id=untrusted.collection_id,
+    )
+    assert untrusted_snapshot is not None
+    assert untrusted_snapshot.item_count == 0
+    assert untrusted_snapshot.items == ()
+
+    trusted = await create_curation_collection(
+        migrated_session,
+        collection_key="tvn40-service-cap-trusted",
+        theme_id=theme_id,
+        source_id=source_id,
+        title="승인 항목 cap 적용",
+        edition_key="2026",
+        status="published",
+        visibility="public",
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.curation_items (
+                collection_id, feature_id, external_item_id, place_name, status
+            )
+            SELECT
+                CAST(:collection_id AS uuid),
+                :feature_id,
+                'trusted-' || value::text,
+                '승인 ' || value::text,
+                'included'
+            FROM generate_series(1, 2001) AS value
+            """
+        ),
+        {"collection_id": trusted.collection_id, "feature_id": _FEATURE_ID},
+    )
+    await migrated_session.execute(
+        text(
+            """
+            INSERT INTO feature.curation_link_decisions (
+                curation_item_id, feature_id, decision_kind, match_basis,
+                resolver_version, evidence, actor
+            )
+            SELECT
+                item.curation_item_id,
+                item.feature_id,
+                'accepted',
+                'admin_review',
+                'tvn40-cap-test-v1',
+                '{}'::jsonb,
+                'admin:test'
+            FROM feature.curation_items AS item
+            WHERE item.collection_id = CAST(:collection_id AS uuid)
+            """
+        ),
+        {"collection_id": trusted.collection_id},
+    )
+    await migrated_session.execute(
+        text(
+            """
+            UPDATE feature.curation_items AS item
+            SET accepted_link_decision_id = decision.decision_id
+            FROM feature.curation_link_decisions AS decision
+            WHERE item.collection_id = CAST(:collection_id AS uuid)
+              AND decision.curation_item_id = item.curation_item_id
+              AND decision.feature_id = item.feature_id
+              AND decision.decision_kind = 'accepted'
+            """
+        ),
+        {"collection_id": trusted.collection_id},
+    )
+    trusted_snapshot = await get_curation_service_collection_snapshot(
+        migrated_session,
+        collection_id=trusted.collection_id,
+    )
+    assert trusted_snapshot is not None
+    assert trusted_snapshot.item_count == 2001
+    assert trusted_snapshot.items == ()
 
 
 def test_collection_cursor_rejects_non_uuid_tie_breaker() -> None:
@@ -1231,9 +1649,9 @@ async def test_source_absent_included_item_is_hidden_and_can_be_archived(
         public_only=True,
     )
     assert public_collection is not None
-    assert [item.external_item_id for item in public_collection[1]] == [
-        "source-absent-b"
-    ]
+    # 공개 membership은 trusted accepted Feature link가 필수다. source가 남아도
+    # 미연결 item은 canonical public projection에 노출하지 않는다.
+    assert public_collection[1] == ()
     assert await get_feature_curation_group(
         migrated_session,
         feature_id="feature:source-absent",
@@ -2650,43 +3068,42 @@ async def test_authoritative_reimport_does_not_resurrect_unresolved_archive(
     assert row["archived"] is True
 
 
-async def test_theme_upsert_fallback_sees_concurrent_identical_insert(
+async def test_theme_resolution_uses_precreated_retained_catalog(
     migrated_engine: AsyncEngine,
 ) -> None:
-    """ON CONFLICT가 본 새 row를 다음 READ COMMITTED statement에서 회수한다."""
+    """import helper는 retained catalog를 생성하지 않고 exact row만 해소한다."""
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
     suffix = uuid4().hex
     theme_slug = f"concurrent-theme-{suffix}"
-    first_session = AsyncSession(migrated_engine, expire_on_commit=False)
-    second_session = AsyncSession(migrated_engine, expire_on_commit=False)
+    session = AsyncSession(migrated_engine, expire_on_commit=False)
     try:
-        await first_session.begin()
-        first_id = await upsert_curation_theme(
-            first_session,
+        first_id = str(
+            (
+                await session.execute(
+                    text(
+                        """
+                        INSERT INTO feature.curated_themes (
+                            theme_slug, theme_name, theme_group
+                        ) VALUES (:theme_slug, '명시 생성 테마', 'test')
+                        RETURNING theme_id::text
+                        """
+                    ),
+                    {"theme_slug": theme_slug},
+                )
+            ).scalar_one()
+        )
+        second_id = await upsert_curation_theme(
+            session,
             theme_slug=theme_slug,
-            theme_name="동시 생성 테마",
+            theme_name="명시 생성 테마",
             theme_group="test",
         )
-        await second_session.begin()
-        second_task = asyncio.create_task(
-            upsert_curation_theme(
-                second_session,
-                theme_slug=theme_slug,
-                theme_name="동시 생성 테마",
-                theme_group="test",
-            )
-        )
-        await asyncio.sleep(0.2)
-        await first_session.commit()
-        second_id = await asyncio.wait_for(second_task, timeout=5)
-        await second_session.commit()
-
         assert second_id == first_id
+        await session.commit()
     finally:
-        await first_session.close()
-        await second_session.close()
+        await session.close()
         async with migrated_engine.begin() as connection:
             await connection.execute(
                 text("DELETE FROM feature.curated_themes WHERE theme_slug = :theme_slug"),
@@ -2921,10 +3338,10 @@ async def test_cross_title_legacy_moves_do_not_lock_source_collections_in_revers
             )
 
 
-async def test_source_and_collection_fallbacks_see_concurrent_identical_insert(
+async def test_collection_fallback_sees_concurrent_identical_insert(
     migrated_engine: AsyncEngine,
 ) -> None:
-    """import 전용 source/collection upsert도 새 statement snapshot을 사용한다."""
+    """import collection upsert가 concurrent insert 뒤 새 statement snapshot을 사용한다."""
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -2943,49 +3360,45 @@ async def test_source_and_collection_fallbacks_see_concurrent_identical_insert(
     second_session = AsyncSession(migrated_engine, expire_on_commit=False)
     try:
         async with AsyncSession(migrated_engine, expire_on_commit=False) as setup:
-            theme_id = await upsert_curation_theme(
-                setup,
-                theme_slug=theme_slug,
-                theme_name="동시 생성 기반 테마",
-                theme_group="test",
+            theme_id = str(
+                (
+                    await setup.execute(
+                        text(
+                            """
+                            INSERT INTO feature.curated_themes (
+                                theme_slug, theme_name, theme_group,
+                                default_curated, visibility, metadata
+                            ) VALUES (
+                                :theme_slug, '동시 생성 기반 테마', 'test',
+                                false, 'public', '{}'::jsonb
+                            )
+                            RETURNING theme_id::text
+                            """
+                        ),
+                        {"theme_slug": theme_slug},
+                    )
+                ).scalar_one()
+            )
+            source_id = str(
+                (
+                    await setup.execute(
+                        text(
+                            """
+                            INSERT INTO feature.curated_sources (
+                                provider_dataset_id, source_name, source_url,
+                                source_kind, update_cycle, provider_status, metadata
+                            ) VALUES (
+                                :provider_dataset_id, :source_name, :source_url,
+                                'manual', 'unknown', 'manual_only', '{}'::jsonb
+                            )
+                            RETURNING source_id::text
+                            """
+                        ),
+                        source_params,
+                    )
+                ).scalar_one()
             )
             await setup.commit()
-
-        await first_session.begin()
-        source_id = str(
-            (
-                await first_session.execute(
-                    text(
-                        """
-                        INSERT INTO feature.curated_sources (
-                            provider_dataset_id, source_name, source_url,
-                            source_kind, update_cycle, provider_status, metadata
-                        ) VALUES (
-                            :provider_dataset_id, :source_name, :source_url,
-                            'manual', 'unknown', 'manual_only', '{}'::jsonb
-                        )
-                        RETURNING source_id::text
-                        """
-                    ),
-                    source_params,
-                )
-            ).scalar_one()
-        )
-        await second_session.begin()
-        source_task = asyncio.create_task(
-            _upsert_id_with_fallback(
-                second_session,
-                upsert_sql=_UPSERT_SOURCE_SQL,
-                lookup_sql=_GET_SOURCE_ID_BY_DATASET_ID_SQL,
-                params=source_params,
-                entity="test source",
-            )
-        )
-        await asyncio.sleep(0.2)
-        await first_session.commit()
-        concurrent_source_id = await asyncio.wait_for(source_task, timeout=5)
-        await second_session.commit()
-        assert concurrent_source_id == source_id
 
         collection_params = {
             "collection_key": collection_key,
@@ -3198,6 +3611,18 @@ async def test_new_collection_create_add_does_not_deadlock_import(
                     {"provider_dataset_id": provider_dataset_id},
                 )
             ).scalar_one()
+        )
+        await setup.execute(
+            text(
+                """
+                INSERT INTO feature.curated_themes (
+                    theme_slug, theme_name, theme_group
+                ) VALUES (
+                    :theme_slug, 'collection key lock 테마', 'test'
+                )
+                """
+            ),
+            {"theme_slug": theme_slug},
         )
         await setup.commit()
 
@@ -4677,6 +5102,7 @@ async def test_quarantine_conflict_preview_truth_table(
 ) -> None:
     """② conflict preview 진리표 — (A)만 / (B)만 / (A) 우선 / movable / 미해결 target."""
 
+    await migrated_session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
     theme_id, source_id = await _seed_foundations(migrated_session)
     target = await create_curation_collection(
         migrated_session,
@@ -4852,14 +5278,25 @@ async def test_quarantine_conflict_preview_truth_table(
             collection_id=quarantine_id,
             target_collection_id=orphan_quarantine_id,
         )
-    with pytest.raises(ValueError, match="격리 간 이동"):
-        await move_curation_quarantine_items(
-            migrated_session,
-            collection_id=quarantine_id,
-            target_collection_id=orphan_quarantine_id,
-            item_ids=None,
-            actor="mover",
-        )
+    savepoint = await migrated_session.begin_nested()
+    try:
+        with pytest.raises(DBAPIError) as invalid_move:
+            await _move_quarantine_as_api(
+                migrated_session,
+                collection_id=quarantine_id,
+                expected_collection_revision=await _collection_revision(
+                    migrated_session, quarantine_id
+                ),
+                target_collection_id=orphan_quarantine_id,
+                expected_target_revision=await _collection_revision(
+                    migrated_session, orphan_quarantine_id
+                ),
+                item_ids=None,
+                actor="mover",
+            )
+        assert getattr(invalid_move.value.orig, "sqlstate", None) == "23514"
+    finally:
+        await savepoint.rollback()
 
 
 async def test_quarantine_move_is_atomic_and_deletes_empty_collection(
@@ -4867,6 +5304,7 @@ async def test_quarantine_move_is_atomic_and_deletes_empty_collection(
 ) -> None:
     """③ move 성공 + 빈 격리 DELETE ④ 충돌 fail-close(무변경) ⑥ actor 기록."""
 
+    await migrated_session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
     theme_id, source_id = await _seed_foundations(migrated_session)
     target = await create_curation_collection(
         migrated_session,
@@ -4944,9 +5382,15 @@ async def test_quarantine_move_is_atomic_and_deletes_empty_collection(
     # ④ 전체 이동은 충돌 1건 때문에 원자적으로 거부되고 아무 행도 안 바뀐다.
     before = await _item_states()
     with pytest.raises(CurationQuarantineMoveConflictError) as conflict_info:
-        await move_curation_quarantine_items(
+        await _move_quarantine_as_api(
             migrated_session,
             collection_id=quarantine_id,
+            expected_collection_revision=await _collection_revision(
+                migrated_session, quarantine_id
+            ),
+            expected_target_revision=await _collection_revision(
+                migrated_session, target.collection_id
+            ),
             actor="ops:h22-reviewer",
         )
     assert [
@@ -4962,27 +5406,55 @@ async def test_quarantine_move_is_atomic_and_deletes_empty_collection(
     assert await _item_states() == before
     assert before[movable_1.curation_item_id] == (quarantine_id, "seeder")
 
-    # 중복 item_ids는 422 계약(ValueError)이다.
-    with pytest.raises(ValueError, match="중복"):
-        await move_curation_quarantine_items(
-            migrated_session,
-            collection_id=quarantine_id,
-            item_ids=[movable_1.curation_item_id, movable_1.curation_item_id],
-            actor="ops:h22-reviewer",
-        )
+    # 중복 item_ids는 named command DB invariant로 거부된다.
+    savepoint = await migrated_session.begin_nested()
+    try:
+        with pytest.raises(DBAPIError) as duplicate_item_ids:
+            await _move_quarantine_as_api(
+                migrated_session,
+                collection_id=quarantine_id,
+                expected_collection_revision=await _collection_revision(
+                    migrated_session, quarantine_id
+                ),
+                expected_target_revision=await _collection_revision(
+                    migrated_session, target.collection_id
+                ),
+                item_ids=[movable_1.curation_item_id, movable_1.curation_item_id],
+                actor="ops:h22-reviewer",
+            )
+        assert getattr(duplicate_item_ids.value.orig, "sqlstate", None) == "23514"
+    finally:
+        await savepoint.rollback()
 
     # marker 없는 collection은 move 대상이 아니다 (⑦의 move 측).
-    with pytest.raises(LookupError, match="quarantine collection 없음"):
-        await move_curation_quarantine_items(
-            migrated_session,
-            collection_id=target.collection_id,
-            actor="ops:h22-reviewer",
-        )
+    savepoint = await migrated_session.begin_nested()
+    try:
+        with pytest.raises(DBAPIError) as non_quarantine:
+            await _move_quarantine_as_api(
+                migrated_session,
+                collection_id=target.collection_id,
+                expected_collection_revision=await _collection_revision(
+                    migrated_session, target.collection_id
+                ),
+                expected_target_revision=await _collection_revision(
+                    migrated_session, target.collection_id
+                ),
+                actor="ops:h22-reviewer",
+            )
+        assert getattr(non_quarantine.value.orig, "sqlstate", None) == "23514"
+    finally:
+        await savepoint.rollback()
 
     # 부분 이동(충돌 없는 subset)은 성공하고 actor가 updated_by에 박힌다 (⑥).
-    moved_ids, deleted = await move_curation_quarantine_items(
+    moved_ids, deleted = await _move_quarantine_as_api(
         migrated_session,
         collection_id=quarantine_id,
+        expected_collection_revision=await _collection_revision(
+            migrated_session, quarantine_id
+        ),
+        expected_target_revision=await _collection_revision(
+            migrated_session, target.collection_id
+        ),
         item_ids=[movable_1.curation_item_id, movable_2.curation_item_id],
         actor="ops:h22-reviewer",
     )
@@ -4999,7 +5471,7 @@ async def test_quarantine_move_is_atomic_and_deletes_empty_collection(
     )
     assert after_partial[conflicted.curation_item_id] == (quarantine_id, "seeder")
 
-    # archived target은 409 계약의 전용 예외로 거부된다.
+    # archive된 target은 named command DB invariant로 거부된다.
     archived_target = await create_curation_collection(
         migrated_session,
         collection_key="h22:archived-target",
@@ -5012,22 +5484,42 @@ async def test_quarantine_move_is_atomic_and_deletes_empty_collection(
         collection_id=archived_target.collection_id,
         actor="seeder",
     )
-    with pytest.raises(CurationQuarantineTargetArchivedError):
-        await move_curation_quarantine_items(
-            migrated_session,
-            collection_id=quarantine_id,
-            target_collection_id=archived_target.collection_id,
-            actor="ops:h22-reviewer",
-        )
+    savepoint = await migrated_session.begin_nested()
+    try:
+        with pytest.raises(DBAPIError) as archived_target_error:
+            await _move_quarantine_as_api(
+                migrated_session,
+                collection_id=quarantine_id,
+                expected_collection_revision=await _collection_revision(
+                    migrated_session, quarantine_id
+                ),
+                target_collection_id=archived_target.collection_id,
+                expected_target_revision=await _collection_revision(
+                    migrated_session, archived_target.collection_id
+                ),
+                actor="ops:h22-reviewer",
+            )
+        assert getattr(archived_target_error.value.orig, "sqlstate", None) == "23514"
+    finally:
+        await savepoint.rollback()
 
-    # 존재하지 않는 target은 404 계약(LookupError)이다.
-    with pytest.raises(LookupError, match="target collection 없음"):
-        await move_curation_quarantine_items(
-            migrated_session,
-            collection_id=quarantine_id,
-            target_collection_id=str(uuid4()),
-            actor="ops:h22-reviewer",
-        )
+    # 존재하지 않는 target은 procedure의 not-found SQLSTATE로 거부된다.
+    savepoint = await migrated_session.begin_nested()
+    try:
+        with pytest.raises(DBAPIError) as missing_target:
+            await _move_quarantine_as_api(
+                migrated_session,
+                collection_id=quarantine_id,
+                expected_collection_revision=await _collection_revision(
+                    migrated_session, quarantine_id
+                ),
+                target_collection_id=str(uuid4()),
+                expected_target_revision=1,
+                actor="ops:h22-reviewer",
+            )
+        assert getattr(missing_target.value.orig, "sqlstate", None) == "P0002"
+    finally:
+        await savepoint.rollback()
 
     # ③ 남은 item을 빈 target으로 옮기면 격리 collection 행이 DELETE된다.
     fresh_target = await create_curation_collection(
@@ -5037,10 +5529,16 @@ async def test_quarantine_move_is_atomic_and_deletes_empty_collection(
         source_id=None,
         title="새 target",
     )
-    moved_ids, deleted = await move_curation_quarantine_items(
+    moved_ids, deleted = await _move_quarantine_as_api(
         migrated_session,
         collection_id=quarantine_id,
+        expected_collection_revision=await _collection_revision(
+            migrated_session, quarantine_id
+        ),
         target_collection_id=fresh_target.collection_id,
+        expected_target_revision=await _collection_revision(
+            migrated_session, fresh_target.collection_id
+        ),
         actor="ops:h22-reviewer",
     )
     assert moved_ids == (conflicted.curation_item_id,)
@@ -5065,8 +5563,9 @@ async def test_quarantine_move_is_atomic_and_deletes_empty_collection(
 async def test_quarantine_confirm_standalone_removes_marker_only(
     migrated_session: AsyncSession,
 ) -> None:
-    """⑤ marker 키 제거 + key/title 갱신 ⑥ actor 기록 ⑦ marker 없으면 LookupError."""
+    """⑤ marker 키 제거 + key/title 갱신 ⑥ actor 기록 ⑦ marker 없으면 DB에서 거부."""
 
+    await migrated_session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
     theme_id, source_id = await _seed_foundations(migrated_session)
     original = await create_curation_collection(
         migrated_session,
@@ -5091,9 +5590,12 @@ async def test_quarantine_confirm_standalone_removes_marker_only(
         actor="seeder",
     )
 
-    confirmed_id, confirmed_key = await confirm_curation_quarantine_standalone(
+    confirmed_id, confirmed_key = await _confirm_quarantine_as_api(
         migrated_session,
         collection_id=quarantine_id,
+        expected_collection_revision=await _collection_revision(
+            migrated_session, quarantine_id
+        ),
         collection_key="  h22:standalone-confirmed  ",
         title="  독립 확정  ",
         actor="ops:h22-reviewer",
@@ -5130,22 +5632,32 @@ async def test_quarantine_confirm_standalone_removes_marker_only(
     # 확정된 collection은 더 이상 격리 정본 술어에 안 걸린다.
     rows, _ = await list_curation_quarantine_collections(migrated_session)
     assert [r.collection_id for r in rows] == []
-    with pytest.raises(LookupError, match="quarantine collection 없음"):
-        await confirm_curation_quarantine_standalone(
-            migrated_session,
-            collection_id=quarantine_id,
-            collection_key="h22:standalone-again",
-            title="재확정",
-            actor="ops:h22-reviewer",
-        )
+    savepoint = await migrated_session.begin_nested()
+    try:
+        with pytest.raises(DBAPIError) as non_quarantine:
+            await _confirm_quarantine_as_api(
+                migrated_session,
+                collection_id=quarantine_id,
+                expected_collection_revision=await _collection_revision(
+                    migrated_session, quarantine_id
+                ),
+                collection_key="h22:standalone-again",
+                title="재확정",
+                actor="ops:h22-reviewer",
+            )
+        assert getattr(non_quarantine.value.orig, "sqlstate", None) == "23514"
+    finally:
+        await savepoint.rollback()
 
-    # 빈 key/title은 422 계약(ValueError)이다.
+    # 빈 key/title은 repository input validation에서 즉시 거부된다.
     with pytest.raises(ValueError, match="required"):
         await confirm_curation_quarantine_standalone(
             migrated_session,
             collection_id=quarantine_id,
+            expected_collection_revision=2,
             collection_key="   ",
             title="제목",
+            command_id=1,
             actor="ops:h22-reviewer",
         )
 
@@ -5158,9 +5670,12 @@ async def test_quarantine_confirm_standalone_removes_marker_only(
         original_collection_id=None,
     )
     with pytest.raises(IntegrityError):
-        await confirm_curation_quarantine_standalone(
+        await _confirm_quarantine_as_api(
             migrated_session,
             collection_id=second_quarantine_id,
+            expected_collection_revision=await _collection_revision(
+                migrated_session, second_quarantine_id
+            ),
             collection_key="h22:standalone-confirmed",
             title="중복 확정",
             actor="ops:h22-reviewer",

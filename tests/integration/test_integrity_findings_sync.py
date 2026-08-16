@@ -442,6 +442,58 @@ async def test_close_targets_only_findings_this_run_did_not_observe(
     assert sorted((await _statuses(migrated_session)).values()) == ["open", "resolved"]
 
 
+async def test_clean_step_retry_closes_failed_attempt_findings(
+    migrated_session: AsyncSession,
+) -> None:
+    """같은 Dagster run의 retry는 독립 observation set으로 stale을 닫는다."""
+    await _observe(migrated_session, "run-retry", ["failed-attempt"])
+    await _close(migrated_session, "run-retry", finding_count=1)
+    await sync_integrity_findings(
+        migrated_session,
+        provider_dataset_id=await _dataset_id(migrated_session),
+        findings=[],
+        external_run_id="run-retry::retry:1",
+    )
+    closed = await _close(
+        migrated_session,
+        "run-retry::retry:1",
+        finding_count=0,
+    )
+
+    assert closed == 1
+    assert set((await _statuses(migrated_session)).values()) == {"resolved"}
+    observation_count = await migrated_session.scalar(
+        text(
+            """
+            SELECT count(*)
+            FROM ops.integrity_finding_observations AS observation
+            JOIN ops.integrity_observation_runs AS run
+              ON run.observation_run_id = observation.observation_run_id
+            WHERE run.external_run_id = 'run-retry::retry:1'
+            """
+        )
+    )
+    assert observation_count == 0
+
+
+async def test_older_clean_run_does_not_close_newer_strict_failure(
+    migrated_session: AsyncSession,
+) -> None:
+    """실패 attempt가 run-bound면 앞서 시작한 clean sweep이 증거를 닫지 못한다."""
+    await sync_integrity_findings(
+        migrated_session,
+        provider_dataset_id=await _dataset_id(migrated_session),
+        findings=[],
+        external_run_id="older-clean",
+    )
+    await _observe(migrated_session, "newer-strict", ["newer-failure"])
+
+    closed = await _close(migrated_session, "older-clean", finding_count=0)
+
+    assert closed == 0
+    assert set((await _statuses(migrated_session)).values()) == {"open"}
+
+
 async def test_overlapping_run_cannot_overwrite_observation_evidence(
     migrated_session: AsyncSession,
 ) -> None:

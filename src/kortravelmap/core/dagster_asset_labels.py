@@ -35,9 +35,5 @@ DAGSTER_ASSET_KOREAN_LABELS: Final[dict[str, str]] = {
     "feature_weather_kma_mid_forecast": "기상청 중기예보",
     "feature_notice_kma_weather_alerts": "기상특보",
     "feature_place_mcst_culture": "문화시설 파일데이터",
-    "curated_source_metadata": "큐레이션 원천 메타데이터",
-    "curated_feature_candidates": "큐레이션 후보 생성",
-    "curated_feature_status_sweep": "큐레이션 상태 정리",
-    "curated_feature_detail_snapshots": "큐레이션 상세 스냅샷",
 }
 """asset code-level name → 한국어 표시명."""

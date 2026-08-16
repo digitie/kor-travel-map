@@ -790,6 +790,10 @@ export interface components {
          * @description curated source metadata view.
          */
         CuratedSourceView: {
+            /** Archived At */
+            archived_at?: string | null;
+            /** Command Etag */
+            command_etag: string;
             /**
              * Created At
              * Format: date-time
@@ -811,24 +815,42 @@ export interface components {
             };
             /** Next Expected At */
             next_expected_at?: string | null;
+            /** Observation Revision */
+            observation_revision: string;
             /** Provider */
             provider: string;
             /** Provider Dataset Id */
             provider_dataset_id: number;
-            /** Provider Status */
-            provider_status: string;
+            /**
+             * Provider Status
+             * @enum {string}
+             */
+            provider_status: "implemented" | "provider_needed" | "manual_only" | "deprecated";
+            /** Representation Etag */
+            representation_etag: string;
             /** Row Count */
             row_count?: number | null;
-            /** Source Id */
+            /** Row Revision */
+            row_revision: string;
+            /**
+             * Source Id
+             * Format: uuid
+             */
             source_id: string;
-            /** Source Kind */
-            source_kind: string;
+            /**
+             * Source Kind
+             * @enum {string}
+             */
+            source_kind: "openapi" | "filedata" | "standard" | "internal" | "manual";
             /** Source Name */
             source_name: string;
             /** Source Url */
             source_url?: string | null;
-            /** Update Cycle */
-            update_cycle: string;
+            /**
+             * Update Cycle
+             * @enum {string}
+             */
+            update_cycle: "realtime" | "daily" | "weekly" | "monthly" | "annual" | "one_time" | "unknown";
             /**
              * Updated At
              * Format: date-time
@@ -850,22 +872,33 @@ export interface components {
          * @description curated theme view.
          */
         CuratedThemeView: {
+            /** Archived At */
+            archived_at?: string | null;
+            /** Command Etag */
+            command_etag: string;
             /**
              * Created At
              * Format: date-time
              */
             created_at: string;
-            /** Default Curated */
-            default_curated: boolean;
             /** Metadata */
             metadata: {
                 [key: string]: unknown;
             };
+            /** Owner Kind */
+            owner_kind?: ("operator" | "provider_dataset") | null;
+            /** Owner Provider Dataset Id */
+            owner_provider_dataset_id?: number | null;
+            /** Row Revision */
+            row_revision: string;
             /** Theme Description */
             theme_description: string;
             /** Theme Group */
             theme_group: string;
-            /** Theme Id */
+            /**
+             * Theme Id
+             * Format: uuid
+             */
             theme_id: string;
             /** Theme Name */
             theme_name: string;
@@ -876,8 +909,11 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
-            /** Visibility */
-            visibility: string;
+            /**
+             * Visibility
+             * @enum {string}
+             */
+            visibility: "admin_only" | "public";
         };
         /** CuratedThemesData */
         CuratedThemesData: {

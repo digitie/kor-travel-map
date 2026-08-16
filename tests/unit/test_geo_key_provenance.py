@@ -565,5 +565,5 @@ def test_frontend_geo_proxy_fails_closed_with_an_explicit_reason() -> None:
     """키가 없을 때 upstream의 400을 그대로 흘리지 않는다."""
 
     text = _read("packages/kor-travel-map-admin/frontend/src/app/api/geo/[...path]/route.ts")
-    assert 'GEO_API_KEY === ""' in text, "빈 키 단락 경로가 없다"
+    assert "if (!apiKey)" in text, "빈 키 단락 경로가 없다"
     assert "GEO_API_KEY_NOT_CONFIGURED" in text, "빈 키 응답에 명시적 사유 코드가 없다"

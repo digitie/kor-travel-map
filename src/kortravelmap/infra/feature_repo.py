@@ -96,6 +96,7 @@ __all__ = [
     "DEFAULT_PRICE_STALE_HIDE_DAYS",
     "EnrichmentLoadResult",
     "FeatureLoadResult",
+    "capture_provider_curation_input",
     "FeatureBatchItemRow",
     "FeatureSearchPage",
     "FeatureSearchRow",
@@ -137,6 +138,18 @@ __all__ = [
     "search_features",
     "features_nearby_poi_cache_target",
 ]
+
+_FEATURE_CURATION_WRITE_LOCK_SQL: Final[str] = """
+SELECT pg_catalog.pg_advisory_xact_lock(
+  pg_catalog.hashtextextended('feature-curation-write', 0)
+)
+"""
+
+
+async def lock_feature_curation_write(session: AsyncSession) -> None:
+    """Feature/source/link/curation 의미 writer의 공통 transaction fence."""
+
+    await session.execute(text(_FEATURE_CURATION_WRITE_LOCK_SQL), {})
 
 
 @dataclass(frozen=True)
@@ -2014,6 +2027,8 @@ class FeatureLoadResult:
     source_records_inserted: int = 0
     source_links_inserted: int = 0
     source_links_updated: int = 0
+    curation_input_member_count: int | None = None
+    curation_input_set_hash: str | None = None
 
     def merge(self, other: FeatureLoadResult) -> FeatureLoadResult:
         """두 결과 카운트를 합산 (streaming 배치 적재 누적용)."""
@@ -2024,7 +2039,44 @@ class FeatureLoadResult:
             source_records_inserted=(self.source_records_inserted + other.source_records_inserted),
             source_links_inserted=(self.source_links_inserted + other.source_links_inserted),
             source_links_updated=(self.source_links_updated + other.source_links_updated),
+            curation_input_member_count=(
+                other.curation_input_member_count
+                if other.curation_input_member_count is not None
+                else self.curation_input_member_count
+            ),
+            curation_input_set_hash=(
+                other.curation_input_set_hash
+                if other.curation_input_set_hash is not None
+                else self.curation_input_set_hash
+            ),
         )
+
+
+async def capture_provider_curation_input(
+    session: AsyncSession, *, provider: str, dataset_key: str
+) -> FeatureLoadResult:
+    """현재 transaction이 쓴 source head/link 집합의 causal seal을 반환한다."""
+
+    row = (
+        await session.execute(
+            text(
+                """
+                SELECT input.input_member_count, input.source_input_set_hash
+                FROM provider_sync.provider_datasets AS dataset
+                CROSS JOIN LATERAL feature.current_provider_curation_input_set(
+                  dataset.provider_dataset_id
+                ) AS input
+                WHERE dataset.provider = :provider
+                  AND dataset.dataset_key = :dataset_key
+                """
+            ),
+            {"provider": provider, "dataset_key": dataset_key},
+        )
+    ).mappings().one()
+    return FeatureLoadResult(
+        curation_input_member_count=int(row["input_member_count"]),
+        curation_input_set_hash=str(row["source_input_set_hash"]),
+    )
 
 
 FeatureBatchItemState = Literal[
@@ -2104,6 +2156,7 @@ async def load_source_record_links(
     ``feature_id`` FK가 **이미 존재**해야 한다(1차 source가 먼저 적재돼 있어야 함).
     commit/rollback은 호출자(`AsyncKorTravelMapClient.load_enrichment_links`) 책임.
     """
+    await lock_feature_curation_write(session)
     result = EnrichmentLoadResult()
     for record, link in pairs:
         record_inserted = await upsert_source_record(session, record)
@@ -2520,6 +2573,7 @@ async def upsert_feature(
     시점에 거부한다(ADR-086). 종전 geometryless-area retirement 보정은 더 이상
     필요한 상태를 만들 수 없다.
     """
+    await lock_feature_curation_write(session)
     if provider_dataset_id <= 0:
         raise ValueError("provider_dataset_id는 양의 정수여야 합니다.")
 
@@ -2708,6 +2762,7 @@ async def upsert_source_record(session: AsyncSession, record: SourceRecord) -> b
     payload hash가 entity 안에서 유일하므로 payload 변경은 새 immutable row를 남긴다.
     재관측은 raw row를 갱신하지 않고 entity head의 ``observed_at``만 전진시킨다.
     """
+    await lock_feature_curation_write(session)
     return (await _upsert_source_record_state(session, record)).inserted
 
 
@@ -2756,6 +2811,7 @@ async def _feature_load_state(
 
 async def upsert_source_link(session: AsyncSession, link: SourceLink) -> bool:
     """``provider_sync.source_links`` upsert. 신규 INSERT면 ``True``, 갱신이면 ``False``."""
+    await lock_feature_curation_write(session)
     result = await session.execute(text(_UPSERT_SOURCE_LINK_SQL), _source_link_params(link))
     return bool(result.scalar_one())
 
@@ -2981,6 +3037,7 @@ async def load_bundle(session: AsyncSession, bundle: FeatureBundle) -> FeatureLo
     ``user_request`` feature와 provider 재활성화 방지 override는 복구하지 않는다.
     commit은 호출자 책임.
     """
+    await lock_feature_curation_write(session)
     record_state = await _upsert_source_record_state(
         session, bundle.source_record
     )
@@ -3099,6 +3156,7 @@ async def retire_features_absent_from_snapshot(
     int
         retired 전이된 feature 수.
     """
+    await lock_feature_curation_write(session)
     candidates = (
         await session.execute(
             text(_SOFT_DELETE_NOT_IN_SNAPSHOT_SQL),
@@ -3147,6 +3205,7 @@ async def retire_features_by_source_entity_ids(
     int
         retired 전이된 feature 수.
     """
+    await lock_feature_curation_write(session)
     if not source_entity_ids:
         return 0
     candidates = (
@@ -3181,6 +3240,7 @@ async def retire_geometryless_area_features_by_source(
     재적재될 수 있으므로 source_entity_id 집합 기반 전환은 쓰지 않는다.
     commit은 호출자 책임.
     """
+    await lock_feature_curation_write(session)
     candidates = (
         await session.execute(
             text(_INACTIVATE_GEOMETRYLESS_AREA_BY_SOURCE_SQL),
@@ -4174,6 +4234,7 @@ async def load_authoritative_notice_snapshot(
     observed_at: datetime,
 ) -> NoticeFeatureLoadResult:
     """full snapshot 적재·state CAS·Feature lifecycle을 한 transaction에서 수행."""
+    await lock_feature_curation_write(session)
     await session.execute(text(_NOTICE_SNAPSHOT_RECONCILE_LOCK_SQL))
     normalized_active_keys = sorted(set(active_lineage_keys))
     fingerprint = _notice_snapshot_fingerprint(normalized_active_keys)
@@ -4230,6 +4291,7 @@ async def load_notice_event_bundles(
     observed_at: datetime,
 ) -> NoticeFeatureLoadResult:
     """event notice 적재·member 전이·Feature lifecycle을 한 transaction에서 수행."""
+    await lock_feature_curation_write(session)
     bundle_lineage_keys: list[str] = []
     seen_bundle_lineage_keys: set[str] = set()
     duplicate_lineage_keys: set[str] = set()
@@ -4351,6 +4413,7 @@ async def close_notice_features(
     lift는 ``present=false`` 전이이며, 같은 Feature의 다른 scope winner가
     present면 실제 close를 미룬다. commit은 호출자 책임.
     """
+    await lock_feature_curation_write(session)
     lineage_events: dict[str, tuple[bool, datetime, datetime | None]] = {}
     for present, events in ((True, announcements or {}), (False, closures)):
         for lineage_key, changed_at in events.items():
@@ -4405,6 +4468,7 @@ async def supersede_stale_notice_features(
 
     commit은 호출자 책임.
     """
+    await lock_feature_curation_write(session)
     snapshot_params: dict[str, object] | None = None
     if active_lineage_keys is not None and closed_at is not None:
         # snapshot 상태 갱신과 공유 Feature lifecycle 판정을 scope 간 직렬화한다.
@@ -4584,6 +4648,7 @@ async def purge_expired_notices(session: AsyncSession, *, retention: str = "1 ye
     ``valid_end_time``(없으면 ``valid_start_time``) + ``retention`` 경과분.
     commit은 호출자 책임.
     """
+    await lock_feature_curation_write(session)
     result = await session.execute(
         text(_PURGE_EXPIRED_NOTICES_SQL), {"retention": retention}
     )

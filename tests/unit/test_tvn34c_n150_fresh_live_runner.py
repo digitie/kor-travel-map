@@ -30,15 +30,26 @@ def test_runner_uses_receipt_pinned_archives_not_its_checkout() -> None:
     runner = _text(_RUNNER)
 
     assert 'readonly RECEIPT="$INSTALL_DIR/consumer-rollout-v1.json"' in runner
-    assert 'data["tasks"]["T-VN-36"]["pinvi_snapshot_receipt"]' in runner
+    assert 'task = data.get("deployment_receipt_task")' in runner
+    assert 'receipt.get("state") != "complete"' in runner
+    assert '"map_service_openapi_sha256"' in runner
+    assert '"pinvi_service_vendor_sha256"' in runner
+    assert 'openapi.service.json' in runner
+    assert 'kor-travel-map-openapi-service.json' in runner
+    assert 'pinvi_admin_detail_vendor_sha256' not in runner
     assert (
         'python3 - "$RECEIPT" "$MAP_DIR" "$PINVI_DIR" "$MAP_COMMIT" "$PINVI_COMMIT"'
         in runner
     )
     assert 'safe_extract "$MAP_ARCHIVE" "$RUN_DIR"' in runner
     assert 'safe_extract "$PINVI_ARCHIVE" "$RUN_DIR"' in runner
-    assert '"version"] != 3' in runner
-    assert "0104_tvn36_final_fence" in runner
+    assert '"version"] != 4' in runner
+    assert 'read_map_application_head' in runner
+    assert '"$MAP_DIR/docker/application-schema-head.py"' in runner
+    assert '"$MAP_DIR/src/kortravelmap/_application_migration_graph.json"' in runner
+    assert 'namespace.get("_application_head")' in runner
+    assert "known = {" not in runner
+    assert 'KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD=$EXPECTED_HEAD' in runner
     assert "feature.features_detailed') IS NULL" in runner
     assert "T-VN-36 final legacy Feature columns remain" in runner
     assert "T-VN-36 final request/version bridge remains" in runner
@@ -49,6 +60,19 @@ def test_runner_uses_receipt_pinned_archives_not_its_checkout() -> None:
     assert 'E2E_BASE_URL=http://localhost:12705' in runner
     assert "PINVI_KOR_TRAVEL_MAP_CACHE_TARGET_COMMAND_TOKEN=$cache_target_command_token" in runner
     assert "PINVI_KOR_TRAVEL_MAP_CACHE_TARGET_CONSUMER_TOKEN=$cache_target_consumer_token" in runner
+    assert "PINVI_KOR_TRAVEL_MAP_CURATION_SNAPSHOT_TOKEN=$curation_snapshot_token" in runner
+    assert (
+        "PINVI_KOR_TRAVEL_MAP_CURATION_CUTOVER_MAPPING_TOKEN=$curation_cutover_mapping_token"
+        in runner
+    )
+    assert (
+        "KOR_TRAVEL_MAP_API_PINVI_CURATION_SNAPSHOT_TOKEN_SHA256=$curation_snapshot_digest"
+        in runner
+    )
+    assert (
+        "KOR_TRAVEL_MAP_API_PINVI_CURATION_CUTOVER_MAPPING_TOKEN_SHA256=$curation_cutover_mapping_digest"
+        in runner
+    )
     assert "PINVI_KOR_TRAVEL_MAP_CACHE_TARGET_EXPECTED_CONTRACT_GENERATION=7" in runner
     assert 'compose_ui_password_hash="${ui_password_hash//\\$/\\$\\$}"' in runner
     assert "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN=$ops_fixture" in runner
@@ -69,8 +93,14 @@ def test_installer_archives_exact_pair_and_installs_immutable_inputs() -> None:
         'git -C "$PINVI_REPOSITORY" archive --format=tar.gz --prefix=pinvi/ "$PINVI_COMMIT"'
         in installer
     )
-    assert 'json.load(sys.stdin)["tasks"]["T-VN-36"]["pinvi_snapshot_receipt"]' in installer
-    assert '"version":3' in installer
+    assert 'task = rollout.get("deployment_receipt_task")' in installer
+    assert 'receipt.get("state") != "complete"' in installer
+    assert '"map_service_openapi_sha256"' in installer
+    assert '"pinvi_service_vendor_sha256"' in installer
+    assert 'openapi.service.json' in installer
+    assert 'kor-travel-map-openapi-service.json' in installer
+    assert 'pinvi_admin_detail_vendor_sha256' not in installer
+    assert '"version":4' in installer
     assert 'readonly snapshot_name="${MAP_COMMIT}-${PINVI_COMMIT}-${RUNNER_COMMIT}"' in installer
     assert 'install -o root -g root -m 0500' in installer
     assert (

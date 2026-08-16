@@ -720,16 +720,98 @@ WHERE (status = 'archived') <> (archived_at IS NOT NULL); -- expect: 0 -- phase:
 -- [INV-040-02] theme_feature_candidates identity 중복 없음.
 SELECT count(*)
 FROM (
-    SELECT theme_id, feature_id
+    SELECT rule_id, source_entity_key, feature_id
     FROM feature.theme_feature_candidates
-    GROUP BY theme_id, feature_id
+    GROUP BY rule_id, source_entity_key, feature_id
     HAVING count(*) > 1
 ) AS duplicated; -- expect: 0 -- phase: both
 
--- [INV-040-03] candidate FK orphan 없음 (theme·feature 양쪽).
+-- [INV-040-03] candidate FK orphan 없음 (rule·entity·record·feature 네 축).
 SELECT count(*)
 FROM feature.theme_feature_candidates AS c
-LEFT JOIN feature.curated_themes AS t ON t.theme_id = c.theme_id
+LEFT JOIN feature.curated_source_rules AS r ON r.rule_id = c.rule_id
+LEFT JOIN provider_sync.source_entities AS e ON e.source_entity_key = c.source_entity_key
+LEFT JOIN provider_sync.source_records AS sr
+  ON sr.source_entity_key = c.source_entity_key
+ AND sr.source_record_key = c.source_record_key
 LEFT JOIN feature.features AS f ON f.feature_id = c.feature_id
-WHERE t.theme_id IS NULL
+WHERE r.rule_id IS NULL
+   OR e.source_entity_key IS NULL
+   OR sr.source_record_key IS NULL
    OR f.feature_id IS NULL; -- expect: 0 -- phase: both
+
+-- [INV-040-04] merged tombstone은 exact active winner를 한 단계로 가리킨다.
+SELECT count(*)
+FROM feature.theme_feature_candidates AS loser
+LEFT JOIN feature.theme_feature_candidates AS winner
+  ON winner.candidate_id = loser.merged_into_candidate_id
+ AND winner.rule_id = loser.rule_id
+ AND winner.source_entity_key = loser.source_entity_key
+ AND winner.disposition = 'active'
+WHERE (loser.disposition = 'active'
+       AND (loser.merged_into_candidate_id IS NOT NULL OR loser.retired_at IS NOT NULL))
+   OR (loser.disposition = 'merged'
+       AND (loser.merged_into_candidate_id IS NULL OR loser.retired_at IS NULL
+            OR winner.candidate_id IS NULL)); -- expect: 0 -- phase: both
+
+-- [INV-040-05] reconcile receipt의 durable scope count는 child exact set과 같다.
+SELECT count(*)
+FROM ops.curation_rule_reconcile_operations AS operation
+WHERE operation.scope_member_count <> (
+    SELECT count(*)
+    FROM ops.curation_rule_reconcile_scope_members AS member
+    WHERE member.operation_id = operation.operation_id
+); -- expect: 0 -- phase: both
+
+-- [INV-040-06] generation kind별 authoritative origin XOR 위반 없음.
+SELECT count(*)
+FROM feature.theme_candidate_generations
+WHERE NOT (
+    (generation_kind = 'provider_full_snapshot'
+     AND source_job_id IS NOT NULL AND reconcile_operation_id IS NULL AND command_id IS NULL)
+    OR (generation_kind IN ('scoped_reconcile','rule_reconcile')
+        AND source_job_id IS NULL AND reconcile_operation_id IS NOT NULL)
+    OR (generation_kind = 'legacy_backfill'
+        AND source_job_id IS NULL AND reconcile_operation_id IS NULL AND command_id IS NULL)
+); -- expect: 0 -- phase: both
+
+-- [INV-040-07] observation은 generation의 rule과 같은 current candidate identity만 가리킨다.
+SELECT count(*)
+FROM feature.theme_candidate_generation_observations AS observation
+JOIN feature.theme_candidate_generations AS generation
+  ON generation.generation_id = observation.generation_id
+LEFT JOIN feature.theme_feature_candidates AS candidate
+  ON candidate.candidate_id = observation.candidate_id
+ AND candidate.rule_id = generation.rule_id
+ AND candidate.source_entity_key = observation.source_entity_key
+ AND candidate.feature_id = observation.feature_id
+WHERE candidate.candidate_id IS NULL; -- expect: 0 -- phase: both
+
+-- [INV-040-08] live candidate query는 merged tombstone을 포함하지 않는다.
+SELECT count(*)
+FROM feature.theme_feature_candidates
+WHERE disposition <> 'active'
+  AND review_state = 'open'
+  AND eligibility_present
+  AND candidate_id IN (
+      SELECT candidate_id
+      FROM feature.theme_feature_candidates
+      WHERE disposition = 'active'
+  ); -- expect: 0 -- phase: both
+
+-- [INV-040-09] final target에는 legacy overlay relation이 없다.
+SELECT count(*)
+FROM (SELECT to_regclass('feature.curated_features') AS relation_oid) AS legacy
+WHERE relation_oid IS NOT NULL; -- expect: 0 -- phase: post-backfill
+
+-- [INV-040-10] retained catalog ownership은 operator/provider_dataset 두 exact shape뿐이다.
+SELECT count(*)
+FROM (
+    SELECT owner_kind, owner_provider_dataset_id FROM feature.curated_themes
+    UNION ALL
+    SELECT owner_kind, owner_provider_dataset_id FROM feature.curated_source_rules
+) AS catalog
+WHERE NOT (
+    (owner_kind = 'operator' AND owner_provider_dataset_id IS NULL)
+    OR (owner_kind = 'provider_dataset' AND owner_provider_dataset_id IS NOT NULL)
+); -- expect: 0 -- phase: both

@@ -18,11 +18,6 @@ from dagster import (
 
 from .assets import FEATURE_LOAD_ASSETS
 from .batch_dag import BATCH_DAG_JOBS
-from .curated_features import (
-    CURATED_FEATURE_ASSETS,
-    CURATED_FEATURE_JOBS,
-    CURATED_FEATURE_SCHEDULES,
-)
 from .feature_operation_sensors import FEATURE_OPERATION_TRACKING_SENSORS
 from .feature_update_runner import feature_update_runner_resource
 from .file_registry_scan import (
@@ -187,7 +182,6 @@ defs = Definitions(
         *FEATURE_LOAD_ASSETS,
         *KMA_WEATHER_ASSETS,
         *MCST_FEATURE_ASSETS,
-        *CURATED_FEATURE_ASSETS,
     ],
     jobs=cast(
         "Any",
@@ -198,7 +192,6 @@ defs = Definitions(
             *MAINTENANCE_JOBS,
             *MOIS_SOURCE_SYNC_JOBS,
             *OFFLINE_UPLOAD_JOBS,
-            *CURATED_FEATURE_JOBS,
             *FILE_REGISTRY_SCAN_JOBS,
         ],
     ),
@@ -206,7 +199,6 @@ defs = Definitions(
         *FEATURE_LOAD_SCHEDULES,
         *MAINTENANCE_SCHEDULES,
         *MOIS_SOURCE_SYNC_SCHEDULES,
-        *CURATED_FEATURE_SCHEDULES,
         *FILE_REGISTRY_SCAN_SCHEDULES,
     ],
     sensors=[*FEATURE_UPDATE_SENSORS, *FEATURE_OPERATION_TRACKING_SENSORS],

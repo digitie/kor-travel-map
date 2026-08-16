@@ -49,8 +49,10 @@ from kortravelmap.core.feature_operation import (
     ProviderDatasetOperationMembership,
 )
 from kortravelmap.infra.feature_operation_repo import (
-    ensure_dagster_feature_operation,
-    finish_dagster_feature_membership,
+    ensure_dagster_feature_operation as _ensure_dagster_feature_operation,
+)
+from kortravelmap.infra.feature_operation_repo import (
+    finish_dagster_feature_membership as _finish_dagster_feature_membership,
 )
 from kortravelmap.infra.feature_update_repo import enqueue_feature_update_request
 from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget
@@ -59,8 +61,23 @@ from kortravelmap.infra.provider_refresh_policy_repo import (
 )
 from tests.integration._db_cleanup import truncate_committed_test_rows
 from tests.integration._membership_seed import launch_tags, membership_for_dataset
+from tests.integration.conftest import as_dagster_runtime
 
 pytestmark = pytest.mark.integration
+
+
+async def ensure_dagster_feature_operation(
+    session: AsyncSession, **kwargs: Any
+) -> Any:
+    async with as_dagster_runtime(session) as runtime_session:
+        return await _ensure_dagster_feature_operation(runtime_session, **kwargs)
+
+
+async def finish_dagster_feature_membership(
+    session: AsyncSession, **kwargs: Any
+) -> Any:
+    async with as_dagster_runtime(session) as runtime_session:
+        return await _finish_dagster_feature_membership(runtime_session, **kwargs)
 
 _PAGE_SIZE = 10
 _OPERATOR = "integration-test"
@@ -848,6 +865,10 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
 
     # seed commit 자체를 포함해 이후 예외·취소는 같은 finally 정리 경계에 둔다.
     try:
+        # 이 회귀는 committed operation의 exact projection을 세므로, 앞선
+        # integration의 중단된 provider tree가 남아 있어도 관측 집합에 섞이지 않게
+        # 같은 정리 규약을 seed 전에도 적용한다.
+        await _cleanup_committed_operations(migrated_engine)
         seed = await _seed_committed_operations(migrated_engine)
         target_filter = {
             "provider_dataset_id": seed.target_dataset_id,

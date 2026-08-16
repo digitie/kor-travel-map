@@ -123,6 +123,34 @@ async def _seed_provider_dataset(
     )
 
 
+async def _seed_curated_source(
+    session: AsyncSession,
+    *,
+    provider_dataset_id: int,
+    source_name: str,
+) -> None:
+    """T-VN-40 import가 요구하는 retained source catalog를 준비한다."""
+
+    await session.execute(
+        text(
+            """
+            INSERT INTO feature.curated_sources (
+                provider_dataset_id, source_name, source_kind,
+                update_cycle, provider_status, metadata
+            ) VALUES (
+                :provider_dataset_id, :source_name, 'manual',
+                'unknown', 'manual_only', '{}'::jsonb
+            )
+            ON CONFLICT (provider_dataset_id) DO NOTHING
+            """
+        ),
+        {
+            "provider_dataset_id": provider_dataset_id,
+            "source_name": source_name,
+        },
+    )
+
+
 async def _seed_pair(engine: AsyncEngine) -> str:
     """master(좌표 O) + loser(좌표 X) + source_links(충돌 SR 포함) + 큐 1행 적재.
 
@@ -986,6 +1014,11 @@ async def test_duplicate_merge_appends_survivor_owned_current_import_row(
         provider_dataset_id = await _seed_provider_dataset(
             session, provider=provider, dataset_key=dataset_key
         )
+        await _seed_curated_source(
+            session,
+            provider_dataset_id=provider_dataset_id,
+            source_name="병합 테스트 출처",
+        )
     common = {
         "collection_key": "merge-test:2026",
         "theme_slug": "merge-test",
@@ -1149,6 +1182,11 @@ async def test_duplicate_merge_reconciles_active_and_historical_components(
             session,
             provider="merge-test-provider",
             dataset_key="duplicate-multi-component",
+        )
+        await _seed_curated_source(
+            session,
+            provider_dataset_id=provider_dataset_id,
+            source_name="병합 테스트 출처",
         )
     common = {
         "collection_key": "merge-test:2026",
@@ -2885,155 +2923,6 @@ async def test_membership_writer_first_is_seen_and_moved_by_merge(
     assert state == ("f_master", True)
 
 
-async def test_rule_apply_rechecks_feature_after_waiting_for_merge(
-    seeded: str,
-    migrated_engine: AsyncEngine,
-) -> None:
-    suffix = uuid4().hex
-    theme_slug = f"merge-rule-race-{suffix}"
-    async with AsyncSession(migrated_engine) as setup, setup.begin():
-        rule_id = str(
-            (
-                await setup.execute(
-                    text(
-                        """
-                        WITH dataset AS (
-                            -- rule은 seeded fixture가 f_loser에 링크한 dataset
-                            -- (SE2)을 가리켜야 후보가 잡히고, merge가 잡고 있는
-                            -- feature 잠금에서 대기한다. 새 빈 dataset을 만들면
-                            -- 후보가 0건이라 잠금 자체를 안 잡는다.
-                            SELECT provider_dataset_id
-                            FROM provider_sync.provider_datasets
-                            WHERE provider = 'merge-test-visitkorea'
-                              AND dataset_key = 'd'
-                        ), theme AS (
-                            INSERT INTO feature.curated_themes (
-                                theme_slug, theme_name, theme_group
-                            ) VALUES (
-                                :theme_slug, 'merge rule race', 'test'
-                            )
-                            RETURNING theme_id
-                        ), source AS (
-                            INSERT INTO feature.curated_sources (
-                                provider_dataset_id, source_name,
-                                source_kind, update_cycle,
-                                provider_status, metadata
-                            )
-                            SELECT provider_dataset_id, 'merge rule race',
-                                   'manual', 'unknown', 'manual_only', '{}'::jsonb
-                            FROM dataset
-                            RETURNING source_id
-                        )
-                        INSERT INTO feature.curated_source_rules (
-                            theme_id, source_id, default_action,
-                            enabled, priority
-                        )
-                        SELECT
-                            theme_id, source_id, 'candidate', true, 1
-                        FROM theme CROSS JOIN source
-                        RETURNING rule_id::text
-                        """
-                    ),
-                    {"theme_slug": theme_slug},
-                )
-            ).scalar_one()
-        )
-        collection_id = str(
-            (
-                await setup.execute(
-                    text(
-                        "SELECT collection_id::text "
-                        "FROM feature.curation_collections "
-                        "WHERE collection_key = 'merge-test:2026'"
-                    )
-                )
-            ).scalar_one()
-        )
-
-    async def run_merge() -> None:
-        async with AsyncSession(migrated_engine) as merger, merger.begin():
-            await merger.execute(
-                text("SET LOCAL application_name = 'rule-race-merge'")
-            )
-            await merge_from_review(merger, seeded, merged_by="rule-race")
-
-    async def run_rule() -> int:
-        async with AsyncSession(migrated_engine) as writer, writer.begin():
-            await writer.execute(
-                text("SET LOCAL application_name = 'rule-race-writer'")
-            )
-            result = await curated_repo.apply_curated_source_rule(
-                writer,
-                rule_id=rule_id,
-            )
-            return result.inserted_or_updated
-
-    merge_task: asyncio.Task[None] | None = None
-    rule_task: asyncio.Task[int] | None = None
-    try:
-        async with AsyncSession(migrated_engine) as holder, holder.begin():
-            await holder.execute(
-                text(
-                    "SELECT collection_id "
-                    "FROM feature.curation_collections "
-                    "WHERE collection_id = CAST(:collection_id AS uuid) "
-                    "FOR UPDATE"
-                ),
-                {"collection_id": collection_id},
-            )
-            merge_task = asyncio.create_task(run_merge())
-            await _wait_for_application_lock(
-                holder,
-                application_name="rule-race-merge",
-            )
-            rule_task = asyncio.create_task(run_rule())
-            await _wait_for_application_lock(
-                holder,
-                application_name="rule-race-writer",
-            )
-
-        assert merge_task is not None
-        await asyncio.wait_for(merge_task, timeout=5)
-        assert rule_task is not None
-        assert await asyncio.wait_for(rule_task, timeout=5) == 0
-    finally:
-        for task in (rule_task, merge_task):
-            if task is not None and not task.done():
-                task.cancel()
-                with pytest.raises(asyncio.CancelledError):
-                    await task
-        async with migrated_engine.begin() as connection:
-            await connection.execute(
-                text(
-                    "DELETE FROM feature.curation_collections "
-                    "WHERE theme_id IN ("
-                    "SELECT theme_id FROM feature.curated_themes "
-                    "WHERE theme_slug = :theme_slug"
-                    ")"
-                ),
-                {"theme_slug": theme_slug},
-            )
-            await connection.execute(
-                text(
-                    "DELETE FROM feature.curated_source_rules "
-                    "WHERE rule_id = CAST(:rule_id AS uuid)"
-                ),
-                {"rule_id": rule_id},
-            )
-            # dataset 자체는 seeded fixture 소유다 — source만 지운다.
-            await connection.execute(
-                text(
-                    "DELETE FROM feature.curated_sources "
-                    "WHERE source_name = 'merge rule race'"
-                )
-            )
-            await connection.execute(
-                text(
-                    "DELETE FROM feature.curated_themes "
-                    "WHERE theme_slug = :theme_slug"
-                ),
-                {"theme_slug": theme_slug},
-            )
 
 
 async def test_merge_locks_curation_collection_before_items(

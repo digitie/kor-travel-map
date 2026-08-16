@@ -86,6 +86,8 @@ export interface CurationCollection {
   archived_at: string | null;
   created_by: string | null;
   updated_by: string | null;
+  row_revision: string;
+  command_etag: string;
 }
 
 export interface CurationItem {
@@ -126,14 +128,13 @@ export interface CurationItem {
   archived_at: string | null;
   created_by: string | null;
   updated_by: string | null;
+  row_revision: string;
+  command_etag: string;
 }
 
 export interface CurationCollectionCreateRequest {
   collection_key: string;
-  theme_id?: string | null;
-  theme_slug?: string | null;
-  theme_name?: string | null;
-  theme_group?: string | null;
+  theme_id: string;
   source_id?: string | null;
   title: string;
   edition_key?: string;
@@ -230,6 +231,9 @@ export interface CurationItemResponse {
 export interface CurationImportResponse {
   data: {
     dry_run: boolean;
+    import_plan_id: string;
+    plan_etag: string;
+    expires_at: string;
     rows_total: number;
     valid_rows: number;
     invalid_rows: number;
@@ -459,19 +463,28 @@ export function useReclassifyCurationQuarantineMutation() {
   return useMutation<
     CurationQuarantineReclassifyResponse,
     Error,
-    { collectionId: string; body: CurationQuarantineReclassifyRequest }
+    {
+      collectionId: string;
+      commandEtag: string;
+      body: CurationQuarantineReclassifyRequest;
+    }
   >({
-    mutationFn: ({ collectionId, body }) =>
+    mutationFn: ({ collectionId, commandEtag, body }) =>
       withDomainIdempotencySubmission(
         domainCommandSlot("admin.curation-quarantine.reclassify", collectionId),
-        { collectionId, body },
+        { collectionId, commandEtag, body },
         (submission, idempotencyKey) =>
           postJson<CurationQuarantineReclassifyResponse>(
             `/v1/admin/curations/quarantine/${encodeURIComponent(
               submission.collectionId,
             )}/reclassify`,
             submission.body,
-            { headers: { "Idempotency-Key": idempotencyKey } },
+            {
+              headers: {
+                "Idempotency-Key": idempotencyKey,
+                "If-Match": submission.commandEtag,
+              },
+            },
           ),
       ),
     onSuccess: () => invalidateCurations(queryClient),
@@ -552,24 +565,30 @@ export function usePatchCurationItemMutation() {
     {
       collectionId: string;
       curationItemId: string;
+      commandEtag: string;
       body: CurationItemPatchRequest;
     }
   >({
-    mutationFn: ({ collectionId, curationItemId, body }) =>
+    mutationFn: ({ collectionId, curationItemId, commandEtag, body }) =>
       withDomainIdempotencySubmission(
         domainCommandSlot(
           "admin.curation-item.patch",
           collectionId,
           curationItemId,
         ),
-        { collectionId, curationItemId, body },
+        { collectionId, curationItemId, commandEtag, body },
         (submission, idempotencyKey) =>
           patchJson<CurationItemResponse>(
             `/v1/admin/curations/${encodeURIComponent(
               submission.collectionId,
             )}/items/${encodeURIComponent(submission.curationItemId)}`,
             submission.body,
-            { headers: { "Idempotency-Key": idempotencyKey } },
+            {
+              headers: {
+                "Idempotency-Key": idempotencyKey,
+                "If-Match": submission.commandEtag,
+              },
+            },
           ),
       ),
     onSuccess: () => invalidateCurations(queryClient),
@@ -581,63 +600,95 @@ export function useArchiveCurationItemMutation() {
   return useMutation<
     CurationItemResponse,
     Error,
-    { collectionId: string; curationItemId: string }
+    { collectionId: string; curationItemId: string; commandEtag: string }
   >({
-    mutationFn: ({ collectionId, curationItemId }) =>
+    mutationFn: ({ collectionId, curationItemId, commandEtag }) =>
       withDomainIdempotencySubmission(
         domainCommandSlot(
           "admin.curation-item.archive",
           collectionId,
           curationItemId,
         ),
-        { collectionId, curationItemId },
+        { collectionId, curationItemId, commandEtag },
         (submission, idempotencyKey) =>
           deleteJson<CurationItemResponse>(
             `/v1/admin/curations/${encodeURIComponent(
               submission.collectionId,
             )}/items/${encodeURIComponent(submission.curationItemId)}`,
             undefined,
-            { headers: { "Idempotency-Key": idempotencyKey } },
+            {
+              headers: {
+                "Idempotency-Key": idempotencyKey,
+                "If-Match": submission.commandEtag,
+              },
+            },
           ),
       ),
     onSuccess: () => invalidateCurations(queryClient),
   });
 }
 
-export function useImportCurationCsvMutation() {
+export function usePreviewCurationCsvMutation() {
   const queryClient = useQueryClient();
   return useMutation<
     CurationImportResponse,
     Error,
-    { file: File; dryRun: boolean }
+    { file: File; provenanceFile?: File | null }
   >({
-    mutationFn: async ({ file, dryRun }) => {
+    mutationFn: async ({ file, provenanceFile }) => {
       const body = new FormData();
       body.append("file", file);
+      if (provenanceFile) body.append("provenance_file", provenanceFile);
       const fileIdentity = await fileIdempotencyFingerprint(file);
-      const operation = "admin.curation.import";
+      const provenanceIdentity = provenanceFile
+        ? await fileIdempotencyFingerprint(provenanceFile)
+        : null;
+      const operation = "admin.curation-import.preview";
       return withDomainIdempotencyFingerprint(
         domainCreateCommandSlot(operation),
         {
           content_sha256: fileIdentity.contentSha256,
-          dry_run: dryRun,
+          provenance_sha256: provenanceIdentity?.contentSha256 ?? null,
         },
         (idempotencyKey) =>
           postFormData<CurationImportResponse>(
-            pathWithQuery("/v1/admin/curations/import", {
-              dry_run: dryRun,
-            }),
+            "/v1/admin/curations/imports/preview",
             body,
             { headers: { "Idempotency-Key": idempotencyKey } },
           ),
         { onRelease: () => clearDomainCreateCommandSlot(operation) },
       );
     },
-    onSuccess: (response) => {
-      if (!response.data.dry_run) {
-        invalidateCurations(queryClient);
-      }
-    },
+    onSuccess: () => invalidateCurations(queryClient),
+  });
+}
+
+export function useCommitCurationImportPlanMutation() {
+  const queryClient = useQueryClient();
+  return useMutation<
+    CurationImportResponse,
+    Error,
+    { importPlanId: string; planEtag: string }
+  >({
+    mutationFn: ({ importPlanId, planEtag }) =>
+      withDomainIdempotencySubmission(
+        domainCommandSlot("admin.curation.import", importPlanId),
+        { importPlanId, planEtag },
+        (submission, idempotencyKey) =>
+          postJson<CurationImportResponse>(
+            `/v1/admin/curations/import-plans/${encodeURIComponent(
+              submission.importPlanId,
+            )}/commit`,
+            undefined,
+            {
+              headers: {
+                "Idempotency-Key": idempotencyKey,
+                "If-Match": submission.planEtag,
+              },
+            },
+          ),
+      ),
+    onSuccess: () => invalidateCurations(queryClient),
   });
 }
 

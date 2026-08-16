@@ -315,10 +315,9 @@ async def test_membership_id_outside_catalog_never_reaches_dagster(
 ) -> None:
     """카탈로그에 없는 id는 MOIS로 승격되지 않는다.
 
-    시드에는 MOIS dataset이 실재하므로(``alembic/baseline/seed.sql`` — squash 이전에는
-    ``0089_tvn33_expand_seed``가 넣던 것이고, 그 파일은 지금
-    ``alembic/legacy_versions/``에 있다), ``provider_dataset_id`` 필터가 빠지면
-    존재하지 않는 id로도 MOIS 행이 걸려 Dagster 조회가 발생한다.
+    시드에는 MOIS dataset이 실재하므로(``alembic/legacy_versions/0089_tvn33_expand_seed.py``),
+    ``provider_dataset_id`` 필터가 빠지면 존재하지 않는 id로도 MOIS 행이 걸려
+    Dagster 조회가 발생한다.
     """
     unused_dataset_id = int(
         (

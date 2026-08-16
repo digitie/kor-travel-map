@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from inspect import signature
+from io import BytesIO
 from typing import Any
 from unittest.mock import AsyncMock
 from uuid import UUID
@@ -16,6 +17,8 @@ from kortravelmap.infra.domain_command_repo import (
     canonical_domain_command_fingerprint,
 )
 from pydantic import BaseModel
+from sqlalchemy.exc import DBAPIError
+from starlette.datastructures import UploadFile
 
 from kortravelmap.api import domain_command_service as service
 from kortravelmap.api.auth import AdminProxyContext
@@ -185,6 +188,21 @@ class _Session:
 
     def in_transaction(self) -> bool:
         return False
+
+
+class _SqlStateError(Exception):
+    def __init__(self, sqlstate: str) -> None:
+        super().__init__(sqlstate)
+        self.sqlstate = sqlstate
+
+
+class _SerializableSession(_Session):
+    def __init__(self, events: list[str]) -> None:
+        super().__init__()
+        self.events = events
+
+    async def execute(self, statement: object) -> None:
+        self.events.append(f"sql:{statement}")
 
 
 def _request(*, headers: dict[str, str] | None = None) -> Request:
@@ -363,7 +381,7 @@ async def test_route_decorator_uses_operation_success_status_without_response_pa
     ) -> _Response:
         return _Response(data={"collection_id": "collection-1"})
 
-    session = _Session()
+    session = _SerializableSession([])
     result = await _route(
         context=AdminProxyContext(actor=_ACTOR),
         session=session,
@@ -378,6 +396,135 @@ async def test_route_decorator_uses_operation_success_status_without_response_pa
         status_code=201,
         response_headers={},
     )
+
+
+@pytest.mark.asyncio
+async def test_serializable_multipart_fingerprint_streams_and_rewinds_each_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operation = "admin.curation-import.preview"
+    events: list[str] = []
+    payloads: list[object] = []
+    reads: list[bytes] = []
+    command = service.DomainCommandHandle(
+        command_id=1,
+        actor=_ACTOR,
+        operation=operation,
+        idempotency_key=str(_KEY),
+        request_fingerprint="a" * 64,
+    )
+
+    async def begin(
+        *_args: object, payload: object, **_kwargs: object
+    ) -> service.DomainCommandHandle:
+        payloads.append(payload)
+        return command
+
+    monkeypatch.setattr(service, "begin_domain_command", begin)
+    monkeypatch.setattr(service, "complete_domain_command", AsyncMock())
+
+    @service.idempotent_domain_command(operation)
+    async def _route(
+        file: UploadFile,
+        provenance_file: UploadFile | None,
+        context: AdminProxyContext,
+        session: _SerializableSession,
+        request: Request,
+    ) -> _Response:
+        reads.append(await file.read())
+        if len(reads) == 1:
+            raise DBAPIError(None, None, _SqlStateError("40001"), False)
+        return _Response(data={"import_plan_id": "plan-1"})
+
+    content = b"collection_key,theme_slug\ncollection,theme\n"
+    result = await _route(
+        file=UploadFile(BytesIO(content), filename="curations.csv"),
+        provenance_file=None,
+        context=AdminProxyContext(actor=_ACTOR),
+        session=_SerializableSession(events),
+        request=_request(),
+        __domain_idempotency_key=_KEY,
+    )
+
+    assert result.data == {"import_plan_id": "plan-1"}
+    assert reads == [content, content]
+    assert payloads == [
+        {
+            "file": {
+                "sha256": "b3bd60f28eb1639d2a58118ba9626bcc43ff4d1f26caae00aaad62cc8186b80f"
+            },
+            "provenance_file": None,
+        },
+        {
+            "file": {
+                "sha256": "b3bd60f28eb1639d2a58118ba9626bcc43ff4d1f26caae00aaad62cc8186b80f"
+            },
+            "provenance_file": None,
+        },
+    ]
+
+
+@pytest.mark.asyncio
+async def test_serializable_policy_sets_first_statement_and_retries_whole_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    operation = "admin.curated-source-rule.patch"
+    events: list[str] = []
+    command = service.DomainCommandHandle(
+        command_id=1,
+        actor=_ACTOR,
+        operation=operation,
+        idempotency_key=str(_KEY),
+        request_fingerprint="a" * 64,
+    )
+
+    async def begin(*_args: object, **_kwargs: object) -> service.DomainCommandHandle:
+        events.append("claim")
+        return command
+
+    async def complete(*_args: object, **_kwargs: object) -> None:
+        events.append("terminal")
+
+    monkeypatch.setattr(service, "begin_domain_command", begin)
+    monkeypatch.setattr(service, "complete_domain_command", complete)
+    route_attempts = 0
+
+    @service.idempotent_domain_command(operation)
+    async def _route(
+        context: AdminProxyContext,
+        session: _SerializableSession,
+        request: Request,
+    ) -> _Response:
+        nonlocal route_attempts
+        route_attempts += 1
+        events.append("mutation")
+        if route_attempts < 3:
+            raise DBAPIError(None, None, _SqlStateError("40001"), False)
+        return _Response(data={"rule_id": "rule-1"})
+
+    session = _SerializableSession(events)
+    result = await _route(
+        context=AdminProxyContext(actor=_ACTOR),
+        session=session,
+        request=_request(),
+        __domain_idempotency_key=_KEY,
+    )
+
+    assert result.data == {"rule_id": "rule-1"}
+    assert session.begin_count == 3
+    assert route_attempts == 3
+    assert events == [
+        "sql:SET TRANSACTION ISOLATION LEVEL SERIALIZABLE",
+        "claim",
+        "mutation",
+        "sql:SET TRANSACTION ISOLATION LEVEL SERIALIZABLE",
+        "claim",
+        "mutation",
+        "sql:SET TRANSACTION ISOLATION LEVEL SERIALIZABLE",
+        "claim",
+        "mutation",
+        "terminal",
+    ]
 
 
 @pytest.mark.asyncio

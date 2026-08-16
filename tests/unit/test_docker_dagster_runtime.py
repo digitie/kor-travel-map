@@ -275,6 +275,10 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN",
         "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN",
         "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED",
+        # T-VN-40C canonical curation은 PinVi 전용 token digest만 Map API에 둔다.
+        # 원문 token은 어떤 Map runtime에도 전달하지 않는다.
+        "KOR_TRAVEL_MAP_API_PINVI_CURATION_SNAPSHOT_TOKEN_SHA256",
+        "KOR_TRAVEL_MAP_API_PINVI_CURATION_CUTOVER_MAPPING_TOKEN_SHA256",
         "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN",
     }
     assert "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET" in api["environment"]
@@ -300,6 +304,16 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
     assert api["environment"]["KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED"] == (
         "${KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED:-false}"
     )
+    for name in (
+        "KOR_TRAVEL_MAP_API_PINVI_CURATION_SNAPSHOT_TOKEN_SHA256",
+        "KOR_TRAVEL_MAP_API_PINVI_CURATION_CUTOVER_MAPPING_TOKEN_SHA256",
+    ):
+        assert api["environment"][name] == f"${{{name}:-}}"
+        assert {
+            service_name
+            for service_name, service in services.items()
+            if name in service.get("environment", {})
+        } == {"api"}
     assert api["environment"]["KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED"] == (
         "${KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED:-false}"
     )
@@ -1208,6 +1222,36 @@ def _run_entrypoint(path: str, extra: dict[str, str]) -> subprocess.CompletedPro
     )
 
 
+def _image_layout_without_legacy_migrations(tmp_path: Path) -> Path:
+    """최종 API image처럼 실행 archive 없이 진단 manifest만 둔다."""
+    image_root = tmp_path / "image"
+    (image_root / "docker").mkdir(parents=True)
+    (image_root / "alembic" / "versions").mkdir(parents=True)
+    (image_root / "docker" / "api-entrypoint.sh").write_bytes(
+        (ROOT / "docker" / "api-entrypoint.sh").read_bytes()
+    )
+    (image_root / "docker" / "pre-squash-revisions.txt").write_bytes(
+        (ROOT / "docker" / "pre-squash-revisions.txt").read_bytes()
+    )
+    (image_root / "alembic" / "versions" / "0200_schema_baseline.py").touch()
+    return image_root
+
+
+def _run_image_layout_entrypoint(
+    image_root: Path,
+    path: str,
+    extra: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["sh", "docker/api-entrypoint.sh"],
+        cwd=image_root,
+        env={"PATH": path, **_MIGRATION_BASE_ENV, **extra},
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
 @pytest.mark.unit
 def test_api_container_refuses_image_whose_alembic_head_differs(tmp_path: Path) -> None:
     """이미지의 alembic head가 기대값과 다르면 **DB를 건드리기 전에** 죽어야 한다.
@@ -1346,6 +1390,31 @@ def test_api_container_says_so_when_the_db_predates_the_squash_baseline(tmp_path
     )
     assert "legacy_versions" in result.stderr, "아카이브 위치를 알려 주지 않는다."
     assert "retrying" not in result.stderr, "영구 오류를 retry 루프로 두드렸다."
+
+
+@pytest.mark.unit
+def test_api_image_without_legacy_modules_identifies_pre_squash_db(
+    tmp_path: Path,
+) -> None:
+    """최종 image에 historical Python이 없어도 pre-squash 진단은 보존한다."""
+    path, marker = _migration_stub_path(
+        tmp_path,
+        image_head="0221_tvn40_snapshot_text_bounds",
+        current_script=(
+            "echo \"FAILED: Can't locate revision identified by "
+            "'0078_cache_target_gc_observe'\"; exit 255"
+        ),
+    )
+    image_root = _image_layout_without_legacy_migrations(tmp_path)
+
+    result = _run_image_layout_entrypoint(image_root, path, {})
+
+    assert result.returncode != 0, result.stdout
+    assert not marker.exists(), "복구 불가 상태인데 upgrade가 실행됐다."
+    assert "pre-squash" in result.stderr, result.stderr
+    assert "stale image" not in result.stderr
+    assert "legacy_versions/0078_cache_target_gc_observe" in result.stderr
+    assert not (image_root / "alembic" / "legacy_versions").exists()
 
 
 @pytest.mark.unit

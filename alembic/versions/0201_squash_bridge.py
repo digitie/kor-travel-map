@@ -25,19 +25,21 @@ alembic은 `public.alembic_version`에 적힌 문자열을 **script directory에
 파일명만 정렬을 위해 `0201_…`이다(alembic은 파일명과 revision id를 묶지 않는다).
 결과:
 
-- **기존 DB**(prod, `0104`): 문자열이 그대로 해석되고, 이미 head이므로 `upgrade head`가
-  no-op이다. `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD` 핀도 손댈 필요가 없다.
-- **새 DB**: `0200`이 스키마를 세우고 이 노드가 no-op으로 얹혀 같은 문자열에서 멈춘다.
+- **기존 DB**(prod, `0104`): 문자열이 그대로 해석된다. 이 bridge 노드 자체는 이미 적용된
+  것으로 보므로 다시 실행하지 않고, `upgrade head`는 후속 `0202`부터 현재 head `0220`까지
+  적용한다.
+- **새 DB**: `0200`이 스키마를 세우고 이 노드를 no-op으로 통과한 뒤 같은 `0202`~`0220`
+  후속 migration을 적용한다.
 
-두 경로가 **같은 head 문자열**로 수렴하는 것이 요점이다. 배포 순서에 stamp도, 핀
-갱신도, 손수술도 들어가지 않는다 — 넣지 않아도 되는 절차는 넣지 않는 편이 안전하다.
+두 경로가 **같은 현재 head `0220`**으로 수렴하는 것이 요점이다. 배포 순서에 stamp나
+손수술은 들어가지 않으며 expected-head 핀은 배포 대상인 현재 head를 가리킨다.
 
 ## upgrade의 검증이 **닿는 범위** (오해하지 말 것)
 
 여기 있는 relation 확인은 **새 DB 경로에서만 돈다.** `alembic_version`이 이미
-`0104_tvn36_final_fence`인 DB는 current == head라 `alembic upgrade head`가 0스텝으로
-끝나고 이 함수는 **호출되지 않는다.** 적대 리뷰 2인이 각각 그것을 지적했고, 한쪽은
-relation 두 개를 DROP한 0104 DB에서 `upgrade head`가 exit 0으로 통과하는 것을 실측했다.
+`0104_tvn36_final_fence`인 DB는 이 bridge revision을 이미 적용한 것으로 간주하므로 이
+함수는 **호출되지 않는다.** 전체 `upgrade head`는 0스텝이 아니라 후속 `0202`~`0220`을
+적용한다. 따라서 여기 relation 검사는 기존 0104 DB를 검증하거나 복구하지 않는다.
 
 그러니 이 검사를 "손수술·부분 복원·옛 dump로 어긋난 DB를 구제한다"고 읽으면 안 된다.
 그 축은 alembic 밖에 있어야 한다 — 지금은 `docker/api-entrypoint.sh`가 DB revision이

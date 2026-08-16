@@ -121,8 +121,9 @@ debug 표면은 origin이 허용 목록에 있어도 CORS를 광고하지 않는
   `/v2`로만 깬다"를 규칙화.
 
 ### 1.3 인증 (ADR-066·T-VN-57)
-- `RoutePolicy.PUBLIC_KEYED`로 분류된 모든 public operation은 production에서 VWorld 호환
-  `X-Kor-Travel-Map-Api-Key` header 또는 `ServiceToken` 중 하나를 요구한다.
+- `RoutePolicy.PUBLIC_KEYED`로 분류된 모든 public operation은 production에서 DB에 등록한
+  Map 전용 `X-Kor-Travel-Map-Api-Key` header 또는 `ServiceToken` 중 하나를 요구한다.
+  key의 32자 wire 형식만 VWorld 호환이며 VWorld provider key는 fallback으로 인정하지 않는다.
   URL `key` query는 T-VN-H01에서 clean-cut으로 폐기했다. OpenAPI도 두 scheme을 OR
   대안으로 선언한다. trusted admin BFF 우회는 same-origin UI용 내부 경계이며 public
   consumer security에는 노출하지 않는다.

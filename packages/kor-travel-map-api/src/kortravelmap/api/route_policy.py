@@ -40,6 +40,8 @@ from starlette.routing import WebSocketRoute
 from kortravelmap.api.auth import (
     require_admin_frontend,
     require_cache_target_service_principal,
+    require_curation_cutover_service_principal,
+    require_curation_snapshot_service_principal,
     require_metrics_token,
     require_ops_fixture_principal,
     require_ops_operator,
@@ -82,6 +84,12 @@ class RoutePolicyError(RuntimeError):
 #: 관측 가능한 enforcing dependency — dependency callable identity로만 판정한다.
 _ENFORCEMENT_BY_CALLABLE: dict[Callable[..., Any], str] = {
     require_cache_target_service_principal: "require_cache_target_service_principal",
+    require_curation_snapshot_service_principal: (
+        "require_curation_snapshot_service_principal"
+    ),
+    require_curation_cutover_service_principal: (
+        "require_curation_cutover_service_principal"
+    ),
     require_public_api_key: "require_public_api_key",
     require_service_token: "require_service_token",
     require_admin_frontend: "require_admin_frontend",
@@ -202,6 +210,9 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     # T-VN-32C alias-map DB-to-DB 이관 표면 (ADR-068 전환·복구 경계 read).
     "/v1/service/feature-alias-maps": RoutePolicy.SERVICE,
     "/v1/service/feature-alias-maps/checksum": RoutePolicy.SERVICE,
+    "/v1/service/curation-items/{curation_item_id}/detail-snapshot": RoutePolicy.SERVICE,
+    "/v1/service/curation-collections/{collection_id}/detail-snapshot": RoutePolicy.SERVICE,
+    "/v1/service/curation-cutover/identity-mappings": RoutePolicy.SERVICE,
     "/v1/service/refresh-requests": RoutePolicy.SERVICE,
     "/v1/service/refresh-requests/{request_id}": RoutePolicy.SERVICE,
     # C6c Map-owned cancel-probe service API — generic ServiceToken이 아닌 exact
@@ -228,13 +239,13 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/admin/curated-features/{curated_feature_id}/unselect": RoutePolicy.OPERATOR,
     "/v1/admin/curated-source-rules": RoutePolicy.OPERATOR,
     "/v1/admin/curated-source-rules/{rule_id}": RoutePolicy.OPERATOR,
-    "/v1/admin/curated-source-rules/{rule_id}/apply": RoutePolicy.OPERATOR,
     "/v1/admin/curated-sources": RoutePolicy.OPERATOR,
     "/v1/admin/curated-sources/{source_id}": RoutePolicy.OPERATOR,
     "/v1/admin/curated-themes": RoutePolicy.OPERATOR,
     "/v1/admin/curated-themes/{theme_id}": RoutePolicy.OPERATOR,
     "/v1/admin/curations": RoutePolicy.OPERATOR,
-    "/v1/admin/curations/import": RoutePolicy.OPERATOR,
+    "/v1/admin/curations/imports/preview": RoutePolicy.OPERATOR,
+    "/v1/admin/curations/import-plans/{import_plan_id}/commit": RoutePolicy.OPERATOR,
     "/v1/admin/curations/import-batches/{import_batch_id}": RoutePolicy.OPERATOR,
     "/v1/admin/curations/import-template.csv": RoutePolicy.OPERATOR,
     "/v1/admin/curations/items/{curation_item_id}/current-import-row": (RoutePolicy.OPERATOR),
@@ -245,6 +256,11 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/admin/curations/{collection_id}": RoutePolicy.OPERATOR,
     "/v1/admin/curations/{collection_id}/items": RoutePolicy.OPERATOR,
     "/v1/admin/curations/{collection_id}/items/{curation_item_id}": (RoutePolicy.OPERATOR),
+    "/v1/admin/theme-feature-candidates": RoutePolicy.OPERATOR,
+    "/v1/admin/theme-feature-candidates/{candidate_id}": RoutePolicy.OPERATOR,
+    "/v1/admin/theme-feature-candidates/{candidate_id}/transitions": (RoutePolicy.OPERATOR),
+    "/v1/admin/theme-feature-candidates/{candidate_id}/promote": (RoutePolicy.OPERATOR),
+    "/v1/admin/theme-feature-candidates/{candidate_id}/reject": (RoutePolicy.OPERATOR),
     "/v1/admin/cache-target-event-dead-letters/{event_id}/replays": (RoutePolicy.OPERATOR),
     "/v1/admin/cache-target-reconciliations": RoutePolicy.OPERATOR,
     "/v1/admin/dedup-reviews": RoutePolicy.OPERATOR,
@@ -490,6 +506,8 @@ def _wiring_satisfied(row: RoutePolicyMatrixRow) -> bool:
             & {
                 "require_service_token",
                 "require_cache_target_service_principal",
+                "require_curation_cutover_service_principal",
+                "require_curation_snapshot_service_principal",
                 "require_ops_fixture_principal",
             }
         )

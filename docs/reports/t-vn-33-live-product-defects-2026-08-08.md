@@ -18,7 +18,7 @@
 
 ## 남은 것
 
-### 1. src/kortravelmap/infra/alembic_exclusions.py:25 (UNCOMPARED_INDEXES) vs alembic/versions/0091_tvn33_cutover_fence.py:64
+### 1. src/kortravelmap/infra/alembic_exclusions.py:25 (UNCOMPARED_INDEXES) vs alembic/legacy_versions/0091_tvn33_cutover_fence.py:64
 
 T-VN-33 cutover가 DROP한 인덱스가 alembic 비교 제외 ledger에 그대로 남아 있다. ledger는 "검증 없는 제외 항목을 막는" 계약인데, 존재하지 않는 객체를 가리켜 계약 테스트가 영구 red가 된다.
 
@@ -63,7 +63,7 @@ test_krex_notice_asset_snapshot_lifecycle_and_sync_cursor: seed→partial→empt
 `run_mois_license_bulk_job`이 canonical membership 해석에 실패해 항상 FeatureOperationInvariantConflict('runtime dataset does not resolve to exactly one operation membership')로 죽는다 — MOIS bulk 적재(ktmctl import mois, Step A) 경로 전체가 최종 스키마에서 실행 불가.
 
 ```
-`_BULK_JOB_KIND = "mois_license_full_update"`(mois.py:73)를 import job kind이자 operation_key로 함께 넘기는데, 0089가 seed한 mois_license_features_bulk(provider_dataset_id=30)의 canonical operation_key는 `feature_place_mois_licenses_job`이다(alembic/versions/0089_tvn33_expand_seed.py:282, providers/feature_operation_registry.py:71, dagster/schedules.py:207 모두 동일). 그래서 _OPERATION_DATASET_MEMBERSHIP_SQL이 0행을 돌려준다. incremental/closed는 job kind와 operation key가 우연히 일치해서 이 단계는 통과한다. 컨테이너에서 그 한 인자만 'feature_place_mois_licenses_job'으로 바꾸자 test_cli_import_mois_loads_promoted가 통과했다.
+`_BULK_JOB_KIND = "mois_license_full_update"`(mois.py:73)를 import job kind이자 operation_key로 함께 넘기는데, 0089가 seed한 mois_license_features_bulk(provider_dataset_id=30)의 canonical operation_key는 `feature_place_mois_licenses_job`이다(alembic/legacy_versions/0089_tvn33_expand_seed.py:282, providers/feature_operation_registry.py:71, dagster/schedules.py:207 모두 동일). 그래서 _OPERATION_DATASET_MEMBERSHIP_SQL이 0행을 돌려준다. incremental/closed는 job kind와 operation key가 우연히 일치해서 이 단계는 통과한다. 컨테이너에서 그 한 인자만 'feature_place_mois_licenses_job'으로 바꾸자 test_cli_import_mois_loads_promoted가 통과했다.
 ```
 
 ### 7. src/kortravelmap/cli/main.py:214-218 (--sync-scope default="default"), src/kortravelmap/client/__init__.py:1425·1462 (sync_scope="default"), src/kortravelmap/mois.py:431·533 (sync_scope: str = "default")
@@ -74,7 +74,7 @@ MOIS incremental/closed 적재가 데이터 upsert까지 다 하고 나서 curso
 provider_sync.provider_dataset_operation_scopes의 유효 sync_scope는 dataset_wide(56행)/target_grids(3행)뿐이고 'default'는 없다. _RECORD_SUCCESS_SQL(sync_state_repo.py:125)이 scope 행을 join하므로 sync_scope='default'면 INSERT가 0행 → `.one()`에서 NoResultFound. 같은 함수가 job row용 membership은 `_dataset_membership`으로 제대로 해석해 dataset_wide를 쓰면서(mois.py:187-197), record_sync_success/record_sync_failure에는 낡은 리터럴 파라미터를 넘긴다. 컨테이너에서 CLI 기본값만 dataset_wide로 바꾸자 6/6 통과했다.
 ```
 
-### 8. alembic/versions/0091_tvn33_cutover_fence.py:74 (_detach_legacy_constraints, ck_import_jobs_update_request_shape DROP)
+### 8. alembic/legacy_versions/0091_tvn33_cutover_fence.py:74 (_detach_legacy_constraints, ck_import_jobs_update_request_shape DROP)
 
 feature_update_request job의 status/owner 형태 불변식이 통째로 사라졌다. 이제 status='running'인데 dagster_run_id IS NULL이거나, status='queued'인데 owner가 박힌 job, payload가 '{}'가 아닌 job을 DB가 그대로 받는다 — 소유자 없는 running job은 stale 회수 로직이 판정 못 하는 상태다.
 
@@ -82,7 +82,7 @@ feature_update_request job의 status/owner 형태 불변식이 통째로 사라�
 0053이 만든 이 CHECK은 pair 부분(provider/dataset_key/sync_scope) 외에 parent_job_id IS NULL, load_batch_id IS NULL, trigger_kind='update_request', operation_registry_version IS NULL, dagster_run_status IS NULL, payload='{}', dagster_run_id trim/non-empty, status<>'queued' OR dagster_run_id IS NULL, status<>'running' OR dagster_run_id IS NOT NULL을 함께 들고 있었다(0053_feature_update_scope_dispatch.py:400-411). 0091은 pair 컬럼 때문에 detach만 하고 canonical 잔여분을 재생성하지 않았다. 현재 ops.import_jobs의 CHECK 목록에도, 트리거 목록에도 대체물이 없다. docs/architecture/postgres-schema.md:384는 여전히 이 제약을 정본으로 문서화하고 있다.
 ```
 
-### 9. alembic/versions/0091_tvn33_cutover_fence.py:126-127 (_replace_pre_tvn33_ownership_guards, enforce_feature_update_job_pair/assert_feature_update_job_pair DROP)
+### 9. alembic/legacy_versions/0091_tvn33_cutover_fence.py:126-127 (_replace_pre_tvn33_ownership_guards, enforce_feature_update_job_pair/assert_feature_update_job_pair DROP)
 
 job→request 방향의 pair 불변식이 사라져 request 없는 kind='feature_update_request' import job(비격리 상태)이 commit된다. pair는 이제 request→job 한 방향만 강제된다.
 
@@ -106,7 +106,7 @@ dataset membership을 가진 feature update job은 typed terminal event를 절�
 test_feature_update_executor.py::test_bound_kma_empty_target_fails_operation_without_provider_or_state_write 에서 KmaWeatherTargetScopeEmptyError 처리 중 /repo/src/kortravelmap/infra/jobs_repo.py:1010 FeatureOperationInvariantConflict 발생. jobs_repo._membership_mode(line 659)는 membership 1개 → 'single'을 반환하고, _INSERT_EVENT_SQL(line 419-431)은 mode<>'root'일 때 CAST(:import_job_dataset_id AS uuid)와 일치하는 ops.import_job_datasets 행을 EXISTS로 요구한다. executor(line 799)는 그 인자를 넘기지 않는다.
 ```
 
-### 12. alembic/versions/0091_tvn33_cutover_fence.py:1673~1690 provider_sync.validate_data_integrity_violation_dataset() 트리거 vs ops.data_integrity_violations의 fk_data_integrity_violations_source_record_key_source_records (ON DELETE SET NULL)
+### 12. alembic/legacy_versions/0091_tvn33_cutover_fence.py:1673~1690 provider_sync.validate_data_integrity_violation_dataset() 트리거 vs ops.data_integrity_violations의 fk_data_integrity_violations_source_record_key_source_records (ON DELETE SET NULL)
 
 같은 head 스키마 안에서 두 규칙이 정면으로 모순된다. 트리거는 UPDATE 시 (provider_dataset_id, source_record_key)를 불변으로 강제하는데, FK는 source_record 삭제 시 source_record_key를 NULL로 UPDATE한다. 그래서 열린 finding이 가리키는 provider_sync.source_records 행은 이제 **삭제 자체가 불가능**하다 — SET NULL이 트리거에 걸려 CheckViolation으로 터진다. record GC/purge 경로가 있으면 그대로 막힌다.
 

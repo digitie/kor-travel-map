@@ -22,7 +22,10 @@ from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
 
 pytestmark = pytest.mark.integration
 
-_PASSWORD = "tvn34-test-only-runtime-password"
+# Shared migrations recreate the disposable runtime LOGIN roles with this
+# T-VN-40 password.  Keep the preflight fixture aligned so a preceding
+# privilege test cannot invalidate later command-login connections.
+_PASSWORD = "tvn40-test-only-runtime-password"
 _RUNTIME_LOGINS = (
     "ktm_feature_api_runtime",
     "ktm_feature_dagster_runtime",
@@ -337,6 +340,173 @@ async def test_tvn34_runtime_preflight_rejects_single_audit_or_read_view_leak(
             )
             await connection.execute(
                 text("GRANT SELECT ON feature.public_features TO ktm_feature_runtime")
+            )
+        await api_engine.dispose()
+        await dagster_engine.dispose()
+
+
+async def test_tvn40_runtime_preflight_rejects_cross_executor_and_missing_grants(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """T-VN-40 application routine 집합은 API/Dagster별 exact equality다."""
+
+    await _provision_runtime_logins(migrated_engine)
+    api_engine = await _engine_for_runtime(
+        migrated_engine,
+        login="ktm_feature_api_runtime",
+    )
+    dagster_engine = await _engine_for_runtime(
+        migrated_engine,
+        login="ktm_feature_dagster_runtime",
+    )
+    try:
+        async with migrated_engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "GRANT EXECUTE ON PROCEDURE "
+                    "feature.finalize_provider_curation_root(uuid) "
+                    "TO ktm_feature_api_runtime"
+                )
+            )
+            await connection.execute(
+                text(
+                    "GRANT EXECUTE ON PROCEDURE "
+                    "feature.reject_theme_feature_candidate("
+                    "uuid,bigint,bigint,text,text) "
+                    "TO ktm_feature_dagster_runtime"
+                )
+            )
+            await connection.execute(
+                text(
+                    "CREATE PROCEDURE ops.review_rogue_procedure() "
+                    "LANGUAGE SQL SECURITY DEFINER AS 'SELECT 1'"
+                )
+            )
+            await connection.execute(
+                text(
+                    "CREATE FUNCTION ops.review_rogue_function() RETURNS integer "
+                    "LANGUAGE SQL SECURITY DEFINER AS 'SELECT 1'"
+                )
+            )
+            await connection.execute(
+                text(
+                    "REVOKE ALL ON PROCEDURE ops.review_rogue_procedure() FROM PUBLIC"
+                )
+            )
+            await connection.execute(
+                text(
+                    "GRANT EXECUTE ON PROCEDURE ops.review_rogue_procedure() "
+                    "TO ktm_feature_dagster_runtime"
+                )
+            )
+            await connection.execute(
+                text(
+                    "REVOKE ALL ON FUNCTION ops.review_rogue_function() FROM PUBLIC"
+                )
+            )
+            await connection.execute(
+                text(
+                    "GRANT EXECUTE ON FUNCTION ops.review_rogue_function() "
+                    "TO ktm_feature_api_runtime"
+                )
+            )
+
+        with pytest.raises(RuntimeDbPrivilegeBoundaryError, match="unexpected"):
+            await assert_runtime_db_privilege_boundary(
+                api_engine,
+                expected_login="ktm_feature_api_runtime",
+            )
+        with pytest.raises(RuntimeDbPrivilegeBoundaryError, match="unexpected"):
+            await assert_runtime_db_privilege_boundary(
+                dagster_engine,
+                expected_login="ktm_feature_dagster_runtime",
+            )
+
+        async with migrated_engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "REVOKE EXECUTE ON PROCEDURE "
+                    "feature.finalize_provider_curation_root(uuid) "
+                    "FROM ktm_feature_api_runtime"
+                )
+            )
+            await connection.execute(
+                text(
+                    "REVOKE EXECUTE ON PROCEDURE "
+                    "feature.reject_theme_feature_candidate("
+                    "uuid,bigint,bigint,text,text) "
+                    "FROM ktm_feature_dagster_runtime"
+                )
+            )
+            await connection.execute(
+                text("DROP PROCEDURE ops.review_rogue_procedure()")
+            )
+            await connection.execute(
+                text("DROP FUNCTION ops.review_rogue_function()")
+            )
+            await connection.execute(
+                text(
+                    "REVOKE EXECUTE ON PROCEDURE "
+                    "ops.ensure_provider_feature_operation_command("
+                    "text,text,text,jsonb,timestamptz,timestamptz,text) "
+                    "FROM ktm_curation_provider_executor"
+                )
+            )
+            await connection.execute(
+                text(
+                    "REVOKE EXECUTE ON FUNCTION "
+                    "ops.fill_provider_cancellation_starts_command("
+                    "uuid,text,timestamptz) FROM ktm_feature_api_runtime"
+                )
+            )
+
+        with pytest.raises(RuntimeDbPrivilegeBoundaryError, match="missing expected"):
+            await assert_runtime_db_privilege_boundary(
+                api_engine,
+                expected_login="ktm_feature_api_runtime",
+            )
+        with pytest.raises(RuntimeDbPrivilegeBoundaryError, match="missing expected"):
+            await assert_runtime_db_privilege_boundary(
+                dagster_engine,
+                expected_login="ktm_feature_dagster_runtime",
+            )
+    finally:
+        async with migrated_engine.begin() as connection:
+            await connection.execute(
+                text("DROP PROCEDURE IF EXISTS ops.review_rogue_procedure()")
+            )
+            await connection.execute(
+                text("DROP FUNCTION IF EXISTS ops.review_rogue_function()")
+            )
+            await connection.execute(
+                text(
+                    "REVOKE EXECUTE ON PROCEDURE "
+                    "feature.finalize_provider_curation_root(uuid) "
+                    "FROM ktm_feature_api_runtime"
+                )
+            )
+            await connection.execute(
+                text(
+                    "REVOKE EXECUTE ON PROCEDURE "
+                    "feature.reject_theme_feature_candidate("
+                    "uuid,bigint,bigint,text,text) "
+                    "FROM ktm_feature_dagster_runtime"
+                )
+            )
+            await connection.execute(
+                text(
+                    "GRANT EXECUTE ON PROCEDURE "
+                    "ops.ensure_provider_feature_operation_command("
+                    "text,text,text,jsonb,timestamptz,timestamptz,text) "
+                    "TO ktm_curation_provider_executor"
+                )
+            )
+            await connection.execute(
+                text(
+                    "GRANT EXECUTE ON FUNCTION "
+                    "ops.fill_provider_cancellation_starts_command("
+                    "uuid,text,timestamptz) TO ktm_feature_api_runtime"
+                )
             )
         await api_engine.dispose()
         await dagster_engine.dispose()

@@ -853,15 +853,27 @@ async def test_curated_public_read_uses_projection_admin_unchanged(
             )
             await migrated_session.flush()
 
-    admin_theme = await curated_repo.create_curated_theme(
-        migrated_session,
-        theme_slug="pfv-admin-only-theme",
-        theme_name="관리자 전용 테마",
-        theme_group="internal",
-        visibility="admin_only",
+    admin_theme_id = str(
+        (
+            await migrated_session.execute(
+                text(
+                    """
+                    INSERT INTO feature.curated_themes (
+                      theme_slug, theme_name, theme_description, theme_group,
+                      default_curated, visibility, metadata, row_revision,
+                      owner_kind, owner_provider_dataset_id
+                    ) VALUES (
+                      'pfv-admin-only-theme', '관리자 전용 테마', '', 'internal',
+                      false, 'admin_only', '{}'::jsonb, 1, 'operator', NULL
+                    )
+                    RETURNING theme_id::text
+                    """
+                )
+            )
+        ).scalar_one()
     )
     overlay_cases = (
-        ("admin-theme", admin_theme.theme_id, "curated"),
+        ("admin-theme", admin_theme_id, "curated"),
         ("candidate", theme_id, "candidate"),
         ("rejected", theme_id, "rejected"),
     )
@@ -938,7 +950,7 @@ async def test_curated_public_read_uses_projection_admin_unchanged(
     admin_collection = await curation_repo.create_curation_collection(
         migrated_session,
         collection_key="pfv-admin-only:2026",
-        theme_id=admin_theme.theme_id,
+        theme_id=admin_theme_id,
         source_id=source_id,
         title="관리자 전용 테마의 공개 표시 컬렉션",
         edition_key="2026",
@@ -1077,12 +1089,13 @@ async def test_category_counts_use_projection(migrated_session: AsyncSession) ->
 async def test_collection_items_redact_non_public_linked_features(
     migrated_session: AsyncSession,
 ) -> None:
-    """공개 collection은 비공개 연결 item 전체를 SQL에서 제외한다 (리뷰 S2).
+    """공개 collection은 신뢰된 공개 Feature 연결 item만 SQL에서 반환한다 (리뷰 S2).
 
     feature 이름을 ``place_name``으로 자동 복제하고 CSV가 ``address_hint``와
     metadata를 저장하므로 Python에서 feature 필드 일부만 NULL 처리해서는 비공개
     전환 뒤에도 장소 정보를 숨길 수 없다. 공개 SQL은 연결 feature가 최종 공개
-    집합에 없으면 item 자체를 반환하지 않고, 공식 미연결 item은 유지한다.
+    집합에 없거나 Feature에 연결되지 않은 item은 모두 반환하지 않는다. admin read는
+    미연결 item을 그대로 보존해 관리자가 원인을 확인할 수 있어야 한다.
     """
     theme_id, source_id = await _seed_curation_foundation(migrated_session)
     collection = await curation_repo.create_curation_collection(
@@ -1153,14 +1166,13 @@ async def test_collection_items_redact_non_public_linked_features(
     assert result is not None
     row, items = result
     by_external = {item.external_item_id: item for item in items}
-    assert set(by_external) == {"pfv-item-active", "pfv-item-unlinked"}
+    assert set(by_external) == {"pfv-item-active"}
     active = by_external["pfv-item-active"]
     assert active.feature_id == "pfv:item:active"
     assert active.feature_name == "아이템장소 active"
     assert active.lon is not None
     assert active.lat is not None
-    assert by_external["pfv-item-unlinked"].feature_id is None
-    assert row.item_count == row.public_item_count == 2
+    assert row.item_count == row.public_item_count == 1
 
     admin_result = await curation_repo.get_curation_collection(
         migrated_session, collection_id=collection.collection_id
@@ -1168,6 +1180,10 @@ async def test_collection_items_redact_non_public_linked_features(
     assert admin_result is not None
     _admin_row, admin_items = admin_result
     assert len(admin_items) == len(_STATE_MATRIX) + 1
+    unlinked = next(
+        item for item in admin_items if item.external_item_id == "pfv-item-unlinked"
+    )
+    assert unlinked.feature_id is None
     suppressed = next(
         item for item in admin_items if item.external_item_id == "pfv-item-suppressed"
     )
