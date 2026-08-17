@@ -65,10 +65,13 @@ enable한다.
      `c6f9aba6ab4b815c394e5e1cb5fb4a2c3488d147d5bb1a7e21b92c1796f4aebd`다. PinVi는 이 service
      bytes를 exact vendor로 재고정한다. `consumer-rollout-v1.json`의 T-VN-41 receipt는
      `pending → candidate_verified → complete` 세 상태만 허용한다. `candidate_verified`는 n150
-     격리 후보 archive·양 image ID·compatible-pair attestation·live evidence digest와 두 source
-     commit을 모두 고정하지만, `final_c7_required=true`로 final main C7과 consumer enable을
-     명시적으로 막는다. `complete`는 final main source/image의 C7 attestation까지 다시 통과한 뒤에만
-     허용한다.
+     격리 후보 archive·Map API/UI/Dagster web/Dagster daemon·PinVi API의 다섯 immutable image ID·
+     compatible-pair manifest·attestation·live evidence digest와 두 source commit을 모두 고정하지만,
+     `final_c7_required=true`로 final main C7과 consumer enable을 명시적으로 막는다. `complete`는
+     별도의 final Map/PinVi source commit, 같은 다섯 final image ID, final C7 attestation과 final
+     compatible-pair manifest·C7 attestation·final live evidence digest를 다시 기록한 뒤에만 허용한다.
+     receipt test는 C7 attestation의 runtime
+     role 다섯 개와 이 필드를 1:1로 대조한다.
 
 ## 필수 검증
 

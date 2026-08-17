@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from kortravelmap.core.cache_target_stream import SnapshotMerkleRowV1
+from scripts.lib.c7_prod_attestation import PAIR_RUNTIME_IMAGE_FIELDS
 
 _ROOT: Final = Path(__file__).resolve().parents[2]
 _CONTRACTS: Final = _ROOT / "contracts" / "vnext"
@@ -87,6 +88,16 @@ _WAVE2_TASKS: Final = (
     "T-VN-39",
 )
 _REVENDOR_VALUES: Final = frozenset({"yes", "no", "deferred-to-implementation"})
+_C7_ROLE_RECEIPT_FIELDS: Final[dict[str, tuple[str, str]]] = {
+    "map_api": ("map_image_id", "map_api_image_id"),
+    "map_ui": ("map_ui_image_id", "map_ui_image_id"),
+    "map_dagster_web": ("map_dagster_image_id", "map_dagster_web_image_id"),
+    "map_dagster_daemon": (
+        "map_dagster_daemon_image_id",
+        "map_dagster_daemon_image_id",
+    ),
+    "pinvi_api": ("pinvi_image_id", "pinvi_api_image_id"),
+}
 
 
 def _load_json(name: str) -> dict[str, Any]:
@@ -281,31 +292,55 @@ def test_consumer_rollout_shape() -> None:
     else:
         required_keys = {
             "state",
-            "map_commit",
-            "pinvi_commit",
             "map_service_openapi_sha256",
             "pinvi_service_vendor_sha256",
-            "map_image_id",
-            "pinvi_image_id",
-            "compatible_pair_attestation_sha256",
-            "live_e2e_evidence_sha256",
             "verification",
         }
+        assert dict(PAIR_RUNTIME_IMAGE_FIELDS) == {
+            role: active_field
+            for role, (active_field, _) in _C7_ROLE_RECEIPT_FIELDS.items()
+        }
         if paired_receipt["state"] == "candidate_verified":
-            assert set(paired_receipt) == required_keys | {"final_c7_required"}
+            prefix = "candidate_"
+            state_keys = {
+                f"{prefix}map_commit",
+                f"{prefix}pinvi_commit",
+                f"{prefix}compatible_pair_manifest_sha256",
+                f"{prefix}compatible_pair_attestation_sha256",
+                f"{prefix}live_e2e_evidence_sha256",
+                "final_c7_required",
+            }
             assert paired_receipt["final_c7_required"] is True
         else:
-            assert set(paired_receipt) == required_keys
-        for key in ("map_commit", "pinvi_commit"):
+            prefix = "final_"
+            state_keys = {
+                f"{prefix}map_commit",
+                f"{prefix}pinvi_commit",
+                f"{prefix}compatible_pair_manifest_sha256",
+                f"{prefix}c7_attestation_sha256",
+                f"{prefix}live_e2e_evidence_sha256",
+            }
+        image_keys = {
+            f"{prefix}{receipt_field}"
+            for _, receipt_field in _C7_ROLE_RECEIPT_FIELDS.values()
+        }
+        assert len(image_keys) == len(PAIR_RUNTIME_IMAGE_FIELDS)
+        assert set(paired_receipt) == required_keys | state_keys | image_keys
+        for key in (f"{prefix}map_commit", f"{prefix}pinvi_commit"):
             assert re.fullmatch(r"[0-9a-f]{40}", paired_receipt[key]), key
         for key in (
             "map_service_openapi_sha256",
             "pinvi_service_vendor_sha256",
-            "compatible_pair_attestation_sha256",
-            "live_e2e_evidence_sha256",
+            f"{prefix}compatible_pair_manifest_sha256",
+            (
+                f"{prefix}compatible_pair_attestation_sha256"
+                if paired_receipt["state"] == "candidate_verified"
+                else f"{prefix}c7_attestation_sha256"
+            ),
+            f"{prefix}live_e2e_evidence_sha256",
         ):
             assert re.fullmatch(r"[0-9a-f]{64}", paired_receipt[key]), key
-        for key in ("map_image_id", "pinvi_image_id"):
+        for key in image_keys:
             assert re.fullmatch(r"sha256:[0-9a-f]{64}", paired_receipt[key]), key
         assert paired_receipt["map_service_openapi_sha256"] == service_sha256
         assert (
