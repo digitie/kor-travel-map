@@ -52,9 +52,10 @@
   final target mutation의 current-tuple fence는 의도적으로 분리한다.
 - 두 적대적 재리뷰에서 DB/동시성 P0/P1은 없었다. Map service OpenAPI는 현재
   SHA로 재생성했고 PinVi 수동 PUT의 409 설명도 좌표 conflict와 source protocol
-  위반을 모두 명시했다. 다만 PinVi service vendor는 이전 SHA를 가리키므로
-  receipt는 `pending`을 유지한다. PinVi 재vendor·paired contract CI·완료 receipt와
-  n150 isolated Live UI E2E 전에는 consumer enable 또는 PR 병합을 선언하지 않는다.
+  위반을 모두 명시했다. PinVi service vendor 재고정과 paired contract CI는 완료했으며,
+  T-VN-41 receipt는 `pending → candidate_verified → complete`를 fail-closed로 구분한다.
+  n150 후보 검증은 exact archive·양 immutable image·attestation·evidence digest를 남겨도
+  final main C7 이전에는 `complete`/consumer enable을 선언할 수 없다.
 
 ## 2026-08-17 — 완료된 Wave 2 task 이력 아카이브 정리
 

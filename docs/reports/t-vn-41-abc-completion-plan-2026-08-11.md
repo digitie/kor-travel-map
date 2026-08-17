@@ -62,9 +62,13 @@ enable한다.
    - fixed snapshot/Merkle reconciliation은 begin → writer backfill → seal → consumer completion
      순서를 지키며 checksum mismatch, duplicate, gap, stale restore epoch을 fail-closed한다.
    - current-main rebase 뒤 Map service OpenAPI SHA-256은
-     `c6f9aba6ab4b815c394e5e1cb5fb4a2c3488d147d5bb1a7e21b92c1796f4aebd`다. 기존 PinVi vendor는
-     다른 SHA를 가리키므로, 새 vendor와 exact paired receipt를 재생성하기 전까지 consumer enable은
-     기본 off로 둔다. n150 isolated evidence가 통과할 때만 별도 operation으로 enable한다.
+     `c6f9aba6ab4b815c394e5e1cb5fb4a2c3488d147d5bb1a7e21b92c1796f4aebd`다. PinVi는 이 service
+     bytes를 exact vendor로 재고정한다. `consumer-rollout-v1.json`의 T-VN-41 receipt는
+     `pending → candidate_verified → complete` 세 상태만 허용한다. `candidate_verified`는 n150
+     격리 후보 archive·양 image ID·compatible-pair attestation·live evidence digest와 두 source
+     commit을 모두 고정하지만, `final_c7_required=true`로 final main C7과 consumer enable을
+     명시적으로 막는다. `complete`는 final main source/image의 C7 attestation까지 다시 통과한 뒤에만
+     허용한다.
 
 ## 필수 검증
 
