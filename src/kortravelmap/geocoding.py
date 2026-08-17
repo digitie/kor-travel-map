@@ -961,7 +961,12 @@ class KorTravelGeoRestClient:
             self.preflight()
 
     def preflight(self) -> None:
-        """geo public API key 결선을 확인한다."""
+        """geo public API key **결선**을 확인한다 (형태만).
+
+        ⚠️ 이 검사는 값이 *무엇인지* 보지 않는다. 다른 서비스의 키를 여기 넣어도 통과한다 —
+        2026-08-13 prod 사고가 정확히 그것이었다(VWorld 키가 결선돼 geo가 401로 거부).
+        의미 검증은 :meth:`verify_credentials`가 하고, 그건 네트워크가 필요해 별도다.
+        """
         if self._api_key is None:
             raise GeoAuthNotConfiguredError(
                 "kor-travel-geo public API key가 설정되지 않았습니다. "
@@ -977,6 +982,52 @@ class KorTravelGeoRestClient:
             raise GeoAuthNotConfiguredError(
                 "kor-travel-geo public API key는 128자 이하여야 합니다."
             )
+
+    async def verify_credentials(self) -> None:
+        """geo가 이 키를 **실제로 받아들이는지** 1회 호출로 확인한다.
+
+        :meth:`preflight`는 형태만 본다. 다른 서비스의 키를 넣어도 통과하므로,
+        "설정돼 있다"와 "동작한다" 사이의 간극을 여기서 메운다.
+
+        판정은 두 갈래이고 **의도적으로 비대칭**이다.
+
+        - **키가 거부되면 던진다**(fail-close). geo가 400 ``E0100 field=key`` 또는 401
+          ``E0401``로 답하면 그 키로는 어떤 지오코딩도 성공하지 못한다. 그 상태로 기동하면
+          정/역지오코딩이 전부 실패하는 서비스가 healthy로 뜬다.
+        - **도달 못 하면 던지지 않는다**(fail-open). geo는 별도 stack이라, 그쪽 지연이
+          map 전체의 부팅 교착이 되면 안 된다. 이 경우는 호출자가 경고를 남긴다.
+
+        네트워크는 **주입된 클라이언트**로 나간다. 이 모듈은 httpx를 런타임 의존으로 갖지
+        않으며(ADR-006/044) client 수명은 호출자 책임이다(ADR-002).
+
+        Raises:
+            GeoAuthNotConfiguredError: 키가 미설정·형태 위반이거나 geo가 거부했을 때.
+            GeoRequestError: 도달 실패·5xx 등 **판정 불가**. 호출자가 삼킬지 정한다.
+        """
+        self.preflight()
+        # 가장 싼 유효 요청. 좌표는 어디든 되지만 결과를 쓰지 않으므로 최소 옵션만 켠다.
+        resp = await self._post(
+            f"{self._base}/reverse",
+            json={
+                "lon": 127.0,
+                "lat": 37.5,
+                "include_region": False,
+                "include_zipcode": False,
+            },
+        )
+        if _is_public_key_rejection(resp):
+            raise GeoAuthNotConfiguredError(
+                "kor-travel-geo가 Map public API key를 거부했습니다. "
+                "다른 서비스의 키(예: VWorld)가 결선돼 있지 않은지 확인하세요 — "
+                "형태 검사는 그것을 잡지 못합니다."
+            )
+        if resp.status_code >= 500:
+            raise GeoRequestError(
+                f"kor-travel-geo 상태 확인 불가: {resp.status_code} "
+                f"{resp.reason_phrase}"
+            )
+        # 2xx/4xx(키 거부 아님)는 키가 받아들여졌다는 뜻이다. 본문은 보지 않는다 —
+        # 이 메서드가 답하는 질문은 "이 키가 먹히는가"뿐이다.
 
     def _public_api_headers(self) -> dict[str, str] | None:
         if self._api_key is None:

@@ -416,6 +416,8 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         schedule_name="feature_weather_airkorea_air_quality_hourly_schedule",
         cron_schedule="10 * * * *",
         description="AirKorea 대기질 weather Feature + WeatherValue 매시 적재.",
+        coalesce_active_runs=True,
+        max_runtime_seconds=_FRESHNESS_RUN_MAX_RUNTIME_SECONDS,
     ),
     # KMA weather 3종 (T-219b) — 발표 스케줄 + 가용 지연(docs/etl/kma-weather-etl.md §6)
     # 에 맞춘 cron. 같은 base 재실행은 provider_sync_state cursor가 skip한다.
@@ -425,6 +427,8 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         schedule_name="feature_weather_kma_ultra_short_nowcast_hourly_schedule",
         cron_schedule="45 * * * *",
         description="KMA 초단기실황 WeatherValue 매시 적재(발표 HH:00 + 40분 지연 후).",
+        coalesce_active_runs=True,
+        max_runtime_seconds=_FRESHNESS_RUN_MAX_RUNTIME_SECONDS,
         execution_scopes=_kma_grid_execution_scopes(KMA_ULTRA_SHORT_NOWCAST_DATASET_KEY),
     ),
     FeatureLoadScheduleSpec(
@@ -433,6 +437,8 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         schedule_name="feature_weather_kma_ultra_short_forecast_hourly_schedule",
         cron_schedule="50 * * * *",
         description="KMA 초단기예보 WeatherValue 매시 적재(발표 HH:30 + 15분 지연 후).",
+        coalesce_active_runs=True,
+        max_runtime_seconds=_FRESHNESS_RUN_MAX_RUNTIME_SECONDS,
         execution_scopes=_kma_grid_execution_scopes(KMA_ULTRA_SHORT_FORECAST_DATASET_KEY),
     ),
     FeatureLoadScheduleSpec(
@@ -443,6 +449,8 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         description=(
             "KMA 단기예보 WeatherValue 매시 적재(발표 02~23시 3시간 간격 + 지연 후)."
         ),
+        coalesce_active_runs=True,
+        max_runtime_seconds=_FRESHNESS_RUN_MAX_RUNTIME_SECONDS,
         execution_scopes=_kma_grid_execution_scopes(KMA_SHORT_FORECAST_DATASET_KEY),
     ),
     FeatureLoadScheduleSpec(
@@ -451,6 +459,8 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         schedule_name="feature_weather_kma_mid_forecast_hourly_schedule",
         cron_schedule="25 * * * *",
         description="KMA 중기예보(육상+기온) WeatherValue 매시 적재(발표 06/18시 + 지연 후).",
+        coalesce_active_runs=True,
+        max_runtime_seconds=_FRESHNESS_RUN_MAX_RUNTIME_SECONDS,
     ),
     FeatureLoadScheduleSpec(
         asset=feature_notice_kma_weather_alerts,
@@ -458,6 +468,8 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         schedule_name="feature_notice_kma_weather_alerts_hourly_schedule",
         cron_schedule="15 * * * *",
         description="KMA 기상특보 notice Feature 매시 적재(rolling window 멱등 upsert).",
+        coalesce_active_runs=True,
+        max_runtime_seconds=_FRESHNESS_RUN_MAX_RUNTIME_SECONDS,
     ),
     # MCST 파일데이터 (T-220 재배선, #395) — 저빈도 시설 데이터, 월 1회.
     FeatureLoadScheduleSpec(

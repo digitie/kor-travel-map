@@ -15,20 +15,24 @@
 barrier로 직렬화한다.
 
 - **Lane A — cross-repo 계약·운영·데이터 품질**
-  - [~] `T-VN-H25B` → [ ] `T-VN-H34`(공식 curation 미연결 membership 잔여 AC)
+  - [x] `T-VN-H25B`(미충족 AC 2건 종결, 2026-08-18) → [~] `T-VN-H34`(공식 curation 미연결 membership 잔여 AC)
   - [~] `T-VN-H43` → [~] `T-VN-H44`(백업 정기화·복원 드릴 재개 조건)
-  - [ ] `T-VN-H45-후속`(다건 provider fetcher·quota 관찰 확장)
-  - [ ] `T-VN-H46C`(VWorld fallback 사슬 제거) ∥ [ ] `T-VN-H46D`(daemon 스키마 drift)
-  - [ ] `T-VN-H47`(prod 백업 산출물 위생 — #987) ∥ [ ] `T-VN-H48`(n150 임시 DB 컨테이너 — #988)
-  - [ ] `T-VN-H49`(4분할 인스턴스 백업 주체 — dm #177 추적)
+  - [~] `T-VN-H45-후속`(②quota 오분류·④coalesce 완료 / ①khoa·③RetryBudget·⑤alembic 잔여)
+  - [x] `T-VN-H46C`(preflight 의미 검증 + 기동 결선, 2026-08-18) ∥ [x] `T-VN-H46D`(실측 종결)
+  - [x] `T-VN-H47`(#987 종료) ∥ [x] `T-VN-H48`(#988 종료) — prod 정리 + 재발 방지 문서화 완료
+  - [x] `T-VN-H49`(baseline 3건 확보 + 절차 문서화 완료, 2026-08-18 — 주기화는 dm #177)
 - **Lane B — frontend hardening·PinVi 소비 API**
   - [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox)
   - [~] `T-VN-41F1D-D` → [ ] `T-VN-41F1D-D2`(격리 리허설·data-dependent live UI E2E)
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환) ∥ [ ] `T-VN-41S`
+- **Lane M — 수동 Feature 생성 (2026-08-18 결정, T-VN-40 인수 뒤)**
+  - [ ] `T-VN-M01`(admin Feature 생성 API — **ADR 필요**) → [ ] `T-VN-M02`(origin 보존·불변)
+  - [ ] `T-VN-M03`(curated 동시 생성 — T-VN-40 표면) ∥ [ ] `T-VN-M04`(PinVi 요청 큐 — cross-repo)
+  - [ ] `T-VN-M05`(provider 발행 시 중복 판정 — 자동 병합 금지)
 - **Lane C — 사문화 정리·미구현 dataset (다른 lane과 무관, 아무 때나)**
-  - [ ] `T-VN-C01`(H35 cutover helper 18개 파일 제거) — T-VN-40 legacy 삭제와 겹침
-  - [ ] `T-VN-C02`(T-229-buildx arm64 검증) ∥ [ ] `T-VN-C03`(ADR-034 보조 dataset 5종)
-  - [ ] `T-VN-C04`(문서 정합 — SPRINT 헤더·미개봉 브랜치)
+  - [x] `T-VN-C01`(H35 cutover helper 퇴역, 2026-08-18) — 17파일 삭제, identity 정의는 `core/database_identity.py`로 이전
+  - [~] `T-VN-C02`(arm64 — registry 자격증명 필요, 정적 점검만 완료) ∥ [~] `T-VN-C03`(표 drift 완료 / dataset 5종은 제품 결정)
+  - [x] `T-VN-C04`(SPRINT 헤더 정정 + 원격 브랜치 382개 정리, 2026-08-18)
 - **Wave 2 barrier 이후**
   - Lane A: [ ] `T-VN-37D`(notice empty range 표현 — 제품 결정 대기)
   - 32~38 join barrier 뒤 Lane B: [~] `T-VN-40A` → [~] `T-VN-40B` →
@@ -48,6 +52,10 @@ barrier로 직렬화한다.
       과거 `0001~0104` 파일은 read-only legacy 증거다. n150 현행 `0104` DB는 bridge가
       그대로 인식하므로 stamp나 baseline 재실행 없이 `0202…0220`만 forward upgrade한다.
   - 최종 단일 cutover: [ ] `T-VN-39`
+  - ⚠️ **T-VN-40 인수 실태 재조사(2026-08-18, 조사 1 + 적대 검증 2)** — "인수만 남았다"가
+    아니다. 아래 `T-VN-40 인수 — 실태` 절 참조. 요지: 40A write fence **미구현**(legacy와
+    canonical 양쪽 쓰기 가능), 40C 물리 삭제 **코드·migration·manifest 없음**,
+    identity mapping 테이블 **적재 0건**, receipt는 손으로 고쳐야 하며 freeze 상수와 함께.
 - **보류/외부 추적**
   - [ ] `T-VN-H27` — #819 HAProxy WebSocket tunnel timeout(**보류: 운영자 환경 필요**,
     사용자 지시 2026-07-29). 프록시는 **OPNsense 라우터의 HAProxy**이고 저장소에 config가 없다
@@ -197,7 +205,7 @@ barrier로 직렬화한다.
 H24가 stable component 기반 미연결 membership으로 무손실 보존하므로 데이터 손실 위험은 없다.
 증거 생성과 mutation을 분리한다.
 
-- [~] T-VN-H25B — **CSV 역반영 5건 + 매칭 재실행** (미충족 AC는 아래 표)
+- [x] T-VN-H25B — **CSV 역반영 5건 + 매칭 재실행** (미충족 AC 2건 2026-08-18 종결)
 
   H25A 재정의 결과 실행 가능한 작업은 둘이다.
   1. **CSV 역반영 8건** — DB에서는 링크됐으나 CSV `feature_id`가 비어 있는 항목(H25A §3).
@@ -240,8 +248,54 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   | --- | --- | --- |
   | CSV 역반영 | 충족 (8→5, 3건은 오링크) | — |
   | 기준선 대조 + 차이 설명 | 충족 — 교차표를 manifest `summary.baseline_vs_matcher`에 기록 | — |
-  | 주소 축 | **부분** — `region`(115/264)만 사용. `sigungu_code`는 시도코드 비교에만 쓰고 시군구 단위 대조는 미구현 | H25B-후속 |
-  | provider provenance 조인 | **미충족** — `source_record_key`가 미연결 261건에서 전부 NULL이라 조인 대상이 없다. CSV의 `provider`/`dataset_key`는 entry에 싣기만 하고 판정에 쓰지 않았다 | H25B-후속 |
+  | 주소 축 | **충족(2026-08-18)** — 시군구 축 신설. 아래 ①. | — |
+  | provider provenance 조인 | **불가로 종결(2026-08-18)** — 데이터 부재가 아니라 **축이 다르다**. 아래 ②. | — |
+
+  #### ① 주소 축 — 시군구 단위 대조 신설 (2026-08-18)
+
+  **이 항목의 전제가 낡아 있었다.** "`address_hint`가 비어 있으므로 `metadata_json.region`을
+  쓴다"고 적혀 있는데, 실측하니 **105건에 `address_hint`가 채워져 있고** 시도가 아니라
+  시군구·읍면동까지 있다.
+
+  ```
+  간절곶등대   울산광역시 울주군 서생면 대송리
+  독도등대     경상북도 울릉군 울릉읍 독도리
+  마라도등대   제주특별자치도 서귀포시 대정읍 가파리
+  ```
+
+  그리고 그게 **매칭이 가장 나빴던 등대 캠페인**이다 — 103건 중 89건의 최상위 후보가
+  상호에 `등대`가 든 가게였다. 시도 축만으로는 같은 시도의 가게를 못 걸러낸다.
+  feature 쪽은 이미 `address.sigungu_name`을 갖고 있었다 — **양쪽 신호가 다 있는데
+  축만 없었다.**
+
+  - 추출: `address_hint` 105/105 성공(보류 0).
+  - ⚠️ **단순 `==` 비교는 맞는 링크를 죽인다.** `경상남도 창원시 진해구 장천동`에서
+    hint는 `창원시`인데 feature는 `창원시 진해구`다. 일반구를 둔 시(창원·수원·성남·
+    고양·용인·청주·천안·전주·포항·안산·안양)가 전부 해당한다. 한쪽이 다른 쪽의
+    **접두(공백 경계)**면 같은 곳으로 본다. 이 축은 반증으로 쓰이므로 오판이 그대로
+    링크를 죽인다 — 이 관용이 없으면 축을 넣는 것이 손해다.
+  - 애매하면 판정하지 않는다(`n/a`). `세종특별자치시 조치원읍`처럼 시군구가 없는 표기,
+    두 번째 토큰이 시/군/구로 끝나지 않는 표기가 그렇다.
+
+  #### ② provider provenance 조인 — 불가로 종결 (2026-08-18)
+
+  **원래 사유("`source_record_key`가 전부 NULL")도 낡았다.** 실측: prod
+  `feature.curation_items`의 `source_record_key`는 **NULL 0 / NOT NULL 4,424**이고,
+  `provider_sync.source_records`와 **4,424/4,424 전부 조인된다.**
+
+  그런데도 이 AC는 달성할 수 없다. 이유가 둘이고 **둘 다 데이터 부재가 아니다.**
+
+  1. **미연결 항목은 DB에 행이 없다.** `curation_items`에서 `feature_id IS NULL`인 행은
+     **0건**이다. "미연결 261건"은 저장소 CSV 쪽 개념이고, 그 행들은 import되지 않는다.
+     즉 조인을 **시작할 행**이 없다.
+  2. **CSV의 `provider`는 적재 provider가 아니다.** 값은 `korea-arboreta-and-gardens`·
+     `korea-tourism-100`·`lighthouse-stamp-tour`·`heritage-visit-campaign` —
+     **캠페인 발행처**다. `provider_sync.provider_datasets`에 등록된 것은
+     `python-*-api` 계열 18종이고 **교집합 0**이다. 같은 이름의 다른 축이다.
+
+  → 이 AC는 "아직 안 했다"가 아니라 **질문이 잘못 세워진 것**이다. 미연결 항목의
+  provenance를 provider_sync에서 찾을 수 없다 — 그 항목은 애초에 provider가 발행한
+  것이 아니다. 후속으로 넘기지 않고 여기서 닫는다.
   | candidate·근거 manifest 커밋 | 충족 — 스크립트 실제 산출물, `candidates_total`로 잘린 수 공개 | — |
   | linked/unresolved 수치 검증 | 충족 (222/264, manifest sha256 일치) | — |
   | **preview/commit·REST/UI 실데이터 검증** | **미충족** — 읽기 전용 범위를 유지했다 | H25B-후속 |
@@ -430,11 +484,28 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
 - [ ] T-VN-H45-후속 — **다건 provider 호출·quota 관찰 확장**
 
-  완료한 KMA/airkorea 강건화(`T-VN-H45`)의 후속으로 ① khoa 등 다건 루프 fetcher 확대,
-  ② python-kma-api resultCode 22 quota `retryable=True` 오분류와 200-body XML envelope
-  parse 경로, ③ RetryBudget 비례화/settings 노출 및 `_LOGGER` `python_logs` 결선,
-  ④ KMA 4종+airkorea schedule `coalesce_active_runs=True`, ⑤ alembic 1.19 적응을
-  실측 우선순위로 분리한다.
+  완료한 KMA/airkorea 강건화(`T-VN-H45`)의 후속 5축.
+
+  - [ ] ① khoa 등 다건 루프 fetcher 확대
+  - [x] ② **python-kma-api resultCode 22 오분류 수정(2026-08-18)** —
+    [digitie/python-kma-api `fix/result-code-22-not-retryable`](https://github.com/digitie/python-kma-api/tree/fix/result-code-22-not-retryable).
+    `22`는 data.go.kr 일일 한도 초과이고 그 한도는 **자정에 리셋**된다. `retryable` 축은
+    같은 파일이 auth(20/30/31)=False · server(04/99)=True로 정한 대로 "**즉시 재시도가
+    성공할 만한가**"이지 "언젠가 성공할 수 있는가"가 아니다. `True`면 호출자가 성공할
+    수 없는 것에 retry budget을 태운다.
+    - **테스트가 왜 못 잡았나**: `test_result_codes_raise_typed_exceptions`가 `12`와 `22`를
+      한 묶음으로 돌리면서 `failure_kind`도 `retryable`도 단언하지 않았다(provider·endpoint만).
+      `22`를 분리해 셋 다 단언하도록 고쳤다.
+    - 200-body XML envelope parse 경로는 **미확인 잔여**다.
+  - [ ] ③ RetryBudget 비례화/settings 노출 및 `_LOGGER`↔`python_logs` 결선
+  - [x] ④ **KMA 5종 + airkorea schedule에 `coalesce_active_runs=True`(2026-08-18)** —
+    같은 job의 미종료 run이 있으면 tick을 건너뛴다.
+    - ⚠️ **혼자 켜면 안 된다.** 상한이 없으면 hung run 하나가 그 스케줄을 **영구
+      차단**하고, 증상이 "스케줄이 조용하다"로 나타나 고장처럼 안 보인다. 기존에
+      coalesce를 쓰는 유일한 스케줄(`feature_notice_krex_traffic_notices`)이
+      `max_runtime_seconds`와 짝인 이유다. 6개 모두 상한이 **없었으므로** 둘을 함께 넣었다
+      (`_FRESHNESS_RUN_MAX_RUNTIME_SECONDS` = 7,200초, `MAX_RUNTIME_SECONDS_TAG`로 강제).
+  - [ ] ⑤ alembic 1.19 적응
 
 - [~] T-VN-H43 — **prod 백업 체계 수립 (정기 dump·sha256·보존·rollback 기준선)**
 
@@ -502,18 +573,79 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   형태였고, ETL이 08-07 이후 안 돌아서 아직 안 터졌을 뿐이었다.
   `up -d --no-deps --force-recreate` 후 세 컨테이너 전부 `POST /v2/reverse` HTTP 200.
 
-- [ ] T-VN-H46C — **VWorld fallback 사슬 제거** (H46B 재발 통로)
+- [x] T-VN-H46C — **VWorld fallback 사슬 제거 + geo key 의미 검증** (H46B 재발 통로)
 
-  `docker-compose.yml:201,326,396`과 `scripts/load-env.sh:119-121`의
-  `${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-…:-${NEXT_PUBLIC_VWORLD_API_KEY:-…}}`가
-  **정확히 401을 받는 값**으로 떨어진다. `.env.example:152`의 낡은 주석도 같은 통로다.
-  `geocoding.py:962-979`의 `preflight()`는 존재·길이만 보므로 잘못된 키를 통과시킨다.
+  - [x] **fallback 사슬은 PR #979에서 이미 끊겼다.** 저장소 전체에
+    `…GEO_API_KEY:-${NEXT_PUBLIC_VWORLD_API_KEY…}` 형태가 0건이고
+    `tests/unit/test_geo_key_provenance.py`가 정적으로 지키며
+    `test_deploy_automation.py:132-138`이 그 문자열의 부재를 직접 단언한다.
+    `.env.example`도 `# (낡음)` 경고가 붙었다(`9bbb74d99`). **이 항목 본문이 낡았던
+    것**이고, 남아 있던 축은 아래 하나뿐이었다.
+  - [x] **`preflight()`가 의미를 안 봤다 → `verify_credentials()` 추가(2026-08-18).**
+    `preflight()`는 (1) None (2) 공백 (3) 128자 초과만 본다 — 값이 무엇인지는 안 본다.
+    2026-08-13 사고가 정확히 그 구멍이었다(VWorld 키가 결선돼 geo가 401로 거부했고,
+    정/역지오코딩이 전부 실패하는 동안 preflight는 초록).
+    `verify_credentials()`가 1회 호출로 geo가 **실제로 받아들이는지** 확인한다.
+    판정은 의도적으로 비대칭이다 — **키 거부는 fail-close**(400 `E0100 field=key` /
+    401 `E0401`), **도달 불가·5xx는 fail-open**(geo는 별도 stack이라 그쪽 지연이
+    map 부팅 교착이 되면 안 된다).
+    - 설계 제약: `geocoding.py`는 httpx를 **런타임 의존으로 갖지 않는다**
+      (`pyproject.toml` 주석 + ADR-002/006/044 — client 수명은 호출자 책임).
+      조사 초안은 이 모듈에서 `httpx.AsyncClient(...)`를 생성해 **런타임 `NameError`**가
+      나는 코드였다(적대 검증이 잡음). 주입된 클라이언트를 쓰는 메서드로 바꿔
+      새 의존도 ADR 개정도 없앴다.
+    - 테스트 8종은 네트워크 없이 돈다. 그중 하나는 **probe가 키 헤더를 싣는지**를
+      본다 — 안 실으면 geo가 거부할 수 없어 이 검사기가 *무엇도 검사하지 않으면서
+      초록*이 된다.
+  - [x] **호출 결선 완료(2026-08-18).** api lifespan에 붙였다. 기존
+    `runtime_db_preflight_required`와 같은 형태 — 새 플래그
+    `kor_travel_geo_preflight_required`(기본 False, 배포 compose가 True 주입)라
+    라이브러리 단위 테스트는 영향받지 않는다. `base_url`이 없으면(보강 비활성) 건너뛴다.
+    - 테스트 6종이 **결선 자체**를 본다: 플래그 off면 네트워크 0회, base_url 없으면 0회,
+      키 거부면 기동 거부, 도달 불가·5xx면 경고 남기고 진행, client를 닫는지.
+  - [x] **커버리지 한계를 코드에 박았다(2026-08-18).** 이 검증은 주입된 클라이언트를 쓰는
+    python 경로만 본다. 2026-08-14 사고의 실제 통로였던 **Next.js admin UI 프록시**
+    (`packages/kor-travel-map-admin/frontend/src/app/api/geo/[...path]/route.ts`)는
+    별개 축이고 이 검사가 **못 본다**. 그 사실을 `_verify_kor_travel_geo_credentials`
+    docstring에 경고로 넣었다 — tasks.md에만 적으면 코드를 읽는 사람이 못 본다.
+  - [ ] **별건: admin UI 프록시 축.** 위 한계 그대로다. 그쪽은 Node 런타임이라 이
+    검사가 닿지 않는다.
 
-- [ ] T-VN-H46D — **daemon 스키마 drift**: `column request.providers does not exist`
+- [x] T-VN-H46D — **daemon 스키마 drift**: `column request.providers does not exist`
+  (2026-08-18 실측으로 종결 — **배포 이미지 lag이 맞았다**)
 
-  `kor-travel-map-dagster-daemon-latest` 로그에 반복되는 `asyncpg.UndefinedColumnError`
-  (feature_operation 계열 쿼리). prod는 `0104`인데 코드가 없는 컬럼을 질의한다.
-  이 경로가 실제 자산 실행 경로면 다음 ETL에서 터진다.
+  ### 하마터면 틀린 근거로 닫을 뻔했다
+
+  처음에 배포 컨테이너 안에서 `grep -r "request.providers"`를 돌려 0건을 받고 "코드에
+  없다"고 결론지으려 했다. **그 grep은 애초에 못 찾는 형태다** — `request.providers`는
+  PostgreSQL 오류 문자열이고 `request`는 **테이블 별칭**이라, 별칭과 컬럼이 SQL에서 따로
+  조립되면 소스에 그 문자열이 통째로 존재하지 않는다. 0건이 "없다"가 아니라 "이 방법으로는
+  안 보인다"였다.
+
+  ### 실제로 확인한 것
+
+  1. **grep 대상이 비어 있지 않은지 먼저 양성 대조.** 배포 경로
+     `/usr/local/lib/python3.12/site-packages/kortravelmap`에 `.py` 172개, 확실히 있는
+     문자열(`feature_operation`) 41히트 — 검사 자체는 동작한다.
+  2. **DB에 그 컬럼이 없다.** `ops` 스키마 전체에 `providers` 컬럼 **0건**.
+     `ops.feature_update_requests`의 실제 컬럼은 `request_id, scope_type, scope,
+     update_policy, run_mode, priority, matched_scope, job_id, operator, reason,
+     created_at, generation, dataset_membership_mode`다.
+  3. **배포 코드가 그 컬럼을 질의하지 않는다.** `AS request` 별칭을 쓰는 파일들
+     (`feature_update_repo`·`feature_update_active_repo`·`ops_repo`·`pipeline_repo`)에서
+     `providers` 참조 **각각 0건**.
+  4. **로그에도 없다.** daemon 재기동(2026-08-17T10:02) 이후 75,158줄에서 0건.
+
+  ### 한계 — 이걸로 "고쳤다"고는 말할 수 없다
+
+  로그는 **2026-08-17 10:02 이후만** 남아 있다(DB 4분할 때 컨테이너를 재생성했다). 즉
+  "재발하지 않았다"의 관측 창은 약 12시간뿐이다. 닫는 근거는 로그가 아니라 **(2)+(3)**
+  이다 — 지금 도는 코드가 없는 컬럼을 질의하지 않는다.
+
+  배포 이미지는 `2026-08-13T20:23` 생성이고 revision label이 `development`다(빌드에 커밋이
+  안 박혔다). 그래서 "어느 커밋에서 고쳐졌는지"는 이 경로로 특정할 수 없다.
+  - [ ] **별건**: buildx가 `KOR_TRAVEL_MAP_GIT_COMMIT`을 실제 커밋으로 채우게 한다. 지금은
+    prod 3개 컨테이너 전부 `development`라 배포된 것이 무엇인지 이미지에서 알 수 없다.
 
 - [x] T-VN-H46E — **공개 data.go.kr 키: 현행 유지 판정** (2026-08-14)
 
@@ -624,25 +756,57 @@ AC: 세 인스턴스 각각의 최신 dump + sha256 + manifest가 존재하고 �
 
 ### T-VN-C01 — 사문화된 H35 cutover helper 제거
 
-`tasks-done.md`가 "typed cutover helper는 **사문화됐다** … 제거/축소는 **후속 정리
-task로 잡는다**"고 적었는데 **그 task가 없었다.** main에 18개 파일이 그대로 있다.
+**완료(2026-08-18).** `tasks-done.md`가 "제거/축소는 후속 정리 task로 잡는다"고 적어놓고
+그 task가 없어서 17파일이 main에 남아 있었다.
 
-- `scripts/h35/` 6개 — `h35_build.py`, `h35_ctx.sh`, `h35_cutover.py`,
-  `h35_migrate.sh`, `h35_pin.sh`, `h35_verify.py`
-- `src/kortravelmap/cli/_h35_*.py` 6개 + `h35_cutover.py`
-- `tests/unit/test_h35_*.py` 4개
-- `docs/runbooks/h35-prod-migration-cutover.md`
+**지운 것(17)**: `scripts/h35/` 6개 · `cli/{h35_cutover,_h35_cache_target,_h35_catalog,`
+`_h35_contract,_h35_csv5,_h35_schema,_h35_schema_version}.py` 7개 ·
+`tests/unit/test_h35_{contract,entrypoint,partial_migration,image_contract}.py` 4개 ·
+`setup.py`(파일 전체가 wheel에서 H35를 빼는 build 훅뿐이었다).
 
-- [ ] **먼저 실측한다** — 어떤 파일이 아직 배포 경로에서 쓰이는지. `h35_migrate.sh`는
-  dagster 정지 절차로 인용된 이력이 있다. 안 보고 지우면 배포가 끊긴다.
-- [ ] `_h35_schema.py`가 아직 `curated_features`를 참조한다 — **T-VN-40의 legacy 물리
-  삭제와 같은 표면**이라 함께 처리하는 편이 낫다.
-- [ ] 남길 것은 "왜 남기는지"를 파일 상단에 적는다. 안 적으면 다음 사람이 같은 조사를
-  처음부터 다시 한다.
+**살린 것 — `h35-db-identity-v1`**. `contracts/vnext/recovery-preflight-v1.json`이
+**살아 있는 계약**으로 이 digest를 요구한다. 통째로 지우면 스펙만 남고 계산하는 코드가
+저장소 어디에도 없게 되고, 소비자 `T-VN-39`를 구현할 사람이 산문에서 NUL framing을 다시
+유도해야 한다 — golden vector 없이는 재현이 어렵다. `core/database_identity.py`로 옮기고
+golden vector 테스트를 동반했다. 이름의 `h35` 접두는 **wire 상수**라 바꾸지 않았다.
 
-AC: 제거 목록·근거가 removal manifest에 있고 `pytest -q`·`lint-imports` green.
+**남긴 것 — `docs/runbooks/h35-prod-migration-cutover.md`(426줄)**. `contracts/vnext/`
+2개가 §5.1(112/512 상한)·§6(writer fence 5종)을 선언된 출처로 인용하고
+`test_vnext_contract_artifacts.py:345`가 그 5종을 단언한다. `runbooks/README.md`가 이미
+'폐기 · prod 실행 금지'로 표시한다.
+
+**순서 의존을 지켰다**(조사 + 적대 검증이 짚은 것):
+- `test_vnext_target_freeze.py`의 `canonical_json_bytes` import를 **먼저** 옮겼다 —
+  안 옮기고 지웠으면 PostGIS job 전체가 collection error로 죽는다.
+- `setup.py` 삭제와 두 Dockerfile의 `COPY … setup.py` 제거를 **같은 커밋**에 넣었다.
+- Dockerfile의 `rm -f _h35_*` 행 삭제와 그것을 단언하던 테스트도 함께.
+
+**되살아나지 않게 가드를 뒀다**(`tests/unit/test_candidate_image_contract.py`). 지우기만
+하고 검사기를 안 두면 같은 파일이 조용히 돌아온다. 그 파일은 옛
+`test_h35_image_contract.py`를 개명한 것이다 — 이름만 h35이고 실체는 image 위생 가드였다.
+가드는 양방향이다: 퇴역한 경로가 없을 것 **그리고** 계약이 요구하는 identity 계산은 있을 것.
+전자만 두면 "다 지웠다"로 초록인데 계약이 참조하는 계산이 사라진 상태도 통과한다.
+
+**dangling 인용 4곳**도 정정했다(`contracts/vnext/target-invariants-v1.sql`,
+`infra/curation_repo.py`, `scripts/h25b_apply_verified_links.py`, admin e2e spec).
+지운 파일을 "출처"로 인용한 채 두면 다음 사람이 그 경로를 찾다가 인용 자체를 못 믿게 된다.
 
 ### T-VN-C02 — T-229-buildx arm64 multi-arch 배포 검증
+
+**정적 점검 완료(2026-08-18), 실행은 막힘.**
+
+- Dockerfile에 **아키텍처 하드코딩 0건**(`amd64`/`x86_64`/`aarch64`/`--platform` 없음).
+- `scripts/docker-buildx.sh`의 `PLATFORMS` 기본값이 이미 `linux/amd64,linux/arm64`다.
+- 남은 위험은 **바이너리 휠**이다 — `asyncpg` · `psycopg[binary,pool]` · `shapely` ·
+  `geopandas`. 넷 다 manylinux aarch64 휠을 내지만, 그건 빌드해 봐야 확정된다.
+- **실행이 막힌 이유**: ghcr.io push에 `GITHUB_TOKEN`이 필요하고, registry에 이미지를
+  올리는 것은 외부로 나가는 동작이라 임의로 하지 않는다.
+
+```bash
+# 자격증명이 있는 환경에서 1회:
+KOR_TRAVEL_MAP_DOCKER_PLATFORMS=linux/arm64 bash scripts/docker-buildx.sh
+# 볼 것: 위 4개 패키지가 소스 빌드로 떨어지지 않는지(떨어지면 빌드가 매우 길어지거나 실패)
+```
 
 `docs/sprints/README.md`가 "본 저장소 잔여는 `T-229-buildx` 하나뿐"이라고 하는데
 tasks.md에 항목이 없었다. `tasks-done.md`는 `[x]`인데 본문은 "arm64 buildx만 잔여"다.
@@ -684,6 +848,58 @@ AC: 표와 실제 모듈이 일치. dataset 구현은 결정에 따라 별도 ta
 - [ ] 덤으로 오래된 미머지 브랜치 40여 개 정리 판단.
 
 AC: 세 항목 처리 + `docs/sprints/README.md`와 각 SPRINT 헤더 일치.
+
+### T-VN-40 인수 — 실태 (2026-08-18 재조사)
+
+`resume.md`·이 문서 상단이 "구현 병합 완료 → n150 인수 + receipt complete + 물리 삭제만
+남음"으로 서술한다. **저장소 실측은 다르다.** 조사 1명 + 적대 검증 2명(contract/ops lens)이
+독립으로 확인했고, 검증자 둘 다 조사 초안의 일부를 뒤집었다. 아래는 **검증을 통과한 사실**만이다.
+
+#### 남은 것은 넷이 아니라 다섯이고, 순서가 정해져 있다
+
+| # | 일 | 실태 | 근거 |
+|---|---|---|---|
+| ① | prod migration 적용 | `0202~0221` 20개 미적용 (prod head `0104`) | `alembic/versions/` |
+| ② | canonical import 실행 | admin API 2단계(`preview` → `commit`, `If-Match`+`Idempotency-Key`). ktmctl도 Dagster도 아니다 | `CHANGELOG.md:48-57`, `openapi.json` |
+| ③ | **40A write fence** | **미구현.** `curated_repo.py:577,601`이 여전히 `INSERT/UPDATE feature.curated_features`. DB·ACL·static 어느 층에도 차단이 없다 | `src/kortravelmap/infra/curated_repo.py`, `alembic/baseline/schema.sql:11897`(sync trigger만) |
+| ④ | live 인수 + soak | sanctioned 경로는 `docs/runbooks/c7-prod-live-e2e.md`뿐 — origin 검증·증거 redaction 포함 | `playwright.live.config.ts:42-46,221,263` |
+| ⑤ | receipt complete | **손으로** JSON 수정. 9키 exact, `blocking_reason` 삭제, freeze 상수(`test_vnext_contract_artifacts.py:52-53`) 동시 갱신 | `contracts/vnext/consumer-rollout-v1.json:168` |
+| ⑥ | **40C 물리 삭제** | **코드·migration·manifest 어디에도 없다.** `docs/removal-manifests/`에 T-VN-33 것 하나뿐 | 설계 §6.2 step 6-7이 요구 |
+
+**순서 — ADR-075 결정 4가 정한다**: "soak·reconciliation 전에는 legacy column/table/alias를
+제거하지 않는다." 즉 **① → ② → ③ → ④ → ⑤ → ⑥**이다. 조사 초안이 "삭제 → 배포 → 인수"를
+권했는데 ops 검증자가 ADR-075:21-22 · `consumer-rollout-v1.json:14`로 반증했다. 백업/PITR
+복구점(`c7-prod-live-e2e.md:38`)도 초안에 없었다.
+
+#### 검증자가 뒤집은 것 (초안이 틀렸던 곳)
+
+- "40A는 병합 완료" → **아니다.** write fence가 없다. legacy와 canonical이 **양쪽 다 쓰기
+  가능**한 상태로 prod에 나갈 참이었다.
+- "`/v1/admin/curated-features*` 5개가 openapi.json에 있다" → **없다.** 실체는 curated 경로
+  16개이고 path family가 다르다.
+- "`ops.curation_cutover_identity_mappings`가 0건이면 설계상 불필요" → 설계 문서
+  (`…detailed-design…md:895-897,951`)가 **명시적으로 migration이 적재한다**고 했다.
+  적재 코드가 없는 것이지 필요 없는 것이 아니다. 지금 `GET /v1/service/curation-cutover/
+  identity-mappings`는 count 0 / empty Merkle root라 PinVi backfill이 소비할 것이 없다.
+- "`map_commit`에 무엇을 넣을지 모른다" → 러너가 정한다. 인수를 **실행한 그 커밋**이고
+  `install-tvn34c-n150-fresh-live-e2e.sh:98-112`가 동치를 검사한다.
+
+#### "전용 canonical principal"의 정체
+
+DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
+(`pinvi:curation-snapshot:read`)와 `service:pinvi:curation-cutover`
+(`pinvi:curation-cutover:read`). digest만 Map이 받고 원문은 docker-manager C6c(PR #174)가
+주입한다. `.env.example`에 키가 없다(주입 주체가 다르다). DB role 쪽은 별도로
+`ktm_curation_command_owner` 등 4개.
+
+- [ ] **T-VN-40A-fence** — legacy write 차단. `curated_repo.py`의 INSERT/UPDATE 경로에
+  DB(trigger 또는 REVOKE)·ACL·static(lint) 3층 게이트. **①~② 전에 끝나야 한다** —
+  안 그러면 import 중에도 legacy가 쓰일 수 있다.
+- [ ] **T-VN-40-mapping** — `ops.curation_cutover_identity_mappings` 적재 migration.
+  설계 §6.2 step 3. PinVi backfill의 입력이다.
+- [ ] **T-VN-40C-manifest** — physical removal manifest 작성 + migration. ⑤ 뒤에만.
+- [ ] **T-VN-40 인수 실행** — ①②④⑤. sanctioned 경로(`c7-prod-live-e2e.md`)로, 백업/PITR
+  복구점 먼저.
 
 ## Lane B 상세 — b1 PinVi 결합·후속
 
@@ -853,3 +1069,160 @@ AC: 세 항목 처리 + `docs/sprints/README.md`와 각 SPRINT 헤더 일치.
 후보는 `mv_feature_cluster_counts`이며, exact-viewport와 region-total 의미 차이를
 시범 PR에서 먼저 결정해야 한다. 도입 시 `REFRESH MATERIALIZED VIEW CONCURRENTLY`용
 `UNIQUE` 인덱스와 batch gate 연결을 함께 설계한다.
+
+### T-VN-H34 잔여 — "없는 것은 Feature로 추가" (2026-08-18 조사)
+
+사용자 지시: 재연결 대상이 없던 3건을 **Feature로 추가**하라. 조사 결과 **지금 바로는
+못 한다** — 그 경로가 저장소에 없다.
+
+**실측.** 세 항목은 prod에 **축제(event)로만** 존재하고 장소 자체는 어떤 provider
+dataset에도 없다(kind·lifecycle·publication 무관 전수 검색).
+
+| 항목 | prod에 있는 것 |
+|---|---|
+| 태화강 국가정원 | `태화강 국가정원 봄꽃축제`·`태화강 대숲 납량축제` 등 event 6건 + 주차장 6건 |
+| 반디랜드&태권도원 | **0건**(place/event/area 어디에도 없다) |
+| 청풍호 | `제30회 제천청풍호벚꽃축제` event 1건 + 호수 시설(전망대·케이블카) |
+
+**왜 못 만드나.** `Feature`는 provider ETL이 만드는 것이 계약이다. 큐레이션이 Feature를
+만드는 경로는 없고, `T-VN-40`의 write model도 **기존 public Feature에 링크**만 한다
+(`docs/reports/t-vn-40-…-plan-2026-08-11.md:161` — "public Feature만 반환").
+
+만들려면 새 표면이 필요하다:
+
+- **새 `source_type`**(예: `curation_manual`) — `make_feature_id`의 입력이라 ID 체계에 들어간다
+- **writer 경로와 소유권** — 누가 갱신하나? provider가 나중에 그 실체를 발행하면 dedup은?
+- **lifecycle** — 3축(`lifecycle_state`/`publication_state`/`quality_state`)을 누가 정하나
+- **T-VN-40과 충돌** — 그 릴리스가 지금 curation write model을 바꾸는 중이고, 사용자가
+  이번 PR에서 **제외**하라고 한 범위다
+
+### 결정 (2026-08-18, 사용자) — ETL 무관 Feature는 admin/API로 만든다
+
+1. **ETL과 무관한 Feature는 admin UI/API로 추가할 수 있다.** provider가 발행하지 않는
+   실체(국가정원·테마파크 복합·호수 등)가 대상이다.
+2. **PinVi의 Feature 생성 요청도 같은 API를 쓴다.** PinVi가 직접 만들지 않고 **요청**하며
+   admin이 승인한다.
+3. **curated Feature를 추가할 때 대상 Feature가 없으면** 이 API로 Feature를 만들고
+   curation에도 함께 넣는다.
+4. **origin(누가 만들었나)을 구분해 보존한다** — admin 직접 / PinVi 요청 승인 / curation
+   추가 중 생성. **Feature가 나중에 수정돼도 origin은 바뀌지 않는다.** ETL이 같은 실체를
+   발행하는 상황이 되면 admin이 따로 판정한다.
+
+#### 실측으로 보완한 것
+
+**① 표면은 이미 있다. 결선이 없을 뿐이다.**
+`ktm_feature_runtime`은 `feature.features`에 **SELECT만** 갖는다(INSERT 없음) — 직접
+INSERT는 불가능하다. 그런데 procedure
+`feature.create_feature_with_initial_state(p_feature jsonb, p_lifecycle_state,
+p_publication_state, p_quality_state, p_context jsonb)`가 **이미 존재하고
+`ktm_feature_runtime`에 EXECUTE가 이미 부여돼 있다.** admin 상태 전이용
+`transition_admin_feature_state`·`reactivate_admin_feature_state`도 마찬가지다.
+→ 새 쓰기 경로를 만드는 일이 아니라 **기존 procedure를 admin API에 잇는 일**이다.
+
+**② "ETL이 엎어쓴다"는 일어나지 않는다 — 진짜 위험은 중복이다.**
+`make_feature_id`는 `source_type`을 해시 입력에 넣는다(ADR-009). 수동 Feature와 provider
+Feature는 **애초에 다른 `feature_id`**라 ETL이 그 행을 덮어쓸 수 없다. 실제로 생기는 문제는
+**같은 실체에 Feature가 둘**이 되는 것이고, 그건 덮어쓰기가 아니라 **dedup/merge** 판정
+영역이다. 결정 4의 "ETL이 엎어쓰는 상황"을 그 의미로 새긴다.
+
+**③ curation과 함께 만드는 것은 구조적으로 가능하다.**
+`curation_items.source_record_key`는 **nullable**이고 `feature.features`에는 source 쪽 FK가
+없다(부모 Feature 자기참조 FK만 있다). 즉 provider source record 없이도 Feature와 curation
+item을 만들 수 있다.
+
+#### 아직 안 정해진 것
+
+- **`source_type` / `source_natural_key`** — `make_feature_id`의 입력이라 ID 체계에 들어간다.
+  origin 3종을 `source_type`으로 가를지(`manual_admin`/`manual_pinvi`/`manual_curation`),
+  아니면 `source_type`은 하나로 두고 origin은 별도 컬럼에 둘지. **전자면 origin이 ID에 박혀
+  불변이 공짜로 얻어지지만 origin을 정정할 수 없다.** 후자면 정정이 가능하지만 불변을 따로
+  강제해야 한다.
+- **natural key의 안정성** — 같은 실체를 두 번 만들면 같은 ID여야 하고, 이름을 고쳐도 ID가
+  바뀌면 안 된다(`trg_features_identity_fence`가 `feature_id` UPDATE를 막는다).
+- **3축 초기 상태** — 만들자마자 공개인가, 검토 후인가.
+- **PinVi 요청 큐** — 접수 → 승인 → 생성. 요청 자체의 저장 위치와 상태 모델.
+- **좌표** — `features.coord`는 nullable이지만, 지도에 안 찍히는 Feature가 공개 표면에
+  나가도 되는지.
+- **provider가 나중에 같은 실체를 발행하면** — 자동 병합하지 않는다까지는 정해졌다.
+  admin에게 무엇을 보여주고 어떤 선택지를 주는지는 미정.
+- **공개 표면 노출** — public API/PinVi snapshot에 수동 Feature가 나가는지, 나간다면 소비자가
+  origin을 알 수 있어야 하는지.
+
+#### 설계 초안 1차 — 적대 검증에서 무너진 것 (2026-08-18)
+
+설계 초안을 검증자 2명(contract lens / ops lens)이 독립 검토했고 **둘 다 `holds=false`**다.
+P1 6건 중 셋이 설계 방향을 바꾼다. 실측 근거가 붙어 있어 그대로 채택한다.
+
+**① "origin은 호출 경로/principal에서 파생한다"는 실행 불가능하다.**
+초안은 body로 origin을 받으면 사칭이 영구화되니 서버가 호출 경로에서 파생하자고 했다.
+그런데 **PinVi와 admin BFF는 같은 endpoint(`POST /v1/admin/features`)·같은 proxy secret·
+검증 없는 `X-Kor-Travel-Map-Actor` 헤더**를 쓴다(`auth.py:205,272-279`; PinVi
+`kor_travel_map_admin.py:248-257,518-522`). 서버가 구별할 신호가 **없다.** 이대로 가면 PinVi
+승인으로 생긴 Feature가 전부 `manual_admin`으로 **영구·불변** 각인된다 — 초안이 스스로
+"불변 컬럼에 추정값을 넣으면 그 추정이 영구 기록"이라며 M01/M02 분리를 반대한 논거가
+자기 자신에게 적용된다.
+→ **M01은 origin을 `manual_admin` 단일 값으로만 발급한다.** `manual_pinvi`/`manual_curation`은
+인증 경계가 실제로 갈린 뒤(별도 route 또는 별도 ops-token scope)에만 값 도메인에 넣는다.
+도달 불가능한 값을 미리 등록하면 "구분되고 있다"는 오해까지 영구 기록된다.
+
+**② 자연키를 opaque로 바꾸면 유일한 하드 중복 방지가 사라진다.**
+현행은 `feature_id` unique + `ON CONFLICT DO NOTHING`(`schema.sql:1341`) → 409로 같은 실체를
+막는다. 초안은 이름·좌표를 자연키에서 빼서 매 요청이 다른 `feature_id`가 되게 했고, 중복
+방지를 READ COMMITTED 하의 check-then-act 프리체크로 대체했다 — 동시 요청 2건이 모두 통과한다
+(TOCTOU). 게다가 판정 워크플로는 M05로 미뤄져 있어 **M01 머지 시점에 방어가 0**이다.
+→ 자연키 opaque화와 **동시에** DB 제약을 둔다: origin `manual_%` 부분 unique index(`lower(name)`,
+`sigungu_code`) 또는 `ST_DWithin` EXCLUDE, 또는 `admin.feature.create`에 `serializable`
+(`domain_command_registry.py:164-168`이 지원, 40001 재시도 루프 있음).
+
+**③ 새 CHECK가 `PATCH /state`에서 500으로 샌다 — 2026-08-12에 이미 한 번 겪은 유형이다.**
+`admin_feature_repo.py:2186-2211`의 23514→도메인 오류 매핑이 **constraint 이름 allow-list**라,
+새 CHECK 이름이 거기 없으면 raw re-raise → catch-all 500. 초안의 테스트는 "DB CHECK로 실패"만
+요구해 **500이어도 초록**이다. 그리고 근거로 든 fail-close 테스트
+`test_admin_state_error_mapping_names_exist_in_ddl`은 **저장소에 없다**(docstring 언급 1건뿐).
+→ 새 CHECK 이름을 `_ADMIN_STATE_CONFLICT_CONSTRAINTS`에 넣고, 테스트는 **HTTP status를 단언**한다
+(409/422이지 500 아님). "features의 모든 CHECK 이름이 두 집합 중 하나에 있다"는 역방향 fail-close
+테스트를 **실제로 만든다.**
+
+**④ `transition_kind='initial'` ⇒ origin 필수 규칙이 기존 integration 테스트 4곳을 즉시 red로 만든다.**
+`initial`은 provider 경로가 아니라 비-provider 일반 create kind이고(`schema.sql:1807`),
+`test_tvn34c_post_cutover_contract.py:84` 등 fixture 4곳이 origin 없이 CALL한다.
+→ 규칙을 "origin이 있으면 `initial`이어야 한다"(역방향)로 약화하거나, fixture 4곳 수정을 구현
+순서에 명시한다.
+
+**⑤ `contracts/vnext/*` freeze 갱신이 통째로 빠졌다 — 그런데 freeze 스위트는 green을 유지한다.**
+`target-schema-v1.sql:730`이 `create_feature_with_initial_state`를 선언하고 fingerprint는 계약
+파일로 만든 DB를 본다(`test_vnext_target_freeze.py:16-18` — "계약이 실제 migration과 갈라져도
+green"). 컬럼 축은 의도적으로 닫혀 있다(`:1723-1760`). 즉 **CI가 초록인 채 vNext 목표 계약이
+실제 스키마를 서술하지 않게 된다** — 이 저장소가 반복 경계한 바로 그 형태.
+→ 구현 순서에 `target-schema-v1.sql` · `target-schema-fingerprints-v1.json` 4카테고리 재계산 ·
+`violation-fixtures-v1.sql` + `expected-rejections-v1.json`(신규 거부 케이스) 갱신을 넣는다.
+`test_vnext_contract_artifacts.py`의 sha256 상수도.
+
+**⑥ P2 중 결정에 걸리는 것**: `publication_state` 기본값 `published→draft`는 PinVi의 사용자
+제보 승인 흐름(`feature_requests.py:242-251`)에 무음 회귀를 낸다 · 3단계 backfill의 전건 UPDATE가
+`row_revision` trigger를 100만 번 밟는다 · procedure OWNER 전환과 migration graph artifact 재생성이
+선행 조건에 없다 · back-out을 한 줄도 안 다뤘다(forward-only 저장소).
+
+**다음**: 위 ①~⑤를 반영한 **설계 초안 2차**를 쓰고 같은 검증자 2명에게 다시 건다.
+2차가 `holds=true`를 받기 전에는 코딩하지 않는다.
+
+#### 후속 task
+
+- [ ] **T-VN-M00 — 설계 초안 2차 + 적대 검증 2명 통과** (위 ①~⑤ 반영). 이것이 M01의 선행이다.
+- [ ] **T-VN-M01 — admin Feature 생성 API** (결정 1). `create_feature_with_initial_state`를
+  admin OpenAPI에 잇는다. `source_type`/natural key 규칙과 3축 초기 상태를 함께 정한다.
+  **ADR 필요** — ID 체계에 새 `source_type`이 들어간다.
+- [ ] **T-VN-M02 — origin 보존과 불변** (결정 4). origin 3종을 구분해 저장하고 Feature
+  수정에도 불변임을 스키마·테스트로 고정한다. `trg_features_identity_fence`가 이미
+  `feature_id`/`feature_uuid`에 같은 일을 하므로 그 패턴을 따른다.
+- [ ] **T-VN-M03 — curated 동시 생성** (결정 3). curation import/admin 편집에서 대상 Feature가
+  없을 때 M01을 호출해 만들고 `curation_items`에 잇는다. **T-VN-40의 write model과 같은
+  표면**이라 그 인수 뒤에 얹는다.
+- [ ] **T-VN-M04 — PinVi 요청 큐** (결정 2). PinVi가 HTTP로 요청하고 admin이 승인한다. 승인
+  시 M01을 호출하고 origin을 `manual_pinvi`로 남긴다. cross-repo 계약이라
+  `docs/integration-map.md`에도 추가한다.
+- [ ] **T-VN-M05 — provider 발행 시 중복 판정** (결정 4 후단). 수동 Feature와 같은 실체를
+  provider가 발행하면 dedup 후보로 올리고 **자동 병합하지 않는다.** admin이 병합/유지/수동본
+  폐기를 고른다.
+- [ ] **T-VN-H34 잔여** — M01~M03이 서면 태화강 국가정원·반디랜드&태권도원·청풍호를 Feature로
+  만들고 curation을 재연결한다. 그때까지는 해제 상태를 유지한다.

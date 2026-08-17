@@ -343,6 +343,21 @@ cancel을 다시 보내지 않는다. 세부 상태 전이와 API는
 [`architecture/c6c-cancel-probe-fixture.md`](architecture/c6c-cancel-probe-fixture.md) 및
 ADR-084가 정본이다.
 
+### 3.6 PinVi Feature 생성 요청 (T-VN-M04, 2026-08-18 결정 — **미구현**)
+
+PinVi가 Map에 **없는 Feature**를 필요로 할 때, PinVi가 직접 만들지 않고 Map에 **요청**하고
+Map admin이 승인한다. 승인 시 Map이 Feature를 만들고 origin을 `manual_pinvi`로 남긴다.
+
+- **방향**: PinVi → Map (요청). 생성 주체는 항상 Map이다.
+- **왜 PinVi가 직접 안 만드나**: Feature ID 체계(`make_feature_id`, ADR-009)와 3축 상태,
+  dedup 판정이 Map 소유다. 밖에서 만들면 그 규칙을 두 곳이 갖게 된다.
+- **origin 불변**: 승인으로 생긴 Feature가 나중에 수정돼도 "PinVi 요청에서 왔다"는 사실은
+  바뀌지 않는다. provider가 같은 실체를 발행하면 **자동 병합하지 않고** Map admin이 판정한다.
+
+⚠️ **아직 계약이 없다.** endpoint·요청 body·승인 상태 모델·인증이 전부 미정이고, 정해지면
+이 절과 `docs/tasks.md`의 `T-VN-M04`가 함께 갱신된다. PinVi 쪽 구현을 시작하기 전에 이
+절이 채워져야 한다.
+
 ## 4. 계약 정본 위치
 
 | 계약 | 정본(공급자 repo) | 소비측 view |

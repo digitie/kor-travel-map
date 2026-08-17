@@ -4,7 +4,9 @@
  * **prod에서 돌리지 마라.** 이 spec은 격리 clone 전용이다:
  * 실데이터 quarantine은 0건이고 구조상 영구 0건이므로(H22 착수 전 실측), 검증 대상은
  * 러너가 DB에 **합성**해야 한다. 합성 레시피는
- * `tests/integration/test_h35_cutover_rehearsal.py`의 `_plant_quarantine_candidate`와
+ * (옛 `tests/integration/test_h35_cutover_rehearsal.py`의 `_plant_quarantine_candidate`와
+ * 같은 형상이었다. 그 파일은 `df9237a3`에서 이미 삭제됐다.)
+ * 격리 후보 planting은
  * 같은 계열 — legacy-marker collection에 canonical-only item을 심고 `0065`를 통과시키거나,
  * head 스키마에서 quarantine marker collection(`created_by='migration:0065'`,
  * `metadata.migration_quarantine='0065'`, `metadata.original_collection_id`)을 직접 만든다.

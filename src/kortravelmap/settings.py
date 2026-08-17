@@ -144,6 +144,18 @@ class KorTravelMapSettings(BaseSettings):
         le=30.0,
         description="kor-travel-geo REST 호출 timeout seconds.",
     )
+    kor_travel_geo_preflight_required: bool = Field(
+        default=False,
+        description=(
+            "True면 기동 시 kor-travel-geo가 이 API key를 **실제로 받아들이는지** "
+            "1회 호출로 확인한다. ``preflight()``는 형태만 보므로 다른 서비스의 키를 "
+            "넣어도 통과한다 — 2026-08-13 prod 사고가 그것이었다(VWorld 키가 결선돼 "
+            "geo가 401로 거부, 정/역지오코딩이 전부 실패하는 동안 preflight는 초록). "
+            "키가 거부되면 기동을 막고(fail-close), geo에 도달하지 못하면 경고만 "
+            "남기고 진행한다(fail-open) — geo는 별도 stack이라 그쪽 지연이 map 부팅 "
+            "교착이 되면 안 되기 때문. ``kor_travel_geo_base_url``이 없으면 건너뛴다."
+        ),
+    )
     kor_travel_geo_api_key: SecretStr | None = Field(
         default=None,
         description=(

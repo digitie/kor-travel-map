@@ -158,6 +158,7 @@ from kortravelmap.providers.krforest import (
     DATASET_KEY_ARBORETUMS,
     DATASET_KEY_RECREATION_FORESTS,
     KRFOREST_MARKER_COLOR,
+    KRFOREST_PROVIDER_NAME,
     RECREATION_FOREST_CATEGORY,
     ForestSpatialItem,
     RecreationForestItem,
@@ -362,6 +363,7 @@ __all__ = [
     "RECREATION_FOREST_CATEGORY",
     "ARBORETUM_CATEGORY",
     "KRFOREST_MARKER_COLOR",
+    "KRFOREST_PROVIDER_NAME",
     # kma (PR#38 short, PR#39 nowcast, PR#41 ultra_short, PR#46 alerts —
     # ADR-010)
     "KmaShortForecastItem",

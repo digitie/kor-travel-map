@@ -1886,7 +1886,8 @@ LIMIT :limit
 """
 
 # `0065`가 quarantine collection에 박는 정본 marker 술어 그대로 읽는다
-# (`src/kortravelmap/cli/_h35_schema.py`의 `_QUARANTINE_COUNT_SQL`과 동일).
+# (원래 `src/kortravelmap/cli/_h35_schema.py`의 `_QUARANTINE_COUNT_SQL`과 같은
+#  질의였다. 그 모듈은 T-VN-C01(2026-08-18)에서 퇴역했고 여기가 정본이다.)
 # `created_by`만 보면 `0065`가 만든 다른 행과 섞이므로 metadata marker를 함께 요구한다.
 _QUARANTINE_MARKER_JSONB: Final[str] = """'{"migration_quarantine": "0065"}'::jsonb"""
 
