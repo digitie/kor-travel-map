@@ -2,6 +2,44 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-17 — prod PostgreSQL 4분할(12x00 대역) + 적대 리뷰 반영
+
+- n150 prod의 PostgreSQL을 프로젝트별 전용 instance로 나누고 포트를 각 대역의 `x00`에
+  맞췄다: geo `12500`(33GB, 제자리) · concierge `12600`(79MB 이관) · map `12700`(제자리) ·
+  pinvi `12800`(11MB 이관). 넷 다 `listen_addresses=127.0.0.1`이고 **`5432`를 듣는 것은
+  없다**. 근거는 docker-manager **ADR-37**(이번에 신설 — 그전까지 4분할에 ADR이 없었다).
+- **DB만 나누는 것으로 부족했던 이유**: role·ACL·확장은 DB가 아니라 **cluster 전역**이다.
+  08-15에 map을 전용 인스턴스로 뺀 뒤에도 통합 인스턴스에 `ktm_` 역할 7개가 남았고 map
+  migrator 자격증명으로 `kor_travel_geo`(33GB)에 실제로 접속됐다. 지금 geo 인스턴스의
+  LOGIN role은 자기 superuser `addr` 하나뿐이다.
+- 이관 검증은 카탈로그 대조가 아니라 **기능**으로 했다 — concierge 28테이블/39,515행,
+  pinvi 52테이블/265인덱스 일치에 더해 map ETL `feature_place_knps_points_job`을 실제로
+  돌려 SUCCESS(run `591f5e69`)를 받았다. 08-15 이관 때 카탈로그 2,486행이 "전부 일치"였는데
+  schema ACL과 membership option 결함 2건이 살아남아 cutover 뒤 ETL에서야 드러난 적이 있다.
+- **적대 리뷰가 P1 9건 + P2 4건을 찾았고 전부 반영했다.** 실질적이었던 셋:
+  - `c6c_deployment.py`가 `12703`을 하드코딩해 **다음 sanctioned 배포를 fail-close로 막을
+    상태**였다. 테스트 픽스처도 12703이라 테스트는 초록이면서 배포만 막힌다.
+  - `.env.example`가 옛 포트 그대로였다. 이번 사고의 원인이 `.env` override인데 그 `.env`를
+    만드는 템플릿을 안 고쳤으니 다음 사람이 같은 사고를 재현할 상태였다.
+  - `backup-restore.md`의 드리프트 점검 명령이 `:5432/`를 찾고 있었다. 찾아야 할 옛 포트는
+    12703이고 5432는 애초에 없다 — **항상 초록인 거짓 안심**이었다. 현재 배치 4개와
+    대조하는 형태로 바꿨다.
+- ktm 쪽 문서 결함도 함께: `KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT`는 `load-env.sh`가
+  export하고 문서 3곳이 "override한다"고 설명했지만 **읽는 곳이 하나도 없었다**. 포트를
+  12700으로 고쳐도 접속 대상이 안 바뀐다 — 죽은 포트를 가리키는 것보다 효과 없는 손잡이가
+  더 나쁘므로 변수를 제거하고 "포트는 DSN 안에 있다"로 정정했다.
+
+### 사고 1건 (자책 아니라 재발 방지용 기록)
+
+`docker-targets.yml`을 바꾼 뒤 manager backend(config를 `lru_cache`로 붙든다)를
+재시작하면서 환경변수를 `/proc/PID/environ`으로 옮기려 했다. 그 스크립트가 `sh`에서
+`read -d ''`(bash 전용)를 써서 조용히 실패했고, `env -i`와 겹쳐 manager가 **KTDM_* 0개**로
+약 2분간 떠 있었다. `health`는 200이라 겉으로는 정상이었고 admin 로그인만 죽는 상태였다.
+`.env`를 직접 `source`해 다시 띄워 32개 복구, 인증 강제(무세션 401)·web 200 확인.
+
+교훈은 늘 같은 것이다 — **health 200은 "동작한다"의 증거가 아니다.** 무엇이 죽었는지
+알려면 죽었을 때 달라지는 것을 봐야 한다(여기서는 KTDM_* 개수).
+
 ## 2026-08-17 — 완료된 Wave 2 task 이력 아카이브 정리
 
 - `tasks.md`에서 완료된 T-VN-34/35/36 배포·인수 블록을 제거하고
