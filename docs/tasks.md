@@ -15,12 +15,12 @@
 barrier로 직렬화한다.
 
 - **Lane A — cross-repo 계약·운영·데이터 품질**
-  - [~] `T-VN-H25B` → [ ] `T-VN-H34`(공식 curation 미연결 membership 잔여 AC)
+  - [x] `T-VN-H25B`(미충족 AC 2건 종결, 2026-08-18) → [~] `T-VN-H34`(공식 curation 미연결 membership 잔여 AC)
   - [~] `T-VN-H43` → [~] `T-VN-H44`(백업 정기화·복원 드릴 재개 조건)
   - [~] `T-VN-H45-후속`(②quota 오분류·④coalesce 완료 / ①khoa·③RetryBudget·⑤alembic 잔여)
   - [x] `T-VN-H46C`(preflight 의미 검증 + 기동 결선, 2026-08-18) ∥ [x] `T-VN-H46D`(실측 종결)
   - [x] `T-VN-H47`(#987 종료) ∥ [x] `T-VN-H48`(#988 종료) — prod 정리 + 재발 방지 문서화 완료
-  - [ ] `T-VN-H49`(4분할 인스턴스 백업 주체 — dm #177 추적)
+  - [x] `T-VN-H49`(baseline 3건 확보 + 절차 문서화 완료, 2026-08-18 — 주기화는 dm #177)
 - **Lane B — frontend hardening·PinVi 소비 API**
   - [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox)
   - [~] `T-VN-41F1D-D` → [ ] `T-VN-41F1D-D2`(격리 리허설·data-dependent live UI E2E)
@@ -197,7 +197,7 @@ barrier로 직렬화한다.
 H24가 stable component 기반 미연결 membership으로 무손실 보존하므로 데이터 손실 위험은 없다.
 증거 생성과 mutation을 분리한다.
 
-- [~] T-VN-H25B — **CSV 역반영 5건 + 매칭 재실행** (미충족 AC는 아래 표)
+- [x] T-VN-H25B — **CSV 역반영 5건 + 매칭 재실행** (미충족 AC 2건 2026-08-18 종결)
 
   H25A 재정의 결과 실행 가능한 작업은 둘이다.
   1. **CSV 역반영 8건** — DB에서는 링크됐으나 CSV `feature_id`가 비어 있는 항목(H25A §3).
@@ -240,8 +240,54 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   | --- | --- | --- |
   | CSV 역반영 | 충족 (8→5, 3건은 오링크) | — |
   | 기준선 대조 + 차이 설명 | 충족 — 교차표를 manifest `summary.baseline_vs_matcher`에 기록 | — |
-  | 주소 축 | **부분** — `region`(115/264)만 사용. `sigungu_code`는 시도코드 비교에만 쓰고 시군구 단위 대조는 미구현 | H25B-후속 |
-  | provider provenance 조인 | **미충족** — `source_record_key`가 미연결 261건에서 전부 NULL이라 조인 대상이 없다. CSV의 `provider`/`dataset_key`는 entry에 싣기만 하고 판정에 쓰지 않았다 | H25B-후속 |
+  | 주소 축 | **충족(2026-08-18)** — 시군구 축 신설. 아래 ①. | — |
+  | provider provenance 조인 | **불가로 종결(2026-08-18)** — 데이터 부재가 아니라 **축이 다르다**. 아래 ②. | — |
+
+  #### ① 주소 축 — 시군구 단위 대조 신설 (2026-08-18)
+
+  **이 항목의 전제가 낡아 있었다.** "`address_hint`가 비어 있으므로 `metadata_json.region`을
+  쓴다"고 적혀 있는데, 실측하니 **105건에 `address_hint`가 채워져 있고** 시도가 아니라
+  시군구·읍면동까지 있다.
+
+  ```
+  간절곶등대   울산광역시 울주군 서생면 대송리
+  독도등대     경상북도 울릉군 울릉읍 독도리
+  마라도등대   제주특별자치도 서귀포시 대정읍 가파리
+  ```
+
+  그리고 그게 **매칭이 가장 나빴던 등대 캠페인**이다 — 103건 중 89건의 최상위 후보가
+  상호에 `등대`가 든 가게였다. 시도 축만으로는 같은 시도의 가게를 못 걸러낸다.
+  feature 쪽은 이미 `address.sigungu_name`을 갖고 있었다 — **양쪽 신호가 다 있는데
+  축만 없었다.**
+
+  - 추출: `address_hint` 105/105 성공(보류 0).
+  - ⚠️ **단순 `==` 비교는 맞는 링크를 죽인다.** `경상남도 창원시 진해구 장천동`에서
+    hint는 `창원시`인데 feature는 `창원시 진해구`다. 일반구를 둔 시(창원·수원·성남·
+    고양·용인·청주·천안·전주·포항·안산·안양)가 전부 해당한다. 한쪽이 다른 쪽의
+    **접두(공백 경계)**면 같은 곳으로 본다. 이 축은 반증으로 쓰이므로 오판이 그대로
+    링크를 죽인다 — 이 관용이 없으면 축을 넣는 것이 손해다.
+  - 애매하면 판정하지 않는다(`n/a`). `세종특별자치시 조치원읍`처럼 시군구가 없는 표기,
+    두 번째 토큰이 시/군/구로 끝나지 않는 표기가 그렇다.
+
+  #### ② provider provenance 조인 — 불가로 종결 (2026-08-18)
+
+  **원래 사유("`source_record_key`가 전부 NULL")도 낡았다.** 실측: prod
+  `feature.curation_items`의 `source_record_key`는 **NULL 0 / NOT NULL 4,424**이고,
+  `provider_sync.source_records`와 **4,424/4,424 전부 조인된다.**
+
+  그런데도 이 AC는 달성할 수 없다. 이유가 둘이고 **둘 다 데이터 부재가 아니다.**
+
+  1. **미연결 항목은 DB에 행이 없다.** `curation_items`에서 `feature_id IS NULL`인 행은
+     **0건**이다. "미연결 261건"은 저장소 CSV 쪽 개념이고, 그 행들은 import되지 않는다.
+     즉 조인을 **시작할 행**이 없다.
+  2. **CSV의 `provider`는 적재 provider가 아니다.** 값은 `korea-arboreta-and-gardens`·
+     `korea-tourism-100`·`lighthouse-stamp-tour`·`heritage-visit-campaign` —
+     **캠페인 발행처**다. `provider_sync.provider_datasets`에 등록된 것은
+     `python-*-api` 계열 18종이고 **교집합 0**이다. 같은 이름의 다른 축이다.
+
+  → 이 AC는 "아직 안 했다"가 아니라 **질문이 잘못 세워진 것**이다. 미연결 항목의
+  provenance를 provider_sync에서 찾을 수 없다 — 그 항목은 애초에 provider가 발행한
+  것이 아니다. 후속으로 넘기지 않고 여기서 닫는다.
   | candidate·근거 manifest 커밋 | 충족 — 스크립트 실제 산출물, `candidates_total`로 잘린 수 공개 | — |
   | linked/unresolved 수치 검증 | 충족 (222/264, manifest sha256 일치) | — |
   | **preview/commit·REST/UI 실데이터 검증** | **미충족** — 읽기 전용 범위를 유지했다 | H25B-후속 |

@@ -114,6 +114,7 @@ SELECT cc.collection_key,
        ci.place_name,
        ci.feature_id,
        ci.metadata ->> 'region' AS region,
+       ci.address_hint AS address_hint,
        ci.metadata ->> 'feature_match_confidence' AS declared_confidence,
        f.name AS feature_name,
        f.category AS feature_category,
@@ -181,6 +182,7 @@ class AuditTarget:
     place_name: str
     feature_id: str | None
     region: str | None
+    address_hint: str | None
     declared_confidence: str | None
     feature_name: str | None
     feature_category: str | None
@@ -201,6 +203,60 @@ def _normalize_name(value: str | None) -> str | None:
 
     normalized = normalize_korean_text(value)
     return normalized.casefold() if normalized is not None else None
+
+
+def _sigungu_from_hint(address_hint: str | None) -> str | None:
+    """``address_hint``에서 시군구 토큰을 뽑는다.
+
+    ``"울산광역시 울주군 서생면 대송리"`` → ``"울주군"``.
+
+    첫 토큰은 시도(``…특별자치도``/``…광역시``/``…도``)이고 그다음이 시군구다. 다만
+    ``"세종특별자치시"``처럼 시군구가 없는 경우가 있고, ``"창원시 진해구"``처럼 두 토큰인
+    경우도 있다. 여기서는 **두 번째 토큰이 시/군/구로 끝날 때만** 취한다 — 아니면
+    ``None``을 돌려 이 축을 쓰지 않는다. 애매한 것을 억지로 판정하면 그 판정이 반증으로
+    쓰여 맞는 링크를 죽인다.
+    """
+    if not address_hint:
+        return None
+    parts = address_hint.split()
+    if len(parts) < 2:
+        return None
+    token = parts[1]
+    if token.endswith(("시", "군", "구")):
+        return token
+    return None
+
+
+
+def _sigungu_matches(hint: str, feature: str) -> bool:
+    """시군구 두 표기가 같은 곳을 가리키는지.
+
+    **단순 ``==``로 하면 안 된다.** 일반구를 둔 시(창원·수원·성남·고양·용인·청주·천안·
+    전주·포항·안산·안양 등)에서 표기 깊이가 다르다:
+
+        address_hint "경상남도 창원시 진해구 장천동" -> "창원시"
+        feature      address.sigungu_name           -> "창원시 진해구"
+
+    한쪽이 다른 쪽의 접두이면 같은 곳이다. 이 관용을 빼면 **맞는 링크가 거짓 반증**되고,
+    이 축은 반증으로 쓰이므로 그 오판이 그대로 링크를 죽인다.
+    """
+    if hint == feature:
+        return True
+    return feature.startswith(hint + " ") or hint.startswith(feature + " ")
+
+
+def _sigungu_from_feature_address(feature_address: str) -> str | None:
+    """feature ``address`` jsonb 문자열에서 ``sigungu_name``을 뽑는다."""
+    if not feature_address:
+        return None
+    try:
+        payload = json.loads(feature_address)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    value = payload.get("sigungu_name")
+    return str(value).strip() or None if value else None
 
 
 def _judge(
@@ -231,6 +287,29 @@ def _judge(
         reasons.append(
             f"시도 불일치: curation region={region}({expected_sido}) vs "
             f"feature sido={feature_sido}"
+        )
+
+    # 시군구 축 — `address_hint`가 있는 행에서만 쓴다.
+    #
+    # 시도 축만으로는 **같은 시도의 다른 대상**을 걸러내지 못한다. 등대 캠페인 103건 중
+    # 89건의 최상위 후보가 상호에 `등대`가 들어간 가게였고, 그 대부분이 같은 시도였다.
+    # `address_hint`에 시군구가 있으므로 한 단계 좁힌다.
+    #
+    # 애매하면 판정하지 않는다(`n/a`). 억지 판정은 반증으로 쓰여 맞는 링크를 죽인다.
+    hint_sigungu = _sigungu_from_hint(row.get("address_hint"))
+    feature_sigungu = _sigungu_from_feature_address(str(row.get("feature_address") or ""))
+    if hint_sigungu is None:
+        axes["sigungu"] = "n/a"
+    elif feature_sigungu is None:
+        axes["sigungu"] = "n/a"
+        reasons.append("feature address에 sigungu_name이 없어 시군구 축을 쓸 수 없다")
+    elif _sigungu_matches(hint_sigungu, feature_sigungu):
+        axes["sigungu"] = "pass"
+    else:
+        axes["sigungu"] = "fail"
+        reasons.append(
+            f"시군구 불일치: curation address_hint={hint_sigungu} vs "
+            f"feature sigungu={feature_sigungu}"
         )
 
     category = str(row.get("feature_category") or "").strip()
