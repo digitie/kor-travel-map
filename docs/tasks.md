@@ -335,6 +335,7 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     [`tests/unit/test_h25b_verify_links.py`](../tests/unit/test_h25b_verify_links.py).
 
     **전수 실행 결과(222건 링크, 2026-07-31)**: 모순 **8건** / 무모순 214건.
+    → **처리 완료(2026-08-18)** — 아래 표 뒤 「처리 결과」 참조.
     8건은 전부 **카테고리 축에서만** 걸린다 — 행정구역 축으로는 10건 전부 통과한다.
     고유 feature 5개:
     | curation | feature category | 판정 |
@@ -347,7 +348,46 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
     **장소는 맞고 유형이 틀린 것**이다(좌표·주소가 대상과 일치). H33이 해제한 3건처럼
     *다른 장소*에 붙은 오링크가 아니므로 **링크 해제가 아니라 올바른 feature로 재연결하거나
-    카테고리를 고치는 것**이 맞다. 후속 처리는 별도 판단이 필요하다.
+    카테고리를 고치는 것**이 맞다.
+
+    ### 처리 결과 (2026-08-18)
+
+    사용자 승인은 **"올바른 Feature로 재연결"**이었다. prod에서 후보를 전수 조사한 결과
+    **재연결이 가능한 것은 5개 중 1개뿐**이었다. 승인에 "맞는 Feature가 DB에 없으면 결국
+    해제로 떨어진다"가 명시돼 있어 그 fallback을 따랐고, 한 건은 **어느 쪽도 아닌 것**으로
+    판정했다.
+
+    | 항목 | 조사 결과 | 처리 |
+    |---|---|---|
+    | `김해가야테마파크` | `f_global_p_54ab91…` **`01010400`(관광지)** 존재 | **재연결** |
+    | `태화강 국가정원` | 정원 자체가 DB에 없다 — 주차장 6개와 "…태화강국가정원점" 식당들뿐 | 해제(3행) |
+    | `반디랜드&태권도원` | 후보 0건(질의 결과 빈 집합) | 해제(2행) |
+    | `청풍호` | 전망대(`01050300`)·케이블카(`01080200`)는 호수가 아니라 호수의 **시설** | 해제(1행) |
+    | `진해보타닉뮤지엄` | **링크가 맞다** — 이름·주소가 정확히 그 박물관이고 Feature가 하나뿐 | **유지** |
+
+    `01010400`이 관광지 축인 근거(prod place 표본): 죽성드림성당세트장 · 연미산 자연 미술
+    공원 · 머루 와인 동굴 · 깡깡이 예술마을 · 메타버스 체험관. 후보였던 `01000000`은
+    관광지가 아니다 — place 표본이 사계절즉석국수 · 부전동촌국수 · 서가원이다.
+
+    **진해보타닉뮤지엄을 해제하지 않은 이유.** 해제는 "이 항목에 맞는 Feature가 없다"는
+    뜻인데 여기서는 맞는 Feature가 **있고 링크도 그것을 가리킨다**. 틀린 것은 그 Feature의
+    category다(MOIS가 휴게음식점으로 인허가). 해제하면 맞는 링크를 지우고 문제는 그대로
+    남는다.
+    - [ ] **별건: Feature category 보정** — MOIS 인허가 업종이 실제 시설 성격과 다른 경우.
+      같은 형태가 더 있는지 조사가 선행돼야 한다(박물관·미술관이 부속 카페 인허가로
+      `02020100`에 묶이는 패턴).
+
+    **부수로 고친 것 — manifest 카운트가 파생되지 않았다.** `refresh_manifest`의 docstring이
+    "손으로 유지하면 CSV를 고칠 때마다 어긋난다, 그러니 **파생시킨다**"고 하는데 실제로
+    파생하는 것은 `sha256`·`rows`뿐이었다. `linked_rows`/`unresolved_rows`는 손으로
+    유지됐고, CSV 7행을 고친 뒤 스크립트를 돌려도 카운트가 **222 그대로**였다. 그 값이
+    `_h35_csv5.py`의 `csv5_manifest_counts_mismatch` 게이트 입력이라 방치하면 게이트가
+    거짓말을 한다. CSV에서 파생하도록 고쳤고(216/270) `EXPECTED_CSV_ACCEPTED`도
+    222 → **216**으로 맞췄다 — 적대 검증이 "이 상수와 충돌해 shipped 코드가 죽는다"고
+    지목한 지점이다.
+
+    - [ ] ⚠️ **prod 반영은 아직이다.** CSV는 저장소 정본이고 실제 링크는 curation import가
+      반영한다. import를 돌려야 공개 표면(3,265건)에서 사라진다.
 
     > **판정 로직을 두 번 고쳤다(기록)**. ① 동명 다수를 *모순*으로 셌다 → 222건 중 30건이
     > 모순으로 잡히고 그중 20건이 이 축 단독이었다. 동명 다수는 반증이 아니라 **그 축으로
@@ -414,8 +454,9 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     (사용자 지시 2026-08-06). 복원 가능성 자체는 H44가 실증했으므로 열린
     리스크가 아니다. 실 prod 전환 시 manager **#148**(일 1회 dump+sha256+
     manifest·retention·오프박스 반출·배포 직전 fence dump)로 재개한다.
-  - [ ] 신규 DB 프로비저닝 함정 참조 링크 — superuser 확장 4종 사전 생성
+  - [x] 신규 DB 프로비저닝 함정 참조 링크 — superuser 확장 4종 사전 생성
     (manager #109 절차)을 restore 문서에서 링크한다.
+    **해소(2026-08-18)**: `docs/backup-restore.md` **§2.2**를 신설했다 — 빈 DB 재생성이 n150의 1차 복구 경로("손상 시 재적재가 정책")이므로 그 첫 단계인 superuser 확장 선생성 SQL을 넣고 #109를 링크했다. 그 이슈의 **본문은 이미지↔pin 사고**이고 절차는 2026-08-04 코멘트에 있어 본문만 보면 놓친다는 점, 원문 식별자(`krtour_map`)가 낡았다는 점도 적었다. GRANT grantee는 정본(`docker/postgres-role-bootstrap.sh:521-522`)에서 직접 읽어 `ktm_feature_state_procedure_owner, ktm_feature_runtime`으로 썼다 — 조사 초안은 `ktm_feature_migrator`로 틀렸다.
 
 - [~] T-VN-H44 — **복원 리허설 드릴 정기화 (H30B 하네스 재사용)**
 
@@ -618,10 +659,18 @@ AC: arm64 이미지가 registry에 올라가고 n150/Odroid 중 arm64에서 기�
 `krforest_safety_notices`, `forest_fire_risk`, `khoa_coastal_notices`.
 
 - [ ] 착수 여부는 **제품 결정**이다. 하지 않기로 하면 문서에서 "계획"을 빼고 그렇게 적는다.
-- [ ] 그와 별개로 **표 drift는 지금 고친다** — `src/kortravelmap/providers/__init__.py`가
-  존재하지 않는 `krforest_weather`·`krforest_trails` 모듈을 나열한다(실제 파일은
-  `krforest.py` 하나). `docs/reports/full-consistency-audit-2026-06-16.md` R2-15가 이미
-  적발해 뒀다.
+- [x] **표 drift 해소(2026-08-18)** — `providers/__init__.py` docstring이 2026-05
+  Sprint 계획표로 굳어 존재하지 않는 모듈 **3개**(`krforest_weather`·`krforest_trails`·
+  `khoa_weather`)를 나열하고 실재하는 **6개**(`mcst`·`datagokr_file_data`·`krairport`·
+  `kor_travel_concierge`·`feature_operation_registry`·`knps_name_translations`)를
+  빠뜨리고 있었다. 실제 인벤토리로 교체했다.
+  - 고쳐 적는 것만으로는 또 어긋나므로 **`tests/lint/test_providers_docstring_inventory.py`**를
+    신설해 "표 + 예외 목록 = 디렉터리의 모든 모듈"을 강제한다. 새 provider를 넣고
+    docstring을 안 고치면 red다.
+  - 조사 초안은 "이 표는 디렉터리와 1:1"이라 단언하면서 표가 15행/실제 17개라
+    **새 거짓 주장을 만들 뻔했다**(적대 검증이 잡음). 보조 모듈 2개를 예외로 명시하고
+    그 예외 집합까지 테스트가 고정한다.
+  - R2-15는 `provider-contract.md` 대상이고 이미 적용 완료다 — 이 drift는 별건이었다.
 
 AC: 표와 실제 모듈이 일치. dataset 구현은 결정에 따라 별도 task로 분기.
 
