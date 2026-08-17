@@ -35,6 +35,18 @@ PR 2건 머지 — kor-travel-map [#985](https://github.com/digitie/kor-travel-m
 [#176](https://github.com/digitie/kor-travel-docker-manager/pull/176)(compose·ADR-37).
 그 뒤 남은 것은 **geo·concierge·pinvi 인스턴스의 백업 주체**다 — map만 절차가 있고
 나머지 셋은 없다(docker-manager 소관, `docs/backup-restore.md` §1 참조).
+## 2026-08-17 — T-VN-41A-C PR #975 current-main 재배치
+
+PR [#975](https://github.com/digitie/kor-travel-map/pull/975)의 stale refresh
+finalization fence와 queued cancellation outbox를 보완하고, 현재 `main` OpenAPI
+artifact를 재생성했다. 두 적대적 재리뷰에서 Map DB/동시성 P0/P1은 없었다. 그러나
+T-VN-41 receipt는 의도적으로 `pending`이다. Map service SHA와 PinVi의 vendored
+service SHA가 다르므로, 이를 완료로 기록하거나 live consumer를 열면 안 된다.
+
+**다음 한 작업**: PinVi #444를 현재 Map service OpenAPI로 재vendor하고 paired contract
+CI와 두 저장소의 exact commit/vendor SHA receipt를 고정한다. 그 완료 후보만 n150
+isolated Live UI E2E에 배포·검증하고, 성공한 경우에만 #975를 병합한다. #967은 #975
+병합 뒤의 `main` 위에서 재배치·동일 gate를 적용한다.
 
 ## 2026-08-17 — 완료된 Wave 2 task 이력 아카이브 정리
 

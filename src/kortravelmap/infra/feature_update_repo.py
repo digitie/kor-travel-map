@@ -70,6 +70,7 @@ __all__ = [
     "heartbeat_feature_update_request_job",
     "set_update_request_matched_scope",
     "get_update_request",
+    "get_update_request_by_job_id",
     "create_feature_update_request_idempotency",
     "get_feature_update_request_idempotency",
     "lock_feature_update_request_idempotency",
@@ -659,6 +660,15 @@ FROM ops.feature_update_requests AS request
 JOIN ops.import_jobs AS job ON job.job_id = request.job_id
 {_REQUEST_MEMBERSHIP_JOINS}
 WHERE request.request_id = CAST(:request_id AS uuid)
+ORDER BY member.provider_dataset_id, member.sync_scope, member.operation_key
+"""
+
+_GET_REQUEST_BY_JOB_SQL: Final[str] = f"""
+SELECT {_REQUEST_RETURN_COLUMNS}
+FROM ops.feature_update_requests AS request
+JOIN ops.import_jobs AS job ON job.job_id = request.job_id
+{_REQUEST_MEMBERSHIP_JOINS}
+WHERE request.job_id = CAST(:job_id AS uuid)
 ORDER BY member.provider_dataset_id, member.sync_scope, member.operation_key
 """
 
@@ -1413,6 +1423,15 @@ async def get_update_request(
 ) -> FeatureUpdateRequest | None:
     """request id로 단건 조회."""
     rows = (await session.execute(text(_GET_REQUEST_SQL), {"request_id": request_id})).all()
+    return _rows_to_request(rows) if rows else None
+
+
+async def get_update_request_by_job_id(
+    session: AsyncSession,
+    job_id: str,
+) -> FeatureUpdateRequest | None:
+    """canonical import job에 연결된 feature update request를 조회한다."""
+    rows = (await session.execute(text(_GET_REQUEST_BY_JOB_SQL), {"job_id": job_id})).all()
     return _rows_to_request(rows) if rows else None
 
 

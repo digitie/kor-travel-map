@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "a687eaacc9472e357a4f9676c75662a9b53ec387972312b4e236c0e83e8e0ddb"
+      "sha256": "2107d4ef1f46e4bdca9970afbe3977074bcfa820a67f606e1d5b3b23abf9591e"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -17,6 +17,11 @@
     }
   },
   "revisions": [
+    {
+      "date": "2026-08-17",
+      "task": "T-VN-41A-C current-main rebase",
+      "change": "PinVi cache target의 admin 수동 PUT/DELETE를 source protocol 전용 409으로 닫고, PUT의 409 설명에 좌표 conflict와 source protocol 위반을 함께 명시한 현재 admin OpenAPI를 재생성해 baseline을 재고정했다. user/service bytes와 Wave 2 목표 operation 집합은 변하지 않는다."
+    },
     {
       "date": "2026-08-14",
       "task": "T-VN-40C",
