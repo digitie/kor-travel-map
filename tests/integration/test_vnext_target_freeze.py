@@ -7,7 +7,8 @@
    (빈 DB — 위반 0).
 3. ``contracts/vnext/violation-fixtures-v1.sql`` 각 case가
    ``expected-rejections-v1.json``의 SQLSTATE·제약명으로 **DB에서** 거부된다.
-4. H35 7 카테고리 catalog 질의(출처: ``src/kortravelmap/cli/_h35_catalog.py``)로
+4. 7 카테고리 catalog 질의(아래 ``_CATALOG_QUERIES``가 정본 — 원래 출처였던
+   ``src/kortravelmap/cli/_h35_catalog.py``는 T-VN-C01에서 퇴역했다)로
    재계산한 fingerprint가 ``target-schema-fingerprints-v1.json``과 일치한다.
 
 이 테스트가 target freeze artifact의 drift를 fail-close한다 (T-VN-31C).
@@ -37,7 +38,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine
 
-from kortravelmap.cli._h35_contract import canonical_json_bytes
+from kortravelmap.core.database_identity import canonical_json_bytes
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 
 pytestmark = pytest.mark.integration
@@ -260,7 +261,9 @@ _INDEXES_DIVERGENT_FROM_HEAD: Final[dict[str, str]] = {
 }
 
 # =============================================================================
-# H35 catalog 질의 — src/kortravelmap/cli/_h35_catalog.py의 7 카테고리 질의를
+# 7 카테고리 catalog 질의 — 여기가 정본이다. 원래 출처였던
+# src/kortravelmap/cli/_h35_catalog.py는 T-VN-C01(2026-08-18)에서 퇴역했고, 그때
+# 이 사본이 유일한 실행 가능 정의가 됐다. 원문 질의를
 # 복제·적응했다(출처 주석 — ADR/T-VN-31A 지시). 차이점:
 #   * `ops` 고정 schema 대신 schema-qualified relation 목록($1::text[])
 #   * functions의 outbox 소유자 대조·indexes의 단일 인덱스 예외 절 제거

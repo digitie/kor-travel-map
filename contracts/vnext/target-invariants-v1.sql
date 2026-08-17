@@ -16,7 +16,8 @@
 --
 -- 패턴 출처:
 --   * H35 preflight 6종 — identity(null/blank/중복)·NFC·trim·길이·CHECK 위반·
---     FK orphan (src/kortravelmap/cli/_h35_schema.py `_preflight_counts`,
+--     FK orphan (원래 출처 src/kortravelmap/cli/_h35_schema.py `_preflight_counts` —
+--     T-VN-C01(2026-08-18)에서 퇴역했다. 아래 SQL이 이제 정본이다.
 --     docs/runbooks/h35-prod-migration-cutover.md §5.1)
 --   * 각 ADR의 데이터 불변식 (ADR-067~072, ADR-078)
 --

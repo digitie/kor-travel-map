@@ -18,7 +18,7 @@ barrier로 직렬화한다.
   - [~] `T-VN-H25B` → [ ] `T-VN-H34`(공식 curation 미연결 membership 잔여 AC)
   - [~] `T-VN-H43` → [~] `T-VN-H44`(백업 정기화·복원 드릴 재개 조건)
   - [ ] `T-VN-H45-후속`(다건 provider fetcher·quota 관찰 확장)
-  - [ ] `T-VN-H46C`(VWorld fallback 사슬 제거) ∥ [ ] `T-VN-H46D`(daemon 스키마 drift)
+  - [~] `T-VN-H46C`(preflight 의미 검증 — 호출 결선 잔여) ∥ [ ] `T-VN-H46D`(daemon 스키마 drift)
   - [ ] `T-VN-H47`(prod 백업 산출물 위생 — #987) ∥ [ ] `T-VN-H48`(n150 임시 DB 컨테이너 — #988)
   - [ ] `T-VN-H49`(4분할 인스턴스 백업 주체 — dm #177 추적)
 - **Lane B — frontend hardening·PinVi 소비 API**
@@ -26,7 +26,7 @@ barrier로 직렬화한다.
   - [~] `T-VN-41F1D-D` → [ ] `T-VN-41F1D-D2`(격리 리허설·data-dependent live UI E2E)
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환) ∥ [ ] `T-VN-41S`
 - **Lane C — 사문화 정리·미구현 dataset (다른 lane과 무관, 아무 때나)**
-  - [ ] `T-VN-C01`(H35 cutover helper 18개 파일 제거) — T-VN-40 legacy 삭제와 겹침
+  - [x] `T-VN-C01`(H35 cutover helper 퇴역, 2026-08-18) — 17파일 삭제, identity 정의는 `core/database_identity.py`로 이전
   - [ ] `T-VN-C02`(T-229-buildx arm64 검증) ∥ [ ] `T-VN-C03`(ADR-034 보조 dataset 5종)
   - [ ] `T-VN-C04`(문서 정합 — SPRINT 헤더·미개봉 브랜치)
 - **Wave 2 barrier 이후**
@@ -502,12 +502,37 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   형태였고, ETL이 08-07 이후 안 돌아서 아직 안 터졌을 뿐이었다.
   `up -d --no-deps --force-recreate` 후 세 컨테이너 전부 `POST /v2/reverse` HTTP 200.
 
-- [ ] T-VN-H46C — **VWorld fallback 사슬 제거** (H46B 재발 통로)
+- [~] T-VN-H46C — **VWorld fallback 사슬 제거** (H46B 재발 통로)
 
-  `docker-compose.yml:201,326,396`과 `scripts/load-env.sh:119-121`의
-  `${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-…:-${NEXT_PUBLIC_VWORLD_API_KEY:-…}}`가
-  **정확히 401을 받는 값**으로 떨어진다. `.env.example:152`의 낡은 주석도 같은 통로다.
-  `geocoding.py:962-979`의 `preflight()`는 존재·길이만 보므로 잘못된 키를 통과시킨다.
+  - [x] **fallback 사슬은 PR #979에서 이미 끊겼다.** 저장소 전체에
+    `…GEO_API_KEY:-${NEXT_PUBLIC_VWORLD_API_KEY…}` 형태가 0건이고
+    `tests/unit/test_geo_key_provenance.py`가 정적으로 지키며
+    `test_deploy_automation.py:132-138`이 그 문자열의 부재를 직접 단언한다.
+    `.env.example`도 `# (낡음)` 경고가 붙었다(`9bbb74d99`). **이 항목 본문이 낡았던
+    것**이고, 남아 있던 축은 아래 하나뿐이었다.
+  - [x] **`preflight()`가 의미를 안 봤다 → `verify_credentials()` 추가(2026-08-18).**
+    `preflight()`는 (1) None (2) 공백 (3) 128자 초과만 본다 — 값이 무엇인지는 안 본다.
+    2026-08-13 사고가 정확히 그 구멍이었다(VWorld 키가 결선돼 geo가 401로 거부했고,
+    정/역지오코딩이 전부 실패하는 동안 preflight는 초록).
+    `verify_credentials()`가 1회 호출로 geo가 **실제로 받아들이는지** 확인한다.
+    판정은 의도적으로 비대칭이다 — **키 거부는 fail-close**(400 `E0100 field=key` /
+    401 `E0401`), **도달 불가·5xx는 fail-open**(geo는 별도 stack이라 그쪽 지연이
+    map 부팅 교착이 되면 안 된다).
+    - 설계 제약: `geocoding.py`는 httpx를 **런타임 의존으로 갖지 않는다**
+      (`pyproject.toml` 주석 + ADR-002/006/044 — client 수명은 호출자 책임).
+      조사 초안은 이 모듈에서 `httpx.AsyncClient(...)`를 생성해 **런타임 `NameError`**가
+      나는 코드였다(적대 검증이 잡음). 주입된 클라이언트를 쓰는 메서드로 바꿔
+      새 의존도 ADR 개정도 없앴다.
+    - 테스트 8종은 네트워크 없이 돈다. 그중 하나는 **probe가 키 헤더를 싣는지**를
+      본다 — 안 실으면 geo가 거부할 수 없어 이 검사기가 *무엇도 검사하지 않으면서
+      초록*이 된다.
+  - [ ] **잔여: 호출 결선.** 지금은 메서드만 있고 기동 시 부르는 곳이 없다.
+    api/dagster lifespan에 붙일지, 붙인다면 fail-open 경고를 어디에 남길지 결정 필요.
+  - [ ] **잔여: 커버리지 한계 명시.** 이 검증은 주입된 클라이언트를 쓰는 python
+    경로만 본다. 2026-08-14 사고의 실제 통로였던 **Next.js admin UI 프록시**
+    (`packages/kor-travel-map-admin/frontend/src/app/api/geo/[...path]/route.ts`)는
+    별개 축이고 이 검사가 **못 본다**. "geo 키 검증 완료"로 닫으면 검사기가 자기
+    커버리지를 과장하는 형태가 된다.
 
 - [ ] T-VN-H46D — **daemon 스키마 drift**: `column request.providers does not exist`
 
@@ -624,23 +649,40 @@ AC: 세 인스턴스 각각의 최신 dump + sha256 + manifest가 존재하고 �
 
 ### T-VN-C01 — 사문화된 H35 cutover helper 제거
 
-`tasks-done.md`가 "typed cutover helper는 **사문화됐다** … 제거/축소는 **후속 정리
-task로 잡는다**"고 적었는데 **그 task가 없었다.** main에 18개 파일이 그대로 있다.
+**완료(2026-08-18).** `tasks-done.md`가 "제거/축소는 후속 정리 task로 잡는다"고 적어놓고
+그 task가 없어서 17파일이 main에 남아 있었다.
 
-- `scripts/h35/` 6개 — `h35_build.py`, `h35_ctx.sh`, `h35_cutover.py`,
-  `h35_migrate.sh`, `h35_pin.sh`, `h35_verify.py`
-- `src/kortravelmap/cli/_h35_*.py` 6개 + `h35_cutover.py`
-- `tests/unit/test_h35_*.py` 4개
-- `docs/runbooks/h35-prod-migration-cutover.md`
+**지운 것(17)**: `scripts/h35/` 6개 · `cli/{h35_cutover,_h35_cache_target,_h35_catalog,`
+`_h35_contract,_h35_csv5,_h35_schema,_h35_schema_version}.py` 7개 ·
+`tests/unit/test_h35_{contract,entrypoint,partial_migration,image_contract}.py` 4개 ·
+`setup.py`(파일 전체가 wheel에서 H35를 빼는 build 훅뿐이었다).
 
-- [ ] **먼저 실측한다** — 어떤 파일이 아직 배포 경로에서 쓰이는지. `h35_migrate.sh`는
-  dagster 정지 절차로 인용된 이력이 있다. 안 보고 지우면 배포가 끊긴다.
-- [ ] `_h35_schema.py`가 아직 `curated_features`를 참조한다 — **T-VN-40의 legacy 물리
-  삭제와 같은 표면**이라 함께 처리하는 편이 낫다.
-- [ ] 남길 것은 "왜 남기는지"를 파일 상단에 적는다. 안 적으면 다음 사람이 같은 조사를
-  처음부터 다시 한다.
+**살린 것 — `h35-db-identity-v1`**. `contracts/vnext/recovery-preflight-v1.json`이
+**살아 있는 계약**으로 이 digest를 요구한다. 통째로 지우면 스펙만 남고 계산하는 코드가
+저장소 어디에도 없게 되고, 소비자 `T-VN-39`를 구현할 사람이 산문에서 NUL framing을 다시
+유도해야 한다 — golden vector 없이는 재현이 어렵다. `core/database_identity.py`로 옮기고
+golden vector 테스트를 동반했다. 이름의 `h35` 접두는 **wire 상수**라 바꾸지 않았다.
 
-AC: 제거 목록·근거가 removal manifest에 있고 `pytest -q`·`lint-imports` green.
+**남긴 것 — `docs/runbooks/h35-prod-migration-cutover.md`(426줄)**. `contracts/vnext/`
+2개가 §5.1(112/512 상한)·§6(writer fence 5종)을 선언된 출처로 인용하고
+`test_vnext_contract_artifacts.py:345`가 그 5종을 단언한다. `runbooks/README.md`가 이미
+'폐기 · prod 실행 금지'로 표시한다.
+
+**순서 의존을 지켰다**(조사 + 적대 검증이 짚은 것):
+- `test_vnext_target_freeze.py`의 `canonical_json_bytes` import를 **먼저** 옮겼다 —
+  안 옮기고 지웠으면 PostGIS job 전체가 collection error로 죽는다.
+- `setup.py` 삭제와 두 Dockerfile의 `COPY … setup.py` 제거를 **같은 커밋**에 넣었다.
+- Dockerfile의 `rm -f _h35_*` 행 삭제와 그것을 단언하던 테스트도 함께.
+
+**되살아나지 않게 가드를 뒀다**(`tests/unit/test_candidate_image_contract.py`). 지우기만
+하고 검사기를 안 두면 같은 파일이 조용히 돌아온다. 그 파일은 옛
+`test_h35_image_contract.py`를 개명한 것이다 — 이름만 h35이고 실체는 image 위생 가드였다.
+가드는 양방향이다: 퇴역한 경로가 없을 것 **그리고** 계약이 요구하는 identity 계산은 있을 것.
+전자만 두면 "다 지웠다"로 초록인데 계약이 참조하는 계산이 사라진 상태도 통과한다.
+
+**dangling 인용 4곳**도 정정했다(`contracts/vnext/target-invariants-v1.sql`,
+`infra/curation_repo.py`, `scripts/h25b_apply_verified_links.py`, admin e2e spec).
+지운 파일을 "출처"로 인용한 채 두면 다음 사람이 그 경로를 찾다가 인용 자체를 못 믿게 된다.
 
 ### T-VN-C02 — T-229-buildx arm64 multi-arch 배포 검증
 

@@ -14,7 +14,7 @@
     "completeness_rule": "fence는 writer capability registry와 실제 process/container/transaction을 대조한다. 알려지지 않은 writer나 registry 밖 새 write route가 있으면 cutover를 시작하지 않는다."
   },
   "fence_evidence_keys": {
-    "source": "h35-map/v1 receipt 계약 (src/kortravelmap/cli/_h35_contract.py) — cutover fence 증거는 아래 key로 증명한다.",
+    "source": "h35-map/v1 receipt 계약 — cutover fence 증거는 아래 key로 증명한다. database_identity의 실행 가능한 정의는 src/kortravelmap/core/database_identity.py (golden vector 포함)다. 원래 출처 src/kortravelmap/cli/_h35_contract.py는 T-VN-C01(2026-08-18)에서 퇴역했고 identity 축만 그 모듈로 옮겼다.",
     "keys": {
       "database_identity": "live 재계산 identity — sha256(h35-db-identity-v1 NUL-framed transaction_id/role/database/system_identifier). request echo가 아닌 재계산 값만 신뢰",
       "runtime_mutation_count": "fence window 동안 0이어야 한다",

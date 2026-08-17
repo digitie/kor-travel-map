@@ -290,10 +290,11 @@ def _render_manifest(
             if rows is not None:
                 rows = len(parsed)
             # `linked_rows`/`unresolved_rows`도 파생한다. 예전에는 손으로 유지했는데,
-            # 이 값은 `_h35_csv5.py`가 `EXPECTED_CSV_ACCEPTED`와 대조해
-            # `csv5_manifest_counts_mismatch`를 던지는 게이트의 입력이다. 손으로 두면
-            # CSV를 고칠 때마다 어긋나고, 실제로 T-VN-H34에서 7행을 고친 뒤 이 함수를
-            # 돌려도 카운트가 옛 값 그대로였다.
+            # 손으로 두면 CSV를 고칠 때마다 어긋난다 — 실제로 T-VN-H34에서 7행을
+            # 고친 뒤 이 함수를 돌려도 카운트가 옛 값 그대로였다.
+            # (이 값을 `EXPECTED_CSV_ACCEPTED`와 대조하던 `_h35_csv5.py`는
+            #  T-VN-C01에서 퇴역했다. 그래도 파생이 맞다 — 손으로 유지되는 숫자는
+            #  읽는 쪽이 없어져도 여전히 틀린 채로 남는다.)
             if linked is not None or unresolved is not None:
                 linked_count = sum(
                     1 for row in parsed if (row.get("feature_id") or "").strip()

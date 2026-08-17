@@ -119,8 +119,11 @@ production/n150 검증은 위 세 단계와 별도 명시 승인을 모두 통�
 ## 6. schema regression 경계
 
 writer-drain migration은 `0079_cache_target_writer_drain`가 단일 Alembic head가 된 시점부터
-H35 helper의 synthetic regression target에도 포함된다. `PRE_SCHEMA`, `TARGET_SCHEMA`,
-`FORWARD_BOUNDARY`는 `_h35_schema_version.py`가 한 번만 정의하며, preflight·migrate·CSV5·GC·verify
+H35 helper의 synthetic regression target에도 포함됐었다. `PRE_SCHEMA`(`0063_pipeline_root_id`),
+`TARGET_SCHEMA`(`0079_cache_target_writer_drain`), `FORWARD_BOUNDARY`(`schema_0079`)는
+`_h35_schema_version.py`가 한 번만 정의했으나 그 helper 세트는 T-VN-C01(2026-08-18)에서
+퇴역했다 — 위 값은 이제 **역사 기록**이고 살아 있는 코드가 참조하지 않는다.
+당시 preflight·migrate·CSV5·GC·verify
 receipt가 같은 `schema_0079` 경계를 요구한다. H35의 과거 prod cutover 자체는 폐기됐으므로
 이는 CI의 isolated `0063→0079` schema-chain 검증일 뿐 production/n150 실행 권한을 뜻하지
 않는다.

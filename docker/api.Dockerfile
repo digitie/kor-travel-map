@@ -9,15 +9,15 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY pyproject.toml setup.py README.md alembic.ini ./
+COPY pyproject.toml README.md alembic.ini ./
 COPY alembic/env.py alembic/script.py.mako ./alembic/
 COPY alembic/baseline ./alembic/baseline
 COPY alembic/versions ./alembic/versions
 COPY src ./src
 COPY packages/kor-travel-map-api ./packages/kor-travel-map-api
 
-RUN rm -f src/kortravelmap/cli/_h35_*.py src/kortravelmap/cli/h35_cutover.py \
-    && python -m pip install --no-cache-dir --upgrade pip \
+# T-VN-C01(2026-08-18): H35 helper가 저장소에서 사라져 `rm -f`가 필요 없어졌다.
+RUN python -m pip install --no-cache-dir --upgrade pip \
     && python -m pip install --no-cache-dir --prefix=/install . ./packages/kor-travel-map-api
 
 FROM python:3.12-slim AS runtime
