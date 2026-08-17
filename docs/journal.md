@@ -2,6 +2,13 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-18 — T-VN-41 #975 후보 증거 task ledger 정리
+
+- 열린 작업 목록은 T-VN-41A/B/C를 `[~]`로 정렬했다. 정확한 source 쌍의 격리 Live UI 복구와
+  증거 결박·적대 재리뷰는 통과했지만, PR #975의 원격 CI와 사용자 머지 지시는 남아 있다.
+- `tasks-done.md`는 완료·폐기·병합 이력 전용이므로, 아직 열린 T-VN-41 항목을 이관하지 않았다.
+  후보 receipt는 final main C7이나 production consumer enable을 뜻하지 않는다.
+
 ## 2026-08-17 — prod PostgreSQL 4분할(12x00 대역) + 적대 리뷰 반영
 
 - n150 prod의 PostgreSQL을 프로젝트별 전용 instance로 나누고 포트를 각 대역의 `x00`에

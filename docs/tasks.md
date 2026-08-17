@@ -22,7 +22,7 @@ barrier로 직렬화한다.
   - [x] `T-VN-H47`(#987 종료) ∥ [x] `T-VN-H48`(#988 종료) — prod 정리 + 재발 방지 문서화 완료
   - [x] `T-VN-H49`(baseline 3건 확보 + 절차 문서화 완료, 2026-08-18 — 주기화는 dm #177)
 - **Lane B — frontend hardening·PinVi 소비 API**
-  - [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox)
+  - [~] `T-VN-41A` → [~] `T-VN-41B` → [~] `T-VN-41C`(generation/outbox — #975 후보 Live UI E2E·적대 재리뷰 통과, 원격 CI·머지 대기)
   - [~] `T-VN-41F1D-D` → [ ] `T-VN-41F1D-D2`(격리 리허설·data-dependent live UI E2E)
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환) ∥ [ ] `T-VN-41S`
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정, T-VN-40 인수 뒤)**
@@ -910,6 +910,14 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
 > 완주·수렴 + H35 prod live 검증 잔여) **완료 후**에만 진행한다. 그 전 격리 스택 작업은
 > 병행 무방(파일 충돌은 의도된 핀 2개뿐 — registry write 수·mocked manifest,
 > journal 2026-08-04).
+>
+> **#975 후보 증거 상태(2026-08-18)** — `main`의 후손 Map `77821001`과 PinVi `e8e0fecf`의
+> 정확한 source archive를 n150의 별도 Docker project·volume에서만 실행했다. 실제 관리자 UI 로그인·
+> BFF-only dead-letter replay·reconciliation 뒤 같은 stream의 `blocked`/consumer disabled/dead-letter
+> 1/pending 1이 종결 reconciliation의 `ready`/consumer enabled/모든 delivery 0으로 수렴했다. 증거는
+> stream 식별자·blocked event·snapshot epoch/count/Merkle와 request 종결 tuple을 회귀 test로 실패 폐쇄
+> 결박했고, 두 적대 재리뷰의 P0/P1은 없다. 후보 receipt는 final main C7, production consumer enable
+> 또는 `complete` 근거가 아니며 #975 원격 CI 녹색 뒤에도 사용자 머지 지시 전까지 대기한다.
 
 - [ ] T-VN-41A — **source generation·restore epoch**
 
@@ -951,9 +959,11 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
   - [ ] n150 격리 DB에서 migration → 수동 GC → schedule ON → 다음 tick 순서로 검증하고,
     GC 처리량이 유입률을 상회하며 remaining backlog가 0인지 증명한다. referenced snapshot 증가율과
     보존 임계치 alert도 함께 확인한다.
-  - [ ] Map/PinVi exact head로 n150 isolated live UI recovery와 최종 prod gate를 통과한다.
-    PinVi system별 snapshot concurrency 1, `429/503 Retry-After` backoff, `413` non-retry,
-    credential별 gateway limit 또는 동등한 외부 rate-limit과 실제 호출 cadence를 증명한다.
+  - [~] Map/PinVi exact head로 n150 isolated live UI recovery와 최종 prod gate를 통과한다.
+    후보 Live UI recovery와 `blocked → ready` stream/replay/reconciliation 결박은 통과했다. 최종 prod
+    gate는 별도 final main C7·production consumer enable 경계이며, PinVi system별 snapshot concurrency 1,
+    `429/503 Retry-After` backoff, `413` non-retry, credential별 gateway limit 또는 동등한 외부 rate-limit과
+    실제 호출 cadence를 함께 증명한다.
 
 - [ ] T-VN-41S — **snapshot materialization streaming·audit compaction 확장 (#922, C enable 비차단)**
 

@@ -1,5 +1,15 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-18 — T-VN-41 task ledger를 후보 검증 상태로 정렬
+
+`tasks.md`는 #975의 정확한 source 쌍 후보 Live UI 복구·증거 결박·적대 재리뷰 통과를 `[~]`로
+기록한다. 이는 final main C7, production consumer enable 또는 `complete` receipt가 아니다.
+
+### 다음 한 작업
+
+Map #975와 paired PinVi #444의 원격 CI가 녹색인지 확인한다. 모두 충족돼도 사용자 지시가 있을 때까지
+머지하지 않으며, #967은 #975 머지 뒤에 재배치한다.
+
 ## 2026-08-17 — prod DB를 프로젝트별 전용 인스턴스 4개로 분리 (12x00 대역)
 
 n150 prod의 PostgreSQL을 넷으로 나누고 포트를 각 대역의 `x00`으로 맞췄다.
