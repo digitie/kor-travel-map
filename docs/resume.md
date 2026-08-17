@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-17 — T-VN-41 #975 격리 후보 Live UI E2E 통과
+
+Map `b6685ceb`·PinVi `21e2148c` exact archive와 다섯 immutable runtime image로 n150
+격리 후보를 재구성했다. 실제 브라우저 로그인에서 BFF-only admin UI가 blocked stream과
+dead-letter를 읽고 replay/reconciliation을 요청했으며, PinVi consumer 복구 뒤 checksum이
+일치한 `ready` 상태(backlog/dead-letter 0)까지 도달했다. 후보 증거는 final main C7이나
+production enable이 아니다.
+
+### 다음 한 작업
+
+`candidate_verified` receipt·manifest·attestation·Live E2E digest를 PR #975에 고정하고 CI를
+다시 통과시킨다. 두 적대 리뷰의 candidate evidence 재확인 뒤 #975를 merge하고, #967은 새
+`main` 위에 재배치한다.
+
 ## 2026-08-17 — prod DB를 프로젝트별 전용 인스턴스 4개로 분리 (12x00 대역)
 
 n150 prod의 PostgreSQL을 넷으로 나누고 포트를 각 대역의 `x00`으로 맞췄다.

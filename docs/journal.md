@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-17 — T-VN-41 #975 n150 격리 후보 Live UI E2E 통과
+
+- Map `b6685ceb`과 PinVi `21e2148c` archive를 n150의 별도 Docker project·volume으로만
+  기동했다. Map API/UI/Dagster web/Dagster daemon과 PinVi API의 다섯 runtime image는
+  immutable ID와 OCI revision label을 각각 archive commit에 대조했다. service OpenAPI와
+  PinVi vendor bytes도 같은 SHA-256 `c6f9…aebd`였다.
+- 빈 후보 DB에서 PinVi initial cutover 뒤 **dead-letter 1건 + pending relay 1건**을 만든
+  다음, 실제 admin UI 로그인과 BFF-only 경로로 dead-letter replay·reconciliation을 요청했다.
+  브라우저에는 service token이 없음을 검증했고 PinVi consumer가 reconciliation을 적용한
+  뒤 `ready`, backlog `0`, dead-letter `0`, 고정 Merkle root 일치까지 Playwright 1 worker/
+  retry 0으로 통과했다.
+- 이 결과는 `candidate_verified` evidence로만 고정한다. final main C7, production consumer
+  enable, `complete` receipt는 수행하거나 주장하지 않았다.
+
 ## 2026-08-17 — prod PostgreSQL 4분할(12x00 대역) + 적대 리뷰 반영
 
 - n150 prod의 PostgreSQL을 프로젝트별 전용 instance로 나누고 포트를 각 대역의 `x00`에
