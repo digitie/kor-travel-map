@@ -25,6 +25,10 @@ barrier로 직렬화한다.
   - [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox)
   - [~] `T-VN-41F1D-D` → [ ] `T-VN-41F1D-D2`(격리 리허설·data-dependent live UI E2E)
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환) ∥ [ ] `T-VN-41S`
+- **Lane M — 수동 Feature 생성 (2026-08-18 결정, T-VN-40 인수 뒤)**
+  - [ ] `T-VN-M01`(admin Feature 생성 API — **ADR 필요**) → [ ] `T-VN-M02`(origin 보존·불변)
+  - [ ] `T-VN-M03`(curated 동시 생성 — T-VN-40 표면) ∥ [ ] `T-VN-M04`(PinVi 요청 큐 — cross-repo)
+  - [ ] `T-VN-M05`(provider 발행 시 중복 판정 — 자동 병합 금지)
 - **Lane C — 사문화 정리·미구현 dataset (다른 lane과 무관, 아무 때나)**
   - [x] `T-VN-C01`(H35 cutover helper 퇴역, 2026-08-18) — 17파일 삭제, identity 정의는 `core/database_identity.py`로 이전
   - [~] `T-VN-C02`(arm64 — registry 자격증명 필요, 정적 점검만 완료) ∥ [~] `T-VN-C03`(표 drift 완료 / dataset 5종은 제품 결정)
@@ -1036,6 +1040,74 @@ dataset에도 없다(kind·lifecycle·publication 무관 전수 검색).
 - **T-VN-40과 충돌** — 그 릴리스가 지금 curation write model을 바꾸는 중이고, 사용자가
   이번 PR에서 **제외**하라고 한 범위다
 
-- [ ] **결정 필요**: (A) T-VN-40 인수 후 그 위에 `curation_manual` source를 얹는다
-  (B) 지금 별도 ADR로 설계한다 (C) 축제 event에 링크한다(장소가 아니라 부정확) —
-  현재는 해제 상태로 두고 이 항목이 추적한다.
+### 결정 (2026-08-18, 사용자) — ETL 무관 Feature는 admin/API로 만든다
+
+1. **ETL과 무관한 Feature는 admin UI/API로 추가할 수 있다.** provider가 발행하지 않는
+   실체(국가정원·테마파크 복합·호수 등)가 대상이다.
+2. **PinVi의 Feature 생성 요청도 같은 API를 쓴다.** PinVi가 직접 만들지 않고 **요청**하며
+   admin이 승인한다.
+3. **curated Feature를 추가할 때 대상 Feature가 없으면** 이 API로 Feature를 만들고
+   curation에도 함께 넣는다.
+4. **origin(누가 만들었나)을 구분해 보존한다** — admin 직접 / PinVi 요청 승인 / curation
+   추가 중 생성. **Feature가 나중에 수정돼도 origin은 바뀌지 않는다.** ETL이 같은 실체를
+   발행하는 상황이 되면 admin이 따로 판정한다.
+
+#### 실측으로 보완한 것
+
+**① 표면은 이미 있다. 결선이 없을 뿐이다.**
+`ktm_feature_runtime`은 `feature.features`에 **SELECT만** 갖는다(INSERT 없음) — 직접
+INSERT는 불가능하다. 그런데 procedure
+`feature.create_feature_with_initial_state(p_feature jsonb, p_lifecycle_state,
+p_publication_state, p_quality_state, p_context jsonb)`가 **이미 존재하고
+`ktm_feature_runtime`에 EXECUTE가 이미 부여돼 있다.** admin 상태 전이용
+`transition_admin_feature_state`·`reactivate_admin_feature_state`도 마찬가지다.
+→ 새 쓰기 경로를 만드는 일이 아니라 **기존 procedure를 admin API에 잇는 일**이다.
+
+**② "ETL이 엎어쓴다"는 일어나지 않는다 — 진짜 위험은 중복이다.**
+`make_feature_id`는 `source_type`을 해시 입력에 넣는다(ADR-009). 수동 Feature와 provider
+Feature는 **애초에 다른 `feature_id`**라 ETL이 그 행을 덮어쓸 수 없다. 실제로 생기는 문제는
+**같은 실체에 Feature가 둘**이 되는 것이고, 그건 덮어쓰기가 아니라 **dedup/merge** 판정
+영역이다. 결정 4의 "ETL이 엎어쓰는 상황"을 그 의미로 새긴다.
+
+**③ curation과 함께 만드는 것은 구조적으로 가능하다.**
+`curation_items.source_record_key`는 **nullable**이고 `feature.features`에는 source 쪽 FK가
+없다(부모 Feature 자기참조 FK만 있다). 즉 provider source record 없이도 Feature와 curation
+item을 만들 수 있다.
+
+#### 아직 안 정해진 것
+
+- **`source_type` / `source_natural_key`** — `make_feature_id`의 입력이라 ID 체계에 들어간다.
+  origin 3종을 `source_type`으로 가를지(`manual_admin`/`manual_pinvi`/`manual_curation`),
+  아니면 `source_type`은 하나로 두고 origin은 별도 컬럼에 둘지. **전자면 origin이 ID에 박혀
+  불변이 공짜로 얻어지지만 origin을 정정할 수 없다.** 후자면 정정이 가능하지만 불변을 따로
+  강제해야 한다.
+- **natural key의 안정성** — 같은 실체를 두 번 만들면 같은 ID여야 하고, 이름을 고쳐도 ID가
+  바뀌면 안 된다(`trg_features_identity_fence`가 `feature_id` UPDATE를 막는다).
+- **3축 초기 상태** — 만들자마자 공개인가, 검토 후인가.
+- **PinVi 요청 큐** — 접수 → 승인 → 생성. 요청 자체의 저장 위치와 상태 모델.
+- **좌표** — `features.coord`는 nullable이지만, 지도에 안 찍히는 Feature가 공개 표면에
+  나가도 되는지.
+- **provider가 나중에 같은 실체를 발행하면** — 자동 병합하지 않는다까지는 정해졌다.
+  admin에게 무엇을 보여주고 어떤 선택지를 주는지는 미정.
+- **공개 표면 노출** — public API/PinVi snapshot에 수동 Feature가 나가는지, 나간다면 소비자가
+  origin을 알 수 있어야 하는지.
+
+#### 후속 task
+
+- [ ] **T-VN-M01 — admin Feature 생성 API** (결정 1). `create_feature_with_initial_state`를
+  admin OpenAPI에 잇는다. `source_type`/natural key 규칙과 3축 초기 상태를 함께 정한다.
+  **ADR 필요** — ID 체계에 새 `source_type`이 들어간다.
+- [ ] **T-VN-M02 — origin 보존과 불변** (결정 4). origin 3종을 구분해 저장하고 Feature
+  수정에도 불변임을 스키마·테스트로 고정한다. `trg_features_identity_fence`가 이미
+  `feature_id`/`feature_uuid`에 같은 일을 하므로 그 패턴을 따른다.
+- [ ] **T-VN-M03 — curated 동시 생성** (결정 3). curation import/admin 편집에서 대상 Feature가
+  없을 때 M01을 호출해 만들고 `curation_items`에 잇는다. **T-VN-40의 write model과 같은
+  표면**이라 그 인수 뒤에 얹는다.
+- [ ] **T-VN-M04 — PinVi 요청 큐** (결정 2). PinVi가 HTTP로 요청하고 admin이 승인한다. 승인
+  시 M01을 호출하고 origin을 `manual_pinvi`로 남긴다. cross-repo 계약이라
+  `docs/integration-map.md`에도 추가한다.
+- [ ] **T-VN-M05 — provider 발행 시 중복 판정** (결정 4 후단). 수동 Feature와 같은 실체를
+  provider가 발행하면 dedup 후보로 올리고 **자동 병합하지 않는다.** admin이 병합/유지/수동본
+  폐기를 고른다.
+- [ ] **T-VN-H34 잔여** — M01~M03이 서면 태화강 국가정원·반디랜드&태권도원·청풍호를 Feature로
+  만들고 curation을 재연결한다. 그때까지는 해제 상태를 유지한다.
