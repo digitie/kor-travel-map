@@ -28,6 +28,34 @@ docker compose stop api frontend dagster dagster-daemon rustfs
 `postgres`는 멈추지 않는다. RustFS는 멈춘 뒤 같은 named volume을
 `rustfs-perms` service로 읽어 tar archive를 만든다.
 
+> ⚠️ **이 스크립트는 n150 prod에 쓸 수 없다.** prod는 저장소 standalone stack이 아니라
+> `kor-travel-docker-manager`가 띄우는 **프로젝트별 전용 PostgreSQL**에서 돈다
+> (2026-08-17, docker-manager ADR-37). 서비스명이 `postgres`가 아니고 포트도 다르다.
+>
+> | | standalone | n150 prod |
+> |---|---|---|
+> | 서비스/컨테이너 | `postgres` | `kor-travel-map-postgres` |
+> | 포트 | `5432` | **`12700`** (loopback 전용) |
+> | 대상 DB | `kor_travel_map`, `_dagster` | 같음 |
+>
+> prod 백업은 컨테이너 안에서 포트를 명시해 직접 뜬다. **`-p`를 빠뜨리면 컨테이너
+> 기본값(5432)을 찾아 실패한다** — host network라 소켓도 그 포트에 없다.
+>
+> ```bash
+> docker exec kor-travel-map-postgres \
+>   pg_dump -h 127.0.0.1 -p 12700 -U kor_travel_map -d kor_travel_map \
+>   -Fc --compress=6 -f /tmp/map.dump
+> docker cp kor-travel-map-postgres:/tmp/map.dump <대상>/
+> ```
+>
+> 산출물은 `~/backups/kor-travel-map/`에 `<날짜>-<태그>.dump` + `.sha256` +
+> `.manifest`(alembic head와 주요 row count)로 둔다 — 기존 관례 그대로다. 권한은
+> `600`이다(`docs/external-apis.md` §1.1 — dump는 DB 전체를 담는다).
+>
+> **다른 세 인스턴스도 각자 백업 주체가 필요하다**(geo `12500` 33GB · concierge
+> `12600` · pinvi `12800`). 그 셋은 이 저장소 소관이 아니므로 docker-manager 쪽에
+> 절차를 둔다 — 현재 미비이고 별건이다.
+
 ## 2. 백업 실행
 
 Admin UI `/admin/backups` 또는 `POST /v1/admin/backups`의 `execute=true` command로
@@ -166,10 +194,30 @@ KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL:-postgresq
 로 되어 있는데 그 override 이름이 **`.env`에 아예 없었다.** `.env`만 훑는 방식으로는
 안 보인다. 안 고치면 dagster가 계속 **옛 DB에 run을 기록해** 두 DB가 조용히 갈라진다.
 
+**어느 compose를 볼지부터 정한다.** 이 저장소의 compose는 standalone이고, prod에서
+실제로 도는 것은 `kor-travel-docker-manager`의 compose다(§1 경고). 둘은 기대집합이
+다르므로 섞어 보면 매번 거짓 경보가 난다.
+
 ```bash
-# `.env`가 아니라 compose가 resolve한 값에서 옛 포트를 찾는다
-docker compose config | grep -E 'PG_DSN|PG_URL' | grep ':5432/'
+# ① prod 형상 — 반드시 docker-manager compose를 대상으로 지정한다.
+#    이 저장소에서 그냥 `docker compose config`를 하면 prod가 쓰는 값을 보지 않는다.
+(cd <kor-travel-docker-manager 경로> && docker compose config) \
+  | grep -oE 'postgres[^ ]*://[^ ]+' \
+  | grep -oE ':[0-9]{4,5}/[a-z_]+' | sort -u
+# 기대: geo 12500 / concierge 12600 / map 12700 / pinvi 12800 뿐.
+
+# ② 이 저장소 standalone 형상.
+docker compose config \
+  | grep -oE 'postgres[^ ]*://[^ ]+' \
+  | grep -oE ':[0-9]{4,5}/[a-z_]+' | sort -u
+# 기대: `KOR_TRAVEL_MAP_POSTGRES_HOST_PORT`(기본 5432)와 container 내부 5432 뿐.
+#       여기서 5432가 나오는 것은 **정상**이다 — prod 기준으로 판정하지 마라.
 ```
+
+찾을 포트를 고정하지 마라. 2026-08-17에 map이 12703에서 12700으로 옮겼고, 그때 이
+명령이 `:5432/`만 보고 있어서 12703 잔여 7건을 통째로 놓쳤다 — **항상 초록이었다.**
+위 ④가 인용한 스니펫도 이 저장소에는 없다(여기 compose는 `${…:-}` 빈 기본값이다).
+하드코딩된 기본 DSN이 있던 곳은 docker-manager compose다. 그래서 ①이 본론이다.
 
 ### 왜 카탈로그 비교로는 ③④가 안 잡혔나
 
@@ -387,6 +435,95 @@ command/env를 확인한 뒤 명시적으로 실행한다.
 request는 409다. create는 완전한 artifact checksum을 다시 검증해 crash 뒤 marker를 복구할
 수 있다. delete는 새 command의 대상이 처음부터 없으면 claim을 rollback하고 404를 반환하며,
 이미 시작된 command만 DB에 동결한 삭제 전 snapshot과 artifact 부재 proof로 완료한다.
+
+## 8.1 prod 복구 (§5·§7·§8은 prod에 못 쓴다)
+
+> ⚠️ **위 §5 staging cold restore·§7 hot-swap·§8 Admin API는 전부
+> `scripts/docker-restore.sh` 기준이고, 그 스크립트는 `docker compose exec -T postgres`
+> 를 쓴다.** prod에는 `postgres`라는 compose service가 없고(`kor-travel-map-postgres`
+> 이며 docker-manager 소유다) 포트도 `5432`가 아니라 `12700`이다. `-p`도 주지 않는다.
+> **Admin UI의 restore/swap 버튼도 마찬가지다** — `KOR_TRAVEL_MAP_API_BACKUP_COMMAND_ENABLED=true`
+> 로 눌러도 존재하지 않는 service를 찾아 실패한다. prod에서는 켜지 마라.
+
+prod 복구는 아래처럼 **손으로** 한다. §1의 백업과 짝이다.
+
+### 준비 — 무엇으로 되돌리는지부터 정한다
+
+```bash
+# 산출물과 무결성 확인. sha256이 안 맞으면 여기서 멈춘다.
+ls -l ~/backups/kor-travel-map/
+sha256sum -c ~/backups/kor-travel-map/<날짜>-<태그>.dump.sha256
+cat      ~/backups/kor-travel-map/<날짜>-<태그>.manifest   # alembic head·주요 row count
+```
+
+manifest의 **alembic head가 지금 이미지의 head와 같은지** 먼저 본다. 다르면 복원한 DB로
+API가 기동을 거부한다(세대 게이트). `0104` 이전 dump는 alembic chain을 거슬러 올라갈 수
+없어 지금 코드로 복원되지 않는다.
+
+### ① 쓰기 정지
+
+```bash
+# map 앱만 멈춘다. DB는 살려 둔다(pg_restore가 붙어야 한다).
+sudo docker stop kor-travel-map-api-latest kor-travel-map-dagster-latest \
+                 kor-travel-map-dagster-daemon-latest kor-travel-map-ui-latest
+```
+
+### ② 옆에 복원해서 먼저 본다 (덮어쓰기 전에)
+
+```bash
+sudo docker cp <대상>/<날짜>-<태그>.dump kor-travel-map-postgres:/tmp/restore.dump
+sudo docker exec kor-travel-map-postgres \
+  createdb -h 127.0.0.1 -p 12700 -U kor_travel_map kor_travel_map_restore
+sudo docker exec kor-travel-map-postgres \
+  pg_restore -h 127.0.0.1 -p 12700 -U kor_travel_map -d kor_travel_map_restore \
+  --no-owner --no-privileges -j 4 /tmp/restore.dump
+```
+
+`-p 12700`을 빠뜨리면 컨테이너 기본값 `5432`를 찾아 실패한다 — host network라 소켓도
+그 포트에 없다. 복원본에서 manifest의 row count를 대조한 **뒤에** ③으로 간다.
+
+### ③ 교체
+
+```bash
+# 연결을 끊고 이름을 맞바꾼다. 원본은 지우지 말고 남겨 둔다.
+sudo docker exec kor-travel-map-postgres psql -h 127.0.0.1 -p 12700 -U kor_travel_map -d postgres -c \
+  "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='kor_travel_map' AND pid<>pg_backend_pid()"
+sudo docker exec kor-travel-map-postgres psql -h 127.0.0.1 -p 12700 -U kor_travel_map -d postgres -c \
+  "ALTER DATABASE kor_travel_map RENAME TO kor_travel_map_prev_$(date +%Y%m%d)"
+sudo docker exec kor-travel-map-postgres psql -h 127.0.0.1 -p 12700 -U kor_travel_map -d postgres -c \
+  "ALTER DATABASE kor_travel_map_restore RENAME TO kor_travel_map"
+```
+
+### ④ role·ACL을 다시 맞춘다 (여기가 제일 잘 빠진다)
+
+`pg_dump -d <db>`는 **role·ACL·membership option을 담지 않는다**(§2.1). `--no-owner
+--no-privileges`로 복원했으므로 runtime role의 권한이 **비어 있다.** 이 상태로 API를
+올리면 기동은 되고 쿼리에서 permission denied가 난다.
+
+```bash
+# api-entrypoint의 ACL 재조정 경로를 태운다(migrator SET ROLE 경로).
+sudo docker start kor-travel-map-api-latest
+sudo docker logs -f kor-travel-map-api-latest   # ACL inventory 재조정 로그 확인
+```
+
+### ⑤ 기동·검증
+
+```bash
+sudo docker start kor-travel-map-dagster-latest kor-travel-map-dagster-daemon-latest \
+                  kor-travel-map-ui-latest
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:12701/health
+```
+
+**health 200은 "동작한다"의 증거가 아니다.** ETL을 하나 실제로 돌려 SUCCESS를 받고,
+manifest의 row count를 다시 대조한 뒤에 복구 완료로 판정한다.
+
+### ⑥ 뒷정리
+
+`kor_travel_map_prev_*`는 검증이 끝날 때까지 남긴다. 다 끝나면 지운다 — 남겨 두면
+다음 사람이 "백업이 여러 개 있다"고 세게 된다.
+
+> **다른 세 인스턴스(geo `12500` · concierge `12600` · pinvi `12800`)는 백업 자체가
+> 없으므로 복구 절차도 없다.** docker-manager 소관이고 별건이다(`T-VN-H49`).
 
 ## 9. n150 prod 수동 기준선 (T-VN-H43)
 

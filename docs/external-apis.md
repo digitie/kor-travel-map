@@ -13,10 +13,48 @@ kor-travel-map API backend가 Kakao Local, NAVER Search, Google Places API를 �
 ## 1. 키 보관 원칙
 
 - 모든 API 키는 `SecretStr`로 settings에 로드.
-- `.env` 파일은 권한 600. systemd `EnvironmentFile` 또는 vault 권장.
+- **평문 자격증명을 담은 파일은 전부 권한 600.** `.env`만이 아니다 — 아래 참조.
+  systemd `EnvironmentFile` 또는 vault 권장.
 - 평문 commit 금지. CI/CD에서는 GitHub Actions secret.
 - 로그/Sentry에 절대 노출 안 함.
 - 키 회전 시 ADR 추가 (회전 사유, 영향 범위).
+
+### 1.1 ⛔ `.env`만 보면 놓친다 — 같은 비밀을 담은 다른 파일들
+
+이 규정이 오래 `.env`만 지목했고, 그 결과 **같은 비밀을 담은 파일들이 규정 밖에**
+있었다. 2026-08-17 n150 실측:
+
+| 대상 | 실태 | 담고 있던 것 |
+|---|---|---|
+| `docker-compose.yml` | `664` | 하드코딩 기본 DSN **3건** |
+| `docker-compose.yml.bak-*` 5개 | `644`/`664` | 자격증명 **7~9건**씩 |
+| `pg_dump` 산출물 4개(1.2GB) | `644` | **DB 전체** |
+
+compose가 위험한 것은 `${VAR:-postgresql://user:password@host/db}` 형태로 **기본값에
+비밀번호를 박기** 때문이다. `.env`에 override가 있어도 기본값은 파일에 남는다.
+dump는 말할 것도 없이 DB 전체(발급 키 해시 포함)다.
+
+전부 `600`(현행 compose는 배포 스크립트가 읽어야 해 `640`), 디렉터리는 `700`으로
+좁혔다. **삭제하지 않았다** — 권한 조정은 되돌릴 수 있고, 삭제는 아니다.
+
+**점검 방법** — 이름이 아니라 **내용**으로 찾는다. `.env`라는 이름만 훑으면 위 셋을
+전부 놓친다.
+
+```bash
+# 대상을 **열거**한다. 목록을 미리 알아야 하면 그게 곧 이름 기반이다.
+# 길이 조건도 두지 마라 — 이 표가 근거로 든 `addr:addr`은 비밀번호가 4자라
+# `{8,}`로는 안 잡힌다. 돌려도 pinvi만 나오고 나머지가 초록으로 보인다.
+find . -type f \\( -name '.env*' -o -name '*.yml' -o -name '*.yaml' \\
+                 -o -name '*.dump' -o -name '*.bak*' -o -name '*.backup*' \\) \\
+     -not -path './.git/*' -not -path './node_modules/*' -print0 \\
+| while IFS= read -r -d '' f; do
+    n=$(grep -acE '://[^:/@ ]+:[^@ ]+@' "$f" 2>/dev/null) || n=0
+    [ "$n" -gt 0 ] && printf '%s %s (자격증명 %s건)\n' "$(stat -c %a "$f")" "$f" "$n"
+  done
+```
+
+권한이 `600`이 아닌 줄이 나오면 그게 위반이다(`.env.example` 같은 tracked 예시는
+예외로 **명시해** 뺀다 — 조용히 빠지는 예외를 만들지 않는다).
 
 ## 2. 환경변수 카탈로그
 

@@ -13,8 +13,47 @@ Odroid M1S(ARM64) 양쪽 배포를 위한 multi-platform Docker build 절차를 
 | `api` | `12701` | `kor-travel-map-api` FastAPI, OpenAPI/public/admin/debug/ops 라우터 |
 | `frontend` | `12705` | Next.js admin UI |
 | `dagster` | `12702` | kor-travel-map-owned Dagster UI/code location |
-| `postgres` | host `5432`, container `5432` | 독립 `kor_travel_map` PostGIS DB |
+| `postgres` | standalone host `5432` · **n150 prod `12700`** | 독립 `kor_travel_map` PostGIS DB. 아래 ⚠️ |
 | `rustfs` | API `12101`, console `12105` | S3 호환 객체 저장소(선택, backup 대상) |
+
+> ⚠️ **postgres 포트는 배포 형태에 따라 다르다.**
+>
+> | 형태 | 포트 | listen | 비고 |
+> |---|---|---|---|
+> | 저장소 standalone compose | `5432` | 컨테이너 기본 | 로컬 개발·CI |
+> | **n150 prod** | **`12700`** | **`127.0.0.1` 전용** | `kor-travel-map-postgres`, host network |
+>
+> prod는 두 단계로 옮겼다. 2026-08-15 커토버(#46)가 kor-travel-geo와 공유하던
+> 인스턴스에서 map 전용 인스턴스(`12703`)로 뺐고, 2026-08-17에 **네 프로젝트를 각각
+> 전용 인스턴스로 나누면서** 포트를 대역 규칙에 맞춰 `12700`으로 옮겼다.
+>
+> **왜 DB만 나누는 것으로 부족했나** — role·ACL·확장은 DB가 아니라 **cluster 전역**이라
+> DB를 나눠도 principal이 격리되지 않는다. map을 전용 인스턴스로 옮긴 뒤에도 통합
+> 인스턴스에 `ktm_` 역할 7개가 남아 있었고, map migrator 자격증명으로
+> `kor_travel_geo`(33GB)에 실제로 접속됐다. 같은 이유가 docker-manager ADR-35가
+> map을 분리한 근거였고, 그 근거는 concierge·pinvi에도 그대로 적용된다.
+>
+> ⚠️ **prod에 `5432`를 듣는 것은 이제 없다.** 옛 문서를 보고 `5432`로 붙으면 연결
+> 자체가 실패한다(예전에는 조용히 geo 인스턴스에 붙었다). 자세히는
+> `docs/integration-map.md`.
+
+**호스트 `12xxx` 대역 배치**(2026-08-17 n150 실측). 새 포트를 잡을 때는 자기 프로젝트의
+100번대 안에서 고른다 — 대역을 넘으면 다른 프로젝트와 충돌한다.
+
+| 대역 | 소유 | 사용 중 |
+|---|---|---|
+| `121xx` | RustFS | 12101 S3 · 12105 console |
+| `122xx` | Grafana | 12205 |
+| `123xx` | cAdvisor | 12301 |
+| `124xx` | Prometheus | 12401 |
+| `125xx` | kor-travel-geo | **12500 postgres** · 12501 api · 12502 dagster · 12505 ui |
+| `126xx` | kor-travel-concierge | **12600 postgres** · 12601 api · 12602 mcp · 12605 web |
+| **`127xx`** | **kor-travel-map** | **12700 postgres** · 12701 api · 12702 dagster · 12705 ui |
+| `128xx` | PinVi | **12800 postgres** · 12801 api · 12802 dagster · 12805 web |
+| `129xx` | kor-travel-docker-manager 자체 | 12901 api · 12905 web |
+
+**DB는 각 대역의 `x00`이다** (2026-08-17). 프로젝트마다 전용 PostgreSQL 인스턴스를
+쓰며, 통합 인스턴스는 없다. 새 포트를 잡을 때는 자기 프로젝트의 100번대 안에서 고른다.
 
 Prometheus 성능 메트릭은 별도 포트를 열지 않고 `api`의 같은 host 포트 `12701`에서
 `GET /metrics`로 노출한다. 이 endpoint는 공개 REST(`/v1/features`·`/v1/categories`·
@@ -67,11 +106,15 @@ token 미설정 local-dev는 기존 open scrape를 유지한다.
 순서를 뒤집으면(토큰 먼저, scrape config 나중) 그 사이 scrape가 401로 gap이
 생긴다 — 조용한 유실이 아니라 scrape 실패로 드러난다.
 
-`kor-travel-docker-manager`가 공유 PostGIS/RustFS를 이미 구동하는 로컬 환경에서는 kor-travel-map의
-local `postgres`/`rustfs` 서비스를 함께 띄우면 `5432`/`12101`이 충돌한다. 이때는
+`kor-travel-docker-manager`가 인프라를 이미 구동하는 환경에서는 kor-travel-map의
+local `postgres`/`rustfs` 서비스를 함께 띄우면 포트가 충돌한다. 이때는
 `KOR_TRAVEL_MAP_INFRA_EXTERNAL=true bash scripts/docker-up.sh`를 사용해 API, Web UI,
-Dagster만 올리고, 컨테이너는 `host.docker.internal:5432` /
-`host.docker.internal:12101`로 공유 인프라에 연결한다.
+Dagster만 올리고, 컨테이너는 docker-manager가 띄운 인프라에 연결한다.
+
+⚠️ **연결 대상 포트는 `5432`가 아니다.** docker-manager는 2026-08-17부터 프로젝트별
+전용 PostgreSQL을 띄우며 map의 DB는 **`12700`**이다(위 대역표). RustFS만 `12101`로
+그대로다. 옛 문서를 보고 `host.docker.internal:5432`로 붙으면 연결 자체가 실패한다 —
+그 포트를 듣는 것이 없다.
 
 `api`, `frontend`, `dagster`는 Docker compose healthcheck를 가진다. `frontend`는
 `api`의 `service_healthy` 이후 시작한다.
@@ -208,8 +251,9 @@ route, backup, CORS, metrics 설정은 API 전용 파일에만 둔다. 이 파�
 덮이므로 Compose opt-in 근거가 아니다. Docker Manager가 소유하는 승인된 production 형상은
 canonical API service에 literal `true`를 주입한 뒤 raw/resolved/runtime 검증으로 이를 증명한다.
 라이브 조작의 actor는 admin BFF 인증 principal로 별도 감사된다.
-PC 개발 환경에서 host `5432`는 `kor-travel-docker-manager`가 소유한
-공유 PostgreSQL/PostGIS 서버 인스턴스다. `scripts/load-env.sh`는 bootstrap owner로
+`kor-travel-docker-manager`가 띄우는 map 전용 PostgreSQL은 host **`12700`**이다
+(`5432`가 아니다 — 위 §서비스 대역표와 §공유 인프라 경고 참조).
+`scripts/load-env.sh`는 bootstrap owner로
 `KOR_TRAVEL_MAP_PG_DSN`을 합성하지 않는다. API/Dagster runtime, Alembic migrator,
 Dagster metadata DSN은 각각 ignored deployment env 또는 vault에 명시해야 하며 누락한
 Compose 기동은 fail-closed 한다. 외부 DB/infra overlay는 ownership bootstrap을 자동 실행하지
@@ -219,7 +263,7 @@ object만 명시 transfer한다. API entrypoint는 Alembic 뒤 migrator `SET ROL
 inventory를 재조정한다. `ALTER DEFAULT PRIVILEGES` fallback은 없으므로 state/audit future table이
 runtime DML을 자동으로 얻지 않는다.
 공유 DB만 쓰고 RustFS는 local compose로 띄우는 Docker 기동은
-`KOR_TRAVEL_MAP_DB_EXTERNAL=true`와 `KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT=5432`
+`KOR_TRAVEL_MAP_DB_EXTERNAL=true`
 기준이다. 공유 DB와 공유 RustFS를 모두 쓰면 `KOR_TRAVEL_MAP_INFRA_EXTERNAL=true`를 쓴다.
 
 ## 프로덕션 도메인 (reverse proxy)
@@ -284,7 +328,9 @@ localhost에만 열린다. API, Dagster, RustFS console처럼 코드 인증이 �
 ## 이관된 결정 (구 ADR)
 
 - 로컬/개발/compose 기본 포트는 API `12701` · Dagster `12702` · admin UI `12705` ·
-  Postgres host `5432`(container도 `5432`, standalone publish 기본값 `15432`) ·
+  Postgres host `5432`(이 저장소 standalone compose 한정 — container도 `5432`이고
+  `KOR_TRAVEL_MAP_POSTGRES_HOST_PORT` 기본값이 그 값이다. **docker-manager가 띄우는
+  prod/공유 인스턴스는 `12700`이다**) ·
   의존 대상 kor-travel-geo `12501`/`12505`로 고정한다 — 외부 OpenAPI 경계, Windows
   Playwright, WSL 서버, Docker compose가 같은 주소를 바라보게 하기 위함이다(구 ADR-047,
   위 §서비스에서 결정). 추가로 `scripts/stop-fixed-ports.sh`가 기동 전 `12701`/`12705`/
