@@ -52,6 +52,10 @@ barrier로 직렬화한다.
       과거 `0001~0104` 파일은 read-only legacy 증거다. n150 현행 `0104` DB는 bridge가
       그대로 인식하므로 stamp나 baseline 재실행 없이 `0202…0220`만 forward upgrade한다.
   - 최종 단일 cutover: [ ] `T-VN-39`
+  - ⚠️ **T-VN-40 인수 실태 재조사(2026-08-18, 조사 1 + 적대 검증 2)** — "인수만 남았다"가
+    아니다. 아래 `T-VN-40 인수 — 실태` 절 참조. 요지: 40A write fence **미구현**(legacy와
+    canonical 양쪽 쓰기 가능), 40C 물리 삭제 **코드·migration·manifest 없음**,
+    identity mapping 테이블 **적재 0건**, receipt는 손으로 고쳐야 하며 freeze 상수와 함께.
 - **보류/외부 추적**
   - [ ] `T-VN-H27` — #819 HAProxy WebSocket tunnel timeout(**보류: 운영자 환경 필요**,
     사용자 지시 2026-07-29). 프록시는 **OPNsense 라우터의 HAProxy**이고 저장소에 config가 없다
@@ -845,6 +849,58 @@ AC: 표와 실제 모듈이 일치. dataset 구현은 결정에 따라 별도 ta
 
 AC: 세 항목 처리 + `docs/sprints/README.md`와 각 SPRINT 헤더 일치.
 
+### T-VN-40 인수 — 실태 (2026-08-18 재조사)
+
+`resume.md`·이 문서 상단이 "구현 병합 완료 → n150 인수 + receipt complete + 물리 삭제만
+남음"으로 서술한다. **저장소 실측은 다르다.** 조사 1명 + 적대 검증 2명(contract/ops lens)이
+독립으로 확인했고, 검증자 둘 다 조사 초안의 일부를 뒤집었다. 아래는 **검증을 통과한 사실**만이다.
+
+#### 남은 것은 넷이 아니라 다섯이고, 순서가 정해져 있다
+
+| # | 일 | 실태 | 근거 |
+|---|---|---|---|
+| ① | prod migration 적용 | `0202~0221` 20개 미적용 (prod head `0104`) | `alembic/versions/` |
+| ② | canonical import 실행 | admin API 2단계(`preview` → `commit`, `If-Match`+`Idempotency-Key`). ktmctl도 Dagster도 아니다 | `CHANGELOG.md:48-57`, `openapi.json` |
+| ③ | **40A write fence** | **미구현.** `curated_repo.py:577,601`이 여전히 `INSERT/UPDATE feature.curated_features`. DB·ACL·static 어느 층에도 차단이 없다 | `src/kortravelmap/infra/curated_repo.py`, `alembic/baseline/schema.sql:11897`(sync trigger만) |
+| ④ | live 인수 + soak | sanctioned 경로는 `docs/runbooks/c7-prod-live-e2e.md`뿐 — origin 검증·증거 redaction 포함 | `playwright.live.config.ts:42-46,221,263` |
+| ⑤ | receipt complete | **손으로** JSON 수정. 9키 exact, `blocking_reason` 삭제, freeze 상수(`test_vnext_contract_artifacts.py:52-53`) 동시 갱신 | `contracts/vnext/consumer-rollout-v1.json:168` |
+| ⑥ | **40C 물리 삭제** | **코드·migration·manifest 어디에도 없다.** `docs/removal-manifests/`에 T-VN-33 것 하나뿐 | 설계 §6.2 step 6-7이 요구 |
+
+**순서 — ADR-075 결정 4가 정한다**: "soak·reconciliation 전에는 legacy column/table/alias를
+제거하지 않는다." 즉 **① → ② → ③ → ④ → ⑤ → ⑥**이다. 조사 초안이 "삭제 → 배포 → 인수"를
+권했는데 ops 검증자가 ADR-075:21-22 · `consumer-rollout-v1.json:14`로 반증했다. 백업/PITR
+복구점(`c7-prod-live-e2e.md:38`)도 초안에 없었다.
+
+#### 검증자가 뒤집은 것 (초안이 틀렸던 곳)
+
+- "40A는 병합 완료" → **아니다.** write fence가 없다. legacy와 canonical이 **양쪽 다 쓰기
+  가능**한 상태로 prod에 나갈 참이었다.
+- "`/v1/admin/curated-features*` 5개가 openapi.json에 있다" → **없다.** 실체는 curated 경로
+  16개이고 path family가 다르다.
+- "`ops.curation_cutover_identity_mappings`가 0건이면 설계상 불필요" → 설계 문서
+  (`…detailed-design…md:895-897,951`)가 **명시적으로 migration이 적재한다**고 했다.
+  적재 코드가 없는 것이지 필요 없는 것이 아니다. 지금 `GET /v1/service/curation-cutover/
+  identity-mappings`는 count 0 / empty Merkle root라 PinVi backfill이 소비할 것이 없다.
+- "`map_commit`에 무엇을 넣을지 모른다" → 러너가 정한다. 인수를 **실행한 그 커밋**이고
+  `install-tvn34c-n150-fresh-live-e2e.sh:98-112`가 동치를 검사한다.
+
+#### "전용 canonical principal"의 정체
+
+DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
+(`pinvi:curation-snapshot:read`)와 `service:pinvi:curation-cutover`
+(`pinvi:curation-cutover:read`). digest만 Map이 받고 원문은 docker-manager C6c(PR #174)가
+주입한다. `.env.example`에 키가 없다(주입 주체가 다르다). DB role 쪽은 별도로
+`ktm_curation_command_owner` 등 4개.
+
+- [ ] **T-VN-40A-fence** — legacy write 차단. `curated_repo.py`의 INSERT/UPDATE 경로에
+  DB(trigger 또는 REVOKE)·ACL·static(lint) 3층 게이트. **①~② 전에 끝나야 한다** —
+  안 그러면 import 중에도 legacy가 쓰일 수 있다.
+- [ ] **T-VN-40-mapping** — `ops.curation_cutover_identity_mappings` 적재 migration.
+  설계 §6.2 step 3. PinVi backfill의 입력이다.
+- [ ] **T-VN-40C-manifest** — physical removal manifest 작성 + migration. ⑤ 뒤에만.
+- [ ] **T-VN-40 인수 실행** — ①②④⑤. sanctioned 경로(`c7-prod-live-e2e.md`)로, 백업/PITR
+  복구점 먼저.
+
 ## Lane B 상세 — b1 PinVi 결합·후속
 
 ### T-VN-41 — cache-target generation·outbox 전파
@@ -1092,8 +1148,67 @@ item을 만들 수 있다.
 - **공개 표면 노출** — public API/PinVi snapshot에 수동 Feature가 나가는지, 나간다면 소비자가
   origin을 알 수 있어야 하는지.
 
+#### 설계 초안 1차 — 적대 검증에서 무너진 것 (2026-08-18)
+
+설계 초안을 검증자 2명(contract lens / ops lens)이 독립 검토했고 **둘 다 `holds=false`**다.
+P1 6건 중 셋이 설계 방향을 바꾼다. 실측 근거가 붙어 있어 그대로 채택한다.
+
+**① "origin은 호출 경로/principal에서 파생한다"는 실행 불가능하다.**
+초안은 body로 origin을 받으면 사칭이 영구화되니 서버가 호출 경로에서 파생하자고 했다.
+그런데 **PinVi와 admin BFF는 같은 endpoint(`POST /v1/admin/features`)·같은 proxy secret·
+검증 없는 `X-Kor-Travel-Map-Actor` 헤더**를 쓴다(`auth.py:205,272-279`; PinVi
+`kor_travel_map_admin.py:248-257,518-522`). 서버가 구별할 신호가 **없다.** 이대로 가면 PinVi
+승인으로 생긴 Feature가 전부 `manual_admin`으로 **영구·불변** 각인된다 — 초안이 스스로
+"불변 컬럼에 추정값을 넣으면 그 추정이 영구 기록"이라며 M01/M02 분리를 반대한 논거가
+자기 자신에게 적용된다.
+→ **M01은 origin을 `manual_admin` 단일 값으로만 발급한다.** `manual_pinvi`/`manual_curation`은
+인증 경계가 실제로 갈린 뒤(별도 route 또는 별도 ops-token scope)에만 값 도메인에 넣는다.
+도달 불가능한 값을 미리 등록하면 "구분되고 있다"는 오해까지 영구 기록된다.
+
+**② 자연키를 opaque로 바꾸면 유일한 하드 중복 방지가 사라진다.**
+현행은 `feature_id` unique + `ON CONFLICT DO NOTHING`(`schema.sql:1341`) → 409로 같은 실체를
+막는다. 초안은 이름·좌표를 자연키에서 빼서 매 요청이 다른 `feature_id`가 되게 했고, 중복
+방지를 READ COMMITTED 하의 check-then-act 프리체크로 대체했다 — 동시 요청 2건이 모두 통과한다
+(TOCTOU). 게다가 판정 워크플로는 M05로 미뤄져 있어 **M01 머지 시점에 방어가 0**이다.
+→ 자연키 opaque화와 **동시에** DB 제약을 둔다: origin `manual_%` 부분 unique index(`lower(name)`,
+`sigungu_code`) 또는 `ST_DWithin` EXCLUDE, 또는 `admin.feature.create`에 `serializable`
+(`domain_command_registry.py:164-168`이 지원, 40001 재시도 루프 있음).
+
+**③ 새 CHECK가 `PATCH /state`에서 500으로 샌다 — 2026-08-12에 이미 한 번 겪은 유형이다.**
+`admin_feature_repo.py:2186-2211`의 23514→도메인 오류 매핑이 **constraint 이름 allow-list**라,
+새 CHECK 이름이 거기 없으면 raw re-raise → catch-all 500. 초안의 테스트는 "DB CHECK로 실패"만
+요구해 **500이어도 초록**이다. 그리고 근거로 든 fail-close 테스트
+`test_admin_state_error_mapping_names_exist_in_ddl`은 **저장소에 없다**(docstring 언급 1건뿐).
+→ 새 CHECK 이름을 `_ADMIN_STATE_CONFLICT_CONSTRAINTS`에 넣고, 테스트는 **HTTP status를 단언**한다
+(409/422이지 500 아님). "features의 모든 CHECK 이름이 두 집합 중 하나에 있다"는 역방향 fail-close
+테스트를 **실제로 만든다.**
+
+**④ `transition_kind='initial'` ⇒ origin 필수 규칙이 기존 integration 테스트 4곳을 즉시 red로 만든다.**
+`initial`은 provider 경로가 아니라 비-provider 일반 create kind이고(`schema.sql:1807`),
+`test_tvn34c_post_cutover_contract.py:84` 등 fixture 4곳이 origin 없이 CALL한다.
+→ 규칙을 "origin이 있으면 `initial`이어야 한다"(역방향)로 약화하거나, fixture 4곳 수정을 구현
+순서에 명시한다.
+
+**⑤ `contracts/vnext/*` freeze 갱신이 통째로 빠졌다 — 그런데 freeze 스위트는 green을 유지한다.**
+`target-schema-v1.sql:730`이 `create_feature_with_initial_state`를 선언하고 fingerprint는 계약
+파일로 만든 DB를 본다(`test_vnext_target_freeze.py:16-18` — "계약이 실제 migration과 갈라져도
+green"). 컬럼 축은 의도적으로 닫혀 있다(`:1723-1760`). 즉 **CI가 초록인 채 vNext 목표 계약이
+실제 스키마를 서술하지 않게 된다** — 이 저장소가 반복 경계한 바로 그 형태.
+→ 구현 순서에 `target-schema-v1.sql` · `target-schema-fingerprints-v1.json` 4카테고리 재계산 ·
+`violation-fixtures-v1.sql` + `expected-rejections-v1.json`(신규 거부 케이스) 갱신을 넣는다.
+`test_vnext_contract_artifacts.py`의 sha256 상수도.
+
+**⑥ P2 중 결정에 걸리는 것**: `publication_state` 기본값 `published→draft`는 PinVi의 사용자
+제보 승인 흐름(`feature_requests.py:242-251`)에 무음 회귀를 낸다 · 3단계 backfill의 전건 UPDATE가
+`row_revision` trigger를 100만 번 밟는다 · procedure OWNER 전환과 migration graph artifact 재생성이
+선행 조건에 없다 · back-out을 한 줄도 안 다뤘다(forward-only 저장소).
+
+**다음**: 위 ①~⑤를 반영한 **설계 초안 2차**를 쓰고 같은 검증자 2명에게 다시 건다.
+2차가 `holds=true`를 받기 전에는 코딩하지 않는다.
+
 #### 후속 task
 
+- [ ] **T-VN-M00 — 설계 초안 2차 + 적대 검증 2명 통과** (위 ①~⑤ 반영). 이것이 M01의 선행이다.
 - [ ] **T-VN-M01 — admin Feature 생성 API** (결정 1). `create_feature_with_initial_state`를
   admin OpenAPI에 잇는다. `source_type`/natural key 규칙과 3축 초기 상태를 함께 정한다.
   **ADR 필요** — ID 체계에 새 `source_type`이 들어간다.

@@ -182,7 +182,6 @@ class AuditTarget:
     place_name: str
     feature_id: str | None
     region: str | None
-    address_hint: str | None
     declared_confidence: str | None
     feature_name: str | None
     feature_category: str | None
@@ -192,6 +191,9 @@ class AuditTarget:
     feature_sido_code: str | None
     feature_sigungu_code: str | None
     feature_address: str
+    # 시군구 축의 입력. approved 경로(`_approved_targets`)만 SQL로 채운다 —
+    # public 경로는 repository DTO에서 만들어 이 값이 없고, 그때는 축이 `n/a`다.
+    address_hint: str | None = None
 
 
 def _campaign(collection_key: str) -> str:
@@ -446,6 +448,7 @@ async def _approved_targets(session: AsyncSession) -> list[AuditTarget]:
                     feature_sido_code=sido_code,
                     feature_sigungu_code=sigungu_code,
                     feature_address=address,
+                    address_hint=_optional_text(row["address_hint"]),
                 )
             )
     return targets
