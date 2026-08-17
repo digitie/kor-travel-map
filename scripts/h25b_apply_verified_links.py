@@ -44,11 +44,21 @@ APPROVED: dict[ApprovalKey, str] = {
         "kt100-2025-2026-035",
         "primary",
     ): "f_global_p_2eddbdc1ef5a0c00",
-    (
-        "korean-tourism-100:2025-2026",
-        "kt100-2025-2026-040",
-        "primary",
-    ): "f_4315032041_p_12c53fe662dafc4f",
+    # T-VN-H34(2026-08-18): 청풍호 승인 철회. 대상 Feature가 카테고리 축에서
+    # 반증됐다 — `f_4315032041_p_12c53fe662dafc4f`는 `03050200`(농어촌민박)이고
+    # 주소도 '청풍호로 2193'의 민박이다. 이 항목을 남겨두면 재실행이 해제한 링크를
+    # 되돌린다.
+    #
+    # 재연결도 하지 않았다. 후보였던 `청풍호 전망대`(01050300)·`청풍호 케이블카`
+    # (01080200)는 호수가 아니라 호수의 **시설**이라 '청풍호' 항목의 대상이 아니다.
+    # 아래 승인 근거 주석이 이미 "정지오코딩이 시군구까지만 지목해 구분되지 않는다"고
+    # 적어 두었는데, 카테고리 축이 그 의심을 확정지었다.
+    #
+    # (
+    #     "korean-tourism-100:2025-2026",
+    #     "kt100-2025-2026-040",
+    #     "primary",
+    # ): "f_4315032041_p_12c53fe662dafc4f",
 }
 
 # key -> (confidence, reason).
@@ -272,13 +282,39 @@ def _render_manifest(
             content = path.read_bytes()
         digest = hashlib.sha256(content).hexdigest()
         rows = entry.get("rows")
-        if path.suffix == ".csv" and rows is not None:
+        linked = entry.get("linked_rows")
+        unresolved = entry.get("unresolved_rows")
+        if path.suffix == ".csv":
             text = content.decode("utf-8-sig")
-            rows = sum(1 for _ in csv.DictReader(io.StringIO(text, newline="")))
-        if digest != entry["sha256"] or rows != entry.get("rows"):
+            parsed = list(csv.DictReader(io.StringIO(text, newline="")))
+            if rows is not None:
+                rows = len(parsed)
+            # `linked_rows`/`unresolved_rows`도 파생한다. 예전에는 손으로 유지했는데,
+            # 이 값은 `_h35_csv5.py`가 `EXPECTED_CSV_ACCEPTED`와 대조해
+            # `csv5_manifest_counts_mismatch`를 던지는 게이트의 입력이다. 손으로 두면
+            # CSV를 고칠 때마다 어긋나고, 실제로 T-VN-H34에서 7행을 고친 뒤 이 함수를
+            # 돌려도 카운트가 옛 값 그대로였다.
+            if linked is not None or unresolved is not None:
+                linked_count = sum(
+                    1 for row in parsed if (row.get("feature_id") or "").strip()
+                )
+                if linked is not None:
+                    linked = linked_count
+                if unresolved is not None:
+                    unresolved = len(parsed) - linked_count
+        if (
+            digest != entry["sha256"]
+            or rows != entry.get("rows")
+            or linked != entry.get("linked_rows")
+            or unresolved != entry.get("unresolved_rows")
+        ):
             entry["sha256"] = digest
             if entry.get("rows") is not None:
                 entry["rows"] = rows
+            if entry.get("linked_rows") is not None:
+                entry["linked_rows"] = linked
+            if entry.get("unresolved_rows") is not None:
+                entry["unresolved_rows"] = unresolved
             touched.append(entry["path"])
 
     if not touched:

@@ -41,7 +41,11 @@ from kortravelmap.infra.db import make_async_engine
 EXPECTED_POST_PUBLIC: Final = 3_265
 EXPECTED_CSV_FILES: Final = 5
 EXPECTED_CSV_ROWS: Final = 486
-EXPECTED_CSV_ACCEPTED: Final = 222
+# T-VN-H34(2026-08-18): 카테고리 축이 반증한 링크 6행을 해제해 222 -> 216.
+# 이 상수는 manifest의 linked_rows 합계와 대조되며 어긋나면
+# `csv5_manifest_counts_mismatch`가 난다. manifest 쪽은 이제
+# `scripts/h25b_apply_verified_links.py`의 `refresh_manifest`가 CSV에서 파생한다.
+EXPECTED_CSV_ACCEPTED: Final = 216
 EXPECTED_CSV_REJECTED: Final = 0
 _CSV_ACTOR: Final = "system:h35-csv5"
 _RESOURCE_ROOT: Final = Path("resources/curations")

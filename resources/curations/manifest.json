@@ -56,24 +56,24 @@
       "kind": "official_seed",
       "expected_rows": 110,
       "official_items": 100,
-      "linked_rows": 51,
-      "unresolved_rows": 59,
+      "linked_rows": 49,
+      "unresolved_rows": 61,
       "source_name": "문화체육관광부·한국관광공사 2023~2024 한국관광 100선",
       "source_url": "https://www.mcst.go.kr/site/s_notice/press/pressView.jsp?pSeq=19905",
       "source_download_url": "https://mcst.go.kr/servlets/eduport/front/upload/UplDownloadFile?pFileName=%281213%29%EB%AC%B8%EC%B2%B4%EB%B6%80%EB%B3%B4%EB%8F%84%EC%9E%90%EB%A3%8C-2023-2024_%ED%95%9C%EA%B5%AD%EA%B4%80%EA%B4%91_100%EC%84%A0_%EB%B0%9C%ED%91%9C.pdf&pPath=0302000000&pRealName=20221213092808809385740974_PRESS20221213092808849370.pdf",
-      "sha256": "e86447603ffb3277e06c3d17ecc7c6706271cf5cce6d5dd5fc7e5ec262ad7423"
+      "sha256": "d1aa4d61e2efefd81b3c94c792e2bb64932b848f76856d17c6a728e4c6db4944"
     },
     {
       "path": "korean-tourism-100-2025-2026.csv",
       "kind": "official_seed",
       "expected_rows": 114,
       "official_items": 100,
-      "linked_rows": 58,
-      "unresolved_rows": 56,
+      "linked_rows": 55,
+      "unresolved_rows": 59,
       "source_name": "문화체육관광부·한국관광공사 2025~2026 한국관광 100선",
       "source_url": "https://korean.visitkorea.or.kr/other/other_list.do?otdid=622bcd99-84fa-11e8-8165-020027310001",
       "source_download_url": "https://www.mcst.go.kr/servlets/eduport/front/upload/UplDownloadFile?pFileName=%280120%29%EB%AC%B8%EC%B2%B4%EB%B6%80%EB%B3%B4%EB%8F%84%EC%9E%90%EB%A3%8C-2025-2026_%ED%95%9C%EA%B5%AD%EA%B4%80%EA%B4%91_100%EC%84%A0_%EB%B0%9C%ED%91%9C.pdf&pPath=0302000000&pRealName=20250121091819797522427349_PRESS20250121091819798355.pdf",
-      "sha256": "b23e0d9b42aa2825c8175869ae42ad41c9611084094eaa03a2d70dc3d0160aa5"
+      "sha256": "6221cf1b37d52eeb6af941412e2b0fb4ec5a8feab8bef97d87c8fc8e482ff002"
     },
     {
       "path": "heritage-visit-campaign.csv",
@@ -92,12 +92,12 @@
       "kind": "official_seed",
       "expected_rows": 72,
       "official_items": 72,
-      "linked_rows": 44,
-      "unresolved_rows": 28,
+      "linked_rows": 43,
+      "unresolved_rows": 29,
       "source_name": "한국수목원정원관리원 2026 수목원·정원 스탬프투어 아름다운 동행",
       "source_url": "https://www.koagi.or.kr/www/user/bbs/BD_selectBbs.do?q_bbsDocNo=A00000000604421koagi&q_bbsSn=1001",
       "source_download_url": "https://www.koagi.or.kr/component/file/ND_fileDownload.do?q_fileSn=32329&q_fileId=80a900dcedfb41a2b168a164d1e2059c2",
-      "sha256": "30d8bb7d8f0bbca76c6196a9993b97cd146625d5345a8a9f3415bf4a2f0ec604"
+      "sha256": "cdee3c84cb4f38e66ded455a9b40fbfa4186e8d386ecf4f07d2caabc5f76989b"
     },
     {
       "path": "lighthouse-stamp-tour.csv",
