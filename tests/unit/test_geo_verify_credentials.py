@@ -14,9 +14,10 @@ from typing import Any
 
 import httpx
 import pytest
+from pydantic import SecretStr
+
 from kortravelmap.core.exceptions import GeoAuthNotConfiguredError, GeoRequestError
 from kortravelmap.geocoding import KorTravelGeoRestClient
-from pydantic import SecretStr
 
 pytestmark = pytest.mark.unit
 

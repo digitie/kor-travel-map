@@ -12,10 +12,11 @@ from typing import Any
 
 import httpx
 import pytest
-from kortravelmap.api.app import _verify_kor_travel_geo_credentials
 from kortravelmap.core.exceptions import GeoAuthNotConfiguredError
 from kortravelmap.settings import KorTravelMapSettings
 from pydantic import SecretStr
+
+from kortravelmap.api.app import _verify_kor_travel_geo_credentials
 
 pytestmark = pytest.mark.unit
 

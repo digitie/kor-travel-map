@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import pytest
+
 from kortravelmap.core.database_identity import (
     DATABASE_IDENTITY_GOLDEN_VECTOR,
     DATABASE_IDENTITY_PREFIX,
