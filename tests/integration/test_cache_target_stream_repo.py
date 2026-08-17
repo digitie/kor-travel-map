@@ -140,6 +140,7 @@ async def _seed_scope_feature(
     feature_id: str,
     lon: float = 126.978,
     lat: float = 37.5665,
+    category: str = "01070100",
 ) -> None:
     """cache target 반경 안에 primary source를 가진 feature 1건을 심는다.
 
@@ -160,13 +161,14 @@ async def _seed_scope_feature(
         "record_hash": hashlib.sha256(record_key.encode("utf-8")).hexdigest(),
         "lon": lon,
         "lat": lat,
+        "category": category,
     }
     await session.execute(
         text(
             """
             INSERT INTO feature.features (feature_id, kind, name, category, coord)
             VALUES (
-              :feature_id, 'place', 'cache target scope anchor', '01070100',
+              :feature_id, 'place', 'cache target scope anchor', :category,
               x_extension.ST_SetSRID(
                 x_extension.ST_MakePoint(CAST(:lon AS double precision),
                                          CAST(:lat AS double precision)),
@@ -3604,6 +3606,9 @@ async def test_queued_service_refresh_cancellation_emits_exact_tuple_status(
             setup,
             membership=await _canonical_membership(setup),
             feature_id="f_queued_refresh_cancellation_scope_anchor",
+            # migrated_engine는 다음 테스트에도 commit을 남긴다. 카테고리 집계
+            # 회귀 fixture와 충돌하지 않는 전용 코드로 격리한다.
+            category="99999101",
         )
         request = await create_cache_target_refresh_request(
             setup,
@@ -3756,6 +3761,7 @@ async def test_service_refresh_creation_serializes_stream_before_capture(
             setup,
             membership=await _canonical_membership(setup),
             feature_id="f_service_refresh_serialization_anchor",
+            category="99999102",
         )
     assert created.target is not None
 
