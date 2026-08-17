@@ -18,7 +18,7 @@ barrier로 직렬화한다.
   - [~] `T-VN-H25B` → [ ] `T-VN-H34`(공식 curation 미연결 membership 잔여 AC)
   - [~] `T-VN-H43` → [~] `T-VN-H44`(백업 정기화·복원 드릴 재개 조건)
   - [~] `T-VN-H45-후속`(②quota 오분류·④coalesce 완료 / ①khoa·③RetryBudget·⑤alembic 잔여)
-  - [~] `T-VN-H46C`(preflight 의미 검증 — 호출 결선 잔여) ∥ [ ] `T-VN-H46D`(daemon 스키마 drift)
+  - [~] `T-VN-H46C`(preflight 의미 검증 — 호출 결선 잔여) ∥ [x] `T-VN-H46D`(2026-08-18 실측 종결)
   - [x] `T-VN-H47`(#987 종료) ∥ [x] `T-VN-H48`(#988 종료) — prod 정리 + 재발 방지 문서화 완료
   - [ ] `T-VN-H49`(4분할 인스턴스 백업 주체 — dm #177 추적)
 - **Lane B — frontend hardening·PinVi 소비 API**
@@ -551,11 +551,41 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     별개 축이고 이 검사가 **못 본다**. "geo 키 검증 완료"로 닫으면 검사기가 자기
     커버리지를 과장하는 형태가 된다.
 
-- [ ] T-VN-H46D — **daemon 스키마 drift**: `column request.providers does not exist`
+- [x] T-VN-H46D — **daemon 스키마 drift**: `column request.providers does not exist`
+  (2026-08-18 실측으로 종결 — **배포 이미지 lag이 맞았다**)
 
-  `kor-travel-map-dagster-daemon-latest` 로그에 반복되는 `asyncpg.UndefinedColumnError`
-  (feature_operation 계열 쿼리). prod는 `0104`인데 코드가 없는 컬럼을 질의한다.
-  이 경로가 실제 자산 실행 경로면 다음 ETL에서 터진다.
+  ### 하마터면 틀린 근거로 닫을 뻔했다
+
+  처음에 배포 컨테이너 안에서 `grep -r "request.providers"`를 돌려 0건을 받고 "코드에
+  없다"고 결론지으려 했다. **그 grep은 애초에 못 찾는 형태다** — `request.providers`는
+  PostgreSQL 오류 문자열이고 `request`는 **테이블 별칭**이라, 별칭과 컬럼이 SQL에서 따로
+  조립되면 소스에 그 문자열이 통째로 존재하지 않는다. 0건이 "없다"가 아니라 "이 방법으로는
+  안 보인다"였다.
+
+  ### 실제로 확인한 것
+
+  1. **grep 대상이 비어 있지 않은지 먼저 양성 대조.** 배포 경로
+     `/usr/local/lib/python3.12/site-packages/kortravelmap`에 `.py` 172개, 확실히 있는
+     문자열(`feature_operation`) 41히트 — 검사 자체는 동작한다.
+  2. **DB에 그 컬럼이 없다.** `ops` 스키마 전체에 `providers` 컬럼 **0건**.
+     `ops.feature_update_requests`의 실제 컬럼은 `request_id, scope_type, scope,
+     update_policy, run_mode, priority, matched_scope, job_id, operator, reason,
+     created_at, generation, dataset_membership_mode`다.
+  3. **배포 코드가 그 컬럼을 질의하지 않는다.** `AS request` 별칭을 쓰는 파일들
+     (`feature_update_repo`·`feature_update_active_repo`·`ops_repo`·`pipeline_repo`)에서
+     `providers` 참조 **각각 0건**.
+  4. **로그에도 없다.** daemon 재기동(2026-08-17T10:02) 이후 75,158줄에서 0건.
+
+  ### 한계 — 이걸로 "고쳤다"고는 말할 수 없다
+
+  로그는 **2026-08-17 10:02 이후만** 남아 있다(DB 4분할 때 컨테이너를 재생성했다). 즉
+  "재발하지 않았다"의 관측 창은 약 12시간뿐이다. 닫는 근거는 로그가 아니라 **(2)+(3)**
+  이다 — 지금 도는 코드가 없는 컬럼을 질의하지 않는다.
+
+  배포 이미지는 `2026-08-13T20:23` 생성이고 revision label이 `development`다(빌드에 커밋이
+  안 박혔다). 그래서 "어느 커밋에서 고쳐졌는지"는 이 경로로 특정할 수 없다.
+  - [ ] **별건**: buildx가 `KOR_TRAVEL_MAP_GIT_COMMIT`을 실제 커밋으로 채우게 한다. 지금은
+    prod 3개 컨테이너 전부 `development`라 배포된 것이 무엇인지 이미지에서 알 수 없다.
 
 - [x] T-VN-H46E — **공개 data.go.kr 키: 현행 유지 판정** (2026-08-14)
 
