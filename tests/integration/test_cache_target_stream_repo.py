@@ -1313,6 +1313,14 @@ async def test_permanent_nack_dead_letter_blocks_later_order_and_replays_same_ev
     )
     assert dead.status == "dead"
     assert dead.stream_blocked
+    control = await get_cache_target_stream(
+        migrated_session,
+        external_system=_SYSTEM,
+    )
+    assert control is not None
+    assert control.status == "blocked"
+    assert control.blocked_event_id == blocked_event.event_id
+    assert not control.consumer_enabled
 
     detail = await get_cache_target_dead_letter(
         migrated_session,
