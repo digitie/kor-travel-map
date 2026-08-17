@@ -566,6 +566,52 @@ def _error_response(
     )
 
 
+
+async def _verify_kor_travel_geo_credentials(core_settings: KorTravelMapSettings) -> None:
+    """기동 시 geo가 이 API key를 실제로 받아들이는지 확인한다 (T-VN-H46C).
+
+    ``preflight()``는 존재·공백·길이만 본다. 다른 서비스의 키를 넣어도 통과하므로
+    "설정돼 있다"와 "동작한다" 사이에 간극이 있고, 2026-08-13 prod 사고가 정확히 그
+    간극이었다.
+
+    판정은 비대칭이다.
+
+    - **키 거부 → 기동 거부.** 그 키로는 어떤 지오코딩도 성공하지 못한다. 그대로 뜨면
+      정/역지오코딩이 전부 실패하는 서비스가 healthy로 보인다.
+    - **도달 불가·5xx → 경고 후 진행.** geo는 별도 stack이라 그쪽 지연이 map 전체의
+      부팅 교착이 되면 안 된다.
+
+    ⚠️ **이 검사가 못 보는 축이 있다.** 여기서 확인하는 것은 python 프로세스가 주입된
+    httpx client로 나가는 경로뿐이다. Next.js admin UI의 geo 프록시
+    (``packages/kor-travel-map-admin/frontend``)는 별개 통로이고, 2026-08-14 사고는
+    **그쪽**이었다. 이 검사가 통과했다고 geo 결선 전체가 검증된 것은 아니다.
+    """
+    if not core_settings.kor_travel_geo_preflight_required:
+        return
+    base_url = core_settings.kor_travel_geo_base_url
+    if base_url is None:
+        # 지오코딩 보강 자체가 비활성이다 — 검사할 대상이 없다.
+        return
+
+    from kortravelmap.core.exceptions import GeoRequestError
+    from kortravelmap.geocoding import KorTravelGeoRestClient
+
+    async with httpx.AsyncClient(
+        base_url=base_url.get_secret_value(),
+        timeout=core_settings.kor_travel_geo_timeout_seconds,
+    ) as http_client:
+        client = KorTravelGeoRestClient(
+            http_client,
+            api_key=core_settings.kor_travel_geo_api_key,
+        )
+        try:
+            await client.verify_credentials()
+        except GeoRequestError as exc:
+            # 판정 불가. 기동을 막지 않는다.
+            _logger.warning(
+                "kor-travel-geo 자격증명 확인 불가 — 기동은 계속한다: %s", exc
+            )
+
 def create_app(settings: ApiSettings | None = None) -> FastAPI:
     """FastAPI application factory.
 
@@ -606,6 +652,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
                 await get_engine(),
                 expected_login="ktm_feature_api_runtime",
             )
+        await _verify_kor_travel_geo_credentials(core_settings)
         try:
             yield
         finally:

@@ -18,7 +18,7 @@ barrier로 직렬화한다.
   - [~] `T-VN-H25B` → [ ] `T-VN-H34`(공식 curation 미연결 membership 잔여 AC)
   - [~] `T-VN-H43` → [~] `T-VN-H44`(백업 정기화·복원 드릴 재개 조건)
   - [~] `T-VN-H45-후속`(②quota 오분류·④coalesce 완료 / ①khoa·③RetryBudget·⑤alembic 잔여)
-  - [~] `T-VN-H46C`(preflight 의미 검증 — 호출 결선 잔여) ∥ [x] `T-VN-H46D`(2026-08-18 실측 종결)
+  - [x] `T-VN-H46C`(preflight 의미 검증 + 기동 결선, 2026-08-18) ∥ [x] `T-VN-H46D`(실측 종결)
   - [x] `T-VN-H47`(#987 종료) ∥ [x] `T-VN-H48`(#988 종료) — prod 정리 + 재발 방지 문서화 완료
   - [ ] `T-VN-H49`(4분할 인스턴스 백업 주체 — dm #177 추적)
 - **Lane B — frontend hardening·PinVi 소비 API**
@@ -519,7 +519,7 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   형태였고, ETL이 08-07 이후 안 돌아서 아직 안 터졌을 뿐이었다.
   `up -d --no-deps --force-recreate` 후 세 컨테이너 전부 `POST /v2/reverse` HTTP 200.
 
-- [~] T-VN-H46C — **VWorld fallback 사슬 제거** (H46B 재발 통로)
+- [x] T-VN-H46C — **VWorld fallback 사슬 제거 + geo key 의미 검증** (H46B 재발 통로)
 
   - [x] **fallback 사슬은 PR #979에서 이미 끊겼다.** 저장소 전체에
     `…GEO_API_KEY:-${NEXT_PUBLIC_VWORLD_API_KEY…}` 형태가 0건이고
@@ -543,13 +543,19 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     - 테스트 8종은 네트워크 없이 돈다. 그중 하나는 **probe가 키 헤더를 싣는지**를
       본다 — 안 실으면 geo가 거부할 수 없어 이 검사기가 *무엇도 검사하지 않으면서
       초록*이 된다.
-  - [ ] **잔여: 호출 결선.** 지금은 메서드만 있고 기동 시 부르는 곳이 없다.
-    api/dagster lifespan에 붙일지, 붙인다면 fail-open 경고를 어디에 남길지 결정 필요.
-  - [ ] **잔여: 커버리지 한계 명시.** 이 검증은 주입된 클라이언트를 쓰는 python
-    경로만 본다. 2026-08-14 사고의 실제 통로였던 **Next.js admin UI 프록시**
+  - [x] **호출 결선 완료(2026-08-18).** api lifespan에 붙였다. 기존
+    `runtime_db_preflight_required`와 같은 형태 — 새 플래그
+    `kor_travel_geo_preflight_required`(기본 False, 배포 compose가 True 주입)라
+    라이브러리 단위 테스트는 영향받지 않는다. `base_url`이 없으면(보강 비활성) 건너뛴다.
+    - 테스트 6종이 **결선 자체**를 본다: 플래그 off면 네트워크 0회, base_url 없으면 0회,
+      키 거부면 기동 거부, 도달 불가·5xx면 경고 남기고 진행, client를 닫는지.
+  - [x] **커버리지 한계를 코드에 박았다(2026-08-18).** 이 검증은 주입된 클라이언트를 쓰는
+    python 경로만 본다. 2026-08-14 사고의 실제 통로였던 **Next.js admin UI 프록시**
     (`packages/kor-travel-map-admin/frontend/src/app/api/geo/[...path]/route.ts`)는
-    별개 축이고 이 검사가 **못 본다**. "geo 키 검증 완료"로 닫으면 검사기가 자기
-    커버리지를 과장하는 형태가 된다.
+    별개 축이고 이 검사가 **못 본다**. 그 사실을 `_verify_kor_travel_geo_credentials`
+    docstring에 경고로 넣었다 — tasks.md에만 적으면 코드를 읽는 사람이 못 본다.
+  - [ ] **별건: admin UI 프록시 축.** 위 한계 그대로다. 그쪽은 Node 런타임이라 이
+    검사가 닿지 않는다.
 
 - [x] T-VN-H46D — **daemon 스키마 drift**: `column request.providers does not exist`
   (2026-08-18 실측으로 종결 — **배포 이미지 lag이 맞았다**)
