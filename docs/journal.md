@@ -87,6 +87,22 @@
 
 교훈은 늘 같은 것이다 — **health 200은 "동작한다"의 증거가 아니다.** 무엇이 죽었는지
 알려면 죽었을 때 달라지는 것을 봐야 한다(여기서는 KTDM_* 개수).
+## 2026-08-17 — T-VN-41A-C current-main 재배치와 stale writer/cancellation outbox 봉합
+
+- PR [#975](https://github.com/digitie/kor-travel-map/pull/975)를 현재 `main` 위에
+  재배치했다. refresh finalization은 캡처한 모든 member의 restore epoch·source
+  generation·payload fingerprint를 stream→head canonical lock 순서로 다시 확인한
+  같은 transaction에서만 link·freshness·done을 확정한다. source writer가 그 사이
+  한 member라도 바꾸면 terminal success와 stale link/freshness가 전부 rollback된다.
+- queued service refresh 취소는 job의 `cancelled` 전이와 exact captured tuple
+  `(restore_epoch, source_generation, source_payload_fingerprint)`의 outbox status를
+  한 transaction으로 기록하게 했다. queued/running/cancelled의 과거 tuple 사실과
+  final target mutation의 current-tuple fence는 의도적으로 분리한다.
+- 두 적대적 재리뷰에서 DB/동시성 P0/P1은 없었다. Map service OpenAPI는 현재
+  SHA로 재생성했고 PinVi 수동 PUT의 409 설명도 좌표 conflict와 source protocol
+  위반을 모두 명시했다. 다만 PinVi service vendor는 이전 SHA를 가리키므로
+  receipt는 `pending`을 유지한다. PinVi 재vendor·paired contract CI·완료 receipt와
+  n150 isolated Live UI E2E 전에는 consumer enable 또는 PR 병합을 선언하지 않는다.
 
 ## 2026-08-17 — 완료된 Wave 2 task 이력 아카이브 정리
 

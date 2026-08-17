@@ -40400,6 +40400,16 @@
             },
             "description": "target 없음"
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "PinVi target은 ServiceToken source protocol 전용"
+          },
           "412": {
             "content": {
               "application/problem+json": {
@@ -40620,7 +40630,7 @@
                 }
               }
             },
-            "description": "같은 key의 좌표 conflict"
+            "description": "같은 key의 좌표 conflict 또는 PinVi cache target의 source protocol 위반"
           },
           "422": {
             "content": {

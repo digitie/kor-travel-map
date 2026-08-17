@@ -469,7 +469,12 @@ def _require_manual_target_writer(external_system: str) -> None:
             "description": "등록 또는 갱신 완료",
             "headers": _ETAG_RESPONSE_HEADER,
         },
-        409: {"description": "같은 key의 좌표 conflict"},
+        409: {
+            "description": (
+                "같은 key의 좌표 conflict 또는 PinVi cache target의 "
+                "source protocol 위반"
+            )
+        },
     },
 )
 async def put_poi_cache_target(

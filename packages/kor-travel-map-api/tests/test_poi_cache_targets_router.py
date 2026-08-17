@@ -209,6 +209,24 @@ def test_admin_target_writer_rejects_relay_owned_pinvi_before_transaction(
 
 
 @pytest.mark.unit
+def test_put_pinvi_target_409_documents_source_protocol_rejection() -> None:
+    spec = create_app(
+        ApiSettings(
+            admin_proxy_secret=None,
+            service_token=None,
+            admin_destructive_enabled=True,
+            public_api_key_required=False,
+        )
+    ).openapi()
+    description = spec["paths"]["/v1/admin/poi-cache-targets/{external_system}/{target_key}"][
+        "put"
+    ]["responses"]["409"]["description"]
+
+    assert "좌표 conflict" in description
+    assert "source protocol" in description
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize(
     ("method", "path", "params"),
     [

@@ -917,8 +917,9 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
   - [/] PinVi command writer가 CAS source GET과 refresh `Location` polling에서 consumer credential로
     전환하고, restore clone은 sync disabled 상태에서 immutable pre-CAS receipt를 써 응답 유실 exact replay까지
     완료한다. 동일 key의 병렬 `201`/`200`도 terminal payload·ETag가 같으면 한 durable receipt로 수렴한다.
-    그 뒤에만 후속 reconciliation/cutover로 진행한다. Map `9c5332bb…` / PinVi `5eacfdc…` service SHA
-    `53da6a3a…`의 paired receipt는 고정됐고, 두 적대 재리뷰와 n150 isolated evidence가 남았다.
+    current-main rebase 뒤 Map service OpenAPI SHA가 바뀌어 PinVi service vendor와 exact paired receipt를
+    다시 고정해야 한다. 그 뒤 두 적대 재리뷰와 n150 isolated evidence를 통과한 뒤에만 후속
+    reconciliation/cutover로 진행한다.
   - [x] 일반 snapshot first page를 route transaction으로 durable commit하고 실제 만료 시각을 노출한다.
   - [x] source-material watermark reuse와 75분 server handoff/1시간 client receipt gate를 구현한다.
   - [x] stream share barrier와 snapshot 내부 exact material watermark로 lock-wait stale MVCC 누락을 막는다.

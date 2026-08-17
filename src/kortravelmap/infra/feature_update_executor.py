@@ -25,6 +25,7 @@ from kortravelmap.infra.cache_target_event_repo import (
     CacheTargetRefreshProtocolViolation,
     append_cache_target_links_reconciled_events,
     append_cache_target_refresh_status_events,
+    assert_cache_target_refresh_members_current,
     capture_cache_target_refresh_members_by_keys,
     lock_cache_target_result_streams,
     pinvi_cache_target_refresh_protocol_error,
@@ -544,6 +545,10 @@ async def _sync_cache_target_links(
     request: FeatureUpdateRequest,
 ) -> None:
     await lock_cache_target_result_streams(
+        session,
+        request_id=request.request_id,
+    )
+    await assert_cache_target_refresh_members_current(
         session,
         request_id=request.request_id,
     )
