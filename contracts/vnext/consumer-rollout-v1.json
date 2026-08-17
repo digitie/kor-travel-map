@@ -189,8 +189,8 @@
       "pinvi_snapshot_receipt": {
         "state": "pending",
         "map_service_openapi_sha256": "c6f9aba6ab4b815c394e5e1cb5fb4a2c3488d147d5bb1a7e21b92c1796f4aebd",
-        "pinvi_service_vendor_sha256": "53da6a3a1194b9de715e80ed69e016ae15885b81d2909bf2d128773d64f8b2f7",
-        "blocking_reason": "current-main rebase 뒤 Map service OpenAPI SHA가 바뀌었다. PinVi service vendor를 이 SHA로 재vendor하고 paired contract test·두 적대 리뷰·n150 isolated live gate를 통과하기 전에는 완료 receipt나 consumer enable을 선언할 수 없다."
+        "pinvi_service_vendor_sha256": "c6f9aba6ab4b815c394e5e1cb5fb4a2c3488d147d5bb1a7e21b92c1796f4aebd",
+        "blocking_reason": "PinVi service vendor 재vendor와 paired contract CI는 완료됐다. 두 적대 리뷰와 n150 isolated candidate Live UI E2E가 exact archive·immutable image·attestation 증거를 남길 때까지 candidate_verified나 consumer enable을 선언할 수 없다. 후보 증거 뒤에도 final main C7 attestation 전에는 complete를 선언할 수 없다."
       }
     },
     "T-VN-39": {

@@ -49,7 +49,7 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-08-13 T-VN-36 — receipt가 리베이스로 폐기된 커밋(c1fa5a4d)과 그때의
     # spec sha를 가리키고 있었다. 현재 head로 재핀했다.
     "consumer-rollout-v1.json": (
-        "fc697be2b4025c95c3a9953453e5c81304ba99c69a1d4e1f16daa2efefeba9de"
+        "0c8691e90135cfa35cbf1e51238beb12f9821e92e6696a6e16d170afc681136e"
     ),
     "violation-fixtures-v1.sql": (
         "84cca48b776387e4b6fd00b702e40b3412c9731f6abcdd250a5c126c2ea155d8"
@@ -261,24 +261,69 @@ def test_consumer_rollout_shape() -> None:
         "T-VN-36 exact Map/PinVi source pair",
     ]
     paired_receipt = rollout["tasks"]["T-VN-41"]["pinvi_snapshot_receipt"]
-    assert set(paired_receipt) == {
-        "state",
-        "map_service_openapi_sha256",
-        "pinvi_service_vendor_sha256",
-        "blocking_reason",
-    }
-    assert paired_receipt["state"] == "pending"
-    assert paired_receipt["blocking_reason"].strip()
-    for key in ("map_service_openapi_sha256", "pinvi_service_vendor_sha256"):
-        assert re.fullmatch(r"[0-9a-f]{64}", paired_receipt[key]), key
     service_sha256 = hashlib.sha256(
         (_ROOT / "packages/kor-travel-map-api/openapi.service.json").read_bytes()
     ).hexdigest()
-    assert paired_receipt["map_service_openapi_sha256"] == service_sha256
-    assert (
-        paired_receipt["map_service_openapi_sha256"]
-        != paired_receipt["pinvi_service_vendor_sha256"]
-    )
+    assert paired_receipt["state"] in {"pending", "candidate_verified", "complete"}
+    if paired_receipt["state"] == "pending":
+        assert set(paired_receipt) == {
+            "state",
+            "map_service_openapi_sha256",
+            "pinvi_service_vendor_sha256",
+            "blocking_reason",
+        }
+        assert paired_receipt["blocking_reason"].strip()
+        assert paired_receipt["map_service_openapi_sha256"] == service_sha256
+        assert (
+            paired_receipt["map_service_openapi_sha256"]
+            == paired_receipt["pinvi_service_vendor_sha256"]
+        )
+    else:
+        required_keys = {
+            "state",
+            "map_commit",
+            "pinvi_commit",
+            "map_service_openapi_sha256",
+            "pinvi_service_vendor_sha256",
+            "map_image_id",
+            "pinvi_image_id",
+            "compatible_pair_attestation_sha256",
+            "live_e2e_evidence_sha256",
+            "verification",
+        }
+        if paired_receipt["state"] == "candidate_verified":
+            assert set(paired_receipt) == required_keys | {"final_c7_required"}
+            assert paired_receipt["final_c7_required"] is True
+        else:
+            assert set(paired_receipt) == required_keys
+        for key in ("map_commit", "pinvi_commit"):
+            assert re.fullmatch(r"[0-9a-f]{40}", paired_receipt[key]), key
+        for key in (
+            "map_service_openapi_sha256",
+            "pinvi_service_vendor_sha256",
+            "compatible_pair_attestation_sha256",
+            "live_e2e_evidence_sha256",
+        ):
+            assert re.fullmatch(r"[0-9a-f]{64}", paired_receipt[key]), key
+        for key in ("map_image_id", "pinvi_image_id"):
+            assert re.fullmatch(r"sha256:[0-9a-f]{64}", paired_receipt[key]), key
+        assert paired_receipt["map_service_openapi_sha256"] == service_sha256
+        assert (
+            paired_receipt["map_service_openapi_sha256"]
+            == paired_receipt["pinvi_service_vendor_sha256"]
+        )
+        expected_verification = [
+            "PinVi service vendor bytes are exact",
+            "n150 isolated candidate Map/PinVi Live UI E2E passed",
+            "candidate archive, immutable images, and attestation are exact",
+        ]
+        if paired_receipt["state"] == "candidate_verified":
+            assert paired_receipt["verification"] == expected_verification
+        else:
+            assert paired_receipt["verification"] == [
+                *expected_verification,
+                "final main C7 attestation passed",
+            ]
 
 
 def test_active_pinvi_receipt_describes_current_consumed_specs() -> None:
