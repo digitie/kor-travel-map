@@ -45,11 +45,11 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     ),
     # 2026-08-13 T-VN-40 — public legacy catalog 제거, scoped service snapshot/mapping,
     # admin catalog/import/candidate ETag·412/428 목표 diff를 machine freeze했다.
-    "openapi-diff-v1.json": ("6843548b63814772cef25fdb010ebbb5faf6662cde3f80bbdff748f865c42ee7"),
+    "openapi-diff-v1.json": ("3a9984e47b682e07cc389d38524d6c8d47bb03a23f06095a660331afe0b0cc88"),
     # 2026-08-13 T-VN-36 — receipt가 리베이스로 폐기된 커밋(c1fa5a4d)과 그때의
     # spec sha를 가리키고 있었다. 현재 head로 재핀했다.
     "consumer-rollout-v1.json": (
-        "268b02115edda88a66fe1e0e139ff0b7bce91eb3567163ffc4013c25682271e3"
+        "fc697be2b4025c95c3a9953453e5c81304ba99c69a1d4e1f16daa2efefeba9de"
     ),
     "violation-fixtures-v1.sql": (
         "84cca48b776387e4b6fd00b702e40b3412c9731f6abcdd250a5c126c2ea155d8"
@@ -83,6 +83,7 @@ _WAVE2_TASKS: Final = (
     "T-VN-37",
     "T-VN-38",
     "T-VN-40",
+    "T-VN-41",
     "T-VN-39",
 )
 _REVENDOR_VALUES: Final = frozenset({"yes", "no", "deferred-to-implementation"})
@@ -259,6 +260,25 @@ def test_consumer_rollout_shape() -> None:
         "PinVi contract pin consistency",
         "T-VN-36 exact Map/PinVi source pair",
     ]
+    paired_receipt = rollout["tasks"]["T-VN-41"]["pinvi_snapshot_receipt"]
+    assert set(paired_receipt) == {
+        "state",
+        "map_service_openapi_sha256",
+        "pinvi_service_vendor_sha256",
+        "blocking_reason",
+    }
+    assert paired_receipt["state"] == "pending"
+    assert paired_receipt["blocking_reason"].strip()
+    for key in ("map_service_openapi_sha256", "pinvi_service_vendor_sha256"):
+        assert re.fullmatch(r"[0-9a-f]{64}", paired_receipt[key]), key
+    service_sha256 = hashlib.sha256(
+        (_ROOT / "packages/kor-travel-map-api/openapi.service.json").read_bytes()
+    ).hexdigest()
+    assert paired_receipt["map_service_openapi_sha256"] == service_sha256
+    assert (
+        paired_receipt["map_service_openapi_sha256"]
+        != paired_receipt["pinvi_service_vendor_sha256"]
+    )
 
 
 def test_active_pinvi_receipt_describes_current_consumed_specs() -> None:

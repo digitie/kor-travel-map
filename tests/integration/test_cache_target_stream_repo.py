@@ -9,6 +9,8 @@ from typing import Any
 
 import httpx
 import pytest
+from kortravelmap.api.pipeline_cancellation_service import cancel_pipeline_execution
+from kortravelmap.api.settings import ApiSettings
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -3581,6 +3583,75 @@ async def test_service_refresh_rejects_source_head_from_prior_restore_epoch(
         await migrated_session.scalar(text("SELECT count(*) FROM ops.feature_update_requests"))
         == requests_before
     )
+
+
+@pytest.mark.integration
+async def test_queued_service_refresh_cancellation_emits_exact_tuple_status(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """실행 전 취소도 queued snapshot과 같은 tuple로 relay에 남긴다."""
+
+    system = "queued-refresh-cancellation-test"
+    async with AsyncSession(migrated_engine) as setup, setup.begin():
+        await _apply_snapshot_source(
+            setup,
+            external_system=system,
+            target_key="refresh-target",
+            event_id="9d500000-0000-4000-8000-000000000001",
+            idempotency_key="9d600000-0000-4000-8000-000000000001",
+        )
+        await _seed_scope_feature(
+            setup,
+            membership=await _canonical_membership(setup),
+            feature_id="f_queued_refresh_cancellation_scope_anchor",
+        )
+        request = await create_cache_target_refresh_request(
+            setup,
+            principal_id="pinvi-service",
+            consumer_id=_CONSUMER,
+            idempotency_key="9d700000-0000-4000-8000-000000000001",
+            external_system=system,
+            target_keys=["refresh-target"],
+            reason="queued cancellation relay evidence",
+        )
+
+    settings = ApiSettings(
+        dagster_url="http://dagster.example",
+        dagster_allowed_hosts=["dagster.example"],
+    )
+    async with httpx.AsyncClient() as client:
+        result = await cancel_pipeline_execution(
+            engine=migrated_engine,
+            settings=settings,
+            http_client=client,
+            kind="update_request",
+            execution_id=request.request_id,
+            requested_by="admin:test",
+            reason="queued refresh cancellation",
+        )
+
+    assert result.status == "completed"
+    assert result.members[0].result == "cancelled"
+    async with AsyncSession(migrated_engine) as probe:
+        rows = (
+            await probe.execute(
+                text(
+                    """
+                    SELECT payload ->> 'status' AS status, restore_epoch,
+                           source_generation, source_payload_fingerprint
+                    FROM ops.poi_cache_target_outbox_events
+                    WHERE refresh_request_id = CAST(:request_id AS uuid)
+                    ORDER BY relay_order
+                    """
+                ),
+                {"request_id": request.request_id},
+            )
+        ).all()
+    assert [(row.status, row.restore_epoch, row.source_generation) for row in rows] == [
+        ("queued", 1, 1),
+        ("cancelled", 1, 1),
+    ]
+    assert len({str(row.source_payload_fingerprint) for row in rows}) == 1
 
 
 @pytest.mark.integration

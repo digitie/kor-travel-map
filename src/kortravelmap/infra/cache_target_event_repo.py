@@ -33,6 +33,7 @@ __all__ = [
     "CacheTargetResultEvent",
     "append_cache_target_links_reconciled_events",
     "append_cache_target_refresh_status_events",
+    "assert_cache_target_refresh_members_current",
     "capture_cache_target_refresh_members",
     "capture_cache_target_refresh_members_by_keys",
     "lock_cache_target_result_streams",
@@ -192,7 +193,7 @@ ORDER BY member.target_key COLLATE "C", member.target_id
 """
 
 _LOCK_HEAD_SQL = """
-SELECT restore_epoch, source_generation, target_sequence
+SELECT restore_epoch, source_generation, source_payload_fingerprint, target_sequence
 FROM ops.poi_cache_target_source_heads
 WHERE external_system = :external_system
   AND target_key = :target_key
@@ -458,6 +459,53 @@ async def capture_cache_target_refresh_members_by_keys(
         request_id=request_id,
         target_ids=(),
     )
+
+
+async def assert_cache_target_refresh_members_current(
+    session: AsyncSession,
+    *,
+    request_id: str,
+) -> tuple[CacheTargetRefreshMember, ...]:
+    """captured member가 아직 current source head와 같은지 stream→head 순서로 검증한다.
+
+    refresh 실행 도중 source writer가 다음 generation을 커밋하면, 이전 snapshot으로
+    link/freshness를 확정해서는 안 된다. 이 함수가 잡은 stream/head lock은 호출
+    transaction 끝까지 유지되므로, 성공 뒤의 target/link mutation과 result event는
+    같은 source tuple에 결박된다. 상태 이력(``queued``/``running``/``cancelled``)은
+    captured tuple의 사실 기록이므로 여기서 검증하지 않는다.
+    """
+
+    await lock_cache_target_result_streams(session, request_id=request_id)
+    members = await capture_cache_target_refresh_members(
+        session,
+        request_id=request_id,
+        target_ids=(),
+    )
+    for member in members:
+        head = (
+            await session.execute(
+                text(_LOCK_HEAD_SQL),
+                {
+                    "external_system": member.external_system,
+                    "target_key": member.target_key,
+                },
+            )
+        ).one_or_none()
+        if head is None:
+            raise CacheTargetRefreshProtocolViolation(
+                "captured cache target refresh member의 source head가 사라졌습니다."
+            )
+        values = head._mapping
+        if (
+            int(values["restore_epoch"]) != member.restore_epoch
+            or int(values["source_generation"]) != member.source_generation
+            or str(values["source_payload_fingerprint"])
+            != member.source_payload_fingerprint
+        ):
+            raise CacheTargetRefreshProtocolViolation(
+                "captured cache target refresh member의 source tuple이 현재 head와 다릅니다."
+            )
+    return members
 
 
 async def pinvi_cache_target_refresh_protocol_error(
