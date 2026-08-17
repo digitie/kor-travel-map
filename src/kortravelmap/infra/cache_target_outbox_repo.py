@@ -344,6 +344,7 @@ RETURNING delivery_version, attempt_count
 _BLOCK_STREAM_SQL = """
 UPDATE ops.poi_cache_target_streams
 SET status = 'blocked', blocked_event_id = CAST(:event_id AS uuid),
+    consumer_enabled = false, control_version = control_version + 1,
     updated_at = now()
 WHERE external_system = :external_system
 """
