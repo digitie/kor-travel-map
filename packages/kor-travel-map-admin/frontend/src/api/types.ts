@@ -2349,7 +2349,7 @@ export interface paths {
         put?: never;
         /**
          * feature update request 생성
-         * @description 6-type scope union(feature_ids/center_radius/sigungu_by_radius/bbox/provider_dataset/cache_target_keys) + reason 감사 사유 + priority 계약을 전량 승계한다. operator는 인증된 ops principal actor를 사용한다. 카탈로그 refreshable 검증과 run_mode=now의 동일 scope advisory lock(409 + Retry-After)을 포함한다.
+         * @description 6-type scope union(feature_ids/center_radius/sigungu_by_radius/bbox/provider_dataset/cache_target_keys) + reason 감사 사유 + priority 계약을 전량 승계한다. operator는 인증된 ops principal actor를 사용한다. 단, PinVi cache_target_keys는 source head와 queued outbox를 같은 transaction에 남기는 ServiceToken /v1/service/refresh-requests만 사용한다. 카탈로그 refreshable 검증과 run_mode=now의 동일 scope advisory lock(409 + Retry-After)을 포함한다.
          */
         post: operations["create_pipeline_update_request_v1_ops_pipeline_requests_post"];
         delete?: never;
@@ -19105,7 +19105,7 @@ export interface operations {
                     "application/json": components["schemas"]["PoiCacheTargetMutationResponse"];
                 };
             };
-            /** @description 같은 key의 좌표 conflict */
+            /** @description 같은 key의 좌표 conflict 또는 PinVi cache target의 source protocol 위반 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -19173,6 +19173,15 @@ export interface operations {
             };
             /** @description target 없음 */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description PinVi target은 ServiceToken source protocol 전용 */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };
