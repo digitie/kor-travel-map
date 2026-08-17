@@ -13,8 +13,38 @@ Odroid M1S(ARM64) 양쪽 배포를 위한 multi-platform Docker build 절차를 
 | `api` | `12701` | `kor-travel-map-api` FastAPI, OpenAPI/public/admin/debug/ops 라우터 |
 | `frontend` | `12705` | Next.js admin UI |
 | `dagster` | `12702` | kor-travel-map-owned Dagster UI/code location |
-| `postgres` | host `5432`, container `5432` | 독립 `kor_travel_map` PostGIS DB |
+| `postgres` | standalone host `5432` · **n150 prod `12703`** | 독립 `kor_travel_map` PostGIS DB. 아래 ⚠️ |
 | `rustfs` | API `12101`, console `12105` | S3 호환 객체 저장소(선택, backup 대상) |
+
+> ⚠️ **postgres 포트는 배포 형태에 따라 다르다.**
+>
+> | 형태 | 포트 | listen | 비고 |
+> |---|---|---|---|
+> | 저장소 standalone compose | `5432` | 컨테이너 기본 | 로컬 개발·CI |
+> | **n150 prod** | **`12703`** | **`127.0.0.1` 전용** | `kor-travel-map-postgres`, host network |
+>
+> prod는 2026-08-15 커토버(#46)로 kor-travel-geo와 공유하던 인스턴스에서 map 전용
+> 인스턴스로 옮겼다. **`12703`은 map이 이미 쓰는 `127xx` 대역의 빈 번호**이므로
+> `12xxx` 고정 포트 규칙(ADR-047, 이 문서)에 그대로 맞는다 — 12701 api · 12702
+> dagster · **12703 postgres** · 12705 admin UI.
+>
+> ⚠️ prod에서 `5432`는 **kor-travel-geo의 인스턴스**다. 거기로 붙어도 오류가 나지
+> 않으므로(다른 DB에 연결될 뿐) 실수를 알아채기 어렵다. 자세히는
+> `docs/integration-map.md`.
+
+**호스트 `12xxx` 대역 배치**(2026-08-17 n150 실측). 새 포트를 잡을 때는 자기 프로젝트의
+100번대 안에서 고른다 — 대역을 넘으면 다른 프로젝트와 충돌한다.
+
+| 대역 | 소유 | 사용 중 |
+|---|---|---|
+| `121xx` | RustFS | 12101 S3 · 12105 console |
+| `122xx` | Grafana | 12205 |
+| `123xx` | cAdvisor | 12301 |
+| `124xx` | Prometheus | 12401 |
+| `125xx` | kor-travel-geo | 12501 api · 12502 dagster · 12505 ui |
+| `126xx` | kor-travel-concierge | 12601 api · 12602 mcp · 12605 web |
+| **`127xx`** | **kor-travel-map** | **12701 api · 12702 dagster · 12703 postgres · 12705 ui** |
+| `128xx` | PinVi | 12801 api · 12802 dagster · 12805 web |
 
 Prometheus 성능 메트릭은 별도 포트를 열지 않고 `api`의 같은 host 포트 `12701`에서
 `GET /metrics`로 노출한다. 이 endpoint는 공개 REST(`/v1/features`·`/v1/categories`·
