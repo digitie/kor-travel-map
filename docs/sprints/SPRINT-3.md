@@ -1,6 +1,8 @@
 # SPRINT-3.md — KNPS/트래킹 + 국가유산 + 정합성 Phase 1
 
-> **상태**: 🔵 **active (진입, 2026-05-28)** — Sprint 2 종료(PR#28~#59) 후 진입.
+> **상태**: ✅ **완료** (PR#60~#95, 2026-05-28~30) — 아래 §6 종료 조건 대조 완료.
+> 단일 정본은 [`README.md`](./README.md)의 표다. 이 헤더가 `🔵 active`로 남아
+> 있었던 것은 종료 시점에 여기를 안 고쳤기 때문이다.
 >
 > **목적**: ADR-034 9단계의 ⑤~⑥ — 국립공원/트래킹 (`python-knps-api` +
 > `python-krforest-api` trails) + 국가유산 (`python-krheritage-api`). area/

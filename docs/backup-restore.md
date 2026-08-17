@@ -256,6 +256,56 @@ PGPASSWORD=<앱 DSN의 값> psql -h 127.0.0.1 -p <새 포트> -U ktm_feature_api
 이 접속 시험은 ①②를 잡지만 ③④는 통과시킨다 — 접속과 `search_path`는 멀쩡하고
 스키마 USAGE에서만 막히기 때문이다.
 
+### 2.2 ⛔ 빈 DB로 재생성할 때 — 확장은 superuser 전용
+
+n150은 "손상 시 재적재"가 정책이다(`docs/tasks.md` T-VN-H43, 사용자 지시 2026-08-06).
+즉 dump 복원(§8.1)과 **나란히 빈 DB 재생성이 1차 복구 경로**이고, 그 첫 단계가 이 절이다.
+
+`CREATE EXTENSION`은 **superuser 전용**이다. 앱 role로 도는 alembic은 `0001`에서
+`permission denied to create extension "postgis"`로 막힌다.
+
+> **CI는 이 경로를 못 잡는다.** testcontainers의 앱 유저가 superuser라 거기서는 그냥
+> 성공한다. 즉 이 함정은 초록인 CI를 통과해 prod에서만 나타난다.
+
+빈 DB를 만들면 **superuser로** 아래를 선행한다.
+
+```sql
+-- superuser(예: kor_travel_map) 로 접속. 포트는 12700이다(§1).
+CREATE DATABASE kor_travel_map;
+\connect kor_travel_map
+
+CREATE SCHEMA IF NOT EXISTS x_extension AUTHORIZATION ktm_feature_schema_owner;
+
+-- `0001`의 _EXTENSIONS 3종. 반드시 x_extension 스키마에 만든다(ADR-008).
+CREATE EXTENSION IF NOT EXISTS postgis   WITH SCHEMA x_extension;
+CREATE EXTENSION IF NOT EXISTS pg_trgm   WITH SCHEMA x_extension;
+CREATE EXTENSION IF NOT EXISTS pgcrypto  WITH SCHEMA x_extension;
+-- 선택: 부팅 후 buffer warm-up(T-102). superuser일 때만.
+CREATE EXTENSION IF NOT EXISTS pg_prewarm WITH SCHEMA x_extension;
+
+-- ⚠️ 이 GRANT를 빠뜨리면 **런타임이 통째로 죽는다.** runtime의 평범한 core update
+--    SQL도 typed coordinate expression을 parse하므로, 스키마 USAGE가 없으면
+--    `ST_DWithin` 한 줄은 물론 CHECK 제약이 걸린 INSERT까지
+--    `permission denied for schema x_extension`으로 실패한다.
+GRANT USAGE ON SCHEMA x_extension
+    TO ktm_feature_state_procedure_owner, ktm_feature_runtime;
+```
+
+정본은 `docker/postgres-role-bootstrap.sh`(스키마·확장·GRANT를 만드는 주체)다. 위 SQL을
+고칠 일이 생기면 **그 파일을 먼저 고치고 여기를 맞춘다** — 반대로 하면 두 벌이 갈린다.
+
+> 2026-08-14 적대 리뷰가 실측한 것: squash baseline이 3개 스키마만 재현해서 위 GRANT가
+> 사라졌는데, **카탈로그 오라클도 같은 3개 스키마만 봐서** 검사기와 검사 대상이 같은
+> 맹점을 공유했다. 새 DB에서 runtime의 PostGIS 호출이 전부 실패하고서야 드러났다.
+
+**출처**: `kor-travel-docker-manager` 이슈
+[#109](https://github.com/digitie/kor-travel-docker-manager/issues/109). 그 이슈의
+**본문은 이미지↔pin 사고**이고 이 확장 절차는 2026-08-04 **코멘트**에 있다 — 본문만 읽고
+"관련 없다"고 넘기기 쉽다.
+
+⚠️ #109 원문의 식별자는 낡았다. DB `krtour_map` → **`kor_travel_map`**, role도 `ktm_*`
+계열로 바뀌었다(ADR-37 4분할 및 그 이전 개명). **그대로 복사하지 마라.**
+
 ## 3. 산출물 구조
 
 백업 디렉터리는 다음 파일을 가진다.
@@ -533,13 +583,19 @@ command가 결선돼 있지 않다** — 그 결선 전까지의 수동 기준�
 
 - **경로/명명**: n150 `~/backups/kor-travel-map/<YYYY-MM-DD>-<label>.dump`
   (+`.sha256`, `.manifest`). manifest에는 alembic head와 핵심 카운트
-  (features/source_records/source_links/weather_values/**public_api_keys**)를
+  (features/source_records/source_links/feature_weather_values/**public_api_keys**)를
   선기록한다 — `ops.public_api_keys`는 2026-08-05 재생성 소실 실측(공개 표면
   전체 401) 이후 **백업 스코프 필수 확인 항목**이다.
-  ⚠️ **2026-08-13 정정**: `weather_values`의 실제 relation은
-  `feature.weather_values`가 아니라 **`feature.feature_weather_values`**다
-  (T-VN-35 typed subtype 분해에서 개명). 옛 이름으로 조회하면 relation 부재로
-  실패한다 — 이 절의 카운트 목록을 그대로 스크립트로 옮기면 그 자리에서 깨진다.
+  ⚠️ **relation 이름**: weather 카운트의 relation은
+  **`feature.feature_weather_values`**다. `feature.weather_values`는 이 절이 쓰던
+  축약 표기였을 뿐 **한 번도 존재한 적이 없다** — `0017`이 처음부터 이 이름으로
+  만들었고 개명 migration은 저장소에 없다
+  (`alembic/legacy_versions/0017_feature_weather_values.py`). 축약 표기를 그대로
+  스크립트로 옮기면 relation 부재로 그 자리에서 깨진다.
+
+  (2026-08-13에 이 자리에 "T-VN-35에서 개명"이라고 적었는데 그것도 틀렸다.
+  개명이 아니라 애초에 그 이름이었다. 틀린 정정을 남겨두면 다음 사람이 없는
+  migration을 찾는다.)
 - **실행**: api 컨테이너 env의 TCP DSN으로 `postgis/postgis:16-3.5-alpine`
   컨테이너에서 `pg_dump -Fc --no-owner`. pg_dump는 스냅샷 트랜잭션이라 DB
   단독으로는 **내부 일관**이다. 단 write path를 멈추지 않은 live dump는 3종
@@ -614,7 +670,10 @@ command가 결선돼 있지 않다** — 그 결선 전까지의 수동 기준�
    -e POSTGRES_PASSWORD=drill -p 15444:5432 postgis/postgis:16-3.5-alpine`.
    prod와 같은 이미지 계열을 쓰고 포트는 겹치지 않게 띄운다.
 2. **새 DB + 확장 선생성** — `CREATE DATABASE ktm_drill` 뒤
-   `CREATE SCHEMA x_extension` + `postgis`/`pg_trgm`/`pgcrypto`/`btree_gist`를
+   `CREATE SCHEMA x_extension` + `postgis`/`pg_trgm`/`pgcrypto`(superuser면
+   `pg_prewarm`도)를 그 스키마에 생성(ADR-008 — 정확한 SQL은 **§2.2**).
+   `btree_gist`는 이 스키마가 만들지도 쓰지도 않는다(`0001`의 `_EXTENSIONS`는 3종).
+   생성 위치는
    그 스키마에 생성(ADR-008). **`POSTGRES_DB`에 그대로 복원하지 않는다** —
    init이 심어둔 확장과 dump의 확장 배치가 충돌한다(0072 아카이브 복원 실측).
 3. **복원** — `pg_restore -U drill -d ktm_drill --no-owner --no-privileges -j 2`.

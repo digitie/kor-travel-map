@@ -4,15 +4,38 @@
 ``FeatureBundle``로 정규화하는 **순수 함수 namespace**. wrapper/adapter/
 gateway 신규 생성 금지 (ADR-006).
 
-**Sprint 2~5에서 provider별 모듈 점진 추가** — ADR-034 9단계 순서:
+**변환 모듈 인벤토리.** 아래 표와 그 뒤 「표에 없는 모듈」 두 줄이 ``providers/``
+디렉터리의 모든 ``*.py``(``__init__`` 제외)를 덮는다 — 이 불변식은
+``tests/lint/test_providers_docstring_inventory.py``가 강제한다.
 
-| Sprint | provider 모듈 |
-|--------|--------------|
-| 2 | ``visitkorea`` / ``kma`` / ``airkorea`` / ``krforest_weather`` |
-|   | / ``khoa_weather`` / ``opinet`` / ``krex`` |
-| 3 | ``knps`` (14 dataset) / ``krforest_trails`` / ``krheritage`` |
-| 4 | ``mois`` (4단계 lifecycle) |
-| 5 | ``krforest`` (휴양림/수목원) / ``standard_data`` (5종) |
+| 모듈 | provider 라이브러리 | 비고 |
+|------|--------------------|------|
+| ``airkorea`` | python-airkorea-api | 대기질 측정소·측정값 |
+| ``datagokr_file_data`` | python-datagokr-api | data.go.kr fileData curated |
+| ``khoa`` | python-khoa-api | 해수욕장 place |
+| ``kma`` | python-kma-api | 단기·초단기·중기 예보 + 특보 |
+| ``knps`` | python-knps-api | 국립공원 file dataset |
+| ``kor_travel_concierge`` | kor-travel-concierge | YouTube 장소 후보 |
+| ``krairport`` | python-krairport-api | 공항 메타데이터 |
+| ``krex`` | python-krex-api | 휴게소 multi-kind |
+| ``krforest`` | python-krforest-api | 휴양림·수목원 |
+| ``krheritage`` | python-krheritage-api | 국가유산 place/area/event |
+| ``mcst`` | python-mcst-api | 문체부 파일데이터 CSV |
+| ``mois`` | python-mois-api | 인허가 LOCALDATA lifecycle |
+| ``opinet`` | python-opinet-api | 주유소·유가 |
+| ``standard_data`` | data.go.kr 표준데이터 | 표준데이터 5종 |
+| ``visitkorea`` | python-visitkorea-api | TourAPI enrichment |
+
+**표에 없는 모듈** — 변환 모듈이 아니라서 위 표에 넣지 않는다:
+
+- ``feature_operation_registry`` — DB operation key → Dagster handler 결박 registry (T-VN-33)
+- ``knps_name_translations`` — ``knps``가 쓰는 이름 대역표
+
+ADR-034의 9단계 **계획 순서**와 미구현 dataset(``krforest_trails`` /
+``krforest_mountain_weather`` / ``krforest_safety_notices`` / ``forest_fire_risk`` /
+``khoa_coastal_notices``)의 정본은 ``docs/architecture/provider-contract.md``다.
+여기에 계획을 다시 적지 않는다 — 2026-05 계획표가 그대로 굳어 존재하지 않는 모듈 3개를
+나열하고 실재하는 6개를 빠뜨린 것이 이 문단을 고쳐 쓰게 된 이유다.
 
 ADR 참조
 --------

@@ -414,8 +414,9 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     (사용자 지시 2026-08-06). 복원 가능성 자체는 H44가 실증했으므로 열린
     리스크가 아니다. 실 prod 전환 시 manager **#148**(일 1회 dump+sha256+
     manifest·retention·오프박스 반출·배포 직전 fence dump)로 재개한다.
-  - [ ] 신규 DB 프로비저닝 함정 참조 링크 — superuser 확장 4종 사전 생성
+  - [x] 신규 DB 프로비저닝 함정 참조 링크 — superuser 확장 4종 사전 생성
     (manager #109 절차)을 restore 문서에서 링크한다.
+    **해소(2026-08-18)**: `docs/backup-restore.md` **§2.2**를 신설했다 — 빈 DB 재생성이 n150의 1차 복구 경로("손상 시 재적재가 정책")이므로 그 첫 단계인 superuser 확장 선생성 SQL을 넣고 #109를 링크했다. 그 이슈의 **본문은 이미지↔pin 사고**이고 절차는 2026-08-04 코멘트에 있어 본문만 보면 놓친다는 점, 원문 식별자(`krtour_map`)가 낡았다는 점도 적었다. GRANT grantee는 정본(`docker/postgres-role-bootstrap.sh:521-522`)에서 직접 읽어 `ktm_feature_state_procedure_owner, ktm_feature_runtime`으로 썼다 — 조사 초안은 `ktm_feature_migrator`로 틀렸다.
 
 - [~] T-VN-H44 — **복원 리허설 드릴 정기화 (H30B 하네스 재사용)**
 
@@ -618,10 +619,18 @@ AC: arm64 이미지가 registry에 올라가고 n150/Odroid 중 arm64에서 기�
 `krforest_safety_notices`, `forest_fire_risk`, `khoa_coastal_notices`.
 
 - [ ] 착수 여부는 **제품 결정**이다. 하지 않기로 하면 문서에서 "계획"을 빼고 그렇게 적는다.
-- [ ] 그와 별개로 **표 drift는 지금 고친다** — `src/kortravelmap/providers/__init__.py`가
-  존재하지 않는 `krforest_weather`·`krforest_trails` 모듈을 나열한다(실제 파일은
-  `krforest.py` 하나). `docs/reports/full-consistency-audit-2026-06-16.md` R2-15가 이미
-  적발해 뒀다.
+- [x] **표 drift 해소(2026-08-18)** — `providers/__init__.py` docstring이 2026-05
+  Sprint 계획표로 굳어 존재하지 않는 모듈 **3개**(`krforest_weather`·`krforest_trails`·
+  `khoa_weather`)를 나열하고 실재하는 **6개**(`mcst`·`datagokr_file_data`·`krairport`·
+  `kor_travel_concierge`·`feature_operation_registry`·`knps_name_translations`)를
+  빠뜨리고 있었다. 실제 인벤토리로 교체했다.
+  - 고쳐 적는 것만으로는 또 어긋나므로 **`tests/lint/test_providers_docstring_inventory.py`**를
+    신설해 "표 + 예외 목록 = 디렉터리의 모든 모듈"을 강제한다. 새 provider를 넣고
+    docstring을 안 고치면 red다.
+  - 조사 초안은 "이 표는 디렉터리와 1:1"이라 단언하면서 표가 15행/실제 17개라
+    **새 거짓 주장을 만들 뻔했다**(적대 검증이 잡음). 보조 모듈 2개를 예외로 명시하고
+    그 예외 집합까지 테스트가 고정한다.
+  - R2-15는 `provider-contract.md` 대상이고 이미 적용 완료다 — 이 drift는 별건이었다.
 
 AC: 표와 실제 모듈이 일치. dataset 구현은 결정에 따라 별도 task로 분기.
 

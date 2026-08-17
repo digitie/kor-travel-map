@@ -1,9 +1,16 @@
 # SPRINT-5.md — MOIS-sibling provider + 정합성 Phase 2 + 운영 진입
 
-> **상태**: 🟢 진행 중 (최종 운영 진입 task 상세화, 2026-06-07). **ADR-045 독립
-> 프로그램화**(Docker compose + admin-first OpenAPI + 독립 Dagster)는 핵심 기반 구현을
-> 대부분 마쳤고, 남은 범위는 T-RV-04b-opinet, T-212b/d/e, T-210 PinVi 연계 정리,
-> Sprint 5 closure다.
+> **상태**: 🟢 **마무리** — 잔여는 `T-229-buildx`(arm64 buildx 배포 검증) 하나다.
+> 단일 정본은 [`README.md`](./README.md)의 표이고, 열린 작업은 `../tasks.md`가 갖는다.
+>
+> 이 헤더가 2026-06-07 시점 그대로 `T-RV-04b-opinet, T-212b/d/e, T-210`을 잔여로
+> 나열하고 있었는데 넷 다 완료됐다(`../tasks-done.md`: T-RV-04b 2026-06-08 "완전
+> 종료", T-212a~e 2026-06-12까지, T-210은 a/e 완료 + b/c/d won't-do).
+>
+> ⚠️ **아래 §4 DoD 체크박스는 대조하지 않았다.** 일부 항목("모든 ADR이 운영 단계
+> 사용자 대상으로 갱신" 등)은 이후 ADR이 계속 늘어 지금 기준으로 확인이 불가능하다.
+> 미체크로 남아 있다고 해서 미완이라는 뜻이 아니고, 반대로 검증 없이 `[x]`를 박지도
+> 않았다. Sprint 완료 판정은 README 표를 따른다.
 >
 > **목적**: ADR-034 9단계의 ⑧⑨ — 휴양림/수목원 (`python-krforest-api`) +
 > 박물관/미술관 (`data.go.kr-standard`). MOIS와 sibling 가능한 provider를
