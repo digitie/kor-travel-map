@@ -50,6 +50,7 @@ Odroid M1S(ARM64) 양쪽 배포를 위한 multi-platform Docker build 절차를 
 | `126xx` | kor-travel-concierge | **12600 postgres** · 12601 api · 12602 mcp · 12605 web |
 | **`127xx`** | **kor-travel-map** | **12700 postgres** · 12701 api · 12702 dagster · 12705 ui |
 | `128xx` | PinVi | **12800 postgres** · 12801 api · 12802 dagster · 12805 web |
+| `129xx` | kor-travel-docker-manager 자체 | 12901 api · 12905 web |
 
 **DB는 각 대역의 `x00`이다** (2026-08-17). 프로젝트마다 전용 PostgreSQL 인스턴스를
 쓰며, 통합 인스턴스는 없다. 새 포트를 잡을 때는 자기 프로젝트의 100번대 안에서 고른다.
@@ -105,11 +106,15 @@ token 미설정 local-dev는 기존 open scrape를 유지한다.
 순서를 뒤집으면(토큰 먼저, scrape config 나중) 그 사이 scrape가 401로 gap이
 생긴다 — 조용한 유실이 아니라 scrape 실패로 드러난다.
 
-`kor-travel-docker-manager`가 공유 PostGIS/RustFS를 이미 구동하는 로컬 환경에서는 kor-travel-map의
-local `postgres`/`rustfs` 서비스를 함께 띄우면 `5432`/`12101`이 충돌한다. 이때는
+`kor-travel-docker-manager`가 인프라를 이미 구동하는 환경에서는 kor-travel-map의
+local `postgres`/`rustfs` 서비스를 함께 띄우면 포트가 충돌한다. 이때는
 `KOR_TRAVEL_MAP_INFRA_EXTERNAL=true bash scripts/docker-up.sh`를 사용해 API, Web UI,
-Dagster만 올리고, 컨테이너는 `host.docker.internal:5432` /
-`host.docker.internal:12101`로 공유 인프라에 연결한다.
+Dagster만 올리고, 컨테이너는 docker-manager가 띄운 인프라에 연결한다.
+
+⚠️ **연결 대상 포트는 `5432`가 아니다.** docker-manager는 2026-08-17부터 프로젝트별
+전용 PostgreSQL을 띄우며 map의 DB는 **`12700`**이다(위 대역표). RustFS만 `12101`로
+그대로다. 옛 문서를 보고 `host.docker.internal:5432`로 붙으면 연결 자체가 실패한다 —
+그 포트를 듣는 것이 없다.
 
 `api`, `frontend`, `dagster`는 Docker compose healthcheck를 가진다. `frontend`는
 `api`의 `service_healthy` 이후 시작한다.
@@ -257,7 +262,7 @@ object만 명시 transfer한다. API entrypoint는 Alembic 뒤 migrator `SET ROL
 inventory를 재조정한다. `ALTER DEFAULT PRIVILEGES` fallback은 없으므로 state/audit future table이
 runtime DML을 자동으로 얻지 않는다.
 공유 DB만 쓰고 RustFS는 local compose로 띄우는 Docker 기동은
-`KOR_TRAVEL_MAP_DB_EXTERNAL=true`와 `KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT=5432`
+`KOR_TRAVEL_MAP_DB_EXTERNAL=true`
 기준이다. 공유 DB와 공유 RustFS를 모두 쓰면 `KOR_TRAVEL_MAP_INFRA_EXTERNAL=true`를 쓴다.
 
 ## 프로덕션 도메인 (reverse proxy)

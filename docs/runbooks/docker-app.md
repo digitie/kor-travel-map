@@ -2,8 +2,9 @@
 
 본 문서는 ADR-045/047/056 기준 kor-travel-map 독립 프로그램을 로컬에서 빌드·기동·스모크하는
 절차다. 고정 포트는 API `12701`, admin UI `12705`, Dagster `12702`이다.
-PC 개발 환경에서 host `5432`는 `kor-travel-docker-manager`가 소유한
-공유 PostgreSQL/PostGIS 서버 인스턴스다. RustFS S3 API는
+PC 개발 환경에서 `kor-travel-docker-manager`가 띄우는 map 전용 PostgreSQL은
+host **`12700`**이다(2026-08-17, docker-manager ADR-37 — 프로젝트마다 전용
+instance이고 포트는 대역의 `x00`이다). **`5432`를 듣는 것은 없다.** RustFS S3 API는
 `12101`, console은 `12105`다. 공유 PostGIS만 쓰고 RustFS는 local로 띄우려면
 `KOR_TRAVEL_MAP_DB_EXTERNAL=true`를 사용한다. 공유 PostGIS/RustFS를 모두 쓰면
 `KOR_TRAVEL_MAP_INFRA_EXTERNAL=true`로 local infra 서비스를 띄우지 않는다.
@@ -113,15 +114,16 @@ Dagster metadata는 같은 Postgres container 안의 별도 DB `kor_travel_map_d
 ignored deployment env/vault에만 둔다. host network overlay는 같은 값을
 `KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL`로 요구한다.
 
-공유 DB 모드는 `kor-travel-docker-manager`가 이미 `kor-travel-geo-postgres:5432`를
-띄운 상태에서 사용한다. 이때 kor-travel-map compose는 local Postgres를 띄우지 않고,
+공유 DB 모드는 `kor-travel-docker-manager`가 이미 `kor-travel-map-postgres:12700`을
+띄운 상태에서 사용한다(옛 `kor-travel-geo-postgres:5432`가 아니다 — 그 컨테이너는
+이제 geo 전용이고 `12500`에서 loopback만 듣는다). 이때 kor-travel-map compose는 local Postgres를 띄우지 않고,
 local RustFS와 API/frontend/Dagster만 띄운다.
 
 ```bash
 KOR_TRAVEL_MAP_DB_EXTERNAL=true bash scripts/docker-up.sh
 ```
 
-공유 인프라 모드는 `kor-travel-docker-manager`가 이미 `kor-travel-geo-postgres:5432`와
+공유 인프라 모드는 `kor-travel-docker-manager`가 이미 `kor-travel-map-postgres:12700`과
 `tripmate-rustfs:12101`을 모두 띄운 상태에서 사용한다. 이때 kor-travel-map compose는 API,
 frontend, Dagster webserver/daemon만 띄운다.
 
@@ -133,12 +135,17 @@ KOR_TRAVEL_MAP_INFRA_EXTERNAL=true bash scripts/docker-up.sh
 자동 실행하지 않는다. 운영자가 dedicated `kor_travel_map` DB에 위 NOLOGIN/LOGIN 역할,
 ownership transfer와 runtime DSN을 사전 provision해야 한다. 공유 Postgres에는
 `kor_travel_map`과 `kor_travel_map_dagster` DB가 미리 있어야 한다.
-공유 DB host 포트는 `KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT`로 override하며,
-기본값은 `5432`다. 이 값은 standalone local Postgres publish 포트인
-`KOR_TRAVEL_MAP_POSTGRES_HOST_PORT`와 분리되어 있다.
+공유 DB의 host 포트를 정하는 **별도 변수는 없다.** external overlay는 포트를 조합하지
+않고 아래 완성된 DSN을 그대로 주입하므로, 포트는 각 DSN 문자열 안에 있다(prod 기준
+`127.0.0.1:12700`). standalone local Postgres publish 포트
+`KOR_TRAVEL_MAP_POSTGRES_HOST_PORT`(기본 `5432`)는 이 경로와 무관하다.
+
+> 2026-08-17에 `KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT`를 제거했다. 이 변수는
+> `load-env.sh`가 export하고 문서 3곳이 "override한다"고 설명했지만 **읽는 곳이
+> 하나도 없었다** — 값을 바꿔도 접속 대상은 그대로였다. 죽은 포트를 가리키는 것보다
+> 효과 없는 손잡이가 더 나쁘다.
 
 ```bash
-KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT=5432
 KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN=<ignored API runtime DSN>
 KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN=<ignored Dagster runtime DSN>
 KOR_TRAVEL_MAP_MIGRATOR_PG_DSN=<ignored migrator DSN>
@@ -330,7 +337,7 @@ PR #931):
   (`KOR_TRAVEL_MAP_MIGRATION_RETRIES`, 기본 30회)가 처리한다.
 - `KOR_TRAVEL_MAP_MIGRATION_MODE`는 존재하지 않는다 — 설정돼 있으면 기동을 거부한다. `dagster-db-init`는 `kor_travel_map_dagster` DB 존재를 보장한다. `dagster`는
 Dagster webserver, `dagster-daemon`은 schedule/sensor daemon이다. `rustfs-init`는
-`kor-travel-map`과 `kor-travel-map-uploads` bucket을 생성한다. host `5432` 공유 DB를 쓰려면
+`kor-travel-map`과 `kor-travel-map-uploads` bucket을 생성한다. host `12700` 공유 DB를 쓰려면
 `KOR_TRAVEL_MAP_DB_EXTERNAL=true` 또는 `KOR_TRAVEL_MAP_INFRA_EXTERNAL=true` 모드로
 local Postgres를 띄우지 않는다.
 

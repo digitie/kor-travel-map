@@ -34,8 +34,11 @@
 - [x] T-VN-35/34/36-deploy — **`0104` prod cutover**
 
   1,008,852 feature를 보존한 in-place migration(1시간 32분 39초) 뒤 api/ui/dagster/daemon
-  4개 런타임이 healthy 상태로 전환됐다. post-deploy baseline dump와 manifest를 남겼으며,
-  현행 공유 PostgreSQL에서 전용 인스턴스로의 향후 이전은 별도 Docker Manager 작업이다.
+  4개 런타임이 healthy 상태로 전환됐다. post-deploy baseline dump와 manifest를 남겼다.
+  여기서 남겨뒀던 "공유 PostgreSQL에서 전용 인스턴스로의 이전"은 **2026-08-17에
+  완료**됐다 — prod PostgreSQL을 프로젝트별 전용 instance 4개로 나눴고(geo `12500` ·
+  concierge `12600` · **map `12700`** · pinvi `12800`, 전부 loopback) `5432`를 듣는 것은
+  이제 없다. 근거는 docker-manager **ADR-37**, 경과는 `docs/resume.md` 2026-08-17 항목.
 
 ## 2026-08-12 — T-VN-38 weather·price current summary 병합
 

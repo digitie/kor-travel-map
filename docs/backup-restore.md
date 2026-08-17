@@ -28,6 +28,34 @@ docker compose stop api frontend dagster dagster-daemon rustfs
 `postgres`는 멈추지 않는다. RustFS는 멈춘 뒤 같은 named volume을
 `rustfs-perms` service로 읽어 tar archive를 만든다.
 
+> ⚠️ **이 스크립트는 n150 prod에 쓸 수 없다.** prod는 저장소 standalone stack이 아니라
+> `kor-travel-docker-manager`가 띄우는 **프로젝트별 전용 PostgreSQL**에서 돈다
+> (2026-08-17, docker-manager ADR-37). 서비스명이 `postgres`가 아니고 포트도 다르다.
+>
+> | | standalone | n150 prod |
+> |---|---|---|
+> | 서비스/컨테이너 | `postgres` | `kor-travel-map-postgres` |
+> | 포트 | `5432` | **`12700`** (loopback 전용) |
+> | 대상 DB | `kor_travel_map`, `_dagster` | 같음 |
+>
+> prod 백업은 컨테이너 안에서 포트를 명시해 직접 뜬다. **`-p`를 빠뜨리면 컨테이너
+> 기본값(5432)을 찾아 실패한다** — host network라 소켓도 그 포트에 없다.
+>
+> ```bash
+> docker exec kor-travel-map-postgres \
+>   pg_dump -h 127.0.0.1 -p 12700 -U kor_travel_map -d kor_travel_map \
+>   -Fc --compress=6 -f /tmp/map.dump
+> docker cp kor-travel-map-postgres:/tmp/map.dump <대상>/
+> ```
+>
+> 산출물은 `~/backups/kor-travel-map/`에 `<날짜>-<태그>.dump` + `.sha256` +
+> `.manifest`(alembic head와 주요 row count)로 둔다 — 기존 관례 그대로다. 권한은
+> `600`이다(`docs/external-apis.md` §1.1 — dump는 DB 전체를 담는다).
+>
+> **다른 세 인스턴스도 각자 백업 주체가 필요하다**(geo `12500` 33GB · concierge
+> `12600` · pinvi `12800`). 그 셋은 이 저장소 소관이 아니므로 docker-manager 쪽에
+> 절차를 둔다 — 현재 미비이고 별건이다.
+
 ## 2. 백업 실행
 
 Admin UI `/admin/backups` 또는 `POST /v1/admin/backups`의 `execute=true` command로
@@ -167,8 +195,14 @@ KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL:-postgresq
 안 보인다. 안 고치면 dagster가 계속 **옛 DB에 run을 기록해** 두 DB가 조용히 갈라진다.
 
 ```bash
-# `.env`가 아니라 compose가 resolve한 값에서 옛 포트를 찾는다
-docker compose config | grep -E 'PG_DSN|PG_URL' | grep ':5432/'
+# `.env`가 아니라 compose가 resolve한 값에서 **현재 쓰는 포트가 아닌 것**을 찾는다.
+# 찾을 포트를 고정하지 마라 — 2026-08-17에 map이 12703에서 12700으로 옮겼고, 그때
+# 이 명령이 `:5432/`만 보고 있어서 12703 잔여 7건을 통째로 놓쳤다(항상 초록이었다).
+docker compose config \
+  | grep -oE 'postgres[^ ]*://[^ ]+' \
+  | grep -oE ':[0-9]{4,5}/[a-z_]+' | sort -u
+# 나온 포트가 전부 현재 배치(geo 12500 / concierge 12600 / map 12700 / pinvi 12800)인지
+# 눈으로 확인한다. 하나라도 다르면 그 DSN이 죽은 포트를 가리킨다.
 ```
 
 ### 왜 카탈로그 비교로는 ③④가 안 잡혔나

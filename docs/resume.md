@@ -1,5 +1,41 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-17 — prod DB를 프로젝트별 전용 인스턴스 4개로 분리 (12x00 대역)
+
+n150 prod의 PostgreSQL을 넷으로 나누고 포트를 각 대역의 `x00`으로 맞췄다.
+**`5432`를 듣는 것은 이제 없다.**
+
+    geo        5432  -> 12500   (33GB, 제자리 — 포트만)
+    concierge  (신규)   12600   (79MB 이관, 28테이블 39,515행 일치)
+    map       12703  -> 12700   (제자리 — 포트만)
+    pinvi      (신규)   12800   (11MB 이관, 52테이블·265인덱스 일치)
+
+**왜 DB만 나누는 것으로 부족했나.** role·ACL·확장은 DB가 아니라 cluster 전역이다.
+08-15에 map을 전용 인스턴스로 뺀 뒤에도 통합 인스턴스에 `ktm_` 역할 7개가 남았고
+map migrator 자격증명으로 `kor_travel_geo`(33GB)에 실제로 접속됐다. 근거는
+docker-manager **ADR-37**(이번에 신설 — 그전까지 4분할에는 ADR이 없었다).
+
+geo 33GB는 옮기지 않았다. 통합 인스턴스가 이미 그 데이터를 갖고 있으므로 얹혀 있던
+것만 빼내고 포트를 바꿨다 — 총 이동량 692MB.
+
+**적대 리뷰가 P1 9건을 찾았고 전부 반영했다.** 특히 세 가지가 실질적이었다.
+
+- `c6c_deployment.py`가 12703을 하드코딩해 **다음 sanctioned 배포를 fail-close로
+  막고 있었다.** 테스트 픽스처도 12703이라 테스트는 초록이면서 prod가 막히는 상태.
+- `.env.example`가 옛 포트 그대로였다. 이번 사고의 원인이 `.env` override인데 그
+  `.env`를 만드는 템플릿을 안 고쳤으니 다음 사람이 같은 사고를 재현할 상태였다.
+- geo만 `listen_addresses=*`로 LAN에 열려 있었고, `kor_travel_map`·`krtour_map`·
+  `pinvi` login role이 `kor_travel_geo`에 CONNECT+USAGE를 가진 채 남아 있었다.
+  지금은 넷 다 loopback이고 geo에는 자기 superuser `addr`만 있다.
+
+### 다음 한 작업
+
+PR 2건 머지 — kor-travel-map [#985](https://github.com/digitie/kor-travel-map/pull/985)
+(문서), kor-travel-docker-manager
+[#176](https://github.com/digitie/kor-travel-docker-manager/pull/176)(compose·ADR-37).
+그 뒤 남은 것은 **geo·concierge·pinvi 인스턴스의 백업 주체**다 — map만 절차가 있고
+나머지 셋은 없다(docker-manager 소관, `docs/backup-restore.md` §1 참조).
+
 ## 2026-08-17 — 완료된 Wave 2 task 이력 아카이브 정리
 
 `T-VN-34`·`T-VN-35/34/36-deploy`·`T-VN-36`과 격리 clone 인수는 2026-08-13
@@ -9,6 +45,7 @@ prod cutover로 완료돼 [`tasks-done.md`](tasks-done.md)로 이관했다. `tas
 
 **다음 한 작업**: 기존과 같이 T-VN-40 canonical import/backfill 실운영 인수와
 paired receipt complete를 진행한다.
+
 
 ## 2026-08-16 — T-VN-40 구현·연동 소비자 병합 완료
 
@@ -266,6 +303,9 @@ PinVi legacy curated detail snapshot도 canonical `curation_item_id` 기반 proj
 401이다(마이그레이션 이전에도 0이었다). 그 다음이 전용 PostgreSQL 이행
 (docker-manager #172)이고, 그건 **데이터 이동이 선행**돼야 한다 — 저장소 형상은
 DSN이 `:12703`을 가리키는 전제인데 prod 데이터는 공유 `:5432`에 있다.
+
+> 이 문단은 **2026-08-17 항목(맨 위)이 대체했다.** 전용 인스턴스 이행은 끝났고
+> map의 포트는 `12703`이 아니라 **`12700`**이며 `5432`를 듣는 것은 없다.
 
 배포에서 배운 것 둘:
 

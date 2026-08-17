@@ -24,7 +24,7 @@
 | 시스템 | 역할 | 로컬 고정 포트 | 근거 |
 |---|---|---|---|
 | **kor-travel-map** | feature 정본 owner — 공공 API+후보 정규화·dedup·PostGIS 조회 (독립 Docker, ADR-045) | API **12701** · admin UI 12705 · Dagster 12702 · rustfs 12101/12105 · postgres — **standalone 5432 / n150 prod 12700**(아래 ⚠️) | ADR-047 |
-| **PinVi** | 사용자 여행 계획/협업/공유 서비스 — feature **consumer** | api **9021** · web 9022 | PinVi README |
+| **PinVi** | 사용자 여행 계획/협업/공유 서비스 — feature **consumer** | n150: postgres **12800** · api **12801** · dagster 12802 · web 12805 (PinVi 저장소 자체 기본값은 api 9021 · web 9022) | PinVi README, ADR-047 |
 | **kor-travel-concierge** | YouTube 콘텐츠 → 장소 후보 추출/검수 — feature 후보 **provider**. 현 코드/provider 이름은 `kor-travel-concierge` 계열 | API **12601** · MCP 12602 · web 12605 | kor-travel-concierge `.env.example` / `docs/feature-export-api.md` |
 | **kor-travel-docker-manager** | 공용 인프라 일괄 관리(docker-compose+Web UI) — **프로젝트별 PostGIS 4개**·RustFS·관측 스택 소유 | PostGIS **12500·12600·12700·12800**(아래 ⚠️) · RustFS S3 **12101**/console 12105 · Grafana 12205 · cAdvisor 12301 · Prometheus 12401 | kor-travel-docker-manager README, ADR-052 amendment, docker-manager ADR-35 |
 | (보조) kor-travel-geo | geocoding REST v2 정본. 현 API/env 표기는 kor-travel-geo 계열 | **12501** | ADR-046/047 |
@@ -34,7 +34,7 @@
 >
 > | 포트 | 컨테이너 | 담는 것 | listen |
 > |---|---|---|---|
-> | **12500** | `kor-travel-geo-postgres` | `kor_travel_geo`(33GB) · `_dagster` | `0.0.0.0` |
+> | **12500** | `kor-travel-geo-postgres` | `kor_travel_geo`(33GB) · `_dagster` | `127.0.0.1` |
 > | **12600** | `kor-travel-concierge-postgres` | `kor_travel_concierge` | `127.0.0.1` |
 > | **12700** | `kor-travel-map-postgres` | `kor_travel_map` · `_dagster` | `127.0.0.1` |
 > | **12800** | `pinvi-postgres` | `pinvi` | `127.0.0.1` |
