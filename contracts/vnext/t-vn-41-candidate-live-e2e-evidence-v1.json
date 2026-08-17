@@ -1,0 +1,30 @@
+{
+  "schema": "t-vn-41-candidate-live-e2e-evidence-v1",
+  "candidate_compatible_pair_attestation_sha256": "7782c8ea9a9962ac794c4de96802d7a0897735064498e9f59c27a756449f9ca6",
+  "initial_blocked_stream": {
+    "restore_epoch": 1,
+    "snapshot_id": "8a51ed00-b203-4c71-9684-ad2f4959c181",
+    "snapshot_count": 1,
+    "snapshot_merkle_root": "1bee4bcead16e60aa1100b2b2e515995900ad539757fac5d2add4386545578da",
+    "dead_event_id": "8808ae2f-dec9-4584-b3cf-1d16de9469e9",
+    "pending_relay_count": 1
+  },
+  "final_ready_stream": {
+    "restore_epoch": 1,
+    "snapshot_id": "a021d6d0-3edd-45af-a60a-a03113fda071",
+    "snapshot_count": 1,
+    "snapshot_merkle_root": "1bee4bcead16e60aa1100b2b2e515995900ad539757fac5d2add4386545578da",
+    "backlog_count": 0,
+    "dead_count": 0,
+    "state": "ready"
+  },
+  "playwright": {
+    "spec": "cache-target-streams-isolated.live.spec.ts",
+    "browser": "chromium",
+    "workers": 1,
+    "retries": 0,
+    "result": "passed",
+    "bff_only": true,
+    "browser_service_token_exposure": "absent"
+  }
+}

@@ -50,7 +50,7 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-08-13 T-VN-36 — receipt가 리베이스로 폐기된 커밋(c1fa5a4d)과 그때의
     # spec sha를 가리키고 있었다. 현재 head로 재핀했다.
     "consumer-rollout-v1.json": (
-        "0c8691e90135cfa35cbf1e51238beb12f9821e92e6696a6e16d170afc681136e"
+        "36b71954f27490403454c21cba65703dd8a222a91a7e7b003d0e6c8596453656"
     ),
     "violation-fixtures-v1.sql": (
         "84cca48b776387e4b6fd00b702e40b3412c9731f6abcdd250a5c126c2ea155d8"
@@ -146,6 +146,7 @@ def test_frozen_artifacts_have_no_crlf() -> None:
         assert b"\r\n" not in (_CONTRACTS / name).read_bytes(), (
             f"{name} contains CRLF — frozen artifact는 LF bytes로만 저장해야 한다"
         )
+
 
 def test_openapi_diff_baseline_matches_current_specs() -> None:
     diff = _load_json("openapi-diff-v1.json")
@@ -297,8 +298,7 @@ def test_consumer_rollout_shape() -> None:
             "verification",
         }
         assert dict(PAIR_RUNTIME_IMAGE_FIELDS) == {
-            role: active_field
-            for role, (active_field, _) in _C7_ROLE_RECEIPT_FIELDS.items()
+            role: active_field for role, (active_field, _) in _C7_ROLE_RECEIPT_FIELDS.items()
         }
         if paired_receipt["state"] == "candidate_verified":
             prefix = "candidate_"
@@ -321,8 +321,7 @@ def test_consumer_rollout_shape() -> None:
                 f"{prefix}live_e2e_evidence_sha256",
             }
         image_keys = {
-            f"{prefix}{receipt_field}"
-            for _, receipt_field in _C7_ROLE_RECEIPT_FIELDS.values()
+            f"{prefix}{receipt_field}" for _, receipt_field in _C7_ROLE_RECEIPT_FIELDS.values()
         }
         assert len(image_keys) == len(PAIR_RUNTIME_IMAGE_FIELDS)
         assert set(paired_receipt) == required_keys | state_keys | image_keys
@@ -437,6 +436,129 @@ def test_active_pinvi_receipt_describes_current_consumed_specs() -> None:
         assert entry["fenced_by"].startswith("T-VN-")
         assert isinstance(entry["object"], str)
         assert entry["object"]
+
+
+def test_tvn41_candidate_receipt_binds_immutable_live_evidence() -> None:
+    """T-VN-41 후보 receipt가 실행한 archive·image·UI 증적을 직접 가리킨다.
+
+    receipt의 digest를 모양만 검증하면 서로 무관한 임의 문자열을 넣어
+    ``candidate_verified``를 선언할 수 있다. 세 JSON의 raw bytes와 receipt를 함께
+    고정해, source pair·C7 5-image 역할·blocked→ready UI 회복 증적이 한 후보임을
+    CI에서 fail-closed로 확인한다.
+    """
+
+    rollout = _load_json("consumer-rollout-v1.json")
+    receipt = rollout["tasks"]["T-VN-41"]["pinvi_snapshot_receipt"]
+    assert receipt["state"] == "candidate_verified"
+
+    manifest_path = _CONTRACTS / "t-vn-41-candidate-manifest-v1.json"
+    attestation_path = _CONTRACTS / "t-vn-41-candidate-attestation-v1.json"
+    evidence_path = _CONTRACTS / "t-vn-41-candidate-live-e2e-evidence-v1.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    attestation = json.loads(attestation_path.read_text(encoding="utf-8"))
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+
+    manifest_sha256 = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    attestation_sha256 = hashlib.sha256(attestation_path.read_bytes()).hexdigest()
+    evidence_sha256 = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+    assert receipt["candidate_compatible_pair_manifest_sha256"] == manifest_sha256
+    assert receipt["candidate_compatible_pair_attestation_sha256"] == attestation_sha256
+    assert receipt["candidate_live_e2e_evidence_sha256"] == evidence_sha256
+
+    assert set(manifest) == {
+        "schema",
+        "map_commit",
+        "pinvi_commit",
+        "map_service_openapi_sha256",
+        "pinvi_service_vendor_sha256",
+        "runtime_images",
+    }
+    assert manifest["schema"] == "t-vn-41-compatible-pair-candidate-manifest-v1"
+    assert manifest["map_commit"] == receipt["candidate_map_commit"]
+    assert manifest["pinvi_commit"] == receipt["candidate_pinvi_commit"]
+    assert manifest["map_service_openapi_sha256"] == receipt["map_service_openapi_sha256"]
+    assert manifest["pinvi_service_vendor_sha256"] == receipt["pinvi_service_vendor_sha256"]
+
+    expected_images = {
+        role: receipt[f"candidate_{receipt_field}"]
+        for role, (_, receipt_field) in _C7_ROLE_RECEIPT_FIELDS.items()
+    }
+    assert dict(PAIR_RUNTIME_IMAGE_FIELDS) == {
+        role: active_field for role, (active_field, _) in _C7_ROLE_RECEIPT_FIELDS.items()
+    }
+    assert manifest["runtime_images"] == expected_images
+
+    assert set(attestation) == {
+        "schema",
+        "manifest_sha256",
+        "map_application_schema_head",
+        "pinvi_application_schema_head",
+        "runtime_image_revisions",
+        "runtime_images",
+        "candidate_boundary",
+    }
+    assert attestation["schema"] == "t-vn-41-compatible-pair-candidate-attestation-v1"
+    assert attestation["manifest_sha256"] == manifest_sha256
+    assert attestation["runtime_images"] == expected_images
+    assert attestation["runtime_image_revisions"] == {
+        role: (
+            receipt["candidate_pinvi_commit"]
+            if role == "pinvi_api"
+            else receipt["candidate_map_commit"]
+        )
+        for role, _ in PAIR_RUNTIME_IMAGE_FIELDS
+    }
+    assert attestation["map_application_schema_head"]
+    assert attestation["pinvi_application_schema_head"]
+    assert "final main C7" in attestation["candidate_boundary"]
+    assert "production consumer enable" in attestation["candidate_boundary"]
+
+    assert set(evidence) == {
+        "schema",
+        "candidate_compatible_pair_attestation_sha256",
+        "initial_blocked_stream",
+        "final_ready_stream",
+        "playwright",
+    }
+    assert evidence["schema"] == "t-vn-41-candidate-live-e2e-evidence-v1"
+    assert evidence["candidate_compatible_pair_attestation_sha256"] == attestation_sha256
+    initial = evidence["initial_blocked_stream"]
+    final = evidence["final_ready_stream"]
+    assert set(initial) == {
+        "restore_epoch",
+        "snapshot_id",
+        "snapshot_count",
+        "snapshot_merkle_root",
+        "dead_event_id",
+        "pending_relay_count",
+    }
+    assert set(final) == {
+        "restore_epoch",
+        "snapshot_id",
+        "snapshot_count",
+        "snapshot_merkle_root",
+        "backlog_count",
+        "dead_count",
+        "state",
+    }
+    assert initial["restore_epoch"] == final["restore_epoch"]
+    assert initial["snapshot_count"] == final["snapshot_count"] == 1
+    assert initial["snapshot_merkle_root"] == final["snapshot_merkle_root"]
+    assert re.fullmatch(r"[0-9a-f-]{36}", initial["snapshot_id"])
+    assert re.fullmatch(r"[0-9a-f-]{36}", final["snapshot_id"])
+    assert re.fullmatch(r"[0-9a-f-]{36}", initial["dead_event_id"])
+    assert initial["pending_relay_count"] == 1
+    assert final["backlog_count"] == final["dead_count"] == 0
+    assert final["state"] == "ready"
+    assert evidence["playwright"] == {
+        "spec": "cache-target-streams-isolated.live.spec.ts",
+        "browser": "chromium",
+        "workers": 1,
+        "retries": 0,
+        "result": "passed",
+        "bff_only": True,
+        "browser_service_token_exposure": "absent",
+    }
 
 
 def test_recovery_preflight_shape() -> None:

@@ -1,0 +1,21 @@
+{
+  "schema": "t-vn-41-compatible-pair-candidate-attestation-v1",
+  "manifest_sha256": "788607441d7e4cb9800aa9c7ee857c91695546d27124d5a01b584bae8db47d0c",
+  "map_application_schema_head": "0221_tvn40_snapshot_text_bounds",
+  "pinvi_application_schema_head": "20260814_0059",
+  "runtime_image_revisions": {
+    "map_api": "b6685ceb558f41420028e9f1f2488117a73b3e00",
+    "map_ui": "b6685ceb558f41420028e9f1f2488117a73b3e00",
+    "map_dagster_web": "b6685ceb558f41420028e9f1f2488117a73b3e00",
+    "map_dagster_daemon": "b6685ceb558f41420028e9f1f2488117a73b3e00",
+    "pinvi_api": "21e2148cdd3fbfab0e2529616836d27e1246e11f"
+  },
+  "runtime_images": {
+    "map_api": "sha256:17678b96fc8113064b99a761c4c9b93c3e52a5cb252573e5ca5386e952907280",
+    "map_ui": "sha256:8b91a3eed9342d138463caac61157b468cdd8d22f7c5391fded568b373e38732",
+    "map_dagster_web": "sha256:6fce1e1e15eee622239bd2044b8c0140bdd987b5aa07d1bab196937692518ce5",
+    "map_dagster_daemon": "sha256:bffd327b48a9aec04823246eaa4db60efa26bdbe8e3e94be40b81f42c7125ce6",
+    "pinvi_api": "sha256:aeb8e51cb743e13c939667da076c9fcd0bf9904308a479d38a7c19caf1b57910"
+  },
+  "candidate_boundary": "n150 격리 Docker 후보이며 final main C7 또는 production consumer enable이 아니다."
+}

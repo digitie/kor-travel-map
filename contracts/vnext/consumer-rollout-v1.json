@@ -187,10 +187,25 @@
         "admin-detail": "no"
       },
       "pinvi_snapshot_receipt": {
-        "state": "pending",
+        "state": "candidate_verified",
         "map_service_openapi_sha256": "c6f9aba6ab4b815c394e5e1cb5fb4a2c3488d147d5bb1a7e21b92c1796f4aebd",
         "pinvi_service_vendor_sha256": "c6f9aba6ab4b815c394e5e1cb5fb4a2c3488d147d5bb1a7e21b92c1796f4aebd",
-        "blocking_reason": "PinVi service vendor 재vendor와 paired contract CI는 완료됐다. 두 적대 리뷰와 n150 isolated candidate Live UI E2E가 exact archive·immutable image·attestation 증거를 남길 때까지 candidate_verified나 consumer enable을 선언할 수 없다. 후보 증거 뒤에도 final main C7 attestation 전에는 complete를 선언할 수 없다."
+        "verification": [
+          "PinVi service vendor bytes are exact",
+          "n150 isolated candidate Map/PinVi Live UI E2E passed",
+          "candidate archive, immutable images, and attestation are exact"
+        ],
+        "candidate_map_commit": "b6685ceb558f41420028e9f1f2488117a73b3e00",
+        "candidate_pinvi_commit": "21e2148cdd3fbfab0e2529616836d27e1246e11f",
+        "candidate_compatible_pair_manifest_sha256": "788607441d7e4cb9800aa9c7ee857c91695546d27124d5a01b584bae8db47d0c",
+        "candidate_compatible_pair_attestation_sha256": "7782c8ea9a9962ac794c4de96802d7a0897735064498e9f59c27a756449f9ca6",
+        "candidate_live_e2e_evidence_sha256": "73286c7bc550ab1ecc588bafebdf56529ecf20b4f9573fc1da1c1163eac97688",
+        "candidate_map_api_image_id": "sha256:17678b96fc8113064b99a761c4c9b93c3e52a5cb252573e5ca5386e952907280",
+        "candidate_map_ui_image_id": "sha256:8b91a3eed9342d138463caac61157b468cdd8d22f7c5391fded568b373e38732",
+        "candidate_map_dagster_web_image_id": "sha256:6fce1e1e15eee622239bd2044b8c0140bdd987b5aa07d1bab196937692518ce5",
+        "candidate_map_dagster_daemon_image_id": "sha256:bffd327b48a9aec04823246eaa4db60efa26bdbe8e3e94be40b81f42c7125ce6",
+        "candidate_pinvi_api_image_id": "sha256:aeb8e51cb743e13c939667da076c9fcd0bf9904308a479d38a7c19caf1b57910",
+        "final_c7_required": true
       }
     },
     "T-VN-39": {
