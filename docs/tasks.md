@@ -19,10 +19,16 @@ barrier로 직렬화한다.
   - [~] `T-VN-H43` → [~] `T-VN-H44`(백업 정기화·복원 드릴 재개 조건)
   - [ ] `T-VN-H45-후속`(다건 provider fetcher·quota 관찰 확장)
   - [ ] `T-VN-H46C`(VWorld fallback 사슬 제거) ∥ [ ] `T-VN-H46D`(daemon 스키마 drift)
+  - [ ] `T-VN-H47`(prod 백업 산출물 위생 — #987) ∥ [ ] `T-VN-H48`(n150 임시 DB 컨테이너 — #988)
+  - [ ] `T-VN-H49`(4분할 인스턴스 백업 주체 — dm #177 추적)
 - **Lane B — frontend hardening·PinVi 소비 API**
   - [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox)
   - [~] `T-VN-41F1D-D` → [ ] `T-VN-41F1D-D2`(격리 리허설·data-dependent live UI E2E)
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환) ∥ [ ] `T-VN-41S`
+- **Lane C — 사문화 정리·미구현 dataset (다른 lane과 무관, 아무 때나)**
+  - [ ] `T-VN-C01`(H35 cutover helper 18개 파일 제거) — T-VN-40 legacy 삭제와 겹침
+  - [ ] `T-VN-C02`(T-229-buildx arm64 검증) ∥ [ ] `T-VN-C03`(ADR-034 보조 dataset 5종)
+  - [ ] `T-VN-C04`(문서 정합 — SPRINT 헤더·미개봉 브랜치)
 - **Wave 2 barrier 이후**
   - Lane A: [ ] `T-VN-37D`(notice empty range 표현 — 제품 결정 대기)
   - 32~38 join barrier 뒤 Lane B: [~] `T-VN-40A` → [~] `T-VN-40B` →
@@ -520,6 +526,111 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   저장소를 훑어 **무시되지 않는 비밀 후보 파일은 0건**이다(worktree 포인터가 끊겨
   git 자체가 안 도는 체크아웃이 여럿 있는데, 그런 곳은 애초에 커밋이 불가능하다).
   넣을 규칙은 `.env*` + `!.env.example` 한 쌍.
+
+## Lane A 상세 — 운영 위생 (2026-08-17 신설)
+
+> 2026-08-17 DB 4분할 작업에서 드러났고 **소유 task가 없던** 것들이다. 셋 다 이슈가
+> 정본이고 여기서는 실행 단위만 잡는다.
+
+### T-VN-H47 — prod DB dump 산출물 위생 (#987)
+
+- [ ] **권한 600 위반 9건** 정정. root 소유 3건은 소유자도 `digitie`로 맞춘다
+  (지금 `digitie`가 읽기만 되고 지우지도 못한다).
+- [ ] **0바이트 죽은 dump 2건** 삭제(`kor_travel_map_before_0039_*_010754`,
+  `..._010819`). 남아 있으면 "백업이 3개 있다"고 세게 만든다 — 복구가 필요한 순간에
+  세는 숫자가 틀리는 것이 제일 나쁘다.
+- [ ] **네 디렉터리 7.8GB 통합.** 정본은 `~/backups/kor-travel-map/` 하나다
+  (`docs/backup-restore.md`). `kor-travel-map-backups`·`ktm-db-backups`·
+  `kor-travel-backups` 3.5GB는 옮기거나 지운다. **`0104` 이전 스키마 dump는 지금
+  코드로 복원이 안 된다** — alembic chain을 거슬러 올라갈 수 없으므로 보관 가치가
+  낮다. 남긴다면 "복원 불가, 감사 목적"이라고 명시한다.
+- [ ] **재발 방지가 본론이다.** dump를 만드는 절차가 `pg_dump` 직후 `chmod 600`을
+  하도록 고친다. `docker cp`로 꺼내면 umask에 따라 644로 떨어지고, 이번 위반 대부분이
+  그 경로다.
+
+AC: 위 4개 + `docs/external-apis.md` §1.1이 요구하는 600을 실제 파일이 만족.
+
+### T-VN-H48 — n150 임시 DB 컨테이너 정리 (#988)
+
+- [ ] `ktm-tvn36-db`(:18736, 216M)·`ktm-tvn38-db`(:18732, 134M)와 볼륨 제거. 두 작업
+  모두 종료됐다(T-VN-36은 2026-08-13 prod cutover, T-VN-38은 #971 머지).
+- [ ] 이름 규약 — 일회성 DB 컨테이너에 `ktm-` 접두어를 쓰지 않는다. 이번 작업에서
+  `ktm-tvn36-db`를 prod DB로 착각해 **"runtime role의 write 권한 0개"라는 틀린 감사
+  결론**을 냈다(실제 94/84/82). `docs/journal.md` 2026-08-17 참조.
+- [ ] 검증용은 `--rm`을 기본으로. `restart=no`는 이미 맞지만 재부팅이 드물면 실질적인
+  수명 제한이 못 된다 — 실제로 9일을 버텼다.
+
+AC: 컨테이너·볼륨 0건 + 규약을 `docs/dev-environment.md`에 명문화.
+
+### T-VN-H49 — 4분할 인스턴스 백업 주체 (docker-manager #177 추적)
+
+소관은 docker-manager다. 이 저장소는 **의존만** 추적한다.
+
+- [ ] geo(`12500`, **33GB, 백업 0건**) · concierge(`12600`) · pinvi(`12800`)의 dump·
+  sha256·manifest·retention 결선. map만 절차가 있다.
+- [ ] 결선 후 `docs/backup-restore.md` §1의 "다른 세 인스턴스도 각자 백업 주체가
+  필요하다 — 현재 미비이고 별건이다" 경고를 갱신한다.
+
+AC: 세 인스턴스 각각의 최신 dump + sha256 + manifest가 존재하고 절차가 문서화됨.
+
+## Lane C 상세 — 사문화 정리·미구현 dataset (2026-08-17 신설)
+
+> 다른 lane과 barrier를 공유하지 않는다. 아무 때나 착수할 수 있다.
+
+### T-VN-C01 — 사문화된 H35 cutover helper 제거
+
+`tasks-done.md`가 "typed cutover helper는 **사문화됐다** … 제거/축소는 **후속 정리
+task로 잡는다**"고 적었는데 **그 task가 없었다.** main에 18개 파일이 그대로 있다.
+
+- `scripts/h35/` 6개 — `h35_build.py`, `h35_ctx.sh`, `h35_cutover.py`,
+  `h35_migrate.sh`, `h35_pin.sh`, `h35_verify.py`
+- `src/kortravelmap/cli/_h35_*.py` 6개 + `h35_cutover.py`
+- `tests/unit/test_h35_*.py` 4개
+- `docs/runbooks/h35-prod-migration-cutover.md`
+
+- [ ] **먼저 실측한다** — 어떤 파일이 아직 배포 경로에서 쓰이는지. `h35_migrate.sh`는
+  dagster 정지 절차로 인용된 이력이 있다. 안 보고 지우면 배포가 끊긴다.
+- [ ] `_h35_schema.py`가 아직 `curated_features`를 참조한다 — **T-VN-40의 legacy 물리
+  삭제와 같은 표면**이라 함께 처리하는 편이 낫다.
+- [ ] 남길 것은 "왜 남기는지"를 파일 상단에 적는다. 안 적으면 다음 사람이 같은 조사를
+  처음부터 다시 한다.
+
+AC: 제거 목록·근거가 removal manifest에 있고 `pytest -q`·`lint-imports` green.
+
+### T-VN-C02 — T-229-buildx arm64 multi-arch 배포 검증
+
+`docs/sprints/README.md`가 "본 저장소 잔여는 `T-229-buildx` 하나뿐"이라고 하는데
+tasks.md에 항목이 없었다. `tasks-done.md`는 `[x]`인데 본문은 "arm64 buildx만 잔여"다.
+
+- [ ] `GITHUB_TOKEN` 있는 환경에서 arm64 multi-arch buildx 배포 1회 검증.
+- [ ] 결과에 따라 `tasks-done.md`의 `[x]`를 정정하거나 잔여 문구를 제거한다.
+
+AC: arm64 이미지가 registry에 올라가고 n150/Odroid 중 arm64에서 기동 확인.
+
+### T-VN-C03 — ADR-034 보조 dataset 5종 미구현 + provider 표 drift
+
+`docs/architecture/provider-contract.md`가 다섯을 "**(계획 — 미구현)**"으로 둔다:
+`krforest_trails`(숲길/등산로 route), `krforest_mountain_weather`,
+`krforest_safety_notices`, `forest_fire_risk`, `khoa_coastal_notices`.
+
+- [ ] 착수 여부는 **제품 결정**이다. 하지 않기로 하면 문서에서 "계획"을 빼고 그렇게 적는다.
+- [ ] 그와 별개로 **표 drift는 지금 고친다** — `src/kortravelmap/providers/__init__.py`가
+  존재하지 않는 `krforest_weather`·`krforest_trails` 모듈을 나열한다(실제 파일은
+  `krforest.py` 하나). `docs/reports/full-consistency-audit-2026-06-16.md` R2-15가 이미
+  적발해 뒀다.
+
+AC: 표와 실제 모듈이 일치. dataset 구현은 결정에 따라 별도 task로 분기.
+
+### T-VN-C04 — 문서 정합 잔여
+
+- [ ] `docs/sprints/SPRINT-3.md` 헤더가 아직 `🔵 active`, `SPRINT-5.md`가 `🟢 진행 중`이고
+  이미 끝난 잔여(`T-RV-04b-opinet`, `T-212b/d/e`, `T-210`)를 나열한다. `README.md`는
+  각각 완료·`T-229-buildx`만이라 어긋난다.
+- [ ] 미개봉 브랜치 `origin/fix/npm-audit-js-yaml`(2026-08-07, 커밋 2개, PR 없음) 처리
+  결정 — npm high 게이트를 `--omit=dev`로 좁히는 변경이다. 머지하거나 브랜치를 지운다.
+- [ ] 덤으로 오래된 미머지 브랜치 40여 개 정리 판단.
+
+AC: 세 항목 처리 + `docs/sprints/README.md`와 각 SPRINT 헤더 일치.
 
 ## Lane B 상세 — b1 PinVi 결합·후속
 
