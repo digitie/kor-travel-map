@@ -70,7 +70,7 @@ artifact를 재생성했다. 두 적대적 재리뷰에서 Map DB/동시성 P0/P
 동일 service bytes를 재vendor했고 paired contract CI를 통과했다. T-VN-41 receipt는
 `pending → candidate_verified → complete`를 구분하며, 후보 증거는 final main C7을 대체하지 않는다.
 
-**다음 한 작업**: Map/PinVi 후보 commit·immutable image·attestation을 고정한 뒤 n150
+**다음 한 작업**: Map/PinVi 후보 commit·C7 runtime 다섯 immutable image·attestation을 고정한 뒤 n150
 isolated Live UI E2E를 실행한다. 성공 시 `candidate_verified` receipt와 evidence digest를
 같은 PR에 기록하고 CI를 다시 통과시킨다. 그 뒤 #975를 병합하고, #967은 #975 병합 뒤의
 `main` 위에서 재배치·동일 gate를 적용한다. final main C7은 별도 후속 gate다.

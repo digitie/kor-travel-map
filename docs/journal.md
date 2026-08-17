@@ -102,8 +102,9 @@
   SHA로 재생성했고 PinVi 수동 PUT의 409 설명도 좌표 conflict와 source protocol
   위반을 모두 명시했다. PinVi service vendor 재고정과 paired contract CI는 완료했으며,
   T-VN-41 receipt는 `pending → candidate_verified → complete`를 fail-closed로 구분한다.
-  n150 후보 검증은 exact archive·양 immutable image·attestation·evidence digest를 남겨도
-  final main C7 이전에는 `complete`/consumer enable을 선언할 수 없다.
+  n150 후보 검증은 exact archive·C7 runtime 다섯 immutable image·attestation·evidence digest를
+  남겨도 final main C7 이전에는 `complete`/consumer enable을 선언할 수 없다. candidate와
+  final receipt는 source commit·다섯 image·attestation/evidence digest를 별도 필드로 강제한다.
 
 ## 2026-08-17 — 완료된 Wave 2 task 이력 아카이브 정리
 
