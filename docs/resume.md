@@ -39,14 +39,14 @@ PR 2건 머지 — kor-travel-map [#985](https://github.com/digitie/kor-travel-m
 
 PR [#975](https://github.com/digitie/kor-travel-map/pull/975)의 stale refresh
 finalization fence와 queued cancellation outbox를 보완하고, 현재 `main` OpenAPI
-artifact를 재생성했다. 두 적대적 재리뷰에서 Map DB/동시성 P0/P1은 없었다. 그러나
-T-VN-41 receipt는 의도적으로 `pending`이다. Map service SHA와 PinVi의 vendored
-service SHA가 다르므로, 이를 완료로 기록하거나 live consumer를 열면 안 된다.
+artifact를 재생성했다. 두 적대적 재리뷰에서 Map DB/동시성 P0/P1은 없었다. PinVi #444는
+동일 service bytes를 재vendor했고 paired contract CI를 통과했다. T-VN-41 receipt는
+`pending → candidate_verified → complete`를 구분하며, 후보 증거는 final main C7을 대체하지 않는다.
 
-**다음 한 작업**: PinVi #444를 현재 Map service OpenAPI로 재vendor하고 paired contract
-CI와 두 저장소의 exact commit/vendor SHA receipt를 고정한다. 그 완료 후보만 n150
-isolated Live UI E2E에 배포·검증하고, 성공한 경우에만 #975를 병합한다. #967은 #975
-병합 뒤의 `main` 위에서 재배치·동일 gate를 적용한다.
+**다음 한 작업**: Map/PinVi 후보 commit·immutable image·attestation을 고정한 뒤 n150
+isolated Live UI E2E를 실행한다. 성공 시 `candidate_verified` receipt와 evidence digest를
+같은 PR에 기록하고 CI를 다시 통과시킨다. 그 뒤 #975를 병합하고, #967은 #975 병합 뒤의
+`main` 위에서 재배치·동일 gate를 적용한다. final main C7은 별도 후속 gate다.
 
 ## 2026-08-17 — 완료된 Wave 2 task 이력 아카이브 정리
 
