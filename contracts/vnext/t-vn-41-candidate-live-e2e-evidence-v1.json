@@ -1,22 +1,48 @@
 {
   "schema": "t-vn-41-candidate-live-e2e-evidence-v1",
-  "candidate_compatible_pair_attestation_sha256": "7782c8ea9a9962ac794c4de96802d7a0897735064498e9f59c27a756449f9ca6",
+  "candidate_compatible_pair_attestation_sha256": "ca99a15ce37722362b17fa1b291fba7c7141b87d912971e2a6bf8e418cf219be",
   "initial_blocked_stream": {
+    "external_system": "pinvi",
+    "consumer_id": "pinvi-cache-target-consumer",
     "restore_epoch": 1,
-    "snapshot_id": "8a51ed00-b203-4c71-9684-ad2f4959c181",
+    "state": "blocked",
+    "consumer_enabled": false,
+    "blocked_event_id": "835873b1-62c5-45f5-a758-a757810aadd7",
+    "snapshot_id": "b7ccc117-c3bd-4424-bde4-83e17e5e0fb9",
     "snapshot_count": 1,
-    "snapshot_merkle_root": "1bee4bcead16e60aa1100b2b2e515995900ad539757fac5d2add4386545578da",
-    "dead_event_id": "8808ae2f-dec9-4584-b3cf-1d16de9469e9",
-    "pending_relay_count": 1
+    "snapshot_merkle_root": "39b2e2309d34191fd552dfb46f6f51b0daf23df7f0f579b6a8d2d236aea73c79",
+    "dead_event_id": "835873b1-62c5-45f5-a758-a757810aadd7",
+    "delivery_counts": {
+      "pending": 1,
+      "leased": 0,
+      "retry": 0,
+      "dead": 1
+    }
   },
   "final_ready_stream": {
+    "external_system": "pinvi",
+    "consumer_id": "pinvi-cache-target-consumer",
     "restore_epoch": 1,
-    "snapshot_id": "a021d6d0-3edd-45af-a60a-a03113fda071",
+    "state": "ready",
+    "consumer_enabled": true,
+    "blocked_event_id": null,
+    "snapshot_id": "df4f508f-c79f-4032-8e51-4125138a3257",
     "snapshot_count": 1,
-    "snapshot_merkle_root": "1bee4bcead16e60aa1100b2b2e515995900ad539757fac5d2add4386545578da",
-    "backlog_count": 0,
-    "dead_count": 0,
-    "state": "ready"
+    "snapshot_merkle_root": "39b2e2309d34191fd552dfb46f6f51b0daf23df7f0f579b6a8d2d236aea73c79",
+    "delivery_counts": {
+      "pending": 0,
+      "leased": 0,
+      "retry": 0,
+      "dead": 0
+    },
+    "reconciliation": {
+      "request_id": "40f1d533-cdca-4811-b015-f2459ed0c477",
+      "status": "succeeded",
+      "snapshot_id": "df4f508f-c79f-4032-8e51-4125138a3257",
+      "restore_epoch": 1,
+      "snapshot_count": 1,
+      "snapshot_merkle_root": "39b2e2309d34191fd552dfb46f6f51b0daf23df7f0f579b6a8d2d236aea73c79"
+    }
   },
   "playwright": {
     "spec": "cache-target-streams-isolated.live.spec.ts",

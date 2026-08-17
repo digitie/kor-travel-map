@@ -1,14 +1,14 @@
 {
   "schema": "t-vn-41-compatible-pair-candidate-manifest-v1",
-  "map_commit": "b6685ceb558f41420028e9f1f2488117a73b3e00",
-  "pinvi_commit": "21e2148cdd3fbfab0e2529616836d27e1246e11f",
+  "map_commit": "77821001f2c430f4c7d1c2c8509fff990dd8ad08",
+  "pinvi_commit": "e8e0fecfcb2c75899a2b558afb9ab2056c68d987",
   "map_service_openapi_sha256": "c6f9aba6ab4b815c394e5e1cb5fb4a2c3488d147d5bb1a7e21b92c1796f4aebd",
   "pinvi_service_vendor_sha256": "c6f9aba6ab4b815c394e5e1cb5fb4a2c3488d147d5bb1a7e21b92c1796f4aebd",
   "runtime_images": {
-    "map_api": "sha256:17678b96fc8113064b99a761c4c9b93c3e52a5cb252573e5ca5386e952907280",
-    "map_ui": "sha256:8b91a3eed9342d138463caac61157b468cdd8d22f7c5391fded568b373e38732",
-    "map_dagster_web": "sha256:6fce1e1e15eee622239bd2044b8c0140bdd987b5aa07d1bab196937692518ce5",
-    "map_dagster_daemon": "sha256:bffd327b48a9aec04823246eaa4db60efa26bdbe8e3e94be40b81f42c7125ce6",
-    "pinvi_api": "sha256:aeb8e51cb743e13c939667da076c9fcd0bf9904308a479d38a7c19caf1b57910"
+    "map_api": "sha256:6a4cf793d191f30d9de3afb65e0bc114f6c72b3e5aa11af69204f32a44bd4b1f",
+    "map_ui": "sha256:b0bdd0c41fe49017c94e71c4f48cb1f9c09779964da74858d96da520420034f0",
+    "map_dagster_web": "sha256:2f7ac8ecb1552ab8e5cc05b6a11fce5bf9e3c1856d8823f5f1731adb6e354e99",
+    "map_dagster_daemon": "sha256:00082696d75057ba05ea62811a52956ea98915fe88de4eca0f829b80b795f3ce",
+    "pinvi_api": "sha256:9e8e2acb4993f35fa5c223162cf77e9c5d646fcbf7e0ff45550c7cc56f8c3445"
   }
 }

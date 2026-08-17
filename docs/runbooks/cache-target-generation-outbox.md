@@ -90,8 +90,10 @@ production DB에 직접 migration을 자동 적용하지 않는다. exact source
 6. target/link/refresh DB rollback 시 대응 outbox 0행.
 7. admin UI에서 backlog/dead/reconciliation 상태와 replay 결과 확인.
 
-evidence에는 Map/PinVi commit, image ID, migration head, snapshot ID/epoch/high-watermark/count/Merkle,
-fixture event ID만 남긴다. token, cookie, raw payload, 실데이터 screenshot과 trace는 종료 즉시 폐기한다.
+evidence에는 Map/PinVi commit, image ID, migration head, 같은 `external_system`·`consumer_id`의
+initial `blocked`/`blocked_event_id`·delivery count와 final `ready`/unblocked·consumer enable·모든
+비terminal delivery count `0`, reconciliation request의 terminal snapshot ID/epoch/count/Merkle를
+남긴다. token, cookie, raw payload, 실데이터 screenshot과 trace는 종료 즉시 폐기한다.
 
 ### 5.1 추적 가능한 Live UI 증거
 

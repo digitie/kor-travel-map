@@ -50,7 +50,7 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-08-13 T-VN-36 — receipt가 리베이스로 폐기된 커밋(c1fa5a4d)과 그때의
     # spec sha를 가리키고 있었다. 현재 head로 재핀했다.
     "consumer-rollout-v1.json": (
-        "36b71954f27490403454c21cba65703dd8a222a91a7e7b003d0e6c8596453656"
+        "346795d3fa42f0029745b39202b20af03c4ab09231bb95166ac65c84045c2444"
     ),
     "violation-fixtures-v1.sql": (
         "84cca48b776387e4b6fd00b702e40b3412c9731f6abcdd250a5c126c2ea155d8"
@@ -525,31 +525,67 @@ def test_tvn41_candidate_receipt_binds_immutable_live_evidence() -> None:
     initial = evidence["initial_blocked_stream"]
     final = evidence["final_ready_stream"]
     assert set(initial) == {
+        "external_system",
+        "consumer_id",
         "restore_epoch",
+        "state",
+        "consumer_enabled",
+        "blocked_event_id",
         "snapshot_id",
         "snapshot_count",
         "snapshot_merkle_root",
         "dead_event_id",
-        "pending_relay_count",
+        "delivery_counts",
     }
     assert set(final) == {
+        "external_system",
+        "consumer_id",
         "restore_epoch",
+        "state",
+        "consumer_enabled",
+        "blocked_event_id",
         "snapshot_id",
         "snapshot_count",
         "snapshot_merkle_root",
-        "backlog_count",
-        "dead_count",
-        "state",
+        "delivery_counts",
+        "reconciliation",
     }
+    assert initial["external_system"] == final["external_system"] == "pinvi"
+    assert initial["consumer_id"] == final["consumer_id"] == "pinvi-cache-target-consumer"
     assert initial["restore_epoch"] == final["restore_epoch"]
+    assert initial["state"] == "blocked"
+    assert initial["consumer_enabled"] is False
+    assert initial["blocked_event_id"] == initial["dead_event_id"]
     assert initial["snapshot_count"] == final["snapshot_count"] == 1
     assert initial["snapshot_merkle_root"] == final["snapshot_merkle_root"]
     assert re.fullmatch(r"[0-9a-f-]{36}", initial["snapshot_id"])
     assert re.fullmatch(r"[0-9a-f-]{36}", final["snapshot_id"])
     assert re.fullmatch(r"[0-9a-f-]{36}", initial["dead_event_id"])
-    assert initial["pending_relay_count"] == 1
-    assert final["backlog_count"] == final["dead_count"] == 0
+    assert initial["delivery_counts"] == {
+        "pending": 1,
+        "leased": 0,
+        "retry": 0,
+        "dead": 1,
+    }
     assert final["state"] == "ready"
+    assert final["consumer_enabled"] is True
+    assert final["blocked_event_id"] is None
+    assert final["delivery_counts"] == {
+        "pending": 0,
+        "leased": 0,
+        "retry": 0,
+        "dead": 0,
+    }
+    reconciliation = final["reconciliation"]
+    assert reconciliation == {
+        "request_id": reconciliation["request_id"],
+        "status": "succeeded",
+        "snapshot_id": final["snapshot_id"],
+        "restore_epoch": final["restore_epoch"],
+        "snapshot_count": final["snapshot_count"],
+        "snapshot_merkle_root": final["snapshot_merkle_root"],
+    }
+    assert re.fullmatch(r"[0-9a-f-]{36}", reconciliation["request_id"])
     assert evidence["playwright"] == {
         "spec": "cache-target-streams-isolated.live.spec.ts",
         "browser": "chromium",
