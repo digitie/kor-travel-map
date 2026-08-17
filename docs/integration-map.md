@@ -23,28 +23,34 @@
 
 | 시스템 | 역할 | 로컬 고정 포트 | 근거 |
 |---|---|---|---|
-| **kor-travel-map** | feature 정본 owner — 공공 API+후보 정규화·dedup·PostGIS 조회 (독립 Docker, ADR-045) | API **12701** · admin UI 12705 · Dagster 12702 · rustfs 12101/12105 · postgres — **standalone 5432 / n150 prod 12703**(아래 ⚠️) | ADR-047 |
+| **kor-travel-map** | feature 정본 owner — 공공 API+후보 정규화·dedup·PostGIS 조회 (독립 Docker, ADR-045) | API **12701** · admin UI 12705 · Dagster 12702 · rustfs 12101/12105 · postgres — **standalone 5432 / n150 prod 12700**(아래 ⚠️) | ADR-047 |
 | **PinVi** | 사용자 여행 계획/협업/공유 서비스 — feature **consumer** | api **9021** · web 9022 | PinVi README |
 | **kor-travel-concierge** | YouTube 콘텐츠 → 장소 후보 추출/검수 — feature 후보 **provider**. 현 코드/provider 이름은 `kor-travel-concierge` 계열 | API **12601** · MCP 12602 · web 12605 | kor-travel-concierge `.env.example` / `docs/feature-export-api.md` |
-| **kor-travel-docker-manager** | 공용 인프라 일괄 관리(docker-compose+Web UI) — 단일 PostGIS·RustFS·관측 스택 소유 | PostGIS **5432**(`kor-travel-geo-postgres`) · RustFS S3 **12101**/console 12105 · Grafana 12205 · cAdvisor 12301 · Prometheus 12401 | kor-travel-docker-manager README, ADR-052 amendment |
+| **kor-travel-docker-manager** | 공용 인프라 일괄 관리(docker-compose+Web UI) — **프로젝트별 PostGIS 4개**·RustFS·관측 스택 소유 | PostGIS **12500·12600·12700·12800**(아래 ⚠️) · RustFS S3 **12101**/console 12105 · Grafana 12205 · cAdvisor 12301 · Prometheus 12401 | kor-travel-docker-manager README, ADR-052 amendment, docker-manager ADR-35 |
 | (보조) kor-travel-geo | geocoding REST v2 정본. 현 API/env 표기는 kor-travel-geo 계열 | **12501** | ADR-046/047 |
 
-> ⚠️ **n150 prod의 PostgreSQL은 두 인스턴스다 (2026-08-16~).**
+> ⚠️ **n150 prod의 PostgreSQL은 프로젝트마다 전용 인스턴스다 (2026-08-17~). 통합
+> 인스턴스는 없다.**
 >
 > | 포트 | 컨테이너 | 담는 것 | listen |
 > |---|---|---|---|
-> | **12703** | `kor-travel-map-postgres` | `kor_travel_map`, `kor_travel_map_dagster` | `127.0.0.1` 전용 |
-> | **5432** | `kor-travel-geo-postgres` | `kor_travel_geo`, concierge, pinvi 등 | `0.0.0.0` |
+> | **12500** | `kor-travel-geo-postgres` | `kor_travel_geo`(33GB) · `_dagster` | `0.0.0.0` |
+> | **12600** | `kor-travel-concierge-postgres` | `kor_travel_concierge` | `127.0.0.1` |
+> | **12700** | `kor-travel-map-postgres` | `kor_travel_map` · `_dagster` | `127.0.0.1` |
+> | **12800** | `pinvi-postgres` | `pinvi` | `127.0.0.1` |
 >
-> map은 원래 5432의 공유 인스턴스를 썼고 2026-08-15 커토버로 전용 인스턴스(#46)로
-> 옮겼다. **prod에서 `5432`로 붙으면 오류 없이 geo 인스턴스에 연결된다** — 이름이
-> 같은 DB가 거기 남아 있어(롤백용) 조회도 성공하고, 다만 **낡은 데이터**를 본다.
-> 2026-08-15에 실제로 그 함정에 빠져 잘못된 DB를 정본으로 보고 "runtime 역할이 쓰기
-> 권한 0"이라는 틀린 결론을 냈다.
+> **`5432`를 듣는 것은 이제 없다.** 옛 문서를 보고 그리로 붙으면 연결 자체가
+> 실패한다. 각 프로젝트 대역의 `x00`이 그 프로젝트의 DB다(ADR-047 대역 규칙).
 >
-> `docker exec <컨테이너> psql`에도 같은 함정이 있다. 두 인스턴스 모두
-> `network_mode: host`라 **`-p`를 안 주면 5432(geo)로 간다.** map을 보려면 반드시
-> `psql -h 127.0.0.1 -p 12703`.
+> **왜 DB만 나누는 것으로 부족했나** — `role`·ACL·확장은 DB가 아니라 **cluster
+> 전역**이다. 2026-08-15에 map을 전용 인스턴스로 뺀 뒤에도 통합 인스턴스에 `ktm_`
+> 역할 7개가 남아 있었고, map migrator 자격증명으로 `kor_travel_geo`에 실제로
+> 접속됐다(`CONNECTED as ktm_feature_migrator`). 그것이 docker-manager ADR-35가 map을
+> 분리한 근거이고, 같은 근거가 concierge·pinvi에도 적용돼 2026-08-17에 넷으로 나눴다.
+>
+> ⚠️ `docker exec <컨테이너> psql`에 **반드시 `-p`를 준다.** 전부
+> `network_mode: host`라 포트를 생략하면 컨테이너 기본값(5432)을 찾아 실패한다.
+> 예: `psql -h 127.0.0.1 -p 12700 -U kor_travel_map -d kor_travel_map`.
 >
 > 잔여물 주의 — `ktm-tvn36-db`(:18736) / `ktm-tvn38-db`(:18732)에도 같은 이름의 DB가
 > 있지만 `features`가 1행인 껍데기다. 정본이 아니다.
@@ -67,7 +73,7 @@
                           [PinVi web :9022]          — 사용자 제안 승인 반영, ADR-051;
                                                        ops: canonical datasets/pipeline)
 
-[kor-travel-docker-manager] ═══ 인프라 계층(별도 데이터 흐름 없음): PostGIS(5432)·RustFS(12101) 구동/관리
+[kor-travel-docker-manager] ═══ 인프라 계층(별도 데이터 흐름 없음): PostGIS 4개(125/126/127/128 대역의 x00)·RustFS(12101) 구동/관리
 [kor-travel-docker-manager Prometheus :12401] ┄┄(목표: Authorization Bearer metrics token으로
        12701 scrape — ADR-066 T-VN-02. 현재 docker-manager prometheus.yml에
        12701 job 없음, 배포 시 인증과 함께 신규 추가)┄▶ [kor-travel-map :12701/metrics]

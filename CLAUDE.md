@@ -36,12 +36,11 @@ identity table은 `AGENTS.md` §식별자가 정본이다.
   여기 박지 않는다, DA-D-01 drift 회피). 고정 기준값만 아래 둔다.
 - **고정 포트(ADR-047)**: API `12701` · admin UI `12705` · Dagster `12702` ·
   Postgres host `5432` · RustFS S3 `12101`/console `12105`.
-  ⚠️ **Postgres `5432`는 저장소 standalone 스택 기준이다.** n150 prod의 map DB는
-  2026-08-16부터 **전용 인스턴스 `127.0.0.1:12703`**(`kor-travel-map-postgres`,
-  loopback 전용)이고, `5432`는 **kor-travel-geo의 인스턴스**다. prod에서 `5432`로
-  붙으면 오류 없이 **다른 DB에 연결된다** — 이 함정에 실제로 빠져 잘못된 DB를
-  정본으로 보고 결론을 낸 적이 있다(2026-08-15). 자세히는
-  `docs/integration-map.md`.
+  ⚠️ **Postgres `5432`는 저장소 standalone 스택 기준이다.** n150 prod는 2026-08-17에
+  DB를 **프로젝트별 전용 인스턴스**로 나눴고 포트는 각 대역의 `x00`이다 —
+  geo `12500` · concierge `12600` · **map `12700`** · pinvi `12800`.
+  **prod에 `5432`를 듣는 것은 이제 없다.** map DB는
+  `psql -h 127.0.0.1 -p 12700`으로만 닿는다. 자세히는 `docs/integration-map.md`.
 - **geocoding 정본**: kor-travel-geo REST v2 `POST /v2/{reverse,geocode}`, 로컬 기본
   `http://127.0.0.1:12501`(ADR-046/047).
 - **frontend 정본**: Next.js 16 + React 19 + `maplibre-gl` + in-repo VWorld style
