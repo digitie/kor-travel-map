@@ -1,7 +1,7 @@
 {
   "artifact": "target-schema-fingerprints-v1",
   "owner": "T-VN-31A",
-  "description": "target-schema-v1.sql과 그 직후의 tvn33-reference-ownership-v1.sql을 빈 PostGIS DB(x_extension 확장 사전 생성)에 적용한 뒤 7 카테고리 catalog 질의(정본: tests/integration/test_vnext_target_freeze.py의 _CATALOG_QUERIES. 원래 출처 src/kortravelmap/cli/_h35_catalog.py는 T-VN-C01에서 퇴역했고 그때 이 사본이 유일한 실행 가능 정의가 됐다)로 산출한 category별 canonical SHA-256이다. tests/integration/test_vnext_target_freeze.py가 실제 적용 직후 재계산해 drift를 fail-close한다. 2026-08-13 T-VN-40 재동결은 retained catalog·canonical collection/item revision과 immutable reconcile/generation/candidate/transition/cutover mapping relation을 최종형으로 추가하고 legacy 최소형 candidate를 제거했다. 아래 두 source SHA와 7축 fingerprint는 해당 실행 가능한 SQL을 clean PostGIS 16에서 실측한 값이다.",
+  "description": "target-schema-v1.sql과 그 직후의 tvn33-reference-ownership-v1.sql을 빈 PostGIS DB(x_extension 확장 사전 생성)에 적용한 뒤 H35 7 카테고리 catalog 질의(출처: src/kortravelmap/cli/_h35_catalog.py — schema-qualified relation 목록으로 적응)로 산출한 category별 canonical SHA-256이다. tests/integration/test_vnext_target_freeze.py가 실제 적용 직후 재계산해 drift를 fail-close한다. 2026-08-13 T-VN-40 재동결은 retained catalog·canonical collection/item revision과 immutable reconcile/generation/candidate/transition/cutover mapping relation을 최종형으로 추가하고 legacy 최소형 candidate를 제거했다. 아래 두 source SHA와 7축 fingerprint는 해당 실행 가능한 SQL을 clean PostGIS 16에서 실측한 값이다.",
   "environment": "postgis/postgis:16-3.5-alpine (PostgreSQL 16 / PostGIS 3.5)",
   "target_schema_sql_sha256": "11fb6a2ec85d87ca7e32bb63155ede380ced6ebce46e3ebe6c8b34e9cfb756f4",
   "tvn33_reference_ownership_sql_sha256": "2e72796b373691b4d6e10f71eceec4504df94af1a2582edbf445fb2390f20b6b",

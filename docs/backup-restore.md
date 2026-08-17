@@ -46,11 +46,24 @@ docker compose stop api frontend dagster dagster-daemon rustfs
 >   pg_dump -h 127.0.0.1 -p 12700 -U kor_travel_map -d kor_travel_map \
 >   -Fc --compress=6 -f /tmp/map.dump
 > docker cp kor-travel-map-postgres:/tmp/map.dump <대상>/
+> chmod 600 <대상>/map.dump     # ← 잊지 마라
 > ```
 >
-> 산출물은 `~/backups/kor-travel-map/`에 `<날짜>-<태그>.dump` + `.sha256` +
-> `.manifest`(alembic head와 주요 row count)로 둔다 — 기존 관례 그대로다. 권한은
-> `600`이다(`docs/external-apis.md` §1.1 — dump는 DB 전체를 담는다).
+> 산출물은 `~/backups/kor-travel-map/`에 `<날짜>-<태그>.dump` + `<날짜>-<태그>.dump.sha256`
+> + `<날짜>-<태그>.manifest`(alembic head와 주요 row count)로 둔다.
+>
+> ⚠️ **`chmod 600`을 절차에 넣어라.** `docker cp`는 umask에 따라 **644로 떨군다** —
+> 2026-08-17에 발견한 권한 위반 9건 중 대부분이 그 경로였다. dump는 DB 전체를
+> 담으므로(`ops.public_api_keys` 포함) 644면 호스트의 어떤 로컬 사용자든 읽고 복원해
+> 전부 본다(`docs/external-apis.md` §1.1).
+>
+> ⚠️ **sha256 파일명은 `<dump 파일명>.sha256`으로 통일한다.** `<태그>.sha256`(dump
+> 확장자 없이)으로 두면 한쪽 형식을 가정한 검사가 다른 쪽을 **조용히 건너뛴다** —
+> 실제로 그렇게 섞여 있어서 점검이 멀쩡한 파일을 "sha256 없음"으로 넘겼다.
+>
+> ⚠️ **manifest에 포트를 적었으면 포트가 바뀔 때 같이 고쳐라.** map manifest가 죽은
+> `12703`을 가리키고 있었다. 고칠 때 `port_corrected=` 같은 이력 줄을 남긴다 —
+> 조용히 고치면 다음 사람이 그 값을 못 믿는다.
 >
 > **다른 세 인스턴스도 각자 백업 주체가 필요하다**(geo `12500` 33GB · concierge
 > `12600` · pinvi `12800`). 그 셋은 이 저장소 소관이 아니므로 docker-manager 쪽에

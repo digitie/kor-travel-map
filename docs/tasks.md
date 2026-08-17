@@ -17,9 +17,9 @@ barrier로 직렬화한다.
 - **Lane A — cross-repo 계약·운영·데이터 품질**
   - [~] `T-VN-H25B` → [ ] `T-VN-H34`(공식 curation 미연결 membership 잔여 AC)
   - [~] `T-VN-H43` → [~] `T-VN-H44`(백업 정기화·복원 드릴 재개 조건)
-  - [ ] `T-VN-H45-후속`(다건 provider fetcher·quota 관찰 확장)
+  - [~] `T-VN-H45-후속`(②quota 오분류·④coalesce 완료 / ①khoa·③RetryBudget·⑤alembic 잔여)
   - [~] `T-VN-H46C`(preflight 의미 검증 — 호출 결선 잔여) ∥ [ ] `T-VN-H46D`(daemon 스키마 drift)
-  - [ ] `T-VN-H47`(prod 백업 산출물 위생 — #987) ∥ [ ] `T-VN-H48`(n150 임시 DB 컨테이너 — #988)
+  - [x] `T-VN-H47`(#987 종료) ∥ [x] `T-VN-H48`(#988 종료) — prod 정리 + 재발 방지 문서화 완료
   - [ ] `T-VN-H49`(4분할 인스턴스 백업 주체 — dm #177 추적)
 - **Lane B — frontend hardening·PinVi 소비 API**
   - [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox)
@@ -27,8 +27,8 @@ barrier로 직렬화한다.
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환) ∥ [ ] `T-VN-41S`
 - **Lane C — 사문화 정리·미구현 dataset (다른 lane과 무관, 아무 때나)**
   - [x] `T-VN-C01`(H35 cutover helper 퇴역, 2026-08-18) — 17파일 삭제, identity 정의는 `core/database_identity.py`로 이전
-  - [ ] `T-VN-C02`(T-229-buildx arm64 검증) ∥ [ ] `T-VN-C03`(ADR-034 보조 dataset 5종)
-  - [ ] `T-VN-C04`(문서 정합 — SPRINT 헤더·미개봉 브랜치)
+  - [~] `T-VN-C02`(arm64 — registry 자격증명 필요, 정적 점검만 완료) ∥ [~] `T-VN-C03`(표 drift 완료 / dataset 5종은 제품 결정)
+  - [x] `T-VN-C04`(SPRINT 헤더 정정 + 원격 브랜치 382개 정리, 2026-08-18)
 - **Wave 2 barrier 이후**
   - Lane A: [ ] `T-VN-37D`(notice empty range 표현 — 제품 결정 대기)
   - 32~38 join barrier 뒤 Lane B: [~] `T-VN-40A` → [~] `T-VN-40B` →
@@ -430,11 +430,28 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
 - [ ] T-VN-H45-후속 — **다건 provider 호출·quota 관찰 확장**
 
-  완료한 KMA/airkorea 강건화(`T-VN-H45`)의 후속으로 ① khoa 등 다건 루프 fetcher 확대,
-  ② python-kma-api resultCode 22 quota `retryable=True` 오분류와 200-body XML envelope
-  parse 경로, ③ RetryBudget 비례화/settings 노출 및 `_LOGGER` `python_logs` 결선,
-  ④ KMA 4종+airkorea schedule `coalesce_active_runs=True`, ⑤ alembic 1.19 적응을
-  실측 우선순위로 분리한다.
+  완료한 KMA/airkorea 강건화(`T-VN-H45`)의 후속 5축.
+
+  - [ ] ① khoa 등 다건 루프 fetcher 확대
+  - [x] ② **python-kma-api resultCode 22 오분류 수정(2026-08-18)** —
+    [digitie/python-kma-api `fix/result-code-22-not-retryable`](https://github.com/digitie/python-kma-api/tree/fix/result-code-22-not-retryable).
+    `22`는 data.go.kr 일일 한도 초과이고 그 한도는 **자정에 리셋**된다. `retryable` 축은
+    같은 파일이 auth(20/30/31)=False · server(04/99)=True로 정한 대로 "**즉시 재시도가
+    성공할 만한가**"이지 "언젠가 성공할 수 있는가"가 아니다. `True`면 호출자가 성공할
+    수 없는 것에 retry budget을 태운다.
+    - **테스트가 왜 못 잡았나**: `test_result_codes_raise_typed_exceptions`가 `12`와 `22`를
+      한 묶음으로 돌리면서 `failure_kind`도 `retryable`도 단언하지 않았다(provider·endpoint만).
+      `22`를 분리해 셋 다 단언하도록 고쳤다.
+    - 200-body XML envelope parse 경로는 **미확인 잔여**다.
+  - [ ] ③ RetryBudget 비례화/settings 노출 및 `_LOGGER`↔`python_logs` 결선
+  - [x] ④ **KMA 5종 + airkorea schedule에 `coalesce_active_runs=True`(2026-08-18)** —
+    같은 job의 미종료 run이 있으면 tick을 건너뛴다.
+    - ⚠️ **혼자 켜면 안 된다.** 상한이 없으면 hung run 하나가 그 스케줄을 **영구
+      차단**하고, 증상이 "스케줄이 조용하다"로 나타나 고장처럼 안 보인다. 기존에
+      coalesce를 쓰는 유일한 스케줄(`feature_notice_krex_traffic_notices`)이
+      `max_runtime_seconds`와 짝인 이유다. 6개 모두 상한이 **없었으므로** 둘을 함께 넣었다
+      (`_FRESHNESS_RUN_MAX_RUNTIME_SECONDS` = 7,200초, `MAX_RUNTIME_SECONDS_TAG`로 강제).
+  - [ ] ⑤ alembic 1.19 적응
 
 - [~] T-VN-H43 — **prod 백업 체계 수립 (정기 dump·sha256·보존·rollback 기준선)**
 
@@ -686,6 +703,21 @@ golden vector 테스트를 동반했다. 이름의 `h35` 접두는 **wire 상수
 
 ### T-VN-C02 — T-229-buildx arm64 multi-arch 배포 검증
 
+**정적 점검 완료(2026-08-18), 실행은 막힘.**
+
+- Dockerfile에 **아키텍처 하드코딩 0건**(`amd64`/`x86_64`/`aarch64`/`--platform` 없음).
+- `scripts/docker-buildx.sh`의 `PLATFORMS` 기본값이 이미 `linux/amd64,linux/arm64`다.
+- 남은 위험은 **바이너리 휠**이다 — `asyncpg` · `psycopg[binary,pool]` · `shapely` ·
+  `geopandas`. 넷 다 manylinux aarch64 휠을 내지만, 그건 빌드해 봐야 확정된다.
+- **실행이 막힌 이유**: ghcr.io push에 `GITHUB_TOKEN`이 필요하고, registry에 이미지를
+  올리는 것은 외부로 나가는 동작이라 임의로 하지 않는다.
+
+```bash
+# 자격증명이 있는 환경에서 1회:
+KOR_TRAVEL_MAP_DOCKER_PLATFORMS=linux/arm64 bash scripts/docker-buildx.sh
+# 볼 것: 위 4개 패키지가 소스 빌드로 떨어지지 않는지(떨어지면 빌드가 매우 길어지거나 실패)
+```
+
 `docs/sprints/README.md`가 "본 저장소 잔여는 `T-229-buildx` 하나뿐"이라고 하는데
 tasks.md에 항목이 없었다. `tasks-done.md`는 `[x]`인데 본문은 "arm64 buildx만 잔여"다.
 
@@ -895,3 +927,33 @@ AC: 세 항목 처리 + `docs/sprints/README.md`와 각 SPRINT 헤더 일치.
 후보는 `mv_feature_cluster_counts`이며, exact-viewport와 region-total 의미 차이를
 시범 PR에서 먼저 결정해야 한다. 도입 시 `REFRESH MATERIALIZED VIEW CONCURRENTLY`용
 `UNIQUE` 인덱스와 batch gate 연결을 함께 설계한다.
+
+### T-VN-H34 잔여 — "없는 것은 Feature로 추가" (2026-08-18 조사)
+
+사용자 지시: 재연결 대상이 없던 3건을 **Feature로 추가**하라. 조사 결과 **지금 바로는
+못 한다** — 그 경로가 저장소에 없다.
+
+**실측.** 세 항목은 prod에 **축제(event)로만** 존재하고 장소 자체는 어떤 provider
+dataset에도 없다(kind·lifecycle·publication 무관 전수 검색).
+
+| 항목 | prod에 있는 것 |
+|---|---|
+| 태화강 국가정원 | `태화강 국가정원 봄꽃축제`·`태화강 대숲 납량축제` 등 event 6건 + 주차장 6건 |
+| 반디랜드&태권도원 | **0건**(place/event/area 어디에도 없다) |
+| 청풍호 | `제30회 제천청풍호벚꽃축제` event 1건 + 호수 시설(전망대·케이블카) |
+
+**왜 못 만드나.** `Feature`는 provider ETL이 만드는 것이 계약이다. 큐레이션이 Feature를
+만드는 경로는 없고, `T-VN-40`의 write model도 **기존 public Feature에 링크**만 한다
+(`docs/reports/t-vn-40-…-plan-2026-08-11.md:161` — "public Feature만 반환").
+
+만들려면 새 표면이 필요하다:
+
+- **새 `source_type`**(예: `curation_manual`) — `make_feature_id`의 입력이라 ID 체계에 들어간다
+- **writer 경로와 소유권** — 누가 갱신하나? provider가 나중에 그 실체를 발행하면 dedup은?
+- **lifecycle** — 3축(`lifecycle_state`/`publication_state`/`quality_state`)을 누가 정하나
+- **T-VN-40과 충돌** — 그 릴리스가 지금 curation write model을 바꾸는 중이고, 사용자가
+  이번 PR에서 **제외**하라고 한 범위다
+
+- [ ] **결정 필요**: (A) T-VN-40 인수 후 그 위에 `curation_manual` source를 얹는다
+  (B) 지금 별도 ADR로 설계한다 (C) 축제 event에 링크한다(장소가 아니라 부정확) —
+  현재는 해제 상태로 두고 이 항목이 추적한다.
