@@ -41,12 +41,20 @@ dump는 말할 것도 없이 DB 전체(발급 키 해시 포함)다.
 전부 놓친다.
 
 ```bash
-# 평문 DSN을 담은 파일을 권한과 함께 센다
-for f in <대상들>; do
-  n=$(grep -cE '://[^:/@ ]+:[^@ ]{8,}@' "$f" 2>/dev/null || echo 0)
-  [ "$n" != 0 ] && printf '%s %s (자격증명 %s건)\n' "$(stat -c %a "$f")" "$f" "$n"
-done
+# 대상을 **열거**한다. 목록을 미리 알아야 하면 그게 곧 이름 기반이다.
+# 길이 조건도 두지 마라 — 이 표가 근거로 든 `addr:addr`은 비밀번호가 4자라
+# `{8,}`로는 안 잡힌다. 돌려도 pinvi만 나오고 나머지가 초록으로 보인다.
+find . -type f \\( -name '.env*' -o -name '*.yml' -o -name '*.yaml' \\
+                 -o -name '*.dump' -o -name '*.bak*' -o -name '*.backup*' \\) \\
+     -not -path './.git/*' -not -path './node_modules/*' -print0 \\
+| while IFS= read -r -d '' f; do
+    n=$(grep -acE '://[^:/@ ]+:[^@ ]+@' "$f" 2>/dev/null) || n=0
+    [ "$n" -gt 0 ] && printf '%s %s (자격증명 %s건)\n' "$(stat -c %a "$f")" "$f" "$n"
+  done
 ```
+
+권한이 `600`이 아닌 줄이 나오면 그게 위반이다(`.env.example` 같은 tracked 예시는
+예외로 **명시해** 뺀다 — 조용히 빠지는 예외를 만들지 않는다).
 
 ## 2. 환경변수 카탈로그
 

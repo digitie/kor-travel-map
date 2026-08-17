@@ -1,6 +1,7 @@
 # 외부(공유) 인프라 모드 오버레이 (ADR-052 amendment).
 #
-# kor-travel-docker-manager가 소유한 공유 PostGIS(:5432)와 RustFS(S3 :12101)를 사용할 때
+# kor-travel-docker-manager가 소유한 map 전용 PostgreSQL(`kor-travel-map-postgres`,
+# **:12700** — `5432`가 아니다, docker-manager ADR-37)과 RustFS(S3 :12101)를 쓸 때
 # kor-travel-map compose의 local postgres/rustfs 계열을 시작하지 않는다.
 # 적용:
 #

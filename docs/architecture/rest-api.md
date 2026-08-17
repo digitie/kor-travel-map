@@ -99,10 +99,14 @@ debug 표면은 origin이 허용 목록에 있어도 CORS를 광고하지 않는
 ## 1. 공통 규약 (전 엔드포인트)
 
 ### 1.1 Base URL · 포트 (ADR-047)
-- API `http://127.0.0.1:12701`(admin UI `12705`, Dagster `12702`; PC 개발 host
-  `5432`는 docker-manager가 구동하는 공유 PostgreSQL/PostGIS **인스턴스/컨테이너**이나,
-  kor-travel-map은 그 안의 **소유 독립 DATABASE `kor_travel_map`**을 쓴다(공유 DB 아님, ADR-045);
-  RustFS `12101`/`12105`). `TRIPMATE_KOR_TRAVEL_MAP_API_BASE_URL`은 host root까지만 포함하고,
+- API `http://127.0.0.1:12701`(admin UI `12705`, Dagster `12702`; RustFS `12101`/`12105`).
+  DB는 docker-manager가 띄우는 **map 전용 PostgreSQL 인스턴스** `kor-travel-map-postgres`
+  (host **`12700`**, loopback 전용) 안의 `kor_travel_map` DATABASE다.
+  ⚠️ 2026-08-17(docker-manager ADR-37)에 **"공유 인스턴스 안의 독립 DATABASE"라는 구조
+  자체가 폐기됐다** — role·ACL·확장이 database가 아니라 cluster 전역이라 database만
+  나누는 것으로는 principal이 격리되지 않기 때문이다. 지금은 프로젝트마다 instance가
+  따로이고(geo `12500` · concierge `12600` · map `12700` · pinvi `12800`) **`5432`를
+  듣는 것은 없다**. consumer는 이 포트를 자기 설정에 박지 말고 주입받은 DSN을 쓴다. `TRIPMATE_KOR_TRAVEL_MAP_API_BASE_URL`은 host root까지만 포함하고,
   모든 REST path가 `/v1` prefix를 명시한다(예: base `http://127.0.0.1:12701` +
   path `/v1/features/search`). base와 path 양쪽에 `/v1`를 중복 삽입하지 않는다.
 

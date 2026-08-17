@@ -1,7 +1,16 @@
 # 외부(공유) DB 모드 오버레이.
 #
-# PC 개발 환경의 host 5432는 kor-travel-docker-manager/kor-travel-geo가 소유한
-# 공유 PostGIS 서버 인스턴스다. 이 모드는 kor-travel-map local Postgres만 띄우지 않고,
+# 붙을 대상은 `kor-travel-docker-manager`가 띄우는 **map 전용** PostgreSQL,
+# `kor-travel-map-postgres`(host **12700**, loopback 전용)다.
+#
+# ⚠️ `5432`도 `kor-travel-geo-postgres`도 아니다. 2026-08-17(docker-manager ADR-37)에
+#    PostgreSQL이 프로젝트별 전용 instance로 나뉘었다 — geo는 `12500`의 geo 전용이고
+#    `5432`를 듣는 것은 없다. 옛 문서를 보고 5432로 붙으면 연결 자체가 실패한다.
+#
+# 포트를 정하는 별도 변수는 없다. 이 overlay는 포트를 조합하지 않고 아래
+# `..._PG_DSN`을 그대로 주입하므로 포트는 각 DSN 문자열 안에 있다.
+#
+# 이 모드는 kor-travel-map local Postgres만 띄우지 않고,
 # RustFS는 kor-travel-map compose의 local 서비스를 계속 사용한다.
 # 적용:
 #

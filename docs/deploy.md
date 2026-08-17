@@ -251,8 +251,9 @@ route, backup, CORS, metrics 설정은 API 전용 파일에만 둔다. 이 파�
 덮이므로 Compose opt-in 근거가 아니다. Docker Manager가 소유하는 승인된 production 형상은
 canonical API service에 literal `true`를 주입한 뒤 raw/resolved/runtime 검증으로 이를 증명한다.
 라이브 조작의 actor는 admin BFF 인증 principal로 별도 감사된다.
-PC 개발 환경에서 host `5432`는 `kor-travel-docker-manager`가 소유한
-공유 PostgreSQL/PostGIS 서버 인스턴스다. `scripts/load-env.sh`는 bootstrap owner로
+`kor-travel-docker-manager`가 띄우는 map 전용 PostgreSQL은 host **`12700`**이다
+(`5432`가 아니다 — 위 §서비스 대역표와 §공유 인프라 경고 참조).
+`scripts/load-env.sh`는 bootstrap owner로
 `KOR_TRAVEL_MAP_PG_DSN`을 합성하지 않는다. API/Dagster runtime, Alembic migrator,
 Dagster metadata DSN은 각각 ignored deployment env 또는 vault에 명시해야 하며 누락한
 Compose 기동은 fail-closed 한다. 외부 DB/infra overlay는 ownership bootstrap을 자동 실행하지
@@ -327,7 +328,9 @@ localhost에만 열린다. API, Dagster, RustFS console처럼 코드 인증이 �
 ## 이관된 결정 (구 ADR)
 
 - 로컬/개발/compose 기본 포트는 API `12701` · Dagster `12702` · admin UI `12705` ·
-  Postgres host `5432`(container도 `5432`, standalone publish 기본값 `15432`) ·
+  Postgres host `5432`(이 저장소 standalone compose 한정 — container도 `5432`이고
+  `KOR_TRAVEL_MAP_POSTGRES_HOST_PORT` 기본값이 그 값이다. **docker-manager가 띄우는
+  prod/공유 인스턴스는 `12700`이다**) ·
   의존 대상 kor-travel-geo `12501`/`12505`로 고정한다 — 외부 OpenAPI 경계, Windows
   Playwright, WSL 서버, Docker compose가 같은 주소를 바라보게 하기 위함이다(구 ADR-047,
   위 §서비스에서 결정). 추가로 `scripts/stop-fixed-ports.sh`가 기동 전 `12701`/`12705`/
