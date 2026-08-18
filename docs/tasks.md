@@ -947,6 +947,13 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
   - [ ] n150 격리 DB에서 migration → 수동 GC → schedule ON → 다음 tick 순서로 검증하고,
     GC 처리량이 유입률을 상회하며 remaining backlog가 0인지 증명한다. referenced snapshot 증가율과
     보존 임계치 alert도 함께 확인한다.
+  - [ ] (#975 적대 재리뷰 P2, 후속) relay 종결성 보강 — (a) run 중 source generation 변경으로 실패할 때
+    stale generation tuple에도 `failed` status event를 내는 것이 안전하다(`_append_result_event`는
+    generation을 검사하지 않음) → 억제 대신 emit; (b) running member의 operator cancel 전이
+    (`_TRANSITION_JOB_MEMBER_SQL`)에도 queued 경로처럼 savepoint-guarded status event append.
+    (c) 실패/취소 append의 violation 삼킴은 epoch precheck(또는 typed reason)로 gate해 향후
+    `_append_result_event`에 검사가 추가돼도 조용히 삼키지 않게. (d) 통합 suite 순서 의존
+    (`test_cache_target_stream_repo` commit 잔여 → `test_feature_update_repo`)은 main부터의 기존 문제.
   - [~] Map/PinVi exact head로 n150 isolated live UI recovery와 최종 prod gate를 통과한다.
     후보 Live UI recovery와 `blocked → ready` stream/replay/reconciliation 결박은 통과했다. 최종 prod
     gate는 별도 final main C7·production consumer enable 경계이며, PinVi system별 snapshot concurrency 1,
