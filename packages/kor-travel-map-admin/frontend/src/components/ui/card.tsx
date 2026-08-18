@@ -1,7 +1,14 @@
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Card — 패널 표면의 유일한 chrome(design.md §Spacing·shape·size §Depth).
+ * rest = hairline(`border-border`) + `rounded-panel`, 그림자 없음, hover 상승 없음(M8/C3).
+ * 실제로 클릭되는 카드만 `data-interactive` opt-in: hover 배경 + focus-visible outline.
+ * Card 안에 Card/SectionCard/bordered box를 넣지 않는다 — containment은 region당 1층.
+ */
 function Card({
   className,
   size = "default",
@@ -12,7 +19,8 @@ function Card({
       data-slot="card"
       data-size={size}
       className={cn(
-        "group/card flex flex-col gap-5 overflow-hidden rounded-2xl bg-card p-6 text-[14px] leading-normal text-card-foreground shadow-[var(--shadow-card)] ring-1 ring-border/70 transition-shadow has-data-[slot=card-footer]:pb-0 hover:shadow-[var(--shadow-card-hover)] has-[>img:first-child]:pt-0 data-[size=sm]:gap-4 data-[size=sm]:p-5 data-[size=sm]:has-data-[slot=card-footer]:pb-0 *:[img:first-child]:rounded-t-2xl *:[img:last-child]:rounded-b-2xl",
+        "group/card flex flex-col gap-4 rounded-panel border border-border bg-card p-6 text-sm text-text-primary has-data-[slot=card-footer]:pb-0 has-[>img:first-child]:pt-0 data-[size=sm]:gap-3 data-[size=sm]:p-4 data-[size=sm]:has-data-[slot=card-footer]:pb-0 *:[img:first-child]:rounded-t-panel *:[img:last-child]:rounded-b-panel",
+        "data-interactive:cursor-pointer data-interactive:transition-colors data-interactive:outline-none data-interactive:hover:bg-surface-subtle data-interactive:focus-visible:outline-2 data-interactive:focus-visible:outline-offset-2 data-interactive:focus-visible:outline-focus data-interactive:active:bg-surface-muted",
         className
       )}
       {...props}
@@ -20,12 +28,17 @@ function Card({
   )
 }
 
+/**
+ * 제목 행. `border-b`를 주면 카드 패딩 밖까지 뻗는 hairline이 아래에 그어진다
+ * (SectionCard가 이 형태를 쓴다 — 제목 밴드 + flat body).
+ */
 function CardHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="card-header"
       className={cn(
-        "group/card-header @container/card-header grid auto-rows-min items-start gap-1.5 rounded-t-2xl group-data-[size=sm]/card:gap-1 has-data-[slot=card-action]:grid-cols-[1fr_auto] has-data-[slot=card-description]:grid-rows-[auto_auto] [.border-b]:pb-5 group-data-[size=sm]/card:[.border-b]:pb-4",
+        "group/card-header @container/card-header grid auto-rows-min items-start gap-1 has-data-[slot=card-action]:grid-cols-[1fr_auto] has-data-[slot=card-description]:grid-rows-[auto_auto] group-data-[size=sm]/card:gap-0.5",
+        "[.border-b]:-mx-6 [.border-b]:border-border [.border-b]:px-6 [.border-b]:pb-4 group-data-[size=sm]/card:[.border-b]:-mx-4 group-data-[size=sm]/card:[.border-b]:px-4 group-data-[size=sm]/card:[.border-b]:pb-3",
         className
       )}
       {...props}
@@ -45,7 +58,7 @@ function CardTitle({
       data-slot="card-title"
       role={role}
       className={cn(
-        "font-heading text-[18px] leading-snug font-bold text-text-primary group-data-[size=sm]/card:text-[14px]",
+        "text-md leading-snug font-semibold text-text-primary group-data-[size=sm]/card:text-sm",
         className
       )}
       {...props}
@@ -57,7 +70,7 @@ function CardDescription({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="card-description"
-      className={cn("text-[13px] leading-normal text-text-secondary", className)}
+      className={cn("text-xs text-text-secondary", className)}
       {...props}
     />
   )
@@ -68,7 +81,7 @@ function CardAction({ className, ...props }: React.ComponentProps<"div">) {
     <div
       data-slot="card-action"
       className={cn(
-        "col-start-2 row-span-2 row-start-1 self-start justify-self-end text-icon-default [&_svg:not([class*='size-'])]:size-5",
+        "col-start-2 row-span-2 row-start-1 flex items-center gap-2 self-start justify-self-end text-icon-default",
         className
       )}
       {...props}
@@ -86,12 +99,13 @@ function CardContent({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
+/** 카드 하단 행 — hairline 위에 flat(틴트 밴드 없음). 저장 행/요약 행에 쓴다. */
 function CardFooter({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="card-footer"
       className={cn(
-        "-mx-6 -mb-6 mt-1 flex items-center rounded-b-2xl border-t border-surface-muted bg-surface-subtle px-6 py-4 group-data-[size=sm]/card:-mx-5 group-data-[size=sm]/card:-mb-5 group-data-[size=sm]/card:px-5 group-data-[size=sm]/card:py-3",
+        "-mx-6 -mb-6 mt-1 flex flex-wrap items-center gap-2 rounded-b-panel border-t border-border px-6 py-3 group-data-[size=sm]/card:-mx-4 group-data-[size=sm]/card:-mb-4 group-data-[size=sm]/card:px-4 group-data-[size=sm]/card:py-3",
         className
       )}
       {...props}

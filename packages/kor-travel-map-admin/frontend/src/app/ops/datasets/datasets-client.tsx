@@ -1,4 +1,5 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (list + detail pane) · design-system: design.md · designed-as-app
 
 import { useQueryClient } from "@tanstack/react-query";
 import { type CellContext, type ColumnDef } from "@tanstack/react-table";
@@ -52,19 +53,32 @@ import {
 } from "@/api/datasets";
 import { useOpsLiveInvalidation, type OpsLiveTopic } from "@/api/live";
 import { AdminShell } from "@/components/admin-shell";
+import { DetailList } from "@/components/detail-list";
+import { EmptyState } from "@/components/empty-state";
 import { FilterBar, FilterField } from "@/components/filter-bar";
-import { StatusBadge } from "@/components/status-badge";
+import { JsonViewer } from "@/components/json-viewer";
+import { LevelBadge, LiveBadge, StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { DataTable } from "@/components/ui/data-table";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { DataTable, type DataTableColumnMeta } from "@/components/ui/data-table";
 import { FormField, FormSelect } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { formatCount, formatDateTime, shortId } from "@/lib/format";
+import { NULL_GLYPH, formatCount, formatDateTime, shortId } from "@/lib/format";
+import { statusLabel } from "@/lib/status-label";
+import { cn } from "@/lib/utils";
 import { integerString, ordered, validateForm } from "@/lib/form-validation";
 
 import {
@@ -92,6 +106,12 @@ import {
 
 const PANELS = ["history", "policy", "preview"] as const;
 type DrawerPanel = (typeof PANELS)[number];
+
+/** drawer 안 소제목 — 12px/600 normal case(m3). */
+const SUBHEADING_CLASS = "text-xs font-semibold text-text-primary";
+/** 인라인 링크 — prose link recipe(brand, hover 밑줄) + 단일 focus 레시피. */
+const INLINE_LINK_CLASS =
+  "link rounded-control outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
 function panelValue(value: string | null): DrawerPanel {
   return PANELS.includes(value as DrawerPanel)
@@ -211,7 +231,7 @@ function DatasetDetailToggleCell({
       aria-expanded={active}
       aria-pressed={active}
       id={`dataset-detail-toggle-${rowKey(row.original)}`}
-      size="icon"
+      size="icon-sm"
       type="button"
       variant={active ? "secondary" : "ghost"}
       onClick={(event) => {
@@ -238,13 +258,15 @@ const FRESHNESS_LABELS: Record<OpsDatasetFreshness["state"], string> = {
   unknown: "알 수 없음",
 };
 
-function freshnessVariant(
-  state: OpsDatasetFreshness["state"],
-): "outline" | "warning" | "destructive" | "secondary" {
-  if (state === "overdue") return "warning";
-  if (state === "disabled") return "secondary";
-  if (state === "unknown") return "secondary";
-  return "outline";
+/** freshness 상태 배지 — 라벨은 서버 state 사전, 톤은 tone 테이블(never_run/disabled/unknown → neutral,
+ *  fresh → success, overdue → warning). */
+function FreshnessBadge({ freshness }: { freshness: OpsDatasetFreshness }) {
+  return (
+    <StatusBadge
+      label={FRESHNESS_LABELS[freshness.state]}
+      status={freshness.state}
+    />
+  );
 }
 
 /** freshness 근거 문구 — basis/SLA/초과분을 사람이 읽게 표기. */
@@ -259,11 +281,11 @@ function freshnessReason(freshness: OpsDatasetFreshness): string {
   if (freshness.is_overdue) {
     const overdueHours =
       Math.round((freshness.overdue_by_seconds / 3600) * 10) / 10;
-    return `SLA ${slaHours}h 초과 +${overdueHours}h (기한 ${
-      formatDateTime(freshness.due_at) ?? "-"
-    })`;
+    return `SLA ${slaHours}h 초과 +${overdueHours}h (기한 ${formatDateTime(
+      freshness.due_at,
+    )})`;
   }
-  return `SLA ${slaHours}h (기한 ${formatDateTime(freshness.due_at) ?? "-"})`;
+  return `SLA ${slaHours}h (기한 ${formatDateTime(freshness.due_at)})`;
 }
 
 function featuresHref(selection: DatasetSelection): string {
@@ -692,14 +714,12 @@ function PolicyIdentityFields({
     <>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <div>
-          <div className="font-medium">갱신 정책</div>
+          <h4 className={SUBHEADING_CLASS}>갱신 정책</h4>
           <div className="font-mono text-xs text-text-secondary">
             {provider}/{datasetKey}
           </div>
         </div>
-        <Badge variant={draft.enabled ? "outline" : "destructive"}>
-          {draft.enabled ? "활성" : "비활성"}
-        </Badge>
+        <StatusBadge status={draft.enabled ? "active" : "inactive"} />
       </div>
       <div className="grid gap-3 lg:grid-cols-2">
         {latestObservedPolicy?.source_kind ? (
@@ -833,11 +853,10 @@ function PolicyIdentityFields({
             setField("stale_after_minutes", event.target.value)
           }
         />
-        <label className="flex items-center gap-2 self-end text-sm">
-          <input
+        <label className="flex h-control items-center gap-2 self-end text-sm text-text-primary">
+          <Checkbox
             checked={draft.enabled}
-            type="checkbox"
-            onChange={(event) => setField("enabled", event.target.checked)}
+            onCheckedChange={(checked) => setField("enabled", checked === true)}
           />
           활성화
         </label>
@@ -871,36 +890,38 @@ function PolicyScopeFields({
   return (
     <>
       {latestObservedPolicy ? (
-        <div className="mt-4 rounded-md bg-card p-3 text-xs text-text-secondary">
-          <div className="mb-1 font-medium text-text-primary">
-            출처(provenance) — 서버 기록, 편집 불가
-          </div>
-          <p>
-            config_source:{" "}
-            <span className="font-mono">
-              {latestObservedPolicy.config_source}
-            </span>
-          </p>
-          <p className="mt-1">
-            rate_limit_source:{" "}
-            <span className="font-mono break-all">
-              {JSON.stringify(latestObservedPolicy.rate_limit_source)}
-            </span>
-          </p>
-          <p className="mt-1">
-            초안 기준 revision:{" "}
-            <span className="font-mono">{draftBaseRevision ?? "신규"}</span>
-            {latestObservedRevision !== draftBaseRevision ? (
-              <>
-                {" "}
-                · 최신 서버 revision:{" "}
-                <span className="font-mono">
-                  {latestObservedRevision ?? "없음"}
-                </span>
-              </>
-            ) : null}
-          </p>
-        </div>
+        <section className="mt-4 space-y-2 border-t border-border pt-4">
+          <h4 className={SUBHEADING_CLASS}>출처(provenance) — 서버 기록, 편집 불가</h4>
+          <DetailList
+            items={[
+              {
+                label: "config_source",
+                value: latestObservedPolicy.config_source,
+                mono: true,
+              },
+              {
+                label: "rate_limit_source",
+                value: JSON.stringify(latestObservedPolicy.rate_limit_source),
+                mono: true,
+              },
+              {
+                label: "초안 기준 revision",
+                value: draftBaseRevision ?? "신규",
+                mono: true,
+              },
+              ...(latestObservedRevision !== draftBaseRevision
+                ? [
+                    {
+                      label: "최신 서버 revision",
+                      value: latestObservedRevision ?? "없음",
+                      mono: true,
+                    },
+                  ]
+                : []),
+            ]}
+            layout="inline"
+          />
+        </section>
       ) : null}
       {revisionConflict?.terminal ? (
         <Alert className="mt-3" variant="destructive">
@@ -976,7 +997,7 @@ function PolicyScopeFields({
         </Alert>
       ) : null}
       {reconcileMessage ? (
-        <Alert className="mt-3">
+        <Alert className="mt-3" variant="info">
           <AlertTitle>초안 조정 완료</AlertTitle>
           <AlertDescription>{reconcileMessage}</AlertDescription>
         </Alert>
@@ -1003,9 +1024,11 @@ function PolicyEditorActions({
 >) {
   return (
     <>
-      <div className="mt-4 flex flex-wrap items-center gap-2">
+      <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-border pt-4">
         <Button
-          disabled={upsertPolicy.isPending || saveBlocked}
+          disabled={saveBlocked}
+          disabledReason="정책 저장이 차단된 상태입니다 — 위 안내를 확인하세요."
+          loading={upsertPolicy.isPending}
           type="button"
           onClick={submit}
         >
@@ -1013,7 +1036,9 @@ function PolicyEditorActions({
           저장
         </Button>
         {lastSavedAt ? (
-          <Badge variant="outline">저장됨 {formatDateTime(lastSavedAt)}</Badge>
+          <span aria-live="polite" className="text-xs text-text-secondary tabular-nums">
+            저장됨 {formatDateTime(lastSavedAt)}
+          </span>
         ) : null}
       </div>
       {!revisionConflict && error ? (
@@ -1048,7 +1073,7 @@ function PolicyEditorView({
   upsertPolicy,
 }: ReturnType<typeof usePolicyEditorController>) {
   return (
-    <div className="rounded-xl bg-surface-subtle p-4">
+    <div>
       <PolicyIdentityFields
         datasetKey={datasetKey}
         draft={draft}
@@ -1121,17 +1146,22 @@ function PreviewPanel({
     capability?.supported && (capability.sources ?? []).includes("fixture"),
   );
 
+  const previewDisabledReason = fixtureSupported
+    ? undefined
+    : "이 데이터셋은 preview capability가 없습니다 — 버튼이 비활성화됩니다 (fail-closed).";
   return (
-    <div className="flex flex-col gap-3">
-      <div className="rounded-xl bg-surface-subtle p-4">
-        <div className="mb-1 font-medium">ETL 미리보기 (dry-run)</div>
-        <p className="text-[13px] leading-normal text-text-secondary">
+    <div className="flex flex-col gap-4">
+      <section className="space-y-2">
+        <h4 className={SUBHEADING_CLASS}>ETL 미리보기 (dry-run)</h4>
+        <p className="text-xs text-text-secondary">
           provider raw → DTO 변환만 실행하고 제한된 typed 결과를 보여줍니다 (DB
           적재 없음, fixture 전용 — 외부 provider 호출 budget 0).
         </p>
-        <div className="mt-3 flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-3">
           <Button
-            disabled={preview.isPending || !fixtureSupported}
+            disabled={!fixtureSupported}
+            disabledReason={previewDisabledReason}
+            loading={preview.isPending}
             type="button"
             onClick={() =>
               preview.mutate({
@@ -1148,19 +1178,16 @@ function PreviewPanel({
             <FlaskConicalIcon data-icon="inline-start" />
             fixture 실행
           </Button>
-          <Badge variant={fixtureSupported ? "outline" : "secondary"}>
+          <span className="text-xs text-text-secondary tabular-nums">
             {fixtureSupported
               ? `fixture 지원 (최대 ${capability?.max_items_limit ?? 100}건)`
               : "미리보기 미지원"}
-          </Badge>
+          </span>
         </div>
-        {!fixtureSupported ? (
-          <p className="mt-2 text-[13px] text-text-tertiary">
-            이 데이터셋은 preview capability가 없습니다 — 버튼이 비활성화됩니다
-            (fail-closed).
-          </p>
+        {previewDisabledReason ? (
+          <p className="text-xs text-text-secondary">{previewDisabledReason}</p>
         ) : null}
-      </div>
+      </section>
       {preview.isError ? (
         <Alert variant="destructive">
           <AlertTitle>미리보기 실패</AlertTitle>
@@ -1168,24 +1195,27 @@ function PreviewPanel({
         </Alert>
       ) : null}
       {result ? (
-        <div className="rounded-xl bg-surface-subtle p-4">
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <Badge variant="outline">{result.source}</Badge>
-            <Badge variant="outline">{result.variant}</Badge>
-            <span className="text-[13px] text-text-secondary">
+        <section className="space-y-2 border-t border-border pt-4">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="font-mono">{result.source}</span>
+            <span className="font-mono">{result.variant}</span>
+            <span className="text-text-secondary tabular-nums">
               {result.description} · {formatCount(result.returned_items)}/
               {formatCount(result.total_items)}건
               {result.truncated ? " (잘림)" : ""}
             </span>
           </div>
-          <p className="mb-2 text-xs text-text-tertiary">
+          <p className="text-2xs text-text-secondary tabular-nums">
             budget: 외부 호출 {result.budget.external_call_budget}회 · 최대{" "}
             {result.budget.max_items}건 · {result.budget.timeout_seconds}s
           </p>
-          <pre className="max-h-96 overflow-auto rounded-md bg-card p-3 text-xs">
-            {JSON.stringify(result.items, null, 2)}
-          </pre>
-        </div>
+          <JsonViewer
+            aria-label="ETL 미리보기 결과"
+            copyable
+            maxHeight="lg"
+            value={result.items}
+          />
+        </section>
       ) : null}
     </div>
   );
@@ -1366,9 +1396,11 @@ function RefreshNowSection({
           >
             <span>이미 진행 중인 canonical 실행</span>
             <StatusBadge status={activeExecution.status} />
-            <Badge variant="outline">pair {activeExecution.pair_status}</Badge>
+            <span className="text-text-secondary">
+              pair · {statusLabel(activeExecution.pair_status)}
+            </span>
             <Link
-              className="text-primary underline-offset-2 hover:underline"
+              className={INLINE_LINK_CLASS}
               data-api-detail-url={activeExecution.detail_url}
               href={pipelineExecutionHref(
                 activeExecution.kind,
@@ -1390,10 +1422,10 @@ function RefreshNowSection({
               }
             />
             {statusQuery.isError ? (
-              <Badge variant="destructive">상태 재확인 필요</Badge>
+              <StatusBadge label="상태 재확인 필요" status="pending_verification" />
             ) : null}
             <Link
-              className="text-primary underline-offset-2 hover:underline"
+              className={INLINE_LINK_CLASS}
               href={pipelineExecutionHref("update_request", requestId)}
             >
               실행 {shortId(requestId)} 보기
@@ -1401,7 +1433,9 @@ function RefreshNowSection({
           </span>
         ) : (
           <Button
-            disabled={refreshNow.isPending || disabledReason !== null}
+            disabled={disabledReason !== null}
+            disabledReason={disabledReason ?? undefined}
+            loading={refreshNow.isPending}
             type="button"
             onClick={submit}
           >
@@ -1410,24 +1444,31 @@ function RefreshNowSection({
           </Button>
         )}
         {refreshNow.data ? (
-          <Badge
+          <StatusBadge
             data-testid="refresh-create-result"
-            variant={
-              refreshNow.data.reused_active_request ? "warning" : "outline"
+            hideDot
+            label={
+              refreshNow.data.idempotent_replay
+                ? "동일 요청 결과 재생(200)"
+                : refreshNow.data.reused_active_request
+                  ? "활성 요청 재사용(200)"
+                  : "새 요청 생성(201)"
             }
-          >
-            {refreshNow.data.idempotent_replay
-              ? "동일 요청 결과 재생(200)"
-              : refreshNow.data.reused_active_request
-                ? "활성 요청 재사용(200)"
-                : "새 요청 생성(201)"}
-          </Badge>
+            status={null}
+            tone={
+              refreshNow.data.reused_active_request
+                ? "warning"
+                : refreshNow.data.idempotent_replay
+                  ? "neutral"
+                  : "success"
+            }
+          />
         ) : null}
         {requestId && currentStatus && !statusQuery.isError ? (
           <span className="flex items-center gap-2 text-xs">
             <StatusBadge status={currentStatus} />
             <Link
-              className="text-primary underline-offset-2 hover:underline"
+              className={INLINE_LINK_CLASS}
               href={pipelineExecutionHref("update_request", requestId)}
             >
               자세히
@@ -1436,7 +1477,7 @@ function RefreshNowSection({
         ) : null}
       </div>
       {scopeRefresh ? (
-        <p className="text-xs text-text-tertiary">
+        <p className="text-xs text-text-secondary">
           범위 계약:{" "}
           {scopeRefresh.selector === "poi_cache_targets"
             ? "활성 POI target"
@@ -1449,9 +1490,7 @@ function RefreshNowSection({
         </p>
       ) : null}
       {disabledReason ? (
-        <p className="text-[13px] leading-normal text-text-tertiary">
-          {disabledReason}
-        </p>
+        <p className="text-xs text-text-secondary">{disabledReason}</p>
       ) : null}
       {refreshNow.isError ? (
         <Alert variant="destructive">
@@ -1468,7 +1507,7 @@ function RefreshNowSection({
                   <StatusBadge status={existingConflict.status} />
                 ) : null}
                 <Link
-                  className="text-primary underline-offset-2 hover:underline"
+                  className={INLINE_LINK_CLASS}
                   data-api-detail-url={existingConflict.detailUrl ?? undefined}
                   href={pipelineExecutionHref(
                     "update_request",
@@ -1509,7 +1548,7 @@ function RefreshNowSection({
                 다시 확인
               </Button>
               <Link
-                className="text-primary underline-offset-2 hover:underline"
+                className={INLINE_LINK_CLASS}
                 href={pipelineExecutionHref("update_request", requestId)}
               >
                 파이프라인에서 보기
@@ -1519,7 +1558,7 @@ function RefreshNowSection({
         </Alert>
       ) : null}
       {requestId && currentStatus === "done" ? (
-        <Alert>
+        <Alert variant="success">
           <AlertTitle>갱신 완료</AlertTitle>
           <AlertDescription>
             요청 {shortId(requestId)}이 완료되어 행 신선도를 갱신했습니다.
@@ -1586,15 +1625,10 @@ const scopeColumns: ColumnDef<OpsDatasetScopeState, unknown>[] = [
     header: "신선도(SLA)",
     enableSorting: false,
     cell: ({ row }) => (
-      <span
-        className="flex flex-wrap items-center gap-1"
-        title={freshnessReason(row.original.freshness)}
-      >
-        <Badge variant={freshnessVariant(row.original.freshness.state)}>
-          {FRESHNESS_LABELS[row.original.freshness.state]}
-        </Badge>
-        <span className="text-xs text-text-tertiary">
-          {formatDateTime(row.original.freshness.due_at)}
+      <span className="flex flex-col items-start gap-0.5">
+        <FreshnessBadge freshness={row.original.freshness} />
+        <span className="text-2xs text-text-secondary">
+          {freshnessReason(row.original.freshness)}
         </span>
       </span>
     ),
@@ -1614,6 +1648,7 @@ const scopeColumns: ColumnDef<OpsDatasetScopeState, unknown>[] = [
     accessorKey: "consecutive_failures",
     header: "실패 횟수",
     enableSorting: false,
+    meta: { align: "right" } satisfies DataTableColumnMeta,
     cell: ({ row }) => formatCount(row.original.consecutive_failures),
   },
 ];
@@ -1679,7 +1714,7 @@ const recentRunColumns: ColumnDef<OpsDatasetExecution, unknown>[] = [
     enableSorting: false,
     cell: ({ row }) => (
       <Link
-        className="inline-flex items-center gap-1 text-primary underline-offset-2 hover:underline"
+        className={cn(INLINE_LINK_CLASS, "inline-flex items-center gap-1")}
         href={pipelineExecutionHref(row.original.kind, row.original.id)}
         onClick={(event) => event.stopPropagation()}
       >
@@ -1692,17 +1727,18 @@ const recentRunColumns: ColumnDef<OpsDatasetExecution, unknown>[] = [
 
 function EventRow({ event }: { event: OpsDatasetEventRecord }) {
   return (
-    <li className="flex flex-wrap items-center gap-2 border-b border-surface-muted py-2 text-[13px] last:border-b-0">
-      <StatusBadge status={event.level} />
+    <li className="flex flex-wrap items-center gap-2 py-2 text-xs">
+      <LevelBadge level={event.level} />
       {event.code ? (
-        <span className="font-mono text-xs text-text-secondary">
+        <span className="font-mono text-2xs text-text-secondary">
           {event.code}
         </span>
       ) : null}
-      <Badge variant="outline">{event.sync_scope}</Badge>
-      <Badge variant="outline">{event.operation_key ?? "-"}</Badge>
+      <span className="font-mono text-2xs text-text-secondary">
+        {event.sync_scope} · {event.operation_key ?? NULL_GLYPH}
+      </span>
       <span className="min-w-0 flex-1 break-all">{event.message}</span>
-      <span className="text-xs text-text-tertiary">
+      <span className="text-2xs text-text-secondary tabular-nums">
         {formatDateTime(event.occurred_at)}
       </span>
     </li>
@@ -1736,52 +1772,63 @@ function HistoryPanel({
   const latestExecution = detail?.latest_execution ?? null;
   const recentRuns = detail?.run_history.items ?? [];
   return (
-    <div className="flex flex-col gap-3">
-      <DataTable
-        ariaLabel="sync scope 상태"
-        columns={scopeColumns}
-        data={detail?.scopes ?? []}
-        getRowId={(scope) =>
-          tupleKey([scope.sync_scope, operationKeyOf(scope)])
-        }
-        emptyMessage="sync scope 상태가 없습니다."
-        manualSorting={false}
-        containerClassName="overflow-auto rounded-xl bg-surface-subtle"
-      />
-      {!selectedScope ? (
-        <Alert variant="destructive">
-          <AlertTitle>선택 범위 상태 확인 불가</AlertTitle>
-          <AlertDescription>
-            상세 응답에 <span className="font-mono">{selection.syncScope}</span>
-            범위가 없어 다른 scope로 대체하지 않았습니다(degrade, fail-closed).
-          </AlertDescription>
-        </Alert>
-      ) : null}
-      <div className="rounded-xl bg-surface-subtle p-4">
-        <div className="mb-2 font-medium">
-          커서{" "}
-          <span className="font-mono text-xs text-text-secondary">
-            {selectedScope?.sync_scope ?? "-"}
-          </span>
-        </div>
-        <pre className="max-h-64 overflow-auto rounded-md bg-card p-3 text-xs">
-          {JSON.stringify(selectedScope?.cursor ?? {}, null, 2)}
-        </pre>
+    <div className="flex flex-col divide-y divide-border [&>*:last-child]:pb-0">
+      <div className="pb-4">
+        <DataTable
+          ariaLabel="sync scope 상태"
+          columns={scopeColumns}
+          data={detail?.scopes ?? []}
+          getRowId={(scope) =>
+            tupleKey([scope.sync_scope, operationKeyOf(scope)])
+          }
+          emptyState={{
+            title: "sync scope 상태가 없습니다.",
+            description: "상세 응답에 scope 상태가 실리면 여기에 표시됩니다.",
+          }}
+          manualSorting={false}
+        />
       </div>
-      <div className="rounded-xl bg-surface-subtle p-4">
-        <div className="mb-2 font-medium">선택 범위 진행 중 실행</div>
+      {!selectedScope ? (
+        <div className="py-4">
+          <Alert variant="destructive">
+            <AlertTitle>선택 범위 상태 확인 불가</AlertTitle>
+            <AlertDescription>
+              상세 응답에 <span className="font-mono">{selection.syncScope}</span>
+              범위가 없어 다른 scope로 대체하지 않았습니다(degrade, fail-closed).
+            </AlertDescription>
+          </Alert>
+        </div>
+      ) : null}
+      <section className="space-y-2 py-4">
+        <h4 className={SUBHEADING_CLASS}>
+          커서{" "}
+          <span className="font-mono text-2xs font-normal text-text-secondary">
+            {selectedScope?.sync_scope ?? NULL_GLYPH}
+          </span>
+        </h4>
+        <JsonViewer
+          aria-label="선택 범위 커서"
+          copyable
+          maxHeight="sm"
+          value={selectedScope?.cursor ?? {}}
+        />
+      </section>
+      <section className="space-y-2 py-4">
+        <h4 className={SUBHEADING_CLASS}>선택 범위 진행 중 실행</h4>
         {activeExecution ? (
-          <div className="flex flex-wrap items-center gap-2 text-[13px]">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
             <StatusBadge status={activeExecution.status} />
-            <Badge variant="outline">pair {activeExecution.pair_status}</Badge>
-            <span className="font-mono text-xs">
+            <span className="text-text-secondary">
+              pair · {statusLabel(activeExecution.pair_status)}
+            </span>
+            <span className="font-mono">
               {activeExecution.kind}:{shortId(activeExecution.id)}
             </span>
-            <span className="text-text-secondary">
+            <span className="text-text-secondary tabular-nums">
               {formatDateTime(activeExecution.created_at)}
             </span>
             <Link
-              className="text-primary underline-offset-2 hover:underline"
+              className={INLINE_LINK_CLASS}
               data-api-detail-url={activeExecution.detail_url}
               href={pipelineExecutionHref(
                 activeExecution.kind,
@@ -1792,25 +1839,27 @@ function HistoryPanel({
             </Link>
           </div>
         ) : (
-          <p className="text-[13px] text-text-secondary">
+          <p className="text-xs text-text-secondary">
             이 범위에 진행 중인 canonical 실행이 없습니다.
           </p>
         )}
-      </div>
-      <div className="rounded-xl bg-surface-subtle p-4">
-        <div className="mb-2 font-medium">선택 범위 최근 종료 실행</div>
+      </section>
+      <section className="space-y-2 py-4">
+        <h4 className={SUBHEADING_CLASS}>선택 범위 최근 종료 실행</h4>
         {latestExecution ? (
-          <div className="flex flex-wrap items-center gap-2 text-[13px]">
+          <div className="flex flex-wrap items-center gap-2 text-xs">
             <StatusBadge status={latestExecution.status} />
-            <Badge variant="outline">pair {latestExecution.pair_status}</Badge>
-            <span className="font-mono text-xs">
+            <span className="text-text-secondary">
+              pair · {statusLabel(latestExecution.pair_status)}
+            </span>
+            <span className="font-mono">
               {latestExecution.kind}:{shortId(latestExecution.id)}
             </span>
-            <span className="text-text-secondary">
+            <span className="text-text-secondary tabular-nums">
               {formatDateTime(latestExecution.created_at)}
             </span>
             <Link
-              className="text-primary underline-offset-2 hover:underline"
+              className={INLINE_LINK_CLASS}
               data-api-detail-url={latestExecution.detail_url}
               href={pipelineExecutionHref(
                 latestExecution.kind,
@@ -1821,17 +1870,17 @@ function HistoryPanel({
             </Link>
           </div>
         ) : (
-          <p className="text-[13px] text-text-secondary">
+          <p className="text-xs text-text-secondary">
             이 범위에서 종료된 canonical 실행이 없습니다.
           </p>
         )}
-      </div>
-      <div className="rounded-xl bg-surface-subtle p-4">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <span className="font-medium">최근 실행</span>
+      </section>
+      <section className="space-y-2 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h4 className={SUBHEADING_CLASS}>최근 실행</h4>
           {detail ? (
             <Link
-              className="text-xs text-primary underline-offset-2 hover:underline"
+              className={cn(INLINE_LINK_CLASS, "text-xs")}
               data-api-history-url={detail.run_history.canonical_url}
               href={pipelineExecutionHistoryHref(
                 detail.run_history.canonical_url,
@@ -1841,7 +1890,7 @@ function HistoryPanel({
             </Link>
           ) : null}
         </div>
-        <p className="mb-2 text-xs text-text-tertiary">
+        <p className="text-2xs text-text-secondary">
           서버가 cursor와 page limit 전에 선택한 exact scope를 적용한 canonical
           operation만 표시합니다.
           {detail?.run_history.next_cursor ? " 더 오래된 실행이 있습니다." : ""}
@@ -1856,17 +1905,19 @@ function HistoryPanel({
           getRowId={(run) =>
             tupleKey([run.kind, run.id, run.sync_scope, run.operation_key])
           }
-          emptyMessage="최근 실행 기록이 없습니다."
+          emptyState={{
+            title: "최근 실행 기록이 없습니다.",
+            description: "이 범위로 canonical 실행이 돌면 여기에 쌓입니다.",
+          }}
           manualSorting={false}
-          containerClassName="overflow-auto rounded-md bg-card"
         />
-      </div>
-      <div className="rounded-xl bg-surface-subtle p-4">
-        <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-          <span className="font-medium">최근 이벤트</span>
+      </section>
+      <section className="space-y-2 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h4 className={SUBHEADING_CLASS}>최근 이벤트</h4>
           {detail ? (
             <Link
-              className="text-xs text-primary underline-offset-2 hover:underline"
+              className={cn(INLINE_LINK_CLASS, "text-xs")}
               data-api-history-url={detail.event_history.canonical_url}
               href={pipelineEventHistoryHref(
                 detail.event_history.canonical_url,
@@ -1876,7 +1927,7 @@ function HistoryPanel({
             </Link>
           ) : null}
         </div>
-        <p className="mb-2 text-xs text-text-tertiary">
+        <p className="text-2xs text-text-secondary">
           canonical job/request의 effective sync scope가 선택 범위와 정확히 같은
           이벤트만 표시합니다.
           {detail?.event_history.next_cursor
@@ -1884,17 +1935,15 @@ function HistoryPanel({
             : ""}
         </p>
         {detail && detail.event_history.items.length > 0 ? (
-          <ul>
+          <ul className="divide-y divide-border">
             {detail.event_history.items.map((event) => (
               <EventRow event={event} key={event.event_id} />
             ))}
           </ul>
         ) : (
-          <p className="text-[13px] text-text-secondary">
-            최근 이벤트가 없습니다.
-          </p>
+          <p className="text-xs text-text-secondary">최근 이벤트가 없습니다.</p>
         )}
-      </div>
+      </section>
     </div>
   );
 }
@@ -1950,9 +1999,8 @@ function DatasetDrawer({
               : null;
   const canRenderPanels = effectivePolicyDetail !== null;
   return (
-    <div
+    <Card
       aria-label={`${selection.provider}/${selection.datasetKey} 상세`}
-      className="rounded-lg border bg-background p-4"
       id={`dataset-detail-region-${[
         selection.providerDatasetId,
         selection.syncScope,
@@ -1961,41 +2009,36 @@ function DatasetDrawer({
         .map(encodeURIComponent)
         .join("|")}`}
       role="region"
+      size="sm"
     >
-      <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <div className="font-medium">데이터셋 상세</div>
-          <div className="break-all font-mono text-xs text-text-secondary">
+      <CardHeader className="border-b">
+        <CardTitle>데이터셋 상세</CardTitle>
+        <CardDescription className="space-y-1">
+          <span className="block break-all font-mono text-text-secondary">
             #{selection.providerDatasetId} · {selection.provider}/{selection.datasetKey}
-          </div>
-          <div className="mt-1 break-all font-mono text-xs text-text-tertiary">
-            sync_scope={selection.syncScope}
-          </div>
-          <div className="mt-1 break-all font-mono text-xs text-text-tertiary">
-            operation_key={selection.operationKey}
-          </div>
+          </span>
+          <span className="block break-all font-mono text-2xs">
+            sync_scope={selection.syncScope} · operation_key=
+            {selection.operationKey || NULL_GLYPH}
+          </span>
           {catalog ? (
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              <Badge variant="outline">{catalog.feature_kind}</Badge>
-              <span className="text-[13px] text-text-secondary">
-                {catalog.label}
-              </span>
-            </div>
+            <span className="block">
+              <span className="font-mono text-2xs">{catalog.feature_kind}</span>
+              {" · "}
+              {catalog.label}
+            </span>
           ) : (
-            <p className="mt-1 text-[13px] text-text-tertiary">
+            <span className="block">
               ETL 카탈로그에 없는 잔존 행입니다(상태 가시성만 유지).
-            </p>
+            </span>
           )}
-          <div className="mt-1 flex flex-wrap gap-3 text-xs">
-            <Link
-              className="text-primary underline-offset-2 hover:underline"
-              href={featuresHref(selection)}
-            >
+          <span className="flex flex-wrap gap-3">
+            <Link className={INLINE_LINK_CLASS} href={featuresHref(selection)}>
               생성된 Feature 보기
             </Link>
             {detail && detail.dataset_issues.open_count > 0 ? (
               <Link
-                className="text-primary underline-offset-2 hover:underline"
+                className={INLINE_LINK_CLASS}
                 href={
                   `/admin/issues?provider_dataset_id=${selection.providerDatasetId}`
                 }
@@ -2006,20 +2049,23 @@ function DatasetDrawer({
                 )}
               </Link>
             ) : null}
-          </div>
-        </div>
-        <Button
-          aria-label="데이터셋 상세 닫기"
-          size="icon"
-          type="button"
-          variant="ghost"
-          onClick={onClose}
-        >
-          <XIcon />
-        </Button>
-      </div>
+          </span>
+        </CardDescription>
+        <CardAction>
+          <Button
+            aria-label="데이터셋 상세 닫기"
+            size="icon-sm"
+            type="button"
+            variant="ghost"
+            onClick={onClose}
+          >
+            <XIcon />
+          </Button>
+        </CardAction>
+      </CardHeader>
+      <CardContent className="space-y-4">
       {verifiedDetail && verifiedDetail.schedule_source_status !== "ok" ? (
-        <Alert className="mb-3" variant="destructive">
+        <Alert variant="destructive">
           <AlertTitle>Dagster 스케줄 소스 이상</AlertTitle>
           <AlertDescription>
             {(verifiedDetail.schedule_source_errors ?? []).length > 0
@@ -2028,16 +2074,21 @@ function DatasetDrawer({
           </AlertDescription>
         </Alert>
       ) : null}
-      <div className="mb-4">
-        <RefreshNowSection
-          detail={detail}
-          detailError={isError}
-          detailLoading={isLoading}
-          key={`${selection.providerDatasetId}/${selection.syncScope}/${selection.operationKey}`}
-          selection={selection}
-        />
-      </div>
-      {isLoading ? <Skeleton className="h-64" /> : null}
+      <RefreshNowSection
+        detail={detail}
+        detailError={isError}
+        detailLoading={isLoading}
+        key={`${selection.providerDatasetId}/${selection.syncScope}/${selection.operationKey}`}
+        selection={selection}
+      />
+      {isLoading ? (
+        <div aria-busy="true" className="space-y-2">
+          <Skeleton className="h-control w-full" />
+          <Skeleton className="h-4 w-2/3" />
+          <Skeleton className="h-4 w-1/2" />
+          <Skeleton className="h-40 w-full" />
+        </div>
+      ) : null}
       {/* 정책은 provider/dataset 리소스다. 같은 pair의 exact scope 전환 동안
           마지막 authoritative snapshot으로 editor mount만 유지하되, history와
           action에는 이전 scope 상세를 절대 재사용하지 않는다. */}
@@ -2046,12 +2097,12 @@ function DatasetDrawer({
           value={activePanel}
           onValueChange={(value) => onPanelChange(panelValue(String(value)))}
         >
-          <TabsList>
+          <TabsList className="w-full" variant="line">
             <TabsTrigger value="history">상태·이력</TabsTrigger>
             <TabsTrigger value="policy">갱신 정책</TabsTrigger>
             <TabsTrigger value="preview">ETL 미리보기</TabsTrigger>
           </TabsList>
-          <TabsContent value="history">
+          <TabsContent className="pt-2" value="history">
             {verifiedDetail ? (
               <HistoryPanel
                 detail={verifiedDetail}
@@ -2059,12 +2110,12 @@ function DatasetDrawer({
                 selection={selection}
               />
             ) : (
-              <p className="text-[13px] text-text-secondary">
+              <p className="text-xs text-text-secondary">
                 선택 scope의 상태·이력을 불러오는 중입니다.
               </p>
             )}
           </TabsContent>
-          <TabsContent keepMounted value="policy">
+          <TabsContent className="pt-2" keepMounted value="policy">
             {effectivePolicyDetail ? (
               <PolicyEditor
                 datasetKey={selection.datasetKey}
@@ -2076,7 +2127,7 @@ function DatasetDrawer({
               />
             ) : null}
           </TabsContent>
-          <TabsContent value="preview">
+          <TabsContent className="pt-2" value="preview">
             {verifiedDetail ? (
               <PreviewPanel
                 catalog={catalog}
@@ -2084,14 +2135,15 @@ function DatasetDrawer({
                 selection={selection}
               />
             ) : (
-              <p className="text-[13px] text-text-secondary">
+              <p className="text-xs text-text-secondary">
                 선택 scope의 미리보기 capability를 확인하는 중입니다.
               </p>
             )}
           </TabsContent>
         </Tabs>
       ) : null}
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -2434,7 +2486,7 @@ function useDatasetsClientController({
         enableSorting: true,
         cell: ({ row }) => (
           <span className="font-mono text-xs">
-            {row.original.operation_key ?? "-"}
+            {row.original.operation_key ?? NULL_GLYPH}
           </span>
         ),
       },
@@ -2444,13 +2496,16 @@ function useDatasetsClientController({
         enableSorting: true,
         cell: ({ row }) => (
           <span
-            className="flex flex-wrap items-center gap-1"
+            className="flex flex-col items-start gap-0.5"
             title={freshnessReason(row.original.freshness)}
           >
-            <StatusBadge status={row.original.status} />
-            <Badge variant={freshnessVariant(row.original.freshness.state)}>
-              {FRESHNESS_LABELS[row.original.freshness.state]}
-            </Badge>
+            <span className="flex flex-wrap items-center gap-1">
+              <StatusBadge status={row.original.status} />
+              <FreshnessBadge freshness={row.original.freshness} />
+            </span>
+            <span className="text-2xs text-text-secondary">
+              {freshnessReason(row.original.freshness)}
+            </span>
           </span>
         ),
       },
@@ -2461,15 +2516,19 @@ function useDatasetsClientController({
         enableSorting: true,
         cell: ({ row }) =>
           row.original.refresh_policy ? (
-            <Badge
-              variant={
-                row.original.refresh_policy.enabled ? "outline" : "destructive"
+            <span
+              className={cn(
+                "font-mono text-xs",
+                !row.original.refresh_policy.enabled && "text-text-secondary line-through",
+              )}
+              title={
+                row.original.refresh_policy.enabled ? undefined : "정책 비활성"
               }
             >
               {row.original.refresh_policy.targeted_policy}
-            </Badge>
+            </span>
           ) : (
-            <span className="text-text-secondary">-</span>
+            <span className="text-text-tertiary">{NULL_GLYPH}</span>
           ),
       },
       {
@@ -2510,16 +2569,19 @@ function useDatasetsClientController({
           if (schedule.basis === "unknown") {
             // Dagster GraphQL degrade — "스케줄 없음"(not_scheduled)과 구분한다.
             return (
-              <Badge title={schedule.status ?? undefined} variant="secondary">
-                확인 불가
-              </Badge>
+              <StatusBadge
+                label="확인 불가"
+                status="unknown"
+                title={schedule.status ?? undefined}
+                tone="warning"
+              />
             );
           }
           return (
             <span className="text-text-secondary">
               {schedule.basis === "not_scheduled"
                 ? "스케줄 없음"
-                : (formatDateTime(schedule.next_scheduled_at) ?? "-")}
+                : formatDateTime(schedule.next_scheduled_at)}
             </span>
           );
         },
@@ -2528,11 +2590,12 @@ function useDatasetsClientController({
         accessorKey: "consecutive_failures",
         header: "실패",
         enableSorting: true,
+        meta: { align: "right" } satisfies DataTableColumnMeta,
         cell: ({ row }) =>
           row.original.consecutive_failures > 0 ? (
-            <Badge variant="destructive">
+            <span className="font-medium text-destructive">
               {row.original.consecutive_failures}
-            </Badge>
+            </span>
           ) : (
             <span className="text-text-secondary">0</span>
           ),
@@ -2542,18 +2605,19 @@ function useDatasetsClientController({
         header: "이슈",
         accessorFn: (row) => datasetRowOpenIssueCount(row),
         enableSorting: true,
+        meta: { align: "right" } satisfies DataTableColumnMeta,
         cell: ({ row }) => (
-          <span className="flex flex-wrap items-center gap-1">
+          <span className="flex flex-wrap items-center justify-end gap-1">
             {row.original.dataset_issues.open_count > 0 ? (
-              <Badge
+              <span
+                className="font-medium text-destructive"
                 title={`데이터셋 이슈${datasetIssueSeveritySummary(row.original.dataset_issues.severity_counts)}`}
-                variant="destructive"
               >
                 {formatCount(row.original.dataset_issues.open_count)}
-              </Badge>
+              </span>
             ) : null}
             {!datasetRowHasOpenIssue(row.original) ? (
-              <span className="text-text-secondary">-</span>
+              <span className="text-text-tertiary">{NULL_GLYPH}</span>
             ) : null}
           </span>
         ),
@@ -2614,7 +2678,7 @@ function DatasetsClientView({
     <AdminShell
       actions={
         <Button
-          disabled={datasets.isFetching || detail.isFetching}
+          loading={datasets.isFetching || detail.isFetching}
           type="button"
           variant="outline"
           onClick={() => {
@@ -2627,9 +2691,47 @@ function DatasetsClientView({
         </Button>
       }
       description="provider×dataset×범위의 신선도·갱신 정책·이슈를 한 화면에서 추적하고, 정책 편집·ETL 미리보기·지금 갱신을 실행합니다."
+      meta={
+        <span
+          aria-label="데이터셋 상태 요약"
+          className="flex flex-wrap items-center gap-x-3 gap-y-1 tabular-nums"
+          data-testid="datasets-status-summary"
+          role="region"
+        >
+          <LiveBadge
+            data-testid="datasets-live-mode"
+            label={opsDatasetLiveBadgeLabel(live)}
+            state={live.state}
+            title={live.lastError ?? `ops live: ${live.state}`}
+          />
+          {(
+            [
+              ["제공자", summary.providers, false],
+              ["행", items.length, false],
+              ["실패", summary.failing, summary.failing > 0],
+              ["오래됨(SLA 초과)", summary.stale, summary.stale > 0],
+              ["미실행", summary.neverRun, false],
+              ["이슈", summary.issues, summary.issues > 0],
+            ] as const
+          ).map(([label, value, attention]) => (
+            <span
+              className={cn(
+                "text-xs",
+                attention ? "font-medium text-text-primary" : "text-text-secondary",
+              )}
+              key={label}
+            >
+              {label}{" "}
+              {formatCount(datasets.data ? value : null, {
+                loading: datasets.isLoading,
+              })}
+            </span>
+          ))}
+        </span>
+      }
       title="데이터셋"
     >
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-6">
         {datasets.isError ? (
           <Alert variant="destructive">
             <AlertTitle>데이터셋 조회 실패</AlertTitle>
@@ -2646,44 +2748,6 @@ function DatasetsClientView({
             </AlertDescription>
           </Alert>
         ) : null}
-
-        <section
-          aria-label="데이터셋 상태 요약"
-          className="flex flex-wrap gap-2"
-          data-testid="datasets-status-summary"
-        >
-          <Badge
-            data-testid="datasets-live-mode"
-            title={live.lastError ?? `ops live: ${live.state}`}
-            variant={
-              live.mode === "live"
-                ? "outline"
-                : live.mode === "polling"
-                  ? "warning"
-                  : live.mode === "standby"
-                    ? "secondary"
-                    : "destructive"
-            }
-          >
-            {opsDatasetLiveBadgeLabel(live)}
-          </Badge>
-          <Badge variant="outline">
-            제공자 {formatCount(summary.providers)}
-          </Badge>
-          <Badge variant="outline">행 {formatCount(items.length)}</Badge>
-          <Badge variant={summary.failing > 0 ? "destructive" : "outline"}>
-            실패 {formatCount(summary.failing)}
-          </Badge>
-          <Badge variant={summary.stale > 0 ? "warning" : "outline"}>
-            오래됨(SLA 초과) {formatCount(summary.stale)}
-          </Badge>
-          <Badge variant="outline">
-            미실행 {formatCount(summary.neverRun)}
-          </Badge>
-          <Badge variant={summary.issues > 0 ? "destructive" : "outline"}>
-            이슈 {formatCount(summary.issues)}
-          </Badge>
-        </section>
 
         {datasets.data && datasets.data.data.schedule_source_status !== "ok" ? (
           <Alert data-testid="schedule-degrade-banner" variant="destructive">
@@ -2711,6 +2775,7 @@ function DatasetsClientView({
           </FilterField>
           <FilterField htmlFor="datasets-status" label="상태">
             <NativeSelect
+              aria-label="상태 필터"
               id="datasets-status"
               value={statusFilter}
               onChange={(event) =>
@@ -2726,7 +2791,7 @@ function DatasetsClientView({
           </FilterField>
         </FilterBar>
 
-        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.1fr)_minmax(30rem,0.9fr)]">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(30rem,0.9fr)]">
           <DatasetGridActionContext value={gridActions}>
             <DataTable
               ariaLabel="데이터셋 그리드"
@@ -2734,20 +2799,24 @@ function DatasetsClientView({
               data={filteredItems}
               getRowId={(row) => rowKey(row)}
               isLoading={datasets.isLoading}
-              emptyMessage="조건에 맞는 데이터셋 행이 없습니다."
+              emptyState={{
+                title: "조건에 맞는 데이터셋 행이 없습니다.",
+                description: "검색어를 지우거나 상태 필터를 전체로 바꿔 보세요.",
+              }}
               onRowClick={(row) => applySelection(selectionFromRow(row))}
               isRowActive={(row) =>
                 activeSelection ? sameRow(row, activeSelection) : false
               }
               manualSorting={false}
-              containerClassName="overflow-auto rounded-lg border bg-background"
+              skeletonRowCount={8}
             />
           </DatasetGridActionContext>
 
           <div
-            className={`flex min-w-0 flex-col gap-4 ${
-              activeSelection ? "order-first xl:order-none" : ""
-            }`}
+            className={cn(
+              "flex min-w-0 flex-col gap-4",
+              activeSelection && "order-first xl:order-none",
+            )}
           >
             {activeSelection ? (
               <>
@@ -2777,9 +2846,11 @@ function DatasetsClientView({
                 />
               </>
             ) : (
-              <div className="rounded-lg border bg-background p-6 text-sm text-text-secondary">
-                선택된 데이터셋 행이 없습니다.
-              </div>
+              <EmptyState
+                description="행을 선택하면 상태·이력, 갱신 정책, ETL 미리보기가 열립니다."
+                framed
+                title="선택된 데이터셋 행이 없습니다."
+              />
             )}
           </div>
         </div>

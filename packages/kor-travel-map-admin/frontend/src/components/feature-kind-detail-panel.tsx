@@ -1,13 +1,6 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (detail) · design-system: design.md · designed-as-app
 
-import {
-  AlertTriangleIcon,
-  CalendarDaysIcon,
-  ClipboardListIcon,
-  RouteIcon,
-  RulerIcon,
-  ShapesIcon,
-} from "lucide-react";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
@@ -15,12 +8,15 @@ import {
   useAreaContainedFeatures,
   type FeatureSummary,
 } from "@/api/features";
+import { DetailList, type DetailItem } from "@/components/detail-list";
+import { EmptyState } from "@/components/empty-state";
 import { FeaturePricePanel } from "@/components/feature-price-panel";
 import { FeatureWeatherPanel } from "@/components/feature-weather-panel";
+import { JsonViewer } from "@/components/json-viewer";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatDateTime, shortId } from "@/lib/format";
+import { NULL_GLYPH, formatCount, formatDateTime, shortId } from "@/lib/format";
 
 type DetailRecord = Record<string, unknown>;
 
@@ -66,7 +62,7 @@ function arrayText(detail: DetailRecord, key: string): string | null {
 }
 
 function formatArea(value: number | null | undefined): string {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "-";
+  if (typeof value !== "number" || !Number.isFinite(value)) return NULL_GLYPH;
   if (value >= 1_000_000) {
     return `${(value / 1_000_000).toLocaleString("ko-KR", {
       maximumFractionDigits: 2,
@@ -76,7 +72,7 @@ function formatArea(value: number | null | undefined): string {
 }
 
 function formatDistance(value: number | null | undefined): string {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "-";
+  if (typeof value !== "number" || !Number.isFinite(value)) return NULL_GLYPH;
   if (value >= 1000) {
     return `${(value / 1000).toLocaleString("ko-KR", {
       maximumFractionDigits: 2,
@@ -86,7 +82,7 @@ function formatDistance(value: number | null | undefined): string {
 }
 
 function formatDuration(value: number | null | undefined): string {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "-";
+  if (typeof value !== "number" || !Number.isFinite(value)) return NULL_GLYPH;
   const hours = Math.floor(value / 60);
   const minutes = value % 60;
   if (hours <= 0) return `${minutes}분`;
@@ -97,53 +93,53 @@ function featureHref(featureId: string): string {
   return `/features/${encodeURIComponent(featureId)}`;
 }
 
+/**
+ * kind 상세 key-value — DetailList(inline `라벨 | 값`)만 쓴다(m9). 값이 없는 행은 빼고,
+ * 남는 행이 없으면 EmptyState 한 문장.
+ */
 function InfoRows({
   rows,
 }: {
-  rows: Array<[string, string | null | undefined]>;
+  rows: Array<[string, string | null | undefined, { mono?: boolean }?]>;
 }) {
-  const visibleRows = rows.filter(([, value]) => value !== null && value !== undefined);
-  if (visibleRows.length === 0) {
-    return <div className="text-sm text-muted-foreground">표시할 상세값이 없습니다.</div>;
+  const items: DetailItem[] = rows
+    .filter(([, value]) => value !== null && value !== undefined)
+    .map(([label, value, options]) => ({
+      label,
+      value,
+      mono: options?.mono,
+    }));
+  if (items.length === 0) {
+    return <EmptyState size="sm" title="표시할 상세값이 없습니다." />;
   }
-  return (
-    <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
-      {visibleRows.map(([label, value]) => (
-        <div className="contents" key={label}>
-          <dt className="text-muted-foreground">{label}</dt>
-          <dd className="min-w-0 break-words">{value}</dd>
-        </div>
-      ))}
-    </dl>
-  );
+  return <DetailList items={items} layout="inline" />;
 }
 
+/**
+ * kind 패널의 flush 섹션(카드 없음): 제목(h3 15px/600) + 한 줄 설명 + 우측 건수(muted 텍스트).
+ * 지도 위 floating 패널(compact)과 상세 rail 양쪽에서 같은 모양이다.
+ */
 function PanelShell({
   title,
   description,
-  badge,
-  icon,
+  count,
   children,
 }: {
   title: string;
   description: string;
-  badge?: string;
-  icon: ReactNode;
+  count?: string;
   children: ReactNode;
 }) {
   return (
-    <section className="rounded-lg border bg-background">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 font-medium">
-            <span className="text-muted-foreground">{icon}</span>
-            {title}
-          </div>
-          <div className="mt-1 text-xs text-muted-foreground">{description}</div>
-        </div>
-        {badge ? <Badge variant="secondary">{badge}</Badge> : null}
+    <section className="flex min-w-0 flex-col gap-3">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+        <h3 className="text-sm leading-snug font-semibold text-text-primary">{title}</h3>
+        {count ? (
+          <span className="text-xs text-text-secondary tabular-nums">{count}</span>
+        ) : null}
+        <p className="basis-full text-xs text-text-secondary">{description}</p>
       </div>
-      <div className="p-4">{children}</div>
+      <div className="min-w-0">{children}</div>
     </section>
   );
 }
@@ -153,23 +149,19 @@ function EventDetailPanel({ feature }: { feature: FeatureKindDetail }) {
   const startsOn = textValue(detail, "starts_on");
   const endsOn = textValue(detail, "ends_on");
   const period =
-    startsOn && endsOn ? `${startsOn} - ${endsOn}` : startsOn ?? endsOn ?? null;
+    startsOn && endsOn ? `${startsOn} – ${endsOn}` : startsOn ?? endsOn ?? null;
 
   return (
-    <PanelShell
-      description="기간, 장소, 연락처 등 행사 메타"
-      icon={<CalendarDaysIcon className="size-4" />}
-      title="Event"
-    >
+    <PanelShell description="기간, 장소, 연락처 등 행사 메타" title="Event">
       <InfoRows
         rows={[
           ["기간", period],
           ["종류", textValue(detail, "event_kind")],
           ["장소", textValue(detail, "venue_name")],
           ["전화", textValue(detail, "tel")],
-          ["timezone", textValue(detail, "timezone")],
-          ["content_id", textValue(detail, "content_id")],
-          ["content_type", textValue(detail, "content_type_id")],
+          ["timezone", textValue(detail, "timezone"), { mono: true }],
+          ["content_id", textValue(detail, "content_id"), { mono: true }],
+          ["content_type", textValue(detail, "content_type_id"), { mono: true }],
         ]}
       />
     </PanelShell>
@@ -178,26 +170,33 @@ function EventDetailPanel({ feature }: { feature: FeatureKindDetail }) {
 
 function AreaContainedList({ items }: { items: FeatureSummary[] }) {
   if (items.length === 0) {
-    return <div className="text-sm text-muted-foreground">포함된 feature가 없습니다.</div>;
+    return (
+      <EmptyState
+        description="이 구역 경계 안에 위치한 feature가 없습니다."
+        size="sm"
+        title="포함된 feature가 없습니다."
+      />
+    );
   }
   return (
-    <div className="flex flex-col gap-2">
+    <ul className="divide-y divide-border">
       {items.map((item) => (
-        <Link
-          className="rounded-md border bg-muted/30 px-3 py-2 text-sm hover:bg-muted"
-          href={featureHref(item.feature_id)}
-          key={item.feature_id}
-        >
-          <div className="flex min-w-0 items-center justify-between gap-2">
-            <span className="truncate font-medium">{item.name}</span>
-            <Badge variant="outline">{item.kind}</Badge>
-          </div>
-          <div className="mt-1 break-all font-mono text-xs text-muted-foreground">
-            {shortId(item.feature_id, 18)}
-          </div>
-        </Link>
+        <li key={item.feature_id}>
+          <Link
+            className="-mx-2 flex flex-col gap-0.5 rounded-control px-2 py-2 text-sm text-text-primary transition-colors outline-none hover:bg-surface-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus active:bg-surface-muted"
+            href={featureHref(item.feature_id)}
+          >
+            <span className="flex min-w-0 items-center justify-between gap-2">
+              <span className="truncate font-medium">{item.name}</span>
+              <Badge variant="neutral">{item.kind}</Badge>
+            </span>
+            <span className="truncate font-mono text-2xs text-text-secondary slashed-zero">
+              {shortId(item.feature_id, 18)}
+            </span>
+          </Link>
+        </li>
       ))}
-    </div>
+    </ul>
   );
 }
 
@@ -222,9 +221,8 @@ function AreaDetailPanel({
 
   return (
     <PanelShell
-      badge={contained.data ? `${items.length}건` : undefined}
+      count={contained.data ? `${formatCount(items.length)}건` : undefined}
       description="면적과 공간 안의 feature"
-      icon={<RulerIcon className="size-4" />}
       title="Area"
     >
       <div className="flex flex-col gap-4">
@@ -232,13 +230,20 @@ function AreaDetailPanel({
           rows={[
             ["면적", formatArea(area)],
             ["종류", textValue(detail, "area_kind")],
-            ["boundary", textValue(detail, "boundary_source")],
+            ["boundary", textValue(detail, "boundary_source"), { mono: true }],
             ["관리", textValue(detail, "administrative_office")],
             ["규제", textValue(detail, "regulation_scope")],
             ["설명", textValue(detail, "description")],
           ]}
         />
-        {contained.isLoading ? <Skeleton className="h-32 w-full" /> : null}
+        {contained.isLoading ? (
+          <div aria-busy="true" className="flex flex-col gap-2">
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-3 w-1/2" />
+            <Skeleton className="h-4 w-2/3" />
+            <Skeleton className="h-3 w-1/2" />
+          </div>
+        ) : null}
         {contained.isError ? (
           <Alert variant="destructive">
             <AlertTitle>포함 feature 조회 실패</AlertTitle>
@@ -256,11 +261,7 @@ function AreaDetailPanel({
 function RouteDetailPanel({ feature }: { feature: FeatureKindDetail }) {
   const detail = feature.detail;
   return (
-    <PanelShell
-      description="구간, 거리, 난이도 등 route 메타"
-      icon={<RouteIcon className="size-4" />}
-      title="Route"
-    >
+    <PanelShell description="구간, 거리, 난이도 등 route 메타" title="Route">
       <InfoRows
         rows={[
           ["종류", textValue(detail, "route_type")],
@@ -271,7 +272,7 @@ function RouteDetailPanel({ feature }: { feature: FeatureKindDetail }) {
           ["시작 주소", textValue(detail, "begin_address")],
           ["종료", textValue(detail, "end_name")],
           ["종료 주소", textValue(detail, "end_address")],
-          ["geometry", textValue(detail, "geometry_status")],
+          ["geometry", textValue(detail, "geometry_status"), { mono: true }],
         ]}
       />
     </PanelShell>
@@ -285,6 +286,34 @@ function isMoisPlaceDetail(feature: FeatureKindDetail): boolean {
   return Boolean(payload?.mng_no || facilityInfo?.service_slug);
 }
 
+function FacilityDisclosure({
+  label,
+  value,
+  defaultOpen = false,
+}: {
+  label: string;
+  value: DetailRecord | null;
+  defaultOpen?: boolean;
+}) {
+  if (!value) return null;
+  return (
+    <details className="group/details" open={defaultOpen}>
+      <summary className="inline-flex h-control-sm cursor-pointer list-none items-center gap-1 rounded-control font-mono text-xs text-text-secondary outline-none select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
+        <span aria-hidden="true" className="w-3 text-text-tertiary group-open/details:hidden">
+          +
+        </span>
+        <span aria-hidden="true" className="hidden w-3 text-text-tertiary group-open/details:inline">
+          −
+        </span>
+        {label}
+      </summary>
+      <div className="pt-1">
+        <JsonViewer maxHeight="sm" value={value} />
+      </div>
+    </details>
+  );
+}
+
 function MoisPlaceDetailPanel({ feature }: { feature: FeatureKindDetail }) {
   const detail = feature.detail;
   const payload = objectValue(detail, "payload") ?? {};
@@ -295,11 +324,7 @@ function MoisPlaceDetailPanel({ feature }: { feature: FeatureKindDetail }) {
   const cultureSports = objectValue(facilityInfo, "culture_sports");
 
   return (
-    <PanelShell
-      description="행정안전부 지방행정 인허가 상세"
-      icon={<ClipboardListIcon className="size-4" />}
-      title="MOIS place"
-    >
+    <PanelShell description="행정안전부 지방행정 인허가 상세" title="MOIS place">
       <div className="flex flex-col gap-4">
         <InfoRows
           rows={[
@@ -308,58 +333,22 @@ function MoisPlaceDetailPanel({ feature }: { feature: FeatureKindDetail }) {
             ["영업상태", textValue(payload, "status_name")],
             ["상세상태", textValue(payload, "detail_status_name")],
             ["인허가일", textValue(detail, "license_date")],
-            ["관리번호", textValue(payload, "mng_no")],
-            ["개방자치단체", textValue(payload, "opn_authority_code")],
-            ["place_kind", textValue(detail, "place_kind")],
-            ["category", feature.category],
+            ["관리번호", textValue(payload, "mng_no"), { mono: true }],
+            ["개방자치단체", textValue(payload, "opn_authority_code"), { mono: true }],
+            ["place_kind", textValue(detail, "place_kind"), { mono: true }],
+            ["category", feature.category, { mono: true }],
             ["MOIS 분류", textValue(facilityInfo, "category")],
-            ["service_slug", textValue(facilityInfo, "service_slug")],
+            ["service_slug", textValue(facilityInfo, "service_slug"), { mono: true }],
             ["세부업종", textValue(facilityInfo, "subtype_name")],
             ["영업방식", textValue(facilityInfo, "sales_method_name")],
             ["전화", arrayText(detail, "phones")],
           ]}
         />
-        <div className="grid gap-3">
-          {building ? (
-            <details open>
-              <summary className="cursor-pointer text-sm font-medium">
-                facility_info.building
-              </summary>
-              <pre className="mt-2 max-h-40 overflow-auto rounded-md bg-muted p-3 text-xs">
-                {JSON.stringify(building, null, 2)}
-              </pre>
-            </details>
-          ) : null}
-          {food ? (
-            <details open>
-              <summary className="cursor-pointer text-sm font-medium">
-                facility_info.food
-              </summary>
-              <pre className="mt-2 max-h-40 overflow-auto rounded-md bg-muted p-3 text-xs">
-                {JSON.stringify(food, null, 2)}
-              </pre>
-            </details>
-          ) : null}
-          {medical ? (
-            <details>
-              <summary className="cursor-pointer text-sm font-medium">
-                facility_info.medical
-              </summary>
-              <pre className="mt-2 max-h-40 overflow-auto rounded-md bg-muted p-3 text-xs">
-                {JSON.stringify(medical, null, 2)}
-              </pre>
-            </details>
-          ) : null}
-          {cultureSports ? (
-            <details>
-              <summary className="cursor-pointer text-sm font-medium">
-                facility_info.culture_sports
-              </summary>
-              <pre className="mt-2 max-h-40 overflow-auto rounded-md bg-muted p-3 text-xs">
-                {JSON.stringify(cultureSports, null, 2)}
-              </pre>
-            </details>
-          ) : null}
+        <div className="flex flex-col gap-2">
+          <FacilityDisclosure defaultOpen label="facility_info.building" value={building} />
+          <FacilityDisclosure defaultOpen label="facility_info.food" value={food} />
+          <FacilityDisclosure label="facility_info.medical" value={medical} />
+          <FacilityDisclosure label="facility_info.culture_sports" value={cultureSports} />
         </div>
       </div>
     </PanelShell>
@@ -377,11 +366,7 @@ function NoticeDetailPanel({ feature }: { feature: FeatureKindDetail }) {
   const payload = objectValue(detail, "payload") ?? {};
 
   return (
-    <PanelShell
-      description="공지 시간, 출처, 도로 돌발 메타"
-      icon={<AlertTriangleIcon className="size-4" />}
-      title="Notice"
-    >
+    <PanelShell description="공지 시간, 출처, 도로 돌발 메타" title="Notice">
       <InfoRows
         rows={[
           ["종류", textValue(detail, "notice_type")],
@@ -403,15 +388,11 @@ function NoticeDetailPanel({ feature }: { feature: FeatureKindDetail }) {
 
 function GenericDetailPanel({ feature }: { feature: FeatureKindDetail }) {
   return (
-    <PanelShell
-      description="kind 전용 상세 화면이 아직 없는 feature"
-      icon={<ShapesIcon className="size-4" />}
-      title="Feature"
-    >
+    <PanelShell description="kind 전용 상세 화면이 아직 없는 feature" title="Feature">
       <InfoRows
         rows={[
-          ["kind", feature.kind],
-          ["category", feature.category],
+          ["kind", feature.kind, { mono: true }],
+          ["category", feature.category, { mono: true }],
           ["updated", formatDateTime(feature.updated_at ?? null)],
         ]}
       />

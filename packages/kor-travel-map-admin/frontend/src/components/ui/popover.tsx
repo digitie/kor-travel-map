@@ -1,4 +1,5 @@
 "use client"
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 
 import { Popover as PopoverPrimitive } from "@base-ui/react/popover"
 
@@ -12,6 +13,11 @@ function PopoverTrigger({ ...props }: PopoverPrimitive.Trigger.Props) {
   return <PopoverPrimitive.Trigger data-slot="popover-trigger" {...props} />
 }
 
+/**
+ * Elevated surface: `bg-card` + hairline + `rounded-panel` + `shadow-elevated` (popover/menu tier;
+ * dialogs use `shadow-modal`). Motion = design.md overlay recipe (opacity + scale .98, 150ms in /
+ * 100ms out); `data-motion="crossfade"` keeps an opacity-only crossfade under reduced motion.
+ */
 function PopoverContent({
   className,
   sideOffset = 8,
@@ -31,9 +37,10 @@ function PopoverContent({
       >
         <PopoverPrimitive.Popup
           data-slot="popover-content"
+          data-motion="crossfade"
           className={cn(
-            "w-72 rounded-lg border border-border bg-popover p-4 text-[13px] leading-normal text-popover-foreground shadow-[var(--shadow-modal)] outline-none",
-            "data-[starting-style]:scale-95 data-[starting-style]:opacity-0 data-[ending-style]:scale-95 data-[ending-style]:opacity-0 transition-[transform,opacity] duration-100",
+            "w-72 rounded-panel border border-border bg-card p-4 text-xs leading-normal text-text-primary shadow-elevated outline-none",
+            "transition-[opacity,scale] duration-base ease-out data-[starting-style]:scale-98 data-[starting-style]:opacity-0 data-[ending-style]:scale-98 data-[ending-style]:opacity-0 data-[ending-style]:duration-fast data-[ending-style]:ease-in",
             className
           )}
           {...props}

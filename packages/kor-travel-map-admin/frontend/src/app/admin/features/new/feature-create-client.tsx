@@ -1,4 +1,5 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (form) · design-system: design.md · designed-as-app
 
 import { type ColumnDef } from "@tanstack/react-table";
 import type { Map as MapLibreMap } from "maplibre-gl";
@@ -36,13 +37,16 @@ import {
   type KorTravelGeoCandidate,
 } from "@/api/korTravelGeo";
 import { AdminShell } from "@/components/admin-shell";
+import { SectionCard } from "@/components/section-card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { FormField } from "@/components/ui/form-field-input";
 import { FormSelect } from "@/components/ui/form-select";
-import { DataTable } from "@/components/ui/data-table";
+import {
+  DataTable,
+  type DataTableColumnMeta,
+} from "@/components/ui/data-table";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { validateAddressCodes } from "@/lib/feature-address-validation";
 import {
@@ -65,6 +69,7 @@ import {
   required,
   validateForm,
 } from "@/lib/form-validation";
+import { NULL_GLYPH } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 import {
@@ -531,29 +536,27 @@ function useFeatureCreateClientController() {
         cell: ({ row }) => {
           const item = row.original;
           return (
-            <>
+            <div className="flex min-w-0 flex-col gap-0.5">
               <Link
-                className="font-medium text-primary underline-offset-4 hover:underline"
+                className="truncate rounded-control font-medium text-brand underline-offset-4 outline-none hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                 href={featureDetailHref(item.feature_id)}
                 onClick={(event) => event.stopPropagation()}
               >
                 {item.name}
               </Link>
-              <div className="mt-1 flex flex-wrap gap-1">
-                <Badge variant="outline">{item.kind}</Badge>
-                <Badge variant="outline">{item.category}</Badge>
-              </div>
-            </>
+              <span className="truncate font-mono text-2xs text-text-secondary slashed-zero">
+                {item.kind} · {item.category}
+              </span>
+            </div>
           );
         },
       },
       {
         accessorKey: "distance_m",
         header: "거리",
+        meta: { align: "right" } satisfies DataTableColumnMeta,
         cell: ({ row }) => (
-          <span className="font-mono text-xs">
-            {row.original.distance_m.toFixed(1)}m
-          </span>
+          <span className="tabular-nums">{row.original.distance_m.toFixed(1)}m</span>
         ),
       },
     ],
@@ -755,6 +758,8 @@ function useFeatureCreateClientController() {
   };
 }
 
+type FailureItem = { source: string; message: string | undefined };
+
 function FeatureCreateFeedback({
   createFeature,
   createdFeatureId,
@@ -764,34 +769,61 @@ function FeatureCreateFeedback({
   ReturnType<typeof useFeatureCreateClientController>,
   "createFeature" | "createdFeatureId" | "formError" | "korTravelGeoError"
 >) {
+  const failureCandidates: Array<FailureItem | null> = [
+    formError ? { source: "입력 검증", message: formError } : null,
+    korTravelGeoError ? { source: "kor-travel-geo", message: korTravelGeoError } : null,
+    createFeature.isError
+      ? { source: "생성 요청", message: createFeature.error?.message }
+      : null,
+  ];
+  const failures = failureCandidates.filter((item): item is FailureItem => item !== null);
   return (
-    <>
-      {(formError || korTravelGeoError || createFeature.isError) && (
+    // CTA 바로 위의 예약 슬롯 — 오류가 나타나도 저장 행이 밀리지 않는다(M13).
+    <div aria-live="polite" className="flex min-h-[1lh] flex-col gap-3">
+      {failures.length > 0 ? (
         <Alert variant="destructive">
           <AlertTitle>Feature 작성 실패</AlertTitle>
           <AlertDescription>
-            {formError ?? korTravelGeoError ?? createFeature.error?.message}
+            {failures.length === 1 ? (
+              <p>{failures[0].message}</p>
+            ) : (
+              <ul className="list-disc space-y-0.5 pl-4">
+                {failures.map((item) => (
+                  <li key={item.source}>
+                    <span className="font-medium">{item.source}</span>
+                    {item.message ? <> — {item.message}</> : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+            <p>입력값을 고친 뒤 다시 요청을 생성하세요.</p>
           </AlertDescription>
         </Alert>
-      )}
+      ) : null}
 
       {createdFeatureId ? (
         <Alert>
           <CheckCircle2Icon data-icon="inline-start" />
           <AlertTitle>Feature 생성됨</AlertTitle>
           <AlertDescription>
+            변경 요청으로 등록되었습니다. 생성된 feature{" "}
             <Link
-              className="underline underline-offset-4"
+              className="rounded-control text-brand underline underline-offset-4 outline-none hover:text-brand-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
               href={featureDetailHref(createdFeatureId)}
             >
               {createdFeatureId}
             </Link>
+            에서 상태와 소스를 확인하세요.
           </AlertDescription>
         </Alert>
       ) : null}
-    </>
+    </div>
   );
 }
+
+/** 지오코딩 후보 행 — SelectableRow 레시피(테두리 없는 행, 선택 = brand-tint + 좌측 마크)를 native button으로. */
+const candidateRowClass =
+  "group/row relative flex w-full cursor-pointer flex-col items-start gap-0.5 rounded-control px-3 py-2 text-left text-sm text-text-primary transition-colors outline-none select-none hover:bg-surface-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus active:bg-surface-muted aria-pressed:bg-brand-tint aria-pressed:hover:bg-brand-tint aria-pressed:before:absolute aria-pressed:before:inset-y-2 aria-pressed:before:left-0 aria-pressed:before:w-0.5 aria-pressed:before:rounded-full aria-pressed:before:bg-brand aria-pressed:before:content-['']";
 
 function FeatureCreateLocationWorkspace({
   applyCandidate,
@@ -831,182 +863,204 @@ function FeatureCreateLocationWorkspace({
   | "updateCoord"
   | "updateForm"
 >) {
+  const reverseGeocodeDisabledReason = !coord
+    ? "경도·위도를 먼저 입력하거나 지도를 클릭하세요"
+    : korTravelGeoPending
+      ? "kor-travel-geo 조회가 진행 중입니다"
+      : undefined;
+  const nearbyDisabledReason = !coord
+    ? "좌표가 있어야 중복 후보를 조회할 수 있습니다"
+    : undefined;
   return (
-    <>
-      <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_28rem]">
-        <FeatureLocationPreviewSection
-          apiKey={VWORLD_KEY}
-          className="h-full"
-          coord={coord}
-          heightClassName="min-h-[28rem] flex-1"
-          markerColor={form.markerColor}
-          markerIcon={form.markerIcon}
-          testId="feature-create-location-map"
-          title={form.name || "new feature"}
+    <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_var(--rail)]">
+      <FeatureLocationPreviewSection
+        apiKey={VWORLD_KEY}
+        coord={coord}
+        heightClassName="h-[28rem]"
+        markerColor={form.markerColor}
+        markerIcon={form.markerIcon}
+        testId="feature-create-location-map"
+        title={form.name || "new feature"}
+        actions={
+          <>
+            <Button size="sm" type="button" variant="outline" onClick={applyMapCenter}>
+              <LocateFixedIcon data-icon="inline-start" />
+              중심 사용
+            </Button>
+            <Button
+              disabled={!coord || korTravelGeoPending}
+              disabledReason={reverseGeocodeDisabledReason}
+              loading={korTravelGeoPending && Boolean(coord)}
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={() => void runReverseGeocode()}
+            >
+              <MapPinIcon data-icon="inline-start" />
+              역지오코딩
+            </Button>
+          </>
+        }
+        onLoad={(map) => {
+          mapRef.current = map;
+        }}
+        onMapClick={({ lon, lat }) => updateCoord(lon, lat)}
+      />
+
+      <div className="flex min-w-0 flex-col gap-4">
+        <SectionCard
           actions={
-            <>
-              <Button type="button" variant="outline" onClick={applyMapCenter}>
-                <LocateFixedIcon data-icon="inline-start" />
-                중심 사용
-              </Button>
-              <Button
-                disabled={!coord || korTravelGeoPending}
-                type="button"
-                variant="outline"
-                onClick={() => void runReverseGeocode()}
-              >
-                <MapPinIcon data-icon="inline-start" />
-                역지오코딩
-              </Button>
-            </>
+            <span className="text-xs text-text-secondary tabular-nums">
+              {korTravelGeoPending ? "조회 중" : `${korTravelGeoCandidates.length}건`}
+            </span>
           }
-          onLoad={(map) => {
-            mapRef.current = map;
-          }}
-          onMapClick={({ lon, lat }) => updateCoord(lon, lat)}
-        />
-
-        <div className="flex min-w-0 flex-col gap-4">
-          <section className="rounded-lg border bg-background p-4">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <h2 className="font-medium">kor-travel-geo</h2>
-              {korTravelGeoPending ? (
-                <Badge variant="outline">조회 중</Badge>
-              ) : (
-                <Badge variant="secondary">
-                  {korTravelGeoCandidates.length}건
-                </Badge>
-              )}
-            </div>
-            <div className="grid gap-2">
-              <FormField
-                error={fieldErrors.geocodeQuery}
-                label="주소 검색"
-                hint="주소·지명을 입력해 좌표 후보를 조회합니다."
-                value={form.geocodeQuery}
-                onChange={(event) =>
-                  updateForm("geocodeQuery", event.target.value)
-                }
-              />
-              <div className="grid gap-2 sm:grid-cols-[9rem_1fr]">
-                <FormSelect
-                  label="주소 타입"
-                  hint="도로명(road)/지번(parcel) 지오코딩 기준입니다."
-                  value={form.geocodeType}
-                  onChange={(event) =>
-                    updateForm(
-                      "geocodeType",
-                      event.target
-                        .value as FeatureCreateFormState["geocodeType"],
-                    )
-                  }
-                >
-                  <NativeSelectOption value="road">road</NativeSelectOption>
-                  <NativeSelectOption value="parcel">parcel</NativeSelectOption>
-                </FormSelect>
-                <Button
-                  className="self-end"
-                  disabled={korTravelGeoPending}
-                  type="button"
-                  variant="outline"
-                  onClick={() => void runGeocode()}
-                >
-                  <SearchIcon data-icon="inline-start" />
-                  정지오코딩
-                </Button>
-              </div>
-            </div>
-            {korTravelGeoCandidates.length > 0 ? (
-              <div className="mt-4 flex flex-col gap-2">
-                {korTravelGeoCandidates.slice(0, 4).map((candidate) => {
-                  const candidateCoord =
-                    korTravelGeoCandidateToCoord(candidate);
-                  const address = candidate.address;
-                  const candidateKey = korTravelGeoCandidateKey(candidate);
-                  const selected = candidateKey === selectedKorTravelGeoKey;
-                  return (
-                    <button
-                      className={cn(
-                        "rounded-md border px-3 py-2 text-left text-sm hover:bg-muted",
-                        selected
-                          ? "border-primary bg-primary/10 text-primary"
-                          : null,
-                      )}
-                      key={candidateKey}
-                      type="button"
-                      onClick={() => applyCandidate(candidate)}
-                    >
-                      <div className="font-medium">
-                        {address?.road_address ??
-                          address?.parcel_address ??
-                          address?.full ??
-                          candidate.match_kind ??
-                          "candidate"}
-                      </div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {candidateCoord
-                          ? `${candidateCoord.lon.toFixed(6)}, ${candidateCoord.lat.toFixed(6)}`
-                          : "coord 없음"}
-                        {typeof candidate.confidence === "number"
-                          ? ` · ${candidate.confidence.toFixed(2)}`
-                          : ""}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
-          </section>
-
-          <section className="rounded-lg border bg-background p-4">
-            <div className="mb-3 flex items-center justify-between gap-3">
-              <h2 className="font-medium">중복 후보</h2>
+          contentClassName="space-y-3"
+          title="kor-travel-geo"
+        >
+          <FormField
+            error={fieldErrors.geocodeQuery}
+            hint="주소·지명을 입력해 좌표 후보를 조회합니다."
+            label="주소 검색"
+            size="sm"
+            value={form.geocodeQuery}
+            onChange={(event) =>
+              updateForm("geocodeQuery", event.target.value)
+            }
+          />
+          <div className="grid gap-x-2 gap-y-1 sm:grid-cols-[9rem_1fr]">
+            <FormSelect
+              hint="도로명(road)/지번(parcel) 기준"
+              label="주소 타입"
+              size="sm"
+              value={form.geocodeType}
+              onChange={(event) =>
+                updateForm(
+                  "geocodeType",
+                  event.target
+                    .value as FeatureCreateFormState["geocodeType"],
+                )
+              }
+            >
+              <NativeSelectOption value="road">도로명(road)</NativeSelectOption>
+              <NativeSelectOption value="parcel">지번(parcel)</NativeSelectOption>
+            </FormSelect>
+            <div className="flex flex-col gap-1">
+              {/* 라벨 높이 스페이서 — 버튼을 왼쪽 select의 컨트롤 baseline에 맞춘다. */}
+              <span aria-hidden="true" className="invisible text-xs leading-snug font-medium">
+                조회
+              </span>
               <Button
-                disabled={!coord || nearby.isFetching}
+                disabled={korTravelGeoPending}
+                disabledReason="kor-travel-geo 조회가 진행 중입니다"
+                loading={korTravelGeoPending}
                 size="sm"
                 type="button"
                 variant="outline"
-                onClick={() => void nearby.refetch()}
+                onClick={() => void runGeocode()}
               >
-                <RefreshCwIcon data-icon="inline-start" />
-                재조회
+                <SearchIcon data-icon="inline-start" />
+                정지오코딩
               </Button>
             </div>
-            <FormField
-              error={
-                duplicateRadius === null
-                  ? "1 이상 100000 이하 숫자여야 합니다."
-                  : undefined
-              }
-              inputMode="numeric"
-              label="radius_m"
-              hint="이 반경(m) 내 기존 feature를 중복 후보로 조회합니다."
-              value={form.duplicateRadiusM}
-              onChange={(event) =>
-                updateForm("duplicateRadiusM", event.target.value)
-              }
-            />
-            {nearby.isError ? (
-              <Alert className="mt-4" variant="destructive">
-                <AlertTitle>중복 후보 조회 실패</AlertTitle>
-                <AlertDescription>{nearby.error.message}</AlertDescription>
-              </Alert>
-            ) : null}
-            <div className="mt-4">
-              <DataTable
-                columns={duplicateColumns}
-                data={duplicateItems}
-                getRowId={(row) => row.feature_id}
-                isLoading={nearby.isLoading}
-                emptyMessage="후보 없음"
-                manualSorting={false}
-                containerClassName="overflow-auto rounded-md border"
-              />
+          </div>
+          {korTravelGeoCandidates.length > 0 ? (
+            <div
+              aria-label="지오코딩 후보"
+              className="-mx-3 flex flex-col divide-y divide-border border-t border-border pt-1"
+              role="group"
+            >
+              {korTravelGeoCandidates.slice(0, 4).map((candidate) => {
+                const candidateCoord =
+                  korTravelGeoCandidateToCoord(candidate);
+                const address = candidate.address;
+                const candidateKey = korTravelGeoCandidateKey(candidate);
+                const selected = candidateKey === selectedKorTravelGeoKey;
+                return (
+                  <button
+                    aria-pressed={selected}
+                    className={candidateRowClass}
+                    key={candidateKey}
+                    type="button"
+                    onClick={() => applyCandidate(candidate)}
+                  >
+                    <span className="font-medium">
+                      {address?.road_address ??
+                        address?.parcel_address ??
+                        address?.full ??
+                        candidate.match_kind ??
+                        "candidate"}
+                    </span>
+                    <span className="font-mono text-2xs text-text-secondary tabular-nums slashed-zero">
+                      {candidateCoord
+                        ? `${candidateCoord.lon.toFixed(6)}, ${candidateCoord.lat.toFixed(6)}`
+                        : `좌표 ${NULL_GLYPH}`}
+                      {typeof candidate.confidence === "number"
+                        ? ` · ${candidate.confidence.toFixed(2)}`
+                        : ""}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
-          </section>
-        </div>
-      </section>
-    </>
+          ) : null}
+        </SectionCard>
+
+        <SectionCard
+          actions={
+            <Button
+              disabled={!coord || nearby.isFetching}
+              disabledReason={nearbyDisabledReason}
+              loading={nearby.isFetching}
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={() => void nearby.refetch()}
+            >
+              <RefreshCwIcon data-icon="inline-start" />
+              재조회
+            </Button>
+          }
+          contentClassName="space-y-3"
+          title="중복 후보"
+        >
+          <FormField
+            error={
+              duplicateRadius === null
+                ? "1 이상 100000 이하 숫자여야 합니다."
+                : undefined
+            }
+            hint="이 반경(m) 안의 기존 feature를 중복 후보로 조회합니다."
+            inputMode="numeric"
+            label="radius_m"
+            size="sm"
+            value={form.duplicateRadiusM}
+            onChange={(event) =>
+              updateForm("duplicateRadiusM", event.target.value)
+            }
+          />
+          {nearby.isError ? (
+            <Alert variant="destructive">
+              <AlertTitle>중복 후보 조회 실패</AlertTitle>
+              <AlertDescription>{nearby.error.message}</AlertDescription>
+            </Alert>
+          ) : null}
+          <DataTable
+            columns={duplicateColumns}
+            data={duplicateItems}
+            emptyState={{
+              title: "후보 없음",
+              description: coord
+                ? "반경 안에 기존 feature가 없습니다."
+                : "좌표를 입력하면 자동으로 조회합니다.",
+            }}
+            getRowId={(row) => row.feature_id}
+            isLoading={nearby.isLoading}
+            manualSorting={false}
+            skeletonRowCount={3}
+          />
+        </SectionCard>
+      </div>
+    </section>
   );
 }
 
@@ -1014,39 +1068,23 @@ function FeatureCreateIdentityFields({
   categories,
   categoryItems,
   coordError,
-  createFeature,
   fieldErrors,
   form,
   formMarkerIconOptions,
-  resetForm,
   updateForm,
 }: Pick<
   ReturnType<typeof useFeatureCreateClientController>,
   | "categories"
   | "categoryItems"
   | "coordError"
-  | "createFeature"
   | "fieldErrors"
   | "form"
   | "formMarkerIconOptions"
-  | "resetForm"
   | "updateForm"
 >) {
   return (
     <>
       <FeatureBasicInfoSection
-        actions={
-          <>
-            <Button type="button" variant="outline" onClick={resetForm}>
-              <RotateCcwIcon data-icon="inline-start" />
-              초기화
-            </Button>
-            <Button disabled={createFeature.isPending} type="submit">
-              <CheckCircle2Icon data-icon="inline-start" />
-              요청 생성
-            </Button>
-          </>
-        }
         category={form.category}
         categoryError={fieldErrors.category}
         categoryItems={categoryItems}
@@ -1072,18 +1110,21 @@ function FeatureCreateIdentityFields({
         onQualityStateChange={(value) => updateForm("qualityState", value)}
       />
       {categories.isError ? (
-        <div className="text-sm text-destructive">
-          {categories.error.message}
-        </div>
+        <Alert variant="destructive">
+          <AlertTitle>카테고리 목록을 불러오지 못했습니다</AlertTitle>
+          <AlertDescription>
+            {categories.error.message} — 카테고리 코드를 직접 입력해도 제출할 수 있습니다.
+          </AlertDescription>
+        </Alert>
       ) : null}
 
-      <section className="rounded-lg border bg-background p-4">
-        <h2 className="mb-4 font-medium">위치/요청</h2>
-        <div className="grid gap-3 lg:grid-cols-4">
+      <SectionCard title="위치/요청">
+        <div className="grid gap-x-3 gap-y-1 lg:grid-cols-4">
           <FormField
             error={fieldErrors.lon ?? coordError}
             inputMode="decimal"
             label="경도"
+            placeholder="예: 126.978400"
             required
             value={form.lon}
             onChange={(event) => updateForm("lon", event.target.value)}
@@ -1092,6 +1133,7 @@ function FeatureCreateIdentityFields({
             error={fieldErrors.lat ?? coordError}
             inputMode="decimal"
             label="위도"
+            placeholder="예: 37.566500"
             required
             value={form.lat}
             onChange={(event) => updateForm("lat", event.target.value)}
@@ -1127,21 +1169,23 @@ function FeatureCreateIdentityFields({
             ))}
           </FormSelect>
         </div>
-        <div className="mt-3 grid gap-3 lg:grid-cols-4">
+        <div className="grid gap-x-3 gap-y-1 lg:grid-cols-4">
           <FormField
             error={fieldErrors.reason}
+            hint="변경 요청 감사 로그에 남는 문장"
             label="사유"
             required
             value={form.reason}
             onChange={(event) => updateForm("reason", event.target.value)}
           />
           <FormField
-            label="Feature ID"
             hint="비우면 자동 생성됩니다."
+            label="Feature ID"
             value={form.featureId}
             onChange={(event) => updateForm("featureId", event.target.value)}
           />
           <FormField
+            hint="같은 키로 다시 보내면 중복 생성되지 않습니다."
             label="중복 방지 키"
             value={form.idempotencyKey}
             onChange={(event) =>
@@ -1149,7 +1193,7 @@ function FeatureCreateIdentityFields({
             }
           />
         </div>
-      </section>
+      </SectionCard>
     </>
   );
 }
@@ -1165,47 +1209,45 @@ function FeatureCreateDetailFields({
 >) {
   return (
     <>
-      <section className="grid gap-4 xl:grid-cols-2">
-        <FeatureAddressSection
-          idPrefix="create"
-          values={{
-            addressAdmin: form.addressAdmin,
-            addressExtraJson: form.addressExtraJson,
-            addressLegal: form.addressLegal,
-            addressRoad: form.addressRoad,
-            adminDongCode: form.adminDongCode,
-            legalDongCode: form.legalDongCode,
-            roadAddressManagementNo: form.roadAddressManagementNo,
-            roadNameCode: form.roadNameCode,
-            sidoCode: form.sidoCode,
-            sigunguCode: form.sigunguCode,
-          }}
-          onSelectRegionCandidate={applyCandidate}
-          onChange={(field, value) => updateForm(field, value)}
-        />
-        <FeatureDetailSection
-          errors={{
-            homepageUrl: fieldErrors.homepageUrl,
-            phone: fieldErrors.phone,
-            sourceUrl: fieldErrors.sourceUrl,
-          }}
-          idPrefix="create"
-          kind={form.kind}
-          values={{
-            detailExtraJson: form.detailExtraJson,
-            endDate: form.endDate,
-            eventStatus: form.eventStatus,
-            homepageUrl: form.homepageUrl,
-            organizer: form.organizer,
-            phone: form.phone,
-            sourceUrl: form.sourceUrl,
-            startDate: form.startDate,
-            urlsExtraJson: form.urlsExtraJson,
-            venue: form.venue,
-          }}
-          onChange={(field, value) => updateForm(field, value)}
-        />
-      </section>
+      <FeatureAddressSection
+        idPrefix="create"
+        values={{
+          addressAdmin: form.addressAdmin,
+          addressExtraJson: form.addressExtraJson,
+          addressLegal: form.addressLegal,
+          addressRoad: form.addressRoad,
+          adminDongCode: form.adminDongCode,
+          legalDongCode: form.legalDongCode,
+          roadAddressManagementNo: form.roadAddressManagementNo,
+          roadNameCode: form.roadNameCode,
+          sidoCode: form.sidoCode,
+          sigunguCode: form.sigunguCode,
+        }}
+        onSelectRegionCandidate={applyCandidate}
+        onChange={(field, value) => updateForm(field, value)}
+      />
+      <FeatureDetailSection
+        errors={{
+          homepageUrl: fieldErrors.homepageUrl,
+          phone: fieldErrors.phone,
+          sourceUrl: fieldErrors.sourceUrl,
+        }}
+        idPrefix="create"
+        kind={form.kind}
+        values={{
+          detailExtraJson: form.detailExtraJson,
+          endDate: form.endDate,
+          eventStatus: form.eventStatus,
+          homepageUrl: form.homepageUrl,
+          organizer: form.organizer,
+          phone: form.phone,
+          sourceUrl: form.sourceUrl,
+          startDate: form.startDate,
+          urlsExtraJson: form.urlsExtraJson,
+          venue: form.venue,
+        }}
+        onChange={(field, value) => updateForm(field, value)}
+      />
     </>
   );
 }
@@ -1252,17 +1294,10 @@ function FeatureCreateClientView({
           </Link>
         </>
       }
-      description="새 Feature를 등록합니다."
+      description="새 Feature를 변경 요청으로 등록합니다. 좌표를 먼저 정하고, 기본 정보·주소·상세를 채운 뒤 맨 아래에서 요청을 생성합니다."
       title="새 Feature"
     >
       <form className="flex flex-col gap-4" onSubmit={submitCreate}>
-        <FeatureCreateFeedback
-          createFeature={createFeature}
-          createdFeatureId={createdFeatureId}
-          formError={formError}
-          korTravelGeoError={korTravelGeoError}
-        />
-
         <FeatureCreateLocationWorkspace
           applyCandidate={applyCandidate}
           applyMapCenter={applyMapCenter}
@@ -1287,11 +1322,9 @@ function FeatureCreateClientView({
           categories={categories}
           categoryItems={categoryItems}
           coordError={coordError}
-          createFeature={createFeature}
           fieldErrors={fieldErrors}
           form={form}
           formMarkerIconOptions={formMarkerIconOptions}
-          resetForm={resetForm}
           updateForm={updateForm}
         />
 
@@ -1301,6 +1334,25 @@ function FeatureCreateClientView({
           form={form}
           updateForm={updateForm}
         />
+
+        <FeatureCreateFeedback
+          createFeature={createFeature}
+          createdFeatureId={createdFeatureId}
+          formError={formError}
+          korTravelGeoError={korTravelGeoError}
+        />
+
+        {/* 저장 행 — 폼 맨 끝에 하나(design.md form 변형). primary 1 + secondary 1. */}
+        <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border pt-4">
+          <Button type="button" variant="outline" onClick={resetForm}>
+            <RotateCcwIcon data-icon="inline-start" />
+            초기화
+          </Button>
+          <Button loading={createFeature.isPending} type="submit">
+            <CheckCircle2Icon data-icon="inline-start" />
+            요청 생성
+          </Button>
+        </div>
       </form>
     </AdminShell>
   );

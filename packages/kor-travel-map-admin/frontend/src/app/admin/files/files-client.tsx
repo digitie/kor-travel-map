@@ -1,17 +1,17 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 
 import { type ColumnDef } from "@tanstack/react-table";
 import {
-  DatabaseIcon,
   FileIcon,
   FolderIcon,
-  HardDriveIcon,
   RefreshCwIcon,
   ScanSearchIcon,
   Trash2Icon,
+  XIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 
 import {
   type ManagedFile,
@@ -24,21 +24,32 @@ import {
   useRescanManagedFilesMutation,
 } from "@/api/adminFiles";
 import { AdminShell } from "@/components/admin-shell";
+import { useConfirm } from "@/components/confirm-dialog";
 import { DetailList, type DetailItem } from "@/components/detail-list";
 import { EmptyState } from "@/components/empty-state";
 import { FilterBar, FilterField } from "@/components/filter-bar";
 import { HelpTip } from "@/components/help-tip";
 import { JsonViewer } from "@/components/json-viewer";
+import { OffsetPager } from "@/components/pagination-bar";
 import { SectionCard } from "@/components/section-card";
 import { StatusBadge } from "@/components/status-badge";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
+import {
+  Alert,
+  AlertAction,
+  AlertActions,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { DataTable } from "@/components/ui/data-table";
+import { buttonVariants } from "@/components/ui/button-variants";
+import { DataTable, type DataTableColumnMeta } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
-import { formatCount, formatDateTime, shortId } from "@/lib/format";
+import { Skeleton } from "@/components/ui/skeleton";
+import { NULL_GLYPH, formatCount, formatDateTime, shortId } from "@/lib/format";
+import { statusLabel } from "@/lib/status-label";
+import { cn } from "@/lib/utils";
 
 // ── 라벨 사전 (값 drift는 core/managed_file_states.py가 정본) ──────────────
 const KIND_LABELS: Record<string, string> = {
@@ -82,6 +93,7 @@ const ORPHAN_REASON_LABELS: Record<string, string> = {
 };
 
 const KIND_OPTIONS = Object.keys(KIND_LABELS);
+// 상태 라벨은 status-label 톤 테이블을 그대로 읽는다(StatusBadge와 같은 어휘).
 const STATUS_OPTIONS = ["active", "orphan", "missing", "deleted"];
 const LOCATION_OPTIONS = Object.keys(LOCATION_LABELS);
 const SORT_OPTIONS: { value: string; label: string }[] = [
@@ -99,13 +111,18 @@ const PAGE_SIZE = 50;
 const byteFormatter = new Intl.NumberFormat("ko-KR");
 
 function formatBytes(value: number | null | undefined): string {
-  if (value === null || value === undefined) return "-";
+  if (value === null || value === undefined) return NULL_GLYPH;
   if (value < 1024) return `${byteFormatter.format(value)} B`;
   if (value < 1024 * 1024)
     return `${byteFormatter.format(Math.round(value / 1024))} KB`;
   if (value < 1024 * 1024 * 1024)
     return `${byteFormatter.format(Math.round(value / 1024 / 1024))} MB`;
   return `${byteFormatter.format(Math.round(value / 1024 / 1024 / 1024))} GB`;
+}
+
+/** 재스캔 결과의 느슨한 dict 값에서 숫자만 취한다 — 미지 값은 `—`(가짜 0 금지). */
+function asCount(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function basename(path: string): string {
@@ -131,7 +148,7 @@ const EMPTY_FILTERS: Filters = {
   sort: "downloaded_at",
 };
 
-// ── 요약 카드 (칩 클릭 = 해당 필터 적용, 페이지 간 유기적 연계) ───────────
+// ── 요약 facet (칩 = 해당 필터 토글, count 는 inline tabular 숫자 — badge 아님) ──────
 function SummaryChips({
   title,
   buckets,
@@ -142,30 +159,36 @@ function SummaryChips({
   title: string;
   buckets: { key: string; count: number }[];
   activeKey: string;
-  labels: Record<string, string>;
+  labels: (key: string) => string;
   onPick: (key: string) => void;
 }) {
   if (buckets.length === 0) {
     return null;
   }
   return (
-    <div className="flex flex-col gap-2">
-      <span className="text-xs font-medium text-muted-foreground">{title}</span>
-      <div className="flex flex-wrap gap-2">
+    <div className="flex flex-col gap-1.5" role="group" aria-label={`${title} 요약`}>
+      <span className="text-2xs font-medium text-text-secondary">{title}</span>
+      <div className="flex flex-wrap gap-1.5">
         {buckets.map((bucket) => {
           const active = activeKey === bucket.key;
           return (
             <Button
+              aria-pressed={active}
               key={bucket.key}
               size="sm"
               type="button"
-              variant={active ? "default" : "outline"}
+              variant={active ? "secondary" : "outline"}
               onClick={() => onPick(active ? "" : bucket.key)}
             >
-              {labels[bucket.key] ?? bucket.key}
-              <Badge className="ml-1" variant="secondary">
+              {labels(bucket.key)}
+              <span
+                className={cn(
+                  "text-2xs tabular-nums",
+                  active ? "text-brand" : "text-text-secondary",
+                )}
+              >
                 {formatCount(bucket.count)}
-              </Badge>
+              </span>
             </Button>
           );
         })}
@@ -176,15 +199,15 @@ function SummaryChips({
 
 function ProvenanceLinks({ links }: { links: ManagedFileLink[] }) {
   if (links.length === 0) {
-    return <span className="text-sm text-muted-foreground">연결된 항목 없음</span>;
+    return <span className="text-xs text-text-tertiary">연결된 항목이 없습니다.</span>;
   }
   return (
-    <div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap gap-1.5">
       {links.map((link) =>
         link.href ? (
           <Link
             key={link.rel}
-            className="inline-flex items-center rounded-md border px-2 py-1 text-xs underline-offset-2 hover:underline"
+            className={buttonVariants({ size: "sm", variant: "outline" })}
             href={link.href}
           >
             {link.label}
@@ -192,12 +215,25 @@ function ProvenanceLinks({ links }: { links: ManagedFileLink[] }) {
         ) : (
           <span
             key={link.rel}
-            className="inline-flex items-center rounded-md border px-2 py-1 text-xs text-muted-foreground"
+            className="inline-flex h-control-sm items-center rounded-control px-2.5 text-xs text-text-secondary"
           >
             {link.label}
           </span>
         ),
       )}
+    </div>
+  );
+}
+
+function DetailSkeleton() {
+  return (
+    <div className="flex flex-col gap-3" aria-busy="true">
+      {["a", "b", "c", "d", "e", "f"].map((key) => (
+        <div className="grid grid-cols-[8rem_minmax(0,1fr)] gap-x-3" key={key}>
+          <Skeleton className="h-4 w-16" />
+          <Skeleton className="h-4 w-3/4" />
+        </div>
+      ))}
     </div>
   );
 }
@@ -211,11 +247,11 @@ function FileDetailPanel({
 }) {
   const detail = useManagedFile(fileId);
   const purge = usePurgeManagedFileMutation();
-  const [confirmPurge, setConfirmPurge] = useState(false);
+  const confirm = useConfirm();
 
   if (fileId === null) {
     return (
-      <SectionCard title="상세" description="행을 선택하면 연결·이력을 추적합니다.">
+      <SectionCard description="행을 선택하면 연결·이력을 추적합니다." title="상세">
         <EmptyState
           icon={<FileIcon />}
           title="선택된 파일 없음"
@@ -225,14 +261,31 @@ function FileDetailPanel({
     );
   }
   if (detail.isLoading) {
-    return <SectionCard title="상세">불러오는 중…</SectionCard>;
+    return (
+      <SectionCard title="상세">
+        <DetailSkeleton />
+      </SectionCard>
+    );
   }
   if (detail.error || !detail.data) {
     return (
       <SectionCard title="상세">
         <Alert variant="destructive">
           <AlertTitle>상세를 불러오지 못했습니다</AlertTitle>
-          <AlertDescription>{detail.error?.message ?? "not found"}</AlertDescription>
+          <AlertDescription>
+            {detail.error?.message ?? "해당 파일이 레지스트리에 없습니다."}
+          </AlertDescription>
+          <AlertActions>
+            <Button
+              loading={detail.isFetching}
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={() => void detail.refetch()}
+            >
+              다시 시도
+            </Button>
+          </AlertActions>
         </Alert>
       </SectionCard>
     );
@@ -254,17 +307,17 @@ function FileDetailPanel({
       value: file.storage_backend,
       help: "filesystem(호스트 디스크) 또는 s3(오브젝트 스토리지).",
     },
-    { label: "Provider", value: file.provider ?? "-" },
-    { label: "Dataset", value: file.dataset_key ?? "-", mono: true },
+    { label: "Provider", value: file.provider ?? null },
+    { label: "Dataset", value: file.dataset_key ?? null, mono: true },
     {
       label: "등록 경로",
       value: file.registered_by,
       help: "hook(생산/소비 시 자동) · scan(주기 스캔) · backfill(DB 회수).",
     },
-    { label: "크기", value: formatBytes(file.byte_size) },
+    { label: "크기", value: formatBytes(file.byte_size), numeric: true },
     {
       label: "체크섬",
-      value: file.checksum_sha256 ? shortId(file.checksum_sha256, 16) : "-",
+      value: file.checksum_sha256 ? shortId(file.checksum_sha256, 16) : null,
       mono: true,
       copyable: file.checksum_sha256 !== null,
     },
@@ -292,48 +345,86 @@ function FileDetailPanel({
     });
   }
 
+  const runPurge = () => {
+    void (async () => {
+      const ok = await confirm({
+        title: "잔존 오브젝트를 레지스트리에서 정리할까요?",
+        description:
+          "소유 레코드가 사라진 S3 잔존 오브젝트를 레지스트리에서 제거합니다. 실체 삭제는 스캐너가 뒤이어 처리하며 되돌릴 수 없습니다.",
+        confirmLabel: "정리",
+        destructive: true,
+      });
+      if (!ok) return;
+      purge.mutate(file.file_id, { onSuccess: onPurged });
+    })();
+  };
+
   return (
     <SectionCard
+      actions={<StatusBadge status={file.status} />}
+      footer={
+        purgeable ? (
+          <div className="flex w-full flex-wrap items-center justify-between gap-2">
+            <span className="flex items-center gap-1 text-xs text-text-secondary">
+              잔존 오브젝트 정리
+              <HelpTip label="영구 정리">
+                소유 레코드가 사라진 S3 잔존 오브젝트만 레지스트리에서 제거합니다. 실체
+                오브젝트 삭제는 스토리지를 소유한 스캐너가 뒤이어 정리합니다. 파괴적
+                작업 스위치가 켜져 있어야 동작합니다.
+              </HelpTip>
+            </span>
+            <Button
+              loading={purge.isPending}
+              size="sm"
+              type="button"
+              variant="destructive"
+              onClick={runPurge}
+            >
+              <Trash2Icon data-icon="inline-start" />
+              레지스트리에서 정리
+            </Button>
+          </div>
+        ) : undefined
+      }
       title={
-        <span className="flex items-center gap-2">
+        <span className="flex min-w-0 items-center gap-2">
           {file.is_directory ? (
-            <FolderIcon className="size-4" />
+            <FolderIcon className="size-4 shrink-0 text-text-secondary" />
           ) : (
-            <FileIcon className="size-4" />
+            <FileIcon className="size-4 shrink-0 text-text-secondary" />
           )}
           <span className="truncate">{basename(file.path)}</span>
         </span>
       }
-      actions={<StatusBadge status={file.status} />}
     >
-      <DetailList items={items} columns={1} />
+      <DetailList items={items} layout="inline" />
 
-      <div className="flex flex-col gap-2">
-        <span className="text-xs font-medium text-muted-foreground">연결된 항목</span>
+      <div className="flex flex-col gap-2 border-t border-border pt-4">
+        <span className="text-2xs font-medium text-text-secondary">연결된 항목</span>
         <ProvenanceLinks links={links} />
       </div>
 
-      <div className="flex flex-col gap-2">
-        <span className="text-xs font-medium text-muted-foreground">
-          이력 ({formatCount(events.length)})
+      <div className="flex flex-col gap-2 border-t border-border pt-4">
+        <span className="text-2xs font-medium text-text-secondary">
+          이력 · {formatCount(events.length)}건
         </span>
         {events.length === 0 ? (
-          <span className="text-sm text-muted-foreground">이력 없음</span>
+          <span className="text-xs text-text-tertiary">기록된 이력이 없습니다.</span>
         ) : (
-          <ol className="flex flex-col gap-1 text-sm">
+          <ol className="flex flex-col divide-y divide-border">
             {events.map((event) => (
               <li
                 key={event.event_id}
-                className="flex flex-wrap items-baseline gap-2 border-l-2 pl-2"
+                className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 py-1.5 text-sm"
               >
                 <span className="font-medium">
                   {EVENT_LABELS[event.event_kind] ?? event.event_kind}
                 </span>
-                <span className="text-xs text-muted-foreground">
+                <span className="text-xs text-text-secondary tabular-nums">
                   {formatDateTime(event.occurred_at)}
                 </span>
                 {event.actor ? (
-                  <span className="text-xs text-muted-foreground">· {event.actor}</span>
+                  <span className="text-xs text-text-secondary">· {event.actor}</span>
                 ) : null}
               </li>
             ))}
@@ -342,64 +433,17 @@ function FileDetailPanel({
       </div>
 
       {Object.keys(file.meta).length > 0 ? (
-        <div className="flex flex-col gap-2">
-          <span className="text-xs font-medium text-muted-foreground">메타데이터</span>
-          <JsonViewer value={file.meta} />
+        <div className="flex flex-col gap-2 border-t border-border pt-4">
+          <span className="text-2xs font-medium text-text-secondary">메타데이터</span>
+          <JsonViewer aria-label="file metadata" value={file.meta} />
         </div>
       ) : null}
 
-      {purgeable ? (
-        <div className="flex flex-col gap-2 rounded-md border border-destructive/40 p-3">
-          <span className="flex items-center gap-1 text-sm font-medium">
-            잔존 오브젝트 정리
-            <HelpTip label="영구 정리">
-              소유 레코드가 사라진 S3 잔존 오브젝트만 레지스트리에서 제거합니다. 실체
-              오브젝트 삭제는 스토리지를 소유한 스캐너가 뒤이어 정리합니다. 파괴적
-              작업 스위치가 켜져 있어야 동작합니다.
-            </HelpTip>
-          </span>
-          {purge.error ? (
-            <span className="text-xs text-destructive">{purge.error.message}</span>
-          ) : null}
-          {confirmPurge ? (
-            <div className="flex gap-2">
-              <Button
-                disabled={purge.isPending}
-                size="sm"
-                type="button"
-                variant="destructive"
-                onClick={() =>
-                  purge.mutate(file.file_id, {
-                    onSuccess: () => {
-                      setConfirmPurge(false);
-                      onPurged();
-                    },
-                  })
-                }
-              >
-                확인
-              </Button>
-              <Button
-                size="sm"
-                type="button"
-                variant="outline"
-                onClick={() => setConfirmPurge(false)}
-              >
-                취소
-              </Button>
-            </div>
-          ) : (
-            <Button
-              size="sm"
-              type="button"
-              variant="outline"
-              onClick={() => setConfirmPurge(true)}
-            >
-              <Trash2Icon data-icon="inline-start" />
-              레지스트리에서 정리
-            </Button>
-          )}
-        </div>
+      {purge.error ? (
+        <Alert variant="destructive">
+          <AlertTitle>정리를 완료하지 못했습니다</AlertTitle>
+          <AlertDescription>{purge.error.message}</AlertDescription>
+        </Alert>
       ) : null}
     </SectionCard>
   );
@@ -409,10 +453,12 @@ function useFilesClientController() {
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS);
   const [offset, setOffset] = useState(0);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  // search-as-you-type: 키 입력마다 refetch하지 않도록 q만 deferred로 넘긴다(m10).
+  const deferredQ = useDeferredValue(filters.q);
 
   const listParams = useMemo(
     () => ({
-      q: filters.q.trim() || null,
+      q: deferredQ.trim() || null,
       kind: filters.kind ? [filters.kind] : undefined,
       status: filters.status ? [filters.status] : undefined,
       location: filters.location || null,
@@ -421,7 +467,7 @@ function useFilesClientController() {
       limit: PAGE_SIZE,
       offset,
     }),
-    [filters, offset],
+    [deferredQ, filters.kind, filters.location, filters.provider, filters.sort, filters.status, offset],
   );
 
   const files = useManagedFiles(listParams);
@@ -429,7 +475,7 @@ function useFilesClientController() {
   const rescan = useRescanManagedFilesMutation();
 
   const items = useMemo(() => files.data?.data ?? [], [files.data]);
-  const total = files.data?.meta.page?.total ?? 0;
+  const total = files.data?.meta.page?.total ?? null;
 
   const patch = (next: Partial<Filters>) => {
     setFilters((prev) => ({ ...prev, ...next }));
@@ -444,9 +490,9 @@ function useFilesClientController() {
         cell: ({ row }) => (
           <span className="flex items-center gap-1.5 font-mono text-xs">
             {row.original.is_directory ? (
-              <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
+              <FolderIcon className="size-3.5 shrink-0 text-text-secondary" />
             ) : (
-              <FileIcon className="size-3.5 shrink-0 text-muted-foreground" />
+              <FileIcon className="size-3.5 shrink-0 text-text-secondary" />
             )}
             {shortId(basename(row.original.path), 28)}
           </span>
@@ -455,11 +501,7 @@ function useFilesClientController() {
       {
         accessorKey: "kind",
         header: "종류",
-        cell: ({ row }) => (
-          <Badge variant="outline">
-            {KIND_LABELS[row.original.kind] ?? row.original.kind}
-          </Badge>
-        ),
+        cell: ({ row }) => KIND_LABELS[row.original.kind] ?? row.original.kind,
       },
       {
         accessorKey: "location",
@@ -475,11 +517,12 @@ function useFilesClientController() {
       {
         accessorKey: "provider",
         header: "Provider",
-        cell: ({ row }) => row.original.provider ?? "-",
+        cell: ({ row }) => row.original.provider ?? NULL_GLYPH,
       },
       {
         accessorKey: "byte_size",
         header: "크기",
+        meta: { align: "right" } satisfies DataTableColumnMeta,
         cell: ({ row }) => formatBytes(row.original.byte_size),
       },
       {
@@ -526,32 +569,29 @@ function FilesClientView({
   summary,
   total,
 }: ReturnType<typeof useFilesClientController>) {
+  const page = Math.floor(offset / PAGE_SIZE) + 1;
+  const totalPages = total === null ? null : Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const refreshAll = () => {
+    void files.refetch();
+    void summary.refetch();
+  };
   return (
     <AdminShell
       actions={
         <>
           <Button
+            loading={files.isFetching || summary.isFetching}
             type="button"
             variant="outline"
-            onClick={() => {
-              void files.refetch();
-              void summary.refetch();
-            }}
+            onClick={refreshAll}
           >
             <RefreshCwIcon data-icon="inline-start" />
             새로고침
           </Button>
           <Button
-            disabled={rescan.isPending}
+            loading={rescan.isPending}
             type="button"
-            onClick={() =>
-              rescan.mutate(null, {
-                onSuccess: () => {
-                  void files.refetch();
-                  void summary.refetch();
-                },
-              })
-            }
+            onClick={() => rescan.mutate(null, { onSuccess: refreshAll })}
           >
             <ScanSearchIcon data-icon="inline-start" />
             재스캔
@@ -561,55 +601,86 @@ function FilesClientView({
       description="Provider 다운로드·백업·업로드 등 시스템 파일이 어디에 연결됐고 언제 쓰였는지 추적합니다."
       title="파일 관리"
     >
-      <div className="flex flex-col gap-5">
-        {files.error ? (
+      <div className="flex flex-col gap-6">
+        {rescan.error ? (
           <Alert variant="destructive">
-            <AlertTitle>파일 목록을 불러오지 못했습니다</AlertTitle>
-            <AlertDescription>{files.error.message}</AlertDescription>
+            <AlertTitle>재스캔을 실행하지 못했습니다</AlertTitle>
+            <AlertDescription>{rescan.error.message}</AlertDescription>
+            <AlertActions>
+              <Button
+                loading={rescan.isPending}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => rescan.mutate(null, { onSuccess: refreshAll })}
+              >
+                다시 시도
+              </Button>
+            </AlertActions>
           </Alert>
         ) : null}
 
         {rescan.data ? (
           <Alert>
-            <ScanSearchIcon data-icon="inline-start" />
             <AlertTitle>재스캔 완료</AlertTitle>
-            <AlertDescription className="flex flex-col gap-1">
+            <AlertDescription>
               {rescan.data.data.results.length > 0 ? (
-                <span className="font-mono text-xs">
-                  {rescan.data.data.results
-                    .map(
-                      (result) =>
-                        `${String(result.location)}: 등록 ${String(
-                          result.registered ?? 0,
-                        )} · 고아 ${String(result.orphaned ?? 0)} · 유실 ${String(
-                          result.missing ?? 0,
-                        )}`,
-                    )
-                    .join(" / ")}
-                </span>
+                <DetailList
+                  items={rescan.data.data.results.map((result) => ({
+                    label: String(result.location),
+                    value: `등록 ${formatCount(asCount(result.registered))} · 고아 ${formatCount(
+                      asCount(result.orphaned),
+                    )} · 유실 ${formatCount(asCount(result.missing))}`,
+                    numeric: true,
+                  }))}
+                  layout="inline"
+                />
               ) : (
-                <span>변경된 파일 없음</span>
+                <p>변경된 파일이 없습니다.</p>
               )}
-              {rescan.data.data.note ? (
-                <span className="text-xs text-muted-foreground">
-                  {rescan.data.data.note}
-                </span>
-              ) : null}
+              {rescan.data.data.note ? <p className="mt-2">{rescan.data.data.note}</p> : null}
             </AlertDescription>
+            <AlertAction>
+              <Button
+                aria-label="재스캔 결과 닫기"
+                size="icon-sm"
+                type="button"
+                variant="ghost"
+                onClick={() => rescan.reset()}
+              >
+                <XIcon />
+              </Button>
+            </AlertAction>
           </Alert>
         ) : null}
 
-        {summary.data ? (
-          <SectionCard
-            size="sm"
-            title={
-              <span className="flex items-center gap-2">
-                <HardDriveIcon className="size-4" />
-                레지스트리 요약
-              </span>
-            }
-            description="칩을 누르면 해당 조건으로 목록을 좁힙니다."
-          >
+        <SectionCard
+          description="칩을 누르면 해당 조건으로 목록을 좁힙니다."
+          title="레지스트리 요약"
+        >
+          {summary.isLoading ? (
+            <div className="flex flex-col gap-3" aria-busy="true">
+              <Skeleton className="h-control-sm w-2/3" />
+              <Skeleton className="h-control-sm w-1/2" />
+              <Skeleton className="h-control-sm w-3/5" />
+            </div>
+          ) : summary.error ? (
+            <Alert variant="destructive">
+              <AlertTitle>요약을 불러오지 못했습니다</AlertTitle>
+              <AlertDescription>{summary.error.message}</AlertDescription>
+              <AlertActions>
+                <Button
+                  loading={summary.isFetching}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={() => void summary.refetch()}
+                >
+                  다시 시도
+                </Button>
+              </AlertActions>
+            </Alert>
+          ) : summary.data ? (
             <div className="flex flex-col gap-4">
               <SummaryChips
                 title="종류"
@@ -618,7 +689,7 @@ function FilesClientView({
                   count: b.count,
                 }))}
                 activeKey={filters.kind}
-                labels={KIND_LABELS}
+                labels={(key) => KIND_LABELS[key] ?? key}
                 onPick={(key) => patch({ kind: key })}
               />
               <SummaryChips
@@ -628,12 +699,7 @@ function FilesClientView({
                   count: b.count,
                 }))}
                 activeKey={filters.status}
-                labels={{
-                  active: "정상",
-                  orphan: "고아",
-                  missing: "유실",
-                  deleted: "삭제됨",
-                }}
+                labels={(key) => statusLabel(key)}
                 onPick={(key) => patch({ status: key })}
               />
               <SummaryChips
@@ -643,12 +709,12 @@ function FilesClientView({
                   count: b.count,
                 }))}
                 activeKey={filters.location}
-                labels={LOCATION_LABELS}
+                labels={(key) => LOCATION_LABELS[key] ?? key}
                 onPick={(key) => patch({ location: key })}
               />
             </div>
-          </SectionCard>
-        ) : null}
+          ) : null}
+        </SectionCard>
 
         <FilterBar>
           <FilterField className="w-56" htmlFor="files-q" label="검색">
@@ -682,7 +748,7 @@ function FilesClientView({
               <NativeSelectOption value="">전체</NativeSelectOption>
               {STATUS_OPTIONS.map((status) => (
                 <NativeSelectOption key={status} value={status}>
-                  {status}
+                  {statusLabel(status)}
                 </NativeSelectOption>
               ))}
             </NativeSelect>
@@ -716,65 +782,53 @@ function FilesClientView({
           </FilterField>
         </FilterBar>
 
-        <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_26rem]">
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_var(--rail)]">
           <SectionCard
-            contentClassName="overflow-auto"
+            description={`${formatCount(total, { loading: files.isLoading })}건`}
             title="파일 목록"
-            description={`${formatCount(total)}건`}
-            actions={
-              <div className="flex items-center gap-2">
-                <Button
-                  disabled={offset === 0}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                  onClick={() => setOffset((prev) => Math.max(0, prev - PAGE_SIZE))}
-                >
-                  이전
-                </Button>
-                <span className="text-xs text-muted-foreground">
-                  {total === 0 ? 0 : offset + 1}–{Math.min(offset + PAGE_SIZE, total)}
-                </span>
-                <Button
-                  disabled={offset + PAGE_SIZE >= total}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                  onClick={() => setOffset((prev) => prev + PAGE_SIZE)}
-                >
-                  다음
-                </Button>
-              </div>
-            }
           >
-            {!files.isLoading && items.length === 0 ? (
-              <EmptyState
-                icon={<DatabaseIcon />}
-                title="조건에 맞는 파일이 없습니다"
-                description="필터를 비우거나 재스캔을 실행해 최신 상태를 반영하세요."
-              />
-            ) : (
-              <DataTable
-                columns={columns}
-                data={items}
-                getRowId={(row) => String(row.file_id)}
-                isLoading={files.isLoading}
-                emptyMessage="조건에 맞는 파일이 없습니다."
-                onRowClick={(row) => setSelectedId(row.file_id)}
-                isRowActive={(row) => row.file_id === selectedId}
-                manualSorting={false}
-              />
-            )}
+            <DataTable
+              columns={columns}
+              data={items}
+              emptyState={{
+                title: "조건에 맞는 파일이 없습니다.",
+                description: "필터를 비우거나 재스캔을 실행해 최신 상태를 반영하세요.",
+                action: (
+                  <Button
+                    size="sm"
+                    type="button"
+                    variant="outline"
+                    onClick={() => patch(EMPTY_FILTERS)}
+                  >
+                    필터 초기화
+                  </Button>
+                ),
+              }}
+              error={files.error}
+              errorTitle="파일 목록을 불러오지 못했습니다"
+              getRowId={(row) => String(row.file_id)}
+              isError={files.isError}
+              isLoading={files.isLoading}
+              isRowActive={(row) => row.file_id === selectedId}
+              manualSorting={false}
+              onRetry={() => files.refetch()}
+              onRowClick={(row) => setSelectedId(row.file_id)}
+            />
+            <OffsetPager
+              ariaPrefix="파일"
+              currentCount={items.length}
+              hasNextPage={total !== null && offset + PAGE_SIZE < total}
+              hasPreviousPage={offset > 0}
+              isFetching={files.isFetching}
+              page={page}
+              totalCount={total}
+              totalPages={totalPages}
+              onPageChange={(nextPage) => setOffset(Math.max(0, nextPage - 1) * PAGE_SIZE)}
+            />
           </SectionCard>
 
-          <FileDetailPanel
-            fileId={selectedId}
-            onPurged={() => {
-              void files.refetch();
-              void summary.refetch();
-            }}
-          />
-        </section>
+          <FileDetailPanel fileId={selectedId} onPurged={refreshAll} />
+        </div>
       </div>
     </AdminShell>
   );

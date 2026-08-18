@@ -1,17 +1,14 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (map) · design-system: design.md · designed-as-app
 
 import type { LngLatBounds, Map as MapLibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
-  GitCompareArrowsIcon,
   ExternalLinkIcon,
-  ListChecksIcon,
+  GitCompareArrowsIcon,
   ListIcon,
   MapIcon,
   MapPinnedIcon,
-  RefreshCwIcon,
-  RouteIcon,
-  WorkflowIcon,
   XIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -26,6 +23,7 @@ import {
   FEATURE_LIFECYCLE_STATES,
   FEATURE_PUBLICATION_STATES,
   FEATURE_QUALITY_STATES,
+  featureStateLabel,
   isAdminFeatureClusterZoom,
   useAdminFeatureClustersInBbox,
   useAdminFeatureDetail,
@@ -38,21 +36,22 @@ import {
 } from "@/api/features";
 import { useOpsLiveInvalidation } from "@/api/live";
 import { AdminShell } from "@/components/admin-shell";
+import { DetailList } from "@/components/detail-list";
+import { EmptyState } from "@/components/empty-state";
 import { FeatureAssociations } from "@/components/feature-associations";
 import { FeatureKindDetailPanel } from "@/components/feature-kind-detail-panel";
 import { FeatureStateBadges } from "@/components/feature-state-badges";
+import { FilterBar, FilterField } from "@/components/filter-bar";
+import { JsonViewer } from "@/components/json-viewer";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
+import { Card } from "@/components/ui/card";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { DataTable } from "@/components/ui/data-table";
+  DataTable,
+  type DataTableColumnMeta,
+} from "@/components/ui/data-table";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -62,6 +61,7 @@ import {
   VWorldMapView,
   VWorldServerClusters,
 } from "@/components/vworld-map-view";
+import { NULL_GLYPH } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { isVWorldApiKeyConfigured } from "@/lib/vworld-style";
 import {
@@ -73,6 +73,9 @@ import {
 const VWORLD_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY;
 const AREA_GEOMETRY_MIN_ZOOM = 14;
 type AxisFilter<T extends string> = "" | T;
+
+/** 지도/테이블 작업면 높이 — 헤더·툴바를 뺀 뷰포트 비율(고정 rem 오프셋 금지, m6). */
+const WORKSPACE_HEIGHT_CLASS = "h-[70dvh] min-h-[28rem]";
 
 interface Bbox {
   min_lon: number;
@@ -90,16 +93,34 @@ function boundsToBbox(bounds: LngLatBounds): Bbox {
   };
 }
 
-function JsonBlock({ value }: { value: unknown }) {
-  return (
-    <pre className="max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs leading-relaxed">
-      {JSON.stringify(value, null, 2)}
-    </pre>
-  );
-}
-
 function featureDetailHref(featureId: string): string {
   return `/features/${encodeURIComponent(featureId)}`;
+}
+
+/** 필터 툴바 안 접이식 payload 블록(주소/상세/URL) — 제목은 12px/500, 본문은 JsonViewer. */
+function PayloadDisclosure({
+  label,
+  value,
+}: {
+  label: string;
+  value: unknown;
+}) {
+  return (
+    <details className="group/details">
+      <summary className="inline-flex h-control-sm cursor-pointer list-none items-center gap-1 rounded-control text-xs font-medium text-text-secondary outline-none select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
+        <span aria-hidden="true" className="w-3 text-text-tertiary group-open/details:hidden">
+          +
+        </span>
+        <span aria-hidden="true" className="hidden w-3 text-text-tertiary group-open/details:inline">
+          −
+        </span>
+        {label}
+      </summary>
+      <div className="pt-1">
+        <JsonViewer maxHeight="sm" value={value} />
+      </div>
+    </details>
+  );
 }
 
 function FeatureDetailPanel({
@@ -116,24 +137,28 @@ function FeatureDetailPanel({
     return Array.from(new Set(sources.map((source) => source.provider))).sort();
   }, [adminDetailQuery.data]);
 
+  const coordinate =
+    feature && typeof feature.lon === "number" && typeof feature.lat === "number"
+      ? `${feature.lon.toFixed(5)}, ${feature.lat.toFixed(5)}`
+      : null;
+
   return (
     <Card
-      className="absolute bottom-24 right-3 top-20 z-10 w-[min(24rem,calc(100%-1.5rem))] overflow-auto shadow-lg"
+      className="absolute top-20 right-3 bottom-24 z-10 w-[min(var(--rail),calc(100%-1.5rem))] gap-3 overflow-auto p-4 shadow-elevated"
       data-testid="feature-detail-panel"
+      size="sm"
     >
-      <CardHeader className="grid-cols-[1fr_auto]">
-        <div>
-          <CardTitle>선택 Feature</CardTitle>
-          <CardDescription className="break-all font-mono">
+      <div className="flex items-start justify-between gap-2 border-b border-border pb-3">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <span className="text-2xs font-medium text-text-secondary">선택 Feature</span>
+          <span className="font-mono text-xs break-all text-text-primary slashed-zero">
             {featureId}
-          </CardDescription>
+          </span>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1">
           <Link
             aria-label="상세 열기"
-            className={cn(
-              buttonVariants({ variant: "ghost", size: "icon-sm" }),
-            )}
+            className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }))}
             href={featureDetailHref(featureId)}
           >
             <ExternalLinkIcon />
@@ -148,25 +173,32 @@ function FeatureDetailPanel({
             <XIcon />
           </Button>
         </div>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
+      </div>
+      <div className="flex flex-col gap-3">
         {adminDetailQuery.isLoading ? (
-          <Skeleton className="h-48 w-full" />
+          <div aria-busy="true" className="flex flex-col gap-2">
+            <Skeleton className="h-5 w-2/3" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-4 w-5/6" />
+            <Skeleton className="h-24 w-full" />
+          </div>
         ) : null}
         {adminDetailQuery.isError ? (
           <Alert variant="destructive">
             <AlertTitle>상세 호출 실패</AlertTitle>
             <AlertDescription>
-              {adminDetailQuery.error.message}
+              {adminDetailQuery.error.message} — 다시 선택하거나 새로고침하세요.
             </AlertDescription>
           </Alert>
         ) : null}
         {feature ? (
           <>
             <div className="flex flex-col gap-2">
-              <h2 className="text-base font-semibold">{feature.name}</h2>
-              <div className="flex flex-wrap gap-2">
-                <Badge>{feature.kind}</Badge>
+              <h2 className="text-md leading-snug font-semibold text-text-primary">
+                {feature.name}
+              </h2>
+              <div className="flex flex-wrap gap-1">
+                <Badge variant="neutral">{feature.kind}</Badge>
                 <FeatureStateBadges
                   lifecycleState={feature.lifecycle_state}
                   publicationState={feature.publication_state}
@@ -175,68 +207,45 @@ function FeatureDetailPanel({
                 <Badge variant="outline">{feature.category}</Badge>
               </div>
             </div>
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
-              <dt className="text-muted-foreground">coord</dt>
-              <dd className="font-mono">
-                {typeof feature.lon === "number" &&
-                typeof feature.lat === "number"
-                  ? `${feature.lon.toFixed(5)}, ${feature.lat.toFixed(5)}`
-                  : "없음"}
-              </dd>
-              <dt className="text-muted-foreground">sigungu</dt>
-              <dd>{feature.sigungu_code ?? "없음"}</dd>
-              <dt className="text-muted-foreground">소스</dt>
-              <dd className="flex flex-wrap gap-1">
-                {adminDetailQuery.isLoading ? (
-                  <span className="text-muted-foreground">로딩 중</span>
-                ) : adminDetailQuery.isError ? (
-                  <span className="text-destructive">조회 실패</span>
-                ) : sourceProviders.length > 0 ? (
-                  sourceProviders.map((provider) => (
-                    <Badge key={provider} variant="outline">
-                      {provider}
-                    </Badge>
-                  ))
-                ) : (
-                  <span className="text-muted-foreground">없음</span>
-                )}
-              </dd>
-            </dl>
-            <details>
-              <summary className="cursor-pointer text-sm font-medium">
-                address
-              </summary>
-              <JsonBlock value={feature.address} />
-            </details>
+            <DetailList
+              items={[
+                { label: "좌표", value: coordinate, mono: true },
+                { label: "시군구", value: feature.sigungu_code ?? null, mono: true },
+                {
+                  label: "소스",
+                  value: adminDetailQuery.isError ? (
+                    <span className="text-destructive">조회 실패</span>
+                  ) : sourceProviders.length > 0 ? (
+                    <span className="flex flex-wrap gap-1">
+                      {sourceProviders.map((provider) => (
+                        <Badge key={provider} variant="outline">
+                          {provider}
+                        </Badge>
+                      ))}
+                    </span>
+                  ) : null,
+                },
+              ]}
+              layout="inline"
+            />
+            <PayloadDisclosure label="주소(address)" value={feature.address} />
             <FeatureKindDetailPanel
               compact
               feature={feature}
               featureId={featureId}
             />
-            {adminDetailQuery.isLoading ? (
-              <Skeleton className="h-40 w-full" />
-            ) : adminDetailQuery.data ? (
+            {adminDetailQuery.data ? (
               <FeatureAssociations
                 compact
                 curations={adminDetailQuery.data.data.curations}
                 observations={adminDetailQuery.data.data.sources}
               />
             ) : null}
-            <details>
-              <summary className="cursor-pointer text-sm font-medium">
-                detail
-              </summary>
-              <JsonBlock value={feature.detail} />
-            </details>
-            <details>
-              <summary className="cursor-pointer text-sm font-medium">
-                urls
-              </summary>
-              <JsonBlock value={feature.urls} />
-            </details>
+            <PayloadDisclosure label="상세(detail)" value={feature.detail} />
+            <PayloadDisclosure label="URL(urls)" value={feature.urls} />
           </>
         ) : null}
-      </CardContent>
+      </div>
     </Card>
   );
 }
@@ -364,7 +373,7 @@ function useFeaturesClientController() {
           rowA.original.name.localeCompare(rowB.original.name, "ko"),
         cell: ({ row }) => (
           <Link
-            className="font-medium text-primary underline-offset-4 hover:underline"
+            className="rounded-control font-medium text-brand underline-offset-4 outline-none hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             href={featureDetailHref(row.original.feature_id)}
             onClick={(event) => event.stopPropagation()}
           >
@@ -375,7 +384,7 @@ function useFeaturesClientController() {
       {
         accessorKey: "kind",
         header: "종류",
-        cell: ({ row }) => <Badge variant="outline">{row.original.kind}</Badge>,
+        cell: ({ row }) => <Badge variant="neutral">{row.original.kind}</Badge>,
       },
       {
         id: "state",
@@ -395,14 +404,21 @@ function useFeaturesClientController() {
         id: "coord",
         header: "좌표",
         enableSorting: false,
+        meta: { align: "right" } satisfies DataTableColumnMeta,
         cell: ({ row }) => {
-          const feature = row.original;
+          const { lon, lat } = row.original;
+          const coordinate =
+            typeof lon === "number" && typeof lat === "number"
+              ? `${lon.toFixed(5)}, ${lat.toFixed(5)}`
+              : null;
           return (
-            <span className="font-mono text-xs text-muted-foreground">
-              {typeof feature.lon === "number" &&
-              typeof feature.lat === "number"
-                ? `${feature.lon.toFixed(5)}, ${feature.lat.toFixed(5)}`
-                : "없음"}
+            <span
+              className={cn(
+                "font-mono text-xs slashed-zero",
+                coordinate !== null ? "text-text-secondary" : "text-text-tertiary",
+              )}
+            >
+              {coordinate ?? NULL_GLYPH}
             </span>
           );
         },
@@ -472,6 +488,8 @@ function useFeaturesClientController() {
   };
 }
 
+const filterLabelClass = "text-2xs leading-none font-medium text-text-secondary";
+
 function FeatureMapToolbar({
   activeFeatureKinds,
   clusterMode,
@@ -512,33 +530,14 @@ function FeatureMapToolbar({
   | "toggleFeatureKind"
   | "truncated"
 >) {
+  const queryFailed = clusterMode ? clustersQuery.isError : featuresQuery.isError;
   return (
-    <>
-      <div className="flex flex-col gap-3 border-b bg-background px-4 py-3 md:flex-row md:items-center md:justify-between">
-        <div className="flex flex-col gap-1">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">Feature 지도</Badge>
-            <Badge
-              variant={
-                (clusterMode ? clustersQuery.isError : featuresQuery.isError)
-                  ? "destructive"
-                  : "outline"
-              }
-            >
-              {status}
-            </Badge>
-            {truncated ? (
-              <Badge
-                data-testid="features-partial-indicator"
-                title="현재 bbox 결과가 서버 상한에서 잘렸습니다. 더 확대해 범위를 좁히세요."
-                variant="destructive"
-              >
-                부분 결과
-              </Badge>
-            ) : null}
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
+    <div className="flex flex-col gap-3">
+      <FilterBar>
+        <div className="flex min-w-0 flex-col gap-1">
+          <span aria-hidden="true" className={filterLabelClass}>
+            종류
+          </span>
           <div
             aria-label="kind 필터"
             className="flex flex-wrap gap-1"
@@ -553,7 +552,7 @@ function FeatureMapToolbar({
                   key={kind}
                   size="sm"
                   type="button"
-                  variant={active ? "default" : "outline"}
+                  variant={active ? "secondary" : "outline"}
                   onClick={() => toggleFeatureKind(kind)}
                 >
                   {kind}
@@ -562,18 +561,23 @@ function FeatureMapToolbar({
             })}
             <Button
               disabled={isDefaultKindFilter}
+              disabledReason="기본 종류(weather·notice)만 선택된 상태입니다"
               size="sm"
               type="button"
-              variant="outline"
+              variant="ghost"
               onClick={resetFeatureKinds}
             >
               <XIcon data-icon="inline-start" />
               초기화
             </Button>
           </div>
+        </div>
+        <FilterField htmlFor="feature-provider-filter" label="소스">
           <NativeSelect
             aria-label="소스 필터"
             className="w-44"
+            id="feature-provider-filter"
+            size="sm"
             value={effectiveProvider}
             onChange={(event) => setProviderFilter(event.target.value)}
           >
@@ -584,9 +588,13 @@ function FeatureMapToolbar({
               </NativeSelectOption>
             ))}
           </NativeSelect>
+        </FilterField>
+        <FilterField htmlFor="feature-lifecycle-filter" label="수명주기">
           <NativeSelect
             aria-label="수명주기 필터"
             className="w-36"
+            id="feature-lifecycle-filter"
+            size="sm"
             value={lifecycleStateFilter}
             onChange={(event) =>
               setLifecycleStateFilter(
@@ -597,13 +605,17 @@ function FeatureMapToolbar({
             <NativeSelectOption value="">모든 수명주기</NativeSelectOption>
             {FEATURE_LIFECYCLE_STATES.map((value) => (
               <NativeSelectOption key={value} value={value}>
-                {value}
+                {featureStateLabel("lifecycle", value)}
               </NativeSelectOption>
             ))}
           </NativeSelect>
+        </FilterField>
+        <FilterField htmlFor="feature-publication-filter" label="공개 상태">
           <NativeSelect
             aria-label="공개 상태 필터"
             className="w-36"
+            id="feature-publication-filter"
+            size="sm"
             value={publicationStateFilter}
             onChange={(event) =>
               setPublicationStateFilter(
@@ -614,13 +626,17 @@ function FeatureMapToolbar({
             <NativeSelectOption value="">모든 공개 상태</NativeSelectOption>
             {FEATURE_PUBLICATION_STATES.map((value) => (
               <NativeSelectOption key={value} value={value}>
-                {value}
+                {featureStateLabel("publication", value)}
               </NativeSelectOption>
             ))}
           </NativeSelect>
+        </FilterField>
+        <FilterField htmlFor="feature-quality-filter" label="품질 상태">
           <NativeSelect
             aria-label="품질 상태 필터"
             className="w-36"
+            id="feature-quality-filter"
+            size="sm"
             value={qualityStateFilter}
             onChange={(event) =>
               setQualityStateFilter(
@@ -631,26 +647,49 @@ function FeatureMapToolbar({
             <NativeSelectOption value="">모든 품질 상태</NativeSelectOption>
             {FEATURE_QUALITY_STATES.map((value) => (
               <NativeSelectOption key={value} value={value}>
-                {value}
+                {featureStateLabel("quality", value)}
               </NativeSelectOption>
             ))}
           </NativeSelect>
-        </div>
-      </div>
+        </FilterField>
+      </FilterBar>
 
       {!clusterMode && featuresQuery.isError ? (
-        <Alert className="m-4" variant="destructive">
+        <Alert variant="destructive">
           <AlertTitle>feature 호출 실패</AlertTitle>
-          <AlertDescription>{featuresQuery.error.message}</AlertDescription>
+          <AlertDescription>
+            {featuresQuery.error.message} — 지도를 조금 움직이거나 필터를 바꾸면 다시
+            조회합니다.
+          </AlertDescription>
         </Alert>
       ) : null}
       {clusterMode && clustersQuery.isError ? (
-        <Alert className="m-4" variant="destructive">
+        <Alert variant="destructive">
           <AlertTitle>클러스터 호출 실패</AlertTitle>
-          <AlertDescription>{clustersQuery.error.message}</AlertDescription>
+          <AlertDescription>
+            {clustersQuery.error.message} — 지도를 조금 움직이거나 필터를 바꾸면 다시
+            조회합니다.
+          </AlertDescription>
         </Alert>
       ) : null}
-    </>
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant={queryFailed ? "destructive" : "neutral"}>{status}</Badge>
+        {truncated ? (
+          <Badge
+            data-testid="features-partial-indicator"
+            title="현재 bbox 결과가 서버 상한에서 잘렸습니다. 더 확대해 범위를 좁히세요."
+            variant="warning"
+          >
+            부분 결과
+          </Badge>
+        ) : null}
+        {truncated ? (
+          <span className="text-2xs text-text-secondary">
+            결과가 서버 상한에서 잘렸습니다 — 더 확대해 범위를 좁히세요.
+          </span>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
@@ -687,66 +726,62 @@ function FeatureMapWorkspace({
   | "viewport"
 >) {
   return (
-    <>
+    <div className="flex flex-col gap-4">
       <Tabs
-        className="min-h-0 flex-1 p-4"
+        className="min-h-0"
         value={featureViewMode}
         onValueChange={(value) => setFeatureViewMode(value as FeatureViewMode)}
       >
-        <div className="mb-3 flex items-center justify-between">
-          <TabsList>
-            <TabsTrigger value="map">
-              <MapIcon data-icon="inline-start" />
-              지도
-            </TabsTrigger>
-            <TabsTrigger value="table">
-              <ListIcon data-icon="inline-start" />
-              테이블
-            </TabsTrigger>
-          </TabsList>
-          <span className="text-sm text-muted-foreground">
-            center {viewport.lon.toFixed(4)}, {viewport.lat.toFixed(4)} · z{" "}
-            {viewport.zoom.toFixed(1)}
-          </span>
-        </div>
+        <TabsList aria-label="보기 전환">
+          <TabsTrigger value="map">
+            <MapIcon data-icon="inline-start" />
+            지도
+          </TabsTrigger>
+          <TabsTrigger value="table">
+            <ListIcon data-icon="inline-start" />
+            테이블
+          </TabsTrigger>
+        </TabsList>
 
         <TabsContent className="min-h-0" value="map">
-          <Card className="relative h-[calc(100vh-22rem)] min-h-[28rem] overflow-hidden p-0">
-            <div
+          <div
+            className={cn(
+              "relative overflow-hidden rounded-panel border border-border bg-surface-subtle",
+              WORKSPACE_HEIGHT_CLASS,
+            )}
+          >
+            <VWorldMapView
+              apiKey={VWORLD_KEY}
+              center={[viewport.lon, viewport.lat]}
               className="absolute inset-0 h-full w-full"
-              style={{
-                height: "100%",
-                inset: 0,
-                position: "absolute",
-                width: "100%",
-              }}
+              navigation
+              scale
+              testId="map-canvas-container"
+              zoom={viewport.zoom}
+              onLoad={updateViewportFromMap}
+              onMoveEnd={updateViewportFromMap}
             >
-              <VWorldMapView
-                apiKey={VWORLD_KEY}
-                center={[viewport.lon, viewport.lat]}
-                className="absolute inset-0 h-full w-full"
-                navigation
-                scale
-                testId="map-canvas-container"
-                zoom={viewport.zoom}
-                onLoad={updateViewportFromMap}
-                onMoveEnd={updateViewportFromMap}
-              >
-                {clusterMode ? (
-                  <VWorldServerClusters clusters={clusterItems} />
-                ) : (
-                  <VWorldFeatureClusters
-                    features={featureItems}
-                    selectedFeatureId={selectedFeatureId}
-                    showAreaGeometry={showAreaGeometry}
-                    onSelectFeature={setSelectedFeatureId}
-                  />
-                )}
-              </VWorldMapView>
               {clusterMode ? (
-                <div className="pointer-events-none absolute left-3 top-3 z-10 rounded-md bg-background/90 px-2 py-1 text-xs text-muted-foreground shadow-sm">
+                <VWorldServerClusters clusters={clusterItems} />
+              ) : (
+                <VWorldFeatureClusters
+                  features={featureItems}
+                  selectedFeatureId={selectedFeatureId}
+                  showAreaGeometry={showAreaGeometry}
+                  onSelectFeature={setSelectedFeatureId}
+                />
+              )}
+            </VWorldMapView>
+            {/* 지도 위 flat status strip: 좌표 readout(mono) + 클러스터 안내 — 프레임 없는 칩(m6). */}
+            <div className="pointer-events-none absolute top-3 left-3 z-10 flex max-w-[calc(100%-6rem)] flex-col items-start gap-1">
+              <span className="rounded-control border border-border bg-card px-2 py-1 font-mono text-2xs text-text-secondary tabular-nums">
+                {viewport.lon.toFixed(4)}, {viewport.lat.toFixed(4)} · z{" "}
+                {viewport.zoom.toFixed(1)}
+              </span>
+              {clusterMode ? (
+                <span className="rounded-control border border-border bg-card px-2 py-1 text-2xs text-text-secondary">
                   지역 클러스터 뷰 · 확대하면 개별 feature가 표시됩니다
-                </div>
+                </span>
               ) : null}
             </div>
             {selectedFeatureId ? (
@@ -755,54 +790,47 @@ function FeatureMapWorkspace({
                 onClose={() => setSelectedFeatureId(null)}
               />
             ) : null}
-          </Card>
+          </div>
         </TabsContent>
 
         <TabsContent value="table">
-          <Card className="h-[calc(100vh-22rem)] min-h-[28rem] overflow-hidden">
-            <CardHeader>
-              <CardTitle>이름순 feature</CardTitle>
-              <CardDescription>
-                현재 bbox와 kind 필터에 해당하는 feature를 이름순으로
-                표시합니다.
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="min-h-0">
-              {clusterMode ? (
-                <div className="flex h-[calc(100vh-28rem)] min-h-80 items-center justify-center px-6 text-center text-sm text-muted-foreground">
-                  저zoom에서는 개별 feature 대신 지역 클러스터로 집계됩니다.
-                  지도를 확대(zoom {FEATURE_CLUSTER_MAX_ZOOM + 1}+)하면 개별
-                  feature 목록이 표시됩니다.
-                </div>
-              ) : (
-                <DataTable
-                  columns={featureColumns}
-                  data={featureItems}
-                  getRowId={(feature) => feature.feature_id}
-                  isLoading={featuresQuery.isLoading}
-                  emptyMessage="표시할 feature가 없습니다."
-                  onRowClick={(feature) =>
-                    setSelectedFeatureId(feature.feature_id)
-                  }
-                  isRowActive={(feature) =>
-                    feature.feature_id === selectedFeatureId
-                  }
-                  sorting={tableSorting}
-                  onSortingChange={setTableSorting}
-                  manualSorting={false}
-                  virtualized
-                  estimateRowSize={41}
-                  containerClassName="h-[calc(100vh-28rem)] min-h-80"
-                  ariaLabel="이름순 feature"
-                />
-              )}
-            </CardContent>
-          </Card>
+          {clusterMode ? (
+            <EmptyState
+              description={`지도를 확대(zoom ${FEATURE_CLUSTER_MAX_ZOOM + 1}+)하면 개별 feature 목록이 표시됩니다.`}
+              framed
+              title="저zoom에서는 개별 feature 대신 지역 클러스터로 집계됩니다."
+            />
+          ) : (
+            <DataTable
+              ariaLabel="이름순 feature"
+              columns={featureColumns}
+              containerClassName={WORKSPACE_HEIGHT_CLASS}
+              data={featureItems}
+              emptyState={{
+                title: "표시할 feature가 없습니다.",
+                description:
+                  "현재 지도 범위와 종류·소스·상태 축 필터에 맞는 feature가 없습니다 — 지도를 이동하거나 필터를 넓혀 보세요.",
+              }}
+              estimateRowSize={41}
+              getRowId={(feature) => feature.feature_id}
+              isLoading={featuresQuery.isLoading}
+              isRowActive={(feature) =>
+                feature.feature_id === selectedFeatureId
+              }
+              manualSorting={false}
+              onRowClick={(feature) =>
+                setSelectedFeatureId(feature.feature_id)
+              }
+              onSortingChange={setTableSorting}
+              sorting={tableSorting}
+              virtualized
+            />
+          )}
         </TabsContent>
       </Tabs>
 
       {!isVWorldApiKeyConfigured(VWORLD_KEY) ? (
-        <Alert className="mx-4 mb-4">
+        <Alert>
           <AlertTitle>VWorld key 미설정</AlertTitle>
           <AlertDescription>
             NEXT_PUBLIC_VWORLD_API_KEY 미설정 상태라 회색 배경으로 표시합니다.
@@ -810,7 +838,7 @@ function FeatureMapWorkspace({
           </AlertDescription>
         </Alert>
       ) : null}
-    </>
+    </div>
   );
 }
 
@@ -859,45 +887,17 @@ function FeaturesClientView({
           </Link>
           <Link
             className={cn(buttonVariants({ variant: "outline" }))}
-            href="/ops/pipeline?kind=import_job"
-          >
-            <ListChecksIcon data-icon="inline-start" />
-            Jobs
-          </Link>
-          <Link
-            className={cn(buttonVariants({ variant: "outline" }))}
-            href="/ops/pipeline?kind=update_request"
-          >
-            <RefreshCwIcon data-icon="inline-start" />
-            Update
-          </Link>
-          <Link
-            className={cn(buttonVariants({ variant: "outline" }))}
-            href="/admin/poi-cache-targets"
-          >
-            <RouteIcon data-icon="inline-start" />
-            POI 캐시 대상
-          </Link>
-          <Link
-            className={cn(buttonVariants({ variant: "outline" }))}
             href="/admin/features/dedup-reviews"
           >
             <GitCompareArrowsIcon data-icon="inline-start" />
             중복 검토
           </Link>
-          <Link
-            className={cn(buttonVariants({ variant: "outline" }))}
-            href="/ops/pipeline?tab=schedules"
-          >
-            <WorkflowIcon data-icon="inline-start" />
-            작업 자동화
-          </Link>
         </>
       }
-      description={status}
+      description="현재 지도 범위의 feature를 종류·소스·상태 축으로 걸러 지도와 테이블로 봅니다."
       title="Feature 지도"
     >
-      <div className="flex min-h-[calc(100vh-12rem)] flex-col rounded-lg border bg-muted/30">
+      <div className="flex flex-col gap-4">
         <FeatureMapToolbar
           activeFeatureKinds={activeFeatureKinds}
           clusterMode={clusterMode}

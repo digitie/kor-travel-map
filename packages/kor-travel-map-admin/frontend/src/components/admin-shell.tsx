@@ -1,4 +1,5 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 
 import {
   ActivityIcon,
@@ -27,7 +28,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 
-import { Badge } from "@/components/ui/badge";
 import { withOccurrenceKeys } from "@/lib/occurrence-key";
 import {
   Breadcrumb,
@@ -43,18 +43,18 @@ import { publishAdminLogout } from "@/lib/admin-auth-events";
 import { cn } from "@/lib/utils";
 
 /**
- * 작업 지향 nav 그룹 (§1) — nav·섹션 배지·브레드크럼 라벨의 단일 정본.
- * 그룹 헤더는 비링크이며 href 18개는 존치하는 canonical 화면만 가리킨다.
+ * 작업 지향 nav 그룹 (§1) — nav·섹션 라벨·브레드크럼 라벨의 단일 정본.
+ * 그룹 헤더는 비링크이며 href는 존치하는 canonical 화면만 가리킨다.
  */
 const NAV_GROUPS = [
   {
     group: null,
-    badge: "개요",
+    section: "개요",
     items: [{ href: "/", label: "홈", icon: HomeIcon }],
   },
   {
     group: "Feature 관리",
-    badge: "Feature 관리",
+    section: "Feature 관리",
     items: [
       { href: "/features", label: "Feature 지도", icon: MapIcon },
       { href: "/admin/features", label: "Feature 목록", icon: DatabaseIcon },
@@ -84,7 +84,7 @@ const NAV_GROUPS = [
   },
   {
     group: "수집 파이프라인",
-    badge: "수집 파이프라인",
+    section: "수집 파이프라인",
     items: [
       { href: "/ops/pipeline", label: "파이프라인", icon: WorkflowIcon },
       { href: "/ops/datasets", label: "데이터셋", icon: LayersIcon },
@@ -107,7 +107,7 @@ const NAV_GROUPS = [
   },
   {
     group: "모니터링",
-    badge: "모니터링",
+    section: "모니터링",
     items: [
       { href: "/ops/logs", label: "운영 로그", icon: ActivityIcon },
       { href: "/ops/consistency", label: "정합성 점검", icon: RadarIcon },
@@ -115,7 +115,7 @@ const NAV_GROUPS = [
   },
   {
     group: "시스템",
-    badge: "시스템",
+    section: "시스템",
     items: [
       { href: "/admin/files", label: "파일 관리", icon: FolderTreeIcon },
       { href: "/admin/backups", label: "백업", icon: ArchiveIcon },
@@ -125,10 +125,11 @@ const NAV_GROUPS = [
 ] as const;
 
 const navItems = NAV_GROUPS.flatMap((group) =>
-  group.items.map((item) => ({ ...item, badge: group.badge })),
+  group.items.map((item) => ({ ...item, section: group.section })),
 );
 
 const SIDEBAR_COLLAPSED_KEY = "kor-travel-map:sidebar-collapsed";
+const MAIN_CONTENT_ID = "main-content";
 
 function isActive(pathname: string, href: string) {
   if (href === "/") {
@@ -137,7 +138,37 @@ function isActive(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 
+/**
+ * Rail nav row / footer row 레시피 (design.md §Macrostructure N3 · M9).
+ * flat row · 30px · 500 · hover paper-2 · pressed rules 색 · focus = 단일 outline 레시피.
+ * active 는 색만이 아니라 좌측 2px brand mark + `aria-current="page"`(M11).
+ */
+const railRowClass =
+  "relative flex h-control-sm shrink-0 items-center gap-2.5 rounded-control px-3 text-xs font-medium whitespace-nowrap text-text-secondary transition-[color,background-color] duration-fast ease-out outline-none hover:bg-surface-subtle hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus active:bg-surface-muted";
+
+const railRowActiveClass =
+  "bg-brand-tint text-text-primary hover:bg-brand-tint before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-brand";
+
+const railRowCollapsedClass = "lg:size-control lg:justify-center lg:gap-0 lg:px-0";
+
 export type AdminBreadcrumb = { label: string; href?: string };
+
+export type AdminShellProps = {
+  title: string;
+  description?: string;
+  /** 명시 오버라이드 — 생략 시 NAV_GROUPS longest-prefix로 유도(§1). breadcrumbs 가 없을 때만 h1 위 한 줄 라벨로 렌더. */
+  section?: string;
+  breadcrumbs?: AdminBreadcrumb[];
+  help?: ReactNode;
+  /**
+   * h1 아래 한 줄 메타(상태·갱신 시각·건수 등). text-secondary 텍스트 한 줄로만 렌더한다 —
+   * 제목을 반복하는 badge 는 넣지 않는다(M30/M31). 구분자는 `·`.
+   */
+  meta?: ReactNode;
+  /** 헤더 밴드 액션 슬롯 — primary ≤ 1 + secondary ≤ 2 (design.md). 나머지 cross-link 는 rail/breadcrumb 로. */
+  actions?: ReactNode;
+  children: ReactNode;
+};
 
 export function AdminShell({
   title,
@@ -145,18 +176,10 @@ export function AdminShell({
   section,
   breadcrumbs,
   help,
+  meta,
   actions,
   children,
-}: {
-  title: string;
-  description?: string;
-  /** 명시 오버라이드 — 생략 시 NAV_GROUPS longest-prefix로 유도(§1). */
-  section?: string;
-  breadcrumbs?: AdminBreadcrumb[];
-  help?: ReactNode;
-  actions?: ReactNode;
-  children: ReactNode;
-}) {
+}: AdminShellProps) {
   const pathname = usePathname();
   const activeNavItemRef = useRef<HTMLAnchorElement | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
@@ -167,12 +190,17 @@ export function AdminShell({
     .filter((item) => isActive(pathname, item.href))
     .toSorted((a, b) => b.href.length - a.href.length)[0];
   const activeHref = activeItem?.href;
-  const sectionBadge = section ?? activeItem?.badge;
+  const sectionLabel = section ?? activeItem?.section;
+  const hasBreadcrumbs = Boolean(breadcrumbs && breadcrumbs.length > 0);
 
   useEffect(() => {
     if (typeof window === "undefined" || window.innerWidth >= 1024) return;
+    // M14: reduced-motion 이면 smooth scroll 대신 즉시 이동.
+    const reduceMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
     activeNavItemRef.current?.scrollIntoView({
-      behavior: "smooth",
+      behavior: reduceMotion ? "auto" : "smooth",
       block: "nearest",
       inline: "center",
     });
@@ -190,106 +218,152 @@ export function AdminShell({
   };
 
   return (
-    <main className="min-h-screen bg-surface-page text-text-primary">
+    <div className="min-h-dvh bg-surface-page text-text-primary">
+      {/* M11: skip link — rail 19개 항목을 건너뛰어 <main> 으로. nav 밖(링크 수 보존). */}
+      <a
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:rounded-control focus:border focus:border-border focus:bg-card focus:px-3 focus:py-2 focus:text-xs focus:font-medium focus:text-text-primary focus:shadow-elevated focus:outline-2 focus:outline-offset-2 focus:outline-focus"
+        href={`#${MAIN_CONTENT_ID}`}
+      >
+        본문으로 건너뛰기
+      </a>
       <div
         className={cn(
-          "grid min-h-screen min-w-0",
+          "grid min-h-dvh min-w-0",
           sidebarCollapsed
-            ? "lg:grid-cols-[4.75rem_1fr]"
-            : "lg:grid-cols-[17rem_1fr]",
+            ? "lg:grid-cols-[4rem_minmax(0,1fr)]"
+            : "lg:grid-cols-[16rem_minmax(0,1fr)]",
         )}
       >
-        <aside className="min-w-0 border-b border-surface-muted bg-card shadow-[var(--shadow-card)] lg:border-r lg:border-b-0">
-          <div
-            className={cn(
-              "flex h-full min-w-0 flex-col gap-5 p-5",
-              sidebarCollapsed && "lg:items-center lg:p-3",
-            )}
-          >
+        {/* Rail (N3): paper-2 위 hairline 분리, rest shadow 없음. lg 에서 sticky 전체 높이. */}
+        <aside
+          className="min-w-0 border-b border-border bg-card lg:sticky lg:top-0 lg:h-dvh lg:self-start lg:border-r lg:border-b-0"
+          data-slot="admin-shell-rail"
+        >
+          <div className="flex h-full min-w-0 flex-col">
             <div
               className={cn(
-                "flex w-full items-center justify-between gap-2",
-                sidebarCollapsed && "lg:flex-col",
+                "flex h-14 shrink-0 items-center justify-between gap-2 border-b border-border px-4",
+                sidebarCollapsed &&
+                  "lg:h-auto lg:flex-col lg:justify-center lg:gap-1 lg:px-0 lg:py-2",
               )}
             >
+              {/* 타이포 워드마크 — 아이콘 타일 없음(M9). 접힘 시 축약형 `ktm`. */}
               <Link
+                aria-label="kor-travel-map admin"
                 className={cn(
-                  "flex min-w-0 items-center gap-2 text-text-primary",
+                  "flex min-w-0 items-baseline gap-1.5 rounded-control text-text-primary no-underline outline-none hover:no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
                   sidebarCollapsed && "lg:justify-center",
                 )}
                 href="/"
-                title="kor-travel-map"
               >
-                <span className="flex size-10 items-center justify-center rounded-xl bg-brand-tint text-brand">
-                  <MapIcon className="size-4" />
-                </span>
                 <span
                   className={cn(
-                    "truncate text-[14px] font-bold",
+                    "truncate text-sm font-semibold tracking-tight",
                     sidebarCollapsed && "lg:hidden",
                   )}
                 >
                   kor-travel-map
                 </span>
+                <span
+                  className={cn(
+                    "text-2xs font-medium text-text-tertiary",
+                    sidebarCollapsed && "lg:hidden",
+                  )}
+                >
+                  admin
+                </span>
+                <span
+                  aria-hidden="true"
+                  className={cn(
+                    "hidden text-xs font-semibold tracking-tight",
+                    sidebarCollapsed && "lg:inline",
+                  )}
+                >
+                  ktm
+                </span>
               </Link>
-              <button
-                aria-label={sidebarCollapsed ? "좌측 메뉴 펼치기" : "좌측 메뉴 접기"}
-                className={cn(
-                  buttonVariants({ variant: "ghost", size: "icon-sm" }),
-                  "hidden lg:inline-flex",
-                )}
-                title={sidebarCollapsed ? "좌측 메뉴 펼치기" : "좌측 메뉴 접기"}
-                type="button"
-                onClick={toggleSidebar}
-              >
-                {sidebarCollapsed ? <PanelLeftOpenIcon /> : <PanelLeftCloseIcon />}
-              </button>
+              <div className="flex shrink-0 items-center gap-1">
+                <ButtonLogout className="lg:hidden" iconOnly />
+                <button
+                  aria-label={
+                    sidebarCollapsed ? "좌측 메뉴 펼치기" : "좌측 메뉴 접기"
+                  }
+                  className={cn(
+                    buttonVariants({ variant: "ghost", size: "icon-sm" }),
+                    "hidden lg:inline-flex",
+                  )}
+                  title={sidebarCollapsed ? "좌측 메뉴 펼치기" : "좌측 메뉴 접기"}
+                  type="button"
+                  onClick={toggleSidebar}
+                >
+                  {sidebarCollapsed ? (
+                    <PanelLeftOpenIcon aria-hidden="true" />
+                  ) : (
+                    <PanelLeftCloseIcon aria-hidden="true" />
+                  )}
+                </button>
+              </div>
             </div>
             <nav
+              aria-label="주요 메뉴"
               className={cn(
-                "flex max-w-full gap-1 overflow-x-auto lg:max-h-[calc(100vh-6rem)] lg:flex-col lg:overflow-y-auto lg:pr-1",
-                sidebarCollapsed && "lg:items-center lg:pr-0",
+                "flex min-h-0 max-w-full gap-1 overflow-x-auto px-3 py-2 lg:flex-1 lg:flex-col lg:gap-0.5 lg:overflow-x-hidden lg:overflow-y-auto lg:py-3",
+                sidebarCollapsed && "lg:items-center lg:px-2",
               )}
             >
               {NAV_GROUPS.map((group) => (
                 <div
                   className={cn(
-                    "flex gap-1 lg:flex-col",
+                    "flex shrink-0 items-center gap-1 lg:flex-col lg:items-stretch lg:gap-0.5",
                     sidebarCollapsed && "lg:items-center",
                   )}
                   key={group.group ?? "root"}
                 >
                   {group.group ? (
-                    <div
-                      className={cn(
-                        "hidden px-3 pt-3 pb-1 text-[11px] font-semibold tracking-wide text-text-secondary uppercase lg:block",
-                        sidebarCollapsed && "lg:hidden",
-                      )}
-                    >
-                      {group.group}
-                    </div>
+                    <>
+                      {/* 그룹 라벨 12px/500 + hairline rule — 한글이라 uppercase/tracking 없음(m3). <lg 에서는 strip 안 인라인 라벨. */}
+                      <div
+                        className={cn(
+                          "ml-1 flex shrink-0 items-center gap-2 border-l border-border pl-3 text-2xs font-medium whitespace-nowrap text-text-secondary",
+                          "lg:ml-0 lg:border-l-0 lg:px-3 lg:pt-4 lg:pb-1 lg:after:h-px lg:after:flex-1 lg:after:bg-border",
+                          sidebarCollapsed && "lg:hidden",
+                        )}
+                      >
+                        {group.group}
+                      </div>
+                      {sidebarCollapsed ? (
+                        <span
+                          aria-hidden="true"
+                          className="mx-auto my-2 hidden h-px w-6 bg-border lg:block"
+                        />
+                      ) : null}
+                    </>
                   ) : null}
                   {group.items.map((item) => {
                     const Icon = item.icon;
                     const active = item.href === activeHref;
                     return (
                       <Link
+                        aria-current={active ? "page" : undefined}
                         aria-label={sidebarCollapsed ? item.label : undefined}
                         className={cn(
-                          buttonVariants({
-                            variant: active ? "secondary" : "ghost",
-                            size: "sm",
-                          }),
-                          "justify-start whitespace-nowrap",
-                          sidebarCollapsed &&
-                            "lg:size-10 lg:justify-center lg:p-0",
+                          railRowClass,
+                          "no-underline hover:no-underline",
+                          active && railRowActiveClass,
+                          sidebarCollapsed && railRowCollapsedClass,
                         )}
                         href={item.href}
                         key={item.href}
                         ref={active ? activeNavItemRef : undefined}
-                        title={item.label}
+                        title={sidebarCollapsed ? item.label : undefined}
                       >
-                        <Icon data-icon="inline-start" />
+                        <Icon
+                          aria-hidden="true"
+                          className={cn(
+                            "size-4 shrink-0",
+                            active ? "text-brand" : "text-icon-default",
+                          )}
+                        />
                         <span className={cn(sidebarCollapsed && "lg:hidden")}>
                           {item.label}
                         </span>
@@ -299,82 +373,121 @@ export function AdminShell({
                 </div>
               ))}
             </nav>
-            <ButtonLogout collapsed={sidebarCollapsed} />
+            {/* 로그아웃 = rail footer 의 plain row(M9). <lg 에서는 상단 워드마크 행의 아이콘 버튼이 대신한다. */}
+            <div
+              className={cn(
+                "hidden shrink-0 border-t border-border p-2 lg:block",
+                sidebarCollapsed && "lg:flex lg:justify-center",
+              )}
+            >
+              <ButtonLogout collapsed={sidebarCollapsed} />
+            </div>
           </div>
         </aside>
-        <div className="min-w-0">
-          <header className="px-6 pt-6">
-            <div className="flex flex-col gap-4 rounded-2xl bg-card p-6 shadow-[var(--shadow-card)] ring-1 ring-border/70 xl:flex-row xl:items-start xl:justify-between">
-              <div className="flex min-w-0 flex-col gap-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  {sectionBadge ? (
-                    <Badge variant="secondary">{sectionBadge}</Badge>
-                  ) : null}
-                  <span className="break-all font-mono text-[12px] text-text-secondary">
-                    {pathname}
-                  </span>
-                </div>
-                {breadcrumbs && breadcrumbs.length > 0 ? (
-                  <Breadcrumb>
-                    <BreadcrumbList>
-                      {withOccurrenceKeys(breadcrumbs, (crumb) =>
-                        JSON.stringify([crumb.href ?? null, crumb.label]),
-                      ).map(({ key, value: crumb }, index) => (
-                        <Fragment key={key}>
-                          {index > 0 ? <BreadcrumbSeparator /> : null}
-                          <BreadcrumbItem>
-                            {crumb.href ? (
-                              <BreadcrumbLink href={crumb.href}>
-                                {crumb.label}
-                              </BreadcrumbLink>
-                            ) : index === breadcrumbs.length - 1 ? (
-                              <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
-                            ) : (
-                              <span>{crumb.label}</span>
-                            )}
-                          </BreadcrumbItem>
-                        </Fragment>
-                      ))}
-                    </BreadcrumbList>
-                  </Breadcrumb>
-                ) : null}
-                <div className="flex items-center gap-2">
-                  <h1 className="text-[24px] leading-snug font-bold">{title}</h1>
+        <div className="flex min-w-0 flex-col">
+          {/* Flush header band: breadcrumb/section → h1(+help) + actions 한 baseline → meta → description, 아래 hairline(M9/M30/m1). */}
+          <header
+            className="border-b border-border px-6 pt-5 pb-4"
+            data-slot="admin-shell-header"
+          >
+            <div className="flex min-w-0 flex-col gap-1">
+              {hasBreadcrumbs && breadcrumbs ? (
+                <Breadcrumb>
+                  <BreadcrumbList className="text-xs">
+                    {withOccurrenceKeys(breadcrumbs, (crumb) =>
+                      JSON.stringify([crumb.href ?? null, crumb.label]),
+                    ).map(({ key, value: crumb }, index) => (
+                      <Fragment key={key}>
+                        {index > 0 ? <BreadcrumbSeparator /> : null}
+                        <BreadcrumbItem>
+                          {crumb.href ? (
+                            <BreadcrumbLink href={crumb.href}>
+                              {crumb.label}
+                            </BreadcrumbLink>
+                          ) : index === breadcrumbs.length - 1 ? (
+                            <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
+                          ) : (
+                            <span>{crumb.label}</span>
+                          )}
+                        </BreadcrumbItem>
+                      </Fragment>
+                    ))}
+                  </BreadcrumbList>
+                </Breadcrumb>
+              ) : sectionLabel ? (
+                <p className="text-2xs font-medium text-text-secondary">
+                  {sectionLabel}
+                </p>
+              ) : null}
+              <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-center md:justify-between md:gap-6">
+                <div className="flex min-w-0 items-center gap-2">
+                  <h1 className="text-xl leading-tight font-bold tracking-tight text-text-primary">
+                    {title}
+                  </h1>
                   {help ? <HelpTip label={title}>{help}</HelpTip> : null}
                 </div>
-                {description ? (
-                  <p className="max-w-4xl text-[13px] leading-normal text-text-secondary">
-                    {description}
-                  </p>
+                {actions ? (
+                  <div className="flex shrink-0 flex-wrap items-center gap-2">
+                    {actions}
+                  </div>
                 ) : null}
               </div>
-              {actions ? (
-                <div className="flex shrink-0 flex-wrap gap-2">{actions}</div>
+              {meta ? (
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-secondary">
+                  {meta}
+                </div>
+              ) : null}
+              {description ? (
+                <p className="max-w-3xl text-xs text-text-secondary">
+                  {description}
+                </p>
               ) : null}
             </div>
           </header>
-          <div className="px-6 py-6">{children}</div>
+          {/* M11: <main> 은 children 만 감싼다(aside/header 밖). skip link 대상. */}
+          <main
+            className="min-w-0 flex-1 px-6 py-6 outline-none"
+            data-slot="admin-shell-main"
+            id={MAIN_CONTENT_ID}
+            tabIndex={-1}
+          >
+            {children}
+          </main>
         </div>
       </div>
-    </main>
+    </div>
   );
 }
 
-function ButtonLogout({ collapsed }: { collapsed: boolean }) {
+function ButtonLogout({
+  collapsed = false,
+  iconOnly = false,
+  className,
+}: {
+  /** lg rail 접힘 — 라벨을 lg 에서만 숨긴다. */
+  collapsed?: boolean;
+  /** 모든 breakpoint 에서 아이콘만(<lg 상단 행). */
+  iconOnly?: boolean;
+  className?: string;
+}) {
+  const labelHidden = iconOnly || collapsed;
   return (
     <button
-      aria-label={collapsed ? "로그아웃" : undefined}
+      aria-label={labelHidden ? "로그아웃" : undefined}
       className={cn(
-        buttonVariants({ variant: "ghost", size: "sm" }),
-        "mt-auto justify-start text-text-secondary",
-        collapsed && "lg:size-10 lg:justify-center lg:p-0",
+        railRowClass,
+        iconOnly ? "size-control-sm justify-center gap-0 px-0" : "w-full",
+        !iconOnly && collapsed && railRowCollapsedClass,
+        className,
       )}
-      title="로그아웃"
+      title={labelHidden ? "로그아웃" : undefined}
       type="button"
       onClick={() => void logout()}
     >
-      <LogOutIcon data-icon="inline-start" />
-      <span className={cn(collapsed && "lg:hidden")}>로그아웃</span>
+      <LogOutIcon aria-hidden="true" className="size-4 shrink-0 text-icon-default" />
+      <span className={cn(iconOnly ? "sr-only" : collapsed && "lg:hidden")}>
+        로그아웃
+      </span>
     </button>
   );
 }

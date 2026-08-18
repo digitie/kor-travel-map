@@ -1,15 +1,16 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 
 import { type ColumnDef } from "@tanstack/react-table";
 import {
   ArchiveIcon,
-  DatabaseIcon,
   PlayIcon,
   RefreshCwIcon,
   RotateCcwIcon,
+  XIcon,
 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
+import { useCallback, useId, useMemo, useState, type ReactNode } from "react";
 
 import {
   type BackupOperationResponse,
@@ -20,21 +21,26 @@ import {
   useRestoreSwapMutation,
 } from "@/api/backups";
 import { AdminShell } from "@/components/admin-shell";
+import { useConfirm } from "@/components/confirm-dialog";
+import { DetailList, type DetailItem } from "@/components/detail-list";
+import { JsonViewer } from "@/components/json-viewer";
+import { SectionCard } from "@/components/section-card";
 import { StatusBadge } from "@/components/status-badge";
-import { statusLabel } from "@/lib/status-label";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  Alert,
+  AlertAction,
+  AlertActions,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { DataTable } from "@/components/ui/data-table";
-import { Input } from "@/components/ui/input";
-import { formatCount, formatDateTime, shortId } from "@/lib/format";
+import { buttonVariants } from "@/components/ui/button-variants";
+import { Checkbox } from "@/components/ui/checkbox";
+import { DataTable, type DataTableColumnMeta } from "@/components/ui/data-table";
+import { FormField } from "@/components/ui/form-field";
+import { NULL_GLYPH, formatCount, formatDateTime, shortId } from "@/lib/format";
+import { statusLabel } from "@/lib/status-label";
 
 const byteFormatter = new Intl.NumberFormat("ko-KR");
 
@@ -50,7 +56,7 @@ function formatBytes(value: number): string {
 
 function commandLine(command: BackupOperationResponse["data"]["command"]): string {
   if (!command) {
-    return "-";
+    return NULL_GLYPH;
   }
   const env = Object.entries(command.env)
     .map(([key, value]) => `${key}=${value}`)
@@ -58,96 +64,334 @@ function commandLine(command: BackupOperationResponse["data"]["command"]): strin
   return `${env} ${command.command.join(" ")}`;
 }
 
-function BackupDetail({ backup }: { backup: BackupRecord | null }) {
-  if (!backup) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>선택 없음</CardTitle>
-          <CardDescription>백업 행을 선택하면 manifest와 restore target을 확인합니다.</CardDescription>
-        </CardHeader>
-      </Card>
-    );
-  }
+/**
+ * 실행 옵션 토글 — ui/Checkbox + 형제 `<label htmlFor>`. Base UI Checkbox 기본 root는
+ * `<span role=checkbox>` + 숨은 `<input>` 쌍이라 `<label>`로 감싸면 접근성 라벨이 두 요소에
+ * 붙는다(e2e getByLabel strict 충돌). `nativeButton` + `render={<button/>}`로 root를 labelable
+ * `<button>`으로 바꾸면 `id`가 root에 붙어 형제 label 하나만 checkbox를 가리킨다 — 텍스트 클릭
+ * 토글은 native label 연결이 맡는다(정적 요소 onClick 없음).
+ */
+function OptionToggle({
+  checked,
+  label,
+  hint,
+  onCheckedChange,
+}: {
+  checked: boolean;
+  label: string;
+  hint?: ReactNode;
+  onCheckedChange: (checked: boolean) => void;
+}) {
+  const checkboxId = useId();
+  const labelId = useId();
+  const hintId = useId();
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <CardTitle>{backup.backup_id}</CardTitle>
-            <CardDescription>{backup.path}</CardDescription>
-          </div>
-          <StatusBadge status={backup.manifest_status} />
-        </div>
-      </CardHeader>
-      <CardContent>
-        <dl className="grid gap-3 text-sm">
-          <div className="grid gap-1 sm:grid-cols-[9rem_1fr]">
-            <dt className="text-muted-foreground">created</dt>
-            <dd>{formatDateTime(backup.created_at_utc)}</dd>
-          </div>
-          <div className="grid gap-1 sm:grid-cols-[9rem_1fr]">
-            <dt className="text-muted-foreground">mode</dt>
-            <dd>{backup.mode ?? "-"}</dd>
-          </div>
-          <div className="grid gap-1 sm:grid-cols-[9rem_1fr]">
-            <dt className="text-muted-foreground">size</dt>
-            <dd>{formatBytes(backup.byte_size)}</dd>
-          </div>
-          <div className="grid gap-1 sm:grid-cols-[9rem_1fr]">
-            <dt className="text-muted-foreground">checksums</dt>
-            <dd>{formatCount(backup.checksum_count)}</dd>
-          </div>
-          <div className="grid gap-1 sm:grid-cols-[9rem_1fr]">
-            <dt className="text-muted-foreground">databases</dt>
-            <dd className="break-all font-mono text-xs">
-              {JSON.stringify(backup.databases)}
-            </dd>
-          </div>
-          <div className="grid gap-1 sm:grid-cols-[9rem_1fr]">
-            <dt className="text-muted-foreground">components</dt>
-            <dd className="break-all font-mono text-xs">
-              {JSON.stringify(backup.components)}
-            </dd>
-          </div>
-        </dl>
-      </CardContent>
-    </Card>
+    <div className="flex items-start gap-2 py-1">
+      <Checkbox
+        aria-describedby={hint ? hintId : undefined}
+        aria-labelledby={labelId}
+        checked={checked}
+        className="mt-0.5"
+        id={checkboxId}
+        nativeButton
+        render={<button type="button" />}
+        onCheckedChange={(next) => onCheckedChange(next === true)}
+      />
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <label
+          className="cursor-pointer text-sm text-text-primary select-none"
+          htmlFor={checkboxId}
+          id={labelId}
+        >
+          {label}
+        </label>
+        {hint ? (
+          <span className="text-2xs text-text-secondary" id={hintId}>
+            {hint}
+          </span>
+        ) : null}
+      </div>
+    </div>
   );
 }
 
-function OperationResult({ result }: { result: BackupOperationResponse | null }) {
+function BackupDetail({ backup }: { backup: BackupRecord | null }) {
+  if (!backup) {
+    return (
+      <SectionCard
+        description="백업 행을 선택하면 manifest와 restore target을 확인합니다."
+        headingLevel={2}
+        title="선택 없음"
+      >
+        <p className="text-xs text-text-tertiary">
+          목록에서 행을 클릭하거나 Enter로 선택합니다.
+        </p>
+      </SectionCard>
+    );
+  }
+  const items: DetailItem[] = [
+    { label: "생성", value: formatDateTime(backup.created_at_utc), numeric: true },
+    { label: "모드", value: backup.mode ?? null },
+    { label: "크기", value: formatBytes(backup.byte_size), numeric: true },
+    { label: "체크섬", value: `${formatCount(backup.checksum_count)}개`, numeric: true },
+    { label: "경로", value: backup.path, mono: true, copyable: true },
+  ];
+  return (
+    <SectionCard
+      actions={<StatusBadge status={backup.manifest_status} />}
+      description={<span className="font-mono">{backup.backup_id}</span>}
+      headingLevel={2}
+      title="백업 상세"
+    >
+      <DetailList items={items} layout="inline" />
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-1">
+          <span className="text-2xs font-medium text-text-secondary">데이터베이스</span>
+          <JsonViewer aria-label="backup databases" maxHeight="sm" value={backup.databases} />
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-2xs font-medium text-text-secondary">구성 요소</span>
+          <JsonViewer aria-label="backup components" maxHeight="sm" value={backup.components} />
+        </div>
+      </div>
+    </SectionCard>
+  );
+}
+
+function OperationResult({
+  result,
+  onDismiss,
+}: {
+  result: BackupOperationResponse | null;
+  onDismiss: () => void;
+}) {
   if (!result) {
     return null;
   }
+  const targets = result.data.restore_targets;
   return (
     <Alert>
-      <DatabaseIcon data-icon="inline-start" />
       <AlertTitle>
         {result.data.operation} / {statusLabel(result.data.status)}
       </AlertTitle>
-      <AlertDescription className="flex flex-col gap-2">
-        <span>{result.data.message}</span>
-        {result.data.restore_targets ? (
-          <span className="font-mono text-xs">
-            {result.data.restore_targets.app_db} /{" "}
-            {result.data.restore_targets.dagster_db} /{" "}
-            {result.data.restore_targets.rustfs_volume}
-          </span>
+      <AlertDescription>
+        <p>{result.data.message}</p>
+        {targets ? (
+          <DetailList
+            className="mt-2"
+            items={[
+              { label: "app DB", value: targets.app_db, mono: true },
+              { label: "Dagster DB", value: targets.dagster_db, mono: true },
+              { label: "RustFS 볼륨", value: targets.rustfs_volume, mono: true },
+            ]}
+            layout="inline"
+          />
         ) : null}
         {result.data.command ? (
-          <code className="block whitespace-pre-wrap break-all rounded-md bg-muted p-2 text-xs">
-            {commandLine(result.data.command)}
-          </code>
+          <JsonViewer
+            aria-label="backup command"
+            className="mt-2"
+            copyable
+            maxHeight="sm"
+            value={commandLine(result.data.command)}
+          />
         ) : null}
+      </AlertDescription>
+      <AlertActions>
         <Link
-          className="w-fit text-xs underline underline-offset-2"
+          className={buttonVariants({ size: "sm", variant: "outline" })}
           href="/ops/logs?tab=system"
         >
           운영 로그에서 실행 확인
         </Link>
-      </AlertDescription>
+      </AlertActions>
+      <AlertAction>
+        <Button
+          aria-label="결과 닫기"
+          size="icon-sm"
+          type="button"
+          variant="ghost"
+          onClick={onDismiss}
+        >
+          <XIcon />
+        </Button>
+      </AlertAction>
     </Alert>
+  );
+}
+
+type BackupExecutionOptions = {
+  backupId: string;
+  executeBackup: boolean;
+  executeRestore: boolean;
+  recreateRestore: boolean;
+  executeSwap: boolean;
+  applySwap: boolean;
+};
+
+const DEFAULT_EXECUTION_OPTIONS: BackupExecutionOptions = {
+  backupId: "",
+  executeBackup: false,
+  executeRestore: false,
+  recreateRestore: false,
+  executeSwap: false,
+  applySwap: false,
+};
+
+function ExecutionOptionsPanel({
+  options,
+  onChange,
+}: {
+  options: BackupExecutionOptions;
+  onChange: (patch: Partial<BackupExecutionOptions>) => void;
+}) {
+  return (
+    <SectionCard
+      description="기본은 command plan만 생성합니다. 실행은 아래에서 명시적으로 켭니다."
+      headingLevel={2}
+      title="실행 옵션"
+    >
+      <FormField
+        hint="비워 두면 시각 기반 ID로 자동 생성됩니다."
+        id="backup-id-input"
+        label="backup id"
+        value={options.backupId}
+        onChange={(event) => onChange({ backupId: event.target.value })}
+      />
+      <div className="flex flex-col divide-y divide-border">
+        <OptionToggle
+          checked={options.executeBackup}
+          label="백업 command 실행"
+          onCheckedChange={(checked) => onChange({ executeBackup: checked })}
+        />
+        <OptionToggle
+          checked={options.executeRestore}
+          label="restore command 실행"
+          onCheckedChange={(checked) => onChange({ executeRestore: checked })}
+        />
+        <OptionToggle
+          checked={options.recreateRestore}
+          hint="staging DB/볼륨을 지우고 다시 만든 뒤 복원합니다."
+          label="staging 대상 재생성"
+          onCheckedChange={(checked) => onChange({ recreateRestore: checked })}
+        />
+        <OptionToggle
+          checked={options.executeSwap}
+          label="swap command 실행"
+          onCheckedChange={(checked) => onChange({ executeSwap: checked })}
+        />
+        <OptionToggle
+          checked={options.applySwap}
+          hint="실행과 함께 켜면 운영 대상이 즉시 교체됩니다 — 확인 대화상자를 거칩니다."
+          label="swap 즉시 적용"
+          onCheckedChange={(checked) => onChange({ applySwap: checked })}
+        />
+      </div>
+    </SectionCard>
+  );
+}
+
+function useBackupColumns({
+  restoreBackup,
+  swapRestore,
+  submitRestore,
+  submitSwap,
+}: {
+  restoreBackup: ReturnType<typeof useRestoreBackupMutation>;
+  swapRestore: ReturnType<typeof useRestoreSwapMutation>;
+  submitRestore: (backup: BackupRecord) => void;
+  submitSwap: (backup: BackupRecord) => void;
+}): ColumnDef<BackupRecord, unknown>[] {
+  return useMemo<ColumnDef<BackupRecord, unknown>[]>(
+    () => [
+      {
+        accessorKey: "backup_id",
+        header: "백업 ID",
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">
+            {shortId(row.original.backup_id, 20)}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "created_at_utc",
+        header: "생성",
+        enableSorting: true,
+        cell: ({ row }) => formatDateTime(row.original.created_at_utc),
+      },
+      {
+        accessorKey: "manifest_status",
+        header: "상태",
+        enableSorting: true,
+        cell: ({ row }) => <StatusBadge status={row.original.manifest_status} />,
+      },
+      {
+        accessorKey: "byte_size",
+        header: "크기",
+        enableSorting: true,
+        meta: { align: "right" } satisfies DataTableColumnMeta,
+        cell: ({ row }) => formatBytes(row.original.byte_size),
+      },
+      {
+        id: "action",
+        header: "작업",
+        enableSorting: false,
+        meta: { align: "right" } satisfies DataTableColumnMeta,
+        cell: ({ row }) => {
+          const backup = row.original;
+          const restoring =
+            restoreBackup.isPending &&
+            restoreBackup.variables?.backupId === backup.backup_id;
+          const swapping =
+            swapRestore.isPending && swapRestore.variables?.backupId === backup.backup_id;
+          return (
+            <div className="flex flex-wrap justify-end gap-1">
+              <Button
+                disabled={restoreBackup.isPending}
+                disabledReason="다른 restore 요청을 처리하는 중입니다"
+                loading={restoring}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  submitRestore(backup);
+                }}
+              >
+                <RotateCcwIcon data-icon="inline-start" />
+                Restore
+              </Button>
+              <Button
+                disabled={swapRestore.isPending}
+                disabledReason="다른 swap 요청을 처리하는 중입니다"
+                loading={swapping}
+                size="sm"
+                type="button"
+                variant="ghost"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  submitSwap(backup);
+                }}
+              >
+                <PlayIcon data-icon="inline-start" />
+                Swap
+              </Button>
+            </div>
+          );
+        },
+      },
+    ],
+    // 행의 Restore/Swap 버튼 onClick은 submitRestore/submitSwap을 통해 execute/recreate/
+    // apply 체크박스 state를 읽는다. 이 state들이 바뀔 때 컬럼을 재생성하지 않으면 onClick이
+    // 최초 렌더의 stale closure를 잡아 항상 execute:false를 보낸다(실행 옵션 무효 버그).
+    [
+      restoreBackup.isPending,
+      restoreBackup.variables?.backupId,
+      submitRestore,
+      submitSwap,
+      swapRestore.isPending,
+      swapRestore.variables?.backupId,
+    ],
   );
 }
 
@@ -156,13 +400,14 @@ export function BackupsClient() {
   const createBackup = useCreateBackupMutation();
   const restoreBackup = useRestoreBackupMutation();
   const swapRestore = useRestoreSwapMutation();
+  const confirm = useConfirm();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [backupId, setBackupId] = useState("");
-  const [executeBackup, setExecuteBackup] = useState(false);
-  const [executeRestore, setExecuteRestore] = useState(false);
-  const [executeSwap, setExecuteSwap] = useState(false);
-  const [applySwap, setApplySwap] = useState(false);
-  const [recreateRestore, setRecreateRestore] = useState(false);
+  const [options, setOptions] = useState<BackupExecutionOptions>(DEFAULT_EXECUTION_OPTIONS);
+  const { applySwap, backupId, executeBackup, executeRestore, executeSwap, recreateRestore } =
+    options;
+  const updateOptions = useCallback((patch: Partial<BackupExecutionOptions>) => {
+    setOptions((prev) => ({ ...prev, ...patch }));
+  }, []);
   const [lastResult, setLastResult] = useState<BackupOperationResponse | null>(null);
 
   const items = useMemo(() => backups.data?.data.items ?? [], [backups.data]);
@@ -198,97 +443,43 @@ export function BackupsClient() {
 
   const submitSwap = useCallback(
     (backup: BackupRecord) => {
-      swapRestore.mutate(
-        {
-          backupId: backup.backup_id,
-          body: {
-            app_db: null,
-            dagster_db: null,
-            rustfs_volume: null,
-            apply: applySwap,
-            execute: executeSwap,
-            skip_verify: false,
-            note: null,
+      const run = () =>
+        swapRestore.mutate(
+          {
+            backupId: backup.backup_id,
+            body: {
+              app_db: null,
+              dagster_db: null,
+              rustfs_volume: null,
+              apply: applySwap,
+              execute: executeSwap,
+              skip_verify: false,
+              note: null,
+            },
           },
-        },
-        { onSuccess: setLastResult },
-      );
+          { onSuccess: setLastResult },
+        );
+      // 실행 + 즉시 적용만 비가역(운영 대상 교체) — plan/execute-only는 확인 없이 진행한다.
+      if (executeSwap && applySwap) {
+        void (async () => {
+          const ok = await confirm({
+            title: `${backup.backup_id} 백업으로 운영 대상을 교체할까요?`,
+            description:
+              "실행 즉시 staging 대상이 운영 대상으로 교체됩니다. 되돌리려면 이전 백업으로 다시 복원해야 합니다.",
+            confirmLabel: "교체 적용",
+            destructive: true,
+          });
+          if (!ok) return;
+          run();
+        })();
+        return;
+      }
+      run();
     },
-    [applySwap, executeSwap, swapRestore],
+    [applySwap, confirm, executeSwap, swapRestore],
   );
 
-  type BackupRow = NonNullable<typeof backups.data>["data"]["items"][number];
-  const columns = useMemo<ColumnDef<BackupRow, unknown>[]>(
-    () => [
-      {
-        accessorKey: "backup_id",
-        header: "백업 ID",
-        cell: ({ row }) => (
-          <span className="font-mono text-xs">
-            {shortId(row.original.backup_id, 20)}
-          </span>
-        ),
-      },
-      {
-        accessorKey: "created_at_utc",
-        header: "생성",
-        enableSorting: true,
-        cell: ({ row }) => formatDateTime(row.original.created_at_utc),
-      },
-      {
-        accessorKey: "manifest_status",
-        header: "상태",
-        enableSorting: true,
-        cell: ({ row }) => <StatusBadge status={row.original.manifest_status} />,
-      },
-      {
-        accessorKey: "byte_size",
-        header: "크기",
-        enableSorting: true,
-        cell: ({ row }) => formatBytes(row.original.byte_size),
-      },
-      {
-        id: "action",
-        header: "작업",
-        enableSorting: false,
-        cell: ({ row }) => {
-          const backup = row.original;
-          return (
-            <div className="flex flex-wrap gap-2">
-              <Button
-                size="sm"
-                type="button"
-                variant="outline"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  submitRestore(backup);
-                }}
-              >
-                <RotateCcwIcon data-icon="inline-start" />
-                Restore
-              </Button>
-              <Button
-                size="sm"
-                type="button"
-                variant="ghost"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  submitSwap(backup);
-                }}
-              >
-                <PlayIcon data-icon="inline-start" />
-                Swap
-              </Button>
-            </div>
-          );
-        },
-      },
-    ],
-    // 행의 Restore/Swap 버튼 onClick은 submitRestore/submitSwap을 통해 execute/recreate/
-    // apply 체크박스 state를 읽는다. 이 state들이 바뀔 때 컬럼을 재생성하지 않으면 onClick이
-    // 최초 렌더의 stale closure를 잡아 항상 execute:false를 보낸다(실행 옵션 무효 버그).
-    [submitRestore, submitSwap],
-  );
+  const columns = useBackupColumns({ restoreBackup, swapRestore, submitRestore, submitSwap });
 
   const submitBackup = () => {
     createBackup.mutate(
@@ -301,140 +492,99 @@ export function BackupsClient() {
     );
   };
 
-  const activeError =
-    backups.error ??
-    createBackup.error ??
-    restoreBackup.error ??
-    swapRestore.error;
+  const errorLines = [
+    backups.error ? `목록: ${backups.error.message}` : null,
+    createBackup.error ? `백업: ${createBackup.error.message}` : null,
+    restoreBackup.error ? `restore: ${restoreBackup.error.message}` : null,
+    swapRestore.error ? `swap: ${swapRestore.error.message}` : null,
+  ].filter((line): line is string => line !== null);
+  const commandEnabled = backups.data?.data.command_enabled;
 
   return (
     <AdminShell
       actions={
         <>
-          <Button type="button" variant="outline" onClick={refresh}>
+          <Button loading={backups.isFetching} type="button" variant="outline" onClick={refresh}>
             <RefreshCwIcon data-icon="inline-start" />
             새로고침
           </Button>
-          <Button
-            disabled={createBackup.isPending}
-            type="button"
-            onClick={submitBackup}
-          >
+          <Button loading={createBackup.isPending} type="button" onClick={submitBackup}>
             <ArchiveIcon data-icon="inline-start" />
             백업
           </Button>
         </>
       }
       description="cold backup artifact와 staging restore command를 확인합니다."
+      meta={
+        backups.data ? (
+          <>
+            저장소 <span className="font-mono">{backups.data.data.backup_root}</span>
+          </>
+        ) : undefined
+      }
       title="백업"
     >
-      <div className="flex flex-col gap-5">
-        {activeError ? (
+      <div className="flex flex-col gap-6">
+        {errorLines.length > 0 ? (
           <Alert variant="destructive">
             <AlertTitle>backup/restore 요청 실패</AlertTitle>
-            <AlertDescription>{activeError.message}</AlertDescription>
+            <AlertDescription>
+              {errorLines.map((line) => (
+                <p key={line}>{line}</p>
+              ))}
+              <p>서버 응답을 확인한 뒤 다시 시도하세요.</p>
+            </AlertDescription>
+            <AlertActions>
+              <Button
+                loading={backups.isFetching}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={refresh}
+              >
+                다시 시도
+              </Button>
+            </AlertActions>
           </Alert>
         ) : null}
-        <OperationResult result={lastResult} />
+        <OperationResult result={lastResult} onDismiss={() => setLastResult(null)} />
 
-        <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
-          <Card>
-            <CardHeader>
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <CardTitle>백업 목록</CardTitle>
-                  <CardDescription>
-                    {backups.data
-                      ? `${formatCount(backups.data.data.items.length)} artifacts`
-                      : "loading"}
-                  </CardDescription>
-                </div>
-                <Badge
-                  variant={
-                    backups.data?.data.command_enabled ? "default" : "secondary"
-                  }
-                >
-                  {backups.data?.data.command_enabled
-                    ? "execute enabled"
-                    : "plan only"}
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_var(--rail)]">
+          <SectionCard
+            actions={
+              commandEnabled === undefined ? null : (
+                <Badge variant={commandEnabled ? "success" : "neutral"}>
+                  {commandEnabled ? "execute enabled" : "plan only"}
                 </Badge>
-              </div>
-            </CardHeader>
-            <CardContent className="overflow-auto">
-              <DataTable
-                columns={columns}
-                data={items}
-                getRowId={(row) => row.backup_id}
-                isLoading={backups.isLoading}
-                emptyMessage="백업이 없습니다."
-                onRowClick={(row) => setSelectedId(row.backup_id)}
-                isRowActive={(row) => selected?.backup_id === row.backup_id}
-                manualSorting={false}
-              />
-            </CardContent>
-          </Card>
+              )
+            }
+            description={
+              backups.data
+                ? `${formatCount(backups.data.data.items.length)} artifacts`
+                : NULL_GLYPH
+            }
+            title="백업 목록"
+          >
+            <DataTable
+              columns={columns}
+              data={items}
+              emptyState={{
+                title: "백업이 없습니다.",
+                description: "상단 백업 버튼으로 첫 artifact를 만들 수 있습니다.",
+              }}
+              getRowId={(row) => row.backup_id}
+              isLoading={backups.isLoading}
+              isRowActive={(row) => selected?.backup_id === row.backup_id}
+              manualSorting={false}
+              onRowClick={(row) => setSelectedId(row.backup_id)}
+            />
+          </SectionCard>
 
-          <div className="flex flex-col gap-4">
-            <Card>
-              <CardHeader>
-                <CardTitle>실행 옵션</CardTitle>
-                <CardDescription>기본은 command plan만 생성합니다.</CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-3">
-                <label className="flex flex-col gap-1 text-sm" htmlFor="backup-id-input">
-                  backup id
-                  <Input
-                    id="backup-id-input"
-                    placeholder="자동 생성"
-                    value={backupId}
-                    onChange={(event) => setBackupId(event.target.value)}
-                  />
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    checked={executeBackup}
-                    type="checkbox"
-                    onChange={(event) => setExecuteBackup(event.target.checked)}
-                  />
-                  백업 command 실행
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    checked={executeRestore}
-                    type="checkbox"
-                    onChange={(event) => setExecuteRestore(event.target.checked)}
-                  />
-                  restore command 실행
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    checked={recreateRestore}
-                    type="checkbox"
-                    onChange={(event) => setRecreateRestore(event.target.checked)}
-                  />
-                  staging 대상 재생성
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    checked={executeSwap}
-                    type="checkbox"
-                    onChange={(event) => setExecuteSwap(event.target.checked)}
-                  />
-                  swap command 실행
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    checked={applySwap}
-                    type="checkbox"
-                    onChange={(event) => setApplySwap(event.target.checked)}
-                  />
-                  swap 즉시 적용
-                </label>
-              </CardContent>
-            </Card>
+          <div className="flex flex-col gap-6">
+            <ExecutionOptionsPanel options={options} onChange={updateOptions} />
             <BackupDetail backup={selected} />
           </div>
-        </section>
+        </div>
       </div>
     </AdminShell>
   );

@@ -1,4 +1,5 @@
 "use client"
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 
 // 공용 headless DataTable — @tanstack/react-table v8(STABLE) 기반. admin/ops UI의 모든
 // 테이블이 본 컴포넌트로 통일된다(ADR/마이그레이션 2026-06-17). 기본은 semantic
@@ -10,10 +11,16 @@
 // cursor 페이징/필터/정렬을 수행하므로 DataTable은 data만 받아 렌더한다(서버 정렬이
 // 일반적 케이스라 #502에서 기본을 manual로 뒤집었다). 전체 데이터셋을 한 번에 보유하는
 // 완전 client 목록만 manualSorting={false}로 getSortedRowModel을 켠다.
+//
+// 상태 표면(design.md): loading = 형태가 맞는 skeleton 행(`aria-busy`), empty = 좌측 정렬
+// EmptyState(제목 + 이유 + 행동 1개, `emptyState`), error = what/why/what-to-do Alert +
+// `다시 시도`(`onRetry`). 숫자 column은 `meta.align: "right"`(tabular-nums는 Table 기본),
+// 긴 본문 column은 `meta.wrap: true`로 clamp/wrap을 허용한다.
 
 import * as React from "react"
 import {
   type Cell,
+  type Column,
   type ColumnDef,
   type Header,
   type OnChangeFn,
@@ -29,7 +36,13 @@ import {
 import { useVirtualizer } from "@tanstack/react-virtual"
 import { ArrowDown, ArrowUp, ChevronsUpDown } from "lucide-react"
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { EmptyState } from "@/components/empty-state"
+import {
+  Alert,
+  AlertActions,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -43,6 +56,31 @@ import {
 } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 
+/**
+ * ColumnDef.meta에 넣는 표시 힌트. 예:
+ *   { accessorKey: "duration_ms", header: "소요", meta: { align: "right" } satisfies DataTableColumnMeta }
+ */
+export interface DataTableColumnMeta {
+  /** 정렬 — 숫자/시각/크기 column은 "right"(우측 정렬, M24). */
+  align?: "left" | "center" | "right"
+  /** 긴 본문(message 등) — whitespace-normal로 wrap/line-clamp 허용(M38). */
+  wrap?: boolean
+  /** th·td 공통 className. */
+  className?: string
+  /** th 전용 className. */
+  headerClassName?: string
+  /** td 전용 className. */
+  cellClassName?: string
+}
+
+/** 비었을 때 표시할 내용 — 무엇이 비었나 · 왜/다음 행동 · 행동 1개. */
+export interface DataTableEmptyState {
+  title: string
+  description?: React.ReactNode
+  action?: React.ReactNode
+  icon?: React.ReactNode
+}
+
 export interface DataTableProps<TData> {
   columns: ColumnDef<TData, unknown>[]
   data: TData[]
@@ -52,8 +90,19 @@ export interface DataTableProps<TData> {
   isLoading?: boolean
   isError?: boolean
   error?: { message?: string } | null
-  /** 비었을 때 colSpan 행에 표시할 문구. */
+  /** 오류 제목(what). 기본 `목록을 불러오지 못했습니다`. */
+  errorTitle?: string
+  /** 오류 슬롯 전체를 대체(페이지가 AppErrorPanel 등을 직접 렌더할 때). */
+  errorState?: React.ReactNode
+  /** 오류 시 `다시 시도` 버튼에 연결할 refetch. Promise를 돌려주면(예: `() => query.refetch()`)
+   *  resolve될 때까지 버튼을 loading 상태로 잠근다 — 페이지가 진행 상태를 따로 넘기지 않는다. */
+  onRetry?: () => void | Promise<unknown>
+  /** 비었을 때 colSpan 행에 표시할 문구(제목만). `emptyState`가 있으면 그것이 우선. */
   emptyMessage?: string
+  /** 비었을 때 표시할 EmptyState(제목 + 이유 + 행동 1개). */
+  emptyState?: DataTableEmptyState
+  /** skeleton 행 수(기본 6). 예상 페이지 크기에 맞추면 layout shift가 줄어든다. */
+  skeletonRowCount?: number
   /** 정렬: 제어(서버) 모드면 sorting+onSortingChange 전달 + manualSorting. */
   sorting?: SortingState
   onSortingChange?: OnChangeFn<SortingState>
@@ -81,36 +130,97 @@ export interface DataTableProps<TData> {
   virtualized?: boolean
   estimateRowSize?: number
   overscan?: number
-  /** 스크롤 컨테이너 className(가상화 시 고정 높이 필수, 예: h-[calc(100vh-16rem)]). */
+  /** 스크롤 컨테이너 className — Table 자신의 컨테이너(hairline 1층)에 합쳐진다: 높이 제한
+   *  (`max-h-80`)·스크롤 축만 준다(테두리/배경/모서리를 다시 주지 않는다). 가상화 시 고정 높이 필수
+   *  (예: h-[calc(100vh-16rem)]). */
   containerClassName?: string
   /** 테이블 caption(스크린리더용). */
   ariaLabel?: string
 }
 
-/** 정렬 가능한 헤더 버튼 — 접근성 이름은 title 그대로 보존(글리프 aria-hidden), th에 aria-sort. */
+function columnMeta<TData>(column: Column<TData, unknown>): DataTableColumnMeta {
+  return (column.columnDef.meta ?? {}) as DataTableColumnMeta
+}
+
+/**
+ * 긴 본문 셀(로그 message·이벤트 payload 요약)의 표준 — column에 `meta: { wrap: true }`를 주고
+ * cell을 이 컴포넌트로 감싸면 N줄로 clamp되고 말줄임이 보인다(M38). 잘린 전문은 hover title이
+ * 아니라 행 상세(onRowClick → inspector rail)로 도달하게 한다 — title은 보조 신호일 뿐이다.
+ */
+export function DataTableClampCell({
+  lines = 2,
+  className,
+  title,
+  children,
+}: {
+  /** clamp 줄 수(1–3). */
+  lines?: 1 | 2 | 3
+  className?: string
+  /** 전문(문자열이면 title로도 노출). */
+  title?: string
+  children: React.ReactNode
+}) {
+  return (
+    <div
+      className={cn(
+        "max-w-96 whitespace-normal break-words",
+        lines === 1 && "line-clamp-1",
+        lines === 2 && "line-clamp-2",
+        lines === 3 && "line-clamp-3",
+        className,
+      )}
+      title={title ?? (typeof children === "string" ? children : undefined)}
+    >
+      {children}
+    </div>
+  )
+}
+
+function alignClass(align: DataTableColumnMeta["align"]): string | undefined {
+  if (align === "right") return "text-right"
+  if (align === "center") return "text-center"
+  return undefined
+}
+
+function flexAlignClass(align: DataTableColumnMeta["align"]): string | undefined {
+  if (align === "right") return "justify-end text-right"
+  if (align === "center") return "justify-center text-center"
+  return undefined
+}
+
+/** 정렬 가능한 헤더 버튼 — 접근성 이름은 title 그대로 보존(글리프 aria-hidden), th에 aria-sort.
+ *  th와 같은 12px/600 활자(정렬 버튼이 헤더 텍스트보다 커 보이지 않게, M3). */
 function DataTableColumnHeader({
   title,
   sorted,
   canSort,
+  align,
   onToggle,
 }: {
   title: string
   sorted: false | "asc" | "desc"
   canSort: boolean
+  align?: DataTableColumnMeta["align"]
   onToggle?: (event: React.MouseEvent) => void
 }) {
   if (!canSort) return <>{title}</>
   const Glyph = sorted === "asc" ? ArrowUp : sorted === "desc" ? ArrowDown : ChevronsUpDown
   return (
-    <Button
-      variant="ghost"
-      size="sm"
-      className="-ml-2 h-8 px-2 data-[state=open]:bg-brand-tint"
+    <button
+      type="button"
+      data-sorted={sorted || undefined}
+      className={cn(
+        "inline-flex h-7 items-center gap-1 rounded-control px-2 text-2xs leading-none font-semibold whitespace-nowrap text-text-secondary transition-colors outline-none select-none hover:bg-surface-muted hover:text-text-primary focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus active:translate-y-px data-[sorted]:text-text-primary",
+        align === "right" ? "-mr-2 flex-row-reverse" : "-ml-2",
+      )}
       onClick={onToggle}
     >
       {title}
-      <Glyph className="ml-1 size-3.5 opacity-60" aria-hidden="true" />
-    </Button>
+      <Glyph
+        className={cn("size-3.5 shrink-0", sorted ? "text-brand" : "text-text-tertiary")}
+        aria-hidden="true"
+      />
+    </button>
   )
 }
 
@@ -132,6 +242,7 @@ function renderHeadCellContent<TData>(
         title={header.column.columnDef.header}
         sorted={sorted}
         canSort={canSort}
+        align={columnMeta(header.column).align}
         onToggle={header.column.getToggleSortingHandler()}
       />
     )
@@ -149,6 +260,11 @@ function handleClickableRowKeyDown<TData>(
   event.preventDefault()
   onRowClick(row)
 }
+
+/** 클릭 가능한 행의 focus 표면 — 표 안이라 inset outline(이웃 행/스크롤 컨테이너에 잘리지 않게)
+ *  + 배경 변화(색 1채널이 아니게). ring은 transition-colors 밖이라 즉시 나타난다. */
+const CLICKABLE_ROW_CLASS =
+  "cursor-pointer outline-none focus-visible:bg-surface-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus active:bg-surface-muted"
 
 function selectionColumn<TData>(): ColumnDef<TData, unknown> {
   return {
@@ -175,6 +291,53 @@ function selectionColumn<TData>(): ColumnDef<TData, unknown> {
   }
 }
 
+const DEFAULT_ERROR_TITLE = "목록을 불러오지 못했습니다"
+const DEFAULT_ERROR_WHY = "서버가 응답하지 않았거나 요청이 거부되었습니다."
+const DEFAULT_ERROR_NEXT = "잠시 후 다시 시도하세요."
+
+function DataTableError({
+  title,
+  message,
+  onRetry,
+}: {
+  title: string
+  message: string | undefined
+  onRetry?: () => void | Promise<unknown>
+}) {
+  // 재시도 진행 상태는 onRetry가 돌려준 Promise로 스스로 판단한다(페이지 prop 없음).
+  // React 19는 unmount 후 setState를 무시하므로 mounted guard가 필요 없다.
+  const [retrying, setRetrying] = React.useState(false)
+  const handleRetry = () => {
+    if (!onRetry) return
+    const result: unknown = onRetry()
+    if (!(result instanceof Promise)) return
+    setRetrying(true)
+    void result.catch(() => undefined).finally(() => setRetrying(false))
+  }
+  return (
+    <Alert variant="destructive">
+      <AlertTitle>{title}</AlertTitle>
+      <AlertDescription>
+        <span>{message ?? DEFAULT_ERROR_WHY}</span>
+        {onRetry ? null : <span className="ml-1">{DEFAULT_ERROR_NEXT}</span>}
+      </AlertDescription>
+      {onRetry ? (
+        <AlertActions>
+          <Button
+            loading={retrying}
+            size="sm"
+            type="button"
+            variant="outline"
+            onClick={handleRetry}
+          >
+            다시 시도
+          </Button>
+        </AlertActions>
+      ) : null}
+    </Alert>
+  )
+}
+
 export function DataTable<TData>({
   columns,
   data,
@@ -182,7 +345,12 @@ export function DataTable<TData>({
   isLoading,
   isError,
   error,
+  errorTitle = DEFAULT_ERROR_TITLE,
+  errorState,
+  onRetry,
   emptyMessage = "데이터가 없습니다.",
+  emptyState,
+  skeletonRowCount = 6,
   sorting,
   onSortingChange,
   manualSorting = true,
@@ -228,22 +396,30 @@ export function DataTable<TData>({
   })
 
   if (isError) {
+    if (errorState !== undefined) return <>{errorState}</>
     return (
-      <Alert variant="destructive">
-        <AlertTitle>불러오기 실패</AlertTitle>
-        <AlertDescription>{error?.message ?? "알 수 없는 오류"}</AlertDescription>
-      </Alert>
+      <DataTableError
+        title={errorTitle}
+        message={error?.message}
+        onRetry={onRetry}
+      />
     )
   }
 
   const rows = table.getRowModel().rows
   const colCount = table.getAllLeafColumns().length
   const selectedRows = enableRowSelection ? table.getSelectedRowModel().rows : []
+  const resolvedEmpty: DataTableEmptyState = emptyState ?? { title: emptyMessage }
 
   const bulkBar =
     enableRowSelection && renderBulkActions && selectedRows.length > 0 ? (
-      <div className="flex items-center gap-2 rounded-xl border border-surface-muted bg-surface-subtle px-3 py-2 text-[13px]">
-        <span className="text-text-secondary">{selectedRows.length}개 선택됨</span>
+      <div
+        className="flex flex-wrap items-center gap-2 rounded-control bg-brand-tint px-3 py-2 text-xs text-text-primary"
+        data-slot="bulk-actions"
+        role="region"
+        aria-label="선택 항목 작업"
+      >
+        <span className="font-medium tabular-nums">{selectedRows.length}개 선택됨</span>
         {renderBulkActions(selectedRows)}
       </div>
     ) : null
@@ -257,7 +433,8 @@ export function DataTable<TData>({
           rows={rows}
           colCount={colCount}
           isLoading={isLoading}
-          emptyMessage={emptyMessage}
+          emptyState={resolvedEmpty}
+          skeletonRowCount={skeletonRowCount}
           estimateRowSize={estimateRowSize}
           overscan={overscan}
           onRowClick={onRowClick}
@@ -266,54 +443,57 @@ export function DataTable<TData>({
           ariaLabel={ariaLabel}
         />
       ) : (
-        <div className={cn(containerClassName)}>
-          <Table aria-label={ariaLabel}>
-            <TableHeader>
-              {table.getHeaderGroups().map((headerGroup) => (
-                <TableRow key={headerGroup.id}>
-                  {headerGroup.headers.map((header) => {
-                    const sorted = header.column.getIsSorted()
-                    const canSort = header.column.getCanSort()
-                    return (
-                      <TableHead
-                        aria-sort={canSort ? ariaSort(sorted) : undefined}
-                        key={header.id}
-                      >
-                        {renderHeadCellContent(header, sorted, canSort)}
-                      </TableHead>
-                    )
-                  })}
-                </TableRow>
-              ))}
-            </TableHeader>
-            <TableBody>
-              {isLoading ? (
-                <SkeletonRows colCount={colCount} />
-              ) : rows.length === 0 ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={colCount}
-                    className="h-32 text-center text-text-secondary"
-                  >
-                    {emptyMessage}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                rows.map((row) => (
+        <Table
+          aria-busy={isLoading || undefined}
+          aria-label={ariaLabel}
+          containerClassName={containerClassName}
+        >
+          <TableHeader>
+            {table.getHeaderGroups().map((headerGroup) => (
+              <TableRow key={headerGroup.id}>
+                {headerGroup.headers.map((header) => {
+                  const sorted = header.column.getIsSorted()
+                  const canSort = header.column.getCanSort()
+                  const meta = columnMeta(header.column)
+                  return (
+                    <TableHead
+                      aria-sort={canSort ? ariaSort(sorted) : undefined}
+                      className={cn(alignClass(meta.align), meta.className, meta.headerClassName)}
+                      key={header.id}
+                    >
+                      {renderHeadCellContent(header, sorted, canSort)}
+                    </TableHead>
+                  )
+                })}
+              </TableRow>
+            ))}
+          </TableHeader>
+          <TableBody>
+            {isLoading ? (
+              <SkeletonRows columns={table.getAllLeafColumns()} rowCount={skeletonRowCount} />
+            ) : rows.length === 0 ? (
+              <TableRow className="hover:bg-transparent">
+                <TableCell colSpan={colCount} className="px-3 py-0 whitespace-normal">
+                  <EmptyState
+                    action={resolvedEmpty.action}
+                    description={resolvedEmpty.description}
+                    icon={resolvedEmpty.icon}
+                    size="sm"
+                    title={resolvedEmpty.title}
+                  />
+                </TableCell>
+              </TableRow>
+            ) : (
+              rows.map((row) => {
+                const active = row.getIsSelected() || isRowActive?.(row.original) === true
+                return (
                   <TableRow
                     key={row.id}
                     data-row-identity={rowIdentity?.(row.original)}
                     data-testid={rowTestId?.(row.original)}
-                    data-state={
-                      row.getIsSelected() || isRowActive?.(row.original)
-                        ? "selected"
-                        : undefined
-                    }
-                    className={
-                      onRowClick
-                        ? "cursor-pointer focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset focus-visible:outline-none"
-                        : undefined
-                    }
+                    data-state={active ? "selected" : undefined}
+                    aria-selected={onRowClick ? active : undefined}
+                    className={onRowClick ? CLICKABLE_ROW_CLASS : undefined}
                     tabIndex={onRowClick ? 0 : undefined}
                     onClick={onRowClick ? () => onRowClick(row.original) : undefined}
                     onKeyDown={
@@ -322,46 +502,69 @@ export function DataTable<TData>({
                         : undefined
                     }
                   >
-                    {row.getVisibleCells().map((cell) => (
-                      <TableCell key={cell.id}>
-                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </TableCell>
-                    ))}
+                    {row.getVisibleCells().map((cell) => {
+                      const meta = columnMeta(cell.column)
+                      return (
+                        <TableCell
+                          key={cell.id}
+                          className={cn(
+                            alignClass(meta.align),
+                            meta.wrap && "whitespace-normal",
+                            meta.className,
+                            meta.cellClassName,
+                          )}
+                        >
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </TableCell>
+                      )
+                    })}
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
+                )
+              })
+            )}
+          </TableBody>
+        </Table>
       )}
     </div>
   )
 }
 
-const SKELETON_ROW_KEYS = [
-  "skeleton-row-1",
-  "skeleton-row-2",
-  "skeleton-row-3",
-  "skeleton-row-4",
-  "skeleton-row-5",
-  "skeleton-row-6",
-  "skeleton-row-7",
-  "skeleton-row-8",
-] as const
+// skeleton 행 — 실제 행과 같은 셀 구조, 폭은 column마다 조금씩 다르게(형태가 맞는 skeleton).
+const SKELETON_WIDTHS = ["w-3/4", "w-1/2", "w-2/3", "w-2/5", "w-3/5", "w-1/3"] as const
 
-function SkeletonRows({ colCount }: { colCount: number }) {
-  const columnKeys = [...Array.from({ length: colCount }).keys()].map(
-    (columnNumber) => `skeleton-column-${columnNumber + 1}`,
-  )
+function skeletonWidth(rowIndex: number, columnIndex: number): string {
+  return SKELETON_WIDTHS[(rowIndex + columnIndex) % SKELETON_WIDTHS.length]
+}
+
+function SkeletonRows<TData>({
+  columns,
+  rowCount,
+}: {
+  columns: Column<TData, unknown>[]
+  rowCount: number
+}) {
+  const rowKeys = Array.from({ length: Math.max(1, rowCount) }, (_, index) => `skeleton-row-${index + 1}`)
   return (
     <>
-      {SKELETON_ROW_KEYS.map((rowKey) => (
-        <TableRow key={rowKey}>
-          {columnKeys.map((columnKey) => (
-            <TableCell key={`${rowKey}-${columnKey}`}>
-              <Skeleton className="h-4 w-full" />
-            </TableCell>
-          ))}
+      {rowKeys.map((rowKey, rowIndex) => (
+        <TableRow className="hover:bg-transparent" key={rowKey}>
+          {columns.map((column, columnIndex) => {
+            const meta = columnMeta(column)
+            return (
+              <TableCell
+                className={cn(alignClass(meta.align), meta.className, meta.cellClassName)}
+                key={`${rowKey}-${column.id}`}
+              >
+                <Skeleton
+                  className={cn(
+                    "h-4",
+                    skeletonWidth(rowIndex, columnIndex),
+                    meta.align === "right" && "ml-auto",
+                  )}
+                />
+              </TableCell>
+            )
+          })}
         </TableRow>
       ))}
     </>
@@ -375,7 +578,8 @@ function VirtualizedTable<TData>({
   rows,
   colCount,
   isLoading,
-  emptyMessage,
+  emptyState,
+  skeletonRowCount,
   estimateRowSize,
   overscan,
   onRowClick,
@@ -387,7 +591,8 @@ function VirtualizedTable<TData>({
   rows: Row<TData>[]
   colCount: number
   isLoading?: boolean
-  emptyMessage: string
+  emptyState: DataTableEmptyState
+  skeletonRowCount: number
   estimateRowSize: number
   overscan: number
   onRowClick?: (row: TData) => void
@@ -413,12 +618,18 @@ function VirtualizedTable<TData>({
   // ARIA rowcount/rowindex는 header row까지 포함해야 스크린리더가 전체 개수와 각 행의
   // 절대 위치를 정확히 읽는다(WAI-ARIA grid). header group(보통 1) + data rows.
   const headerRowCount = table.getHeaderGroups().length
+  const leafColumns = table.getAllLeafColumns()
+  const skeletonKeys = Array.from(
+    { length: Math.max(1, skeletonRowCount) },
+    (_, index) => `skeleton-row-${index + 1}`,
+  )
 
   return (
     <div
       ref={containerRef}
+      aria-busy={isLoading || undefined}
       className={cn(
-        "relative overflow-auto rounded-xl border border-surface-muted",
+        "relative overflow-auto rounded-panel border border-border bg-card group-data-[slot=card]/card:rounded-none group-data-[slot=card]/card:border-0 group-data-[slot=card]/card:bg-transparent",
         containerClassName,
       )}
     >
@@ -426,7 +637,7 @@ function VirtualizedTable<TData>({
         aria-label={ariaLabel}
         aria-rowcount={rows.length + headerRowCount}
         aria-colcount={colCount}
-        className="grid w-full caption-bottom text-sm"
+        className="grid w-full caption-bottom text-sm tabular-nums"
       >
         <thead
           className="sticky top-0 z-10 grid bg-surface-subtle [&_tr]:border-b"
@@ -435,17 +646,23 @@ function VirtualizedTable<TData>({
             <tr
               key={headerGroup.id}
               aria-rowindex={headerGroupIndex + 1}
-              className="flex w-full border-b"
+              className="flex w-full border-b border-border"
             >
               {headerGroup.headers.map((header) => {
                 const sorted = header.column.getIsSorted()
                 const canSort = header.column.getCanSort()
+                const meta = columnMeta(header.column)
                 return (
                   <th
                     key={header.id}
                     aria-sort={canSort ? ariaSort(sorted) : undefined}
                     style={{ width: header.getSize() }}
-                    className="flex h-10 items-center px-3 text-left align-middle text-[12px] font-bold tracking-[0.05em] text-text-secondary uppercase"
+                    className={cn(
+                      "flex h-9 items-center px-3 text-left align-middle text-2xs leading-none font-semibold whitespace-nowrap text-text-secondary",
+                      flexAlignClass(meta.align),
+                      meta.className,
+                      meta.headerClassName,
+                    )}
                   >
                     {renderHeadCellContent(header, sorted, canSort)}
                   </th>
@@ -456,32 +673,55 @@ function VirtualizedTable<TData>({
         </thead>
         <tbody
           className="relative grid"
-          style={{ height: `${virtualizer.getTotalSize()}px` }}
+          style={isLoading ? undefined : { height: `${virtualizer.getTotalSize()}px` }}
         >
-          {isLoading ? null : rows.length === 0 ? (
+          {isLoading ? (
+            skeletonKeys.map((rowKey, rowIndex) => (
+              <tr key={rowKey} className="flex w-full border-b border-border">
+                {leafColumns.map((column, columnIndex) => {
+                  const meta = columnMeta(column)
+                  return (
+                    <td
+                      key={`${rowKey}-${column.id}`}
+                      style={{ width: column.getSize() }}
+                      className={cn(
+                        "flex items-center px-3 py-2 align-middle",
+                        flexAlignClass(meta.align),
+                      )}
+                    >
+                      <Skeleton className={cn("h-4", skeletonWidth(rowIndex, columnIndex))} />
+                    </td>
+                  )
+                })}
+              </tr>
+            ))
+          ) : rows.length === 0 ? (
             <tr className="flex">
-              <td
-                className="flex h-32 w-full items-center justify-center text-muted-foreground"
-              >
-                {emptyMessage}
+              <td className="flex w-full px-3">
+                <EmptyState
+                  action={emptyState.action}
+                  description={emptyState.description}
+                  icon={emptyState.icon}
+                  size="sm"
+                  title={emptyState.title}
+                />
               </td>
             </tr>
           ) : (
             virtualizer.getVirtualItems().map((virtualRow) => {
               const row = rows[virtualRow.index]
+              const active = row.getIsSelected() || isRowActive?.(row.original) === true
               return (
                 <tr
                   key={row.id}
                   data-index={virtualRow.index}
                   aria-rowindex={virtualRow.index + headerRowCount + 1}
+                  aria-selected={onRowClick ? active : undefined}
                   ref={(node) => virtualizer.measureElement(node)}
-                  data-state={
-                    row.getIsSelected() || isRowActive?.(row.original) ? "selected" : undefined
-                  }
+                  data-state={active ? "selected" : undefined}
                   className={cn(
-                    "absolute flex w-full border-b border-surface-muted transition-colors hover:bg-surface-subtle data-[state=selected]:bg-brand-tint",
-                    onRowClick &&
-                      "cursor-pointer focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset focus-visible:outline-none",
+                    "absolute flex w-full border-b border-border transition-colors hover:bg-surface-subtle data-[state=selected]:bg-brand-tint",
+                    onRowClick && CLICKABLE_ROW_CLASS,
                   )}
                   style={{ transform: `translateY(${virtualRow.start}px)` }}
                   tabIndex={onRowClick ? 0 : undefined}
@@ -492,26 +732,30 @@ function VirtualizedTable<TData>({
                       : undefined
                   }
                 >
-                  {row.getVisibleCells().map((cell: Cell<TData, unknown>) => (
-                    <td
-                      key={cell.id}
-                      style={{ width: cell.column.getSize() }}
-                      className="flex items-center px-3 py-2.5 align-middle text-text-primary"
-                    >
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </td>
-                  ))}
+                  {row.getVisibleCells().map((cell: Cell<TData, unknown>) => {
+                    const meta = columnMeta(cell.column)
+                    return (
+                      <td
+                        key={cell.id}
+                        style={{ width: cell.column.getSize() }}
+                        className={cn(
+                          "flex items-center px-3 py-2 align-middle text-text-primary",
+                          flexAlignClass(meta.align),
+                          meta.wrap ? "whitespace-normal" : "whitespace-nowrap",
+                          meta.className,
+                          meta.cellClassName,
+                        )}
+                      >
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </td>
+                    )
+                  })}
                 </tr>
               )
             })
           )}
         </tbody>
       </table>
-      {isLoading ? (
-        <div className="p-2">
-          <Skeleton className="h-64 w-full" />
-        </div>
-      ) : null}
     </div>
   )
 }

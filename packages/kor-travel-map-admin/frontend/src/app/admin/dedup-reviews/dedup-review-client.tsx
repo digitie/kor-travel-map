@@ -1,20 +1,21 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 
 import {
   type ColumnDef,
   type Row,
   type RowSelectionState,
 } from "@tanstack/react-table";
-import {
-  CheckIcon,
-  EyeIcon,
-  MergeIcon,
-  RefreshCwIcon,
-  SearchIcon,
-  XIcon,
-} from "lucide-react";
+import { CheckIcon, MergeIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import { type Map as MapLibreMap } from "maplibre-gl";
-import { useCallback, useDeferredValue, useMemo, useReducer } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useMemo,
+  useReducer,
+  useState,
+  type ReactNode,
+} from "react";
 
 import {
   type DedupDecision,
@@ -27,15 +28,24 @@ import {
   useDedupReviews,
 } from "@/api/dedup";
 import { AdminShell } from "@/components/admin-shell";
+import { DetailList, type DetailItem } from "@/components/detail-list";
 import { EntityLink } from "@/components/entity-link";
 import { FeatureStateBadges } from "@/components/feature-state-badges";
+import { FilterBar, FilterField } from "@/components/filter-bar";
+import { JsonViewer } from "@/components/json-viewer";
 import { MultiFilterCombobox } from "@/components/multi-filter-combobox";
 import { uniqueSorted } from "@/lib/string-list";
 import { CursorPager } from "@/components/pagination-bar";
+import { StatStrip } from "@/components/stat-strip";
 import { StatusBadge } from "@/components/status-badge";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  Alert,
+  AlertActions,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { DataTable } from "@/components/ui/data-table";
+import { DataTable, type DataTableColumnMeta } from "@/components/ui/data-table";
 import {
   Dialog,
   DialogContent,
@@ -46,8 +56,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
+import { Skeleton } from "@/components/ui/skeleton";
 import { VWorldMapView, VWorldMarker } from "@/components/vworld-map-view";
-import { formatDateTime, shortId } from "@/lib/format";
+import { NULL_GLYPH, formatDateTime, shortId } from "@/lib/format";
+import { statusLabel } from "@/lib/status-label";
 
 const statuses: Array<DedupStatus | "all"> = [
   "pending",
@@ -66,13 +78,23 @@ const DEDUP_KINDS = [
   "route",
   "area",
 ] as const;
+// enum → 한글 라벨(design.md §Copy — 옵션도 raw enum 금지).
+const FEATURE_KIND_LABELS: Record<(typeof DEDUP_KINDS)[number], string> = {
+  place: "장소",
+  event: "행사",
+  notice: "공지",
+  price: "가격",
+  weather: "날씨",
+  route: "경로",
+  area: "구역",
+};
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200] as const;
 const VWORLD_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY;
 const SCORE_FILTERS = [
-  { value: "all", label: "score all" },
-  { value: "high", label: "score >= 90", min: 90 },
-  { value: "middle", label: "score 70-90", min: 70, max: 90 },
-  { value: "low", label: "score < 70", max: 70 },
+  { value: "all", label: "전체" },
+  { value: "high", label: "≥ 90", min: 90 },
+  { value: "middle", label: "70–90", min: 70, max: 90 },
+  { value: "low", label: "< 70", max: 70 },
 ] as const;
 
 type DedupKindFilter = (typeof DEDUP_KINDS)[number] | "all";
@@ -112,6 +134,41 @@ function fitMapToPoints(map: MapLibreMap, points: readonly MapPoint[]) {
   );
 }
 
+/**
+ * 비교 마커 색은 design.md `--compare-a/--compare-b` 토큰을 읽는다(M21). VWorldMarker는 `#hex`
+ * 또는 팔레트 코드만 받으므로 canvas fillStyle 직렬화(브라우저 표준: 불투명 색 → `#rrggbb`)로
+ * OKLCH → sRGB hex를 얻는다. 해석 실패 시 null → 마커 기본색.
+ */
+function resolveCssColorHex(variable: string): string | null {
+  if (typeof document === "undefined") return null;
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(variable).trim();
+  if (!raw) return null;
+  if (/^#[0-9a-f]{6}$/i.test(raw)) return raw;
+  const context = document.createElement("canvas").getContext("2d");
+  if (!context) return null;
+  const sentinel = "#000001";
+  context.fillStyle = sentinel;
+  context.fillStyle = raw;
+  const resolved = context.fillStyle;
+  return typeof resolved === "string" &&
+    /^#[0-9a-f]{6}$/i.test(resolved) &&
+    resolved !== sentinel
+    ? resolved
+    : null;
+}
+
+/**
+ * 비교 dialog는 사용자 상호작용 뒤 클라이언트에서만 마운트되므로(SSR 마크업 없음) lazy state
+ * 초기화로 한 번만 토큰을 읽는다 — effect 안 setState(cascading render)를 피한다.
+ */
+function useCompareMarkerColors(): { a: string | null; b: string | null } {
+  const [colors] = useState<{ a: string | null; b: string | null }>(() => ({
+    a: resolveCssColorHex("--compare-a"),
+    b: resolveCssColorHex("--compare-b"),
+  }));
+  return colors;
+}
+
 function scoreBounds(value: ScoreFilter): { min?: number; max?: number } {
   const found = SCORE_FILTERS.find((item) => item.value === value);
   return {
@@ -125,7 +182,7 @@ function formatScore(value: number): string {
 }
 
 function formatDistance(value: number | null | undefined): string {
-  if (typeof value !== "number") return "-";
+  if (typeof value !== "number") return NULL_GLYPH;
   if (value >= 1000) return `${(value / 1000).toFixed(2)}km`;
   return `${value.toFixed(1)}m`;
 }
@@ -142,48 +199,49 @@ function hasCoord(feature: DedupFeatureRecord): boolean {
 type DedupReviewDetail = DedupReviewDetailResponse["data"];
 type DetailFeature = DedupReviewDetail["feature_a"];
 
-function formatMaybe(value: unknown): string {
-  if (value === null || value === undefined || value === "") return "-";
-  if (typeof value === "string" || typeof value === "number")
-    return String(value);
-  return JSON.stringify(value);
+function statusOptionLabel(value: DedupStatus | "all"): string {
+  return value === "all" ? "전체" : statusLabel(value);
 }
 
-function JsonBlock({ value }: { value: unknown }) {
-  return (
-    <pre className="max-h-52 overflow-auto rounded-md bg-muted p-3 text-xs leading-relaxed">
-      {JSON.stringify(value ?? {}, null, 2)}
-    </pre>
-  );
-}
-
-function DetailMetric({ label, value }: { label: string; value: unknown }) {
-  return (
-    <div>
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className="break-words text-sm">{formatMaybe(value)}</dd>
-    </div>
-  );
-}
-
-function FeatureDetailPanel({
-  accentClassName,
+function CompareColumn({
+  eyebrow,
+  eyebrowClassName,
   feature,
-  label,
 }: {
-  accentClassName: string;
+  eyebrow: string;
+  eyebrowClassName: string;
   feature: DetailFeature;
-  label: string;
 }) {
   const primarySource = feature.sources.find(
     (source) => source.source_role === "primary",
   );
+  const items: DetailItem[] = [
+    {
+      label: "종류",
+      value: FEATURE_KIND_LABELS[feature.kind as (typeof DEDUP_KINDS)[number]] ?? feature.kind,
+    },
+    { label: "카테고리", value: feature.category },
+    {
+      label: "상태 축",
+      value: (
+        <FeatureStateBadges
+          lifecycleState={feature.lifecycle_state}
+          publicationState={feature.publication_state}
+          qualityState={feature.quality_state}
+        />
+      ),
+    },
+    { label: "경도", value: feature.lon?.toFixed(6) ?? null, mono: true },
+    { label: "위도", value: feature.lat?.toFixed(6) ?? null, mono: true },
+    { label: "primary provider", value: primarySource?.provider ?? null },
+    { label: "primary entity", value: primarySource?.source_entity_id ?? null, mono: true },
+  ];
   return (
-    <section className="min-w-0 rounded-lg border bg-background p-4">
-      <div className="mb-3">
-        <div className={`text-xs font-medium ${accentClassName}`}>{label}</div>
-        <h3 className="break-words text-base font-semibold">{feature.name}</h3>
-        <div className="break-all font-mono text-xs text-muted-foreground">
+    <section className="flex min-w-0 flex-col gap-4">
+      <div className="flex flex-col gap-0.5">
+        <div className={`text-2xs font-medium ${eyebrowClassName}`}>{eyebrow}</div>
+        <h3 className="text-md font-semibold break-words text-text-primary">{feature.name}</h3>
+        <div className="font-mono text-xs break-all text-text-secondary">
           <EntityLink
             className="text-xs"
             id={feature.feature_id}
@@ -192,48 +250,19 @@ function FeatureDetailPanel({
           />
         </div>
       </div>
-      <dl className="grid gap-3 sm:grid-cols-2">
-        <DetailMetric label="종류" value={feature.kind} />
-        <DetailMetric label="카테고리" value={feature.category} />
-        <div>
-          <dt className="text-xs text-muted-foreground">상태 축</dt>
-          <dd className="mt-1">
-            <FeatureStateBadges
-              lifecycleState={feature.lifecycle_state}
-              publicationState={feature.publication_state}
-              qualityState={feature.quality_state}
-            />
-          </dd>
+      <DetailList items={items} layout="inline" />
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-1">
+          <span className="text-2xs font-medium text-text-secondary">detail</span>
+          <JsonViewer aria-label={`${eyebrow} detail`} copyable maxHeight="sm" value={feature.detail ?? {}} />
         </div>
-        <DetailMetric label="경도" value={feature.lon?.toFixed(6)} />
-        <DetailMetric label="위도" value={feature.lat?.toFixed(6)} />
-        <DetailMetric
-          label="primary provider"
-          value={primarySource?.provider}
-        />
-        <DetailMetric
-          label="primary entity"
-          value={primarySource?.source_entity_id}
-        />
-      </dl>
-      <div className="mt-4 space-y-3">
-        <div>
-          <div className="mb-1 text-xs font-medium text-muted-foreground">
-            detail
-          </div>
-          <JsonBlock value={feature.detail} />
+        <div className="flex flex-col gap-1">
+          <span className="text-2xs font-medium text-text-secondary">address</span>
+          <JsonViewer aria-label={`${eyebrow} address`} copyable maxHeight="sm" value={feature.address ?? {}} />
         </div>
-        <div>
-          <div className="mb-1 text-xs font-medium text-muted-foreground">
-            address
-          </div>
-          <JsonBlock value={feature.address} />
-        </div>
-        <div>
-          <div className="mb-1 text-xs font-medium text-muted-foreground">
-            sources
-          </div>
-          <JsonBlock value={feature.sources} />
+        <div className="flex flex-col gap-1">
+          <span className="text-2xs font-medium text-text-secondary">sources</span>
+          <JsonViewer aria-label={`${eyebrow} sources`} copyable maxHeight="sm" value={feature.sources} />
         </div>
       </div>
     </section>
@@ -253,6 +282,7 @@ function DedupDetailDialog({
 }) {
   const featureA = detail?.feature_a;
   const featureB = detail?.feature_b;
+  const markerColors = useCompareMarkerColors();
   const hasMap =
     typeof featureA?.lon === "number" &&
     typeof featureA.lat === "number" &&
@@ -267,58 +297,69 @@ function DedupDetailDialog({
     >
       <DialogContent aria-label="dedup review detail" className="max-w-6xl">
         <DialogHeader>
-          <div>
+          <div className="flex min-w-0 flex-col gap-0.5">
             <DialogTitle>중복 상세 비교</DialogTitle>
             <DialogDescription>
-              {detail
-                ? `${shortId(detail.review_id)} · ${formatDistance(detail.distance_m)}`
-                : "loading"}
+              {detail ? (
+                <span className="tabular-nums">
+                  <span className="font-mono">{shortId(detail.review_id)}</span> ·{" "}
+                  {formatDistance(detail.distance_m)}
+                </span>
+              ) : (
+                NULL_GLYPH
+              )}
             </DialogDescription>
           </div>
           <Button size="sm" type="button" variant="ghost" onClick={onClose}>
             닫기
           </Button>
         </DialogHeader>
-        <div className="space-y-4 p-4">
+        <div className="flex flex-col gap-6 p-4">
           {isLoading ? (
-            <div className="text-sm text-muted-foreground">불러오는 중</div>
+            <div className="flex flex-col gap-3" aria-busy="true">
+              <Skeleton className="h-control w-full" />
+              <Skeleton className="h-80 w-full" />
+              <div className="grid gap-4 lg:grid-cols-2">
+                <Skeleton className="h-40 w-full" />
+                <Skeleton className="h-40 w-full" />
+              </div>
+            </div>
           ) : error ? (
             <Alert variant="destructive">
-              <AlertTitle>상세 조회 실패</AlertTitle>
+              <AlertTitle>상세를 불러오지 못했습니다</AlertTitle>
               <AlertDescription>{error.message}</AlertDescription>
+              <AlertActions>
+                <Button size="sm" type="button" variant="outline" onClick={onClose}>
+                  닫기
+                </Button>
+              </AlertActions>
             </Alert>
           ) : detail && featureA && featureB ? (
             <>
-              <div className="flex flex-col gap-3 rounded-lg border bg-muted/40 p-3 lg:flex-row lg:items-center lg:justify-between">
-                <dl className="grid flex-1 gap-3 sm:grid-cols-5">
-                  <DetailMetric
-                    label="total"
-                    value={formatScore(detail.total_score)}
-                  />
-                  <DetailMetric
-                    label="이름"
-                    value={formatScore(detail.name_score)}
-                  />
-                  <DetailMetric
-                    label="distance score"
-                    value={formatScore(detail.spatial_score)}
-                  />
-                  <DetailMetric
-                    label="카테고리"
-                    value={formatScore(detail.category_score)}
-                  />
-                  <DetailMetric
-                    label="거리"
-                    value={formatDistance(detail.distance_m)}
-                  />
-                </dl>
-              </div>
+              <StatStrip
+                ariaLabel="중복 점수"
+                items={[
+                  { label: "총점", value: formatScore(detail.total_score) },
+                  { label: "이름 점수", value: formatScore(detail.name_score) },
+                  { label: "거리 점수", value: formatScore(detail.spatial_score) },
+                  { label: "카테고리 점수", value: formatScore(detail.category_score) },
+                  { label: "거리", value: formatDistance(detail.distance_m) },
+                ]}
+              />
               {hasMap ? (
-                <section className="overflow-hidden rounded-lg border">
-                  <div className="border-b px-4 py-2 text-sm font-medium">
-                    위치 비교
+                <section className="flex flex-col gap-2 border-t border-border pt-4">
+                  <div className="flex flex-wrap items-center gap-3 text-2xs font-medium text-text-secondary">
+                    <span>위치 비교</span>
+                    <span className="flex items-center gap-1">
+                      <span aria-hidden="true" className="size-2 rounded-full bg-compare-a" />
+                      A
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <span aria-hidden="true" className="size-2 rounded-full bg-compare-b" />
+                      B
+                    </span>
                   </div>
-                  <div className="relative h-80 min-h-72">
+                  <div className="relative h-80 min-h-72 overflow-hidden rounded-control border border-border">
                     <VWorldMapView
                       apiKey={VWORLD_KEY}
                       center={[
@@ -340,29 +381,29 @@ function DedupDetailDialog({
                     >
                       <VWorldMarker
                         lngLat={[featureA.lon ?? 0, featureA.lat ?? 0]}
-                        markerColor="#2563eb"
+                        markerColor={markerColors.a}
                         selected
                         title={`Feature A: ${featureA.name}`}
                       />
                       <VWorldMarker
                         lngLat={[featureB.lon ?? 0, featureB.lat ?? 0]}
-                        markerColor="#dc2626"
+                        markerColor={markerColors.b}
                         title={`Feature B: ${featureB.name}`}
                       />
                     </VWorldMapView>
                   </div>
                 </section>
               ) : null}
-              <div className="grid gap-4 lg:grid-cols-2">
-                <FeatureDetailPanel
-                  accentClassName="text-blue-700"
+              <div className="grid gap-6 border-t border-border pt-4 lg:grid-cols-2 lg:gap-8 lg:divide-x lg:divide-border lg:[&>*:last-child]:pl-8">
+                <CompareColumn
+                  eyebrow="후보 A"
+                  eyebrowClassName="text-compare-a"
                   feature={featureA}
-                  label="후보 A"
                 />
-                <FeatureDetailPanel
-                  accentClassName="text-red-700"
+                <CompareColumn
+                  eyebrow="후보 B"
+                  eyebrowClassName="text-compare-b"
                   feature={featureB}
-                  label="후보 B"
                 />
               </div>
             </>
@@ -475,6 +516,16 @@ function dedupReviewReducer(
   }
 }
 
+/** MultiFilterCombobox 는 자체 라벨 슬롯이 없어 FilterField 와 같은 라벨 리듬으로 감싼다. */
+function ComboboxField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex w-56 min-w-0 flex-col gap-1" data-slot="filter-field">
+      <span className="text-2xs leading-none font-medium text-text-secondary">{label}</span>
+      {children}
+    </div>
+  );
+}
+
 function DedupReviewFiltersPanel({
   categoryOptions,
   datasetOptions,
@@ -489,18 +540,16 @@ function DedupReviewFiltersPanel({
   onChange: (patch: Partial<DedupReviewFilters>) => void;
 }) {
   return (
-    <section className="rounded-lg border bg-background p-4">
-      <div className="grid gap-3 lg:grid-cols-[minmax(12rem,1fr)_auto_auto_minmax(10rem,14rem)_minmax(10rem,14rem)_minmax(8rem,12rem)_auto_auto]">
-        <div className="relative">
-          <SearchIcon className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-          <Input
-            aria-label="dedup search"
-            className="pl-8"
-            placeholder="feature id, name"
-            value={filters.q}
-            onChange={(event) => onChange({ q: event.target.value })}
-          />
-        </div>
+    <FilterBar>
+      <FilterField className="w-64" label="검색">
+        <Input
+          aria-label="dedup search"
+          placeholder="feature id, name"
+          value={filters.q}
+          onChange={(event) => onChange({ q: event.target.value })}
+        />
+      </FilterField>
+      <FilterField label="상태">
         <NativeSelect
           aria-label="dedup status"
           value={filters.status}
@@ -510,10 +559,12 @@ function DedupReviewFiltersPanel({
         >
           {statuses.map((item) => (
             <NativeSelectOption key={item} value={item}>
-              {item}
+              {statusOptionLabel(item)}
             </NativeSelectOption>
           ))}
         </NativeSelect>
+      </FilterField>
+      <FilterField label="종류">
         <NativeSelect
           aria-label="dedup kind"
           value={filters.kind}
@@ -521,34 +572,45 @@ function DedupReviewFiltersPanel({
             onChange({ kind: event.target.value as DedupKindFilter })
           }
         >
-          <NativeSelectOption value="all">all kinds</NativeSelectOption>
+          <NativeSelectOption value="all">전체 종류</NativeSelectOption>
           {DEDUP_KINDS.map((item) => (
             <NativeSelectOption key={item} value={item}>
-              {item}
+              {FEATURE_KIND_LABELS[item]}
             </NativeSelectOption>
           ))}
         </NativeSelect>
+      </FilterField>
+      <ComboboxField label="provider">
         <MultiFilterCombobox
           ariaLabel="dedup provider"
+          className="w-full"
           options={providerOptions}
           placeholder="provider"
           values={filters.providers}
           onChange={(providers) => onChange({ providers })}
         />
+      </ComboboxField>
+      <ComboboxField label="dataset">
         <MultiFilterCombobox
           ariaLabel="dedup dataset"
+          className="w-full"
           options={datasetOptions}
           placeholder="dataset"
           values={filters.datasetKeys}
           onChange={(datasetKeys) => onChange({ datasetKeys })}
         />
+      </ComboboxField>
+      <ComboboxField label="category">
         <MultiFilterCombobox
           ariaLabel="dedup category"
+          className="w-full"
           options={categoryOptions}
           placeholder="category"
           values={filters.categories}
           onChange={(categories) => onChange({ categories })}
         />
+      </ComboboxField>
+      <FilterField label="점수">
         <NativeSelect
           aria-label="dedup score filter"
           value={filters.scoreFilter}
@@ -562,6 +624,8 @@ function DedupReviewFiltersPanel({
             </NativeSelectOption>
           ))}
         </NativeSelect>
+      </FilterField>
+      <FilterField label="페이지 크기">
         <NativeSelect
           aria-label="dedup page size"
           value={String(filters.pageSize)}
@@ -579,8 +643,8 @@ function DedupReviewFiltersPanel({
             </NativeSelectOption>
           ))}
         </NativeSelect>
-      </div>
-    </section>
+      </FilterField>
+    </FilterBar>
   );
 }
 
@@ -627,19 +691,40 @@ function DedupReviewPager({
   );
 }
 
+/** master 후보 버튼 라벨 — 좌표 보유는 글리프(✓)가 아니라 lucide CheckIcon으로 표시한다(m2). */
+function MasterCandidateLabel({
+  prefix,
+  feature,
+}: {
+  prefix: "A" | "B";
+  feature: DedupFeatureRecord;
+}) {
+  return (
+    <>
+      {prefix}: {feature.name}
+      {hasCoord(feature) ? (
+        <span className="flex items-center gap-0.5 text-text-secondary">
+          · 좌표
+          <CheckIcon aria-hidden="true" className="size-3.5 text-success" />
+        </span>
+      ) : null}
+    </>
+  );
+}
+
 function useDedupReviewColumns({
   decisionPending,
   mergeKey,
+  pendingReviewId,
   onDecide,
   onMerge,
-  onOpenDetail,
   onSelectMerge,
 }: {
   decisionPending: boolean;
   mergeKey: string | null;
+  pendingReviewId: string | null;
   onDecide: (reviewId: string, decision: DedupDecision) => void;
   onMerge: (reviewId: string, masterFeatureId?: string) => void;
-  onOpenDetail: (reviewId: string) => void;
   onSelectMerge: (reviewId: string | null) => void;
 }) {
   return useMemo<ColumnDef<DedupReviewRecord, unknown>[]>(
@@ -659,8 +744,8 @@ function useDedupReviewColumns({
         header: "점수",
         enableSorting: false,
         cell: ({ row }) => (
-          <div className="space-y-1 font-mono text-xs">
-            <div>total {formatScore(row.original.total_score)}</div>
+          <div className="flex flex-col gap-0.5 text-xs text-text-secondary tabular-nums">
+            <div className="text-text-primary">total {formatScore(row.original.total_score)}</div>
             <div>name {formatScore(row.original.name_score)}</div>
             <div>distance {formatScore(row.original.spatial_score)}</div>
           </div>
@@ -670,11 +755,8 @@ function useDedupReviewColumns({
         accessorKey: "distance_m",
         header: "거리",
         enableSorting: false,
-        cell: ({ row }) => (
-          <span className="font-mono">
-            {formatDistance(row.original.distance_m)}
-          </span>
-        ),
+        meta: { align: "right" } satisfies DataTableColumnMeta,
+        cell: ({ row }) => formatDistance(row.original.distance_m),
       },
       {
         id: "feature_a",
@@ -683,8 +765,8 @@ function useDedupReviewColumns({
         cell: ({ row }) => (
           <>
             <div className="font-medium">{row.original.feature_a.name}</div>
-            <div className="text-xs text-muted-foreground">
-              {row.original.feature_a.provider ?? "-"} ·{" "}
+            <div className="text-xs text-text-secondary">
+              {row.original.feature_a.provider ?? NULL_GLYPH} ·{" "}
               {row.original.feature_a.category}
             </div>
           </>
@@ -697,8 +779,8 @@ function useDedupReviewColumns({
         cell: ({ row }) => (
           <>
             <div className="font-medium">{row.original.feature_b.name}</div>
-            <div className="text-xs text-muted-foreground">
-              {row.original.feature_b.provider ?? "-"} ·{" "}
+            <div className="text-xs text-text-secondary">
+              {row.original.feature_b.provider ?? NULL_GLYPH} ·{" "}
               {row.original.feature_b.category}
             </div>
           </>
@@ -715,7 +797,7 @@ function useDedupReviewColumns({
         header: "생성",
         enableSorting: false,
         cell: ({ row }) => (
-          <span className="text-muted-foreground">
+          <span className="text-text-secondary">
             {formatDateTime(row.original.created_at)}
           </span>
         ),
@@ -727,45 +809,25 @@ function useDedupReviewColumns({
         cell: ({ row }) => {
           const item = row.original;
           if (item.status !== "pending") {
-            return (
-              <div
-                className="flex flex-wrap items-center gap-1"
-                onClick={(event) => event.stopPropagation()}
-              >
-                <Button
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                  onClick={() => onOpenDetail(item.review_id)}
-                >
-                  <EyeIcon data-icon="inline-start" />
-                  detail
-                </Button>
-                <span className="text-sm text-muted-foreground">완료</span>
-              </div>
-            );
+            return <span className="text-xs text-text-secondary">완료</span>;
           }
+          const busy = decisionPending && pendingReviewId === item.review_id;
+          const reason =
+            decisionPending && !busy ? "다른 결정을 처리하는 중입니다" : undefined;
           if (mergeKey === item.review_id) {
             return (
               <div
                 className="flex flex-col gap-1"
                 onClick={(event) => event.stopPropagation()}
               >
-                <span className="text-xs text-muted-foreground">
+                <span className="text-2xs text-text-secondary">
                   master 선택 (병합 시 나머지는 master로 흡수)
                 </span>
                 <div className="flex flex-wrap gap-1">
                   <Button
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                    onClick={() => onOpenDetail(item.review_id)}
-                  >
-                    <EyeIcon data-icon="inline-start" />
-                    detail
-                  </Button>
-                  <Button
                     disabled={decisionPending}
+                    disabledReason={reason}
+                    loading={busy}
                     size="sm"
                     type="button"
                     variant="outline"
@@ -773,11 +835,11 @@ function useDedupReviewColumns({
                       onMerge(item.review_id, item.feature_a.feature_id)
                     }
                   >
-                    A: {item.feature_a.name}
-                    {hasCoord(item.feature_a) ? " · 좌표✓" : ""}
+                    <MasterCandidateLabel feature={item.feature_a} prefix="A" />
                   </Button>
                   <Button
                     disabled={decisionPending}
+                    disabledReason={reason}
                     size="sm"
                     type="button"
                     variant="outline"
@@ -785,11 +847,11 @@ function useDedupReviewColumns({
                       onMerge(item.review_id, item.feature_b.feature_id)
                     }
                   >
-                    B: {item.feature_b.name}
-                    {hasCoord(item.feature_b) ? " · 좌표✓" : ""}
+                    <MasterCandidateLabel feature={item.feature_b} prefix="B" />
                   </Button>
                   <Button
                     disabled={decisionPending}
+                    disabledReason={reason}
                     size="sm"
                     type="button"
                     variant="secondary"
@@ -799,6 +861,7 @@ function useDedupReviewColumns({
                   </Button>
                   <Button
                     disabled={decisionPending}
+                    disabledReason={reason}
                     size="sm"
                     type="button"
                     variant="ghost"
@@ -816,16 +879,9 @@ function useDedupReviewColumns({
               onClick={(event) => event.stopPropagation()}
             >
               <Button
-                size="sm"
-                type="button"
-                variant="outline"
-                onClick={() => onOpenDetail(item.review_id)}
-              >
-                <EyeIcon data-icon="inline-start" />
-                detail
-              </Button>
-              <Button
                 disabled={decisionPending}
+                disabledReason={reason}
+                loading={busy}
                 size="sm"
                 type="button"
                 variant="outline"
@@ -836,9 +892,10 @@ function useDedupReviewColumns({
               </Button>
               <Button
                 disabled={decisionPending}
+                disabledReason={reason}
                 size="sm"
                 type="button"
-                variant="outline"
+                variant="ghost"
                 onClick={() => onDecide(item.review_id, "rejected")}
               >
                 <XIcon data-icon="inline-start" />
@@ -846,9 +903,10 @@ function useDedupReviewColumns({
               </Button>
               <Button
                 disabled={decisionPending}
+                disabledReason={reason}
                 size="sm"
                 type="button"
-                variant="default"
+                variant="outline"
                 onClick={() => onSelectMerge(item.review_id)}
               >
                 <MergeIcon data-icon="inline-start" />
@@ -856,6 +914,7 @@ function useDedupReviewColumns({
               </Button>
               <Button
                 disabled={decisionPending}
+                disabledReason={reason}
                 size="sm"
                 type="button"
                 variant="ghost"
@@ -868,7 +927,7 @@ function useDedupReviewColumns({
         },
       },
     ],
-    [decisionPending, mergeKey, onDecide, onMerge, onOpenDetail, onSelectMerge],
+    [decisionPending, mergeKey, onDecide, onMerge, onSelectMerge, pendingReviewId],
   );
 }
 
@@ -898,10 +957,12 @@ function DedupReviewTable({
       columns={columns}
       data={data}
       getRowId={(row) => row.review_id}
-      emptyMessage="dedup review가 없습니다."
+      emptyState={{
+        title: "dedup review가 없습니다.",
+        description: "상태 필터를 전체로 바꾸거나 점수·provider·dataset 조건을 넓혀 보세요.",
+      }}
       isLoading={isLoading}
       manualSorting={false}
-      containerClassName="overflow-auto rounded-lg border bg-background"
       onRowClick={(row) => onOpenDetail(row.review_id)}
       isRowActive={(row) => row.review_id === detailReviewId}
       enableRowSelection={(row) => row.original.status === "pending"}
@@ -920,6 +981,7 @@ function DedupReviewTable({
           <div className="flex flex-wrap gap-1">
             <Button
               disabled={decisionPending}
+              disabledReason="다른 결정을 처리하는 중입니다"
               size="sm"
               type="button"
               variant="outline"
@@ -930,6 +992,7 @@ function DedupReviewTable({
             </Button>
             <Button
               disabled={decisionPending}
+              disabledReason="다른 결정을 처리하는 중입니다"
               size="sm"
               type="button"
               variant="outline"
@@ -1073,17 +1136,21 @@ export function DedupReviewClient() {
   const columns = useDedupReviewColumns({
     decisionPending: decision.isPending,
     mergeKey: state.mergeKey,
+    pendingReviewId: decision.isPending ? (decision.variables?.reviewKey ?? null) : null,
     onDecide: decide,
     onMerge: merge,
-    onOpenDetail: openDetail,
     onSelectMerge: selectMerge,
   });
+  const errorLines = [
+    reviews.error ? `목록: ${reviews.error.message}` : null,
+    decision.error ? `결정: ${decision.error.message}` : null,
+  ].filter((line): line is string => line !== null);
 
   return (
     <AdminShell
       actions={
         <Button
-          disabled={reviews.isFetching}
+          loading={reviews.isFetching}
           type="button"
           variant="outline"
           onClick={() => void reviews.refetch()}
@@ -1096,14 +1163,31 @@ export function DedupReviewClient() {
       title="중복 검토"
     >
       <div className="flex flex-col gap-4">
-        {(reviews.isError || decision.isError) && (
+        {errorLines.length > 0 ? (
           <Alert variant="destructive">
             <AlertTitle>dedup review 처리 실패</AlertTitle>
             <AlertDescription>
-              {reviews.error?.message ?? decision.error?.message}
+              {errorLines.map((line) => (
+                <p key={line}>{line}</p>
+              ))}
+              <p>잠시 후 다시 시도하세요.</p>
             </AlertDescription>
+            <AlertActions>
+              <Button
+                loading={reviews.isFetching}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  decision.reset();
+                  void reviews.refetch();
+                }}
+              >
+                다시 시도
+              </Button>
+            </AlertActions>
           </Alert>
-        )}
+        ) : null}
 
         {state.detailReviewId ? (
           <DedupDetailDialog

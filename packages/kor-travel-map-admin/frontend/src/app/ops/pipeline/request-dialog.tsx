@@ -1,4 +1,5 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (form dialog) · design-system: design.md · designed-as-app
 
 import { PlayIcon } from "lucide-react";
 import { memo, useCallback, useMemo, useRef, useState } from "react";
@@ -19,7 +20,6 @@ import {
   canonicalCatalogRows,
   validateCatalogSelection,
 } from "./catalog-selection";
-import { statusLabel } from "@/lib/status-label";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -30,9 +30,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { fieldLabelClassName } from "@/components/ui/field-variants";
 import { FormField, FormSelect } from "@/components/ui/form-field";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
+import { Textarea } from "@/components/ui/textarea";
 import { formatDateTime, shortId } from "@/lib/format";
+import { statusLabel } from "@/lib/status-label";
 
 type ScopeType = FeatureUpdateScope["type"];
 
@@ -75,7 +78,7 @@ function MoisPrecheckNotice({
   return (
     <Alert
       data-testid="mois-precheck-notice"
-      variant={sourceReady ? "default" : "destructive"}
+      variant={sourceReady ? "info" : "destructive"}
     >
       <AlertTitle>MOIS 선행 동기화 확인</AlertTitle>
       <AlertDescription>
@@ -842,7 +845,7 @@ const RequestIdentityFields = memo(function RequestIdentityFields({
             </FormSelect>
           ) : null}
           {selectedCatalogRow ? (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-text-secondary tabular-nums">
               canonical membership: {selectedCatalogRow.provider_dataset_id}
             </p>
           ) : null}
@@ -872,7 +875,7 @@ const RequestIdentityFields = memo(function RequestIdentityFields({
             />
           </div>
           {scopeType === "sigungu_by_radius" ? (
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-text-secondary">
               시군구 매칭은 canonical intersects 방식으로 계산됩니다.
             </p>
           ) : null}
@@ -909,13 +912,13 @@ const RequestIdentityFields = memo(function RequestIdentityFields({
       ) : null}
 
       {scopeType === "feature_ids" ? (
-        <label className="flex flex-col gap-1 text-sm">
-          <span className="text-xs font-medium text-muted-foreground">
+        <label className="flex flex-col gap-1.5">
+          <span className={fieldLabelClassName}>
             feature id 목록 (줄바꿈/쉼표 구분, 최대 1000)
           </span>
-          <textarea
+          <Textarea
             aria-label="feature id 목록"
-            className="min-h-24 rounded-md border bg-background p-2 font-mono text-xs"
+            className="font-mono text-xs"
             value={featureIdsText}
             onChange={(event) => setFeatureIdsText(event.target.value)}
           />
@@ -953,13 +956,13 @@ const RequestTargetFields = memo(function RequestTargetFields({
             value={externalSystem}
             onChange={(event) => setExternalSystem(event.target.value)}
           />
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="text-xs font-medium text-muted-foreground">
+          <label className="flex flex-col gap-1.5">
+            <span className={fieldLabelClassName}>
               target key 목록 (줄바꿈/쉼표 구분, 최대 500)
             </span>
-            <textarea
+            <Textarea
               aria-label="target key 목록"
-              className="min-h-24 rounded-md border bg-background p-2 font-mono text-xs"
+              className="font-mono text-xs"
               value={targetKeysText}
               onChange={(event) => setTargetKeysText(event.target.value)}
             />
@@ -1042,9 +1045,10 @@ const RequestExecutionSettings = memo(function RequestExecutionSettings({
           onChange={(event) => setReason(event.target.value)}
         />
       ) : null}
-      <label className="flex items-center gap-2 text-sm">
+      <label className="flex items-center gap-2 text-sm text-text-primary">
         <input
           checked={dryRun}
+          className="size-4 shrink-0 rounded-control border-input accent-brand outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-55"
           type="checkbox"
           onChange={(event) => setDryRun(event.target.checked)}
         />
@@ -1144,7 +1148,12 @@ function RequestResultFeedback({
                 </li>
               ))}
             </ul>
-            <p>매칭 대상: {JSON.stringify(preview.matched_scope)}</p>
+            <p className="break-all">
+              매칭 대상:{" "}
+              <span className="font-mono text-2xs">
+                {JSON.stringify(preview.matched_scope)}
+              </span>
+            </p>
           </AlertDescription>
         </Alert>
       ) : null}
@@ -1269,6 +1278,7 @@ export function RequestCreateDialog({
           <DialogFooter>
             <Button
               disabled={createRequest.isPending}
+              disabledReason="요청 응답을 확인할 때까지 dialog를 닫지 않습니다."
               type="button"
               variant="outline"
               onClick={closeDialog}
@@ -1276,12 +1286,16 @@ export function RequestCreateDialog({
               닫기
             </Button>
             <Button
-              disabled={
+              disabled={catalogQuery.isLoading || catalogQuery.isError}
+              disabledReason={
+                catalogQuery.isError
+                  ? "canonical catalog를 확인할 수 없어 요청을 차단합니다."
+                  : "canonical catalog를 불러오는 중입니다."
+              }
+              loading={
                 createRequest.isPending ||
                 previewRequest.isPending ||
-                submittingPrecheck ||
-                catalogQuery.isLoading ||
-                catalogQuery.isError
+                submittingPrecheck
               }
               type="button"
               onClick={() => void submit()}

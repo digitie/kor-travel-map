@@ -1,9 +1,12 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (detail) · design-system: design.md · designed-as-app
 
 import { CircleHelpIcon } from "lucide-react";
 import { useState } from "react";
 
-import { statusLabel } from "@/lib/status-label";
+import { statusLabel, toneFor } from "@/lib/status-label";
+import { toneBadgeVariant } from "@/components/status-badge-variants";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -22,8 +25,9 @@ import { cn } from "@/lib/utils";
 
 /**
  * 큐레이션 라이프사이클 스트립 — 처음 온 운영자가 "후보가 어디서 오고, 채택하면
- * 무슨 일이 생기는지"를 한 카드에서 읽게 한다. 칩은 상태 필터 버튼을 겸한다
- * (`onSelectStatus`가 있으면 클릭 시 해당 상태로 필터).
+ * 무슨 일이 생기는지"를 한 줄에서 읽게 한다. 칩은 상태 필터 버튼을 겸한다
+ * (`onSelectStatus`가 있으면 클릭 시 해당 상태로 필터). 톤은 단일 tone 테이블에서 읽는다
+ * (candidate=info · curated=success · rejected=destructive · archived=neutral).
  *
  * compact: DETAIL 화면용 — 현재 상태와 그 결과 한 줄만 강조.
  */
@@ -41,22 +45,6 @@ const LIFECYCLE_STATUSES: readonly CuratedLifecycleStatus[] = [
   "archived",
 ];
 
-function chipTone(status: CuratedLifecycleStatus, active: boolean): string {
-  if (status === "curated") {
-    return active
-      ? "border-primary bg-primary text-primary-foreground"
-      : "border-primary/40 bg-primary/10 text-foreground";
-  }
-  if (status === "candidate") {
-    return active
-      ? "border-foreground bg-secondary text-secondary-foreground ring-1 ring-foreground"
-      : "border-border bg-secondary text-secondary-foreground";
-  }
-  return active
-    ? "border-foreground bg-muted text-foreground ring-1 ring-foreground"
-    : "border-border bg-muted text-muted-foreground";
-}
-
 export function CuratedLifecycleStrip({
   activeStatus,
   onSelectStatus,
@@ -73,12 +61,12 @@ export function CuratedLifecycleStrip({
 
   return (
     <div
-      className="rounded-lg border bg-muted/40 px-3 py-2 text-sm"
+      className="flex flex-col gap-2 text-sm"
       data-testid="curated-lifecycle-strip"
     >
       {!compact ? (
-        <div className="mb-2 flex items-center gap-1.5">
-          <span className="font-medium">큐레이션 흐름</span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs font-medium text-text-secondary">큐레이션 흐름</span>
           <Button
             aria-label="이 화면의 동작 방식"
             size="icon-sm"
@@ -92,30 +80,31 @@ export function CuratedLifecycleStrip({
         </div>
       ) : null}
       <TooltipProvider>
-        <div className={cn("flex flex-wrap gap-2", compact && "gap-1")}>
+        <div className={cn("flex flex-wrap items-center gap-2", compact && "gap-1")}>
           {statuses.map((status) => {
             const active = activeStatus === status;
             const chip = (
-              <span
-                className={cn(
-                  "inline-flex h-6 items-center rounded-full border px-2.5 text-xs font-medium",
-                  chipTone(status, active),
-                )}
+              <Badge
+                className={cn("gap-1.5", !active && "text-text-secondary")}
+                variant={active ? toneBadgeVariant(toneFor(status)) : "outline"}
               >
+                {active ? (
+                  <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-current" />
+                ) : null}
                 {statusLabel(status)}
-              </span>
+              </Badge>
             );
             const trigger = onSelectStatus ? (
               <button
                 aria-pressed={active}
-                className="rounded-full outline-offset-2 focus-visible:outline-2"
+                className="rounded-control outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                 type="button"
                 onClick={() => onSelectStatus(status)}
               >
                 {chip}
               </button>
             ) : (
-              <span className="inline-flex rounded-full">{chip}</span>
+              <span className="inline-flex rounded-control">{chip}</span>
             );
             return (
               <Tooltip key={status}>
@@ -124,6 +113,11 @@ export function CuratedLifecycleStrip({
               </Tooltip>
             );
           })}
+          {compact && activeStatus && activeStatus in STATUS_CONSEQUENCES ? (
+            <span className="text-xs text-text-secondary">
+              {STATUS_CONSEQUENCES[activeStatus]}
+            </span>
+          ) : null}
         </div>
       </TooltipProvider>
       {!compact ? (
@@ -131,16 +125,8 @@ export function CuratedLifecycleStrip({
           <DialogContent aria-label="큐레이션 흐름 도움말">
             <DialogHeader>
               <DialogTitle>이 화면의 동작 방식</DialogTitle>
-              <Button
-                size="sm"
-                type="button"
-                variant="ghost"
-                onClick={() => setHelpOpen(false)}
-              >
-                닫기
-              </Button>
             </DialogHeader>
-            <ul className="grid list-disc gap-2 p-4 pl-8 text-sm text-muted-foreground">
+            <ul className="grid list-disc gap-2 pl-5 text-sm text-text-secondary">
               <li>큐레이션 항목은 원본 feature 위의 overlay입니다.</li>
               <li>
                 채택·해제·보관은 이 화면이 아니라 컬렉션 관리(canonical)에서 합니다
@@ -148,6 +134,16 @@ export function CuratedLifecycleStrip({
               </li>
               <li>거절·보관된 항목은 규칙 재적용으로 되살아나지 않습니다.</li>
             </ul>
+            <div className="flex justify-end">
+              <Button
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => setHelpOpen(false)}
+              >
+                닫기
+              </Button>
+            </div>
           </DialogContent>
         </Dialog>
       ) : null}

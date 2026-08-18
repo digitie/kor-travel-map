@@ -1,4 +1,5 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (list + inspector rail) · design-system: design.md · designed-as-app
 
 import { RefreshCwIcon } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -12,13 +13,13 @@ import {
   usePipelineOverview,
 } from "@/api/pipeline";
 import { AdminShell } from "@/components/admin-shell";
-import { StatusBadge } from "@/components/status-badge";
+import { StatStrip } from "@/components/stat-strip";
+import { LiveBadge, StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatCount } from "@/lib/format";
+import { statusLabel, toneFor } from "@/lib/status-label";
 
 import { ExecutionDetailPanel } from "./execution-detail-panel";
 import { ExecutionTimeline, type TimelineFilters } from "./execution-timeline";
@@ -109,30 +110,17 @@ function queueSensorState(
   };
 }
 
-function KpiCard({
-  label,
-  value,
-  caption,
-}: {
-  label: string;
-  value: string;
-  caption?: string;
-}) {
-  return (
-    <Card>
-      <CardContent className="pt-6">
-        <p className="text-xs font-bold tracking-[0.05em] text-muted-foreground uppercase">
-          {label}
-        </p>
-        <p className="mt-1 text-[36px] leading-none font-bold">{value}</p>
-        {caption ? (
-          <p className="mt-1 text-xs text-muted-foreground">{caption}</p>
-        ) : null}
-      </CardContent>
-    </Card>
-  );
+function sensorDisplayName(name: string): string {
+  if (name === QUEUE_SENSOR_NAME) return "큐 sensor";
+  if (name.includes("failure")) return "failure sensor";
+  return name;
 }
 
+/**
+ * 상태 스트립(design.md §Macrostructure dashboard · M37) — 아이콘 타일 KPI 대신 StatStrip 하나.
+ * 값은 query가 resolve되기 전엔 `—`(M36 — 가짜 0 금지). Dagster 상태는 라벨 톤 dot + 라벨로,
+ * run count·sensor는 caption 한 줄(배지 counter 금지, M22).
+ */
 function OverviewStrip({
   overview,
 }: {
@@ -143,18 +131,22 @@ function OverviewStrip({
 
   const queueState = queueSensorState(overview.data);
   const operationsByStatus = data?.operations_by_status ?? {};
+  const loading = overview.isLoading || (overview.isError && !overview.data);
+  const dagsterStatus = dagster?.status ?? "unknown";
+  const runCounts = Object.entries(dagster?.run_counts ?? {});
+  const sensors = dagster?.sensors ?? [];
 
   return (
     <section aria-label="파이프라인 상태 스트립" className="space-y-4">
       {overview.isError ? (
         <Alert variant="destructive">
-          <AlertTitle>상태 스트립 호출 실패</AlertTitle>
+          <AlertTitle>상태 스트립을 불러오지 못했습니다</AlertTitle>
           <AlertDescription>{overview.error.message}</AlertDescription>
         </Alert>
       ) : null}
       {dagster && dagster.status !== "ok" ? (
         <Alert
-          variant={dagster.status === "unavailable" ? "destructive" : "default"}
+          variant={dagster.status === "unavailable" ? "destructive" : "warning"}
         >
           <AlertTitle>
             {dagster.status === "unavailable"
@@ -182,67 +174,76 @@ function OverviewStrip({
           </AlertDescription>
         </Alert>
       ) : null}
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        <KpiCard
-          caption="queued + running"
-          label="활성 작업"
-          value={formatCount(data?.active_operations ?? 0)}
-        />
-        <KpiCard
-          caption="canonical root"
-          label="대기"
-          value={formatCount(operationsByStatus.queued ?? 0)}
-        />
-        <KpiCard
-          caption="canonical root"
-          label="실행 중"
-          value={formatCount(operationsByStatus.running ?? 0)}
-        />
-        <KpiCard
-          caption="canonical root"
-          label="최근 24시간 실패"
-          value={formatCount(data?.failed_operations_24h ?? 0)}
-        />
-        <Card data-testid="dagster-status-card">
-          <CardContent className="pt-6">
-            <p className="text-xs font-bold tracking-[0.05em] text-muted-foreground uppercase">
-              Dagster
-            </p>
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <StatusBadge status={dagster?.status ?? "unknown"} />
-              {dagster?.version ? (
-                <span className="text-xs text-muted-foreground">
-                  v{dagster.version}
-                </span>
-              ) : null}
-            </div>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {Object.entries(dagster?.run_counts ?? {}).map(
-                ([status, count]) => (
-                  <Badge key={status} variant="outline">
-                    {status}: {formatCount(count)}
-                  </Badge>
-                ),
-              )}
-              {(dagster?.sensors ?? []).map((sensor) => (
-                <Badge
-                  key={sensor.name}
-                  variant={
-                    sensor.status === "RUNNING" ? "secondary" : "destructive"
-                  }
-                >
-                  {sensor.name === QUEUE_SENSOR_NAME
-                    ? "큐 sensor"
-                    : sensor.name.includes("failure")
-                      ? "failure sensor"
-                      : sensor.name}
-                  : {sensor.status ?? "-"}
-                </Badge>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+      <StatStrip
+        ariaLabel="파이프라인 요약"
+        isLoading={loading}
+        items={[
+          {
+            key: "active",
+            label: "활성 작업",
+            value: data?.active_operations,
+            unit: "건",
+            caption: "queued + running",
+          },
+          {
+            key: "queued",
+            label: "대기",
+            value: operationsByStatus.queued,
+            unit: "건",
+            caption: "canonical root",
+          },
+          {
+            key: "running",
+            label: "실행 중",
+            value: operationsByStatus.running,
+            unit: "건",
+            caption: "canonical root",
+          },
+          {
+            key: "failed-24h",
+            label: "최근 24시간 실패",
+            value: data?.failed_operations_24h,
+            unit: "건",
+            tone:
+              data && (data.failed_operations_24h ?? 0) > 0
+                ? "destructive"
+                : undefined,
+            caption: "canonical root",
+          },
+          {
+            key: "dagster",
+            label: "Dagster",
+            testId: "dagster-status-card",
+            tone: toneFor(dagsterStatus),
+            value: (
+              <span className="text-lg font-semibold">
+                {statusLabel(dagsterStatus)}
+              </span>
+            ),
+            caption: (
+              <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                {dagster?.version ? (
+                  <span className="tabular-nums">v{dagster.version}</span>
+                ) : null}
+                {runCounts.map(([status, count]) => (
+                  <span className="font-mono tabular-nums" key={status}>
+                    {status.toLowerCase()} {formatCount(count)}
+                  </span>
+                ))}
+                {sensors.map((sensor) => (
+                  <span className="inline-flex items-center gap-1" key={sensor.name}>
+                    {sensorDisplayName(sensor.name)}
+                    <StatusBadge
+                      label={sensor.status ? statusLabel(sensor.status) : undefined}
+                      status={sensor.status?.toLowerCase() ?? null}
+                    />
+                  </span>
+                ))}
+              </span>
+            ),
+          },
+        ]}
+      />
     </section>
   );
 }
@@ -500,11 +501,12 @@ export function PipelineClient() {
     <AdminShell
       actions={
         <div className="flex flex-wrap items-center gap-2">
-          <Badge variant={live.state === "live" ? "default" : "outline"}>
-            {opsLiveConnectionLabel(live.state)}
-          </Badge>
+          <LiveBadge
+            label={opsLiveConnectionLabel(live.state)}
+            state={live.state}
+          />
           <Button
-            disabled={overview.isFetching}
+            loading={overview.isFetching}
             type="button"
             variant="outline"
             onClick={() => void overview.refetch()}
@@ -518,6 +520,7 @@ export function PipelineClient() {
             <Button
               aria-label="갱신 요청 생성 (큐 sensor 확인 필요)"
               disabled
+              disabledReason="큐 sensor가 RUNNING으로 확인될 때까지 새 갱신 요청을 만들지 않습니다."
               type="button"
             >
               갱신 요청 생성
@@ -525,7 +528,7 @@ export function PipelineClient() {
           )}
         </div>
       }
-      description="실행 타임라인·전역 이벤트·스케줄·갱신 요청을 한 화면에서 관측/조작합니다 (ADR-064 페이지 ①)."
+      description="실행 타임라인·전역 이벤트·스케줄·갱신 요청을 한 화면에서 관측하고 조작합니다."
       section="수집 파이프라인"
       title="파이프라인"
     >
@@ -538,7 +541,7 @@ export function PipelineClient() {
             updateUrl({ tab: value });
           }}
         >
-          <TabsList>
+          <TabsList className="w-full" variant="line">
             <TabsTrigger value="executions">실행 타임라인</TabsTrigger>
             <TabsTrigger value="events">전역 이벤트</TabsTrigger>
             <TabsTrigger value="schedules">스케줄</TabsTrigger>
@@ -547,11 +550,11 @@ export function PipelineClient() {
             <div
               className={
                 selected
-                  ? "grid gap-4 xl:grid-cols-[minmax(0,1fr)_26rem]"
-                  : "space-y-4"
+                  ? "grid gap-6 xl:grid-cols-[minmax(0,1fr)_var(--rail)]"
+                  : "space-y-6"
               }
             >
-              <div className="min-w-0 space-y-4">
+              <div className="min-w-0 space-y-6">
                 <ExecutionTimeline
                   initialFilters={timelineFilters}
                   initialLoadBatchId={timelineLoadBatchId}

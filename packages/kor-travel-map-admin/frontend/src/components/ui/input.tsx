@@ -1,15 +1,32 @@
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 import * as React from "react"
 import { Input as InputPrimitive } from "@base-ui/react/input"
 
 import { cn } from "@/lib/utils"
 
-function Input({ className, type, ...props }: React.ComponentProps<"input">) {
+type InputProps = Omit<React.ComponentProps<"input">, "size"> & {
+  /** 컨트롤 높이 2종만: `default` = `h-control`(36px, 15px) · `sm` = `h-control-sm`(30px, 13.5px). */
+  size?: "sm" | "default"
+}
+
+/**
+ * 텍스트 입력 recipe (interaction-and-states §Input field states):
+ * border 1px 고정(모든 상태) · hover는 배경만 · focus는 불투명 outline(즉시) · disabled/read-only는
+ * opacity + cursor + 배경 3채널 · aria-invalid는 border 색 + 메시지 슬롯(FormField) 병행.
+ */
+function Input({ className, type, size = "default", ...props }: InputProps) {
   return (
     <InputPrimitive
       type={type}
       data-slot="input"
+      data-size={size}
       className={cn(
-        "h-10 w-full min-w-0 rounded-md border border-input bg-card px-3 py-2 text-[14px] transition-colors outline-none file:inline-flex file:h-6 file:border-0 file:bg-transparent file:text-[13px] file:font-medium file:text-text-primary placeholder:text-text-tertiary focus-visible:border-brand focus-visible:ring-3 focus-visible:ring-brand/20 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-surface-muted disabled:text-text-disabled read-only:cursor-not-allowed read-only:bg-surface-muted read-only:text-text-disabled aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:bg-card dark:disabled:bg-surface-muted dark:read-only:bg-surface-muted dark:aria-invalid:border-destructive/50 dark:aria-invalid:ring-destructive/40",
+        "w-full min-w-0 rounded-control border border-input bg-card px-3 text-text-primary transition-[color,background-color,border-color] duration-fast ease-out outline-none",
+        "h-control text-sm data-[size=sm]:h-control-sm data-[size=sm]:px-2.5 data-[size=sm]:text-xs",
+        "file:inline-flex file:h-6 file:border-0 file:bg-transparent file:text-xs file:font-medium file:text-text-primary placeholder:text-text-tertiary",
+        "hover:bg-surface-subtle focus-visible:border-text-secondary focus-visible:bg-card focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
+        "disabled:cursor-not-allowed disabled:bg-surface-subtle disabled:opacity-55 read-only:cursor-default read-only:bg-surface-subtle read-only:text-text-secondary",
+        "aria-invalid:border-destructive",
         className
       )}
       {...props}
@@ -18,3 +35,4 @@ function Input({ className, type, ...props }: React.ComponentProps<"input">) {
 }
 
 export { Input }
+export type { InputProps }

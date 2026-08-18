@@ -1,15 +1,26 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (detail) · design-system: design.md · designed-as-app
 
 import { type ColumnDef } from "@tanstack/react-table";
-import { FuelIcon, HistoryIcon } from "lucide-react";
 import { useMemo } from "react";
 
 import { useAdminFeaturePrice, type PricePoint } from "@/api/features";
+import { DetailList } from "@/components/detail-list";
+import { EmptyState } from "@/components/empty-state";
 import { StatusBadge } from "@/components/status-badge";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { DataTable } from "@/components/ui/data-table";
-import { formatDateTime } from "@/lib/format";
+import {
+  Alert,
+  AlertActions,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import {
+  DataTable,
+  type DataTableColumnMeta,
+} from "@/components/ui/data-table";
+import { Skeleton } from "@/components/ui/skeleton";
+import { formatCount, formatDateTime } from "@/lib/format";
 import { withOccurrenceKeys } from "@/lib/occurrence-key";
 
 const priceFormatter = new Intl.NumberFormat("ko-KR", {
@@ -64,9 +75,23 @@ function priceLabel(point: PricePoint): string {
   return `${priceFormatter.format(point.value_number)}${point.unit ? ` ${point.unit}` : ""}`;
 }
 
+/**
+ * series 색은 토큰만(design.md §Theme — 페이지 코드에 raw hsl/hex 없음). 비교 쌍 → 상태 잉크
+ * 순으로 순환한다; series 수가 팔레트를 넘으면 순환하지만 legend 라벨이 항상 함께 붙는다.
+ */
+const SERIES_COLORS = [
+  "var(--compare-a)",
+  "var(--compare-b)",
+  "var(--warning)",
+  "var(--destructive)",
+  "var(--success)",
+  "var(--info)",
+  "var(--brand-hover)",
+  "var(--text-secondary)",
+] as const;
+
 function seriesColor(index: number): string {
-  const goldenAngle = 137.508;
-  return `hsl(${(index * goldenAngle) % 360} 72% 42%)`;
+  return SERIES_COLORS[index % SERIES_COLORS.length];
 }
 
 export function PriceHistoryChart({ history }: { history: PricePoint[] }) {
@@ -108,9 +133,11 @@ export function PriceHistoryChart({ history }: { history: PricePoint[] }) {
   const allPoints = series.flatMap((item) => item.points);
   if (allPoints.length === 0) {
     return (
-      <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-        그래프를 그릴 price history가 부족합니다.
-      </div>
+      <EmptyState
+        description="같은 series의 관측이 2건 이상 쌓이면 선으로 이어 그립니다."
+        size="sm"
+        title="그래프를 그릴 price history가 부족합니다."
+      />
     );
   }
 
@@ -133,36 +160,52 @@ export function PriceHistoryChart({ history }: { history: PricePoint[] }) {
       : padX + ((timestamp - minTime) / timeSpan) * chartWidth;
   const y = (value: number) =>
     padTop + chartHeight - ((value - minPrice) / priceSpan) * chartHeight;
+  const axisColor = "var(--border)";
+  const pointOutline = "var(--card)";
 
   return (
-    <div className="rounded-md border bg-muted/20 p-3">
+    <div className="flex flex-col gap-2 rounded-panel border border-border bg-surface-subtle p-3">
       <svg
         aria-label="price history graph"
-        className="h-40 w-full"
+        className="h-40 w-full text-text-secondary"
         preserveAspectRatio="none"
         role="img"
         viewBox={`0 0 ${width} ${height}`}
       >
         <line
-          stroke="hsl(var(--border))"
+          stroke={axisColor}
           strokeWidth="1"
+          style={{ stroke: axisColor }}
           x1={padX}
           x2={width - padX}
           y1={padTop + chartHeight}
           y2={padTop + chartHeight}
         />
         <line
-          stroke="hsl(var(--border))"
+          stroke={axisColor}
           strokeWidth="1"
+          style={{ stroke: axisColor }}
           x1={padX}
           x2={padX}
           y1={padTop}
           y2={padTop + chartHeight}
         />
-        <text fill="currentColor" fontSize="10" x="2" y={padTop + 4}>
+        <text
+          className="font-mono tabular-nums"
+          fill="currentColor"
+          fontSize="10"
+          x="2"
+          y={padTop + 4}
+        >
           {chartPriceFormatter.format(maxPrice)}
         </text>
-        <text fill="currentColor" fontSize="10" x="2" y={padTop + chartHeight}>
+        <text
+          className="font-mono tabular-nums"
+          fill="currentColor"
+          fontSize="10"
+          x="2"
+          y={padTop + chartHeight}
+        >
           {chartPriceFormatter.format(minPrice)}
         </text>
         {series.map((item) => (
@@ -177,6 +220,7 @@ export function PriceHistoryChart({ history }: { history: PricePoint[] }) {
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 strokeWidth="2"
+                style={{ stroke: item.color }}
               />
             ) : null}
             {withOccurrenceKeys(
@@ -189,8 +233,9 @@ export function PriceHistoryChart({ history }: { history: PricePoint[] }) {
                 fill={item.color}
                 key={key}
                 r="3"
-                stroke="#ffffff"
+                stroke={pointOutline}
                 strokeWidth="1"
+                style={{ fill: item.color, stroke: pointOutline }}
               >
                 <title>
                   {item.label} {priceLabel(point)} {formatDateTime(point.observed_at)}
@@ -200,17 +245,18 @@ export function PriceHistoryChart({ history }: { history: PricePoint[] }) {
           </g>
         ))}
       </svg>
-      <div className="mt-2 flex flex-wrap gap-2 text-xs">
+      <ul className="flex flex-wrap gap-x-3 gap-y-1 text-2xs text-text-secondary">
         {series.map((item) => (
-          <span className="inline-flex items-center gap-1" key={item.seriesKey}>
+          <li className="inline-flex items-center gap-1" key={item.seriesKey}>
             <span
-              className="size-2 rounded-full"
+              aria-hidden="true"
+              className="size-2 shrink-0 rounded-full"
               style={{ backgroundColor: item.color }}
             />
             {item.label}
-          </span>
+          </li>
         ))}
-      </div>
+      </ul>
     </div>
   );
 }
@@ -237,12 +283,12 @@ export function FeaturePricePanel({
         cell: ({ row }) => {
           const point = row.original;
           return (
-            <>
-              <div className="font-medium">{productLabel(point)}</div>
-              <div className="font-mono text-xs text-muted-foreground">
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <span className="truncate font-medium">{productLabel(point)}</span>
+              <span className="truncate font-mono text-2xs text-text-secondary slashed-zero">
                 {point.product_key}
-              </div>
-            </>
+              </span>
+            </div>
           );
         },
       },
@@ -250,9 +296,8 @@ export function FeaturePricePanel({
         id: "price",
         header: "price",
         accessorFn: (point) => point.value_number,
-        cell: ({ row }) => (
-          <span className="font-mono">{priceLabel(row.original)}</span>
-        ),
+        meta: { align: "right" } satisfies DataTableColumnMeta,
+        cell: ({ row }) => <span className="tabular-nums">{priceLabel(row.original)}</span>,
       },
     ];
 
@@ -262,7 +307,7 @@ export function FeaturePricePanel({
         header: "observed",
         accessorKey: "observed_at",
         cell: ({ row }) => (
-          <span className="text-muted-foreground">
+          <span className="text-text-secondary">
             {formatDateTime(row.original.observed_at)}
           </span>
         ),
@@ -274,12 +319,12 @@ export function FeaturePricePanel({
         cell: ({ row }) => {
           const canonical = canonicalPricePoint(row.original);
           return (
-            <>
-              <div className="font-medium">{canonical.dataset_display_name}</div>
-              <div className="font-mono text-xs text-muted-foreground">
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <span className="truncate font-medium">{canonical.dataset_display_name}</span>
+              <span className="truncate font-mono text-2xs text-text-secondary slashed-zero">
                 {canonical.dataset_key} · #{canonical.provider_dataset_id}
-              </div>
-            </>
+              </span>
+            </div>
           );
         },
       });
@@ -288,7 +333,7 @@ export function FeaturePricePanel({
         header: "provider",
         accessorKey: "provider",
         cell: ({ row }) => (
-          <Badge variant="outline">{row.original.provider}</Badge>
+          <span className="font-mono text-xs text-text-secondary">{row.original.provider}</span>
         ),
       });
       cols.push({
@@ -296,7 +341,9 @@ export function FeaturePricePanel({
         header: "domain",
         accessorKey: "price_domain",
         cell: ({ row }) => (
-          <Badge variant="outline">{row.original.price_domain}</Badge>
+          <span className="font-mono text-xs text-text-secondary">
+            {row.original.price_domain}
+          </span>
         ),
       });
       cols.push({
@@ -304,7 +351,7 @@ export function FeaturePricePanel({
         header: "known",
         accessorFn: (point) => canonicalPricePoint(point).known_at,
         cell: ({ row }) => (
-          <span className="text-muted-foreground">
+          <span className="text-text-secondary">
             {formatDateTime(canonicalPricePoint(row.original).known_at)}
           </span>
         ),
@@ -315,78 +362,98 @@ export function FeaturePricePanel({
   }, [compact]);
 
   return (
-    <section className="rounded-lg border bg-background" data-testid="feature-price-panel">
-      <div className="flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 font-medium">
-            <FuelIcon className="size-4 text-muted-foreground" />
-            Price
-          </div>
-          <div className="mt-1 text-xs text-muted-foreground">
-            canonical dataset/domain/product series별 최신 가격과 최근 이력
-          </div>
+    <section className="flex min-w-0 flex-col gap-3" data-testid="feature-price-panel">
+      <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+        <div className="flex min-w-0 items-baseline gap-2">
+          <h3 className="text-sm leading-snug font-semibold text-text-primary">Price</h3>
+          {data ? (
+            <span
+              aria-label={`현재 가격 series ${formatCount(current.length)}건`}
+              className="text-xs text-text-secondary tabular-nums"
+            >
+              {formatCount(current.length)}
+            </span>
+          ) : null}
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Badge variant={data?.is_stale ? "destructive" : "outline"}>
-            {data?.is_stale ? "stale" : "fresh"}
-          </Badge>
-          <Badge variant="secondary">{current.length}</Badge>
-        </div>
+        {data ? (
+          <StatusBadge
+            label={data.is_stale ? "stale" : "fresh"}
+            status={data.is_stale ? "stale" : "fresh"}
+          />
+        ) : null}
+        <p className="basis-full text-xs text-text-secondary">
+          canonical dataset/domain/product series별 최신 가격과 최근 이력
+        </p>
       </div>
 
       {price.isError ? (
-        <Alert className="m-4" variant="destructive">
+        <Alert variant="destructive">
           <AlertTitle>price 호출 실패</AlertTitle>
           <AlertDescription>{price.error.message}</AlertDescription>
+          <AlertActions>
+            <Button
+              loading={price.isFetching}
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={() => void price.refetch()}
+            >
+              다시 시도
+            </Button>
+          </AlertActions>
         </Alert>
       ) : null}
-      {data || price.isLoading ? (
-        <div className="flex flex-col gap-4 p-4">
-          {data ? (
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-sm">
-              <dt className="text-muted-foreground">latest</dt>
-              <dd>{formatDateTime(data.latest_at)}</dd>
-              <dt className="text-muted-foreground">current</dt>
-              <dd className="flex flex-wrap gap-2">
-                {current.length > 0
-                  ? withOccurrenceKeys(current, priceSeriesIdentity).map(
-                      ({ key, value: point }) => (
-                        <Badge key={key} variant="outline">
-                          {productLabel(point)} · {datasetLabel(point)} · {point.provider}/
-                          {point.price_domain} {priceFormatter.format(point.value_number)}
-                        </Badge>
-                      ),
-                    )
-                  : "-"}
-              </dd>
-            </dl>
-          ) : null}
+      {price.isLoading ? (
+        <div aria-busy="true" className="flex flex-col gap-2">
+          <Skeleton className="h-4 w-1/2" />
+          <Skeleton className="h-4 w-3/4" />
+          <Skeleton className="h-40 w-full" />
+        </div>
+      ) : null}
+      {data ? (
+        <div className="flex flex-col gap-4">
+          <DetailList
+            items={[
+              { label: "latest", value: formatDateTime(data.latest_at) },
+              {
+                label: "current",
+                value:
+                  current.length > 0 ? (
+                    <ul className="flex flex-col gap-0.5">
+                      {withOccurrenceKeys(current, priceSeriesIdentity).map(
+                        ({ key, value: point }) => (
+                          <li className="text-xs tabular-nums" key={key}>
+                            {productLabel(point)} · {datasetLabel(point)} · {point.provider}/
+                            {point.price_domain} {priceFormatter.format(point.value_number)}
+                          </li>
+                        ),
+                      )}
+                    </ul>
+                  ) : null,
+              },
+            ]}
+            layout="inline"
+          />
 
-          <div>
-            <div className="mb-2 flex items-center gap-2 text-sm font-medium">
-              <HistoryIcon className="size-4 text-muted-foreground" />
-              Graph
-            </div>
+          <div className="flex flex-col gap-2">
+            <h4 className="text-xs font-semibold text-text-primary">Graph</h4>
             <PriceHistoryChart history={history} />
           </div>
 
-          <div className="overflow-auto">
-            <div className="mb-2 flex items-center gap-2 text-sm font-medium">
-              <HistoryIcon className="size-4 text-muted-foreground" />
-              History
-            </div>
+          <div className="flex flex-col gap-2">
+            <h4 className="text-xs font-semibold text-text-primary">History</h4>
             <DataTable
               columns={historyColumns}
               data={history}
-              getRowId={(point) =>
-                pricePointIdentity(point)
-              }
+              emptyState={{
+                title: "price history가 없습니다.",
+                description: "가격 관측이 적재되면 series별로 최근 이력이 표시됩니다.",
+              }}
+              getRowId={(point) => pricePointIdentity(point)}
               isLoading={price.isLoading}
-              emptyMessage="price history가 없습니다."
               manualSorting={false}
             />
           </div>
-          {data?.is_stale ? <StatusBadge status="stale" /> : null}
         </div>
       ) : null}
     </section>

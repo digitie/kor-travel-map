@@ -1,10 +1,23 @@
 "use client"
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 
 import * as React from "react"
 
 import { Dialog as DialogPrimitive } from "@base-ui/react/dialog"
 
 import { cn } from "@/lib/utils"
+
+/**
+ * Overlay motion recipe (design.md §Motion): enter = opacity + scale .98, `--duration-base`
+ * 150ms `--ease-out`; exit = 100ms `--ease-in`. Scrim is the only alpha colour (`bg-overlay`).
+ * `data-motion="crossfade"` keeps a ≤150ms opacity-only crossfade under
+ * `prefers-reduced-motion` (globals.css global rule); the scale step then snaps.
+ */
+const OVERLAY_BACKDROP_CLASS =
+  "fixed inset-0 z-50 bg-overlay transition-opacity duration-base ease-out data-[starting-style]:opacity-0 data-[ending-style]:opacity-0 data-[ending-style]:duration-fast data-[ending-style]:ease-in"
+
+const OVERLAY_POPUP_MOTION_CLASS =
+  "transition-[opacity,scale] duration-base ease-out data-[starting-style]:scale-98 data-[starting-style]:opacity-0 data-[ending-style]:scale-98 data-[ending-style]:opacity-0 data-[ending-style]:duration-fast data-[ending-style]:ease-in"
 
 function Dialog({ ...props }: DialogPrimitive.Root.Props) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />
@@ -19,8 +32,8 @@ function DialogClose({ ...props }: DialogPrimitive.Close.Props) {
 }
 
 /**
- * 화면 중앙(상단 정렬) 팝업. 기존 수제 모달(`fixed inset-0 … bg-black/45`)과 같은
- * 시각 구조를 유지해 재쉘 시 레이아웃 변화가 없도록 한다. 스크롤은 backdrop 영역에서.
+ * 화면 중앙(상단 정렬) 팝업. 스크롤은 backdrop(viewport) 영역에서. panel 표면은 다른
+ * elevated surface와 같은 `bg-card` + hairline + `rounded-panel`, 그림자는 `shadow-modal`만.
  */
 function DialogContent({
   className,
@@ -31,7 +44,7 @@ function DialogContent({
     <DialogPrimitive.Portal>
       <DialogPrimitive.Backdrop
         data-slot="dialog-backdrop"
-        className="fixed inset-0 z-50 bg-black/45 data-[starting-style]:opacity-0 data-[ending-style]:opacity-0 transition-opacity duration-150"
+        className={OVERLAY_BACKDROP_CLASS}
       />
       <DialogPrimitive.Viewport
         data-slot="dialog-viewport"
@@ -39,9 +52,10 @@ function DialogContent({
       >
         <DialogPrimitive.Popup
           data-slot="dialog-content"
+          data-motion="crossfade"
           className={cn(
-            "w-full max-w-lg rounded-lg border border-border bg-background shadow-[var(--shadow-modal)] outline-none",
-            "data-[starting-style]:scale-[0.98] data-[starting-style]:opacity-0 data-[ending-style]:scale-[0.98] data-[ending-style]:opacity-0 transition-[transform,opacity] duration-150",
+            "w-full max-w-lg rounded-panel border border-border bg-card text-text-primary shadow-modal outline-none",
+            OVERLAY_POPUP_MOTION_CLASS,
             className
           )}
           {...props}
@@ -70,7 +84,7 @@ function DialogTitle({ className, ...props }: DialogPrimitive.Title.Props) {
   return (
     <DialogPrimitive.Title
       data-slot="dialog-title"
-      className={cn("text-lg font-semibold", className)}
+      className={cn("text-md font-semibold text-text-primary", className)}
       {...props}
     />
   )
@@ -83,7 +97,7 @@ function DialogDescription({
   return (
     <DialogPrimitive.Description
       data-slot="dialog-description"
-      className={cn("text-sm text-muted-foreground", className)}
+      className={cn("text-sm text-text-secondary", className)}
       {...props}
     />
   )

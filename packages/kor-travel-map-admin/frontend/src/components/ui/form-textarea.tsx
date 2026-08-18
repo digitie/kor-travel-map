@@ -1,4 +1,5 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 
 import * as React from "react";
 
@@ -8,6 +9,7 @@ import {
   FieldDescription,
   FieldError,
   FieldLabel,
+  FieldMessage,
 } from "@/components/ui/field";
 import {
   describedBy,
@@ -21,8 +23,13 @@ type FormTextAreaProps = Omit<
   React.ComponentPropsWithRef<typeof Textarea>,
   "id" | "aria-invalid"
 > &
-  FieldShellProps & { id?: string };
+  FieldShellProps & {
+    id?: string;
+    /** hint/error 메시지 슬롯(1줄) 항상 예약(기본 true, M13). 인라인 툴바만 false. */
+    reserveMessage?: boolean;
+  };
 
+/** 라벨 위 · Textarea · 메시지 슬롯 1개(error가 hint를 대체) — FormField와 같은 리듬. */
 function FormTextArea({
   label,
   hint,
@@ -31,6 +38,7 @@ function FormTextArea({
   required,
   className,
   labelClassName,
+  reserveMessage = true,
   id,
   ref,
   "aria-describedby": ariaDescribedBy,
@@ -38,6 +46,8 @@ function FormTextArea({
 }: FormTextAreaProps) {
   const { fieldId, hintId, errorId } = useFieldIds(id);
   const unavailable = textareaProps.disabled || textareaProps.readOnly;
+  const showHint = !error && Boolean(hint);
+  const showMessage = reserveMessage || Boolean(error) || showHint;
   return (
     <Field
       className={className}
@@ -56,7 +66,7 @@ function FormTextArea({
       <Textarea
         aria-describedby={describedBy(
           ariaDescribedBy,
-          hint ? hintId : undefined,
+          showHint ? hintId : undefined,
           error ? errorId : undefined,
         )}
         aria-invalid={error ? true : undefined}
@@ -66,8 +76,15 @@ function FormTextArea({
         ref={ref}
         {...textareaProps}
       />
-      {hint ? <FieldDescription id={hintId}>{hint}</FieldDescription> : null}
-      {error ? <FieldError id={errorId}>{error}</FieldError> : null}
+      {showMessage ? (
+        <FieldMessage>
+          {error ? (
+            <FieldError id={errorId}>{error}</FieldError>
+          ) : showHint ? (
+            <FieldDescription id={hintId}>{hint}</FieldDescription>
+          ) : null}
+        </FieldMessage>
+      ) : null}
     </Field>
   );
 }

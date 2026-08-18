@@ -1,8 +1,15 @@
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 import * as React from "react"
+import { mergeProps } from "@base-ui/react/merge-props"
+import { useRender } from "@base-ui/react/use-render"
 import { ChevronRightIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Breadcrumb — 헤더 밴드의 위치 표기(13.5px secondary). 링크는 밑줄 없이 hover 시 잉크가
+ * 짙어지고, 현재 페이지만 500 ink. `BreadcrumbLink`는 `render`로 next/link를 받을 수 있다.
+ */
 function Breadcrumb({ ...props }: React.ComponentProps<"nav">) {
   return <nav aria-label="breadcrumb" data-slot="breadcrumb" {...props} />
 }
@@ -12,7 +19,7 @@ function BreadcrumbList({ className, ...props }: React.ComponentProps<"ol">) {
     <ol
       data-slot="breadcrumb-list"
       className={cn(
-        "flex flex-wrap items-center gap-1.5 text-[13px] leading-normal break-words text-muted-foreground",
+        "flex flex-wrap items-center gap-1.5 text-xs break-words text-text-secondary",
         className
       )}
       {...props}
@@ -30,14 +37,25 @@ function BreadcrumbItem({ className, ...props }: React.ComponentProps<"li">) {
   )
 }
 
-function BreadcrumbLink({ className, ...props }: React.ComponentProps<"a">) {
-  return (
-    <a
-      data-slot="breadcrumb-link"
-      className={cn("transition-colors hover:text-foreground", className)}
-      {...props}
-    />
-  )
+function BreadcrumbLink({
+  className,
+  render,
+  ...props
+}: useRender.ComponentProps<"a">) {
+  return useRender({
+    defaultTagName: "a",
+    props: mergeProps<"a">(
+      {
+        className: cn(
+          "rounded-control no-underline transition-colors outline-none hover:text-text-primary hover:no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus active:text-text-primary",
+          className
+        ),
+      },
+      props
+    ),
+    render,
+    state: { slot: "breadcrumb-link" },
+  })
 }
 
 function BreadcrumbPage({ className, ...props }: React.ComponentProps<"span">) {
@@ -45,7 +63,7 @@ function BreadcrumbPage({ className, ...props }: React.ComponentProps<"span">) {
     <span
       aria-current="page"
       data-slot="breadcrumb-page"
-      className={cn("font-medium text-foreground", className)}
+      className={cn("font-medium text-text-primary", className)}
       {...props}
     />
   )
@@ -61,7 +79,7 @@ function BreadcrumbSeparator({
       aria-hidden="true"
       data-slot="breadcrumb-separator"
       role="presentation"
-      className={cn("[&>svg]:size-3.5", className)}
+      className={cn("text-text-tertiary [&>svg]:size-3.5", className)}
       {...props}
     >
       {children ?? <ChevronRightIcon />}

@@ -1,4 +1,5 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (map) · design-system: design.md · designed-as-app
 
 import {
   createMarkerElement,
@@ -348,6 +349,31 @@ export function VWorldMapView({
   );
 }
 
+/**
+ * 마커 색 토큰 지원(design.md §Theme — 페이지 코드는 raw hex 대신 `var(--compare-a/b)`를 넘긴다).
+ * `@kor-travel-map/map-marker-react`의 resolveMarkerColor는 hex/팔레트 키만 알므로,
+ * `var(--…)` 참조는 그대로 DOM inline style에 넘겨 브라우저가 :root 토큰으로 해석하게 한다.
+ * (WebGL geometry paint는 CSS 변수를 못 읽으므로 서버 팔레트 키/hex 경로는 그대로 둔다.)
+ */
+function isCssVariableColor(value: string | null | undefined): value is string {
+  return typeof value === "string" && value.trim().startsWith("var(");
+}
+
+function markerColorValue(markerColor: string | null | undefined): string {
+  if (isCssVariableColor(markerColor)) return markerColor.trim();
+  return resolveMarkerColor(markerColor ?? null);
+}
+
+/** createMarkerElement가 var() 색을 기본색으로 떨어뜨린 경우 배경을 토큰 참조로 되돌린다. */
+function applyTokenMarkerColor(element: HTMLElement, markerColor: string | null | undefined): void {
+  if (isCssVariableColor(markerColor)) {
+    element.style.background = markerColor.trim();
+  }
+}
+
+/** 선택 강조 outline — 불투명 focus 토큰(구 `hsl(var(--primary))`는 oklch 토큰과 호환되지 않는다). */
+const SELECTED_OUTLINE = "3px solid var(--focus)";
+
 interface VWorldMarkerProps {
   lngLat: [number, number];
   markerIcon?: string | null;
@@ -393,6 +419,7 @@ export function VWorldMarker({
       title,
       onClick: clickable ? () => onClickRef.current?.() : undefined,
     });
+    applyTokenMarkerColor(element, markerColor);
     if (clickable) {
       element.setAttribute("aria-label", title ?? "Feature marker");
       element.setAttribute("role", "button");
@@ -421,7 +448,7 @@ export function VWorldMarker({
     const element = elementRef.current;
     if (element === null) return;
     if (selected) {
-      element.style.outline = "3px solid hsl(var(--primary))";
+      element.style.outline = SELECTED_OUTLINE;
       element.style.outlineOffset = "2px";
     } else {
       element.style.outline = "";
@@ -435,7 +462,7 @@ export function VWorldMarker({
 /** 선택 강조: 기존 element에 outline만 토글(마커 재생성 없이). VWorldMarker와 동일 룩. */
 function setSelectedOutline(element: HTMLElement, selected: boolean): void {
   if (selected) {
-    element.style.outline = "3px solid hsl(var(--primary))";
+    element.style.outline = SELECTED_OUTLINE;
     element.style.outlineOffset = "2px";
   } else {
     element.style.outline = "";
@@ -452,14 +479,14 @@ function createClusterElement(pointCount: number, label: string): HTMLDivElement
   el.style.alignItems = "center";
   el.style.justifyContent = "center";
   el.style.borderRadius = "9999px";
-  el.style.background = "#2f765f";
-  el.style.color = "#ffffff";
+  el.style.background = "var(--brand)";
+  el.style.color = "var(--brand-foreground)";
   el.style.fontWeight = "600";
   el.style.fontSize = pointCount < 1000 ? "12px" : "11px";
   el.style.lineHeight = "1";
   el.style.cursor = "pointer";
-  el.style.border = "2px solid #ffffff";
-  el.style.boxShadow = "0 1px 4px rgba(0,0,0,0.35)";
+  el.style.border = "2px solid var(--card)";
+  el.style.boxShadow = "var(--shadow-elevated)";
   el.style.userSelect = "none";
   el.textContent = label;
   el.setAttribute("role", "button");
@@ -720,6 +747,7 @@ function createFeatureMarkerElement({
     size: 24,
     title,
   });
+  applyTokenMarkerColor(icon, markerColor);
   const markerLabel = priceLabel ?? weatherLabel ?? null;
   if (!markerLabel) {
     if (onClick) {
@@ -731,12 +759,12 @@ function createFeatureMarkerElement({
       });
     }
     if (badgeCount && badgeCount > 1) {
-      appendCountBadge(icon, badgeCount, resolveMarkerColor(markerColor ?? null));
+      appendCountBadge(icon, badgeCount, markerColorValue(markerColor));
     }
     return icon;
   }
 
-  const color = resolveMarkerColor(markerColor ?? null);
+  const color = markerColorValue(markerColor);
   // 아이콘(24px 원)이 좌표에 정확히 앵커링되도록 wrapper 박스를 아이콘 크기로 유지하고,
   // 라벨(가격/날씨)은 absolute로 아이콘 오른쪽에 띄운다. flex로 [icon][label]을 나열하면
   // maplibre 기본 center 앵커가 wrapper 중앙(=아이콘과 라벨 사이)을 좌표에 놓아, 아이콘이

@@ -1,4 +1,5 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (form) · design-system: design.md · designed-as-app
 
 import type { Map as MapLibreMap } from "maplibre-gl";
 import type { ReactNode } from "react";
@@ -6,6 +7,7 @@ import type { ReactNode } from "react";
 import type { CategorySummary } from "@/api/categories";
 import type { KorTravelGeoCandidate } from "@/api/korTravelGeo";
 import { AdminRegionAutoSearch } from "@/components/admin-region-autosearch";
+import { SectionCard } from "@/components/section-card";
 import { FormField } from "@/components/ui/form-field-input";
 import { FormSelect } from "@/components/ui/form-select";
 import { FormTextArea } from "@/components/ui/form-textarea";
@@ -28,6 +30,7 @@ import {
   jsonObject,
   phoneNumber,
 } from "@/lib/form-validation";
+import { NULL_GLYPH } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { isVWorldApiKeyConfigured } from "@/lib/vworld-style";
 import { DEFAULT_VIEWPORT } from "@/state/map";
@@ -53,6 +56,30 @@ export interface FeatureDetailValues {
 }
 
 type FeatureDetailField = keyof FeatureDetailValues;
+
+/** "고급 추가 정보" 접이식 블록 — dashed 박스 대신 flat details(C3/M17). summary는 12px/500. */
+function AdvancedDisclosure({
+  children,
+  className,
+}: {
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <details className={cn("group/details", className)}>
+      <summary className="inline-flex h-control-sm cursor-pointer list-none items-center gap-1 rounded-control text-xs font-medium text-text-secondary outline-none select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
+        <span aria-hidden="true" className="w-3 text-text-tertiary group-open/details:hidden">
+          +
+        </span>
+        <span aria-hidden="true" className="hidden w-3 text-text-tertiary group-open/details:inline">
+          −
+        </span>
+        고급 추가 정보
+      </summary>
+      <div className="pt-3">{children}</div>
+    </details>
+  );
+}
 
 function categoryOptionLabel(category: CategorySummary): string {
   const path =
@@ -93,24 +120,23 @@ export function FeatureLocationPreviewSection({
   const zoom = coord ? zoomWhenCoord : DEFAULT_VIEWPORT.zoom;
 
   return (
-    <div
-      className={cn(
-        "flex min-w-0 flex-col rounded-lg border bg-background",
-        className,
-      )}
+    <SectionCard
+      actions={actions}
+      className={cn("min-w-0", className)}
+      contentClassName="space-y-3"
+      description={
+        <span className="font-mono tabular-nums slashed-zero">
+          {coord ? `${coord.lon.toFixed(6)}, ${coord.lat.toFixed(6)}` : `좌표 ${NULL_GLYPH}`}
+        </span>
+      }
+      title="좌표"
     >
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
-        <div>
-          <h2 className="font-medium">좌표</h2>
-          <p className="font-mono text-sm text-muted-foreground">
-            {coord
-              ? `${coord.lon.toFixed(6)}, ${coord.lat.toFixed(6)}`
-              : "좌표 없음"}
-          </p>
-        </div>
-        {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
-      </div>
-      <div className={cn("relative min-h-0 overflow-hidden", heightClassName)}>
+      <div
+        className={cn(
+          "relative min-h-0 overflow-hidden rounded-control bg-surface-subtle",
+          heightClassName,
+        )}
+      >
         <VWorldMapView
           apiKey={apiKey}
           center={center}
@@ -144,11 +170,11 @@ export function FeatureLocationPreviewSection({
         </VWorldMapView>
       </div>
       {!isVWorldApiKeyConfigured(apiKey) ? (
-        <div className="border-t px-4 py-3 text-sm text-muted-foreground">
+        <p className="text-xs text-text-secondary">
           VWorld key 미설정 상태라 회색 배경으로 표시합니다.
-        </div>
+        </p>
       ) : null}
-    </div>
+    </SectionCard>
   );
 }
 
@@ -200,12 +226,8 @@ export function FeatureBasicInfoSection({
   onQualityStateChange: (value: FeatureQualityState) => void;
 }) {
   return (
-    <section className={cn("rounded-lg border bg-background p-4", className)}>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-        <h2 className="font-medium">기본 정보</h2>
-        {actions ? <div className="flex flex-wrap gap-2">{actions}</div> : null}
-      </div>
-      <div className="grid gap-3 lg:grid-cols-4">
+    <SectionCard actions={actions} className={className} title="기본 정보">
+      <div className="grid gap-x-3 gap-y-1 lg:grid-cols-4">
         <FormSelect
           aria-label={`${idPrefix} kind`}
           id={`${idPrefix}-kind`}
@@ -315,7 +337,7 @@ export function FeatureBasicInfoSection({
           ))}
         </FormSelect>
       </div>
-    </section>
+    </SectionCard>
   );
 }
 
@@ -333,9 +355,8 @@ export function FeatureAddressSection({
   onChange: (field: FeatureAddressField, value: string) => void;
 }) {
   return (
-    <div className={cn("rounded-lg border bg-background p-4", className)}>
-      <h2 className="mb-4 font-medium">주소</h2>
-      <div className="grid gap-3 md:grid-cols-2">
+    <SectionCard className={className} title="주소">
+      <div className="grid gap-x-3 gap-y-1 md:grid-cols-2">
         <FormField
           aria-label={`${idPrefix} road address`}
           id={`${idPrefix}-address-road`}
@@ -419,13 +440,9 @@ export function FeatureAddressSection({
           }
         />
       </div>
-      <details className="mt-3 rounded-md border border-dashed p-3">
-        <summary className="cursor-pointer text-sm font-medium">
-          고급 추가 정보
-        </summary>
+      <AdvancedDisclosure>
         <FormTextArea
           aria-label={`${idPrefix} address JSON`}
-          className="mt-3"
           error={jsonObject<FeatureAddressValues>()(
             values.addressExtraJson,
             values,
@@ -437,8 +454,8 @@ export function FeatureAddressSection({
           value={values.addressExtraJson}
           onChange={(event) => onChange("addressExtraJson", event.target.value)}
         />
-      </details>
-    </div>
+      </AdvancedDisclosure>
+    </SectionCard>
   );
 }
 
@@ -468,10 +485,9 @@ export function FeatureDetailSection({
   );
 
   return (
-    <div className={cn("rounded-lg border bg-background p-4", className)}>
-      <h2 className="mb-4 font-medium">상세</h2>
+    <SectionCard className={className} title="상세">
       {kind === "event" ? (
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid gap-x-3 gap-y-1 md:grid-cols-2">
           <FormField
             aria-label={`${idPrefix} event start`}
             error={dateOrdered<FeatureDetailValues>("endDate")(
@@ -524,7 +540,7 @@ export function FeatureDetailSection({
           />
         </div>
       ) : (
-        <div className="grid gap-3 md:grid-cols-2">
+        <div className="grid gap-x-3 gap-y-1 md:grid-cols-2">
           <FormField
             aria-label={`${idPrefix} phone`}
             error={errors?.phone ?? phoneError}
@@ -537,7 +553,7 @@ export function FeatureDetailSection({
           />
         </div>
       )}
-      <div className="mt-3 grid gap-3 md:grid-cols-2">
+      <div className="grid gap-x-3 gap-y-1 md:grid-cols-2">
         <FormField
           aria-label={`${idPrefix} homepage url`}
           error={errors?.homepageUrl ?? homepageError}
@@ -559,11 +575,8 @@ export function FeatureDetailSection({
           onChange={(event) => onChange("sourceUrl", event.target.value)}
         />
       </div>
-      <details className="mt-3 rounded-md border border-dashed p-3">
-        <summary className="cursor-pointer text-sm font-medium">
-          고급 추가 정보
-        </summary>
-        <div className="mt-3 grid gap-3 md:grid-cols-2">
+      <AdvancedDisclosure>
+        <div className="grid gap-x-3 gap-y-1 md:grid-cols-2">
           <FormTextArea
             aria-label={`${idPrefix} detail JSON`}
             error={jsonObject<FeatureDetailValues>()(
@@ -593,7 +606,7 @@ export function FeatureDetailSection({
             onChange={(event) => onChange("urlsExtraJson", event.target.value)}
           />
         </div>
-      </details>
-    </div>
+      </AdvancedDisclosure>
+    </SectionCard>
   );
 }

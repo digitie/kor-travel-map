@@ -1,9 +1,14 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 
 import { Button } from "@/components/ui/button";
+import { NULL_GLYPH, formatCount } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
 /**
- * 페이지네이션 표준 바 (§3).
+ * 페이지네이션 표준 바(design.md §Copy — 빈 값 `—`, 구분자 `·`). 손으로 만든 pager 대신
+ * OffsetPager/CursorPager만 쓴다(M33). 기본은 flat(테이블 아래 한 행) — Card/SectionCard 안에서
+ * 다시 테두리를 두르지 않는다(C3). `framed`는 컨테이너가 없는 곳에서만 켠다.
  *
  * aria-label 규약: `ariaPrefix`를 주면 기존 dedup 화면과 동일하게
  * `"dedup 첫 페이지"`처럼 접두어가 붙고, 생략하면 enrichment처럼 접두어 없이
@@ -21,7 +26,11 @@ type PagerShellProps = {
   navAriaPrefix?: string;
   placement?: "top" | "bottom";
   summary?: React.ReactNode;
+  /** hairline 프레임(컨테이너 없는 영역 전용). 기본 false = flat 행. */
   framed?: boolean;
+  /** 페이지 전환 중 — nav에 aria-busy를 건다. */
+  isFetching?: boolean;
+  className?: string;
   children: React.ReactNode;
 };
 
@@ -30,28 +39,29 @@ function PagerShell({
   navAriaPrefix,
   placement,
   summary,
-  framed = true,
+  framed = false,
+  isFetching = false,
+  className,
   children,
 }: PagerShellProps) {
   const navPrefix = navAriaPrefix ?? ariaPrefix;
   return (
     <nav
+      aria-busy={isFetching || undefined}
       aria-label={`${navPrefix ? `${navPrefix} ` : ""}pagination${placement ? ` ${placement}` : ""}`}
-      className={`flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between ${
-        framed ? "rounded-lg border bg-background px-3 py-2" : ""
-      }`}
+      className={cn(
+        "flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:justify-between",
+        framed && "rounded-panel border border-border bg-card px-3 py-2",
+        className,
+      )}
+      data-slot="pager"
     >
       {summary ? (
-        <span className="text-sm text-muted-foreground">{summary}</span>
+        <span className="text-xs text-text-secondary tabular-nums">{summary}</span>
       ) : null}
-      <div className="flex flex-wrap gap-1">{children}</div>
+      <div className="flex flex-wrap items-center gap-1">{children}</div>
     </nav>
   );
-}
-
-function formatCount(value: number | null | undefined): string {
-  if (value === null || value === undefined) return "-";
-  return value.toLocaleString("ko-KR");
 }
 
 type OffsetPagerProps = {
@@ -68,6 +78,8 @@ type OffsetPagerProps = {
   ariaPrefix?: string;
   navAriaPrefix?: string;
   placement?: "top" | "bottom";
+  framed?: boolean;
+  className?: string;
 };
 
 function OffsetPager({
@@ -82,17 +94,22 @@ function OffsetPager({
   ariaPrefix,
   navAriaPrefix,
   placement,
+  framed,
+  className,
 }: OffsetPagerProps) {
   const hasPrev = hasPreviousPage ?? page > 1;
   const hasNext = hasNextPage ?? (totalPages !== null ? page < totalPages : false);
   return (
     <PagerShell
       ariaPrefix={ariaPrefix}
+      className={className}
+      framed={framed}
+      isFetching={isFetching}
       navAriaPrefix={navAriaPrefix}
       placement={placement}
       summary={
         <>
-          페이지 {page} / {totalPages ?? "-"}
+          페이지 {page} / {totalPages ?? NULL_GLYPH}
           {totalCount !== undefined ? <> · 총 {formatCount(totalCount)}건</> : null}
           {currentCount !== undefined && currentCount !== null ? (
             <> · 현재 {formatCount(currentCount)}건</>
@@ -156,6 +173,7 @@ type CursorPagerProps = {
   ariaPrefix?: string;
   placement?: "top" | "bottom";
   framed?: boolean;
+  className?: string;
 };
 
 /** keyset cursor 페이지네이션(이전으로 못 돌아가는 목록)용 — 처음/다음만 제공. */
@@ -169,11 +187,14 @@ function CursorPager({
   ariaPrefix,
   placement,
   framed,
+  className,
 }: CursorPagerProps) {
   return (
     <PagerShell
       ariaPrefix={ariaPrefix}
+      className={className}
       framed={framed}
+      isFetching={isFetching}
       placement={placement}
       summary={summary}
     >

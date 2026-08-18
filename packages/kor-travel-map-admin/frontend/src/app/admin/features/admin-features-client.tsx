@@ -1,4 +1,5 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (list) · design-system: design.md · designed-as-app
 
 import {
   AlertTriangleIcon,
@@ -7,8 +8,8 @@ import {
   PencilIcon,
   PlusIcon,
   RefreshCwIcon,
-  SearchIcon,
   XCircleIcon,
+  XIcon,
 } from "lucide-react";
 import {
   type ColumnDef,
@@ -23,6 +24,7 @@ import {
   FEATURE_LIFECYCLE_STATES,
   FEATURE_PUBLICATION_STATES,
   FEATURE_QUALITY_STATES,
+  featureStateLabel,
   fetchAdminFeatureCorrectionBasis,
   useAdminFeatures,
   useAdminFeatureDetail,
@@ -39,21 +41,31 @@ import {
 import { AdminShell } from "@/components/admin-shell";
 import { CursorPager } from "@/components/pagination-bar";
 import { useConfirm } from "@/components/confirm-dialog";
+import { DetailList } from "@/components/detail-list";
+import { EmptyState } from "@/components/empty-state";
 import { EntityLink } from "@/components/entity-link";
 import { FeatureAssociations } from "@/components/feature-associations";
 import { FeatureKindDetailPanel } from "@/components/feature-kind-detail-panel";
 import { FeatureStateBadges } from "@/components/feature-state-badges";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { FilterActions, FilterBar, FilterField } from "@/components/filter-bar";
+import { JsonViewer } from "@/components/json-viewer";
+import {
+  Alert,
+  AlertActions,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
+import { Card } from "@/components/ui/card";
 import { DataTable } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { Skeleton } from "@/components/ui/skeleton";
 import { VWorldMapView, VWorldMarker } from "@/components/vworld-map-view";
-import { formatCount, formatDateTime, shortId } from "@/lib/format";
+import { NULL_GLYPH, formatCount, formatDateTime, shortId } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200, 500] as const;
@@ -65,7 +77,17 @@ const SORT_OPTIONS: AdminFeatureSort[] = [
   "provider",
   "issue_count",
 ];
+const SORT_LABELS: Record<AdminFeatureSort, string> = {
+  name: "이름",
+  updated_at: "수정 시각",
+  created_at: "생성 시각",
+  kind: "종류",
+  provider: "provider",
+  issue_count: "이슈 수",
+};
 const VWORLD_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY;
+/** 미리보기 마커 색은 토큰만(design.md §Theme — `--compare-a/b`). */
+const PREVIEW_MARKER_COLOR = "var(--compare-a)";
 
 type HasIssueFilter = "all" | "yes" | "no";
 type AxisFilter<T extends string> = T | "all";
@@ -78,23 +100,38 @@ function parseProviderDatasetId(value: string | undefined): number | null {
     : null;
 }
 
-function JsonBlock({ value }: { value: unknown }) {
-  return (
-    <pre className="max-h-64 overflow-auto rounded-lg bg-muted p-3 text-xs leading-relaxed">
-      {JSON.stringify(value, null, 2)}
-    </pre>
-  );
-}
-
-function coordLabel(feature: AdminFeatureRecord): string {
+function coordLabel(feature: {
+  lon?: number | null;
+  lat?: number | null;
+}): string | null {
   if (typeof feature.lon === "number" && typeof feature.lat === "number") {
     return `${feature.lon.toFixed(5)}, ${feature.lat.toFixed(5)}`;
   }
-  return "없음";
+  return null;
 }
 
 function featureDetailHref(featureId: string): string {
   return `/features/${encodeURIComponent(featureId)}`;
+}
+
+/** inspector 안 접이식 payload(address/detail) — summary 12px/500 + JsonViewer. */
+function PayloadDisclosure({ label, value }: { label: string; value: unknown }) {
+  return (
+    <details className="group/details">
+      <summary className="inline-flex h-control-sm cursor-pointer list-none items-center gap-1 rounded-control font-mono text-xs text-text-secondary outline-none select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
+        <span aria-hidden="true" className="w-3 text-text-tertiary group-open/details:hidden">
+          +
+        </span>
+        <span aria-hidden="true" className="hidden w-3 text-text-tertiary group-open/details:inline">
+          −
+        </span>
+        {label}
+      </summary>
+      <div className="pt-1">
+        <JsonViewer maxHeight="sm" value={value} />
+      </div>
+    </details>
+  );
 }
 
 function FeatureLocationMap({
@@ -106,14 +143,16 @@ function FeatureLocationMap({
     typeof feature?.lon === "number" && typeof feature?.lat === "number";
   if (!hasCoord) {
     return (
-      <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-        좌표가 없어 지도 marker를 표시할 수 없습니다.
-      </div>
+      <EmptyState
+        description="주소나 좌표를 보정하면 지도에 표시됩니다."
+        size="sm"
+        title="좌표가 없어 지도 marker를 표시할 수 없습니다."
+      />
     );
   }
 
   return (
-    <div className="relative h-52 overflow-hidden rounded-md border">
+    <div className="relative h-52 overflow-hidden rounded-panel border border-border bg-surface-subtle">
       <VWorldMapView
         apiKey={VWORLD_KEY}
         center={[feature.lon as number, feature.lat as number]}
@@ -125,7 +164,7 @@ function FeatureLocationMap({
       >
         <VWorldMarker
           lngLat={[feature.lon as number, feature.lat as number]}
-          markerColor="#2563eb"
+          markerColor={PREVIEW_MARKER_COLOR}
           selected
           title={feature.name}
         />
@@ -134,91 +173,123 @@ function FeatureLocationMap({
   );
 }
 
-function FeatureDetailInspector({ featureId }: { featureId: string | null }) {
+/** 우측 inspector rail(design.md list — 행 선택 시 `--rail` 폭 패널, 안쪽은 hairline으로만 나눈 flat 블록). */
+function FeatureDetailInspector({
+  featureId,
+  onClose,
+}: {
+  featureId: string | null;
+  onClose: () => void;
+}) {
   const detail = useAdminFeatureDetail(featureId);
   const data = detail.data?.data;
   const feature = data?.feature;
 
   if (!featureId) {
     return (
-      <div className="rounded-lg border bg-background p-5 text-sm text-muted-foreground">
-        table에서 feature를 선택하면 상세와 kind별 패널을 확인할 수 있습니다.
-      </div>
+      <EmptyState
+        description="행을 클릭하거나 preview를 누르면 이 자리에 열립니다."
+        framed
+        title="table에서 feature를 선택하면 상세와 kind별 패널을 확인할 수 있습니다."
+      />
     );
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="rounded-lg border bg-background">
-        {detail.isLoading ? <Skeleton className="m-4 h-48" /> : null}
+    <Card className="gap-0 p-0">
+      <div className="flex items-start justify-between gap-2 border-b border-border px-4 py-3">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          {feature ? (
+            <h2 className="text-md leading-snug font-semibold break-keep text-text-primary">
+              {feature.name}
+            </h2>
+          ) : (
+            <span className="text-xs font-medium text-text-secondary">선택 Feature</span>
+          )}
+          <span className="font-mono text-xs break-all text-text-secondary slashed-zero">
+            {featureId}
+          </span>
+        </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <Link
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+            href={featureDetailHref(featureId)}
+          >
+            <PencilIcon data-icon="inline-start" />
+            편집
+          </Link>
+          <Button
+            aria-label="미리보기 닫기"
+            size="icon-sm"
+            type="button"
+            variant="ghost"
+            onClick={onClose}
+          >
+            <XIcon />
+          </Button>
+        </div>
+      </div>
+      <div className="flex flex-col divide-y divide-border px-4 [&>*]:py-4">
+        {detail.isLoading ? (
+          <div aria-busy="true" className="flex flex-col gap-2">
+            <Skeleton className="h-6 w-2/3" />
+            <Skeleton className="h-4 w-full" />
+            <Skeleton className="h-40 w-full" />
+            <Skeleton className="h-4 w-5/6" />
+          </div>
+        ) : null}
         {detail.isError ? (
-          <Alert className="m-4" variant="destructive">
-            <AlertTitle>feature 상세 조회 실패</AlertTitle>
-            <AlertDescription>{detail.error.message}</AlertDescription>
-          </Alert>
+          <div>
+            <Alert variant="destructive">
+              <AlertTitle>feature 상세 조회 실패</AlertTitle>
+              <AlertDescription>{detail.error.message}</AlertDescription>
+              <AlertActions>
+                <Button
+                  loading={detail.isFetching}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={() => void detail.refetch()}
+                >
+                  다시 시도
+                </Button>
+              </AlertActions>
+            </Alert>
+          </div>
         ) : null}
         {data && feature ? (
-          <div className="flex flex-col gap-4 p-4">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0">
-                <div className="text-lg font-semibold">{feature.name}</div>
-                <div className="mt-1 break-all font-mono text-xs text-muted-foreground">
-                  {featureId}
-                </div>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  <FeatureStateBadges
-                    lifecycleState={feature.lifecycle_state}
-                    publicationState={feature.publication_state}
-                    qualityState={feature.quality_state}
-                  />
-                  <Badge variant="outline">{feature.kind}</Badge>
-                  <Badge variant="outline">{feature.category}</Badge>
-                </div>
-              </div>
-              <Link
-                className={cn(
-                  buttonVariants({ variant: "outline", size: "sm" }),
-                )}
-                href={`/features/${encodeURIComponent(featureId)}`}
-              >
-                <PencilIcon data-icon="inline-start" />
-                편집
-              </Link>
+          <>
+            <div className="flex flex-wrap gap-1">
+              <FeatureStateBadges
+                lifecycleState={feature.lifecycle_state}
+                publicationState={feature.publication_state}
+                qualityState={feature.quality_state}
+              />
+              <Badge variant="neutral">{feature.kind}</Badge>
+              <Badge variant="outline">{feature.category}</Badge>
             </div>
             <FeatureLocationMap feature={feature} />
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
-              <dt className="text-muted-foreground">coord</dt>
-              <dd className="font-mono">
-                {typeof feature.lon === "number" &&
-                typeof feature.lat === "number"
-                  ? `${feature.lon.toFixed(5)}, ${feature.lat.toFixed(5)}`
-                  : "없음"}
-              </dd>
-              <dt className="text-muted-foreground">sigungu</dt>
-              <dd>{feature.sigungu_code ?? "없음"}</dd>
-            </dl>
-            <details>
-              <summary className="cursor-pointer text-sm font-medium">
-                address
-              </summary>
-              <JsonBlock value={feature.address} />
-            </details>
-            <details>
-              <summary className="cursor-pointer text-sm font-medium">
-                detail
-              </summary>
-              <JsonBlock value={feature.detail} />
-            </details>
+            <DetailList
+              items={[
+                { label: "coord", value: coordLabel(feature), mono: true },
+                { label: "sigungu", value: feature.sigungu_code ?? null, mono: true },
+              ]}
+              layout="inline"
+            />
+            <div className="flex flex-col gap-2">
+              <PayloadDisclosure label="address" value={feature.address} />
+              <PayloadDisclosure label="detail" value={feature.detail} />
+            </div>
             <FeatureAssociations
               compact
               curations={data.curations}
               observations={data.sources}
             />
-          </div>
+            <FeatureKindDetailPanel compact feature={feature} featureId={featureId} />
+          </>
         ) : null}
       </div>
-      <FeatureKindDetailPanel compact feature={feature} featureId={featureId} />
-    </div>
+    </Card>
   );
 }
 
@@ -331,7 +402,6 @@ function useAdminFeaturesClientController({
   const confirm = useConfirm();
   const items = features.data?.data.items ?? [];
   const nextCursor = features.data?.meta.page?.next_cursor ?? null;
-  const durationMs = features.data?.meta.duration_ms ?? 0;
 
   const resetCursor = () => {
     setCursor(null);
@@ -404,35 +474,35 @@ function useAdminFeaturesClientController({
         cell: ({ row }) => {
           const feature = row.original;
           return (
-            <>
-              <div className="font-medium">{feature.name}</div>
-              <div className="break-all font-mono text-xs text-muted-foreground">
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <span className="truncate font-medium">{feature.name}</span>
+              <span className="truncate font-mono text-2xs text-text-secondary slashed-zero">
                 {shortId(feature.feature_id, 18)}
-              </div>
-            </>
+              </span>
+            </div>
           );
         },
       },
       {
         id: "kind_state",
-        header: "종류/상태 축",
+        header: "종류/상태",
         enableSorting: false,
         cell: ({ row }) => {
           const feature = row.original;
           return (
-            <>
+            <div className="flex min-w-0 flex-col gap-1">
               <div className="flex flex-wrap gap-1">
-                <Badge variant="outline">{feature.kind}</Badge>
+                <Badge variant="neutral">{feature.kind}</Badge>
                 <FeatureStateBadges
                   lifecycleState={feature.lifecycle_state}
                   publicationState={feature.publication_state}
                   qualityState={feature.quality_state}
                 />
               </div>
-              <div className="mt-1 font-mono text-xs text-muted-foreground">
+              <span className="font-mono text-2xs text-text-secondary slashed-zero">
                 {feature.category}
-              </div>
-            </>
+              </span>
+            </div>
           );
         },
       },
@@ -442,12 +512,14 @@ function useAdminFeaturesClientController({
         cell: ({ row }) => {
           const feature = row.original;
           return (
-            <>
-              <div>{feature.primary_provider ?? "-"}</div>
-              <div className="text-xs text-muted-foreground">
-                {feature.primary_dataset_key ?? "-"}
-              </div>
-            </>
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <span className={cn("truncate", !feature.primary_provider && "text-text-tertiary")}>
+                {feature.primary_provider ?? NULL_GLYPH}
+              </span>
+              <span className="truncate font-mono text-2xs text-text-secondary slashed-zero">
+                {feature.primary_dataset_key ?? NULL_GLYPH}
+              </span>
+            </div>
           );
         },
       },
@@ -457,27 +529,28 @@ function useAdminFeaturesClientController({
         cell: ({ row }) => {
           const feature = row.original;
           return (
-            <>
+            <div className="flex min-w-0 flex-col gap-0.5">
               {feature.issue_count > 0 ? (
                 <EntityLink
+                  className="font-medium text-destructive tabular-nums hover:text-destructive"
                   id=""
                   kind="issue"
                   params={{ feature_id: feature.feature_id }}
                 >
-                  <Badge variant="destructive">{feature.issue_count}</Badge>
+                  {feature.issue_count}
                 </EntityLink>
               ) : (
-                <Badge variant="outline">{feature.issue_count}</Badge>
+                <span className="text-text-tertiary tabular-nums">{feature.issue_count}</span>
               )}
               {feature.issues.slice(0, 2).map((issue) => (
-                <div
-                  className="mt-1 max-w-48 truncate text-xs text-muted-foreground"
+                <span
+                  className="max-w-48 truncate text-2xs text-text-secondary"
                   key={issue.issue_id ?? issue.message}
                 >
-                  {issue.violation_type ?? "issue"} · {issue.message ?? "-"}
-                </div>
+                  {issue.violation_type ?? "issue"} · {issue.message ?? NULL_GLYPH}
+                </span>
               ))}
-            </>
+            </div>
           );
         },
       },
@@ -487,13 +560,21 @@ function useAdminFeaturesClientController({
         enableSorting: false,
         cell: ({ row }) => {
           const feature = row.original;
+          const coordinate = coordLabel(feature);
           return (
-            <>
-              <div className="font-mono text-xs">{coordLabel(feature)}</div>
-              <div className="mt-1 max-w-64 truncate text-xs text-muted-foreground">
-                {feature.address_label || "-"}
-              </div>
-            </>
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <span
+                className={cn(
+                  "font-mono text-xs slashed-zero",
+                  coordinate ? "text-text-primary" : "text-text-tertiary",
+                )}
+              >
+                {coordinate ?? NULL_GLYPH}
+              </span>
+              <span className="max-w-64 truncate text-2xs text-text-secondary">
+                {feature.address_label || NULL_GLYPH}
+              </span>
+            </div>
           );
         },
       },
@@ -501,7 +582,7 @@ function useAdminFeaturesClientController({
         id: "updated_at",
         header: "수정",
         cell: ({ row }) => (
-          <span className="text-muted-foreground">
+          <span className="text-text-secondary">
             {formatDateTime(row.original.updated_at)}
           </span>
         ),
@@ -512,6 +593,7 @@ function useAdminFeaturesClientController({
         enableSorting: false,
         cell: ({ row }) => {
           const feature = row.original;
+          const retired = feature.lifecycle_state === "retired";
           return (
             <div className="flex flex-wrap gap-1">
               <Link
@@ -539,9 +621,10 @@ function useAdminFeaturesClientController({
                 preview
               </Button>
               <Button
-                disabled={
-                  stateMutation.isPending ||
-                  feature.lifecycle_state === "retired"
+                className="text-destructive hover:text-destructive"
+                disabled={stateMutation.isPending || retired}
+                disabledReason={
+                  retired ? "이미 종료된 feature입니다" : "다른 상태 변경이 진행 중입니다"
                 }
                 size="sm"
                 type="button"
@@ -567,7 +650,6 @@ function useAdminFeaturesClientController({
     cursor,
     retireError,
     stateMutation,
-    durationMs,
     features,
     goFirstPage,
     goNextPage,
@@ -628,11 +710,12 @@ type AdminFeatureFilterBarProps = Pick<
   | "sort"
 >;
 
-/** 목록 상단 검색·필터·정렬 툴바.
+/** 목록 상단 검색·필터·정렬 툴바(FilterBar/FilterField 표준 — 가시 라벨, wrap, M26).
  *
  * T-VN-34에서 단일 ``status`` 필터가 lifecycle/publication/quality 3축으로
  * 갈라지며 이 구간만 세 배가 됐다. 목록/상세 레이아웃과 축 필터는 서로를
- * 참조하지 않으므로 툴바를 별도 컴포넌트로 둔다.
+ * 참조하지 않으므로 툴바를 별도 컴포넌트로 둔다. 정렬 select + asc/desc는 서버
+ * keyset 정렬의 유일한 표면이라 유지한다(표 컬럼은 display 전용).
  */
 function AdminFeatureFilterBar({
   hasIssue,
@@ -658,40 +741,48 @@ function AdminFeatureFilterBar({
   sort,
 }: AdminFeatureFilterBarProps) {
   return (
-    <section className="rounded-lg border bg-background p-3">
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        <div className="relative w-72 shrink-0">
-          <SearchIcon className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-          <Input
-            aria-label="feature search"
-            className="pl-8"
-            placeholder="name, address, feature_id"
-            value={q}
-            onChange={(event) => {
-              setQ(event.target.value);
-              resetCursor();
-            }}
-          />
-        </div>
+    <FilterBar>
+      <FilterField htmlFor="admin-feature-search" label="검색">
+        <Input
+          aria-label="feature search"
+          className="w-64"
+          id="admin-feature-search"
+          placeholder="이름 · 주소 · feature_id"
+          size="sm"
+          type="search"
+          value={q}
+          onChange={(event) => {
+            setQ(event.target.value);
+            resetCursor();
+          }}
+        />
+      </FilterField>
+      <FilterField htmlFor="admin-feature-kind" label="종류">
         <NativeSelect
           aria-label="feature kind"
-          className="w-36 shrink-0"
+          className="w-32"
+          id="admin-feature-kind"
+          size="sm"
           value={kind}
           onChange={(event) => {
             setKind(event.target.value as FeatureKind | "all");
             resetCursor();
           }}
         >
-          <NativeSelectOption value="all">all kinds</NativeSelectOption>
+          <NativeSelectOption value="all">모든 종류</NativeSelectOption>
           {FEATURE_KINDS.map((item) => (
             <NativeSelectOption key={item} value={item}>
               {item}
             </NativeSelectOption>
           ))}
         </NativeSelect>
+      </FilterField>
+      <FilterField htmlFor="admin-feature-lifecycle" label="수명">
         <NativeSelect
           aria-label="feature lifecycle state"
-          className="w-36 shrink-0"
+          className="w-32"
+          id="admin-feature-lifecycle"
+          size="sm"
           value={lifecycleState}
           onChange={(event) => {
             setLifecycleState(
@@ -703,13 +794,17 @@ function AdminFeatureFilterBar({
           <NativeSelectOption value="all">모든 수명</NativeSelectOption>
           {FEATURE_LIFECYCLE_STATES.map((item) => (
             <NativeSelectOption key={item} value={item}>
-              {item}
+              {featureStateLabel("lifecycle", item)}
             </NativeSelectOption>
           ))}
         </NativeSelect>
+      </FilterField>
+      <FilterField htmlFor="admin-feature-publication" label="공개">
         <NativeSelect
           aria-label="feature publication state"
-          className="w-36 shrink-0"
+          className="w-32"
+          id="admin-feature-publication"
+          size="sm"
           value={publicationState}
           onChange={(event) => {
             setPublicationState(
@@ -721,13 +816,17 @@ function AdminFeatureFilterBar({
           <NativeSelectOption value="all">모든 공개</NativeSelectOption>
           {FEATURE_PUBLICATION_STATES.map((item) => (
             <NativeSelectOption key={item} value={item}>
-              {item}
+              {featureStateLabel("publication", item)}
             </NativeSelectOption>
           ))}
         </NativeSelect>
+      </FilterField>
+      <FilterField htmlFor="admin-feature-quality" label="품질">
         <NativeSelect
           aria-label="feature quality state"
-          className="w-36 shrink-0"
+          className="w-32"
+          id="admin-feature-quality"
+          size="sm"
           value={qualityState}
           onChange={(event) => {
             setQualityState(event.target.value as AxisFilter<FeatureQualityState>);
@@ -737,29 +836,41 @@ function AdminFeatureFilterBar({
           <NativeSelectOption value="all">모든 품질</NativeSelectOption>
           {FEATURE_QUALITY_STATES.map((item) => (
             <NativeSelectOption key={item} value={item}>
-              {item}
+              {featureStateLabel("quality", item)}
             </NativeSelectOption>
           ))}
         </NativeSelect>
+      </FilterField>
+      <FilterField htmlFor="admin-feature-has-issue" label="이슈">
         <NativeSelect
           aria-label="has issue"
-          className="w-36 shrink-0"
+          className="w-32"
+          id="admin-feature-has-issue"
+          size="sm"
           value={hasIssue}
           onChange={(event) => {
             setHasIssue(event.target.value as HasIssueFilter);
             resetCursor();
           }}
         >
-          <NativeSelectOption value="all">issue all</NativeSelectOption>
-          <NativeSelectOption value="yes">issue only</NativeSelectOption>
-          <NativeSelectOption value="no">no issue</NativeSelectOption>
+          <NativeSelectOption value="all">이슈 전체</NativeSelectOption>
+          <NativeSelectOption value="yes">이슈 있음</NativeSelectOption>
+          <NativeSelectOption value="no">이슈 없음</NativeSelectOption>
         </NativeSelect>
+      </FilterField>
+      <FilterField
+        hint="숫자 ID · 데이터셋 화면에서 복사"
+        htmlFor="admin-feature-provider-dataset"
+        label="provider dataset ID"
+      >
         <Input
           aria-label="feature provider dataset ID"
-          className="w-52 shrink-0"
+          className="w-36"
+          id="admin-feature-provider-dataset"
           inputMode="numeric"
           min={1}
-          placeholder="provider dataset ID"
+          placeholder="예: 703"
+          size="sm"
           type="number"
           value={providerDatasetId ?? ""}
           onChange={(event) => {
@@ -767,19 +878,20 @@ function AdminFeatureFilterBar({
             resetCursor();
           }}
         />
-        <Link
-          aria-label="데이터셋에서 선택"
-          className={cn(
-            buttonVariants({ variant: "outline", size: "sm" }),
-            "shrink-0",
-          )}
-          href="/ops/datasets"
-        >
-          데이터셋에서 선택
-        </Link>
+      </FilterField>
+      <Link
+        aria-label="데이터셋에서 선택"
+        className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "shrink-0 self-end")}
+        href="/ops/datasets"
+      >
+        데이터셋에서 선택
+      </Link>
+      <FilterField htmlFor="admin-feature-sort" label="정렬">
         <NativeSelect
           aria-label="feature sort"
-          className="w-48 shrink-0"
+          className="w-36"
+          id="admin-feature-sort"
+          size="sm"
           value={sort}
           onChange={(event) => {
             setSort(event.target.value as AdminFeatureSort);
@@ -788,60 +900,74 @@ function AdminFeatureFilterBar({
         >
           {SORT_OPTIONS.map((item) => (
             <NativeSelectOption key={item} value={item}>
-              {item}
+              {SORT_LABELS[item]}
             </NativeSelectOption>
           ))}
         </NativeSelect>
-        <NativeSelect
-          aria-label="feature page size"
-          className="w-24 shrink-0"
-          value={String(pageSize)}
-          onChange={(event) => {
-            setPageSize(Number(event.target.value) as typeof pageSize);
-            resetCursor();
-          }}
-        >
-          {PAGE_SIZE_OPTIONS.map((item) => (
-            <NativeSelectOption key={item} value={item}>
-              {item}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-        <Button
-          className="shrink-0"
-          size="sm"
-          type="button"
-          variant={order === "asc" ? "default" : "outline"}
-          onClick={() => {
-            setOrder("asc");
-            resetCursor();
-          }}
-        >
-          asc
-        </Button>
-        <Button
-          className="shrink-0"
-          size="sm"
-          type="button"
-          variant={order === "desc" ? "default" : "outline"}
-          onClick={() => {
-            setOrder("desc");
-            resetCursor();
-          }}
-        >
-          desc
-        </Button>
+      </FilterField>
+      <div className="flex min-w-0 flex-col gap-1">
+        <span aria-hidden="true" className="text-2xs leading-none font-medium text-text-secondary">
+          방향
+        </span>
+        <div aria-label="정렬 방향" className="flex items-center gap-1" role="group">
+          <Button
+            aria-pressed={order === "asc"}
+            size="sm"
+            type="button"
+            variant={order === "asc" ? "default" : "outline"}
+            onClick={() => {
+              setOrder("asc");
+              resetCursor();
+            }}
+          >
+            asc
+          </Button>
+          <Button
+            aria-pressed={order === "desc"}
+            size="sm"
+            type="button"
+            variant={order === "desc" ? "default" : "outline"}
+            onClick={() => {
+              setOrder("desc");
+              resetCursor();
+            }}
+          >
+            desc
+          </Button>
+        </div>
       </div>
-    </section>
+      <FilterActions>
+        <FilterField htmlFor="admin-feature-page-size" label="페이지 크기">
+          <NativeSelect
+            aria-label="feature page size"
+            className="w-24"
+            id="admin-feature-page-size"
+            size="sm"
+            value={String(pageSize)}
+            onChange={(event) => {
+              setPageSize(Number(event.target.value) as typeof pageSize);
+              resetCursor();
+            }}
+          >
+            {PAGE_SIZE_OPTIONS.map((item) => (
+              <NativeSelectOption key={item} value={item}>
+                {item}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </FilterField>
+      </FilterActions>
+    </FilterBar>
   );
 }
+
+type FailureItem = { source: string; message: string | undefined };
 
 function AdminFeaturesClientView({
   columns,
   cursor,
   retireError,
   stateMutation,
-  durationMs,
   features,
   goFirstPage,
   goNextPage,
@@ -856,18 +982,20 @@ function AdminFeaturesClientView({
   sorting,
   ...filters
 }: ReturnType<typeof useAdminFeaturesClientController>) {
+  const failureCandidates: Array<FailureItem | null> = [
+    features.isError ? { source: "목록 조회", message: features.error?.message } : null,
+    stateMutation.isError
+      ? { source: "상태 변경", message: stateMutation.error?.message }
+      : null,
+    retireError !== null ? { source: "종료 준비", message: retireError } : null,
+  ];
+  const failures = failureCandidates.filter((item): item is FailureItem => item !== null);
   return (
     <AdminShell
       actions={
         <>
-          <Link
-            className={cn(buttonVariants({ variant: "outline" }))}
-            href="/admin/features/new"
-          >
-            <PlusIcon data-icon="inline-start" />새 작성
-          </Link>
           <Button
-            disabled={features.isFetching}
+            loading={features.isFetching}
             type="button"
             variant="outline"
             onClick={refresh}
@@ -875,66 +1003,94 @@ function AdminFeaturesClientView({
             <RefreshCwIcon data-icon="inline-start" />
             새로고침
           </Button>
+          <Link
+            className={cn(buttonVariants({ variant: "default" }))}
+            href="/admin/features/new"
+          >
+            <PlusIcon data-icon="inline-start" />새 작성
+          </Link>
         </>
       }
+      description="적재된 feature를 검색·필터·정렬하고 행을 선택해 상세와 kind별 패널을 확인합니다."
       title="Feature 목록"
     >
       <div className="flex flex-col gap-4">
-        {(features.isError || stateMutation.isError || retireError !== null) && (
+        {failures.length > 0 ? (
           <Alert variant="destructive">
             <AlertTriangleIcon data-icon="inline-start" />
             <AlertTitle>admin feature 처리 실패</AlertTitle>
             <AlertDescription>
-              {features.error?.message ??
-                stateMutation.error?.message ??
-                retireError}
+              <ul className="list-disc space-y-0.5 pl-4">
+                {failures.map((item) => (
+                  <li key={item.source}>
+                    <span className="font-medium">{item.source}</span>
+                    {item.message ? <> — {item.message}</> : null}
+                  </li>
+                ))}
+              </ul>
             </AlertDescription>
+            <AlertActions>
+              <Button
+                loading={features.isFetching}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={refresh}
+              >
+                다시 시도
+              </Button>
+            </AlertActions>
           </Alert>
-        )}
+        ) : null}
 
         <AdminFeatureFilterBar {...filters} pageSize={pageSize} />
 
-        <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_28rem]">
-          <div className="min-w-0 rounded-lg border bg-background">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
-              <div className="flex min-w-0 flex-wrap items-center gap-2">
-                <div className="font-medium">Feature 목록</div>
-                <Badge variant="outline">
-                  {formatCount(items.length)} rows
-                </Badge>
-                <Badge variant="outline">page {formatCount(pageIndex)}</Badge>
-                <Badge variant="outline">
-                  page size {formatCount(pageSize)}
-                </Badge>
-                <Badge variant="outline">{durationMs}ms</Badge>
-              </div>
-              <CursorPager
-                framed={false}
-                hasNext={Boolean(nextCursor)}
-                isFirst={cursor === null}
-                isFetching={features.isFetching}
-                onFirst={goFirstPage}
-                onNext={goNextPage}
-              />
-            </div>
+        <section
+          className={cn(
+            "grid gap-4",
+            "xl:grid-cols-[minmax(0,1fr)_var(--rail)]",
+          )}
+        >
+          <div className="flex min-w-0 flex-col gap-2">
+            <CursorPager
+              hasNext={Boolean(nextCursor)}
+              isFetching={features.isFetching}
+              isFirst={cursor === null}
+              placement="top"
+              summary={
+                <>
+                  {formatCount(items.length)} rows · page {formatCount(pageIndex)} · page
+                  size {formatCount(pageSize)}
+                </>
+              }
+              onFirst={goFirstPage}
+              onNext={goNextPage}
+            />
             <DataTable
               columns={columns}
               data={items}
+              emptyState={{
+                title: "feature가 없습니다.",
+                description:
+                  "검색어·종류·상태 축·이슈·provider dataset 조건에 맞는 feature가 없습니다 — 필터를 넓혀 보세요.",
+              }}
               getRowId={(feature) => feature.feature_id}
               isLoading={features.isLoading}
-              emptyMessage="feature가 없습니다."
-              sorting={sorting}
-              onSortingChange={handleSortingChange}
-              manualSorting
-              onRowClick={(feature) => setSelectedFeatureId(feature.feature_id)}
               isRowActive={(feature) =>
                 selectedFeatureId === feature.feature_id
               }
-              containerClassName="overflow-auto"
+              manualSorting
+              onRowClick={(feature) => setSelectedFeatureId(feature.feature_id)}
+              onSortingChange={handleSortingChange}
+              skeletonRowCount={8}
+              sorting={sorting}
             />
           </div>
 
-          <FeatureDetailInspector featureId={selectedFeatureId} />
+          <FeatureDetailInspector
+            featureId={selectedFeatureId}
+            onClose={() => setSelectedFeatureId(null)}
+          />
         </section>
       </div>
     </AdminShell>

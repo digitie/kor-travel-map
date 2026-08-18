@@ -7,7 +7,8 @@
  *  - `toneFor(status)`      enum → StatusTone(알 수 없는 값은 "neutral").
  *  - `STATUS_TONE`          정규화 키(lowercase, `-`→`_`) → tone 테이블(읽기 전용).
  *  - `httpStatusTone(code)` HTTP status code → tone(2xx neutral · 3xx info · 4xx warning · 5xx destructive).
- *  - `statusOptions(values)` select/filter option 목록(`{ value, label }`) — option도 raw enum 금지.
+ *
+ * select/filter option도 raw enum을 쓰지 않는다 — `{ value, label: statusLabel(value) }`로 만든다.
  *
  * tone 의미(design.md):
  *  success     = 활성/완료/ready
@@ -21,14 +22,6 @@
  */
 
 export type StatusTone = "success" | "warning" | "destructive" | "info" | "neutral";
-
-export const STATUS_TONES: readonly StatusTone[] = [
-  "success",
-  "warning",
-  "destructive",
-  "info",
-  "neutral",
-];
 
 /** 상태 문자열을 사전 키로 정규화한다: lowercase + `-` → `_` + trim. */
 export function normalizeStatusKey(status: string): string {
@@ -331,12 +324,6 @@ export function statusLabel(status: string | null | undefined): string {
   return STATUS_LABELS[normalizeStatusKey(status)] ?? status;
 }
 
-/** 라벨 사전에 등록된 상태인지(= raw enum이 아닌 한글로 렌더되는지). */
-export function hasStatusLabel(status: string | null | undefined): boolean {
-  if (status == null) return false;
-  return normalizeStatusKey(status) in STATUS_LABELS;
-}
-
 /**
  * 상태 → tone. 알 수 없는 값(그리고 null/undefined)은 "neutral".
  * 하이픈/대소문자는 정규화한다("dry-run" → "dry_run").
@@ -357,24 +344,4 @@ export function httpStatusTone(code: number | string | null | undefined): Status
   if (numeric >= 400) return "warning";
   if (numeric >= 300) return "info";
   return "neutral";
-}
-
-/** 라벨 + tone을 한 번에. badge/option/column 렌더러용. */
-export function describeStatus(status: string | null | undefined): {
-  label: string;
-  tone: StatusTone;
-} {
-  return { label: statusLabel(status), tone: toneFor(status) };
-}
-
-/** select/filter option 한 개: value는 enum 원문, label은 한글. */
-export function statusOption<T extends string>(value: T): { value: T; label: string } {
-  return { value, label: statusLabel(value) };
-}
-
-/** enum 목록 → select/filter option 목록. option 텍스트에 raw enum을 쓰지 않기 위한 헬퍼. */
-export function statusOptions<T extends string>(
-  values: readonly T[],
-): Array<{ value: T; label: string }> {
-  return values.map((value) => statusOption(value));
 }
