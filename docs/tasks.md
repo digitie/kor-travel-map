@@ -801,7 +801,7 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
 주입한다. `.env.example`에 키가 없다(주입 주체가 다르다). DB role 쪽은 별도로
 `ktm_curation_command_owner` 등 4개.
 
-- [~] **T-VN-40A-fence** — legacy write 차단 (PR #994, draft). 3층 구현·검증 완료:
+- [x] **T-VN-40A-fence** — legacy write 차단 (PR #994 → main `3e0732b3`, 2026-08-18). 3층 구현·검증 완료:
   **ACL**(`runtime_privileges` 표에서 `curated_features` write 제거 → DB가 거부, 통합
   테스트가 `SET ROLE ktm_feature_runtime`으로 실측) · **static**(`infra/legacy_write_fence.py`,
   repo write 4함수 첫 줄) · **route**(legacy admin write route 410 Gone).
@@ -864,7 +864,8 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
       DSN)와 `test_tvn35_typed_subtypes`(migrated_session) 2건이 여전히 superuser로 merge를 몰았다
       → CLI 테스트는 API runtime DSN(prod와 같음), tvn35는 `as_api_runtime`. `ktmctl dedup-merge`
       help에 "DSN은 API runtime 로그인" 명시(superuser/migrator DSN은 42501).
-  - 잔여: draft 해제 → CI → 머지. **①~② 전에 머지돼야 한다.**
+  - 머지됨(적대 리뷰 2명 hold · CI 4 workflow green · n150 전체 통합 931 passed/env-only 6 failed).
+    **①~② 전에 머지돼야 한다**는 조건 충족.
 - [ ] **T-VN-40-mapping** — `ops.curation_cutover_identity_mappings` 적재 migration.
   설계 §6.2 step 3. PinVi backfill의 입력이다.
 - [ ] **T-VN-40C-manifest** — physical removal manifest와 migration을 사전에 작성·검토한다.
