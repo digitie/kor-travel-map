@@ -942,9 +942,15 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
       **append-only + unique + advisory lock이라 되돌릴 수 없다** — 직전 백업이 유일한 복구 수단.
     - [ ] cutover **backfill 자체는 prod no-op**이다: PinVi prod `curated_trip_plans`/`curated_plan_pois`가
       0행이라 전환할 legacy plan이 없다. `GET …/curation-cutover/legacy-preflight`로 `ready=true`만 기록한다.
-    - [ ] ⚖️ **결정 필요** — canonical collection 59개를 PinVi notice plan으로 import할지
-      (`POST …/imports/kor-travel-map-curation-collections`). ④ receipt의 verification 3문구 어디에도
-      요구되지 않으므로 계약 의무가 아니라 **제품 결정**이다.
+    - [ ] **canonical collection 59개 → PinVi notice plan import** (2026-08-18 사용자 결정: **한다**).
+      `POST /api/v1/admin/notice-plans/imports/kor-travel-map-curation-collections`,
+      body `{collection_id, mode:"create", is_published?}`, `Idempotency-Key`(UUID) 필수, 201/200(replay).
+      ④ receipt 요건은 아니고 제품 결정이며, S3 배포 뒤 S4·S5와 함께 실행한다.
+      **59개 구성**(prod 실측, 전부 `published/public`·빈 컬렉션 0·합계 4,424): concierge 채널
+      (`concierge-yt-*`) 26개/1,481 · 재생목록(`concierge-pl-*`) 13개/1,462 · `media-places` 20개/1,481.
+      같은 채널이 채널·재생목록·미디어촬영지 세 축으로 각각 한 컬렉션을 갖는다(둘시네아 440×3축,
+      키다리짬뽕아저씨 362×3축, 여행작가 봄비 328×3축, 감성 국내여행지 97, 킴스트래블 83 …).
+      최대 440 item < PinVi 상한 2,000이라 413 없음. 되돌리기 = plan soft delete + 백업 복원.
   - [ ] **③ sanctioned live/soak** (`docs/runbooks/c7-prod-live-e2e.md`)
   - [ ] **④ receipt complete** — 선행: PinVi 재-vendor PR. PinVi가 vendor한 user spec은 Map `73a9a246`
     (2026-08-05) 시절 바이트(`66fc83b3…`)인데 Map user spec은 `4672aa96`~`main` 전 구간에서 `6a2ee0f9…`로
