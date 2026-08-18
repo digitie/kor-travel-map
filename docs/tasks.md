@@ -551,6 +551,26 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   post-review cleanup 잔여(ADR-045 VWorld 불투명 자격증명 hard-gate 등)는 PinVi 저장소가
   소유한다. Map Agent A/B 실행 queue에는 넣지 않고 PinVi #215가 닫힐 때 상태만 동기화한다.
 
+### T-VN-H50 — CI integration flake: `test_t212d_perf_explain.py:546` planner 인덱스 선택
+
+- [ ] **재현되는 flake다** — `test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible`의
+  첫 gate(`_assert_uses_index(dedup_refresh, 'idx_source_entities_provider_dataset',
+  'idx_features_dedup_refresh_keyset')`)가 CI에서 간헐 실패한다. 2026-08-18까지 PR #975·#996·#998
+  세 번 모두 **재실행 한 번으로 통과**했다(코드와 무관). 실패 시 planner가 `idx_source_links_…`로
+  진입한다 — `enable_seqscan=off`라 인덱스는 타지만 gate가 받는 이름 집합에 없다.
+- 원인 가설: `_seed_live_like_perf_data` 뒤 `ANALYZE` 표본이 실행마다 달라 동치 진입 경로 중
+  하나를 고른다. 성능 축(선두 컬럼 selectivity)은 같지만 gate가 이름으로 고정한다.
+- **재현 실험(2026-08-18, n150)**: 같은 테스트 6회 연속 전부 pass(13~15s). 즉 로컬에서는 재현되지
+  않고 **CI 러너에서만** 뒤집힌다 — 코어 수·메모리·PostGIS 이미지 차이에서 오는 cost 추정 차이가
+  유력하다. 따라서 (c) seed 결정화는 로컬에서 검증할 수 없다.
+- **다음 발생 시 반드시 할 것**: 실패 로그의 `used={...}` 전문을 **잘리지 않게** 저장한다
+  (`gh run view <id> --log-failed | grep -A2 'expected one of'`). 지금까지 확보된 조각은
+  `used={'idx_source_lin…` 하나뿐이라 어떤 진입 경로였는지 확정하지 못했다.
+- 고칠 방향(택1, 근거 필요): (a) 진입 경로 동치 집합을 근거와 함께 넓힌다(왜 동치인지 주석 필수 —
+  기존 `_FEATURES_PK_ACCESS` 선례), (b) gate를 "driving relation에 Seq Scan 없음"으로 바꾼다,
+  (c) seed 통계를 결정적으로 만든다(`default_statistics_target`·행 수 상향). **PR마다 재실행이
+  필요하므로 머지 위생 비용이 실재한다.**
+
 ### T-VN-H46 — 완료 이력과 남은 배포 위생 follow-up
 
 > `T-VN-H46B`~`E`의 완료 요약은 [`tasks-done.md`](tasks-done.md)에 이관했다. 아래에는
@@ -778,7 +798,7 @@ AC: 표와 실제 모듈이 일치. dataset 구현은 결정에 따라 별도 ta
 | 사전 | **identity mapping** | `ops.curation_cutover_identity_mappings` 적재 migration을 구현·병합한다. PinVi backfill의 입력이다 | 상세 설계 §6.2 step 3 |
 | 사전 | **40C removal manifest 작성** | 삭제 대상·순서·검증을 manifest와 migration으로 먼저 review 가능하게 만든다. 실행은 receipt 뒤다 | 설계 §6.2 step 6-7 |
 | ① | prod migration·fence enable | 사전 구현을 포함한 `0202~0221` 이후 migration을 prod head `0104`에 forward 적용한다 | `alembic/versions/` |
-| ② | canonical import·mapping/PinVi backfill | admin API 2단계(`preview` → `commit`, `If-Match`+`Idempotency-Key`)로 import하고 mapping을 소비시킨다 | `CHANGELOG.md`, `openapi.json` |
+| ② | mapping 소비 (PinVi) | **Map DB mutation 없음**(2026-08-18 실측 정정 — 아래 ② 항목). PinVi가 identity-mappings 4,424건을 전량 읽어 mapping receipt를 봉인한다. Map admin CSV import(`preview`→`commit`)를 legacy projection 위에 돌리면 0223이 동결한 bucket B 전제가 깨지므로 **돌리지 않는다** | `docs/reports/t-vn-40-curation-write-model-detailed-design-2026-08-11.md` §6.3, PinVi `apps/api/app/services/curation_cutover_mapping_receipt.py` |
 | ③ | live 인수 + soak | sanctioned `c7-prod-live-e2e.md`로 origin 검증·증거 redaction·백업/PITR 복구점을 확인한다 | `playwright.live.config.ts` |
 | ④ | receipt complete | 9키 exact·`blocking_reason` 제거·freeze 상수를 함께 갱신한다 | `contracts/vnext/consumer-rollout-v1.json` |
 | ⑤ | **40C 물리 삭제 실행** | ④ 뒤 manifest가 선언한 legacy repository/trigger/table/API/ACL을 forward-only로 제거한다 | ADR-075 결정 4 |
@@ -903,9 +923,41 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
     (a) `0202`가 요구하는 `ktm_curation_*` NOLOGIN role 4개 → bootstrap profile one-shot 선행,
     (b) manager compose가 항상 주입하는 빈 `KOR_TRAVEL_MAP_API_PINVI_CURATION_*_TOKEN_SHA256` →
     Map이 기동을 거부했다(`fix/api-settings-empty-pinvi-digest`로 수정, PinVi raw pair도 prod `.env`에 설정).
-  - [ ] **② canonical import/backfill** — admin API preview→commit. ①~④ 동안 dedup merge 금지.
+  - [~] **② mapping 소비 (2026-08-18 조사로 범위 정정)** — ①~④ 동안 dedup merge 금지.
+    - **Map 쪽에 남은 데이터 mutation은 없다.** 설계 §6.3 표는 legacy `source_rule`+`curated` 행의
+      target을 "promoted candidate + 기존 item 유지"로 못박는데 prod legacy 4,424는 **전부 `curated`**라
+      archive 대상이 0건이고, canonical item 4,424는 import row 0 / created_by 0 / operator 0 /
+      legacy_projection_id 4,424로 **bucket C·D(official/manual membership)에 해당하는 행이 하나도 없다**.
+      여기에 admin CSV import를 돌리면 `current_import_row_id`·operator 필드가 붙어 0223이 immutable로
+      동결한 `legacy_projection` 전제가 사후에 깨진다 — **돌리지 않는다.**
+    - **실행 순서 정본: [`docs/runbooks/tvn40-pinvi-cutover.md`](runbooks/tvn40-pinvi-cutover.md)** (적대 검증 2명이 초안에서 P1 14건을 잡은 뒤의 수정본).
+    - [ ] **PinVi prod 재배포가 선행이다.** prod `pinvi-api-latest`는 image revision `3b87c19c`(#434)로
+      T-VN-40 소비자 코드가 **아예 없다**(client 모듈 없음 · config token 필드 0건 · OpenAPI curation route 0개).
+      PinVi DB head는 `20260804_0049`로 `0050~0059` 미적용. 소비자 구현 자체는 PinVi `main` `dc8a683f`(#444,
+      2026-08-18)에 이미 들어와 있다 → 필요한 것은 재빌드 + `pinvi-admin-bootstrap` one-shot(alembic upgrade)
+      + 컨테이너 재생성이며, **`ktdctl pinvi-pair rebuild-pinned`는 3 DB 파기형이라 금지**.
+      raw token pair는 manager `.env`에 이미 있고 Map digest와 일치한다(2026-08-18 설정).
+    - [ ] **mapping receipt 봉인 = ②의 실질 완료** — `POST /api/v1/admin/notice-plans/curation-cutover/mapping-receipts`.
+      성공 판정: `mapping_root=69eb85ecb178569bc87665ee1100b0a34ade4274512e5492e358c50a19140710` ·
+      `mapping_root_version=ktm-curation-cutover-mapping-v1` · `mapping_count=4424` · `_items` 4,424행.
+      **append-only + unique + advisory lock이라 되돌릴 수 없다** — 직전 백업이 유일한 복구 수단.
+    - [ ] cutover **backfill 자체는 prod no-op**이다: PinVi prod `curated_trip_plans`/`curated_plan_pois`가
+      0행이라 전환할 legacy plan이 없다. `GET …/curation-cutover/legacy-preflight`로 `ready=true`만 기록한다.
+    - [ ] **canonical collection 59개 → PinVi notice plan import** (2026-08-18 사용자 결정: **한다**).
+      `POST /api/v1/admin/notice-plans/imports/kor-travel-map-curation-collections`,
+      body `{collection_id, mode:"create", is_published?}`, `Idempotency-Key`(UUID) 필수, 201/200(replay).
+      ④ receipt 요건은 아니고 제품 결정이며, S3 배포 뒤 S4·S5와 함께 실행한다.
+      **59개 구성**(prod 실측, 전부 `published/public`·빈 컬렉션 0·합계 4,424): concierge 채널
+      (`concierge-yt-*`) 26개/1,481 · 재생목록(`concierge-pl-*`) 13개/1,462 · `media-places` 20개/1,481.
+      같은 채널이 채널·재생목록·미디어촬영지 세 축으로 각각 한 컬렉션을 갖는다(둘시네아 440×3축,
+      키다리짬뽕아저씨 362×3축, 여행작가 봄비 328×3축, 감성 국내여행지 97, 킴스트래블 83 …).
+      최대 440 item < PinVi 상한 2,000이라 413 없음. 되돌리기 = plan soft delete + 백업 복원.
   - [ ] **③ sanctioned live/soak** (`docs/runbooks/c7-prod-live-e2e.md`)
-  - [ ] **④ receipt complete**
+  - [ ] **④ receipt complete** — 선행: PinVi 재-vendor PR. PinVi가 vendor한 user spec은 Map `73a9a246`
+    (2026-08-05) 시절 바이트(`66fc83b3…`)인데 Map user spec은 `4672aa96`~`main` 전 구간에서 `6a2ee0f9…`로
+    불변이다 → 순수 refresh(신규 path 2 · 변경 9 · 삭제 0). 이 불일치를 잡는 것은 Map의
+    `tests/unit/test_vnext_contract_artifacts.py`뿐이고 PinVi CI는 못 잡는다. receipt는 **정확히 9키**로
+    바꾸고 `blocking_reason`을 지우며 freeze 상수(`ARTIFACT_SHA256`)를 같은 커밋에서 갱신한다(LF 전용).
   - [ ] **⑤ 40C manifest physical removal 실행**(0224)
 
 ## Lane B 상세 — b1 PinVi 결합·후속
