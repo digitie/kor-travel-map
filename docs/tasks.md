@@ -838,12 +838,35 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
     - P2 admin UI — legacy detail 화면의 채택/해제/보관/편집이 410을 맞는다 → write 컨트롤·
       mutation 4개·FeatureEditor·CuratedPlaceSearchPanel 제거, fence 안내로 교체. read
       패널은 40C까지 유지(plan §40B의 write 절반을 지금, read는 40C에서).
-  - 잔여: 리베이스 → draft 해제 → CI → 머지. **①~② 전에 머지돼야 한다.**
+  - **2차 적대 리뷰(2명, 수정분 대상)** — coverage 렌즈 `holds=True`(P2만), DB 렌즈
+    `holds=False` P1 2건. 전부 반영.
+    - P1 — **runtime preflight allowlist 미등록**: `infra/db.py`가 runtime 로그인이 EXECUTE할
+      수 있는 procedure를 fail-closed로 대조하는데 0222의 5개가 없어 **API/Dagster가 기동을
+      거부**했다(`test_tvn34_runtime_privilege_preflight` red — 1차 통합 선택에 빠져 있었다).
+      `_ADMIN_CURATION_FEATURE_PROCEDURES`에 등록.
+    - P1 — **EXECUTE 대상이 공유 그룹**: `ktm_feature_runtime`에 줘서 provider ETL identity
+      (dagster runtime)까지 legacy row를 옮길 수 있었고 본문에 executor 게이트가 없었다(0214
+      패턴의 절반만). 0214 형태 전체로: REVOKE FROM PUBLIC+runtime 로그인 전부, EXECUTE는
+      `ktm_curation_admin_executor`(api runtime 상속)에만, 본문에 `session_user` 게이트.
+      dagster runtime이 CALL하면 42501인 음성 테스트 추가. **그 결과 `test_merge_repo.py`의
+      merge 호출 21곳을 전부 `as_api_runtime`으로 감쌌다** — superuser는 게이트에 걸리고,
+      애초에 superuser 세션은 ACL 회귀를 못 잡는다.
+    - P2 — trigger `sync_curated_feature_collection`이 command_owner로 돌 때 INSERT하는
+      `curation_collections.created_at`이 0213 column grant에 없었다(0214부터 잠복) → 0222에서
+      부여. splitter는 0214 사본을 그대로(`''` escape). route fence는 substring→segment
+      regex. lint 정규식은 회피형(ONLY/MERGE/TRUNCATE/alias 없는 lock/FOR SHARE·KEY SHARE —
+      넷 다 UPDATE 권한 필요) 전수 + ORM `CuratedFeatureRow` 가드. `postgres-schema.md`
+      head→0222.
+    - **배포 선행(잊지 말 것)**: orchestrator(docker-manager) `.env`의
+      `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를 `0222_tvn40a_merge_runtime_role`로 올려야
+      `api-entrypoint.sh`가 fail-closed로 막지 않는다. T-VN-40 인수 실행 ①의 첫 줄.
+  - 잔여: draft 해제 → CI → 머지. **①~② 전에 머지돼야 한다.**
 - [ ] **T-VN-40-mapping** — `ops.curation_cutover_identity_mappings` 적재 migration.
   설계 §6.2 step 3. PinVi backfill의 입력이다.
 - [ ] **T-VN-40C-manifest** — physical removal manifest와 migration을 사전에 작성·검토한다.
   legacy 물리 삭제 실행은 receipt complete 뒤다.
-- [ ] **T-VN-40 인수 실행** — 사전 3 task 병합 뒤 ① migration·fence enable → ② import/backfill
+- [ ] **T-VN-40 인수 실행** — 사전 3 task 병합 뒤 ① `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`
+  bump(→0222) + migration·fence enable → ② import/backfill
   → ③ sanctioned live/soak → ④ receipt complete → ⑤ manifest physical removal 실행. 백업/PITR
   복구점을 먼저 확인한다.
 

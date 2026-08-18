@@ -13,9 +13,13 @@ CI가 못 잡은 이유: 모든 merge 통합 테스트가 superuser 세션으로
 `tests/integration/test_merge_under_runtime_role.py`가 runtime role로 실행해 red를 확인했다.
 
 해결. mirror 4문을 `ktm_curation_command_owner` 소유 SECURITY DEFINER procedure로 옮긴다 —
-`0214_tvn40_item_commands`가 canonical→legacy mirror에 쓰는 것과 같은 패턴이다. runtime은
-표에 write 권한 없이 procedure만 EXECUTE한다. ACL 표(`runtime_privileges`)는 SELECT만 유지 —
-fence의 "표에 없는 권한은 DB에 없다"가 그대로 성립한다.
+`0214_tvn40_item_commands`와 같은 패턴 **전체**다: owner=command_owner · REVOKE FROM PUBLIC과
+runtime 로그인 전부 · EXECUTE는 `ktm_curation_admin_executor`(api runtime이 상속)에만 · 본문에
+`session_user` executor 게이트. 2차 리뷰가 잡은 것: 처음엔 공유 그룹 `ktm_feature_runtime`에
+EXECUTE를 줬는데 그러면 provider ETL identity(dagster runtime)까지 legacy row를 옮길 수 있고,
+runtime preflight(`infra/db.py` allowlist)에도 없어 API/Dagster가 기동을 거부했다.
+runtime은 표에 write 권한 없이 procedure만 EXECUTE한다. ACL 표(`runtime_privileges`)는 SELECT만
+유지 — fence의 "표에 없는 권한은 DB에 없다"가 그대로 성립한다.
 
 4문을 procedure 하나로 합치지 않는다. 사이에 canonical 작업(collection lock·item reconcile·
 history move)이 끼어 있어 **호출 순서**가 계약이다:
@@ -48,7 +52,8 @@ depends_on: str | Sequence[str] | None = None
 
 
 def _execute_commands(source: str) -> None:
-    """Dollar-quoted routine bodies를 보존해 asyncpg statement를 분리한다 (0214와 동일)."""
+    """Dollar-quoted routine bodies를 보존해 asyncpg statement를 분리한다."""
+
     statements: list[str] = []
     start = 0
     index = 0
@@ -65,6 +70,9 @@ def _execute_commands(source: str) -> None:
             continue
         if quote is not None:
             if character == quote:
+                if index + 1 < len(source) and source[index + 1] == quote:
+                    index += 2
+                    continue
                 quote = None
             index += 1
             continue
@@ -111,6 +119,13 @@ SECURITY DEFINER
 SET search_path = pg_catalog, feature, ops, x_extension
 AS $$
 BEGIN
+    -- 0214와 같은 executor 게이트. admin executor(api runtime이 상속)만 부를 수 있고
+    -- provider executor(dagster runtime)는 거부한다. EXECUTE grant와 이중이다.
+    IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+       OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+        RAISE EXCEPTION 'merge command requires the admin executor'
+            USING ERRCODE = '42501';
+    END IF;
     PERFORM legacy.curated_feature_id
     FROM feature.curated_features AS legacy
     WHERE legacy.feature_id IN (p_master, p_loser)
@@ -131,6 +146,13 @@ SECURITY DEFINER
 SET search_path = pg_catalog, feature, ops, x_extension
 AS $$
 BEGIN
+    -- 0214와 같은 executor 게이트. admin executor(api runtime이 상속)만 부를 수 있고
+    -- provider executor(dagster runtime)는 거부한다. EXECUTE grant와 이중이다.
+    IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+       OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+        RAISE EXCEPTION 'merge command requires the admin executor'
+            USING ERRCODE = '42501';
+    END IF;
     UPDATE feature.curated_features AS loser_curated
     SET feature_id = p_master,
         curation_status = 'archived',
@@ -187,6 +209,13 @@ SECURITY DEFINER
 SET search_path = pg_catalog, feature, ops, x_extension
 AS $$
 BEGIN
+    -- 0214와 같은 executor 게이트. admin executor(api runtime이 상속)만 부를 수 있고
+    -- provider executor(dagster runtime)는 거부한다. EXECUTE grant와 이중이다.
+    IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+       OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+        RAISE EXCEPTION 'merge command requires the admin executor'
+            USING ERRCODE = '42501';
+    END IF;
     UPDATE feature.curated_features AS legacy
     SET curation_status = CASE item.status
             WHEN 'included' THEN 'curated'
@@ -263,6 +292,13 @@ SECURITY DEFINER
 SET search_path = pg_catalog, feature, ops, x_extension
 AS $$
 BEGIN
+    -- 0214와 같은 executor 게이트. admin executor(api runtime이 상속)만 부를 수 있고
+    -- provider executor(dagster runtime)는 거부한다. EXECUTE grant와 이중이다.
+    IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+       OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+        RAISE EXCEPTION 'merge command requires the admin executor'
+            USING ERRCODE = '42501';
+    END IF;
     UPDATE feature.curated_features
     SET feature_id = p_master, updated_at = now()
     WHERE feature_id = p_loser;
@@ -281,6 +317,13 @@ SECURITY DEFINER
 SET search_path = pg_catalog, feature, ops, x_extension
 AS $$
 BEGIN
+    -- 0214와 같은 executor 게이트. admin executor(api runtime이 상속)만 부를 수 있고
+    -- provider executor(dagster runtime)는 거부한다. EXECUTE grant와 이중이다.
+    IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+       OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+        RAISE EXCEPTION 'merge command requires the admin executor'
+            USING ERRCODE = '42501';
+    END IF;
     PERFORM collection.collection_id
     FROM feature.curation_collections AS collection
     WHERE EXISTS (
@@ -306,12 +349,25 @@ def upgrade() -> None:
         "GRANT SELECT, UPDATE (feature_id, metadata) ON TABLE feature.curated_features "
         "TO ktm_curation_command_owner"
     )
+    # trigger `feature.sync_curated_feature_collection`(SECURITY INVOKER, 0045)은 ②/④의
+    # UPDATE에서 command_owner로 실행된다. "mirror item도 semantic collection도 없는 legacy
+    # row" 분기가 `curation_collections`에 INSERT하는데 그 열 목록의 `created_at`이 0213의
+    # column INSERT grant에 없다 — 0214의 item command에서부터 잠복한 42501이다(리뷰 P2).
+    op.execute(
+        "GRANT INSERT (created_at) ON TABLE feature.curation_collections "
+        "TO ktm_curation_command_owner"
+    )
     op.execute("SET ROLE ktm_curation_command_owner")
     for signature in (_LOCK_SIG, _ARCHIVE_SIG, _SYNC_SIG, _MOVE_SIG, _LOCK_COLLECTIONS_SIG):
-        op.execute(f"REVOKE ALL ON PROCEDURE {signature} FROM PUBLIC")
-        # merge는 runtime이 실행한다 (dedup review 라우터·CLI). 0214의 catalog command와
-        # 달리 executor role이 따로 없다 — merge_repo가 runtime DSN에서 직접 CALL한다.
-        op.execute(f"GRANT EXECUTE ON PROCEDURE {signature} TO ktm_feature_runtime")
+        # 0214와 같은 형태. merge는 admin 명령(dedup review 라우터·ktmctl)이므로 admin
+        # executor(api runtime이 상속)만 부른다. 공유 그룹 ktm_feature_runtime에 주면
+        # provider ETL identity(dagster runtime)까지 legacy mirror를 부를 수 있다 — 리뷰 P1.
+        op.execute(
+            f"REVOKE ALL ON PROCEDURE {signature} FROM PUBLIC, ktm_feature_runtime, "
+            "ktm_feature_api_runtime, ktm_feature_dagster_runtime, "
+            "ktm_curation_provider_executor"
+        )
+        op.execute(f"GRANT EXECUTE ON PROCEDURE {signature} TO ktm_curation_admin_executor")
     op.execute("SET ROLE ktm_feature_schema_owner")
 
 

@@ -77,6 +77,13 @@ _SHARED_RUNTIME_FEATURE_PROCEDURES = frozenset(
 _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
     {
         "feature.apply_curation_import_items_command(jsonb,text,text,bigint,text)",
+        # 0222 — feature merge의 legacy mirror 4 + canonical collections lock. admin
+        # executor만(dedup review 라우터·ktmctl). legacy 4개는 40C에서 사라진다.
+        "feature.merge_archive_conflicting_legacy_curated_features(text,text)",
+        "feature.merge_lock_curation_collections(text,text)",
+        "feature.merge_lock_legacy_curated_features(text,text)",
+        "feature.merge_move_legacy_curated_features(text,text)",
+        "feature.merge_sync_master_legacy_curated_features(text)",
         "feature.archive_curated_source_command(uuid,bigint,bigint,text,text)",
         "feature.archive_curated_source_rule_command(uuid,bigint,bigint,text,text)",
         "feature.archive_curated_theme_command(uuid,bigint,bigint,text,text)",

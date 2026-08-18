@@ -61,3 +61,38 @@ async def test_apply_feature_merge_succeeds_as_api_runtime(
         ).one_or_none()
         assert row is not None
         assert row[0] != "active", "loser가 여전히 active — merge가 실행되지 않았다"
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        "CALL feature.merge_lock_legacy_curated_features('f_master', 'f_loser')",
+        "CALL feature.merge_lock_curation_collections('f_master', 'f_loser')",
+        "CALL feature.merge_move_legacy_curated_features('f_master', 'f_loser')",
+    ],
+)
+async def test_dagster_runtime_cannot_call_merge_procedures(
+    migrated_engine: AsyncEngine, call: str
+) -> None:
+    """provider ETL identity(dagster runtime)는 merge procedure를 부를 수 없다.
+
+    2차 적대 리뷰 P1: 처음엔 EXECUTE를 공유 그룹 `ktm_feature_runtime`에 줘서 dagster가
+    legacy row를 임의로 옮길 수 있었다. 0214 형태로 고쳤다 — EXECUTE는 admin executor에만,
+    본문에 `session_user` 게이트. 둘 중 하나만 남아도 여기서 42501이어야 한다.
+    """
+    from sqlalchemy.exc import DBAPIError
+
+    from tests.integration.conftest import as_dagster_runtime
+
+    async with AsyncSession(migrated_engine) as session:
+        await session.begin()
+        # pytest.raises가 CM 바깥이어야 한다 — 안쪽이면 실패한 CALL로 aborted된 트랜잭션에서
+        # CM 종료가 `SET LOCAL SESSION AUTHORIZATION DEFAULT`를 내려 InFailedSQLTransaction이다.
+        with pytest.raises(DBAPIError) as info:
+            async with as_dagster_runtime(session):
+                await session.execute(text(call))
+        message = str(info.value.orig)
+        assert "permission denied" in message.lower() or "admin executor" in message, (
+            message[:200]
+        )
+        await session.rollback()

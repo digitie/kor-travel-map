@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 import pytest
@@ -19,6 +19,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kortravelmap.infra import merge_repo as _merge_repo
 from kortravelmap.infra.curation_repo import (
     ResolvedCurationImportRow,
     add_curation_item,
@@ -28,8 +29,6 @@ from kortravelmap.infra.curation_repo import (
 from kortravelmap.infra.merge_repo import (
     MergeConflictError,
     MergeNotFoundError,
-    apply_feature_merge,
-    merge_from_review,
 )
 from kortravelmap.infra.models import (
     DedupReviewQueueRow,
@@ -39,11 +38,31 @@ from kortravelmap.infra.models import (
     SourceLinkRow,
     SourceRecordRow,
 )
+from tests.integration.conftest import as_api_runtime
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
 pytestmark = pytest.mark.integration
+
+
+# ── 모든 merge 호출은 실제 API runtime role로 ────────────────────────────────
+#
+# 0222가 merge procedure에 0214와 같은 executor 게이트를 넣었다(admin executor만). 컨테이너
+# superuser는 그 게이트에 걸리고, 애초에 superuser는 ACL을 안 봐서 fence 회귀를 못 잡는다
+# (그래서 PR #994의 P1이 CI 초록·prod 빨강이었다). 그래서 이 모듈의 merge 호출 21곳은 전부
+# `as_api_runtime`으로 감싼다. savepoint 안에서 감싸므로 merge가 예외를 내도(테스트가 기대하는
+# MergeError 등) LOCAL authorization이 함께 되돌아가 뒤따르는 superuser 검증 SQL이 깨지지 않는다.
+
+
+async def merge_from_review(session: AsyncSession, *args: Any, **kwargs: Any) -> Any:
+    async with session.begin_nested(), as_api_runtime(session):
+        return await _merge_repo.merge_from_review(session, *args, **kwargs)
+
+
+async def apply_feature_merge(session: AsyncSession, *args: Any, **kwargs: Any) -> Any:
+    async with session.begin_nested(), as_api_runtime(session):
+        return await _merge_repo.apply_feature_merge(session, *args, **kwargs)
 
 _CAT = "01070100"
 _FETCHED = datetime(2026, 6, 1, 12, 0, tzinfo=UTC)

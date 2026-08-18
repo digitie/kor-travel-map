@@ -21,6 +21,14 @@
   provenance spoof 422 테스트 · admin legacy detail 화면의 write 컨트롤 제거(410 대신 fence 안내).
 - 교훈: "runtime role로 통합 테스트가 하나도 없다"는 것 자체가 결함이었다. superuser 세션은 ACL을
   안 보므로 ACL을 건드리는 PR은 반드시 `as_api_runtime`으로 한 번 돌려야 한다.
+- **2차 리뷰(수정분)**가 P1을 둘 더 잡았다. (1) `infra/db.py` runtime preflight allowlist에 0222
+  procedure가 없어 API/Dagster가 **기동을 거부** — 1차 통합 선택에 `test_tvn34_runtime_privilege_
+  preflight`가 빠져 있었다. (2) EXECUTE를 공유 그룹 `ktm_feature_runtime`에 줘 dagster(provider ETL)
+  까지 legacy row를 옮길 수 있었다 — 0214 패턴의 절반만 따른 것. 0214 형태 전체(admin executor에만
+  EXECUTE, REVOKE runtime 로그인, 본문 `session_user` 게이트)로 고치고 dagster 음성 테스트를 넣었다.
+  그 게이트 때문에 `test_merge_repo.py` 21곳이 superuser로는 못 돌게 됐고 전부 `as_api_runtime`으로
+  감쌌다 — 이제 merge 통합 테스트 전체가 실제 role로 돈다.
+- 배포 선행: orchestrator `.env` `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`→`0222_tvn40a_merge_runtime_role`.
 
 ## 2026-08-18 — #993 rebase 뒤 tasks ledger 전면 정리
 
