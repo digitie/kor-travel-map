@@ -83,6 +83,47 @@ async def test_runtime_role_cannot_delete_legacy_curated_features(
         await migrated_session.rollback()
 
 
+async def test_runtime_role_cannot_write_legacy_snapshot_cache(
+    migrated_session: AsyncSession,
+) -> None:
+    """legacy read 캐시 — 읽는 코드도 쓰는 코드도 없는데 write가 열려 있었다(fence P2).
+
+    lint가 표에서 SELECT만 확인하지만, 그 표가 GRANT로 이어지는지는 DB에게 묻는다.
+    """
+    await migrated_session.execute(text("SET ROLE ktm_feature_runtime"))
+    try:
+        await _expect_permission_denied(
+            migrated_session,
+            "DELETE FROM feature.curated_feature_detail_snapshots WHERE false",
+        )
+    finally:
+        await migrated_session.rollback()
+
+
+async def test_every_declared_feature_relation_exists(
+    migrated_session: AsyncSession,
+) -> None:
+    """ACL 표에 선언된 feature relation이 전부 실제로 존재한다.
+
+    reconcile은 DB에 **있는** relation만 순회하므로 표의 phantom 항목(예: legacy 0032가
+    rename해 사라진 `curated_tripmate_copy_snapshots`)은 아무 것도 지키지 않으면서 표를
+    읽는 사람에게 "권한이 관리된다"는 인상만 준다. 이 fence 작업 중 처음으로 발견했다.
+    """
+    from kortravelmap.infra import runtime_privileges
+
+    rows = await migrated_session.execute(
+        text(
+            "SELECT relname FROM pg_catalog.pg_class AS c "
+            "JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace "
+            "WHERE n.nspname = 'feature' AND c.relkind IN ('r', 'p', 'v')"
+        )
+    )
+    existing = {row[0] for row in rows}
+    declared = set(runtime_privileges._FEATURE_TABLE_PRIVILEGES)  # noqa: SLF001
+    phantom = sorted(declared - existing)
+    assert not phantom, f"ACL 표에 있지만 DB에 없는 feature relation: {phantom}"
+
+
 async def test_runtime_role_can_still_read_legacy_curated_features(
     migrated_session: AsyncSession,
 ) -> None:

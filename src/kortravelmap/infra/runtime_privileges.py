@@ -48,11 +48,15 @@ _FEATURE_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     # DB가 거부한다. static 층은 `infra/legacy_write_fence.py`, route 층은 410 Gone.
     # 40C가 이 표를 물리 삭제할 때 이 줄도 함께 사라진다.
     "curated_features": ("SELECT",),
-    "curated_feature_detail_snapshots": ("SELECT", "INSERT", "UPDATE", "DELETE"),
+    # legacy read 캐시였으나 지금은 **읽는 코드도 쓰는 코드도 없다**(models에 row 클래스만
+    # 남음). fence 리뷰 P2 — 쓰는 곳 없이 write 권한만 열려 있었다. SELECT만 남기고 40C에서
+    # 표와 함께 지운다. (`curated_tripmate_copy_snapshots`는 legacy 0032가 이 표로 rename해
+    # 더는 없다 — 표에 있던 항목은 phantom이라 지웠다. 표에 없는 relation은 reconcile이
+    # 조용히 건너뛰므로 phantom은 아무 것도 지키지 않는다.)
+    "curated_feature_detail_snapshots": ("SELECT",),
     "curated_source_rules": ("SELECT",),
     "curated_sources": ("SELECT",),
     "curated_themes": ("SELECT",),
-    "curated_tripmate_copy_snapshots": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "curation_collections": ("SELECT",),
     "curation_import_batches": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "curation_import_rows": ("SELECT", "INSERT", "UPDATE", "DELETE"),
@@ -66,7 +70,10 @@ _FEATURE_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "feature_places": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "feature_price_values": ("SELECT", "INSERT"),
     "feature_weather_values": ("SELECT", "INSERT"),
-    "weather_metric_series": ("SELECT", "INSERT", "UPDATE", "DELETE"),
+    # `weather_metric_series`(legacy 0069)는 vNext baseline에 없다 — phantom 항목이라 지웠다.
+    # 표에 있어도 DB에 없으면 reconcile이 건너뛰므로 아무 것도 지키지 않는다.
+    # `tests/integration/test_tvn40a_legacy_write_fence_acl.py::
+    # test_every_declared_feature_relation_exists`가 phantom을 잡는다.
 }
 
 # Views are included in ``REVOKE ALL ON ALL TABLES`` but PostgreSQL does not

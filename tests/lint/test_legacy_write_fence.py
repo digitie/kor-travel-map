@@ -33,17 +33,25 @@ def test_fence_target_set_is_not_empty() -> None:
     assert "curated_features" in legacy_write_fence.LEGACY_CURATED_RELATIONS
 
 
-def test_acl_layer_grants_no_write_on_curated_features() -> None:
-    """ACL 층 — `curated_features`에 write 권한이 부여되지 않는다.
+@pytest.mark.parametrize(
+    "relation",
+    [
+        "curated_features",
+        # legacy read 캐시 — 읽는 코드도 쓰는 코드도 없다(fence 리뷰 P2). 40C까지 SELECT만.
+        "curated_feature_detail_snapshots",
+    ],
+)
+def test_acl_layer_grants_no_write_on_legacy_relations(relation: str) -> None:
+    """ACL 층 — legacy 관계에 write 권한이 부여되지 않는다.
 
     `reconcile_runtime_privileges`는 REVOKE ALL 뒤 이 표대로만 GRANT한다. 표에 write가
     있으면 DB에 write가 생긴다. 이 한 줄이 DB 층 fence의 전부다.
     """
     privileges = runtime_privileges._FEATURE_TABLE_PRIVILEGES  # noqa: SLF001
-    assert "curated_features" in privileges, "표에서 아예 빠지면 SELECT도 못 한다"
-    granted = set(privileges["curated_features"])
+    assert relation in privileges, "표에서 아예 빠지면 SELECT도 못 한다"
+    granted = set(privileges[relation])
     assert granted == {"SELECT"}, (
-        f"curated_features에 write 권한이 부여된다: {sorted(granted - {'SELECT'})}. "
+        f"{relation}에 write 권한이 부여된다: {sorted(granted - {'SELECT'})}. "
         "T-VN-40A fence를 되돌린 것이다."
     )
 
@@ -77,6 +85,127 @@ def test_static_layer_every_repo_write_function_calls_the_fence() -> None:
         if "assert_legacy_write_allowed" not in calls:
             missing.append(fn.name)
     assert not missing, f"fence를 안 부르는 legacy write 함수: {missing}"
+
+
+# ── infra 전체 inventory ────────────────────────────────────────────────────
+#
+# 위 검사는 `curated_repo.py`의 이름 규칙(`create_/update_/set_/archive_curated_feature*`)만
+# 본다. 적대 리뷰 P2: 다른 infra 모듈이 raw SQL로 legacy를 쓰면 그 규칙 밖이다. 그래서
+# `src/kortravelmap/infra/*.py` 전부를 SQL 문자열 수준에서 훑는다 — 모듈 상수든 함수 안
+# 인라인이든 `curated_features`에 write/lock하는 문장을 모두 찾아 **감싸는 함수**로 되돌린
+# 뒤, 그 함수가 fence를 부르거나 아래 allowlist에 있어야 한다.
+
+_INFRA_DIR = _ROOT / "src/kortravelmap/infra"
+_LEGACY_WRITE_SQL = re.compile(
+    r"\b(?:UPDATE|INSERT\s+INTO|DELETE\s+FROM)\s+feature\.curated_features\b"
+    r"|feature\.curated_features\s+AS\s+(\w+)\b[\s\S]*?\bFOR\s+(?:NO\s+KEY\s+)?UPDATE\s+OF\s+\1\b",
+    re.I,
+)
+# 0214 이전의 Python canonical writer들. runtime은 같은 이름의 SECURITY DEFINER procedure
+# (`*_command`)를 CALL하고, 이 Python 함수들은 **어떤 runtime 진입점에도 연결돼 있지 않다**
+# (아래 `test_superseded_python_writers_are_not_reachable_from_runtime`가 그것을 고정한다).
+# superuser 통합 테스트의 seeding 경로로만 남아 있고 40C에서 legacy와 함께 사라진다.
+_SUPERSEDED_TEST_ONLY_WRITERS: frozenset[str] = frozenset(
+    {"update_curation_item", "_lock_legacy_projections_for_item"}
+)
+
+
+def _legacy_writing_functions(path: Path) -> dict[str, bool]:
+    """모듈에서 legacy write SQL을 품거나 그런 상수를 쓰는 top-level 함수 → fence 호출 여부."""
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    write_consts: set[str] = set()
+    for node in tree.body:
+        target = None
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            target = node.target.id
+        elif isinstance(node, ast.Assign) and len(node.targets) == 1:
+            t = node.targets[0]
+            target = t.id if isinstance(t, ast.Name) else None
+        value = getattr(node, "value", None)
+        if (
+            target
+            and isinstance(value, ast.Constant)
+            and isinstance(value.value, str)
+            and _LEGACY_WRITE_SQL.search(value.value)
+        ):
+            write_consts.add(target)
+
+    out: dict[str, bool] = {}
+    for fn in tree.body:
+        if not isinstance(fn, ast.AsyncFunctionDef | ast.FunctionDef):
+            continue
+        writes = False
+        calls_fence = False
+        for n in ast.walk(fn):
+            if isinstance(n, ast.Constant) and isinstance(n.value, str):
+                if _LEGACY_WRITE_SQL.search(n.value):
+                    writes = True
+            elif isinstance(n, ast.Name) and n.id in write_consts:
+                writes = True
+            elif (
+                isinstance(n, ast.Call)
+                and isinstance(n.func, ast.Name)
+                and n.func.id == "assert_legacy_write_allowed"
+            ):
+                calls_fence = True
+        if writes:
+            out[fn.name] = calls_fence
+    return out
+
+
+def test_every_infra_legacy_write_is_fenced_or_superseded() -> None:
+    """infra 전체에서 `curated_features`에 write/lock하는 함수는 fence를 부르거나 allowlist다."""
+    found: dict[str, dict[str, bool]] = {}
+    for path in sorted(_INFRA_DIR.glob("*.py")):
+        fns = _legacy_writing_functions(path)
+        if fns:
+            found[path.name] = fns
+    assert found, "legacy write SQL을 하나도 못 찾았다 — 정규식이나 경로가 틀렸다"
+    # 검사기가 살아 있다는 증거: 알려진 fenced writer와 알려진 superseded writer가 둘 다 잡힌다.
+    assert found.get("curated_repo.py", {}).get("create_curated_feature") is True
+    assert "update_curation_item" in found.get("curation_repo.py", {})
+
+    unfenced = sorted(
+        f"{module}:{name}"
+        for module, fns in found.items()
+        for name, fenced in fns.items()
+        if not fenced and name not in _SUPERSEDED_TEST_ONLY_WRITERS
+    )
+    assert not unfenced, (
+        f"fence 없이 legacy를 쓰는 함수: {unfenced}. SECURITY DEFINER procedure CALL로 옮기거나 "
+        "fence를 부르거나, superseded 테스트 전용이면 allowlist에 근거와 함께 추가한다."
+    )
+
+
+def test_superseded_python_writers_are_not_reachable_from_runtime() -> None:
+    """allowlist의 Python writer가 라우터·CLI·dagster 어디에서도 참조되지 않는다.
+
+    allowlist는 "runtime에서 안 부른다"는 전제 위에 있다. 누가 다시 연결하면 그 경로는
+    runtime role에서 42501이다 — 여기서 먼저 잡는다.
+    """
+    entrypoint_dirs = (
+        _ROOT / "packages/kor-travel-map-api/src",
+        _ROOT / "packages/kor-travel-map-dagster/src",
+        _ROOT / "src/kortravelmap/cli",
+        _ROOT / "src/kortravelmap/client",
+    )
+    # `_lock_legacy_projections_for_item`은 private이라 `update_curation_item`을 통해서만
+    # 닿는다. public 이름과 그 wrapper(`archive_curation_item`은 update_curation_item을 감싼다).
+    names = sorted(
+        {n for n in _SUPERSEDED_TEST_ONLY_WRITERS if not n.startswith("_")}
+        | {"archive_curation_item"}
+    )
+    pattern = re.compile(r"\b(" + "|".join(map(re.escape, names)) + r")\b(?!_command)")
+    hits: list[str] = []
+    for base in entrypoint_dirs:
+        assert base.is_dir(), f"진입점 디렉터리가 없다: {base}"
+        for path in base.rglob("*.py"):
+            for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if pattern.search(line):
+                    hits.append(f"{path.relative_to(_ROOT)}:{i}: {line.strip()}")
+    assert not hits, "superseded Python legacy writer가 runtime 진입점에서 참조된다:\n" + "\n".join(
+        hits
+    )
 
 
 def test_static_layer_fence_relations_match_the_declared_set() -> None:

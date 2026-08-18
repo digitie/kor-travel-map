@@ -1487,6 +1487,56 @@ def test_theme_catalog_write_routes_are_not_fenced(client: TestClient) -> None:
     assert response.status_code != 410, "theme catalog write가 fence에 걸렸다 — plan:28 위반"
 
 
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "spoof_field",
+    ["actor", "selected_by", "operator_updated_by", "updated_by", "created_by"],
+)
+def test_canonical_item_writes_reject_spoofable_provenance_in_body(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, spoof_field: str
+) -> None:
+    """ADR-066 D-2 — canonical item write는 body의 provenance 필드를 422로 거부한다.
+
+    fence로 지운 legacy 라우터 테스트 6개 중 'body actor 거부·spoofable provenance 거부'의
+    canonical 대응이다(적대 리뷰 P2). actor는 인증 principal에서만 온다 — 위
+    `test_admin_can_patch_and_archive_single_curation_item`이 그 양성 케이스
+    (`principal == "local-dev"`)고, 여기는 음성 케이스다: body에 provenance를 실으면
+    `extra="forbid"`가 422를 내고 **repo command는 호출되지 않는다.**
+    """
+    from kortravelmap.api.routers import curations as module
+
+    called: list[str] = []
+
+    async def _create(_session: object, **_kwargs: Any) -> CurationItem:
+        called.append("create")
+        return _item(item_id=ITEM_ID, edition="2026")
+
+    async def _patch(_session: object, **_kwargs: Any) -> CurationItem:
+        called.append("patch")
+        return _item(item_id=ITEM_ID, edition="2026")
+
+    monkeypatch.setattr(module.curation_repo, "create_curation_item_command", _create)
+    monkeypatch.setattr(module.curation_repo, "patch_curation_item_command", _patch)
+
+    created = client.post(
+        f"/v1/admin/curations/{COLLECTION_ID}/items",
+        json={
+            "external_item_id": "spoof-item",
+            "place_name": "provenance 위조 시도",
+            spoof_field: "attacker",
+        },
+    )
+    patched = client.patch(
+        f"/v1/admin/curations/{COLLECTION_ID}/items/{ITEM_ID}",
+        headers={"If-Match": '"1"'},
+        json={"feature_id": "feature:resolved", spoof_field: "attacker"},
+    )
+
+    assert created.status_code == 422, (created.status_code, created.text)
+    assert patched.status_code == 422, (patched.status_code, patched.text)
+    assert called == [], f"422여야 할 요청이 repo command까지 닿았다: {called}"
+
+
 def _namesake_match(feature_id: str, name: str, sido_name: str) -> FeatureMatch:
     """이름은 같지만 지역이 다른 후보. 실제 사고를 그대로 본뜬 것이다."""
     return FeatureMatch(

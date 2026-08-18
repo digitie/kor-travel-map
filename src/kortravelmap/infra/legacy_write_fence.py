@@ -41,8 +41,9 @@ LEGACY_CURATED_RELATIONS: Final[frozenset[str]] = frozenset({"curated_features"}
 # "catalog input만 유지"로 정했고 `0207_tvn40_theme_catalog.py`가 T-VN-40에서 새로 만든
 # procedure로 그 표에 쓴다. 살아 있는 catalog다. 첫 적용에서 넷을 다 막았다가 이 사실을
 # 확인하고 되돌렸다 — 막으면 T-VN-40 자체가 깨진다.
-# `curated_feature_detail_snapshots`·`curated_tripmate_copy_snapshots`는 legacy **read**
-# 경로의 캐시라 read가 살아 있는 동안 갱신돼야 한다. 40C에서 read와 함께 지운다.
+# `curated_feature_detail_snapshots`·`curated_tripmate_copy_snapshots`는 legacy read 캐시였지만
+# 지금은 읽는 코드도 쓰는 코드도 없다(fence 리뷰 P2에서 확인). ACL은 SELECT만 남겼고 write
+# 경로가 없으니 static fence 대상으로 올릴 것도 없다. 40C에서 표와 함께 지운다.
 
 
 class LegacyWriteFenceError(KorTravelMapError):

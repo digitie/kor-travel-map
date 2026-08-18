@@ -1,5 +1,3 @@
-import { toast } from "sonner";
-
 /**
  * 큐레이션 관리 화면 공용 어휘 사전 (LIST/DETAIL/MAP 공유).
  *
@@ -30,7 +28,6 @@ export const CURATION_RELATION_LABELS: Record<string, string> = {
   theme_area_anchor: "테마 거리 앵커",
 };
 
-
 /** 상태별 결과(consequence) 한 줄 — 라이프사이클 스트립·detail에서 공유. */
 export const STATUS_CONSEQUENCES: Record<string, string> = {
   candidate: "검토 대기 — 채택하면 공개됩니다",
@@ -47,7 +44,6 @@ export function curationRelationLabel(value: string): string {
   return CURATION_RELATION_LABELS[value] ?? value;
 }
 
-
 /** select option 표시 텍스트 — "재사용 허용 (allowed)" 형식. */
 export function enumOption(label: string, raw: string): string {
   return `${label} (${raw})`;
@@ -57,28 +53,3 @@ export function enumOption(label: string, raw: string): string {
  * 상태 전환 mutation 성공 토스트 — 어느 화면에서 눌러도 같은 문구가 나오게 공유.
  * select는 "행이 어디 갔지?"를 바로 해소하는 필터 점프 액션을 받을 수 있다.
  */
-export function notifyStatusTransition(
-  kind: "select" | "unselect" | "archive",
-  featureName: string,
-  onJumpFilter?: () => void,
-): void {
-  if (kind === "select") {
-    toast.success("채택 완료 — 후보 → 큐레이션됨", {
-      description: `"${featureName}" — 큐레이션됨 상태로 이동했습니다.`,
-      action: onJumpFilter
-        ? { label: "큐레이션됨 보기", onClick: onJumpFilter }
-        : undefined,
-    });
-    return;
-  }
-  if (kind === "unselect") {
-    toast.success("채택 해제 완료 — 큐레이션됨 → 거절됨", {
-      description: "규칙 재적용·자동 파이프라인이 이 항목을 되살리지 않습니다.",
-    });
-    return;
-  }
-  toast.success("보관 완료", {
-    description:
-      "공개·후보 목록에서 제외됩니다(소프트 삭제). '보관됨 포함'으로 조회할 수 있습니다.",
-  });
-}
