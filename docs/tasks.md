@@ -1063,6 +1063,29 @@ Feature는 **애초에 다른 `feature_id`**라 ETL이 그 행을 덮어쓸 수 
 없다(부모 Feature 자기참조 FK만 있다). 즉 provider source record 없이도 Feature와 curation
 item을 만들 수 있다.
 
+#### T-VN-41과의 관계 (2026-08-18 확인 — **직접 겹치지 않는다**)
+
+사용자 질문 "H34 개선이 T-VN-41과 관련 없는지"에 대한 확인. 저장소와 PinVi main을 대조했다.
+
+- **T-VN-41은 cache-target 표면이다.** `(external_system, target_key)` = **PinVi가 등록한 POI**를
+  Map Feature에 링크하고, 그 링크·refresh 결과의 순서를 generation·outbox로 보존한다(ADR-081).
+  대상 relation은 `poi_cache_targets`·`cache_target_*`이고 `feature.features`를 **쓰지 않는다**
+  (`cache_target_outbox_repo.py`에 `feature.features` 참조 0건).
+- **H34/M01은 `feature.features`를 만드는 표면이다.** `create_feature_with_initial_state`
+  procedure를 admin API에 잇는다. cache-target을 건드리지 않는다.
+- **PinVi의 Feature 생성 요청(M04)은 이미 별도 경로다.** PinVi main의
+  `feature_requests.py:254`가 `admin_client.create_feature(payload)`로 **`POST /v1/admin/features`**를
+  친다(`kor_travel_map_admin.py:3` — "`/v1/admin/features*` change API"). cache-target을 만지지
+  않는다(`grep cache_target` 0건). 즉 M04는 41의 outbox를 타지 않고 admin API를 탄다.
+
+**간접 접점 하나 — 미결.** 수동 Feature가 만들어진 뒤 PinVi가 그것을 POI로 **링크**하려면
+cache-target 경로를 탄다. 그때 41C의 outbox가 그 링크를 전파한다. 이건 41의 정상 동작이지
+H34가 41을 바꾸는 것이 아니다. 다만 **origin이 `manual_*`인 Feature를 41의 reconciliation이
+provider Feature와 다르게 취급해야 하는지**(예: provider 재적재로 사라질 수 있는 Feature와
+달리 수동 Feature는 restore epoch에서 어떻게 보이나)는 M02(origin 불변)와 41A(restore epoch)를
+함께 볼 때 정해야 한다. 지금은 41A가 미착수라 정할 수 없다 — **M02 설계 시 41A 소유자와
+확인 항목**으로 남긴다.
+
 #### 아직 안 정해진 것
 
 - **`source_type` / `source_natural_key`** — `make_feature_id`의 입력이라 ID 체계에 들어간다.
