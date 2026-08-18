@@ -444,9 +444,17 @@ export function AdminShell({
               ) : null}
             </div>
           </header>
-          {/* M11: <main> 은 children 만 감싼다(aside/header 밖). skip link 대상. */}
+          {/*
+            M11: <main> 은 children 만 감싼다(aside/header 밖). skip link 대상.
+            `focus-visible:outline-0` — design.md §Focus 닫힌 목록 4번. skip link(Enter)로
+            프로그램 포커스를 받으면 마지막 입력이 키보드라 `:focus-visible`이 매칭돼 **페이지 폭
+            2px 링**이 본문 전체에 그려진다. 사용자가 키로 이동한 요소가 아니라 링이 "어디로
+            갔는지"를 알리지 못하고, 도착 사실은 스크롤 점프와 본문 첫 heading 이 알린다.
+            `outline-none` 은 금지(§금지 패턴 6 — v4에서 `--tw-outline-style: none` 이 안쪽 컨트롤
+            까지 오염) — 폭만 0으로 끄는 `outline-0` 이라야 자식 컨트롤 링이 살아 있다.
+          */}
           <main
-            className="min-w-0 flex-1 px-6 py-6"
+            className="min-w-0 flex-1 px-6 py-6 focus-visible:outline-0"
             data-slot="admin-shell-main"
             id={MAIN_CONTENT_ID}
             tabIndex={-1}

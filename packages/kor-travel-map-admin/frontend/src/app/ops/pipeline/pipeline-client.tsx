@@ -185,16 +185,20 @@ function OverviewStrip({
             unit: "건",
             caption: "queued + running",
           },
+          // 상태 축(operations_by_status)의 낱말은 tone table이 정본이다(design.md: 문구도
+          // `statusLabel()` 한 곳에서). 손으로 적으면 같은 축이 KPI와 실행 행 배지에서 다른
+          // 단어로 보인다 — "대기"는 사람의 결정을 기다리는 `pending`(warning)의 낱말이라
+          // 기계 큐 `queued`는 "실행 대기"고, `running`도 배지와 같은 글자를 써야 한다.
           {
             key: "queued",
-            label: "대기",
+            label: statusLabel("queued"),
             value: operationsByStatus.queued,
             unit: "건",
             caption: "canonical root",
           },
           {
             key: "running",
-            label: "실행 중",
+            label: statusLabel("running"),
             value: operationsByStatus.running,
             unit: "건",
             caption: "canonical root",

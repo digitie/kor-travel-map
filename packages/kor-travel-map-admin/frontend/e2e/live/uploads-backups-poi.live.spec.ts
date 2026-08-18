@@ -546,16 +546,22 @@ test.describe("live/poi-cache-targets (read-only)", () => {
     await expect(page.getByText("page 1 ·")).toBeVisible({ timeout: 15000 });
   });
 
+  // 손으로 만들던 targets pager가 공용 CursorPager(+`previous`)로 바뀌면서 버튼 접근성
+  // 이름이 다른 목록과 같아졌다(보이는 라벨은 그대로 `이전`/`다음`).
   test("poi pagination 이전 button disabled (PRESENCE=0)", async ({ page }) => {
     await page.goto("/admin/poi-cache-targets");
     await expectHeading(page, HEADINGS.poi);
-    await expect(page.getByRole("button", { name: "이전" })).toBeDisabled({ timeout: 15000 });
+    await expect(
+      page.getByRole("button", { name: "이전 페이지", exact: true }),
+    ).toBeDisabled({ timeout: 15000 });
   });
 
   test("poi pagination 다음 button disabled (PRESENCE=0)", async ({ page }) => {
     await page.goto("/admin/poi-cache-targets");
     await expectHeading(page, HEADINGS.poi);
-    await expect(page.getByRole("button", { name: "다음" })).toBeDisabled({ timeout: 15000 });
+    await expect(
+      page.getByRole("button", { name: "다음 페이지", exact: true }),
+    ).toBeDisabled({ timeout: 15000 });
   });
 
   test("poi Nearby features card present", async ({ page }) => {

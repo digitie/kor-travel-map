@@ -63,7 +63,9 @@ function SelectableRow({
       aria-disabled={disabled || undefined}
       aria-selected={selected}
       className={cn(
-        "group/row relative flex w-full cursor-pointer items-start gap-3 rounded-control text-left text-sm text-text-primary transition-colors select-none",
+        // 전환 대상은 열거한다(design.md §금지 패턴 1) — v4의 축약 전환 유틸은 전환 목록에
+        // `outline-color`까지 넣어 포커스 링이 100ms에 걸쳐 스며든다(§Focus: 링은 즉시).
+        "group/row relative flex w-full cursor-pointer items-start gap-3 rounded-control text-left text-sm text-text-primary transition-[color,background-color] select-none",
         size === "default" ? "px-3 py-2" : "px-2 py-1.5",
         "hover:bg-surface-subtle focus-visible:bg-surface-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus active:bg-surface-muted",
         "aria-selected:bg-brand-tint aria-selected:hover:bg-brand-tint aria-selected:focus-visible:bg-brand-tint aria-selected:before:absolute aria-selected:before:inset-y-2 aria-selected:before:left-0 aria-selected:before:w-0.5 aria-selected:before:rounded-full aria-selected:before:bg-brand aria-selected:before:content-['']",
@@ -150,9 +152,29 @@ function SelectableRowGroup({
   className,
   onKeyDown,
   onFocusCapture,
+  ref,
   ...props
 }: SelectableRowGroupProps) {
   const containerRef = React.useRef<HTMLDivElement | null>(null);
+
+  /**
+   * 호출부 ref와 내부 `containerRef`를 함께 채운다. ref를 props에 남겨 두면 `{...props}`가
+   * `ref={containerRef}`를 **덮어써** `containerRef.current`가 영원히 null이 되고, 그러면
+   * `syncRoving`이 조기 반환해 모든 행이 `tabIndex=-1`로 남는다 — 목록 전체가 Tab으로 도달
+   * 불가능해진다(지금은 두 호출부가 ref를 안 넘겨 잠복해 있을 뿐이다). 그래서 ref는 떼어서
+   * 여기서 합친다.
+   */
+  const setContainer = React.useCallback(
+    (node: HTMLDivElement | null) => {
+      containerRef.current = node;
+      if (typeof ref === "function") {
+        ref(node);
+        return;
+      }
+      if (ref && typeof ref === "object") ref.current = node;
+    },
+    [ref],
+  );
 
   /**
    * 탭 순서에 남길 한 행을 고른다: 포커스가 그룹 안에 있으면 그 행, 없으면 선택 행,
@@ -186,7 +208,7 @@ function SelectableRowGroup({
       <div
         className={cn("flex flex-col", divided && "divide-y divide-border", className)}
         data-slot="selectable-row-group"
-        ref={containerRef}
+        ref={setContainer}
         role="listbox"
         onFocusCapture={(event) => {
           onFocusCapture?.(event);

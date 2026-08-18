@@ -508,7 +508,7 @@ function HomePageClientView({
                   {dedupItems.slice(0, 4).map((item) => (
                     <li key={item.review_id}>
                       <Link
-                        className="-mx-2 flex flex-col gap-0.5 rounded-control px-2 py-2 text-sm text-text-primary transition-colors hover:bg-surface-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus active:bg-surface-muted"
+                        className="-mx-2 flex flex-col gap-0.5 rounded-control px-2 py-2 text-sm text-text-primary transition-[color,background-color] hover:bg-surface-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus active:bg-surface-muted"
                         href="/admin/features/dedup-reviews"
                       >
                         <span className="truncate font-medium">

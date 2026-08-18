@@ -47,7 +47,8 @@ function BreadcrumbLink({
     props: mergeProps<"a">(
       {
         className: cn(
-          "rounded-control no-underline transition-colors hover:text-text-primary hover:no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus active:text-text-primary",
+          // 전환 속성 열거(v4 `transition-colors`는 `outline-color` 포함 → 포커스 링이 페이드인).
+          "rounded-control no-underline transition-[color,background-color,border-color] hover:text-text-primary hover:no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus active:text-text-primary",
           className
         ),
       },

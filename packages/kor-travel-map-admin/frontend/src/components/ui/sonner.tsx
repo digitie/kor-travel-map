@@ -33,8 +33,10 @@ const TOAST_CLASS_NAMES: ToastClassNames = {
     "rounded-control! bg-brand! font-medium text-brand-foreground! hover:bg-brand-hover! focus-visible:shadow-none! focus-visible:outline-2! focus-visible:outline-offset-2 focus-visible:outline-focus!",
   cancelButton:
     "rounded-control! bg-surface-subtle! font-medium text-text-primary! hover:bg-surface-muted! focus-visible:shadow-none! focus-visible:outline-2! focus-visible:outline-offset-2 focus-visible:outline-focus!",
+  // 닫기 버튼은 조작 가능한 요소라 경계가 `border-input`(= `--control-line`)이다 — 장식용
+  // `border-border`는 card 위에서 1.22:1로 WCAG 1.4.11(3:1) 미달이었다(design.md §Hairlines).
   closeButton:
-    "border-border! bg-card! text-text-secondary! hover:border-border! hover:bg-surface-subtle! hover:text-text-primary! focus-visible:shadow-none! focus-visible:outline-2! focus-visible:outline-offset-2 focus-visible:outline-focus!",
+    "border-input! bg-card! text-text-secondary! hover:border-input! hover:bg-surface-subtle! hover:text-text-primary! focus-visible:shadow-none! focus-visible:outline-2! focus-visible:outline-offset-2 focus-visible:outline-focus!",
 }
 
 const TOASTER_STYLE = {

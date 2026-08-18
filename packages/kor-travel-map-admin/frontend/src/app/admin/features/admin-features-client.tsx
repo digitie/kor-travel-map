@@ -466,6 +466,12 @@ function useAdminFeaturesClientController({
     resetCursor();
   };
 
+  // P1-5: 상태 변경이 진행 중인 **그 행**만 진행 표면을 든다. 누른 버튼까지 native disabled로
+  // 만들면 포커스가 body로 떨어져 돌아갈 자리를 잃는다(다른 행은 mutex라 그대로 disabled).
+  const retiringFeatureId = stateMutation.isPending
+    ? (stateMutation.variables?.featureId ?? null)
+    : null;
+
   const columns = useMemo<ColumnDef<AdminFeatureRecord, unknown>[]>(
     () => [
       {
@@ -626,6 +632,7 @@ function useAdminFeaturesClientController({
                 disabledReason={
                   retired ? "이미 종료된 feature입니다" : "다른 상태 변경이 진행 중입니다"
                 }
+                loading={retiringFeatureId === feature.feature_id}
                 size="sm"
                 type="button"
                 variant="ghost"
@@ -642,7 +649,7 @@ function useAdminFeaturesClientController({
         },
       },
     ],
-    [retireFeature, stateMutation.isPending],
+    [retireFeature, retiringFeatureId, stateMutation.isPending],
   );
 
   return {

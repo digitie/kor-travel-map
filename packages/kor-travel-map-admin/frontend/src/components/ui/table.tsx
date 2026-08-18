@@ -76,7 +76,9 @@ function TableRow({ className, ...props }: React.ComponentProps<"tr">) {
     <tr
       data-slot="table-row"
       className={cn(
-        "border-b border-border transition-colors hover:bg-surface-subtle has-aria-expanded:bg-surface-subtle data-[state=selected]:bg-brand-tint",
+        // 전환 속성은 열거한다: v4 `transition-colors`는 `outline-color`까지 포함해
+        // 클릭 가능한 행(`tabIndex=0`)의 포커스 링이 100ms 페이드인 된다(design.md §Focus).
+        "border-b border-border transition-[color,background-color,border-color] hover:bg-surface-subtle has-aria-expanded:bg-surface-subtle data-[state=selected]:bg-brand-tint",
         className
       )}
       {...props}

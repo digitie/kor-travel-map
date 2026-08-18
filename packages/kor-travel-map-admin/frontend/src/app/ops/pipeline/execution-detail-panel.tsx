@@ -536,9 +536,14 @@ function ExecutionClaimResolution({
           >
             처음
           </Button>
+          {/*
+            P1-5: 전환 중에는 native `disabled` 대신 `loading`(spinner + aria-busy, 포커스 유지).
+            cursor가 없어 더 볼 게 없는 경우만 진짜 disabled다.
+          */}
           <Button
             aria-label="이전 이벤트 더 보기"
-            disabled={!eventsNextCursor || detail.isFetching}
+            disabled={!eventsNextCursor}
+            loading={Boolean(eventsNextCursor) && detail.isFetching}
             size="sm"
             type="button"
             variant="outline"

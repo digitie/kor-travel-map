@@ -12,15 +12,20 @@
  *   in-flow micro-control 예외 목록은 design.md §Spacing.
  * - hairline 2종: 장식/구분선은 `border-border`(= `--surface-muted`), **컨트롤 경계는
  *   `border-input`(= `--control-line`)** — 후자는 WCAG 1.4.11 대상이라 3:1 이상을 지킨다.
- * - focus 레시피 1종은 이 파일 `@layer base`의 `:focus-visible`이 **혼자** 발행한다
- *   (outline 2px `--focus` + offset 2px). 컴포넌트는 아무것도 선언하지 않아도 링을 받으므로
- *   **무조건부 `outline-none` 금지** — utility가 base를 이겨서 그 요소는 링을 영구히 잃는다.
- *   `outline-none` + `focus-visible:outline-*`를 함께 적는 것도 금지다(base 레시피를 지우고
- *   같은 걸 손으로 다시 적는 중복 = drift 출처). 유일한 예외는 부모 래퍼가
- *   `has-[input:focus-visible]:outline-*`로 대신 링을 그리는 자리. design.md §Focus + §금지 패턴.
- *   ring은 transition 밖 — 즉시 표시.
+ * - focus 레시피 1종은 이 파일 `@layer base`의 `:focus-visible`이 **혼자** 발행한다. 컴포넌트는
+ *   아무것도 선언하지 않아도 링을 받는다. 링을 끄는 예외는 닫힌 목록 4개뿐이고 각 컴포넌트에서
+ *   `focus-visible:outline-0`으로 끈다. design.md §Focus + §금지 패턴.
+ *   - `outline-none` 금지(조건 없이). v4에서 이 유틸은 `outline-style: none` + 내부 변수
+ *     `--tw-outline-style: none`을 박고, 같은 요소의 `outline-<n>`은 style을 그 변수에서 읽는다
+ *     → 짝을 맞춰 다시 적어도 링은 안 그려진다. 꺼야 하면 `focus-visible:outline-0`(폭 0만 바꾸고
+ *     style/색은 무오염, `focus-visible:outline-2`와 같은 twMerge 그룹).
+ *   - 링은 전환 대상이 아니다. v4의 `transition`/`transition-colors`는 전환 목록에
+ *     `outline-color`를 포함하므로 열거형(`transition-[color,background-color,border-color]`)만 쓴다.
+ *   - 링을 흐리지 않는다: root `opacity`는 자기 outline·border까지 합성한다(light page 6.66 → 2.57,
+ *     `border-input` 3.54 → 1.87). 흐림은 라벨 자식 래퍼에만(design.md §States).
  * - motion: `duration-fast`(100ms, hover/colour) · `duration-base`(150ms, overlay) ·
- *   `ease-out`/`ease-in`; `transition-all` 금지; reduced-motion 전역 규칙은 파일 끝.
+ *   `ease-out`/`ease-in`; 대상을 열거하지 않는 전환 유틸(`transition-all`/`transition-colors`/
+ *   맨 `transition`) 금지; reduced-motion 전역 규칙은 파일 끝.
  */
 @import "tailwindcss";
 @import "tw-animate-css";
@@ -317,11 +322,18 @@
     @apply text-brand underline-offset-4 hover:underline;
   }
 
-  /* one focus recipe, opaque, appears instantly (never transitioned) */
+  /* one focus recipe, opaque, appears instantly (never transitioned).
+     light: page 6.66:1 · card 6.93 · subtle 6.45 · muted 5.70
+     dark:  page 10.26   · card 9.38 · subtle 9.13 · muted 7.28   (전부 1.4.11의 3:1 위) */
   :focus-visible {
     outline: 2px solid var(--focus);
     outline-offset: 2px;
   }
+
+  /* 링을 끄는 예외는 여기 base에 두지 않는다 — 대상이 4개뿐이고 모두 단일 공용 primitive라
+     (DialogContent · AlertDialogContent · PopoverContent · AdminShell `<main>`) 그 자리에
+     `focus-visible:outline-0` + 이유 주석을 두는 편이 호출부에서 바로 보인다. 규칙과 닫힌 목록은
+     design.md §Focus. `outline-none`은 어느 쪽에서도 금지(§금지 패턴 6). */
 
   button,
   input,

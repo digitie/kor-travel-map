@@ -34,6 +34,13 @@ function DialogClose({ ...props }: DialogPrimitive.Close.Props) {
 /**
  * 화면 중앙(상단 정렬) 팝업. 스크롤은 backdrop(viewport) 영역에서. panel 표면은 다른
  * elevated surface와 같은 `bg-card` + hairline + `rounded-panel`, 그림자는 `shadow-modal`만.
+ *
+ * `focus-visible:outline-0` — 패널은 `tabIndex=-1`로 **프로그램적 포커스만** 받는 컨테이너다
+ * (열릴 때 base-ui가 여기로 포커스를 옮긴다). 키보드로 열면 `@layer base`의 링이 다이얼로그
+ * 전체를 두르는데, 조작 가능한 요소가 아니라 상태 변화는 패널 등장·scrim이 이미 알린다.
+ * `outline-none`은 쓰지 않는다 — tailwind v4에서 `--tw-outline-style: none`이 요소의 outline
+ * style 자체를 죽여 이후 어떤 focus-visible 선언으로도 링을 되살릴 수 없다(design.md §금지 패턴 6).
+ * `outline-0`은 폭만 0이라 style 오염이 없고, 패널 안의 컨트롤은 base 레시피의 링을 그대로 받는다.
  */
 function DialogContent({
   className,
@@ -54,7 +61,7 @@ function DialogContent({
           data-slot="dialog-content"
           data-motion="crossfade"
           className={cn(
-            "w-full max-w-lg rounded-panel border border-border bg-card text-text-primary shadow-modal",
+            "w-full max-w-lg rounded-panel border border-border bg-card text-text-primary shadow-modal focus-visible:outline-0",
             OVERLAY_POPUP_MOTION_CLASS,
             className
           )}

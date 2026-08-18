@@ -366,8 +366,14 @@ function DagsterRunDetail({ runId }: { runId: string }) {
             ))}
           </ul>
           {data.event_has_more ? (
+            /*
+              P1-5: 전환 중에는 native `disabled` 대신 `loading` — 방금 누른 버튼이 탭 순서에서
+              빠지면 포커스가 body로 떨어져 돌아갈 자리를 잃는다. cursor가 없어 구조적으로 못
+              넘기는 경우만 진짜 disabled다.
+            */
             <Button
-              disabled={!data.event_cursor || detail.isFetching}
+              disabled={!data.event_cursor}
+              loading={Boolean(data.event_cursor) && detail.isFetching}
               size="sm"
               type="button"
               variant="outline"

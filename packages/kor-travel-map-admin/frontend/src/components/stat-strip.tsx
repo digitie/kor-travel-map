@@ -14,7 +14,7 @@ type StatStripItem = {
   label: string;
   /** 숫자면 ko-KR 천 단위로, null/undefined면 `—`. ReactNode(예: `1.2 GB`)도 허용. */
   value: React.ReactNode | number | null | undefined;
-  /** 값 뒤 단위(`건`, `%`) — 값보다 작은 활자. */
+  /** 값 뒤 단위(`건`, `%`) — 값보다 작은 활자. **값이 없으면(`—`) 단위도 함께 사라진다.** */
   unit?: string;
   /** 값 아래 한 줄(변화량·마지막 갱신·상태 문구). StatusBadge를 넣어도 된다. */
   caption?: React.ReactNode;
@@ -55,6 +55,15 @@ function renderValue(value: StatStripItem["value"], loading: boolean): React.Rea
   if (value === null || value === undefined) return formatCount(null);
   if (typeof value === "number") return formatCount(value);
   return value;
+}
+
+/**
+ * 값이 실제로 있는가. 없으면(로딩 중이든, 응답이 null이든) **단위를 함께 감춘다** —
+ * `— 개`/`— 건`은 "0개"만큼이나 없는 값을 있는 것처럼 읽히게 만든다(M36 가짜 값 금지).
+ * 단위는 값의 일부지 라벨의 일부가 아니다.
+ */
+function hasValue(value: StatStripItem["value"], loading: boolean): boolean {
+  return !loading && value !== null && value !== undefined;
 }
 
 /**
@@ -118,7 +127,7 @@ function StatStrip({
                 )}
               >
                 <span className="truncate">{renderValue(item.value, loading)}</span>
-                {item.unit && !loading ? (
+                {item.unit && hasValue(item.value, loading) ? (
                   <span className="text-xs font-medium text-text-secondary">{item.unit}</span>
                 ) : null}
               </span>

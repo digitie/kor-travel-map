@@ -22,6 +22,11 @@ function AlertDialogTrigger({ ...props }: AlertDialogPrimitive.Trigger.Props) {
   return <AlertDialogPrimitive.Trigger data-slot="alert-dialog-trigger" {...props} />
 }
 
+/**
+ * `focus-visible:outline-0` — dialog.tsx와 같은 이유: 패널은 `tabIndex=-1`로 프로그램적 포커스만
+ * 받는 컨테이너라 페이지 폭 링을 그리면 안 된다. `outline-none`은 금지(§금지 패턴 6) — 폭만 0으로
+ * 두는 `outline-0`이라야 `--tw-outline-style` 오염 없이 자식 컨트롤의 링이 살아 있다.
+ */
 function AlertDialogContent({
   className,
   children,
@@ -41,7 +46,7 @@ function AlertDialogContent({
           data-slot="alert-dialog-content"
           data-motion="crossfade"
           className={cn(
-            "w-full max-w-md rounded-panel border border-border bg-card p-5 text-text-primary shadow-modal",
+            "w-full max-w-md rounded-panel border border-border bg-card p-5 text-text-primary shadow-modal focus-visible:outline-0",
             ALERT_POPUP_MOTION_CLASS,
             className
           )}

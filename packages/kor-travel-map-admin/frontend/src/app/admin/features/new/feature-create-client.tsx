@@ -823,7 +823,7 @@ function FeatureCreateFeedback({
 
 /** 지오코딩 후보 행 — SelectableRow 레시피(테두리 없는 행, 선택 = brand-tint + 좌측 마크)를 native button으로. */
 const candidateRowClass =
-  "group/row relative flex w-full cursor-pointer flex-col items-start gap-0.5 rounded-control px-3 py-2 text-left text-sm text-text-primary transition-colors select-none hover:bg-surface-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus active:bg-surface-muted aria-pressed:bg-brand-tint aria-pressed:hover:bg-brand-tint aria-pressed:before:absolute aria-pressed:before:inset-y-2 aria-pressed:before:left-0 aria-pressed:before:w-0.5 aria-pressed:before:rounded-full aria-pressed:before:bg-brand aria-pressed:before:content-['']";
+  "group/row relative flex w-full cursor-pointer flex-col items-start gap-0.5 rounded-control px-3 py-2 text-left text-sm text-text-primary transition-[color,background-color] select-none hover:bg-surface-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus active:bg-surface-muted aria-pressed:bg-brand-tint aria-pressed:hover:bg-brand-tint aria-pressed:before:absolute aria-pressed:before:inset-y-2 aria-pressed:before:left-0 aria-pressed:before:w-0.5 aria-pressed:before:rounded-full aria-pressed:before:bg-brand aria-pressed:before:content-['']";
 
 function FeatureCreateLocationWorkspace({
   applyCandidate,

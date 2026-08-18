@@ -20,7 +20,8 @@ function Card({
       data-size={size}
       className={cn(
         "group/card flex flex-col gap-4 rounded-panel border border-border bg-card p-6 text-sm text-text-primary has-data-[slot=card-footer]:pb-0 has-[>img:first-child]:pt-0 data-[size=sm]:gap-3 data-[size=sm]:p-4 data-[size=sm]:has-data-[slot=card-footer]:pb-0 *:[img:first-child]:rounded-t-panel *:[img:last-child]:rounded-b-panel",
-        "data-interactive:cursor-pointer data-interactive:transition-colors data-interactive:hover:bg-surface-subtle data-interactive:focus-visible:outline-2 data-interactive:focus-visible:outline-offset-2 data-interactive:focus-visible:outline-focus data-interactive:active:bg-surface-muted",
+        // 전환 속성 열거(v4 `transition-colors`는 `outline-color` 포함 → 포커스 링이 페이드인).
+        "data-interactive:cursor-pointer data-interactive:transition-[color,background-color,border-color] data-interactive:hover:bg-surface-subtle data-interactive:focus-visible:outline-2 data-interactive:focus-visible:outline-offset-2 data-interactive:focus-visible:outline-focus data-interactive:active:bg-surface-muted",
         className
       )}
       {...props}

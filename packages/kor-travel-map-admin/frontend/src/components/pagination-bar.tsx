@@ -25,15 +25,21 @@ type PagerButtonProps = {
   children: React.ReactNode;
   /** 페이지 경계 등 구조적으로 없는 이동 — native `disabled`(탭 순서에서 빠지는 게 맞다). */
   unavailable: boolean;
-  /** 전환이 진행 중 — `aria-disabled`만 건다. */
+  /** 전환이 진행 중 — `Button loading`(spinner + `aria-busy`, 포커스 유지)으로 넘긴다. */
   busy: boolean;
   onActivate: () => void;
 };
 
 /**
  * P1-5: 전환 중(`isFetching`)에 native `disabled`를 걸면 방금 누른 버튼이 탭 순서에서 사라져
- * 포커스가 body로 떨어지고, 응답이 오면 돌아갈 자리가 없다. busy는 `aria-disabled` + 클릭
- * early-return 으로만 막는다(포커스 유지). 경계(첫/마지막 페이지)는 원래대로 native disabled.
+ * 포커스가 body로 떨어지고, 응답이 오면 돌아갈 자리가 없다. 그래서 busy는 **`Button loading`**에
+ * 맡긴다 — `aria-busy` + spinner가 "지금 넘기는 중"을 말하고(진행 신호 없이 흐리기만 하면 아무
+ * 일도 일어나지 않은 것처럼 보인다), 활성화는 Button이 막고, 포커스는 누른 자리에 남는다.
+ * 경계(첫/마지막 페이지)는 busy보다 우선해 native disabled를 유지한다 — 구조적으로 없는 이동에는
+ * 진행 표면이 없어야 하고, e2e가 경계 버튼의 `toBeDisabled()`를 계약으로 잡고 있다.
+ * 진행 표시는 **pager 단위**다(전환 중에는 어느 버튼도 응답하지 않는다). 누른 버튼 하나만
+ * 돌리려면 "무엇을 눌렀는지"를 렌더 중에 되돌려야 하는데(`react-hooks/set-state-in-render`),
+ * 그 상태 기계보다 nav `aria-busy`와 같은 축으로 읽히는 편이 정직하다.
  */
 function PagerButton({
   ariaLabel,
@@ -44,9 +50,9 @@ function PagerButton({
 }: PagerButtonProps) {
   return (
     <Button
-      aria-disabled={busy || undefined}
       aria-label={ariaLabel}
       disabled={unavailable}
+      loading={busy && !unavailable}
       size="sm"
       type="button"
       variant="outline"
@@ -204,13 +210,28 @@ type CursorPagerProps = {
   isFetching?: boolean;
   /** 첫 페이지(cursor=null)면 '첫 페이지' 버튼을 비활성. */
   isFirst?: boolean;
+  /**
+   * cursor를 스택으로 쌓아 **뒤로도** 갈 수 있는 목록에서만 준다 — 주면 `첫 페이지`와 `다음`
+   * 사이에 `이전`이 선다. 손으로 만든 pager를 따로 두지 않기 위한 확장이다(M33).
+   *
+   * 핸들러와 가용 여부를 **한 프로퍼티로 묶는다**: 둘은 따로 의미가 없고(핸들러만 주면 항상
+   * 비활성, 플래그만 주면 누를 데가 없다), 최상위 on/off 프로퍼티가 하나 늘면 조합 수가
+   * 두 배가 된다(react-doctor `no-many-boolean-props`). `available`은 PagerButton의
+   * `unavailable`과 같은 축이다.
+   */
+  previous?: { available: boolean; onActivate: () => void };
   ariaPrefix?: string;
+  /** nav 자체의 aria-label 접두어가 버튼 접두어와 다른 화면용. */
+  navAriaPrefix?: string;
   placement?: "top" | "bottom";
   framed?: boolean;
   className?: string;
 };
 
-/** keyset cursor 페이지네이션(이전으로 못 돌아가는 목록)용 — 처음/다음만 제공. */
+/**
+ * keyset cursor 페이지네이션용 — 기본은 처음/다음(cursor만으로는 뒤로 못 간다).
+ * 호출부가 cursor 스택을 들고 있으면 `previous`를 줘서 `이전`까지 켠다.
+ */
 function CursorPager({
   hasNext,
   onFirst,
@@ -218,7 +239,9 @@ function CursorPager({
   summary,
   isFetching = false,
   isFirst = false,
+  previous,
   ariaPrefix,
+  navAriaPrefix,
   placement,
   framed,
   className,
@@ -229,6 +252,7 @@ function CursorPager({
       className={className}
       framed={framed}
       isFetching={isFetching}
+      navAriaPrefix={navAriaPrefix}
       placement={placement}
       summary={summary}
     >
@@ -240,6 +264,16 @@ function CursorPager({
       >
         첫 페이지
       </PagerButton>
+      {previous ? (
+        <PagerButton
+          ariaLabel={paginationAria(ariaPrefix, "이전 페이지")}
+          busy={isFetching}
+          unavailable={!previous.available}
+          onActivate={previous.onActivate}
+        >
+          이전
+        </PagerButton>
+      ) : null}
       <PagerButton
         ariaLabel={paginationAria(ariaPrefix, "다음 페이지")}
         busy={isFetching}

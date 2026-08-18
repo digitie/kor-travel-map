@@ -494,6 +494,7 @@ function EnrichmentReviewTable({
   isPending,
   items,
   pendingReviewId,
+  pendingDecision,
   onDecide,
   onOpenDetail,
 }: {
@@ -502,6 +503,8 @@ function EnrichmentReviewTable({
   isPending: boolean;
   items: EnrichmentReviewRecord[];
   pendingReviewId: string | null;
+  /** 진행 중인 결정이 무엇인지 — 행 안에서 **누른 버튼**을 특정하는 축(mutation variables). */
+  pendingDecision: EnrichmentDecision | null;
   onDecide: (reviewId: string, decision: EnrichmentDecision) => void;
   onOpenDetail: (reviewId: string) => void;
 }) {
@@ -611,6 +614,10 @@ function EnrichmentReviewTable({
           const busy = isPending && pendingReviewId === item.review_id;
           const otherBusy = isPending && !busy;
           const reason = otherBusy ? "다른 결정을 처리하는 중입니다" : undefined;
+          // P1-5: 진행 표면은 **누른 버튼**에 붙는다(dedup과 같은 규약). 그룹 첫 버튼에 고정하면
+          // 방금 누른 버튼이 native disabled가 되어 포커스를 잃고 spinner는 엉뚱한 곳에서 돈다.
+          const busyWith = (value: EnrichmentDecision) =>
+            busy && pendingDecision === value;
           return (
             <div
               className="flex flex-wrap gap-1"
@@ -619,7 +626,7 @@ function EnrichmentReviewTable({
               <Button
                 disabled={isPending}
                 disabledReason={reason}
-                loading={busy}
+                loading={busyWith("accepted")}
                 size="sm"
                 type="button"
                 variant="outline"
@@ -631,6 +638,7 @@ function EnrichmentReviewTable({
               <Button
                 disabled={isPending}
                 disabledReason={reason}
+                loading={busyWith("rejected")}
                 size="sm"
                 type="button"
                 variant="ghost"
@@ -642,6 +650,7 @@ function EnrichmentReviewTable({
               <Button
                 disabled={isPending}
                 disabledReason={reason}
+                loading={busyWith("ignored")}
                 size="sm"
                 type="button"
                 variant="ghost"
@@ -654,7 +663,7 @@ function EnrichmentReviewTable({
         },
       },
     ],
-    [isPending, onDecide, pendingReviewId],
+    [isPending, onDecide, pendingDecision, pendingReviewId],
   );
 
   return (
@@ -946,6 +955,9 @@ export function EnrichmentReviewClient() {
           isLoading={reviews.isLoading}
           isPending={decision.isPending}
           items={items}
+          pendingDecision={
+            decision.isPending ? (decision.variables?.body.decision ?? null) : null
+          }
           pendingReviewId={decision.isPending ? (decision.variables?.reviewKey ?? null) : null}
           onDecide={decide}
           onOpenDetail={openDetail}

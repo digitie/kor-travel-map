@@ -183,7 +183,8 @@ function AreaContainedList({ items }: { items: FeatureSummary[] }) {
       {items.map((item) => (
         <li key={item.feature_id}>
           <Link
-            className="-mx-2 flex flex-col gap-0.5 rounded-control px-2 py-2 text-sm text-text-primary transition-colors hover:bg-surface-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus active:bg-surface-muted"
+            // 전환 속성 열거(v4 `transition-colors`는 `outline-color` 포함 → 포커스 링이 페이드인).
+            className="-mx-2 flex flex-col gap-0.5 rounded-control px-2 py-2 text-sm text-text-primary transition-[color,background-color] hover:bg-surface-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus active:bg-surface-muted"
             href={featureHref(item.feature_id)}
           >
             <span className="flex min-w-0 items-center justify-between gap-2">

@@ -216,7 +216,7 @@ function DataTableColumnHeader({
       type="button"
       data-sorted={sorted || undefined}
       className={cn(
-        "inline-flex h-7 items-center gap-1 rounded-control px-2 text-2xs leading-none font-semibold whitespace-nowrap text-text-secondary transition-colors select-none hover:bg-surface-muted hover:text-text-primary focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus active:translate-y-px data-[sorted]:text-text-primary",
+        "inline-flex h-7 items-center gap-1 rounded-control px-2 text-2xs leading-none font-semibold whitespace-nowrap text-text-secondary transition-[color,background-color,border-color] select-none hover:bg-surface-muted hover:text-text-primary focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus active:translate-y-px data-[sorted]:text-text-primary",
         align === "right" ? "-mr-2 flex-row-reverse" : "-ml-2",
       )}
       onClick={onToggle}
@@ -268,7 +268,9 @@ function handleClickableRowKeyDown<TData>(
 }
 
 /** 클릭 가능한 행의 focus 표면 — 표 안이라 inset outline(이웃 행/스크롤 컨테이너에 잘리지 않게)
- *  + 배경 변화(색 1채널이 아니게). ring은 transition-colors 밖이라 즉시 나타난다. */
+ *  + 배경 변화(색 1채널이 아니게). 링은 즉시 나타나야 하므로(design.md §Focus) 행의 전환은
+ *  `transition-colors`가 아니라 `transition-[color,background-color,border-color]`로 열거한다 —
+ *  tailwind v4의 `transition-colors`는 `outline-color`를 포함해서 링 색이 100ms 페이드인 된다. */
 const CLICKABLE_ROW_CLASS =
   "cursor-pointer focus-visible:bg-surface-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus active:bg-surface-muted"
 
@@ -755,7 +757,7 @@ function VirtualizedTable<TData>({
                   data-state={active ? "selected" : undefined}
                   role="row"
                   className={cn(
-                    "absolute flex w-full border-b border-border transition-colors hover:bg-surface-subtle data-[state=selected]:bg-brand-tint",
+                    "absolute flex w-full border-b border-border transition-[color,background-color,border-color] hover:bg-surface-subtle data-[state=selected]:bg-brand-tint",
                     onRowClick && CLICKABLE_ROW_CLASS,
                   )}
                   style={{ transform: `translateY(${virtualRow.start}px)` }}

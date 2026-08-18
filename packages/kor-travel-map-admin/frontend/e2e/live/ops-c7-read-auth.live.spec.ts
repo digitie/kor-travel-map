@@ -966,8 +966,10 @@ async function expectPipelineOverview(
   });
   await expect(strip).toBeVisible(READY);
   await expectKpiValue(strip, "활성 작업", overview.activeOperations);
-  await expectKpiValue(strip, "대기", overview.queued);
-  await expectKpiValue(strip, "실행 중", overview.running);
+  // 상태 축 KPI의 낱말은 tone table 정본이다 — "대기"는 pending 전용이라 queued는 "실행 대기",
+  // running은 실행 행 배지와 같은 "실행중"(src/lib/status-label.ts).
+  await expectKpiValue(strip, "실행 대기", overview.queued);
+  await expectKpiValue(strip, "실행중", overview.running);
   await expectKpiValue(strip, "최근 24시간 실패", overview.failedOperations24h);
 
   const dagsterLabel = {
@@ -987,7 +989,10 @@ async function expectKpiValue(
   label: string,
   value: number,
 ): Promise<void> {
-  const labelNode = strip.getByText(label, { exact: true });
+  // StatStrip은 라벨을 <dt>, 값을 <dd>에 둔다. (a) 라벨은 <dt>로 스코프한다 — 상태 축 낱말은
+  // 배지와 같은 문자열이라 스트립 전체 텍스트 검색은 두 개를 잡는다. (b) 값은 <dt>의 부모
+  // (항목 컨테이너)에서 찾는다 — 구 MetricItem은 한 div 안에 라벨/값이 같이 있었다.
+  const labelNode = strip.locator("dt").filter({ hasText: label });
   await expect(labelNode).toHaveCount(1);
   await expect(
     labelNode.locator("..").getByText(formatCount(value), { exact: true }),

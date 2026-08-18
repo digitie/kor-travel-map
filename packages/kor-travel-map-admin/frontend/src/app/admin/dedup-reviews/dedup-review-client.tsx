@@ -716,6 +716,8 @@ function useDedupReviewColumns({
   decisionPending,
   mergeKey,
   pendingReviewId,
+  pendingDecision,
+  pendingMasterFeatureId,
   onDecide,
   onMerge,
   onSelectMerge,
@@ -723,6 +725,9 @@ function useDedupReviewColumns({
   decisionPending: boolean;
   mergeKey: string | null;
   pendingReviewId: string | null;
+  /** 진행 중인 결정이 무엇인지 — 행 안에서 **누른 버튼**을 특정하는 축(mutation variables). */
+  pendingDecision: DedupDecision | null;
+  pendingMasterFeatureId: string | null;
   onDecide: (reviewId: string, decision: DedupDecision) => void;
   onMerge: (reviewId: string, masterFeatureId?: string) => void;
   onSelectMerge: (reviewId: string | null) => void;
@@ -814,6 +819,12 @@ function useDedupReviewColumns({
           const busy = decisionPending && pendingReviewId === item.review_id;
           const reason =
             decisionPending && !busy ? "다른 결정을 처리하는 중입니다" : undefined;
+          // P1-5: 진행 표면은 **누른 버튼**에 붙어야 한다. 그룹 첫 버튼에 고정하면 방금 누른
+          // 버튼은 native disabled가 되어 포커스를 잃고(돌아갈 자리가 사라진다) spinner는
+          // 엉뚱한 버튼에서 돈다. "무엇을 눌렀는지"의 정본은 mutation variables다.
+          const busyWith = (value: DedupDecision) => busy && pendingDecision === value;
+          const busyMerge = (masterFeatureId: string | null) =>
+            busyWith("merged") && pendingMasterFeatureId === masterFeatureId;
           if (mergeKey === item.review_id) {
             return (
               <div
@@ -827,7 +838,7 @@ function useDedupReviewColumns({
                   <Button
                     disabled={decisionPending}
                     disabledReason={reason}
-                    loading={busy}
+                    loading={busyMerge(item.feature_a.feature_id)}
                     size="sm"
                     type="button"
                     variant="outline"
@@ -840,6 +851,7 @@ function useDedupReviewColumns({
                   <Button
                     disabled={decisionPending}
                     disabledReason={reason}
+                    loading={busyMerge(item.feature_b.feature_id)}
                     size="sm"
                     type="button"
                     variant="outline"
@@ -849,12 +861,21 @@ function useDedupReviewColumns({
                   >
                     <MasterCandidateLabel feature={item.feature_b} prefix="B" />
                   </Button>
+                  {/*
+                    A · B · 자동은 같은 축의 **동등한 세 선택지**라 셋 다 `outline`이다.
+                    `secondary`(brand-tint 채움 + `border-brand`)는 design.md §CTA voice에서
+                    **토글의 눌린 상태 전용**이다 — 이 시스템의 brand tint는 어디서나 "선택됨"을
+                    뜻하는데(SelectableRow 선택 행 · Checkbox `data-checked` · field
+                    `has-data-checked`), 아직 아무것도 고르지 않은 자리에서 한 버튼만 tint를
+                    쓰면 "이미 자동이 선택돼 있다"로 잘못 읽힌다.
+                  */}
                   <Button
                     disabled={decisionPending}
                     disabledReason={reason}
+                    loading={busyMerge(null)}
                     size="sm"
                     type="button"
-                    variant="secondary"
+                    variant="outline"
                     onClick={() => onMerge(item.review_id)}
                   >
                     자동 선정
@@ -881,7 +902,7 @@ function useDedupReviewColumns({
               <Button
                 disabled={decisionPending}
                 disabledReason={reason}
-                loading={busy}
+                loading={busyWith("accepted")}
                 size="sm"
                 type="button"
                 variant="outline"
@@ -893,6 +914,7 @@ function useDedupReviewColumns({
               <Button
                 disabled={decisionPending}
                 disabledReason={reason}
+                loading={busyWith("rejected")}
                 size="sm"
                 type="button"
                 variant="ghost"
@@ -915,6 +937,7 @@ function useDedupReviewColumns({
               <Button
                 disabled={decisionPending}
                 disabledReason={reason}
+                loading={busyWith("ignored")}
                 size="sm"
                 type="button"
                 variant="ghost"
@@ -927,7 +950,16 @@ function useDedupReviewColumns({
         },
       },
     ],
-    [decisionPending, mergeKey, onDecide, onMerge, onSelectMerge, pendingReviewId],
+    [
+      decisionPending,
+      mergeKey,
+      onDecide,
+      onMerge,
+      onSelectMerge,
+      pendingDecision,
+      pendingMasterFeatureId,
+      pendingReviewId,
+    ],
   );
 }
 
@@ -1137,6 +1169,12 @@ export function DedupReviewClient() {
     decisionPending: decision.isPending,
     mergeKey: state.mergeKey,
     pendingReviewId: decision.isPending ? (decision.variables?.reviewKey ?? null) : null,
+    pendingDecision: decision.isPending
+      ? (decision.variables?.body.decision ?? null)
+      : null,
+    pendingMasterFeatureId: decision.isPending
+      ? (decision.variables?.body.master_feature_id ?? null)
+      : null,
     onDecide: decide,
     onMerge: merge,
     onSelectMerge: selectMerge,

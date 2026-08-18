@@ -1744,10 +1744,15 @@ test.describe("/ops/pipeline", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "파이프라인" }),
     ).toBeVisible();
-    await expect(page.getByText("활성 작업")).toBeVisible();
-    await expect(page.getByText("대기", { exact: true })).toBeVisible();
-    await expect(page.getByText("실행 중", { exact: true })).toBeVisible();
-    await expect(page.getByText("최근 24시간 실패")).toBeVisible();
+    // KPI 라벨은 <dt>로 스코프한다 — 상태 축 라벨이 tone table의 낱말("실행 대기"/"실행중")을
+    // 그대로 쓰므로 같은 스트립 안 Dagster sensor 배지·실행 행 배지와 문자열이 겹친다
+    // ("대기"는 pending 전용이라 queued가 "실행 대기"로 좁혀졌다 — src/lib/status-label.ts).
+    const kpiLabels = page
+      .getByRole("region", { name: "파이프라인 상태 스트립" })
+      .locator("dt");
+    for (const label of ["활성 작업", "실행 대기", "실행중", "최근 24시간 실패"]) {
+      await expect(kpiLabels.filter({ hasText: label })).toBeVisible();
+    }
 
     // C3b (a): root 2건 응답 → 표시 행 2행. descendant job은 별도 행이 아니다.
     const requestRow = page.getByTestId(`pipeline-execution-row-${REQUEST_ID}`);

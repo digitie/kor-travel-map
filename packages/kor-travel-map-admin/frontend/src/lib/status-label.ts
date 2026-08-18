@@ -10,6 +10,11 @@
  *
  * select/filter option도 raw enum을 쓰지 않는다 — `{ value, label: statusLabel(value) }`로 만든다.
  *
+ * **화면 문구의 정본은 여기 하나다.** 배지·옵션·컬럼뿐 아니라 KPI/`StatStrip` 라벨도
+ * `statusLabel(status)`를 거친다. 대시보드에서 라벨을 손으로 적으면 같은 축이 자리마다 다른
+ * 단어로 보인다 — /ops/pipeline이 `queued` 수를 KPI에선 "대기", 같은 화면 실행 행 배지에선
+ * "실행 대기"로 적어 두 단어가 한 화면에 공존했다(design.md §Status colour semantics).
+ *
  * tone 의미(design.md):
  *  success     = 활성/완료/ready
  *  warning     = 검토 필요/대기(사람의 결정을 기다림)/quarantine/저하
@@ -26,6 +31,9 @@
  *  - "확인됨"   = acknowledged(사람이 인지함, info) 전용. 결과 확정인 confirmed는 "확인 완료".
  * pending/acknowledged 쪽을 고정한 이유는 두 문자열이 live e2e 계약이기 때문이다
  * (e2e/live/reviews-decide-write.live.spec.ts · e2e/live/admin-issues-actions-write.live.spec.ts).
+ * 규약은 `status-label.test.ts`가 잠근다 — 라벨 → tone이 함수여야 하고(한 라벨이 두 tone을 갖지
+ * 않는다), 라벨과 tone의 키 집합이 정확히 같아야 한다. 새 상태를 추가할 때 둘 중 하나만 적으면
+ * 실패한다.
  *
  * 키는 toLowerCase 후 하이픈을 언더스코어로 정규화한 형태로 보관한다
  * (예: "dry-run"/"dry_run" 모두 매칭). 컴포넌트 파일은 이 모듈만 import한다.

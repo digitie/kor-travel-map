@@ -14,6 +14,7 @@ import {
 import { AdminShell } from "@/components/admin-shell";
 import { useConfirm } from "@/components/confirm-dialog";
 import { EntityLink } from "@/components/entity-link";
+import { CursorPager } from "@/components/pagination-bar";
 import { SectionCard } from "@/components/section-card";
 import { StatusBadge } from "@/components/status-badge";
 import {
@@ -325,6 +326,10 @@ function usePoiCacheTargetsClientController() {
     );
   };
 
+  const goToFirstPage = () => {
+    setCursorStack([]);
+  };
+
   const goToNextPage = () => {
     const nextCursor = targets.data?.meta.page?.next_cursor;
     if (nextCursor) {
@@ -341,6 +346,7 @@ function usePoiCacheTargetsClientController() {
     errors,
     externalSystem,
     externalSystemRef,
+    goToFirstPage,
     goToNextPage,
     goToPreviousPage,
     lat,
@@ -375,66 +381,12 @@ function usePoiCacheTargetsClientController() {
   };
 }
 
-/**
- * keyset cursor 스택 pager(이전으로 돌아갈 수 있는 목록) — 공용 CursorPager는 `첫 페이지/다음`만
- * 제공하므로, 같은 PagerShell 형태(flat 행 · 요약 · sm outline 버튼)로 `이전/다음`을 렌더한다.
- */
-function TargetsPager({
-  page,
-  rowCount,
-  hasPrevious,
-  hasNext,
-  isFetching,
-  onPrevious,
-  onNext,
-}: {
-  page: number;
-  rowCount: number | null;
-  hasPrevious: boolean;
-  hasNext: boolean;
-  isFetching: boolean;
-  onPrevious: () => void;
-  onNext: () => void;
-}) {
-  return (
-    <nav
-      aria-busy={isFetching || undefined}
-      aria-label="targets pagination"
-      className="flex flex-col gap-2 py-1 sm:flex-row sm:items-center sm:justify-between"
-      data-slot="pager"
-    >
-      <span className="text-xs text-text-secondary tabular-nums">
-        page {page} · {formatCount(rowCount)} rows
-      </span>
-      <div className="flex flex-wrap items-center gap-1">
-        <Button
-          disabled={!hasPrevious || isFetching}
-          size="sm"
-          type="button"
-          variant="outline"
-          onClick={onPrevious}
-        >
-          이전
-        </Button>
-        <Button
-          disabled={!hasNext || isFetching}
-          size="sm"
-          type="button"
-          variant="outline"
-          onClick={onNext}
-        >
-          다음
-        </Button>
-      </div>
-    </nav>
-  );
-}
-
 function PoiCacheTargetsClientView({
   cursorStack,
   errors,
   externalSystem,
   externalSystemRef,
+  goToFirstPage,
   goToNextPage,
   goToPreviousPage,
   lat,
@@ -536,14 +488,28 @@ function PoiCacheTargetsClientView({
               isRowActive={(target) => target.target_id === selectedTargetId}
               onRowClick={(target) => setSelectedTargetId(target.target_id)}
             />
-            <TargetsPager
+            {/*
+              cursor 스택 목록이라 뒤로도 간다 — 손으로 만든 pager 대신 공용 CursorPager의
+              `previous` 확장을 쓴다(M33: pager idiom은 두 개뿐). nav 라벨만 접두어를 받아
+              기존 `targets pagination` 계약을 지키고, 버튼 접근성 이름은 다른 목록과 같다.
+            */}
+            <CursorPager
               hasNext={Boolean(targets.data?.meta.page?.next_cursor)}
-              hasPrevious={cursorStack.length > 0}
               isFetching={targets.isFetching}
-              page={cursorStack.length + 1}
-              rowCount={targets.data ? targets.data.data.items.length : null}
+              isFirst={cursorStack.length === 0}
+              navAriaPrefix="targets"
+              previous={{
+                available: cursorStack.length > 0,
+                onActivate: goToPreviousPage,
+              }}
+              summary={
+                <>
+                  page {cursorStack.length + 1} ·{" "}
+                  {formatCount(targets.data ? targets.data.data.items.length : null)} rows
+                </>
+              }
+              onFirst={goToFirstPage}
               onNext={goToNextPage}
-              onPrevious={goToPreviousPage}
             />
           </SectionCard>
 
