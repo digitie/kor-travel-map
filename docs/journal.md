@@ -30,6 +30,18 @@
   감쌌다 — 이제 merge 통합 테스트 전체가 실제 role로 돈다.
 - 배포 선행: orchestrator `.env` `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`→`0222_tvn40a_merge_runtime_role`.
 
+## 2026-08-18 — T-VN-41 #975 rebase pair의 dead-letter recovery 증명 보강
+
+- 적대 런타임 재리뷰의 P2를 반영해, dead-letter를 replay한 직후에도 stream은 여전히
+  `blocked`이고 consumer는 disable되어 claim이 `consumer_disabled`로 거부됨을 두 integration
+  경로에서 고정했다. consumer 재개는 checksum reconciliation 성공 뒤에만 가능하다.
+- mid-claim recovery는 poison event와 뒤따르는 `cache_target.reconciled`를 같은 claim에서 끝까지
+  ack하고 다음 claim이 비었음을 확인한다. 따라서 prefix-ack 불변식과 relay 순서의 회복을 끝까지
+  검증한다.
+- 기존 `77821001`/`e8e0fec` 후보 E2E 증거는 당시 pair의 이력 증거로만 보존한다. 현재 rebase
+  head와 새 PinVi pin에는 재사용할 수 없으므로, 원격 CI가 녹색이 된 뒤 새 immutable image·n150
+  isolated Live UI E2E·artifact digest로 후보 증거를 다시 만든다. #975는 계속 draft·미병합이다.
+
 ## 2026-08-18 — T-VN-41 #975 rebase 뒤 stream recovery 회귀 정렬
 
 - #975 후보 브랜치를 `main` `ff25c397` 위로 rebase했다. permanent NACK가 consumer를
@@ -58,7 +70,8 @@
 - 열린 작업 목록은 T-VN-41A/B/C를 `[~]`로 정렬했다. 정확한 source 쌍의 격리 Live UI 복구와
   증거 결박·적대 재리뷰는 통과했다. 이후 #975 PostGIS CI에서 기존 integration test 2건이
   permanent NACK의 새 consumer disable 계약과 충돌한 것을 확인해, 실제 reconciliation 재개
-  경로를 검증하도록 수정 중이다. 후보 E2E 증거 자체는 유효하며 #975는 미병합 상태다.
+  경로를 검증하도록 수정 중이다. 후보 E2E 증거는 당시 exact pair에만 유효한 이력이며, rebase된
+  새 pair의 머지 근거로는 사용할 수 없다. #975는 미병합 상태다.
 - `tasks-done.md`는 완료·폐기·병합 이력 전용이므로, 아직 열린 T-VN-41 항목을 이관하지 않았다.
   후보 receipt는 final main C7이나 production consumer enable을 뜻하지 않는다.
 

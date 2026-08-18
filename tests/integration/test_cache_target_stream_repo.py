@@ -1347,6 +1347,23 @@ async def test_permanent_nack_dead_letter_blocks_later_order_and_replays_same_ev
         expected_delivery_version=detail.delivery_version,
     )
     assert replayed.status == "retry"
+    replay_control = await get_cache_target_stream(
+        migrated_session,
+        external_system=_SYSTEM,
+    )
+    assert replay_control is not None
+    assert replay_control.status == "blocked"
+    assert replay_control.blocked_event_id == blocked_event.event_id
+    assert not replay_control.consumer_enabled
+    with pytest.raises(CacheTargetStreamConflict) as replay_blocked:
+        await claim_cache_target_events(
+            migrated_session,
+            external_system=_SYSTEM,
+            consumer_id=_CONSUMER,
+            idempotency_key="82000000-0000-0000-0000-000000000007",
+            limit=2,
+        )
+    assert replay_blocked.value.code == "consumer_disabled"
     completed = await _resume_stream_after_dead_letter_replay(
         migrated_session,
         key="82000000-0000-0000-0000-000000000005",
@@ -1507,6 +1524,23 @@ async def test_mid_claim_dead_transition_requires_acked_prefix_then_replays(
         expected_delivery_version=dead.delivery_version,
     )
     assert replayed.status == "retry"
+    replay_control = await get_cache_target_stream(
+        migrated_session,
+        external_system=_SYSTEM,
+    )
+    assert replay_control is not None
+    assert replay_control.status == "blocked"
+    assert replay_control.blocked_event_id == poison.event_id
+    assert not replay_control.consumer_enabled
+    with pytest.raises(CacheTargetStreamConflict) as replay_blocked:
+        await claim_cache_target_events(
+            migrated_session,
+            external_system=_SYSTEM,
+            consumer_id=_CONSUMER,
+            idempotency_key="85000000-0000-0000-0000-000000000004",
+            limit=2,
+        )
+    assert replay_blocked.value.code == "consumer_disabled"
     completed = await _resume_stream_after_dead_letter_replay(
         migrated_session,
         key="85000000-0000-0000-0000-000000000003",
@@ -1525,6 +1559,30 @@ async def test_mid_claim_dead_transition_requires_acked_prefix_then_replays(
         "cache_target.reconciled",
     ]
     assert recovery.events[1].payload["request_id"] == completed.request_id
+    await ack_cache_target_events(
+        migrated_session,
+        consumer_id=_CONSUMER,
+        claim_id=recovery.claim_id,
+        lease_token=recovery.lease_token,
+        through_cursor=recovery.events[-1].cursor,
+        applied=[
+            CacheTargetAppliedReceipt(
+                event.event_id,
+                event.payload_fingerprint,
+            )
+            for event in recovery.events
+        ],
+    )
+    assert (
+        await claim_cache_target_events(
+            migrated_session,
+            external_system=_SYSTEM,
+            consumer_id=_CONSUMER,
+            idempotency_key="85000000-0000-0000-0000-000000000005",
+            limit=2,
+        )
+        is None
+    )
 
 
 async def _apply_snapshot_source(
