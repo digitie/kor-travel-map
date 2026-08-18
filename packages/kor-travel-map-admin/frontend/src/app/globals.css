@@ -44,6 +44,16 @@
   }
 }
 
+/* Card의 `data-interactive` opt-in(실제로 클릭되는 카드만) — 이름 있는 data variant는
+   shadcn 스타일시트를 import하지 않으므로 이 파일이 직접 소유한다
+   (`tests/unit/test_frontend_dependency_security.py::test_frontend_owns_every_named_shadcn_css_token_it_uses`).
+   `data-interactive="false"`는 opt-out으로 취급한다 — data-checked/data-active와 같은 규약. */
+@custom-variant data-interactive {
+  &:where([data-interactive]:not([data-interactive="false"])) {
+    @slot;
+  }
+}
+
 @custom-variant data-horizontal {
   &:where([data-orientation="horizontal"]) {
     @slot;
