@@ -237,6 +237,50 @@ DDL은 남고 stamp만 `0089`인** 상태가 된다. 재시도는 `0090`부터 �
 359MB) 조건에 따라 `source_records`(733k / 1.25GB)를 재작성한다. `0090`은 두 테이블에
 non-concurrent UNIQUE를 만든다. 유지보수 창에서 돌린다.
 
+## T-VN-40 (0202~0223) prod 배포 — 실행 기록과 선행조건 (2026-08-18)
+
+prod(n150)를 `0104_tvn36_final_fence` → `0223_tvn40_identity_mappings`로 올린 실제 절차다.
+manager의 `ensure_target`은 production 모드를 거부한다("production ensure is not permitted;
+manage this service directly on the host instead") — **sanctioned 경로는 manager의 compose
+파일/`.env`로 host에서 직접 `docker compose`를 도는 것**이고, `ktdctl pinvi-pair rebuild-pinned`는
+파괴적이라 쓰지 않는다.
+
+```bash
+cd ~/kor-travel-docker-manager
+# 0) 읽기 전용 precheck — scripts/tvn40_identity_mapping_precheck.sql (전부 0이어야 한다)
+# 1) 복구점: pg_dump -Fc + .sha256 (~/backups/kor_travel_map_<head>_<tag>_<ts>.dump), .env 백업
+# 2) 소스 스냅샷: git clone --depth 1 --branch main → ~/ktm-src-<full-sha> (.git 제거)
+#    .env(root 0600) 3키: KOR_TRAVEL_MAP_REPO_DIR / _GIT_COMMIT / _MIGRATION_EXPECTED_HEAD
+sudo docker compose --env-file .env -f docker-compose.yml -f docker-compose.override.yml   build kor-travel-map-api kor-travel-map-ui kor-travel-map-dagster kor-travel-map-dagster-daemon
+# 3) **선행조건 A** — 0202 이후는 ktm_curation_* NOLOGIN role 4개를 요구한다
+sudo docker compose --env-file .env -f docker-compose.yml -f docker-compose.override.yml   --profile bootstrap run --rm --no-deps kor-travel-map-db-role-bootstrap
+# 4) api 재생성 → entrypoint가 alembic upgrade head (0104→0223 단일 트랜잭션)
+sudo docker compose --env-file .env -f ... up -d --no-deps kor-travel-map-api
+# 5) 나머지 서비스
+sudo docker compose --env-file .env -f ... up -d kor-travel-map-ui kor-travel-map-dagster kor-travel-map-dagster-daemon
+```
+
+**선행조건 A — DB role bootstrap.** `0202`의 `_APPLICATION_ROLE_ASSERTIONS_SQL`은
+`ktm_curation_command_owner/_audit_writer/_admin_executor/_provider_executor` 4개를 포함한
+NOLOGIN role 8개를 exact로 요구한다. 없으면 `application NOLOGIN role is missing or unsafe`
+(42501)로 **retry 30회 내내** 실패한다(영구 오류라 retry가 무의미하다). 배포 대상 소스의
+`docker/postgres-role-bootstrap.sh`를 위 bootstrap profile one-shot으로 먼저 돌린다 — idempotent다.
+
+**선행조건 B — PinVi curation service token pair.** manager compose는 Map API에
+`KOR_TRAVEL_MAP_API_PINVI_CURATION_{SNAPSHOT,CUTOVER_MAPPING}_TOKEN_SHA256`을 `${NAME:-}`로
+**항상** 주입한다. manager `.env`에 raw pair
+(`PINVI_KOR_TRAVEL_MAP_CURATION_{SNAPSHOT,CUTOVER_MAPPING}_TOKEN`, 각 32자 이상·공백 없음·서로 다름)를
+두면 manager가 같은 frozen 환경에서 sha256을 파생한다. raw 없이 digest만 주입하는 우회는 manager가
+거부한다. Map API는 빈 문자열을 unset으로 정규화한다(2026-08-18 hotfix 전에는 `string_too_short`로
+**기동 자체가 막혀** 재시작 루프였다).
+
+**실행 결과(2026-08-18).** 백업 `kor_travel_map_0104_pre-tvn40-1_20260818T082752Z.dump`(614MB).
+`0223`이 남긴 manifest는 `total=4424 by_kind={'legacy_projection': 4424}`이고, 사후 확인에서
+`count(curated_features) = count(ops.curation_cutover_identity_mappings) = 4424`,
+`source_row_hash` 재계산 불일치 0, dangling 0, `legacy_projection_id` 포인터 불일치 0,
+0222 procedure 5개 owner=`ktm_curation_command_owner`/SECURITY DEFINER, dagster runtime EXECUTE=false,
+legacy 표 runtime 권한 SELECT only, 4 컨테이너 healthy(restart 0)였다.
+
 ## 환경변수
 
 루트 `.env`와 API 전용 `packages/kor-travel-map-api/.env`는 배포 환경의 secret store,
