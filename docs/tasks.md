@@ -866,9 +866,9 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
       help에 "DSN은 API runtime 로그인" 명시(superuser/migrator DSN은 42501).
   - 머지됨(적대 리뷰 2명 hold · CI 4 workflow green · n150 전체 통합 931 passed/env-only 6 failed).
     **①~② 전에 머지돼야 한다**는 조건 충족.
-- [~] **T-VN-40-mapping** — `ops.curation_cutover_identity_mappings` 적재 migration `0223_tvn40_identity_mappings`
+- [x] **T-VN-40-mapping** — `ops.curation_cutover_identity_mappings` 적재 migration `0223_tvn40_identity_mappings`
   (설계 §6.2 step 3·§6.3 · [설계 문서](reports/t-vn-40-identity-mapping-loader-design-2026-08-18.md), 적대 리뷰 2명 hold).
-  PinVi backfill의 입력이다. **draft PR #996** — 코드 적대 리뷰 2명(data/SQL · ops/deploy) 둘 다 hold, P2 반영:
+  PinVi backfill의 입력이다. **PR #996 → main `fbc31f2f`(2026-08-18)** — 코드 적대 리뷰 2명(data/SQL · ops/deploy) 둘 다 hold, P2 반영:
   `SET LOCAL lock_timeout='30s'` · `api-entrypoint.sh` loader 중단 시 즉시 종료(30회 재시도 없음) ·
   `scripts/tvn40_identity_mapping_precheck.sql`(prod 실측 전부 0 · TEMP 권한 ok) · merge guard 회귀 · 0104에서
   seed된 중단 형태가 0202~0223 전체를 롤백함을 dedicated DB로 실측. 통합 13 · 유닛(entrypoint 포함).
