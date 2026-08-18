@@ -481,8 +481,12 @@ generic PinVi request는 executor가 provider 호출 전에 terminal fail-close�
 
 `external_system="pinvi"`로 위 endpoint를 호출하면 422이다. PinVi consumer가
 요청을 만들 때는 `POST /v1/service/refresh-requests`에 ServiceToken과
-`Idempotency-Key`를 보내며, active target마다 현 stream `restore_epoch`의 active
-source head가 없으면 `refresh_source_head_missing` 409으로 fail-close한다.
+`Idempotency-Key`를 보내며, **exact key set** 계약이다: 요청 key 중 활성 target이 아닌 것(없음·삭제·
+`update_enabled=false`·`refresh_policy=disabled`)이 하나라도 있으면 `refresh_target_inactive` 409로,
+active target마다 현 stream `restore_epoch`의 active source head가 없으면
+`refresh_source_head_missing` 409으로 fail-close한다(둘 다 request 행·outbox event를 만들지 않는다).
+실행 도중 restore fence가 지나가면 request는 ledger에서 `failed`/`cancelled`로 끝나되 옛 epoch의
+relay event는 내지 않는다 — consumer는 fence 뒤 reconciliation으로 재동기화한다.
 
 처리:
 

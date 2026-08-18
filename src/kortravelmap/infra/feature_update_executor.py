@@ -819,13 +819,29 @@ async def _finish_failed_execution(
             if failed is None:
                 raise _FeatureUpdateExecutionStopped
             if append_cache_target_status_events:
-                await append_cache_target_refresh_status_events(
-                    session,
-                    request_id=failed.request_id,
-                    job_id=failed.job_id,
-                    status="failed",
-                    error_code=event_code,
-                )
+                # 실행 도중 restore fence가 지나가면 captured member의 epoch는 stale이고
+                # `_append_result_event`가 protocol violation을 낸다. 그때 terminalization까지
+                # 함께 굴러떨어지면 request가 `running`으로 남아 dataset op 소유권을 쥔 채
+                # 뒤 요청을 막는다(#975 적대 재리뷰 P1). fence 뒤 stream은 새 epoch이고 옛
+                # epoch event는 설계상 거부되므로(runbook §5-5) failed 상태만 ledger에 남기고
+                # relay event 없이 끝낸다. savepoint로 감싸 append 실패가 바깥 transaction을
+                # 오염시키지 않게 한다.
+                try:
+                    async with session.begin_nested():
+                        await append_cache_target_refresh_status_events(
+                            session,
+                            request_id=failed.request_id,
+                            job_id=failed.job_id,
+                            status="failed",
+                            error_code=event_code,
+                        )
+                except CacheTargetRefreshProtocolViolation as violation:
+                    _LOG.warning(
+                        "cache target refresh failed status persisted without relay event — "
+                        "restore fence moved during execution: request_id=%s detail=%s",
+                        failed.request_id,
+                        violation,
+                    )
             if event_code is not None:
                 for import_job_dataset_id in await _terminal_event_member_ids(
                     session,

@@ -2809,3 +2809,132 @@ async def test_scope_checkpoint_commits_before_real_cancellation_marker_wins(
         item["dataset_key"]
         for item in stored.matched_scope["executed_provider_scopes"]
     ] == ["phase-a"]
+
+
+async def test_restore_fence_during_run_with_provider_failure_still_terminalizes(
+    migrated_engine: AsyncEngine,
+    execution_session: AsyncSession,
+) -> None:
+    """runner 도중 restore fence + provider 실패 → request는 `failed`로 끝나야 한다.
+
+    #975 적대 재리뷰 P1: `_finish_failed_execution`의 status event append가 stale epoch로
+    protocol violation을 내면 terminalization 트랜잭션까지 굴러떨어져 request가 `running`으로
+    남고 dataset op 소유권을 쥔 채 뒤 요청을 막았다. fence 뒤 옛 epoch event는 설계상 거부되므로
+    relay event 없이(queued/running만) failed 상태만 남는 것이 맞다.
+    """
+    from kortravelmap.infra.cache_target_stream_repo import (
+        advance_cache_target_restore_fence,
+        get_cache_target_stream,
+    )
+    from kortravelmap.infra.domain_command_repo import (
+        canonical_domain_command_fingerprint,
+        create_domain_command_claim,
+    )
+
+    seed = await _load_seed(execution_session, "EXEC-FENCE-THEN-FAIL")
+    membership = await _membership(
+        execution_session,
+        provider=seed.source_record.provider,
+        dataset_key=seed.source_record.dataset_key,
+    )
+    await upsert_provider_refresh_policy(
+        execution_session,
+        provider_dataset_id=membership.provider_dataset_id,
+        source_kind="openapi",
+        expected_revision=None,
+        targeted_policy="allow_targeted",
+    )
+    system = "executor-fence-then-fail"
+    consumer = "executor-test-consumer"
+    await apply_cache_target_source(
+        execution_session,
+        consumer_id=consumer,
+        source_event_id="7b100000-0000-4000-8000-000000000011",
+        idempotency_key="7b200000-0000-4000-8000-000000000011",
+        external_system=system,
+        target_key="k1",
+        restore_epoch=1,
+        source_generation=1,
+        source=make_active_cache_target_source(
+            lon="126.978", lat="37.5665", radius_km="1", update_enabled=True
+        ),
+        occurred_at=datetime(2026, 8, 17, 1, tzinfo=UTC),
+        create_only=True,
+    )
+    request = await create_cache_target_refresh_request(
+        execution_session,
+        principal_id="executor-test-service",
+        consumer_id=consumer,
+        idempotency_key="7b300000-0000-4000-8000-000000000011",
+        external_system=system,
+        target_keys=["k1"],
+        reason="fence then provider failure",
+    )
+    await execution_session.commit()
+
+    async def runner(
+        _session: AsyncSession,
+        scope: ProviderDatasetRefreshScope,
+    ) -> ProviderDatasetRefreshResult:
+        async with AsyncSession(migrated_engine) as fence_session, fence_session.begin():
+            control = await get_cache_target_stream(fence_session, external_system=system)
+            payload = {"external_system": system, "reason": "fence during run"}
+            fingerprint = canonical_domain_command_fingerprint(payload)
+            claim = await create_domain_command_claim(
+                fence_session,
+                actor=f"cache-target:test:{consumer}",
+                operation="cache-target.restore-fence",
+                idempotency_key="7b400000-0000-4000-8000-000000000011",
+                request_fingerprint=fingerprint,
+            )
+            await advance_cache_target_restore_fence(
+                fence_session,
+                external_system=system,
+                consumer_id=consumer,
+                command_id=claim.command_id,
+                expected_restore_epoch=control.restore_epoch,
+                expected_control_version=control.control_version,
+                reason="fence during run",
+                request_fingerprint=fingerprint,
+            )
+        raise RuntimeError("provider exploded after the fence")
+
+    result = await AsyncKorTravelMapClient(
+        migrated_engine
+    ).execute_next_feature_update_request(
+        runner=runner,
+        dagster_run_id="dagster-fence-then-fail",
+    )
+
+    assert result is not None
+    assert result.status == "failed"
+    assert result.error_message is not None
+    assert "provider exploded" in result.error_message
+    stored = await get_update_request(execution_session, request.request_id)
+    assert stored is not None
+    assert stored.status == "failed", "request must not be left running after a fence"
+    refresh_events = (
+        await execution_session.execute(
+            text(
+                """
+                SELECT event_type, payload ->> 'status' AS status
+                FROM ops.poi_cache_target_outbox_events
+                WHERE refresh_request_id = CAST(:request_id AS uuid)
+                ORDER BY relay_order
+                """
+            ),
+            {"request_id": request.request_id},
+        )
+    ).all()
+    # fence 뒤 옛 epoch event는 거부된다 — failed relay event는 나오지 않고 ledger 상태만 남는다.
+    assert [(row.event_type, row.status) for row in refresh_events] == [
+        ("refresh_request.status_changed", "queued"),
+        ("refresh_request.status_changed", "running"),
+    ]
+    # 소유권이 풀렸는지 — dataset op 점유는 import job status IN ('queued','running')로 판정된다
+    # (`assert_feature_update_request_member_available`). failed면 더는 뒤 요청을 막지 않는다.
+    job_status = await execution_session.scalar(
+        text("SELECT status FROM ops.import_jobs WHERE job_id = CAST(:job_id AS uuid)"),
+        {"job_id": stored.job_id},
+    )
+    assert job_status not in ("queued", "running"), job_status

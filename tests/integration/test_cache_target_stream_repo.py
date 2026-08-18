@@ -4083,3 +4083,69 @@ async def test_refresh_member_result_events_are_idempotent_and_transactional(
         )
         == 4
     )
+
+
+@pytest.mark.integration
+async def test_service_refresh_rejects_inactive_or_unknown_keys_at_intake(
+    migrated_session: AsyncSession,
+) -> None:
+    """PinVi service refresh는 exact key set — 활성 target이 아닌 key가 하나라도 있으면 409.
+
+    #975 적대 재리뷰 P1: 예전엔 active key만 member로 capture하고 202/queued를 돌려준 뒤 실행자의
+    exact-set 검사에서 relay event 없이 fail-close했다(consumer는 영원히 기다린다). intake에서
+    `refresh_target_inactive`로 막고 request 행·outbox event를 만들지 않는다.
+    """
+    system = "service-refresh-inactive-key-test"
+    await _apply_snapshot_source(
+        migrated_session,
+        external_system=system,
+        target_key="active-key",
+        event_id="9e100000-0000-4000-8000-000000000001",
+        idempotency_key="9e200000-0000-4000-8000-000000000001",
+    )
+    await apply_cache_target_source(
+        migrated_session,
+        consumer_id=_CONSUMER,
+        source_event_id="9e100000-0000-4000-8000-000000000002",
+        idempotency_key="9e200000-0000-4000-8000-000000000002",
+        external_system=system,
+        target_key="disabled-key",
+        restore_epoch=1,
+        source_generation=1,
+        source=make_active_cache_target_source(
+            lon="126.978", lat="37.5665", radius_km="5", update_enabled=False
+        ),
+        occurred_at=datetime(2026, 7, 31, 18, 0, tzinfo=UTC),
+        create_only=True,
+    )
+    requests_before = await migrated_session.scalar(
+        text("SELECT count(*) FROM ops.feature_update_requests")
+    )
+    events_before = await migrated_session.scalar(
+        text("SELECT count(*) FROM ops.poi_cache_target_outbox_events")
+    )
+    with pytest.raises(CacheTargetStreamConflict) as conflict:
+        await create_cache_target_refresh_request(
+            migrated_session,
+            principal_id="pinvi-service",
+            consumer_id=_CONSUMER,
+            idempotency_key="9e300000-0000-4000-8000-000000000001",
+            external_system=system,
+            target_keys=["active-key", "disabled-key", "never-registered-key"],
+            reason="mixed keys",
+        )
+    assert conflict.value.code == "refresh_target_inactive"
+    assert conflict.value.current == {
+        "external_system": system,
+        "target_keys": ["disabled-key", "never-registered-key"],
+    }
+    assert (
+        await migrated_session.scalar(text("SELECT count(*) FROM ops.feature_update_requests"))
+        == requests_before
+    )
+    assert (
+        await migrated_session.scalar(
+            text("SELECT count(*) FROM ops.poi_cache_target_outbox_events")
+        )
+        == events_before
+    )
