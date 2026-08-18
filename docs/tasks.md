@@ -930,6 +930,7 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
       legacy_projection_id 4,424로 **bucket C·D(official/manual membership)에 해당하는 행이 하나도 없다**.
       여기에 admin CSV import를 돌리면 `current_import_row_id`·operator 필드가 붙어 0223이 immutable로
       동결한 `legacy_projection` 전제가 사후에 깨진다 — **돌리지 않는다.**
+    - **실행 순서 정본: [`docs/runbooks/tvn40-pinvi-cutover.md`](runbooks/tvn40-pinvi-cutover.md)** (적대 검증 2명이 초안에서 P1 14건을 잡은 뒤의 수정본).
     - [ ] **PinVi prod 재배포가 선행이다.** prod `pinvi-api-latest`는 image revision `3b87c19c`(#434)로
       T-VN-40 소비자 코드가 **아예 없다**(client 모듈 없음 · config token 필드 0건 · OpenAPI curation route 0개).
       PinVi DB head는 `20260804_0049`로 `0050~0059` 미적용. 소비자 구현 자체는 PinVi `main` `dc8a683f`(#444,
