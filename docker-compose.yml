@@ -207,7 +207,7 @@ services:
       # 거절하는데, `preflight()`는 존재·길이만 보므로 리소스 초기화는 통과하고 첫
       # 요청에서야 터진다. 2026-08-13 prod에서 정확히 그렇게 dagster/daemon이 죽은 키를
       # 들고 있었다(T-VN-H46B). 비어 있으면 비어 있는 채로 두고 fail-closed 한다.
-      KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY: ${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-${NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY:-}}
+      KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY: ${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-}
       KOR_TRAVEL_MAP_KAKAO_LOCAL_REST_API_KEY: ${KOR_TRAVEL_MAP_KAKAO_LOCAL_REST_API_KEY:-${KAKAO_LOCAL_REST_API_KEY:-}}
       KOR_TRAVEL_MAP_NAVER_SEARCH_CLIENT_ID: ${KOR_TRAVEL_MAP_NAVER_SEARCH_CLIENT_ID:-${NAVER_SEARCH_CLIENT_ID:-}}
       KOR_TRAVEL_MAP_NAVER_SEARCH_CLIENT_SECRET: ${KOR_TRAVEL_MAP_NAVER_SEARCH_CLIENT_SECRET:-${NAVER_SEARCH_CLIENT_SECRET:-}}
@@ -250,19 +250,13 @@ services:
         NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL: ${NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL:-http://127.0.0.1:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}}
         NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL: ${NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL:-http://127.0.0.1:12501}
         NEXT_PUBLIC_VWORLD_API_KEY: ${NEXT_PUBLIC_VWORLD_API_KEY:-${KOR_TRAVEL_GEO_VWORLD_API_KEY:-${VWORLD_API_KEY:-}}}
-        # geo 소비자 키는 VWorld 키로 떨어지지 않는다 — geo가 401(E0401)로 거절하는 값이다.
-        NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY: ${NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY:-${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-}}
     environment:
       NEXT_PUBLIC_KOR_TRAVEL_MAP_API: ${NEXT_PUBLIC_KOR_TRAVEL_MAP_API:-http://127.0.0.1:${KOR_TRAVEL_MAP_API_PORT:-12701}}
       NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL: ${NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL:-http://127.0.0.1:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}}
       NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL: ${NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL:-http://127.0.0.1:12501}
       NEXT_PUBLIC_VWORLD_API_KEY: ${NEXT_PUBLIC_VWORLD_API_KEY:-${KOR_TRAVEL_GEO_VWORLD_API_KEY:-${VWORLD_API_KEY:-}}}
-      # geo 소비자 키는 VWorld 키로 떨어지지 않는다 — geo가 401(E0401)로 거절하는 값이다.
-      NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY: ${NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY:-${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-}}
-      # `NEXT_PUBLIC_*`은 빌드 시점에 번들에 박힌다. 이미 구운 이미지에 키를 넣는
-      # 유일한 경로가 이 런타임 env이고, geo 프록시(`app/api/geo/[...path]/route.ts`)가
-      # 이것을 **먼저** 읽는다. 이 줄이 없으면 admin UI 지오코딩은 이미지를 다시 굽기
-      # 전까지 켤 수 없다 — prod가 지금 그 상태다(docker-manager 쪽 후속).
+      # geo consumer credential은 browser/build env에 싣지 않고 server runtime BFF에만
+      # 별칭 결선한다. 프록시는 이 값만 X-KTG-API-Key header로 보낸다(T-VN-H46F).
       KOR_TRAVEL_GEO_API_KEY: ${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-}
       KOR_TRAVEL_MAP_API_INTERNAL_URL: ${KOR_TRAVEL_MAP_DOCKER_API_INTERNAL_URL:-http://api:${KOR_TRAVEL_MAP_API_PORT:-12701}}
       KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET: ${KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET:?KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET is required}
@@ -344,7 +338,7 @@ services:
       # 거절하는데, `preflight()`는 존재·길이만 보므로 리소스 초기화는 통과하고 첫
       # 요청에서야 터진다. 2026-08-13 prod에서 정확히 그렇게 dagster/daemon이 죽은 키를
       # 들고 있었다(T-VN-H46B). 비어 있으면 비어 있는 채로 두고 fail-closed 한다.
-      KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY: ${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-${NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY:-}}
+      KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY: ${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
@@ -419,7 +413,7 @@ services:
       # 거절하는데, `preflight()`는 존재·길이만 보므로 리소스 초기화는 통과하고 첫
       # 요청에서야 터진다. 2026-08-13 prod에서 정확히 그렇게 dagster/daemon이 죽은 키를
       # 들고 있었다(T-VN-H46B). 비어 있으면 비어 있는 채로 두고 fail-closed 한다.
-      KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY: ${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-${NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY:-}}
+      KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY: ${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:

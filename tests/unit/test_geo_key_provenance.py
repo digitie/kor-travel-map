@@ -64,7 +64,6 @@ _ROOT = Path(__file__).resolve().parents[2]
 #: geo가 인증에 받아들이는 소비자 키 이름들. VWorld 키와는 다른 자격증명이다.
 _GEO_CONSUMER_VARS = (
     "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY",
-    "NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY",
     "KOR_TRAVEL_GEO_API_KEY",
 )
 #: 앞에 `_`나 영숫자가 붙은 더 긴 이름(`E2E_KOR_TRAVEL_GEO_API_KEY`)은 다른 변수다.
@@ -482,13 +481,9 @@ _DISCOVERED = _discover()
 def test_the_scan_actually_finds_the_known_carriers() -> None:
     """발견이 비어 있거나 알려진 통로를 놓치면 이 가드는 아무것도 지키지 않는다."""
 
-    assert len(_DISCOVERED) >= 8, _DISCOVERED
+    assert len(_DISCOVERED) >= 4, _DISCOVERED
     for expected in (
         "docker-compose.yml",
-        "scripts/load-env.sh",
-        "scripts/docker-buildx.sh",
-        "docker/frontend.Dockerfile",
-        "scripts/frontend-build-inputs.mjs",
         "packages/kor-travel-map-admin/frontend/src/app/api/geo/[...path]/route.ts",
     ):
         assert expected in _DISCOVERED, f"{expected}을 발견하지 못했다: {_DISCOVERED}"
@@ -522,32 +517,20 @@ def test_env_examples_warn_that_the_vworld_key_is_not_valid(relative: str) -> No
     )
 
 
-def test_load_env_maps_the_public_alias_forward() -> None:
-    """`.env.example`이 시키는 이름만 설정해도 admin UI가 키를 받는다."""
+def test_browser_global_geo_credential_alias_is_absent_from_build_and_runtime() -> None:
+    """Geo consumer credential을 browser-global 이름으로 다시 노출하지 않는다."""
 
-    joined = _read("scripts/load-env.sh").replace("\\\n", " ")
-    assert re.search(
-        r"export_first\s+NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY\s+"
-        r"KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY\b",
-        joined,
-    ), "load-env.sh가 geo 소비자 키의 public 별칭을 정본 이름에서 채우지 않는다"
-
-
-def test_load_env_never_exits_on_alias_mismatch() -> None:
-    """별칭 불일치로 **호출자를 죽이지 않는다**.
-
-    `load-env.sh`는 항상 `source`된다(`docker-up.sh`·`docker-buildx.sh`·
-    `docker-restore-swap.sh` …). `exit 1`은 호출 스크립트를 끝내고, 대화형 셸에서는
-    터미널을 닫는다 — 복구 절차(`docker-restore-swap.sh`가 운영자에게 `source
-    scripts/load-env.sh`를 지시한다) 도중에 그러면 안 된다(적대 리뷰 지적).
-    """
-
-    text = _read("scripts/load-env.sh")
-    assert "geo_alias_split_brain" in text, "별칭 불일치 진단이 없다"
-    block = text[text.index("geo_alias_split_brain") :]
-    assert "exit 1" not in block.split("\nfi\n", 1)[0], (
-        "별칭 불일치에서 exit 한다 — sourced 스크립트라 호출자를 죽인다"
-    )
+    forbidden = "NEXT_PUBLIC_" + "KOR_TRAVEL_GEO_API_KEY"
+    for relative in (
+        "docker-compose.yml",
+        "docker/frontend.Dockerfile",
+        "scripts/frontend-build-inputs.mjs",
+        "scripts/docker-buildx.sh",
+        "scripts/load-env.sh",
+        "scripts/run-admin-feature-clone-live-acceptance.sh",
+        "packages/kor-travel-map-admin/frontend/e2e/run-mocked-checkpoint.mjs",
+    ):
+        assert forbidden not in _read(relative), f"{relative}가 browser-global geo key를 되살린다"
 
 
 def test_compose_gives_the_frontend_a_runtime_geo_key() -> None:
@@ -561,9 +544,27 @@ def test_compose_gives_the_frontend_a_runtime_geo_key() -> None:
     )
 
 
+def test_compose_wires_one_geo_source_to_exact_server_runtime_paths() -> None:
+    """root source 하나만 API/Dagster/UI server runtime에 결선한다."""
+
+    document: Any = yaml.safe_load(_read("docker-compose.yml"))
+    services = document["services"]
+    source = "${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-}"
+    for service_name in ("api", "dagster", "dagster-daemon"):
+        assert services[service_name]["environment"][
+            "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY"
+        ] == source
+    assert services["frontend"]["environment"]["KOR_TRAVEL_GEO_API_KEY"] == source
+
+
 def test_frontend_geo_proxy_fails_closed_with_an_explicit_reason() -> None:
     """키가 없을 때 upstream의 400을 그대로 흘리지 않는다."""
 
     text = _read("packages/kor-travel-map-admin/frontend/src/app/api/geo/[...path]/route.ts")
-    assert "if (!apiKey)" in text, "빈 키 단락 경로가 없다"
+    assert "const GEO_API_KEY_PATTERN = /^[A-Za-z0-9]{32}$/;" in text
+    assert "if (!GEO_API_KEY_PATTERN.test(apiKey))" in text, (
+        "Geo 발급 정본과 다른 키 형식을 단락하는 경로가 없다"
+    )
+    assert 'process.env[GEO_API_KEY_ENV] ?? ""' in text
+    assert 'process.env[GEO_API_KEY_ENV]?.trim()' not in text
     assert "GEO_API_KEY_NOT_CONFIGURED" in text, "빈 키 응답에 명시적 사유 코드가 없다"

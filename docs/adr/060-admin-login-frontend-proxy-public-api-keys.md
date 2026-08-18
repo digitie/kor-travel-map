@@ -79,3 +79,11 @@ VWorld 호환이라는 말은 key의 wire 형식만 뜻한다. `ops.public_api_k
 없을 때 VWorld provider key를 Map 공개 인증에 쓰던 fallback을 제거한다. geo REST v2 호출도
 geo가 Map frontend/backend consumer에 발급한 별도 public key만 사용하며 VWorld provider key를
 대입하지 않는다. 활성 Map key 부재나 geo consumer key 누락은 각각 401/503으로 fail-close한다.
+
+## 개정 (2026-08-19, T-VN-H46F)
+
+브라우저가 geo public API에 `key` query를 직접 보내는 경로를 폐기한다. 브라우저는
+same-origin `/api/geo/*` BFF만 호출하고, BFF는 server runtime
+`KOR_TRAVEL_GEO_API_KEY`의 ASCII 영숫자 32자 발급 형식을 검증한 뒤
+`X-KTG-API-Key` header로만 geo에 전달한다. browser query의 `key`는 버리며 공개 build
+alias와 VWorld provider key는 credential source가 될 수 없다.

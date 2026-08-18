@@ -90,10 +90,11 @@ def test_geo_credentials_never_fall_back_to_vworld_provider_key(
     """VWorld provider key 하나로 Geo consumer credential을 채우지 않는다."""
 
     env = os.environ.copy()
+    forbidden_browser_key = "NEXT_PUBLIC_" + "KOR_TRAVEL_GEO_API_KEY"
     for name in (
         "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY",
         "KOR_TRAVEL_GEO_API_KEY",
-        "NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY",
+        forbidden_browser_key,
         "NEXT_PUBLIC_VWORLD_API_KEY",
         "KOR_TRAVEL_GEO_VWORLD_API_KEY",
         "VWORLD_API_KEY",
@@ -108,7 +109,7 @@ def test_geo_credentials_never_fall_back_to_vworld_provider_key(
             "source scripts/load-env.sh; "
             "printf '%s\\n%s\\n%s\\n' "
             '"$NEXT_PUBLIC_VWORLD_API_KEY" '
-            '"${NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY:-}" '
+            '"${KOR_TRAVEL_GEO_API_KEY:-}" '
             '"${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-}"',
         ],
         cwd=ROOT,
@@ -121,23 +122,20 @@ def test_geo_credentials_never_fall_back_to_vworld_provider_key(
 
     buildx = _read("scripts/docker-buildx.sh")
     compose = _read("docker-compose.yml")
+    dockerfile = _read("docker/frontend.Dockerfile")
+    build_inputs = _read("scripts/frontend-build-inputs.mjs")
     geo_route = _read(
         "packages/kor-travel-map-admin/frontend/src/app/api/geo/[...path]/route.ts"
     )
     live_acceptance = _read("scripts/run-admin-feature-clone-live-acceptance.sh")
-    assert (
-        'NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY=${NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY:-}"'
-        in buildx
-    )
-    assert "NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY:-${NEXT_PUBLIC_VWORLD_API_KEY" not in compose
+    assert forbidden_browser_key not in buildx
+    assert forbidden_browser_key not in compose
+    assert forbidden_browser_key not in dockerfile
+    assert forbidden_browser_key not in build_inputs
     assert "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-${NEXT_PUBLIC_VWORLD_API_KEY" not in compose
     assert "process.env.NEXT_PUBLIC_VWORLD_API_KEY" not in geo_route
-    assert "require_env E2E_KOR_TRAVEL_GEO_API_KEY" in live_acceptance
-    assert 'export NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY=""' in live_acceptance
-    assert (
-        'NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY="$E2E_VWORLD_API_KEY"'
-        not in live_acceptance
-    )
+    assert "E2E_KOR_TRAVEL_GEO_API_KEY" not in live_acceptance
+    assert forbidden_browser_key not in live_acceptance
 
 
 @pytest.mark.unit
@@ -220,12 +218,14 @@ def test_frontend_source_digest_includes_public_build_inputs() -> None:
         "NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL",
         "NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL",
         "NEXT_PUBLIC_VWORLD_API_KEY",
-        "NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY",
     )
 
     for name in build_inputs:
         assert name in build_input_contract
         assert f"ARG {name}" in dockerfile
+    forbidden_browser_key = "NEXT_PUBLIC_" + "KOR_TRAVEL_GEO_API_KEY"
+    assert forbidden_browser_key not in build_input_contract
+    assert f"ARG {forbidden_browser_key}" not in dockerfile
     assert "function envOrDefault(environment, name, fallback)" in (
         build_input_contract
     )

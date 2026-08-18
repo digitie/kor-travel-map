@@ -394,4 +394,8 @@ kor-travel-map backend의 geo 호출은 public API key를 URL query로 보내지
 `X-KTG-API-Key` header로만 보낸다. Map은 geo public endpoint만 호출하며
 `X-KTG-Actor`/`X-KTG-Roles`/`X-KTG-Admin-Proxy-Secret`을 보내거나 admin 권한을
 위임받지 않는다. Map 설정 `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY`에는 geo public key를
-넣으며 Map admin BFF/service/ops token과 공유하지 않는다.
+넣으며 Map admin BFF/service/ops token과 공유하지 않는다. Docker Manager는 이 source를
+Map UI의 server-only `KOR_TRAVEL_GEO_API_KEY`로만 별칭 결선한다. Next.js `/api/geo`
+프록시는 public/VWorld alias나 browser query key를 받지 않고 같은 header로 전송하며,
+geo의 credential rejection은 `503 GEO_API_KEY_REJECTED`로 fail-close한다. 이 credential은
+frontend Docker build arg/source digest나 `NEXT_PUBLIC_*` runtime에 포함하지 않는다.

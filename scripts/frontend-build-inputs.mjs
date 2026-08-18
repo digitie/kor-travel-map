@@ -34,12 +34,5 @@ export function frontendBuildInputs(environment = process.env) {
       ),
     ],
     ["NEXT_PUBLIC_VWORLD_API_KEY", vworldApiKey],
-    // geo 소비자 키는 VWorld 키로 떨어지지 않는다 — VWorld 키는 kor-travel-geo가
-    // 상류로 나갈 때 쓰는 것이고 geo는 그 값을 401(E0401)로 거절한다. 사슬로 이어
-    // 두면 "설정이 있다"는 착시만 만들고 실패를 첫 요청까지 미룬다(T-VN-H46B).
-    [
-      "NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY",
-      envOrDefault(environment, "NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY", ""),
-    ],
   ];
 }
