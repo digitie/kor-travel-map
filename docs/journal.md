@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-18 — T-VN-40-mapping: 0223 identity mapping loader (설계 → 리뷰 → 구현 → 리뷰)
+
+- 설계 문서를 먼저 쓰고 적대 리뷰 2명(data/PinVi · migration/ACL)을 통과시킨 뒤 구현했다. 리뷰가 바꾼 것:
+  `RAISE NOTICE`는 asyncpg 경로에서 버려진다(manifest는 표 재조회로 logging) · prod ①의 `upgrade head`는
+  0104→0223 **한 트랜잭션**이라 0223 실패 = 전체 롤백 · fence ACL은 upgrade **뒤** reconcile되므로 loader가
+  스스로 `LOCK TABLE … SHARE`(+`lock_timeout 30s`) · `source_row_hash`는 소비자가 대조하는 값이 아니라 적재
+  시점 스냅샷 digest · 새 FK가 merge의 detach rekey를 막는 불변식(merge_repo가 명시 MergeConflictError).
+- prod 실측(read-only): legacy 4,424 전부 bucket B(projection 1:1), 중단 bucket 전부 0. `scripts/
+  tvn40_identity_mapping_precheck.sql`로 ① 직전에 같은 검사를 반복한다.
+- 코드 적대 리뷰 2명 hold. P2로 `api-entrypoint.sh`가 loader 중단 문장을 보면 30회 재시도 없이 즉시 종료하게
+  했고(테스트로 고정), 0104에서 seed된 중단 형태가 0202~0223 전체를 롤백함을 dedicated DB로 실측했다.
+- 남은 것: #996 CI → 머지 → 40C-manifest → ① 실행(precheck → EXPECTED_HEAD 0223 → migration).
+
 ## 2026-08-18 — T-VN-40A fence PR #994: 적대 리뷰 P1 — merge가 runtime role로 돈 적이 없었다
 
 - fence 적대 리뷰(2명) 둘 다 `holds=False`. P1: `apply_feature_merge`가 legacy 표를 `FOR

@@ -1253,6 +1253,52 @@ def _run_image_layout_entrypoint(
 
 
 @pytest.mark.unit
+def test_api_container_stops_retrying_when_tvn40_identity_mapping_loader_aborts(
+    tmp_path: Path,
+) -> None:
+    """0223 loader의 fail-closed 중단은 데이터 문제라 재시도로 풀리지 않는다.
+
+    영구 실패를 30회 반복하면 매번 0202~0223 DDL을 다시 돌리며 lock만 흔든다. entrypoint는
+    upgrade stderr에서 loader의 중단 문장을 보면 즉시 exit 1이어야 하고, 원문 stderr는 운영자가
+    볼 수 있게 그대로 내보내야 한다.
+    """
+    head = "0223_tvn40_identity_mappings"
+    path, marker = _migration_stub_path(tmp_path, image_head=head)
+    alembic = tmp_path / "bin" / "alembic"
+    alembic.write_text(
+        "#!/bin/sh\n"
+        'case "$1" in\n'
+        f"  heads) echo '{head} (head)' ;;\n"
+        "  current) true ;;\n"
+        "  upgrade)\n"
+        f"    echo ran >> '{marker}'\n"
+        "    echo 'sqlalchemy.exc.InternalError: tvn40 identity mapping: unmapped/ambiguous "
+        "legacy rows - detached=1 no_candidate=0 multi_candidate=0 no_evidence=0"
+        " item_claimed_twice=0 (legacy_total=4424).' >&2\n"
+        "    exit 1 ;;\n"
+        "esac\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    result = _run_entrypoint(
+        path,
+        {
+            "KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD": head,
+            "KOR_TRAVEL_MAP_MIGRATION_RETRIES": "5",
+            "KOR_TRAVEL_MAP_MIGRATION_RETRY_SLEEP_SECONDS": "0",
+        },
+    )
+    assert result.returncode != 0
+    assert marker.read_text(encoding="utf-8").count("ran") == 1, (
+        "loader 중단은 영구 실패다 — upgrade를 한 번만 시도해야 한다"
+    )
+    assert "retrying" not in result.stderr, result.stderr
+    assert "T-VN-40 identity mapping loader aborted" in result.stderr
+    # 원문 stderr(원인별 count)가 그대로 보인다.
+    assert "detached=1" in result.stderr
+
+
+@pytest.mark.unit
 def test_api_container_refuses_image_whose_alembic_head_differs(tmp_path: Path) -> None:
     """이미지의 alembic head가 기대값과 다르면 **DB를 건드리기 전에** 죽어야 한다.
 
@@ -1399,7 +1445,7 @@ def test_api_image_without_legacy_modules_identifies_pre_squash_db(
     """최종 image에 historical Python이 없어도 pre-squash 진단은 보존한다."""
     path, marker = _migration_stub_path(
         tmp_path,
-        image_head="0222_tvn40a_merge_runtime_role",
+        image_head="0223_tvn40_identity_mappings",
         current_script=(
             "echo \"FAILED: Can't locate revision identified by "
             "'0078_cache_target_gc_observe'\"; exit 255"

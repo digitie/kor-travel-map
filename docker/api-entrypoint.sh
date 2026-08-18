@@ -350,7 +350,21 @@ retries="${KOR_TRAVEL_MAP_MIGRATION_RETRIES:-30}"
 sleep_seconds="${KOR_TRAVEL_MAP_MIGRATION_RETRY_SLEEP_SECONDS:-2}"
 attempt=1
 
-while ! alembic upgrade head; do
+# `alembic upgrade head`의 stderr는 파일에 받았다가 그대로 다시 내보낸다(운영자가 원문을 봐야
+# 한다) — 그 사본으로 **영구 실패**를 판정한다. 0223(T-VN-40 identity mapping loader)의 fail-closed
+# 중단은 데이터 문제라 재시도로 풀리지 않는데, 30회 반복하면 매번 0202~0223 DDL을 다시 돌리며
+# lock만 흔든다. (POSIX sh — process substitution 없음.)
+upgrade_log="$(mktemp)"
+trap 'rm -f "$upgrade_log"' EXIT
+while ! alembic upgrade head 2>"$upgrade_log"; do
+  cat "$upgrade_log" >&2
+  if grep -Fq "tvn40 identity mapping:" "$upgrade_log"; then
+    echo "alembic upgrade head failed permanently: T-VN-40 identity mapping loader aborted" >&2
+    echo " (fail-closed by design — resolve on the canonical side per" >&2
+    echo "  docs/reports/t-vn-40-identity-mapping-loader-design-2026-08-18.md §5, then redeploy;" >&2
+    echo "  the whole 0202..0223 chain was rolled back, head is unchanged)" >&2
+    exit 1
+  fi
   if [ "$attempt" -ge "$retries" ]; then
     echo "alembic upgrade head failed after $attempt attempts" >&2
     exit 1
@@ -359,6 +373,9 @@ while ! alembic upgrade head; do
   attempt=$((attempt + 1))
   sleep "$sleep_seconds"
 done
+cat "$upgrade_log" >&2
+rm -f "$upgrade_log"
+trap - EXIT
 
 # Ownership transfer strips legacy bootstrap ACLs.  Rebuild the closed runtime
 # inventory with the migrator-only SET ROLE path before this shell discards its

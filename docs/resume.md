@@ -1,6 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-08-18 — T-VN-40A fence(#994) 적대 리뷰 반영 완료, 머지 대기
+## 2026-08-18 — T-VN-40A fence(#994) 머지 → 다음은 40-mapping
+
+#994는 main `3e0732b3`로 머지됐다(적대 리뷰 3라운드·2명 hold, CI 4 workflow green, n150 전체 통합
+931 passed). 배포 선행 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`→ 그때의 head(0223 뒤로는 `0223_tvn40_identity_mappings`).
+
+### 다음 한 작업
+
+**T-VN-40-mapping은 구현·리뷰 완료 — draft PR #996 CI 뒤 머지.** 그 다음 **40C-manifest**(physical removal
+manifest·migration 사전 작성 — mapping 표는 삭제 대상 제외 + FK 처리) → ① 실행(precheck 스크립트 전부 0 →
+`KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`=0223 → prod migration 0202~0223) → canonical import → soak/live e2e →
+receipt → 40C 물리 삭제.
+
+## 2026-08-18 — (이전) T-VN-40A fence(#994) 적대 리뷰 반영 완료, 머지 대기
 
 fence 3층(ACL·static·route)에 더해 리뷰 P1이 드러낸 **merge의 runtime-role 결함**(fence 이전부터
 `curation_collections` FOR UPDATE가 42501 — superuser 테스트만 있어 아무도 몰랐다)을 0222로 고쳤다.

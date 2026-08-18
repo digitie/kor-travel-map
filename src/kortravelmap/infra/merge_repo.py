@@ -727,6 +727,30 @@ WHERE loser_curated.curated_feature_id = item.legacy_projection_id
 RETURNING loser_curated.curated_feature_id
 """
 
+# 0223(T-VN-40-mapping) 이후 `ops.curation_cutover_identity_mappings.curation_item_id`가
+# item PK를 ON UPDATE CASCADE 없이 참조한다 — PinVi cutover의 identity 안정성이 목적이다.
+# 위 DETACH는 item UUID를 rekey하므로 mapping이 잡은 item에 대해서는 FK로 막힌다. raw
+# 23503 대신 명시적 MergeConflictError를 내기 위해 같은 술어로 먼저 검사한다.
+_PINNED_LEGACY_CONFLICT_ITEMS_SQL: Final[str] = """
+SELECT item.curation_item_id
+FROM feature.curation_items AS item
+JOIN feature.curated_features AS loser_curated
+  ON loser_curated.curated_feature_id = item.legacy_projection_id
+JOIN ops.curation_cutover_identity_mappings AS mapping
+  ON mapping.curation_item_id = item.curation_item_id
+WHERE loser_curated.feature_id = :loser
+  AND loser_curated.archived_at IS NULL
+  AND item.archived_at IS NULL
+  AND EXISTS (
+      SELECT 1
+      FROM feature.curated_features AS master_curated
+      WHERE master_curated.feature_id = :master
+        AND master_curated.theme_id = loser_curated.theme_id
+        AND master_curated.archived_at IS NULL
+  )
+ORDER BY item.curation_item_id
+"""
+
 # UUID가 분리된 same-theme legacy conflict 또는 아직 이동하지 않은 loser UUID item과
 # 같은 stored collection/external identity의 master canonical pair만 archive한다.
 # Mutable slug/title로 collection key를 재계산하거나 MOVE 뒤 feature_id를 증거로 쓰지 않는다.
@@ -875,6 +899,21 @@ async def apply_feature_merge(
     dropped = len(
         (await session.execute(text(_DROP_LEFTOVER_LINKS_SQL), {"loser": loser_id})).fetchall()
     )
+    pinned = [
+        str(row[0])
+        for row in (
+            await session.execute(
+                text(_PINNED_LEGACY_CONFLICT_ITEMS_SQL),
+                {"master": master_id, "loser": loser_id},
+            )
+        ).fetchall()
+    ]
+    if pinned:
+        raise MergeConflictError(
+            "same-theme legacy conflict item(s) are pinned by the T-VN-40 cutover identity "
+            f"mapping and cannot be re-keyed — {pinned!r}. Resolve on the canonical side "
+            "(archive/retarget the item through admin commands) before merging."
+        )
     await session.execute(
         text(_DETACH_CONFLICTING_LEGACY_CURATION_ITEMS_SQL),
         {"master": master_id, "loser": loser_id},
