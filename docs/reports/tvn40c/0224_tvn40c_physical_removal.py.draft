@@ -1,0 +1,237 @@
+"""T-VN-40C — legacy 물리 삭제 (DRAFT — alembic/versions/ 밖. receipt complete 뒤 옮겨 적용).
+
+Revision ID: 0224_tvn40c_physical_removal
+Revises: 0223_tvn40_identity_mappings
+
+manifest: docs/reports/t-vn-40c-physical-removal-manifest-2026-08-18.md ·
+          contracts/vnext/t-vn-40c-removal-manifest-v1.json (D1~D12)
+
+원칙
+- forward-only · 단일 트랜잭션. 모든 DROP은 RESTRICT — manifest가 모르는 dependent가 있으면 트랜잭션이
+  죽고 manifest를 고친 뒤 재실행한다(trigger disable 같은 우회 없음).
+- 이 migration은 데이터를 파괴한다(legacy overlay 표). 선행조건 P1~P6(manifest §0)을 사람이 확인한 뒤에만
+  적용한다. api-entrypoint의 EXPECTED_HEAD pin은 0224로.
+- fresh DB에서도 0202~0224 전체가 통과해야 한다(legacy 0행 → 0223 0건 적재 → 0224 drop).
+- ops.curation_cutover_identity_mappings는 **남긴다**(PinVi cutover 증거; FK → curation_items 유지).
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+
+from alembic import op
+
+# ruff: noqa: E501
+
+revision: str = "0224_tvn40c_physical_removal"
+down_revision: str | Sequence[str] | None = "0223_tvn40_identity_mappings"
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
+
+
+_PRECHECK_SQL = """
+DO $tvn40c_precheck$
+DECLARE
+    v_legacy bigint;
+    v_mapped bigint;
+BEGIN
+    -- P3: ① 이후 legacy 신규 write가 없었어야 한다(mapping 1:1). 다르면 중단.
+    SELECT count(*) INTO v_legacy FROM feature.curated_features;
+    SELECT count(*) INTO v_mapped FROM ops.curation_cutover_identity_mappings;
+    IF v_legacy <> v_mapped THEN
+        RAISE EXCEPTION 'tvn40c physical removal: legacy rows (%) != identity mappings (%) — resolve before dropping', v_legacy, v_mapped
+            USING ERRCODE = 'P0001';
+    END IF;
+END
+$tvn40c_precheck$;
+"""
+
+# D1 — 0222 legacy mirror procedure 4개 (canonical collections lock ⑤는 유지)
+_D1_SQL = """
+DROP PROCEDURE feature.merge_lock_legacy_curated_features(text, text) RESTRICT;
+DROP PROCEDURE feature.merge_archive_conflicting_legacy_curated_features(text, text) RESTRICT;
+DROP PROCEDURE feature.merge_sync_master_legacy_curated_features(text) RESTRICT;
+DROP PROCEDURE feature.merge_move_legacy_curated_features(text, text) RESTRICT;
+"""
+
+# D2 — 0045 sync trigger + function
+_D2_SQL = """
+DROP TRIGGER trg_sync_curated_feature_collection ON feature.curated_features;
+DROP FUNCTION feature.sync_curated_feature_collection() RESTRICT;
+"""
+
+# D3 — legacy projection만 입력으로 쓰던 source-rule decision trigger + function
+_D3_SQL = """
+DROP TRIGGER trg_curation_items_source_rule_decision ON feature.curation_items;
+DROP FUNCTION feature.issue_curation_source_rule_decision() RESTRICT;
+"""
+
+# D3b — legacy_projection_id를 읽는 BEFORE INSERT trigger (plpgsql 본문은 pg_depend 밖 — D5 뒤에 남으면 모든
+#       curation_items INSERT가 42703). 반드시 D5보다 먼저.
+_D3B_SQL = """
+DROP TRIGGER trg_curation_items_legacy_component_identity ON feature.curation_items;
+DROP FUNCTION feature.set_curation_item_legacy_component_identity() RESTRICT;
+"""
+
+# D4 — 0214 item command procedure 2개: legacy 분기(v_hint.legacy_projection_id · curated_features FOR UPDATE ·
+#      mirror UPDATE) 제거본으로 CREATE OR REPLACE. owner=ktm_curation_command_owner → SET ROLE 아래서.
+#      TODO(draft): 0214_tvn40_item_commands.py의 두 procedure 본문에서 legacy 분기를 뺀 전문을 여기 붙인다
+#      (patch: 335-357·485-504, archive: 565-576·597-603). 통합 테스트: replace 뒤 create/patch/archive command가
+#      api runtime으로 동작 + pg_proc.prosrc에 legacy 식별자 0.
+#      **CREATE OR REPLACE는 명시하지 않은 속성을 기본값으로 되돌린다** — 반드시 `SECURITY DEFINER`와
+#      `SET search_path = pg_catalog, feature, ops`(0214:270-271, 525-526)를 다시 적는다. 안 그러면 executor 게이트가
+#      INVOKER로 조용히 깨진다(리뷰 P1). D4 대상은 정확히 patch/archive 둘 — create_curation_item_command에는 legacy 참조 없음.
+_D4_SQL = """
+SET ROLE ktm_curation_command_owner;
+-- CREATE OR REPLACE PROCEDURE feature.patch_curation_item_command(...) ... $$ ... $$;
+-- CREATE OR REPLACE PROCEDURE feature.archive_curation_item_command(...) ... $$ ... $$;
+SET ROLE ktm_feature_schema_owner;
+"""
+
+# D5 — legacy_projection_id 흔적
+_D5_SQL = """
+ALTER TABLE feature.curation_items DROP CONSTRAINT fk_curation_items_legacy_projection_id_curated_features;
+DROP INDEX feature.uq_curation_items_legacy_projection_id;
+ALTER TABLE feature.curation_items DROP COLUMN legacy_projection_id RESTRICT;
+"""
+
+# D6·D7 — overlay 표 (snapshot 먼저: FK → curated_features)
+_D6_D7_SQL = """
+DROP TABLE feature.curated_feature_detail_snapshots RESTRICT;
+DROP TABLE feature.curated_features RESTRICT;
+"""
+
+# D8 — 0074의 ON UPDATE CASCADE 4 FK → NO ACTION (rekey 경로 소멸)
+_D8_SQL = """
+ALTER TABLE feature.curation_import_rows
+    DROP CONSTRAINT fk_curation_import_rows_item,
+    ADD CONSTRAINT fk_curation_import_rows_item
+        FOREIGN KEY (curation_item_id) REFERENCES feature.curation_items(curation_item_id)
+        ON UPDATE NO ACTION ON DELETE RESTRICT;
+ALTER TABLE feature.curation_link_decisions
+    DROP CONSTRAINT fk_curation_link_decisions_import_row,
+    ADD CONSTRAINT fk_curation_link_decisions_import_row
+        FOREIGN KEY (import_row_id, curation_item_id) REFERENCES feature.curation_import_rows(import_row_id, curation_item_id)
+        ON UPDATE NO ACTION ON DELETE RESTRICT;
+ALTER TABLE feature.curation_link_decisions
+    DROP CONSTRAINT fk_curation_link_decisions_item,
+    ADD CONSTRAINT fk_curation_link_decisions_item
+        FOREIGN KEY (curation_item_id) REFERENCES feature.curation_items(curation_item_id)
+        ON UPDATE NO ACTION ON DELETE RESTRICT;
+ALTER TABLE feature.curation_link_decisions
+    DROP CONSTRAINT fk_curation_link_decisions_supersedes,
+    ADD CONSTRAINT fk_curation_link_decisions_supersedes
+        FOREIGN KEY (supersedes_decision_id, curation_item_id) REFERENCES feature.curation_link_decisions(decision_id, curation_item_id)
+        ON UPDATE NO ACTION ON DELETE RESTRICT;
+"""
+# TODO(draft): 위 4 FK의 정확한 열·참조·DEFERRABLE 옵션은 baseline schema.sql 12748~12800의 정의를 그대로 복사해
+#              ON UPDATE만 바꾼다. 적용 전 실제 정의와 대조(테스트가 pg_get_constraintdef로 고정).
+
+# D9 — history 가드 무조건 거부
+_D9_SQL = """
+CREATE OR REPLACE FUNCTION feature.reject_curation_history_mutation() RETURNS trigger
+    LANGUAGE plpgsql
+AS $$
+BEGIN
+  -- T-VN-40C: merge의 legacy-conflict detach(rekey)가 사라져 curation_item_id 재작성 허용 분기도 없다.
+  RAISE EXCEPTION 'curation import/link history is append-only'
+    USING ERRCODE = '55000';
+END;
+$$;
+"""
+
+_POSTCHECK_SQL = """
+DO $tvn40c_postcheck$
+BEGIN
+    IF to_regclass('feature.curated_features') IS NOT NULL
+       OR to_regclass('feature.curated_feature_detail_snapshots') IS NOT NULL THEN
+        RAISE EXCEPTION 'tvn40c physical removal: legacy relation still present' USING ERRCODE = 'P0001';
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid = 'feature.curation_items'::regclass AND attname = 'legacy_projection_id' AND NOT attisdropped) THEN
+        RAISE EXCEPTION 'tvn40c physical removal: legacy_projection_id still present' USING ERRCODE = 'P0001';
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'feature' AND p.proname LIKE 'merge_%legacy%') THEN
+        RAISE EXCEPTION 'tvn40c physical removal: legacy merge procedure still present' USING ERRCODE = 'P0001';
+    END IF;
+    -- 이름만이 아니라 본문(prosrc)도 본다 — 0214 item command의 legacy 분기·D3b trigger 함수 잔존을 잡는다.
+    IF EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+               WHERE n.nspname IN ('feature','ops','provider_sync','public')
+                 AND (p.prosrc LIKE '%curated_features%' OR p.prosrc LIKE '%legacy_projection_id%')) THEN
+        RAISE EXCEPTION 'tvn40c physical removal: a routine body still references the legacy overlay' USING ERRCODE = 'P0001';
+    END IF;
+END
+$tvn40c_postcheck$;
+"""
+
+
+# 0214와 같은 dollar-quote 인식 splitter — D4의 procedure 본문($$ … ; … $$)을 쪼개지 않는다.
+def _execute_commands(source: str) -> None:
+    """Dollar-quoted routine bodies를 보존해 asyncpg statement를 분리한다."""
+
+    statements: list[str] = []
+    start = 0
+    index = 0
+    quote: str | None = None
+    dollar_tag: str | None = None
+    while index < len(source):
+        character = source[index]
+        if dollar_tag is not None:
+            if source.startswith(dollar_tag, index):
+                index += len(dollar_tag)
+                dollar_tag = None
+                continue
+            index += 1
+            continue
+        if quote is not None:
+            if character == quote:
+                if index + 1 < len(source) and source[index + 1] == quote:
+                    index += 2
+                    continue
+                quote = None
+            index += 1
+            continue
+        if character in {"'", '"'}:
+            quote = character
+            index += 1
+            continue
+        if character == "$":
+            end = source.find("$", index + 1)
+            if end != -1:
+                candidate = source[index : end + 1]
+                inner = candidate[1:-1]
+                if not inner or inner.replace("_", "a").isalnum():
+                    dollar_tag = candidate
+                    index = end + 1
+                    continue
+        if character == ";":
+            statement = source[start:index].strip()
+            if statement:
+                statements.append(statement)
+            start = index + 1
+        index += 1
+    trailing = source[start:].strip()
+    if trailing:
+        statements.append(trailing)
+    for statement in statements:
+        op.execute(statement)
+
+
+def upgrade() -> None:
+    op.execute(_PRECHECK_SQL)
+    _execute_commands(_D1_SQL)
+    _execute_commands(_D2_SQL)
+    _execute_commands(_D3_SQL)
+    _execute_commands(_D3B_SQL)
+    _execute_commands(_D4_SQL)  # TODO(draft): 본문 채운 뒤 활성
+    _execute_commands(_D5_SQL)
+    _execute_commands(_D6_D7_SQL)
+    _execute_commands(_D8_SQL)
+    op.execute(_D9_SQL)
+    op.execute(_POSTCHECK_SQL)
+    # D10 ACL: 코드(runtime_privileges) 변경 + 배포 후 reconcile. D12 models/graph/head pin: 같은 PR.
+
+
+def downgrade() -> None:
+    raise RuntimeError(
+        "0224_tvn40c_physical_removal is forward-only; legacy overlay was physically removed"
+    )

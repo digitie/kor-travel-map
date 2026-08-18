@@ -7,7 +7,7 @@
 
 ### 다음 한 작업
 
-**T-VN-40-mapping은 구현·리뷰 완료 — draft PR #996 CI 뒤 머지.** 그 다음 **40C-manifest**(physical removal
+**T-VN-40-mapping 머지됨(#996 → `fbc31f2f`). 40C-manifest v2.2 초안·리뷰 완료(draft PR).** 다음은(physical removal
 manifest·migration 사전 작성 — mapping 표는 삭제 대상 제외 + FK 처리) → ① 실행(precheck 스크립트 전부 0 →
 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`=0223 → prod migration 0202~0223) → canonical import → soak/live e2e →
 receipt → 40C 물리 삭제.

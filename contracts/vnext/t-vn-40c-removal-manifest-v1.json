@@ -1,0 +1,345 @@
+{
+  "artifact": "t-vn-40c-removal-manifest-v1",
+  "owner": "T-VN-40C",
+  "status": "draft-v2 (reviewed x2, P1/P2 folded)",
+  "description": "T-VN-40C physical removal manifest - typed tombstone. Lists every legacy object/path removed by migration 0224 and the code/frontend/contract removals in the same release. Executed only after the T-VN-40 receipt is complete (docs/reports/t-vn-40c-physical-removal-manifest-2026-08-18.md section 0). This file is an allowed location for legacy identifiers under the static zero gate.",
+  "preconditions": [
+    {
+      "id": "P1",
+      "check": "consumer-rollout-v1.json tasks.T-VN-40 receipt state == complete, no blocking_reason"
+    },
+    {
+      "id": "P2",
+      "check": "legacy read consumers are deleted/converted IN the 40C PR (cannot be 0 before: routes/repo exist until 40C); public map already canonical"
+    },
+    {
+      "id": "P3",
+      "check": "count(feature.curated_features) == count(ops.curation_cutover_identity_mappings)"
+    },
+    {
+      "id": "P4",
+      "check": "PinVi backfill consumed the mapping (paired receipt); mapping table is retained"
+    },
+    {
+      "id": "P5",
+      "check": "prod backup / PITR restore point verified (0224 destroys 4,424 legacy rows + 500 detail snapshots)"
+    },
+    {
+      "id": "P6",
+      "check": "ops.dedup_review_queue pending contains no same-theme legacy conflict"
+    },
+    {
+      "id": "P7",
+      "check": "PinVi lockstep: 40C changes openapi.user.json (curated-features + public catalog routes removed) -> user-client types regen (gen:types:check), PinVi re-vendors post-40C user spec, new paired receipt (map_commit/pinvi_commit) in the same rollout; test_vnext_contract_artifacts binds receipt map_user_openapi_sha256 == pinvi_user_vendor_sha256 when complete; sequencing follows the T-VN-41 candidate_verified -> complete two-step (40C PR merged -> PinVi re-vendor PR -> paired candidate receipt -> live -> complete)"
+    }
+  ],
+  "db_removals_ordered": [
+    {
+      "id": "D1",
+      "kind": "procedure",
+      "names": [
+        "feature.merge_lock_legacy_curated_features(text,text)",
+        "feature.merge_archive_conflicting_legacy_curated_features(text,text)",
+        "feature.merge_sync_master_legacy_curated_features(text)",
+        "feature.merge_move_legacy_curated_features(text,text)"
+      ],
+      "action": "DROP PROCEDURE RESTRICT",
+      "keep": [
+        "feature.merge_lock_curation_collections(text,text)"
+      ]
+    },
+    {
+      "id": "D2",
+      "kind": "trigger+function",
+      "names": [
+        "feature.trg_sync_curated_feature_collection",
+        "feature.sync_curated_feature_collection()"
+      ],
+      "action": "DROP TRIGGER; DROP FUNCTION RESTRICT"
+    },
+    {
+      "id": "D3",
+      "kind": "trigger+function",
+      "names": [
+        "feature.trg_curation_items_source_rule_decision",
+        "feature.issue_curation_source_rule_decision()"
+      ],
+      "action": "DROP TRIGGER; DROP FUNCTION RESTRICT (only input was the legacy projection; NO canonical emitter of match_basis=source_rule exists - 0204 promotion emits admin_review - so source_rule decisions become history-only)"
+    },
+    {
+      "id": "D3b",
+      "kind": "trigger+function",
+      "names": [
+        "feature.trg_curation_items_legacy_component_identity",
+        "feature.set_curation_item_legacy_component_identity()"
+      ],
+      "action": "DROP TRIGGER; DROP FUNCTION RESTRICT - BEFORE D5 (body reads NEW.legacy_projection_id; plpgsql not pg_depend-tracked; otherwise every curation_items INSERT fails 42703)"
+    },
+    {
+      "id": "D4",
+      "kind": "procedure-rewrite",
+      "names": [
+        "feature.patch_curation_item_command",
+        "feature.archive_curation_item_command"
+      ],
+      "action": "CREATE OR REPLACE PROCEDURE without legacy branches (v_hint.legacy_projection_id, curated_features FOR UPDATE, mirror UPDATE; 0214:335-357,485-504,565-576,597-603) under SET ROLE ktm_curation_command_owner - grants survive; catalog-zero test must grep pg_proc.prosrc"
+    },
+    {
+      "id": "D5",
+      "kind": "column",
+      "names": [
+        "feature.curation_items.legacy_projection_id"
+      ],
+      "dependents": [
+        "fk_curation_items_legacy_projection_id_curated_features",
+        "uq_curation_items_legacy_projection_id"
+      ],
+      "action": "DROP CONSTRAINT; DROP INDEX; DROP COLUMN (after D3b and D4)"
+    },
+    {
+      "id": "D6",
+      "kind": "table",
+      "names": [
+        "feature.curated_feature_detail_snapshots"
+      ],
+      "action": "DROP TABLE RESTRICT"
+    },
+    {
+      "id": "D7",
+      "kind": "table",
+      "names": [
+        "feature.curated_features"
+      ],
+      "action": "DROP TABLE RESTRICT"
+    },
+    {
+      "id": "D8",
+      "kind": "constraint-rewrite",
+      "names": [
+        "fk_curation_import_rows_item",
+        "fk_curation_link_decisions_import_row",
+        "fk_curation_link_decisions_item",
+        "fk_curation_link_decisions_supersedes"
+      ],
+      "action": "recreate with ON UPDATE NO ACTION (was ON UPDATE CASCADE, 0074)"
+    },
+    {
+      "id": "D9",
+      "kind": "function-rewrite",
+      "names": [
+        "feature.reject_curation_history_mutation()"
+      ],
+      "action": "unconditional reject (drop the curation_item_id-only rekey allowance)"
+    },
+    {
+      "id": "D10",
+      "kind": "acl",
+      "names": [
+        "curated_features",
+        "curated_feature_detail_snapshots"
+      ],
+      "action": "remove from runtime_privileges._FEATURE_TABLE_PRIVILEGES; reconcile after upgrade"
+    },
+    {
+      "id": "D11",
+      "kind": "keep",
+      "names": [
+        "ops.curation_cutover_identity_mappings",
+        "fk curation_item_id -> feature.curation_items (ON DELETE RESTRICT, no ON UPDATE CASCADE)",
+        "fk collection_id -> feature.curation_collections (ON DELETE RESTRICT)",
+        "mapping_kind enum value legacy_projection"
+      ],
+      "action": "retain as immutable cutover evidence; note 0215 quarantine-release DELETE of empty quarantine collections is blocked for a mapped item's collection (prod: 0 quarantine collections)"
+    },
+    {
+      "id": "D12",
+      "kind": "models",
+      "names": [
+        "CuratedFeatureRow",
+        "CuratedFeatureDetailSnapshotRow",
+        "CurationItemRow.legacy_projection_id",
+        "uq_curation_items_legacy_projection_id (models index)"
+      ],
+      "action": "remove ORM mappings; regenerate _application_migration_graph.json; head pin 0224 in test_alembic_squash_boundary, test_alembic_metadata_consistency (2), test_docker_dagster_runtime (2), test_migration_forward_only, docs/architecture/postgres-schema.md, KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD"
+    }
+  ],
+  "code_removals": {
+    "api": {
+      "routers/curated.py": [
+        "/features/curated",
+        "/features/curated/{curated_feature_id}",
+        "/features/curated/{curated_feature_id}/select",
+        "/features/curated/{curated_feature_id}/unselect",
+        "/features/curated/{curated_feature_id}/detail-snapshot",
+        "/features/curated/{curated_feature_id}/place-search",
+        "/curated-features",
+        "/curated-features/{curated_feature_id}",
+        "/curated-features/{curated_feature_id}/select",
+        "/curated-features/{curated_feature_id}/unselect",
+        "/curated-features/{curated_feature_id}/place-search",
+        "_fence_legacy_curated_writes",
+        "public GET /v1/curated-themes",
+        "public GET /v1/curated-sources"
+      ],
+      "keep": [
+        "admin /v1/admin/curated-themes*",
+        "admin /v1/admin/curated-sources*",
+        "admin /v1/admin/curated-source-rules*"
+      ],
+      "also": [
+        "route_policy.py legacy entries",
+        "domain_command_registry.py legacy commands",
+        "curated_public_schema.py legacy schema",
+        "prometheus.py legacy metric",
+        "curated_public_schema.py + _CURATED_FEATURE_BASE_TYPES (PinVi user-schema contract) deleted"
+      ]
+    },
+    "infra": {
+      "curated_repo.py": [
+        "list_curated_features",
+        "get_curated_feature",
+        "get_curated_feature_detail_snapshot",
+        "create_curated_feature",
+        "update_curated_feature",
+        "set_curated_feature_status",
+        "archive_curated_feature",
+        "legacy SQL constants",
+        "CuratedFeature* DTOs"
+      ],
+      "legacy_write_fence.py": "delete",
+      "merge_repo.py": [
+        "legacy mirror CALLs (4)",
+        "_DETACH_CONFLICTING_LEGACY_CURATION_ITEMS_SQL",
+        "_PINNED_LEGACY_CONFLICT_ITEMS_SQL",
+        "_ARCHIVE_CONFLICTING_LEGACY_CURATED_FEATURES_SQL"
+      ],
+      "curation_repo.py": [
+        "_lock_legacy_projections_for_item",
+        "update_curation_item legacy sync branch"
+      ],
+      "db.py": [
+        "4 merge legacy procedure signatures in _ADMIN_CURATION_FEATURE_PROCEDURES"
+      ],
+      "runtime_privileges.py": [
+        "curated_features",
+        "curated_feature_detail_snapshots"
+      ]
+    },
+    "tests_delete": [
+      "tests/lint/test_legacy_write_fence.py",
+      "tests/integration/test_tvn40a_legacy_write_fence_acl.py",
+      "tests/integration/test_tvn40_identity_mapping_loader.py",
+      "router 410 fence tests in packages/kor-travel-map-api/tests/test_curations_router.py",
+      "legacy seed helpers in test_curated_repo/test_public_features_view/test_notice_defensive_cast",
+      "legacy conflict scenarios in tests/integration/test_merge_repo.py",
+      "packages/kor-travel-map-api/tests/test_export_openapi.py (user path exact set + PinVi curated union schema)",
+      "packages/kor-travel-map-api/tests/test_route_policy.py:401-402",
+      "packages/kor-travel-map-api/tests/test_auth.py:1073",
+      "packages/kor-travel-map-api/tests/test_admin_curated_snapshot_contract.py",
+      "tests/unit/test_curated_routes.py:172-184,766-990",
+      "tests/integration/test_curation_repo.py:1772-2423 legacy seeds",
+      "tests/unit/test_curation_repo.py (_lock_legacy_projections_for_item patches)",
+      "tests/integration/test_merge_under_runtime_role.py dagster negative -> canonical merge_lock_curation_collections",
+      "tests/integration/test_tvn33_migration_contract.py:185-197 (issue_curation_source_rule_decision definition assert)",
+      "scripts/tvn40_identity_mapping_precheck.sql (obsolete after step 1)"
+    ],
+    "frontend": {
+      "delete": [
+        "src/app/admin/curated-features/**",
+        "src/app/admin/features/curated/[curatedFeatureId]/",
+        "legacy hooks in src/api/curated.ts (useAdminCuratedFeature, useCuratedFeatureDetailSnapshot, useAdminCuratedFeatures*)"
+      ],
+      "convert_to_canonical": [
+        "src/app/curated-features/** already reads /v1/curations* - keep; fix href /admin/curated-features -> /admin/features/curated (curated-feature-map-client.tsx:494)"
+      ],
+      "regenerate": [
+        "src/api/types.ts",
+        "packages/kor-travel-map-user-client/src/types.ts (gen:types:check)"
+      ],
+      "e2e": [
+        "admin-scenario-catalog.ts curated-features surface legacy readApis + curated-feature-detail surface + generator F.CURATED_IDS/pinvi-copy parity (212-236, 520-532)",
+        "admin-scenario-catalog.live.spec.ts:20-23",
+        "e2e/live/_fixtures.ts CURATED_IDS -> canonical item ids (used by uploads-backups-poi.live.spec.ts, reviews.live.spec.ts)"
+      ]
+    }
+  },
+  "contract_updates": [
+    "packages/kor-travel-map-api/openapi{,.user,.service}.json regenerate",
+    "contracts/vnext/openapi-diff-v1.json: existing T-VN-40C tombstones (admin 9 + user 2) -> applied: true (do NOT add receipt keys - receipt key set is exact)",
+    "tests/unit/test_vnext_contract_artifacts.py sha refreeze",
+    "recovery-preflight-v1.json final_zero axes satisfied by the static-zero gate",
+    "T-VN-40 paired receipt re-issued with post-40C user spec (P7)"
+  ],
+  "static_zero_gate": {
+    "identifiers": [
+      "feature.curated_features",
+      "curated_feature_detail_snapshots",
+      "legacy_projection_id",
+      "CuratedFeatureRow",
+      "CuratedFeatureDetailSnapshotRow",
+      "legacy_write_fence",
+      "/v1/curated-features",
+      "/v1/admin/features/curated",
+      "/admin/curated-features",
+      "merge_\\w+_legacy_curated_features",
+      "sync_curated_feature_collection",
+      "set_curation_item_legacy_component_identity",
+      "issue_curation_source_rule_decision"
+    ],
+    "active_scopes": [
+      "src/",
+      "packages/kor-travel-map-api/src",
+      "packages/kor-travel-map-dagster/src",
+      "packages/kor-travel-map-user-client/src",
+      "packages/kor-travel-map-admin/frontend/src",
+      "packages/kor-travel-map-admin/frontend/e2e",
+      "docs/*.md (current)",
+      "docs/architecture",
+      "docs/runbooks"
+    ],
+    "allowed_locations": [
+      "alembic/legacy_versions/",
+      "alembic/versions/0045_*..0223_*",
+      "alembic/baseline/",
+      "docs/archive/",
+      "docs/reports/",
+      "docs/adr/",
+      "docs/journal.md",
+      "docs/tasks.md",
+      "docs/tasks-done.md",
+      "docs/resume.md",
+      "contracts/vnext/openapi-diff-v1.json#/surfaces/*/removed",
+      "contracts/vnext/t-vn-40c-removal-manifest-v1.json",
+      "contracts/vnext/target-invariants-v1.sql#INV-040-09",
+      "contracts/vnext/recovery-preflight-v1.json"
+    ],
+    "docs_to_update": [
+      "docs/curated-features.md",
+      "docs/architecture/data-model.md",
+      "docs/architecture/rest-api.md",
+      "docs/architecture/openapi-admin-contract.md",
+      "docs/architecture/provider-contract.md",
+      "docs/architecture/postgres-schema.md",
+      "docs/integration-map.md:140-147",
+      "docs/runbooks/admin-ui-screen-checklist.md",
+      "docs/backup-restore.md",
+      "docs/test-strategy.md"
+    ],
+    "notes": [
+      "search with --fixed-strings per identifier (path-like identifiers are not regexes); run on Linux (n150/CI) - Windows Git Bash mangles /v1/... patterns",
+      "comment/import residue in KEPT modules counts (runtime_privileges.py fence comments, routers/curated.py fence docstring, curated_repo.py legacy_write_fence import)"
+    ]
+  },
+  "verification": [
+    "alembic check clean on fresh DB (0200 -> 0224)",
+    "fresh DB full-chain 0202..0224 passes with 0 legacy rows",
+    "migrated-head DB catalog zero: pg_class/pg_trigger/pg_constraint/pg_index names AND pg_proc.prosrc contain no legacy identifiers",
+    "runtime preflight (API/Dagster) passes",
+    "reconcile_runtime_privileges matches DB",
+    "static zero gate == 0 (identifiers/scopes/allowlist above)",
+    "API smoke: removed routes 404, admin catalog routes 200, public /v1/curations* 200",
+    "admin frontend build + mock e2e; user-client gen:types:check",
+    "PinVi re-vendored user spec sha == map_user_openapi_sha256 in the new paired receipt"
+  ],
+  "rollback": "none - forward-only; failure inside 0224 rolls the whole transaction back (RESTRICT surfaces unknown dependents); post-apply issues are forward-fixed; backup per P5"
+}
