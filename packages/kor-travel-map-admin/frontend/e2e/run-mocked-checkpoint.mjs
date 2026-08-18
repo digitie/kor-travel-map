@@ -124,7 +124,6 @@ const isolatedBuildEnvironment = {
   NEXT_PUBLIC_KOR_TRAVEL_MAP_API: "http://127.0.0.1:9",
   NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL: "http://127.0.0.1:9",
   NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL: "http://127.0.0.1:9",
-  NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY: "",
   NEXT_PUBLIC_VWORLD_API_KEY: "",
 };
 const sourceDigestResult = spawnSync(
@@ -939,7 +938,6 @@ try {
         NEXT_PUBLIC_KOR_TRAVEL_MAP_API: "http://127.0.0.1:9",
         NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL: "http://127.0.0.1:9",
         NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL: "http://127.0.0.1:9",
-        NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY: "",
         NEXT_PUBLIC_VWORLD_API_KEY: "",
         E2E_STORAGE_STATE: storageStatePath,
         PLAYWRIGHT_ARTIFACT_ROOT: playwrightArtifactRoot,

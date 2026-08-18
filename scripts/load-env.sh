@@ -104,6 +104,11 @@ export_first() {
   done
 }
 
+# Next.js BFF의 server runtime alias다. browser-global 이름이나 VWorld provider key는
+# source가 될 수 없다.
+export_first KOR_TRAVEL_GEO_API_KEY \
+  KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY
+
 export_first KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY \
   DATA_GO_KR_SERVICE_KEY DATAGOKR_API_KEY PUBLIC_DATA_SERVICE_KEY SERVICE_KEY
 export_first KOR_TRAVEL_MAP_OPINET_API_KEY \
@@ -115,38 +120,6 @@ export_first KOR_TRAVEL_MAP_KREX_GO_API_KEY \
 
 export_first NEXT_PUBLIC_VWORLD_API_KEY \
   KOR_TRAVEL_GEO_VWORLD_API_KEY VWORLD_API_KEY
-# geo **소비자** 키는 VWorld 키로 떨어지지 않는다. VWorld 키는 kor-travel-geo가 상류로
-# 나갈 때 쓰는 것이고, geo는 그 값을 401(E0401)로 거절한다. 두 이름이 같은 사슬에 있으면
-# "설정이 있다"는 착시만 만들고 실패를 첫 요청 시점까지 미룬다 — 2026-08-13 prod에서
-# 정확히 그렇게 dagster/daemon이 죽은 키를 들고 있었다(T-VN-H46B).
-# 두 이름은 **같은 geo 소비자 자격증명의 별칭**이므로 양방향으로 채운다. 한 방향만
-# 두면 `.env.example`이 시키는 대로 `KOR_TRAVEL_MAP_…`만 설정한 개발자의 admin UI가
-# 키 없이 뜬다(적대 리뷰 지적). `export_first`는 target이 이미 있으면 그대로 두므로
-# 두 줄이 서로를 덮지 않는다.
-export_first NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY \
-  KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY
-export_first KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY \
-  NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY
-# 별칭이라고 적어 두기만 하면 강제되지 않는다. 키 회전에서 한쪽만 고치면 backend ETL은
-# 초록인데 admin UI만 401이 되고 아무도 모른다 — 2026-08-13 사고와 같은 모양이 한 겹
-# 위에서 재현된다. (marker: geo_alias_split_brain)
-#
-# **여기서 exit 하지 않는다.** 이 파일은 항상 `source`되므로(`docker-up.sh`·
-# `docker-buildx.sh`·`docker-restore-swap.sh` …) exit는 호출 스크립트를 끝내고,
-# 대화형 셸에서는 터미널을 닫는다 — `docker-restore-swap.sh`가 복구 도중 운영자에게
-# `source scripts/load-env.sh`를 지시하는데 거기서 그러면 안 된다(적대 리뷰 지적).
-# 그리고 서는 것은 이 파일의 우선순위 모델과도 모순이다: `load_env_file`은 다른 모든
-# 변수에 대해 `.env`가 주변 env를 **덮는다**. 같은 규칙을 적용해 정본 이름으로 정렬하고
-# 경고만 남긴다.
-if [[ -n "${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-}" \
-   && -n "${NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY:-}" \
-   && "${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY}" != "${NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY}" ]]; then
-  echo "load-env: geo_alias_split_brain — KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY와" \
-       "NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY가 서로 다른 값이다. 둘은 같은 자격증명의" \
-       "별칭이므로 한쪽만 회전하면 admin UI만 401이 된다." \
-       "정본(KOR_TRAVEL_MAP_…) 값으로 맞춘다." >&2
-  export NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY="$KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY"
-fi
 export_first KOR_TRAVEL_MAP_KAKAO_LOCAL_REST_API_KEY \
   KAKAO_LOCAL_REST_API_KEY
 export_first KOR_TRAVEL_MAP_NAVER_SEARCH_CLIENT_ID \

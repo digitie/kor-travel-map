@@ -101,16 +101,12 @@ build_one() {
 ensure_builder
 
 build_one "$API_IMAGE" docker/api.Dockerfile
-# `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY`는 VWorld 키로 떨어지지 않는다 — VWorld 키는
-# kor-travel-geo가 **상류로 나갈 때** 쓰는 것이고, geo는 그 값을 401(E0401)로 거절한다.
-# 사슬로 이어 두면 "설정이 있다"는 착시만 만들고 실패를 첫 요청까지 미룬다(T-VN-H46B).
 build_one "$FRONTEND_IMAGE" docker/frontend.Dockerfile \
   --build-arg "KOR_TRAVEL_MAP_GIT_COMMIT=${GIT_REVISION}" \
   --build-arg "NEXT_PUBLIC_KOR_TRAVEL_MAP_API=${NEXT_PUBLIC_KOR_TRAVEL_MAP_API}" \
   --build-arg "NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL=${NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL}" \
   --build-arg "NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL=${NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL:-http://127.0.0.1:12501}" \
-  --build-arg "NEXT_PUBLIC_VWORLD_API_KEY=${NEXT_PUBLIC_VWORLD_API_KEY:-}" \
-  --build-arg "NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY=${NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY:-}"
+  --build-arg "NEXT_PUBLIC_VWORLD_API_KEY=${NEXT_PUBLIC_VWORLD_API_KEY:-}"
 build_one "$DAGSTER_IMAGE $DAGSTER_DAEMON_IMAGE" docker/dagster.Dockerfile "${secret_args[@]}"
 
 echo "Built tag: $IMAGE_TAG"

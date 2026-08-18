@@ -3,6 +3,22 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-08-19 — T-VN-H46F admin UI Geo 자격증명 경계 완료
+
+- [x] T-VN-H46F — **admin UI Geo proxy를 server-only 자격증명 경계로 결선**
+
+  Next.js `/api/geo` BFF가 server-only `KOR_TRAVEL_GEO_API_KEY`만 읽고 browser query의
+  `key`를 제거한 뒤 `X-KTG-API-Key`로 전송한다. 키 형식 오류와 Geo의 401 또는 400
+  `E0100 field=key`는 원문을 숨긴 typed 503으로 fail-close한다. root Compose·frontend
+  Docker build/fingerprint·buildx·load-env·live/mocked E2E에서 browser-global
+  `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY` 운반 경로를 제거했다.
+
+  Docker Manager는 충돌한 draft #173을 PR #183(merge `4f5cbb44`)으로 supersede해 root
+  source → UI server-only alias와 C6c service 격리를 결선했다. Map 변경은 admin redesign
+  PR #1003 merge `da2c740a` 위에 재배치해 PR #1004에 담았다. 전문 적대 리뷰어 2명 GO,
+  frontend unit 336개·Map 집중 37개·BFF route 14개와 원격 CI를 merge gate로 통과시킨다.
+  별도 buildx OCI commit provenance label은 열린 `T-VN-H46G`가 소유한다.
+
 ## 2026-08-18 — backlog 전면 재대조 완료 이력 이관
 
 - [x] T-VN-H25B — **공식 curation CSV 역반영·매칭 재실행**
@@ -15,8 +31,8 @@
 
   VWorld fallback을 제거하고 API 기동의 geo credential 의미 검증을 결선했으며, daemon의
   schema drift는 image lag으로 판정·종결했다. data.go.kr 키는 노출 정황이 없어 현행 유지로
-  결정했다. 남은 Node geo proxy와 buildx commit label은 열린 `T-VN-H46F`·`T-VN-H46G`로
-  분리한다.
+  결정했다. 당시 남긴 Node geo proxy는 2026-08-19 `T-VN-H46F`로 완료했고, buildx commit
+  provenance label만 열린 `T-VN-H46G`가 소유한다.
 
 - [x] T-VN-H47/H48 — **prod dump 위생·n150 임시 DB 정리**
 
@@ -42,7 +58,7 @@
   `alembic/versions/0200_schema_baseline.py` docstring과
   `alembic/legacy_versions/README.md`이며, 빈 PostGIS DB catalog 동등성·ACL digest·legacy
   execution/build artifact 차단을 CI로 고정한다. 당시 후속 H46B~E도 2026-08-18에 종결했고,
-  남은 것은 별도 열린 `T-VN-H46F`·`T-VN-H46G`다.
+  당시 남은 `T-VN-H46F`는 2026-08-19 완료했고, 현재 열린 후속은 `T-VN-H46G`다.
 
 ## 2026-08-13 — T-VN-34/35/36 Wave 2 최종 배포·인수 완료
 

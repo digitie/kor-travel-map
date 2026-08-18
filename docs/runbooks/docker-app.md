@@ -64,13 +64,13 @@ api service의 `environment` interpolation 입력인 shell 또는 root project `
 canonical service의 literal `true`를 사용한다. 설정 enablement와 각 요청의
 `AdminProxyContext.actor` 감사는 서로 대체하지 않는다.
 
-| 입력 키 예                                        | 실행 시 export                                                                                              |
+| 입력 키 예                                        | 실행 시 export/결선                                                                                         |
 | ------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
 | `DATA_GO_KR_SERVICE_KEY`, `KMA_API_KEY`           | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY`                                                                     |
 | `OPINET_API_KEY`                                  | `KOR_TRAVEL_MAP_OPINET_API_KEY`                                                                             |
 | `KEX_GO_API_KEY`, `KREX_API_KEY`                  | `KOR_TRAVEL_MAP_KREX_EX_API_KEY`, `KOR_TRAVEL_MAP_KREX_GO_API_KEY`                                          |
 | `KOR_TRAVEL_GEO_VWORLD_API_KEY`, `VWORLD_API_KEY` | `NEXT_PUBLIC_VWORLD_API_KEY` |
-| `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY` ↔ `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY` | 서로의 별칭이라 **양방향**으로 채운다 |
+| `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY` | geo-issued consumer key의 root 정본. backend는 같은 이름, admin UI는 Compose/Manager가 server-only `KOR_TRAVEL_GEO_API_KEY`로만 결선하며 browser-global 별칭은 만들지 않는다 |
 
 > ⚠️ geo **소비자** 키는 VWorld 키로 채우지 않는다. 두 이름이 비슷하지만 다른
 > 자격증명이고, geo는 VWorld 키를 `401 E0401`로 거절한다. 2026-08-13 prod 장애가

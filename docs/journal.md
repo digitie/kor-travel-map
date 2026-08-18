@@ -2,6 +2,30 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-19 — T-VN-H46F admin UI geo credential fail-close
+
+Next.js `/api/geo` BFF가 공개 build alias나 browser `key` query를 credential source로
+받지 않도록 server-only `KOR_TRAVEL_GEO_API_KEY` 단일 provenance로 좁혔다. 키는 URL이
+아닌 `X-KTG-API-Key` header로만 보내며, geo의 401과 400 `E0100 field=key`는
+`503 GEO_API_KEY_REJECTED`로 정규화해 입력 오류처럼 보이는 실패를 막는다. missing/invalid
+설정, public/VWorld fallback 차단, query override 차단, header 전송, 두 rejection 형태와
+비자격증명 400 passthrough를 frontend 단위 테스트로 고정했다.
+
+route만 고치면 credential은 더 이상 읽지 않아도 이미지에는 계속 남는다. 그래서 root
+Compose의 API/Dagster source fallback을 canonical server key 하나로 좁히고, frontend
+build args·Dockerfile `ARG/ENV`·source digest input·buildx·live/mocked E2E·`load-env.sh`의
+양방향 public alias를 함께 제거했다. UI key는 Compose/Manager service 경계에서만
+`KOR_TRAVEL_GEO_API_KEY`로 별칭 결선되며 browser bundle에는 들어가지 않는다.
+
+Manager PR #183이 충돌한 #173의 의도를 최신 C6c protected-value 계약과 compose에
+재배치해 merge SHA `4f5cbb44`로 흡수했고 #173은 superseded로 닫았다. Map 변경은 admin
+redesign PR #1003 merge SHA 위로 재배치했다.
+
+전문 적대 리뷰어 2명이 Map BFF·browser/build/runtime 노출과 Manager C6c 결선을 독립
+재검토해 모두 GO를 냈다. frontend unit 336개, Map 집중 37개, BFF route 14개와 원격 CI를
+PR #1004의 최종 merge gate로 두고, 완료 항목은 `tasks-done.md`로 이관했다. H46 계열의
+열린 후속은 `T-VN-H46G` buildx OCI commit provenance label뿐이다.
+
 ## 2026-08-18 — 인수 ②의 범위가 조사로 바뀌었다: Map은 mutation 없음, 관문은 PinVi 재배포
 
 - ② 문구("admin API preview→commit으로 import")를 그대로 실행하면 **틀린 일을 한다.** prod legacy
@@ -63,7 +87,6 @@
   따라서 ①~③은 완료하지만 ⑤ Alembic 1.19 적응은 열린 barrier로 유지한다.
 - 로컬 검증: python-kma-api `149 passed, 12 skipped` + Ruff/mypy, python-khoa-api
   `44 passed, 2 skipped` + compileall/Ruff/mypy, Map 변경 집중 `350 passed` + Ruff/strict mypy.
-
 ## 2026-08-18 — T-VN-40 인수 ① 실행: prod가 `0223`으로 올라갔다 (4,424 mapping)
 
 - 순서: read-only precheck(전부 0, `4424|4424`) → `pg_dump -Fc` 복구점(614MB, `.sha256`) + `.env` 백업 →

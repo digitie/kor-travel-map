@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-19 — T-VN-H46F admin UI geo proxy 구현
+
+- `/api/geo`는 server-only `KOR_TRAVEL_GEO_API_KEY`의 ASCII 영숫자 32자 발급 형식만
+  신뢰하고 browser query key를 제거한 뒤 `X-KTG-API-Key` header로 전달한다.
+- geo가 401 또는 400 `E0100 field=key`로 거부하면 원문 응답 대신
+  `503 GEO_API_KEY_REJECTED`로 fail-close한다. public/VWorld alias는 proxy credential
+  provenance에 참여하지 않는다.
+- root Compose·frontend Dockerfile/build fingerprint·buildx·load-env·live/mocked E2E에서
+  browser-global geo credential alias를 제거했다. root source → backend 동일 이름 / UI
+  server-only alias의 service wiring만 남는다.
+- Docker Manager PR #183이 충돌한 #173을 최신 C6c 구조에서 supersede해
+  `4f5cbb44`로 병합됐다. Map은 admin redesign PR #1003 merge SHA 위로 재배치했으며
+  PR #1004에 담았다. 독립 전문 적대 리뷰어 2명은 모두 GO를 냈고, frontend unit
+  336개·Map 집중 37개·BFF route 14개와 원격 CI를 최종 merge gate로 유지한다.
+- 완료 이력은 `tasks-done.md`로 이관했다. 남은 H46 계열 작업은 별도
+  `T-VN-H46G`(buildx OCI commit provenance label)뿐이다.
+
 ## 2026-08-18 — T-VN-41S bounded snapshot 1차 구현, 0224 migration barrier
 
 #922의 server cursor 2-pass capture, incremental Merkle v1, 1,000행 INSERT, item 1,000,000/512 MiB
@@ -33,7 +50,6 @@ python-kma-api #24(`0868b76`, quota/XML 계약)와 python-khoa-api #8(`20c7207`,
 H45 Map PR의 전체 게이트·CI를 통과시켜 머지한 뒤 T-VN-41S/#922 구현 커밋을 최신 main에
 재배치하고 독립 적대 리뷰 2명·전체 테스트·PR 병합을 진행한다. H45 전체 완료 표시는 ⑤를
 안전한 migration/check gate로 해결하기 전까지 금지한다.
-
 ## 2026-08-18 — T-VN-40 인수 ① 완료: prod head `0223`, mapping 4,424
 
 precheck 전부 0 → 백업(`kor_travel_map_0104_pre-tvn40-1_20260818T082752Z.dump` + `.sha256`) →

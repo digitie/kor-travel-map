@@ -85,14 +85,17 @@ find . -type f \\( -name '.env*' -o -name '*.yml' -o -name '*.yaml' \\
 | `KOR_TRAVEL_GEO_*` | kor-travel-geo | (로컬 DB 위주, vworld 폴백 키는 kor-travel-geo가 관리) | geo 서비스 자체 설정. 본 라이브러리는 HTTP client만 사용 |
 | `KOR_TRAVEL_GEO_VWORLD_API_KEY` | kor-travel-geo (reverse geocoding), 디버그/admin UI frontend (MapLibre/VWorld), PinVi 사용자 UI (ADR-026) | VWorld (vworld.kr) | **공유 키**. 별도 발급 X. ADR-025 + ADR-026 |
 | `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY` | kor-travel-map API/Dagster/CLI의 kor-travel-geo v2 호출 | kor-travel-geo public REST v2 | `X-KTG-API-Key` header로만 전송한다. admin trusted-proxy secret/role을 Map에 위임하지 않는다. |
-| `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY` | admin frontend (지금은 `/api/geo/*` 프록시 경유) | kor-travel-geo public REST v2 | ⚠️ **VWorld 키를 넣지 않는다.** geo가 `key` query를 "VWorld 호환" 형식으로 받을 뿐, 값은 geo가 발급한 소비자 키여야 한다. VWorld 키를 넣으면 `401 E0401`. §2.1 참조 |
-| `KOR_TRAVEL_GEO_API_KEY` | admin UI 컨테이너의 `/api/geo/*` 프록시 | kor-travel-geo public REST v2 | `NEXT_PUBLIC_` 접두가 없어 **런타임**에 먹는다 — 이미 구워진 이미지에도 반영되므로 키 교체 시 재빌드가 필요 없다. 프록시가 이 이름을 먼저 읽는다 |
+| `KOR_TRAVEL_GEO_API_KEY` | admin UI 컨테이너의 `/api/geo/*` 프록시 | kor-travel-geo public REST v2 | `NEXT_PUBLIC_` 접두가 없는 **유일한 UI server runtime 입력**이다. Manager가 root `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY`에서 이 이름으로만 결선하고, 프록시는 browser `key` query를 버린 뒤 `X-KTG-API-Key` header로만 보낸다. 키 교체에 이미지 재빌드는 필요 없다. |
 
-## 2.1 동일 값을 공유하는 별칭 (실측)
+## 2.1 과거 동일 값 오염 실측 (2026-08-14, 운영 정본 아님)
 
 자격증명 하나가 provider별·저장소별 이름으로 갈라져 여러 곳에 복제돼 있다. 아래는
 로컬 `F:\dev` 전체의 `.env`/`.env.local`/`.env.production`을 값의 sha256 앞 8자로
-묶은 **실측**이다(2026-08-14). 값은 싣지 않는다.
+묶은 **당시 사고 조사 실측**이다. 값은 싣지 않는다. 이 표는 현재 허용 별칭 목록이
+아니다. 특히 `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY`는 H46F에서 폐기됐으며 build arg,
+browser bundle, query credential로 다시 결선하면 안 된다. 현재 Map 소비자 키 정본은
+root `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY`이고, UI에는 server runtime
+`KOR_TRAVEL_GEO_API_KEY`로만 격리 전달한다.
 
 | 자격증명 | sha8 | 별칭 수 | 파일 수 | 별칭 |
 |---|---|---|---|---|
@@ -100,7 +103,8 @@ find . -type f \\( -name '.env*' -o -name '*.yml' -o -name '*.yaml' \\
 | VWorld 키 | `e9caf390` | 14 | 15 | `VWORLD_API_KEY`, `VWORLD_SERVICE_KEY`, `VITE_VWORLD_API_KEY`, `NEXT_PUBLIC_VWORLD_API_KEY`, `NEXT_PUBLIC_VWORLD_SERVICE_KEY`, `KTG_VWORLD_API_KEY`, `KRADDR_GEO_VWORLD_API_KEY`, `PINVI_VWORLD_API_KEY`, `KOR_TRAVEL_GEO_VWORLD_API_KEY`, `KOR_TRAVEL_MAP_API_VWORLD_API_KEY`, `KOR_TRAVEL_GEO_V2_API_KEY`, **`KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY`**, **`NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY`** |
 | OpiNet 키 | `dfc07838` | 4 | 3 | `OPINET_API_KEY`, `TRIPMATE_OPINET_API_KEY`, `KRTOUR_MAP_OPINET_API_KEY`, `KRTOUR_MAP_ADMIN_OPINET_SERVICE_KEY` |
 
-**굵게 표시한 두 이름은 geo 소비자 키 자리인데 VWorld 키 값이 들어 있다.** geo는 그
+**굵게 표시한 두 이름은 당시 geo 소비자 키 자리에 VWorld 키 값이 들어 있던 오염
+기록이다.** 둘 중 `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY`는 현재 폐기된 이름이다. geo는 그
 값을 `401 E0401`("VWorld 호환 인증키가 유효하지 않습니다")로 거절하고, `preflight()`는
 존재·길이만 보므로 실패가 첫 요청 시점까지 미뤄진다. 2026-08-13 prod 사고가 정확히
 이것이었고, 로컬 `.env`들에는 아직 그대로 있다. 두 자격증명은 성격이 다르다 — VWorld
@@ -322,9 +326,10 @@ provider API spec이 변경되면:
   `kor-travel-geo` ADR-019의 `KOR_TRAVEL_GEO_VWORLD_API_KEY`를 **공유 사용**
   (ADR-025 사용자 보강 2026-05-25). 별도 발급 금지. frontend는 **Next.js**
   (ADR-025 2차 보강) 규약상 `NEXT_PUBLIC_VWORLD_API_KEY`로 노출 — 값은
-  동일 출처. `kor-travel-geo` public REST v2 호출에는 geo가 Map frontend consumer에
-  별도로 발급한 값을 `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY`에 넣어 `key` query로 전달한다.
-  VWorld provider key fallback은 금지하며 HTTP referrer 제한을 권장한다.
+  동일 출처. `kor-travel-geo` public REST v2 호출에는 geo가 Map consumer에 별도로
+  발급한 값을 UI server runtime `KOR_TRAVEL_GEO_API_KEY`에 넣고 BFF가
+  `X-KTG-API-Key` header로 전달한다. VWorld provider key나 browser query fallback은
+  금지하며 HTTP referrer 제한을 권장한다.
 - **Kakao Maps JS SDK**: **미사용** (ADR-026 — PinVi 사용자 UI도
   VWorld/MapLibre 계열로 통일, SPEC V8 v8_3 supersede). 본 항목은 reference로
   유지하되 비용/한도 모니터링 대상이 아니다.
