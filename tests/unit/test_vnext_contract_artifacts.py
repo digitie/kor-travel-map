@@ -52,6 +52,17 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     "consumer-rollout-v1.json": (
         "968bf7f5832817ec69858f80213ddd46cdac4e067eb3010214593a973acdefa9"
     ),
+    # T-VN-41S service 계약 변경으로 active receipt가 pending으로 돌아가도, 이전
+    # candidate archive·image·Live UI 증거 세트는 detached 이력으로 불변이어야 한다.
+    "t-vn-41-candidate-manifest-v1.json": (
+        "f5620c37f5f2665371d86d434ae5ef1e0c34815462f335fcb15e760f5d40a085"
+    ),
+    "t-vn-41-candidate-attestation-v1.json": (
+        "ca99a15ce37722362b17fa1b291fba7c7141b87d912971e2a6bf8e418cf219be"
+    ),
+    "t-vn-41-candidate-live-e2e-evidence-v1.json": (
+        "15e05098949d52097a64826c0702fe72149c138f3863ce9be98042b9079e58f4"
+    ),
     "violation-fixtures-v1.sql": (
         "84cca48b776387e4b6fd00b702e40b3412c9731f6abcdd250a5c126c2ea155d8"
     ),
