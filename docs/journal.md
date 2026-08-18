@@ -17,8 +17,9 @@ build args·Dockerfile `ARG/ENV`·source digest input·buildx·live/mocked E2E·
 양방향 public alias를 함께 제거했다. UI key는 Compose/Manager service 경계에서만
 `KOR_TRAVEL_GEO_API_KEY`로 별칭 결선되며 browser bundle에는 들어가지 않는다.
 
-Manager draft PR #183이 충돌한 #173의 의도를 최신 C6c protected-value 계약과 compose에
-재배치해 흡수한다. Map 변경은 admin redesign PR #1003 merge SHA 위로 재배치했다.
+Manager PR #183이 충돌한 #173의 의도를 최신 C6c protected-value 계약과 compose에
+재배치해 merge SHA `4f5cbb44`로 흡수했고 #173은 superseded로 닫았다. Map 변경은 admin
+redesign PR #1003 merge SHA 위로 재배치했다.
 
 ## 2026-08-18 — 인수 ②의 범위가 조사로 바뀌었다: Map은 mutation 없음, 관문은 PinVi 재배포
 

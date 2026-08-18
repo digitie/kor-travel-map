@@ -139,6 +139,45 @@ def test_geo_credentials_never_fall_back_to_vworld_provider_key(
 
 
 @pytest.mark.unit
+def test_local_admin_stack_receives_only_the_server_geo_alias(tmp_path: Path) -> None:
+    """root 정본 키를 local Next.js server에 전달하되 browser 이름은 만들지 않는다."""
+
+    env = os.environ.copy()
+    forbidden_browser_key = "NEXT_PUBLIC_" + "KOR_TRAVEL_GEO_API_KEY"
+    for name in (
+        "KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY",
+        "KOR_TRAVEL_GEO_API_KEY",
+        forbidden_browser_key,
+    ):
+        env.pop(name, None)
+    env["KOR_TRAVEL_MAP_ENV_FILE"] = str(tmp_path / "missing.env")
+    env["KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY"] = "G" * 32
+
+    result = subprocess.run(
+        [
+            "bash",
+            "-c",
+            "source scripts/load-env.sh; "
+            "printf '%s\\n%s\\n' "
+            '"$KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY" '
+            '"$KOR_TRAVEL_GEO_API_KEY"',
+        ],
+        cwd=ROOT,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.stdout.splitlines() == ["G" * 32, "G" * 32]
+    assert forbidden_browser_key not in _read("scripts/load-env.sh")
+    assert (
+        "NEXT_PUBLIC_* | KOR_TRAVEL_GEO_API_KEY | KOR_TRAVEL_MAP_API_INTERNAL_URL"
+        in _read("scripts/run-admin-stack.sh")
+    )
+
+
+@pytest.mark.unit
 def test_local_compose_build_paths_export_exact_git_revision() -> None:
     expected = 'export KOR_TRAVEL_MAP_GIT_COMMIT="$(git -C "$ROOT_DIR" rev-parse HEAD)"'
 

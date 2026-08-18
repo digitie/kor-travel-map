@@ -10,8 +10,9 @@
 - root Compose·frontend Dockerfile/build fingerprint·buildx·load-env·live/mocked E2E에서
   browser-global geo credential alias를 제거했다. root source → backend 동일 이름 / UI
   server-only alias의 service wiring만 남는다.
-- Docker Manager draft PR #183이 충돌한 #173을 최신 C6c 구조에서 supersede한다. Map은
-  admin redesign PR #1003 merge SHA 위로 재배치했으며 독립 적대 재리뷰·원격 CI가 남았다.
+- Docker Manager PR #183이 충돌한 #173을 최신 C6c 구조에서 supersede해
+  `4f5cbb44`로 병합됐다. Map은 admin redesign PR #1003 merge SHA 위로 재배치했으며
+  독립 적대 재리뷰 2명과 원격 CI가 남았다.
 
 ## 2026-08-18 — T-VN-41S bounded snapshot 1차 구현, 0224 migration barrier
 

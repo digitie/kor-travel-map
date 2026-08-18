@@ -18,7 +18,7 @@ barrier로 직렬화한다.
   - [~] `T-VN-H34`(공식 curation 미연결 membership 잔여 AC — `T-VN-M01`~`M03` 선행 필요)
   - [~] `T-VN-H43` → [~] `T-VN-H44`(백업 정기화·복원 드릴 재개 조건)
   - [~] `T-VN-H45-후속`(①~④ 완료 / ⑤ alembic 1.19 적응 잔여)
-  - [~] `T-VN-H46F`(admin UI geo proxy 구현·로컬 검증, 적대 리뷰/CI 대기) ∥ [ ] `T-VN-H46G`(buildx image commit provenance label)
+  - [~] `T-VN-H46F`(Manager #183 병합·Map #1003 재배치 완료, #1004 적대 재리뷰/CI 대기) ∥ [ ] `T-VN-H46G`(buildx image commit provenance label)
   - [~] `T-VN-H49`(Map baseline·절차 완료 / docker-manager #177의 외부 인스턴스 주기화 잔여)
 - **Lane B — frontend hardening·PinVi 소비 API**
   - [~] `T-VN-41A` → [~] `T-VN-41B` → [~] `T-VN-41C`(generation/outbox — 상세 AC 일부 완료, #975 rebase·regression 수정·새 exact-pair CI/E2E 재검증 중)
@@ -623,11 +623,12 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     `KOR_TRAVEL_GEO_API_KEY`만 읽고, browser query의 `key`를 버린 뒤
     `X-KTG-API-Key` header로 전송한다. geo의 401 또는 400 `E0100 field=key`는
     `503 GEO_API_KEY_REJECTED`로 변환해 입력 오류와 구분하고 fail-close한다. Manager
-    PR #173의 의도는 최신 Manager `main`에 재배치해 source
+    PR #173의 의도는 Manager PR #183(`4f5cbb44`)으로 최신 `main`에 재배치해 source
     `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY` → UI server-only alias 결선과 정확한 service
     격리 계약으로 흡수한다. root Compose·frontend Docker build/fingerprint·buildx·
     load-env·live/mocked E2E의 browser-global credential alias도 제거해 bundle 잔존 경로를
-    닫았다. 구현·로컬 검증 뒤 독립 적대 리뷰와 CI가 남았다.
+    닫았고 충돌한 #173은 superseded로 닫았다. Map PR #1004의 독립 적대 재리뷰 2명과
+    CI가 남았다.
 
 **T-VN-H46D 완료 — daemon 스키마 drift: `column request.providers does not exist`.**
   (2026-08-18 실측으로 종결 — **배포 이미지 lag이 맞았다**)

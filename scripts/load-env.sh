@@ -104,6 +104,11 @@ export_first() {
   done
 }
 
+# Next.js BFF의 server runtime alias다. browser-global 이름이나 VWorld provider key는
+# source가 될 수 없다.
+export_first KOR_TRAVEL_GEO_API_KEY \
+  KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY
+
 export_first KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY \
   DATA_GO_KR_SERVICE_KEY DATAGOKR_API_KEY PUBLIC_DATA_SERVICE_KEY SERVICE_KEY
 export_first KOR_TRAVEL_MAP_OPINET_API_KEY \
