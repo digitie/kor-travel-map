@@ -9,6 +9,23 @@ Map 인수 ①(prod `0104 → 0223`, mapping 4,424)이 끝난 뒤 남은 ②를 
 
 ## 0. 선행 조건 (전부 만족해야 시작)
 
+> **2026-08-19 갱신 — PR #1000(T-VN-41S)이 순서를 바꾼다.** 그 PR은
+> `openapi.service.json`을 바꾸고(`c6f9aba6…` → `8019e36f…`, +298/-4) `consumer-rollout-v1.json`의
+> T-VN-40 receipt 해시 2개를 함께 옮기며 T-VN-41 receipt의 `candidate_verified` 블록을 되돌린다.
+> 따라서:
+> - **pair commit은 #1000 머지 이후여야 한다**(그 전 커밋으로 배포하면 이미지가 receipt와 다른 service
+>   계약을 담는다).
+> - PinVi는 **service 스냅샷도 재vendor**해야 한다. 그러면 §0-2가 "재핀하지 않는다"고 적은
+>   provenance lockstep이 **이번엔 실제로 발동한다** — `contracts/kor-travel-map-service-provenance-v1.json`의
+>   `service_openapi_sha256`+`map_release_revision`, `tests/unit/test_kor_travel_map_cache_target_contract.py`
+>   상수, `PINVI_KOR_TRAVEL_MAP_CACHE_TARGET_EXPECTED_SOURCE_REVISION` env를 한 커밋에서 옮긴다.
+> - **S4는 그 재핀 이후에 한 번만 봉인한다.** 먼저 봉인하면 재핀 뒤 preflight가 새 revision 기준으로
+>   `ready=false`가 되어 재봉인이 필요하다(mapping 표는 immutable이라 재봉인 자체는 가능하다).
+>
+> 결정된 실행 순서: **#1000 머지 → Map prod를 그 head로 재배포 → PinVi service 재vendor + provenance
+> 재핀 PR 머지(= PinVi pair commit) → S3 → S4 → S5 → S6 → ④ receipt complete.**
+
+
 1. **PinVi PR #451 머지 완료.** Map 인수 ④는 `map_user_openapi_sha256 == pinvi_user_vendor_sha256`을
    강제하는데(`tests/unit/test_vnext_contract_artifacts.py`), PinVi `main`의 vendored user spec은
    `66fc83b3…`이고 Map은 `6a2ee0f9…`다. **배포 pair commit은 #451 머지 커밋 이후여야 한다.**
