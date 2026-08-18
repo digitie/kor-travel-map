@@ -339,6 +339,7 @@ interface MockCounters {
   detail: number;
   nearby: number;
   weather: number;
+  revision: number;
   /** admin 상세 라우트로 들어온 정확한 pathname 목록(deeplink 검증용). */
   detailPaths: string[];
 }
@@ -353,6 +354,7 @@ async function mockFeatureDetail(
     detail: 0,
     nearby: 0,
     weather: 0,
+    revision: 0,
     detailPaths: [],
   };
 
@@ -371,6 +373,27 @@ async function mockFeatureDetail(
         return;
       }
       await fulfillJson(route, makeWeatherResponse(options.weather));
+      return;
+    }
+    // `/revision` — FeatureStatePanel의 `useAdminFeatureCorrectionBasis`가 마운트와 함께
+    // 부르는 write 선행조건(ETag + row_revision). mock이 이걸 비워 두면 요청이 route를
+    // 빠져나가 BFF/실백엔드로 향하고(= mock suite의 hermetic 계약 위반), 실패 응답이
+    // "상태 명령을 적용하지 못했습니다" alert로 화면에 feature_id를 한 번 더 찍는다.
+    // detail 본문의 `row_revision`을 그대로 echo해 basis가 1회 시도로 합의되게 한다.
+    if (request.method() === "GET" && pathname.endsWith("/revision")) {
+      counters.revision += 1;
+      await route.fulfill({
+        body: JSON.stringify({
+          data: {
+            feature_id: data.feature.feature_id,
+            row_revision: data.feature.row_revision,
+          },
+        }),
+        contentType: "application/json",
+        // `fetchAdminFeatureCorrectionBasis`는 ETag가 없으면 즉시 throw한다.
+        headers: { etag: `"${String(data.feature.row_revision)}"` },
+        status: 200,
+      });
       return;
     }
     if (request.method() === "GET" && pathname === DETAIL_PATH) {
@@ -653,8 +676,9 @@ test.describe("/features/[featureId] 섹션 깊이", () => {
     // 헤더 coord dd가 "-"(coordLabel null → "-").
     await expect(page.getByText("coord", { exact: true })).toBeVisible();
 
-    // 상세 GET 1회는 발생했으나(페이지 렌더), nearby는 enabled=false라 0회.
-    await expect.poll(() => counters.detail).toBe(1);
+    // 상세 GET은 발생했으나(페이지 렌더 + 상태 basis 짝 맞추기 = 2회, 아래 deeplink
+    // 테스트 주석 참조), nearby는 enabled=false라 0회.
+    await expect.poll(() => counters.detail).toBe(2);
     await expect.poll(() => counters.nearby).toBe(0);
   });
 
@@ -710,8 +734,13 @@ test.describe("/features/[featureId] 섹션 깊이", () => {
       `/admin/features?feature_id=${encodeURIComponent(FEATURE_ID)}`,
     );
 
-    // GET /v1/admin/features/{FEATURE_ID} 정확히 1회 + 그 path만 수신.
-    await expect.poll(() => counters.detail).toBe(1);
-    expect(counters.detailPaths).toEqual([DETAIL_PATH]);
+    // GET /v1/admin/features/{FEATURE_ID}는 그 path로만 들어온다(deeplink 인코딩 회귀 방지).
+    // 횟수는 2회다: ① 읽기용 `useAdminFeatureDetail`, ② 쓰기 선행조건
+    // `fetchAdminFeatureCorrectionBasis`가 revision(ETag)과 같은 시점의 상세를 다시 읽어
+    // 짝을 맞추는 호출(src/api/features.ts). 예전 단언(1회)은 mock이 `/revision`을 비워 둬
+    // 그 호출이 첫 단계에서 실패하는 동안만 참이었다 — 실제 백엔드에서는 늘 2회였다.
+    await expect.poll(() => counters.detail).toBe(2);
+    expect(counters.revision).toBe(1);
+    expect(new Set(counters.detailPaths)).toEqual(new Set([DETAIL_PATH]));
   });
 });

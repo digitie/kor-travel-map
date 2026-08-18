@@ -45,6 +45,18 @@ const EXPECTED_CONFIG = {
         files: ["src/app/ops/datasets/datasets-client.tsx"],
         rules: ["react-doctor/no-event-handler"],
       },
+      // 가상화 DataTable은 display를 grid/flex로 바꿔 브라우저의 암묵 table role을
+      // 잃는다(그 상태에서는 aria-rowcount/aria-rowindex/aria-sort가 무시된다).
+      // 그래서 role="table"/"row"/"columnheader"/"cell"을 **명시**해야 하는데,
+      // react-doctor는 semantic 태그 위의 같은 role을 redundant로 본다(그 규칙은
+      // display가 바뀌지 않는 일반 표를 전제한다). 이 예외는 그 한 파일에만 준다.
+      {
+        files: ["src/components/ui/data-table.tsx"],
+        rules: [
+          "react-doctor/no-redundant-roles",
+          "react-doctor/no-interactive-element-to-noninteractive-role",
+        ],
+      },
     ],
   },
 };

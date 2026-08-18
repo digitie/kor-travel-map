@@ -1,35 +1,18 @@
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 import { mergeProps } from "@base-ui/react/merge-props"
 import { useRender } from "@base-ui/react/use-render"
-import { cva, type VariantProps } from "class-variance-authority"
+import { type VariantProps } from "class-variance-authority"
 
+import { badgeVariants, type BadgeVariant } from "@/components/ui/badge-variants"
 import { cn } from "@/lib/utils"
 
-const badgeVariants = cva(
-  "group/badge inline-flex h-6 w-fit shrink-0 items-center justify-center gap-1 overflow-hidden rounded-md border border-transparent px-2 py-0.5 text-[12px] font-bold tracking-[0.05em] whitespace-nowrap uppercase transition-colors focus-visible:border-brand focus-visible:ring-[3px] focus-visible:ring-brand/20 has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&>svg]:pointer-events-none [&>svg]:size-3!",
-  {
-    variants: {
-      variant: {
-        default: "bg-brand text-brand-foreground [a]:hover:bg-brand/90",
-        secondary:
-          "bg-brand-tint text-brand [a]:hover:bg-brand-tint/80",
-        destructive:
-          "bg-destructive/10 text-destructive focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:focus-visible:ring-destructive/40 [a]:hover:bg-destructive/20",
-        outline:
-          "border-border bg-card text-text-secondary [a]:hover:bg-surface-subtle [a]:hover:text-text-primary",
-        ghost:
-          "text-text-secondary hover:bg-surface-subtle hover:text-text-primary",
-        link: "text-brand underline-offset-4 hover:underline",
-        success: "bg-success/10 text-success [a]:hover:bg-success/20",
-        warning: "bg-warning/10 text-warning [a]:hover:bg-warning/20",
-        info: "bg-info/10 text-info [a]:hover:bg-info/20",
-      },
-    },
-    defaultVariants: {
-      variant: "default",
-    },
-  }
-)
-
+/**
+ * Badge — 상태 칩 전용(design.md §Status colour semantics). count/version/key 같은 정적 metadata는
+ * badge가 아니라 muted inline text로 표기한다(M22). tone 변형(success/warning/info/destructive/neutral)은
+ * 불투명 `*-tint` 토큰 위에 tone 잉크(각각 AA ≥ 4.5:1) — alpha 팔레트 금지(M4/C2).
+ * 한글 라벨이므로 uppercase/tracking 없음(m3), 숫자는 tabular-nums(M24).
+ * recipe(`badgeVariants`)와 `BadgeVariant` 타입은 `badge-variants.ts`가 정본이다.
+ */
 function Badge({
   className,
   variant = "default",
@@ -53,3 +36,4 @@ function Badge({
 }
 
 export { Badge }
+export type { BadgeVariant }

@@ -12,6 +12,13 @@
       {
         "files": ["src/app/ops/datasets/datasets-client.tsx"],
         "rules": ["react-doctor/no-event-handler"]
+      },
+      {
+        "files": ["src/components/ui/data-table.tsx"],
+        "rules": [
+          "react-doctor/no-redundant-roles",
+          "react-doctor/no-interactive-element-to-noninteractive-role"
+        ]
       }
     ]
   }

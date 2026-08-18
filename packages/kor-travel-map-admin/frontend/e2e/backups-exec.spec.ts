@@ -220,11 +220,13 @@ test.describe("admin/backups execute depth", () => {
     await backupRow.getByRole("button", { name: "Swap" }).click();
 
     await expect.poll(() => captured.swap).not.toBeNull();
+    // `env_file`은 더 이상 보내지 않는다 — OpenAPI `RestoreSwapRequest`(src/api/types.ts)에
+    // 그 필드가 없다(백엔드 swap 계약에서 제거됨). UI가 보낼 수 없는 키를 기대하던 잔존
+    // 단언이라 리디자인 이전 main에서도 이 테스트는 같은 diff로 실패했다.
     expect(captured.swap).toEqual({
       app_db: null,
       apply: false,
       dagster_db: null,
-      env_file: null,
       execute: true,
       note: null,
       rustfs_volume: null,

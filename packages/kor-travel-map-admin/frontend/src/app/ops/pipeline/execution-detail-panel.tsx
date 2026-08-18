@@ -1,4 +1,5 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (inspector rail) · design-system: design.md · designed-as-app
 
 import { PlayIcon, XIcon } from "lucide-react";
 import Link from "next/link";
@@ -12,26 +13,28 @@ import {
   usePipelineExecutionDetail,
   useRunNowUpdateRequestMutation,
 } from "@/api/pipeline";
+import { useConfirm } from "@/components/confirm-dialog";
+import { DetailList } from "@/components/detail-list";
+import { EmptyState } from "@/components/empty-state";
 import { EntityLink } from "@/components/entity-link";
-import { StatusBadge } from "@/components/status-badge";
-import { statusLabel } from "@/lib/status-label";
+import { JsonViewer } from "@/components/json-viewer";
+import { LevelBadge, StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
+  CardAction,
   CardContent,
   CardDescription,
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { JsonViewer } from "@/components/json-viewer";
-import { DetailList } from "@/components/detail-list";
+import { FormField } from "@/components/ui/form-field";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
-import { useConfirm } from "@/components/confirm-dialog";
-import { formatDateTime, shortId } from "@/lib/format";
+import { Skeleton } from "@/components/ui/skeleton";
+import { NULL_GLYPH, formatDateTime, shortId } from "@/lib/format";
+import { statusLabel } from "@/lib/status-label";
 
 import {
   executionKindLabel,
@@ -46,6 +49,12 @@ const EVENT_LEVELS: Array<JobEventLevel | "all"> = [
   "info",
   "debug",
 ];
+
+/** rail 안 소제목 — 12px/600 normal case(한글에 uppercase·tracking 없음, m3). */
+const SUBHEADING_CLASS = "text-xs font-semibold text-text-primary";
+/** 연결 개체·배치 링크 — prose link recipe + 단일 focus 레시피. */
+const INLINE_LINK_CLASS =
+  "link rounded-control font-mono focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
 function useExecutionDetailPanelController({
   kind,
@@ -206,11 +215,16 @@ function ExecutionRunSummary({
   return (
     <>
       {detail.isLoading ? (
-        <p className="text-sm text-muted-foreground">상세를 불러오는 중…</p>
+        <div aria-busy="true" className="space-y-2">
+          <Skeleton className="h-4 w-1/2" />
+          <Skeleton className="h-4 w-3/4" />
+          <Skeleton className="h-4 w-2/3" />
+          <Skeleton className="h-4 w-1/3" />
+        </div>
       ) : null}
       {detail.isError ? (
         <Alert variant="destructive">
-          <AlertTitle>실행 상세 호출 실패</AlertTitle>
+          <AlertTitle>실행 상세를 불러오지 못했습니다</AlertTitle>
           <AlertDescription>{detail.error.message}</AlertDescription>
         </Alert>
       ) : null}
@@ -230,7 +244,7 @@ function ExecutionRunSummary({
             cancellation.status === "failed" ||
             cancellation.status === "retryable"
               ? "destructive"
-              : "default"
+              : "info"
           }
         >
           <AlertTitle>취소 작업 {cancellation.status}</AlertTitle>
@@ -273,47 +287,46 @@ function ExecutionRunSummary({
               label: "진행",
               value:
                 execution.kind === "update_request" && root
-                  ? `${root.projected_job.progress}% · ${root.projected_job.current_stage ?? "-"}`
-                  : `${execution.progress ?? 0}% · ${execution.current_stage ?? "-"}`,
+                  ? `${root.projected_job.progress}% · ${root.projected_job.current_stage ?? NULL_GLYPH}`
+                  : `${execution.progress ?? 0}% · ${execution.current_stage ?? NULL_GLYPH}`,
             },
             {
               label: "provider datasets",
               value:
                 execution.provider_datasets
                   .map(providerDatasetIdentityLabel)
-                  .join(", ") || "-",
+                  .join(", ") || null,
               mono: true,
             },
             {
               label: "scope",
-              value: execution.scope_type ?? execution.job_kind ?? "-",
+              value: execution.scope_type ?? execution.job_kind ?? null,
               mono: true,
             },
             {
               label: "우선순위/모드",
               value:
                 execution.kind === "update_request"
-                  ? `${execution.priority ?? "-"} / ${execution.run_mode ?? "-"}`
-                  : "-",
+                  ? `${execution.priority ?? NULL_GLYPH} / ${execution.run_mode ?? NULL_GLYPH}`
+                  : null,
             },
-            { label: "operator", value: execution.operator ?? "-" },
+            { label: "operator", value: execution.operator ?? null },
             { label: "생성", value: formatDateTime(execution.created_at) },
             {
               label: "시작/완료",
-              value: `${formatDateTime(execution.started_at) ?? "-"} → ${
-                formatDateTime(execution.finished_at) ?? "-"
-              }`,
+              value: `${formatDateTime(execution.started_at)} → ${formatDateTime(
+                execution.finished_at,
+              )}`,
             },
           ]}
+          layout="inline"
         />
       ) : null}
 
       {execution ? (
         <section aria-label="연결 개체" className="space-y-2">
-          <h3 className="text-xs font-bold tracking-[0.05em] text-muted-foreground uppercase">
-            연결 개체
-          </h3>
-          <ul className="space-y-1 text-sm">
+          <h3 className={SUBHEADING_CLASS}>연결 개체</h3>
+          <ul className="space-y-1 text-xs text-text-secondary [&_li]:flex [&_li]:flex-wrap [&_li]:items-center [&_li]:gap-1">
             {root ? (
               <li>
                 대표 작업:{" "}
@@ -392,7 +405,7 @@ function ExecutionRunSummary({
               <li>
                 배치:{" "}
                 <Link
-                  className="font-mono text-brand underline-offset-2 hover:underline"
+                  className={INLINE_LINK_CLASS}
                   href={`/ops/pipeline?load_batch_id=${encodeURIComponent(execution.load_batch_id)}`}
                 >
                   {shortId(execution.load_batch_id)}
@@ -415,9 +428,7 @@ function ExecutionRunSummary({
 
       {updateRequest ? (
         <section aria-label="요청 payload" className="space-y-2">
-          <h3 className="text-xs font-bold tracking-[0.05em] text-muted-foreground uppercase">
-            요청 payload
-          </h3>
+          <h3 className={SUBHEADING_CLASS}>요청 payload</h3>
           <JsonViewer
             aria-label="요청 scope payload"
             copyable
@@ -433,9 +444,7 @@ function ExecutionRunSummary({
       ) : null}
       {!updateRequest && importJob ? (
         <section aria-label="작업 payload" className="space-y-2">
-          <h3 className="text-xs font-bold tracking-[0.05em] text-muted-foreground uppercase">
-            작업 payload
-          </h3>
+          <h3 className={SUBHEADING_CLASS}>작업 payload</h3>
           <JsonViewer
             aria-label="작업 payload"
             copyable
@@ -470,11 +479,10 @@ function ExecutionClaimResolution({
     <>
       <section aria-label="이벤트 로그" className="space-y-2">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-xs font-bold tracking-[0.05em] text-muted-foreground uppercase">
-            이벤트 로그
-          </h3>
+          <h3 className={SUBHEADING_CLASS}>이벤트 로그</h3>
           <NativeSelect
             aria-label="이벤트 레벨"
+            size="sm"
             value={level}
             onChange={(event) => {
               setLevel(event.target.value as JobEventLevel | "all");
@@ -483,32 +491,33 @@ function ExecutionClaimResolution({
           >
             {EVENT_LEVELS.map((value) => (
               <NativeSelectOption key={value} value={value}>
-                {value === "all" ? "전체 레벨" : value}
+                {value === "all" ? "전체 레벨" : statusLabel(value)}
               </NativeSelectOption>
             ))}
           </NativeSelect>
         </div>
         {events.length === 0 && !detail.isLoading ? (
-          <p className="text-sm text-muted-foreground">
-            표시할 이벤트가 없습니다.
-          </p>
+          <EmptyState
+            description="레벨 필터를 전체로 바꾸거나 이전 이벤트를 더 불러오세요."
+            size="sm"
+            title="표시할 이벤트가 없습니다."
+          />
         ) : (
-          <ul className="space-y-1.5">
+          <ul className="divide-y divide-border">
             {events.map((event) => (
-              <li
-                className="rounded-md bg-surface-subtle p-2 text-sm"
-                key={event.event_id}
-              >
+              <li className="py-2 text-sm" key={event.event_id}>
                 <div className="flex flex-wrap items-center gap-2">
-                  <StatusBadge status={event.level} />
-                  <span className="text-xs text-muted-foreground">
+                  <LevelBadge level={event.level} />
+                  <span className="text-xs text-text-secondary">
                     {formatDateTime(event.occurred_at)}
                   </span>
                   {event.stage ? (
-                    <Badge variant="outline">{event.stage}</Badge>
+                    <span className="font-mono text-2xs text-text-secondary">
+                      {event.stage}
+                    </span>
                   ) : null}
                   {event.code ? (
-                    <span className="font-mono text-xs">{event.code}</span>
+                    <span className="font-mono text-2xs">{event.code}</span>
                   ) : null}
                 </div>
                 <p className="mt-1 break-all">{event.message}</p>
@@ -527,9 +536,14 @@ function ExecutionClaimResolution({
           >
             처음
           </Button>
+          {/*
+            P1-5: 전환 중에는 native `disabled` 대신 `loading`(spinner + aria-busy, 포커스 유지).
+            cursor가 없어 더 볼 게 없는 경우만 진짜 disabled다.
+          */}
           <Button
             aria-label="이전 이벤트 더 보기"
-            disabled={!eventsNextCursor || detail.isFetching}
+            disabled={!eventsNextCursor}
+            loading={Boolean(eventsNextCursor) && detail.isFetching}
             size="sm"
             type="button"
             variant="outline"
@@ -584,22 +598,21 @@ function ExecutionRunLogs({
   return (
     <>
       <section aria-label="실행 조작" className="space-y-2">
-        <h3 className="text-xs font-bold tracking-[0.05em] text-muted-foreground uppercase">
-          조작
-        </h3>
+        <h3 className={SUBHEADING_CLASS}>조작</h3>
         {canCancel ? (
           <div className="flex flex-wrap items-end gap-2">
-            <label className="flex min-w-0 grow flex-col gap-1 text-xs font-medium text-muted-foreground">
-              취소 사유
-              <Input
-                aria-label="취소 사유"
-                placeholder="예: 잘못된 scope"
-                value={cancelReason}
-                onChange={(event) => setCancelReason(event.target.value)}
-              />
-            </label>
+            <FormField
+              aria-label="취소 사유"
+              className="min-w-0 grow"
+              label="취소 사유"
+              placeholder="예: 잘못된 scope"
+              reserveMessage={false}
+              value={cancelReason}
+              onChange={(event) => setCancelReason(event.target.value)}
+            />
             <Button
-              disabled={cancelExecution.isPending || runNow.isPending}
+              disabled={runNow.isPending}
+              loading={cancelExecution.isPending}
               type="button"
               variant="destructive"
               onClick={() => void submitCancel()}
@@ -612,7 +625,8 @@ function ExecutionRunLogs({
         {canRunNow ? (
           <div className="space-y-1">
             <Button
-              disabled={runNow.isPending || cancelExecution.isPending}
+              disabled={cancelExecution.isPending}
+              loading={runNow.isPending}
               type="button"
               variant="outline"
               onClick={submitRunNow}
@@ -622,7 +636,7 @@ function ExecutionRunLogs({
                 ? "실행 중 요청 확인 (run-now)"
                 : "즉시 재큐잉 (run-now)"}
             </Button>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-text-secondary">
               새 요청을 만들지 않고 같은 canonical request/job을 사용합니다.
               queued는 우선 dispatch를 요청하고 running 재호출은 현재 요청을
               200으로 멱등 반환합니다.
@@ -632,7 +646,7 @@ function ExecutionRunLogs({
         {execution?.kind === "update_request" &&
         execution.status === "queued" &&
         !queueOperational ? (
-          <Alert variant="destructive">
+          <Alert variant="warning">
             <AlertTitle>run-now 차단됨</AlertTitle>
             <AlertDescription>
               큐 sensor가 RUNNING으로 확인될 때까지 dispatch 요청을 만들지
@@ -641,7 +655,7 @@ function ExecutionRunLogs({
           </Alert>
         ) : null}
         {cancellationInProgress ? (
-          <Alert>
+          <Alert variant="info">
             <AlertTitle>취소 진행 중</AlertTitle>
             <AlertDescription>
               취소 coordinator가 완료될 때까지 run-now와 중복 취소를 차단합니다.
@@ -649,7 +663,7 @@ function ExecutionRunLogs({
           </Alert>
         ) : null}
         {!canCancel && !canRunNow && cancellation === null ? (
-          <p className="text-sm text-muted-foreground">
+          <p className="text-xs text-text-secondary">
             terminal 상태 실행은 조작할 수 없습니다.
           </p>
         ) : null}
@@ -744,35 +758,35 @@ function ExecutionDetailPanelView({
   updateRequest,
 }: ReturnType<typeof useExecutionDetailPanelController>) {
   return (
-    <Card aria-label="실행 상세" data-testid="pipeline-execution-detail">
-      <CardHeader>
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
-            <CardTitle className="flex flex-wrap items-center gap-2">
-              <Badge variant="outline">
-                {execution
-                  ? executionKindLabel(execution.kind)
-                  : executionKindLabel(kind)}
-              </Badge>
-              <span className="font-mono text-sm">{shortId(executionId)}</span>
-              {execution ? <StatusBadge status={execution.status} /> : null}
-            </CardTitle>
-            <CardDescription>
-              실행 상세 — 이벤트 로그·연결 개체·요청 payload
-            </CardDescription>
-          </div>
+    <Card aria-label="실행 상세" data-testid="pipeline-execution-detail" size="sm">
+      <CardHeader className="border-b">
+        <CardTitle className="flex flex-wrap items-center gap-2">
+          <span>
+            {execution
+              ? executionKindLabel(execution.kind)
+              : executionKindLabel(kind)}
+          </span>
+          <span className="font-mono text-xs font-normal text-text-secondary slashed-zero">
+            {shortId(executionId)}
+          </span>
+          {execution ? <StatusBadge status={execution.status} /> : null}
+        </CardTitle>
+        <CardDescription>
+          실행 상세 — 이벤트 로그·연결 개체·요청 payload
+        </CardDescription>
+        <CardAction>
           <Button
             aria-label="실행 상세 닫기"
-            size="icon"
+            size="icon-sm"
             type="button"
             variant="ghost"
             onClick={onClose}
           >
             <XIcon />
           </Button>
-        </div>
+        </CardAction>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-5">
         <ExecutionRunSummary
           cancellation={cancellation}
           cancellationFailures={cancellationFailures}

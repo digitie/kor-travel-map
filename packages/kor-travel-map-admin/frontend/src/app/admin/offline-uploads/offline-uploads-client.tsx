@@ -1,16 +1,16 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 
 import { type ColumnDef } from "@tanstack/react-table";
 import {
   CheckCircle2Icon,
-  Columns3Icon,
   FileUpIcon,
   PlayIcon,
   RefreshCwIcon,
   Trash2Icon,
   UploadCloudIcon,
 } from "lucide-react";
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useState } from "react";
 
 import {
   type OfflineUploadColumnMapping,
@@ -30,19 +30,28 @@ import {
   useOpsDatasetCatalog,
 } from "@/api/datasets";
 import { AdminShell } from "@/components/admin-shell";
+import { DetailList, type DetailItem } from "@/components/detail-list";
+import { EmptyState } from "@/components/empty-state";
 import { EntityLink } from "@/components/entity-link";
-import { StatusBadge } from "@/components/status-badge";
+import { FilterBar, FilterField } from "@/components/filter-bar";
+import { SectionCard } from "@/components/section-card";
+import { LevelBadge, StatusBadge } from "@/components/status-badge";
 import { statusLabel } from "@/lib/status-label";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
+import {
+  Alert,
+  AlertActions,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { DataTable } from "@/components/ui/data-table";
-import { FormField } from "@/components/ui/form-field";
+import { DataTable, type DataTableColumnMeta } from "@/components/ui/data-table";
+import { FormField, FormSelect } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatDateTime, shortId } from "@/lib/format";
+import { NULL_GLYPH, formatCount, formatDateTime, shortId } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
 const statuses: Array<OfflineUploadStatus | "all"> = [
   "uploading",
@@ -98,6 +107,10 @@ const optionalMappingFields: Array<keyof OfflineUploadColumnMapping> = [
   "default_marker_color",
   "default_place_kind",
 ];
+
+const LOAD_BLOCKED_REASON = "CSV/TSV는 validation 완료 후 load 가능";
+const DELETE_BLOCKED_REASON = "validation/load 진행 중에는 삭제 불가";
+const MAPPING_INCOMPLETE_REASON = "필수 매핑(name · lon · lat)을 채우면 활성화됩니다.";
 
 function formatBytes(value: number): string {
   if (value < 1024) {
@@ -168,69 +181,56 @@ function mappingComplete(mapping: OfflineUploadColumnMapping): boolean {
   });
 }
 
-function DetailRow({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="grid gap-1 text-sm sm:grid-cols-[8rem_1fr]">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="min-w-0 break-all font-mono text-xs">{value}</dd>
-    </div>
-  );
+function statusOptionLabel(value: OfflineUploadStatus | "all"): string {
+  return value === "all" ? "전체" : statusLabel(value);
 }
 
 function UploadDetail({ upload }: { upload: OfflineUploadRecord | null }) {
   if (upload === null) {
     return (
-      <div className="rounded-lg border border-dashed bg-background p-5 text-sm text-muted-foreground">
-        목록에서 업로드를 선택하면 저장 key, checksum, validation/load job 상태를
-        확인할 수 있습니다.
-      </div>
+      <SectionCard headingLevel={2} title="상세">
+        <EmptyState
+          title="선택된 업로드가 없습니다"
+          description="목록에서 업로드를 선택하면 저장 key, checksum, validation/load job 상태를 확인할 수 있습니다."
+        />
+      </SectionCard>
     );
   }
-
+  const items: DetailItem[] = [
+    { label: "provider dataset ID", value: upload.provider_dataset_id, numeric: true },
+    { label: "스코프", value: upload.sync_scope, mono: true },
+    {
+      label: "storage",
+      value: `${upload.storage_backend}:${upload.storage_key}`,
+      mono: true,
+      copyable: true,
+    },
+    { label: "size", value: formatBytes(upload.byte_size), numeric: true },
+    { label: "sha256", value: upload.checksum_sha256, mono: true, copyable: true },
+    { label: "형식", value: upload.detected_format ?? null, mono: true },
+    {
+      label: "validation job",
+      value: upload.validation_job_id ? (
+        <EntityLink id={upload.validation_job_id} kind="importJob" />
+      ) : null,
+    },
+    {
+      label: "load job",
+      value: upload.load_job_id ? (
+        <EntityLink id={upload.load_job_id} kind="importJob" />
+      ) : null,
+    },
+    { label: "updated", value: formatDateTime(upload.updated_at), numeric: true },
+  ];
   return (
-    <div className="rounded-lg border bg-background p-4">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="font-medium">{upload.original_filename}</div>
-          <div className="font-mono text-xs text-muted-foreground">
-            {shortId(upload.upload_id, 18)}
-          </div>
-        </div>
-        <StatusBadge status={upload.status} />
-      </div>
-      <dl className="flex flex-col gap-3">
-        <DetailRow
-          label="provider dataset ID"
-          value={String(upload.provider_dataset_id)}
-        />
-        <DetailRow label="스코프" value={upload.sync_scope} />
-        <DetailRow label="storage" value={`${upload.storage_backend}:${upload.storage_key}`} />
-        <DetailRow label="size" value={formatBytes(upload.byte_size)} />
-        <DetailRow label="sha256" value={upload.checksum_sha256} />
-        <DetailRow label="형식" value={upload.detected_format ?? "-"} />
-        <DetailRow
-          label="validation job"
-          value={
-            upload.validation_job_id ? (
-              <EntityLink id={upload.validation_job_id} kind="importJob" />
-            ) : (
-              "-"
-            )
-          }
-        />
-        <DetailRow
-          label="load job"
-          value={
-            upload.load_job_id ? (
-              <EntityLink id={upload.load_job_id} kind="importJob" />
-            ) : (
-              "-"
-            )
-          }
-        />
-        <DetailRow label="updated" value={formatDateTime(upload.updated_at)} />
-      </dl>
-    </div>
+    <SectionCard
+      actions={<StatusBadge status={upload.status} />}
+      description={<span className="font-mono">{shortId(upload.upload_id, 18)}</span>}
+      headingLevel={2}
+      title={<span className="truncate">{upload.original_filename}</span>}
+    >
+      <DetailList items={items} layout="inline" />
+    </SectionCard>
   );
 }
 
@@ -251,38 +251,38 @@ function MappingInput({
   const value = (mapping[field] as string | null | undefined) ?? "";
   if (headers && headers.length > 0) {
     return (
-      <label className="flex min-w-0 flex-col gap-1 text-xs text-muted-foreground">
-        {label}
-        <NativeSelect
-          aria-label={`mapping ${label}`}
-          className="font-mono text-xs"
-          value={headers.includes(value) ? value : ""}
-          onChange={(event) =>
-            setMapping({ ...mapping, [field]: event.target.value })
-          }
-        >
-          <NativeSelectOption value="">컬럼 선택</NativeSelectOption>
-          {headers.map((header) => (
-            <NativeSelectOption key={header} value={header}>
-              {header}
-            </NativeSelectOption>
-          ))}
-        </NativeSelect>
-      </label>
-    );
-  }
-  return (
-    <label className="flex min-w-0 flex-col gap-1 text-xs text-muted-foreground">
-      {label}
-      <Input
+      <FormSelect
         aria-label={`mapping ${label}`}
-        className="font-mono text-xs"
-        value={value}
+        className="font-mono"
+        label={label}
+        reserveMessage={false}
+        size="sm"
+        value={headers.includes(value) ? value : ""}
         onChange={(event) =>
           setMapping({ ...mapping, [field]: event.target.value })
         }
-      />
-    </label>
+      >
+        <NativeSelectOption value="">컬럼 선택</NativeSelectOption>
+        {headers.map((header) => (
+          <NativeSelectOption key={header} value={header}>
+            {header}
+          </NativeSelectOption>
+        ))}
+      </FormSelect>
+    );
+  }
+  return (
+    <FormField
+      aria-label={`mapping ${label}`}
+      className="font-mono"
+      label={label}
+      reserveMessage={false}
+      size="sm"
+      value={value}
+      onChange={(event) =>
+        setMapping({ ...mapping, [field]: event.target.value })
+      }
+    />
   );
 }
 
@@ -305,13 +305,13 @@ function PreviewTable({
         accessorFn: (row) => row[header] ?? "",
         enableSorting: false,
         header: () => (
-          <span className="whitespace-nowrap font-mono text-xs">{header}</span>
+          <span className="font-mono text-2xs whitespace-nowrap">{header}</span>
         ),
         cell: ({ row }) => {
           const value = row.original[header] ?? "";
           return (
             <span
-              className="block max-w-56 truncate whitespace-nowrap text-xs"
+              className="block max-w-56 truncate text-xs whitespace-nowrap"
               title={value}
             >
               {value}
@@ -324,21 +324,23 @@ function PreviewTable({
 
   if (headers.length === 0) {
     return (
-      <div className="rounded-md border border-dashed p-4 text-sm text-muted-foreground">
-        preview 행이 없습니다.
-      </div>
+      <EmptyState
+        description="파일 첫 줄에서 header를 읽지 못했습니다."
+        size="sm"
+        title="preview 행이 없습니다."
+      />
     );
   }
 
   return (
     <DataTable
       columns={columns}
+      containerClassName="max-h-80 overflow-auto"
       data={rows}
+      emptyState={{ title: "preview 행이 없습니다." }}
       getRowId={(row) =>
-        headers.map((header) => row[header] ?? "").join("")
+        headers.map((header) => row[header] ?? "").join("")
       }
-      emptyMessage="preview 행이 없습니다."
-      containerClassName="max-h-80 overflow-auto rounded-md border"
     />
   );
 }
@@ -355,20 +357,21 @@ const validationIssueColumns: ColumnDef<ValidationIssueRow, unknown>[] = [
   {
     accessorKey: "severity",
     header: "심각도",
-    cell: ({ row }) => <StatusBadge status={row.original.severity} />,
+    cell: ({ row }) => <LevelBadge level={row.original.severity} />,
   },
   {
     accessorKey: "row_number",
     header: "행",
+    meta: { align: "right" } satisfies DataTableColumnMeta,
     cell: ({ row }) => (
-      <span className="font-mono text-xs">{row.original.row_number ?? "-"}</span>
+      <span className="font-mono text-xs">{row.original.row_number ?? NULL_GLYPH}</span>
     ),
   },
   {
     accessorKey: "column",
     header: "컬럼",
     cell: ({ row }) => (
-      <span className="font-mono text-xs">{row.original.column ?? "-"}</span>
+      <span className="font-mono text-xs">{row.original.column ?? NULL_GLYPH}</span>
     ),
   },
   {
@@ -382,6 +385,7 @@ const validationIssueColumns: ColumnDef<ValidationIssueRow, unknown>[] = [
     accessorKey: "message",
     header: "메시지",
     enableSorting: false,
+    meta: { wrap: true } satisfies DataTableColumnMeta,
     cell: ({ row }) => (
       <span className="block max-w-xl">{row.original.message}</span>
     ),
@@ -412,77 +416,96 @@ function ValidationPanel({
 
   if (selected === null) {
     return (
-      <div className="rounded-lg border border-dashed bg-background p-5 text-sm text-muted-foreground">
-        CSV/TSV 업로드를 선택하면 column mapping과 validation 결과를 확인할 수 있습니다.
-      </div>
+      <SectionCard headingLevel={2} title="CSV/TSV validation">
+        <EmptyState
+          title="선택된 업로드가 없습니다"
+          description="CSV/TSV 업로드를 선택하면 column mapping과 validation 결과를 확인할 수 있습니다."
+        />
+      </SectionCard>
     );
   }
 
   if (!isTabular) {
     return (
-      <div className="rounded-lg border bg-background p-4">
-        <div className="mb-1 flex items-center gap-2 font-medium">
-          <Columns3Icon className="size-4 text-muted-foreground" />
-          CSV/TSV validation
-        </div>
-        <p className="text-sm text-muted-foreground">
-          이 업로드는 {uploadFormat(selected).toUpperCase() || "unknown"} 형식이라
-          JSON/JSONL FeatureBundle load gate를 따릅니다.
+      <SectionCard
+        description={`이 업로드는 ${uploadFormat(selected).toUpperCase() || "unknown"} 형식이라 JSON/JSONL FeatureBundle load gate를 따릅니다.`}
+        headingLevel={2}
+        title="CSV/TSV validation"
+      >
+        <p className="text-xs text-text-secondary">
+          column mapping 없이 목록의 load 버튼으로 바로 적재할 수 있습니다.
         </p>
-      </div>
+      </SectionCard>
     );
   }
 
+  const mappingReady = mappingComplete(mapping);
+  const validationErrorLines = [
+    preview.error ? `preview: ${preview.error.message}` : null,
+    validation.error ? `validation 조회: ${validation.error.message}` : null,
+    validateUpload.error ? `검증 실행: ${validateUpload.error.message}` : null,
+  ].filter((line): line is string => line !== null);
+  const previewMeta = preview.data?.meta;
+
   return (
-    <div className="rounded-lg border bg-background p-4">
-      <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2 font-medium">
-            <Columns3Icon className="size-4 text-muted-foreground" />
-            CSV/TSV validation
-          </div>
-          <div className="text-sm text-muted-foreground">
-            {uploadFormat(selected).toUpperCase()} ·{" "}
-            {preview.data?.meta.rows_total ?? "-"} rows
-          </div>
-        </div>
-        {validationResult ? (
-          <Badge variant={validationResult.meta.error_rows > 0 ? "destructive" : "outline"}>
+    <SectionCard
+      actions={
+        validationResult ? (
+          <span
+            className={cn(
+              "text-xs font-medium tabular-nums",
+              validationResult.meta.error_rows > 0 ? "text-destructive" : "text-success",
+            )}
+          >
             {validationResult.meta.valid_rows} valid / {validationResult.meta.error_rows} error
-          </Badge>
+          </span>
         ) : (
-          <Badge variant="outline">not validated</Badge>
-        )}
+          <span className="text-xs text-text-tertiary">검증 전</span>
+        )
+      }
+      description={
+        <span className="tabular-nums">
+          {uploadFormat(selected).toUpperCase()} · 총{" "}
+          {formatCount(previewMeta?.rows_total ?? null, { loading: preview.isLoading })}행
+        </span>
+      }
+      headingLevel={2}
+      title="CSV/TSV validation"
+    >
+      <div className="flex flex-col gap-3">
+        <span className="text-2xs font-medium text-text-secondary">필수 매핑</span>
+        <div className="grid gap-3 md:grid-cols-3">
+          {requiredMappingFields.map((field) => (
+            <MappingInput
+              field={field}
+              headers={previewMeta?.headers ?? []}
+              key={field}
+              label={field}
+              mapping={mapping}
+              setMapping={setMapping}
+            />
+          ))}
+        </div>
+        <span className="text-2xs font-medium text-text-secondary">선택 매핑 · 기본값</span>
+        <div className="grid gap-3 md:grid-cols-4">
+          {optionalMappingFields.map((field) => (
+            <MappingInput
+              field={field}
+              key={field}
+              label={field}
+              mapping={mapping}
+              setMapping={setMapping}
+            />
+          ))}
+        </div>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-3">
-        {requiredMappingFields.map((field) => (
-          <MappingInput
-            field={field}
-            headers={preview.data?.meta.headers ?? []}
-            key={field}
-            label={field}
-            mapping={mapping}
-            setMapping={setMapping}
-          />
-        ))}
-      </div>
-      <div className="mt-3 grid gap-3 md:grid-cols-4">
-        {optionalMappingFields.map((field) => (
-          <MappingInput
-            field={field}
-            key={field}
-            label={field}
-            mapping={mapping}
-            setMapping={setMapping}
-          />
-        ))}
-      </div>
-
-      <div className="mt-4 flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
         <Button
           data-testid="offline-upload-validate"
-          disabled={validateUpload.isPending || !mappingComplete(mapping)}
+          disabled={!mappingReady}
+          disabledReason={MAPPING_INCOMPLETE_REASON}
+          loading={validateUpload.isPending}
           type="button"
           onClick={() =>
             validateUpload.mutate({
@@ -495,65 +518,92 @@ function ValidationPanel({
           <CheckCircle2Icon data-icon="inline-start" />
           검증 실행
         </Button>
+        {!mappingReady ? (
+          <span className="text-2xs text-text-secondary">{MAPPING_INCOMPLETE_REASON}</span>
+        ) : null}
         {selected.validation_job_id ? (
-          <EntityLink id={selected.validation_job_id} kind="importJob">
-            <Badge variant="outline">
-              job {shortId(selected.validation_job_id)}
-            </Badge>
-          </EntityLink>
+          <span className="text-xs text-text-secondary">
+            job{" "}
+            <EntityLink id={selected.validation_job_id} kind="importJob">
+              {shortId(selected.validation_job_id)}
+            </EntityLink>
+          </span>
         ) : null}
       </div>
 
-      {(preview.isError || validation.isError || validateUpload.isError) && (
-        <Alert className="mt-4" variant="destructive">
+      {validationErrorLines.length > 0 ? (
+        <Alert variant="destructive">
           <AlertTitle>validation 처리 실패</AlertTitle>
           <AlertDescription>
-            {preview.error?.message ??
-              validation.error?.message ??
-              validateUpload.error?.message}
+            {validationErrorLines.map((line) => (
+              <p key={line}>{line}</p>
+            ))}
           </AlertDescription>
+          <AlertActions>
+            <Button
+              loading={preview.isFetching || validation.isFetching}
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={() => {
+                validateUpload.reset();
+                void preview.refetch();
+                void validation.refetch();
+              }}
+            >
+              다시 시도
+            </Button>
+          </AlertActions>
         </Alert>
-      )}
+      ) : null}
 
-      {preview.isLoading ? <Skeleton className="mt-4 h-44" /> : null}
-      {preview.data ? (
-        <div className="mt-4">
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <Badge variant="outline">{preview.data.meta.headers.length} columns</Badge>
-            <Badge variant="outline">{preview.data.meta.rows_sampled} sampled</Badge>
-            <Badge variant="outline">
-              sha256 {shortId(preview.data.meta.checksum_sha256_actual, 12)}
-            </Badge>
-          </div>
+      {preview.isLoading ? (
+        <div className="flex flex-col gap-2" aria-busy="true">
+          <Skeleton className="h-4 w-1/3" />
+          <Skeleton className="h-40 w-full" />
+        </div>
+      ) : null}
+      {previewMeta ? (
+        <div className="flex flex-col gap-2 border-t border-border pt-4">
+          <p className="text-2xs text-text-secondary tabular-nums">
+            <span className="font-medium">미리보기</span> · {previewMeta.headers.length} columns ·{" "}
+            {previewMeta.rows_sampled} sampled · sha256{" "}
+            <span className="font-mono">
+              {shortId(previewMeta.checksum_sha256_actual, 12)}
+            </span>
+          </p>
           <PreviewTable
-            headers={preview.data.meta.headers}
-            rows={preview.data.meta.sample_rows}
+            headers={previewMeta.headers}
+            rows={previewMeta.sample_rows}
           />
         </div>
       ) : null}
 
       {validationResult ? (
-        <div className="mt-4">
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <Badge variant="outline">{validationResult.meta.valid_rows} valid</Badge>
-            <Badge variant={validationResult.meta.error_rows > 0 ? "destructive" : "outline"}>
+        <div className="flex flex-col gap-2 border-t border-border pt-4">
+          <p className="text-2xs text-text-secondary tabular-nums">
+            <span className="font-medium">검증 결과</span> · {validationResult.meta.valid_rows} valid ·{" "}
+            <span className={validationResult.meta.error_rows > 0 ? "text-destructive" : undefined}>
               {validationResult.meta.error_rows} error
-            </Badge>
-            <Badge variant="outline">{issues.length} issues</Badge>
-          </div>
+            </span>{" "}
+            · <span>{issues.length} issues</span>
+          </p>
           <DataTable
             columns={validationIssueColumns}
+            containerClassName="max-h-72 overflow-auto"
             data={issues}
+            emptyState={{
+              title: "validation issue가 없습니다.",
+              description: "표본 행이 모두 통과했습니다.",
+            }}
             getRowId={(issue, index) =>
               `${issue.code}-${issue.row_number ?? index}`
             }
-            emptyMessage="validation issue가 없습니다."
             manualSorting={false}
-            containerClassName="max-h-72 overflow-auto rounded-md border"
           />
         </div>
       ) : null}
-    </div>
+    </SectionCard>
   );
 }
 
@@ -607,6 +657,8 @@ function UploadFormPanel({
         : "sync scope"
       : null,
   ].filter((item): item is string => item !== null);
+  const missingReason =
+    uploadMissingFields.length > 0 ? `입력 필요: ${uploadMissingFields.join(", ")}` : null;
 
   const submitUpload = () => {
     if (file === null || parsedProviderDatasetId === undefined) return;
@@ -621,14 +673,12 @@ function UploadFormPanel({
   };
 
   return (
-    <div className="rounded-lg border bg-background p-4">
-      <div className="mb-4">
-        <div className="font-medium">파일 업로드</div>
-        <div className="text-sm text-muted-foreground">
-          JSON/JSONL FeatureBundle, CSV/TSV tabular 원본
-        </div>
-      </div>
-      <div className="flex flex-col gap-3">
+    <SectionCard
+      description="JSON/JSONL FeatureBundle, CSV/TSV tabular 원본"
+      headingLevel={2}
+      title="파일 업로드"
+    >
+      <div className="flex flex-col gap-1">
         <FormField
           data-testid="offline-upload-file-input"
           label="파일"
@@ -640,7 +690,7 @@ function UploadFormPanel({
           label="provider dataset ID"
           list="offline-upload-provider-dataset-options"
           min="1"
-          placeholder="provider_dataset_id"
+          placeholder="401"
           type="number"
           value={providerDatasetId}
           onChange={(event) => setProviderDatasetId(event.target.value)}
@@ -664,7 +714,7 @@ function UploadFormPanel({
           }
           label="sync scope"
           list="offline-upload-sync-scope-options"
-          placeholder={effectiveSyncScope || "sync_scope"}
+          placeholder={effectiveSyncScope || "default"}
           value={syncScope}
           onChange={(event) => setSyncScope(event.target.value)}
         />
@@ -673,29 +723,33 @@ function UploadFormPanel({
             <option key={scope} value={scope} />
           ))}
         </datalist>
-        <Button
-          data-testid="offline-upload-submit"
-          disabled={createUpload.isPending || uploadMissingFields.length > 0}
-          type="button"
-          onClick={submitUpload}
-        >
-          <UploadCloudIcon data-icon="inline-start" />
-          업로드
-        </Button>
-        {uploadMissingFields.length > 0 ? (
-          <span className="text-xs text-muted-foreground">
-            입력 필요: {uploadMissingFields.join(", ")}
-          </span>
-        ) : null}
+        <div className="flex flex-col items-start gap-1 border-t border-border pt-4">
+          <Button
+            data-testid="offline-upload-submit"
+            disabled={missingReason !== null}
+            disabledReason={missingReason ?? undefined}
+            loading={createUpload.isPending}
+            type="button"
+            onClick={submitUpload}
+          >
+            <UploadCloudIcon data-icon="inline-start" />
+            업로드
+          </Button>
+          {missingReason ? (
+            <span className="text-2xs text-text-secondary">{missingReason}</span>
+          ) : null}
+        </div>
         {createUpload.data ? (
-          <Alert>
-            <AlertTitle>업로드 완료</AlertTitle>
-            <AlertDescription>
-              {shortId(createUpload.data.data.upload_id, 18)} ·{" "}
-              {statusLabel(createUpload.data.data.status)} ·{" "}
-              {formatBytes(createUpload.data.data.byte_size)}
-            </AlertDescription>
-          </Alert>
+          <p
+            aria-live="polite"
+            className="text-xs text-text-secondary tabular-nums"
+            role="status"
+          >
+            업로드 완료 ·{" "}
+            <span className="font-mono">{shortId(createUpload.data.data.upload_id, 18)}</span> ·{" "}
+            {statusLabel(createUpload.data.data.status)} ·{" "}
+            {formatBytes(createUpload.data.data.byte_size)}
+          </p>
         ) : null}
         {createUpload.isError ? (
           <Alert variant="destructive">
@@ -704,7 +758,7 @@ function UploadFormPanel({
           </Alert>
         ) : null}
       </div>
-    </div>
+    </SectionCard>
   );
 }
 
@@ -759,7 +813,7 @@ function useOfflineUploadListController() {
         header: "형식",
         accessorFn: (row) => uploadFormat(row),
         cell: ({ row }) => (
-          <Badge variant="outline">{uploadFormat(row.original) || "-"}</Badge>
+          <span className="font-mono text-xs">{uploadFormat(row.original) || NULL_GLYPH}</span>
         ),
       },
       {
@@ -768,10 +822,10 @@ function useOfflineUploadListController() {
         enableSorting: false,
         cell: ({ row }) => (
           <>
-            <div className="max-w-64 truncate font-mono">
+            <div className="max-w-64 truncate font-mono tabular-nums">
               #{row.original.provider_dataset_id}
             </div>
-            <div className="max-w-64 truncate text-xs text-muted-foreground">
+            <div className="max-w-64 truncate text-xs text-text-secondary">
               {row.original.sync_scope}
             </div>
           </>
@@ -783,7 +837,7 @@ function useOfflineUploadListController() {
         enableSorting: false,
         cell: ({ row }) => (
           <div className="flex max-w-72 items-center gap-2 truncate">
-            <FileUpIcon className="size-4 shrink-0 text-muted-foreground" />
+            <FileUpIcon className="size-4 shrink-0 text-text-secondary" />
             <span className="truncate">{row.original.original_filename}</span>
           </div>
         ),
@@ -791,13 +845,14 @@ function useOfflineUploadListController() {
       {
         accessorKey: "byte_size",
         header: "크기",
+        meta: { align: "right" } satisfies DataTableColumnMeta,
         cell: ({ row }) => formatBytes(row.original.byte_size),
       },
       {
         accessorKey: "updated_at",
         header: "수정",
         cell: ({ row }) => (
-          <span className="text-muted-foreground">
+          <span className="text-text-secondary">
             {formatDateTime(row.original.updated_at)}
           </span>
         ),
@@ -809,19 +864,22 @@ function useOfflineUploadListController() {
         cell: ({ row }) => {
           const upload = row.original;
           const loadEnabled = canLoad(upload);
+          const inProgress = inProgressStates.has(upload.status);
+          const loading = launchLoad.isPending && launchLoad.variables === upload.upload_id;
+          const deleting =
+            deleteUpload.isPending && deleteUpload.variables === upload.upload_id;
           return (
             <div className="flex items-center gap-1">
               <Button
                 data-testid="offline-upload-load"
                 disabled={launchLoad.isPending || !loadEnabled}
-                size="sm"
-                title={
-                  loadEnabled
-                    ? "load"
-                    : "CSV/TSV는 validation 완료 후 load 가능"
+                disabledReason={
+                  launchLoad.isPending ? "다른 load를 실행하는 중입니다" : LOAD_BLOCKED_REASON
                 }
+                loading={loading}
+                size="sm"
                 type="button"
-                variant={loadEnabled ? "outline" : "ghost"}
+                variant="outline"
                 onClick={(event) => {
                   event.stopPropagation();
                   setSelectedUploadId(upload.upload_id);
@@ -833,18 +891,15 @@ function useOfflineUploadListController() {
               </Button>
               <Button
                 data-testid="offline-upload-delete"
-                disabled={
-                  deleteUpload.isPending ||
-                  inProgressStates.has(upload.status)
+                disabled={deleteUpload.isPending || inProgress}
+                disabledReason={
+                  inProgress ? DELETE_BLOCKED_REASON : "다른 업로드를 삭제하는 중입니다"
                 }
+                loading={deleting}
                 size="sm"
-                title={
-                  inProgressStates.has(upload.status)
-                    ? "validation/load 진행 중에는 삭제 불가"
-                    : "업로드 row + 저장 객체 삭제"
-                }
+                title="업로드 row + 저장 객체 삭제"
                 type="button"
-                variant="ghost"
+                variant="destructive"
                 onClick={(event) => {
                   event.stopPropagation();
                   deleteUpload.mutate(upload.upload_id, {
@@ -904,11 +959,17 @@ export function OfflineUploadsClient() {
     uploadItems,
     uploads,
   } = useOfflineUploadListController();
+  const errorLines = [
+    uploads.error ? `목록: ${uploads.error.message}` : null,
+    launchLoad.error ? `load: ${launchLoad.error.message}` : null,
+    deleteUpload.error ? `삭제: ${deleteUpload.error.message}` : null,
+    selectedUpload.error ? `상세: ${selectedUpload.error.message}` : null,
+  ].filter((line): line is string => line !== null);
   return (
     <AdminShell
       actions={
         <Button
-          disabled={uploads.isFetching}
+          loading={uploads.isFetching}
           type="button"
           variant="outline"
           onClick={() => void uploads.refetch()}
@@ -920,94 +981,116 @@ export function OfflineUploadsClient() {
       description="저장된 FeatureBundle·CSV 원본을 검증하고 적재합니다."
       title="오프라인 업로드"
     >
-      <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
-        <div className="flex flex-col gap-4">
-          <UploadFormPanel onCreated={setSelectedUploadId} />
-
-          <UploadDetail upload={selected} />
-        </div>
-
-        <div className="flex flex-col gap-4">
-          {(uploads.isError ||
-            launchLoad.isError ||
-            deleteUpload.isError ||
-            selectedUpload.isError) && (
+      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_var(--rail)]">
+        <div className="flex flex-col gap-6">
+          {errorLines.length > 0 ? (
             <Alert variant="destructive">
               <AlertTitle>offline upload 처리 실패</AlertTitle>
               <AlertDescription>
-                {uploads.error?.message ??
-                  launchLoad.error?.message ??
-                  deleteUpload.error?.message ??
-                  selectedUpload.error?.message}
+                {errorLines.map((line) => (
+                  <p key={line}>{line}</p>
+                ))}
+                <p>잠시 후 다시 시도하세요.</p>
               </AlertDescription>
+              <AlertActions>
+                <Button
+                  loading={uploads.isFetching}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    launchLoad.reset();
+                    deleteUpload.reset();
+                    void uploads.refetch();
+                  }}
+                >
+                  다시 시도
+                </Button>
+              </AlertActions>
             </Alert>
-          )}
+          ) : null}
+
+          <FilterBar>
+            <FilterField label="상태">
+              <NativeSelect
+                aria-label="offline upload status"
+                value={status}
+                onChange={(event) =>
+                  setStatus(event.target.value as OfflineUploadStatus | "all")
+                }
+              >
+                {statuses.map((item) => (
+                  <NativeSelectOption key={item} value={item}>
+                    {statusOptionLabel(item)}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </FilterField>
+            <FilterField className="w-56" label="provider dataset ID">
+              <Input
+                aria-label="provider dataset ID filter"
+                inputMode="numeric"
+                min="1"
+                placeholder="401"
+                type="number"
+                value={providerDatasetIdFilter}
+                onChange={(event) => setProviderDatasetIdFilter(event.target.value)}
+              />
+            </FilterField>
+          </FilterBar>
+
           {deleteUpload.data ? (
-            <Alert>
-              <AlertTitle>업로드 삭제됨</AlertTitle>
-              <AlertDescription>
-                {shortId(deleteUpload.data.data.upload_id, 18)} ·{" "}
-                {deleteUpload.data.data.original_filename}
-              </AlertDescription>
-            </Alert>
+            <p aria-live="polite" className="text-xs text-text-secondary" role="status">
+              업로드 삭제됨 ·{" "}
+              <span className="font-mono">{shortId(deleteUpload.data.data.upload_id, 18)}</span> ·{" "}
+              {deleteUpload.data.data.original_filename}
+            </p>
           ) : null}
           {launchLoad.data ? (
-            <Alert>
-              <AlertTitle>Dagster load 실행됨</AlertTitle>
-              <AlertDescription>
-                {shortId(launchLoad.data.meta.dagster_run_id, 18)} ·{" "}
-                {statusLabel(launchLoad.data.meta.dagster_status)}
-              </AlertDescription>
-            </Alert>
+            <p aria-live="polite" className="text-xs text-text-secondary" role="status">
+              Dagster load 실행됨 ·{" "}
+              <span className="font-mono">{shortId(launchLoad.data.meta.dagster_run_id, 18)}</span> ·{" "}
+              {statusLabel(launchLoad.data.meta.dagster_status)}
+            </p>
           ) : null}
+
+          <SectionCard
+            description={
+              <span className="tabular-nums">
+                {formatCount(uploads.data ? uploadItems.length : null, {
+                  loading: uploads.isLoading,
+                })}{" "}
+                rows
+              </span>
+            }
+            title="업로드 목록"
+          >
+            <DataTable
+              columns={uploadColumns}
+              data={uploadItems}
+              emptyState={{
+                title: "offline upload가 없습니다.",
+                description: "상태 필터를 전체로 바꾸거나 우측 폼에서 파일을 올려 보세요.",
+              }}
+              getRowId={(row) => row.upload_id}
+              isLoading={uploads.isLoading}
+              isRowActive={(upload) => upload.upload_id === selectedUploadId}
+              manualSorting={false}
+              onRowClick={(upload) => setSelectedUploadId(upload.upload_id)}
+              rowTestId={() => "offline-upload-row"}
+            />
+          </SectionCard>
 
           <ValidationPanel
             mapping={mapping}
             selected={selected}
             setMapping={setMapping}
           />
+        </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <NativeSelect
-              aria-label="offline upload status"
-              value={status}
-              onChange={(event) =>
-                setStatus(event.target.value as OfflineUploadStatus | "all")
-              }
-            >
-              {statuses.map((item) => (
-                <NativeSelectOption key={item} value={item}>
-                  {item}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            <Input
-              className="w-56"
-              aria-label="provider dataset ID filter"
-              inputMode="numeric"
-              min="1"
-              placeholder="provider_dataset_id 필터"
-              type="number"
-              value={providerDatasetIdFilter}
-              onChange={(event) => setProviderDatasetIdFilter(event.target.value)}
-            />
-            <Badge variant="outline">
-              {uploads.data?.data.items.length ?? 0} rows
-            </Badge>
-          </div>
-
-          <DataTable
-            columns={uploadColumns}
-            data={uploadItems}
-            getRowId={(row) => row.upload_id}
-            isLoading={uploads.isLoading}
-            emptyMessage="offline upload가 없습니다."
-            onRowClick={(upload) => setSelectedUploadId(upload.upload_id)}
-            isRowActive={(upload) => upload.upload_id === selectedUploadId}
-            rowTestId={() => "offline-upload-row"}
-            manualSorting={false}
-            containerClassName="overflow-auto rounded-lg border bg-background"
-          />
+        <div className="flex flex-col gap-6">
+          <UploadFormPanel onCreated={setSelectedUploadId} />
+          <UploadDetail upload={selected} />
         </div>
       </div>
     </AdminShell>

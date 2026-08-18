@@ -1,4 +1,5 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 
 import { HelpTip } from "@/components/help-tip";
 import {
@@ -6,6 +7,7 @@ import {
   FieldDescription,
   FieldError,
   FieldLabel,
+  FieldMessage,
 } from "@/components/ui/field";
 import {
   describedBy,
@@ -19,8 +21,13 @@ import {
 } from "@/components/ui/native-select";
 
 type FormSelectProps = Omit<NativeSelectProps, "id" | "aria-invalid"> &
-  FieldShellProps & { id?: string };
+  FieldShellProps & {
+    id?: string;
+    /** hint/error 메시지 슬롯(1줄) 항상 예약(기본 true, M13). 인라인 툴바만 false. */
+    reserveMessage?: boolean;
+  };
 
+/** 라벨 위 · NativeSelect · 메시지 슬롯 1개(error가 hint를 대체) — FormField와 같은 리듬. */
 function FormSelect({
   label,
   hint,
@@ -29,6 +36,7 @@ function FormSelect({
   required,
   className,
   labelClassName,
+  reserveMessage = true,
   id,
   ref,
   "aria-describedby": ariaDescribedBy,
@@ -36,6 +44,8 @@ function FormSelect({
   ...selectProps
 }: FormSelectProps) {
   const { fieldId, hintId, errorId } = useFieldIds(id);
+  const showHint = !error && Boolean(hint);
+  const showMessage = reserveMessage || Boolean(error) || showHint;
   return (
     <Field
       className={className}
@@ -54,7 +64,7 @@ function FormSelect({
       <NativeSelect
         aria-describedby={describedBy(
           ariaDescribedBy,
-          hint ? hintId : undefined,
+          showHint ? hintId : undefined,
           error ? errorId : undefined,
         )}
         aria-invalid={error ? true : undefined}
@@ -67,8 +77,15 @@ function FormSelect({
       >
         {children}
       </NativeSelect>
-      {hint ? <FieldDescription id={hintId}>{hint}</FieldDescription> : null}
-      {error ? <FieldError id={errorId}>{error}</FieldError> : null}
+      {showMessage ? (
+        <FieldMessage>
+          {error ? (
+            <FieldError id={errorId}>{error}</FieldError>
+          ) : showHint ? (
+            <FieldDescription id={hintId}>{hint}</FieldDescription>
+          ) : null}
+        </FieldMessage>
+      ) : null}
     </Field>
   );
 }

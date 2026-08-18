@@ -1,8 +1,8 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (list) · design-system: design.md · designed-as-app
 
 import {
   ArchiveRestoreIcon,
-  CheckCircle2Icon,
   RefreshCwIcon,
   ShieldCheckIcon,
 } from "lucide-react";
@@ -19,10 +19,17 @@ import {
   type CurationQuarantineTheme,
 } from "@/api/curations";
 import { useConfirm } from "@/components/confirm-dialog";
+import { DetailList } from "@/components/detail-list";
 import { EmptyState } from "@/components/empty-state";
 import { SectionCard } from "@/components/section-card";
+import {
+  SelectableRow,
+  SelectableRowDescription,
+  SelectableRowGroup,
+  SelectableRowTitle,
+} from "@/components/selectable-row";
+import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { FormField } from "@/components/ui/form-field-input";
@@ -36,8 +43,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { shortId } from "@/lib/format";
-import { cn } from "@/lib/utils";
+import { NULL_GLYPH, formatCount, shortId } from "@/lib/format";
+import { type StatusTone } from "@/lib/status-label";
 
 interface StandaloneFormState {
   collectionKey: string;
@@ -63,10 +70,11 @@ function conflictKindLabel(kind: string): string {
     : kind;
 }
 
-function conflictVariant(kind: CurationQuarantineConflictKind) {
-  if (kind === "movable") return "success" as const;
-  if (kind === "no_target") return "warning" as const;
-  return "destructive" as const;
+/** conflict preview 톤 — 이동 가능=success · target 미지정=warning · 충돌/없음=destructive (톤 테이블 어휘). */
+function conflictTone(kind: CurationQuarantineConflictKind): StatusTone {
+  if (kind === "movable") return "success";
+  if (kind === "no_target") return "warning";
+  return "destructive";
 }
 
 interface QuarantineMoveConflict {
@@ -318,7 +326,8 @@ function QuarantineStatusMessages({
         <Alert variant="destructive">
           <AlertTitle>재분류 실패</AlertTitle>
           <AlertDescription>
-            {localError ?? quarantineErrorMessage(mutationError)}
+            {localError ?? quarantineErrorMessage(mutationError)} — 대상과 선택 항목을 확인한 뒤 다시
+            시도하세요.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -346,13 +355,14 @@ function QuarantineStatusMessages({
           </AlertDescription>
         </Alert>
       ) : null}
-      {message ? (
-        <Alert>
-          <CheckCircle2Icon />
-          <AlertTitle>완료</AlertTitle>
-          <AlertDescription>{message}</AlertDescription>
-        </Alert>
-      ) : null}
+      {/* 조용한 결과 줄(role=status) — 축하 배너 대신 한 줄(M15). */}
+      <p
+        aria-live="polite"
+        className="min-h-[1lh] text-xs text-text-secondary"
+        role="status"
+      >
+        {message}
+      </p>
     </>
   );
 }
@@ -368,7 +378,7 @@ function QuarantineCollectionList({
       actions={
         <Button
           aria-label="격리 collection 목록 새로고침"
-          disabled={quarantineQuery.isFetching}
+          loading={quarantineQuery.isFetching}
           size="icon-sm"
           type="button"
           variant="ghost"
@@ -377,7 +387,8 @@ function QuarantineCollectionList({
           <RefreshCwIcon />
         </Button>
       }
-      description={`현재 ${quarantineCollections.length}개`}
+      description={`현재 ${formatCount(quarantineCollections.length)}개`}
+      headingLevel={3}
       title="격리 collection"
     >
       {quarantineQuery.isError ? (
@@ -386,37 +397,30 @@ function QuarantineCollectionList({
           <AlertDescription>{quarantineQuery.error.message}</AlertDescription>
         </Alert>
       ) : (
-        <div className="space-y-2" data-testid="quarantine-collection-list">
+        <SelectableRowGroup
+          aria-label="격리 collection"
+          className="-mx-3"
+          data-testid="quarantine-collection-list"
+          divided
+        >
           {quarantineCollections.map((collection) => (
-            <button
-              className={cn(
-                "w-full rounded-xl border p-3 text-left transition-colors hover:bg-surface-subtle",
-                activeQuarantineId === collection.collection_id &&
-                  "border-brand bg-brand-tint",
-              )}
+            <SelectableRow
               key={collection.collection_id}
-              type="button"
-              onClick={() => selectQuarantine(collection.collection_id)}
+              selected={activeQuarantineId === collection.collection_id}
+              trailing={<StatusBadge status={collection.status} />}
+              onSelect={() => selectQuarantine(collection.collection_id)}
             >
-              <span className="flex items-start justify-between gap-2">
-                <span className="min-w-0">
-                  <span className="block truncate text-sm font-bold">
-                    {collection.title}
-                  </span>
-                  <span className="block truncate text-xs text-text-secondary">
-                    {collection.collection_key} ·{" "}
-                    {collection.edition_key || "회차 없음"}
-                  </span>
-                </span>
-                <Badge variant="outline">{collection.status}</Badge>
-              </span>
-              <span className="mt-2 block text-xs text-text-secondary">
-                {collection.item_count}개 ·{" "}
+              <SelectableRowTitle>{collection.title}</SelectableRowTitle>
+              <SelectableRowDescription className="font-mono">
+                {collection.collection_key} · {collection.edition_key || "회차 없음"}
+              </SelectableRowDescription>
+              <SelectableRowDescription className="tabular-nums">
+                {formatCount(collection.item_count)}개 ·{" "}
                 {collection.marker_intact ? "marker 정상" : "marker 변조"}
-              </span>
-            </button>
+              </SelectableRowDescription>
+            </SelectableRow>
           ))}
-        </div>
+        </SelectableRowGroup>
       )}
     </SectionCard>
   );
@@ -432,20 +436,25 @@ function QuarantineThemeSourceColumn({
   title: string;
 }) {
   return (
-    <div className="space-y-1 rounded-xl border p-3 text-xs">
-      <div className="text-sm font-bold">{title}</div>
-      <div>
-        <span className="font-medium">테마 </span>
-        {theme
-          ? `${theme.theme_name} · ${theme.theme_slug} · ${theme.theme_group}`
-          : "없음"}
-      </div>
-      <div>
-        <span className="font-medium">출처 </span>
-        {source
-          ? `${source.source_name ?? "-"} · ${source.provider ?? "-"}/${source.dataset_key ?? "-"}`
-          : "없음"}
-      </div>
+    <div className="flex min-w-0 flex-col gap-2">
+      <h4 className="text-xs font-semibold text-text-primary">{title}</h4>
+      <DetailList
+        items={[
+          {
+            label: "테마",
+            value: theme
+              ? `${theme.theme_name} · ${theme.theme_slug} · ${theme.theme_group}`
+              : null,
+          },
+          {
+            label: "출처",
+            value: source
+              ? `${source.source_name ?? NULL_GLYPH} · ${source.provider ?? NULL_GLYPH}/${source.dataset_key ?? NULL_GLYPH}`
+              : null,
+          },
+        ]}
+        layout="inline"
+      />
     </div>
   );
 }
@@ -456,8 +465,8 @@ function QuarantineComparison({
   if (!activeQuarantine) return null;
   const original = activeQuarantine.original_collection;
   return (
-    <div className="space-y-2" data-testid="quarantine-comparison">
-      <div className="grid gap-3 md:grid-cols-2">
+    <div className="space-y-3" data-testid="quarantine-comparison">
+      <div className="grid gap-4 md:grid-cols-2 md:[&>*:not(:first-child)]:border-l md:[&>*:not(:first-child)]:border-border md:[&>*:not(:first-child)]:pl-4">
         <QuarantineThemeSourceColumn
           source={activeQuarantine.quarantine_source}
           theme={activeQuarantine.quarantine_theme}
@@ -468,7 +477,7 @@ function QuarantineComparison({
           theme={original?.theme ?? null}
           title={
             original?.exists
-              ? `원본 collection 현재 상태 — ${original.title ?? "-"}`
+              ? `원본 collection 현재 상태 — ${original.title ?? NULL_GLYPH}`
               : "원본 collection 현재 상태"
           }
         />
@@ -482,11 +491,12 @@ function QuarantineComparison({
           </AlertDescription>
         </Alert>
       ) : (
-        <div className="flex flex-wrap gap-2 text-xs">
-          <Badge variant="outline">원본 {original.status ?? "-"}</Badge>
-          <Badge variant="outline">{original.visibility ?? "-"}</Badge>
-          <span className="font-mono text-text-secondary">
-            {shortId(original.collection_id, 20)}
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-secondary">
+          <span>원본</span>
+          <StatusBadge status={original.status ?? null} />
+          <span>· {original.visibility ?? NULL_GLYPH}</span>
+          <span className="font-mono slashed-zero">
+            · {shortId(original.collection_id, 20)}
           </span>
         </div>
       )}
@@ -553,13 +563,19 @@ function QuarantineItemsTable({
   }
   if (!preview) {
     return (
-      <p className="text-sm text-text-secondary">
+      <p aria-busy="true" className="text-xs text-text-secondary">
         격리 item conflict preview를 불러오는 중입니다.
       </p>
     );
   }
   if (preview.items.length === 0) {
-    return <EmptyState title="격리 item이 없습니다" />;
+    return (
+      <EmptyState
+        description="이 격리 collection에 남은 항목이 없습니다."
+        size="sm"
+        title="격리 item이 없습니다"
+      />
+    );
   }
   return (
     <Table data-testid="quarantine-items-table">
@@ -584,41 +600,43 @@ function QuarantineItemsTable({
                 }
               />
             </TableCell>
-            <TableCell>
-              <div className="max-w-64 whitespace-normal">
-                <div className="font-medium">{item.place_name}</div>
-                <div className="font-mono text-xs text-text-secondary">
+            <TableCell className="whitespace-normal">
+              <div className="flex max-w-64 flex-col gap-0.5">
+                <span className="font-medium">{item.place_name}</span>
+                <span className="font-mono text-2xs text-text-secondary slashed-zero">
                   {item.feature_id
                     ? shortId(item.feature_id, 20)
                     : "Feature 미연결"}
-                </div>
+                </span>
               </div>
             </TableCell>
-            <TableCell>
-              <div className="max-w-64 space-y-1 whitespace-normal text-xs">
-                <div className="font-mono">
+            <TableCell className="whitespace-normal">
+              <div className="flex max-w-64 flex-col gap-1">
+                <span className="font-mono text-xs slashed-zero">
                   {item.external_item_id}/{item.external_component_id}
-                </div>
+                </span>
                 {item.source_present ? null : (
-                  <Badge variant="outline">원천 누락</Badge>
+                  <StatusBadge label="원천 누락" status="missing" />
                 )}
               </div>
             </TableCell>
             <TableCell>
               <div className="flex flex-col items-start gap-1">
-                <Badge variant="outline">{item.status}</Badge>
+                <StatusBadge status={item.status} />
                 {item.archived_at ? (
-                  <Badge variant="outline">보관됨</Badge>
+                  <span className="text-2xs text-text-secondary">보관됨</span>
                 ) : null}
               </div>
             </TableCell>
-            <TableCell>
+            <TableCell className="whitespace-normal">
               <div className="flex flex-col items-start gap-1">
-                <Badge variant={conflictVariant(item.conflict_kind)}>
-                  {conflictKindLabel(item.conflict_kind)}
-                </Badge>
+                <StatusBadge
+                  label={conflictKindLabel(item.conflict_kind)}
+                  status={item.conflict_kind}
+                  tone={conflictTone(item.conflict_kind)}
+                />
                 {item.conflict_item_id ? (
-                  <span className="font-mono text-xs text-text-secondary">
+                  <span className="font-mono text-2xs text-text-secondary slashed-zero">
                     기존 {shortId(item.conflict_item_id, 20)}
                   </span>
                 ) : null}
@@ -647,26 +665,50 @@ function QuarantineActions({
     preview.target_missing ||
     preview.target_archived ||
     preview.items.length === 0;
+  // 이동이 잠긴 이유를 버튼 아래 한 줄로 보여 준다(M35).
+  const moveDisabledReason = reclassify.isPending
+    ? "재분류가 진행 중입니다"
+    : !preview
+      ? "conflict preview를 불러온 뒤 이동할 수 있습니다"
+      : preview.target_collection_id === null
+        ? "이동 target collection을 선택하세요"
+        : preview.target_missing
+          ? "target collection이 존재하지 않습니다"
+          : preview.target_archived
+            ? "target collection이 archive 상태입니다"
+            : preview.items.length === 0
+              ? "이동할 격리 item이 없습니다"
+              : undefined;
+  const isMovePending = reclassify.isPending && reclassify.variables?.body.action === "move";
+  const isStandalonePending =
+    reclassify.isPending && reclassify.variables?.body.action !== "move";
   return (
-    <div className="grid gap-4 md:grid-cols-2">
-      <div className="space-y-2 rounded-xl border p-4">
-        <h3 className="text-sm font-bold">target으로 이동</h3>
+    <div className="grid gap-6 border-t border-border pt-4 md:grid-cols-2 md:[&>*:not(:first-child)]:border-l md:[&>*:not(:first-child)]:border-border md:[&>*:not(:first-child)]:pl-6">
+      <div className="flex flex-col gap-2">
+        <h4 className="text-xs font-semibold text-text-primary">target으로 이동</h4>
         <p className="text-xs text-text-secondary">
           {selectedItemIds.length > 0
-            ? `선택한 ${selectedItemIds.length}개 항목만 이동합니다.`
+            ? `선택한 ${formatCount(selectedItemIds.length)}개 항목만 이동합니다.`
             : "선택한 항목이 없으면 전체를 이동합니다."}
         </p>
-        <Button
-          disabled={moveDisabled}
-          type="button"
-          onClick={() => void moveItems()}
-        >
-          <ArchiveRestoreIcon data-icon="inline-start" />
-          {reclassify.isPending ? "재분류 중" : "이동"}
-        </Button>
+        <div>
+          <Button
+            disabled={moveDisabled}
+            disabledReason={moveDisabledReason}
+            loading={isMovePending}
+            type="button"
+            onClick={() => void moveItems()}
+          >
+            <ArchiveRestoreIcon data-icon="inline-start" />
+            이동
+          </Button>
+        </div>
+        <p className="min-h-[1lh] text-2xs text-text-secondary">
+          {moveDisabledReason ?? "이동 전 확인 대화상자에서 대상과 건수를 다시 보여 줍니다."}
+        </p>
       </div>
-      <div className="space-y-2 rounded-xl border p-4">
-        <h3 className="text-sm font-bold">별도 collection 확정</h3>
+      <div className="flex flex-col gap-2">
+        <h4 className="text-xs font-semibold text-text-primary">별도 collection 확정</h4>
         <p className="text-xs text-text-secondary">
           0065 격리 marker를 제거하고 확정된 key/제목의 독립 collection으로
           유지합니다.
@@ -674,6 +716,7 @@ function QuarantineActions({
         <FormField
           label="확정 collection key"
           placeholder="standalone-collection-key"
+          size="sm"
           value={standaloneForm.collectionKey}
           onChange={(event) =>
             setStandaloneForm((current) => ({
@@ -685,6 +728,7 @@ function QuarantineActions({
         <FormField
           label="확정 제목"
           placeholder="독립 collection 제목"
+          size="sm"
           value={standaloneForm.title}
           onChange={(event) =>
             setStandaloneForm((current) => ({
@@ -693,15 +737,19 @@ function QuarantineActions({
             }))
           }
         />
-        <Button
-          disabled={reclassify.isPending}
-          type="button"
-          variant="outline"
-          onClick={() => void confirmStandalone()}
-        >
-          <ShieldCheckIcon data-icon="inline-start" />
-          {reclassify.isPending ? "재분류 중" : "별도 collection 확정"}
-        </Button>
+        <div>
+          <Button
+            disabled={reclassify.isPending}
+            disabledReason="재분류가 진행 중입니다"
+            loading={isStandalonePending}
+            type="button"
+            variant="outline"
+            onClick={() => void confirmStandalone()}
+          >
+            <ShieldCheckIcon data-icon="inline-start" />
+            별도 collection 확정
+          </Button>
+        </div>
       </div>
     </div>
   );
@@ -727,13 +775,14 @@ function QuarantineWorkspace({
     <SectionCard
       description={
         activeQuarantine
-          ? `${activeQuarantine.collection_key} · 생성 ${activeQuarantine.created_by ?? "-"}`
+          ? `${activeQuarantine.collection_key} · 생성 ${activeQuarantine.created_by ?? NULL_GLYPH}`
           : "왼쪽에서 격리 collection을 선택하세요."
       }
+      headingLevel={3}
       title={activeQuarantine?.title ?? "격리 상세"}
     >
       {activeQuarantine ? (
-        <div className="space-y-4" data-testid="quarantine-workspace">
+        <div className="space-y-5" data-testid="quarantine-workspace">
           <QuarantineComparison activeQuarantine={activeQuarantine} />
           <QuarantineTargetPicker
             preview={preview}
@@ -789,10 +838,22 @@ function CurationQuarantinePanelView({
   toggleItem,
 }: ReturnType<typeof useCurationQuarantineController>) {
   return (
-    <SectionCard
-      description="0065 마이그레이션이 격리한 collection을 원본 이동 또는 별도 collection 확정으로 명시 재분류합니다."
-      title="격리 collection 재분류"
+    <section
+      aria-labelledby="curation-quarantine-heading"
+      className="flex flex-col gap-4 border-t border-border pt-6"
     >
+      <div className="flex flex-col gap-1">
+        <h2
+          className="text-md leading-snug font-semibold text-text-primary"
+          id="curation-quarantine-heading"
+        >
+          격리 collection 재분류
+        </h2>
+        <p className="text-xs text-text-secondary">
+          0065 마이그레이션이 격리한 collection을 원본 이동 또는 별도 collection 확정으로 명시
+          재분류합니다.
+        </p>
+      </div>
       <div className="space-y-4">
         <QuarantineStatusMessages
           localError={localError}
@@ -809,7 +870,7 @@ function CurationQuarantinePanelView({
             title="격리된 collection 없음"
           />
         ) : (
-          <div className="grid gap-6 xl:grid-cols-[24rem_minmax(0,1fr)]">
+          <div className="grid gap-6 xl:grid-cols-[var(--rail)_minmax(0,1fr)]">
             <QuarantineCollectionList
               activeQuarantineId={activeQuarantineId}
               quarantineCollections={quarantineCollections}
@@ -835,7 +896,7 @@ function CurationQuarantinePanelView({
           </div>
         )}
       </div>
-    </SectionCard>
+    </section>
   );
 }
 

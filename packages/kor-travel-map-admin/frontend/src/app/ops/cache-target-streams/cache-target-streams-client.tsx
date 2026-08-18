@@ -1,12 +1,8 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (list + inspector rail) · design-system: design.md · designed-as-app
 
 import { type ColumnDef } from "@tanstack/react-table";
-import {
-  AlertTriangleIcon,
-  CheckCircle2Icon,
-  RefreshCwIcon,
-  RotateCcwIcon,
-} from "lucide-react";
+import { RefreshCwIcon } from "lucide-react";
 import { useState } from "react";
 
 import {
@@ -22,19 +18,17 @@ import {
 import { ApiClientError } from "@/api/client";
 import { AdminShell } from "@/components/admin-shell";
 import { useConfirm } from "@/components/confirm-dialog";
+import { DetailList } from "@/components/detail-list";
+import { EmptyState } from "@/components/empty-state";
+import { SectionCard } from "@/components/section-card";
+import { StatStrip } from "@/components/stat-strip";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { DataTable } from "@/components/ui/data-table";
+import { DataTable, type DataTableColumnMeta } from "@/components/ui/data-table";
 import { FormField } from "@/components/ui/form-field";
-import { formatDateTime, shortId } from "@/lib/format";
+import { NULL_GLYPH, formatCount, formatDateTime, shortId } from "@/lib/format";
+import { statusLabel } from "@/lib/status-label";
 
 type CacheTargetStreamsViewModel = {
   streams: CacheTargetStreamStatus[];
@@ -47,9 +41,8 @@ type CacheTargetStreamsViewModel = {
   reconcileResult: RecoveryOperationReceipt | null;
 };
 
-function formatCount(value: number) {
-  return value.toLocaleString("ko-KR");
-}
+const REPLAY_REASON_HINT = "사유를 입력하면 replay 요청이 활성화됩니다.";
+const RECONCILE_REASON_HINT = "사유를 입력하면 reconciliation 요청이 활성화됩니다.";
 
 function selectedOrFirst<T extends { externalSystem: string }>(
   items: T[],
@@ -140,12 +133,12 @@ function useCacheTargetStreamsController() {
       setReasonError("replay 사유를 입력하세요.");
       return;
     }
+    // replay는 되돌릴 수 있는 재시도(동일 identity만 pending으로 복귀)라 destructive 톤을 쓰지 않는다(m11).
     const ok = await confirm({
       title: `${shortId(selectedDeadLetter.eventId, 18)} event를 replay할까요?`,
       description:
         "동일 event identity와 delivery fingerprint만 pending으로 되돌립니다. 412 응답은 최신 ETag로 자동 재시도하지 않습니다.",
       confirmLabel: "replay 요청",
-      destructive: true,
     });
     if (!ok) return;
     reconcile.reset();
@@ -202,14 +195,14 @@ function useCacheTargetStreamsController() {
 const streamColumns: ColumnDef<CacheTargetStreamStatus, unknown>[] = [
   {
     accessorKey: "externalSystem",
-    header: "stream",
+    header: "스트림",
     enableSorting: false,
     cell: ({ row }) => (
       <>
         <div className="font-medium">{row.original.externalSystem}</div>
-        <div className="font-mono text-xs text-text-tertiary">
-          epoch {row.original.restoreEpoch} · control{" "}
-          {row.original.controlVersion}
+        <div className="text-2xs text-text-secondary tabular-nums">
+          epoch {formatCount(row.original.restoreEpoch)} · control{" "}
+          {formatCount(row.original.controlVersion)}
         </div>
       </>
     ),
@@ -222,10 +215,10 @@ const streamColumns: ColumnDef<CacheTargetStreamStatus, unknown>[] = [
   },
   {
     id: "relay",
-    header: "relay",
+    header: "relay backlog",
     enableSorting: false,
     cell: ({ row }) => (
-      <span className="font-mono text-xs">
+      <span className="text-xs tabular-nums">
         {formatCount(row.original.pendingCount)} pending /{" "}
         {formatCount(row.original.leasedCount)} lease /{" "}
         {formatCount(row.original.retryCount)} retry
@@ -236,19 +229,15 @@ const streamColumns: ColumnDef<CacheTargetStreamStatus, unknown>[] = [
     accessorKey: "deadCount",
     header: "dead",
     enableSorting: false,
-    cell: ({ row }) => (
-      <span className="font-mono">{formatCount(row.original.deadCount)}</span>
-    ),
+    meta: { align: "right" } satisfies DataTableColumnMeta,
+    cell: ({ row }) => formatCount(row.original.deadCount),
   },
   {
     accessorKey: "supersededCount",
     header: "superseded",
     enableSorting: false,
-    cell: ({ row }) => (
-      <span className="font-mono">
-        {formatCount(row.original.supersededCount)}
-      </span>
-    ),
+    meta: { align: "right" } satisfies DataTableColumnMeta,
+    cell: ({ row }) => formatCount(row.original.supersededCount),
   },
   {
     accessorKey: "updatedAt",
@@ -270,7 +259,7 @@ const deadLetterColumns: ColumnDef<CacheTargetDeadLetter, unknown>[] = [
     cell: ({ row }) => (
       <>
         <div className="font-medium">{row.original.eventType}</div>
-        <div className="font-mono text-xs text-text-tertiary">
+        <div className="font-mono text-2xs text-text-secondary slashed-zero">
           {shortId(row.original.eventId, 18)}
         </div>
       </>
@@ -289,8 +278,9 @@ const deadLetterColumns: ColumnDef<CacheTargetDeadLetter, unknown>[] = [
     header: "순서",
     enableSorting: false,
     cell: ({ row }) => (
-      <span className="font-mono text-xs">
-        relay {row.original.relayOrder} · seq {row.original.targetSequence}
+      <span className="text-xs tabular-nums">
+        relay {formatCount(row.original.relayOrder)} · seq{" "}
+        {formatCount(row.original.targetSequence)}
       </span>
     ),
   },
@@ -298,23 +288,30 @@ const deadLetterColumns: ColumnDef<CacheTargetDeadLetter, unknown>[] = [
     accessorKey: "attemptCount",
     header: "시도",
     enableSorting: false,
+    meta: { align: "right" } satisfies DataTableColumnMeta,
+    cell: ({ row }) => formatCount(row.original.attemptCount),
   },
   {
     id: "error",
     header: "오류",
     enableSorting: false,
-    cell: ({ row }) => (
-      <span className="text-text-secondary">
-        {row.original.errorCode ?? row.original.errorClass ?? "-"}
-      </span>
-    ),
+    cell: ({ row }) => {
+      const code = row.original.errorCode ?? row.original.errorClass;
+      return code ? (
+        <span className="font-mono text-xs text-text-secondary">{code}</span>
+      ) : (
+        <span className="text-text-tertiary">{NULL_GLYPH}</span>
+      );
+    },
   },
 ];
 
 function StreamSummary({
+  isLoading,
   selectedStream,
   streams,
 }: {
+  isLoading: boolean;
   selectedStream: CacheTargetStreamStatus | null;
   streams: CacheTargetStreamStatus[];
 }) {
@@ -326,53 +323,51 @@ function StreamSummary({
   const blockedStreams = streams.filter(
     (item) => item.blockedEventId !== null || item.deadCount > 0,
   ).length;
-  const checksumLabel = selectedStream?.lastSnapshot
-    ? shortId(selectedStream.lastSnapshot.merkleRoot, 18)
-    : "-";
+  const snapshot = selectedStream?.lastSnapshot ?? null;
 
   return (
-    <div className="grid gap-4 lg:grid-cols-4">
-      <Card size="sm">
-        <CardHeader>
-          <CardDescription>stream</CardDescription>
-          <CardTitle>{formatCount(streams.length)} 개</CardTitle>
-        </CardHeader>
-        <CardContent className="text-[13px] text-text-secondary">
-          {selectedStream?.externalSystem ?? "선택된 stream 없음"}
-        </CardContent>
-      </Card>
-      <Card size="sm">
-        <CardHeader>
-          <CardDescription>relay backlog</CardDescription>
-          <CardTitle>{formatCount(totalBacklog)} 건</CardTitle>
-        </CardHeader>
-        <CardContent className="text-[13px] text-text-secondary">
-          pending + lease + retry
-        </CardContent>
-      </Card>
-      <Card size="sm">
-        <CardHeader>
-          <CardDescription>dead / blocked</CardDescription>
-          <CardTitle>{formatCount(totalDead)} 건</CardTitle>
-        </CardHeader>
-        <CardContent className="text-[13px] text-text-secondary">
-          blocked stream {formatCount(blockedStreams)} 개
-        </CardContent>
-      </Card>
-      <Card size="sm">
-        <CardHeader>
-          <CardDescription>snapshot checksum</CardDescription>
-          <CardTitle className="break-all font-mono text-[14px]">
-            {checksumLabel}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="text-[13px] text-text-secondary">
-          {selectedStream?.lastSnapshot
-            ? `${formatCount(selectedStream.lastSnapshot.count)} rows`
-            : "snapshot 없음"}
-        </CardContent>
-      </Card>
-    </div>
+    <StatStrip
+      ariaLabel="cache target stream 요약"
+      isLoading={isLoading}
+      items={[
+        {
+          key: "streams",
+          label: "stream",
+          value: streams.length,
+          unit: "개",
+          caption: selectedStream
+            ? `선택: ${selectedStream.externalSystem}`
+            : "선택된 stream 없음",
+        },
+        {
+          key: "backlog",
+          label: "relay backlog",
+          value: totalBacklog,
+          unit: "건",
+          caption: "pending + lease + retry",
+        },
+        {
+          key: "dead",
+          label: "dead / blocked",
+          value: totalDead,
+          unit: "건",
+          tone: totalDead > 0 || blockedStreams > 0 ? "destructive" : "success",
+          caption: `blocked stream ${formatCount(blockedStreams)}개`,
+        },
+        {
+          key: "checksum",
+          label: "snapshot checksum",
+          value: snapshot ? (
+            <span className="font-mono text-sm slashed-zero">
+              {shortId(snapshot.merkleRoot, 18)}
+            </span>
+          ) : null,
+          caption: snapshot
+            ? `${formatCount(snapshot.count)} rows`
+            : "snapshot 없음",
+        },
+      ]}
+    />
   );
 }
 
@@ -388,80 +383,107 @@ function StreamStatusSection({
   streams: CacheTargetStreamStatus[];
 }) {
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
-      <Card>
-        <CardHeader>
-          <CardTitle>Source stream 상태</CardTitle>
-          <CardDescription>
-            epoch, fence/control revision, relay backlog과 checksum 상태입니다.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <DataTable
-            ariaLabel="cache target source stream 상태"
-            columns={streamColumns}
-            data={streams}
-            emptyMessage="stream 상태가 없습니다."
-            getRowId={(row) => row.externalSystem}
-            isLoading={isLoading}
-            isRowActive={(row) =>
-              row.externalSystem === selectedStream?.externalSystem
-            }
-            onRowClick={(row) => onSelect(row.externalSystem)}
-          />
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>선택 stream</CardTitle>
-          <CardDescription>
-            consumer enable, blocked event, fixed snapshot watermark입니다.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {selectedStream ? (
-            <>
-              <dl className="grid grid-cols-[8rem_1fr] gap-x-3 gap-y-2 text-[13px]">
-                <dt className="text-text-tertiary">external_system</dt>
-                <dd className="font-mono">{selectedStream.externalSystem}</dd>
-                <dt className="text-text-tertiary">consumer</dt>
-                <dd>
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_var(--rail)]">
+      <SectionCard
+        description="epoch, fence/control revision, relay backlog과 checksum 상태입니다."
+        title="Source stream 상태"
+      >
+        <DataTable
+          ariaLabel="cache target source stream 상태"
+          columns={streamColumns}
+          data={streams}
+          emptyState={{
+            title: "stream 상태가 없습니다.",
+            description: "cache target source stream이 등록되면 여기에 표시됩니다.",
+          }}
+          getRowId={(row) => row.externalSystem}
+          isLoading={isLoading}
+          isRowActive={(row) =>
+            row.externalSystem === selectedStream?.externalSystem
+          }
+          skeletonRowCount={3}
+          onRowClick={(row) => onSelect(row.externalSystem)}
+        />
+      </SectionCard>
+      <SectionCard
+        description="consumer enable, blocked event, fixed snapshot watermark입니다."
+        headingLevel={3}
+        title="선택 stream"
+      >
+        {selectedStream ? (
+          <DetailList
+            items={[
+              {
+                label: "external_system",
+                value: selectedStream.externalSystem,
+                mono: true,
+              },
+              {
+                label: "consumer",
+                value: (
                   <StatusBadge
-                    status={selectedStream.consumerEnabled ? "enabled" : "disabled"}
+                    status={selectedStream.consumerEnabled ? "active" : "disabled"}
                   />
-                </dd>
-                <dt className="text-text-tertiary">blocked_event</dt>
-                <dd className="break-all font-mono">
-                  {selectedStream.blockedEventId
-                    ? shortId(selectedStream.blockedEventId, 24)
-                    : "-"}
-                </dd>
-                <dt className="text-text-tertiary">snapshot</dt>
-                <dd className="break-all font-mono">
-                  {selectedStream.lastSnapshot?.snapshotId ?? "-"}
-                </dd>
-                <dt className="text-text-tertiary">high_watermark</dt>
-                <dd className="break-all font-mono">
-                  {selectedStream.lastSnapshot?.highWatermarkCursor ?? "-"}
-                </dd>
-              </dl>
-              {selectedStream.lastSnapshot ? (
-                <div className="rounded-xl bg-surface-subtle p-3 text-[13px]">
-                  <div className="mb-1 font-semibold">Merkle root</div>
-                  <div className="break-all font-mono text-text-secondary">
-                    {selectedStream.lastSnapshot.merkleRoot}
-                  </div>
-                </div>
-              ) : null}
-            </>
-          ) : (
-            <div className="rounded-xl bg-surface-subtle p-4 text-[13px] text-text-secondary">
-              stream을 선택하면 epoch와 checksum 상세가 표시됩니다.
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                ),
+              },
+              {
+                label: "blocked_event",
+                value: selectedStream.blockedEventId
+                  ? shortId(selectedStream.blockedEventId, 24)
+                  : null,
+                mono: true,
+              },
+              {
+                label: "snapshot",
+                value: selectedStream.lastSnapshot?.snapshotId ?? null,
+                mono: true,
+              },
+              {
+                label: "high_watermark",
+                value: selectedStream.lastSnapshot?.highWatermarkCursor ?? null,
+                mono: true,
+              },
+              {
+                label: "Merkle root",
+                value: selectedStream.lastSnapshot?.merkleRoot ?? null,
+                mono: true,
+                copyable: true,
+              },
+            ]}
+            layout="inline"
+          />
+        ) : (
+          <EmptyState
+            description="epoch와 checksum 상세가 여기에 표시됩니다."
+            size="sm"
+            title="stream을 선택하세요."
+          />
+        )}
+      </SectionCard>
     </div>
+  );
+}
+
+function RecoveryReceipt({
+  result,
+}: {
+  result: RecoveryOperationReceipt | null;
+}) {
+  // 접수 결과는 트리거 옆에 한 줄로(M39) — role=status 하나만 두어 live 알림이 겹치지 않게 한다.
+  return (
+    <p
+      aria-live="polite"
+      className="min-h-[1lh] text-xs text-text-secondary tabular-nums"
+      data-testid="recovery-receipt"
+      role="status"
+    >
+      {result ? (
+        <>
+          접수됨 · <span className="font-mono">{result.operationId}</span> ·{" "}
+          {statusLabel(result.status)}
+        </>
+      ) : null}
+    </p>
   );
 }
 
@@ -471,6 +493,7 @@ function DeadLetterRecoverySection({
   onReconciliationRequest,
   onReplayRequest,
   onSelectEvent,
+  receipt,
   reconcilePending,
   reconcileReason,
   replayPending,
@@ -485,6 +508,7 @@ function DeadLetterRecoverySection({
   onReconciliationRequest: () => void;
   onReplayRequest: () => void;
   onSelectEvent: (value: string) => void;
+  receipt: RecoveryOperationReceipt | null;
   reconcilePending: boolean;
   reconcileReason: string;
   replayPending: boolean;
@@ -494,101 +518,139 @@ function DeadLetterRecoverySection({
   setReconcileReason: (value: string) => void;
   setReplayReason: (value: string) => void;
 }) {
-  const replayDisabled =
-    selectedDeadLetter === null ||
-    replayReason.trim().length === 0 ||
-    replayPending;
-  const reconcileDisabled =
-    selectedStream === null ||
-    reconcileReason.trim().length === 0 ||
-    reconcilePending;
+  const replayDisabledReason =
+    selectedDeadLetter === null
+      ? "replay할 dead letter를 먼저 선택하세요."
+      : replayReason.trim().length === 0
+        ? REPLAY_REASON_HINT
+        : undefined;
+  const reconcileDisabledReason =
+    selectedStream === null
+      ? "reconciliation을 요청할 stream을 먼저 선택하세요."
+      : reconcileReason.trim().length === 0
+        ? RECONCILE_REASON_HINT
+        : undefined;
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
-      <Card>
-        <CardHeader>
-          <CardTitle>Dead letter</CardTitle>
-          <CardDescription>
-            poison event와 replay 전 확인해야 할 delivery fingerprint입니다.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <DataTable
-            ariaLabel="cache target dead letter"
-            columns={deadLetterColumns}
-            data={deadLetters}
-            emptyMessage="dead letter가 없습니다."
-            getRowId={(row) => row.eventId}
-            isLoading={isLoading}
-            isRowActive={(row) => row.eventId === selectedDeadLetter?.eventId}
-            onRowClick={(row) => onSelectEvent(row.eventId)}
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_var(--rail)]">
+      <SectionCard
+        description="poison event와 replay 전 확인해야 할 delivery fingerprint입니다."
+        title="Dead letter"
+      >
+        <DataTable
+          ariaLabel="cache target dead letter"
+          columns={deadLetterColumns}
+          data={deadLetters}
+          emptyState={{
+            title: "dead letter가 없습니다.",
+            description: "전달에 실패한 event가 생기면 여기에 쌓입니다.",
+          }}
+          getRowId={(row) => row.eventId}
+          isLoading={isLoading}
+          isRowActive={(row) => row.eventId === selectedDeadLetter?.eventId}
+          skeletonRowCount={3}
+          onRowClick={(row) => onSelectEvent(row.eventId)}
+        />
+      </SectionCard>
+      <SectionCard
+        contentClassName="space-y-0 divide-y divide-border"
+        description="replay와 reconciliation은 operator API에서 접수됩니다."
+        headingLevel={3}
+        title="복구 작업"
+      >
+        <section aria-labelledby="cache-recovery-replay" className="space-y-3 pb-4">
+          <h4
+            className="text-xs font-semibold text-text-primary"
+            id="cache-recovery-replay"
+          >
+            Dead replay
+          </h4>
+          {selectedDeadLetter ? (
+            <DetailList
+              items={[
+                {
+                  label: "event_id",
+                  value: selectedDeadLetter.eventId,
+                  mono: true,
+                  copyable: true,
+                },
+                {
+                  label: "If-Match",
+                  value: selectedDeadLetter.entityTag,
+                  mono: true,
+                },
+                {
+                  label: "fingerprint",
+                  value: shortId(selectedDeadLetter.payloadFingerprint, 24),
+                  mono: true,
+                },
+              ]}
+              layout="inline"
+            />
+          ) : (
+            <p className="text-xs text-text-secondary">
+              dead letter 목록에서 행을 선택하면 event identity가 표시됩니다.
+            </p>
+          )}
+          {/* 힌트는 아직 사유가 비어 있을 때만 — 채우고 나면 같은 문장이 노이즈가 된다. */}
+          <FormField
+            hint={
+              replayReason.trim().length === 0 ? REPLAY_REASON_HINT : undefined
+            }
+            label="사유"
+            value={replayReason}
+            onChange={(event) => setReplayReason(event.target.value)}
           />
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader>
-          <CardTitle>Recovery action</CardTitle>
-          <CardDescription>
-            replay와 reconciliation은 operator API에서 접수됩니다.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="space-y-3 rounded-xl bg-surface-subtle p-4">
-            <div className="flex items-center gap-2 font-semibold">
-              <RotateCcwIcon className="size-4" />
-              Dead replay
-            </div>
-            <FormField
-              label="사유"
-              value={replayReason}
-              onChange={(event) => setReplayReason(event.target.value)}
-            />
-            {selectedDeadLetter ? (
-              <dl className="grid grid-cols-[7rem_1fr] gap-x-2 gap-y-1 text-[12px]">
-                <dt className="text-text-tertiary">event_id</dt>
-                <dd className="break-all font-mono">
-                  {selectedDeadLetter.eventId}
-                </dd>
-                <dt className="text-text-tertiary">If-Match</dt>
-                <dd className="break-all font-mono">
-                  {selectedDeadLetter.entityTag}
-                </dd>
-                <dt className="text-text-tertiary">fingerprint</dt>
-                <dd className="break-all font-mono">
-                  {shortId(selectedDeadLetter.payloadFingerprint, 24)}
-                </dd>
-              </dl>
-            ) : null}
-            <Button
-              disabled={replayDisabled}
-              type="button"
-              onClick={onReplayRequest}
-            >
-              {replayPending ? "replay 접수 중" : "replay 요청"}
-            </Button>
-          </div>
-          <div className="space-y-3 rounded-xl bg-surface-subtle p-4">
-            <div className="flex items-center gap-2 font-semibold">
-              <AlertTriangleIcon className="size-4" />
-              Reconciliation
-            </div>
-            <FormField
-              label="사유"
-              value={reconcileReason}
-              onChange={(event) => setReconcileReason(event.target.value)}
-            />
-            <Button
-              disabled={reconcileDisabled}
-              type="button"
-              onClick={onReconciliationRequest}
-            >
-              {reconcilePending
-                ? "reconciliation 접수 중"
-                : "reconciliation 요청"}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+          <Button
+            disabled={replayDisabledReason !== undefined}
+            disabledReason={replayDisabledReason}
+            loading={replayPending}
+            type="button"
+            onClick={onReplayRequest}
+          >
+            replay 요청
+          </Button>
+        </section>
+        <section
+          aria-labelledby="cache-recovery-reconcile"
+          className="space-y-3 pt-4"
+        >
+          <h4
+            className="text-xs font-semibold text-text-primary"
+            id="cache-recovery-reconcile"
+          >
+            Reconciliation
+          </h4>
+          <p className="text-xs text-text-secondary">
+            {selectedStream
+              ? `대상 stream: ${selectedStream.externalSystem}`
+              : "stream 목록에서 행을 선택하세요."}
+          </p>
+          <FormField
+            hint={
+              reconcileReason.trim().length === 0
+                ? RECONCILE_REASON_HINT
+                : undefined
+            }
+            label="사유"
+            value={reconcileReason}
+            onChange={(event) => setReconcileReason(event.target.value)}
+          />
+          <Button
+            disabled={reconcileDisabledReason !== undefined}
+            disabledReason={reconcileDisabledReason}
+            loading={reconcilePending}
+            type="button"
+            variant="outline"
+            onClick={onReconciliationRequest}
+          >
+            reconciliation 요청
+          </Button>
+        </section>
+        <div className="pt-4">
+          <RecoveryReceipt result={receipt} />
+        </div>
+      </SectionCard>
     </div>
   );
 }
@@ -628,7 +690,7 @@ function CacheTargetStreamsClientView({
     <AdminShell
       actions={
         <Button
-          disabled={model.isRefreshing}
+          loading={model.isRefreshing}
           type="button"
           variant="outline"
           onClick={onRefresh}
@@ -643,7 +705,7 @@ function CacheTargetStreamsClientView({
       <div className="space-y-6">
         {model.statusError ? (
           <Alert variant="destructive">
-            <AlertTitle>stream 상태 조회 실패</AlertTitle>
+            <AlertTitle>stream 상태를 불러오지 못했습니다</AlertTitle>
             <AlertDescription>{model.statusError}</AlertDescription>
           </Alert>
         ) : null}
@@ -653,18 +715,9 @@ function CacheTargetStreamsClientView({
             <AlertDescription>{model.mutationError}</AlertDescription>
           </Alert>
         ) : null}
-        {model.replayResult || model.reconcileResult ? (
-          <Alert>
-            <CheckCircle2Icon data-icon="inline-start" />
-            <AlertTitle>복구 명령 접수</AlertTitle>
-            <AlertDescription>
-              {(model.replayResult ?? model.reconcileResult)?.operationId} ·{" "}
-              {(model.replayResult ?? model.reconcileResult)?.status}
-            </AlertDescription>
-          </Alert>
-        ) : null}
 
         <StreamSummary
+          isLoading={model.isLoading}
           selectedStream={selectedStream}
           streams={model.streams}
         />
@@ -680,6 +733,7 @@ function CacheTargetStreamsClientView({
           onReconciliationRequest={onReconciliationRequest}
           onReplayRequest={onReplayRequest}
           onSelectEvent={setSelectedEventId}
+          receipt={model.replayResult ?? model.reconcileResult}
           reconcilePending={reconcilePending}
           reconcileReason={reconcileReason}
           replayPending={replayPending}

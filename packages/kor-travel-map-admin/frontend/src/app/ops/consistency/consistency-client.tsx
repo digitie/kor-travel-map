@@ -1,25 +1,40 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (dashboard) · design-system: design.md · designed-as-app
 
 import { type ColumnDef } from "@tanstack/react-table";
 import { RefreshCwIcon } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 
 import {
   type IntegrityIssueStatus,
+  type OpsConsistencyReportRecord,
+  type OpsIntegrityIssueRecord,
   useConsistencyReports,
   useIntegrityIssues,
   useOpsMetrics,
 } from "@/api/ops";
 import { AdminShell } from "@/components/admin-shell";
 import { EntityLink } from "@/components/entity-link";
-import { StatusBadge } from "@/components/status-badge";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
+import { FilterField } from "@/components/filter-bar";
+import { SectionCard } from "@/components/section-card";
+import { StatStrip } from "@/components/stat-strip";
+import { LevelBadge } from "@/components/status-badge";
+import {
+  Alert,
+  AlertActions,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { DataTable } from "@/components/ui/data-table";
+import {
+  DataTable,
+  DataTableClampCell,
+  type DataTableColumnMeta,
+} from "@/components/ui/data-table";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
-import { formatCount, formatDateTime, shortId } from "@/lib/format";
+import { NULL_GLYPH, formatCount, formatDateTime, shortId } from "@/lib/format";
+import { statusLabel, toneFor } from "@/lib/status-label";
 
 const issueStatuses: Array<IntegrityIssueStatus | "all"> = [
   "open",
@@ -28,6 +43,123 @@ const issueStatuses: Array<IntegrityIssueStatus | "all"> = [
   "ignored",
   "all",
 ];
+
+/**
+ * consistency 계열 severity(`OK` · `WARN` · `ERROR` · `critical` …)를 tone 테이블 키로 정규화한다
+ * — `WARN`은 사전에 없어 raw로 렌더되던 값이라 `warning`으로 접는다(M28: enum raw 렌더 금지).
+ */
+function severityStatus(value: string | null | undefined): string | null {
+  if (value == null) return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "warn") return "warning";
+  return normalized;
+}
+
+const reportColumns: ColumnDef<OpsConsistencyReportRecord, unknown>[] = [
+  {
+    id: "report",
+    header: "리포트",
+    enableSorting: false,
+    cell: ({ row }) => (
+      <span className="font-mono text-xs slashed-zero">
+        {shortId(row.original.report_id)}
+      </span>
+    ),
+  },
+  {
+    id: "batch",
+    header: "배치",
+    enableSorting: false,
+    cell: ({ row }) => (
+      <EntityLink className="text-xs" id={row.original.batch_id} kind="loadBatch">
+        {shortId(row.original.batch_id)}
+      </EntityLink>
+    ),
+  },
+  {
+    accessorKey: "severity_max",
+    header: "심각도",
+    cell: ({ row }) => (
+      <LevelBadge level={severityStatus(row.original.severity_max)} />
+    ),
+  },
+  {
+    accessorKey: "finished_at",
+    header: "완료",
+    cell: ({ row }) => (
+      <span className="text-text-secondary">
+        {formatDateTime(row.original.finished_at)}
+      </span>
+    ),
+  },
+];
+
+const issueColumns: ColumnDef<OpsIntegrityIssueRecord, unknown>[] = [
+  {
+    id: "issue",
+    header: "이슈",
+    enableSorting: false,
+    cell: ({ row }) => (
+      <span className="font-mono text-xs slashed-zero">
+        {shortId(row.original.issue_id)}
+      </span>
+    ),
+  },
+  {
+    accessorKey: "severity",
+    header: "심각도",
+    cell: ({ row }) => <LevelBadge level={severityStatus(row.original.severity)} />,
+  },
+  {
+    id: "provider_dataset",
+    header: "provider dataset",
+    cell: ({ row }) =>
+      row.original.provider_dataset_id ? (
+        <EntityLink
+          id=""
+          kind="issue"
+          params={{
+            provider_dataset_id: String(row.original.provider_dataset_id),
+          }}
+        >
+          {row.original.provider
+            ? `${row.original.provider} · #${row.original.provider_dataset_id}`
+            : `#${row.original.provider_dataset_id}`}
+        </EntityLink>
+      ) : (
+        <span className="text-text-tertiary">{NULL_GLYPH}</span>
+      ),
+  },
+  {
+    accessorKey: "message",
+    header: "메시지",
+    enableSorting: false,
+    meta: { wrap: true } satisfies DataTableColumnMeta,
+    cell: ({ row }) => (
+      <DataTableClampCell lines={2}>{row.original.message}</DataTableClampCell>
+    ),
+  },
+  {
+    accessorKey: "detected_at",
+    header: "감지",
+    cell: ({ row }) => (
+      <span className="text-text-secondary">
+        {formatDateTime(row.original.detected_at)}
+      </span>
+    ),
+  },
+];
+
+/**
+ * 요약 stat의 e2e 훅(값 단언이 소유 stat으로 scope되도록 stat마다 하나씩).
+ * e2e/consistency-drilldown.spec.ts · e2e/live/ops-consistency-drilldown-roundtrip.live.spec.ts가
+ * 이 testid로 stat을 잡는다. SectionCard는 `[data-slot="card"]` + 제목 텍스트로 scope한다.
+ */
+const STAT_TEST_ID = {
+  checkedAt: "stat-checked-at",
+  latestSeverity: "stat-latest-severity",
+  openIssues: "stat-open-issues",
+} as const;
 
 export function ConsistencyClient() {
   const [status, setStatus] = useState<IntegrityIssueStatus | "all">("open");
@@ -44,117 +176,27 @@ export function ConsistencyClient() {
     void reports.refetch();
     void issues.refetch();
   };
+  const isRefreshing =
+    metrics.isFetching || reports.isFetching || issues.isFetching;
 
   const reportItems = reports.data?.data.items ?? [];
-  type ReportRow = NonNullable<typeof reports.data>["data"]["items"][number];
-  const reportColumns = useMemo<ColumnDef<ReportRow, unknown>[]>(
-    () => [
-      {
-        id: "report",
-        header: "리포트",
-        enableSorting: false,
-        cell: ({ row }) => (
-          <span className="font-mono text-xs">
-            {shortId(row.original.report_id)}
-          </span>
-        ),
-      },
-      {
-        id: "batch",
-        header: "배치",
-        enableSorting: false,
-        cell: ({ row }) => (
-          <EntityLink
-            className="text-xs"
-            id={row.original.batch_id}
-            kind="loadBatch"
-          >
-            {shortId(row.original.batch_id)}
-          </EntityLink>
-        ),
-      },
-      {
-        accessorKey: "severity_max",
-        header: "심각도",
-        cell: ({ row }) => <StatusBadge status={row.original.severity_max} />,
-      },
-      {
-        accessorKey: "finished_at",
-        header: "완료",
-        cell: ({ row }) => (
-          <span className="text-muted-foreground">
-            {formatDateTime(row.original.finished_at)}
-          </span>
-        ),
-      },
-    ],
-    [],
-  );
-
   const issueItems = issues.data?.data.items ?? [];
-  type IssueRow = NonNullable<typeof issues.data>["data"]["items"][number];
-  const issueColumns = useMemo<ColumnDef<IssueRow, unknown>[]>(
-    () => [
-      {
-        id: "issue",
-        header: "이슈",
-        enableSorting: false,
-        cell: ({ row }) => (
-          <span className="font-mono text-xs">
-            {shortId(row.original.issue_id)}
-          </span>
-        ),
-      },
-      {
-        accessorKey: "severity",
-        header: "심각도",
-        cell: ({ row }) => <StatusBadge status={row.original.severity} />,
-      },
-      {
-        id: "provider_dataset",
-        header: "provider dataset",
-        cell: ({ row }) =>
-          row.original.provider_dataset_id ? (
-            <EntityLink
-              id=""
-              kind="issue"
-              params={{
-                provider_dataset_id: String(row.original.provider_dataset_id),
-              }}
-            >
-              {row.original.provider
-                ? `${row.original.provider} · #${row.original.provider_dataset_id}`
-                : `#${row.original.provider_dataset_id}`}
-            </EntityLink>
-          ) : (
-            "-"
-          ),
-      },
-      {
-        accessorKey: "message",
-        header: "메시지",
-        enableSorting: false,
-        cell: ({ row }) => (
-          <span className="block max-w-96 truncate">{row.original.message}</span>
-        ),
-      },
-      {
-        accessorKey: "detected_at",
-        header: "감지",
-        cell: ({ row }) => (
-          <span className="text-muted-foreground">
-            {formatDateTime(row.original.detected_at)}
-          </span>
-        ),
-      },
-    ],
-    [],
+
+  const latestSeverity = severityStatus(
+    metricsData?.latest_consistency_report?.severity_max ?? "none",
   );
+  const queryError =
+    metrics.error?.message ?? reports.error?.message ?? issues.error?.message;
 
   return (
     <AdminShell
       actions={
-        <Button type="button" variant="outline" onClick={refreshAll}>
+        <Button
+          loading={isRefreshing}
+          type="button"
+          variant="outline"
+          onClick={refreshAll}
+        >
           <RefreshCwIcon data-icon="inline-start" />
           새로고침
         </Button>
@@ -162,95 +204,129 @@ export function ConsistencyClient() {
       description="정합성 리포트와 이슈 큐를 조회합니다."
       title="정합성 점검"
     >
-      <div className="flex flex-col gap-4">
-        {(metrics.isError || reports.isError || issues.isError) && (
+      <div className="flex flex-col gap-6">
+        {metrics.isError || reports.isError || issues.isError ? (
           <Alert variant="destructive">
             <AlertTitle>consistency 조회 실패</AlertTitle>
             <AlertDescription>
-              {metrics.error?.message ?? reports.error?.message ?? issues.error?.message}
+              {queryError ?? "서버가 응답하지 않았거나 요청이 거부되었습니다."}
             </AlertDescription>
+            <AlertActions>
+              <Button
+                loading={isRefreshing}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={refreshAll}
+              >
+                다시 시도
+              </Button>
+            </AlertActions>
           </Alert>
-        )}
+        ) : null}
 
-        <section className="grid gap-4 md:grid-cols-3">
-          <div className="rounded-lg border bg-background p-4">
-            <div className="text-sm text-muted-foreground">Open issues</div>
-            <div className="mt-1 text-2xl font-semibold">
-              {formatCount(metricsData?.data_integrity_issues.open_total)}
-            </div>
-          </div>
-          <div className="rounded-lg border bg-background p-4">
-            <div className="text-sm text-muted-foreground">Latest severity</div>
-            <div className="mt-2">
-              <StatusBadge
-                status={metricsData?.latest_consistency_report?.severity_max ?? "none"}
-              />
-            </div>
-          </div>
-          <div className="rounded-lg border bg-background p-4">
-            <div className="text-sm text-muted-foreground">Checked at</div>
-            <div className="mt-1 font-mono text-sm">
-              {formatDateTime(metricsData?.checked_at)}
-            </div>
-          </div>
-        </section>
+        <StatStrip
+          ariaLabel="정합성 요약"
+          isLoading={metrics.isLoading}
+          items={[
+            {
+              key: "open-issues",
+              label: "Open issues",
+              value: metricsData?.data_integrity_issues.open_total,
+              unit: "건",
+              caption: "열린 정합성 이슈",
+              testId: STAT_TEST_ID.openIssues,
+            },
+            {
+              key: "latest-severity",
+              label: "Latest severity",
+              value: statusLabel(latestSeverity),
+              tone: toneFor(latestSeverity),
+              caption: "최근 consistency 리포트 기준",
+              testId: STAT_TEST_ID.latestSeverity,
+            },
+            {
+              key: "checked-at",
+              label: "Checked at",
+              value: (
+                <span className="text-sm font-medium">
+                  {formatDateTime(metricsData?.checked_at)}
+                </span>
+              ),
+              caption: "마지막 점검 시각",
+              testId: STAT_TEST_ID.checkedAt,
+            },
+          ]}
+        />
 
-        <section className="grid gap-4 xl:grid-cols-2">
-          <div className="rounded-lg border bg-background">
-            <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
-              <div>
-                <div className="font-medium">Reports</div>
-                <div className="text-sm text-muted-foreground">
-                  최근 consistency batch
-                </div>
-              </div>
-              <Badge variant="outline">
-                {reports.data?.data.items.length ?? 0}
-              </Badge>
-            </div>
+        <section className="grid gap-6 xl:grid-cols-2">
+          <SectionCard
+            actions={
+              <span className="text-xs text-text-secondary tabular-nums">
+                <span>
+                  {formatCount(reports.data ? reportItems.length : null, {
+                    loading: reports.isLoading,
+                  })}
+                </span>{" "}
+                건
+              </span>
+            }
+            description="최근 consistency batch"
+            title="Reports"
+          >
             <DataTable
               columns={reportColumns}
               data={reportItems}
               getRowId={(row) => row.report_id}
               isLoading={reports.isLoading}
-              emptyMessage="데이터가 없습니다."
+              emptyState={{
+                title: "데이터가 없습니다.",
+                description:
+                  "consistency batch가 끝나면 리포트가 여기에 쌓입니다.",
+              }}
               manualSorting={false}
-              containerClassName="overflow-auto"
+              skeletonRowCount={5}
             />
-          </div>
+          </SectionCard>
 
-          <div className="rounded-lg border bg-background">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
-              <div>
-                <div className="font-medium">Integrity issues</div>
-                <div className="text-sm text-muted-foreground">
-                  status/provider dataset/type별 후속 처리 대상
-                </div>
-              </div>
-              <NativeSelect
-                aria-label="issue status"
-                value={status}
-                onChange={(event) =>
-                  setStatus(event.target.value as IntegrityIssueStatus | "all")
-                }
-              >
-                {issueStatuses.map((item) => (
-                  <NativeSelectOption key={item} value={item}>
-                    {item}
-                  </NativeSelectOption>
-                ))}
-              </NativeSelect>
-            </div>
+          <SectionCard
+            actions={
+              <FilterField label="상태">
+                <NativeSelect
+                  aria-label="issue status"
+                  size="sm"
+                  value={status}
+                  onChange={(event) =>
+                    setStatus(event.target.value as IntegrityIssueStatus | "all")
+                  }
+                >
+                  {issueStatuses.map((item) => (
+                    <NativeSelectOption key={item} value={item}>
+                      {item === "all" ? "전체" : statusLabel(item)}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </FilterField>
+            }
+            description="상태·provider dataset·유형별 후속 처리 대상"
+            title="Integrity issues"
+          >
             <DataTable
               columns={issueColumns}
               data={issueItems}
               getRowId={(row) => row.issue_id}
               isLoading={issues.isLoading}
-              emptyMessage="데이터가 없습니다."
+              emptyState={{
+                title: "데이터가 없습니다.",
+                description:
+                  status === "all"
+                    ? "기록된 정합성 이슈가 없습니다."
+                    : "상태 필터를 전체로 바꾸면 다른 상태의 이슈를 볼 수 있습니다.",
+              }}
               manualSorting={false}
-              containerClassName="overflow-auto"
+              skeletonRowCount={5}
             />
-          </div>
+          </SectionCard>
         </section>
       </div>
     </AdminShell>

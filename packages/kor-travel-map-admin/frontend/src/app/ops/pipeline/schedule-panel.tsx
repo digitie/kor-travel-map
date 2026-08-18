@@ -1,4 +1,5 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (list) · design-system: design.md · designed-as-app
 
 import { PencilIcon, PlayIcon, RotateCcwIcon, SquareIcon } from "lucide-react";
 import {
@@ -22,18 +23,13 @@ import {
   useResolveScheduleClaimMutation,
   useScheduleCommandMutation,
 } from "@/api/pipeline";
+import { useConfirm } from "@/components/confirm-dialog";
+import { EmptyState } from "@/components/empty-state";
 import { HelpTip } from "@/components/help-tip";
+import { SectionCard } from "@/components/section-card";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -42,10 +38,11 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { FormField } from "@/components/ui/form-field";
-import { NativeSelect } from "@/components/ui/native-select";
+import { FormField, FormSelect } from "@/components/ui/form-field";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
-import { useConfirm } from "@/components/confirm-dialog";
+import { Skeleton } from "@/components/ui/skeleton";
+import { NULL_GLYPH } from "@/lib/format";
+import { cn } from "@/lib/utils";
 
 import { shouldRetainClaimResolutionSubmission } from "./claim-resolution-retry";
 import { describeCron } from "./pipeline-shared";
@@ -124,7 +121,7 @@ function ScheduleCommandResultAlert({
         {result.run_id ? (
           <p>
             실행: <span className="font-mono">{result.run_id}</span> (
-            {result.run_status ?? "-"})
+            {result.run_status ?? NULL_GLYPH})
           </p>
         ) : null}
         {result.reload_status === "succeeded" ? (
@@ -300,6 +297,14 @@ function useSchedulePanelController({
     patchSchedule.isPending ||
     commandSchedule.isPending ||
     resolveClaim.isPending;
+  // 진행 중인 명령의 트리거만 loading으로 표시한다(design.md — row action은 트리거의 loading, page spinner 금지).
+  const pendingCommand =
+    commandSchedule.isPending && commandSchedule.variables
+      ? {
+          scheduleName: commandSchedule.variables.scheduleName,
+          command: commandSchedule.variables.body.command,
+        }
+      : null;
   const failedResult =
     commandResultFromError(patchSchedule.error) ??
     commandResultFromError(commandSchedule.error);
@@ -363,7 +368,7 @@ function useSchedulePanelController({
 
   useEffect(() => {
     if (highlightSchedule && highlightRef.current) {
-      highlightRef.current.scrollIntoView({ block: "center" });
+      highlightRef.current.scrollIntoView({ block: "nearest" });
     }
   }, [highlightSchedule, scheduleItems.length]);
 
@@ -503,7 +508,6 @@ function useSchedulePanelController({
       description:
         "Dagster 실행·스케줄 상태를 직접 확인한 경우에만 진행하세요. 해제 후 같은 조작은 새 명령으로 실행됩니다.",
       confirmLabel: "확인 결과 기록 후 해제",
-      destructive: true,
     });
     const latestRecoveryClaim = recoveryClaimRef.current;
     if (
@@ -593,6 +597,7 @@ function useSchedulePanelController({
     lastResult,
     openEdit,
     patchSchedule,
+    pendingCommand,
     recoveryClaim,
     resolveClaim,
     retryFrozenScheduleMutation,
@@ -642,7 +647,7 @@ function ScheduleEditor({
       ) : null}
       {data && data.status !== "ok" ? (
         <Alert
-          variant={data.status === "unavailable" ? "destructive" : "default"}
+          variant={data.status === "unavailable" ? "destructive" : "warning"}
         >
           <AlertTitle>스케줄 상태 확인 필요</AlertTitle>
           <AlertDescription>
@@ -697,13 +702,10 @@ function ScheduleEditor({
               <p>Dagster 실제 상태 확인 후 아래 claim 해제를 진행하세요.</p>
             ) : (
               <Button
-                disabled={
-                  !scheduleStateScanned ||
-                  patchSchedule.isPending ||
-                  commandSchedule.isPending
-                }
+                disabled={!scheduleStateScanned}
+                loading={patchSchedule.isPending || commandSchedule.isPending}
                 type="button"
-                variant="destructive"
+                variant="outline"
                 onClick={retryFrozenScheduleMutation}
               >
                 동일 요청 재확인
@@ -727,36 +729,36 @@ function ScheduleEditor({
               {" · claim "}
               <span className="font-mono">{recoveryClaim.commandId}</span>
             </p>
-            <div className="grid gap-3 md:grid-cols-[14rem_minmax(0,1fr)_auto] md:items-end">
-              <label className="flex flex-col gap-1 text-xs font-medium">
-                실제 반영 확인 결과
-                <NativeSelect
-                  aria-label="schedule claim 실제 반영 확인 결과"
-                  disabled={
-                    resolveClaim.isPending || frozenClaimResolution !== null
-                  }
-                  value={
-                    frozenClaimResolution?.body.resolution ?? claimResolution
-                  }
-                  onChange={(event) =>
-                    setClaimResolution(
-                      event.target
-                        .value as PipelineScheduleClaimResolutionRequest["resolution"],
-                    )
-                  }
-                >
-                  <NativeSelectOption value="confirmed_not_applied">
-                    미반영 확인
-                  </NativeSelectOption>
-                  <NativeSelectOption value="confirmed_applied">
-                    반영 확인
-                  </NativeSelectOption>
-                </NativeSelect>
-              </label>
+            <div className="grid gap-3 md:grid-cols-[14rem_minmax(0,1fr)_auto] md:items-start">
+              <FormSelect
+                aria-label="schedule claim 실제 반영 확인 결과"
+                disabled={
+                  resolveClaim.isPending || frozenClaimResolution !== null
+                }
+                label="실제 반영 확인 결과"
+                reserveMessage={false}
+                value={
+                  frozenClaimResolution?.body.resolution ?? claimResolution
+                }
+                onChange={(event) =>
+                  setClaimResolution(
+                    event.target
+                      .value as PipelineScheduleClaimResolutionRequest["resolution"],
+                  )
+                }
+              >
+                <NativeSelectOption value="confirmed_not_applied">
+                  미반영 확인
+                </NativeSelectOption>
+                <NativeSelectOption value="confirmed_applied">
+                  반영 확인
+                </NativeSelectOption>
+              </FormSelect>
               <FormField
                 disabled={
                   resolveClaim.isPending || frozenClaimResolution !== null
                 }
+                hint="사유를 입력하면 claim 해제가 활성화됩니다."
                 label="확인 근거·해제 사유 (필수)"
                 maxLength={MAX_CLAIM_RESOLUTION_REASON_LENGTH}
                 placeholder="예: Dagster run 목록에서 해당 run이 없음을 확인"
@@ -768,9 +770,9 @@ function ScheduleEditor({
                 }
               />
               <Button
+                className="md:mt-5"
                 disabled={
                   !scheduleStateScanned ||
-                  resolveClaim.isPending ||
                   !(
                     frozenClaimResolution?.body.reason ??
                     claimResolutionReason.trim()
@@ -780,8 +782,14 @@ function ScheduleEditor({
                     claimResolutionReason.trim()
                   ).length > MAX_CLAIM_RESOLUTION_REASON_LENGTH
                 }
+                disabledReason={
+                  !scheduleStateScanned
+                    ? "schedule 상태 확인이 끝나면 활성화됩니다."
+                    : "확인 근거·해제 사유를 입력하면 활성화됩니다."
+                }
+                loading={resolveClaim.isPending}
                 type="button"
-                variant="destructive"
+                variant="outline"
                 onClick={() => void submitClaimResolution()}
               >
                 claim 해제
@@ -819,42 +827,41 @@ function ScheduleSummary({
   sensors,
 }: Pick<ReturnType<typeof useSchedulePanelController>, "schedules" | "sensors">) {
   return (
-    <>
-<Card>
-        <CardHeader>
-          <CardTitle>센서</CardTitle>
-          <CardDescription>
-            큐 sensor가 꺼지면 갱신 요청 큐가 조용히 멈춥니다 — 상태를 항상
-            확인하세요.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {sensors.length === 0 && !schedules.isLoading ? (
-            <p className="text-sm text-muted-foreground">
-              표시할 sensor가 없습니다.
-            </p>
-          ) : (
-            <ul className="space-y-2">
-              {sensors.map((sensor) => (
-                <li
-                  className="flex flex-wrap items-center gap-2"
-                  data-testid={`pipeline-sensor-${sensor.name}`}
-                  key={sensor.name}
-                >
-                  <span className="font-mono text-sm">{sensor.name}</span>
-                  <StatusBadge status={sensor.status ?? "unknown"} />
-                  {sensor.recent_ticks?.[0]?.error ? (
-                    <span className="text-xs text-destructive">
-                      최근 tick 오류: {sensor.recent_ticks[0].error.message}
-                    </span>
-                  ) : null}
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
-    </>
+    <SectionCard
+      description="큐 sensor가 꺼지면 갱신 요청 큐가 조용히 멈춥니다 — 상태를 항상 확인하세요."
+      title="센서"
+    >
+      {schedules.isLoading ? (
+        <div aria-busy="true" className="space-y-2">
+          <Skeleton className="h-4 w-2/3" />
+          <Skeleton className="h-4 w-1/2" />
+        </div>
+      ) : sensors.length === 0 ? (
+        <EmptyState
+          description="Dagster 응답에 sensor가 실리면 여기에 표시됩니다."
+          size="sm"
+          title="표시할 sensor가 없습니다."
+        />
+      ) : (
+        <ul className="divide-y divide-border">
+          {sensors.map((sensor) => (
+            <li
+              className="flex flex-wrap items-center gap-2 py-2"
+              data-testid={`pipeline-sensor-${sensor.name}`}
+              key={sensor.name}
+            >
+              <span className="font-mono text-xs">{sensor.name}</span>
+              <StatusBadge status={sensor.status ?? "unknown"} />
+              {sensor.recent_ticks?.[0]?.error ? (
+                <span className="text-xs text-destructive">
+                  최근 tick 오류: {sensor.recent_ticks[0].error.message}
+                </span>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      )}
+    </SectionCard>
   );
 }
 
@@ -863,155 +870,165 @@ function ScheduleTable({
   highlightRef,
   highlightSchedule,
   openEdit,
+  pendingCommand,
   scheduleControlsDisabled,
   scheduleItems,
   schedules,
   setCommandReasons,
   submitCommand,
-}: Pick<ReturnType<typeof useSchedulePanelController>, "commandReasons" | "highlightRef" | "highlightSchedule" | "openEdit" | "scheduleControlsDisabled" | "scheduleItems" | "schedules" | "setCommandReasons" | "submitCommand">) {
+}: Pick<ReturnType<typeof useSchedulePanelController>, "commandReasons" | "highlightRef" | "highlightSchedule" | "openEdit" | "pendingCommand" | "scheduleControlsDisabled" | "scheduleItems" | "schedules" | "setCommandReasons" | "submitCommand">) {
+  const isPending = (name: string, command: PipelineScheduleCommand) =>
+    pendingCommand?.scheduleName === name && pendingCommand.command === command;
   return (
-    <>
-<Card>
-        <CardHeader>
-          <CardTitle>스케줄</CardTitle>
-          <CardDescription>
-            cron은 override가 있으면 override, 없으면 코드 기본값이 표시됩니다.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {schedules.isLoading ? (
-            <p className="text-sm text-muted-foreground">
-              스케줄을 불러오는 중…
-            </p>
-          ) : null}
-          {scheduleItems.map((schedule) => {
-            const highlighted = schedule.name === highlightSchedule;
-            const effectiveCron = schedule.effective_cron_schedule;
-            return (
-              <div
-                className={`rounded-xl bg-surface-subtle p-4 ${
-                  highlighted ? "ring-2 ring-brand" : ""
-                }`}
-                data-testid={`pipeline-schedule-row-${schedule.name}`}
-                key={schedule.name}
-                ref={highlighted ? highlightRef : undefined}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="truncate font-mono text-sm font-medium">
-                      {schedule.name}
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      <span className="font-mono">{effectiveCron ?? "-"}</span>
-                      {describeCron(effectiveCron)
-                        ? ` — ${describeCron(effectiveCron)}`
-                        : ""}
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    <StatusBadge status={schedule.status ?? "unknown"} />
-                    {schedule.override_saved ? (
-                      <Badge variant="secondary">override 저장됨</Badge>
-                    ) : null}
-                    {schedule.override_effective === true ? (
-                      <Badge variant="default">실제 반영됨</Badge>
-                    ) : null}
-                    {schedule.override_effective === false ? (
-                      <Badge variant="destructive">저장/실제 불일치</Badge>
-                    ) : null}
-                  </div>
-                </div>
-                {schedule.schedule_note ? (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    {schedule.schedule_note}
-                  </p>
-                ) : null}
-                {schedule.disabled_reason ? (
-                  <p className="mt-1 text-xs text-destructive">
-                    즉시 실행 불가: {schedule.disabled_reason}
-                  </p>
-                ) : null}
-                <div className="mt-2">
-                  <FormField
-                    disabled={scheduleControlsDisabled}
-                    label="명령 사유 (선택)"
-                    placeholder="시작·중지·reset·즉시 실행 감사 로그에 기록"
-                    value={commandReasons[schedule.name] ?? ""}
-                    onChange={(event) =>
-                      setCommandReasons((current) => ({
-                        ...current,
-                        [schedule.name]: event.target.value,
-                      }))
-                    }
-                  />
-                </div>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  <Button
-                    aria-label={`${schedule.name} 즉시 실행`}
-                    disabled={scheduleControlsDisabled || !schedule.can_run_now}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                    title={schedule.disabled_reason ?? undefined}
-                    onClick={() => void submitCommand(schedule, "run")}
-                  >
-                    <PlayIcon data-icon="inline-start" />
-                    즉시 실행
-                  </Button>
-                  {schedule.status === "RUNNING" ? (
-                    <Button
-                      aria-label={`${schedule.name} 스케줄 중지`}
-                      disabled={scheduleControlsDisabled}
-                      size="sm"
-                      type="button"
-                      variant="destructive"
-                      onClick={() => void submitCommand(schedule, "stop")}
-                    >
-                      <SquareIcon data-icon="inline-start" />
-                      중지
-                    </Button>
-                  ) : (
-                    <Button
-                      aria-label={`${schedule.name} 스케줄 시작`}
-                      disabled={scheduleControlsDisabled}
-                      size="sm"
-                      type="button"
-                      variant="outline"
-                      onClick={() => void submitCommand(schedule, "start")}
-                    >
-                      <PlayIcon data-icon="inline-start" />
-                      시작
-                    </Button>
-                  )}
-                  <Button
-                    aria-label={`${schedule.name} 상태 기본값 복귀`}
-                    disabled={scheduleControlsDisabled || !schedule.can_reset}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                    onClick={() => void submitCommand(schedule, "reset")}
-                  >
-                    <RotateCcwIcon data-icon="inline-start" />
-                    상태 reset
-                  </Button>
-                  <Button
-                    aria-label={`${schedule.name} cron 수정`}
-                    disabled={scheduleControlsDisabled}
-                    size="sm"
-                    type="button"
-                    variant="outline"
-                    onClick={() => openEdit(schedule)}
-                  >
-                    <PencilIcon data-icon="inline-start" />
-                    cron 수정
-                  </Button>
-                </div>
+    <SectionCard
+      contentClassName="space-y-0 divide-y divide-border"
+      description="cron은 override가 있으면 override, 없으면 코드 기본값이 표시됩니다."
+      title="스케줄"
+    >
+      {schedules.isLoading ? (
+        <div aria-busy="true" className="space-y-3 py-2">
+          <Skeleton className="h-4 w-1/2" />
+          <Skeleton className="h-4 w-1/3" />
+          <Skeleton className="h-control-sm w-2/3" />
+        </div>
+      ) : null}
+      {!schedules.isLoading && scheduleItems.length === 0 ? (
+        <EmptyState
+          description="Dagster 응답에 스케줄이 실리면 여기에 표시됩니다."
+          size="sm"
+          title="표시할 스케줄이 없습니다."
+        />
+      ) : null}
+      {scheduleItems.map((schedule) => {
+        const highlighted = schedule.name === highlightSchedule;
+        const effectiveCron = schedule.effective_cron_schedule;
+        return (
+          <div
+            className={cn(
+              "space-y-2 py-4 first:pt-0 last:pb-0",
+              // 딥링크로 지목된 행: brand 틴트 wash + 2px brand ring(e2e가 ring-2를 단언한다).
+              highlighted &&
+                "-mx-2 rounded-control bg-brand-tint px-2 ring-2 ring-brand ring-inset first:pt-4 last:pb-4",
+            )}
+            data-testid={`pipeline-schedule-row-${schedule.name}`}
+            key={schedule.name}
+            ref={highlighted ? highlightRef : undefined}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0">
+                <p className="truncate font-mono text-sm font-medium">
+                  {schedule.name}
+                </p>
+                <p className="text-xs text-text-secondary">
+                  <span className="font-mono">{effectiveCron ?? NULL_GLYPH}</span>
+                  {describeCron(effectiveCron)
+                    ? ` — ${describeCron(effectiveCron)}`
+                    : ""}
+                </p>
               </div>
-            );
-          })}
-        </CardContent>
-      </Card>
-    </>
+              <div className="flex flex-wrap items-center gap-1.5">
+                <StatusBadge status={schedule.status ?? "unknown"} />
+                {schedule.override_saved ? (
+                  <StatusBadge label="override 저장됨" status="saved" tone="info" />
+                ) : null}
+                {schedule.override_effective === true ? (
+                  <StatusBadge label="실제 반영됨" status="applied" />
+                ) : null}
+                {schedule.override_effective === false ? (
+                  <StatusBadge label="저장/실제 불일치" status="mismatch" />
+                ) : null}
+              </div>
+            </div>
+            {schedule.schedule_note ? (
+              <p className="text-xs text-text-secondary">{schedule.schedule_note}</p>
+            ) : null}
+            {schedule.disabled_reason ? (
+              <p className="text-xs text-destructive">
+                즉시 실행 불가: {schedule.disabled_reason}
+              </p>
+            ) : null}
+            <FormField
+              disabled={scheduleControlsDisabled}
+              label="명령 사유 (선택)"
+              placeholder="시작·중지·reset·즉시 실행 감사 로그에 기록"
+              reserveMessage={false}
+              value={commandReasons[schedule.name] ?? ""}
+              onChange={(event) =>
+                setCommandReasons((current) => ({
+                  ...current,
+                  [schedule.name]: event.target.value,
+                }))
+              }
+            />
+            <div className="flex flex-wrap gap-1.5">
+              <Button
+                aria-label={`${schedule.name} 즉시 실행`}
+                disabled={scheduleControlsDisabled || !schedule.can_run_now}
+                disabledReason={schedule.disabled_reason ?? undefined}
+                loading={isPending(schedule.name, "run")}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => void submitCommand(schedule, "run")}
+              >
+                <PlayIcon data-icon="inline-start" />
+                즉시 실행
+              </Button>
+              {schedule.status === "RUNNING" ? (
+                <Button
+                  aria-label={`${schedule.name} 스케줄 중지`}
+                  disabled={scheduleControlsDisabled}
+                  loading={isPending(schedule.name, "stop")}
+                  size="sm"
+                  type="button"
+                  variant="destructive"
+                  onClick={() => void submitCommand(schedule, "stop")}
+                >
+                  <SquareIcon data-icon="inline-start" />
+                  중지
+                </Button>
+              ) : (
+                <Button
+                  aria-label={`${schedule.name} 스케줄 시작`}
+                  disabled={scheduleControlsDisabled}
+                  loading={isPending(schedule.name, "start")}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={() => void submitCommand(schedule, "start")}
+                >
+                  <PlayIcon data-icon="inline-start" />
+                  시작
+                </Button>
+              )}
+              <Button
+                aria-label={`${schedule.name} 상태 기본값 복귀`}
+                disabled={scheduleControlsDisabled || !schedule.can_reset}
+                loading={isPending(schedule.name, "reset")}
+                size="sm"
+                type="button"
+                variant="ghost"
+                onClick={() => void submitCommand(schedule, "reset")}
+              >
+                <RotateCcwIcon data-icon="inline-start" />
+                상태 reset
+              </Button>
+              <Button
+                aria-label={`${schedule.name} cron 수정`}
+                disabled={scheduleControlsDisabled}
+                size="sm"
+                type="button"
+                variant="ghost"
+                onClick={() => openEdit(schedule)}
+              >
+                <PencilIcon data-icon="inline-start" />
+                cron 수정
+              </Button>
+            </div>
+          </div>
+        );
+      })}
+    </SectionCard>
   );
 }
 
@@ -1019,12 +1036,13 @@ function ScheduleDeleteDialog({
   cronDraft,
   editReason,
   editing,
+  patchSchedule,
   scheduleControlsDisabled,
   setCronDraft,
   setEditReason,
   setEditing,
   submitCronPatch,
-}: Pick<ReturnType<typeof useSchedulePanelController>, "cronDraft" | "editReason" | "editing" | "scheduleControlsDisabled" | "setCronDraft" | "setEditReason" | "setEditing" | "submitCronPatch">) {
+}: Pick<ReturnType<typeof useSchedulePanelController>, "cronDraft" | "editReason" | "editing" | "patchSchedule" | "scheduleControlsDisabled" | "setCronDraft" | "setEditReason" | "setEditing" | "submitCronPatch">) {
   return (
     <>
 <Dialog
@@ -1053,7 +1071,7 @@ function ScheduleDeleteDialog({
               onChange={(event) => setCronDraft(event.target.value)}
             />
             {describeCron(cronDraft) ? (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-text-secondary">
                 {describeCron(cronDraft)}
               </p>
             ) : null}
@@ -1064,10 +1082,10 @@ function ScheduleDeleteDialog({
               value={editReason}
               onChange={(event) => setEditReason(event.target.value)}
             />
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-text-secondary">
               기본값:{" "}
               <span className="font-mono">
-                {editing?.default_cron_schedule ?? "-"}
+                {editing?.default_cron_schedule ?? NULL_GLYPH}
               </span>
               {editing?.override_cron_schedule ? (
                 <>
@@ -1078,7 +1096,7 @@ function ScheduleDeleteDialog({
                 </>
               ) : null}
             </p>
-            <p className="text-xs text-muted-foreground">
+            <p className="text-xs text-text-secondary">
               저장 후 코드 위치 새로고침이 반영될 때까지 지연이 있을 수
               있습니다.
             </p>
@@ -1087,6 +1105,10 @@ function ScheduleDeleteDialog({
             <Button
               aria-label="기본값으로 되돌리기"
               disabled={scheduleControlsDisabled}
+              loading={
+                patchSchedule.isPending &&
+                patchSchedule.variables?.body.cron_schedule === null
+              }
               type="button"
               variant="outline"
               onClick={() => submitCronPatch(null)}
@@ -1096,6 +1118,13 @@ function ScheduleDeleteDialog({
             </Button>
             <Button
               disabled={scheduleControlsDisabled || !cronDraft.trim()}
+              disabledReason={
+                !cronDraft.trim() ? "cron을 입력하면 저장할 수 있습니다." : undefined
+              }
+              loading={
+                patchSchedule.isPending &&
+                patchSchedule.variables?.body.cron_schedule !== null
+              }
               type="button"
               onClick={() => submitCronPatch(cronDraft.trim())}
             >
@@ -1125,6 +1154,7 @@ function SchedulePanelView({
   lastResult,
   openEdit,
   patchSchedule,
+  pendingCommand,
   recoveryClaim,
   resolveClaim,
   retryFrozenScheduleMutation,
@@ -1145,7 +1175,7 @@ function SchedulePanelView({
 }: ReturnType<typeof useSchedulePanelController>) {
   return (
     <div
-      className="space-y-4"
+      className="space-y-6"
       data-schedule-state-scanned={scheduleStateScanned ? "true" : "false"}
       data-testid="pipeline-schedule-panel"
     >
@@ -1153,9 +1183,9 @@ function SchedulePanelView({
 
       <ScheduleSummary schedules={schedules} sensors={sensors} />
 
-      <ScheduleTable commandReasons={commandReasons} highlightRef={highlightRef} highlightSchedule={highlightSchedule} openEdit={openEdit} scheduleControlsDisabled={scheduleControlsDisabled} scheduleItems={scheduleItems} schedules={schedules} setCommandReasons={setCommandReasons} submitCommand={submitCommand} />
+      <ScheduleTable commandReasons={commandReasons} highlightRef={highlightRef} highlightSchedule={highlightSchedule} openEdit={openEdit} pendingCommand={pendingCommand} scheduleControlsDisabled={scheduleControlsDisabled} scheduleItems={scheduleItems} schedules={schedules} setCommandReasons={setCommandReasons} submitCommand={submitCommand} />
 
-      <ScheduleDeleteDialog cronDraft={cronDraft} editReason={editReason} editing={editing} scheduleControlsDisabled={scheduleControlsDisabled} setCronDraft={setCronDraft} setEditReason={setEditReason} setEditing={setEditing} submitCronPatch={submitCronPatch} />
+      <ScheduleDeleteDialog cronDraft={cronDraft} editReason={editReason} editing={editing} patchSchedule={patchSchedule} scheduleControlsDisabled={scheduleControlsDisabled} setCronDraft={setCronDraft} setEditReason={setEditReason} setEditing={setEditing} submitCronPatch={submitCronPatch} />
     </div>
   );
 }

@@ -1,4 +1,5 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (map) · design-system: design.md · designed-as-app
 
 import type { LngLatBounds, Map as MapLibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
@@ -25,18 +26,18 @@ import {
   type PublicCurationItem,
 } from "@/api/public-curations";
 import { AdminShell } from "@/components/admin-shell";
+import { DetailList } from "@/components/detail-list";
+import { FilterBar, FilterField } from "@/components/filter-bar";
+import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
+import { Card } from "@/components/ui/card";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { DataTable } from "@/components/ui/data-table";
+  DataTable,
+  type DataTableColumnMeta,
+} from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
@@ -46,12 +47,14 @@ import {
   VWorldFeatureClusters,
   VWorldMapView,
 } from "@/components/vworld-map-view";
-import { shortId } from "@/lib/format";
+import { NULL_GLYPH, formatCount, shortId } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { isVWorldApiKeyConfigured } from "@/lib/vworld-style";
 import { DEFAULT_VIEWPORT, type FeatureViewMode, type MapViewport } from "@/state/map";
 
 const VWORLD_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY;
+/** 지도/테이블 작업면 높이 — 뷰포트 비율(고정 rem 오프셋 금지, m6). */
+const WORKSPACE_HEIGHT_CLASS = "h-[70dvh] min-h-[28rem]";
 
 interface Bbox {
   min_lon: number;
@@ -73,14 +76,14 @@ function featureDetailHref(featureId: string): string {
   return `/features/${encodeURIComponent(featureId)}`;
 }
 
-function coordLabel(group: PublicCurationGroup): string {
+function coordLabel(group: PublicCurationGroup): string | null {
   const { lon, lat } = group.feature;
   return typeof lon === "number" && typeof lat === "number"
     ? `${lon.toFixed(5)}, ${lat.toFixed(5)}`
-    : "없음";
+    : null;
 }
 
-function addressLabel(address: Record<string, unknown>): string {
+function addressLabel(address: Record<string, unknown>): string | null {
   const preferredKeys = [
     "road_address",
     "roadAddress",
@@ -95,7 +98,7 @@ function addressLabel(address: Record<string, unknown>): string {
   const strings = Object.values(address).filter(
     (value): value is string => typeof value === "string" && value.trim().length > 0,
   );
-  return strings.join(" ") || "없음";
+  return strings.join(" ") || null;
 }
 
 function sourceLabel(item: PublicCurationItem): string {
@@ -123,112 +126,122 @@ function toClusterFeature(group: PublicCurationGroup): ClusterFeatureInput {
   };
 }
 
-function MembershipCard({ item }: { item: PublicCurationItem }) {
+/** 소속 1건 — 테두리 박스 대신 hairline으로 나뉜 행(C3). 상태는 StatusBadge 1개, 나머지는 텍스트(M22). */
+function MembershipRow({ item }: { item: PublicCurationItem }) {
   return (
-    <div
-      className="flex flex-col gap-2 rounded-lg border p-3"
+    <li
+      className="flex flex-col gap-2 py-3 first:pt-0 last:pb-0"
       data-testid="curation-membership"
     >
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="secondary">{item.theme_name}</Badge>
-        {item.edition_key ? <Badge variant="outline">{item.edition_key}</Badge> : null}
-        <Badge variant="outline">{item.status}</Badge>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <span className="text-xs font-medium text-text-primary">{item.theme_name}</span>
+        {item.edition_key ? (
+          <span className="text-xs text-text-secondary tabular-nums">{item.edition_key}</span>
+        ) : null}
+        <StatusBadge status={item.status} />
       </div>
-      <div>
-        <p className="font-medium">{itemTitle(item)}</p>
+      <div className="flex flex-col gap-0.5">
+        <p className="text-sm font-medium text-text-primary">{itemTitle(item)}</p>
         {item.item_title && item.item_title !== item.title ? (
-          <p className="text-xs text-muted-foreground">컬렉션: {item.title}</p>
+          <p className="text-xs text-text-secondary">컬렉션: {item.title}</p>
         ) : null}
       </div>
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-        <dt className="text-muted-foreground">테마</dt>
-        <dd>{item.theme_name} ({item.theme_slug})</dd>
-        <dt className="text-muted-foreground">출처</dt>
-        <dd>
-          {item.source_url ? (
-            <a
-              className="inline-flex items-center gap-1 text-primary underline-offset-4 hover:underline"
-              href={item.source_url}
-              rel="noreferrer"
-              target="_blank"
-            >
-              {sourceLabel(item)}
-              <ExternalLinkIcon className="size-3" />
-            </a>
-          ) : (
-            sourceLabel(item)
-          )}
-        </dd>
-        <dt className="text-muted-foreground">항목 ID</dt>
-        <dd className="break-all font-mono">{item.external_item_id}</dd>
-        <dt className="text-muted-foreground">관계</dt>
-        <dd>{item.curation_relation}</dd>
-      </dl>
+      <DetailList
+        items={[
+          { label: "테마", value: `${item.theme_name} (${item.theme_slug})` },
+          {
+            label: "출처",
+            value: item.source_url ? (
+              <a
+                className="inline-flex items-center gap-1 rounded-control text-brand underline-offset-4 hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                href={item.source_url}
+                rel="noreferrer"
+                target="_blank"
+              >
+                {sourceLabel(item)}
+                <ExternalLinkIcon aria-hidden="true" className="size-3" />
+              </a>
+            ) : (
+              sourceLabel(item)
+            ),
+          },
+          { label: "항목 ID", value: item.external_item_id, mono: true },
+          { label: "관계", value: item.curation_relation, mono: true },
+        ]}
+        layout="inline"
+      />
       {item.item_summary ? (
-        <p className="whitespace-pre-wrap text-sm text-muted-foreground">
-          {item.item_summary}
-        </p>
+        <p className="text-xs whitespace-pre-wrap text-text-secondary">{item.item_summary}</p>
       ) : null}
-      <details>
-        <summary className="cursor-pointer text-xs text-muted-foreground">
+      <details className="group/details">
+        <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-control py-1 text-xs font-medium text-text-secondary select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
+          <span aria-hidden="true" className="w-3 text-text-tertiary group-open/details:hidden">
+            +
+          </span>
+          <span aria-hidden="true" className="hidden w-3 text-text-tertiary group-open/details:inline">
+            −
+          </span>
           membership 전체 정보
         </summary>
-        <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-          <dt className="text-muted-foreground">collection_key</dt>
-          <dd className="break-all font-mono">{item.collection_key}</dd>
-          <dt className="text-muted-foreground">collection_id</dt>
-          <dd className="break-all font-mono">{item.collection_id}</dd>
-          <dt className="text-muted-foreground">curation_item_id</dt>
-          <dd className="break-all font-mono">{item.curation_item_id}</dd>
-          <dt className="text-muted-foreground">theme</dt>
-          <dd>{item.theme_group} · {item.theme_slug}</dd>
-          <dt className="text-muted-foreground">place_name</dt>
-          <dd>{item.place_name || "-"}</dd>
-          <dt className="text-muted-foreground">address_hint</dt>
-          <dd>{item.address_hint ?? "-"}</dd>
-          <dt className="text-muted-foreground">relation</dt>
-          <dd>{item.curation_relation}</dd>
-          <dt className="text-muted-foreground">reuse_policy</dt>
-          <dd>{item.reuse_policy}</dd>
-          <dt className="text-muted-foreground">sort_order</dt>
-          <dd>{item.sort_order}</dd>
-          <dt className="text-muted-foreground">created_at</dt>
-          <dd>{item.created_at}</dd>
-          <dt className="text-muted-foreground">updated_at</dt>
-          <dd>{item.updated_at}</dd>
-          <dt className="text-muted-foreground">archived_at</dt>
-          <dd>{item.archived_at ?? "-"}</dd>
-        </dl>
+        <div className="pt-1">
+          <DetailList
+            items={[
+              { label: "collection_key", value: item.collection_key, mono: true },
+              { label: "collection_id", value: item.collection_id, mono: true },
+              { label: "curation_item_id", value: item.curation_item_id, mono: true },
+              { label: "theme", value: `${item.theme_group} · ${item.theme_slug}` },
+              { label: "place_name", value: item.place_name || null },
+              { label: "address_hint", value: item.address_hint ?? null },
+              { label: "relation", value: item.curation_relation, mono: true },
+              { label: "reuse_policy", value: item.reuse_policy, mono: true },
+              { label: "sort_order", value: item.sort_order, numeric: true },
+              { label: "created_at", value: item.created_at, mono: true },
+              { label: "updated_at", value: item.updated_at, mono: true },
+              { label: "archived_at", value: item.archived_at ?? null, mono: true },
+            ]}
+            layout="inline"
+          />
+        </div>
       </details>
-    </div>
+    </li>
   );
 }
 
+/**
+ * 선택 그룹 inspector. 지도 위에서는 floating(overlay → shadow-elevated, 축척 컨트롤 위에 머문다),
+ * 테이블 옆에서는 우측 rail(`--rail`)의 flat 패널이다.
+ */
 function CurationGroupDetailPanel({
   group,
-  avoidMapControls,
+  placement,
   onClose,
 }: {
   group: PublicCurationGroup;
-  avoidMapControls: boolean;
+  placement: "floating" | "rail";
   onClose: () => void;
 }) {
+  const floating = placement === "floating";
   return (
     <Card
       className={cn(
-        "absolute right-3 top-20 z-10 w-[min(28rem,calc(100%-1.5rem))] overflow-auto shadow-lg",
-        avoidMapControls ? "bottom-24" : "max-h-[calc(100%-5.75rem)]",
+        "gap-3 overflow-auto p-4",
+        floating
+          ? "absolute top-20 right-3 bottom-24 z-10 w-[min(var(--rail),calc(100%-1.5rem))] shadow-elevated"
+          : cn("min-h-0", WORKSPACE_HEIGHT_CLASS),
       )}
       data-testid="curation-group-detail"
+      size="sm"
     >
-      <CardHeader className="grid-cols-[1fr_auto]">
-        <div>
-          <CardTitle>{group.feature.name}</CardTitle>
-          <CardDescription>
-            큐레이션 소속 {group.curations.length}건
-          </CardDescription>
+      <div className="flex items-start justify-between gap-2 border-b border-border pb-3">
+        <div className="flex min-w-0 flex-col gap-0.5">
+          <h2 className="text-md leading-snug font-semibold break-keep text-text-primary">
+            {group.feature.name}
+          </h2>
+          <span className="text-xs text-text-secondary tabular-nums">
+            큐레이션 소속 {formatCount(group.curations.length)}건
+          </span>
         </div>
-        <div className="flex items-center gap-1">
+        <div className="flex shrink-0 items-center gap-1">
           <Link
             aria-label="feature 상세 열기"
             className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
@@ -246,33 +259,31 @@ function CurationGroupDetailPanel({
             <XIcon />
           </Button>
         </div>
-      </CardHeader>
-      <CardContent className="flex flex-col gap-3">
-        <div className="flex flex-wrap gap-2">
-          <Badge>{group.feature.kind}</Badge>
+      </div>
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-wrap gap-1">
+          <Badge variant="neutral">{group.feature.kind}</Badge>
           <Badge variant="outline">{group.feature.category}</Badge>
         </div>
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
-          <dt className="text-muted-foreground">주소</dt>
-          <dd>{addressLabel(group.feature.address)}</dd>
-          <dt className="text-muted-foreground">좌표</dt>
-          <dd className="font-mono">{coordLabel(group)}</dd>
-          <dt className="text-muted-foreground">feature_id</dt>
-          <dd className="break-all font-mono">
-            <Link
-              className="text-primary underline-offset-4 hover:underline"
-              href={featureDetailHref(group.feature.feature_id)}
-            >
-              {group.feature.feature_id}
-            </Link>
-          </dd>
-        </dl>
-        <div className="flex flex-col gap-2">
+        <DetailList
+          items={[
+            { label: "주소", value: addressLabel(group.feature.address) },
+            { label: "좌표", value: coordLabel(group), mono: true },
+            {
+              label: "feature_id",
+              value: group.feature.feature_id,
+              mono: true,
+              href: featureDetailHref(group.feature.feature_id),
+            },
+          ]}
+          layout="inline"
+        />
+        <ul className="divide-y divide-border border-t border-border pt-3">
           {group.curations.map((item) => (
-            <MembershipCard item={item} key={item.curation_item_id} />
+            <MembershipRow item={item} key={item.curation_item_id} />
           ))}
-        </div>
-      </CardContent>
+        </ul>
+      </div>
     </Card>
   );
 }
@@ -342,18 +353,19 @@ function useCuratedFeatureMapClientController() {
         header: "POI명",
         sortingFn: (rowA, rowB) =>
           rowA.original.feature.name.localeCompare(rowB.original.feature.name, "ko"),
+        meta: { wrap: true } satisfies DataTableColumnMeta,
         cell: ({ row }) => (
-          <div className="max-w-[22rem] whitespace-normal">
+          <div className="flex max-w-[22rem] min-w-0 flex-col gap-0.5">
             <Link
-              className="font-medium text-primary underline-offset-4 hover:underline"
+              className="rounded-control font-medium text-brand underline-offset-4 hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
               href={featureDetailHref(row.original.feature.feature_id)}
               onClick={(event) => event.stopPropagation()}
             >
               {row.original.feature.name}
             </Link>
-            <div className="break-all font-mono text-xs text-muted-foreground">
+            <span className="font-mono text-2xs break-all text-text-secondary slashed-zero">
               {shortId(row.original.feature.feature_id, 18)}
-            </div>
+            </span>
           </div>
         ),
       },
@@ -361,17 +373,19 @@ function useCuratedFeatureMapClientController() {
         id: "curation_count",
         accessorFn: (group) => group.curations.length,
         header: "소속",
-        cell: ({ row }) => `${row.original.curations.length}건`,
+        meta: { align: "right" } satisfies DataTableColumnMeta,
+        cell: ({ row }) => `${formatCount(row.original.curations.length)}건`,
       },
       {
         id: "themes",
         header: "테마",
         enableSorting: false,
+        meta: { wrap: true } satisfies DataTableColumnMeta,
         cell: ({ row }) => (
-          <div className="flex max-w-64 flex-wrap gap-1">
+          <div className="flex max-w-64 flex-col gap-0.5 text-xs">
             {Array.from(new Set(row.original.curations.map((item) => item.theme_name))).map(
               (theme) => (
-                <Badge key={theme} variant="secondary">{theme}</Badge>
+                <span key={theme}>{theme}</span>
               ),
             )}
           </div>
@@ -381,12 +395,13 @@ function useCuratedFeatureMapClientController() {
         id: "collections",
         header: "컬렉션 / 연도",
         enableSorting: false,
+        meta: { wrap: true } satisfies DataTableColumnMeta,
         cell: ({ row }) => (
-          <div className="max-w-72 space-y-1 whitespace-normal text-sm">
+          <div className="flex max-w-72 flex-col gap-0.5 text-sm">
             {row.original.curations.map((item) => (
-              <div key={item.curation_item_id}>
+              <span key={item.curation_item_id}>
                 {item.title}{item.edition_key ? ` · ${item.edition_key}` : ""}
-              </div>
+              </span>
             ))}
           </div>
         ),
@@ -395,10 +410,11 @@ function useCuratedFeatureMapClientController() {
         id: "sources",
         header: "데이터소스",
         enableSorting: false,
+        meta: { wrap: true } satisfies DataTableColumnMeta,
         cell: ({ row }) => (
-          <div className="max-w-64 space-y-1 whitespace-normal text-xs">
+          <div className="flex max-w-64 flex-col gap-0.5 text-xs text-text-secondary">
             {Array.from(new Set(row.original.curations.map(sourceLabel))).map((source) => (
-              <div key={source}>{source}</div>
+              <span key={source}>{source}</span>
             ))}
           </div>
         ),
@@ -407,11 +423,20 @@ function useCuratedFeatureMapClientController() {
         id: "coord",
         header: "좌표",
         enableSorting: false,
-        cell: ({ row }) => (
-          <span className="font-mono text-xs text-muted-foreground">
-            {coordLabel(row.original)}
-          </span>
-        ),
+        meta: { align: "right" } satisfies DataTableColumnMeta,
+        cell: ({ row }) => {
+          const coordinate = coordLabel(row.original);
+          return (
+            <span
+              className={cn(
+                "font-mono text-xs slashed-zero",
+                coordinate ? "text-text-secondary" : "text-text-tertiary",
+              )}
+            >
+              {coordinate ?? NULL_GLYPH}
+            </span>
+          );
+        },
       },
     ],
     [],
@@ -497,95 +522,115 @@ function CuratedFeatureMapClientView({
           </Link>
         </>
       }
-      description={status}
+      description="공개 큐레이션에 소속된 feature를 지도 범위·테마·연도·제공자로 걸러 봅니다."
       title="큐레이션 지도"
     >
-      <div className="flex min-h-[calc(100vh-12rem)] flex-col rounded-lg border bg-muted/30">
-        <div className="flex flex-col gap-3 border-b bg-background px-4 py-3 xl:flex-row xl:items-center">
-          <div className="flex shrink-0 flex-wrap items-center gap-2">
-            <Badge variant="secondary">Feature 그룹 지도</Badge>
-            <Badge variant={groupsQuery.isError ? "destructive" : "outline"}>
-              {status}
-            </Badge>
-          </div>
-          <div className="flex min-w-0 flex-1 gap-2 overflow-x-auto pb-1 xl:justify-end">
-            <Input
-              aria-label="POI명 또는 큐레이션 제목 필터"
-              className="w-64 shrink-0"
-              placeholder="POI명, 제목, 테마 검색"
-              value={search}
-              onChange={(event) => {
-                setSearch(event.target.value);
-                setSelectedFeatureId(null);
-              }}
-            />
-            <NativeSelect
-              aria-label="테마 필터"
-              className="w-52 shrink-0"
-              value={themeSlug}
-              onChange={(event) => {
-                setThemeSlug(event.target.value);
-                setSelectedFeatureId(null);
-              }}
-            >
-              <NativeSelectOption value="">테마 전체</NativeSelectOption>
-              {filterOptions.themes.map((theme) => (
-                <NativeSelectOption key={theme.value} value={theme.value}>
-                  {theme.label}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-            <NativeSelect
-              aria-label="연도 필터"
-              className="w-44 shrink-0"
-              value={editionKey}
-              onChange={(event) => {
-                setEditionKey(event.target.value);
-                setSelectedFeatureId(null);
-              }}
-            >
-              <NativeSelectOption value="">연도 전체</NativeSelectOption>
-              {filterOptions.editions.map((edition) => (
-                <NativeSelectOption key={edition} value={edition}>{edition}</NativeSelectOption>
-              ))}
-            </NativeSelect>
-            <NativeSelect
-              aria-label="제공자 필터"
-              className="w-44 shrink-0"
-              value={provider}
-              onChange={(event) => {
-                setProvider(event.target.value);
-                setSelectedFeatureId(null);
-              }}
-            >
-              <NativeSelectOption value="">제공자 전체</NativeSelectOption>
-              {filterOptions.providers.map((value) => (
-                <NativeSelectOption key={value} value={value}>{value}</NativeSelectOption>
-              ))}
-            </NativeSelect>
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3">
+          <FilterBar>
+            <FilterField htmlFor="curated-map-search" label="검색">
+              <Input
+                aria-label="POI명 또는 큐레이션 제목 필터"
+                className="w-64"
+                id="curated-map-search"
+                placeholder="예: 경복궁, 한국관광 100선"
+                size="sm"
+                value={search}
+                onChange={(event) => {
+                  setSearch(event.target.value);
+                  setSelectedFeatureId(null);
+                }}
+              />
+            </FilterField>
+            <FilterField htmlFor="curated-map-theme" label="테마">
+              <NativeSelect
+                aria-label="테마 필터"
+                className="w-52"
+                id="curated-map-theme"
+                size="sm"
+                value={themeSlug}
+                onChange={(event) => {
+                  setThemeSlug(event.target.value);
+                  setSelectedFeatureId(null);
+                }}
+              >
+                <NativeSelectOption value="">테마 전체</NativeSelectOption>
+                {filterOptions.themes.map((theme) => (
+                  <NativeSelectOption key={theme.value} value={theme.value}>
+                    {theme.label}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </FilterField>
+            <FilterField htmlFor="curated-map-edition" label="연도">
+              <NativeSelect
+                aria-label="연도 필터"
+                className="w-44"
+                id="curated-map-edition"
+                size="sm"
+                value={editionKey}
+                onChange={(event) => {
+                  setEditionKey(event.target.value);
+                  setSelectedFeatureId(null);
+                }}
+              >
+                <NativeSelectOption value="">연도 전체</NativeSelectOption>
+                {filterOptions.editions.map((edition) => (
+                  <NativeSelectOption key={edition} value={edition}>{edition}</NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </FilterField>
+            <FilterField htmlFor="curated-map-provider" label="제공자">
+              <NativeSelect
+                aria-label="제공자 필터"
+                className="w-44"
+                id="curated-map-provider"
+                size="sm"
+                value={provider}
+                onChange={(event) => {
+                  setProvider(event.target.value);
+                  setSelectedFeatureId(null);
+                }}
+              >
+                <NativeSelectOption value="">제공자 전체</NativeSelectOption>
+                {filterOptions.providers.map((value) => (
+                  <NativeSelectOption key={value} value={value}>{value}</NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </FilterField>
+          </FilterBar>
+
+          {groupsQuery.isError ? (
+            <Alert variant="destructive">
+              <AlertTitle>큐레이션 그룹 호출 실패</AlertTitle>
+              <AlertDescription>
+                {groupsQuery.error.message} — 지도를 조금 움직이거나 필터를 바꾸면 다시
+                조회합니다.
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          {collectionsQuery.isError ? (
+            <Alert variant="destructive">
+              <AlertTitle>큐레이션 필터 조회 실패</AlertTitle>
+              <AlertDescription>
+                {collectionsQuery.error.message} — 테마·연도·제공자 옵션이 비어 있을 수
+                있습니다.
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge variant={groupsQuery.isError ? "destructive" : "neutral"}>{status}</Badge>
           </div>
         </div>
 
-        {groupsQuery.isError ? (
-          <Alert className="m-4" variant="destructive">
-            <AlertTitle>큐레이션 그룹 호출 실패</AlertTitle>
-            <AlertDescription>{groupsQuery.error.message}</AlertDescription>
-          </Alert>
-        ) : null}
-        {collectionsQuery.isError ? (
-          <Alert className="mx-4 mt-4" variant="destructive">
-            <AlertTitle>큐레이션 필터 조회 실패</AlertTitle>
-            <AlertDescription>{collectionsQuery.error.message}</AlertDescription>
-          </Alert>
-        ) : null}
-
         <Tabs
-          className="min-h-0 flex-1 p-4"
+          className="min-h-0"
           value={viewMode}
           onValueChange={(value) => setViewMode(value as FeatureViewMode)}
         >
-          <div className="mb-3 flex items-center justify-between">
-            <TabsList>
+          {/* 좌표 readout은 탭 헤더 행 — 지도/테이블 두 탭 모두 지도 bounds로 필터되므로 공통 컨텍스트다. */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <TabsList aria-label="보기 전환">
               <TabsTrigger value="map">
                 <MapIcon data-icon="inline-start" />
                 지도
@@ -595,84 +640,88 @@ function CuratedFeatureMapClientView({
                 테이블
               </TabsTrigger>
             </TabsList>
-            <span className="text-sm text-muted-foreground">
+            <span className="font-mono text-2xs text-text-secondary tabular-nums">
               center {viewport.lon.toFixed(4)}, {viewport.lat.toFixed(4)} · z{" "}
               {viewport.zoom.toFixed(1)}
             </span>
           </div>
 
           <TabsContent className="min-h-0" value="map">
-            <Card className="relative h-[calc(100vh-22rem)] min-h-[28rem] overflow-hidden p-0">
-              <div className="absolute inset-0 h-full w-full">
-                <VWorldMapView
-                  apiKey={VWORLD_KEY}
-                  center={[viewport.lon, viewport.lat]}
-                  className="absolute inset-0 h-full w-full"
-                  navigation
-                  scale
-                  testId="curated-map-canvas-container"
-                  zoom={viewport.zoom}
-                  onLoad={updateViewportFromMap}
-                  onMoveEnd={updateViewportFromMap}
-                >
-                  <VWorldFeatureClusters
-                    features={clusterItems}
-                    selectedFeatureId={selectedFeatureId}
-                    onSelectFeature={setSelectedFeatureId}
-                  />
-                </VWorldMapView>
-              </div>
+            <div
+              className={cn(
+                "relative overflow-hidden rounded-panel border border-border bg-surface-subtle",
+                WORKSPACE_HEIGHT_CLASS,
+              )}
+            >
+              <VWorldMapView
+                apiKey={VWORLD_KEY}
+                center={[viewport.lon, viewport.lat]}
+                className="absolute inset-0 h-full w-full"
+                navigation
+                scale
+                testId="curated-map-canvas-container"
+                zoom={viewport.zoom}
+                onLoad={updateViewportFromMap}
+                onMoveEnd={updateViewportFromMap}
+              >
+                <VWorldFeatureClusters
+                  features={clusterItems}
+                  selectedFeatureId={selectedFeatureId}
+                  onSelectFeature={setSelectedFeatureId}
+                />
+              </VWorldMapView>
               {selectedGroup ? (
                 <CurationGroupDetailPanel
                   group={selectedGroup}
-                  avoidMapControls
+                  placement="floating"
                   onClose={() => setSelectedFeatureId(null)}
                 />
               ) : null}
-            </Card>
+            </div>
           </TabsContent>
 
           <TabsContent value="table">
-            <Card className="relative h-[calc(100vh-22rem)] min-h-[28rem] overflow-hidden">
-              <CardHeader>
-                <CardTitle>큐레이션 Feature 그룹</CardTitle>
-                <CardDescription>
-                  한 행은 한 Feature이며, 관련된 모든 큐레이션 소속을 함께 표시합니다.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="min-h-0">
-                <DataTable
-                  columns={columns}
-                  data={groups}
-                  getRowId={(group) => group.feature.feature_id}
-                  isLoading={groupsQuery.isLoading}
-                  emptyMessage="표시할 큐레이션 Feature가 없습니다."
-                  onRowClick={(group) => setSelectedFeatureId(group.feature.feature_id)}
-                  isRowActive={(group) =>
-                    group.feature.feature_id === selectedFeatureId
-                  }
-                  sorting={tableSorting}
-                  onSortingChange={setTableSorting}
-                  manualSorting={false}
-                  virtualized
-                  estimateRowSize={64}
-                  containerClassName="h-[calc(100vh-28rem)] min-h-80"
-                  ariaLabel="큐레이션 Feature 그룹"
-                />
-              </CardContent>
+            <div
+              className={cn(
+                "grid gap-4",
+                selectedGroup && "xl:grid-cols-[minmax(0,1fr)_var(--rail)]",
+              )}
+            >
+              <DataTable
+                ariaLabel="큐레이션 Feature 그룹"
+                columns={columns}
+                containerClassName={WORKSPACE_HEIGHT_CLASS}
+                data={groups}
+                emptyState={{
+                  title: "표시할 큐레이션 Feature가 없습니다.",
+                  description:
+                    "현재 지도 범위와 검색·테마·연도·제공자 필터에 맞는 feature가 없습니다 — 지도를 이동하거나 필터를 넓혀 보세요.",
+                }}
+                estimateRowSize={64}
+                getRowId={(group) => group.feature.feature_id}
+                isLoading={groupsQuery.isLoading}
+                isRowActive={(group) =>
+                  group.feature.feature_id === selectedFeatureId
+                }
+                manualSorting={false}
+                onRowClick={(group) => setSelectedFeatureId(group.feature.feature_id)}
+                onSortingChange={setTableSorting}
+                sorting={tableSorting}
+                virtualized
+              />
               {selectedGroup ? (
                 <CurationGroupDetailPanel
                   group={selectedGroup}
-                  avoidMapControls={false}
+                  placement="rail"
                   onClose={() => setSelectedFeatureId(null)}
                 />
               ) : null}
-            </Card>
+            </div>
           </TabsContent>
         </Tabs>
 
         {!isVWorldApiKeyConfigured(VWORLD_KEY) ? (
-          <Alert className="mx-4 mb-4">
+          <Alert>
             <AlertTitle>VWorld key 미설정</AlertTitle>
             <AlertDescription>
               NEXT_PUBLIC_VWORLD_API_KEY 미설정 상태라 회색 배경으로 표시합니다.

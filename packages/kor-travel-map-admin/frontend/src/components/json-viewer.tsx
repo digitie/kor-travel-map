@@ -1,4 +1,6 @@
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 import { CopyButton } from "@/components/copy-button";
+import { NULL_GLYPH } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 type JsonViewerProps = {
@@ -12,7 +14,7 @@ type JsonViewerProps = {
 };
 
 function stringify(value: unknown): string {
-  if (value === null || value === undefined) return "-";
+  if (value === null || value === undefined) return NULL_GLYPH;
   if (typeof value === "string") {
     try {
       return JSON.stringify(JSON.parse(value), null, 2);
@@ -27,7 +29,10 @@ function stringify(value: unknown): string {
   }
 }
 
-/** JSON/raw payload 표시 표준 블록 (§3). */
+/**
+ * JSON/raw payload 표시 표준 블록 — 그룹 안의 유일한 JSON 렌더러(M42).
+ * Geist Mono 12px, `--surface-subtle` 위 hairline, 값 없음은 `—`.
+ */
 function JsonViewer({
   value,
   maxHeight = "md",
@@ -37,15 +42,17 @@ function JsonViewer({
   "aria-label": ariaLabel,
 }: JsonViewerProps) {
   const text = stringify(value);
+  const isEmpty = text === NULL_GLYPH;
   return (
-    <div className={cn("relative min-w-0", className)}>
+    <div className={cn("relative min-w-0", className)} data-slot="json-viewer">
       <pre
         aria-label={ariaLabel}
         className={cn(
-          "overflow-auto rounded-md border p-3 font-mono text-xs leading-relaxed break-all whitespace-pre-wrap",
-          tone === "default" && "border-border bg-muted/40 text-foreground",
-          tone === "destructive" &&
-            "border-destructive/30 bg-destructive/5 text-destructive",
+          "overflow-auto rounded-control border p-3 font-mono text-2xs leading-relaxed break-all whitespace-pre-wrap slashed-zero",
+          tone === "default" && "border-border bg-surface-subtle text-text-primary",
+          tone === "destructive" && "border-destructive bg-destructive-tint text-destructive",
+          isEmpty && "text-text-tertiary",
+          copyable && !isEmpty && "pr-10",
           maxHeight === "sm" && "max-h-40",
           maxHeight === "md" && "max-h-72",
           maxHeight === "lg" && "max-h-[32rem]",
@@ -53,7 +60,7 @@ function JsonViewer({
       >
         {text}
       </pre>
-      {copyable && text !== "-" ? (
+      {copyable && !isEmpty ? (
         <div className="absolute top-2 right-2">
           <CopyButton label="JSON" value={text} />
         </div>

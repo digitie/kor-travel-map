@@ -1,14 +1,12 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 
 import { type ColumnDef } from "@tanstack/react-table";
 import {
-  AlertTriangleIcon,
   CheckIcon,
   MapIcon,
   RefreshCwIcon,
   RotateCcwIcon,
-  SearchIcon,
-  WrenchIcon,
   XIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -19,6 +17,7 @@ import {
   useReducer,
   useRef,
   useState,
+  type ReactNode,
 } from "react";
 
 import {
@@ -33,22 +32,35 @@ import {
 } from "@/api/issues";
 import { featureStateLabel } from "@/api/features";
 import { AdminShell } from "@/components/admin-shell";
-import { CursorPager } from "@/components/pagination-bar";
+import { DetailList, type DetailItem } from "@/components/detail-list";
+import { EmptyState } from "@/components/empty-state";
 import { EntityLink } from "@/components/entity-link";
-import { StatusBadge } from "@/components/status-badge";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
+import { FilterActions, FilterBar, FilterField } from "@/components/filter-bar";
+import { JsonViewer } from "@/components/json-viewer";
+import { CursorPager } from "@/components/pagination-bar";
+import { SectionCard } from "@/components/section-card";
+import { LevelBadge, StatusBadge } from "@/components/status-badge";
+import {
+  Alert,
+  AlertActions,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
-import { DataTable } from "@/components/ui/data-table";
+import {
+  DataTable,
+  DataTableClampCell,
+  type DataTableColumnMeta,
+} from "@/components/ui/data-table";
 import { FormField, FormTextArea } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { Skeleton } from "@/components/ui/skeleton";
-import { formatCount, formatDateTime, shortId } from "@/lib/format";
+import { NULL_GLYPH, formatCount, formatDateTime, shortId } from "@/lib/format";
 import { KOREA_COORD_MESSAGE, isKoreaCoordinate } from "@/lib/form-validation";
-import { cn } from "@/lib/utils";
+import { statusLabel } from "@/lib/status-label";
 
 const ISSUE_STATUSES: Array<AdminIssueStatus | "all"> = [
   "open",
@@ -65,13 +77,10 @@ const ISSUE_SEVERITIES: Array<AdminIssueSeverity | "all"> = [
   "all",
 ];
 const PAGE_SIZE_OPTIONS = [25, 50, 100, 200, 500] as const;
+const BBOX_FORMAT_HINT = "형식: minLon,minLat,maxLon,maxLat";
 
-function JsonBlock({ value }: { value: unknown }) {
-  return (
-    <pre className="max-h-72 overflow-auto rounded-lg bg-muted p-3 text-xs leading-relaxed">
-      {JSON.stringify(value, null, 2)}
-    </pre>
-  );
+function optionLabel(value: string): string {
+  return value === "all" ? "전체" : statusLabel(value);
 }
 
 function buildActionBody(
@@ -86,7 +95,7 @@ function buildActionBody(
 }
 
 function linkedFeatureLabel(issue: AdminIssueRecord): string {
-  return issue.feature_id ? shortId(issue.feature_id, 18) : "-";
+  return issue.feature_id ? shortId(issue.feature_id, 18) : NULL_GLYPH;
 }
 
 function parseBbox(value: string) {
@@ -192,19 +201,22 @@ function IssueManualOverridePanel({
     });
   };
 
+  const isOverriding =
+    action.isPending && action.variables?.body.action === "manual_override";
+
   return (
-    <div className="rounded-lg border bg-background p-4">
-      <div className="mb-3 flex items-center gap-2 font-medium">
-        <WrenchIcon className="size-4 text-muted-foreground" />
-        수동 보정
-      </div>
+    <SectionCard
+      description="주소 또는 좌표 중 하나만 입력해도 됩니다."
+      headingLevel={3}
+      title="수동 보정"
+    >
       {action.isError ? (
-        <Alert className="mb-3" variant="destructive">
+        <Alert variant="destructive">
           <AlertTitle>issue 조치 실패</AlertTitle>
           <AlertDescription>{action.error.message}</AlertDescription>
         </Alert>
       ) : null}
-      <div className="grid gap-3">
+      <div className="flex flex-col gap-1">
         <FormTextArea
           className="font-mono"
           error={manualErrorField === "address" ? manualError : undefined}
@@ -215,7 +227,7 @@ function IssueManualOverridePanel({
           value={manualAddress}
           onChange={(event) => setManualAddress(event.target.value)}
         />
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid grid-cols-2 gap-x-3">
           <FormField
             error={manualErrorField === "lon" ? manualError : undefined}
             inputMode="decimal"
@@ -231,20 +243,43 @@ function IssueManualOverridePanel({
             value={manualLat}
             onChange={(event) => setManualLat(event.target.value)}
           />
-          <FormField
-            label="보정 사유"
-            value={manualReason}
-            onChange={(event) => setManualReason(event.target.value)}
-          />
         </div>
-        <Button
-          disabled={action.isPending}
-          type="button"
-          onClick={submitManualOverride}
-        >
-          수동 보정 적용
-        </Button>
+        <FormField
+          hint="비워 두면 admin-ui manual override 로 기록됩니다."
+          label="보정 사유"
+          value={manualReason}
+          onChange={(event) => setManualReason(event.target.value)}
+        />
+        <div className="flex items-center justify-end border-t border-border pt-4">
+          <Button
+            disabled={action.isPending}
+            disabledReason="다른 조치를 처리하는 중입니다"
+            loading={isOverriding}
+            type="button"
+            onClick={submitManualOverride}
+          >
+            수동 보정 적용
+          </Button>
+        </div>
       </div>
+    </SectionCard>
+  );
+}
+
+function DetailSkeleton() {
+  return (
+    <div className="flex flex-col gap-3" aria-busy="true">
+      <div className="flex gap-1.5">
+        <Skeleton className="h-6 w-16" />
+        <Skeleton className="h-6 w-14" />
+      </div>
+      <Skeleton className="h-4 w-5/6" />
+      {["a", "b", "c", "d"].map((key) => (
+        <div className="grid grid-cols-[8rem_minmax(0,1fr)] gap-x-3" key={key}>
+          <Skeleton className="h-4 w-16" />
+          <Skeleton className="h-4 w-2/3" />
+        </div>
+      ))}
     </div>
   );
 }
@@ -255,10 +290,12 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
 
   if (!issueId) {
     return (
-      <div className="rounded-lg border bg-background p-5 text-sm text-muted-foreground">
-        table에서 issue를 선택하면 상세 payload와 조치 버튼을 확인할 수
-        있습니다.
-      </div>
+      <SectionCard title="상세">
+        <EmptyState
+          title="선택된 이슈가 없습니다"
+          description="table에서 issue를 선택하면 상세 payload와 조치 버튼을 확인할 수 있습니다."
+        />
+      </SectionCard>
     );
   }
 
@@ -271,164 +308,157 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
       body: buildActionBody(actionName, patch),
     });
   };
+  const pendingAction = action.isPending ? action.variables?.body.action : undefined;
+  const actionButton = (
+    label: string,
+    actionName: AdminIssueAction,
+    variant: "outline" | "ghost",
+    icon?: ReactNode,
+  ) => (
+    <Button
+      disabled={action.isPending}
+      disabledReason="다른 조치를 처리하는 중입니다"
+      loading={pendingAction === actionName}
+      size="sm"
+      type="button"
+      variant={variant}
+      onClick={() => runAction(actionName)}
+    >
+      {icon}
+      {label}
+    </Button>
+  );
+
+  const items: DetailItem[] | null = issue
+    ? [
+        { label: "provider", value: issue.provider ?? null },
+        { label: "dataset", value: issue.dataset_key ?? null, mono: true },
+        {
+          label: "provider dataset ID",
+          value: issue.provider_dataset_id ?? null,
+          numeric: true,
+        },
+        {
+          label: "feature",
+          value: issue.feature_id ? (
+            <EntityLink id={issue.feature_id} kind="feature" />
+          ) : null,
+        },
+        { label: "source", value: issue.source_record_key ?? null, mono: true },
+        { label: "detected", value: formatDateTime(issue.detected_at), numeric: true },
+      ]
+    : null;
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="rounded-lg border bg-background">
-        <div className="flex flex-wrap items-start justify-between gap-3 border-b px-4 py-3">
-          <div className="min-w-0">
-            <div className="font-medium">이슈 상세</div>
-            <div className="break-all font-mono text-xs text-muted-foreground">
-              {issueId}
-            </div>
-          </div>
-          {issue?.feature_id ? (
+    <div className="flex flex-col gap-6">
+      <SectionCard
+        actions={
+          issue?.feature_id ? (
             <Link
-              className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+              className={buttonVariants({ variant: "outline", size: "sm" })}
               href={`/features/${encodeURIComponent(issue.feature_id)}`}
             >
               <MapIcon data-icon="inline-start" />
               Feature 상세
             </Link>
-          ) : null}
-        </div>
-        {detail.isLoading ? <Skeleton className="m-4 h-64" /> : null}
+          ) : null
+        }
+        description={<span className="font-mono break-all">{issueId}</span>}
+        title="이슈 상세"
+      >
+        {detail.isLoading ? <DetailSkeleton /> : null}
         {detail.isError ? (
-          <Alert className="m-4" variant="destructive">
+          <Alert variant="destructive">
             <AlertTitle>issue 상세 조회 실패</AlertTitle>
             <AlertDescription>{detail.error.message}</AlertDescription>
+            <AlertActions>
+              <Button
+                loading={detail.isFetching}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => void detail.refetch()}
+              >
+                다시 시도
+              </Button>
+            </AlertActions>
           </Alert>
         ) : null}
-        {issue ? (
-          <div className="flex flex-col gap-4 p-4">
-            <div className="flex flex-wrap gap-2">
+        {issue && items ? (
+          <>
+            <div className="flex flex-wrap items-center gap-1.5">
               <StatusBadge status={issue.status} />
-              <StatusBadge status={issue.severity} />
-              <Badge variant="outline">{issue.violation_type}</Badge>
+              <LevelBadge level={issue.severity} />
+              <span className="font-mono text-xs text-text-secondary">
+                {issue.violation_type}
+              </span>
             </div>
-            <p className="text-sm">{issue.message}</p>
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
-              <dt className="text-muted-foreground">provider</dt>
-              <dd>{issue.provider ?? "-"}</dd>
-              <dt className="text-muted-foreground">dataset</dt>
-              <dd>{issue.dataset_key ?? "-"}</dd>
-              <dt className="text-muted-foreground">provider dataset ID</dt>
-              <dd>{issue.provider_dataset_id ?? "-"}</dd>
-              <dt className="text-muted-foreground">feature</dt>
-              <dd className="break-all font-mono">
-                {issue.feature_id ? (
-                  <EntityLink id={issue.feature_id} kind="feature" />
-                ) : (
-                  "-"
+            <p className="text-sm text-text-primary">{issue.message}</p>
+            <DetailList items={items} layout="inline" />
+            <div className="flex flex-col gap-2 border-t border-border pt-4">
+              <span className="text-2xs font-medium text-text-secondary">조치</span>
+              <div className="flex flex-wrap gap-1.5">
+                {actionButton("해결", "resolve", "outline", <CheckIcon data-icon="inline-start" />)}
+                {actionButton("무시", "ignore", "ghost", <XIcon data-icon="inline-start" />)}
+                {actionButton(
+                  "다시 열기",
+                  "reopen",
+                  "ghost",
+                  <RotateCcwIcon data-icon="inline-start" />,
                 )}
-              </dd>
-              <dt className="text-muted-foreground">source</dt>
-              <dd className="break-all font-mono">
-                {issue.source_record_key ?? "-"}
-              </dd>
-              <dt className="text-muted-foreground">detected</dt>
-              <dd>{formatDateTime(issue.detected_at)}</dd>
-            </dl>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                disabled={action.isPending}
-                size="sm"
-                type="button"
-                variant="outline"
-                onClick={() => runAction("resolve")}
-              >
-                <CheckIcon data-icon="inline-start" />
-                해결
-              </Button>
-              <Button
-                disabled={action.isPending}
-                size="sm"
-                type="button"
-                variant="outline"
-                onClick={() => runAction("ignore")}
-              >
-                <XIcon data-icon="inline-start" />
-                무시
-              </Button>
-              <Button
-                disabled={action.isPending}
-                size="sm"
-                type="button"
-                variant="outline"
-                onClick={() => runAction("reopen")}
-              >
-                <RotateCcwIcon data-icon="inline-start" />
-                다시 열기
-              </Button>
-              <Button
-                disabled={action.isPending}
-                size="sm"
-                type="button"
-                variant="ghost"
-                onClick={() => runAction("retry_geocode")}
-              >
-                주소로 좌표 재검색
-              </Button>
-              <Button
-                disabled={action.isPending}
-                size="sm"
-                type="button"
-                variant="ghost"
-                onClick={() => runAction("retry_reverse_geocode")}
-              >
-                좌표로 주소 재검색
-              </Button>
-              <Button
-                disabled={action.isPending}
-                size="sm"
-                type="button"
-                variant="ghost"
-                onClick={() => runAction("apply_kor_travel_geo_address")}
-              >
-                추천 주소 적용
-              </Button>
+              </div>
+              <span className="mt-1 text-2xs font-medium text-text-secondary">주소·좌표</span>
+              <div className="flex flex-wrap gap-1.5">
+                {actionButton("주소로 좌표 재검색", "retry_geocode", "ghost")}
+                {actionButton("좌표로 주소 재검색", "retry_reverse_geocode", "ghost")}
+                {actionButton("추천 주소 적용", "apply_kor_travel_geo_address", "ghost")}
+              </div>
             </div>
 
             {feature ? (
-              <details open>
-                <summary className="cursor-pointer text-sm font-medium">
+              <details className="group/details border-t border-border pt-4" open>
+                <summary className="cursor-pointer text-sm font-medium text-text-primary select-none">
                   Feature 스냅샷
                 </summary>
-                <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
-                  <dt className="text-muted-foreground">상태 축</dt>
-                  <dd>
-                    {featureStateLabel("lifecycle", feature.lifecycle_state)} ·{" "}
-                    {featureStateLabel(
-                      "publication",
-                      feature.publication_state,
-                    )}{" "}
-                    · {featureStateLabel("quality", feature.quality_state)}
-                  </dd>
-                  <dt className="text-muted-foreground">coord</dt>
-                  <dd className="font-mono">
-                    {typeof feature.lon === "number" &&
-                    typeof feature.lat === "number"
-                      ? `${feature.lon.toFixed(5)}, ${feature.lat.toFixed(5)}`
-                      : "없음"}
-                  </dd>
-                  <dt className="text-muted-foreground">sigungu</dt>
-                  <dd>{feature.sigungu_code ?? "-"}</dd>
-                </dl>
-                <div className="mt-3">
-                  <JsonBlock value={feature.address} />
+                <div className="mt-3 flex flex-col gap-3">
+                  <DetailList
+                    items={[
+                      {
+                        label: "상태 축",
+                        value: `${featureStateLabel("lifecycle", feature.lifecycle_state)} · ${featureStateLabel(
+                          "publication",
+                          feature.publication_state,
+                        )} · ${featureStateLabel("quality", feature.quality_state)}`,
+                      },
+                      {
+                        label: "coord",
+                        value:
+                          typeof feature.lon === "number" &&
+                          typeof feature.lat === "number"
+                            ? `${feature.lon.toFixed(5)}, ${feature.lat.toFixed(5)}`
+                            : "없음",
+                        mono: true,
+                      },
+                      { label: "sigungu", value: feature.sigungu_code ?? null, mono: true },
+                    ]}
+                    layout="inline"
+                  />
+                  <JsonViewer aria-label="feature address" maxHeight="sm" value={feature.address} />
                 </div>
               </details>
             ) : null}
 
-            <details>
-              <summary className="cursor-pointer text-sm font-medium">
+            <details className="border-t border-border pt-4">
+              <summary className="cursor-pointer text-sm font-medium text-text-primary select-none">
                 payload
               </summary>
-              <JsonBlock value={issue.payload} />
+              <div className="mt-3">
+                <JsonViewer aria-label="issue payload" copyable value={issue.payload} />
+              </div>
             </details>
-          </div>
+          </>
         ) : null}
-      </div>
+      </SectionCard>
 
       <IssueManualOverridePanel action={action} runAction={runAction} />
     </div>
@@ -601,6 +631,9 @@ function useAdminIssuesClientController({
     },
     [action],
   );
+  const actionPending = action.isPending;
+  const pendingIssueId = actionPending ? (action.variables?.issueId ?? null) : null;
+  const pendingActionKind = actionPending ? (action.variables?.body.action ?? null) : null;
 
   const columns = useMemo<ColumnDef<AdminIssueRecord, unknown>[]>(
     () => [
@@ -613,7 +646,7 @@ function useAdminIssuesClientController({
           return (
             <>
               <div className="font-mono text-xs">{shortId(issue.issue_id)}</div>
-              <div className="mt-1 text-xs text-muted-foreground">
+              <div className="mt-1 text-xs text-text-secondary">
                 {issue.violation_type}
               </div>
             </>
@@ -626,7 +659,7 @@ function useAdminIssuesClientController({
         // keyset cursor 목록 — 서버가 정렬을 소유하고 severity accessor로 정렬하지 않으므로
         // client 정렬은 현재 페이지만 재배열해 오해를 준다(#502). 정렬 비활성화.
         enableSorting: false,
-        cell: ({ row }) => <StatusBadge status={row.original.severity} />,
+        cell: ({ row }) => <LevelBadge level={row.original.severity} />,
       },
       {
         accessorKey: "status",
@@ -642,9 +675,9 @@ function useAdminIssuesClientController({
           const issue = row.original;
           return (
             <>
-              <div>{issue.provider ?? "-"}</div>
-              <div className="text-xs text-muted-foreground">
-                {issue.dataset_key ?? "-"}
+              <div>{issue.provider ?? NULL_GLYPH}</div>
+              <div className="text-xs text-text-secondary">
+                {issue.dataset_key ?? NULL_GLYPH}
               </div>
             </>
           );
@@ -654,13 +687,14 @@ function useAdminIssuesClientController({
         id: "message",
         header: "메시지",
         enableSorting: false,
+        meta: { wrap: true } satisfies DataTableColumnMeta,
         cell: ({ row }) => {
           const issue = row.original;
           return (
             <div className="max-w-96">
-              <div className="line-clamp-2">{issue.message}</div>
-              <div className="mt-1 break-all font-mono text-xs text-muted-foreground">
-                {issue.source_record_key ?? "-"}
+              <DataTableClampCell lines={2}>{issue.message}</DataTableClampCell>
+              <div className="mt-1 font-mono text-xs break-all text-text-secondary">
+                {issue.source_record_key ?? NULL_GLYPH}
               </div>
             </div>
           );
@@ -680,7 +714,7 @@ function useAdminIssuesClientController({
               {linkedFeatureLabel(row.original)}
             </EntityLink>
           ) : (
-            <span className="font-mono text-xs">-</span>
+            <span className="font-mono text-xs">{NULL_GLYPH}</span>
           ),
       },
       {
@@ -689,7 +723,7 @@ function useAdminIssuesClientController({
         // keyset cursor 목록 — 서버 정렬을 신뢰(현재 페이지만 client 정렬하지 않음, #502).
         enableSorting: false,
         cell: ({ row }) => (
-          <span className="text-muted-foreground">
+          <span className="text-text-secondary">
             {formatDateTime(row.original.detected_at)}
           </span>
         ),
@@ -700,10 +734,15 @@ function useAdminIssuesClientController({
         enableSorting: false,
         cell: ({ row }) => {
           const issue = row.original;
+          const busy = pendingIssueId === issue.issue_id;
+          const reason =
+            actionPending && !busy ? "다른 조치를 처리하는 중입니다" : undefined;
           return (
             <div className="flex flex-wrap gap-1">
               <Button
-                disabled={action.isPending}
+                disabled={actionPending}
+                disabledReason={reason}
+                loading={busy && pendingActionKind === "resolve"}
                 size="sm"
                 type="button"
                 variant="outline"
@@ -716,7 +755,9 @@ function useAdminIssuesClientController({
                 resolve
               </Button>
               <Button
-                disabled={action.isPending}
+                disabled={actionPending}
+                disabledReason={reason}
+                loading={busy && pendingActionKind === "ignore"}
                 size="sm"
                 type="button"
                 variant="ghost"
@@ -732,7 +773,7 @@ function useAdminIssuesClientController({
         },
       },
     ],
-    [action.isPending, quickAction],
+    [actionPending, pendingActionKind, pendingIssueId, quickAction],
   );
 
   return {
@@ -781,11 +822,17 @@ function AdminIssuesClientView({
   severity,
   status,
 }: ReturnType<typeof useAdminIssuesClientController>) {
+  const bboxInvalid =
+    bbox.trim().length > 0 && Object.keys(parseBbox(bbox)).length === 0;
+  const errorLines = [
+    issues.error ? `목록: ${issues.error.message}` : null,
+    action.error ? `조치: ${action.error.message}` : null,
+  ].filter((line): line is string => line !== null);
   return (
     <AdminShell
       actions={
         <Button
-          disabled={issues.isFetching}
+          loading={issues.isFetching}
           type="button"
           variant="outline"
           onClick={() => void issues.refetch()}
@@ -797,32 +844,45 @@ function AdminIssuesClientView({
       description="주소·정합성 이슈를 확인하고 처리합니다."
       title="이슈"
     >
-      <div className="flex flex-col gap-4">
-        {(issues.isError || action.isError) && (
+      <div className="flex flex-col gap-6">
+        {errorLines.length > 0 ? (
           <Alert variant="destructive">
-            <AlertTriangleIcon data-icon="inline-start" />
             <AlertTitle>admin issue 처리 실패</AlertTitle>
             <AlertDescription>
-              {issues.error?.message ?? action.error?.message}
+              {errorLines.map((line) => (
+                <p key={line}>{line}</p>
+              ))}
+              <p>잠시 후 다시 시도하세요.</p>
             </AlertDescription>
+            <AlertActions>
+              <Button
+                loading={issues.isFetching}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  action.reset();
+                  void issues.refetch();
+                }}
+              >
+                다시 시도
+              </Button>
+            </AlertActions>
           </Alert>
-        )}
+        ) : null}
 
-        <section className="rounded-lg border bg-background p-3">
-          <div className="flex gap-2 overflow-x-auto pb-1">
-            <div className="relative w-80 shrink-0">
-              <SearchIcon className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-              <Input
-                aria-label="이슈 검색"
-                className="pl-8"
-                placeholder="message, feature_id, source_record_key"
-                value={q}
-                onChange={(event) => changeFilters({ q: event.target.value })}
-              />
-            </div>
+        <FilterBar>
+          <FilterField className="w-72" label="검색">
+            <Input
+              aria-label="이슈 검색"
+              placeholder="message, feature_id, source_record_key"
+              value={q}
+              onChange={(event) => changeFilters({ q: event.target.value })}
+            />
+          </FilterField>
+          <FilterField label="상태">
             <NativeSelect
               aria-label="이슈 상태 필터"
-              className="w-36 shrink-0"
               value={status}
               onChange={(event) =>
                 changeFilters({
@@ -832,13 +892,14 @@ function AdminIssuesClientView({
             >
               {ISSUE_STATUSES.map((item) => (
                 <NativeSelectOption key={item} value={item}>
-                  {item}
+                  {optionLabel(item)}
                 </NativeSelectOption>
               ))}
             </NativeSelect>
+          </FilterField>
+          <FilterField label="심각도">
             <NativeSelect
               aria-label="이슈 심각도 필터"
-              className="w-36 shrink-0"
               value={severity}
               onChange={(event) =>
                 changeFilters({
@@ -848,13 +909,57 @@ function AdminIssuesClientView({
             >
               {ISSUE_SEVERITIES.map((item) => (
                 <NativeSelectOption key={item} value={item}>
-                  {item}
+                  {optionLabel(item)}
                 </NativeSelectOption>
               ))}
             </NativeSelect>
+          </FilterField>
+          <FilterField className="w-40" label="issue type">
+            <Input
+              aria-label="issue type"
+              className="font-mono"
+              placeholder="missing_address"
+              value={issueType}
+              onChange={(event) =>
+                changeFilters({ issueType: event.target.value })
+              }
+            />
+          </FilterField>
+          <FilterField className="w-40" label="provider dataset ID">
+            <Input
+              aria-label="issue provider dataset ID"
+              inputMode="numeric"
+              min="1"
+              type="number"
+              value={providerDatasetId}
+              onChange={(event) =>
+                changeFilters({ providerDatasetId: event.target.value })
+              }
+            />
+          </FilterField>
+          <FilterField className="w-56" label="feature ID">
+            <Input
+              aria-label="issue feature id"
+              className="font-mono"
+              value={featureId}
+              onChange={(event) =>
+                changeFilters({ featureId: event.target.value })
+              }
+            />
+          </FilterField>
+          <FilterField className="w-72" hint={BBOX_FORMAT_HINT} label="bbox">
+            <Input
+              aria-invalid={bboxInvalid}
+              aria-label="bbox"
+              className="font-mono"
+              placeholder="126.9,37.5,127.1,37.6"
+              value={bbox}
+              onChange={(event) => changeFilters({ bbox: event.target.value })}
+            />
+          </FilterField>
+          <FilterField label="페이지 크기">
             <NativeSelect
               aria-label="issue page size"
-              className="w-24 shrink-0"
               value={String(pageSize)}
               onChange={(event) =>
                 changeFilters({
@@ -868,101 +973,44 @@ function AdminIssuesClientView({
                 </NativeSelectOption>
               ))}
             </NativeSelect>
-            <Input
-              aria-label="issue type"
-              className="w-40 shrink-0"
-              placeholder="issue_type"
-              value={issueType}
-              onChange={(event) =>
-                changeFilters({ issueType: event.target.value })
-              }
-            />
-            <Input
-              aria-label="issue provider dataset ID"
-              className="w-40 shrink-0"
-              inputMode="numeric"
-              min="1"
-              placeholder="provider_dataset_id"
-              type="number"
-              value={providerDatasetId}
-              onChange={(event) =>
-                changeFilters({ providerDatasetId: event.target.value })
-              }
-            />
-            <Input
-              aria-label="issue feature id"
-              className="w-56 shrink-0 font-mono"
-              placeholder="feature_id"
-              value={featureId}
-              onChange={(event) =>
-                changeFilters({ featureId: event.target.value })
-              }
-            />
-            <Input
-              aria-invalid={
-                bbox.trim().length > 0 &&
-                Object.keys(parseBbox(bbox)).length === 0
-              }
-              aria-label="bbox"
-              className="w-72 shrink-0"
-              placeholder="min_lon,min_lat,max_lon,max_lat"
-              title={
-                bbox.trim().length > 0 &&
-                Object.keys(parseBbox(bbox)).length === 0
-                  ? "형식: minLon,minLat,maxLon,maxLat"
-                  : undefined
-              }
-              value={bbox}
-              onChange={(event) => changeFilters({ bbox: event.target.value })}
-            />
-            <Button
-              className="shrink-0"
-              type="button"
-              variant="outline"
-              onClick={resetFilters}
-            >
+          </FilterField>
+          <FilterActions>
+            <Button type="button" variant="outline" onClick={resetFilters}>
               초기화
             </Button>
-            <Badge className="shrink-0" variant="outline">
-              {formatCount(items.length)} rows
-            </Badge>
-            <Badge className="shrink-0" variant="outline">
-              {issues.data?.meta.duration_ms ?? 0}ms
-            </Badge>
-          </div>
-        </section>
+          </FilterActions>
+        </FilterBar>
 
-        <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_30rem]">
-          <div className="min-w-0 rounded-lg border bg-background">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
-              <div>
-                <div className="font-medium">Issue table</div>
-                <div className="text-sm text-muted-foreground">
-                  `/admin/issues` keyset cursor 목록
-                </div>
-              </div>
-              <CursorPager
-                hasNext={Boolean(nextCursor)}
-                isFetching={issues.isFetching}
-                isFirst={cursor === null}
-                onFirst={goFirstPage}
-                onNext={goNextPage}
-              />
-            </div>
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_var(--rail)]">
+          <SectionCard
+            description="행을 선택하면 우측에 상세와 조치가 열립니다."
+            title="Issue table"
+          >
             <DataTable
               columns={columns}
+              containerClassName="overflow-auto"
               data={items}
+              emptyState={{
+                title: "issue가 없습니다.",
+                description: "상태 필터를 전체로 바꾸거나 검색어·bbox를 비워 보세요.",
+              }}
               getRowId={(row) => row.issue_id}
               isLoading={issues.isLoading}
-              emptyMessage="issue가 없습니다."
-              onRowClick={(issue) => selectIssue(issue.issue_id)}
               isRowActive={(issue) => selectedIssueId === issue.issue_id}
-              containerClassName="overflow-auto"
+              onRowClick={(issue) => selectIssue(issue.issue_id)}
             />
-          </div>
+            <CursorPager
+              hasNext={Boolean(nextCursor)}
+              isFetching={issues.isFetching}
+              isFirst={cursor === null}
+              summary={`이 페이지 ${formatCount(issues.data ? items.length : null)}건`}
+              onFirst={goFirstPage}
+              onNext={goNextPage}
+            />
+          </SectionCard>
 
           <IssueDetailPanel issueId={selectedIssueId} />
-        </section>
+        </div>
       </div>
     </AdminShell>
   );

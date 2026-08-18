@@ -1,13 +1,9 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 
 import { type ColumnDef } from "@tanstack/react-table";
-import {
-  ChevronLeftIcon,
-  ChevronRightIcon,
-  RefreshCwIcon,
-  Trash2Icon,
-} from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { RefreshCwIcon, Trash2Icon } from "lucide-react";
+import { useMemo, useRef, useState, type FormEvent } from "react";
 
 import {
   useDeletePoiCacheTargetMutation,
@@ -18,13 +14,20 @@ import {
 import { AdminShell } from "@/components/admin-shell";
 import { useConfirm } from "@/components/confirm-dialog";
 import { EntityLink } from "@/components/entity-link";
+import { CursorPager } from "@/components/pagination-bar";
+import { SectionCard } from "@/components/section-card";
 import { StatusBadge } from "@/components/status-badge";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import {
+  Alert,
+  AlertActions,
+  AlertDescription,
+  AlertTitle,
+} from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { DataTable } from "@/components/ui/data-table";
+import { DataTable, type DataTableColumnMeta } from "@/components/ui/data-table";
 import { FormField, FormSelect } from "@/components/ui/form-field";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
-import { formatDateTime, shortId } from "@/lib/format";
+import { formatCount, formatDateTime, shortId } from "@/lib/format";
 import {
   combine,
   koreaLatitude,
@@ -33,6 +36,27 @@ import {
   required,
   validateForm,
 } from "@/lib/form-validation";
+
+// enum → 한글 라벨(design.md §Copy — enum 값을 raw로 렌더하지 않는다). 값 정본은 API 스키마.
+const SCOPE_MODE_LABELS: Record<string, string> = {
+  center_radius: "중심점 반경",
+  sigungu_by_radius: "시군구 반경",
+};
+const REFRESH_POLICY_LABELS: Record<string, string> = {
+  provider_default: "provider 기본",
+  follow_system: "시스템 추종",
+  allow_targeted: "대상 갱신 허용",
+  disabled: "비활성화",
+};
+const FEATURE_KIND_LABELS: Record<string, string> = {
+  place: "장소",
+  event: "행사",
+  notice: "공지",
+  price: "가격",
+  weather: "날씨",
+  route: "경로",
+  area: "구역",
+};
 
 function usePoiCacheTargetsClientController() {
   const [externalSystem, setExternalSystem] = useState("external-app");
@@ -93,7 +117,7 @@ function usePoiCacheTargetsClientController() {
               <div className="font-medium">
                 {target.name ?? target.target_key}
               </div>
-              <div className="font-mono text-xs text-muted-foreground">
+              <div className="font-mono text-xs text-text-secondary">
                 {target.external_system}/{shortId(target.target_key, 18)}
               </div>
             </>
@@ -113,7 +137,13 @@ function usePoiCacheTargetsClientController() {
       },
       // keyset cursor 목록(next_cursor 페이징) — 서버가 정렬을 소유하므로 컬럼 정렬을
       // 끈다(#502: manual 기본에서 client 정렬은 현재 페이지만 재배열해 오해를 줌).
-      { accessorKey: "scope_mode", header: "스코프", enableSorting: false },
+      {
+        accessorKey: "scope_mode",
+        header: "스코프",
+        enableSorting: false,
+        cell: ({ row }) =>
+          SCOPE_MODE_LABELS[row.original.scope_mode] ?? row.original.scope_mode,
+      },
       {
         accessorKey: "update_enabled",
         header: "사용",
@@ -124,13 +154,20 @@ function usePoiCacheTargetsClientController() {
           />
         ),
       },
-      { accessorKey: "refresh_policy", header: "갱신", enableSorting: false },
+      {
+        accessorKey: "refresh_policy",
+        header: "갱신",
+        enableSorting: false,
+        cell: ({ row }) =>
+          REFRESH_POLICY_LABELS[row.original.refresh_policy] ??
+          row.original.refresh_policy,
+      },
       {
         accessorKey: "updated_at",
         header: "수정",
         enableSorting: false,
         cell: ({ row }) => (
-          <span className="text-muted-foreground">
+          <span className="text-text-secondary">
             {formatDateTime(row.original.updated_at)}
           </span>
         ),
@@ -139,14 +176,21 @@ function usePoiCacheTargetsClientController() {
         id: "actions",
         header: "작업",
         enableSorting: false,
+        meta: { align: "right" } satisfies DataTableColumnMeta,
         cell: ({ row }) => {
           const target = row.original;
+          const removing =
+            remove.isPending && remove.variables?.targetKey === target.target_key;
           return (
             <Button
               disabled={remove.isPending || targets.isFetching}
+              disabledReason={
+                remove.isPending ? "다른 대상을 삭제하는 중입니다" : "목록을 불러오는 중입니다"
+              }
+              loading={removing}
               size="sm"
               type="button"
-              variant="ghost"
+              variant="destructive"
               onClick={(event) => {
                 event.stopPropagation();
                 void (async () => {
@@ -191,6 +235,7 @@ function usePoiCacheTargetsClientController() {
         id: "feature",
         header: "feature",
         enableSorting: false,
+        meta: { wrap: true } satisfies DataTableColumnMeta,
         cell: ({ row }) => (
           <>
             <div className="font-medium">{row.original.name}</div>
@@ -205,16 +250,18 @@ function usePoiCacheTargetsClientController() {
         ),
       },
       // nearby는 서버가 거리순(또는 지정 sort)으로 반환 — client 재정렬을 끈다(#502).
-      { accessorKey: "kind", header: "종류", enableSorting: false },
+      {
+        accessorKey: "kind",
+        header: "종류",
+        enableSorting: false,
+        cell: ({ row }) => FEATURE_KIND_LABELS[row.original.kind] ?? row.original.kind,
+      },
       {
         accessorKey: "distance_m",
         header: "거리",
         enableSorting: false,
-        cell: ({ row }) => (
-          <span className="font-mono">
-            {row.original.distance_m.toFixed(1)}m
-          </span>
-        ),
+        meta: { align: "right" } satisfies DataTableColumnMeta,
+        cell: ({ row }) => `${row.original.distance_m.toFixed(1)} m`,
       },
     ],
     [],
@@ -279,6 +326,10 @@ function usePoiCacheTargetsClientController() {
     );
   };
 
+  const goToFirstPage = () => {
+    setCursorStack([]);
+  };
+
   const goToNextPage = () => {
     const nextCursor = targets.data?.meta.page?.next_cursor;
     if (nextCursor) {
@@ -295,6 +346,7 @@ function usePoiCacheTargetsClientController() {
     errors,
     externalSystem,
     externalSystemRef,
+    goToFirstPage,
     goToNextPage,
     goToPreviousPage,
     lat,
@@ -334,6 +386,7 @@ function PoiCacheTargetsClientView({
   errors,
   externalSystem,
   externalSystemRef,
+  goToFirstPage,
   goToNextPage,
   goToPreviousPage,
   lat,
@@ -366,11 +419,20 @@ function PoiCacheTargetsClientView({
   targets,
   upsert,
 }: ReturnType<typeof usePoiCacheTargetsClientController>) {
+  const errorLines = [
+    targets.error ? `목록: ${targets.error.message}` : null,
+    upsert.error ? `저장: ${upsert.error.message}` : null,
+    remove.error ? `삭제: ${remove.error.message}` : null,
+  ].filter((line): line is string => line !== null);
+  const onSubmit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    submit();
+  };
   return (
     <AdminShell
       actions={
         <Button
-          disabled={targets.isFetching}
+          loading={targets.isFetching}
           type="button"
           variant="outline"
           onClick={() => void targets.refetch()}
@@ -382,157 +444,202 @@ function PoiCacheTargetsClientView({
       description="외부 시스템 POI/cache target을 등록하고 target key 기준 주변 feature를 확인합니다."
       title="POI 캐시 대상"
     >
-      <div className="grid gap-4 xl:grid-cols-[24rem_1fr]">
-        <div className="rounded-lg border bg-background p-4">
-          <div className="mb-4">
-            <div className="font-medium">Target upsert</div>
-          </div>
-          <div className="flex flex-col gap-3">
-            <FormField
-              error={errors.externalSystem}
-              label="외부 시스템"
-              ref={externalSystemRef}
-              required
-              value={externalSystem}
-              onChange={(event) => setExternalSystem(event.target.value)}
-            />
-            <FormField
-              error={errors.targetKey}
-              label="대상 키"
-              ref={targetKeyRef}
-              required
-              value={targetKey}
-              onChange={(event) => setTargetKey(event.target.value)}
-            />
-            <FormField
-              label="이름"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-            />
-            <FormField
-              error={errors.lon}
-              label="경도"
-              ref={lonRef}
-              required
-              value={lon}
-              onChange={(e) => setLon(e.target.value)}
-            />
-            <FormField
-              error={errors.lat}
-              label="위도"
-              ref={latRef}
-              required
-              value={lat}
-              onChange={(e) => setLat(e.target.value)}
-            />
-            <FormField
-              error={errors.radiusKm}
-              label="반경(km)"
-              ref={radiusKmRef}
-              required
-              value={radiusKm}
-              onChange={(e) => setRadiusKm(e.target.value)}
-            />
-            <FormSelect
-              label="대상 범위"
-              value={scopeMode}
-              onChange={(event) =>
-                setScopeMode(event.target.value as "center_radius" | "sigungu_by_radius")
-              }
-            >
-              <NativeSelectOption value="center_radius">
-                중심점 반경
-              </NativeSelectOption>
-              <NativeSelectOption value="sigungu_by_radius">
-                시군구 반경
-              </NativeSelectOption>
-            </FormSelect>
-            <Button disabled={upsert.isPending} type="button" onClick={submit}>
-              저장
-            </Button>
-            {(targets.isError || upsert.isError || remove.isError) && (
-              <Alert variant="destructive">
-                <AlertTitle>target 처리 실패</AlertTitle>
-                <AlertDescription>
-                  {targets.error?.message ??
-                    upsert.error?.message ??
-                    remove.error?.message}
-                </AlertDescription>
-              </Alert>
-            )}
-          </div>
-        </div>
+      <div className="flex flex-col gap-6">
+        {errorLines.length > 0 ? (
+          <Alert variant="destructive">
+            <AlertTitle>target 처리 실패</AlertTitle>
+            <AlertDescription>
+              {errorLines.map((line) => (
+                <p key={line}>{line}</p>
+              ))}
+              <p>입력값을 확인하고 다시 시도하세요.</p>
+            </AlertDescription>
+            {targets.error ? (
+              <AlertActions>
+                <Button
+                  loading={targets.isFetching}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={() => void targets.refetch()}
+                >
+                  다시 시도
+                </Button>
+              </AlertActions>
+            ) : null}
+          </Alert>
+        ) : null}
 
-        <div className="grid gap-4 2xl:grid-cols-[minmax(0,1fr)_minmax(28rem,0.8fr)]">
-          <div className="rounded-lg border bg-background">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-3">
-              <div>
-                <div className="font-medium">Targets</div>
-                <div className="text-sm text-muted-foreground">
-                  page {cursorStack.length + 1} ·{" "}
-                  {targets.data?.data.items.length ?? 0} rows
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button
-                  disabled={cursorStack.length === 0 || targets.isFetching}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                  onClick={goToPreviousPage}
-                >
-                  <ChevronLeftIcon data-icon="inline-start" />
-                  이전
-                </Button>
-                <Button
-                  disabled={!targets.data?.meta.page?.next_cursor || targets.isFetching}
-                  size="sm"
-                  type="button"
-                  variant="outline"
-                  onClick={goToNextPage}
-                >
-                  다음
-                  <ChevronRightIcon data-icon="inline-end" />
-                </Button>
-              </div>
-            </div>
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_var(--rail)]">
+          <SectionCard
+            description="행을 선택하면 우측에 주변 feature가 열립니다."
+            title="Targets"
+          >
             <DataTable
               columns={targetColumns}
+              containerClassName="overflow-auto"
               data={targetItems}
+              emptyState={{
+                title: "데이터가 없습니다.",
+                description: "우측 폼에서 대상을 저장하면 목록에 나타납니다.",
+              }}
               getRowId={(row) => row.target_id}
               isLoading={targets.isLoading}
-              emptyMessage="데이터가 없습니다."
+              isRowActive={(target) => target.target_id === selectedTargetId}
               onRowClick={(target) => setSelectedTargetId(target.target_id)}
-              isRowActive={(target) =>
-                target.target_id === selectedTargetId
+            />
+            {/*
+              cursor 스택 목록이라 뒤로도 간다 — 손으로 만든 pager 대신 공용 CursorPager의
+              `previous` 확장을 쓴다(M33: pager idiom은 두 개뿐). nav 라벨만 접두어를 받아
+              기존 `targets pagination` 계약을 지키고, 버튼 접근성 이름은 다른 목록과 같다.
+            */}
+            <CursorPager
+              hasNext={Boolean(targets.data?.meta.page?.next_cursor)}
+              isFetching={targets.isFetching}
+              isFirst={cursorStack.length === 0}
+              navAriaPrefix="targets"
+              previous={{
+                available: cursorStack.length > 0,
+                onActivate: goToPreviousPage,
+              }}
+              summary={
+                <>
+                  page {cursorStack.length + 1} ·{" "}
+                  {formatCount(targets.data ? targets.data.data.items.length : null)} rows
+                </>
               }
-              containerClassName="overflow-auto"
+              onFirst={goToFirstPage}
+              onNext={goToNextPage}
             />
-          </div>
+          </SectionCard>
 
-          <div className="rounded-lg border bg-background">
-            <div className="border-b px-4 py-3">
-              <div className="font-medium">Nearby features</div>
-              <div className="text-sm text-muted-foreground">
-                {selectedTarget
-                  ? `${selectedTarget.external_system}/${selectedTarget.target_key}`
-                  : "target을 선택하세요"}
-              </div>
-            </div>
-            {nearby.isError ? (
-              <Alert className="m-4" variant="destructive">
-                <AlertTitle>주변 feature 조회 실패</AlertTitle>
-                <AlertDescription>{nearby.error.message}</AlertDescription>
-              </Alert>
-            ) : null}
-            <DataTable
-              columns={nearbyColumns}
-              data={nearbyItems}
-              getRowId={(row) => row.feature_id}
-              isLoading={nearby.isLoading}
-              emptyMessage="데이터가 없습니다."
-              containerClassName="max-h-[34rem] overflow-auto"
-            />
+          <div className="flex flex-col gap-6">
+            <SectionCard
+              description="같은 외부 시스템·대상 키가 있으면 위치를 옮겨 갱신합니다."
+              headingLevel={2}
+              title="Target upsert"
+            >
+              <form className="flex flex-col gap-1" onSubmit={onSubmit}>
+                <FormField
+                  error={errors.externalSystem}
+                  hint="예: external-app"
+                  label="외부 시스템"
+                  ref={externalSystemRef}
+                  required
+                  value={externalSystem}
+                  onChange={(event) => setExternalSystem(event.target.value)}
+                />
+                <FormField
+                  error={errors.targetKey}
+                  hint="외부 시스템 안에서 고유한 키"
+                  label="대상 키"
+                  ref={targetKeyRef}
+                  required
+                  value={targetKey}
+                  onChange={(event) => setTargetKey(event.target.value)}
+                />
+                <FormField
+                  hint="비워 두면 대상 키를 이름으로 씁니다."
+                  label="이름"
+                  value={name}
+                  onChange={(event) => setName(event.target.value)}
+                />
+                <div className="grid grid-cols-2 gap-x-3">
+                  <FormField
+                    error={errors.lon}
+                    inputMode="decimal"
+                    label="경도"
+                    ref={lonRef}
+                    required
+                    value={lon}
+                    onChange={(e) => setLon(e.target.value)}
+                  />
+                  <FormField
+                    error={errors.lat}
+                    inputMode="decimal"
+                    label="위도"
+                    ref={latRef}
+                    required
+                    value={lat}
+                    onChange={(e) => setLat(e.target.value)}
+                  />
+                </div>
+                <FormField
+                  error={errors.radiusKm}
+                  hint="0.1 이상"
+                  inputMode="decimal"
+                  label="반경(km)"
+                  ref={radiusKmRef}
+                  required
+                  value={radiusKm}
+                  onChange={(e) => setRadiusKm(e.target.value)}
+                />
+                <FormSelect
+                  label="대상 범위"
+                  value={scopeMode}
+                  onChange={(event) =>
+                    setScopeMode(event.target.value as "center_radius" | "sigungu_by_radius")
+                  }
+                >
+                  <NativeSelectOption value="center_radius">
+                    {SCOPE_MODE_LABELS.center_radius}
+                  </NativeSelectOption>
+                  <NativeSelectOption value="sigungu_by_radius">
+                    {SCOPE_MODE_LABELS.sigungu_by_radius}
+                  </NativeSelectOption>
+                </FormSelect>
+                <div className="flex items-center justify-end border-t border-border pt-4">
+                  <Button loading={upsert.isPending} type="submit">
+                    저장
+                  </Button>
+                </div>
+              </form>
+            </SectionCard>
+
+            <SectionCard
+              description={
+                selectedTarget ? (
+                  <span className="font-mono">
+                    {selectedTarget.external_system}/{selectedTarget.target_key}
+                  </span>
+                ) : (
+                  "target을 선택하세요"
+                )
+              }
+              headingLevel={2}
+              title="Nearby features"
+            >
+              {nearby.isError ? (
+                <Alert variant="destructive">
+                  <AlertTitle>주변 feature 조회 실패</AlertTitle>
+                  <AlertDescription>{nearby.error.message}</AlertDescription>
+                  <AlertActions>
+                    <Button
+                      loading={nearby.isFetching}
+                      size="sm"
+                      type="button"
+                      variant="outline"
+                      onClick={() => void nearby.refetch()}
+                    >
+                      다시 시도
+                    </Button>
+                  </AlertActions>
+                </Alert>
+              ) : null}
+              <DataTable
+                columns={nearbyColumns}
+                containerClassName="max-h-[34rem] overflow-auto"
+                data={nearbyItems}
+                emptyState={{
+                  title: "데이터가 없습니다.",
+                  description: selectedTarget
+                    ? "이 대상의 반경 안에 feature가 없습니다."
+                    : "목록에서 대상을 선택하면 주변 feature를 조회합니다.",
+                }}
+                getRowId={(row) => row.feature_id}
+                isLoading={nearby.isLoading}
+              />
+            </SectionCard>
           </div>
         </div>
       </div>

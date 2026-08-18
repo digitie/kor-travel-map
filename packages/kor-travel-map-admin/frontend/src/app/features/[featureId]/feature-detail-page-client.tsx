@@ -1,10 +1,7 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (detail) · design-system: design.md · designed-as-app
 
-import {
-  ArrowLeftIcon,
-  DatabaseIcon,
-  PencilIcon,
-} from "lucide-react";
+import { ArrowLeftIcon, DatabaseIcon, PencilIcon } from "lucide-react";
 import Link from "next/link";
 
 import { AdminShell } from "@/components/admin-shell";
@@ -12,6 +9,10 @@ import { FeatureDetailView } from "@/components/feature-detail-view";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 
+/**
+ * Feature 상세 라우트 — detail 변형(design.md §Macrostructure): 헤더 밴드(primary 1 `수정` +
+ * secondary 2) → 본문은 FeatureDetailView(flush 섹션 + 우측 rail).
+ */
 export function FeatureDetailPageClient({ featureId }: { featureId: string }) {
   return (
     <AdminShell
@@ -29,7 +30,7 @@ export function FeatureDetailPageClient({ featureId }: { featureId: string }) {
             Feature 목록
           </Link>
           <Link
-            className={cn(buttonVariants({ variant: "outline" }))}
+            className={cn(buttonVariants({ variant: "default" }))}
             href={`/admin/features?feature_id=${encodeURIComponent(featureId)}`}
           >
             <PencilIcon data-icon="inline-start" />

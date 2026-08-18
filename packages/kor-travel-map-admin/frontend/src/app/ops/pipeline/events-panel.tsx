@@ -1,4 +1,5 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (list) · design-system: design.md · designed-as-app
 
 import { type ColumnDef } from "@tanstack/react-table";
 import { useMemo, useState } from "react";
@@ -11,25 +12,26 @@ import {
   usePipelineDagsterRuns,
   usePipelineEvents,
 } from "@/api/pipeline";
+import { EmptyState } from "@/components/empty-state";
 import { EntityLink } from "@/components/entity-link";
-import { StatusBadge } from "@/components/status-badge";
+import { FilterBar, FilterField } from "@/components/filter-bar";
+import { CursorPager } from "@/components/pagination-bar";
+import { SectionCard } from "@/components/section-card";
+import { LevelBadge, StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { DataTable } from "@/components/ui/data-table";
-import { FilterBar, FilterField } from "@/components/filter-bar";
-import { CursorPager } from "@/components/pagination-bar";
+  DataTable,
+  DataTableClampCell,
+  type DataTableColumnMeta,
+} from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
-import { formatDateTime, shortId } from "@/lib/format";
+import { Skeleton } from "@/components/ui/skeleton";
+import { NULL_GLYPH, formatDateTime, shortId } from "@/lib/format";
 import { withOccurrenceKeys } from "@/lib/occurrence-key";
+import { statusLabel } from "@/lib/status-label";
 
 const LEVEL_OPTIONS: Array<JobEventLevel | "all"> = [
   "all",
@@ -111,7 +113,7 @@ export function PipelineEventsPanel({
         id: "occurred_at",
         header: "발생",
         cell: ({ row }) => (
-          <span className="text-sm whitespace-nowrap">
+          <span className="whitespace-nowrap text-text-secondary">
             {formatDateTime(row.original.occurred_at)}
           </span>
         ),
@@ -119,14 +121,15 @@ export function PipelineEventsPanel({
       {
         id: "level",
         header: "레벨",
-        cell: ({ row }) => <StatusBadge status={row.original.level} />,
+        cell: ({ row }) => <LevelBadge level={row.original.level} />,
       },
       {
         id: "provider_dataset_id",
         header: "provider dataset ID",
+        meta: { align: "right" } satisfies DataTableColumnMeta,
         cell: ({ row }) => (
-          <span className="font-mono text-xs">
-            {row.original.provider_dataset_id ?? "-"}
+          <span className="text-xs tabular-nums">
+            {row.original.provider_dataset_id ?? NULL_GLYPH}
           </span>
         ),
       },
@@ -138,7 +141,7 @@ export function PipelineEventsPanel({
         header: "scope",
         cell: ({ row }) => (
           <span className="font-mono text-xs">
-            {row.original.sync_scope ?? "-"}
+            {row.original.sync_scope ?? NULL_GLYPH}
           </span>
         ),
       },
@@ -149,17 +152,16 @@ export function PipelineEventsPanel({
         header: "operation",
         cell: ({ row }) => (
           <span className="font-mono text-xs">
-            {row.original.operation_key ?? "-"}
+            {row.original.operation_key ?? NULL_GLYPH}
           </span>
         ),
       },
       {
         id: "message",
         header: "메시지",
+        meta: { wrap: true } satisfies DataTableColumnMeta,
         cell: ({ row }) => (
-          <p className="line-clamp-2 max-w-96 text-sm">
-            {row.original.message}
-          </p>
+          <DataTableClampCell lines={2}>{row.original.message}</DataTableClampCell>
         ),
       },
       {
@@ -180,23 +182,22 @@ export function PipelineEventsPanel({
       {
         id: "code",
         header: "코드",
-        cell: ({ row }) => (
-          <span className="font-mono text-xs">{row.original.code ?? "-"}</span>
-        ),
+        cell: ({ row }) =>
+          row.original.code ? (
+            <span className="font-mono text-xs">{row.original.code}</span>
+          ) : (
+            <span className="text-text-tertiary">{NULL_GLYPH}</span>
+          ),
       },
     ],
     [onSelectExecution],
   );
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>전역 job 이벤트</CardTitle>
-        <CardDescription>
-          어느 작업인지 모르는 상태에서 최근 error를 훑는 전역 스트림입니다.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-4">
+    <SectionCard
+      description="어느 작업인지 모르는 상태에서 최근 error를 훑는 전역 스트림입니다."
+      title="전역 job 이벤트"
+    >
         <FilterBar>
           <FilterField label="레벨">
             <NativeSelect
@@ -209,7 +210,7 @@ export function PipelineEventsPanel({
             >
               {LEVEL_OPTIONS.map((value) => (
                 <NativeSelectOption key={value} value={value}>
-                  {value === "all" ? "전체" : value}
+                  {value === "all" ? "전체" : statusLabel(value)}
                 </NativeSelectOption>
               ))}
             </NativeSelect>
@@ -252,7 +253,7 @@ export function PipelineEventsPanel({
             <Input
               aria-label="이벤트 operation 필터"
               disabled={!providerDatasetIdFilter}
-              placeholder="operation_key"
+              placeholder="예: refresh_targeted"
               value={operationKey}
               onChange={(event) => {
                 resetPage();
@@ -266,7 +267,7 @@ export function PipelineEventsPanel({
           <FilterField label="작업 ID">
             <Input
               aria-label="이벤트 작업 ID 필터"
-              placeholder="job_id (UUID)"
+              placeholder="UUID"
               value={jobId}
               onChange={(event) => {
                 setJobId(event.target.value);
@@ -276,23 +277,23 @@ export function PipelineEventsPanel({
           </FilterField>
         </FilterBar>
 
-        {events.isError ? (
-          <Alert variant="destructive">
-            <AlertTitle>이벤트 목록 호출 실패</AlertTitle>
-            <AlertDescription>{events.error.message}</AlertDescription>
-          </Alert>
-        ) : null}
-
         <DataTable
           ariaLabel="전역 job 이벤트"
           columns={columns}
           data={items}
-          emptyMessage="조건에 맞는 이벤트가 없습니다."
+          emptyState={{
+            title: "조건에 맞는 이벤트가 없습니다.",
+            description: "레벨·dataset·작업 ID 필터를 넓혀 보세요.",
+          }}
+          error={events.error}
+          errorTitle="이벤트 목록을 불러오지 못했습니다"
           getRowId={(row) => row.event_id}
+          isError={events.isError}
           isLoading={events.isLoading}
           rowIdentity={(row) =>
             JSON.stringify([row.occurred_at, row.event_id])
           }
+          onRetry={() => events.refetch()}
         />
 
         <CursorPager
@@ -308,8 +309,7 @@ export function PipelineEventsPanel({
               : undefined
           }
         />
-      </CardContent>
-    </Card>
+    </SectionCard>
   );
 }
 
@@ -324,11 +324,16 @@ function DagsterRunDetail({ runId }: { runId: string }) {
   const data = detail.data?.data;
   return (
     <div
-      className="mt-2 rounded-md bg-surface-subtle p-3"
+      aria-busy={detail.isLoading || undefined}
+      className="mt-2 space-y-2 border-l-2 border-border pl-3"
       data-testid={`pipeline-dagster-run-detail-${runId}`}
+      id={`pipeline-dagster-run-detail-${runId}`}
     >
       {detail.isLoading ? (
-        <p className="text-sm text-muted-foreground">run 상세를 불러오는 중…</p>
+        <div className="space-y-2">
+          <Skeleton className="h-4 w-2/3" />
+          <Skeleton className="h-4 w-1/2" />
+        </div>
       ) : null}
       {detail.isError ? (
         <Alert variant="destructive">
@@ -353,16 +358,22 @@ function DagsterRunDetail({ runId }: { runId: string }) {
               JSON.stringify([runId, event]),
             ).map(({ key, value: event }) => (
               <li className="flex flex-wrap items-center gap-2" key={key}>
-                <span className="font-mono text-xs text-muted-foreground">
+                <span className="font-mono text-2xs text-text-secondary">
                   {event.level ?? event.event_type}
                 </span>
-                <span className="break-all">{event.message ?? "-"}</span>
+                <span className="break-all">{event.message ?? NULL_GLYPH}</span>
               </li>
             ))}
           </ul>
           {data.event_has_more ? (
+            /*
+              P1-5: 전환 중에는 native `disabled` 대신 `loading` — 방금 누른 버튼이 탭 순서에서
+              빠지면 포커스가 body로 떨어져 돌아갈 자리를 잃는다. cursor가 없어 구조적으로 못
+              넘기는 경우만 진짜 disabled다.
+            */
             <Button
-              disabled={!data.event_cursor || detail.isFetching}
+              disabled={!data.event_cursor}
+              loading={Boolean(data.event_cursor) && detail.isFetching}
               size="sm"
               type="button"
               variant="outline"
@@ -397,24 +408,28 @@ export function DagsterRunsPanel() {
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
 
   return (
-    <Card data-testid="pipeline-dagster-runs-panel">
-      <CardHeader>
-        <CardTitle>Dagster 실행 (보조)</CardTitle>
-        <CardDescription>
-          적재 작업을 만들지 못하고 죽은 순수 Dagster 실패를 확인하는 보조
-          패널입니다 — 상세는 Dagster UI에서 봅니다.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-3">
+    <div data-testid="pipeline-dagster-runs-panel">
+      <SectionCard
+        contentClassName="space-y-3"
+        description="적재 작업을 만들지 못하고 죽은 순수 Dagster 실패를 확인하는 보조 패널입니다 — 상세는 Dagster UI에서 봅니다."
+        title="Dagster 실행 (보조)"
+      >
         {runs.isError ? (
           <Alert variant="destructive">
-            <AlertTitle>Dagster run 호출 실패</AlertTitle>
+            <AlertTitle>Dagster run 목록을 불러오지 못했습니다</AlertTitle>
             <AlertDescription>{runs.error.message}</AlertDescription>
           </Alert>
         ) : null}
+        {runs.isLoading ? (
+          <div aria-busy="true" className="space-y-2">
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-4 w-1/2" />
+            <Skeleton className="h-4 w-2/3" />
+          </div>
+        ) : null}
         {data && data.status !== "ok" ? (
           <Alert
-            variant={data.status === "unavailable" ? "destructive" : "default"}
+            variant={data.status === "unavailable" ? "destructive" : "warning"}
           >
             <AlertTitle>
               {data.status === "unavailable"
@@ -429,49 +444,59 @@ export function DagsterRunsPanel() {
           </Alert>
         ) : null}
         {data && (data.runs ?? []).length === 0 && data.status === "ok" ? (
-          <p className="text-sm text-muted-foreground">최근 run이 없습니다.</p>
+          <EmptyState
+            description="Dagster에서 실행이 시작되면 최근 20건이 여기에 표시됩니다."
+            size="sm"
+            title="최근 run이 없습니다."
+          />
         ) : null}
         {data && (data.runs ?? []).length > 0 ? (
-          <ul className="space-y-1.5">
-            {(data.runs ?? []).map((run) => (
-              <li className="text-sm" key={run.run_id}>
-                <div className="flex flex-wrap items-center gap-2">
-                  <StatusBadge status={run.status} />
-                  <span className="truncate">{run.job_name ?? "-"}</span>
-                  <EntityLink id={run.run_id} kind="dagsterRun" newTab>
-                    {shortId(run.run_id, 8)}
-                  </EntityLink>
-                  <span className="text-xs text-muted-foreground">
-                    {run.start_time
-                      ? formatDateTime(
-                          new Date(run.start_time * 1000).toISOString(),
+          <ul className="divide-y divide-border">
+            {(data.runs ?? []).map((run) => {
+              const expanded = expandedRunId === run.run_id;
+              const detailId = `pipeline-dagster-run-detail-${run.run_id}`;
+              return (
+                <li className="py-2 text-sm" key={run.run_id}>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusBadge status={run.status} />
+                    <span className="truncate font-medium">
+                      {run.job_name ?? NULL_GLYPH}
+                    </span>
+                    <EntityLink id={run.run_id} kind="dagsterRun" newTab>
+                      {shortId(run.run_id, 8)}
+                    </EntityLink>
+                    <span className="text-xs text-text-secondary">
+                      {run.start_time
+                        ? formatDateTime(
+                            new Date(run.start_time * 1000).toISOString(),
+                          )
+                        : NULL_GLYPH}
+                    </span>
+                    <Button
+                      aria-controls={expanded ? detailId : undefined}
+                      aria-expanded={expanded}
+                      aria-label={`run ${shortId(run.run_id, 8)} 상세 ${
+                        expanded ? "닫기" : "열기"
+                      }`}
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                      onClick={() =>
+                        setExpandedRunId((current) =>
+                          current === run.run_id ? null : run.run_id,
                         )
-                      : "-"}
-                  </span>
-                  <Button
-                    aria-label={`run ${shortId(run.run_id, 8)} 상세 ${
-                      expandedRunId === run.run_id ? "닫기" : "열기"
-                    }`}
-                    size="sm"
-                    type="button"
-                    variant="ghost"
-                    onClick={() =>
-                      setExpandedRunId((current) =>
-                        current === run.run_id ? null : run.run_id,
-                      )
-                    }
-                  >
-                    {expandedRunId === run.run_id ? "상세 닫기" : "상세"}
-                  </Button>
-                </div>
-                {expandedRunId === run.run_id ? (
-                  <DagsterRunDetail runId={run.run_id} />
-                ) : null}
-              </li>
-            ))}
+                      }
+                    >
+                      {expanded ? "상세 닫기" : "상세"}
+                    </Button>
+                  </div>
+                  {expanded ? <DagsterRunDetail runId={run.run_id} /> : null}
+                </li>
+              );
+            })}
           </ul>
         ) : null}
-      </CardContent>
-    </Card>
+      </SectionCard>
+    </div>
   );
 }

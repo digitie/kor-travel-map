@@ -1,10 +1,18 @@
 "use client"
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 
 import * as React from "react"
 
 import { AlertDialog as AlertDialogPrimitive } from "@base-ui/react/alert-dialog"
 
 import { cn } from "@/lib/utils"
+
+/** Same overlay recipe as `dialog.tsx` (design.md §Motion): scrim `bg-overlay`, panel opacity+scale .98. */
+const ALERT_BACKDROP_CLASS =
+  "fixed inset-0 z-50 bg-overlay transition-opacity duration-base ease-out data-[starting-style]:opacity-0 data-[ending-style]:opacity-0 data-[ending-style]:duration-fast data-[ending-style]:ease-in"
+
+const ALERT_POPUP_MOTION_CLASS =
+  "transition-[opacity,scale] duration-base ease-out data-[starting-style]:scale-98 data-[starting-style]:opacity-0 data-[ending-style]:scale-98 data-[ending-style]:opacity-0 data-[ending-style]:duration-fast data-[ending-style]:ease-in"
 
 function AlertDialog({ ...props }: AlertDialogPrimitive.Root.Props) {
   return <AlertDialogPrimitive.Root data-slot="alert-dialog" {...props} />
@@ -14,6 +22,11 @@ function AlertDialogTrigger({ ...props }: AlertDialogPrimitive.Trigger.Props) {
   return <AlertDialogPrimitive.Trigger data-slot="alert-dialog-trigger" {...props} />
 }
 
+/**
+ * `focus-visible:outline-0` — dialog.tsx와 같은 이유: 패널은 `tabIndex=-1`로 프로그램적 포커스만
+ * 받는 컨테이너라 페이지 폭 링을 그리면 안 된다. `outline-none`은 금지(§금지 패턴 6) — 폭만 0으로
+ * 두는 `outline-0`이라야 `--tw-outline-style` 오염 없이 자식 컨트롤의 링이 살아 있다.
+ */
 function AlertDialogContent({
   className,
   children,
@@ -23,7 +36,7 @@ function AlertDialogContent({
     <AlertDialogPrimitive.Portal>
       <AlertDialogPrimitive.Backdrop
         data-slot="alert-dialog-backdrop"
-        className="fixed inset-0 z-50 bg-black/45 data-[starting-style]:opacity-0 data-[ending-style]:opacity-0 transition-opacity duration-150"
+        className={ALERT_BACKDROP_CLASS}
       />
       <AlertDialogPrimitive.Viewport
         data-slot="alert-dialog-viewport"
@@ -31,9 +44,10 @@ function AlertDialogContent({
       >
         <AlertDialogPrimitive.Popup
           data-slot="alert-dialog-content"
+          data-motion="crossfade"
           className={cn(
-            "w-full max-w-md rounded-lg border border-border bg-background p-5 shadow-[var(--shadow-modal)] outline-none",
-            "data-[starting-style]:scale-[0.98] data-[starting-style]:opacity-0 data-[ending-style]:scale-[0.98] data-[ending-style]:opacity-0 transition-[transform,opacity] duration-150",
+            "w-full max-w-md rounded-panel border border-border bg-card p-5 text-text-primary shadow-modal focus-visible:outline-0",
+            ALERT_POPUP_MOTION_CLASS,
             className
           )}
           {...props}
@@ -52,7 +66,7 @@ function AlertDialogTitle({
   return (
     <AlertDialogPrimitive.Title
       data-slot="alert-dialog-title"
-      className={cn("text-base font-semibold", className)}
+      className={cn("text-md font-semibold text-text-primary", className)}
       {...props}
     />
   )
@@ -65,7 +79,7 @@ function AlertDialogDescription({
   return (
     <AlertDialogPrimitive.Description
       data-slot="alert-dialog-description"
-      className={cn("mt-2 text-sm text-muted-foreground", className)}
+      className={cn("mt-2 text-sm text-text-secondary", className)}
       {...props}
     />
   )

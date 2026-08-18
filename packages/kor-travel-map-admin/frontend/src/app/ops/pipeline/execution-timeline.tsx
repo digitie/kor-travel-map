@@ -1,4 +1,5 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (list) · design-system: design.md · designed-as-app
 
 import { type ColumnDef } from "@tanstack/react-table";
 import { XIcon } from "lucide-react";
@@ -12,24 +13,17 @@ import {
   usePipelineExecutionsHead,
 } from "@/api/pipeline";
 import { EntityLink } from "@/components/entity-link";
-import { StatusBadge } from "@/components/status-badge";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { DataTable } from "@/components/ui/data-table";
 import { FilterBar, FilterField } from "@/components/filter-bar";
 import { CursorPager } from "@/components/pagination-bar";
+import { SectionCard } from "@/components/section-card";
+import { StatusBadge } from "@/components/status-badge";
+import { Button } from "@/components/ui/button";
+import { DataTable } from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
-import { formatDateTime, shortId } from "@/lib/format";
+import { NULL_GLYPH, formatDateTime, shortId } from "@/lib/format";
+import { statusLabel } from "@/lib/status-label";
 
 import {
   executionKindLabel,
@@ -51,6 +45,10 @@ const STATUS_OPTIONS: Array<ExecutionStatus | "all"> = [
   "cancelled",
 ];
 const PAGE_SIZE = 50;
+
+/** 적용 중인 딥링크 필터 칩 — hairline chip + kit 아이콘 버튼(≥ 30px hit target, M23). */
+const ACTIVE_FILTER_CHIP_CLASS =
+  "inline-flex items-center gap-1 rounded-control border border-border bg-card py-0.5 pr-0.5 pl-2.5 text-xs text-text-primary";
 
 function positiveInteger(value: string): number | undefined {
   const parsed = Number(value.trim());
@@ -291,14 +289,14 @@ function useExecutionTimelineController({
         id: "kind",
         header: "종류",
         cell: ({ row }) => (
-          <div className="flex flex-wrap items-center gap-1">
-            <Badge variant="outline">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-xs font-medium">
               {executionKindLabel(row.original.kind)}
-            </Badge>
+            </span>
             {row.original.linked_job_count > 1 ? (
-              <Badge variant="secondary">
+              <span className="text-2xs text-text-secondary tabular-nums">
                 작업 {row.original.linked_job_count}
-              </Badge>
+              </span>
             ) : null}
           </div>
         ),
@@ -311,7 +309,7 @@ function useExecutionTimelineController({
           return (
             <div className="min-w-0">
               <p className="truncate font-medium">{identity.primary}</p>
-              <p className="truncate text-xs text-muted-foreground">
+              <p className="truncate text-xs text-text-secondary">
                 {identity.secondary || shortId(row.original.id)}
               </p>
               {row.original.provider_datasets.length > 0 ? (
@@ -354,9 +352,10 @@ function useExecutionTimelineController({
               </span>
             ) : null}
             {row.original.cancellation ? (
-              <Badge variant="destructive">
-                취소 {row.original.cancellation.status}
-              </Badge>
+              <StatusBadge
+                label={`취소 ${statusLabel(row.original.cancellation.status)}`}
+                status={row.original.cancellation.status}
+              />
             ) : null}
           </div>
         ),
@@ -391,7 +390,7 @@ function useExecutionTimelineController({
         id: "created_at",
         header: "생성",
         cell: ({ row }) => (
-          <span className="text-sm whitespace-nowrap">
+          <span className="whitespace-nowrap text-text-secondary">
             {formatDateTime(row.original.created_at)}
           </span>
         ),
@@ -420,7 +419,7 @@ function useExecutionTimelineController({
               ) : null}
             </div>
           ) : (
-            <span className="text-muted-foreground">-</span>
+            <span className="text-text-tertiary">{NULL_GLYPH}</span>
           );
         },
       },
@@ -566,11 +565,18 @@ function ExecutionTimelineFilters({
               }
             />
           </FilterField>
-          <FilterField label="sync scope">
+          <FilterField
+            hint={
+              <span id="timeline-scope-prerequisite">
+                {providerDatasetIdFilter
+                  ? "선택한 provider dataset 안의 scope로 좁힙니다."
+                  : "provider dataset ID를 먼저 입력하세요."}
+              </span>
+            }
+            label="sync scope"
+          >
             <Input
-              aria-describedby={
-                !providerDatasetIdFilter ? "timeline-scope-prerequisite" : undefined
-              }
+              aria-describedby="timeline-scope-prerequisite"
               aria-label="sync scope 필터"
               disabled={!providerDatasetIdFilter}
               placeholder="예: target_grids"
@@ -589,22 +595,19 @@ function ExecutionTimelineFilters({
                 setDrafts((current) => ({ ...current, syncScope }))
               }
             />
-            {!providerDatasetIdFilter ? (
-              <p
-                className="text-xs text-text-tertiary"
-                id="timeline-scope-prerequisite"
-              >
-                provider dataset ID를 먼저 입력하세요.
-              </p>
-            ) : null}
           </FilterField>
-          <FilterField label="operation key">
+          <FilterField
+            hint={
+              <span id="timeline-operation-prerequisite">
+                {!providerDatasetIdFilter || !syncScope.trim()
+                  ? "provider dataset ID와 sync scope를 먼저 입력하세요."
+                  : "같은 dataset/scope의 operation으로 좁힙니다."}
+              </span>
+            }
+            label="operation key"
+          >
             <Input
-              aria-describedby={
-                !providerDatasetIdFilter || !syncScope.trim()
-                  ? "timeline-operation-prerequisite"
-                  : undefined
-              }
+              aria-describedby="timeline-operation-prerequisite"
               aria-label="operation key 필터"
               disabled={!providerDatasetIdFilter || !syncScope.trim()}
               placeholder="예: refresh_targeted"
@@ -626,14 +629,6 @@ function ExecutionTimelineFilters({
                 setDrafts((current) => ({ ...current, operationKey }))
               }
             />
-            {!providerDatasetIdFilter || !syncScope.trim() ? (
-              <p
-                className="text-xs text-text-tertiary"
-                id="timeline-operation-prerequisite"
-              >
-                provider dataset ID와 sync scope를 먼저 입력하세요.
-              </p>
-            ) : null}
           </FilterField>
           <FilterField label="시작일">
             <Input
@@ -697,121 +692,115 @@ function ExecutionTimelineView({
   syncScope,
 }: ReturnType<typeof useExecutionTimelineController>) {
   return (
-    <Card>
-      <CardHeader>
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <CardTitle>실행 타임라인</CardTitle>
-            <CardDescription>
-              request branch·standalone root 단위 통합 목록 — 하위 작업은 별도
-              행으로 나오지 않습니다.
-            </CardDescription>
-          </div>
-          {newCount > 0 ? (
-            <Button
-              aria-label={`새 실행 ${newCountLabel}건 반영`}
-              size="sm"
-              type="button"
-              variant="outline"
-              onClick={resetToFirstPage}
-            >
-              새 실행 {newCountLabel}건 — 첫 페이지로
-            </Button>
-          ) : null}
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <ExecutionTimelineFilters
-          createdFrom={createdFrom}
-          createdTo={createdTo}
-          kind={kind}
-          onUrlChange={onUrlChange}
-          operationKey={operationKey}
-          providerDatasetId={providerDatasetId}
-          providerDatasetIdFilter={providerDatasetIdFilter}
-          setDrafts={setDrafts}
-          setStoredBaselineTop={setStoredBaselineTop}
-          setStoredCursorStack={setStoredCursorStack}
-          status={status}
-          syncScope={syncScope}
-        />
+    <SectionCard
+      actions={
+        newCount > 0 ? (
+          <Button
+            aria-label={`새 실행 ${newCountLabel}건 반영`}
+            size="sm"
+            type="button"
+            variant="outline"
+            onClick={resetToFirstPage}
+          >
+            새 실행 {newCountLabel}건 — 첫 페이지로
+          </Button>
+        ) : undefined
+      }
+      description="request branch·standalone root 단위 통합 목록 — 하위 작업은 별도 행으로 나오지 않습니다."
+      title="실행 타임라인"
+    >
+      <ExecutionTimelineFilters
+        createdFrom={createdFrom}
+        createdTo={createdTo}
+        kind={kind}
+        onUrlChange={onUrlChange}
+        operationKey={operationKey}
+        providerDatasetId={providerDatasetId}
+        providerDatasetIdFilter={providerDatasetIdFilter}
+        setDrafts={setDrafts}
+        setStoredBaselineTop={setStoredBaselineTop}
+        setStoredCursorStack={setStoredCursorStack}
+        status={status}
+        syncScope={syncScope}
+      />
 
-        {loadBatchId.trim() || parentJobId.trim() ? (
-          <div className="flex flex-wrap items-center gap-2">
-            {loadBatchId.trim() ? (
-              <Badge variant="secondary">
-                배치 {shortId(loadBatchId)}
-                <button
-                  aria-label="배치 필터 지우기"
-                  className="ml-1"
-                  type="button"
-                  onClick={() => {
-                    onUrlChange({ load_batch_id: null });
-                  }}
-                >
-                  <XIcon className="size-3" />
-                </button>
-              </Badge>
-            ) : null}
-            {parentJobId.trim() ? (
-              <Badge variant="secondary">
-                상위 작업 {shortId(parentJobId)}
-                <button
-                  aria-label="상위 작업 필터 지우기"
-                  className="ml-1"
-                  type="button"
-                  onClick={() => {
-                    onUrlChange({ parent_job_id: null });
-                  }}
-                >
-                  <XIcon className="size-3" />
-                </button>
-              </Badge>
-            ) : null}
-            <span className="text-xs text-muted-foreground">
-              root 전체 구성 작업을 서버에서 cursor와 page limit 적용 전에
-              필터링합니다.
+      {loadBatchId.trim() || parentJobId.trim() ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {loadBatchId.trim() ? (
+            <span className={ACTIVE_FILTER_CHIP_CLASS}>
+              배치 <span className="font-mono">{shortId(loadBatchId)}</span>
+              <Button
+                aria-label="배치 필터 지우기"
+                size="icon-sm"
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  onUrlChange({ load_batch_id: null });
+                }}
+              >
+                <XIcon />
+              </Button>
             </span>
-          </div>
-        ) : null}
+          ) : null}
+          {parentJobId.trim() ? (
+            <span className={ACTIVE_FILTER_CHIP_CLASS}>
+              상위 작업 <span className="font-mono">{shortId(parentJobId)}</span>
+              <Button
+                aria-label="상위 작업 필터 지우기"
+                size="icon-sm"
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  onUrlChange({ parent_job_id: null });
+                }}
+              >
+                <XIcon />
+              </Button>
+            </span>
+          ) : null}
+          <span className="text-xs text-text-secondary">
+            root 전체 구성 작업을 서버에서 cursor와 page limit 적용 전에
+            필터링합니다.
+          </span>
+        </div>
+      ) : null}
 
-        {executions.isError ? (
-          <Alert variant="destructive">
-            <AlertTitle>실행 목록 호출 실패</AlertTitle>
-            <AlertDescription>{executions.error.message}</AlertDescription>
-          </Alert>
-        ) : null}
+      <DataTable
+        ariaLabel="실행 타임라인"
+        columns={columns}
+        data={rows}
+        emptyState={{
+          title: "조건에 맞는 실행이 없습니다.",
+          description: "필터를 조정하거나 갱신 요청을 생성하세요.",
+        }}
+        error={executions.error}
+        errorTitle="실행 목록을 불러오지 못했습니다"
+        getRowId={(row) => `${row.kind}:${row.id}`}
+        isError={executions.isError}
+        isLoading={executions.isLoading}
+        isRowActive={(row) =>
+          selectedExecutionId !== null &&
+          (row.id === selectedExecutionId ||
+            row.projected_job?.id === selectedExecutionId)
+        }
+        rowIdentity={(row) =>
+          JSON.stringify([row.created_at, row.id, row.kind])
+        }
+        rowTestId={(row) => `pipeline-execution-row-${row.id}`}
+        onRetry={() => executions.refetch()}
+        onRowClick={(row) => onSelectExecution(row.kind, row.id, row.id)}
+      />
 
-        <DataTable
-          ariaLabel="실행 타임라인"
-          columns={columns}
-          data={rows}
-          emptyMessage="조건에 맞는 실행이 없습니다. 필터를 조정하거나 갱신 요청을 생성하세요."
-          getRowId={(row) => `${row.kind}:${row.id}`}
-          isLoading={executions.isLoading}
-          isRowActive={(row) =>
-            selectedExecutionId !== null &&
-            (row.id === selectedExecutionId ||
-              row.projected_job?.id === selectedExecutionId)
-          }
-          rowIdentity={(row) =>
-            JSON.stringify([row.created_at, row.id, row.kind])
-          }
-          rowTestId={(row) => `pipeline-execution-row-${row.id}`}
-          onRowClick={(row) => onSelectExecution(row.kind, row.id, row.id)}
-        />
-
-        <CursorPager
-          ariaPrefix="실행 타임라인"
-          hasNext={Boolean(nextCursor)}
-          isFetching={executions.isFetching}
-          isFirst={cursorStack.length === 0}
-          summary={`page ${cursorStack.length + 1} · 이 페이지 ${rows.length}행`}
-          onFirst={resetToFirstPage}
-          onNext={goNextPage}
-        />
-      </CardContent>
-    </Card>
+      <CursorPager
+        ariaPrefix="실행 타임라인"
+        hasNext={Boolean(nextCursor)}
+        isFetching={executions.isFetching}
+        isFirst={cursorStack.length === 0}
+        summary={`page ${cursorStack.length + 1} · 이 페이지 ${rows.length}행`}
+        onFirst={resetToFirstPage}
+        onNext={goNextPage}
+      />
+    </SectionCard>
   );
 }
 

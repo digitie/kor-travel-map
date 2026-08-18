@@ -1,3 +1,4 @@
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 import Link from "next/link";
 import { ExternalLinkIcon } from "lucide-react";
 
@@ -9,7 +10,6 @@ import { cn } from "@/lib/utils";
  * 모든 크로스링크는 이 컴포넌트로만 렌더링해 경로가 한 곳에서 관리되게 한다.
  */
 
-
 type EntityLinkProps = {
   kind: EntityKind;
   id: string | number;
@@ -20,7 +20,13 @@ type EntityLinkProps = {
   children?: React.ReactNode;
 };
 
-/** id 링크는 mono, 외부 링크는 ExternalLinkIcon + 새 탭 (§2 배치 규칙). */
+/**
+ * prose 링크 레시피 (design.md §CTA voice): brand 잉크, hover 에 underline, focus 는 단일 outline.
+ * id 링크는 mono + tabular-nums, 외부 링크는 ExternalLinkIcon + 새 탭 (§2 배치 규칙).
+ */
+const entityLinkClass =
+  "rounded-control text-brand underline-offset-4 transition-[color] duration-fast ease-out hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus active:text-brand-hover";
+
 function EntityLink({
   kind,
   id,
@@ -31,15 +37,15 @@ function EntityLink({
 }: EntityLinkProps) {
   const href = hrefFor(kind, id, params);
   const label = children ?? String(id);
+  const monoClassName = children === undefined ? "font-mono tabular-nums" : null;
   if (href === null) {
-    return <span className={cn("font-mono", className)}>{label}</span>;
+    // 링크를 만들 수 없는 엔티티는 식별자 텍스트로만 — 항상 mono(기존 계약).
+    return (
+      <span className={cn("font-mono tabular-nums", className)}>{label}</span>
+    );
   }
   const external = kind === "dagsterRun";
-  const linkClassName = cn(
-    "text-primary underline-offset-2 hover:underline",
-    children === undefined && "font-mono",
-    className,
-  );
+  const linkClassName = cn(entityLinkClass, monoClassName, className);
   if (external || newTab) {
     return (
       <a
@@ -50,7 +56,10 @@ function EntityLink({
       >
         {label}
         {external ? (
-          <ExternalLinkIcon aria-hidden className="ml-1 inline size-3.5 align-text-top" />
+          <ExternalLinkIcon
+            aria-hidden="true"
+            className="ml-1 inline size-3.5 align-text-top"
+          />
         ) : null}
       </a>
     );

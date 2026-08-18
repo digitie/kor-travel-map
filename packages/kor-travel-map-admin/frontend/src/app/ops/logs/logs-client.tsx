@@ -1,11 +1,8 @@
 "use client";
+// Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (list) · design-system: design.md · designed-as-app
 
 import { type ColumnDef } from "@tanstack/react-table";
-import {
-  AlertTriangleIcon,
-  RefreshCwIcon,
-  SearchIcon,
-} from "lucide-react";
+import { RefreshCwIcon, SearchIcon } from "lucide-react";
 import { useDeferredValue, useMemo, useState } from "react";
 
 import {
@@ -14,17 +11,21 @@ import {
   type SystemLogLevel,
 } from "@/api/ops";
 import { AdminShell } from "@/components/admin-shell";
+import { FilterBar, FilterField } from "@/components/filter-bar";
 import { CursorPager } from "@/components/pagination-bar";
-import { StatusBadge } from "@/components/status-badge";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
+import { HttpStatusBadge, LevelBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
-import { DataTable } from "@/components/ui/data-table";
+import {
+  DataTable,
+  DataTableClampCell,
+  type DataTableColumnMeta,
+} from "@/components/ui/data-table";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { formatDateTime, shortId } from "@/lib/format";
+import { NULL_GLYPH, formatCount, formatDateTime, shortId } from "@/lib/format";
+import { statusLabel } from "@/lib/status-label";
 
 const LEVELS: Array<SystemLogLevel | "all"> = [
   "critical",
@@ -133,7 +134,7 @@ function useLogsClientController({
         header: "생성",
         enableSorting: false,
         cell: ({ row }) => (
-          <span className="text-muted-foreground">
+          <span className="text-text-secondary">
             {formatDateTime(row.original.created_at)}
           </span>
         ),
@@ -142,7 +143,7 @@ function useLogsClientController({
         accessorKey: "level",
         header: "레벨",
         enableSorting: false,
-        cell: ({ row }) => <StatusBadge status={row.original.level} />,
+        cell: ({ row }) => <LevelBadge level={row.original.level} />,
       },
       { accessorKey: "source", header: "소스", enableSorting: false },
       { accessorKey: "event", header: "이벤트", enableSorting: false },
@@ -150,10 +151,9 @@ function useLogsClientController({
         id: "message",
         header: "메시지",
         enableSorting: false,
+        meta: { wrap: true } satisfies DataTableColumnMeta,
         cell: ({ row }) => (
-          <div className="max-w-96">
-            <div className="line-clamp-2">{row.original.message}</div>
-          </div>
+          <DataTableClampCell lines={2}>{row.original.message}</DataTableClampCell>
         ),
       },
       {
@@ -161,7 +161,7 @@ function useLogsClientController({
         header: "요청",
         enableSorting: false,
         cell: ({ row }) => (
-          <span className="font-mono text-xs">
+          <span className="font-mono text-xs slashed-zero">
             {shortId(row.original.request_id)}
           </span>
         ),
@@ -177,7 +177,7 @@ function useLogsClientController({
         header: "생성",
         enableSorting: false,
         cell: ({ row }) => (
-          <span className="text-muted-foreground">
+          <span className="text-text-secondary">
             {formatDateTime(row.original.created_at)}
           </span>
         ),
@@ -186,30 +186,35 @@ function useLogsClientController({
         accessorKey: "method",
         header: "방식",
         enableSorting: false,
-        cell: ({ row }) => <Badge variant="outline">{row.original.method}</Badge>,
+        cell: ({ row }) => (
+          <span className="font-mono text-xs">{row.original.method}</span>
+        ),
       },
       {
         accessorKey: "status_code",
         header: "상태",
         enableSorting: false,
-        cell: ({ row }) => (
-          <StatusBadge status={String(row.original.status_code)} />
-        ),
+        cell: ({ row }) => <HttpStatusBadge code={row.original.status_code} />,
       },
       {
         accessorKey: "duration_ms",
         header: "소요시간",
         enableSorting: false,
+        meta: { align: "right" } satisfies DataTableColumnMeta,
         cell: ({ row }) => (
-          <span className="font-mono">{row.original.duration_ms}ms</span>
+          <span className="tabular-nums">
+            {formatCount(row.original.duration_ms)}
+            <span className="ml-0.5 text-2xs text-text-secondary">ms</span>
+          </span>
         ),
       },
       {
         id: "path",
         header: "경로",
         enableSorting: false,
+        meta: { wrap: true } satisfies DataTableColumnMeta,
         cell: ({ row }) => (
-          <span className="block max-w-96 break-all font-mono text-xs">
+          <span className="block max-w-96 font-mono text-xs break-all">
             {row.original.path}
           </span>
         ),
@@ -219,7 +224,7 @@ function useLogsClientController({
         header: "요청",
         enableSorting: false,
         cell: ({ row }) => (
-          <span className="font-mono text-xs">
+          <span className="font-mono text-xs slashed-zero">
             {shortId(row.original.request_id)}
           </span>
         ),
@@ -228,7 +233,12 @@ function useLogsClientController({
         accessorKey: "error_code",
         header: "오류",
         enableSorting: false,
-        cell: ({ row }) => row.original.error_code ?? "-",
+        cell: ({ row }) =>
+          row.original.error_code ? (
+            <span className="font-mono text-xs">{row.original.error_code}</span>
+          ) : (
+            <span className="text-text-tertiary">{NULL_GLYPH}</span>
+          ),
       },
     ],
     [],
@@ -298,11 +308,12 @@ function LogsClientView({
   systemQ,
   systemSource,
 }: ReturnType<typeof useLogsClientController>) {
+  const isRefreshing = systemLogs.isFetching || apiLogs.isFetching;
   return (
     <AdminShell
       actions={
         <Button
-          disabled={systemLogs.isFetching || apiLogs.isFetching}
+          loading={isRefreshing}
           type="button"
           variant="outline"
           onClick={refreshAll}
@@ -314,21 +325,19 @@ function LogsClientView({
       description="시스템 로그와 API 호출 로그를 조회합니다."
       title="운영 로그"
     >
-      <div className="flex flex-col gap-4">
-        {(systemLogs.isError || apiLogs.isError) && (
-          <Alert variant="destructive">
-            <AlertTriangleIcon data-icon="inline-start" />
-            <AlertTitle>로그 조회 실패</AlertTitle>
-            <AlertDescription>
-              {systemLogs.error?.message ?? apiLogs.error?.message}
-            </AlertDescription>
-          </Alert>
-        )}
-
-        <div className="rounded-lg border bg-background p-4">
-          <div className="flex flex-wrap items-center gap-3">
+      <Tabs
+        value={activeLogTab}
+        onValueChange={(value) => setActiveLogTab(value as LogTab)}
+      >
+        <div className="flex flex-wrap items-end justify-between gap-x-4 gap-y-2 border-b border-border">
+          <TabsList className="border-b-0" variant="line">
+            <TabsTrigger value="system">System logs</TabsTrigger>
+            <TabsTrigger value="api">API call logs</TabsTrigger>
+          </TabsList>
+          <FilterField className="pb-1.5" label="페이지 크기">
             <NativeSelect
               aria-label="log page size"
+              size="sm"
               value={String(pageSize)}
               onChange={(event) => {
                 setPageSize(Number(event.target.value) as typeof pageSize);
@@ -342,138 +351,166 @@ function LogsClientView({
                 </NativeSelectOption>
               ))}
             </NativeSelect>
-            <Badge variant="outline">
-              system {systemItems.length}
-            </Badge>
-            <Badge variant="outline">
-              api {apiItems.length}
-            </Badge>
-            <Badge variant="outline">
-              page size {pageSize}
-            </Badge>
-          </div>
+          </FilterField>
         </div>
 
-        <Tabs
-          value={activeLogTab}
-          onValueChange={(value) => setActiveLogTab(value as LogTab)}
-        >
-          <TabsList>
-            <TabsTrigger value="system">System logs</TabsTrigger>
-            <TabsTrigger value="api">API call logs</TabsTrigger>
-          </TabsList>
-
-          <TabsContent className="mt-4" value="system">
-            <section className="rounded-lg border bg-background">
-              <div className="grid gap-3 border-b p-4 md:grid-cols-[minmax(12rem,1fr)_auto_auto_auto_auto]">
-                <div className="relative">
-                  <SearchIcon className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
-                  <Input
-                    aria-label="system log search"
-                    className="pl-8"
-                    placeholder="event, message, request_id"
-                    value={systemQ}
-                    onChange={(event) => {
-                      setSystemQ(event.target.value);
-                      resetSystemPage();
-                    }}
-                  />
-                </div>
-                <NativeSelect
-                  aria-label="system log level"
-                  value={systemLevel}
-                  onChange={(event) => {
-                    setSystemLevel(event.target.value as SystemLogLevel | "all");
-                    resetSystemPage();
-                  }}
-                >
-                  {LEVELS.map((item) => (
-                    <NativeSelectOption key={item} value={item}>
-                      {item}
-                    </NativeSelectOption>
-                  ))}
-                </NativeSelect>
+        <TabsContent className="mt-4 space-y-4" value="system">
+          <FilterBar>
+            <FilterField className="min-w-64 grow" label="검색">
+              <span className="relative block">
+                <SearchIcon
+                  aria-hidden="true"
+                  className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-text-tertiary"
+                />
                 <Input
-                  aria-label="system log source"
-                  placeholder="source"
-                  value={systemSource}
+                  aria-label="system log search"
+                  className="pl-8"
+                  placeholder="event, message, request_id"
+                  value={systemQ}
                   onChange={(event) => {
-                    setSystemSource(event.target.value);
+                    setSystemQ(event.target.value);
                     resetSystemPage();
                   }}
                 />
-                <CursorPager
-                  ariaPrefix="system log"
-                  hasNext={Boolean(systemLogs.data?.meta.page?.next_cursor)}
-                  isFetching={systemLogs.isFetching}
-                  summary={<>page {systemPageIndex}</>}
-                  onFirst={resetSystemPage}
-                  onNext={nextSystemPage}
-                />
-              </div>
-              <DataTable
-                columns={systemColumns}
-                data={systemItems}
-                getRowId={(row) => row.log_id}
-                isLoading={systemLogs.isLoading}
-                emptyMessage="system log가 없습니다."
-                containerClassName="overflow-auto"
+              </span>
+            </FilterField>
+            <FilterField label="레벨">
+              <NativeSelect
+                aria-label="system log level"
+                value={systemLevel}
+                onChange={(event) => {
+                  setSystemLevel(event.target.value as SystemLogLevel | "all");
+                  resetSystemPage();
+                }}
+              >
+                {LEVELS.map((item) => (
+                  <NativeSelectOption key={item} value={item}>
+                    {item === "all" ? "전체" : statusLabel(item)}
+                  </NativeSelectOption>
+                ))}
+              </NativeSelect>
+            </FilterField>
+            <FilterField label="소스">
+              <Input
+                aria-label="system log source"
+                placeholder="예: api.request"
+                value={systemSource}
+                onChange={(event) => {
+                  setSystemSource(event.target.value);
+                  resetSystemPage();
+                }}
               />
-            </section>
-          </TabsContent>
+            </FilterField>
+          </FilterBar>
+          <DataTable
+            ariaLabel="system log 목록"
+            columns={systemColumns}
+            data={systemItems}
+            emptyState={{
+              title: "system log가 없습니다.",
+              description: "검색어·레벨·소스 필터를 넓혀 보세요.",
+            }}
+            error={systemLogs.error}
+            errorTitle="system log를 불러오지 못했습니다"
+            getRowId={(row) => row.log_id}
+            isError={systemLogs.isError}
+            isLoading={systemLogs.isLoading}
+            onRetry={() => systemLogs.refetch()}
+            skeletonRowCount={8}
+          />
+          <CursorPager
+            ariaPrefix="system log"
+            hasNext={Boolean(systemLogs.data?.meta.page?.next_cursor)}
+            isFetching={systemLogs.isFetching}
+            isFirst={systemPageIndex === 1}
+            summary={
+              <>
+                page {systemPageIndex} · 이 페이지{" "}
+                {formatCount(systemLogs.data ? systemItems.length : null, {
+                  loading: systemLogs.isLoading,
+                })}
+                건
+              </>
+            }
+            onFirst={resetSystemPage}
+            onNext={nextSystemPage}
+          />
+        </TabsContent>
 
-          <TabsContent className="mt-4" value="api">
-            <section className="rounded-lg border bg-background">
-              <div className="grid gap-3 border-b p-4 md:grid-cols-[auto_minmax(12rem,1fr)_auto_auto_auto]">
-                <Input
-                  aria-label="api log method"
-                  placeholder="method"
-                  value={apiMethod}
-                  onChange={(event) => {
-                    setApiMethod(event.target.value);
-                    resetApiPage();
-                  }}
-                />
-                <Input
-                  aria-label="api log path"
-                  placeholder="경로 포함"
-                  value={apiPath}
-                  onChange={(event) => {
-                    setApiPath(event.target.value);
-                    resetApiPage();
-                  }}
-                />
-                <Input
-                  aria-label="api log min status"
-                  placeholder="최소 상태"
-                  value={apiMinStatus}
-                  onChange={(event) => {
-                    setApiMinStatus(event.target.value);
-                    resetApiPage();
-                  }}
-                />
-                <CursorPager
-                  ariaPrefix="api log"
-                  hasNext={Boolean(apiLogs.data?.meta.page?.next_cursor)}
-                  isFetching={apiLogs.isFetching}
-                  summary={<>page {apiPageIndex}</>}
-                  onFirst={resetApiPage}
-                  onNext={nextApiPage}
-                />
-              </div>
-              <DataTable
-                columns={apiColumns}
-                data={apiItems}
-                getRowId={(row) => row.log_id}
-                isLoading={apiLogs.isLoading}
-                emptyMessage="API call log가 없습니다."
-                containerClassName="overflow-auto"
+        <TabsContent className="mt-4 space-y-4" value="api">
+          <FilterBar>
+            <FilterField label="방식">
+              <Input
+                aria-label="api log method"
+                className="w-32"
+                placeholder="예: GET"
+                value={apiMethod}
+                onChange={(event) => {
+                  setApiMethod(event.target.value);
+                  resetApiPage();
+                }}
               />
-            </section>
-          </TabsContent>
-
-        </Tabs>
-      </div>
+            </FilterField>
+            <FilterField className="min-w-64 grow" label="경로">
+              <Input
+                aria-label="api log path"
+                placeholder="예: /v1/ops"
+                value={apiPath}
+                onChange={(event) => {
+                  setApiPath(event.target.value);
+                  resetApiPage();
+                }}
+              />
+            </FilterField>
+            <FilterField hint="이 값 이상인 HTTP 상태만" label="최소 상태 코드">
+              <Input
+                aria-label="api log min status"
+                className="w-32"
+                inputMode="numeric"
+                placeholder="예: 400"
+                value={apiMinStatus}
+                onChange={(event) => {
+                  setApiMinStatus(event.target.value);
+                  resetApiPage();
+                }}
+              />
+            </FilterField>
+          </FilterBar>
+          <DataTable
+            ariaLabel="API call log 목록"
+            columns={apiColumns}
+            data={apiItems}
+            emptyState={{
+              title: "API call log가 없습니다.",
+              description: "방식·경로·최소 상태 코드 필터를 넓혀 보세요.",
+            }}
+            error={apiLogs.error}
+            errorTitle="API call log를 불러오지 못했습니다"
+            getRowId={(row) => row.log_id}
+            isError={apiLogs.isError}
+            isLoading={apiLogs.isLoading}
+            onRetry={() => apiLogs.refetch()}
+            skeletonRowCount={8}
+          />
+          <CursorPager
+            ariaPrefix="api log"
+            hasNext={Boolean(apiLogs.data?.meta.page?.next_cursor)}
+            isFetching={apiLogs.isFetching}
+            isFirst={apiPageIndex === 1}
+            summary={
+              <>
+                page {apiPageIndex} · 이 페이지{" "}
+                {formatCount(apiLogs.data ? apiItems.length : null, {
+                  loading: apiLogs.isLoading,
+                })}
+                건
+              </>
+            }
+            onFirst={resetApiPage}
+            onNext={nextApiPage}
+          />
+        </TabsContent>
+      </Tabs>
     </AdminShell>
   );
 }
