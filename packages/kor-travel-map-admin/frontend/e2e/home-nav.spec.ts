@@ -410,7 +410,12 @@ async function mockHomeHappyPath(page: Page) {
 }
 
 // admin-shell.tsx NAV_GROUPS와 정확히 1:1로 거울처럼 박는다 (그룹 순서 그대로 평탄화).
-// nav item이 추가/삭제되면 이 표와 toHaveCount(17)가 함께 깨져 테스트가 drift를 잡는다.
+// nav item이 추가/삭제되면 이 표와 toHaveCount(19)가 함께 깨져 테스트가 drift를 잡는다.
+// 2026-08-19: 이 거울 표가 실제로 drift를 잡아 놓고도 갱신되지 않은 채 남아 있었다 —
+// `큐레이션 후보`(#767231d2 curation candidate review UI)와 `캐시 전파`(#0acf3f61 cache
+// target stream recovery console)가 NAV_GROUPS에 들어오면서 링크 수가 17 → 19가 됐는데
+// 표는 17에 머물러 있었다(리디자인 이전 main에서도 같은 이유로 실패). 두 route 모두
+// 존치하는 canonical 화면이므로 정본은 source의 19개이고, 여기 표를 그쪽에 맞춘다.
 const NAV_ITEMS: ReadonlyArray<{ label: string; href: string }> = [
   { label: "홈", href: "/" },
   // [Feature 관리]
@@ -420,12 +425,14 @@ const NAV_ITEMS: ReadonlyArray<{ label: string; href: string }> = [
   { label: "보강 검토", href: "/admin/features/enrichment-reviews" },
   { label: "이슈", href: "/admin/issues" },
   { label: "큐레이션 관리", href: "/admin/features/curated" },
+  { label: "큐레이션 후보", href: "/admin/curations/candidates" },
   { label: "큐레이션 지도", href: "/curated-features" },
   // [수집 파이프라인]
   { label: "파이프라인", href: "/ops/pipeline" },
   { label: "데이터셋", href: "/ops/datasets" },
   { label: "오프라인 업로드", href: "/admin/offline-uploads" },
   { label: "POI 캐시 대상", href: "/admin/poi-cache-targets" },
+  { label: "캐시 전파", href: "/ops/cache-target-streams" },
   // [모니터링]
   { label: "운영 로그", href: "/ops/logs" },
   { label: "정합성 점검", href: "/ops/consistency" },
@@ -463,7 +470,7 @@ test.describe("home page (/) — nav + metric/status depth", () => {
         page.getByRole("heading", { level: 1, name: "운영 홈" }),
       ).toBeVisible();
       const navigation = page.getByRole("navigation");
-      await expect(navigation.getByRole("link")).toHaveCount(17);
+      await expect(navigation.getByRole("link")).toHaveCount(19);
       await expect(
         navigation.getByRole("link", { name: "파이프라인", exact: true }),
       ).toBeVisible();
@@ -515,7 +522,7 @@ test.describe("home page (/) — nav + metric/status depth", () => {
     });
   }
 
-  test("admin shell: 17개 nav 링크가 그룹과 함께 정확한 href로 렌더(audit gap 보강)", async ({
+  test("admin shell: 19개 nav 링크가 그룹과 함께 정확한 href로 렌더(audit gap 보강)", async ({
     page,
   }) => {
     // shell 구조 단언 — 모든 query가 실패/빈 응답이어도 AdminShell은 query 상태와
@@ -532,8 +539,8 @@ test.describe("home page (/) — nav + metric/status depth", () => {
       await expect(link).toHaveAttribute("href", href);
     }
 
-    // nav 링크는 정확히 17개 — source NAV_GROUPS 기준.
-    await expect(navigation.getByRole("link")).toHaveCount(17);
+    // nav 링크는 정확히 19개 — source NAV_GROUPS 기준.
+    await expect(navigation.getByRole("link")).toHaveCount(19);
 
     // 그룹 헤더(비링크)가 렌더된다 — 작업 지향 nav 그룹.
     for (const header of NAV_GROUP_HEADERS) {

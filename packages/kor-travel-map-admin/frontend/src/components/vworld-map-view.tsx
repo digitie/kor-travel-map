@@ -578,12 +578,25 @@ function shouldClusterAsPoint(feature: ClusterFeatureInput): boolean {
   return feature.kind !== "route";
 }
 
+/**
+ * weather marker 글리프의 판별 키. ADR-088 triple identity 이후 `WeatherSummaryOut`의 정본
+ * 신원은 `dataset_key`(+`provider_dataset_id`)이고 `weather_domain`은 optional 잔존 필드다.
+ * `weather_domain`만 보던 옛 코드는 dataset_key만 오는 응답에서 조용히 판별에 실패해
+ * `marker_icon`("marker" → 📍)로 떨어졌다 — KMA/에어코리아 마커가 서로 구분되지 않던 원인.
+ */
+function weatherDomainKey(
+  summary: ClusterWeatherSummaryPoint | null | undefined,
+): string | null {
+  return summary?.weather_domain ?? summary?.dataset_key ?? null;
+}
+
 function markerIconForFeature(feature: ClusterFeatureInput): string | null {
   if (feature.kind === "weather") {
-    if (feature.weather_summary?.weather_domain?.startsWith("kma_")) {
+    const domain = weatherDomainKey(feature.weather_summary);
+    if (domain?.startsWith("kma_")) {
       return "weather";
     }
-    if (feature.weather_summary?.weather_domain?.startsWith("airkorea_")) {
+    if (domain?.startsWith("airkorea_")) {
       return "air-quality";
     }
   }
