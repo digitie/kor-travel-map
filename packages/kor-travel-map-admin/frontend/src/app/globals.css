@@ -1,3 +1,19 @@
+/* Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app */
+/*
+ * 토큰 정본(design.md §Theme/§Typography/§Spacing/§Motion). Tailwind v4에서는 이 파일의
+ * `:root`/`.dark` + `@theme inline`이 곧 토큰 파일이다(별도 tokens.css 없음).
+ *
+ * 규칙:
+ * - 색 값(oklch)은 이 파일에만 둔다. 컴포넌트는 아래 utility 이름만 쓴다.
+ * - alpha는 `--overlay`(dialog scrim)와 shadow에만 허용. 팔레트 alpha(`/10`,`/50`) 금지 →
+ *   불투명 `*-tint` 토큰 사용.
+ * - radius 2종(`rounded-control` 6px · `rounded-panel` 8px), control 높이 2종
+ *   (`h-control` 36px · `h-control-sm` 30px), inspector rail `w-rail` 22rem.
+ * - focus 레시피 1종: `outline-none focus-visible:outline-2 focus-visible:outline-offset-2
+ *   focus-visible:outline-focus` (ring은 transition 밖 — 즉시 표시).
+ * - motion: `duration-fast`(100ms, hover/colour) · `duration-base`(150ms, overlay) ·
+ *   `ease-out`/`ease-in`; `transition-all` 금지; reduced-motion 전역 규칙은 파일 끝.
+ */
 @import "tailwindcss";
 @import "tw-animate-css";
 
@@ -30,6 +46,7 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  /* ── shadcn alias (kept; component code speaks the project vocabulary below) ── */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -44,13 +61,11 @@
   --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-brand: var(--brand);
-  --color-brand-foreground: var(--brand-foreground);
-  --color-brand-tint: var(--brand-tint);
-  --color-success: var(--success);
-  --color-warning: var(--warning);
-  --color-info: var(--info);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  /* ── project vocabulary: surfaces · ink ── */
   --color-surface-page: var(--surface-page);
   --color-surface-subtle: var(--surface-subtle);
   --color-surface-muted: var(--surface-muted);
@@ -59,15 +74,30 @@
   --color-text-tertiary: var(--text-tertiary);
   --color-text-disabled: var(--text-disabled);
   --color-icon-default: var(--icon-default);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --font-heading: var(--font-sans);
-  --font-sans: var(--font-sans);
+
+  /* ── brand ── */
+  --color-brand: var(--brand);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-tint: var(--brand-tint);
+  --color-brand-foreground: var(--brand-foreground);
+
+  /* ── status (single tone table: src/lib/status-label.ts) ── */
+  --color-success: var(--success);
+  --color-success-tint: var(--success-tint);
+  --color-warning: var(--warning);
+  --color-warning-tint: var(--warning-tint);
+  --color-info: var(--info);
+  --color-info-tint: var(--info-tint);
+  --color-destructive: var(--destructive);
+  --color-destructive-tint: var(--destructive-tint);
+
+  /* ── focus · overlay · compare pair ── */
+  --color-focus: var(--focus);
+  --color-overlay: var(--overlay);
+  --color-compare-a: var(--compare-a);
+  --color-compare-b: var(--compare-b);
+
+  /* ── sidebar / chart aliases (kept) ── */
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -81,36 +111,136 @@
   --color-chart-3: var(--chart-3);
   --color-chart-2: var(--chart-2);
   --color-chart-1: var(--chart-1);
-  --radius-2xl: calc(var(--radius) * 1.8);
-  --radius-3xl: calc(var(--radius) * 2.2);
-  --radius-4xl: calc(var(--radius) * 2.6);
+
+  /* ── radii: exactly two. legacy names collapse onto them (design.md §Spacing) ── */
+  --radius-control: var(--radius-control);
+  --radius-panel: var(--radius-panel);
+  --radius-xs: var(--radius-control);
+  --radius-sm: var(--radius-control);
+  --radius-md: var(--radius-control);
+  --radius-lg: var(--radius-panel);
+  --radius-xl: var(--radius-panel);
+  --radius-2xl: var(--radius-panel);
+  --radius-3xl: var(--radius-panel);
+  --radius-4xl: var(--radius-panel);
+
+  /* ── type scale (7 steps; no text-[Npx]) — 12 / 13.5 / 15 / 17 / 20 / 24 / 30 px ── */
+  --text-2xs: 0.75rem;
+  --text-2xs--line-height: 1.5;
+  --text-xs: 0.84375rem;
+  --text-xs--line-height: 1.5;
+  --text-sm: 0.9375rem;
+  --text-sm--line-height: 1.5;
+  --text-base: 0.9375rem; /* legacy alias → body size (kept on-scale) */
+  --text-base--line-height: 1.5;
+  --text-md: 1.0625rem;
+  --text-md--line-height: 1.4;
+  --text-lg: 1.25rem;
+  --text-lg--line-height: 1.3;
+  --text-xl: 1.5rem;
+  --text-xl--line-height: 1.25;
+  --text-2xl: 1.875rem;
+  --text-2xl--line-height: 1.2;
+
+  /* ── sizes: h-control · h-control-sm · w-rail (spacing namespace) ── */
+  --spacing-control: var(--control-h);
+  --spacing-control-sm: var(--control-h-sm);
+  --spacing-rail: var(--rail);
+  --container-rail: var(--rail); /* max-w-rail / min-w-rail resolve via container ns too */
+
+  /* ── fonts ── */
+  --font-sans:
+    var(--font-pretendard, "Pretendard Variable"), Pretendard, "Noto Sans KR",
+    "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-mono:
+    var(--font-geist-mono, "Geist Mono"), ui-monospace, SFMono-Regular, Menlo,
+    Consolas, "Liberation Mono", monospace;
+  --font-heading: var(--font-sans);
+
+  /* ── shadows: overlays only (rest = hairline) ── */
+  --shadow-elevated: var(--shadow-elevated);
+  --shadow-modal: var(--shadow-modal);
+
+  /* ── motion ── */
+  --ease-out: var(--ease-out);
+  --ease-in: var(--ease-in);
+  --default-transition-duration: var(--duration-fast);
+  --default-transition-timing-function: var(--ease-out);
+}
+
+/* duration-fast / duration-base — Tailwind v4에는 --duration-* namespace가 없어
+   utility로 등록한다. `--tw-duration`도 함께 세팅해 tw-animate-css가 읽게 한다. */
+@utility duration-fast {
+  --tw-duration: var(--duration-fast);
+  transition-duration: var(--duration-fast);
+}
+
+@utility duration-base {
+  --tw-duration: var(--duration-base);
+  transition-duration: var(--duration-base);
 }
 
 :root {
-  --radius: 0.625rem;
-  --brand: #2f765f;
-  --brand-foreground: #ffffff;
-  --brand-tint: #e7f2ee;
-  --surface-page: #f7f8f6;
-  --surface-subtle: #f2f5f1;
-  --surface-muted: #e3e8e2;
-  --text-primary: #3c3f3d;
-  --text-secondary: #68706b;
-  --text-tertiary: #858d87;
-  --text-disabled: #b5bdb7;
-  --icon-default: #7c857f;
-  /* WCAG AA(4.5:1) — 상태색을 텍스트(badge/status line, bg-<tone>/10 tint 포함)로 쓸 때
-     light surface(card/page/subtle)에서 본문 대비 통과하도록 darken (#469/#471 리뷰). */
-  --success: #33683f;
-  --warning: #8a5a12;
-  --info: #3b82f6;
-  --shadow-card: 0 1px 3px rgb(60 63 61 / 0.04);
-  --shadow-card-hover: 0 2px 4px rgb(60 63 61 / 0.08);
-  --shadow-elevated: 0 4px 12px rgb(60 63 61 / 0.08);
-  --shadow-modal: 0 8px 24px rgb(60 63 61 / 0.12);
-  --card: #ffffff;
+  /* shape · size */
+  --radius-control: 0.375rem; /* 6px — button/input/badge/tab */
+  --radius-panel: 0.5rem; /* 8px — Card/SectionCard/dialog/popover */
+  --radius: var(--radius-control);
+  --control-h: 2.25rem; /* 36px */
+  --control-h-sm: 1.875rem; /* 30px */
+  --rail: 22rem; /* right inspector rail */
+
+  /* motion */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+  --duration-fast: 100ms; /* hover / colour */
+  --duration-base: 150ms; /* overlay enter: opacity + scale .98 */
+  --dur-fast: var(--duration-fast); /* design.md name parity */
+  --dur-base: var(--duration-base);
+
+  /* paper · ink (light) */
+  --surface-page: oklch(97.8% 0.003 128);
+  --surface-subtle: oklch(96.7% 0.006 138);
+  --surface-muted: oklch(92.5% 0.01 141);
+  --card: oklch(99.2% 0.002 140);
+  --text-primary: oklch(30% 0.006 157);
+  --text-secondary: oklch(48% 0.012 159);
+  /* design.md 명목값 56%는 paper 4.35:1 / subtle 4.21:1로 계산돼 AA(≥4.5:1) 목표에 미달 →
+     54%(paper 4.73 · subtle 4.58 · card 4.92)로 조정. */
+  --text-tertiary: oklch(54% 0.012 154);
+  --text-disabled: oklch(79% 0.012 154); /* non-text cue only */
+  --icon-default: oklch(54% 0.012 154);
+
+  /* brand */
+  --brand: oklch(51.4% 0.081 169);
+  --brand-hover: oklch(46% 0.085 169);
+  --brand-tint: oklch(95.2% 0.013 172);
+  --brand-foreground: oklch(99% 0.002 140);
+
+  /* status (AA as text on paper and on its own tint) */
+  --success: oklch(46.9% 0.087 149);
+  --success-tint: oklch(95% 0.03 150);
+  --warning: oklch(50.9% 0.103 71);
+  --warning-tint: oklch(96% 0.035 80);
+  --info: oklch(50% 0.16 258);
+  --info-tint: oklch(95.5% 0.025 255);
+  --destructive: oklch(51.4% 0.167 27);
+  --destructive-tint: oklch(96% 0.03 25);
+
+  /* focus · overlay · compare */
+  --focus: oklch(45% 0.09 169); /* opaque, used with 2px offset */
+  --overlay: oklch(30% 0.006 157 / 0.45); /* the ONLY alpha colour */
+  --compare-a: var(--brand);
+  --compare-b: var(--info);
+
+  /* shadows — overlays only; --shadow-card* stay defined, unused at rest */
+  --shadow-card: 0 1px 3px oklch(30% 0.006 157 / 0.04);
+  --shadow-card-hover: 0 2px 4px oklch(30% 0.006 157 / 0.08);
+  --shadow-elevated: 0 4px 12px oklch(30% 0.006 157 / 0.1);
+  --shadow-modal: 0 8px 24px oklch(30% 0.006 157 / 0.14);
+
+  /* shadcn aliases → project tokens */
   --card-foreground: var(--text-primary);
-  --popover: #ffffff;
+  --popover: var(--card);
   --popover-foreground: var(--text-primary);
   --primary: var(--brand);
   --primary-foreground: var(--brand-foreground);
@@ -120,30 +250,34 @@
   --muted-foreground: var(--text-secondary);
   --accent: var(--brand-tint);
   --accent-foreground: var(--brand);
-  --destructive: #b3322c;
   --border: var(--surface-muted);
-  --input: #d7ded8;
-  --ring: var(--brand);
+  --input: oklch(89% 0.01 145);
+  --ring: var(--focus);
   --background: var(--surface-page);
   --foreground: var(--text-primary);
   --chart-1: var(--brand);
-  --chart-2: #9fb8ad;
-  --chart-3: #c4ccc5;
-  --chart-4: #8a948e;
-  --chart-5: #59625c;
-  --sidebar: #ffffff;
+  --chart-2: oklch(75% 0.035 165);
+  --chart-3: oklch(83% 0.008 155);
+  --chart-4: oklch(63% 0.012 155);
+  --chart-5: oklch(46% 0.012 155);
+  --sidebar: var(--card);
   --sidebar-foreground: var(--text-primary);
   --sidebar-primary: var(--brand);
   --sidebar-primary-foreground: var(--brand-foreground);
   --sidebar-accent: var(--brand-tint);
   --sidebar-accent-foreground: var(--brand);
   --sidebar-border: var(--surface-muted);
-  --sidebar-ring: var(--brand);
+  --sidebar-ring: var(--focus);
 }
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border;
+  }
+
+  html {
+    overflow-x: clip;
+    @apply font-sans;
   }
 
   html,
@@ -153,14 +287,20 @@
   }
 
   body {
-    @apply bg-surface-page text-text-primary antialiased;
-    font-family:
-      var(--font-sans), Pretendard, "Noto Sans KR", "Apple SD Gothic Neo",
-      "Malgun Gothic", sans-serif;
+    @apply bg-surface-page font-sans text-sm text-text-primary antialiased;
   }
 
-  a {
+  /* prose links only — button-styled <Link className=…> is unaffected */
+  a:not([class]),
+  .prose a,
+  .link {
     @apply text-brand underline-offset-4 hover:underline;
+  }
+
+  /* one focus recipe, opaque, appears instantly (never transitioned) */
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
   }
 
   button,
@@ -169,35 +309,48 @@
   textarea {
     font: inherit;
   }
-  html {
-    @apply font-sans;
-  }
 }
 
 .dark {
-  --brand: #78c7ad;
-  --brand-foreground: #10201a;
-  --brand-tint: #1f3a31;
-  --surface-page: #171a18;
-  --surface-subtle: #222720;
-  --surface-muted: #30372f;
-  --text-primary: #e5ebe7;
-  --text-secondary: #b5beb8;
-  --text-tertiary: #8f9a93;
-  --text-disabled: #68736c;
-  --icon-default: #9aa49d;
-  --success: #82bd92;
-  --warning: #d9a441;
-  --info: #7aa7ff;
-  --shadow-card: 0 1px 3px rgb(8 12 10 / 0.08);
-  --shadow-card-hover: 0 2px 4px rgb(8 12 10 / 0.12);
-  --shadow-elevated: 0 4px 12px rgb(8 12 10 / 0.12);
-  --shadow-modal: 0 8px 24px rgb(8 12 10 / 0.18);
+  /* paper · ink (dark) — same names, dark values; no toggle mounted */
+  --surface-page: oklch(19% 0.006 150);
+  --surface-subtle: oklch(24% 0.008 145);
+  --surface-muted: oklch(31% 0.012 145);
+  --card: oklch(23% 0.007 145);
+  --text-primary: oklch(93% 0.006 155);
+  --text-secondary: oklch(78% 0.01 155);
+  --text-tertiary: oklch(68% 0.012 155);
+  --text-disabled: oklch(52% 0.012 155);
+  --icon-default: oklch(70% 0.01 155);
+
+  --brand: oklch(76% 0.085 169);
+  --brand-hover: oklch(81% 0.085 169);
+  --brand-tint: oklch(31% 0.035 169);
+  --brand-foreground: oklch(20% 0.02 165);
+
+  --success: oklch(75% 0.09 149);
+  --success-tint: oklch(28% 0.04 150);
+  --warning: oklch(77% 0.12 75);
+  --warning-tint: oklch(30% 0.045 80);
+  --info: oklch(75% 0.11 258);
+  --info-tint: oklch(30% 0.05 258);
+  --destructive: oklch(72% 0.14 27);
+  --destructive-tint: oklch(30% 0.06 27);
+
+  --focus: oklch(80% 0.09 169);
+  --overlay: oklch(10% 0.006 157 / 0.6);
+  --compare-a: var(--brand);
+  --compare-b: var(--info);
+
+  --shadow-card: 0 1px 3px oklch(10% 0.006 157 / 0.2);
+  --shadow-card-hover: 0 2px 4px oklch(10% 0.006 157 / 0.28);
+  --shadow-elevated: 0 4px 12px oklch(10% 0.006 157 / 0.32);
+  --shadow-modal: 0 8px 24px oklch(10% 0.006 157 / 0.4);
+
   --background: var(--surface-page);
   --foreground: var(--text-primary);
-  --card: #20241f;
   --card-foreground: var(--text-primary);
-  --popover: #20241f;
+  --popover: var(--card);
   --popover-foreground: var(--text-primary);
   --primary: var(--brand);
   --primary-foreground: var(--brand-foreground);
@@ -207,21 +360,39 @@
   --muted-foreground: var(--text-secondary);
   --accent: var(--brand-tint);
   --accent-foreground: var(--brand);
-  --destructive: #e17870;
-  --border: #30372f;
-  --input: #3a4239;
-  --ring: var(--brand);
+  --border: var(--surface-muted);
+  --input: oklch(36% 0.012 145);
+  --ring: var(--focus);
   --chart-1: var(--brand);
-  --chart-2: #5c7f70;
-  --chart-3: #46504a;
-  --chart-4: #a8b4ad;
-  --chart-5: #d2d9d5;
-  --sidebar: #20241f;
+  --chart-2: oklch(56% 0.045 165);
+  --chart-3: oklch(40% 0.012 155);
+  --chart-4: oklch(76% 0.012 155);
+  --chart-5: oklch(88% 0.008 155);
+  --sidebar: var(--card);
   --sidebar-foreground: var(--text-primary);
   --sidebar-primary: var(--brand);
   --sidebar-primary-foreground: var(--brand-foreground);
   --sidebar-accent: var(--brand-tint);
   --sidebar-accent-foreground: var(--brand);
-  --sidebar-border: #30372f;
-  --sidebar-ring: var(--brand);
+  --sidebar-border: var(--surface-muted);
+  --sidebar-ring: var(--focus);
+}
+
+/* Reduced motion (design.md §Motion): all spatial motion collapses. Elements that carry
+   `transition-opacity` or `data-motion="crossfade"` keep a ≤150ms opacity crossfade only. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .transition-opacity,
+  [data-motion="crossfade"] {
+    transition-property: opacity !important;
+    transition-duration: var(--duration-base) !important;
+  }
 }
