@@ -1339,7 +1339,7 @@ async def test_permanent_nack_dead_letter_blocks_later_order_and_replays_same_ev
             idempotency_key="82000000-0000-0000-0000-000000000002",
             limit=2,
         )
-    assert blocked.value.code == "stream_blocked"
+    assert blocked.value.code == "consumer_disabled"
 
     replayed = await replay_cache_target_dead_letter(
         migrated_session,
@@ -1347,6 +1347,10 @@ async def test_permanent_nack_dead_letter_blocks_later_order_and_replays_same_ev
         expected_delivery_version=detail.delivery_version,
     )
     assert replayed.status == "retry"
+    completed = await _resume_stream_after_dead_letter_replay(
+        migrated_session,
+        key="82000000-0000-0000-0000-000000000005",
+    )
     recovery_claim = await claim_cache_target_events(
         migrated_session,
         external_system=_SYSTEM,
@@ -1355,7 +1359,10 @@ async def test_permanent_nack_dead_letter_blocks_later_order_and_replays_same_ev
         limit=2,
     )
     assert recovery_claim is not None
-    assert [event.event_id for event in recovery_claim.events] == [blocked_event.event_id]
+    assert [event.event_type for event in recovery_claim.events] == [
+        "cache_target.state_applied",
+        "cache_target.state_applied",
+    ]
     assert (
         recovery_claim.events[0].relay_order,
         recovery_claim.events[0].payload_fingerprint,
@@ -1365,23 +1372,51 @@ async def test_permanent_nack_dead_letter_blocks_later_order_and_replays_same_ev
         consumer_id=_CONSUMER,
         claim_id=recovery_claim.claim_id,
         lease_token=recovery_claim.lease_token,
-        through_cursor=recovery_claim.events[0].cursor,
+        through_cursor=recovery_claim.events[-1].cursor,
         applied=[
             CacheTargetAppliedReceipt(
-                recovery_claim.events[0].event_id,
-                recovery_claim.events[0].payload_fingerprint,
+                event.event_id,
+                event.payload_fingerprint,
+            )
+            for event in recovery_claim.events
+        ],
+    )
+    reconciled_claim = await claim_cache_target_events(
+        migrated_session,
+        external_system=_SYSTEM,
+        consumer_id=_CONSUMER,
+        idempotency_key="82000000-0000-0000-0000-000000000004",
+        limit=2,
+    )
+    assert reconciled_claim is not None
+    assert len(reconciled_claim.events) == 1
+    reconciled_event = reconciled_claim.events[0]
+    assert reconciled_event.event_type == "cache_target.reconciled"
+    assert reconciled_event.event_scope == "stream"
+    assert reconciled_event.payload["request_id"] == completed.request_id
+    await ack_cache_target_events(
+        migrated_session,
+        consumer_id=_CONSUMER,
+        claim_id=reconciled_claim.claim_id,
+        lease_token=reconciled_claim.lease_token,
+        through_cursor=reconciled_event.cursor,
+        applied=[
+            CacheTargetAppliedReceipt(
+                reconciled_event.event_id,
+                reconciled_event.payload_fingerprint,
             )
         ],
     )
-    with pytest.raises(CacheTargetStreamConflict) as still_blocked:
+    assert (
         await claim_cache_target_events(
             migrated_session,
             external_system=_SYSTEM,
             consumer_id=_CONSUMER,
-            idempotency_key="82000000-0000-0000-0000-000000000004",
+            idempotency_key="82000000-0000-0000-0000-000000000006",
             limit=2,
         )
-    assert still_blocked.value.code == "blocked_event_not_head"
+        is None
+    )
 
 
 @pytest.mark.integration
@@ -1472,6 +1507,10 @@ async def test_mid_claim_dead_transition_requires_acked_prefix_then_replays(
         expected_delivery_version=dead.delivery_version,
     )
     assert replayed.status == "retry"
+    completed = await _resume_stream_after_dead_letter_replay(
+        migrated_session,
+        key="85000000-0000-0000-0000-000000000003",
+    )
     recovery = await claim_cache_target_events(
         migrated_session,
         external_system=_SYSTEM,
@@ -1480,7 +1519,12 @@ async def test_mid_claim_dead_transition_requires_acked_prefix_then_replays(
         limit=2,
     )
     assert recovery is not None
-    assert [event.event_id for event in recovery.events] == [poison.event_id]
+    assert [event.event_id for event in recovery.events[:1]] == [poison.event_id]
+    assert [event.event_type for event in recovery.events] == [
+        "cache_target.state_applied",
+        "cache_target.reconciled",
+    ]
+    assert recovery.events[1].payload["request_id"] == completed.request_id
 
 
 async def _apply_snapshot_source(
@@ -2751,6 +2795,36 @@ async def _reconciliation_command(
         request_fingerprint=fingerprint,
     )
     return claim.command_id
+
+
+async def _resume_stream_after_dead_letter_replay(
+    session: AsyncSession,
+    *,
+    key: str,
+):
+    """dead-letter replay 뒤의 consumer 재개는 checksum reconciliation만 허용한다."""
+
+    command_id = await _reconciliation_command(session, key=key)
+    request = await request_cache_target_reconciliation(
+        session,
+        command_id=command_id,
+        external_system=_SYSTEM,
+        reason="dead-letter replay resume",
+    )
+    assert request.snapshot_id is not None
+    assert request.restore_epoch is not None
+    assert request.expected_merkle_root is not None
+    completed = await complete_cache_target_reconciliation(
+        session,
+        request_id=request.request_id,
+        external_system=_SYSTEM,
+        consumer_id=_CONSUMER,
+        snapshot_id=request.snapshot_id,
+        expected_restore_epoch=request.restore_epoch,
+        actual_merkle_root=request.expected_merkle_root,
+    )
+    assert completed.status == "succeeded"
+    return completed
 
 
 @pytest.mark.integration

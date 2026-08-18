@@ -14,6 +14,18 @@ P2 4건(inventory 전수·snapshot ACL+phantom 2개·spoof 422·admin write UI �
 import(admin API preview→commit) → soak/live e2e(`docs/runbooks/c7-prod-live-e2e.md`, 백업/PITR
 먼저) → receipt complete → 40C manifest. H34/37D는 설계 v2 P2 정리 → ADR → 다음 PR.
 
+## 2026-08-18 — T-VN-41 #975 rebase 후 PostGIS recovery 회귀 수정
+
+#975 후보를 현재 `main` `ff25c397` 위로 rebase하고 permanent NACK의 consumer disable 계약에 맞춰
+dead-letter replay → checksum reconciliation → `cache_target.reconciled` 전달·ack 순서를 통합 테스트에
+고정했다. 대상 stream integration 33건과 Ruff가 통과했다. 직접 replay로 consumer를 여는 경로는 없다.
+
+### 다음 한 작업
+
+이 rebase head를 #975에 force-with-lease로 push해 원격 CI를 시작한다. 통과 뒤 새 Map head를 PinVi에
+재pin하고, 그 exact pair의 immutable candidate image로 n150 isolated Live UI E2E와 적대 리뷰를 다시
+실행한다. #975는 사용자 승인 전까지 머지하지 않는다. F1D 후속은 별도 draft #995에서 진행한다.
+
 ## 2026-08-18 — T-VN-41 task ledger를 후보 검증 상태로 정렬
 
 `tasks.md`는 #975의 정확한 source 쌍 후보 Live UI 복구·증거 결박·적대 재리뷰 통과를 `[~]`로

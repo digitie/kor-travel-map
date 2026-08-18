@@ -30,6 +30,18 @@
   감쌌다 — 이제 merge 통합 테스트 전체가 실제 role로 돈다.
 - 배포 선행: orchestrator `.env` `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`→`0222_tvn40a_merge_runtime_role`.
 
+## 2026-08-18 — T-VN-41 #975 rebase 뒤 stream recovery 회귀 정렬
+
+- #975 후보 브랜치를 `main` `ff25c397` 위로 rebase했다. permanent NACK가 consumer를
+  fail-closed로 disable하는 현재 계약 때문에 기존 PostGIS integration test 두 건이 직접 claim을
+  시도하며 깨진 것을 확인했다.
+- dead-letter replay 뒤에는 checksum reconciliation을 성공시켜 `cache_target.reconciled` outbox
+  event까지 정확히 전달·ack한 다음 빈 stream을 단언하도록 고쳤다. 재생만으로 consumer를 직접
+  enable하는 우회는 만들지 않았다.
+- `tests/integration/test_cache_target_stream_repo.py` 33건과 변경 파일 Ruff가 통과했다. 새 Map
+  source를 PinVi에 다시 pin하고 원격 CI·n150 isolated Live UI E2E를 통과하기 전까지 #975는
+  draft·미병합 상태다.
+
 ## 2026-08-18 — #993 rebase 뒤 tasks ledger 전면 정리
 
 - 문서 PR을 `main` `142a1c12`에 rebase하고, 인덱스를 열린 실행 단위만 남도록 다시 정렬했다.
