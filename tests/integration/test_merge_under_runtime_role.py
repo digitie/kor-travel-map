@@ -91,8 +91,17 @@ async def test_dagster_runtime_cannot_call_merge_procedures(
         with pytest.raises(DBAPIError) as info:
             async with as_dagster_runtime(session):
                 await session.execute(text(call))
-        message = str(info.value.orig)
-        assert "permission denied" in message.lower() or "admin executor" in message, (
-            message[:200]
-        )
+        orig = info.value.orig
+        # 어느 층이 거부했든 SQLSTATE는 42501이어야 한다. grant 층(EXECUTE가 admin executor에만)
+        # 이면 "permission denied for procedure", 게이트 층이면 "requires the admin executor".
+        # 둘 다 42501이라 한 층이 풀려도 여기서 red다.
+        assert getattr(orig, "sqlstate", None) == "42501", repr(orig)[:200]
+        await session.rollback()
+
+    # 양성 대조 — 같은 CALL을 API runtime(admin executor 상속)이 하면 통과한다. 이게 없으면
+    # "procedure가 아예 깨져서 모두 42501"인 상태와 구분이 안 된다.
+    async with AsyncSession(migrated_engine) as session:
+        await session.begin()
+        async with as_api_runtime(session):
+            await session.execute(text(call))
         await session.rollback()

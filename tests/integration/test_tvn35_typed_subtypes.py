@@ -53,6 +53,7 @@ from kortravelmap.infra.feature_subtype import (
     subtype_upsert_sql,
 )
 from kortravelmap.infra.merge_repo import MergeConflictError
+from tests.integration.conftest import as_api_runtime
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -943,12 +944,13 @@ async def test_cross_kind_merge_is_rejected(migrated_session: AsyncSession) -> N
     )
 
     with pytest.raises(MergeConflictError, match="kind가 다른"):
-        await merge_repo.apply_feature_merge(
-            migrated_session,
-            master_id="tvn35:merge:place",
-            loser_id="tvn35:merge:event",
-            merged_by="tvn35-test",
-        )
+        async with migrated_session.begin_nested(), as_api_runtime(migrated_session):
+            await merge_repo.apply_feature_merge(
+                migrated_session,
+                master_id="tvn35:merge:place",
+                loser_id="tvn35:merge:event",
+                merged_by="tvn35-test",
+            )
 
 
 async def test_same_kind_merge_keeps_master_subtype_and_preserves_loser(
@@ -958,12 +960,15 @@ async def test_same_kind_merge_keeps_master_subtype_and_preserves_loser(
     await _seed_place(migrated_session, "tvn35:merge:master", place_kind="cafe")
     await _seed_place(migrated_session, "tvn35:merge:loser", place_kind="restaurant")
 
-    await merge_repo.apply_feature_merge(
-        migrated_session,
-        master_id="tvn35:merge:master",
-        loser_id="tvn35:merge:loser",
-        merged_by="tvn35-test",
-    )
+    # merge는 실제 API runtime role로 — 0222 executor 게이트가 superuser를 거부하고, superuser는
+    # ACL을 안 봐 회귀도 못 잡는다. savepoint 안이라 뒤따르는 superuser 검증 SQL은 그대로다.
+    async with migrated_session.begin_nested(), as_api_runtime(migrated_session):
+        await merge_repo.apply_feature_merge(
+            migrated_session,
+            master_id="tvn35:merge:master",
+            loser_id="tvn35:merge:loser",
+            merged_by="tvn35-test",
+        )
     await migrated_session.flush()
 
     loser_lifecycle = (

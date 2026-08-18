@@ -860,6 +860,10 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
     - **배포 선행(잊지 말 것)**: orchestrator(docker-manager) `.env`의
       `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를 `0222_tvn40a_merge_runtime_role`로 올려야
       `api-entrypoint.sh`가 fail-closed로 막지 않는다. T-VN-40 인수 실행 ①의 첫 줄.
+    - 3차(재검증) P1 — executor 게이트가 superuser도 거부하는데 `test_cli_dedup_merge`(superuser
+      DSN)와 `test_tvn35_typed_subtypes`(migrated_session) 2건이 여전히 superuser로 merge를 몰았다
+      → CLI 테스트는 API runtime DSN(prod와 같음), tvn35는 `as_api_runtime`. `ktmctl dedup-merge`
+      help에 "DSN은 API runtime 로그인" 명시(superuser/migrator DSN은 42501).
   - 잔여: draft 해제 → CI → 머지. **①~② 전에 머지돼야 한다.**
 - [ ] **T-VN-40-mapping** — `ops.curation_cutover_identity_mappings` 적재 migration.
   설계 §6.2 step 3. PinVi backfill의 입력이다.
