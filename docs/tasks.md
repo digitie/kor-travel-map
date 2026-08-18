@@ -560,6 +560,12 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   진입한다 — `enable_seqscan=off`라 인덱스는 타지만 gate가 받는 이름 집합에 없다.
 - 원인 가설: `_seed_live_like_perf_data` 뒤 `ANALYZE` 표본이 실행마다 달라 동치 진입 경로 중
   하나를 고른다. 성능 축(선두 컬럼 selectivity)은 같지만 gate가 이름으로 고정한다.
+- **재현 실험(2026-08-18, n150)**: 같은 테스트 6회 연속 전부 pass(13~15s). 즉 로컬에서는 재현되지
+  않고 **CI 러너에서만** 뒤집힌다 — 코어 수·메모리·PostGIS 이미지 차이에서 오는 cost 추정 차이가
+  유력하다. 따라서 (c) seed 결정화는 로컬에서 검증할 수 없다.
+- **다음 발생 시 반드시 할 것**: 실패 로그의 `used={...}` 전문을 **잘리지 않게** 저장한다
+  (`gh run view <id> --log-failed | grep -A2 'expected one of'`). 지금까지 확보된 조각은
+  `used={'idx_source_lin…` 하나뿐이라 어떤 진입 경로였는지 확정하지 못했다.
 - 고칠 방향(택1, 근거 필요): (a) 진입 경로 동치 집합을 근거와 함께 넓힌다(왜 동치인지 주석 필수 —
   기존 `_FEATURES_PK_ACCESS` 선례), (b) gate를 "driving relation에 Seq Scan 없음"으로 바꾼다,
   (c) seed 통계를 결정적으로 만든다(`default_statistics_target`·행 수 상향). **PR마다 재실행이
