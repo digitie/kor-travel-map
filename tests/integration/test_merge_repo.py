@@ -19,7 +19,6 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.infra import curated_repo
 from kortravelmap.infra.curation_repo import (
     ResolvedCurationImportRow,
     add_curation_item,
@@ -2665,7 +2664,11 @@ async def test_import_first_merge_moves_newly_committed_membership(
             )
 
 
-@pytest.mark.parametrize("writer_kind", ["add", "feature_link", "legacy_create"])
+# T-VN-40A: `legacy_create` case를 뺐다. 그 case는 "merge 중 legacy writer가 끼어든다"를
+# 시뮬레이션했는데, fence 뒤로 legacy write는 static 층에서 즉시 죽어 **끼어들 수가
+# 없다.** 남겨두면 fence 예외를 race 결과로 오독한다. fence 자체는
+# `test_curated_repo.py::test_manual_curated_feature_writes_are_fenced`가 검증한다.
+@pytest.mark.parametrize("writer_kind", ["add", "feature_link"])
 async def test_merge_first_rechecks_all_membership_writer_feature_lifecycles(
     seeded: str,
     migrated_engine: AsyncEngine,
@@ -2682,20 +2685,6 @@ async def test_merge_first_rechecks_all_membership_writer_feature_lifecycles(
                         "SELECT collection_id::text "
                         "FROM feature.curation_collections "
                         "WHERE collection_key = 'merge-test:2026'"
-                    )
-                )
-            ).scalar_one()
-        )
-        source_id = str(
-            (
-                await setup.execute(
-                    text(
-                        "SELECT source.source_id::text "
-                        "FROM feature.curated_sources AS source "
-                        "JOIN provider_sync.provider_datasets AS dataset "
-                        "  ON dataset.provider_dataset_id = source.provider_dataset_id "
-                        "WHERE dataset.provider = 'merge-test-provider' "
-                        "AND dataset.dataset_key = 'legacy-curation'"
                     )
                 )
             ).scalar_one()
@@ -2758,14 +2747,8 @@ async def test_merge_first_rechecks_all_membership_writer_feature_lifecycles(
                     updates={"feature_id": "f_loser"},
                     actor="race-writer",
                 )
-            else:
-                await curated_repo.create_curated_feature(
-                    writer,
-                    theme_id=theme_id,
-                    feature_id="f_loser",
-                    source_id=source_id,
-                    actor="race-writer",
-                )
+            else:  # pragma: no cover — legacy_create는 parametrize에서 뺐다 (T-VN-40A)
+                raise AssertionError(f"unexpected writer_kind {writer_kind!r}")
 
     merge_task: asyncio.Task[None] | None = None
     writer_task: asyncio.Task[None] | None = None
@@ -2825,7 +2808,6 @@ async def test_merge_first_rechecks_all_membership_writer_feature_lifecycles(
         expected_refusal = {
             "add": "must reference an active Feature",
             "feature_link": "Feature가 없습니다",
-            "legacy_create": "must reference a selectable Feature",
         }[writer_kind]
         with pytest.raises(ValueError, match=expected_refusal):
             await asyncio.wait_for(writer_task, timeout=5)

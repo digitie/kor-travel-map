@@ -1760,7 +1760,7 @@ async def test_item_identity_patch_cannot_cross_resolved_or_unresolved_tombstone
         )
 
 
-async def test_legacy_writer_preserves_operator_override_and_tombstone(
+async def test_legacy_writer_is_fenced_and_canonical_is_untouched(
     migrated_session: AsyncSession,
 ) -> None:
     theme_id, source_id = await _seed_foundations(migrated_session)
@@ -1835,164 +1835,46 @@ async def test_legacy_writer_preserves_operator_override_and_tombstone(
     )
     assert public_page.items == ()
 
-    await curated_repo.set_curated_feature_status(
-        migrated_session,
-        curated_feature_id=legacy_id,
-        curation_status="curated",
-        actor="legacy-operator",
-    )
-    await migrated_session.execute(
-        text(
-            "UPDATE feature.curation_items "
-            "SET item_summary = 'canonical newer source', sort_order = 77, "
-            "source_updated_at = clock_timestamp() "
-            "WHERE curation_item_id = CAST(:legacy_id AS uuid)"
-        ),
-        {"legacy_id": legacy_id},
-    )
-    await curated_repo.update_curated_feature(
-        migrated_session,
-        curated_feature_id=legacy_id,
-        updates={
-            "curation_relation": "food_stop",
-            "reuse_policy": "allowed",
-        },
-        actor="legacy-patch-operator",
-    )
-    canonical_after_legacy = await get_curation_item(
+    # ── T-VN-40A fence ─────────────────────────────────────────────────
+    # 여기서부터는 원래 "legacy writer가 canonical item을 sync한다"를 검증했다.
+    # fence 후에는 **그 sync가 일어나면 안 된다** — legacy write 자체가 막힌다.
+    # 같은 자리에서 반대 방향을 단언해 fence 회귀를 잡는다.
+    from kortravelmap.infra.legacy_write_fence import LegacyWriteFenceError
+
+    before = await get_curation_item(
         migrated_session,
         collection_id=legacy_item[0],
         curation_item_id=legacy_item[1],
     )
-    assert canonical_after_legacy is not None
-    assert canonical_after_legacy.status == "included"
-    assert canonical_after_legacy.curation_relation == "food_stop"
-    assert canonical_after_legacy.reuse_policy == "allowed"
-    assert canonical_after_legacy.item_summary == "canonical newer source"
-    assert canonical_after_legacy.sort_order == 77
-    assert (
-        await migrated_session.execute(
-            text(
-                "SELECT operator_updated_by "
-                "FROM feature.curation_items "
-                "WHERE curation_item_id = CAST(:legacy_id AS uuid)"
-            ),
-            {"legacy_id": legacy_id},
-        )
-    ).scalar_one() == "legacy-patch-operator"
-    operator_revision = (
-        await migrated_session.execute(
-            text(
-                "SELECT operator_updated_by, operator_updated_at "
-                "FROM feature.curated_features "
-                "WHERE curated_feature_id = CAST(:legacy_id AS uuid)"
-            ),
-            {"legacy_id": legacy_id},
-        )
-    ).one()
-    await curated_repo.update_curated_feature(
-        migrated_session,
-        curated_feature_id=legacy_id,
-        updates={"display_summary": "source-only legacy patch"},
-        actor="source-only-admin",
-    )
-    assert (
-        await migrated_session.execute(
-            text(
-                "SELECT operator_updated_by, operator_updated_at "
-                "FROM feature.curated_features "
-                "WHERE curated_feature_id = CAST(:legacy_id AS uuid)"
-            ),
-            {"legacy_id": legacy_id},
-        )
-    ).one() == operator_revision
-    with pytest.raises(ValueError, match="legacy writer"):
-        await update_curation_item(
+    assert before is not None
+
+    with pytest.raises(LegacyWriteFenceError):
+        await curated_repo.set_curated_feature_status(
             migrated_session,
-            collection_id=legacy_item[0],
-            curation_item_id=legacy_item[1],
-            updates={"item_summary": "canonical source drift"},
-            actor="canonical-source-admin",
+            curated_feature_id=legacy_id,
+            curation_status="curated",
+            actor="legacy-operator",
+        )
+    with pytest.raises(LegacyWriteFenceError):
+        await curated_repo.update_curated_feature(
+            migrated_session,
+            curated_feature_id=legacy_id,
+            updates={"curation_relation": "food_stop", "reuse_policy": "allowed"},
+            actor="legacy-patch-operator",
         )
 
-    await update_curation_item(
-        migrated_session,
-        collection_id=legacy_item[0],
-        curation_item_id=legacy_item[1],
-        updates={
-            "status": "rejected",
-            "curation_relation": "primary_stop",
-            "reuse_policy": "blocked",
-        },
-        actor="operator",
-    )
-    await migrated_session.execute(
-        text(
-            "UPDATE feature.curated_features "
-            "SET display_summary = 'provider changed', rank_score = 42, "
-            "curation_relation = 'food_stop', reuse_policy = 'allowed', "
-            "updated_at = clock_timestamp() "
-            "WHERE curated_feature_id = CAST(:legacy_id AS uuid)"
-        ),
-        {"legacy_id": legacy_id},
-    )
-    preserved = await get_curation_item(
+    # fence가 static 층에서 잡았으므로 DB에는 아무것도 닿지 않았어야 한다.
+    after = await get_curation_item(
         migrated_session,
         collection_id=legacy_item[0],
         curation_item_id=legacy_item[1],
     )
-    assert preserved is not None
-    assert preserved.source_present is True
-    assert preserved.status == "rejected"
-    assert preserved.curation_relation == "primary_stop"
-    assert preserved.reuse_policy == "blocked"
-    assert preserved.item_summary == "provider changed"
-    assert preserved.sort_order == 42
-
-    archived = await archive_curation_item(
-        migrated_session,
-        collection_id=legacy_item[0],
-        curation_item_id=legacy_item[1],
-        actor="operator",
-    )
-    assert archived is not None
-    legacy_archived = (
-        await migrated_session.execute(
-            text(
-                "SELECT curation_status, archived_at IS NOT NULL "
-                "FROM feature.curated_features "
-                "WHERE curated_feature_id = CAST(:legacy_id AS uuid)"
-            ),
-            {"legacy_id": legacy_id},
-        )
-    ).one()
-    assert legacy_archived == ("archived", True)
-    await migrated_session.execute(
-        text(
-            "UPDATE feature.curated_features "
-            "SET display_summary = 'must not resurrect', "
-            "updated_at = clock_timestamp() "
-            "WHERE curated_feature_id = CAST(:legacy_id AS uuid)"
-        ),
-        {"legacy_id": legacy_id},
-    )
-    await migrated_session.execute(
-        text(
-            "DELETE FROM feature.curated_features "
-            "WHERE curated_feature_id = CAST(:legacy_id AS uuid)"
-        ),
-        {"legacy_id": legacy_id},
-    )
-    tombstone = await get_curation_item(
-        migrated_session,
-        collection_id=legacy_item[0],
-        curation_item_id=legacy_item[1],
-        include_archived=True,
-    )
-    assert tombstone is not None
-    assert tombstone.status == "archived"
-    assert tombstone.item_summary == "provider changed"
-
+    assert after is not None
+    assert after.status == before.status
+    assert after.curation_relation == before.curation_relation
+    assert after.reuse_policy == before.reuse_policy
+    assert after.item_summary == before.item_summary
+    assert after.sort_order == before.sort_order
 
 async def test_legacy_identity_move_does_not_overwrite_occupied_target(
     migrated_session: AsyncSession,
@@ -2160,16 +2042,22 @@ async def test_legacy_identity_move_does_not_overwrite_occupied_target(
         )
     ).items == ()
 
-    blocked = await curated_repo.update_curated_feature(
-        migrated_session,
-        curated_feature_id=legacy_id,
-        updates={
-            "curation_status": "curated",
-            "metadata": {},
-        },
-        actor="detached-attacker",
-    )
-    assert blocked is None
+    # T-VN-40A: 원래는 "detached legacy row에 대한 legacy update가 조용히 None으로
+    # 막힌다"를 검증했다. fence 뒤로는 그보다 앞에서 — static 층에서 — 예외로 막힌다.
+    # 어느 쪽이든 legacy write가 canonical을 건드리지 못한다는 사실은 같고, 그 사실을
+    # 아래 raw UPDATE 뒤의 단언들이 계속 검증한다.
+    from kortravelmap.infra.legacy_write_fence import LegacyWriteFenceError
+
+    with pytest.raises(LegacyWriteFenceError):
+        await curated_repo.update_curated_feature(
+            migrated_session,
+            curated_feature_id=legacy_id,
+            updates={
+                "curation_status": "curated",
+                "metadata": {},
+            },
+            actor="detached-attacker",
+        )
 
     await migrated_session.execute(
         text(
