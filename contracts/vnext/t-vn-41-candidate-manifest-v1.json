@@ -1,0 +1,14 @@
+{
+  "schema": "t-vn-41-compatible-pair-candidate-manifest-v1",
+  "map_commit": "77821001f2c430f4c7d1c2c8509fff990dd8ad08",
+  "pinvi_commit": "e8e0fecfcb2c75899a2b558afb9ab2056c68d987",
+  "map_service_openapi_sha256": "c6f9aba6ab4b815c394e5e1cb5fb4a2c3488d147d5bb1a7e21b92c1796f4aebd",
+  "pinvi_service_vendor_sha256": "c6f9aba6ab4b815c394e5e1cb5fb4a2c3488d147d5bb1a7e21b92c1796f4aebd",
+  "runtime_images": {
+    "map_api": "sha256:6a4cf793d191f30d9de3afb65e0bc114f6c72b3e5aa11af69204f32a44bd4b1f",
+    "map_ui": "sha256:b0bdd0c41fe49017c94e71c4f48cb1f9c09779964da74858d96da520420034f0",
+    "map_dagster_web": "sha256:2f7ac8ecb1552ab8e5cc05b6a11fce5bf9e3c1856d8823f5f1731adb6e354e99",
+    "map_dagster_daemon": "sha256:00082696d75057ba05ea62811a52956ea98915fe88de4eca0f829b80b795f3ce",
+    "pinvi_api": "sha256:9e8e2acb4993f35fa5c223162cf77e9c5d646fcbf7e0ff45550c7cc56f8c3445"
+  }
+}

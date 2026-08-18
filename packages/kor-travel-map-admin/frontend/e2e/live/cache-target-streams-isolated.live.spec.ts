@@ -151,9 +151,12 @@ test.describe("/ops/cache-target-streams isolated live recovery", () => {
     expect(initialStreams.status).toBe(200);
     const initialStream = requireStream(initialStreams.body, config);
     expect(initialStream.state).toBe("blocked");
+    expect(initialStream.consumer_enabled).toBe(false);
     expect(initialStream.blocked_event_id).toBe(config.deadEventId);
-    expect(backlogCount(initialStream)).toBeGreaterThan(0);
-    expect(initialStream.dead_count).toBeGreaterThan(0);
+    expect(initialStream.pending_count).toBe(1);
+    expect(initialStream.leased_count).toBe(0);
+    expect(initialStream.retry_count).toBe(0);
+    expect(initialStream.dead_count).toBe(1);
 
     const deadList = await fetchBffJson<CacheTargetDeadLetterListResponse>(
       page,
@@ -218,6 +221,7 @@ test.describe("/ops/cache-target-streams isolated live recovery", () => {
         expectedStatus: 202,
       },
     );
+    expect(reconciliationReceipt.data.operation_id).toMatch(UUID_PATTERN);
     const reconciliationSnapshotId = reconciliationReceipt.data.snapshot_id;
     if (typeof reconciliationSnapshotId !== "string") {
       throw new Error("reconciliation receipt snapshot_id가 없습니다.");
@@ -234,9 +238,13 @@ test.describe("/ops/cache-target-streams isolated live recovery", () => {
       .toEqual({
         backlog: 0,
         blockedEventId: null,
+        consumerEnabled: true,
         count: config.expectedCount,
         dead: 0,
+        leased: 0,
         merkleRoot: config.expectedMerkleRoot,
+        pending: 0,
+        retry: 0,
         snapshotId: reconciliationSnapshotId,
         state: "ready",
       });
@@ -729,9 +737,13 @@ async function finalReadiness(
 ): Promise<{
   backlog: number;
   blockedEventId: string | null;
+  consumerEnabled: boolean;
   count: number | null;
   dead: number;
+  leased: number;
   merkleRoot: string | null;
+  pending: number;
+  retry: number;
   snapshotId: string | null;
   state: string;
 }> {
@@ -743,9 +755,13 @@ async function finalReadiness(
     return {
       backlog: -1,
       blockedEventId: "unavailable",
+      consumerEnabled: false,
       count: null,
       dead: -1,
+      leased: -1,
       merkleRoot: null,
+      pending: -1,
+      retry: -1,
       snapshotId: null,
       state: "unavailable",
     };
@@ -758,9 +774,13 @@ async function finalReadiness(
     return {
       backlog: -1,
       blockedEventId: "missing",
+      consumerEnabled: false,
       count: null,
       dead: -1,
+      leased: -1,
       merkleRoot: null,
+      pending: -1,
+      retry: -1,
       snapshotId: null,
       state: "missing",
     };
@@ -769,9 +789,13 @@ async function finalReadiness(
   return {
     backlog: backlogCount(stream),
     blockedEventId: stream.blocked_event_id,
+    consumerEnabled: stream.consumer_enabled,
     count: stream.last_snapshot?.count ?? null,
     dead: stream.dead_count,
+    leased: stream.leased_count,
     merkleRoot: stream.last_snapshot?.merkle_root ?? null,
+    pending: stream.pending_count,
+    retry: stream.retry_count,
     snapshotId,
     state: snapshotId === expectedSnapshotId ? stream.state : "snapshot_mismatch",
   };

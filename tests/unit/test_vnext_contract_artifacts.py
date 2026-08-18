@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from kortravelmap.core.cache_target_stream import SnapshotMerkleRowV1
+from scripts.lib.c7_prod_attestation import PAIR_RUNTIME_IMAGE_FIELDS
 
 _ROOT: Final = Path(__file__).resolve().parents[2]
 _CONTRACTS: Final = _ROOT / "contracts" / "vnext"
@@ -45,11 +46,11 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     ),
     # 2026-08-13 T-VN-40 — public legacy catalog 제거, scoped service snapshot/mapping,
     # admin catalog/import/candidate ETag·412/428 목표 diff를 machine freeze했다.
-    "openapi-diff-v1.json": ("6843548b63814772cef25fdb010ebbb5faf6662cde3f80bbdff748f865c42ee7"),
+    "openapi-diff-v1.json": ("3a9984e47b682e07cc389d38524d6c8d47bb03a23f06095a660331afe0b0cc88"),
     # 2026-08-13 T-VN-36 — receipt가 리베이스로 폐기된 커밋(c1fa5a4d)과 그때의
     # spec sha를 가리키고 있었다. 현재 head로 재핀했다.
     "consumer-rollout-v1.json": (
-        "268b02115edda88a66fe1e0e139ff0b7bce91eb3567163ffc4013c25682271e3"
+        "346795d3fa42f0029745b39202b20af03c4ab09231bb95166ac65c84045c2444"
     ),
     "violation-fixtures-v1.sql": (
         "84cca48b776387e4b6fd00b702e40b3412c9731f6abcdd250a5c126c2ea155d8"
@@ -83,9 +84,20 @@ _WAVE2_TASKS: Final = (
     "T-VN-37",
     "T-VN-38",
     "T-VN-40",
+    "T-VN-41",
     "T-VN-39",
 )
 _REVENDOR_VALUES: Final = frozenset({"yes", "no", "deferred-to-implementation"})
+_C7_ROLE_RECEIPT_FIELDS: Final[dict[str, tuple[str, str]]] = {
+    "map_api": ("map_image_id", "map_api_image_id"),
+    "map_ui": ("map_ui_image_id", "map_ui_image_id"),
+    "map_dagster_web": ("map_dagster_image_id", "map_dagster_web_image_id"),
+    "map_dagster_daemon": (
+        "map_dagster_daemon_image_id",
+        "map_dagster_daemon_image_id",
+    ),
+    "pinvi_api": ("pinvi_image_id", "pinvi_api_image_id"),
+}
 
 
 def _load_json(name: str) -> dict[str, Any]:
@@ -134,6 +146,7 @@ def test_frozen_artifacts_have_no_crlf() -> None:
         assert b"\r\n" not in (_CONTRACTS / name).read_bytes(), (
             f"{name} contains CRLF — frozen artifact는 LF bytes로만 저장해야 한다"
         )
+
 
 def test_openapi_diff_baseline_matches_current_specs() -> None:
     diff = _load_json("openapi-diff-v1.json")
@@ -259,6 +272,92 @@ def test_consumer_rollout_shape() -> None:
         "PinVi contract pin consistency",
         "T-VN-36 exact Map/PinVi source pair",
     ]
+    paired_receipt = rollout["tasks"]["T-VN-41"]["pinvi_snapshot_receipt"]
+    service_sha256 = hashlib.sha256(
+        (_ROOT / "packages/kor-travel-map-api/openapi.service.json").read_bytes()
+    ).hexdigest()
+    assert paired_receipt["state"] in {"pending", "candidate_verified", "complete"}
+    if paired_receipt["state"] == "pending":
+        assert set(paired_receipt) == {
+            "state",
+            "map_service_openapi_sha256",
+            "pinvi_service_vendor_sha256",
+            "blocking_reason",
+        }
+        assert paired_receipt["blocking_reason"].strip()
+        assert paired_receipt["map_service_openapi_sha256"] == service_sha256
+        assert (
+            paired_receipt["map_service_openapi_sha256"]
+            == paired_receipt["pinvi_service_vendor_sha256"]
+        )
+    else:
+        required_keys = {
+            "state",
+            "map_service_openapi_sha256",
+            "pinvi_service_vendor_sha256",
+            "verification",
+        }
+        assert dict(PAIR_RUNTIME_IMAGE_FIELDS) == {
+            role: active_field for role, (active_field, _) in _C7_ROLE_RECEIPT_FIELDS.items()
+        }
+        if paired_receipt["state"] == "candidate_verified":
+            prefix = "candidate_"
+            state_keys = {
+                f"{prefix}map_commit",
+                f"{prefix}pinvi_commit",
+                f"{prefix}compatible_pair_manifest_sha256",
+                f"{prefix}compatible_pair_attestation_sha256",
+                f"{prefix}live_e2e_evidence_sha256",
+                "final_c7_required",
+            }
+            assert paired_receipt["final_c7_required"] is True
+        else:
+            prefix = "final_"
+            state_keys = {
+                f"{prefix}map_commit",
+                f"{prefix}pinvi_commit",
+                f"{prefix}compatible_pair_manifest_sha256",
+                f"{prefix}c7_attestation_sha256",
+                f"{prefix}live_e2e_evidence_sha256",
+            }
+        image_keys = {
+            f"{prefix}{receipt_field}" for _, receipt_field in _C7_ROLE_RECEIPT_FIELDS.values()
+        }
+        assert len(image_keys) == len(PAIR_RUNTIME_IMAGE_FIELDS)
+        assert set(paired_receipt) == required_keys | state_keys | image_keys
+        for key in (f"{prefix}map_commit", f"{prefix}pinvi_commit"):
+            assert re.fullmatch(r"[0-9a-f]{40}", paired_receipt[key]), key
+        for key in (
+            "map_service_openapi_sha256",
+            "pinvi_service_vendor_sha256",
+            f"{prefix}compatible_pair_manifest_sha256",
+            (
+                f"{prefix}compatible_pair_attestation_sha256"
+                if paired_receipt["state"] == "candidate_verified"
+                else f"{prefix}c7_attestation_sha256"
+            ),
+            f"{prefix}live_e2e_evidence_sha256",
+        ):
+            assert re.fullmatch(r"[0-9a-f]{64}", paired_receipt[key]), key
+        for key in image_keys:
+            assert re.fullmatch(r"sha256:[0-9a-f]{64}", paired_receipt[key]), key
+        assert paired_receipt["map_service_openapi_sha256"] == service_sha256
+        assert (
+            paired_receipt["map_service_openapi_sha256"]
+            == paired_receipt["pinvi_service_vendor_sha256"]
+        )
+        expected_verification = [
+            "PinVi service vendor bytes are exact",
+            "n150 isolated candidate Map/PinVi Live UI E2E passed",
+            "candidate archive, immutable images, and attestation are exact",
+        ]
+        if paired_receipt["state"] == "candidate_verified":
+            assert paired_receipt["verification"] == expected_verification
+        else:
+            assert paired_receipt["verification"] == [
+                *expected_verification,
+                "final main C7 attestation passed",
+            ]
 
 
 def test_active_pinvi_receipt_describes_current_consumed_specs() -> None:
@@ -337,6 +436,165 @@ def test_active_pinvi_receipt_describes_current_consumed_specs() -> None:
         assert entry["fenced_by"].startswith("T-VN-")
         assert isinstance(entry["object"], str)
         assert entry["object"]
+
+
+def test_tvn41_candidate_receipt_binds_immutable_live_evidence() -> None:
+    """T-VN-41 후보 receipt가 실행한 archive·image·UI 증적을 직접 가리킨다.
+
+    receipt의 digest를 모양만 검증하면 서로 무관한 임의 문자열을 넣어
+    ``candidate_verified``를 선언할 수 있다. 세 JSON의 raw bytes와 receipt를 함께
+    고정해, source pair·C7 5-image 역할·blocked→ready UI 회복 증적이 한 후보임을
+    CI에서 fail-closed로 확인한다.
+    """
+
+    rollout = _load_json("consumer-rollout-v1.json")
+    receipt = rollout["tasks"]["T-VN-41"]["pinvi_snapshot_receipt"]
+    assert receipt["state"] == "candidate_verified"
+
+    manifest_path = _CONTRACTS / "t-vn-41-candidate-manifest-v1.json"
+    attestation_path = _CONTRACTS / "t-vn-41-candidate-attestation-v1.json"
+    evidence_path = _CONTRACTS / "t-vn-41-candidate-live-e2e-evidence-v1.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    attestation = json.loads(attestation_path.read_text(encoding="utf-8"))
+    evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+
+    manifest_sha256 = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
+    attestation_sha256 = hashlib.sha256(attestation_path.read_bytes()).hexdigest()
+    evidence_sha256 = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
+    assert receipt["candidate_compatible_pair_manifest_sha256"] == manifest_sha256
+    assert receipt["candidate_compatible_pair_attestation_sha256"] == attestation_sha256
+    assert receipt["candidate_live_e2e_evidence_sha256"] == evidence_sha256
+
+    assert set(manifest) == {
+        "schema",
+        "map_commit",
+        "pinvi_commit",
+        "map_service_openapi_sha256",
+        "pinvi_service_vendor_sha256",
+        "runtime_images",
+    }
+    assert manifest["schema"] == "t-vn-41-compatible-pair-candidate-manifest-v1"
+    assert manifest["map_commit"] == receipt["candidate_map_commit"]
+    assert manifest["pinvi_commit"] == receipt["candidate_pinvi_commit"]
+    assert manifest["map_service_openapi_sha256"] == receipt["map_service_openapi_sha256"]
+    assert manifest["pinvi_service_vendor_sha256"] == receipt["pinvi_service_vendor_sha256"]
+
+    expected_images = {
+        role: receipt[f"candidate_{receipt_field}"]
+        for role, (_, receipt_field) in _C7_ROLE_RECEIPT_FIELDS.items()
+    }
+    assert dict(PAIR_RUNTIME_IMAGE_FIELDS) == {
+        role: active_field for role, (active_field, _) in _C7_ROLE_RECEIPT_FIELDS.items()
+    }
+    assert manifest["runtime_images"] == expected_images
+
+    assert set(attestation) == {
+        "schema",
+        "manifest_sha256",
+        "map_application_schema_head",
+        "pinvi_application_schema_head",
+        "runtime_image_revisions",
+        "runtime_images",
+        "candidate_boundary",
+    }
+    assert attestation["schema"] == "t-vn-41-compatible-pair-candidate-attestation-v1"
+    assert attestation["manifest_sha256"] == manifest_sha256
+    assert attestation["runtime_images"] == expected_images
+    assert attestation["runtime_image_revisions"] == {
+        role: (
+            receipt["candidate_pinvi_commit"]
+            if role == "pinvi_api"
+            else receipt["candidate_map_commit"]
+        )
+        for role, _ in PAIR_RUNTIME_IMAGE_FIELDS
+    }
+    assert attestation["map_application_schema_head"]
+    assert attestation["pinvi_application_schema_head"]
+    assert "final main C7" in attestation["candidate_boundary"]
+    assert "production consumer enable" in attestation["candidate_boundary"]
+
+    assert set(evidence) == {
+        "schema",
+        "candidate_compatible_pair_attestation_sha256",
+        "initial_blocked_stream",
+        "final_ready_stream",
+        "playwright",
+    }
+    assert evidence["schema"] == "t-vn-41-candidate-live-e2e-evidence-v1"
+    assert evidence["candidate_compatible_pair_attestation_sha256"] == attestation_sha256
+    initial = evidence["initial_blocked_stream"]
+    final = evidence["final_ready_stream"]
+    assert set(initial) == {
+        "external_system",
+        "consumer_id",
+        "restore_epoch",
+        "state",
+        "consumer_enabled",
+        "blocked_event_id",
+        "snapshot_id",
+        "snapshot_count",
+        "snapshot_merkle_root",
+        "dead_event_id",
+        "delivery_counts",
+    }
+    assert set(final) == {
+        "external_system",
+        "consumer_id",
+        "restore_epoch",
+        "state",
+        "consumer_enabled",
+        "blocked_event_id",
+        "snapshot_id",
+        "snapshot_count",
+        "snapshot_merkle_root",
+        "delivery_counts",
+        "reconciliation",
+    }
+    assert initial["external_system"] == final["external_system"] == "pinvi"
+    assert initial["consumer_id"] == final["consumer_id"] == "pinvi-cache-target-consumer"
+    assert initial["restore_epoch"] == final["restore_epoch"]
+    assert initial["state"] == "blocked"
+    assert initial["consumer_enabled"] is False
+    assert initial["blocked_event_id"] == initial["dead_event_id"]
+    assert initial["snapshot_count"] == final["snapshot_count"] == 1
+    assert initial["snapshot_merkle_root"] == final["snapshot_merkle_root"]
+    assert re.fullmatch(r"[0-9a-f-]{36}", initial["snapshot_id"])
+    assert re.fullmatch(r"[0-9a-f-]{36}", final["snapshot_id"])
+    assert re.fullmatch(r"[0-9a-f-]{36}", initial["dead_event_id"])
+    assert initial["delivery_counts"] == {
+        "pending": 1,
+        "leased": 0,
+        "retry": 0,
+        "dead": 1,
+    }
+    assert final["state"] == "ready"
+    assert final["consumer_enabled"] is True
+    assert final["blocked_event_id"] is None
+    assert final["delivery_counts"] == {
+        "pending": 0,
+        "leased": 0,
+        "retry": 0,
+        "dead": 0,
+    }
+    reconciliation = final["reconciliation"]
+    assert reconciliation == {
+        "request_id": reconciliation["request_id"],
+        "status": "succeeded",
+        "snapshot_id": final["snapshot_id"],
+        "restore_epoch": final["restore_epoch"],
+        "snapshot_count": final["snapshot_count"],
+        "snapshot_merkle_root": final["snapshot_merkle_root"],
+    }
+    assert re.fullmatch(r"[0-9a-f-]{36}", reconciliation["request_id"])
+    assert evidence["playwright"] == {
+        "spec": "cache-target-streams-isolated.live.spec.ts",
+        "browser": "chromium",
+        "workers": 1,
+        "retries": 0,
+        "result": "passed",
+        "bff_only": True,
+        "browser_service_token_exposure": "absent",
+    }
 
 
 def test_recovery_preflight_shape() -> None:

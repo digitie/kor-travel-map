@@ -12,12 +12,16 @@ from kortravelmap.core.cache_target_stream import (
     validate_cache_target_external_system,
     validate_cache_target_key,
 )
+from kortravelmap.infra.cache_target_event_repo import (
+    append_cache_target_refresh_status_events,
+    capture_cache_target_refresh_members_by_keys,
+)
 from kortravelmap.infra.cache_target_stream_repo import CacheTargetStreamConflict
 from kortravelmap.infra.domain_command_repo import canonical_domain_command_fingerprint
 from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateRequest,
     create_feature_update_request_idempotency,
-    enqueue_feature_update_request,
+    enqueue_cache_target_service_refresh_request,
     get_feature_update_request_idempotency,
     get_update_request,
     lock_feature_update_request_idempotency,
@@ -50,6 +54,46 @@ LEFT JOIN ops.poi_cache_target_source_events AS source
 LEFT JOIN ops.poi_cache_targets AS target
   ON target.target_id = head.target_id
 WHERE head.external_system = :external_system AND head.target_key = :target_key
+"""
+
+# 요청한 key 중 stream의 활성 target(존재·미삭제·update_enabled·policy 활성)이 아닌 것.
+# PinVi service refresh는 **exact key set** 계약이다 — 실행자가 captured member set과 요청
+# key set이 같은지 검사하므로(`pinvi_cache_target_refresh_protocol_error`) intake에서 한 key라도
+# member가 될 수 없으면 queue에 넣지 않고 409로 돌려준다. 그렇지 않으면 202/queued 뒤 실행
+# 시점에 relay event 없이 fail-close되는 요청이 생긴다(#975 적대 재리뷰 P1).
+_INACTIVE_REFRESH_TARGET_KEYS_SQL = """
+SELECT requested.target_key
+FROM unnest(CAST(:target_keys AS text[])) AS requested(target_key)
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM ops.poi_cache_targets AS target
+    WHERE target.external_system = :external_system
+      AND target.target_key = requested.target_key
+      AND target.deleted_at IS NULL
+      AND target.update_enabled
+      AND target.refresh_policy <> 'disabled'
+)
+ORDER BY requested.target_key
+"""
+
+_MISSING_ACTIVE_REFRESH_SOURCE_HEADS_SQL = """
+SELECT target.target_key
+FROM ops.poi_cache_targets AS target
+JOIN ops.poi_cache_target_streams AS stream
+  ON stream.external_system = target.external_system
+LEFT JOIN ops.poi_cache_target_source_heads AS head
+  ON head.external_system = target.external_system
+ AND head.target_key = target.target_key
+ AND head.target_id = target.target_id
+ AND head.state = 'active'
+ AND head.restore_epoch = stream.restore_epoch
+WHERE target.external_system = :external_system
+  AND target.target_key = ANY(CAST(:target_keys AS text[]))
+  AND target.deleted_at IS NULL
+  AND target.update_enabled
+  AND target.refresh_policy <> 'disabled'
+  AND head.target_id IS NULL
+ORDER BY target.target_key
 """
 
 
@@ -191,6 +235,61 @@ async def _refresh_scope_memberships(
     )
 
 
+async def _require_active_refresh_source_heads(
+    session: AsyncSession,
+    *,
+    external_system: str,
+    target_keys: Sequence[str],
+) -> None:
+    """요청 key 전부가 활성 target이고, 각각 현 stream epoch의 active source head를 갖게 한다."""
+
+    inactive_target_keys = tuple(
+        str(value)
+        for value in (
+            await session.execute(
+                text(_INACTIVE_REFRESH_TARGET_KEYS_SQL),
+                {
+                    "external_system": external_system,
+                    "target_keys": list(target_keys),
+                },
+            )
+        ).scalars()
+    )
+    if inactive_target_keys:
+        raise CacheTargetStreamConflict(
+            "refresh_target_inactive",
+            "요청 target key 중 활성 target이 아닌 것(없음·삭제·update_enabled=false·"
+            "refresh_policy=disabled)이 있어 요청을 queue에 넣을 수 없습니다. PinVi service "
+            "refresh는 exact key set 계약이다 — 해당 key를 빼고 다시 요청한다.",
+            current={
+                "external_system": external_system,
+                "target_keys": list(inactive_target_keys),
+            },
+        )
+    missing_target_keys = tuple(
+        str(value)
+        for value in (
+            await session.execute(
+                text(_MISSING_ACTIVE_REFRESH_SOURCE_HEADS_SQL),
+                {
+                    "external_system": external_system,
+                    "target_keys": list(target_keys),
+                },
+            )
+        ).scalars()
+    )
+    if missing_target_keys:
+        raise CacheTargetStreamConflict(
+            "refresh_source_head_missing",
+            "활성 refresh target의 현 restore epoch source head가 없어 요청을 "
+            "queue에 넣을 수 없습니다.",
+            current={
+                "external_system": external_system,
+                "target_keys": list(missing_target_keys),
+            },
+        )
+
+
 async def create_cache_target_refresh_request(
     session: AsyncSession,
     *,
@@ -247,7 +346,7 @@ async def create_cache_target_refresh_request(
         await session.execute(
             text(
                 "SELECT consumer_id FROM ops.poi_cache_target_streams "
-                "WHERE external_system = :external_system FOR KEY SHARE"
+                "WHERE external_system = :external_system FOR UPDATE"
             ),
             {"external_system": external_system},
         )
@@ -264,18 +363,50 @@ async def create_cache_target_refresh_request(
         "external_system": external_system,
         "target_keys": list(canonical_target_keys),
     }
+    # source command도 stream을 먼저 ``FOR UPDATE``로 잡은 다음 source head를
+    # 갱신한다. 여기서 같은 강한 lock을 선점하면 capture의 stream re-lock이 lock
+    # upgrade가 되지 않고, legacy target도 source-generation outbox를 우회할 수 없다.
+    await _require_active_refresh_source_heads(
+        session,
+        external_system=external_system,
+        target_keys=canonical_target_keys,
+    )
     memberships = await _refresh_scope_memberships(
         session,
         scope=scope,
         external_system=external_system,
     )
-    request = await enqueue_feature_update_request(
+    request = await enqueue_cache_target_service_refresh_request(
         session,
         scope=scope,
         dataset_memberships=memberships,
-        run_mode="queued",
         operator=actor,
         reason=reason,
+    )
+    # 요청을 queue에 넣는 것 자체가 PinVi가 관측해야 하는 상태 전이다. 실행자가
+    # running으로 claim할 때까지 기다리면, queue에서 취소·정지된 요청은 relay에
+    # 영영 나타나지 않는다. source tuple snapshot과 queued event를 이 mutation과
+    # 같은 transaction에 남긴다.
+    members = await capture_cache_target_refresh_members_by_keys(
+        session,
+        request_id=request.request_id,
+        external_system=external_system,
+        target_keys=canonical_target_keys,
+    )
+    captured_keys = {member.target_key for member in members}
+    if captured_keys != set(canonical_target_keys):
+        # 위 두 검사(활성 target·active head)가 stream FOR UPDATE 아래서 통과했으면 여기 올 수
+        # 없다. 오면 intake 불변식이 깨진 것이고, 실행 시점의 조용한 fail-close보다 지금 죽는 게
+        # 낫다.
+        missing = sorted(set(canonical_target_keys) - captured_keys)
+        raise RuntimeError(
+            f"refresh member capture가 요청 target key set과 다릅니다 — missing={missing}"
+        )
+    await append_cache_target_refresh_status_events(
+        session,
+        request_id=request.request_id,
+        job_id=request.job_id,
+        status="queued",
     )
     await create_feature_update_request_idempotency(
         session,

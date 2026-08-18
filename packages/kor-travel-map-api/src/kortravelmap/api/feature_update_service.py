@@ -88,6 +88,11 @@ DEFAULT_STATUS_URL_PREFIX = "/v1/ops/pipeline/executions/update_request"
 _SIGUNGU_RESOLVER_REQUIRED_MESSAGE = (
     "sigungu_by_radius scope에는 KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL 설정이 필요합니다."
 )
+_PINVI_CACHE_TARGET_SYSTEM = "pinvi"
+_PINVI_CACHE_TARGET_SERVICE_REQUEST_MESSAGE = (
+    "PinVi cache target refresh는 /v1/service/refresh-requests "
+    "ServiceToken 경로로만 요청할 수 있습니다."
+)
 
 
 class FeatureUpdateServiceError(Exception):
@@ -167,6 +172,16 @@ class FeatureUpdateEnqueueError(RuntimeError, FeatureUpdateServiceError):
 
 def _scope_payload(scope: FeatureUpdateScope) -> dict[str, Any]:
     return scope.model_dump(mode="json", exclude_none=True)
+
+
+def _reject_pinvi_cache_target_generic_writer(scope: Mapping[str, Any]) -> None:
+    """PinVi source head/outbox writer를 일반 ops queue가 우회하지 못하게 한다."""
+
+    if (
+        scope.get("type") == "cache_target_keys"
+        and scope.get("external_system") == _PINVI_CACHE_TARGET_SYSTEM
+    ):
+        raise FeatureUpdateValidationError(_PINVI_CACHE_TARGET_SERVICE_REQUEST_MESSAGE)
 
 
 def _update_policy_payload(policy: FeatureUpdatePolicy) -> dict[str, Any]:
@@ -505,6 +520,7 @@ async def enqueue_update_request(
     settings: KorTravelMapSettings,
 ) -> FeatureUpdateRequest:
     """HTTP scope를 DB-validated canonical snapshot으로 적재한다."""
+    _reject_pinvi_cache_target_generic_writer(scope)
     core_scope, direct_memberships = _core_scope_and_memberships(scope)
     preview = await _preview_resolved_update_request(
         session,
@@ -808,7 +824,8 @@ async def create_feature_update_request(
             actor=operator,
         )
         body = await resolve_feature_ids_scope_refs(body, session)
-        scope, direct_memberships = _core_scope_and_memberships(_scope_payload(body.scope))
+        scope_payload = _scope_payload(body.scope)
+        scope, direct_memberships = _core_scope_and_memberships(scope_payload)
         update_policy = _update_policy_payload(body.update_policy)
         mapping = await get_feature_update_request_idempotency(
             session,
@@ -841,6 +858,7 @@ async def create_feature_update_request(
             replayed = True
             reused = mapping.reused_active_request
         else:
+            _reject_pinvi_cache_target_generic_writer(scope_payload)
             preview = await _preview_resolved_update_request(
                 session,
                 scope=scope,

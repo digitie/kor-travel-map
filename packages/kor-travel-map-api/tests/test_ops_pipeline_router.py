@@ -3578,6 +3578,27 @@ def test_create_request_rejects_dry_run_flag(
 
 
 @pytest.mark.unit
+def test_create_request_rejects_pinvi_cache_target_generic_writer(
+    client: TestClient,
+    session: _FakeSession,
+) -> None:
+    response = client.post(
+        "/v1/ops/pipeline/requests",
+        json={
+            "scope": {
+                "type": "cache_target_keys",
+                "external_system": "pinvi",
+                "target_keys": ["poi-1"],
+            }
+        },
+    )
+
+    assert response.status_code == 422
+    assert "ServiceToken" in response.json()["detail"]
+    assert session.begin_count == 1
+
+
+@pytest.mark.unit
 def test_create_request_requires_uuid_idempotency_key(client: TestClient) -> None:
     del client.headers["Idempotency-Key"]
 

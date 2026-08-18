@@ -6,7 +6,7 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
@@ -32,9 +32,14 @@ from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from kortravelmap.client import AsyncKorTravelMapClient
+from kortravelmap.core.cache_target_stream import make_active_cache_target_source
 from kortravelmap.infra import feature_repo
 from kortravelmap.infra import feature_update_executor as executor_mod
 from kortravelmap.infra.advisory_lock import advisory_lock_key, try_advisory_lock
+from kortravelmap.infra.cache_target_service_repo import (
+    create_cache_target_refresh_request,
+)
+from kortravelmap.infra.cache_target_stream_repo import apply_cache_target_source
 from kortravelmap.infra.feature_update_executor import (
     FeatureUpdateConnectionUnsafe,
     FeatureUpdateExecutionPlan,
@@ -529,6 +534,211 @@ async def test_execute_next_request_runs_provider_and_syncs_target_links(
         seed.feature.feature_id,
         result.results[0].loaded_feature_ids[0],
     } <= {link.feature_id for link in links}
+
+
+async def test_execute_next_fails_historic_pinvi_generic_cache_target_request(
+    migrated_engine: AsyncEngine,
+    execution_session: AsyncSession,
+) -> None:
+    """배포 전 generic PinVi queue는 source snapshot/outbox 없이 실행하지 않는다."""
+
+    seed = await _load_seed(execution_session, "EXEC-PINVI-PROTOCOL")
+    membership = await _membership(
+        execution_session,
+        provider=seed.source_record.provider,
+        dataset_key=seed.source_record.dataset_key,
+    )
+    await upsert_poi_cache_target(
+        execution_session,
+        external_system="external-app",
+        target_key="historic-pinvi-generic",
+        lon=126.978,
+        lat=37.5665,
+        radius_km=1,
+    )
+    request = await enqueue_feature_update_request(
+        execution_session,
+        scope={
+            "type": "cache_target_keys",
+            "external_system": "external-app",
+            "target_keys": ["historic-pinvi-generic"],
+        },
+        dataset_memberships=[membership],
+    )
+    await execution_session.execute(text("SET LOCAL session_replication_role = replica"))
+    await execution_session.execute(
+        text(
+            "UPDATE ops.feature_update_requests SET scope = "
+            "jsonb_set(scope, '{external_system}', '\"pinvi\"'::jsonb) "
+            "WHERE request_id = CAST(:request_id AS uuid)"
+        ),
+        {"request_id": request.request_id},
+    )
+    await execution_session.execute(text("SET LOCAL session_replication_role = origin"))
+    await execution_session.commit()
+
+    async def runner(
+        _session: AsyncSession,
+        _scope: ProviderDatasetRefreshScope,
+    ) -> ProviderDatasetRefreshResult:
+        raise AssertionError("historic generic PinVi request must fail before provider runner")
+
+    result = await AsyncKorTravelMapClient(
+        migrated_engine
+    ).execute_next_feature_update_request(
+        runner=runner,
+        dagster_run_id="dagster-pinvi-generic-protocol",
+    )
+
+    assert result is not None
+    assert result.status == "failed"
+    assert result.error_message is not None
+    assert "cache target stream" in result.error_message
+    stored = await get_update_request(execution_session, request.request_id)
+    assert stored is not None
+    assert stored.status == "failed"
+    assert (
+        await execution_session.scalar(
+            text(
+                "SELECT count(*) FROM ops.poi_cache_target_outbox_events "
+                "WHERE refresh_request_id = CAST(:request_id AS uuid)"
+            ),
+            {"request_id": request.request_id},
+        )
+        == 0
+    )
+
+
+async def test_source_generation_change_fails_before_final_link_and_freshness(
+    migrated_engine: AsyncEngine,
+    execution_session: AsyncSession,
+) -> None:
+    """runner 뒤 source generation이 바뀌면 이전 snapshot의 완료를 막는다."""
+
+    seed = await _load_seed(execution_session, "EXEC-SOURCE-GENERATION-FENCE")
+    membership = await _membership(
+        execution_session,
+        provider=seed.source_record.provider,
+        dataset_key=seed.source_record.dataset_key,
+    )
+    await upsert_provider_refresh_policy(
+        execution_session,
+        provider_dataset_id=membership.provider_dataset_id,
+        source_kind="openapi",
+        expected_revision=None,
+        targeted_policy="allow_targeted",
+    )
+    system = "executor-source-generation-fence"
+    first = await apply_cache_target_source(
+        execution_session,
+        consumer_id="executor-test-consumer",
+        source_event_id="7f100000-0000-4000-8000-000000000001",
+        idempotency_key="7f200000-0000-4000-8000-000000000001",
+        external_system=system,
+        target_key="refresh-target",
+        restore_epoch=1,
+        source_generation=1,
+        source=make_active_cache_target_source(
+            lon="126.978",
+            lat="37.5665",
+            radius_km="1",
+            update_enabled=True,
+        ),
+        occurred_at=datetime(2026, 8, 17, 1, tzinfo=UTC),
+        create_only=True,
+    )
+    assert first.target is not None
+    request = await create_cache_target_refresh_request(
+        execution_session,
+        principal_id="executor-test-service",
+        consumer_id="executor-test-consumer",
+        idempotency_key="7f300000-0000-4000-8000-000000000001",
+        external_system=system,
+        target_keys=["refresh-target"],
+        reason="source generation final fence",
+    )
+    await execution_session.commit()
+
+    async def runner(
+        _session: AsyncSession,
+        scope: ProviderDatasetRefreshScope,
+    ) -> ProviderDatasetRefreshResult:
+        assert scope.target_ids == (first.target_id,)
+        async with AsyncSession(migrated_engine) as source_session, source_session.begin():
+            current = await get_poi_cache_target_by_key(
+                source_session,
+                external_system=system,
+                target_key="refresh-target",
+            )
+            assert current is not None
+            await apply_cache_target_source(
+                source_session,
+                consumer_id="executor-test-consumer",
+                source_event_id="7f100000-0000-4000-8000-000000000002",
+                idempotency_key="7f200000-0000-4000-8000-000000000002",
+                external_system=system,
+                target_key="refresh-target",
+                restore_epoch=1,
+                source_generation=2,
+                source=make_active_cache_target_source(
+                    lon="126.9781",
+                    lat="37.5666",
+                    radius_km="1",
+                    update_enabled=True,
+                ),
+                occurred_at=datetime(2026, 8, 17, 2, tzinfo=UTC),
+                create_only=False,
+                expected_target_id=current.target_id,
+                expected_lock_version=current.lock_version,
+            )
+        return ProviderDatasetRefreshResult(
+            provider_dataset_id=scope.provider_dataset_id,
+            sync_scope=scope.sync_scope,
+            operation_key=scope.operation_key,
+            provider=scope.provider,
+            dataset_key=scope.dataset_key,
+            loaded_count=1,
+        )
+
+    result = await AsyncKorTravelMapClient(
+        migrated_engine
+    ).execute_next_feature_update_request(
+        runner=runner,
+        dagster_run_id="dagster-source-generation-fence",
+    )
+
+    assert result is not None
+    assert result.status == "failed"
+    assert result.error_message is not None
+    assert "source tuple" in result.error_message
+    stored = await get_update_request(execution_session, request.request_id)
+    assert stored is not None
+    assert stored.status == "failed"
+    target = await get_poi_cache_target_by_key(
+        execution_session,
+        external_system=system,
+        target_key="refresh-target",
+    )
+    assert target is not None
+    assert target.last_refreshed_at is None
+    assert target.last_failed_at is not None
+    refresh_events = (
+        await execution_session.execute(
+            text(
+                """
+                SELECT event_type, payload ->> 'status' AS status
+                FROM ops.poi_cache_target_outbox_events
+                WHERE refresh_request_id = CAST(:request_id AS uuid)
+                ORDER BY relay_order
+                """
+            ),
+            {"request_id": request.request_id},
+        )
+    ).all()
+    assert [(row.event_type, row.status) for row in refresh_events] == [
+        ("refresh_request.status_changed", "queued"),
+        ("refresh_request.status_changed", "running"),
+    ]
 
 
 async def test_execute_next_request_applies_follow_system_policy_skip(
@@ -2599,3 +2809,132 @@ async def test_scope_checkpoint_commits_before_real_cancellation_marker_wins(
         item["dataset_key"]
         for item in stored.matched_scope["executed_provider_scopes"]
     ] == ["phase-a"]
+
+
+async def test_restore_fence_during_run_with_provider_failure_still_terminalizes(
+    migrated_engine: AsyncEngine,
+    execution_session: AsyncSession,
+) -> None:
+    """runner 도중 restore fence + provider 실패 → request는 `failed`로 끝나야 한다.
+
+    #975 적대 재리뷰 P1: `_finish_failed_execution`의 status event append가 stale epoch로
+    protocol violation을 내면 terminalization 트랜잭션까지 굴러떨어져 request가 `running`으로
+    남고 dataset op 소유권을 쥔 채 뒤 요청을 막았다. fence 뒤 옛 epoch event는 설계상 거부되므로
+    relay event 없이(queued/running만) failed 상태만 남는 것이 맞다.
+    """
+    from kortravelmap.infra.cache_target_stream_repo import (
+        advance_cache_target_restore_fence,
+        get_cache_target_stream,
+    )
+    from kortravelmap.infra.domain_command_repo import (
+        canonical_domain_command_fingerprint,
+        create_domain_command_claim,
+    )
+
+    seed = await _load_seed(execution_session, "EXEC-FENCE-THEN-FAIL")
+    membership = await _membership(
+        execution_session,
+        provider=seed.source_record.provider,
+        dataset_key=seed.source_record.dataset_key,
+    )
+    await upsert_provider_refresh_policy(
+        execution_session,
+        provider_dataset_id=membership.provider_dataset_id,
+        source_kind="openapi",
+        expected_revision=None,
+        targeted_policy="allow_targeted",
+    )
+    system = "executor-fence-then-fail"
+    consumer = "executor-test-consumer"
+    await apply_cache_target_source(
+        execution_session,
+        consumer_id=consumer,
+        source_event_id="7b100000-0000-4000-8000-000000000011",
+        idempotency_key="7b200000-0000-4000-8000-000000000011",
+        external_system=system,
+        target_key="k1",
+        restore_epoch=1,
+        source_generation=1,
+        source=make_active_cache_target_source(
+            lon="126.978", lat="37.5665", radius_km="1", update_enabled=True
+        ),
+        occurred_at=datetime(2026, 8, 17, 1, tzinfo=UTC),
+        create_only=True,
+    )
+    request = await create_cache_target_refresh_request(
+        execution_session,
+        principal_id="executor-test-service",
+        consumer_id=consumer,
+        idempotency_key="7b300000-0000-4000-8000-000000000011",
+        external_system=system,
+        target_keys=["k1"],
+        reason="fence then provider failure",
+    )
+    await execution_session.commit()
+
+    async def runner(
+        _session: AsyncSession,
+        scope: ProviderDatasetRefreshScope,
+    ) -> ProviderDatasetRefreshResult:
+        async with AsyncSession(migrated_engine) as fence_session, fence_session.begin():
+            control = await get_cache_target_stream(fence_session, external_system=system)
+            payload = {"external_system": system, "reason": "fence during run"}
+            fingerprint = canonical_domain_command_fingerprint(payload)
+            claim = await create_domain_command_claim(
+                fence_session,
+                actor=f"cache-target:test:{consumer}",
+                operation="cache-target.restore-fence",
+                idempotency_key="7b400000-0000-4000-8000-000000000011",
+                request_fingerprint=fingerprint,
+            )
+            await advance_cache_target_restore_fence(
+                fence_session,
+                external_system=system,
+                consumer_id=consumer,
+                command_id=claim.command_id,
+                expected_restore_epoch=control.restore_epoch,
+                expected_control_version=control.control_version,
+                reason="fence during run",
+                request_fingerprint=fingerprint,
+            )
+        raise RuntimeError("provider exploded after the fence")
+
+    result = await AsyncKorTravelMapClient(
+        migrated_engine
+    ).execute_next_feature_update_request(
+        runner=runner,
+        dagster_run_id="dagster-fence-then-fail",
+    )
+
+    assert result is not None
+    assert result.status == "failed"
+    assert result.error_message is not None
+    assert "provider exploded" in result.error_message
+    stored = await get_update_request(execution_session, request.request_id)
+    assert stored is not None
+    assert stored.status == "failed", "request must not be left running after a fence"
+    refresh_events = (
+        await execution_session.execute(
+            text(
+                """
+                SELECT event_type, payload ->> 'status' AS status
+                FROM ops.poi_cache_target_outbox_events
+                WHERE refresh_request_id = CAST(:request_id AS uuid)
+                ORDER BY relay_order
+                """
+            ),
+            {"request_id": request.request_id},
+        )
+    ).all()
+    # fence 뒤 옛 epoch event는 거부된다 — failed relay event는 나오지 않고 ledger 상태만 남는다.
+    assert [(row.event_type, row.status) for row in refresh_events] == [
+        ("refresh_request.status_changed", "queued"),
+        ("refresh_request.status_changed", "running"),
+    ]
+    # 소유권이 풀렸는지 — dataset op 점유는 import job status IN ('queued','running')로 판정된다
+    # (`assert_feature_update_request_member_available`). failed면 더는 뒤 요청을 막지 않는다.
+    job_status = await execution_session.scalar(
+        text("SELECT status FROM ops.import_jobs WHERE job_id = CAST(:job_id AS uuid)"),
+        {"job_id": stored.job_id},
+    )
+    assert job_status not in ("queued", "running"), job_status

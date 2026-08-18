@@ -30,6 +30,35 @@
   감쌌다 — 이제 merge 통합 테스트 전체가 실제 role로 돈다.
 - 배포 선행: orchestrator `.env` `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`→`0222_tvn40a_merge_runtime_role`.
 
+## 2026-08-18 — T-VN-41 #975 rebase pair의 dead-letter recovery 증명 보강
+
+- 적대 런타임 재리뷰의 P2를 반영해, dead-letter를 replay한 직후에도 stream은 여전히
+  `blocked`이고 consumer는 disable되어 claim이 `consumer_disabled`로 거부됨을 두 integration
+  경로에서 고정했다. consumer 재개는 checksum reconciliation 성공 뒤에만 가능하다.
+- mid-claim recovery는 poison event와 뒤따르는 `cache_target.reconciled`를 같은 claim에서 끝까지
+  ack하고 다음 claim이 비었음을 확인한다. 따라서 prefix-ack 불변식과 relay 순서의 회복을 끝까지
+  검증한다.
+- 기존 `77821001`/`e8e0fec` 후보 E2E 증거는 당시 pair의 이력 증거로만 보존한다. 현재 rebase
+  head와 새 PinVi pin에는 재사용할 수 없으므로, 원격 CI가 녹색이 된 뒤 새 immutable image·n150
+  isolated Live UI E2E·artifact digest로 후보 증거를 다시 만든다. #975는 계속 draft·미병합이다.
+- **(2026-08-18 후속, 이어받음)** #975를 `main` `3e0732b3`(#994 fence 포함) 위로 다시 rebase했다(head
+  `a78f55dc`; 충돌은 journal/resume 2개뿐). 사용자 결정으로 머지 게이트는 **CI green + 적대 재리뷰 2명**이고,
+  새 pair의 n150 isolated Live UI 증거 재생성은 final C7으로 미룬다(격리 pair 러너가 저장소에 없다; 머지는
+  candidate 경계라 prod enable 없음). 위 두 항목의 "`ff25c397` 위로 rebase"는 그 시점의 base였고 지금 base는
+  `3e0732b3`다.
+
+## 2026-08-18 — T-VN-41 #975 rebase 뒤 stream recovery 회귀 정렬
+
+- #975 후보 브랜치를 `main` `ff25c397` 위로 rebase했다. permanent NACK가 consumer를
+  fail-closed로 disable하는 현재 계약 때문에 기존 PostGIS integration test 두 건이 직접 claim을
+  시도하며 깨진 것을 확인했다.
+- dead-letter replay 뒤에는 checksum reconciliation을 성공시켜 `cache_target.reconciled` outbox
+  event까지 정확히 전달·ack한 다음 빈 stream을 단언하도록 고쳤다. 재생만으로 consumer를 직접
+  enable하는 우회는 만들지 않았다.
+- `tests/integration/test_cache_target_stream_repo.py` 33건과 변경 파일 Ruff가 통과했다. 새 Map
+  source를 PinVi에 다시 pin하고 원격 CI·n150 isolated Live UI E2E를 통과하기 전까지 #975는
+  draft·미병합 상태다.
+
 ## 2026-08-18 — #993 rebase 뒤 tasks ledger 전면 정리
 
 - 문서 PR을 `main` `142a1c12`에 rebase하고, 인덱스를 열린 실행 단위만 남도록 다시 정렬했다.
@@ -46,7 +75,8 @@
 - 열린 작업 목록은 T-VN-41A/B/C를 `[~]`로 정렬했다. 정확한 source 쌍의 격리 Live UI 복구와
   증거 결박·적대 재리뷰는 통과했다. 이후 #975 PostGIS CI에서 기존 integration test 2건이
   permanent NACK의 새 consumer disable 계약과 충돌한 것을 확인해, 실제 reconciliation 재개
-  경로를 검증하도록 수정 중이다. 후보 E2E 증거 자체는 유효하며 #975는 미병합 상태다.
+  경로를 검증하도록 수정 중이다. 후보 E2E 증거는 당시 exact pair에만 유효한 이력이며, rebase된
+  새 pair의 머지 근거로는 사용할 수 없다. #975는 미병합 상태다.
 - `tasks-done.md`는 완료·폐기·병합 이력 전용이므로, 아직 열린 T-VN-41 항목을 이관하지 않았다.
   후보 receipt는 final main C7이나 production consumer enable을 뜻하지 않는다.
 
@@ -87,6 +117,24 @@
 
 교훈은 늘 같은 것이다 — **health 200은 "동작한다"의 증거가 아니다.** 무엇이 죽었는지
 알려면 죽었을 때 달라지는 것을 봐야 한다(여기서는 KTDM_* 개수).
+## 2026-08-17 — T-VN-41A-C current-main 재배치와 stale writer/cancellation outbox 봉합
+
+- PR [#975](https://github.com/digitie/kor-travel-map/pull/975)를 현재 `main` 위에
+  재배치했다. refresh finalization은 캡처한 모든 member의 restore epoch·source
+  generation·payload fingerprint를 stream→head canonical lock 순서로 다시 확인한
+  같은 transaction에서만 link·freshness·done을 확정한다. source writer가 그 사이
+  한 member라도 바꾸면 terminal success와 stale link/freshness가 전부 rollback된다.
+- queued service refresh 취소는 job의 `cancelled` 전이와 exact captured tuple
+  `(restore_epoch, source_generation, source_payload_fingerprint)`의 outbox status를
+  한 transaction으로 기록하게 했다. queued/running/cancelled의 과거 tuple 사실과
+  final target mutation의 current-tuple fence는 의도적으로 분리한다.
+- 두 적대적 재리뷰에서 DB/동시성 P0/P1은 없었다. Map service OpenAPI는 현재
+  SHA로 재생성했고 PinVi 수동 PUT의 409 설명도 좌표 conflict와 source protocol
+  위반을 모두 명시했다. PinVi service vendor 재고정과 paired contract CI는 완료했으며,
+  T-VN-41 receipt는 `pending → candidate_verified → complete`를 fail-closed로 구분한다.
+  n150 후보 검증은 exact archive·C7 runtime 다섯 immutable image·attestation·evidence digest를
+  남겨도 final main C7 이전에는 `complete`/consumer enable을 선언할 수 없다. candidate와
+  final receipt는 source commit·다섯 image·attestation/evidence digest를 별도 필드로 강제한다.
 
 ## 2026-08-17 — 완료된 Wave 2 task 이력 아카이브 정리
 

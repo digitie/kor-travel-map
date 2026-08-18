@@ -14,6 +14,20 @@ P2 4건(inventory 전수·snapshot ACL+phantom 2개·spoof 422·admin write UI �
 import(admin API preview→commit) → soak/live e2e(`docs/runbooks/c7-prod-live-e2e.md`, 백업/PITR
 먼저) → receipt complete → 40C manifest. H34/37D는 설계 v2 P2 정리 → ADR → 다음 PR.
 
+## 2026-08-18 — T-VN-41 #975 rebase 후 recovery fail-closed 검증 보강
+
+#975 후보를 현재 `main` `ff25c397` 위로 rebase하고 permanent NACK의 consumer disable 계약에 맞춰
+dead-letter replay → checksum reconciliation → `cache_target.reconciled` 전달·ack 순서를 통합 테스트에
+고정했다. replay 뒤에도 `blocked`·consumer disable·claim 거부가 유지되고, mid-claim recovery가
+모든 relay event를 ack해 빈 stream으로 끝남까지 검증한다. 직접 replay로 consumer를 여는 경로는 없다.
+
+### 다음 한 작업
+
+(2026-08-18 갱신) #975는 `main` `3e0732b3` 위로 rebase됐고(head `a78f55dc`) 사용자 결정으로 **CI green +
+적대 재리뷰 2명 뒤 머지**한다. 새 exact pair의 n150 isolated Live UI 증거와 PinVi #444 재pin은 final C7
+인수 때 한다(격리 pair 러너 재구성 필요·candidate 경계라 prod enable 없음). 기존 `77821001`/`e8e0fec`
+증거는 이력이다(`t-vn-41-candidate-map` tag). F1D 후속은 별도 draft #995에서 진행한다.
+
 ## 2026-08-18 — T-VN-41 task ledger를 후보 검증 상태로 정렬
 
 `tasks.md`는 #975의 정확한 source 쌍 후보 Live UI 복구·증거 결박·적대 재리뷰 통과를 `[~]`로
@@ -62,6 +76,18 @@ PR 2건 머지 — kor-travel-map [#985](https://github.com/digitie/kor-travel-m
 [#176](https://github.com/digitie/kor-travel-docker-manager/pull/176)(compose·ADR-37).
 그 뒤 남은 것은 **geo·concierge·pinvi 인스턴스의 백업 주체**다 — map만 절차가 있고
 나머지 셋은 없다(docker-manager 소관, `docs/backup-restore.md` §1 참조).
+## 2026-08-17 — T-VN-41A-C PR #975 current-main 재배치
+
+PR [#975](https://github.com/digitie/kor-travel-map/pull/975)의 stale refresh
+finalization fence와 queued cancellation outbox를 보완하고, 현재 `main` OpenAPI
+artifact를 재생성했다. 두 적대적 재리뷰에서 Map DB/동시성 P0/P1은 없었다. PinVi #444는
+동일 service bytes를 재vendor했고 paired contract CI를 통과했다. T-VN-41 receipt는
+`pending → candidate_verified → complete`를 구분하며, 후보 증거는 final main C7을 대체하지 않는다.
+
+**다음 한 작업**: Map/PinVi 후보 commit·C7 runtime 다섯 immutable image·attestation을 고정한 뒤 n150
+isolated Live UI E2E를 실행한다. 성공 시 `candidate_verified` receipt와 evidence digest를
+같은 PR에 기록하고 CI를 다시 통과시킨다. 그 뒤 #975를 병합하고, #967은 #975 병합 뒤의
+`main` 위에서 재배치·동일 gate를 적용한다. final main C7은 별도 후속 gate다.
 
 ## 2026-08-17 — 완료된 Wave 2 task 이력 아카이브 정리
 

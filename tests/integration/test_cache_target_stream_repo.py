@@ -9,6 +9,8 @@ from typing import Any
 
 import httpx
 import pytest
+from kortravelmap.api.pipeline_cancellation_service import cancel_pipeline_execution
+from kortravelmap.api.settings import ApiSettings
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -21,11 +23,14 @@ from kortravelmap.core.cache_target_stream import (
 )
 from kortravelmap.infra import cache_target_event_repo as result_event_repo
 from kortravelmap.infra import cache_target_reconciliation_repo as snapshot_repo
+from kortravelmap.infra import cache_target_service_repo as service_repo
 from kortravelmap.infra.cache_target_event_repo import (
     CacheTargetRefreshMember,
+    CacheTargetRefreshProtocolViolation,
     append_cache_target_links_reconciled_events,
     append_cache_target_refresh_status_events,
     capture_cache_target_refresh_members_by_keys,
+    pinvi_cache_target_refresh_protocol_error,
 )
 from kortravelmap.infra.cache_target_outbox_repo import (
     CacheTargetAppliedReceipt,
@@ -72,8 +77,12 @@ from kortravelmap.infra.domain_command_repo import (
     canonical_domain_command_fingerprint,
     create_domain_command_claim,
 )
-from kortravelmap.infra.feature_update_repo import enqueue_feature_update_request
+from kortravelmap.infra.feature_update_repo import (
+    enqueue_feature_update_request,
+    get_update_request,
+)
 from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget
+from kortravelmap.infra.poi_cache_target_repo import upsert_poi_cache_target
 
 _SYSTEM = "pinvi-test"
 _CONSUMER = "pinvi-cache-consumer"
@@ -131,6 +140,7 @@ async def _seed_scope_feature(
     feature_id: str,
     lon: float = 126.978,
     lat: float = 37.5665,
+    category: str = "01070100",
 ) -> None:
     """cache target 반경 안에 primary source를 가진 feature 1건을 심는다.
 
@@ -151,13 +161,14 @@ async def _seed_scope_feature(
         "record_hash": hashlib.sha256(record_key.encode("utf-8")).hexdigest(),
         "lon": lon,
         "lat": lat,
+        "category": category,
     }
     await session.execute(
         text(
             """
             INSERT INTO feature.features (feature_id, kind, name, category, coord)
             VALUES (
-              :feature_id, 'place', 'cache target scope anchor', '01070100',
+              :feature_id, 'place', 'cache target scope anchor', :category,
               x_extension.ST_SetSRID(
                 x_extension.ST_MakePoint(CAST(:lon AS double precision),
                                          CAST(:lat AS double precision)),
@@ -1302,6 +1313,14 @@ async def test_permanent_nack_dead_letter_blocks_later_order_and_replays_same_ev
     )
     assert dead.status == "dead"
     assert dead.stream_blocked
+    control = await get_cache_target_stream(
+        migrated_session,
+        external_system=_SYSTEM,
+    )
+    assert control is not None
+    assert control.status == "blocked"
+    assert control.blocked_event_id == blocked_event.event_id
+    assert not control.consumer_enabled
 
     detail = await get_cache_target_dead_letter(
         migrated_session,
@@ -1320,7 +1339,7 @@ async def test_permanent_nack_dead_letter_blocks_later_order_and_replays_same_ev
             idempotency_key="82000000-0000-0000-0000-000000000002",
             limit=2,
         )
-    assert blocked.value.code == "stream_blocked"
+    assert blocked.value.code == "consumer_disabled"
 
     replayed = await replay_cache_target_dead_letter(
         migrated_session,
@@ -1328,6 +1347,27 @@ async def test_permanent_nack_dead_letter_blocks_later_order_and_replays_same_ev
         expected_delivery_version=detail.delivery_version,
     )
     assert replayed.status == "retry"
+    replay_control = await get_cache_target_stream(
+        migrated_session,
+        external_system=_SYSTEM,
+    )
+    assert replay_control is not None
+    assert replay_control.status == "blocked"
+    assert replay_control.blocked_event_id == blocked_event.event_id
+    assert not replay_control.consumer_enabled
+    with pytest.raises(CacheTargetStreamConflict) as replay_blocked:
+        await claim_cache_target_events(
+            migrated_session,
+            external_system=_SYSTEM,
+            consumer_id=_CONSUMER,
+            idempotency_key="82000000-0000-0000-0000-000000000007",
+            limit=2,
+        )
+    assert replay_blocked.value.code == "consumer_disabled"
+    completed = await _resume_stream_after_dead_letter_replay(
+        migrated_session,
+        key="82000000-0000-0000-0000-000000000005",
+    )
     recovery_claim = await claim_cache_target_events(
         migrated_session,
         external_system=_SYSTEM,
@@ -1336,7 +1376,10 @@ async def test_permanent_nack_dead_letter_blocks_later_order_and_replays_same_ev
         limit=2,
     )
     assert recovery_claim is not None
-    assert [event.event_id for event in recovery_claim.events] == [blocked_event.event_id]
+    assert [event.event_type for event in recovery_claim.events] == [
+        "cache_target.state_applied",
+        "cache_target.state_applied",
+    ]
     assert (
         recovery_claim.events[0].relay_order,
         recovery_claim.events[0].payload_fingerprint,
@@ -1346,23 +1389,51 @@ async def test_permanent_nack_dead_letter_blocks_later_order_and_replays_same_ev
         consumer_id=_CONSUMER,
         claim_id=recovery_claim.claim_id,
         lease_token=recovery_claim.lease_token,
-        through_cursor=recovery_claim.events[0].cursor,
+        through_cursor=recovery_claim.events[-1].cursor,
         applied=[
             CacheTargetAppliedReceipt(
-                recovery_claim.events[0].event_id,
-                recovery_claim.events[0].payload_fingerprint,
+                event.event_id,
+                event.payload_fingerprint,
+            )
+            for event in recovery_claim.events
+        ],
+    )
+    reconciled_claim = await claim_cache_target_events(
+        migrated_session,
+        external_system=_SYSTEM,
+        consumer_id=_CONSUMER,
+        idempotency_key="82000000-0000-0000-0000-000000000004",
+        limit=2,
+    )
+    assert reconciled_claim is not None
+    assert len(reconciled_claim.events) == 1
+    reconciled_event = reconciled_claim.events[0]
+    assert reconciled_event.event_type == "cache_target.reconciled"
+    assert reconciled_event.event_scope == "stream"
+    assert reconciled_event.payload["request_id"] == completed.request_id
+    await ack_cache_target_events(
+        migrated_session,
+        consumer_id=_CONSUMER,
+        claim_id=reconciled_claim.claim_id,
+        lease_token=reconciled_claim.lease_token,
+        through_cursor=reconciled_event.cursor,
+        applied=[
+            CacheTargetAppliedReceipt(
+                reconciled_event.event_id,
+                reconciled_event.payload_fingerprint,
             )
         ],
     )
-    with pytest.raises(CacheTargetStreamConflict) as still_blocked:
+    assert (
         await claim_cache_target_events(
             migrated_session,
             external_system=_SYSTEM,
             consumer_id=_CONSUMER,
-            idempotency_key="82000000-0000-0000-0000-000000000004",
+            idempotency_key="82000000-0000-0000-0000-000000000006",
             limit=2,
         )
-    assert still_blocked.value.code == "blocked_event_not_head"
+        is None
+    )
 
 
 @pytest.mark.integration
@@ -1453,6 +1524,27 @@ async def test_mid_claim_dead_transition_requires_acked_prefix_then_replays(
         expected_delivery_version=dead.delivery_version,
     )
     assert replayed.status == "retry"
+    replay_control = await get_cache_target_stream(
+        migrated_session,
+        external_system=_SYSTEM,
+    )
+    assert replay_control is not None
+    assert replay_control.status == "blocked"
+    assert replay_control.blocked_event_id == poison.event_id
+    assert not replay_control.consumer_enabled
+    with pytest.raises(CacheTargetStreamConflict) as replay_blocked:
+        await claim_cache_target_events(
+            migrated_session,
+            external_system=_SYSTEM,
+            consumer_id=_CONSUMER,
+            idempotency_key="85000000-0000-0000-0000-000000000004",
+            limit=2,
+        )
+    assert replay_blocked.value.code == "consumer_disabled"
+    completed = await _resume_stream_after_dead_letter_replay(
+        migrated_session,
+        key="85000000-0000-0000-0000-000000000003",
+    )
     recovery = await claim_cache_target_events(
         migrated_session,
         external_system=_SYSTEM,
@@ -1461,7 +1553,36 @@ async def test_mid_claim_dead_transition_requires_acked_prefix_then_replays(
         limit=2,
     )
     assert recovery is not None
-    assert [event.event_id for event in recovery.events] == [poison.event_id]
+    assert [event.event_id for event in recovery.events[:1]] == [poison.event_id]
+    assert [event.event_type for event in recovery.events] == [
+        "cache_target.state_applied",
+        "cache_target.reconciled",
+    ]
+    assert recovery.events[1].payload["request_id"] == completed.request_id
+    await ack_cache_target_events(
+        migrated_session,
+        consumer_id=_CONSUMER,
+        claim_id=recovery.claim_id,
+        lease_token=recovery.lease_token,
+        through_cursor=recovery.events[-1].cursor,
+        applied=[
+            CacheTargetAppliedReceipt(
+                event.event_id,
+                event.payload_fingerprint,
+            )
+            for event in recovery.events
+        ],
+    )
+    assert (
+        await claim_cache_target_events(
+            migrated_session,
+            external_system=_SYSTEM,
+            consumer_id=_CONSUMER,
+            idempotency_key="85000000-0000-0000-0000-000000000005",
+            limit=2,
+        )
+        is None
+    )
 
 
 async def _apply_snapshot_source(
@@ -2734,6 +2855,36 @@ async def _reconciliation_command(
     return claim.command_id
 
 
+async def _resume_stream_after_dead_letter_replay(
+    session: AsyncSession,
+    *,
+    key: str,
+):
+    """dead-letter replay 뒤의 consumer 재개는 checksum reconciliation만 허용한다."""
+
+    command_id = await _reconciliation_command(session, key=key)
+    request = await request_cache_target_reconciliation(
+        session,
+        command_id=command_id,
+        external_system=_SYSTEM,
+        reason="dead-letter replay resume",
+    )
+    assert request.snapshot_id is not None
+    assert request.restore_epoch is not None
+    assert request.expected_merkle_root is not None
+    completed = await complete_cache_target_reconciliation(
+        session,
+        request_id=request.request_id,
+        external_system=_SYSTEM,
+        consumer_id=_CONSUMER,
+        snapshot_id=request.snapshot_id,
+        expected_restore_epoch=request.restore_epoch,
+        actual_merkle_root=request.expected_merkle_root,
+    )
+    assert completed.status == "succeeded"
+    return completed
+
+
 @pytest.mark.integration
 async def test_two_phase_reconciliation_seal_is_exact_and_transactional(
     migrated_session: AsyncSession,
@@ -3431,6 +3582,23 @@ async def test_service_source_read_and_refresh_request_idempotency(
     )
     assert request.status == "queued"
     assert not request.idempotent_replay
+    queued_events = (
+        await migrated_session.execute(
+            text(
+                "SELECT event_type, payload, restore_epoch, source_generation "
+                "FROM ops.poi_cache_target_outbox_events "
+                "WHERE refresh_request_id = CAST(:request_id AS uuid)"
+            ),
+            {"request_id": request.request_id},
+        )
+    ).all()
+    assert len(queued_events) == 1
+    queued_event = queued_events[0]
+    assert queued_event.event_type == "refresh_request.status_changed"
+    assert queued_event.payload["status"] == "queued"
+    assert queued_event.payload["request_id"] == request.request_id
+    assert queued_event.restore_epoch == 1
+    assert queued_event.source_generation == 1
     replay = await create_cache_target_refresh_request(
         migrated_session,
         principal_id="pinvi-service",
@@ -3459,6 +3627,356 @@ async def test_service_source_read_and_refresh_request_idempotency(
             reason="different reason",
         )
     assert conflict.value.code == "refresh_idempotency_key_reused"
+
+    # source protocol 도입 전 admin 경로가 만든 target은 source head가 없다. 이를
+    # request만 queued되고 status outbox가 0건인 거짓 성공으로 남기지 않는다.
+    legacy_target = await upsert_poi_cache_target(
+        migrated_session,
+        external_system=system,
+        target_key="legacy-refresh-target",
+        lon=126.978,
+        lat=37.5665,
+        radius_km=5,
+    )
+    requests_before = await migrated_session.scalar(
+        text("SELECT count(*) FROM ops.feature_update_requests")
+    )
+    with pytest.raises(CacheTargetStreamConflict) as missing_source:
+        await create_cache_target_refresh_request(
+            migrated_session,
+            principal_id="pinvi-service",
+            consumer_id=_CONSUMER,
+            idempotency_key="99000000-0000-0000-0000-000000000010",
+            external_system=system,
+            target_keys=[legacy_target.target_key],
+            reason="legacy target must fail closed",
+        )
+    assert missing_source.value.code == "refresh_source_head_missing"
+    assert missing_source.value.current == {
+        "external_system": system,
+        "target_keys": [legacy_target.target_key],
+    }
+    assert (
+        await migrated_session.scalar(
+            text("SELECT count(*) FROM ops.feature_update_requests")
+        )
+        == requests_before
+    )
+
+
+@pytest.mark.integration
+async def test_service_refresh_rejects_source_head_from_prior_restore_epoch(
+    migrated_session: AsyncSession,
+) -> None:
+    """restore fence 뒤 남은 head로 epoch-1 delivery를 새로 만들지 않는다."""
+
+    system = "service-refresh-stale-head-test"
+    await _apply_snapshot_source(
+        migrated_session,
+        external_system=system,
+        target_key="refresh-target",
+        event_id="9d100000-0000-4000-8000-000000000001",
+        idempotency_key="9d200000-0000-4000-8000-000000000001",
+    )
+    fence_request = {
+        "external_system": system,
+        "expected_restore_epoch": 1,
+        "reason": "stale source head must not refresh",
+    }
+    fingerprint = canonical_domain_command_fingerprint(fence_request)
+    claim = await create_domain_command_claim(
+        migrated_session,
+        actor=_CONSUMER,
+        operation="cache_target.restore_fence",
+        idempotency_key="9d300000-0000-4000-8000-000000000001",
+        request_fingerprint=fingerprint,
+    )
+    fenced = await advance_cache_target_restore_fence(
+        migrated_session,
+        external_system=system,
+        consumer_id=_CONSUMER,
+        command_id=claim.command_id,
+        expected_restore_epoch=1,
+        expected_control_version=1,
+        reason=fence_request["reason"],
+        request_fingerprint=fingerprint,
+    )
+    assert fenced.restore_epoch == 2
+
+    requests_before = await migrated_session.scalar(
+        text("SELECT count(*) FROM ops.feature_update_requests")
+    )
+    with pytest.raises(CacheTargetStreamConflict) as stale_source:
+        await create_cache_target_refresh_request(
+            migrated_session,
+            principal_id="pinvi-service",
+            consumer_id=_CONSUMER,
+            idempotency_key="9d400000-0000-4000-8000-000000000001",
+            external_system=system,
+            target_keys=["refresh-target"],
+            reason="stale epoch must fail closed",
+        )
+    assert stale_source.value.code == "refresh_source_head_missing"
+    assert stale_source.value.current == {
+        "external_system": system,
+        "target_keys": ["refresh-target"],
+    }
+    assert (
+        await migrated_session.scalar(text("SELECT count(*) FROM ops.feature_update_requests"))
+        == requests_before
+    )
+
+
+@pytest.mark.integration
+async def test_queued_service_refresh_cancellation_emits_exact_tuple_status(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """실행 전 취소도 queued snapshot과 같은 tuple로 relay에 남긴다."""
+
+    system = "queued-refresh-cancellation-test"
+    async with AsyncSession(migrated_engine) as setup, setup.begin():
+        await _apply_snapshot_source(
+            setup,
+            external_system=system,
+            target_key="refresh-target",
+            event_id="9d500000-0000-4000-8000-000000000001",
+            idempotency_key="9d600000-0000-4000-8000-000000000001",
+        )
+        await _seed_scope_feature(
+            setup,
+            membership=await _canonical_membership(setup),
+            feature_id="f_queued_refresh_cancellation_scope_anchor",
+            # migrated_engine는 다음 테스트에도 commit을 남긴다. 카테고리 집계
+            # 회귀 fixture와 충돌하지 않는 전용 코드로 격리한다.
+            category="99999101",
+        )
+        request = await create_cache_target_refresh_request(
+            setup,
+            principal_id="pinvi-service",
+            consumer_id=_CONSUMER,
+            idempotency_key="9d700000-0000-4000-8000-000000000001",
+            external_system=system,
+            target_keys=["refresh-target"],
+            reason="queued cancellation relay evidence",
+        )
+
+    settings = ApiSettings(
+        dagster_url="http://dagster.example",
+        dagster_allowed_hosts=["dagster.example"],
+    )
+    async with httpx.AsyncClient() as client:
+        result = await cancel_pipeline_execution(
+            engine=migrated_engine,
+            settings=settings,
+            http_client=client,
+            kind="update_request",
+            execution_id=request.request_id,
+            requested_by="admin:test",
+            reason="queued refresh cancellation",
+        )
+
+    assert result.status == "completed"
+    assert result.members[0].result == "cancelled"
+    async with AsyncSession(migrated_engine) as probe:
+        rows = (
+            await probe.execute(
+                text(
+                    """
+                    SELECT payload ->> 'status' AS status, restore_epoch,
+                           source_generation, source_payload_fingerprint
+                    FROM ops.poi_cache_target_outbox_events
+                    WHERE refresh_request_id = CAST(:request_id AS uuid)
+                    ORDER BY relay_order
+                    """
+                ),
+                {"request_id": request.request_id},
+            )
+        ).all()
+    assert [(row.status, row.restore_epoch, row.source_generation) for row in rows] == [
+        ("queued", 1, 1),
+        ("cancelled", 1, 1),
+    ]
+    assert len({str(row.source_payload_fingerprint) for row in rows}) == 1
+
+
+@pytest.mark.integration
+async def test_restore_fence_rejects_previously_queued_service_refresh_status_event(
+    migrated_session: AsyncSession,
+) -> None:
+    """fence 전 정상 queue도 fence 뒤 epoch-1 status event를 다시 만들지 않는다."""
+
+    system = "pinvi"
+    await _apply_snapshot_source(
+        migrated_session,
+        external_system=system,
+        target_key="fenced-refresh-target",
+        event_id="9e100000-0000-4000-8000-000000000001",
+        idempotency_key="9e200000-0000-4000-8000-000000000001",
+    )
+    await _seed_scope_feature(
+        migrated_session,
+        membership=await _canonical_membership(migrated_session),
+        feature_id="f_fenced_service_refresh_scope_anchor",
+    )
+    request = await create_cache_target_refresh_request(
+        migrated_session,
+        principal_id="pinvi-service",
+        consumer_id=_CONSUMER,
+        idempotency_key="9e300000-0000-4000-8000-000000000001",
+        external_system=system,
+        target_keys=["fenced-refresh-target"],
+        reason="queue before restore fence",
+    )
+    fence_request = {
+        "external_system": system,
+        "expected_restore_epoch": 1,
+        "reason": "fence queued refresh",
+    }
+    fingerprint = canonical_domain_command_fingerprint(fence_request)
+    claim = await create_domain_command_claim(
+        migrated_session,
+        actor=_CONSUMER,
+        operation="cache_target.restore_fence",
+        idempotency_key="9e400000-0000-4000-8000-000000000001",
+        request_fingerprint=fingerprint,
+    )
+    await advance_cache_target_restore_fence(
+        migrated_session,
+        external_system=system,
+        consumer_id=_CONSUMER,
+        command_id=claim.command_id,
+        expected_restore_epoch=1,
+        expected_control_version=1,
+        reason=fence_request["reason"],
+        request_fingerprint=fingerprint,
+    )
+
+    protocol_error = await pinvi_cache_target_refresh_protocol_error(
+        migrated_session,
+        request_id=request.request_id,
+        external_system=system,
+        target_keys=["fenced-refresh-target"],
+    )
+    assert protocol_error is not None
+    assert "restore epoch" in protocol_error
+    stored_request = await get_update_request(migrated_session, request.request_id)
+    assert stored_request is not None
+    with pytest.raises(CacheTargetRefreshProtocolViolation, match="restore epoch"):
+        await append_cache_target_refresh_status_events(
+            migrated_session,
+            request_id=request.request_id,
+            job_id=stored_request.job_id,
+            status="running",
+        )
+    assert (
+        await migrated_session.scalar(
+            text(
+                "SELECT count(*) FROM ops.poi_cache_target_outbox_events "
+                "WHERE refresh_request_id = CAST(:request_id AS uuid) "
+                "AND payload ->> 'status' = 'running'"
+            ),
+            {"request_id": request.request_id},
+        )
+        == 0
+    )
+
+
+@pytest.mark.integration
+async def test_service_refresh_creation_serializes_stream_before_capture(
+    migrated_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """서로 다른 idempotency key도 stream lock upgrade 없이 순서대로 queue한다."""
+
+    system = "service-refresh-serialization-test"
+    async with AsyncSession(migrated_engine) as setup, setup.begin():
+        created = await _apply_snapshot_source(
+            setup,
+            external_system=system,
+            target_key="refresh-target",
+            event_id="9c100000-0000-4000-8000-000000000001",
+            idempotency_key="9c200000-0000-4000-8000-000000000001",
+        )
+        await _seed_scope_feature(
+            setup,
+            membership=await _canonical_membership(setup),
+            feature_id="f_service_refresh_serialization_anchor",
+            category="99999102",
+        )
+    assert created.target is not None
+
+    first_scope_entered = asyncio.Event()
+    second_scope_entered = asyncio.Event()
+    release_first_scope = asyncio.Event()
+    release_second_scope = asyncio.Event()
+    scope_calls = 0
+    original_scope_memberships = service_repo._refresh_scope_memberships
+
+    async def _gated_scope_memberships(*args: Any, **kwargs: Any):
+        nonlocal scope_calls
+        scope_calls += 1
+        if scope_calls == 1:
+            first_scope_entered.set()
+            await release_first_scope.wait()
+        else:
+            second_scope_entered.set()
+            await release_second_scope.wait()
+        return await original_scope_memberships(*args, **kwargs)
+
+    monkeypatch.setattr(
+        service_repo,
+        "_refresh_scope_memberships",
+        _gated_scope_memberships,
+    )
+
+    async def _submit(idempotency_key: str):
+        async with AsyncSession(migrated_engine) as session, session.begin():
+            return await create_cache_target_refresh_request(
+                session,
+                principal_id="pinvi-service",
+                consumer_id=_CONSUMER,
+                idempotency_key=idempotency_key,
+                external_system=system,
+                target_keys=["refresh-target"],
+                reason="concurrent service refresh",
+            )
+
+    first = asyncio.create_task(_submit("9c300000-0000-4000-8000-000000000001"))
+    await asyncio.wait_for(first_scope_entered.wait(), timeout=5)
+    second = asyncio.create_task(_submit("9c300000-0000-4000-8000-000000000002"))
+    with pytest.raises(asyncio.TimeoutError):
+        await asyncio.wait_for(second_scope_entered.wait(), timeout=0.3)
+
+    release_first_scope.set()
+    first_request = await asyncio.wait_for(first, timeout=5)
+    await asyncio.wait_for(second_scope_entered.wait(), timeout=5)
+    async with AsyncSession(migrated_engine) as complete, complete.begin():
+        await complete.execute(
+            text(
+                "UPDATE ops.import_jobs AS job SET status = 'done', progress = 100, "
+                "finished_at = now() FROM ops.feature_update_requests AS request "
+                "WHERE request.request_id = CAST(:request_id AS uuid) "
+                "AND job.job_id = request.job_id"
+            ),
+            {"request_id": first_request.request_id},
+        )
+    release_second_scope.set()
+    second_request = await asyncio.wait_for(
+        second,
+        timeout=5,
+    )
+    assert first_request.request_id != second_request.request_id
+    async with AsyncSession(migrated_engine) as verify:
+        queued_event_count = await verify.scalar(
+            text(
+                "SELECT count(*) FROM ops.poi_cache_target_outbox_events "
+                "WHERE refresh_request_id::text = ANY(CAST(:request_ids AS text[]))"
+            ),
+            {
+                "request_ids": [first_request.request_id, second_request.request_id],
+            },
+        )
+    assert queued_event_count == 2
 
 
 @pytest.mark.integration
@@ -3564,4 +4082,70 @@ async def test_refresh_member_result_events_are_idempotent_and_transactional(
             {"system": _SYSTEM},
         )
         == 4
+    )
+
+
+@pytest.mark.integration
+async def test_service_refresh_rejects_inactive_or_unknown_keys_at_intake(
+    migrated_session: AsyncSession,
+) -> None:
+    """PinVi service refresh는 exact key set — 활성 target이 아닌 key가 하나라도 있으면 409.
+
+    #975 적대 재리뷰 P1: 예전엔 active key만 member로 capture하고 202/queued를 돌려준 뒤 실행자의
+    exact-set 검사에서 relay event 없이 fail-close했다(consumer는 영원히 기다린다). intake에서
+    `refresh_target_inactive`로 막고 request 행·outbox event를 만들지 않는다.
+    """
+    system = "service-refresh-inactive-key-test"
+    await _apply_snapshot_source(
+        migrated_session,
+        external_system=system,
+        target_key="active-key",
+        event_id="9e100000-0000-4000-8000-000000000001",
+        idempotency_key="9e200000-0000-4000-8000-000000000001",
+    )
+    await apply_cache_target_source(
+        migrated_session,
+        consumer_id=_CONSUMER,
+        source_event_id="9e100000-0000-4000-8000-000000000002",
+        idempotency_key="9e200000-0000-4000-8000-000000000002",
+        external_system=system,
+        target_key="disabled-key",
+        restore_epoch=1,
+        source_generation=1,
+        source=make_active_cache_target_source(
+            lon="126.978", lat="37.5665", radius_km="5", update_enabled=False
+        ),
+        occurred_at=datetime(2026, 7, 31, 18, 0, tzinfo=UTC),
+        create_only=True,
+    )
+    requests_before = await migrated_session.scalar(
+        text("SELECT count(*) FROM ops.feature_update_requests")
+    )
+    events_before = await migrated_session.scalar(
+        text("SELECT count(*) FROM ops.poi_cache_target_outbox_events")
+    )
+    with pytest.raises(CacheTargetStreamConflict) as conflict:
+        await create_cache_target_refresh_request(
+            migrated_session,
+            principal_id="pinvi-service",
+            consumer_id=_CONSUMER,
+            idempotency_key="9e300000-0000-4000-8000-000000000001",
+            external_system=system,
+            target_keys=["active-key", "disabled-key", "never-registered-key"],
+            reason="mixed keys",
+        )
+    assert conflict.value.code == "refresh_target_inactive"
+    assert conflict.value.current == {
+        "external_system": system,
+        "target_keys": ["disabled-key", "never-registered-key"],
+    }
+    assert (
+        await migrated_session.scalar(text("SELECT count(*) FROM ops.feature_update_requests"))
+        == requests_before
+    )
+    assert (
+        await migrated_session.scalar(
+            text("SELECT count(*) FROM ops.poi_cache_target_outbox_events")
+        )
+        == events_before
     )

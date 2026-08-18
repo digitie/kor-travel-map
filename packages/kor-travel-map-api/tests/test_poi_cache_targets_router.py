@@ -177,6 +177,57 @@ def test_put_poi_cache_target_rejects_impossible_external_system_before_transact
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
+    ("method", "path", "body", "headers"),
+    [
+        (
+            "PUT",
+            "/v1/admin/poi-cache-targets/pinvi/poi-1",
+            {"coord": {"lon": 126.978, "lat": 37.5665}},
+            {},
+        ),
+        (
+            "DELETE",
+            "/v1/admin/poi-cache-targets/pinvi/poi-1",
+            None,
+            {"If-Match": f'"{TARGET_ID}:7"'},
+        ),
+    ],
+)
+def test_admin_target_writer_rejects_relay_owned_pinvi_before_transaction(
+    client: TestClient,
+    session: _FakeSession,
+    method: str,
+    path: str,
+    body: dict[str, Any] | None,
+    headers: dict[str, str],
+) -> None:
+    response = client.request(method, path, json=body, headers=headers)
+
+    assert response.status_code == 409
+    assert response.json()["code"] == "CACHE_TARGET_SOURCE_PROTOCOL_REQUIRED"
+    assert session.begin_count == 0
+
+
+@pytest.mark.unit
+def test_put_pinvi_target_409_documents_source_protocol_rejection() -> None:
+    spec = create_app(
+        ApiSettings(
+            admin_proxy_secret=None,
+            service_token=None,
+            admin_destructive_enabled=True,
+            public_api_key_required=False,
+        )
+    ).openapi()
+    description = spec["paths"]["/v1/admin/poi-cache-targets/{external_system}/{target_key}"][
+        "put"
+    ]["responses"]["409"]["description"]
+
+    assert "좌표 conflict" in description
+    assert "source protocol" in description
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
     ("method", "path", "params"),
     [
         ("GET", "/v1/admin/poi-cache-targets/external-app/poi:e\u0301", None),

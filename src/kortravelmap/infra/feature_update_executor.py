@@ -22,10 +22,13 @@ from kortravelmap.core.feature_operation import ProviderDatasetOperationMembersh
 from kortravelmap.core.sync_scope import parse_canonical_sync_scope
 from kortravelmap.infra.advisory_lock import advisory_lock_key
 from kortravelmap.infra.cache_target_event_repo import (
+    CacheTargetRefreshProtocolViolation,
     append_cache_target_links_reconciled_events,
     append_cache_target_refresh_status_events,
+    assert_cache_target_refresh_members_current,
     capture_cache_target_refresh_members_by_keys,
     lock_cache_target_result_streams,
+    pinvi_cache_target_refresh_protocol_error,
 )
 from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateLockBusy,
@@ -545,6 +548,10 @@ async def _sync_cache_target_links(
         session,
         request_id=request.request_id,
     )
+    await assert_cache_target_refresh_members_current(
+        session,
+        request_id=request.request_id,
+    )
     target_ids = tuple(target.target_id for target in resolution.cache_targets)
     links = await sync_poi_cache_target_feature_links(
         session,
@@ -785,6 +792,7 @@ async def _finish_failed_execution(
     error_message: str,
     owner_dagster_run_id: str,
     event_code: str | None = None,
+    append_cache_target_status_events: bool = True,
 ) -> FeatureUpdateExecutionResult:
     target_ids = [target.target_id for target in plan.resolution.cache_targets]
     try:
@@ -810,13 +818,30 @@ async def _finish_failed_execution(
             )
             if failed is None:
                 raise _FeatureUpdateExecutionStopped
-            await append_cache_target_refresh_status_events(
-                session,
-                request_id=failed.request_id,
-                job_id=failed.job_id,
-                status="failed",
-                error_code=event_code,
-            )
+            if append_cache_target_status_events:
+                # 실행 도중 restore fence가 지나가면 captured member의 epoch는 stale이고
+                # `_append_result_event`가 protocol violation을 낸다. 그때 terminalization까지
+                # 함께 굴러떨어지면 request가 `running`으로 남아 dataset op 소유권을 쥔 채
+                # 뒤 요청을 막는다(#975 적대 재리뷰 P1). fence 뒤 stream은 새 epoch이고 옛
+                # epoch event는 설계상 거부되므로(runbook §5-5) failed 상태만 ledger에 남기고
+                # relay event 없이 끝낸다. savepoint로 감싸 append 실패가 바깥 transaction을
+                # 오염시키지 않게 한다.
+                try:
+                    async with session.begin_nested():
+                        await append_cache_target_refresh_status_events(
+                            session,
+                            request_id=failed.request_id,
+                            job_id=failed.job_id,
+                            status="failed",
+                            error_code=event_code,
+                        )
+                except CacheTargetRefreshProtocolViolation as violation:
+                    _LOG.warning(
+                        "cache target refresh failed status persisted without relay event — "
+                        "restore fence moved during execution: request_id=%s detail=%s",
+                        failed.request_id,
+                        violation,
+                    )
             if event_code is not None:
                 for import_job_dataset_id in await _terminal_event_member_ids(
                     session,
@@ -1010,6 +1035,7 @@ async def _execute_feature_update_request_locked(
     plan: FeatureUpdateExecutionPlan | None = None
     target_ids: list[str] = []
     results: list[ProviderDatasetRefreshResult] = []
+    protocol_error: str | None = None
     try:
         async with session.begin():
             await _guard_execution_phase(
@@ -1028,19 +1054,39 @@ async def _execute_feature_update_request_locked(
                 raise _FeatureUpdateExecutionStopped
             started = claimed
             if started.scope_type == "cache_target_keys":
-                await capture_cache_target_refresh_members_by_keys(
+                external_system = str(started.scope["external_system"])
+                target_keys = tuple(str(value) for value in started.scope["target_keys"])
+                protocol_error = await pinvi_cache_target_refresh_protocol_error(
                     session,
                     request_id=started.request_id,
-                    external_system=str(started.scope["external_system"]),
-                    target_keys=tuple(
-                        str(value) for value in started.scope["target_keys"]
-                    ),
+                    external_system=external_system,
+                    target_keys=target_keys,
                 )
-            await append_cache_target_refresh_status_events(
+                if protocol_error is None:
+                    await capture_cache_target_refresh_members_by_keys(
+                        session,
+                        request_id=started.request_id,
+                        external_system=external_system,
+                        target_keys=target_keys,
+                    )
+            if protocol_error is None:
+                await append_cache_target_refresh_status_events(
+                    session,
+                    request_id=started.request_id,
+                    job_id=started.job_id,
+                    status="running",
+                )
+
+        if protocol_error is not None:
+            return await _finish_failed_execution(
                 session,
-                request_id=started.request_id,
-                job_id=started.job_id,
-                status="running",
+                started,
+                plan=_unresolved_execution_plan(started),
+                results=results,
+                error_message=protocol_error,
+                owner_dagster_run_id=dagster_run_id,
+                event_code="CACHE_TARGET_REFRESH_PROTOCOL_VIOLATION",
+                append_cache_target_status_events=False,
             )
 
         async with session.begin():
@@ -1234,6 +1280,9 @@ async def _execute_feature_update_request_locked(
                 exc.event_code
                 if isinstance(exc, ProviderDatasetRefreshFailure)
                 else None
+            ),
+            append_cache_target_status_events=not isinstance(
+                exc, CacheTargetRefreshProtocolViolation
             ),
         )
 

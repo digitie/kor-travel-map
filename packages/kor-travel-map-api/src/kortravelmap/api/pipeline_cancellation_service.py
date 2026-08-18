@@ -21,6 +21,11 @@ from kortravelmap.infra.advisory_lock import advisory_lock_key
 from kortravelmap.infra.c6c_cancel_probe_fixture_repo import (
     mark_c6c_cancel_probe_consumed,
 )
+from kortravelmap.infra.cache_target_event_repo import (
+    CacheTargetRefreshProtocolViolation,
+    append_cache_target_refresh_status_events,
+)
+from kortravelmap.infra.feature_update_repo import get_update_request_by_job_id
 from kortravelmap.infra.log_repo import record_system_log
 from kortravelmap.infra.pipeline_cancellation_repo import (
     PipelineCancellationConflict,
@@ -718,6 +723,30 @@ async def _cancel_queued_members(
                     cancellation_id=detail.attempt.cancellation_id,
                     message="queued cancellation member CAS ownership was lost",
                 )
+                request = await get_update_request_by_job_id(
+                    session,
+                    member.job_id,
+                )
+                if request is not None and request.scope_type == "cache_target_keys":
+                    # queued 뒤 restore fence가 지나간 request의 member epoch는 stale이라
+                    # append가 protocol violation을 낸다. 취소 자체(ledger CAS)는 성립해야
+                    # 하므로 savepoint 안에서 시도하고, fence 뒤에는 relay event 없이 끝낸다
+                    # (옛 epoch event는 설계상 거부 — 500이 아니라 조용한 생략이 맞다).
+                    try:
+                        async with session.begin_nested():
+                            await append_cache_target_refresh_status_events(
+                                session,
+                                request_id=request.request_id,
+                                job_id=request.job_id,
+                                status="cancelled",
+                            )
+                    except CacheTargetRefreshProtocolViolation as violation:
+                        _LOG.warning(
+                            "cache target refresh cancelled without relay event — restore fence "
+                            "moved after queue: request_id=%s detail=%s",
+                            request.request_id,
+                            violation,
+                        )
     async with session.begin():
         return await _reload_attempt(session, detail.attempt.cancellation_id)
 

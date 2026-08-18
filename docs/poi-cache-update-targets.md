@@ -457,15 +457,18 @@ Target summary도 외부 key와 좌표만 반환하며 `target_id`, `refresh_pol
 
 #### `POST /ops/pipeline/requests`
 
-feature update request는 운영자/admin 영역이다. scope에 `cache_target_keys`를
-추가해 등록된 target 묶음 기준 refresh를 실행한다. PinVi 사용자 제안 큐는
-PinVi app DB가 소유하고, 운영자 승인 뒤 admin API로 이 요청을 만든다.
+feature update request는 운영자/admin 영역이다. `cache_target_keys`는 PinVi가 아닌
+운영자 소유 external system의 등록 target 묶음을 기준으로 refresh를 실행한다.
+PinVi target은 일반 ops queue가 아니라 아래 ServiceToken refresh 경로만 사용한다. 이
+구분으로 source head·refresh member·queued status outbox가 한 transaction에 남고,
+generic ops/API/Python client enqueue가 그 경계를 우회하지 못한다. 배포 전 남은
+generic PinVi request는 executor가 provider 호출 전에 terminal fail-close한다.
 
 ```json
 {
   "scope": {
     "type": "cache_target_keys",
-    "external_system": "pinvi",
+    "external_system": "operator-owned-system",
     "target_keys": ["poi_123", "poi_456"],
     "radius_km": 5.0,
     "scope_mode": "center_radius"
@@ -475,6 +478,15 @@ PinVi app DB가 소유하고, 운영자 승인 뒤 admin API로 이 요청을 �
   "reason": "저장 POI 주변 캐시 갱신"
 }
 ```
+
+`external_system="pinvi"`로 위 endpoint를 호출하면 422이다. PinVi consumer가
+요청을 만들 때는 `POST /v1/service/refresh-requests`에 ServiceToken과
+`Idempotency-Key`를 보내며, **exact key set** 계약이다: 요청 key 중 활성 target이 아닌 것(없음·삭제·
+`update_enabled=false`·`refresh_policy=disabled`)이 하나라도 있으면 `refresh_target_inactive` 409로,
+active target마다 현 stream `restore_epoch`의 active source head가 없으면
+`refresh_source_head_missing` 409으로 fail-close한다(둘 다 request 행·outbox event를 만들지 않는다).
+실행 도중 restore fence가 지나가면 request는 ledger에서 `failed`/`cancelled`로 끝나되 옛 epoch의
+relay event는 내지 않는다 — consumer는 fence 뒤 reconciliation으로 재동기화한다.
 
 처리:
 
@@ -573,9 +585,12 @@ DB 규칙:
 
 ### 11.1 vNext generation/outbox producer foundation (ADR-081, T-VN-41)
 
-기존 admin target resource는 운영자 수동 관리와 ETag CAS를 유지한다. PinVi 전파는 admin route를
-재사용하지 않고 ServiceToken 전용 `/v1/service/cache-targets/*`, refresh operation, stream
-control, pull claim/ACK/NACK, dead/replay, fixed snapshot resource를 사용한다.
+기존 admin target resource는 **PinVi 이외 수동 소유 external system**의 운영자 관리와 ETag CAS를
+유지한다. `external_system='pinvi'`의 admin PUT/DELETE는 `409
+CACHE_TARGET_SOURCE_PROTOCOL_REQUIRED`로 거부한다. PinVi 전파는 admin route를 재사용하지 않고
+ServiceToken 전용 `/v1/service/cache-targets/*`, refresh operation, stream control, pull
+claim/ACK/NACK, dead/replay, fixed snapshot resource를 사용한다. 따라서 활성 relay stream의
+source head/outbox를 우회하는 writer는 없다.
 
 `feature_update_requests.generation`, target `lock_version`, Map `restore_epoch`, PinVi
 `source_generation`, result `target_sequence`, delivery `relay_order`는 서로 다른 값이다. 특히
