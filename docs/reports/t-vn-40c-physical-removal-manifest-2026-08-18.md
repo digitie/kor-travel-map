@@ -1,7 +1,9 @@
 # T-VN-40C — legacy 물리 삭제 manifest (사전 작성 · 실행은 receipt complete 뒤)
 
-- 날짜: 2026-08-18 · 상태: **적대 리뷰 2명(DB/dependency · code/contract/consumer) 1차 — 둘 다 holds=false, P1 5건
-  → 아래에 전부 반영(v2). 재리뷰 뒤 확정. 실행(0224 적용)은 T-VN-40 인수 ①~④(migration → import → soak →
+- 날짜: 2026-08-18 · 상태: **v2.2 — 적대 리뷰 2명 2라운드. code/contract 렌즈 hold. DB 렌즈: DDL 순서·postcheck는 n150
+  시뮬레이션(prod-shaped·fresh)에서 전부 통과, 남은 P1은 draft 기계 결함(procedure 본문 splitter → 0214 splitter로 교체,
+  D4 replace 시 SECURITY DEFINER+search_path 재명시)으로 v2.2에서 반영. D4 본문(0214 patch/archive 두 procedure의
+  legacy 분기 제거본)은 40C 구현 PR에서 채운다. 실행(0224 적용)은 T-VN-40 인수 ①~④(migration → import → soak →
   receipt complete) 뒤에만.**
 - 근거: 상세 설계 §6.2 step 6–7, ADR-075 결정 4(soak 전 legacy 제거 금지), `docs/tasks.md` "T-VN-40 인수 —
   실태" 사전 task 3, `contracts/vnext/target-schema-v1.sql` §12(목표 상태에 legacy 없음),

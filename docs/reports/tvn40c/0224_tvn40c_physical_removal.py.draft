@@ -78,6 +78,9 @@ DROP FUNCTION feature.set_curation_item_legacy_component_identity() RESTRICT;
 #      TODO(draft): 0214_tvn40_item_commands.py의 두 procedure 본문에서 legacy 분기를 뺀 전문을 여기 붙인다
 #      (patch: 335-357·485-504, archive: 565-576·597-603). 통합 테스트: replace 뒤 create/patch/archive command가
 #      api runtime으로 동작 + pg_proc.prosrc에 legacy 식별자 0.
+#      **CREATE OR REPLACE는 명시하지 않은 속성을 기본값으로 되돌린다** — 반드시 `SECURITY DEFINER`와
+#      `SET search_path = pg_catalog, feature, ops`(0214:270-271, 525-526)를 다시 적는다. 안 그러면 executor 게이트가
+#      INVOKER로 조용히 깨진다(리뷰 P1). D4 대상은 정확히 patch/archive 둘 — create_curation_item_command에는 legacy 참조 없음.
 _D4_SQL = """
 SET ROLE ktm_curation_command_owner;
 -- CREATE OR REPLACE PROCEDURE feature.patch_curation_item_command(...) ... $$ ... $$;
@@ -152,7 +155,7 @@ BEGIN
     END IF;
     -- 이름만이 아니라 본문(prosrc)도 본다 — 0214 item command의 legacy 분기·D3b trigger 함수 잔존을 잡는다.
     IF EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
-               WHERE n.nspname IN ('feature','ops','provider_sync')
+               WHERE n.nspname IN ('feature','ops','provider_sync','public')
                  AND (p.prosrc LIKE '%curated_features%' OR p.prosrc LIKE '%legacy_projection_id%')) THEN
         RAISE EXCEPTION 'tvn40c physical removal: a routine body still references the legacy overlay' USING ERRCODE = 'P0001';
     END IF;
@@ -161,21 +164,68 @@ $tvn40c_postcheck$;
 """
 
 
-def _run(sql: str) -> None:
-    for statement in (s.strip() for s in sql.split(";\n") if s.strip()):
+# 0214와 같은 dollar-quote 인식 splitter — D4의 procedure 본문($$ … ; … $$)을 쪼개지 않는다.
+def _execute_commands(source: str) -> None:
+    """Dollar-quoted routine bodies를 보존해 asyncpg statement를 분리한다."""
+
+    statements: list[str] = []
+    start = 0
+    index = 0
+    quote: str | None = None
+    dollar_tag: str | None = None
+    while index < len(source):
+        character = source[index]
+        if dollar_tag is not None:
+            if source.startswith(dollar_tag, index):
+                index += len(dollar_tag)
+                dollar_tag = None
+                continue
+            index += 1
+            continue
+        if quote is not None:
+            if character == quote:
+                if index + 1 < len(source) and source[index + 1] == quote:
+                    index += 2
+                    continue
+                quote = None
+            index += 1
+            continue
+        if character in {"'", '"'}:
+            quote = character
+            index += 1
+            continue
+        if character == "$":
+            end = source.find("$", index + 1)
+            if end != -1:
+                candidate = source[index : end + 1]
+                inner = candidate[1:-1]
+                if not inner or inner.replace("_", "a").isalnum():
+                    dollar_tag = candidate
+                    index = end + 1
+                    continue
+        if character == ";":
+            statement = source[start:index].strip()
+            if statement:
+                statements.append(statement)
+            start = index + 1
+        index += 1
+    trailing = source[start:].strip()
+    if trailing:
+        statements.append(trailing)
+    for statement in statements:
         op.execute(statement)
 
 
 def upgrade() -> None:
     op.execute(_PRECHECK_SQL)
-    _run(_D1_SQL)
-    _run(_D2_SQL)
-    _run(_D3_SQL)
-    _run(_D3B_SQL)
-    _run(_D4_SQL)  # TODO(draft): 본문 채운 뒤 활성
-    _run(_D5_SQL)
-    _run(_D6_D7_SQL)
-    _run(_D8_SQL)
+    _execute_commands(_D1_SQL)
+    _execute_commands(_D2_SQL)
+    _execute_commands(_D3_SQL)
+    _execute_commands(_D3B_SQL)
+    _execute_commands(_D4_SQL)  # TODO(draft): 본문 채운 뒤 활성
+    _execute_commands(_D5_SQL)
+    _execute_commands(_D6_D7_SQL)
+    _execute_commands(_D8_SQL)
     op.execute(_D9_SQL)
     op.execute(_POSTCHECK_SQL)
     # D10 ACL: 코드(runtime_privileges) 변경 + 배포 후 reconcile. D12 models/graph/head pin: 같은 PR.
