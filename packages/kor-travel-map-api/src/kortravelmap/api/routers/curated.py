@@ -10,7 +10,7 @@ import re
 from collections.abc import Awaitable
 from datetime import date, datetime
 from time import perf_counter
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Final, Literal
 from uuid import UUID
 
 import httpx
@@ -50,6 +50,11 @@ __all__ = ["admin_router", "router"]
 router = APIRouter(tags=["curated"])
 
 
+# T-VN-40A fence 대상 legacy write 경로. `/admin` prefix 아래의 두 alias만이며 뒤에
+# 하위 segment(`/{id}`, `/{id}/select` …)가 오거나 끝난다.
+_LEGACY_WRITE_PATH: Final = re.compile(r"/admin/(?:features/curated|curated-features)(?:/|$)")
+
+
 async def _fence_legacy_curated_writes(request: Request) -> None:
     """T-VN-40A route 층 — legacy admin curated **write** route는 410 Gone.
 
@@ -70,8 +75,9 @@ async def _fence_legacy_curated_writes(request: Request) -> None:
     # input만 유지"로 정했고 0207~0209가 T-VN-40에서 새 procedure로 그 표에 쓴다. 그 route는
     # 살려 둔다. legacy는 `curated_features` overlay(`/features/curated*`,
     # `/curated-features*`)뿐이다.
-    path = request.url.path
-    if "/features/curated" not in path and "/curated-features" not in path:
+    # segment 단위로 본다 — substring이면 `/features/curated-imports` 같은 미래 route까지
+    # 조용히 410이 된다(리뷰 P2). `/features/curated` 뒤는 끝이거나 `/`여야 한다.
+    if _LEGACY_WRITE_PATH.search(request.url.path) is None:
         return
     raise HTTPException(
         status_code=410,

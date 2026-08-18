@@ -96,9 +96,14 @@ def test_static_layer_every_repo_write_function_calls_the_fence() -> None:
 # 뒤, 그 함수가 fence를 부르거나 아래 allowlist에 있어야 한다.
 
 _INFRA_DIR = _ROOT / "src/kortravelmap/infra"
+# write DML(ONLY/MERGE/TRUNCATE 포함) 또는 row lock. PostgreSQL은 FOR UPDATE / FOR NO KEY
+# UPDATE / FOR SHARE / FOR KEY SHARE **넷 다** UPDATE 권한을 요구한다(SELECT 문서) — SHARE도
+# 잡는다. lock 절은 `OF alias`가 있든 없든, alias에 `AS`가 있든 없든 매칭한다: 같은 문자열
+# 안에 `feature.curated_features`가 등장하고 뒤에 locking clause가 오면 write로 본다.
 _LEGACY_WRITE_SQL = re.compile(
-    r"\b(?:UPDATE|INSERT\s+INTO|DELETE\s+FROM)\s+feature\.curated_features\b"
-    r"|feature\.curated_features\s+AS\s+(\w+)\b[\s\S]*?\bFOR\s+(?:NO\s+KEY\s+)?UPDATE\s+OF\s+\1\b",
+    r"\b(?:UPDATE|INSERT\s+INTO|DELETE\s+FROM|MERGE\s+INTO|TRUNCATE)\s+(?:ONLY\s+)?"
+    r"feature\.curated_features\b"
+    r"|feature\.curated_features\b[\s\S]*?\bFOR\s+(?:NO\s+KEY\s+UPDATE|UPDATE|KEY\s+SHARE|SHARE)\b",
     re.I,
 )
 # 0214 이전의 Python canonical writer들. runtime은 같은 이름의 SECURITY DEFINER procedure
@@ -183,12 +188,15 @@ def test_superseded_python_writers_are_not_reachable_from_runtime() -> None:
     allowlist는 "runtime에서 안 부른다"는 전제 위에 있다. 누가 다시 연결하면 그 경로는
     runtime role에서 42501이다 — 여기서 먼저 잡는다.
     """
+    # 진입점 + "진입점이 부를 수 있는 모든 것". curation_repo.py 자신만 제외한다 —
+    # infra의 다른 모듈이 부르면 그 모듈이 runtime-reachable bridge가 된다(리뷰 P2).
     entrypoint_dirs = (
         _ROOT / "packages/kor-travel-map-api/src",
         _ROOT / "packages/kor-travel-map-dagster/src",
-        _ROOT / "src/kortravelmap/cli",
-        _ROOT / "src/kortravelmap/client",
+        _ROOT / "src/kortravelmap",
+        _ROOT / "scripts",
     )
+    excluded = {_ROOT / "src/kortravelmap/infra/curation_repo.py"}
     # `_lock_legacy_projections_for_item`은 private이라 `update_curation_item`을 통해서만
     # 닿는다. public 이름과 그 wrapper(`archive_curation_item`은 update_curation_item을 감싼다).
     names = sorted(
@@ -200,6 +208,8 @@ def test_superseded_python_writers_are_not_reachable_from_runtime() -> None:
     for base in entrypoint_dirs:
         assert base.is_dir(), f"진입점 디렉터리가 없다: {base}"
         for path in base.rglob("*.py"):
+            if path in excluded:
+                continue
             for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
                 if pattern.search(line):
                     hits.append(f"{path.relative_to(_ROOT)}:{i}: {line.strip()}")
@@ -250,3 +260,55 @@ def test_fence_ignores_relations_outside_the_set() -> None:
     (그래서 위 `..._match_the_declared_set`이 필요하다: 오타는 여기로 빠져나간다.)
     """
     legacy_write_fence.assert_legacy_write_allowed("curation_items", operation="test")
+
+
+def test_legacy_write_regex_catches_every_locking_clause_and_dml_form() -> None:
+    """검사기 자기검증 — 회피 형태가 실제로 잡히는지(리뷰 P2에서 나온 목록)."""
+    caught = (
+        "UPDATE ONLY feature.curated_features SET x = 1",
+        "MERGE INTO feature.curated_features AS t USING s ON true WHEN MATCHED THEN DELETE",
+        "TRUNCATE feature.curated_features",
+        "SELECT 1 FROM feature.curated_features cf WHERE true FOR UPDATE OF cf",
+        "SELECT 1 FROM feature.curated_features WHERE true FOR NO KEY UPDATE",
+        "SELECT 1 FROM feature.curated_features AS legacy FOR SHARE",
+        "SELECT 1 FROM feature.curated_features FOR KEY SHARE",
+        "select 1 from feature.curated_features for update",
+    )
+    for sql in caught:
+        assert _LEGACY_WRITE_SQL.search(sql), sql
+    passed = (
+        "SELECT count(*) FROM feature.curated_features",
+        "SELECT 1 FROM feature.curated_features_history FOR UPDATE",
+        "UPDATE feature.curation_items SET x = 1",
+    )
+    for sql in passed:
+        assert not _LEGACY_WRITE_SQL.search(sql), sql
+
+
+def test_no_orm_write_path_to_curated_features_outside_models() -> None:
+    """ORM 우회 — `CuratedFeatureRow`(models.py)를 통한 add()/update()는 SQL 문자열이 없어
+    위 정규식이 못 본다. 그래서 그 row 클래스가 models·infra/__init__ 재수출 밖 어디에서도
+    참조되지 않음을 고정한다. 참조가 생기면 여기서 red — 그때 fence 층을 그 경로에도 놓는다.
+    """
+    allowed = {
+        _ROOT / "src/kortravelmap/infra/models.py",
+        _ROOT / "src/kortravelmap/infra/__init__.py",
+    }
+    bases = (
+        _ROOT / "src",
+        _ROOT / "packages/kor-travel-map-api/src",
+        _ROOT / "packages/kor-travel-map-dagster/src",
+        _ROOT / "scripts",
+    )
+    hits: list[str] = []
+    for base in bases:
+        for path in base.rglob("*.py"):
+            if path in allowed:
+                continue
+            for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if re.search(r"\bCuratedFeatureRow\b", line):
+                    hits.append(f"{path.relative_to(_ROOT)}:{i}: {line.strip()}")
+    assert not hits, "CuratedFeatureRow(ORM legacy write 우회 가능)가 참조된다:\n" + "\n".join(
+        hits
+    )
+
