@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-18 — T-VN-40 인수 ① 완료: prod head `0223`, mapping 4,424
+
+precheck 전부 0 → 백업(`kor_travel_map_0104_pre-tvn40-1_20260818T082752Z.dump` + `.sha256`) →
+`14ec2368` 스냅샷 배포 → `0104→0223` 단일 트랜잭션 성공(`total=4424 by_kind={'legacy_projection': 4424}`).
+사후 확인 전부 통과, 4 서비스 healthy. 절차·선행조건 2개(DB role bootstrap, PinVi token pair)는
+`docs/deploy.md` §T-VN-40 prod 배포에 있다. 배포 중 드러난 Map 결함(빈 digest env → 기동 거부)은
+`fix/api-settings-empty-pinvi-digest`로 수정 중(적대 리뷰 2명 진행).
+
+### 다음 한 작업
+
+**② canonical import** — admin API preview→commit으로 canonical collection을 채운다(dedup merge는
+①~④ 동안 금지). 그다음 ③ soak/live e2e(`docs/runbooks/c7-prod-live-e2e.md`) → ④ receipt complete →
+⑤ 40C 구현 PR(D4 본문·코드/프론트/계약 제거·static zero gate)과 `0224` 적용.
+
 ## 2026-08-18 — T-VN-40A fence(#994) 머지 → 다음은 40-mapping
 
 #994는 main `3e0732b3`로 머지됐다(적대 리뷰 3라운드·2명 hold, CI 4 workflow green, n150 전체 통합

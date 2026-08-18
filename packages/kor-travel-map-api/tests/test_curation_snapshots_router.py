@@ -442,9 +442,32 @@ def test_snapshot_http_representation_normalizes_nfc(
 
 
 @pytest.mark.unit
+def test_pinvi_curation_token_digest_empty_string_disables_like_none(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """compose의 ``${NAME:-}`` 주입(raw pair 미설정)은 unset과 같아야 한다 — 기동 거부 금지."""
+
+    monkeypatch.setenv("KOR_TRAVEL_MAP_API_PINVI_CURATION_SNAPSHOT_TOKEN_SHA256", "")
+    monkeypatch.setenv("KOR_TRAVEL_MAP_API_PINVI_CURATION_CUTOVER_MAPPING_TOKEN_SHA256", "")
+    settings = ApiSettings()
+    assert settings.pinvi_curation_snapshot_token_sha256 is None
+    assert settings.pinvi_curation_cutover_mapping_token_sha256 is None
+    direct = ApiSettings(
+        pinvi_curation_snapshot_token_sha256="",
+        pinvi_curation_cutover_mapping_token_sha256="",
+    )
+    assert direct.pinvi_curation_snapshot_token_sha256 is None
+    assert direct.pinvi_curation_cutover_mapping_token_sha256 is None
+
+
+@pytest.mark.unit
 def test_snapshot_token_digest_must_be_lowercase_and_distinct() -> None:
     with pytest.raises(ValidationError):
         ApiSettings(pinvi_curation_snapshot_token_sha256="A" * 64)
+    with pytest.raises(ValidationError):
+        ApiSettings(pinvi_curation_snapshot_token_sha256="a" * 63)
+    with pytest.raises(ValidationError):
+        ApiSettings(pinvi_curation_cutover_mapping_token_sha256=" ")
     with pytest.raises(ValidationError):
         ApiSettings(
             service_token=SecretStr(TOKEN),

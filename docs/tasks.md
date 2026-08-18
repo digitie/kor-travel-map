@@ -884,10 +884,22 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
   trigger·D4 0214 patch/archive procedure 재작성·prosrc 검사·splitter); code/contract 렌즈 hold(Q5 public catalog 제거·
   P7 PinVi lockstep·static zero 식별자/allowlist·누락 테스트/e2e/docs). 남은 구현: 40C PR에서 D4 본문·코드/프론트/계약
   삭제·static zero gate 테스트. 실행은 ①~④ 뒤.
-- [ ] **T-VN-40 인수 실행** — 사전 3 task 병합 뒤 ① `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`
-  bump(→ 현재 head `0223_tvn40_identity_mappings`) + **0223 precheck**(설계 §5, prod read-only) + migration·fence enable → ② import/backfill
-  → ③ sanctioned live/soak → ④ receipt complete → ⑤ manifest physical removal 실행. 백업/PITR
-  복구점을 먼저 확인한다.
+- [~] **T-VN-40 인수 실행** — ① 완료 · ②~⑤ 남음.
+  - [x] **① prod migration (2026-08-18)** — precheck 전부 0 → `pg_dump -Fc` 복구점
+    (`~/backups/kor_travel_map_0104_pre-tvn40-1_20260818T082752Z.dump` + `.sha256`) + `.env` 백업 →
+    소스 스냅샷 `~/ktm-src-14ec2368…` + `.env` 3키(REPO_DIR/GIT_COMMIT/EXPECTED_HEAD=`0223_tvn40_identity_mappings`)
+    → 이미지 4개 빌드 → api 재생성으로 `0104→0223` **단일 트랜잭션** 성공. manifest
+    `total=4424 by_kind={'legacy_projection': 4424}`. 사후: legacy 4424 = mapping 4424 ·
+    `source_row_hash` 재계산 불일치 0 · dangling 0 · 포인터 불일치 0 · 0222 5 procedure
+    owner=command_owner/SECDEF·dagster EXECUTE=false · legacy 표 SELECT only · 4 서비스 healthy.
+    절차·선행조건은 `docs/deploy.md` §T-VN-40 prod 배포. **선행조건 2개가 새로 드러났다**:
+    (a) `0202`가 요구하는 `ktm_curation_*` NOLOGIN role 4개 → bootstrap profile one-shot 선행,
+    (b) manager compose가 항상 주입하는 빈 `KOR_TRAVEL_MAP_API_PINVI_CURATION_*_TOKEN_SHA256` →
+    Map이 기동을 거부했다(`fix/api-settings-empty-pinvi-digest`로 수정, PinVi raw pair도 prod `.env`에 설정).
+  - [ ] **② canonical import/backfill** — admin API preview→commit. ①~④ 동안 dedup merge 금지.
+  - [ ] **③ sanctioned live/soak** (`docs/runbooks/c7-prod-live-e2e.md`)
+  - [ ] **④ receipt complete**
+  - [ ] **⑤ 40C manifest physical removal 실행**(0224)
 
 ## Lane B 상세 — b1 PinVi 결합·후속
 

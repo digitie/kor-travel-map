@@ -2,6 +2,28 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-18 — T-VN-40 인수 ① 실행: prod가 `0223`으로 올라갔다 (4,424 mapping)
+
+- 순서: read-only precheck(전부 0, `4424|4424`) → `pg_dump -Fc` 복구점(614MB, `.sha256`) + `.env` 백업 →
+  소스 스냅샷 `~/ktm-src-14ec2368…` → `.env` 3키(REPO_DIR/GIT_COMMIT/EXPECTED_HEAD=0223) → 이미지 4개 빌드
+  → api 재생성(entrypoint의 `alembic upgrade head`) → ui/dagster/daemon.
+- **배포 경로**: manager의 `ensure_target`은 production을 거부한다("manage this service directly on the
+  host instead"). 그래서 manager의 compose 파일+`.env`로 host에서 직접 `docker compose`를 돌렸다.
+  `pinvi-pair rebuild-pinned`는 파괴적이라 쓰지 않았다.
+- 결과: `0104 → 0202 … 0223` 단일 트랜잭션 성공, manifest `total=4424 by_kind={'legacy_projection': 4424}`.
+  사후 확인 — legacy 4424 = mapping 4424, `source_row_hash` 재계산 불일치 0, dangling 0,
+  `legacy_projection_id` 포인터 불일치 0, 0222 procedure 5개 owner=command_owner/SECDEF·dagster EXECUTE=false,
+  legacy 표 runtime 권한 SELECT only, temp 잔존 0. 4 컨테이너 healthy(restart 0), traceback 0, 5xx 0.
+- **배포 중 API가 두 번 내려갔다(데이터 무손상, 둘 다 문서화).**
+  (1) `0202`가 요구하는 `ktm_curation_*` NOLOGIN role 4개가 prod에 없어 42501 재시도 루프 →
+  bootstrap profile one-shot(`docker/postgres-role-bootstrap.sh`, idempotent)을 먼저 돌려 해소.
+  (2) **Map 결함** — manager compose가 `KOR_TRAVEL_MAP_API_PINVI_CURATION_*_TOKEN_SHA256`을 `${NAME:-}`로
+  항상 주입하는데 `min_length=64`가 빈 문자열을 `string_too_short`로 거부해 API 기동 자체가 막혔다.
+  manager 계약대로 PinVi raw pair+digest를 `.env`에 넣어 즉시 복구했고, Map 쪽은 ""를 unset으로
+  정규화하는 hotfix(`fix/api-settings-empty-pinvi-digest`)로 고쳤다.
+- 교훈: "prod 배포 = 이미지 교체"가 아니다. migration이 새로 요구하는 **DB role**과 compose가 항상
+  주입하는 **빈 env**가 각각 기동 게이트다. `docs/deploy.md`에 두 선행조건과 실행 절차를 박았다.
+
 ## 2026-08-18 — T-VN-40-mapping: 0223 identity mapping loader (설계 → 리뷰 → 구현 → 리뷰)
 
 - 설계 문서를 먼저 쓰고 적대 리뷰 2명(data/PinVi · migration/ACL)을 통과시킨 뒤 구현했다. 리뷰가 바꾼 것:
