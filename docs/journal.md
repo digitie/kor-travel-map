@@ -2,6 +2,23 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-18 — T-VN-H45 후속: 다건 재시도 예산·provider quota/TLS 정본화
+
+- KMA·DataGoKr·AirKorea·KHOA 다건 호출에 예상 경계 수 5% 올림(최소 8·최대 32)의 공유
+  `RetryBudget`을 적용했다. timeout과 내부 재시도 정산을 모든 client 생성 경계에 전달하고,
+  provider logger WARNING을 Dagster event stream에 결선했다. 경고에는 예외 본문을 넣지 않고
+  label 개행도 escape해 인증키·log injection 경로를 닫았다.
+- provider 정본을 먼저 수정했다. python-kma-api #24(`0868b76`)는 `resultCode=22`를
+  비재시도 quota로 분류하고 strict XML envelope에서 `03`을 빈 결과로 통일했다. python-khoa-api
+  #8(`20c7207`)은 `serviceKey`를 보내는 ODMI·해수욕장정보 기본 URL을 HTTPS로 전환했다.
+  Map은 두 merge SHA를 exact pin했다.
+- 독립 적대 리뷰 2명은 최초 P1/P2(로그 비밀 노출, XML 03/임의 XML 오분류, KHOA 평문 HTTP,
+  CHECK drift 은폐)를 발견했고 반영 후 신규 P0~P3 없음으로 재심했다. Alembic 1.19 CHECK
+  comparator 전역 제외는 실제 `provider_sync.source_entities` CHECK drift를 숨겨 완전히 철회했다.
+  따라서 ①~③은 완료하지만 ⑤ Alembic 1.19 적응은 열린 barrier로 유지한다.
+- 로컬 검증: python-kma-api `149 passed, 12 skipped` + Ruff/mypy, python-khoa-api
+  `44 passed, 2 skipped` + compileall/Ruff/mypy, Map 변경 집중 `350 passed` + Ruff/strict mypy.
+
 ## 2026-08-18 — T-VN-40 인수 ① 실행: prod가 `0223`으로 올라갔다 (4,424 mapping)
 
 - 순서: read-only precheck(전부 0, `4424|4424`) → `pg_dump -Fc` 복구점(614MB, `.sha256`) + `.env` 백업 →

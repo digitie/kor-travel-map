@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-18 — T-VN-H45 후속 ①~③ 구현·provider 정본 병합
+
+KHOA 시도×페이지와 KMA/DataGoKr/AirKorea 다건 호출에 비례형 공유 `RetryBudget`을 적용하고
+WARNING을 Dagster event stream에 결선했다. 예외 본문은 로그에서 제거했다. upstream 정본은
+python-kma-api #24(`0868b76`, quota/XML 계약)와 python-khoa-api #8(`20c7207`, HTTPS
+`serviceKey`)로 병합했고 Map provider pin도 exact merge SHA로 올렸다. 독립 적대 재리뷰 2명은
+신규 P0~P3 없음으로 provider GO, Map ①~③ 조건부 GO를 판정했다. Alembic 1.19 comparator를
+전역 제외하는 초안은 실제 CHECK drift를 숨겨 철회했으므로 ⑤는 열린 barrier다.
+
+### 다음 한 작업
+
+H45 Map PR의 전체 게이트·CI를 통과시켜 머지한 뒤 T-VN-41S/#922 구현 커밋을 최신 main에
+재배치하고 독립 적대 리뷰 2명·전체 테스트·PR 병합을 진행한다. H45 전체 완료 표시는 ⑤를
+안전한 migration/check gate로 해결하기 전까지 금지한다.
+
 ## 2026-08-18 — T-VN-40 인수 ① 완료: prod head `0223`, mapping 4,424
 
 precheck 전부 0 → 백업(`kor_travel_map_0104_pre-tvn40-1_20260818T082752Z.dump` + `.sha256`) →

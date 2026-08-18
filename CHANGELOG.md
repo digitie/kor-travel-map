@@ -5,6 +5,16 @@
 
 ## [Unreleased]
 
+### provider 다건 재시도·quota/TLS 계약 (2026-08-18, T-VN-H45 후속)
+
+- **CHANGED**: KMA·DataGoKr·AirKorea·KHOA 다건 호출의 재시도 예산을 예상 경계 수 5%로
+  비례화하되 최소 8·최대 32로 제한하고 env/settings로 노출했다. provider WARNING은 Dagster
+  event stream에 기록되며 예외 본문과 개행은 기록하지 않는다.
+- **FIXED**: `python-kma-api@0868b76`으로 올려 `resultCode=22`를 비재시도 quota로
+  분류하고 HTTP 200 XML의 `03`을 빈 결과로 정규화했다. 임의 XML은 parse error로 fail-close한다.
+- **SECURITY**: `python-khoa-api@20c7207`으로 올려 `serviceKey`를 보내는 KHOA ODMI와
+  해수욕장정보 기본 요청 URL을 HTTPS로 전환했다.
+
 ### PinVi legacy curation cutover mapping export (2026-08-14, T-VN-40C)
 
 - **API(service)**: maintenance fence에서만 쓰는

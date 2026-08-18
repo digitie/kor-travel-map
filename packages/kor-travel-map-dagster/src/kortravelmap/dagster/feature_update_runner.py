@@ -639,6 +639,12 @@ def _kma_weather_resources(
             "kma_weather_client_factory": _client_factory,
             "kma_weather_extra_points": settings.kma_weather_extra_points,
             "kma_weather_max_grids_per_run": settings.kma_weather_max_grids_per_run,
+            "provider_upstream_retry_budget_minimum": (
+                settings.provider_upstream_retry_budget_minimum
+            ),
+            "provider_upstream_retry_budget_percent": (
+                settings.provider_upstream_retry_budget_percent
+            ),
         }
     )
 
@@ -661,6 +667,12 @@ def _kma_mid_resources(
         {
             "kma_datagokr_client": client,
             "kma_mid_region_features": settings.kma_mid_region_features,
+            "provider_upstream_retry_budget_minimum": (
+                settings.provider_upstream_retry_budget_minimum
+            ),
+            "provider_upstream_retry_budget_percent": (
+                settings.provider_upstream_retry_budget_percent
+            ),
         },
         teardowns=(_close_method(client),),
     )

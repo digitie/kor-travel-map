@@ -11,7 +11,9 @@ from kortravelmap.dagster.upstream_retry import (
     DEFAULT_UPSTREAM_ATTEMPTS,
     DEFAULT_UPSTREAM_BASE_DELAY_SECONDS,
     DEFAULT_UPSTREAM_MAX_DELAY_SECONDS,
+    DEFAULT_UPSTREAM_RETRY_BUDGET_PERCENT,
     DEFAULT_UPSTREAM_RUN_RETRY_BUDGET,
+    MAX_UPSTREAM_RUN_RETRY_BUDGET,
     PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
     PROVIDER_CLIENT_INNER_RETRIES,
     RetryBudget,
@@ -72,8 +74,32 @@ def test_layer_reconciliation_constants_are_pinned() -> None:
     assert DEFAULT_UPSTREAM_BASE_DELAY_SECONDS == 2.0
     assert DEFAULT_UPSTREAM_MAX_DELAY_SECONDS == 20.0
     assert DEFAULT_UPSTREAM_RUN_RETRY_BUDGET == 8
-    # provider 경계 backoff — 예산과 곱해 run당 재시도 대기 상한 120s.
+    assert DEFAULT_UPSTREAM_RETRY_BUDGET_PERCENT == 5
+    assert MAX_UPSTREAM_RUN_RETRY_BUDGET == 32
+    # provider 경계 backoff — hard cap과 곱해 run당 재시도 대기 상한 480s.
     assert PROVIDER_BOUNDARY_BASE_DELAY_SECONDS == 15.0
+
+
+def test_proportional_budget_preserves_floor_scales_and_caps() -> None:
+    assert RetryBudget.proportional(1).limit == 8
+    assert RetryBudget.proportional(187).limit == 10
+    assert RetryBudget.proportional(300).limit == 15
+    assert RetryBudget.proportional(10_000).limit == 32
+    assert RetryBudget.proportional(100, percent=20, minimum=3).limit == 20
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"expected_calls": -1},
+        {"expected_calls": 1, "percent": -1},
+        {"expected_calls": 1, "minimum": -1},
+        {"expected_calls": 1, "minimum": 3, "maximum": 2},
+    ],
+)
+def test_proportional_budget_rejects_invalid_inputs(kwargs: dict[str, int]) -> None:
+    with pytest.raises(ValueError, match="expected_calls|percent|bounds"):
+        RetryBudget.proportional(**kwargs)
 
 
 def test_default_predicate_follows_retryable_attribute() -> None:
@@ -297,6 +323,27 @@ def test_on_retry_reports_label_attempt_and_exception() -> None:
     assert "kma grid 60,127" in messages[0]
     assert "_RetryableError" in messages[0]
     assert "1/2" in messages[0]
+
+
+def test_on_retry_never_logs_exception_text_or_raw_newlines() -> None:
+    messages: list[str] = []
+    call = _Flaky(
+        1,
+        _RetryableError("https://upstream/?serviceKey=TOPSECRET\nforged-event"),
+    )
+
+    retry_upstream(
+        call,
+        label="provider\npage-1",
+        sleep=lambda _s: None,
+        on_retry=messages.append,
+    )
+
+    assert len(messages) == 1
+    assert "TOPSECRET" not in messages[0]
+    assert "forged-event" not in messages[0]
+    assert "\n" not in messages[0]
+    assert r"provider\npage-1" in messages[0]
 
 
 def test_async_recovers_and_yields_backoff_to_loop() -> None:

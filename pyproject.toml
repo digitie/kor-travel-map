@@ -95,11 +95,12 @@ providers = [
   # (NO_DATA)을 예외 대신 빈 결과로 정규화 (provider #18/PR#19 — T-212e 특보
   # rolling window 빈 구간 대응). 2592b740: 중기예보 응답이 tmFc를 에코하지
   # 않아 MidForecastItem.tm_fc가 항상 None → 해석된 요청 tmFc 폴백 주입
-  # (provider #20/PR#21, T-212e mid forecast run f044b091 실측).
-  "python-kma-api @ git+https://github.com/digitie/python-kma-api.git@63e9bcdaf2fc3533de8c3bb93ad146bb4f2f8eab",
+  # (provider #20/PR#21, T-212e mid forecast run f044b091 실측). 0868b76:
+  # resultCode 22 비재시도 quota + strict XML 03 빈 결과(provider PR#24).
+  "python-kma-api @ git+https://github.com/digitie/python-kma-api.git@0868b76bd4b7de96b20f667e431c3f43b67cb537",
   "python-airkorea-api @ git+https://github.com/digitie/python-airkorea-api.git@a206282c4aff574dcb5689f97cca301072c09095",
-  # khoa: snake_case live row 파싱 (khoa#5/PR#6).
-  "python-khoa-api @ git+https://github.com/digitie/python-khoa-api.git@0ccb5ed90da5886a2d346b33f1019efd2719e0bc",
+  # khoa: snake_case live row 파싱(khoa#5/PR#6) + serviceKey 기본 URL HTTPS(PR#8).
+  "python-khoa-api @ git+https://github.com/digitie/python-khoa-api.git@20c720741c4c041a49332ca2b26703801f0de1a9",
   # python-krforest-api는 산악기상 + Sprint 3 trails 양쪽 사용 (아래 §2.5와 동일 lib).
   #
   # ── Sprint 2 §2.3 — opinet 유가 (place + price) ───────────────────────

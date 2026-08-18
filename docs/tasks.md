@@ -17,7 +17,7 @@ barrier로 직렬화한다.
 - **Lane A — cross-repo 계약·운영·데이터 품질**
   - [~] `T-VN-H34`(공식 curation 미연결 membership 잔여 AC — `T-VN-M01`~`M03` 선행 필요)
   - [~] `T-VN-H43` → [~] `T-VN-H44`(백업 정기화·복원 드릴 재개 조건)
-  - [~] `T-VN-H45-후속`(②quota 오분류·④coalesce 완료 / ①khoa·③RetryBudget·⑤alembic 잔여)
+  - [~] `T-VN-H45-후속`(①~④ 완료 / ⑤ alembic 1.19 적응 잔여)
   - [ ] `T-VN-H46F`(admin UI geo proxy 잔여 결선) ∥ [ ] `T-VN-H46G`(buildx image commit provenance label)
   - [~] `T-VN-H49`(Map baseline·절차 완료 / docker-manager #177의 외부 인스턴스 주기화 잔여)
 - **Lane B — frontend hardening·PinVi 소비 API**
@@ -462,13 +462,16 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > prod는 `archive_mode=off`라 **PITR이 없다 — dump가 유일 복구점**이다. codex 소관 41C prod enable은 H42 판정 + docker-manager
 > 재pin 뒤(Lane B T-VN-41 절 경계 주석).
 
-- [ ] T-VN-H45-후속 — **다건 provider 호출·quota 관찰 확장**
+- [~] T-VN-H45-후속 — **다건 provider 호출·quota 관찰 확장**
 
   완료한 KMA/airkorea 강건화(`T-VN-H45`)의 후속 5축.
 
-  - [ ] ① khoa 등 다건 루프 fetcher 확대
+  - [x] ① **khoa 등 다건 루프 fetcher 확대(2026-08-18)** — KHOA 시도×페이지 경계를
+    공용 재시도·run 예산으로 감싸고 timeout·내부 재시도 정산값을 client에 주입했다. upstream
+    [python-khoa-api PR #8](https://github.com/digitie/python-khoa-api/pull/8)에서
+    `serviceKey` 기본 전송 URL도 HTTPS로 전환했다.
   - [x] ② **python-kma-api resultCode 22 오분류 수정(2026-08-18)** —
-    [digitie/python-kma-api `fix/result-code-22-not-retryable`](https://github.com/digitie/python-kma-api/tree/fix/result-code-22-not-retryable).
+    [python-kma-api PR #24](https://github.com/digitie/python-kma-api/pull/24).
     `22`는 data.go.kr 일일 한도 초과이고 그 한도는 **자정에 리셋**된다. `retryable` 축은
     같은 파일이 auth(20/30/31)=False · server(04/99)=True로 정한 대로 "**즉시 재시도가
     성공할 만한가**"이지 "언젠가 성공할 수 있는가"가 아니다. `True`면 호출자가 성공할
@@ -476,8 +479,12 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     - **테스트가 왜 못 잡았나**: `test_result_codes_raise_typed_exceptions`가 `12`와 `22`를
       한 묶음으로 돌리면서 `failure_kind`도 `retryable`도 단언하지 않았다(provider·endpoint만).
       `22`를 분리해 셋 다 단언하도록 고쳤다.
-    - 200-body XML envelope parse 경로는 **미확인 잔여**다.
-  - [ ] ③ RetryBudget 비례화/settings 노출 및 `_LOGGER`↔`python_logs` 결선
+    - HTTP 200 XML `OpenAPI_ServiceResponse/cmmMsgHeader`도 같은 result-code 정책을 쓰며,
+      `03`은 빈 결과, `22`는 비재시도 quota다. 임의 XML의 같은 태그는 parse error로 fail-close한다.
+  - [x] ③ **RetryBudget 비례화/settings 노출 및 `_LOGGER`↔`python_logs` 결선(2026-08-18)** —
+    예상 경계 수의 5%를 올림하되 최소 8·최대 32로 제한하고 두 값을 env/settings로 노출했다.
+    KMA·DataGoKr·AirKorea·KHOA의 다건 경계에 공유 예산을 전달하며 provider logger WARNING을
+    Dagster event stream에 결선했다. 예외 본문과 개행은 로그에 싣지 않는다.
   - [x] ④ **KMA 5종 + airkorea schedule에 `coalesce_active_runs=True`(2026-08-18)** —
     같은 job의 미종료 run이 있으면 tick을 건너뛴다.
     - ⚠️ **혼자 켜면 안 된다.** 상한이 없으면 hung run 하나가 그 스케줄을 **영구

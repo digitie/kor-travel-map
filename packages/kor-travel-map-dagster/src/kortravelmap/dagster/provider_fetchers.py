@@ -42,10 +42,8 @@ if TYPE_CHECKING:
     from kortravelmap.settings import KorTravelMapSettings
 
 _LOGGER = logging.getLogger(__name__)
-"""H45 재시도 텔레메트리. 주의: `docker/dagster.yaml`에 `python_logs` 관리 절이
-없어 이 logger는 구조화 event log가 아니라 stderr→compute log로 남는다(재리뷰
-N — 가시성 등급은 kma 경로의 `context.log`보다 낮다). event stream 라우팅
-필요 시 `python_logs.managed_python_loggers` 결선은 배포 후 튜닝 백로그."""
+"""H45 재시도 텔레메트리. ``docker/dagster.yaml``의 ``python_logs``가 이
+logger의 WARNING 이상을 Dagster event stream으로 결선한다."""
 
 __all__ = [
     "KrexTrafficNoticeSnapshotUnstable",
@@ -968,6 +966,20 @@ KMA_WEATHER_ALERT_STN_ID: Final[str] = "108"
 """KMA 특보 발표관서 — ``108`` = 전국(기상청 본청). 1차는 전국 단일 조회."""
 
 
+def _provider_retry_budget(
+    settings: KorTravelMapSettings,
+    *,
+    expected_calls: int,
+) -> upstream_retry.RetryBudget:
+    """settings의 비율·하한으로 run 재시도 예산을 만든다(H45 후속)."""
+
+    return upstream_retry.RetryBudget.proportional(
+        expected_calls,
+        percent=settings.provider_upstream_retry_budget_percent,
+        minimum=settings.provider_upstream_retry_budget_minimum,
+    )
+
+
 def fetch_kma_weather_alerts(
     settings: KorTravelMapSettings,
 ) -> Iterator[Any]:
@@ -1000,7 +1012,7 @@ def fetch_kma_weather_alerts(
     kst = timezone(timedelta(hours=9))
     today = datetime.now(kst).date()
     window_start = today - timedelta(days=settings.kma_weather_alert_lookback_days - 1)
-    budget = upstream_retry.RetryBudget()
+    budget = _provider_retry_budget(settings, expected_calls=1)
     num_of_rows = 100
     try:
         page_no = 1
@@ -1072,14 +1084,31 @@ def fetch_khoa_beaches(
     api_key = secret.get_secret_value()
 
     khoa = cast(Any, importlib.import_module("khoa"))
-    client = khoa.KhoaClient(api_key=api_key)
+    client = khoa.KhoaClient(
+        api_key=api_key,
+        timeout=settings.provider_http_timeout_seconds,
+        retries=upstream_retry.PROVIDER_CLIENT_INNER_RETRIES,
+    )
+    sido_names = tuple(khoa.OCEANS_BEACH_INFO_DEFAULT_SIDO_NAMES)
+    budget = _provider_retry_budget(settings, expected_calls=len(sido_names))
     num_of_rows = 100
     try:
-        for sido in khoa.OCEANS_BEACH_INFO_DEFAULT_SIDO_NAMES:
+        for sido in sido_names:
             page_no = 1
             while True:
-                page = client.oceans_beach_info(sido, page_no=page_no, num_of_rows=num_of_rows)
-                items = list(page.items)
+                items = retry_upstream(
+                    partial(
+                        _khoa_beach_page,
+                        client,
+                        sido,
+                        page_no=page_no,
+                        num_of_rows=num_of_rows,
+                    ),
+                    label=f"khoa oceans_beach_info {sido} p{page_no}",
+                    base_delay=upstream_retry.PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
+                    budget=budget,
+                    on_retry=_LOGGER.warning,
+                )
                 if not items:
                     break
                 yield from items
@@ -1088,6 +1117,23 @@ def fetch_khoa_beaches(
                 page_no += 1
     finally:
         client.close()
+
+
+def _khoa_beach_page(
+    client: Any,
+    sido: str,
+    *,
+    page_no: int,
+    num_of_rows: int,
+) -> list[Any]:
+    """KHOA 해수욕장 한 페이지를 재시도 경계 안에서 완전히 소진한다."""
+
+    page = client.oceans_beach_info(
+        sido,
+        page_no=page_no,
+        num_of_rows=num_of_rows,
+    )
+    return list(page.items)
 
 
 _AIRKOREA_SIDO_NAMES: Final[tuple[str, ...]] = (
@@ -1181,7 +1227,7 @@ def fetch_airkorea_stations(
     """
     client = _airkorea_client(settings, label="stations")
     retryable_types = _airkorea_retryable_types()
-    budget = upstream_retry.RetryBudget()
+    budget = _provider_retry_budget(settings, expected_calls=1)
     num_of_rows = 100
     page_no = 1
     try:
@@ -1223,7 +1269,10 @@ def fetch_airkorea_air_quality(
     """
     client = _airkorea_client(settings, label="air_quality")
     retryable_types = _airkorea_retryable_types()
-    budget = upstream_retry.RetryBudget()
+    budget = _provider_retry_budget(
+        settings,
+        expected_calls=len(_AIRKOREA_SIDO_NAMES),
+    )
     num_of_rows = 100
     try:
         for sido in _AIRKOREA_SIDO_NAMES:

@@ -398,6 +398,8 @@ def _context(
         ),
         "kma_weather_extra_points": extra_points,
         "kma_weather_max_grids_per_run": max_grids,
+        "provider_upstream_retry_budget_minimum": 8,
+        "provider_upstream_retry_budget_percent": 5,
         # 격자 중심 좌표 reverse geocoding은 best-effort — None이면 이름 fallback.
         "reverse_geocoder": None,
     }
@@ -1363,6 +1365,8 @@ def test_scheduled_kma_materialization_defers_public_client_until_after_prefligh
             "kma_weather_client_factory": (resources.kma_weather_client_factory_resource),
             "kma_weather_extra_points": None,
             "kma_weather_max_grids_per_run": 50,
+            "provider_upstream_retry_budget_minimum": 8,
+            "provider_upstream_retry_budget_percent": 5,
             "reverse_geocoder": None,
         },
         tags={

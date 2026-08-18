@@ -75,3 +75,17 @@ def test_opinet_run_budget_preserves_daily_quota_for_two_datasets() -> None:
     assert KorTravelMapSettings(opinet_run_call_budget=700).opinet_run_call_budget == 700
     with pytest.raises(ValidationError):
         KorTravelMapSettings(opinet_run_call_budget=701)
+
+
+def test_provider_retry_budget_settings_are_bounded() -> None:
+    settings = KorTravelMapSettings(
+        provider_upstream_retry_budget_percent=7,
+        provider_upstream_retry_budget_minimum=12,
+    )
+    assert settings.provider_upstream_retry_budget_percent == 7
+    assert settings.provider_upstream_retry_budget_minimum == 12
+
+    with pytest.raises(ValidationError):
+        KorTravelMapSettings(provider_upstream_retry_budget_percent=-1)
+    with pytest.raises(ValidationError):
+        KorTravelMapSettings(provider_upstream_retry_budget_minimum=33)

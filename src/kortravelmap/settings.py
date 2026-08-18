@@ -340,13 +340,33 @@ class KorTravelMapSettings(BaseSettings):
         gt=0.0,
         le=60.0,
         description=(
-            "KMA/DataGoKr/AirKorea client 생성 시 주입하는 HTTP timeout seconds "
-            "(T-VN-H45 — 이 3계열 외 client는 아직 lib 기본값). lib 기본 10s는 "
+            "KMA/DataGoKr/AirKorea/KHOA client 생성 시 주입하는 HTTP timeout seconds "
+            "(T-VN-H45). lib 기본 10s는 "
             "data.go.kr 지연 스파이크에서 대량 순차 호출 asset을 만성 실패시켰다. "
             "상한 60s: 경계당 최악 wall ≈ upstream_retry attempts 2 × (내부 "
             "retries 1+1) × timeout + backoff — 격자 187개 병적 상한이 dagster "
             "run 한도 6h를 넘지 않도록 묶는다(기본 20s ≈ 4.4h). "
             "env ``KOR_TRAVEL_MAP_PROVIDER_HTTP_TIMEOUT_SECONDS``."
+        ),
+    )
+    provider_upstream_retry_budget_percent: int = Field(
+        default=5,
+        ge=0,
+        le=100,
+        description=(
+            "다건 provider run의 예상 호출 경계 수 대비 재시도 예산 비율(%) "
+            "(T-VN-H45 후속). 기본 5%이며 minimum과 hard cap 32 사이로 제한된다. "
+            "env ``KOR_TRAVEL_MAP_PROVIDER_UPSTREAM_RETRY_BUDGET_PERCENT``."
+        ),
+    )
+    provider_upstream_retry_budget_minimum: int = Field(
+        default=8,
+        ge=0,
+        le=32,
+        description=(
+            "다건 provider run 재시도 예산 하한(T-VN-H45 후속). 작은 시도/페이지 "
+            "순회도 기존 8회 허용량을 유지하며 hard cap은 32다. env "
+            "``KOR_TRAVEL_MAP_PROVIDER_UPSTREAM_RETRY_BUDGET_MINIMUM``."
         ),
     )
     dagster_address_validation: Literal["strict", "drop", "off"] = Field(

@@ -85,6 +85,8 @@ REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
     "kma_weather_max_grids_per_run",
     "kma_datagokr_client",
     "kma_mid_region_features",
+    "provider_upstream_retry_budget_minimum",
+    "provider_upstream_retry_budget_percent",
     "kma_weather_alert_records",
     "mcst_culture_records",
 )
@@ -107,6 +109,8 @@ SETTINGS_VALUE_RESOURCES: Final[dict[str, str]] = {
     "kma_weather_extra_points": "kma_weather_extra_points",
     "kma_weather_max_grids_per_run": "kma_weather_max_grids_per_run",
     "kma_mid_region_features": "kma_mid_region_features",
+    "provider_upstream_retry_budget_minimum": "provider_upstream_retry_budget_minimum",
+    "provider_upstream_retry_budget_percent": "provider_upstream_retry_budget_percent",
     "strict_address": "dagster_address_validation",
 }
 """resource key → 같은 값을 제공하는 ``KorTravelMapSettings`` 속성명."""
