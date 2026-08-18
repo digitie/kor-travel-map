@@ -1,0 +1,281 @@
+{
+  "artifact": "t-vn-40c-removal-manifest-v1",
+  "owner": "T-VN-40C",
+  "status": "draft",
+  "description": "T-VN-40C physical removal manifest - typed tombstone. Lists every legacy object/path removed by migration 0224 and the code/frontend/contract removals in the same release. Executed only after the T-VN-40 receipt is complete (docs/reports/t-vn-40c-physical-removal-manifest-2026-08-18.md section 0). This file is an allowed location for legacy identifiers under the static zero gate.",
+  "preconditions": [
+    {
+      "id": "P1",
+      "check": "consumer-rollout-v1.json tasks.T-VN-40 receipt state == complete, no blocking_reason"
+    },
+    {
+      "id": "P2",
+      "check": "legacy read consumers == 0 (admin legacy pages, public /curated-features map, PinVi) - code grep 0"
+    },
+    {
+      "id": "P3",
+      "check": "count(feature.curated_features) == count(ops.curation_cutover_identity_mappings)"
+    },
+    {
+      "id": "P4",
+      "check": "PinVi backfill consumed the mapping (paired receipt); mapping table is retained"
+    },
+    {
+      "id": "P5",
+      "check": "prod backup / PITR restore point verified"
+    },
+    {
+      "id": "P6",
+      "check": "ops.dedup_review_queue pending contains no same-theme legacy conflict"
+    }
+  ],
+  "db_removals_ordered": [
+    {
+      "id": "D1",
+      "kind": "procedure",
+      "names": [
+        "feature.merge_lock_legacy_curated_features(text,text)",
+        "feature.merge_archive_conflicting_legacy_curated_features(text,text)",
+        "feature.merge_sync_master_legacy_curated_features(text)",
+        "feature.merge_move_legacy_curated_features(text,text)"
+      ],
+      "action": "DROP PROCEDURE RESTRICT",
+      "keep": [
+        "feature.merge_lock_curation_collections(text,text)"
+      ]
+    },
+    {
+      "id": "D2",
+      "kind": "trigger+function",
+      "names": [
+        "feature.trg_sync_curated_feature_collection",
+        "feature.sync_curated_feature_collection()"
+      ],
+      "action": "DROP TRIGGER; DROP FUNCTION RESTRICT"
+    },
+    {
+      "id": "D3",
+      "kind": "trigger+function",
+      "names": [
+        "feature.trg_curation_items_source_rule_decision",
+        "feature.issue_curation_source_rule_decision()"
+      ],
+      "action": "DROP TRIGGER; DROP FUNCTION RESTRICT (only input was the legacy projection; canonical source_rule decisions come from 0204 promotion / 0205 generation)"
+    },
+    {
+      "id": "D4",
+      "kind": "none",
+      "names": [],
+      "action": "removed from manifest - provider_sync.validate_data_integrity_violation_dataset does not reference curated_features (draft grep range error)"
+    },
+    {
+      "id": "D5",
+      "kind": "column",
+      "names": [
+        "feature.curation_items.legacy_projection_id"
+      ],
+      "dependents": [
+        "fk_curation_items_legacy_projection_id_curated_features",
+        "uq_curation_items_legacy_projection_id"
+      ],
+      "action": "DROP CONSTRAINT; DROP INDEX; DROP COLUMN"
+    },
+    {
+      "id": "D6",
+      "kind": "table",
+      "names": [
+        "feature.curated_feature_detail_snapshots"
+      ],
+      "action": "DROP TABLE RESTRICT"
+    },
+    {
+      "id": "D7",
+      "kind": "table",
+      "names": [
+        "feature.curated_features"
+      ],
+      "action": "DROP TABLE RESTRICT"
+    },
+    {
+      "id": "D8",
+      "kind": "constraint-rewrite",
+      "names": [
+        "fk_curation_import_rows_item",
+        "fk_curation_link_decisions_import_row",
+        "fk_curation_link_decisions_item",
+        "fk_curation_link_decisions_supersedes"
+      ],
+      "action": "recreate with ON UPDATE NO ACTION (was ON UPDATE CASCADE, 0074)"
+    },
+    {
+      "id": "D9",
+      "kind": "function-rewrite",
+      "names": [
+        "feature.reject_curation_history_mutation()"
+      ],
+      "action": "unconditional reject (drop the curation_item_id-only rekey allowance)"
+    },
+    {
+      "id": "D10",
+      "kind": "acl",
+      "names": [
+        "curated_features",
+        "curated_feature_detail_snapshots"
+      ],
+      "action": "remove from runtime_privileges._FEATURE_TABLE_PRIVILEGES; reconcile after upgrade"
+    },
+    {
+      "id": "D11",
+      "kind": "keep",
+      "names": [
+        "ops.curation_cutover_identity_mappings",
+        "fk curation_item_id -> feature.curation_items (ON DELETE RESTRICT)"
+      ],
+      "action": "retain as immutable cutover evidence"
+    },
+    {
+      "id": "D12",
+      "kind": "models",
+      "names": [
+        "CuratedFeatureRow",
+        "CuratedFeatureDetailSnapshotRow"
+      ],
+      "action": "remove ORM rows; regenerate _application_migration_graph.json; head pin 0224"
+    }
+  ],
+  "code_removals": {
+    "api": {
+      "routers/curated.py": [
+        "/features/curated",
+        "/features/curated/{curated_feature_id}",
+        "/features/curated/{curated_feature_id}/select",
+        "/features/curated/{curated_feature_id}/unselect",
+        "/features/curated/{curated_feature_id}/detail-snapshot",
+        "/features/curated/{curated_feature_id}/place-search",
+        "/curated-features",
+        "/curated-features/{curated_feature_id}",
+        "/curated-features/{curated_feature_id}/select",
+        "/curated-features/{curated_feature_id}/unselect",
+        "/curated-features/{curated_feature_id}/place-search",
+        "_fence_legacy_curated_writes"
+      ],
+      "keep": [
+        "/curated-themes*",
+        "/curated-sources*",
+        "/curated-source-rules*"
+      ],
+      "also": [
+        "route_policy.py legacy entries",
+        "domain_command_registry.py legacy commands",
+        "curated_public_schema.py legacy schema",
+        "prometheus.py legacy metric"
+      ]
+    },
+    "infra": {
+      "curated_repo.py": [
+        "list_curated_features",
+        "get_curated_feature",
+        "get_curated_feature_detail_snapshot",
+        "create_curated_feature",
+        "update_curated_feature",
+        "set_curated_feature_status",
+        "archive_curated_feature",
+        "legacy SQL constants",
+        "CuratedFeature* DTOs"
+      ],
+      "legacy_write_fence.py": "delete",
+      "merge_repo.py": [
+        "legacy mirror CALLs (4)",
+        "_DETACH_CONFLICTING_LEGACY_CURATION_ITEMS_SQL",
+        "_PINNED_LEGACY_CONFLICT_ITEMS_SQL",
+        "_ARCHIVE_CONFLICTING_LEGACY_CURATED_FEATURES_SQL"
+      ],
+      "curation_repo.py": [
+        "_lock_legacy_projections_for_item",
+        "update_curation_item legacy sync branch"
+      ],
+      "db.py": [
+        "4 merge legacy procedure signatures in _ADMIN_CURATION_FEATURE_PROCEDURES"
+      ],
+      "runtime_privileges.py": [
+        "curated_features",
+        "curated_feature_detail_snapshots"
+      ]
+    },
+    "tests_delete": [
+      "tests/lint/test_legacy_write_fence.py",
+      "tests/integration/test_tvn40a_legacy_write_fence_acl.py",
+      "tests/integration/test_tvn40_identity_mapping_loader.py",
+      "router 410 fence tests in packages/kor-travel-map-api/tests/test_curations_router.py",
+      "legacy seed helpers in test_curated_repo/test_public_features_view/test_notice_defensive_cast",
+      "legacy conflict scenarios in tests/integration/test_merge_repo.py"
+    ],
+    "frontend": {
+      "delete": [
+        "src/app/admin/curated-features/**",
+        "src/app/admin/features/curated/[curatedFeatureId]/",
+        "legacy hooks in src/api/curated.ts (useAdminCuratedFeature, useCuratedFeatureDetailSnapshot, useAdminCuratedFeatures*)"
+      ],
+      "convert_to_canonical": [
+        "src/app/curated-features/** (public map: /v1/curated-features -> /v1/curations*)"
+      ],
+      "regenerate": [
+        "src/api/types.ts"
+      ],
+      "e2e": [
+        "curated-features-map.spec.ts",
+        "admin-scenario-catalog.ts curated-feature-detail surface"
+      ]
+    }
+  },
+  "contract_updates": [
+    "packages/kor-travel-map-api/openapi*.json regenerate",
+    "contracts/vnext/openapi-diff-v1.json removed-route tombstones",
+    "contracts/vnext/consumer-rollout-v1.json T-VN-40 compat_drop_applied",
+    "tests/unit/test_vnext_contract_artifacts.py sha refreeze",
+    "target-invariants INV-040-09 executable post-backfill"
+  ],
+  "static_zero_gate": {
+    "identifiers": [
+      "curated_features",
+      "legacy_projection",
+      "curated-features",
+      "/features/curated",
+      "CuratedFeatureRow",
+      "legacy_write_fence"
+    ],
+    "active_scopes": [
+      "src/",
+      "packages/kor-travel-map-api/src",
+      "packages/kor-travel-map-dagster/src",
+      "packages/kor-travel-map-user-client/src",
+      "packages/kor-travel-map-admin/frontend/src",
+      "docs/*.md",
+      "docs/adr",
+      "docs/architecture",
+      "docs/runbooks"
+    ],
+    "allowed_locations": [
+      "alembic/legacy_versions/",
+      "alembic/versions/0045_*..0223_*",
+      "alembic/baseline/",
+      "docs/archive/",
+      "docs/reports/",
+      "contracts/vnext/openapi-diff-v1.json#/surfaces/*/removed",
+      "contracts/vnext/t-vn-40c-removal-manifest-v1.json",
+      "contracts/vnext/target-invariants-v1.sql#INV-040-09"
+    ]
+  },
+  "verification": [
+    "alembic check clean on fresh DB (0200 -> 0224)",
+    "fresh DB full-chain 0202..0224 passes with 0 legacy rows",
+    "runtime preflight (API/Dagster) passes",
+    "reconcile_runtime_privileges matches DB",
+    "DB catalog legacy names == 0",
+    "static zero gate == 0",
+    "API smoke: removed routes 404, catalog routes 200",
+    "admin frontend build + mock e2e",
+    "PinVi vendor OpenAPI sha unchanged or re-pinned"
+  ],
+  "rollback": "none - forward-only; failure inside 0224 rolls the whole transaction back (RESTRICT surfaces unknown dependents); post-apply issues are forward-fixed; backup per P5"
+}

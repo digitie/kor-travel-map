@@ -874,8 +874,13 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
   seed된 중단 형태가 0202~0223 전체를 롤백함을 dedicated DB로 실측. 통합 13 · 유닛(entrypoint 포함).
   prod 실측(2026-08-18): legacy 4,424 전부 bucket B(1:1 projection). merge_repo는 mapping이 잡은 item의
   detach rekey를 명시 MergeConflictError로 막는다.
-- [ ] **T-VN-40C-manifest** — physical removal manifest와 migration을 사전에 작성·검토한다.
-  legacy 물리 삭제 실행은 receipt complete 뒤다.
+- [~] **T-VN-40C-manifest** — physical removal manifest와 migration을 사전에 작성·검토한다.
+  legacy 물리 삭제 실행은 receipt complete 뒤다. **초안 작성(2026-08-18)**:
+  `docs/reports/t-vn-40c-physical-removal-manifest-2026-08-18.md`(선행조건 P1~P6 · DB 삭제 순서 D1~D12 ·
+  코드/프론트/계약 삭제 · static zero gate · 열린 결정 Q1~Q4) + 기계 판독본
+  `contracts/vnext/t-vn-40c-removal-manifest-v1.json` + migration 초안
+  `docs/reports/tvn40c/0224_tvn40c_physical_removal.py.draft`(alembic 밖). 다음: 적대 리뷰 2명 → 확정 →
+  ①~④ 뒤 0224를 `alembic/versions/`로 옮겨 적용.
 - [ ] **T-VN-40 인수 실행** — 사전 3 task 병합 뒤 ① `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`
   bump(→ 현재 head `0223_tvn40_identity_mappings`) + **0223 precheck**(설계 §5, prod read-only) + migration·fence enable → ② import/backfill
   → ③ sanctioned live/soak → ④ receipt complete → ⑤ manifest physical removal 실행. 백업/PITR
