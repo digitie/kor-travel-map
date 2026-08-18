@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from decimal import Decimal
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypeAlias
 from uuid import UUID
 
 from kortravelmap.core.cache_target_stream import (
@@ -13,7 +13,7 @@ from kortravelmap.core.cache_target_stream import (
 )
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from kortravelmap.api.response import Meta
+from kortravelmap.api.response import Meta, ProblemDetail
 
 MERKLE_ROOT_PATTERN = r"^[0-9a-f]{64}$"
 _SNAPSHOT_HIGH_WATERMARK_DESCRIPTION = (
@@ -53,6 +53,8 @@ __all__ = [
     "CacheTargetRefreshRequestRecord",
     "CacheTargetRefreshRequestResponse",
     "CacheTargetSnapshotResponse",
+    "CacheTargetSnapshotAdmissionProblem",
+    "CacheTargetSnapshotMaterialCompactedProblem",
     "CacheTargetSnapshotData",
     "CacheTargetSnapshotRow",
     "CacheTargetSnapshotStatus",
@@ -800,6 +802,69 @@ class CacheTargetSnapshotRow(BaseModel):
     state: CacheTargetSourceState
     source_generation: int = Field(ge=1)
     source_payload_fingerprint: str = Field(min_length=64, max_length=64)
+
+
+class CacheTargetSnapshotItemLimitDetails(BaseModel):
+    """Item-count admission 실패의 machine-readable details."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    item_count_lower_bound: int = Field(ge=1)
+    item_limit: int = Field(ge=1)
+
+
+class CacheTargetSnapshotByteLimitDetails(BaseModel):
+    """Canonical material byte admission 실패의 machine-readable details."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    material_bytes_lower_bound: int = Field(ge=1)
+    material_byte_limit: int = Field(ge=1)
+
+
+class CacheTargetSnapshotItemLimitProblem(ProblemDetail):
+    """Snapshot item-count admission의 typed RFC7807 413 응답."""
+
+    status: Literal[413]
+    code: Literal["SNAPSHOT_ITEM_LIMIT_EXCEEDED"]
+    details: CacheTargetSnapshotItemLimitDetails
+
+
+class CacheTargetSnapshotByteLimitProblem(ProblemDetail):
+    """Snapshot canonical-byte admission의 typed RFC7807 413 응답."""
+
+    status: Literal[413]
+    code: Literal["SNAPSHOT_BYTE_LIMIT_EXCEEDED"]
+    details: CacheTargetSnapshotByteLimitDetails
+
+
+CacheTargetSnapshotAdmissionProblem: TypeAlias = Annotated[
+    CacheTargetSnapshotItemLimitProblem | CacheTargetSnapshotByteLimitProblem,
+    Field(discriminator="code"),
+]
+
+
+class CacheTargetSnapshotMaterialCompactedDetails(BaseModel):
+    """Compaction 뒤에도 보존하는 immutable snapshot receipt."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    snapshot_id: UUID
+    item_count: int = Field(ge=0)
+    merkle_root: str = Field(
+        min_length=64,
+        max_length=64,
+        pattern=MERKLE_ROOT_PATTERN,
+    )
+    compacted_at: datetime
+
+
+class CacheTargetSnapshotMaterialCompactedProblem(ProblemDetail):
+    """Terminal material compaction의 typed RFC7807 410 응답."""
+
+    status: Literal[410]
+    code: Literal["SNAPSHOT_MATERIAL_COMPACTED"]
+    details: CacheTargetSnapshotMaterialCompactedDetails
 
 
 class CacheTargetSnapshotData(BaseModel):

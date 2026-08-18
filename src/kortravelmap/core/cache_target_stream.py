@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import unicodedata
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import ROUND_HALF_EVEN, Decimal, DecimalException, InvalidOperation
 from typing import Final, Literal, TypeAlias
 
@@ -21,6 +21,7 @@ __all__ = [
     "ActiveCacheTargetSourceV1",
     "CacheTargetSourceV1",
     "DeletedCacheTargetSourceV1",
+    "SnapshotMerkleAccumulatorV1",
     "SnapshotMerkleRowV1",
     "canonical_cache_target_source_bytes",
     "cache_target_source_fingerprint",
@@ -264,6 +265,69 @@ def _leaf_material(row: SnapshotMerkleRowV1) -> tuple[bytes, bytes, bytes]:
 def snapshot_leaf_digest(row: SnapshotMerkleRowV1) -> bytes:
     """ADR-081 domain-separated leaf digest를 반환한다."""
     return hashlib.sha256(_leaf_material(row)[2]).digest()
+
+
+@dataclass(slots=True)
+class SnapshotMerkleAccumulatorV1:
+    """이미 정렬된 snapshot leaf를 O(log N) 메모리로 누적한다.
+
+    각 level에는 아직 오른쪽 sibling을 만나지 못한 완전 subtree 하나만 남긴다.
+    마지막 root 계산은 낮은 level부터 왼쪽 digest와 이미 승격된 오른쪽 digest를
+    결합해 ADR-081의 odd promotion을 그대로 보존한다.
+    """
+
+    _levels: list[bytes | None] = field(default_factory=list, init=False, repr=False)
+    _previous_identity: tuple[bytes, bytes] | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
+    count: int = field(default=0, init=False)
+    material_bytes: int = field(default=0, init=False)
+
+    def add(self, row: SnapshotMerkleRowV1) -> None:
+        """NFC UTF-8 byte 순서의 다음 leaf를 누적한다."""
+
+        system, key, material = _leaf_material(row)
+        identity = (system, key)
+        if self._previous_identity is not None:
+            if identity == self._previous_identity:
+                raise ValueError("NFC 정규화 뒤 snapshot target identity가 중복됩니다.")
+            if identity < self._previous_identity:
+                raise ValueError("snapshot leaf는 NFC UTF-8 byte 순서여야 합니다.")
+        self._previous_identity = identity
+        self.count += 1
+        self.material_bytes += len(material)
+
+        digest = hashlib.sha256(material).digest()
+        level = 0
+        while level < len(self._levels) and self._levels[level] is not None:
+            left = self._levels[level]
+            assert left is not None
+            digest = hashlib.sha256(_NODE_DOMAIN + left + digest).digest()
+            self._levels[level] = None
+            level += 1
+        if level == len(self._levels):
+            self._levels.append(digest)
+        else:
+            self._levels[level] = digest
+
+    def hexdigest(self) -> str:
+        """현재 leaf 전체의 Merkle v1 root를 lowercase hex로 반환한다."""
+
+        if self.count == 0:
+            return hashlib.sha256(_EMPTY_DOMAIN).hexdigest()
+        root: bytes | None = None
+        for digest in self._levels:
+            if digest is None:
+                continue
+            root = (
+                digest
+                if root is None
+                else hashlib.sha256(_NODE_DOMAIN + digest + root).digest()
+            )
+        assert root is not None
+        return root.hex()
 
 
 def snapshot_merkle_root(rows: list[SnapshotMerkleRowV1]) -> str:

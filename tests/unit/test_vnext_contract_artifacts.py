@@ -46,11 +46,22 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     ),
     # 2026-08-13 T-VN-40 — public legacy catalog 제거, scoped service snapshot/mapping,
     # admin catalog/import/candidate ETag·412/428 목표 diff를 machine freeze했다.
-    "openapi-diff-v1.json": ("3a9984e47b682e07cc389d38524d6c8d47bb03a23f06095a660331afe0b0cc88"),
+    "openapi-diff-v1.json": ("c029594cf4105bf33880b01274426c92ec64d784ae41e00ba4f912ad1497384b"),
     # 2026-08-13 T-VN-36 — receipt가 리베이스로 폐기된 커밋(c1fa5a4d)과 그때의
     # spec sha를 가리키고 있었다. 현재 head로 재핀했다.
     "consumer-rollout-v1.json": (
-        "346795d3fa42f0029745b39202b20af03c4ab09231bb95166ac65c84045c2444"
+        "968bf7f5832817ec69858f80213ddd46cdac4e067eb3010214593a973acdefa9"
+    ),
+    # T-VN-41S service 계약 변경으로 active receipt가 pending으로 돌아가도, 이전
+    # candidate archive·image·Live UI 증거 세트는 detached 이력으로 불변이어야 한다.
+    "t-vn-41-candidate-manifest-v1.json": (
+        "f5620c37f5f2665371d86d434ae5ef1e0c34815462f335fcb15e760f5d40a085"
+    ),
+    "t-vn-41-candidate-attestation-v1.json": (
+        "ca99a15ce37722362b17fa1b291fba7c7141b87d912971e2a6bf8e418cf219be"
+    ),
+    "t-vn-41-candidate-live-e2e-evidence-v1.json": (
+        "15e05098949d52097a64826c0702fe72149c138f3863ce9be98042b9079e58f4"
     ),
     "violation-fixtures-v1.sql": (
         "84cca48b776387e4b6fd00b702e40b3412c9731f6abcdd250a5c126c2ea155d8"
@@ -438,18 +449,19 @@ def test_active_pinvi_receipt_describes_current_consumed_specs() -> None:
         assert entry["object"]
 
 
-def test_tvn41_candidate_receipt_binds_immutable_live_evidence() -> None:
-    """T-VN-41 후보 receipt가 실행한 archive·image·UI 증적을 직접 가리킨다.
+def test_tvn41_candidate_artifacts_bind_immutable_live_evidence() -> None:
+    """T-VN-41 후보 artifact가 실행한 archive·image·UI 증적을 직접 가리킨다.
 
     receipt의 digest를 모양만 검증하면 서로 무관한 임의 문자열을 넣어
     ``candidate_verified``를 선언할 수 있다. 세 JSON의 raw bytes와 receipt를 함께
     고정해, source pair·C7 5-image 역할·blocked→ready UI 회복 증적이 한 후보임을
-    CI에서 fail-closed로 확인한다.
+    CI에서 fail-closed로 확인한다. service 계약이 바뀌어 receipt가 ``pending``으로
+    돌아간 동안에는 과거 후보를 현행 계약 증거로 재사용하지 않고 detached 이력의
+    내부 정합성만 검증한다.
     """
 
     rollout = _load_json("consumer-rollout-v1.json")
     receipt = rollout["tasks"]["T-VN-41"]["pinvi_snapshot_receipt"]
-    assert receipt["state"] == "candidate_verified"
 
     manifest_path = _CONTRACTS / "t-vn-41-candidate-manifest-v1.json"
     attestation_path = _CONTRACTS / "t-vn-41-candidate-attestation-v1.json"
@@ -461,9 +473,13 @@ def test_tvn41_candidate_receipt_binds_immutable_live_evidence() -> None:
     manifest_sha256 = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
     attestation_sha256 = hashlib.sha256(attestation_path.read_bytes()).hexdigest()
     evidence_sha256 = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
-    assert receipt["candidate_compatible_pair_manifest_sha256"] == manifest_sha256
-    assert receipt["candidate_compatible_pair_attestation_sha256"] == attestation_sha256
-    assert receipt["candidate_live_e2e_evidence_sha256"] == evidence_sha256
+    if receipt["state"] == "candidate_verified":
+        assert receipt["candidate_compatible_pair_manifest_sha256"] == manifest_sha256
+        assert receipt["candidate_compatible_pair_attestation_sha256"] == attestation_sha256
+        assert receipt["candidate_live_e2e_evidence_sha256"] == evidence_sha256
+    else:
+        assert receipt["state"] == "pending"
+        assert manifest["map_service_openapi_sha256"] != receipt["map_service_openapi_sha256"]
 
     assert set(manifest) == {
         "schema",
@@ -474,19 +490,22 @@ def test_tvn41_candidate_receipt_binds_immutable_live_evidence() -> None:
         "runtime_images",
     }
     assert manifest["schema"] == "t-vn-41-compatible-pair-candidate-manifest-v1"
-    assert manifest["map_commit"] == receipt["candidate_map_commit"]
-    assert manifest["pinvi_commit"] == receipt["candidate_pinvi_commit"]
-    assert manifest["map_service_openapi_sha256"] == receipt["map_service_openapi_sha256"]
-    assert manifest["pinvi_service_vendor_sha256"] == receipt["pinvi_service_vendor_sha256"]
+    assert manifest["map_service_openapi_sha256"] == manifest["pinvi_service_vendor_sha256"]
+    if receipt["state"] == "candidate_verified":
+        assert manifest["map_commit"] == receipt["candidate_map_commit"]
+        assert manifest["pinvi_commit"] == receipt["candidate_pinvi_commit"]
+        assert manifest["map_service_openapi_sha256"] == receipt["map_service_openapi_sha256"]
+        assert manifest["pinvi_service_vendor_sha256"] == receipt["pinvi_service_vendor_sha256"]
 
-    expected_images = {
-        role: receipt[f"candidate_{receipt_field}"]
-        for role, (_, receipt_field) in _C7_ROLE_RECEIPT_FIELDS.items()
-    }
+    expected_images = manifest["runtime_images"]
     assert dict(PAIR_RUNTIME_IMAGE_FIELDS) == {
         role: active_field for role, (active_field, _) in _C7_ROLE_RECEIPT_FIELDS.items()
     }
-    assert manifest["runtime_images"] == expected_images
+    if receipt["state"] == "candidate_verified":
+        assert expected_images == {
+            role: receipt[f"candidate_{receipt_field}"]
+            for role, (_, receipt_field) in _C7_ROLE_RECEIPT_FIELDS.items()
+        }
 
     assert set(attestation) == {
         "schema",
@@ -501,11 +520,7 @@ def test_tvn41_candidate_receipt_binds_immutable_live_evidence() -> None:
     assert attestation["manifest_sha256"] == manifest_sha256
     assert attestation["runtime_images"] == expected_images
     assert attestation["runtime_image_revisions"] == {
-        role: (
-            receipt["candidate_pinvi_commit"]
-            if role == "pinvi_api"
-            else receipt["candidate_map_commit"]
-        )
+        role: manifest["pinvi_commit"] if role == "pinvi_api" else manifest["map_commit"]
         for role, _ in PAIR_RUNTIME_IMAGE_FIELDS
     }
     assert attestation["map_application_schema_head"]

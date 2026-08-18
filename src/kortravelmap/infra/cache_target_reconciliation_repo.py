@@ -1,16 +1,18 @@
 """Fixed cache-target snapshot, checksum reconciliation과 ops projection.
 
-Repository 함수는 commit하지 않는다. Snapshot 생성은 stream control, outbox
-high-watermark와 모든 natural-key head를 한 PostgreSQL statement의 MVCC view로
-읽은 뒤 immutable header/items로 고정한다.
+Repository 함수는 commit하지 않는다. Snapshot 생성은 stream row barrier를 잡은
+같은 transaction에서 모든 natural-key head를 두 번 server-cursor scan하고, 두 scan의
+count/byte/root가 일치할 때만 immutable header/items로 고정한다.
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import json
-import unicodedata
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -20,8 +22,8 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
 from kortravelmap.core.cache_target_stream import (
+    SnapshotMerkleAccumulatorV1,
     SnapshotMerkleRowV1,
-    snapshot_merkle_root,
     validate_cache_target_external_system,
 )
 from kortravelmap.infra.advisory_lock import advisory_lock_key
@@ -70,10 +72,12 @@ _SNAPSHOT_ITEM_PRUNE_LIMIT = 1000
 _SNAPSHOT_HEADER_PRUNE_LIMIT = 100
 _GENERIC_SNAPSHOT_COPY_LIMIT = 2
 _SNAPSHOT_CAPACITY_RETRY_AFTER_MAX_SECONDS = 7_200
-_SNAPSHOT_BUILD_STATEMENT_TIMEOUT = "30s"
+_SNAPSHOT_BUILD_STATEMENT_TIMEOUT = "5min"
+_SNAPSHOT_BUILD_TIMEOUT_SECONDS = 300.0
 _SNAPSHOT_BARRIER_LOCK_TIMEOUT = "5s"
-_SNAPSHOT_ITEM_LIMIT = 100_000
-_SNAPSHOT_CAPTURE_LIMIT = _SNAPSHOT_ITEM_LIMIT + 1
+_SNAPSHOT_ITEM_LIMIT = 1_000_000
+_SNAPSHOT_MATERIAL_BYTE_LIMIT = 512 * 1024 * 1024
+_SNAPSHOT_STREAM_BATCH_SIZE = 1_000
 _LOWERCASE_HEX = frozenset("0123456789abcdef")
 
 _LOCK_SNAPSHOT_STREAM_SQL = """
@@ -122,7 +126,6 @@ LEFT JOIN LATERAL (
   FROM ops.poi_cache_target_source_heads AS source
   WHERE source.external_system = stream.external_system
   ORDER BY sort_key
-  LIMIT :capture_limit
 ) AS head ON true
 WHERE stream.external_system = :external_system
 ORDER BY head.sort_key
@@ -186,6 +189,36 @@ WHERE snapshot.external_system = :external_system
     WHERE request.snapshot_id = snapshot.snapshot_id
   )
 ORDER BY snapshot.created_at DESC, snapshot.snapshot_id DESC
+LIMIT 1
+FOR SHARE OF snapshot
+"""
+
+_GET_REUSABLE_MATERIAL_SNAPSHOT_SQL = f"""
+SELECT snapshot.snapshot_id, snapshot.external_system, snapshot.restore_epoch,
+       snapshot.high_watermark_relay_order,
+       snapshot.material_high_watermark_relay_order, snapshot.item_count,
+       snapshot.merkle_root, snapshot.created_at, snapshot.expires_at
+FROM ops.poi_cache_target_snapshots AS snapshot
+WHERE snapshot.external_system = :external_system
+  AND snapshot.restore_epoch = :restore_epoch
+  AND snapshot.material_high_watermark_relay_order
+      = :material_high_watermark_relay_order
+  AND (
+    snapshot.expires_at > now() + {_SNAPSHOT_REUSE_MIN_TTL_SQL}
+    OR EXISTS (
+      SELECT 1
+      FROM ops.poi_cache_target_reconciliation_requests AS request
+      WHERE request.snapshot_id = snapshot.snapshot_id
+    )
+  )
+ORDER BY
+  EXISTS (
+    SELECT 1
+    FROM ops.poi_cache_target_reconciliation_requests AS request
+    WHERE request.snapshot_id = snapshot.snapshot_id
+  ) DESC,
+  snapshot.created_at DESC,
+  snapshot.snapshot_id DESC
 LIMIT 1
 FOR SHARE OF snapshot
 """
@@ -337,14 +370,47 @@ WITH snapshot_inventory AS MATERIALIZED (
   FROM ops.poi_cache_target_snapshot_items AS item
   JOIN snapshot_inventory AS inventory
     ON inventory.snapshot_id = item.snapshot_id
+), relation_stats AS (
+  SELECT COALESCE(sum(pg_table_size(relation.oid)), 0)::bigint
+           AS snapshot_table_bytes,
+         COALESCE(sum(pg_indexes_size(relation.oid)), 0)::bigint
+           AS snapshot_index_bytes,
+         COALESCE(sum(statistics.n_dead_tup), 0)::bigint
+           AS snapshot_dead_tuples,
+         CASE
+           WHEN count(*) FILTER (
+             WHERE statistics.last_vacuum IS NULL
+               AND statistics.last_autovacuum IS NULL
+           ) > 0 THEN NULL
+           ELSE ceil(max(extract(epoch FROM clock_timestamp() - CASE
+             WHEN statistics.last_vacuum IS NULL THEN statistics.last_autovacuum
+             WHEN statistics.last_autovacuum IS NULL THEN statistics.last_vacuum
+             ELSE greatest(statistics.last_vacuum, statistics.last_autovacuum)
+           END)))::bigint
+         END AS snapshot_vacuum_lag_seconds
+  FROM pg_class AS relation
+  JOIN pg_namespace AS namespace
+    ON namespace.oid = relation.relnamespace
+  LEFT JOIN pg_stat_user_tables AS statistics
+    ON statistics.relid = relation.oid
+  WHERE namespace.nspname = 'ops'
+    AND relation.relname IN (
+      'poi_cache_target_snapshots',
+      'poi_cache_target_snapshot_items'
+    )
 )
 SELECT item_counts.remaining_items, header_counts.remaining_headers,
        item_counts.total_items, header_counts.total_headers,
        item_counts.unexpired_unreferenced_items,
        header_counts.unexpired_unreferenced_headers,
-       item_counts.referenced_items, header_counts.referenced_headers
+       item_counts.referenced_items, header_counts.referenced_headers,
+       relation_stats.snapshot_table_bytes,
+       relation_stats.snapshot_index_bytes,
+       relation_stats.snapshot_dead_tuples,
+       relation_stats.snapshot_vacuum_lag_seconds
 FROM item_counts
 CROSS JOIN header_counts
+CROSS JOIN relation_stats
 """
 
 _GET_SNAPSHOT_ITEMS_SQL = """
@@ -649,6 +715,12 @@ class CacheTargetSnapshotItem:
 
 
 @dataclass(frozen=True, slots=True)
+class _SnapshotMaterialScan:
+    header: dict[str, Any]
+    material_bytes: int
+
+
+@dataclass(frozen=True, slots=True)
 class CacheTargetSnapshotPage:
     snapshot_id: str
     external_system: str
@@ -684,6 +756,10 @@ class CacheTargetSnapshotGcBacklog:
     unexpired_unreferenced_headers: int = 0
     referenced_items: int = 0
     referenced_headers: int = 0
+    snapshot_table_bytes: int = 0
+    snapshot_index_bytes: int = 0
+    snapshot_dead_tuples: int = 0
+    snapshot_vacuum_lag_seconds: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -963,17 +1039,42 @@ def _snapshot_item(row: Any) -> CacheTargetSnapshotItem:
     )
 
 
-def _enforce_snapshot_item_limit(item_count: int) -> None:
-    if item_count <= _SNAPSHOT_ITEM_LIMIT:
-        return
-    raise CacheTargetStreamConflict(
-        "snapshot_item_limit_exceeded",
-        "snapshot item 수가 in-memory materialization 상한을 초과했습니다.",
-        current={
-            "item_count_lower_bound": item_count,
-            "item_limit": _SNAPSHOT_ITEM_LIMIT,
-        },
-    )
+def _enforce_snapshot_admission(*, item_count: int, material_bytes: int) -> None:
+    if item_count > _SNAPSHOT_ITEM_LIMIT:
+        raise CacheTargetStreamConflict(
+            "snapshot_item_limit_exceeded",
+            "snapshot item 수가 admission 상한을 초과했습니다.",
+            current={
+                "item_count_lower_bound": item_count,
+                "item_limit": _SNAPSHOT_ITEM_LIMIT,
+            },
+        )
+    if material_bytes > _SNAPSHOT_MATERIAL_BYTE_LIMIT:
+        raise CacheTargetStreamConflict(
+            "snapshot_byte_limit_exceeded",
+            "snapshot canonical material byte 수가 admission 상한을 초과했습니다.",
+            current={
+                "material_bytes_lower_bound": material_bytes,
+                "material_byte_limit": _SNAPSHOT_MATERIAL_BYTE_LIMIT,
+            },
+        )
+
+
+@asynccontextmanager
+async def _snapshot_build_deadline() -> AsyncIterator[None]:
+    """첫 stream lock부터 두 scan과 모든 INSERT까지의 단일 누적 예산."""
+
+    deadline = asyncio.timeout(_SNAPSHOT_BUILD_TIMEOUT_SECONDS)
+    try:
+        async with deadline:
+            yield
+    except TimeoutError as exc:
+        if not deadline.expired():
+            raise
+        raise CacheTargetStreamConflict(
+            "snapshot_build_timeout",
+            "snapshot materialization 누적 제한 시간이 초과되었습니다.",
+        ) from exc
 
 
 async def _barrier_snapshot_stream(
@@ -1010,25 +1111,80 @@ async def _barrier_snapshot_stream(
         )
 
 
-async def _build_snapshot_material(
+async def _lock_snapshot_stream_for_build(
     session: AsyncSession,
     *,
     external_system: str,
-) -> tuple[Any, tuple[CacheTargetSnapshotItem, ...]]:
-    await _barrier_snapshot_stream(
-        session,
-        external_system=external_system,
+) -> Any | None:
+    """Snapshot build의 첫 stream ``FOR UPDATE``에도 barrier 예산을 적용한다."""
+
+    await session.execute(
+        text(_SET_SNAPSHOT_BARRIER_TIMEOUTS_SQL),
+        {
+            "lock_timeout": _SNAPSHOT_BARRIER_LOCK_TIMEOUT,
+            "statement_timeout": _SNAPSHOT_BUILD_STATEMENT_TIMEOUT,
+        },
     )
     try:
-        rows = (
+        stream = (
             await session.execute(
-                text(_CAPTURE_VIEW_SQL),
-                {
-                    "external_system": external_system,
-                    "capture_limit": _SNAPSHOT_CAPTURE_LIMIT,
-                },
+                text(_LOCK_STREAM_SQL),
+                {"external_system": external_system},
             )
-        ).all()
+        ).one_or_none()
+    except DBAPIError as exc:
+        if getattr(exc.orig, "sqlstate", None) in {"55P03", "57014"}:
+            raise CacheTargetStreamConflict(
+                "snapshot_barrier_timeout",
+                "snapshot stream writer barrier 대기 시간이 초과되었습니다.",
+            ) from exc
+        raise
+    await session.execute(text(_RESET_SNAPSHOT_BARRIER_LOCK_TIMEOUT_SQL))
+    return stream
+
+
+def _capture_snapshot_item(row: Any, *, row_number: int) -> CacheTargetSnapshotItem:
+    values = row._mapping
+    state = str(values["state"])
+    if state not in ("active", "deleted"):
+        raise RuntimeError("snapshot item state가 유효하지 않습니다.")
+    return CacheTargetSnapshotItem(
+        external_system=str(values["external_system"]),
+        target_key=str(values["target_key"]),
+        state=cast('Literal["active", "deleted"]', state),
+        source_generation=int(values["source_generation"]),
+        source_payload_fingerprint=str(values["source_payload_fingerprint"]),
+        row_number=row_number,
+    )
+
+
+def _snapshot_merkle_row(item: CacheTargetSnapshotItem) -> SnapshotMerkleRowV1:
+    return SnapshotMerkleRowV1(
+        external_system=item.external_system,
+        target_key=item.target_key,
+        state=item.state,
+        source_generation=item.source_generation,
+        source_payload_fingerprint=item.source_payload_fingerprint,
+    )
+
+
+async def _stream_snapshot_capture(
+    session: AsyncSession,
+    *,
+    external_system: str,
+) -> AsyncIterator[Any]:
+    result = None
+    try:
+        result = await session.stream(
+            text(_CAPTURE_VIEW_SQL),
+            {"external_system": external_system},
+            execution_options={
+                "stream_results": True,
+                "yield_per": _SNAPSHOT_STREAM_BATCH_SIZE,
+            },
+        )
+        async for row in result:
+            yield row
     except DBAPIError as exc:
         if getattr(exc.orig, "sqlstate", None) == "57014":
             raise CacheTargetStreamConflict(
@@ -1036,60 +1192,43 @@ async def _build_snapshot_material(
                 "snapshot materialization query 제한 시간이 초과되었습니다.",
             ) from exc
         raise
-    if not rows:
+    finally:
+        if result is not None:
+            await result.close()
+
+
+async def _scan_snapshot_material(
+    session: AsyncSession,
+    *,
+    external_system: str,
+) -> _SnapshotMaterialScan:
+    await _barrier_snapshot_stream(
+        session,
+        external_system=external_system,
+    )
+    first: Any | None = None
+    accumulator = SnapshotMerkleAccumulatorV1()
+    async for row in _stream_snapshot_capture(
+        session,
+        external_system=external_system,
+    ):
+        if first is None:
+            first = row._mapping
+        if row._mapping["target_key"] is None:
+            continue
+        item = _capture_snapshot_item(row, row_number=accumulator.count + 1)
+        accumulator.add(_snapshot_merkle_row(item))
+        _enforce_snapshot_admission(
+            item_count=accumulator.count,
+            material_bytes=accumulator.material_bytes,
+        )
+    if first is None:
         raise CacheTargetStreamConflict(
             "stream_not_found",
             "snapshot을 만들 cache target stream이 없습니다.",
         )
-    first = rows[0]._mapping
-    captured_item_count = len(rows) if first["target_key"] is not None else 0
-    _enforce_snapshot_item_limit(captured_item_count)
-    items = tuple(
-        CacheTargetSnapshotItem(
-            external_system=str(row._mapping["external_system"]),
-            target_key=str(row._mapping["target_key"]),
-            state=str(row._mapping["state"]),  # type: ignore[arg-type]
-            source_generation=int(row._mapping["source_generation"]),
-            source_payload_fingerprint=str(row._mapping["source_payload_fingerprint"]),
-            row_number=index,
-        )
-        for index, row in enumerate(rows, start=1)
-        if row._mapping["target_key"] is not None
-    )
-    items = tuple(
-        sorted(
-            items,
-            key=lambda item: (
-                unicodedata.normalize("NFC", item.external_system).encode("utf-8"),
-                unicodedata.normalize("NFC", item.target_key).encode("utf-8"),
-            ),
-        )
-    )
-    items = tuple(
-        CacheTargetSnapshotItem(
-            external_system=item.external_system,
-            target_key=item.target_key,
-            state=item.state,
-            source_generation=item.source_generation,
-            source_payload_fingerprint=item.source_payload_fingerprint,
-            row_number=index,
-        )
-        for index, item in enumerate(items, start=1)
-    )
-    merkle_root = snapshot_merkle_root(
-        [
-            SnapshotMerkleRowV1(
-                external_system=item.external_system,
-                target_key=item.target_key,
-                state=item.state,
-                source_generation=item.source_generation,
-                source_payload_fingerprint=item.source_payload_fingerprint,
-            )
-            for item in items
-        ]
-    )
-    return (
-        {
+    return _SnapshotMaterialScan(
+        header={
             "snapshot_id": str(uuid4()),
             "external_system": external_system,
             "restore_epoch": int(first["restore_epoch"]),
@@ -1097,19 +1236,20 @@ async def _build_snapshot_material(
             "material_high_watermark_relay_order": int(
                 first["material_high_watermark_relay_order"]
             ),
-            "item_count": len(items),
-            "merkle_root": merkle_root,
+            "item_count": accumulator.count,
+            "merkle_root": accumulator.hexdigest(),
         },
-        items,
+        material_bytes=accumulator.material_bytes,
     )
 
 
-async def _persist_snapshot(
+async def _persist_snapshot_material(
     session: AsyncSession,
     *,
-    header: Any,
-    items: tuple[CacheTargetSnapshotItem, ...],
-) -> Any:
+    scan: _SnapshotMaterialScan,
+    return_limit: int,
+) -> tuple[Any, tuple[CacheTargetSnapshotItem, ...]]:
+    header = scan.header
     try:
         persisted = (
             await session.execute(
@@ -1129,22 +1269,39 @@ async def _persist_snapshot(
                 },
             )
         ).one()
-        if items:
+        accumulator = SnapshotMerkleAccumulatorV1()
+        batch: list[dict[str, object]] = []
+        return_items: list[CacheTargetSnapshotItem] = []
+        async for row in _stream_snapshot_capture(
+            session,
+            external_system=str(header["external_system"]),
+        ):
+            if row._mapping["target_key"] is None:
+                continue
+            item = _capture_snapshot_item(row, row_number=accumulator.count + 1)
+            accumulator.add(_snapshot_merkle_row(item))
+            if len(return_items) < return_limit:
+                return_items.append(item)
+            batch.append(
+                {
+                    "snapshot_id": header["snapshot_id"],
+                    "row_number": item.row_number,
+                    "external_system": item.external_system,
+                    "target_key": item.target_key,
+                    "state": item.state,
+                    "source_generation": item.source_generation,
+                    "source_payload_fingerprint": item.source_payload_fingerprint,
+                }
+            )
+            if len(batch) < _SNAPSHOT_STREAM_BATCH_SIZE:
+                continue
             await session.execute(
                 text(_INSERT_SNAPSHOT_ITEM_SQL),
-                [
-                    {
-                        "snapshot_id": header["snapshot_id"],
-                        "row_number": item.row_number,
-                        "external_system": item.external_system,
-                        "target_key": item.target_key,
-                        "state": item.state,
-                        "source_generation": item.source_generation,
-                        "source_payload_fingerprint": item.source_payload_fingerprint,
-                    }
-                    for item in items
-                ],
+                batch,
             )
+            batch = []
+        if batch:
+            await session.execute(text(_INSERT_SNAPSHOT_ITEM_SQL), batch)
     except DBAPIError as exc:
         if getattr(exc.orig, "sqlstate", None) == "57014":
             raise CacheTargetStreamConflict(
@@ -1152,23 +1309,38 @@ async def _persist_snapshot(
                 "snapshot persistence query 제한 시간이 초과되었습니다.",
             ) from exc
         raise
-    return {
-        **header,
-        "created_at": persisted._mapping["created_at"],
-        "expires_at": persisted._mapping["expires_at"],
-    }
+    if (
+        accumulator.count != int(header["item_count"])
+        or accumulator.material_bytes != scan.material_bytes
+        or accumulator.hexdigest() != str(header["merkle_root"])
+    ):
+        raise RuntimeError("snapshot 두 번째 material scan이 최초 checksum과 다릅니다.")
+    return (
+        {
+            **header,
+            "created_at": persisted._mapping["created_at"],
+            "expires_at": persisted._mapping["expires_at"],
+        },
+        tuple(return_items),
+    )
 
 
 async def _create_snapshot(
     session: AsyncSession,
     *,
     external_system: str,
+    return_limit: int = 0,
 ) -> tuple[Any, tuple[CacheTargetSnapshotItem, ...]]:
-    header, items = await _build_snapshot_material(
-        session,
-        external_system=external_system,
-    )
-    return await _persist_snapshot(session, header=header, items=items), items
+    async with _snapshot_build_deadline():
+        scan = await _scan_snapshot_material(
+            session,
+            external_system=external_system,
+        )
+        return await _persist_snapshot_material(
+            session,
+            scan=scan,
+            return_limit=return_limit,
+        )
 
 
 async def _prune_expired_generic_snapshots(
@@ -1311,7 +1483,50 @@ async def observe_expired_cache_target_snapshot_backlog(
         ),
         referenced_items=int(row._mapping["referenced_items"]),
         referenced_headers=int(row._mapping["referenced_headers"]),
+        snapshot_table_bytes=int(row._mapping["snapshot_table_bytes"]),
+        snapshot_index_bytes=int(row._mapping["snapshot_index_bytes"]),
+        snapshot_dead_tuples=int(row._mapping["snapshot_dead_tuples"]),
+        snapshot_vacuum_lag_seconds=(
+            int(row._mapping["snapshot_vacuum_lag_seconds"])
+            if row._mapping["snapshot_vacuum_lag_seconds"] is not None
+            else None
+        ),
     )
+
+
+async def _get_reusable_reconciliation_material(
+    session: AsyncSession,
+    *,
+    external_system: str,
+) -> dict[str, Any] | None:
+    """현재 source material과 같은 기존 snapshot header/item을 공유한다."""
+
+    await _barrier_snapshot_stream(session, external_system=external_system)
+    identity_row = (
+        await session.execute(
+            text(_GET_SNAPSHOT_IDENTITY_SQL),
+            {"external_system": external_system},
+        )
+    ).one_or_none()
+    if identity_row is None:
+        raise CacheTargetStreamConflict(
+            "stream_not_found",
+            "snapshot을 만들 cache target stream이 없습니다.",
+        )
+    identity = identity_row._mapping
+    reusable = (
+        await session.execute(
+            text(_GET_REUSABLE_MATERIAL_SNAPSHOT_SQL),
+            {
+                "external_system": external_system,
+                "restore_epoch": int(identity["restore_epoch"]),
+                "material_high_watermark_relay_order": int(
+                    identity["material_high_watermark_relay_order"]
+                ),
+            },
+        )
+    ).one_or_none()
+    return dict(reusable._mapping) if reusable is not None else None
 
 
 async def _create_generic_snapshot(
@@ -1405,6 +1620,7 @@ async def _create_generic_snapshot(
     header, items = await _create_snapshot(
         session,
         external_system=external_system,
+        return_limit=limit,
     )
     if not await _snapshot_has_minimum_return_ttl(
         session,
@@ -1429,11 +1645,12 @@ async def get_cache_target_snapshot(
     if not 0 < limit <= 1000:
         raise ValueError("limit은 1 이상 1000 이하여야 합니다.")
     if cursor is None:
-        header, items = await _create_generic_snapshot(
-            session,
-            external_system=external_system,
-            limit=limit,
-        )
+        async with _snapshot_build_deadline():
+            header, items = await _create_generic_snapshot(
+                session,
+                external_system=external_system,
+                limit=limit,
+            )
         after_row_number = 0
     else:
         snapshot_id, after_row_number = _parse_snapshot_cursor(cursor)
@@ -2021,6 +2238,32 @@ async def seal_cache_target_reconciliation(
     expected_item_count: int,
     expected_merkle_root: str,
 ) -> CacheTargetReconciliationResult:
+    """첫 stream lock부터 seal 결과 조회까지 단일 누적 deadline을 적용한다."""
+
+    async with _snapshot_build_deadline():
+        return await _seal_cache_target_reconciliation(
+            session,
+            request_id=request_id,
+            external_system=external_system,
+            consumer_id=consumer_id,
+            expected_phase_version=expected_phase_version,
+            expected_restore_epoch=expected_restore_epoch,
+            expected_item_count=expected_item_count,
+            expected_merkle_root=expected_merkle_root,
+        )
+
+
+async def _seal_cache_target_reconciliation(
+    session: AsyncSession,
+    *,
+    request_id: str,
+    external_system: str,
+    consumer_id: str,
+    expected_phase_version: int,
+    expected_restore_epoch: int,
+    expected_item_count: int,
+    expected_merkle_root: str,
+) -> CacheTargetReconciliationResult:
     """Preparing request를 expected checksum과 같은 snapshot으로만 running 전환한다."""
 
     request_id = _canonical_uuid(request_id, field="request_id")
@@ -2031,12 +2274,10 @@ async def seal_cache_target_reconciliation(
         raise ValueError("expected_restore_epoch은 양수여야 합니다.")
     if expected_item_count < 0:
         raise ValueError("expected_item_count는 0 이상이어야 합니다.")
-    stream = (
-        await session.execute(
-            text(_LOCK_STREAM_SQL),
-            {"external_system": external_system},
-        )
-    ).one_or_none()
+    stream = await _lock_snapshot_stream_for_build(
+        session,
+        external_system=external_system,
+    )
     if stream is None:
         raise CacheTargetStreamConflict(
             "reconciliation_precondition_failed",
@@ -2106,10 +2347,17 @@ async def seal_cache_target_reconciliation(
                 ),
             },
         )
-    header, items = await _build_snapshot_material(
+    header = await _get_reusable_reconciliation_material(
         session,
         external_system=external_system,
     )
+    scan = None
+    if header is None:
+        scan = await _scan_snapshot_material(
+            session,
+            external_system=external_system,
+        )
+        header = scan.header
     actual = {
         "restore_epoch": int(header["restore_epoch"]),
         "item_count": int(header["item_count"]),
@@ -2125,7 +2373,14 @@ async def seal_cache_target_reconciliation(
             "seal expected checksum이 현재 Map source heads와 다릅니다.",
             current=actual,
         )
-    persisted = await _persist_snapshot(session, header=header, items=items)
+    if scan is not None:
+        persisted, _ = await _persist_snapshot_material(
+            session,
+            scan=scan,
+            return_limit=0,
+        )
+    else:
+        persisted = header
     await session.execute(
         text(_SEAL_RECONCILIATION_SQL),
         {
@@ -2145,6 +2400,24 @@ async def seal_cache_target_reconciliation(
 
 
 async def request_cache_target_reconciliation(
+    session: AsyncSession,
+    *,
+    command_id: int,
+    external_system: str,
+    reason: str,
+) -> CacheTargetReconciliationResult:
+    """첫 stream lock부터 snapshot 결박까지 단일 누적 deadline을 적용한다."""
+
+    async with _snapshot_build_deadline():
+        return await _request_cache_target_reconciliation(
+            session,
+            command_id=command_id,
+            external_system=external_system,
+            reason=reason,
+        )
+
+
+async def _request_cache_target_reconciliation(
     session: AsyncSession,
     *,
     command_id: int,
@@ -2171,12 +2444,10 @@ async def request_cache_target_reconciliation(
             )
         return _reconciliation(existing, replay=True)
 
-    stream = (
-        await session.execute(
-            text(_LOCK_STREAM_SQL),
-            {"external_system": external_system},
-        )
-    ).one_or_none()
+    stream = await _lock_snapshot_stream_for_build(
+        session,
+        external_system=external_system,
+    )
     if stream is None:
         raise CacheTargetStreamConflict("stream_not_found", "cache target stream이 없습니다.")
     active = (
@@ -2204,7 +2475,15 @@ async def request_cache_target_reconciliation(
         text(_HALT_STREAM_SQL),
         {"external_system": external_system},
     )
-    header, _ = await _create_snapshot(session, external_system=external_system)
+    header = await _get_reusable_reconciliation_material(
+        session,
+        external_system=external_system,
+    )
+    if header is None:
+        header, _ = await _create_snapshot(
+            session,
+            external_system=external_system,
+        )
     request_id = str(uuid4())
     inserted = (
         await session.execute(

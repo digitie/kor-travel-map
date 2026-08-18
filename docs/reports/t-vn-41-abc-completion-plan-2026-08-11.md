@@ -61,9 +61,10 @@ enable한다.
      replay와 strict per-stream prefix도 그 consumer의 불변식으로 유지한다.
    - fixed snapshot/Merkle reconciliation은 begin → writer backfill → seal → consumer completion
      순서를 지키며 checksum mismatch, duplicate, gap, stale restore epoch을 fail-closed한다.
-   - current-main rebase 뒤 Map service OpenAPI SHA-256은
-     `c6f9aba6ab4b815c394e5e1cb5fb4a2c3488d147d5bb1a7e21b92c1796f4aebd`다. PinVi는 이 service
-     bytes를 exact vendor로 재고정한다. `consumer-rollout-v1.json`의 T-VN-41 receipt는
+   - T-VN-41S typed snapshot error 반영 뒤 Map service OpenAPI SHA-256은
+     `8019e36f150ed006f5580e5ff224a0ba72030808b5303273f8c4c51aa0496431`이다. PinVi는 이 service
+     bytes를 exact vendor로 재고정했다. 기존 후보 증거는 이전 service bytes를 검증했으므로 receipt를
+     `pending`으로 되돌리고 새 source pair acceptance 전에는 재사용하지 않는다. `consumer-rollout-v1.json`의 T-VN-41 receipt는
      `pending → candidate_verified → complete` 세 상태만 허용한다. `candidate_verified`는 n150
      격리 후보 archive·Map API/UI/Dagster web/Dagster daemon·PinVi API의 다섯 immutable image ID·
      compatible-pair manifest·attestation·live evidence digest와 두 source commit을 모두 고정하지만,

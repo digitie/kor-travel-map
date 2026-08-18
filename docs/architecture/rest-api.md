@@ -689,21 +689,32 @@ link/refresh/stream-reconciled event는 재사용을 깨지 않는다. 재사용
 다시 읽어 중복을 제거한다. server handoff 직전 75분 floor를 통과하지 못한 수명 부족과 생성 경합은 각각
 `503 snapshot_ttl_too_short`, `503 snapshot_busy`와 `Retry-After: 1`로 실패한다. consumer는 실제 수신
 시 60분 floor를 다시 검사한다.
-barrier lock wait는 5초, snapshot statement는 30초로 제한하며 초과는
-각각 `503 snapshot_barrier_timeout`, `503 snapshot_build_timeout`과 `Retry-After: 1`로 반환한다.
+barrier/첫 stream lock wait는 5초, snapshot statement는 5분으로 제한한다. server cursor의 statement
+timeout은 각 `FETCH`마다 재적용되므로 generic 첫 barrier 또는 seal/request 첫 lock부터 두 scan, 모든
+INSERT와 receipt 조회까지 별도 누적 5분 deadline을 적용한다. 초과는 각각
+`503 snapshot_barrier_timeout`, `503 snapshot_build_timeout`과 `Retry-After: 1`로 반환한다.
 
 reuse miss 뒤 system별 미만료·미참조 generic snapshot이 이미 2개면 세 번째 복사를 만들지 않는다.
 가장 오래된 expiry까지 `429 snapshot_capacity_exceeded + Retry-After`로 대기시켜 유효 cursor를 보존하고
 live generic 저장량을 stream cardinality의 2배로 제한한다. request-bound snapshot은 이 count에서 제외한다.
-단일 snapshot은 100,000 item ceiling을 넘으면 부분 material을 만들지 않고
-`413 snapshot_item_limit_exceeded`로 실패한다. 후속 #922가 bounded streaming으로 이 경계를 확장한다.
+단일 snapshot은 server cursor 두 번 순회와 incremental Merkle로 process memory를 `O(log N)`에
+가깝게 유지한다. item 1,000,000개 또는 canonical material 512 MiB를 넘으면 header/item 부분
+material을 만들지 않고 각각 `413 snapshot_item_limit_exceeded`,
+`413 snapshot_byte_limit_exceeded`로 실패한다. 75분 넘게 남은 generic material은 two-phase reconciliation seal이
+같은 snapshot으로 재사용한다.
 
 만료·미참조 일반 snapshot만 bounded GC하며 reconciliation request가 참조하면 terminal 이후에도
 보존한다. hourly background GC는 전역 try-lock, system round-robin, batch별 commit, 시간/statement/
 no-progress 예산을 사용하고 종료 시 expired backlog와 total/unexpired/referenced count를 한 번만 기록한다.
+같은 관측에 snapshot relation/index bytes, dead tuple, vacuum lag와 threshold reason을 기록한다.
 실행당 기본 2백만 item은 설정 상한이며 n150 실측 처리량 보장이 아니다. 기본 STOPPED schedule은
 production enable 전에 켜고 backlog 경보를 확인한다. 상세 계약은 ADR-081이 정본이며 PinVi paired
 contract checksum 통과 뒤에만 enable한다.
+
+terminal reconciliation item compaction 뒤 request-bound page는 retry 불가능한
+`410 SNAPSHOT_MATERIAL_COMPACTED`와 보존된 snapshot ID/count/root/compacted 시각을 반환한다. 실제
+material/receipt 분리와 compactor는 T-VN-40C의 예약 revision `0224` 뒤 `0225+` migration으로만
+활성화하며, 그 전 API는 typed error code만 예약한다.
 
 referenced snapshot은 reconciliation 감사 영수증이라 GC가 삭제하지 않는다. 따라서 job execution
 metadata만 직전값으로 추정하지 않고, acquired GC run의 `Dagster run_id`와 referenced item/header count를

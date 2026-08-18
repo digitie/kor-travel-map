@@ -5941,6 +5941,60 @@ export interface components {
             meta: components["schemas"]["Meta"];
         };
         /**
+         * CacheTargetSnapshotByteLimitDetails
+         * @description Canonical material byte admission 실패의 machine-readable details.
+         */
+        CacheTargetSnapshotByteLimitDetails: {
+            /** Material Byte Limit */
+            material_byte_limit: number;
+            /** Material Bytes Lower Bound */
+            material_bytes_lower_bound: number;
+        };
+        /**
+         * CacheTargetSnapshotByteLimitProblem
+         * @description Snapshot canonical-byte admission의 typed RFC7807 413 응답.
+         */
+        CacheTargetSnapshotByteLimitProblem: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "SNAPSHOT_BYTE_LIMIT_EXCEEDED";
+            /**
+             * Detail
+             * @description 이 발생 건에 대한 사람이 읽는 설명.
+             */
+            detail: string;
+            details: components["schemas"]["CacheTargetSnapshotByteLimitDetails"];
+            /**
+             * Errors
+             * @description 필드 단위 검증 오류 목록(검증 실패 시 비어 있지 않다).
+             */
+            errors?: components["schemas"]["ProblemDetailError"][];
+            /**
+             * Request Id
+             * @description 요청 상관추적 ID(`X-Request-ID`/`meta.request_id`와 동일).
+             */
+            request_id: string;
+            /**
+             * Status
+             * @constant
+             */
+            status: 413;
+            /**
+             * Title
+             * @description 사람이 읽는 짧은 요약(= detail).
+             */
+            title: string;
+            /**
+             * Type
+             * @description 오류 유형 URI. 예: https://kor-travel-map/errors/not-found
+             */
+            type: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * CacheTargetSnapshotData
          * @description Fixed snapshot page.
          */
@@ -5972,6 +6026,124 @@ export interface components {
             restore_epoch: number;
             /** Snapshot Id */
             snapshot_id: string;
+        };
+        /**
+         * CacheTargetSnapshotItemLimitDetails
+         * @description Item-count admission 실패의 machine-readable details.
+         */
+        CacheTargetSnapshotItemLimitDetails: {
+            /** Item Count Lower Bound */
+            item_count_lower_bound: number;
+            /** Item Limit */
+            item_limit: number;
+        };
+        /**
+         * CacheTargetSnapshotItemLimitProblem
+         * @description Snapshot item-count admission의 typed RFC7807 413 응답.
+         */
+        CacheTargetSnapshotItemLimitProblem: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            code: "SNAPSHOT_ITEM_LIMIT_EXCEEDED";
+            /**
+             * Detail
+             * @description 이 발생 건에 대한 사람이 읽는 설명.
+             */
+            detail: string;
+            details: components["schemas"]["CacheTargetSnapshotItemLimitDetails"];
+            /**
+             * Errors
+             * @description 필드 단위 검증 오류 목록(검증 실패 시 비어 있지 않다).
+             */
+            errors?: components["schemas"]["ProblemDetailError"][];
+            /**
+             * Request Id
+             * @description 요청 상관추적 ID(`X-Request-ID`/`meta.request_id`와 동일).
+             */
+            request_id: string;
+            /**
+             * Status
+             * @constant
+             */
+            status: 413;
+            /**
+             * Title
+             * @description 사람이 읽는 짧은 요약(= detail).
+             */
+            title: string;
+            /**
+             * Type
+             * @description 오류 유형 URI. 예: https://kor-travel-map/errors/not-found
+             */
+            type: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * CacheTargetSnapshotMaterialCompactedDetails
+         * @description Compaction 뒤에도 보존하는 immutable snapshot receipt.
+         */
+        CacheTargetSnapshotMaterialCompactedDetails: {
+            /**
+             * Compacted At
+             * Format: date-time
+             */
+            compacted_at: string;
+            /** Item Count */
+            item_count: number;
+            /** Merkle Root */
+            merkle_root: string;
+            /**
+             * Snapshot Id
+             * Format: uuid
+             */
+            snapshot_id: string;
+        };
+        /**
+         * CacheTargetSnapshotMaterialCompactedProblem
+         * @description Terminal material compaction의 typed RFC7807 410 응답.
+         */
+        CacheTargetSnapshotMaterialCompactedProblem: {
+            /**
+             * Code
+             * @constant
+             */
+            code: "SNAPSHOT_MATERIAL_COMPACTED";
+            /**
+             * Detail
+             * @description 이 발생 건에 대한 사람이 읽는 설명.
+             */
+            detail: string;
+            details: components["schemas"]["CacheTargetSnapshotMaterialCompactedDetails"];
+            /**
+             * Errors
+             * @description 필드 단위 검증 오류 목록(검증 실패 시 비어 있지 않다).
+             */
+            errors?: components["schemas"]["ProblemDetailError"][];
+            /**
+             * Request Id
+             * @description 요청 상관추적 ID(`X-Request-ID`/`meta.request_id`와 동일).
+             */
+            request_id: string;
+            /**
+             * Status
+             * @constant
+             */
+            status: 410;
+            /**
+             * Title
+             * @description 사람이 읽는 짧은 요약(= detail).
+             */
+            title: string;
+            /**
+             * Type
+             * @description 오류 유형 URI. 예: https://kor-travel-map/errors/not-found
+             */
+            type: string;
+        } & {
+            [key: string]: unknown;
         };
         /**
          * CacheTargetSnapshotResponse
@@ -14593,13 +14765,13 @@ export interface operations {
                     "application/json": components["schemas"]["CacheTargetOperationResponse"];
                 };
             };
-            /** @description snapshot item 수가 100,000개 materialization 상한을 초과함. */
+            /** @description snapshot item 1,000,000개 또는 canonical material 512 MiB admission 상한을 초과함. */
             413: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["CacheTargetSnapshotItemLimitProblem"] | components["schemas"]["CacheTargetSnapshotByteLimitProblem"];
                 };
             };
             /** @description Validation Error */
@@ -24243,13 +24415,13 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description snapshot item 수가 100,000개 materialization 상한을 초과함. */
+            /** @description snapshot item 1,000,000개 또는 canonical material 512 MiB admission 상한을 초과함. */
             413: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["CacheTargetSnapshotItemLimitProblem"] | components["schemas"]["CacheTargetSnapshotByteLimitProblem"];
                 };
             };
             /** @description Validation Error */
@@ -24318,6 +24490,15 @@ export interface operations {
                     "application/json": components["schemas"]["CacheTargetSnapshotResponse"];
                 };
             };
+            /** @description terminal audit 보존 기간 뒤 snapshot item material이 compact되어 header/root receipt만 남음. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["CacheTargetSnapshotMaterialCompactedProblem"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -24365,13 +24546,13 @@ export interface operations {
                     "application/json": components["schemas"]["CacheTargetSnapshotResponse"];
                 };
             };
-            /** @description snapshot item 수가 100,000개 materialization 상한을 초과함. */
+            /** @description snapshot item 1,000,000개 또는 canonical material 512 MiB admission 상한을 초과함. */
             413: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                    "application/problem+json": components["schemas"]["CacheTargetSnapshotItemLimitProblem"] | components["schemas"]["CacheTargetSnapshotByteLimitProblem"];
                 };
             };
             /** @description Validation Error */

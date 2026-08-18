@@ -501,6 +501,10 @@ class CacheTargetSnapshotGcDrainResult:
     unexpired_unreferenced_headers: int | None = None
     referenced_items: int | None = None
     referenced_headers: int | None = None
+    snapshot_table_bytes: int | None = None
+    snapshot_index_bytes: int | None = None
+    snapshot_dead_tuples: int | None = None
+    snapshot_vacuum_lag_seconds: int | None = None
     observation_run_id: str | None = None
     observed_at: datetime | None = None
     observation_referenced_items: int | None = None
@@ -748,6 +752,10 @@ class AsyncKorTravelMapClient:
                 ),
                 referenced_items=backlog.referenced_items,
                 referenced_headers=backlog.referenced_headers,
+                snapshot_table_bytes=backlog.snapshot_table_bytes,
+                snapshot_index_bytes=backlog.snapshot_index_bytes,
+                snapshot_dead_tuples=backlog.snapshot_dead_tuples,
+                snapshot_vacuum_lag_seconds=backlog.snapshot_vacuum_lag_seconds,
                 observation_run_id=(
                     observation.dagster_run_id if observation is not None else None
                 ),

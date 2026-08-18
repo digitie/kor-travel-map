@@ -23,7 +23,8 @@ barrier로 직렬화한다.
 - **Lane B — frontend hardening·PinVi 소비 API**
   - [~] `T-VN-41A` → [~] `T-VN-41B` → [~] `T-VN-41C`(generation/outbox — 상세 AC 일부 완료, #975 rebase·regression 수정·새 exact-pair CI/E2E 재검증 중)
   - [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2`(격리 리허설·data-dependent live UI E2E; #967 closed)
-  - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환) ∥ [ ] `T-VN-41S`
+  - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환) ∥ [~] `T-VN-41S`(#922 1차 구현·리뷰 GO,
+    `0225+` migration/compactor·n150 1M 검증 잔여)
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정, T-VN-40 인수 뒤)**
   - [ ] `T-VN-M00`(설계 초안 2차·적대 검증) → [ ] `T-VN-M01`(admin Feature 생성 API — **ADR 필요**) → [ ] `T-VN-M02`(origin 보존·불변)
   - [ ] `T-VN-M03`(curated 동시 생성 — T-VN-40 인수 뒤) ∥ [ ] `T-VN-M04`(PinVi 요청 큐 — cross-repo)
@@ -1011,19 +1012,22 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
   - [~] PinVi command writer가 CAS source GET과 refresh `Location` polling에서 consumer credential로
     전환하고, restore clone은 sync disabled 상태에서 immutable pre-CAS receipt를 써 응답 유실 exact replay까지
     완료한다. 동일 key의 병렬 `201`/`200`도 terminal payload·ETag가 같으면 한 durable receipt로 수렴한다.
-    current-main rebase 뒤 Map service OpenAPI SHA가 바뀌어 PinVi service vendor와 exact paired receipt를
-    다시 고정해야 한다. 그 뒤 두 적대 재리뷰와 n150 isolated evidence를 통과한 뒤에만 후속
-    reconciliation/cutover로 진행한다.
+    T-VN-41S로 Map service OpenAPI SHA가 바뀌어 PinVi exact vendor를 새 Map head에 다시 고정한다.
+    active paired receipt는 `pending`으로 되돌렸으며, 기존 `77821001`/`e8e0fec` 후보 archive·image·Live UI
+    증거는 이전 service bytes의 이력일 뿐이다. PinVi vendor PR 병합과 새 exact pair의 적대 재리뷰·n150
+    isolated evidence를 통과한 뒤에만 `candidate_verified` 승격과 후속 reconciliation/cutover로 진행한다.
   - [x] 일반 snapshot first page를 route transaction으로 durable commit하고 실제 만료 시각을 노출한다.
   - [x] source-material watermark reuse와 75분 server handoff/1시간 client receipt gate를 구현한다.
   - [x] stream share barrier와 snapshot 내부 exact material watermark로 lock-wait stale MVCC 누락을 막는다.
   - [x] 모든 outbox writer transaction을 stream → head/target/link 잠금 순서로 직렬화해 system별 relay
     cursor를 해당 stream의 commit-safe contiguous prefix로 만든다.
   - [x] DB trigger가 stream lock 뒤 relay sequence를 배정해 raw/future writer에도 같은 순서를 강제한다.
-  - [x] barrier 5초 lock timeout/30초 statement timeout과 retryable `503`으로 hung writer를 bound한다.
-  - [x] capture/persist 30초 timeout을 별도 retryable `snapshot_build_timeout`으로 구분한다.
+  - [x] barrier 5초 lock timeout/5분 statement timeout과 retryable `503`으로 hung writer를 bound한다.
+  - [x] server cursor의 per-FETCH timeout과 별도로 두 scan/모든 INSERT의 누적 5분 deadline을 두고
+    capture/persist 초과를 retryable `snapshot_build_timeout`으로 구분한다.
   - [x] system별 미만료 generic snapshot을 2개로 제한하고 동적 `429 + Retry-After` admission을 구현한다.
-  - [x] 단일 snapshot 100,000 item ceiling과 초과 `413` fail-close로 process memory를 bound한다.
+  - [x] 단일 snapshot 1,000,000 item/512 MiB 독립 ceiling과 초과 `413` fail-close로 process
+    memory와 canonical material 크기를 bound한다.
   - [x] 만료·미참조 snapshot의 reader-safe foreground bounded GC를 구현한다.
   - [x] 전역 mutex·system round-robin·batch commit·시간/statement/no-progress 예산을 가진 hourly
     background GC와 exact 종료 backlog/total/unexpired/referenced metric을 구현한다.
@@ -1046,10 +1050,36 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
     `429/503 Retry-After` backoff, `413` non-retry, credential별 gateway limit 또는 동등한 외부 rate-limit과
     실제 호출 cadence를 함께 증명한다.
 
-- [ ] T-VN-41S — **snapshot materialization streaming·audit compaction 확장 (#922, C enable 비차단)**
+- [~] T-VN-41S — **snapshot materialization streaming·audit compaction 확장 (#922, C enable 비차단)**
 
   DB-side/bounded streaming Merkle materialization, receipt/material 공유, terminal audit item compaction,
   item/byte admission과 relation bytes/dead-tuple/vacuum metric을 1M+ synthetic/n150 soak로 검증한다.
+
+  **이번 PR 종료선(완료)** — migration 없는 bounded streaming/admission·현재 스키마에서 안전한 단방향
+  material 재사용·관측 metric·typed future error 계약까지다. 독립 적대 리뷰 2명은 최종 head에서 P0~P3
+  잔여 없음으로 GO했고, 단위/API/Dagster 집중 231개와 PostGIS stream repository 37개를 통과했다.
+
+  **후속 종료선(미완료, #922 유지)** — `0224` 착지 뒤 `0225+` 물리 모델, 양방향 공유, 실제 compactor와
+  repository 410, migration/ACL/EXPLAIN 및 n150 1M+ 증거까지다. 이 항목들이 끝나기 전에는 #922 또는
+  T-VN-41S 전체 완료로 표시하지 않는다.
+
+  **이번 PR 완료 항목**
+
+  - [x] PostgreSQL server cursor 2-pass scan, incremental Merkle v1, 1,000행 INSERT batch와 first-page만
+    보관하는 process-memory bounded 경로를 구현한다.
+  - [x] item 1,000,000/canonical material 512 MiB admission을 header INSERT 전에 검사하고 typed `413`으로
+    fail-close한다.
+  - [x] 유효 generic material을 two-phase reconciliation seal이 같은 snapshot으로 재사용하고,
+    relation/index bytes·dead tuple·vacuum lag Dagster metric/alert를 추가한다.
+  - [x] future terminal compaction page의 non-retryable `410 SNAPSHOT_MATERIAL_COMPACTED` API 계약과
+    번호 없는 receipt/material DDL·upgrade/downgrade 설계를 고정한다.
+
+  **후속 항목**
+
+  - [ ] T-VN-40C 예약 `0224` 착지 뒤 `0225+`로 receipt/material/item 정규화 migration, 양방향 material
+    공유, terminal retention compactor와 실제 repository 410 경로를 구현한다.
+  - [ ] migration upgrade/downgrade·ACL/catalog·EXPLAIN과 n150 PostGIS 1M admitted/1M+ rejection,
+    concurrent mutation safe lower cursor, compaction/vacuum soak evidence를 통과한다.
 
 ### T-VN-41F1J — C6c cancel-probe fixture 수명주기 복구
 

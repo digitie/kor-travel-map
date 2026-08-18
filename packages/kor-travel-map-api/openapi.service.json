@@ -1861,6 +1861,86 @@
         "title": "CacheTargetRestoreFenceResponse",
         "type": "object"
       },
+      "CacheTargetSnapshotByteLimitDetails": {
+        "additionalProperties": false,
+        "description": "Canonical material byte admission 실패의 machine-readable details.",
+        "properties": {
+          "material_byte_limit": {
+            "minimum": 1.0,
+            "title": "Material Byte Limit",
+            "type": "integer"
+          },
+          "material_bytes_lower_bound": {
+            "minimum": 1.0,
+            "title": "Material Bytes Lower Bound",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "material_bytes_lower_bound",
+          "material_byte_limit"
+        ],
+        "title": "CacheTargetSnapshotByteLimitDetails",
+        "type": "object"
+      },
+      "CacheTargetSnapshotByteLimitProblem": {
+        "additionalProperties": true,
+        "description": "Snapshot canonical-byte admission의 typed RFC7807 413 응답.",
+        "properties": {
+          "code": {
+            "const": "SNAPSHOT_BYTE_LIMIT_EXCEEDED",
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "description": "이 발생 건에 대한 사람이 읽는 설명.",
+            "title": "Detail",
+            "type": "string"
+          },
+          "details": {
+            "$ref": "#/components/schemas/CacheTargetSnapshotByteLimitDetails"
+          },
+          "errors": {
+            "description": "필드 단위 검증 오류 목록(검증 실패 시 비어 있지 않다).",
+            "items": {
+              "$ref": "#/components/schemas/ProblemDetailError"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "request_id": {
+            "description": "요청 상관추적 ID(`X-Request-ID`/`meta.request_id`와 동일).",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "status": {
+            "const": 413,
+            "title": "Status",
+            "type": "integer"
+          },
+          "title": {
+            "description": "사람이 읽는 짧은 요약(= detail).",
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "description": "오류 유형 URI. 예: https://kor-travel-map/errors/not-found",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "code",
+          "request_id",
+          "details"
+        ],
+        "title": "CacheTargetSnapshotByteLimitProblem",
+        "type": "object"
+      },
       "CacheTargetSnapshotData": {
         "additionalProperties": false,
         "description": "Fixed snapshot page.",
@@ -1922,6 +2002,180 @@
           "items"
         ],
         "title": "CacheTargetSnapshotData",
+        "type": "object"
+      },
+      "CacheTargetSnapshotItemLimitDetails": {
+        "additionalProperties": false,
+        "description": "Item-count admission 실패의 machine-readable details.",
+        "properties": {
+          "item_count_lower_bound": {
+            "minimum": 1.0,
+            "title": "Item Count Lower Bound",
+            "type": "integer"
+          },
+          "item_limit": {
+            "minimum": 1.0,
+            "title": "Item Limit",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "item_count_lower_bound",
+          "item_limit"
+        ],
+        "title": "CacheTargetSnapshotItemLimitDetails",
+        "type": "object"
+      },
+      "CacheTargetSnapshotItemLimitProblem": {
+        "additionalProperties": true,
+        "description": "Snapshot item-count admission의 typed RFC7807 413 응답.",
+        "properties": {
+          "code": {
+            "const": "SNAPSHOT_ITEM_LIMIT_EXCEEDED",
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "description": "이 발생 건에 대한 사람이 읽는 설명.",
+            "title": "Detail",
+            "type": "string"
+          },
+          "details": {
+            "$ref": "#/components/schemas/CacheTargetSnapshotItemLimitDetails"
+          },
+          "errors": {
+            "description": "필드 단위 검증 오류 목록(검증 실패 시 비어 있지 않다).",
+            "items": {
+              "$ref": "#/components/schemas/ProblemDetailError"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "request_id": {
+            "description": "요청 상관추적 ID(`X-Request-ID`/`meta.request_id`와 동일).",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "status": {
+            "const": 413,
+            "title": "Status",
+            "type": "integer"
+          },
+          "title": {
+            "description": "사람이 읽는 짧은 요약(= detail).",
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "description": "오류 유형 URI. 예: https://kor-travel-map/errors/not-found",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "code",
+          "request_id",
+          "details"
+        ],
+        "title": "CacheTargetSnapshotItemLimitProblem",
+        "type": "object"
+      },
+      "CacheTargetSnapshotMaterialCompactedDetails": {
+        "additionalProperties": false,
+        "description": "Compaction 뒤에도 보존하는 immutable snapshot receipt.",
+        "properties": {
+          "compacted_at": {
+            "format": "date-time",
+            "title": "Compacted At",
+            "type": "string"
+          },
+          "item_count": {
+            "minimum": 0.0,
+            "title": "Item Count",
+            "type": "integer"
+          },
+          "merkle_root": {
+            "maxLength": 64,
+            "minLength": 64,
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Merkle Root",
+            "type": "string"
+          },
+          "snapshot_id": {
+            "format": "uuid",
+            "title": "Snapshot Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "snapshot_id",
+          "item_count",
+          "merkle_root",
+          "compacted_at"
+        ],
+        "title": "CacheTargetSnapshotMaterialCompactedDetails",
+        "type": "object"
+      },
+      "CacheTargetSnapshotMaterialCompactedProblem": {
+        "additionalProperties": true,
+        "description": "Terminal material compaction의 typed RFC7807 410 응답.",
+        "properties": {
+          "code": {
+            "const": "SNAPSHOT_MATERIAL_COMPACTED",
+            "title": "Code",
+            "type": "string"
+          },
+          "detail": {
+            "description": "이 발생 건에 대한 사람이 읽는 설명.",
+            "title": "Detail",
+            "type": "string"
+          },
+          "details": {
+            "$ref": "#/components/schemas/CacheTargetSnapshotMaterialCompactedDetails"
+          },
+          "errors": {
+            "description": "필드 단위 검증 오류 목록(검증 실패 시 비어 있지 않다).",
+            "items": {
+              "$ref": "#/components/schemas/ProblemDetailError"
+            },
+            "title": "Errors",
+            "type": "array"
+          },
+          "request_id": {
+            "description": "요청 상관추적 ID(`X-Request-ID`/`meta.request_id`와 동일).",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "status": {
+            "const": 410,
+            "title": "Status",
+            "type": "integer"
+          },
+          "title": {
+            "description": "사람이 읽는 짧은 요약(= detail).",
+            "title": "Title",
+            "type": "string"
+          },
+          "type": {
+            "description": "오류 유형 URI. 예: https://kor-travel-map/errors/not-found",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail",
+          "code",
+          "request_id",
+          "details"
+        ],
+        "title": "CacheTargetSnapshotMaterialCompactedProblem",
         "type": "object"
       },
       "CacheTargetSnapshotResponse": {
@@ -5475,11 +5729,26 @@
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
+                  "discriminator": {
+                    "mapping": {
+                      "SNAPSHOT_BYTE_LIMIT_EXCEEDED": "#/components/schemas/CacheTargetSnapshotByteLimitProblem",
+                      "SNAPSHOT_ITEM_LIMIT_EXCEEDED": "#/components/schemas/CacheTargetSnapshotItemLimitProblem"
+                    },
+                    "propertyName": "code"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CacheTargetSnapshotItemLimitProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CacheTargetSnapshotByteLimitProblem"
+                    }
+                  ],
+                  "title": "Response 413 Seal Service Cache Target Reconciliation V1 Service Cache Target Reconciliations  Request Id  Seals Post"
                 }
               }
             },
-            "description": "snapshot item 수가 100,000개 materialization 상한을 초과함."
+            "description": "snapshot item 1,000,000개 또는 canonical material 512 MiB admission 상한을 초과함."
           },
           "422": {
             "content": {
@@ -5615,6 +5884,16 @@
             },
             "description": "Successful Response"
           },
+          "410": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheTargetSnapshotMaterialCompactedProblem"
+                }
+              }
+            },
+            "description": "terminal audit 보존 기간 뒤 snapshot item material이 compact되어 header/root receipt만 남음."
+          },
           "422": {
             "content": {
               "application/problem+json": {
@@ -5727,11 +6006,26 @@
             "content": {
               "application/problem+json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
+                  "discriminator": {
+                    "mapping": {
+                      "SNAPSHOT_BYTE_LIMIT_EXCEEDED": "#/components/schemas/CacheTargetSnapshotByteLimitProblem",
+                      "SNAPSHOT_ITEM_LIMIT_EXCEEDED": "#/components/schemas/CacheTargetSnapshotItemLimitProblem"
+                    },
+                    "propertyName": "code"
+                  },
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/CacheTargetSnapshotItemLimitProblem"
+                    },
+                    {
+                      "$ref": "#/components/schemas/CacheTargetSnapshotByteLimitProblem"
+                    }
+                  ],
+                  "title": "Response 413 Get Service Cache Target Snapshot V1 Service Cache Target Snapshots  External System  Get"
                 }
               }
             },
-            "description": "snapshot item 수가 100,000개 materialization 상한을 초과함."
+            "description": "snapshot item 1,000,000개 또는 canonical material 512 MiB admission 상한을 초과함."
           },
           "422": {
             "content": {

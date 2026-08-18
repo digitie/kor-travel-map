@@ -181,6 +181,7 @@ class _FakeCacheTargetService:
         self.reconciliation_completion_calls: list[dict[str, Any]] = []
         self.reconciliation_snapshot_calls: list[dict[str, Any]] = []
         self.reconciliation_completion_error: Exception | None = None
+        self.reconciliation_snapshot_error: Exception | None = None
         self.snapshot_error: Exception | None = None
         self.operation_result: Any = SimpleNamespace(
             operation_id=RECONCILIATION_REQUEST_ID,
@@ -444,6 +445,8 @@ class _FakeCacheTargetService:
         self.reconciliation_snapshot_calls.append(kwargs)
         if kwargs["consumer_id"] != CONSUMER_ID:
             raise CacheTargetStreamConflict("consumer_mismatch", "consumer mismatch")
+        if self.reconciliation_snapshot_error is not None:
+            raise self.reconciliation_snapshot_error
         return self.reconciliation_snapshot_result
 
     async def get_cache_target_snapshot(
@@ -2526,7 +2529,7 @@ def test_service_snapshot_item_ceiling_returns_non_retryable_payload_too_large()
     service.snapshot_error = CacheTargetStreamConflict(
         "snapshot_item_limit_exceeded",
         "snapshot item capacity reached",
-        current={"item_count_lower_bound": 100_001, "item_limit": 100_000},
+        current={"item_count_lower_bound": 1_000_001, "item_limit": 1_000_000},
     )
     session = _FakeSession()
     client = _client(service, session=session)
@@ -2540,11 +2543,66 @@ def test_service_snapshot_item_ceiling_returns_non_retryable_payload_too_large()
     assert "retry-after" not in response.headers
     assert response.json()["code"] == "SNAPSHOT_ITEM_LIMIT_EXCEEDED"
     assert response.json()["details"] == {
-        "item_count_lower_bound": 100_001,
-        "item_limit": 100_000,
+        "item_count_lower_bound": 1_000_001,
+        "item_limit": 1_000_000,
     }
     assert session.commit_calls == 0
     assert session.rollback_calls == 1
+
+
+@pytest.mark.unit
+def test_service_snapshot_byte_ceiling_returns_non_retryable_payload_too_large() -> None:
+    service = _FakeCacheTargetService()
+    service.snapshot_error = CacheTargetStreamConflict(
+        "snapshot_byte_limit_exceeded",
+        "snapshot byte capacity reached",
+        current={
+            "material_bytes_lower_bound": 536_870_913,
+            "material_byte_limit": 536_870_912,
+        },
+    )
+    session = _FakeSession()
+    client = _client(service, session=session)
+
+    response = client.get(
+        f"/v1/service/cache-target-snapshots/{EXTERNAL_SYSTEM}",
+        headers=_service_headers(),
+    )
+
+    assert response.status_code == 413
+    assert "retry-after" not in response.headers
+    assert response.json()["code"] == "SNAPSHOT_BYTE_LIMIT_EXCEEDED"
+    assert response.json()["details"]["material_byte_limit"] == 536_870_912
+    assert session.commit_calls == 0
+    assert session.rollback_calls == 1
+
+
+@pytest.mark.unit
+def test_reconciliation_snapshot_compaction_returns_typed_gone_receipt() -> None:
+    service = _FakeCacheTargetService()
+    service.reconciliation_snapshot_error = CacheTargetStreamConflict(
+        "snapshot_material_compacted",
+        "snapshot item material compacted",
+        current={
+            "snapshot_id": RECONCILIATION_SNAPSHOT_ID,
+            "item_count": 1,
+            "merkle_root": "a" * 64,
+            "compacted_at": "2026-08-18T00:00:00+00:00",
+        },
+    )
+    client = _client(service)
+
+    response = client.get(
+        "/v1/service/cache-target-reconciliations/"
+        f"{RECONCILIATION_REQUEST_ID}/snapshot",
+        headers=_service_headers(),
+    )
+
+    assert response.status_code == 410
+    assert "retry-after" not in response.headers
+    assert response.json()["code"] == "SNAPSHOT_MATERIAL_COMPACTED"
+    assert response.json()["details"]["snapshot_id"] == RECONCILIATION_SNAPSHOT_ID
+    assert response.json()["details"]["merkle_root"] == "a" * 64
 
 
 @pytest.mark.unit

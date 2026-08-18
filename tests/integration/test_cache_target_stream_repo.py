@@ -1613,6 +1613,189 @@ async def _apply_snapshot_source(
     )
 
 
+async def _bulk_seed_deleted_snapshot_heads(
+    session: AsyncSession,
+    *,
+    external_system: str,
+    count: int,
+) -> None:
+    await session.execute(
+        text(
+            "INSERT INTO ops.poi_cache_target_source_heads ("
+            "external_system, target_key, target_id, state, restore_epoch, "
+            "source_generation, source_payload_fingerprint, target_sequence) "
+            "SELECT :external_system, 'target-' || lpad(value::text, 4, '0'), "
+            "NULL, 'deleted', 1, 1, repeat('b', 64), 0 "
+            "FROM generate_series(1, :count) AS value"
+        ),
+        {"external_system": external_system, "count": count},
+    )
+
+
+@pytest.mark.integration
+async def test_snapshot_materialization_streams_more_than_one_insert_batch(
+    migrated_session: AsyncSession,
+) -> None:
+    system = "snapshot-streaming-batch-test"
+    await _apply_snapshot_source(
+        migrated_session,
+        external_system=system,
+        target_key="target-0000",
+        event_id="9f410000-0000-4000-8000-000000000001",
+        idempotency_key="9f420000-0000-4000-8000-000000000001",
+    )
+    await _bulk_seed_deleted_snapshot_heads(
+        migrated_session,
+        external_system=system,
+        count=1_004,
+    )
+
+    page = await get_cache_target_snapshot(
+        migrated_session,
+        external_system=system,
+        limit=2,
+    )
+
+    assert page.count == 1_005
+    assert [item.target_key for item in page.items] == ["target-0000", "target-0001"]
+    assert (
+        await migrated_session.scalar(
+            text(
+                "SELECT count(*) FROM ops.poi_cache_target_snapshot_items "
+                "WHERE snapshot_id = CAST(:snapshot_id AS uuid)"
+            ),
+            {"snapshot_id": page.snapshot_id},
+        )
+        == 1_005
+    )
+
+
+@pytest.mark.integration
+async def test_snapshot_cumulative_timeout_rolls_back_and_releases_writer(
+    migrated_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system = "snapshot-cumulative-timeout-test"
+    async with AsyncSession(migrated_engine) as setup, setup.begin():
+        await _apply_snapshot_source(
+            setup,
+            external_system=system,
+            target_key="target-a",
+            event_id="9f410000-0000-4000-8000-000000000011",
+            idempotency_key="9f420000-0000-4000-8000-000000000011",
+        )
+        await _bulk_seed_deleted_snapshot_heads(
+            setup,
+            external_system=system,
+            count=1_004,
+        )
+
+    original_stream = snapshot_repo._stream_snapshot_capture  # pyright: ignore[reportPrivateUsage]
+    first_item_batch_inserted = asyncio.Event()
+    never = asyncio.Event()
+    stream_calls = 0
+
+    async def _delayed_second_pass(
+        session: AsyncSession,
+        *,
+        external_system: str,
+    ) -> AsyncIterator[Any]:
+        nonlocal stream_calls
+        stream_calls += 1
+        if stream_calls == 1:
+            async for row in original_stream(
+                session,
+                external_system=external_system,
+            ):
+                yield row
+            return
+        async for row in original_stream(
+            session,
+            external_system=external_system,
+        ):
+            yield row
+        assert (
+            await session.scalar(
+                text(
+                    "SELECT count(*) FROM ops.poi_cache_target_snapshot_items "
+                    "WHERE external_system = :external_system"
+                ),
+                {"external_system": external_system},
+            )
+            == 1_000
+        )
+        first_item_batch_inserted.set()
+        await never.wait()
+
+    monkeypatch.setattr(snapshot_repo, "_SNAPSHOT_BUILD_TIMEOUT_SECONDS", 3.0)
+    monkeypatch.setattr(snapshot_repo, "_stream_snapshot_capture", _delayed_second_pass)
+
+    async def _build_snapshot() -> Any:
+        async with AsyncSession(migrated_engine) as reader, reader.begin():
+            return await get_cache_target_snapshot(
+                reader,
+                external_system=system,
+                limit=1,
+            )
+
+    async def _write_source() -> Any:
+        async with AsyncSession(migrated_engine) as writer, writer.begin():
+            return await _apply_snapshot_source(
+                writer,
+                external_system=system,
+                target_key="writer-target",
+                event_id="9f410000-0000-4000-8000-000000000012",
+                idempotency_key="9f420000-0000-4000-8000-000000000012",
+            )
+
+    build_task = asyncio.create_task(_build_snapshot())
+    writer_task: asyncio.Task[Any] | None = None
+    try:
+        await asyncio.wait_for(first_item_batch_inserted.wait(), timeout=5)
+        writer_task = asyncio.create_task(_write_source())
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(asyncio.shield(writer_task), timeout=0.1)
+
+        with pytest.raises(CacheTargetStreamConflict) as timed_out:
+            await asyncio.wait_for(build_task, timeout=5)
+        assert timed_out.value.code == "snapshot_build_timeout"
+
+        written = await asyncio.wait_for(writer_task, timeout=3)
+        assert written.target_key == "writer-target"
+    finally:
+        pending = tuple(
+            task
+            for task in (build_task, writer_task)
+            if task is not None and not task.done()
+        )
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
+
+    async with AsyncSession(migrated_engine) as observer, observer.begin():
+        assert (
+            await observer.scalar(
+                text(
+                    "SELECT count(*) FROM ops.poi_cache_target_snapshots "
+                    "WHERE external_system = :external_system"
+                ),
+                {"external_system": system},
+            )
+            == 0
+        )
+        assert (
+            await observer.scalar(
+                text(
+                    "SELECT count(*) FROM ops.poi_cache_target_snapshot_items "
+                    "WHERE external_system = :external_system"
+                ),
+                {"external_system": system},
+            )
+            == 0
+        )
+
+
 @pytest.mark.integration
 async def test_non_nfc_identity_cannot_poison_snapshot(
     migrated_session: AsyncSession,
@@ -2588,6 +2771,13 @@ async def test_background_snapshot_gc_round_robins_systems_and_observes_once(
         False,
     )
     assert backlog.remaining_items == backlog.remaining_headers == 0
+    assert backlog.snapshot_table_bytes > 0
+    assert backlog.snapshot_index_bytes > 0
+    assert backlog.snapshot_dead_tuples >= 0
+    assert (
+        backlog.snapshot_vacuum_lag_seconds is None
+        or backlog.snapshot_vacuum_lag_seconds >= 0
+    )
 
 
 @pytest.mark.integration
@@ -2883,6 +3073,84 @@ async def _resume_stream_after_dead_letter_replay(
     )
     assert completed.status == "succeeded"
     return completed
+
+
+@pytest.mark.integration
+async def test_two_phase_reconciliation_reuses_current_generic_snapshot_material(
+    migrated_session: AsyncSession,
+) -> None:
+    system = "reconciliation-generic-material-reuse-test"
+    begin_command = await _reconciliation_command(
+        migrated_session,
+        key="9d100000-0000-4000-8000-000000000001",
+        operation="service.cache-target-reconciliation.begin",
+    )
+    preparing = await begin_cache_target_reconciliation(
+        migrated_session,
+        command_id=begin_command,
+        external_system=system,
+        consumer_id=_CONSUMER,
+        expected_restore_epoch=1,
+        expected_control_version=None,
+        create_only=True,
+        reason="generic material 공유",
+    )
+    head = await _apply_snapshot_source(
+        migrated_session,
+        external_system=system,
+        target_key="target-a",
+        event_id="9d200000-0000-4000-8000-000000000001",
+        idempotency_key="9d300000-0000-4000-8000-000000000001",
+    )
+    generic = await get_cache_target_snapshot(
+        migrated_session,
+        external_system=system,
+        limit=10,
+    )
+    expected_root = snapshot_merkle_root(
+        [
+            SnapshotMerkleRowV1(
+                external_system=system,
+                target_key="target-a",
+                state=head.state,
+                source_generation=head.source_generation,
+                source_payload_fingerprint=head.source_payload_fingerprint,
+            )
+        ]
+    )
+
+    sealed = await seal_cache_target_reconciliation(
+        migrated_session,
+        request_id=preparing.request_id,
+        external_system=system,
+        consumer_id=_CONSUMER,
+        expected_phase_version=1,
+        expected_restore_epoch=1,
+        expected_item_count=1,
+        expected_merkle_root=expected_root,
+    )
+
+    assert sealed.snapshot_id == generic.snapshot_id
+    assert (
+        await migrated_session.scalar(
+            text(
+                "SELECT count(*) FROM ops.poi_cache_target_snapshots "
+                "WHERE external_system = :system"
+            ),
+            {"system": system},
+        )
+        == 1
+    )
+    assert (
+        await migrated_session.scalar(
+            text(
+                "SELECT count(*) FROM ops.poi_cache_target_snapshot_items "
+                "WHERE external_system = :system"
+            ),
+            {"system": system},
+        )
+        == 1
+    )
 
 
 @pytest.mark.integration
