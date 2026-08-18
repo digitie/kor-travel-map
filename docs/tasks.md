@@ -1020,10 +1020,12 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
   - [x] 모든 outbox writer transaction을 stream → head/target/link 잠금 순서로 직렬화해 system별 relay
     cursor를 해당 stream의 commit-safe contiguous prefix로 만든다.
   - [x] DB trigger가 stream lock 뒤 relay sequence를 배정해 raw/future writer에도 같은 순서를 강제한다.
-  - [x] barrier 5초 lock timeout/30초 statement timeout과 retryable `503`으로 hung writer를 bound한다.
-  - [x] capture/persist 30초 timeout을 별도 retryable `snapshot_build_timeout`으로 구분한다.
+  - [x] barrier 5초 lock timeout/5분 statement timeout과 retryable `503`으로 hung writer를 bound한다.
+  - [x] server cursor의 per-FETCH timeout과 별도로 두 scan/모든 INSERT의 누적 5분 deadline을 두고
+    capture/persist 초과를 retryable `snapshot_build_timeout`으로 구분한다.
   - [x] system별 미만료 generic snapshot을 2개로 제한하고 동적 `429 + Retry-After` admission을 구현한다.
-  - [x] 단일 snapshot 100,000 item ceiling과 초과 `413` fail-close로 process memory를 bound한다.
+  - [x] 단일 snapshot 1,000,000 item/512 MiB 독립 ceiling과 초과 `413` fail-close로 process
+    memory와 canonical material 크기를 bound한다.
   - [x] 만료·미참조 snapshot의 reader-safe foreground bounded GC를 구현한다.
   - [x] 전역 mutex·system round-robin·batch commit·시간/statement/no-progress 예산을 가진 hourly
     background GC와 exact 종료 backlog/total/unexpired/referenced metric을 구현한다.

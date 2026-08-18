@@ -211,6 +211,10 @@ barrier 전에 transaction-local `lock_timeout=5s`, `statement_timeout=5min`을 
 fail-close한다.
 barrier 이후 capture/item persist statement가 5분을 넘기면 별도
 `503 snapshot_build_timeout + Retry-After: 1`로 rollback해 lock wait와 build 병목을 구분한다.
+server cursor의 `statement_timeout`은 각 `FETCH`마다 다시 적용되므로, generic의 첫 barrier 또는
+seal/request의 첫 stream lock부터 두 scan·모든 bounded INSERT·receipt 조회를 함께 감싸는 monotonic
+누적 5분 application deadline도 둔다. 첫 stream lock은 5초 lock timeout을 적용하고, 누적 deadline
+만료는 cursor를 닫아 같은 `snapshot_build_timeout`으로 transaction 전체를 rollback한다.
 
 `high_watermark_cursor`는 snapshot 생성 시 고정한 external-system-scoped relay prefix다. 재사용 뒤에는 현재 outbox의
 exact max가 아니라 안전한 replay lower-bound일 수 있고 절대 상향 수정하지 않는다. consumer는 이

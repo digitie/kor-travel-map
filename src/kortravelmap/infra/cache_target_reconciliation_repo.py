@@ -1,16 +1,18 @@
 """Fixed cache-target snapshot, checksum reconciliation과 ops projection.
 
-Repository 함수는 commit하지 않는다. Snapshot 생성은 stream control, outbox
-high-watermark와 모든 natural-key head를 한 PostgreSQL statement의 MVCC view로
-읽은 뒤 immutable header/items로 고정한다.
+Repository 함수는 commit하지 않는다. Snapshot 생성은 stream row barrier를 잡은
+같은 transaction에서 모든 natural-key head를 두 번 server-cursor scan하고, 두 scan의
+count/byte/root가 일치할 때만 immutable header/items로 고정한다.
 """
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import json
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -71,6 +73,7 @@ _SNAPSHOT_HEADER_PRUNE_LIMIT = 100
 _GENERIC_SNAPSHOT_COPY_LIMIT = 2
 _SNAPSHOT_CAPACITY_RETRY_AFTER_MAX_SECONDS = 7_200
 _SNAPSHOT_BUILD_STATEMENT_TIMEOUT = "5min"
+_SNAPSHOT_BUILD_TIMEOUT_SECONDS = 300.0
 _SNAPSHOT_BARRIER_LOCK_TIMEOUT = "5s"
 _SNAPSHOT_ITEM_LIMIT = 1_000_000
 _SNAPSHOT_MATERIAL_BYTE_LIMIT = 512 * 1024 * 1024
@@ -1057,6 +1060,23 @@ def _enforce_snapshot_admission(*, item_count: int, material_bytes: int) -> None
         )
 
 
+@asynccontextmanager
+async def _snapshot_build_deadline() -> AsyncIterator[None]:
+    """첫 stream lock부터 두 scan과 모든 INSERT까지의 단일 누적 예산."""
+
+    deadline = asyncio.timeout(_SNAPSHOT_BUILD_TIMEOUT_SECONDS)
+    try:
+        async with deadline:
+            yield
+    except TimeoutError as exc:
+        if not deadline.expired():
+            raise
+        raise CacheTargetStreamConflict(
+            "snapshot_build_timeout",
+            "snapshot materialization 누적 제한 시간이 초과되었습니다.",
+        ) from exc
+
+
 async def _barrier_snapshot_stream(
     session: AsyncSession,
     *,
@@ -1089,6 +1109,38 @@ async def _barrier_snapshot_stream(
             "stream_not_found",
             "snapshot을 만들 cache target stream이 없습니다.",
         )
+
+
+async def _lock_snapshot_stream_for_build(
+    session: AsyncSession,
+    *,
+    external_system: str,
+) -> Any | None:
+    """Snapshot build의 첫 stream ``FOR UPDATE``에도 barrier 예산을 적용한다."""
+
+    await session.execute(
+        text(_SET_SNAPSHOT_BARRIER_TIMEOUTS_SQL),
+        {
+            "lock_timeout": _SNAPSHOT_BARRIER_LOCK_TIMEOUT,
+            "statement_timeout": _SNAPSHOT_BUILD_STATEMENT_TIMEOUT,
+        },
+    )
+    try:
+        stream = (
+            await session.execute(
+                text(_LOCK_STREAM_SQL),
+                {"external_system": external_system},
+            )
+        ).one_or_none()
+    except DBAPIError as exc:
+        if getattr(exc.orig, "sqlstate", None) in {"55P03", "57014"}:
+            raise CacheTargetStreamConflict(
+                "snapshot_barrier_timeout",
+                "snapshot stream writer barrier 대기 시간이 초과되었습니다.",
+            ) from exc
+        raise
+    await session.execute(text(_RESET_SNAPSHOT_BARRIER_LOCK_TIMEOUT_SQL))
+    return stream
 
 
 def _capture_snapshot_item(row: Any, *, row_number: int) -> CacheTargetSnapshotItem:
@@ -1279,15 +1331,16 @@ async def _create_snapshot(
     external_system: str,
     return_limit: int = 0,
 ) -> tuple[Any, tuple[CacheTargetSnapshotItem, ...]]:
-    scan = await _scan_snapshot_material(
-        session,
-        external_system=external_system,
-    )
-    return await _persist_snapshot_material(
-        session,
-        scan=scan,
-        return_limit=return_limit,
-    )
+    async with _snapshot_build_deadline():
+        scan = await _scan_snapshot_material(
+            session,
+            external_system=external_system,
+        )
+        return await _persist_snapshot_material(
+            session,
+            scan=scan,
+            return_limit=return_limit,
+        )
 
 
 async def _prune_expired_generic_snapshots(
@@ -1592,11 +1645,12 @@ async def get_cache_target_snapshot(
     if not 0 < limit <= 1000:
         raise ValueError("limit은 1 이상 1000 이하여야 합니다.")
     if cursor is None:
-        header, items = await _create_generic_snapshot(
-            session,
-            external_system=external_system,
-            limit=limit,
-        )
+        async with _snapshot_build_deadline():
+            header, items = await _create_generic_snapshot(
+                session,
+                external_system=external_system,
+                limit=limit,
+            )
         after_row_number = 0
     else:
         snapshot_id, after_row_number = _parse_snapshot_cursor(cursor)
@@ -2184,6 +2238,32 @@ async def seal_cache_target_reconciliation(
     expected_item_count: int,
     expected_merkle_root: str,
 ) -> CacheTargetReconciliationResult:
+    """첫 stream lock부터 seal 결과 조회까지 단일 누적 deadline을 적용한다."""
+
+    async with _snapshot_build_deadline():
+        return await _seal_cache_target_reconciliation(
+            session,
+            request_id=request_id,
+            external_system=external_system,
+            consumer_id=consumer_id,
+            expected_phase_version=expected_phase_version,
+            expected_restore_epoch=expected_restore_epoch,
+            expected_item_count=expected_item_count,
+            expected_merkle_root=expected_merkle_root,
+        )
+
+
+async def _seal_cache_target_reconciliation(
+    session: AsyncSession,
+    *,
+    request_id: str,
+    external_system: str,
+    consumer_id: str,
+    expected_phase_version: int,
+    expected_restore_epoch: int,
+    expected_item_count: int,
+    expected_merkle_root: str,
+) -> CacheTargetReconciliationResult:
     """Preparing request를 expected checksum과 같은 snapshot으로만 running 전환한다."""
 
     request_id = _canonical_uuid(request_id, field="request_id")
@@ -2194,12 +2274,10 @@ async def seal_cache_target_reconciliation(
         raise ValueError("expected_restore_epoch은 양수여야 합니다.")
     if expected_item_count < 0:
         raise ValueError("expected_item_count는 0 이상이어야 합니다.")
-    stream = (
-        await session.execute(
-            text(_LOCK_STREAM_SQL),
-            {"external_system": external_system},
-        )
-    ).one_or_none()
+    stream = await _lock_snapshot_stream_for_build(
+        session,
+        external_system=external_system,
+    )
     if stream is None:
         raise CacheTargetStreamConflict(
             "reconciliation_precondition_failed",
@@ -2328,6 +2406,24 @@ async def request_cache_target_reconciliation(
     external_system: str,
     reason: str,
 ) -> CacheTargetReconciliationResult:
+    """첫 stream lock부터 snapshot 결박까지 단일 누적 deadline을 적용한다."""
+
+    async with _snapshot_build_deadline():
+        return await _request_cache_target_reconciliation(
+            session,
+            command_id=command_id,
+            external_system=external_system,
+            reason=reason,
+        )
+
+
+async def _request_cache_target_reconciliation(
+    session: AsyncSession,
+    *,
+    command_id: int,
+    external_system: str,
+    reason: str,
+) -> CacheTargetReconciliationResult:
     """Stream을 halt하고 fixed snapshot checksum 비교 operation을 시작한다."""
 
     if command_id <= 0:
@@ -2348,12 +2444,10 @@ async def request_cache_target_reconciliation(
             )
         return _reconciliation(existing, replay=True)
 
-    stream = (
-        await session.execute(
-            text(_LOCK_STREAM_SQL),
-            {"external_system": external_system},
-        )
-    ).one_or_none()
+    stream = await _lock_snapshot_stream_for_build(
+        session,
+        external_system=external_system,
+    )
     if stream is None:
         raise CacheTargetStreamConflict("stream_not_found", "cache target stream이 없습니다.")
     active = (

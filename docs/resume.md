@@ -4,8 +4,12 @@
 
 #922의 server cursor 2-pass capture, incremental Merkle v1, 1,000행 INSERT, item 1,000,000/512 MiB
 admission, generic→reconciliation material 재사용과 relation/index/dead tuple/vacuum 관측을
-`feat/tvn41s-snapshot-streaming`에 구현했다. API는 미래 compaction의 typed 410을 예약했고, 단위/API/
-Dagster 212개와 PostGIS material 재사용, 1,000,001 leaf synthetic O(log N) accumulator를 통과했다.
+`feat/tvn41s-snapshot-streaming`에 구현했다. 적대 리뷰에서 server cursor의 per-FETCH timeout이 전체
+작업을 제한하지 않는 결함을 찾아 두 scan/모든 INSERT에 누적 5분 deadline을 추가했고, vacuum 관측불능
+warning과 codegen 가능한 typed 410/413 details schema도 보강했다. 실제 PostgreSQL 1,005행 batch와 두 번째
+scan timeout의 전량 rollback·동시 writer 회복 회귀를 추가했다.
+새 service OpenAPI는 PinVi에 exact 재-vendor했지만 기존 후보 Live UI 증거와 source pair가 다르므로
+T-VN-41 receipt는 `pending`이다. 과거 후보 artifact는 이력으로 보존하며 새 pair 검증에 재사용하지 않는다.
 
 ### 다음 한 작업
 
@@ -1602,8 +1606,8 @@ trigger 전 할당을 제거해 raw/future insert도 allocation-before-lock 순�
 link/refresh/stream-reconciled event는 재사용을 깨지 않는다. 재사용 cursor는 safe replay lower-bound라
 consumer가 이후 event를 idempotent하게 다시 읽는다. Map은 handoff 전 75분, PinVi는 실제 수신 시 60분의
 잔여수명을 각각 검사하며 부족하면 `503 + Retry-After` 또는 consumer fail-close다.
-barrier lock wait 5초/statement 30초를 넘기면 single-flight를 해제하고 barrier/build별 retryable `503`으로
-실패한다.
+barrier lock wait 5초/statement 5분을 넘기면 single-flight를 해제하고 barrier/build별 retryable `503`으로
+실패한다. server cursor의 per-FETCH timeout과 별도로 두 scan/모든 INSERT를 누적 5분 deadline으로 묶는다.
 
 reuse miss 시 system별 미만료·미참조 generic snapshot이 2개면 세 번째 full copy를 거부한다. 가장 오래된
 expiry까지 동적 `429 + Retry-After`를 반환해 유효 cursor를 삭제하지 않고 live 저장량을 stream

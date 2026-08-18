@@ -689,8 +689,10 @@ link/refresh/stream-reconciled event는 재사용을 깨지 않는다. 재사용
 다시 읽어 중복을 제거한다. server handoff 직전 75분 floor를 통과하지 못한 수명 부족과 생성 경합은 각각
 `503 snapshot_ttl_too_short`, `503 snapshot_busy`와 `Retry-After: 1`로 실패한다. consumer는 실제 수신
 시 60분 floor를 다시 검사한다.
-barrier lock wait는 5초, snapshot statement는 5분으로 제한하며 초과는
-각각 `503 snapshot_barrier_timeout`, `503 snapshot_build_timeout`과 `Retry-After: 1`로 반환한다.
+barrier/첫 stream lock wait는 5초, snapshot statement는 5분으로 제한한다. server cursor의 statement
+timeout은 각 `FETCH`마다 재적용되므로 generic 첫 barrier 또는 seal/request 첫 lock부터 두 scan, 모든
+INSERT와 receipt 조회까지 별도 누적 5분 deadline을 적용한다. 초과는 각각
+`503 snapshot_barrier_timeout`, `503 snapshot_build_timeout`과 `Retry-After: 1`로 반환한다.
 
 reuse miss 뒤 system별 미만료·미참조 generic snapshot이 이미 2개면 세 번째 복사를 만들지 않는다.
 가장 오래된 expiry까지 `429 snapshot_capacity_exceeded + Retry-After`로 대기시켜 유효 cursor를 보존하고

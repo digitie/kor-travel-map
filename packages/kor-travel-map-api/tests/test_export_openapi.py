@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from kortravelmap.api import app as app_module
 from kortravelmap.api.app import create_app
 from kortravelmap.api.route_policy import RoutePolicy, build_route_policy_matrix
 from kortravelmap.api.settings import ApiSettings
@@ -434,7 +435,8 @@ def test_route_policy_full_and_user_operations_match_bidirectionally() -> None:
 def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -> None:
     module = _load_script_module()
     app = create_app(ApiSettings())
-    service = module.service_openapi_spec(app.openapi(), app=app)
+    full = app.openapi()
+    service = module.service_openapi_spec(full, app=app)
 
     assert service["info"]["title"] == "kor-travel-map-service"
     assert set(service["paths"]) == {
@@ -521,6 +523,84 @@ def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -
     assert "Retry-After" in seal_responses["503"]["headers"]
     assert "headers" not in seal_responses["413"]
     assert "application/problem+json" in seal_responses["413"]["content"]
+    compacted_ref = {
+        "$ref": "#/components/schemas/CacheTargetSnapshotMaterialCompactedProblem"
+    }
+    for spec, path, method in (
+        (
+            service,
+            "/v1/service/cache-target-snapshots/{external_system}",
+            "get",
+        ),
+        (
+            service,
+            "/v1/service/cache-target-reconciliations/{request_id}/seals",
+            "post",
+        ),
+        (
+            full,
+            "/v1/admin/cache-target-reconciliations",
+            "post",
+        ),
+    ):
+        admission_schema = spec["paths"][path][method]["responses"]["413"]["content"][
+            "application/problem+json"
+        ]["schema"]
+        assert _refs(admission_schema) == {
+            "CacheTargetSnapshotItemLimitProblem",
+            "CacheTargetSnapshotByteLimitProblem",
+        }
+        assert admission_schema["discriminator"]["propertyName"] == "code"
+        assert set(admission_schema["discriminator"]["mapping"]) == {
+            "SNAPSHOT_ITEM_LIMIT_EXCEEDED",
+            "SNAPSHOT_BYTE_LIMIT_EXCEEDED",
+        }
+    assert service["paths"][
+        "/v1/service/cache-target-reconciliations/{request_id}/snapshot"
+    ]["get"]["responses"]["410"]["content"]["application/problem+json"][
+        "schema"
+    ] == compacted_ref
+
+    item_problem = schemas["CacheTargetSnapshotItemLimitProblem"]
+    assert item_problem["properties"]["status"]["const"] == 413
+    assert item_problem["properties"]["code"]["const"] == (
+        "SNAPSHOT_ITEM_LIMIT_EXCEEDED"
+    )
+    assert _refs(item_problem["properties"]["details"]) == {
+        "CacheTargetSnapshotItemLimitDetails"
+    }
+    byte_problem = schemas["CacheTargetSnapshotByteLimitProblem"]
+    assert byte_problem["properties"]["status"]["const"] == 413
+    assert byte_problem["properties"]["code"]["const"] == (
+        "SNAPSHOT_BYTE_LIMIT_EXCEEDED"
+    )
+    assert _refs(byte_problem["properties"]["details"]) == {
+        "CacheTargetSnapshotByteLimitDetails"
+    }
+    assert set(schemas["CacheTargetSnapshotItemLimitDetails"]["required"]) == {
+        "item_count_lower_bound",
+        "item_limit",
+    }
+    assert set(schemas["CacheTargetSnapshotByteLimitDetails"]["required"]) == {
+        "material_bytes_lower_bound",
+        "material_byte_limit",
+    }
+    compacted_problem = schemas["CacheTargetSnapshotMaterialCompactedProblem"]
+    assert compacted_problem["properties"]["status"]["const"] == 410
+    assert (
+        compacted_problem["properties"]["code"]["const"]
+        == "SNAPSHOT_MATERIAL_COMPACTED"
+    )
+    compacted_details = schemas["CacheTargetSnapshotMaterialCompactedDetails"]
+    assert set(compacted_details["required"]) == {
+        "snapshot_id",
+        "item_count",
+        "merkle_root",
+        "compacted_at",
+    }
+    assert compacted_details["properties"]["snapshot_id"]["format"] == "uuid"
+    assert compacted_details["properties"]["compacted_at"]["format"] == "date-time"
+    assert compacted_details["properties"]["merkle_root"]["pattern"] == r"^[0-9a-f]{64}$"
     mutation_record = schemas["CacheTargetSourceMutationRecord"]
     assert {"target_id", "entity_tag", "target_sequence"} <= set(mutation_record["required"])
     assert mutation_record["properties"]["target_id"]["format"] == "uuid"
@@ -670,9 +750,11 @@ def test_openapi_declares_rfc7807_problem_json_error_responses() -> None:
             for code, response in responses.items():
                 if code.isdigit() and int(code) >= 400:
                     schema = response["content"]["application/problem+json"]["schema"]
-                    ref = schema.get("$ref") if isinstance(schema, dict) else None
-                    assert ref is not None
-                    assert ref.rsplit("/", 1)[-1] in schemas
+                    assert isinstance(schema, dict)
+                    assert app_module._declares_problem_schema(  # pyright: ignore[reportPrivateUsage]
+                        schema,
+                        schemas,
+                    )
                     error_responses_seen += 1
     assert error_responses_seen > 0
 

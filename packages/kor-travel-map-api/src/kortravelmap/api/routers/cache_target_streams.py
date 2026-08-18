@@ -65,7 +65,9 @@ from kortravelmap.api.cache_target_stream_schema import (
     CacheTargetRestoreFenceRecord,
     CacheTargetRestoreFenceRequest,
     CacheTargetRestoreFenceResponse,
+    CacheTargetSnapshotAdmissionProblem,
     CacheTargetSnapshotData,
+    CacheTargetSnapshotMaterialCompactedProblem,
     CacheTargetSnapshotResponse,
     CacheTargetSnapshotRow,
     CacheTargetSnapshotStatus,
@@ -1517,6 +1519,7 @@ async def begin_service_cache_target_reconciliation(
     responses={
         200: {"description": "two-phase reconciliation sealed", "headers": _ETAG_RESPONSE_HEADER},
         413: {
+            "model": CacheTargetSnapshotAdmissionProblem,
             "description": (
                 "snapshot item 1,000,000개 또는 canonical material 512 MiB "
                 "admission 상한을 초과함."
@@ -1677,6 +1680,7 @@ async def complete_service_cache_target_reconciliation(
     response_model=CacheTargetSnapshotResponse,
     responses={
         413: {
+            "model": CacheTargetSnapshotAdmissionProblem,
             "description": (
                 "snapshot item 1,000,000개 또는 canonical material 512 MiB "
                 "admission 상한을 초과함."
@@ -1782,6 +1786,7 @@ def _snapshot_response(
     response_model=CacheTargetSnapshotResponse,
     responses={
         410: {
+            "model": CacheTargetSnapshotMaterialCompactedProblem,
             "description": (
                 "terminal audit 보존 기간 뒤 snapshot item material이 compact되어 "
                 "header/root receipt만 남음."
@@ -2031,6 +2036,7 @@ async def replay_admin_cache_target_dead_letter(
     responses={
         202: {"description": "reconciliation accepted", "headers": _ASYNC_OPERATION_HEADERS},
         413: {
+            "model": CacheTargetSnapshotAdmissionProblem,
             "description": (
                 "snapshot item 1,000,000개 또는 canonical material 512 MiB "
                 "admission 상한을 초과함."

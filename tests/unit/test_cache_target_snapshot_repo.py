@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
@@ -240,8 +241,25 @@ class _BarrierTimeoutSession:
         sql = str(statement)
         if "set_config('lock_timeout'" in sql:
             return _Result(scalar="5s")
-        if "FOR SHARE OF stream" in sql:
+        if "FOR SHARE OF stream" in sql or "FOR UPDATE" in sql:
             raise DBAPIError(None, params, _SqlStateError("55P03"), False)
+        raise AssertionError(f"unexpected SQL: {sql}")
+
+
+class _BlockedBuildLockSession:
+    async def execute(
+        self,
+        statement: Any,
+        params: dict[str, Any] | None = None,
+    ) -> _Result:
+        del params
+        sql = str(statement)
+        if "WHERE request.command_id = :command_id" in sql:
+            return _Result()
+        if "set_config('lock_timeout'" in sql:
+            return _Result(scalar="5s")
+        if "FOR UPDATE" in sql:
+            await asyncio.Event().wait()
         raise AssertionError(f"unexpected SQL: {sql}")
 
 
@@ -289,6 +307,31 @@ class _PersistSession:
         del statement, params
         assert execution_options == {"stream_results": True, "yield_per": 1_000}
         return _Result(rows=self._rows)
+
+
+class _BlockingStreamResult:
+    def __init__(self) -> None:
+        self.started = asyncio.Event()
+        self.closed = False
+
+    def __aiter__(self) -> _BlockingStreamResult:
+        return self
+
+    async def __anext__(self) -> Any:
+        self.started.set()
+        await asyncio.Event().wait()
+        raise StopAsyncIteration
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+class _BlockingStreamSession:
+    def __init__(self, result: _BlockingStreamResult) -> None:
+        self.result = result
+
+    async def stream(self, *_args: Any, **_kwargs: Any) -> _BlockingStreamResult:
+        return self.result
 
 
 @pytest.mark.unit
@@ -439,12 +482,113 @@ async def test_snapshot_barrier_and_build_timeouts_are_typed_conflicts() -> None
         )
     assert barrier.value.code == "snapshot_barrier_timeout"
 
+    with pytest.raises(repo.CacheTargetStreamConflict) as first_lock:
+        await repo._lock_snapshot_stream_for_build(  # pyright: ignore[reportPrivateUsage]
+            _BarrierTimeoutSession(),  # type: ignore[arg-type]
+            external_system="pinvi",
+        )
+    assert first_lock.value.code == "snapshot_barrier_timeout"
+
     with pytest.raises(repo.CacheTargetStreamConflict) as build:
         await repo._scan_snapshot_material(  # pyright: ignore[reportPrivateUsage]
             _BuildTimeoutSession(),  # type: ignore[arg-type]
             external_system="pinvi",
         )
     assert build.value.code == "snapshot_build_timeout"
+
+
+@pytest.mark.unit
+async def test_reconciliation_seal_deadline_starts_before_first_stream_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(repo, "_SNAPSHOT_BUILD_TIMEOUT_SECONDS", 0.01)
+
+    with pytest.raises(repo.CacheTargetStreamConflict) as timeout:
+        await repo.seal_cache_target_reconciliation(
+            _BlockedBuildLockSession(),  # type: ignore[arg-type]
+            request_id="11111111-1111-4111-8111-111111111111",
+            external_system="pinvi",
+            consumer_id="pinvi-consumer",
+            expected_phase_version=1,
+            expected_restore_epoch=1,
+            expected_item_count=0,
+            expected_merkle_root="a" * 64,
+        )
+
+    assert timeout.value.code == "snapshot_build_timeout"
+
+
+@pytest.mark.unit
+async def test_reconciliation_request_deadline_starts_before_first_stream_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(repo, "_SNAPSHOT_BUILD_TIMEOUT_SECONDS", 0.01)
+
+    with pytest.raises(repo.CacheTargetStreamConflict) as timeout:
+        await repo.request_cache_target_reconciliation(
+            _BlockedBuildLockSession(),  # type: ignore[arg-type]
+            command_id=1,
+            external_system="pinvi",
+            reason="snapshot deadline regression",
+        )
+
+    assert timeout.value.code == "snapshot_build_timeout"
+
+
+@pytest.mark.unit
+async def test_snapshot_build_uses_one_cumulative_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _slow_scan(*_args: Any, **_kwargs: Any) -> Any:
+        await asyncio.sleep(10)
+
+    monkeypatch.setattr(repo, "_SNAPSHOT_BUILD_TIMEOUT_SECONDS", 0.01)
+    monkeypatch.setattr(repo, "_scan_snapshot_material", _slow_scan)
+
+    with pytest.raises(repo.CacheTargetStreamConflict) as timeout:
+        await repo._create_snapshot(  # pyright: ignore[reportPrivateUsage]
+            object(),  # type: ignore[arg-type]
+            external_system="pinvi",
+        )
+
+    assert timeout.value.code == "snapshot_build_timeout"
+
+
+@pytest.mark.unit
+async def test_snapshot_build_does_not_relabel_unrelated_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _failed_scan(*_args: Any, **_kwargs: Any) -> Any:
+        raise TimeoutError("unrelated timeout")
+
+    monkeypatch.setattr(repo, "_scan_snapshot_material", _failed_scan)
+
+    with pytest.raises(TimeoutError, match="unrelated timeout"):
+        await repo._create_snapshot(  # pyright: ignore[reportPrivateUsage]
+            object(),  # type: ignore[arg-type]
+            external_system="pinvi",
+        )
+
+
+@pytest.mark.unit
+async def test_snapshot_stream_external_cancellation_closes_cursor() -> None:
+    result = _BlockingStreamResult()
+    session = _BlockingStreamSession(result)
+
+    async def _consume() -> None:
+        async for _ in repo._stream_snapshot_capture(  # pyright: ignore[reportPrivateUsage]
+            session,  # type: ignore[arg-type]
+            external_system="pinvi",
+        ):
+            pass
+
+    task = asyncio.create_task(_consume())
+    await result.started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert result.closed is True
 
 
 @pytest.mark.unit

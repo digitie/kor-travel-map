@@ -8,14 +8,16 @@
 ### cache-target snapshot bounded streaming (2026-08-18, T-VN-41S)
 
 - **API(service)**: snapshot admission을 item 1,000,000개와 canonical material 512 MiB로 확대·분리하고
-  초과를 non-retryable `413`으로 반환한다. terminal item compaction 뒤 request-bound page에 사용할
-  `410 SNAPSHOT_MATERIAL_COMPACTED` 계약도 예약했다.
+  초과를 typed details를 가진 non-retryable `413`으로 반환한다. terminal item compaction 뒤
+  request-bound page에 사용할 `410 SNAPSHOT_MATERIAL_COMPACTED`도 필수 receipt details schema와 함께
+  예약했다.
 - **BACKEND**: PostgreSQL server cursor 2-pass capture, incremental Merkle v1, 1,000행 INSERT batch로
-  process memory를 snapshot 크기와 분리했다. 유효 generic snapshot material은 two-phase
-  reconciliation seal이 같은 snapshot으로 재사용한다.
+  process memory를 snapshot 크기와 분리했다. per-FETCH statement timeout과 별도로 두 scan/모든 INSERT에
+  누적 5분 deadline을 적용한다. 유효 generic snapshot material은 two-phase reconciliation seal이 같은
+  snapshot으로 재사용한다.
 - **OPERATIONS**: hourly snapshot GC metadata에 header/item table·index bytes, dead tuple과 vacuum lag
-  ceiling/경보를 추가했다. receipt/material 물리 분리와 terminal compaction migration은 T-VN-40C의
-  예약 `0224` 뒤 `0225+`로 진행한다.
+  ceiling/경보와 vacuum 관측불능 warning을 추가했다. receipt/material 물리 분리와 terminal compaction
+  migration은 T-VN-40C의 예약 `0224` 뒤 `0225+`로 진행한다.
 
 ### provider 다건 재시도·quota/TLS 계약 (2026-08-18, T-VN-H45 후속)
 

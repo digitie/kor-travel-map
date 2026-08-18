@@ -263,18 +263,37 @@ _PROBLEM_REQUIRED_FIELDS = frozenset({"type", "title", "status", "detail", "code
 def _declares_problem_schema(
     candidate: Mapping[str, Any],
     components: Mapping[str, Any],
+    *,
+    _seen_refs: frozenset[str] = frozenset(),
 ) -> bool:
-    """명시 schema가 실제 RFC7807 확장 계약일 때만 보존한다."""
-    resolved: Mapping[str, Any] = candidate
+    """명시 schema 또는 union의 모든 branch가 RFC7807 계약일 때만 보존한다."""
+
     ref = candidate.get("$ref")
     prefix = "#/components/schemas/"
     if isinstance(ref, str) and ref.startswith(prefix):
+        if ref in _seen_refs:
+            return False
         component = components.get(ref.removeprefix(prefix))
         if not isinstance(component, Mapping):
             return False
-        resolved = component
-    required = resolved.get("required")
-    return isinstance(required, list) and _PROBLEM_REQUIRED_FIELDS.issubset(required)
+        return _declares_problem_schema(
+            component,
+            components,
+            _seen_refs=_seen_refs | {ref},
+        )
+    required = candidate.get("required")
+    if isinstance(required, list) and _PROBLEM_REQUIRED_FIELDS.issubset(required):
+        return True
+    alternatives = candidate.get("oneOf", candidate.get("anyOf"))
+    return bool(alternatives) and isinstance(alternatives, list) and all(
+        isinstance(alternative, Mapping)
+        and _declares_problem_schema(
+            alternative,
+            components,
+            _seen_refs=_seen_refs,
+        )
+        for alternative in alternatives
+    )
 
 
 def _problem_content(

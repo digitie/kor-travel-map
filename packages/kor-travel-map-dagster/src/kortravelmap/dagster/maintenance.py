@@ -626,6 +626,11 @@ async def drain_expired_cache_target_snapshots_op(
             "cache-target snapshot relation/vacuum alert: %s",
             metadata["snapshot_storage_alert_reasons"],
         )
+    if metadata["snapshot_storage_observation_issue"]:
+        context.log.warning(
+            "cache-target snapshot storage 관측 품질 경고: %s",
+            metadata["snapshot_storage_observation_issue_reasons"],
+        )
     context.add_output_metadata(metadata)
     return metadata
 

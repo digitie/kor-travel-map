@@ -167,8 +167,8 @@
       "pinvi_snapshot_receipt": {
         "state": "pending",
         "map_user_openapi_sha256": "6a2ee0f94ffded691f5d169ef1914144eecdf1f4170226c8bc5e963e972403c1",
-        "map_service_openapi_sha256": "c6f9aba6ab4b815c394e5e1cb5fb4a2c3488d147d5bb1a7e21b92c1796f4aebd",
-        "map_full_openapi_sha256": "2107d4ef1f46e4bdca9970afbe3977074bcfa820a67f606e1d5b3b23abf9591e",
+        "map_service_openapi_sha256": "8019e36f150ed006f5580e5ff224a0ba72030808b5303273f8c4c51aa0496431",
+        "map_full_openapi_sha256": "22e3f2f07192706bd06b35d2b9841c4a023047053be03731d5cfbfba8a746d32",
         "blocking_reason": "T-VN-40 canonical curation service snapshot과 maintenance-only identity mapping export를 PinVi UUID import consumer가 paired vendor·receipt로 수용하기 전이다. 이 receipt가 complete가 되기 전에는 n150 installer가 fail-close한다."
       }
     },
@@ -187,25 +187,10 @@
         "admin-detail": "no"
       },
       "pinvi_snapshot_receipt": {
-        "state": "candidate_verified",
-        "map_service_openapi_sha256": "c6f9aba6ab4b815c394e5e1cb5fb4a2c3488d147d5bb1a7e21b92c1796f4aebd",
-        "pinvi_service_vendor_sha256": "c6f9aba6ab4b815c394e5e1cb5fb4a2c3488d147d5bb1a7e21b92c1796f4aebd",
-        "verification": [
-          "PinVi service vendor bytes are exact",
-          "n150 isolated candidate Map/PinVi Live UI E2E passed",
-          "candidate archive, immutable images, and attestation are exact"
-        ],
-        "candidate_map_commit": "77821001f2c430f4c7d1c2c8509fff990dd8ad08",
-        "candidate_pinvi_commit": "e8e0fecfcb2c75899a2b558afb9ab2056c68d987",
-        "candidate_compatible_pair_manifest_sha256": "f5620c37f5f2665371d86d434ae5ef1e0c34815462f335fcb15e760f5d40a085",
-        "candidate_compatible_pair_attestation_sha256": "ca99a15ce37722362b17fa1b291fba7c7141b87d912971e2a6bf8e418cf219be",
-        "candidate_live_e2e_evidence_sha256": "15e05098949d52097a64826c0702fe72149c138f3863ce9be98042b9079e58f4",
-        "candidate_map_api_image_id": "sha256:6a4cf793d191f30d9de3afb65e0bc114f6c72b3e5aa11af69204f32a44bd4b1f",
-        "candidate_map_ui_image_id": "sha256:b0bdd0c41fe49017c94e71c4f48cb1f9c09779964da74858d96da520420034f0",
-        "candidate_map_dagster_web_image_id": "sha256:2f7ac8ecb1552ab8e5cc05b6a11fce5bf9e3c1856d8823f5f1731adb6e354e99",
-        "candidate_map_dagster_daemon_image_id": "sha256:00082696d75057ba05ea62811a52956ea98915fe88de4eca0f829b80b795f3ce",
-        "candidate_pinvi_api_image_id": "sha256:9e8e2acb4993f35fa5c223162cf77e9c5d646fcbf7e0ff45550c7cc56f8c3445",
-        "final_c7_required": true
+        "state": "pending",
+        "map_service_openapi_sha256": "8019e36f150ed006f5580e5ff224a0ba72030808b5303273f8c4c51aa0496431",
+        "pinvi_service_vendor_sha256": "8019e36f150ed006f5580e5ff224a0ba72030808b5303273f8c4c51aa0496431",
+        "blocking_reason": "T-VN-41S typed snapshot 410/413가 service 계약을 바꿨다. PinVi exact vendor는 갱신했지만 기존 77821001/e8e0fec 후보 archive·image·Live UI 증거는 이전 service bytes만 검증했으므로 새 Map/PinVi source pair의 isolated acceptance 전까지 candidate_verified로 승격하지 않는다."
       }
     },
     "T-VN-39": {

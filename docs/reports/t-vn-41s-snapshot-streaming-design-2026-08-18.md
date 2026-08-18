@@ -15,8 +15,12 @@ root를 계산한다. item 1,000,000개 또는 canonical material 512 MiB를 넘
 admission을 통과한 두 번째 scan은 1,000행씩 INSERT하고 첫 응답 page만 최대 요청 `limit`만큼
 보관한다. 두 scan은 같은 transaction의 stream row `FOR SHARE` barrier 아래 실행되므로 source writer가
 중간에 membership을 바꿀 수 없다. 그래도 두 번째 scan의 count/byte/root를 첫 scan과 다시 비교해
-불일치하면 transaction 전체를 rollback한다. statement timeout은 1M급 scan을 수용하도록 5분으로
-올리되 barrier lock timeout은 5초를 유지한다.
+불일치하면 transaction 전체를 rollback한다. PostgreSQL server cursor의 `statement_timeout`은 각
+`FETCH`마다 다시 적용되므로 그것만으로 전체 작업 시간을 제한하지 않는다. 1M급 scan을 수용하는
+statement timeout 5분과 별도로, generic의 첫 barrier 또는 seal/request의 첫 stream `FOR UPDATE`부터
+두 scan과 모든 INSERT·최종 receipt 조회가 끝날 때까지 단일 `asyncio.timeout()` 누적 5분 deadline을
+적용한다. 첫 lock은 별도 5초 lock timeout으로 `snapshot_barrier_timeout`을 구분하며, 누적 deadline
+초과는 cursor를 닫고 transaction 전체를 `snapshot_build_timeout`으로 rollback한다.
 
 Merkle accumulator는 이미 NFC UTF-8 unsigned byte 순서로 들어오는 leaf만 받는다. level별 미결
 subtree 하나만 유지하므로 추가 메모리는 `O(log N)`이고, 마지막 낮은 level부터 합치는 방식으로
@@ -32,13 +36,14 @@ snapshot을 reconciliation seal이 같은 `snapshot_id`로 결박하는 것이�
 
 hourly GC 종료 관측에는 snapshot 두 relation의 table/TOAST bytes, index bytes,
 `pg_stat_user_tables.n_dead_tup`, 두 relation 중 가장 긴 vacuum lag를 추가한다. 한 relation이라도 아직
-manual/autovacuum 이력이 없으면 lag를 추정하지 않고 `snapshot_vacuum_not_observed` 관측 품질 경고를
-낸다. Dagster run config의 각 ceiling 초과는 exact reason과 warning으로 남기되 GC 성공 자체를
-실패시키지 않는다.
+manual/autovacuum 이력이 없으면 lag를 추정하지 않고 `snapshot_vacuum_not_observed` 관측 품질 reason과
+별도 warning을 낸다. Dagster run config의 각 ceiling 초과는 exact reason과 warning으로 남기되 GC 성공
+자체를 실패시키지 않는다.
 
 API는 미래 compaction 뒤 request-bound page에 사용할
-`410 SNAPSHOT_MATERIAL_COMPACTED`를 미리 고정한다. details는 최소 `snapshot_id`, `item_count`,
-`merkle_root`, `compacted_at`을 유지하며 retryable 응답이 아니다.
+`410 SNAPSHOT_MATERIAL_COMPACTED`를 미리 고정한다. details는 `snapshot_id`, `item_count`,
+`merkle_root`, `compacted_at`을 필수로 유지하며 retryable 응답이 아니다. item/byte admission의 두 413도
+각 code와 details를 typed OpenAPI schema로 내보내 codegen이 generic map 없이 판독할 수 있게 한다.
 
 ## 2. 0224 예약과 migration barrier
 
@@ -89,8 +94,10 @@ receipt를 legacy snapshot/item 형태로 되돌릴 수 있다. 서비스 전 �
 
 ## 5. 검증 상태와 남은 gate
 
-- 단위/API/Dagster 집중 테스트: 212개 통과.
-- PostGIS: generic 먼저 생성 → two-phase seal이 같은 snapshot material을 재사용하는 회귀 통과.
+- 단위/API/Dagster 집중 테스트: 231개 통과.
+- PostGIS: cache-target stream repository 37개 통과. 실제 1,005행의 1,000+5 bounded INSERT와 두 번째
+  scan에서 1,000 item INSERT 뒤 누적 timeout이 header/item을 전량 rollback하고 대기 writer를 푸는
+  회귀를 포함한다.
 - synthetic accumulator: 1,000,001 leaf, traced peak 약 0.003 MiB, 약 64,700 leaf/s(현재 WSL 측정).
 - strict mypy(변경 source 6개)와 Ruff 변경 파일 통과.
 - 남음: `0225+` 실제 migration upgrade/downgrade, true receipt/material 양방향 공유, atomic terminal

@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "2107d4ef1f46e4bdca9970afbe3977074bcfa820a67f606e1d5b3b23abf9591e"
+      "sha256": "22e3f2f07192706bd06b35d2b9841c4a023047053be03731d5cfbfba8a746d32"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -13,10 +13,15 @@
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
-      "sha256": "c6f9aba6ab4b815c394e5e1cb5fb4a2c3488d147d5bb1a7e21b92c1796f4aebd"
+      "sha256": "8019e36f150ed006f5580e5ff224a0ba72030808b5303273f8c4c51aa0496431"
     }
   },
   "revisions": [
+    {
+      "date": "2026-08-18",
+      "task": "T-VN-41S",
+      "change": "snapshot item/byte admission 413을 code discriminator로 결박한 두 typed Problem branch로 분리하고 future material compaction 410에 필수 receipt details를 고정했다. user spec은 바뀌지 않으며 admin/service bytes를 재동결한다. 새 service bytes는 PinVi가 재-vendor했지만 종전 candidate Live UI 증거의 source pair와 다르므로 T-VN-41 receipt는 새 pair 검증 전까지 pending으로 되돌린다."
+    },
     {
       "date": "2026-08-17",
       "task": "T-VN-41A-C current-main rebase",

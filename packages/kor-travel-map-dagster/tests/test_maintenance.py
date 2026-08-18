@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any, cast
+from unittest.mock import Mock
 
 import pytest
 from dagster import Failure
@@ -25,6 +28,7 @@ from kortravelmap.dagster.maintenance import (
     cache_target_snapshot_gc_job,
     consistency_dedup_refresh_job,
     current_weather_summary_refresh_job,
+    drain_expired_cache_target_snapshots_op,
 )
 
 pytestmark = pytest.mark.filterwarnings(
@@ -546,6 +550,51 @@ def test_cache_target_snapshot_gc_job_marks_skipped_backlog_unobserved(
         "gc_overlap_skipped"
     ]
     assert output["snapshot_storage_requires_attention"] is True
+
+
+@pytest.mark.asyncio
+async def test_cache_target_snapshot_gc_warns_when_vacuum_is_not_observed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _NoVacuumClient(_Client):
+        async def drain_expired_cache_target_snapshots(
+            self, **kwargs: object
+        ) -> CacheTargetSnapshotGcDrainResult:
+            result = await super().drain_expired_cache_target_snapshots(**kwargs)
+            return replace(
+                result,
+                snapshot_table_bytes=100,
+                snapshot_index_bytes=100,
+                snapshot_dead_tuples=0,
+                snapshot_vacuum_lag_seconds=None,
+            )
+
+    clock = iter([300.0, 301.0])
+    monkeypatch.setattr(maintenance_mod, "monotonic", lambda: next(clock))
+    log = Mock()
+    metadata: list[dict[str, object]] = []
+    context = SimpleNamespace(
+        resources=SimpleNamespace(kor_travel_map_client=_NoVacuumClient()),
+        op_config={},
+        run_id="vacuum-not-observed-run",
+        log=log,
+        add_output_metadata=metadata.append,
+    )
+
+    output = await drain_expired_cache_target_snapshots_op.compute_fn.decorated_fn(
+        cast(Any, context)
+    )
+
+    assert output["snapshot_storage_alert"] is False
+    assert output["snapshot_storage_observation_issue_reasons"] == [
+        "snapshot_vacuum_not_observed"
+    ]
+    assert output["snapshot_storage_requires_attention"] is True
+    log.warning.assert_any_call(
+        "cache-target snapshot storage 관측 품질 경고: %s",
+        ["snapshot_vacuum_not_observed"],
+    )
+    assert metadata == [output]
 
 
 def test_cache_target_snapshot_gc_first_observation_checks_only_ceiling() -> None:
