@@ -12,13 +12,22 @@ Map 인수 ①(prod `0104 → 0223`, mapping 4,424)이 끝난 뒤 남은 ②를 
 1. **PinVi PR #451 머지 완료.** Map 인수 ④는 `map_user_openapi_sha256 == pinvi_user_vendor_sha256`을
    강제하는데(`tests/unit/test_vnext_contract_artifacts.py`), PinVi `main`의 vendored user spec은
    `66fc83b3…`이고 Map은 `6a2ee0f9…`다. **배포 pair commit은 #451 머지 커밋 이후여야 한다.**
-2. **provenance 재핀 결정.** PinVi가 봉인하는 `map_release_revision`은 요청 결과가 아니라
-   vendored 상수(`contracts/kor-travel-map-service-provenance-v1.json`, 현재 `4672aa96…`)다.
-   실제로 export를 서빙하는 prod Map은 그 자손 커밋이며, client·route·DB 어디에도 둘을 대조하는
-   지점이 없다 — 즉 **사실이 아닌 문장이 append-only로 봉인될 수 있다.**
-   → 배포 pair commit에서 provenance를 **실제 배포되는 Map 커밋으로 재핀**한 뒤 S4를 실행한다.
-   (대안: 상수가 "벤더된 계약 리비전"임을 receipt·journal에 명시하고 진행. 재봉인은 가능하지만
-   거짓 provenance 행이 영구히 남고 preflight가 새 revision 기준으로 `ready=false`가 된다.)
+2. **provenance 상수의 의미 — 재핀하지 않는다(2026-08-19 검증 결론).**
+   PinVi가 봉인하는 `map_release_revision`은 vendored 상수
+   (`contracts/kor-travel-map-service-provenance-v1.json`, `4672aa96…`)다. 처음에는 "실제 서빙 커밋과
+   달라 거짓 문장이 봉인된다"고 판단했으나, 계약 렌즈 검증이 이를 뒤집었다:
+   - 이 상수는 live `/health` revision이 아니라 **vendored service 계약의 release identity**다
+     (`core/config.py:552-564`가 cache-target expected source revision과 대조한다).
+   - `4672aa96`의 `openapi.service.json` sha256이 provenance의 `service_openapi_sha256`(`c6f9aba6…`)과
+     일치하고, service·user 스펙 바이트는 `4672aa96 → 현재 main` 전 구간 **불변**이다. 따라서
+     "service 계약이 `c6f9aba6`인 release에 대해 봉인됐다"는 문장은 참이다.
+   - 재핀은 vendoring chore가 아니라 receipt 흐름 결정이다: `UNIQUE(map_release_revision)` 때문에
+     이미 봉인된 receipt가 backfill에서 conflict가 되고 새 scope에 **두 번째 receipt**가 생긴다.
+     `PINVI_KOR_TRAVEL_MAP_CACHE_TARGET_EXPECTED_SOURCE_REVISION` env와
+     `tests/unit/test_kor_travel_map_cache_target_contract.py:25`까지 같은 순간에 옮겨야 한다.
+   → **S4는 현재 상수 그대로 봉인한다.** 다만 이 상수의 의미가 어디에도 문서화돼 있지 않으므로
+   receipt 발행 시 journal에 "봉인된 `map_release_revision`은 서빙 커밋이 아니라 vendored service 계약
+   identity"라고 남긴다.
 3. Map prod를 pair commit으로 재배포해 둔다(현재 `14ec2368`; #998 hotfix 미반영).
    **Map export root는 재배포로 바뀌지 않는다** — `ops.curation_cutover_identity_mappings`는 0223이
    한 번만 적재하는 immutable 표이고 40C manifest D11이 retain으로 못박았다.
