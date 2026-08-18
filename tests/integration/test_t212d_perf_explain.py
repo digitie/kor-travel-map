@@ -1204,11 +1204,14 @@ async def test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible(
         },
     )
     # T-VN-33: record가 dataset 자연키 사본을 잃으면서
-    # ``idx_source_records_provider_dataset_entity``가 사라졌다. dataset 한정
-    # 진입 경로의 정본은 entity 쪽 ``idx_source_entities_provider_dataset``다.
+    # ``idx_source_records_provider_dataset_entity``가 사라졌다. planner는 dataset에서
+    # entity로 들어가면 ``idx_source_entities_provider_dataset``를, source link에서
+    # entity로 들어가면 exact key+dataset unique index를 쓸 수 있다. 둘 다 entity의
+    # canonical dataset FK를 타는 index-compatible 경로다.
     _assert_uses_index(
         dedup_refresh,
         "idx_source_entities_provider_dataset",
+        "uq_source_entities_key_dataset",
         "idx_features_dedup_refresh_keyset",
     )
 
