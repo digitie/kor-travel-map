@@ -20,7 +20,7 @@
 | P4 | PinVi backfill이 mapping을 소비 완료(PinVi 쪽 receipt) — mapping 표는 **남긴다**(삭제 대상 아님) | docker-manager paired receipt |
 | P5 | prod 백업/PITR 복구점 확인(0224는 forward-only·데이터 파괴: legacy 4,424행 + detail snapshot 500행) | runbook `c7-prod-live-e2e.md` 백업 절차 |
 | P6 | dedup merge 큐에 same-theme legacy-conflict 후보 0(0224가 merge의 legacy detach 경로를 지우므로) | `ops.dedup_review_queue` pending 중 legacy 관련 0 |
-| P7 | **PinVi lockstep** — 40C는 `openapi.user.json`을 바꾼다(`/v1/curated-features{,/{id}}` 제거 + public catalog 2 route 제거). `test_vnext_contract_artifacts`가 T-VN-40 receipt(`deployment_receipt_task`)의 `map_user_openapi_sha256`을 현행 spec bytes에, complete 뒤엔 `pinvi_user_vendor_sha256`과 동일하게 묶으므로 PinVi가 post-40C user spec을 재vendor하고 새 paired receipt(map_commit/pinvi_commit)를 같은 rollout에서 발행해야 한다. user-client `gen:types:check`도 같은 PR에서 재생성 | docker-manager paired receipt · PinVi PR · `packages/kor-travel-map-user-client` types 재생성 |
+| P7 | **PinVi lockstep** — 40C는 `openapi.user.json`을 바꾼다(`/v1/curated-features{,/{id}}` 제거 + public catalog 2 route 제거). `test_vnext_contract_artifacts`가 T-VN-40 receipt(`deployment_receipt_task`)의 `map_user_openapi_sha256`을 현행 spec bytes에, complete 뒤엔 `pinvi_user_vendor_sha256`과 동일하게 묶으므로 PinVi가 post-40C user spec을 재vendor하고 새 paired receipt(map_commit/pinvi_commit)를 같은 rollout에서 발행해야 한다. **순서**: receipt는 40C map_commit이 존재해야 가리킬 수 있으므로 T-VN-41의 `candidate_verified → complete` 2단계 패턴을 따른다(40C PR 머지 → PinVi 재vendor PR → paired candidate receipt → live 확인 → complete). user-client `gen:types:check`도 같은 PR에서 재생성 | docker-manager paired receipt · PinVi PR · `packages/kor-travel-map-user-client` types 재생성 |
 
 ## 1. DB 삭제 순서 (0224 — forward-only, 단일 트랜잭션, 각 DROP은 `RESTRICT`)
 
@@ -90,9 +90,13 @@ manifest를 고친 뒤 다시 실행한다 — "trigger disable" 같은 우회�
    `docs/archive/`, `docs/reports/`, `docs/adr/`(불변), `docs/journal.md`, `docs/tasks*.md`, `docs/resume.md`,
    `contracts/vnext/openapi-diff-v1.json#/surfaces/*/removed`, `t-vn-40c-removal-manifest-v1.json`,
    `target-invariants-v1.sql#INV-040-09`, `recovery-preflight-v1.json`. `tests/lint/test_tvn40c_static_zero.py`가 fail-closed.
-   갱신할 현행 문서: `docs/curated-features.md`, `architecture/data-model.md`, `rest-api.md`, `openapi-admin-contract.md`,
-   `integration-map.md:140-147`(PinVi가 curated_features를 REST로 읽는다는 서술), `runbooks/admin-ui-screen-checklist.md`,
-   `backup-restore.md`, `postgres-schema.md`, `test-strategy.md`, `provider-contract.md`.
+   갱신할 현행 문서(정확한 경로): `docs/curated-features.md`, `docs/architecture/data-model.md`, `docs/architecture/rest-api.md`,
+   `docs/architecture/openapi-admin-contract.md`, `docs/architecture/provider-contract.md`, `docs/architecture/postgres-schema.md`,
+   `docs/integration-map.md:140-147`(PinVi가 curated_features를 REST로 읽는다는 서술), `docs/runbooks/admin-ui-screen-checklist.md`,
+   `docs/backup-restore.md`, `docs/test-strategy.md`. **유지되는 모듈의 주석/import 잔재**도 gate 대상이다 —
+   `runtime_privileges.py:44-56,75`(fence 주석), `routers/curated.py:61,65`(fence docstring), `curated_repo.py:25`(fence import)
+   등은 40C PR에서 함께 정리. gate 구현은 식별자를 `--fixed-strings`(경로형 식별자는 정규식이 아니다)로 검색한다 —
+   Windows Git Bash에서 `/v1/...` 패턴이 경로로 변환돼 0건 거짓 초록이 난 사례가 있어 n150(Linux)에서 실행.
 4. DB catalog zero(migrated head DB, 통합 테스트): `pg_class/pg_trigger/pg_constraint/pg_index`에 legacy 이름 0 **그리고
    `pg_proc.prosrc`에 legacy 식별자 0**(이름만 보면 D4의 0214 procedure를 놓친다).
 5. `alembic check` clean · runtime preflight(API/Dagster 로그인이 EXECUTE 가능한 procedure 집합 = allowlist) ·

@@ -30,7 +30,7 @@
     },
     {
       "id": "P7",
-      "check": "PinVi lockstep: 40C changes openapi.user.json (curated-features + public catalog routes removed) -> user-client types regen (gen:types:check), PinVi re-vendors post-40C user spec, new paired receipt (map_commit/pinvi_commit) in the same rollout; test_vnext_contract_artifacts binds receipt map_user_openapi_sha256 == pinvi_user_vendor_sha256 when complete"
+      "check": "PinVi lockstep: 40C changes openapi.user.json (curated-features + public catalog routes removed) -> user-client types regen (gen:types:check), PinVi re-vendors post-40C user spec, new paired receipt (map_commit/pinvi_commit) in the same rollout; test_vnext_contract_artifacts binds receipt map_user_openapi_sha256 == pinvi_user_vendor_sha256 when complete; sequencing follows the T-VN-41 candidate_verified -> complete two-step (40C PR merged -> PinVi re-vendor PR -> paired candidate receipt -> live -> complete)"
     }
   ],
   "db_removals_ordered": [
@@ -316,14 +316,18 @@
     "docs_to_update": [
       "docs/curated-features.md",
       "docs/architecture/data-model.md",
-      "docs/rest-api.md",
-      "docs/openapi-admin-contract.md",
+      "docs/architecture/rest-api.md",
+      "docs/architecture/openapi-admin-contract.md",
+      "docs/architecture/provider-contract.md",
+      "docs/architecture/postgres-schema.md",
       "docs/integration-map.md:140-147",
       "docs/runbooks/admin-ui-screen-checklist.md",
-      "docs/runbooks/backup-restore.md",
-      "docs/architecture/postgres-schema.md",
-      "docs/test-strategy.md",
-      "docs/provider-contract.md"
+      "docs/backup-restore.md",
+      "docs/test-strategy.md"
+    ],
+    "notes": [
+      "search with --fixed-strings per identifier (path-like identifiers are not regexes); run on Linux (n150/CI) - Windows Git Bash mangles /v1/... patterns",
+      "comment/import residue in KEPT modules counts (runtime_privileges.py fence comments, routers/curated.py fence docstring, curated_repo.py legacy_write_fence import)"
     ]
   },
   "verification": [
