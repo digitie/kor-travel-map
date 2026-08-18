@@ -811,7 +811,34 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
     전부 legacy가 아니다.
   - legacy write가 **된다**를 단언하던 테스트를 **막힌다**로 뒤집었다(지우면 회귀를 잡을
     자리가 없다). read 경로 fixture는 test-only raw INSERT helper로.
-  - 잔여: 적대 리뷰 2명 → draft 해제 → CI → 머지. **①~② 전에 머지돼야 한다.**
+  - **적대 리뷰(2명) 결과와 조치** — 둘 다 `holds=False`, P1 1건 + P2 4건. 전부 반영했다.
+    - **P1 — merge가 runtime role로 죽는다.** `apply_feature_merge`가 legacy 표를 `FOR
+      UPDATE`+UPDATE 3문으로 mirror하는데 fence가 그 권한을 뺐다 → 42501. 새
+      `tests/integration/test_merge_under_runtime_role.py`(`as_api_runtime`)로 red 확인.
+      **그 테스트가 하나 더 드러냈다**: legacy 다음으로 canonical `curation_collections`
+      `FOR UPDATE`에서 42501 — **fence 이전부터의 결함**(20fa752d). 모든 merge 테스트가
+      superuser라 CI가 못 잡았고 prod dedup 병합은 이미 깨져 있었다. 해결(0204/0214 패턴):
+      `0222_tvn40a_merge_runtime_role` — command_owner 소유 SECURITY DEFINER procedure 5개
+      (legacy lock/archive/sync/move + canonical collections lock)를 CALL. runtime에 표
+      권한을 주지 않는다. 행 잠금은 트랜잭션 범위라 반환 뒤에도 유지된다. legacy 4개는 40C에서
+      사라지고 collections lock은 남는다.
+    - P2 inventory — lint가 `curated_repo.py` 이름 규칙만 봤다 → `infra/*.py` 전체를 SQL
+      문자열 수준(상수+인라인)에서 훑어 감싸는 함수를 찾고 fence 호출 또는 allowlist
+      (`update_curation_item`·`_lock_legacy_projections_for_item` — 0214 이전 Python writer,
+      **어떤 runtime 진입점에도 연결돼 있지 않음**을 별도 테스트로 고정)를 요구.
+    - P2 snapshot 표 — `curated_feature_detail_snapshots`는 읽는 코드도 쓰는 코드도 없는데
+      RW였다 → SELECT만. 덤으로 ACL 표의 **phantom 항목 2개** 발견·삭제
+      (`curated_tripmate_copy_snapshots` — legacy 0032가 rename, `weather_metric_series` —
+      baseline에 없음). reconcile은 DB에 없는 표를 조용히 건너뛰므로 phantom은 아무 것도
+      지키지 않으면서 "관리된다"는 인상만 준다. "표에 선언된 relation이 DB에 실재한다"
+      통합 테스트 추가.
+    - P2 spoof 422 — 삭제한 legacy 라우터 테스트의 canonical 대응: item POST/PATCH가
+      body의 actor/selected_by/operator_updated_by/updated_by/created_by를 422로 거부하고
+      repo command에 닿지 않음(ADR-066 D-2).
+    - P2 admin UI — legacy detail 화면의 채택/해제/보관/편집이 410을 맞는다 → write 컨트롤·
+      mutation 4개·FeatureEditor·CuratedPlaceSearchPanel 제거, fence 안내로 교체. read
+      패널은 40C까지 유지(plan §40B의 write 절반을 지금, read는 40C에서).
+  - 잔여: 리베이스 → draft 해제 → CI → 머지. **①~② 전에 머지돼야 한다.**
 - [ ] **T-VN-40-mapping** — `ops.curation_cutover_identity_mappings` 적재 migration.
   설계 §6.2 step 3. PinVi backfill의 입력이다.
 - [ ] **T-VN-40C-manifest** — physical removal manifest와 migration을 사전에 작성·검토한다.

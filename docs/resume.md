@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-18 — T-VN-40A fence(#994) 적대 리뷰 반영 완료, 머지 대기
+
+fence 3층(ACL·static·route)에 더해 리뷰 P1이 드러낸 **merge의 runtime-role 결함**(fence 이전부터
+`curation_collections` FOR UPDATE가 42501 — superuser 테스트만 있어 아무도 몰랐다)을 0222로 고쳤다.
+P2 4건(inventory 전수·snapshot ACL+phantom 2개·spoof 422·admin write UI 제거) 반영. n150 게이트
+전부 초록(ruff·mypy·lint 10·router 74·merge+runtime+ACL 통합 40·admin tsc/eslint/vitest 269).
+
+### 다음 한 작업
+
+#994를 draft 해제하고 CI 초록 뒤 머지한다. 머지 뒤 T-VN-40 인수 순서대로 **40-mapping**
+(`ops.curation_cutover_identity_mappings` 적재 migration) → prod migration 0202~0222 → canonical
+import(admin API preview→commit) → soak/live e2e(`docs/runbooks/c7-prod-live-e2e.md`, 백업/PITR
+먼저) → receipt complete → 40C manifest. H34/37D는 설계 v2 P2 정리 → ADR → 다음 PR.
+
 ## 2026-08-18 — T-VN-41 task ledger를 후보 검증 상태로 정렬
 
 `tasks.md`는 #975의 정확한 source 쌍 후보 Live UI 복구·증거 결박·적대 재리뷰 통과를 `[~]`로
