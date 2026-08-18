@@ -5,7 +5,7 @@ import { bffApiPath } from "./bff-api-path";
 
 // 손으로 쓴 record shape 대신 **생성된 OpenAPI 스키마**에 바인딩한다(#308 리뷰).
 // 백엔드 DTO가 바뀌면 mock factory가 타입 불일치로 컴파일 실패 → mock-실계약 drift 감지.
-// admin-ops.spec.ts의 /admin/issues smoke(render + 필터 + manual_override 검증)는
+// /admin/issues 전용 smoke(render + 필터 + manual_override 검증)는
 // 그대로 두고, 여기서는 **미검증 깊이**만 추가한다:
 //   (1) row/detail quick-action PATCH coverage,
 //   (2) keyset cursor 페이지네이션,

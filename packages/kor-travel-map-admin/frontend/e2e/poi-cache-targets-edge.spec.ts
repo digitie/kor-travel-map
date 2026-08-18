@@ -5,7 +5,7 @@ import { bffApiPath } from "./bff-api-path";
 
 /**
  * `/admin/poi-cache-targets` (`poi-cache-targets-client.tsx`) — route-mocked
- * **edge/depth** spec. 기존 `admin-ops.spec.ts`의 smoke(렌더 표면 + upsert→row→
+ * **edge/depth** spec. 전용 smoke(렌더 표면 + upsert→row→
  * nearby→delete mutation flow + target_key 검증)와 **중복하지 않고**, 그 smoke가
  * 건드리지 않는 분기만 더한다:
  *   1. cursor 페이지네이션: '다음'이 keyset cursor를 실어 page를 전진시키고
@@ -16,7 +16,7 @@ import { bffApiPath } from "./bff-api-path";
  *   5. upsert body가 scope_mode='sigungu_by_radius' 선택을 싣고 on_conflict='move'
  *      (하드코딩)·coord 기본값을 함께 보낸다.
  *
- * HOUSE PATTERN(`admin-ops.spec.ts`): 모든 mock body는 생성 OpenAPI 스키마
+ * HOUSE PATTERN: 모든 mock body는 생성 OpenAPI 스키마
  * (`components["schemas"][...]`)에 바인딩한 typed factory로만 만든다 — 백엔드 DTO가
  * 바뀌면 e2e tsconfig type-check가 깨져 mock-실계약 drift를 컴파일 타임에 잡는다.
  *

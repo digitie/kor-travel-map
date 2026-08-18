@@ -6,7 +6,6 @@ set -euo pipefail
 umask 077
 
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-readonly FIXTURE_HELPER="$SCRIPT_DIR/admin_feature_live_fixture.py"
 readonly STATE_HELPER="$SCRIPT_DIR/admin_feature_live_state.py"
 readonly SUPERVISOR="$SCRIPT_DIR/admin_feature_live_supervisor.py"
 readonly SOURCE_MANIFEST="$SCRIPT_DIR/source-manifest.json"
@@ -29,7 +28,9 @@ RUNTIME_DIR=""
 LIFECYCLE_DIR=""
 API_CONTAINER_ID=""
 API_IMAGE_ID=""
-COMPATIBLE_PAIR_SHA256=""
+PINNED_RUNTIME_MANIFEST_SHA256=""
+PINNED_RUNTIME_REBUILD_JOURNAL_SHA256=""
+FINAL_SCHEMA_RELOAD_RECEIPT_SHA256=""
 HOST_ATTESTATION_SHA256=""
 BARRIER_FD=""
 declare -a EXECUTION_IDENTITY_ARGS=()
@@ -48,14 +49,98 @@ require_env() {
   [[ -n "${!name-}" ]] || die "required env is missing: $name"
 }
 
-safe_root_file() {
-  local path="$1"
-  local mode="$2"
-  [[
-    -f "$path" &&
-    ! -L "$path" &&
-    "$(stat -c '%u:%g:%a' -- "$path")" == "0:0:$mode"
-  ]] || die "root snapshot file metadata is unsafe"
+verify_root_snapshot_bootstrap() {
+  # state_helper() 자체가 snapshot 안의 Python을 실행한다. 따라서 그 helper에게
+  # source-manifest 검증을 맡기기 전에, runner가 독립된 최소 bootstrap으로 동일한
+  # immutable snapshot을 검증한다.
+  python3 -I -B - \
+    "$SCRIPT_DIR" \
+    "$SOURCE_MANIFEST" \
+    "$INSTALL_BASE" \
+    "$E2E_C7_EXPECTED_GIT_COMMIT" <<'PY' || die "targeted source snapshot bootstrap is unsafe"
+import hashlib
+import json
+import os
+import re
+import stat
+import sys
+from pathlib import Path
+
+snapshot_root = Path(sys.argv[1])
+manifest_path = Path(sys.argv[2])
+install_base = Path(sys.argv[3])
+commit = sys.argv[4]
+required = {
+    "admin_feature_live_state.py": 0o444,
+    "admin_feature_live_supervisor.py": 0o444,
+    "run-admin-feature-live-acceptance.sh": 0o555,
+}
+
+
+def safe_ancestors(path: Path) -> None:
+    for parent in [path, *path.parents]:
+        observed = os.lstat(parent)
+        if (
+            not stat.S_ISDIR(observed.st_mode)
+            or stat.S_ISLNK(observed.st_mode)
+            or observed.st_uid != 0
+            or observed.st_gid != 0
+            or stat.S_IMODE(observed.st_mode) & 0o022
+        ):
+            raise RuntimeError("unsafe bootstrap ancestor")
+
+
+def safe_file(path: Path, mode: int) -> bytes:
+    if path.parent != expected_root:
+        raise RuntimeError("bootstrap file parent mismatch")
+    descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+    try:
+        observed = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(observed.st_mode)
+            or observed.st_uid != 0
+            or observed.st_gid != 0
+            or stat.S_IMODE(observed.st_mode) != mode
+        ):
+            raise RuntimeError("unsafe bootstrap file")
+        chunks = []
+        while chunk := os.read(descriptor, 1024 * 1024):
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(descriptor)
+
+
+try:
+    if re.fullmatch(r"[0-9a-f]{40}", commit) is None:
+        raise RuntimeError("invalid bootstrap commit")
+    expected_root = Path("/usr/local/lib/kor-travel-map/admin-feature-live-acceptance") / commit
+    if snapshot_root != expected_root or manifest_path != expected_root / "source-manifest.json":
+        raise RuntimeError("snapshot root mismatch")
+    safe_ancestors(expected_root)
+    if stat.S_IMODE(os.lstat(expected_root).st_mode) != 0o555:
+        raise RuntimeError("snapshot root mode mismatch")
+    if set(os.listdir(expected_root)) != set(required) | {"source-manifest.json"}:
+        raise RuntimeError("snapshot exact file set mismatch")
+    manifest = json.loads(safe_file(manifest_path, 0o444))
+    if (
+        not isinstance(manifest, dict)
+        or set(manifest) != {"files", "repository_commit", "version"}
+        or manifest.get("version") != 1
+        or manifest.get("repository_commit") != commit
+        or not isinstance(manifest.get("files"), dict)
+        or set(manifest["files"]) != set(required)
+    ):
+        raise RuntimeError("manifest contract mismatch")
+    for name, mode in required.items():
+        expected_hash = manifest["files"].get(name)
+        if not isinstance(expected_hash, str) or re.fullmatch(r"[0-9a-f]{64}", expected_hash) is None:
+            raise RuntimeError("manifest hash mismatch")
+        if hashlib.sha256(safe_file(expected_root / name, mode)).hexdigest() != expected_hash:
+            raise RuntimeError("snapshot file hash mismatch")
+except (OSError, RuntimeError, TypeError, ValueError, json.JSONDecodeError):
+    raise SystemExit(1)
+PY
 }
 
 state_helper() {
@@ -114,7 +199,9 @@ validate_runtime() {
   require_env E2E_DAGSTER_URL
   require_env E2E_ADMIN_PASSWORD
   require_env E2E_C7_EXPECTED_GIT_COMMIT
-  require_env E2E_C7_COMPATIBLE_PAIR_MANIFEST
+  require_env E2E_C7_PINNED_RUNTIME_MANIFEST
+  require_env E2E_C7_PINNED_RUNTIME_REBUILD_JOURNAL
+  require_env E2E_C7_FINAL_SCHEMA_RELOAD_RECEIPT
   require_env E2E_C7_PLAYWRIGHT_IMAGE
   validate_sha256_env E2E_C7_EXPECTED_UI_ORIGIN_SHA256
   validate_sha256_env E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256
@@ -124,6 +211,8 @@ validate_runtime() {
   validate_service_env E2E_C7_UI_SERVICE
   validate_service_env E2E_C7_MAP_API_SERVICE
   validate_service_env E2E_C7_PINVI_API_SERVICE
+  validate_service_env E2E_C7_PINVI_WEB_SERVICE
+  validate_service_env E2E_C7_PINVI_DAGSTER_SERVICE
 
   [[ "${E2E_LIVE_ALLOW_PROD-}" == "1" ]] || die "E2E_LIVE_ALLOW_PROD=1 opt-in required"
   [[ "${E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE-}" == "1" ]] ||
@@ -132,8 +221,12 @@ validate_runtime() {
     die "expected Git commit is invalid"
   [[ "$E2E_C7_PLAYWRIGHT_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]] ||
     die "Playwright executor must be an immutable image ID"
-  [[ "$E2E_C7_COMPATIBLE_PAIR_MANIFEST" == /* ]] ||
-    die "compatible-pair manifest path must be absolute"
+  [[ "$E2E_C7_PINNED_RUNTIME_MANIFEST" == /* ]] ||
+    die "pinned runtime manifest path must be absolute"
+  [[ "$E2E_C7_PINNED_RUNTIME_REBUILD_JOURNAL" == /* ]] ||
+    die "pinned runtime rebuild journal path must be absolute"
+  [[ "$E2E_C7_FINAL_SCHEMA_RELOAD_RECEIPT" == /* ]] ||
+    die "final schema reload receipt path must be absolute"
 
   local expected_root c7_module
   expected_root="$INSTALL_BASE/$E2E_C7_EXPECTED_GIT_COMMIT"
@@ -144,7 +237,6 @@ validate_runtime() {
     --manifest "$SOURCE_MANIFEST" \
     --expected-commit "$E2E_C7_EXPECTED_GIT_COMMIT" \
     --required-file "${BASH_SOURCE[0]##*/}" \
-    --required-file "${FIXTURE_HELPER##*/}" \
     --required-file "${STATE_HELPER##*/}" \
     --required-file "${SUPERVISOR##*/}" || die "targeted source snapshot validation failed"
   state_helper validate-c7-module \
@@ -157,14 +249,23 @@ validate_runtime() {
   mapfile -t attestation_output < <(
     python3 -I -B "$c7_module" runtime \
       "$HOST_ATTESTATION_FILE" \
-      "$E2E_C7_COMPATIBLE_PAIR_MANIFEST" \
+      "$E2E_C7_PINNED_RUNTIME_MANIFEST" \
+      "$E2E_C7_PINNED_RUNTIME_REBUILD_JOURNAL" \
+      "$E2E_C7_FINAL_SCHEMA_RELOAD_RECEIPT" \
       "$PWD" \
       "$PLAYWRIGHT_BASE_IMAGE" 2>/dev/null
-  ) || die "trusted C7 v3/v4 runtime attestation failed"
-  (( ${#attestation_output[@]} == 2 )) || die "runtime attestation output is invalid"
-  COMPATIBLE_PAIR_SHA256="${attestation_output[0]}"
-  HOST_ATTESTATION_SHA256="${attestation_output[1]}"
-  [[ "$COMPATIBLE_PAIR_SHA256" =~ ^[0-9a-f]{64}$ ]] || die "pair hash is invalid"
+  ) || die "trusted C7 v5/v7 runtime attestation failed"
+  (( ${#attestation_output[@]} == 5 )) || die "runtime attestation output is invalid"
+  PINNED_RUNTIME_MANIFEST_SHA256="${attestation_output[0]}"
+  PINNED_RUNTIME_REBUILD_JOURNAL_SHA256="${attestation_output[1]}"
+  FINAL_SCHEMA_RELOAD_RECEIPT_SHA256="${attestation_output[2]}"
+  HOST_ATTESTATION_SHA256="${attestation_output[3]}"
+  [[ "$PINNED_RUNTIME_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
+    die "pinned runtime manifest hash is invalid"
+  [[ "$PINNED_RUNTIME_REBUILD_JOURNAL_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
+    die "pinned runtime rebuild journal hash is invalid"
+  [[ "$FINAL_SCHEMA_RELOAD_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
+    die "final schema reload receipt hash is invalid"
   [[ "$HOST_ATTESTATION_SHA256" =~ ^[0-9a-f]{64}$ ]] || die "attestation hash is invalid"
 
   API_CONTAINER_ID="$(
@@ -180,7 +281,9 @@ validate_runtime() {
     --source-commit "$E2E_C7_EXPECTED_GIT_COMMIT"
     --api-image-id "$API_IMAGE_ID"
     --playwright-image-id "$E2E_C7_PLAYWRIGHT_IMAGE"
-    --compatible-pair-sha256 "$COMPATIBLE_PAIR_SHA256"
+    --pinned-runtime-manifest-sha256 "$PINNED_RUNTIME_MANIFEST_SHA256"
+    --pinned-runtime-rebuild-journal-sha256 "$PINNED_RUNTIME_REBUILD_JOURNAL_SHA256"
+    --final-schema-reload-receipt-sha256 "$FINAL_SCHEMA_RELOAD_RECEIPT_SHA256"
     --host-attestation-sha256 "$HOST_ATTESTATION_SHA256"
   )
 }
@@ -307,20 +410,6 @@ run_supervisor() {
   return "$status"
 }
 
-run_helper() {
-  local action="$1"
-  local output="$2"
-  if [[ "$ACTOR" == "recovery" && "$action" == "seed" ]]; then
-    die "recovery mode cannot seed fixtures"
-  fi
-  run_supervisor helper "helper-$action" \
-    --image "$API_IMAGE_ID" \
-    --api-container "$API_CONTAINER_ID" \
-    --fixture "$FIXTURE_HELPER" \
-    --helper-action "$action" \
-    --output "$output"
-}
-
 run_executor() {
   local operation="$1"
   local artifact_dir="$2"
@@ -352,8 +441,7 @@ assert_container_residue_zero() {
   local actor attempt operation name
   for actor in main recovery; do
     for (( attempt = 0; attempt <= ATTEMPT; attempt += 1 )); do
-      for operation in \
-        probe-cursor-missing helper-seed executor-main executor-recovery helper-cleanup helper-audit; do
+      for operation in probe-cursor-missing executor-main executor-recovery; do
         name="$(container_name "$actor" "$attempt" "$operation")"
         ! docker container inspect -- "$name" >/dev/null 2>&1 ||
           die "deterministic Docker container name residue remains"
@@ -409,12 +497,10 @@ recover_run() {
     drain_terminal_active "$prior_actor" "$prior_attempt" "$prior_operation"
   fi
   write_blocked recovery-running
-  local browser_status=0 helper_status=0
+  local browser_status=0
   run_executor executor-recovery "$RUNTIME_DIR/playwright-recovery" 1 || browser_status=$?
-  run_helper cleanup "$RUNTIME_DIR/direct-cleanup.json" || helper_status=$?
-  run_helper audit "$RUNTIME_DIR/direct-audit.json" || helper_status=$?
   assert_container_residue_zero
-  if (( browser_status != 0 || helper_status != 0 )); then
+  if (( browser_status != 0 )); then
     write_blocked recovery-failed
     die "recovery left owned residue"
   fi
@@ -449,23 +535,16 @@ PY
     write_blocked cursor-probe-failed
     die "cursor fail-closed probe failed"
   }
-  write_blocked fixture-seed-pending
-  run_helper seed "$RUNTIME_DIR/direct-seed.json" || {
-    write_blocked fixture-seed-failed
-    die "direct fixture seed failed"
-  }
   write_blocked browser-running
-  local test_status=0 browser_cleanup_status=0 helper_cleanup_status=0
+  local test_status=0 browser_cleanup_status=0
   run_executor executor-main "$RUNTIME_DIR/playwright-main" 0 || test_status=$?
   write_blocked browser-cleanup-running
   run_executor executor-recovery "$RUNTIME_DIR/playwright-recovery" 1 ||
     browser_cleanup_status=$?
-  run_helper cleanup "$RUNTIME_DIR/direct-cleanup.json" || helper_cleanup_status=$?
-  run_helper audit "$RUNTIME_DIR/direct-audit.json" || helper_cleanup_status=$?
   assert_container_residue_zero
-  if (( browser_cleanup_status != 0 || helper_cleanup_status != 0 )); then
+  if (( browser_cleanup_status != 0 )); then
     write_blocked cleanup-failed
-    die "owned fixture cleanup left residue"
+    die "browser cleanup left owned residue"
   fi
   if (( test_status != 0 )); then
     write_blocked test-failed-restored
@@ -479,11 +558,9 @@ PY
 }
 
 [[ "$MODE" == "run" || "$MODE" == "recover" ]] || die "usage: runner [run|recover]"
-safe_root_file "${BASH_SOURCE[0]}" 555
-safe_root_file "$FIXTURE_HELPER" 444
-safe_root_file "$STATE_HELPER" 444
-safe_root_file "$SUPERVISOR" 444
-safe_root_file "$SOURCE_MANIFEST" 444
+require_env E2E_C7_EXPECTED_GIT_COMMIT
+[[ "$E2E_C7_EXPECTED_GIT_COMMIT" =~ ^[0-9a-f]{40}$ ]] || die "expected Git commit is invalid"
+verify_root_snapshot_bootstrap
 validate_runtime
 initialize_state
 trap 'finish_signal 130' INT

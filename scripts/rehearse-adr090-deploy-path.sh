@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
-# ADR-090 배포 경로 리허설 — clone-live 러너가 건드리지 않는 축만 잰다.
+# ADR-090 배포 경로 리허설 — browser-only live runner가 의도적으로 실패시키지 않는 축만 잰다.
 #
 # 왜 별도로 필요한가:
-#   `run-admin-feature-clone-live-acceptance.sh`는 candidate API를
-#   `--entrypoint python -m uvicorn`으로 띄우고 **단일** `KOR_TRAVEL_MAP_PG_DSN`을
-#   준다. 즉 2026-08-12에 prod를 crash-loop시킨 코드 — `docker/api-entrypoint.sh`의
-#   split DSN 하드 요구, `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD` 게이트,
-#   `KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE` — 는 그 경로에서 한 번도
-#   실행되지 않는다. live 인수가 green이어도 배포 위험은 그대로 남는다.
+#   `run-admin-feature-live-acceptance.sh`는 attested `E2E_BASE_URL`에서 정상 구성의
+#   browser acceptance를 수행한다. 2026-08-12에 prod를 crash-loop시킨
+#   `docker/api-entrypoint.sh`의 split DSN 하드 요구,
+#   `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD` 게이트,
+#   `KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE`은 이처럼 의도적으로 잘못된 값을
+#   주어 거부 사유까지 확인하는 probe가 아니다. live 인수가 green이어도 배포 위험은
+#   별도로 검증해야 한다.
 #
 #   이 스크립트는 그 세 축을 **실패해야 하는 경우 실패하는지**로 잰다. 성공 경로만
 #   재면 게이트가 죽어 있어도 green이다.

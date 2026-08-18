@@ -30,8 +30,10 @@ POI_STATE_FILE=""
 RUNTIME_DIR=""
 PLAYWRIGHT_IMAGE_ID=""
 REPOSITORY_COMMIT=""
-COMPATIBLE_PAIR_MANIFEST_SHA256=""
-ALEMBIC_HEAD=""
+PINNED_RUNTIME_MANIFEST_SHA256=""
+PINNED_RUNTIME_REBUILD_JOURNAL_SHA256=""
+FINAL_SCHEMA_RELOAD_RECEIPT_SHA256=""
+MAP_APPLICATION_HEAD=""
 ACTIVE_COMMAND_PID=""
 ACTIVE_COMMAND_PGID=""
 ACTIVE_CID_FILE=""
@@ -40,7 +42,9 @@ ACTIVE_CREATE_OUTCOME_FILE=""
 ACTIVE_CONTAINER_NAME=""
 HOST_ATTESTATION_SHA256=""
 HOST_ATTESTATION_SNAPSHOT=""
-COMPATIBLE_PAIR_SNAPSHOT=""
+PINNED_RUNTIME_MANIFEST_SNAPSHOT=""
+PINNED_RUNTIME_REBUILD_JOURNAL_SNAPSHOT=""
+FINAL_SCHEMA_RELOAD_RECEIPT_SNAPSHOT=""
 
 die() {
   printf 'C7 prod live E2E orchestrator failed: %s (values redacted)\n' "$1" >&2
@@ -233,14 +237,22 @@ validate_service_env() {
 
 snapshot_attested_inputs() {
   HOST_ATTESTATION_SNAPSHOT="$STATE_ROOT/attestation-$$.json"
-  COMPATIBLE_PAIR_SNAPSHOT="$STATE_ROOT/compatible-pair-$$.json"
+  PINNED_RUNTIME_MANIFEST_SNAPSHOT="$STATE_ROOT/pinned-runtime-manifest-$$.json"
+  PINNED_RUNTIME_REBUILD_JOURNAL_SNAPSHOT="$STATE_ROOT/pinned-runtime-rebuild-journal-$$.json"
+  FINAL_SCHEMA_RELOAD_RECEIPT_SNAPSHOT="$STATE_ROOT/final-schema-reload-receipt-$$.json"
   python3 - \
     "$HOST_ATTESTATION_FILE" \
     "$HOST_ATTESTATION_SNAPSHOT" \
     "$HOST_ATTESTATION_SHA256" \
-    "$E2E_C7_COMPATIBLE_PAIR_MANIFEST" \
-    "$COMPATIBLE_PAIR_SNAPSHOT" \
-    "$COMPATIBLE_PAIR_MANIFEST_SHA256" <<'PY'
+    "$E2E_C7_PINNED_RUNTIME_MANIFEST" \
+    "$PINNED_RUNTIME_MANIFEST_SNAPSHOT" \
+    "$PINNED_RUNTIME_MANIFEST_SHA256" \
+    "$E2E_C7_PINNED_RUNTIME_REBUILD_JOURNAL" \
+    "$PINNED_RUNTIME_REBUILD_JOURNAL_SNAPSHOT" \
+    "$PINNED_RUNTIME_REBUILD_JOURNAL_SHA256" \
+    "$E2E_C7_FINAL_SCHEMA_RELOAD_RECEIPT" \
+    "$FINAL_SCHEMA_RELOAD_RECEIPT_SNAPSHOT" \
+    "$FINAL_SCHEMA_RELOAD_RECEIPT_SHA256" <<'PY'
 import hashlib
 import os
 import stat
@@ -324,11 +336,15 @@ preserve_evidence() {
     "$ORCHESTRATOR_VERIFIED" \
     "$REPOSITORY_COMMIT" \
     "$PLAYWRIGHT_IMAGE_ID" \
-    "$COMPATIBLE_PAIR_MANIFEST_SHA256" \
-    "$ALEMBIC_HEAD" \
+    "$PINNED_RUNTIME_MANIFEST_SHA256" \
+    "$PINNED_RUNTIME_REBUILD_JOURNAL_SHA256" \
+    "$FINAL_SCHEMA_RELOAD_RECEIPT_SHA256" \
+    "$MAP_APPLICATION_HEAD" \
     "$HOST_ATTESTATION_SHA256" \
     "$HOST_ATTESTATION_SNAPSHOT" \
-    "$COMPATIBLE_PAIR_SNAPSHOT" <<'PY'
+    "$PINNED_RUNTIME_MANIFEST_SNAPSHOT" \
+    "$PINNED_RUNTIME_REBUILD_JOURNAL_SNAPSHOT" \
+    "$FINAL_SCHEMA_RELOAD_RECEIPT_SNAPSHOT" <<'PY'
 import hashlib
 import json
 import os
@@ -349,11 +365,15 @@ from pathlib import Path
     verified_raw,
     repository_commit,
     playwright_image_id,
-    pair_manifest_sha256,
-    alembic_head,
+    pinned_runtime_manifest_sha256,
+    pinned_runtime_rebuild_journal_sha256,
+    final_schema_reload_receipt_sha256,
+    map_application_head,
     host_attestation_sha256,
     host_attestation_raw,
-    compatible_pair_raw,
+    pinned_runtime_manifest_raw,
+    pinned_runtime_rebuild_journal_raw,
+    final_schema_reload_receipt_raw,
 ) = sys.argv[1:]
 destination = Path(destination_raw)
 runtime = Path(runtime_raw) if runtime_raw else None
@@ -381,7 +401,9 @@ for name, raw in (
 
 for name, raw in (
     ("runtime-attestation.json", host_attestation_raw),
-    ("compatible-pair.json", compatible_pair_raw),
+    ("pinned-runtime-manifest.json", pinned_runtime_manifest_raw),
+    ("pinned-runtime-rebuild-journal.json", pinned_runtime_rebuild_journal_raw),
+    ("final-schema-reload-receipt.json", final_schema_reload_receipt_raw),
 ):
     source = Path(raw)
     copy_regular(source, destination / name)
@@ -389,8 +411,16 @@ for name, raw in (
 if (
     hashlib.sha256((destination / "runtime-attestation.json").read_bytes()).hexdigest()
     != host_attestation_sha256
-    or hashlib.sha256((destination / "compatible-pair.json").read_bytes()).hexdigest()
-    != pair_manifest_sha256
+    or hashlib.sha256((destination / "pinned-runtime-manifest.json").read_bytes()).hexdigest()
+    != pinned_runtime_manifest_sha256
+    or hashlib.sha256(
+        (destination / "pinned-runtime-rebuild-journal.json").read_bytes()
+    ).hexdigest()
+    != pinned_runtime_rebuild_journal_sha256
+    or hashlib.sha256(
+        (destination / "final-schema-reload-receipt.json").read_bytes()
+    ).hexdigest()
+    != final_schema_reload_receipt_sha256
 ):
     raise RuntimeError("attested evidence snapshot hash mismatch")
 
@@ -427,16 +457,18 @@ for path in sorted(destination.rglob("*")):
             }
         )
 manifest = {
-    "alembic_head": alembic_head,
-    "compatible_pair_manifest_sha256": pair_manifest_sha256,
+    "map_application_head": map_application_head,
     "files": files,
     "finished_at": datetime.now(UTC).isoformat(),
     "orchestrator_verified": verified_raw == "1",
     "host_attestation_sha256": host_attestation_sha256,
+    "pinned_runtime_manifest_sha256": pinned_runtime_manifest_sha256,
+    "pinned_runtime_rebuild_journal_sha256": pinned_runtime_rebuild_journal_sha256,
+    "final_schema_reload_receipt_sha256": final_schema_reload_receipt_sha256,
     "playwright_image_id": playwright_image_id,
     "repository_commit": repository_commit,
     "status": int(status_raw),
-    "version": 1,
+    "version": 4,
 }
 manifest_path = destination / "manifest.json"
 manifest_path.write_text(
@@ -501,7 +533,11 @@ finish() {
     status == 0 && ORCHESTRATOR_VERIFIED == 1 &&
       container_clean == 1 && evidence_preserved == 1
   )); then
-    rm -f -- "$HOST_ATTESTATION_SNAPSHOT" "$COMPATIBLE_PAIR_SNAPSHOT" || status=1
+    rm -f -- \
+      "$HOST_ATTESTATION_SNAPSHOT" \
+      "$PINNED_RUNTIME_MANIFEST_SNAPSHOT" \
+      "$PINNED_RUNTIME_REBUILD_JOURNAL_SNAPSHOT" \
+      "$FINAL_SCHEMA_RELOAD_RECEIPT_SNAPSHOT" || status=1
   fi
   if ((
     status == 0 && ORCHESTRATOR_VERIFIED == 1 &&
@@ -557,7 +593,9 @@ has_residual_state() {
     compgen -G "$STATE_ROOT/.state.*" >/dev/null ||
     compgen -G "$STATE_ROOT/cap.*" >/dev/null ||
     compgen -G "$STATE_ROOT/attestation-*.json" >/dev/null ||
-    compgen -G "$STATE_ROOT/compatible-pair-*.json" >/dev/null ||
+    compgen -G "$STATE_ROOT/pinned-runtime-manifest-*.json" >/dev/null ||
+    compgen -G "$STATE_ROOT/pinned-runtime-rebuild-journal-*.json" >/dev/null ||
+    compgen -G "$STATE_ROOT/final-schema-reload-receipt-*.json" >/dev/null ||
     compgen -G "$STATE_ROOT/container-*.cid" >/dev/null ||
     compgen -G "$STATE_ROOT/container-*.json" >/dev/null ||
     compgen -G "$STATE_ROOT/container-*.outcome.json" >/dev/null
@@ -589,7 +627,9 @@ require_env E2E_ADMIN_PASSWORD
 require_env E2E_DAGSTER_JOB
 require_env E2E_C7_SCHEDULE
 require_env E2E_C7_EXPECTED_GIT_COMMIT
-require_env E2E_C7_COMPATIBLE_PAIR_MANIFEST
+require_env E2E_C7_PINNED_RUNTIME_MANIFEST
+require_env E2E_C7_PINNED_RUNTIME_REBUILD_JOURNAL
+require_env E2E_C7_FINAL_SCHEMA_RELOAD_RECEIPT
 require_env E2E_C7_PLAYWRIGHT_IMAGE
 validate_sha256_env E2E_C7_EXPECTED_UI_ORIGIN_SHA256
 validate_sha256_env E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256
@@ -599,13 +639,19 @@ validate_service_env E2E_C7_DAGSTER_DAEMON_SERVICE
 validate_service_env E2E_C7_UI_SERVICE
 validate_service_env E2E_C7_MAP_API_SERVICE
 validate_service_env E2E_C7_PINVI_API_SERVICE
+validate_service_env E2E_C7_PINVI_WEB_SERVICE
+validate_service_env E2E_C7_PINVI_DAGSTER_SERVICE
 
 [[ "$E2E_C7_EXPECTED_GIT_COMMIT" =~ ^[0-9a-f]{40}$ ]] ||
   die "expected Git commit is invalid"
 [[ "$E2E_C7_PLAYWRIGHT_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]] ||
   die "Playwright executor must be an immutable image ID"
-[[ "$E2E_C7_COMPATIBLE_PAIR_MANIFEST" == /* ]] ||
-  die "compatible-pair manifest path must be absolute"
+[[ "$E2E_C7_PINNED_RUNTIME_MANIFEST" == /* ]] ||
+  die "pinned runtime manifest path must be absolute"
+[[ "$E2E_C7_PINNED_RUNTIME_REBUILD_JOURNAL" == /* ]] ||
+  die "pinned runtime rebuild journal path must be absolute"
+[[ "$E2E_C7_FINAL_SCHEMA_RELOAD_RECEIPT" == /* ]] ||
+  die "final schema reload receipt path must be absolute"
 
 require_enabled E2E_LIVE_ALLOW_PROD
 require_enabled E2E_ADMIN_WRITE
@@ -726,7 +772,9 @@ verify_trusted_runtime_attestation() {
   run_verified_attestation_module \
     runtime \
     "$HOST_ATTESTATION_FILE" \
-    "$E2E_C7_COMPATIBLE_PAIR_MANIFEST" \
+    "$E2E_C7_PINNED_RUNTIME_MANIFEST" \
+    "$E2E_C7_PINNED_RUNTIME_REBUILD_JOURNAL" \
+    "$E2E_C7_FINAL_SCHEMA_RELOAD_RECEIPT" \
     "$COMPOSE_PROJECT_DIR" \
     "$PLAYWRIGHT_BASE_IMAGE"
 }
@@ -771,38 +819,6 @@ pathname = parsed.path.rstrip("/")
 pathname = pathname if pathname.endswith("/graphql") else f"{pathname}/graphql"
 canonical = urlunsplit(("https", f"{netloc_host}{port}", pathname, "", ""))
 print(hashlib.sha256(canonical.encode()).hexdigest())
-PY
-}
-
-verify_alembic_state() {
-  local current_output heads_output
-  heads_output="$(
-    docker compose --project-directory "$COMPOSE_PROJECT_DIR" exec -T \
-      "$E2E_C7_MAP_API_SERVICE" alembic heads 2>/dev/null
-  )" || return 1
-  current_output="$(
-    docker compose --project-directory "$COMPOSE_PROJECT_DIR" exec -T \
-      "$E2E_C7_MAP_API_SERVICE" alembic current 2>/dev/null
-  )" || return 1
-  docker compose --project-directory "$COMPOSE_PROJECT_DIR" exec -T \
-    "$E2E_C7_MAP_API_SERVICE" alembic check >/dev/null 2>&1 || return 1
-  python3 - "$heads_output" "$current_output" <<'PY'
-import re
-import sys
-
-pattern = re.compile(r"^([0-9A-Za-z_]+) \(head\)$")
-parsed = []
-for raw in sys.argv[1:]:
-    lines = [line.strip() for line in raw.splitlines() if line.strip()]
-    if len(lines) != 1:
-        raise SystemExit(1)
-    match = pattern.fullmatch(lines[0])
-    if match is None:
-        raise SystemExit(1)
-    parsed.append(match.group(1))
-if parsed[0] != parsed[1]:
-    raise SystemExit(1)
-print(parsed[0])
 PY
 }
 
@@ -1149,6 +1165,168 @@ PY
   return "$command_status"
 }
 
+remove_pre_sentinel_creating_container() {
+  local active_container_name inspect_id observed_identity
+  if [[ -e "$ACTIVE_CID_FILE" || -L "$ACTIVE_CID_FILE" ]]; then
+    [[
+      -f "$ACTIVE_CID_FILE" &&
+      ! -L "$ACTIVE_CID_FILE" &&
+      "$(stat -c '%u:%g:%a' -- "$ACTIVE_CID_FILE" 2>/dev/null)" == "0:0:600"
+    ]] || return 1
+  fi
+  [[
+    -f "$ACTIVE_CONTAINER_REF_FILE" &&
+    ! -L "$ACTIVE_CONTAINER_REF_FILE" &&
+    "$(stat -c '%u:%g:%a' -- "$ACTIVE_CONTAINER_REF_FILE" 2>/dev/null)" == "0:0:600"
+  ]] || return 1
+  if [[ -e "$ACTIVE_CREATE_OUTCOME_FILE" || -L "$ACTIVE_CREATE_OUTCOME_FILE" ]]; then
+    [[
+      -f "$ACTIVE_CREATE_OUTCOME_FILE" &&
+      ! -L "$ACTIVE_CREATE_OUTCOME_FILE" &&
+      "$(stat -c '%u:%g:%a' -- "$ACTIVE_CREATE_OUTCOME_FILE" 2>/dev/null)" == "0:0:600"
+    ]] || return 1
+  fi
+  active_container_name="$(python3 - "$ACTIVE_CONTAINER_REF_FILE" "$RUNTIME_DIR" "$ACTIVE_CONTAINER_NAME" <<'PY'
+import json
+import os
+import stat
+import sys
+
+path, runtime, expected_name = sys.argv[1:]
+fd = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
+try:
+    observed = os.fstat(fd)
+    value = json.loads(os.read(fd, 4097))
+finally:
+    os.close(fd)
+if (
+    not stat.S_ISREG(observed.st_mode)
+    or observed.st_uid != 0
+    or observed.st_gid != 0
+    or stat.S_IMODE(observed.st_mode) != 0o600
+    or not isinstance(value, dict)
+    or value.get("phase") != "creating"
+    or value.get("runtime") != runtime
+    or value.get("container_name") != expected_name
+    or value.get("version") != 1
+):
+    raise SystemExit(1)
+print(expected_name)
+PY
+  )" || return 1
+  inspect_id="$(
+    timeout --signal=KILL 10s docker container ls --all --quiet --no-trunc \
+      --filter "name=^/${active_container_name}$" 2>/dev/null
+  )" || return 1
+  if [[ -n "$inspect_id" ]]; then
+    [[ "$inspect_id" =~ ^[0-9a-f]{64}$ ]] || return 1
+    observed_identity="$(docker container inspect --format \
+      '{{.Name}}|{{index .Config.Labels "io.kortravelmap.c7.runner"}}|{{range .Mounts}}{{if and (eq .Type "bind") .RW (eq .Source .Destination)}}{{.Source}}{{end}}{{end}}' \
+      -- "$inspect_id")" || return 1
+    [[ "$observed_identity" == "/${active_container_name}|prod-live-e2e|${RUNTIME_DIR}" ]] || return 1
+    docker container rm --force -- "$inspect_id" >/dev/null || return 1
+  fi
+  rm -f -- \
+    "$ACTIVE_CID_FILE" \
+    "$ACTIVE_CONTAINER_REF_FILE" \
+    "$ACTIVE_CREATE_OUTCOME_FILE" || return 1
+}
+
+finish_exact_triple_api_preflight() {
+  local status=$?
+  trap - EXIT INT TERM
+  set +e
+  if [[ -n "$ACTIVE_COMMAND_PID" ]]; then
+    terminate_active_command || status=1
+    status=1
+  fi
+  if ! remove_active_container; then
+    remove_pre_sentinel_creating_container || status=1
+  fi
+  if [[ -n "$RUNTIME_DIR" ]]; then
+    discard_exact_triple_preflight_runtime || status=1
+  fi
+  if [[ -n "$LOCK_GUARD_INPUT_FD" ]]; then
+    exec {LOCK_GUARD_INPUT_FD}>&- || status=1
+  fi
+  if [[ -n "$LOCK_GUARD_PID" ]]; then
+    wait "$LOCK_GUARD_PID" || status=1
+  fi
+  exit "$status"
+}
+
+prepare_exact_triple_preflight_runtime() {
+  RUNTIME_DIR="$(mktemp -d "$STATE_ROOT/runtime.XXXXXX")" || return 1
+  chown 0:0 -- "$RUNTIME_DIR" || return 1
+  chmod 700 -- "$RUNTIME_DIR" || return 1
+  runtime_is_private_direct_child || return 1
+  mkdir -- "$RUNTIME_DIR/playwright" "$RUNTIME_DIR/journals" || return 1
+  chown 0:0 -- "$RUNTIME_DIR/playwright" "$RUNTIME_DIR/journals" || return 1
+  chmod 700 -- "$RUNTIME_DIR/playwright" "$RUNTIME_DIR/journals" || return 1
+  export E2E_STORAGE_STATE="$RUNTIME_DIR/admin-state.json"
+  export E2E_C7_KMA_STATE_FILE="$RUNTIME_DIR/journals/kma-preflight.json"
+  ACTIVE_CID_FILE="$STATE_ROOT/container-$$.cid"
+  ACTIVE_CONTAINER_REF_FILE="$STATE_ROOT/container-$$.json"
+  ACTIVE_CREATE_OUTCOME_FILE="$STATE_ROOT/container-$$.outcome.json"
+  ACTIVE_CONTAINER_NAME="kor-travel-map-c7-e2e-$$"
+}
+
+discard_exact_triple_preflight_runtime() {
+  [[ -z "$ACTIVE_COMMAND_PID" ]] || return 1
+  [[
+    ! -e "$ACTIVE_CID_FILE" && ! -L "$ACTIVE_CID_FILE" &&
+    ! -e "$ACTIVE_CONTAINER_REF_FILE" && ! -L "$ACTIVE_CONTAINER_REF_FILE" &&
+    ! -e "$ACTIVE_CREATE_OUTCOME_FILE" && ! -L "$ACTIVE_CREATE_OUTCOME_FILE"
+  ]] || return 1
+  rm -f -- "$E2E_STORAGE_STATE" || return 1
+  runtime_is_private_direct_child || return 1
+  rm -rf -- "$RUNTIME_DIR" || return 1
+  [[ ! -e "$RUNTIME_DIR" && ! -L "$RUNTIME_DIR" ]] || return 1
+  unset E2E_STORAGE_STATE E2E_C7_KMA_STATE_FILE PLAYWRIGHT_ARTIFACT_ROOT
+  RUNTIME_DIR=""
+  ACTIVE_CID_FILE=""
+  ACTIVE_CONTAINER_REF_FILE=""
+  ACTIVE_CREATE_OUTCOME_FILE=""
+  ACTIVE_CONTAINER_NAME=""
+}
+
+run_exact_triple_api_preflight() {
+  prepare_exact_triple_preflight_runtime || return 1
+  export E2E_LIVE_ALLOW_PROD
+  export E2E_ADMIN_WRITE E2E_C7_READ_AUTH_WRITE E2E_KMA_SCOPE_WRITE
+  export E2E_C7_EXPECTED_UI_ORIGIN_SHA256
+  export E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256
+  export E2E_LIVE_WORKERS=1
+
+  if ! docker_run_playwright npm run type-check:e2e; then
+    discard_exact_triple_preflight_runtime || return 1
+    return 1
+  fi
+
+  export PLAYWRIGHT_ARTIFACT_ROOT="$RUNTIME_DIR/playwright/exact-triple-contract"
+  mkdir -- "$PLAYWRIGHT_ARTIFACT_ROOT" || {
+    discard_exact_triple_preflight_runtime || return 1
+    return 1
+  }
+  chown 0:0 -- "$PLAYWRIGHT_ARTIFACT_ROOT" || {
+    discard_exact_triple_preflight_runtime || return 1
+    return 1
+  }
+  chmod 700 -- "$PLAYWRIGHT_ARTIFACT_ROOT" || {
+    discard_exact_triple_preflight_runtime || return 1
+    return 1
+  }
+  if ! docker_run_playwright npm run e2e:live -- \
+    "e2e/live/ops-c7-kma-contract-preflight.live.spec.ts" \
+    --workers=1 \
+    --retries=0; then
+    discard_exact_triple_preflight_runtime || return 1
+    return 1
+  fi
+
+  discard_exact_triple_preflight_runtime
+}
+
 # 여기까지는 수집/파이프라인 domain state를 바꾸지 않는 preflight다. UI login은
 # session/auth audit를 만들 수 있으나 provider/request/POI/schedule mutation은 하지 않는다.
 # 고정 C7 상태 root와 BLOCKED sentinel은 모든 실행 identity 검증 뒤에만 만든다.
@@ -1156,23 +1334,29 @@ verify_root_owned_orchestrator_snapshot ||
   die "runner is not the attested root-owned exact commit snapshot"
 source "$SCRIPT_DIR/lib/c7-prod-runner-lifecycle.sh"
 mapfile -t runtime_attestation_output < <(verify_trusted_runtime_attestation 2>/dev/null) ||
-  die "trusted host/runtime/compatible-pair attestation failed"
-(( ${#runtime_attestation_output[@]} == 2 )) ||
+  die "trusted host/runtime/pinned-generation attestation failed"
+(( ${#runtime_attestation_output[@]} == 5 )) ||
   die "trusted runtime attestation output cardinality is invalid"
-COMPATIBLE_PAIR_MANIFEST_SHA256="${runtime_attestation_output[0]}"
-HOST_ATTESTATION_SHA256="${runtime_attestation_output[1]}"
-[[ "$COMPATIBLE_PAIR_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
-  die "compatible-pair manifest attestation output is invalid"
+PINNED_RUNTIME_MANIFEST_SHA256="${runtime_attestation_output[0]}"
+PINNED_RUNTIME_REBUILD_JOURNAL_SHA256="${runtime_attestation_output[1]}"
+FINAL_SCHEMA_RELOAD_RECEIPT_SHA256="${runtime_attestation_output[2]}"
+HOST_ATTESTATION_SHA256="${runtime_attestation_output[3]}"
+MAP_APPLICATION_HEAD="${runtime_attestation_output[4]}"
+[[ "$PINNED_RUNTIME_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
+  die "pinned runtime manifest attestation output is invalid"
+[[ "$PINNED_RUNTIME_REBUILD_JOURNAL_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
+  die "pinned runtime rebuild journal attestation output is invalid"
+[[ "$FINAL_SCHEMA_RELOAD_RECEIPT_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
+  die "final schema reload receipt attestation output is invalid"
 [[ "$HOST_ATTESTATION_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
   die "host runtime attestation output is invalid"
+[[ "$MAP_APPLICATION_HEAD" =~ ^[0-9a-z][0-9a-z_.-]{0,127}$ ]] ||
+  die "Map application head attestation output is invalid"
 PLAYWRIGHT_IMAGE_ID="$E2E_C7_PLAYWRIGHT_IMAGE"
 actual_dagster_origin_sha256="$(canonical_dagster_graphql_sha256)" ||
   die "Dagster GraphQL HTTPS endpoint canonicalization failed"
 [[ "$actual_dagster_origin_sha256" == "$E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256" ]] ||
   die "Dagster GraphQL endpoint origin attestation mismatch"
-ALEMBIC_HEAD="$(verify_alembic_state)" ||
-  die "Map API Alembic current/head/check attestation failed"
-[[ "$ALEMBIC_HEAD" =~ ^[0-9A-Za-z_]+$ ]] || die "Alembic head output is invalid"
 web_cap="$(read_cap "$E2E_C7_DAGSTER_WEB_SERVICE")" ||
   die "Dagster web cap attestation failed"
 daemon_cap="$(read_cap "$E2E_C7_DAGSTER_DAEMON_SERVICE")" ||
@@ -1186,6 +1370,12 @@ start_orchestrator_lock_guard
 [[ ! -e "$BLOCKED_FILE" && ! -L "$BLOCKED_FILE" ]] ||
   die "prior BLOCKED state requires operator recovery"
 has_residual_state && die "prior C7 journal/runtime residue requires operator recovery"
+trap finish_exact_triple_api_preflight EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+run_exact_triple_api_preflight ||
+  die "C7 exact-triple API/type preflight failed before destructive state creation"
+trap - EXIT INT TERM
 create_blocked_sentinel
 trap finish EXIT
 trap 'exit_for_signal 130' INT
@@ -1218,9 +1408,10 @@ printf -v schedule_state_payload \
   '{"dagsterGraphqlEndpointSha256":"%s","phase":"schedule_snapshot_pending","version":2}' \
   "$actual_dagster_origin_sha256"
 atomic_replace_state "$SCHEDULE_STATE_FILE" "$schedule_state_payload"
-# helper의 이전-run fail-closed 검사와 호환되는 빈 restored baseline이다. 최종
-# 검증은 sentinel run_id와 null cleanup_result를 거부하므로 실행 생략을 성공으로
-# 오인하지 않는다.
+# 첫 v5 durable write 전 helper가 읽을 수 있는 **별도 bootstrap marker**다. 이 v3
+# empty marker는 final/recovery journal이 아니며, helper는 request_ownership 사중 결박이
+# 있는 v5만 cleanup에 사용할 수 있다. sentinel run_id와 null cleanup_result는 최종
+# 검증에서 거부하므로 실행 생략을 성공으로 오인하지 않는다.
 atomic_replace_state \
   "$KMA_STATE_FILE" \
   '{"cleanup_result":null,"completed_scenarios":[],"external_systems":[],"idempotency_entries":[],"phase":"restored","request_ids":[],"request_terminal_statuses":{},"run_id":"__orchestrator_pending__","target_history":[],"target_refs":[],"version":3}'
@@ -1417,7 +1608,26 @@ elif kind == "schedule":
     ):
         raise SystemExit(5)
 elif kind == "kma":
-    if state.get("version") != 3:
+    expected_kma_keys = {
+        "cleanup_result",
+        "completed_scenarios",
+        "external_systems",
+        "idempotency_entries",
+        "phase",
+        "request_ids",
+        "request_ownership",
+        "request_terminal_statuses",
+        "run_id",
+        "scenario",
+        "scope_state_count",
+        "target_history",
+        "target_refs",
+        "updated_at",
+        "version",
+    }
+    # v3은 runner가 spec 시작 전 남기는 빈 bootstrap marker일 뿐이다. final
+    # success path는 request↔idempotency↔scope/operation 사중 결박을 갖춘 v5만 수용한다.
+    if state.get("version") != 5 or not exact_dict(state, expected_kma_keys):
         raise SystemExit(19)
     cleanup = state.get("cleanup_result")
     if (
@@ -1436,6 +1646,13 @@ elif kind == "kma":
         and cleanup.get("restored") is True
     ):
         raise SystemExit(10)
+    if (
+        state.get("scenario") != "invalidation"
+        or type(state.get("scope_state_count")) is not int
+        or state["scope_state_count"] < 0
+        or not nonempty_string(state.get("updated_at"))
+    ):
+        raise SystemExit(37)
     target_refs = state.get("target_refs")
     if not isinstance(target_refs, list) or not target_refs:
         raise SystemExit(20)
@@ -1569,22 +1786,94 @@ elif kind == "kma":
     if not isinstance(idempotency_entries, list) or not idempotency_entries:
         raise SystemExit(26)
     idempotency_keys = []
+    idempotency_by_request = {}
+    idempotency_by_key = {}
     for item in idempotency_entries:
+        body = item.get("body") if isinstance(item, dict) else None
+        scope = body.get("scope") if isinstance(body, dict) else None
         if (
             not exact_dict(
                 item,
                 {"body", "idempotency_key", "request_id", "status"},
             )
-            or not isinstance(item["body"], dict)
+            or not isinstance(body, dict)
             or not isinstance(item["idempotency_key"], str)
             or uuid_pattern.fullmatch(item["idempotency_key"]) is None
             or item["request_id"] not in request_ids
             or not nonempty_string(item["status"])
+            or not isinstance(scope, dict)
+            or scope.get("type") != "provider_dataset"
+            or scope.get("operation_key")
+            != "feature_weather_kma_ultra_short_nowcast_job"
+            or type(scope.get("provider_dataset_id")) is not int
+            or scope["provider_dataset_id"] <= 0
+            or not nonempty_string(scope.get("sync_scope"))
+            or not scope["sync_scope"].startswith("external_system:")
+            or scope["sync_scope"] == "external_system:"
         ):
             raise SystemExit(27)
         idempotency_keys.append(item["idempotency_key"])
+        idempotency_by_request[item["request_id"]] = item
+        idempotency_by_key[item["idempotency_key"]] = item
     if len(idempotency_keys) != len(set(idempotency_keys)):
         raise SystemExit(28)
+    if (
+        len(idempotency_entries) != len(request_ids)
+        or len(idempotency_by_request) != len(request_ids)
+    ):
+        raise SystemExit(38)
+    request_ownership = state.get("request_ownership")
+    if not isinstance(request_ownership, list) or len(request_ownership) != len(request_ids):
+        raise SystemExit(39)
+    ownership_request_ids = set()
+    ownership_idempotency_keys = set()
+    for ownership in request_ownership:
+        if (
+            not exact_dict(
+                ownership,
+                {
+                    "idempotency_key",
+                    "operation_key",
+                    "provider_dataset_id",
+                    "request_id",
+                    "sync_scope",
+                },
+            )
+            or not isinstance(ownership["request_id"], str)
+            or uuid_pattern.fullmatch(ownership["request_id"]) is None
+            or ownership["request_id"] not in request_ids
+            or not isinstance(ownership["idempotency_key"], str)
+            or uuid_pattern.fullmatch(ownership["idempotency_key"]) is None
+            or ownership["idempotency_key"] not in idempotency_by_key
+            or ownership["operation_key"]
+            != "feature_weather_kma_ultra_short_nowcast_job"
+            or type(ownership["provider_dataset_id"]) is not int
+            or ownership["provider_dataset_id"] <= 0
+            or not nonempty_string(ownership["sync_scope"])
+            or not ownership["sync_scope"].startswith("external_system:")
+            or ownership["sync_scope"] == "external_system:"
+            or ownership["request_id"] in ownership_request_ids
+            or ownership["idempotency_key"] in ownership_idempotency_keys
+        ):
+            raise SystemExit(40)
+        entry = idempotency_by_key[ownership["idempotency_key"]]
+        body = entry["body"]
+        scope = body["scope"]
+        if (
+            entry["request_id"] != ownership["request_id"]
+            or idempotency_by_request.get(ownership["request_id"]) is not entry
+            or scope["operation_key"] != ownership["operation_key"]
+            or scope["provider_dataset_id"] != ownership["provider_dataset_id"]
+            or scope["sync_scope"] != ownership["sync_scope"]
+        ):
+            raise SystemExit(41)
+        ownership_request_ids.add(ownership["request_id"])
+        ownership_idempotency_keys.add(ownership["idempotency_key"])
+    if (
+        ownership_request_ids != set(request_ids)
+        or ownership_idempotency_keys != set(idempotency_keys)
+    ):
+        raise SystemExit(42)
 elif kind == "poi":
     if state.get("version") != 1:
         raise SystemExit(29)

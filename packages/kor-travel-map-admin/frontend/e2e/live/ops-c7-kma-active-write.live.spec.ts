@@ -11,6 +11,7 @@ import {
 
 import {
   KMA_DATASET_KEY,
+  KMA_NOWCAST_OPERATION_KEY,
   KMA_PROVIDER,
   assertKmaDagsterWorkerJobDefinition,
   assertExactKmaPreviewResponse,
@@ -23,7 +24,7 @@ import {
   createKmaRequest,
   DATASET_DETAIL_FETCH_TIMEOUT_MS,
   destructiveGateBlocker,
-  exactDatasetUiPath,
+  exactDatasetUiPathForProviderDatasetId,
   getExactDatasetDetail,
   getRequestDetail,
   journalExactUiKmaCreateRequest,
@@ -32,6 +33,7 @@ import {
   rediscoverExactActiveOrSettledRequest,
   REQUEST_TERMINAL_TIMEOUT,
   requireBody,
+  resolveKmaProviderDatasetId,
   resolveTrackedUiKmaCreateResponse,
   waitForTerminal,
   withC7Cleanup,
@@ -116,8 +118,13 @@ function isCanonicalKmaBaseDatetime(value: unknown): value is string {
 
 function executedKmaMetadata(
   detail: PipelineExecutionDetailResponse,
+  expected: {
+    operationKey: string;
+    providerDatasetId: number;
+    syncScope: string;
+  },
 ): KmaExecutionMetadata {
-  assertKmaOnlyTerminalProviderScopes(detail, { executed: "nonempty" });
+  assertKmaOnlyTerminalProviderScopes(detail, expected, { executed: "nonempty" });
   const executed = detail.data.update_request?.matched_scope.executed_provider_scopes;
   expect(Array.isArray(executed)).toBe(true);
   const records = (executed as unknown[]).map(asRecord);
@@ -188,6 +195,7 @@ async function boundedRouteWait<T>(
 
 async function openAndFillKmaRequestDialog(
   page: Page,
+  providerDatasetId: number,
   syncScope: string,
   reason: string,
 ): Promise<void> {
@@ -198,9 +206,10 @@ async function openAndFillKmaRequestDialog(
   await page.getByRole("button", { name: "갱신 요청 생성" }).click();
   const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
   await expect(dialog).toBeVisible();
-  await dialog.getByLabel("provider").fill(KMA_PROVIDER);
-  await dialog.getByLabel("dataset_key").fill(KMA_DATASET_KEY);
-  await dialog.getByLabel("sync_scope (선택)").fill(syncScope);
+  await dialog
+    .getByLabel("대상 데이터셋")
+    .selectOption(String(providerDatasetId));
+  await dialog.getByLabel("sync_scope").selectOption(syncScope);
 
   const previewResponse = page.waitForResponse(
     (response) => {
@@ -217,6 +226,7 @@ async function openAndFillKmaRequestDialog(
   await dialog.getByRole("button", { name: "dry-run 실행" }).click();
   const expectedPreview = previewBody(
     buildKmaRequest(
+      providerDatasetId,
       syncScope.slice("external_system:".length),
       reason,
     ),
@@ -449,6 +459,7 @@ async function assertDatasetTerminalHistoryUi(
 function isExactDatasetDetailResponse(
   response: import("@playwright/test").Response,
   syncScope: string,
+  providerDatasetId: number,
 ): boolean {
   // The per-run external_system sync_scope is unique to this test + dataset, so a
   // 200 GET on the detail endpoint carrying it is unambiguously the UI's own detail
@@ -457,10 +468,20 @@ function isExactDatasetDetailResponse(
   const url = new URL(response.url());
   return (
     response.request().method() === "GET" &&
-    url.pathname === "/api/proxy/v1/ops/datasets/detail" &&
+    url.pathname === `/api/proxy/v1/ops/datasets/${providerDatasetId}` &&
     url.searchParams.get("sync_scope") === syncScope &&
+    url.searchParams.get("operation_key") === KMA_NOWCAST_OPERATION_KEY &&
     response.status() === 200
   );
+}
+
+async function assertExactDatasetDetailResponseIdentity(
+  response: import("@playwright/test").Response,
+  providerDatasetId: number,
+): Promise<void> {
+  const payload = asRecord(await response.json());
+  const data = asRecord(payload?.data);
+  expect(data?.provider_dataset_id).toBe(providerDatasetId);
 }
 
 // The dataset-detail drawer renders in two phases: the `상세` region appears as soon
@@ -475,12 +496,19 @@ async function gotoExactDatasetUiSettled(
   page: Page,
   syncScope: string,
 ): Promise<void> {
+  const providerDatasetId = await resolveKmaProviderDatasetId(page);
   const detailSettled = page.waitForResponse(
-    (response) => isExactDatasetDetailResponse(response, syncScope),
+    (response) =>
+      isExactDatasetDetailResponse(response, syncScope, providerDatasetId),
     { timeout: DATASET_DETAIL_FETCH_TIMEOUT_MS },
   );
-  await page.goto(exactDatasetUiPath(syncScope));
-  await detailSettled;
+  await page.goto(
+    exactDatasetUiPathForProviderDatasetId(providerDatasetId, syncScope),
+  );
+  await assertExactDatasetDetailResponseIdentity(
+    await detailSettled,
+    providerDatasetId,
+  );
 }
 
 function cursorMembershipFingerprint(
@@ -522,6 +550,7 @@ test.describe("C7 KMA active exact scope destructive live E2E", () => {
     const externalSystem = `e2e-${RUN_ID}`;
     const syncScope = `external_system:${externalSystem}`;
     const state = createCleanupState("active", RUN_ID);
+    const providerDatasetId = await resolveKmaProviderDatasetId(page);
 
     await withC7Cleanup(page, testInfo, state, async () => {
       await putTrackedTarget(
@@ -535,8 +564,8 @@ test.describe("C7 KMA active exact scope destructive live E2E", () => {
       );
 
       const reason = `C7 ${RUN_ID} membership first`;
-      const firstBody = buildKmaRequest(externalSystem, reason);
-      await openAndFillKmaRequestDialog(page, syncScope, reason);
+      const firstBody = buildKmaRequest(providerDatasetId, externalSystem, reason);
+      await openAndFillKmaRequestDialog(page, providerDatasetId, syncScope, reason);
       const firstCreates = await uiCreateThenApiActiveReuse(
         page,
         firstBody,
@@ -597,7 +626,11 @@ test.describe("C7 KMA active exact scope destructive live E2E", () => {
         state,
       );
       expect(firstTerminal.data.execution.status).toBe("done");
-      const firstMetadata = executedKmaMetadata(firstTerminal);
+      const firstMetadata = executedKmaMetadata(firstTerminal, {
+        operationKey: KMA_NOWCAST_OPERATION_KEY,
+        providerDatasetId,
+        syncScope,
+      });
       expect(firstMetadata.skipped).toBe(false);
       expect(firstMetadata).toMatchObject({
         grids_dropped: 0,
@@ -633,6 +666,7 @@ test.describe("C7 KMA active exact scope destructive live E2E", () => {
       const secondResult = await createKmaRequest(
         page,
         buildKmaRequest(
+          providerDatasetId,
           externalSystem,
           `C7 ${RUN_ID} membership second`,
           "now",
@@ -648,7 +682,11 @@ test.describe("C7 KMA active exact scope destructive live E2E", () => {
         state,
       );
       expect(secondTerminal.data.execution.status).toBe("done");
-      const secondMetadata = executedKmaMetadata(secondTerminal);
+      const secondMetadata = executedKmaMetadata(secondTerminal, {
+        operationKey: KMA_NOWCAST_OPERATION_KEY,
+        providerDatasetId,
+        syncScope,
+      });
       expect(secondMetadata.skipped).toBe(false);
       expect(secondMetadata).toMatchObject({
         grids_dropped: 0,
@@ -674,7 +712,12 @@ test.describe("C7 KMA active exact scope destructive live E2E", () => {
       // (test_external_system_scope_run_history_cursor_pages_past_boundary)로 옮겼다.
       const skippedResult = await createKmaRequest(
         page,
-        buildKmaRequest(externalSystem, `C7 ${RUN_ID} skipped budget-0`, "now"),
+        buildKmaRequest(
+          providerDatasetId,
+          externalSystem,
+          `C7 ${RUN_ID} skipped budget-0`,
+          "now",
+        ),
         randomUUID(),
         state,
       );
@@ -686,7 +729,11 @@ test.describe("C7 KMA active exact scope destructive live E2E", () => {
         state,
       );
       expect(skippedTerminal.data.execution.status).toBe("done");
-      assertSkippedWithoutProviderIo(executedKmaMetadata(skippedTerminal), {
+      assertSkippedWithoutProviderIo(executedKmaMetadata(skippedTerminal, {
+        operationKey: KMA_NOWCAST_OPERATION_KEY,
+        providerDatasetId,
+        syncScope,
+      }), {
         baseDatetime: secondMetadata.base_datetime,
         membershipFingerprint: secondFingerprint,
       });

@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-18 — T-VN-41 F1D 새 후속 브랜치 정적 계약 복구
+
+closed #967을 재개하지 않고 현재 `main` `ff25c397`에서
+`feat/tvn41-f1d-evidence-followup`을 만들었다. v5/v7 attestation, exact-triple preflight와
+browser-only C7 runner를 이식했고, T-VN-48D clone runner의 fixture는 별도 legacy 경계로 보존했다.
+F1D Python 계약 151건, Ruff·Bash 구문, frontend e2e TypeScript·ESLint·OpenAPI 생성 타입 검사는
+통과했다.
+
+### 다음 한 작업
+
+새 후속 PR을 draft로 올린 뒤 새 head의 적대 리뷰 2건과 n150 browser-only C7 live E2E를 실행한다.
+그 결과와 원격 CI가 모두 녹색일 때에만 F1D 상태를 갱신한다. #975는 이 작업과 독립적으로 계속
+미병합으로 둔다.
+
 ## 2026-08-18 — T-VN-41 task ledger를 후보 검증 상태로 정렬
 
 `tasks.md`는 #975의 정확한 source 쌍 후보 Live UI 복구·증거 결박·적대 재리뷰 통과를 `[~]`로

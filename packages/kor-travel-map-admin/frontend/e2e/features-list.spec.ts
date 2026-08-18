@@ -2,13 +2,13 @@ import { expect, type Page, type Route, test } from "@playwright/test";
 
 import type { components } from "../src/api/types";
 
-// admin-ops.spec.ts house pattern: 손으로 쓴 record shape 대신 생성된 OpenAPI
+// house pattern: 손으로 쓴 record shape 대신 생성된 OpenAPI
 // 스키마(components["schemas"])에 mock factory를 바인딩한다(#308). 백엔드 DTO가
 // 바뀌면 factory가 타입 불일치로 컴파일 실패 → mock-실계약 drift를 tsc가 잡는다.
 //
 // 이 파일은 /admin/features 목록 페이지의 "깊이" 검증(검색 deferred 반영, 서버
 // 정렬 미러링, cursor 페이지네이션, empty/error, retire command, deeplink,
-// has_issue 필터)을 담당한다. admin-ops.spec.ts의 `/v1/admin/features` smoke는
+// has_issue 필터)을 담당한다. 전용 feature 목록 smoke는
 // 헤더/필터 표면만 보므로 중복하지 않는다.
 
 type Meta = components["schemas"]["Meta"];
@@ -246,7 +246,7 @@ function makeAdminFeatureDetailResponse(
 /**
  * `**\/v1/admin/features**`를 단일 route로 잡되 분기는 most-specific-first.
  * 이 페이지는 GET list + PATCH .../state만 발생시키지만 glob은 change-request
- * 등도 매칭하므로 정확한 pathname으로 가드한다(admin-ops.spec.ts risk note).
+ * 등도 매칭하므로 정확한 pathname으로 가드한다(route glob risk note).
  *
  * 모든 GET list URL의 searchParams를 기록한다(deferred q / sort / cursor 검증용).
  */
@@ -501,7 +501,7 @@ test.describe("admin/features list depth", () => {
     page,
   }) => {
     // 에러 본문은 RFC7807 problem+json — 생성 스키마에 이름이 없으므로 literal로
-    // 둔다. 성공 본문만 schema 바인딩(admin-ops.spec.ts risk note).
+    // 둔다. 성공 본문만 schema 바인딩(route mock risk note).
     await page.route("**/v1/admin/features**", async (route) => {
       const url = new URL(route.request().url());
       const pathname = apiPath(url);

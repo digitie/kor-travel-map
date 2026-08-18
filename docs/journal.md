@@ -2,6 +2,19 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-18 — T-VN-41 F1D를 새 main 기반 후속 브랜치로 분리
+
+- closed draft #967은 오래된 T-VN-40 기반이라 재개하지 않고, `main` `ff25c397`에서
+  `feat/tvn41-f1d-evidence-followup`을 만들었다. #966은 이미 `main`에 병합됐으므로 당시의
+  exact-triple API 선행 차단은 해소돼 있다.
+- v5/v7 attestation·exact triple preflight·browser-only C7 runner 변경만 이식했다. 현재
+  T-VN-48D clone runner가 실제로 소유하는 fixture/state helper는 보존하고, F1D live lane이
+  이를 읽지 않는 정적 계약으로 경계를 고정했다. provider dataset ID 전환 뒤 남은 unused
+  e2e import도 제거했다.
+- 로컬 확인: F1D Python 계약 151건, Ruff·관련 Bash 구문, frontend e2e TypeScript·ESLint·생성
+  OpenAPI 타입 검사는 통과했다. Playwright와 n150 Live E2E, 새 head 기준 적대 리뷰는 아직
+  실행 전이며 이 브랜치는 draft PR로만 연다.
+
 ## 2026-08-18 — #993 rebase 뒤 tasks ledger 전면 정리
 
 - 문서 PR을 `main` `142a1c12`에 rebase하고, 인덱스를 열린 실행 단위만 남도록 다시 정렬했다.
