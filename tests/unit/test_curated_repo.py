@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from kortravelmap.infra import curated_repo
+from kortravelmap.infra.legacy_write_fence import LegacyWriteFenceError
 
 pytestmark = pytest.mark.unit
 
@@ -266,106 +267,45 @@ async def test_curated_repo_read_paths_with_fake_session() -> None:
 
 
 @pytest.mark.asyncio
-async def test_curated_repo_write_paths_with_fake_session() -> None:
-    session = _FakeSession(
-        [{"feature_id": _FEATURE_ID}],
-        [{"curated_feature_id": _CURATED_ID}],
-        [_feature_row()],
-        [_feature_row()],
-        [{"curated_feature_id": _CURATED_ID}],
-        [_feature_row(content_version=3)],
-        [{"curated_feature_id": _CURATED_ID}],
-        [_feature_row(curation_status="curated", content_version=4)],
-        [{"curated_feature_id": _CURATED_ID}],
-        [_feature_row(curation_status="rejected", content_version=5)],
-        [{"curated_feature_id": _CURATED_ID}],
-        [_feature_row(curation_status="candidate", content_version=6)],
-        [{"curated_feature_id": _CURATED_ID}],
-        [_feature_row(curation_status="archived", archived_at=_NOW, content_version=7)],
-        [_theme_row()],
-        [_theme_row(theme_name="수정 책방")],
-        [{"source_id": _SOURCE_ID}],
-        [_source_row()],
-        [{"source_id": _SOURCE_ID}],
-        [_source_row(source_name="수정 source")],
-        [{"rule_id": _RULE_ID}],
-        [_rule_row()],
-        [{"rule_id": _RULE_ID}],
-        [
-            _rule_row(
-                priority=99,
-                detail_selector={
-                    "path": ["payload", "channel_id"],
-                    "value": "channel-A",
-                },
-            )
-        ],
-    )
+async def test_curated_repo_legacy_writes_are_fenced_before_any_sql() -> None:
+    """T-VN-40A — legacy write 4함수는 SQL을 조립하기 **전에** static fence에서 죽는다.
 
-    created = await curated_repo.create_curated_feature(
-        session,
-        theme_id=_THEME_ID,
-        feature_id=_FEATURE_ID,
-        source_id=_SOURCE_ID,
-        curation_status="curated",
-        selected_by="pytest",
-        curation_relation="bookstore_stop",
-        reuse_policy="allowed",
-        metadata={"manual": True},
-        actor="principal",
-    )
-    assert created.curated_feature_id == _CURATED_ID
-    assert "FOR KEY SHARE" in session.calls[0][0]
-    assert session.calls[1][1]["selected_now"] is True
-    assert session.calls[1][1]["operator_updated_by"] == "principal"
+    원래 이 테스트는 그 4함수가 fake session에 내는 SQL 문자열을 검증했다(`FOR KEY SHARE`,
+    `content_version = content_version + 1` 등). fence 뒤로는 첫 줄에서 예외라 SQL이
+    조립되지 않는다 — 검증 대상 자체가 사라졌다.
 
-    same = await curated_repo.update_curated_feature(
-        session,
-        curated_feature_id=_CURATED_ID,
-        updates={},
-    )
-    assert same is not None
+    대신 여기서 보는 것: **fake session에 아무 호출도 닿지 않는다.** 그것이 static 층이
+    ACL 층보다 먼저 죽는다는 증거다. static이 뚫려 SQL이 나가면 `session.calls`가 비지
+    않는다.
+    """
+    from kortravelmap.infra.legacy_write_fence import LegacyWriteFenceError
 
-    patched = await curated_repo.update_curated_feature(
-        session,
-        curated_feature_id=_CURATED_ID,
-        updates={
-            "theme_id": "99999999-9999-9999-9999-999999999999",
-            "display_summary": "patched",
-            "metadata": {"patched": True},
-            "curation_relation": "bookstore_stop",
-        },
-        actor="patch-principal",
-    )
-    assert patched is not None
-    assert "content_version = content_version + 1" in session.calls[4][0]
-    assert (
-        session.calls[4][1]["theme_id"]
-        == "99999999-9999-9999-9999-999999999999"
-    )
-    assert session.calls[4][1]["actor"] == "patch-principal"
-    assert "operator_updated_by = COALESCE(:actor, operator_updated_by)" in (
-        session.calls[4][0]
-    )
+    session = _FakeSession()
 
-    for status_name in ("curated", "rejected", "candidate"):
-        changed = await curated_repo.set_curated_feature_status(
+    with pytest.raises(LegacyWriteFenceError):
+        await curated_repo.create_curated_feature(
             session,
-            curated_feature_id=_CURATED_ID,
-            curation_status=status_name,
-            actor="pytest",
-            reason="reason",
+            theme_id=_THEME_ID,
+            feature_id=_FEATURE_ID,
+            source_id=_SOURCE_ID,
+            curation_status="curated",
+            selected_by="pytest",
         )
-        assert changed is not None
-        assert changed.curation_status == status_name
+    with pytest.raises(LegacyWriteFenceError):
+        await curated_repo.update_curated_feature(
+            session, curated_feature_id=_CURATED_ID, updates={"reuse_policy": "allowed"}
+        )
+    with pytest.raises(LegacyWriteFenceError):
+        await curated_repo.set_curated_feature_status(
+            session, curated_feature_id=_CURATED_ID, curation_status="rejected"
+        )
+    with pytest.raises(LegacyWriteFenceError):
+        await curated_repo.archive_curated_feature(session, curated_feature_id=_CURATED_ID)
 
-    archived = await curated_repo.archive_curated_feature(
-        session,
-        curated_feature_id=_CURATED_ID,
-        actor="pytest",
+    assert session.calls == [], (
+        f"fence 뒤에서 SQL이 나갔다 — static 층이 첫 줄에 있지 않다: {session.calls[:2]}"
     )
-    assert archived is not None
-    assert archived.archived_at == _NOW
+
 
 @pytest.mark.asyncio
 async def test_retained_rule_commands_use_full_desired_cas_inputs() -> None:
@@ -506,7 +446,10 @@ async def test_curated_repo_validation_and_empty_paths() -> None:
         )
     with pytest.raises(ValueError, match="invalid curated feature cursor"):
         await curated_repo.list_curated_features(_FakeSession(), cursor="not-base64")
-    with pytest.raises(ValueError, match="selection_origin"):
+    # T-VN-40A: 이 ValueError 검증은 create 함수 **안**에 있어 fence 뒤다.
+    # 도달 불가이므로 fence 예외를 단언한다. (그 검증 자체는 canonical 경로에
+    # 같은 것이 있는지가 진짜 질문이고 이 파일 범위 밖이다.)
+    with pytest.raises(LegacyWriteFenceError):
         await curated_repo.create_curated_feature(
             _FakeSession(),
             theme_id=_THEME_ID,
@@ -514,42 +457,44 @@ async def test_curated_repo_validation_and_empty_paths() -> None:
             source_id=_SOURCE_ID,
             selection_origin="bad",
         )
-    with pytest.raises(ValueError, match="selectable Feature"):
+    # T-VN-40A: 이 ValueError 검증은 create 함수 **안**에 있어 fence 뒤다.
+    # 도달 불가이므로 fence 예외를 단언한다. (그 검증 자체는 canonical 경로에
+    # 같은 것이 있는지가 진짜 질문이고 이 파일 범위 밖이다.)
+    with pytest.raises(LegacyWriteFenceError):
         await curated_repo.create_curated_feature(
             _FakeSession([]),
             theme_id=_THEME_ID,
             feature_id=_FEATURE_ID,
             source_id=_SOURCE_ID,
         )
-    with pytest.raises(ValueError, match="unsupported curated_feature update field"):
+    with pytest.raises(LegacyWriteFenceError):
         await curated_repo.update_curated_feature(
             _FakeSession(),
             curated_feature_id=_CURATED_ID,
             updates={"bad": True},
         )
-    with pytest.raises(ValueError, match="reuse_policy"):
+    with pytest.raises(LegacyWriteFenceError):
         await curated_repo.update_curated_feature(
             _FakeSession(),
             curated_feature_id=_CURATED_ID,
             updates={"reuse_policy": "bad"},
         )
-    with pytest.raises(ValueError, match="curation_status"):
+    with pytest.raises(LegacyWriteFenceError):
         await curated_repo.set_curated_feature_status(
             _FakeSession(),
             curated_feature_id=_CURATED_ID,
             curation_status="bad",
         )
-    detached = _FakeSession(
-        [_feature_row(metadata={"merge_projection_detached": True})]
-    )
-    assert (
+    # T-VN-40A: 원래 "detached row update는 None"을 검증했다. fence 뒤로는 그보다 앞에서
+    # 예외다. 검증 대상(update 함수 안의 detached 판정)이 도달 불가라 fence 단언으로.
+    detached = _FakeSession()
+    with pytest.raises(LegacyWriteFenceError):
         await curated_repo.update_curated_feature(
             detached,
             curated_feature_id=_CURATED_ID,
             updates={},
         )
-        is None
-    )
+    assert detached.calls == []
 
     missing_session = _FakeSession([], [])
     assert (

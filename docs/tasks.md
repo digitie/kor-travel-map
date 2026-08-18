@@ -801,9 +801,17 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
 주입한다. `.env.example`에 키가 없다(주입 주체가 다르다). DB role 쪽은 별도로
 `ktm_curation_command_owner` 등 4개.
 
-- [ ] **T-VN-40A-fence** — legacy write 차단. `curated_repo.py`의 INSERT/UPDATE 경로에
-  DB(trigger 또는 REVOKE)·ACL·static(lint) 3층 게이트를 구현·병합한다. **prod ①~② 전에**
-  끝나야 한다 — 안 그러면 import 중에도 legacy가 쓰일 수 있다.
+- [~] **T-VN-40A-fence** — legacy write 차단 (PR #994, draft). 3층 구현·검증 완료:
+  **ACL**(`runtime_privileges` 표에서 `curated_features` write 제거 → DB가 거부, 통합
+  테스트가 `SET ROLE ktm_feature_runtime`으로 실측) · **static**(`infra/legacy_write_fence.py`,
+  repo write 4함수 첫 줄) · **route**(legacy admin write route 410 Gone).
+  - 범위를 한 번 잘못 잡았다 — theme/source/rule catalog까지 막았다가 plan:28("catalog
+    input만 유지")과 `0207_tvn40_theme_catalog.py`(T-VN-40이 새로 만든 procedure가 그 표에
+    쓴다)를 확인하고 `curated_features` 하나로 좁혔다. 이름이 `curated_`로 시작한다고
+    전부 legacy가 아니다.
+  - legacy write가 **된다**를 단언하던 테스트를 **막힌다**로 뒤집었다(지우면 회귀를 잡을
+    자리가 없다). read 경로 fixture는 test-only raw INSERT helper로.
+  - 잔여: 적대 리뷰 2명 → draft 해제 → CI → 머지. **①~② 전에 머지돼야 한다.**
 - [ ] **T-VN-40-mapping** — `ops.curation_cutover_identity_mappings` 적재 migration.
   설계 §6.2 step 3. PinVi backfill의 입력이다.
 - [ ] **T-VN-40C-manifest** — physical removal manifest와 migration을 사전에 작성·검토한다.
