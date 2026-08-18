@@ -21,6 +21,11 @@ Manager PR #183이 충돌한 #173의 의도를 최신 C6c protected-value 계약
 재배치해 merge SHA `4f5cbb44`로 흡수했고 #173은 superseded로 닫았다. Map 변경은 admin
 redesign PR #1003 merge SHA 위로 재배치했다.
 
+전문 적대 리뷰어 2명이 Map BFF·browser/build/runtime 노출과 Manager C6c 결선을 독립
+재검토해 모두 GO를 냈다. frontend unit 336개, Map 집중 37개, BFF route 14개와 원격 CI를
+PR #1004의 최종 merge gate로 두고, 완료 항목은 `tasks-done.md`로 이관했다. H46 계열의
+열린 후속은 `T-VN-H46G` buildx OCI commit provenance label뿐이다.
+
 ## 2026-08-18 — 인수 ②의 범위가 조사로 바뀌었다: Map은 mutation 없음, 관문은 PinVi 재배포
 
 - ② 문구("admin API preview→commit으로 import")를 그대로 실행하면 **틀린 일을 한다.** prod legacy

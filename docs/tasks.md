@@ -18,7 +18,7 @@ barrier로 직렬화한다.
   - [~] `T-VN-H34`(공식 curation 미연결 membership 잔여 AC — `T-VN-M01`~`M03` 선행 필요)
   - [~] `T-VN-H43` → [~] `T-VN-H44`(백업 정기화·복원 드릴 재개 조건)
   - [~] `T-VN-H45-후속`(①~④ 완료 / ⑤ alembic 1.19 적응 잔여)
-  - [~] `T-VN-H46F`(Manager #183 병합·Map #1003 재배치 완료, #1004 적대 재리뷰/CI 대기) ∥ [ ] `T-VN-H46G`(buildx image commit provenance label)
+  - [ ] `T-VN-H46G`(buildx image commit provenance label)
   - [~] `T-VN-H49`(Map baseline·절차 완료 / docker-manager #177의 외부 인스턴스 주기화 잔여)
 - **Lane B — frontend hardening·PinVi 소비 API**
   - [~] `T-VN-41A` → [~] `T-VN-41B` → [~] `T-VN-41C`(generation/outbox — 상세 AC 일부 완료, #975 rebase·regression 수정·새 exact-pair CI/E2E 재검증 중)
@@ -572,174 +572,36 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   (c) seed 통계를 결정적으로 만든다(`default_statistics_target`·행 수 상향). **PR마다 재실행이
   필요하므로 머지 위생 비용이 실재한다.**
 
-### T-VN-H46 — 완료 이력과 남은 배포 위생 follow-up
+### T-VN-H46G — buildx image commit provenance label
 
-> `T-VN-H46B`~`E`의 완료 요약은 [`tasks-done.md`](tasks-done.md)에 이관했다. 아래에는
-> 남은 `T-VN-H46F`·`G`의 근거를 함께 둔다.
+> 완료한 `T-VN-H46B`~`F`는 [`tasks-done.md`](tasks-done.md)에 이관했다.
 
-**T-VN-H46B 완료 — prod 지오코딩 복구(2026-08-14).**
-
-  08-13에 `.env`만 고치고 api만 재생성해 dagster/daemon 2개가 401 나는 상류 VWorld
-  키를 들고 있었다. fail-open이 아니라 첫 요청에서 asset step이 통째로 실패하는
-  형태였고, ETL이 08-07 이후 안 돌아서 아직 안 터졌을 뿐이었다.
-  `up -d --no-deps --force-recreate` 후 세 컨테이너 전부 `POST /v2/reverse` HTTP 200.
-
-**T-VN-H46C 완료 — VWorld fallback 사슬 제거 + geo key 의미 검증.**
-
-  - [x] **fallback 사슬은 PR #979에서 이미 끊겼다.** 저장소 전체에
-    `…GEO_API_KEY:-${NEXT_PUBLIC_VWORLD_API_KEY…}` 형태가 0건이고
-    `tests/unit/test_geo_key_provenance.py`가 정적으로 지키며
-    `test_deploy_automation.py:132-138`이 그 문자열의 부재를 직접 단언한다.
-    `.env.example`도 `# (낡음)` 경고가 붙었다(`9bbb74d99`). **이 항목 본문이 낡았던
-    것**이고, 남아 있던 축은 아래 하나뿐이었다.
-  - [x] **`preflight()`가 의미를 안 봤다 → `verify_credentials()` 추가(2026-08-18).**
-    `preflight()`는 (1) None (2) 공백 (3) 128자 초과만 본다 — 값이 무엇인지는 안 본다.
-    2026-08-13 사고가 정확히 그 구멍이었다(VWorld 키가 결선돼 geo가 401로 거부했고,
-    정/역지오코딩이 전부 실패하는 동안 preflight는 초록).
-    `verify_credentials()`가 1회 호출로 geo가 **실제로 받아들이는지** 확인한다.
-    판정은 의도적으로 비대칭이다 — **키 거부는 fail-close**(400 `E0100 field=key` /
-    401 `E0401`), **도달 불가·5xx는 fail-open**(geo는 별도 stack이라 그쪽 지연이
-    map 부팅 교착이 되면 안 된다).
-    - 설계 제약: `geocoding.py`는 httpx를 **런타임 의존으로 갖지 않는다**
-      (`pyproject.toml` 주석 + ADR-002/006/044 — client 수명은 호출자 책임).
-      조사 초안은 이 모듈에서 `httpx.AsyncClient(...)`를 생성해 **런타임 `NameError`**가
-      나는 코드였다(적대 검증이 잡음). 주입된 클라이언트를 쓰는 메서드로 바꿔
-      새 의존도 ADR 개정도 없앴다.
-    - 테스트 8종은 네트워크 없이 돈다. 그중 하나는 **probe가 키 헤더를 싣는지**를
-      본다 — 안 실으면 geo가 거부할 수 없어 이 검사기가 *무엇도 검사하지 않으면서
-      초록*이 된다.
-  - [x] **호출 결선 완료(2026-08-18).** api lifespan에 붙였다. 기존
-    `runtime_db_preflight_required`와 같은 형태 — 새 플래그
-    `kor_travel_geo_preflight_required`(기본 False, 배포 compose가 True 주입)라
-    라이브러리 단위 테스트는 영향받지 않는다. `base_url`이 없으면(보강 비활성) 건너뛴다.
-    - 테스트 6종이 **결선 자체**를 본다: 플래그 off면 네트워크 0회, base_url 없으면 0회,
-      키 거부면 기동 거부, 도달 불가·5xx면 경고 남기고 진행, client를 닫는지.
-  - [x] **커버리지 한계를 코드에 박았다(2026-08-18).** 이 검증은 주입된 클라이언트를 쓰는
-    python 경로만 본다. 2026-08-14 사고의 실제 통로였던 **Next.js admin UI 프록시**
-    (`packages/kor-travel-map-admin/frontend/src/app/api/geo/[...path]/route.ts`)는
-    별개 축이고 이 검사가 **못 본다**. 그 사실을 `_verify_kor_travel_geo_credentials`
-    docstring에 경고로 넣었다 — tasks.md에만 적으면 코드를 읽는 사람이 못 본다.
-  - [~] **T-VN-H46F — admin UI geo proxy 결선.** Node 런타임은 server-only
-    `KOR_TRAVEL_GEO_API_KEY`만 읽고, browser query의 `key`를 버린 뒤
-    `X-KTG-API-Key` header로 전송한다. geo의 401 또는 400 `E0100 field=key`는
-    `503 GEO_API_KEY_REJECTED`로 변환해 입력 오류와 구분하고 fail-close한다. Manager
-    PR #173의 의도는 Manager PR #183(`4f5cbb44`)으로 최신 `main`에 재배치해 source
-    `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY` → UI server-only alias 결선과 정확한 service
-    격리 계약으로 흡수한다. root Compose·frontend Docker build/fingerprint·buildx·
-    load-env·live/mocked E2E의 browser-global credential alias도 제거해 bundle 잔존 경로를
-    닫았고 충돌한 #173은 superseded로 닫았다. Map PR #1004의 독립 적대 재리뷰 2명과
-    CI가 남았다.
-
-**T-VN-H46D 완료 — daemon 스키마 drift: `column request.providers does not exist`.**
-  (2026-08-18 실측으로 종결 — **배포 이미지 lag이 맞았다**)
-
-  ### 하마터면 틀린 근거로 닫을 뻔했다
-
-  처음에 배포 컨테이너 안에서 `grep -r "request.providers"`를 돌려 0건을 받고 "코드에
-  없다"고 결론지으려 했다. **그 grep은 애초에 못 찾는 형태다** — `request.providers`는
-  PostgreSQL 오류 문자열이고 `request`는 **테이블 별칭**이라, 별칭과 컬럼이 SQL에서 따로
-  조립되면 소스에 그 문자열이 통째로 존재하지 않는다. 0건이 "없다"가 아니라 "이 방법으로는
-  안 보인다"였다.
-
-  ### 실제로 확인한 것
-
-  1. **grep 대상이 비어 있지 않은지 먼저 양성 대조.** 배포 경로
-     `/usr/local/lib/python3.12/site-packages/kortravelmap`에 `.py` 172개, 확실히 있는
-     문자열(`feature_operation`) 41히트 — 검사 자체는 동작한다.
-  2. **DB에 그 컬럼이 없다.** `ops` 스키마 전체에 `providers` 컬럼 **0건**.
-     `ops.feature_update_requests`의 실제 컬럼은 `request_id, scope_type, scope,
-     update_policy, run_mode, priority, matched_scope, job_id, operator, reason,
-     created_at, generation, dataset_membership_mode`다.
-  3. **배포 코드가 그 컬럼을 질의하지 않는다.** `AS request` 별칭을 쓰는 파일들
-     (`feature_update_repo`·`feature_update_active_repo`·`ops_repo`·`pipeline_repo`)에서
-     `providers` 참조 **각각 0건**.
-  4. **로그에도 없다.** daemon 재기동(2026-08-17T10:02) 이후 75,158줄에서 0건.
-
-  ### 한계 — 이걸로 "고쳤다"고는 말할 수 없다
-
-  로그는 **2026-08-17 10:02 이후만** 남아 있다(DB 4분할 때 컨테이너를 재생성했다). 즉
-  "재발하지 않았다"의 관측 창은 약 12시간뿐이다. 닫는 근거는 로그가 아니라 **(2)+(3)**
-  이다 — 지금 도는 코드가 없는 컬럼을 질의하지 않는다.
-
-  배포 이미지는 `2026-08-13T20:23` 생성이고 revision label이 `development`다(빌드에 커밋이
-  안 박혔다). 그래서 "어느 커밋에서 고쳐졌는지"는 이 경로로 특정할 수 없다.
-  - [ ] **T-VN-H46G — buildx image commit provenance label.** buildx가
-    `KOR_TRAVEL_MAP_GIT_COMMIT`을 실제 커밋으로 채우게 한다. 지금은 prod 3개 컨테이너가
-    `development`라 배포된 것이 무엇인지 이미지에서 알 수 없다.
-
-**T-VN-H46E 완료 — 공개 data.go.kr 키 현행 유지 판정(2026-08-14).**
-
-  자격증명 1개를 **17개 별칭 / 8개 파일 / 6개 저장소**가 공유한다("4곳"이 아니었다 —
-  provider별 이름으로 갈라져 그렇게 보였다). 노출 정황은 없다: `git log --all -S`와
-  `git grep` 전 저장소 0건, prod 비밀 파일 전부 `0600`.
-
-  회전하지 않는다. 트리거가 되는 사건이 없고, data.go.kr 분리 발급은 계정 분리를
-  뜻하는데 인증 필요 오픈API가 코드 실측 약 236건이라 전건 재활용신청은 비대칭적으로
-  크다. 실제 위험은 키가 아니라 **사본 수**다.
-
-  잔여 위생(별건): ~~`~/kor-travel-docker-manager/.env.bak-*` 정리~~ → **완료(2026-08-14)**,
-  `python-krex-api`의 `.env.local` gitignore 규칙 추가, ~~`docs/external-apis.md` §2에
-  "동일 키를 쓰는 17개 별칭" 표 추가~~ → **완료(2026-08-14, §2.1)**. ⚠️ data.go.kr
-  콘솔 실제 상태(재발급이 기존 활용신청 승인을 유지하는지, 계정당 다중 키 가능 여부)는
-  **미확인 추정**이다.
-
-  표를 만들며 개수가 갱신됐다 — 로컬 `F:\dev` 전체를 값의 sha8로 다시 묶으니
-  data.go.kr 키는 **별칭 18개 / 파일 18개**다(앞의 "17/8/6"은 스캔 범위가 좁았다).
-  같이 나온 것 두 가지:
-
-  - **VWorld 키가 별칭 14개 / 파일 15개**로 퍼져 있고, 그 그룹 안에
-    `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY`와 `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY`가
-    **들어 있다**. 즉 로컬 `.env`들에서 geo 소비자 키 자리에 VWorld 값이 들어 있고,
-    geo는 그것을 `401 E0401`로 거절한다. 2026-08-13 prod 사고와 같은 형상이 개발
-    머신에 그대로 남아 있다는 뜻이다(prod의 소비자 키 자리는 복구 후 정상).
-    → 저장소가 고칠 수 있는 부분은 PR #979와 docker-manager
-    `fix/map-ui-geo-consumer-key`로 끊었다. `.env` 자체는 운영자/개발자 조치다.
-  - 일부 `.env`가 **UTF-8 BOM으로 시작**해 첫 변수 이름이 `\ufeffKMA_SERVICE_KEY`처럼
-    깨진다. 순진한 파서는 그 줄을 통째로 놓친다.
-
-  `.env.bak-*` 처리(2026-08-14, 사용자 승인 후 실행). **23개**였다 — 처음 "4개",
-  다음 "10개"로 두 번 잘못 셌다. 둘 다 `tail`/`stat` 출력이 잘린 것을 그대로 믿은
-  탓이다. 전부 폐기된 `KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY` 값을 품고 있었고,
-  오래된 것들은 `KOR_TRAVEL_MAP_UI_SESSION_SECRET`·`UI_ADMIN_PASSWORD_HASH`·
-  `KOR_TRAVEL_CONCIERGE_API_KEYS`의 이전 값도 갖고 있었다. 셋은 권한이 `0664`/`0775`로
-  **그룹·타인 읽기 가능**했다 — §1이 규정한 600이 아니었고, T-VN-H46E의 "prod 비밀
-  파일 전부 0600"은 이 파일들을 포함하지 않은 판정이었다.
-
-  먼저 전부 `600`으로 고치고, 이어서 **21개를 삭제**했다. 남긴 둘은
-  `tvn34`(08-12)·`tvn36`(08-13). 삭제 로그(파일명·크기·변수 수·sha16)는 세션 기록에
-  남겼다 — 지운 뒤에는 확인할 방법이 없으므로 그것이 유일한 근거다.
-
-  ⚠️ 한 건은 의도와 어긋났다. `\.env.bak-geokey-20260813T222829Z`(08-13 22:28)는 남긴
-  `tvn36`(20:19)보다 **나중** 스냅샷인데 KEEP 목록이 이름 기반이라 삭제됐다. 실질
-  손실은 없다 — 그 파일이 담은 것은 geo 키 복구 **이전**의 깨진 형상이고, 되돌릴 이유가
-  없는 상태다. 다음에 같은 작업을 하면 KEEP은 이름이 아니라 **mtime 상위 N개**로 잡을 것.
-
-  현재 `.env`는 무사하다(600 / 121개 변수 / 8152B). 정리 직후 map 컨테이너 4개 전부
-  Up·healthy 확인.
-
-  `python-krex-api`의 `.env.local` 규칙은 **손대지 않았다.** 그 저장소는
-  `fix/incident-realtime-sms`에 29개 파일이 스테이지된 진행 중 작업이라 커밋을 끼워
-  넣지 않았다. 노출 위험은 없다 — 그 이름의 파일이 지금 없고, git이 정상 동작하는 전
-  저장소를 훑어 **무시되지 않는 비밀 후보 파일은 0건**이다(worktree 포인터가 끊겨
-  git 자체가 안 도는 체크아웃이 여럿 있는데, 그런 곳은 애초에 커밋이 불가능하다).
-  넣을 규칙은 `.env*` + `!.env.example` 한 쌍.
-
-## Lane A 상세 — 운영 위생 (2026-08-17 신설)
-
-> 2026-08-17 DB 4분할 작업에서 드러났고 **소유 task가 없던** 것들이다. 셋 다 이슈가
-> 정본이고 여기서는 실행 단위만 잡는다.
+- [ ] buildx가 `KOR_TRAVEL_MAP_GIT_COMMIT`을 실제 40자 commit SHA로 채우고, API·Dagster
+      web·daemon 등 배포 image의 `org.opencontainers.image.revision` label과 exact 일치하게
+      만든다. 현재 관측된 prod 3개 container label은 `development`라 image만으로 배포 source를
+      특정할 수 없다.
+- [ ] build input·OCI label·runtime inspect의 source revision을 같은 값으로 결박하는 회귀와
+      buildx 검증을 추가하고, 기존 compatible-pair provenance 계약과 중복 정본을 만들지 않는다.
 
 ### T-VN-H49 — 4분할 인스턴스 백업 주체 (docker-manager #177 추적)
 
-Map 인스턴스의 baseline 3건과 절차 문서화는 완료했다. 남은 소관은 docker-manager #177의
-외부 인스턴스 주기화이며, 이 저장소는 **의존만** 추적한다.
+Map 인스턴스의 baseline 3건과 절차 문서화, Docker Manager #177의 6-role standalone
+backup primitive, Geo application DB의 앱 레벨 schedule env 결선(PR #181, merge
+`969eff18`)까지 완료했다. 남은 소관은 실제 외부 인스턴스의 주기 실행·산출물·off-box
+증거이며, 이 저장소는 **의존만** 추적한다.
 
-- [ ] geo(`12500`, **33GB, 백업 0건**) · concierge(`12600`) · pinvi(`12800`)의 dump·
-  sha256·manifest·retention 결선. map만 절차가 있다.
-- [ ] 결선 후 `docs/backup-restore.md` §1의 "다른 세 인스턴스도 각자 백업 주체가
-  필요하다 — 현재 미비이고 별건이다" 경고를 갱신한다.
+- [~] Geo application DB 첫 자동 백업은 4.71 GB artifact와 sha256 verify까지 성공했다.
+  다만 `scheduled_backup`과 retention janitor가 계속 RUNNING이며 최근 성공·bounded retention으로
+  수렴하는지는 운영 증거가 더 필요하다. application DB에 standalone cron을 중복 설치하지 않는다.
+- [ ] 별도 `geo_dagster` metadata DB와 concierge(`12600`)·pinvi(`12800`)에 standalone
+  create → sha256 검증 → list → GC를 실행하고 cron/systemd timer 및 최신 dump + sha256 +
+  manifest 증거를 남긴다.
+- [ ] off-box 사본 자동화를 결선한다. Map application/Dagster 주기화는 #148의 재적재 정책
+  결정을 따르며 이 task가 임의로 활성화하지 않는다.
+- [ ] 위 운영 AC를 닫은 뒤 `docs/backup-restore.md` §1의 외부 instance 경고를 현행화한다.
 
-AC: 세 인스턴스 각각의 최신 dump + sha256 + manifest가 존재하고 절차가 문서화됨.
+AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 보존 GC, off-box 사본
+증거가 있고 절차가 문서화되어야 한다. PR #181 병합만으로 H49를 완료 처리하지 않는다.
 
 ## Lane C 상세 — 사문화 정리·미구현 dataset (2026-08-17 신설)
 

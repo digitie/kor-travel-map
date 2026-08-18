@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### admin UI Geo 자격증명 server boundary (2026-08-19, T-VN-H46F)
+
+- **SECURITY**: Next.js `/api/geo` BFF가 server-only `KOR_TRAVEL_GEO_API_KEY`만 읽고
+  browser query의 `key`를 제거한 뒤 `X-KTG-API-Key`로 전송한다. 공개 build alias와
+  VWorld provider key는 Geo consumer 자격증명에 참여하지 않는다.
+- **FAIL-CLOSE**: 키가 ASCII 영숫자 32자 발급 형식이 아니거나 Geo가 401 또는 400
+  `E0100 field=key`로 거부하면 upstream 원문을 숨긴 typed 503을 반환한다.
+- **DEPLOY**: root Compose·frontend Docker build/fingerprint·buildx·load-env·live/mocked
+  E2E에서 `NEXT_PUBLIC_KOR_TRAVEL_GEO_API_KEY` 운반 경로를 제거하고 UI server runtime
+  alias만 유지한다.
+
 ### cache-target snapshot bounded streaming (2026-08-18, T-VN-41S)
 
 - **API(service)**: snapshot admission을 item 1,000,000개와 canonical material 512 MiB로 확대·분리하고
