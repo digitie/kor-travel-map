@@ -879,8 +879,11 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
   `docs/reports/t-vn-40c-physical-removal-manifest-2026-08-18.md`(선행조건 P1~P6 · DB 삭제 순서 D1~D12 ·
   코드/프론트/계약 삭제 · static zero gate · 열린 결정 Q1~Q4) + 기계 판독본
   `contracts/vnext/t-vn-40c-removal-manifest-v1.json` + migration 초안
-  `docs/reports/tvn40c/0224_tvn40c_physical_removal.py.draft`(alembic 밖). 다음: 적대 리뷰 2명 → 확정 →
-  ①~④ 뒤 0224를 `alembic/versions/`로 옮겨 적용.
+  `docs/reports/tvn40c/0224_tvn40c_physical_removal.py.draft`(alembic 밖). **적대 리뷰 2명 2라운드 완료(v2.2)**:
+  DB 렌즈가 n150 시뮬레이션(prod-shaped·fresh)으로 D1~D9 + postcheck 통과 확인, P1 반영(D3b legacy_component_identity
+  trigger·D4 0214 patch/archive procedure 재작성·prosrc 검사·splitter); code/contract 렌즈 hold(Q5 public catalog 제거·
+  P7 PinVi lockstep·static zero 식별자/allowlist·누락 테스트/e2e/docs). 남은 구현: 40C PR에서 D4 본문·코드/프론트/계약
+  삭제·static zero gate 테스트. 실행은 ①~④ 뒤.
 - [ ] **T-VN-40 인수 실행** — 사전 3 task 병합 뒤 ① `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`
   bump(→ 현재 head `0223_tvn40_identity_mappings`) + **0223 precheck**(설계 §5, prod read-only) + migration·fence enable → ② import/backfill
   → ③ sanctioned live/soak → ④ receipt complete → ⑤ manifest physical removal 실행. 백업/PITR
