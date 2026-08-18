@@ -173,6 +173,41 @@ async def _seed_notice_matrix(session: AsyncSession) -> dict[str, str]:
 _EXPECTED_VISIBLE_NOTICES: frozenset[str] = frozenset({"future-end", "no-end"})
 
 
+
+async def _seed_legacy_curated_row(
+    session: AsyncSession,
+    *,
+    theme_id: str,
+    feature_id: str,
+    source_id: str,
+) -> str:
+    """legacy `curated_features` row를 **테스트 fixture로만** 심는다 (T-VN-40A).
+
+    `curated_repo.create_curated_feature`는 fence 뒤로 static 층에서 막힌다. 이 파일은
+    공개 **read** 경로를 검증하므로 legacy row가 있어야 하고, 그 read는 soak 동안 살아
+    있어야 한다. 테스트 owner role이라 raw INSERT가 되는 것이지 fence 우회가 아니다 —
+    앱 role은 ACL 층이 막는다. **이 helper를 앱 코드로 옮기지 마라.**
+    """
+    row = await session.execute(
+        text(
+            """
+            INSERT INTO feature.curated_features (
+                theme_id, feature_id, source_id, curation_status,
+                selection_origin, selected_by, selected_at,
+                curation_relation, reuse_policy, metadata, updated_at
+            ) VALUES (
+                CAST(:theme_id AS uuid), :feature_id, CAST(:source_id AS uuid),
+                'curated', 'admin', 'pytest', now(),
+                'nearby_option', 'manual_review', '{}'::jsonb, now()
+            )
+            RETURNING curated_feature_id::text
+            """
+        ),
+        {"theme_id": theme_id, "feature_id": feature_id, "source_id": source_id},
+    )
+    return str(row.scalar_one())
+
+
 @pytest.mark.parametrize("corrupted", _CORRUPTED_END_TIMES)
 async def test_corrupted_timestamp_cannot_reach_the_typed_column(
     migrated_session: AsyncSession, corrupted: str
@@ -390,12 +425,11 @@ async def test_curated_features_read_hides_ended_notice(
     healthy_id, ended_id = await _seed_two_notices(migrated_session)
     overlays = {}
     for fid in (healthy_id, ended_id):
-        overlays[fid] = await curated_repo.create_curated_feature(
+        overlays[fid] = await _seed_legacy_curated_row(
             migrated_session,
             theme_id=theme_id,
             feature_id=fid,
             source_id=source_id,
-            curation_status="curated",
         )
 
     page = await curated_repo.list_curated_features(
@@ -405,7 +439,7 @@ async def test_curated_features_read_hides_ended_notice(
     assert (
         await curated_repo.get_curated_feature(
             migrated_session,
-            curated_feature_id=overlays[ended_id].curated_feature_id,
+            curated_feature_id=overlays[ended_id],
             public_only=True,
         )
         is None

@@ -1415,180 +1415,126 @@ def test_curation_paths_are_in_openapi(client: TestClient) -> None:
 
 
 @pytest.mark.unit
-def test_curated_select_records_principal_not_body_actor(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("method", "path", "body"),
+    [
+        ("post", "/v1/admin/features/curated", {"feature_id": "f_x", "theme_id": "t"}),
+        ("post", "/v1/admin/curated-features", {"feature_id": "f_x", "theme_id": "t"}),
+        ("patch", "/v1/admin/features/curated/cf-1", {"reuse_policy": "allowed"}),
+        ("delete", "/v1/admin/features/curated/cf-1", None),
+        ("post", "/v1/admin/features/curated/cf-1/select", {"reason": "x"}),
+        ("post", "/v1/admin/features/curated/cf-1/unselect", {"reason": "x"}),
+        # body actor·spoofable provenance·reserved marker — 예전엔 각각 422를 검증했다.
+        # 지금은 body를 읽기 전에 410이므로 그 검증은 도달 불가다. 같은 성질은
+        # canonical route가 갖는지가 진짜 질문이고 그건 다른 테스트가 본다.
+        ("post", "/v1/admin/features/curated/cf-1/select", {"actor": "attacker"}),
+        ("post", "/v1/admin/features/curated", {"selection_origin": "external_api"}),
+        ("post", "/v1/admin/features/curated", {"feature_id": "__detach__"}),
+    ],
+)
+def test_legacy_curated_write_routes_are_fenced_410(
+    client: TestClient, method: str, path: str, body: dict[str, object] | None
 ) -> None:
-    # T-VN-20 (ADR-066 D-2): curated select는 인증 principal(local-dev)을 actor로
-    # 넘겨야 한다. row None → 404지만 repo가 받은 actor kwarg로 검증한다.
-    from kortravelmap.api.routers import curated as module
+    """T-VN-40A route 층 — legacy admin curated **write** route는 body와 무관하게 410.
 
-    captured: dict[str, Any] = {}
+    원래 이 자리에는 legacy write route의 입력 검증 테스트 6개가 있었다(body actor
+    거부, spoofable provenance 거부, reserved detach marker 거부, principal 기록). fence
+    뒤로 그 route는 body를 읽기도 전에 410이라 그 검증들은 **도달 불가**다.
 
-    async def _set(_session: object, **kwargs: Any) -> None:
-        captured.update(kwargs)
-        return
-
-    monkeypatch.setattr(module.curated_repo, "set_curated_feature_status", _set)
-    response = client.post(
-        "/v1/admin/features/curated/cf-1/select",
-        json={"reason": "admin select"},
+    410인 이유는 설계(plan §40B step 4)가 "legacy admin surface는 같은 release에서 제거하며
+    redirect/no-op parameter를 두지 않는다"고 했기 때문이다. 물리 삭제(40C)는 soak 뒤에만
+    가능하므로(ADR-075 결정 4) 그때까지 이 route는 읽기 전용이다.
+    """
+    call = getattr(client, method)
+    response = call(path, json=body) if body is not None else call(path)
+    assert response.status_code == 410, (
+        f"{method.upper()} {path} -> {response.status_code}. "
+        "legacy write route가 410이 아니면 T-VN-40A route fence가 풀린 것이다."
     )
-    assert response.status_code == 404
-    assert captured["actor"] == "local-dev"
-    assert captured["curation_status"] == "curated"
+    assert "T-VN-40A" in response.text
 
 
 @pytest.mark.unit
-def test_curated_select_rejects_removed_actor_field(client: TestClient) -> None:
-    # T-VN-20 (ADR-066 D-2): 제거된 body actor 필드를 보내면 extra="forbid"로 422.
-    response = client.post(
-        "/v1/admin/features/curated/cf-1/select",
-        json={"actor": "attacker", "reason": "x"},
-    )
-    assert response.status_code == 422
+def test_legacy_curated_read_routes_survive_the_fence(client: TestClient) -> None:
+    """읽기는 살아 있어야 한다 — soak 동안 legacy를 읽어 canonical과 대조한다.
+
+    fence dependency가 method를 안 보고 전부 410을 주면 이 테스트가 잡는다.
+    """
+    # 이 fixture의 client는 DB를 스텁한다. GET은 fence를 통과한 뒤 스텁 repo까지 내려가
+    # 예외로 죽을 수 있다 — 그게 정확히 "fence를 통과했다"는 증거다. fence에 걸리면
+    # 예외 없이 410 응답이 돌아온다. 그래서 응답이 오면 410이 아님을, 예외가 나면
+    # 그 예외가 HTTPException(410)이 아님을 각각 확인한다.
+    from fastapi import HTTPException
+
+    status: int | None
+    try:
+        status = client.get("/v1/admin/features/curated").status_code
+    except HTTPException as exc:
+        status = exc.status_code
+    except Exception:  # noqa: BLE001 — 스텁 repo가 GET을 못 받아 죽는 것은 fence 통과의 증거
+        status = None
+    assert status != 410, "read까지 fence에 걸렸다 — dependency가 method를 안 본다"
 
 
 @pytest.mark.unit
-def test_curated_legacy_admin_writes_record_authenticated_principal(
-    client: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    from kortravelmap.api.routers import curated as module
+def test_theme_catalog_write_routes_are_not_fenced(client: TestClient) -> None:
+    """theme/source/rule catalog는 legacy가 아니다 — fence 대상이 아니다.
 
-    calls: list[tuple[str, dict[str, Any]]] = []
-
-    async def _create(_session: object, **kwargs: Any) -> None:
-        calls.append(("create", kwargs))
-        raise ValueError("captured")
-
-    async def _update(_session: object, **kwargs: Any) -> None:
-        calls.append(("update", kwargs))
-        raise ValueError("captured")
-
-    async def _archive(_session: object, **kwargs: Any) -> None:
-        calls.append(("archive", kwargs))
-
-    monkeypatch.setattr(module.curated_repo, "create_curated_feature", _create)
-    monkeypatch.setattr(module.curated_repo, "update_curated_feature", _update)
-    monkeypatch.setattr(module.curated_repo, "archive_curated_feature", _archive)
-
-    create_response = client.post(
-        "/v1/admin/features/curated",
-        json={
-            "theme_id": "11111111-1111-4111-8111-111111111111",
-            "feature_id": "feature:principal",
-            "source_id": "22222222-2222-4222-8222-222222222222",
-            "curation_status": "curated",
-        },
-    )
-    patch_response = client.patch(
-        "/v1/admin/features/curated/cf-1",
-        json={"curation_relation": "primary_stop"},
-    )
-    delete_response = client.delete("/v1/admin/features/curated/cf-1")
-
-    assert create_response.status_code == 422
-    assert patch_response.status_code == 422
-    assert delete_response.status_code == 404
-    assert calls == [
-        (
-            "create",
-            {
-                "theme_id": "11111111-1111-4111-8111-111111111111",
-                "feature_id": "feature:principal",
-                "source_id": "22222222-2222-4222-8222-222222222222",
-                "source_record_key": None,
-                "curation_status": "curated",
-                "rejection_reason": None,
-                "rank_score": 0.0,
-                "display_title": None,
-                "display_summary": None,
-                "curation_relation": "nearby_option",
-                "reuse_policy": "manual_review",
-                "metadata": {},
-                "selection_origin": "admin",
-                "selected_by": "local-dev",
-                "rejected_by": None,
-                "actor": "local-dev",
-            },
-        ),
-        (
-            "update",
-            {
-                "curated_feature_id": "cf-1",
-                "updates": {"curation_relation": "primary_stop"},
-                "actor": "local-dev",
-            },
-        ),
-        (
-            "archive",
-            {
-                "curated_feature_id": "cf-1",
-                "actor": "local-dev",
-            },
-        ),
-    ]
+    plan:28이 그 셋을 "catalog input만 유지"로 정했고 T-VN-40이 새 procedure로 쓴다.
+    fence가 `/admin` prefix 전체를 잡으면 여기서 잡힌다 — 그러면 T-VN-40 자체가 깨진다.
+    """
+    response = client.post("/v1/admin/curated-themes", json={})
+    assert response.status_code != 410, "theme catalog write가 fence에 걸렸다 — plan:28 위반"
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    ("field", "value"),
-    [
-        ("selection_origin", "external_api"),
-        ("selected_by", "attacker"),
-        ("rejected_by", "attacker"),
-    ],
+    "spoof_field",
+    ["actor", "selected_by", "operator_updated_by", "updated_by", "created_by"],
 )
-def test_curated_create_rejects_spoofable_provenance_fields(
-    client: TestClient, field: str, value: str
+def test_canonical_item_writes_reject_spoofable_provenance_in_body(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch, spoof_field: str
 ) -> None:
-    response = client.post(
-        "/v1/admin/features/curated",
+    """ADR-066 D-2 — canonical item write는 body의 provenance 필드를 422로 거부한다.
+
+    fence로 지운 legacy 라우터 테스트 6개 중 'body actor 거부·spoofable provenance 거부'의
+    canonical 대응이다(적대 리뷰 P2). actor는 인증 principal에서만 온다 — 위
+    `test_admin_can_patch_and_archive_single_curation_item`이 그 양성 케이스
+    (`principal == "local-dev"`)고, 여기는 음성 케이스다: body에 provenance를 실으면
+    `extra="forbid"`가 422를 내고 **repo command는 호출되지 않는다.**
+    """
+    from kortravelmap.api.routers import curations as module
+
+    called: list[str] = []
+
+    async def _create(_session: object, **_kwargs: Any) -> CurationItem:
+        called.append("create")
+        return _item(item_id=ITEM_ID, edition="2026")
+
+    async def _patch(_session: object, **_kwargs: Any) -> CurationItem:
+        called.append("patch")
+        return _item(item_id=ITEM_ID, edition="2026")
+
+    monkeypatch.setattr(module.curation_repo, "create_curation_item_command", _create)
+    monkeypatch.setattr(module.curation_repo, "patch_curation_item_command", _patch)
+
+    created = client.post(
+        f"/v1/admin/curations/{COLLECTION_ID}/items",
         json={
-            "theme_id": "11111111-1111-4111-8111-111111111111",
-            "feature_id": "feature:spoof",
-            "source_id": "22222222-2222-4222-8222-222222222222",
-            field: value,
+            "external_item_id": "spoof-item",
+            "place_name": "provenance 위조 시도",
+            spoof_field: "attacker",
         },
     )
-    assert response.status_code == 422
+    patched = client.patch(
+        f"/v1/admin/curations/{COLLECTION_ID}/items/{ITEM_ID}",
+        headers={"If-Match": '"1"'},
+        json={"feature_id": "feature:resolved", spoof_field: "attacker"},
+    )
 
-
-@pytest.mark.unit
-@pytest.mark.parametrize(
-    ("method", "path", "payload"),
-    [
-        (
-            "post",
-            "/v1/admin/features/curated",
-            {
-                "theme_id": "11111111-1111-4111-8111-111111111111",
-                "feature_id": "feature:reserved-metadata",
-                "source_id": "22222222-2222-4222-8222-222222222222",
-                "metadata": {"merge_projection_detached": True},
-            },
-        ),
-        (
-            "patch",
-            "/v1/admin/features/curated/cf-1",
-            {"metadata": {"merge_projection_detached": False}},
-        ),
-    ],
-)
-def test_curated_write_rejects_reserved_detach_marker(
-    client: TestClient,
-    method: str,
-    path: str,
-    payload: dict[str, Any],
-) -> None:
-    response = client.request(method, path, json=payload)
-    assert response.status_code == 422
-
-
-# --- T-VN-H36: 이름 단독 일치로는 자동 링크하지 않는다 ---------------------------
-#
-# 회귀 대상은 실제로 일어난 사고다. 한국관광100선 "남이섬"이 서울 중구의 동명 업소
-# feature에 붙어 공개 응답에 나왔다(T-VN-H33이 해제). prod에 그 이름의 live feature가
-# 하나뿐이라 옛 규칙(`matches[0] if len(matches) == 1`)이 항상 "유일 매칭"으로 채택했다.
+    assert created.status_code == 422, (created.status_code, created.text)
+    assert patched.status_code == 422, (patched.status_code, patched.text)
+    assert called == [], f"422여야 할 요청이 repo command까지 닿았다: {called}"
 
 
 def _namesake_match(feature_id: str, name: str, sido_name: str) -> FeatureMatch:

@@ -26,6 +26,7 @@ from kortravelmap.infra.models import (
     SourceRecordRow,
 )
 from tests.integration._db_cleanup import truncate_committed_test_rows
+from tests.integration._tvn34_migration_bootstrap import _TVN40_TEST_RUNTIME_PASSWORD
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -136,9 +137,17 @@ async def _seed_pair(engine: AsyncEngine) -> str:
 async def container_dsn(
     pg_container: object, migrated_engine: AsyncEngine
 ) -> AsyncIterator[str]:
-    from kortravelmap.infra.db import normalize_async_dsn
+    """CLI가 붙을 DSN — **실제 API runtime 로그인**이다.
 
-    dsn = normalize_async_dsn(pg_container.get_connection_url())  # type: ignore[attr-defined]
+    prod에서 `ktmctl`은 api 컨테이너의 `KOR_TRAVEL_MAP_PG_DSN`(= API runtime DSN,
+    docker-compose.yml)으로 돈다. 예전엔 컨테이너 superuser DSN을 넘겼는데 0222가 merge
+    procedure에 0214와 같은 executor 게이트를 넣어 superuser는 거부된다 — 그리고 애초에
+    superuser로 돌리면 ACL 회귀를 못 잡는다. 이름은 다른 테스트와의 호환을 위해 그대로 둔다.
+    """
+    dsn = migrated_engine.url.set(
+        username="ktm_feature_api_runtime",
+        password=_TVN40_TEST_RUNTIME_PASSWORD,
+    ).render_as_string(hide_password=False)
     yield dsn
     async with AsyncSession(migrated_engine) as session, session.begin():
         await truncate_committed_test_rows(session, _TRUNCATE_SQL)

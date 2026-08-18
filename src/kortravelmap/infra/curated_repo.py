@@ -22,6 +22,7 @@ from kortravelmap.infra.feature_projection import (
     typed_feature_detail_joins_sql,
 )
 from kortravelmap.infra.feature_repo import public_active_notice_filter_sql
+from kortravelmap.infra.legacy_write_fence import assert_legacy_write_allowed
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -1328,6 +1329,7 @@ async def create_curated_feature(
     actor: str | None = None,
 ) -> CuratedFeature:
     """curated feature overlay 1건을 생성한다. commit은 호출자 책임."""
+    assert_legacy_write_allowed("curated_features", operation="create")
 
     if metadata is not None and "merge_projection_detached" in metadata:
         raise ValueError("merge_projection_detached metadata는 내부 전용입니다.")
@@ -1400,6 +1402,7 @@ async def update_curated_feature(
     actor: str | None = None,
 ) -> CuratedFeature | None:
     """curated feature overlay를 부분 수정한다."""
+    assert_legacy_write_allowed("curated_features", operation="update")
 
     allowed = {
         "curation_status",
@@ -1496,6 +1499,7 @@ async def set_curated_feature_status(
     reason: str | None = None,
 ) -> CuratedFeature | None:
     """curated feature status를 운영자 action으로 변경한다."""
+    assert_legacy_write_allowed("curated_features", operation="set_status")
 
     _validate_choice(curation_status, _CURATION_STATUSES, "curation_status")
     updates = _selected_fields_for_status(
@@ -1542,6 +1546,7 @@ async def archive_curated_feature(
     actor: str | None = None,
 ) -> CuratedFeature | None:
     """curated feature를 soft archive한다."""
+    assert_legacy_write_allowed("curated_features", operation="archive")
 
     return await set_curated_feature_status(
         session,

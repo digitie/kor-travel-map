@@ -142,7 +142,10 @@ export function CuratedLifecycleStrip({
             </DialogHeader>
             <ul className="grid list-disc gap-2 p-4 pl-8 text-sm text-muted-foreground">
               <li>큐레이션 항목은 원본 feature 위의 overlay입니다.</li>
-              <li>채택하면 공개 API 목록에 포함되고 스냅샷이 갱신됩니다.</li>
+              <li>
+                채택·해제·보관은 이 화면이 아니라 컬렉션 관리(canonical)에서 합니다
+                (T-VN-40A: legacy 쓰기 봉인).
+              </li>
               <li>거절·보관된 항목은 규칙 재적용으로 되살아나지 않습니다.</li>
             </ul>
           </DialogContent>

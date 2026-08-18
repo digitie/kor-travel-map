@@ -19,12 +19,6 @@ import {
   type RestoreSwapRequest,
 } from "./backups";
 import {
-  useArchiveCuratedFeatureMutation,
-  usePatchCuratedFeatureMutation,
-  useSelectCuratedFeatureMutation,
-  useUnselectCuratedFeatureMutation,
-  type CuratedFeaturePatchRequest,
-  type CuratedFeatureStatusRequest,
 } from "./curated";
 import {
   useAddCurationItemMutation,
@@ -140,9 +134,6 @@ describe("admin domain idempotency consumers", () => {
 
   it("retryable admin write hooks send explicit UUID Idempotency-Key headers", async () => {
     const context = hookContext();
-    const curationStatusBody = {
-      reason: "curated status",
-    } as CuratedFeatureStatusRequest;
     const cases: Array<{ name: string; run: () => Promise<void> }> = [
       {
         name: "backup create",
@@ -228,38 +219,6 @@ describe("admin domain idempotency consumers", () => {
             body: { reason: "delete" } as AdminFeatureDeleteRequest,
             entityTag: '"7"',
             featureId: "feature-1",
-          }),
-      },
-      {
-        name: "curated select",
-        run: () =>
-          runMutation(context, useSelectCuratedFeatureMutation, {
-            body: curationStatusBody,
-            curatedFeatureId: "curated-1",
-          }),
-      },
-      {
-        name: "curated unselect",
-        run: () =>
-          runMutation(context, useUnselectCuratedFeatureMutation, {
-            body: curationStatusBody,
-            curatedFeatureId: "curated-1",
-          }),
-      },
-      {
-        name: "curated archive",
-        run: () =>
-          runMutation(context, useArchiveCuratedFeatureMutation, {
-            body: curationStatusBody,
-            curatedFeatureId: "curated-1",
-          }),
-      },
-      {
-        name: "curated patch",
-        run: () =>
-          runMutation(context, usePatchCuratedFeatureMutation, {
-            body: { item_title: "title" } as CuratedFeaturePatchRequest,
-            curatedFeatureId: "curated-1",
           }),
       },
       {

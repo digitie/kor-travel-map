@@ -220,16 +220,12 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
       "/v1/admin/curations/quarantine",
       "/v1/admin/curations/quarantine/{collection_id}/items",
     ],
+    // T-VN-40A: legacy `curated_features` write API(POST/PATCH/DELETE
+    // /v1/admin/features/curated*)는 fence로 410이라 write 계약에서 뺐다. canonical
+    // 편집은 `curation-collections` surface의 collection/item command다.
+    // (`/v1/curated-features/{id}/pinvi-copy`는 API에 이미 없어 함께 정리.)
     writeApis: [
-      writeApi("POST", "/v1/admin/features/curated"),
-      writeApi("PATCH", "/v1/admin/features/curated/{curated_feature_id}"),
-      writeApi(
-        "DELETE",
-        "/v1/admin/features/curated/{curated_feature_id}",
-        "destructive",
-      ),
       writeApi("PATCH", "/v1/admin/curated-source-rules/{rule_id}"),
-      writeApi("POST", "/v1/curated-features/{curated_feature_id}/pinvi-copy"),
       writeApi(
         "POST",
         "/v1/admin/curations/quarantine/{collection_id}/reclassify",
@@ -245,14 +241,8 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     route: "/admin/features/curated/{curated_feature_id}",
     readyHeading: "큐레이션 상세",
     readApis: ["/v1/admin/features/curated/{curated_feature_id}"],
-    writeApis: [
-      writeApi("PATCH", "/v1/admin/features/curated/{curated_feature_id}"),
-      writeApi(
-        "DELETE",
-        "/v1/admin/features/curated/{curated_feature_id}",
-        "destructive",
-      ),
-    ],
+    // T-VN-40A: 이 화면은 읽기 전용이 됐다 — write 컨트롤은 fence와 함께 제거.
+    writeApis: [],
     reflectedSurfaces: ["/admin/features/curated"],
   },
   {

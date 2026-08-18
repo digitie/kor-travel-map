@@ -244,7 +244,7 @@ async def test_squash_boundary_rejects_stamp_below_0200_before_mutation(
     assert await _admin_fetchval(
         admin_dsn,
         "SELECT version_num FROM public.alembic_version",
-    ) == "0221_tvn40_snapshot_text_bounds"
+    ) == "0222_tvn40a_merge_runtime_role"
 
 
 async def test_existing_0104_bridge_upgrades_to_tvn40_head_without_baseline_replay(
@@ -271,7 +271,7 @@ async def test_existing_0104_bridge_upgrades_to_tvn40_head_without_baseline_repl
     assert await _admin_fetchval(
         admin_dsn,
         "SELECT version_num FROM public.alembic_version",
-    ) == "0221_tvn40_snapshot_text_bounds"
+    ) == "0222_tvn40a_merge_runtime_role"
     assert await _admin_fetchval(
         admin_dsn,
         "SELECT to_regclass('feature.theme_feature_candidates') IS NOT NULL",

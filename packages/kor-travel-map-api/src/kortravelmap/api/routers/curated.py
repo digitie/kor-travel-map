@@ -10,7 +10,7 @@ import re
 from collections.abc import Awaitable
 from datetime import date, datetime
 from time import perf_counter
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Final, Literal
 from uuid import UUID
 
 import httpx
@@ -48,7 +48,52 @@ from kortravelmap.api.response import Meta, make_meta
 __all__ = ["admin_router", "router"]
 
 router = APIRouter(tags=["curated"])
-admin_router = APIRouter(prefix="/admin", tags=["admin-curated"])
+
+
+# T-VN-40A fence 대상 legacy write 경로. `/admin` prefix 아래의 두 alias만이며 뒤에
+# 하위 segment(`/{id}`, `/{id}/select` …)가 오거나 끝난다.
+_LEGACY_WRITE_PATH: Final = re.compile(r"/admin/(?:features/curated|curated-features)(?:/|$)")
+
+
+async def _fence_legacy_curated_writes(request: Request) -> None:
+    """T-VN-40A route 층 — legacy admin curated **write** route는 410 Gone.
+
+    설계(plan §40B step 4)는 "`/v1/curated-features`와 legacy admin surface는 같은
+    release에서 제거하며 redirect/no-op parameter를 두지 않는다"고 했다. 물리 삭제(40C)는
+    soak 뒤에만 가능하므로(ADR-075 결정 4) 그때까지 이 route는 **읽기 전용**이다.
+
+    static 층(`infra/legacy_write_fence.py`)과 ACL 층(`runtime_privileges`)이 같은 것을
+    막지만, route에서 먼저 410을 주면 (a) 클라이언트가 재시도하지 않고 (b) 감사 로그에
+    "왜 실패했는지"가 500이 아니라 의도된 상태로 남는다.
+
+    읽기(GET/HEAD/OPTIONS)는 통과시킨다 — soak 동안 legacy를 **읽어서** canonical과
+    대조해야 한다.
+    """
+    if request.method in {"GET", "HEAD", "OPTIONS"}:
+        return
+    # theme/source/rule catalog는 legacy가 아니다 — T-VN-40 계획서(plan:28)가 "catalog
+    # input만 유지"로 정했고 0207~0209가 T-VN-40에서 새 procedure로 그 표에 쓴다. 그 route는
+    # 살려 둔다. legacy는 `curated_features` overlay(`/features/curated*`,
+    # `/curated-features*`)뿐이다.
+    # segment 단위로 본다 — substring이면 `/features/curated-imports` 같은 미래 route까지
+    # 조용히 410이 된다(리뷰 P2). `/features/curated` 뒤는 끝이거나 `/`여야 한다.
+    if _LEGACY_WRITE_PATH.search(request.url.path) is None:
+        return
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "legacy curated write surface is fenced (T-VN-40A). "
+            "정본은 curation_collections/curation_items이며 쓰기 경로는 "
+            "POST /v1/admin/curations/imports/preview → import-plans/{id}/commit 이다."
+        ),
+    )
+
+
+admin_router = APIRouter(
+    prefix="/admin",
+    tags=["admin-curated"],
+    dependencies=[Depends(_fence_legacy_curated_writes)],
+)
 
 CurationStatus = Literal["candidate", "curated", "rejected", "archived"]
 CurationRelation = Literal[

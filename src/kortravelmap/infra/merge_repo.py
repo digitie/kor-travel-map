@@ -144,32 +144,26 @@ ORDER BY feature_id
 FOR UPDATE
 """
 
+# T-VN-40A(0222): legacy mirror 4문은 SECURITY DEFINER procedure다. fence가 runtime의
+# `curated_features` write 권한을 뺐으므로(ACL 층) runtime이 직접 UPDATE/FOR UPDATE를
+# 하면 42501이다. `ktm_curation_command_owner` 소유 procedure를 CALL해 mirror만 열어 둔다 —
+# 0214의 canonical→legacy mirror와 같은 패턴. 4문을 하나로 합치지 않은 이유는 사이에
+# canonical 작업이 끼어 호출 **순서**가 계약이기 때문이다. 40C에서 legacy와 함께 사라진다.
+#
 # Merge는 Feature lifecycle을 먼저 고정한 뒤 legacy→collection→item 순서로
 # 잠근다. Legacy DML의 row→collection→item 순서와 import의 Feature→collection
 # 순서를 모두 확장하므로 양방향 sync/import와 교착하지 않는다.
 _LOCK_CURATION_LEGACY_PROJECTIONS_SQL: Final[str] = """
-SELECT legacy.curated_feature_id
-FROM feature.curated_features AS legacy
-WHERE legacy.feature_id IN (:master, :loser)
-  AND NOT legacy.metadata @> '{"merge_projection_detached": true}'::jsonb
-ORDER BY legacy.curated_feature_id
-FOR UPDATE OF legacy
+CALL feature.merge_lock_legacy_curated_features(CAST(:master AS text), CAST(:loser AS text))
 """
 
 # Feature를 선잠근 merge와 legacy-backed writer는 legacy row를 거쳐
 # collection(parent)→item(child) 순서로 들어간다. 영향 collection은 UUID
 # 순서로 잠가 import/admin writer와의 교착을 막는다.
+# 0222: runtime은 canonical 표에 lock 권한이 없으므로(0204 패턴) command_owner 소유
+# procedure 안에서 잠근다 — 행 잠금은 트랜잭션 범위라 반환 뒤에도 유지된다.
 _LOCK_CURATION_COLLECTIONS_SQL: Final[str] = """
-SELECT collection.collection_id
-FROM feature.curation_collections AS collection
-WHERE EXISTS (
-    SELECT 1
-    FROM feature.curation_items AS item
-    WHERE item.collection_id = collection.collection_id
-      AND item.feature_id IN (:master, :loser)
-)
-ORDER BY collection.collection_id
-FOR UPDATE OF collection
+CALL feature.merge_lock_curation_collections(CAST(:master AS text), CAST(:loser AS text))
 """
 
 # 한 collection의 동일 official item에는 source에서 빠진 과거 component와 현재
@@ -686,69 +680,7 @@ RETURNING
 # Duplicate reconcile가 loser의 최신 operator state/tombstone을 master canonical
 # survivor에 반영했으면 master legacy projection도 같은 transaction에서 맞춘다.
 _SYNC_MASTER_LEGACY_PROJECTIONS_SQL: Final[str] = """
-UPDATE feature.curated_features AS legacy
-SET curation_status = CASE item.status
-        WHEN 'included' THEN 'curated'
-        ELSE item.status
-    END,
-    selection_origin = CASE
-        WHEN item.operator_updated_at IS NOT NULL THEN 'admin'
-        ELSE legacy.selection_origin
-    END,
-    selected_by = CASE
-        WHEN item.status = 'included' THEN item.operator_updated_by
-        ELSE legacy.selected_by
-    END,
-    selected_at = CASE
-        WHEN item.status = 'included' THEN item.operator_updated_at
-        ELSE legacy.selected_at
-    END,
-    rejected_by = CASE
-        WHEN item.status = 'rejected' THEN item.operator_updated_by
-        WHEN item.status IN ('included', 'candidate') THEN NULL
-        ELSE legacy.rejected_by
-    END,
-    rejected_at = CASE
-        WHEN item.status = 'rejected' THEN item.operator_updated_at
-        WHEN item.status IN ('included', 'candidate') THEN NULL
-        ELSE legacy.rejected_at
-    END,
-    rejection_reason = CASE
-        WHEN item.status IN ('included', 'candidate') THEN NULL
-        ELSE legacy.rejection_reason
-    END,
-    curation_relation = item.curation_relation,
-    reuse_policy = item.reuse_policy,
-    operator_updated_by = item.operator_updated_by,
-    operator_updated_at = item.operator_updated_at,
-    archived_at = item.archived_at,
-    updated_at = clock_timestamp(),
-    content_version = legacy.content_version + 1
-FROM feature.curation_items AS item
-WHERE item.feature_id = :master
-  AND legacy.feature_id = :master
-  AND legacy.archived_at IS NULL
-  AND NOT legacy.metadata @> '{"merge_projection_detached": true}'::jsonb
-  AND item.legacy_projection_id = legacy.curated_feature_id
-  AND (
-      legacy.curation_status,
-      legacy.curation_relation,
-      legacy.reuse_policy,
-      legacy.operator_updated_by,
-      legacy.operator_updated_at,
-      legacy.archived_at
-  ) IS DISTINCT FROM (
-      CASE item.status
-          WHEN 'included' THEN 'curated'
-          ELSE item.status
-      END,
-      item.curation_relation,
-      item.reuse_policy,
-      item.operator_updated_by,
-      item.operator_updated_at,
-      item.archived_at
-  )
-RETURNING legacy.curated_feature_id
+CALL feature.merge_sync_master_legacy_curated_features(CAST(:master AS text))
 """
 
 # Legacy projection 동기화 전에는 duplicate history의 target을 비워 둔다. 같은
@@ -799,59 +731,15 @@ RETURNING loser_curated.curated_feature_id
 # 같은 stored collection/external identity의 master canonical pair만 archive한다.
 # Mutable slug/title로 collection key를 재계산하거나 MOVE 뒤 feature_id를 증거로 쓰지 않는다.
 _ARCHIVE_CONFLICTING_LEGACY_CURATED_FEATURES_SQL: Final[str] = """
-UPDATE feature.curated_features AS loser_curated
-SET feature_id = :master,
-    curation_status = 'archived',
-    metadata = loser_curated.metadata || jsonb_build_object(
-        'merge_projection_detached',
-        true
-    ),
-    archived_at = now(),
-    updated_at = now()
-WHERE loser_curated.feature_id = :loser
-  AND loser_curated.archived_at IS NULL
-  AND (
-      (
-          NOT EXISTS (
-              SELECT 1
-              FROM feature.curation_items AS direct_item
-              WHERE direct_item.legacy_projection_id =
-                    loser_curated.curated_feature_id
-                AND direct_item.archived_at IS NULL
-          )
-          AND EXISTS (
-              SELECT 1
-              FROM feature.curated_features AS master_curated
-              WHERE master_curated.feature_id = :master
-                AND master_curated.theme_id = loser_curated.theme_id
-                AND master_curated.archived_at IS NULL
-                AND NOT master_curated.metadata @>
-                    '{"merge_projection_detached": true}'::jsonb
-          )
-      )
-      OR EXISTS (
-          SELECT 1
-          FROM feature.curation_items AS loser_item
-          JOIN feature.curation_items AS master_item
-            ON master_item.collection_id = loser_item.collection_id
-           AND master_item.external_item_id = loser_item.external_item_id
-          WHERE master_item.feature_id = :master
-            AND loser_item.legacy_projection_id =
-                loser_curated.curated_feature_id
-            AND master_item.curation_item_id <>
-                loser_item.curation_item_id
-      )
-  )
-RETURNING loser_curated.curated_feature_id
+CALL feature.merge_archive_conflicting_legacy_curated_features(
+    CAST(:master AS text), CAST(:loser AS text)
+)
 """
 
 # 충돌을 정리한 뒤 남은 active/archived legacy row도 master로 옮긴다. 이 UPDATE로
 # 0045 trigger가 다시 실행되어도 NEW.feature_id가 master이므로 병합이 되돌아가지 않는다.
 _MOVE_LEGACY_CURATED_FEATURES_SQL: Final[str] = """
-UPDATE feature.curated_features
-SET feature_id = :master, updated_at = now()
-WHERE feature_id = :loser
-RETURNING curated_feature_id
+CALL feature.merge_move_legacy_curated_features(CAST(:master AS text), CAST(:loser AS text))
 """
 
 _TRANSITION_LOSER_LIFECYCLE_SQL: Final[str] = """
@@ -971,18 +859,14 @@ async def apply_feature_merge(
     )
     if loser_state is None:
         raise MergeConflictError(f"loser feature 없음 — {loser_id!r}")
-    (
-        await session.execute(
-            text(_LOCK_CURATION_LEGACY_PROJECTIONS_SQL),
-            {"master": master_id, "loser": loser_id},
-        )
-    ).fetchall()
-    (
-        await session.execute(
-            text(_LOCK_CURATION_COLLECTIONS_SQL),
-            {"master": master_id, "loser": loser_id},
-        )
-    ).fetchall()
+    await session.execute(
+        text(_LOCK_CURATION_LEGACY_PROJECTIONS_SQL),
+        {"master": master_id, "loser": loser_id},
+    )
+    await session.execute(
+        text(_LOCK_CURATION_COLLECTIONS_SQL),
+        {"master": master_id, "loser": loser_id},
+    )
     moved = len(
         (
             await session.execute(text(_MOVE_LINKS_SQL), {"master": master_id, "loser": loser_id})

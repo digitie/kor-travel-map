@@ -801,14 +801,76 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
 주입한다. `.env.example`에 키가 없다(주입 주체가 다르다). DB role 쪽은 별도로
 `ktm_curation_command_owner` 등 4개.
 
-- [ ] **T-VN-40A-fence** — legacy write 차단. `curated_repo.py`의 INSERT/UPDATE 경로에
-  DB(trigger 또는 REVOKE)·ACL·static(lint) 3층 게이트를 구현·병합한다. **prod ①~② 전에**
-  끝나야 한다 — 안 그러면 import 중에도 legacy가 쓰일 수 있다.
+- [~] **T-VN-40A-fence** — legacy write 차단 (PR #994, draft). 3층 구현·검증 완료:
+  **ACL**(`runtime_privileges` 표에서 `curated_features` write 제거 → DB가 거부, 통합
+  테스트가 `SET ROLE ktm_feature_runtime`으로 실측) · **static**(`infra/legacy_write_fence.py`,
+  repo write 4함수 첫 줄) · **route**(legacy admin write route 410 Gone).
+  - 범위를 한 번 잘못 잡았다 — theme/source/rule catalog까지 막았다가 plan:28("catalog
+    input만 유지")과 `0207_tvn40_theme_catalog.py`(T-VN-40이 새로 만든 procedure가 그 표에
+    쓴다)를 확인하고 `curated_features` 하나로 좁혔다. 이름이 `curated_`로 시작한다고
+    전부 legacy가 아니다.
+  - legacy write가 **된다**를 단언하던 테스트를 **막힌다**로 뒤집었다(지우면 회귀를 잡을
+    자리가 없다). read 경로 fixture는 test-only raw INSERT helper로.
+  - **적대 리뷰(2명) 결과와 조치** — 둘 다 `holds=False`, P1 1건 + P2 4건. 전부 반영했다.
+    - **P1 — merge가 runtime role로 죽는다.** `apply_feature_merge`가 legacy 표를 `FOR
+      UPDATE`+UPDATE 3문으로 mirror하는데 fence가 그 권한을 뺐다 → 42501. 새
+      `tests/integration/test_merge_under_runtime_role.py`(`as_api_runtime`)로 red 확인.
+      **그 테스트가 하나 더 드러냈다**: legacy 다음으로 canonical `curation_collections`
+      `FOR UPDATE`에서 42501 — **fence 이전부터의 결함**(20fa752d). 모든 merge 테스트가
+      superuser라 CI가 못 잡았고 prod dedup 병합은 이미 깨져 있었다. 해결(0204/0214 패턴):
+      `0222_tvn40a_merge_runtime_role` — command_owner 소유 SECURITY DEFINER procedure 5개
+      (legacy lock/archive/sync/move + canonical collections lock)를 CALL. runtime에 표
+      권한을 주지 않는다. 행 잠금은 트랜잭션 범위라 반환 뒤에도 유지된다. legacy 4개는 40C에서
+      사라지고 collections lock은 남는다.
+    - P2 inventory — lint가 `curated_repo.py` 이름 규칙만 봤다 → `infra/*.py` 전체를 SQL
+      문자열 수준(상수+인라인)에서 훑어 감싸는 함수를 찾고 fence 호출 또는 allowlist
+      (`update_curation_item`·`_lock_legacy_projections_for_item` — 0214 이전 Python writer,
+      **어떤 runtime 진입점에도 연결돼 있지 않음**을 별도 테스트로 고정)를 요구.
+    - P2 snapshot 표 — `curated_feature_detail_snapshots`는 읽는 코드도 쓰는 코드도 없는데
+      RW였다 → SELECT만. 덤으로 ACL 표의 **phantom 항목 2개** 발견·삭제
+      (`curated_tripmate_copy_snapshots` — legacy 0032가 rename, `weather_metric_series` —
+      baseline에 없음). reconcile은 DB에 없는 표를 조용히 건너뛰므로 phantom은 아무 것도
+      지키지 않으면서 "관리된다"는 인상만 준다. "표에 선언된 relation이 DB에 실재한다"
+      통합 테스트 추가.
+    - P2 spoof 422 — 삭제한 legacy 라우터 테스트의 canonical 대응: item POST/PATCH가
+      body의 actor/selected_by/operator_updated_by/updated_by/created_by를 422로 거부하고
+      repo command에 닿지 않음(ADR-066 D-2).
+    - P2 admin UI — legacy detail 화면의 채택/해제/보관/편집이 410을 맞는다 → write 컨트롤·
+      mutation 4개·FeatureEditor·CuratedPlaceSearchPanel 제거, fence 안내로 교체. read
+      패널은 40C까지 유지(plan §40B의 write 절반을 지금, read는 40C에서).
+  - **2차 적대 리뷰(2명, 수정분 대상)** — coverage 렌즈 `holds=True`(P2만), DB 렌즈
+    `holds=False` P1 2건. 전부 반영.
+    - P1 — **runtime preflight allowlist 미등록**: `infra/db.py`가 runtime 로그인이 EXECUTE할
+      수 있는 procedure를 fail-closed로 대조하는데 0222의 5개가 없어 **API/Dagster가 기동을
+      거부**했다(`test_tvn34_runtime_privilege_preflight` red — 1차 통합 선택에 빠져 있었다).
+      `_ADMIN_CURATION_FEATURE_PROCEDURES`에 등록.
+    - P1 — **EXECUTE 대상이 공유 그룹**: `ktm_feature_runtime`에 줘서 provider ETL identity
+      (dagster runtime)까지 legacy row를 옮길 수 있었고 본문에 executor 게이트가 없었다(0214
+      패턴의 절반만). 0214 형태 전체로: REVOKE FROM PUBLIC+runtime 로그인 전부, EXECUTE는
+      `ktm_curation_admin_executor`(api runtime 상속)에만, 본문에 `session_user` 게이트.
+      dagster runtime이 CALL하면 42501인 음성 테스트 추가. **그 결과 `test_merge_repo.py`의
+      merge 호출 21곳을 전부 `as_api_runtime`으로 감쌌다** — superuser는 게이트에 걸리고,
+      애초에 superuser 세션은 ACL 회귀를 못 잡는다.
+    - P2 — trigger `sync_curated_feature_collection`이 command_owner로 돌 때 INSERT하는
+      `curation_collections.created_at`이 0213 column grant에 없었다(0214부터 잠복) → 0222에서
+      부여. splitter는 0214 사본을 그대로(`''` escape). route fence는 substring→segment
+      regex. lint 정규식은 회피형(ONLY/MERGE/TRUNCATE/alias 없는 lock/FOR SHARE·KEY SHARE —
+      넷 다 UPDATE 권한 필요) 전수 + ORM `CuratedFeatureRow` 가드. `postgres-schema.md`
+      head→0222.
+    - **배포 선행(잊지 말 것)**: orchestrator(docker-manager) `.env`의
+      `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를 `0222_tvn40a_merge_runtime_role`로 올려야
+      `api-entrypoint.sh`가 fail-closed로 막지 않는다. T-VN-40 인수 실행 ①의 첫 줄.
+    - 3차(재검증) P1 — executor 게이트가 superuser도 거부하는데 `test_cli_dedup_merge`(superuser
+      DSN)와 `test_tvn35_typed_subtypes`(migrated_session) 2건이 여전히 superuser로 merge를 몰았다
+      → CLI 테스트는 API runtime DSN(prod와 같음), tvn35는 `as_api_runtime`. `ktmctl dedup-merge`
+      help에 "DSN은 API runtime 로그인" 명시(superuser/migrator DSN은 42501).
+  - 잔여: draft 해제 → CI → 머지. **①~② 전에 머지돼야 한다.**
 - [ ] **T-VN-40-mapping** — `ops.curation_cutover_identity_mappings` 적재 migration.
   설계 §6.2 step 3. PinVi backfill의 입력이다.
 - [ ] **T-VN-40C-manifest** — physical removal manifest와 migration을 사전에 작성·검토한다.
   legacy 물리 삭제 실행은 receipt complete 뒤다.
-- [ ] **T-VN-40 인수 실행** — 사전 3 task 병합 뒤 ① migration·fence enable → ② import/backfill
+- [ ] **T-VN-40 인수 실행** — 사전 3 task 병합 뒤 ① `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`
+  bump(→0222) + migration·fence enable → ② import/backfill
   → ③ sanctioned live/soak → ④ receipt complete → ⑤ manifest physical removal 실행. 백업/PITR
   복구점을 먼저 확인한다.
 
@@ -1054,6 +1116,29 @@ Feature는 **애초에 다른 `feature_id`**라 ETL이 그 행을 덮어쓸 수 
 `curation_items.source_record_key`는 **nullable**이고 `feature.features`에는 source 쪽 FK가
 없다(부모 Feature 자기참조 FK만 있다). 즉 provider source record 없이도 Feature와 curation
 item을 만들 수 있다.
+
+#### T-VN-41과의 관계 (2026-08-18 확인 — **직접 겹치지 않는다**)
+
+사용자 질문 "H34 개선이 T-VN-41과 관련 없는지"에 대한 확인. 저장소와 PinVi main을 대조했다.
+
+- **T-VN-41은 cache-target 표면이다.** `(external_system, target_key)` = **PinVi가 등록한 POI**를
+  Map Feature에 링크하고, 그 링크·refresh 결과의 순서를 generation·outbox로 보존한다(ADR-081).
+  대상 relation은 `poi_cache_targets`·`cache_target_*`이고 `feature.features`를 **쓰지 않는다**
+  (`cache_target_outbox_repo.py`에 `feature.features` 참조 0건).
+- **H34/M01은 `feature.features`를 만드는 표면이다.** `create_feature_with_initial_state`
+  procedure를 admin API에 잇는다. cache-target을 건드리지 않는다.
+- **PinVi의 Feature 생성 요청(M04)은 이미 별도 경로다.** PinVi main의
+  `feature_requests.py:254`가 `admin_client.create_feature(payload)`로 **`POST /v1/admin/features`**를
+  친다(`kor_travel_map_admin.py:3` — "`/v1/admin/features*` change API"). cache-target을 만지지
+  않는다(`grep cache_target` 0건). 즉 M04는 41의 outbox를 타지 않고 admin API를 탄다.
+
+**간접 접점 하나 — 미결.** 수동 Feature가 만들어진 뒤 PinVi가 그것을 POI로 **링크**하려면
+cache-target 경로를 탄다. 그때 41C의 outbox가 그 링크를 전파한다. 이건 41의 정상 동작이지
+H34가 41을 바꾸는 것이 아니다. 다만 **origin이 `manual_*`인 Feature를 41의 reconciliation이
+provider Feature와 다르게 취급해야 하는지**(예: provider 재적재로 사라질 수 있는 Feature와
+달리 수동 Feature는 restore epoch에서 어떻게 보이나)는 M02(origin 불변)와 41A(restore epoch)를
+함께 볼 때 정해야 한다. 지금은 41A가 미착수라 정할 수 없다 — **M02 설계 시 41A 소유자와
+확인 항목**으로 남긴다.
 
 #### 아직 안 정해진 것
 

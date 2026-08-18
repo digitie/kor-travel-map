@@ -2,41 +2,29 @@
 
 import {
   AlertTriangleIcon,
-  ArchiveIcon,
   ArrowLeftIcon,
-  CheckIcon,
   CopyIcon,
   ExternalLinkIcon,
+  LockIcon,
   RefreshCwIcon,
-  RotateCcwIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 
-import {
-  useAdminCuratedFeature,
-  useAdminCuratedThemes,
-  useArchiveCuratedFeatureMutation,
-  useSelectCuratedFeatureMutation,
-  useUnselectCuratedFeatureMutation,
-} from "@/api/curated";
+import { useAdminCuratedFeature } from "@/api/curated";
 import { AdminShell } from "@/components/admin-shell";
-import { useConfirm } from "@/components/confirm-dialog";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { statusLabel } from "@/lib/status-label";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Skeleton } from "@/components/ui/skeleton";
-import { notifyStatusTransition } from "@/lib/curated-labels";
 import { formatDateTime, shortId } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 import {
   CuratedFeatureDetailPreview,
   CuratedFeatureLocationPanel,
-  CuratedPlaceSearchPanel,
-  FeatureEditor,
 } from "../curated-features-client";
 import { CuratedLifecycleStrip } from "../curated-lifecycle";
 
@@ -50,82 +38,10 @@ export function CuratedFeatureDetailClient({
   curatedFeatureId: string;
 }) {
   const feature = useAdminCuratedFeature(curatedFeatureId);
-  const themes = useAdminCuratedThemes({ limit: 200 });
-  const selectFeature = useSelectCuratedFeatureMutation();
-  const unselectFeature = useUnselectCuratedFeatureMutation();
-  const archiveFeature = useArchiveCuratedFeatureMutation();
-  const confirm = useConfirm();
   const item = feature.data?.data ?? null;
   const pageTitle = item
     ? `${item.display_title ?? item.feature_name} · ${statusLabel(item.curation_status)}`
     : "큐레이션";
-  const anyStatusPending =
-    selectFeature.isPending ||
-    unselectFeature.isPending ||
-    archiveFeature.isPending;
-
-  const selectCurated = () => {
-    if (!item) return;
-    selectFeature.mutate(
-      {
-        curatedFeatureId: item.curated_feature_id,
-        body: { reason: "admin curated selection" },
-      },
-      {
-        onSuccess: () => {
-          // invalidateCurated가 ["curated-feature"]도 무효화해 hero 배지가 자동 갱신.
-          notifyStatusTransition("select", item.feature_name);
-        },
-        onError: (error) => {
-          toast.error("채택 실패", { description: error.message });
-        },
-      },
-    );
-  };
-
-  const unselectCurated = () => {
-    if (!item) return;
-    unselectFeature.mutate(
-      {
-        curatedFeatureId: item.curated_feature_id,
-        body: { reason: "admin curated unselect" },
-      },
-      {
-        onSuccess: () => {
-          notifyStatusTransition("unselect", item.feature_name);
-        },
-        onError: (error) => {
-          toast.error("채택 해제 실패", { description: error.message });
-        },
-      },
-    );
-  };
-
-  const archiveCurated = async () => {
-    if (!item) return;
-    const ok = await confirm({
-      title: `"${item.feature_name}"을(를) 보관할까요?`,
-      description:
-        "보관하면 규칙 재적용으로 되살아나지 않으며, '보관됨 포함' 필터로만 조회됩니다.",
-      confirmLabel: "보관",
-      destructive: true,
-    });
-    if (!ok) return;
-    archiveFeature.mutate(
-      {
-        curatedFeatureId: item.curated_feature_id,
-        body: { reason: "admin curated archive" },
-      },
-      {
-        onSuccess: () => {
-          notifyStatusTransition("archive", item.feature_name);
-        },
-        onError: (error) => {
-          toast.error("보관 실패", { description: error.message });
-        },
-      },
-    );
-  };
 
   const copyId = () => {
     if (!item) return;
@@ -153,42 +69,6 @@ export function CuratedFeatureDetailClient({
               <ExternalLinkIcon data-icon="inline-start" />
               feature
             </Link>
-          ) : null}
-          {item ? (
-            item.curation_status === "curated" ? (
-              <Button
-                disabled={anyStatusPending}
-                title="공개에서 제외(거절)"
-                type="button"
-                variant="outline"
-                onClick={unselectCurated}
-              >
-                <RotateCcwIcon data-icon="inline-start" />
-                채택 해제
-              </Button>
-            ) : (
-              <Button
-                disabled={anyStatusPending}
-                title="공개 목록에 추가"
-                type="button"
-                onClick={selectCurated}
-              >
-                <CheckIcon data-icon="inline-start" />
-                채택
-              </Button>
-            )
-          ) : null}
-          {item ? (
-            <Button
-              disabled={anyStatusPending}
-              title="소프트 삭제"
-              type="button"
-              variant="destructive"
-              onClick={() => void archiveCurated()}
-            >
-              <ArchiveIcon data-icon="inline-start" />
-              보관
-            </Button>
           ) : null}
           <Button
             disabled={feature.isFetching}
@@ -277,18 +157,23 @@ export function CuratedFeatureDetailClient({
                 <CuratedFeatureDetailPreview feature={item} />
               </div>
               <aside className="flex min-w-0 flex-col gap-4">
-                <CuratedPlaceSearchPanel
-                  feature={item}
-                  key={`${item.curated_feature_id}:place-search`}
-                />
-                {/* The editor keeps its inputs in an override state that follows
-                    the refetched server values while pristine, so the key no
-                    longer needs updated_at to re-sync after a patch/save. */}
-                <FeatureEditor
-                  feature={item}
-                  key={`${item.curated_feature_id}:editor`}
-                  themes={themes.data?.data.items ?? []}
-                />
+                <Alert>
+                  <LockIcon data-icon="inline-start" />
+                  <AlertTitle>legacy 큐레이션 쓰기 봉인 (T-VN-40A)</AlertTitle>
+                  <AlertDescription>
+                    이 화면은 읽기 전용입니다. 채택·해제·보관·편집은 canonical
+                    컬렉션 관리에서 합니다. legacy 표는 T-VN-40C에서 삭제됩니다.
+                    <Link
+                      className={cn(
+                        buttonVariants({ variant: "outline", size: "sm" }),
+                        "mt-2",
+                      )}
+                      href="/admin/features/curated"
+                    >
+                      컬렉션 관리로
+                    </Link>
+                  </AlertDescription>
+                </Alert>
               </aside>
             </div>
           </>

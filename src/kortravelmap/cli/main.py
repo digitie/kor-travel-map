@@ -242,7 +242,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     merge_p = sub.add_parser(
         "dedup-merge",
-        help="검토 큐 후보 1쌍을 병합 (mutate, advisory lock; ADR-016).",
+        help=(
+            "검토 큐 후보 1쌍을 병합 (mutate, advisory lock; ADR-016). "
+            "DSN은 API runtime 로그인이어야 한다 — 0222 merge procedure는 admin executor만 "
+            "실행할 수 있어 superuser/migrator DSN은 42501로 거부된다."
+        ),
     )
     merge_p.add_argument(
         "review_id",

@@ -160,6 +160,62 @@ def _expected_public(ids: dict[str, str]) -> set[str]:
     return {ids[suffix] for suffix, _l, _p, _q, public in _STATE_MATRIX if public}
 
 
+
+async def _seed_legacy_curated_row(
+    session: AsyncSession,
+    *,
+    theme_id: str,
+    feature_id: str,
+    source_id: str,
+    curation_status: str = "curated",
+    selected_by: str | None = "pytest",
+    rejected_by: str | None = None,
+    rejection_reason: str | None = None,
+    metadata: dict[str, object] | None = None,
+) -> str:
+    """legacy `curated_features` row를 **테스트 fixture로만** 심는다 (T-VN-40A).
+
+    `curated_repo.create_curated_feature`는 fence 뒤로 static 층에서 막힌다. 이 파일은
+    공개 **read** 경로를 검증하므로 legacy row가 있어야 하고, 그 read는 soak 동안 살아
+    있어야 한다. 테스트 owner role이라 raw INSERT가 되는 것이지 fence 우회가 아니다 —
+    앱 role은 ACL 층이 막는다. **이 helper를 앱 코드로 옮기지 마라.**
+    """
+    row = await session.execute(
+        text(
+            """
+            INSERT INTO feature.curated_features (
+                theme_id, feature_id, source_id, curation_status,
+                selection_origin, selected_by, selected_at,
+                rejected_by, rejected_at, rejection_reason,
+                curation_relation, reuse_policy, metadata, updated_at
+            ) VALUES (
+                CAST(:theme_id AS uuid), :feature_id, CAST(:source_id AS uuid),
+                :curation_status, 'admin',
+                CAST(:selected_by AS text),
+                CASE WHEN CAST(:selected_by AS text) IS NULL THEN NULL ELSE now() END,
+                CAST(:rejected_by AS text),
+                CASE WHEN CAST(:rejected_by AS text) IS NULL THEN NULL ELSE now() END,
+                CAST(:rejection_reason AS text),
+                'nearby_option', 'manual_review',
+                CAST(:metadata_json AS jsonb), now()
+            )
+            RETURNING curated_feature_id::text
+            """
+        ),
+        {
+            "theme_id": theme_id,
+            "feature_id": feature_id,
+            "source_id": source_id,
+            "curation_status": curation_status,
+            "selected_by": selected_by,
+            "rejected_by": rejected_by,
+            "rejection_reason": rejection_reason,
+            "metadata_json": json.dumps(metadata or {}),
+        },
+    )
+    return str(row.scalar_one())
+
+
 async def test_view_exists_with_single_predicate(migrated_session: AsyncSession) -> None:
     """0096 view가 ADR-067의 3축 공개 predicate를 단독으로 가진다."""
     viewdef = (
@@ -833,12 +889,11 @@ async def test_curated_public_read_uses_projection_admin_unchanged(
             feature_id=f"pfv:curated:{suffix}",
             name=f"레거시 큐레이션 {suffix}",
         )
-        await curated_repo.create_curated_feature(
+        await _seed_legacy_curated_row(
             migrated_session,
             theme_id=theme_id,
             feature_id=f"pfv:curated:{suffix}",
             source_id=source_id,
-            curation_status="curated",
         )
         if publication_state != "published":
             await migrated_session.execute(
@@ -885,7 +940,7 @@ async def test_curated_public_read_uses_projection_admin_unchanged(
             name=f"제한 큐레이션 {suffix}",
         )
         restricted_overlays.append(
-            await curated_repo.create_curated_feature(
+            await _seed_legacy_curated_row(
                 migrated_session,
                 theme_id=overlay_theme_id,
                 feature_id=f"pfv:curated:{suffix}",
@@ -941,7 +996,7 @@ async def test_curated_public_read_uses_projection_admin_unchanged(
         assert (
             await curated_repo.get_curated_feature(
                 migrated_session,
-                curated_feature_id=restricted.curated_feature_id,
+                curated_feature_id=restricted,
                 public_only=True,
             )
             is None
@@ -1026,12 +1081,11 @@ async def test_ended_notice_is_hidden_from_curation_and_curated_surfaces(
         kind="notice",
         detail=json.dumps({"valid_end_time": "2000-01-01T00:00:00+00:00"}),
     )
-    overlay = await curated_repo.create_curated_feature(
+    overlay_id = await _seed_legacy_curated_row(
         migrated_session,
         theme_id=theme_id,
         feature_id=feature_id,
         source_id=source_id,
-        curation_status="curated",
     )
     collection = await curation_repo.create_curation_collection(
         migrated_session,
@@ -1054,7 +1108,7 @@ async def test_ended_notice_is_hidden_from_curation_and_curated_surfaces(
     assert (
         await curated_repo.get_curated_feature(
             migrated_session,
-            curated_feature_id=overlay.curated_feature_id,
+            curated_feature_id=overlay_id,
             public_only=True,
         )
         is None

@@ -134,6 +134,63 @@ async def _curated_source_for_catalog_display(
     )
 
 
+
+async def _seed_legacy_curated_row(
+    session: AsyncSession,
+    *,
+    theme_id: str,
+    feature_id: str,
+    source_id: str,
+    curation_status: str = "curated",
+    selected_by: str | None = "pytest",
+    rank_score: float = 0.0,
+    display_title: str | None = None,
+) -> str:
+    """legacy `curated_features` row를 **테스트 fixture로만** 심는다.
+
+    T-VN-40A fence 뒤로 `curated_repo.create_curated_feature`는 static 층에서 막힌다.
+    그런데 이 파일의 read 테스트(`list_curated_features` 계열)는 legacy row가 있어야
+    돌고, soak 동안 legacy를 읽어 canonical과 대조하는 경로라 살아 있어야 한다.
+
+    이 helper는 그 fence를 **우회하는 것이 아니다** — 우회하려면 앱 코드가 raw SQL로
+    쓰면 되겠지만 그건 ACL 층(`runtime_privileges`)이 막는다. 여기서 되는 이유는
+    `migrated_session`이 테스트 owner role이기 때문이고, 그것이 곧 "앱은 못 쓰고
+    테스트만 심을 수 있다"는 fence의 의도다.
+
+    ⚠️ 이 helper를 앱 코드나 스크립트로 옮기지 마라. 옮기는 순간 fence가 뚫린 것이다.
+    """
+    row = await session.execute(
+        text(
+            """
+            INSERT INTO feature.curated_features (
+                theme_id, feature_id, source_id, curation_status,
+                selection_origin, selected_by, selected_at,
+                rank_score, display_title, curation_relation, reuse_policy,
+                metadata, updated_at
+            ) VALUES (
+                CAST(:theme_id AS uuid), :feature_id, CAST(:source_id AS uuid),
+                :curation_status, 'admin', CAST(:selected_by AS text),
+                CASE WHEN CAST(:selected_by AS text) IS NULL THEN NULL ELSE now() END,
+                CAST(:rank_score AS numeric), CAST(:display_title AS text),
+                'nearby_option', 'manual_review',
+                '{}'::jsonb, now()
+            )
+            RETURNING curated_feature_id::text
+            """
+        ),
+        {
+            "theme_id": theme_id,
+            "feature_id": feature_id,
+            "source_id": source_id,
+            "curation_status": curation_status,
+            "selected_by": selected_by,
+            "rank_score": rank_score,
+            "display_title": display_title,
+        },
+    )
+    return str(row.scalar_one())
+
+
 async def test_seeded_theme_sets_include_seasonal_and_regional_expansion(
     migrated_session: AsyncSession,
 ) -> None:
@@ -197,82 +254,62 @@ async def test_curated_uuid_defaults_are_schema_qualified(
     }
 
 
-async def test_manual_create_patch_and_archive_curated_feature(
+async def test_manual_curated_feature_writes_are_fenced(
     migrated_session: AsyncSession,
 ) -> None:
+    """T-VN-40A — legacy `curated_features` CRUD는 static fence에서 막힌다.
+
+    원래 이 테스트는 legacy create/patch/archive가 **동작한다**를 검증했다. fence 후에는
+    반대다. 세 write 함수 전부가 DB에 닿기 전에 `LegacyWriteFenceError`를 던져야 한다.
+    """
+    from kortravelmap.infra.legacy_write_fence import LegacyWriteFenceError
+
     feature_id = await _load_seoul_bookstore(migrated_session)
-    themes = await curated_repo.list_curated_themes(
-        migrated_session,
-        limit=50,
-    )
+    themes = await curated_repo.list_curated_themes(migrated_session, limit=50)
     theme = next(item for item in themes if item.theme_group == "books")
-    target_theme = next(item for item in themes if item.theme_id != theme.theme_id)
     source = await _curated_source_for_catalog_display(
         migrated_session,
         provider="python-datagokr-api",
         dataset_key="datagokr_seoul_bookstores",
     )
-
-    created = await curated_repo.create_curated_feature(
-        migrated_session,
-        theme_id=theme.theme_id,
-        feature_id=feature_id,
-        source_id=source.source_id,
-        curation_status="curated",
-        selected_by="pytest",
-        curation_relation="bookstore_stop",
-        reuse_policy="allowed",
-        metadata={"manual": True},
-    )
-    assert created.selected_at is not None
-    assert created.content_version == 1
-
-    patched = await curated_repo.update_curated_feature(
-        migrated_session,
-        curated_feature_id=created.curated_feature_id,
-        updates={
-            "theme_id": target_theme.theme_id,
-            "display_title": "관리자 지정 묶음 제목",
-            "display_summary": "수동 추천 책방",
-        },
-    )
-    assert patched is not None
-    assert patched.theme_id == target_theme.theme_id
-    assert patched.display_title == "관리자 지정 묶음 제목"
-    assert patched.display_summary == "수동 추천 책방"
-    assert patched.content_version == 2
-
-    archived = await curated_repo.update_curated_feature(
-        migrated_session,
-        curated_feature_id=created.curated_feature_id,
-        updates={"curation_status": "archived"},
-        actor="pytest",
-    )
-    assert archived is not None
-    assert archived.curation_status == "archived"
-    assert archived.archived_at is not None
-
-    retained_tombstone = await curated_repo.update_curated_feature(
-        migrated_session,
-        curated_feature_id=created.curated_feature_id,
-        updates={"curation_status": "curated"},
-        actor="pytest",
-    )
-    assert retained_tombstone is not None
-    assert retained_tombstone.curation_status == "archived"
-    assert retained_tombstone.archived_at is not None
-
-    created_archived = await curated_repo.create_curated_feature(
-        migrated_session,
-        theme_id=theme.theme_id,
-        feature_id=feature_id,
-        source_id=source.source_id,
-        curation_status="archived",
-        actor="pytest",
-    )
-    assert created_archived.curation_status == "archived"
-    assert created_archived.archived_at is not None
-
+    theme_id = theme.theme_id
+    with pytest.raises(LegacyWriteFenceError):
+        await curated_repo.create_curated_feature(
+            migrated_session,
+            theme_id=theme_id,
+            feature_id=feature_id,
+            source_id=source.source_id,
+            curation_status="curated",
+            selected_by="pytest",
+        )
+    with pytest.raises(LegacyWriteFenceError):
+        await curated_repo.update_curated_feature(
+            migrated_session,
+            curated_feature_id="00000000-0000-0000-0000-000000000001",
+            updates={"reuse_policy": "allowed"},
+            actor="fence-test",
+        )
+    with pytest.raises(LegacyWriteFenceError):
+        await curated_repo.set_curated_feature_status(
+            migrated_session,
+            curated_feature_id="00000000-0000-0000-0000-000000000001",
+            curation_status="rejected",
+            actor="fence-test",
+        )
+    with pytest.raises(LegacyWriteFenceError):
+        await curated_repo.archive_curated_feature(
+            migrated_session,
+            curated_feature_id="00000000-0000-0000-0000-000000000001",
+            actor="fence-test",
+        )
+    # static 층이 먼저 잡으므로 DB에 row가 생기지 않았어야 한다.
+    count = (
+        await migrated_session.execute(
+            text("SELECT count(*) FROM feature.curated_features WHERE theme_id = CAST(:t AS uuid)"),
+            {"t": theme_id},
+        )
+    ).scalar_one()
+    assert count == 0
 
 async def test_list_curated_features_distinct_by_feature_dedups_cross_theme(
     migrated_session: AsyncSession,
@@ -288,22 +325,18 @@ async def test_list_curated_features_distinct_by_feature_dedups_cross_theme(
         provider="python-datagokr-api",
         dataset_key="datagokr_seoul_bookstores",
     )
-    await curated_repo.create_curated_feature(
+    await _seed_legacy_curated_row(
         migrated_session,
         theme_id=theme_a.theme_id,
         feature_id=feature_id,
         source_id=source.source_id,
-        curation_status="curated",
-        selected_by="pytest",
         rank_score=10.0,
     )
-    best = await curated_repo.create_curated_feature(
+    best_id = await _seed_legacy_curated_row(
         migrated_session,
         theme_id=theme_b.theme_id,
         feature_id=feature_id,
         source_id=source.source_id,
-        curation_status="curated",
-        selected_by="pytest",
         rank_score=90.0,
     )
 
@@ -322,7 +355,7 @@ async def test_list_curated_features_distinct_by_feature_dedups_cross_theme(
     )
     kept = [item for item in deduped.items if item.feature_id == feature_id]
     assert len(kept) == 1
-    assert kept[0].curated_feature_id == best.curated_feature_id
+    assert kept[0].curated_feature_id == best_id
     dedup_feature_ids = [item.feature_id for item in deduped.items]
     assert len(dedup_feature_ids) == len(set(dedup_feature_ids))
 
@@ -338,23 +371,19 @@ async def test_list_curated_features_display_titles_multi_filter(
         provider="python-datagokr-api",
         dataset_key="datagokr_seoul_bookstores",
     )
-    await curated_repo.create_curated_feature(
+    await _seed_legacy_curated_row(
         migrated_session,
         theme_id=themes[0].theme_id,
         feature_id=feature_id,
         source_id=source.source_id,
-        curation_status="curated",
         display_title="가을 책방",
-        selected_by="pytest",
     )
-    await curated_repo.create_curated_feature(
+    await _seed_legacy_curated_row(
         migrated_session,
         theme_id=themes[1].theme_id,
         feature_id=feature_id,
         source_id=source.source_id,
-        curation_status="curated",
         display_title="겨울 책방",
-        selected_by="pytest",
     )
 
     only_fall = await curated_repo.list_curated_features(
