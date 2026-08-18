@@ -773,16 +773,28 @@ class ApiSettings(BaseSettings):
     @field_validator(
         "pinvi_curation_snapshot_token_sha256",
         "pinvi_curation_cutover_mapping_token_sha256",
+        mode="before",
     )
     @classmethod
-    def _validate_pinvi_curation_service_token_sha256(
-        cls,
-        value: str | None,
-    ) -> str | None:
-        if value is not None and _LOWER_SHA256_HEX_PATTERN.fullmatch(value) is None:
-            raise ValueError(
-                "PinVi curation service token digest must be lowercase SHA-256 hex"
-            )
+    def _validate_pinvi_curation_service_token_sha256(cls, value: object) -> object:
+        """빈 문자열을 unset(None)으로 정규화하고 lowercase SHA-256 hex만 받는다.
+
+        docker-manager compose는 이 두 env를 ``${NAME:-}``로 항상 주입한다 — PinVi
+        raw pair가 비어 있는(T-VN-40 receipt pending, legacy compatible-pair) 배포에서는
+        빈 문자열이 들어온다. ``mode="after"`` + ``min_length=64``였을 때 그 빈 문자열이
+        ``string_too_short``로 API 기동 자체를 막았다(2026-08-18 prod 0223 rollout에서
+        재시작 루프). metrics_token/ops token과 같은 규칙으로 ""는 opt-out이다.
+        """
+
+        if value is None:
+            return value
+        if isinstance(value, str):
+            if value == "":
+                return None
+            if _LOWER_SHA256_HEX_PATTERN.fullmatch(value) is None:
+                raise ValueError(
+                    "PinVi curation service token digest must be lowercase SHA-256 hex"
+                )
         return value
 
     @model_validator(mode="after")
