@@ -38,7 +38,10 @@ from kortravelmap.core.curation_cutover_mapping import (
     curation_cutover_identity_mapping_root,
 )
 from kortravelmap.infra import curated_repo, curation_repo
-from tests.integration import test_alembic_metadata_consistency as _alembic_gate_tests
+from tests.integration import (
+    test_alembic_metadata_consistency as _alembic_gate_tests,
+)
+from tests.integration import test_merge_repo as _merge_repo_tests
 from tests.integration.test_curated_repo import (
     _curated_source_for_catalog_display,
     _load_seoul_bookstore,
@@ -50,6 +53,9 @@ pytestmark = pytest.mark.integration
 # dedicated DB fixture 재사용 — 모듈 속성으로 재바인딩하는 것이 pytest의 cross-module fixture
 # 형식이다(`from ... import gate_alembic_config`는 아래 테스트 인자와 이름이 겹쳐 F811).
 gate_alembic_config = _alembic_gate_tests.gate_alembic_config
+# merge guard 테스트용 — test_merge_repo의 `seeded`(master/loser + same-theme legacy conflict,
+# teardown 정리)
+seeded = _merge_repo_tests.seeded
 
 _ROOT = Path(__file__).resolve().parents[2]
 _MIGRATION = _ROOT / "alembic" / "versions" / "0223_tvn40_identity_mappings.py"
@@ -439,5 +445,119 @@ async def test_upgrade_from_0104_loads_seeded_legacy_row(gate_alembic_config: Co
             assert rows[0]["mapping_kind"] == "legacy_projection"
             legacy = await _legacy_row(session, legacy_id)
             assert rows[0]["source_row_hash"] == _python_source_row_hash(legacy)
+    finally:
+        await admin_engine.dispose()
+
+
+# ── 5. merge guard — mapping이 잡은 item은 merge detach가 명시적으로 막는다 ──
+
+
+async def test_merge_refuses_to_rekey_mapped_legacy_conflict_item(
+    seeded: str,
+    migrated_engine: AsyncEngine,
+) -> None:
+    """같은 theme legacy conflict merge는 loser projection item을 rekey한다 — mapping 뒤엔 금지.
+
+    raw FK 23503이 아니라 `MergeConflictError`가 먼저 나야 한다(merge_repo
+    `_PINNED_LEGACY_CONFLICT_ITEMS_SQL`). 실제 API runtime role로 merge를 돌린다.
+    """
+    from kortravelmap.infra.merge_repo import MergeConflictError, apply_feature_merge
+    from tests.integration.conftest import as_api_runtime
+
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        await _run_loader(session)  # seeded pair의 legacy row들이 mapping에 잡힌다
+        pinned = (
+            await session.execute(
+                text(
+                    "SELECT count(*) FROM ops.curation_cutover_identity_mappings AS m "
+                    "JOIN feature.curation_items AS i ON i.curation_item_id = m.curation_item_id "
+                    "WHERE i.feature_id IN ('f_master', 'f_loser')"
+                )
+            )
+        ).scalar_one()
+        assert pinned >= 2, "seeded legacy pair must be mapped before the merge"
+        with pytest.raises(MergeConflictError, match="pinned"):
+            async with session.begin_nested(), as_api_runtime(session):
+                await apply_feature_merge(
+                    session,
+                    master_id="f_master",
+                    loser_id="f_loser",
+                    review_id=seeded,
+                    merged_by="mapping-guard-test",
+                )
+        await session.rollback()
+
+
+# ── 6. dedicated DB — 0104에서 seed된 중단 형태는 전체 체인을 롤백시킨다 ────────
+
+
+async def test_upgrade_from_0104_aborts_whole_chain_on_detached_row(
+    gate_alembic_config: Config,
+) -> None:
+    """prod ① 시나리오: 0104 head에 매핑 불가 legacy row가 있으면 `upgrade head`가 0223에서
+    RAISE하고 0202~0223 **전부** 롤백된다 — head 0104 유지, 표도 안 생긴다.
+
+    중단 사유는 `no_candidate`로 만든다(0045 trigger를 replica 모드로 끄고 legacy row만 심어
+    projection item이 없게). detached marker는 0104 스키마의 reserved-metadata 가드가 직접
+    쓰기를 막아 seed에 쓸 수 없다.
+    """
+    from tests.integration._tvn34_migration_bootstrap import (
+        alembic_schema_owner_role,
+        bootstrapped_migrator_dsn,
+    )
+
+    cfg = gate_alembic_config
+    admin_engine = await _admin_engine(cfg)
+    try:
+        admin_dsn = cfg.get_main_option("sqlalchemy.url")
+        assert admin_dsn is not None
+        cfg.set_main_option("sqlalchemy.url", await bootstrapped_migrator_dsn(admin_dsn))
+        with alembic_schema_owner_role():
+            await asyncio.to_thread(command.upgrade, cfg, "0200_schema_baseline")
+            await asyncio.to_thread(command.stamp, cfg, "0104_tvn36_final_fence")
+
+        async with AsyncSession(admin_engine) as session, session.begin():
+            # 0104 스키마에는 T-VN-40 열(row_revision 등)이 없어 repo helper 대신 raw로 심는다.
+            feature_id = await _load_seoul_bookstore(session)
+            theme_id = (
+                await session.execute(
+                    text(
+                        "SELECT theme_id::text FROM feature.curated_themes "
+                        "ORDER BY theme_slug LIMIT 1"
+                    )
+                )
+            ).scalar_one()
+            source_id = (
+                await session.execute(
+                    text(
+                        "SELECT source_id::text FROM feature.curated_sources "
+                        "ORDER BY source_id LIMIT 1"
+                    )
+                )
+            ).scalar_one()
+            await session.execute(text("SET LOCAL session_replication_role = replica"))
+            await _seed_legacy_curated_row(
+                session, theme_id=theme_id, feature_id=feature_id, source_id=source_id
+            )
+            await session.execute(text("SET LOCAL session_replication_role = DEFAULT"))
+
+        with alembic_schema_owner_role(), pytest.raises(Exception, match="no_candidate=1"):
+            await asyncio.to_thread(command.upgrade, cfg, "head")
+
+        async with AsyncSession(admin_engine) as session:
+            head = (
+                await session.execute(text("SELECT version_num FROM public.alembic_version"))
+            ).scalar_one()
+            assert head == "0104_tvn36_final_fence"
+            assert (
+                await session.execute(
+                    text("SELECT to_regclass('ops.curation_cutover_identity_mappings') IS NULL")
+                )
+            ).scalar_one() is True
+            assert (
+                await session.execute(
+                    text("SELECT to_regclass('feature.theme_feature_candidates') IS NULL")
+                )
+            ).scalar_one() is True
     finally:
         await admin_engine.dispose()

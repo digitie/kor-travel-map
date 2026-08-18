@@ -1,6 +1,6 @@
 # T-VN-40-mapping — `ops.curation_cutover_identity_mappings` 적재 migration 설계
 
-- 날짜: 2026-08-18 · 상태: **적대 리뷰 2명 통과(둘 다 holds=true, P1 없음) → P2 반영 확정 → 구현**
+- 날짜: 2026-08-18 · 상태: **구현됨 — 0223 (draft PR #996). 설계 리뷰 2명 hold → 구현 → 코드 리뷰 2명 hold(P2 반영)**
 - 근거: 상세 설계 §6.2 step 3·§6.3(`t-vn-40-curation-write-model-detailed-design-2026-08-11.md:895-961`),
   `docs/tasks.md` "T-VN-40 인수 — 실태" 사전 task 2번, ADR-075 결정 4
 - 선행: T-VN-40A fence(#994, main `3e0732b3`). **주의(리뷰 P2)**: prod ①에서 fence ACL은 `alembic
@@ -44,7 +44,7 @@ bucket과 fail-closed 규칙을 그대로 구현한다 — "0건이면 무시" �
 | B | `curation_items.legacy_projection_id = curated_feature_id`인 item이 **1** | `legacy_projection` | 0045 sync가 만든 canonical companion — legacy row의 canonical identity 그 자체. archived 여부 무관(identity ≠ liveness; PinVi는 mapped-but-archived를 "resolved·retired"로 다루며 orphan이 아니다). 2개는 `uq_curation_items_legacy_projection_id`(partial UNIQUE)로 **불가** |
 | C | B가 0이고, `collection.theme_id = legacy.theme_id AND item.feature_id = legacy.feature_id AND item.archived_at IS NULL AND item.legacy_projection_id IS NULL`(다른 legacy의 projection은 후보에서 제외)인 item이 **정확히 1**이며 그 item이 `current_import_row_id IS NOT NULL` | `official_membership` | canonical import가 만든 official membership |
 | D | C와 같은 조건인데 `current_import_row_id IS NULL`이고 `(created_by IS NOT NULL OR operator_updated_by IS NOT NULL)` | `manual_membership` | admin이 만든 membership |
-| E | C/D 후보 ≥ 2 · 후보 0(0045의 옛 UUID-mirror 형태 `legacy_projection_id IS NULL AND curation_item_id = curated_feature_id`도 여기 — prod 0) · C/D 조건에 걸리는 item이 있는데 import/admin 근거가 둘 다 없음 · **같은 item을 legacy 2행이 잡음**(PK/UNIQUE 위반 대신 구조화된 사유로 먼저 잡는다) | — **중단** | ambiguous/unmapped. 원인별 count를 RAISE EXCEPTION 메시지에 담는다 |
+| E | C/D 후보 ≥ 2 · 후보 0 (0045의 옛 UUID-mirror 형태 `legacy_projection_id IS NULL AND curation_item_id = curated_feature_id`인 item은 별도 bucket이 아니라 **C/D의 일반 후보**로 본다 — import/admin 근거가 있으면 매핑, 없으면 no_evidence; prod 0) · C/D 조건에 걸리는 item이 있는데 import/admin 근거가 둘 다 없음 · **같은 item을 legacy 2행이 잡음**(PK/UNIQUE 위반 대신 구조화된 사유로 먼저 잡는다) | — **중단** | ambiguous/unmapped. 원인별 count를 RAISE EXCEPTION 메시지에 담는다 |
 
 `legacy_projection`이 있는데 C/D 후보도 함께 있는 경우: B가 우선(첫 매치). 같은 legacy가 두 item에
 동시에 대응되는 것이 아니라 identity는 projection이고 나머지는 별도 membership이다.
@@ -128,8 +128,11 @@ recovery-preflight-v1.json)의 leaf 입력 하나일 뿐이다. 바이트 인코
   image_head, `tests/integration/test_alembic_metadata_consistency.py` 2곳, `docs/architecture/postgres-schema.md`,
   `docs/tasks.md`·`docs/resume.md`의 "→0222", 배포 env `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`.
   `contracts/vnext/*`·`test_vnext_target_freeze`는 catalog 객체 비교라 행 적재와 무관.
-- prod ①에서 실행 후 NOTICE의 count(=4,424 · legacy_projection 4,424 · 나머지 0)를 journal에 기록.
-  `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`는 0223으로.
+- prod ① 직전 `scripts/tvn40_identity_mapping_precheck.sql`(read-only, 전부 0이어야 함 — 2026-08-18 실측 전부 0,
+  legacy 4,424 / projection 4,424)을 돌리고, 실행 후 migration 로그의 manifest 줄(`0223 tvn40 identity mapping
+  loaded: total=… by_kind=…`)과 `count(curated_features) == count(mappings)`를 journal에 기록.
+  `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`는 0223으로. `api-entrypoint.sh`는 loader 중단 문장을 보면 30회
+  재시도 없이 즉시 종료한다.
 
 ## 7. 열어 둔 것
 

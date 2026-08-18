@@ -7,9 +7,10 @@
 
 ### 다음 한 작업
 
-**T-VN-40-mapping** — `ops.curation_cutover_identity_mappings` 적재 migration(설계 §6.3). 코딩 전
-설계 → 적대 리뷰 2명 → 구현. 그 다음 prod migration 0202~0222 → canonical import → soak/live e2e →
-receipt → 40C manifest.
+**T-VN-40-mapping은 구현·리뷰 완료 — draft PR #996 CI 뒤 머지.** 그 다음 **40C-manifest**(physical removal
+manifest·migration 사전 작성 — mapping 표는 삭제 대상 제외 + FK 처리) → ① 실행(precheck 스크립트 전부 0 →
+`KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`=0223 → prod migration 0202~0223) → canonical import → soak/live e2e →
+receipt → 40C 물리 삭제.
 
 ## 2026-08-18 — (이전) T-VN-40A fence(#994) 적대 리뷰 반영 완료, 머지 대기
 

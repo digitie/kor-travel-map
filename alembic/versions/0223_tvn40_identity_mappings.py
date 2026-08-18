@@ -95,7 +95,10 @@ DECLARE
     v_item_claimed_twice bigint;
     v_inserted bigint;
 BEGIN
-    -- 0. 정지 상태 확보 (설계 §5 step 0)
+    -- 0. 정지 상태 확보 (설계 §5 step 0). lock_timeout: prod는 0(무한)이라 옛 이미지 writer가
+    --    curated_features에 ROW EXCLUSIVE를 쥐고 있으면 0104→0223 전체 트랜잭션이 영원히 기다린다.
+    --    30초 안에 못 잡으면 실패(→ 전체 롤백·재시도)가 낫다.
+    SET LOCAL lock_timeout = '30s';
     LOCK TABLE feature.curated_features, feature.curation_items, feature.curation_collections IN SHARE MODE;
 
     -- 1. 사전조건: 표가 비어 있다

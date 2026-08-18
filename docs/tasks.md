@@ -868,12 +868,12 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
     **①~② 전에 머지돼야 한다**는 조건 충족.
 - [~] **T-VN-40-mapping** — `ops.curation_cutover_identity_mappings` 적재 migration `0223_tvn40_identity_mappings`
   (설계 §6.2 step 3·§6.3 · [설계 문서](reports/t-vn-40-identity-mapping-loader-design-2026-08-18.md), 적대 리뷰 2명 hold).
-  PinVi backfill의 입력이다. 구현·통합 테스트 11건(bucket B/C/D + 중단 사유 5 + 재적용 방지 + FK 불변식 +
-  dedicated DB 0104→head) 통과, PR 대기. prod 실측(2026-08-18): legacy 4,424 전부 bucket B(1:1 projection).
-  merge_repo는 mapping이 잡은 item의 detach rekey를 명시 MergeConflictError로 막는다.
-  - [ ] T-VN-40B 아래 잔여(§6.2 step 3 후반): legacy source_rule → candidate `legacy_backfill` transition,
-    `default_action='curated'` 퇴역 + `ck_curated_source_rules_action` VALIDATE. ② blocker 아님(candidate는
-    admin 전용, PinVi 입력 아님) — 소유 줄이 없어 여기 명시.
+  PinVi backfill의 입력이다. **draft PR #996** — 코드 적대 리뷰 2명(data/SQL · ops/deploy) 둘 다 hold, P2 반영:
+  `SET LOCAL lock_timeout='30s'` · `api-entrypoint.sh` loader 중단 시 즉시 종료(30회 재시도 없음) ·
+  `scripts/tvn40_identity_mapping_precheck.sql`(prod 실측 전부 0 · TEMP 권한 ok) · merge guard 회귀 · 0104에서
+  seed된 중단 형태가 0202~0223 전체를 롤백함을 dedicated DB로 실측. 통합 13 · 유닛(entrypoint 포함).
+  prod 실측(2026-08-18): legacy 4,424 전부 bucket B(1:1 projection). merge_repo는 mapping이 잡은 item의
+  detach rekey를 명시 MergeConflictError로 막는다.
 - [ ] **T-VN-40C-manifest** — physical removal manifest와 migration을 사전에 작성·검토한다.
   legacy 물리 삭제 실행은 receipt complete 뒤다.
 - [ ] **T-VN-40 인수 실행** — 사전 3 task 병합 뒤 ① `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`
@@ -1051,6 +1051,9 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
   차단한다. canonical curation과 effective projection checksum을 만든다.
 
 - [~] T-VN-40B — **candidate lifecycle 분리·consumer cutover**
+  - [ ] §6.2 step 3 후반 잔여(40-mapping에서 분리): legacy source_rule → candidate `legacy_backfill`
+    transition, `default_action='curated'` 퇴역 + `ck_curated_source_rules_action` VALIDATE. ② blocker
+    아님(candidate는 admin 전용, PinVi 입력 아님).
 
   자동 후보를 `theme_feature_candidates` lifecycle로 분리하고 admin/public/PinVi consumer가
   `curation_collections/items` 정본만 읽도록 전환한다.
