@@ -7,8 +7,11 @@
 
 ### 다음 한 작업
 
-Map #975와 paired PinVi #444의 원격 CI가 녹색인지 확인한다. 모두 충족돼도 사용자 지시가 있을 때까지
-머지하지 않으며, #967은 #975 머지 뒤에 재배치한다.
+Map #975를 최신 `main`에 rebase한 뒤 permanent NACK 후 consumer disable 계약에 맞춰 integration
+test 2건을 reconciliation 재개 경로로 갱신한다. 정확한 새 Map/PinVi 쌍을 다시 pin해 원격 CI와
+n150 isolated Live UI E2E를 새로 통과시킨다. #975는 사용자 머지 지시 전까지 미병합으로 둔다.
+닫힌 #967은 재배치 대상이 아니므로 #975 후 현재 `main` 기준의 F1D 후속 PR을 새로 열지 또는
+reopen할지를 결정한다.
 
 ## 2026-08-17 — prod DB를 프로젝트별 전용 인스턴스 4개로 분리 (12x00 대역)
 
