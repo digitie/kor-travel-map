@@ -2,6 +2,28 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-18 — 인수 ②의 범위가 조사로 바뀌었다: Map은 mutation 없음, 관문은 PinVi 재배포
+
+- ② 문구("admin API preview→commit으로 import")를 그대로 실행하면 **틀린 일을 한다.** prod legacy
+  4,424는 전부 `curated`(bucket B)이고 canonical item도 import row 0 / operator 0이라 설계 §6.3의
+  official·manual membership 분기에 해당하는 행이 하나도 없다. 여기에 CSV import를 돌리면
+  `current_import_row_id`·operator 필드가 붙어 **0223이 immutable로 동결한 `legacy_projection` 전제가
+  사후에 깨진다.** → Map 쪽 ②는 데이터 mutation 없음으로 정정.
+- **PinVi 실태**: 소비자 코드(`kor_travel_map_curation.py`의 cutover mapping client, receipt/backfill
+  service, admin route 3개, alembic 0051~0059)는 `main` `dc8a683f`(#444, 오늘)에 이미 있다. 그런데
+  **prod 런타임에는 없다** — `pinvi-api-latest`가 image revision `3b87c19c`(#434, 12커밋 뒤)이고 컨테이너
+  안에 client 모듈이 없으며 OpenAPI에 curation route가 0개, DB head는 `20260804_0049`(0050~0059 미적용).
+  raw token pair는 오늘 manager `.env`에 넣었고 Map digest와 일치하지만, **토큰만으로는 아무 일도
+  일어나지 않는다**(재빌드 + bootstrap one-shot alembic + 재생성이 선행).
+- **cutover backfill은 prod no-op**: PinVi `curated_trip_plans`/`curated_plan_pois`가 0행이라 전환할
+  legacy plan이 없다. ②를 실제로 이행하는 동작은 **mapping receipt 봉인** 하나이고, 그것은 append-only +
+  unique + advisory lock이라 되돌릴 수 없다(백업이 유일한 복구 수단).
+- 부수 확인: `ktdctl pinvi-pair`의 하위는 `rebuild-pinned` 하나뿐이고 **3 DB 파기형**이다 — ②~③에서
+  쓰지 않는다. 런북 §2.1 step 8이 부르는 `pinvi-pair capture --verified-compatible --build`는
+  docker-manager `main`에도 **존재하지 않는다**(런북 수정 또는 명령 신설 결정 필요).
+- ④ 선행: PinVi가 vendor한 Map user spec은 `73a9a246`(08-05) 시절 바이트다. Map user spec은
+  `4672aa96`~`main` 전 구간 불변이라 재-vendor는 순수 refresh이며, 이 불일치를 잡는 것은 Map의
+  `test_vnext_contract_artifacts`뿐이다(PinVi CI는 못 잡는다).
 ## 2026-08-18 — T-VN-H45 후속: 다건 재시도 예산·provider quota/TLS 정본화
 
 - KMA·DataGoKr·AirKorea·KHOA 다건 호출에 예상 경계 수 5% 올림(최소 8·최대 32)의 공유
@@ -18,6 +40,7 @@
   따라서 ①~③은 완료하지만 ⑤ Alembic 1.19 적응은 열린 barrier로 유지한다.
 - 로컬 검증: python-kma-api `149 passed, 12 skipped` + Ruff/mypy, python-khoa-api
   `44 passed, 2 skipped` + compileall/Ruff/mypy, Map 변경 집중 `350 passed` + Ruff/strict mypy.
+||||||| parent of 2c3014ff (docs(tvn40): 인수 ② 범위 정정 — Map mutation 없음, 관문은 PinVi 재배포)
 
 ## 2026-08-18 — T-VN-40 인수 ① 실행: prod가 `0223`으로 올라갔다 (4,424 mapping)
 

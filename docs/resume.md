@@ -25,9 +25,12 @@ precheck 전부 0 → 백업(`kor_travel_map_0104_pre-tvn40-1_20260818T082752Z.d
 
 ### 다음 한 작업
 
-**② canonical import** — admin API preview→commit으로 canonical collection을 채운다(dedup merge는
-①~④ 동안 금지). 그다음 ③ soak/live e2e(`docs/runbooks/c7-prod-live-e2e.md`) → ④ receipt complete →
-⑤ 40C 구현 PR(D4 본문·코드/프론트/계약 제거·static zero gate)과 `0224` 적용.
+**② mapping 소비 — Map은 mutation 없음, PinVi 재배포가 관문이다**(2026-08-18 조사로 범위 정정).
+prod legacy 4,424가 전부 `curated`/bucket B라 Map 쪽 import·archive 대상이 0건이고, admin CSV import를
+돌리면 오히려 0223이 동결한 전제가 깨진다. 실제로 남은 것은 (1) PinVi prod 재배포(현재 image `3b87c19c`는
+T-VN-40 소비자 코드가 없고 DB head가 `20260804_0049`) → (2) mapping receipt 봉인(root `69eb85ec…`,
+count 4424) → (3) legacy-preflight `ready=true` 기록(backfill은 plan 0행이라 no-op). 그다음 ③ soak/live
+e2e → ④ receipt complete(선행: PinVi user spec 재-vendor) → ⑤ 40C 구현 PR + `0224`.
 
 ## 2026-08-18 — T-VN-40A fence(#994) 머지 → 다음은 40-mapping
 
