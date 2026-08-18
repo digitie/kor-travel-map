@@ -1529,8 +1529,9 @@ class _FakeKhoaClient:
     instances: list[_FakeKhoaClient] = []
     per_sido: list[object] = []
 
-    def __init__(self, *, api_key: str | None = None, **_kwargs: Any) -> None:
+    def __init__(self, *, api_key: str | None = None, **kwargs: Any) -> None:
         self.api_key = api_key
+        self.kwargs = kwargs
         self.closed = False
         self.calls: list[str] = []
         _FakeKhoaClient.instances.append(self)
@@ -1580,7 +1581,67 @@ def test_khoa_beaches_fetch_iterates_sido_and_closes(
     assert len(records) == 4
     client = fake.instances[0]
     assert client.calls == ["부산광역시", "강원특별자치도"]
+    assert client.kwargs == {"timeout": 20.0, "retries": 1}
     assert client.closed is True
+
+
+class _FakeKhoaNetworkError(Exception):
+    retryable = True
+    failure_kind = "network"
+
+
+class _FlakyKhoaClient(_FakeKhoaClient):
+    fail_first = True
+
+    def oceans_beach_info(
+        self, sido_nm: str, *, page_no: int = 1, num_of_rows: int = 100, **kw: Any
+    ) -> _FakeBeachPage:
+        if type(self).fail_first:
+            type(self).fail_first = False
+            self.calls.append(sido_nm)
+            raise _FakeKhoaNetworkError("transient")
+        return super().oceans_beach_info(
+            sido_nm,
+            page_no=page_no,
+            num_of_rows=num_of_rows,
+            **kw,
+        )
+
+
+def test_khoa_beaches_retries_transient_page_without_record_loss(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _FakeKhoaClient.instances = []
+    _FakeKhoaClient.per_sido = [object(), object()]
+    _FlakyKhoaClient.fail_first = True
+    module = ModuleType("khoa")
+    module.__dict__["KhoaClient"] = _FlakyKhoaClient
+    module.__dict__["OCEANS_BEACH_INFO_DEFAULT_SIDO_NAMES"] = ("부산광역시",)
+    monkeypatch.setitem(sys.modules, "khoa", module)
+    delays: list[float] = []
+    monkeypatch.setattr(time, "sleep", delays.append)
+    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("svc"))
+
+    records = list(fetch_khoa_beaches(settings))
+
+    assert len(records) == 2
+    client = _FakeKhoaClient.instances[0]
+    assert client.calls == ["부산광역시", "부산광역시"]
+    assert delays == [15.0]
+    assert client.closed is True
+
+
+def test_khoa_real_exception_contract_matches_default_retry_predicate() -> None:
+    khoa_exceptions = pytest.importorskip("khoa.exceptions")
+    network = khoa_exceptions.KhoaRequestError(
+        "t", failure_kind="network", retryable=True
+    )
+    quota = khoa_exceptions.KhoaRequestError(
+        "t", failure_kind="quota", retryable=True
+    )
+
+    assert provider_fetchers.upstream_retry.default_upstream_retryable(network) is True
+    assert provider_fetchers.upstream_retry.default_upstream_retryable(quota) is False
 
 
 class _FakeKrairportClient:

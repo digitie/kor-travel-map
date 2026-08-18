@@ -132,9 +132,41 @@ _KMA_WEATHER_RESOURCE_KEYS: Final[set[str]] = {
     "kma_weather_client_factory",
     "kma_weather_extra_points",
     "kma_weather_max_grids_per_run",
+    "provider_upstream_retry_budget_minimum",
+    "provider_upstream_retry_budget_percent",
     "reverse_geocoder",
 }
 """KMA weather asset 공통 resource key."""
+
+
+async def _proportional_retry_budget(
+    context: AssetExecutionContext,
+    *,
+    expected_calls: int,
+) -> RetryBudget:
+    """Dagster settings resource로 호출 경계 수 비례 재시도 예산을 만든다."""
+
+    percent = cast(
+        int,
+        await _resource_value(
+            context,
+            "provider_upstream_retry_budget_percent",
+            default=5,
+        )
+    )
+    minimum = cast(
+        int,
+        await _resource_value(
+            context,
+            "provider_upstream_retry_budget_minimum",
+            default=8,
+        )
+    )
+    return RetryBudget.proportional(
+        expected_calls,
+        percent=percent,
+        minimum=minimum,
+    )
 
 
 def _response_row_payload(row: Any) -> dict[str, Any]:
@@ -706,7 +738,10 @@ async def _run_kma_weather_asset(
         fetched_at = kst_now()
         # H45: run당 재시도 예산 — 상관 장애(전 격자 동시 열화)에서 N×backoff
         # 전액을 지불하지 않고 조기 실패한다(리뷰 반영 early abort).
-        retry_budget = RetryBudget()
+        retry_budget = await _proportional_retry_budget(
+            context,
+            expected_calls=len(targets.grids),
+        )
         for nx, ny in targets.grids:
             # H45: 단건 격자 호출만 유한 재시도(retryable 분류 예외 한정 — kma
             # ``retryable`` 규약, quota/rate_limit 제외). N건 순차 호출에서 step
@@ -1076,6 +1111,8 @@ _KMA_MID_RESOURCE_KEYS: Final[set[str]] = {
     "kor_travel_map_client",
     "kma_datagokr_client",
     "kma_mid_region_features",
+    "provider_upstream_retry_budget_minimum",
+    "provider_upstream_retry_budget_percent",
 }
 
 
@@ -1134,7 +1171,10 @@ async def run_feature_weather_kma_mid_forecast(
         # H45(재리뷰 2 N-1): client retries=1 정산은 mid에도 적용되므로, 경계
         # 재시도 없이는 mid만 HTTP 4→2 시도로 약화된다 — 격자 루프와 동일하게
         # 경계당 4 시도로 균일화.
-        retry_budget = RetryBudget()
+        retry_budget = await _proportional_retry_budget(
+            context,
+            expected_calls=len(specs) * 2,
+        )
         for spec in specs:
             # 변환 함수 Protocol 인자: frozen dataclass attr은 mypy에서 read-only라
             # 직접 만족 판정이 안 됨 → ``Sequence[Any]`` 우회 (기존 패턴).

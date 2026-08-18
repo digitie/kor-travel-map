@@ -250,19 +250,26 @@ data.go.kr는 간헐 지연·5xx·게이트웨이 timeout이 일상이라, 격�
   시도 상한을 외부 2 × 내부 2 = 4로 유지한다(레이어 도입 전과 동일).
 - **timeout**: `KOR_TRAVEL_MAP_PROVIDER_HTTP_TIMEOUT_SECONDS`(기본 20s,
   ≤60s) — KMA/DataGoKr/AirKorea client **6개 생성 지점**(스케줄 resource 2 ·
-  admin 재적재 runner 2 · fetcher 2) 전부에 주입. 경계당 최악 wall ≈
+  admin 재적재 runner 2 · fetcher 2)과 KHOA fetcher에 전부 주입. 경계당 최악 wall ≈
   2×(2×20s)+backoff 15s ≈ 95s, 187격자 병적 상한 ≈ 4.4h < dagster run 한도
   6h(예산 반영 실효 상한은 ≈ 2.2h).
 - **경계 backoff 15s**(재리뷰 반영): lib 내부 재시도가 ~2s 안에 소진되므로
   외부 재시도는 간격을 벌려 수 초~수 분 장애에 대한 독립 시행으로 만든다 —
-  비용은 예산이 묶는다(8×15s = 120s/run 상한).
-- **run 재시도 예산**(기본 8): 상관 장애(전 격자 동시 열화)에서는 건별
-  재시도가 무력하므로 예산 소진 후 retryable 실패도 즉시 전파해 run을 빨리
-  실패시킨다. 재시도·예산 소진은 run 로그에 warning으로 남는다(kma는
-  `context.log`, fetcher는 module logger → compute log).
+  비용은 비례 예산의 hard cap이 묶는다(32×15s = 480s/run backoff 상한).
+- **run 재시도 예산**: 예상 호출 경계 수의 5%를 올림하되 최소 8회·최대
+  32회로 제한한다. 비율은 `KOR_TRAVEL_MAP_PROVIDER_UPSTREAM_RETRY_BUDGET_PERCENT`,
+  하한은 `KOR_TRAVEL_MAP_PROVIDER_UPSTREAM_RETRY_BUDGET_MINIMUM`으로 조정한다.
+  상관 장애(전 격자 동시 열화)에서는 예산 소진 후 retryable 실패도 즉시
+  전파해 run을 빨리 실패시킨다. KMA 격자·중기예보뿐 아니라 AirKorea와 KHOA
+  다건 순회도 같은 예산을 쓴다.
+- **로그 결선**: KMA asset은 `context.log`, fetcher는 module logger를 사용한다.
+  `docker/dagster.yaml`의 `python_logs.managed_python_loggers`가
+  `kortravelmap.dagster.provider_fetchers`의 WARNING 이상을 Dagster event stream에
+  결선하므로 재시도와 예산 소진을 run event에서 함께 조회할 수 있다.
 - **배포 후 판정이 음성일 때의 다음 수 순서**(재리뷰 2 기대치): 경계
-  backoff 추가 상향 → 격자 배치 축소(N 감소) → python-kma-api 정본 수정
-  (resultCode 22 분류·200-body XML envelope). 경계 재시도 접근 자체의 기각으로
+  backoff 추가 상향 → 격자 배치 축소(N 감소) → python-kma-api 정본 확인.
+  `resultCode 22`와 HTTP 200 XML 오류 envelope는 quota/non-retryable로 정규화됐다.
+  경계 재시도 접근 자체의 기각으로
   오독하지 말 것.
 
 ## 9. 데이터 양과 인덱스

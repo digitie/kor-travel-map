@@ -514,6 +514,16 @@ def test_dagster_image_config_points_storage_to_postgres() -> None:
 
 
 @pytest.mark.unit
+def test_dagster_image_config_captures_provider_retry_warnings() -> None:
+    config = yaml.safe_load((ROOT / "docker" / "dagster.yaml").read_text(encoding="utf-8"))
+
+    assert config["python_logs"] == {
+        "managed_python_loggers": ["kortravelmap.dagster.provider_fetchers"],
+        "python_log_level": "WARNING",
+    }
+
+
+@pytest.mark.unit
 def test_dagster_image_config_recovers_orphaned_runs() -> None:
     config = yaml.safe_load((ROOT / "docker" / "dagster.yaml").read_text(encoding="utf-8"))
 

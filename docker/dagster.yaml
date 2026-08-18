@@ -1,6 +1,13 @@
 telemetry:
   enabled: false
 
+# provider_fetchers의 표준 logging 경고(H45 재시도/예산 소진)를 Dagster event
+# stream에도 결선한다. WARNING 이상만 수집해 정상 record 로그 노이즈는 피한다.
+python_logs:
+  managed_python_loggers:
+    - kortravelmap.dagster.provider_fetchers
+  python_log_level: WARNING
+
 storage:
   postgres:
     postgres_url:
