@@ -894,6 +894,14 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
 > direct replay test 2건이 consumer disable 계약과 충돌했으므로, reconciliation 재개 경로로 고친 뒤 새
 > exact pair CI와 n150 Live UI E2E를 다시 통과해야 한다. 후보 receipt는 final main C7, production consumer
 > enable 또는 `complete` 근거가 아니며 #975는 사용자 머지 지시 전까지 미병합이다.
+>
+> **머지 결정(2026-08-18, 사용자 지시)** — #975를 `main` `3e0732b3`(#994 fence 포함) 위로 rebase(head
+> `a78f55dc`)하고 **CI green + 독립 적대 재리뷰 2명**을 게이트로 머지한다. **새 exact pair(rebased Map +
+> 재pin PinVi)의 n150 isolated Live UI E2E 증거는 이번 머지에서 재생성하지 않는다** — 그 격리 pair 러너
+> (`ktm41r778-*` 이미지·`tvn41-live-*` 스택을 만든 것)는 저장소에 없어 재구성 비용이 크고, 머지 자체는
+> candidate 경계(`final_c7_required=true`, PinVi startup sync 거부)라 prod enable이 없다. 기존
+> `77821001`/`e8e0fecf` 후보 증거는 그 pair의 이력으로만 남고(`t-vn-41-candidate-map` tag로 고정), 새 pair
+> 증거는 **final C7 인수 때** 만든다. PinVi #444의 Map pin 갱신도 그때 함께.
 
 - [~] T-VN-41A — **source generation·restore epoch**
 
@@ -914,7 +922,7 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
     exact 4-role binding과 consumer ID 단일 canonical system owner 검증, public API key digest 분리,
     17 operation의 machine-readable/runtime scope와 wrong-role zero-call 계약, service OpenAPI 재export를
     완료한다.
-  - [/] PinVi command writer가 CAS source GET과 refresh `Location` polling에서 consumer credential로
+  - [~] PinVi command writer가 CAS source GET과 refresh `Location` polling에서 consumer credential로
     전환하고, restore clone은 sync disabled 상태에서 immutable pre-CAS receipt를 써 응답 유실 exact replay까지
     완료한다. 동일 key의 병렬 `201`/`200`도 terminal payload·ETag가 같으면 한 durable receipt로 수렴한다.
     current-main rebase 뒤 Map service OpenAPI SHA가 바뀌어 PinVi service vendor와 exact paired receipt를

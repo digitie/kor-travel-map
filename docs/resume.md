@@ -23,10 +23,10 @@ dead-letter replay → checksum reconciliation → `cache_target.reconciled` 전
 
 ### 다음 한 작업
 
-이 보강을 #975에 push하고 새 Map head를 PinVi에 다시 pin한다. 양 원격 CI가 통과한 뒤에만 그 exact
-pair의 immutable candidate image로 n150 isolated Live UI E2E를 다시 실행하고 후보 artifact digest를
-교체한다. 기존 `77821001`/`e8e0fec` 증거는 이력일 뿐 새 pair에 승계하지 않는다. #975는 사용자
-승인 전까지 머지하지 않는다. F1D 후속은 별도 draft #995에서 진행한다.
+(2026-08-18 갱신) #975는 `main` `3e0732b3` 위로 rebase됐고(head `a78f55dc`) 사용자 결정으로 **CI green +
+적대 재리뷰 2명 뒤 머지**한다. 새 exact pair의 n150 isolated Live UI 증거와 PinVi #444 재pin은 final C7
+인수 때 한다(격리 pair 러너 재구성 필요·candidate 경계라 prod enable 없음). 기존 `77821001`/`e8e0fec`
+증거는 이력이다(`t-vn-41-candidate-map` tag). F1D 후속은 별도 draft #995에서 진행한다.
 
 ## 2026-08-18 — T-VN-41 task ledger를 후보 검증 상태로 정렬
 

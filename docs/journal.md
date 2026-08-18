@@ -41,6 +41,11 @@
 - 기존 `77821001`/`e8e0fec` 후보 E2E 증거는 당시 pair의 이력 증거로만 보존한다. 현재 rebase
   head와 새 PinVi pin에는 재사용할 수 없으므로, 원격 CI가 녹색이 된 뒤 새 immutable image·n150
   isolated Live UI E2E·artifact digest로 후보 증거를 다시 만든다. #975는 계속 draft·미병합이다.
+- **(2026-08-18 후속, 이어받음)** #975를 `main` `3e0732b3`(#994 fence 포함) 위로 다시 rebase했다(head
+  `a78f55dc`; 충돌은 journal/resume 2개뿐). 사용자 결정으로 머지 게이트는 **CI green + 적대 재리뷰 2명**이고,
+  새 pair의 n150 isolated Live UI 증거 재생성은 final C7으로 미룬다(격리 pair 러너가 저장소에 없다; 머지는
+  candidate 경계라 prod enable 없음). 위 두 항목의 "`ff25c397` 위로 rebase"는 그 시점의 base였고 지금 base는
+  `3e0732b3`다.
 
 ## 2026-08-18 — T-VN-41 #975 rebase 뒤 stream recovery 회귀 정렬
 
