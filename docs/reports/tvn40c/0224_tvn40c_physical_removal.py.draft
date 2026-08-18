@@ -66,6 +66,25 @@ DROP TRIGGER trg_curation_items_source_rule_decision ON feature.curation_items;
 DROP FUNCTION feature.issue_curation_source_rule_decision() RESTRICT;
 """
 
+# D3b — legacy_projection_id를 읽는 BEFORE INSERT trigger (plpgsql 본문은 pg_depend 밖 — D5 뒤에 남으면 모든
+#       curation_items INSERT가 42703). 반드시 D5보다 먼저.
+_D3B_SQL = """
+DROP TRIGGER trg_curation_items_legacy_component_identity ON feature.curation_items;
+DROP FUNCTION feature.set_curation_item_legacy_component_identity() RESTRICT;
+"""
+
+# D4 — 0214 item command procedure 2개: legacy 분기(v_hint.legacy_projection_id · curated_features FOR UPDATE ·
+#      mirror UPDATE) 제거본으로 CREATE OR REPLACE. owner=ktm_curation_command_owner → SET ROLE 아래서.
+#      TODO(draft): 0214_tvn40_item_commands.py의 두 procedure 본문에서 legacy 분기를 뺀 전문을 여기 붙인다
+#      (patch: 335-357·485-504, archive: 565-576·597-603). 통합 테스트: replace 뒤 create/patch/archive command가
+#      api runtime으로 동작 + pg_proc.prosrc에 legacy 식별자 0.
+_D4_SQL = """
+SET ROLE ktm_curation_command_owner;
+-- CREATE OR REPLACE PROCEDURE feature.patch_curation_item_command(...) ... $$ ... $$;
+-- CREATE OR REPLACE PROCEDURE feature.archive_curation_item_command(...) ... $$ ... $$;
+SET ROLE ktm_feature_schema_owner;
+"""
+
 # D5 — legacy_projection_id 흔적
 _D5_SQL = """
 ALTER TABLE feature.curation_items DROP CONSTRAINT fk_curation_items_legacy_projection_id_curated_features;
@@ -131,6 +150,12 @@ BEGIN
     IF EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace WHERE n.nspname = 'feature' AND p.proname LIKE 'merge_%legacy%') THEN
         RAISE EXCEPTION 'tvn40c physical removal: legacy merge procedure still present' USING ERRCODE = 'P0001';
     END IF;
+    -- 이름만이 아니라 본문(prosrc)도 본다 — 0214 item command의 legacy 분기·D3b trigger 함수 잔존을 잡는다.
+    IF EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace
+               WHERE n.nspname IN ('feature','ops','provider_sync')
+                 AND (p.prosrc LIKE '%curated_features%' OR p.prosrc LIKE '%legacy_projection_id%')) THEN
+        RAISE EXCEPTION 'tvn40c physical removal: a routine body still references the legacy overlay' USING ERRCODE = 'P0001';
+    END IF;
 END
 $tvn40c_postcheck$;
 """
@@ -146,6 +171,8 @@ def upgrade() -> None:
     _run(_D1_SQL)
     _run(_D2_SQL)
     _run(_D3_SQL)
+    _run(_D3B_SQL)
+    _run(_D4_SQL)  # TODO(draft): 본문 채운 뒤 활성
     _run(_D5_SQL)
     _run(_D6_D7_SQL)
     _run(_D8_SQL)
