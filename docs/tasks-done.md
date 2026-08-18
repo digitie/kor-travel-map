@@ -3,6 +3,37 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-08-18 — backlog 전면 재대조 완료 이력 이관
+
+- [x] T-VN-H25B — **공식 curation CSV 역반영·매칭 재실행**
+
+  검증 가능한 5건만 CSV에 반영하고, matcher·manifest를 재생성했다. 주소 축은 시군구 대조로
+  보강했고 provider provenance의 기존 축 한계는 import-act provenance로 분리했다. 남은
+  Feature 생성·prod import는 열린 `T-VN-H34`와 `T-VN-M00`~`M03`이 소유한다.
+
+- [x] T-VN-H46B/C/D/E — **geo 자격증명 복구·의미 검증·daemon drift·공개 키 현행 유지**
+
+  VWorld fallback을 제거하고 API 기동의 geo credential 의미 검증을 결선했으며, daemon의
+  schema drift는 image lag으로 판정·종결했다. data.go.kr 키는 노출 정황이 없어 현행 유지로
+  결정했다. 남은 Node geo proxy와 buildx commit label은 열린 `T-VN-H46F`·`T-VN-H46G`로
+  분리한다.
+
+- [x] T-VN-H47/H48 — **prod dump 위생·n150 임시 DB 정리**
+
+  dump 권한·0바이트 산출물·보관 위치를 정리하고, 일회성 DB는 `tmp-` 접두어와 `--rm`을
+  기본으로 하는 규약을 문서화했다.
+
+- [x] T-VN-C01 — **사문화된 H35 cutover helper 퇴역**
+
+  H35 helper 17개를 제거하고 살아 있는 `h35-db-identity-v1` 계산은
+  `core/database_identity.py`와 golden-vector 검증으로 보존했다. 퇴역 경로 재도입을 막는
+  image contract와 dangling 인용 정정도 포함한다.
+
+- [x] T-VN-C04 — **SPRINT 헤더·원격 브랜치 정합**
+
+  SPRINT 상태 헤더를 정본과 맞추고 미개봉 npm 브랜치를 정리했으며, 오래된 원격 브랜치를
+  382개 정리했다.
+
 ## 2026-08-16 — T-VN-H46A alembic squash 병합
 
 - [x] T-VN-H46A — **alembic squash: 체인 109개 → `0200_schema_baseline`**
@@ -10,8 +41,8 @@
   PR [#978](https://github.com/digitie/kor-travel-map/pull/978)이 `main`에 병합됐다. 정본은
   `alembic/versions/0200_schema_baseline.py` docstring과
   `alembic/legacy_versions/README.md`이며, 빈 PostGIS DB catalog 동등성·ACL digest·legacy
-  execution/build artifact 차단을 CI로 고정한다. 남은 VWorld fallback과 daemon drift는 열린
-  `T-VN-H46C`·`T-VN-H46D`가 각각 소유한다.
+  execution/build artifact 차단을 CI로 고정한다. 당시 후속 H46B~E도 2026-08-18에 종결했고,
+  남은 것은 별도 열린 `T-VN-H46F`·`T-VN-H46G`다.
 
 ## 2026-08-13 — T-VN-34/35/36 Wave 2 최종 배포·인수 완료
 

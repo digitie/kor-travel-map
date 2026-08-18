@@ -5,7 +5,7 @@
 [`docs/resume.md`](resume.md)가 정본이다. 작성·유지 규약은
 [`docs/tasks-rule.md`](tasks-rule.md)를 따른다.
 
-## 진행 중인 작업 인덱스 (2026-08-16 T-VN-40 PR #974 머지 후 재대조)
+## 진행 중인 작업 인덱스 (2026-08-18 전면 재대조)
 
 완료한 `T-VN-32`·`T-VN-33`·`T-VN-37`·`T-VN-38`과 선행 운영 task는
 [`tasks-done.md`](tasks-done.md)로 이관했다. 아래에는 아직 닫히지 않은 실행 단위만 둔다.
@@ -15,24 +15,21 @@
 barrier로 직렬화한다.
 
 - **Lane A — cross-repo 계약·운영·데이터 품질**
-  - [x] `T-VN-H25B`(미충족 AC 2건 종결, 2026-08-18) → [~] `T-VN-H34`(공식 curation 미연결 membership 잔여 AC)
+  - [~] `T-VN-H34`(공식 curation 미연결 membership 잔여 AC — `T-VN-M01`~`M03` 선행 필요)
   - [~] `T-VN-H43` → [~] `T-VN-H44`(백업 정기화·복원 드릴 재개 조건)
   - [~] `T-VN-H45-후속`(②quota 오분류·④coalesce 완료 / ①khoa·③RetryBudget·⑤alembic 잔여)
-  - [x] `T-VN-H46C`(preflight 의미 검증 + 기동 결선, 2026-08-18) ∥ [x] `T-VN-H46D`(실측 종결)
-  - [x] `T-VN-H47`(#987 종료) ∥ [x] `T-VN-H48`(#988 종료) — prod 정리 + 재발 방지 문서화 완료
-  - [x] `T-VN-H49`(baseline 3건 확보 + 절차 문서화 완료, 2026-08-18 — 주기화는 dm #177)
+  - [ ] `T-VN-H46F`(admin UI geo proxy 잔여 결선) ∥ [ ] `T-VN-H46G`(buildx image commit provenance label)
+  - [~] `T-VN-H49`(Map baseline·절차 완료 / docker-manager #177의 외부 인스턴스 주기화 잔여)
 - **Lane B — frontend hardening·PinVi 소비 API**
-  - [ ] `T-VN-41A` → [ ] `T-VN-41B` → [ ] `T-VN-41C`(generation/outbox)
-  - [~] `T-VN-41F1D-D` → [ ] `T-VN-41F1D-D2`(격리 리허설·data-dependent live UI E2E)
+  - [~] `T-VN-41A` → [~] `T-VN-41B` → [~] `T-VN-41C`(generation/outbox — 상세 AC 일부 완료, #975 rebase·regression 수정·새 exact-pair CI/E2E 재검증 중)
+  - [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2`(격리 리허설·data-dependent live UI E2E; #967 closed)
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환) ∥ [ ] `T-VN-41S`
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정, T-VN-40 인수 뒤)**
-  - [ ] `T-VN-M01`(admin Feature 생성 API — **ADR 필요**) → [ ] `T-VN-M02`(origin 보존·불변)
-  - [ ] `T-VN-M03`(curated 동시 생성 — T-VN-40 표면) ∥ [ ] `T-VN-M04`(PinVi 요청 큐 — cross-repo)
+  - [ ] `T-VN-M00`(설계 초안 2차·적대 검증) → [ ] `T-VN-M01`(admin Feature 생성 API — **ADR 필요**) → [ ] `T-VN-M02`(origin 보존·불변)
+  - [ ] `T-VN-M03`(curated 동시 생성 — T-VN-40 인수 뒤) ∥ [ ] `T-VN-M04`(PinVi 요청 큐 — cross-repo)
   - [ ] `T-VN-M05`(provider 발행 시 중복 판정 — 자동 병합 금지)
 - **Lane C — 사문화 정리·미구현 dataset (다른 lane과 무관, 아무 때나)**
-  - [x] `T-VN-C01`(H35 cutover helper 퇴역, 2026-08-18) — 17파일 삭제, identity 정의는 `core/database_identity.py`로 이전
   - [~] `T-VN-C02`(arm64 — registry 자격증명 필요, 정적 점검만 완료) ∥ [~] `T-VN-C03`(표 drift 완료 / dataset 5종은 제품 결정)
-  - [x] `T-VN-C04`(SPRINT 헤더 정정 + 원격 브랜치 382개 정리, 2026-08-18)
 - **Wave 2 barrier 이후**
   - Lane A: [ ] `T-VN-37D`(notice empty range 표현 — 제품 결정 대기)
   - 32~38 join barrier 뒤 Lane B: [~] `T-VN-40A` → [~] `T-VN-40B` →
@@ -53,9 +50,8 @@ barrier로 직렬화한다.
       그대로 인식하므로 stamp나 baseline 재실행 없이 `0202…0220`만 forward upgrade한다.
   - 최종 단일 cutover: [ ] `T-VN-39`
   - ⚠️ **T-VN-40 인수 실태 재조사(2026-08-18, 조사 1 + 적대 검증 2)** — "인수만 남았다"가
-    아니다. 아래 `T-VN-40 인수 — 실태` 절 참조. 요지: 40A write fence **미구현**(legacy와
-    canonical 양쪽 쓰기 가능), 40C 물리 삭제 **코드·migration·manifest 없음**,
-    identity mapping 테이블 **적재 0건**, receipt는 손으로 고쳐야 하며 freeze 상수와 함께.
+    아니다. 아래 `T-VN-40 인수 — 실태` 절 참조. 사전 구현/병합(40A fence·identity mapping·40C
+    manifest 작성) → prod migration·enable → import/backfill → live/receipt → 물리 삭제 실행 순이다.
 - **보류/외부 추적**
   - [ ] `T-VN-H27` — #819 HAProxy WebSocket tunnel timeout(**보류: 운영자 환경 필요**,
     사용자 지시 2026-07-29). 프록시는 **OPNsense 라우터의 HAProxy**이고 저장소에 config가 없다
@@ -205,7 +201,8 @@ barrier로 직렬화한다.
 H24가 stable component 기반 미연결 membership으로 무손실 보존하므로 데이터 손실 위험은 없다.
 증거 생성과 mutation을 분리한다.
 
-- [x] T-VN-H25B — **CSV 역반영 5건 + 매칭 재실행** (미충족 AC 2건 2026-08-18 종결)
+> **T-VN-H25B 완료 이력** — CSV 역반영 5건과 매칭 재실행은 2026-08-18에 종결했고
+> [`tasks-done.md`](tasks-done.md)에 이관했다. 아래는 열린 `T-VN-H34`의 판단 근거만 보존한다.
 
   H25A 재정의 결과 실행 가능한 작업은 둘이다.
   1. **CSV 역반영 8건** — DB에서는 링크됐으나 CSV `feature_id`가 비어 있는 항목(H25A §3).
@@ -427,7 +424,7 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     뜻인데 여기서는 맞는 Feature가 **있고 링크도 그것을 가리킨다**. 틀린 것은 그 Feature의
     category다(MOIS가 휴게음식점으로 인허가). 해제하면 맞는 링크를 지우고 문제는 그대로
     남는다.
-    - [ ] **별건: Feature category 보정** — MOIS 인허가 업종이 실제 시설 성격과 다른 경우.
+    - [ ] **T-VN-H34A — Feature category 보정** — MOIS 인허가 업종이 실제 시설 성격과 다른 경우.
       같은 형태가 더 있는지 조사가 선행돼야 한다(박물관·미술관이 부속 카페 인허가로
       `02020100`에 묶이는 패턴).
 
@@ -440,7 +437,7 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     222 → **216**으로 맞췄다 — 적대 검증이 "이 상수와 충돌해 shipped 코드가 죽는다"고
     지목한 지점이다.
 
-    - [ ] ⚠️ **prod 반영은 아직이다.** CSV는 저장소 정본이고 실제 링크는 curation import가
+    - [ ] **T-VN-H34B — prod curation import 반영.** CSV는 저장소 정본이고 실제 링크는 curation import가
       반영한다. import를 돌려야 공개 표면(3,265건)에서 사라진다.
 
     > **판정 로직을 두 번 고쳤다(기록)**. ① 동명 다수를 *모순*으로 셌다 → 222건 중 30건이
@@ -450,26 +447,9 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     > 오탐이 됐다. 숙박을 갖춘 휴양림이 그렇게 분류되는 건 정당하다. 축을 "관광이어야 한다"에서
     > **"명백히 대상일 수 없는 유형인가"** 로 뒤집었다(10→8). 두 회귀 모두 단위 테스트로 고정했다.
 
-> **issue #673 판정(2026-07-30) — 아직 닫을 수 없다.** 서브에이전트 조사로 이슈 본문·코멘트를
-> 요구사항으로 분해해 대조했다. 3항목 중 둘(오탐 분포 규명 / 규칙 교체)은 충족이고,
-> 셋째("다음 materialize에서 자동 회복되는가")는 **코드 논증만 있고 실증이 없다**.
-> 결정적 blocker는 **prod 미배포**이며 이슈가 신고한 손실(당시 457건)이 실재한다 →
-> ~~`T-VN-H35`~~ **`T-VN-35/34/36-deploy`**(2026-08-13 정정 — H35의 cutover는 소멸했다).
-> "457건"은 prod 폐기·재생성(`0078`) **이전** 측정값이라 그대로 쓸 수 없다. prod는 현재
-> `0087` / feature 1,008,852이므로 배포 전 재측정이 필요하다.
-> **재기준화(2026-07-31, #910/`0072` 반영)** — #673을 "457건 신규 회복"만으로 종결하면 안 된다.
-> `0072`가 기존 concierge 공개 표면 **3,044건**을 `legacy_unattributed`로 만들어 공개에서
-> 제외하고 복구 경로가 없다(`T-VN-H40`). 따라서 종결 기준은 **두 축**이다 —
-> ① 미적재 457건 신규 회복 ② **기존 concierge 공개 표면 보존/복구**. ①만 달성하고 ②를 잃으면
-> 순 손실이다.
->
-> 남은 실증은 `T-VN-H30B`. **`T-VN-H30C`·`T-VN-H32`는 #673 범위 밖**이다 —
-> 이슈는 "concierge provider에 한해" 완화를 요구했고 두 task는 그 파생 개선이다.
-> 저장소 열린 이슈는 #673·#819 두 건뿐이고 #673은 epic이 아니다.
->
-> (열린 이슈 목록은 **작성 시점**이다. #673은 2026-08-07 closed고 2026-08-17 기준
-> 열린 것은 #819·#922·#987·#988이다. 위 논지는 총 건수가 아니라 "#673이 epic이
-> 아니다"에 걸려 있으므로 그대로 유효하다.)
+> **issue #673 이력** — 이슈는 2026-08-07에 닫혔다. 당시의 457건·`0072` 관련 판정은
+> 현 prod 상태를 설명하는 기준이 아니며, 남은 Feature category 보정·저장소 CSV의 prod import는
+> 열린 `T-VN-H34A/B`가, 새 Feature 생성 경로는 `T-VN-M00`~`M03`이 소유한다.
 
 ### T-VN-H42~H45 — 운영 연속성 (0072 사고 후속: 재적재 수렴 → 강건화 → 백업 → 복원 드릴)
 
@@ -564,16 +544,19 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   post-review cleanup 잔여(ADR-045 VWorld 불투명 자격증명 hard-gate 등)는 PinVi 저장소가
   소유한다. Map Agent A/B 실행 queue에는 넣지 않고 PinVi #215가 닫힐 때 상태만 동기화한다.
 
-### T-VN-H46 — alembic squash + 배포 위생 (2026-08-14)
+### T-VN-H46 — 완료 이력과 남은 배포 위생 follow-up
 
-- [x] T-VN-H46B — **prod 지오코딩 복구** (2026-08-14 완료)
+> `T-VN-H46B`~`E`의 완료 요약은 [`tasks-done.md`](tasks-done.md)에 이관했다. 아래에는
+> 남은 `T-VN-H46F`·`G`의 근거를 함께 둔다.
+
+**T-VN-H46B 완료 — prod 지오코딩 복구(2026-08-14).**
 
   08-13에 `.env`만 고치고 api만 재생성해 dagster/daemon 2개가 401 나는 상류 VWorld
   키를 들고 있었다. fail-open이 아니라 첫 요청에서 asset step이 통째로 실패하는
   형태였고, ETL이 08-07 이후 안 돌아서 아직 안 터졌을 뿐이었다.
   `up -d --no-deps --force-recreate` 후 세 컨테이너 전부 `POST /v2/reverse` HTTP 200.
 
-- [x] T-VN-H46C — **VWorld fallback 사슬 제거 + geo key 의미 검증** (H46B 재발 통로)
+**T-VN-H46C 완료 — VWorld fallback 사슬 제거 + geo key 의미 검증.**
 
   - [x] **fallback 사슬은 PR #979에서 이미 끊겼다.** 저장소 전체에
     `…GEO_API_KEY:-${NEXT_PUBLIC_VWORLD_API_KEY…}` 형태가 0건이고
@@ -608,10 +591,11 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     (`packages/kor-travel-map-admin/frontend/src/app/api/geo/[...path]/route.ts`)는
     별개 축이고 이 검사가 **못 본다**. 그 사실을 `_verify_kor_travel_geo_credentials`
     docstring에 경고로 넣었다 — tasks.md에만 적으면 코드를 읽는 사람이 못 본다.
-  - [ ] **별건: admin UI 프록시 축.** 위 한계 그대로다. 그쪽은 Node 런타임이라 이
-    검사가 닿지 않는다.
+  - [ ] **T-VN-H46F — admin UI geo proxy 결선.** 위 한계 그대로다. Node 런타임인
+    `packages/kor-travel-map-admin/frontend/src/app/api/geo/[...path]/route.ts`에도 키 의미
+    검증과 fail-closed 동작을 별도 결선한다.
 
-- [x] T-VN-H46D — **daemon 스키마 drift**: `column request.providers does not exist`
+**T-VN-H46D 완료 — daemon 스키마 drift: `column request.providers does not exist`.**
   (2026-08-18 실측으로 종결 — **배포 이미지 lag이 맞았다**)
 
   ### 하마터면 틀린 근거로 닫을 뻔했다
@@ -644,10 +628,11 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
   배포 이미지는 `2026-08-13T20:23` 생성이고 revision label이 `development`다(빌드에 커밋이
   안 박혔다). 그래서 "어느 커밋에서 고쳐졌는지"는 이 경로로 특정할 수 없다.
-  - [ ] **별건**: buildx가 `KOR_TRAVEL_MAP_GIT_COMMIT`을 실제 커밋으로 채우게 한다. 지금은
-    prod 3개 컨테이너 전부 `development`라 배포된 것이 무엇인지 이미지에서 알 수 없다.
+  - [ ] **T-VN-H46G — buildx image commit provenance label.** buildx가
+    `KOR_TRAVEL_MAP_GIT_COMMIT`을 실제 커밋으로 채우게 한다. 지금은 prod 3개 컨테이너가
+    `development`라 배포된 것이 무엇인지 이미지에서 알 수 없다.
 
-- [x] T-VN-H46E — **공개 data.go.kr 키: 현행 유지 판정** (2026-08-14)
+**T-VN-H46E 완료 — 공개 data.go.kr 키 현행 유지 판정(2026-08-14).**
 
   자격증명 1개를 **17개 별칭 / 8개 파일 / 6개 저장소**가 공유한다("4곳"이 아니었다 —
   provider별 이름으로 갈라져 그렇게 보였다). 노출 정황은 없다: `git log --all -S`와
@@ -709,39 +694,10 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > 2026-08-17 DB 4분할 작업에서 드러났고 **소유 task가 없던** 것들이다. 셋 다 이슈가
 > 정본이고 여기서는 실행 단위만 잡는다.
 
-### T-VN-H47 — prod DB dump 산출물 위생 (#987)
-
-- [ ] **권한 600 위반 9건** 정정. root 소유 3건은 소유자도 `digitie`로 맞춘다
-  (지금 `digitie`가 읽기만 되고 지우지도 못한다).
-- [ ] **0바이트 죽은 dump 2건** 삭제(`kor_travel_map_before_0039_*_010754`,
-  `..._010819`). 남아 있으면 "백업이 3개 있다"고 세게 만든다 — 복구가 필요한 순간에
-  세는 숫자가 틀리는 것이 제일 나쁘다.
-- [ ] **네 디렉터리 7.8GB 통합.** 정본은 `~/backups/kor-travel-map/` 하나다
-  (`docs/backup-restore.md`). `kor-travel-map-backups`·`ktm-db-backups`·
-  `kor-travel-backups` 3.5GB는 옮기거나 지운다. **`0104` 이전 스키마 dump는 지금
-  코드로 복원이 안 된다** — alembic chain을 거슬러 올라갈 수 없으므로 보관 가치가
-  낮다. 남긴다면 "복원 불가, 감사 목적"이라고 명시한다.
-- [ ] **재발 방지가 본론이다.** dump를 만드는 절차가 `pg_dump` 직후 `chmod 600`을
-  하도록 고친다. `docker cp`로 꺼내면 umask에 따라 644로 떨어지고, 이번 위반 대부분이
-  그 경로다.
-
-AC: 위 4개 + `docs/external-apis.md` §1.1이 요구하는 600을 실제 파일이 만족.
-
-### T-VN-H48 — n150 임시 DB 컨테이너 정리 (#988)
-
-- [ ] `ktm-tvn36-db`(:18736, 216M)·`ktm-tvn38-db`(:18732, 134M)와 볼륨 제거. 두 작업
-  모두 종료됐다(T-VN-36은 2026-08-13 prod cutover, T-VN-38은 #971 머지).
-- [ ] 이름 규약 — 일회성 DB 컨테이너에 `ktm-` 접두어를 쓰지 않는다. 이번 작업에서
-  `ktm-tvn36-db`를 prod DB로 착각해 **"runtime role의 write 권한 0개"라는 틀린 감사
-  결론**을 냈다(실제 94/84/82). `docs/journal.md` 2026-08-17 참조.
-- [ ] 검증용은 `--rm`을 기본으로. `restart=no`는 이미 맞지만 재부팅이 드물면 실질적인
-  수명 제한이 못 된다 — 실제로 9일을 버텼다.
-
-AC: 컨테이너·볼륨 0건 + 규약을 `docs/dev-environment.md`에 명문화.
-
 ### T-VN-H49 — 4분할 인스턴스 백업 주체 (docker-manager #177 추적)
 
-소관은 docker-manager다. 이 저장소는 **의존만** 추적한다.
+Map 인스턴스의 baseline 3건과 절차 문서화는 완료했다. 남은 소관은 docker-manager #177의
+외부 인스턴스 주기화이며, 이 저장소는 **의존만** 추적한다.
 
 - [ ] geo(`12500`, **33GB, 백업 0건**) · concierge(`12600`) · pinvi(`12800`)의 dump·
   sha256·manifest·retention 결선. map만 절차가 있다.
@@ -753,43 +709,6 @@ AC: 세 인스턴스 각각의 최신 dump + sha256 + manifest가 존재하고 �
 ## Lane C 상세 — 사문화 정리·미구현 dataset (2026-08-17 신설)
 
 > 다른 lane과 barrier를 공유하지 않는다. 아무 때나 착수할 수 있다.
-
-### T-VN-C01 — 사문화된 H35 cutover helper 제거
-
-**완료(2026-08-18).** `tasks-done.md`가 "제거/축소는 후속 정리 task로 잡는다"고 적어놓고
-그 task가 없어서 17파일이 main에 남아 있었다.
-
-**지운 것(17)**: `scripts/h35/` 6개 · `cli/{h35_cutover,_h35_cache_target,_h35_catalog,`
-`_h35_contract,_h35_csv5,_h35_schema,_h35_schema_version}.py` 7개 ·
-`tests/unit/test_h35_{contract,entrypoint,partial_migration,image_contract}.py` 4개 ·
-`setup.py`(파일 전체가 wheel에서 H35를 빼는 build 훅뿐이었다).
-
-**살린 것 — `h35-db-identity-v1`**. `contracts/vnext/recovery-preflight-v1.json`이
-**살아 있는 계약**으로 이 digest를 요구한다. 통째로 지우면 스펙만 남고 계산하는 코드가
-저장소 어디에도 없게 되고, 소비자 `T-VN-39`를 구현할 사람이 산문에서 NUL framing을 다시
-유도해야 한다 — golden vector 없이는 재현이 어렵다. `core/database_identity.py`로 옮기고
-golden vector 테스트를 동반했다. 이름의 `h35` 접두는 **wire 상수**라 바꾸지 않았다.
-
-**남긴 것 — `docs/runbooks/h35-prod-migration-cutover.md`(426줄)**. `contracts/vnext/`
-2개가 §5.1(112/512 상한)·§6(writer fence 5종)을 선언된 출처로 인용하고
-`test_vnext_contract_artifacts.py:345`가 그 5종을 단언한다. `runbooks/README.md`가 이미
-'폐기 · prod 실행 금지'로 표시한다.
-
-**순서 의존을 지켰다**(조사 + 적대 검증이 짚은 것):
-- `test_vnext_target_freeze.py`의 `canonical_json_bytes` import를 **먼저** 옮겼다 —
-  안 옮기고 지웠으면 PostGIS job 전체가 collection error로 죽는다.
-- `setup.py` 삭제와 두 Dockerfile의 `COPY … setup.py` 제거를 **같은 커밋**에 넣었다.
-- Dockerfile의 `rm -f _h35_*` 행 삭제와 그것을 단언하던 테스트도 함께.
-
-**되살아나지 않게 가드를 뒀다**(`tests/unit/test_candidate_image_contract.py`). 지우기만
-하고 검사기를 안 두면 같은 파일이 조용히 돌아온다. 그 파일은 옛
-`test_h35_image_contract.py`를 개명한 것이다 — 이름만 h35이고 실체는 image 위생 가드였다.
-가드는 양방향이다: 퇴역한 경로가 없을 것 **그리고** 계약이 요구하는 identity 계산은 있을 것.
-전자만 두면 "다 지웠다"로 초록인데 계약이 참조하는 계산이 사라진 상태도 통과한다.
-
-**dangling 인용 4곳**도 정정했다(`contracts/vnext/target-invariants-v1.sql`,
-`infra/curation_repo.py`, `scripts/h25b_apply_verified_links.py`, admin e2e spec).
-지운 파일을 "출처"로 인용한 채 두면 다음 사람이 그 경로를 찾다가 인용 자체를 못 믿게 된다.
 
 ### T-VN-C02 — T-229-buildx arm64 multi-arch 배포 검증
 
@@ -838,38 +757,28 @@ AC: arm64 이미지가 registry에 올라가고 n150/Odroid 중 arm64에서 기�
 
 AC: 표와 실제 모듈이 일치. dataset 구현은 결정에 따라 별도 task로 분기.
 
-### T-VN-C04 — 문서 정합 잔여
-
-- [ ] `docs/sprints/SPRINT-3.md` 헤더가 아직 `🔵 active`, `SPRINT-5.md`가 `🟢 진행 중`이고
-  이미 끝난 잔여(`T-RV-04b-opinet`, `T-212b/d/e`, `T-210`)를 나열한다. `README.md`는
-  각각 완료·`T-229-buildx`만이라 어긋난다.
-- [ ] 미개봉 브랜치 `origin/fix/npm-audit-js-yaml`(2026-08-07, 커밋 2개, PR 없음) 처리
-  결정 — npm high 게이트를 `--omit=dev`로 좁히는 변경이다. 머지하거나 브랜치를 지운다.
-- [ ] 덤으로 오래된 미머지 브랜치 40여 개 정리 판단.
-
-AC: 세 항목 처리 + `docs/sprints/README.md`와 각 SPRINT 헤더 일치.
-
 ### T-VN-40 인수 — 실태 (2026-08-18 재조사)
 
 `resume.md`·이 문서 상단이 "구현 병합 완료 → n150 인수 + receipt complete + 물리 삭제만
 남음"으로 서술한다. **저장소 실측은 다르다.** 조사 1명 + 적대 검증 2명(contract/ops lens)이
 독립으로 확인했고, 검증자 둘 다 조사 초안의 일부를 뒤집었다. 아래는 **검증을 통과한 사실**만이다.
 
-#### 남은 것은 넷이 아니라 다섯이고, 순서가 정해져 있다
+#### 사전 구현과 prod 실행을 분리한 여섯 단계
 
 | # | 일 | 실태 | 근거 |
 |---|---|---|---|
-| ① | prod migration 적용 | `0202~0221` 20개 미적용 (prod head `0104`) | `alembic/versions/` |
-| ② | canonical import 실행 | admin API 2단계(`preview` → `commit`, `If-Match`+`Idempotency-Key`). ktmctl도 Dagster도 아니다 | `CHANGELOG.md:48-57`, `openapi.json` |
-| ③ | **40A write fence** | **미구현.** `curated_repo.py:577,601`이 여전히 `INSERT/UPDATE feature.curated_features`. DB·ACL·static 어느 층에도 차단이 없다 | `src/kortravelmap/infra/curated_repo.py`, `alembic/baseline/schema.sql:11897`(sync trigger만) |
-| ④ | live 인수 + soak | sanctioned 경로는 `docs/runbooks/c7-prod-live-e2e.md`뿐 — origin 검증·증거 redaction 포함 | `playwright.live.config.ts:42-46,221,263` |
-| ⑤ | receipt complete | **손으로** JSON 수정. 9키 exact, `blocking_reason` 삭제, freeze 상수(`test_vnext_contract_artifacts.py:52-53`) 동시 갱신 | `contracts/vnext/consumer-rollout-v1.json:168` |
-| ⑥ | **40C 물리 삭제** | **코드·migration·manifest 어디에도 없다.** `docs/removal-manifests/`에 T-VN-33 것 하나뿐 | 설계 §6.2 step 6-7이 요구 |
+| 사전 | **40A write fence** | **미구현.** `curated_repo.py`의 legacy `INSERT/UPDATE`를 DB·ACL·static 3층에서 차단하는 migration/검사를 먼저 구현·병합한다 | `src/kortravelmap/infra/curated_repo.py`, `alembic/baseline/schema.sql` |
+| 사전 | **identity mapping** | `ops.curation_cutover_identity_mappings` 적재 migration을 구현·병합한다. PinVi backfill의 입력이다 | 상세 설계 §6.2 step 3 |
+| 사전 | **40C removal manifest 작성** | 삭제 대상·순서·검증을 manifest와 migration으로 먼저 review 가능하게 만든다. 실행은 receipt 뒤다 | 설계 §6.2 step 6-7 |
+| ① | prod migration·fence enable | 사전 구현을 포함한 `0202~0221` 이후 migration을 prod head `0104`에 forward 적용한다 | `alembic/versions/` |
+| ② | canonical import·mapping/PinVi backfill | admin API 2단계(`preview` → `commit`, `If-Match`+`Idempotency-Key`)로 import하고 mapping을 소비시킨다 | `CHANGELOG.md`, `openapi.json` |
+| ③ | live 인수 + soak | sanctioned `c7-prod-live-e2e.md`로 origin 검증·증거 redaction·백업/PITR 복구점을 확인한다 | `playwright.live.config.ts` |
+| ④ | receipt complete | 9키 exact·`blocking_reason` 제거·freeze 상수를 함께 갱신한다 | `contracts/vnext/consumer-rollout-v1.json` |
+| ⑤ | **40C 물리 삭제 실행** | ④ 뒤 manifest가 선언한 legacy repository/trigger/table/API/ACL을 forward-only로 제거한다 | ADR-075 결정 4 |
 
-**순서 — ADR-075 결정 4가 정한다**: "soak·reconciliation 전에는 legacy column/table/alias를
-제거하지 않는다." 즉 **① → ② → ③ → ④ → ⑤ → ⑥**이다. 조사 초안이 "삭제 → 배포 → 인수"를
-권했는데 ops 검증자가 ADR-075:21-22 · `consumer-rollout-v1.json:14`로 반증했다. 백업/PITR
-복구점(`c7-prod-live-e2e.md:38`)도 초안에 없었다.
+**순서 — ADR-075 결정 4가 정한다**: soak·reconciliation 전에는 legacy column/table/alias를
+제거하지 않는다. 따라서 사전 구현·병합 → ① → ② → ③ → ④ → ⑤이며, 물리 삭제를 먼저 하거나
+import 중 legacy write를 허용하지 않는다.
 
 #### 검증자가 뒤집은 것 (초안이 틀렸던 곳)
 
@@ -893,13 +802,15 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
 `ktm_curation_command_owner` 등 4개.
 
 - [ ] **T-VN-40A-fence** — legacy write 차단. `curated_repo.py`의 INSERT/UPDATE 경로에
-  DB(trigger 또는 REVOKE)·ACL·static(lint) 3층 게이트. **①~② 전에 끝나야 한다** —
-  안 그러면 import 중에도 legacy가 쓰일 수 있다.
+  DB(trigger 또는 REVOKE)·ACL·static(lint) 3층 게이트를 구현·병합한다. **prod ①~② 전에**
+  끝나야 한다 — 안 그러면 import 중에도 legacy가 쓰일 수 있다.
 - [ ] **T-VN-40-mapping** — `ops.curation_cutover_identity_mappings` 적재 migration.
   설계 §6.2 step 3. PinVi backfill의 입력이다.
-- [ ] **T-VN-40C-manifest** — physical removal manifest 작성 + migration. ⑤ 뒤에만.
-- [ ] **T-VN-40 인수 실행** — ①②④⑤. sanctioned 경로(`c7-prod-live-e2e.md`)로, 백업/PITR
-  복구점 먼저.
+- [ ] **T-VN-40C-manifest** — physical removal manifest와 migration을 사전에 작성·검토한다.
+  legacy 물리 삭제 실행은 receipt complete 뒤다.
+- [ ] **T-VN-40 인수 실행** — 사전 3 task 병합 뒤 ① migration·fence enable → ② import/backfill
+  → ③ sanctioned live/soak → ④ receipt complete → ⑤ manifest physical removal 실행. 백업/PITR
+  복구점을 먼저 확인한다.
 
 ## Lane B 상세 — b1 PinVi 결합·후속
 
@@ -910,18 +821,29 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
 > 완주·수렴 + H35 prod live 검증 잔여) **완료 후**에만 진행한다. 그 전 격리 스택 작업은
 > 병행 무방(파일 충돌은 의도된 핀 2개뿐 — registry write 수·mocked manifest,
 > journal 2026-08-04).
+>
+> **#975 후보 증거 상태(2026-08-18)** — 당시 `main` `0e26a232`의 후손 Map `77821001`과 PinVi
+> `e8e0fecf`의 정확한 source archive를 n150의 별도 Docker project·volume에서만 실행했다. 실제 관리자 UI 로그인·
+> BFF-only dead-letter replay·reconciliation 뒤 같은 stream의 `blocked`/consumer disabled/dead-letter
+> 1/pending 1이 종결 reconciliation의 `ready`/consumer enabled/모든 delivery 0으로 수렴했다. 증거는
+> stream 식별자·blocked event·snapshot epoch/count/Merkle와 request 종결 tuple을 회귀 test로 실패 폐쇄
+> 결박했고, 두 적대 재리뷰의 P0/P1은 없다. 이 pair는 현재 `main` `142a1c12`의 후손이 아니므로
+> rebase된 Map과 다시 pin한 PinVi archive/image에는 증거를 승계하지 않는다. 기존 PostGIS CI에서 예전
+> direct replay test 2건이 consumer disable 계약과 충돌했으므로, reconciliation 재개 경로로 고친 뒤 새
+> exact pair CI와 n150 Live UI E2E를 다시 통과해야 한다. 후보 receipt는 final main C7, production consumer
+> enable 또는 `complete` 근거가 아니며 #975는 사용자 머지 지시 전까지 미병합이다.
 
-- [ ] T-VN-41A — **source generation·restore epoch**
+- [~] T-VN-41A — **source generation·restore epoch**
 
   existing external identity/exact scope를 유지하면서 source generation과 restore epoch를 schema에
   도입하고 restore/backfill 시 단조성·중복 억제를 고정한다.
 
-- [ ] T-VN-41B — **transaction-coupled outbox writer**
+- [~] T-VN-41B — **transaction-coupled outbox writer**
 
   target/link/update 결과와 같은 transaction에서 generation-bearing outbox event를 기록한다.
   critical write path는 relay I/O를 기다리지 않고 commit/rollback 원자성만 보장한다.
 
-- [ ] T-VN-41C — **relay·reconciliation·consumer enable**
+- [~] T-VN-41C — **relay·reconciliation·consumer enable**
 
   lease/retry/dead-letter/replay가 있는 relay와 DB 대조 reconciliation을 추가한다. backfill checksum
   뒤 critical path 밖에서 PinVi 소비를 enable하고 누락·중복·restore epoch 전환을 live로 증명한다.
@@ -951,9 +873,11 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
   - [ ] n150 격리 DB에서 migration → 수동 GC → schedule ON → 다음 tick 순서로 검증하고,
     GC 처리량이 유입률을 상회하며 remaining backlog가 0인지 증명한다. referenced snapshot 증가율과
     보존 임계치 alert도 함께 확인한다.
-  - [ ] Map/PinVi exact head로 n150 isolated live UI recovery와 최종 prod gate를 통과한다.
-    PinVi system별 snapshot concurrency 1, `429/503 Retry-After` backoff, `413` non-retry,
-    credential별 gateway limit 또는 동등한 외부 rate-limit과 실제 호출 cadence를 증명한다.
+  - [~] Map/PinVi exact head로 n150 isolated live UI recovery와 최종 prod gate를 통과한다.
+    후보 Live UI recovery와 `blocked → ready` stream/replay/reconciliation 결박은 통과했다. 최종 prod
+    gate는 별도 final main C7·production consumer enable 경계이며, PinVi system별 snapshot concurrency 1,
+    `429/503 Retry-After` backoff, `413` non-retry, credential별 gateway limit 또는 동등한 외부 rate-limit과
+    실제 호출 cadence를 함께 증명한다.
 
 - [ ] T-VN-41S — **snapshot materialization streaming·audit compaction 확장 (#922, C enable 비차단)**
 
@@ -1028,9 +952,10 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
 > `170ddf57`로 병합됐고 CI 8개가 모두 녹색이다. 연동 소비자 PinVi
 > [#445](https://github.com/digitie/pinvi/pull/445)와 Docker Manager
 > [#174](https://github.com/digitie/kor-travel-docker-manager/pull/174)도 병합됐다. 그러나
-> receipt는 `pending`이며 n150 canonical import/backfill 실운영 인수와 그 증거에 따른
-> final legacy 물리 삭제가 남아 있다. 따라서 아래 A/B/C는 구현은 병합됐지만 release는 아직
-> 완료되지 않은 `[~]` 상태다.
+> receipt는 `pending`이다. #974가 lifecycle·consumer 전환의 기반을 병합했더라도 40A write
+> fence·identity mapping·40C physical removal manifest는 아직 구현되지 않았고, 그 뒤 n150
+> canonical import/backfill·live receipt·물리 삭제 실행도 남아 있다. 따라서 아래 A/B/C는
+> release 관점에서 완료되지 않은 `[~]` 상태다.
 
 - [~] T-VN-40A — **legacy writer inventory·write fence**
 
