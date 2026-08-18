@@ -1399,7 +1399,7 @@ def test_api_image_without_legacy_modules_identifies_pre_squash_db(
     """최종 image에 historical Python이 없어도 pre-squash 진단은 보존한다."""
     path, marker = _migration_stub_path(
         tmp_path,
-        image_head="0222_tvn40a_merge_runtime_role",
+        image_head="0223_tvn40_identity_mappings",
         current_script=(
             "echo \"FAILED: Can't locate revision identified by "
             "'0078_cache_target_gc_observe'\"; exit 255"

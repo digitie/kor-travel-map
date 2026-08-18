@@ -858,7 +858,7 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
       넷 다 UPDATE 권한 필요) 전수 + ORM `CuratedFeatureRow` 가드. `postgres-schema.md`
       head→0222.
     - **배포 선행(잊지 말 것)**: orchestrator(docker-manager) `.env`의
-      `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를 `0222_tvn40a_merge_runtime_role`로 올려야
+      `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를 그때의 head(0223 뒤로는 `0223_tvn40_identity_mappings`)로 올려야
       `api-entrypoint.sh`가 fail-closed로 막지 않는다. T-VN-40 인수 실행 ①의 첫 줄.
     - 3차(재검증) P1 — executor 게이트가 superuser도 거부하는데 `test_cli_dedup_merge`(superuser
       DSN)와 `test_tvn35_typed_subtypes`(migrated_session) 2건이 여전히 superuser로 merge를 몰았다
@@ -866,12 +866,18 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
       help에 "DSN은 API runtime 로그인" 명시(superuser/migrator DSN은 42501).
   - 머지됨(적대 리뷰 2명 hold · CI 4 workflow green · n150 전체 통합 931 passed/env-only 6 failed).
     **①~② 전에 머지돼야 한다**는 조건 충족.
-- [ ] **T-VN-40-mapping** — `ops.curation_cutover_identity_mappings` 적재 migration.
-  설계 §6.2 step 3. PinVi backfill의 입력이다.
+- [~] **T-VN-40-mapping** — `ops.curation_cutover_identity_mappings` 적재 migration `0223_tvn40_identity_mappings`
+  (설계 §6.2 step 3·§6.3 · [설계 문서](reports/t-vn-40-identity-mapping-loader-design-2026-08-18.md), 적대 리뷰 2명 hold).
+  PinVi backfill의 입력이다. 구현·통합 테스트 11건(bucket B/C/D + 중단 사유 5 + 재적용 방지 + FK 불변식 +
+  dedicated DB 0104→head) 통과, PR 대기. prod 실측(2026-08-18): legacy 4,424 전부 bucket B(1:1 projection).
+  merge_repo는 mapping이 잡은 item의 detach rekey를 명시 MergeConflictError로 막는다.
+  - [ ] T-VN-40B 아래 잔여(§6.2 step 3 후반): legacy source_rule → candidate `legacy_backfill` transition,
+    `default_action='curated'` 퇴역 + `ck_curated_source_rules_action` VALIDATE. ② blocker 아님(candidate는
+    admin 전용, PinVi 입력 아님) — 소유 줄이 없어 여기 명시.
 - [ ] **T-VN-40C-manifest** — physical removal manifest와 migration을 사전에 작성·검토한다.
   legacy 물리 삭제 실행은 receipt complete 뒤다.
 - [ ] **T-VN-40 인수 실행** — 사전 3 task 병합 뒤 ① `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`
-  bump(→0222) + migration·fence enable → ② import/backfill
+  bump(→ 현재 head `0223_tvn40_identity_mappings`) + **0223 precheck**(설계 §5, prod read-only) + migration·fence enable → ② import/backfill
   → ③ sanctioned live/soak → ④ receipt complete → ⑤ manifest physical removal 실행. 백업/PITR
   복구점을 먼저 확인한다.
 

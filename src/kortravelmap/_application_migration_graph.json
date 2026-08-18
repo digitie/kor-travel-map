@@ -135,6 +135,12 @@
         "0221_tvn40_snapshot_text_bounds"
       ],
       "revision": "0222_tvn40a_merge_runtime_role"
+    },
+    {
+      "down_revision": [
+        "0222_tvn40a_merge_runtime_role"
+      ],
+      "revision": "0223_tvn40_identity_mappings"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

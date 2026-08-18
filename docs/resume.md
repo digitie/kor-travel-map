@@ -3,7 +3,7 @@
 ## 2026-08-18 — T-VN-40A fence(#994) 머지 → 다음은 40-mapping
 
 #994는 main `3e0732b3`로 머지됐다(적대 리뷰 3라운드·2명 hold, CI 4 workflow green, n150 전체 통합
-931 passed). 배포 선행 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`→`0222_tvn40a_merge_runtime_role`.
+931 passed). 배포 선행 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`→ 그때의 head(0223 뒤로는 `0223_tvn40_identity_mappings`).
 
 ### 다음 한 작업
 
