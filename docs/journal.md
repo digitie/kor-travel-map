@@ -24,6 +24,21 @@
 - ④ 선행: PinVi가 vendor한 Map user spec은 `73a9a246`(08-05) 시절 바이트다. Map user spec은
   `4672aa96`~`main` 전 구간 불변이라 재-vendor는 순수 refresh이며, 이 불일치를 잡는 것은 Map의
   `test_vnext_contract_artifacts`뿐이다(PinVi CI는 못 잡는다).
+
+## 2026-08-18 — T-VN-41S snapshot streaming 1차와 migration 보류
+
+- list 기반 capture를 PostgreSQL server cursor 두 번 순회로 바꿨다. 첫 scan은 incremental Merkle
+  level stack으로 root/count/canonical bytes를 계산하고 admission을 header INSERT 전에 닫는다. 두 번째
+  scan은 1,000행씩 INSERT하고 첫 page만 메모리에 두며, 끝에서 첫 scan checksum을 다시 검증한다.
+- item 1,000,000/512 MiB의 독립 typed 413, 유효 generic→reconciliation 동일 snapshot material 공유,
+  table/index bytes·dead tuple·vacuum lag Dagster metadata/threshold와 future compacted page 410을 추가했다.
+- 집중 테스트 212개, PostGIS generic-first material reuse 1개, 변경 source strict mypy와 Ruff가
+  통과했다. 1,000,001 synthetic leaf는 약 15.45초/64.7k leaf/s, traced peak 약 0.003 MiB였다. 이는
+  accumulator 근거이며 n150 DB 처리량 증거는 아니다.
+- terminal audit item compaction과 true receipt/material 분리는 schema 변경 없이는 안전하지 않다.
+  T-VN-40C가 `0224`를 예약했으므로 migration 번호를 만들지 않았고, `0225+`용 번호 없는 DDL·downgrade
+  fail-close 설계만 `docs/reports/tvn41s/`에 남겼다.
+
 ## 2026-08-18 — T-VN-H45 후속: 다건 재시도 예산·provider quota/TLS 정본화
 
 - KMA·DataGoKr·AirKorea·KHOA 다건 호출에 예상 경계 수 5% 올림(최소 8·최대 32)의 공유
@@ -40,7 +55,6 @@
   따라서 ①~③은 완료하지만 ⑤ Alembic 1.19 적응은 열린 barrier로 유지한다.
 - 로컬 검증: python-kma-api `149 passed, 12 skipped` + Ruff/mypy, python-khoa-api
   `44 passed, 2 skipped` + compileall/Ruff/mypy, Map 변경 집중 `350 passed` + Ruff/strict mypy.
-||||||| parent of 2c3014ff (docs(tvn40): 인수 ② 범위 정정 — Map mutation 없음, 관문은 PinVi 재배포)
 
 ## 2026-08-18 — T-VN-40 인수 ① 실행: prod가 `0223`으로 올라갔다 (4,424 mapping)
 

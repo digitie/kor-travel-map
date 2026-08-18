@@ -2741,6 +2741,14 @@ view에서 읽어 ADR-081 Merkle v1으로 checksum한다. page 중 새 write가 
 동일 epoch, dead-letter 0을 모두 확인해야만 enable하며 mismatch terminal receipt는 다른 checksum으로
 resume할 수 없다. legacy target에는 임의 epoch를 백필하지 않으며 첫 권위 snapshot이 head를 채택한다.
 
+T-VN-41S는 현재 표에서 먼저 server cursor/incremental Merkle와 bounded item INSERT를 적용하고, 75분 넘게 남은
+generic snapshot을 reconciliation seal이 같은 header/item으로 재사용한다. generic/reconciliation별
+receipt와 공용 material/item을 물리 분리하는 최종 모델은 T-VN-40C 예약 `0224` 뒤 `0225+` migration이
+소유한다. 목표 material은 exact `(external_system, restore_epoch,
+material_high_watermark_relay_order)`, safe lower cursor, count/bytes/root와 compacted 시각을 보존한다.
+receipt는 새 snapshot ID와 kind/expiry를 갖고 material FK를 공유한다. terminal retention 뒤 item을
+compact해도 receipt ID, count/root/cursor와 reconciliation terminal 인과관계는 삭제하지 않는다.
+
 `ops.poi_cache_target_snapshot_gc_observations`는 감사 snapshot 자체가 아니라 그 개수를 다시 셀 수
 있는 파생 운영 관측이다. 새 행은 직전 acquired 행의 run/time/count와 마지막
 `growth_baseline_eligible=true` 행의 run/time/count를 서로 다른 컬럼에 복사한다. 감소 경보는 직전
@@ -2757,6 +2765,11 @@ acquired count와 비교하고 증가율은 적격 baseline과 비교한다. DB 
 0078에 두고 테이블과 관측을 보존한다. 정상 복구는 0078 이상 앱으로 forward 배포하는 것이다.
 명시적 Alembic downgrade만 테이블을 파괴하며, 다시 0078로 upgrade하면 빈 테이블로 재생성되어 첫
 acquired run이 새 기준선이 된다. snapshot/reconciliation 원본은 이 경로에서 삭제되지 않는다.
+
+GC 종료 관측은 위 count 외에 snapshot header/item 두 relation의 table/TOAST bytes, index bytes,
+`n_dead_tup`, 가장 긴 vacuum lag도 같은 transaction에서 읽는다. 이 네 값은 운영 metadata이며 감사
+snapshot 원본이 아니다. vacuum 이력이 없는 relation이 하나라도 있으면 lag를 임의 0으로 만들지 않고
+관측 불능으로 남긴다.
 
 ### 9.11 `ops.provider_refresh_policies` (ADR-045 T-205c, alembic 0009/0049/0056)
 

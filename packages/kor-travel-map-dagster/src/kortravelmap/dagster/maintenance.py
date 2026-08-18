@@ -205,6 +205,26 @@ _CACHE_TARGET_SNAPSHOT_GC_CONFIG_SCHEMA: Final[dict[str, object]] = {
         default_value=90,
         description="run별 referenced count 관측 이력 보존 일수.",
     ),
+    "snapshot_table_byte_ceiling": Field(
+        Int,
+        default_value=2_000_000_000,
+        description="snapshot 두 relation의 table/TOAST bytes alert ceiling.",
+    ),
+    "snapshot_index_byte_ceiling": Field(
+        Int,
+        default_value=1_000_000_000,
+        description="snapshot 두 relation의 index bytes alert ceiling.",
+    ),
+    "snapshot_dead_tuple_ceiling": Field(
+        Int,
+        default_value=100_000,
+        description="snapshot 두 relation의 pg_stat dead tuple alert ceiling.",
+    ),
+    "snapshot_vacuum_lag_ceiling_seconds": Field(
+        Int,
+        default_value=7_200,
+        description="snapshot relation 중 가장 오래된 최근 vacuum age alert ceiling(초).",
+    ),
 }
 
 
@@ -485,6 +505,30 @@ async def drain_expired_cache_target_snapshots_op(
         minimum=1,
         maximum=3_650,
     )
+    snapshot_table_byte_ceiling = _bounded_int_config(
+        config.get("snapshot_table_byte_ceiling"),
+        name="snapshot_table_byte_ceiling",
+        default=2_000_000_000,
+        minimum=0,
+    )
+    snapshot_index_byte_ceiling = _bounded_int_config(
+        config.get("snapshot_index_byte_ceiling"),
+        name="snapshot_index_byte_ceiling",
+        default=1_000_000_000,
+        minimum=0,
+    )
+    snapshot_dead_tuple_ceiling = _bounded_int_config(
+        config.get("snapshot_dead_tuple_ceiling"),
+        name="snapshot_dead_tuple_ceiling",
+        default=100_000,
+        minimum=0,
+    )
+    snapshot_vacuum_lag_ceiling_seconds = _bounded_int_config(
+        config.get("snapshot_vacuum_lag_ceiling_seconds"),
+        name="snapshot_vacuum_lag_ceiling_seconds",
+        default=7_200,
+        minimum=0,
+    )
     started_at = monotonic()
     result = await client.drain_expired_cache_target_snapshots(
         max_batches=max_batches,
@@ -558,6 +602,15 @@ async def drain_expired_cache_target_snapshots_op(
             observation_retention_days=observation_retention_days,
         )
     )
+    metadata.update(
+        _cache_target_snapshot_storage_alert_metadata(
+            result,
+            table_byte_ceiling=snapshot_table_byte_ceiling,
+            index_byte_ceiling=snapshot_index_byte_ceiling,
+            dead_tuple_ceiling=snapshot_dead_tuple_ceiling,
+            vacuum_lag_ceiling_seconds=snapshot_vacuum_lag_ceiling_seconds,
+        )
+    )
     if metadata["referenced_alert"]:
         context.log.warning(
             "cache-target referenced snapshot 보존 alert: %s",
@@ -567,6 +620,11 @@ async def drain_expired_cache_target_snapshots_op(
         context.log.warning(
             "cache-target referenced snapshot 관측 품질 경고: %s",
             metadata["referenced_observation_issue_reasons"],
+        )
+    if metadata["snapshot_storage_alert"]:
+        context.log.warning(
+            "cache-target snapshot relation/vacuum alert: %s",
+            metadata["snapshot_storage_alert_reasons"],
         )
     context.add_output_metadata(metadata)
     return metadata
@@ -824,6 +882,78 @@ def _bounded_int_config(
             allow_retries=False,
         )
     return result
+
+
+def _cache_target_snapshot_storage_alert_metadata(
+    result: Any,
+    *,
+    table_byte_ceiling: int,
+    index_byte_ceiling: int,
+    dead_tuple_ceiling: int,
+    vacuum_lag_ceiling_seconds: int,
+) -> dict[str, object]:
+    not_observed = "not_observed"
+    table_bytes = result.snapshot_table_bytes
+    index_bytes = result.snapshot_index_bytes
+    dead_tuples = result.snapshot_dead_tuples
+    vacuum_lag = result.snapshot_vacuum_lag_seconds
+    available = table_bytes is not None and index_bytes is not None and dead_tuples is not None
+    total_relation_bytes: int | str = not_observed
+    if available:
+        assert table_bytes is not None
+        assert index_bytes is not None
+        assert dead_tuples is not None
+        total_relation_bytes = table_bytes + index_bytes
+    table_alert = bool(available and table_bytes is not None and table_bytes > table_byte_ceiling)
+    index_alert = bool(available and index_bytes is not None and index_bytes > index_byte_ceiling)
+    dead_tuple_alert = bool(
+        available and dead_tuples is not None and dead_tuples > dead_tuple_ceiling
+    )
+    vacuum_lag_alert = bool(
+        available
+        and vacuum_lag is not None
+        and vacuum_lag > vacuum_lag_ceiling_seconds
+    )
+    reasons = [
+        reason
+        for reason, active in (
+            ("snapshot_table_bytes", table_alert),
+            ("snapshot_index_bytes", index_alert),
+            ("snapshot_dead_tuples", dead_tuple_alert),
+            ("snapshot_vacuum_lag", vacuum_lag_alert),
+        )
+        if active
+    ]
+    observation_issue_reasons: list[str] = []
+    if result.skipped:
+        observation_issue_reasons.append("gc_overlap_skipped")
+    elif not available:
+        observation_issue_reasons.append("snapshot_storage_observation_unavailable")
+    elif vacuum_lag is None:
+        observation_issue_reasons.append("snapshot_vacuum_not_observed")
+    return {
+        "snapshot_storage_observed": available,
+        "snapshot_table_bytes": table_bytes if table_bytes is not None else not_observed,
+        "snapshot_index_bytes": index_bytes if index_bytes is not None else not_observed,
+        "snapshot_total_relation_bytes": total_relation_bytes,
+        "snapshot_dead_tuples": dead_tuples if dead_tuples is not None else not_observed,
+        "snapshot_vacuum_lag_seconds": (
+            vacuum_lag if vacuum_lag is not None else not_observed
+        ),
+        "snapshot_table_byte_ceiling": table_byte_ceiling,
+        "snapshot_index_byte_ceiling": index_byte_ceiling,
+        "snapshot_dead_tuple_ceiling": dead_tuple_ceiling,
+        "snapshot_vacuum_lag_ceiling_seconds": vacuum_lag_ceiling_seconds,
+        "snapshot_table_byte_alert": table_alert,
+        "snapshot_index_byte_alert": index_alert,
+        "snapshot_dead_tuple_alert": dead_tuple_alert,
+        "snapshot_vacuum_lag_alert": vacuum_lag_alert,
+        "snapshot_storage_alert": bool(reasons),
+        "snapshot_storage_alert_reasons": reasons,
+        "snapshot_storage_observation_issue": bool(observation_issue_reasons),
+        "snapshot_storage_observation_issue_reasons": observation_issue_reasons,
+        "snapshot_storage_requires_attention": bool(reasons or observation_issue_reasons),
+    }
 
 
 def _cache_target_referenced_alert_metadata(

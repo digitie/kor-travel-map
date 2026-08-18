@@ -2588,6 +2588,13 @@ async def test_background_snapshot_gc_round_robins_systems_and_observes_once(
         False,
     )
     assert backlog.remaining_items == backlog.remaining_headers == 0
+    assert backlog.snapshot_table_bytes > 0
+    assert backlog.snapshot_index_bytes > 0
+    assert backlog.snapshot_dead_tuples >= 0
+    assert (
+        backlog.snapshot_vacuum_lag_seconds is None
+        or backlog.snapshot_vacuum_lag_seconds >= 0
+    )
 
 
 @pytest.mark.integration
@@ -2883,6 +2890,84 @@ async def _resume_stream_after_dead_letter_replay(
     )
     assert completed.status == "succeeded"
     return completed
+
+
+@pytest.mark.integration
+async def test_two_phase_reconciliation_reuses_current_generic_snapshot_material(
+    migrated_session: AsyncSession,
+) -> None:
+    system = "reconciliation-generic-material-reuse-test"
+    begin_command = await _reconciliation_command(
+        migrated_session,
+        key="9d100000-0000-4000-8000-000000000001",
+        operation="service.cache-target-reconciliation.begin",
+    )
+    preparing = await begin_cache_target_reconciliation(
+        migrated_session,
+        command_id=begin_command,
+        external_system=system,
+        consumer_id=_CONSUMER,
+        expected_restore_epoch=1,
+        expected_control_version=None,
+        create_only=True,
+        reason="generic material 공유",
+    )
+    head = await _apply_snapshot_source(
+        migrated_session,
+        external_system=system,
+        target_key="target-a",
+        event_id="9d200000-0000-4000-8000-000000000001",
+        idempotency_key="9d300000-0000-4000-8000-000000000001",
+    )
+    generic = await get_cache_target_snapshot(
+        migrated_session,
+        external_system=system,
+        limit=10,
+    )
+    expected_root = snapshot_merkle_root(
+        [
+            SnapshotMerkleRowV1(
+                external_system=system,
+                target_key="target-a",
+                state=head.state,
+                source_generation=head.source_generation,
+                source_payload_fingerprint=head.source_payload_fingerprint,
+            )
+        ]
+    )
+
+    sealed = await seal_cache_target_reconciliation(
+        migrated_session,
+        request_id=preparing.request_id,
+        external_system=system,
+        consumer_id=_CONSUMER,
+        expected_phase_version=1,
+        expected_restore_epoch=1,
+        expected_item_count=1,
+        expected_merkle_root=expected_root,
+    )
+
+    assert sealed.snapshot_id == generic.snapshot_id
+    assert (
+        await migrated_session.scalar(
+            text(
+                "SELECT count(*) FROM ops.poi_cache_target_snapshots "
+                "WHERE external_system = :system"
+            ),
+            {"system": system},
+        )
+        == 1
+    )
+    assert (
+        await migrated_session.scalar(
+            text(
+                "SELECT count(*) FROM ops.poi_cache_target_snapshot_items "
+                "WHERE external_system = :system"
+            ),
+            {"system": system},
+        )
+        == 1
+    )
 
 
 @pytest.mark.integration

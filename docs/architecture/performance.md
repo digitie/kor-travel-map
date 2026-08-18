@@ -1008,6 +1008,21 @@ T-216f/g와 PinVi-agent provider 반영 후 T-212d를 다시 실행했다. 전�
 
 상세 리포트: `docs/reports/t-212d-read-heavy-rerun-2026-06-10.md`.
 
+### 14.5 cache-target snapshot streaming·physical 관측
+
+T-VN-41S snapshot은 전체 head/item Python list와 한 번의 무제한 `executemany`를 금지한다. DB 정렬
+cursor를 `yield_per=1,000`으로 읽고 incremental Merkle level stack만 유지한다. 첫 scan은 admission과
+root를 확정하고, 두 번째 scan은 1,000행 INSERT batch와 응답 page만 유지한다. item 1,000,000개와
+canonical material 512 MiB는 서로 독립인 fail-close ceiling이다. 두 번째 scan의 count/bytes/root가
+다르면 같은 transaction을 rollback한다.
+
+GC 관측은 논리 row count만으로 bloat를 숨기지 않는다. `pg_table_size` 합, `pg_indexes_size` 합,
+`pg_stat_user_tables.n_dead_tup` 합, 두 snapshot relation의 최근 vacuum 중 가장 긴 age를 함께 기록한다.
+vacuum 이력이 없는 relation은 age 0이 아니라 관측 불능이다. threshold는 초기 운영 guardrail이며
+n150 1M admitted materialization/compaction soak에서 처리량, relation 감소, dead tuple 회수와 실제
+autovacuum cadence를 측정해 조정한다. final receipt/material schema의 hot path와 compaction 후보 SQL은
+`0225+` migration 뒤 natural planner EXPLAIN으로 index scan과 bounded lock set을 검증한다.
+
 ## 15. 운영 체크리스트 (Sprint 5 진입 전)
 
 - [ ] 모든 hot path SQL에 EXPLAIN 통합 테스트

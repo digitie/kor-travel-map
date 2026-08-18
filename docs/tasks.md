@@ -23,7 +23,7 @@ barrier로 직렬화한다.
 - **Lane B — frontend hardening·PinVi 소비 API**
   - [~] `T-VN-41A` → [~] `T-VN-41B` → [~] `T-VN-41C`(generation/outbox — 상세 AC 일부 완료, #975 rebase·regression 수정·새 exact-pair CI/E2E 재검증 중)
   - [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2`(격리 리허설·data-dependent live UI E2E; #967 closed)
-  - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환) ∥ [ ] `T-VN-41S`
+  - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환) ∥ [~] `T-VN-41S`
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정, T-VN-40 인수 뒤)**
   - [ ] `T-VN-M00`(설계 초안 2차·적대 검증) → [ ] `T-VN-M01`(admin Feature 생성 API — **ADR 필요**) → [ ] `T-VN-M02`(origin 보존·불변)
   - [ ] `T-VN-M03`(curated 동시 생성 — T-VN-40 인수 뒤) ∥ [ ] `T-VN-M04`(PinVi 요청 큐 — cross-repo)
@@ -1046,10 +1046,22 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
     `429/503 Retry-After` backoff, `413` non-retry, credential별 gateway limit 또는 동등한 외부 rate-limit과
     실제 호출 cadence를 함께 증명한다.
 
-- [ ] T-VN-41S — **snapshot materialization streaming·audit compaction 확장 (#922, C enable 비차단)**
+- [~] T-VN-41S — **snapshot materialization streaming·audit compaction 확장 (#922, C enable 비차단)**
 
   DB-side/bounded streaming Merkle materialization, receipt/material 공유, terminal audit item compaction,
   item/byte admission과 relation bytes/dead-tuple/vacuum metric을 1M+ synthetic/n150 soak로 검증한다.
+  - [x] PostgreSQL server cursor 2-pass scan, incremental Merkle v1, 1,000행 INSERT batch와 first-page만
+    보관하는 process-memory bounded 경로를 구현한다.
+  - [x] item 1,000,000/canonical material 512 MiB admission을 header INSERT 전에 검사하고 typed `413`으로
+    fail-close한다.
+  - [x] 유효 generic material을 two-phase reconciliation seal이 같은 snapshot으로 재사용하고,
+    relation/index bytes·dead tuple·vacuum lag Dagster metric/alert를 추가한다.
+  - [x] future terminal compaction page의 non-retryable `410 SNAPSHOT_MATERIAL_COMPACTED` API 계약과
+    번호 없는 receipt/material DDL·upgrade/downgrade 설계를 고정한다.
+  - [ ] T-VN-40C 예약 `0224` 착지 뒤 `0225+`로 receipt/material/item 정규화 migration, 양방향 material
+    공유, terminal retention compactor와 실제 repository 410 경로를 구현한다.
+  - [ ] migration upgrade/downgrade·ACL/catalog·EXPLAIN과 n150 PostGIS 1M admitted/1M+ rejection,
+    concurrent mutation safe lower cursor, compaction/vacuum soak evidence를 통과한다.
 
 ### T-VN-41F1J — C6c cancel-probe fixture 수명주기 복구
 

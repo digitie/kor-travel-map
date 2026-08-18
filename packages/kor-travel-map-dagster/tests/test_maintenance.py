@@ -88,6 +88,10 @@ class _Client:
             growth_baseline_referenced_headers=9,
             observation_growth_baseline_eligible=True,
             observation_growth_min_interval_seconds=300,
+            snapshot_table_bytes=2_100_000_000,
+            snapshot_index_bytes=1_100_000_000,
+            snapshot_dead_tuples=100_001,
+            snapshot_vacuum_lag_seconds=7_201,
         )
 
     async def purge_expired_notices(self, *, retention: str = "1 year") -> int:
@@ -357,6 +361,10 @@ def test_cache_target_snapshot_gc_job_reports_metadata_and_has_retry_policy(
                         "referenced_header_growth_ceiling_per_hour": 0,
                         "referenced_growth_min_interval_seconds": 300,
                         "observation_retention_days": 30,
+                        "snapshot_table_byte_ceiling": 2_000_000_000,
+                        "snapshot_index_byte_ceiling": 1_000_000_000,
+                        "snapshot_dead_tuple_ceiling": 100_000,
+                        "snapshot_vacuum_lag_ceiling_seconds": 7_200,
                     }
                 }
             }
@@ -445,6 +453,30 @@ def test_cache_target_snapshot_gc_job_reports_metadata_and_has_retry_policy(
             "referenced_header_growth",
         ],
         "referenced_requires_attention": True,
+        "snapshot_storage_observed": True,
+        "snapshot_table_bytes": 2_100_000_000,
+        "snapshot_index_bytes": 1_100_000_000,
+        "snapshot_total_relation_bytes": 3_200_000_000,
+        "snapshot_dead_tuples": 100_001,
+        "snapshot_vacuum_lag_seconds": 7_201,
+        "snapshot_table_byte_ceiling": 2_000_000_000,
+        "snapshot_index_byte_ceiling": 1_000_000_000,
+        "snapshot_dead_tuple_ceiling": 100_000,
+        "snapshot_vacuum_lag_ceiling_seconds": 7_200,
+        "snapshot_table_byte_alert": True,
+        "snapshot_index_byte_alert": True,
+        "snapshot_dead_tuple_alert": True,
+        "snapshot_vacuum_lag_alert": True,
+        "snapshot_storage_alert": True,
+        "snapshot_storage_alert_reasons": [
+            "snapshot_table_bytes",
+            "snapshot_index_bytes",
+            "snapshot_dead_tuples",
+            "snapshot_vacuum_lag",
+        ],
+        "snapshot_storage_observation_issue": False,
+        "snapshot_storage_observation_issue_reasons": [],
+        "snapshot_storage_requires_attention": True,
     }
     retry_by_name = {
         node_def.name: node_def.retry_policy
@@ -507,6 +539,13 @@ def test_cache_target_snapshot_gc_job_marks_skipped_backlog_unobserved(
     assert output["referenced_alert"] is False
     assert output["referenced_alert_reasons"] == []
     assert output["referenced_requires_attention"] is True
+    assert output["snapshot_storage_observed"] is False
+    assert output["snapshot_table_bytes"] == "not_observed"
+    assert output["snapshot_storage_alert"] is False
+    assert output["snapshot_storage_observation_issue_reasons"] == [
+        "gc_overlap_skipped"
+    ]
+    assert output["snapshot_storage_requires_attention"] is True
 
 
 def test_cache_target_snapshot_gc_first_observation_checks_only_ceiling() -> None:

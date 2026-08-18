@@ -3,7 +3,7 @@
 - **상태**: accepted
 - **날짜**: 2026-07-31
 - **결정자**: 사용자 + Codex
-- **출처**: ADR-074, `T-VN-41A/B/C`
+- **출처**: ADR-074, `T-VN-41A/B/C`, `T-VN-41S`(#922, 2026-08-18 보강)
 
 ## 컨텍스트
 
@@ -206,10 +206,10 @@ subquery를 섞어 pre-wait MVCC head에 post-wait cursor를 결합하지 않는
 `relay_order`를 배정하며, column default/Identity가 trigger보다 먼저 번호를 소비하게 두지 않는다.
 application의 사전 stream lock은 trigger가 head/target lock 뒤 stream을 기다리는 역순 교착을 막고,
 trigger는 raw SQL이나 미래 writer도 allocation-before-lock 계약을 우회하지 못하게 한다.
-barrier 전에 transaction-local `lock_timeout=5s`, `statement_timeout=30s`를 설정한다. hung writer 때문에
+barrier 전에 transaction-local `lock_timeout=5s`, `statement_timeout=5min`을 설정한다. hung writer 때문에
 기한을 넘기면 advisory single-flight를 해제하고 `503 snapshot_barrier_timeout + Retry-After: 1`로
 fail-close한다.
-barrier 이후 capture/item persist statement가 30초를 넘기면 별도
+barrier 이후 capture/item persist statement가 5분을 넘기면 별도
 `503 snapshot_build_timeout + Retry-After: 1`로 rollback해 lock wait와 build 병목을 구분한다.
 
 `high_watermark_cursor`는 snapshot 생성 시 고정한 external-system-scoped relay prefix다. 재사용 뒤에는 현재 outbox의
@@ -225,12 +225,18 @@ single-flight 안에서 reuse가 실패하면 같은 system의 미만료·미참
 generic live storage를 최대 `2 × stream cardinality`로 제한한다. reconciliation이 참조하는 snapshot은
 이 admission count에서 제외한다.
 
-한 번의 materialization은 source head를 최대 100,001행까지만 읽고 tuple/Merkle 생성 전에 100,000 item
-ceiling을 검사한다. 초과하면 부분 snapshot을 저장하지 않고 `413 snapshot_item_limit_exceeded`로
-fail-close한다. 이 ceiling은 Python O(N) peak memory를 제한하는 pre-streaming 안전 경계이며, DB-side
-bounded streaming/material 공유로 확장하는 후속은 #922가 소유한다.
+T-VN-41S(#922)는 capture를 PostgreSQL server cursor로 두 번 순회한다. 첫 scan은 level stack만 가진
+Merkle v1 accumulator로 count/root/canonical material bytes를 `O(log N)` 메모리에서 계산한다. item
+1,000,000개 또는 512 MiB를 넘으면 header INSERT 전에 각각
+`413 snapshot_item_limit_exceeded`, `413 snapshot_byte_limit_exceeded`로 fail-close한다. 두 번째 scan은
+1,000행 batch INSERT와 첫 응답 page만 보관하고 count/byte/root를 첫 scan과 재대조한다. 두 scan은 같은
+transaction의 stream share barrier 안에 있어 source membership이 고정되며 불일치는 전체 rollback한다.
 
-reconciliation seal은 재사용하지 않고 항상 request 전용 snapshot을 만든다. 만료된 일반 snapshot은
+reconciliation seal은 exact material identity이고 75분 넘게 남은 generic 또는 이미 request가 참조하는 snapshot이
+있으면 같은 header/item을 재사용한다. 만료·미참조 snapshot은 GC가 일부 item을 지웠을 수 있어
+재사용하지 않는다. generic/reconciliation별 독립 receipt가 같은 material을 양방향 공유하고 terminal
+item을 compact하는 정규화 스키마는 T-VN-40C 예약 revision `0224` 뒤의 `0225+` migration으로 제한한다.
+그 전에는 revision 번호 없는 설계 초안만 유지한다. 만료된 일반 snapshot은
 reconciliation request가 참조하지 않을 때만 item 1,000행/header 100행 이하의 `SKIP LOCKED` 배치로
 정리한다. page reader의 header share lock은 GC가 빈 반복 page를 만드는 race를 막는다. terminal request가
 참조하는 snapshot도 checksum 감사 영수증이므로 보존한다.
@@ -243,6 +249,11 @@ busy-loop 대신 종료한다. 2,000,000 item은 실행당 설정 상한이지 �
 remaining count와 total/unexpired-generic/referenced header·item count는 종료 시 한 번만 관측하고 mutex
 skip에서는 unknown이다. backlog/observation retry는 경보 대상이며 기본 `STOPPED` schedule은 consumer
 production enable 전에 켜고 n150 처리량을 확인한다.
+
+같은 종료 관측은 snapshot header/item relation의 table/TOAST bytes, index bytes, dead tuple 추정치와
+두 relation 중 가장 긴 최근 vacuum lag도 기록한다. 한 relation이라도 vacuum/autovacuum 이력이 없으면
+lag를 추정하지 않고 관측 품질 경고를 낸다. Dagster ceiling 초과는 exact reason과 warning을 남기되
+성공한 GC를 retry 실패로 바꾸지 않는다.
 
 초기 cutover는 service recovery principal의 `begin → writer backfill → seal` 두 단계로 고정한다.
 begin은 stream을 fenced 상태로 만들고 active claim을 끊지만 snapshot을 만들지 않는 `preparing`

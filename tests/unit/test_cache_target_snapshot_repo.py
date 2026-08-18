@@ -9,6 +9,10 @@ from typing import Any
 import pytest
 from sqlalchemy.exc import DBAPIError
 
+from kortravelmap.core.cache_target_stream import (
+    SnapshotMerkleAccumulatorV1,
+    SnapshotMerkleRowV1,
+)
 from kortravelmap.infra import cache_target_reconciliation_repo as repo
 
 
@@ -37,6 +41,16 @@ class _Result:
 
     def all(self) -> list[Any]:
         return self._rows
+
+    def __aiter__(self) -> Any:
+        async def _rows() -> Any:
+            for row in self._rows:
+                yield row
+
+        return _rows()
+
+    async def close(self) -> None:
+        return None
 
 
 class _Session:
@@ -148,6 +162,10 @@ class _GcSession:
                         "unexpired_unreferenced_headers": 4,
                         "referenced_items": 11,
                         "referenced_headers": 2,
+                        "snapshot_table_bytes": 10_000,
+                        "snapshot_index_bytes": 2_000,
+                        "snapshot_dead_tuples": 17,
+                        "snapshot_vacuum_lag_seconds": 900,
                     }
                 )
             )
@@ -167,7 +185,7 @@ class _BuildSession:
         values = params or {}
         self.calls.append((sql, values))
         if "set_config('statement_timeout'" in sql:
-            return _Result(scalar="30s")
+            return _Result(scalar="5min")
         if "set_config('lock_timeout', '0'" in sql:
             return _Result(scalar="0")
         if (
@@ -176,24 +194,35 @@ class _BuildSession:
             and "FOR SHARE OF stream" in sql
         ):
             return _Result(SimpleNamespace(_mapping={"external_system": "pinvi"}))
-        if "FROM ops.poi_cache_target_streams AS stream" in sql:
-            return _Result(
-                rows=[
-                    SimpleNamespace(
-                        _mapping={
-                            "external_system": "pinvi",
-                            "restore_epoch": 3,
-                            "high_watermark_relay_order": 8,
-                            "material_high_watermark_relay_order": 5,
-                            "target_key": None,
-                            "state": None,
-                            "source_generation": None,
-                            "source_payload_fingerprint": None,
-                        }
-                    )
-                ]
-            )
         raise AssertionError(f"unexpected SQL: {sql}")
+
+    async def stream(
+        self,
+        statement: Any,
+        params: dict[str, Any] | None = None,
+        *,
+        execution_options: dict[str, Any] | None = None,
+    ) -> _Result:
+        sql = str(statement)
+        values = params or {}
+        self.calls.append((sql, values))
+        assert execution_options == {"stream_results": True, "yield_per": 1_000}
+        return _Result(
+            rows=[
+                SimpleNamespace(
+                    _mapping={
+                        "external_system": "pinvi",
+                        "restore_epoch": 3,
+                        "high_watermark_relay_order": 8,
+                        "material_high_watermark_relay_order": 5,
+                        "target_key": None,
+                        "state": None,
+                        "source_generation": None,
+                        "source_payload_fingerprint": None,
+                    }
+                )
+            ]
+        )
 
 
 class _SqlStateError(Exception):
@@ -217,15 +246,49 @@ class _BarrierTimeoutSession:
 
 
 class _BuildTimeoutSession(_BuildSession):
-    async def execute(
+    async def stream(
         self,
         statement: Any,
         params: dict[str, Any] | None = None,
+        *,
+        execution_options: dict[str, Any] | None = None,
     ) -> _Result:
+        del statement, execution_options
+        raise DBAPIError(None, params, _SqlStateError("57014"), False)
+
+
+class _PersistSession:
+    def __init__(self, rows: list[Any]) -> None:
+        self._rows = rows
+        self.item_batch_sizes: list[int] = []
+
+    async def execute(self, statement: Any, params: Any = None) -> _Result:
         sql = str(statement)
-        if "LIMIT :capture_limit" in sql:
-            raise DBAPIError(None, params, _SqlStateError("57014"), False)
-        return await super().execute(statement, params)
+        if "INSERT INTO ops.poi_cache_target_snapshots (" in sql:
+            return _Result(
+                SimpleNamespace(
+                    _mapping={
+                        "created_at": datetime(2026, 8, 18, tzinfo=UTC),
+                        "expires_at": datetime(2026, 8, 18, 2, tzinfo=UTC),
+                    }
+                )
+            )
+        if "INSERT INTO ops.poi_cache_target_snapshot_items (" in sql:
+            assert isinstance(params, list)
+            self.item_batch_sizes.append(len(params))
+            return _Result()
+        raise AssertionError(f"unexpected SQL: {sql}")
+
+    async def stream(
+        self,
+        statement: Any,
+        params: dict[str, Any] | None = None,
+        *,
+        execution_options: dict[str, Any] | None = None,
+    ) -> _Result:
+        del statement, params
+        assert execution_options == {"stream_results": True, "yield_per": 1_000}
+        return _Result(rows=self._rows)
 
 
 @pytest.mark.unit
@@ -286,6 +349,10 @@ async def test_background_gc_exact_backlog_is_a_separate_observation() -> None:
         unexpired_unreferenced_headers=4,
         referenced_items=11,
         referenced_headers=2,
+        snapshot_table_bytes=10_000,
+        snapshot_index_bytes=2_000,
+        snapshot_dead_tuples=17,
+        snapshot_vacuum_lag_seconds=900,
     )
     assert len(session.calls) == 1
     assert "WITH snapshot_inventory AS MATERIALIZED" in session.calls[0][0]
@@ -295,52 +362,72 @@ async def test_background_gc_exact_backlog_is_a_separate_observation() -> None:
 def test_reuse_identity_filters_material_events_but_snapshot_cursor_stays_global() -> None:
     identity_sql = repo._GET_SNAPSHOT_IDENTITY_SQL  # pyright: ignore[reportPrivateUsage]
     capture_sql = repo._CAPTURE_VIEW_SQL  # pyright: ignore[reportPrivateUsage]
+    material_reuse_sql = repo._GET_REUSABLE_MATERIAL_SNAPSHOT_SQL  # pyright: ignore[reportPrivateUsage]
 
     assert "event.event_type = 'cache_target.state_applied'" in identity_sql
     assert "material_high_watermark_relay_order" in identity_sql
     assert "AS high_watermark_relay_order" in capture_sql
     assert "event.event_type = 'cache_target.state_applied'" in capture_sql
     assert "AS material_high_watermark_relay_order" in capture_sql
-    assert "LIMIT :capture_limit" in capture_sql
+    assert "LIMIT :capture_limit" not in capture_sql
+    assert "ORDER BY head.sort_key" in capture_sql
+    assert "material_high_watermark_relay_order" in material_reuse_sql
+    assert "snapshot.expires_at > now()" in material_reuse_sql
+    assert "poi_cache_target_reconciliation_requests" in material_reuse_sql
+    assert "FOR SHARE OF snapshot" in material_reuse_sql
 
 
 @pytest.mark.unit
 def test_snapshot_item_ceiling_accepts_exact_limit_and_rejects_limit_plus_one() -> None:
-    repo._enforce_snapshot_item_limit(100_000)  # pyright: ignore[reportPrivateUsage]
+    repo._enforce_snapshot_admission(  # pyright: ignore[reportPrivateUsage]
+        item_count=1_000_000,
+        material_bytes=536_870_912,
+    )
 
     with pytest.raises(repo.CacheTargetStreamConflict) as exceeded:
-        repo._enforce_snapshot_item_limit(100_001)  # pyright: ignore[reportPrivateUsage]
+        repo._enforce_snapshot_admission(  # pyright: ignore[reportPrivateUsage]
+            item_count=1_000_001,
+            material_bytes=1,
+        )
 
     assert exceeded.value.code == "snapshot_item_limit_exceeded"
     assert exceeded.value.current == {
-        "item_count_lower_bound": 100_001,
-        "item_limit": 100_000,
+        "item_count_lower_bound": 1_000_001,
+        "item_limit": 1_000_000,
+    }
+
+    with pytest.raises(repo.CacheTargetStreamConflict) as byte_exceeded:
+        repo._enforce_snapshot_admission(  # pyright: ignore[reportPrivateUsage]
+            item_count=1,
+            material_bytes=536_870_913,
+        )
+    assert byte_exceeded.value.code == "snapshot_byte_limit_exceeded"
+    assert byte_exceeded.value.current == {
+        "material_bytes_lower_bound": 536_870_913,
+        "material_byte_limit": 536_870_912,
     }
 
 
 @pytest.mark.unit
-async def test_snapshot_material_build_sets_timeout_and_uses_limit_sentinel() -> None:
+async def test_snapshot_material_scan_sets_timeout_and_uses_server_cursor() -> None:
     session = _BuildSession()
 
-    header, items = await repo._build_snapshot_material(  # pyright: ignore[reportPrivateUsage]
+    scan = await repo._scan_snapshot_material(  # pyright: ignore[reportPrivateUsage]
         session,  # type: ignore[arg-type]
         external_system="pinvi",
     )
 
-    assert header["item_count"] == 0
-    assert items == ()
+    assert scan.header["item_count"] == 0
+    assert scan.material_bytes == 0
     assert "set_config('lock_timeout'" in session.calls[0][0]
     assert session.calls[0][1] == {
         "lock_timeout": "5s",
-        "statement_timeout": "30s",
+        "statement_timeout": "5min",
     }
     assert "FOR SHARE OF stream" in session.calls[1][0]
     assert "set_config('lock_timeout', '0'" in session.calls[2][0]
-    assert "LIMIT :capture_limit" in session.calls[3][0]
-    assert session.calls[3][1] == {
-        "external_system": "pinvi",
-        "capture_limit": 100_001,
-    }
+    assert "LIMIT :capture_limit" not in session.calls[3][0]
+    assert session.calls[3][1] == {"external_system": "pinvi"}
 
 
 @pytest.mark.unit
@@ -353,11 +440,62 @@ async def test_snapshot_barrier_and_build_timeouts_are_typed_conflicts() -> None
     assert barrier.value.code == "snapshot_barrier_timeout"
 
     with pytest.raises(repo.CacheTargetStreamConflict) as build:
-        await repo._build_snapshot_material(  # pyright: ignore[reportPrivateUsage]
+        await repo._scan_snapshot_material(  # pyright: ignore[reportPrivateUsage]
             _BuildTimeoutSession(),  # type: ignore[arg-type]
             external_system="pinvi",
         )
     assert build.value.code == "snapshot_build_timeout"
+
+
+@pytest.mark.unit
+async def test_snapshot_persistence_flushes_bounded_batches_and_returns_only_page() -> None:
+    accumulator = SnapshotMerkleAccumulatorV1()
+    rows: list[Any] = []
+    for index in range(1_005):
+        target_key = f"target-{index:04d}"
+        merkle_row = SnapshotMerkleRowV1(
+            external_system="pinvi",
+            target_key=target_key,
+            state="active",
+            source_generation=1,
+            source_payload_fingerprint="a" * 64,
+        )
+        accumulator.add(merkle_row)
+        rows.append(
+            SimpleNamespace(
+                _mapping={
+                    "external_system": merkle_row.external_system,
+                    "target_key": merkle_row.target_key,
+                    "state": merkle_row.state,
+                    "source_generation": merkle_row.source_generation,
+                    "source_payload_fingerprint": merkle_row.source_payload_fingerprint,
+                }
+            )
+        )
+    scan = repo._SnapshotMaterialScan(  # pyright: ignore[reportPrivateUsage]
+        header={
+            "snapshot_id": "11111111-1111-4111-8111-111111111111",
+            "external_system": "pinvi",
+            "restore_epoch": 3,
+            "high_watermark_relay_order": 8,
+            "material_high_watermark_relay_order": 5,
+            "item_count": accumulator.count,
+            "merkle_root": accumulator.hexdigest(),
+        },
+        material_bytes=accumulator.material_bytes,
+    )
+    session = _PersistSession(rows)
+
+    header, returned = await repo._persist_snapshot_material(  # pyright: ignore[reportPrivateUsage]
+        session,  # type: ignore[arg-type]
+        scan=scan,
+        return_limit=7,
+    )
+
+    assert header["item_count"] == 1_005
+    assert len(returned) == 7
+    assert returned[-1].row_number == 7
+    assert session.item_batch_sizes == [1_000, 5]
 
 
 @pytest.mark.unit
@@ -380,10 +518,12 @@ async def test_create_snapshot_reuses_exact_unreferenced_material(
         "expires_at": now + timedelta(minutes=90),
     }
     session = _Session(reusable)
-    create_calls: list[str] = []
+    create_calls: list[tuple[str, int]] = []
 
-    async def _create(_session: Any, *, external_system: str) -> tuple[Any, tuple[Any, ...]]:
-        create_calls.append(external_system)
+    async def _create(
+        _session: Any, *, external_system: str, return_limit: int
+    ) -> tuple[Any, tuple[Any, ...]]:
+        create_calls.append((external_system, return_limit))
         return material, ()
 
     monkeypatch.setattr(repo, "_create_snapshot", _create)
@@ -432,10 +572,12 @@ async def test_reusable_snapshot_below_return_ttl_gate_is_rebuilt(
         "expires_at": now + timedelta(minutes=75),
     }
     session = _Session(reusable, return_ttls=[False, True])
-    create_calls: list[str] = []
+    create_calls: list[tuple[str, int]] = []
 
-    async def _create(_session: Any, *, external_system: str) -> tuple[Any, tuple[Any, ...]]:
-        create_calls.append(external_system)
+    async def _create(
+        _session: Any, *, external_system: str, return_limit: int
+    ) -> tuple[Any, tuple[Any, ...]]:
+        create_calls.append((external_system, return_limit))
         return material, ()
 
     monkeypatch.setattr(repo, "_create_snapshot", _create)
@@ -447,7 +589,7 @@ async def test_reusable_snapshot_below_return_ttl_gate_is_rebuilt(
     )
 
     assert header["snapshot_id"] == material["snapshot_id"]
-    assert create_calls == ["pinvi"]
+    assert create_calls == [("pinvi", 10)]
     assert sum(
         "clock_timestamp() + interval '75 minutes'" in sql
         for sql, _params in session.calls
@@ -472,10 +614,12 @@ async def test_create_generic_snapshot_prunes_only_before_full_capture(
         "expires_at": datetime(2026, 8, 1, 13, 0, tzinfo=UTC),
     }
     session = _Session()
-    create_calls: list[str] = []
+    create_calls: list[tuple[str, int]] = []
 
-    async def _create(_session: Any, *, external_system: str) -> tuple[Any, tuple[Any, ...]]:
-        create_calls.append(external_system)
+    async def _create(
+        _session: Any, *, external_system: str, return_limit: int
+    ) -> tuple[Any, tuple[Any, ...]]:
+        create_calls.append((external_system, return_limit))
         return material, ()
 
     monkeypatch.setattr(repo, "_create_snapshot", _create)
@@ -488,7 +632,7 @@ async def test_create_generic_snapshot_prunes_only_before_full_capture(
 
     assert header == material
     assert items == ()
-    assert create_calls == ["pinvi"]
+    assert create_calls == [("pinvi", 10)]
     assert "set_config('lock_timeout'" in session.calls[1][0]
     assert "LIMIT 2" in session.calls[6][0]
     assert "poi_cache_target_reconciliation_requests" in session.calls[6][0]
@@ -513,8 +657,12 @@ async def test_create_generic_snapshot_rejects_unexpired_unreferenced_copy_over_
         _session: Any,
         *,
         external_system: str,
+        return_limit: int,
     ) -> tuple[Any, tuple[Any, ...]]:
-        pytest.fail(f"capacity 초과 stream에서 full capture를 호출함: {external_system}")
+        pytest.fail(
+            "capacity 초과 stream에서 full capture를 호출함: "
+            f"{external_system}/{return_limit}"
+        )
 
     monkeypatch.setattr(repo, "_create_snapshot", _unexpected_create)
 
@@ -547,8 +695,11 @@ async def test_create_generic_snapshot_fails_fast_when_stream_is_busy(
         _session: Any,
         *,
         external_system: str,
+        return_limit: int,
     ) -> tuple[Any, tuple[Any, ...]]:
-        pytest.fail(f"busy stream에서 full capture를 호출함: {external_system}")
+        pytest.fail(
+            f"busy stream에서 full capture를 호출함: {external_system}/{return_limit}"
+        )
 
     monkeypatch.setattr(repo, "_create_snapshot", _unexpected_create)
 

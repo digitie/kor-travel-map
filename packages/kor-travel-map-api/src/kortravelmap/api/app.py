@@ -173,7 +173,13 @@ _CACHE_TARGET_UNAVAILABLE_CODES = frozenset(
     }
 )
 _CACHE_TARGET_TOO_MANY_REQUEST_CODES = frozenset({"snapshot_capacity_exceeded"})
-_CACHE_TARGET_PAYLOAD_TOO_LARGE_CODES = frozenset({"snapshot_item_limit_exceeded"})
+_CACHE_TARGET_PAYLOAD_TOO_LARGE_CODES = frozenset(
+    {
+        "snapshot_byte_limit_exceeded",
+        "snapshot_item_limit_exceeded",
+    }
+)
+_CACHE_TARGET_GONE_CODES = frozenset({"snapshot_material_compacted"})
 
 _OPS_CANONICAL_PREFIXES = (
     "/v1/ops/datasets",
@@ -493,6 +499,8 @@ def _cache_target_stream_conflict_status(code: str) -> int:
         return 429
     if code in _CACHE_TARGET_PAYLOAD_TOO_LARGE_CODES:
         return 413
+    if code in _CACHE_TARGET_GONE_CODES:
+        return 410
     return 409
 
 

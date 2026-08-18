@@ -1,0 +1,82 @@
+-- T-VN-41S 번호 없는 설계 초안이다. 실행하거나 Alembic revision으로 import하지 않는다.
+-- T-VN-40C의 0224 착지 뒤 실제 revision은 0225 이상을 배정한다.
+
+CREATE TABLE ops.poi_cache_target_snapshot_materials (
+    material_id uuid PRIMARY KEY,
+    external_system text NOT NULL,
+    restore_epoch bigint NOT NULL CHECK (restore_epoch > 0),
+    safe_high_watermark_relay_order bigint NOT NULL
+        CHECK (safe_high_watermark_relay_order >= 0),
+    material_high_watermark_relay_order bigint NOT NULL
+        CHECK (material_high_watermark_relay_order >= 0),
+    item_count bigint NOT NULL CHECK (item_count >= 0),
+    material_bytes bigint NOT NULL CHECK (material_bytes >= 0),
+    merkle_root text NOT NULL CHECK (merkle_root ~ '^[0-9a-f]{64}$'),
+    materialized_at timestamptz NOT NULL,
+    compacted_at timestamptz,
+    CHECK (compacted_at IS NULL OR compacted_at >= materialized_at),
+    UNIQUE (
+        external_system,
+        restore_epoch,
+        material_high_watermark_relay_order
+    )
+);
+
+-- 기존 snapshot header는 material 자체가 아니라 generic/reconciliation receipt가 된다.
+ALTER TABLE ops.poi_cache_target_snapshots
+    ADD COLUMN material_id uuid,
+    ADD COLUMN receipt_kind text,
+    ADD CONSTRAINT ck_poi_cache_target_snapshot_receipt_kind
+        CHECK (receipt_kind IN ('generic', 'reconciliation')),
+    ADD CONSTRAINT fk_poi_cache_target_snapshot_material
+        FOREIGN KEY (material_id)
+        REFERENCES ops.poi_cache_target_snapshot_materials(material_id)
+        ON DELETE RESTRICT;
+
+-- 실제 migration은 새 material item 표를 만들고 검증·swap한다. 기존 표를 제자리에서
+-- 바로 변경하면 backfill 중 reader가 legacy snapshot_id와 material_id를 섞어 읽을 수 있다.
+CREATE TABLE ops.poi_cache_target_snapshot_material_items_draft (
+    material_id uuid NOT NULL
+        REFERENCES ops.poi_cache_target_snapshot_materials(material_id)
+        ON DELETE CASCADE,
+    row_number bigint NOT NULL CHECK (row_number > 0),
+    external_system text NOT NULL,
+    target_key text NOT NULL,
+    state text NOT NULL CHECK (state IN ('active', 'deleted')),
+    source_generation bigint NOT NULL CHECK (source_generation > 0),
+    source_payload_fingerprint text NOT NULL
+        CHECK (source_payload_fingerprint ~ '^[0-9a-f]{64}$'),
+    PRIMARY KEY (material_id, row_number),
+    UNIQUE (material_id, external_system, target_key)
+);
+
+CREATE INDEX idx_poi_cache_target_snapshot_material_identity
+    ON ops.poi_cache_target_snapshot_materials (
+        external_system,
+        restore_epoch,
+        material_high_watermark_relay_order DESC
+    )
+    WHERE compacted_at IS NULL;
+
+CREATE INDEX idx_poi_cache_target_snapshot_receipt_material
+    ON ops.poi_cache_target_snapshots (material_id, expires_at, snapshot_id);
+
+-- compaction 후보의 논리 조건 초안:
+--   material.compacted_at IS NULL
+--   AND 미만료 generic receipt가 없음
+--   AND preparing/running reconciliation이 없음
+--   AND 모든 연결 reconciliation completed_at <= now() - :retention
+-- 후보 material row를 FOR UPDATE SKIP LOCKED한 뒤 같은 transaction에서 compacted_at을
+-- 기록하고 material item을 bounded 삭제한다. page reader는 먼저 material FOR SHARE를 잡는다.
+
+-- downgrade precheck 초안:
+-- DO $$
+-- BEGIN
+--   IF EXISTS (
+--     SELECT 1 FROM ops.poi_cache_target_snapshot_materials
+--     WHERE compacted_at IS NOT NULL
+--   ) THEN
+--     RAISE EXCEPTION 'compacted snapshot material이 있어 legacy item을 복원할 수 없음';
+--   END IF;
+-- END
+-- $$;

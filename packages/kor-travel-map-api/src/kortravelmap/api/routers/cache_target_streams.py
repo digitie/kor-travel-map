@@ -1517,7 +1517,10 @@ async def begin_service_cache_target_reconciliation(
     responses={
         200: {"description": "two-phase reconciliation sealed", "headers": _ETAG_RESPONSE_HEADER},
         413: {
-            "description": "snapshot item 수가 100,000개 materialization 상한을 초과함."
+            "description": (
+                "snapshot item 1,000,000개 또는 canonical material 512 MiB "
+                "admission 상한을 초과함."
+            )
         },
         503: {
             "description": "snapshot writer barrier 또는 materialization 제한 시간 초과.",
@@ -1674,7 +1677,10 @@ async def complete_service_cache_target_reconciliation(
     response_model=CacheTargetSnapshotResponse,
     responses={
         413: {
-            "description": "snapshot item 수가 100,000개 materialization 상한을 초과함."
+            "description": (
+                "snapshot item 1,000,000개 또는 canonical material 512 MiB "
+                "admission 상한을 초과함."
+            )
         },
         429: {
             "description": (
@@ -1774,6 +1780,14 @@ def _snapshot_response(
 @service_router.get(
     "/cache-target-reconciliations/{request_id}/snapshot",
     response_model=CacheTargetSnapshotResponse,
+    responses={
+        410: {
+            "description": (
+                "terminal audit 보존 기간 뒤 snapshot item material이 compact되어 "
+                "header/root receipt만 남음."
+            )
+        }
+    },
     openapi_extra={"x-required-service-scope": "cache-target:snapshot"},
 )
 async def get_service_cache_target_reconciliation_snapshot(
@@ -2017,7 +2031,10 @@ async def replay_admin_cache_target_dead_letter(
     responses={
         202: {"description": "reconciliation accepted", "headers": _ASYNC_OPERATION_HEADERS},
         413: {
-            "description": "snapshot item 수가 100,000개 materialization 상한을 초과함."
+            "description": (
+                "snapshot item 1,000,000개 또는 canonical material 512 MiB "
+                "admission 상한을 초과함."
+            )
         },
         503: {
             "description": "snapshot writer barrier 또는 materialization 제한 시간 초과.",

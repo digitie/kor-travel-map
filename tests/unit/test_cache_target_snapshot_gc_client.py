@@ -147,6 +147,10 @@ async def test_snapshot_gc_drain_uses_global_try_lock_and_transaction_per_batch(
             unexpired_unreferenced_headers=4,
             referenced_items=18,
             referenced_headers=5,
+            snapshot_table_bytes=12_345,
+            snapshot_index_bytes=6_789,
+            snapshot_dead_tuples=321,
+            snapshot_vacuum_lag_seconds=654,
         )
 
     async def _record_trend(
@@ -220,6 +224,10 @@ async def test_snapshot_gc_drain_uses_global_try_lock_and_transaction_per_batch(
         growth_baseline_referenced_headers=4,
         observation_growth_baseline_eligible=True,
         observation_growth_min_interval_seconds=300,
+        snapshot_table_bytes=12_345,
+        snapshot_index_bytes=6_789,
+        snapshot_dead_tuples=321,
+        snapshot_vacuum_lag_seconds=654,
     )
     assert lock_calls == ["cache-target-snapshot-gc"]
     assert lock_commits_at_batch == [1, 2]

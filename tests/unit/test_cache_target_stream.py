@@ -7,6 +7,7 @@ from typing import Any, cast
 import pytest
 
 from kortravelmap.core.cache_target_stream import (
+    SnapshotMerkleAccumulatorV1,
     SnapshotMerkleRowV1,
     cache_target_source_fingerprint,
     canonical_cache_target_source_bytes,
@@ -93,3 +94,32 @@ def test_merkle_rejects_nfc_equivalent_duplicate_identity() -> None:
     ]
     with pytest.raises(ValueError, match="중복"):
         snapshot_merkle_root(rows)
+
+
+def test_incremental_merkle_matches_batch_root_for_every_odd_promotion_shape() -> None:
+    fingerprint = _golden()["source_vectors"][2]["sha256"]
+    rows = [
+        SnapshotMerkleRowV1("pinvi", f"target-{index:02d}", "deleted", index, fingerprint)
+        for index in range(1, 17)
+    ]
+
+    for size in range(len(rows) + 1):
+        accumulator = SnapshotMerkleAccumulatorV1()
+        for row in rows[:size]:
+            accumulator.add(row)
+        assert accumulator.count == size
+        assert accumulator.hexdigest() == snapshot_merkle_root(rows[:size])
+
+
+def test_incremental_merkle_tracks_canonical_material_bytes_and_rejects_order_drift() -> None:
+    fingerprint = _golden()["source_vectors"][2]["sha256"]
+    first = SnapshotMerkleRowV1("pinvi", "a", "deleted", 1, fingerprint)
+    second = SnapshotMerkleRowV1("pinvi", "b", "deleted", 2, fingerprint)
+    accumulator = SnapshotMerkleAccumulatorV1()
+
+    accumulator.add(first)
+    assert accumulator.material_bytes == 59 + len(b"pinvi") + len(b"a")
+    accumulator.add(second)
+
+    with pytest.raises(ValueError, match="순서"):
+        accumulator.add(first)

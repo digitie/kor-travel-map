@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-18 — T-VN-41S bounded snapshot 1차 구현, 0224 migration barrier
+
+#922의 server cursor 2-pass capture, incremental Merkle v1, 1,000행 INSERT, item 1,000,000/512 MiB
+admission, generic→reconciliation material 재사용과 relation/index/dead tuple/vacuum 관측을
+`feat/tvn41s-snapshot-streaming`에 구현했다. API는 미래 compaction의 typed 410을 예약했고, 단위/API/
+Dagster 212개와 PostGIS material 재사용, 1,000,001 leaf synthetic O(log N) accumulator를 통과했다.
+
+### 다음 한 작업
+
+T-VN-40C가 예약한 Alembic `0224`가 main에 착지할 때까지 migration은 만들지 않는다. 그 뒤 `0225+`로
+receipt/material/item 정규화와 terminal retention compactor를 구현하고 실제 repository 410,
+upgrade/downgrade·ACL/catalog·EXPLAIN, n150 1M DB streaming/concurrent mutation/compaction-vacuum soak를
+통과한다. 번호 없는 DDL과 수용 matrix는
+`docs/reports/t-vn-41s-snapshot-streaming-design-2026-08-18.md`가 잇는다.
+
 ## 2026-08-18 — T-VN-H45 후속 ①~③ 구현·provider 정본 병합
 
 KHOA 시도×페이지와 KMA/DataGoKr/AirKorea 다건 호출에 비례형 공유 `RetryBudget`을 적용하고
