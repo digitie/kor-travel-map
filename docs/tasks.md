@@ -551,6 +551,20 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   post-review cleanup 잔여(ADR-045 VWorld 불투명 자격증명 hard-gate 등)는 PinVi 저장소가
   소유한다. Map Agent A/B 실행 queue에는 넣지 않고 PinVi #215가 닫힐 때 상태만 동기화한다.
 
+### T-VN-H50 — CI integration flake: `test_t212d_perf_explain.py:546` planner 인덱스 선택
+
+- [ ] **재현되는 flake다** — `test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible`의
+  첫 gate(`_assert_uses_index(dedup_refresh, 'idx_source_entities_provider_dataset',
+  'idx_features_dedup_refresh_keyset')`)가 CI에서 간헐 실패한다. 2026-08-18까지 PR #975·#996·#998
+  세 번 모두 **재실행 한 번으로 통과**했다(코드와 무관). 실패 시 planner가 `idx_source_links_…`로
+  진입한다 — `enable_seqscan=off`라 인덱스는 타지만 gate가 받는 이름 집합에 없다.
+- 원인 가설: `_seed_live_like_perf_data` 뒤 `ANALYZE` 표본이 실행마다 달라 동치 진입 경로 중
+  하나를 고른다. 성능 축(선두 컬럼 selectivity)은 같지만 gate가 이름으로 고정한다.
+- 고칠 방향(택1, 근거 필요): (a) 진입 경로 동치 집합을 근거와 함께 넓힌다(왜 동치인지 주석 필수 —
+  기존 `_FEATURES_PK_ACCESS` 선례), (b) gate를 "driving relation에 Seq Scan 없음"으로 바꾼다,
+  (c) seed 통계를 결정적으로 만든다(`default_statistics_target`·행 수 상향). **PR마다 재실행이
+  필요하므로 머지 위생 비용이 실재한다.**
+
 ### T-VN-H46 — 완료 이력과 남은 배포 위생 follow-up
 
 > `T-VN-H46B`~`E`의 완료 요약은 [`tasks-done.md`](tasks-done.md)에 이관했다. 아래에는
