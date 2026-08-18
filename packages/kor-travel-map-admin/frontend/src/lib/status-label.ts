@@ -13,9 +13,19 @@
  * tone 의미(design.md):
  *  success     = 활성/완료/ready
  *  warning     = 검토 필요/대기(사람의 결정을 기다림)/quarantine/저하
- *  destructive = 실패/blocked/dead-letter/거부
+ *  destructive = 실패/blocked/dead-letter/거부 — **실제로 잘못된 것**만
  *  info        = draft/candidate/valid(정보성) + 기계가 진행 중인 상태(queued/running/…)
- *  neutral     = archived/disabled/unknown/종료된 중립 상태
+ *  neutral     = archived/disabled/unknown/종료된 중립 상태(정상 취소 포함)
+ *
+ * 라벨 유일성 규약: **같은 한글 라벨이 서로 다른 tone을 갖지 않는다.** 한 화면에 두 축의
+ * 배지가 같이 뜨면(예: /ops/pipeline의 실행 상태 + 취소 상태) 같은 글자가 다른 색으로
+ * 보여 "색이 무슨 뜻인지"를 무너뜨리기 때문이다. 충돌이 생기면 tone이 아니라 **라벨을**
+ * 좁힌다(tone 테이블이 의미의 정본이므로). 아래 세 건이 그렇게 좁혀진 결과다:
+ *  - "대기"     = pending(사람의 결정 대기, warning) 전용. 기계 큐인 queued는 "실행 대기".
+ *  - "진행중"   = in_progress(기계 작업 진행, info) 전용. Feature event 축의 ongoing은 "행사중".
+ *  - "확인됨"   = acknowledged(사람이 인지함, info) 전용. 결과 확정인 confirmed는 "확인 완료".
+ * pending/acknowledged 쪽을 고정한 이유는 두 문자열이 live e2e 계약이기 때문이다
+ * (e2e/live/reviews-decide-write.live.spec.ts · e2e/live/admin-issues-actions-write.live.spec.ts).
  *
  * 키는 toLowerCase 후 하이픈을 언더스코어로 정규화한 형태로 보관한다
  * (예: "dry-run"/"dry_run" 모두 매칭). 컴포넌트 파일은 이 모듈만 import한다.
@@ -58,7 +68,9 @@ export const STATUS_LABELS: Readonly<Record<string, string>> = {
   promoted: "승격됨",
   delivered: "전달됨",
   reconciled: "정합화됨",
-  confirmed: "확인됨",
+  // "확인됨"은 acknowledged(사람이 인지, info)가 가져간다. confirmed는 결과가 확정적으로
+  // 검증된 상태(success)라 완료형으로 구분한다 — confirmed_applied/…와 같은 계열.
+  confirmed: "확인 완료",
   confirmed_applied: "반영 확인",
   confirmed_not_applied: "미반영 확인",
   allowed: "허용",
@@ -68,7 +80,10 @@ export const STATUS_LABELS: Readonly<Record<string, string>> = {
   found: "발견됨",
   managed: "관리됨",
   // 진행/대기 계열
-  queued: "대기",
+  // /ops/pipeline은 "대기" KPI(queued 수)와 실행 행 배지를 한 화면에 같이 띄우고,
+  // 검수 큐(pending, warning)와 실행 큐(queued, info)는 의미가 다르다. pending 라벨이
+  // live e2e 계약이라 queued 쪽을 "실행 대기"로 좁혀 색-의미 충돌을 없앤다.
+  queued: "실행 대기",
   pending: "대기",
   loading: "로딩중",
   running: "실행중",
@@ -79,7 +94,9 @@ export const STATUS_LABELS: Readonly<Record<string, string>> = {
   materializing: "구체화중",
   scheduled: "예정됨",
   planned: "예정됨",
-  ongoing: "진행중",
+  // ongoing은 Feature event_status 전용(행사가 열리는 중, success)이라 "진행중"을 기계 진행
+  // 상태인 in_progress(info)에 넘기고 행사 축 어휘로 좁힌다 — kind 라벨이 이미 "행사"다.
+  ongoing: "행사중",
   acknowledged: "확인됨",
   open: "열림",
   candidate: "후보",
@@ -242,8 +259,6 @@ export const STATUS_TONE: Readonly<Record<string, StatusTone>> = {
   failed: "destructive",
   failure: "destructive",
   critical: "destructive",
-  cancelled: "destructive",
-  canceled: "destructive",
   unavailable: "destructive",
   unauthorized: "destructive",
   rejected: "destructive",
@@ -283,6 +298,11 @@ export const STATUS_TONE: Readonly<Record<string, StatusTone>> = {
   preparing: "info",
   armed: "info",
   // ── neutral: archived / disabled / unknown / 종료된 중립 상태 ──
+  // 정상 취소는 실패가 아니라 사용자가 의도한 종료다(운영자가 직접 누른 "취소"의 성공 경로).
+  // 빨간 배지로 칠하면 취소가 실패한 `cancel_failed`(destructive)와 구분이 사라지고,
+  // /ops/pipeline 실행 목록에서 실패 건수를 눈으로 세는 스캔이 망가진다.
+  cancelled: "neutral",
+  canceled: "neutral",
   debug: "neutral",
   unknown: "neutral",
   none: "neutral",

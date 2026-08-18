@@ -20,7 +20,7 @@ function Card({
       data-size={size}
       className={cn(
         "group/card flex flex-col gap-4 rounded-panel border border-border bg-card p-6 text-sm text-text-primary has-data-[slot=card-footer]:pb-0 has-[>img:first-child]:pt-0 data-[size=sm]:gap-3 data-[size=sm]:p-4 data-[size=sm]:has-data-[slot=card-footer]:pb-0 *:[img:first-child]:rounded-t-panel *:[img:last-child]:rounded-b-panel",
-        "data-interactive:cursor-pointer data-interactive:transition-colors data-interactive:outline-none data-interactive:hover:bg-surface-subtle data-interactive:focus-visible:outline-2 data-interactive:focus-visible:outline-offset-2 data-interactive:focus-visible:outline-focus data-interactive:active:bg-surface-muted",
+        "data-interactive:cursor-pointer data-interactive:transition-colors data-interactive:hover:bg-surface-subtle data-interactive:focus-visible:outline-2 data-interactive:focus-visible:outline-offset-2 data-interactive:focus-visible:outline-focus data-interactive:active:bg-surface-muted",
         className
       )}
       {...props}
@@ -99,13 +99,18 @@ function CardContent({ className, ...props }: React.ComponentProps<"div">) {
   )
 }
 
-/** 카드 하단 행 — hairline 위에 flat(틴트 밴드 없음). 저장 행/요약 행에 쓴다. */
+/**
+ * 카드 하단 행 — hairline 위에 flat(틴트 밴드 없음). 저장 행/요약 행에 쓴다.
+ * 좌우로만 bleed한다(`-mx-*` + 같은 값의 `px-*`): 아래쪽 여백은 Card의
+ * `has-data-[slot=card-footer]:pb-0`가 이미 걷어내므로 음수 `-mb-*`를 더하면 footer가 카드
+ * 테두리 밖으로 넘쳐 밑줄이 두 겹으로 보인다(drift-P1-4).
+ */
 function CardFooter({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="card-footer"
       className={cn(
-        "-mx-6 -mb-6 mt-1 flex flex-wrap items-center gap-2 rounded-b-panel border-t border-border px-6 py-3 group-data-[size=sm]/card:-mx-4 group-data-[size=sm]/card:-mb-4 group-data-[size=sm]/card:px-4 group-data-[size=sm]/card:py-3",
+        "-mx-6 mt-1 flex flex-wrap items-center gap-2 rounded-b-panel border-t border-border px-6 py-3 group-data-[size=sm]/card:-mx-4 group-data-[size=sm]/card:px-4 group-data-[size=sm]/card:py-3",
         className
       )}
       {...props}

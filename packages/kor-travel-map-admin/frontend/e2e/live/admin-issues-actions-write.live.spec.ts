@@ -176,13 +176,15 @@ async function readActionResponse(
   return (await response.json()) as AdminIssueActionResponse;
 }
 
-// 상세 카드: "Issue detail" 헤더를 감싼 최단 rounded-lg 컨테이너(컴포넌트 line 182).
+// 상세 카드: 제목 "이슈 상세"(SectionCard = Card primitive `[data-slot="card"]`)로 잡는다.
 // 같은 카드 안에 status/severity badge·violation_type·message·조치 버튼이 모두 있어
 // 행(table)의 동일 텍스트와 충돌하지 않게 스코프한다.
 function issueDetailCard(page: Page): Locator {
   return page
-    .getByText("Issue detail", { exact: true })
-    .locator("xpath=ancestor::div[contains(@class,'rounded-lg')][1]");
+    .locator('[data-slot="card"]')
+    .filter({
+      has: page.getByRole("heading", { name: "이슈 상세", exact: true }),
+    });
 }
 
 async function gotoAdminIssues(page: Page): Promise<void> {

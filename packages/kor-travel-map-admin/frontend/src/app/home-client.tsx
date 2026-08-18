@@ -22,6 +22,7 @@ import { AdminShell } from "@/components/admin-shell";
 import { EmptyState } from "@/components/empty-state";
 import { EntityLink } from "@/components/entity-link";
 import { SectionCard } from "@/components/section-card";
+import { StatStrip } from "@/components/stat-strip";
 import { StatusBadge } from "@/components/status-badge";
 import {
   Alert,
@@ -43,49 +44,21 @@ import { cn } from "@/lib/utils";
 import { canonicalPipelineRootRowId } from "./home-row-id";
 
 /**
- * 대시보드 stat strip(design.md §Macrostructure dashboard · M25). 숫자 + 라벨을 hairline으로만
- * 구분한다 — 아이콘 타일·카드 그리드 없음. 값이 아직 없으면(로딩/오류) `—`(M36 — 가짜 0 금지).
- * 라벨은 heading(level 3) 안의 링크로 두어 해당 관리 화면으로 딥링크한다.
+ * 홈 KPI의 e2e 훅 — 네 stat이 한 StatStrip을 공유하므로 값 단언은 반드시 소유 stat으로
+ * scope한다(e2e/home.spec.ts · e2e/home-nav.spec.ts).
  */
-function MetricItem({
-  title,
-  value,
-  unit,
-  href,
-  caption,
-}: {
-  title: string;
-  value: number | null | undefined;
-  unit: string;
-  href: string;
-  caption: ReactNode;
-}) {
-  const missing = value === null || value === undefined;
-  return (
-    <div className="flex min-w-0 flex-col gap-1 px-4 first:pl-0 [&:not(:first-child)]:border-l [&:not(:first-child)]:border-border">
-      <h3 className="truncate text-xs font-medium text-text-secondary">
-        <Link
-          className="rounded-control underline-offset-4 outline-none hover:text-text-primary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-          href={href}
-        >
-          {title}
-        </Link>
-      </h3>
-      <div
-        className={cn(
-          "flex items-baseline gap-1 text-2xl font-semibold tabular-nums text-text-primary",
-          missing && "text-text-tertiary",
-        )}
-      >
-        <span>{formatCount(value)}</span>
-        {missing ? null : (
-          <span className="text-xs font-medium text-text-secondary">{unit}</span>
-        )}
-      </div>
-      <p className="text-2xs text-text-secondary">{caption}</p>
-    </div>
-  );
-}
+const HOME_STAT_TEST_ID = {
+  dedup: "home-stat-dedup",
+  features: "home-stat-features",
+  issues: "home-stat-issues",
+  pipeline: "home-stat-pipeline",
+} as const;
+
+/**
+ * KPI 컬럼 수: 모바일 1 · 태블릿 2 · 데스크톱 4(StatStrip 기본 auto-fit을 이 페이지에서만 고정).
+ * e2e/home-nav.spec.ts의 밀도 계약(390/768/1280 → 1/2/4)이 이 클래스에 걸려 있다.
+ */
+const HOME_STAT_COLUMNS = "grid-cols-1 sm:grid-cols-2 xl:grid-cols-4";
 
 function StatusLine({
   tone,
@@ -363,34 +336,43 @@ function HomePageClientView({
         ) : null}
 
         <Card aria-busy={metricsLoading || undefined} size="sm">
-          <div
-            aria-label="운영 요약"
-            className="grid grid-cols-2 gap-y-6 xl:grid-cols-4"
-            role="group"
-          >
-            {metricsLoading ? (
-              <>
-                <MetricItemSkeleton />
-                <MetricItemSkeleton />
-                <MetricItemSkeleton />
-                <MetricItemSkeleton />
-              </>
-            ) : (
-              <>
-                <MetricItem
-                  caption={
+          {metricsLoading ? (
+            <div
+              aria-label="운영 요약"
+              className={cn("grid gap-y-6", HOME_STAT_COLUMNS)}
+              role="group"
+            >
+              <MetricItemSkeleton />
+              <MetricItemSkeleton />
+              <MetricItemSkeleton />
+              <MetricItemSkeleton />
+            </div>
+          ) : (
+            <StatStrip
+              ariaLabel="운영 요약"
+              className={HOME_STAT_COLUMNS}
+              items={[
+                {
+                  key: "features",
+                  label: "Feature",
+                  href: "/admin/features",
+                  unit: "개",
+                  value: totalFeatures,
+                  caption: (
                     <>
                       활성 {formatCount(activeFeatures)} / 비활성{" "}
                       {formatCount(inactiveFeatures)}
                     </>
-                  }
-                  href="/admin/features"
-                  title="Feature"
-                  unit="개"
-                  value={totalFeatures}
-                />
-                <MetricItem
-                  caption={
+                  ),
+                  testId: HOME_STAT_TEST_ID.features,
+                },
+                {
+                  key: "pipeline",
+                  label: "파이프라인 작업",
+                  href: "/ops/pipeline",
+                  unit: "건",
+                  value: operationTotal,
+                  caption:
                     activeOperations === null ? (
                       "진행 상태 확인 불가"
                     ) : (
@@ -399,38 +381,38 @@ function HomePageClientView({
                           ? `${formatCount(activeOperations)}건 진행 중`
                           : "대기 중인 작업 없음"}
                       </StatusLine>
-                    )
-                  }
-                  href="/ops/pipeline"
-                  title="파이프라인 작업"
-                  unit="건"
-                  value={operationTotal}
-                />
-                <MetricItem
-                  caption={<>대기 {formatCount(pendingDedupCount)}건</>}
-                  href="/admin/features/dedup-reviews"
-                  title="중복 검수"
-                  unit="건"
-                  value={dedupQueueTotal}
-                />
-                <MetricItem
-                  caption={
+                    ),
+                  testId: HOME_STAT_TEST_ID.pipeline,
+                },
+                {
+                  key: "dedup",
+                  label: "중복 검수",
+                  href: "/admin/features/dedup-reviews",
+                  unit: "건",
+                  value: dedupQueueTotal,
+                  caption: <>대기 {formatCount(pendingDedupCount)}건</>,
+                  testId: HOME_STAT_TEST_ID.dedup,
+                },
+                {
+                  key: "issues",
+                  label: "이슈",
+                  href: "/admin/issues",
+                  unit: "건",
+                  value: openIssueCount,
+                  caption:
                     openIssueCount === null ? (
                       "이슈 상태 확인 불가"
                     ) : (
                       <StatusLine tone={openIssueCount > 0 ? "destructive" : "success"}>
                         {openIssueCount > 0 ? "조치 필요" : "열린 이슈 없음"}
                       </StatusLine>
-                    )
-                  }
-                  href="/admin/issues"
-                  title="이슈"
-                  unit="건"
-                  value={openIssueCount}
-                />
-              </>
-            )}
-          </div>
+                    ),
+                  testId: HOME_STAT_TEST_ID.issues,
+                },
+              ]}
+              size="lg"
+            />
+          )}
         </Card>
 
         <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_var(--rail)]">
@@ -526,7 +508,7 @@ function HomePageClientView({
                   {dedupItems.slice(0, 4).map((item) => (
                     <li key={item.review_id}>
                       <Link
-                        className="-mx-2 flex flex-col gap-0.5 rounded-control px-2 py-2 text-sm text-text-primary transition-colors outline-none hover:bg-surface-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus active:bg-surface-muted"
+                        className="-mx-2 flex flex-col gap-0.5 rounded-control px-2 py-2 text-sm text-text-primary transition-colors hover:bg-surface-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus active:bg-surface-muted"
                         href="/admin/features/dedup-reviews"
                       >
                         <span className="truncate font-medium">

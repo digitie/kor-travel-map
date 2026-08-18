@@ -39,7 +39,7 @@ function PopoverContent({
           data-slot="popover-content"
           data-motion="crossfade"
           className={cn(
-            "w-72 rounded-panel border border-border bg-card p-4 text-xs leading-normal text-text-primary shadow-elevated outline-none",
+            "w-72 rounded-panel border border-border bg-card p-4 text-xs leading-normal text-text-primary shadow-elevated",
             "transition-[opacity,scale] duration-base ease-out data-[starting-style]:scale-98 data-[starting-style]:opacity-0 data-[ending-style]:scale-98 data-[ending-style]:opacity-0 data-[ending-style]:duration-fast data-[ending-style]:ease-in",
             className
           )}

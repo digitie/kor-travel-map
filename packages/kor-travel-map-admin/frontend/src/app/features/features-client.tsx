@@ -107,7 +107,7 @@ function PayloadDisclosure({
 }) {
   return (
     <details className="group/details">
-      <summary className="inline-flex h-control-sm cursor-pointer list-none items-center gap-1 rounded-control text-xs font-medium text-text-secondary outline-none select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
+      <summary className="inline-flex h-control-sm cursor-pointer list-none items-center gap-1 rounded-control text-xs font-medium text-text-secondary select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
         <span aria-hidden="true" className="w-3 text-text-tertiary group-open/details:hidden">
           +
         </span>
@@ -373,7 +373,7 @@ function useFeaturesClientController() {
           rowA.original.name.localeCompare(rowB.original.name, "ko"),
         cell: ({ row }) => (
           <Link
-            className="rounded-control font-medium text-brand underline-offset-4 outline-none hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+            className="rounded-control font-medium text-brand underline-offset-4 hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             href={featureDetailHref(row.original.feature_id)}
             onClick={(event) => event.stopPropagation()}
           >
@@ -732,16 +732,27 @@ function FeatureMapWorkspace({
         value={featureViewMode}
         onValueChange={(value) => setFeatureViewMode(value as FeatureViewMode)}
       >
-        <TabsList aria-label="보기 전환">
-          <TabsTrigger value="map">
-            <MapIcon data-icon="inline-start" />
-            지도
-          </TabsTrigger>
-          <TabsTrigger value="table">
-            <ListIcon data-icon="inline-start" />
-            테이블
-          </TabsTrigger>
-        </TabsList>
+        {/*
+         * 좌표 readout은 탭 헤더 행에 둔다(지도/테이블 두 탭 모두에서 보임 — 테이블도 지도 bounds로
+         * 필터되므로 현재 viewport가 두 뷰의 공통 컨텍스트다). e2e는 "center … · z N"을 읽는다
+         * (e2e/live/features-map.live.spec.ts · features-map-input-roundtrip.live.spec.ts).
+         */}
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <TabsList aria-label="보기 전환">
+            <TabsTrigger value="map">
+              <MapIcon data-icon="inline-start" />
+              지도
+            </TabsTrigger>
+            <TabsTrigger value="table">
+              <ListIcon data-icon="inline-start" />
+              테이블
+            </TabsTrigger>
+          </TabsList>
+          <span className="font-mono text-2xs text-text-secondary tabular-nums">
+            center {viewport.lon.toFixed(4)}, {viewport.lat.toFixed(4)} · z{" "}
+            {viewport.zoom.toFixed(1)}
+          </span>
+        </div>
 
         <TabsContent className="min-h-0" value="map">
           <div
@@ -772,18 +783,14 @@ function FeatureMapWorkspace({
                 />
               )}
             </VWorldMapView>
-            {/* 지도 위 flat status strip: 좌표 readout(mono) + 클러스터 안내 — 프레임 없는 칩(m6). */}
-            <div className="pointer-events-none absolute top-3 left-3 z-10 flex max-w-[calc(100%-6rem)] flex-col items-start gap-1">
-              <span className="rounded-control border border-border bg-card px-2 py-1 font-mono text-2xs text-text-secondary tabular-nums">
-                {viewport.lon.toFixed(4)}, {viewport.lat.toFixed(4)} · z{" "}
-                {viewport.zoom.toFixed(1)}
-              </span>
-              {clusterMode ? (
+            {/* 지도 위 status strip: 클러스터 모드일 때만 뜨는 한 줄 안내(m6). 좌표 readout은 탭 헤더 행. */}
+            {clusterMode ? (
+              <div className="pointer-events-none absolute top-3 left-3 z-10 max-w-[calc(100%-6rem)]">
                 <span className="rounded-control border border-border bg-card px-2 py-1 text-2xs text-text-secondary">
                   지역 클러스터 뷰 · 확대하면 개별 feature가 표시됩니다
                 </span>
-              ) : null}
-            </div>
+              </div>
+            ) : null}
             {selectedFeatureId ? (
               <FeatureDetailPanel
                 featureId={selectedFeatureId}

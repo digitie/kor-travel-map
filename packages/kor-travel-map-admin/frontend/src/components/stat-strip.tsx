@@ -84,7 +84,7 @@ function StatStrip({
         const loading = isLoading || item.loading === true;
         const labelNode = item.href ? (
           <Link
-            className="rounded-control underline-offset-4 outline-none hover:text-text-primary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+            className="rounded-control underline-offset-4 hover:text-text-primary hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             href={item.href}
           >
             {item.label}

@@ -148,8 +148,26 @@ async function browserFetch<T>(
 
 // consistency-drilldown.spec.ts(route-mocked depth)의 검증된 scoping 헬퍼와 동일:
 // 카드/표에 같은 텍스트가 중복 등장하므로 값 단언은 항상 소유 카드로 scope한다.
+// SectionCard = `[data-slot="card"]`(Card primitive) + 제목 텍스트.
 function metricsCard(page: Page, heading: string): Locator {
-  return page.locator("div.rounded-lg").filter({ has: page.getByText(heading) });
+  return page
+    .locator('[data-slot="card"]')
+    .filter({ has: page.getByText(heading) });
+}
+
+/**
+ * 요약 StatStrip의 개별 stat(consistency-client.tsx의 `STAT_TEST_ID`).
+ * 세 stat이 한 strip을 공유하므로 값 단언은 반드시 소유 stat testid로 scope한다.
+ */
+function summaryStat(page: Page, testId: string): Locator {
+  return page.getByTestId(testId);
+}
+
+/** stat의 값(dd)에서 첫 숫자를 읽는다(천 단위 콤마 제거). 로딩 중(`—`)이면 NaN. */
+async function readStatNumber(stat: Locator): Promise<number> {
+  const text = await stat.locator("dd").first().innerText();
+  const match = /([\d,]+)/.exec(text);
+  return match ? Number(match[1].replace(/,/g, "")) : Number.NaN;
 }
 
 async function gotoConsistency(page: Page): Promise<void> {
@@ -256,17 +274,9 @@ test.describe("/ops/consistency 읽기 드릴다운 라운드트립 (live)", () 
 
     // 카드가 /metrics open_total을 반영할 때까지 대기(로케일 무관 — 콤마 제거 후
     // 정수 파싱이 open_total과 같아질 때까지 retry).
-    const openCard = metricsCard(page, "Open issues");
+    const openStat = summaryStat(page, "stat-open-issues");
     await expect
-      .poll(
-        async () =>
-          Number(
-            (await openCard.locator("div.text-2xl").innerText())
-              .trim()
-              .replace(/,/g, ""),
-          ),
-        T,
-      )
+      .poll(async () => readStatNumber(openStat), T)
       .toBe(displayedOpen);
 
     // 드릴다운: open issues 상세 endpoint를 직접 읽어 집계 숫자와 정합 확인.
@@ -347,13 +357,13 @@ test.describe("/ops/consistency 읽기 드릴다운 라운드트립 (live)", () 
         await expect(reportsCard.getByText(EMPTY_MESSAGE)).toBeVisible(T);
       }
 
-      // Latest severity 카드 = <StatusBadge status={severity_max ?? 'none'}> →
+      // Latest severity stat = statusLabel(severity_max ?? 'none') →
       // 화면엔 statusLabel 한글 텍스트가 렌더되므로 기대값도 동일 매핑을 통과시킨다.
       const latest = metricsBody.data.latest_consistency_report ?? null;
-      const latestSeverityCard = metricsCard(page, "Latest severity");
+      const latestSeverityStat = summaryStat(page, "stat-latest-severity");
       const expectedSeverity = severityLabel(latest ? latest.severity_max : "none");
       await expect(
-        latestSeverityCard.getByText(expectedSeverity).first(),
+        latestSeverityStat.getByText(expectedSeverity).first(),
       ).toBeVisible(T);
 
       // 교차 정합(순서 가정 없음): 최신 report가 존재하고 목록이 page 상한 미만이면

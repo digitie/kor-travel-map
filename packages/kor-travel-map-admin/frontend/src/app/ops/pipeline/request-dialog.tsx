@@ -1048,7 +1048,7 @@ const RequestExecutionSettings = memo(function RequestExecutionSettings({
       <label className="flex items-center gap-2 text-sm text-text-primary">
         <input
           checked={dryRun}
-          className="size-4 shrink-0 rounded-control border-input accent-brand outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-55"
+          className="size-4 shrink-0 rounded-control border-input accent-brand focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus disabled:cursor-not-allowed disabled:opacity-55"
           type="checkbox"
           onChange={(event) => setDryRun(event.target.checked)}
         />

@@ -111,7 +111,7 @@ type DrawerPanel = (typeof PANELS)[number];
 const SUBHEADING_CLASS = "text-xs font-semibold text-text-primary";
 /** 인라인 링크 — prose link recipe(brand, hover 밑줄) + 단일 focus 레시피. */
 const INLINE_LINK_CLASS =
-  "link rounded-control outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
+  "link rounded-control focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
 function panelValue(value: string | null): DrawerPanel {
   return PANELS.includes(value as DrawerPanel)

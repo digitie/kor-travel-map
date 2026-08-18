@@ -245,8 +245,10 @@ export function AdminSettingsClient() {
               <span aria-hidden="true" className="invisible text-xs leading-snug font-medium">
                 &nbsp;
               </span>
+              {/* 라벨 정본: e2e(live/settings-write)가 "랜덤 생성"을 클릭한다 — 키가 서버에서
+                  무작위 생성된다는 정보가 "키 생성"보다 크므로 이 문구를 유지한다. */}
               <Button loading={createKey.isPending} type="submit">
-                키 생성
+                랜덤 생성
               </Button>
             </div>
           </form>

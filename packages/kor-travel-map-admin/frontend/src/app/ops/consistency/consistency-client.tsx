@@ -151,11 +151,15 @@ const issueColumns: ColumnDef<OpsIntegrityIssueRecord, unknown>[] = [
 ];
 
 /**
- * e2e/consistency-drilldown.spec.ts는 카드를 `div.rounded-lg` + 제목 텍스트로 scope한다
- * (data-testid 없음). `rounded-lg`는 Foundation에서 `--radius-panel`로 접혀 `rounded-panel`과 같은
- * 8px이라 시각 차이는 없다 — spec이 testid로 옮겨 가면 이 클래스는 지운다.
+ * 요약 stat의 e2e 훅(값 단언이 소유 stat으로 scope되도록 stat마다 하나씩).
+ * e2e/consistency-drilldown.spec.ts · e2e/live/ops-consistency-drilldown-roundtrip.live.spec.ts가
+ * 이 testid로 stat을 잡는다. SectionCard는 `[data-slot="card"]` + 제목 텍스트로 scope한다.
  */
-const E2E_CARD_HOOK = "rounded-lg";
+const STAT_TEST_ID = {
+  checkedAt: "stat-checked-at",
+  latestSeverity: "stat-latest-severity",
+  openIssues: "stat-open-issues",
+} as const;
 
 export function ConsistencyClient() {
   const [status, setStatus] = useState<IntegrityIssueStatus | "all">("open");
@@ -221,38 +225,39 @@ export function ConsistencyClient() {
           </Alert>
         ) : null}
 
-        <div className={E2E_CARD_HOOK}>
-          <StatStrip
-            ariaLabel="정합성 요약"
-            isLoading={metrics.isLoading}
-            items={[
-              {
-                key: "open-issues",
-                label: "Open issues",
-                value: metricsData?.data_integrity_issues.open_total,
-                unit: "건",
-                caption: "열린 정합성 이슈",
-              },
-              {
-                key: "latest-severity",
-                label: "Latest severity",
-                value: statusLabel(latestSeverity),
-                tone: toneFor(latestSeverity),
-                caption: "최근 consistency 리포트 기준",
-              },
-              {
-                key: "checked-at",
-                label: "Checked at",
-                value: (
-                  <span className="text-sm font-medium">
-                    {formatDateTime(metricsData?.checked_at)}
-                  </span>
-                ),
-                caption: "마지막 점검 시각",
-              },
-            ]}
-          />
-        </div>
+        <StatStrip
+          ariaLabel="정합성 요약"
+          isLoading={metrics.isLoading}
+          items={[
+            {
+              key: "open-issues",
+              label: "Open issues",
+              value: metricsData?.data_integrity_issues.open_total,
+              unit: "건",
+              caption: "열린 정합성 이슈",
+              testId: STAT_TEST_ID.openIssues,
+            },
+            {
+              key: "latest-severity",
+              label: "Latest severity",
+              value: statusLabel(latestSeverity),
+              tone: toneFor(latestSeverity),
+              caption: "최근 consistency 리포트 기준",
+              testId: STAT_TEST_ID.latestSeverity,
+            },
+            {
+              key: "checked-at",
+              label: "Checked at",
+              value: (
+                <span className="text-sm font-medium">
+                  {formatDateTime(metricsData?.checked_at)}
+                </span>
+              ),
+              caption: "마지막 점검 시각",
+              testId: STAT_TEST_ID.checkedAt,
+            },
+          ]}
+        />
 
         <section className="grid gap-6 xl:grid-cols-2">
           <SectionCard
@@ -266,7 +271,6 @@ export function ConsistencyClient() {
                 건
               </span>
             }
-            className={E2E_CARD_HOOK}
             description="최근 consistency batch"
             title="Reports"
           >
@@ -304,7 +308,6 @@ export function ConsistencyClient() {
                 </NativeSelect>
               </FilterField>
             }
-            className={E2E_CARD_HOOK}
             description="상태·provider dataset·유형별 후속 처리 대상"
             title="Integrity issues"
           >

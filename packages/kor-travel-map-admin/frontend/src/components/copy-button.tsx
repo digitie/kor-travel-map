@@ -61,7 +61,7 @@ function CopyButton({ value, label = "값", className }: CopyButtonProps) {
         "relative inline-flex size-6 shrink-0 items-center justify-center rounded-control text-text-secondary transition-[color,background-color] duration-fast ease-out",
         "before:absolute before:-inset-2",
         "hover:bg-surface-subtle hover:text-text-primary active:bg-surface-muted",
-        "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
+        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
         "disabled:pointer-events-none disabled:text-text-disabled",
         "data-[state=copied]:text-success",
         className,

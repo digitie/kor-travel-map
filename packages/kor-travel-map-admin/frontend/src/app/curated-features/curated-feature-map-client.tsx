@@ -153,7 +153,7 @@ function MembershipRow({ item }: { item: PublicCurationItem }) {
             label: "출처",
             value: item.source_url ? (
               <a
-                className="inline-flex items-center gap-1 rounded-control text-brand underline-offset-4 outline-none hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                className="inline-flex items-center gap-1 rounded-control text-brand underline-offset-4 hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                 href={item.source_url}
                 rel="noreferrer"
                 target="_blank"
@@ -174,7 +174,7 @@ function MembershipRow({ item }: { item: PublicCurationItem }) {
         <p className="text-xs whitespace-pre-wrap text-text-secondary">{item.item_summary}</p>
       ) : null}
       <details className="group/details">
-        <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-control py-1 text-xs font-medium text-text-secondary outline-none select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
+        <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-control py-1 text-xs font-medium text-text-secondary select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
           <span aria-hidden="true" className="w-3 text-text-tertiary group-open/details:hidden">
             +
           </span>
@@ -357,7 +357,7 @@ function useCuratedFeatureMapClientController() {
         cell: ({ row }) => (
           <div className="flex max-w-[22rem] min-w-0 flex-col gap-0.5">
             <Link
-              className="rounded-control font-medium text-brand underline-offset-4 outline-none hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+              className="rounded-control font-medium text-brand underline-offset-4 hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
               href={featureDetailHref(row.original.feature.feature_id)}
               onClick={(event) => event.stopPropagation()}
             >
@@ -628,16 +628,23 @@ function CuratedFeatureMapClientView({
           value={viewMode}
           onValueChange={(value) => setViewMode(value as FeatureViewMode)}
         >
-          <TabsList aria-label="보기 전환">
-            <TabsTrigger value="map">
-              <MapIcon data-icon="inline-start" />
-              지도
-            </TabsTrigger>
-            <TabsTrigger value="table">
-              <ListIcon data-icon="inline-start" />
-              테이블
-            </TabsTrigger>
-          </TabsList>
+          {/* 좌표 readout은 탭 헤더 행 — 지도/테이블 두 탭 모두 지도 bounds로 필터되므로 공통 컨텍스트다. */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <TabsList aria-label="보기 전환">
+              <TabsTrigger value="map">
+                <MapIcon data-icon="inline-start" />
+                지도
+              </TabsTrigger>
+              <TabsTrigger value="table">
+                <ListIcon data-icon="inline-start" />
+                테이블
+              </TabsTrigger>
+            </TabsList>
+            <span className="font-mono text-2xs text-text-secondary tabular-nums">
+              center {viewport.lon.toFixed(4)}, {viewport.lat.toFixed(4)} · z{" "}
+              {viewport.zoom.toFixed(1)}
+            </span>
+          </div>
 
           <TabsContent className="min-h-0" value="map">
             <div
@@ -663,12 +670,6 @@ function CuratedFeatureMapClientView({
                   onSelectFeature={setSelectedFeatureId}
                 />
               </VWorldMapView>
-              <div className="pointer-events-none absolute top-3 left-3 z-10">
-                <span className="rounded-control border border-border bg-card px-2 py-1 font-mono text-2xs text-text-secondary tabular-nums">
-                  {viewport.lon.toFixed(4)}, {viewport.lat.toFixed(4)} · z{" "}
-                  {viewport.zoom.toFixed(1)}
-                </span>
-              </div>
               {selectedGroup ? (
                 <CurationGroupDetailPanel
                   group={selectedGroup}

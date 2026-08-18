@@ -68,14 +68,20 @@ test.describe("home page (/)", () => {
   test("운영 metric 카드와 상태 카드가 렌더", async ({ page }) => {
     await page.goto("/");
 
-    for (const heading of [
-      "Feature",
-      "파이프라인 작업",
-      "중복 검수",
-      "이슈",
-      "서비스 상태",
-      "중복 검수 대기",
-    ]) {
+    // 요약 KPI는 StatStrip 한 덩어리다(라벨은 heading이 아니라 dt 안의 딥링크) —
+    // 값/라벨 단언은 소유 stat testid(home-client.tsx `HOME_STAT_TEST_ID`)로 scope한다.
+    for (const [testId, label] of [
+      ["home-stat-features", "Feature"],
+      ["home-stat-pipeline", "파이프라인 작업"],
+      ["home-stat-dedup", "중복 검수"],
+      ["home-stat-issues", "이슈"],
+    ] as const) {
+      await expect(
+        page.getByTestId(testId).getByRole("link", { name: label, exact: true }),
+      ).toBeVisible();
+    }
+
+    for (const heading of ["서비스 상태", "중복 검수 대기"]) {
       await expect(
         page.getByRole("heading", { name: heading, exact: true }),
       ).toBeVisible();

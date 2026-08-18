@@ -144,7 +144,7 @@ function isActive(pathname: string, href: string) {
  * active 는 색만이 아니라 좌측 2px brand mark + `aria-current="page"`(M11).
  */
 const railRowClass =
-  "relative flex h-control-sm shrink-0 items-center gap-2.5 rounded-control px-3 text-xs font-medium whitespace-nowrap text-text-secondary transition-[color,background-color] duration-fast ease-out outline-none hover:bg-surface-subtle hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus active:bg-surface-muted";
+  "relative flex h-control-sm shrink-0 items-center gap-2.5 rounded-control px-3 text-xs font-medium whitespace-nowrap text-text-secondary transition-[color,background-color] duration-fast ease-out hover:bg-surface-subtle hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus active:bg-surface-muted";
 
 const railRowActiveClass =
   "bg-brand-tint text-text-primary hover:bg-brand-tint before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-brand";
@@ -251,7 +251,7 @@ export function AdminShell({
               <Link
                 aria-label="kor-travel-map admin"
                 className={cn(
-                  "flex min-w-0 items-baseline gap-1.5 rounded-control text-text-primary no-underline outline-none hover:no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
+                  "flex min-w-0 items-baseline gap-1.5 rounded-control text-text-primary no-underline hover:no-underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
                   sidebarCollapsed && "lg:justify-center",
                 )}
                 href="/"
@@ -446,7 +446,7 @@ export function AdminShell({
           </header>
           {/* M11: <main> 은 children 만 감싼다(aside/header 밖). skip link 대상. */}
           <main
-            className="min-w-0 flex-1 px-6 py-6 outline-none"
+            className="min-w-0 flex-1 px-6 py-6"
             data-slot="admin-shell-main"
             id={MAIN_CONTENT_ID}
             tabIndex={-1}

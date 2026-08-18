@@ -15,6 +15,10 @@ import {
   FieldError,
   FieldLabel,
 } from "@/components/ui/field";
+import {
+  describedBy,
+  useFieldIds,
+} from "@/components/ui/form-field-shared";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
@@ -204,6 +208,7 @@ function AdminRegionAutoSearch({
   onSelectCandidate,
   placeholder = "시군구 또는 읍면동 검색",
 }: AdminRegionAutoSearchProps) {
+  const { errorId, fieldId, hintId } = useFieldIds(id);
   const query = value.trim();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -274,6 +279,10 @@ function AdminRegionAutoSearch({
   const visiblePending = query.length > 0 && pending;
   const validationError = codeValidationMessage(value, kind);
   const invalid = Boolean(visibleError || validationError);
+  // P2-1: describedby 는 FormField 규약대로 hint/error 만 가리킨다. 예전에는 결과 팝업 **전체**를
+  // 가리켜 스크린리더가 입력 설명 자리에서 후보 목록을 통째로 읽었고, 정작 FieldError 는 어디에도
+  // 연결돼 있지 않았다.
+  const hintVisible = query.length === 0;
   const resultButtonLabel =
     query.length === 0
       ? "검색 결과"
@@ -284,17 +293,21 @@ function AdminRegionAutoSearch({
   return (
     <Field className={className} data-invalid={invalid ? true : undefined}>
       <div className="flex items-center justify-between gap-2">
-        <FieldLabel htmlFor={id}>{label}</FieldLabel>
+        <FieldLabel htmlFor={fieldId}>{label}</FieldLabel>
         {/* 결과 건수는 배지가 아니라 text-secondary 카운터(M22) — 검색 중이면 라벨 swap. */}
         <span className="text-2xs text-text-secondary tabular-nums">
           {visiblePending ? "검색 중" : `${visibleCandidates.length}건`}
         </span>
       </div>
       <Input
-        aria-describedby={`${id}-region-results`}
-        aria-invalid={visibleError ? true : undefined}
+        aria-describedby={describedBy(
+          undefined,
+          hintVisible ? hintId : undefined,
+          invalid ? errorId : undefined,
+        )}
+        aria-invalid={invalid || undefined}
         aria-label={ariaLabel}
-        id={id}
+        id={fieldId}
         placeholder={placeholder}
         value={value}
         inputMode="search"
@@ -307,12 +320,12 @@ function AdminRegionAutoSearch({
           setResultsOpen(nextValue.trim().length > 0);
         }}
       />
-      <div className="relative" id={`${id}-region-results`}>
+      <div className="relative">
         {query.length > 0 ? (
           <button
-            aria-controls={`${id}-region-results-popup`}
+            aria-controls={`${fieldId}-region-results-popup`}
             aria-expanded={resultsOpen}
-            className="flex h-control-sm w-full items-center justify-between gap-2 rounded-control border border-border bg-card px-2.5 text-left text-2xs text-text-secondary transition-[color,background-color] duration-fast ease-out outline-none hover:bg-surface-subtle hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus active:bg-surface-muted"
+            className="flex h-control-sm w-full items-center justify-between gap-2 rounded-control border border-border bg-card px-2.5 text-left text-2xs text-text-secondary transition-[color,background-color] duration-fast ease-out hover:bg-surface-subtle hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus active:bg-surface-muted"
             type="button"
             onClick={() => setResultsOpen((current) => !current)}
           >
@@ -326,14 +339,14 @@ function AdminRegionAutoSearch({
             />
           </button>
         ) : (
-          <FieldDescription className="text-2xs">
+          <FieldDescription className="text-2xs" id={hintId}>
             검색어를 입력하면 같은 계층의 행정구역만 표시됩니다.
           </FieldDescription>
         )}
         {query.length > 0 && resultsOpen ? (
           <div
             className="absolute z-30 mt-1 w-full rounded-panel border border-border bg-card p-1 shadow-elevated"
-            id={`${id}-region-results-popup`}
+            id={`${fieldId}-region-results-popup`}
           >
             {visibleCandidates.length > 0 ? (
               <div className="flex max-h-48 flex-col overflow-auto">
@@ -343,7 +356,7 @@ function AdminRegionAutoSearch({
                     <button
                       aria-current={selected ? "true" : undefined}
                       className={cn(
-                        "flex flex-col items-start rounded-control px-2 py-1.5 text-left text-xs transition-[color,background-color] duration-fast ease-out outline-none",
+                        "flex flex-col items-start rounded-control px-2 py-1.5 text-left text-xs transition-[color,background-color] duration-fast ease-out",
                         "hover:bg-surface-subtle focus-visible:bg-surface-subtle focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus active:bg-surface-muted",
                         selected ? "bg-brand-tint text-brand hover:bg-brand-tint" : "text-text-primary",
                       )}
@@ -377,8 +390,12 @@ function AdminRegionAutoSearch({
           </div>
         ) : null}
       </div>
-      {validationError ? <FieldError>{validationError}</FieldError> : null}
-      {visibleError ? <FieldError>{visibleError}</FieldError> : null}
+      {invalid ? (
+        <FieldError id={errorId}>
+          {validationError ? <span className="block">{validationError}</span> : null}
+          {visibleError ? <span className="block">{visibleError}</span> : null}
+        </FieldError>
+      ) : null}
     </Field>
   );
 }

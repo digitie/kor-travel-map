@@ -77,7 +77,7 @@ function featureAddressLabel(feature: CuratedFeature): string | null {
 function PayloadDisclosure({ label, value }: { label: string; value: unknown }) {
   return (
     <details className="group/details">
-      <summary className="inline-flex h-control-sm cursor-pointer list-none items-center gap-1 rounded-control font-mono text-xs text-text-secondary outline-none select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
+      <summary className="inline-flex h-control-sm cursor-pointer list-none items-center gap-1 rounded-control font-mono text-xs text-text-secondary select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
         <span aria-hidden="true" className="w-3 text-text-tertiary group-open/details:hidden">
           +
         </span>

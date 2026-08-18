@@ -26,7 +26,7 @@ function Disclosure({
 }) {
   return (
     <details className="group/details" open={defaultOpen}>
-      <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-control py-1 text-xs font-medium text-text-secondary outline-none select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
+      <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-control py-1 text-xs font-medium text-text-secondary select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
         <span aria-hidden="true" className="w-3 text-text-tertiary group-open/details:hidden">
           +
         </span>
@@ -168,7 +168,7 @@ export function FeatureAssociations({
                 <p className="text-xs text-text-secondary">
                   {item.source_url ? (
                     <a
-                      className="rounded-control text-brand underline-offset-4 outline-none hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                      className="rounded-control text-brand underline-offset-4 hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                       href={item.source_url}
                       rel="noreferrer"
                       target="_blank"

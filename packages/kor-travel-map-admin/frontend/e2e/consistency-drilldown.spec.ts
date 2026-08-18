@@ -151,10 +151,18 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
 }
 
 // 카드/테이블에 같은 텍스트가 중복 등장(예: 'severity' columnheader가 두 표 모두에,
-// StatusBadge 값이 metric 카드 + 표에 동시에)하므로, 값 단언은 항상 소유 카드로
-// scope한다. 컴포넌트에 data-testid가 전혀 없어 role/text 기반 scoping만 가능.
+// 상태 라벨이 요약 stat + 표에 동시에)하므로, 값 단언은 항상 소유 카드/stat으로
+// scope한다. SectionCard는 Card primitive의 `[data-slot="card"]`로 잡는다.
 function metricsCard(page: Page, heading: string) {
-  return page.locator("div.rounded-lg").filter({ has: page.getByText(heading) });
+  return page
+    .locator('[data-slot="card"]')
+    .filter({ has: page.getByText(heading) });
+}
+
+// 요약 StatStrip의 개별 stat — 세 stat이 한 strip을 공유하므로 값 단언은 반드시
+// 소유 stat의 testid(consistency-client.tsx `STAT_TEST_ID`)로 scope한다.
+function summaryStat(page: Page, testId: string) {
+  return page.getByTestId(testId);
 }
 
 test.describe("admin/ops consistency drilldown (route-mocked depth)", () => {
@@ -209,15 +217,14 @@ test.describe("admin/ops consistency drilldown (route-mocked depth)", () => {
       page.getByRole("heading", { level: 1, name: "정합성 점검" }),
     ).toBeVisible();
 
-    // metrics cards — scope each value to its owning bordered card.
-    const openIssuesCard = metricsCard(page, "Open issues");
-    await expect(openIssuesCard.getByText("7", { exact: true })).toBeVisible();
+    // 요약 stat — 각 값을 소유 stat(testid)으로 scope한다.
+    const openIssuesStat = summaryStat(page, "stat-open-issues");
+    await expect(openIssuesStat.getByText("7", { exact: true })).toBeVisible();
 
-    // latest_consistency_report.severity_max='critical' → 'Latest severity' 카드
-    // StatusBadge가 현행 한국어 '심각'을 렌더. 심각도 columnheader와 충돌하지
-    // 않도록 카드로 scope.
-    const latestSeverityCard = metricsCard(page, "Latest severity");
-    await expect(latestSeverityCard.getByText("심각")).toBeVisible();
+    // latest_consistency_report.severity_max='critical' → 'Latest severity' stat이
+    // 현행 한국어 '심각'을 렌더. 심각도 columnheader와 충돌하지 않도록 stat으로 scope.
+    const latestSeverityStat = summaryStat(page, "stat-latest-severity");
+    await expect(latestSeverityStat.getByText("심각")).toBeVisible();
 
     // reports 카드 — count Badge '2' + 두 report 행 모두 가시.
     const reportsCard = metricsCard(page, "Reports");
@@ -412,13 +419,13 @@ test.describe("admin/ops consistency drilldown (route-mocked depth)", () => {
     await expect(reportsCard.getByText("데이터가 없습니다.")).toBeVisible();
     await expect(issuesCard.getByText("데이터가 없습니다.")).toBeVisible();
 
-    // metrics 카드.
+    // 요약 stat.
     await expect(
-      metricsCard(page, "Open issues").getByText("0", { exact: true }),
+      summaryStat(page, "stat-open-issues").getByText("0", { exact: true }),
     ).toBeVisible();
-    // latest_consistency_report null → StatusBadge '없음'.
+    // latest_consistency_report null → statusLabel '없음'.
     await expect(
-      metricsCard(page, "Latest severity").getByText("없음"),
+      summaryStat(page, "stat-latest-severity").getByText("없음"),
     ).toBeVisible();
   });
 

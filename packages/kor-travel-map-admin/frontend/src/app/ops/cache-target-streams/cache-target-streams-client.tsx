@@ -592,8 +592,11 @@ function DeadLetterRecoverySection({
               dead letter 목록에서 행을 선택하면 event identity가 표시됩니다.
             </p>
           )}
+          {/* 힌트는 아직 사유가 비어 있을 때만 — 채우고 나면 같은 문장이 노이즈가 된다. */}
           <FormField
-            hint={REPLAY_REASON_HINT}
+            hint={
+              replayReason.trim().length === 0 ? REPLAY_REASON_HINT : undefined
+            }
             label="사유"
             value={replayReason}
             onChange={(event) => setReplayReason(event.target.value)}
@@ -624,7 +627,11 @@ function DeadLetterRecoverySection({
               : "stream 목록에서 행을 선택하세요."}
           </p>
           <FormField
-            hint={RECONCILE_REASON_HINT}
+            hint={
+              reconcileReason.trim().length === 0
+                ? RECONCILE_REASON_HINT
+                : undefined
+            }
             label="사유"
             value={reconcileReason}
             onChange={(event) => setReconcileReason(event.target.value)}

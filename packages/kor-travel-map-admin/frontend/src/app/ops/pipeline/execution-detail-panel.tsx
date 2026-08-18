@@ -54,7 +54,7 @@ const EVENT_LEVELS: Array<JobEventLevel | "all"> = [
 const SUBHEADING_CLASS = "text-xs font-semibold text-text-primary";
 /** 연결 개체·배치 링크 — prose link recipe + 단일 focus 레시피. */
 const INLINE_LINK_CLASS =
-  "link rounded-control font-mono outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
+  "link rounded-control font-mono focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus";
 
 function useExecutionDetailPanelController({
   kind,

@@ -52,13 +52,13 @@ type ConfirmFn = <L extends string>(options: ConfirmOptions<L>) => Promise<boole
 
 const ConfirmContext = React.createContext<ConfirmFn | null>(null);
 
-type PendingConfirm = {
+/** 다이얼로그가 그리는 내용. 닫힘 애니메이션 동안에도 마지막 값이 남아 있어야 한다(P2-3). */
+type ConfirmView = {
   title: string;
   description: React.ReactNode;
   confirmLabel: string;
   cancelLabel: string;
   destructive: boolean;
-  resolve: (confirmed: boolean) => void;
 };
 
 const GENERIC_CONFIRM_LABELS: ReadonlySet<string> = new Set([
@@ -99,45 +99,49 @@ function resolveConfirmLabel(label: string | undefined): string {
  * dialog가 아니라 호출한 트리거(`Button loading`)가 보인다 — 여기서는 즉시 닫힌다.
  */
 function ConfirmDialogProvider({ children }: { children: React.ReactNode }) {
-  const [pending, setPending] = React.useState<PendingConfirm | null>(null);
+  // 열림 여부와 내용을 분리한다: settle 은 `open` 만 내리고 `view` 는 그대로 두므로
+  // 닫힘 트랜지션(180ms) 동안 제목/설명/버튼 라벨이 빈칸으로 깜빡이지 않는다(P2-3).
+  const [view, setView] = React.useState<ConfirmView | null>(null);
+  const [open, setOpen] = React.useState(false);
+  const resolveRef = React.useRef<((confirmed: boolean) => void) | null>(null);
 
   const confirm = React.useCallback<ConfirmFn>((options) => {
     const confirmLabel = resolveConfirmLabel(options.confirmLabel);
     return new Promise<boolean>((resolve) => {
-      setPending({
+      // 앞선 confirm 이 아직 살아 있으면(연속 호출) 안전한 기본값으로 먼저 정리한다.
+      resolveRef.current?.(false);
+      resolveRef.current = resolve;
+      setView({
         title: options.title,
         description: options.description,
         confirmLabel,
         cancelLabel: options.cancelLabel?.trim() || "취소",
         destructive: options.destructive === true,
-        resolve,
       });
+      setOpen(true);
     });
   }, []);
 
-  const settle = React.useCallback(
-    (confirmed: boolean) => {
-      setPending((current) => {
-        current?.resolve(confirmed);
-        return null;
-      });
-    },
-    [],
-  );
+  const settle = React.useCallback((confirmed: boolean) => {
+    const resolve = resolveRef.current;
+    resolveRef.current = null;
+    setOpen(false);
+    resolve?.(confirmed);
+  }, []);
 
   return (
     <ConfirmContext value={confirm}>
       {children}
       <AlertDialog
-        open={pending !== null}
-        onOpenChange={(open) => {
-          if (!open) settle(false);
+        open={open}
+        onOpenChange={(next) => {
+          if (!next) settle(false);
         }}
       >
         <AlertDialogContent>
-          <AlertDialogTitle>{pending?.title}</AlertDialogTitle>
-          {pending?.description ? (
-            <AlertDialogDescription>{pending.description}</AlertDialogDescription>
+          <AlertDialogTitle>{view?.title}</AlertDialogTitle>
+          {view?.description ? (
+            <AlertDialogDescription>{view.description}</AlertDialogDescription>
           ) : null}
           <AlertDialogFooter>
             <Button
@@ -146,16 +150,16 @@ function ConfirmDialogProvider({ children }: { children: React.ReactNode }) {
               variant="outline"
               onClick={() => settle(false)}
             >
-              {pending?.cancelLabel ?? "취소"}
+              {view?.cancelLabel ?? "취소"}
             </Button>
             {/* design.md §CTA voice: the destructive FILL exists only inside confirm dialogs. */}
             <Button
               size="sm"
               type="button"
-              variant={pending?.destructive ? "destructive-solid" : "default"}
+              variant={view?.destructive ? "destructive-solid" : "default"}
               onClick={() => settle(true)}
             >
-              {pending?.confirmLabel}
+              {view?.confirmLabel}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

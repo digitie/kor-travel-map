@@ -97,7 +97,7 @@ export function CuratedLifecycleStrip({
             const trigger = onSelectStatus ? (
               <button
                 aria-pressed={active}
-                className="rounded-control outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                className="rounded-control focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                 type="button"
                 onClick={() => onSelectStatus(status)}
               >

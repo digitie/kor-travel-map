@@ -716,7 +716,7 @@ function CurationSourceCatalog({
             actions={
               <Button
                 aria-label="컬렉션 목록 새로고침"
-                disabled={collectionsQuery.isFetching}
+                loading={collectionsQuery.isFetching}
                 size="icon-sm"
                 type="button"
                 variant="ghost"
@@ -827,7 +827,7 @@ function CurationCollectionSummary({
                       label: "공식 출처",
                       value: detail.collection.source_url ? (
                         <a
-                          className="rounded-control break-all text-brand underline-offset-4 outline-none hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                          className="rounded-control break-all text-brand underline-offset-4 hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                           href={detail.collection.source_url}
                           rel="noreferrer"
                           target="_blank"
@@ -839,7 +839,7 @@ function CurationCollectionSummary({
                   ]}
                 />
                 <details className="group/details">
-                  <summary className="inline-flex h-control-sm cursor-pointer list-none items-center gap-1 rounded-control font-mono text-xs text-text-secondary outline-none select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
+                  <summary className="inline-flex h-control-sm cursor-pointer list-none items-center gap-1 rounded-control font-mono text-xs text-text-secondary select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
                     <span aria-hidden="true" className="w-3 text-text-tertiary group-open/details:hidden">
                       +
                     </span>
@@ -1063,7 +1063,7 @@ function CurationCollectionTable({
                                 {item.item_summary || "요약 없음"}
                               </span>
                               <details className="group/details">
-                                <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-control font-mono text-2xs text-text-secondary outline-none select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
+                                <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-control font-mono text-2xs text-text-secondary select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
                                   <span aria-hidden="true" className="w-3 text-text-tertiary group-open/details:hidden">
                                     +
                                   </span>
@@ -1094,7 +1094,7 @@ function CurationCollectionTable({
                               ) : null}
                               {item.source_url ? (
                                 <a
-                                  className="w-fit rounded-control break-all text-brand underline-offset-4 outline-none hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                                  className="w-fit rounded-control break-all text-brand underline-offset-4 hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                                   href={item.source_url}
                                   rel="noreferrer"
                                   target="_blank"

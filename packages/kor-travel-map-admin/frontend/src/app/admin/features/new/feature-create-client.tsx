@@ -538,7 +538,7 @@ function useFeatureCreateClientController() {
           return (
             <div className="flex min-w-0 flex-col gap-0.5">
               <Link
-                className="truncate rounded-control font-medium text-brand underline-offset-4 outline-none hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                className="truncate rounded-control font-medium text-brand underline-offset-4 hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                 href={featureDetailHref(item.feature_id)}
                 onClick={(event) => event.stopPropagation()}
               >
@@ -808,7 +808,7 @@ function FeatureCreateFeedback({
           <AlertDescription>
             변경 요청으로 등록되었습니다. 생성된 feature{" "}
             <Link
-              className="rounded-control text-brand underline underline-offset-4 outline-none hover:text-brand-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+              className="rounded-control text-brand underline underline-offset-4 hover:text-brand-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
               href={featureDetailHref(createdFeatureId)}
             >
               {createdFeatureId}
@@ -823,7 +823,7 @@ function FeatureCreateFeedback({
 
 /** 지오코딩 후보 행 — SelectableRow 레시피(테두리 없는 행, 선택 = brand-tint + 좌측 마크)를 native button으로. */
 const candidateRowClass =
-  "group/row relative flex w-full cursor-pointer flex-col items-start gap-0.5 rounded-control px-3 py-2 text-left text-sm text-text-primary transition-colors outline-none select-none hover:bg-surface-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus active:bg-surface-muted aria-pressed:bg-brand-tint aria-pressed:hover:bg-brand-tint aria-pressed:before:absolute aria-pressed:before:inset-y-2 aria-pressed:before:left-0 aria-pressed:before:w-0.5 aria-pressed:before:rounded-full aria-pressed:before:bg-brand aria-pressed:before:content-['']";
+  "group/row relative flex w-full cursor-pointer flex-col items-start gap-0.5 rounded-control px-3 py-2 text-left text-sm text-text-primary transition-colors select-none hover:bg-surface-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus active:bg-surface-muted aria-pressed:bg-brand-tint aria-pressed:hover:bg-brand-tint aria-pressed:before:absolute aria-pressed:before:inset-y-2 aria-pressed:before:left-0 aria-pressed:before:w-0.5 aria-pressed:before:rounded-full aria-pressed:before:bg-brand aria-pressed:before:content-['']";
 
 function FeatureCreateLocationWorkspace({
   applyCandidate,
@@ -863,11 +863,11 @@ function FeatureCreateLocationWorkspace({
   | "updateCoord"
   | "updateForm"
 >) {
+  // 진행 중(pending)은 native disabled가 아니라 Button `loading`이 표현한다 — disabled는
+  // "좌표 없음" 같은 진짜 상태 비활성만 남긴다.
   const reverseGeocodeDisabledReason = !coord
     ? "경도·위도를 먼저 입력하거나 지도를 클릭하세요"
-    : korTravelGeoPending
-      ? "kor-travel-geo 조회가 진행 중입니다"
-      : undefined;
+    : undefined;
   const nearbyDisabledReason = !coord
     ? "좌표가 있어야 중복 후보를 조회할 수 있습니다"
     : undefined;
@@ -888,7 +888,7 @@ function FeatureCreateLocationWorkspace({
               중심 사용
             </Button>
             <Button
-              disabled={!coord || korTravelGeoPending}
+              disabled={!coord}
               disabledReason={reverseGeocodeDisabledReason}
               loading={korTravelGeoPending && Boolean(coord)}
               size="sm"
@@ -950,8 +950,6 @@ function FeatureCreateLocationWorkspace({
                 조회
               </span>
               <Button
-                disabled={korTravelGeoPending}
-                disabledReason="kor-travel-geo 조회가 진행 중입니다"
                 loading={korTravelGeoPending}
                 size="sm"
                 type="button"
@@ -1008,7 +1006,7 @@ function FeatureCreateLocationWorkspace({
         <SectionCard
           actions={
             <Button
-              disabled={!coord || nearby.isFetching}
+              disabled={!coord}
               disabledReason={nearbyDisabledReason}
               loading={nearby.isFetching}
               size="sm"

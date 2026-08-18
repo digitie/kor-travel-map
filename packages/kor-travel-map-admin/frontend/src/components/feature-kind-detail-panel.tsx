@@ -183,7 +183,7 @@ function AreaContainedList({ items }: { items: FeatureSummary[] }) {
       {items.map((item) => (
         <li key={item.feature_id}>
           <Link
-            className="-mx-2 flex flex-col gap-0.5 rounded-control px-2 py-2 text-sm text-text-primary transition-colors outline-none hover:bg-surface-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus active:bg-surface-muted"
+            className="-mx-2 flex flex-col gap-0.5 rounded-control px-2 py-2 text-sm text-text-primary transition-colors hover:bg-surface-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus active:bg-surface-muted"
             href={featureHref(item.feature_id)}
           >
             <span className="flex min-w-0 items-center justify-between gap-2">
@@ -298,7 +298,7 @@ function FacilityDisclosure({
   if (!value) return null;
   return (
     <details className="group/details" open={defaultOpen}>
-      <summary className="inline-flex h-control-sm cursor-pointer list-none items-center gap-1 rounded-control font-mono text-xs text-text-secondary outline-none select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
+      <summary className="inline-flex h-control-sm cursor-pointer list-none items-center gap-1 rounded-control font-mono text-xs text-text-secondary select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
         <span aria-hidden="true" className="w-3 text-text-tertiary group-open/details:hidden">
           +
         </span>

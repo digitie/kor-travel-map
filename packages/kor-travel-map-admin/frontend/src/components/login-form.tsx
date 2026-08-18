@@ -21,6 +21,9 @@ export function LoginForm({ nextPath }: { nextPath: string }) {
 
   async function submit(event: FormEvent) {
     event.preventDefault();
+    // P1-5: 제출 중에도 CTA는 탭 순서에 남는다(Button loading = aria-disabled). 두 번째 제출은
+    // 여기서 조용히 끊는다 — native disabled로 포커스를 뺏지 않기 위한 짝이다.
+    if (busy) return;
     const form = event.currentTarget as HTMLFormElement;
     const formData = new FormData(form);
     const submittedUsername = String(formData.get("username") ?? "");
@@ -87,9 +90,9 @@ export function LoginForm({ nextPath }: { nextPath: string }) {
               aria-describedby={error ? "login-error" : undefined}
               aria-invalid={error ? true : undefined}
               autoComplete="username"
-              disabled={busy}
               id="admin-username"
               name="username"
+              readOnly={busy}
               value={username}
               onChange={(event) => setUsername(event.target.value)}
             />
@@ -102,9 +105,9 @@ export function LoginForm({ nextPath }: { nextPath: string }) {
               aria-describedby={error ? "login-error" : undefined}
               aria-invalid={error ? true : undefined}
               autoComplete="current-password"
-              disabled={busy}
               id="admin-password"
               name="password"
+              readOnly={busy}
               type="password"
               value={password}
               onChange={(event) => setPassword(event.target.value)}

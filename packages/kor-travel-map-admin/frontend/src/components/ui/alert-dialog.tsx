@@ -41,7 +41,7 @@ function AlertDialogContent({
           data-slot="alert-dialog-content"
           data-motion="crossfade"
           className={cn(
-            "w-full max-w-md rounded-panel border border-border bg-card p-5 text-text-primary shadow-modal outline-none",
+            "w-full max-w-md rounded-panel border border-border bg-card p-5 text-text-primary shadow-modal",
             ALERT_POPUP_MOTION_CLASS,
             className
           )}

@@ -120,7 +120,7 @@ function CellDisclosure({
     <details className="group/details">
       <summary
         className={cn(
-          "inline-flex cursor-pointer list-none items-center gap-1 rounded-control text-xs font-medium text-text-secondary outline-none select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden",
+          "inline-flex cursor-pointer list-none items-center gap-1 rounded-control text-xs font-medium text-text-secondary select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden",
           mono && "font-mono font-normal slashed-zero",
         )}
       >
@@ -297,7 +297,7 @@ function CurationsTable({ data }: { data: AdminFeatureDetailData }) {
               <span className="truncate">
                 {item.source_url ? (
                   <a
-                    className="rounded-control text-brand underline-offset-4 outline-none hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                    className="rounded-control text-brand underline-offset-4 hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                     href={item.source_url}
                     rel="noreferrer"
                     target="_blank"
@@ -663,7 +663,7 @@ function FilesTable({ data }: { data: AdminFeatureDetailData }) {
               <span className="font-mono text-xs break-all slashed-zero">{file.object_key}</span>
               {file.public_url ? (
                 <Link
-                  className="inline-flex w-fit rounded-control text-xs text-brand underline-offset-4 outline-none hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                  className="inline-flex w-fit rounded-control text-xs text-brand underline-offset-4 hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                   href={file.public_url}
                   rel="noreferrer"
                   target="_blank"
@@ -751,7 +751,7 @@ function NearbyPanel({
             <CellStack
               primary={
                 <Link
-                  className="rounded-control font-medium text-brand underline-offset-4 outline-none hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                  className="rounded-control font-medium text-brand underline-offset-4 hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
                   href={featureHref(item.feature_id)}
                   onClick={(event) => event.stopPropagation()}
                 >
@@ -873,7 +873,7 @@ function RawDisclosure({
 }) {
   return (
     <details className="group/details" open={defaultOpen}>
-      <summary className="inline-flex h-control-sm cursor-pointer list-none items-center gap-1 rounded-control text-xs font-medium text-text-secondary outline-none select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
+      <summary className="inline-flex h-control-sm cursor-pointer list-none items-center gap-1 rounded-control text-xs font-medium text-text-secondary select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
         <span aria-hidden="true" className="w-3 text-text-tertiary group-open/details:hidden">
           +
         </span>
@@ -977,6 +977,8 @@ function ReactivateSection({
     if (!basis.data || !reactivateReady) {
       return;
     }
+    // Button `loading`은 aria-disabled(포커스 유지)라 두 번째 클릭이 실제로 도착한다 — 여기서 끊는다.
+    if (reactivate.isPending) return;
     reactivate.mutate({
       featureId: basis.data.featureId,
       entityTag: basis.data.entityTag,
@@ -1097,6 +1099,7 @@ function FeatureStatePanel({
 
   const submitPatch = () => {
     if (!basis.data) return;
+    if (patchState.isPending) return;
     if (!publicationChanged && !qualityChanged) return;
     patchState.mutate({
       featureId: basis.data.featureId,
@@ -1111,7 +1114,7 @@ function FeatureStatePanel({
   };
 
   const retire = async () => {
-    if (!basis.data || isRetired) return;
+    if (!basis.data || isRetired || patchState.isPending) return;
     const ok = await confirm({
       title: `${feature.name} feature를 종료할까요?`,
       description:
@@ -1330,7 +1333,7 @@ export function FeatureDetailView({ featureId }: { featureId: string }) {
             다시 시도
           </Button>
           <Link
-            className="rounded-control text-xs text-brand underline-offset-4 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+            className="rounded-control text-xs text-brand underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
             href="/admin/features"
           >
             Feature 목록으로

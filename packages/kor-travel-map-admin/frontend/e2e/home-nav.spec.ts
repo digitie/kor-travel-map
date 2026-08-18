@@ -484,16 +484,14 @@ test.describe("home page (/) — nav + metric/status depth", () => {
         await expect(sidebarToggle).toBeHidden();
       }
 
+      // 요약 KPI는 StatStrip의 4 stat — 각 stat testid로 잡아 밀도(컬럼 수)를 잰다
+      // (home-client.tsx `HOME_STAT_COLUMNS`: 모바일 1 · 태블릿 2 · 데스크톱 4).
       const metricCards = [
-        "Feature",
-        "파이프라인 작업",
-        "중복 검수",
-        "이슈",
-      ].map((title) =>
-        page.locator('[data-slot="card"]').filter({
-          has: page.getByRole("heading", { name: title, exact: true }),
-        }),
-      );
+        "home-stat-features",
+        "home-stat-pipeline",
+        "home-stat-dedup",
+        "home-stat-issues",
+      ].map((testId) => page.getByTestId(testId));
       const boxes = await Promise.all(
         metricCards.map((card) => card.boundingBox()),
       );
@@ -572,60 +570,46 @@ test.describe("home page (/) — nav + metric/status depth", () => {
       page.getByRole("heading", { level: 1, name: "운영 홈" }),
     ).toBeVisible();
 
-    // ── metric 카드 (CardTitle = heading) ──
+    // ── 요약 KPI (StatStrip — 라벨은 dt 안의 딥링크, 값 단언은 stat testid로 scope) ──
     const cards = page.locator('[data-slot="card"]');
-    const featuresCard = cards.filter({
-      has: page.getByRole("heading", { name: "Feature", exact: true }),
-    });
+    const featuresStat = page.getByTestId("home-stat-features");
     await expect(
-      featuresCard.getByRole("heading", { name: "Feature", exact: true }),
+      featuresStat.getByRole("link", { name: "Feature", exact: true }),
     ).toBeVisible();
     // features_total=42 → value cell "42"
-    await expect(featuresCard.getByText("42", { exact: true })).toBeVisible();
-    // description: 30 active / 12 inactive
-    await expect(
-      featuresCard.getByText("활성 30 / 비활성 12"),
-    ).toBeVisible();
+    await expect(featuresStat.getByText("42", { exact: true })).toBeVisible();
+    // caption: 30 active / 12 inactive
+    await expect(featuresStat.getByText("활성 30 / 비활성 12")).toBeVisible();
 
-    // Pipeline MetricCard: canonical operations_by_status 합(7+1+2=10).
-    const importJobsCard = cards.filter({
-      has: page.getByRole("heading", { name: "파이프라인 작업", exact: true }),
-    });
-    await expect(
-      importJobsCard.getByText("10", { exact: true }),
-    ).toBeVisible();
-    await expect(importJobsCard.getByText("3건 진행 중")).toBeVisible();
+    // Pipeline stat: canonical operations_by_status 합(7+1+2=10).
+    const importJobsStat = page.getByTestId("home-stat-pipeline");
+    await expect(importJobsStat.getByText("10", { exact: true })).toBeVisible();
+    await expect(importJobsStat.getByText("3건 진행 중")).toBeVisible();
 
-    // Dedup queue MetricCard: dedup_queue_by_status 합(6+3=9) + pending desc.
-    const dedupQueueCard = cards.filter({
-      has: page.getByRole("heading", { name: "중복 검수", exact: true }),
-    });
-    await expect(dedupQueueCard.getByText("9", { exact: true })).toBeVisible();
-    await expect(
-      dedupQueueCard.getByText("대기 6건"),
-    ).toBeVisible();
+    // Dedup queue stat: dedup_queue_by_status 합(6+3=9) + pending caption.
+    const dedupQueueStat = page.getByTestId("home-stat-dedup");
+    await expect(dedupQueueStat.getByText("9", { exact: true })).toBeVisible();
+    await expect(dedupQueueStat.getByText("대기 6건")).toBeVisible();
 
-    // Issues MetricCard: data_integrity_issues.open_total = 7.
-    const issuesCard = cards.filter({
-      has: page.getByRole("heading", { name: "이슈", exact: true }),
-    });
-    await expect(issuesCard.getByText("7", { exact: true })).toBeVisible();
+    // Issues stat: data_integrity_issues.open_total = 7.
+    const issuesStat = page.getByTestId("home-stat-issues");
+    await expect(issuesStat.getByText("7", { exact: true })).toBeVisible();
 
-    // metric 카드 제목은 해당 관리 화면으로 딥링크된다(개편 B 크로스링크).
+    // stat 라벨은 해당 관리 화면으로 딥링크된다(개편 B 크로스링크).
     await expect(
-      featuresCard.getByRole("link", { name: "Feature", exact: true }),
+      featuresStat.getByRole("link", { name: "Feature", exact: true }),
     ).toHaveAttribute("href", "/admin/features");
     await expect(
-      importJobsCard.getByRole("link", {
+      importJobsStat.getByRole("link", {
         name: "파이프라인 작업",
         exact: true,
       }),
     ).toHaveAttribute("href", "/ops/pipeline");
     await expect(
-      dedupQueueCard.getByRole("link", { name: "중복 검수", exact: true }),
+      dedupQueueStat.getByRole("link", { name: "중복 검수", exact: true }),
     ).toHaveAttribute("href", "/admin/features/dedup-reviews");
     await expect(
-      issuesCard.getByRole("link", { name: "이슈", exact: true }),
+      issuesStat.getByRole("link", { name: "이슈", exact: true }),
     ).toHaveAttribute("href", "/admin/issues");
 
     // ── 최근 pipeline root 테이블 ──
@@ -719,11 +703,11 @@ test.describe("home page (/) — nav + metric/status depth", () => {
 
     const cards = page.locator('[data-slot="card"]');
 
-    // metric value cells → formatCount(undefined)="0". Features 카드로 scope.
-    const featuresCard = cards.filter({
-      has: page.getByRole("heading", { name: "Feature", exact: true }),
-    });
-    await expect(featuresCard.getByText("0", { exact: true })).toBeVisible();
+    // metric value cells → formatCount(null)=NULL_GLYPH("—", M36: 가짜 0 금지).
+    // 네 stat이 한 StatStrip을 공유하므로 소유 stat testid로 scope한다.
+    await expect(
+      page.getByTestId("home-stat-features").getByText("—", { exact: true }),
+    ).toBeVisible();
 
     // Backend StatusBadge "error" (health.isError) — Backend Card로 scope.
     const backendCard = page.getByTestId("service-backend");
@@ -782,16 +766,12 @@ test.describe("home page (/) — nav + metric/status depth", () => {
     // 충돌하지 않지만, data-testid="metric-skeleton"으로 metrics skeleton만 한정한다.
     const metricSkeletons = page.getByTestId("metric-skeleton");
     await expect(metricSkeletons).toHaveCount(4);
-    // gate 동안 Features metric heading은 아직 없다.
-    await expect(
-      page.getByRole("heading", { name: "Feature", exact: true }),
-    ).toHaveCount(0);
+    // gate 동안 Features stat은 아직 없다(skeleton만 렌더).
+    await expect(page.getByTestId("home-stat-features")).toHaveCount(0);
 
     release();
 
-    await expect(
-      page.getByRole("heading", { name: "Feature", exact: true }),
-    ).toBeVisible();
+    await expect(page.getByTestId("home-stat-features")).toBeVisible();
     await expect(metricSkeletons).toHaveCount(0);
   });
 

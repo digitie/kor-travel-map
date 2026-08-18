@@ -9,8 +9,16 @@
  *   불투명 `*-tint` 토큰 사용.
  * - radius 2종(`rounded-control` 6px · `rounded-panel` 8px), control 높이 2종
  *   (`h-control` 36px · `h-control-sm` 30px), inspector rail `w-rail` 22rem.
- * - focus 레시피 1종: `outline-none focus-visible:outline-2 focus-visible:outline-offset-2
- *   focus-visible:outline-focus` (ring은 transition 밖 — 즉시 표시).
+ *   in-flow micro-control 예외 목록은 design.md §Spacing.
+ * - hairline 2종: 장식/구분선은 `border-border`(= `--surface-muted`), **컨트롤 경계는
+ *   `border-input`(= `--control-line`)** — 후자는 WCAG 1.4.11 대상이라 3:1 이상을 지킨다.
+ * - focus 레시피 1종은 이 파일 `@layer base`의 `:focus-visible`이 **혼자** 발행한다
+ *   (outline 2px `--focus` + offset 2px). 컴포넌트는 아무것도 선언하지 않아도 링을 받으므로
+ *   **무조건부 `outline-none` 금지** — utility가 base를 이겨서 그 요소는 링을 영구히 잃는다.
+ *   `outline-none` + `focus-visible:outline-*`를 함께 적는 것도 금지다(base 레시피를 지우고
+ *   같은 걸 손으로 다시 적는 중복 = drift 출처). 유일한 예외는 부모 래퍼가
+ *   `has-[input:focus-visible]:outline-*`로 대신 링을 그리는 자리. design.md §Focus + §금지 패턴.
+ *   ring은 transition 밖 — 즉시 표시.
  * - motion: `duration-fast`(100ms, hover/colour) · `duration-base`(150ms, overlay) ·
  *   `ease-out`/`ease-in`; `transition-all` 금지; reduced-motion 전역 규칙은 파일 끝.
  */
@@ -62,6 +70,8 @@
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-border: var(--border);
+  /* `border-input` = 컨트롤 경계(--control-line). shadcn 이름을 유지하되 값은 장식용
+     `--border`와 분리된 고대비 hairline이다. */
   --color-input: var(--input);
   --color-ring: var(--ring);
 
@@ -74,6 +84,9 @@
   --color-text-tertiary: var(--text-tertiary);
   --color-text-disabled: var(--text-disabled);
   --color-icon-default: var(--icon-default);
+
+  /* ── hairlines: 장식(`--border`)과 컨트롤 경계(`--control-line`)를 분리한다 ── */
+  --color-control-line: var(--control-line);
 
   /* ── brand ── */
   --color-brand: var(--brand);
@@ -208,7 +221,14 @@
      54%(paper 4.73 · subtle 4.58 · card 4.92)로 조정. */
   --text-tertiary: oklch(54% 0.012 154);
   --text-disabled: oklch(79% 0.012 154); /* non-text cue only */
-  --icon-default: oklch(54% 0.012 154);
+  --icon-default: oklch(54% 0.012 154); /* 의미 있는 아이콘(= text-tertiary와 같은 값) */
+
+  /* hairline 2종. `--border`(= --surface-muted)는 표 구분선·패널 테두리 같은 *장식*이고,
+     컨트롤 경계는 WCAG 1.4.11(non-text contrast) 대상이라 인접 배경 대비 3:1이 필요하다.
+     이전 값 oklch(89% 0.01 145)는 card 1.36 · page 1.30 · subtle 1.26으로 전부 미달했다.
+     oklch(61% 0.012 145) = card 3.69 · surface-page 3.54 · surface-subtle 3.43
+     · surface-muted 3.03 — 컨트롤이 놓이는 네 표면 모두 3:1 이상. */
+  --control-line: oklch(61% 0.012 145);
 
   /* brand */
   --brand: oklch(51.4% 0.081 169);
@@ -250,8 +270,8 @@
   --muted-foreground: var(--text-secondary);
   --accent: var(--brand-tint);
   --accent-foreground: var(--brand);
-  --border: var(--surface-muted);
-  --input: oklch(89% 0.01 145);
+  --border: var(--surface-muted); /* 장식 hairline — 대비 요건 없음 */
+  --input: var(--control-line); /* 컨트롤 경계 — 3:1 이상 */
   --ring: var(--focus);
   --background: var(--surface-page);
   --foreground: var(--text-primary);
@@ -323,6 +343,11 @@
   --text-disabled: oklch(52% 0.012 155);
   --icon-default: oklch(70% 0.01 155);
 
+  /* light와 같은 규칙: 이전 oklch(36% 0.012 145)는 card 1.56 · page 1.71 · subtle 1.52로
+     미달. oklch(58% 0.012 145) = card 3.96 · surface-page 4.33 · surface-subtle 3.85
+     · surface-muted 3.07. */
+  --control-line: oklch(58% 0.012 145);
+
   --brand: oklch(76% 0.085 169);
   --brand-hover: oklch(81% 0.085 169);
   --brand-tint: oklch(31% 0.035 169);
@@ -360,8 +385,8 @@
   --muted-foreground: var(--text-secondary);
   --accent: var(--brand-tint);
   --accent-foreground: var(--brand);
-  --border: var(--surface-muted);
-  --input: oklch(36% 0.012 145);
+  --border: var(--surface-muted); /* 장식 hairline — 대비 요건 없음 */
+  --input: var(--control-line); /* 컨트롤 경계 — 3:1 이상 */
   --ring: var(--focus);
   --chart-1: var(--brand);
   --chart-2: oklch(56% 0.045 165);
@@ -394,5 +419,17 @@
   [data-motion="crossfade"] {
     transition-property: opacity !important;
     transition-duration: var(--duration-base) !important;
+  }
+
+  /* 로딩 스피너는 장식이 아니라 "지금 처리 중"을 알리는 유일한 시각 신호다(Button loading은
+     라벨을 opacity-0으로 감추고 스피너만 남긴다 — 멈추면 정지 상태와 구분되지 않는다).
+     그래서 위 킬스위치에서 제외하고, 대신 회전을 느리게(1.6s, 기본 1s) 돌려 전정기관 부담만
+     줄인다. `*` 규칙과 specificity로 경쟁하므로 두 속성 모두 다시 선언해야 한다.
+     반대로 Skeleton은 콘텐츠 자리표시(장식)라 컴포넌트에서 `motion-reduce:animate-none`으로
+     완전히 끈다 — 로딩 여부는 감싸는 영역의 `aria-busy`가 알린다. */
+  [data-slot="button-spinner"] svg,
+  [data-sonner-toast] [data-icon] svg.animate-spin {
+    animation-duration: 1.6s !important;
+    animation-iteration-count: infinite !important;
   }
 }

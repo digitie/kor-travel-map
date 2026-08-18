@@ -5,7 +5,8 @@
 // 테이블이 본 컴포넌트로 통일된다(ADR/마이그레이션 2026-06-17). 기본은 semantic
 // shadcn Table primitive로 렌더해 접근성(role=table/columnheader/row/cell)과 기존
 // Playwright 셀렉터를 보존하고, 대용량/무한 목록만 `virtualized`로 @tanstack/react-virtual
-// 윈도잉을 켠다(이때는 display:grid라 native table role이 죽으므로 명시 ARIA를 붙인다).
+// 윈도잉을 켠다(이때는 display:grid라 native table role이 죽으므로 role=table/rowgroup/row/
+// columnheader/cell을 명시하고 aria-rowcount/aria-rowindex를 얹는다).
 //
 // 데이터 연산은 기본 server-side(manualSorting 기본 true): 페이지의 react-query가 이미
 // cursor 페이징/필터/정렬을 수행하므로 DataTable은 data만 받아 렌더한다(서버 정렬이
@@ -116,6 +117,11 @@ export interface DataTableProps<TData> {
   enableRowSelection?: boolean | ((row: Row<TData>) => boolean)
   rowSelection?: RowSelectionState
   onRowSelectionChange?: OnChangeFn<RowSelectionState>
+  /** 행 체크박스의 이름 조각 — `${rowSelectionLabel(row)} 선택`으로 접근성 이름을 만든다.
+   *  주지 않으면 모든 행이 같은 이름(`행 선택`)이라 스크린리더/셀렉터가 행을 구분하지 못한다.
+   *  행을 식별하는 짧은 값(이름·id)을 주고, column 재생성을 막기 위해 module-level 함수나
+   *  useCallback으로 안정화한다. */
+  rowSelectionLabel?: (row: TData) => string
   /** 선택된 행이 있을 때 테이블 위에 표시할 bulk action 바. */
   renderBulkActions?: (rows: Row<TData>[]) => React.ReactNode
   /** 행 클릭(detail pane 선택 등). 내부 link/button은 stopPropagation 해야 함. */
@@ -126,7 +132,7 @@ export interface DataTableProps<TData> {
   rowTestId?: (row: TData) => string | undefined
   /** cursor 순서 검증용 불투명 행 identity. 비가상 경로의 <tr data-row-identity>로 렌더. */
   rowIdentity?: (row: TData) => string | undefined
-  /** 가상화(대용량/무한 목록만). 켜면 명시 ARIA + display:grid 레이아웃. */
+  /** 가상화(대용량/무한 목록만). 켜면 display:grid 레이아웃 + 명시 role=table 계열 ARIA. */
   virtualized?: boolean
   estimateRowSize?: number
   overscan?: number
@@ -210,7 +216,7 @@ function DataTableColumnHeader({
       type="button"
       data-sorted={sorted || undefined}
       className={cn(
-        "inline-flex h-7 items-center gap-1 rounded-control px-2 text-2xs leading-none font-semibold whitespace-nowrap text-text-secondary transition-colors outline-none select-none hover:bg-surface-muted hover:text-text-primary focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus active:translate-y-px data-[sorted]:text-text-primary",
+        "inline-flex h-7 items-center gap-1 rounded-control px-2 text-2xs leading-none font-semibold whitespace-nowrap text-text-secondary transition-colors select-none hover:bg-surface-muted hover:text-text-primary focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus active:translate-y-px data-[sorted]:text-text-primary",
         align === "right" ? "-mr-2 flex-row-reverse" : "-ml-2",
       )}
       onClick={onToggle}
@@ -264,9 +270,13 @@ function handleClickableRowKeyDown<TData>(
 /** 클릭 가능한 행의 focus 표면 — 표 안이라 inset outline(이웃 행/스크롤 컨테이너에 잘리지 않게)
  *  + 배경 변화(색 1채널이 아니게). ring은 transition-colors 밖이라 즉시 나타난다. */
 const CLICKABLE_ROW_CLASS =
-  "cursor-pointer outline-none focus-visible:bg-surface-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus active:bg-surface-muted"
+  "cursor-pointer focus-visible:bg-surface-subtle focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus active:bg-surface-muted"
 
-function selectionColumn<TData>(): ColumnDef<TData, unknown> {
+/** 선택 열. 행 체크박스 이름은 `rowSelectionLabel`이 있으면 행마다 다르게(`홍길동 선택`),
+ *  없으면 기존 계약대로 `행 선택`으로 남는다(호출부 호환). */
+function selectionColumn<TData>(
+  rowSelectionLabel?: (row: TData) => string,
+): ColumnDef<TData, unknown> {
   return {
     id: "__select__",
     enableSorting: false,
@@ -281,7 +291,9 @@ function selectionColumn<TData>(): ColumnDef<TData, unknown> {
     ),
     cell: ({ row }) => (
       <Checkbox
-        aria-label="행 선택"
+        aria-label={
+          rowSelectionLabel ? `${rowSelectionLabel(row.original)} 선택` : "행 선택"
+        }
         checked={row.getIsSelected()}
         disabled={!row.getCanSelect()}
         onCheckedChange={(checked) => row.toggleSelected(!!checked)}
@@ -357,6 +369,7 @@ export function DataTable<TData>({
   enableRowSelection = false,
   rowSelection,
   onRowSelectionChange,
+  rowSelectionLabel,
   renderBulkActions,
   onRowClick,
   isRowActive,
@@ -374,8 +387,11 @@ export function DataTable<TData>({
   const [internalSelection, setInternalSelection] = React.useState<RowSelectionState>({})
 
   const resolvedColumns = React.useMemo(
-    () => (enableRowSelection ? [selectionColumn<TData>(), ...columns] : columns),
-    [columns, enableRowSelection],
+    () =>
+      enableRowSelection
+        ? [selectionColumn<TData>(rowSelectionLabel), ...columns]
+        : columns,
+    [columns, enableRowSelection, rowSelectionLabel],
   )
 
   // TanStack Table은 함수형 객체를 반환하므로 이 컴포넌트는 React Compiler 대상이 아니다.
@@ -571,8 +587,16 @@ function SkeletonRows<TData>({
   )
 }
 
-// 가상화 변형 — display:grid + sticky thead + absolute rows. native table role이 죽으므로
-// 명시 role/aria-rowcount/aria-rowindex를 붙여 스크린리더가 전체 개수를 인지하게 한다.
+// 가상화 변형 — display:grid + sticky thead + absolute rows. display가 table-*가 아니면
+// 브라우저가 table/row/columnheader/cell 암묵 role을 버리므로(그러면 aria-rowcount·
+// aria-rowindex·aria-sort도 얹힐 자리가 없다) 모든 구조 요소에 명시 role을 붙인다.
+// role은 grid가 아니라 table이다: 행 클릭은 detail pane 선택일 뿐 셀 단위 키보드 탐색
+// (grid가 요구하는 roving tabindex)을 제공하지 않고, e2e 계약도 role=table을 참조한다.
+//
+// 정적 분석기는 CSS를 못 보므로 이 명시 role을 "암묵 role과 중복"으로 읽는다
+// (react-doctor no-redundant-roles / no-interactive-element-to-noninteractive-role).
+// 여기서는 display 오버라이드 때문에 중복이 아니라 필수라, 파일 범위 예외를
+// `doctor.config.json`에 둔다(같은 파일의 비가상 경로는 native table 그대로다).
 function VirtualizedTable<TData>({
   table,
   rows,
@@ -638,15 +662,18 @@ function VirtualizedTable<TData>({
         aria-rowcount={rows.length + headerRowCount}
         aria-colcount={colCount}
         className="grid w-full caption-bottom text-sm tabular-nums"
+        role="table"
       >
         <thead
           className="sticky top-0 z-10 grid bg-surface-subtle [&_tr]:border-b"
+          role="rowgroup"
         >
           {table.getHeaderGroups().map((headerGroup, headerGroupIndex) => (
             <tr
               key={headerGroup.id}
               aria-rowindex={headerGroupIndex + 1}
               className="flex w-full border-b border-border"
+              role="row"
             >
               {headerGroup.headers.map((header) => {
                 const sorted = header.column.getIsSorted()
@@ -656,6 +683,7 @@ function VirtualizedTable<TData>({
                   <th
                     key={header.id}
                     aria-sort={canSort ? ariaSort(sorted) : undefined}
+                    role="columnheader"
                     style={{ width: header.getSize() }}
                     className={cn(
                       "flex h-9 items-center px-3 text-left align-middle text-2xs leading-none font-semibold whitespace-nowrap text-text-secondary",
@@ -674,15 +702,21 @@ function VirtualizedTable<TData>({
         <tbody
           className="relative grid"
           style={isLoading ? undefined : { height: `${virtualizer.getTotalSize()}px` }}
+          role="rowgroup"
         >
           {isLoading ? (
             skeletonKeys.map((rowKey, rowIndex) => (
-              <tr key={rowKey} className="flex w-full border-b border-border">
+              <tr
+                key={rowKey}
+                className="flex w-full border-b border-border"
+                role="row"
+              >
                 {leafColumns.map((column, columnIndex) => {
                   const meta = columnMeta(column)
                   return (
                     <td
                       key={`${rowKey}-${column.id}`}
+                      role="cell"
                       style={{ width: column.getSize() }}
                       className={cn(
                         "flex items-center px-3 py-2 align-middle",
@@ -696,8 +730,8 @@ function VirtualizedTable<TData>({
               </tr>
             ))
           ) : rows.length === 0 ? (
-            <tr className="flex">
-              <td className="flex w-full px-3">
+            <tr className="flex" role="row">
+              <td className="flex w-full px-3" colSpan={colCount} role="cell">
                 <EmptyState
                   action={emptyState.action}
                   description={emptyState.description}
@@ -719,6 +753,7 @@ function VirtualizedTable<TData>({
                   aria-selected={onRowClick ? active : undefined}
                   ref={(node) => virtualizer.measureElement(node)}
                   data-state={active ? "selected" : undefined}
+                  role="row"
                   className={cn(
                     "absolute flex w-full border-b border-border transition-colors hover:bg-surface-subtle data-[state=selected]:bg-brand-tint",
                     onRowClick && CLICKABLE_ROW_CLASS,
@@ -737,6 +772,7 @@ function VirtualizedTable<TData>({
                     return (
                       <td
                         key={cell.id}
+                        role="cell"
                         style={{ width: cell.column.getSize() }}
                         className={cn(
                           "flex items-center px-3 py-2 align-middle text-text-primary",

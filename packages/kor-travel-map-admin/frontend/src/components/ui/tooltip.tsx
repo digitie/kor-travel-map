@@ -47,7 +47,7 @@ function TooltipContent({
           data-slot="tooltip-content"
           data-motion="crossfade"
           className={cn(
-            "max-w-xs rounded-control bg-text-primary px-3 py-1.5 text-2xs leading-normal text-surface-page shadow-elevated outline-none",
+            "max-w-xs rounded-control bg-text-primary px-3 py-1.5 text-2xs leading-normal text-surface-page shadow-elevated",
             "transition-opacity duration-base ease-out data-[starting-style]:opacity-0 data-[ending-style]:opacity-0 data-[ending-style]:duration-fast data-[ending-style]:ease-in data-[instant]:duration-0",
             className
           )}

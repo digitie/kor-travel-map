@@ -378,7 +378,7 @@ function QuarantineCollectionList({
       actions={
         <Button
           aria-label="격리 collection 목록 새로고침"
-          disabled={quarantineQuery.isFetching}
+          loading={quarantineQuery.isFetching}
           size="icon-sm"
           type="button"
           variant="ghost"

@@ -6,9 +6,12 @@ import { cva } from "class-variance-authority";
  *
  * - 높이 2종만: `default`/`lg`/`icon`/`icon-lg` → `h-control`(36px), `sm`/`xs`/`icon-sm`/`icon-xs` →
  *   `h-control-sm`(30px). xs/lg 계열은 하위 호환 alias — 신규 코드는 default/sm/icon/icon-sm만.
- * - 8-state: rest · hover(colour) · focus-visible(불투명 outline, transition 밖) · active(1px press) ·
- *   disabled(`opacity-55 + cursor-not-allowed`, pointer-events 유지 → `title` 사유 도달 가능) ·
- *   loading(`aria-busy` — Button `loading` prop이 spinner 오버레이) · aria-invalid · aria-expanded.
+ * - 8-state: rest · hover(colour) · focus-visible(불투명 outline, transition 밖 — `outline-none`을
+ *   붙이지 않는다: tailwind v4에서 `--tw-outline-style: none`이 focus-visible까지 덮어 링이 사라진다) ·
+ *   active(1px press) · disabled(`opacity-55 + cursor-not-allowed`, pointer-events 유지 →
+ *   `title` 사유 도달 가능) · loading(`aria-busy` + `aria-disabled` — native disabled를 걸지 않아
+ *   포커스를 유지한다. Button `loading` prop이 spinner 오버레이) · aria-invalid · aria-expanded.
+ *   그래서 disabled 계열 색은 `disabled:`/`aria-disabled:` 두 벌을 항상 같이 둔다.
  * - variant: `default`(brand fill, band당 1개) · `outline`(secondary CTA) · `ghost`(toolbar/table 안) ·
  *   `secondary`(선택/활성 tint chip) · `destructive`(in-page = outline + destructive text) ·
  *   `destructive-solid`(confirm dialog 안에서만 fill) · `link`.
@@ -19,7 +22,7 @@ const buttonVariants = cva(
   [
     "group/button inline-flex shrink-0 items-center justify-center rounded-control border border-transparent bg-clip-padding font-medium whitespace-nowrap no-underline select-none",
     "transition-[color,background-color,border-color,box-shadow,transform] duration-fast ease-out",
-    "outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
+    "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
     "active:not-aria-[haspopup]:translate-y-px",
     "disabled:cursor-not-allowed disabled:opacity-55 aria-disabled:cursor-not-allowed aria-disabled:opacity-55 aria-busy:cursor-progress",
     "aria-invalid:border-destructive",

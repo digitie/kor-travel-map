@@ -54,7 +54,7 @@ function DialogContent({
           data-slot="dialog-content"
           data-motion="crossfade"
           className={cn(
-            "w-full max-w-lg rounded-panel border border-border bg-card text-text-primary shadow-modal outline-none",
+            "w-full max-w-lg rounded-panel border border-border bg-card text-text-primary shadow-modal",
             OVERLAY_POPUP_MOTION_CLASS,
             className
           )}

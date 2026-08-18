@@ -20,6 +20,46 @@ function paginationAria(ariaPrefix: string | undefined, label: string): string {
   return ariaPrefix ? `${ariaPrefix} ${label}` : label;
 }
 
+type PagerButtonProps = {
+  ariaLabel: string;
+  children: React.ReactNode;
+  /** 페이지 경계 등 구조적으로 없는 이동 — native `disabled`(탭 순서에서 빠지는 게 맞다). */
+  unavailable: boolean;
+  /** 전환이 진행 중 — `aria-disabled`만 건다. */
+  busy: boolean;
+  onActivate: () => void;
+};
+
+/**
+ * P1-5: 전환 중(`isFetching`)에 native `disabled`를 걸면 방금 누른 버튼이 탭 순서에서 사라져
+ * 포커스가 body로 떨어지고, 응답이 오면 돌아갈 자리가 없다. busy는 `aria-disabled` + 클릭
+ * early-return 으로만 막는다(포커스 유지). 경계(첫/마지막 페이지)는 원래대로 native disabled.
+ */
+function PagerButton({
+  ariaLabel,
+  busy,
+  children,
+  unavailable,
+  onActivate,
+}: PagerButtonProps) {
+  return (
+    <Button
+      aria-disabled={busy || undefined}
+      aria-label={ariaLabel}
+      disabled={unavailable}
+      size="sm"
+      type="button"
+      variant="outline"
+      onClick={() => {
+        if (busy || unavailable) return;
+        onActivate();
+      }}
+    >
+      {children}
+    </Button>
+  );
+}
+
 type PagerShellProps = {
   ariaPrefix?: string;
   /** nav 자체의 aria-label 접두어가 버튼 접두어와 다른 화면용(예: enrichment는 nav만 접두어). */
@@ -117,46 +157,40 @@ function OffsetPager({
         </>
       }
     >
-      <Button
-        aria-label={paginationAria(ariaPrefix, "첫 페이지")}
-        disabled={!hasPrev || isFetching}
-        size="sm"
-        type="button"
-        variant="outline"
-        onClick={() => onPageChange(1)}
+      <PagerButton
+        ariaLabel={paginationAria(ariaPrefix, "첫 페이지")}
+        busy={isFetching}
+        unavailable={!hasPrev}
+        onActivate={() => onPageChange(1)}
       >
         첫 페이지
-      </Button>
-      <Button
-        aria-label={paginationAria(ariaPrefix, "이전 페이지")}
-        disabled={!hasPrev || isFetching}
-        size="sm"
-        type="button"
-        variant="outline"
-        onClick={() => onPageChange(page - 1)}
+      </PagerButton>
+      <PagerButton
+        ariaLabel={paginationAria(ariaPrefix, "이전 페이지")}
+        busy={isFetching}
+        unavailable={!hasPrev}
+        onActivate={() => onPageChange(page - 1)}
       >
         이전
-      </Button>
-      <Button
-        aria-label={paginationAria(ariaPrefix, "다음 페이지")}
-        disabled={!hasNext || isFetching}
-        size="sm"
-        type="button"
-        variant="outline"
-        onClick={() => onPageChange(page + 1)}
+      </PagerButton>
+      <PagerButton
+        ariaLabel={paginationAria(ariaPrefix, "다음 페이지")}
+        busy={isFetching}
+        unavailable={!hasNext}
+        onActivate={() => onPageChange(page + 1)}
       >
         다음
-      </Button>
-      <Button
-        aria-label={paginationAria(ariaPrefix, "마지막 페이지")}
-        disabled={totalPages === null || !hasNext || isFetching}
-        size="sm"
-        type="button"
-        variant="outline"
-        onClick={() => (totalPages !== null ? onPageChange(totalPages) : undefined)}
+      </PagerButton>
+      <PagerButton
+        ariaLabel={paginationAria(ariaPrefix, "마지막 페이지")}
+        busy={isFetching}
+        unavailable={totalPages === null || !hasNext}
+        onActivate={() => {
+          if (totalPages !== null) onPageChange(totalPages);
+        }}
       >
         마지막 페이지
-      </Button>
+      </PagerButton>
     </PagerShell>
   );
 }
@@ -198,26 +232,22 @@ function CursorPager({
       placement={placement}
       summary={summary}
     >
-      <Button
-        aria-label={paginationAria(ariaPrefix, "첫 페이지")}
-        disabled={isFirst || isFetching}
-        size="sm"
-        type="button"
-        variant="outline"
-        onClick={onFirst}
+      <PagerButton
+        ariaLabel={paginationAria(ariaPrefix, "첫 페이지")}
+        busy={isFetching}
+        unavailable={isFirst}
+        onActivate={onFirst}
       >
         첫 페이지
-      </Button>
-      <Button
-        aria-label={paginationAria(ariaPrefix, "다음 페이지")}
-        disabled={!hasNext || isFetching}
-        size="sm"
-        type="button"
-        variant="outline"
-        onClick={onNext}
+      </PagerButton>
+      <PagerButton
+        ariaLabel={paginationAria(ariaPrefix, "다음 페이지")}
+        busy={isFetching}
+        unavailable={!hasNext}
+        onActivate={onNext}
       >
         다음
-      </Button>
+      </PagerButton>
     </PagerShell>
   );
 }

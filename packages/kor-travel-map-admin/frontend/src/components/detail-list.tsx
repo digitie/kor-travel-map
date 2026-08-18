@@ -65,7 +65,7 @@ function DetailList({ items, columns = "auto", layout = "stacked", className }: 
         if (item.href && !isEmpty) {
           body = (
             <Link
-              className="rounded-control text-brand underline-offset-4 outline-none hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+              className="rounded-control text-brand underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
               href={item.href}
             >
               {rawValue}

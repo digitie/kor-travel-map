@@ -96,7 +96,7 @@ export function AppErrorPanel({ error, reset, standalone = false }: AppErrorPane
           </Button>
         </div>
         <details className="group/details mt-2 border-t border-border pt-3">
-          <summary className="inline-flex h-control-sm cursor-pointer list-none items-center rounded-control px-1 text-xs font-medium text-text-secondary transition-[color,background-color] duration-fast ease-out outline-none hover:bg-surface-subtle hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus active:bg-surface-muted [&::-webkit-details-marker]:hidden">
+          <summary className="inline-flex h-control-sm cursor-pointer list-none items-center rounded-control px-1 text-xs font-medium text-text-secondary transition-[color,background-color] duration-fast ease-out hover:bg-surface-subtle hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus active:bg-surface-muted [&::-webkit-details-marker]:hidden">
             <span className="group-open/details:hidden">오류 정보 보기</span>
             <span className="hidden group-open/details:inline">오류 정보 닫기</span>
           </summary>

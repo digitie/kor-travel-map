@@ -25,7 +25,7 @@ type EntityLinkProps = {
  * id 링크는 mono + tabular-nums, 외부 링크는 ExternalLinkIcon + 새 탭 (§2 배치 규칙).
  */
 const entityLinkClass =
-  "rounded-control text-brand underline-offset-4 outline-none transition-[color] duration-fast ease-out hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus active:text-brand-hover";
+  "rounded-control text-brand underline-offset-4 transition-[color] duration-fast ease-out hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus active:text-brand-hover";
 
 function EntityLink({
   kind,

@@ -34,7 +34,7 @@ function NativeSelect({
         data-size={size}
         ref={ref}
         className={cn(
-          "w-full min-w-0 appearance-none rounded-control border border-input bg-card pr-9 pl-3 text-text-primary transition-[color,background-color,border-color] duration-fast ease-out outline-none select-none",
+          "w-full min-w-0 appearance-none rounded-control border border-input bg-card pr-9 pl-3 text-text-primary transition-[color,background-color,border-color] duration-fast ease-out select-none",
           "h-control text-sm data-[size=sm]:h-control-sm data-[size=sm]:pl-2.5 data-[size=sm]:text-xs",
           "selection:bg-brand selection:text-brand-foreground placeholder:text-text-tertiary",
           "hover:bg-surface-subtle focus-visible:border-text-secondary focus-visible:bg-card focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus",
