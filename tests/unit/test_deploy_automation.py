@@ -50,7 +50,12 @@ def test_buildx_runtime_images_receive_exact_git_revision(
     docker_log = tmp_path / "docker.log"
     git = fake_bin / "git"
     git.write_text(
-        f"#!/usr/bin/env bash\nprintf '%s\\n' '{revision}'\n",
+        "#!/usr/bin/env bash\n"
+        "case \"$*\" in\n"
+        f"  'rev-parse HEAD') printf '%s\\n' '{revision}' ;;\n"
+        "  'status --porcelain=v1 --untracked-files=all') : ;;\n"
+        "  *) exit 64 ;;\n"
+        "esac\n",
         encoding="utf-8",
     )
     git.chmod(0o755)
@@ -101,6 +106,53 @@ def test_buildx_runtime_images_receive_exact_git_revision(
     assert "kor-travel-map-admin" in frontend_build
     assert "kor-travel-map-dagster" in dagster_build
     assert "kor-travel-map-dagster-daemon" in dagster_build
+
+
+@pytest.mark.unit
+def test_buildx_rejects_dirty_source_context(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    revision = "0123456789abcdef0123456789abcdef01234567"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    docker_log = tmp_path / "docker.log"
+    git = fake_bin / "git"
+    git.write_text(
+        "#!/usr/bin/env bash\n"
+        "case \"$*\" in\n"
+        f"  'rev-parse HEAD') printf '%s\\n' '{revision}' ;;\n"
+        "  'status --porcelain=v1 --untracked-files=all') "
+        "printf '%s\\n' ' M src/changed.py' ;;\n"
+        "  *) exit 64 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    git.chmod(0o755)
+    docker = fake_bin / "docker"
+    docker.write_text(
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >>"$DOCKER_LOG"\n',
+        encoding="utf-8",
+    )
+    docker.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake_bin}:{os.environ['PATH']}")
+    monkeypatch.setenv("DOCKER_LOG", str(docker_log))
+    monkeypatch.setenv("KOR_TRAVEL_MAP_ENV_FILE", str(tmp_path / "missing.env"))
+
+    result = subprocess.run(
+        ["bash", "scripts/docker-buildx.sh"],
+        cwd=ROOT,
+        env=os.environ.copy(),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert result.stderr == (
+        "clean Git worktree is required for an exact source revision build\n"
+    )
+    assert not docker_log.exists()
 
 
 @pytest.mark.unit

@@ -14,6 +14,10 @@ if [[ ! "$GIT_REVISION" =~ ^[0-9a-f]{40}$ ]]; then
   echo "exact 40-character Git HEAD is required; got $GIT_REVISION" >&2
   exit 2
 fi
+if [[ -n "$(git status --porcelain=v1 --untracked-files=all)" ]]; then
+  echo "clean Git worktree is required for an exact source revision build" >&2
+  exit 2
+fi
 IMAGE_TAG="${KOR_TRAVEL_MAP_IMAGE_TAG:-${GIT_REVISION:0:12}}"
 PLATFORMS="${KOR_TRAVEL_MAP_DOCKER_PLATFORMS:-linux/amd64,linux/arm64}"
 BUILDER="${KOR_TRAVEL_MAP_BUILDX_BUILDER:-kor-travel-map-builder}"
