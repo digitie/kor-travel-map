@@ -27,25 +27,14 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 __all__ = [
-    "CuratedFeature",
-    "CuratedFeaturePage",
     "CuratedSource",
     "CuratedSourceRule",
     "CuratedTheme",
-    "CuratedFeatureDetailItem",
-    "CuratedFeatureDetailSnapshot",
-    "archive_curated_feature",
-    "create_curated_feature",
     "create_curated_source_rule_command",
-    "get_curated_feature",
-    "get_curated_feature_detail_snapshot",
     "get_curated_source_rule",
-    "list_curated_features",
     "list_curated_source_rules",
     "list_curated_sources",
     "list_curated_themes",
-    "set_curated_feature_status",
-    "update_curated_feature",
     "patch_curated_source_rule_command",
     "archive_curated_source_rule_command",
 ]
