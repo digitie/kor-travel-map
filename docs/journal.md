@@ -2,6 +2,41 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-19 — C7 live `ops-c7-read-auth` 첫 테스트 실패 2건 수정
+
+러너 증거가 redact라 세부가 없어서, attestation의 executor 이미지로 컨테이너를 직접 띄워
+(orchestrator 우회 — BLOCKED.json 없음) 그 spec만 `--max-failures=1`로 돌려 비-redact 오류를 얻었다.
+두 실패는 서로 다른 커밋에서 왔고 한쪽만 프론트 회귀였다.
+
+- **실패 1 (계약 노후 — 프론트 무관)**: live 스펙이 grid row마다 `provider_issues.open_count`를
+  요구했는데 prod 응답 67/67 행에 그 키가 없다. `9bbb74d9`(ADR-088 · #966)가 provider dataset
+  identity를 triple로 바꾸면서 grid/detail 계약에서 provider 단위 이슈 축을 없앴고, 같은 커밋이
+  스펙의 딥링크 축·aria-label은 갱신했지만 이 검사는 놓쳤다(해당 줄은 스펙 최초 생성 `f4c8c16b`
+  이후 불변). 정본이 API·OpenAPI·UI(`dataset-issues.ts`)이므로 **스펙을** 현행 계약으로 맞췄다 —
+  이슈 축은 `dataset_issues` 하나, 그리드 요약은 `provider_dataset_id` 단위 max dedupe 합.
+  UI 모듈을 import하지 않고 미러를 유지한 것은 그래야 UI가 UI를 검증하지 않기 때문이다.
+- **실패 2 (Hallmark 리디자인 #1003 회귀 — 프론트 수정)**: prod overview는
+  `operations_by_status={"done":6,"failed":2}`처럼 0건 버킷을 아예 빼고 온다(GROUP BY 집계 ·
+  OpenAPI에도 required 키 없음). 리디자인 전에는 `?? 0`으로 0을 그렸는데 KpiCard → StatStrip
+  전환(`da2c740a`)에서 그 coalesce가 빠져 `—`가 떴다(단위 `건`도 함께 사라진다). 응답이 온 뒤의
+  키 부재는 **알려진 0**이므로 `operationCount()` 한 곳으로 읽기를 좁혀 0을 돌려주고, `—`는 응답
+  자체가 없는 로딩·에러에만 남긴다(M36 유지). 생성 타입의 index signature가 키 부재를 표현하지
+  못해(`noUncheckedIndexedAccess` 미사용) tsc가 못 잡은 자리다.
+- mock e2e(275)가 못 잡은 이유는 fixture 두 곳이 늘 다섯 축을 채워 빈 버킷 경로를 밟지 않아서다.
+  `makeOverview()`에 sparse 옵션을 열고 회귀 테스트를 추가했다(276).
+
+**재검증(prod 읽기 전용)**: 같은 harness로 스펙 수정본을 prod에 다시 돌렸다. datasets 구간
+(row 계약 · 요약 "이슈" 카운트 · 딥링크 · 상세 · invalid scope)이 전부 통과하고 실패가
+`expectKpiValue("실행 대기")` 하나로 좁혀졌다 — prod가 아직 수정 전 번들을 서빙하므로 예상된
+결과다. 그 두 단언만 진단 사본에서 비활성화하니 test #1이 **완전히 통과**(2 passed)했다. 즉
+프론트 수정의 live 확인은 Map prod 재배포 이후에 완결된다. 두 실행 모두 실행 전후 잔여 0
+(POI target 0, update_request 5상태 전부 0)이고 write 단계에는 도달하지 않았다. strict runner는
+실행하지 않았고 audit rc=0 · BLOCKED 없음.
+
+n150 게이트: tsc(src/e2e/tooling) · eslint · vitest 324 · react-doctor · 금지패턴 0 · next build,
+mocked e2e **276 passed**.
+
+
 ## 2026-08-19 — T-VN-H46G buildx source revision 결박
 
 `scripts/docker-buildx.sh`가 exact HEAD를 frontend에만 넘기고 API·Dagster web·daemon에는

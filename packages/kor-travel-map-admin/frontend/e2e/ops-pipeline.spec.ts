@@ -463,6 +463,8 @@ function makeOverview(options: {
   queueSensorPresent?: boolean;
   includeOtherSensor?: boolean;
   dagsterStatus?: "ok" | "unavailable" | "error";
+  /** sparse map을 그대로 흘려보낸다 — 기본값은 다섯 축이 다 찬 응답이다. */
+  operationsByStatus?: Record<string, number>;
 }): PipelineOverviewResponse {
   const dagsterStatus = options.dagsterStatus ?? "ok";
   const sensors = [];
@@ -498,7 +500,12 @@ function makeOverview(options: {
         sensors,
         errors: dagsterStatus === "ok" ? [] : ["dagster down"],
       },
-      operations_by_status: { queued: 2, running: 1, done: 7, failed: 3 },
+      operations_by_status: options.operationsByStatus ?? {
+        queued: 2,
+        running: 1,
+        done: 7,
+        failed: 3,
+      },
       active_operations: 3,
       failed_operations_24h: 3,
     },
@@ -1796,6 +1803,28 @@ test.describe("/ops/pipeline", () => {
     );
     await expect(runDetail).toBeVisible();
     await expect(runDetail).toContainText("STEP_FAILURE: kma fetch timeout");
+  });
+
+  // 회귀 잠금: `operations_by_status`는 GROUP BY 집계라 **0건 버킷이 응답에서 빠진다**
+  // (OpenAPI에도 required 키가 없다). 응답이 온 뒤의 키 부재는 알려진 0이지 미지값이 아니므로
+  // `—`가 아니라 `0 건`으로 그려야 한다 — 빈 큐가 `—`로 보이면 "집계를 못 읽었다"로 읽힌다.
+  // 다른 mock은 늘 다섯 축을 채워서 이 경로를 밟지 않았고, 실제 prod overview가 `{done, failed}`만
+  // 돌려줘 C7 live 스펙에서만 깨졌다(#1003 리디자인이 `?? 0`을 떨어뜨린 회귀).
+  test("빈 상태 버킷은 미지값이 아니라 0으로 표시한다", async ({ page }) => {
+    await installPipelineMocks(page, {
+      overview: makeOverview({ operationsByStatus: { done: 6, failed: 2 } }),
+    });
+    await page.goto("/ops/pipeline");
+
+    const strip = page.getByRole("region", { name: "파이프라인 상태 스트립" });
+    for (const label of ["실행 대기", "실행중"]) {
+      const item = strip.locator("dt").filter({ hasText: label }).locator("..");
+      await expect(item.getByText("0", { exact: true })).toHaveCount(1);
+      // "—"는 NULL_GLYPH(src/lib/format.ts) — 미지값 표기가 남아 있으면 안 된다.
+      await expect(item.getByText("—", { exact: true })).toHaveCount(0);
+      // 값이 있으면 단위도 같이 보인다(design.md §Copy — 값이 없을 때만 단위가 사라진다).
+      await expect(item.getByText("건", { exact: true })).toHaveCount(1);
+    }
   });
 
   test("큐 sensor 중지 시 destructive alert", async ({ page }) => {

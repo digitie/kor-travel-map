@@ -897,7 +897,9 @@ provider/dataset identity를 기준으로 처리한다.
   전역 `GET /v1/ops/pipeline/events`도 `provider`·`dataset_key`와 함께 `sync_scope`를 받으며
   응답 event에 nullable `sync_scope`를 싣는다. 0057부터 이 값은 event payload나 runtime JOIN이
   아니라 `ops.import_job_events.sync_scope` typed 열과 partial index로 조회한다.
-- integrity issue는 `dataset_issues`와 `provider_issues`를 섞지 않고 따로 반환한다.
+- integrity issue는 grid row·상세 모두 `dataset_issues` 한 축으로 반환한다. ADR-088(#966)이
+  provider dataset identity를 triple로 바꾸면서 provider 단위 `provider_issues` 축을 계약에서
+  없앴다 — issue는 provider가 아니라 provider dataset에 달린다.
 - 카탈로그에서 제거됐지만 sync state/policy가 남은 row는 `catalog_state=orphan`,
   `mutable=false`이며 정책 mutation은 `409 ORPHAN_MUTATION_DISABLED`와
   `details.mutation_disabled_reason`으로 거부한다.

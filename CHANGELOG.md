@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### 파이프라인 상태 스트립의 빈 버킷 표기 (2026-08-19, T-VN-40 인수 ③)
+
+- **FIXED**: `/ops/pipeline` 상태 스트립이 `operations_by_status`에 없는 상태 버킷을 `—`로
+  그리던 회귀를 닫았다. 이 필드는 GROUP BY 집계라 0건 버킷이 응답에서 빠지는 sparse map이므로
+  키 부재는 알려진 0이다. 빈 큐가 `—`로 보이면 "집계를 못 읽었다"로 읽혀 없는 장애를 조사하게
+  된다. 미지값 `—`는 응답 자체가 없는 로딩·에러에만 남긴다(M36 가짜 0 금지는 그대로).
+- **TEST**: mocked E2E fixture가 늘 다섯 축을 채워 이 경로를 밟지 않았다. sparse 응답을 흘려보내는
+  옵션과 빈 버킷이 `0 건`으로 그려지는지 잠그는 회귀 테스트를 추가했다.
+- **TEST(live)**: C7 live 스펙이 ADR-088(#966)에서 삭제된 `provider_issues` 축을 아직 검사하던
+  것을 현행 계약(`dataset_issues` 단일 축 · `provider_dataset_id` 단위 max dedupe)으로 맞췄다.
+  같은 삭제를 반영하지 않은 `docs/architecture/openapi-admin-contract.md`도 고쳤다.
+
+
 ### buildx runtime image source provenance (2026-08-19, T-VN-H46G)
 
 - **FIXED**: multi-platform buildx가 frontend에만 source revision을 전달해 API·Dagster

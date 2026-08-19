@@ -73,7 +73,6 @@ type LiveDatasetRow = {
   operationKey: string;
   provider: string;
   providerDatasetId: number;
-  providerOpenIssues: number;
   status: string;
   syncScope: string;
 };
@@ -786,8 +785,6 @@ function datasetRows(payload: unknown): LiveDatasetRow[] {
       typeof item.consecutive_failures !== "number" ||
       !isRecord(item.dataset_issues) ||
       typeof item.dataset_issues.open_count !== "number" ||
-      !isRecord(item.provider_issues) ||
-      typeof item.provider_issues.open_count !== "number" ||
       typeof item.status !== "string" ||
       !isRecord(item.freshness) ||
       typeof item.freshness.state !== "string" ||
@@ -806,7 +803,6 @@ function datasetRows(payload: unknown): LiveDatasetRow[] {
         typeof item.operation_key === "string" ? item.operation_key : "",
       provider: item.provider,
       providerDatasetId: item.provider_dataset_id,
-      providerOpenIssues: item.provider_issues.open_count,
       status: item.status,
       syncScope: item.sync_scope,
     };
@@ -873,33 +869,29 @@ async function expectDatasetSummary(
   }
 }
 
-/** UI의 dataset-issues.ts와 같은 provider+dataset/provider max dedupe 계약. */
+/**
+ * UI의 `src/app/ops/datasets/dataset-issues.ts`와 같은 계약을 **따로 구현한** 미러다(그 모듈을
+ * import하면 UI가 UI를 검증한다). 같은 provider dataset의 issue projection이 scope마다 반복되므로
+ * `provider_dataset_id` 단위로 한 번만(max) 센다.
+ *
+ * 행의 이슈 축은 `dataset_issues` 하나다 — ADR-088(#966)이 provider dataset identity를 triple로
+ * 바꾸면서 provider 단위 `provider_issues` 축을 grid/detail 계약에서 없앴다.
+ */
 function datasetGridOpenIssueCount(rows: readonly LiveDatasetRow[]): number {
-  const datasetCountsByProvider = new Map<string, Map<string, number>>();
-  const providerCounts = new Map<string, number>();
+  const countsByProviderDatasetId = new Map<number, number>();
   for (const row of rows) {
-    const datasetCounts =
-      datasetCountsByProvider.get(row.provider) ?? new Map<string, number>();
-    datasetCounts.set(
-      row.datasetKey,
-      Math.max(datasetCounts.get(row.datasetKey) ?? 0, row.datasetOpenIssues),
-    );
-    datasetCountsByProvider.set(row.provider, datasetCounts);
-    providerCounts.set(
-      row.provider,
-      Math.max(providerCounts.get(row.provider) ?? 0, row.providerOpenIssues),
+    countsByProviderDatasetId.set(
+      row.providerDatasetId,
+      Math.max(
+        countsByProviderDatasetId.get(row.providerDatasetId) ?? 0,
+        row.datasetOpenIssues,
+      ),
     );
   }
-  const datasetTotal = [...datasetCountsByProvider.values()].reduce(
-    (total, counts) =>
-      total + [...counts.values()].reduce((sum, count) => sum + count, 0),
+  return [...countsByProviderDatasetId.values()].reduce(
+    (total, count) => total + count,
     0,
   );
-  const providerTotal = [...providerCounts.values()].reduce(
-    (sum, count) => sum + count,
-    0,
-  );
-  return datasetTotal + providerTotal;
 }
 
 function sameDatasetRows(
@@ -914,7 +906,6 @@ function sameDatasetRows(
       row.catalogState,
       row.consecutiveFailures,
       row.datasetOpenIssues,
-      row.providerOpenIssues,
       row.freshnessState,
       row.status,
     ]);

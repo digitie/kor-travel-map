@@ -9,6 +9,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 import { opsLiveConnectionLabel, useOpsLiveInvalidation } from "@/api/live";
 import {
   type ExecutionKind,
+  type ExecutionStatus,
   type PipelineOverviewResponse,
   usePipelineOverview,
 } from "@/api/pipeline";
@@ -117,8 +118,33 @@ function sensorDisplayName(name: string): string {
 }
 
 /**
+ * 상태별 실행 수 — **키가 없으면 0건**이다.
+ *
+ * `operations_by_status`는 sparse map이다: 서버가 GROUP BY로 집계하므로 0건인 버킷은 응답에서
+ * 아예 빠지고, OpenAPI에도 required 키가 없다(`propertyNames` enum만 있는 additionalProperties).
+ * 그래서 키 부재는 "모름"이 아니라 "0건"이다 — 응답이 도착한 뒤에도 undefined로 흘리면 StatStrip이
+ * `—`를 그려 **실제 0을 미지값으로** 읽히게 만든다(M36의 반대 오류: 가짜 0이 금지인 만큼 가짜
+ * 미지값도 금지다. 빈 큐가 `—`로 보이면 "집계를 못 읽었다"는 뜻이 되어 운영자가 조사를 시작한다).
+ * 값을 정말 모르는 구간은 응답 자체가 없는 로딩·에러뿐이므로 그때만 undefined를 남긴다.
+ *
+ * 읽기를 이 함수 하나로 좁히는 이유: 생성 타입의 index signature(`{ [key: string]: number }`)는
+ * 키 부재를 표현하지 못해서(`noUncheckedIndexedAccess` 미사용) `byStatus.queued`가 타입상 `number`로
+ * 보이지만 런타임에는 undefined다 — 호출부에서 직접 읽으면 컴파일러가 막아 주지 않는다.
+ */
+function operationCount(
+  data: PipelineOverviewResponse["data"] | undefined,
+  status: ExecutionStatus,
+): number | undefined {
+  if (!data) {
+    return undefined;
+  }
+  return data.operations_by_status[status] ?? 0;
+}
+
+/**
  * 상태 스트립(design.md §Macrostructure dashboard · M37) — 아이콘 타일 KPI 대신 StatStrip 하나.
- * 값은 query가 resolve되기 전엔 `—`(M36 — 가짜 0 금지). Dagster 상태는 라벨 톤 dot + 라벨로,
+ * 값은 query가 resolve되기 전엔 `—`(M36 — 가짜 0 금지). 반대로 응답이 온 뒤 상태 버킷이 비어 있는
+ * 것은 알려진 0이다 — `operationCount()` 참고. Dagster 상태는 라벨 톤 dot + 라벨로,
  * run count·sensor는 caption 한 줄(배지 counter 금지, M22).
  */
 function OverviewStrip({
@@ -130,7 +156,6 @@ function OverviewStrip({
   const dagster = data?.dagster;
 
   const queueState = queueSensorState(overview.data);
-  const operationsByStatus = data?.operations_by_status ?? {};
   const loading = overview.isLoading || (overview.isError && !overview.data);
   const dagsterStatus = dagster?.status ?? "unknown";
   const runCounts = Object.entries(dagster?.run_counts ?? {});
@@ -192,14 +217,14 @@ function OverviewStrip({
           {
             key: "queued",
             label: statusLabel("queued"),
-            value: operationsByStatus.queued,
+            value: operationCount(data, "queued"),
             unit: "건",
             caption: "canonical root",
           },
           {
             key: "running",
             label: statusLabel("running"),
-            value: operationsByStatus.running,
+            value: operationCount(data, "running"),
             unit: "건",
             caption: "canonical root",
           },
