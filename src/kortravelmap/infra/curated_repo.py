@@ -22,7 +22,6 @@ from kortravelmap.infra.feature_projection import (
     typed_feature_detail_joins_sql,
 )
 from kortravelmap.infra.feature_repo import public_active_notice_filter_sql
-from kortravelmap.infra.legacy_write_fence import assert_legacy_write_allowed
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
