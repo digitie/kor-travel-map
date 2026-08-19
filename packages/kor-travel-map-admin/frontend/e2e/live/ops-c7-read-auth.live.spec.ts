@@ -47,6 +47,10 @@ const COUNT_STATE_TEST_TIMEOUT_MS = 90_000;
 const REFRESH_ATTEMPT_TIMEOUT_MS = 8_000;
 const REFRESH_ATTEMPTS = 3;
 const REJECTION_TEST_TIMEOUT_MS = 90_000;
+// 이 파일에서 명시 예산이 없던 마지막 테스트다. create/delete 각각 ops-live
+// dataset_projection 증적을 `READY`(20s) poll로 기다리므로 config 기본 30s로는
+// 두 번째 poll이 시작도 못 하고 상한에 닿는다.
+const PROJECTION_TEST_TIMEOUT_MS = 120_000;
 const TTL_TEST_TIMEOUT_MS = 150_000;
 const NATURAL_ROTATION_TEST_TIMEOUT_MS = 180_000;
 const IMMEDIATE_ROTATION_MAX_MS = 2_000;
@@ -329,6 +333,7 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
   test("외부 dataset_projection mutation은 열린 datasets 화면을 navigation/refresh 없이 갱신하고 복원한다", async ({
     page,
   }, testInfo) => {
+    test.setTimeout(PROJECTION_TEST_TIMEOUT_MS);
     const runId = randomUUID();
     const state = createCleanupState("invalidation", runId);
     const target = {
