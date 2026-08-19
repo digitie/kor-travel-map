@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -47,6 +49,8 @@ def test_buildx_runtime_images_receive_exact_git_revision(
     revision = "0123456789abcdef0123456789abcdef01234567"
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
+    temp_dir = tmp_path / "tmp"
+    temp_dir.mkdir()
     docker_log = tmp_path / "docker.log"
     git = fake_bin / "git"
     git.write_text(
@@ -73,6 +77,7 @@ def test_buildx_runtime_images_receive_exact_git_revision(
     monkeypatch.setenv("KOR_TRAVEL_MAP_ENV_FILE", str(env_file))
     monkeypatch.setenv("KOR_TRAVEL_MAP_BUILDX_OUTPUT", "docker")
     monkeypatch.setenv("KOR_TRAVEL_MAP_DOCKER_PLATFORMS", "linux/amd64")
+    monkeypatch.setenv("TMPDIR", str(temp_dir))
 
     subprocess.run(
         ["bash", "scripts/docker-buildx.sh"],
@@ -95,22 +100,19 @@ def test_buildx_runtime_images_receive_exact_git_revision(
             f"org.opencontainers.image.revision={revision}"
         ) == 1
 
-    api_build = next(line for line in image_builds if "/docker/api.Dockerfile" in line)
+    api_build = next(line for line in image_builds if "-f docker/api.Dockerfile" in line)
     frontend_build = next(
-        line for line in image_builds if "/docker/frontend.Dockerfile" in line
+        line for line in image_builds if "-f docker/frontend.Dockerfile" in line
     )
     dagster_build = next(
-        line for line in image_builds if "/docker/dagster.Dockerfile" in line
+        line for line in image_builds if "-f docker/dagster.Dockerfile" in line
     )
     assert "kor-travel-map-api" in api_build
     assert "kor-travel-map-admin" in frontend_build
     assert "kor-travel-map-dagster" in dagster_build
     assert "kor-travel-map-dagster-daemon" in dagster_build
-    build_contexts = {line.split()[-1] for line in image_builds}
-    assert len(build_contexts) == 1
-    build_context = Path(build_contexts.pop())
-    assert build_context != ROOT
-    assert not build_context.exists()
+    assert all(line.split()[-1] == "-" for line in image_builds)
+    assert list(temp_dir.iterdir()) == []
 
 
 @pytest.mark.unit
@@ -263,6 +265,117 @@ def test_buildx_oci_output_uses_one_archive_per_build_target(
         str(output_dir / f"frontend-{revision[:12]}.oci"),
         str(output_dir / f"dagster-{revision[:12]}.oci"),
     }
+
+
+@pytest.mark.unit
+def test_buildx_rejects_removed_single_oci_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    revision = "0123456789abcdef0123456789abcdef01234567"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    docker_log = tmp_path / "docker.log"
+    git = fake_bin / "git"
+    git.write_text(
+        "#!/usr/bin/env bash\n"
+        "case \"$*\" in\n"
+        f"  'rev-parse HEAD') printf '%s\\n' '{revision}' ;;\n"
+        "  'status --porcelain=v1 --untracked-files=all') : ;;\n"
+        f"  'archive --format=tar {revision}') "
+        "tar -cf - --files-from /dev/null ;;\n"
+        "  *) exit 64 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    git.chmod(0o755)
+    docker = fake_bin / "docker"
+    docker.write_text(
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >>"$DOCKER_LOG"\n',
+        encoding="utf-8",
+    )
+    docker.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake_bin}:{os.environ['PATH']}")
+    monkeypatch.setenv("DOCKER_LOG", str(docker_log))
+    monkeypatch.setenv("KOR_TRAVEL_MAP_ENV_FILE", str(tmp_path / "missing.env"))
+    monkeypatch.setenv("KOR_TRAVEL_MAP_BUILDX_OUTPUT", "oci")
+    monkeypatch.setenv("KOR_TRAVEL_MAP_BUILDX_OCI_PATH", str(tmp_path / "images.oci"))
+
+    result = subprocess.run(
+        ["bash", "scripts/docker-buildx.sh"],
+        cwd=ROOT,
+        env=os.environ.copy(),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert result.stderr == (
+        "KOR_TRAVEL_MAP_BUILDX_OCI_PATH was removed; "
+        "use KOR_TRAVEL_MAP_BUILDX_OCI_DIR\n"
+    )
+    assert not docker_log.exists()
+
+
+@pytest.mark.unit
+def test_buildx_cleans_partial_archive_when_materialization_is_terminated(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    revision = "0123456789abcdef0123456789abcdef01234567"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    temp_dir = tmp_path / "tmp"
+    temp_dir.mkdir()
+    docker_log = tmp_path / "docker.log"
+    git = fake_bin / "git"
+    git.write_text(
+        "#!/usr/bin/env bash\n"
+        "case \"$*\" in\n"
+        f"  'rev-parse HEAD') printf '%s\\n' '{revision}' ;;\n"
+        "  'status --porcelain=v1 --untracked-files=all') : ;;\n"
+        f"  'archive --format=tar {revision}') "
+        "while :; do printf x; for ((i=0; i<10000; i++)); do :; done; done ;;\n"
+        "  *) exit 64 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    git.chmod(0o755)
+    docker = fake_bin / "docker"
+    docker.write_text(
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >>"$DOCKER_LOG"\n',
+        encoding="utf-8",
+    )
+    docker.chmod(0o755)
+    env = os.environ.copy()
+    env["PATH"] = f"{fake_bin}:{env['PATH']}"
+    env["DOCKER_LOG"] = str(docker_log)
+    env["KOR_TRAVEL_MAP_ENV_FILE"] = str(tmp_path / "missing.env")
+    env["TMPDIR"] = str(temp_dir)
+
+    process = subprocess.Popen(
+        ["bash", "scripts/docker-buildx.sh"],
+        cwd=ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    deadline = time.monotonic() + 5
+    while not any(
+        path.stat().st_size > 0
+        for path in temp_dir.glob("kor-travel-map-buildx.*.tar")
+    ):
+        assert time.monotonic() < deadline
+        time.sleep(0.01)
+    os.kill(process.pid, signal.SIGTERM)
+    stdout, stderr = process.communicate(timeout=5)
+
+    assert process.returncode == 143
+    assert stdout == ""
+    assert stderr == ""
+    assert list(temp_dir.iterdir()) == []
+    assert not docker_log.exists()
 
 
 @pytest.mark.unit

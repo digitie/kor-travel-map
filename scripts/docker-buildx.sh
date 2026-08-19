@@ -27,13 +27,31 @@ if [[ -n "$GIT_STATUS" ]]; then
 fi
 
 # 실제 Docker context는 worktree가 아니라 위에서 고정한 commit의 tracked bytes다.
-# ignored 파일 혼입과 세 순차 build 사이의 TOCTOU를 함께 차단한다.
-BUILD_CONTEXT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/kor-travel-map-buildx.XXXXXX")"
+# ignored 파일 혼입과 세 순차 build 사이의 TOCTOU를 함께 차단한다. directory에 풀지 않고
+# 단일 tar를 세 build의 stdin으로 재사용해 materialize 도중 취소와 writer의 cleanup 경합도 없앤다.
+BUILD_CONTEXT_ARCHIVE="$(mktemp "${TMPDIR:-/tmp}/kor-travel-map-buildx.XXXXXX.tar")"
+archive_pid=""
 cleanup() {
-  rm -rf -- "$BUILD_CONTEXT_DIR"
+  if [[ -n "$archive_pid" ]]; then
+    kill "$archive_pid" >/dev/null 2>&1 || true
+    wait "$archive_pid" >/dev/null 2>&1 || true
+    archive_pid=""
+  fi
+  rm -f -- "$BUILD_CONTEXT_ARCHIVE"
 }
 trap cleanup EXIT
-if ! git archive --format=tar "$GIT_REVISION" | tar -xf - -C "$BUILD_CONTEXT_DIR"; then
+trap 'exit 130' INT
+trap 'exit 143' TERM
+git archive --format=tar "$GIT_REVISION" >"$BUILD_CONTEXT_ARCHIVE" &
+archive_pid="$!"
+if wait "$archive_pid"; then
+  archive_status=0
+else
+  archive_status="$?"
+fi
+archive_pid=""
+trap - INT TERM
+if [[ "$archive_status" -ne 0 ]]; then
   echo "failed to materialize the exact Git revision build context" >&2
   exit 2
 fi
@@ -67,6 +85,10 @@ case "$OUTPUT" in
     output_args=(--load)
     ;;
   oci)
+    if [[ ${KOR_TRAVEL_MAP_BUILDX_OCI_PATH+x} == x ]]; then
+      echo "KOR_TRAVEL_MAP_BUILDX_OCI_PATH was removed; use KOR_TRAVEL_MAP_BUILDX_OCI_DIR" >&2
+      exit 2
+    fi
     OCI_OUTPUT_DIR="${KOR_TRAVEL_MAP_BUILDX_OCI_DIR:-dist/kor-travel-map-images-oci}"
     mkdir -p "$OCI_OUTPUT_DIR"
     ;;
@@ -124,13 +146,13 @@ build_one() {
   echo "Building ${images[*]} :$IMAGE_TAG for $PLATFORMS"
   docker buildx build \
     --platform "$PLATFORMS" \
-    -f "$BUILD_CONTEXT_DIR/$dockerfile" \
+    -f "$dockerfile" \
     "${tag_args[@]}" \
     "${build_output_args[@]}" \
     "$@" \
     --build-arg "KOR_TRAVEL_MAP_GIT_COMMIT=${GIT_REVISION}" \
     --label "org.opencontainers.image.revision=${GIT_REVISION}" \
-    "$BUILD_CONTEXT_DIR"
+    - <"$BUILD_CONTEXT_ARCHIVE"
 }
 
 ensure_builder

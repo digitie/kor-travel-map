@@ -585,7 +585,9 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
       buildx 검증을 추가했다. 전문 적대 리뷰 2명의 1차 finding(status 오류 fail-open, context
       TOCTOU·ignored 혼입, OCI archive 덮어쓰기)은 status 검증 fail-close, exact commit의
       `git archive` context, target별 OCI 파일로 보완했다. 기존 compatible-pair provenance
-      계약과 중복 정본을 만들지 않는다. 두 리뷰어 재심과 최종 CI가 남았다.
+      계약과 중복 정본을 만들지 않는다. 1차 재심의 구 OCI path silent-ignore와 archive 생성 중
+      취소 누수도 명시적 migration 오류와 signal-safe 단일 tar cleanup으로 보완했다. 두 리뷰어
+      최종 재심과 CI가 남았다.
 
 ### T-VN-H49 — 4분할 인스턴스 백업 주체 (docker-manager #177 추적)
 

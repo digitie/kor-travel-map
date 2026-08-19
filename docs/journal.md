@@ -14,9 +14,11 @@ image가 생길 때 다시 빠질 수 있어 쓰지 않았다.
 별도 build가 한 OCI 경로를 덮어쓰는 문제가 확인됐다. 상태 확인 실패와 dirty worktree는 builder
 mutation 전에 exit 2로 중단하고, exact commit의 tracked bytes를 한 번 `git archive`로 만든
 불변 context에서 세 build를 실행하도록 보완했다. OCI 출력도 API·admin·Dagster별 파일로
-분리했다. 배포 뒤 실제 container 검증은 ADR-076의 C6c/C7가 네 immutable image ID와 revision
+분리했다. 재심에서 확인된 구 `KOR_TRAVEL_MAP_BUILDX_OCI_PATH` silent-ignore는 명시적 migration
+오류로 바꾸고, archive 생성 중 TERM에는 writer를 종료·회수한 뒤 단일 임시 tar를 unlink하도록
+보완했다. 배포 뒤 실제 container 검증은 ADR-076의 C6c/C7가 네 immutable image ID와 revision
 label을 `map_source_revision`에 대조하는 기존 정본을 유지하며 새 manifest나 digest 정본은
-만들지 않는다. draft PR #1007에서 두 리뷰어의 재심과 전체 CI를 진행한다.
+만들지 않는다. draft PR #1007에서 두 리뷰어의 최종 재심과 전체 CI를 진행한다.
 
 ## 2026-08-19 — T-VN-40 인수 ② 완료: PinVi cutover 봉인 + canonical collection 59개 import
 

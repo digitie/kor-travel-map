@@ -176,6 +176,8 @@ KOR_TRAVEL_MAP_BUILDX_OUTPUT=docker \
 
 registry에 push하지 않고 OCI archive를 남길 때는 출력 디렉터리를 지정한다. API·admin·Dagster는
 서로 다른 파일로 생성되며 Dagster archive 하나가 web·daemon 두 tag를 함께 가진다.
+이전 단일 파일 변수 `KOR_TRAVEL_MAP_BUILDX_OCI_PATH`는 제거됐으며, 설정된 채로 실행하면
+예상 artifact를 잃지 않도록 migration 오류로 중단한다.
 
 ```bash
 KOR_TRAVEL_MAP_BUILDX_OUTPUT=oci \
