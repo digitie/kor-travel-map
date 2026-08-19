@@ -3,6 +3,26 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-08-19 — T-VN-H46G buildx image commit provenance 완료
+
+- [x] T-VN-H46G — **runtime image 입력·revision을 exact source commit에 결박**
+
+  API·admin·Dagster web·daemon의 공통 build 경계가 exact 40자 commit을 build arg와 OCI
+  `org.opencontainers.image.revision` label에 강제한다. 상태를 검증할 수 없거나 dirty인
+  worktree는 builder mutation 전에 거부하고, 실제 입력은 commit의 단일 `git archive` tar로
+  고정해 ignored 파일 혼입과 순차 build TOCTOU를 차단한다.
+
+  OCI 로컬 출력은 API·admin·Dagster별 archive로 분리하고, 제거된 단일 파일 env는 조용히
+  무시하지 않고 migration 오류를 낸다. archive 생성 중 INT/TERM에도 writer를 회수하고 임시
+  tar를 지운다. 새 provenance 정본은 만들지 않고 기존 C6c/C7의 네 role image ID·revision →
+  `map_source_revision` 비교를 그대로 쓴다.
+
+  전문 적대 리뷰어 2명은 exact head `84349b4c`에 P0~P3 잔여 없이 GO했다. 실제 32.7 MB
+  tar-stdin BuildKit 3종과 Dagster web·daemon 동일 OCI digest, signal·실패 cleanup을 독립
+  재현했다. 로컬 root unit 2,300개, focused 15개, 인접 C7 포함 독립 95개, Ruff·strict mypy
+  3패키지·import-linter를 통과했다. 구현·완료 이관은 draft PR
+  [#1007](https://github.com/digitie/kor-travel-map/pull/1007)이 소유한다.
+
 ## 2026-08-19 — T-VN-H46F admin UI Geo 자격증명 경계 완료
 
 - [x] T-VN-H46F — **admin UI Geo proxy를 server-only 자격증명 경계로 결선**

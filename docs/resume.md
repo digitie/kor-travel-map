@@ -1,6 +1,6 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-08-19 — T-VN-H46G buildx provenance 구현, 리뷰 대기
+## 2026-08-19 — T-VN-H46G buildx provenance 구현·전문 리뷰 완료
 
 buildx 공통 경계에서 API·admin·Dagster web·daemon image 모두에 clean HEAD의 exact 40자 SHA를
 build arg와 OCI `org.opencontainers.image.revision` label로 강제했다. 전문 적대 리뷰어 2명이
@@ -8,12 +8,14 @@ build arg와 OCI `org.opencontainers.image.revision` label로 강제했다. 전�
 `git archive` context로 닫았다. 세 build가 같은 OCI 경로를 덮어쓰던 문제도 target별 archive로
 분리했다. 재심에서 나온 구 OCI 단일 경로 변수 silent-ignore와 archive 생성 중 취소 누수는
 각각 명시적 migration 오류와 signal-safe 단일 tar cleanup으로 닫았다. C6c/C7 runtime inspect
-정본은 그대로 유지한다. draft PR #1007의 두 리뷰어 최종 재심과 전체 CI가 남았다.
+정본은 그대로 유지한다. 두 전문 리뷰어는 exact head `84349b4c`에 P0~P3 잔여 없이 GO했다.
+로컬 root unit 2,300개, focused 15개, 실제 BuildKit tar-stdin 3종, Ruff·strict mypy 3패키지,
+import-linter를 통과했고 열린 H46G는 `tasks-done.md`로 이관했다.
 
 ### 다음 한 작업
 
-서로 다른 렌즈의 전문 리뷰어 2명이 보완 commit의 build context 정확성·OCI 출력·C7 runtime
-결박을 다시 검토한다. 전체 로컬 게이트와 GitHub CI까지 통과한 뒤 H46G를 완료 이관·병합한다.
+완료 이관 문서 commit의 GitHub CI 7개가 green인지 확인한 뒤 draft PR #1007을 ready로 바꾸고
+병합한다. H46G 범위 밖의 prod rebuild/deploy는 이 PR에서 실행하지 않는다.
 
 ## 2026-08-19 — T-VN-40 인수 ② 완료 (pair: Map `817cfeae` · PinVi `5cad141a`)
 
