@@ -774,18 +774,26 @@ print(hashlib.sha256(canonical.encode()).hexdigest())
 PY
 }
 
+# T-VN-40(0202~) 이후 API runtime LOGIN은 `public.alembic_version`을 읽지 못한다 - fence가
+# runtime role 권한을 exact catalog로 좁혔기 때문이다. 컨테이너의 기본 `KOR_TRAVEL_MAP_PG_DSN`이
+# 그 runtime DSN이므로 아무 것도 주지 않고 `alembic current`를 돌리면
+# `permission denied for table alembic_version`으로 실패한다(2026-08-19 prod 실측 - C7 게이트가 여기서 죽었다).
+#
+# entrypoint가 migration 구간에서 쓰는 것과 같은 조합으로 조회한다: migrator LOGIN +
+# schema owner role 활성화. migrator LOGIN만으로는 부족하다 - `alembic_version`은 schema owner 소유다.
+# 두 값 모두 컨테이너 env 안에 이미 있으므로 secret이 host argv/로그로 새지 않는다.
+_ALEMBIC_INTROSPECTION_ENV='KOR_TRAVEL_MAP_PG_DSN="${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?}" KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE=true'
+
+alembic_in_container() {
+  docker compose --project-directory "$COMPOSE_PROJECT_DIR" exec -T \
+    "$E2E_C7_MAP_API_SERVICE" sh -c "$_ALEMBIC_INTROSPECTION_ENV $1"
+}
+
 verify_alembic_state() {
   local current_output heads_output
-  heads_output="$(
-    docker compose --project-directory "$COMPOSE_PROJECT_DIR" exec -T \
-      "$E2E_C7_MAP_API_SERVICE" alembic heads 2>/dev/null
-  )" || return 1
-  current_output="$(
-    docker compose --project-directory "$COMPOSE_PROJECT_DIR" exec -T \
-      "$E2E_C7_MAP_API_SERVICE" alembic current 2>/dev/null
-  )" || return 1
-  docker compose --project-directory "$COMPOSE_PROJECT_DIR" exec -T \
-    "$E2E_C7_MAP_API_SERVICE" alembic check >/dev/null 2>&1 || return 1
+  heads_output="$(alembic_in_container 'alembic heads 2>/dev/null | tail -1')" || return 1
+  current_output="$(alembic_in_container 'alembic current 2>/dev/null | tail -1')" || return 1
+  alembic_in_container 'alembic check' >/dev/null 2>&1 || return 1
   python3 - "$heads_output" "$current_output" <<'PY'
 import re
 import sys
