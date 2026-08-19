@@ -32,12 +32,15 @@ OPS_FIXTURE_TOKEN = "fixture-token-00000000000000000000000000000"
 SERVICE_TOKEN = "service-token-0000000000000000000000000000"
 METRICS_TOKEN = "metrics-token-0000000000000000000000000000"
 CURSOR_SIGNING_SECRET = "cursor-signing-secret-000000000000000000000000"
+ADMIN_FEATURE_CREATE_TOKEN_SHA256 = "0" * 64
 
 _HERMETIC_ENV_VARS = (
     "KOR_TRAVEL_MAP_API_PROFILE",
     "KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED",
     "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED",
     "KOR_TRAVEL_MAP_API_ADMIN_ROUTES_ENABLED",
+    "KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED",
+    "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256",
     "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED",
     "KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED",
     "KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_ENABLED",
@@ -72,6 +75,7 @@ def _representative_settings(**overrides: object) -> ApiSettings:
         "prometheus_metrics_enabled": True,
         "public_api_key_required": True,
         "admin_proxy_secret": ADMIN_PROXY_SECRET,
+        "admin_feature_create_token_sha256": ADMIN_FEATURE_CREATE_TOKEN_SHA256,
         "ops_read_token": OPS_READ_TOKEN,
         "ops_cancel_token": OPS_CANCEL_TOKEN,
         "ops_fixture_token": OPS_FIXTURE_TOKEN,
@@ -316,6 +320,21 @@ def test_metrics_route_is_gated_by_metrics_token_dependency() -> None:
     rows = [row for row in matrix if row.policy is RoutePolicy.METRICS]
     assert [row.path for row in rows] == ["/metrics"]
     assert rows[0].observed_enforcement == ("require_metrics_token",)
+
+
+@pytest.mark.unit
+def test_manual_feature_create_route_observes_both_admin_enforcements() -> None:
+    matrix = build_route_policy_matrix(_representative_app())
+    row = next(
+        row
+        for row in matrix
+        if row.path == "/v1/admin/features" and "POST" in row.methods
+    )
+    assert row.policy is RoutePolicy.OPERATOR
+    assert set(row.observed_enforcement) == {
+        "require_admin_frontend",
+        "require_admin_manual_feature_create",
+    }
 
 
 @pytest.mark.unit

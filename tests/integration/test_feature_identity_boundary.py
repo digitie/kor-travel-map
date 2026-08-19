@@ -42,6 +42,7 @@ from kortravelmap.dto import (
 )
 from kortravelmap.infra import feature_identity, feature_repo
 from kortravelmap.infra.admin_feature_repo import (
+    AdminManualFeatureCreated,
     create_admin_feature_with_field_overrides,
 )
 
@@ -387,7 +388,6 @@ async def test_upsert_wires_sent_and_inserted_into_verification(
 async def test_admin_add_sql_writes_uuid_and_alias(
     migrated_session: AsyncSession,
 ) -> None:
-    feature_id = "f_1100000000_p_idboundary0005"
     # T-VN-34가 admin add를 raw INSERT에서 `feature.create_feature_with_initial_state`
     # 프로시저로 옮겼고, T-VN-36D가 그 호출자를 change-request apply(`_apply_change`)에서
     # `create_admin_feature_with_field_overrides`로 옮겼다. 검증하려는 불변식(writer가
@@ -403,7 +403,7 @@ async def test_admin_add_sql_writes_uuid_and_alias(
                         actor, operation, idempotency_key, fingerprint_version,
                         request_fingerprint
                     ) VALUES (
-                        'identity-boundary-test', 'admin.feature.create',
+                        'identity-boundary-test', 'admin.feature.create.manual-v1',
                         x_extension.gen_random_uuid(), 1, :fingerprint
                     )
                     RETURNING command_id
@@ -415,23 +415,21 @@ async def test_admin_add_sql_writes_uuid_and_alias(
     )
     created = await create_admin_feature_with_field_overrides(
         migrated_session,
-        feature_id=feature_id,
         payload={
             "kind": "place",
             "name": "admin add 장소",
             "category": "01070100",
+            "coord": {"lon": 126.9239, "lat": 37.5263},
             "marker_icon": "star",
             "marker_color": "P-03",
         },
-        lifecycle_state="active",
-        publication_state="published",
-        quality_state="valid",
         reason_code="user_request_add",
         operator="identity-boundary-test",
         command_id=command_id,
     )
-    assert created.feature_id == feature_id
-    assert created.feature_uuid is not None
+    assert isinstance(created, AdminManualFeatureCreated)
+    assert created.creation_origin == "manual_admin"
+    feature_id = created.feature_id
     # writer가 보낸 후보 == 저장값 (트리거가 바꿔치기하지 않는다).
     sent = _assert_nonderived_uuid_v7(created.feature_uuid, feature_id=feature_id)
     assert await _stored_feature_uuid(migrated_session, feature_id) == sent

@@ -118,7 +118,12 @@ def test_generic_domain_ledger_is_admin_bff_only() -> None:
         method, path = key
         assert method in _WRITE_METHODS
         if path.startswith("/v1/admin/"):
-            assert writes[key]["security"] == [{"AdminBFF": []}], key
+            expected_security = (
+                [{"AdminBFF": [], "AdminFeatureCreateBFF": []}]
+                if key == ("POST", "/v1/admin/features")
+                else [{"AdminBFF": []}]
+            )
+            assert writes[key]["security"] == expected_security, key
         else:
             assert path.startswith("/v1/service/")
             assert writes[key]["security"] == [{"ServiceToken": []}], key
@@ -224,6 +229,16 @@ def test_tvn40_canonical_collection_and_item_commands_are_serializable() -> None
     assert all(policy.transaction_isolation == "serializable" for policy in policies.values())
 
 
+def test_manual_feature_create_has_versioned_read_committed_terminal_contract() -> None:
+    policy = COMMAND_REGISTRY[("POST", "/v1/admin/features")]
+
+    assert policy.kind is CommandPolicyKind.DOMAIN_LEDGER
+    assert policy.operation == "admin.feature.create.manual-v1"
+    assert policy.success_status == 201
+    assert policy.replay_headers == ("ETag", "Location")
+    assert policy.transaction_isolation == "read-committed"
+
+
 def test_future_h22b_quarantine_command_cannot_bypass_domain_ledger() -> None:
     for key, operation in _openapi_writes().items():
         operation_id = str(operation.get("operationId", "")).lower()
@@ -273,7 +288,7 @@ def test_policy_requires_operation_only_for_ledger_kinds() -> None:
             reason="unsafe isolation",
             operation="admin.test",
             success_status=200,
-            transaction_isolation="read-committed",
+            transaction_isolation="repeatable-read",
         )
 
 

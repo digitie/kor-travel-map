@@ -955,9 +955,11 @@ proposed ADR-093에서 닫았고, exact checkpoint `2aa17c27`에 API·DB 전문 
 
 #### 후속 task
 
-- [ ] **T-VN-M01 — admin Feature 생성 API clean cutover** (결정 1). 이미 존재하는
+- [~] **T-VN-M01 — admin Feature 생성 API clean cutover** (결정 1, 구현 진행). 이미 존재하는
   `POST /v1/admin/features`를 서버 발급 UUIDv7, exact identity claim, `manual_admin` 단일 origin,
   고정 initial state와 admin BFF 전용 인증 경계로 교정한다. **ADR-093 필요**.
+  PR #1012 merge `ac77a7d1`을 base로 API/ORM foundation과 PinVi direct-create fail-close draft #458을
+  열었다. DB tranche는 T-VN-40C의 실제 `0225` 착지 뒤 `0226`으로만 잇는다.
 - [ ] **T-VN-M02 — origin 보존과 불변** (결정 4). origin/claim read model과 Feature 수정·purge,
   backup/restore에서의 불변을 스키마·테스트로 고정한다. `manual_pinvi`/`manual_curation` 값은 각
   인증 writer가 생기는 M04/M03 전에는 등록하지 않는다.

@@ -102,6 +102,24 @@ safety notice는 source semantics, KHOA coastal notice는 upstream 부재 결정
 
 이 문서 전용 PR을 원격에 열고 CI가 모두 green인지 확인한 뒤 병합하지 않고
 사용자 지시를 기다린다. 이 PR에 H45 코드 적응이나 C03 dataset 구현을 섞지 않는다.
+## 2026-08-19 — T-VN-M01 구현 진행: API/ORM foundation + PinVi fail-close
+
+M01을 PR #1012 merge `ac77a7d1` 위에서 시작했다. Map에는 생성 전용 이중 인증·기본 off flag,
+`admin.feature.create.manual-v1`, READ COMMITTED, caller identity/state 제거, UUIDv7 server identity,
+exact duplicate typed result, 201 UUID/ETag/Location/replay foundation과 claim/origin ORM을 구현 중이다.
+전문 리뷰 2인은 P0 0건으로 판정했고, 공통 P1인 DB 오류 422/409/500 분류와 raw 진단 비노출,
+trusted wrapper/receipt 불변 검증을 반영했다. API 경계의 local-dev 인증 우회 차단, 안정
+`errors[].field`, POST 전용 strict coord, literal replay bytes도 첫 checkpoint 테스트로 고정했다.
+
+PinVi paired draft PR [#458](https://github.com/digitie/pinvi/pull/458)은 direct `new_place` create를
+제거하고 queue 준비 전 503/pending fail-close를 고정했다(대상 테스트 127건, Ruff/mypy 통과).
+
+### 다음 한 작업
+
+첫 Map foundation checkpoint를 draft PR로 push한 뒤 Admin UI BFF/form을 같은 PR의 후속 commit으로 붙인다.
+실제 `0225` T-VN-40C migration이 main에 착지하기 전에는 `0226` DB/ACL/backup/vNext tranche를 만들지
+않는다. ADR-093 accepted 전환과 T-VN-M01 완료 이관은 그 migration 및 실제 PostgreSQL concurrency/restore
+검증 뒤에만 수행한다.
 
 ## 2026-08-19 — T-VN-M00 수동 Feature 생성 설계·전문 리뷰 완료
 

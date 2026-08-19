@@ -39,6 +39,7 @@ from starlette.routing import WebSocketRoute
 
 from kortravelmap.api.auth import (
     require_admin_frontend,
+    require_admin_manual_feature_create,
     require_cache_target_service_principal,
     require_curation_cutover_service_principal,
     require_curation_snapshot_service_principal,
@@ -92,6 +93,7 @@ _ENFORCEMENT_BY_CALLABLE: dict[Callable[..., Any], str] = {
     ),
     require_public_api_key: "require_public_api_key",
     require_service_token: "require_service_token",
+    require_admin_manual_feature_create: "require_admin_manual_feature_create",
     require_admin_frontend: "require_admin_frontend",
     require_ops_operator: "require_ops_operator",
     require_ops_fixture_principal: "require_ops_fixture_principal",
@@ -102,6 +104,7 @@ _ENFORCEMENT_BY_CALLABLE: dict[Callable[..., Any], str] = {
 
 _OPERATOR_ENFORCEMENTS = frozenset(
     {
+        "require_admin_manual_feature_create",
         "require_admin_frontend",
         "require_ops_operator",
         "authenticate_ops_live_websocket",

@@ -104,6 +104,8 @@ __all__ = [
     "Base",
     "FeatureRow",
     "FeatureStateTransitionRow",
+    "ManualFeatureIdentityClaimRow",
+    "FeatureCreationOriginRow",
     "FeatureAliasRow",
     "ProviderDatasetRow",
     "ProviderDatasetOperationRow",
@@ -584,6 +586,149 @@ class FeatureStateTransitionRow(Base):
     invoker_role: Mapped[str] = mapped_column(Text, nullable=False)
     state_procedure_definer: Mapped[str] = mapped_column(Text, nullable=False)
     audit_writer_definer: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+# =============================================================================
+# feature.manual_feature_identity_claims / feature.feature_creation_origins
+# (ADR-093 / T-VN-M01)
+# =============================================================================
+
+
+class ManualFeatureIdentityClaimRow(Base):
+    """수동 생성 exact identity 예약의 append-only snapshot.
+
+    ``feature_id``는 현행 ``features.feature_uuid``와 T-VN-39 이후
+    ``features.feature_id``가 공유하는 canonical UUID다. hard purge 뒤에도 예약을
+    보존해야 하므로 ``feature.features`` FK는 의도적으로 두지 않는다.
+    """
+
+    __tablename__ = "manual_feature_identity_claims"
+    __table_args__ = (
+        CheckConstraint(
+            "feature_kind IN ('place','event')",
+            name=conv("ck_manual_feature_identity_claims_kind"),
+        ),
+        CheckConstraint(
+            "char_length(name_key) BETWEEN 1 AND 200 AND octet_length(name_key) <= 512",
+            name=conv("ck_manual_feature_identity_claims_name_key"),
+        ),
+        CheckConstraint(
+            "lon_e6 BETWEEN 124000000 AND 132000000",
+            name=conv("ck_manual_feature_identity_claims_lon_e6"),
+        ),
+        CheckConstraint(
+            "lat_e6 BETWEEN 33000000 AND 39500000",
+            name=conv("ck_manual_feature_identity_claims_lat_e6"),
+        ),
+        CheckConstraint(
+            "claim_basis IN ('manual_create','legacy_admin_route')",
+            name=conv("ck_manual_feature_identity_claims_basis"),
+        ),
+        UniqueConstraint(
+            "feature_kind",
+            "name_key",
+            "lon_e6",
+            "lat_e6",
+            name=conv("uq_manual_feature_identity_claims_exact"),
+        ),
+        UniqueConstraint(
+            "claimed_by_command_id",
+            name=conv("uq_manual_feature_identity_claims_command"),
+        ),
+        UniqueConstraint(
+            "feature_id",
+            "claimed_by_command_id",
+            name=conv("uq_manual_feature_identity_claims_feature_command"),
+        ),
+        ForeignKeyConstraint(
+            ["claimed_by_command_id"],
+            ["ops.domain_commands.command_id"],
+            name=conv("fk_manual_feature_identity_claims_command"),
+            ondelete="RESTRICT",
+        ),
+        {"schema": "feature"},
+    )
+
+    feature_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        nullable=False,
+    )
+    feature_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    name_key: Mapped[str] = mapped_column(Text(collation="C"), nullable=False)
+    lon_e6: Mapped[int] = mapped_column(Integer, nullable=False)
+    lat_e6: Mapped[int] = mapped_column(Integer, nullable=False)
+    claimed_by_command_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    claim_basis: Mapped[str] = mapped_column(Text, nullable=False)
+    claimed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+
+
+class FeatureCreationOriginRow(Base):
+    """검증된 Feature 생성 provenance의 append-only snapshot.
+
+    origin도 hard purge 뒤에 남아야 하므로 ``feature.features`` FK가 없다. 대신
+    복합 FK가 동일 command로 생성된 identity claim만 참조하도록 고정한다.
+    """
+
+    __tablename__ = "feature_creation_origins"
+    __table_args__ = (
+        CheckConstraint(
+            "origin_kind = 'manual_admin'",
+            name=conv("ck_feature_creation_origins_kind"),
+        ),
+        CheckConstraint(
+            "creator_principal_id = 'admin-ui-bff.manual-feature-create.v1'",
+            name=conv("ck_feature_creation_origins_principal"),
+        ),
+        CheckConstraint(
+            "btrim(created_by_actor) <> '' AND char_length(created_by_actor) <= 200",
+            name=conv("ck_feature_creation_origins_actor"),
+        ),
+        CheckConstraint(
+            "invoker_role = 'ktm_feature_api_runtime' "
+            "AND procedure_definer = 'ktm_manual_feature_procedure_owner'",
+            name=conv("ck_feature_creation_origins_roles"),
+        ),
+        UniqueConstraint(
+            "creation_command_id",
+            name=conv("uq_feature_creation_origins_command"),
+        ),
+        ForeignKeyConstraint(
+            ["creation_command_id"],
+            ["ops.domain_commands.command_id"],
+            name=conv("fk_feature_creation_origins_command"),
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["feature_id", "creation_command_id"],
+            [
+                "feature.manual_feature_identity_claims.feature_id",
+                "feature.manual_feature_identity_claims.claimed_by_command_id",
+            ],
+            name=conv("fk_feature_creation_origins_claim"),
+            ondelete="RESTRICT",
+        ),
+        {"schema": "feature"},
+    )
+
+    feature_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        nullable=False,
+    )
+    origin_kind: Mapped[str] = mapped_column(Text, nullable=False)
+    creation_command_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    creator_principal_id: Mapped[str] = mapped_column(Text, nullable=False)
+    created_by_actor: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+    invoker_role: Mapped[str] = mapped_column(Text, nullable=False)
+    procedure_definer: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 # =============================================================================

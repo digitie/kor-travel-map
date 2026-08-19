@@ -415,6 +415,10 @@ def idempotent_domain_command(
                             await session.execute(
                                 text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
                             )
+                        elif policy.transaction_isolation == "read-committed":
+                            await session.execute(
+                                text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
+                            )
                         token = _ACTIVE_DOMAIN_SESSION.set(session)
                         try:
                             command = await begin_domain_command(

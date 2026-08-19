@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -17,6 +18,7 @@ from pydantic import SecretStr, ValidationError
 from kortravelmap.api.app import create_app
 from kortravelmap.api.auth import (
     ADMIN_ACTOR_HEADER,
+    ADMIN_FEATURE_CREATE_TOKEN_HEADER,
     ADMIN_PROXY_SECRET_HEADER,
     OPS_ACTOR,
     OPS_FIXTURE_ACTOR,
@@ -24,8 +26,10 @@ from kortravelmap.api.auth import (
     OPS_TOKEN_HEADER,
     PUBLIC_API_KEY_HEADER,
     SERVICE_TOKEN_HEADER,
+    AdminProxyContext,
     require_admin_destructive_enabled,
     require_admin_frontend,
+    require_admin_manual_feature_create,
     require_ops_fixture_principal,
     require_ops_operator,
     require_service_token,
@@ -44,10 +48,18 @@ from kortravelmap.api.settings import ApiSettings
 OPS_READ_TOKEN = "read-token-00000000000000000000000000000000"
 OPS_CANCEL_TOKEN = "cancel-token-000000000000000000000000000000"
 OPS_FIXTURE_TOKEN = "fixture-token-00000000000000000000000000000"
+ADMIN_FEATURE_CREATE_TOKEN = "manual-feature-create-token-000000000000000000"
+ADMIN_FEATURE_CREATE_TOKEN_SHA256 = hashlib.sha256(
+    ADMIN_FEATURE_CREATE_TOKEN.encode("utf-8")
+).hexdigest()
+ADMIN_FEATURE_CREATE_PROXY_SECRET = (
+    "manual-feature-create-admin-proxy-secret-0000000000000000"
+)
 
 
 def _api_settings(**overrides: Any) -> ApiSettings:
     values: dict[str, Any] = {
+        "admin_feature_create_token_sha256": None,
         "admin_proxy_secret": None,
         "ops_cancel_token": None,
         "ops_fixture_token": None,
@@ -419,6 +431,80 @@ def test_admin_frontend_gate_keeps_local_dev_compat_when_secret_unset() -> None:
         headers={},
     )
     assert require_admin_frontend(request).actor == "local-dev"
+
+
+@pytest.mark.unit
+def test_admin_manual_feature_create_requires_flag_before_scope_token() -> None:
+    request = _request(
+        _api_settings(
+            admin_manual_feature_create_enabled=False,
+            admin_feature_create_token_sha256=ADMIN_FEATURE_CREATE_TOKEN_SHA256,
+        )
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        require_admin_manual_feature_create(
+            request,
+            AdminProxyContext(actor="admin:alice"),
+            token=ADMIN_FEATURE_CREATE_TOKEN,
+        )
+
+    assert excinfo.value.status_code == 503
+    assert excinfo.value.detail == {
+        "code": "MANUAL_FEATURE_CREATE_NOT_READY",
+        "message": "수동 Feature 생성 기능이 아직 준비되지 않았습니다.",
+        "details": {},
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("token", [None, "", "wrong-token"])
+def test_admin_manual_feature_create_requires_exact_scope_token(
+    token: str | None,
+) -> None:
+    request = _request(
+        _api_settings(
+            admin_manual_feature_create_enabled=True,
+            admin_feature_create_token_sha256=ADMIN_FEATURE_CREATE_TOKEN_SHA256,
+            admin_proxy_secret=ADMIN_FEATURE_CREATE_PROXY_SECRET,
+        )
+    )
+
+    with pytest.raises(HTTPException) as excinfo:
+        require_admin_manual_feature_create(
+            request,
+            AdminProxyContext(actor="admin:alice"),
+            token=token,
+        )
+
+    assert excinfo.value.status_code == 403
+    assert excinfo.value.detail == {
+        "code": "ADMIN_FEATURE_CREATE_SCOPE_REQUIRED",
+        "message": "수동 Feature 생성 권한이 없습니다.",
+        "details": {"required_scope": "admin:feature:create"},
+    }
+    assert ADMIN_FEATURE_CREATE_TOKEN not in str(excinfo.value.detail)
+
+
+@pytest.mark.unit
+def test_admin_manual_feature_create_returns_fixed_principal_and_scope() -> None:
+    request = _request(
+        _api_settings(
+            admin_manual_feature_create_enabled=True,
+            admin_feature_create_token_sha256=ADMIN_FEATURE_CREATE_TOKEN_SHA256,
+            admin_proxy_secret=ADMIN_FEATURE_CREATE_PROXY_SECRET,
+        )
+    )
+
+    context = require_admin_manual_feature_create(
+        request,
+        AdminProxyContext(actor="admin:alice"),
+        token=ADMIN_FEATURE_CREATE_TOKEN,
+    )
+
+    assert context.principal_id == "admin-ui-bff.manual-feature-create.v1"
+    assert context.actor == "admin:alice"
+    assert context.scopes == frozenset({"admin:feature:create"})
 
 
 @pytest.mark.unit
@@ -968,6 +1054,15 @@ def test_openapi_declares_exact_canonical_ops_security_contract() -> None:
         ),
         "in": "header",
         "name": ADMIN_PROXY_SECRET_HEADER,
+    }
+    assert schemes["AdminFeatureCreateBFF"] == {
+        "type": "apiKey",
+        "description": (
+            "trusted admin frontend BFF가 수동 Feature 생성 요청에만 주입하는 "
+            "server-only 전용 token. AdminBFF와 함께 검증한다."
+        ),
+        "in": "header",
+        "name": ADMIN_FEATURE_CREATE_TOKEN_HEADER,
     }
     assert schemes["OpsToken"] == {
         "type": "apiKey",

@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from sqlalchemy.exc import DBAPIError
 
 from kortravelmap.infra import admin_feature_repo as repo
 from kortravelmap.infra.merge_repo import MergeError, MergeOutcome
@@ -207,10 +208,19 @@ def test_create_override_payload_does_not_claim_omitted_subtype_defaults() -> No
 
 
 @pytest.mark.asyncio
-async def test_create_initial_payload_uses_typed_state_arguments(
+@pytest.mark.parametrize(
+    ("kind", "expected_feature_id"),
+    [
+        ("place", "f_global_p_9f9480adb6abef69"),
+        ("event", "f_global_e_a221cb848390f739"),
+    ],
+)
+async def test_create_initial_payload_uses_manual_wrapper_and_uuid_bridge(
     monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    expected_feature_id: str,
 ) -> None:
-    """review payload의 축은 state procedure JSON input으로 새지 않는다."""
+    """UUIDv7만으로 current opaque legacy bridge를 만들고 wrapper에 보낸다."""
 
     async def _write_subtype(_session: object, **_: Any) -> None:
         return None
@@ -224,10 +234,10 @@ async def test_create_initial_payload_uses_typed_state_arguments(
             feature_id=feature_id,
             row_revision=2,
             command_id=71,
-            applied_field_count=5,
+            applied_field_count=6,
         )
 
-    candidate_uuid = "00000000-0000-4000-8000-000000000101"
+    candidate_uuid = "0198d9f1-7a31-7e52-8ea8-cb2548d3a891"
     monkeypatch.setattr(repo, "candidate_feature_uuid", lambda: candidate_uuid)
     monkeypatch.setattr(repo, "write_subtype", _write_subtype)
     monkeypatch.setattr(repo, "author_admin_feature_field_overrides", _author)
@@ -236,48 +246,356 @@ async def test_create_initial_payload_uses_typed_state_arguments(
             _Result(
                 [
                     {
-                        "o_feature_id": "user:live-create",
+                        "o_outcome": "created",
+                        "o_feature_id": expected_feature_id,
                         "o_feature_uuid": candidate_uuid,
                         "o_row_revision": 1,
-                        "o_inserted": True,
+                        "o_existing_feature_uuid": None,
                     }
                 ]
             )
         ]
     )
 
-    await repo.create_admin_feature_with_field_overrides(
+    result = await repo.create_admin_feature_with_field_overrides(
         session,  # type: ignore[arg-type]
-        feature_id="user:live-create",
         payload={
-            "kind": "place",
+            "kind": kind,
             "name": "n150 생성",
             "category": "01070300",
             "coord": {"lon": 127.5, "lat": 36.5},
             "marker_icon": "marker",
             "marker_color": "P-02",
-            "lifecycle_state": "active",
-            "publication_state": "published",
-            "quality_state": "valid",
         },
-        lifecycle_state="active",
-        publication_state="published",
-        quality_state="valid",
         reason_code="tvn36-create",
         operator="admin:n150",
         command_id=71,
     )
 
     initial_payload = json.loads(session.calls[0]["params"]["feature_payload"])
-    assert {
-        "lifecycle_state",
-        "publication_state",
-        "quality_state",
-    }.isdisjoint(initial_payload)
+    assert isinstance(result, repo.AdminManualFeatureCreated)
+    assert result.feature_uuid == candidate_uuid
+    assert result.feature_id == expected_feature_id
+    assert session.calls[0]["params"]["domain_command_id"] == 71
+    assert "create_admin_manual_feature_with_initial_state" in session.calls[0][
+        "statement"
+    ]
+    assert initial_payload["feature_id"] == expected_feature_id
     assert initial_payload["feature_uuid"] == candidate_uuid
     assert initial_payload["lon"] == 127.5
     assert initial_payload["lat"] == 36.5
+    assert initial_payload["coord_precision_digits"] == 6
     assert "coord" not in initial_payload
+    assert result.applied_field_count == 6
+
+
+@pytest.mark.asyncio
+async def test_create_exact_duplicate_returns_winner_before_subtype(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate_uuid = "0198d9f1-7a31-7e52-8ea8-cb2548d3a891"
+    winner_uuid = "0198d9f2-7a31-7e52-8ea8-cb2548d3a892"
+    monkeypatch.setattr(repo, "candidate_feature_uuid", lambda: candidate_uuid)
+    subtype_calls: list[object] = []
+
+    async def _unexpected_subtype(*args: object, **_kwargs: object) -> None:
+        subtype_calls.extend(args)
+
+    monkeypatch.setattr(repo, "write_subtype", _unexpected_subtype)
+    session = _Session(
+        [
+            _Result(
+                [
+                    {
+                        "o_outcome": "exact_conflict",
+                        "o_feature_id": None,
+                        "o_feature_uuid": None,
+                        "o_row_revision": None,
+                        "o_existing_feature_uuid": winner_uuid,
+                    }
+                ]
+            )
+        ]
+    )
+
+    result = await repo.create_admin_feature_with_field_overrides(
+        session,  # type: ignore[arg-type]
+        payload={
+            "kind": "place",
+            "name": "동시 중복",
+            "category": "01070300",
+            "coord": {"lon": 127.5, "lat": 36.5},
+            "marker_icon": "marker",
+            "marker_color": "P-02",
+        },
+        reason_code="tvn-m01-create",
+        operator="admin:n150",
+        command_id=72,
+    )
+
+    assert result == repo.AdminManualFeatureExactDuplicate(
+        existing_feature_uuid=winner_uuid
+    )
+    assert subtype_calls == []
+
+
+def test_manual_create_db_error_mapper_is_allow_listed_and_does_not_leak_driver_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    driver_error = DBAPIError(
+        None,
+        None,
+        RuntimeError("private actor/token/payload"),
+        False,
+    )
+    attempted_uuid = "0198d9f1-7a31-7e52-8ea8-cb2548d3a891"
+
+    monkeypatch.setattr(
+        repo,
+        "_driver_constraint_identity",
+        lambda _error: ("23514", "ck_manual_feature_identity_coord_range"),
+    )
+    with pytest.raises(repo.AdminManualFeatureValidationError) as validation:
+        repo._raise_admin_manual_feature_create_procedure_error(
+            driver_error,
+            attempted_feature_uuid=attempted_uuid,
+        )
+    assert validation.value.field == "coord"
+    assert "private" not in str(validation.value)
+
+    monkeypatch.setattr(
+        repo,
+        "_driver_constraint_identity",
+        lambda _error: ("23505", "uq_features_feature_uuid"),
+    )
+    with pytest.raises(repo.AdminManualFeatureIdentityConflict) as identity:
+        repo._raise_admin_manual_feature_create_procedure_error(
+            driver_error,
+            attempted_feature_uuid=attempted_uuid,
+        )
+    assert identity.value.feature_uuid == attempted_uuid
+    assert "private" not in str(identity.value)
+
+    monkeypatch.setattr(
+        repo,
+        "_driver_constraint_identity",
+        lambda _error: ("23514", "ck_manual_feature_create_executor"),
+    )
+    with pytest.raises(DBAPIError) as unknown:
+        repo._raise_admin_manual_feature_create_procedure_error(
+            driver_error,
+            attempted_feature_uuid=attempted_uuid,
+        )
+    assert unknown.value is driver_error
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "wrapper_row",
+    [
+        {
+            "o_outcome": "exact_conflict",
+            "o_feature_id": "must-be-null",
+            "o_feature_uuid": None,
+            "o_row_revision": None,
+            "o_existing_feature_uuid": "0198d9f2-7a31-7e52-8ea8-cb2548d3a892",
+        },
+        {
+            "o_outcome": "exact_conflict",
+            "o_feature_id": None,
+            "o_feature_uuid": None,
+            "o_row_revision": None,
+            "o_existing_feature_uuid": None,
+        },
+        {
+            "o_outcome": "created",
+            "o_feature_id": "f_global_p_9f9480adb6abef69",
+            "o_feature_uuid": "0198d9f1-7a31-7e52-8ea8-cb2548d3a891",
+            "o_row_revision": 1,
+            "o_existing_feature_uuid": "0198d9f2-7a31-7e52-8ea8-cb2548d3a892",
+        },
+        {
+            "o_outcome": "created",
+            "o_feature_id": "f_global_p_9f9480adb6abef69",
+            "o_feature_uuid": "00000000-0000-4000-8000-000000000001",
+            "o_row_revision": 1,
+            "o_existing_feature_uuid": None,
+        },
+        {
+            "o_outcome": "created",
+            "o_feature_id": "f_global_p_9f9480adb6abef69",
+            "o_feature_uuid": "0198d9f1-7a31-7e52-8ea8-cb2548d3a891",
+            "o_row_revision": 0,
+            "o_existing_feature_uuid": None,
+        },
+        {
+            "o_outcome": "unexpected",
+            "o_feature_id": None,
+            "o_feature_uuid": None,
+            "o_row_revision": None,
+            "o_existing_feature_uuid": None,
+        },
+    ],
+)
+async def test_manual_create_rejects_malformed_wrapper_outcome(
+    monkeypatch: pytest.MonkeyPatch,
+    wrapper_row: dict[str, Any],
+) -> None:
+    monkeypatch.setattr(
+        repo,
+        "candidate_feature_uuid",
+        lambda: "0198d9f1-7a31-7e52-8ea8-cb2548d3a891",
+    )
+    session = _Session([_Result([wrapper_row])])
+
+    with pytest.raises(repo.AdminManualFeatureInvariantError):
+        await repo.create_admin_feature_with_field_overrides(
+            session,  # type: ignore[arg-type]
+            payload={
+                "kind": "place",
+                "name": "불변식 검증",
+                "category": "01070300",
+                "coord": {"lon": 127.5, "lat": 36.5},
+                "marker_icon": "marker",
+                "marker_color": "P-02",
+            },
+            reason_code="tvn-m01-create",
+            operator="admin:n150",
+            command_id=73,
+        )
+
+
+@pytest.mark.asyncio
+async def test_manual_create_rejects_non_uuid7_generator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        repo,
+        "candidate_feature_uuid",
+        lambda: "00000000-0000-4000-8000-000000000001",
+    )
+    session = _Session([])
+
+    with pytest.raises(repo.AdminManualFeatureInvariantError):
+        await repo.create_admin_feature_with_field_overrides(
+            session,  # type: ignore[arg-type]
+            payload={
+                "kind": "place",
+                "name": "generator fault",
+                "category": "01070300",
+                "coord": {"lon": 127.5, "lat": 36.5},
+                "marker_icon": "marker",
+                "marker_color": "P-02",
+            },
+            reason_code="tvn-m01-create",
+            operator="admin:n150",
+            command_id=74,
+        )
+    assert session.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("operator", "reason_code", "command_id", "expected_error", "expected_field"),
+    [
+        ("", "valid reason", 76, repo.AdminManualFeatureInvariantError, None),
+        ("admin:n150", "", 76, repo.AdminManualFeatureValidationError, "reason"),
+        ("admin:n150", "valid reason", 0, repo.AdminManualFeatureInvariantError, None),
+    ],
+)
+async def test_manual_create_separates_trusted_command_faults_from_request_validation(
+    operator: str,
+    reason_code: str,
+    command_id: int,
+    expected_error: type[Exception],
+    expected_field: str | None,
+) -> None:
+    session = _Session([])
+
+    with pytest.raises(expected_error) as raised:
+        await repo.create_admin_feature_with_field_overrides(
+            session,  # type: ignore[arg-type]
+            payload={
+                "kind": "place",
+                "name": "command boundary",
+                "category": "01070300",
+                "coord": {"lon": 127.5, "lat": 36.5},
+                "marker_icon": "marker",
+                "marker_color": "P-02",
+            },
+            reason_code=reason_code,
+            operator=operator,
+            command_id=command_id,
+        )
+    assert getattr(raised.value, "field", None) == expected_field
+    assert session.calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("receipt_override", "expected_message"),
+    [
+        ({"feature_id": "wrong"}, "causation"),
+        ({"command_id": 999}, "causation"),
+        ({"row_revision": 1}, "causation"),
+        ({"applied_field_count": 5}, "causation"),
+    ],
+)
+async def test_manual_create_rejects_mismatched_override_receipt(
+    monkeypatch: pytest.MonkeyPatch,
+    receipt_override: dict[str, Any],
+    expected_message: str,
+) -> None:
+    candidate_uuid = "0198d9f1-7a31-7e52-8ea8-cb2548d3a891"
+    feature_id = "f_global_p_9f9480adb6abef69"
+    monkeypatch.setattr(repo, "candidate_feature_uuid", lambda: candidate_uuid)
+
+    async def _write_subtype(_session: object, **_: Any) -> None:
+        return None
+
+    async def _author(_session: object, _feature_id: str, **_: Any) -> Any:
+        receipt = {
+            "feature_id": feature_id,
+            "row_revision": 2,
+            "command_id": 75,
+            "applied_field_count": 6,
+        }
+        receipt.update(receipt_override)
+        return repo.FeatureFieldOverrideCommand(**receipt)
+
+    monkeypatch.setattr(repo, "write_subtype", _write_subtype)
+    monkeypatch.setattr(repo, "author_admin_feature_field_overrides", _author)
+    session = _Session(
+        [
+            _Result(
+                [
+                    {
+                        "o_outcome": "created",
+                        "o_feature_id": feature_id,
+                        "o_feature_uuid": candidate_uuid,
+                        "o_row_revision": 1,
+                        "o_existing_feature_uuid": None,
+                    }
+                ]
+            )
+        ]
+    )
+
+    with pytest.raises(repo.AdminManualFeatureInvariantError, match=expected_message):
+        await repo.create_admin_feature_with_field_overrides(
+            session,  # type: ignore[arg-type]
+            payload={
+                "kind": "place",
+                "name": "receipt 검증",
+                "category": "01070300",
+                "coord": {"lon": 127.5, "lat": 36.5},
+                "marker_icon": "marker",
+                "marker_color": "P-02",
+            },
+            reason_code="tvn-m01-create",
+            operator="admin:n150",
+            command_id=75,
+        )
 
 
 @pytest.mark.asyncio

@@ -76,7 +76,11 @@ class CommandPolicy:
                     "unsupported fingerprint headers: "
                     f"{sorted(unsupported_fingerprint_headers)}"
                 )
-            if self.transaction_isolation not in {None, "serializable"}:
+            if self.transaction_isolation not in {
+                None,
+                "read-committed",
+                "serializable",
+            }:
                 raise ValueError(
                     "unsupported domain transaction isolation: "
                     f"{self.transaction_isolation}"
@@ -162,9 +166,11 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
     # field override로 통일된 것과 무관하게 이름은 라우트별로 갈라 둔다
     # (admin UI의 idempotency slot 이름도 이 이름을 그대로 쓴다).
     ("POST", "/v1/admin/features"): _domain(
-        "admin.feature.create",
+        "admin.feature.create.manual-v1",
         _MUTATION_RESULT,
-        replay_headers=("ETag",),
+        success_status=201,
+        replay_headers=("ETag", "Location"),
+        transaction_isolation="read-committed",
     ),
     ("POST", "/v1/admin/features/{feature_id}/field-overrides"): _domain(
         "admin.feature.override.author",
