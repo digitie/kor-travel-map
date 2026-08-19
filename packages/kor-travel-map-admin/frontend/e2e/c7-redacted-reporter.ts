@@ -16,6 +16,24 @@ type RedactedResult = {
   status: string;
 };
 
+/** evidence로 통과시킬 진단 attachment 이름. */
+const DIAGNOSTIC_ATTACHMENT_NAME = /^[a-z0-9 -]{1,60}-refresh-attempts$/;
+/** 통과시킬 **줄 모양**. 이 모양 밖은 버린다 — redaction은 생산자를 믿지 않는다.
+ *  `#0 aria-disabled=null response=200` 형태만 남으므로 URL·ID·단언값이 실릴 수 없다. */
+const DIAGNOSTIC_LINE = /^#\d{1,2} aria-disabled=(?:null|true|false) response=(?:none|\d{3})$/;
+const DIAGNOSTIC_LINE_LIMIT = 8;
+
+/** attachment 본문에서 위 모양의 줄만 추린다. 하나도 없으면 아무것도 남기지 않는다. */
+function redactedDiagnosticLines(body: Buffer | undefined): string[] {
+  if (body === undefined) return [];
+  return body
+    .toString("utf8")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => DIAGNOSTIC_LINE.test(line))
+    .slice(0, DIAGNOSTIC_LINE_LIMIT);
+}
+
 type ReporterOptions = {
   outputFolder: string;
 };
@@ -37,6 +55,11 @@ function escapeXml(value: string): string {
 export default class C7RedactedReporter implements Reporter {
   readonly #outputFolder: string;
   readonly #results: RedactedResult[] = [];
+  readonly #diagnostics: {
+    lines: string[];
+    name: string;
+    sequence: number;
+  }[] = [];
   #total = 0;
 
   constructor(options: ReporterOptions) {
@@ -54,6 +77,24 @@ export default class C7RedactedReporter implements Reporter {
       spec: path.basename(test.location.file),
       status: result.status,
     });
+    // 이름·MIME·줄 모양 셋을 모두 만족하는 진단만 통과시킨다. 이것이 없으면 C7
+    // 실행에서 "새로고침이 몇 번 만에 응답을 봤는가"를 사후에 읽을 방법이 없다 —
+    // redacted 실행은 `outputDir`도 컨테이너 tmpfs라 artifact가 남지 않는다.
+    for (const attachment of result.attachments) {
+      if (
+        !DIAGNOSTIC_ATTACHMENT_NAME.test(attachment.name) ||
+        attachment.contentType !== "text/plain"
+      ) {
+        continue;
+      }
+      const lines = redactedDiagnosticLines(attachment.body);
+      if (lines.length === 0) continue;
+      this.#diagnostics.push({
+        name: attachment.name,
+        lines,
+        sequence: this.#results.length,
+      });
+    }
   }
 
   onEnd(fullResult: FullResult): void {
@@ -69,6 +110,9 @@ export default class C7RedactedReporter implements Reporter {
       testsObserved: this.#results.length,
       testsPlanned: this.#total,
       version: 1,
+      ...(this.#diagnostics.length > 0
+        ? { diagnostics: this.#diagnostics }
+        : {}),
     };
     const jsonPath = path.join(this.#outputFolder, "c7-summary.json");
     fs.writeFileSync(jsonPath, `${JSON.stringify(summary)}\n`, {

@@ -50,7 +50,7 @@ const COUNT_STATE_TEST_TIMEOUT_MS = 180_000;
 // `actionTimeout` 60s) **이상**이어야 한다. 짧게 잡으면 진행 중(aria-disabled) 버튼을
 // 기다리는 동안 응답 창이 먼저 만료돼, 그 클릭이 낸 응답을 아무도 보지 못한다.
 // 같은 규약이 `_ops-c7-admin-api.ts`의 `DATASET_DETAIL_FETCH_TIMEOUT_MS`와
-// `ops-c7-kma-empty-write.live.spec.ts:88-93`(리뷰 승인된 선례)에 이미 있다.
+// `ops-c7-kma-empty-write.live.spec.ts:50-56`(리뷰 승인된 선례)에 이미 있다.
 const REFRESH_RESPONSE_TIMEOUT_MS = 60_000;
 const REFRESH_ATTEMPTS = 2;
 const REJECTION_TEST_TIMEOUT_MS = 90_000;
@@ -365,14 +365,20 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
       name: "새로고침",
       exact: true,
     });
-    const baselineResponse = await refreshUntilResponse(
-      page,
-      refreshButton,
-      isDatasetsGridResponse,
-      "dataset projection baseline",
+    const baselineRows = await test.step(
+      "dataset projection baseline 요약",
+      async () => {
+        const baselineResponse = await refreshUntilResponse(
+          page,
+          refreshButton,
+          isDatasetsGridResponse,
+          "dataset projection baseline",
+        );
+        const rows = datasetRows(await baselineResponse.json());
+        await expectDatasetSummary(page, rows);
+        return rows;
+      },
     );
-    const baselineRows = datasetRows(await baselineResponse.json());
-    await expectDatasetSummary(page, baselineRows);
     const baselineEvidence = latestDatasetProjectionEvidence(
       await observedAppSockets(page),
     );
