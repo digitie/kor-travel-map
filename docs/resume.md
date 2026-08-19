@@ -76,6 +76,23 @@ T-VN-M01을 별도 구현 작업으로 연다. migration/API/admin UI/OpenAPI/Pi
 freeze를 설계 보고서의 단일 cutover 순서로 구현하고, ADR-093의 accepted 전환은 그 구현·계약 검증과
 함께 한다. 이 M00 PR에는 M01 코드를 섞지 않는다.
 
+## 2026-08-20 — T-VN-40 인수 ③ 완료, receipt 봉인 (pair: Map `f00e7f48` · PinVi `5cad141a`)
+
+C7 prod live가 `f00e7f48`에서 `RESULT: GREEN`(6 spec 17 case, orchestrator_verified,
+BLOCKED 없음, 실행 뒤 audit rc=0)으로 끝났고, T-VN-40 receipt를 `complete`로 봉인했다.
+
+### 다음 한 작업
+
+⑤ **T-VN-40C 물리 삭제**. 선행조건 P1(receipt complete)이 이제 참이다. manifest
+`contracts/vnext/t-vn-40c-removal-manifest-v1.json`(예약 revision `0225`)의 P2~P7을
+차례로 확인한 뒤 migration + 구현 PR을 낸다 — D1~D12 순서, 정적 zero gate, 그리고
+P7 lockstep(40C가 `openapi.user.json`을 바꾸므로 PinVi 재-vendor + 두 번째 paired
+receipt cycle이 같은 release에 묶인다).
+
+병행 가능한 것: T-VN-41 최종 C7 인수(receipt가 `candidate_verified`이고 candidate
+증적이 non-ancestor 커밋에 묶여 있다), 백로그 `T-C7-SCOPE-REGISTRY`(external_system
+선언 규약 정본화)·`T-C7-LIVE-SERIAL`(직렬 실행을 코드로 보장).
+
 ## 2026-08-19 — C7 인수 ③ 진행: 계약 드리프트 4건 + 하네스 경합 1건
 
 `025be0e6` → `db866351` → `dbba2ab6`로 prod를 올리며 strict runner를 돌렸고, 매번

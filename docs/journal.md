@@ -87,6 +87,37 @@ backfill, 전체 procedure owner ACL, 명시적 READ COMMITTED, 무조건 forwar
 artifact unit 11개, diff/redaction/비밀 가드를 통과했다. ADR-093은 proposed로 유지하고 M00은
 `tasks-done.md`로 이관했다. 다음 작업은 M01 clean cutover 구현이며 이 draft PR에는 섞지 않는다.
 
+## 2026-08-19 — C7 prod live 6-spec GREEN, T-VN-40 receipt 봉인
+
+`f00e7f48`에서 strict runner가 `RESULT: GREEN`으로 끝났다 — rc=0,
+`orchestrator_verified=true`, BLOCKED 없음, 6 spec 17 case 전부 passed
+(read-auth 7 · kma-active 2 · kma-cap 2 · kma-empty 2 · schedule 2 · poi-causal 2).
+실행 뒤 audit rc=0, runtime/journal 잔여 0.
+
+**여기까지 걷어낸 결함 7건.** 전부 "CI는 green인데 prod 실행에서만 죽는" 계급이었다.
+
+1. `provider_issues` 축 (#1010) — ADR-088이 지운 축을 스펙이 요구
+2. dialog 자유입력 → canonical select + `external_system:c7-e2e` 선언 (#1011)
+3. `matched_scope` 자연키 단언 (#1013) — 생산자가 strip하는 필드를 단언
+4. 삭제된 `/v1/ops/datasets/detail` 경로 대기 (#1013)
+5. refetch 취소 경합 + 부족한 테스트 예산 (#1015)
+6. 이월 cursor 가드가 runner 자기 순서를 막음 (#1018) — 내가 만든 결함
+7. raw enum 단언 (#1020) — 화면은 `design.md` §Copy대로 한글 라벨을 렌더
+
+**드러난 구조적 문제 셋.**
+- `assertOnlyKmaProviderObjects`가 `"provider" in record` 가드 때문에 **공허**해져
+  "KMA 외 provider 배제" 보장이 조용히 사라져 있었다.
+- `test_c7_prod_live_runner_contract`가 계약이 아니라 **소비자 쪽 문자열을 고정**해,
+  드리프트를 잡는 대신 stale 단언을 얼려두고 있었다.
+- 진단 attach가 redacted reporter에서 버려져 증적이 도달하지 못했다.
+
+셋 다 정본을 한쪽에 두는 방식으로 고쳤다 — canonical triple, 생산자 상수
+(`_NATURAL_IDENTITY_RESPONSE_KEYS`), fail-closed 화이트리스트, 공유 라벨 표.
+
+receipt는 `contracts/vnext/consumer-rollout-v1.json`의 T-VN-40을 `complete`로
+봉인했다(9키). pair는 Map `f00e7f48` · PinVi `5cad141a`이고 vendored user/service
+바이트가 Map 트리와 정확히 일치함을 확인했다.
+
 ## 2026-08-19 — C7 read-auth의 지점 없는 timeout: refetch 취소와 부족한 예산
 
 `dbba2ab6` strict runner에서 `ops-c7-read-auth` 첫 테스트가 지점 정보 없는 30s

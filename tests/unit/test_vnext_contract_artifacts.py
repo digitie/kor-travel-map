@@ -49,8 +49,10 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     "openapi-diff-v1.json": ("c029594cf4105bf33880b01274426c92ec64d784ae41e00ba4f912ad1497384b"),
     # 2026-08-13 T-VN-36 — receipt가 리베이스로 폐기된 커밋(c1fa5a4d)과 그때의
     # spec sha를 가리키고 있었다. 현재 head로 재핀했다.
+    # 2026-08-19 T-VN-40 ③ 완료 — C7 prod live 6-spec GREEN(f00e7f48) 뒤 receipt를
+    # complete로 봉인했다.
     "consumer-rollout-v1.json": (
-        "968bf7f5832817ec69858f80213ddd46cdac4e067eb3010214593a973acdefa9"
+        "2812e756200e4457ea76a04885b14fcc5620f549c2cefc3ca06ee41a486ed60e"
     ),
     # T-VN-41S service 계약 변경으로 active receipt가 pending으로 돌아가도, 이전
     # candidate archive·image·Live UI 증거 세트는 detached 이력으로 불변이어야 한다.
