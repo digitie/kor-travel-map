@@ -45,8 +45,10 @@ _EXPECTED_REVISIONS = (
     "0221_tvn40_snapshot_text_bounds",
     "0222_tvn40a_merge_runtime_role",
     "0223_tvn40_identity_mappings",
-    "0224_c7_acceptance_external_system_scope",
+    "0224_c7_external_system_scope",
 )
+#: `alembic_version.version_num`의 컬럼 폭(alembic 기본값).
+_ALEMBIC_VERSION_NUM_LENGTH = 32
 _LEGACY_ARCHIVE_SHA256 = (
     "ae65901c78ea1d38ef6f5b7a7e8532744656e73c79392251452680d35f461e42"
 )
@@ -231,6 +233,25 @@ def _literal(path: Path, name: str) -> str | tuple[str, ...] | None:
             assert value is None or isinstance(value, (str, tuple))
             return value
     raise AssertionError(f"{path}: {name} literal이 없다")
+
+
+def test_revision_identifiers_fit_alembic_version_column() -> None:
+    """revision id는 `alembic_version.version_num varchar(32)`에 들어가야 한다.
+
+    길면 migration이 **DB에 닿아서야** `StringDataRightTruncationError`로 죽는다 —
+    unit/ruff/mypy는 전부 green이고 integration(PostGIS 컨테이너)에서만 드러나므로
+    피드백이 가장 늦은 축이다. 실제로 `0224`가 40자로 들어왔다가 여기서 걸렸다.
+    """
+    too_long = {
+        revision: len(revision)
+        for revision in (
+            str(_literal(path, "revision")) for path in sorted(_ACTIVE.glob("[0-9]*.py"))
+        )
+        if len(revision) > _ALEMBIC_VERSION_NUM_LENGTH
+    }
+    assert not too_long, (
+        f"revision id가 varchar({_ALEMBIC_VERSION_NUM_LENGTH})를 넘는다: {too_long}"
+    )
 
 
 def test_active_graph_is_only_0200_bridge_to_0224() -> None:

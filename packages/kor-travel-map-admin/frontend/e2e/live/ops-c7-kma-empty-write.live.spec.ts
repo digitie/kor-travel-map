@@ -243,7 +243,7 @@ test.describe("C7 KMA empty exact scope destructive live E2E", () => {
   }, testInfo) => {
     requireBarrierGates(testInfo);
     test.setTimeout(TEST_TIMEOUT);
-    // 이름은 catalog 선언(`0224_c7_acceptance_external_system_scope`)과 같아야 한다 —
+    // 이름은 catalog 선언(`0224_c7_external_system_scope`)과 같아야 한다 —
     // run마다 만들면 선언되지 않은 scope라 preview/create가 422다. run 격리는
     // `target_key`가 맡는다.
     const externalSystem = C7_EXTERNAL_SYSTEM;

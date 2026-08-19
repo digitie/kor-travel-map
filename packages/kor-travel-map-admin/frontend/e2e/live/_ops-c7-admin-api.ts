@@ -127,7 +127,7 @@ export const EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX = "external_system:" as const;
  *  ADR-088 이후 제출 가능한 `sync_scope` 집합의 정본은 catalog 선언이다
  *  (`provider_dataset_operation_scopes`, API가 exact join으로 요구하고 exact FK 4종이
  *  구조로 강제한다). 그래서 run마다 이름을 새로 만들 수 없다 — 선언되지 않은 값은
- *  preview/create가 422다. 이름은 migration `0224_c7_acceptance_external_system_scope`가
+ *  preview/create가 422다. 이름은 migration `0224_c7_external_system_scope`가
  *  선언한 값과 같아야 하고, run 격리는 `target_key`가 맡는다.
  *
  *  이 scope를 쓰는 이유(= `target_grids`를 쓰지 않는 이유): `target_grids`는 "모든 활성

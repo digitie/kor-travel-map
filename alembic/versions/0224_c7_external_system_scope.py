@@ -1,6 +1,6 @@
 """C7 인수 — KMA 초단기실황에 `external_system:c7-e2e` refresh scope를 선언한다.
 
-Revision ID: 0224_c7_acceptance_external_system_scope
+Revision ID: 0224_c7_external_system_scope
 Revises: 0223_tvn40_identity_mappings
 
 왜 필요한가. ADR-088(#966) 이후 제출 가능한 `sync_scope` 집합의 정본은
@@ -37,7 +37,7 @@ from sqlalchemy import text
 
 from alembic import op
 
-revision: str = "0224_c7_acceptance_external_system_scope"
+revision: str = "0224_c7_external_system_scope"
 down_revision: str | Sequence[str] | None = "0223_tvn40_identity_mappings"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -137,7 +137,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     raise RuntimeError(
-        "0224_c7_acceptance_external_system_scope is forward-only; "
+        "0224_c7_external_system_scope is forward-only; "
         "카탈로그 선언을 되돌리면 이미 그 scope로 쌓인 provider_sync_state·request 행이 "
         "exact FK로 남아 삭제도 막힌다"
     )
