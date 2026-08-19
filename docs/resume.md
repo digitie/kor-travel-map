@@ -82,6 +82,10 @@ KHOA exact pin의 46개 ODMI catalog에는 공지 사건 API나 typed notice mod
 `T-VN-C05A`를 먼저 구현한다. 두 forest.go.kr ZIP의 live census로 geometry 유형·안정
 자연키·중복을 봉인한 뒤 route 변환, Dagster dataset operation, fixture와 통합 적재를 잇는다.
 
+fresh DB는 historical exact role graph 때문에 기존 bootstrap→`0225` upgrade→M01 bootstrap→
+`0226_m01_manual_feature_create`의 두 migration phase가 필요하다. production digest 상시 필수 정책을
+유지하므로 raw/UI와 digest/API credential도 flag=false runtime 배포 전에 secret store에 사전 provision한다.
+
 ## 2026-08-19 — tasks 전면 감사·H44 종결·C02/H18 폐기
 
 `tasks-rule.md`의 블록 단위 라우팅과 `origin/main`, 연결된 PR·이슈 상태를

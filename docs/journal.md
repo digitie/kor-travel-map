@@ -177,6 +177,13 @@ DB migration은 만들지 않았다. active head는 `0224_c7_external_system_sco
 예약했으므로, 실제 `0225`가 main에 착지한 뒤에만 M01을 `0226_tvn_m01_manual_feature_create`로 잇는다.
 `0226→0224` 임시 head나 byte-frozen `0200` baseline 수정은 금지한다.
 
+foundation 뒤 배포 역조사에서 설계의 두 drift를 추가로 찾았다. 긴 revision literal은 PostgreSQL의
+32자 `alembic_version` gate를 넘으므로 30자 ID로 줄였다. 또한 갱신 role membership을 fresh DB의
+0200/0202보다 먼저 bootstrap하면 historical exact graph 검사가 실패한다. 따라서 기존 graph로
+`0225`까지 upgrade한 뒤 M01 bootstrap을 재실행하고 `0226`을 적용하는 2단계 provisioning이 필수다.
+production digest 상시 필수 fail-close는 유지하며, UI raw/API digest를 flag=false 배포보다 먼저 secret
+store에서 provision하도록 설계 순서를 교정했다.
+
 ## 2026-08-19 — T-VN-M00 수동 Feature 생성 설계·전문 리뷰 완료
 
 T-VN-H34 잔여의 "없는 것은 Feature로 추가" 요구를 M lane으로 분리한 뒤, M01 구현 전에 닫아야 할
