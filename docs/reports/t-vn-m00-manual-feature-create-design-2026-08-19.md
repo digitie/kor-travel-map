@@ -1,6 +1,6 @@
 # T-VN-M00 — 수동 Feature 생성 2차 설계
 
-- 상태: draft — 전문 리뷰 2차 finding 반영, 동일 SHA 최종 재심 대기
+- 상태: draft — 전문 리뷰 3차 finding 반영, 동일 SHA 4차 재심 대기
 - 기준: `main` `025be0e638ba`
 - 관련: ADR-066, ADR-068, ADR-070, ADR-074, ADR-075, ADR-083, ADR-086,
   ADR-090, ADR-092, ADR-093(proposed)
@@ -401,13 +401,13 @@ transaction에서 직접 부르면 stable 25001로 거부되어 winner SELECT가
 
 | 열 | 계약 |
 |---|---|
-| `feature_id uuid` | PK. current `features.feature_uuid`, target `features.feature_id` 값 |
-| `feature_kind text` | `place|event` |
-| `name_key text COLLATE "C"` | §5.2 함수가 만든 생성 시점 snapshot |
-| `lon_e6 integer`, `lat_e6 integer` | §5.2 함수가 만든 대한민국 범위 좌표 |
+| `feature_id uuid` | PK·NOT NULL. current `features.feature_uuid`, target `features.feature_id` 값 |
+| `feature_kind text` | NOT NULL, `place|event` |
+| `name_key text COLLATE "C"` | NOT NULL, §5.2 함수가 만든 생성 시점 snapshot |
+| `lon_e6 integer`, `lat_e6 integer` | 둘 다 NOT NULL, §5.2 함수가 만든 대한민국 범위 좌표 |
 | `claimed_by_command_id bigint` | NOT NULL, `ops.domain_commands` FK |
-| `claim_basis text` | `manual_create|legacy_admin_route` |
-| `claimed_at timestamptz` | 신규는 DB 시각, legacy는 command `created_at` |
+| `claim_basis text` | NOT NULL, `manual_create|legacy_admin_route` |
+| `claimed_at timestamptz` | NOT NULL, 신규는 DB 시각, legacy는 command `created_at` |
 
 명시적 제약은 다음과 같다.
 
@@ -428,14 +428,14 @@ transaction에서 직접 부르면 stable 25001로 거부되어 winner SELECT가
 
 | 열 | 계약 |
 |---|---|
-| `feature_id uuid` | PK, claim과 composite FK |
-| `origin_kind text` | M01 DDL에서는 오직 `manual_admin` |
+| `feature_id uuid` | PK·NOT NULL, claim과 composite FK |
+| `origin_kind text` | NOT NULL, M01 DDL에서는 오직 `manual_admin` |
 | `creation_command_id bigint` | NOT NULL·unique, command FK |
-| `creator_principal_id text` | `admin-ui-bff.manual-feature-create.v1` 상수 |
-| `created_by_actor text` | locked domain-command actor에서 복사 |
-| `created_at timestamptz` | DB 시각 |
-| `invoker_role text` | `session_user` 감사 |
-| `procedure_definer text` | wrapper owner 감사 |
+| `creator_principal_id text` | NOT NULL, `admin-ui-bff.manual-feature-create.v1` 상수 |
+| `created_by_actor text` | NOT NULL, locked domain-command actor에서 복사 |
+| `created_at timestamptz` | NOT NULL, DB 시각 |
+| `invoker_role text` | NOT NULL, `session_user` 감사 |
+| `procedure_definer text` | NOT NULL, wrapper owner 감사 |
 
 명시적 제약은 다음과 같다.
 
@@ -451,6 +451,11 @@ transaction에서 직접 부르면 stable 25001로 거부되어 winner SELECT가
 
 origin이 claim과 다른 command를 가리키거나 dangling command를 가리키는 상태는 선언적으로
 불가능하다. M03/M04는 실제 auth/writer가 생기는 migration에서만 `origin_kind` CHECK를 확장한다.
+
+일반 CHECK와 UNIQUE가 NULL을 거부한다고 가정하지 않는다. 위 두 표의 모든 열은 current·target DDL
+모두 명시적 NOT NULL이며, `columns` fingerprint도 `nullable=false`를 고정한다. violation fixture는
+두 relation의 모든 필수 열(PK 포함)을 하나씩 NULL로 넣는 case를 전부 포함하고 각 INSERT가 23502로
+거부되는지 검증한다.
 
 두 relation에는 `feature.features` FK를 의도적으로 두지 않는다. 물리 purge 뒤에도 reservation과
 provenance를 보존하고 T-VN-39 때 재작성하지 않기 위해서다. 대신 M02 purge 계약이 완료될 때까지
@@ -720,7 +725,8 @@ CI reverse inventory는 CHECK·UNIQUE만 세지 않는다. current migration과 
 ### 10.1 migration 번호와 단계
 
 T-VN-40C가 `0224`를 예약했다. M01은 번호를 지금 선점하지 않고 main rebase 때 T-VN-41S와 조정해
-`0225+` 실제 head를 배정한다.
+`0225+` 실제 head를 배정한다. 새 노드는 실제 head에 잇는 forward-only migration이며
+`downgrade()`는 row count와 무관하게 DDL 없이 `RuntimeError`를 낸다.
 
 1. old route flag false와 PinVi paired receipt 확인
 2. 수정된 bootstrap을 먼저 실행해 NOLOGIN owner/executor와 schema ownership grant를 생성·검증
@@ -748,6 +754,12 @@ T-VN-40C가 `0224`를 예약했다. M01은 번호를 지금 선점하지 않고 
 빈 target DB와 실제 migration DB의 catalog를 각각 검증하되 §7.4의 의도된 text/UUID 차이를 직접
 catalog equality로 오판하지 않는다.
 
+이 target 계약 갱신은 squash baseline 갱신이 아니다. M01에서는
+`alembic/versions/0200_schema_baseline.py`, `alembic/baseline/schema.sql`,
+`alembic/baseline/seed.sql`과 baseline 내부 `_SCHEMA_SHA256`·`_SEED_SHA256`를 base와 byte 단위로
+같게 유지한다. 새 세대 fold/re-squash는 별도 결정과 `build-baseline`·catalog 동등성 증명 없이는 하지
+않는다.
+
 ### 10.3 backup·restore와 cache-target epoch 분리
 
 claim, origin, 그들이 참조하는 command/result는 한 `pg_dump` consistent snapshot에 들어간다. backup
@@ -768,9 +780,14 @@ epoch 값으로 추정하지 않는다.
 
 ### 10.4 backout
 
-- 첫 성공 create 전: route를 닫고 migration downgrade로 관계와 procedure를 제거할 수 있다.
-- 첫 claim/origin 후: forward-only다. route를 닫고 relation을 보존한 채 후속 migration으로 고친다.
-  claim/origin을 drop/update/delete하는 rollback은 금지한다.
+- upgrade transaction 안의 실패는 그 transaction 전체 rollback으로 끝낸다. 부분 DDL이나 legacy
+  claim을 남긴 채 성공으로 간주하지 않는다.
+- migration 적용 뒤에는 claim/origin이 0행이어도 downgrade하지 않는다. route를 계속 false로 두고
+  후속 forward migration으로 고치거나, 배포 전 검증된 전체 DB snapshot을 restore runbook으로
+  복원한다. M01 `downgrade()`는 항상 `RuntimeError`다.
+- legacy backfill 또는 첫 API create로 claim/origin이 한 행이라도 생긴 뒤에는 relation을 보존한
+  forward correction만 기본 경로다. snapshot restore는 해당 시점 뒤의 DB 전체 쓰기를 버리는 별도
+  운영 결정이며 surgical table restore가 아니다. claim/origin drop/update/delete rollback은 금지한다.
 - shared PinVi credential을 되살리는 rollback은 금지한다.
 - M02 purge 계약 전에는 hard purge fence를 제거하지 않는다.
 
@@ -790,6 +807,7 @@ epoch 값으로 추정하지 않는다.
 | fault | claim/generic/origin/subtype/override/result 각 경계 fault injection 전체 rollback |
 | legacy | deterministic transition→command/result→name/coord override; missing/duplicate/exact conflict pre-DDL abort; claim 수량/root; origin 0; core 무변경 |
 | causation | 두 command FK와 origin→claim composite FK의 mismatch 거부 |
+| NULL | claim/origin의 모든 필수 열(PK 포함) 각각 NULL INSERT 23502; current·target `nullable=false` fingerprint |
 | append-only | 두 relation 각각 UPDATE/DELETE/TRUNCATE stable 42501/constraint |
 | ACL | API wrapper-only, Dagster generic-only, owner의 schema/command-lock 최소 ACL exact, direct relation 접근/PUBLIC/SET ROLE 거부, restore 뒤 동일 |
 | 오류 | PK/UNIQUE/FK/CHECK/NOT NULL/cast/explicit raise/result outcome reverse inventory와 HTTP code |
@@ -803,7 +821,8 @@ field override, domain command, domain result를 각각 세어 orphan과 이중 
 ## 12. M01 구현 파일 점검표
 
 - ADR-093과 `docs/adr/README.md`
-- Alembic migration, baseline schema/generated metadata, migration graph artifact
+- 신규 forward-only Alembic migration, SQLAlchemy/generated metadata, migration graph artifact와 expected head;
+  `0200_schema_baseline.py`·baseline sidecar·두 byte hash는 불변
 - `src/kortravelmap/infra/{models,admin_feature_repo,runtime_privileges,db}.py`
 - `packages/kor-travel-map-api/.../{auth,settings,domain_command_registry}.py`
 - `packages/kor-travel-map-api/.../routers/admin_features.py`
@@ -817,10 +836,10 @@ field override, domain command, domain result를 각각 세어 orphan과 이중 
 
 ## 13. 전문 검토 기록
 
-| 검토자 | 1차 판정 | 2차 판정(`56fa3148`) | 2차 finding 반영 위치 | 최종 재심 |
-|---|---|---|---|---|
-| API 계약 전문 검토자 | `HOLD`: P0 2, P1 3, P2 1 | 기존 6건 닫힘, 신규 P1 1 | §5.1, §7.4, §11 | 대기 |
-| DB/동시성 전문 검토자 | `NO-GO`: P1 5, P2 6 | 기존 8건 닫힘, P1 2·P2 2 잔여 | §4.4, §5.3, §6.4, §8, §9, §11 | 대기 |
+| 검토자 | 1차 판정 | 2차 판정(`56fa3148`) | 3차 판정(`88222caa`) | 최신 finding 반영 위치 | 4차 재심 |
+|---|---|---|---|---|---|
+| API 계약 전문 검토자 | `HOLD`: P0 2, P1 3, P2 1 | 기존 6건 닫힘, 신규 P1 1 | `GO`: P0~P3 0 | §5.1, §7.4, §11 | SHA 변경으로 대기 |
+| DB/동시성 전문 검토자 | `NO-GO`: P1 5, P2 6 | 기존 8건 닫힘, P1 2·P2 2 잔여 | 기존 15건 닫힘, 신규 P1 1·P2 2 | §6.1~6.2, §10.1~10.4, §11~12 | 대기 |
 
 API finding별 반영은 201 registry/header/old operation 격리(§4.4), 전용 transport principal(§4.1~4.2),
 exact response schema(§4.5), constraint error payload(§4.6·§9), PinVi paired fence(§4.7), coord
@@ -835,5 +854,9 @@ snapshot restore와 cache epoch 분리(§10.3), 닫힌 ACL manifest(§8)다.
 명세해 닫았다. 2차 DB finding은 실제 override 열을 쓰는 backfill join, owner의 전체 call-chain ACL,
 core identity 23514의 409 분류, 명시적 READ COMMITTED 설정·검증으로 닫았다.
 
-최종 재심은 이 문서와 ADR의 동일 commit SHA를 대상으로 한다. `조건부 GO`나 P0~P3 잔여가 하나라도
+3차 DB finding은 migration 적용 뒤 무조건 forward-only인 backout, 0200 baseline byte freeze,
+claim/origin 전 필수 열의 명시적 NOT NULL과 NULL rejection fixture로 닫았다. 3차 API GO도 문서 SHA가
+바뀌었으므로 4차에서 다시 확인한다.
+
+4차 재심은 이 문서와 ADR의 동일 commit SHA를 대상으로 한다. `조건부 GO`나 P0~P3 잔여가 하나라도
 있으면 M00을 완료로 표시하지 않는다.

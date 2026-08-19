@@ -39,6 +39,8 @@ UUID 발급 뒤 Python repository가 기존 `make_feature_id()`로 만드는 opa
 DB 단일 함수가 kind, NFC/trim/ASCII-lower/C-collation name, numeric 6자리 좌표를 계산하고
 `(feature_kind,name_key,lon_e6,lat_e6)` unique 제약으로 동시 생성의 단일 승자를 정한다. category는
 identity에 넣지 않는다. claim은 이름·좌표 patch나 Feature purge 뒤에도 append-only로 남는다.
+claim의 kind, name key, 좌표, command, basis, 시각은 모두 명시적 NOT NULL이다. CHECK나 UNIQUE의
+NULL 동작에 거부를 맡기지 않는다.
 
 ### 2. verified origin과 command causation
 
@@ -49,6 +51,8 @@ origin의 command 열은 모두 `ops.domain_commands`를 `ON DELETE RESTRICT`로
 origin에는 transport principal ID와 human actor를 분리해 저장한다. 전자는 고정값
 `admin-ui-bff.manual-feature-create.v1`, 후자는 locked domain-command actor다. API body, actor 문자열,
 reason prefix로 origin이나 principal을 선택하지 않는다.
+origin의 kind, command, principal, actor, 시각, invoker role, procedure definer도 모두 명시적
+NOT NULL이다.
 
 `manual_pinvi`와 `manual_curation`은 각 queue/writer 및 인증 경계를 실제로 배포하는 M04/M03에서만
 CHECK domain에 추가한다. 과거 admin/PinVi 공유 경계에서 만들어진 행에는 origin을 추정하지 않는다.
@@ -117,6 +121,12 @@ M01 활성화 전 backup manifest는 claim, origin, 참조 command/result를 같
 SHA-256 root로 검증한다. `pg_restore --no-owner --no-privileges` 뒤 bootstrap owner repair와 ACL
 reconciliation을 다시 실행한다. cache-target `restore_epoch`는 DB 복원 정본이 아니라 복원 후 downstream
 invalidation fence다. M02 purge 계약 전 manual claim/origin Feature의 hard purge는 닫는다.
+
+M01은 현행 head 뒤에 새 forward-only migration으로 추가한다. migration 적용 뒤에는 claim/origin이
+0행이어도 downgrade하지 않으며 `downgrade()`는 DDL 없이 항상 `RuntimeError`를 낸다. backout은 route를
+닫고 후속 forward migration으로 고치거나 검증된 전체 DB snapshot을 restore하는 경로뿐이다.
+byte-frozen `0200_schema_baseline.py`와 `alembic/baseline/{schema,seed}.sql` 및 그 두 hash는 M01에서
+바꾸지 않는다. baseline fold는 별도 결정과 catalog 동등성 증명을 요구한다.
 
 ## 근거
 
