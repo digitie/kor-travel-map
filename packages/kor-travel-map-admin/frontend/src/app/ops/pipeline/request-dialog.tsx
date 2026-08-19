@@ -104,6 +104,22 @@ function MoisPrecheckNotice({
   );
 }
 
+/** canonical sync_scope 정규형 셋 중 열거 가능한 축(`kortravelmap.core.sync_scope`). */
+const TARGET_GRIDS_SYNC_SCOPE = "target_grids";
+/** `sync_scope` select에서 exact target을 고를 때 쓰는 sentinel.
+ *
+ *  `external_system:<name>`의 `<name>`은 **선언이 아니라 데이터**라서
+ *  `allowed_sync_scopes`(=DB `provider_dataset_operation_scopes`)에 절대 나타나지
+ *  않는다. 선택지를 카탈로그 열거로만 만들면 API가 받는 세 정규형 중 하나를 운영
+ *  화면이 표현할 수 없다 — ADR-088 재작성에서 실제로 그렇게 됐고, 자유입력이었던
+ *  이전 판이 하던 exact target 갱신이 UI에서 사라졌다.
+ *
+ *  이 값 자체는 canonical이 아니다(`:` 뒤 이름이 있어야 정규형이다). 이름이 비면
+ *  `buildScope`가 fail-closed로 막으므로 sentinel이 그대로 제출되지 않는다. */
+const EXTERNAL_SYSTEM_SCOPE_CHOICE = "external_system";
+/** `kortravelmap.core.sync_scope.MAX_EXTERNAL_SYSTEM_NAME_LENGTH`와 같은 값. */
+const MAX_EXTERNAL_SYSTEM_NAME_LENGTH = 112;
+
 type DatasetMembershipView = {
   provider_dataset_id: number;
   sync_scope: string;
@@ -155,6 +171,9 @@ function useRequestScopeForm(catalogRows: CanonicalCatalogRow[]) {
   const [scopeType, setScopeType] = useState<ScopeType>("provider_dataset");
   const [scopeProviderDatasetId, setScopeProviderDatasetId] = useState("");
   const [scopeSyncScope, setScopeSyncScope] = useState("");
+  // exact target scope(`external_system:<name>`)의 이름 축. 카탈로그가 열거할 수
+  // 없으므로 운영자가 직접 적는다.
+  const [scopeExternalSystem, setScopeExternalSystem] = useState("");
   // identity의 세 번째 축. 후보가 하나면 비워 둔 채로 그것이 쓰이고, 형제
   // operation이 둘 이상일 때만 운영자가 명시한다 — 임의로 고르지 않는다.
   const [scopeOperationKey, setScopeOperationKey] = useState("");
@@ -196,8 +215,26 @@ function useRequestScopeForm(catalogRows: CanonicalCatalogRow[]) {
     () => selectedScopeCapability?.allowed_sync_scopes ?? [],
     [selectedScopeCapability],
   );
-  const effectiveScopeSyncScope =
+  // exact target scope를 넣으면서 select가 들고 있는 **선택지**와 실제로 제출할
+  // canonical 값이 갈린다. 둘을 한 변수로 두면 sentinel이 그대로 나간다.
+  const syncScopeChoice =
     scopeSyncScope.trim() || selectedScopeCapability?.default_sync_scope || "";
+  const externalSystemScopeSelected =
+    syncScopeChoice === EXTERNAL_SYSTEM_SCOPE_CHOICE;
+  // 이름은 trim해서 조립한다 — API는 앞뒤 공백이 붙은 이름을 비정규 입력으로
+  // 거절하므로(`parse_canonical_sync_scope`), 여기서 정규형만 만들어 보낸다.
+  const externalSystemName = scopeExternalSystem.trim();
+  const effectiveScopeSyncScope = externalSystemScopeSelected
+    ? externalSystemName
+      ? `${EXTERNAL_SYSTEM_SCOPE_CHOICE}:${externalSystemName}`
+      : ""
+    : syncScopeChoice;
+  // catalog 행의 scope는 선언이라 `external_system:*` 행이 없다. exact target은
+  // target_grids 집합을 external system으로 좁힌 것이므로(`kma_weather` asset이
+  // 두 kind를 같은 grid 경로로 처리한다) operation 후보도 그 membership에서 읽는다.
+  const membershipSyncScope = externalSystemScopeSelected
+    ? TARGET_GRIDS_SYNC_SCOPE
+    : effectiveScopeSyncScope;
   // 고른 (dataset, scope)에 걸린 membership 전부. 형제 operation은 여기서 갈린다 —
   // `.find()`로 하나를 집으면 운영자가 고르지 않은 operation에 canonical write가
   // 나간다(그 위험이 이 목록이 존재하는 이유다).
@@ -206,11 +243,11 @@ function useRequestScopeForm(catalogRows: CanonicalCatalogRow[]) {
       catalogRows.filter(
         (row) =>
           row.provider_dataset_id === Number(scopeProviderDatasetId) &&
-          row.sync_scope === effectiveScopeSyncScope &&
+          row.sync_scope === membershipSyncScope &&
           typeof row.operation_key === "string" &&
           row.operation_key.length > 0,
       ),
-    [catalogRows, effectiveScopeSyncScope, scopeProviderDatasetId],
+    [catalogRows, membershipSyncScope, scopeProviderDatasetId],
   );
   const effectiveOperationKey =
     scopeOperationKey.trim() ||
@@ -229,7 +266,15 @@ function useRequestScopeForm(catalogRows: CanonicalCatalogRow[]) {
         return "canonical 데이터셋을 선택하세요.";
       }
       if (!effectiveScopeSyncScope) {
-        return "sync_scope를 선택하세요.";
+        return externalSystemScopeSelected
+          ? "external_system 이름을 입력하세요."
+          : "sync_scope를 선택하세요.";
+      }
+      if (
+        externalSystemScopeSelected &&
+        externalSystemName.length > MAX_EXTERNAL_SYSTEM_NAME_LENGTH
+      ) {
+        return `external_system 이름은 ${MAX_EXTERNAL_SYSTEM_NAME_LENGTH}자 이하여야 합니다.`;
       }
       // grid 행은 membership 단위다(ADR-088 triple) — dataset만으로 고르면 형제
       // operation 중 아무거나 집는다. 고른 scope에 해당하는 행에서 operation을 읽는다.
@@ -298,6 +343,8 @@ function useRequestScopeForm(catalogRows: CanonicalCatalogRow[]) {
     effectiveOperationKey,
     membershipCandidates,
     effectiveScopeSyncScope,
+    externalSystemName,
+    externalSystemScopeSelected,
     featureIdsText,
     lat,
     lon,
@@ -311,11 +358,20 @@ function useRequestScopeForm(catalogRows: CanonicalCatalogRow[]) {
     selectedCatalogRow,
   ]);
 
+  const supportsExactTargetScope = syncScopeOptions.includes(
+    TARGET_GRIDS_SYNC_SCOPE,
+  );
+
   return useMemo(
     () => ({
       buildScope,
       effectiveOperationKey,
       effectiveScopeSyncScope,
+      externalSystemScopeSelected,
+      scopeExternalSystem,
+      setScopeExternalSystem,
+      supportsExactTargetScope,
+      syncScopeChoice,
       featureIdsText,
       lat,
       lon,
@@ -349,6 +405,10 @@ function useRequestScopeForm(catalogRows: CanonicalCatalogRow[]) {
       buildScope,
       effectiveOperationKey,
       effectiveScopeSyncScope,
+      externalSystemScopeSelected,
+      scopeExternalSystem,
+      supportsExactTargetScope,
+      syncScopeChoice,
       featureIdsText,
       lat,
       moisSelected,
@@ -715,7 +775,11 @@ const RequestIdentityFields = memo(function RequestIdentityFields({
   scopeForm: ReturnType<typeof useRequestScopeForm>;
 }) {
   const {
-    effectiveScopeSyncScope: scopeSyncScope,
+    externalSystemScopeSelected,
+    scopeExternalSystem,
+    setScopeExternalSystem,
+    supportsExactTargetScope,
+    syncScopeChoice,
     featureIdsText,
     lat,
     lon,
@@ -758,6 +822,10 @@ const RequestIdentityFields = memo(function RequestIdentityFields({
       ? [selectedScopeCapability.default_sync_scope]
       : []),
   ].filter((value, index, values) => values.indexOf(value) === index);
+  // exact target 선택지는 카탈로그 열거 밖이라 따로 센다 — 이 수가 1이면 고를
+  // 것이 없다는 뜻이므로 select를 잠근다.
+  const syncScopeChoiceCount =
+    availableSyncScopes.length + (supportsExactTargetScope ? 1 : 0);
   return (
     <>
       <FormSelect
@@ -783,6 +851,7 @@ const RequestIdentityFields = memo(function RequestIdentityFields({
             onChange={(event) => {
               setScopeProviderDatasetId(event.target.value);
               setScopeSyncScope("");
+              setScopeExternalSystem("");
               setScopeOperationKey("");
             }}
           >
@@ -799,31 +868,53 @@ const RequestIdentityFields = memo(function RequestIdentityFields({
             ))}
           </FormSelect>
           <FormSelect
-            disabled={availableSyncScopes.length <= 1}
+            disabled={syncScopeChoiceCount <= 1}
             hint={
               selectedScopeCapability?.effect === "dataset_wide"
                 ? "dataset-wide 정본 scope로 고정됩니다."
-                : "catalog가 허용한 canonical sync scope만 선택할 수 있습니다."
+                : supportsExactTargetScope
+                  ? "catalog가 선언한 scope와, 특정 external system만 좁혀 갱신하는 exact target 중에서 고릅니다."
+                  : "catalog가 허용한 canonical sync scope만 선택할 수 있습니다."
             }
             label="sync_scope"
-            value={scopeSyncScope}
+            value={syncScopeChoice}
             onChange={(event) => {
               setScopeSyncScope(event.target.value);
+              setScopeExternalSystem("");
               setScopeOperationKey("");
             }}
           >
-            {availableSyncScopes.length === 0 ? (
+            {syncScopeChoiceCount === 0 ? (
               <NativeSelectOption value="">
                 데이터셋을 먼저 선택하세요.
               </NativeSelectOption>
             ) : (
-              availableSyncScopes.map((syncScope) => (
-                <NativeSelectOption key={syncScope} value={syncScope}>
-                  {syncScope}
-                </NativeSelectOption>
-              ))
+              <>
+                {availableSyncScopes.map((syncScope) => (
+                  <NativeSelectOption key={syncScope} value={syncScope}>
+                    {syncScope}
+                  </NativeSelectOption>
+                ))}
+                {supportsExactTargetScope ? (
+                  <NativeSelectOption value={EXTERNAL_SYSTEM_SCOPE_CHOICE}>
+                    external_system:&lt;name&gt; (exact target)
+                  </NativeSelectOption>
+                ) : null}
+              </>
             )}
           </FormSelect>
+          {externalSystemScopeSelected ? (
+            // 이 축은 카탈로그가 열거할 수 없다(이름이 데이터다). 비어 있으면
+            // `buildScope`가 요청을 막으므로 sentinel이 그대로 나가지 않는다.
+            <FormField
+              hint="이 external system이 등록한 cache target만 갱신합니다. 이름은 등록값과 정확히 같아야 합니다."
+              label="external_system"
+              maxLength={MAX_EXTERNAL_SYSTEM_NAME_LENGTH}
+              required
+              value={scopeExternalSystem}
+              onChange={(event) => setScopeExternalSystem(event.target.value)}
+            />
+          ) : null}
           {membershipCandidates.length > 1 ? (
             // 형제 operation이 있을 때만 뜬다. 평소에는 축이 하나로 결정되므로
             // 화면을 늘리지 않고, 갈릴 때는 **운영자가 고르게** 한다.

@@ -10,7 +10,8 @@ import {
 } from "node:fs/promises";
 import path from "node:path";
 
-import type { Page, Response, Route, TestInfo } from "@playwright/test";
+import { expect } from "@playwright/test";
+import type { Locator, Page, Response, Route, TestInfo } from "@playwright/test";
 
 import type { components } from "../../src/api/types";
 
@@ -119,6 +120,8 @@ type CleanupExecution = {
 };
 
 // src/kortravelmap/providers/kma.py와 schedules.py의 canonical identity.
+/** `kortravelmap.core.sync_scope.EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX`와 같은 값. */
+export const EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX = "external_system:" as const;
 export const KMA_PROVIDER = "python-kma-api" as const;
 export const KMA_DATASET_KEY = "kma_ultra_short_nowcast" as const;
 export const KMA_SAFE_DAGSTER_JOB =
@@ -1329,6 +1332,31 @@ async function listAllActivePoiTargets(
   );
 }
 
+/** 갱신 요청 dialog에 canonical KMA triple + exact target scope를 넣는다.
+ *
+ *  ADR-088 이후 dialog는 provider/dataset_key 자유입력이 아니라 catalog가 투영한
+ *  membership을 고르는 화면이다. `external_system:<name>`은 카탈로그가 열거할 수
+ *  없는 축이라 select의 exact-target 선택지 + 이름 입력으로 조립한다 — 여기서
+ *  쓰는 identity는 `resolveKmaDatasetIdentity`가 `/v1/ops/datasets`에서 푼 값이라
+ *  화면과 API가 같은 triple을 보는지도 함께 확인된다.
+ */
+export async function fillKmaRequestDialogScope(
+  dialog: Locator,
+  externalSystem: string,
+): Promise<void> {
+  const identity = requireKmaDatasetIdentity();
+  await dialog.getByLabel("scope 유형").selectOption("provider_dataset");
+  await dialog
+    .getByLabel("대상 데이터셋")
+    .selectOption(String(identity.providerDatasetId));
+  await dialog.getByLabel("sync_scope").selectOption("external_system");
+  await dialog.getByLabel("external_system").fill(externalSystem);
+  // 형제 operation이 갈리면 dialog가 operation_key select를 띄운다. C7은 단일
+  // canonical operation을 요구하므로(resolveKmaDatasetIdentity) 뜨면 안 된다 —
+  // 조용히 넘어가면 운영자가 고르지 않은 operation으로 write가 나간다.
+  await expect(dialog.getByLabel("operation_key")).toHaveCount(0);
+}
+
 export function buildKmaRequest(
   externalSystem: string,
   reason: string,
@@ -1340,7 +1368,7 @@ export function buildKmaRequest(
       type: "provider_dataset",
       provider_dataset_id: identity.providerDatasetId,
       operation_key: identity.operationKey,
-      sync_scope: `external_system:${externalSystem}`,
+      sync_scope: `${EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX}${externalSystem}`,
     },
     run_mode: runMode,
     priority: 50,

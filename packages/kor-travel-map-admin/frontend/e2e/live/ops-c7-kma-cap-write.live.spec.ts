@@ -6,6 +6,7 @@ import {
 } from "@playwright/test";
 
 import {
+  EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX,
   KMA_DATASET_KEY,
   KMA_PROVIDER,
   assertKmaDagsterWorkerJobDefinition,
@@ -61,13 +62,10 @@ async function createCapRequestFromUi(
     name: "갱신 요청 생성",
     exact: true,
   });
-  await dialog.getByLabel("provider", { exact: true }).fill(KMA_PROVIDER);
-  await dialog
-    .getByLabel("dataset_key", { exact: true })
-    .fill(KMA_DATASET_KEY);
-  await dialog
-    .getByLabel("sync_scope (선택)", { exact: true })
-    .fill(syncScope);
+  await fillKmaRequestDialogScope(
+    dialog,
+    syncScope.slice(EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX.length),
+  );
   const previewResponsePromise = page.waitForResponse((response) => {
     return (
       response.request().method() === "POST" &&
