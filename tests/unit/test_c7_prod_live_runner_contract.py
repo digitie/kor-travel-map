@@ -257,10 +257,13 @@ def test_live_helper_does_not_assert_stripped_identity_keys() -> None:
     assert _NATURAL_IDENTITY_RESPONSE_KEYS, "생산자 상수가 비었다"
     for section, label in ((preview, "preview"), (terminal, "terminal")):
         for key in _NATURAL_IDENTITY_RESPONSE_KEYS:
-            assert f".{key} " not in section and f".{key}!" not in section, (
+            reason = (
                 f"{label} 단언이 생산자가 strip하는 `{key}`를 본다 — "
                 "triple(provider_dataset_id/sync_scope/operation_key)로 단언하라"
             )
+            # 속성 접근 두 모양(`x.key !==`, `x.key!==`)을 각각 본다.
+            assert f".{key} " not in section, reason
+            assert f".{key}!" not in section, reason
 
 
 def test_kma_dagster_job_and_terminal_run_identity_are_exact() -> None:
