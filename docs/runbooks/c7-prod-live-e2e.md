@@ -48,7 +48,21 @@ C7은 다음 조건을 모두 만족해야 완료다.
 7. UI credential을 UI-only exact-image recreate로 먼저 회전하고 새 로그인→보호 화면→
    로그아웃→재차단 및 구 credential 401을 확인한다. 실패하면 저장한 env/config/image로
    UI만 정확히 복구한다.
-8. Manager의 `pinvi-pair capture --verified-compatible --build`를 실행한다. manifestless
+8. Manager의 `pinvi-pair capture --verified-compatible --build`를 실행한다.
+
+   > **2026-08-19 — 실행 전 반드시 확인.** 이 명령은 docker-manager `#184`(`9eb38a92`)에서 **비파괴
+   > 관측기**로 다시 만들어졌다(ADR-38). 그 이전 설치본의 같은 이름 명령은 **파괴형**이다 — Map 4 +
+   > PinVi API를 stop하고 candidate image로 force-recreate한다. n150 설치본은 2026-08-19 기준
+   > revision `4191582779be…`(구판)이므로 **manager를 먼저 설치**해야 한다.
+   > 판별은 실행 없이 가능하다: `ktdctl pinvi-pair capture --help`에 `--manifest-path`와
+   > `capture_contract = pair-capture-v1`이 보이면 새 구현, `--wait-timeout`만 보이면 구판이다.
+   > 설치 절차·선행조건은 manager `docs/docker-management.md` §7.5.1/§7.5.9.
+   >
+   > 첫 capture나 runtime이 바뀐 뒤에는 `manifest_sha256`과 `active.map_source_revision`·
+   > `active.pinvi_source_revision` **세 값이 모두** 바뀌므로 §2.3 attestation을 재생성해야 한다
+   > (capture가 `recorded_at_preserved=false` + `attestation_action=…`으로 알린다).
+
+   manifestless
    capture가 mutation 뒤 실패하면 임의 rollback 성공을 꾸미지 않고 Map 네
    runtime과 PinVi API를 중지한 채 operator-required로 남긴다.
 
