@@ -47,6 +47,36 @@ backfill, 전체 procedure owner ACL, 명시적 READ COMMITTED, 무조건 forwar
 artifact unit 11개, diff/redaction/비밀 가드를 통과했다. ADR-093은 proposed로 유지하고 M00은
 `tasks-done.md`로 이관했다. 다음 작업은 M01 clean cutover 구현이며 이 draft PR에는 섞지 않는다.
 
+## 2026-08-19 — C7 read-auth의 지점 없는 timeout: refetch 취소와 부족한 예산
+
+`dbba2ab6` strict runner에서 `ops-c7-read-auth` 첫 테스트가 지점 정보 없는 30s
+"Test timeout"으로 죽었다(직전 두 실행은 7/7). trace를 뜯어야 원인이 보였다 —
+미완료 액션은 `waitForResponse` 하나뿐, 그 앞 refresh click은 정상 종료했고,
+`/v1/ops/pipeline/overview` 두 건 중 **두 번째가 `status=-1` `time_ms=-1`**(취소)였다.
+prod 실측 응답 시간은 overview 0.75~1.02s, datasets 1.39s로 느리지 않다.
+
+이 화면들은 ops-live 알림으로 query를 invalidate하고, TanStack v5는 invalidate 시
+in-flight fetch를 취소한다(`cancelRefetch` 기본 true). 특정 응답 하나를 기다리는 코드는
+그때 상한까지 매달린다. 같은 상호작용의 선례가 `ops-c7-kma-empty-write` 코드 주석에
+있었다(앱 fix + 테스트 단순화로 해소).
+
+**적대 리뷰가 첫 수정의 두 결함을 잡았다.**
+- `response.ok()`를 predicate에 넣어 4xx/5xx가 "응답 없음"으로 뭉개졌다. read/auth
+  게이트에서 간헐 5xx와 인증 회귀(401/403)를 **틀린 사유**로 보고하게 된다.
+- 응답 창(8s)을 click의 actionability 상한(60s) **앞에** 열어, 진행 중
+  (`aria-disabled`) 버튼을 기다리는 동안 창이 만료되는 구조였다. 재시도가 자기 응답을
+  구조적으로 못 보는 모양이다.
+
+고친 형태: attempt마다 `toBeEnabled`를 선행하고, 응답 창을 click 상한 이상(60s)으로
+맞추고, "응답을 못 봤다"(재시도)와 "응답이 틀렸다"(즉시 실패)를 가른다. 시도 기록은
+evidence로 attach해 조용한 열화가 통과했는지 나중에 읽을 수 있게 했다.
+
+예산은 자기 worst case 위로 올리고(#2 180s, #6 240s) 구간을 `test.step`으로 감쌌다 —
+예산을 올려도 실패가 스스로 이름을 대야 이번 같은 trace 발굴을 반복하지 않는다.
+리뷰가 지적한 대로, "#6이 28.4s로 완주했다"는 1표본은 제품 지연을 배제하지 못한다.
+#6의 예산 근거는 그 표본이 아니라 **구조**다 — 명시 `READY` 대기만 6개(합 120s)에
+ops-live poll 간격 2s가 더해진다.
+
 ## 2026-08-19 — C7 KMA live 3종이 ADR-088 계약과 어긋나 있었다 (0224 선언)
 
 `025be0e6`로 prod를 올려 strict runner를 돌리자 `ops-c7-read-auth`는 7/7 통과(#1010이 실제로

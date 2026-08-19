@@ -40,6 +40,30 @@ T-VN-M01을 별도 구현 작업으로 연다. migration/API/admin UI/OpenAPI/Pi
 freeze를 설계 보고서의 단일 cutover 순서로 구현하고, ADR-093의 accepted 전환은 그 구현·계약 검증과
 함께 한다. 이 M00 PR에는 M01 코드를 섞지 않는다.
 
+## 2026-08-19 — C7 인수 ③ 진행: 계약 드리프트 4건 + 하네스 경합 1건
+
+`025be0e6` → `db866351` → `dbba2ab6`로 prod를 올리며 strict runner를 돌렸고, 매번
+다음 결함이 드러났다. 전부 **prod 실행에서만** 보이는 계급이다.
+
+1. `provider_issues` 축 (#1010) — ADR-088 드리프트
+2. dialog 자유입력 → canonical select + `external_system:c7-e2e` 선언 (#1011)
+3. `matched_scope` 자연키 단언 (#1013) — 계약이 strip하는 필드를 단언하고 있었다
+4. 삭제된 `/v1/ops/datasets/detail` 경로 대기 (#1013)
+5. refetch 취소 경합 + 부족한 테스트 예산 (#1015)
+
+부수적으로 드러난 둘이 더 중요하다. `assertOnlyKmaProviderObjects`가
+`"provider" in record` 가드 때문에 **공허**해져 "KMA 외 provider 배제" 보장이 사라져
+있었고, `test_c7_prod_live_runner_contract`가 계약이 아니라 **소비자 쪽 문자열을
+고정**해 드리프트를 잡는 대신 얼려두고 있었다. 각각 canonical triple과 생산자 상수
+기준으로 다시 세웠다.
+
+### 다음 한 작업
+
+#1015 머지 → prod 재배포 → capture/rebind → strict runner. `ops-c7-read-auth`는
+prod 비-redact 재현에서 7/7이고, `ops-c7-kma-active-write`는 terminal history UI
+직전까지 확인했다. 남은 미확인 구간은 그 이후와 kma-cap · kma-empty · schedule ·
+poi-cache-targets 4개 spec이다.
+
 ## 2026-08-19 — C7 인수 재개: KMA live 3종이 ADR-088 계약과 어긋나 있었다
 
 `025be0e6`(PR #1010)로 prod를 올려 strict runner를 돌리자 `ops-c7-read-auth`가 7/7로 통과했고
