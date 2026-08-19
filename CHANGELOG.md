@@ -5,6 +5,25 @@
 
 ## [Unreleased]
 
+### C7 인수용 exact-target refresh scope 선언 (2026-08-19, T-VN-40 인수 ③)
+
+- **ADDED**: migration `0224_c7_external_system_scope`가 KMA 초단기실황
+  (`python-kma-api`/`kma_ultra_short_nowcast`)의 refresh operation에
+  `external_system:c7-e2e` scope를 선언한다. ADR-088 이후 제출 가능한 `sync_scope`의 정본은
+  이 선언이며(요청 해석의 exact join + 요청·job·sync state·upload 4종 exact FK), 선언되지 않은
+  이름은 422다. **이 선언은 운영 콘솔에 보인다** — `/ops/datasets` 그리드·상세 scope 목록과
+  갱신 요청 dialog의 `sync_scope` 선택지에 나온다. C7 인수 harness 전용이므로 운영자는 고르지
+  않는다(활성 target 0인 상태에서 실행하면 빈 scope 실패 행이 남는다).
+- **TEST(live)**: C7 KMA live 3종이 run마다 `external_system:e2e-<run-id>`를 만들던 것을 그
+  선언된 scope로 맞췄다. run 격리는 기존대로 `target_key`가 맡고, 시작 전에 그 scope가
+  깨끗한지(활성 target 0 · 비terminal 요청 0 · 현재 base의 cursor 없음) fail-closed로 본다.
+- **TEST**: revision id가 `alembic_version.version_num varchar(32)`에 들어가는지, 그리고
+  선언 상수가 migration(Python)과 live 스펙(TypeScript)에서 같은 값인지 unit에서 잠근다.
+  두 축 모두 드리프트하면 CI는 green인 채 prod 실행에서만 죽는다.
+- **DEPLOY**: `kor-travel-docker-manager`의 `.env`에서
+  `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를 `0224_c7_external_system_scope`로 올려야 API가
+  기동한다(`docs/deploy.md`). T-VN-40C 예약 revision은 `0225`로 재배정했다.
+
 ### 파이프라인 상태 스트립의 빈 버킷 표기 (2026-08-19, T-VN-40 인수 ③)
 
 - **FIXED**: `/ops/pipeline` 상태 스트립이 `operations_by_status`에 없는 상태 버킷을 `—`로

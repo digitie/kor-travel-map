@@ -713,7 +713,7 @@ contract checksum 통과 뒤에만 enable한다.
 
 terminal reconciliation item compaction 뒤 request-bound page는 retry 불가능한
 `410 SNAPSHOT_MATERIAL_COMPACTED`와 보존된 snapshot ID/count/root/compacted 시각을 반환한다. 실제
-material/receipt 분리와 compactor는 T-VN-40C의 예약 revision `0224` 뒤 `0225+` migration으로만
+material/receipt 분리와 compactor는 T-VN-40C의 예약 revision `0225` 뒤 `0226+` migration으로만
 활성화하며, 그 전 API는 typed error code만 예약한다.
 
 referenced snapshot은 reconciliation 감사 영수증이라 GC가 삭제하지 않는다. 따라서 job execution

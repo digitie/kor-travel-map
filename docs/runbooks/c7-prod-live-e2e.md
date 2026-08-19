@@ -142,6 +142,48 @@ runner는 위 다섯 runtime role의 image ID를 host attestation과 비교한 �
 manifest active pair의 네 Map image ID와 각각 비교한다. 네 image의 OCI revision은 모두
 active pair의 `map_source_revision`이어야 하며 PinVi API도 동일한 방식으로 검증한다.
 
+### 2.4 KMA 인수 scope (`external_system:c7-e2e`)
+
+KMA live 3종(`ops-c7-kma-{active,cap,empty}-write`)은 **고정** external system
+`c7-e2e`에 cache target을 만들고 `external_system:c7-e2e` scope로 갱신을 건다. run마다
+이름을 새로 만들 수 없다 — ADR-088 이후 제출 가능한 `sync_scope`의 정본은
+`provider_dataset_operation_scopes` 선언이고(`0224_c7_external_system_scope`가 선언한다),
+선언되지 않은 값은 preview/create가 **422**다. run 격리는 `target_key`가 맡는다.
+
+`target_grids`를 쓰지 않는 이유: 그 scope는 "모든 활성 cache target + extra points"라
+인수가 운영 대상에 provider I/O를 내고 `membership_fingerprint`가 비결정적이 되며,
+`provider_sync_state`의 정본 cursor 행을 스케줄 job과 공유한다.
+
+**사전조건(fail-closed).** 세 spec은 시작 직후 `assertC7ScopeIsClean`으로 **세 축**을 본다.
+하나라도 걸리면 앞 run의 잔존물이 이 run에 섞이므로 즉시 멈춘다.
+
+| 축 | 막는 것 | 걸렸을 때 |
+|---|---|---|
+| `c7-e2e`의 활성 target 0건 | 남은 target이 `membership_fingerprint`를 오염 | 아래 회수 절차 |
+| 비terminal(queued/running) 요청 0건 | 같은 scope의 생성이 409(active scope conflict) | 파이프라인 화면에서 취소 |
+| 현재 base의 sync-state cursor 없음 | 같은 base·같은 membership이면 실행기가 `skipped=true`로 접어 "첫 요청은 실행된다"가 깨짐 | **다음 base rollover(KST 매시 40분) 뒤 재실행** |
+
+셋째 축은 고정 이름이 되면서 새로 생긴 노출이다 — cleanup은 target만 지우고 sync-state 행은
+남기므로, **실패 직후 같은 base 안에서 재시도하면** 여기서 선다. 기다리는 것이 맞다.
+
+**직렬 실행이 필수다.** 세 spec이 같은 external system을 공유하므로 병렬로 돌면 서로의 target과
+요청을 오염시킨다. runner(`scripts/run-c7-prod-live-e2e.sh`)가 spec별 별도 컨테이너 순차 루프 +
+`--workers=1`(+`E2E_LIVE_WORKERS=1`)로 보장한다. **`npm run e2e:live -- e2e/live/`로 직접 돌리지
+마라** — `playwright.live.config.ts`의 기본은 `fullyParallel: true` / `workers: 4`다.
+
+**잔존물 회수.** cleanup은 요청이 전부 terminal이고 scope/target 탐색이 완결됐을 때만
+target을 지우고, 아니면 `preservedForManualCleanup: true`로 **의도적으로 보존**한다. cap
+시나리오는 ~301건을 만들므로 중간 실패 시 그만큼 남을 수 있다. §4 복구를 마친 뒤 다음 run
+전에 비운다(admin 자격 필요, prod 쓰기 — 운영자 판단으로 실행):
+
+```bash
+# 남은 target 확인 (읽기)
+curl -s "$MAP_API/v1/admin/poi-cache-targets?external_system=c7-e2e&include_deleted=false&page_size=500"   -H "Authorization: Bearer $ADMIN_TOKEN" | jq '.data.items | length'
+# 개별 DELETE — target_id마다 (전용 일괄 삭제 표면은 없다)
+```
+
+비terminal 요청이 남았으면 admin 파이프라인 화면에서 취소한 뒤 다시 확인한다.
+
 ## 3. runner 실행
 
 runner를 실행하기 전 Map exact commit은 C7P v4 reader와 해당 pair의 모든 필수

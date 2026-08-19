@@ -1272,7 +1272,7 @@ def test_api_container_stops_retrying_when_tvn40_identity_mapping_loader_aborts(
     upgrade stderr에서 loader의 중단 문장을 보면 즉시 exit 1이어야 하고, 원문 stderr는 운영자가
     볼 수 있게 그대로 내보내야 한다.
     """
-    head = "0223_tvn40_identity_mappings"
+    head = "0224_c7_external_system_scope"
     path, marker = _migration_stub_path(tmp_path, image_head=head)
     alembic = tmp_path / "bin" / "alembic"
     alembic.write_text(
@@ -1455,7 +1455,7 @@ def test_api_image_without_legacy_modules_identifies_pre_squash_db(
     """최종 image에 historical Python이 없어도 pre-squash 진단은 보존한다."""
     path, marker = _migration_stub_path(
         tmp_path,
-        image_head="0223_tvn40_identity_mappings",
+        image_head="0224_c7_external_system_scope",
         current_script=(
             "echo \"FAILED: Can't locate revision identified by "
             "'0078_cache_target_gc_observe'\"; exit 255"

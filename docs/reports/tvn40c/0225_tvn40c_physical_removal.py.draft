@@ -1,6 +1,6 @@
 """T-VN-40C — legacy 물리 삭제 (DRAFT — alembic/versions/ 밖. receipt complete 뒤 옮겨 적용).
 
-Revision ID: 0224_tvn40c_physical_removal
+Revision ID: 0225_tvn40c_physical_removal
 Revises: 0223_tvn40_identity_mappings
 
 manifest: docs/reports/t-vn-40c-physical-removal-manifest-2026-08-18.md ·
@@ -10,8 +10,8 @@ manifest: docs/reports/t-vn-40c-physical-removal-manifest-2026-08-18.md ·
 - forward-only · 단일 트랜잭션. 모든 DROP은 RESTRICT — manifest가 모르는 dependent가 있으면 트랜잭션이
   죽고 manifest를 고친 뒤 재실행한다(trigger disable 같은 우회 없음).
 - 이 migration은 데이터를 파괴한다(legacy overlay 표). 선행조건 P1~P6(manifest §0)을 사람이 확인한 뒤에만
-  적용한다. api-entrypoint의 EXPECTED_HEAD pin은 0224로.
-- fresh DB에서도 0202~0224 전체가 통과해야 한다(legacy 0행 → 0223 0건 적재 → 0224 drop).
+  적용한다. api-entrypoint의 EXPECTED_HEAD pin은 0225로.
+- fresh DB에서도 0202~0225 전체가 통과해야 한다(legacy 0행 → 0223 0건 적재 → 0225 drop).
 - ops.curation_cutover_identity_mappings는 **남긴다**(PinVi cutover 증거; FK → curation_items 유지).
 """
 
@@ -23,7 +23,7 @@ from alembic import op
 
 # ruff: noqa: E501
 
-revision: str = "0224_tvn40c_physical_removal"
+revision: str = "0225_tvn40c_physical_removal"
 down_revision: str | Sequence[str] | None = "0223_tvn40_identity_mappings"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -233,5 +233,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     raise RuntimeError(
-        "0224_tvn40c_physical_removal is forward-only; legacy overlay was physically removed"
+        "0225_tvn40c_physical_removal is forward-only; legacy overlay was physically removed"
     )

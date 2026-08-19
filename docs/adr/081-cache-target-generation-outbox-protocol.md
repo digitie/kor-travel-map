@@ -239,7 +239,7 @@ transaction의 stream share barrier 안에 있어 source membership이 고정되
 reconciliation seal은 exact material identity이고 75분 넘게 남은 generic 또는 이미 request가 참조하는 snapshot이
 있으면 같은 header/item을 재사용한다. 만료·미참조 snapshot은 GC가 일부 item을 지웠을 수 있어
 재사용하지 않는다. generic/reconciliation별 독립 receipt가 같은 material을 양방향 공유하고 terminal
-item을 compact하는 정규화 스키마는 T-VN-40C 예약 revision `0224` 뒤의 `0225+` migration으로 제한한다.
+item을 compact하는 정규화 스키마는 T-VN-40C 예약 revision `0225` 뒤의 `0226+` migration으로 제한한다.
 그 전에는 revision 번호 없는 설계 초안만 유지한다. 만료된 일반 snapshot은
 reconciliation request가 참조하지 않을 때만 item 1,000행/header 100행 이하의 `SKIP LOCKED` 배치로
 정리한다. page reader의 header share lock은 GC가 빈 반복 page를 만드는 race를 막는다. terminal request가

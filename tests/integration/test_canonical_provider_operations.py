@@ -3271,12 +3271,13 @@ async def test_multi_scope_dataset_run_freezes_only_the_executable_scope(
             operation_key=job_name,
             sync_scope="target_grids",
         )
-    # 전제: 같은 dataset에 scope가 2개다(그래서 dataset만으로는 지목되지 않는다).
-    assert len(executable) == 2
-    assert {member.sync_scope for member in executable} == {
-        "dataset_wide",
-        "target_grids",
-    }
+    # 전제: 같은 dataset에 scope가 둘 이상이다(그래서 dataset만으로는 지목되지 않는다).
+    # 개수를 2로 못 박지 않는 이유: `0224_c7_external_system_scope`가 nowcast dataset에
+    # exact-target scope(`external_system:c7-e2e`)를 하나 더 선언한다. 그 선언은 이 전제를
+    # **강화**하지 약화하지 않는다 — 확인할 것은 "정본 실행 scope 둘이 모두 있고, 선언 전부가
+    # 같은 dataset을 가리킨다"이다.
+    assert len(executable) >= 2
+    assert {"dataset_wide", "target_grids"} <= {member.sync_scope for member in executable}
     assert len({member.provider_dataset_id for member in executable}) == 1
 
     run_id = f"run-c3e-kma-manifest-{uuid4()}"

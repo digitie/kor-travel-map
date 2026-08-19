@@ -45,16 +45,16 @@ API는 미래 compaction 뒤 request-bound page에 사용할
 `merkle_root`, `compacted_at`을 필수로 유지하며 retryable 응답이 아니다. item/byte admission의 두 413도
 각 code와 details를 typed OpenAPI schema로 내보내 codegen이 generic map 없이 판독할 수 있게 한다.
 
-## 2. 0224 예약과 migration barrier
+## 2. 0225 예약과 migration barrier
 
-T-VN-40C가 다음 Alembic revision `0224`를 예약 중이다. 따라서 이 branch는 revision 번호를 만들거나
+T-VN-40C가 Alembic revision `0225`를 예약 중이다. 따라서 이 branch는 revision 번호를 만들거나
 migration-bearing PR을 병합하지 않는다. terminal item compaction은 현재
 `poi_cache_target_snapshots` header가 material과 receipt 역할을 동시에 하고 item FK도 직접
 `snapshot_id`를 가리켜 안전하게 구현할 수 없다.
 
 번호 없는 DDL 초안은
 [`tvn41s/snapshot-material-schema.sql.draft`](tvn41s/snapshot-material-schema.sql.draft)에 둔다.
-`0224`가 main에 착지한 뒤에만 실제 revision을 `0225+`로 배정한다. draft는 Alembic graph나 application
+`0225`가 main에 착지한 뒤에만 실제 revision을 `0226+`로 배정한다. draft는 Alembic graph나 application
 migration graph에 포함하지 않으며 실행 대상이 아니다.
 
 ## 3. 목표 물리 모델

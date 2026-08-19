@@ -6,13 +6,17 @@ import {
 } from "@playwright/test";
 
 import {
+  C7_EXTERNAL_SYSTEM,
+  C7_KMA_SYNC_SCOPE,
   KMA_DATASET_KEY,
   KMA_PROVIDER,
   assertKmaDagsterWorkerJobDefinition,
   assertExactKmaPreviewResponse,
   assertKmaOnlyTerminalProviderScopes,
   bootstrapC7SameOriginPage,
+  assertC7ScopeIsClean,
   buildKmaRequest,
+  fillKmaRequestDialogScope,
   buildPoiTargetBody,
   createCleanupState,
   destructiveGateBlocker,
@@ -61,13 +65,7 @@ async function createCapRequestFromUi(
     name: "갱신 요청 생성",
     exact: true,
   });
-  await dialog.getByLabel("provider", { exact: true }).fill(KMA_PROVIDER);
-  await dialog
-    .getByLabel("dataset_key", { exact: true })
-    .fill(KMA_DATASET_KEY);
-  await dialog
-    .getByLabel("sync_scope (선택)", { exact: true })
-    .fill(syncScope);
+  await fillKmaRequestDialogScope(dialog, syncScope);
   const previewResponsePromise = page.waitForResponse((response) => {
     return (
       response.request().method() === "POST" &&
@@ -211,10 +209,14 @@ test.describe("C7 KMA grid cap destructive live E2E", () => {
       description: `runtime KMA cap+1인 POI target ${cap + 1}개 생성`,
     });
 
-    const externalSystem = `e2e-${RUN_ID}`;
-    const syncScope = `external_system:${externalSystem}`;
+    // 이름은 catalog 선언(`0224_c7_external_system_scope`)과 같아야 한다 —
+    // run마다 만들면 선언되지 않은 scope라 preview/create가 422다. run 격리는
+    // `target_key`가 맡는다.
+    const externalSystem = C7_EXTERNAL_SYSTEM;
+    const syncScope = C7_KMA_SYNC_SCOPE;
     const state = createCleanupState("cap", RUN_ID);
     await bootstrapC7SameOriginPage(page, "/ops/pipeline");
+    await assertC7ScopeIsClean(page);
     await assertKmaDagsterWorkerJobDefinition();
 
     await withC7Cleanup(

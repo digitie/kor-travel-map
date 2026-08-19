@@ -19,6 +19,32 @@ T-VN-M01을 별도 구현 작업으로 연다. migration/API/admin UI/OpenAPI/Pi
 freeze를 설계 보고서의 단일 cutover 순서로 구현하고, ADR-093의 accepted 전환은 그 구현·계약 검증과
 함께 한다. 이 M00 PR에는 M01 코드를 섞지 않는다.
 
+## 2026-08-19 — C7 인수 재개: KMA live 3종이 ADR-088 계약과 어긋나 있었다
+
+`025be0e6`(PR #1010)로 prod를 올려 strict runner를 돌리자 `ops-c7-read-auth`가 7/7로 통과했고
+(#1010이 실제로 고쳤다), 실패가 `ops-c7-kma-active-write`로 옮겨갔다. 비-redact 재현 하네스로
+근본원인을 확정했다 — dialog의 `provider` 자유입력을 60초 기다리다 죽는다.
+
+원인은 UI가 아니라 **스펙이 stale**한 것이다. C7이 마지막으로 full green이던 `d5693269`(07-26)는
+ADR-088(#966, 08-11) **이전**이고, ADR-088은 제출 가능한 `sync_scope`의 정본을
+`provider_dataset_operation_scopes` 선언으로 못 박았다(`feature_update_repo`의 exact join +
+request/job/sync-state/upload 4종 exact FK). 스펙은 여전히 run마다
+`external_system:e2e-<run-id>`를 만들고 있었고 그건 선언될 수 없는 값이다.
+
+`target_grids`로 바꾸지 않았다 — 그 scope는 "모든 활성 cache target + extra points"라 PinVi가
+target을 등록하는 순간 인수가 운영 대상에 provider I/O를 내고 fingerprint가 비결정적이 되며,
+`provider_sync_state`의 정본 cursor 행을 스케줄 job과 공유한다. 대신 migration
+`0224_c7_external_system_scope`로 KMA 초단기실황에 `external_system:c7-e2e`를 선언하고, 스펙 3종이
+그 값을 쓰되 run 격리는 기존 `target_key`가 맡는다. **T-VN-40C 예약 revision은 `0224`→`0225`로
+재배정했다** — 40C의 선행조건 P1이 T-VN-40 receipt complete이고 그건 이 C7 인수 뒤에야 참이 되므로,
+40C가 먼저 착지할 수 없다.
+
+### 다음 한 작업
+
+이 PR의 CI green → 머지 → prod 재배포(manager `.env`의 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를
+`0224_c7_external_system_scope`로 올리고 소스 스냅샷 재취득 — 안 올리면 API entrypoint가 head
+불일치로 fail-closed 정지한다) → `ktdctl pinvi-pair capture` → rebind → strict runner로 ③ 마무리.
+
 ## 2026-08-19 — T-VN-H46G buildx provenance 구현·전문 리뷰 완료
 
 buildx 공통 경계에서 API·admin·Dagster web·daemon image 모두에 clean HEAD의 exact 40자 SHA를
@@ -70,7 +96,7 @@ Map prod는 `817cfeae`, PinVi prod는 `5cad141a`로 정렬됐다.
 - 완료 이력은 `tasks-done.md`로 이관했다. 남은 H46 계열 작업은 별도
   `T-VN-H46G`(buildx OCI commit provenance label)뿐이다.
 
-## 2026-08-18 — T-VN-41S bounded snapshot 1차 구현, 0224 migration barrier
+## 2026-08-18 — T-VN-41S bounded snapshot 1차 구현, migration barrier
 
 #922의 server cursor 2-pass capture, incremental Merkle v1, 1,000행 INSERT, item 1,000,000/512 MiB
 admission, generic→reconciliation material 재사용과 relation/index/dead tuple/vacuum 관측을
@@ -83,7 +109,8 @@ T-VN-41 receipt는 `pending`이다. 과거 후보 artifact는 이력으로 보�
 
 ### 다음 한 작업
 
-T-VN-40C가 예약한 Alembic `0224`가 main에 착지할 때까지 migration은 만들지 않는다. 그 뒤 `0225+`로
+T-VN-40C가 예약한 Alembic `0225`(2026-08-19 재배정 — 아래 C7 항목)가 main에 착지할 때까지 migration은
+만들지 않는다. 그 뒤 `0226+`로
 receipt/material/item 정규화와 terminal retention compactor를 구현하고 실제 repository 410,
 upgrade/downgrade·ACL/catalog·EXPLAIN, n150 1M DB streaming/concurrent mutation/compaction-vacuum soak를
 통과한다. 번호 없는 DDL과 수용 matrix는
@@ -119,7 +146,7 @@ prod legacy 4,424가 전부 `curated`/bucket B라 Map 쪽 import·archive 대상
 T-VN-40 소비자 코드가 없고 DB head가 `20260804_0049`) → (2) mapping receipt 봉인(root `69eb85ec…`,
 count 4424) → (3) legacy-preflight `ready=true` 기록(backfill은 plan 0행이라 no-op) → (4) canonical collection 59개를
 PinVi notice plan으로 import(2026-08-18 사용자 결정). 그다음 ③ soak/live e2e → ④ receipt complete
-(선행: PinVi user spec 재-vendor = PinVi PR #451) → ⑤ 40C 구현 PR + `0224`.
+(선행: PinVi user spec 재-vendor = PinVi PR #451) → ⑤ 40C 구현 PR + `0225`.
 
 ③ 착수 전 결정 하나가 남아 있다: 런북 `c7-prod-live-e2e.md` §2.1 step 8이 부르는
 `ktdctl pinvi-pair capture --verified-compatible --build`가 **docker-manager CLI에 없다**(문서에만 남아 있고

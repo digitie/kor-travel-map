@@ -16,6 +16,8 @@ import {
 } from "./_ops-c7-dagster-sensor";
 import {
   DATASET_DETAIL_FETCH_TIMEOUT_MS,
+  C7_EXTERNAL_SYSTEM,
+  C7_KMA_SYNC_SCOPE,
   KMA_DATASET_KEY,
   KMA_PROVIDER,
   assertKmaDagsterWorkerJobDefinition,
@@ -23,7 +25,9 @@ import {
   assertExactNonTerminalFeatureUpdateRequests,
   assertKmaOnlyTerminalProviderScopes,
   bootstrapC7SameOriginPage,
+  assertC7ScopeIsClean,
   buildKmaRequest,
+  fillKmaRequestDialogScope,
   buildPoiTargetBody,
   createCleanupState,
   createKmaRequest,
@@ -88,9 +92,7 @@ async function previewEmptyRequestFromUi(
   // (active-write는 가벼운 페이지 + 60s one-shot이라 회피). 앱 fix로 dry-run은 강제 refetch를
   // skip(캐시로 사전검증)해 POST가 즉시 발사되므로, active-write처럼 fill 1회 + click 1회로
   // 단순화한다. 폼 입력은 부모 re-render로 리셋되지 않는다(controlled input, 무 key remount).
-  await dialog.getByLabel("provider").fill(KMA_PROVIDER);
-  await dialog.getByLabel("dataset_key").fill(KMA_DATASET_KEY);
-  await dialog.getByLabel("sync_scope (선택)").fill(syncScope);
+  await fillKmaRequestDialogScope(dialog, syncScope);
   const responsePromise = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&
@@ -241,8 +243,11 @@ test.describe("C7 KMA empty exact scope destructive live E2E", () => {
   }, testInfo) => {
     requireBarrierGates(testInfo);
     test.setTimeout(TEST_TIMEOUT);
-    const externalSystem = `e2e-${RUN_ID}`;
-    const syncScope = `external_system:${externalSystem}`;
+    // 이름은 catalog 선언(`0224_c7_external_system_scope`)과 같아야 한다 —
+    // run마다 만들면 선언되지 않은 scope라 preview/create가 422다. run 격리는
+    // `target_key`가 맡는다.
+    const externalSystem = C7_EXTERNAL_SYSTEM;
+    const syncScope = C7_KMA_SYNC_SCOPE;
     const reason = `C7 ${RUN_ID} empty scope`;
     const target = { externalSystem, targetKey: `${RUN_ID}-target` };
     const targetBody = buildPoiTargetBody(126.978, 37.5665, {
@@ -251,6 +256,7 @@ test.describe("C7 KMA empty exact scope destructive live E2E", () => {
     });
     const state = createCleanupState("empty", RUN_ID);
     await bootstrapC7SameOriginPage(page, "/ops/pipeline");
+    await assertC7ScopeIsClean(page);
     const kmaIdentity = await resolveKmaDatasetIdentity(page);
     await assertKmaDagsterWorkerJobDefinition();
     const controller = await createQueueSensorController();
