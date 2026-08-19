@@ -1,3 +1,7 @@
+import {
+  POI_REFRESH_POLICY_LABELS,
+  POI_SCOPE_MODE_LABELS,
+} from "../../src/lib/poi-cache-target-labels";
 import { randomUUID } from "node:crypto";
 import { chmod, open, readFile, rename, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -1066,8 +1070,11 @@ test.describe("/admin/poi-cache-targets POI cache target write round-trip (live)
 
         const row = rowContaining(page, CREATE_NAME);
         await expect(row).toBeVisible(T);
-        await expect(row).toContainText("center_radius");
-        await expect(row).toContainText("provider_default");
+        // 화면은 raw enum을 렌더하지 않는다(design.md §Copy) — 정본 표에서 읽는다.
+        await expect(row).toContainText(POI_SCOPE_MODE_LABELS.center_radius);
+        await expect(row).toContainText(
+          POI_REFRESH_POLICY_LABELS.provider_default,
+        );
         // enabled 컬럼은 StatusBadge(update_enabled→"active") → statusLabel로 "활성" 렌더.
         await expect(row).toContainText("활성");
 
@@ -1673,7 +1680,9 @@ test.describe("/admin/poi-cache-targets POI cache target write round-trip (live)
         await gotoPoiTargets(page);
         const row = rowContaining(page, name);
         await expect(row).toBeVisible(T);
-        await expect(row).toContainText("sigungu_by_radius");
+        await expect(row).toContainText(
+          POI_SCOPE_MODE_LABELS.sigungu_by_radius,
+        );
       });
 
       await test.step("center_radius로 갱신하면 GET·admin이 center_radius로 바뀌고 이전 값은 사라진다", async () => {
@@ -1695,8 +1704,10 @@ test.describe("/admin/poi-cache-targets POI cache target write round-trip (live)
 
         await refreshList(page);
         const row = rowContaining(page, name);
-        await expect(row).toContainText("center_radius");
-        await expect(row).not.toContainText("sigungu_by_radius");
+        await expect(row).toContainText(POI_SCOPE_MODE_LABELS.center_radius);
+        await expect(row).not.toContainText(
+          POI_SCOPE_MODE_LABELS.sigungu_by_radius,
+        );
       });
     } finally {
       if (created) {

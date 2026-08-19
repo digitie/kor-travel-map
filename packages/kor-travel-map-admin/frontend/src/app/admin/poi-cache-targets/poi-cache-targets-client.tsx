@@ -36,18 +36,15 @@ import {
   required,
   validateForm,
 } from "@/lib/form-validation";
+import {
+  POI_REFRESH_POLICY_LABELS,
+  POI_SCOPE_MODE_LABELS,
+} from "@/lib/poi-cache-target-labels";
 
-// enum → 한글 라벨(design.md §Copy — enum 값을 raw로 렌더하지 않는다). 값 정본은 API 스키마.
-const SCOPE_MODE_LABELS: Record<string, string> = {
-  center_radius: "중심점 반경",
-  sigungu_by_radius: "시군구 반경",
-};
-const REFRESH_POLICY_LABELS: Record<string, string> = {
-  provider_default: "provider 기본",
-  follow_system: "시스템 추종",
-  allow_targeted: "대상 갱신 허용",
-  disabled: "비활성화",
-};
+// enum → 한글 라벨의 정본은 `@/lib/poi-cache-target-labels`다. live 스펙이 같은 표를
+// 읽어야 라벨 변경이 스펙 드리프트로 남지 않는다.
+const SCOPE_MODE_LABELS = POI_SCOPE_MODE_LABELS;
+const REFRESH_POLICY_LABELS = POI_REFRESH_POLICY_LABELS;
 const FEATURE_KIND_LABELS: Record<string, string> = {
   place: "장소",
   event: "행사",
