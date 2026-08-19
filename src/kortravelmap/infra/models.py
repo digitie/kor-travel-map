@@ -224,7 +224,7 @@ class FeatureRow(Base):
     __table_args__ = (
         CheckConstraint(
             "kind IN ('place','event','notice','price','weather','route','area')",
-            name="features_kind",
+            name=conv("ck_features_ck_features_kind"),
         ),
         CheckConstraint(
             "lifecycle_state IN ('active','retired')",
@@ -242,12 +242,12 @@ class FeatureRow(Base):
             "lifecycle_state = 'active' OR publication_state = 'suppressed'",
             name="state_tuple",
         ),
-        CheckConstraint("row_revision >= 1", name="ck_features_row_revision"),
+        CheckConstraint("row_revision >= 1", name=conv("ck_features_row_revision")),
         CheckConstraint(
             "coord IS NULL OR ("
             "ST_X(coord) BETWEEN 124.0 AND 132.0 AND "
             "ST_Y(coord) BETWEEN 33.0 AND 39.5)",
-            name="features_coord_pair",
+            name=conv("ck_features_ck_features_coord_pair"),
         ),
         CheckConstraint(
             "("
@@ -255,7 +255,7 @@ class FeatureRow(Base):
             ") OR ("
             "coord IS NOT NULL AND coord_precision_digits BETWEEN 3 AND 8"
             ")",
-            name="coord_precision",
+            name=conv("ck_features_ck_features_coord_precision"),
         ),
         Index(
             "idx_features_coord_gist",
@@ -375,9 +375,7 @@ class FeatureRow(Base):
         UniqueConstraint("feature_uuid", name=conv("uq_features_feature_uuid")),
         # T-VN-32C(0083) — 파생 CHECK는 해제됐고(비파생 UUIDv7 generator),
         # 복합 UNIQUE가 alias 사본 일치 FK의 참조 대상이 된다.
-        UniqueConstraint(
-            "feature_id", "feature_uuid", name=conv("uq_features_identity_pair")
-        ),
+        UniqueConstraint("feature_id", "feature_uuid", name=conv("uq_features_identity_pair")),
         # T-VN-35A(0084) — typed subtype의 배타 arc 참조 대상. subtype 행이
         # (feature_id, kind) 복합 FK로 이 UNIQUE를 참조하고 각자 kind 상수
         # CHECK를 가지므로 ① 한 feature는 최대 한 subtype에만 존재하고
@@ -609,7 +607,7 @@ def _subtype_table_args(kind: str, *extra: Any) -> tuple[Any, ...]:
     """subtype 공통 제약 — kind 상수 CHECK + 배타 arc FK + identity 사본 FK."""
     table = f"feature_{kind}s"
     return (
-        CheckConstraint(f"kind = '{kind}'", name=f"ck_{table}_kind"),
+        CheckConstraint(f"kind = '{kind}'", name=conv(f"ck_{table}_kind")),
         ForeignKeyConstraint(
             ["feature_id", "kind"],
             ["feature.features.feature_id", "feature.features.kind"],
@@ -676,7 +674,7 @@ class FeatureEventRow(_FeatureSubtypeBase):
         "event",
         CheckConstraint(
             "starts_on IS NULL OR ends_on IS NULL OR starts_on <= ends_on",
-            name="ck_feature_events_period",
+            name=conv("ck_feature_events_period"),
         ),
         Index(
             "idx_feature_events_period",
@@ -721,7 +719,7 @@ class FeatureNoticeRow(_FeatureSubtypeBase):
         "notice",
         CheckConstraint(
             "severity IS NULL OR severity BETWEEN 0 AND 5",
-            name="ck_feature_notices_severity",
+            name=conv("ck_feature_notices_severity"),
         ),
         Index(
             "idx_feature_notices_validity",
@@ -836,15 +834,15 @@ class FeatureAliasRow(Base):
     __table_args__ = (
         CheckConstraint(
             "alias <> '' AND alias = btrim(alias)",
-            name=conv("ck_feature_aliases_alias_canonical"),
+            name=conv("ck_feature_aliases_ck_feature_aliases_alias_canonical"),
         ),
         CheckConstraint(
             "alias_kind <> '' AND alias_kind = btrim(alias_kind)",
-            name=conv("ck_feature_aliases_kind_canonical"),
+            name=conv("ck_feature_aliases_ck_feature_aliases_kind_canonical"),
         ),
         CheckConstraint(
             "alias_kind IN ('legacy_feature_id')",
-            name=conv("ck_feature_aliases_alias_kind"),
+            name=conv("ck_feature_aliases_ck_feature_aliases_alias_kind"),
         ),
         # T-VN-32C(0083) — 파생 CHECK 해제 후의 선언적 사본 일치: alias 행의
         # (feature_id, feature_uuid)는 정본 행의 쌍과 정확히 같아야 한다.
@@ -905,25 +903,25 @@ class ProviderDatasetRow(Base):
         CheckConstraint(
             "provider <> '' AND provider = btrim(provider) "
             "AND provider = normalize(provider, NFC) AND length(provider) <= 112",
-            name="ck_provider_datasets_provider_canonical",
+            name=conv("ck_provider_datasets_provider_canonical"),
         ),
         CheckConstraint(
             "dataset_key <> '' AND dataset_key = btrim(dataset_key) "
             "AND dataset_key = normalize(dataset_key, NFC) AND length(dataset_key) <= 112",
-            name="ck_provider_datasets_dataset_key_canonical",
+            name=conv("ck_provider_datasets_dataset_key_canonical"),
         ),
         CheckConstraint(
             "display_name <> '' AND display_name = btrim(display_name) "
             "AND display_name = normalize(display_name, NFC) AND length(display_name) <= 256",
-            name="ck_provider_datasets_display_name_canonical",
+            name=conv("ck_provider_datasets_display_name_canonical"),
         ),
         CheckConstraint(
             "source_kind IN ('openapi', 'filedata', 'manual', 'system', 'standard', 'internal')",
-            name="ck_provider_datasets_source_kind",
+            name=conv("ck_provider_datasets_source_kind"),
         ),
         CheckConstraint(
             "provider_sync.is_valid_provider_dataset_capabilities(capabilities)",
-            name="ck_provider_datasets_capabilities",
+            name=conv("ck_provider_datasets_capabilities"),
         ),
         {"schema": "provider_sync"},
     )
@@ -987,15 +985,15 @@ class ProviderDatasetOperationRow(Base):
         CheckConstraint(
             "operation_key <> '' AND operation_key = btrim(operation_key) "
             "AND operation_key = normalize(operation_key, NFC) AND length(operation_key) <= 128",
-            name="ck_provider_dataset_operations_key_canonical",
+            name=conv("ck_provider_dataset_operations_key_canonical"),
         ),
         CheckConstraint(
             "operation_kind IN ('feature_load', 'refresh', 'preview')",
-            name="ck_provider_dataset_operations_kind",
+            name=conv("ck_provider_dataset_operations_kind"),
         ),
         CheckConstraint(
             "jsonb_typeof(config) = 'object'",
-            name="ck_provider_dataset_operations_config",
+            name=conv("ck_provider_dataset_operations_config"),
         ),
         Index(
             "idx_provider_dataset_operations_enabled",
@@ -1048,11 +1046,11 @@ class ProviderDatasetOperationScopeRow(Base):
         ),
         CheckConstraint(
             "operation_kind = 'refresh'",
-            name="ck_provider_dataset_operation_scopes_refresh_only",
+            name=conv("ck_provider_dataset_operation_scopes_refresh_only"),
         ),
         CheckConstraint(
             "provider_sync.is_valid_provider_dataset_sync_scope(sync_scope)",
-            name="ck_provider_dataset_operation_scopes_syntax",
+            name=conv("ck_provider_dataset_operation_scopes_syntax"),
         ),
         Index(
             "idx_provider_dataset_operation_scopes_operation",
@@ -1102,19 +1100,7 @@ class SourceEntityRow(Base):
         ),
         CheckConstraint(
             "first_seen_at <= last_seen_at",
-            name="ck_source_entities_seen_order",
-        ),
-        CheckConstraint(
-            "source_entity_type <> '' AND source_entity_type = btrim(source_entity_type) "
-            "AND source_entity_type = normalize(source_entity_type, NFC) "
-            "AND length(source_entity_type) <= 512",
-            name="ck_source_entities_type_canonical",
-        ),
-        CheckConstraint(
-            "source_entity_id <> '' AND source_entity_id = btrim(source_entity_id) "
-            "AND source_entity_id = normalize(source_entity_id, NFC) "
-            "AND length(source_entity_id) <= 512",
-            name="ck_source_entities_id_canonical",
+            name=conv("ck_source_entities_seen_order"),
         ),
         Index(
             "idx_source_entities_provider_dataset",
@@ -1148,7 +1134,7 @@ class NoticeLifecycleScopeRow(Base):
         ),
         CheckConstraint(
             "mode IN ('snapshot', 'event')",
-            name="ck_notice_lifecycle_scopes_mode",
+            name=conv("ck_notice_lifecycle_scopes_mode"),
         ),
         {"schema": "provider_sync"},
     )
@@ -1325,11 +1311,11 @@ class SourceLinkRow(Base):
             "source_role IN ('primary','base_address','base_coordinate',"
             "'enrichment','correction','duplicate_candidate','media',"
             "'weather_context')",
-            name="source_links_role",
+            name=conv("ck_source_links_ck_source_links_role"),
         ),
         CheckConstraint(
             "confidence BETWEEN 0 AND 100",
-            name="source_links_confidence",
+            name=conv("ck_source_links_ck_source_links_confidence"),
         ),
         Index(
             "idx_source_links_entity",
@@ -1386,7 +1372,7 @@ class CuratedThemeRow(Base):
     __table_args__ = (
         CheckConstraint(
             "visibility IN ('admin_only','public')",
-            name="ck_curated_themes_visibility",
+            name=conv("ck_curated_themes_visibility"),
         ),
         CheckConstraint(
             "char_length(theme_slug) BETWEEN 1 AND 128 "
@@ -1449,9 +1435,7 @@ class CuratedThemeRow(Base):
         nullable=False,
         server_default=text("'{}'::jsonb"),
     )
-    row_revision: Mapped[int] = mapped_column(
-        BigInteger, nullable=False, server_default=text("1")
-    )
+    row_revision: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("1"))
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     owner_kind: Mapped[str | None] = mapped_column(Text)
     owner_provider_dataset_id: Mapped[int | None] = mapped_column(BigInteger)
@@ -1483,19 +1467,19 @@ class CuratedSourceRow(Base):
         ),
         CheckConstraint(
             "source_kind IN ('openapi','filedata','standard','internal','manual')",
-            name="ck_curated_sources_source_kind",
+            name=conv("ck_curated_sources_source_kind"),
         ),
         CheckConstraint(
             "update_cycle IN ('realtime','daily','weekly','monthly','annual','one_time','unknown')",
-            name="ck_curated_sources_update_cycle",
+            name=conv("ck_curated_sources_update_cycle"),
         ),
         CheckConstraint(
             "provider_status IN ('implemented','provider_needed','manual_only','deprecated')",
-            name="ck_curated_sources_provider_status",
+            name=conv("ck_curated_sources_provider_status"),
         ),
         CheckConstraint(
             "row_count IS NULL OR row_count >= 0",
-            name="ck_curated_sources_row_count",
+            name=conv("ck_curated_sources_row_count"),
         ),
         # ``uq_curated_sources_dataset``(UNIQUE)가 이미 provider_dataset_id 단일
         # 열 btree를 만든다 — 0090/freeze 계약 어디에도 같은 열의 별도 index는
@@ -1534,9 +1518,7 @@ class CuratedSourceRow(Base):
         nullable=False,
         server_default=text("'implemented'"),
     )
-    row_revision: Mapped[int] = mapped_column(
-        BigInteger, nullable=False, server_default=text("1")
-    )
+    row_revision: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("1"))
     observation_revision: Mapped[int] = mapped_column(
         BigInteger, nullable=False, server_default=text("1")
     )
@@ -1566,15 +1548,15 @@ class CuratedSourceRuleRow(Base):
     __table_args__ = (
         CheckConstraint(
             "default_action IN ('candidate','curated','ignore')",
-            name="ck_curated_source_rules_action",
+            name=conv("ck_curated_source_rules_action"),
         ),
         CheckConstraint(
             "jsonb_typeof(region_scope) = 'object'",
-            name="ck_curated_source_rules_region_scope",
+            name=conv("ck_curated_source_rules_region_scope"),
         ),
         CheckConstraint(
             "detail_selector IS NULL OR jsonb_typeof(detail_selector) = 'object'",
-            name="ck_curated_source_rules_detail_selector",
+            name=conv("ck_curated_source_rules_detail_selector"),
         ),
         Index(
             "idx_curated_source_rules_enabled",
@@ -1645,9 +1627,7 @@ class CuratedSourceRuleRow(Base):
         nullable=False,
         server_default=text("true"),
     )
-    row_revision: Mapped[int] = mapped_column(
-        BigInteger, nullable=False, server_default=text("1")
-    )
+    row_revision: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("1"))
     archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     owner_kind: Mapped[str | None] = mapped_column(Text)
     owner_provider_dataset_id: Mapped[int | None] = mapped_column(BigInteger)
@@ -1676,11 +1656,11 @@ class CuratedFeatureRow(Base):
     __table_args__ = (
         CheckConstraint(
             "curation_status IN ('candidate','curated','rejected','archived')",
-            name="ck_curated_features_status",
+            name=conv("ck_curated_features_status"),
         ),
         CheckConstraint(
             "selection_origin IN ('source_rule','admin','external_api')",
-            name="ck_curated_features_selection_origin",
+            name=conv("ck_curated_features_selection_origin"),
         ),
         CheckConstraint(
             "curation_relation IN ("
@@ -1688,19 +1668,19 @@ class CuratedFeatureRow(Base):
             "'nearby_option','accessibility_support','pet_support',"
             "'family_support','theme_area_anchor'"
             ")",
-            name="ck_curated_features_curation_relation",
+            name=conv("ck_curated_features_curation_relation"),
         ),
         CheckConstraint(
             "reuse_policy IN ('allowed','blocked','manual_review')",
-            name="ck_curated_features_reuse_policy",
+            name=conv("ck_curated_features_reuse_policy"),
         ),
         CheckConstraint(
             "content_version >= 1",
-            name="ck_curated_features_content_version",
+            name=conv("ck_curated_features_content_version"),
         ),
         CheckConstraint(
             "jsonb_typeof(metadata) = 'object'",
-            name="ck_curated_features_metadata",
+            name=conv("ck_curated_features_metadata"),
         ),
         Index(
             "uq_curated_features_theme_feature_active",
@@ -1820,8 +1800,7 @@ class CurationCollectionRow(Base):
         CheckConstraint("btrim(collection_key) <> ''", name="key"),
         CheckConstraint("btrim(title) <> ''", name="title"),
         CheckConstraint(
-            "char_length(title) BETWEEN 1 AND 300 "
-            "AND char_length(edition_key) <= 100",
+            "char_length(title) BETWEEN 1 AND 300 AND char_length(edition_key) <= 100",
             name="snapshot_text_bounds",
         ),
         CheckConstraint(
@@ -1879,9 +1858,7 @@ class CurationCollectionRow(Base):
     )
     created_by: Mapped[str | None] = mapped_column(Text)
     updated_by: Mapped[str | None] = mapped_column(Text)
-    row_revision: Mapped[int] = mapped_column(
-        BigInteger, nullable=False, server_default=text("1")
-    )
+    row_revision: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("1"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -2064,9 +2041,7 @@ class CurationItemRow(Base):
     updated_by: Mapped[str | None] = mapped_column(Text)
     operator_updated_by: Mapped[str | None] = mapped_column(Text)
     operator_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    row_revision: Mapped[int] = mapped_column(
-        BigInteger, nullable=False, server_default=text("1")
-    )
+    row_revision: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("1"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
@@ -2082,13 +2057,12 @@ class CurationCutoverIdentityMappingRow(Base):
     __tablename__ = "curation_cutover_identity_mappings"
     __table_args__ = (
         CheckConstraint(
-            "mapping_kind IN "
-            "('legacy_projection','official_membership','manual_membership')",
-            name=conv("ck_curation_cutover_identity_mapping_kind"),
+            "mapping_kind IN ('legacy_projection','official_membership','manual_membership')",
+            name=conv("curation_cutover_identity_mappings_mapping_kind_check"),
         ),
         CheckConstraint(
             "source_row_hash ~ '^[0-9a-f]{64}$'",
-            name=conv("ck_curation_cutover_identity_mapping_hash"),
+            name=conv("curation_cutover_identity_mappings_source_row_hash_check"),
         ),
         UniqueConstraint(
             "curation_item_id",
@@ -2097,9 +2071,7 @@ class CurationCutoverIdentityMappingRow(Base):
         {"schema": "ops"},
     )
 
-    legacy_curated_feature_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False), primary_key=True
-    )
+    legacy_curated_feature_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
     collection_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False),
         ForeignKey("feature.curation_collections.collection_id", ondelete="RESTRICT"),
@@ -2124,17 +2096,15 @@ class CurationRuleReconcileOperationRow(Base):
     __table_args__ = (
         CheckConstraint(
             "after_rule_revision >= 1",
-            name=conv("ck_curation_rule_reconcile_operation_revisions"),
+            name=conv("curation_rule_reconcile_operations_after_rule_revision_check"),
         ),
         CheckConstraint(
-            "(before_rule_input_hash IS NULL OR "
-            "before_rule_input_hash ~ '^[0-9a-f]{64}$') AND "
             "after_rule_input_hash ~ '^[0-9a-f]{64}$'",
-            name=conv("ck_curation_rule_reconcile_operation_hashes"),
+            name=conv("curation_rule_reconcile_operations_after_rule_input_hash_check"),
         ),
         CheckConstraint(
             "operation_kind IN ('create','patch','archive')",
-            name=conv("ck_curation_rule_reconcile_operation_kind"),
+            name=conv("curation_rule_reconcile_operations_operation_kind_check"),
         ),
         CheckConstraint(
             "(operation_kind = 'create' AND before_rule_revision IS NULL "
@@ -2142,16 +2112,17 @@ class CurationRuleReconcileOperationRow(Base):
             "(operation_kind IN ('patch','archive') "
             "AND before_rule_revision IS NOT NULL "
             "AND before_rule_input_hash IS NOT NULL "
-            "AND after_rule_revision > before_rule_revision)",
+            "AND after_rule_revision >= before_rule_revision "
+            "AND after_rule_input_hash IS DISTINCT FROM before_rule_input_hash)",
             name=conv("ck_curation_rule_reconcile_operation_revision_shape"),
         ),
         CheckConstraint(
             "actor = btrim(actor) AND actor <> ''",
-            name=conv("ck_curation_rule_reconcile_operation_actor"),
+            name=conv("curation_rule_reconcile_operations_actor_check"),
         ),
         CheckConstraint(
-            "scope_member_count >= 0 AND scope_members_hash ~ '^[0-9a-f]{64}$'",
-            name=conv("ck_curation_rule_reconcile_operation_scope"),
+            "scope_members_hash ~ '^[0-9a-f]{64}$'",
+            name=conv("curation_rule_reconcile_operations_scope_members_hash_check"),
         ),
         CheckConstraint(
             "(command_id IS NOT NULL AND system_operation_key IS NULL) OR "
@@ -2212,11 +2183,11 @@ class CurationRuleReconcileScopeMemberRow(Base):
     __table_args__ = (
         CheckConstraint(
             "member_kind IN ('source_entity','feature')",
-            name=conv("ck_curation_rule_reconcile_scope_member_kind"),
+            name=conv("curation_rule_reconcile_scope_members_member_kind_check"),
         ),
         CheckConstraint(
             "member_key = btrim(member_key) AND member_key <> ''",
-            name=conv("ck_curation_rule_reconcile_scope_member_key"),
+            name=conv("curation_rule_reconcile_scope_members_member_key_check"),
         ),
         CheckConstraint(
             "before_identity_hash IS NOT NULL OR after_identity_hash IS NOT NULL",
@@ -2246,29 +2217,26 @@ class ThemeCandidateGenerationRow(Base):
     __table_args__ = (
         CheckConstraint(
             "rule_row_revision >= 1",
-            name=conv("ck_theme_candidate_generation_rule_revision"),
+            name=conv("theme_candidate_generations_rule_row_revision_check"),
         ),
         CheckConstraint(
             "generation_kind IN ('provider_full_snapshot','scoped_reconcile',"
             "'rule_reconcile','legacy_backfill')",
-            name=conv("ck_theme_candidate_generation_kind"),
+            name=conv("theme_candidate_generations_generation_kind_check"),
         ),
         CheckConstraint(
-            "rule_input_hash ~ '^[0-9a-f]{64}$' AND "
             "generation_input_set_hash ~ '^[0-9a-f]{64}$'",
-            name=conv("ck_theme_candidate_generation_hashes"),
+            name=conv("theme_candidate_generations_generation_input_set_hash_check"),
         ),
         CheckConstraint(
             "jsonb_typeof(rule_input) = 'object'",
-            name=conv("ck_theme_candidate_generation_rule_input"),
+            name=conv("theme_candidate_generations_rule_input_check"),
         ),
         CheckConstraint(
-            "observed_candidate_count >= 0 AND eligibility_removed_candidate_count >= 0",
-            name=conv("ck_theme_candidate_generation_counts"),
+            "eligibility_removed_candidate_count >= 0",
+            name=conv("theme_candidate_generations_eligibility_removed_candidate_check"),
         ),
-        UniqueConstraint(
-            "generation_key", name="theme_candidate_generations_generation_key_key"
-        ),
+        UniqueConstraint("generation_key", name="theme_candidate_generations_generation_key_key"),
         Index(
             "idx_theme_candidate_generations_rule_completed",
             "rule_id",
@@ -2287,9 +2255,7 @@ class ThemeCandidateGenerationRow(Base):
             "rule_id",
             "reconcile_operation_id",
             unique=True,
-            postgresql_where=text(
-                "generation_kind IN ('scoped_reconcile','rule_reconcile')"
-            ),
+            postgresql_where=text("generation_kind IN ('scoped_reconcile','rule_reconcile')"),
         ),
         {"schema": "feature"},
     )
@@ -2324,9 +2290,7 @@ class ThemeCandidateGenerationRow(Base):
     rule_input: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
     generation_input_set_hash: Mapped[str] = mapped_column(Text, nullable=False)
     observed_candidate_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    eligibility_removed_candidate_count: Mapped[int] = mapped_column(
-        BigInteger, nullable=False
-    )
+    eligibility_removed_candidate_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
     completed_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")
     )
@@ -2353,9 +2317,7 @@ class ThemeCandidateGenerationObservationRow(Base):
 
     generation_id: Mapped[str] = mapped_column(
         UUID(as_uuid=False),
-        ForeignKey(
-            "feature.theme_candidate_generations.generation_id", ondelete="RESTRICT"
-        ),
+        ForeignKey("feature.theme_candidate_generations.generation_id", ondelete="RESTRICT"),
         primary_key=True,
     )
     candidate_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
@@ -2390,11 +2352,11 @@ class ThemeFeatureCandidateRow(Base):
         ),
         CheckConstraint(
             "review_state IN ('open','promoted','rejected')",
-            name=conv("ck_theme_feature_candidates_review_state"),
+            name=conv("theme_feature_candidates_review_state_check"),
         ),
         CheckConstraint(
             "disposition IN ('active','merged')",
-            name=conv("ck_theme_feature_candidates_disposition_value"),
+            name=conv("theme_feature_candidates_disposition_check"),
         ),
         CheckConstraint(
             "(disposition = 'active' AND merged_into_candidate_id IS NULL "
@@ -2466,15 +2428,11 @@ class ThemeFeatureCandidateRow(Base):
     rule_input_hash: Mapped[str] = mapped_column(Text, nullable=False)
     source_record_hash: Mapped[str] = mapped_column(Text, nullable=False)
     candidate_input_hash: Mapped[str] = mapped_column(Text, nullable=False)
-    review_state: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'open'")
-    )
+    review_state: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'open'"))
     eligibility_present: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
     )
-    disposition: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'active'")
-    )
+    disposition: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'active'"))
     merged_into_candidate_id: Mapped[str | None] = mapped_column(
         UUID(as_uuid=False),
         ForeignKey("feature.theme_feature_candidates.candidate_id", ondelete="RESTRICT"),
@@ -2488,9 +2446,7 @@ class ThemeFeatureCandidateRow(Base):
     match_evidence: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, server_default=text("'{}'::jsonb")
     )
-    row_revision: Mapped[int] = mapped_column(
-        BigInteger, nullable=False, server_default=text("1")
-    )
+    row_revision: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("1"))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")
     )
@@ -2522,9 +2478,7 @@ class ThemeFeatureCandidateTransitionRow(Base):
         {"schema": "feature"},
     )
 
-    transition_id: Mapped[int] = mapped_column(
-        BigInteger, Identity(always=True), primary_key=True
-    )
+    transition_id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     candidate_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     from_feature_id: Mapped[str | None] = mapped_column(Text)
     to_feature_id: Mapped[str | None] = mapped_column(Text)
@@ -2574,23 +2528,23 @@ class CurationImportBatchRow(Base):
     __table_args__ = (
         CheckConstraint(
             "content_sha256 ~ '^[0-9a-f]{64}$'",
-            name=conv("ck_curation_import_batches_sha256"),
+            name=conv("ck_curation_import_batches_ck_curation_import_batches_sha256"),
         ),
         CheckConstraint(
             "batch_kind IN ('csv_upload','normalized_rows','forward_recovery')",
-            name=conv("ck_curation_import_batches_kind"),
+            name=conv("ck_curation_import_batches_ck_curation_import_batches_kind"),
         ),
         CheckConstraint(
             "row_count >= 0",
-            name=conv("ck_curation_import_batches_row_count"),
+            name=conv("ck_curation_import_batches_ck_curation_import_batches_row_count"),
         ),
         CheckConstraint(
             "actor = btrim(actor) AND actor <> ''",
-            name=conv("ck_curation_import_batches_actor"),
+            name=conv("ck_curation_import_batches_ck_curation_import_batches_actor"),
         ),
         CheckConstraint(
             "jsonb_typeof(metadata) = 'object'",
-            name=conv("ck_curation_import_batches_metadata"),
+            name=conv("ck_curation_import_batches_ck_curation_import_batches_metadata"),
         ),
         UniqueConstraint(
             "command_id",
@@ -2648,19 +2602,19 @@ class CurationImportRowRow(Base):
     __table_args__ = (
         CheckConstraint(
             "row_number > 0",
-            name=conv("ck_curation_import_rows_row_number"),
+            name=conv("ck_curation_import_rows_ck_curation_import_rows_row_number"),
         ),
         CheckConstraint(
             "source_row_sha256 ~ '^[0-9a-f]{64}$'",
-            name=conv("ck_curation_import_rows_sha256"),
+            name=conv("ck_curation_import_rows_ck_curation_import_rows_sha256"),
         ),
         CheckConstraint(
             "jsonb_typeof(row_payload) = 'object'",
-            name=conv("ck_curation_import_rows_payload"),
+            name=conv("ck_curation_import_rows_ck_curation_import_rows_payload"),
         ),
         CheckConstraint(
             "jsonb_typeof(provenance) = 'object'",
-            name=conv("ck_curation_import_rows_provenance"),
+            name=conv("ck_curation_import_rows_ck_curation_import_rows_provenance"),
         ),
         ForeignKeyConstraint(
             ["import_batch_id"],
@@ -2733,29 +2687,29 @@ class CurationLinkDecisionRow(Base):
     __table_args__ = (
         CheckConstraint(
             "decision_kind IN ('accepted','revoked')",
-            name=conv("ck_curation_link_decisions_kind"),
+            name=conv("ck_curation_link_decisions_ck_curation_link_decisions_kind"),
         ),
         CheckConstraint(
             # 값 목록은 `curation_link_basis`가 소유한다. 여기 열거하면 값이 늘 때
             # 세 곳(DB CHECK / 공개·merge 술어 / 이 metadata)이 따로 놀게 된다.
             f"match_basis IN ({_sql_text_literals(tuple(sorted(ALL_LINK_BASES)))})",
-            name=conv("ck_curation_link_decisions_basis"),
+            name=conv("ck_curation_link_decisions_ck_curation_link_decisions_basis"),
         ),
         CheckConstraint(
             "resolver_version = btrim(resolver_version) AND resolver_version <> ''",
-            name=conv("ck_curation_link_decisions_resolver"),
+            name=conv("ck_curation_link_decisions_ck_curation_link_decisions_resolver"),
         ),
         CheckConstraint(
             "jsonb_typeof(evidence) = 'object'",
-            name=conv("ck_curation_link_decisions_evidence"),
+            name=conv("ck_curation_link_decisions_ck_curation_link_decisions_evidence"),
         ),
         CheckConstraint(
             "actor = btrim(actor) AND actor <> ''",
-            name=conv("ck_curation_link_decisions_actor"),
+            name=conv("ck_curation_link_decisions_ck_curation_link_decisions_actor"),
         ),
         CheckConstraint(
             "supersedes_decision_id IS DISTINCT FROM decision_id",
-            name=conv("ck_curation_link_decisions_not_self_superseding"),
+            name=conv("ck_curation_link_decisions_ck_curation_link_decisions_n_5a74"),
         ),
         ForeignKeyConstraint(
             ["curation_item_id"],
@@ -2850,11 +2804,11 @@ class CuratedFeatureDetailSnapshotRow(Base):
     __table_args__ = (
         CheckConstraint(
             "content_version >= 1",
-            name="ck_curated_feature_detail_snapshots_version",
+            name=conv("ck_curated_feature_detail_snapshots_version"),
         ),
         CheckConstraint(
             "jsonb_typeof(snapshot) = 'object'",
-            name="ck_curated_feature_detail_snapshots_snapshot",
+            name=conv("ck_curated_feature_detail_snapshots_snapshot"),
         ),
         Index(
             "idx_curated_feature_detail_snapshots_updated",
@@ -2907,7 +2861,7 @@ class ProviderSyncStateRow(Base):
         ),
         CheckConstraint(
             "status IN ('active','paused','disabled','failed')",
-            name="provider_sync_state_status",
+            name=conv("ck_provider_sync_state_ck_provider_sync_state_status"),
         ),
         Index(
             "idx_provider_sync_state_next_run",
@@ -2969,7 +2923,7 @@ class FeatureConsistencyReportRow(Base):
     __table_args__ = (
         CheckConstraint(
             "severity_max IN ('OK','WARN','ERROR')",
-            name="feature_consistency_reports_severity_max",
+            name=conv("ck_feature_consistency_reports_feature_consistency_repo_55c7"),
         ),
         Index("idx_reports_batch", "batch_id"),
         Index("idx_reports_started", text("started_at DESC"), text("report_id DESC")),
@@ -3190,31 +3144,30 @@ class FeatureOverrideFieldPathRow(Base):
     __table_args__ = (
         CheckConstraint(
             "field_path <> '' AND field_path = btrim(field_path)",
-            name="ck_feature_override_field_paths_canonical",
+            name=conv("ck_feature_override_field_paths_canonical"),
         ),
         CheckConstraint(
             "feature_kind IN ('*','place','event','notice','route','area')",
-            name="ck_feature_override_field_paths_kind",
+            name=conv("ck_feature_override_field_paths_kind"),
         ),
         CheckConstraint(
             "target_relation IN ('features','feature_places','feature_events',"
             "'feature_notices','feature_routes','feature_areas')",
-            name="ck_feature_override_field_paths_relation",
+            name=conv("ck_feature_override_field_paths_relation"),
         ),
         CheckConstraint(
             "value_kind IN ('text','integer','numeric','boolean','json_object',"
             "'json_array','text_array','date','timestamptz','uuid','geometry')",
-            name="ck_feature_override_field_paths_value_kind",
+            name=conv("ck_feature_override_field_paths_value_kind"),
         ),
         CheckConstraint(
-            "geometry_type IS NULL OR geometry_type IN "
-            "('POINT','MULTILINESTRING','MULTIPOLYGON')",
-            name="ck_feature_override_field_paths_geometry_type",
+            "geometry_type IS NULL OR geometry_type IN ('POINT','MULTILINESTRING','MULTIPOLYGON')",
+            name=conv("ck_feature_override_field_paths_geometry_type"),
         ),
         CheckConstraint(
             "(value_kind = 'geometry' AND geometry_type IS NOT NULL) OR "
             "(value_kind <> 'geometry' AND geometry_type IS NULL)",
-            name="ck_feature_override_field_paths_geometry_kind",
+            name=conv("ck_feature_override_field_paths_geometry_kind"),
         ),
         UniqueConstraint(
             "feature_kind",
@@ -3249,15 +3202,15 @@ class FeatureBaseFieldValueRow(Base):
     __table_args__ = (
         CheckConstraint(
             "base_revision >= 1",
-            name="ck_feature_base_field_values_revision",
+            name=conv("ck_feature_base_field_values_revision"),
         ),
         CheckConstraint(
             "(value_json IS NULL) <> (value_geometry IS NULL)",
-            name="ck_feature_base_field_values_single_value",
+            name=conv("ck_feature_base_field_values_single_value"),
         ),
         CheckConstraint(
             "btrim(source_raw_payload_hash) <> ''",
-            name="ck_feature_base_field_values_source_hash",
+            name=conv("ck_feature_base_field_values_source_hash"),
         ),
         ForeignKeyConstraint(
             ["feature_id", "feature_uuid"],
@@ -3375,15 +3328,11 @@ class FeatureOverrideRow(Base):
     )
     source_provider_dataset_id: Mapped[int | None] = mapped_column(
         BigInteger,
-        ForeignKey(
-            "provider_sync.provider_datasets.provider_dataset_id", ondelete="SET NULL"
-        ),
+        ForeignKey("provider_sync.provider_datasets.provider_dataset_id", ondelete="SET NULL"),
     )
     source_entity_key: Mapped[str | None] = mapped_column(
         Text,
-        ForeignKey(
-            "provider_sync.source_entities.source_entity_key", ondelete="SET NULL"
-        ),
+        ForeignKey("provider_sync.source_entities.source_entity_key", ondelete="SET NULL"),
     )
     source_raw_payload_hash: Mapped[str | None] = mapped_column(Text)
     field_path: Mapped[str] = mapped_column(Text, nullable=False)
@@ -3440,7 +3389,7 @@ class ImportJobRow(Base):
     __table_args__ = (
         CheckConstraint(
             "status IN ('queued','running','done','failed','cancelled')",
-            name="ck_import_jobs_status",
+            name=conv("ck_import_jobs_ck_import_jobs_state"),
         ),
         CheckConstraint(
             "progress BETWEEN 0 AND 100",
@@ -3473,7 +3422,7 @@ class ImportJobRow(Base):
             "AND operation_key IS NOT NULL "
             "AND operation_key = btrim(operation_key) AND operation_key <> '') "
             "OR (kind <> 'provider_feature_load_run' AND operation_key IS NULL)",
-            name="ck_import_jobs_operation_key_shape",
+            name=conv("ck_import_jobs_operation_key_shape"),
         ),
         CheckConstraint(
             "dagster_run_status IS NULL OR "
@@ -3484,7 +3433,7 @@ class ImportJobRow(Base):
         ),
         CheckConstraint(
             "dataset_membership_mode IN ('root','single','multiple')",
-            name="ck_import_jobs_membership_mode",
+            name=conv("ck_import_jobs_membership_mode"),
         ),
         CheckConstraint(
             "kind NOT IN ('provider_feature_load_run','provider_feature_load') OR "
@@ -3653,7 +3602,7 @@ class C6cCancelProbeFixtureRow(Base):
             "(state = 'finalized' AND cancellation_id IS NOT NULL "
             " AND consumed_at IS NOT NULL AND finalized_at IS NOT NULL "
             " AND finalized_at >= consumed_at)",
-            name="ck_c6c_cancel_probe_fixtures_transition",
+            name=conv("ck_c6c_cancel_probe_fixtures_ck_c6c_cancel_probe_fixtur_e283"),
         ),
         ForeignKeyConstraint(
             ["job_id"],
@@ -3767,7 +3716,7 @@ class ImportJobEventRow(Base):
     __table_args__ = (
         CheckConstraint(
             "level IN ('debug','info','warning','error','critical')",
-            name="ck_import_job_events_level",
+            name=conv("ck_import_job_events_level"),
         ),
         ForeignKeyConstraint(
             ["job_id", "import_job_dataset_id"],
@@ -3811,9 +3760,7 @@ class ImportJobEventRow(Base):
             text("occurred_at DESC"),
             text("event_id DESC"),
             postgresql_include=["level"],
-            postgresql_where=text(
-                "import_job_dataset_id IS NOT NULL AND quarantined_at IS NULL"
-            ),
+            postgresql_where=text("import_job_dataset_id IS NOT NULL AND quarantined_at IS NULL"),
         ),
         {"schema": "ops"},
     )
@@ -3857,10 +3804,10 @@ class ImportJobEventClockRow(Base):
 
     __tablename__ = "import_job_event_clock"
     __table_args__ = (
-        CheckConstraint("clock_id", name="ck_import_job_event_clock_singleton"),
+        CheckConstraint("clock_id", name=conv("ck_import_job_event_clock_singleton")),
         CheckConstraint(
             "revision >= 0",
-            name="ck_import_job_event_clock_revision_nonnegative",
+            name=conv("ck_import_job_event_clock_revision_nonnegative"),
         ),
         {"schema": "ops"},
     )
@@ -4028,7 +3975,7 @@ class FeatureUpdateRequestRow(Base):
         ),
         CheckConstraint(
             "dataset_membership_mode IN ('single','multiple')",
-            name="ck_feature_update_requests_membership_mode",
+            name=conv("ck_feature_update_requests_membership_mode"),
         ),
         CheckConstraint(
             "priority BETWEEN 0 AND 1000",
@@ -4764,7 +4711,7 @@ class PipelineCancellationRunRow(Base):
     __table_args__ = (
         CheckConstraint(
             f"result IN ({_sql_text_literals(PIPELINE_CANCELLATION_RESULT_VALUES)})",
-            name="ck_pipeline_cancellation_runs_result",
+            name=conv("ck_pipeline_cancellation_runs_ck_pipeline_cancellation__5a49"),
         ),
         CheckConstraint(
             "(termination_reserved_at IS NULL OR initial_status IS NOT NULL) AND ("
@@ -4775,7 +4722,7 @@ class PipelineCancellationRunRow(Base):
             "  AND error IS NULL) OR "
             " (result = 'cancel_failed' AND terminal_status IS NULL AND error IS NOT NULL "
             "  AND jsonb_typeof(error) = 'object'))",
-            name="ck_pipeline_cancellation_runs_shape",
+            name=conv("ck_pipeline_cancellation_runs_ck_pipeline_cancellation__83d7"),
         ),
         CheckConstraint(
             "(engine_started_at IS NULL AND engine_finished_at IS NULL) OR "
@@ -4783,7 +4730,7 @@ class PipelineCancellationRunRow(Base):
             "AND engine_finished_at IS NOT NULL "
             "AND (engine_started_at IS NULL OR "
             "engine_started_at <= engine_finished_at))",
-            name="ck_pipeline_cancellation_runs_engine_times",
+            name=conv("ck_pipeline_cancellation_runs_ck_pipeline_cancellation__3296"),
         ),
         ForeignKeyConstraint(
             ["cancellation_id"],
@@ -4824,7 +4771,7 @@ class PipelineCancellationMemberRow(Base):
     __table_args__ = (
         CheckConstraint(
             f"result IN ({_sql_text_literals(PIPELINE_CANCELLATION_RESULT_VALUES)})",
-            name="ck_pipeline_cancellation_members_result",
+            name=conv("ck_pipeline_cancellation_members_ck_pipeline_cancellati_e484"),
         ),
         CheckConstraint(
             "(result = 'pending' AND terminal_status IS NULL AND error IS NULL) OR "
@@ -4833,19 +4780,19 @@ class PipelineCancellationMemberRow(Base):
             " AND terminal_status IN ('done','failed','cancelled') AND error IS NULL) OR "
             "(result = 'cancel_failed' AND terminal_status IS NULL AND error IS NOT NULL "
             " AND jsonb_typeof(error) = 'object')",
-            name="ck_pipeline_cancellation_members_shape",
+            name=conv("ck_pipeline_cancellation_members_ck_pipeline_cancellati_36d3"),
         ),
         CheckConstraint(
             "operation_kind IS NULL OR "
             "(operation_kind = btrim(operation_kind) AND operation_kind <> '')",
-            name="ck_pipeline_cancellation_members_operation_kind",
+            name=conv("ck_pipeline_cancellation_members_operation_kind"),
         ),
         CheckConstraint(
             "requires_run_termination = "
             "(dagster_run_id IS NOT NULL AND (initial_status = 'running' OR "
             "(initial_status = 'queued' AND COALESCE(operation_kind IN "
             "('provider_feature_load_run','provider_feature_load'), false))))",
-            name="ck_pipeline_cancellation_members_run_termination",
+            name=conv("ck_pipeline_cancellation_members_ck_pipeline_cancellati_c38b"),
         ),
         ForeignKeyConstraint(
             ["cancellation_id"],
@@ -4934,7 +4881,7 @@ class IntegrityObservationScopeRow(Base):
             "latest_generation >= 0 "
             "AND latest_authoritative_generation >= 0 "
             "AND latest_authoritative_generation <= latest_generation",
-            name=conv("ck_integrity_observation_scopes_generations"),
+            name=conv("ck_integrity_observation_scopes_ck_integrity_observatio_2e27"),
         ),
         {"schema": "ops"},
     )
@@ -4969,15 +4916,15 @@ class IntegrityObservationRunRow(Base):
     __table_args__ = (
         CheckConstraint(
             "generation > 0",
-            name=conv("ck_integrity_observation_runs_generation"),
+            name=conv("ck_integrity_observation_runs_ck_integrity_observation__b773"),
         ),
         CheckConstraint(
             "external_run_id = btrim(external_run_id) AND external_run_id <> ''",
-            name=conv("ck_integrity_observation_runs_external_run"),
+            name=conv("ck_integrity_observation_runs_ck_integrity_observation__c764"),
         ),
         CheckConstraint(
             "status IN ('collecting','authoritative','superseded')",
-            name=conv("ck_integrity_observation_runs_status"),
+            name=conv("ck_integrity_observation_runs_ck_integrity_observation__5835"),
         ),
         CheckConstraint(
             "source_observations >= 0 "
@@ -4986,13 +4933,13 @@ class IntegrityObservationRunRow(Base):
             "AND findings_upserted >= 0 "
             "AND findings_unique <= findings_observed "
             "AND findings_upserted <= findings_unique",
-            name=conv("ck_integrity_observation_runs_counts"),
+            name=conv("ck_integrity_observation_runs_ck_integrity_observation__0779"),
         ),
         CheckConstraint(
             "(status = 'collecting' AND completed_at IS NULL) "
             "OR (status IN ('authoritative','superseded') "
             "AND completed_at IS NOT NULL)",
-            name=conv("ck_integrity_observation_runs_completion"),
+            name=conv("ck_integrity_observation_runs_ck_integrity_observation__b94e"),
         ),
         ForeignKeyConstraint(
             ["integrity_observation_scope_id"],
@@ -5067,7 +5014,7 @@ class IntegrityFindingObservationRow(Base):
     __table_args__ = (
         CheckConstraint(
             "dedupe_key ~ '^av2_[0-9a-f]{64}$'",
-            name=conv("ck_integrity_finding_observations_key"),
+            name=conv("ck_integrity_finding_observations_ck_integrity_finding__49d3"),
         ),
         ForeignKeyConstraint(
             ["observation_run_id"],
@@ -5428,23 +5375,23 @@ class PoiCacheTargetStreamRow(Base):
             "AND external_system = "
             f"btrim(external_system, {_CANONICAL_WHITESPACE_SQL}) "
             "AND external_system = normalize(external_system, NFC)",
-            name=conv("ck_cache_target_streams_external_system"),
+            name=conv("ck_poi_cache_target_streams_ck_cache_target_streams_ext_40b1"),
         ),
         CheckConstraint(
             "btrim(consumer_id) <> '' AND char_length(consumer_id) <= 128",
-            name=conv("ck_cache_target_streams_consumer"),
+            name=conv("ck_poi_cache_target_streams_ck_cache_target_streams_consumer"),
         ),
         CheckConstraint(
             "restore_epoch > 0 AND control_version > 0",
-            name=conv("ck_cache_target_streams_versions"),
+            name=conv("ck_poi_cache_target_streams_ck_cache_target_streams_versions"),
         ),
         CheckConstraint(
             "status IN ('ready','fenced','blocked')",
-            name=conv("ck_cache_target_streams_status"),
+            name=conv("ck_poi_cache_target_streams_ck_cache_target_streams_status"),
         ),
         CheckConstraint(
             "(status = 'blocked') = (blocked_event_id IS NOT NULL)",
-            name=conv("ck_cache_target_streams_blocked"),
+            name=conv("ck_poi_cache_target_streams_ck_cache_target_streams_blocked"),
         ),
         {"schema": "ops"},
     )
@@ -5502,34 +5449,34 @@ class PoiCacheTargetRestoreFenceRow(Base):
     __table_args__ = (
         CheckConstraint(
             "request_fingerprint ~ '^[0-9a-f]{64}$'",
-            name=conv("ck_cache_target_restore_fences_fingerprint"),
+            name=conv("ck_poi_cache_target_restore_fences_ck_cache_target_rest_322d"),
         ),
         CheckConstraint(
             "restore_epoch = previous_restore_epoch + 1",
-            name=conv("ck_cache_target_restore_fences_epoch"),
+            name=conv("ck_poi_cache_target_restore_fences_ck_cache_target_rest_49d3"),
         ),
         CheckConstraint(
             "control_version = previous_control_version + 1",
-            name=conv("ck_cache_target_restore_fences_version"),
+            name=conv("ck_poi_cache_target_restore_fences_ck_cache_target_rest_62e5"),
         ),
         CheckConstraint(
             "superseded_delivery_count >= 0",
-            name=conv("ck_cache_target_restore_fences_superseded_count"),
+            name=conv("ck_poi_cache_target_restore_fences_ck_cache_target_rest_9c5b"),
         ),
         CheckConstraint(
             "invalidated_claim_count >= 0",
-            name=conv("ck_cache_target_restore_fences_invalidated_claim_count"),
+            name=conv("ck_poi_cache_target_restore_fences_ck_cache_target_rest_e080"),
         ),
         CheckConstraint(
             "(superseded_reconciliation_count = 0 "
             "AND superseded_reconciliation_request_id IS NULL) OR "
             "(superseded_reconciliation_count = 1 "
             "AND superseded_reconciliation_request_id IS NOT NULL)",
-            name=conv("ck_cache_target_restore_fences_superseded_reconciliation"),
+            name=conv("ck_poi_cache_target_restore_fences_ck_cache_target_rest_6e67"),
         ),
         CheckConstraint(
             "btrim(reason) <> '' AND char_length(reason) <= 1000",
-            name=conv("ck_cache_target_restore_fences_reason"),
+            name=conv("ck_poi_cache_target_restore_fences_ck_cache_target_rest_3328"),
         ),
         UniqueConstraint(
             "command_id",
@@ -5602,26 +5549,26 @@ class PoiCacheTargetSourceHeadRow(Base):
     __table_args__ = (
         CheckConstraint(
             "source_payload_fingerprint ~ '^[0-9a-f]{64}$'",
-            name=conv("ck_cache_target_source_heads_fingerprint"),
+            name=conv("ck_poi_cache_target_source_heads_ck_cache_target_source_b79b"),
         ),
         CheckConstraint(
             "target_key <> '' AND char_length(target_key) <= 512 "
             "AND target_key = "
             f"btrim(target_key, {_CANONICAL_WHITESPACE_SQL}) "
             "AND target_key = normalize(target_key, NFC)",
-            name=conv("ck_cache_target_source_heads_key"),
+            name=conv("ck_poi_cache_target_source_heads_ck_cache_target_source_b73c"),
         ),
         CheckConstraint(
             "state IN ('active','deleted')",
-            name=conv("ck_cache_target_source_heads_state"),
+            name=conv("ck_poi_cache_target_source_heads_ck_cache_target_source_b31f"),
         ),
         CheckConstraint(
             "restore_epoch > 0 AND source_generation > 0 AND target_sequence >= 0",
-            name=conv("ck_cache_target_source_heads_versions"),
+            name=conv("ck_poi_cache_target_source_heads_ck_cache_target_source_ebce"),
         ),
         CheckConstraint(
             "state <> 'active' OR target_id IS NOT NULL",
-            name=conv("ck_cache_target_source_heads_active_target"),
+            name=conv("ck_poi_cache_target_source_heads_ck_cache_target_source_0235"),
         ),
         ForeignKeyConstraint(
             ["target_id", "external_system", "target_key"],
@@ -5686,31 +5633,30 @@ class PoiCacheTargetSourceEventRow(Base):
     __table_args__ = (
         CheckConstraint(
             "request_fingerprint ~ '^[0-9a-f]{64}$'",
-            name=conv("ck_cache_target_source_events_request_fingerprint"),
+            name=conv("ck_poi_cache_target_source_events_ck_cache_target_sourc_fd1e"),
         ),
         CheckConstraint(
             "source_payload_fingerprint ~ '^[0-9a-f]{64}$'",
-            name=conv("ck_cache_target_source_events_payload_fingerprint"),
+            name=conv("ck_poi_cache_target_source_events_ck_cache_target_sourc_160e"),
         ),
         CheckConstraint(
             "operation IN ('upsert','delete')",
-            name=conv("ck_cache_target_source_events_operation"),
+            name=conv("ck_poi_cache_target_source_events_ck_cache_target_sourc_986c"),
         ),
         CheckConstraint(
             "outcome IN ('applied','stale')",
-            name=conv("ck_cache_target_source_events_outcome"),
+            name=conv("ck_poi_cache_target_source_events_ck_cache_target_sourc_7859"),
         ),
         CheckConstraint(
             "restore_epoch > 0 AND source_generation > 0",
-            name=conv("ck_cache_target_source_events_versions"),
+            name=conv("ck_poi_cache_target_source_events_ck_cache_target_sourc_0ce9"),
         ),
         CheckConstraint(
             "target_lock_version IS NULL OR target_lock_version > 0",
             name=conv("ck_cache_target_source_events_target_lock_version"),
         ),
         CheckConstraint(
-            "outcome <> 'applied' OR "
-            "(target_id IS NOT NULL AND target_lock_version IS NOT NULL)",
+            "outcome <> 'applied' OR (target_id IS NOT NULL AND target_lock_version IS NOT NULL)",
             name=conv("ck_cache_target_source_events_applied_target_receipt"),
         ),
         ForeignKeyConstraint(
@@ -5802,7 +5748,7 @@ class PoiCacheTargetRefreshMemberRow(Base):
     __table_args__ = (
         CheckConstraint(
             "restore_epoch > 0 AND source_generation > 0",
-            name=conv("ck_cache_target_refresh_members_versions"),
+            name=conv("ck_poi_cache_target_refresh_members_ck_cache_target_ref_d752"),
         ),
         ForeignKeyConstraint(
             ["external_system", "target_key"],
@@ -5868,8 +5814,7 @@ class PoiCacheTargetReconciliationRequestRow(Base):
             name=conv("ck_cache_target_reconciliation_requests_phase_version"),
         ),
         CheckConstraint(
-            "expected_merkle_root IS NULL OR "
-            "expected_merkle_root ~ '^[0-9a-f]{64}$'",
+            "expected_merkle_root IS NULL OR expected_merkle_root ~ '^[0-9a-f]{64}$'",
             name=conv("ck_cache_target_reconciliation_requests_expected_root"),
         ),
         CheckConstraint(
@@ -5992,11 +5937,11 @@ class PoiCacheTargetOutboxEventRow(Base):
     __table_args__ = (
         CheckConstraint(
             "source_payload_fingerprint ~ '^[0-9a-f]{64}$'",
-            name=conv("ck_cache_target_outbox_source_fingerprint"),
+            name=conv("ck_poi_cache_target_outbox_events_ck_cache_target_outbo_400d"),
         ),
         CheckConstraint(
             "payload_fingerprint ~ '^[0-9a-f]{64}$'",
-            name=conv("ck_cache_target_outbox_payload_fingerprint"),
+            name=conv("ck_poi_cache_target_outbox_events_ck_cache_target_outbo_9411"),
         ),
         CheckConstraint(
             "event_type IN ("
@@ -6005,7 +5950,7 @@ class PoiCacheTargetOutboxEventRow(Base):
             "'refresh_request.status_changed',"
             "'cache_target.reconciled'"
             ")",
-            name=conv("ck_cache_target_outbox_event_type"),
+            name=conv("ck_poi_cache_target_outbox_events_ck_cache_target_outbo_c9fd"),
         ),
         CheckConstraint(
             "restore_epoch > 0 AND ("
@@ -6016,15 +5961,15 @@ class PoiCacheTargetOutboxEventRow(Base):
             "AND target_id IS NULL AND source_generation IS NULL "
             "AND target_sequence IS NULL AND event_type = 'cache_target.reconciled' "
             "AND reconciliation_request_id IS NOT NULL))",
-            name=conv("ck_cache_target_outbox_versions"),
+            name=conv("ck_poi_cache_target_outbox_events_ck_cache_target_outbo_6652"),
         ),
         CheckConstraint(
             "event_scope IN ('target','stream')",
-            name=conv("ck_cache_target_outbox_scope"),
+            name=conv("ck_poi_cache_target_outbox_events_ck_cache_target_outbox_scope"),
         ),
         CheckConstraint(
             "jsonb_typeof(payload) = 'object'",
-            name=conv("ck_cache_target_outbox_payload"),
+            name=conv("ck_poi_cache_target_outbox_events_ck_cache_target_outbo_885c"),
         ),
         ForeignKeyConstraint(
             ["external_system", "target_key"],
@@ -6138,25 +6083,25 @@ class PoiCacheTargetOutboxClaimRow(Base):
     __table_args__ = (
         CheckConstraint(
             "request_fingerprint ~ '^[0-9a-f]{64}$'",
-            name=conv("ck_cache_target_outbox_claims_fingerprint"),
+            name=conv("ck_poi_cache_target_outbox_claims_ck_cache_target_outbo_40df"),
         ),
         CheckConstraint(
             "status IN ('active','acked','expired','invalidated')",
-            name=conv("ck_cache_target_outbox_claims_status"),
+            name=conv("ck_poi_cache_target_outbox_claims_ck_cache_target_outbo_ac7d"),
         ),
         CheckConstraint(
             "first_relay_order > 0 AND last_relay_order >= first_relay_order",
-            name=conv("ck_cache_target_outbox_claims_order"),
+            name=conv("ck_poi_cache_target_outbox_claims_ck_cache_target_outbo_d094"),
         ),
         CheckConstraint(
             "acked_through_relay_order IS NULL OR "
             "acked_through_relay_order BETWEEN first_relay_order AND last_relay_order",
-            name=conv("ck_cache_target_outbox_claims_ack_order"),
+            name=conv("ck_poi_cache_target_outbox_claims_ck_cache_target_outbo_0bdb"),
         ),
         CheckConstraint(
             "(status = 'active' AND completed_at IS NULL) OR "
             "(status <> 'active' AND completed_at IS NOT NULL)",
-            name=conv("ck_cache_target_outbox_claims_completion"),
+            name=conv("ck_poi_cache_target_outbox_claims_ck_cache_target_outbo_6de5"),
         ),
         UniqueConstraint(
             "external_system",
@@ -6215,33 +6160,33 @@ class PoiCacheTargetOutboxDeliveryRow(Base):
     __table_args__ = (
         CheckConstraint(
             "status IN ('pending','leased','retry','dead','delivered','superseded')",
-            name=conv("ck_cache_target_outbox_deliveries_status"),
+            name=conv("ck_poi_cache_target_outbox_deliveries_ck_cache_target_o_15f4"),
         ),
         CheckConstraint(
             "delivery_version > 0 AND attempt_count >= 0",
-            name=conv("ck_cache_target_outbox_deliveries_versions"),
+            name=conv("ck_poi_cache_target_outbox_deliveries_ck_cache_target_o_59b7"),
         ),
         CheckConstraint(
             "(status = 'leased') = "
             "(claim_id IS NOT NULL AND lease_token IS NOT NULL "
             "AND lease_expires_at IS NOT NULL)",
-            name=conv("ck_cache_target_outbox_deliveries_lease"),
+            name=conv("ck_poi_cache_target_outbox_deliveries_ck_cache_target_o_a10f"),
         ),
         CheckConstraint(
             "(status = 'delivered') = (delivered_at IS NOT NULL)",
-            name=conv("ck_cache_target_outbox_deliveries_delivered"),
+            name=conv("ck_poi_cache_target_outbox_deliveries_ck_cache_target_o_5f5e"),
         ),
         CheckConstraint(
             "(status = 'superseded') = (superseded_at IS NOT NULL)",
-            name=conv("ck_cache_target_outbox_deliveries_superseded"),
+            name=conv("ck_poi_cache_target_outbox_deliveries_ck_cache_target_o_1c8f"),
         ),
         CheckConstraint(
             "error_class IS NULL OR error_class IN ('transient','permanent')",
-            name=conv("ck_cache_target_outbox_deliveries_error_class"),
+            name=conv("ck_poi_cache_target_outbox_deliveries_ck_cache_target_o_28fa"),
         ),
         CheckConstraint(
             "error_fingerprint IS NULL OR error_fingerprint ~ '^[0-9a-f]{64}$'",
-            name=conv("ck_cache_target_outbox_deliveries_error_fingerprint"),
+            name=conv("ck_poi_cache_target_outbox_deliveries_ck_cache_target_o_d009"),
         ),
         Index(
             "idx_cache_target_outbox_deliveries_due",
@@ -6312,16 +6257,15 @@ class PoiCacheTargetOutboxClaimEventRow(Base):
     __table_args__ = (
         CheckConstraint(
             "relay_order > 0 AND position > 0",
-            name=conv("ck_cache_target_claim_events_order"),
+            name=conv("ck_poi_cache_target_outbox_claim_events_ck_cache_target_49fc"),
         ),
         CheckConstraint(
-            "ack_payload_fingerprint IS NULL OR "
-            "ack_payload_fingerprint ~ '^[0-9a-f]{64}$'",
-            name=conv("ck_cache_target_claim_events_fingerprint"),
+            "ack_payload_fingerprint IS NULL OR ack_payload_fingerprint ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_poi_cache_target_outbox_claim_events_ck_cache_target_7a05"),
         ),
         CheckConstraint(
             "prefix_acked_at IS NULL OR consumer_applied_at IS NOT NULL",
-            name=conv("ck_cache_target_claim_events_ack"),
+            name=conv("ck_poi_cache_target_outbox_claim_events_ck_cache_target_e719"),
         ),
         UniqueConstraint(
             "claim_id",
@@ -6337,9 +6281,7 @@ class PoiCacheTargetOutboxClaimEventRow(Base):
             "idx_cache_target_claim_events_applied_gap",
             "claim_id",
             "relay_order",
-            postgresql_where=text(
-                "consumer_applied_at IS NOT NULL AND prefix_acked_at IS NULL"
-            ),
+            postgresql_where=text("consumer_applied_at IS NOT NULL AND prefix_acked_at IS NULL"),
         ),
         {"schema": "ops"},
     )
@@ -6364,9 +6306,7 @@ class PoiCacheTargetOutboxClaimEventRow(Base):
     )
     relay_order: Mapped[int] = mapped_column(BigInteger, nullable=False)
     position: Mapped[int] = mapped_column(Integer, nullable=False)
-    consumer_applied_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
+    consumer_applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     prefix_acked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ack_payload_fingerprint: Mapped[str | None] = mapped_column(Text)
 
@@ -6378,18 +6318,18 @@ class PoiCacheTargetSnapshotRow(Base):
     __table_args__ = (
         CheckConstraint(
             "merkle_root ~ '^[0-9a-f]{64}$'",
-            name=conv("ck_cache_target_snapshots_merkle_root"),
+            name=conv("ck_poi_cache_target_snapshots_ck_cache_target_snapshots_0ecd"),
         ),
         CheckConstraint(
             "restore_epoch > 0 AND high_watermark_relay_order >= 0 "
             "AND material_high_watermark_relay_order >= 0 "
             "AND high_watermark_relay_order >= material_high_watermark_relay_order "
             "AND item_count >= 0",
-            name=conv("ck_cache_target_snapshots_counts"),
+            name=conv("ck_poi_cache_target_snapshots_ck_cache_target_snapshots_counts"),
         ),
         CheckConstraint(
             "expires_at > created_at",
-            name=conv("ck_cache_target_snapshots_expiry"),
+            name=conv("ck_poi_cache_target_snapshots_ck_cache_target_snapshots_expiry"),
         ),
         UniqueConstraint(
             "snapshot_id",
@@ -6456,15 +6396,15 @@ class PoiCacheTargetSnapshotItemRow(Base):
     __table_args__ = (
         CheckConstraint(
             "source_payload_fingerprint ~ '^[0-9a-f]{64}$'",
-            name=conv("ck_cache_target_snapshot_items_fingerprint"),
+            name=conv("ck_poi_cache_target_snapshot_items_ck_cache_target_snap_879d"),
         ),
         CheckConstraint(
             "row_number > 0 AND source_generation > 0",
-            name=conv("ck_cache_target_snapshot_items_versions"),
+            name=conv("ck_poi_cache_target_snapshot_items_ck_cache_target_snap_0ba2"),
         ),
         CheckConstraint(
             "state IN ('active','deleted')",
-            name=conv("ck_cache_target_snapshot_items_state"),
+            name=conv("ck_poi_cache_target_snapshot_items_ck_cache_target_snap_96c2"),
         ),
         ForeignKeyConstraint(
             ["snapshot_id", "external_system"],
@@ -6590,21 +6530,15 @@ class PoiCacheTargetSnapshotGcObservationRow(Base):
     referenced_items: Mapped[int] = mapped_column(BigInteger, nullable=False)
     referenced_headers: Mapped[int] = mapped_column(BigInteger, nullable=False)
     previous_observation_run_id: Mapped[str | None] = mapped_column(Text)
-    previous_observed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
+    previous_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     previous_referenced_items: Mapped[int | None] = mapped_column(BigInteger)
     previous_referenced_headers: Mapped[int | None] = mapped_column(BigInteger)
     growth_baseline_run_id: Mapped[str | None] = mapped_column(Text)
-    growth_baseline_observed_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
+    growth_baseline_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     growth_baseline_referenced_items: Mapped[int | None] = mapped_column(BigInteger)
     growth_baseline_referenced_headers: Mapped[int | None] = mapped_column(BigInteger)
     growth_baseline_eligible: Mapped[bool] = mapped_column(Boolean, nullable=False)
-    growth_min_interval_seconds: Mapped[int] = mapped_column(
-        BigInteger, nullable=False
-    )
+    growth_min_interval_seconds: Mapped[int] = mapped_column(BigInteger, nullable=False)
 
 
 class ProviderRefreshPolicyRow(Base):
@@ -6623,7 +6557,7 @@ class ProviderRefreshPolicyRow(Base):
         ),
         CheckConstraint(
             "targeted_policy IN ('follow_system','allow_targeted','disabled')",
-            name="ck_provider_refresh_targeted_policy",
+            name=conv("ck_provider_refresh_policies_ck_provider_refresh_target_9acf"),
         ),
         CheckConstraint(
             "max_concurrent > 0",
@@ -6631,11 +6565,11 @@ class ProviderRefreshPolicyRow(Base):
         ),
         CheckConstraint(
             "system_interval_seconds IS NULL OR system_interval_seconds > 0",
-            name="ck_provider_refresh_system_interval",
+            name=conv("ck_provider_refresh_policies_ck_provider_refresh_system_3f4b"),
         ),
         CheckConstraint(
             "optimal_interval_seconds IS NULL OR optimal_interval_seconds > 0",
-            name="ck_provider_refresh_optimal_interval",
+            name=conv("ck_provider_refresh_policies_ck_provider_refresh_optima_98bf"),
         ),
         CheckConstraint(
             "min_interval_seconds IS NULL OR min_interval_seconds > 0",
@@ -6924,15 +6858,15 @@ class DagsterScheduleOverrideRow(Base):
     __table_args__ = (
         CheckConstraint(
             "btrim(schedule_name) <> ''",
-            name="ck_dagster_schedule_overrides_schedule_name_not_blank",
+            name=conv("ck_dagster_schedule_overrides_ck_dagster_schedule_overr_c709"),
         ),
         CheckConstraint(
             "btrim(cron_schedule) <> ''",
-            name="ck_dagster_schedule_overrides_cron_schedule_not_blank",
+            name=conv("ck_dagster_schedule_overrides_ck_dagster_schedule_overr_886e"),
         ),
         CheckConstraint(
             "jsonb_typeof(metadata) = 'object'",
-            name="ck_dagster_schedule_overrides_metadata_object",
+            name=conv("ck_dagster_schedule_overrides_ck_dagster_schedule_overr_ac19"),
         ),
         {"schema": "ops"},
     )
@@ -7063,7 +6997,7 @@ class ManagedFileRow(Base):
             "(provider_dataset_id IS NOT NULL AND provider_name IS NULL) OR "
             "(provider_dataset_id IS NULL AND provider_name IS NOT NULL) OR "
             "(provider_dataset_id IS NULL AND provider_name IS NULL)",
-            name="ck_managed_files_owner_v2",
+            name=conv("ck_managed_files_owner_v2"),
         ),
         UniqueConstraint(
             "storage_backend",
@@ -7227,3 +7161,316 @@ class ManagedFileEventRow(Base):
         nullable=False,
         server_default=text("'{}'::jsonb"),
     )
+
+
+# 초기에는 raw SQL migration이 소유해 ORM에 빠져 있던 CHECK다. Alembic 1.19의
+# 이름 기반 comparator가 fresh DB와 target_metadata를 완전하게 대조할 수 있도록
+# DB의 실제 constraint 이름과 식을 metadata에도 등록한다. 이름은 PostgreSQL의
+# 63-byte 절단 결과까지 포함한 catalog 값이므로 naming convention을 재적용하지 않는다.
+_MIGRATION_OWNED_CHECK_CONSTRAINTS: tuple[tuple[str, str, tuple[tuple[str, str], ...]], ...] = (
+    (
+        "feature",
+        "curated_source_rules",
+        (("ck_curated_source_rules_revision_positive", "row_revision >= 1"),),
+    ),
+    (
+        "feature",
+        "curated_sources",
+        (
+            (
+                "ck_curated_sources_observation_revision_positive",
+                "observation_revision >= 1",
+            ),
+            ("ck_curated_sources_revision_positive", "row_revision >= 1"),
+        ),
+    ),
+    (
+        "feature",
+        "curated_themes",
+        (("ck_curated_themes_revision_positive", "row_revision >= 1"),),
+    ),
+    (
+        "feature",
+        "curation_collections",
+        (("ck_curation_collections_revision_positive", "row_revision >= 1"),),
+    ),
+    (
+        "feature",
+        "curation_items",
+        (("ck_curation_items_revision_positive", "row_revision >= 1"),),
+    ),
+    (
+        "feature",
+        "theme_candidate_generation_observations",
+        (
+            (
+                "theme_candidate_generation_observati_candidate_input_hash_check",
+                "candidate_input_hash ~ '^[0-9a-f]{64}$'",
+            ),
+        ),
+    ),
+    (
+        "feature",
+        "theme_candidate_generations",
+        (
+            (
+                "ck_theme_candidate_generations_origin",
+                "(generation_kind = 'provider_full_snapshot' "
+                "AND source_job_id IS NOT NULL "
+                "AND reconcile_operation_id IS NULL AND command_id IS NULL) OR "
+                "(generation_kind IN ('scoped_reconcile','rule_reconcile') "
+                "AND source_job_id IS NULL AND reconcile_operation_id IS NOT NULL) OR "
+                "(generation_kind = 'legacy_backfill' "
+                "AND source_job_id IS NULL AND reconcile_operation_id IS NULL "
+                "AND command_id IS NULL)",
+            ),
+            (
+                "theme_candidate_generations_generation_key_check",
+                "generation_key = btrim(generation_key) AND generation_key <> ''",
+            ),
+            (
+                "theme_candidate_generations_observed_candidate_count_check",
+                "observed_candidate_count >= 0",
+            ),
+            (
+                "theme_candidate_generations_rule_input_hash_check",
+                "rule_input_hash ~ '^[0-9a-f]{64}$'",
+            ),
+        ),
+    ),
+    (
+        "feature",
+        "theme_feature_candidate_transitions",
+        (
+            (
+                "ck_candidate_transition_initial_shape",
+                "(transition_kind = 'eligibility_materialize' "
+                "AND from_review_state IS NULL AND from_eligibility_present IS NULL "
+                "AND from_disposition IS NULL AND to_review_state = 'open' "
+                "AND to_eligibility_present AND to_disposition = 'active') OR "
+                "(transition_kind = 'legacy_backfill' "
+                "AND from_review_state IS NULL AND from_eligibility_present IS NULL "
+                "AND from_disposition IS NULL AND to_disposition = 'active') OR "
+                "(transition_kind = 'eligibility_refresh' "
+                "AND from_review_state = to_review_state "
+                "AND from_eligibility_present AND to_eligibility_present "
+                "AND from_disposition = 'active' AND to_disposition = 'active') OR "
+                "(transition_kind = 'eligibility_restore' "
+                "AND from_review_state = to_review_state "
+                "AND NOT from_eligibility_present AND to_eligibility_present "
+                "AND from_disposition = 'active' AND to_disposition = 'active') OR "
+                "(transition_kind = 'eligibility_remove' "
+                "AND from_review_state = to_review_state "
+                "AND from_eligibility_present AND NOT to_eligibility_present "
+                "AND from_disposition = 'active' AND to_disposition = 'active') OR "
+                "(transition_kind = 'admin_promote' "
+                "AND from_review_state = 'open' AND to_review_state = 'promoted' "
+                "AND from_eligibility_present AND to_eligibility_present "
+                "AND from_disposition = 'active' AND to_disposition = 'active') OR "
+                "(transition_kind = 'admin_reject' "
+                "AND from_review_state = 'open' AND to_review_state = 'rejected' "
+                "AND from_eligibility_present AND to_eligibility_present "
+                "AND from_disposition = 'active' AND to_disposition = 'active') OR "
+                "(transition_kind = 'merge_retarget' "
+                "AND from_review_state IS NOT NULL "
+                "AND from_eligibility_present IS NOT NULL "
+                "AND from_disposition = 'active' AND to_disposition = 'active' "
+                "AND from_feature_id IS DISTINCT FROM to_feature_id) OR "
+                "(transition_kind = 'merge_collapse' "
+                "AND from_review_state IS NOT NULL "
+                "AND from_eligibility_present IS NOT NULL "
+                "AND from_disposition = 'active' AND to_disposition = 'merged' "
+                "AND winner_candidate_id IS NOT NULL)",
+            ),
+            (
+                "ck_candidate_transition_kind_shape",
+                "(transition_kind IN ('eligibility_materialize','eligibility_refresh',"
+                "'eligibility_restore','eligibility_remove') "
+                "AND generation_id IS NOT NULL AND provider_dataset_id IS NOT NULL "
+                "AND source_record_key IS NOT NULL AND source_record_hash IS NOT NULL "
+                "AND command_id IS NULL AND collection_id IS NULL "
+                "AND curation_item_id IS NULL) OR "
+                "(transition_kind = 'admin_promote' AND generation_id IS NULL "
+                "AND command_id IS NOT NULL AND collection_id IS NOT NULL "
+                "AND curation_item_id IS NOT NULL) OR "
+                "(transition_kind = 'admin_reject' AND generation_id IS NULL "
+                "AND command_id IS NOT NULL AND collection_id IS NULL "
+                "AND curation_item_id IS NULL) OR "
+                "(transition_kind IN ('merge_retarget','merge_collapse') "
+                "AND generation_id IS NULL AND command_id IS NOT NULL) OR "
+                "(transition_kind = 'legacy_backfill' AND generation_id IS NOT NULL "
+                "AND command_id IS NULL AND actor = 'migration:tvn40')",
+            ),
+            (
+                "theme_feature_candidate_transition_candidate_row_revision_check",
+                "candidate_row_revision >= 1",
+            ),
+            (
+                "theme_feature_candidate_transitions_actor_check",
+                "actor = btrim(actor) AND actor <> ''",
+            ),
+            (
+                "theme_feature_candidate_transitions_candidate_input_hash_check",
+                "candidate_input_hash ~ '^[0-9a-f]{64}$'",
+            ),
+            (
+                "theme_feature_candidate_transitions_causation_ref_check",
+                "jsonb_typeof(causation_ref) = 'object'",
+            ),
+            (
+                "theme_feature_candidate_transitions_from_disposition_check",
+                "from_disposition IN ('active','merged')",
+            ),
+            (
+                "theme_feature_candidate_transitions_from_review_state_check",
+                "from_review_state IN ('open','promoted','rejected')",
+            ),
+            (
+                "theme_feature_candidate_transitions_reason_code_check",
+                "reason_code = btrim(reason_code) AND reason_code <> ''",
+            ),
+            (
+                "theme_feature_candidate_transitions_rule_input_hash_check",
+                "rule_input_hash ~ '^[0-9a-f]{64}$'",
+            ),
+            (
+                "theme_feature_candidate_transitions_rule_row_revision_check",
+                "rule_row_revision >= 1",
+            ),
+            (
+                "theme_feature_candidate_transitions_to_disposition_check",
+                "to_disposition IN ('active','merged')",
+            ),
+            (
+                "theme_feature_candidate_transitions_to_review_state_check",
+                "to_review_state IN ('open','promoted','rejected')",
+            ),
+            (
+                "theme_feature_candidate_transitions_transition_kind_check",
+                "transition_kind IN ('eligibility_materialize','eligibility_refresh',"
+                "'eligibility_restore','eligibility_remove','admin_promote',"
+                "'admin_reject','merge_retarget','merge_collapse','legacy_backfill')",
+            ),
+        ),
+    ),
+    (
+        "feature",
+        "theme_feature_candidates",
+        (
+            (
+                "theme_feature_candidates_candidate_input_hash_check",
+                "candidate_input_hash ~ '^[0-9a-f]{64}$'",
+            ),
+            (
+                "theme_feature_candidates_match_evidence_check",
+                "jsonb_typeof(match_evidence) = 'object'",
+            ),
+            ("theme_feature_candidates_row_revision_check", "row_revision >= 1"),
+            (
+                "theme_feature_candidates_rule_input_hash_check",
+                "rule_input_hash ~ '^[0-9a-f]{64}$'",
+            ),
+            (
+                "theme_feature_candidates_rule_row_revision_check",
+                "rule_row_revision >= 1",
+            ),
+            (
+                "theme_feature_candidates_source_record_hash_check",
+                "source_record_hash ~ '^[0-9a-f]{1,64}$'",
+            ),
+        ),
+    ),
+    (
+        "ops",
+        "curation_rule_reconcile_operations",
+        (
+            (
+                "curation_rule_reconcile_operations_before_rule_input_hash_check",
+                "before_rule_input_hash ~ '^[0-9a-f]{64}$'",
+            ),
+            (
+                "curation_rule_reconcile_operations_before_rule_revision_check",
+                "before_rule_revision >= 1",
+            ),
+            (
+                "curation_rule_reconcile_operations_scope_member_count_check",
+                "scope_member_count >= 0",
+            ),
+        ),
+    ),
+    (
+        "ops",
+        "curation_rule_reconcile_scope_members",
+        (
+            (
+                "curation_rule_reconcile_scope_member_before_identity_hash_check",
+                "before_identity_hash ~ '^[0-9a-f]{64}$'",
+            ),
+            (
+                "curation_rule_reconcile_scope_members_after_identity_hash_check",
+                "after_identity_hash ~ '^[0-9a-f]{64}$'",
+            ),
+        ),
+    ),
+    (
+        "ops",
+        "feature_overrides",
+        (
+            (
+                "ck_feature_overrides_base_revision",
+                "base_revision IS NULL OR base_revision >= 1",
+            ),
+            (
+                "ck_feature_overrides_revocation_pair",
+                "status <> 'revoked' OR (revoked_at IS NOT NULL AND btrim(revoked_by) <> '')",
+            ),
+            (
+                "ck_feature_overrides_value_storage",
+                "value_geometry IS NULL OR override_value IS NULL",
+            ),
+        ),
+    ),
+    (
+        "ops",
+        "import_jobs",
+        (
+            (
+                "ck_import_jobs_ck_import_jobs_registry_version_owner",
+                "operation_key IS NULL OR kind = 'provider_feature_load_run'",
+            ),
+            (
+                "ck_import_jobs_update_request_shape",
+                "kind <> 'feature_update_request' OR quarantined_at IS NOT NULL OR "
+                "(parent_job_id IS NULL AND load_batch_id IS NULL "
+                "AND trigger_kind = 'update_request' AND operation_key IS NULL "
+                "AND dagster_run_status IS NULL AND payload = '{}'::jsonb "
+                "AND (dagster_run_id IS NULL OR "
+                "(dagster_run_id = btrim(dagster_run_id) AND dagster_run_id <> '')) "
+                "AND (status <> 'queued' OR dagster_run_id IS NULL) "
+                "AND (status <> 'running' OR dagster_run_id IS NOT NULL))",
+            ),
+        ),
+    ),
+    (
+        "provider_sync",
+        "source_records",
+        (
+            (
+                "ck_source_records_payload_hash_canonical",
+                "raw_payload_hash ~ '^[0-9a-f]{1,64}$'",
+            ),
+            (
+                "ck_source_records_raw_data_object",
+                "jsonb_typeof(raw_data) = 'object'",
+            ),
+        ),
+    ),
+)
+
+for _schema, _table_name, _checks in _MIGRATION_OWNED_CHECK_CONSTRAINTS:
+    _table = Base.metadata.tables[f"{_schema}.{_table_name}"]
+    _existing_names = {constraint.name for constraint in _table.constraints}
+    for _name, _sqltext in _checks:
+        if _name in _existing_names:
+            raise RuntimeError(f"중복 CHECK constraint metadata: {_schema}.{_table_name}.{_name}")
+        _table.append_constraint(CheckConstraint(_sqltext, name=conv(_name)))

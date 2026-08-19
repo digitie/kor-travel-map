@@ -33,6 +33,19 @@
   2026-08-06 정책에 따라 H43/manager #148의 **실 production 전환 조건**으로 남긴다.
   이 보류는 백업본이 실제로 복원되는지를 실증하는 H44를 더 이상 열어두지 않는다.
 
+- [x] T-VN-H45-후속 — **Alembic 1.19 CHECK 비교 적응**
+
+  Alembic 1.19.1 fresh PostGIS에서 재현한 named CHECK removed 208건 / added 167건을
+  comparator 비활성화 없이 해소했다. PostgreSQL의 실제 63-byte 절단 이름까지 포함해
+  DB catalog와 ORM CHECK 373개를 1:1로 정렬하고, raw SQL migration이 소유하던 43개
+  CHECK도 metadata에 명시했다. 이 과정에서 `curation_rule_reconcile` revision 식이
+  후속 migration보다 뒤처진 실제 의미 drift 1건도 찾아 DB 정본에 맞췄다.
+
+  Alembic 의존성은 column-bound fix가 포함된 `>=1.19.1,<1.20`으로 전환했다. fresh
+  `upgrade head → alembic check`뿐 아니라 ORM 식을 임시 table에 설치해
+  `pg_get_constraintdef`로 live catalog와 비교하는 의미 gate를 추가했다. CHECK 전체
+  제외나 by-name plugin 전역 비활성화는 도입하지 않았다.
+
 - [x] T-VN-H45-후속-①~④ — **provider 다건 재시도·quota·schedule 강건화**
 
   PR [#999](https://github.com/digitie/kor-travel-map/pull/999), merge `284fd10c`. KHOA
@@ -40,7 +53,7 @@
   적용하고, data.go.kr `resultCode=22`를 비재시도 quota로 정정했다. provider
   WARNING을 비밀 노출 없이 Dagster event에 결선했고 KMA 5종·airkorea schedule에
   active-run coalescing과 7,200초 runtime 상한을 같이 고정했다. Alembic 1.19 적응은
-  독립 열린 `T-VN-H45-후속`으로 남긴다.
+  당시 독립 `T-VN-H45-후속`으로 분리했고 위 항목에서 완료했다.
 
 - [x] T-VN-C03-doc-drift — **provider module 인벤토리 표·회귀 lint 정렬**
 
