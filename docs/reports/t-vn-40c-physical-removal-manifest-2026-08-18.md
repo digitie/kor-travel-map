@@ -3,16 +3,16 @@
 - 날짜: 2026-08-18 · 상태: **v2.2 — 적대 리뷰 2명 2라운드. code/contract 렌즈 hold. DB 렌즈: DDL 순서·postcheck는 n150
   시뮬레이션(prod-shaped·fresh)에서 전부 통과, 남은 P1은 draft 기계 결함(procedure 본문 splitter → 0214 splitter로 교체,
   D4 replace 시 SECURITY DEFINER+search_path 재명시)으로 v2.2에서 반영. D4 본문(0214 patch/archive 두 procedure의
-  legacy 분기 제거본)은 40C 구현 PR에서 채운다. 실행(0224 적용)은 T-VN-40 인수 ①~④(migration → import → soak →
+  legacy 분기 제거본)은 40C 구현 PR에서 채운다. 실행(0225 적용)은 T-VN-40 인수 ①~④(migration → import → soak →
   receipt complete) 뒤에만.**
 - 근거: 상세 설계 §6.2 step 6–7, ADR-075 결정 4(soak 전 legacy 제거 금지), `docs/tasks.md` "T-VN-40 인수 —
   실태" 사전 task 3, `contracts/vnext/target-schema-v1.sql` §12(목표 상태에 legacy 없음),
   `contracts/vnext/target-invariants-v1.sql` INV-040-09(post-backfill: `to_regclass('feature.curated_features') IS NULL`).
 - 기계 판독본: `contracts/vnext/t-vn-40c-removal-manifest-v1.json`(이 문서와 1:1; typed tombstone —
-  static zero gate의 허용 위치). migration 초안: `docs/reports/tvn40c/0224_tvn40c_physical_removal.py.draft`
-  (alembic이 읽지 않는 위치. 실행 시점에 `alembic/versions/0224_…py`로 옮기고 head pin을 함께 올린다).
+  static zero gate의 허용 위치). migration 초안: `docs/reports/tvn40c/0225_tvn40c_physical_removal.py.draft`
+  (alembic이 읽지 않는 위치. 실행 시점에 `alembic/versions/0225_…py`로 옮기고 head pin을 함께 올린다).
 
-## 0. 실행 선행조건 (전부 참이어야 0224를 적용한다)
+## 0. 실행 선행조건 (전부 참이어야 0225를 적용한다)
 
 | # | 조건 | 확인 방법 |
 |---|---|---|
@@ -20,11 +20,11 @@
 | P2 | soak 동안 legacy read ↔ canonical read 대조가 끝났다. legacy read 소비자(admin legacy 화면·`/v1/curated-features*`)는 **40C PR 안에서** 삭제/전환된다(그 전에 0이 될 수는 없다 — route/repo가 40C까지 존재). public map은 이미 canonical(`/v1/curations*`)만 읽는다(§3) | §3 표 + static zero gate(§4.3)는 40C PR의 게이트 |
 | P3 | `count(feature.curated_features) == count(ops.curation_cutover_identity_mappings)` (① 이후 legacy 신규 write 0) | prod read-only SQL |
 | P4 | PinVi backfill이 mapping을 소비 완료(PinVi 쪽 receipt) — mapping 표는 **남긴다**(삭제 대상 아님) | docker-manager paired receipt |
-| P5 | prod 백업/PITR 복구점 확인(0224는 forward-only·데이터 파괴: legacy 4,424행 + detail snapshot 500행) | runbook `c7-prod-live-e2e.md` 백업 절차 |
-| P6 | dedup merge 큐에 same-theme legacy-conflict 후보 0(0224가 merge의 legacy detach 경로를 지우므로) | `ops.dedup_review_queue` pending 중 legacy 관련 0 |
+| P5 | prod 백업/PITR 복구점 확인(0225는 forward-only·데이터 파괴: legacy 4,424행 + detail snapshot 500행) | runbook `c7-prod-live-e2e.md` 백업 절차 |
+| P6 | dedup merge 큐에 same-theme legacy-conflict 후보 0(0225가 merge의 legacy detach 경로를 지우므로) | `ops.dedup_review_queue` pending 중 legacy 관련 0 |
 | P7 | **PinVi lockstep** — 40C는 `openapi.user.json`을 바꾼다(`/v1/curated-features{,/{id}}` 제거 + public catalog 2 route 제거). `test_vnext_contract_artifacts`가 T-VN-40 receipt(`deployment_receipt_task`)의 `map_user_openapi_sha256`을 현행 spec bytes에, complete 뒤엔 `pinvi_user_vendor_sha256`과 동일하게 묶으므로 PinVi가 post-40C user spec을 재vendor하고 새 paired receipt(map_commit/pinvi_commit)를 같은 rollout에서 발행해야 한다. **순서**: receipt는 40C map_commit이 존재해야 가리킬 수 있으므로 T-VN-41의 `candidate_verified → complete` 2단계 패턴을 따른다(40C PR 머지 → PinVi 재vendor PR → paired candidate receipt → live 확인 → complete). user-client `gen:types:check`도 같은 PR에서 재생성 | docker-manager paired receipt · PinVi PR · `packages/kor-travel-map-user-client` types 재생성 |
 
-## 1. DB 삭제 순서 (0224 — forward-only, 단일 트랜잭션, 각 DROP은 `RESTRICT`)
+## 1. DB 삭제 순서 (0225 — forward-only, 단일 트랜잭션, 각 DROP은 `RESTRICT`)
 
 `DROP … RESTRICT`를 쓰는 이유(설계 §6.2 step 6): 이 manifest가 모르는 dependent가 있으면 트랜잭션이 죽고
 manifest를 고친 뒤 다시 실행한다 — "trigger disable" 같은 우회는 없다.
@@ -43,7 +43,7 @@ manifest를 고친 뒤 다시 실행한다 — "trigger disable" 같은 우회�
 | D9 | `feature.reject_curation_history_mutation()` — "curation_item_id 하나만 바뀐 UPDATE 통과" 분기 | 무조건 거부로 `CREATE OR REPLACE` | 설계 §6.2 step 6 |
 | D10 | ACL: `runtime_privileges._FEATURE_TABLE_PRIVILEGES`에서 `curated_features`·`curated_feature_detail_snapshots` 제거 → 배포 후 reconcile | 코드 변경 + `reconcile_runtime_privileges` | 표 없는 항목은 phantom(#994 교훈) — 같은 PR |
 | D11 | **남기는 것**: `ops.curation_cutover_identity_mappings`(+ FK → `curation_items` ON DELETE RESTRICT, UPDATE 비cascade **및** FK → `curation_collections` ON DELETE RESTRICT) | 유지 | PinVi cutover 증거. `curation_items`는 물리 삭제하지 않는 표라(archived_at) RESTRICT가 실무를 막지 않는다 — 앱 코드에 `DELETE FROM feature.curation_items` 0건. 단 0215 quarantine release는 빈 quarantine collection을 DELETE한다 — mapping이 잡은 item의 collection이 0065 quarantine이면 막힌다(prod 오늘 quarantine collection 0 → 해당 없음; 발생 시 그 collection은 남긴다). `mapping_kind='legacy_projection'` enum 값도 유지(static zero 예외) |
-| D12 | `alembic check` 정합: `models.py`의 `CuratedFeatureRow`·`CuratedFeatureDetailSnapshotRow` 제거 **+ `CurationItemRow.legacy_projection_id` 컬럼·`uq_curation_items_legacy_projection_id` index 매핑 제거**, `_application_migration_graph.json` 재생성, head pin 0224 전수(`test_alembic_squash_boundary`·`test_alembic_metadata_consistency` 2곳·`test_docker_dagster_runtime` 2곳·`test_migration_forward_only`·`postgres-schema.md`·`KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`) | 코드 | `test_alembic_metadata_consistency` |
+| D12 | `alembic check` 정합: `models.py`의 `CuratedFeatureRow`·`CuratedFeatureDetailSnapshotRow` 제거 **+ `CurationItemRow.legacy_projection_id` 컬럼·`uq_curation_items_legacy_projection_id` index 매핑 제거**, `_application_migration_graph.json` 재생성, head pin 0225 전수(`test_alembic_squash_boundary`·`test_alembic_metadata_consistency` 2곳·`test_docker_dagster_runtime` 2곳·`test_migration_forward_only`·`postgres-schema.md`·`KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`) | 코드 | `test_alembic_metadata_consistency` |
 
 ## 2. 코드 삭제 (같은 PR — API/repo/lint/ACL)
 
@@ -107,7 +107,7 @@ manifest를 고친 뒤 다시 실행한다 — "trigger disable" 같은 우회�
 
 ## 5. 롤백 없음 — forward fix
 
-0224는 데이터를 파괴하므로 되돌리는 migration은 없다. 실패 시(RESTRICT가 미지의 dependent를 잡음): 트랜잭션
+0225는 데이터를 파괴하므로 되돌리는 migration은 없다. 실패 시(RESTRICT가 미지의 dependent를 잡음): 트랜잭션
 전체 롤백 → manifest에 dependent를 추가 → 재실행. 적용 뒤 문제는 forward fix(백업은 P5).
 
 ## 6. 열린 결정 (리뷰에서 답할 것)
@@ -117,8 +117,8 @@ manifest를 고친 뒤 다시 실행한다 — "trigger disable" 같은 우회�
 - Q2 `ops.curation_cutover_identity_mappings`의 FK를 유지할지(현재 유지 안): PinVi가 mapping을 소비 완료한 뒤에도
   identity 증거로 남기고 item 삭제를 영구히 RESTRICT — item은 원래 물리 삭제하지 않으므로 유지가 맞다고 본다.
 - Q3 `test_tvn40_identity_mapping_loader.py`·0223 loader의 dedicated-DB 테스트는 표 삭제 뒤 돌 수 없다 → 삭제. 0223
-  자체는 체인에 남는다(0104→0223 fresh replay 시 legacy 0행 → 0건 적재 → 0224가 표를 지움; **fresh DB에서도
-  0202~0224 전체가 통과해야 한다** — dedicated-DB 테스트로 고정).
+  자체는 체인에 남는다(0104→0224 fresh replay 시 legacy 0행 → 0건 적재 → 0225가 표를 지움; **fresh DB에서도
+  0202~0225 전체가 통과해야 한다** — dedicated-DB 테스트로 고정).
 - Q4 (답) canonical 경로는 `source_rule` decision을 내지 않는다 — `source_rule` basis는 이력 전용. 삭제는 유효.
 - Q5 public catalog route(`GET /v1/curated-themes`·`/v1/curated-sources`) — openapi-diff가 이미 T-VN-40C tombstone으로
   선언("retained catalog는 admin typed surface만") → 40C에서 **제거**(admin typed catalog만 유지). 이 문서 v1의 "public

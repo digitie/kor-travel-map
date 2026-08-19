@@ -1381,15 +1381,22 @@ export async function fillKmaRequestDialogScope(
   await expect(dialog.getByLabel("operation_key")).toHaveCount(0);
 }
 
-/** 인수 scope에 남은 활성 target이 없음을 확인한다(fail-closed 사전조건).
+/** 인수 scope가 깨끗함을 확인한다(fail-closed 사전조건).
  *
- *  external system 이름이 run마다 갈리지 않으므로, 앞 run이 남긴 target이 있으면
- *  `membership_fingerprint`가 이 run의 것이 아니게 된다. 조용히 이어가면 인수가
- *  "통과했는데 무엇을 통과했는지 모르는" 상태가 된다.
+ *  external system 이름이 run마다 갈리지 않으므로 앞 run의 잔존물이 이 run에 그대로
+ *  섞인다. 두 축을 본다.
+ *
+ *  1. **활성 target** — 남아 있으면 `membership_fingerprint`가 이 run의 것이 아니다.
+ *     필터(`include_deleted=false` + `update_enabled=true`)는 실행 경로가 대상을 고르는
+ *     조건(`infra/poi_cache_target_repo`의 `deleted_at IS NULL AND update_enabled`)과
+ *     같아야 한다 — 넓으면 거짓 차단, 좁으면 오염을 통과시킨다.
+ *  2. **비terminal 요청** — 같은 scope에 queued/running이 남아 있으면 이 run의 생성이
+ *     409(active scope conflict)로 죽는다. reason에 RUN_ID가 들어가 plan이 달라 활성
+ *     재사용도 되지 않는다.
+ *
+ *  `bootstrapC7SameOriginPage` 뒤에 부른다(`browserFetch`가 bootstrap을 요구한다).
  */
-export async function assertC7ScopeHasNoActiveTargets(
-  page: Page,
-): Promise<void> {
+export async function assertC7ScopeIsClean(page: Page): Promise<void> {
   const listed = requireBody(
     await listActivePoiTargets(page, C7_EXTERNAL_SYSTEM),
     200,
@@ -1399,6 +1406,11 @@ export async function assertC7ScopeHasNoActiveTargets(
     `C7 인수 scope(${C7_EXTERNAL_SYSTEM})에 앞 run의 활성 target이 남아 있다 — ` +
       "정리 후 다시 실행하라",
   ).toHaveLength(0);
+  await assertExactNonTerminalFeatureUpdateRequests(
+    page,
+    [],
+    "C7 인수 사전조건",
+  );
 }
 
 export function buildKmaRequest(

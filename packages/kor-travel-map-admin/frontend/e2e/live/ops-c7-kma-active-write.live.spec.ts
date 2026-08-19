@@ -19,7 +19,7 @@ import {
   assertExactOwnedTargetsAtServer,
   assertKmaOnlyTerminalProviderScopes,
   bootstrapC7SameOriginPage,
-  assertC7ScopeHasNoActiveTargets,
+  assertC7ScopeIsClean,
   buildKmaRequest,
   fillKmaRequestDialogScope,
   buildPoiTargetBody,
@@ -526,7 +526,7 @@ test.describe("C7 KMA active exact scope destructive live E2E", () => {
     // `target_key`가 맡는다.
     const externalSystem = C7_EXTERNAL_SYSTEM;
     const syncScope = C7_KMA_SYNC_SCOPE;
-    await assertC7ScopeHasNoActiveTargets(page);
+    await assertC7ScopeIsClean(page);
     const state = createCleanupState("active", RUN_ID);
 
     await withC7Cleanup(page, testInfo, state, async () => {

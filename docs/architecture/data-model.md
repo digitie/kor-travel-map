@@ -2743,7 +2743,7 @@ resume할 수 없다. legacy target에는 임의 epoch를 백필하지 않으며
 
 T-VN-41S는 현재 표에서 먼저 server cursor/incremental Merkle와 bounded item INSERT를 적용하고, 75분 넘게 남은
 generic snapshot을 reconciliation seal이 같은 header/item으로 재사용한다. generic/reconciliation별
-receipt와 공용 material/item을 물리 분리하는 최종 모델은 T-VN-40C 예약 `0224` 뒤 `0225+` migration이
+receipt와 공용 material/item을 물리 분리하는 최종 모델은 T-VN-40C 예약 `0225` 뒤 `0226+` migration이
 소유한다. 목표 material은 exact `(external_system, restore_epoch,
 material_high_watermark_relay_order)`, safe lower cursor, count/bytes/root와 compacted 시각을 보존한다.
 receipt는 새 snapshot ID와 kind/expiry를 갖고 material FK를 공유한다. terminal retention 뒤 item을

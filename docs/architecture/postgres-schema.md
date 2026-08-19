@@ -588,9 +588,9 @@ squash(2026-08-14) 이후 baseline과 bridge, T-VN-40 migration만 있다.
 ([README](../../alembic/legacy_versions/README.md)). **`versions/`로 되돌리지 마라** —
 bridge와 아카이브가 `0104_tvn36_final_fence`를 둘 다 선언하면 Alembic graph가 손상된다.
 
-#### 다음 migration(`0224`~) 작성
+#### 다음 migration(`0225`~) 작성
 
-1. 파일은 `alembic/versions/0224_<name>.py`,
+1. 파일은 `alembic/versions/0225_<name>.py`,
    `down_revision = "0224_c7_external_system_scope"`(= 현재 head)로 잇는다.
    **`0201`을 쓰지 마라** — 그건 bridge 파일명이고 revision id가 아니다.
 2. `0105`~`0199`처럼 아카이브와 겹치는 번호는 쓰지 않는다. 파일 정렬이 `0200`보다

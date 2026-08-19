@@ -14,7 +14,7 @@ import {
   assertExactKmaPreviewResponse,
   assertKmaOnlyTerminalProviderScopes,
   bootstrapC7SameOriginPage,
-  assertC7ScopeHasNoActiveTargets,
+  assertC7ScopeIsClean,
   buildKmaRequest,
   fillKmaRequestDialogScope,
   buildPoiTargetBody,
@@ -214,9 +214,9 @@ test.describe("C7 KMA grid cap destructive live E2E", () => {
     // `target_key`가 맡는다.
     const externalSystem = C7_EXTERNAL_SYSTEM;
     const syncScope = C7_KMA_SYNC_SCOPE;
-    await assertC7ScopeHasNoActiveTargets(page);
     const state = createCleanupState("cap", RUN_ID);
     await bootstrapC7SameOriginPage(page, "/ops/pipeline");
+    await assertC7ScopeIsClean(page);
     await assertKmaDagsterWorkerJobDefinition();
 
     await withC7Cleanup(

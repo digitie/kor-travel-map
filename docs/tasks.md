@@ -765,7 +765,7 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
   `docs/reports/t-vn-40c-physical-removal-manifest-2026-08-18.md`(선행조건 P1~P6 · DB 삭제 순서 D1~D12 ·
   코드/프론트/계약 삭제 · static zero gate · 열린 결정 Q1~Q4) + 기계 판독본
   `contracts/vnext/t-vn-40c-removal-manifest-v1.json` + migration 초안
-  `docs/reports/tvn40c/0224_tvn40c_physical_removal.py.draft`(alembic 밖). **적대 리뷰 2명 2라운드 완료(v2.2)**:
+  `docs/reports/tvn40c/0225_tvn40c_physical_removal.py.draft`(alembic 밖). **적대 리뷰 2명 2라운드 완료(v2.2)**:
   DB 렌즈가 n150 시뮬레이션(prod-shaped·fresh)으로 D1~D9 + postcheck 통과 확인, P1 반영(D3b legacy_component_identity
   trigger·D4 0214 patch/archive procedure 재작성·prosrc 검사·splitter); code/contract 렌즈 hold(Q5 public catalog 제거·
   P7 PinVi lockstep·static zero 식별자/allowlist·누락 테스트/e2e/docs). 남은 구현: 40C PR에서 D4 본문·코드/프론트/계약
@@ -819,7 +819,7 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
     불변이다 → 순수 refresh(신규 path 2 · 변경 9 · 삭제 0). 이 불일치를 잡는 것은 Map의
     `tests/unit/test_vnext_contract_artifacts.py`뿐이고 PinVi CI는 못 잡는다. receipt는 **정확히 9키**로
     바꾸고 `blocking_reason`을 지우며 freeze 상수(`ARTIFACT_SHA256`)를 같은 커밋에서 갱신한다(LF 전용).
-  - [ ] **⑤ 40C manifest physical removal 실행**(0224)
+  - [ ] **⑤ 40C manifest physical removal 실행**(0225)
 
 ## Lane B 상세 — b1 PinVi 결합·후속
 
@@ -919,7 +919,7 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
   material 재사용·관측 metric·typed future error 계약까지다. 독립 적대 리뷰 2명은 최종 head에서 P0~P3
   잔여 없음으로 GO했고, 단위/API/Dagster 집중 231개와 PostGIS stream repository 37개를 통과했다.
 
-  **후속 종료선(미완료, #922 유지)** — `0224` 착지 뒤 `0225+` 물리 모델, 양방향 공유, 실제 compactor와
+  **후속 종료선(미완료, #922 유지)** — `0225` 착지 뒤 `0226+` 물리 모델, 양방향 공유, 실제 compactor와
   repository 410, migration/ACL/EXPLAIN 및 n150 1M+ 증거까지다. 이 항목들이 끝나기 전에는 #922 또는
   T-VN-41S 전체 완료로 표시하지 않는다.
 
@@ -936,7 +936,7 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
 
   **후속 항목**
 
-  - [ ] T-VN-40C 예약 `0224` 착지 뒤 `0225+`로 receipt/material/item 정규화 migration, 양방향 material
+  - [ ] T-VN-40C 예약 `0225` 착지 뒤 `0226+`로 receipt/material/item 정규화 migration, 양방향 material
     공유, terminal retention compactor와 실제 repository 410 경로를 구현한다.
   - [ ] migration upgrade/downgrade·ACL/catalog·EXPLAIN과 n150 PostGIS 1M admitted/1M+ rejection,
     concurrent mutation safe lower cursor, compaction/vacuum soak evidence를 통과한다.

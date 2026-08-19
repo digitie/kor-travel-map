@@ -2,6 +2,37 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-19 — C7 KMA live 3종이 ADR-088 계약과 어긋나 있었다 (0224 선언)
+
+`025be0e6`로 prod를 올려 strict runner를 돌리자 `ops-c7-read-auth`는 7/7 통과(#1010이 실제로
+고쳤다)했고 실패가 `ops-c7-kma-active-write`로 옮겨갔다. §4 recovery로 BLOCKED을 풀고(audit rc=0;
+잔여는 이 실행이 만든 cache target 2건, 둘 다 API의 종료 상태인 soft delete) 비-redact 하네스로
+재현해 `getByLabel('provider')` 60s timeout을 확인했다.
+
+**첫 판단이 틀렸다.** dialog에 `external_system:<name>` 자유입력을 되살리려 했는데, 적대 리뷰 2인이
+같은 P0을 잡았고 코드로 확인됐다 — ADR-088(#966)은 제출 가능한 `sync_scope`의 정본을
+`provider_dataset_operation_scopes` 선언으로 못 박았다(`_ACTIVE_DATASET_MEMBERSHIPS_SQL`의 exact
+join + `feature_update_request_datasets`/`import_job_datasets`/`provider_sync_state`/
+`offline_uploads` 4종 exact FK). 즉 UI는 제출 가능 집합을 이미 정확히 표현하고 있었고, 내 수정은
+실패 지점을 label timeout에서 서버 422로 옮기며 제출 직전 fail-closed 가드까지 약화시켰을 것이다.
+제품 변경 4파일을 전량 revert했다.
+
+**실제 결함은 스펙이 stale한 것**이다. C7이 마지막으로 full green이던 `d5693269`(07-26)는
+ADR-088(08-11) 이전이라 스펙이 여전히 run마다 `external_system:e2e-<run-id>`를 만들고 있었다.
+`target_grids`로 바꾸지 않은 이유는 그 scope가 "모든 활성 cache target + extra points"라 (a) PinVi가
+target을 등록하는 순간 인수가 운영 대상에 provider I/O를 내고 `membership_fingerprint`가
+비결정적이 되며 (b) `provider_sync_state`의 정본 cursor 행을 스케줄 job과 공유하기 때문이다.
+오늘 prod가 비어 있어(활성 target 0, extra points 미설정) 우연히 동등해 보일 뿐이다.
+
+migration `0224_c7_external_system_scope`가 `external_system:c7-e2e`를 선언하고 스펙 3종이 그 값을
+쓴다. run 격리는 기존 `target_key`. **T-VN-40C 예약 revision은 `0224`→`0225`로 재배정했다** — 40C의
+선행조건 P1이 T-VN-40 receipt complete이라 이 인수 뒤에야 참이 되고, 40C가 먼저 착지할 수 없다.
+
+실행으로만 잡힌 결함 2건: revision id 40자가 `alembic_version.version_num varchar(32)`를 넘어
+unit/ruff/mypy는 전부 green인 채 DB에 닿아서야 죽었다(29자로 줄이고 상한을 unit 게이트로 잠갔다).
+선언이 사라지면 prod에서만 422로 죽는 문제는 seed 기반 integration 테스트로 잠갔고 migration을
+no-op으로 만들면 RED가 되는 것까지 확인했다.
+
 ## 2026-08-19 — C7 live `ops-c7-read-auth` 첫 테스트 실패 2건 수정
 
 러너 증거가 redact라 세부가 없어서, attestation의 executor 이미지로 컨테이너를 직접 띄워

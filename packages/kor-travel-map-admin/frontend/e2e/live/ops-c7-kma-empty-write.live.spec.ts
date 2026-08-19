@@ -25,7 +25,7 @@ import {
   assertExactNonTerminalFeatureUpdateRequests,
   assertKmaOnlyTerminalProviderScopes,
   bootstrapC7SameOriginPage,
-  assertC7ScopeHasNoActiveTargets,
+  assertC7ScopeIsClean,
   buildKmaRequest,
   fillKmaRequestDialogScope,
   buildPoiTargetBody,
@@ -248,7 +248,6 @@ test.describe("C7 KMA empty exact scope destructive live E2E", () => {
     // `target_key`가 맡는다.
     const externalSystem = C7_EXTERNAL_SYSTEM;
     const syncScope = C7_KMA_SYNC_SCOPE;
-    await assertC7ScopeHasNoActiveTargets(page);
     const reason = `C7 ${RUN_ID} empty scope`;
     const target = { externalSystem, targetKey: `${RUN_ID}-target` };
     const targetBody = buildPoiTargetBody(126.978, 37.5665, {
@@ -257,6 +256,7 @@ test.describe("C7 KMA empty exact scope destructive live E2E", () => {
     });
     const state = createCleanupState("empty", RUN_ID);
     await bootstrapC7SameOriginPage(page, "/ops/pipeline");
+    await assertC7ScopeIsClean(page);
     const kmaIdentity = await resolveKmaDatasetIdentity(page);
     await assertKmaDagsterWorkerJobDefinition();
     const controller = await createQueueSensorController();
