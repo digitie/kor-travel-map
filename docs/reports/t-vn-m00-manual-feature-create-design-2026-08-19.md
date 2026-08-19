@@ -1,6 +1,6 @@
 # T-VN-M00 — 수동 Feature 생성 2차 설계
 
-- 상태: draft — 전문 리뷰 1차 `HOLD` 반영, 동일 SHA 재심 대기
+- 상태: draft — 전문 리뷰 2차 finding 반영, 동일 SHA 최종 재심 대기
 - 기준: `main` `025be0e638ba`
 - 관련: ADR-066, ADR-068, ADR-070, ADR-074, ADR-075, ADR-083, ADR-086,
   ADR-090, ADR-092, ADR-093(proposed)
@@ -188,6 +188,7 @@ _domain(
     _MUTATION_RESULT,
     success_status=201,
     replay_headers=("ETag", "Location"),
+    transaction_isolation="read-committed",
 )
 ```
 
@@ -200,6 +201,11 @@ route는 terminal result를 기록하기 전에 `response.status_code=201`, stro
 `ETag=revision_etag(row_revision)`, 상대 canonical URI
 `Location=/v1/admin/features/{canonical-uuid}`를 설정한다. registry/decorator는 body와 두 header를
 같은 transaction의 terminal result에 저장한다.
+
+`CommandPolicy`가 허용하는 isolation 값에 `read-committed`를 추가하고 service는 transaction을 연
+직후, domain-command claim보다 먼저 `SET TRANSACTION ISOLATION LEVEL READ COMMITTED`를 실행한다.
+ambient DB·role default에는 의존하지 않는다. §5.3의 loser UUID 회수는 이 명시적 policy가 있어야만
+유효하다.
 
 ### 4.5 성공 body와 replay
 
@@ -305,11 +311,36 @@ vendored admin OpenAPI SHA가 없으면 Map route flag를 켜지 않는다.
 current text PK가 남아 있는 동안 UUID를 먼저 만든 뒤 다음 opaque natural key로 legacy ID를 만든다.
 
 ```text
+bjd_code = None                  # make_feature_id에서는 global
+kind = validated request kind    # place|event
+category = manual_feature_v1     # 실제 category가 아닌 bridge 상수
 source_type = user_request
 source_natural_key = manual::<canonical-feature-uuid>
+content_hash = None
 ```
 
-T-VN-39 뒤 그 `f_*` 값은 `feature.feature_aliases(alias_kind='legacy_feature_id')`에만 남는다.
+생성 위치는 DB wrapper가 아니라 Python repository다. domain command가 claim된 뒤 repository가 기존
+`candidate_feature_uuid()`로 UUIDv7을 한 번 만들고, lowercase hyphenated UUID 문자열과 위 여섯
+인자를 `make_feature_id()`에 넣는다. 실제 `category`, `legal_dong_code`, 이름, 좌표,
+`Idempotency-Key`는 이 bridge 입력에 넣지 않는다. repository가 만든 `feature_id`와
+`feature_uuid`는 request model이 아닌 server-only internal payload에 추가해 wrapper로 보낸다.
+
+고정 golden vector는 다음과 같다.
+
+```text
+uuid = 0198d9f1-7a31-7e52-8ea8-cb2548d3a891
+place -> f_global_p_9f9480adb6abef69
+event -> f_global_e_a221cb848390f739
+```
+
+`kind`는 legacy prefix와 hash에 남는 생성 시점 immutable snapshot일 뿐 canonical identity 재료가
+아니다. old route의 `_create_feature_id(body)`는 삭제하고 manual-v1 call graph에서 참조 0건을
+static test로 고정한다. unit test는 helper 인자가 UUID/kind뿐임과 name/coord/category/legal-dong/key를
+바꿔도 같은 UUID에 같은 bridge ID가 나옴을 단언한다.
+
+T-VN-39 뒤 그 exact `f_*` 값은
+`feature.feature_aliases(alias_kind='legacy_feature_id')`에만 남는다. current→target migration은
+golden vector로 만든 alias가 같은 canonical UUID를 가리키는지 검증한다.
 
 ### 5.2 DB 단일 exact-key 함수
 
@@ -337,8 +368,10 @@ category는 넣지 않는다. 같은 실체의 분류 보정이 새 identity를 
 
 ### 5.3 동시 exact claim
 
-READ COMMITTED check-then-act 프리체크는 정합성 장치로 쓰지 않는다. wrapper는 다음 statement를
-사용한다.
+READ COMMITTED check-then-act 프리체크는 정합성 장치로 쓰지 않는다. §4.4 policy가 transaction의
+첫 DB statement로 READ COMMITTED를 설정한 뒤 wrapper는
+`current_setting('transaction_isolation') = 'read committed'`를 확인한다. 다르면 claim INSERT 전에
+25001 / `ck_manual_feature_create_isolation`으로 fail-close한다. wrapper는 다음 statement를 사용한다.
 
 ```sql
 INSERT INTO feature.manual_feature_identity_claims (...)
@@ -355,6 +388,10 @@ RETURNING feature_id;
 PK·command unique 충돌은 exact conflict와 다른 invariant이므로 `ON CONFLICT`가 잡지 않는다.
 그 named 23505는 `FEATURE_IDENTITY_CONFLICT`로 분류한다. exact loser의 외부 transaction은 rollback되어
 loser command/core/subtype/transition/claim/origin/override/result가 모두 0행이다.
+
+integration test는 database와 두 login의 ambient default를 각각 `repeatable read`로 바꿔도 HTTP
+service의 첫 statement가 READ COMMITTED로 덮어쓰는지 확인한다. 반대로 wrapper를 repeatable-read
+transaction에서 직접 부르면 stable 25001로 거부되어 winner SELECT가 오래된 snapshot을 쓰지 못한다.
 
 ## 6. 저장 모델과 legacy backfill
 
@@ -447,14 +484,18 @@ fenced된 상태에서 기존 네 relation을 안정적으로 읽고, 다음 조
    `admin.feature.create`, actor는 transition principal과 같다.
 3. 같은 command에 `ops.domain_command_results`가 정확히 1행이고 status는 old success `200`,
    response `data.feature_id` UUID는 transition `feature_uuid`와 같다.
-4. 같은 `(feature_id,feature_uuid,command_id)`의 `ops.feature_overrides`에 `core.name`이 정확히
-   1행 있다. `override_value`는 JSON string, `value_geometry IS NULL`, `created_by=command.actor`다.
-5. 같은 tuple에 `core.coord`가 정확히 1행 있다. `value_geometry`는 finite SRID 4326 Point,
+4. `ops.feature_overrides`에는 `feature_uuid` 열이 없다. 따라서
+   `override.feature_id=transition.feature_id`, `override.command_id=command.command_id`,
+   `field_path='core.name'`으로 연결한 행이 정확히 1개여야 한다. `override_value`는 JSON string,
+   `value_geometry IS NULL`, `created_by=command.actor`다.
+5. 같은 실제 두 열 `(feature_id,command_id)`과 `field_path='core.coord'`로 연결한 행이 정확히
+   1개여야 한다. `value_geometry`는 finite SRID 4326 Point,
    `override_value IS NULL`, `created_by=command.actor`다.
 6. creation override의 현재 status는 판정에 쓰지 않는다. 후속 patch로 superseded/revoked되어도 같은
    command의 original row가 생성 시점 snapshot이다.
-7. transition의 UUID가 canonical UUIDv7이고, 같은 command·feature의 중복 evidence가 없으며,
-   §5.2 key로 묶은 candidate 간 exact 충돌이 없다.
+7. UUID parity는 override에서 읽지 않는다. transition `feature_uuid`가 canonical UUIDv7이고 old
+   result `data.feature_id`와 같은지 별도로 확인한다. 같은 command·feature의 중복 evidence가 없고
+   §5.2 key로 묶은 candidate 간 exact 충돌도 없어야 한다.
 
 read-only preflight는 permanent DDL/INSERT보다 먼저 실행한다. missing, duplicate, malformed,
 operation/actor/UUID 불일치, exact 충돌이 하나라도 있으면 migration 전체를 중단하고 offender
@@ -497,7 +538,7 @@ feature.create_admin_manual_feature_with_initial_state(
 
 wrapper는 `search_path=pg_catalog`이고 모든 relation/function을 schema-qualified로 부른다.
 
-1. §8의 `session_user`/membership gate를 검사한다.
+1. §4.4가 설정한 isolation과 §8의 `session_user`/membership gate를 claim보다 먼저 검사한다.
 2. `ops.domain_commands` row를 `FOR UPDATE`로 잠근다. command가 존재하고 operation이
    `admin.feature.create.manual-v1`이며 result가 아직 없고 actor가 canonical인지 검사한다.
 3. payload가 object인지, unknown/forbidden key가 없는지, caller UUID·상태·origin·principal을 싣지
@@ -557,7 +598,8 @@ parity gate는 catalog equality가 아니라 다음 의미 mapping을 검사한�
 - current canonical `o_feature_uuid` = target canonical `o_feature_id`
 - current `o_existing_feature_uuid` = target `o_existing_feature_id`
 - operation, exact-key vector, claim/origin rows, command causation, initial tuple, 201 body/header가 동일
-- current legacy text output만 target에서 제거되고 alias lookup은 유지
+- current `category` → target `category_code` payload mapping 외 API body 의미가 동일
+- current legacy text output만 target에서 제거되고 §5.1 golden alias lookup은 유지
 
 ## 8. DB 역할과 닫힌 ACL
 
@@ -565,7 +607,7 @@ parity gate는 catalog equality가 아니라 다음 의미 mapping을 검사한�
 
 | role | 속성/멤버십 | 목적 |
 |---|---|---|
-| `ktm_manual_feature_procedure_owner` | NOLOGIN NOINHERIT; schema owner가 SET 가능 | wrapper·normalizer owner, claim/origin SELECT+INSERT |
+| `ktm_manual_feature_procedure_owner` | NOLOGIN NOINHERIT; schema owner가 SET 가능 | wrapper·normalizer owner와 call-chain 최소 권한 |
 | `ktm_manual_feature_admin_executor` | NOLOGIN NOINHERIT; API login만 INHERIT, SET 불가 | wrapper EXECUTE |
 | `ktm_feature_create_provider_executor` | NOLOGIN NOINHERIT; Dagster login만 INHERIT, SET 불가 | generic create 직접 EXECUTE |
 
@@ -584,12 +626,31 @@ pg_has_role(session_user, ktm_feature_create_provider_executor, member) = false
 provider executor와 manual procedure owner뿐이다. 따라서 API login은 wrapper 밖에서 generic create를
 부를 수 없고 Dagster는 generic create만 부를 수 있으며 `manual_admin` origin을 만들 수 없다.
 
+bootstrap membership은 다음 exact option을 갖는다.
+
+```text
+ktm_manual_feature_procedure_owner -> ktm_feature_schema_owner:
+    ADMIN false, INHERIT false, SET true
+ktm_manual_feature_admin_executor -> ktm_feature_api_runtime:
+    ADMIN false, INHERIT true, SET false
+ktm_feature_create_provider_executor -> ktm_feature_dagster_runtime:
+    ADMIN false, INHERIT true, SET false
+```
+
 ### 8.2 relation·function ACL
 
 - claim/origin은 `_FEATURE_TABLE_PRIVILEGES`에 넣지 않고 `_PROTECTED_FEATURE_TABLES`에 넣는다.
   M01 runtime login은 direct SELECT/DML/TRUNCATE가 모두 없다. 생성 response는 procedure OUT을 쓴다.
-- manual procedure owner만 두 relation의 `SELECT, INSERT`를 가진다. schema owner/migrator의 migration
-  권한 외 direct writer는 없다.
+- claim/origin relation owner는 `ktm_feature_schema_owner`다. manual procedure owner만 두 relation의
+  `SELECT, INSERT`를 가진다. schema owner/migrator의 migration 권한 외 direct writer는 없다.
+- wrapper/normalizer의 target owner인 manual procedure owner에는 ownership 이전에 필요한
+  `USAGE, CREATE ON SCHEMA feature`와 `USAGE ON SCHEMA ops`를 bootstrap이 준다. NOLOGIN이고 API는
+  이 owner role을 상속하거나 SET할 수 없다.
+- wrapper call chain에는
+  `SELECT ON ops.domain_commands, ops.domain_command_results`,
+  `UPDATE(command_id) ON ops.domain_commands`(row lock에 필요한 현행 최소 패턴),
+  `EXECUTE ON feature.create_feature_with_initial_state(...)`만 추가한다. command/result DML이나
+  다른 generic procedure 권한은 주지 않는다.
 - wrapper와 normalizer는 PUBLIC/shared/Dagster에서 revoke하고 admin executor에 wrapper EXECUTE만
   grant한다. normalizer는 manual owner와 migration owner만 실행한다.
 - append-only 함수 두 개는 `_AUDIT_WRITER_FUNCTION_ACL`, wrapper/generic split은
@@ -597,7 +658,8 @@ provider executor와 manual procedure owner뿐이다. 따라서 API login은 wra
 - `src/kortravelmap/infra/db.py`의 login별 executable procedure allow-list는 API에서 generic을 빼고
   manual wrapper를 넣으며, Dagster에는 generic만 남긴다. unexpected routine 하나도 startup 실패다.
 - `docker/postgres-role-bootstrap.sh`는 role 속성, membership option, owner repair, routine owner,
-  PUBLIC revoke를 모두 재실행 가능하게 맞춘다.
+  schema grant, call-chain ACL, PUBLIC revoke를 모두 재실행 가능하게 맞춘다. runtime privilege
+  reconciler와 startup/restore closed manifest도 같은 grant 집합을 exact 비교한다.
 
 M02가 read model을 만들 때 table SELECT를 넓히지 않고 view 또는 별도 typed reader를 설계한다.
 
@@ -621,9 +683,11 @@ M02가 read model을 만들 때 table SELECT를 넓히지 않고 view 또는 별
 |---|---:|---|---|
 | wrapper `exact_conflict` | 409 | `MANUAL_FEATURE_EXACT_DUPLICATE` | constraint + `existing_feature_id` |
 | claim PK/command/composite unique, `pk_features`, `uq_features_feature_uuid`, alias identity, origin PK/command unique | 409 | `FEATURE_IDENTITY_CONFLICT` | stable constraint, known UUID만 |
+| 23514 `ck_manual_feature_create_core_identity`(`o_inserted=false` 또는 returned ID mismatch) | 409 | `FEATURE_IDENTITY_CONFLICT` | constraint + attempted canonical UUID |
 | request/exact-key named 23514, subtype/field/category/parent typed input constraint/FK | 422 | `VALIDATION_ERROR` | field + stable constraint |
 | Pydantic missing/null/type/range | 422 | `VALIDATION_ERROR` | `errors[]` field path |
 | `ck_manual_feature_create_executor` | startup fail; route 도달 시 500 | `INTERNAL_SERVER_ERROR` | constraint 비노출 |
+| 25001 `ck_manual_feature_create_isolation` | 500 | `INTERNAL_SERVER_ERROR` | request ID만 |
 | claim/origin command/composite FK, append-only 42501, audit NOT NULL 등 내부 causation 위반 | 500 | `INTERNAL_SERVER_ERROR` | request ID만 |
 | 미등록 SQLSTATE/constraint | 500 | `INTERNAL_SERVER_ERROR` | request ID만 |
 
@@ -645,6 +709,8 @@ CI reverse inventory는 CHECK·UNIQUE만 세지 않는다. current migration과 
 - explicit `RAISE ... ERRCODE/CONSTRAINT`
 - JSON/UUID/numeric/date/geometry cast path와 exception translation
 - procedure result outcome enum
+- `ck_manual_feature_create_core_identity`가 validation 집합이 아닌 identity-conflict 집합에만 있는지
+- `ck_manual_feature_create_isolation`이 internal 집합에만 있는지
 
 새 이름이나 SQLSTATE가 분류 없이 추가되면 CI가 실패한다. 실제 DB exception과 HTTP response를 함께
 검사하고 문자열 message matching은 사용하지 않는다.
@@ -657,13 +723,14 @@ T-VN-40C가 `0224`를 예약했다. M01은 번호를 지금 선점하지 않고 
 `0225+` 실제 head를 배정한다.
 
 1. old route flag false와 PinVi paired receipt 확인
-2. read-only legacy preflight와 relation lock
-3. role, normalizer, table, FK/check/unique, append-only function/trigger, wrapper 생성
-4. legacy claim INSERT, candidate count/ordered SHA-256 root 검증, origin backfill 0 단언
-5. owner·ACL reconciliation과 두 login preflight
-6. API/admin UI/OpenAPI clean cutover, registry operation/status/header 변경
-7. backup/restore manifest 및 hard-purge fence 검증
-8. 전용 token 배포 뒤 route flag와 auth/201/replay smoke
+2. 수정된 bootstrap을 먼저 실행해 NOLOGIN owner/executor와 schema ownership grant를 생성·검증
+3. read-only legacy preflight와 relation lock
+4. normalizer, table, FK/check/unique, append-only function/trigger, wrapper 생성과 owner 이전
+5. legacy claim INSERT, candidate count/ordered SHA-256 root 검증, origin backfill 0 단언
+6. owner·ACL reconciliation과 두 login preflight
+7. API/admin UI/OpenAPI clean cutover, registry operation/status/header/isolation 변경
+8. backup/restore manifest 및 hard-purge fence 검증
+9. 전용 token 배포 뒤 route flag와 auth/201/replay smoke
 
 ### 10.2 vNext freeze
 
@@ -714,15 +781,17 @@ epoch 값으로 추정하지 않는다.
 | 인증 | OpenAPI AND security; 공식 BFF 두 자격 성공; 일반 BFF·PinVi·service token·2차 token 단독 403 및 8관계 zero-write |
 | 요청 | `coord` required/non-null; missing/null/string/NaN/range 422; body ID/key/actor/state 거부 |
 | identity | 서버 UUIDv7; opaque legacy alias; patch 뒤 UUID·claim·origin 불변 |
+| current bridge | §5.1 place/event golden vector; actual category/legal-dong/name/coord/key 무관; old `_create_feature_id` call 0 |
 | exact key | NFC/ASCII lower/C collation/name byte bound/numeric half-tie current·target vector |
 | 멱등 | 같은 actor/key/body 201 exact replay + original request ID; same key/different body 409 |
 | 동시성 | 서로 다른 key의 same exact body를 두 connection barrier로 실행해 1×201, 1×409(existing UUID), loser 8관계 zero-write |
+| isolation | ambient repeatable-read에도 service 첫 statement가 READ COMMITTED; wrapper direct repeatable-read는 25001 fail-close |
 | generic collision | `o_inserted=false` 또는 returned ID mismatch를 origin 전 409로 rollback |
 | fault | claim/generic/origin/subtype/override/result 각 경계 fault injection 전체 rollback |
 | legacy | deterministic transition→command/result→name/coord override; missing/duplicate/exact conflict pre-DDL abort; claim 수량/root; origin 0; core 무변경 |
 | causation | 두 command FK와 origin→claim composite FK의 mismatch 거부 |
 | append-only | 두 relation 각각 UPDATE/DELETE/TRUNCATE stable 42501/constraint |
-| ACL | API wrapper-only, Dagster generic-only, direct relation 접근/PUBLIC/SET ROLE 거부, restore 뒤 동일 |
+| ACL | API wrapper-only, Dagster generic-only, owner의 schema/command-lock 최소 ACL exact, direct relation 접근/PUBLIC/SET ROLE 거부, restore 뒤 동일 |
 | 오류 | PK/UNIQUE/FK/CHECK/NOT NULL/cast/explicit raise/result outcome reverse inventory와 HTTP code |
 | freeze | target apply, violation rejection, 7축 fingerprint, artifact SHA, semantic bridge |
 | PinVi | exact caller 2파일 제거, vendored admin spec SHA, 503 pending/no outbound, Map 403 zero-write |
@@ -748,10 +817,10 @@ field override, domain command, domain result를 각각 세어 orphan과 이중 
 
 ## 13. 전문 검토 기록
 
-| 검토자 | 1차 판정 | 1차 finding | 이 초안의 반영 위치 | 재심 |
+| 검토자 | 1차 판정 | 2차 판정(`56fa3148`) | 2차 finding 반영 위치 | 최종 재심 |
 |---|---|---|---|---|
-| API 계약 전문 검토자 | `HOLD` | P0 2, P1 3, P2 1 | §4.1~4.7, §9, §11 | 대기 |
-| DB/동시성 전문 검토자 | `NO-GO` | P1 5, P2 6 | §5.2~§10.3, §11 | 대기 |
+| API 계약 전문 검토자 | `HOLD`: P0 2, P1 3, P2 1 | 기존 6건 닫힘, 신규 P1 1 | §5.1, §7.4, §11 | 대기 |
+| DB/동시성 전문 검토자 | `NO-GO`: P1 5, P2 6 | 기존 8건 닫힘, P1 2·P2 2 잔여 | §4.4, §5.3, §6.4, §8, §9, §11 | 대기 |
 
 API finding별 반영은 201 registry/header/old operation 격리(§4.4), 전용 transport principal(§4.1~4.2),
 exact response schema(§4.5), constraint error payload(§4.6·§9), PinVi paired fence(§4.7), coord
@@ -762,5 +831,9 @@ API-only executor(§8), 선언적 command/composite FK(§6.1~6.2), current/targe
 `o_inserted` 검증(§7.2), 전체 오류 inventory(§9), 결정적 key(§5.2), 두 append-only trigger(§6.3),
 snapshot restore와 cache epoch 분리(§10.3), 닫힌 ACL manifest(§8)다.
 
-두 재심은 이 문서와 ADR의 동일 commit SHA를 대상으로 한다. `조건부 GO`나 P0~P3 잔여가 하나라도
+2차 API finding은 current legacy bridge의 생성 위치·정확한 인자·golden vector와 target alias parity를
+명세해 닫았다. 2차 DB finding은 실제 override 열을 쓰는 backfill join, owner의 전체 call-chain ACL,
+core identity 23514의 409 분류, 명시적 READ COMMITTED 설정·검증으로 닫았다.
+
+최종 재심은 이 문서와 ADR의 동일 commit SHA를 대상으로 한다. `조건부 GO`나 P0~P3 잔여가 하나라도
 있으면 M00을 완료로 표시하지 않는다.

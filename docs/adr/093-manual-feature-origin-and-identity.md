@@ -29,7 +29,11 @@ ADR-068/083의 UUID cutover가 되돌아간다.
 
 canonical Feature identity는 서버 발급 UUIDv7이다. 이름, 분류, 주소, 좌표, origin,
 `Idempotency-Key`는 UUID 재료가 아니다. current text PK가 남아 있는 동안의 `f_*`는
-`source_type=user_request`, `source_natural_key=manual::<uuid>`로 만든 opaque legacy alias다.
+UUID 발급 뒤 Python repository가 기존 `make_feature_id()`로 만드는 opaque legacy alias다. 입력은
+`bjd_code=None`, 검증된 `kind`, bridge 상수 `category=manual_feature_v1`,
+`source_type=user_request`, `source_natural_key=manual::<uuid>`, `content_hash=None`로 고정한다.
+실제 category·법정동·이름·좌표·replay key는 alias 입력에도 넣지 않는다. old
+`_create_feature_id(body)`의 name/coord/idempotency 경로는 manual-v1에서 제거한다.
 
 생성 시점 exact duplicate는 별도 `feature.manual_feature_identity_claims` relation이 소유한다.
 DB 단일 함수가 kind, NFC/trim/ASCII-lower/C-collation name, numeric 6자리 좌표를 계산하고
@@ -78,6 +82,10 @@ M01은 별도 SECURITY DEFINER wrapper를 둔다. exact claim은
 조회해 `exact_conflict` outcome으로 반환한다. raw 23505와 aborted transaction 안에서 UUID를 조회하지
 않는다.
 
+새 command policy는 `read-committed`를 명시한다. service가 transaction의 첫 DB statement로
+`SET TRANSACTION ISOLATION LEVEL READ COMMITTED`를 실행하고 wrapper도 isolation을 확인한다. 따라서
+winner 재조회는 DB·role ambient default에 의존하지 않는다.
+
 winner만 generic initial-create procedure를 부른다. generic 결과의 `o_inserted=true`와 반환 ID가
 claim과 같음을 검사한 뒤 origin을 넣는다. subtype, field override, terminal result까지 같은 외부
 transaction이며 어느 단계 실패도 전체 rollback이다.
@@ -87,6 +95,11 @@ transaction이며 어느 단계 실패도 전체 rollback이다.
 runtime direct SELECT/DML/TRUNCATE가 모두 없고 wrapper owner만 SELECT/INSERT한다. 두 relation의
 UPDATE/DELETE row trigger와 TRUNCATE statement trigger는 stable 42501 diagnostic으로 mutation을 막는다.
 
+manual owner는 NOLOGIN이며 schema owner만 SET할 수 있다. owner 이전용 `USAGE,CREATE(feature)`,
+`USAGE(ops)`, command/result SELECT, command row-lock용 `UPDATE(command_id)`, generic create EXECUTE와
+claim/origin SELECT·INSERT만 가진다. bootstrap, ACL reconciler, API/Dagster startup, restore manifest가
+이 exact call-chain grant를 함께 검증한다.
+
 ### 6. current/target, 이관, 복원
 
 claim/origin은 처음부터 UUID 열만 사용한다. current wrapper는 legacy text ID와 canonical UUID를 모두
@@ -94,7 +107,9 @@ claim/origin은 처음부터 UUID 열만 사용한다. current wrapper는 legacy
 `feature_uuid` → target `feature_id` semantic mapping으로 검증한다.
 
 legacy claim backfill은 first initial transition → old domain command/result → 같은 command의
-`ops.feature_overrides` `core.name`/`core.coord`를 연결한다. 각 evidence가 정확히 1행이고 actor,
+`ops.feature_overrides` `core.name`/`core.coord`를 실제 열
+`(override.feature_id,override.command_id,field_path)`로 연결한다. override에는 UUID 열이 없으므로
+UUID는 transition과 old result 사이에서 별도 대조한다. 각 evidence가 정확히 1행이고 actor,
 operation, UUID가 일치해야 한다. missing·duplicate·exact 충돌은 permanent DDL/INSERT 전에 migration을
 중단한다. legacy origin은 0건이다.
 
