@@ -14,7 +14,7 @@ import-linter를 통과했고 열린 H46G는 `tasks-done.md`로 이관했다.
 
 ### 다음 한 작업
 
-완료 이관 문서 commit의 GitHub CI 7개가 green인지 확인한 뒤 draft PR #1007을 ready로 바꾸고
+완료 이관 문서 commit의 GitHub 필수 CI가 모두 green인지 확인한 뒤 draft PR #1007을 ready로 바꾸고
 병합한다. H46G 범위 밖의 prod rebuild/deploy는 이 PR에서 실행하지 않는다.
 
 ## 2026-08-19 — T-VN-40 인수 ② 완료 (pair: Map `817cfeae` · PinVi `5cad141a`)
