@@ -439,7 +439,7 @@ async def test_upgrade_from_0104_loads_seeded_legacy_row(gate_alembic_config: Co
             head = (
                 await session.execute(text("SELECT version_num FROM public.alembic_version"))
             ).scalar_one()
-            assert head == "0223_tvn40_identity_mappings"
+            assert head == "0224_c7_external_system_scope"
             rows = await _mapping_rows(session)
             assert [str(r["legacy_curated_feature_id"]) for r in rows] == [legacy_id]
             assert rows[0]["mapping_kind"] == "legacy_projection"

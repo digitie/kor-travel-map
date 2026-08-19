@@ -254,6 +254,33 @@ DDL은 남고 stamp만 `0089`인** 상태가 된다. 재시도는 `0090`부터 �
 359MB) 조건에 따라 `source_records`(733k / 1.25GB)를 재작성한다. `0090`은 두 테이블에
 non-concurrent UNIQUE를 만든다. 유지보수 창에서 돌린다.
 
+## C7 인수 scope (0224) prod 배포 — 선행조건 (2026-08-19)
+
+`0224_c7_external_system_scope`는 행 하나를 INSERT하는 짧은 migration이라 긴 lock도 새 role도
+없다. 그러나 **배포 자체에 cross-repo 선행조건이 하나 있다**.
+
+`docker/api-entrypoint.sh`는 이미지의 alembic head와 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를
+대조해 다르면 **DB를 건드리지 않고 exit 1** 한다. 그 값은 이 저장소가 아니라
+`kor-travel-docker-manager`의 `.env`가 소유한다(현재 prod 값 `0223_tvn40_identity_mappings`).
+→ 이 이미지를 올리기 전에 manager `.env`의 3키를 함께 올린다:
+
+- `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD` = `0224_c7_external_system_scope`
+- `KOR_TRAVEL_MAP_REPO_DIR` = 새 소스 스냅샷 경로(`~/ktm-src-<full-sha>`)
+- `KOR_TRAVEL_MAP_GIT_COMMIT` = 그 커밋
+
+안 올리면 API 컨테이너가 부팅에 실패하며 재시작을 반복한다(fail-closed라 DB 손상은 없다).
+
+**이 migration의 실패 모드.** 대상이 유일하지 않으면(`python-kma-api`/`kma_ultra_short_nowcast`의
+enabled refresh operation이 0개 또는 2개 이상) `RuntimeError`로 중단한다 — 조용히 0행을 넣으면 C7
+인수가 preview 422로 죽고 원인이 감춰지기 때문이다. entrypoint가 migration을 돌리므로
+**migration 실패 = 서비스 기동 실패**다. 2026-08-19 prod 실측은 operation 1개로 깨끗하다.
+
+**이 선언이 운영 표면에 보인다.** `/ops/datasets` 그리드·상세 scope 목록·요청 dialog의 `sync_scope`
+드롭다운에 `external_system:c7-e2e`가 나온다. 계약상 정합한 노출이며 감추지 않는다(감추려면
+"제출 가능 집합의 정본은 카탈로그 선언 하나"라는 규칙을 깨는 두 번째 정본이 필요하다). 다만 활성
+target이 0인 상태에서 "지금 갱신"을 누르면 `KmaWeatherTargetScopeEmptyError`로 실패 행이 남는다
+(provider I/O·비용 없음). **운영자는 이 scope를 누르지 않는다 — C7 인수 harness 전용이다.**
+
 ## T-VN-40 (0202~0223) prod 배포 — 실행 기록과 선행조건 (2026-08-18)
 
 prod(n150)를 `0104_tvn36_final_fence` → `0223_tvn40_identity_mappings`로 올린 실제 절차다.

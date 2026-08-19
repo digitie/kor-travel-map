@@ -141,6 +141,12 @@
         "0222_tvn40a_merge_runtime_role"
       ],
       "revision": "0223_tvn40_identity_mappings"
+    },
+    {
+      "down_revision": [
+        "0223_tvn40_identity_mappings"
+      ],
+      "revision": "0224_c7_external_system_scope"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

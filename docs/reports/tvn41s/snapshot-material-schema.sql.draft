@@ -1,5 +1,5 @@
 -- T-VN-41S 번호 없는 설계 초안이다. 실행하거나 Alembic revision으로 import하지 않는다.
--- T-VN-40C의 0224 착지 뒤 실제 revision은 0225 이상을 배정한다.
+-- T-VN-40C의 0225 착지 뒤 실제 revision은 0226 이상을 배정한다.
 
 CREATE TABLE ops.poi_cache_target_snapshot_materials (
     material_id uuid PRIMARY KEY,
