@@ -42,7 +42,23 @@ import {
 } from "./_ops-live-browser";
 
 const READY = { timeout: 20_000 } as const;
+// 예산은 자기 worst case **위**로 잡는다. 아래로 잡으면 느린 구간 하나가 다시 지점
+// 정보 없는 "Test timeout"을 만든다 — 이 PR이 없애려던 증상 그 자체다. 구간은
+// `test.step`으로 감싸 실패가 스스로 이름을 대게 한다.
+const COUNT_STATE_TEST_TIMEOUT_MS = 180_000;
+// 응답 대기 상한은 click의 actionability 상한(`playwright.live.config.ts`의
+// `actionTimeout` 60s) **이상**이어야 한다. 짧게 잡으면 진행 중(aria-disabled) 버튼을
+// 기다리는 동안 응답 창이 먼저 만료돼, 그 클릭이 낸 응답을 아무도 보지 못한다.
+// 같은 규약이 `_ops-c7-admin-api.ts`의 `DATASET_DETAIL_FETCH_TIMEOUT_MS`와
+// `ops-c7-kma-empty-write.live.spec.ts:50-56`(리뷰 승인된 선례)에 이미 있다.
+const REFRESH_RESPONSE_TIMEOUT_MS = 60_000;
+const REFRESH_ATTEMPTS = 2;
 const REJECTION_TEST_TIMEOUT_MS = 90_000;
+// 이 파일에서 명시 예산이 없던 마지막 테스트다. 명시 `READY`(20s) 대기만 6개라
+// 합이 이미 120s이고, 그 위에 bootstrap·navigation·mutation 2회·cleanup이 얹힌다.
+// 구조 지연도 있다 — ops-live poll 간격이 2s라 mutation commit 뒤 projection update가
+// 그만큼 늦고, 이어지는 grid refetch가 ~1.4s다.
+const PROJECTION_TEST_TIMEOUT_MS = 240_000;
 const TTL_TEST_TIMEOUT_MS = 150_000;
 const NATURAL_ROTATION_TEST_TIMEOUT_MS = 180_000;
 const IMMEDIATE_ROTATION_MAX_MS = 2_000;
@@ -121,6 +137,10 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
   test("실 API count/state를 두 운영 페이지에 반영하고 invalid exact scope는 fail-closed한다", async ({
     page,
   }) => {
+    // 이 테스트는 live prod에서 5회 navigation + 2회 refetch 대기를 돈다. config 기본
+    // 30s는 `READY`(20s) 한 번만 늦어도 넘는다 — 실제로 그렇게 죽었고, 증상이 지점
+    // 정보 없는 "Test timeout"이라 원인을 trace로 파야 했다.
+    test.setTimeout(COUNT_STATE_TEST_TIMEOUT_MS);
     await gotoDatasetsAndTraceOpsLiveUrl(page);
     await expect(
       page.getByRole("heading", { level: 1, name: "데이터셋", exact: true }),
@@ -135,18 +155,17 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
       exact: true,
     });
     await expect(datasetsRefresh).toBeEnabled(READY);
-    const gridResponsePromise = page.waitForResponse(
-      isDatasetsGridResponse,
-      READY,
-    );
-    await datasetsRefresh.click();
-    const gridResponse = await gridResponsePromise;
-    if (!gridResponse.ok()) {
-      throw new Error(`datasets grid 조회 실패 (HTTP ${gridResponse.status()})`);
-    }
-    const gridPayload = await gridResponse.json();
-    const rows = datasetRows(gridPayload);
-    await expectDatasetSummary(page, rows);
+    const rows = await test.step("datasets grid 요약", async () => {
+      const gridResponse = await refreshUntilResponse(
+        page,
+        datasetsRefresh,
+        isDatasetsGridResponse,
+        "datasets grid",
+      );
+      const gridRows = datasetRows(await gridResponse.json());
+      await expectDatasetSummary(page, gridRows);
+      return gridRows;
+    });
     const canonical = canonicalRepresentative(rows);
 
     // 존재하지 않는 scope로 진입해도 canonical 행으로 **대체되지 않는다**(명시 실패).
@@ -210,21 +229,18 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
       exact: true,
     });
     await expect(pipelineRefresh).toBeEnabled(READY);
-    const overviewResponsePromise = page.waitForResponse(
-      isPipelineOverviewResponse,
-      READY,
-    );
-    await pipelineRefresh.click();
-    const overviewResponse = await overviewResponsePromise;
-    if (!overviewResponse.ok()) {
-      throw new Error(
-        `pipeline overview 조회 실패 (HTTP ${overviewResponse.status()})`,
+    await test.step("pipeline overview KPI", async () => {
+      const overviewResponse = await refreshUntilResponse(
+        page,
+        pipelineRefresh,
+        isPipelineOverviewResponse,
+        "pipeline overview",
       );
-    }
-    await expectPipelineOverview(
-      page,
-      parsePipelineOverview(await overviewResponse.json()),
-    );
+      await expectPipelineOverview(
+        page,
+        parsePipelineOverview(await overviewResponse.json()),
+      );
+    });
   });
 
   test("ticket 없음과 서명 변조는 data frame 없이 4401로 닫힌다", async ({
@@ -329,6 +345,7 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
   test("외부 dataset_projection mutation은 열린 datasets 화면을 navigation/refresh 없이 갱신하고 복원한다", async ({
     page,
   }, testInfo) => {
+    test.setTimeout(PROJECTION_TEST_TIMEOUT_MS);
     const runId = randomUUID();
     const state = createCleanupState("invalidation", runId);
     const target = {
@@ -348,19 +365,20 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
       name: "새로고침",
       exact: true,
     });
-    const baselineResponsePromise = page.waitForResponse(
-      isDatasetsGridResponse,
-      READY,
+    const baselineRows = await test.step(
+      "dataset projection baseline 요약",
+      async () => {
+        const baselineResponse = await refreshUntilResponse(
+          page,
+          refreshButton,
+          isDatasetsGridResponse,
+          "dataset projection baseline",
+        );
+        const rows = datasetRows(await baselineResponse.json());
+        await expectDatasetSummary(page, rows);
+        return rows;
+      },
     );
-    await refreshButton.click();
-    const baselineResponse = await baselineResponsePromise;
-    if (!baselineResponse.ok()) {
-      throw new Error(
-        `dataset projection baseline 조회 실패 (HTTP ${baselineResponse.status()})`,
-      );
-    }
-    const baselineRows = datasetRows(await baselineResponse.json());
-    await expectDatasetSummary(page, baselineRows);
     const baselineEvidence = latestDatasetProjectionEvidence(
       await observedAppSockets(page),
     );
@@ -752,6 +770,75 @@ function isDatasetsGridResponse(response: Response): boolean {
   return (
     response.request().method() === "GET" &&
     proxyPath(response) === DATASETS_PATH
+  );
+}
+
+/** 새로고침을 눌러 해당 read 응답을 얻는다. **응답 자체를 못 봤을 때만** 다시 누른다.
+ *
+ *  이 화면들은 ops-live WebSocket 알림으로 query를 invalidate한다(`src/api/live.ts`).
+ *  TanStack v5는 invalidate 시 in-flight fetch를 취소하므로(`cancelRefetch` 기본 true),
+ *  방금 누른 refetch가 대체되면 그 요청은 abort되고 `response` 이벤트가 오지 않는다
+ *  (trace 실측: `status=-1`, `time_ms=-1`). 그러면 특정 응답 하나를 기다리는 코드는
+ *  상한까지 매달렸다가 **지점 정보 없는 timeout**으로 죽는다 — 화면은 멀쩡해서 원인이
+ *  보이지 않는다. 같은 상호작용의 선례가
+ *  `ops-c7-kma-empty-write.live.spec.ts:88-93`에 있다.
+ *
+ *  두 가지를 **가른다**.
+ *  - 응답을 못 봤다 → 재시도한다(취소는 재시도로 넘어간다).
+ *  - 응답이 왔는데 2xx가 아니다 → status를 담아 **즉시** 실패한다. 이 spec은 read/auth
+ *    게이트다. 4xx/5xx를 "응답 없음"으로 뭉개면 간헐 5xx도, 인증 회귀(401/403)도
+ *    "refetch가 취소된다"는 **틀린 사유**로 보고된다.
+ *
+ *  click 전에 버튼이 idle인지 먼저 본다. 진행 중 버튼은 native `disabled`가 아니라
+ *  `aria-disabled`인데(`src/components/ui/button.tsx`) Playwright는 그것도 disabled로
+ *  보므로, 먼저 벗기지 않으면 click이 actionTimeout까지 auto-wait 한다.
+ *
+ *  시도 기록은 evidence로 남긴다 — "3번 중 2번 취소"처럼 조용히 열화하는 회귀가
+ *  통과했는지 나중에 읽을 수 있어야 한다.
+ */
+async function refreshUntilResponse(
+  page: Page,
+  refreshButton: Locator,
+  matches: (response: Response) => boolean,
+  label: string,
+): Promise<Response> {
+  const attempts: string[] = [];
+  const attach = async (): Promise<void> => {
+    await test
+      .info()
+      .attach(`${label}-refresh-attempts`, {
+        body: attempts.join("\n"),
+        contentType: "text/plain",
+      })
+      .catch(() => undefined);
+  };
+
+  for (let attempt = 0; attempt < REFRESH_ATTEMPTS; attempt += 1) {
+    await expect(refreshButton).toBeEnabled({
+      timeout: REFRESH_RESPONSE_TIMEOUT_MS,
+    });
+    const busyBefore = await refreshButton.getAttribute("aria-disabled");
+    const pending = page
+      .waitForResponse(matches, { timeout: REFRESH_RESPONSE_TIMEOUT_MS })
+      .catch(() => null);
+    await refreshButton.click({ timeout: REFRESH_RESPONSE_TIMEOUT_MS });
+    const response = await pending;
+    attempts.push(
+      `#${attempt} aria-disabled=${busyBefore ?? "null"} ` +
+        `response=${response === null ? "none" : String(response.status())}`,
+    );
+    if (response === null) continue;
+    if (!response.ok()) {
+      await attach();
+      throw new Error(`${label} 조회 실패 (HTTP ${response.status()})`);
+    }
+    await attach();
+    return response;
+  }
+  await attach();
+  throw new Error(
+    `${label} 응답을 ${REFRESH_ATTEMPTS}회 시도에서 보지 못했다 — ` +
+      "refetch가 계속 취소되거나 응답이 오지 않는다",
   );
 }
 
