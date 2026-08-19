@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
+from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
@@ -16,6 +19,11 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID
 
 import kortravelmap.infra.models as models
+from kortravelmap.infra.alembic_exclusions import (
+    PENDING_MIGRATION_TABLES,
+    PENDING_MIGRATION_TABLES_EXPIRE_AT,
+    UNMAPPED_APP_TABLES,
+)
 from kortravelmap.infra.models import (
     FeatureCreationOriginRow,
     ManualFeatureIdentityClaimRow,
@@ -186,3 +194,27 @@ def test_feature_creation_origin_metadata_matches_m00_contract() -> None:
 def test_manual_feature_models_are_public_module_exports() -> None:
     assert "ManualFeatureIdentityClaimRow" in models.__all__
     assert "FeatureCreationOriginRow" in models.__all__
+
+
+def test_manual_feature_pending_migration_ledger_is_exact_and_unexpired() -> None:
+    expected = {
+        ("feature", "manual_feature_identity_claims"),
+        ("feature", "feature_creation_origins"),
+    }
+    metadata_tables = {
+        (table.schema, table.name) for table in models.metadata.tables.values()
+    }
+
+    assert expected == PENDING_MIGRATION_TABLES
+    assert metadata_tables >= PENDING_MIGRATION_TABLES
+    assert PENDING_MIGRATION_TABLES.isdisjoint(UNMAPPED_APP_TABLES)
+    assert PENDING_MIGRATION_TABLES_EXPIRE_AT == "0226_m01_manual_feature_create"
+
+    root = Path(__file__).resolve().parents[2]
+    config = Config(str(root / "alembic.ini"))
+    config.set_main_option("script_location", str(root / "alembic"))
+    active_revisions = {
+        revision.revision
+        for revision in ScriptDirectory.from_config(config).walk_revisions()
+    }
+    assert PENDING_MIGRATION_TABLES_EXPIRE_AT not in active_revisions

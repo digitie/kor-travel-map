@@ -1,17 +1,18 @@
 """``infra/feature_identity`` + dual read 경계 (T-VN-32B/32C, ADR-068) 통합 검증.
 
-alembic head(0083 포함)가 적용된 실 PostGIS에서:
+alembic head(0226 전)가 적용된 실 PostGIS에서:
 
 ① 경계 alias 해석 — legacy ``f_*`` alias·canonical UUID 양쪽 참조가 같은
    정본 키 쌍으로 해석되고, 미존재는 ``None``, 형식 오류는 fail-fast.
 ② dual read — raw/공개 단건·bbox 목록·service batch·notice lineage read가
    ``feature_uuid``를 UUID 정본 병행(additive)으로 노출한다
    (0080이 ``public_features`` view에 컬럼을 재고정).
-③ 신규 write 원자성 — provider upsert(writer 명시 생성)와 admin add SQL이
-   같은 transaction에서 uuid + legacy alias를 만든다. **0083부터 신규 값은
-   비파생 UUIDv7**이므로 기대값은 파생 재계산이 아니라 **저장/관측값**이고,
-   writer는 ``verify_feature_uuid``로 canonical·generator 이원화를 fail-close
-   한다. ``count_features_missing_identity``는 alias 결측을 관측한다.
+③ 신규 write 원자성 — provider upsert(writer 명시 생성)가 같은 transaction에서
+   uuid + legacy alias를 만든다. **0083부터 신규 값은 비파생 UUIDv7**이므로
+   기대값은 파생 재계산이 아니라 **저장/관측값**이고, writer는
+   ``verify_feature_uuid``로 canonical·generator 이원화를 fail-close한다.
+   M01 admin create wrapper·claim·origin은 0226 migration 전에는 의도적으로
+   부재한다. ``count_features_missing_identity``는 alias 결측을 관측한다.
 """
 
 from __future__ import annotations
@@ -41,10 +42,6 @@ from kortravelmap.dto import (
     SourceRole,
 )
 from kortravelmap.infra import feature_identity, feature_repo
-from kortravelmap.infra.admin_feature_repo import (
-    AdminManualFeatureCreated,
-    create_admin_feature_with_field_overrides,
-)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -385,66 +382,39 @@ async def test_upsert_wires_sent_and_inserted_into_verification(
     assert captured[0]["inserted"] is False
 
 
-async def test_admin_add_sql_writes_uuid_and_alias(
+async def test_admin_manual_create_db_objects_are_absent_before_m01_migration(
     migrated_session: AsyncSession,
 ) -> None:
-    # T-VN-34가 admin add를 raw INSERT에서 `feature.create_feature_with_initial_state`
-    # 프로시저로 옮겼고, T-VN-36D가 그 호출자를 change-request apply(`_apply_change`)에서
-    # `create_admin_feature_with_field_overrides`로 옮겼다. 검증하려는 불변식(writer가
-    # 만든 비파생 UUIDv7이 그대로 저장되고 legacy alias가 같은 transaction에서 생긴다)은
-    # 그대로이므로 **지금 프로덕션 라우트가 부르는 함수 그대로**를 태운다 — 테스트만 옛
-    # 경로를 붙잡고 있으면 정작 쓰이는 경로의 회귀를 못 잡는다.
-    command_id = int(
-        (
-            await migrated_session.execute(
-                text(
-                    """
-                    INSERT INTO ops.domain_commands (
-                        actor, operation, idempotency_key, fingerprint_version,
-                        request_fingerprint
-                    ) VALUES (
-                        'identity-boundary-test', 'admin.feature.create.manual-v1',
-                        x_extension.gen_random_uuid(), 1, :fingerprint
-                    )
-                    RETURNING command_id
-                    """
-                ),
-                {"fingerprint": "c" * 64},
-            )
-        ).scalar_one()
-    )
-    created = await create_admin_feature_with_field_overrides(
-        migrated_session,
-        payload={
-            "kind": "place",
-            "name": "admin add 장소",
-            "category": "01070100",
-            "coord": {"lon": 126.9239, "lat": 37.5263},
-            "marker_icon": "star",
-            "marker_color": "P-03",
-        },
-        reason_code="user_request_add",
-        operator="identity-boundary-test",
-        command_id=command_id,
-    )
-    assert isinstance(created, AdminManualFeatureCreated)
-    assert created.creation_origin == "manual_admin"
-    feature_id = created.feature_id
-    # writer가 보낸 후보 == 저장값 (트리거가 바꿔치기하지 않는다).
-    sent = _assert_nonderived_uuid_v7(created.feature_uuid, feature_id=feature_id)
-    assert await _stored_feature_uuid(migrated_session, feature_id) == sent
-
-    alias = (
+    procedure_count = (
         await migrated_session.execute(
             text(
-                "SELECT alias_kind, CAST(feature_uuid AS text) AS feature_uuid "
-                "FROM feature.feature_aliases WHERE alias = :fid"
-            ),
-            {"fid": feature_id},
+                """
+                SELECT count(*)
+                FROM pg_catalog.pg_proc AS procedure
+                JOIN pg_catalog.pg_namespace AS namespace
+                  ON namespace.oid = procedure.pronamespace
+                WHERE namespace.nspname = 'feature'
+                  AND procedure.proname =
+                      'create_admin_manual_feature_with_initial_state'
+                """
+            )
+        )
+    ).scalar_one()
+    relations = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT
+                    to_regclass('feature.manual_feature_identity_claims') AS claims,
+                    to_regclass('feature.feature_creation_origins') AS origins
+                """
+            )
         )
     ).one()
-    assert alias.alias_kind == "legacy_feature_id"
-    assert alias.feature_uuid == sent
+
+    assert procedure_count == 0
+    assert relations.claims is None
+    assert relations.origins is None
 
 
 async def test_alias_uuid_drift_is_rejected_layer_by_layer(

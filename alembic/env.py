@@ -24,6 +24,12 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 from kortravelmap.infra.alembic_exclusions import (
+    PENDING_MIGRATION_TABLES as _PENDING_MIGRATION_TABLES,
+)
+from kortravelmap.infra.alembic_exclusions import (
+    PENDING_MIGRATION_TABLES_EXPIRE_AT as _PENDING_MIGRATION_TABLES_EXPIRE_AT,
+)
+from kortravelmap.infra.alembic_exclusions import (
     UNCOMPARED_INDEXES as _UNCOMPARED_INDEXES,
 )
 from kortravelmap.infra.alembic_exclusions import (
@@ -63,6 +69,33 @@ target_metadata = metadata
 
 _FORWARD_ONLY_BOUNDARY = "0200_schema_baseline"
 _USE_SCHEMA_OWNER_ROLE_ENV = "KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE"
+
+_METADATA_TABLE_IDENTITIES = frozenset(
+    (table.schema, table.name) for table in target_metadata.tables.values()
+)
+_MISSING_PENDING_MIGRATION_TABLES = (
+    _PENDING_MIGRATION_TABLES - _METADATA_TABLE_IDENTITIES
+)
+if _MISSING_PENDING_MIGRATION_TABLES:
+    missing_names = ", ".join(
+        f"{schema}.{table}"
+        for schema, table in sorted(_MISSING_PENDING_MIGRATION_TABLES)
+    )
+    raise RuntimeError(
+        "pending-migration table exclusions lack SQLAlchemy mappings: " + missing_names
+    )
+if _PENDING_MIGRATION_TABLES & _UNMAPPED_APP_TABLES:
+    raise RuntimeError(
+        "pending-migration tables must not also be unmapped-table exclusions"
+    )
+if any(
+    revision.revision == _PENDING_MIGRATION_TABLES_EXPIRE_AT
+    for revision in ScriptDirectory.from_config(config).walk_revisions()
+):
+    raise RuntimeError(
+        "pending-migration table exclusions expired at "
+        f"{_PENDING_MIGRATION_TABLES_EXPIRE_AT}; remove the ledger and Alembic filter"
+    )
 
 
 def _revisions_include_forward_only_boundary(
@@ -195,12 +228,21 @@ def _include_object(
     name: str | None,
     type_: str,
     reflected: bool,  # noqa: FBT001 — alembic callback signature.
-    compare_to: object,
+    compare_to: object | None,
 ) -> bool:
     """비-app 객체와 미모델 app table/expression index 를 비교에서 제외한다."""
 
     schema = _object_schema(object_) or _object_schema(compare_to)
     if type_ == "table":
+        # M01 ORM foundation은 0226 전까지 metadata에만 있다. 정확히
+        # metadata-only add_table 후보만 숨긴다. 같은 이름의 live table은
+        # compare_to가 있으므로 정상 비교되어 부분/불완전 DDL drift가 드러난다.
+        if (
+            not reflected
+            and compare_to is None
+            and (schema, name) in _PENDING_MIGRATION_TABLES
+        ):
+            return False
         return (
             name not in _POSTGIS_TABLE_NAMES
             and not (reflected and (schema, name) in _POSTGIS_OWNED_TABLES)
