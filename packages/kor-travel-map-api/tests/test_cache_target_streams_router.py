@@ -2042,6 +2042,7 @@ def test_restore_fence_exact_replay_returns_200_after_initial_201(
     assert captured["status_code"] == 200
 
     replay_record = SimpleNamespace(
+        operation="service.cache-target-restore-fence.create",
         response_body=captured["response"].model_dump(mode="json"),
         response_status=captured["status_code"],
         response_headers=captured["response_headers"],
@@ -2345,6 +2346,7 @@ def test_service_reconciliation_seal_uses_request_etag_and_exact_replay(
     }
 
     replay_record = SimpleNamespace(
+        operation="service.cache-target-reconciliation.seal",
         response_body=captured_complete["response"].model_dump(mode="json"),
         response_status=200,
         response_headers=captured_complete["response_headers"],
@@ -3010,6 +3012,7 @@ def test_service_dead_letter_replay_exact_response_uses_domain_ledger(
     assert len(service.replay_calls) == 1
 
     replay_record = SimpleNamespace(
+        operation="service.cache-target-dead-letter.replay",
         response_body=captured["response"].model_dump(mode="json"),
         response_status=200,
         response_headers=captured["response_headers"],
