@@ -42,6 +42,10 @@ import {
 } from "./_ops-live-browser";
 
 const READY = { timeout: 20_000 } as const;
+const COUNT_STATE_TEST_TIMEOUT_MS = 90_000;
+// 한 번의 refetch 응답은 prod 실측 ~1.5s다. 취소되면 곧바로 다시 누른다.
+const REFRESH_ATTEMPT_TIMEOUT_MS = 8_000;
+const REFRESH_ATTEMPTS = 3;
 const REJECTION_TEST_TIMEOUT_MS = 90_000;
 const TTL_TEST_TIMEOUT_MS = 150_000;
 const NATURAL_ROTATION_TEST_TIMEOUT_MS = 180_000;
@@ -121,6 +125,10 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
   test("실 API count/state를 두 운영 페이지에 반영하고 invalid exact scope는 fail-closed한다", async ({
     page,
   }) => {
+    // 이 테스트는 live prod에서 5회 navigation + 2회 refetch 대기를 돈다. config 기본
+    // 30s는 `READY`(20s) 한 번만 늦어도 넘는다 — 실제로 그렇게 죽었고, 증상이 지점
+    // 정보 없는 "Test timeout"이라 원인을 trace로 파야 했다. 예산을 하는 일에 맞춘다.
+    test.setTimeout(COUNT_STATE_TEST_TIMEOUT_MS);
     await gotoDatasetsAndTraceOpsLiveUrl(page);
     await expect(
       page.getByRole("heading", { level: 1, name: "데이터셋", exact: true }),
@@ -135,15 +143,12 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
       exact: true,
     });
     await expect(datasetsRefresh).toBeEnabled(READY);
-    const gridResponsePromise = page.waitForResponse(
+    const gridResponse = await refreshUntilResponse(
+      page,
+      datasetsRefresh,
       isDatasetsGridResponse,
-      READY,
+      "datasets grid",
     );
-    await datasetsRefresh.click();
-    const gridResponse = await gridResponsePromise;
-    if (!gridResponse.ok()) {
-      throw new Error(`datasets grid 조회 실패 (HTTP ${gridResponse.status()})`);
-    }
     const gridPayload = await gridResponse.json();
     const rows = datasetRows(gridPayload);
     await expectDatasetSummary(page, rows);
@@ -210,17 +215,12 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
       exact: true,
     });
     await expect(pipelineRefresh).toBeEnabled(READY);
-    const overviewResponsePromise = page.waitForResponse(
+    const overviewResponse = await refreshUntilResponse(
+      page,
+      pipelineRefresh,
       isPipelineOverviewResponse,
-      READY,
+      "pipeline overview",
     );
-    await pipelineRefresh.click();
-    const overviewResponse = await overviewResponsePromise;
-    if (!overviewResponse.ok()) {
-      throw new Error(
-        `pipeline overview 조회 실패 (HTTP ${overviewResponse.status()})`,
-      );
-    }
     await expectPipelineOverview(
       page,
       parsePipelineOverview(await overviewResponse.json()),
@@ -752,6 +752,39 @@ function isDatasetsGridResponse(response: Response): boolean {
   return (
     response.request().method() === "GET" &&
     proxyPath(response) === DATASETS_PATH
+  );
+}
+
+/** 새로고침을 눌러 해당 read 응답을 얻는다. 취소되면 다시 누른다.
+ *
+ *  이 화면들은 ops-live WebSocket 알림으로 query를 invalidate한다. 그 invalidation이
+ *  방금 누른 refetch를 **대체**하면 in-flight 요청은 취소되고(trace 실측:
+ *  `status=-1`, `time_ms=-1`) `response` 이벤트가 오지 않는다. 그러면 특정 응답 하나를
+ *  기다리는 코드는 상한까지 매달렸다가 죽는데, 화면은 멀쩡해서 원인이 보이지 않는다
+ *  (`docs/journal.md` 2026-08-19: 같은 계열을 empty-write에서 이미 한 번 겪었다).
+ *
+ *  응답을 못 얻는 것과 응답이 틀린 것을 가른다 — 재시도를 다 쓰면 그 사실을 명시적으로
+ *  실패시킨다.
+ */
+async function refreshUntilResponse(
+  page: Page,
+  refreshButton: Locator,
+  matches: (response: Response) => boolean,
+  label: string,
+): Promise<Response> {
+  for (let attempt = 0; attempt < REFRESH_ATTEMPTS; attempt += 1) {
+    const pending = page
+      .waitForResponse((response) => matches(response) && response.ok(), {
+        timeout: REFRESH_ATTEMPT_TIMEOUT_MS,
+      })
+      .catch(() => null);
+    await refreshButton.click();
+    const response = await pending;
+    if (response !== null) return response;
+  }
+  throw new Error(
+    `${label} 응답을 ${REFRESH_ATTEMPTS}회 시도에서 얻지 못했다 — ` +
+      "refetch가 계속 취소되거나 응답이 오지 않는다",
   );
 }
 
