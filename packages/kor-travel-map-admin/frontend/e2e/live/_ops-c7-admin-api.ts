@@ -1413,9 +1413,14 @@ export function currentKmaNowcastBaseDatetime(now = Date.now()): string {
  *     409(active scope conflict)로 죽는다. reason에 RUN_ID가 들어가 plan이 달라 활성
  *     재사용도 되지 않는다.
  *
- *  3. **이월된 sync-state cursor** — 앞 run이 같은 base에 cursor를 남기고 이 run의 첫
- *     요청이 같은 membership을 만들면(좌표가 스펙에 고정이라 같아진다) 실행기가
- *     `skipped=true`로 접는다. cleanup은 target만 지우고 sync-state 행은 남긴다.
+
+ *  이월된 sync-state cursor는 **여기서 보지 않는다**. 세 KMA spec이 같은 scope를
+ *  공유하므로 runner 안에서 먼저 돈 spec이 남긴 cursor를 뒤 spec이 보게 되고, base
+ *  동일성만으로 막으면 6-spec 게이트가 구조적으로 통과 불가능해진다. 실제로 문제가
+ *  되는 것은 base와 **membership fingerprint가 함께** 같을 때뿐인데(각 spec의
+ *  membership은 서로 다르다), 그 조건은 요청을 내 보기 전에는 알 수 없다. 그래서
+ *  `skipped=true`를 만난 자리에서 사유를 밝히는 쪽으로 옮겼다
+ *  (`assertNotSkippedByCarriedCursor`).
  *
  *  `bootstrapC7SameOriginPage` 뒤에 부른다(`browserFetch`가 bootstrap을 요구한다).
  */
@@ -1434,21 +1439,29 @@ export async function assertC7ScopeIsClean(page: Page): Promise<void> {
     [],
     "C7 인수 사전조건",
   );
-  // 축 3 — `dagster/kma_weather.py`의 base+fingerprint 동치 분기를 피한다. 원인이 이
-  // run 안에 없어 진단이 어려운 실패라 사전조건으로 막는다.
-  const detail = requireBody(
-    await getExactDatasetDetail(page, C7_KMA_SYNC_SCOPE),
-    200,
+}
+
+/** 첫 요청이 `skipped`면 이월 cursor 때문임을 밝히고 멈춘다.
+ *
+ *  실행기는 `(base_datetime, membership_fingerprint)`가 저장된 cursor와 같으면
+ *  provider I/O 없이 접는다(`dagster/kma_weather.py`). 고정 external system을 쓰게
+ *  되면서 **같은 spec을 같은 KMA base 안에서 다시 돌리면** 그 조건이 성립한다 —
+ *  실패 직후 재시도가 정확히 그 상황이다. cleanup은 target만 지우고 sync-state 행은
+ *  남긴다.
+ *
+ *  bare `expect(skipped).toBe(false)`는 "false를 기대했는데 true"까지만 말해서, 원인이
+ *  이 run 안에 없다는 사실이 드러나지 않는다. 무엇을 기다려야 하는지 여기서 말한다.
+ */
+export function assertNotSkippedByCarriedCursor(
+  skipped: boolean,
+  label: string,
+): void {
+  if (!skipped) return;
+  throw new Error(
+    `${label}: provider I/O 없이 skipped로 접혔다 — 같은 KMA base` +
+      `(${currentKmaNowcastBaseDatetime()})에 같은 membership의 cursor가 이미 있다. ` +
+      "다음 base rollover(KST 매시 40분) 뒤에 다시 실행하라",
   );
-  const carried = detail.data.scopes.find(
-    (item) => item.sync_scope === C7_KMA_SYNC_SCOPE,
-  );
-  const currentBase = currentKmaNowcastBaseDatetime();
-  expect(
-    carried?.cursor.base_datetime,
-    `C7 인수 scope의 cursor가 현재 base(${currentBase})에 이미 있다 — 다음 base ` +
-      "rollover(KST 매시 40분) 뒤에 다시 실행하라",
-  ).not.toBe(currentBase);
 }
 
 export function buildKmaRequest(

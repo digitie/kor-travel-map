@@ -20,6 +20,7 @@ import {
   assertKmaOnlyTerminalProviderScopes,
   bootstrapC7SameOriginPage,
   assertC7ScopeIsClean,
+  assertNotSkippedByCarriedCursor,
   buildKmaRequest,
   fillKmaRequestDialogScope,
   buildPoiTargetBody,
@@ -608,6 +609,7 @@ test.describe("C7 KMA active exact scope destructive live E2E", () => {
       );
       expect(firstTerminal.data.execution.status).toBe("done");
       const firstMetadata = executedKmaMetadata(firstTerminal);
+      assertNotSkippedByCarriedCursor(firstMetadata.skipped, "첫 요청");
       expect(firstMetadata.skipped).toBe(false);
       expect(firstMetadata).toMatchObject({
         grids_dropped: 0,
@@ -659,6 +661,7 @@ test.describe("C7 KMA active exact scope destructive live E2E", () => {
       );
       expect(secondTerminal.data.execution.status).toBe("done");
       const secondMetadata = executedKmaMetadata(secondTerminal);
+      assertNotSkippedByCarriedCursor(secondMetadata.skipped, "두 번째 요청");
       expect(secondMetadata.skipped).toBe(false);
       expect(secondMetadata).toMatchObject({
         grids_dropped: 0,
