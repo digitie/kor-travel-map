@@ -116,6 +116,55 @@ mode/owner 규칙을 보존하지 않아 처음 전체 suite의 domain marker �
 것은 Linux `/tmp` 재실행 85/85와 전체 suite로 환경 원인임을 확인했다.
 PR [#1019](https://github.com/digitie/kor-travel-map/pull/1019)은 CI 8/8 green 뒤
 merge `82fbe2f6`로 완료했다.
+PinVi direct `new_place` caller는 paired draft PR
+[#458](https://github.com/digitie/pinvi/pull/458)에서 먼저 제거했다. queue cutover 전 승인은 outbound,
+status/ref/reviewer/audit, 연결 POI를 바꾸지 않고 503으로 fail-close하며 correction/closure는 유지한다.
+targeted unit/integration 127건과 Ruff/mypy가 통과했다.
+
+DB migration은 만들지 않았다. active head는 `0224_c7_external_system_scope`이고 T-VN-40C가 `0225`를
+예약했으므로, 실제 `0225`가 main에 착지한 뒤에만 M01을 `0226_m01_manual_feature_create`로 잇는다.
+`0226→0224` 임시 head나 byte-frozen `0200` baseline 수정은 금지한다.
+
+foundation 뒤 배포 역조사에서 설계의 두 drift를 추가로 찾았다. 긴 revision literal은 PostgreSQL의
+32자 `alembic_version` gate를 넘으므로 30자 ID로 줄였다. 또한 갱신 role membership을 fresh DB의
+0200/0202보다 먼저 bootstrap하면 historical exact graph 검사가 실패한다. 따라서 기존 graph로
+`0225`까지 upgrade한 뒤 M01 bootstrap을 재실행하고 `0226`을 적용하는 2단계 provisioning이 필수다.
+production digest 상시 필수 fail-close는 유지하며, UI raw/API digest를 flag=false 배포보다 먼저 secret
+store에서 provision하도록 설계 순서를 교정했다.
+
+Map draft PR [#1016](https://github.com/digitie/kor-travel-map/pull/1016)의 `b41c95f9`에서는 Admin UI와
+runtime credential tranche를 붙였다. browser 제공 admin/create header는 계속 폐기하고 exact
+`POST /v1/admin/features`에만 Next.js server raw를 주입한다. raw가 없거나 32자 미만·공백 포함이면
+upstream fetch 전 503으로 닫고, 201/replay의 `Location`·`ETag`·`X-Request-ID`·
+`Idempotency-Replayed`는 BFF가 그대로 전달한다. form은 caller-owned ID·idempotency body·초기 상태를
+제거하고 canonical UUID 성공 응답과 안정 422/409 UX를 사용하며 generated types를 재생성했다.
+
+Compose와 launcher는 API digest+flag/UI raw만 전달한다. production digest는 flag=false에도 필수이며
+raw SHA-256 parity와 다른 credential 분리를 migration 전에 검사한다. secret-store process env는
+전용 runtime 배열에 캡처한 뒤 unset해 Alembic·Dagster·bootstrap child로 새지 않으며, API entrypoint도
+raw 유입과 invalid settings를 migration 전에 거부한다. runtime/deploy 142건, frontend focused unit
+25건, type-check·lint·generated-type drift, Playwright 14건이 통과했고 baseline 3파일 hash는 불변이다.
+
+최종 계약·보안 재심은 pre-mutation 503 뒤 idempotency draft가 남는 문제, 201 OpenAPI 응답 header
+누락, direct Next 실행의 내부 공백 token 허용을 찾았다. 확실한 not-ready code만 draft를 폐기하고 다른
+5xx의 uncertain replay 정책은 유지했으며, BFF 503을 안정 Problem으로 바꾸고 네 응답 header를 spec에
+고정했다. BFF proxy는 decode된 path segment가 authority를 바꾸지 못하게 내부 base protocol·origin과
+credential 부재를 검증하고, redirect를 follow하지 않는다. Dagster entrypoint는 M01 세 환경변수의 값이
+비어 있어도 유입 자체를 거부한다. `docker-up.sh`는 실제 값을 검증·캡처한 즉시 일반 환경에서 지우고,
+비밀 없는 placeholder build와 실제 자격을 한정한 `up --no-build`를 분리한다. Admin OpenAPI 변경은
+vNext baseline과 active pending receipt에 재핀했으며 user/service spec과 byte-frozen baseline 3파일은
+그대로다.
+
+검토 반영 코드 체크포인트 `2c19e160fa810afe2a8ea2e6a03921eabc8e22bc`를 원격 draft PR #1016에
+푸시했다. 이 커밋에서 Admin OpenAPI SHA-256은
+`483edc245971d4ef247bcd18a0aff83dc83506821c34163234b60abd9f6c0087`이며, 이후 PinVi 재벤더링은
+worktree가 아니라 이 exact commit의 blob만 사용한다. 계약 전문 리뷰는 P0~P3 0건, 보안 전문 리뷰는
+P0~P2 0건으로 최종 종료됐다. 관련 Python 197건, frontend focused 48건, generated type drift,
+type-check·lint, production Next build 32 route, 변경 범위 React Doctor를 통과했다. frontend 전체 unit은
+354건이 통과했고 2건은 `/mnt/f` NTFS가 chmod를 0777로 보이는 기존 환경 한계만 재현했다. Admin
+OpenAPI profile drift와 byte-frozen baseline 3파일 hash도 모두 불변이다. actual T-VN-40C `0225`가
+main에 착지하기 전에는 `0226_m01_manual_feature_create` migration·ACL·backup tranche를 만들지 않고,
+route flag는 계속 `false`로 둔다.
 
 ## 2026-08-19 — T-VN-C03: 보조 dataset 5종을 실제 source 기준으로 재분기
 
