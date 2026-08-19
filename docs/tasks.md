@@ -25,7 +25,7 @@ barrier로 직렬화한다.
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환) ∥ [~] `T-VN-41S`(#922 1차 구현·리뷰 GO,
     `0225+` migration/compactor·n150 1M 검증 잔여)
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정, T-VN-40 인수 뒤)**
-  - [ ] `T-VN-M00`(설계 초안 2차·적대 검증) → [ ] `T-VN-M01`(admin Feature 생성 API — **ADR 필요**) → [ ] `T-VN-M02`(origin 보존·불변)
+  - [~] `T-VN-M00`(설계 초안 2차·적대 검증) → [ ] `T-VN-M01`(admin Feature 생성 API — **ADR 필요**) → [ ] `T-VN-M02`(origin 보존·불변)
   - [ ] `T-VN-M03`(curated 동시 생성 — T-VN-40 인수 뒤) ∥ [ ] `T-VN-M04`(PinVi 요청 큐 — cross-repo)
   - [ ] `T-VN-M05`(provider 발행 시 중복 판정 — 자동 병합 금지)
 - **Lane C — 사문화 정리·미구현 dataset (다른 lane과 무관, 아무 때나)**
@@ -1216,7 +1216,9 @@ green"). 컬럼 축은 의도적으로 닫혀 있다(`:1723-1760`). 즉 **CI가 
 
 #### 후속 task
 
-- [ ] **T-VN-M00 — 설계 초안 2차 + 적대 검증 2명 통과** (위 ①~⑤ 반영). 이것이 M01의 선행이다.
+- [~] **T-VN-M00 — 설계 초안 2차 + 적대 검증 2명 통과** (위 ①~⑤ 반영). 이것이 M01의 선행이다.
+  2차 초안은 `docs/reports/t-vn-m00-manual-feature-create-design-2026-08-19.md`와
+  proposed ADR-093에 있다. 아직 적대 리뷰 2명 GO 전이므로 M01 구현은 시작하지 않는다.
 - [ ] **T-VN-M01 — admin Feature 생성 API** (결정 1). `create_feature_with_initial_state`를
   admin OpenAPI에 잇는다. `source_type`/natural key 규칙과 3축 초기 상태를 함께 정한다.
   **ADR 필요** — ID 체계에 새 `source_type`이 들어간다.

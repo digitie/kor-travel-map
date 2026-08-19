@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-19 — T-VN-M00 수동 Feature 생성 2차 설계 초안
+
+provider가 만들지 않는 장소를 admin/API로 생성하기 위한 M00 2차 초안을 작성했다.
+1차 리뷰에서 무너진 origin 사칭, opaque natural key, CHECK→HTTP 500 누수, `initial` fixture
+충돌, `contracts/vnext` freeze drift를 M01 GO 기준으로 풀었다. M01은 `manual_admin` 단일 origin,
+서버 정규화 source natural key, `feature.manual_feature_origins` side relation, serializable
+`admin.feature.create`, explicit duplicate/error/ACL/freeze gate를 요구한다. ADR-093은 proposed
+상태로 추가했다.
+
+### 다음 한 작업
+
+T-VN-M00 초안에 전문 적대 리뷰어 2명 GO를 받기 전에는 M01 구현을 시작하지 않는다. 리뷰 지적을
+반영한 뒤 ADR-093을 accepted로 전환하거나 수정하고, 그 다음 M01 migration/API/OpenAPI/freeze 구현
+PR을 연다.
+
 ## 2026-08-19 — T-VN-H46G buildx provenance 구현·전문 리뷰 완료
 
 buildx 공통 경계에서 API·admin·Dagster web·daemon image 모두에 clean HEAD의 exact 40자 SHA를

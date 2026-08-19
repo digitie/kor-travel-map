@@ -2,6 +2,21 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-19 — T-VN-M00 수동 Feature 생성 설계 초안 2차
+
+T-VN-H34 잔여의 "없는 것은 Feature로 추가" 요구를 M lane으로 분리한 뒤, M01 구현 전에 닫아야 할
+설계 2차 초안을 작성했다. 핵심 결정은 네 가지다. 첫째, 현재 admin BFF와 PinVi를 서버가 구분할
+수 없으므로 M01 origin은 `manual_admin` 하나만 발급한다. 둘째, HTTP `Idempotency-Key`와 body
+`idempotency_key`를 manual source natural key로 쓰지 않고, 서버가 name/region/kind/category/coord
+cell을 정규화한 `manual-admin-v1` 자연키로 `make_feature_id(source_type="manual_admin", ...)`를
+호출한다. 셋째, `feature.manual_feature_origins` side relation과 security-definer procedure,
+serializable command, advisory lock, unique/fuzzy duplicate guard로 같은 실체 중복을 DB 경계에서
+막는다. 넷째, 새 constraint와 final 40001은 409/422로 명시 매핑하고 current migration과
+`contracts/vnext` freeze artifact를 같은 PR에서 갱신한다.
+
+ADR-093은 proposed로 추가했고, `tasks.md`의 T-VN-M00은 `[~]`로 올렸다. 아직 적대 리뷰 2명 GO 전이므로
+M01 구현은 시작하지 않는다.
+
 ## 2026-08-19 — C7 live `ops-c7-read-auth` 첫 테스트 실패 2건 수정
 
 러너 증거가 redact라 세부가 없어서, attestation의 executor 이미지로 컨테이너를 직접 띄워
