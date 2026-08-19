@@ -10,6 +10,8 @@ import {
 } from "@playwright/test";
 
 import {
+  C7_EXTERNAL_SYSTEM,
+  C7_KMA_SYNC_SCOPE,
   KMA_DATASET_KEY,
   KMA_PROVIDER,
   assertKmaDagsterWorkerJobDefinition,
@@ -17,6 +19,7 @@ import {
   assertExactOwnedTargetsAtServer,
   assertKmaOnlyTerminalProviderScopes,
   bootstrapC7SameOriginPage,
+  assertC7ScopeHasNoActiveTargets,
   buildKmaRequest,
   fillKmaRequestDialogScope,
   buildPoiTargetBody,
@@ -518,8 +521,12 @@ test.describe("C7 KMA active exact scope destructive live E2E", () => {
     test.setTimeout(TEST_TIMEOUT);
     await bootstrapC7SameOriginPage(page, "/ops/pipeline");
     await assertKmaDagsterWorkerJobDefinition();
-    const externalSystem = `e2e-${RUN_ID}`;
-    const syncScope = `external_system:${externalSystem}`;
+    // 이름은 catalog 선언(`0224_c7_acceptance_external_system_scope`)과 같아야 한다 —
+    // run마다 만들면 선언되지 않은 scope라 preview/create가 422다. run 격리는
+    // `target_key`가 맡는다.
+    const externalSystem = C7_EXTERNAL_SYSTEM;
+    const syncScope = C7_KMA_SYNC_SCOPE;
+    await assertC7ScopeHasNoActiveTargets(page);
     const state = createCleanupState("active", RUN_ID);
 
     await withC7Cleanup(page, testInfo, state, async () => {

@@ -122,6 +122,22 @@ type CleanupExecution = {
 // src/kortravelmap/providers/kma.py와 schedules.py의 canonical identity.
 /** `kortravelmap.core.sync_scope.EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX`와 같은 값. */
 export const EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX = "external_system:" as const;
+/** C7 인수 harness가 쓰는 external system.
+ *
+ *  ADR-088 이후 제출 가능한 `sync_scope` 집합의 정본은 catalog 선언이다
+ *  (`provider_dataset_operation_scopes`, API가 exact join으로 요구하고 exact FK 4종이
+ *  구조로 강제한다). 그래서 run마다 이름을 새로 만들 수 없다 — 선언되지 않은 값은
+ *  preview/create가 422다. 이름은 migration `0224_c7_acceptance_external_system_scope`가
+ *  선언한 값과 같아야 하고, run 격리는 `target_key`가 맡는다.
+ *
+ *  이 scope를 쓰는 이유(= `target_grids`를 쓰지 않는 이유): `target_grids`는 "모든 활성
+ *  cache target + extra points"라 인수 실행이 운영 대상에 provider I/O를 내고
+ *  `membership_fingerprint`가 비결정적이 되며, `provider_sync_state`의 정본 cursor 행을
+ *  스케줄 job과 공유한다. */
+export const C7_EXTERNAL_SYSTEM = "c7-e2e" as const;
+export const C7_KMA_SYNC_SCOPE =
+  `${EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX}${C7_EXTERNAL_SYSTEM}` as const;
+
 export const KMA_PROVIDER = "python-kma-api" as const;
 export const KMA_DATASET_KEY = "kma_ultra_short_nowcast" as const;
 export const KMA_SAFE_DAGSTER_JOB =
@@ -1363,6 +1379,26 @@ export async function fillKmaRequestDialogScope(
   // canonical operation을 요구하므로(resolveKmaDatasetIdentity) 뜨면 안 된다 —
   // 조용히 넘어가면 운영자가 고르지 않은 operation으로 write가 나간다.
   await expect(dialog.getByLabel("operation_key")).toHaveCount(0);
+}
+
+/** 인수 scope에 남은 활성 target이 없음을 확인한다(fail-closed 사전조건).
+ *
+ *  external system 이름이 run마다 갈리지 않으므로, 앞 run이 남긴 target이 있으면
+ *  `membership_fingerprint`가 이 run의 것이 아니게 된다. 조용히 이어가면 인수가
+ *  "통과했는데 무엇을 통과했는지 모르는" 상태가 된다.
+ */
+export async function assertC7ScopeHasNoActiveTargets(
+  page: Page,
+): Promise<void> {
+  const listed = requireBody(
+    await listActivePoiTargets(page, C7_EXTERNAL_SYSTEM),
+    200,
+  );
+  expect(
+    listed.data.items,
+    `C7 인수 scope(${C7_EXTERNAL_SYSTEM})에 앞 run의 활성 target이 남아 있다 — ` +
+      "정리 후 다시 실행하라",
+  ).toHaveLength(0);
 }
 
 export function buildKmaRequest(

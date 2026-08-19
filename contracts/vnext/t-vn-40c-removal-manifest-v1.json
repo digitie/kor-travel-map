@@ -2,7 +2,7 @@
   "artifact": "t-vn-40c-removal-manifest-v1",
   "owner": "T-VN-40C",
   "status": "draft-v2 (reviewed x2, P1/P2 folded)",
-  "description": "T-VN-40C physical removal manifest - typed tombstone. Lists every legacy object/path removed by migration 0224 and the code/frontend/contract removals in the same release. Executed only after the T-VN-40 receipt is complete (docs/reports/t-vn-40c-physical-removal-manifest-2026-08-18.md section 0). This file is an allowed location for legacy identifiers under the static zero gate.",
+  "description": "T-VN-40C physical removal manifest - typed tombstone. Lists every legacy object/path removed by migration 0225 and the code/frontend/contract removals in the same release. Executed only after the T-VN-40 receipt is complete (docs/reports/t-vn-40c-physical-removal-manifest-2026-08-18.md section 0). This file is an allowed location for legacy identifiers under the static zero gate.",
   "preconditions": [
     {
       "id": "P1",
@@ -22,7 +22,7 @@
     },
     {
       "id": "P5",
-      "check": "prod backup / PITR restore point verified (0224 destroys 4,424 legacy rows + 500 detail snapshots)"
+      "check": "prod backup / PITR restore point verified (0225 destroys 4,424 legacy rows + 500 detail snapshots)"
     },
     {
       "id": "P6",
@@ -160,7 +160,7 @@
         "CurationItemRow.legacy_projection_id",
         "uq_curation_items_legacy_projection_id (models index)"
       ],
-      "action": "remove ORM mappings; regenerate _application_migration_graph.json; head pin 0224 in test_alembic_squash_boundary, test_alembic_metadata_consistency (2), test_docker_dagster_runtime (2), test_migration_forward_only, docs/architecture/postgres-schema.md, KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD"
+      "action": "remove ORM mappings; regenerate _application_migration_graph.json; head pin 0225 in test_alembic_squash_boundary, test_alembic_metadata_consistency (2), test_docker_dagster_runtime (2), test_migration_forward_only, docs/architecture/postgres-schema.md, KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD"
     }
   ],
   "code_removals": {
@@ -331,8 +331,8 @@
     ]
   },
   "verification": [
-    "alembic check clean on fresh DB (0200 -> 0224)",
-    "fresh DB full-chain 0202..0224 passes with 0 legacy rows",
+    "alembic check clean on fresh DB (0200 -> 0225)",
+    "fresh DB full-chain 0202..0225 passes with 0 legacy rows",
     "migrated-head DB catalog zero: pg_class/pg_trigger/pg_constraint/pg_index names AND pg_proc.prosrc contain no legacy identifiers",
     "runtime preflight (API/Dagster) passes",
     "reconcile_runtime_privileges matches DB",
@@ -341,5 +341,5 @@
     "admin frontend build + mock e2e; user-client gen:types:check",
     "PinVi re-vendored user spec sha == map_user_openapi_sha256 in the new paired receipt"
   ],
-  "rollback": "none - forward-only; failure inside 0224 rolls the whole transaction back (RESTRICT surfaces unknown dependents); post-apply issues are forward-fixed; backup per P5"
+  "rollback": "none - forward-only; failure inside 0225 rolls the whole transaction back (RESTRICT surfaces unknown dependents); post-apply issues are forward-fixed; backup per P5"
 }
