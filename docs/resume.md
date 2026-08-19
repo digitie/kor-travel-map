@@ -15,8 +15,9 @@ ORM CHECK를 PostgreSQL 임시 table에 설치해 `pg_get_constraintdef` 기준�
 
 ### 다음 한 작업
 
-이 H45 PR의 CI green을 확인해 머지한 뒤 `T-VN-C05A` 산림청 등산로·둘레길 route
-구현으로 이어간다.
+PR [#1019](https://github.com/digitie/kor-travel-map/pull/1019)은 CI 8/8 green 뒤
+merge `82fbe2f6`로 완료됐다. 다음 작업은 `T-VN-C05A` 산림청 등산로·둘레길 route
+구현이다.
 
 ## 2026-08-19 — T-VN-C03 보조 dataset 제품·source 결정 완료
 

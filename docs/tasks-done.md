@@ -35,6 +35,7 @@
 
 - [x] T-VN-H45-후속 — **Alembic 1.19 CHECK 비교 적응**
 
+  PR [#1019](https://github.com/digitie/kor-travel-map/pull/1019), merge `82fbe2f6`.
   Alembic 1.19.1 fresh PostGIS에서 재현한 named CHECK removed 208건 / added 167건을
   comparator 비활성화 없이 해소했다. PostgreSQL의 실제 63-byte 절단 이름까지 포함해
   DB catalog와 ORM CHECK 373개를 1:1로 정렬하고, raw SQL migration이 소유하던 43개
@@ -44,7 +45,7 @@
   Alembic 의존성은 column-bound fix가 포함된 `>=1.19.1,<1.20`으로 전환했다. fresh
   `upgrade head → alembic check`뿐 아니라 ORM 식을 임시 table에 설치해
   `pg_get_constraintdef`로 live catalog와 비교하는 의미 gate를 추가했다. CHECK 전체
-  제외나 by-name plugin 전역 비활성화는 도입하지 않았다.
+  제외나 by-name plugin 전역 비활성화는 도입하지 않았다. CI 8개를 통과했다.
 
 - [x] T-VN-H45-후속-①~④ — **provider 다건 재시도·quota·schedule 강건화**
 
