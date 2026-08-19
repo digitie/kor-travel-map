@@ -858,7 +858,7 @@ def test_curation_and_curated_route_through_shared_notice_filter() -> None:
     각 repo의 합성 SQL 상수가 자신의 alias로 만든 typed 감산을 담고 있어야 한다 —
     naked cast를 다시 인라인하면 여기서 fast-fail한다.
     """
-    from kortravelmap.infra import curated_repo, curation_repo
+    from kortravelmap.infra import curation_repo
 
     # curation collection count(count_pf / public_count_pf)·item 필터(pf).
     _assert_typed_notice_filter(
@@ -875,12 +875,6 @@ def test_curation_and_curated_route_through_shared_notice_filter() -> None:
         curation_repo._ITEM_PUBLIC_NOTICE_FILTER_SQL,
         "pf",
         label="_ITEM_PUBLIC_NOTICE_FILTER_SQL",
-    )
-    # curated feature 목록 공개 필터(f 별칭).
-    _assert_typed_notice_filter(
-        curated_repo._PUBLIC_FEATURE_FILTERS_SQL,
-        "f",
-        label="_PUBLIC_FEATURE_FILTERS_SQL",
     )
 
 

@@ -186,9 +186,6 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/public/festivals/map-markers": RoutePolicy.PUBLIC_KEYED,
     "/v1/public/festivals/monthly": RoutePolicy.PUBLIC_KEYED,
     "/v1/public/festivals/{feature_id}": RoutePolicy.PUBLIC_KEYED,
-    "/v1/curated-features": RoutePolicy.PUBLIC_KEYED,
-    "/v1/curated-sources": RoutePolicy.PUBLIC_KEYED,
-    "/v1/curated-themes": RoutePolicy.PUBLIC_KEYED,
     # -- service — service-to-service surface (X-Kor-Travel-Map-Service-Token).
     "/v1/features/batch": RoutePolicy.SERVICE,
     "/v1/features/weather/batch": RoutePolicy.SERVICE,
