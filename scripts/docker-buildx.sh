@@ -95,6 +95,8 @@ build_one() {
     "${tag_args[@]}" \
     "${output_args[@]}" \
     "$@" \
+    --build-arg "KOR_TRAVEL_MAP_GIT_COMMIT=${GIT_REVISION}" \
+    --label "org.opencontainers.image.revision=${GIT_REVISION}" \
     .
 }
 
@@ -102,7 +104,6 @@ ensure_builder
 
 build_one "$API_IMAGE" docker/api.Dockerfile
 build_one "$FRONTEND_IMAGE" docker/frontend.Dockerfile \
-  --build-arg "KOR_TRAVEL_MAP_GIT_COMMIT=${GIT_REVISION}" \
   --build-arg "NEXT_PUBLIC_KOR_TRAVEL_MAP_API=${NEXT_PUBLIC_KOR_TRAVEL_MAP_API}" \
   --build-arg "NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL=${NEXT_PUBLIC_KOR_TRAVEL_MAP_DAGSTER_URL}" \
   --build-arg "NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL=${NEXT_PUBLIC_KOR_TRAVEL_GEO_BASE_URL:-http://127.0.0.1:12501}" \

@@ -24,7 +24,7 @@ def test_package_exposes_t108_deploy_scripts() -> None:
 
 
 @pytest.mark.unit
-def test_buildx_script_builds_three_multi_platform_images() -> None:
+def test_buildx_script_builds_four_multi_platform_runtime_images() -> None:
     script = _read("scripts/docker-buildx.sh")
 
     assert "linux/amd64,linux/arm64" in script
@@ -35,12 +35,13 @@ def test_buildx_script_builds_three_multi_platform_images() -> None:
     assert "KOR_TRAVEL_MAP_API_IMAGE" in script
     assert "KOR_TRAVEL_MAP_FRONTEND_IMAGE" in script
     assert "KOR_TRAVEL_MAP_DAGSTER_IMAGE" in script
+    assert "KOR_TRAVEL_MAP_DAGSTER_DAEMON_IMAGE" in script
     assert "--secret id=github_token,env=GITHUB_TOKEN" in script
     assert "NEXT_PUBLIC_KOR_TRAVEL_MAP_API" in script
 
 
 @pytest.mark.unit
-def test_buildx_frontend_receives_exact_git_revision(
+def test_buildx_runtime_images_receive_exact_git_revision(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     revision = "0123456789abcdef0123456789abcdef01234567"
@@ -75,12 +76,31 @@ def test_buildx_frontend_receives_exact_git_revision(
         text=True,
     )
 
-    frontend_build = next(
+    image_builds = [
         line
         for line in docker_log.read_text(encoding="utf-8").splitlines()
-        if "-f docker/frontend.Dockerfile" in line
+        if line.startswith("buildx build ")
+    ]
+    assert len(image_builds) == 3
+    for image_build in image_builds:
+        assert image_build.count(f"KOR_TRAVEL_MAP_GIT_COMMIT={revision}") == 1
+        assert image_build.count(
+            f"org.opencontainers.image.revision={revision}"
+        ) == 1
+
+    api_build = next(
+        line for line in image_builds if "-f docker/api.Dockerfile" in line
     )
-    assert f"KOR_TRAVEL_MAP_GIT_COMMIT={revision}" in frontend_build
+    frontend_build = next(
+        line for line in image_builds if "-f docker/frontend.Dockerfile" in line
+    )
+    dagster_build = next(
+        line for line in image_builds if "-f docker/dagster.Dockerfile" in line
+    )
+    assert "kor-travel-map-api" in api_build
+    assert "kor-travel-map-admin" in frontend_build
+    assert "kor-travel-map-dagster" in dagster_build
+    assert "kor-travel-map-dagster-daemon" in dagster_build
 
 
 @pytest.mark.unit
