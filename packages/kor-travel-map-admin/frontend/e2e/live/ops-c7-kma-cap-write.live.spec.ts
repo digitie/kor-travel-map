@@ -14,6 +14,7 @@ import {
   assertKmaOnlyTerminalProviderScopes,
   bootstrapC7SameOriginPage,
   buildKmaRequest,
+  fillKmaRequestDialogScope,
   buildPoiTargetBody,
   createCleanupState,
   destructiveGateBlocker,
