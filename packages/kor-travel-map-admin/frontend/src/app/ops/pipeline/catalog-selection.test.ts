@@ -200,9 +200,10 @@ describe("validateCatalogSelection", () => {
     );
   });
 
-  it("exact target(external_system) scope는 target_grids membership으로 통과한다", () => {
-    // 이름은 선언이 아니라 데이터라 `allowed_sync_scopes`에 절대 없다. 제출 직전
-    // 가드가 그 사실을 모르면 dialog가 만든 canonical scope를 자기 화면이 막는다.
+  it("선언되지 않은 exact target은 target_grids membership으로 통과한다", () => {
+    // 이름이 선언이 아니라 데이터인 경우다. 제출 직전 가드가 그 사실을 모르면
+    // dialog가 만든 canonical scope를 자기 화면이 막는다. 선언된 external scope는
+    // 위 두 단언이 그대로 지킨다 — 그 행이 있으면 그 축으로 본다.
     const rows = [
       row(8, "target_grids", TARGETED_CAPABILITY, { operation_key: "a_job" }),
     ];

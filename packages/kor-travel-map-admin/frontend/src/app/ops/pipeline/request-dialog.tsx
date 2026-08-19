@@ -21,6 +21,7 @@ import {
   MAX_EXTERNAL_SYSTEM_NAME_LENGTH,
   TARGET_GRIDS_SYNC_SCOPE,
   canonicalCatalogRows,
+  membershipSyncScope,
   validateCatalogSelection,
 } from "./catalog-selection";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -231,25 +232,30 @@ function useRequestScopeForm(catalogRows: CanonicalCatalogRow[]) {
       ? `${EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX}${externalSystemName}`
       : ""
     : syncScopeChoice;
-  // catalog 행의 scope는 선언이라 `external_system:*` 행이 없다. exact target은
-  // target_grids 집합을 external system으로 좁힌 것이므로(`kma_weather` asset이
-  // 두 kind를 같은 grid 경로로 처리한다) operation 후보도 그 membership에서 읽는다.
-  const membershipSyncScope = externalSystemScopeSelected
-    ? TARGET_GRIDS_SYNC_SCOPE
-    : effectiveScopeSyncScope;
+  const datasetRows = useMemo(
+    () =>
+      catalogRows.filter(
+        (row) => row.provider_dataset_id === Number(scopeProviderDatasetId),
+      ),
+    [catalogRows, scopeProviderDatasetId],
+  );
+  // 조회 scope 사상은 제출 직전 가드와 **같은 함수**를 쓴다 — 갈리면 dialog가
+  // 만든 scope를 자기 화면이 막는다.
+  const lookupSyncScope = effectiveScopeSyncScope
+    ? membershipSyncScope(effectiveScopeSyncScope, datasetRows)
+    : "";
   // 고른 (dataset, scope)에 걸린 membership 전부. 형제 operation은 여기서 갈린다 —
   // `.find()`로 하나를 집으면 운영자가 고르지 않은 operation에 canonical write가
   // 나간다(그 위험이 이 목록이 존재하는 이유다).
   const membershipCandidates = useMemo(
     () =>
-      catalogRows.filter(
+      datasetRows.filter(
         (row) =>
-          row.provider_dataset_id === Number(scopeProviderDatasetId) &&
-          row.sync_scope === membershipSyncScope &&
+          row.sync_scope === lookupSyncScope &&
           typeof row.operation_key === "string" &&
           row.operation_key.length > 0,
       ),
-    [catalogRows, membershipSyncScope, scopeProviderDatasetId],
+    [datasetRows, lookupSyncScope],
   );
   const effectiveOperationKey =
     scopeOperationKey.trim() ||
