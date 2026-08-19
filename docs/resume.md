@@ -1,5 +1,26 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-19 — tasks 전면 감사·H44 종결·C02/H18 폐기
+
+`tasks-rule.md`의 블록 단위 라우팅과 `origin/main`, 연결된 PR·이슈 상태를
+재대조했다. H44는 `0083`·`0104` 복원 실증으로 핵심 AC를 충족했으며,
+월 1회 트리거는 현 n150 정책상 H43/manager #148의 실 production 전환 조건이므로
+H44를 더 이상 열어두지 않고 완료 이관했다. 닫힌 PinVi #215, T-VN-40A·mapping·
+인수 ①/②, #975에서 완료한 41A/41B, H45 후속 ①~④, C03 provider 표 drift도
+`tasks-done.md`로 이관했다. C02 arm64 실배포 검증과 H18 approval provenance 자동
+강제는 2026-08-19 사용자 결정에 따라 미구현 폐기로 아카이브했다.
+
+H45의 유일 잔여는 Alembic 1.19 CHECK 비교 적응이다. 1.19.1 fresh DB에서
+removed 208/added 167을 재현했으므로 즉시 착수는 가능하지만, ORM/DB CHECK 이름
+전수 정렬과 의미 drift 가드 보존이 필요한 독립 PR 규모다. C03은 trail만 typed
+geometry upstream이 명확하고, mountain weather/fire risk는 승인·RawRecord 계약,
+safety notice는 source semantics, KHOA coastal notice는 upstream 부재 결정이 먼저다.
+
+### 다음 한 작업
+
+이 문서 전용 PR을 원격에 열고 CI가 모두 green인지 확인한 뒤 병합하지 않고
+사용자 지시를 기다린다. 이 PR에 H45 코드 적응이나 C03 dataset 구현을 섞지 않는다.
+
 ## 2026-08-19 — T-VN-M00 수동 Feature 생성 설계·전문 리뷰 완료
 
 provider가 만들지 않는 장소를 admin/API로 생성하기 위한 M00 2차 설계를 완료했다. M01은 admin BFF

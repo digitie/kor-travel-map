@@ -3,6 +3,82 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-08-19 — backlog 전면 재대조·완료 이관
+
+- [x] T-VN-H44 — **복원 리허설 드릴 정착**
+
+  `0083` 백업은 별도 PostGIS에서 확장 선생성 → restore → manifest 일치 → 결손
+  감지 → 재생성까지 5단계를 통과했고, `0104` 백업도 341초 restore와 예상된
+  `x_extension` 오류 1건 외 manifest 6개 항목 일치를 통과했다. 3차 드릴은
+  restore·manifest를 다시 통과했으나 24시간 이상 단일 transaction 전량 replay와
+  필드 24개를 잃는 부분 raw replay가 둘 다 복구 경로가 아님을 확정했다.
+
+  반복 절차와 함정은 [`backup-restore.md`](backup-restore.md) §10이 소유한다.
+  최소 월 1회 트리거는 현 n150을 실 production으로 보지 않고 손상 시 재적재하는
+  2026-08-06 정책에 따라 H43/manager #148의 **실 production 전환 조건**으로 남긴다.
+  이 보류는 백업본이 실제로 복원되는지를 실증하는 H44를 더 이상 열어두지 않는다.
+
+- [x] T-VN-H45-후속-①~④ — **provider 다건 재시도·quota·schedule 강건화**
+
+  PR [#999](https://github.com/digitie/kor-travel-map/pull/999), merge `284fd10c`. KHOA
+  시도×페이지와 KMA/DataGoKr/AirKorea 다건 경계에 비례형 공유 `RetryBudget`을
+  적용하고, data.go.kr `resultCode=22`를 비재시도 quota로 정정했다. provider
+  WARNING을 비밀 노출 없이 Dagster event에 결선했고 KMA 5종·airkorea schedule에
+  active-run coalescing과 7,200초 runtime 상한을 같이 고정했다. Alembic 1.19 적응은
+  독립 열린 `T-VN-H45-후속`으로 남긴다.
+
+- [x] T-VN-C03-doc-drift — **provider module 인벤토리 표·회귀 lint 정렬**
+
+  PR [#991](https://github.com/digitie/kor-travel-map/pull/991)이 stale provider 3개를 제거하고
+  누락 모듈 6개와 보조 예외 2개를 정확히 구분했다.
+  `tests/lint/test_providers_docstring_inventory.py`가 "표 + 명시적 예외 = 실제 모듈"을
+  계속 강제한다. 보조 dataset 5종의 제품·source 결정은 열린 C03이 소유한다.
+
+- [x] T-VN-40A / T-VN-40A-fence — **curation canonical 기반·legacy write 3층 차단**
+
+  기반 구현 PR #974 뒤 PR [#994](https://github.com/digitie/kor-travel-map/pull/994),
+  merge `3e0732b3`가 `curated_features` legacy write를 ACL·static inventory·route `410`으로
+  차단했다. runtime-role merge를 command-owner `SECURITY DEFINER` procedure로 복구하고
+  API runtime에만 executor를 제한했으며, 적대 리뷰 2명과 CI 8개를 통과했다.
+
+- [x] T-VN-40-mapping — **identity mapping loader·prod mapping 4,424건**
+
+  PR [#996](https://github.com/digitie/kor-travel-map/pull/996), merge `fbc31f2f`. `0223` loader가
+  legacy projection 4,424건을 불변 mapping으로 적재했고, precheck·lock timeout·merge
+  guard·migration 전체 rollback을 검증했다.
+
+- [x] T-VN-40-인수-①/② — **prod migration·PinVi mapping 봉인·59 collection import**
+
+  PR #1001의 prod `0104→0223` 단일 transaction migration과 PR #1006의 PinVi
+  mapping receipt(root `69eb85ec…`, 4,424 item), legacy preflight `ready=true`, canonical
+  collection 59개/POI 4,424 import를 완주했다. 활성 잔여는 ③ live/soak → ④ exact
+  receipt → ⑤ 40C physical removal이다.
+
+- [x] T-VN-41A / T-VN-41B — **source generation·restore epoch·transaction-coupled outbox**
+
+  PR [#975](https://github.com/digitie/kor-travel-map/pull/975), merge `4672aa96`, CI 8/8.
+  source generation·restore epoch와 target/link/update transaction 내 outbox writer를 병합했다.
+  final exact-pair evidence·production consumer enable·reconciliation은 열린 `T-VN-41C`가 소유한다.
+
+- [x] T-VN-EXT-PINVI-215 — **PinVi 외부 follow-up 종결 동기화**
+
+  PinVi #215는 PR #446 병합과 Android Dev Client smoke 뒤 2026-08-19 닫혔다.
+  위치 동의 gate 등 남은 사항은 PinVi T-320 등으로 분기됐으며 Map lane이
+  더 이상 #215를 추적하지 않는다.
+
+- [x] T-VN-C02 — **폐기(won't-do): arm64 multi-arch 실배포 검증**
+
+  Dockerfile 하드코딩 없음·`linux/amd64,linux/arm64` 기본값·aarch64 wheel 가용성
+  정적 점검만 완료했다. registry push와 arm64 기동은 실행하지 않았고,
+  2026-08-19 사용자 결정으로 추가 추적을 폐기했다. 이는 2026-06-29의
+  T-229 종결 결정을 재확인한 것이며 실행 검증 성공을 의미하지 않는다.
+
+- [x] T-VN-H18 — **폐기(won't-do): GitHub approval provenance 자동 강제**
+
+  branch protection 또는 merge 전 verifier로 latest-head `APPROVED` review를 강제하는
+  자동화 task를 2026-08-19 사용자 결정으로 폐기했다. 과거 PR의 없는 approval
+  provenance를 복구했다거나 보호 규칙을 설정했다고 기록하지 않는다.
+
 ## 2026-08-19 — T-VN-M00 수동 Feature 생성 설계 완료
 
 - [x] T-VN-M00 — **수동 Feature 생성 2차 설계·전문 검토 완료**
@@ -3415,7 +3491,7 @@ PR #888(H30A) · PR #890(H33/H36). 세 task 모두 적대 리뷰로 **결론이 
 
 ## T-212e 후속 라이브 검증 (2026-06-14, `T-229`)
 
-- [x] **T-229 — T-212e 후속 라이브 검증** (arm64 buildx만 잔여).
+- [x] **T-229 — T-212e 후속 라이브 검증**.
   T-225가 분리한 커버리지 갭을 실데이터(features 1,095,665)로 라이브 검증했다. T-212e
   데이터가 옛 claude postgres(15433)에 잔존 + 격리 복원본 `krtour_map_restore` 존재라
   복원 불필요했고, 운영 데이터 무손상 원칙으로 **복원본에만** 검증했다. **curated

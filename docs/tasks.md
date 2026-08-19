@@ -5,7 +5,7 @@
 [`docs/resume.md`](resume.md)가 정본이다. 작성·유지 규약은
 [`docs/tasks-rule.md`](tasks-rule.md)를 따른다.
 
-## 진행 중인 작업 인덱스 (2026-08-18 전면 재대조)
+## 진행 중인 작업 인덱스 (2026-08-19 전면 재대조)
 
 완료한 `T-VN-32`·`T-VN-33`·`T-VN-37`·`T-VN-38`과 선행 운영 task는
 [`tasks-done.md`](tasks-done.md)로 이관했다. 아래에는 아직 닫히지 않은 실행 단위만 둔다.
@@ -16,52 +16,42 @@ barrier로 직렬화한다.
 
 - **Lane A — cross-repo 계약·운영·데이터 품질**
   - [~] `T-VN-H34`(공식 curation 미연결 membership 잔여 AC — `T-VN-M01`~`M03` 선행 필요)
-  - [~] `T-VN-H43` → [~] `T-VN-H44`(백업 정기화·복원 드릴 재개 조건)
-  - [~] `T-VN-H45-후속`(①~④ 완료 / ⑤ alembic 1.19 적응 잔여)
-  - [~] `T-VN-H49`(Map baseline·절차 완료 / docker-manager #177의 외부 인스턴스 주기화 잔여)
+  - [~] `T-VN-H43`(실 production 전환 시 manager #148로 정기화 재개)
+  - [ ] `T-VN-H45-후속`(Alembic 1.19 CHECK 비교 적응)
+  - [~] `T-VN-H49`(4분할 baseline·primitive 완료 / 주기 실행·보존·off-box 증거 잔여)
+  - [ ] `T-VN-H50`(CI planner 인덱스 선택 flake, map #990)
 - **Lane B — frontend hardening·PinVi 소비 API**
-  - [~] `T-VN-41A` → [~] `T-VN-41B` → [~] `T-VN-41C`(generation/outbox — 상세 AC 일부 완료, #975 rebase·regression 수정·새 exact-pair CI/E2E 재검증 중)
+  - [~] `T-VN-41C`(#975 병합 / final exact-pair·prod consumer enable 잔여)
   - [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2`(격리 리허설·data-dependent live UI E2E; #967 closed)
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환) ∥ [~] `T-VN-41S`(#922 1차 구현·리뷰 GO,
-    `0225+` migration/compactor·n150 1M 검증 잔여)
+    `0226+` migration/compactor·n150 1M 검증 잔여)
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정, T-VN-40 인수 뒤)**
   - [ ] `T-VN-M01`(admin Feature 생성 API — ADR-093 accepted 전환) → [ ] `T-VN-M02`(origin 보존·불변)
   - [ ] `T-VN-M03`(curated 동시 생성 — T-VN-40 인수 뒤) ∥ [ ] `T-VN-M04`(PinVi 요청 큐 — cross-repo)
   - [ ] `T-VN-M05`(provider 발행 시 중복 판정 — 자동 병합 금지)
 - **Lane C — 사문화 정리·미구현 dataset (다른 lane과 무관, 아무 때나)**
-  - [~] `T-VN-C02`(arm64 — registry 자격증명 필요, 정적 점검만 완료) ∥ [~] `T-VN-C03`(표 drift 완료 / dataset 5종은 제품 결정)
+  - [ ] `T-VN-C03`(보조 dataset의 제품·upstream source 결정)
 - **Wave 2 barrier 이후**
   - Lane A: [ ] `T-VN-37D`(notice empty range 표현 — 제품 결정 대기)
-  - 32~38 join barrier 뒤 Lane B: [~] `T-VN-40A` → [~] `T-VN-40B` →
-    [~] `T-VN-40C`
-    - A/B/C는 logical phase이며 **하나의 forward-only implementation PR/release**로만 구현·병합한다.
-      phase별 writer/migration/consumer PR 또는 중간 배포는 금지한다.
-    - T-VN-36 PR #973이 `c76ceb7a`로 `main`에 병합돼 join barrier가 해소됐고,
-      2026-08-13 사용자가 ADR-092와 40A/B/C 단일 PR 구현을 승인했다. Map 구현 PR
-      [#974](https://github.com/digitie/kor-travel-map/pull/974)는 `170ddf57`로 병합됐고,
-      PinVi [#445](https://github.com/digitie/pinvi/pull/445) 및 Docker Manager
-      [#174](https://github.com/digitie/kor-travel-docker-manager/pull/174)도 병합됐다. 다만
-      n150 canonical import/backfill 실운영 인수·연동 receipt complete·물리 삭제는 아직
-      실행하지 않았으므로 A/B/C는 release 관점에서 부분 완료다. 설계·구현 정본은
+  - 32~38 join barrier 뒤 Lane B: [~] `T-VN-40B` → [~] `T-VN-40C`
+    - 기반 구현 #974, 40A write fence #994, identity mapping #996, prod migration과 PinVi
+      mapping 소비·59개 collection import는 완료 이관했다. 남은 것은 40B의 source-rule
+      transition, ③ sanctioned live/soak, ④ exact receipt, 40C 물리 삭제다.
+    - 설계·구현 정본은
       [`t-vn-40-curation-write-model-plan-2026-08-11.md`](reports/t-vn-40-curation-write-model-plan-2026-08-11.md)다.
-    - PR #978 최신 baseline+bridge를 T-VN-40 branch에 재배치했다. active chain은
-      `0200_schema_baseline→0104_tvn36_final_fence(bridge)→0202…0220` 단일 head이며,
-      과거 `0001~0104` 파일은 read-only legacy 증거다. n150 현행 `0104` DB는 bridge가
-      그대로 인식하므로 stamp나 baseline 재실행 없이 `0202…0220`만 forward upgrade한다.
+    - 인수 ③·④ 중 분리한 [ ] `T-C7-SCOPE-REGISTRY` ∥ [ ] `T-C7-LIVE-SERIAL`도
+      아래 인수 잔여 절이 소유한다.
   - 최종 단일 cutover: [ ] `T-VN-39`
-  - ⚠️ **T-VN-40 인수 실태 재조사(2026-08-18, 조사 1 + 적대 검증 2)** — "인수만 남았다"가
-    아니다. 아래 `T-VN-40 인수 — 실태` 절 참조. 사전 구현/병합(40A fence·identity mapping·40C
-    manifest 작성) → prod migration·enable → import/backfill → live/receipt → 물리 삭제 실행 순이다.
+  - **T-VN-40 현재 경계(2026-08-19)** — 사전 fence·mapping과 prod ①·PinVi ②는
+    완료했다. 아래 `T-VN-40 인수 — 잔여`의 ③ live/soak → ④ receipt →
+    ⑤ physical removal 순을 따른다.
 - **보류/외부 추적**
   - [ ] `T-VN-H27` — #819 HAProxy WebSocket tunnel timeout(**보류: 운영자 환경 필요**,
     사용자 지시 2026-07-29). 프록시는 **OPNsense 라우터의 HAProxy**이고 저장소에 config가 없다
     (docker-manager `*haproxy*` 0건, n150은 haproxy inactive·`/etc/haproxy/` 없음). 설정 적용도
     proxy metric 확인도 라우터 접근이 필요해 에이전트가 실행할 수 없다. 라우터에
     `timeout tunnel` 적용 후 quiet 2주기 실증 → #819 close.
-  - [ ] `T-VN-H18` — GitHub approval provenance gate(보류: GitHub 자기 PR 승인 불가와
-    required-review 운영 주체 결정 필요)
   - [ ] `T-101` — Materialized View 도입 검토(조건 발생 시)
-  - [ ] `T-VN-EXT-PINVI-215` — PinVi #215 외부 추적(Map Agent A/B queue 밖)
 
 ## 공통 규율 (2026-07-28 개정)
 
@@ -89,9 +79,9 @@ barrier로 직렬화한다.
   (AGENTS.md), 그 아래 설계적 우수성 > 확장성 > 성능 > 불필요한 코드 반복(래퍼류) 금지.
   **prod 환경 보전·호환성·기존 문서 계약·최소 수정은 비제약** — 필요 시 DB 스키마·문서
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
-- migration 정본: 단일 head 유지(2026-08-13 `main` 기준 head
-  `0104_tvn36_final_fence`; prod 적용 head는 `0087_route_area_subtypes` —
-  2026-08-13 실측, `T-VN-35/34/36-deploy` 참조). 후속 migration 소유자는
+- migration 정본: 단일 head 유지(2026-08-19 `main` 기준
+  `0224_c7_external_system_scope`; T-VN-40C는 `0225`, 41S 후속은 `0226+` 예약).
+  prod 적용 head는 배포 직전 live DB에서 다시 확인한다. 후속 migration 소유자는
   PR 직전 단일 head를 재확인한 뒤 번호를 배정한다. 두 lane의 migration-bearing PR은 번호 예약부터
   머지까지 직렬화한다. forward migration 뒤에는 수용 조건이나 실패 복구가 명시적으로 요구하지 않는
   한 downgrade/rollback하지 않고 fresh clone·새 transaction으로 다음 검증을 이어간다.
@@ -159,21 +149,6 @@ barrier로 직렬화한다.
   - **R4 cross-lane 배포 조율**: 두 lane이 같은 prod 페어/공유 DB를 동시에 만질 때는
     재-cut·live 실행 창을 겹치지 않게 하고, 한 lane의 live 컨테이너가 다른 lane의 배포
     대상 DB를 공유하지 않도록 lane 소유자가 사전 확인한다.
-
-## 보류 — 실행 lane 외 거버넌스 결정 대기
-
-- [ ] T-VN-H18 — **GitHub 실제 approval provenance gate 강제** — **보류(governance 결정, 2026-07-27)**:
-  approval 필수화는 이후 모든 PR의 merge 경로를 바꾸므로 repo 소유자가 워크플로우 전환 시점을
-  정해 착수한다. 현황: main branch protection 없음 확인, gh admin 권한 있음.
-  구현 옵션 = branch protection(approval 1·last-push-approval·dismiss-stale·CI checks required) 또는
-  merge 전 CI verifier(head SHA APPROVED≥1 + 회귀 테스트).
-
-  Claude Code가 작성한 PR #841~#845·#847~#850·#852~#857·#859~#864를 전문 적대 감사한 결과 21건 모두
-  GitHub `reviews: []` 상태로 머지돼 AGENTS의 "1 review approval" 계약을 충족하지 못했다. 과거
-  approval provenance는 복구할 수 없으므로 후속 PR부터 branch protection 또는 merge 전 verifier가
-  최신 head SHA에 대한 `APPROVED` review 1건 이상을 강제하도록 한다. 사용자 지시에 따라 self-review도
-  GitHub가 `APPROVED`로 기록하면 유효하게 인정하되, 일반 comment나 bot status를 approval로 오인하지
-  않고 required check·관리자 우회 경로까지 회귀 테스트한다.
 
 ## Lane A 상세 — 열린 이슈·데이터 품질 하드닝
 
@@ -463,37 +438,21 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > prod는 `archive_mode=off`라 **PITR이 없다 — dump가 유일 복구점**이다. codex 소관 41C prod enable은 H42 판정 + docker-manager
 > 재pin 뒤(Lane B T-VN-41 절 경계 주석).
 
-- [~] T-VN-H45-후속 — **다건 provider 호출·quota 관찰 확장**
+- [ ] T-VN-H45-후속 — **Alembic 1.19 CHECK 비교 적응**
 
-  완료한 KMA/airkorea 강건화(`T-VN-H45`)의 후속 5축.
+  후속 ①~④은 PR [#999](https://github.com/digitie/kor-travel-map/pull/999)로 병합해
+  [`tasks-done.md`](tasks-done.md)로 이관했다. 남은 축은 1.19 적응 하나다.
 
-  - [x] ① **khoa 등 다건 루프 fetcher 확대(2026-08-18)** — KHOA 시도×페이지 경계를
-    공용 재시도·run 예산으로 감싸고 timeout·내부 재시도 정산값을 client에 주입했다. upstream
-    [python-khoa-api PR #8](https://github.com/digitie/python-khoa-api/pull/8)에서
-    `serviceKey` 기본 전송 URL도 HTTPS로 전환했다.
-  - [x] ② **python-kma-api resultCode 22 오분류 수정(2026-08-18)** —
-    [python-kma-api PR #24](https://github.com/digitie/python-kma-api/pull/24).
-    `22`는 data.go.kr 일일 한도 초과이고 그 한도는 **자정에 리셋**된다. `retryable` 축은
-    같은 파일이 auth(20/30/31)=False · server(04/99)=True로 정한 대로 "**즉시 재시도가
-    성공할 만한가**"이지 "언젠가 성공할 수 있는가"가 아니다. `True`면 호출자가 성공할
-    수 없는 것에 retry budget을 태운다.
-    - **테스트가 왜 못 잡았나**: `test_result_codes_raise_typed_exceptions`가 `12`와 `22`를
-      한 묶음으로 돌리면서 `failure_kind`도 `retryable`도 단언하지 않았다(provider·endpoint만).
-      `22`를 분리해 셋 다 단언하도록 고쳤다.
-    - HTTP 200 XML `OpenAPI_ServiceResponse/cmmMsgHeader`도 같은 result-code 정책을 쓰며,
-      `03`은 빈 결과, `22`는 비재시도 quota다. 임의 XML의 같은 태그는 parse error로 fail-close한다.
-  - [x] ③ **RetryBudget 비례화/settings 노출 및 `_LOGGER`↔`python_logs` 결선(2026-08-18)** —
-    예상 경계 수의 5%를 올림하되 최소 8·최대 32로 제한하고 두 값을 env/settings로 노출했다.
-    KMA·DataGoKr·AirKorea·KHOA의 다건 경계에 공유 예산을 전달하며 provider logger WARNING을
-    Dagster event stream에 결선했다. 예외 본문과 개행은 로그에 싣지 않는다.
-  - [x] ④ **KMA 5종 + airkorea schedule에 `coalesce_active_runs=True`(2026-08-18)** —
-    같은 job의 미종료 run이 있으면 tick을 건너뛴다.
-    - ⚠️ **혼자 켜면 안 된다.** 상한이 없으면 hung run 하나가 그 스케줄을 **영구
-      차단**하고, 증상이 "스케줄이 조용하다"로 나타나 고장처럼 안 보인다. 기존에
-      coalesce를 쓰는 유일한 스케줄(`feature_notice_krex_traffic_notices`)이
-      `max_runtime_seconds`와 짝인 이유다. 6개 모두 상한이 **없었으므로** 둘을 함께 넣었다
-      (`_FRESHNESS_RUN_MAX_RUNTIME_SECONDS` = 7,200초, `MAX_RUNTIME_SECONDS_TAG`로 강제).
-  - [ ] ⑤ alembic 1.19 적응
+  Alembic 1.19.1에서 fresh PostGIS `upgrade head → alembic check`를 재현하면
+  named CHECK가 **removed 208건 / added 167건**으로 드리프한다. 이는 단일
+  오탐이 아니라 baseline DB와 ORM의 혼합된 이름·naming-convention 적용 차이다.
+  [Alembic 1.19 changelog](https://alembic.sqlalchemy.org/en/latest/changelog.html)의
+  named CHECK by-name plugin과 1.19.1 column-bound fix를 기준으로 한다.
+  plugin 전역 비활성화나 CHECK 전체 `include_object` 제외는 실제 drift도 숨기므로
+  허용하지 않는다.
+
+  **AC**: 현재 DB CHECK catalog와 ORM 이름을 정확히 정렬하고, 표현식·catalog 의미
+  드리프 가드를 보존한 상태에서 Alembic 1.19.1 `alembic check`가 깨끗해야 한다.
 
 - [~] T-VN-H43 — **prod 백업 체계 수립 (정기 dump·sha256·보존·rollback 기준선)**
 
@@ -517,25 +476,6 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
     (manager #109 절차)을 restore 문서에서 링크한다.
     **해소(2026-08-18)**: `docs/backup-restore.md` **§2.2**를 신설했다 — 빈 DB 재생성이 n150의 1차 복구 경로("손상 시 재적재가 정책")이므로 그 첫 단계인 superuser 확장 선생성 SQL을 넣고 #109를 링크했다. 그 이슈의 **본문은 이미지↔pin 사고**이고 절차는 2026-08-04 코멘트에 있어 본문만 보면 놓친다는 점, 원문 식별자(`krtour_map`)가 낡았다는 점도 적었다. GRANT grantee는 정본(`docker/postgres-role-bootstrap.sh:521-522`)에서 직접 읽어 `ktm_feature_state_procedure_owner, ktm_feature_runtime`으로 썼다 — 조사 초안은 `ktm_feature_migrator`로 틀렸다.
 
-- [~] T-VN-H44 — **복원 리허설 드릴 정기화 (H30B 하네스 재사용)**
-
-  백업본이 실제로 복원되는지를 반복 가능한 드릴로 정착시킨다. **타이밍: H43 뒤,
-  이후 정기.**
-
-  - [x] 드릴 1회차 완주(2026-08-05) — `2026-08-05-h43-postdeploy-0083.dump`
-    (489MB) 대상, dev box WSL 격리 PostGIS에서 5단계 전부 통과: 확장 4종
-    선생성 → `pg_restore`(예상 오류 1건만) → **manifest 완전 일치**(head
-    0083 · features/aliases/public 각 731,765 · pair_mismatch 0 · orphan
-    0) → replica 세션 우회로 alias 5건 결손 주입 → `missing_alias=5` 관측
-    검출 → 정본 재생성 replay → 4축 0·행수 원복.
-  - [x] restore 요령 고정 — `docs/backup-restore.md` **§10**(절차 5단계 +
-    함정: 확장 선생성 충돌 오류 1건이 정상, 컨테이너 `/dev/shm` 64MB로
-    73만행 병렬 집계 실패 → `max_parallel_workers_per_gather=0` 또는
-    `--shm-size`).
-  - [ ] 주기화 — "migration 동반 릴리스 뒤 + 최소 월 1회" 규약을 §10에
-    명문화했으나 실행 트리거(캘린더/자동화)는 미결선. H43 정기화
-    (manager #148)와 함께 묶는다.
-
 ## 이슈 종결 추적
 
 > landing task와 완료 조건이 동일한 열린 이슈만 함께 닫는다. LIVE-01 후속 OPEN 7건은 Lane A
@@ -547,14 +487,11 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 - **종결**: map #738은 lane 분배 정본을 본 문서로 이관해 닫혔다. map #930(geo key
   미결선 — dagster job 고착)은 docker-manager compose 결선(#114 트랙) + 3 컨테이너
   env 실측 + krex job 연속 SUCCESS로 2026-08-05 close.
-- [ ] T-VN-EXT-PINVI-215 — **PinVi #215 외부 follow-up 추적**
-
-  post-review cleanup 잔여(ADR-045 VWorld 불투명 자격증명 hard-gate 등)는 PinVi 저장소가
-  소유한다. Map Agent A/B 실행 queue에는 넣지 않고 PinVi #215가 닫힐 때 상태만 동기화한다.
-
 ### T-VN-H50 — CI integration flake: `test_t212d_perf_explain.py:546` planner 인덱스 선택
 
-- [ ] **재현되는 flake다** — `test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible`의
+- [ ] T-VN-H50 — **planner 인덱스 선택 CI flake 해소**
+
+  `test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible`의
   첫 gate(`_assert_uses_index(dedup_refresh, 'idx_source_entities_provider_dataset',
   'idx_features_dedup_refresh_keyset')`)가 CI에서 간헐 실패한다. 2026-08-18까지 PR #975·#996·#998
   세 번 모두 **재실행 한 번으로 통과**했다(코드와 무관). 실패 시 planner가 `idx_source_links_…`로
@@ -572,12 +509,14 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   (c) seed 통계를 결정적으로 만든다(`default_statistics_target`·행 수 상향). **PR마다 재실행이
   필요하므로 머지 위생 비용이 실재한다.**
 
-### T-VN-H49 — 4분할 인스턴스 백업 주체 (docker-manager #177 추적)
+### T-VN-H49 — 4분할 인스턴스 백업 운영 잔여
 
-Map 인스턴스의 baseline 3건과 절차 문서화, Docker Manager #177의 6-role standalone
-backup primitive, Geo application DB의 앱 레벨 schedule env 결선(PR #181, merge
-`969eff18`)까지 완료했다. 남은 소관은 실제 외부 인스턴스의 주기 실행·산출물·off-box
-증거이며, 이 저장소는 **의존만** 추적한다.
+- [~] T-VN-H49 — **주기 실행·bounded retention·off-box 증거 완성**
+
+Map 인스턴스의 baseline 3건과 절차 문서화, Docker Manager #177의
+6-role standalone backup primitive, Geo application DB의 앱 레벨 schedule env 결선
+(PR #181, merge `969eff18`)까지 완료했고 #177도 닫혔다. 그러나 이 task의
+운영 AC인 주기 실행·bounded retention·off-box 증거는 남아 있다.
 
 - [~] Geo application DB 첫 자동 백업은 4.71 GB artifact와 sha256 verify까지 성공했다.
   다만 `scheduled_backup`과 retention janitor가 계속 RUNNING이며 최근 성공·bounded retention으로
@@ -596,278 +535,57 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 
 > 다른 lane과 barrier를 공유하지 않는다. 아무 때나 착수할 수 있다.
 
-### T-VN-C02 — T-229-buildx arm64 multi-arch 배포 검증
+### T-VN-C03 — ADR-034 보조 dataset 5종 제품·source 결정
 
-**정적 점검 완료(2026-08-18), 실행은 막힘.**
-
-- Dockerfile에 **아키텍처 하드코딩 0건**(`amd64`/`x86_64`/`aarch64`/`--platform` 없음).
-- `scripts/docker-buildx.sh`의 `PLATFORMS` 기본값이 이미 `linux/amd64,linux/arm64`다.
-- 남은 위험은 **바이너리 휠**이다 — `asyncpg` · `psycopg[binary,pool]` · `shapely` ·
-  `geopandas`. 넷 다 manylinux aarch64 휠을 내지만, 그건 빌드해 봐야 확정된다.
-- **실행이 막힌 이유**: ghcr.io push에 `GITHUB_TOKEN`이 필요하고, registry에 이미지를
-  올리는 것은 외부로 나가는 동작이라 임의로 하지 않는다.
-
-```bash
-# 자격증명이 있는 환경에서 1회:
-KOR_TRAVEL_MAP_DOCKER_PLATFORMS=linux/arm64 bash scripts/docker-buildx.sh
-# 볼 것: 위 4개 패키지가 소스 빌드로 떨어지지 않는지(떨어지면 빌드가 매우 길어지거나 실패)
-```
-
-`docs/sprints/README.md`가 "본 저장소 잔여는 `T-229-buildx` 하나뿐"이라고 하는데
-tasks.md에 항목이 없었다. `tasks-done.md`는 `[x]`인데 본문은 "arm64 buildx만 잔여"다.
-
-- [ ] `GITHUB_TOKEN` 있는 환경에서 arm64 multi-arch buildx 배포 1회 검증.
-- [ ] 결과에 따라 `tasks-done.md`의 `[x]`를 정정하거나 잔여 문구를 제거한다.
-
-AC: arm64 이미지가 registry에 올라가고 n150/Odroid 중 arm64에서 기동 확인.
-
-### T-VN-C03 — ADR-034 보조 dataset 5종 미구현 + provider 표 drift
+- [ ] T-VN-C03 — **보조 dataset별 착수·폐기·source-discovery 분기**
 
 `docs/architecture/provider-contract.md`가 다섯을 "**(계획 — 미구현)**"으로 둔다:
 `krforest_trails`(숲길/등산로 route), `krforest_mountain_weather`,
 `krforest_safety_notices`, `forest_fire_risk`, `khoa_coastal_notices`.
 
-- [ ] 착수 여부는 **제품 결정**이다. 하지 않기로 하면 문서에서 "계획"을 빼고 그렇게 적는다.
-- [x] **표 drift 해소(2026-08-18)** — `providers/__init__.py` docstring이 2026-05
-  Sprint 계획표로 굳어 존재하지 않는 모듈 **3개**(`krforest_weather`·`krforest_trails`·
-  `khoa_weather`)를 나열하고 실재하는 **6개**(`mcst`·`datagokr_file_data`·`krairport`·
-  `kor_travel_concierge`·`feature_operation_registry`·`knps_name_translations`)를
-  빠뜨리고 있었다. 실제 인벤토리로 교체했다.
-  - 고쳐 적는 것만으로는 또 어긋나므로 **`tests/lint/test_providers_docstring_inventory.py`**를
-    신설해 "표 + 예외 목록 = 디렉터리의 모든 모듈"을 강제한다. 새 provider를 넣고
-    docstring을 안 고치면 red다.
-  - 조사 초안은 "이 표는 디렉터리와 1:1"이라 단언하면서 표가 15행/실제 17개라
-    **새 거짓 주장을 만들 뻔했다**(적대 검증이 잡음). 보조 모듈 2개를 예외로 명시하고
-    그 예외 집합까지 테스트가 고정한다.
-  - R2-15는 `provider-contract.md` 대상이고 이미 적용 완료다 — 이 drift는 별건이었다.
+표 drift 해소와 회귀 lint는 완료 이관했다. 로컬 exact pin 기준 조사 결과,
+다섯 dataset을 하나의 구현 task로 닫을 수는 없다.
 
-AC: 표와 실제 모듈이 일치. dataset 구현은 결정에 따라 별도 task로 분기.
+- [ ] **`krforest_trails`** — `python-krforest-api@f9254e6`에 geometry를 갖는 typed
+  trail client가 있어 구현 가능성이 가장 높다. 제품 착수 여부를 결정한다.
+- [ ] **`krforest_mountain_weather` / `forest_fire_risk`** — upstream 표면은 있지만
+  서비스별 승인·403 이력과 RawRecord 계약을 먼저 해소한 뒤 별도 task로 분기한다.
+- [ ] **`krforest_safety_notices`** — 여러 safety endpoint 중 무엇을 notice로 보는지
+  source semantics 결정이 먼저다.
+- [ ] **`khoa_coastal_notices`** — `python-khoa-api@20c7207`에 안정된 notice API/model이
+  없다. 현재 "계획"을 제거하거나 source-discovery task로 바꿀지 결정한다.
 
-### T-VN-40 인수 — 실태 (2026-08-18 재조사)
+**AC**: 다섯 항목의 제품 범위·authoritative upstream을 각각 결정하고, 구현
+항목은 독립 task로 분기하며 폐기 항목은 provider 계약의 "계획"에서 제거한다.
 
-`resume.md`·이 문서 상단이 "구현 병합 완료 → n150 인수 + receipt complete + 물리 삭제만
-남음"으로 서술한다. **저장소 실측은 다르다.** 조사 1명 + 적대 검증 2명(contract/ops lens)이
-독립으로 확인했고, 검증자 둘 다 조사 초안의 일부를 뒤집었다. 아래는 **검증을 통과한 사실**만이다.
+### T-VN-40 인수 — 잔여 (2026-08-19 재대조)
 
-#### 사전 구현과 prod 실행을 분리한 여섯 단계
+> 40A write fence(PR #994), identity mapping(PR #996), prod migration ①과 PinVi mapping 소비·
+> canonical collection 59개 import ②는 완료해 [`tasks-done.md`](tasks-done.md)로 이관했다.
+> 활성 원장에는 실제 잔여 단계만 둔다.
 
-| # | 일 | 실태 | 근거 |
-|---|---|---|---|
-| 사전 | **40A write fence** | **미구현.** `curated_repo.py`의 legacy `INSERT/UPDATE`를 DB·ACL·static 3층에서 차단하는 migration/검사를 먼저 구현·병합한다 | `src/kortravelmap/infra/curated_repo.py`, `alembic/baseline/schema.sql` |
-| 사전 | **identity mapping** | `ops.curation_cutover_identity_mappings` 적재 migration을 구현·병합한다. PinVi backfill의 입력이다 | 상세 설계 §6.2 step 3 |
-| 사전 | **40C removal manifest 작성** | 삭제 대상·순서·검증을 manifest와 migration으로 먼저 review 가능하게 만든다. 실행은 receipt 뒤다 | 설계 §6.2 step 6-7 |
-| ① | prod migration·fence enable | 사전 구현을 포함한 `0202~0221` 이후 migration을 prod head `0104`에 forward 적용한다 | `alembic/versions/` |
-| ② | mapping 소비 (PinVi) | **Map DB mutation 없음**(2026-08-18 실측 정정 — 아래 ② 항목). PinVi가 identity-mappings 4,424건을 전량 읽어 mapping receipt를 봉인한다. Map admin CSV import(`preview`→`commit`)를 legacy projection 위에 돌리면 0223이 동결한 bucket B 전제가 깨지므로 **돌리지 않는다** | `docs/reports/t-vn-40-curation-write-model-detailed-design-2026-08-11.md` §6.3, PinVi `apps/api/app/services/curation_cutover_mapping_receipt.py` |
-| ③ | live 인수 + soak | sanctioned `c7-prod-live-e2e.md`로 origin 검증·증거 redaction·백업/PITR 복구점을 확인한다 | `playwright.live.config.ts` |
-| ④ | receipt complete | 9키 exact·`blocking_reason` 제거·freeze 상수를 함께 갱신한다 | `contracts/vnext/consumer-rollout-v1.json` |
-| ⑤ | **40C 물리 삭제 실행** | ④ 뒤 manifest가 선언한 legacy repository/trigger/table/API/ACL을 forward-only로 제거한다 | ADR-075 결정 4 |
-
-**순서 — ADR-075 결정 4가 정한다**: soak·reconciliation 전에는 legacy column/table/alias를
-제거하지 않는다. 따라서 사전 구현·병합 → ① → ② → ③ → ④ → ⑤이며, 물리 삭제를 먼저 하거나
-import 중 legacy write를 허용하지 않는다.
-
-#### 검증자가 뒤집은 것 (초안이 틀렸던 곳)
-
-- "40A는 병합 완료" → **아니다.** write fence가 없다. legacy와 canonical이 **양쪽 다 쓰기
-  가능**한 상태로 prod에 나갈 참이었다.
-- "`/v1/admin/curated-features*` 5개가 openapi.json에 있다" → **없다.** 실체는 curated 경로
-  16개이고 path family가 다르다.
-- "`ops.curation_cutover_identity_mappings`가 0건이면 설계상 불필요" → 설계 문서
-  (`…detailed-design…md:895-897,951`)가 **명시적으로 migration이 적재한다**고 했다.
-  적재 코드가 없는 것이지 필요 없는 것이 아니다. 지금 `GET /v1/service/curation-cutover/
-  identity-mappings`는 count 0 / empty Merkle root라 PinVi backfill이 소비할 것이 없다.
-- "`map_commit`에 무엇을 넣을지 모른다" → 러너가 정한다. 인수를 **실행한 그 커밋**이고
-  `install-tvn34c-n150-fresh-live-e2e.sh:98-112`가 동치를 검사한다.
-
-#### "전용 canonical principal"의 정체
-
-DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
-(`pinvi:curation-snapshot:read`)와 `service:pinvi:curation-cutover`
-(`pinvi:curation-cutover:read`). digest만 Map이 받고 원문은 docker-manager C6c(PR #174)가
-주입한다. `.env.example`에 키가 없다(주입 주체가 다르다). DB role 쪽은 별도로
-`ktm_curation_command_owner` 등 4개.
-
-- [x] **T-VN-40A-fence** — legacy write 차단 (PR #994 → main `3e0732b3`, 2026-08-18). 3층 구현·검증 완료:
-  **ACL**(`runtime_privileges` 표에서 `curated_features` write 제거 → DB가 거부, 통합
-  테스트가 `SET ROLE ktm_feature_runtime`으로 실측) · **static**(`infra/legacy_write_fence.py`,
-  repo write 4함수 첫 줄) · **route**(legacy admin write route 410 Gone).
-  - 범위를 한 번 잘못 잡았다 — theme/source/rule catalog까지 막았다가 plan:28("catalog
-    input만 유지")과 `0207_tvn40_theme_catalog.py`(T-VN-40이 새로 만든 procedure가 그 표에
-    쓴다)를 확인하고 `curated_features` 하나로 좁혔다. 이름이 `curated_`로 시작한다고
-    전부 legacy가 아니다.
-  - legacy write가 **된다**를 단언하던 테스트를 **막힌다**로 뒤집었다(지우면 회귀를 잡을
-    자리가 없다). read 경로 fixture는 test-only raw INSERT helper로.
-  - **적대 리뷰(2명) 결과와 조치** — 둘 다 `holds=False`, P1 1건 + P2 4건. 전부 반영했다.
-    - **P1 — merge가 runtime role로 죽는다.** `apply_feature_merge`가 legacy 표를 `FOR
-      UPDATE`+UPDATE 3문으로 mirror하는데 fence가 그 권한을 뺐다 → 42501. 새
-      `tests/integration/test_merge_under_runtime_role.py`(`as_api_runtime`)로 red 확인.
-      **그 테스트가 하나 더 드러냈다**: legacy 다음으로 canonical `curation_collections`
-      `FOR UPDATE`에서 42501 — **fence 이전부터의 결함**(20fa752d). 모든 merge 테스트가
-      superuser라 CI가 못 잡았고 prod dedup 병합은 이미 깨져 있었다. 해결(0204/0214 패턴):
-      `0222_tvn40a_merge_runtime_role` — command_owner 소유 SECURITY DEFINER procedure 5개
-      (legacy lock/archive/sync/move + canonical collections lock)를 CALL. runtime에 표
-      권한을 주지 않는다. 행 잠금은 트랜잭션 범위라 반환 뒤에도 유지된다. legacy 4개는 40C에서
-      사라지고 collections lock은 남는다.
-    - P2 inventory — lint가 `curated_repo.py` 이름 규칙만 봤다 → `infra/*.py` 전체를 SQL
-      문자열 수준(상수+인라인)에서 훑어 감싸는 함수를 찾고 fence 호출 또는 allowlist
-      (`update_curation_item`·`_lock_legacy_projections_for_item` — 0214 이전 Python writer,
-      **어떤 runtime 진입점에도 연결돼 있지 않음**을 별도 테스트로 고정)를 요구.
-    - P2 snapshot 표 — `curated_feature_detail_snapshots`는 읽는 코드도 쓰는 코드도 없는데
-      RW였다 → SELECT만. 덤으로 ACL 표의 **phantom 항목 2개** 발견·삭제
-      (`curated_tripmate_copy_snapshots` — legacy 0032가 rename, `weather_metric_series` —
-      baseline에 없음). reconcile은 DB에 없는 표를 조용히 건너뛰므로 phantom은 아무 것도
-      지키지 않으면서 "관리된다"는 인상만 준다. "표에 선언된 relation이 DB에 실재한다"
-      통합 테스트 추가.
-    - P2 spoof 422 — 삭제한 legacy 라우터 테스트의 canonical 대응: item POST/PATCH가
-      body의 actor/selected_by/operator_updated_by/updated_by/created_by를 422로 거부하고
-      repo command에 닿지 않음(ADR-066 D-2).
-    - P2 admin UI — legacy detail 화면의 채택/해제/보관/편집이 410을 맞는다 → write 컨트롤·
-      mutation 4개·FeatureEditor·CuratedPlaceSearchPanel 제거, fence 안내로 교체. read
-      패널은 40C까지 유지(plan §40B의 write 절반을 지금, read는 40C에서).
-  - **2차 적대 리뷰(2명, 수정분 대상)** — coverage 렌즈 `holds=True`(P2만), DB 렌즈
-    `holds=False` P1 2건. 전부 반영.
-    - P1 — **runtime preflight allowlist 미등록**: `infra/db.py`가 runtime 로그인이 EXECUTE할
-      수 있는 procedure를 fail-closed로 대조하는데 0222의 5개가 없어 **API/Dagster가 기동을
-      거부**했다(`test_tvn34_runtime_privilege_preflight` red — 1차 통합 선택에 빠져 있었다).
-      `_ADMIN_CURATION_FEATURE_PROCEDURES`에 등록.
-    - P1 — **EXECUTE 대상이 공유 그룹**: `ktm_feature_runtime`에 줘서 provider ETL identity
-      (dagster runtime)까지 legacy row를 옮길 수 있었고 본문에 executor 게이트가 없었다(0214
-      패턴의 절반만). 0214 형태 전체로: REVOKE FROM PUBLIC+runtime 로그인 전부, EXECUTE는
-      `ktm_curation_admin_executor`(api runtime 상속)에만, 본문에 `session_user` 게이트.
-      dagster runtime이 CALL하면 42501인 음성 테스트 추가. **그 결과 `test_merge_repo.py`의
-      merge 호출 21곳을 전부 `as_api_runtime`으로 감쌌다** — superuser는 게이트에 걸리고,
-      애초에 superuser 세션은 ACL 회귀를 못 잡는다.
-    - P2 — trigger `sync_curated_feature_collection`이 command_owner로 돌 때 INSERT하는
-      `curation_collections.created_at`이 0213 column grant에 없었다(0214부터 잠복) → 0222에서
-      부여. splitter는 0214 사본을 그대로(`''` escape). route fence는 substring→segment
-      regex. lint 정규식은 회피형(ONLY/MERGE/TRUNCATE/alias 없는 lock/FOR SHARE·KEY SHARE —
-      넷 다 UPDATE 권한 필요) 전수 + ORM `CuratedFeatureRow` 가드. `postgres-schema.md`
-      head→0222.
-    - **배포 선행(잊지 말 것)**: orchestrator(docker-manager) `.env`의
-      `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`를 그때의 head(0223 뒤로는 `0223_tvn40_identity_mappings`)로 올려야
-      `api-entrypoint.sh`가 fail-closed로 막지 않는다. T-VN-40 인수 실행 ①의 첫 줄.
-    - 3차(재검증) P1 — executor 게이트가 superuser도 거부하는데 `test_cli_dedup_merge`(superuser
-      DSN)와 `test_tvn35_typed_subtypes`(migrated_session) 2건이 여전히 superuser로 merge를 몰았다
-      → CLI 테스트는 API runtime DSN(prod와 같음), tvn35는 `as_api_runtime`. `ktmctl dedup-merge`
-      help에 "DSN은 API runtime 로그인" 명시(superuser/migrator DSN은 42501).
-  - 머지됨(적대 리뷰 2명 hold · CI 4 workflow green · n150 전체 통합 931 passed/env-only 6 failed).
-    **①~② 전에 머지돼야 한다**는 조건 충족.
-- [x] **T-VN-40-mapping** — `ops.curation_cutover_identity_mappings` 적재 migration `0223_tvn40_identity_mappings`
-  (설계 §6.2 step 3·§6.3 · [설계 문서](reports/t-vn-40-identity-mapping-loader-design-2026-08-18.md), 적대 리뷰 2명 hold).
-  PinVi backfill의 입력이다. **PR #996 → main `fbc31f2f`(2026-08-18)** — 코드 적대 리뷰 2명(data/SQL · ops/deploy) 둘 다 hold, P2 반영:
-  `SET LOCAL lock_timeout='30s'` · `api-entrypoint.sh` loader 중단 시 즉시 종료(30회 재시도 없음) ·
-  `scripts/tvn40_identity_mapping_precheck.sql`(prod 실측 전부 0 · TEMP 권한 ok) · merge guard 회귀 · 0104에서
-  seed된 중단 형태가 0202~0223 전체를 롤백함을 dedicated DB로 실측. 통합 13 · 유닛(entrypoint 포함).
-  prod 실측(2026-08-18): legacy 4,424 전부 bucket B(1:1 projection). merge_repo는 mapping이 잡은 item의
-  detach rekey를 명시 MergeConflictError로 막는다.
-- [~] **T-VN-40C-manifest** — physical removal manifest와 migration을 사전에 작성·검토한다.
-  legacy 물리 삭제 실행은 receipt complete 뒤다. **초안 작성(2026-08-18)**:
-  `docs/reports/t-vn-40c-physical-removal-manifest-2026-08-18.md`(선행조건 P1~P6 · DB 삭제 순서 D1~D12 ·
-  코드/프론트/계약 삭제 · static zero gate · 열린 결정 Q1~Q4) + 기계 판독본
-  `contracts/vnext/t-vn-40c-removal-manifest-v1.json` + migration 초안
-  `docs/reports/tvn40c/0225_tvn40c_physical_removal.py.draft`(alembic 밖). **적대 리뷰 2명 2라운드 완료(v2.2)**:
-  DB 렌즈가 n150 시뮬레이션(prod-shaped·fresh)으로 D1~D9 + postcheck 통과 확인, P1 반영(D3b legacy_component_identity
-  trigger·D4 0214 patch/archive procedure 재작성·prosrc 검사·splitter); code/contract 렌즈 hold(Q5 public catalog 제거·
-  P7 PinVi lockstep·static zero 식별자/allowlist·누락 테스트/e2e/docs). 남은 구현: 40C PR에서 D4 본문·코드/프론트/계약
-  삭제·static zero gate 테스트. 실행은 ①~④ 뒤.
-- [~] **T-VN-40 인수 실행** — ① 완료 · ②~⑤ 남음.
-  - [x] **① prod migration (2026-08-18)** — precheck 전부 0 → `pg_dump -Fc` 복구점
-    (`~/backups/kor_travel_map_0104_pre-tvn40-1_20260818T082752Z.dump` + `.sha256`) + `.env` 백업 →
-    소스 스냅샷 `~/ktm-src-14ec2368…` + `.env` 3키(REPO_DIR/GIT_COMMIT/EXPECTED_HEAD=`0223_tvn40_identity_mappings`)
-    → 이미지 4개 빌드 → api 재생성으로 `0104→0223` **단일 트랜잭션** 성공. manifest
-    `total=4424 by_kind={'legacy_projection': 4424}`. 사후: legacy 4424 = mapping 4424 ·
-    `source_row_hash` 재계산 불일치 0 · dangling 0 · 포인터 불일치 0 · 0222 5 procedure
-    owner=command_owner/SECDEF·dagster EXECUTE=false · legacy 표 SELECT only · 4 서비스 healthy.
-    절차·선행조건은 `docs/deploy.md` §T-VN-40 prod 배포. **선행조건 2개가 새로 드러났다**:
-    (a) `0202`가 요구하는 `ktm_curation_*` NOLOGIN role 4개 → bootstrap profile one-shot 선행,
-    (b) manager compose가 항상 주입하는 빈 `KOR_TRAVEL_MAP_API_PINVI_CURATION_*_TOKEN_SHA256` →
-    Map이 기동을 거부했다(`fix/api-settings-empty-pinvi-digest`로 수정, PinVi raw pair도 prod `.env`에 설정).
-  - [x] **② mapping 소비 완료 (2026-08-19)** — S3 재배포 → S4 봉인 → S5 preflight → S6 import 59/59.
-    receipt `46627435…`(root `69eb85ec…`, count 4424, items 4424), PinVi plan 59 · POI 4,424.
-    ①~④ 동안 dedup merge 금지는 유지.
-    - **Map 쪽에 남은 데이터 mutation은 없다.** 설계 §6.3 표는 legacy `source_rule`+`curated` 행의
-      target을 "promoted candidate + 기존 item 유지"로 못박는데 prod legacy 4,424는 **전부 `curated`**라
-      archive 대상이 0건이고, canonical item 4,424는 import row 0 / created_by 0 / operator 0 /
-      legacy_projection_id 4,424로 **bucket C·D(official/manual membership)에 해당하는 행이 하나도 없다**.
-      여기에 admin CSV import를 돌리면 `current_import_row_id`·operator 필드가 붙어 0223이 immutable로
-      동결한 `legacy_projection` 전제가 사후에 깨진다 — **돌리지 않는다.**
-    - **실행 순서 정본: [`docs/runbooks/tvn40-pinvi-cutover.md`](runbooks/tvn40-pinvi-cutover.md)** (적대 검증 2명이 초안에서 P1 14건을 잡은 뒤의 수정본).
-    - [ ] **PinVi prod 재배포가 선행이다.** prod `pinvi-api-latest`는 image revision `3b87c19c`(#434)로
-      T-VN-40 소비자 코드가 **아예 없다**(client 모듈 없음 · config token 필드 0건 · OpenAPI curation route 0개).
-      PinVi DB head는 `20260804_0049`로 `0050~0059` 미적용. 소비자 구현 자체는 PinVi `main` `dc8a683f`(#444,
-      2026-08-18)에 이미 들어와 있다 → 필요한 것은 재빌드 + `pinvi-admin-bootstrap` one-shot(alembic upgrade)
-      + 컨테이너 재생성이며, **`ktdctl pinvi-pair rebuild-pinned`는 3 DB 파기형이라 금지**.
-      raw token pair는 manager `.env`에 이미 있고 Map digest와 일치한다(2026-08-18 설정).
-    - [ ] **mapping receipt 봉인 = ②의 실질 완료** — `POST /api/v1/admin/notice-plans/curation-cutover/mapping-receipts`.
-      성공 판정: `mapping_root=69eb85ecb178569bc87665ee1100b0a34ade4274512e5492e358c50a19140710` ·
-      `mapping_root_version=ktm-curation-cutover-mapping-v1` · `mapping_count=4424` · `_items` 4,424행.
-      **append-only + unique + advisory lock이라 되돌릴 수 없다** — 직전 백업이 유일한 복구 수단.
-    - [ ] cutover **backfill 자체는 prod no-op**이다: PinVi prod `curated_trip_plans`/`curated_plan_pois`가
-      0행이라 전환할 legacy plan이 없다. `GET …/curation-cutover/legacy-preflight`로 `ready=true`만 기록한다.
-    - [ ] **canonical collection 59개 → PinVi notice plan import** (2026-08-18 사용자 결정: **한다**).
-      `POST /api/v1/admin/notice-plans/imports/kor-travel-map-curation-collections`,
-      body `{collection_id, mode:"create", is_published?}`, `Idempotency-Key`(UUID) 필수, 201/200(replay).
-      ④ receipt 요건은 아니고 제품 결정이며, S3 배포 뒤 S4·S5와 함께 실행한다.
-      **59개 구성**(prod 실측, 전부 `published/public`·빈 컬렉션 0·합계 4,424): concierge 채널
-      (`concierge-yt-*`) 26개/1,481 · 재생목록(`concierge-pl-*`) 13개/1,462 · `media-places` 20개/1,481.
-      같은 채널이 채널·재생목록·미디어촬영지 세 축으로 각각 한 컬렉션을 갖는다(둘시네아 440×3축,
-      키다리짬뽕아저씨 362×3축, 여행작가 봄비 328×3축, 감성 국내여행지 97, 킴스트래블 83 …).
-      최대 440 item < PinVi 상한 2,000이라 413 없음. 되돌리기 = plan soft delete + 백업 복원.
-  - [ ] **③ sanctioned live/soak** (`docs/runbooks/c7-prod-live-e2e.md`)
-  - [ ] **④ receipt complete** — 선행: PinVi 재-vendor PR. PinVi가 vendor한 user spec은 Map `73a9a246`
-    (2026-08-05) 시절 바이트(`66fc83b3…`)인데 Map user spec은 `4672aa96`~`main` 전 구간에서 `6a2ee0f9…`로
-    불변이다 → 순수 refresh(신규 path 2 · 변경 9 · 삭제 0). 이 불일치를 잡는 것은 Map의
-    `tests/unit/test_vnext_contract_artifacts.py`뿐이고 PinVi CI는 못 잡는다. receipt는 **정확히 9키**로
-    바꾸고 `blocking_reason`을 지우며 freeze 상수(`ARTIFACT_SHA256`)를 같은 커밋에서 갱신한다(LF 전용).
-  - [ ] **T-C7-SCOPE-REGISTRY** — exact-target refresh용 `external_system:*` 선언의 규약·등록부를
-    정본화한다(누가 언제 무슨 근거로 선언하는가, 운영 표면에 어떻게 읽히는가). `c7-e2e`가 첫
-    선례이고 PinVi `external_system:pinvi`가 다음이다 — 지금은 일회성 migration 외에 규칙이 없다.
-    정본 후보: `docs/integration-map.md` 또는 ADR-088 consequences.
-  - [ ] **T-C7-LIVE-SERIAL** — C7 KMA live 3종의 직렬 실행을 runbook 문구가 아니라 코드로 못박는다.
-    고정 external system을 쓰게 되면서 병렬 실행이 서로의 `membership_fingerprint`를 오염시키는데
-    `playwright.live.config.ts` 기본은 `fullyParallel: true`/`workers: 4`다. Playwright에 파일 간
-    직렬화 primitive가 없어 실효 수단은 파일 병합 또는 worker lock fixture다(둘 다 C7 게이트를
-    흔들 수 있으므로 별도 작업).
-  - [ ] **⑤ 40C manifest physical removal 실행**(0225)
+- [ ] **③ sanctioned live/soak** — [`c7-prod-live-e2e.md`](runbooks/c7-prod-live-e2e.md)의
+  strict runner를 current Map/PinVi exact pair에서 통과하고 evidence·cleanup을 봉인한다.
+  PR #1010·#1011로 드러난 sparse KPI·ADR-088 exact scope 결함은 병합됐고, KMA canonical
+  identity/detail 단언 보강도 PR #1013(merge `dbba2ab6`)으로 병합됐다.
+- [ ] **④ receipt complete** — exact 9키로 `pending`을 해소하고 `blocking_reason`을 제거하며
+  `contracts/vnext/consumer-rollout-v1.json`과 freeze 상수를 같은 변경에서 갱신한다.
+- [ ] **T-C7-SCOPE-REGISTRY** — `external_system:*` exact-target scope의 선언 주체·근거·
+  운영 조회 표면을 `docs/integration-map.md` 또는 ADR-088 consequences에 정본화한다.
+- [ ] **T-C7-LIVE-SERIAL** — 고정 `external_system:c7-e2e`를 쓰는 KMA live 3종이 서로의
+  `membership_fingerprint`를 오염시키지 않도록 파일 병합 또는 worker lock으로 직렬화한다.
+- [ ] **⑤ physical removal 실행** — ④ 뒤 `0225` forward migration과 exact removal manifest로
+  legacy repository·trigger·table·API·ACL을 제거한다. 상세 AC는 아래 `T-VN-40C`가 소유한다.
 
 ## Lane B 상세 — b1 PinVi 결합·후속
 
 ### T-VN-41 — cache-target generation·outbox 전파
 
-> **41C prod enable 경계(2026-08-04 갱신)** — 41C의 "prod consumer enable + live 증명"은
-> docker-manager **재pin(#109 — `2b2dee95`) 완료** + Lane A **`T-VN-H42`**(provider 재적재
-> 완주·수렴 + H35 prod live 검증 잔여) **완료 후**에만 진행한다. 그 전 격리 스택 작업은
-> 병행 무방(파일 충돌은 의도된 핀 2개뿐 — registry write 수·mocked manifest,
-> journal 2026-08-04).
->
-> **#975 후보 증거 상태(2026-08-18)** — 당시 `main` `0e26a232`의 후손 Map `77821001`과 PinVi
-> `e8e0fecf`의 정확한 source archive를 n150의 별도 Docker project·volume에서만 실행했다. 실제 관리자 UI 로그인·
-> BFF-only dead-letter replay·reconciliation 뒤 같은 stream의 `blocked`/consumer disabled/dead-letter
-> 1/pending 1이 종결 reconciliation의 `ready`/consumer enabled/모든 delivery 0으로 수렴했다. 증거는
-> stream 식별자·blocked event·snapshot epoch/count/Merkle와 request 종결 tuple을 회귀 test로 실패 폐쇄
-> 결박했고, 두 적대 재리뷰의 P0/P1은 없다. 이 pair는 현재 `main` `142a1c12`의 후손이 아니므로
-> rebase된 Map과 다시 pin한 PinVi archive/image에는 증거를 승계하지 않는다. 기존 PostGIS CI에서 예전
-> direct replay test 2건이 consumer disable 계약과 충돌했으므로, reconciliation 재개 경로로 고친 뒤 새
-> exact pair CI와 n150 Live UI E2E를 다시 통과해야 한다. 후보 receipt는 final main C7, production consumer
-> enable 또는 `complete` 근거가 아니며 #975는 사용자 머지 지시 전까지 미병합이다.
->
-> **머지 결정(2026-08-18, 사용자 지시)** — #975를 `main` `3e0732b3`(#994 fence 포함) 위로 rebase(head
-> `a78f55dc`)하고 **CI green + 독립 적대 재리뷰 2명**을 게이트로 머지한다. **새 exact pair(rebased Map +
-> 재pin PinVi)의 n150 isolated Live UI E2E 증거는 이번 머지에서 재생성하지 않는다** — 그 격리 pair 러너
-> (`ktm41r778-*` 이미지·`tvn41-live-*` 스택을 만든 것)는 저장소에 없어 재구성 비용이 크고, 머지 자체는
-> candidate 경계(`final_c7_required=true`, PinVi startup sync 거부)라 prod enable이 없다. 기존
-> `77821001`/`e8e0fecf` 후보 증거는 그 pair의 이력으로만 남고(`t-vn-41-candidate-map` tag로 고정), 새 pair
-> 증거는 **final C7 인수 때** 만든다. PinVi #444의 Map pin 갱신도 그때 함께.
-
-- [~] T-VN-41A — **source generation·restore epoch**
-
-  existing external identity/exact scope를 유지하면서 source generation과 restore epoch를 schema에
-  도입하고 restore/backfill 시 단조성·중복 억제를 고정한다.
-
-- [~] T-VN-41B — **transaction-coupled outbox writer**
-
-  target/link/update 결과와 같은 transaction에서 generation-bearing outbox event를 기록한다.
-  critical write path는 relay I/O를 기다리지 않고 commit/rollback 원자성만 보장한다.
+> PR [#975](https://github.com/digitie/kor-travel-map/pull/975)는 merge
+> `4672aa966cd473f17fd4f69ee8066276f7be900d`로 병합됐고 CI 8개가 모두 성공했다.
+> source generation·restore epoch(`T-VN-41A`)과 transaction-coupled outbox writer
+> (`T-VN-41B`)는 독립 완료로 이관했다. 남은 `T-VN-41C`는 final exact-pair evidence와
+> production consumer enable·reconciliation 종결 AC를 소유한다.
 
 - [~] T-VN-41C — **relay·reconciliation·consumer enable**
 
@@ -1014,38 +732,22 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
 
 ### T-VN-40 — curation write model 단일화 (Lane B)
 
-> Map 구현 PR [#974](https://github.com/digitie/kor-travel-map/pull/974)는
-> `170ddf57`로 병합됐고 CI 8개가 모두 녹색이다. 연동 소비자 PinVi
-> [#445](https://github.com/digitie/pinvi/pull/445)와 Docker Manager
-> [#174](https://github.com/digitie/kor-travel-docker-manager/pull/174)도 병합됐다. 그러나
-> receipt는 `pending`이다. #974가 lifecycle·consumer 전환의 기반을 병합했더라도 40A write
-> fence·identity mapping·40C physical removal manifest는 아직 구현되지 않았고, 그 뒤 n150
-> canonical import/backfill·live receipt·물리 삭제 실행도 남아 있다. 따라서 아래 A/B/C는
-> release 관점에서 완료되지 않은 `[~]` 상태다.
+> 기반 구현 #974, 40A write fence #994, identity mapping #996, prod migration과 PinVi
+> mapping 소비·59개 collection import는 완료 이관했다. 현재 실행 순서는 40B 잔여 →
+> ③ live/soak → ④ receipt complete → 40C 물리 삭제다.
 
-- [~] T-VN-40A — **legacy writer inventory·write fence**
+- [~] T-VN-40B — **candidate lifecycle 분리·consumer cutover 잔여**
 
-  `curated_features` overlay를 쓰는 route/job/trigger/repository를 전수 고정하고 신규 legacy write를
-  차단한다. canonical curation과 effective projection checksum을 만든다.
+  - [ ] legacy source rule을 candidate `legacy_backfill`로 전환하고
+    `default_action='curated'`를 퇴역시킨 뒤 `ck_curated_source_rules_action`을 VALIDATE한다.
+    PinVi mapping 입력은 아니어서 완료된 ②를 뒤집지 않는다.
 
-- [~] T-VN-40B — **candidate lifecycle 분리·consumer cutover**
-  - [ ] §6.2 step 3 후반 잔여(40-mapping에서 분리): legacy source_rule → candidate `legacy_backfill`
-    transition, `default_action='curated'` 퇴역 + `ck_curated_source_rules_action` VALIDATE. ② blocker
-    아님(candidate는 admin 전용, PinVi 입력 아님).
+- [~] T-VN-40C — **legacy surface physical removal**
 
-  자동 후보를 `theme_feature_candidates` lifecycle로 분리하고 admin/public/PinVi consumer가
-  `curation_collections/items` 정본만 읽도록 전환한다.
-
-- [~] T-VN-40C — **legacy surface fence·removal manifest**
-
-  checksum과 consumer cutover 뒤 overlay 신규 write와 normal routing을 차단한다. exact removal
-  manifest로 legacy repository/trigger/table/API/ACL을 같은 forward-only release에서 물리 삭제하고
-  T-VN-39에 catalog-zero receipt를 넘긴다. held component·old binary rollback·신규 호환 shim은
-  만들지 않으며 recovery는 fresh clone/reload만 허용한다.
-
-  Docker Manager PR #174가 PinVi raw snapshot/mapping pair→Map digest pair의 C6c 결선을
-  구현해 병합됐다. n150 canonical import/backfill live receipt를 남기기 전에는 legacy surface
-  물리 삭제나 T-VN-40 receipt complete를 수행하지 않는다.
+  v2.2 removal manifest·번호 없는 migration 초안과 n150 prod-shaped/fresh 시뮬레이션은
+  완료했다. ④ receipt complete 뒤 D4 procedure 본문, 코드·frontend·계약 삭제, static-zero
+  gate를 구현하고 `0225` forward migration으로 legacy repository·trigger·table·API·ACL을
+  제거한다. held component나 호환 shim은 만들지 않으며 recovery는 fresh clone/reload다.
 
 - [ ] T-VN-39 — **KTM·PinVi write-fence cutover**
 
@@ -1242,5 +944,3 @@ proposed ADR-093에서 닫았고, exact checkpoint `2aa17c27`에 API·DB 전문 
 - [ ] **T-VN-M05 — provider 발행 시 중복 판정** (결정 4 후단). 수동 Feature와 같은 실체를
   provider가 발행하면 dedup 후보로 올리고 **자동 병합하지 않는다.** admin이 병합/유지/수동본
   폐기를 고른다.
-- [ ] **T-VN-H34 잔여** — M01~M03이 서면 태화강 국가정원·반디랜드&태권도원·청풍호를 Feature로
-  만들고 curation을 재연결한다. 그때까지는 해제 상태를 유지한다.
