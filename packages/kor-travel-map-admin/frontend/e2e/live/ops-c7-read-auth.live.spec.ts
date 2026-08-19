@@ -801,8 +801,7 @@ async function refreshUntilResponse(
     await test
       .info()
       .attach(`${label}-refresh-attempts`, {
-        body: attempts.join("
-"),
+        body: attempts.join("\n"),
         contentType: "text/plain",
       })
       .catch(() => undefined);
