@@ -2,6 +2,30 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-19 — T-VN-M00 수동 Feature 생성 설계·전문 리뷰 완료
+
+T-VN-H34 잔여의 "없는 것은 Feature로 추가" 요구를 M lane으로 분리한 뒤, M01 구현 전에 닫아야 할
+설계 2차 초안을 작성했다. 핵심 결정은 네 가지다. 첫째, 현재 admin BFF와 PinVi를 서버가 구분할
+수 없으므로 admin BFF 전용 credential로 PinVi 직접 경로를 차단한 뒤 M01 origin은
+`manual_admin` 하나만 발급한다. 둘째, HTTP `Idempotency-Key`와 body identity를 canonical ID에
+쓰지 않고 서버 UUIDv7을 먼저 발급하며 text PK는 `manual::<uuid>` opaque alias로만 남긴다. 셋째,
+exact duplicate claim과 verified origin을 별도 불변 relation으로 두고 DB unique 제약으로 동시
+요청의 단일 승자를 정한다. fuzzy/provider 중복은 M05로 남겨 자동 병합하지 않는다. 넷째, 새
+constraint를 409/422로 명시 매핑하고 current migration과 `contracts/vnext` 7축 freeze artifact를
+같은 PR에서 갱신한다.
+
+API 계약과 DB/동시성 전문 리뷰어 두 명이 네 차례에 걸쳐 각 라운드의 동일 SHA를 검토했다. 1차의
+API P0 2·P1 3·P2 1,
+DB P1 5·P2 6을 시작으로 201 replay, 전용 transport principal, loser UUID 회수, command causation,
+append-only ACL·restore를 보완했다. 후속 재심에서 드러난 legacy `f_*` golden bridge, 실제 override 열
+backfill, 전체 procedure owner ACL, 명시적 READ COMMITTED, 무조건 forward-only backout, byte-frozen
+`0200` baseline, 전 필수 열 NOT NULL·NULL rejection fixture도 모두 닫았다.
+
+최종 exact checkpoint `2aa17c27d4f09701a9639ea0ea449abbfefc0be2`에서 두 리뷰어가 각각
+`API FINAL GO`, `DB FINAL GO`와 P0~P3 0건을 선언했다. Markdown/archive link unit 3개, vNext contract
+artifact unit 11개, diff/redaction/비밀 가드를 통과했다. ADR-093은 proposed로 유지하고 M00은
+`tasks-done.md`로 이관했다. 다음 작업은 M01 clean cutover 구현이며 이 draft PR에는 섞지 않는다.
+
 ## 2026-08-19 — C7 KMA live 3종이 ADR-088 계약과 어긋나 있었다 (0224 선언)
 
 `025be0e6`로 prod를 올려 strict runner를 돌리자 `ops-c7-read-auth`는 7/7 통과(#1010이 실제로
