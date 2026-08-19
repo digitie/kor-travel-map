@@ -36,6 +36,7 @@ import {
   rediscoverExactActiveOrSettledRequest,
   REQUEST_TERMINAL_TIMEOUT,
   requireBody,
+  requireKmaDatasetIdentity,
   resolveTrackedUiKmaCreateResponse,
   waitForTerminal,
   withC7Cleanup,
@@ -452,14 +453,17 @@ function isExactDatasetDetailResponse(
   response: import("@playwright/test").Response,
   syncScope: string,
 ): boolean {
-  // The per-run external_system sync_scope is unique to this test + dataset, so a
-  // 200 GET on the detail endpoint carrying it is unambiguously the UI's own detail
-  // fetch for this scope — robust to exact provider/dataset_key param spelling and it
-  // ignores the no-param 422 probes the page may also fire.
+  // ADR-088(#966)이 detail 라우트를 `/v1/ops/datasets/detail?provider=&dataset_key=`에서
+  // canonical `/v1/ops/datasets/{provider_dataset_id}`로 바꿨다. 앞 판은 사라진 경로를
+  // 기다렸으므로 **반드시** 60s timeout이었다 — dataset detail이 화면에 떠 있는데도.
+  // scope는 이 dataset에서 이 run만 쓰므로, 그 scope를 실은 200 GET은 UI 자신의
+  // detail fetch로 유일하게 특정된다(페이지가 함께 쏘는 무-param 422 probe는 걸러진다).
+  const identity = requireKmaDatasetIdentity();
   const url = new URL(response.url());
   return (
     response.request().method() === "GET" &&
-    url.pathname === "/api/proxy/v1/ops/datasets/detail" &&
+    url.pathname ===
+      `/api/proxy/v1/ops/datasets/${String(identity.providerDatasetId)}` &&
     url.searchParams.get("sync_scope") === syncScope &&
     response.status() === 200
   );

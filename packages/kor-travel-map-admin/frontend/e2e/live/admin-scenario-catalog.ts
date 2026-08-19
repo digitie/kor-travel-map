@@ -132,12 +132,13 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     readyHeading: "데이터셋",
     readApis: [
       "/v1/ops/datasets",
-      "/v1/ops/datasets/detail",
+      // ADR-088: detail은 canonical id 경로다(`/detail` 자연키 라우트는 삭제됐다).
+      "/v1/ops/datasets/{provider_dataset_id}",
       "/v1/ops/pipeline/executions",
     ],
     writeApis: [
       writeApi("PUT", "/v1/ops/datasets/refresh-policy"),
-      writeApi("POST", "/v1/ops/datasets/preview"),
+      writeApi("POST", "/v1/ops/datasets/{provider_dataset_id}/preview"),
       writeApi("POST", "/v1/ops/pipeline/requests"),
     ],
     reflectedSurfaces: ["/ops/pipeline", "/features/{feature_id}"],

@@ -385,7 +385,7 @@ export async function resolveKmaDatasetIdentity(
 }
 
 /** 이미 해석된 KMA triple identity를 동기 plan 조립/가드에서 읽는다. */
-function requireKmaDatasetIdentity(): KmaDatasetIdentity {
+export function requireKmaDatasetIdentity(): KmaDatasetIdentity {
   if (resolvedKmaDatasetIdentity === null) {
     throw new Error(
       "KMA provider_dataset_id/operation_key가 아직 해석되지 않았습니다 — bootstrapC7SameOriginPage 또는 resolveKmaDatasetIdentity를 먼저 호출하세요",
