@@ -2,46 +2,31 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
-import html
 import json
 import re
-from collections.abc import Awaitable
 from datetime import date, datetime
 from time import perf_counter
-from typing import Annotated, Any, Final, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from kortravelmap.infra import curated_repo
-from kortravelmap.settings import KorTravelMapSettings
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    SecretStr,
     field_validator,
 )
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
-from kortravelmap.api.curated_public_schema import (
-    PublicCuratedFeatureResponse,
-    PublicCuratedFeaturesData,
-    PublicCuratedFeaturesResponse,
-    PublicCuratedFeatureView,
-    public_curated_feature_view,
-)
 from kortravelmap.api.db import get_session
 from kortravelmap.api.domain_command_service import (
     current_domain_command,
     domain_command_transaction,
     idempotent_domain_command,
 )
-from kortravelmap.api.feature_ref import resolve_feature_ref_or_error
 from kortravelmap.api.http_revision import parse_revision_header, revision_etag
 from kortravelmap.api.response import Meta, make_meta
 
