@@ -1219,12 +1219,12 @@ green"). 컬럼 축은 의도적으로 닫혀 있다(`:1723-1760`). 즉 **CI가 
 - [~] **T-VN-M00 — 설계 초안 2차 + 적대 검증 2명 통과** (위 ①~⑤ 반영). 이것이 M01의 선행이다.
   2차 초안은 `docs/reports/t-vn-m00-manual-feature-create-design-2026-08-19.md`와
   proposed ADR-093에 있다. 아직 적대 리뷰 2명 GO 전이므로 M01 구현은 시작하지 않는다.
-- [ ] **T-VN-M01 — admin Feature 생성 API** (결정 1). `create_feature_with_initial_state`를
-  admin OpenAPI에 잇는다. `source_type`/natural key 규칙과 3축 초기 상태를 함께 정한다.
-  **ADR 필요** — ID 체계에 새 `source_type`이 들어간다.
-- [ ] **T-VN-M02 — origin 보존과 불변** (결정 4). origin 3종을 구분해 저장하고 Feature
-  수정에도 불변임을 스키마·테스트로 고정한다. `trg_features_identity_fence`가 이미
-  `feature_id`/`feature_uuid`에 같은 일을 하므로 그 패턴을 따른다.
+- [ ] **T-VN-M01 — admin Feature 생성 API clean cutover** (결정 1). 이미 존재하는
+  `POST /v1/admin/features`를 서버 발급 UUIDv7, exact identity claim, `manual_admin` 단일 origin,
+  고정 initial state와 admin BFF 전용 인증 경계로 교정한다. **ADR-093 필요**.
+- [ ] **T-VN-M02 — origin 보존과 불변** (결정 4). origin/claim read model과 Feature 수정·purge,
+  backup/restore에서의 불변을 스키마·테스트로 고정한다. `manual_pinvi`/`manual_curation` 값은 각
+  인증 writer가 생기는 M04/M03 전에는 등록하지 않는다.
 - [ ] **T-VN-M03 — curated 동시 생성** (결정 3). curation import/admin 편집에서 대상 Feature가
   없을 때 M01을 호출해 만들고 `curation_items`에 잇는다. **T-VN-40의 write model과 같은
   표면**이라 그 인수 뒤에 얹는다.

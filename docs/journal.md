@@ -6,13 +6,13 @@
 
 T-VN-H34 잔여의 "없는 것은 Feature로 추가" 요구를 M lane으로 분리한 뒤, M01 구현 전에 닫아야 할
 설계 2차 초안을 작성했다. 핵심 결정은 네 가지다. 첫째, 현재 admin BFF와 PinVi를 서버가 구분할
-수 없으므로 M01 origin은 `manual_admin` 하나만 발급한다. 둘째, HTTP `Idempotency-Key`와 body
-`idempotency_key`를 manual source natural key로 쓰지 않고, 서버가 name/region/kind/category/coord
-cell을 정규화한 `manual-admin-v1` 자연키로 `make_feature_id(source_type="manual_admin", ...)`를
-호출한다. 셋째, `feature.manual_feature_origins` side relation과 security-definer procedure,
-serializable command, advisory lock, unique/fuzzy duplicate guard로 같은 실체 중복을 DB 경계에서
-막는다. 넷째, 새 constraint와 final 40001은 409/422로 명시 매핑하고 current migration과
-`contracts/vnext` freeze artifact를 같은 PR에서 갱신한다.
+수 없으므로 admin BFF 전용 credential로 PinVi 직접 경로를 차단한 뒤 M01 origin은
+`manual_admin` 하나만 발급한다. 둘째, HTTP `Idempotency-Key`와 body identity를 canonical ID에
+쓰지 않고 서버 UUIDv7을 먼저 발급하며 text PK는 `manual::<uuid>` opaque alias로만 남긴다. 셋째,
+exact duplicate claim과 verified origin을 별도 불변 relation으로 두고 DB unique 제약으로 동시
+요청의 단일 승자를 정한다. fuzzy/provider 중복은 M05로 남겨 자동 병합하지 않는다. 넷째, 새
+constraint를 409/422로 명시 매핑하고 current migration과 `contracts/vnext` 7축 freeze artifact를
+같은 PR에서 갱신한다.
 
 ADR-093은 proposed로 추가했고, `tasks.md`의 T-VN-M00은 `[~]`로 올렸다. 아직 적대 리뷰 2명 GO 전이므로
 M01 구현은 시작하지 않는다.
