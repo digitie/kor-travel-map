@@ -1,6 +1,6 @@
 # T-VN-M00 — 수동 Feature 생성 2차 설계
 
-- 상태: draft — 전문 리뷰 3차 finding 반영, 동일 SHA 4차 재심 대기
+- 상태: complete — exact checkpoint `2aa17c27` API·DB 전문 리뷰 `GO`, P0~P3 0건
 - 기준: `main` `025be0e638ba`
 - 관련: ADR-066, ADR-068, ADR-070, ADR-074, ADR-075, ADR-083, ADR-086,
   ADR-090, ADR-092, ADR-093(proposed)
@@ -838,8 +838,8 @@ field override, domain command, domain result를 각각 세어 orphan과 이중 
 
 | 검토자 | 1차 판정 | 2차 판정(`56fa3148`) | 3차 판정(`88222caa`) | 최신 finding 반영 위치 | 4차 재심 |
 |---|---|---|---|---|---|
-| API 계약 전문 검토자 | `HOLD`: P0 2, P1 3, P2 1 | 기존 6건 닫힘, 신규 P1 1 | `GO`: P0~P3 0 | §5.1, §7.4, §11 | SHA 변경으로 대기 |
-| DB/동시성 전문 검토자 | `NO-GO`: P1 5, P2 6 | 기존 8건 닫힘, P1 2·P2 2 잔여 | 기존 15건 닫힘, 신규 P1 1·P2 2 | §6.1~6.2, §10.1~10.4, §11~12 | 대기 |
+| API 계약 전문 검토자 | `HOLD`: P0 2, P1 3, P2 1 | 기존 6건 닫힘, 신규 P1 1 | `GO`: P0~P3 0 | §5.1, §7.4, §11 | `GO @ 2aa17c27`: P0~P3 0 |
+| DB/동시성 전문 검토자 | `NO-GO`: P1 5, P2 6 | 기존 8건 닫힘, P1 2·P2 2 잔여 | 기존 15건 닫힘, 신규 P1 1·P2 2 | §6.1~6.2, §10.1~10.4, §11~12 | `GO @ 2aa17c27`: P0~P3 0 |
 
 API finding별 반영은 201 registry/header/old operation 격리(§4.4), 전용 transport principal(§4.1~4.2),
 exact response schema(§4.5), constraint error payload(§4.6·§9), PinVi paired fence(§4.7), coord
@@ -858,5 +858,11 @@ core identity 23514의 409 분류, 명시적 READ COMMITTED 설정·검증으로
 claim/origin 전 필수 열의 명시적 NOT NULL과 NULL rejection fixture로 닫았다. 3차 API GO도 문서 SHA가
 바뀌었으므로 4차에서 다시 확인한다.
 
-4차 재심은 이 문서와 ADR의 동일 commit SHA를 대상으로 한다. `조건부 GO`나 P0~P3 잔여가 하나라도
-있으면 M00을 완료로 표시하지 않는다.
+4차 재심은 이 문서와 ADR의 exact checkpoint
+`2aa17c27d4f09701a9639ea0ea449abbfefc0be2`를 대상으로 했고, 두 검토자의 최종 선언은 다음과 같다.
+
+- `API FINAL GO — 2aa17c27d4f09701a9639ea0ea449abbfefc0be2 — P0-P3 0건`
+- `DB FINAL GO — 2aa17c27d4f09701a9639ea0ea449abbfefc0be2 — P0-P3 0건`
+
+이후 완료 이관 commit은 이 검토 결과와 task 상태만 기록하며, 검토 대상인 §1~§12와 ADR-093의 결정
+내용은 바꾸지 않는다. ADR-093의 `accepted` 전환은 M01 구현·계약 검증이 소유한다.

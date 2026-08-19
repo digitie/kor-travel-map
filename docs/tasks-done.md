@@ -3,6 +3,21 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-08-19 — T-VN-M00 수동 Feature 생성 설계 완료
+
+- [x] T-VN-M00 — **수동 Feature 생성 2차 설계·전문 검토 완료**
+
+  [`설계 보고서`](reports/t-vn-m00-manual-feature-create-design-2026-08-19.md)와
+  [ADR-093](adr/093-manual-feature-origin-and-identity.md)이 서버 UUIDv7, exact identity claim,
+  검증된 `manual_admin` origin, 생성 전용 BFF 자격, 원자적 DB writer, current→target bridge,
+  forward-only migration·backup/restore·ACL·오류 계약을 고정한다. ADR은 M01 구현·계약 검증 전까지
+  `proposed`를 유지한다.
+
+  API 계약과 DB/동시성 전문 검토자는 네 차례 검토 끝에 같은 exact checkpoint
+  `2aa17c27d4f09701a9639ea0ea449abbfefc0be2`에 각각 P0~P3 0건 최종 GO를 선언했다. 설계와 완료
+  이관은 draft PR [#1012](https://github.com/digitie/kor-travel-map/pull/1012)이 소유하며, 다음 열린
+  실행 단위는 T-VN-M01 clean cutover 구현이다.
+
 ## 2026-08-19 — T-VN-H46G buildx image commit provenance 완료
 
 - [x] T-VN-H46G — **runtime image 입력·revision을 exact source commit에 결박**

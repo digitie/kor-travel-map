@@ -25,7 +25,7 @@ barrier로 직렬화한다.
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환) ∥ [~] `T-VN-41S`(#922 1차 구현·리뷰 GO,
     `0225+` migration/compactor·n150 1M 검증 잔여)
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정, T-VN-40 인수 뒤)**
-  - [~] `T-VN-M00`(설계 초안 2차·적대 검증) → [ ] `T-VN-M01`(admin Feature 생성 API — **ADR 필요**) → [ ] `T-VN-M02`(origin 보존·불변)
+  - [ ] `T-VN-M01`(admin Feature 생성 API — ADR-093 accepted 전환) → [ ] `T-VN-M02`(origin 보존·불변)
   - [ ] `T-VN-M03`(curated 동시 생성 — T-VN-40 인수 뒤) ∥ [ ] `T-VN-M04`(PinVi 요청 큐 — cross-repo)
   - [ ] `T-VN-M05`(provider 발행 시 중복 판정 — 자동 병합 금지)
 - **Lane C — 사문화 정리·미구현 dataset (다른 lane과 무관, 아무 때나)**
@@ -1211,14 +1211,13 @@ green"). 컬럼 축은 의도적으로 닫혀 있다(`:1723-1760`). 즉 **CI가 
 `row_revision` trigger를 100만 번 밟는다 · procedure OWNER 전환과 migration graph artifact 재생성이
 선행 조건에 없다 · back-out을 한 줄도 안 다뤘다(forward-only 저장소).
 
-**다음**: 위 ①~⑤를 반영한 **설계 초안 2차**를 쓰고 같은 검증자 2명에게 다시 건다.
-2차가 `holds=true`를 받기 전에는 코딩하지 않는다.
+**M00 해소 정본**: 위 finding은
+[`T-VN-M00 설계 보고서`](reports/t-vn-m00-manual-feature-create-design-2026-08-19.md)와
+proposed ADR-093에서 닫았고, exact checkpoint `2aa17c27`에 API·DB 전문 리뷰 P0~P3 0건 GO를
+받았다. 완료 이력은 [`tasks-done.md`](tasks-done.md)가 소유하며 다음 실행 단위는 M01이다.
 
 #### 후속 task
 
-- [~] **T-VN-M00 — 설계 초안 2차 + 적대 검증 2명 통과** (위 ①~⑤ 반영). 이것이 M01의 선행이다.
-  2차 초안은 `docs/reports/t-vn-m00-manual-feature-create-design-2026-08-19.md`와
-  proposed ADR-093에 있다. 아직 적대 리뷰 2명 GO 전이므로 M01 구현은 시작하지 않는다.
 - [ ] **T-VN-M01 — admin Feature 생성 API clean cutover** (결정 1). 이미 존재하는
   `POST /v1/admin/features`를 서버 발급 UUIDv7, exact identity claim, `manual_admin` 단일 origin,
   고정 initial state와 admin BFF 전용 인증 경계로 교정한다. **ADR-093 필요**.

@@ -1,19 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-08-19 — T-VN-M00 수동 Feature 생성 2차 설계 초안
+## 2026-08-19 — T-VN-M00 수동 Feature 생성 설계·전문 리뷰 완료
 
-provider가 만들지 않는 장소를 admin/API로 생성하기 위한 M00 2차 초안을 작성했다.
-1차 리뷰에서 무너진 origin 사칭, opaque natural key, CHECK→HTTP 500 누수, `initial` fixture
-충돌, `contracts/vnext` freeze drift를 M01 GO 기준으로 풀었다. M01은 admin BFF 전용 credential,
-서버 발급 UUIDv7, exact identity claim과 `manual_admin` origin의 별도 불변 relation, 고정
-`active/published/valid`, explicit duplicate/error/ACL/freeze gate를 요구한다. fuzzy/provider 중복은
-M05로 남기며, 과거 PinVi/admin 공용 경계의 origin은 추정하지 않는다. ADR-093은 proposed 상태다.
+provider가 만들지 않는 장소를 admin/API로 생성하기 위한 M00 2차 설계를 완료했다. M01은 admin BFF
+생성 전용 credential, 서버 UUIDv7, exact identity claim과 `manual_admin` origin의 별도 append-only
+relation, 고정 `active/published/valid`, 명시적 READ COMMITTED, current→target bridge,
+forward-only migration·backup/restore·ACL·오류/freeze gate를 한 clean cutover로 구현해야 한다.
+fuzzy/provider 중복은 M05로 남기며 과거 PinVi/admin 공용 경계의 origin은 추정하지 않는다.
+
+API 계약과 DB/동시성 전문 리뷰어는 네 차례 검토 끝에 같은 exact checkpoint
+`2aa17c27d4f09701a9639ea0ea449abbfefc0be2`에 모두 P0~P3 0건 최종 GO를 선언했다. M00은
+`tasks-done.md`로 이관했고 draft PR #1012를 유지한다. ADR-093은 M01 구현·계약 검증 전까지
+proposed 상태다.
 
 ### 다음 한 작업
 
-T-VN-M00 초안의 동일 commit에 전문 적대 리뷰어 2명 GO를 받기 전에는 M01 구현을 시작하지 않는다.
-리뷰 지적을 반영하고 M00 문서를 완료한 뒤 M01 migration/API/OpenAPI/freeze 구현을 별도 작업으로
-연다. ADR-093의 accepted 전환은 M01 구현·계약 검증과 함께 한다.
+T-VN-M01을 별도 구현 작업으로 연다. migration/API/admin UI/OpenAPI/PinVi paired fence와 vNext
+freeze를 설계 보고서의 단일 cutover 순서로 구현하고, ADR-093의 accepted 전환은 그 구현·계약 검증과
+함께 한다. 이 M00 PR에는 M01 코드를 섞지 않는다.
 
 ## 2026-08-19 — T-VN-H46G buildx provenance 구현·전문 리뷰 완료
 
