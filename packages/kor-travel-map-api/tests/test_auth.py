@@ -1069,11 +1069,11 @@ def test_openapi_declares_exact_canonical_ops_security_contract() -> None:
             "?key= 쿼리 파라미터는 제거됐다."
         ),
     }
+    # T-VN-40C — 공개 curated overlay 표면은 물리 삭제됐다. 남은 공개 read로 같은
+    # security 계약을 확인한다.
     for path in {
-        "/v1/curated-features",
-        "/v1/curated-features/{curated_feature_id}",
-        "/v1/curated-sources",
-        "/v1/curated-themes",
+        "/v1/curations",
+        "/v1/curations/collections",
     }:
         assert spec["paths"][path]["get"]["security"] == [
             {"PublicApiKey": []},

@@ -59,24 +59,9 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
 
     user = module.user_openapi_spec(full, app=app)
 
-    assert "visibility" not in _query_parameter_names(full, "/v1/curated-themes")
+    # T-VN-40C — legacy curated overlay 표면(공개 `/v1/curated-*`, admin
+    # `/v1/admin/features/curated*`)은 물리 삭제됐다. admin themes/sources만 남는다.
     assert "visibility" in _query_parameter_names(full, "/v1/admin/curated-themes")
-    assert "curation_status" not in _query_parameter_names(full, "/v1/curated-features")
-    assert "curation_status" in _query_parameter_names(full, "/v1/admin/features/curated")
-    public_curated_queries = _query_parameter_names(full, "/v1/curated-features")
-    admin_curated_queries = _query_parameter_names(full, "/v1/admin/features/curated")
-    assert {"theme_slug", "q", "feature_name", "display_title"} <= (public_curated_queries)
-    # ADR-088 — provider/dataset_key 자연키 필터는 provider_dataset_id로 수렴했다.
-    internal_curated_filters = {"theme_id", "source_id", "provider_dataset_id"}
-    assert internal_curated_filters.isdisjoint(public_curated_queries)
-    assert {"provider", "dataset_key"}.isdisjoint(public_curated_queries)
-    assert internal_curated_filters <= (admin_curated_queries)
-    assert _refs(full["paths"]["/v1/curated-features"]["get"]["responses"]["200"]) == {
-        "PublicCuratedFeaturesResponse"
-    }
-    assert _refs(full["paths"]["/v1/admin/features/curated"]["get"]["responses"]["200"]) == {
-        "CuratedFeaturesResponse"
-    }
     full_schemas = full["components"]["schemas"]
     assert "source_record_key" in _schema_properties(full, "CuratedFeatureView")
     assert "PublicCuratedFeatureView" in full_schemas
@@ -109,10 +94,6 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
         "/v1/public/festivals/monthly",
         "/v1/public/festivals/map-markers",
         "/v1/public/festivals/{feature_id}",
-        "/v1/curated-features",
-        "/v1/curated-features/{curated_feature_id}",
-        "/v1/curated-sources",
-        "/v1/curated-themes",
         "/v1/curations",
         "/v1/curations/collections",
         "/v1/curations/collections/{collection_id}",
@@ -1043,64 +1024,6 @@ _CURATED_DETAIL_CONTRACTS: dict[str, dict[str, Any]] = {
 }
 
 
-@pytest.mark.unit
-def test_public_curated_feature_schemas_pin_required_types_and_enums() -> None:
-    """PinVi가 소비하는 curated feature union을 required/type/const(kind) 단위로 고정."""
-    module = _load_script_module()
-    app = create_app(ApiSettings())
-    user = module.user_openapi_spec(app.openapi(), app=app)
-
-    for kind, (variant, detail) in _CURATED_FEATURE_VARIANTS.items():
-        types = {**_CURATED_FEATURE_BASE_TYPES, "feature_kind": "string"}
-        required = _CURATED_FEATURE_BASE_REQUIRED | {"feature_kind"}
-        refs = {"address": "PublicCuratedAddress"}
-        if detail is None:
-            types["detail"] = "null"
-        else:
-            types["detail"] = "$ref"
-            required = required | {"detail"}
-            refs["detail"] = detail
-        _assert_object_schema_contract(
-            user,
-            variant,
-            required=required,
-            types=types,
-            formats=_CURATED_FEATURE_BASE_FORMATS,
-            consts={"feature_kind": kind},
-            refs=refs,
-        )
-
-    for detail_name, contract in _CURATED_DETAIL_CONTRACTS.items():
-        _assert_object_schema_contract(
-            user,
-            detail_name,
-            required=contract["required"],
-            types=contract["types"],
-            formats=contract.get("formats"),
-            refs=contract.get("refs"),
-        )
-
-    # phones는 PinVi가 소비하는 array element이므로 item type까지 고정한다
-    # (list[PublicPhone] = Annotated[str] → items.type == "string"). element가 object로
-    # 바뀌면 items가 $ref가 되어 "type"이 사라지므로 element shape 변경을 검출한다.
-    place_detail = user["components"]["schemas"]["PublicCuratedPlaceDetail"]
-    assert place_detail["properties"]["phones"]["items"]["type"] == "string"
-
-    # PublicCuratedAddress는 7개 curated feature variant 모두의 address ref
-    # 대상이므로(PinVi 주 소비 표면) 그 필드 shape도 field-level로 고정한다.
-    _assert_object_schema_contract(
-        user,
-        "PublicCuratedAddress",
-        required=set(),
-        types={
-            "road": "string",
-            "legal": "string",
-            "admin": "string",
-            "zipcode": "string",
-            "sido_name": "string",
-            "sigungu_name": "string",
-        },
-    )
 
 
 @pytest.mark.unit
