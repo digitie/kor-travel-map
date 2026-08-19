@@ -152,6 +152,12 @@ KOR_TRAVEL_MAP_IMAGE_TAG="$(git rev-parse --short=12 HEAD)" \
   npm run docker:buildx
 ```
 
+buildx는 clean 여부를 검증할 수 없는 worktree와 dirty worktree를 모두 거부한다. 실제 Docker
+context는 worktree `.`이 아니라 exact 40자 HEAD의 `git archive`로 한 번 고정하므로 ignored
+파일이나 순차 build 도중 변경이 image에 섞이지 않는다. API·admin·Dagster web·daemon image
+모두 같은 HEAD를 build arg와 `org.opencontainers.image.revision` label로 강제한다. runtime의
+네 image ID·revision 대조는 ADR-076의 C6c/C7 compatible-pair attestation이 맡는다.
+
 기본 image 이름은 다음과 같다.
 
 | 서비스 | 기본 image |
@@ -165,6 +171,17 @@ KOR_TRAVEL_MAP_IMAGE_TAG="$(git rev-parse --short=12 HEAD)" \
 ```bash
 KOR_TRAVEL_MAP_DOCKER_PLATFORMS=linux/amd64 \
 KOR_TRAVEL_MAP_BUILDX_OUTPUT=docker \
+  npm run docker:buildx
+```
+
+registry에 push하지 않고 OCI archive를 남길 때는 출력 디렉터리를 지정한다. API·admin·Dagster는
+서로 다른 파일로 생성되며 Dagster archive 하나가 web·daemon 두 tag를 함께 가진다.
+이전 단일 파일 변수 `KOR_TRAVEL_MAP_BUILDX_OCI_PATH`는 제거됐으며, 설정된 채로 실행하면
+예상 artifact를 잃지 않도록 migration 오류로 중단한다.
+
+```bash
+KOR_TRAVEL_MAP_BUILDX_OUTPUT=oci \
+KOR_TRAVEL_MAP_BUILDX_OCI_DIR=dist/kor-travel-map-images-oci \
   npm run docker:buildx
 ```
 

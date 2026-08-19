@@ -5,6 +5,19 @@
 
 ## [Unreleased]
 
+### buildx runtime image source provenance (2026-08-19, T-VN-H46G)
+
+- **FIXED**: multi-platform buildx가 frontend에만 source revision을 전달해 API·Dagster
+  web·daemon image의 `org.opencontainers.image.revision` label이 `development`로
+  남을 수 있던 경로를 닫았다.
+- **FAIL-CLOSE**: API·admin·Dagster web·daemon의 모든 build에 exact 40자 HEAD를 공통
+  build arg와 OCI label로 강제한다. `git status`를 검증할 수 없거나 worktree가 dirty이면
+  builder 실행 전에 중단하고, 실제 입력은 해당 commit의 `git archive`로 고정해 ignored 파일
+  혼입과 순차 build 사이 변경을 차단한다. OCI 로컬 출력은 API·admin·Dagster별 archive로
+  분리해 덮어쓰지 않는다. 구 단일 파일 변수 `KOR_TRAVEL_MAP_BUILDX_OCI_PATH`가 설정되면
+  조용히 무시하지 않고 새 `KOR_TRAVEL_MAP_BUILDX_OCI_DIR` 사용을 안내하며 중단한다. 배포 뒤
+  runtime 비교는 기존 C6c/C7 compatible-pair attestation을 그대로 쓴다.
+
 ### admin UI Geo 자격증명 server boundary (2026-08-19, T-VN-H46F)
 
 - **SECURITY**: Next.js `/api/geo` BFF가 server-only `KOR_TRAVEL_GEO_API_KEY`만 읽고

@@ -18,7 +18,6 @@ barrier로 직렬화한다.
   - [~] `T-VN-H34`(공식 curation 미연결 membership 잔여 AC — `T-VN-M01`~`M03` 선행 필요)
   - [~] `T-VN-H43` → [~] `T-VN-H44`(백업 정기화·복원 드릴 재개 조건)
   - [~] `T-VN-H45-후속`(①~④ 완료 / ⑤ alembic 1.19 적응 잔여)
-  - [ ] `T-VN-H46G`(buildx image commit provenance label)
   - [~] `T-VN-H49`(Map baseline·절차 완료 / docker-manager #177의 외부 인스턴스 주기화 잔여)
 - **Lane B — frontend hardening·PinVi 소비 API**
   - [~] `T-VN-41A` → [~] `T-VN-41B` → [~] `T-VN-41C`(generation/outbox — 상세 AC 일부 완료, #975 rebase·regression 수정·새 exact-pair CI/E2E 재검증 중)
@@ -572,17 +571,6 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   기존 `_FEATURES_PK_ACCESS` 선례), (b) gate를 "driving relation에 Seq Scan 없음"으로 바꾼다,
   (c) seed 통계를 결정적으로 만든다(`default_statistics_target`·행 수 상향). **PR마다 재실행이
   필요하므로 머지 위생 비용이 실재한다.**
-
-### T-VN-H46G — buildx image commit provenance label
-
-> 완료한 `T-VN-H46B`~`F`는 [`tasks-done.md`](tasks-done.md)에 이관했다.
-
-- [ ] buildx가 `KOR_TRAVEL_MAP_GIT_COMMIT`을 실제 40자 commit SHA로 채우고, API·Dagster
-      web·daemon 등 배포 image의 `org.opencontainers.image.revision` label과 exact 일치하게
-      만든다. 현재 관측된 prod 3개 container label은 `development`라 image만으로 배포 source를
-      특정할 수 없다.
-- [ ] build input·OCI label·runtime inspect의 source revision을 같은 값으로 결박하는 회귀와
-      buildx 검증을 추가하고, 기존 compatible-pair provenance 계약과 중복 정본을 만들지 않는다.
 
 ### T-VN-H49 — 4분할 인스턴스 백업 주체 (docker-manager #177 추적)
 

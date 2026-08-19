@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-19 — T-VN-H46G buildx source revision 결박
+
+`scripts/docker-buildx.sh`가 exact HEAD를 frontend에만 넘기고 API·Dagster web·daemon에는
+넘기지 않아 세 image의 OCI revision이 Dockerfile 기본값 `development`로 남을 수 있었다.
+공통 `build_one` 경계가 모든 runtime image에 동일한 40자 SHA를 build arg와
+`org.opencontainers.image.revision` label로 강제하도록 바꿨다. caller별 arg 추가 방식은 다음
+image가 생길 때 다시 빠질 수 있어 쓰지 않았다.
+
+전문 적대 리뷰어 2명의 1차 검토에서 `git status` 오류 fail-open과 clean 검사 뒤 context 변경,
+별도 build가 한 OCI 경로를 덮어쓰는 문제가 확인됐다. 상태 확인 실패와 dirty worktree는 builder
+mutation 전에 exit 2로 중단하고, exact commit의 tracked bytes를 한 번 `git archive`로 만든
+불변 context에서 세 build를 실행하도록 보완했다. OCI 출력도 API·admin·Dagster별 파일로
+분리했다. 재심에서 확인된 구 `KOR_TRAVEL_MAP_BUILDX_OCI_PATH` silent-ignore는 명시적 migration
+오류로 바꾸고, archive 생성 중 TERM에는 writer를 종료·회수한 뒤 단일 임시 tar를 unlink하도록
+보완했다. 배포 뒤 실제 container 검증은 ADR-076의 C6c/C7가 네 immutable image ID와 revision
+label을 `map_source_revision`에 대조하는 기존 정본을 유지하며 새 manifest나 digest 정본은
+만들지 않는다. 두 전문 리뷰어는 exact head `84349b4c`에 P0~P3 잔여 없이 GO했고, 실제
+32.7 MB tar-stdin BuildKit 3종·Dagster 두 tag 동일 OCI digest·signal cleanup을 독립 재현했다.
+로컬 root unit 2,300개와 전체 Ruff·strict mypy 3패키지·import-linter도 통과했다. H46G는
+`tasks-done.md`로 이관하고 draft PR #1007의 완료 이관 commit CI 뒤 병합한다.
+
 ## 2026-08-19 — T-VN-40 인수 ② 완료: PinVi cutover 봉인 + canonical collection 59개 import
 
 - **pair commit 확정**: Map `817cfeae`(prod 배포·검증 완료 — 4 서비스 healthy, head `0223`, export root 불변),
