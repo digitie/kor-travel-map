@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-19 — T-VN-H45 Alembic 1.19 CHECK 비교 적응 완료
+
+Alembic 1.19.1 fresh DB에서 named CHECK removed 208건 / added 167건을 재현한 뒤,
+plugin을 끄지 않고 DB catalog와 ORM CHECK 373개의 이름을 정확히 맞췄다. 혼합 naming
+convention, PostgreSQL 63-byte 절단 이름, raw SQL migration에만 있던 43개 CHECK를
+metadata에 반영했다. 이 대조 과정에서 `curation_rule_reconcile` revision CHECK가
+후속 migration보다 뒤처진 실제 식 drift 1건도 찾아 DB 정본에 맞췄다.
+
+Alembic은 `>=1.19.1,<1.20`으로 올렸다. fresh `upgrade head → alembic check`와 함께,
+ORM CHECK를 PostgreSQL 임시 table에 설치해 `pg_get_constraintdef` 기준으로 live 식과
+비교하는 의미 gate를 추가했다. 로컬 게이트는 ruff, mypy 145 files, import-linter
+4 contracts와 전체 pytest **3,369 passed / 12 skipped**가 green이다.
+
+### 다음 한 작업
+
+이 H45 PR의 CI green을 확인해 머지한 뒤 `T-VN-C05A` 산림청 등산로·둘레길 route
+구현으로 이어간다.
+
 ## 2026-08-19 — T-VN-C03 보조 dataset 제품·source 결정 완료
 
 provider exact pin과 공공데이터포털 현행 계약을 대조해 C03을 닫았다. 산림청 route는

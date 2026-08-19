@@ -2,6 +2,30 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-19 — T-VN-H45: Alembic 1.19 named CHECK 373개 정렬
+
+Alembic 1.18.5 기준으로 잠가 둔 천장을 1.19.1로 올리고 fresh PostGIS
+`upgrade head → alembic check`를 재현했다. 1.19 named CHECK by-name plugin이
+DB removed 208건 / ORM added 167건을 보고했다. 원인은 semantic 이름, 이미 `ck_*`인
+이름에 naming convention이 다시 붙은 경우, `conv()`로 고정된 과거 이름,
+PostgreSQL 63-byte 절단 이름이 한 metadata 안에 섞인 것이었다.
+
+실제 fresh DB의 schema/table/식과 1:1로 대응해 CHECK 373개의 catalog 이름을
+`conv()`로 고정했다. raw SQL migration이 만들었지만 ORM에 없던 43개는 별도
+metadata 목록으로 보완했고, DB에 없는 metadata-only 2개는 제거했다. 단순 이름
+일치로 끝내지 않고 ORM 식을 같은 column type의 PostgreSQL 임시 table에 설치한 뒤
+양쪽 `pg_get_constraintdef`를 비교했다. 이 gate가
+`ck_curation_rule_reconcile_operation_revision_shape`의 실제 drift(`>`가 아니라
+`>=`이면서 input hash 변경 필수)를 찾아 후속 migration 정본대로 고쳤다. varchar
+cast와 `IN` 집합 순서처럼 의미가 같은 표기만 정규화한다.
+
+CHECK comparator 전역 비활성화와 `include_object` 전체 제외는 사용하지 않았다.
+의존성은 column-bound fix가 포함된 `alembic>=1.19.1,<1.20`으로 전환했다. 검증은
+H45 metadata 통합 6 passed, ruff clean, mypy strict 145 files, import-linter 4/4,
+Linux `/tmp` 기준 전체 pytest **3,369 passed / 12 skipped**. Windows Temp가 POSIX
+mode/owner 규칙을 보존하지 않아 처음 전체 suite의 domain marker 계열 25건이 실패한
+것은 Linux `/tmp` 재실행 85/85와 전체 suite로 환경 원인임을 확인했다.
+
 ## 2026-08-19 — T-VN-C03: 보조 dataset 5종을 실제 source 기준으로 재분기
 
 로컬 exact pin `python-krforest-api@f9254e6`의 public client/model/catalog와

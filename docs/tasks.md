@@ -17,7 +17,6 @@ barrier로 직렬화한다.
 - **Lane A — cross-repo 계약·운영·데이터 품질**
   - [~] `T-VN-H34`(공식 curation 미연결 membership 잔여 AC — `T-VN-M01`~`M03` 선행 필요)
   - [~] `T-VN-H43`(실 production 전환 시 manager #148로 정기화 재개)
-  - [ ] `T-VN-H45-후속`(Alembic 1.19 CHECK 비교 적응)
   - [~] `T-VN-H49`(4분할 baseline·primitive 완료 / 주기 실행·보존·off-box 증거 잔여)
   - [ ] `T-VN-H50`(CI planner 인덱스 선택 flake, map #990)
 - **Lane B — frontend hardening·PinVi 소비 API**
@@ -440,22 +439,6 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > 물리 삭제하므로 H44의 복원 실증도 `0083` 기준이라는 점을 함께 읽어야 한다.
 > prod는 `archive_mode=off`라 **PITR이 없다 — dump가 유일 복구점**이다. codex 소관 41C prod enable은 H42 판정 + docker-manager
 > 재pin 뒤(Lane B T-VN-41 절 경계 주석).
-
-- [ ] T-VN-H45-후속 — **Alembic 1.19 CHECK 비교 적응**
-
-  후속 ①~④은 PR [#999](https://github.com/digitie/kor-travel-map/pull/999)로 병합해
-  [`tasks-done.md`](tasks-done.md)로 이관했다. 남은 축은 1.19 적응 하나다.
-
-  Alembic 1.19.1에서 fresh PostGIS `upgrade head → alembic check`를 재현하면
-  named CHECK가 **removed 208건 / added 167건**으로 드리프한다. 이는 단일
-  오탐이 아니라 baseline DB와 ORM의 혼합된 이름·naming-convention 적용 차이다.
-  [Alembic 1.19 changelog](https://alembic.sqlalchemy.org/en/latest/changelog.html)의
-  named CHECK by-name plugin과 1.19.1 column-bound fix를 기준으로 한다.
-  plugin 전역 비활성화나 CHECK 전체 `include_object` 제외는 실제 drift도 숨기므로
-  허용하지 않는다.
-
-  **AC**: 현재 DB CHECK catalog와 ORM 이름을 정확히 정렬하고, 표현식·catalog 의미
-  드리프 가드를 보존한 상태에서 Alembic 1.19.1 `alembic check`가 깨끗해야 한다.
 
 - [~] T-VN-H43 — **prod 백업 체계 수립 (정기 dump·sha256·보존·rollback 기준선)**
 
