@@ -3,8 +3,8 @@
 본 문서는 다음 두 기관 데이터를 `place`/`area`/`route` + `WeatherValue`로
 정규화하는 ETL이다:
 
-- **산림청** (`python-krforest-api`): 휴양림 / 수목원 / 숲길 / 등산로 / 산악기상
-  / 산림 안전공지
+- **산림청** (`python-krforest-api`): 휴양림 / 수목원 / 숲길 / 등산로 / 산악기상 /
+  산불위험 / 산사태 예보발령
 - **국립공원공단 KNPS** (data.go.kr public datasets): 공원경계 / 탐방로 /
   탐방안내소 / 위험지역 / 기상관측 / 화장실 / 문화자원 등
 
@@ -17,9 +17,9 @@
 | 항목 | 값 |
 |------|----|
 | provider | `python-krforest-api` |
-| dataset_key | `krforest_recreation_forests`, `krforest_arboretums`, `forest_trails`, `forest_mountain_weather` |
-| Feature.kind | `place`, `area`, `route` / `WeatherValue` |
-| 코드 entrypoint | `kortravelmap.providers.krforest`, `kortravelmap.forest` |
+| dataset_key | 구현: `krforest_recreation_forests`, `krforest_arboretums`; 계획: `krforest_mountain_trails`, `krforest_dulle_trails`, `krforest_mountain_weather`, `krforest_wildfire_risk_forecast` |
+| Feature.kind | `place`, `route` / `WeatherValue` |
+| 코드 entrypoint | 구현: `kortravelmap.providers.krforest`; C05A~D entrypoint는 각 구현 PR에서 확정 |
 | 갱신 주기 | provider별 (place/area/route 월~분기, 산악기상 시간 단위) |
 
 ## 2. dataset 매핑
@@ -28,15 +28,18 @@
 |-------------|---------------------|----------------|
 | `krforest_recreation_forests` | `travel.recreation_forests()` | `place`, `place_kind="recreation_forest"` |
 | `krforest_arboretums` | `travel.arboretums()` | `place`, `place_kind="arboretum"` |
-| `forest_trails` | `travel.forest_trail_file_features()` / `dulle_trail_features()` | LineString → `route` / Polygon → `area` |
-| `forest_mountain_weather` | 산악기상 관측/예보 typed model | `WeatherValue` |
+| `krforest_mountain_trails` _(C05A)_ | `travel.forest_trail_file_features()` / `ForestSpatialFeature` (`PBD0000041`) | LineString/MultiLineString → `route` |
+| `krforest_dulle_trails` _(C05A)_ | `travel.dulle_trail_features()` / `ForestSpatialFeature` (`PBD0000031`) | LineString/MultiLineString → `route` |
+| `krforest_mountain_weather` _(C05B)_ | data.go.kr `15084696`; upstream typed 관측 model 선행 | `WeatherValue`, `observed` |
+| `krforest_wildfire_risk_forecast` _(C05C)_ | data.go.kr `15084817` V2; upstream typed 예보 model 선행 | `WeatherValue`, `index` |
 
 ## 3. 매핑 룰
 
 - 휴양림 / 수목원: 단일 point → `place`
-- 등산로 / 둘레길 / 숲길: 
-  - LineString / MultiLineString → `route`
-  - Polygon / MultiPolygon → `area`
+- 등산로 / 둘레길: LineString / MultiLineString만 `route`로 승격한다. Point·Polygon과
+  빈 geometry를 다른 kind로 추정하지 않는다.
+- `PBD0000041`의 통제·폐쇄 여부는 실시간이 아니라는 산림청 주의사항을 따른다.
+  route geometry는 운영상 개방 상태·입산통제 notice의 source가 아니다.
 - 산악기상: `feature_weather_values`에 저장 (장소 detail에 섞지 X)
 - `RouteDetail.route_type` ∈ `hiking_trail` / `trekking` / `forest_trail`
 
@@ -66,6 +69,8 @@
 
 ## 5. 핵심 함수
 
+아래는 C05A~D의 목표 형태를 설명하는 의사 코드이며 현재 public API가 아니다.
+
 ```python
 # providers/krforest.py
 async def recreation_forests_to_bundles(items, *, fetched_at, reverse_geocoder=None) -> AsyncIterator[FeatureBundle]:
@@ -74,11 +79,9 @@ async def recreation_forests_to_bundles(items, *, fetched_at, reverse_geocoder=N
 async def arboretums_to_bundles(items, *, fetched_at, reverse_geocoder=None) -> AsyncIterator[FeatureBundle]:
     ...
 
-async def forest_trails_to_bundles(items, *, fetched_at, reverse_geocoder=None) -> AsyncIterator[FeatureBundle]:
-    """LineString → route, Polygon → area로 분기."""
-    for item in items:
-        kind = FeatureKind.AREA if _is_polygon(item.geometry) else FeatureKind.ROUTE
-        yield _trail_to_bundle(item, kind=kind, ...)
+async def forest_trails_to_bundles(items, *, dataset_key, fetched_at) -> AsyncIterator[FeatureBundle]:
+    """LineString/MultiLineString만 route로 변환하고 그 밖의 geometry는 skip한다."""
+    ...
 
 async def mountain_weather_to_values(items, *, feature_id_by_obs_id, fetched_at) -> AsyncIterator[WeatherValue]:
     """관측소 ID → feature_id 매핑 dict 필요."""
@@ -86,6 +89,8 @@ async def mountain_weather_to_values(items, *, feature_id_by_obs_id, fetched_at)
 ```
 
 ## 6. DB 적재
+
+아래 import 역시 목표 형태이며 현재 `kortravelmap.forest` 모듈은 존재하지 않는다.
 
 ```python
 from kortravelmap.forest import (
@@ -141,9 +146,11 @@ await upsert_weather_values(session, values)
 |-------|-------------|------|-------|
 | `feature_place_krforest_recreation` | `krforest_recreation_forests` | `0 2 1 * *` (월 1회) | `features_place` |
 | `feature_place_krforest_arboretums` | `krforest_arboretums` | `0 2 1 * *` | `features_place` |
-| `feature_route_krforest_trails` | `forest_trails` | `0 2 1 * *` | `features_route` |
-| `weather_krforest_mountain` | `forest_mountain_weather` | `0 * * * *` (시간) | `features_weather` |
-| `notice_krforest_safety` | `forest_safety_notices` (별도 — notice doc) | `*/30 * * * *` | `features_notice` |
+| `feature_route_krforest_mountain_trails` _(C05A)_ | `krforest_mountain_trails` | 월 1회 | `features_route` |
+| `feature_route_krforest_dulle_trails` _(C05A)_ | `krforest_dulle_trails` | 월 1회 | `features_route` |
+| `weather_krforest_mountain` _(C05B)_ | `krforest_mountain_weather` | 시간 | `features_weather` |
+| `weather_krforest_wildfire_risk` _(C05C)_ | `krforest_wildfire_risk_forecast` | 3시간 | `features_weather` |
+| `notice_krforest_landslide_forecast` _(C05D)_ | `krforest_landslide_forecast_notices` | 30분 | `features_notice` |
 
 ConcurrencyConfig: `krforest_api: max_concurrent=1`.
 
@@ -154,20 +161,22 @@ ConcurrencyConfig: `krforest_api: max_concurrent=1`.
 - `recreation_forest_typical.json` — 휴양림 정상
 - `arboretum_typical.json` — 수목원
 - `trail_with_linestring.json` — 등산로 (route)
-- `trail_with_polygon.json` — 둘레길 (area)
+- `trail_with_multilinestring.json` — 둘레길 (route)
 - `mountain_weather_typical.json` — 산악기상
 
 ### 통합 테스트
 
-- LineString/Polygon 분기 (`forest_trails_to_bundles`)
+- LineString/MultiLineString route 변환과 다른 geometry fail-closed
 - 산악기상 관측소 매핑 (`feature_id_by_obs_id`)
 - weather value bulk 적재 (BRIN 효율)
 
 ## 10. 후속
 
 - 산 경계 polygon source 추가 (산림청 provider 결정).
-- 산림 안전 공지 — `docs/etl/notice-feature-etl.md`의 `forest_safety_notices`.
-- 추가 산악기상 dataset (산불위험, 산사태위험): `weather_domain ∈ {forest_fire_risk, forest_landslide_risk}` — `docs/etl/weather-feature-normalization.md` §3.
+- 산사태 발령 notice — `docs/etl/notice-feature-etl.md`의
+  `krforest_landslide_forecast_notices`.
+- 산불위험 예보는 notice가 아니라 `weather_domain=forest_fire_risk` 지수성
+  `WeatherValue`다 — `docs/etl/weather-feature-normalization.md` §3.
 
 ## 11. KNPS (국립공원공단) 데이터 통합
 
@@ -370,9 +379,9 @@ v1에 KNPS dataset ID/필드 단서 없음 — 본 §11이 v2의 첫 정밀 카�
 | category | 전용 코드 미존재 — **카테고리 확장 권고**: `WEATHER_MOUNTAIN_STATION` 신설 (§11.6) |
 | marker_icon | `observation-tower` 또는 `marker` |
 | marker_color | `P-09` (정보/청색) |
-| 갱신 주기 | 시설 메타 연 1회 + 관측치는 산림청 산악기상 (`forest_mountain_weather`) 또는 신설 `knps_mountain_weather` (시간 단위) |
+| 갱신 주기 | 시설 메타 연 1회 + 관측치는 산림청 산악기상 (`krforest_mountain_weather`) 또는 신설 `knps_mountain_weather` (시간 단위) |
 
-산악기상 관측치 자체는 본 doc §3 `forest_mountain_weather`에 통합 적재 — KNPS는
+산악기상 관측치 자체는 본 doc §3 `krforest_mountain_weather`에 통합 적재 — KNPS는
 관측소 메타데이터(좌표/소속/고도)만 제공.
 
 #### 11.3.6 화장실 공간데이터

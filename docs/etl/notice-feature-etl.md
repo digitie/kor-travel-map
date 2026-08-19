@@ -1,34 +1,33 @@
 # notice-feature-etl.md — 통합 notice ETL (교통/기상/안전/해양)
 
-본 문서는 4개 provider의 짧은 수명 공지성 데이터를 `Feature(kind=notice)` +
+본 문서는 3개 provider의 짧은 수명 공지성 데이터를 `Feature(kind=notice)` +
 `NoticeDetail`로 통합 적재하는 ETL이다.
 
 > **구현 현황 (2026-07-14)**: 현재 notice Feature를 실제로 emit하는 변환부는
 > **krex(`traffic_notices_to_bundles` → `krex_traffic_notices`)** 와
 > **kma(`weather_alerts_to_notice_bundles` → `kma_weather_alerts`)** 2개뿐이다.
-> `forest_safety_notices`(krforest) · `khoa_coastal_notices`(khoa)는 **설계만
-> 된 미구현(planned)** 상태로, src/dagster에 해당 변환 함수·dataset이 아직
-> 없다. 아래 §5.3/§5.4/§6/§8의 forest·khoa 항목은 **목표 설계**이며 코드 정본이
-> 아니다.
+> `krforest_landslide_forecast_notices`는 **C05D 계획/미구현** 상태로,
+> src/dagster에 변환 함수·dataset이 아직 없다. C03에서 근거 source가 없던
+> `khoa_coastal_notices` 계획은 폐기했다. 해양 지수·관측값을 임의 threshold로
+> notice화하지 않는다.
 
 ## 1. 문서 정보
 
 | 항목 | 값 |
 |------|----|
-| provider | `python-krex-api`, `python-kma-api`, `python-krforest-api`, `python-khoa-api` |
-| dataset_key | `krex_traffic_notices`, `kma_weather_alerts` (구현됨) · `forest_safety_notices`, `khoa_coastal_notices` (planned/미구현) |
+| provider | `python-krex-api`, `python-kma-api`, `python-krforest-api` |
+| dataset_key | `krex_traffic_notices`, `kma_weather_alerts` (구현됨) · `krforest_landslide_forecast_notices` (C05D 계획/미구현) |
 | Feature.kind | `notice` |
 | 상세 테이블 | `feature_notices` |
 | 코드 entrypoint | `kortravelmap.providers.{krex,kma,krforest,khoa}`, `kortravelmap.notices` |
 
-## 2. 4 dataset 갱신 주기
+## 2. 3 dataset 갱신 주기
 
 | dataset_key | provider | 갱신 주기 | 이유 |
 |-------------|---------|----------|------|
 | `krex_traffic_notices` | `python-krex-api` | **10분** | 사고/공사/통제 즉시 영향 |
 | `kma_weather_alerts` | `python-kma-api` | **10분** | 특보 발효/해제 짧은 시간 변경 |
-| `forest_safety_notices` _(planned/미구현)_ | `python-krforest-api` | **30분** | 산사태/산불/탐방 위험 |
-| `khoa_coastal_notices` _(planned/미구현)_ | `python-khoa-api` | **60분** | 바다 갈라짐/해양 위험 |
+| `krforest_landslide_forecast_notices` _(C05D 계획/미구현)_ | `python-krforest-api` | **30분** | 산사태 발령·해제 |
 
 ## 2.5 카테고리 매핑
 
@@ -155,33 +154,25 @@ krex#8/PR#9, #378) 기준:
 복제하거나, 단일 feature + `payload.affected_areas`로 처리. v2 1차: 후자
 (단일 feature).
 
-### 5.3 forest_safety_notices _(planned/미구현)_
+### 5.3 krforest_landslide_forecast_notices _(C05D 계획/미구현)_
 
-> krforest provider에 안전 공지 변환 함수가 아직 없다 — 아래는 목표 매핑.
+authoritative source는 공공데이터포털 `15074798`
+`forecastIssueService/forecastIssueList` 하나다. 산불위험지수는 WeatherValue,
+산불·산사태 통계는 이력, 사방댐·취약지는 시설/영역 데이터이므로 notice에 섞지 않는다.
 
-| provider 필드 | NoticeDetail 매핑 |
-|--------------|------------------|
-| `notice_kind` (산불/산사태/입산통제) | `notice_type` 정규화 |
-| `risk_level` | `severity` |
-| `start_date` / `end_date` | `valid_*_time` |
-| `mountain_name` | `Feature.name` (산이름 prefix) |
-| `description` | `Feature.detail.description` |
+| 공식 원문 필드 | 목표 typed 필드 | NoticeDetail 매핑 |
+|----------------|-----------------|------------------|
+| `frcstIssuKindNm` | `issue_kind` | `notice_type=landslide_warning`, 원문 종류는 payload |
+| `ocrnFrcstIssuInsttNm` | `issuing_agency` | `source_agency`와 영향 행정구역 단서 |
+| `frcstIssuStts` | `issue_status` | 발령은 present, 해제는 absent event |
+| `frstFrcstIssuDt` | `issued_at` | `valid_start_time` 또는 lifecycle event 시각 |
 
-좌표: 해당 산 좌표 또는 입산통제 구역 centroid.
+`python-krforest-api@f9254e6`은 이 endpoint를 `RawRecord`로만 노출한다. C05D에서
+typed model과 시각 정밀도·기관/종류 기반 사건 identity를 먼저 고정하고, 같은 계보의
+발령·해제를 `event` lifecycle로 처리한다. 좌표를 추정하지 않고 공식 기관/행정구역
+필드가 제공하는 scope만 보존한다.
 
-### 5.4 khoa_coastal_notices _(planned/미구현)_
-
-> khoa provider는 현재 `beaches_to_bundles`(place)만 있고 coastal notice 변환
-> 함수가 없다 — 아래는 목표 매핑.
-
-| provider 필드 | NoticeDetail 매핑 |
-|--------------|------------------|
-| `notice_kind` (바다 갈라짐 / 너울 / 이안류) | `notice_type` 정규화 |
-| `severity` | `severity` |
-| `valid_period` | `valid_*_time` |
-| `location_name` | `Feature.name` |
-
-### 5.5 사건 단위 identity + 라이프사이클 (#632)
+### 5.4 사건 단위 identity + 라이프사이클 (#632)
 
 notice feature의 정체성은 **발표/스냅샷이 아니라 사건**이다 — 발표 단위 키가
 재발표마다 새 feature를 만들던 중복(prod 6,164건 중 계보 1,317개, ~4.7×)을
@@ -346,18 +337,13 @@ def notice_job_specs() -> list[EtlJobSpec]:
             interval_minutes=10, suggested_group_name="features_notice",
             ...
         ),
-        # --- 아래 2개 spec은 planned/미구현 (변환 함수·dataset 미존재) ---
+        # --- 아래 spec은 C05D planned/미구현 (변환 함수·dataset 미존재) ---
         EtlJobSpec(
-            provider="python-krforest-api", dataset_key="forest_safety_notices",
-            source_entity_type="safety_notice",
+            provider="python-krforest-api",
+            dataset_key="krforest_landslide_forecast_notices",
+            source_entity_type="landslide_forecast_notice",
             feature_kind=FeatureKind.NOTICE,
             interval_minutes=30, ...
-        ),
-        EtlJobSpec(
-            provider="python-khoa-api", dataset_key="khoa_coastal_notices",
-            source_entity_type="coastal_notice",
-            feature_kind=FeatureKind.NOTICE,
-            interval_minutes=60, ...
         ),
     ]
 ```
@@ -385,8 +371,7 @@ def notice_job_specs() -> list[EtlJobSpec]:
 |-------|-------------|------|-------|
 | `notice_krex_traffic` | `krex_traffic_notices` | `*/10 * * * *` | `features_notice` |
 | `notice_kma_weather_alerts` | `kma_weather_alerts` | `*/10 * * * *` | `features_notice` |
-| `notice_krforest_safety` _(planned)_ | `forest_safety_notices` | `*/30 * * * *` | `features_notice` |
-| `notice_khoa_coastal` _(planned)_ | `khoa_coastal_notices` | `0 * * * *` | `features_notice` |
+| `notice_krforest_landslide_forecast` _(C05D 계획)_ | `krforest_landslide_forecast_notices` | `*/30 * * * *` | `features_notice` |
 
 ConcurrencyConfig: provider별 `max_concurrent=1`.
 
@@ -398,16 +383,16 @@ ConcurrencyConfig: provider별 `max_concurrent=1`.
   maintenance job(`consistency_dedup_refresh`)의 `purge_expired_notices` op가
   주기 실행한다. 보존 기간은 op config `retention`(기본 `'1 year'`).
 - 활성(현재 유효) notice만 frontend에 표시 — bbox/검색 read 필터가
-  `valid_end_time` 지난 notice를 숨긴다(§5.5).
+  `valid_end_time` 지난 notice를 숨긴다(§5.4).
 
 ## 10. 검증
 
-### fixture (≥ 12 — provider × 케이스 3)
+### fixture
 
 - `krex_traffic_accident.json`, `krex_road_closure.json`, `krex_roadwork.json`
 - `kma_heavy_rain_warning.json`, `kma_earthquake.json`, `kma_heat_wave.json`
-- `forest_landslide_warning.json`, `forest_fire_risk_notice.json`, `forest_hiking_closure.json`
-- `khoa_coastal_isolation_warning.json`, `khoa_high_waves.json`, `khoa_rip_current.json`
+- C05D: `krforest_landslide_issued.json`, `krforest_landslide_released.json`,
+  `krforest_landslide_same_lineage_reissued.json`
 
 ### 통합 테스트
 
@@ -419,6 +404,5 @@ ConcurrencyConfig: provider별 `max_concurrent=1`.
 ## 11. 후속
 
 - KMA 영향예보, 폭염주의보 추가 등급 검토.
-- 산림 안전 공지 GIS (위치/영역) 보강.
-- KHOA marine 지수 → notice 자동 생성 (특정 threshold 초과 시).
+- 산사태 발령의 공식 행정구역 코드/geometry source가 제공될 때만 위치·영역을 보강한다.
 - 알림 자동 전송 (PinVi trip POI가 영향 지역과 겹치면 사용자에게 push).

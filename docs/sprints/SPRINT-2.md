@@ -67,13 +67,13 @@
 - **Feature.kind**: `weather` (단/초단/중) + `notice` (특보)
 - **보조 (날씨 그룹에 같이, 후속 PR)**:
   - `python-airkorea-api` — `airkorea_air_quality` (PM10/PM2.5/CAI, kind=weather)
-  - `python-krforest-api` 산악기상 — `krforest_mountain_weather` (kind=weather)
-  - `python-khoa-api` 해양지수 — `khoa_coastal_observations` (kind=weather + notice)
+  - `python-krforest-api` 산악기상 — Sprint 2에서는 미구현, C03 결정 후 `T-VN-C05B`로 분리
+  - `python-khoa-api` 해양지수 — weather 후보. coastal notice 계획은 C03에서 source 부재로 폐기
 - **module**:
   - `src/kortravelmap/providers/kma.py` — PR#38 (`short_forecast_to_weather_
     values` + `KmaShortForecastItem` Protocol + KMA_METRIC_UNITS/NAMES 18종)
   - `src/kortravelmap/providers/airkorea.py` (후속 PR)
-  - `src/kortravelmap/providers/krforest_weather.py` (후속 PR)
+  - 산악기상 module 위치는 `T-VN-C05B` 구현 PR에서 확정
   - `src/kortravelmap/providers/khoa_weather.py` (후속 PR)
 - **fixture**: 3건/provider × 4 provider = 12건 (PR#38은 KMA 8 case 진입)
 - **WeatherValue 표 검증**: `docs/etl/weather-feature-normalization.md` §5 timeline

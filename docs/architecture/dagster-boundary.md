@@ -248,9 +248,8 @@ ctx.log.info("loaded", extra={"dataset_key": VISITKOREA_FESTIVAL_DATASET_KEY})
 
 kor-travel-map Dagster의 asset/job 이름 **명명 가이드라인**이다. 실제 구현된 asset
 정본은 §1.1이며, 아래 표에서 `feature_<kind>_<provider>_<entity>` 형식과 group이
-실제와 다른 행(예: `weather_*`/`notice_*` 접두, `feature_route_krforest_trails`,
-`forest_safety_notices`, `khoa_coastal_notices` 등)은 아직 미구현이거나 **forward-
-looking 예시**다 — §1.1과 충돌하면 §1.1을 따른다.
+실제와 다른 행(예: `weather_*`/`notice_*` 접두와 C05A~D 행)은 아직 미구현인
+**forward-looking 예시**다 — §1.1과 충돌하면 §1.1을 따른다.
 
 | asset 이름 | dataset_key | group |
 |-----------|-------------|-------|
@@ -262,15 +261,17 @@ looking 예시**다 — §1.1과 충돌하면 §1.1을 따른다.
 | `feature_area_krheritage_gis_spca` (forward-looking) | `krheritage_gis_spca` | `features_area` |
 | `feature_event_krheritage_events` | `krheritage_event_list` | `features_event` |
 | `feature_place_krforest_recreation_forests` | `krforest_recreation_forests` | `features_place` |
-| `feature_route_krforest_trails` (forward-looking) | `krforest_trails` | `features_route` |
+| `feature_route_krforest_mountain_trails` (C05A) | `krforest_mountain_trails` | `features_route` |
+| `feature_route_krforest_dulle_trails` (C05A) | `krforest_dulle_trails` | `features_route` |
 | `feature_place_krex_rest_areas` | `krex_rest_areas` | `features_place` |
 | `price_krex_rest_area_fuel` (forward-looking) | `krex_rest_area_prices` | `features_price` |
 | `feature_weather_kma_short_forecast` | `kma_short_forecast` | `features_weather` |
 | `feature_weather_kma_ultra_short_nowcast` | `kma_ultra_short_nowcast` | `features_weather` |
 | `feature_notice_krex_traffic_notices` | `krex_traffic_notices` | `features_notice` |
 | `feature_notice_kma_weather_alerts` | `kma_weather_alerts` | `features_notice` |
-| `notice_krforest_safety` (forward-looking) | `forest_safety_notices` | `features_notice` |
-| `notice_khoa_coastal` (forward-looking) | `khoa_coastal_notices` | `features_notice` |
+| `feature_weather_krforest_mountain` (C05B) | `krforest_mountain_weather` | `features_weather` |
+| `feature_weather_krforest_wildfire_risk` (C05C) | `krforest_wildfire_risk_forecast` | `features_weather` |
+| `feature_notice_krforest_landslide_forecast` (C05D) | `krforest_landslide_forecast_notices` | `features_notice` |
 | `feature_dedup_review` | (운영) | `features_quality` |
 | `feature_consistency_reports` | (운영, T-201) | `features_quality` |
 

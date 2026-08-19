@@ -86,8 +86,8 @@
 | `python-kma-api` | `kma_short_forecast` | `short` | `short` | 단기예보 (3시간 단위) |
 | `python-kma-api` | `kma_mid_forecast` | `mid` | `mid` | 중기예보 (일 2회) |
 | `python-kma-api` | `kma_weather_alert` | `advisory` | null | 특보 (notice로도 별도 변환) |
-| `python-krforest-api` | `forest_mountain_weather` | `observed` | `ultra_short` | 산악 관측 |
-| `python-krforest-api` | `forest_fire_risk` | `index` | `short` | 산불위험 |
+| `python-krforest-api` | `forest_mountain_weather` | `observed` | `ultra_short` | C05B: data.go.kr `15084696` 산악 관측 |
+| `python-krforest-api` | `forest_fire_risk` | `index` | `short` | C05C: data.go.kr `15084817` V2 산불위험 예보 |
 | `python-krforest-api` | `forest_landslide_risk` | `advisory` | `short` | 산사태 (지수 + 위험등급) |
 | `python-krex-api` | `rest_area_weather` | `observed` | `ultra_short` | 휴게소 관측 |
 | `python-krairport-api` | `airport_weather` | `observed` | `ultra_short` | 공항 관측 |

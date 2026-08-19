@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-19 — T-VN-C03: 보조 dataset 5종을 실제 source 기준으로 재분기
+
+로컬 exact pin `python-krforest-api@f9254e6`의 public client/model/catalog와
+`python-khoa-api@20c7207`의 46개 KHOA ODMI catalog를 다시 읽고, 공공데이터포털의
+현행 산악기상 `15084696`, 산불위험 `15084817`, 산사태 예보발령 `15074798` 계약을
+대조했다. 과거의 단일 `krforest_trails`·광범위한 `krforest_safety_notices` 이름은 실제
+source 경계를 감췄고, `khoa_coastal_notices`는 authoritative event source가 없었다.
+
+등산로 `PBD0000041`과 둘레길 `PBD0000031`은 route 2종으로 구현한다. 산악기상과
+산불위험은 각각 typed 관측·V2 예보 model을 upstream에서 먼저 안정화한 뒤
+`WeatherValue`로 구현한다. 산림 notice는 통계·위험지수·시설 목록을 제외하고 실제
+발령/해제인 산사태 예보발령만 채택했다. KHOA 계획은 파생 threshold 공지를 만들지 않고
+폐기했다. C03은 완료 이관하고 네 구현 단위를 `T-VN-C05A`~`C05D`로 열었다.
+
 ## 2026-08-19 — tasks 전면 감사: 완료·폐기·외부 상태 재라우팅
 
 `docs/tasks.md` 전체의 상위 인덱스·상세 블록·체크박스를 `docs/tasks-rule.md`와

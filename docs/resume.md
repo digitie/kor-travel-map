@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-19 — T-VN-C03 보조 dataset 제품·source 결정 완료
+
+provider exact pin과 공공데이터포털 현행 계약을 대조해 C03을 닫았다. 산림청 route는
+`PBD0000041` 등산로와 `PBD0000031` 둘레길을 서로 다른 dataset으로 구현한다. 산악기상은
+`15084696`, 산불위험은 현행 V2 `15084817`을 `WeatherValue` source로 채택했다. 광범위한
+`krforest_safety_notices` 대신 발령·해제가 명시된 `15074798` 산사태 예보발령만 notice로
+채택했다. 구현은 `T-VN-C05A`~`C05D`로 분리했다.
+
+KHOA exact pin의 46개 ODMI catalog에는 공지 사건 API나 typed notice model이 없다.
+해양 지수·관측값을 임의 threshold로 notice화하지 않으며 `khoa_coastal_notices` 계획을
+미구현 폐기했다.
+
+### 다음 한 작업
+
+`T-VN-C05A`를 먼저 구현한다. 두 forest.go.kr ZIP의 live census로 geometry 유형·안정
+자연키·중복을 봉인한 뒤 route 변환, Dagster dataset operation, fixture와 통합 적재를 잇는다.
+
 ## 2026-08-19 — tasks 전면 감사·H44 종결·C02/H18 폐기
 
 `tasks-rule.md`의 블록 단위 라우팅과 `origin/main`, 연결된 PR·이슈 상태를

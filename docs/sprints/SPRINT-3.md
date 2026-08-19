@@ -47,11 +47,12 @@
   - `knps_park_photos` — feature 본문 X, `feature_files` + `source_links`
 
 **`python-krforest-api` trails 추가**:
-- `krforest_trails` — kind=route (산림청 숲길, knps_trails와 sibling 후보)
+- Sprint 3에서는 미구현. C03이 source를 `PBD0000041` 등산로와 `PBD0000031`
+  둘레길로 분리했고 실제 구현은 `T-VN-C05A`가 소유한다.
 
 **module**:
 - `src/kortravelmap/providers/knps.py` — 14 dataset 전부
-- `src/kortravelmap/providers/krforest_trails.py` — krforest_trails 한정
+- krforest route module 위치는 `T-VN-C05A` 구현 PR에서 확정
 
 **SHP/GeoJSON parser 위치 결정** (ADR-028 §B 후속):
 - **본 라이브러리 내**: `src/kortravelmap/providers/knps/_parser.py`. 의존

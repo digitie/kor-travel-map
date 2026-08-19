@@ -50,9 +50,9 @@
   그대로 가동. MOIS row가 이미 적재되어 있으므로 sibling group 자연
   생성 + `dedup_review_queue` 운영자 검토.
 - **fixture**: 6건 (휴양림 3 + 수목원 3 — 모두 MOIS sibling 후보 포함)
-- **module**: `src/kortravelmap/providers/krforest.py` (Sprint 2의
-  `krforest_weather.py`/Sprint 3의 `krforest_trails.py`와 namespace package
-  로 통합)
+- **module**: `src/kortravelmap/providers/krforest.py`. 과거 Sprint 2/3 계획의
+  `krforest_weather.py`/`krforest_trails.py`는 생성되지 않았고, C03 후속
+  `T-VN-C05A`/`C05B`가 실제 module 경계를 확정한다.
 
 ### 2.2 Provider ⑨ — 박물관/미술관 + 표준데이터 (`data.go.kr-standard`)
 
