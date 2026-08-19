@@ -31,6 +31,29 @@ if [[ -f "$ENV_FILE" ]]; then
   load_env_file "$ENV_FILE"
 fi
 
+reject_exported_manual_feature_create_aliases() {
+  local manual_raw="$1"
+  local manual_digest="$2"
+  local exported_name exported_value
+  while IFS= read -r exported_name; do
+    case "$exported_name" in
+      KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN | \
+        KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256 | \
+        KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED)
+        continue
+        ;;
+    esac
+    exported_value="${!exported_name:-}"
+    if [[ -n "$exported_value" \
+      && ( ( -n "$manual_raw" && "$exported_value" == *"$manual_raw"* ) \
+        || ( -n "$manual_digest" \
+          && "$exported_value" == *"$manual_digest"* ) ) ]]; then
+      echo "manual Feature create credentials must be distinct from exported environment values" >&2
+      return 1
+    fi
+  done < <(compgen -e)
+}
+
 export KOR_TRAVEL_MAP_API_HOST="${KOR_TRAVEL_MAP_API_HOST:-127.0.0.1}"
 export KOR_TRAVEL_MAP_API_PORT="${KOR_TRAVEL_MAP_API_PORT:-12701}"
 export KOR_TRAVEL_MAP_ADMIN_WEB_PORT="${KOR_TRAVEL_MAP_ADMIN_WEB_PORT:-12705}"

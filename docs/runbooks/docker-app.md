@@ -326,11 +326,24 @@ KOR_TRAVEL_MAP_BUILDX_OUTPUT=docker \
 
 ```bash
 npm run docker:up
-# 내부 실행: docker compose up -d --build postgres dagster-db-init rustfs rustfs-init api frontend dagster dagster-daemon
+# 내부 실행: 비밀값 대신 build 전용 placeholder로 docker compose build
+# 이어서 검증된 UI raw/API digest+flag를 해당 no-build up 프로세스에만 주입
+# docker compose up -d --no-build postgres dagster-db-init rustfs rustfs-init api frontend dagster dagster-daemon
 
 KOR_TRAVEL_MAP_INFRA_EXTERNAL=true bash scripts/docker-up.sh
-# 내부 실행: docker compose -f docker-compose.yml -f docker-compose.external-infra.yml up -d --build api frontend dagster dagster-daemon
+# 내부 실행도 build와 no-build up을 같은 방식으로 분리한다.
 ```
+
+M01 수동 Feature 생성 자격은 frontend raw와 API digest/flag로 분리된다. launcher는 세 값을
+검증한 직후 일반 process environment에서 제거하므로 Git 조회·포트 preflight·image build에는 실제
+값이 들어가지 않는다. Compose build는 비밀이 아닌 고정 placeholder만 받고, 실제 값은 이미지를
+다시 빌드하지 않는 `up --no-build` 한 프로세스의 interpolation에만 전달한다. root `.env`에 세 키를
+두거나 API env에 raw를 두면 container 생성 전에 거부하고, Dagster entrypoint도 세 키의 유입 자체를
+거부한다. custom env override를 쓰더라도 Compose가 실제 읽는 고정 root/API env를 함께 검사한다.
+resolved `NEXT_PUBLIC_*` 값이 raw/digest를 포함하는 credential 재사용도 build·runtime 전에 거부한다.
+로컬 admin launcher는 Next와 같은 `@next/env` parser와 development precedence로 네 자동 dotenv를
+검증한다. API entrypoint는 settings preflight 직후 digest/flag를 일반 migration child에서 제거하고
+uvicorn exec 직전에만 복원한다. 모든 오류는 환경변수 이름만 밝히고 값은 출력하지 않는다.
 
 API 컨테이너는 Postgres healthcheck 이후 `alembic upgrade head`를 실행하고 uvicorn을
 띄운다. 기동 마이그레이션에는 두 가지 통제가 있다 (2026-08-03 prod 0072 사고 후속,

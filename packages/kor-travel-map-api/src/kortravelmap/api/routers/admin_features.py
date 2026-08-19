@@ -1172,6 +1172,16 @@ _MANUAL_CREATE_RESPONSE_HEADERS = {
         "description": "생성된 canonical UUID Feature의 상대 admin URI.",
         "schema": {"type": "string"},
     },
+    "X-Request-ID": {
+        "description": (
+            "최초 실행의 요청 ID. exact replay도 최초 요청과 같은 값을 반환한다."
+        ),
+        "schema": {"type": "string"},
+    },
+    "Idempotency-Replayed": {
+        "description": "exact Idempotency-Key replay일 때만 `true`.",
+        "schema": {"type": "string", "enum": ["true"]},
+    },
 }
 _IF_MATCH_OPENAPI_PARAMETER = {
     "name": "If-Match",

@@ -354,9 +354,12 @@ function problemErrorField(error: Record<string, unknown>): string | null {
   }
   const location = error.loc;
   if (Array.isArray(location)) {
-    const parts = location
-      .filter((item) => item !== "body")
-      .map((item) => String(item));
+    const parts: string[] = [];
+    for (const item of location) {
+      if (item !== "body") {
+        parts.push(String(item));
+      }
+    }
     return parts.length > 0 ? parts.join(".") : "body";
   }
   return null;

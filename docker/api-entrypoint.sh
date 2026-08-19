@@ -287,6 +287,9 @@ PY
 then
   exit 1
 fi
+unset \
+  KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256 \
+  KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED
 
 # schema 변경이 **컨테이너 기동의 부수효과**로 일어나는 것에 대한 방어.
 #
@@ -449,6 +452,8 @@ export KOR_TRAVEL_MAP_PG_DSN="$runtime_dsn"
 unset KOR_TRAVEL_MAP_MIGRATOR_PG_DSN
 unset KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN
 unset KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE
+export KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256="$manual_feature_create_digest"
+export KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED="$manual_feature_create_flag"
 
 exec python -m uvicorn kortravelmap.api.app:app \
   --host 0.0.0.0 \

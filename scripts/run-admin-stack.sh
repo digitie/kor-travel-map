@@ -49,6 +49,74 @@ read_scoped_env_key() {
   done <"$file"
 }
 
+validate_frontend_manual_create_dotenv() {
+  local file="$1"
+  local manual_raw="${2:-}"
+  local line key value first last
+  [[ -f "$file" ]] || return 0
+
+  for api_only_key in \
+    KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256 \
+    KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED; do
+    read_scoped_env_key "$file" "$api_only_key"
+    if [[ "$SCOPED_ENV_FOUND" == "1" ]]; then
+      echo "API-only key is not allowed in frontend env: $api_only_key" >&2
+      exit 1
+    fi
+  done
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    [[ -z "$line" || "${line:0:1}" == "#" ]] && continue
+    [[ "$line" == export\ * ]] && line="${line#export }"
+    [[ "$line" == *=* ]] || continue
+    key="${line%%=*}"
+    value="${line#*=}"
+    [[ "$key" == NEXT_PUBLIC_* ]] || continue
+    if [[ ${#value} -ge 2 ]]; then
+      first="${value:0:1}"
+      last="${value: -1}"
+      if [[ "$first$last" == '\"\"' || "$first$last" == "''" ]]; then
+        value="${value:1:${#value}-2}"
+      fi
+    fi
+    if [[ "$value" == *'$KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN'* \
+      || "$value" == *'${KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN}'* ]]; then
+      echo "public frontend env must not reference the manual Feature create credential: $key" >&2
+      exit 1
+    fi
+    if [[ -n "$manual_raw" && "$value" == *"$manual_raw"* ]]; then
+      echo "manual Feature create credential must be distinct from public frontend values" >&2
+      exit 1
+    fi
+  done <"$file"
+}
+
+validate_manual_feature_create_routed_env() {
+  local scope="$1"
+  local manual_raw="$2"
+  local manual_digest="$3"
+  local entry name value
+  shift 3
+  for entry in "$@"; do
+    name="${entry%%=*}"
+    value="${entry#*=}"
+    case "$scope:$name" in
+      api:KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256 | \
+        api:KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED | \
+        frontend:KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN)
+        continue
+        ;;
+    esac
+    if [[ -n "$value" \
+      && ( ( -n "$manual_raw" && "$value" == *"$manual_raw"* ) \
+        || ( -n "$manual_digest" && "$value" == *"$manual_digest"* ) ) ]]; then
+      echo "manual Feature create credentials are not allowed in $scope runtime aliases" >&2
+      exit 1
+    fi
+  done
+}
+
 for manual_create_key in \
   KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN \
   KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256 \
@@ -59,6 +127,8 @@ for manual_create_key in \
     exit 1
   fi
 done
+frontend_runtime_dir="$ROOT_DIR/packages/kor-travel-map-admin/frontend"
+validate_frontend_manual_create_dotenv "$FRONTEND_ENV_FILE"
 
 COMMON_PROCESS_ENV=(
   "PATH=$PATH"
@@ -182,6 +252,17 @@ if [[ ! -v KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN ]]; then
     )
   fi
 fi
+validate_frontend_manual_create_dotenv \
+  "$FRONTEND_ENV_FILE" \
+  "$manual_feature_create_raw"
+while IFS= read -r public_name; do
+  public_value="${!public_name:-}"
+  if [[ -n "$manual_feature_create_raw" && -n "$public_value" \
+    && "$public_value" == *"$manual_feature_create_raw"* ]]; then
+    echo "manual Feature create credential must be distinct from public frontend values" >&2
+    exit 1
+  fi
+done < <(compgen -A variable NEXT_PUBLIC_)
 
 frontend_proxy_secret="${KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET:-}"
 trimmed_frontend_proxy_secret="${frontend_proxy_secret#"${frontend_proxy_secret%%[![:space:]]*}"}"
@@ -377,6 +458,56 @@ if [[ "$manual_feature_create_required" == "true" ]]; then
     echo "manual Feature create digest must be distinct from cache-target credentials" >&2
     exit 1
   fi
+fi
+while IFS= read -r public_name; do
+  public_value="${!public_name:-}"
+  if [[ -n "$manual_feature_create_digest" && -n "$public_value" \
+    && "$public_value" == *"$manual_feature_create_digest"* ]]; then
+    echo "manual Feature create credentials must be distinct from public frontend values" >&2
+    exit 1
+  fi
+done < <(compgen -A variable NEXT_PUBLIC_)
+reject_exported_manual_feature_create_aliases \
+  "$manual_feature_create_raw" \
+  "$manual_feature_create_digest"
+validate_manual_feature_create_routed_env \
+  api \
+  "$manual_feature_create_raw" \
+  "$manual_feature_create_digest" \
+  "${API_SHARED_ENV[@]}" \
+  "${API_SCOPED_ENV[@]}"
+validate_manual_feature_create_routed_env \
+  frontend \
+  "$manual_feature_create_raw" \
+  "$manual_feature_create_digest" \
+  "${FRONTEND_PROCESS_ENV[@]}"
+validate_manual_feature_create_routed_env \
+  dagster \
+  "$manual_feature_create_raw" \
+  "$manual_feature_create_digest" \
+  "${DAGSTER_PROCESS_ENV[@]}"
+
+# Next와 같은 parser·development precedence로 실제 auto dotenv 결과를 계산한다.
+# raw는 argv/초기 OS env가 아니라 stdin으로 넘기고 validator 내부에서만 Next의
+# process-env precedence를 재현한다. child는 M01 세 키가 든 caller env를 상속하지 않는다.
+node_bin="$(command -v node || true)"
+if [[ -z "$node_bin" ]]; then
+  echo "node is required to validate frontend dotenv files" >&2
+  exit 1
+fi
+if ! printf '%s\0' \
+  "$manual_feature_create_raw" \
+  "$manual_feature_create_digest" \
+  "${COMMON_PROCESS_ENV[@]}" \
+  "${FRONTEND_PROCESS_ENV[@]}" \
+  | env -i \
+    PATH="$PATH" \
+    HOME="${HOME:-$ROOT_DIR}" \
+    NODE_ENV=development \
+    "$node_bin" \
+    "$ROOT_DIR/scripts/validate-frontend-manual-create-env.mjs" \
+    "$frontend_runtime_dir"; then
+  exit 1
 fi
 
 # Secret-store process env는 위에서 API/frontend 전용 env-i 배열에 캡처했다. 이

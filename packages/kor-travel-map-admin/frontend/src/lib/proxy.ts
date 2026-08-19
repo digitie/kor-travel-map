@@ -12,16 +12,110 @@ const ALLOWED_FORWARD_HEADERS = new Set([
   "user-agent",
 ]);
 const ADMIN_PROXY_SECRET_ENV = "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET";
+const ALLOWED_PROXY_BASE_PROTOCOLS = new Set(["http:", "https:"]);
 
 export type ProxyRequestInit = RequestInit & { duplex?: "half" };
+
+export class ProxyTargetError extends Error {
+  constructor(
+    public status: 400 | 502,
+    public code:
+      | "ADMIN_PROXY_INTERNAL_BASE_INVALID"
+      | "ADMIN_PROXY_TARGET_REJECTED",
+    message: string,
+  ) {
+    super(message);
+    this.name = "ProxyTargetError";
+  }
+}
+
+function safeDecodeSegment(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    throw new ProxyTargetError(
+      400,
+      "ADMIN_PROXY_TARGET_REJECTED",
+      "proxy target path is invalid",
+    );
+  }
+}
+
+function parseInternalBase(internalBase: string): URL {
+  let base: URL;
+  try {
+    base = new URL(internalBase);
+  } catch {
+    throw new ProxyTargetError(
+      502,
+      "ADMIN_PROXY_INTERNAL_BASE_INVALID",
+      "proxy internal base is invalid",
+    );
+  }
+  if (
+    !ALLOWED_PROXY_BASE_PROTOCOLS.has(base.protocol) ||
+    base.username.length > 0 ||
+    base.password.length > 0
+  ) {
+    throw new ProxyTargetError(
+      502,
+      "ADMIN_PROXY_INTERNAL_BASE_INVALID",
+      "proxy internal base is invalid",
+    );
+  }
+  return base;
+}
+
+function safeProxyPath(pathSegments: string[]): string {
+  const encodedSegments = pathSegments.map((segment) => {
+    const decoded = safeDecodeSegment(segment);
+    if (decoded.includes("/") || decoded.includes("\\")) {
+      throw new ProxyTargetError(
+        400,
+        "ADMIN_PROXY_TARGET_REJECTED",
+        "proxy target path is invalid",
+      );
+    }
+    try {
+      return encodeURIComponent(decoded);
+    } catch {
+      throw new ProxyTargetError(
+        400,
+        "ADMIN_PROXY_TARGET_REJECTED",
+        "proxy target path is invalid",
+      );
+    }
+  });
+  return `/${encodedSegments.join("/")}`;
+}
 
 export function buildProxyTarget(
   pathSegments: string[],
   search: string,
   internalBase: string,
-): URL | null {
-  const target = new URL(`/${pathSegments.join("/")}`, internalBase);
+): URL {
+  const base = parseInternalBase(internalBase);
+  let target: URL;
+  try {
+    target = new URL(safeProxyPath(pathSegments), base);
+  } catch (error) {
+    if (error instanceof ProxyTargetError) {
+      throw error;
+    }
+    throw new ProxyTargetError(
+      400,
+      "ADMIN_PROXY_TARGET_REJECTED",
+      "proxy target path is invalid",
+    );
+  }
   target.search = search;
+  if (target.protocol !== base.protocol || target.origin !== base.origin) {
+    throw new ProxyTargetError(
+      400,
+      "ADMIN_PROXY_TARGET_REJECTED",
+      "proxy target path is invalid",
+    );
+  }
   if (
     target.pathname === "/health" ||
     target.pathname === "/version" ||
@@ -29,7 +123,11 @@ export function buildProxyTarget(
   ) {
     return target;
   }
-  return null;
+  throw new ProxyTargetError(
+    400,
+    "ADMIN_PROXY_TARGET_REJECTED",
+    "proxy target path is invalid",
+  );
 }
 
 export function forwardedProxyHeaders(

@@ -225,6 +225,98 @@ describe("admin API proxy response headers", () => {
     expect(forwarded.get("x-kor-travel-map-actor")).toBe("proxy-test-admin");
   });
 
+  it("manual feature create redirect는 follow하지 않고 응답 자체만 전달한다", async () => {
+    vi.stubEnv(
+      "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET",
+      "manual-feature-admin-proxy-secret",
+    );
+    vi.stubEnv(
+      "KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN",
+      "manual-feature-create-token-route-test-0001",
+    );
+    const redirectLocation = "https://example.invalid/redirected";
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      void input;
+      void init;
+      return Promise.resolve(
+        new Response(null, {
+          status: 303,
+          headers: { Location: redirectLocation },
+        }),
+      );
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const request = new NextRequest(
+      "http://127.0.0.1:12705/api/proxy/v1/admin/features",
+      {
+        body: JSON.stringify({}),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      },
+    );
+
+    const response = await POST(request, {
+      params: Promise.resolve({ path: ["v1", "admin", "features"] }),
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[1]?.redirect).toBe("manual");
+    const forwarded = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+    expect(forwarded.get("x-kor-travel-map-admin-feature-create-token")).toBe(
+      "manual-feature-create-token-route-test-0001",
+    );
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe(redirectLocation);
+  });
+
+  it.each([
+    ["encoded double slash", "%2F%2Fevil.example", "//evil.example"],
+    ["encoded backslash", "%5C%5Cevil.example", "\\\\evil.example"],
+  ])(
+    "%s proxy target은 credential 조립/fetch 전에 400으로 거부한다",
+    async (_label, encodedSegment, decodedSegment) => {
+      const proxySecret = "manual-feature-admin-proxy-secret";
+      const manualCreateToken = "manual-feature-create-token-route-test-0001";
+      vi.stubEnv("KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET", proxySecret);
+      vi.stubEnv("KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN", manualCreateToken);
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+      const request = new NextRequest(
+        `http://127.0.0.1:12705/api/proxy/${encodedSegment}/v1/admin/features`,
+        {
+          body: JSON.stringify({}),
+          headers: {
+            "Content-Type": "application/json",
+            "X-Kor-Travel-Map-Admin-Feature-Create-Token":
+              "browser-token-must-not-leak",
+            "X-Kor-Travel-Map-Admin-Proxy-Secret":
+              "browser-proxy-secret-must-not-leak",
+          },
+          method: "POST",
+        },
+      );
+
+      const response = await POST(request, {
+        params: Promise.resolve({
+          path: [decodedSegment, "v1", "admin", "features"],
+        }),
+      });
+
+      expect(response.status).toBe(400);
+      expect(response.headers.get("content-type")).toContain(
+        "application/problem+json",
+      );
+      const problemText = JSON.stringify(await response.json());
+      expect(problemText).toContain("ADMIN_PROXY_TARGET_REJECTED");
+      expect(problemText).not.toContain(proxySecret);
+      expect(problemText).not.toContain(manualCreateToken);
+      expect(problemText).not.toContain("browser-token-must-not-leak");
+      expect(problemText).not.toContain("browser-proxy-secret-must-not-leak");
+      expect(problemText).not.toContain("evil.example");
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
   it("exact create 경로가 아닌 POST에는 manual create token을 주입하지 않는다", async () => {
     vi.stubEnv(
       "KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN",
@@ -265,7 +357,9 @@ describe("admin API proxy response headers", () => {
     ["missing", undefined],
     ["empty", ""],
     ["too short", "short-token"],
-    ["whitespace", " manual-feature-create-token-route-test-0001 "],
+    ["leading/trailing whitespace", " manual-feature-create-token-route-test-0001 "],
+    ["internal whitespace", "manual-feature-create-token route-test-0001"],
+    ["newline", "manual-feature-create-token-route-test\n0001"],
   ])(
     "manual feature create raw token %s이면 upstream fetch 전에 503으로 닫는다",
     async (_label, token) => {
@@ -291,9 +385,25 @@ describe("admin API proxy response headers", () => {
       });
 
       expect(response.status).toBe(503);
-      await expect(response.json()).resolves.toEqual({
-        error: "MANUAL_FEATURE_CREATE_BFF_NOT_READY",
+      expect(response.headers.get("content-type")).toContain(
+        "application/problem+json",
+      );
+      const problem = await response.json();
+      expect(problem).toMatchObject({
+        code: "MANUAL_FEATURE_CREATE_BFF_NOT_READY",
+        detail: "Manual feature create BFF credential is not configured.",
+        errors: [],
+        status: 503,
+        title: "Manual feature create BFF not ready",
+        type: "https://kor-travel-map/errors/manual-feature-create-bff-not-ready",
       });
+      expect(problem.request_id).toMatch(
+        /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/,
+      );
+      expect(response.headers.get("x-request-id")).toBe(problem.request_id);
+      if (token) {
+        expect(JSON.stringify(problem)).not.toContain(token);
+      }
       expect(fetchMock).not.toHaveBeenCalled();
     },
   );

@@ -131,6 +131,7 @@ def test_generic_domain_ledger_is_admin_bff_only() -> None:
 
 def test_domain_terminal_contract_matches_declared_openapi_success_response() -> None:
     writes = _openapi_writes()
+    transport_headers = {"X-Request-ID", "Idempotency-Replayed"}
 
     for key, policy in COMMAND_REGISTRY.items():
         if policy.kind is not CommandPolicyKind.DOMAIN_LEDGER:
@@ -144,11 +145,14 @@ def test_domain_terminal_contract_matches_declared_openapi_success_response() ->
         }
         assert replay_codes <= {200}, key
         assert success_codes == {policy.success_status, *replay_codes}, key
+        expected_headers = set(policy.replay_headers)
+        if key == ("POST", "/v1/admin/features"):
+            expected_headers.update(transport_headers)
         response = responses[str(policy.success_status)]
-        assert set(response.get("headers", {})) == set(policy.replay_headers), key
+        assert set(response.get("headers", {})) == expected_headers, key
         for replay_code in replay_codes:
             response = responses[str(replay_code)]
-            assert set(response.get("headers", {})) == set(policy.replay_headers), key
+            assert set(response.get("headers", {})) == expected_headers, key
 
 
 def test_domain_fingerprint_header_contract_is_explicit_and_minimal() -> None:
@@ -231,12 +235,23 @@ def test_tvn40_canonical_collection_and_item_commands_are_serializable() -> None
 
 def test_manual_feature_create_has_versioned_read_committed_terminal_contract() -> None:
     policy = COMMAND_REGISTRY[("POST", "/v1/admin/features")]
+    response_headers = set(
+        _openapi_writes()[("POST", "/v1/admin/features")]["responses"]["201"][
+            "headers"
+        ]
+    )
 
     assert policy.kind is CommandPolicyKind.DOMAIN_LEDGER
     assert policy.operation == "admin.feature.create.manual-v1"
     assert policy.success_status == 201
     assert policy.replay_headers == ("ETag", "Location")
     assert policy.transaction_isolation == "read-committed"
+    assert response_headers == {
+        "ETag",
+        "Location",
+        "X-Request-ID",
+        "Idempotency-Replayed",
+    }
 
 
 def test_future_h22b_quarantine_command_cannot_bypass_domain_ledger() -> None:

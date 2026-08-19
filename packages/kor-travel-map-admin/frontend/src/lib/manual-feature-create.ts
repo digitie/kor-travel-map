@@ -18,8 +18,7 @@ export function manualFeatureCreateToken(
   if (
     token === undefined ||
     token.length < 32 ||
-    token.trim().length === 0 ||
-    token !== token.trim()
+    /\s/.test(token)
   ) {
     throw new ManualFeatureCreateCredentialError();
   }

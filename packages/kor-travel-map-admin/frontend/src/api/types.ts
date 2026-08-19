@@ -15359,8 +15359,12 @@ export interface operations {
                 headers: {
                     /** @description 현재 feature의 server-owned row_revision strong entity tag. */
                     ETag?: string;
+                    /** @description exact Idempotency-Key replay일 때만 `true`. */
+                    "Idempotency-Replayed"?: "true";
                     /** @description 생성된 canonical UUID Feature의 상대 admin URI. */
                     Location?: string;
+                    /** @description 최초 실행의 요청 ID. exact replay도 최초 요청과 같은 값을 반환한다. */
+                    "X-Request-ID"?: string;
                     [name: string]: unknown;
                 };
                 content: {

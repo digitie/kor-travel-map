@@ -1,16 +1,22 @@
 #!/usr/bin/env sh
 set -eu
 
-api_ops_name="$(
+api_only_name="$(
   python -c '
 import os
 
+manual_create_names = {
+    "KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN",
+    "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256",
+    "KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED",
+}
 print(
     next(
         (
             name
             for name in os.environ
-            if name.startswith(
+            if name in manual_create_names
+            or name.startswith(
                 ("KOR_TRAVEL_MAP_API_OPS_", "KOR_TRAVEL_MAP_OPS_")
             )
         ),
@@ -20,8 +26,17 @@ print(
 )
 '
 )"
-if [ -n "$api_ops_name" ]; then
-  echo "API-only ops principal key must not enter Dagster process: $api_ops_name" >&2
+if [ -n "$api_only_name" ]; then
+  case "$api_only_name" in
+    KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN | \
+      KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256 | \
+      KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED)
+      echo "manual Feature create credential key must not enter Dagster process: $api_only_name" >&2
+      ;;
+    *)
+      echo "API-only ops principal key must not enter Dagster process: $api_only_name" >&2
+      ;;
+  esac
   exit 1
 fi
 

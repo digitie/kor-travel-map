@@ -44,13 +44,50 @@ read_scoped_env_key() {
   done <"$file"
 }
 
+scoped_env_has_key() {
+  local file="$1"
+  local wanted_key="$2"
+  local line key
+  [[ -f "$file" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    [[ -z "$line" || "${line:0:1}" == "#" ]] && continue
+    if [[ "$line" =~ ^export[[:space:]]+ ]]; then
+      line="${line:${#BASH_REMATCH[0]}}"
+    fi
+    key="${line%%=*}"
+    key="${key#"${key%%[![:space:]]*}"}"
+    key="${key%"${key##*[![:space:]]}"}"
+    [[ "$key" == "$wanted_key" ]] && return 0
+  done <"$file"
+  return 1
+}
+
+scoped_env_contains_value() {
+  local file="$1"
+  local protected_value="$2"
+  local line
+  [[ -n "$protected_value" && -f "$file" ]] || return 1
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    line="${line%$'\r'}"
+    line="${line#"${line%%[![:space:]]*}"}"
+    [[ -z "$line" || "${line:0:1}" == "#" ]] && continue
+    [[ "$line" == *"$protected_value"* ]] && return 0
+  done <"$file"
+  return 1
+}
+
 reject_manual_create_key_in_root_env() {
   local key="$1"
-  read_scoped_env_key "$ENV_FILE" "$key"
-  if [[ "$SCOPED_ENV_FOUND" == "1" ]]; then
-    echo "$key must not be configured in root env because Dagster reads that file" >&2
-    exit 1
-  fi
+  local root_env_file
+  for root_env_file in "$ENV_FILE" "$ROOT_DIR/.env"; do
+    if scoped_env_has_key "$root_env_file" "$key"; then
+      echo "$key must not be configured in root env because Dagster reads that file" >&2
+      exit 1
+    fi
+  done
 }
 
 export_scoped_env_key() {
@@ -110,6 +147,15 @@ validate_manual_feature_create_credentials() {
       exit 1
     fi
   done
+  while IFS= read -r protected_name; do
+    protected_value="${!protected_name:-}"
+    if [[ -n "$protected_value" \
+      && ( "$protected_value" == *"$raw"* \
+        || "$protected_value" == *"$digest"* ) ]]; then
+      echo "manual Feature create credentials must be distinct from public frontend values" >&2
+      exit 1
+    fi
+  done < <(compgen -A variable NEXT_PUBLIC_)
   for protected_name in \
     KOR_TRAVEL_MAP_API_PINVI_CURATION_SNAPSHOT_TOKEN_SHA256 \
     KOR_TRAVEL_MAP_API_PINVI_CURATION_CUTOVER_MAPPING_TOKEN_SHA256; do
@@ -132,10 +178,49 @@ for manual_create_key in \
   KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED; do
   reject_manual_create_key_in_root_env "$manual_create_key"
 done
+for manual_create_api_env_file in \
+  "$API_ENV_FILE" \
+  "$ROOT_DIR/packages/kor-travel-map-api/.env"; do
+  if scoped_env_has_key \
+    "$manual_create_api_env_file" \
+    KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN; then
+    echo "raw manual Feature create token is not allowed in API env" >&2
+    exit 1
+  fi
+done
 export_scoped_env_key "$FRONTEND_ENV_FILE" KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN
 export_scoped_env_key "$API_ENV_FILE" KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256
 export_scoped_env_key "$API_ENV_FILE" KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED false
 validate_manual_feature_create_credentials
+manual_create_raw="$KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN"
+manual_create_digest="$KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256"
+manual_create_flag="$KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED"
+reject_exported_manual_feature_create_aliases \
+  "$manual_create_raw" \
+  "$manual_create_digest"
+for manual_create_root_env_file in "$ENV_FILE" "$ROOT_DIR/.env"; do
+  if scoped_env_contains_value "$manual_create_root_env_file" "$manual_create_raw" \
+    || scoped_env_contains_value \
+      "$manual_create_root_env_file" \
+      "$manual_create_digest"; then
+    echo "manual Feature create credentials must not appear in root/Dagster env" >&2
+    exit 1
+  fi
+done
+for manual_create_api_env_file in \
+  "$API_ENV_FILE" \
+  "$ROOT_DIR/packages/kor-travel-map-api/.env"; do
+  if scoped_env_contains_value \
+    "$manual_create_api_env_file" \
+    "$manual_create_raw"; then
+    echo "raw manual Feature create token must not appear in API env" >&2
+    exit 1
+  fi
+done
+unset \
+  KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN \
+  KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256 \
+  KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED
 
 export KOR_TRAVEL_MAP_GIT_COMMIT="$(git -C "$ROOT_DIR" rev-parse HEAD)"
 
@@ -222,5 +307,18 @@ fi
 
 cd "$ROOT_DIR"
 compose=(docker compose --env-file /dev/null)
-"${compose[@]}" "${compose_files[@]}" up -d --build "${services[@]}"
-"${compose[@]}" "${compose_files[@]}" ps
+KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN=manual-feature-create-build-placeholder \
+KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256=0000000000000000000000000000000000000000000000000000000000000000 \
+KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED=false \
+  "${compose[@]}" "${compose_files[@]}" build "${services[@]}"
+KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN="$manual_create_raw" \
+KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256="$manual_create_digest" \
+KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED="$manual_create_flag" \
+  "${compose[@]}" "${compose_files[@]}" up -d --no-build "${services[@]}"
+manual_create_raw=""
+manual_create_digest=""
+manual_create_flag=""
+KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN=manual-feature-create-build-placeholder \
+KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256=0000000000000000000000000000000000000000000000000000000000000000 \
+KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED=false \
+  "${compose[@]}" "${compose_files[@]}" ps
