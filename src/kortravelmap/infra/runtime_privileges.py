@@ -41,19 +41,6 @@ _SCHEMA_OWNER_ROLE = "ktm_feature_schema_owner"
 # runtime이 직접 접근하는 table만 이름으로 허용한다. 새 feature table은 이 목록을
 # 의도적으로 갱신하기 전까지 deployment를 막는다.
 _FEATURE_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
-    # T-VN-40A legacy write fence — legacy `curated_features`는 **읽기 전용**이다.
-    # 정본은 curation_collections/curation_items이고, canonical import가 그쪽에 쓴다.
-    # 여기서 INSERT/UPDATE/DELETE를 빼면 `reconcile_runtime_privileges`가 REVOKE ALL 뒤
-    # 이 표대로만 GRANT하므로 DB에 그 권한이 존재하지 않게 된다 — 우회 코드가 있어도
-    # DB가 거부한다. static 층은 `infra/legacy_write_fence.py`, route 층은 410 Gone.
-    # 40C가 이 표를 물리 삭제할 때 이 줄도 함께 사라진다.
-    "curated_features": ("SELECT",),
-    # legacy read 캐시였으나 지금은 **읽는 코드도 쓰는 코드도 없다**(models에 row 클래스만
-    # 남음). fence 리뷰 P2 — 쓰는 곳 없이 write 권한만 열려 있었다. SELECT만 남기고 40C에서
-    # 표와 함께 지운다. (`curated_tripmate_copy_snapshots`는 legacy 0032가 이 표로 rename해
-    # 더는 없다 — 표에 있던 항목은 phantom이라 지웠다. 표에 없는 relation은 reconcile이
-    # 조용히 건너뛰므로 phantom은 아무 것도 지키지 않는다.)
-    "curated_feature_detail_snapshots": ("SELECT",),
     "curated_source_rules": ("SELECT",),
     "curated_sources": ("SELECT",),
     "curated_themes": ("SELECT",),
