@@ -19,7 +19,7 @@ T-VN-M01은 새 API를 처음 만드는 작업이 아니다. 현행 `POST /v1/ad
    원자화한다.
 
 `manual_pinvi`와 `manual_curation`은 M01의 값 도메인에 넣지 않는다. 각 값을 발급할 별도 route 또는
-별도 token scope가 실제로 배포되는 M04와 M03에서 제약을 확장한다. provider가 같은 실체를 나중에
+분리된 권한 scope가 실제로 배포되는 M04와 M03에서 제약을 확장한다. provider가 같은 실체를 나중에
 발행하는 경우도 M01에서 자동 병합하지 않고 M05의 검토 대상으로 남긴다.
 
 두 검토자가 같은 commit에 P0~P3 잔여 없이 `GO`를 선언하기 전에는 M01 코드를 작성하지 않는다.
@@ -44,7 +44,7 @@ clean cutover와 legacy alias 규칙을 결정한다.
 ### 2.2 PinVi와 admin BFF는 현재 구분되지 않는다
 
 PinVi `origin/main`의 승인 코드는 같은 `/v1/admin/features`를 호출하며, Map admin BFF와 같은 종류의
-proxy secret 및 caller가 지정하는 actor header를 보낸다. 이 신호만으로 `manual_admin`과
+proxy 인증 자격 및 caller가 지정하는 actor header를 보낸다. 이 신호만으로 `manual_admin`과
 `manual_pinvi`를 구분하면 안 된다. PinVi client가 기대하는 옛 `data.request` 응답과 현행 Map 응답도
 이미 갈라져 있다.
 
@@ -272,7 +272,7 @@ PATCH state의 알려진 제약은 `409/422`이지 `500`이 아님을 HTTP 수�
 
 ## 9. 인증·권한
 
-- admin UI BFF만 새 proxy credential을 가진다. secret과 trusted proxy 조건을 모두 만족해야 한다.
+- admin UI BFF만 새 proxy credential을 가진다. 인증 자격과 trusted proxy 조건을 모두 만족해야 한다.
 - origin은 route/writer가 hard-code하고 principal은 ledger actor에서 읽는다.
 - runtime login은 두 테이블에 SELECT만 가진다. INSERT/UPDATE/DELETE/TRUNCATE는 모두 없다.
 - runtime login은 새 procedure EXECUTE만 가진다. table INSERT는 전용 NOLOGIN procedure owner만 가진다.
