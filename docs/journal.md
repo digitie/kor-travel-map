@@ -25,6 +25,8 @@ H45 metadata 통합 6 passed, ruff clean, mypy strict 145 files, import-linter 4
 Linux `/tmp` 기준 전체 pytest **3,369 passed / 12 skipped**. Windows Temp가 POSIX
 mode/owner 규칙을 보존하지 않아 처음 전체 suite의 domain marker 계열 25건이 실패한
 것은 Linux `/tmp` 재실행 85/85와 전체 suite로 환경 원인임을 확인했다.
+PR [#1019](https://github.com/digitie/kor-travel-map/pull/1019)은 CI 8/8 green 뒤
+merge `82fbe2f6`로 완료했다.
 
 ## 2026-08-19 — T-VN-C03: 보조 dataset 5종을 실제 source 기준으로 재분기
 
