@@ -165,19 +165,11 @@
         "admin-detail": "yes"
       },
       "pinvi_snapshot_receipt": {
-        "state": "complete",
-        "map_commit": "f00e7f4888853c61248497f80db39de85a6d95fb",
-        "pinvi_commit": "5cad141a33d2d999d8dbabba0a31bff9c85e132b",
-        "map_user_openapi_sha256": "6a2ee0f94ffded691f5d169ef1914144eecdf1f4170226c8bc5e963e972403c1",
+        "state": "pending",
+        "map_user_openapi_sha256": "489b05d3e62e3531233e3e7eb8c97f9ddf92aa1ecf1573b7557a5951e7f6a61b",
         "map_service_openapi_sha256": "8019e36f150ed006f5580e5ff224a0ba72030808b5303273f8c4c51aa0496431",
-        "map_full_openapi_sha256": "22e3f2f07192706bd06b35d2b9841c4a023047053be03731d5cfbfba8a746d32",
-        "pinvi_user_vendor_sha256": "6a2ee0f94ffded691f5d169ef1914144eecdf1f4170226c8bc5e963e972403c1",
-        "pinvi_service_vendor_sha256": "8019e36f150ed006f5580e5ff224a0ba72030808b5303273f8c4c51aa0496431",
-        "verification": [
-          "PinVi user/service vendor bytes are exact",
-          "PinVi canonical curation importer has no legacy admin snapshot consumer",
-          "paired Map/PinVi n150 canonical snapshot live acceptance passed"
-        ]
+        "map_full_openapi_sha256": "aa106fbf00b60eb9c67ca6056bd8cbcc9705a4523b109b6296e54ecc0053191a",
+        "blocking_reason": "T-VN-40 canonical curation service snapshot과 maintenance-only identity mapping export를 PinVi UUID import consumer가 paired vendor·receipt로 수용하기 전이다. 이 receipt가 complete가 되기 전에는 n150 installer가 fail-close한다."
       }
     },
     "T-VN-41": {

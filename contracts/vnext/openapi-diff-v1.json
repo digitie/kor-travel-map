@@ -170,22 +170,26 @@
         {
           "operation": "GET /v1/curated-features",
           "detail": "legacy curated_features overlay 공개 read — 정본은 curation_collections/items",
-          "basis": "T-VN-40C"
+          "basis": "T-VN-40C",
+          "applied": true
         },
         {
           "operation": "GET /v1/curated-features/{curated_feature_id}",
           "detail": "legacy curated_features overlay 공개 read",
-          "basis": "T-VN-40C"
+          "basis": "T-VN-40C",
+          "applied": true
         },
         {
           "operation": "GET /v1/curated-themes",
           "detail": "legacy source-rule candidate catalog 공개 read. retained catalog는 admin typed surface만 사용한다.",
-          "basis": "T-VN-40C"
+          "basis": "T-VN-40C",
+          "applied": true
         },
         {
           "operation": "GET /v1/curated-sources",
           "detail": "legacy source-rule candidate catalog 공개 read. canonical 공개 표면은 collections/items다.",
-          "basis": "T-VN-40C"
+          "basis": "T-VN-40C",
+          "applied": true
         },
         {
           "operation": "GET /v1/features",
@@ -335,20 +339,20 @@
         "deferred": 1
       },
       "added": [
-      {
-        "kind": "operation",
-        "target_operation": "GET /v1/service/curation-items/{curation_item_id}/detail-snapshot",
-        "detail": "canonical public membership과 trusted accepted link를 직접 조립하는 PinVi 전용 snapshot. exact scoped ServiceToken과 strong ETag/304를 요구한다.",
-        "basis": "ADR-092",
-        "applied": true
-      },
         {
-        "kind": "operation",
-        "target_operation": "GET /v1/service/curation-collections/{collection_id}/detail-snapshot",
-        "detail": "PinVi authoritative collection discovery. signed keyset, collection ETag, item-set hash/count, complete marker와 304/409 restart를 제공한다.",
-        "basis": "ADR-092",
-        "applied": true
-      },
+          "kind": "operation",
+          "target_operation": "GET /v1/service/curation-items/{curation_item_id}/detail-snapshot",
+          "detail": "canonical public membership과 trusted accepted link를 직접 조립하는 PinVi 전용 snapshot. exact scoped ServiceToken과 strong ETag/304를 요구한다.",
+          "basis": "ADR-092",
+          "applied": true
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/service/curation-collections/{collection_id}/detail-snapshot",
+          "detail": "PinVi authoritative collection discovery. signed keyset, collection ETag, item-set hash/count, complete marker와 304/409 restart를 제공한다.",
+          "basis": "ADR-092",
+          "applied": true
+        },
         {
           "kind": "operation",
           "target_operation": "GET /v1/service/curation-cutover/identity-mappings",
@@ -507,47 +511,56 @@
         {
           "operation": "GET /v1/admin/features/curated",
           "detail": "legacy curated_features overlay CRUD",
-          "basis": "T-VN-40C"
+          "basis": "T-VN-40C",
+          "applied": true
         },
         {
           "operation": "POST /v1/admin/features/curated",
           "detail": "legacy curated_features overlay CRUD",
-          "basis": "T-VN-40C"
+          "basis": "T-VN-40C",
+          "applied": true
         },
         {
           "operation": "GET /v1/admin/features/curated/{curated_feature_id}",
           "detail": "legacy curated_features overlay CRUD",
-          "basis": "T-VN-40C"
+          "basis": "T-VN-40C",
+          "applied": true
         },
         {
           "operation": "PATCH /v1/admin/features/curated/{curated_feature_id}",
           "detail": "legacy curated_features overlay CRUD",
-          "basis": "T-VN-40C"
+          "basis": "T-VN-40C",
+          "applied": true
         },
         {
           "operation": "DELETE /v1/admin/features/curated/{curated_feature_id}",
           "detail": "legacy curated_features overlay CRUD",
-          "basis": "T-VN-40C"
+          "basis": "T-VN-40C",
+          "applied": true
         },
         {
           "operation": "GET /v1/admin/features/curated/{curated_feature_id}/detail-snapshot",
           "detail": "legacy curated_features overlay 부속 read. PinVi caller는 canonical GET /v1/service/curation-items/{curation_item_id}/detail-snapshot과 전용 ServiceToken scope로 선전환하고 exact Map/PinVi pair를 고정한다.",
-          "basis": "T-VN-40C"
+          "basis": "T-VN-40C",
+          "applied": true
         },
         {
           "operation": "GET /v1/admin/features/curated/{curated_feature_id}/place-search",
           "detail": "legacy curated_features overlay 부속 read",
-          "basis": "T-VN-40C"
+          "basis": "T-VN-40C",
+          "applied": true
         },
         {
           "operation": "POST /v1/admin/features/curated/{curated_feature_id}/select",
           "detail": "legacy curated_features overlay 부속 command",
-          "basis": "T-VN-40C"
+          "basis": "T-VN-40C",
+          "applied": true
         },
         {
           "operation": "POST /v1/admin/features/curated/{curated_feature_id}/unselect",
           "detail": "legacy curated_features overlay 부속 command",
-          "basis": "T-VN-40C"
+          "basis": "T-VN-40C",
+          "applied": true
         },
         {
           "operation": "PATCH /v1/admin/issues/{issue_id}",
@@ -591,28 +604,100 @@
         }
       ],
       "status_changes": [
-        {"operation": "POST /v1/admin/curated-themes", "detail": "create success 200→201 + strong ETag", "basis": "ADR-092"},
-        {"operation": "POST /v1/admin/curated-sources", "detail": "create success 200→201 + strong ETag", "basis": "ADR-092"},
-        {"operation": "POST /v1/admin/curated-source-rules", "detail": "create success 200→201 + strong ETag", "basis": "ADR-092"},
-        {"operation": "POST /v1/admin/curations", "detail": "collection create success 200→201 + collection ETag", "basis": "ADR-092"},
-        {"operation": "POST /v1/admin/curations/{collection_id}/items", "detail": "item create success 200→201 + item ETag", "basis": "ADR-092"},
-        {"operation": "GET /v1/admin/curations/{collection_id}", "detail": "representation ETag에 대한 If-None-Match 304", "basis": "ADR-092"}
+        {
+          "operation": "POST /v1/admin/curated-themes",
+          "detail": "create success 200→201 + strong ETag",
+          "basis": "ADR-092"
+        },
+        {
+          "operation": "POST /v1/admin/curated-sources",
+          "detail": "create success 200→201 + strong ETag",
+          "basis": "ADR-092"
+        },
+        {
+          "operation": "POST /v1/admin/curated-source-rules",
+          "detail": "create success 200→201 + strong ETag",
+          "basis": "ADR-092"
+        },
+        {
+          "operation": "POST /v1/admin/curations",
+          "detail": "collection create success 200→201 + collection ETag",
+          "basis": "ADR-092"
+        },
+        {
+          "operation": "POST /v1/admin/curations/{collection_id}/items",
+          "detail": "item create success 200→201 + item ETag",
+          "basis": "ADR-092"
+        },
+        {
+          "operation": "GET /v1/admin/curations/{collection_id}",
+          "detail": "representation ETag에 대한 If-None-Match 304",
+          "basis": "ADR-092"
+        }
       ],
       "error_changes": [
-        {"operation": "PATCH /v1/admin/curated-themes/{theme_id}", "detail": "If-Match missing=428, stale=412", "basis": "ADR-092"},
-        {"operation": "PATCH /v1/admin/curated-sources/{source_id}", "detail": "If-Match missing=428, stale=412", "basis": "ADR-092"},
-        {"operation": "PATCH /v1/admin/curated-source-rules/{rule_id}", "detail": "If-Match missing=428, stale=412; semantic patch는 same-transaction reconcile", "basis": "ADR-092"},
-        {"operation": "PATCH /v1/admin/curations/{collection_id}", "detail": "collection raw If-Match missing=428, stale=412", "basis": "ADR-092"},
-        {"operation": "DELETE /v1/admin/curations/{collection_id}", "detail": "collection raw If-Match missing=428, stale=412", "basis": "ADR-092"},
-        {"operation": "PATCH /v1/admin/curations/{collection_id}/items/{curation_item_id}", "detail": "item If-Match missing=428, stale=412", "basis": "ADR-092"},
-        {"operation": "DELETE /v1/admin/curations/{collection_id}/items/{curation_item_id}", "detail": "item If-Match missing=428, stale=412", "basis": "ADR-092"}
+        {
+          "operation": "PATCH /v1/admin/curated-themes/{theme_id}",
+          "detail": "If-Match missing=428, stale=412",
+          "basis": "ADR-092"
+        },
+        {
+          "operation": "PATCH /v1/admin/curated-sources/{source_id}",
+          "detail": "If-Match missing=428, stale=412",
+          "basis": "ADR-092"
+        },
+        {
+          "operation": "PATCH /v1/admin/curated-source-rules/{rule_id}",
+          "detail": "If-Match missing=428, stale=412; semantic patch는 same-transaction reconcile",
+          "basis": "ADR-092"
+        },
+        {
+          "operation": "PATCH /v1/admin/curations/{collection_id}",
+          "detail": "collection raw If-Match missing=428, stale=412",
+          "basis": "ADR-092"
+        },
+        {
+          "operation": "DELETE /v1/admin/curations/{collection_id}",
+          "detail": "collection raw If-Match missing=428, stale=412",
+          "basis": "ADR-092"
+        },
+        {
+          "operation": "PATCH /v1/admin/curations/{collection_id}/items/{curation_item_id}",
+          "detail": "item If-Match missing=428, stale=412",
+          "basis": "ADR-092"
+        },
+        {
+          "operation": "DELETE /v1/admin/curations/{collection_id}/items/{curation_item_id}",
+          "detail": "item If-Match missing=428, stale=412",
+          "basis": "ADR-092"
+        }
       ],
       "schema_changes": [
-        {"operation": "GET /v1/admin/curated-themes", "detail": "row_revision decimal string, archived_at, immutable owner_kind/provider_dataset_id", "basis": "ADR-092"},
-        {"operation": "GET /v1/admin/curated-sources", "detail": "operator row_revision과 provider observation_revision 분리, archived_at", "basis": "ADR-092"},
-        {"operation": "GET /v1/admin/curated-source-rules", "detail": "row_revision decimal string, archived_at, owner provenance, candidate|ignore action", "basis": "ADR-092"},
-        {"operation": "GET /v1/admin/curations", "detail": "collection row_revision와 raw collection_etag", "basis": "ADR-092"},
-        {"operation": "GET /v1/admin/curations/{collection_id}", "detail": "collection representation_etag + collection_etag, item row_revision/item_etag", "basis": "ADR-092"}
+        {
+          "operation": "GET /v1/admin/curated-themes",
+          "detail": "row_revision decimal string, archived_at, immutable owner_kind/provider_dataset_id",
+          "basis": "ADR-092"
+        },
+        {
+          "operation": "GET /v1/admin/curated-sources",
+          "detail": "operator row_revision과 provider observation_revision 분리, archived_at",
+          "basis": "ADR-092"
+        },
+        {
+          "operation": "GET /v1/admin/curated-source-rules",
+          "detail": "row_revision decimal string, archived_at, owner provenance, candidate|ignore action",
+          "basis": "ADR-092"
+        },
+        {
+          "operation": "GET /v1/admin/curations",
+          "detail": "collection row_revision와 raw collection_etag",
+          "basis": "ADR-092"
+        },
+        {
+          "operation": "GET /v1/admin/curations/{collection_id}",
+          "detail": "collection representation_etag + collection_etag, item row_revision/item_etag",
+          "basis": "ADR-092"
+        }
       ],
       "deferred": [
         {
