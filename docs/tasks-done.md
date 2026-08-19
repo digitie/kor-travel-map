@@ -5,6 +5,21 @@
 
 ## 2026-08-19 — backlog 전면 재대조·완료 이관
 
+- [x] T-VN-C03 — **보조 dataset 5종 제품 범위·authoritative source 결정**
+
+  `python-krforest-api@f9254e6`, `python-khoa-api@20c7207`과 공공데이터포털 현행
+  계약을 대조했다. 산림청 등산로·둘레길은 `forest.go.kr` 파일 `PBD0000041` /
+  `PBD0000031`의 route 2종으로 구현하고, 산악기상은 `15084696`, 산불위험은 현행
+  V2 `15084817`, 산림 notice는 실제 발령·해제 source인 산사태 예보발령
+  `15074798`로 한정한다. 각각 열린 `T-VN-C05A`~`C05D`로 분리했다.
+
+  `python-khoa-api@20c7207`의 46개 KHOA ODMI public catalog에는 공지 사건 API나
+  typed notice model이 없다. 해양 지수·관측값에서 임의 threshold로 공지를 합성하지
+  않으며 `khoa_coastal_notices` 계획은 **미구현 폐기**했다. 새 authoritative event
+  source가 생기면 기존 이름을 되살리지 않고 별도 제품 결정으로 다시 진입한다.
+  산림청 등산로 source도 통제·폐쇄 여부가 실시간이 아니라고 명시하므로 route
+  geometry에만 쓰고 안전 notice나 이용 가능 상태로 승격하지 않는다.
+
 - [x] T-VN-H44 — **복원 리허설 드릴 정착**
 
   `0083` 백업은 별도 PostGIS에서 확장 선생성 → restore → manifest 일치 → 결손

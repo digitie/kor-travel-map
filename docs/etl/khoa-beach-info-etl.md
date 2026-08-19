@@ -142,7 +142,8 @@ MOIS 인허가에 같은 위치 / 명칭 해수욕장이 있는 경우:
 | group | `features_place` |
 | ConcurrencyConfig | `khoa_api: max_concurrent=1` |
 
-(`khoa_coastal_notices`는 별도 — `docs/etl/notice-feature-etl.md`)
+KHOA coastal notice 계획은 C03에서 근거 event source 부재로 폐기했다. 이 asset은
+해수욕장 place만 소유한다.
 
 ## 10. 검증
 
@@ -165,4 +166,5 @@ MOIS 인허가에 같은 위치 / 명칭 해수욕장이 있는 경우:
 - 해수욕장별 marine 지수 (수온, 파고, 적조) — `weather-feature-normalization.md`의
   `beach_marine` weather_domain.
 - 해수욕장 운영기간 (개장일/폐장일) → `feature_special_days`로 비개장일 표시.
-- 해수욕장 안전 공지 → `docs/etl/notice-feature-etl.md`의 `khoa_coastal_notices`.
+- 해수욕장 안전 공지는 authoritative event source가 새로 확인될 때 별도 제품 결정으로
+  재진입한다. 해양 지수·관측값의 임의 threshold로 공지를 합성하지 않는다.

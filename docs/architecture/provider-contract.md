@@ -114,12 +114,13 @@ system
 | `datagokr_jeju_local_restaurants` | python-datagokr-api | 제주 향토음식점 지정 현황 fileData |
 | `standard_special_streets` | data.go.kr-standard | 전국지역특화거리표준데이터. 개별 POI보다 area/anchor source이며 현재는 `theme_area_anchor` place로 보존 |
 | `khoa_beaches` | python-khoa-api | 해수욕장 정보. 이 문자열은 source_type/feature_id/source_record_key에 baked → 변경 시 기존 행 re-key 필요 (실제 코드 `khoa.py:64`) |
-| `khoa_coastal_notices` | python-khoa-api | 해양 공지 **(계획 — 미구현; notice는 krex/kma만 방출)** |
 | `krforest_recreation_forests` | python-krforest-api | 휴양림 (구현, `krforest.py:91`) |
 | `krforest_arboretums` | python-krforest-api | 수목원 (구현, `krforest.py:92`) |
-| `krforest_trails` | python-krforest-api | 숲길/등산로 **(계획 — 미구현)** |
-| `krforest_mountain_weather` | python-krforest-api | 산악기상 **(계획 — 미구현)** |
-| `krforest_safety_notices` | python-krforest-api | 산림 안전 공지 **(계획 — 미구현)** |
+| `krforest_mountain_trails` | python-krforest-api | forest.go.kr `PBD0000041` 등산로 route **(C05A 계획 — 미구현)** |
+| `krforest_dulle_trails` | python-krforest-api | forest.go.kr `PBD0000031` 둘레길 route **(C05A 계획 — 미구현)** |
+| `krforest_mountain_weather` | python-krforest-api | data.go.kr `15084696` 산악기상 관측 **(C05B 계획 — upstream typed model 선행)** |
+| `krforest_wildfire_risk_forecast` | python-krforest-api | data.go.kr `15084817` 산불위험 V2 72시간 예보 **(C05C 계획 — upstream V2 typed model 선행)** |
+| `krforest_landslide_forecast_notices` | python-krforest-api | data.go.kr `15074798` 산사태 발령·해제 **(C05D 계획 — upstream typed model 선행)** |
 | `krheritage_heritage_features` | python-krheritage-api | 국가유산 search_list |
 | `krheritage_gis_spca` | python-krheritage-api | 사적/명승 boundary |
 | `krheritage_gis_3070426` | python-krheritage-api | 천연기념물 boundary |
@@ -180,9 +181,9 @@ system
 | python-krex-api | place + price + weather + notice | primary | 시간/분 단위 | 휴게소 + 교통 공지 |
 | python-kma-api | weather | weather_context | 분/시간 | nowcast/short/mid + 특보. Protocol `KmaShortForecastItem` (PR#38) / `KmaUltraShortNowcastItem` (PR#39) |
 | python-krairport-api | weather, place | weather_context, enrichment | 시간 | 공항 운항·날씨 |
-| python-khoa-api | place, notice, weather | primary, primary, weather_context | 일 / 시간 | 해수욕장, 해양 공지 |
+| python-khoa-api | place, weather | primary, weather_context | 일 / 시간 | 해수욕장·해양 지수. C03에서 근거 source 없는 coastal notice 계획 폐기 |
 | python-airkorea-api | weather | weather_context | 시간 | PM10/PM2.5/CAI |
-| python-krforest-api | place, route, area, weather, notice | primary | 일/시간 | 휴양림/숲길/산악기상/안전공지 |
+| python-krforest-api | place, route, weather, notice | primary | 월/시간/30분 | 휴양림·수목원 구현. C05A~D에서 route·산악기상·산불위험·산사태 발령 구현 예정 |
 | python-knps-api | place, route, area, weather | primary | 월/분기/연 (파일 데이터) | keyless file-only. 국립공원 경계·탐방로·선형시설·시설·위험지역·특별보호구역·문화자원·대피소 (`docs/etl/knps-feature-etl.md`, ADR-028 amendment) |
 | python-krheritage-api | place, area, event | primary | 주 (place/area), 일 (event) | media → RustFS |
 | python-kasi-api | (calendar) | (system) | 주 1회 | 공휴일/달력 (PinVi utility) |
@@ -382,8 +383,8 @@ WeatherValue로 일관 적재.
 | python-kma-api | `kma_ultra_short_nowcast` | nowcast | ultra_short |
 | python-kma-api | `kma_short_forecast` | short | short |
 | python-kma-api | `kma_mid_forecast` | mid | mid |
-| python-krforest-api | `forest_mountain_weather` **(계획 — 미구현)** | observed | ultra_short |
-| python-krforest-api | `forest_fire_risk` **(계획 — 미구현)** | index | short |
+| python-krforest-api | `forest_mountain_weather` **(C05B 계획 — 미구현)** | observed | ultra_short |
+| python-krforest-api | `forest_fire_risk` **(C05C 계획 — 미구현)** | index | short |
 | python-krex-api | `rest_area_weather` | observed | ultra_short |
 | python-khoa-api | `beach_marine` | index | short |
 | python-airkorea-api | `air_quality` | observed | ultra_short |
@@ -448,8 +449,8 @@ def test_no_provider_wrapper_classes():
 | python-datagokr-api | `@48e458b` | `CulturalFestivalItem` (PR#34, #374 재정렬) + `PublicSpecialStreetItem` + fileData raw 변환 | PR#34, provider PR#10 | ADR-042 1차 축제 source. `26a5be3`: 주차장 시간 필드 분수값 float(provider #6, T-212e). `1967fb6`: 주차장 요금/수치 int 필드 관용 파싱. `48e458b`: T-223b fileData 4종 + 전국지역특화거리 service/model |
 | python-kma-api | `@0868b76` | `KmaShortForecastItem` (PR#38), `KmaUltraShortNowcastItem` (PR#39), `KmaUltraShortForecastItem`/mid/alerts 등 7종 | PR#24, PR#38~46, T-219b/c | ADR-010 두 축. Dagster asset 5종 완비 — 실황/초단기/단기(T-219b, `KmaClient`) + 중기(설정 주입 region, `DataGoKrClient`)/특보(record resource→notice)(T-219c). `006fdbe`: datagokr `03 NO_DATA` → 빈 결과 정규화(provider #18, T-212e 특보 빈 구간). `2592b740`: 중기예보 응답이 `tmFc` 미에코 → 해석된 요청 tmFc를 item 폴백 주입(provider #20/PR#21, T-212e). `0868b76`: `resultCode=22`를 비재시도 quota로 분류하고 HTTP 200 XML `OpenAPI_ServiceResponse`의 `03`은 빈 결과, 임의 XML은 parse error로 fail-close(provider PR#24, T-VN-H45 후속). ASOS/해수욕장/APIHub 표면은 백로그 |
 | python-airkorea-api | `@22996a4` | (후속 PR) | — | PM10/PM2.5/CAI |
-| python-khoa-api | `@20c7207` | (후속 PR) | PR#8 | 해수욕장, 해양 공지. snake_case live row 파싱 정정(khoa#5/PR#6, #378 pin bump). `20c7207`: `serviceKey`를 보내는 ODMI·해수욕장정보 기본 URL을 HTTPS로 전환(provider PR#8, T-VN-H45 후속) |
-| python-krforest-api | `@f9254e6` | (후속 PR) | — | 산악기상 (Sprint 2) + trails (Sprint 3) 양쪽 사용 |
+| python-khoa-api | `@20c7207` | (후속 PR) | PR#8 | 해수욕장·해양 지수. snake_case live row 파싱 정정(khoa#5/PR#6, #378 pin bump). `20c7207`: `serviceKey`를 보내는 ODMI·해수욕장정보 기본 URL을 HTTPS로 전환(provider PR#8, T-VN-H45 후속). C03에서 46개 ODMI catalog에 notice event/model이 없음을 확인해 coastal notice 계획 폐기 |
+| python-krforest-api | `@f9254e6` | C05A는 `ForestSpatialFeature`; C05B~D upstream 보강 필요 | — | route 2종 geometry는 typed. 산악기상은 좌표+RawRecord, 산불위험·산사태 발령은 RawRecord이고 산불위험 URL은 현행 V2와 drift |
 | python-opinet-api | `@bb6385c` | (후속 PR) | — | Sprint 2 §2.3 PriceValue |
 | python-krex-api | `@ddd69cd` | `KrexTrafficNoticeItem` 재정렬 (#378) | — | Sprint 2 §2.4 multi-kind. incident → `openapi/burstInfo/realTimeSms`(apiId 0611) repoint(krex#8/PR#9) — 좌표 일부 row 보유, 종료 시각 컬럼 없음. 휴게소 유가의 `X`/`-`/`N/A` 가격 sentinel은 결측값으로 파싱. `realTimeSMSList`와 0 이상 `count`가 없는 HTTP 200 본문은 authoritative empty가 아니라 `KrexParseError`(krex#11) |
 | python-visitkorea-api | `@cebf543` | (후속 PR — enrichment) | — | ADR-042: 축제는 enrichment 2차 |
