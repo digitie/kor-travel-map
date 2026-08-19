@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-19 — T-VN-40 인수 ② 완료 (pair: Map `817cfeae` · PinVi `5cad141a`)
+
+S3(PinVi 재배포, alembic `0049→0059`) → S4(mapping receipt 봉인: root `69eb85ec…`, count 4424, items 4424)
+→ S5(`ready=true`, backfill no-op) → S6(collection 59/59 import, POI 4,424) 전부 완료.
+Map prod는 `817cfeae`, PinVi prod는 `5cad141a`로 정렬됐다.
+
+### 다음 한 작업
+
+**③ live/soak** — `docs/runbooks/c7-prod-live-e2e.md` 6개 완료 경계. 선행 2건:
+(a) manager `ktdctl pinvi-pair capture`(런북 §2.1 step 8) — 브랜치 `feat/pinvi-pair-capture`가 리베이스·재검토를
+    마쳤고 blocking 2건(frozen env 읽기가 핸들러 밖이라 fence 안내 없는 traceback / n150 state root 사실관계 오류)
+    수정이 남았다. (b) 그 명령이 읽을 세 키(`E2E_C7_COMPATIBLE_PAIR_MANIFEST` 또는
+    `KTDM_C6C_COMPATIBLE_PAIR_MANIFEST`, `KTDM_C7_MAP_SOURCE_CHECKOUT`, `KTDM_C7_PINVI_SOURCE_CHECKOUT`)를
+    frozen `.env`에 넣는 프로비저닝(manifest 경로는 pinned-runtime state root 밖이어야 한다).
+그 뒤 **④ receipt complete**(9키 exact + `blocking_reason` 삭제 + freeze 상수 갱신) → **⑤ 40C**.
+
+
 ## 2026-08-19 — T-VN-H46F admin UI geo proxy 완료·병합
 
 - `/api/geo`는 server-only `KOR_TRAVEL_GEO_API_KEY`의 ASCII 영숫자 32자 발급 형식만

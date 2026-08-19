@@ -794,7 +794,9 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
     (a) `0202`가 요구하는 `ktm_curation_*` NOLOGIN role 4개 → bootstrap profile one-shot 선행,
     (b) manager compose가 항상 주입하는 빈 `KOR_TRAVEL_MAP_API_PINVI_CURATION_*_TOKEN_SHA256` →
     Map이 기동을 거부했다(`fix/api-settings-empty-pinvi-digest`로 수정, PinVi raw pair도 prod `.env`에 설정).
-  - [~] **② mapping 소비 (2026-08-18 조사로 범위 정정)** — ①~④ 동안 dedup merge 금지.
+  - [x] **② mapping 소비 완료 (2026-08-19)** — S3 재배포 → S4 봉인 → S5 preflight → S6 import 59/59.
+    receipt `46627435…`(root `69eb85ec…`, count 4424, items 4424), PinVi plan 59 · POI 4,424.
+    ①~④ 동안 dedup merge 금지는 유지.
     - **Map 쪽에 남은 데이터 mutation은 없다.** 설계 §6.3 표는 legacy `source_rule`+`curated` 행의
       target을 "promoted candidate + 기존 item 유지"로 못박는데 prod legacy 4,424는 **전부 `curated`**라
       archive 대상이 0건이고, canonical item 4,424는 import row 0 / created_by 0 / operator 0 /

@@ -2,6 +2,30 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-19 — T-VN-40 인수 ② 완료: PinVi cutover 봉인 + canonical collection 59개 import
+
+- **pair commit 확정**: Map `817cfeae`(prod 배포·검증 완료 — 4 서비스 healthy, head `0223`, export root 불변),
+  PinVi `5cad141a`(#455까지 머지). PinVi vendor: user `6a2ee0f9…` · service `8019e36f…`,
+  provenance `map_release_revision=f637f3ad`.
+- **S3** — 복구점(`pinvi_0049_pre-tvn40-2_20260819T000601Z.dump` + sha256, TOC 52) → exact-commit 스냅샷
+  (`--no-checkout` + `fetch --depth 1` + `rev-parse` 검증) → 롤백 태그 → **3 이미지 빌드**(revision 계약) →
+  bootstrap one-shot으로 alembic `20260804_0049 → 20260814_0059`(10개) → `--no-deps --force-recreate`.
+  bootstrap 출력이 `action=unchanged`라 **prod admin 비밀번호 회전·세션 폐기가 없었다**(credential을 `.env`의
+  C6C 값 그대로 쓴 결과). raw token 2개가 각 64자로 주입됐고(이전엔 빈 값) curation-cutover 라우트가 떴다.
+- **S4 봉인(불가역)** — `201` · `receipt_id=46627435-f9a2-44cc-ab3e-329d4255695c` · `status=completed` ·
+  `replayed=false` · `mapping_root=69eb85ecb178569bc87665ee1100b0a34ade4274512e5492e358c50a19140710` ·
+  `mapping_root_version=ktm-curation-cutover-mapping-v1` · `mapping_count=4424` ·
+  `map_release_revision=f637f3ad…`. DB `ktm_curation_cutover_mapping_receipt_items` **4,424행**.
+  봉인된 `map_release_revision`은 **서빙 커밋이 아니라 vendored service 계약의 release identity**다
+  (`config.py`가 cache-target expected source revision과 대조하는 값 — 계약 렌즈 검증 결론).
+- **S5** — `ready=true`, `issues=[]`, `legacy_plan_count=0`. backfill은 prod no-op이라 호출하지 않았다.
+- **S6** — canonical collection **59/59** import 성공(전부 `201`, `copied_poi_count`가 각 collection의 item 수와
+  정확히 일치). PinVi `curated_trip_plans` 59건 · `curated_plan_pois` **4,424행** = Map canonical item 수와 일치.
+- 실행 절차와 그 근거는 `docs/runbooks/tvn40-pinvi-cutover.md`(적대 검증 2명이 초안에서 P1 14건을 잡은 수정본).
+  실제 실행에서 그 수정들이 전부 값을 했다 — 특히 credential file 없이는 alembic이 한 줄도 돌지 않았을 것이고,
+  `/api/v1` prefix로는 404였을 것이며, `--no-deps` 없이는 prod Map API까지 재생성됐을 것이다.
+
+
 ## 2026-08-19 — T-VN-H46F admin UI geo credential fail-close
 
 Next.js `/api/geo` BFF가 공개 build alias나 browser `key` query를 credential source로
