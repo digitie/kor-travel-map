@@ -46,6 +46,7 @@ _EXPECTED_REVISIONS = (
     "0222_tvn40a_merge_runtime_role",
     "0223_tvn40_identity_mappings",
     "0224_c7_external_system_scope",
+    "0225_tvn40c_physical_removal",
 )
 #: `alembic_version.version_num`의 컬럼 폭(alembic 기본값).
 _ALEMBIC_VERSION_NUM_LENGTH = 32
@@ -254,7 +255,7 @@ def test_revision_identifiers_fit_alembic_version_column() -> None:
     )
 
 
-def test_active_graph_is_only_0200_bridge_to_0224() -> None:
+def test_active_graph_is_only_0200_bridge_to_0225() -> None:
     paths = sorted(_ACTIVE.glob("[0-9]*.py"))
     revisions = tuple(str(_literal(path, "revision")) for path in paths)
     parents = tuple(_literal(path, "down_revision") for path in paths)

@@ -147,6 +147,12 @@
         "0223_tvn40_identity_mappings"
       ],
       "revision": "0224_c7_external_system_scope"
+    },
+    {
+      "down_revision": [
+        "0224_c7_external_system_scope"
+      ],
+      "revision": "0225_tvn40c_physical_removal"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"
