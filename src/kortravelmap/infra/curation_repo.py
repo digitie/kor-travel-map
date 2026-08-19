@@ -4419,10 +4419,6 @@ async def update_curation_item(
                     "reason": "명시적 feature_id=null",
                 },
             )
-    if operator_owned_changed:
-        target_status = str(normalized.get("status", current.status))
-        target_relation = str(normalized.get("curation_relation", current.curation_relation))
-        target_reuse_policy = str(normalized.get("reuse_policy", current.reuse_policy))
     await _touch_collection(session, collection_id=collection_id, actor=actor)
     return await get_curation_item(
         session,

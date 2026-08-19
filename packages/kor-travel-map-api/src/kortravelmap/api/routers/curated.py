@@ -50,15 +50,9 @@ __all__ = ["admin_router", "router"]
 router = APIRouter(tags=["curated"])
 
 
-# T-VN-40A fence 대상 legacy write 경로. `/admin` prefix 아래의 두 alias만이며 뒤에
-# 하위 segment(`/{id}`, `/{id}/select` …)가 오거나 끝난다.
-_LEGACY_WRITE_PATH: Final = re.compile(r"/admin/(?:features/curated|curated-features)(?:/|$)")
-
-
 admin_router = APIRouter(
     prefix="/admin",
     tags=["admin-curated"],
-    dependencies=[Depends(_fence_legacy_curated_writes)],
 )
 
 CurationStatus = Literal["candidate", "curated", "rejected", "archived"]
@@ -743,6 +737,26 @@ _CATALOG_IF_MATCH_OPENAPI_PARAMETER = {
 }
 
 
+async def _list_curated_themes_response(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    *,
+    visibility: ThemeVisibility | None,
+    theme_group: str | None,
+    limit: int,
+) -> CuratedThemesResponse:
+    started_at = perf_counter()
+    rows = await curated_repo.list_curated_themes(
+        session,
+        visibility=visibility,
+        theme_group=theme_group,
+        limit=limit,
+    )
+    return CuratedThemesResponse(
+        data=CuratedThemesData(items=[_theme_view(row) for row in rows]),
+        meta=make_meta(started_at=started_at),
+    )
+
+
 @admin_router.get("/curated-themes", response_model=CuratedThemesResponse)
 async def list_admin_curated_themes_route(
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -900,6 +914,25 @@ async def archive_admin_curated_theme_route(
     )
 
 
+async def _list_curated_sources_response(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    provider_dataset_id: Annotated[int | None, Query(gt=0)] = None,
+    provider_status: Annotated[ProviderStatus | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+) -> CuratedSourcesResponse:
+    started_at = perf_counter()
+    rows = await curated_repo.list_curated_sources(
+        session,
+        provider_dataset_id=provider_dataset_id,
+        provider_status=provider_status,
+        limit=limit,
+    )
+    return CuratedSourcesResponse(
+        data=CuratedSourcesData(items=[_source_view(row) for row in rows]),
+        meta=make_meta(started_at=started_at),
+    )
+
+
 @admin_router.get("/curated-sources", response_model=CuratedSourcesResponse)
 async def list_admin_curated_sources_route(
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -907,7 +940,7 @@ async def list_admin_curated_sources_route(
     provider_status: Annotated[ProviderStatus | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
 ) -> CuratedSourcesResponse:
-    return await list_curated_sources_route(
+    return await _list_curated_sources_response(
         session=session,
         provider_dataset_id=provider_dataset_id,
         provider_status=provider_status,
