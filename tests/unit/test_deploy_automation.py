@@ -54,6 +54,8 @@ def test_buildx_runtime_images_receive_exact_git_revision(
         "case \"$*\" in\n"
         f"  'rev-parse HEAD') printf '%s\\n' '{revision}' ;;\n"
         "  'status --porcelain=v1 --untracked-files=all') : ;;\n"
+        f"  'archive --format=tar {revision}') "
+        "tar -cf - --files-from /dev/null ;;\n"
         "  *) exit 64 ;;\n"
         "esac\n",
         encoding="utf-8",
@@ -93,19 +95,22 @@ def test_buildx_runtime_images_receive_exact_git_revision(
             f"org.opencontainers.image.revision={revision}"
         ) == 1
 
-    api_build = next(
-        line for line in image_builds if "-f docker/api.Dockerfile" in line
-    )
+    api_build = next(line for line in image_builds if "/docker/api.Dockerfile" in line)
     frontend_build = next(
-        line for line in image_builds if "-f docker/frontend.Dockerfile" in line
+        line for line in image_builds if "/docker/frontend.Dockerfile" in line
     )
     dagster_build = next(
-        line for line in image_builds if "-f docker/dagster.Dockerfile" in line
+        line for line in image_builds if "/docker/dagster.Dockerfile" in line
     )
     assert "kor-travel-map-api" in api_build
     assert "kor-travel-map-admin" in frontend_build
     assert "kor-travel-map-dagster" in dagster_build
     assert "kor-travel-map-dagster-daemon" in dagster_build
+    build_contexts = {line.split()[-1] for line in image_builds}
+    assert len(build_contexts) == 1
+    build_context = Path(build_contexts.pop())
+    assert build_context != ROOT
+    assert not build_context.exists()
 
 
 @pytest.mark.unit
@@ -153,6 +158,111 @@ def test_buildx_rejects_dirty_source_context(
         "clean Git worktree is required for an exact source revision build\n"
     )
     assert not docker_log.exists()
+
+
+@pytest.mark.unit
+def test_buildx_rejects_unverifiable_source_status(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    revision = "0123456789abcdef0123456789abcdef01234567"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    docker_log = tmp_path / "docker.log"
+    git = fake_bin / "git"
+    git.write_text(
+        "#!/usr/bin/env bash\n"
+        "case \"$*\" in\n"
+        f"  'rev-parse HEAD') printf '%s\\n' '{revision}' ;;\n"
+        "  'status --porcelain=v1 --untracked-files=all') exit 64 ;;\n"
+        "  *) exit 64 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    git.chmod(0o755)
+    docker = fake_bin / "docker"
+    docker.write_text(
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >>"$DOCKER_LOG"\n',
+        encoding="utf-8",
+    )
+    docker.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake_bin}:{os.environ['PATH']}")
+    monkeypatch.setenv("DOCKER_LOG", str(docker_log))
+    monkeypatch.setenv("KOR_TRAVEL_MAP_ENV_FILE", str(tmp_path / "missing.env"))
+
+    result = subprocess.run(
+        ["bash", "scripts/docker-buildx.sh"],
+        cwd=ROOT,
+        env=os.environ.copy(),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert result.stderr == "failed to verify that the Git worktree is clean\n"
+    assert not docker_log.exists()
+
+
+@pytest.mark.unit
+def test_buildx_oci_output_uses_one_archive_per_build_target(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    revision = "0123456789abcdef0123456789abcdef01234567"
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    docker_log = tmp_path / "docker.log"
+    git = fake_bin / "git"
+    git.write_text(
+        "#!/usr/bin/env bash\n"
+        "case \"$*\" in\n"
+        f"  'rev-parse HEAD') printf '%s\\n' '{revision}' ;;\n"
+        "  'status --porcelain=v1 --untracked-files=all') : ;;\n"
+        f"  'archive --format=tar {revision}') "
+        "tar -cf - --files-from /dev/null ;;\n"
+        "  *) exit 64 ;;\n"
+        "esac\n",
+        encoding="utf-8",
+    )
+    git.chmod(0o755)
+    docker = fake_bin / "docker"
+    docker.write_text(
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >>"$DOCKER_LOG"\n',
+        encoding="utf-8",
+    )
+    docker.chmod(0o755)
+    output_dir = tmp_path / "oci"
+    monkeypatch.setenv("PATH", f"{fake_bin}:{os.environ['PATH']}")
+    monkeypatch.setenv("DOCKER_LOG", str(docker_log))
+    monkeypatch.setenv("KOR_TRAVEL_MAP_ENV_FILE", str(tmp_path / "missing.env"))
+    monkeypatch.setenv("KOR_TRAVEL_MAP_BUILDX_OUTPUT", "oci")
+    monkeypatch.setenv("KOR_TRAVEL_MAP_BUILDX_OCI_DIR", str(output_dir))
+
+    subprocess.run(
+        ["bash", "scripts/docker-buildx.sh"],
+        cwd=ROOT,
+        env=os.environ.copy(),
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    image_builds = [
+        line
+        for line in docker_log.read_text(encoding="utf-8").splitlines()
+        if line.startswith("buildx build ")
+    ]
+    output_args = {
+        token.removeprefix("type=oci,dest=")
+        for line in image_builds
+        for token in line.split()
+        if token.startswith("type=oci,dest=")
+    }
+    assert output_args == {
+        str(output_dir / f"api-{revision[:12]}.oci"),
+        str(output_dir / f"frontend-{revision[:12]}.oci"),
+        str(output_dir / f"dagster-{revision[:12]}.oci"),
+    }
 
 
 @pytest.mark.unit

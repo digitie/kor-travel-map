@@ -582,9 +582,10 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
       만든다. 현재 관측된 prod 3개 container label은 `development`라 image만으로 배포 source를
       특정할 수 없다.
 - [~] build input·OCI label·runtime inspect의 source revision을 같은 값으로 결박하는 회귀와
-      buildx 검증을 추가했다. dirty context fail-close와 인접 provenance 회귀 84개가 통과했고,
-      기존 compatible-pair provenance 계약과 중복 정본을 만들지 않는다. 독립 적대 리뷰 2명과
-      최종 CI가 남았다.
+      buildx 검증을 추가했다. 전문 적대 리뷰 2명의 1차 finding(status 오류 fail-open, context
+      TOCTOU·ignored 혼입, OCI archive 덮어쓰기)은 status 검증 fail-close, exact commit의
+      `git archive` context, target별 OCI 파일로 보완했다. 기존 compatible-pair provenance
+      계약과 중복 정본을 만들지 않는다. 두 리뷰어 재심과 최종 CI가 남았다.
 
 ### T-VN-H49 — 4분할 인스턴스 백업 주체 (docker-manager #177 추적)
 

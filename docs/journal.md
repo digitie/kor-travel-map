@@ -10,11 +10,13 @@
 `org.opencontainers.image.revision` label로 강제하도록 바꿨다. caller별 arg 추가 방식은 다음
 image가 생길 때 다시 빠질 수 있어 쓰지 않았다.
 
-tracked/untracked 변경이 있는 worktree는 build context가 HEAD와 다르므로 builder mutation 전에
-exit 2로 중단한다. 배포 뒤 실제 container 검증은 ADR-076의 C6c/C7가 네 immutable image ID와
-revision label을 `map_source_revision`에 대조하는 기존 정본을 유지한다. 새 manifest나 digest
-정본은 만들지 않았다. buildx 모의 실행·Dockerfile label·C7 runtime inspect 인접 회귀는
-84개가 통과했다. draft PR #1007에서 독립 적대 리뷰 2명과 전체 CI를 진행한다.
+전문 적대 리뷰어 2명의 1차 검토에서 `git status` 오류 fail-open과 clean 검사 뒤 context 변경,
+별도 build가 한 OCI 경로를 덮어쓰는 문제가 확인됐다. 상태 확인 실패와 dirty worktree는 builder
+mutation 전에 exit 2로 중단하고, exact commit의 tracked bytes를 한 번 `git archive`로 만든
+불변 context에서 세 build를 실행하도록 보완했다. OCI 출력도 API·admin·Dagster별 파일로
+분리했다. 배포 뒤 실제 container 검증은 ADR-076의 C6c/C7가 네 immutable image ID와 revision
+label을 `map_source_revision`에 대조하는 기존 정본을 유지하며 새 manifest나 digest 정본은
+만들지 않는다. draft PR #1007에서 두 리뷰어의 재심과 전체 CI를 진행한다.
 
 ## 2026-08-19 — T-VN-40 인수 ② 완료: PinVi cutover 봉인 + canonical collection 59개 import
 

@@ -3,14 +3,16 @@
 ## 2026-08-19 — T-VN-H46G buildx provenance 구현, 리뷰 대기
 
 buildx 공통 경계에서 API·admin·Dagster web·daemon image 모두에 clean HEAD의 exact 40자 SHA를
-build arg와 OCI `org.opencontainers.image.revision` label로 강제했다. dirty tracked/untracked
-context는 builder 실행 전에 거부한다. C6c/C7 runtime inspect 정본은 그대로 유지하며 인접 provenance
-회귀 84개가 통과했다. draft PR #1007의 독립 적대 리뷰 2명과 전체 CI가 남았다.
+build arg와 OCI `org.opencontainers.image.revision` label로 강제했다. 전문 적대 리뷰어 2명이
+독립적으로 찾은 status 오류 fail-open과 context TOCTOU는 상태 검증 fail-close + exact commit
+`git archive` context로 닫았다. 세 build가 같은 OCI 경로를 덮어쓰던 문제도 target별 archive로
+분리했다. C6c/C7 runtime inspect 정본은 그대로 유지한다. draft PR #1007의 두 리뷰어 재심과
+전체 CI가 남았다.
 
 ### 다음 한 작업
 
-서로 다른 렌즈의 전문 리뷰어 2명이 build context 정확성·buildx 출력·C7 runtime 결박을 검토한다.
-finding을 반영하고 전체 로컬 게이트와 GitHub CI를 통과한 뒤 H46G를 완료 이관·병합한다.
+서로 다른 렌즈의 전문 리뷰어 2명이 보완 commit의 build context 정확성·OCI 출력·C7 runtime
+결박을 다시 검토한다. 전체 로컬 게이트와 GitHub CI까지 통과한 뒤 H46G를 완료 이관·병합한다.
 
 ## 2026-08-19 — T-VN-40 인수 ② 완료 (pair: Map `817cfeae` · PinVi `5cad141a`)
 

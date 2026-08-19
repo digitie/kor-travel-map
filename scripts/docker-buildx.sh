@@ -9,15 +9,35 @@ cd "$ROOT_DIR"
 
 IMAGE_REGISTRY="${KOR_TRAVEL_MAP_IMAGE_REGISTRY:-ghcr.io/digitie}"
 IMAGE_NAMESPACE="${KOR_TRAVEL_MAP_IMAGE_NAMESPACE:-kor-travel-map}"
-GIT_REVISION="$(git rev-parse HEAD)"
+if ! GIT_REVISION="$(git rev-parse HEAD)"; then
+  echo "failed to resolve the Git revision for the build context" >&2
+  exit 2
+fi
 if [[ ! "$GIT_REVISION" =~ ^[0-9a-f]{40}$ ]]; then
   echo "exact 40-character Git HEAD is required; got $GIT_REVISION" >&2
   exit 2
 fi
-if [[ -n "$(git status --porcelain=v1 --untracked-files=all)" ]]; then
+if ! GIT_STATUS="$(git status --porcelain=v1 --untracked-files=all)"; then
+  echo "failed to verify that the Git worktree is clean" >&2
+  exit 2
+fi
+if [[ -n "$GIT_STATUS" ]]; then
   echo "clean Git worktree is required for an exact source revision build" >&2
   exit 2
 fi
+
+# 실제 Docker context는 worktree가 아니라 위에서 고정한 commit의 tracked bytes다.
+# ignored 파일 혼입과 세 순차 build 사이의 TOCTOU를 함께 차단한다.
+BUILD_CONTEXT_DIR="$(mktemp -d "${TMPDIR:-/tmp}/kor-travel-map-buildx.XXXXXX")"
+cleanup() {
+  rm -rf -- "$BUILD_CONTEXT_DIR"
+}
+trap cleanup EXIT
+if ! git archive --format=tar "$GIT_REVISION" | tar -xf - -C "$BUILD_CONTEXT_DIR"; then
+  echo "failed to materialize the exact Git revision build context" >&2
+  exit 2
+fi
+
 IMAGE_TAG="${KOR_TRAVEL_MAP_IMAGE_TAG:-${GIT_REVISION:0:12}}"
 PLATFORMS="${KOR_TRAVEL_MAP_DOCKER_PLATFORMS:-linux/amd64,linux/arm64}"
 BUILDER="${KOR_TRAVEL_MAP_BUILDX_BUILDER:-kor-travel-map-builder}"
@@ -47,7 +67,8 @@ case "$OUTPUT" in
     output_args=(--load)
     ;;
   oci)
-    output_args=(--output "type=oci,dest=${KOR_TRAVEL_MAP_BUILDX_OCI_PATH:-dist/kor-travel-map-images.oci}")
+    OCI_OUTPUT_DIR="${KOR_TRAVEL_MAP_BUILDX_OCI_DIR:-dist/kor-travel-map-images-oci}"
+    mkdir -p "$OCI_OUTPUT_DIR"
     ;;
   *)
     echo "unsupported KOR_TRAVEL_MAP_BUILDX_OUTPUT=$OUTPUT (registry|docker|oci)" >&2
@@ -80,6 +101,7 @@ build_one() {
   local dockerfile="$2"
   shift 2
   local -a tag_args=()
+  local -a build_output_args=("${output_args[@]}")
   local image
   for image in "${images[@]}"; do
     tag_args+=(-t "$image:$IMAGE_TAG")
@@ -91,17 +113,24 @@ build_one() {
     echo "build_one: 이미지 목록이 비었다 (dockerfile=$dockerfile)" >&2
     exit 2
   fi
+  if [[ "$OUTPUT" == "oci" ]]; then
+    local archive_name="${dockerfile##*/}"
+    archive_name="${archive_name%.Dockerfile}"
+    build_output_args=(
+      --output "type=oci,dest=${OCI_OUTPUT_DIR}/${archive_name}-${IMAGE_TAG}.oci"
+    )
+  fi
 
   echo "Building ${images[*]} :$IMAGE_TAG for $PLATFORMS"
   docker buildx build \
     --platform "$PLATFORMS" \
-    -f "$dockerfile" \
+    -f "$BUILD_CONTEXT_DIR/$dockerfile" \
     "${tag_args[@]}" \
-    "${output_args[@]}" \
+    "${build_output_args[@]}" \
     "$@" \
     --build-arg "KOR_TRAVEL_MAP_GIT_COMMIT=${GIT_REVISION}" \
     --label "org.opencontainers.image.revision=${GIT_REVISION}" \
-    .
+    "$BUILD_CONTEXT_DIR"
 }
 
 ensure_builder
