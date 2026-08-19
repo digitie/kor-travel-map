@@ -1380,23 +1380,15 @@ export async function fillKmaRequestDialogScope(
   await expect(dialog.getByLabel("operation_key")).toHaveCount(0);
 }
 
-/** 인수 scope가 깨끗함을 확인한다(fail-closed 사전조건).
+/** 초단기실황에서 **지금 사용 가능한** canonical base(`YYYYMMDDHH00`, KST).
  *
- *  external system 이름이 run마다 갈리지 않으므로 앞 run의 잔존물이 이 run에 그대로
- *  섞인다. 두 축을 본다.
- *
- *  1. **활성 target** — 남아 있으면 `membership_fingerprint`가 이 run의 것이 아니다.
- *     필터(`include_deleted=false` + `update_enabled=true`)는 실행 경로가 대상을 고르는
- *     조건(`infra/poi_cache_target_repo`의 `deleted_at IS NULL AND update_enabled`)과
- *     같아야 한다 — 넓으면 거짓 차단, 좁으면 오염을 통과시킨다.
- *  2. **비terminal 요청** — 같은 scope에 queued/running이 남아 있으면 이 run의 생성이
- *     409(active scope conflict)로 죽는다. reason에 RUN_ID가 들어가 plan이 달라 활성
- *     재사용도 되지 않는다.
- *
- *  `bootstrapC7SameOriginPage` 뒤에 부른다(`browserFetch`가 bootstrap을 요구한다).
+ *  정본은 provider 라이브러리다 — `python-kma-api`의 `kma.time_utils`가
+ *  `ULTRA_SRT_NCST_DELAY`(40분)를 뺀 뒤 정시로 절삭한다. "분 < 40이면 직전 시각"은 그것과
+ *  동치이고, 출력 shape은 `dagster/kma_weather.py`의 `base_date + base_time`과 같다.
+ *  두 규칙이 갈리면 이월 cursor 가드가 조용히 무력화되므로
+ *  `tests/unit/test_c7_acceptance_scope_pin.py`가 지연 상수를 잠근다.
  */
 export function currentKmaNowcastBaseDatetime(now = Date.now()): string {
-  // 초단기실황의 사용 가능 base는 KST 매시 40분에 바뀐다 — 그 전에는 직전 시각이 최신이다.
   const kst = new Date(now + 9 * 60 * 60 * 1000);
   if (kst.getUTCMinutes() < 40) {
     kst.setUTCHours(kst.getUTCHours() - 1);
@@ -1408,6 +1400,25 @@ export function currentKmaNowcastBaseDatetime(now = Date.now()): string {
   );
 }
 
+/** 인수 scope가 깨끗함을 확인한다(fail-closed 사전조건).
+ *
+ *  external system 이름이 run마다 갈리지 않으므로 앞 run의 잔존물이 이 run에 그대로
+ *  섞인다. 세 축을 본다.
+ *
+ *  1. **활성 target** — 남아 있으면 `membership_fingerprint`가 이 run의 것이 아니다.
+ *     필터(`include_deleted=false` + `update_enabled=true`)는 실행 경로가 대상을 고르는
+ *     조건(`infra/poi_cache_target_repo`의 `deleted_at IS NULL AND update_enabled`)과
+ *     같아야 한다 — 넓으면 거짓 차단, 좁으면 오염을 통과시킨다.
+ *  2. **비terminal 요청** — 같은 scope에 queued/running이 남아 있으면 이 run의 생성이
+ *     409(active scope conflict)로 죽는다. reason에 RUN_ID가 들어가 plan이 달라 활성
+ *     재사용도 되지 않는다.
+ *
+ *  3. **이월된 sync-state cursor** — 앞 run이 같은 base에 cursor를 남기고 이 run의 첫
+ *     요청이 같은 membership을 만들면(좌표가 스펙에 고정이라 같아진다) 실행기가
+ *     `skipped=true`로 접는다. cleanup은 target만 지우고 sync-state 행은 남긴다.
+ *
+ *  `bootstrapC7SameOriginPage` 뒤에 부른다(`browserFetch`가 bootstrap을 요구한다).
+ */
 export async function assertC7ScopeIsClean(page: Page): Promise<void> {
   const listed = requireBody(
     await listActivePoiTargets(page, C7_EXTERNAL_SYSTEM),
@@ -1423,12 +1434,8 @@ export async function assertC7ScopeIsClean(page: Page): Promise<void> {
     [],
     "C7 인수 사전조건",
   );
-  // 3. **이월된 sync-state cursor** — 고정 scope가 되면서 새로 생긴 노출이다.
-  //    앞 run이 같은 base에 cursor를 남겼고 이 run의 첫 요청이 같은 membership을
-  //    만들면(좌표가 스펙에 고정이라 같아진다) 실행기가 `skipped=true`로 접는다
-  //    (`dagster/kma_weather.py`의 base+fingerprint 동치 분기). 그러면 "첫 요청은
-  //    실행된다"는 단언이 깨지는데, 원인이 이 run 안에 없어 진단이 어렵다.
-  //    cleanup은 target만 지우고 sync-state 행은 남긴다.
+  // 축 3 — `dagster/kma_weather.py`의 base+fingerprint 동치 분기를 피한다. 원인이 이
+  // run 안에 없어 진단이 어려운 실패라 사전조건으로 막는다.
   const detail = requireBody(
     await getExactDatasetDetail(page, C7_KMA_SYNC_SCOPE),
     200,

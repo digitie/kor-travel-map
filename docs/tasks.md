@@ -819,6 +819,15 @@ DB role이 **아니라** ServiceToken principal 둘이다 — `service:pinvi`
     불변이다 → 순수 refresh(신규 path 2 · 변경 9 · 삭제 0). 이 불일치를 잡는 것은 Map의
     `tests/unit/test_vnext_contract_artifacts.py`뿐이고 PinVi CI는 못 잡는다. receipt는 **정확히 9키**로
     바꾸고 `blocking_reason`을 지우며 freeze 상수(`ARTIFACT_SHA256`)를 같은 커밋에서 갱신한다(LF 전용).
+  - [ ] **T-C7-SCOPE-REGISTRY** — exact-target refresh용 `external_system:*` 선언의 규약·등록부를
+    정본화한다(누가 언제 무슨 근거로 선언하는가, 운영 표면에 어떻게 읽히는가). `c7-e2e`가 첫
+    선례이고 PinVi `external_system:pinvi`가 다음이다 — 지금은 일회성 migration 외에 규칙이 없다.
+    정본 후보: `docs/integration-map.md` 또는 ADR-088 consequences.
+  - [ ] **T-C7-LIVE-SERIAL** — C7 KMA live 3종의 직렬 실행을 runbook 문구가 아니라 코드로 못박는다.
+    고정 external system을 쓰게 되면서 병렬 실행이 서로의 `membership_fingerprint`를 오염시키는데
+    `playwright.live.config.ts` 기본은 `fullyParallel: true`/`workers: 4`다. Playwright에 파일 간
+    직렬화 primitive가 없어 실효 수단은 파일 병합 또는 worker lock fixture다(둘 다 C7 게이트를
+    흔들 수 있으므로 별도 작업).
   - [ ] **⑤ 40C manifest physical removal 실행**(0225)
 
 ## Lane B 상세 — b1 PinVi 결합·후속

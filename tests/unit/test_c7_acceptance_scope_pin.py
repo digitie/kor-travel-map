@@ -18,6 +18,8 @@ import re
 from pathlib import Path
 from typing import Final
 
+import pytest
+
 _ROOT: Final = Path(__file__).resolve().parents[2]
 _MIGRATION: Final = _ROOT / "alembic" / "versions" / "0224_c7_external_system_scope.py"
 _TS_HELPER: Final = (
@@ -71,3 +73,25 @@ def test_live_spec_derives_its_scope_from_the_same_prefix() -> None:
         "export const C7_KMA_SYNC_SCOPE =\n"
         "  `${EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX}${C7_EXTERNAL_SYSTEM}` as const;" in source
     ), "C7_KMA_SYNC_SCOPE가 상수 조합이 아니다 — 리터럴로 굳으면 드리프트를 잡을 수 없다"
+
+
+def test_live_base_rule_matches_the_provider_library_delay() -> None:
+    """live 가드의 base 규칙이 provider 정본과 같은 지연을 쓴다.
+
+    `currentKmaNowcastBaseDatetime`은 `python-kma-api`의
+    `kma.time_utils.latest_ultra_srt_ncst_base`(= `ULTRA_SRT_NCST_DELAY`를 뺀 뒤 정시
+    절삭)를 TS로 재구현한 것이다. "분 < 40이면 직전 시각"이 그 규칙과 동치인데, provider가
+    지연을 바꾸면 TS만 남아 가드가 **조용히** 무력화된다 — 그러면 이월 cursor가 통과하고
+    `ops-c7-kma-active-write`가 원인 불명의 `skipped=true`로 죽는다(prod에서만 드러난다).
+
+    provider 라이브러리가 없는 환경(게이트 venv 등)에서는 잠글 대상이 없으므로 건너뛴다.
+    CI는 `python-kma-api`를 dev extra로 설치하므로 거기서 잠긴다.
+    """
+    kma_time_utils = pytest.importorskip("kma.time_utils")
+
+    delay_minutes = int(kma_time_utils.ULTRA_SRT_NCST_DELAY.total_seconds() // 60)
+    source = _TS_HELPER.read_text(encoding="utf-8")
+    matched = re.search(r"if \(kst\.getUTCMinutes\(\) < (\d+)\) \{", source)
+    assert matched is not None, "currentKmaNowcastBaseDatetime의 분 비교를 찾지 못했다"
+    assert int(matched.group(1)) == delay_minutes
+
