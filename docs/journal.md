@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-19 — T-VN-H46G buildx source revision 결박
+
+`scripts/docker-buildx.sh`가 exact HEAD를 frontend에만 넘기고 API·Dagster web·daemon에는
+넘기지 않아 세 image의 OCI revision이 Dockerfile 기본값 `development`로 남을 수 있었다.
+공통 `build_one` 경계가 모든 runtime image에 동일한 40자 SHA를 build arg와
+`org.opencontainers.image.revision` label로 강제하도록 바꿨다. caller별 arg 추가 방식은 다음
+image가 생길 때 다시 빠질 수 있어 쓰지 않았다.
+
+tracked/untracked 변경이 있는 worktree는 build context가 HEAD와 다르므로 builder mutation 전에
+exit 2로 중단한다. 배포 뒤 실제 container 검증은 ADR-076의 C6c/C7가 네 immutable image ID와
+revision label을 `map_source_revision`에 대조하는 기존 정본을 유지한다. 새 manifest나 digest
+정본은 만들지 않았다. buildx 모의 실행·Dockerfile label·C7 runtime inspect 인접 회귀는
+84개가 통과했다. draft PR #1007에서 독립 적대 리뷰 2명과 전체 CI를 진행한다.
+
 ## 2026-08-19 — T-VN-40 인수 ② 완료: PinVi cutover 봉인 + canonical collection 59개 import
 
 - **pair commit 확정**: Map `817cfeae`(prod 배포·검증 완료 — 4 서비스 healthy, head `0223`, export root 불변),

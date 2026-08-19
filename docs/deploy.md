@@ -152,6 +152,10 @@ KOR_TRAVEL_MAP_IMAGE_TAG="$(git rev-parse --short=12 HEAD)" \
   npm run docker:buildx
 ```
 
+buildx는 clean worktree만 허용하며 API·admin·Dagster web·daemon image 모두에 exact 40자
+HEAD를 build arg와 `org.opencontainers.image.revision` label로 강제한다. runtime의 네 image
+ID·revision 대조는 ADR-076의 C6c/C7 compatible-pair attestation이 맡는다.
+
 기본 image 이름은 다음과 같다.
 
 | 서비스 | 기본 image |

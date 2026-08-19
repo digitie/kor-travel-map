@@ -275,9 +275,13 @@ N150 16GB(x86_64)와 Odroid M1S(ARM64) 양쪽 배포용 이미지는 buildx로 �
 KOR_TRAVEL_MAP_IMAGE_TAG="$(git rev-parse --short=12 HEAD)" npm run docker:buildx
 ```
 
-`docker-buildx.sh`는 실행 worktree의 exact 40자 `HEAD`를 frontend build arg와 OCI
-`org.opencontainers.image.revision` label에 함께 박는다. admin UI의 `/api/build-info`는
-같은 빌드 SHA와 실제 frontend build 입력의 결정적 SHA-256을 반환한다. E2E runner는 clean
+`docker-buildx.sh`는 clean worktree만 허용하고 실행 worktree의 exact 40자 `HEAD`를 API·admin·
+Dagster web·daemon 모든 image의 공통 build arg와 OCI
+`org.opencontainers.image.revision` label에 함께 박는다. dirty tracked/untracked 입력이 있으면
+builder를 실행하기 전에 중단한다. admin UI의 `/api/build-info`는 같은 빌드 SHA와 실제 frontend
+build 입력의 결정적 SHA-256을 반환한다. 배포 뒤에는 기존 C6c/C7 attestation이 네 runtime
+container의 immutable image ID와 revision label을 같은 `map_source_revision`에 대조한다. 별도
+provenance 정본을 만들지 않는다. E2E runner는 clean
 worktree에서 digest를 독립 계산하므로 tag/SHA만 같고 실제 코드가 다른 이미지는 통과할 수 없다.
 mocked checkpoint runner는 외부 image/container를 입력받지 않는다. clean `HEAD`의
 tracked 파일만 `git archive`로 분리한 context에서 frontend image를 직접 빌드하고, 그
