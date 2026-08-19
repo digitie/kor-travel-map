@@ -2,6 +2,27 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-19 — tasks 전면 감사: 완료·폐기·외부 상태 재라우팅
+
+`docs/tasks.md` 전체의 상위 인덱스·상세 블록·체크박스를 `docs/tasks-rule.md`와
+재대조했다. 원격에서 #975·#994·#996·#999 병합/CI green, PinVi #215 closed,
+manager #148 open, #177 closed, Map #819·#922·#990 open을 확인했다. 그 결과 #975를
+여전히 rebase 중으로 쓴 인덱스, #177이 닫혔는데도 잔여 소유자로 쓴 백업 문구,
+완료한 40A/mapping/①/②을 "미구현"으로 남겨둔 T-VN-40 이력을 현행에 맞게
+정리했다.
+
+H44는 백업 restore 가능성이 독립 DB에서 반복 실증됐으므로 완료했다.
+재적재 replay는 24시간 이상의 전량 transaction 또는 필드 손실 부분 replay 밖에 없어
+복구 경로가 아님을 확정했고, 주기 트리거는 H43/#148의 실 production 전환
+조건으로 남겼다. H45 후속 ①~④·C03 표 drift·40A·mapping·인수 ①/②·41A/B·
+닫힌 PinVi #215도 완료 아카이브로 옮겼다. C02·H18은 사용자 지시대로
+실행 성공이 아닌 **미구현 폐기**로 명시했다.
+
+H45 1.19.1은 fresh migration에서 named CHECK removed 208/added 167을 재현했다.
+전역 comparator 비활성화는 실제 drift를 숨기므로 제외했다. C03은 로컬
+provider exact pin을 1차 근거로 보아 trail·weather/fire·safety notice·KHOA notice를 서로
+다른 결정/implementation task로 분해해야 함을 활성 원장에 기록했다.
+
 ## 2026-08-19 — T-VN-M00 수동 Feature 생성 설계·전문 리뷰 완료
 
 T-VN-H34 잔여의 "없는 것은 Feature로 추가" 요구를 M lane으로 분리한 뒤, M01 구현 전에 닫아야 할

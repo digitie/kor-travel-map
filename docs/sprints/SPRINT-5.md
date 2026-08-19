@@ -1,6 +1,7 @@
 # SPRINT-5.md — MOIS-sibling provider + 정합성 Phase 2 + 운영 진입
 
-> **상태**: 🟢 **마무리** — 잔여는 `T-229-buildx`(arm64 buildx 배포 검증) 하나다.
+> **상태**: ✅ **완료** — `T-229-buildx` arm64 실배포 검증은 2026-08-19
+> 사용자 결정으로 추가 추적하지 않는다.
 > 단일 정본은 [`README.md`](./README.md)의 표이고, 열린 작업은 `../tasks.md`가 갖는다.
 >
 > 이 헤더가 2026-06-07 시점 그대로 `T-RV-04b-opinet, T-212b/d/e, T-210`을 잔여로

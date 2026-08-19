@@ -77,8 +77,10 @@ docker compose stop api frontend dagster dagster-daemon rustfs
 > 재보기 전에는 "geo 33GB를 매일 뜨는 게 현실적인가"에 답할 수 없었다. 15분/4.4GB면
 > 일 1회가 현실적이고 7세대를 남겨도 31GB다.
 >
-> ⚠️ **아직 baseline 1세대뿐이다.** 주기화·retention·외부 사본은 docker-manager #177이
-> 소유한다. 복구 계획을 세울 때 "백업이 있다"와 "최신 백업이 있다"를 구별하라.
+> ⚠️ **아직 baseline 1세대뿐이다.** docker-manager #177은 backup primitive와
+> 1세대 baseline을 만들고 닫혔지만, 주기화·retention·외부 사본 증거는
+> `T-VN-H49`에 남아 있다. 복구 계획을 세울 때 "백업이 있다"와
+> "최신 백업이 있다"를 구별하라.
 
 ## 2. 백업 실행
 

@@ -9,7 +9,7 @@
 | Sprint 2 | [SPRINT-2.md](./SPRINT-2.md) | ✅ **완료** (PR#28~#59, 2026-05-26~28) | MOIS-독립 작은 provider 4건 (축제·날씨·유가·휴게소) + visitkorea enrichment + KMA mid_forecast + 디버그 UI backend 라우터 + ETL live 11/11 dataset + coverage 65 |
 | Sprint 3 | [SPRINT-3.md](./SPRINT-3.md) | ✅ **완료** (PR#60~#95, 2026-05-28~30) | KNPS + krheritage(+area_square_meters/file_sources) + ADR-033 Phase 1(F1~F3, 관측만) + `/features/*` 라우터 + `feature_repo.py` + `core/dedup` + `ops.dedup_review_queue` + `AsyncKorTravelMapClient` 오케스트레이터 + geocoding REST 도입(후속 PR#123에서 v2 `POST /v2/*` 정본화) + `/features` 지도 페이지 + Windows Playwright e2e + frontend CI 게이트 + coverage 75 |
 | Sprint 4 | [SPRINT-4.md](./SPRINT-4.md) | ✅ **완료** (PR#133~#142, 2026-05-31~06-01, 4a/4b 분할) | **MOIS 인허가** Step A~D lifecycle(bulk/incremental/closed/detail) + dedup-merge + `feature_merge_history` + dedup 운영 통계 + ADR-033 F4 + Place phone enrichment + coverage 80%(실측 94.12%) |
-| Sprint 5 | [SPRINT-5.md](./SPRINT-5.md) | 🟢 마무리 (잔여: `T-229-buildx` arm64 buildx 배포 검증 — 배포 시점) | MOIS-sibling (휴양림/수목원/박물관/표준데이터) + 정합성 Phase 2 (F5~F8 + Dagster 게이트) + ADR-045 Docker 독립/admin OpenAPI/독립 Dagster + 운영 직전 T-200~T-204 |
+| Sprint 5 | [SPRINT-5.md](./SPRINT-5.md) | ✅ **완료** (`T-229-buildx` arm64 실배포 검증은 추가 추적 폐기) | MOIS-sibling (휴양림/수목원/박물관/표준데이터) + 정합성 Phase 2 (F5~F8 + Dagster 게이트) + ADR-045 Docker 독립/admin OpenAPI/독립 Dagster + 운영 직전 T-200~T-204 |
 
 > **진척의 단일 정본은 `../resume.md`("다음 한 작업") + 백로그 `../tasks.md`다.**
 > 이 표/문서에는 자주 바뀌는 PR 번호를 박지 않는다(반복 drift 회피 —
@@ -18,9 +18,8 @@
 > Next.js 16 + React 19 + TanStack Query/Table/Virtual + MapLibre GL/VWorld
 > (`maplibre-vworld-react` 모델 내부 포팅, `maplibre-vworld-js` dependency 없음),
 > 운영 모델 ADR-045(Docker 독립 + 독립 DB/Dagster + PinVi OpenAPI, 구 모델 호환
-> shim 금지 ADR-046). Sprint 5의 본
-> 저장소 잔여는 `T-229-buildx`(arm64 multi-arch buildx 배포 검증, `GITHUB_TOKEN`
-> 필요)뿐이다 — `T-225`/`T-229` closure는 완료됐다(상세는 `../resume.md`/`../tasks.md`).
+> shim 금지 ADR-046). `T-225`/`T-229` closure는 완료됐고, arm64 실 registry·기동
+> 검증을 재개한 `T-VN-C02`는 2026-08-19 사용자 결정으로 다시 폐기했다.
 > PinVi 쪽 후속과 `T-101`/`T-103`은 외부 추적 또는 보류 항목으로 별도 관리한다.
 
 ## 9단계 구현 순서 (ADR-034)
