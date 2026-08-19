@@ -58,45 +58,12 @@ Alembic은 `>=1.19.1,<1.20`으로 올렸다. fresh `upgrade head → alembic che
 ORM CHECK를 PostgreSQL 임시 table에 설치해 `pg_get_constraintdef` 기준으로 live 식과
 비교하는 의미 gate를 추가했다. 로컬 게이트는 ruff, mypy 145 files, import-linter
 4 contracts와 전체 pytest **3,369 passed / 12 skipped**가 green이다.
-Map draft PR [#1016](https://github.com/digitie/kor-travel-map/pull/1016)의 검토 완료 코드 checkpoint
-`2c19e160fa810afe2a8ea2e6a03921eabc8e22bc`에는 exact create POST에만 raw token을 넣는 Admin UI BFF, missing/invalid raw의 no-fetch
-503, 201/replay response header 전달, caller-owned ID/상태/origin을 제거한 form과 generated types를
-추가했다. runtime은 API digest+flag/UI raw만 전달하고 launcher parity·credential 분리와 API
-entrypoint의 migration 전 fail-close를 고정했다. secret-store process env는 전용 `env -i` 배열에
-캡처한 직후 unset해 Alembic·Dagster·일반 child로 상속되지 않는다. 프록시의 configured origin과
-redirect 경계, Next dotenv·process alias, Docker/API/Dagster/build child의 raw/digest 경계까지
-fail-close한다. 이 exact commit의 Admin OpenAPI SHA-256은
-`483edc245971d4ef247bcd18a0aff83dc83506821c34163234b60abd9f6c0087`이다.
-
-PinVi paired draft PR [#458](https://github.com/digitie/pinvi/pull/458)은 direct `new_place` create를
-제거하고 queue 준비 전 503/pending fail-close를 고정했다(대상 테스트 127건, Ruff/mypy 통과).
 
 ### 다음 한 작업
 
 PR [#1019](https://github.com/digitie/kor-travel-map/pull/1019)은 CI 8/8 green 뒤
 merge `82fbe2f6`로 완료됐다. 다음 작업은 `T-VN-C05A` 산림청 등산로·둘레길 route
 구현이다.
-Map exact checkpoint를 기준으로 PinVi OpenAPI snapshot과 negative client inventory를 재벤더링하고 두
-draft PR의 CI를 닫는다. 계약 전문 리뷰는 P0~P3 0건, 보안 전문 리뷰는 P0~P2 0건으로 종료됐다. 실제
-`0225` T-VN-40C migration이 main에 착지하기 전에는 `0226` DB/ACL/backup/vNext tranche를 만들지 않는다.
-ADR-093 accepted 전환과 T-VN-M01 완료 이관은 그 migration 및 실제 PostgreSQL concurrency/restore
-검증 뒤에만 수행하며 route flag는 계속 `false`다.
-
-fresh DB는 historical exact role graph 때문에 기존 bootstrap→`0225` upgrade→M01 bootstrap→
-`0226_m01_manual_feature_create`의 두 migration phase가 필요하다. production digest 상시 필수 정책을
-유지하므로 raw/UI와 digest/API credential도 flag=false runtime 배포 전에 secret store에 사전 provision한다.
-현재 관련 Python 197건, frontend focused 48건, generated-type drift·type-check·lint, production Next
-build 32 route와 변경 범위 React Doctor가 통과했다. frontend 전체 unit은 354건 통과, 2건은
-`/mnt/f` NTFS chmod 표현 때문에만 실패했으며 해당 auth-session 파일은 변경하지 않았다. Admin
-OpenAPI profile drift와 baseline hash는 모두 green이다. PinVi draft의 이전 checkpoint는 127건과 필수
-CI가 green이었고, exact Map blob 재벤더링 뒤 150건·Ruff/format·strict mypy 222파일을 통과한
-`3bfcdffe`를 원격에 푸시했다.
-
-Map Python CI가 root validator의 `@next/env` 미설치로만 실패한 문제는
-`8b7989920396b720a8a9b736d1464e20cacf4bf6`에서 닫았다. root가 frontend Next와 같은 exact
-`@next/env@16.2.12`를 직접 소유하고 Python matrix는 root-only production dependency 하나만
-`--ignore-scripts`로 설치한다. fallback parser나 skip은 두지 않았다. 격리 설치·resolver와 관련 Python
-162건, package/lock/workflow 회귀 gate가 통과했으며 원격 matrix 재실행을 확인 중이다.
 
 ## 2026-08-19 — T-VN-C03 보조 dataset 제품·source 결정 완료
 
@@ -114,10 +81,6 @@ KHOA exact pin의 46개 ODMI catalog에는 공지 사건 API나 typed notice mod
 
 `T-VN-C05A`를 먼저 구현한다. 두 forest.go.kr ZIP의 live census로 geometry 유형·안정
 자연키·중복을 봉인한 뒤 route 변환, Dagster dataset operation, fixture와 통합 적재를 잇는다.
-
-fresh DB는 historical exact role graph 때문에 기존 bootstrap→`0225` upgrade→M01 bootstrap→
-`0226_m01_manual_feature_create`의 두 migration phase가 필요하다. production digest 상시 필수 정책을
-유지하므로 raw/UI와 digest/API credential도 flag=false runtime 배포 전에 secret store에 사전 provision한다.
 
 ## 2026-08-19 — tasks 전면 감사·H44 종결·C02/H18 폐기
 
@@ -139,6 +102,7 @@ safety notice는 source semantics, KHOA coastal notice는 upstream 부재 결정
 
 이 문서 전용 PR을 원격에 열고 CI가 모두 green인지 확인한 뒤 병합하지 않고
 사용자 지시를 기다린다. 이 PR에 H45 코드 적응이나 C03 dataset 구현을 섞지 않는다.
+
 ## 2026-08-19 — T-VN-M01 구현 진행: API/ORM foundation + PinVi fail-close
 
 M01을 PR #1012 merge `ac77a7d1` 위에서 시작했다. Map에는 생성 전용 이중 인증·기본 off flag,
