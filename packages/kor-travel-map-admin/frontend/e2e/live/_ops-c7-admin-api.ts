@@ -1537,23 +1537,47 @@ export async function previewKmaRequest(
   return result;
 }
 
-function assertOnlyKmaProviderObjects(value: unknown, context: string): void {
-  if (Array.isArray(value)) {
-    for (const item of value) assertOnlyKmaProviderObjects(item, context);
-    return;
-  }
-  const record = asRecord(value);
-  if (record === null) return;
-  if (
-    "provider" in record &&
-    (record.provider !== KMA_PROVIDER ||
-      ("dataset_key" in record && record.dataset_key !== KMA_DATASET_KEY))
-  ) {
-    throw new Error(`${context}에 KMA 외 provider/dataset이 포함되었습니다`);
-  }
-  for (const item of Object.values(record)) {
-    assertOnlyKmaProviderObjects(item, context);
-  }
+/** 실행 진단 payload가 이 run의 canonical identity만 담았는지 재귀 확인한다.
+ *
+ *  ADR-088 이후 `matched_scope`는 자연키를 **싣지 않는다** —
+ *  `api/feature_update_service._public_matched_scope`가
+ *  `{provider, dataset_key, providers, dataset_keys}`를 의도적으로 strip한다("legacy
+ *  natural identity projection을 유출하지 않는다"). 그래서 `"provider" in record`로
+ *  가드하던 앞 판은 **완전히 공허**해졌다 — "KMA 외 provider가 섞이지 않는다"는 보장이
+ *  조용히 사라져 있었다. 같은 보장을 정본 축(triple)으로 다시 세운다.
+ */
+function assertOnlyKmaCanonicalIdentity(value: unknown, context: string): void {
+  const identity = requireKmaDatasetIdentity();
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) {
+      for (const item of node) walk(item);
+      return;
+    }
+    const record = asRecord(node);
+    if (record === null) return;
+    if (
+      "provider_dataset_id" in record &&
+      record.provider_dataset_id !== identity.providerDatasetId
+    ) {
+      throw new Error(`${context}에 이 run 밖의 provider_dataset_id가 포함되었습니다`);
+    }
+    if (
+      "operation_key" in record &&
+      record.operation_key !== identity.operationKey
+    ) {
+      throw new Error(`${context}에 이 run 밖의 operation_key가 포함되었습니다`);
+    }
+    // 계약상 strip되지만, 되살아나면 그때도 KMA여야 한다.
+    if (
+      "provider" in record &&
+      (record.provider !== KMA_PROVIDER ||
+        ("dataset_key" in record && record.dataset_key !== KMA_DATASET_KEY))
+    ) {
+      throw new Error(`${context}에 KMA 외 provider/dataset이 포함되었습니다`);
+    }
+    for (const item of Object.values(record)) walk(item);
+  };
+  walk(value);
 }
 
 function assertExactKmaPreviewBody(
@@ -1601,24 +1625,24 @@ function assertExactKmaPreviewBody(
   ) {
     throw new Error("KMA preview matched_scope exact provider pair가 없습니다");
   }
-  const pair = asRecord(providerDatasets[0]);
+  const entry = asRecord(providerDatasets[0]);
+  // identity는 triple이다 — `provider`/`dataset_key`는 계약이 strip하므로 여기서
+  // 단언하면 항상 실패한다(그렇게 실패했다).
   if (
-    pair === null ||
-    pair.provider !== KMA_PROVIDER ||
-    pair.dataset_key !== KMA_DATASET_KEY ||
-    typeof pair.feature_count !== "number" ||
-    !Number.isSafeInteger(pair.feature_count) ||
-    pair.feature_count < 0 ||
-    ("sync_scope" in pair && pair.sync_scope !== expectedEffectiveSyncScope) ||
-    ("effective_sync_scope" in matchedScope &&
-      matchedScope.effective_sync_scope !== expectedEffectiveSyncScope)
+    entry === null ||
+    entry.provider_dataset_id !== identity.providerDatasetId ||
+    entry.operation_key !== identity.operationKey ||
+    entry.sync_scope !== expectedEffectiveSyncScope ||
+    typeof entry.feature_count !== "number" ||
+    !Number.isSafeInteger(entry.feature_count) ||
+    entry.feature_count < 0
   ) {
-    throw new Error("KMA preview matched_scope provider/effective scope identity 불일치");
+    throw new Error("KMA preview matched_scope canonical identity 불일치");
   }
   if (FORBIDDEN_PROVIDER_PATTERN.test(JSON.stringify(data))) {
     throw new Error("KMA preview response에 금지 provider가 포함되었습니다");
   }
-  assertOnlyKmaProviderObjects(data.matched_scope, "KMA preview matched_scope");
+  assertOnlyKmaCanonicalIdentity(data.matched_scope, "KMA preview matched_scope");
 }
 
 export async function assertExactKmaPreviewResponse(
@@ -1661,6 +1685,7 @@ export function assertKmaOnlyTerminalProviderScopes(
   ) {
     throw new Error("terminal update request KMA-only plan 계약 불일치");
   }
+  const terminalIdentity = requireKmaDatasetIdentity();
   const matched = asRecord(updateRequest.matched_scope);
   if (matched === null) {
     throw new Error("terminal matched_scope 계약 불일치");
@@ -1685,13 +1710,19 @@ export function assertKmaOnlyTerminalProviderScopes(
     }
     for (const value of raw) {
       const item = asRecord(value);
+      // 자연키는 계약이 strip한다 — 정본 축(triple)으로 본다.
       if (
-        item?.provider !== KMA_PROVIDER ||
-        item.dataset_key !== KMA_DATASET_KEY
+        item === null ||
+        item.provider_dataset_id !== terminalIdentity.providerDatasetId ||
+        item.operation_key !== terminalIdentity.operationKey ||
+        item.sync_scope !== updateRequest.scope.sync_scope
       ) {
         throw new Error(`terminal ${key} KMA-only 집합 불일치`);
       }
-      providerIdentities.add(`${item.provider}\u0000${item.dataset_key}`);
+      providerIdentities.add(
+        `${String(item.provider_dataset_id)}\u0000${String(item.operation_key)}` +
+          `\u0000${String(item.sync_scope)}`,
+      );
     }
   }
   const executed = matched.executed_provider_scopes;
@@ -1702,12 +1733,15 @@ export function assertKmaOnlyTerminalProviderScopes(
     (options.executed === "nonempty" &&
       (!Array.isArray(executed) || executed.length !== 1)) ||
     providerIdentities.size !== 1 ||
-    !providerIdentities.has(`${KMA_PROVIDER}\u0000${KMA_DATASET_KEY}`) ||
+    !providerIdentities.has(
+      `${String(terminalIdentity.providerDatasetId)}\u0000${terminalIdentity.operationKey}` +
+        `\u0000${updateRequest.scope.sync_scope}`,
+    ) ||
     FORBIDDEN_PROVIDER_PATTERN.test(JSON.stringify(matched))
   ) {
     throw new Error("terminal 전체 provider scope 집합이 exact KMA-only가 아닙니다");
   }
-  assertOnlyKmaProviderObjects(matched, "terminal matched_scope");
+  assertOnlyKmaCanonicalIdentity(matched, "terminal matched_scope");
 }
 
 export async function createKmaRequest(
