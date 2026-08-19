@@ -1370,11 +1370,10 @@ export async function fillKmaRequestDialogScope(
     .getByLabel("대상 데이터셋")
     .selectOption(String(identity.providerDatasetId));
   await dialog.getByLabel("sync_scope").selectOption(syncScope);
-  // 아래 `toHaveCount(0)`이 **렌더 전이라 0**인 채로 공허하게 통과하지 않도록,
-  // 선택이 반영된 양성 신호를 먼저 기다린다.
-  await expect(
-    dialog.getByText(`canonical membership: ${identity.providerDatasetId}`),
-  ).toBeVisible();
+  // 아래 `toHaveCount(0)`이 **렌더 전이라 0**인 채로 공허하게 통과하지 않도록, 선택이
+  // 반영된 양성 신호를 먼저 기다린다. 신호는 **scope에 의존**해야 한다 —
+  // `canonical membership: <id>`는 dataset 선택에만 의존해서 이 줄 직전에 이미 참이다.
+  await expect(dialog.getByLabel("sync_scope")).toHaveValue(syncScope);
   // 형제 operation이 갈리면 dialog가 operation_key select를 띄운다. C7은 단일
   // canonical operation을 요구하므로(resolveKmaDatasetIdentity) 뜨면 안 된다 —
   // 조용히 넘어가면 운영자가 고르지 않은 operation으로 write가 나간다.
@@ -1396,6 +1395,19 @@ export async function fillKmaRequestDialogScope(
  *
  *  `bootstrapC7SameOriginPage` 뒤에 부른다(`browserFetch`가 bootstrap을 요구한다).
  */
+export function currentKmaNowcastBaseDatetime(now = Date.now()): string {
+  // 초단기실황의 사용 가능 base는 KST 매시 40분에 바뀐다 — 그 전에는 직전 시각이 최신이다.
+  const kst = new Date(now + 9 * 60 * 60 * 1000);
+  if (kst.getUTCMinutes() < 40) {
+    kst.setUTCHours(kst.getUTCHours() - 1);
+  }
+  const pad = (value: number): string => String(value).padStart(2, "0");
+  return (
+    `${kst.getUTCFullYear()}${pad(kst.getUTCMonth() + 1)}${pad(kst.getUTCDate())}` +
+    `${pad(kst.getUTCHours())}00`
+  );
+}
+
 export async function assertC7ScopeIsClean(page: Page): Promise<void> {
   const listed = requireBody(
     await listActivePoiTargets(page, C7_EXTERNAL_SYSTEM),
@@ -1411,6 +1423,25 @@ export async function assertC7ScopeIsClean(page: Page): Promise<void> {
     [],
     "C7 인수 사전조건",
   );
+  // 3. **이월된 sync-state cursor** — 고정 scope가 되면서 새로 생긴 노출이다.
+  //    앞 run이 같은 base에 cursor를 남겼고 이 run의 첫 요청이 같은 membership을
+  //    만들면(좌표가 스펙에 고정이라 같아진다) 실행기가 `skipped=true`로 접는다
+  //    (`dagster/kma_weather.py`의 base+fingerprint 동치 분기). 그러면 "첫 요청은
+  //    실행된다"는 단언이 깨지는데, 원인이 이 run 안에 없어 진단이 어렵다.
+  //    cleanup은 target만 지우고 sync-state 행은 남긴다.
+  const detail = requireBody(
+    await getExactDatasetDetail(page, C7_KMA_SYNC_SCOPE),
+    200,
+  );
+  const carried = detail.data.scopes.find(
+    (item) => item.sync_scope === C7_KMA_SYNC_SCOPE,
+  );
+  const currentBase = currentKmaNowcastBaseDatetime();
+  expect(
+    carried?.cursor.base_datetime,
+    `C7 인수 scope의 cursor가 현재 base(${currentBase})에 이미 있다 — 다음 base ` +
+      "rollover(KST 매시 40분) 뒤에 다시 실행하라",
+  ).not.toBe(currentBase);
 }
 
 export function buildKmaRequest(
