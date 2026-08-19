@@ -16,7 +16,6 @@ import {
 } from "./_ops-c7-dagster-sensor";
 import {
   DATASET_DETAIL_FETCH_TIMEOUT_MS,
-  EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX,
   KMA_DATASET_KEY,
   KMA_PROVIDER,
   assertKmaDagsterWorkerJobDefinition,
@@ -90,10 +89,7 @@ async function previewEmptyRequestFromUi(
   // (active-write는 가벼운 페이지 + 60s one-shot이라 회피). 앱 fix로 dry-run은 강제 refetch를
   // skip(캐시로 사전검증)해 POST가 즉시 발사되므로, active-write처럼 fill 1회 + click 1회로
   // 단순화한다. 폼 입력은 부모 re-render로 리셋되지 않는다(controlled input, 무 key remount).
-  await fillKmaRequestDialogScope(
-    dialog,
-    syncScope.slice(EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX.length),
-  );
+  await fillKmaRequestDialogScope(dialog, syncScope);
   const responsePromise = page.waitForResponse(
     (response) =>
       response.request().method() === "POST" &&

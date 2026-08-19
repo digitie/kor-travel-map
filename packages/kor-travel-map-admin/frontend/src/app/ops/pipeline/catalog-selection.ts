@@ -19,39 +19,6 @@ export type RequestScope =
   | Exclude<FeatureUpdateScope, { type: "provider_dataset" }>
   | ProviderDatasetScope;
 
-/** canonical `sync_scope` 정규형(`kortravelmap.core.sync_scope`). */
-export const TARGET_GRIDS_SYNC_SCOPE = "target_grids";
-export const EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX = "external_system:";
-/** `kortravelmap.core.sync_scope.MAX_EXTERNAL_SYSTEM_NAME_LENGTH`와 같은 값. */
-export const MAX_EXTERNAL_SYSTEM_NAME_LENGTH = 112;
-
-/** 이 dataset에서 `syncScope`의 membership을 찾을 때 쓸 scope.
- *
- *  `external_system:<name>`은 두 가지 모양으로 존재한다.
- *
- *  1. **선언된 scope** — `provider_dataset_operation_scopes`에 그 행이 있으면
- *     `allowed_sync_scopes`에도 나오고 그리드에도 membership 행이 있다. 이때는
- *     그 축 그대로 본다(capability가 `effect="none"`이면 여기서 막힌다).
- *  2. **exact target** — 이름이 선언이 아니라 데이터인 경우다. 운영자가 특정
- *     external system의 cache target만 좁혀 갱신하는 것이고, 실행 경로는
- *     `target_grids` 집합을 좁힌 것이므로(`dagster/kma_weather.py`가 두 kind를
- *     같은 grid 경로로 처리한다) membership도 `target_grids` 행에서 읽는다.
- *
- *  이 사상을 한 곳에 두지 않으면 dialog는 통과시키고 제출 직전 가드가 막는 식으로
- *  갈린다.
- */
-export function membershipSyncScope(
-  syncScope: string,
-  datasetRows: readonly { sync_scope: string }[],
-): string {
-  if (datasetRows.some((row) => row.sync_scope === syncScope)) {
-    return syncScope;
-  }
-  return syncScope.startsWith(EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX)
-    ? TARGET_GRIDS_SYNC_SCOPE
-    : syncScope;
-}
-
 export function canonicalCatalogRows(
   response: PipelineDatasetsCatalogResponse | undefined,
 ): CanonicalCatalogRow[] {
@@ -116,12 +83,11 @@ export function validateCatalogSelection(
   if (datasetRows.length === 0) {
     return "현재 canonical catalog에 없는 데이터셋입니다.";
   }
-  const lookupScope = membershipSyncScope(scope.sync_scope, datasetRows);
   const scopeRows = datasetRows.filter(
-    (item) => item.sync_scope === lookupScope,
+    (item) => item.sync_scope === scope.sync_scope,
   );
   if (scopeRows.length === 0) {
-    return `이 데이터셋에 sync_scope "${lookupScope}" membership이 더 이상 없습니다. 갱신 범위를 다시 고르세요.`;
+    return `이 데이터셋에 sync_scope "${scope.sync_scope}" membership이 더 이상 없습니다. 갱신 범위를 다시 고르세요.`;
   }
   const operationKey = scope.operation_key.trim();
   if (!operationKey) {
@@ -131,7 +97,7 @@ export function validateCatalogSelection(
   }
   const row = scopeRows.find((item) => item.operation_key === operationKey);
   if (!row) {
-    return `이 데이터셋의 "${lookupScope}" scope에 operation_key "${operationKey}" membership이 더 이상 없습니다. operation을 다시 고르세요.`;
+    return `이 데이터셋의 "${scope.sync_scope}" scope에 operation_key "${operationKey}" membership이 더 이상 없습니다. operation을 다시 고르세요.`;
   }
   const capability = row.catalog?.scope_refresh;
   // ``effect="none"``은 "이 capability로는 어떤 sync scope도 제출할 수 없다"는
@@ -148,8 +114,8 @@ export function validateCatalogSelection(
     );
   }
   if (
-    capability?.default_sync_scope !== lookupScope &&
-    !capability?.allowed_sync_scopes.includes(lookupScope)
+    capability?.default_sync_scope !== scope.sync_scope &&
+    !capability?.allowed_sync_scopes.includes(scope.sync_scope)
   ) {
     return "현재 catalog capability가 허용하지 않는 sync_scope입니다.";
   }

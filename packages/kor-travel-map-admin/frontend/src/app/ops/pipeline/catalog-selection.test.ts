@@ -200,49 +200,6 @@ describe("validateCatalogSelection", () => {
     );
   });
 
-  it("선언되지 않은 exact target은 target_grids membership으로 통과한다", () => {
-    // 이름이 선언이 아니라 데이터인 경우다. 제출 직전 가드가 그 사실을 모르면
-    // dialog가 만든 canonical scope를 자기 화면이 막는다. 선언된 external scope는
-    // 위 두 단언이 그대로 지킨다 — 그 행이 있으면 그 축으로 본다.
-    const rows = [
-      row(8, "target_grids", TARGETED_CAPABILITY, { operation_key: "a_job" }),
-    ];
-
-    expect(
-      validateCatalogSelection(
-        {
-          type: "provider_dataset",
-          provider_dataset_id: 8,
-          sync_scope: "external_system:pinvi",
-          operation_key: "a_job",
-        },
-        rows,
-      ),
-    ).toBeNull();
-  });
-
-  it("exact target도 target_grids membership이 없으면 그 축을 사유로 막는다", () => {
-    const rows = [
-      row(8, "dataset_wide", DATASET_WIDE_CAPABILITY, {
-        operation_key: "a_job",
-      }),
-    ];
-
-    expect(
-      validateCatalogSelection(
-        {
-          type: "provider_dataset",
-          provider_dataset_id: 8,
-          sync_scope: "external_system:pinvi",
-          operation_key: "a_job",
-        },
-        rows,
-      ),
-    ).toBe(
-      '이 데이터셋에 sync_scope "target_grids" membership이 더 이상 없습니다. 갱신 범위를 다시 고르세요.',
-    );
-  });
-
   it("scope만 사라진 경우와 operation만 사라진 경우를 다른 사유로 구분한다", () => {
     const rows = [
       row(8, "target_grids", TARGETED_CAPABILITY, { operation_key: "a_job" }),

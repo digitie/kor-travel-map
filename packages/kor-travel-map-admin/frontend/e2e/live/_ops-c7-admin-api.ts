@@ -1332,25 +1332,33 @@ async function listAllActivePoiTargets(
   );
 }
 
-/** 갱신 요청 dialog에 canonical KMA triple + exact target scope를 넣는다.
+/** 갱신 요청 dialog에 canonical KMA membership triple을 넣는다.
  *
- *  ADR-088 이후 dialog는 provider/dataset_key 자유입력이 아니라 catalog가 투영한
- *  membership을 고르는 화면이다. `external_system:<name>`은 카탈로그가 열거할 수
- *  없는 축이라 select의 exact-target 선택지 + 이름 입력으로 조립한다 — 여기서
- *  쓰는 identity는 `resolveKmaDatasetIdentity`가 `/v1/ops/datasets`에서 푼 값이라
+ *  ADR-088 이후 이 dialog는 provider/dataset_key 자유입력이 아니라 catalog가 투영한
+ *  membership을 고르는 화면이고, 제출 가능한 `sync_scope` 집합의 정본은
+ *  `provider_dataset_operation_scopes`다(`ops_dataset_service.py::_scope_refresh_capability`).
+ *  그래서 여기서 고르는 값은 **선언된 scope**여야 한다 — 선언되지 않은 값은
+ *  `_ACTIVE_DATASET_MEMBERSHIPS_SQL`의 exact join에서 0행이 되어 preview/create가
+ *  422로 죽고, `feature_update_request_datasets`의 exact FK도 그 행을 요구한다.
+ *
+ *  identity는 `resolveKmaDatasetIdentity`가 `/v1/ops/datasets`에서 푼 값이라
  *  화면과 API가 같은 triple을 보는지도 함께 확인된다.
  */
 export async function fillKmaRequestDialogScope(
   dialog: Locator,
-  externalSystem: string,
+  syncScope: string,
 ): Promise<void> {
   const identity = requireKmaDatasetIdentity();
   await dialog.getByLabel("scope 유형").selectOption("provider_dataset");
   await dialog
     .getByLabel("대상 데이터셋")
     .selectOption(String(identity.providerDatasetId));
-  await dialog.getByLabel("sync_scope").selectOption("external_system");
-  await dialog.getByLabel("external_system").fill(externalSystem);
+  await dialog.getByLabel("sync_scope").selectOption(syncScope);
+  // 아래 `toHaveCount(0)`이 **렌더 전이라 0**인 채로 공허하게 통과하지 않도록,
+  // 선택이 반영된 양성 신호를 먼저 기다린다.
+  await expect(
+    dialog.getByText(`canonical membership: ${identity.providerDatasetId}`),
+  ).toBeVisible();
   // 형제 operation이 갈리면 dialog가 operation_key select를 띄운다. C7은 단일
   // canonical operation을 요구하므로(resolveKmaDatasetIdentity) 뜨면 안 된다 —
   // 조용히 넘어가면 운영자가 고르지 않은 operation으로 write가 나간다.

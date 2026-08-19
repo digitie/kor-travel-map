@@ -6,7 +6,6 @@ import {
 } from "@playwright/test";
 
 import {
-  EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX,
   KMA_DATASET_KEY,
   KMA_PROVIDER,
   assertKmaDagsterWorkerJobDefinition,
@@ -63,10 +62,7 @@ async function createCapRequestFromUi(
     name: "갱신 요청 생성",
     exact: true,
   });
-  await fillKmaRequestDialogScope(
-    dialog,
-    syncScope.slice(EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX.length),
-  );
+  await fillKmaRequestDialogScope(dialog, syncScope);
   const previewResponsePromise = page.waitForResponse((response) => {
     return (
       response.request().method() === "POST" &&

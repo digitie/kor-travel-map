@@ -3690,61 +3690,6 @@ test.describe("/ops/pipeline", () => {
     expect(counters.requestBodies).toHaveLength(0);
   });
 
-  test("요청 dialog — exact target scope는 external_system 이름을 조립해 제출한다", async ({
-    page,
-  }) => {
-    // canonical sync_scope 정규형은 셋인데(`dataset_wide`/`target_grids`/
-    // `external_system:<name>`) 마지막 축은 카탈로그가 열거할 수 없다. ADR-088
-    // 재작성이 select만 남기면서 운영 화면이 그 축을 잃었고, C7 KMA live가
-    // "dialog에 sync_scope 자유입력이 없다"로 timeout해서야 드러났다.
-    const counters = await installPipelineMocks(page);
-    await page.goto("/ops/pipeline");
-    await page.getByRole("button", { name: "갱신 요청 생성" }).click();
-    const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
-    await dialog.getByLabel("대상 데이터셋").selectOption("101");
-
-    // 이름을 적기 전에는 sentinel이 그대로 나가면 안 된다 — fail-closed.
-    await dialog.getByLabel("sync_scope").selectOption("external_system");
-    await expect(dialog.getByLabel("external_system")).toBeVisible();
-    await dialog.getByRole("button", { name: "dry-run 실행" }).click();
-    await expect(dialog.getByText("external_system 이름을 입력하세요.")).toBeVisible();
-    expect(counters.previewBodies).toHaveLength(0);
-
-    await dialog.getByLabel("external_system").fill("pinvi");
-    await dialog.getByRole("button", { name: "dry-run 실행" }).click();
-    await expect(dialog.getByTestId("request-preview-result")).toBeVisible();
-    expect(counters.previewBodies.at(0)).toMatchObject({
-      scope: {
-        type: "provider_dataset",
-        provider_dataset_id: 101,
-        sync_scope: "external_system:pinvi",
-      },
-    });
-
-    // 선언된 scope로 되돌리면 이름 입력도 함께 사라진다.
-    await dialog.getByLabel("sync_scope").selectOption("target_grids");
-    await expect(dialog.getByLabel("external_system")).toHaveCount(0);
-  });
-
-  test("요청 dialog — exact target 선택지는 target_grids dataset에만 나온다", async ({
-    page,
-  }) => {
-    await installPipelineMocks(page);
-    await page.goto("/ops/pipeline");
-    await page.getByRole("button", { name: "갱신 요청 생성" }).click();
-    const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
-
-    // dataset_wide 전용 dataset은 좁힐 cache target 집합 자체가 없다.
-    await dialog.getByLabel("대상 데이터셋").selectOption("102");
-    await expect(dialog.getByLabel("sync_scope")).toBeDisabled();
-    await expect(
-      dialog.getByLabel("sync_scope").getByRole("option"),
-    ).toHaveText(["dataset_wide"]);
-
-    await dialog.getByLabel("대상 데이터셋").selectOption("101");
-    await expect(dialog.getByLabel("sync_scope")).toBeEnabled();
-  });
-
   test("요청 dialog — 입력 변경 즉시 이전 dry-run 결과를 무효화", async ({
     page,
   }) => {

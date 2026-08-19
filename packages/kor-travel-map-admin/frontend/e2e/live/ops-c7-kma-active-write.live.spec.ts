@@ -17,7 +17,6 @@ import {
   assertExactOwnedTargetsAtServer,
   assertKmaOnlyTerminalProviderScopes,
   bootstrapC7SameOriginPage,
-  EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX,
   buildKmaRequest,
   fillKmaRequestDialogScope,
   buildPoiTargetBody,
@@ -200,10 +199,7 @@ async function openAndFillKmaRequestDialog(
   await page.getByRole("button", { name: "갱신 요청 생성" }).click();
   const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
   await expect(dialog).toBeVisible();
-  await fillKmaRequestDialogScope(
-    dialog,
-    syncScope.slice(EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX.length),
-  );
+  await fillKmaRequestDialogScope(dialog, syncScope);
 
   const previewResponse = page.waitForResponse(
     (response) => {
