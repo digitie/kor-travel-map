@@ -61,11 +61,13 @@ from kortravelmap.api.db import get_session
 from kortravelmap.api.ops_dataset_service import (
     _catalog_info,
     _catalog_state_memberships,
+    _scope_refresh_capability,
 )
 from kortravelmap.api.provider_catalog import (
     ActiveOperationHandlerDriftError,
     ProviderDatasetCatalogEntry,
     assert_active_operation_handler_exact_set,
+    find_provider_dataset_catalog_entry,
     list_active_refresh_operation_bindings,
     list_provider_dataset_catalog,
 )
@@ -781,6 +783,12 @@ _NON_DAGSTER_REFRESH_OPERATION_KEYS = frozenset(
 )
 
 
+#: `alembic/versions/0224_c7_external_system_scope.py`와 같은 값이어야 한다.
+_C7_PROVIDER = "python-kma-api"
+_C7_DATASET_KEY = "kma_ultra_short_nowcast"
+_C7_SYNC_SCOPE = "external_system:c7-e2e"
+
+
 async def test_seed_active_refresh_operations_match_dagster_handlers_exactly(
     seed_session: AsyncSession,
 ) -> None:
@@ -794,6 +802,39 @@ async def test_seed_active_refresh_operations_match_dagster_handlers_exactly(
     )
 
     assert verified >= _NON_DAGSTER_REFRESH_OPERATION_KEYS
+
+
+async def test_seed_declares_the_c7_acceptance_external_system_scope(
+    seed_session: AsyncSession,
+) -> None:
+    """C7 인수 scope 선언이 시드+migration 결과에 실제로 존재한다.
+
+    ADR-088 이후 제출 가능한 ``sync_scope``의 정본은 이 선언이다 —
+    ``infra/feature_update_repo._ACTIVE_DATASET_MEMBERSHIPS_SQL``이 exact join으로
+    요구하고 ``feature_update_request_datasets``/``import_job_datasets``/
+    ``provider_sync_state``/``offline_uploads``의 exact FK가 구조로 강제한다.
+
+    이 행이 조용히 사라지면 C7 prod live 인수(``ops-c7-kma-*-write``)가 preview
+    422로 죽는데, 그 실패는 **prod 실행에서만** 드러난다(실제로 그렇게 드러났다).
+    선언을 여기서 잠가 CI가 먼저 잡게 한다.
+    """
+
+    entry = await find_provider_dataset_catalog_entry(
+        seed_session,
+        provider=_C7_PROVIDER,
+        dataset_key=_C7_DATASET_KEY,
+    )
+    assert entry is not None, f"{_C7_PROVIDER}/{_C7_DATASET_KEY} 시드가 없다"
+    assert _C7_SYNC_SCOPE in entry.refresh_scopes, (
+        f"C7 인수 scope 선언이 없다 — 0224_c7_external_system_scope 확인 "
+        f"(선언된 scope: {entry.refresh_scopes})"
+    )
+    # capability(=API의 allowed_sync_scopes)까지 나와야 화면·서버가 같은 집합을 본다.
+    capability = _scope_refresh_capability(entry)
+    assert _C7_SYNC_SCOPE in capability.allowed_sync_scopes
+    # 선언이 늘어도 기본 scope는 여전히 target_grids다 — exact target은 좁힌 것이지
+    # 기본이 아니다.
+    assert entry.default_refresh_scope == "target_grids"
 
 
 async def test_non_dagster_operation_allowlist_is_exactly_the_seed_difference(
