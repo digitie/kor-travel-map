@@ -411,6 +411,9 @@ export type AdminFeatureFieldOverrideResponse =
   FeatureSchemas["AdminFeatureFieldOverrideResponse"];
 export type AdminFeatureCreateRequest =
   FeatureSchemas["AdminFeatureCreateRequest"];
+export type AdminFeatureCreateKind = AdminFeatureCreateRequest["kind"];
+export type AdminManualFeatureCreateResponse =
+  FeatureSchemas["AdminManualFeatureCreateResponse"];
 export type AdminFeaturePatchRequest =
   FeatureSchemas["AdminFeaturePatchRequest"];
 export type AdminFeatureDeleteRequest =
@@ -580,17 +583,21 @@ function fetchAdminFeatureStateTransitions(
   );
 }
 
-function createAdminFeature(
+export function createAdminFeature(
   body: AdminFeatureCreateRequest,
-): Promise<AdminFeatureFieldOverrideResponse> {
-  const operation = "admin.feature.create";
+): Promise<AdminManualFeatureCreateResponse> {
+  const operation = "admin.feature.create.manual-v1";
   return withDomainIdempotencySubmission(
     domainCreateCommandSlot(operation),
     body,
     (submission, idempotencyKey) =>
-      postJson<AdminFeatureFieldOverrideResponse>("/v1/admin/features", submission, {
-        headers: { "Idempotency-Key": idempotencyKey },
-      }),
+      postJson<AdminManualFeatureCreateResponse>(
+        "/v1/admin/features",
+        submission,
+        {
+          headers: { "Idempotency-Key": idempotencyKey },
+        },
+      ),
     { onRelease: () => clearDomainCreateCommandSlot(operation) },
   );
 }
@@ -736,7 +743,7 @@ function invalidateAdminFeatureQueries(
 export function useCreateAdminFeatureMutation() {
   const queryClient = useQueryClient();
   return useMutation<
-    AdminFeatureFieldOverrideResponse,
+    AdminManualFeatureCreateResponse,
     Error,
     AdminFeatureCreateRequest
   >({

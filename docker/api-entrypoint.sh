@@ -21,6 +21,13 @@ for name in $removed_provider_keys; do
   fi
 done
 
+# T-VN-M01 — 생성 전용 원문 token은 Next.js server runtime만 소유한다. set-but-empty도
+# 배선 오류이므로 migration/settings import보다 먼저 API container 유입을 거부한다.
+if [ "${KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN+x}" = "x" ]; then
+  echo "raw manual Feature create token must not enter API container" >&2
+  exit 1
+fi
+
 if [ "${KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET+x}" = "x" ]; then
   echo "legacy API-specific admin proxy secret must not enter API container" >&2
   exit 1
@@ -226,6 +233,59 @@ if [ -n "$cursor_signing_secret" ]; then
     echo "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET must be distinct from the public API key" >&2
     exit 1
   fi
+fi
+
+# T-VN-M01 — production은 kill-switch=false인 사전 provision 단계에서도 digest를
+# 요구한다. local-dev도 route를 켜거나 digest를 넣은 순간 같은 형태 검증을 받는다.
+manual_feature_create_flag="${KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED:-false}"
+case "$manual_feature_create_flag" in
+  true | false) ;;
+  *)
+    echo "KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED must be exactly true or false" >&2
+    exit 1
+    ;;
+esac
+manual_feature_create_digest="${KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256:-}"
+manual_feature_create_digest_required=false
+if [ "$api_profile" = "production" ] || [ "$manual_feature_create_flag" = "true" ]; then
+  manual_feature_create_digest_required=true
+fi
+if [ "$manual_feature_create_digest_required" = "true" ] \
+  && [ -z "$manual_feature_create_digest" ]; then
+  echo "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256 must be configured" >&2
+  exit 1
+fi
+if [ -n "$manual_feature_create_digest" ]; then
+  case "$manual_feature_create_digest" in
+    *[!0-9a-f]*)
+      echo "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256 must be lowercase SHA-256 hex" >&2
+      exit 1
+      ;;
+  esac
+  if [ "${#manual_feature_create_digest}" -ne 64 ]; then
+    echo "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256 must be lowercase SHA-256 hex" >&2
+    exit 1
+  fi
+fi
+
+# Shell은 raw 미유입과 단순 형태를 먼저 닫고, API settings 정본이 digest와 기존
+# credential/curation/cache-target 분리를 재검증한다. 예외 본문은 secret input을
+# 포함할 수 있어 밖으로 출력하지 않는다. 이 preflight는 alembic보다 반드시 앞선다.
+if ! python - <<'PY'
+from __future__ import annotations
+
+import sys
+
+from kortravelmap.api.settings import ApiSettings
+
+try:
+    ApiSettings()
+except (TypeError, ValueError):
+    print("API runtime settings credential preflight failed", file=sys.stderr)
+    raise SystemExit(1)
+PY
+then
+  exit 1
 fi
 
 # schema 변경이 **컨테이너 기동의 부수효과**로 일어나는 것에 대한 방어.

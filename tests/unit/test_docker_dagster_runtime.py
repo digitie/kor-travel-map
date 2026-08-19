@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -16,6 +17,10 @@ import yaml
 ROOT = Path(__file__).resolve().parents[2]
 _CURSOR_SIGNING_SECRET = "cursor-signing-secret-000000000000000000000000"
 _OPS_FIXTURE_TOKEN = "fixture-token-00000000000000000000000000000"
+_MANUAL_FEATURE_CREATE_TOKEN = "manual-feature-create-token-00000000000000000000"
+_MANUAL_FEATURE_CREATE_DIGEST = hashlib.sha256(
+    _MANUAL_FEATURE_CREATE_TOKEN.encode("utf-8")
+).hexdigest()
 
 
 def _compose() -> dict[str, Any]:
@@ -275,6 +280,8 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN",
         "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN",
         "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED",
+        "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256",
+        "KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED",
         # T-VN-40C canonical curation은 PinVi 전용 token digest만 Map API에 둔다.
         # 원문 token은 어떤 Map runtime에도 전달하지 않는다.
         "KOR_TRAVEL_MAP_API_PINVI_CURATION_SNAPSHOT_TOKEN_SHA256",
@@ -342,6 +349,8 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN",
         "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED",
         "KOR_TRAVEL_MAP_API_SERVICE_TOKEN",
+        "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256",
+        "KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED",
         "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET",
         "KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_ENABLED",
         "KOR_TRAVEL_MAP_API_METRICS_TOKEN",
@@ -409,6 +418,7 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
     assert {
         "KOR_TRAVEL_MAP_API_INTERNAL_URL",
         "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET",
+        "KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN",
         "KOR_TRAVEL_MAP_UI_ADMIN_USERNAME",
         "KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH",
         "KOR_TRAVEL_MAP_UI_SESSION_SECRET",
@@ -431,6 +441,68 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
     ):
         assert removed_key in entrypoint
     assert "removed provider runtime key must not enter API container" in entrypoint
+
+
+@pytest.mark.unit
+def test_tvn_m01_compose_keeps_manual_create_credentials_in_exact_runtimes() -> None:
+    services = _compose()["services"]
+    raw_name = "KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN"
+    digest_name = "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256"
+    flag_name = "KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED"
+    credential_names = (raw_name, digest_name, flag_name)
+
+    api_environment = services["api"]["environment"]
+    frontend_environment = services["frontend"]["environment"]
+    assert digest_name in api_environment
+    assert "is required" in api_environment[digest_name]
+    assert api_environment[flag_name] == f"${{{flag_name}:-false}}"
+    assert raw_name not in api_environment
+    assert raw_name in frontend_environment
+    assert "is required" in frontend_environment[raw_name]
+    assert digest_name not in frontend_environment
+    assert flag_name not in frontend_environment
+
+    for service_name, service in services.items():
+        if service_name in {"api", "frontend"}:
+            continue
+        environment = service.get("environment", {})
+        assert raw_name not in environment, service_name
+        assert digest_name not in environment, service_name
+        assert flag_name not in environment, service_name
+
+    root_keys = _assigned_env_keys(_script(".env.example"), prefix="KOR_TRAVEL_MAP_")
+    assert {raw_name, digest_name, flag_name}.isdisjoint(root_keys)
+    api_keys = _assigned_env_keys(
+        _script("packages/kor-travel-map-api/.env.example"),
+        prefix="KOR_TRAVEL_MAP_",
+    )
+    frontend_keys = _assigned_env_keys(
+        _script("packages/kor-travel-map-admin/frontend/.env.example"),
+        prefix="KOR_TRAVEL_MAP_",
+    )
+    assert {digest_name, flag_name} <= api_keys
+    assert raw_name not in api_keys
+    assert raw_name in frontend_keys
+    assert digest_name not in frontend_keys
+    assert flag_name not in frontend_keys
+
+    for dockerfile in (
+        "docker/api.Dockerfile",
+        "docker/frontend.Dockerfile",
+        "docker/dagster.Dockerfile",
+    ):
+        text = _script(dockerfile)
+        for credential_name in credential_names:
+            assert credential_name not in text, dockerfile
+    for build_script in (
+        "scripts/docker-build.sh",
+        "scripts/docker-buildx.sh",
+        "scripts/frontend-build-inputs.mjs",
+        "scripts/frontend-source-digest.mjs",
+    ):
+        text = _script(build_script)
+        for credential_name in credential_names:
+            assert credential_name not in text, build_script
 
 
 @pytest.mark.unit
@@ -789,6 +861,7 @@ def test_local_admin_stack_accepts_production_cursor_signing_secret(
 ) -> None:
     root_env = tmp_path / "root.env"
     api_env = tmp_path / "api.env"
+    frontend_env = tmp_path / "frontend.env"
     root_env.write_text(
         "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=shared-secret-at-least-32-characters\n",
         encoding="utf-8",
@@ -797,7 +870,14 @@ def test_local_admin_stack_accepts_production_cursor_signing_secret(
         "KOR_TRAVEL_MAP_API_PROFILE=production\n"
         "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED=true\n"
         "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED=false\n"
+        "KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED=false\n"
+        "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256="
+        f"{_MANUAL_FEATURE_CREATE_DIGEST}\n"
         f"KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET={_CURSOR_SIGNING_SECRET}\n",
+        encoding="utf-8",
+    )
+    frontend_env.write_text(
+        f"KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN={_MANUAL_FEATURE_CREATE_TOKEN}\n",
         encoding="utf-8",
     )
 
@@ -809,6 +889,7 @@ def test_local_admin_stack_accepts_production_cursor_signing_secret(
             "HOME": str(tmp_path),
             "KOR_TRAVEL_MAP_ENV_FILE": str(root_env),
             "KOR_TRAVEL_MAP_API_ENV_FILE": str(api_env),
+            "KOR_TRAVEL_MAP_FRONTEND_ENV_FILE": str(frontend_env),
             "KOR_TRAVEL_MAP_ADMIN_STACK_VALIDATE_ONLY": "1",
         },
         check=False,
@@ -817,6 +898,232 @@ def test_local_admin_stack_accepts_production_cursor_signing_secret(
     )
 
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.unit
+def test_manual_feature_create_launcher_validates_scoped_credential_parity(
+    tmp_path: Path,
+) -> None:
+    root_env = tmp_path / "root.env"
+    api_env = tmp_path / "api.env"
+    frontend_env = tmp_path / "frontend.env"
+    root_env.write_text(
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=shared-secret-at-least-32-characters\n",
+        encoding="utf-8",
+    )
+    api_env.write_text(
+        "KOR_TRAVEL_MAP_API_PROFILE=production\n"
+        "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED=false\n"
+        "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED=false\n"
+        "KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED=false\n"
+        "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256="
+        f"{_MANUAL_FEATURE_CREATE_DIGEST}\n",
+        encoding="utf-8",
+    )
+    frontend_env.write_text(
+        f"KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN={_MANUAL_FEATURE_CREATE_TOKEN}\n",
+        encoding="utf-8",
+    )
+    process_env = {
+        "PATH": os.environ["PATH"],
+        "HOME": str(tmp_path),
+        "KOR_TRAVEL_MAP_ENV_FILE": str(root_env),
+        "KOR_TRAVEL_MAP_API_ENV_FILE": str(api_env),
+        "KOR_TRAVEL_MAP_FRONTEND_ENV_FILE": str(frontend_env),
+        "KOR_TRAVEL_MAP_ADMIN_STACK_VALIDATE_ONLY": "1",
+    }
+
+    valid = subprocess.run(
+        ["bash", "scripts/run-admin-stack.sh"],
+        cwd=ROOT,
+        env=process_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert valid.returncode == 0, valid.stderr
+    assert valid.stdout.strip() == "admin stack environment is valid"
+
+    api_env.write_text(
+        "KOR_TRAVEL_MAP_API_PROFILE=production\n"
+        "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED=false\n"
+        "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED=false\n"
+        "KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED=false\n"
+        f"KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256={'0' * 64}\n",
+        encoding="utf-8",
+    )
+    mismatch = subprocess.run(
+        ["bash", "scripts/run-admin-stack.sh"],
+        cwd=ROOT,
+        env=process_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert mismatch.returncode != 0
+    assert "raw token SHA-256 must match the API digest" in mismatch.stderr
+    combined_output = mismatch.stdout + mismatch.stderr
+    assert _MANUAL_FEATURE_CREATE_TOKEN not in combined_output
+    assert _MANUAL_FEATURE_CREATE_DIGEST not in combined_output
+
+
+@pytest.mark.unit
+def test_admin_launcher_unsets_secret_store_manual_create_env_before_children(
+    tmp_path: Path,
+) -> None:
+    root_env = tmp_path / "root.env"
+    api_env = tmp_path / "api.env"
+    frontend_env = tmp_path / "frontend.env"
+    root_env.write_text(
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=shared-secret-at-least-32-characters\n",
+        encoding="utf-8",
+    )
+    api_env.write_text(
+        "KOR_TRAVEL_MAP_API_PROFILE=production\n"
+        "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED=false\n"
+        "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED=false\n",
+        encoding="utf-8",
+    )
+    frontend_env.write_text("", encoding="utf-8")
+    result = subprocess.run(
+        ["bash", "scripts/run-admin-stack.sh"],
+        cwd=ROOT,
+        env={
+            "PATH": os.environ["PATH"],
+            "HOME": str(tmp_path),
+            "KOR_TRAVEL_MAP_ENV_FILE": str(root_env),
+            "KOR_TRAVEL_MAP_API_ENV_FILE": str(api_env),
+            "KOR_TRAVEL_MAP_FRONTEND_ENV_FILE": str(frontend_env),
+            "KOR_TRAVEL_MAP_ADMIN_STACK_VALIDATE_ONLY": "1",
+            "KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN": (
+                _MANUAL_FEATURE_CREATE_TOKEN
+            ),
+            "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256": (
+                _MANUAL_FEATURE_CREATE_DIGEST
+            ),
+            "KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED": "false",
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "admin stack environment is valid"
+    combined_output = result.stdout + result.stderr
+    assert _MANUAL_FEATURE_CREATE_TOKEN not in combined_output
+    assert _MANUAL_FEATURE_CREATE_DIGEST not in combined_output
+
+    launcher = _script("scripts/run-admin-stack.sh")
+    raw_capture = launcher.index(
+        'FRONTEND_PROCESS_ENV+=("$name=${!name}")'
+    )
+    digest_capture = launcher.index(
+        'API_SCOPED_ENV+=("$manual_api_key=${!manual_api_key}")'
+    )
+    unset_boundary = launcher.index(
+        "unset \\\n  KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN"
+    )
+    validate_only = launcher.index("KOR_TRAVEL_MAP_ADMIN_STACK_VALIDATE_ONLY")
+    preflight_ports = launcher.index('"$ROOT_DIR/scripts/preflight-ports.sh"')
+    migration = launcher.index('echo "alembic upgrade head"')
+    assert max(raw_capture, digest_capture) < unset_boundary
+    assert unset_boundary < min(validate_only, preflight_ports, migration)
+
+
+@pytest.mark.unit
+def test_manual_feature_create_launcher_rejects_root_env_and_ambiguous_flag(
+    tmp_path: Path,
+) -> None:
+    root_env = tmp_path / "root.env"
+    api_env = tmp_path / "api.env"
+    frontend_env = tmp_path / "frontend.env"
+    root_env.write_text(
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=shared-secret-at-least-32-characters\n"
+        f"KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN={_MANUAL_FEATURE_CREATE_TOKEN}\n",
+        encoding="utf-8",
+    )
+    api_env.write_text("", encoding="utf-8")
+    frontend_env.write_text("", encoding="utf-8")
+    process_env = {
+        "PATH": os.environ["PATH"],
+        "HOME": str(tmp_path),
+        "KOR_TRAVEL_MAP_ENV_FILE": str(root_env),
+        "KOR_TRAVEL_MAP_API_ENV_FILE": str(api_env),
+        "KOR_TRAVEL_MAP_FRONTEND_ENV_FILE": str(frontend_env),
+        "KOR_TRAVEL_MAP_ADMIN_STACK_VALIDATE_ONLY": "1",
+    }
+    root_leak = subprocess.run(
+        ["bash", "scripts/run-admin-stack.sh"],
+        cwd=ROOT,
+        env=process_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert root_leak.returncode != 0
+    assert "must not be configured in root env because Dagster reads that file" in (
+        root_leak.stderr
+    )
+    assert _MANUAL_FEATURE_CREATE_TOKEN not in root_leak.stderr
+
+    root_env.write_text(
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=shared-secret-at-least-32-characters\n",
+        encoding="utf-8",
+    )
+    api_env.write_text(
+        "KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED=FALSE\n",
+        encoding="utf-8",
+    )
+    ambiguous_flag = subprocess.run(
+        ["bash", "scripts/run-admin-stack.sh"],
+        cwd=ROOT,
+        env=process_env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert ambiguous_flag.returncode != 0
+    assert "must be exactly true or false" in ambiguous_flag.stderr
+
+
+@pytest.mark.unit
+def test_docker_up_rejects_manual_create_mismatch_before_build(tmp_path: Path) -> None:
+    root_env = tmp_path / "root.env"
+    api_env = tmp_path / "api.env"
+    frontend_env = tmp_path / "frontend.env"
+    root_env.write_text(
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=shared-secret-at-least-32-characters\n",
+        encoding="utf-8",
+    )
+    api_env.write_text(
+        "KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED=false\n"
+        f"KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256={'0' * 64}\n",
+        encoding="utf-8",
+    )
+    frontend_env.write_text(
+        f"KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN={_MANUAL_FEATURE_CREATE_TOKEN}\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["bash", "scripts/docker-up.sh"],
+        cwd=ROOT,
+        env={
+            "PATH": os.environ["PATH"],
+            "HOME": str(tmp_path),
+            "KOR_TRAVEL_MAP_ENV_FILE": str(root_env),
+            "KOR_TRAVEL_MAP_API_ENV_FILE": str(api_env),
+            "KOR_TRAVEL_MAP_FRONTEND_ENV_FILE": str(frontend_env),
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "raw token SHA-256 must match the API digest" in result.stderr
+    assert "docker compose" not in result.stdout
+    combined_output = result.stdout + result.stderr
+    assert _MANUAL_FEATURE_CREATE_TOKEN not in combined_output
+    assert _MANUAL_FEATURE_CREATE_DIGEST not in combined_output
 
 
 @pytest.mark.unit
@@ -928,6 +1235,68 @@ def test_local_admin_stack_rejects_invalid_ops_principal_pair(
 
     assert result.returncode != 0
     assert expected_error in result.stderr
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("raw_value", ["", _MANUAL_FEATURE_CREATE_TOKEN])
+def test_api_container_rejects_manual_create_raw_token_before_migration(
+    raw_value: str,
+) -> None:
+    result = subprocess.run(
+        ["sh", "docker/api-entrypoint.sh"],
+        cwd=ROOT,
+        env={
+            "PATH": os.environ["PATH"],
+            "KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN": raw_value,
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert "raw manual Feature create token must not enter API container" in (
+        result.stderr
+    )
+    assert raw_value not in result.stderr or raw_value == ""
+    assert "alembic" not in result.stderr
+
+
+@pytest.mark.unit
+def test_api_container_requires_manual_create_digest_with_false_production_flag() -> None:
+    result = subprocess.run(
+        ["sh", "docker/api-entrypoint.sh"],
+        cwd=ROOT,
+        env={
+            "PATH": os.environ["PATH"],
+            "KOR_TRAVEL_MAP_API_PROFILE": "production",
+            "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": (
+                "shared-secret-at-least-32-characters"
+            ),
+            "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED": "false",
+            "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED": "false",
+            "KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED": "false",
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0
+    assert (
+        "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256 must be configured"
+        in result.stderr
+    )
+    assert "alembic" not in result.stderr
+
+
+@pytest.mark.unit
+def test_api_entrypoint_settings_credential_preflight_precedes_migration() -> None:
+    entrypoint = _script("docker/api-entrypoint.sh")
+    raw_rejection = entrypoint.index(
+        "raw manual Feature create token must not enter API container"
+    )
+    settings_preflight = entrypoint.index("API runtime settings credential preflight failed")
+    migration = entrypoint.index("alembic upgrade head")
+    assert raw_rejection < settings_preflight < migration
 
 
 @pytest.mark.unit
@@ -2142,6 +2511,10 @@ def test_external_overlays_keep_candidate_storage_migration_ordering(
         "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET": "resolver-dummy",
         "KOR_TRAVEL_MAP_API_METRICS_TOKEN": "resolver-dummy",
         "KOR_TRAVEL_MAP_API_SERVICE_TOKEN": "resolver-dummy",
+        "KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN": _MANUAL_FEATURE_CREATE_TOKEN,
+        "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256": (
+            _MANUAL_FEATURE_CREATE_DIGEST
+        ),
         "KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH": "resolver-dummy",
         "KOR_TRAVEL_MAP_UI_SESSION_SECRET": "resolver-dummy",
         "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": "postgresql://migrator@example.invalid/ktm",

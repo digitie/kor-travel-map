@@ -10,7 +10,7 @@ import { bffApiPath } from "./bff-api-path";
  * `e2e/features-new.spec.ts`는 라이브 smoke 렌더 + 동기 클라이언트 검증만 덮는다.
  * 본 spec은 백엔드/지오코더 호출이 필요한 **결정적 mutation·조회 경로**를 route mock으로
  * 분리한다:
- *   - POST /v1/admin/features 성공 → 변경 요청 생성 알림 + 생성 요청 섹션
+ *   - POST /v1/admin/features 성공 → 수동 Feature 생성 알림 + 생성 Feature 링크
  *   - GET /v1/features/nearby 자동 조회(유효 좌표) → 중복 후보 렌더 / 빈 응답 / 재조회
  *   - POST /v1/admin/features 422·409 → 'Feature 작성 실패' 알림
  *   - POST :12501/v2/geocode, /v2/reverse → 후보 적용으로 좌표·주소 채움 / 실패 알림
@@ -26,10 +26,10 @@ import { bffApiPath } from "./bff-api-path";
  * (updateCoord가 쓰는 동일 state 경로). 검증은 폼/알림 상태 중심.
  */
 
-type AdminFeatureFieldOverrideResponse =
-  components["schemas"]["AdminFeatureFieldOverrideResponse"];
 type AdminFeatureCreateRequest =
   components["schemas"]["AdminFeatureCreateRequest"];
+type AdminManualFeatureCreateResponse =
+  components["schemas"]["AdminManualFeatureCreateResponse"];
 type CategoriesResponse = components["schemas"]["CategoriesResponse"];
 type FeaturesNearbyResponse = components["schemas"]["FeaturesNearbyResponse"];
 type NearbyFeatureSummary = components["schemas"]["NearbyFeatureSummary"];
@@ -45,12 +45,13 @@ async function fulfillJson(route: Route, body: unknown, status = 200) {
 }
 
 function makeCreateResponse(
-  featureId = "e2e-created-feature-001",
-): AdminFeatureFieldOverrideResponse {
+  featureId = "0198d9f1-7a31-7e52-8ea8-cb2548d3a891",
+): AdminManualFeatureCreateResponse {
   return {
     data: {
-      applied_field_count: 0,
+      applied_field_count: 1,
       command_id: 1,
+      creation_origin: "manual_admin",
       feature_id: featureId,
       row_revision: 1,
     },
@@ -209,10 +210,8 @@ test.describe("/admin/features/new (mocked routes)", () => {
   }) => {
     await mockNearbyRoute(page, () => makeNearbyResponse([]));
     const create = await mockCreateRoute(page, async (route, body) => {
-      await fulfillJson(
-        route,
-        makeCreateResponse(body.feature_id ?? "e2e-created-feature-001"),
-      );
+      void body;
+      await fulfillJson(route, makeCreateResponse(), 201);
     });
 
     await page.goto("/admin/features/new");
@@ -226,7 +225,7 @@ test.describe("/admin/features/new (mocked routes)", () => {
     // category 기본값 '01070300' 그대로 유효. nearby 동작은 아래 전용 시나리오가 소유한다.
     await fillCoord(page);
 
-    await page.getByRole("button", { name: "요청 생성" }).click();
+    await page.getByRole("button", { name: "Feature 생성" }).click();
 
     await expect.poll(() => create.count).toBe(1);
     expect(create.bodies[0]).toMatchObject({
@@ -235,13 +234,16 @@ test.describe("/admin/features/new (mocked routes)", () => {
       category: "01070300",
       coord: { lon: 126.978, lat: 37.5665 },
       reason: "e2e 수동 생성",
-      lifecycle_state: "active",
-      publication_state: "published",
-      quality_state: "valid",
       marker_icon: "marker",
       marker_color: "P-01",
     });
+    expect(create.bodies[0]).not.toHaveProperty("feature_id");
+    expect(create.bodies[0]).not.toHaveProperty("idempotency_key");
     expect(create.bodies[0]).not.toHaveProperty("operator");
+    expect(create.bodies[0]).not.toHaveProperty("lifecycle_state");
+    expect(create.bodies[0]).not.toHaveProperty("publication_state");
+    expect(create.bodies[0]).not.toHaveProperty("quality_state");
+    expect(create.bodies[0]).not.toHaveProperty("creation_origin");
 
     // 성공 Alert(role=status) + 생성 Feature 링크.
     const successAlert = page
@@ -249,7 +251,9 @@ test.describe("/admin/features/new (mocked routes)", () => {
       .filter({ hasText: "Feature 생성됨" });
     await expect(successAlert).toBeVisible();
     await expect(
-      successAlert.getByRole("link", { name: "e2e-created-feature-001" }),
+      successAlert.getByRole("link", {
+        name: "0198d9f1-7a31-7e52-8ea8-cb2548d3a891",
+      }),
     ).toBeVisible();
   });
 
@@ -323,7 +327,7 @@ test.describe("/admin/features/new (mocked routes)", () => {
       .fill("e2e 수동 생성");
     await fillCoord(page);
 
-    await page.getByRole("button", { name: "요청 생성" }).click();
+    await page.getByRole("button", { name: "Feature 생성" }).click();
 
     await expect.poll(() => create.count).toBe(1);
     await expect(page.getByText("Feature 작성 실패")).toBeVisible();
@@ -337,8 +341,11 @@ test.describe("/admin/features/new (mocked routes)", () => {
         .filter({ hasText: "Feature 작성 실패" })
         .filter({ hasText: "(HTTP 422)" }),
     ).toBeVisible();
+    await expect(page.locator("#create-category-error")).toHaveText(
+      "category invalid",
+    );
     // 성공 섹션은 렌더되지 않음.
-    await expect(page.getByText("변경 요청 생성됨")).toHaveCount(0);
+    await expect(page.getByText("Feature 생성됨")).toHaveCount(0);
   });
 
   test("409 충돌 — 서버 409 응답이 'Feature 작성 실패' 알림으로 노출", async ({
@@ -353,8 +360,12 @@ test.describe("/admin/features/new (mocked routes)", () => {
           title: "Conflict",
           status: 409,
           detail: "feature already exists",
-          code: "LOCK_BUSY",
+          code: "MANUAL_FEATURE_EXACT_DUPLICATE",
           request_id: "e2e-409",
+          details: {
+            constraint: "uq_manual_feature_identity_claims_exact",
+            existing_feature_id: "0198d9f1-7a31-7e52-8ea8-cb2548d3a891",
+          },
         },
         409,
       );
@@ -369,14 +380,17 @@ test.describe("/admin/features/new (mocked routes)", () => {
       .fill("e2e 수동 생성");
     await fillCoord(page);
 
-    await page.getByRole("button", { name: "요청 생성" }).click();
+    await page.getByRole("button", { name: "Feature 생성" }).click();
 
     await expect.poll(() => create.count).toBe(1);
     await expect(page.getByText("Feature 작성 실패")).toBeVisible();
     await expect(
       page.getByRole("alert").filter({ hasText: "(HTTP 409)" }),
     ).toBeVisible();
-    await expect(page.getByText("변경 요청 생성됨")).toHaveCount(0);
+    await expect(
+      page.getByText("같은 이름·종류·좌표의 수동 Feature가 이미 있습니다"),
+    ).toBeVisible();
+    await expect(page.getByText("Feature 생성됨")).toHaveCount(0);
   });
 
   test("정지오코딩 — POST :12501/v2/geocode 후보 적용으로 좌표·주소 채움", async ({

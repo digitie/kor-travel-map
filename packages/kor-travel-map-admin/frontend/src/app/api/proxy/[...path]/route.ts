@@ -2,10 +2,12 @@ import { NextRequest } from "next/server";
 
 import { adminUsernameFromEnv, requestHasValidSession } from "@/lib/auth";
 import {
+  appendManualFeatureCreateHeaders,
   buildProxyRequestInit,
   buildProxyTarget,
   forwardedProxyHeaders,
 } from "@/lib/proxy";
+import { ManualFeatureCreateCredentialError } from "@/lib/manual-feature-create";
 
 const INTERNAL_BASE =
   process.env.KOR_TRAVEL_MAP_API_INTERNAL_URL ?? "http://127.0.0.1:12701";
@@ -13,7 +15,10 @@ const FORWARDED_RESPONSE_HEADERS = [
   "content-type",
   "content-disposition",
   "etag",
+  "idempotency-replayed",
+  "location",
   "retry-after",
+  "x-request-id",
 ] as const;
 
 function forwardedResponseHeaders(source: Headers): Array<[string, string]> {
@@ -41,10 +46,26 @@ async function proxy(
     return Response.json({ error: "AUTH_REQUIRED" }, { status: 401 });
   }
   try {
+    let headers: Headers;
+    try {
+      headers = appendManualFeatureCreateHeaders(
+        forwardedProxyHeaders(request.headers, adminUsernameFromEnv()),
+        request.method,
+        target.pathname,
+      );
+    } catch (error) {
+      if (error instanceof ManualFeatureCreateCredentialError) {
+        return Response.json(
+          { error: "MANUAL_FEATURE_CREATE_BFF_NOT_READY" },
+          { status: 503 },
+        );
+      }
+      throw error;
+    }
     const response = await fetch(target, {
       ...buildProxyRequestInit(
         request.method,
-        forwardedProxyHeaders(request.headers, adminUsernameFromEnv()),
+        headers,
         request.body,
         request.signal,
       ),

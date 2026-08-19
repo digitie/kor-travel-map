@@ -1,3 +1,9 @@
+import {
+  ADMIN_FEATURE_CREATE_PATH,
+  ADMIN_FEATURE_CREATE_TOKEN_HEADER,
+  manualFeatureCreateToken,
+} from "@/lib/manual-feature-create";
+
 const ALLOWED_FORWARD_HEADERS = new Set([
   "accept",
   "content-type",
@@ -42,6 +48,20 @@ export function forwardedProxyHeaders(
   if (proxySecret) {
     headers.set("X-Kor-Travel-Map-Admin-Proxy-Secret", proxySecret);
   }
+  return headers;
+}
+
+export function appendManualFeatureCreateHeaders(
+  headers: Headers,
+  method: string,
+  pathname: string,
+  env: Record<string, string | undefined> = process.env,
+): Headers {
+  if (method.toUpperCase() !== "POST" || pathname !== ADMIN_FEATURE_CREATE_PATH) {
+    return headers;
+  }
+  const token = manualFeatureCreateToken(env);
+  headers.set(ADMIN_FEATURE_CREATE_TOKEN_HEADER, token);
   return headers;
 }
 

@@ -5,11 +5,13 @@ import {
   adminFeaturesInBboxQueryKey,
   adminFeatureRequestZoom,
   adminFeaturesInBoundsPath,
+  createAdminFeature,
   deleteAdminFeature,
   allowedPublicationStates,
   fetchAdminFeatureCorrectionBasis,
   isAdminFeatureClusterZoom,
   patchAdminFeature,
+  type AdminFeatureCreateRequest,
   type AdminFeaturesInBoundsParams,
 } from "./features";
 
@@ -324,6 +326,67 @@ describe("admin feature correction basis", () => {
       "89898989-8989-4989-8989-898989898989",
     ]);
     expect(randomUUID).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("admin manual feature create", () => {
+  it("manual-v1 POST는 caller identity/state/origin 없이 BFF 경로와 idempotency header만 보낸다", async () => {
+    const randomUUID = stubRandomUUID([
+      "78787878-7878-4787-8787-787878787878",
+      "89898989-8989-4989-8989-898989898989",
+    ]);
+    const featureId = "0198d9f1-7a31-7e52-8ea8-cb2548d3a891";
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse(
+        {
+          data: {
+            applied_field_count: 1,
+            command_id: 7,
+            creation_origin: "manual_admin",
+            feature_id: featureId,
+            row_revision: 1,
+          },
+          meta: { duration_ms: 1, request_id: "manual-feature-create" },
+        },
+        { status: 201 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const body: AdminFeatureCreateRequest = {
+      category: "01070300",
+      coord: { lon: 126.978, lat: 37.5665 },
+      kind: "place",
+      marker_color: "P-01",
+      marker_icon: "marker",
+      name: "새 장소",
+      reason: "수동 생성",
+    };
+
+    const response = await createAdminFeature(body);
+
+    expect(response.data).toMatchObject({
+      creation_origin: "manual_admin",
+      feature_id: featureId,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [input, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(input)).toBe("/api/proxy/v1/admin/features");
+    expect(init?.method).toBe("POST");
+    expect(init?.headers).toEqual(
+      expect.objectContaining({
+        "Idempotency-Key": "89898989-8989-4989-8989-898989898989",
+      }),
+    );
+    const payload = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    expect(payload).toMatchObject(body);
+    expect(payload).not.toHaveProperty("feature_id");
+    expect(payload).not.toHaveProperty("idempotency_key");
+    expect(payload).not.toHaveProperty("operator");
+    expect(payload).not.toHaveProperty("lifecycle_state");
+    expect(payload).not.toHaveProperty("publication_state");
+    expect(payload).not.toHaveProperty("quality_state");
+    expect(payload).not.toHaveProperty("creation_origin");
+    expect(randomUUID).toHaveBeenCalledTimes(2);
   });
 });
 

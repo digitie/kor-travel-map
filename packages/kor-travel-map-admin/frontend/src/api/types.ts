@@ -3351,7 +3351,7 @@ export interface components {
             admin_dong_code?: string | null;
             /** Category */
             category: string;
-            coord?: components["schemas"]["AdminFeatureCoordInput"] | null;
+            coord: components["schemas"]["AdminManualFeatureCreateCoordInput"];
             /** Coord Precision Digits */
             coord_precision_digits?: number | null;
             /** Detail */
@@ -3359,54 +3359,20 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             /**
-             * Feature Id
-             * @description 기존 provider feature와 겹치는 사용자 version을 만들 때 명시한다. 미지정 시 user_request 자연키로 새 feature_id를 생성한다.
-             */
-            feature_id?: string | null;
-            /**
-             * Idempotency Key
-             * @description feature_id 미지정 시 source_natural_key로 쓰는 caller-provided key.
-             */
-            idempotency_key?: string | null;
-            /**
              * Kind
              * @enum {string}
              */
             kind: "place" | "event";
             /** Legal Dong Code */
             legal_dong_code?: string | null;
-            /**
-             * Lifecycle State
-             * @default active
-             * @enum {string}
-             */
-            lifecycle_state: "active" | "retired";
             /** Marker Color */
             marker_color: string;
             /** Marker Icon */
             marker_icon: string;
             /** Name */
             name: string;
-            /**
-             * Operator
-             * @deprecated
-             * @description [deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).
-             */
-            operator?: string | null;
             /** Parent Feature Id */
             parent_feature_id?: string | null;
-            /**
-             * Publication State
-             * @default published
-             * @enum {string}
-             */
-            publication_state: "draft" | "published" | "suppressed";
-            /**
-             * Quality State
-             * @default valid
-             * @enum {string}
-             */
-            quality_state: "valid" | "quarantined";
             /** Reason */
             reason: string;
             /** Road Address Management No */
@@ -4347,6 +4313,46 @@ export interface components {
             status: string;
             /** Violation Type */
             violation_type: string;
+        };
+        /**
+         * AdminManualFeatureCreateCoordInput
+         * @description 수동 생성에서만 coercion과 non-finite 값을 거부하는 좌표 입력.
+         */
+        AdminManualFeatureCreateCoordInput: {
+            /** Lat */
+            lat: number;
+            /** Lon */
+            lon: number;
+        };
+        /**
+         * AdminManualFeatureCreateData
+         * @description 검증된 수동 Feature 생성 command의 commit receipt.
+         */
+        AdminManualFeatureCreateData: {
+            /** Applied Field Count */
+            applied_field_count: number;
+            /** Command Id */
+            command_id: number;
+            /**
+             * Creation Origin
+             * @constant
+             */
+            creation_origin: "manual_admin";
+            /**
+             * Feature Id
+             * Format: uuid
+             */
+            feature_id: string;
+            /** Row Revision */
+            row_revision: number;
+        };
+        /**
+         * AdminManualFeatureCreateResponse
+         * @description ``POST /admin/features``의 manual-v1 성공 응답.
+         */
+        AdminManualFeatureCreateResponse: {
+            data: components["schemas"]["AdminManualFeatureCreateData"];
+            meta: components["schemas"]["Meta"];
         };
         /** AdminThemeCandidatePageData */
         AdminThemeCandidatePageData: {
@@ -15349,17 +15355,28 @@ export interface operations {
         };
         responses: {
             /** @description Successful Response */
-            200: {
+            201: {
                 headers: {
                     /** @description 현재 feature의 server-owned row_revision strong entity tag. */
                     ETag?: string;
+                    /** @description 생성된 canonical UUID Feature의 상대 admin URI. */
+                    Location?: string;
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AdminFeatureFieldOverrideResponse"];
+                    "application/json": components["schemas"]["AdminManualFeatureCreateResponse"];
                 };
             };
-            /** @description feature identity가 이미 존재함 */
+            /** @description 수동 Feature 생성 전용 scope 없음 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 수동 Feature exact identity가 이미 존재함 */
             409: {
                 headers: {
                     [name: string]: unknown;
@@ -15370,6 +15387,15 @@ export interface operations {
             };
             /** @description typed field registry 또는 create input 오류 */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 수동 Feature 생성 cutover 준비 전 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
