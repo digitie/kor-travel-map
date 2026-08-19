@@ -46,6 +46,22 @@ shim은 만들지 않는다.
 > `pinvi_snapshot_receipt.state`는 `pending`으로 둔다. PinVi 재-vendor는 Map 쪽 pin이
 > **머지된 commit**이어야 성립하므로(`contract-pin-consistency`가 그 SHA를 체크아웃한다)
 > 40C 머지 뒤에 수행한다. 세 spec sha는 이미 이 branch 산출물과 일치한다.
+### 수동 Feature 생성 clean cutover 준비 (2026-08-19, T-VN-M01 진행 중)
+
+- **API/SECURITY**: 기존 `POST /v1/admin/features`를
+  `admin.feature.create.manual-v1`로 전환하고, AdminBFF와 생성 전용 BFF token의 AND 인증,
+  서버 발급 UUIDv7, 필수 strict 좌표, 201 UUID-only response와 exact replay 계약을 추가했다.
+  caller가 보내던 Feature ID·초기 상태·origin 입력은 제거했다. route flag는 기본 `false`다.
+- **ADMIN UI**: browser가 보낸 두 인증 header를 폐기하고 exact create POST에만 server-side raw
+  token을 주입한다. credential이 없거나 잘못된 모양이면 upstream 호출 전 503으로 닫으며,
+  `Location`·`ETag`·`X-Request-ID`·`Idempotency-Replayed`를 보존한다. 생성 form과 generated
+  OpenAPI types도 201 canonical UUID 계약으로 맞췄다.
+- **DEPLOY**: API에는 digest와 flag만, Next.js server에는 raw token만 전달한다. production은
+  flag가 `false`여도 digest를 필수화하고 launcher가 raw SHA-256 parity·credential 분리를 migration
+  전에 검증한다. raw/digest/flag는 root provider env, Dagster, bootstrap, build arg/image/fingerprint에
+  들어가지 않는다.
+- **BLOCKED**: DB/ACL/backup/vNext tranche와 route 활성화는 T-VN-40C의 실제 `0225`가 `main`에
+  착지한 뒤 `0226_m01_manual_feature_create`로만 진행한다. byte-frozen `0200` baseline은 불변이다.
 
 ### C7 인수용 exact-target refresh scope 선언 (2026-08-19, T-VN-40 인수 ③)
 

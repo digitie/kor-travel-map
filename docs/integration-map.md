@@ -357,6 +357,12 @@ Map admin이 승인한다. 승인 시 Map이 Feature를 만들고 origin을 `man
 - **origin 불변**: 승인으로 생긴 Feature가 나중에 수정돼도 "PinVi 요청에서 왔다"는 사실은
   바뀌지 않는다. provider가 같은 실체를 발행하면 **자동 병합하지 않고** Map admin이 판정한다.
 
+2026-08-19 paired fence는 구현 중이다. PinVi draft PR
+[#458](https://github.com/digitie/pinvi/pull/458) `8fec7d3e`는 `new_place` 승인을 503/pending으로
+닫아 Map outbound와 status/ref/reviewer/audit/POI 변경을 모두 막는다. Map draft PR
+[#1016](https://github.com/digitie/kor-travel-map/pull/1016)은 admin UI BFF 전용 생성 token과 기본 off
+route를 준비하지만, 실제 `0225`→`0226` DB cutover와 M04 queue가 끝나기 전에는 활성화하지 않는다.
+
 ⚠️ **아직 계약이 없다.** endpoint·요청 body·승인 상태 모델·인증이 전부 미정이고, 정해지면
 이 절과 `docs/tasks.md`의 `T-VN-M04`가 함께 갱신된다. PinVi 쪽 구현을 시작하기 전에 이
 절이 채워져야 한다.
