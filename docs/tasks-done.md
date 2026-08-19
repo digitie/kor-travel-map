@@ -15,8 +15,9 @@
 
   Docker Manager는 충돌한 draft #173을 PR #183(merge `4f5cbb44`)으로 supersede해 root
   source → UI server-only alias와 C6c service 격리를 결선했다. Map 변경은 admin redesign
-  PR #1003 merge `da2c740a` 위에 재배치해 PR #1004에 담았다. 전문 적대 리뷰어 2명 GO,
-  frontend unit 336개·Map 집중 37개·BFF route 14개와 원격 CI를 merge gate로 통과시킨다.
+  PR #1003 merge `da2c740a` 위에 재배치했다. 전문 적대 리뷰어 2명 GO, frontend unit
+  336개·Map 집중 37개·BFF route 14개와 원격 CI 8개를 모두 통과했고, PR #1004는
+  merge `817cfeae`로 병합됐다.
   별도 buildx OCI commit provenance label은 열린 `T-VN-H46G`가 소유한다.
 
 ## 2026-08-18 — backlog 전면 재대조 완료 이력 이관

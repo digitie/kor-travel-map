@@ -1,6 +1,6 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-08-19 — T-VN-H46F admin UI geo proxy 구현
+## 2026-08-19 — T-VN-H46F admin UI geo proxy 완료·병합
 
 - `/api/geo`는 server-only `KOR_TRAVEL_GEO_API_KEY`의 ASCII 영숫자 32자 발급 형식만
   신뢰하고 browser query key를 제거한 뒤 `X-KTG-API-Key` header로 전달한다.
@@ -12,8 +12,8 @@
   server-only alias의 service wiring만 남는다.
 - Docker Manager PR #183이 충돌한 #173을 최신 C6c 구조에서 supersede해
   `4f5cbb44`로 병합됐다. Map은 admin redesign PR #1003 merge SHA 위로 재배치했으며
-  PR #1004에 담았다. 독립 전문 적대 리뷰어 2명은 모두 GO를 냈고, frontend unit
-  336개·Map 집중 37개·BFF route 14개와 원격 CI를 최종 merge gate로 유지한다.
+  독립 전문 적대 리뷰어 2명 GO, frontend unit 336개·Map 집중 37개·BFF route 14개와
+  원격 CI 8개를 모두 통과한 뒤 PR #1004를 merge `817cfeae`로 병합했다.
 - 완료 이력은 `tasks-done.md`로 이관했다. 남은 H46 계열 작업은 별도
   `T-VN-H46G`(buildx OCI commit provenance label)뿐이다.
 
