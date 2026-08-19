@@ -905,3 +905,17 @@ def test_create_app_revalidates_local_dev_cursor_secret(
     bypassed = _local_settings().model_copy(update=updates)
     with pytest.raises(ValueError, match="runtime settings are invalid"):
         create_app(settings=bypassed)
+
+
+@pytest.mark.unit
+def test_create_app_revalidates_manual_create_admin_bff_secret_in_local_profile() -> None:
+    bypassed = _local_settings().model_copy(
+        update={
+            "admin_manual_feature_create_enabled": True,
+            "admin_feature_create_token_sha256": ADMIN_FEATURE_CREATE_TOKEN_SHA256,
+            "admin_proxy_secret": None,
+        }
+    )
+
+    with pytest.raises(ValueError, match="KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET"):
+        create_app(settings=bypassed)

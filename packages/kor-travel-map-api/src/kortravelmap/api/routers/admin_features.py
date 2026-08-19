@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime
 from math import isfinite
@@ -61,6 +62,7 @@ from pydantic import (
 )
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.responses import JSONResponse
 
 from kortravelmap.api.auth import (
     AdminManualFeatureCreateContext,
@@ -103,6 +105,7 @@ __all__ = [
     "AdminFeatureStateResponse",
     "AdminFeatureStateTransitionsResponse",
     "AdminFeatureCreateRequest",
+    "AdminManualFeatureCanonicalJSONResponse",
     "AdminManualFeatureCreateResponse",
     "AdminFeaturePatchRequest",
 ]
@@ -128,6 +131,19 @@ AdminFeatureSort = Literal[
     "issue_count",
 ]
 SortOrder = Literal["asc", "desc"]
+
+
+class AdminManualFeatureCanonicalJSONResponse(JSONResponse):
+    """M01 terminal/replay가 jsonb key order와 무관하게 같은 bytes를 내도록 한다."""
+
+    def render(self, content: Any) -> bytes:
+        return json.dumps(
+            content,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
 
 
 class AdminFeatureIssueRecord(BaseModel):
@@ -1596,6 +1612,7 @@ async def get_feature_detail_route(
 @router.post(
     "",
     response_model=AdminManualFeatureCreateResponse,
+    response_class=AdminManualFeatureCanonicalJSONResponse,
     status_code=status.HTTP_201_CREATED,
     responses={
         403: {"description": "수동 Feature 생성 전용 scope 없음"},
@@ -1649,10 +1666,8 @@ async def create_feature_route(
             field=exc.field,
             constraint=exc.constraint,
         ) from exc
-    except (AdminManualFeatureInvariantError, DBAPIError) as exc:
+    except (AdminManualFeatureInvariantError, DBAPIError, ValueError) as exc:
         raise _manual_feature_create_internal_error() from exc
-    except ValueError as exc:
-        raise _manual_feature_create_validation_error(field="body") from exc
     if isinstance(result, AdminManualFeatureExactDuplicate):
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
