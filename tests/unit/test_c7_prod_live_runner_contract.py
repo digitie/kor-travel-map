@@ -208,19 +208,59 @@ def test_kma_preview_terminal_and_metadata_are_exact_kma_only() -> None:
     assert '"eligible_provider_scopes"' in helper
     assert '"skipped_provider_scopes"' in helper
     assert '"executed_provider_scopes"' in helper
-    assert "assertOnlyKmaProviderObjects(matched" in helper
+    assert "assertOnlyKmaCanonicalIdentity(matched" in helper
     assert "FORBIDDEN_PROVIDER_PATTERN" in helper
     assert "providerDatasets.length !== 1" in helper
-    assert "pair.provider !== KMA_PROVIDER" in helper
-    assert "pair.dataset_key !== KMA_DATASET_KEY" in helper
-    assert "pair.feature_count < 0" in helper
-    assert "matchedScope.effective_sync_scope !== expectedEffectiveSyncScope" in helper
+    # identity는 triple이다(ADR-088). 자연키는 생산자가 strip하므로 여기서 단언하면
+    # 항상 실패한다 — 아래 test_live_helper_does_not_assert_stripped_identity_keys 참조.
+    assert "entry.provider_dataset_id !== identity.providerDatasetId" in helper
+    assert "entry.operation_key !== identity.operationKey" in helper
+    assert "entry.sync_scope !== expectedEffectiveSyncScope" in helper
+    assert "entry.feature_count < 0" in helper
     for spec in (active, empty, cap):
         assert "assertExactKmaPreviewResponse(" in spec
         assert "assertKmaOnlyTerminalProviderScopes(" in spec
     assert "const LOWERCASE_SHA256_PATTERN = /^[0-9a-f]{64}$/" in active
     assert "isCanonicalKmaBaseDatetime" in active
     assert "KMA_BASE_DATETIME_PATTERN" in active
+
+
+def test_live_helper_does_not_assert_stripped_identity_keys() -> None:
+    """matched_scope 단언이 생산자가 strip하는 자연키를 건드리지 않는다.
+
+    `api/feature_update_service._public_matched_scope`가
+    `_NATURAL_IDENTITY_RESPONSE_KEYS`를 응답에서 지운다("실행 진단에서 legacy natural
+    identity projection을 유출하지 않는다"). 그 자리에서 `provider`/`dataset_key`를
+    단언하면 **항상** 실패한다.
+
+    이 게이트가 필요한 이유는 앞 판이 정확히 반대로 했기 때문이다 — 소스 pin이
+    `pair.provider !== KMA_PROVIDER` 같은 **소비자 쪽 문자열을 고정**해서, 드리프트를
+    잡기는커녕 stale 단언을 얼려 두고 있었다. 그래서 계약이 바뀐 뒤에도 CI는 green이었고
+    prod C7 실행에서만 드러났다. 이번에는 축을 **생산자 상수에서 읽어** 대조한다.
+    """
+
+    from kortravelmap.api.feature_update_service import (
+        _NATURAL_IDENTITY_RESPONSE_KEYS,
+    )
+
+    helper = _read(LIVE_DIR / "_ops-c7-admin-api.ts")
+    preview = _section(
+        helper,
+        "function assertExactKmaPreviewBody(",
+        "export async function assertExactKmaPreviewResponse(",
+    )
+    terminal = _section(
+        helper,
+        "export function assertKmaOnlyTerminalProviderScopes(",
+        "export async function createKmaRequest(",
+    )
+    assert _NATURAL_IDENTITY_RESPONSE_KEYS, "생산자 상수가 비었다"
+    for section, label in ((preview, "preview"), (terminal, "terminal")):
+        for key in _NATURAL_IDENTITY_RESPONSE_KEYS:
+            assert f".{key} " not in section and f".{key}!" not in section, (
+                f"{label} 단언이 생산자가 strip하는 `{key}`를 본다 — "
+                "triple(provider_dataset_id/sync_scope/operation_key)로 단언하라"
+            )
 
 
 def test_kma_dagster_job_and_terminal_run_identity_are_exact() -> None:
