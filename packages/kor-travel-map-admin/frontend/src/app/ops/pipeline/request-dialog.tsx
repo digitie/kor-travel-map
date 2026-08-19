@@ -17,6 +17,9 @@ import {
 import {
   type CanonicalCatalogRow,
   type RequestScope,
+  EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX,
+  MAX_EXTERNAL_SYSTEM_NAME_LENGTH,
+  TARGET_GRIDS_SYNC_SCOPE,
   canonicalCatalogRows,
   validateCatalogSelection,
 } from "./catalog-selection";
@@ -104,8 +107,6 @@ function MoisPrecheckNotice({
   );
 }
 
-/** canonical sync_scope 정규형 셋 중 열거 가능한 축(`kortravelmap.core.sync_scope`). */
-const TARGET_GRIDS_SYNC_SCOPE = "target_grids";
 /** `sync_scope` select에서 exact target을 고를 때 쓰는 sentinel.
  *
  *  `external_system:<name>`의 `<name>`은 **선언이 아니라 데이터**라서
@@ -116,9 +117,10 @@ const TARGET_GRIDS_SYNC_SCOPE = "target_grids";
  *
  *  이 값 자체는 canonical이 아니다(`:` 뒤 이름이 있어야 정규형이다). 이름이 비면
  *  `buildScope`가 fail-closed로 막으므로 sentinel이 그대로 제출되지 않는다. */
-const EXTERNAL_SYSTEM_SCOPE_CHOICE = "external_system";
-/** `kortravelmap.core.sync_scope.MAX_EXTERNAL_SYSTEM_NAME_LENGTH`와 같은 값. */
-const MAX_EXTERNAL_SYSTEM_NAME_LENGTH = 112;
+const EXTERNAL_SYSTEM_SCOPE_CHOICE = EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX.slice(
+  0,
+  -1,
+);
 
 type DatasetMembershipView = {
   provider_dataset_id: number;
@@ -226,7 +228,7 @@ function useRequestScopeForm(catalogRows: CanonicalCatalogRow[]) {
   const externalSystemName = scopeExternalSystem.trim();
   const effectiveScopeSyncScope = externalSystemScopeSelected
     ? externalSystemName
-      ? `${EXTERNAL_SYSTEM_SCOPE_CHOICE}:${externalSystemName}`
+      ? `${EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX}${externalSystemName}`
       : ""
     : syncScopeChoice;
   // catalog 행의 scope는 선언이라 `external_system:*` 행이 없다. exact target은
