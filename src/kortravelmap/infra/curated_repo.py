@@ -6,8 +6,6 @@ raw SQL만 제공하고, HTTP envelope/DTO는 admin 패키지 라우터에서 �
 
 from __future__ import annotations
 
-import base64
-import hashlib
 import json
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -16,12 +14,6 @@ from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Final, Literal
 
 from sqlalchemy import text
-
-from kortravelmap.infra.feature_projection import (
-    TYPED_FEATURE_DETAIL_COLUMNS_SQL,
-    typed_feature_detail_joins_sql,
-)
-from kortravelmap.infra.feature_repo import public_active_notice_filter_sql
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
