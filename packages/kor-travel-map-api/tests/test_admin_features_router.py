@@ -1431,6 +1431,66 @@ def test_create_internal_fault_is_sanitized_and_rolls_back_without_terminal(
 
 
 @pytest.mark.unit
+def test_create_ledger_dbapi_fault_uses_m01_internal_code_without_write(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api import domain_command_service
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    private_fragments = (
+        "ops.secret_domain_claim",
+        "private-ledger-payload",
+        "driver ledger detail",
+        "ck_private_ledger_constraint",
+    )
+    begin = AsyncMock(
+        side_effect=DBAPIError(
+            "SELECT ops.secret_domain_claim(:payload)",
+            {"payload": "private-ledger-payload"},
+            RuntimeError(
+                "driver ledger detail: constraint ck_private_ledger_constraint"
+            ),
+            False,
+        )
+    )
+    create = AsyncMock()
+    monkeypatch.setattr(domain_command_service, "begin_domain_command", begin)
+    monkeypatch.setattr(router_mod, "create_admin_feature_with_field_overrides", create)
+    probe = TestClient(
+        client.app,
+        client=("127.0.0.1", 50000),
+        raise_server_exceptions=False,
+        headers={
+            "Idempotency-Key": IDEMPOTENCY_KEY,
+            "X-Kor-Travel-Map-Admin-Proxy-Secret": ADMIN_PROXY_SECRET,
+            "X-Kor-Travel-Map-Actor": ADMIN_ACTOR,
+            "X-Kor-Travel-Map-Admin-Feature-Create-Token": (
+                ADMIN_FEATURE_CREATE_TOKEN
+            ),
+        },
+    )
+
+    response = probe.post("/v1/admin/features", json=_manual_create_payload())
+    probe.close()
+
+    assert response.status_code == 500
+    body = response.json()
+    assert body["code"] == "INTERNAL_SERVER_ERROR"
+    assert "details" not in body
+    assert body["request_id"] == response.headers["X-Request-ID"]
+    for fragment in private_fragments:
+        assert fragment not in response.text
+    begin.assert_awaited_once()
+    domain_command_service.complete_domain_command.assert_not_awaited()
+    create.assert_not_awaited()
+    assert session.begin_count == 1
+    assert session.commit_count == 0
+    assert session.rollback_count == 1
+
+
+@pytest.mark.unit
 def test_create_feature_exact_duplicate_returns_existing_uuid(
     client: TestClient,
     session: _FakeSession,

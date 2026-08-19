@@ -982,10 +982,22 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             request.url.path,
             exc_info=exc,
         )
+        is_manual_feature_create = (
+            request.method == "POST"
+            and request.scope.get("path") == _ADMIN_MANUAL_FEATURE_CREATE_PATH
+        )
         return _error_response(
             status_code=500,
-            code="INTERNAL_ERROR",
-            message="서버 내부 오류가 발생했습니다.",
+            code=(
+                "INTERNAL_SERVER_ERROR"
+                if is_manual_feature_create
+                else "INTERNAL_ERROR"
+            ),
+            message=(
+                "수동 Feature 생성 중 내부 오류가 발생했습니다."
+                if is_manual_feature_create
+                else "서버 내부 오류가 발생했습니다."
+            ),
             details={},
             request_id=request_id,
         )
