@@ -157,6 +157,19 @@ def _manual_create_payload(**updates: object) -> dict[str, object]:
     return payload
 
 
+def _reverse_json_object_order(value: Any) -> Any:
+    """PostgreSQL jsonb 왕복이 object key 순서를 보존하지 않는 상황을 모사한다."""
+
+    if isinstance(value, dict):
+        return {
+            key: _reverse_json_object_order(value[key])
+            for key in reversed(value)
+        }
+    if isinstance(value, list):
+        return [_reverse_json_object_order(item) for item in value]
+    return value
+
+
 def _expected_uuid(feature_id: str) -> str:
     """결정적 mock uuid — 테스트 편의 규약이지 저장 계약(0083 비파생 v7)이 아니다."""
     from kortravelmap.core.ids import feature_uuid_from_legacy
@@ -970,6 +983,13 @@ def test_create_feature_replay_is_byte_equivalent_and_does_not_write_twice(
             "Location": "/v1/admin/features/0198d9f1-7a31-7e52-8ea8-cb2548d3a891",
         }
         completed_at = datetime(2026, 8, 19, tzinfo=UTC)
+        serialized = response.model_dump(mode="json")
+        reordered = _reverse_json_object_order(serialized)
+        assert isinstance(reordered, dict)
+        assert tuple(reordered) == tuple(reversed(tuple(serialized)))
+        assert tuple(reordered["data"]) == tuple(
+            reversed(tuple(serialized["data"]))
+        )
         terminal_record = DomainCommandRecord(
             command_id=command.command_id,
             actor=command.actor,
@@ -978,7 +998,7 @@ def test_create_feature_replay_is_byte_equivalent_and_does_not_write_twice(
             fingerprint_version=1,
             request_fingerprint=command.request_fingerprint,
             response_status=status_code,
-            response_body=response.model_dump(mode="json"),
+            response_body=reordered,
             response_headers=response_headers,
             claimed_at=completed_at,
             completed_at=completed_at,

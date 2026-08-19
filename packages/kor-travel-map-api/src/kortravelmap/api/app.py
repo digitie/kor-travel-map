@@ -107,6 +107,9 @@ from kortravelmap.api.routers import (
     service_feature_alias_maps_router,
     weather_router,
 )
+from kortravelmap.api.routers.admin_features import (
+    AdminManualFeatureCanonicalJSONResponse,
+)
 from kortravelmap.api.settings import ApiSettings
 
 __all__ = ["app", "create_app"]
@@ -852,7 +855,12 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         }
         if original_request_id:
             headers["X-Request-ID"] = original_request_id
-        return JSONResponse(
+        response_class = (
+            AdminManualFeatureCanonicalJSONResponse
+            if exc.record.operation == "admin.feature.create.manual-v1"
+            else JSONResponse
+        )
+        return response_class(
             status_code=exc.record.response_status,
             content=jsonable_encoder(body),
             headers=headers,
