@@ -166,6 +166,14 @@ OpenAPI profile drift와 byte-frozen baseline 3파일 hash도 모두 불변이�
 main에 착지하기 전에는 `0226_m01_manual_feature_create` migration·ACL·backup tranche를 만들지 않고,
 route flag는 계속 `false`로 둔다.
 
+원격 Python matrix의 첫 실행은 수동 생성 로직이 아니라 root validator가 직접 읽는 `@next/env`를
+Python job이 설치하지 않아 3.11/3.12/3.13 모두 같은 `MODULE_NOT_FOUND` 10건으로 실패했다. parser를
+수기 fallback하거나 검사를 skip하지 않고 root production dependency를 frontend Next와 같은 exact
+`16.2.12`로 선언했다. Python matrix는 Node `22.23.1`과 root-only `npm ci --omit=dev --ignore-scripts`로
+의존성 없는 20KB parser 하나만 설치한다. package/lock/Next transitive version과 CI 명령은 unit gate로
+고정했다. CI 수정 checkpoint는 `8b7989920396b720a8a9b736d1464e20cacf4bf6`이며, 격리 root-only 설치와
+실제 resolver, 관련 Python 162건, Ruff check, Prettier, diff/redaction·비밀 감사를 통과했다.
+
 ## 2026-08-19 — T-VN-C03: 보조 dataset 5종을 실제 source 기준으로 재분기
 
 로컬 exact pin `python-krforest-api@f9254e6`의 public client/model/catalog와

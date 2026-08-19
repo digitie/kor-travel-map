@@ -89,7 +89,14 @@ fresh DB는 historical exact role graph 때문에 기존 bootstrap→`0225` upgr
 build 32 route와 변경 범위 React Doctor가 통과했다. frontend 전체 unit은 354건 통과, 2건은
 `/mnt/f` NTFS chmod 표현 때문에만 실패했으며 해당 auth-session 파일은 변경하지 않았다. Admin
 OpenAPI profile drift와 baseline hash는 모두 green이다. PinVi draft의 이전 checkpoint는 127건과 필수
-CI가 green이었고, exact Map blob 재벤더링 뒤 다시 검증한다.
+CI가 green이었고, exact Map blob 재벤더링 뒤 150건·Ruff/format·strict mypy 222파일을 통과한
+`3bfcdffe`를 원격에 푸시했다.
+
+Map Python CI가 root validator의 `@next/env` 미설치로만 실패한 문제는
+`8b7989920396b720a8a9b736d1464e20cacf4bf6`에서 닫았다. root가 frontend Next와 같은 exact
+`@next/env@16.2.12`를 직접 소유하고 Python matrix는 root-only production dependency 하나만
+`--ignore-scripts`로 설치한다. fallback parser나 skip은 두지 않았다. 격리 설치·resolver와 관련 Python
+162건, package/lock/workflow 회귀 gate가 통과했으며 원격 matrix 재실행을 확인 중이다.
 
 ## 2026-08-19 — T-VN-C03 보조 dataset 제품·source 결정 완료
 
