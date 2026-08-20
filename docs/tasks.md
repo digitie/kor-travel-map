@@ -24,6 +24,7 @@ barrier로 직렬화한다.
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환 — **저장소측 완료 2026-08-20**, live 실행은 배리어 대기)
     ∥ [~] `T-VN-41S`(#922 1차 구현·리뷰 GO, `0227+` migration/compactor·n150 1M 검증 잔여)
   - **배리어**: [ ] `T-VN-FINAL-REBUILD`(주요 개발 완료 후 파괴적 재구축 — 사용자 결정 2026-08-20)
+  - [ ] `T-C7-BROWSER-EVIDENCE`(#995 잔여 — 인수 게이트 아님, T-VN-41 마감 비차단)
     → [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2` → `T-VN-41C` receipt 승격
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정, T-VN-40 인수 뒤)**
   - [ ] `T-VN-M01`(admin Feature 생성 API — ADR-093 accepted 전환) → [ ] `T-VN-M02`(origin 보존·불변)
@@ -762,6 +763,34 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   통과하는 compatibility 경로는 만들지 않는다. final schema merge/재적재와 독립적으로 unit·script
   contract까지 완료하고, 실제 n150 data-dependent 실행은 위 F1D-D 순서를 따른다
   (그 순서는 `T-VN-FINAL-REBUILD` 배리어 뒤에 열린다).
+
+### T-C7-BROWSER-EVIDENCE — #995 잔여 browser-only 증거 보강 (2026-08-20 신설)
+
+> **`#995`는 superseded로 닫았다(2026-08-20).** 그 PR의 v5/v7 attestation 전환은 ADR-094(#1032)가
+> 대체했고, frontend 부분은 main이 그 사이 59 커밋 앞서가며 대부분 추월했다 — 공유 파일마다
+> main 쪽이 ADR-088 triple identity·3축 상태 라벨·nav 19개·리디자인을 이미 반영하고 있었고,
+> #995가 지우려던 `admin-ops.spec.ts`는 main에서 이미 정리돼 **통과 중**이다(지우면 살아 있는
+> 커버리지를 잃는다). 아래만 실제로 남은 고유 가치다.
+
+- [ ] **T-C7-BROWSER-EVIDENCE — browser-only C7 lane 커버리지 보강** *(인수 게이트 아님)*
+
+  C7 prod live 6-spec 게이트는 main에서 이미 GREEN이다(`d5693269`). 이 항목은 그 위에 얹는
+  보강이며 `T-VN-41` 마감을 막지 않는다.
+
+  가져올 것 (원본 `origin/feat/tvn41-f1d-evidence-followup` = `eb26981e`):
+  - [ ] `e2e/ops-c7-cleanup-ownership.spec.ts` (신규 256줄) — cleanup 소유권 경계 mocked 회귀
+  - [ ] `e2e/live/ops-c7-kma-contract-preflight.live.spec.ts` (신규 108줄) — KMA 계약 preflight
+  - [ ] 위 둘이 요구하는 `e2e/live/_ops-c7-admin-api.ts` 심볼 6개 —
+    `KmaRequestOwnership`(L70), `KMA_NOWCAST_OPERATION_KEY`(L137),
+    `isC7OrchestratorBootstrapPlaceholder`(L509), `hasExactC7RequestOwnershipBinding`(L534),
+    `cancellationCandidateForScenarioOwnedActiveRequest`(L1814),
+    `resolveKmaProviderDatasetId`(L2561). 원본 helper는 3,844줄 재작성이라 통째로 가져오면
+    main이 이미 반영한 ADR-088 이후 계약을 되돌린다 — **여섯 심볼만 발췌 이식**한다.
+  - [ ] `e2e/mocked-failure-manifest.json` 변경분이 `T-FE-MOCK-MANIFEST`(discoveredTests 284 vs
+    실측 276)를 푸는지 대조한다. 같은 파일을 건드리므로 두 항목을 함께 본다.
+
+  **가져오지 말 것**: attestation 계약 파일 9종과 runbook·integration-map(ADR-094가 정본),
+  `admin-ops.spec.ts` 삭제, 공유 e2e spec 변경(main이 앞선다).
 
 ### T-VN-FINAL-REBUILD — 주요 개발 완료 후 파괴적 재구축 배리어 (2026-08-20 신설)
 
