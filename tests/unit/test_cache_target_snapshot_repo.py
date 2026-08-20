@@ -580,6 +580,7 @@ async def test_snapshot_build_uses_one_cumulative_deadline(
         await repo._create_snapshot(  # pyright: ignore[reportPrivateUsage]
             object(),  # type: ignore[arg-type]
             external_system="pinvi",
+            receipt_kind="generic",
         )
 
     assert timeout.value.code == "snapshot_build_timeout"
@@ -598,6 +599,7 @@ async def test_snapshot_build_does_not_relabel_unrelated_timeout(
         await repo._create_snapshot(  # pyright: ignore[reportPrivateUsage]
             object(),  # type: ignore[arg-type]
             external_system="pinvi",
+            receipt_kind="generic",
         )
 
 
