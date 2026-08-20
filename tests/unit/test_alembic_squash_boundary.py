@@ -265,19 +265,29 @@ def test_revision_identifiers_fit_alembic_version_column() -> None:
     )
 
 
-def test_active_graph_is_only_0200_bridge_to_head() -> None:
+def test_active_graph_is_only_0200_bridge_to_current_head() -> None:
     paths = sorted(_ACTIVE.glob("[0-9]*.py"))
     revisions = tuple(str(_literal(path, "revision")) for path in paths)
-    parents = tuple(_literal(path, "down_revision") for path in paths)
+    parents_by_revision = {
+        str(_literal(path, "revision")): _literal(path, "down_revision") for path in paths
+    }
 
-    assert revisions == _EXPECTED_REVISIONS
-    assert parents == (None, *_EXPECTED_REVISIONS[:-1])
+    # 파일명 정렬은 과거 번호와 새 upstream 번호가 교차하면 실제 적용 순서가 될 수 없다.
+    # Alembic의 정본은 revision/down_revision graph이므로, 파일 집합과 parent map을 분리해
+    # 검증한다.
+    assert set(revisions) == set(_EXPECTED_REVISIONS)
+    assert len(revisions) == len(_EXPECTED_REVISIONS)
+    assert parents_by_revision == dict(
+        zip(_EXPECTED_REVISIONS, (None, *_EXPECTED_REVISIONS[:-1]), strict=True)
+    )
     assert json.loads(_GRAPH.read_text(encoding="utf-8"))["revisions"] == [
         {
             "revision": revision,
             "down_revision": [] if parent is None else [parent],
         }
-        for revision, parent in zip(revisions, parents, strict=True)
+        for revision, parent in zip(
+            _EXPECTED_REVISIONS, (None, *_EXPECTED_REVISIONS[:-1]), strict=True
+        )
     ]
 
 
