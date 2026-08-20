@@ -224,6 +224,22 @@ client가 먼저 병합된 뒤 순차 연결한다.
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-21 — T-VN-M05 paired cutover 설계 착수
+
+사용자는 M05의 consumer 처리를 단순 Map-only merge가 아니라 **paired cutover**로 선택했다.
+기존 generic dedup을 그대로 쓰면 manual origin이 후보 입력에서 빠지고, 높은 점수의 자동
+master·source link 이동까지 열리므로 사용할 수 없다.
+
+ADR-097과 M05 설계 보고서는 manual/provider case, terminal resolution, reconciliation event,
+principal별 ack를 append-only evidence로 분리했다. merge는 admin이 명시한 provider survivor만
+허용하고 manual만 retire하며, manual-retire는 detach event를 낸다. generic merge·auto action·
+source link 재배치는 모두 금지다.
+
+첫 consumer는 event를 local transaction의 immutable receipt와 exact reference impacts로 먼저
+처리하고 ack한다. Map은 consumer 이름을 소유하지 않는 generic service contract만 제공한다.
+현재 DB/HTTP 전문 적대 리뷰어 두 명에게 stale/supersede, restore/ACL, event/ack, UI/consumer
+delivery를 독립 재검토하도록 요청했다.
+
 ## 2026-08-20 — snapshot을 material과 receipt로 가르고, 내가 만든 두 개의 공허를 잡혔다
 
 `T-VN-41S`의 후속 종료선 대부분을 닫았다. `ops.poi_cache_target_snapshots` 한 표가 **무엇을

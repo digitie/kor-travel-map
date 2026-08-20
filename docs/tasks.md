@@ -31,7 +31,7 @@ barrier로 직렬화한다.
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정)**
   - [~] `T-VN-M01`(admin Feature 생성 API foundation 병합, `0226` DB/ACL/route 잔여) → [ ] `T-VN-M02`(origin 보존·불변)
   - [ ] `T-VN-M03`(curated 동시 생성) ∥ [ ] `T-VN-M04`(범용 Feature 요청 큐 — 첫 consumer는 PinVi)
-  - [ ] `T-VN-M05`(provider 발행 시 중복 판정 — 자동 병합 금지)
+  - [~] `T-VN-M05`(provider 발행 시 중복 판정 — 자동 병합 금지, paired consumer reconciliation 설계 진행)
 - **Lane C — 사문화 정리·미구현 dataset (다른 lane과 무관, 아무 때나)**
 - **최종 cutover**
   - [ ] `T-VN-39`
@@ -1018,6 +1018,8 @@ proposed ADR-093에서 닫았고, exact checkpoint `2aa17c27`에 API·DB 전문 
 - [ ] **T-VN-M04 — 범용 Feature 요청 큐** (결정 2). 외부 consumer가 HTTP로 요청하고 admin이 승인한다. 승인
   시 Map이 Feature를 만들고 origin을 `manual_request`로 남긴다. PinVi는 첫 consumer이며 cross-repo 계약은
   `docs/integration-map.md`에도 추가한다.
-- [ ] **T-VN-M05 — provider 발행 시 중복 판정** (결정 4 후단). 수동 Feature와 같은 실체를
+- [~] **T-VN-M05 — provider 발행 시 중복 판정** (결정 4 후단). 수동 Feature와 같은 실체를
   provider가 발행하면 dedup 후보로 올리고 **자동 병합하지 않는다.** admin이 병합/유지/수동본
-  폐기를 고른다.
+  폐기를 고른다. 2026-08-21 사용자 선택은 paired cutover이며, ADR-097과
+  `t-vn-m05-manual-provider-dedup-design-2026-08-21.md`가 immutable evidence·service event/ack·첫
+  consumer rebind 계약을 소유한다.

@@ -71,6 +71,22 @@ prod 덤프 사본(features 1,008,852까지 완전 일치)에서 `0225→0229→
 2026-08-21 한 배포로 prod에 올라갔다(prod head = `0232_tvn37d_notice_empty_range`).
 상세는 이 문서 최상단 배포 항목에 있다.
 
+## 2026-08-21 — T-VN-M05 paired manual/provider dedup 설계
+
+사용자가 paired cutover를 선택했다. M05는 generic dedup 큐나 auto master/merge를 확장하지
+않고, 수동 origin과 provider source head를 함께 freeze한 append-only case/resolution/effect
+evidence로 구현한다. Map decision은 provider survivor만 명시적으로 허용하며, external reference
+rebind/detach는 generic service event와 principal ack로 전파한다.
+
+ADR-097 및 [M05 설계](reports/t-vn-m05-manual-provider-dedup-design-2026-08-21.md)를 추가했고,
+DB/HTTP 전문 적대 리뷰어 둘에게 implementation-ready 재검토를 요청했다.
+
+### 다음 한 작업
+
+두 리뷰의 P0/P1을 반영해 0231 schema/ACL/backup roots와 Map service/admin contract를
+구현한다. 이어 첫 consumer의 durable reference receipt/rebind와 exact vendor를 같은 paired
+release로 구현한다.
+
 ## 2026-08-20 — T-VN-41S material/receipt 분리 착지 (`0231`)
 
 `T-VN-41S`의 후속 종료선에서 **EXPLAIN·1M soak을 뺀 전부**가 닫혔다.
