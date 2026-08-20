@@ -107,7 +107,7 @@ PinVi 복사용 title은 feature 자체 장소명이 아니라 다음 source tit
 ### 2.4 공식 목록 CSV
 
 관리자 수동 입력·CSV import와 운영 실데이터 검증에 쓰는 공식 목록은
-[`resources/curations/README.md`](../resources/curations/README.md)에 보관한다.
+[`resources/curations/README.md`](../../resources/curations/README.md)에 보관한다.
 
 | 파일 | 공식 항목 | membership 행 | 기존 Feature 연결 | 미연결 보존 |
 |------|----------:|----------------:|------------------:|------------:|
