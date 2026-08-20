@@ -2379,6 +2379,158 @@ export function queueSensorOperational(response: PipelineOverviewResponse): bool
   );
 }
 
+function hasExactObjectKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+): boolean {
+  const actual = Object.keys(value).sort();
+  const sortedExpected = [...expected].sort();
+  return (
+    actual.length === sortedExpected.length &&
+    actual.every((key, index) => key === sortedExpected[index])
+  );
+}
+
+function equalStringSets(left: Set<string>, right: Set<string>): boolean {
+  return (
+    left.size === right.size && [...left].every((value) => right.has(value))
+  );
+}
+
+function journalBodyMatchesKmaScope(
+  body: unknown,
+  expected: KmaScopeExpectation,
+): boolean {
+  const scope = asRecord(asRecord(body)?.scope);
+  return (
+    scope !== null &&
+    scope.type === "provider_dataset" &&
+    expected.operationKey === KMA_NOWCAST_OPERATION_KEY &&
+    scope.provider_dataset_id === expected.providerDatasetId &&
+    scope.sync_scope === expected.syncScope &&
+    scope.operation_key === expected.operationKey
+  );
+}
+
+/**
+ * durable journal 하나만 보고 "cleanup이 취소해도 되는 요청 집합"이 성립하는지 본다.
+ *
+ * request id ↔ idempotency entry ↔ provider dataset/sync scope/operation 삼중이
+ * 빠짐없이 1:1이어야 한다. 하나라도 빠지거나 중복되면 그 journal로는 어느 요청이
+ * 우리 것인지 말할 수 없고, 그때 cleanup은 취소를 포기해야 한다(fail-closed).
+ */
+export function hasExactC7RequestOwnershipBinding(value: unknown): boolean {
+  const journal = asRecord(value);
+  if (
+    journal === null ||
+    journal.version !== 4 ||
+    !Array.isArray(journal.request_ids) ||
+    !Array.isArray(journal.idempotency_entries) ||
+    !Array.isArray(journal.request_ownership)
+  ) {
+    return false;
+  }
+
+  const requestIds = new Set<string>();
+  for (const requestId of journal.request_ids) {
+    if (typeof requestId !== "string" || !UUID_PATTERN.test(requestId)) {
+      return false;
+    }
+    if (requestIds.has(requestId)) return false;
+    requestIds.add(requestId);
+  }
+
+  const entriesByIdempotency = new Map<
+    string,
+    { body: unknown; requestId: string | null }
+  >();
+  const entryRequestIds = new Set<string>();
+  for (const entryValue of journal.idempotency_entries) {
+    const entry = asRecord(entryValue);
+    if (
+      entry === null ||
+      typeof entry.idempotency_key !== "string" ||
+      !UUID_PATTERN.test(entry.idempotency_key) ||
+      asRecord(entry.body) === null ||
+      (entry.request_id !== null &&
+        (typeof entry.request_id !== "string" ||
+          !UUID_PATTERN.test(entry.request_id))) ||
+      typeof entry.status !== "string" ||
+      entry.status.length === 0 ||
+      entriesByIdempotency.has(entry.idempotency_key)
+    ) {
+      return false;
+    }
+    const requestId = entry.request_id as string | null;
+    if (requestId !== null) {
+      if (entryRequestIds.has(requestId)) return false;
+      entryRequestIds.add(requestId);
+    }
+    entriesByIdempotency.set(entry.idempotency_key, {
+      body: entry.body,
+      requestId,
+    });
+  }
+
+  const ownershipRequestIds = new Set<string>();
+  const ownershipIdempotencyKeys = new Set<string>();
+  for (const ownershipValue of journal.request_ownership) {
+    const ownership = asRecord(ownershipValue);
+    if (
+      ownership === null ||
+      !hasExactObjectKeys(ownership, [
+        "idempotency_key",
+        "operation_key",
+        "provider_dataset_id",
+        "request_id",
+        "sync_scope",
+      ]) ||
+      typeof ownership.request_id !== "string" ||
+      !UUID_PATTERN.test(ownership.request_id) ||
+      typeof ownership.idempotency_key !== "string" ||
+      !UUID_PATTERN.test(ownership.idempotency_key) ||
+      ownership.operation_key !== KMA_NOWCAST_OPERATION_KEY ||
+      typeof ownership.provider_dataset_id !== "number" ||
+      !Number.isSafeInteger(ownership.provider_dataset_id) ||
+      ownership.provider_dataset_id <= 0 ||
+      typeof ownership.sync_scope !== "string" ||
+      !ownership.sync_scope.startsWith(EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX) ||
+      ownership.sync_scope === EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX ||
+      ownershipRequestIds.has(ownership.request_id) ||
+      ownershipIdempotencyKeys.has(ownership.idempotency_key)
+    ) {
+      return false;
+    }
+    const entry = entriesByIdempotency.get(ownership.idempotency_key);
+    if (
+      entry === undefined ||
+      entry.requestId !== ownership.request_id ||
+      !journalBodyMatchesKmaScope(entry.body, {
+        operationKey: ownership.operation_key,
+        providerDatasetId: ownership.provider_dataset_id,
+        syncScope: ownership.sync_scope,
+      })
+    ) {
+      return false;
+    }
+    ownershipRequestIds.add(ownership.request_id);
+    ownershipIdempotencyKeys.add(ownership.idempotency_key);
+  }
+
+  return (
+    equalStringSets(requestIds, entryRequestIds) &&
+    equalStringSets(requestIds, ownershipRequestIds) &&
+    equalStringSets(
+      ownershipIdempotencyKeys,
+      new Set(
+        [...entriesByIdempotency.entries()]
+          .filter(([, entry]) => entry.requestId !== null)
+          .map(([idempotencyKey]) => idempotencyKey),
+      ),
+    )
+  );
+}
+
 /** request body가 선언한 canonical triple을 뽑는다. 아니면 소유권 자체가 성립하지 않는다. */
 function kmaScopeExpectationFromRequestBody(
   body: FeatureUpdateRequestCreateRequest,
