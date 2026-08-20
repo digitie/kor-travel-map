@@ -6289,6 +6289,16 @@ class PoiCacheTargetSnapshotMaterialRow(Base):
             unique=True,
             postgresql_where=text("compacted_at IS NULL"),
         ),
+        # GC의 orphan material 정리가 쓰는 훑기 순서다. 그 질의는 `compacted_at`을 보지
+        # 않아 위 partial index에 걸리지 못하고, `external_system` equality와
+        # `materialized_at` 순서를 함께 받는 인덱스가 없으면 다른 stream의 material까지
+        # 훑는다. 그래서 비-partial로 둔다.
+        Index(
+            "idx_cache_target_snapshot_materials_sweep",
+            "external_system",
+            "materialized_at",
+            "material_id",
+        ),
         {"schema": "ops"},
     )
 

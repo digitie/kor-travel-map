@@ -12,12 +12,19 @@
 계획을 강제하지 않는다. `enable_seqscan = off`로 "탈 인덱스가 있는가"를 묻는 것이 이
 게이트의 질문이고, 실제 처리량은 n150 soak이 따로 잰다.
 
-**fixture 모양이 곧 이 게이트의 유효성이다.** 세 번 고쳐 쓰면서 알았다. material이
-하나면 두 partial index의 비용이 같아 아무 것이나 골라도 통과했고, compaction 후보가
-0개면 planner의 선택 자체가 무의미했고, material마다 item이 1행이면 정렬이 공짜라
-`(material_id, row_number)` PK 대신 `(material_id, target_key)` UNIQUE를 골랐다.
-그래서 여기 fixture는 실제 모양을 흉내 낸다 — 한 material에 item 5,000행,
-material 201개 중 190개는 이미 compaction, 후보 10개.
+**fixture 모양이 곧 이 게이트의 유효성이다.** 다섯 번 고쳐 쓰면서 알았다.
+
+- material이 하나면 두 partial index의 비용이 같아 아무 것이나 골라도 통과한다.
+- material마다 item이 1행이면 정렬이 공짜라 `(material_id, row_number)` PK 대신
+  `(material_id, target_key)` UNIQUE를 고른다.
+- **compaction 후보가 0개면 planner의 선택 자체가 무의미하다.** 후보 조건은
+  `poi_cache_target_reconciliation_requests` 행을 요구하는데 `receipt_kind`만 맞춘
+  fixture에는 그 행이 없어 후보가 0이었다(적대 리뷰 지적). request를 심는다.
+- **stream이 하나면 `external_system` 제한이 공짜다.** orphan 정리 인덱스의 값은 다른
+  stream의 material을 건너뛰는 데 있으므로 stream을 셋 둔다.
+- `enable_seqscan = off` 아래에서 "Seq Scan 노드가 없다"는 **반증 불가능**하다. 인덱스가
+  있는 표에서는 어떤 크기에서도 통과한다(적대 리뷰 지적). 그 단언을 인덱스 이름 단언으로
+  바꿨다.
 """
 
 from __future__ import annotations
@@ -33,6 +40,9 @@ from kortravelmap.infra import cache_target_reconciliation_repo as repo
 pytestmark = pytest.mark.integration
 
 _SYSTEM = "explain:41s"
+#: orphan 정리 인덱스의 값은 **다른 stream을 건너뛰는 것**이다. stream이 하나면 그
+#: 제한이 공짜라 인덱스가 없어도 같은 계획이 나온다.
+_OTHER_SYSTEMS = ("explain:41s-b", "explain:41s-c")
 _MATERIAL = "b1000000-0000-4000-8000-000000000001"
 _RECEIPT = "b2000000-0000-4000-8000-000000000001"
 _ROOT = "a" * 64
@@ -62,39 +72,16 @@ async def _explain(
     return index_names
 
 
-async def _seq_scanned_relations(
-    session: AsyncSession,
-    sql: str,
-    params: dict[str, Any],
-) -> set[str]:
-    """계획에서 순차로 훑는 relation 이름을 모은다."""
-
-    await session.execute(text("SET LOCAL enable_seqscan = off"))
-    plan = (
-        await session.execute(
-            text("EXPLAIN (FORMAT JSON, COSTS OFF) " + sql),
-            params,
-        )
-    ).scalar_one()[0]["Plan"]
-    nodes = [plan]
-    scanned: set[str] = set()
-    while nodes:
-        node = nodes.pop()
-        nodes.extend(node.get("Plans", []))
-        if node.get("Node Type") == "Seq Scan" and node.get("Relation Name"):
-            scanned.add(str(node["Relation Name"]))
-    return scanned
-
-
 async def _seed(session: AsyncSession) -> None:
-    await session.execute(
-        text(
-            "INSERT INTO ops.poi_cache_target_streams ("
-            "external_system, consumer_id, restore_epoch) "
-            "VALUES (:system, 'explain', 1) ON CONFLICT DO NOTHING"
-        ),
-        {"system": _SYSTEM},
-    )
+    for system in (_SYSTEM, *_OTHER_SYSTEMS):
+        await session.execute(
+            text(
+                "INSERT INTO ops.poi_cache_target_streams ("
+                "external_system, consumer_id, restore_epoch) "
+                "VALUES (:system, 'explain', 1) ON CONFLICT DO NOTHING"
+            ),
+            {"system": system},
+        )
     await session.execute(
         text(
             "INSERT INTO ops.poi_cache_target_snapshot_materials ("
@@ -171,6 +158,66 @@ async def _seed(session: AsyncSession) -> None:
         ),
         {"material_id": _MATERIAL, "fingerprint": "b" * 64},
     )
+    # 다른 stream에도 material을 채운다 — orphan 정리 인덱스가 건너뛸 대상이다.
+    for index, system in enumerate(_OTHER_SYSTEMS, start=1):
+        await session.execute(
+            text(
+                "INSERT INTO ops.poi_cache_target_snapshot_materials ("
+                "material_id, external_system, restore_epoch, "
+                "material_high_watermark_relay_order, "
+                "safe_high_watermark_relay_order, "
+                "item_count, merkle_root, materialized_at) "
+                "SELECT CAST(lpad(to_hex(value), 8, '0') "
+                "|| '-0000-4000-8000-00000000000' || :suffix AS uuid), "
+                ":system, 1, value, value, 0, :root, "
+                "now() - make_interval(mins => value) "
+                "FROM generate_series(1, 200) AS value"
+            ),
+            {"system": system, "root": _ROOT, "suffix": str(index + 2)},
+        )
+
+    # 후보 조건은 `poi_cache_target_reconciliation_requests` 행을 요구한다 —
+    # `receipt_kind`만 맞추면 후보가 0개가 되어 게이트가 아무 것도 재지 않는다.
+    # 살아남을 10개(material order 1..10)를 실제 terminal audit 후보로 만든다.
+    await session.execute(
+        text(
+            "INSERT INTO ops.domain_commands ("
+            "actor, operation, idempotency_key, request_fingerprint) "
+            "SELECT 'explain', 'cache_target.reconcile', "
+            "x_extension.gen_random_uuid(), :fingerprint "
+            "FROM generate_series(1, 10) AS value"
+        ),
+        {"fingerprint": "e" * 64},
+    )
+    await session.execute(
+        text(
+            "INSERT INTO ops.poi_cache_target_reconciliation_requests ("
+            "request_id, external_system, command_id, reason, status, "
+            "phase_version, snapshot_id, expected_merkle_root, "
+            "actual_merkle_root, started_at, completed_at) "
+            "SELECT x_extension.gen_random_uuid(), :system, command.command_id, "
+            "'explain', 'succeeded', 3, receipt.snapshot_id, :root, :root, "
+            "now() - interval '41 days', now() - interval '40 days' "
+            "FROM ("
+            "  SELECT receipt.snapshot_id, "
+            "         row_number() OVER (ORDER BY receipt.snapshot_id) AS position "
+            "  FROM ops.poi_cache_target_snapshots AS receipt "
+            "  JOIN ops.poi_cache_target_snapshot_materials AS material "
+            "    ON material.material_id = receipt.material_id "
+            "  WHERE material.external_system = :system "
+            "    AND material.material_high_watermark_relay_order BETWEEN 1 AND 10"
+            ") AS receipt "
+            "JOIN ("
+            "  SELECT command_id, "
+            "         row_number() OVER (ORDER BY command_id DESC) AS position "
+            "  FROM ops.domain_commands "
+            "  WHERE operation = 'cache_target.reconcile' "
+            "  ORDER BY command_id DESC LIMIT 10"
+            ") AS command ON command.position = receipt.position"
+        ),
+        {"system": _SYSTEM, "root": _ROOT},
+    )
+
     # compaction 후보 조회의 값은 **이미 처리한 것을 건너뛴다**는 데 있다. 전부
     # 미처리인 fixture에서는 partial index가 전체와 같아 planner가 고를 이유가 없다.
     # 대부분을 compaction 상태로 만들어 그 술어를 선택적으로 만든다.
@@ -187,14 +234,44 @@ async def _seed(session: AsyncSession) -> None:
         "ops.poi_cache_target_snapshot_materials",
         "ops.poi_cache_target_snapshot_material_items",
         "ops.poi_cache_target_snapshots",
+        "ops.poi_cache_target_reconciliation_requests",
     ):
         await session.execute(text(f"ANALYZE {relation}"))
+
+
+async def _compaction_candidate_count(session: AsyncSession) -> int:
+    """게이트가 재는 대상이 실재하는지 먼저 센다.
+
+    후보가 0개면 planner의 선택은 무의미하고, 그 위의 인덱스 단언은 통과하면서 아무
+    것도 재지 않는다. 실제로 그 상태로 한동안 초록이었다(적대 리뷰 지적).
+    """
+
+    predicate = repo._COMPACTION_CANDIDATE_PREDICATE  # pyright: ignore[reportPrivateUsage]
+    return int(
+        await session.scalar(  # type: ignore[arg-type]
+            text(
+                "SELECT count(*) "
+                "FROM ops.poi_cache_target_snapshot_materials AS material "
+                f"WHERE material.external_system = :external_system AND {predicate}"
+            ),
+            {
+                "external_system": _SYSTEM,
+                "compaction_retention_seconds": 30 * 24 * 60 * 60,
+            },
+        )
+        or 0
+    )
 
 
 async def test_snapshot_material_hot_queries_have_index_paths(
     migrated_session: AsyncSession,
 ) -> None:
     await _seed(migrated_session)
+
+    # 이 게이트의 전제. 후보가 없으면 아래 compaction 단언은 통과하면서 아무 것도
+    # 재지 않는다 — 실제로 그 상태였다.
+    candidates = await _compaction_candidate_count(migrated_session)
+    assert candidates > 0, "compaction 후보가 0개다 — 아래 단언은 아무 것도 재지 않는다"
 
     item_page = await _explain(
         migrated_session,
@@ -241,16 +318,21 @@ async def test_snapshot_material_hot_queries_have_index_paths(
     # `materialized_at` 정렬은 그 소수만 정렬한다.
     assert "uq_cache_target_snapshot_materials_live_identity" in compaction, compaction
 
-    # orphan material 정리에는 인덱스 **이름**을 요구하지 않는다. anti-join 두 개가
-    # 붙어 있어 planner의 선택이 후보 밀도에 따라 달라지고, 전용 인덱스를 만들어도
-    # 고르는 것을 보이지 못했다(그래서 만들지 않았다). 이 질의가 지켜야 하는 성질은
-    # 하나다 — GC tick이 material 표를 순차로 훑지 않는다.
-    seq_scanned = await _seq_scanned_relations(
+    # orphan material 정리는 `compacted_at`을 보지 않아 partial index에 걸리지 못한다.
+    # 전용 sweep 인덱스가 없으면 `external_system` 제한을 인덱스로 좁히지 못해 다른
+    # stream의 material까지 훑는다 — fixture에 stream이 셋 있어 그 차이가 실재한다.
+    #
+    # 앞판은 여기서 `enable_seqscan = off` 아래 "Seq Scan 노드가 없다"를 단언했는데,
+    # 그 설정이 seq scan에 disable_cost를 더하므로 인덱스가 있는 표에서는 어떤
+    # 크기에서도 통과한다 — 반증 불가능한 단언이었다.
+    orphan_materials = await _explain(
         migrated_session,
         repo._PRUNE_ORPHANED_MATERIALS_SQL,  # pyright: ignore[reportPrivateUsage]
         {"external_system": _SYSTEM, "limit": 100},
     )
-    assert "poi_cache_target_snapshot_materials" not in seq_scanned, seq_scanned
+    assert "idx_cache_target_snapshot_materials_sweep" in orphan_materials, (
+        orphan_materials
+    )
 
     receipt_by_material = await _explain(
         migrated_session,

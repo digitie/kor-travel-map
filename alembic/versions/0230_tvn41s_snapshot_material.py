@@ -21,14 +21,17 @@ PK/FK는 `(material_id, row_number)`로 옮긴다. 같은 identity에 root/count
 
 초안(`docs/reports/tvn41s/snapshot-material-schema.sql.draft`)과 다른 점 셋. 근거를 남긴다.
 
-- **정리용 전용 인덱스를 두지 않는다.** 초안의 `(external_system, restore_epoch,
-  material_high_watermark_relay_order) WHERE compacted_at IS NULL` 하나로 충분했다.
-  compaction 후보 조회는 EXPLAIN 실측에서 그 partial unique를 탄다. orphan material
-  정리용으로 `(external_system, materialized_at, material_id)`를 따로 만들어 봤지만
-  **planner가 고르는 것을 보이지 못했다** — anti-join 두 개가 붙어 있어 정렬 인덱스로
-  일찍 멈출 수 없고, 그 표는 설계상 작다(살아 있는 material은 stream당 generic 상한 2 +
-  reconciliation 참조분). 근거를 못 만든 인덱스는 쓰기 비용만 남기므로 지웠다.
-  게이트는 그 질의에 대해 인덱스 이름 대신 **material 표를 seq scan하지 않는다**를 본다.
+- **정리용 인덱스를 하나 더 둔다.** 초안에는 identity partial unique 하나뿐이었다.
+  compaction 후보 조회는 그것을 타지만(`compacted_at IS NULL` 술어를 그대로 쓴다), GC의
+  orphan material 정리는 `compacted_at`을 보지 않으므로 그 partial index에 걸리지
+  못한다. 그 질의는 `external_system` equality와 `materialized_at` 순서를 쓰는데 둘을
+  함께 받는 인덱스가 없으면 **다른 stream의 material까지** 훑는다.
+  `idx_cache_target_snapshot_materials_sweep (external_system, materialized_at,
+  material_id)`를 비-partial로 둔다.
+
+  한 번 지웠다가 되살렸다. 지웠을 때의 근거는 "planner가 고르는 것을 보이지 못했다"였는데,
+  그 측정이 `enable_seqscan = off` 아래의 반증 불가능한 단언이었다(적대 리뷰 지적).
+  근거가 없어진 것이지 인덱스가 불필요하다고 밝혀진 것이 아니었다.
 - **identity UNIQUE를 partial로 바꿨다.** 초안은 `(external_system, restore_epoch,
   material_high_watermark_relay_order)`에 평범한 UNIQUE를 걸었다. 그러면 compaction된
   material이 그 identity를 영구 점유해서, 같은 source 상태가 다시 필요해졌을 때 새
@@ -267,6 +270,14 @@ def _create_material_tables() -> None:
                 BEFORE TRUNCATE ON {_MATERIALS}
                 FOR EACH STATEMENT
                 EXECUTE FUNCTION ops.reject_cache_target_history_mutation()
+            """
+        )
+    )
+    op.execute(
+        text(
+            f"""
+            CREATE INDEX idx_cache_target_snapshot_materials_sweep
+                ON {_MATERIALS} (external_system, materialized_at, material_id)
             """
         )
     )
