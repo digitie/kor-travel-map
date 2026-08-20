@@ -680,7 +680,9 @@ BEGIN
     END IF;
     IF to_regprocedure('feature.reject_manual_provider_dedup_evidence_mutation()') IS NULL
        OR to_regprocedure('feature.record_manual_provider_dedup_candidate(text,text,jsonb,jsonb)') IS NULL
-       OR to_regprocedure('feature.resolve_manual_provider_dedup_case(uuid,text,text,bigint,bigint,text,text,text,bigint)') IS NULL THEN
+       OR to_regprocedure('feature.resolve_manual_provider_dedup_case(uuid,text,text,bigint,bigint,text,text,text,bigint)') IS NULL
+       OR to_regprocedure('feature.lease_feature_reference_reconciliation_event(text,uuid)') IS NULL
+       OR to_regprocedure('feature.ack_feature_reference_reconciliation_event(text,uuid,uuid,bigint,text,text,bigint)') IS NULL THEN
         RAISE EXCEPTION 'M05 dedicated routine marker is incomplete'
             USING ERRCODE = '55000';
     END IF;
@@ -731,6 +733,11 @@ ALTER PROCEDURE feature.record_manual_provider_dedup_candidate(text, text, jsonb
 ALTER PROCEDURE feature.resolve_manual_provider_dedup_case(
     uuid, text, text, bigint, bigint, text, text, text, bigint
 ) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER PROCEDURE feature.lease_feature_reference_reconciliation_event(text, uuid)
+    OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER PROCEDURE feature.ack_feature_reference_reconciliation_event(
+    text, uuid, uuid, bigint, text, text, bigint
+) OWNER TO ktm_manual_provider_dedup_procedure_owner;
 REVOKE ALL ON FUNCTION feature.reject_manual_provider_dedup_evidence_mutation()
     FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime;
 REVOKE ALL ON PROCEDURE feature.record_manual_provider_dedup_candidate(text, text, jsonb, jsonb)
@@ -748,6 +755,16 @@ GRANT EXECUTE ON PROCEDURE feature.record_manual_provider_dedup_candidate(
 GRANT EXECUTE ON PROCEDURE feature.resolve_manual_provider_dedup_case(
     uuid, text, text, bigint, bigint, text, text, text, bigint
 ) TO ktm_manual_provider_dedup_admin_executor;
+REVOKE ALL ON PROCEDURE feature.lease_feature_reference_reconciliation_event(text, uuid),
+    feature.ack_feature_reference_reconciliation_event(
+        text, uuid, uuid, bigint, text, text, bigint
+    ) FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime,
+    ktm_feature_dagster_runtime, ktm_manual_provider_dedup_detector_executor,
+    ktm_manual_provider_dedup_admin_executor;
+GRANT EXECUTE ON PROCEDURE feature.lease_feature_reference_reconciliation_event(text, uuid),
+    feature.ack_feature_reference_reconciliation_event(
+        text, uuid, uuid, bigint, text, text, bigint
+    ) TO ktm_feature_reference_reconciliation_service_executor;
 SQL
 }
 

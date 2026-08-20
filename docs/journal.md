@@ -153,6 +153,21 @@ candidate의 `to_jsonb(notice)`에 내부 generated column이 누출되는 P1을
 candidate SQL은 `valid_during`을 response JSON에서 제외하도록 수정했다. NULL·one-sided·
 equal range, public/admin active predicate와 notice candidate detail 회귀를 추가했으며,
 수정 후 targeted integration 2건을 통과했다.
+## 2026-08-21 — T-VN-M05 strict-prefix service delivery writer
+
+`0231_m05_manual_provider_dedup`에 service 전용 event lease·ack writer를 추가했다.
+subscription의 현재 ack cursor 뒤에서 실제 최소 `event_sequence`만 lease하고, worker·epoch·만료
+시각을 검증한 뒤 정확히 그 event의 hash와 local receipt hash를 append-only ack로 결박한다.
+따라서 sequence의 commit 가시 순서가 달라도 누락 번호를 가정하지 않으며, 경쟁 worker는
+`lease_conflict`로 멈춘다. ack 뒤에는 strict-prefix cursor만 전진하고 같은 receipt는 replay로
+읽힌다.
+
+trigger function의 PostgreSQL 기본 `PUBLIC EXECUTE`도 migration·bootstrap·startup ACL
+reconciler에서 모두 회수했다. M05 integration은 API/Dagster runtime catalog preflight와 함께
+candidate·decision·event lease·경쟁 lease·ack·replay를 검증했고, fresh Alembic metadata check,
+ruff, shell syntax도 통과했다. 다음 tranche는 Map admin/service HTTP와 backup v3 root, 첫
+consumer의 durable receipt/rebind다.
+
 ## 2026-08-21 — T-VN-M05 dedicated candidate·admin decision writer
 
 `0231_m05_manual_provider_dedup`에 Dagster-only candidate writer와 admin-only

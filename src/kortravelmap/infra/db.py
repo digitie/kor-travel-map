@@ -95,6 +95,18 @@ _FEATURE_REQUEST_REJECT_PROCEDURE = (
 )
 _FEATURE_REQUEST_READ_FUNCTION = "feature.read_feature_request(uuid)"
 _FEATURE_REQUEST_LIST_FUNCTION = "feature.list_feature_requests(text,integer)"
+_M05_CANDIDATE_PROCEDURE = (
+    "feature.record_manual_provider_dedup_candidate(text,text,jsonb,jsonb)"
+)
+_M05_DECISION_PROCEDURE = (
+    "feature.resolve_manual_provider_dedup_case("
+    "uuid,text,text,bigint,bigint,text,text,text,bigint)"
+)
+_M05_LEASE_PROCEDURE = "feature.lease_feature_reference_reconciliation_event(text,uuid)"
+_M05_ACK_PROCEDURE = (
+    "feature.ack_feature_reference_reconciliation_event("
+    "text,uuid,uuid,bigint,text,text,bigint)"
+)
 
 _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
     {
@@ -227,13 +239,16 @@ _EXPECTED_RUNTIME_APPLICATION_PROCEDURES = {
                 _FEATURE_REQUEST_SUBMIT_PROCEDURE,
                 _FEATURE_REQUEST_APPROVE_PROCEDURE,
                 _FEATURE_REQUEST_REJECT_PROCEDURE,
+                _M05_DECISION_PROCEDURE,
+                _M05_LEASE_PROCEDURE,
+                _M05_ACK_PROCEDURE,
             }
         )
         | _ADMIN_CURATION_FEATURE_PROCEDURES
     ),
     "ktm_feature_dagster_runtime": (
         _SHARED_RUNTIME_FEATURE_PROCEDURES
-        | frozenset({_GENERIC_FEATURE_CREATE_PROCEDURE})
+        | frozenset({_GENERIC_FEATURE_CREATE_PROCEDURE, _M05_CANDIDATE_PROCEDURE})
         | _PROVIDER_CURATION_FEATURE_PROCEDURES
         | _PROVIDER_OPERATION_PROCEDURES
     ),

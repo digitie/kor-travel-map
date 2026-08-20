@@ -235,7 +235,9 @@ async def bootstrap_tvn34_migration_roles(engine: AsyncEngine) -> str:
                         REVOKE ktm_manual_provider_dedup_admin_executor
                             FROM ktm_feature_api_runtime, ktm_feature_dagster_runtime;
                     END IF;
-                    IF to_regrole('ktm_feature_reference_reconciliation_service_executor') IS NOT NULL THEN
+                    IF to_regrole(
+                        'ktm_feature_reference_reconciliation_service_executor'
+                    ) IS NOT NULL THEN
                         REVOKE ktm_feature_reference_reconciliation_service_executor
                             FROM ktm_feature_api_runtime, ktm_feature_dagster_runtime;
                     END IF;
@@ -646,6 +648,19 @@ async def repair_tvn_m05_role_phase(async_dsn: str) -> None:
                 text(
                     "ALTER PROCEDURE feature.resolve_manual_provider_dedup_case("
                     "uuid, text, text, bigint, bigint, text, text, text, bigint) "
+                    "OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER PROCEDURE feature.lease_feature_reference_reconciliation_event("
+                    "text, uuid) OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER PROCEDURE feature.ack_feature_reference_reconciliation_event("
+                    "text, uuid, uuid, bigint, text, text, bigint) "
                     "OWNER TO ktm_manual_provider_dedup_procedure_owner"
                 )
             )

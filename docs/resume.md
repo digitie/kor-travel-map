@@ -85,13 +85,15 @@ fresh migration Alembic check 1건과 ruff/strict mypy가 green이다. `0230 →
 사후 복구` compose/DB helper도 연결해 frozen baseline을 건드리지 않은 role choreography를
 고정했다. Dagster-only candidate writer는 manual origin/claim과 정확히 하나인 provider
 primary source head를 freeze하고, admin-only writer는 `kept`/manual retire+`rebind`/manual
-retire+`detach`를 global fence 안에서 append-only resolution/event로 만든다. 실제 runtime
-login integration에서 executor 차단·candidate replay·merged lifecycle/event·source link 보존을
-검증했다.
+retire+`detach`를 global fence 안에서 append-only resolution/event로 만든다. service writer는
+cursor 다음의 실제 최소 sequence를 worker lease/epoch으로 독점하고 exact event hash와 local
+receipt hash를 strict-prefix ack로 결박한다. 실제 runtime login integration에서 executor 차단,
+candidate replay, merged lifecycle/event·source link 보존, 경쟁 lease, ack/replay와 API/Dagster
+catalog preflight를 검증했다.
 
 ### 다음 한 작업
 
-strict-prefix service lease/ack writer와 backup v3 root를 구현한다.
+backup v3 root와 restore 뒤 strict-prefix cursor/lease 복구를 구현한다.
 이어 Map admin/service contract와 첫 consumer의 durable reference receipt/rebind, exact vendor를
 같은 paired release로 구현한다.
 
