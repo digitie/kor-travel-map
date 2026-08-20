@@ -25,7 +25,8 @@ barrier로 직렬화한다.
     ∥ [~] `T-VN-41S`(#922 1차 구현·리뷰 GO, `0230+` migration/compactor·n150 1M 검증 잔여)
   - **배리어**: [ ] `T-VN-FINAL-REBUILD`(주요 개발 완료 후 파괴적 재구축 — 사용자 결정 2026-08-20)
   - [x] `T-C7-BROWSER-EVIDENCE`(#995 잔여 — 2026-08-20 접어넣음)
-  - [ ] `T-VN-40B` 잔여(source rule `curated` action 퇴역, `0227`) — 종결 되돌림
+  - [ ] `T-VN-40B` 잔여(source rule `curated` action 퇴역, `0229`, PR #1035) — 종결 되돌림
+  - [ ] `T-FE-MOCK-MANIFEST`(manifest 층 종결 / flake 잔여) ∥ [ ] `T-FE-MOCK-FLAKE`(`/v1/ops/logs`)
     → [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2` → `T-VN-41C` receipt 승격
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정, T-VN-40 인수 뒤)**
   - [~] `T-VN-M01`(admin Feature 생성 API foundation 병합, `0226` DB/ACL/route 잔여) → [ ] `T-VN-M02`(origin 보존·불변)
@@ -617,7 +618,24 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   증명한다.
 
   **부수**: `run-mocked-checkpoint.mjs`의 `E2E_BASE_URL` 기본값이 `http://127.0.0.1:12705`
-  (**운영 admin UI 포트**)다. 명시하지 않고 실행하면 운영 UI를 친다 — 기본값을 없앤다.
+  (**운영 admin UI 포트**)였다. 명시하지 않고 실행하면 운영 UI를 친다 — 기본값을 없앴다.
+
+  **2026-08-20 진행**: checkpoint A를 5회 돌려 판정했다. manifest 층은 닫혔다 —
+  선언 89건이 **하나도 실패하지 않아**(`expected-failures=89, actual-failures=0`) 원장이
+  통째로 낡은 것이었고, groups를 비우고 인벤토리·baseline을 실측값(285 / `5c647f69…`)으로
+  고정했다. 재고정 뒤 `expected-failures=0`·인벤토리 일치를 확인했다.
+  **남은 게이트 blocker는 아래 별도 항목의 flake 하나다.**
+
+- [ ] **T-FE-MOCK-FLAKE** — `e2e/admin-ops.spec.ts::admin/ops pages › /v1/ops/logs` 간헐 실패
+
+  System logs 표의 첫 columnheader `생성`이 15초 안에 보이지 않는다(`admin-ops.spec.ts:744`).
+  앞선 filter control 단언은 모두 통과하므로 표 mount 전에 header를 단언하는 순서 문제로
+  보인다. n150 5회 실행 중 2회 실패 — 부하가 높을 때 재현된다. mocked config가
+  `retries: process.env.CI ? 1 : 0`이라 **로컬은 재시도가 없어** 느린 렌더가 곧 실패가 된다.
+
+  이 spec은 T-C7-BROWSER-EVIDENCE 이식이 건드리지 않았고 mocked checkpoint는 CI 잡이
+  아니라 수동 게이트다 — 즉 **기존 flake**다. 표/행이 도착한 뒤 header를 단언하도록
+  고쳐야 하며, 재시도로 덮지 않는다.
 - [x] **T-C7-SCOPE-REGISTRY** — `external_system:*` exact-target scope의 선언 주체·근거·
   운영 조회 표면을 `docs/integration-map.md` 또는 ADR-088 consequences에 정본화한다.
   → 2026-08-20 완료. 근거는 migration `0224`의 docstring 안에만 있어 저장소 밖에서
