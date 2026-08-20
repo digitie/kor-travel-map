@@ -85,7 +85,8 @@ fail() { echo; echo "GATE: FAIL — $1" >&2; exit 4; }
 echo "=== ① 격리 DB 재생성 + head까지 migration"
 psql_adm -c "DROP DATABASE IF EXISTS $DB" -c "CREATE DATABASE $DB OWNER $PG_USER" >/dev/null || fail "격리 DB 생성 실패"
 psql_adm -c "DROP DATABASE IF EXISTS $DAGSTER_DB" -c "CREATE DATABASE $DAGSTER_DB OWNER $PG_USER" >/dev/null || fail "Dagster storage DB 생성 실패"
-"$PYTHON" "$REPO_ROOT/scripts/tvn41c_gc_migrate.py" "$REPO_ROOT" "$DB" || fail "migration 실패"
+# 대상 DB는 KOR_TRAVEL_MAP_PG_DSN으로 넘어간다 — 자격증명을 인자로 주면 ps에 남는다.
+"$PYTHON" "$REPO_ROOT/scripts/tvn41c_gc_migrate.py" "$REPO_ROOT" || fail "migration 실패"
 echo "  head: $(psql_app -c 'SELECT version_num FROM public.alembic_version')"
 
 echo

@@ -5,7 +5,8 @@ graph를 만든 뒤 **migrator role**로, ``KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OW
 아래에서 upgrade한다. 이 선행이 없으면 0095 계열이 ``42501``로 막는다. 마지막에
 API entrypoint가 하는 ``reconcile_runtime_privileges``까지 돌려 배포 상태와 맞춘다.
 
-usage: tvn41c_gc_migrate.py <repo_root> <dbname>
+usage: tvn41c_gc_migrate.py <repo_root>
+대상 DB는 ``KOR_TRAVEL_MAP_PG_DSN``으로 받는다 — 인자로 주면 자격증명이 ps에 남는다.
 """
 
 from __future__ import annotations
@@ -17,9 +18,8 @@ from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
-from sqlalchemy.engine import make_url
-
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
+from sqlalchemy.engine import make_url
 from tests.integration._tvn34_migration_bootstrap import bootstrap_tvn34_migration_roles
 
 

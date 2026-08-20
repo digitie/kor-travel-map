@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 from dagster import Definitions
-
 from kortravelmap.dagster.maintenance import (
     CACHE_TARGET_SNAPSHOT_GC_SCHEDULES,
     cache_target_snapshot_gc_job,
