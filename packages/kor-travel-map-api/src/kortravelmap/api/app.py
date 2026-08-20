@@ -888,6 +888,8 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         original_request_id = (
             meta.get("request_id")
             if isinstance(meta, Mapping) and isinstance(meta.get("request_id"), str)
+            else body.get("request_id")
+            if isinstance(body.get("request_id"), str)
             else None
         )
         headers = {

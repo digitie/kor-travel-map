@@ -168,6 +168,11 @@ lock으로 직렬화했다. 두 domain command의 동시 provision은 한 쪽만
 뒤 같은 두 리뷰어에게 재심한다. PinVi consumer, isolated live UI E2E, no-owner restore drill 전에는
 M05 activation receipt를 계속 만들지 않는다.
 
+HTTP 재심에서 subscription 409의 top-level `request_id`와 replay `X-Request-ID`가 달라지는
+경계를 추가로 닫았다. replay handler는 성공 envelope의 `meta.request_id`를 우선하고, RFC 7807
+problem의 top-level `request_id`를 fallback으로 사용해 stored body와 header가 같은 최초 요청 ID를
+보존한다.
+
 후속 DB 재심은 no-owner restore의 legacy sweep이 reader를 schema owner로 바꾸는 상태와, M05
 membership이 legacy exact-graph oracle에 섞이는 두 P0를 확인했다. `0232`는 reader 부재·전용
 owner·schema owner 세 상태를 명시 처리하고 임시 `USAGE, CREATE`를 모두 회수한다. legacy

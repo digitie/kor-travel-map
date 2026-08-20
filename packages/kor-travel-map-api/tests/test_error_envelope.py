@@ -109,10 +109,14 @@ def test_domain_command_problem_result_replays_its_stored_media_type() -> None:
     async def _domain_problem_replay() -> None:
         raise DomainCommandReplay(record)
 
-    response = TestClient(app).post("/domain-problem-replay")
+    response = TestClient(app).post(
+        "/domain-problem-replay",
+        headers={"X-Request-ID": "request-retry-conflict-93"},
+    )
 
     assert response.status_code == 409
     assert response.headers["idempotency-replayed"] == "true"
+    assert response.headers["x-request-id"] == "request-conflict-93"
     assert response.headers["content-type"].startswith("application/problem+json")
     assert response.json() == record.response_body
 

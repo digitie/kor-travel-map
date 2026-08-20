@@ -79,6 +79,8 @@ owner로 재선언할 때만 임시 schema `CREATE`를 주고 곧 회수하므�
 같은 forward path를 쓴다. subscription 최초 생성은 absence race를 transaction advisory lock으로
 직렬화해 두 동시 command가 각각 `provisioned`/`already_provisioned`로 종료한다. stale 및 existing
 subscription 409은 terminal receipt의 `application/problem+json`을 replay에도 보존한다.
+Problem receipt는 top-level `request_id`를 replay header의 fallback source로 사용하므로 최초 body와
+`X-Request-ID`가 동일하게 남는다.
 
 ### 다음 한 작업
 
