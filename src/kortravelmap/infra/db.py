@@ -95,12 +95,15 @@ _M05_CANDIDATE_PROCEDURE = "feature.record_manual_provider_dedup_candidate(text,
 _M05_DECISION_PROCEDURE = (
     "feature.resolve_manual_provider_dedup_case(uuid,text,text,bigint,bigint,text,text,text,bigint)"
 )
-_M05_LEASE_PROCEDURE = "feature.lease_feature_reference_reconciliation_event(text,uuid)"
+_M05_LEASE_PROCEDURE = "feature.lease_feature_reference_reconciliation_event_v2(text,uuid)"
 _M05_ACK_PROCEDURE = (
-    "feature.ack_feature_reference_reconciliation_event(text,uuid,uuid,bigint,text,text,bigint)"
+    "feature.ack_feature_reference_reconciliation_event_v2(text,uuid,uuid,bigint,text,text,bigint)"
+)
+_M05_SUBSCRIPTION_PROVISION_PROCEDURE = (
+    "feature.provision_feature_reference_reconciliation_subscription(text,bigint,text,bigint)"
 )
 _M05_ACK_PREFLIGHT_FUNCTION = (
-    "feature.preflight_feature_reference_reconciliation_ack(text,uuid,text,text)"
+    "feature.preflight_feature_reference_reconciliation_ack_v2(text,uuid,text,text)"
 )
 _M05_CASE_READ_FUNCTION = "feature.read_manual_provider_dedup_case(uuid)"
 _M05_CASE_LIST_FUNCTION = (
@@ -232,6 +235,7 @@ _EXPECTED_RUNTIME_APPLICATION_PROCEDURES = {
                 _M05_DECISION_PROCEDURE,
                 _M05_LEASE_PROCEDURE,
                 _M05_ACK_PROCEDURE,
+                _M05_SUBSCRIPTION_PROVISION_PROCEDURE,
             }
         )
         | _ADMIN_CURATION_FEATURE_PROCEDURES

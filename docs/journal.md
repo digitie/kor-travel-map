@@ -153,6 +153,15 @@ candidate의 `to_jsonb(notice)`에 내부 generated column이 누출되는 P1을
 candidate SQL은 `valid_during`을 response JSON에서 제외하도록 수정했다. NULL·one-sided·
 equal range, public/admin active predicate와 notice candidate detail 회귀를 추가했으며,
 수정 후 targeted integration 2건을 통과했다.
+## 2026-08-21 — T-VN-M05 forward-only delivery·subscription activation 보정
+
+적대 리뷰에서 이미 배포 가능한 `0231` migration을 고치면 기존 DB가 reader/ACK lock routine을
+잃는다는 문제를 확인했다. 해당 revision은 evidence base로 복원하고, 새
+`0232_m05_reconciliation_delivery`에 ACK common lease lock, admin case reader, typed delivery audit,
+그리고 explicit initial cursor를 받는 AdminBFF subscription provisioning procedure를 두었다.
+restore는 M05 pre role phase 뒤 0232까지 migrate한 뒤에만 ownership/ACL repair를 실행한다.
+fresh PostGIS migration integration과 API route/registry/policy test를 다시 고정했다.
+
 ## 2026-08-21 — T-VN-M05 admin 판정과 service delivery 경쟁 경계
 
 `GET /v1/admin/manual-provider-dedup-cases`, 상세 조회와

@@ -3827,55 +3827,24 @@
         "additionalProperties": false,
         "properties": {
           "event": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/FeatureReferenceReconciliationEventData"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/FeatureReferenceReconciliationEventData"
           },
           "event_sha256": {
-            "anyOf": [
-              {
-                "pattern": "^[0-9a-f]{64}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Event Sha256"
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Event Sha256",
+            "type": "string"
           },
           "lease_epoch": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Lease Epoch"
+            "minimum": 1.0,
+            "title": "Lease Epoch",
+            "type": "integer"
           },
           "lease_expires_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Lease Expires At"
+            "title": "Lease Expires At",
+            "type": "string"
           },
           "outcome": {
-            "enum": [
-              "leased",
-              "empty",
-              "lease_conflict"
-            ],
+            "const": "leased",
             "title": "Outcome",
             "type": "string"
           }
@@ -3884,7 +3853,8 @@
           "outcome",
           "lease_epoch",
           "lease_expires_at",
-          "event"
+          "event",
+          "event_sha256"
         ],
         "title": "FeatureReferenceReconciliationLeaseData",
         "type": "object"

@@ -287,7 +287,7 @@ async def _lease_event(
                 await connection.execute(
                     text(
                         """
-                        CALL feature.lease_feature_reference_reconciliation_event(
+                        CALL feature.lease_feature_reference_reconciliation_event_v2(
                           CAST(:principal_id AS text), CAST(:worker_id AS uuid),
                           NULL::text, NULL::bigint, NULL::timestamptz, NULL::uuid,
                           NULL::bigint, NULL::uuid, NULL::uuid, NULL::text, NULL::jsonb,
@@ -321,7 +321,7 @@ async def _ack_event(
                 await connection.execute(
                     text(
                         """
-                        CALL feature.ack_feature_reference_reconciliation_event(
+                        CALL feature.ack_feature_reference_reconciliation_event_v2(
                           CAST(:principal_id AS text), CAST(:event_id AS uuid),
                           CAST(:worker_id AS uuid), CAST(:lease_epoch AS bigint),
                           CAST(:event_sha256 AS text), CAST(:local_receipt_sha256 AS text),
@@ -360,7 +360,7 @@ async def _preflight_ack(
                 await connection.execute(
                     text(
                         """
-                        SELECT * FROM feature.preflight_feature_reference_reconciliation_ack(
+                        SELECT * FROM feature.preflight_feature_reference_reconciliation_ack_v2(
                           CAST(:principal_id AS text), CAST(:event_id AS uuid),
                           CAST(:event_sha256 AS text), CAST(:local_receipt_sha256 AS text)
                         )
@@ -379,6 +379,75 @@ async def _preflight_ack(
         )
 
 
+async def test_reconciliation_subscription_is_provisioned_only_by_admin_writer(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """paired consumer는 raw INSERT 없이 immutable initial cursor를 등록한다."""
+
+    api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
+    principal_id = "service:feature-reference-reconciliation"
+    command_id = await _open_command(
+        migrated_engine,
+        actor="admin:m05-subscription",
+        operation="admin.feature-reference-reconciliation-subscription.provision.v1",
+    )
+    try:
+        async with api.begin() as connection:
+            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
+            provisioned = dict(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            CALL feature.provision_feature_reference_reconciliation_subscription(
+                              :principal_id, 0, 'admin:m05-subscription', :command_id,
+                              NULL::text, NULL::bigint
+                            )
+                            """
+                        ),
+                        {"principal_id": principal_id, "command_id": command_id},
+                    )
+                )
+                .mappings()
+                .one()
+            )
+        assert provisioned == {
+            "o_outcome": "provisioned",
+            "o_initial_event_sequence": 0,
+        }
+
+        duplicate_command_id = await _open_command(
+            migrated_engine,
+            actor="admin:m05-subscription",
+            operation="admin.feature-reference-reconciliation-subscription.provision.v1",
+        )
+        async with api.begin() as connection:
+            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
+            existing = dict(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            CALL feature.provision_feature_reference_reconciliation_subscription(
+                              :principal_id, 0, 'admin:m05-subscription', :command_id,
+                              NULL::text, NULL::bigint
+                            )
+                            """
+                        ),
+                        {"principal_id": principal_id, "command_id": duplicate_command_id},
+                    )
+                )
+                .mappings()
+                .one()
+            )
+        assert existing == {
+            "o_outcome": "already_provisioned",
+            "o_initial_event_sequence": 0,
+        }
+    finally:
+        await api.dispose()
+
+
 async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_only(
     migrated_engine: AsyncEngine,
 ) -> None:
@@ -386,6 +455,13 @@ async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_on
     api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
     dagster = _runtime_engine(migrated_engine, login="ktm_feature_dagster_runtime")
     try:
+        not_ready = await _lease_event(
+            api,
+            principal_id=f"service:m05-unprovisioned-{uuid4().hex}",
+            worker_id=uuid4(),
+        )
+        assert not_ready["o_outcome"] == "not_ready"
+
         async with api.connect() as connection:
             await connection.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
             with pytest.raises(DBAPIError) as denied:

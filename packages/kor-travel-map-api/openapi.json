@@ -15572,6 +15572,45 @@
         "title": "FeaturePriceSnapshotResponse",
         "type": "object"
       },
+      "FeatureReferenceReconciliationAckAuditData": {
+        "additionalProperties": false,
+        "properties": {
+          "acked_at": {
+            "format": "date-time",
+            "title": "Acked At",
+            "type": "string"
+          },
+          "command_id": {
+            "minimum": 1.0,
+            "title": "Command Id",
+            "type": "integer"
+          },
+          "event_id": {
+            "format": "uuid",
+            "title": "Event Id",
+            "type": "string"
+          },
+          "event_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Event Sha256",
+            "type": "string"
+          },
+          "local_receipt_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Local Receipt Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "event_sha256",
+          "local_receipt_sha256",
+          "command_id",
+          "acked_at"
+        ],
+        "title": "FeatureReferenceReconciliationAckAuditData",
+        "type": "object"
+      },
       "FeatureReferenceReconciliationAckData": {
         "additionalProperties": false,
         "properties": {
@@ -15762,55 +15801,24 @@
         "additionalProperties": false,
         "properties": {
           "event": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/FeatureReferenceReconciliationEventData"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/FeatureReferenceReconciliationEventData"
           },
           "event_sha256": {
-            "anyOf": [
-              {
-                "pattern": "^[0-9a-f]{64}$",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Event Sha256"
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Event Sha256",
+            "type": "string"
           },
           "lease_epoch": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Lease Epoch"
+            "minimum": 1.0,
+            "title": "Lease Epoch",
+            "type": "integer"
           },
           "lease_expires_at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Lease Expires At"
+            "title": "Lease Expires At",
+            "type": "string"
           },
           "outcome": {
-            "enum": [
-              "leased",
-              "empty",
-              "lease_conflict"
-            ],
+            "const": "leased",
             "title": "Outcome",
             "type": "string"
           }
@@ -15819,7 +15827,8 @@
           "outcome",
           "lease_epoch",
           "lease_expires_at",
-          "event"
+          "event",
+          "event_sha256"
         ],
         "title": "FeatureReferenceReconciliationLeaseData",
         "type": "object"
@@ -15839,6 +15848,134 @@
           "meta"
         ],
         "title": "FeatureReferenceReconciliationLeaseResponse",
+        "type": "object"
+      },
+      "FeatureReferenceReconciliationSubscriptionDeliveryData": {
+        "additionalProperties": false,
+        "properties": {
+          "ack": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FeatureReferenceReconciliationAckAuditData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "acked_through_sequence": {
+            "minimum": 0.0,
+            "title": "Acked Through Sequence",
+            "type": "integer"
+          },
+          "initial_event_sequence": {
+            "minimum": 0.0,
+            "title": "Initial Event Sequence",
+            "type": "integer"
+          },
+          "lease_epoch": {
+            "minimum": 0.0,
+            "title": "Lease Epoch",
+            "type": "integer"
+          },
+          "lease_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lease Expires At"
+          },
+          "oldest_unacked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oldest Unacked At"
+          },
+          "principal_id": {
+            "title": "Principal Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "principal_id",
+          "initial_event_sequence",
+          "acked_through_sequence",
+          "lease_epoch",
+          "lease_expires_at",
+          "oldest_unacked_at",
+          "ack"
+        ],
+        "title": "FeatureReferenceReconciliationSubscriptionDeliveryData",
+        "type": "object"
+      },
+      "FeatureReferenceReconciliationSubscriptionProvisionData": {
+        "additionalProperties": false,
+        "properties": {
+          "initial_event_sequence": {
+            "minimum": 0.0,
+            "title": "Initial Event Sequence",
+            "type": "integer"
+          },
+          "outcome": {
+            "const": "provisioned",
+            "title": "Outcome",
+            "type": "string"
+          },
+          "principal_id": {
+            "const": "service:feature-reference-reconciliation",
+            "title": "Principal Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome",
+          "principal_id",
+          "initial_event_sequence"
+        ],
+        "title": "FeatureReferenceReconciliationSubscriptionProvisionData",
+        "type": "object"
+      },
+      "FeatureReferenceReconciliationSubscriptionProvisionInput": {
+        "additionalProperties": false,
+        "properties": {
+          "initial_event_sequence": {
+            "minimum": 0.0,
+            "title": "Initial Event Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "initial_event_sequence"
+        ],
+        "title": "FeatureReferenceReconciliationSubscriptionProvisionInput",
+        "type": "object"
+      },
+      "FeatureReferenceReconciliationSubscriptionProvisionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeatureReferenceReconciliationSubscriptionProvisionData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeatureReferenceReconciliationSubscriptionProvisionResponse",
         "type": "object"
       },
       "FeatureRequestApprovalInput": {
@@ -18506,13 +18643,97 @@
         "title": "ManualProviderDedupCaseDecisionResponse",
         "type": "object"
       },
+      "ManualProviderDedupCaseDetailData": {
+        "additionalProperties": false,
+        "properties": {
+          "case_id": {
+            "format": "uuid",
+            "title": "Case Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "event": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FeatureReferenceReconciliationEventData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "evidence_fingerprint": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Evidence Fingerprint",
+            "type": "string"
+          },
+          "manual_feature": {
+            "additionalProperties": true,
+            "title": "Manual Feature",
+            "type": "object"
+          },
+          "provider_feature": {
+            "additionalProperties": true,
+            "title": "Provider Feature",
+            "type": "object"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          },
+          "scores": {
+            "additionalProperties": true,
+            "title": "Scores",
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "terminal"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "subscriptions": {
+            "items": {
+              "$ref": "#/components/schemas/FeatureReferenceReconciliationSubscriptionDeliveryData"
+            },
+            "title": "Subscriptions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "case_id",
+          "status",
+          "created_at",
+          "evidence_fingerprint",
+          "manual_feature",
+          "provider_feature",
+          "scores",
+          "resolution",
+          "event",
+          "subscriptions"
+        ],
+        "title": "ManualProviderDedupCaseDetailData",
+        "type": "object"
+      },
       "ManualProviderDedupCaseDetailResponse": {
         "additionalProperties": false,
         "properties": {
           "data": {
-            "additionalProperties": true,
-            "title": "Data",
-            "type": "object"
+            "$ref": "#/components/schemas/ManualProviderDedupCaseDetailData"
           },
           "meta": {
             "$ref": "#/components/schemas/Meta"
@@ -32939,6 +33160,95 @@
         ]
       }
     },
+    "/v1/admin/feature-reference-reconciliation-subscriptions": {
+      "post": {
+        "description": "paired consumer의 immutable initial cursor를 admin receipt로 한 번만 등록한다.",
+        "operationId": "provision_feature_reference_reconciliation_subscription_route_v1_admin_feature_reference_reconciliation_subscriptions_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeatureReferenceReconciliationSubscriptionProvisionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureReferenceReconciliationSubscriptionProvisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "AdminBFF 거부"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "subscription이 이미 있어 initial cursor를 변경할 수 없음"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "initial cursor 입력 오류"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Provision Feature Reference Reconciliation Subscription Route",
+        "tags": [
+          "admin-feature-reference-reconciliation-subscriptions"
+        ]
+      }
+    },
     "/v1/admin/feature-requests": {
       "get": {
         "description": "Map admin이 pending queue를 UUID를 알기 전부터 발견할 수 있는 목록.",
@@ -37550,16 +37860,6 @@
               }
             },
             "description": "decision 입력 오류"
-          },
-          "503": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "admin destructive boundary 비활성"
           },
           "default": {
             "content": {

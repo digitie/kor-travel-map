@@ -55,6 +55,9 @@ from kortravelmap.api.routers.feature_alias_maps import (
     service_router as service_feature_alias_maps_router,
 )
 from kortravelmap.api.routers.feature_reference_reconciliations import (
+    activation_router as admin_feature_reference_reconciliation_subscriptions_router,
+)
+from kortravelmap.api.routers.feature_reference_reconciliations import (
     admin_router as admin_manual_provider_dedup_cases_router,
 )
 from kortravelmap.api.routers.feature_reference_reconciliations import (
@@ -106,6 +109,7 @@ __all__ = [
     "feature_enrichment_review_router",
     "poi_cache_targets_router",
     "admin_feature_requests_router",
+    "admin_feature_reference_reconciliation_subscriptions_router",
     "admin_manual_provider_dedup_cases_router",
     "features_router",
     "categories_router",

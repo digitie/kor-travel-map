@@ -222,6 +222,7 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/service/feature-requests": RoutePolicy.SERVICE,
     "/v1/service/feature-reference-reconciliations": RoutePolicy.SERVICE,
     "/v1/service/feature-reference-reconciliations/{event_id}/acks": RoutePolicy.SERVICE,
+    "/v1/admin/feature-reference-reconciliation-subscriptions": RoutePolicy.OPERATOR,
     # C6c Map-owned cancel-probe service API — generic ServiceToken이 아닌 exact
     # Docker Manager ops:fixture principal을 요구하지만 service artifact에만 노출한다.
     "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}": RoutePolicy.SERVICE,

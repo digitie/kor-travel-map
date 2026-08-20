@@ -26,12 +26,14 @@ __all__ = [
     "FeatureReferenceReconciliationError",
     "FeatureReferenceReconciliationLease",
     "FeatureReferenceReconciliationPreflight",
+    "FeatureReferenceReconciliationUnavailable",
     "FeatureReferenceReconciliationValidationError",
     "ack_feature_reference_reconciliation_event",
     "get_manual_provider_dedup_case",
     "lease_feature_reference_reconciliation_event",
     "list_manual_provider_dedup_cases",
     "preflight_feature_reference_reconciliation_ack",
+    "provision_feature_reference_reconciliation_subscription",
     "resolve_manual_provider_dedup_case",
 ]
 
@@ -42,6 +44,10 @@ class FeatureReferenceReconciliationError(RuntimeError):
 
 class FeatureReferenceReconciliationValidationError(ValueError):
     """allow-list된 M05 input/lease conflict 진단이다."""
+
+
+class FeatureReferenceReconciliationUnavailable(RuntimeError):
+    """paired consumer subscription이 아직 provision되지 않았다."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,6 +78,12 @@ class FeatureReferenceReconciliationAck:
 
 
 @dataclass(frozen=True, slots=True)
+class FeatureReferenceReconciliationSubscriptionProvision:
+    outcome: str
+    initial_event_sequence: int | None
+
+
+@dataclass(frozen=True, slots=True)
 class ManualProviderDedupCase:
     case_id: UUID
     status: str
@@ -97,7 +109,7 @@ class ManualProviderDedupCaseResolution:
 
 
 _LEASE_SQL: Final = """
-CALL feature.lease_feature_reference_reconciliation_event(
+CALL feature.lease_feature_reference_reconciliation_event_v2(
     CAST(:principal_id AS text), CAST(:worker_id AS uuid),
     NULL::text, NULL::bigint, NULL::timestamptz, NULL::uuid,
     NULL::bigint, NULL::uuid, NULL::uuid, NULL::text, NULL::jsonb,
@@ -105,17 +117,23 @@ CALL feature.lease_feature_reference_reconciliation_event(
 )
 """
 _ACK_PREFLIGHT_SQL: Final = """
-SELECT * FROM feature.preflight_feature_reference_reconciliation_ack(
+SELECT * FROM feature.preflight_feature_reference_reconciliation_ack_v2(
     CAST(:principal_id AS text), CAST(:event_id AS uuid),
     CAST(:event_sha256 AS text), CAST(:local_receipt_sha256 AS text)
 )
 """
 _ACK_SQL: Final = """
-CALL feature.ack_feature_reference_reconciliation_event(
+CALL feature.ack_feature_reference_reconciliation_event_v2(
     CAST(:principal_id AS text), CAST(:event_id AS uuid), CAST(:worker_id AS uuid),
     CAST(:lease_epoch AS bigint), CAST(:event_sha256 AS text),
     CAST(:local_receipt_sha256 AS text), CAST(:command_id AS bigint),
     NULL::text, NULL::bigint
+)
+"""
+_SUBSCRIPTION_PROVISION_SQL: Final = """
+CALL feature.provision_feature_reference_reconciliation_subscription(
+    CAST(:principal_id AS text), CAST(:initial_event_sequence AS bigint),
+    CAST(:actor AS text), CAST(:command_id AS bigint), NULL::text, NULL::bigint
 )
 """
 _LIST_CASES_SQL: Final = """
@@ -147,6 +165,10 @@ def _procedure_error(error: DBAPIError) -> NoReturn:
     constraint = getattr(
         getattr(getattr(error, "orig", None), "diag", None), "constraint_name", None
     )
+    if sqlstate == "P0002":
+        raise FeatureReferenceReconciliationUnavailable(
+            "Feature 참조 reconciliation subscription이 아직 provision되지 않았습니다."
+        ) from error
     if constraint in {
         "ck_m05_reconciliation_ack_input",
         "ck_m05_reconciliation_lease_input",
@@ -156,6 +178,8 @@ def _procedure_error(error: DBAPIError) -> NoReturn:
         "ck_m05_case_read_input",
         "ck_m05_decision_input",
         "ck_m05_decision_command",
+        "ck_m05_subscription_provision_input",
+        "ck_m05_subscription_provision_command",
     } or sqlstate in {"22003", "22P02"}:
         raise FeatureReferenceReconciliationValidationError(
             "Feature 참조 reconciliation 요청 값이 올바르지 않습니다."
@@ -193,7 +217,7 @@ async def lease_feature_reference_reconciliation_event(
     except DBAPIError as error:
         _procedure_error(error)
     outcome = row.get("o_outcome")
-    if outcome not in {"leased", "empty", "lease_conflict"}:
+    if outcome not in {"leased", "empty", "lease_conflict", "not_ready"}:
         raise FeatureReferenceReconciliationError("lease receipt outcome이 올바르지 않습니다.")
     payload = row.get("o_event_payload")
     if payload is not None and not isinstance(payload, Mapping):
@@ -294,6 +318,43 @@ async def ack_feature_reference_reconciliation_event(
     return FeatureReferenceReconciliationAck(
         outcome=outcome,
         acked_through_sequence=_int_or_none(row.get("o_acked_through_sequence")),
+    )
+
+
+async def provision_feature_reference_reconciliation_subscription(
+    session: AsyncSession,
+    *,
+    principal_id: str,
+    initial_event_sequence: int,
+    actor: str,
+    command_id: int,
+) -> FeatureReferenceReconciliationSubscriptionProvision:
+    try:
+        row = (
+            (
+                await session.execute(
+                    text(_SUBSCRIPTION_PROVISION_SQL),
+                    {
+                        "principal_id": principal_id,
+                        "initial_event_sequence": initial_event_sequence,
+                        "actor": actor,
+                        "command_id": command_id,
+                    },
+                )
+            )
+            .mappings()
+            .one()
+        )
+    except DBAPIError as error:
+        _procedure_error(error)
+    outcome = row.get("o_outcome")
+    if outcome not in {"provisioned", "already_provisioned"}:
+        raise FeatureReferenceReconciliationError(
+            "Feature 참조 reconciliation subscription receipt가 올바르지 않습니다."
+        )
+    return FeatureReferenceReconciliationSubscriptionProvision(
+        outcome=outcome,
+        initial_event_sequence=_int_or_none(row.get("o_initial_event_sequence")),
     )
 
 

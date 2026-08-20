@@ -181,6 +181,11 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
         replay_headers=("Idempotency-Replayed",),
         transaction_isolation="read-committed",
     ),
+    ("POST", "/v1/admin/feature-reference-reconciliation-subscriptions"): _domain(
+        "admin.feature-reference-reconciliation-subscription.provision.v1",
+        _MUTATION_RESULT,
+        transaction_isolation="read-committed",
+    ),
     ("POST", "/v1/admin/manual-provider-dedup-cases/{case_id}/decisions"): _domain(
         "admin.manual-provider-dedup-case.resolve.v1",
         _MUTATION_RESULT,

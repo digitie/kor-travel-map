@@ -443,8 +443,13 @@ _M05_WRITER_ACL = (
     "REVOKE ALL ON FUNCTION feature.preflight_feature_reference_reconciliation_ack("
     "text, uuid, text, text) FROM PUBLIC, ktm_feature_runtime, "
     "ktm_feature_dagster_runtime, ktm_manual_provider_dedup_detector_executor, "
-    "ktm_manual_provider_dedup_admin_executor",
-    "GRANT EXECUTE ON FUNCTION feature.preflight_feature_reference_reconciliation_ack("
+    "ktm_manual_provider_dedup_admin_executor, "
+    "ktm_feature_reference_reconciliation_service_executor",
+    "REVOKE ALL ON FUNCTION feature.preflight_feature_reference_reconciliation_ack_v2("
+    "text, uuid, text, text) "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_dagster_runtime, "
+    "ktm_manual_provider_dedup_detector_executor, ktm_manual_provider_dedup_admin_executor",
+    "GRANT EXECUTE ON FUNCTION feature.preflight_feature_reference_reconciliation_ack_v2("
     "text, uuid, text, text) "
     "TO ktm_feature_reference_reconciliation_service_executor",
     "REVOKE ALL ON FUNCTION feature.list_manual_provider_dedup_cases("
@@ -470,14 +475,23 @@ _M05_WRITER_ACL = (
     "GRANT EXECUTE ON PROCEDURE feature.resolve_manual_provider_dedup_case("
     "uuid, text, text, bigint, bigint, text, text, text, bigint) "
     "TO ktm_manual_provider_dedup_admin_executor",
+    "REVOKE ALL ON PROCEDURE feature.provision_feature_reference_reconciliation_subscription("
+    "text, bigint, text, bigint) FROM PUBLIC, ktm_feature_runtime, "
+    "ktm_feature_dagster_runtime, ktm_manual_provider_dedup_detector_executor, "
+    "ktm_feature_reference_reconciliation_service_executor",
+    "GRANT EXECUTE ON PROCEDURE feature.provision_feature_reference_reconciliation_subscription("
+    "text, bigint, text, bigint) TO ktm_manual_provider_dedup_admin_executor",
     "REVOKE ALL ON PROCEDURE feature.lease_feature_reference_reconciliation_event("
+    "text, uuid), feature.lease_feature_reference_reconciliation_event_v2("
     "text, uuid), feature.ack_feature_reference_reconciliation_event("
+    "text, uuid, uuid, bigint, text, text, bigint), "
+    "feature.ack_feature_reference_reconciliation_event_v2("
     "text, uuid, uuid, bigint, text, text, bigint) FROM PUBLIC, "
     "ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime, "
     "ktm_manual_provider_dedup_detector_executor, "
     "ktm_manual_provider_dedup_admin_executor",
-    "GRANT EXECUTE ON PROCEDURE feature.lease_feature_reference_reconciliation_event("
-    "text, uuid), feature.ack_feature_reference_reconciliation_event("
+    "GRANT EXECUTE ON PROCEDURE feature.lease_feature_reference_reconciliation_event_v2("
+    "text, uuid), feature.ack_feature_reference_reconciliation_event_v2("
     "text, uuid, uuid, bigint, text, text, bigint) "
     "TO ktm_feature_reference_reconciliation_service_executor",
 )

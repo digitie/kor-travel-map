@@ -10,6 +10,7 @@ import pytest
 from fastapi import Request, Response
 from kortravelmap.infra.feature_reference_reconciliation_repo import (
     FeatureReferenceReconciliationPreflight,
+    FeatureReferenceReconciliationSubscriptionProvision,
     ManualProviderDedupCase,
     ManualProviderDedupCaseResolution,
 )
@@ -88,6 +89,8 @@ def test_reconciliation_service_routes_are_mounted_in_openapi() -> None:
     ack = spec["paths"]["/v1/service/feature-reference-reconciliations/{event_id}/acks"]["post"]
     assert ack["responses"]["409"]
     assert ack["security"] == [{"ServiceToken": []}]
+    activation = spec["paths"]["/v1/admin/feature-reference-reconciliation-subscriptions"]
+    assert "post" in activation
 
 
 @pytest.mark.asyncio
@@ -145,6 +148,49 @@ async def test_semantic_ack_replay_preflights_before_domain_command_claim(
     preflight.assert_awaited_once()
     assert calls == ["idempotency-key", "receipt"]
     claim.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_subscription_provision_is_durable_admin_domain_command(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    command = DomainCommandHandle(
+        command_id=92,
+        actor="admin:reviewer",
+        operation="admin.feature-reference-reconciliation-subscription.provision.v1",
+        idempotency_key=str(_COMMAND_KEY),
+        request_fingerprint="e" * 64,
+    )
+    provision = AsyncMock(
+        return_value=FeatureReferenceReconciliationSubscriptionProvision(
+            outcome="provisioned", initial_event_sequence=7
+        )
+    )
+    complete = AsyncMock()
+    monkeypatch.setattr(router, "begin_domain_command", AsyncMock(return_value=command))
+    monkeypatch.setattr(
+        router.reconciliation_repo,
+        "provision_feature_reference_reconciliation_subscription",
+        provision,
+    )
+    monkeypatch.setattr(router, "complete_domain_command", complete)
+
+    result = await router.provision_feature_reference_reconciliation_subscription_route(
+        body=router.FeatureReferenceReconciliationSubscriptionProvisionInput(
+            initial_event_sequence=7
+        ),
+        request=_request(),
+        idempotency_key=_COMMAND_KEY,
+        context=_admin_context(),
+        session=_Session(),  # type: ignore[arg-type]
+    )
+
+    assert isinstance(
+        result, router.FeatureReferenceReconciliationSubscriptionProvisionResponse
+    )
+    assert result.data.initial_event_sequence == 7
+    provision.assert_awaited_once()
+    complete.assert_awaited_once()
 
 
 @pytest.mark.asyncio

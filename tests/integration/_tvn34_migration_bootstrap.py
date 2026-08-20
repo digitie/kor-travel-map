@@ -581,7 +581,7 @@ async def repair_tvn_m05_role_phase(async_dsn: str) -> None:
                     ]
                 },
             )
-            if version != "0231_m05_manual_provider_dedup" or relation_count != 6:
+            if version != "0232_m05_reconciliation_delivery" or relation_count != 6:
                 raise RuntimeError("M05 test post-upgrade marker is incomplete")
             await connection.execute(
                 text(
@@ -662,8 +662,29 @@ async def repair_tvn_m05_role_phase(async_dsn: str) -> None:
             )
             await connection.execute(
                 text(
+                    "ALTER PROCEDURE feature.lease_feature_reference_reconciliation_event_v2("
+                    "text, uuid) OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
                     "ALTER PROCEDURE feature.ack_feature_reference_reconciliation_event("
                     "text, uuid, uuid, bigint, text, text, bigint) "
+                    "OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER PROCEDURE feature.ack_feature_reference_reconciliation_event_v2("
+                    "text, uuid, uuid, bigint, text, text, bigint) "
+                    "OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER PROCEDURE "
+                    "feature.provision_feature_reference_reconciliation_subscription("
+                    "text, bigint, text, bigint) "
                     "OWNER TO ktm_manual_provider_dedup_procedure_owner"
                 )
             )
@@ -684,6 +705,14 @@ async def repair_tvn_m05_role_phase(async_dsn: str) -> None:
                 text(
                     "ALTER FUNCTION "
                     "feature.preflight_feature_reference_reconciliation_ack("
+                    "text, uuid, text, text) "
+                    "OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER FUNCTION "
+                    "feature.preflight_feature_reference_reconciliation_ack_v2("
                     "text, uuid, text, text) "
                     "OWNER TO ktm_manual_provider_dedup_procedure_owner"
                 )

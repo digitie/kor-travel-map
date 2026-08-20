@@ -1,6 +1,7 @@
 #!/usr/bin/env sh
 # T-VN-M05 — superuser가 M05 NOLOGIN graph를 완성한 뒤 restricted migrator가
-# 오직 0231만 적용한다. API 기동이 이 choreography를 우회해 head를 만들 수 없다.
+# 0231 기반 증거 테이블 뒤 delivery extension 0232까지 적용한다. API 기동이 이
+# choreography를 우회해 head를 만들 수 없다.
 set -eu
 
 migrator_dsn="${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required}"
@@ -71,6 +72,12 @@ async def main() -> int:
         and role_count == len(_ROLES)
         and relation_count == len(_RELATIONS)
     ):
+        return 2
+    if (
+        revision == "0232_m05_reconciliation_delivery"
+        and role_count == len(_ROLES)
+        and relation_count == len(_RELATIONS)
+    ):
         return 0
     print("M05 migration marker is not a retryable boundary", file=sys.stderr)
     return 2
@@ -83,7 +90,7 @@ marker_status=$?
 set -e
 case "$marker_status" in
   0) exit 0 ;;
-  1) alembic upgrade 0231_m05_manual_provider_dedup ;;
+  1|2) alembic upgrade 0232_m05_reconciliation_delivery ;;
   2)
     echo "M05 migration marker is not a retryable boundary" >&2
     exit 1

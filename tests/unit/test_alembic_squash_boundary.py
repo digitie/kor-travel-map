@@ -58,6 +58,7 @@ _EXPECTED_REVISIONS = (
     "0228_m03_manual_curation",
     "0230_m04_feature_request_queue",
     "0231_m05_manual_provider_dedup",
+    "0232_m05_reconciliation_delivery",
 )
 #: `alembic_version.version_num`의 컬럼 폭(alembic 기본값).
 _ALEMBIC_VERSION_NUM_LENGTH = 32

@@ -32,6 +32,10 @@ raw table DML은 runtime login에서 거부한다.
 revision은 `0231_m05_manual_provider_dedup`이고 정확한
 `down_revision = 0230_tvn_m04_feature_request_queue`다. C05→M01→M04 graph가 착지한 뒤에만 적용한다.
 
+적용된 evidence revision은 변경하지 않는다. service ACK lease lock, admin evidence reader 및 paired
+consumer의 immutable initial cursor provisioning은 후속
+`0232_m05_reconciliation_delivery`에서 forward-only로 추가한다.
+
 | relation | 한 행의 의미 | 핵심 불변식 |
 | --- | --- | --- |
 | `ops.manual_provider_dedup_cases` | 특정 manual/provider Feature와 그때의 evidence fingerprint가 만든 한 episode | manual origin/claim, provider dataset/entity와 immutable source record/raw hash, 당시 head snapshot, 양 UUID·row revision, canonical snapshots, score components/version/distance를 생성 시점 값으로 보존한다. 같은 **미종결** fingerprint만 idempotent다. |
@@ -196,7 +200,8 @@ pending correction/closure의 target은 자동 재지정하지 않아 잘못된 
 M05는 detector, admin decision, reconciliation service를 분리한 executor role과 하나의
 SECURITY DEFINER owner를 둔다. two-phase choreography는 `0230` graph/marker 검증 → **M05 role 전부
 없음** 검증 → M05 role provisioning(새 NOLOGIN/NOINHERIT owner·detector·admin·service executor만,
-object grant 없음) → `0231` upgrade → M05 ownership/ACL/routine marker repair/검증 순서다.
+object grant 없음) → `0231` evidence upgrade → `0232` delivery upgrade → M05 ownership/ACL/routine marker
+repair/검증 순서다.
 bootstrap boundary script, `postgres-role-bootstrap.sh`, fresh integration helper와 no-owner/no-privileges
 restore repair가 같은 choreography와 partial-marker fail-loud를 공유한다. role 일부, M05 relation 일부,
 routine 일부는 어느 phase에서도 허용하지 않는다. pre-0226 frozen graph는 건드리지 않는다. runtime

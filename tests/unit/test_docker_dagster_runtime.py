@@ -618,7 +618,7 @@ def test_tvn_m01_role_phase_runs_only_after_legacy_0225_boundary() -> None:
     assert "M05 migration marker is not a retryable boundary" in m05_migration_script
     assert "set +e" in m05_migration_script
     assert "marker_status=$?" in m05_migration_script
-    assert "alembic upgrade 0231_m05_manual_provider_dedup" in m05_migration_script
+    assert "alembic upgrade 0232_m05_reconciliation_delivery" in m05_migration_script
     dockerfile = _script("docker/api.Dockerfile")
     assert "migrate-to-m01-bootstrap-boundary.sh" in dockerfile
     assert "migrate-to-m05-bootstrap-boundary.sh" in dockerfile

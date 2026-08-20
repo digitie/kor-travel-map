@@ -290,6 +290,9 @@ repair_v3_restored_manual_feature_boundary() {
 
   run_restore_bootstrap_phase legacy "$restore_bootstrap_dsn"
   run_restore_bootstrap_phase m05-pre "$restore_bootstrap_dsn"
+  KOR_TRAVEL_MAP_MIGRATOR_PG_DSN="$restore_migrator_dsn" \
+    "${compose[@]}" run --rm --no-deps --entrypoint /bin/sh \
+      api ./docker/migrate-m05.sh
   run_restore_bootstrap_phase m05-repair "$restore_bootstrap_dsn"
   KOR_TRAVEL_MAP_PG_DSN="$restore_migrator_dsn" \
     "${compose[@]}" run --rm --no-deps --entrypoint python \

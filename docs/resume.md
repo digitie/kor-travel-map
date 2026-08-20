@@ -74,6 +74,9 @@ prod 덤프 사본(features 1,008,852까지 완전 일치)에서 `0225→0229→
 ## 2026-08-21 — T-VN-M05 Map admin 판단·service delivery contract
 
 M05 Map 쪽 admin case 목록/상세/판정과 reconciliation service lease/ACK contract를 완성했다.
+이미 적용 가능한 `0231` evidence revision은 바꾸지 않고, reader·subscription provisioning·ACK common
+lease lock은 forward-only `0232_m05_reconciliation_delivery`로 분리했다. subscription은 AdminBFF
+domain-command receipt와 명시 initial cursor 없이는 만들 수 없다.
 admin은 raw evidence relation을 읽지 않고 전용 SECURITY DEFINER reader만 호출한다. list는 stable
 keyset page, detail은 immutable evidence와 subscription별 unacked 상태, decision은 provider-only
 survivor·expected fingerprint/revision·reason을 모두 다시 대조한다. `kept`는 AdminBFF만,

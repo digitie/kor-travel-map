@@ -4,12 +4,12 @@ from __future__ import annotations
 
 from datetime import datetime
 from time import perf_counter
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, cast
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response, status
 from kortravelmap.infra import feature_reference_reconciliation_repo as reconciliation_repo
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.responses import JSONResponse
@@ -30,7 +30,7 @@ from kortravelmap.api.domain_command_service import (
 )
 from kortravelmap.api.response import Meta, make_meta, request_id
 
-__all__ = ["admin_router", "service_router"]
+__all__ = ["activation_router", "admin_router", "service_router"]
 
 service_router = APIRouter(
     prefix="/service/feature-reference-reconciliations",
@@ -39,6 +39,10 @@ service_router = APIRouter(
 admin_router = APIRouter(
     prefix="/admin/manual-provider-dedup-cases",
     tags=["admin-manual-provider-dedup-cases"],
+)
+activation_router = APIRouter(
+    prefix="/admin/feature-reference-reconciliation-subscriptions",
+    tags=["admin-feature-reference-reconciliation-subscriptions"],
 )
 
 
@@ -81,11 +85,11 @@ class FeatureReferenceReconciliationEventData(BaseModel):
 class FeatureReferenceReconciliationLeaseData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    outcome: Literal["leased", "empty", "lease_conflict"]
-    lease_epoch: int | None
-    lease_expires_at: str | None
-    event: FeatureReferenceReconciliationEventData | None
-    event_sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    outcome: Literal["leased"]
+    lease_epoch: int = Field(ge=1)
+    lease_expires_at: str
+    event: FeatureReferenceReconciliationEventData
+    event_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
 class FeatureReferenceReconciliationLeaseResponse(BaseModel):
@@ -106,6 +110,27 @@ class FeatureReferenceReconciliationAckResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: FeatureReferenceReconciliationAckData
+    meta: Meta
+
+
+class FeatureReferenceReconciliationSubscriptionProvisionInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    initial_event_sequence: int = Field(ge=0)
+
+
+class FeatureReferenceReconciliationSubscriptionProvisionData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    outcome: Literal["provisioned"]
+    principal_id: Literal["service:feature-reference-reconciliation"]
+    initial_event_sequence: int = Field(ge=0)
+
+
+class FeatureReferenceReconciliationSubscriptionProvisionResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: FeatureReferenceReconciliationSubscriptionProvisionData
     meta: Meta
 
 
@@ -157,10 +182,47 @@ class ManualProviderDedupCasePageResponse(BaseModel):
     meta: Meta
 
 
+class FeatureReferenceReconciliationAckAuditData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: UUID
+    event_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    local_receipt_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    command_id: int = Field(ge=1)
+    acked_at: datetime
+
+
+class FeatureReferenceReconciliationSubscriptionDeliveryData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    principal_id: str
+    initial_event_sequence: int = Field(ge=0)
+    acked_through_sequence: int = Field(ge=0)
+    lease_epoch: int = Field(ge=0)
+    lease_expires_at: datetime | None
+    oldest_unacked_at: datetime | None
+    ack: FeatureReferenceReconciliationAckAuditData | None
+
+
+class ManualProviderDedupCaseDetailData(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    case_id: UUID
+    status: Literal["pending", "terminal"]
+    created_at: datetime
+    evidence_fingerprint: str = Field(pattern=r"^[0-9a-f]{64}$")
+    manual_feature: dict[str, Any]
+    provider_feature: dict[str, Any]
+    scores: dict[str, Any]
+    resolution: dict[str, Any] | None
+    event: FeatureReferenceReconciliationEventData | None
+    subscriptions: list[FeatureReferenceReconciliationSubscriptionDeliveryData]
+
+
 class ManualProviderDedupCaseDetailResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    data: dict[str, Any]
+    data: ManualProviderDedupCaseDetailData
     meta: Meta
 
 
@@ -214,17 +276,17 @@ def _lease_response_data(
             or receipt.event_payload is None
             or receipt.event_sha256 is None
             or receipt.occurred_at is None
+            or receipt.lease_epoch is None
+            or receipt.lease_expires_at is None
         ):
             raise reconciliation_repo.FeatureReferenceReconciliationError(
                 "leased receipt가 불완전합니다."
             )
         event = FeatureReferenceReconciliationEventData.model_validate(receipt.event_payload)
     return FeatureReferenceReconciliationLeaseData(
-        outcome=receipt.outcome,
-        lease_epoch=receipt.lease_epoch,
-        lease_expires_at=(
-            receipt.lease_expires_at.isoformat() if receipt.lease_expires_at is not None else None
-        ),
+        outcome="leased",
+        lease_epoch=cast(int, receipt.lease_epoch),
+        lease_expires_at=cast(datetime, receipt.lease_expires_at).isoformat(),
         event=event,
         event_sha256=receipt.event_sha256,
     )
@@ -260,6 +322,17 @@ def _ack_conflict(outcome: str) -> HTTPException:
             "details": {},
         },
     )
+
+
+def _subscription_provision_conflict_body() -> dict[str, Any]:
+    return {
+        "type": "https://kor-travel-map/errors/feature-reference-reconciliation-subscription-exists",
+        "title": "Feature 참조 reconciliation subscription이 이미 있습니다.",
+        "status": status.HTTP_409_CONFLICT,
+        "detail": "기존 immutable initial cursor를 바꾸지 않습니다.",
+        "code": "FEATURE_REFERENCE_RECONCILIATION_SUBSCRIPTION_EXISTS",
+        "errors": [],
+    }
 
 
 @service_router.get(
@@ -298,6 +371,15 @@ async def lease_feature_reference_reconciliation_event_route(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "VALIDATION_ERROR", "message": str(error), "details": {}},
         ) from error
+    except reconciliation_repo.FeatureReferenceReconciliationUnavailable as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "FEATURE_REFERENCE_RECONCILIATION_UNAVAILABLE",
+                "message": str(error),
+                "details": {},
+            },
+        ) from error
     except reconciliation_repo.FeatureReferenceReconciliationError as error:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -307,6 +389,18 @@ async def lease_feature_reference_reconciliation_event_route(
                 "details": {},
             },
         ) from error
+    if receipt.outcome == "not_ready":
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "FEATURE_REFERENCE_RECONCILIATION_UNAVAILABLE",
+                "message": (
+                    "Feature 참조 reconciliation subscription이 아직 provision되지 "
+                    "않았습니다."
+                ),
+                "details": {},
+            },
+        )
     if receipt.outcome == "empty":
         return Response(status_code=status.HTTP_204_NO_CONTENT)
     if receipt.outcome == "lease_conflict":
@@ -431,12 +525,109 @@ async def ack_feature_reference_reconciliation_event_route(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "VALIDATION_ERROR", "message": str(error), "details": {}},
         ) from error
+    except reconciliation_repo.FeatureReferenceReconciliationUnavailable as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "FEATURE_REFERENCE_RECONCILIATION_UNAVAILABLE",
+                "message": str(error),
+                "details": {},
+            },
+        ) from error
     except reconciliation_repo.FeatureReferenceReconciliationError as error:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
                 "code": "INTERNAL_ERROR",
                 "message": "Feature 참조 reconciliation ACK 처리 중 내부 오류가 발생했습니다.",
+                "details": {},
+            },
+        ) from error
+    return result
+
+
+@activation_router.post(
+    "",
+    response_model=FeatureReferenceReconciliationSubscriptionProvisionResponse,
+    responses={
+        403: {"description": "AdminBFF 거부"},
+        409: {"description": "subscription이 이미 있어 initial cursor를 변경할 수 없음"},
+        422: {"description": "initial cursor 입력 오류"},
+    },
+)
+async def provision_feature_reference_reconciliation_subscription_route(
+    body: FeatureReferenceReconciliationSubscriptionProvisionInput,
+    request: Request,
+    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
+    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> FeatureReferenceReconciliationSubscriptionProvisionResponse | JSONResponse:
+    """paired consumer의 immutable initial cursor를 admin receipt로 한 번만 등록한다."""
+
+    started_at = perf_counter()
+    principal_id = "service:feature-reference-reconciliation"
+    payload = body.model_dump(mode="json") | {"principal_id": principal_id}
+    try:
+        async with session.begin():
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
+            command = await begin_domain_command(
+                session,
+                actor=context.actor,
+                operation="admin.feature-reference-reconciliation-subscription.provision.v1",
+                idempotency_key=idempotency_key,
+                payload=payload,
+            )
+            receipt = (
+                await reconciliation_repo.provision_feature_reference_reconciliation_subscription(
+                session,
+                principal_id=principal_id,
+                initial_event_sequence=body.initial_event_sequence,
+                actor=context.actor,
+                command_id=command.command_id,
+                )
+            )
+            if receipt.initial_event_sequence is None:
+                raise reconciliation_repo.FeatureReferenceReconciliationError(
+                    "subscription provision receipt가 불완전합니다."
+                )
+            if receipt.outcome == "already_provisioned":
+                conflict_body = _subscription_provision_conflict_body()
+                result: (
+                    FeatureReferenceReconciliationSubscriptionProvisionResponse | JSONResponse
+                ) = JSONResponse(
+                        status_code=status.HTTP_409_CONFLICT,
+                        content=conflict_body,
+                    )
+                await complete_domain_command(
+                    session,
+                    command=command,
+                    response=conflict_body,
+                    status_code=status.HTTP_409_CONFLICT,
+                )
+            else:
+                result = FeatureReferenceReconciliationSubscriptionProvisionResponse(
+                    data=FeatureReferenceReconciliationSubscriptionProvisionData(
+                        outcome="provisioned",
+                        principal_id=principal_id,
+                        initial_event_sequence=receipt.initial_event_sequence,
+                    ),
+                    meta=make_meta(request, started_at=started_at),
+                )
+                await complete_domain_command(session, command=command, response=result)
+    except reconciliation_repo.FeatureReferenceReconciliationValidationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail={"code": "VALIDATION_ERROR", "message": str(error), "details": {}},
+        ) from error
+    except reconciliation_repo.FeatureReferenceReconciliationError as error:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={
+                "code": "INTERNAL_ERROR",
+                "message": (
+                    "Feature 참조 reconciliation subscription을 등록하는 중 내부 오류가 "
+                    "발생했습니다."
+                ),
                 "details": {},
             },
         ) from error
@@ -455,6 +646,19 @@ def _case_data(
         provider_feature=dict(item.provider_feature),
         scores=dict(item.scores),
     )
+
+
+def _case_detail_data(
+    item: reconciliation_repo.ManualProviderDedupCaseDetail,
+) -> ManualProviderDedupCaseDetailData:
+    """procedure JSON을 typed admin evidence response로 fail-closed 변환한다."""
+
+    try:
+        return ManualProviderDedupCaseDetailData.model_validate(item.data)
+    except ValidationError as error:
+        raise reconciliation_repo.FeatureReferenceReconciliationError(
+            "manual/provider dedup case detail receipt가 내부 계약을 위반했습니다."
+        ) from error
 
 
 async def require_destructive_enabled_for_manual_provider_dedup_decision(
@@ -576,7 +780,7 @@ async def get_manual_provider_dedup_case_route(
             },
         )
     return ManualProviderDedupCaseDetailResponse(
-        data=dict(item.data), meta=make_meta(request, started_at=started_at)
+        data=_case_detail_data(item), meta=make_meta(request, started_at=started_at)
     )
 
 
@@ -587,7 +791,6 @@ async def get_manual_provider_dedup_case_route(
         403: {"description": "AdminBFF 또는 destructive decision kill-switch 거부"},
         409: {"description": "stale evidence 또는 Idempotency-Key 충돌"},
         422: {"description": "decision 입력 오류"},
-        503: {"description": "admin destructive boundary 비활성"},
     },
     dependencies=[Depends(require_destructive_enabled_for_manual_provider_dedup_decision)],
 )

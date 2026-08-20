@@ -53,8 +53,11 @@ async def main() -> int:
         print("M05 relation marker is partial; refusing bootstrap boundary", file=sys.stderr)
         return 2
     if relation_count == len(_RELATIONS):
-        if revision != "0231_m05_manual_provider_dedup":
-            print("M05 relation marker requires exactly 0231", file=sys.stderr)
+        if revision not in {
+            "0231_m05_manual_provider_dedup",
+            "0232_m05_reconciliation_delivery",
+        }:
+            print("M05 relation marker requires an M05 revision", file=sys.stderr)
             return 2
         return 0
     return 1

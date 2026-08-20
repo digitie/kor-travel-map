@@ -207,6 +207,12 @@
         "0230_m04_feature_request_queue"
       ],
       "revision": "0231_m05_manual_provider_dedup"
+    },
+    {
+      "down_revision": [
+        "0231_m05_manual_provider_dedup"
+      ],
+      "revision": "0232_m05_reconciliation_delivery"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"
