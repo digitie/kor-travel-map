@@ -94,6 +94,7 @@ def test_running_cancel_relay_status_is_not_folded() -> None:
     from typing import get_args
 
     from kortravelmap.api.pipeline_cancellation_service import _terminal_mapping
+
     from kortravelmap.infra.cache_target_event_repo import CacheTargetRefreshStatus
 
     allowed = set(get_args(CacheTargetRefreshStatus))

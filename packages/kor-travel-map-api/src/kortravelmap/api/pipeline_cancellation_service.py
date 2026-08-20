@@ -21,13 +21,13 @@ from kortravelmap.infra.advisory_lock import advisory_lock_key
 from kortravelmap.infra.c6c_cancel_probe_fixture_repo import (
     mark_c6c_cancel_probe_consumed,
 )
-from kortravelmap.infra.feature_update_executor import (
-    suppresses_relay_finalization,
-)
 from kortravelmap.infra.cache_target_event_repo import (
     CacheTargetRefreshProtocolViolation,
     CacheTargetRefreshStatus,
     append_cache_target_refresh_status_events,
+)
+from kortravelmap.infra.feature_update_executor import (
+    suppresses_relay_finalization,
 )
 from kortravelmap.infra.feature_update_repo import get_update_request_by_job_id
 from kortravelmap.infra.log_repo import record_system_log
