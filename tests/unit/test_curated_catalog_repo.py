@@ -6,17 +6,12 @@ T-VN-40C가 `tests/unit/test_curated_repo.py`를 지우면서 legacy projection 
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
-
-from decimal import Decimal
-
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
 
 from kortravelmap.infra import curated_repo
-
-from kortravelmap.infra.legacy_write_fence import LegacyWriteFenceError
 
 _KST = timezone(timedelta(hours=9))
 

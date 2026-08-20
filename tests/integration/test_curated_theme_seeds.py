@@ -6,25 +6,9 @@ T-VN-40C가 `tests/integration/test_curated_repo.py`를 지우면서 legacy over
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
-
 from typing import TYPE_CHECKING
 
-import pytest
-
-from sqlalchemy import text
-
-from kortravelmap.dto import Address, Coordinate
-
-from kortravelmap.infra import curated_repo, feature_repo
-
-from kortravelmap.providers.datagokr_file_data import file_data_rows_to_bundles
-
-from kortravelmap.providers.kor_travel_concierge import (
-    DATASET_KEY_YOUTUBE_PLACE_CANDIDATES,
-    KOR_TRAVEL_CONCIERGE_PROVIDER_NAME,
-    kor_travel_concierge_items_to_bundles,
-)
+from kortravelmap.infra import curated_repo
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession

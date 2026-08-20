@@ -9,7 +9,6 @@ import json
 import unicodedata
 from collections.abc import Sequence
 from dataclasses import replace
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -17,7 +16,6 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
-from kortravelmap.infra import curated_repo
 from kortravelmap.infra.curation_repo import (
     _GET_COLLECTION_ID_BY_KEY_SQL,  # noqa: PLC2701 - concurrency regression
     _LIST_FEATURE_ITEMS_SQL,  # noqa: PLC2701 - EXPLAIN 대상
@@ -57,11 +55,6 @@ from kortravelmap.infra.curation_repo import (
     upsert_curation_theme,
 )
 from kortravelmap.infra.curation_repo import import_curation_rows as _import_curation_rows
-from kortravelmap.infra.models import (
-    SourceEntityHeadRow,
-    SourceEntityRow,
-    SourceRecordRow,
-)
 from tests.integration._db_cleanup import truncate_committed_test_rows
 from tests.integration.conftest import as_api_runtime
 

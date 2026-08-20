@@ -183,9 +183,6 @@ async def _seed_pair(engine: AsyncEngine) -> str:
         visitkorea_dataset_id = await _seed_provider_dataset(
             session, provider="merge-test-visitkorea", dataset_key="d"
         )
-        curated_dataset_id = await _seed_provider_dataset(
-            session, provider="merge-test-provider", dataset_key="legacy-curation"
-        )
         entity_1 = _source_entity("SE1", mois_dataset_id)
         entity_2 = _source_entity("SE2", visitkorea_dataset_id)
         session.add(entity_1)

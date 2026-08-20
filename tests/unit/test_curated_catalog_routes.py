@@ -7,55 +7,24 @@ T-VN-40C가 `tests/unit/test_curated_routes.py`를 legacy `curated_features` 라
 
 from __future__ import annotations
 
-import json
-
 from collections.abc import AsyncIterator
-
 from contextlib import asynccontextmanager
-
-from dataclasses import replace
-
 from datetime import UTC, datetime
-
-from typing import Any, NoReturn
-
 from unittest.mock import AsyncMock
 
-import httpx
-
 import pytest
-
 from fastapi.testclient import TestClient
-
 from kortravelmap.api.app import create_app
-
-from kortravelmap.api.curated_public_schema import (
-    PublicCuratedAreaFeatureView,
-    PublicCuratedEventFeatureView,
-    PublicCuratedNoticeFeatureView,
-    PublicCuratedPlaceFeatureView,
-    PublicCuratedPriceFeatureView,
-    PublicCuratedRouteFeatureView,
-    PublicCuratedWeatherFeatureView,
-)
-
 from kortravelmap.api.db import get_session
-
 from kortravelmap.api.routers import curated
-
 from kortravelmap.api.settings import ApiSettings
 
-from pydantic import SecretStr
-
 from kortravelmap.infra.curated_repo import (
-    CuratedFeature,
-    CuratedFeaturePage,
     CuratedSource,
     CuratedSourceRule,
     CuratedTheme,
 )
 
-from kortravelmap.settings import KorTravelMapSettings
 
 def test_curated_source_rule_view_accepts_detail_selector() -> None:
     now = datetime(2026, 7, 12, tzinfo=UTC)

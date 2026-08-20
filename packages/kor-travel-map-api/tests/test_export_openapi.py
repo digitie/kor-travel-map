@@ -62,7 +62,6 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
     # T-VN-40C — legacy curated overlay 표면(공개 `/v1/curated-*`, admin
     # `/v1/admin/features/curated*`)은 물리 삭제됐다. admin themes/sources만 남는다.
     assert "visibility" in _query_parameter_names(full, "/v1/admin/curated-themes")
-    full_schemas = full["components"]["schemas"]
 
     assert user["info"]["title"] == "kor-travel-map-user"
     assert set(user["paths"]) == {

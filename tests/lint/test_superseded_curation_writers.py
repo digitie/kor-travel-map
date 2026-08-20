@@ -62,5 +62,5 @@ def test_superseded_python_writers_are_not_reachable_from_runtime() -> None:
                     hits.append(f"{path.relative_to(_ROOT)}:{i}: {line.strip()}")
     assert not hits, (
         "superseded Python writer가 runtime 경로에서 참조된다 — "
-        f"`*_command` procedure CALL로 바꾼다:\n" + "\n".join(hits)
+        "`*_command` procedure CALL로 바꾼다:\n" + "\n".join(hits)
     )

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from datetime import date, datetime
 from time import perf_counter
 from typing import Annotated, Any, Literal
