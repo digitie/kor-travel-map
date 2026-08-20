@@ -1638,7 +1638,7 @@ async def _read_stream_identity(
     session: AsyncSession,
     *,
     external_system: str,
-) -> Mapping[str, Any]:
+) -> dict[str, Any]:
     """`FOR SHARE OF stream` 아래에서 현재 material identity와 cursor를 읽는다."""
 
     await _barrier_snapshot_stream(session, external_system=external_system)
@@ -1653,7 +1653,7 @@ async def _read_stream_identity(
             "stream_not_found",
             "snapshot을 만들 cache target stream이 없습니다.",
         )
-    return identity_row._mapping
+    return dict(identity_row._mapping)
 
 
 async def _get_reusable_material(
