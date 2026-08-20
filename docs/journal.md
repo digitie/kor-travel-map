@@ -2,6 +2,63 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-20 — T-VN-41C relay 종결성: 테스트가 결함을 보호하고 있었다
+
+`#975` 적대 재리뷰 P2의 (a)~(d)를 닫았다(PR #1026, merge `b2e9c43a`). 착수 전 서브시스템
+매핑을 돌려 보니 **넷 다 미구현**이었고, (c)는 백로그가 "향후 위험"으로 적어 둔 것과 달리
+이미 현재 위험이었다.
+
+구조는 단순하다. `CacheTargetRefreshProtocolViolation` **하나가 네 원인**(epoch 이동 /
+generation 전진 / fingerprint 변경 / head 소멸)에서 올라오는데, 호출자가 예외 클래스만 보고
+분기했다. 억제 근거를 가진 것은 restore fence 이동뿐인데(그때만 옛 epoch event가 설계상
+거부된다 — runbook §5-5) 나머지 셋까지 함께 삼켜졌고, 그러면 PinVi는 요청의 **끝을 보지
+못한 채 매달린다**. 이제 typed reason으로 분기하고, 억제·삼킴을 `epoch_moved`에만 한정한다.
+
+**가장 중요한 발견: 저장소가 그 결함을 계약으로 못박아 두고 있었다.**
+`test_source_generation_change_fails_before_final_link_and_freshness`가 generation 변경 실패
+뒤 relay event를 `queued → running`(failed 없음)으로 단언하고 있었다. 즉 P2-a가 지적한 바로
+그 억제 동작이 테스트로 보호받고 있었다. 이 PR이 그 단언을 `queued → running → failed`로
+바꾼다 — 회귀가 아니라 계약 전환이고, 이제 그 테스트가 (a)를 실제 DB에서 지키는 가장 강한
+증거다.
+
+(b)는 더 단순했다. running member 취소 전이에 relay status event가 **아예 없었다**. queued
+경로에만 있어서, Dagster terminate + ledger 전이로 봉인되는 경로에서는 종결 event가 생기지
+않았다. 두 경로가 같은 규칙(savepoint + epoch만 삼킴)을 쓰도록 헬퍼로 뽑았다.
+
+**그리고 내가 같은 실수를 새로 저질렀다.** 적대 리뷰 2명이 NO_GO를 냈고 둘 다 실측을 들고
+왔다.
+
+- 검증을 통과한 P1은 **내 변경이 만든 결함**이었다. (b)를
+  `status="cancelled" if target_status == "cancelled" else "failed"`로 썼는데,
+  `_terminal_mapping`이 주는 값은 `{cancelled, done, failed}` 셋이다. 삼항식이 `done`을
+  `failed`로 접어, Dagster SUCCESS로 ledger가 `done`을 커밋한 **같은 transaction**에서
+  PinVi에 `failed`를 보낼 수 있었다. relay 종결성을 고치겠다는 변경이 종결 상태 자체를
+  틀리게 만들 뻔했다.
+- 내가 새로 쓴 회귀 테스트가 **공허했다**. 판정을 소스 문자열로 확인해서, 규칙을 완전히
+  되돌려도 `5 passed`였다 — 리뷰어가 직접 되돌려 돌려 보고 왔다. 이번 세션 내내 내가 다른
+  코드에서 지적해온 "검사한다고 주장하는 것을 실제로는 안 보는" 패턴을, 내가 새 테스트로
+  만들어 넣은 것이다.
+
+고친 방식이 교훈이다. 판정을 순수 함수 `suppresses_relay_finalization`으로 뽑아 **값으로**
+검사하게 했고(EPOCH_MOVED만 True, 나머지 세 reason과 `.reason`을 가진 남의 예외·무관 예외는
+False), 더 나아가 `_terminal_mapping`의 반환 타입을 `CacheTargetRefreshStatus`로 좁혀
+**테스트가 단언하던 불변식을 타입으로 올렸다** — 이제 `done`을 `failed`로 접는 코드는 mypy가
+먼저 막는다. 규칙을 값으로 검사할 수 있게 만드는 것과, 그 규칙을 타입으로 올리는 것은 같은
+방향의 두 단계다.
+
+그 외 반영: `getattr(exc, "reason", None)` duck typing → `isinstance` 좁히기, pickle/copy 왕복
+복구(실측 실패였다), (d) truncate 목록에 빠져 있던 `feature.features`·`provider_sync.source_*`
+추가(피해자는 `test_mois_loader`의 전역 count 단언).
+
+반증된 지적도 남긴다 — (a)의 전제가 ADR-081과 반대라는 P1은 인용 문서가 Map 자신의 head
+projection 규칙이지 Map→PinVi outbox 소비 규칙이 아니어서, 비-epoch 재raise가 `#975 P1`을
+되살린다는 P1은 그 경로의 violation이 구조적으로 `EPOCH_MOVED` 하나뿐이라 도달 불가여서
+각각 반증됐다.
+
+**게이트**: ruff / mypy `--strict` ×2 / import-linter 4 contracts green, pytest **145 passed**,
+CI 8/8. (d)는 전체 실행이 알파벳 순서 덕에 늘 초록이므로 **두 모듈만 골라 실행해** 순서 의존을
+실제로 재현하는 방식으로 확인했다.
+
 ## 2026-08-20 — T-VN-40C prod 배포: 0225 적용과 M01이 만든 기동 게이트
 
 `0225`를 prod에 올렸다. 최종 상태는 head `0225_tvn40c_physical_removal`, legacy
