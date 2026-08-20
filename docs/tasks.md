@@ -568,10 +568,11 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   sparse KPI·ADR-088 exact scope 결함과 PR #1013의 KMA canonical identity/detail 보강은
   모두 병합됐다.
 - [~] **④ receipt complete** — PR [#1022](https://github.com/digitie/kor-travel-map/pull/1022)가
-  exact 9키로 `pending`을 해소한다(CI 8/8 green, **미머지**). 단
-  **⑤가 user spec을 바꿨으므로 이 receipt는 40C 머지 뒤 두 번째 paired cycle이 필요하다** —
-  40C branch는 세 sha를 재핀하고 `blocking_reason`을 그 사유로 교체해 `pending`을 유지한다.
-  gate는 이미 fail-closed다(`state == complete`이면
+  exact 9키로 `pending`을 해소했다(merge `82b4d1da`). 단 **⑤가 user/full spec을 바꿨으므로
+  그 `complete`는 더 이상 이 트리의 spec을 서술하지 않는다** — 40C branch가 receipt를
+  `pending`으로 되돌리고 세 sha를 재핀했다. complete 전용 키(`map_commit`/`pinvi_commit`/
+  vendor sha/verification)는 gate가 `pending`에서 금지하므로 함께 떼어냈다. 40C 머지 뒤
+  두 번째 paired cycle이 필요하며, gate는 이미 fail-closed다(`state == complete`이면
   `map_user_openapi_sha256 == pinvi_user_vendor_sha256` 요구).
 - [ ] **T-C7-SCOPE-REGISTRY** — `external_system:*` exact-target scope의 선언 주체·근거·
   운영 조회 표면을 `docs/integration-map.md` 또는 ADR-088 consequences에 정본화한다.
