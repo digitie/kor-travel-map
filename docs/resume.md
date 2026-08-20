@@ -1,5 +1,35 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-20 — T-VN-41S material/receipt 분리 착지 (`0230`)
+
+`T-VN-41S`의 후속 종료선에서 **EXPLAIN·1M soak을 뺀 전부**가 닫혔다.
+
+| 바뀐 것 | 내용 |
+|---|---|
+| DB | `ops.poi_cache_target_snapshot_materials` / `..._material_items` 신설, `poi_cache_target_snapshots`는 receipt로 축소, legacy item 표 삭제 |
+| identity | `(external_system, restore_epoch, material_high_watermark_relay_order)` · partial unique `WHERE compacted_at IS NULL` |
+| 공유 | 재사용 질의 둘 → 하나. generic/reconciliation이 **양방향**으로 material을 공유하고 각자 receipt를 만든다 |
+| service API | 재사용 시 `snapshot_id`가 달라진다(root/count/cursor는 같다). 만료를 물려받지 않아 매번 full TTL |
+| compactor | hourly GC batch의 4단계 중 2·3단계. 보존 기본 30일. receipt/material row는 남긴다 |
+| 410 | 도달 불가였던 것을 고쳤다 — compaction 판정이 만료 판정보다 앞선다 |
+| ACL | `ops`를 `feature`와 같은 강도로. 침묵 full CRUD 경로 제거(표 57개 중 48개가 그 경로였다) |
+
+**잡힌 것 셋.** (1) ACL 목록 게이트를 `Base.metadata`로 재서 green인 채 아무 것도 못 봤다 —
+모델에 없는 ops 표가 17개 있었고 n150 리허설이 잡았다. (2) `410`이 도달 불가능했다 —
+end-to-end 테스트를 쓰고서야 알았다. (3) 초안의 `safe_high_watermark_relay_order`를 뺀 것이
+오판이었다 — 기존 테스트가 잡았고 되돌렸다.
+
+게이트: ruff / mypy `--strict` green, 단위 38 + PostGIS 통합 **49 passed**,
+격리 DB 리허설 12절 PASS(`scripts/verify-tvn41s-snapshot-material.sh`),
+ACL 변이 배터리 6종 전부 red.
+
+### 다음 한 작업
+
+`T-VN-41S`의 남은 두 축 — **EXPLAIN 실측**과 **n150 PostGIS 1M soak**(1M admitted /
+1M+ rejection zero partial row / concurrent mutation safe lower cursor / compaction 전후
+relation bytes·dead tuple·vacuum 추세)을 같은 evidence receipt에 기록한다. 그 뒤에야
+#922와 T-VN-41S를 완료로 표시한다.
+
 ## 2026-08-20 — T-VN-41F1D-E 저장소측 완료 (v4 퇴역 → v5/v7)
 
 live runner 두 개의 신뢰 경계를 v4 compatible-pair manifest에서 v5 pinned runtime

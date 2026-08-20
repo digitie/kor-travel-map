@@ -5,6 +5,36 @@
 
 ## [Unreleased]
 
+### T-VN-41S — cache-target snapshot을 material과 receipt로 가른다 (2026-08-20)
+
+`ops.poi_cache_target_snapshots` 한 표가 **무엇을 고정했는가**(material)와 **누가 언제
+받아갔는가**(receipt)를 겸하고 item FK도 `snapshot_id`를 직접 가리켰다. 그래서 material
+양방향 공유와 terminal item compaction이 둘 다 표현 불가능했다.
+
+- **ADDED (DB)**: migration `0230_tvn41s_snapshot_material`이
+  `ops.poi_cache_target_snapshot_materials`(identity `(external_system, restore_epoch,
+  material_high_watermark_relay_order)` · partial unique `WHERE compacted_at IS NULL`)와
+  `ops.poi_cache_target_snapshot_material_items`(PK/FK `(material_id, row_number)`)를 만든다.
+  두 표 모두 append-only fence를 갖고, material은 `compacted_at`을 NULL에서 한 번 채우는
+  전이만 허용한다. forward-only다 — receipt N개가 material 하나를 공유하므로 되돌리려면
+  item을 receipt 수만큼 다시 복제해야 한다.
+- **CHANGED (DB)**: `poi_cache_target_snapshots`는 receipt로 좁혔다. `material_id`/
+  `receipt_kind`를 갖고 `restore_epoch`/`item_count`/`merkle_root`/두 watermark 열을 잃는다.
+  `ops.poi_cache_target_snapshot_items`는 삭제됐다.
+- **CHANGED (service API)**: 같은 source 상태를 다시 요청하면 `snapshot_id`가 **달라진다**.
+  `merkle_root`/`count`/`high_watermark_cursor`는 같다 — 같은 material을 받았는지는 root/count로
+  판정한다. 재사용해도 `expires_at`을 물려받지 않고 매번 full TTL로 시작하며, 그래서 "잔여
+  TTL이 75분 넘는 material만 재사용한다"는 문턱이 사라졌다.
+- **FIXED**: `410 SNAPSHOT_MATERIAL_COMPACTED`가 도달 불가능했다. compaction 후보는 정의상
+  미만료 receipt가 없어 만료 판정이 항상 먼저 이겼다. compaction 판정을 앞으로 옮겼다.
+- **ADDED (maintenance)**: hourly GC batch가 네 단계가 됐다 — 만료·미참조 receipt 삭제 →
+  보존 기간(기본 30일)을 넘긴 terminal material 표시 → orphan/표시된 material의 item drain →
+  item이 빈 orphan material 삭제. 표시된 material과 그 receipt는 지우지 않는다(root/count가
+  감사 증거다). Dagster metadata에 `compacted_materials`를 노출한다.
+- **CHANGED (runtime ACL)**: `ops` 스키마를 `feature`와 같은 강도로 만들었다. 선언 없는 ops
+  relation은 조용히 full CRUD를 받는 대신 배포를 막는다. 실측으로 표 57개 중 48개가 그
+  침묵 경로였고, 모델에 없는 ops 표 17개가 더 있었다.
+
 ### T-VN-40C — legacy curation overlay 물리 제거 (2026-08-20)
 
 ADR-075 보존 우선 cutover의 마지막 단계. 40A(write fence)·40B(consumer 선전환) 뒤

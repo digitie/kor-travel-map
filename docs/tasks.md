@@ -22,7 +22,7 @@ barrier로 직렬화한다.
 - **Lane B — frontend hardening·PinVi 소비 API**
   - [~] `T-VN-41C`(#975 병합 / final exact-pair·prod consumer enable 잔여)
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환 — **저장소측 완료 2026-08-20**, live 실행은 배리어 대기)
-    ∥ [~] `T-VN-41S`(#922 1차 구현·리뷰 GO, `0230+` migration/compactor·n150 1M 검증 잔여)
+    ∥ [~] `T-VN-41S`(`0230` migration·양방향 공유·compactor·410 착지 2026-08-20 / EXPLAIN·n150 1M soak 잔여)
   - **배리어**: [ ] `T-VN-FINAL-REBUILD`(주요 개발 완료 후 파괴적 재구축 — 사용자 결정 2026-08-20)
   - [x] `T-C7-BROWSER-EVIDENCE`(#995 잔여 — 2026-08-20 접어넣음)
   - [ ] `T-VN-40B` 잔여(source rule `curated` action 퇴역, `0229`, PR #1035) — 종결 되돌림
@@ -736,10 +736,9 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   material 재사용·관측 metric·typed future error 계약까지다. 독립 적대 리뷰 2명은 최종 head에서 P0~P3
   잔여 없음으로 GO했고, 단위/API/Dagster 집중 231개와 PostGIS stream repository 37개를 통과했다.
 
-  **후속 종료선(미완료, #922 유지)** — `0225`는 2026-08-20 착지·prod 적용으로 barrier가
-  풀렸다. 남은 것은 `0230+`(`0226`~`0228`은 #1029 · `0229`는 T-VN-40B 잔여가 선점) 물리 모델, 양방향 공유, 실제 compactor와
-  repository 410, migration/ACL/EXPLAIN 및 n150 1M+ 증거까지다. 이 항목들이 끝나기 전에는 #922 또는
-  T-VN-41S 전체 완료로 표시하지 않는다.
+  **후속 종료선(진행 중, #922 유지)** — 물리 모델(`0230`)·양방향 공유·compactor·repository 410은
+  2026-08-20에 착지했다(아래 후속 항목 참조). 남은 것은 **EXPLAIN 실측과 n150 1M+ soak**뿐이다.
+  그 둘이 끝나기 전에는 #922 또는 T-VN-41S 전체 완료로 표시하지 않는다.
 
   **이번 PR 완료 항목**
 
@@ -754,10 +753,31 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 
   **후속 항목**
 
-  - [ ] (`0225` barrier 해제됨) `0227+`로 receipt/material/item 정규화 migration, 양방향 material
-    공유, terminal retention compactor와 실제 repository 410 경로를 구현한다.
-  - [ ] migration upgrade/downgrade·ACL/catalog·EXPLAIN과 n150 PostGIS 1M admitted/1M+ rejection,
-    concurrent mutation safe lower cursor, compaction/vacuum soak evidence를 통과한다.
+  - [x] `0230`으로 receipt/material/item 정규화 migration, 양방향 material 공유, terminal
+    retention compactor와 실제 repository 410 경로를 구현한다.
+    → material은 exact source membership 하나(identity `(external_system, restore_epoch,
+    material_high_watermark_relay_order)`, partial unique `WHERE compacted_at IS NULL`)를 소유하고,
+    `poi_cache_target_snapshots`는 `material_id`/`receipt_kind`만 갖는 immutable receipt로 좁혔다.
+    item PK/FK는 `(material_id, row_number)`로 옮기고 `external_system`은 material이 소유한다.
+    재사용 질의가 둘에서 하나로 합쳐지며 공유가 양방향이 됐고, 재사용이 만료 시각을 물려받지
+    않게 되어 "잔여 TTL 75분" 문턱이 사라졌다. compactor는 hourly GC batch의 한 단계다
+    (receipt 삭제 → 후보 표시 → item drain → orphan material 삭제).
+    → 초안(`docs/reports/tvn41s/snapshot-material-schema.sql.draft`)과 셋이 다르다. identity UNIQUE를
+    partial로 바꿨고(compaction된 material이 identity를 영구 점유하는 것을 막는다), `material_bytes`는
+    legacy에 NULL을 허용하며(leaf 인코딩을 SQL로 옮겨 적지 않는다), 새 표에도 append-only fence를
+    걸었다(material은 `compacted_at` 1회 전이만 허용). `safe_high_watermark_relay_order`는 한 번
+    뺐다가 되돌렸다 — 재사용 receipt가 자기 시점 cursor를 광고하면 비-membership event를 consumer가
+    건너뛴다는 것을 `test_generic_snapshot_reuse_ignores_nonmaterial_outbox_tail`이 잡았다.
+    → 410은 처음에 **도달 불가능**했다. compaction 후보는 정의상 미만료 receipt가 없어 만료 판정이
+    항상 먼저 이겼다. compaction을 앞으로 옮겨 고쳤고 end-to-end 통합 테스트로 고정했다.
+  - [x] migration upgrade/downgrade·ACL/catalog를 통과한다.
+    → 격리 DB 리허설 12절 PASS(`scripts/verify-tvn41s-snapshot-material.sh`). **빈 DB로는 이
+    migration을 검증할 수 없다** — backfill/dedupe 문장을 한 줄도 타지 않는다. 실제로 `min(uuid)`
+    부재·receipt append-only fence·legacy FK 의존 순서 셋 다 빈 경로에서는 조용히 지나갔다.
+    → ACL은 `ops` 스키마 전체를 fail-closed로 대칭화하면서 함께 닫았다. `feature`는 선언 없는
+    relation을 막는데 `ops`만 침묵 기본값으로 full CRUD를 주고 있었다(표 57개 중 48개).
+  - [ ] EXPLAIN과 n150 PostGIS 1M admitted/1M+ rejection, concurrent mutation safe lower cursor,
+    compaction/vacuum soak evidence를 통과한다.
 
 ### T-VN-41F1J — C6c cancel-probe fixture 수명주기 복구
 

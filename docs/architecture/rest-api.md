@@ -702,8 +702,19 @@ live generic 저장량을 stream cardinality의 2배로 제한한다. request-bo
 단일 snapshot은 server cursor 두 번 순회와 incremental Merkle로 process memory를 `O(log N)`에
 가깝게 유지한다. item 1,000,000개 또는 canonical material 512 MiB를 넘으면 header/item 부분
 material을 만들지 않고 각각 `413 snapshot_item_limit_exceeded`,
-`413 snapshot_byte_limit_exceeded`로 실패한다. 75분 넘게 남은 generic material은 two-phase reconciliation seal이
-같은 snapshot으로 재사용한다.
+`413 snapshot_byte_limit_exceeded`로 실패한다.
+
+**material/receipt 분리(T-VN-41S, migration `0230`)**. 고정한 source membership은 `material`이 소유하고,
+`snapshot_id`는 "누가 언제 그것을 받아갔는가"를 적는 immutable **receipt**다. generic page와 two-phase
+reconciliation seal은 같은 material을 **양방향으로** 공유하되 각자 receipt를 만든다. 그래서 세 가지가
+consumer에게 보인다.
+
+- 같은 source 상태를 다시 요청하면 `snapshot_id`는 **달라지고** `merkle_root`/`count`/
+  `high_watermark_cursor`는 같다. 같은 것을 받았는지는 root/count로 판정한다.
+- 재사용해도 `expires_at`은 물려받지 않고 매번 full TTL로 시작한다. 그래서 "잔여 TTL이 75분 넘는
+  material만 재사용한다"는 앞선 문턱이 사라졌다.
+- `high_watermark_cursor`는 material을 **처음 고정할 때** 관측한 값이다. 재사용 시점의 더 높은 값을
+  주면 그 사이에 낀 비-membership event를 consumer가 건너뛴다.
 
 만료·미참조 일반 snapshot만 bounded GC하며 reconciliation request가 참조하면 terminal 이후에도
 보존한다. hourly background GC는 전역 try-lock, system round-robin, batch별 commit, 시간/statement/
@@ -713,10 +724,14 @@ no-progress 예산을 사용하고 종료 시 expired backlog와 total/unexpired
 production enable 전에 켜고 backlog 경보를 확인한다. 상세 계약은 ADR-081이 정본이며 PinVi paired
 contract checksum 통과 뒤에만 enable한다.
 
-terminal reconciliation item compaction 뒤 request-bound page는 retry 불가능한
-`410 SNAPSHOT_MATERIAL_COMPACTED`와 보존된 snapshot ID/count/root/compacted 시각을 반환한다. 실제
-material/receipt 분리와 compactor는 T-VN-40C의 예약 revision `0225` 뒤 `0226+` migration으로만
-활성화하며, 그 전 API는 typed error code만 예약한다.
+terminal reconciliation item compaction 뒤 그 receipt의 page는 retry 불가능한
+`410 SNAPSHOT_MATERIAL_COMPACTED`와 보존된 snapshot ID/count/root/compacted 시각을 반환한다.
+**compaction 판정은 만료 판정보다 앞선다** — compaction 후보는 정의상 미만료 receipt가 없으므로,
+만료를 먼저 보면 이 410은 도달할 수 없다. 둘 다 참일 때 더 구체적인 쪽을 답한다.
+
+compactor는 hourly GC batch의 한 단계다(별도 schedule을 두지 않는다). 보존 기간(기본 30일)을 넘긴
+terminal reconciliation의 material을 표시하고 item을 bounded로 비운다. **receipt와 material row는
+지우지 않는다** — `item_count`/`merkle_root`가 감사 증거다.
 
 referenced snapshot은 reconciliation 감사 영수증이라 GC가 삭제하지 않는다. 따라서 job execution
 metadata만 직전값으로 추정하지 않고, acquired GC run의 `Dagster run_id`와 referenced item/header count를
