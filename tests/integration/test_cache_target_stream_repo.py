@@ -3041,6 +3041,37 @@ async def test_terminal_material_compaction_drains_items_and_serves_typed_410(
             {"material_id": material_id, "fingerprint": "b" * 64},
         )
 
+    # generic receipt만 붙은 material은 후보가 아니다. receipt가 만료되면 orphan이
+    # 되어 통째로 지워지므로 compaction의 일이 아니고, 그 사이에 표시해 버리면 아직
+    # 재사용 가능한 material의 재사용을 막는다.
+    generic_material = "9e100000-0000-4000-8000-000000000004"
+    await _seed_snapshot_material(
+        migrated_session,
+        material_id=generic_material,
+        external_system=system,
+        material_order=3,
+        item_count=2,
+        merkle_root=root,
+    )
+    await _seed_snapshot_receipt(
+        migrated_session,
+        snapshot_id="9e000000-0000-4000-8000-000000000004",
+        material_id=generic_material,
+        external_system=system,
+        created_at="now() - interval '2 hours'",
+        expires_at="now() - interval '1 hour'",
+    )
+    await migrated_session.execute(
+        text(
+            "INSERT INTO ops.poi_cache_target_snapshot_material_items ("
+            "material_id, row_number, target_key, state, "
+            "source_generation, source_payload_fingerprint) VALUES "
+            "(CAST(:material_id AS uuid), 1, 'kept-1', 'active', 1, :fingerprint), "
+            "(CAST(:material_id AS uuid), 2, 'kept-2', 'active', 1, :fingerprint)"
+        ),
+        {"material_id": generic_material, "fingerprint": "b" * 64},
+    )
+
     # 셋 다 terminal reconciliation이 참조한다. 다른 것은 `completed_at`뿐이다.
     for index, (receipt_id, completed) in enumerate(
         (
@@ -3084,9 +3115,10 @@ async def test_terminal_material_compaction_drains_items_and_serves_typed_410(
     assert batch.external_system == system
     # 후보는 하나뿐이다. `fresh`는 보존 기간 안이고 `live`는 미만료 receipt를 갖는다.
     assert batch.compacted_materials == 1
-    assert batch.deleted_items == 2
+    # 표시된 material 2행 + orphan이 된 generic material 2행.
+    assert batch.deleted_items == 4
     # reconciliation이 참조하는 receipt는 만료돼도 지우지 않는다 — 감사 증거다.
-    assert batch.deleted_headers == 0
+    assert batch.deleted_headers == 1
 
     compacted = (
         await migrated_session.execute(
@@ -3112,7 +3144,20 @@ async def test_terminal_material_compaction_drains_items_and_serves_typed_410(
             {"system": system},
         )
     ).all()
+    # generic 전용 material은 phase 1이 그 receipt를 지워 orphan이 됐고, 같은 batch의
+    # phase 3이 item을 비웠다 — compaction으로 표시된 것이 아니라 통째로 사라지는 길이다.
     assert {str(row[0]) for row in surviving_items} == {fresh_material, live_material}
+    assert (
+        await migrated_session.scalar(
+            text(
+                "SELECT count(*) FROM ops.poi_cache_target_snapshot_materials "
+                "WHERE material_id = CAST(:material_id AS uuid) "
+                "AND compacted_at IS NOT NULL"
+            ),
+            {"material_id": generic_material},
+        )
+        == 0
+    )
 
     # 증거는 남는다.
     assert (

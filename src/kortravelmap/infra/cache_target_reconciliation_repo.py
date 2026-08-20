@@ -310,20 +310,23 @@ RETURNING snapshot.snapshot_id
 #: compaction 후보의 논리 조건. 넷을 모두 만족해야 한다.
 #:
 #: 1. 아직 compaction되지 않았다.
-#: 2. 미만료 receipt가 하나도 없다 — 하나라도 살아 있으면 그 consumer가 아직 page한다.
-#: 3. `preparing|running` reconciliation이 없다.
-#: 4. 이 material을 가리키는 **모든** reconciliation이 terminal이고 `completed_at`이
-#:    보존 기간보다 오래됐다.
-#:
-#: 그리고 두 가지를 더 요구한다. receipt가 하나라도 **있어야** 한다(하나도 없으면 그건
-#: compaction이 아니라 orphan GC의 일이다) — 그리고 item이 실제로 있어야 한다. item이
-#: 없는 material을 compaction으로 표시하면 되찾는 byte는 0인데 그 receipt의 정상적인
-#: 빈 page가 410으로 바뀐다.
+#: 2. reconciliation이 참조하는 receipt가 **하나라도 있다**. compaction은 GC가 지울 수
+#:    없는 감사 영수증 때문에 존재한다 — generic receipt만 붙은 material은 receipt가
+#:    만료되면 orphan이 되어 통째로 지워지므로 compaction의 일이 아니다. 이 조건이
+#:    없으면 아직 재사용 가능한 generic material을 (bounded receipt 삭제가 한 batch에
+#:    끝나지 않은 틈에) compaction으로 표시해 재사용 자체를 막을 수 있다.
+#: 3. 미만료 receipt가 하나도 없다 — 하나라도 살아 있으면 그 consumer가 아직 page한다.
+#: 4. `preparing|running` reconciliation이 없고, 이 material을 가리키는 **모든**
+#:    reconciliation이 terminal이며 `completed_at`이 보존 기간보다 오래됐다.
+#: 5. item이 실제로 있다. item이 없는 material을 표시하면 되찾는 byte는 0인데 그
+#:    receipt의 정상적인 빈 page가 410으로 바뀐다.
 _COMPACTION_CANDIDATE_PREDICATE = """
   material.compacted_at IS NULL
   AND EXISTS (
     SELECT 1
     FROM ops.poi_cache_target_snapshots AS receipt
+    JOIN ops.poi_cache_target_reconciliation_requests AS request
+      ON request.snapshot_id = receipt.snapshot_id
     WHERE receipt.material_id = material.material_id
   )
   AND NOT EXISTS (
