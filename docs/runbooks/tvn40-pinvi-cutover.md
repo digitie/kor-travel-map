@@ -207,3 +207,48 @@ item 튜플을 전량 대조해 동일하면 200 replay, 하나라도 다르면 
   `copied_poi_count`를 함께 봉인하므로 각 plan이 Map collection의 revision/ETag에 결박된다.
 - collection UUID 열거: Map public `GET /v1/curations/collections`.
 - 되돌리기: plan soft delete + 백업 복원.
+
+## S7 — T-VN-40C 뒤 user spec 재-vendor + 두 번째 paired receipt
+
+**언제**: T-VN-40C(`0225`, PR #1023)가 **main에 머지된 뒤**. 그 전에는 성립하지 않는다 —
+PinVi `contract-pin-consistency` job이 pin SHA를 실제로 체크아웃해 vendored 스냅샷과
+비교하기 때문이다(manifest 선행조건 P7이 그 순서를 규정한다:
+`40C PR merged → PinVi re-vendor PR → paired candidate receipt → live → complete`).
+
+**왜**: 40C가 `openapi.user.json`에서 legacy curated overlay 표면을 지웠다. #1022가 봉인한
+T-VN-40 receipt는 그 이전 spec을 증언하므로 더 이상 현행 트리를 서술하지 않는다. 40C
+branch가 receipt를 `pending`으로 되돌리고 세 sha를 재핀해 뒀다.
+
+**사전 확인(2026-08-20 완료, 재확인 불필요)**
+
+| 항목 | 결과 |
+|------|------|
+| user spec delta | path 4 · schema 29 **순수 제거**, 남은 path 본문 변경 0 |
+| 제거된 path | `/v1/curated-features`, `/v1/curated-features/{curated_feature_id}`, `/v1/curated-sources`, `/v1/curated-themes` |
+| service spec | sha 무변경(`8019e36f…`) — 재-vendor 대상 아님 |
+| PinVi 소비 | Map curation client(`app/clients/kor_travel_map_curation.py`)는 `/v1/service/curation-collections/{id}/detail-snapshot`과 `/v1/service/curation-cutover/identity-mappings`만 호출 |
+| PinVi 추적 코드의 제거 식별자 참조 | 0건(`.tmp/` 스크래치와 이력 문서 제외) |
+
+**절차 (PinVi repo)**
+
+1. `MAP_SHA=<40C 머지 커밋 40자>`를 확정한다.
+2. 스냅샷 교체 — Map의 `packages/kor-travel-map-api/openapi.user.json`을
+   `apps/api/tests/contract/kor-travel-map-openapi-user.json`으로 **byte-for-byte** 복사.
+   결과 sha256은 `489b05d3e62e3531233e3e7eb8c97f9ddf92aa1ecf1573b7557a5951e7f6a61b`여야 한다.
+3. `apps/api/tests/unit/test_kor_travel_map_contract.py`의 `_UPSTREAM_COMMIT = "$MAP_SHA"`,
+   `_SNAPSHOT_SHA256 = "489b05d3…"`.
+4. `contracts/kor-travel-map-service-provenance-v1.json`의 `map_release_revision = "$MAP_SHA"`.
+   `service_openapi_sha256`은 그대로다(service 무변경).
+5. `apps/api`에서 `pytest tests/unit/test_kor_travel_map_contract.py`
+   `tests/unit/test_kor_travel_map_cache_target_contract.py`
+   `tests/unit/test_feature_alias_contract.py`를 돌린다.
+6. PR을 열고 `contract-pin-consistency` green을 확인한다.
+
+**절차 (Map repo, PinVi PR 머지 뒤)**
+
+`contracts/vnext/consumer-rollout-v1.json`의 T-VN-40 `pinvi_snapshot_receipt`를 exact 9키로
+되돌린다 — `state: "complete"`, `map_commit`/`pinvi_commit`, 세 map sha, `pinvi_user_vendor_sha256`
+(= `map_user_openapi_sha256`), `pinvi_service_vendor_sha256`(= `map_service_openapi_sha256`),
+`verification` 3줄. `blocking_reason`은 제거한다. `tests/unit/test_vnext_contract_artifacts.py`의
+`ARTIFACT_SHA256["consumer-rollout-v1.json"]`도 같은 변경에서 갱신한다. 그 gate가
+`state == complete`일 때 vendor sha 일치를 요구하므로 어긋나면 red다.
