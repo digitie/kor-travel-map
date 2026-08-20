@@ -1,5 +1,20 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-20 — T-VN-C05A~D: 산림청 route·weather·risk·notice 순차 연결
+
+`python-krforest-api`의 C05A nested SHP route, C05B 산악기상 typed 관측, C05C 산불위험
+V2 예보, C05D 산사태 예보발령 typed 모델을 upstream에서 안정화하고 `kor-travel-map`이
+각 public model을 직접 `FeatureBundle`·`WeatherValue`·notice로 변환하도록 연결했다. C05A는
+월 1회, C05B~D는 하루 6회(`01/05/09/13/17/21시`, 분산 offset)를 사용한다. provider
+dataset 72~74, fixture preview, Dagster record resource/fetcher/asset, operation scope,
+fallback schedule까지 추가했다.
+
+두 전문 리뷰어의 적대 검토에서 발견한 strict mypy 오류, sigungu 공식 코드 우선순위,
+이름만 있는 route의 source identity 충돌, HTTP 200 error body의 키 노출을 provider에서
+수정했다. map 쪽에서는 source record·raw lineage와 산사태 발령→해제 snapshot을 보존한다.
+다음은 CI와 두 저장소 live UI E2E 증거를 확인하고 provider PR 병합 SHA로 map 의존성 pin을
+올리는 단계다.
+
 ## 2026-08-20 — T-VN-C05A: 산림청 등산로·둘레길 route 연결
 
 `python-krforest-api`의 `ForestSpatialFeature`를 직접 소비하는 순수 변환을 추가했다.

@@ -12,13 +12,19 @@ allowlist 안에 있는지 검사하도록 gate를 좁혔다. forced/default pla
 
 두 전문 리뷰어에게 H50 최종 재검토를 요청하고, GitHub Actions 전체 green 확인 후 H50
 문서·PR을 갱신하고 merge한다.
-## 2026-08-20 — T-VN-C05A 산림청 route 연결
+## 2026-08-20 — T-VN-C05A~D 산림청 데이터 연결 완료
 
-`python-krforest-api` C05A가 중첩 SHP archive를 `ForestSpatialFeature`로 파싱하고,
-`kor-travel-map`이 `LineString`/`MultiLineString`만 route Feature로 정규화해 Dagster,
-operation registry, fixture preview, baseline seed에 연결했다. 등산로(`PBD0000041`)와
-둘레길(`PBD0000031`)은 월 1회 schedule을 사용한다. upstream route source identity에 대한
-적대 리뷰 P0도 반영했다. 다음 작업은 upstream typed C05B 산악기상 모델이다.
+`python-krforest-api`에 C05A 중첩 SHP route와 C05B 산악기상, C05C 산불위험 V2,
+C05D 산사태 예보발령 typed 모델을 구현하고, `kor-travel-map`에 순차적으로 직접 연결했다.
+등산로·둘레길은 월 1회, 산악기상·산불위험·산사태는 KST 기준 하루 6회 schedule을 사용한다.
+각 데이터셋은 Dagster resource/fetcher/asset, operation registry, fixture preview, baseline
+provider dataset·scope까지 등록했다. 두 전문 리뷰어의 P1 지적을 반영해 typed API strict
+mypy, 시군구 코드, source identity 충돌, body-level API key redaction을 보강했다.
+
+### 다음 한 작업
+
+두 PR의 CI·live UI E2E와 provider 병합을 확인한 뒤, 병합 SHA로 map provider pin을 갱신하고
+map PR을 병합한다.
 
 ## 2026-08-20 — T-VN-41F1D-E 저장소측 완료 (v4 퇴역 → v5/v7)
 
@@ -87,8 +93,6 @@ backup tranche와 실제 route 활성화는 아직 남아 있다.
 `T-VN-M01`의 `0226` forward-only migration·ACL·backup tranche를 구현·검증한다. 그 뒤에도
 `T-VN-41S`·C05 provider dataset·H34 잔여가 `T-VN-FINAL-REBUILD` 배리어를 유지하며,
 파괴적 rebuild와 D1/D2/final C7 live는 주요 개발 완료 뒤에만 실행한다.
-||||||| parent of d77ea42d (docs(c7): #995 접어넣기와 C7 두 항목 종결 기록)
-
 ## 2026-08-20 — 파괴적 재구축을 배리어로 분리 (`T-VN-FINAL-REBUILD` 신설)
 
 사용자 결정: `T-VN-41F1D-D1`의 파괴적 rebuild(`ktdctl pinvi-pair rebuild-pinned --confirm` —

@@ -106,6 +106,9 @@ Dagster asset으로 연결한다. provider API 호출은 resource가 record iter
 | `feature_place_krforest_arboretums` | `krforest_arboretums` | `krforest_arboretums` | `features_place` |
 | `feature_route_krforest_mountain_trails` | `krforest_mountain_trails` | `krforest_mountain_trails` | `features_route` |
 | `feature_route_krforest_dulle_trails` | `krforest_dulle_trails` | `krforest_dulle_trails` | `features_route` |
+| `feature_weather_krforest_mountain_weather` | `krforest_mountain_weather` | `krforest_mountain_weather` | `features_weather` |
+| `feature_weather_krforest_wildfire_risk_forecast` | `krforest_wildfire_risk_forecast` | `krforest_wildfire_risk_forecast` | `features_weather` |
+| `feature_notice_krforest_landslide_forecast_issues` | `krforest_landslide_forecast_issues` | `krforest_landslide_forecast_issues` | `features_notice` |
 | `feature_place_standard_museums` | `standard_museums` | `datagokr_museums` | `features_place` |
 | `feature_place_standard_tourist_attractions` | `standard_tourist_attractions` | `datagokr_tourist_attractions` | `features_place` |
 | `feature_place_standard_parking_lots` | `standard_parking_lots` | `datagokr_parking_lots` | `features_place` |
@@ -250,8 +253,8 @@ ctx.log.info("loaded", extra={"dataset_key": VISITKOREA_FESTIVAL_DATASET_KEY})
 
 kor-travel-map Dagster의 asset/job 이름 **명명 가이드라인**이다. 실제 구현된 asset
 정본은 §1.1이며, 아래 표에서 `feature_<kind>_<provider>_<entity>` 형식과 group이
-실제와 다른 행(예: `weather_*`/`notice_*` 접두와 C05A~D 행)은 아직 미구현인
-**forward-looking 예시**다 — §1.1과 충돌하면 §1.1을 따른다.
+아직 구현되지 않은 provider는 `forward-looking`으로 표시한다. 구현된 C05A~D 행은
+§1.1의 실제 asset 이름과 동일하게 유지한다.
 
 | asset 이름 | dataset_key | group |
 |-----------|-------------|-------|
@@ -271,9 +274,9 @@ kor-travel-map Dagster의 asset/job 이름 **명명 가이드라인**이다. 실
 | `feature_weather_kma_ultra_short_nowcast` | `kma_ultra_short_nowcast` | `features_weather` |
 | `feature_notice_krex_traffic_notices` | `krex_traffic_notices` | `features_notice` |
 | `feature_notice_kma_weather_alerts` | `kma_weather_alerts` | `features_notice` |
-| `feature_weather_krforest_mountain` (C05B) | `krforest_mountain_weather` | `features_weather` |
-| `feature_weather_krforest_wildfire_risk` (C05C) | `krforest_wildfire_risk_forecast` | `features_weather` |
-| `feature_notice_krforest_landslide_forecast` (C05D) | `krforest_landslide_forecast_notices` | `features_notice` |
+| `feature_weather_krforest_mountain_weather` (C05B) | `krforest_mountain_weather` | `features_weather` |
+| `feature_weather_krforest_wildfire_risk_forecast` (C05C) | `krforest_wildfire_risk_forecast` | `features_weather` |
+| `feature_notice_krforest_landslide_forecast_issues` (C05D) | `krforest_landslide_forecast_issues` | `features_notice` |
 | `feature_dedup_review` | (운영) | `features_quality` |
 | `feature_consistency_reports` | (운영, T-201) | `features_quality` |
 
@@ -496,6 +499,11 @@ offline upload load job은 T-208h 이후 다음 흐름을 따른다.
 | `feature_price_opinet_stations_daily_schedule` | `feature_price_opinet_stations_job` | `18 18 * * *` | OpiNet 주유소 유가 일 1회(#545 quota guard) |
 | `feature_place_krex_rest_areas_monthly_schedule` | `feature_place_krex_rest_areas_job` | `20 2 1 * *` | KREX 휴게소 월 1회 |
 | `feature_price_krex_rest_areas_twice_daily_schedule` | `feature_price_krex_rest_areas_job` | `28 6,18 * * *` | KREX 휴게소 유가 일 2회 |
+| `feature_route_krforest_mountain_trails_monthly_schedule` | `feature_route_krforest_mountain_trails_job` | `25 4 4 * *` | 산림청 등산로 월 1회(C05A) |
+| `feature_route_krforest_dulle_trails_monthly_schedule` | `feature_route_krforest_dulle_trails_job` | `35 4 4 * *` | 산림청 둘레길 월 1회(C05A) |
+| `feature_weather_krforest_mountain_weather_six_daily_schedule` | `feature_weather_krforest_mountain_weather_job` | `0 1,5,9,13,17,21 * * *` | 산림청 산악기상 하루 6회(C05B) |
+| `feature_weather_krforest_wildfire_risk_forecast_six_daily_schedule` | `feature_weather_krforest_wildfire_risk_forecast_job` | `10 1,5,9,13,17,21 * * *` | 산림청 산불위험예보 하루 6회(C05C) |
+| `feature_notice_krforest_landslide_forecast_issues_six_daily_schedule` | `feature_notice_krforest_landslide_forecast_issues_job` | `20 1,5,9,13,17,21 * * *` | 산림청 산사태 예보발령·해제 하루 6회(C05D) |
 | `feature_notice_krex_traffic_notices_ten_minute_schedule` | `feature_notice_krex_traffic_notices_job` | `*/10 * * * *` | KREX 교통공지 10분마다 |
 | `feature_weather_krex_rest_areas_hourly_schedule` | `feature_weather_krex_rest_areas_job` | `35 * * * *` | KREX 휴게소 관측 기상 시간당 |
 | `feature_place_krheritage_items_monthly_schedule` | `feature_place_krheritage_items_job` | `15 2 2 * *` | 국가유산 item 월 1회 |

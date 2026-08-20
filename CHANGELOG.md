@@ -5,6 +5,15 @@
 
 ## [Unreleased]
 
+### 산림청 C05A~D 연결 (2026-08-20)
+
+- **ADDED**: `python-krforest-api`의 등산로·둘레길 route, 산악기상 관측,
+  산불위험 V2 지수, 산사태 예보발령·해제 typed source를 map ETL에 연결했다.
+- **ADDED**: route 월 1회, 산악기상·산불위험·산사태 하루 6회 Dagster schedule과
+  provider dataset/operation/fixture preview를 등록했다.
+- **FIXED**: source lineage와 snapshot lifecycle을 보존하고, provider typed 모델의
+  시군구 identity·HTTP error redaction·route source identity 경계를 보강했다.
+
 ### T-VN-40C — legacy curation overlay 물리 제거 (2026-08-20)
 
 ADR-075 보존 우선 cutover의 마지막 단계. 40A(write fence)·40B(consumer 선전환) 뒤

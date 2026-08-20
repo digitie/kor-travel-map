@@ -33,10 +33,10 @@ barrier로 직렬화한다.
   - [ ] `T-VN-M03`(curated 동시 생성) ∥ [ ] `T-VN-M04`(PinVi 요청 큐 — cross-repo)
   - [ ] `T-VN-M05`(provider 발행 시 중복 판정 — 자동 병합 금지)
 - **Lane C — 사문화 정리·미구현 dataset (다른 lane과 무관, 아무 때나)**
-  - [ ] `T-VN-C05A`(산림청 등산로·둘레길 route 구현)
-  - [ ] `T-VN-C05B`(산악기상 typed model·WeatherValue 구현)
-  - [ ] `T-VN-C05C`(산불위험 V2 typed model·WeatherValue 구현)
-  - [ ] `T-VN-C05D`(산사태 예보발령 notice 구현)
+  - [x] `T-VN-C05A`(산림청 등산로·둘레길 route 구현, PR 진행)
+  - [x] `T-VN-C05B`(산악기상 typed model·WeatherValue 구현, PR 진행)
+  - [x] `T-VN-C05C`(산불위험 V2 typed model·WeatherValue 구현, PR 진행)
+  - [x] `T-VN-C05D`(산사태 예보발령 notice 구현, PR 진행)
 - **Wave 2 barrier 이후**
   - Lane A: [ ] `T-VN-37D`(notice empty range 표현 — 제품 결정 대기)
   - 32~38 join barrier 뒤 Lane B: `T-VN-40B`·`T-VN-40C`는 2026-08-20 prod 적용까지 완료했다.
@@ -529,9 +529,9 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 > C03이 제품 범위와 authoritative source를 확정해 완료 이관됐다. 아래 네 task는 서로
 > 독립이며, upstream public model을 먼저 고치는 task는 해당 provider 저장소 PR을 선행한다.
 
-- [ ] T-VN-C05A — **산림청 등산로·둘레길 route 구현**
+- [x] T-VN-C05A — **산림청 등산로·둘레길 route 구현**
 
-  `python-krforest-api@f9254e6`의 `travel.forest_trail_file_features()`
+  `python-krforest-api` PR#9의 `travel.forest_trail_file_features()`
   (`forest.go.kr` `PBD0000041`)와 `travel.dulle_trail_features()`(`PBD0000031`)가 반환하는
   `ForestSpatialFeature`를 각각 `krforest_mountain_trails`와
   `krforest_dulle_trails`로 적재한다. LineString/MultiLineString만 route로 승격하고,
@@ -539,26 +539,26 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   통제·폐쇄 여부는 실시간이 아니라고 명시하므로 이 source를 운영상 이용 가능 여부나
   notice로 사용하지 않는다.
 
-- [ ] T-VN-C05B — **산악기상 typed model·WeatherValue 구현**
+- [x] T-VN-C05B — **산악기상 typed model·WeatherValue 구현**
 
   authoritative source는 공공데이터포털 `15084696`의
-  `1400377/mtweather/mountListSearch`다. `python-krforest-api`의 좌표+`RawRecord` 모델을
+  `1400377/mtweather/mountListSearch`다. `python-krforest-api`의 `MountainWeather` typed model을
   관측소 ID·이름·관측시각·기온/습도/풍향/풍속/강수 typed 필드로 먼저 안정화하고,
   관측소 anchor와 `WeatherValue` identity를 검증한 뒤 `krforest_mountain_weather`를 적재한다.
 
-- [ ] T-VN-C05C — **산불위험 V2 typed model·WeatherValue 구현**
+- [x] T-VN-C05C — **산불위험 V2 typed model·WeatherValue 구현**
 
   authoritative source는 공공데이터포털 `15084817`의 현행
   `1400377/forestPointV2` 전국/시도/시군구 API다. pinned upstream의 구 V1 경로와
-  `RawRecord`를 V2 typed model로 교체하고 지역 anchor·72시간/3시간 예보 identity를
+  `WildfireRiskForecast` V2 typed model로 교체하고 지역 anchor·D1~D4 예보 identity를
   확정한 뒤 `krforest_wildfire_risk_forecast`를 지수성 `WeatherValue`로 적재한다.
 
-- [ ] T-VN-C05D — **산사태 예보발령 notice 구현**
+- [x] T-VN-C05D — **산사태 예보발령 notice 구현**
 
   산림 안전 API 중 실제 발령·해제 의미를 가진 공공데이터포털 `15074798`
   `forecastIssueService/forecastIssueList`만 source로 채택한다. upstream typed model,
   기관·종류·발령시각 기반 사건 identity, 발령/해제 lifecycle을 fixture·live 표본으로
-  확정한 뒤 `krforest_landslide_forecast_notices`를 `landslide_warning`으로 적재한다.
+  확정한 뒤 `krforest_landslide_forecast_issues`를 notice FeatureBundle로 적재한다.
 
 ### T-VN-40B 잔여 — source rule `curated` action 퇴역 (2026-08-20 종결 되돌림)
 
