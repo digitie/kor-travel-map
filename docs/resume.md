@@ -30,6 +30,26 @@ ADR-094 추가 + ADR-076/079 superseded.
 
 주의: v5/v7은 `require_rebuildable_mode` 아래에서만 생성되고(n150은 rehearsal/
 rebuildable로 해당), runner에는 **root 소유 0600 사본**을 건네야 한다.
+
+## 2026-08-20 — T-VN-34C fresh-live runner와 M01 credential 계약 정렬
+
+최신 `origin/main`의 PR [#1028](https://github.com/digitie/kor-travel-map/pull/1028), merge
+`021b20fc`가 T-VN-M01 foundation과 T-VN-34C 격리 fresh-live runner의 환경변수 계약을
+맞췄다. runner가 raw token(UI 전용), API digest, manual-create off flag를 함께 생성하고,
+`docker-compose.yml`의 모든 `:?` 필수 환경변수와 runner `map.env`의 집합 차이를 정적 테스트로
+검사한다. raw/digest가 서로 다른 값으로 배선되거나 새 compose 필수값이 runner에서 빠지면
+컨테이너 기동 전에 실패하도록 경계를 고정했다.
+
+이는 runner preflight 보강이지 M01 완료나 route 활성화가 아니다. 현재 application migration
+head는 `0225_tvn40c_physical_removal`이고, M01의 `0226_m01_manual_feature_create` DB/ACL/
+backup tranche와 실제 route 활성화는 아직 남아 있다.
+
+### 다음 한 작업
+
+`T-VN-M01`의 `0226` forward-only migration·ACL·backup tranche를 구현·검증한다. 그 뒤에도
+`T-VN-41S`·C05 provider dataset·H34 잔여가 `T-VN-FINAL-REBUILD` 배리어를 유지하며,
+파괴적 rebuild와 D1/D2/final C7 live는 주요 개발 완료 뒤에만 실행한다.
+
 ## 2026-08-20 — 파괴적 재구축을 배리어로 분리 (`T-VN-FINAL-REBUILD` 신설)
 
 사용자 결정: `T-VN-41F1D-D1`의 파괴적 rebuild(`ktdctl pinvi-pair rebuild-pinned --confirm` —
@@ -73,7 +93,6 @@ enable. 앞의 것이 PinVi vendor PR 병합에 물려 있으므로 먼저 그 �
 
 병행 가능: `T-VN-41S` ACL 방침 결정 후 `0227+`, `T-FE-MOCK-MANIFEST`,
 `T-C7-SCOPE-REGISTRY`, `T-C7-LIVE-SERIAL`.
-||||||| parent of b0152b46 (docs(tvn41): F1D-E 저장소측 완료 기록 + 백로그 진척 표시)
 
 ## 2026-08-20 — T-VN-40C 완료: 머지 4건 + prod 0225 적용
 
@@ -101,7 +120,7 @@ removal manifest의 `verification` 9항이 모두 닫혔고, prod는 head
 실측 276과 어긋남 — 40C가 만든 drift 아님), `T-C7-SCOPE-REGISTRY`, `T-C7-LIVE-SERIAL`,
 T-VN-41 최종 C7 인수.
 
-## 2026-08-20 — T-VN-40C legacy overlay 물리 제거 (머지 대기)
+## 2026-08-20 — T-VN-40C legacy overlay 물리 제거 (당시 머지 대기 → 완료)
 
 `0225`가 legacy `curated_features` overlay·snapshot 표·trigger·`legacy_projection_id`·
 rekey 예외·legacy ACL을 지운다. API 라우트 13개, admin UI 라우트 2개와 read hook,
@@ -115,7 +134,7 @@ passed**(7.2분, flake 0). 남은 실패 6건은 n150 환경(PG_DSN·geo 키)이
 mocked checkpoint gate는 manifest의 `discoveredTests: 284`가 실측 276과 어긋나 red인데,
 `origin/main`에서도 276이라 40C가 만든 drift가 아니다(백로그 `T-FE-MOCK-MANIFEST`).
 
-### 다음 한 작업
+### 당시 다음 한 작업
 
 PR [#1023](https://github.com/digitie/kor-travel-map/pull/1023)의 CI green 확인 후
 머지. 머지 순서에 **의존이 있다**:

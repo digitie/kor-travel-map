@@ -76,6 +76,23 @@ rebuildable에서만 만들어진다. n150은 `rehearsal`/`rebuildable`이라 �
 파일이 없다**. D1의 파괴적 rebuild가 처음 만든다. 또 ktdm의 state root는 Manager owner
 소유 `0700`이라 verifier의 root-owned 0600 요구를 그대로는 만족하지 않는다 — v4도 같은
 구조였고 운영자가 root 소유 사본을 건네는 것이 기존 절차다. runbook에 명시했다.
+## 2026-08-20 — T-VN-34C fresh-live runner를 M01 필수 자격증명과 동기화
+
+최신 main의 PR [#1028](https://github.com/digitie/kor-travel-map/pull/1028), merge
+`021b20fc`를 코드·테스트와 대조했다. 같은 날 반영된 M01 foundation이 compose에서 요구하는
+manual-create raw token(UI 전용)과 API digest를 격리 runner가 만들지 않으면 Postgres나
+애플리케이션 검증에 도달하기 전에 compose가 종료되는 결함이 있었다.
+
+이번 보강은 runner가 raw token에서 digest를 파생하고 manual-create flag를 명시적으로 `false`로
+두도록 했으며, `docker-compose.yml`의 `${VAR:?}` 필수 키 집합과 runner `map.env` 키 집합의
+차이를 테스트한다. 따라서 M01이 새 필수 환경변수를 추가해도 isolated fresh-live가 조용히
+기동 실패하지 않고 preflight에서 원인을 드러낸다.
+
+전수 대조 결과 이것은 M01의 runner preflight만 닫는다. `0225_tvn40c_physical_removal` 뒤의
+`0226_m01_manual_feature_create` DB/ACL/backup tranche, route 활성화와 실제 live 인수는
+열린 task로 유지한다. 관련 백로그 상태는 [`tasks.md`](tasks.md)의 T-VN-M01·
+T-VN-FINAL-REBUILD 항목에 반영했다.
+
 ## 2026-08-20 — T-VN-41C GC 실측: 통과 자체보다 "통과가 무엇을 뜻하는가"
 
 cache-target snapshot GC의 백로그 AC(migration → 수동 GC → schedule ON → 다음 tick,
@@ -111,7 +128,6 @@ storage가 자기 alembic 계보를 같은 `public.alembic_version`에 stamp해�
 절차를 일회성으로 흘려보내지 않고 `scripts/verify-tvn41c-cache-target-gc.sh`로 고정했다.
 스키마나 GC 예산이 바뀌면 다시 돌려야 하는 게이트를 사람 기억에 두면 안 된다. 게이트는
 `DROP DATABASE`로 시작하므로 운영 DB 이름이 들어오면 그 전에 거부한다.
-||||||| parent of b0152b46 (docs(tvn41): F1D-E 저장소측 완료 기록 + 백로그 진척 표시)
 
 ## 2026-08-20 — T-VN-41C relay 종결성: 테스트가 결함을 보호하고 있었다
 
@@ -4840,7 +4856,7 @@ map recenter로 해소. 구현 + e2e type-check + 4각도 적대 정적검증 �
 **수정**(`admin-feature-acceptance-write.live.spec.ts`, +57/-5):
 
 - `LON/LAT`를 상수→`sha256("acceptance-coord:"+RUN_ID)` 기반 ±0.25° jitter(`coordJitter`, SEARCH_TOKEN과
-  동일 결정론 패턴). 진폭은 한국 본토 bbox [124,132]×[33,39.5](ADR-012) 중심부 유지로 create 검증·viewport
+  동일 결정론 패턴). 진폭은 한국 본토 bbox `[124,132]×[33,39.5]` (ADR-012) 중심부 유지로 create 검증·viewport
   마진 확보, cross-run 충돌 확률 ≲1e-4.
 - `recenterMapTo(page,lon,lat)` 헬퍼 신설: 노출된 `_maplibreMap` 핸들(vworld-map-view.tsx e2e 훅)에
   `jumpTo({center})`. `assertStatusMarker`에서 zoomMapTo 직전 호출 — jitter로 fixture가

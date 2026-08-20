@@ -5,9 +5,9 @@
 [`docs/resume.md`](resume.md)가 정본이다. 작성·유지 규약은
 [`docs/tasks-rule.md`](tasks-rule.md)를 따른다.
 
-## 진행 중인 작업 인덱스 (2026-08-19 전면 재대조)
+## 진행 중인 작업 인덱스 (2026-08-20 전면 재대조)
 
-완료한 `T-VN-32`·`T-VN-33`·`T-VN-37`·`T-VN-38`과 선행 운영 task는
+완료한 `T-VN-32`·`T-VN-33`·`T-VN-37`·`T-VN-38`·`T-VN-40`과 선행 운영 task는
 [`tasks-done.md`](tasks-done.md)로 이관했다. 아래에는 아직 닫히지 않은 실행 단위만 둔다.
 
 **Lane A (Claude Code)**와 **Lane B (codex)**는 서로 병렬 실행한다. 각 lane 내부는 아래 순서를
@@ -27,8 +27,8 @@ barrier로 직렬화한다.
   - [ ] `T-C7-BROWSER-EVIDENCE`(#995 잔여 — 인수 게이트 아님, T-VN-41 마감 비차단)
     → [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2` → `T-VN-41C` receipt 승격
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정, T-VN-40 인수 뒤)**
-  - [ ] `T-VN-M01`(admin Feature 생성 API — ADR-093 accepted 전환) → [ ] `T-VN-M02`(origin 보존·불변)
-  - [ ] `T-VN-M03`(curated 동시 생성 — T-VN-40 인수 뒤) ∥ [ ] `T-VN-M04`(PinVi 요청 큐 — cross-repo)
+  - [~] `T-VN-M01`(admin Feature 생성 API foundation 병합, `0226` DB/ACL/route 잔여) → [ ] `T-VN-M02`(origin 보존·불변)
+  - [ ] `T-VN-M03`(curated 동시 생성) ∥ [ ] `T-VN-M04`(PinVi 요청 큐 — cross-repo)
   - [ ] `T-VN-M05`(provider 발행 시 중복 판정 — 자동 병합 금지)
 - **Lane C — 사문화 정리·미구현 dataset (다른 lane과 무관, 아무 때나)**
   - [ ] `T-VN-C05A`(산림청 등산로·둘레길 route 구현)
@@ -37,18 +37,13 @@ barrier로 직렬화한다.
   - [ ] `T-VN-C05D`(산사태 예보발령 notice 구현)
 - **Wave 2 barrier 이후**
   - Lane A: [ ] `T-VN-37D`(notice empty range 표현 — 제품 결정 대기)
-  - 32~38 join barrier 뒤 Lane B: [x] `T-VN-40B` → [x] `T-VN-40C`(2026-08-20 prod 적용 완료)
-    - 기반 구현 #974, 40A write fence #994, identity mapping #996, prod migration과 PinVi
-      mapping 소비·59개 collection import는 완료 이관했다. 남은 것은 40B의 source-rule
-      transition, ③ sanctioned live/soak, ④ exact receipt, 40C 물리 삭제다.
-    - 설계·구현 정본은
-      [`t-vn-40-curation-write-model-plan-2026-08-11.md`](reports/t-vn-40-curation-write-model-plan-2026-08-11.md)다.
+  - 32~38 join barrier 뒤 Lane B: `T-VN-40B`·`T-VN-40C`는 2026-08-20 prod 적용까지 완료했다.
+    - 기반 구현 #974, 40A write fence #994, identity mapping #996, 40B candidate 전환,
+      ③ sanctioned live/soak, ④ exact receipt, 40C 물리 삭제와 prod `0225` 적용까지
+      모두 완료했다. 상세 이력은 [`tasks-done.md`](tasks-done.md)에 이관했다.
     - 인수 ③·④ 중 분리한 [ ] `T-C7-SCOPE-REGISTRY` ∥ [ ] `T-C7-LIVE-SERIAL`도
       아래 인수 잔여 절이 소유한다.
   - 최종 단일 cutover: [ ] `T-VN-39`
-  - **T-VN-40 현재 경계(2026-08-19)** — 사전 fence·mapping과 prod ①·PinVi ②는
-    완료했다. 아래 `T-VN-40 인수 — 잔여`의 ③ live/soak → ④ receipt →
-    ⑤ physical removal 순을 따른다.
 - **보류/외부 추적**
   - [ ] `T-VN-H27` — #819 HAProxy WebSocket tunnel timeout(**보류: 운영자 환경 필요**,
     사용자 지시 2026-07-29). 프록시는 **OPNsense 라우터의 HAProxy**이고 저장소에 config가 없다
@@ -83,8 +78,8 @@ barrier로 직렬화한다.
   (AGENTS.md), 그 아래 설계적 우수성 > 확장성 > 성능 > 불필요한 코드 반복(래퍼류) 금지.
   **prod 환경 보전·호환성·기존 문서 계약·최소 수정은 비제약** — 필요 시 DB 스키마·문서
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
-- migration 정본: 단일 head 유지(2026-08-19 `main` 기준
-  `0224_c7_external_system_scope`; T-VN-40C `0225`는 **착지·prod 적용 완료**,
+- migration 정본: 단일 head 유지(2026-08-20 `origin/main` 기준
+  `0225_tvn40c_physical_removal`; T-VN-40C는 **착지·prod 적용 완료**,
   M01 후속이 `0226`, 41S 후속은 `0227+`).
   prod 적용 head는 배포 직전 live DB에서 다시 확인한다. 후속 migration 소유자는
   PR 직전 단일 head를 재확인한 뒤 번호를 배정한다. 두 lane의 migration-bearing PR은 번호 예약부터
@@ -560,32 +555,10 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   기관·종류·발령시각 기반 사건 identity, 발령/해제 lifecycle을 fixture·live 표본으로
   확정한 뒤 `krforest_landslide_forecast_notices`를 `landslide_warning`으로 적재한다.
 
-### T-VN-40 인수 — 완료 (2026-08-20)
+### T-VN-40 후속에서 분리한 C7 인수 잔여
 
-> ①~⑤ 전부 닫혔다. 상세 서사는 [`journal.md`](journal.md) 2026-08-20 두 항목.
-
-- [x] **③ sanctioned live/soak** — strict runner가 `f00e7f48`에서 6-spec / 17-case
-  RESULT: GREEN(`orchestrator_verified=true`, BLOCKED 없음, audit rc=0).
-- [x] **④ receipt complete** — PR [#1024](https://github.com/digitie/kor-travel-map/pull/1024)
-  (merge `294db534`). 40C가 user spec을 바꿔 #1022의 봉인이 무효가 됐으므로
-  PinVi 재-vendor([pinvi#459](https://github.com/digitie/pinvi/pull/459), merge `07340d9e`)
-  뒤 두 번째 paired cycle로 exact 9키를 다시 봉인했다.
-  `map_commit=4c50fe86` · `pinvi_commit=07340d9e` ·
-  `map_user_openapi_sha256 == pinvi_user_vendor_sha256 == 489b05d3`.
-- [x] **⑤ physical removal 실행** — PR [#1023](https://github.com/digitie/kor-travel-map/pull/1023)
-  (merge `4c50fe86`). `0225`가 legacy overlay·snapshot 표·trigger·`legacy_projection_id`·
-  `0074` rekey 예외·legacy ACL을 삭제한다. 라우트 13개, admin UI 라우트 2개와 read hook,
-  dead symbol 20개를 함께 지웠고, 삭제 테스트에 섞여 있던 legacy 무관 검사 9개는 복구했다.
-  정적 zero gate와 post-removal runtime 검증을 저장소 안 테스트로 고정하고 변이 6종으로
-  red를 확인했다.
-- [x] **prod 적용 (2026-08-20)** — head `0225_tvn40c_physical_removal`. 되돌릴 수 없는
-  migration이라 prod 백업을 별도 database로 복원해(소유권 보존) 실데이터 리허설을 먼저
-  했다 — rc=0 · 4초 · 사후 zero 3항 · 보존 3항 · D4/D8 통과. prod 사후검증도 legacy
-  relation·컬럼·`pg_proc.prosrc` 0, 보존 mapping 4,424 / item 4,424 / collection 59 /
-  theme 52 / source 19 / rule 53, rekey FK `ON UPDATE` 없음, 제거 라우트 404 · 잔존 401/200,
-  4개 컨테이너 healthy. 복구점
-  `~/backups/kor_travel_map_0224_c7_external_system_scope_pre0225_20260820T034138Z.dump`
-  (615MB, sha256 검증).
+> T-VN-40B/C와 인수 ③~⑤는 2026-08-20에 모두 완료되어 [`tasks-done.md`](tasks-done.md)로
+> 이관했다. 아래는 그 완료와 독립적으로 남은 검증·운영 task만 둔다.
 
 - [ ] **T-FE-MOCK-MANIFEST** — mocked e2e checkpoint manifest
   (`packages/kor-travel-map-admin/frontend/e2e/mocked-failure-manifest.json`)의
@@ -858,25 +831,6 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   여전히 가치가 있으나, 위 성능 문제와 무관하고 read 술어 변경(=제품 결정)이
   선행돼야 하므로 분리한다. notice_type별 "미래 발효를 보일 것인가" 결정이 먼저다.
 
-### T-VN-40 — curation write model 단일화 (Lane B)
-
-> 기반 구현 #974, 40A write fence #994, identity mapping #996, prod migration과 PinVi
-> mapping 소비·59개 collection import는 완료 이관했다. 현재 실행 순서는 40B 잔여 →
-> ③ live/soak → ④ receipt complete → 40C 물리 삭제다.
-
-- [~] T-VN-40B — **candidate lifecycle 분리·consumer cutover 잔여**
-
-  - [ ] legacy source rule을 candidate `legacy_backfill`로 전환하고
-    `default_action='curated'`를 퇴역시킨 뒤 `ck_curated_source_rules_action`을 VALIDATE한다.
-    PinVi mapping 입력은 아니어서 완료된 ②를 뒤집지 않는다.
-
-- [~] T-VN-40C — **legacy surface physical removal**
-
-  v2.2 removal manifest·번호 없는 migration 초안과 n150 prod-shaped/fresh 시뮬레이션은
-  완료했다. ④ receipt complete 뒤 D4 procedure 본문, 코드·frontend·계약 삭제, static-zero
-  gate를 구현하고 `0225` forward migration으로 legacy repository·trigger·table·API·ACL을
-  제거한다. held component나 호환 shim은 만들지 않으며 recovery는 fresh clone/reload다.
-
 - [ ] T-VN-39 — **KTM·PinVi write-fence cutover**
 
   consumer-first 배포, write fence와 순차 전환을 수행한다. **T-VN-33C의 legacy
@@ -1060,10 +1014,13 @@ proposed ADR-093에서 닫았고, exact checkpoint `2aa17c27`에 API·DB 전문 
 - [~] **T-VN-M01 — admin Feature 생성 API clean cutover** (결정 1, 구현 진행). 이미 존재하는
   `POST /v1/admin/features`를 서버 발급 UUIDv7, exact identity claim, `manual_admin` 단일 origin,
   고정 initial state와 admin BFF 전용 인증 경계로 교정한다. **ADR-093 필요**.
-  PR #1012 merge `ac77a7d1`을 base로 API/ORM foundation과 PinVi direct-create fail-close draft #458을
-  열었고, Map draft #1016 `b41c95f9`에 Admin UI BFF/form/generated types와 runtime raw/digest 격리를
-  추가했다. route flag는 계속 false다. DB tranche는 T-VN-40C의 실제 `0225` 착지 뒤
-  `0226_m01_manual_feature_create`로만 잇는다.
+  Map PR #1016은 `14792385`로 병합되어 API/ORM foundation, Admin UI BFF/form/generated types와
+  runtime raw/digest 격리를 main에 반영했다. PinVi direct-create fail-close는 별도 paired PR
+  [#458](https://github.com/digitie/pinvi/pull/458)의 cross-repo 경계로 추적한다.
+  T-VN-34C 격리 fresh-live runner도 #1028(`021b20fc`)에서 raw UI token·API digest·off flag를 생성하고
+  `docker-compose.yml`의 모든 `:?` 필수 환경변수와의 집합 차이를 테스트하도록 보강했다.
+  이 보강은 runner preflight만 닫은 것이며 route flag는 계속 false다. DB/ACL/backup tranche는
+  `0226_m01_manual_feature_create`로만 잇고 실제 활성화·완료 이관은 그 검증 뒤에 한다.
 - [ ] **T-VN-M02 — origin 보존과 불변** (결정 4). origin/claim read model과 Feature 수정·purge,
   backup/restore에서의 불변을 스키마·테스트로 고정한다. `manual_pinvi`/`manual_curation` 값은 각
   인증 writer가 생기는 M04/M03 전에는 등록하지 않는다.
