@@ -1691,7 +1691,10 @@ class CuratedSourceRuleRow(Base):
     __tablename__ = "curated_source_rules"
     __table_args__ = (
         CheckConstraint(
-            "default_action IN ('candidate','curated','ignore')",
+            # ADR-092가 `curated` action을 candidate 생성으로 재해석해 `candidate`와
+            # 같은 뜻이 됐다. 두 값이 공존하면 읽는 사람마다 다르게 해석하므로
+            # `0227`이 데이터를 정규화하고 이 목록에서 뺐다(T-VN-40B).
+            "default_action IN ('candidate','ignore')",
             name=conv("ck_curated_source_rules_action"),
         ),
         CheckConstraint(
