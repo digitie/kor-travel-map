@@ -73,6 +73,21 @@ async def _seed(session: AsyncSession) -> None:
         ),
         {"material_id": _MATERIAL, "system": _SYSTEM, "root": _ROOT},
     )
+    # identity 술어가 **선택적**이어야 planner가 identity 인덱스를 고른다. material이
+    # 하나뿐이면 두 partial index의 비용이 같아 아무 것이나 골라도 게이트가 통과한다 —
+    # 그러면 "identity로 한 행을 찍는다"를 보는 게 아니라 "인덱스를 아무거나 탄다"를
+    # 보는 게 된다.
+    await session.execute(
+        text(
+            "INSERT INTO ops.poi_cache_target_snapshot_materials ("
+            "material_id, external_system, restore_epoch, "
+            "material_high_watermark_relay_order, safe_high_watermark_relay_order, "
+            "item_count, merkle_root, materialized_at) "
+            "SELECT x_extension.gen_random_uuid(), :system, 1, value, value, 0, "
+            ":root, now() FROM generate_series(1, 200) AS value"
+        ),
+        {"system": _SYSTEM, "root": _ROOT},
+    )
     await session.execute(
         text(
             "INSERT INTO ops.poi_cache_target_snapshots ("
