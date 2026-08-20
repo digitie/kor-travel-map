@@ -595,13 +595,13 @@ squash(2026-08-14) 이후 baseline과 bridge, T-VN-40 migration만 있다.
 ([README](../../alembic/legacy_versions/README.md)). **`versions/`로 되돌리지 마라** —
 bridge와 아카이브가 `0104_tvn36_final_fence`를 둘 다 선언하면 Alembic graph가 손상된다.
 
-#### 다음 migration(`0233`~) 작성
+#### 다음 application migration 작성
 
-1. 파일은 `alembic/versions/0233_<name>.py`,
-   `down_revision = "0232_tvn37d_notice_empty_range"`(= 현재 head)로 잇는다.
-   **`0201`을 쓰지 마라** — 그건 bridge 파일명이고 revision id가 아니다.
-2. `0105`~`0199`처럼 아카이브와 겹치는 번호는 쓰지 않는다. 파일 정렬이 `0200`보다
-   앞서면서 `down_revision`은 뒤를 가리키는 파일이 생겨 읽는 사람을 오도한다.
+1. 새 revision ID와 파일명은 기존 것과 겹치지 않게 잡고, `down_revision`은 **현재 terminal
+    head**로 잇는다. **`0201`을 쓰지 마라** — 그건 bridge 파일명이고 revision id가 아니다.
+2. 파일명 숫자는 편의일 뿐 적용 순서의 정본이 아니다. upstream이 높은 번호를 먼저
+    사용했으면 새 lane은 충돌 없는 ID를 택하고 `down_revision` graph로 순서를 표현한다.
+    package graph artifact는 이 dependency 순서로 생성된다.
 3. 파생 산출물을 함께 갱신한다:
    `python scripts/generate_application_migration_graph.py --write`
    (`src/kortravelmap/_application_migration_graph.json`). 게이트는 그 스크립트의

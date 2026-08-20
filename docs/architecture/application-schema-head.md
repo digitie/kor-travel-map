@@ -43,6 +43,9 @@ artifact의 source는 `alembic/versions/*.py`의 module-top-level `revision`과
 module을 import·실행하지 않으며 dynamic assignment, 중복 revision, unknown parent를
 fail-closed한다. generator와 명령 모두 graph의 root가 하나이고 모든 revision이 root에서
 도달 가능하며 DFS cycle이 없고 terminal head가 정확히 하나일 때만 성공한다.
+artifact의 `revisions` 배열은 파일명의 사전순이 아니라 `down_revision`을 먼저 두는 안정
+topological 순서다. upstream이 더 큰 파일 번호를 먼저 점유한 뒤 후속 lane이 이전 번호를
+사용해도 application head 판정이 잘못된 파일명 순서에 의존하지 않는다.
 
 새 application migration을 추가할 때는 다음을 함께 실행해 artifact를 갱신·검증한다.
 
