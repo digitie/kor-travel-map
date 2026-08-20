@@ -5,8 +5,9 @@
 두 전문 리뷰어의 적대 검토를 반영한 `python-krforest-api` PR #9를 merge commit
 `4681bc7892239adc28aeeab19dba707aefb1dbde`로 머지하고, map의 provider dependency와
 provider-contract를 같은 SHA로 고정했다. provider 로컬 gate는 ruff·strict mypy·pytest
-42건을 통과했고, data.go.kr 키가 없는 환경에서는 live API 11건을 안전하게 skip했다.
-n150 Playwright에서 provider debug UI의 API key 없는 오류 표면은 확인했다.
+42건을 통과했고, n150에 배선된 기존 data.go.kr 키를 출력하지 않고 live API를 실행해 9건을
+통과시켰다. 산림안전·산사태 endpoint 2건은 현재 키의 권한 범위를 서버가 거부해 xfail로
+기록했으며, n150 Playwright에서 provider debug UI의 API key 없는 오류 표면도 확인했다.
 
 운영 map live UI는 로그인 페이지 200까지 도달했으나 제공된 운영 자격증명으로 login POST가
 401이어서 인증 후 `/admin/features` 읽기 전용 검증을 완료하지 못했다. 비밀값을 출력하거나

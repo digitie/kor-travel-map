@@ -5,8 +5,9 @@
 `python-krforest-api` PR #9를 `4681bc7892239adc28aeeab19dba707aefb1dbde`로 머지했고,
 map의 provider pin도 같은 SHA로 갱신했다. map 브랜치는 최신 `origin/main`에 재베이스했으며
 현재 Alembic head 뒤에 C05 catalog migration `0230`을 두어 기존 `0229` 경로를 보존한다.
-provider n150 debug UI 스모크는 통과했지만, map 운영 UI는 제공된 자격증명으로 login POST가
-401이어서 인증 후 읽기 전용 `/admin/features` 스모크를 아직 완료하지 못했다.
+provider n150 debug UI 스모크와 data.go.kr live API 9건은 통과했고, 산림안전·산사태 2건은
+현재 키 권한 범위의 서버 거부를 xfail로 확인했다. map 운영 UI는 제공된 자격증명으로 login
+POST가 401이어서 인증 후 읽기 전용 `/admin/features` 스모크를 아직 완료하지 못했다.
 
 ### 다음 한 작업
 
