@@ -21,6 +21,9 @@ from kortravelmap.infra.advisory_lock import advisory_lock_key
 from kortravelmap.infra.c6c_cancel_probe_fixture_repo import (
     mark_c6c_cancel_probe_consumed,
 )
+from kortravelmap.infra.feature_update_executor import (
+    suppresses_relay_finalization,
+)
 from kortravelmap.infra.cache_target_event_repo import (
     CacheTargetRefreshProtocolViolation,
     CacheTargetRefreshStatus,
@@ -765,7 +768,7 @@ async def _append_cache_target_terminal_relay_event(
                 status=status,
             )
     except CacheTargetRefreshProtocolViolation as violation:
-        if violation.reason != CacheTargetRefreshProtocolViolation.EPOCH_MOVED:
+        if not suppresses_relay_finalization(violation):
             raise
         _LOG.warning(
             "cache target refresh %s without relay event — restore fence moved "
@@ -1043,10 +1046,14 @@ async def _record_terminal_run(
             if changed:
                 # #975 적대 재리뷰 P2-b: running member는 Dagster terminate + ledger 전이로
                 # 봉인되는데 여기에 relay event가 없으면 PinVi가 요청의 끝을 못 본다.
+                # `target_status`는 `_terminal_mapping`이 주는 {cancelled, done, failed}
+                # 셋뿐이고 셋 다 `CacheTargetRefreshStatus`에 있다. 처음에 `done`을 `failed`로
+                # 접었다가 적대 리뷰에서 잡혔다 — Dagster SUCCESS로 ledger가 `done`을 커밋한
+                # 같은 transaction에서 PinVi에 `failed`를 보내 종결 상태가 정면으로 어긋났다.
                 await _append_cache_target_terminal_relay_event(
                     session,
                     job_id=member.job_id,
-                    status="cancelled" if target_status == "cancelled" else "failed",
+                    status=target_status,
                     origin="running member reconcile",
                 )
                 continue

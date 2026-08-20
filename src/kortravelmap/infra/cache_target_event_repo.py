@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Final, Literal, cast
 from uuid import UUID, uuid4
 
 from sqlalchemy import text
@@ -84,6 +84,14 @@ class CacheTargetResultEvent:
     idempotent_replay: bool = False
 
 
+CacheTargetRefreshReason = Literal[
+    "epoch_moved",
+    "generation_advanced",
+    "fingerprint_changed",
+    "head_missing",
+]
+
+
 class CacheTargetRefreshProtocolViolation(RuntimeError):
     """PinVi refresh가 source snapshot/restore fence 정본을 벗어났다.
 
@@ -96,17 +104,20 @@ class CacheTargetRefreshProtocolViolation(RuntimeError):
     """
 
     #: restore fence가 지나가 captured epoch가 stale이다. 옛 epoch event는 거부된다.
-    EPOCH_MOVED = "epoch_moved"
+    EPOCH_MOVED: Final[CacheTargetRefreshReason] = "epoch_moved"
     #: source generation이 전진했다. 같은 epoch 안이라 stale tuple에도 event를 낼 수 있다.
-    GENERATION_ADVANCED = "generation_advanced"
+    GENERATION_ADVANCED: Final[CacheTargetRefreshReason] = "generation_advanced"
     #: source payload fingerprint가 바뀌었다. generation과 같은 취급.
-    FINGERPRINT_CHANGED = "fingerprint_changed"
+    FINGERPRINT_CHANGED: Final[CacheTargetRefreshReason] = "fingerprint_changed"
     #: captured member가 가리키던 head row 자체가 사라졌다.
-    HEAD_MISSING = "head_missing"
+    HEAD_MISSING: Final[CacheTargetRefreshReason] = "head_missing"
 
-    def __init__(self, message: str, *, reason: str) -> None:
-        super().__init__(message)
-        self.reason = reason
+    def __init__(self, message: str, reason: CacheTargetRefreshReason) -> None:
+        # reason을 위치 인자로 받아 `args`에 담는다 — keyword-only로 두면 `BaseException`의
+        # 기본 `__reduce__`가 `args`만으로 재구성하지 못해 pickle/copy 왕복이 깨진다
+        # (적대 리뷰 P3, 실측). 예외는 프로세스 경계를 넘을 수 있어야 한다.
+        super().__init__(message, reason)
+        self.reason: CacheTargetRefreshReason = reason
 
 
 _PINVI_CACHE_TARGET_SYSTEM = "pinvi"
@@ -515,18 +526,18 @@ async def assert_cache_target_refresh_members_current(
         if head is None:
             raise CacheTargetRefreshProtocolViolation(
                 "captured cache target refresh member의 source head가 사라졌습니다.",
-                reason=CacheTargetRefreshProtocolViolation.HEAD_MISSING,
+                CacheTargetRefreshProtocolViolation.HEAD_MISSING,
             )
         values = head._mapping
         if int(values["restore_epoch"]) != member.restore_epoch:
             raise CacheTargetRefreshProtocolViolation(
                 "captured cache target refresh member의 restore epoch가 현재 head와 다릅니다.",
-                reason=CacheTargetRefreshProtocolViolation.EPOCH_MOVED,
+                CacheTargetRefreshProtocolViolation.EPOCH_MOVED,
             )
         if int(values["source_generation"]) != member.source_generation:
             raise CacheTargetRefreshProtocolViolation(
                 "captured cache target refresh member의 source generation이 전진했습니다.",
-                reason=CacheTargetRefreshProtocolViolation.GENERATION_ADVANCED,
+                CacheTargetRefreshProtocolViolation.GENERATION_ADVANCED,
             )
         if (
             str(values["source_payload_fingerprint"])
@@ -534,7 +545,7 @@ async def assert_cache_target_refresh_members_current(
         ):
             raise CacheTargetRefreshProtocolViolation(
                 "captured cache target refresh member의 source fingerprint가 바뀌었습니다.",
-                reason=CacheTargetRefreshProtocolViolation.FINGERPRINT_CHANGED,
+                CacheTargetRefreshProtocolViolation.FINGERPRINT_CHANGED,
             )
     return members
 
@@ -632,7 +643,7 @@ async def _append_result_event(
     if int(stream_restore_epoch) != member.restore_epoch:
         raise CacheTargetRefreshProtocolViolation(
             "captured cache target refresh member의 restore epoch가 현재 stream과 다릅니다.",
-            reason=CacheTargetRefreshProtocolViolation.EPOCH_MOVED,
+            CacheTargetRefreshProtocolViolation.EPOCH_MOVED,
         )
     await session.execute(
         text("SELECT pg_advisory_xact_lock(CAST(:lock_id AS bigint))"),

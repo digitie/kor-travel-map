@@ -4,47 +4,41 @@
 generation 전진·fingerprint 변경·head 소멸까지 relay 종결 event가 사라져 PinVi가 요청의
 끝을 못 본다. 억제 근거를 가진 것은 restore fence 이동뿐이다(runbook §5-5).
 
-여기서는 DB 없이 고정 가능한 두 가지를 본다 — reason 어휘와, executor/취소 서비스가
-그 reason으로 분기한다는 사실.
+**이 파일의 첫 판은 공허했다.** 판정을 소스 문자열로 확인해서, 규칙을 완전히 되돌려도
+초록이었다(적대 리뷰 P2, 리뷰어가 실측). 그래서 판정을 순수 함수
+``suppresses_relay_finalization``으로 뽑고 여기서는 **값으로** 검사한다 — 규칙을 되돌리면
+반드시 red다.
 """
 
 from __future__ import annotations
 
-import ast
-import inspect
-from pathlib import Path
+import copy
+import pickle
 
 import pytest
 
 from kortravelmap.infra.cache_target_event_repo import (
     CacheTargetRefreshProtocolViolation,
 )
+from kortravelmap.infra.feature_update_executor import (
+    suppresses_relay_finalization,
+)
 
 pytestmark = pytest.mark.unit
 
-_ROOT = Path(__file__).resolve().parents[2]
-
-
-def test_violation_carries_typed_reason() -> None:
-    """reason 없이 만들 수 없다 — 클래스만 보고 분기하던 시절로 돌아가지 못하게."""
-    violation = CacheTargetRefreshProtocolViolation(
-        "테스트",
-        reason=CacheTargetRefreshProtocolViolation.GENERATION_ADVANCED,
-    )
-    assert violation.reason == "generation_advanced"
-    with pytest.raises(TypeError):
-        CacheTargetRefreshProtocolViolation("reason 없이")  # type: ignore[call-arg]
+_NON_EPOCH_REASONS = (
+    CacheTargetRefreshProtocolViolation.GENERATION_ADVANCED,
+    CacheTargetRefreshProtocolViolation.FINGERPRINT_CHANGED,
+    CacheTargetRefreshProtocolViolation.HEAD_MISSING,
+)
 
 
 def test_reason_vocabulary_is_exact() -> None:
     """네 원인이 각각 이름을 갖는다. 빈 어휘면 아래 검사가 자명하게 통과한다."""
-    reasons = {
+    assert {
         CacheTargetRefreshProtocolViolation.EPOCH_MOVED,
-        CacheTargetRefreshProtocolViolation.GENERATION_ADVANCED,
-        CacheTargetRefreshProtocolViolation.FINGERPRINT_CHANGED,
-        CacheTargetRefreshProtocolViolation.HEAD_MISSING,
-    }
-    assert reasons == {
+        *_NON_EPOCH_REASONS,
+    } == {
         "epoch_moved",
         "generation_advanced",
         "fingerprint_changed",
@@ -52,63 +46,61 @@ def test_reason_vocabulary_is_exact() -> None:
     }
 
 
-def _raise_reasons(path: Path) -> list[str]:
-    """모듈 안 `CacheTargetRefreshProtocolViolation(...)` raise의 reason 인자를 모은다."""
-    tree = ast.parse(path.read_text(encoding="utf-8"))
-    found: list[str] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, ast.Raise) or node.exc is None:
-            continue
-        call = node.exc
-        if not isinstance(call, ast.Call):
-            continue
-        name = call.func
-        if not (
-            isinstance(name, ast.Name)
-            and name.id == "CacheTargetRefreshProtocolViolation"
-        ):
-            continue
-        kw = {k.arg: k.value for k in call.keywords}
-        reason = kw.get("reason")
-        if isinstance(reason, ast.Attribute):
-            found.append(reason.attr)
-        else:
-            found.append("<no-reason>")
-    return found
-
-
-def test_every_raise_site_supplies_a_reason() -> None:
-    """raise 지점이 하나라도 reason을 빼면 호출자 분기가 조용히 무너진다."""
-    path = _ROOT / "src/kortravelmap/infra/cache_target_event_repo.py"
-    reasons = _raise_reasons(path)
-    assert len(reasons) >= 4, f"raise 지점이 너무 적다: {reasons}"
-    assert "<no-reason>" not in reasons, f"reason 없는 raise: {reasons}"
-    # 네 원인이 모두 실제로 쓰인다
-    assert {"EPOCH_MOVED", "GENERATION_ADVANCED", "FINGERPRINT_CHANGED", "HEAD_MISSING"} <= set(
-        reasons
-    ), reasons
-
-
-def test_executor_suppresses_only_epoch_moved() -> None:
-    """억제 판단이 `reason == EPOCH_MOVED`에 걸려 있는지 — 클래스 isinstance면 회귀다."""
-    from kortravelmap.infra import feature_update_executor
-
-    source = inspect.getsource(feature_update_executor)
-    assert "EPOCH_MOVED" in source, "억제 판단이 reason을 보지 않는다"
-    old_rule = (
-        "not isinstance(\n                exc, "
-        "CacheTargetRefreshProtocolViolation\n            )"
+def test_only_epoch_moved_suppresses_relay_finalization() -> None:
+    """규칙 자체를 값으로 고정한다 — 되돌리면 여기서 red다."""
+    epoch = CacheTargetRefreshProtocolViolation(
+        "fence moved", CacheTargetRefreshProtocolViolation.EPOCH_MOVED
     )
-    assert old_rule not in source, "예외 클래스 전체를 억제하던 옛 규칙이 되살아났다"
+    assert suppresses_relay_finalization(epoch) is True
+
+    for reason in _NON_EPOCH_REASONS:
+        violation = CacheTargetRefreshProtocolViolation("stale", reason)
+        assert suppresses_relay_finalization(violation) is False, reason
 
 
-def test_cancellation_service_uses_the_shared_helper_on_both_paths() -> None:
-    """queued/running 두 경로가 같은 헬퍼를 부르는지 — 한쪽만 있으면 종결 event가 샌다."""
-    path = (
-        _ROOT
-        / "packages/kor-travel-map-api/src/kortravelmap/api/pipeline_cancellation_service.py"
+def test_unrelated_exception_with_a_reason_attribute_does_not_suppress() -> None:
+    """duck typing이던 시절 `.reason`을 가진 남의 예외가 판정에 끼어들 수 있었다.
+
+    표준 라이브러리만 해도 `ssl.SSLError`·`UnicodeDecodeError`·`URLError`가 `.reason`을
+    갖는다. `isinstance` 좁히기가 사라지면 이 검사가 red가 된다.
+    """
+
+    class _Impostor(RuntimeError):
+        reason = CacheTargetRefreshProtocolViolation.EPOCH_MOVED
+
+    assert suppresses_relay_finalization(_Impostor("남의 예외")) is False
+    assert suppresses_relay_finalization(ValueError("무관")) is False
+
+
+def test_violation_round_trips_through_pickle_and_copy() -> None:
+    """예외는 프로세스 경계를 넘을 수 있어야 한다 — keyword-only 필수 인자면 깨진다."""
+    original = CacheTargetRefreshProtocolViolation(
+        "generation advanced",
+        CacheTargetRefreshProtocolViolation.GENERATION_ADVANCED,
     )
-    source = path.read_text(encoding="utf-8")
-    calls = source.count("await _append_cache_target_terminal_relay_event(")
-    assert calls == 2, f"헬퍼 호출이 2곳이어야 한다(queued/running): {calls}"
-    assert "EPOCH_MOVED" in source, "삼킴이 reason으로 gate되지 않는다"
+    revived = pickle.loads(pickle.dumps(original))
+    assert revived.reason == CacheTargetRefreshProtocolViolation.GENERATION_ADVANCED
+    assert str(revived) == str(original)
+    assert copy.copy(original).reason == original.reason
+
+
+def test_running_cancel_relay_status_is_not_folded() -> None:
+    """`done`을 `failed`로 접던 매핑이 되살아나면 red.
+
+    `_terminal_mapping`이 주는 `target_status`는 {cancelled, done, failed} 셋이고 셋 다
+    `CacheTargetRefreshStatus`에 있다. 처음 구현이 `done`을 `failed`로 접어, ledger가
+    `done`으로 커밋한 같은 transaction에서 PinVi에 `failed`를 보냈다(적대 리뷰 P1, 검증됨).
+    """
+    from typing import get_args
+
+    from kortravelmap.api.pipeline_cancellation_service import _terminal_mapping
+    from kortravelmap.infra.cache_target_event_repo import CacheTargetRefreshStatus
+
+    allowed = set(get_args(CacheTargetRefreshStatus))
+    seen: set[str] = set()
+    for terminal in ("CANCELED", "SUCCESS", "FAILURE"):
+        _run_result, _stored, target_status, _error = _terminal_mapping(terminal)
+        seen.add(target_status)
+        assert target_status in allowed, (terminal, target_status)
+    # 셋이 서로 다른 값이어야 접기(fold)가 없다는 뜻이다.
+    assert len(seen) == 3, seen

@@ -95,8 +95,21 @@ _TARGET_KEY = "trip-day-poi:1"
 # 않으면 두 모듈 사이에 수집 순서 의존이 생긴다. 지금까지는 알파벳 순서상 중간 모듈의
 # autouse truncate가 우연히 지워 줘서 통과했을 뿐이라, 모듈을 골라 돌리면 깨진다
 # (#975 적대 재리뷰 P2-d). 생산자가 자기 뒤처리를 한다.
+# 이 모듈이 commit하는 표 — 새 commit 지점이 생기면 여기도 늘린다.
+# 첫 판은 ops 계열만 담았다가 적대 리뷰에서 잡혔다: `_seed_scope_feature`가
+# `feature.features`와 `provider_sync.source_*`에 commit해 `test_mois_loader`의 전역
+# `count(feature.features) == 0`이 순서에 따라 깨진다.
+# 주의 — `truncate_committed_test_rows`는 이 목록 앞에 curation 전체 reset을 무조건
+# 붙이고 CASCADE 폐포로 managed_files·offline_uploads·cache-target 하위 표까지 함께
+# 비운다. 이 모듈은 매 테스트가 자기 데이터를 새로 seed하므로 그 범위를 감수한다.
 _STREAM_TRUNCATE_SQL = """
 TRUNCATE
+    feature.features,
+    provider_sync.source_links,
+    provider_sync.source_records,
+    provider_sync.source_entity_heads,
+    provider_sync.source_entities,
+    provider_sync.provider_sync_state,
     ops.poi_cache_target_feature_links,
     ops.poi_cache_targets,
     ops.pipeline_cancellation_members,
