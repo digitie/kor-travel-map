@@ -237,11 +237,20 @@ branch가 receipt를 `pending`으로 되돌리고 세 sha를 재핀해 뒀다.
    결과 sha256은 `489b05d3e62e3531233e3e7eb8c97f9ddf92aa1ecf1573b7557a5951e7f6a61b`여야 한다.
 3. `apps/api/tests/unit/test_kor_travel_map_contract.py`의 `_UPSTREAM_COMMIT = "$MAP_SHA"`,
    `_SNAPSHOT_SHA256 = "489b05d3…"`.
-4. `contracts/kor-travel-map-service-provenance-v1.json`의 `map_release_revision = "$MAP_SHA"`.
-   `service_openapi_sha256`은 그대로다(service 무변경).
+4. **`contracts/kor-travel-map-service-provenance-v1.json`은 건드리지 않는다.**
+   40C는 `openapi.service.json`을 바꾸지 않았고(sha `8019e36f…` 불변),
+   `contract-pin-consistency`의 service 검사는 `map_release_revision` 커밋을 체크아웃해
+   그 커밋의 service spec과 vendored bytes를 `diff -q`로 비교하므로 기존 pin이 여전히
+   자기정합적이다. 이 상수를 옮기는 것은 vendoring chore가 아니라 receipt 흐름 결정이다
+   — 근거와 파급(`UNIQUE(map_release_revision)`,
+   `PINVI_KOR_TRAVEL_MAP_CACHE_TARGET_EXPECTED_SOURCE_REVISION` env,
+   `test_kor_travel_map_cache_target_contract.py:25`, 패키징 사본)은 위 §0.2가 정본이다.
 5. `apps/api`에서 `pytest tests/unit/test_kor_travel_map_contract.py`
    `tests/unit/test_kor_travel_map_cache_target_contract.py`
-   `tests/unit/test_feature_alias_contract.py`를 돌린다.
+   `tests/unit/test_feature_alias_contract.py`를 돌린다. 로컬 전용 freshness 검사
+   (`test_vendored_snapshot_matches_live_kor_travel_map`)는 sibling 탐색이 무관한 stale
+   worktree를 잡을 수 있으므로 `PINVI_KOR_TRAVEL_MAP_OPENAPI_USER_PATH`로 대상 spec을
+   명시한다.
 6. PR을 열고 `contract-pin-consistency` green을 확인한다.
 
 **절차 (Map repo, PinVi PR 머지 뒤)**
