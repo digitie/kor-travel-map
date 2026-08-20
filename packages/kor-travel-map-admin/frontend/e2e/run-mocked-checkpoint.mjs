@@ -94,7 +94,17 @@ if (statusResult.status !== 0 || statusResult.stdout.trim()) {
   process.exit(2);
 }
 
-const frontendBaseUrl = process.env.E2E_BASE_URL ?? "http://127.0.0.1:12705";
+// 기본값을 두지 않는다. 12705는 **운영 admin UI 포트**라, 깜빡하고 실행하면 self-owned
+// 컨테이너 대신 운영 UI를 친다(2026-08-20에 실제로 두 번 밟았다). checkpoint는 자기
+// 컨테이너만 상대하므로 대상 포트는 호출자가 명시해야 한다.
+const frontendBaseUrl = process.env.E2E_BASE_URL;
+if (!frontendBaseUrl) {
+  console.error(
+    "E2E_BASE_URL을 명시해야 합니다. 기본값은 없습니다 — 운영 admin UI(12705)를 " +
+      "실수로 치지 않도록 checkpoint 전용 loopback 포트를 직접 지정하세요.",
+  );
+  process.exit(2);
+}
 let parsedBaseUrl;
 try {
   parsedBaseUrl = new URL(frontendBaseUrl);
