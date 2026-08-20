@@ -46848,6 +46848,16 @@
             },
             "description": "Successful Response"
           },
+          "410": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheTargetSnapshotMaterialCompactedProblem"
+                }
+              }
+            },
+            "description": "cursor가 가리키는 snapshot material이 보존 기간을 지나 compaction됐다. 재시도 불가이며 보존된 snapshot ID/count/root/compaction 시각을 함께 반환한다. generic receipt와 reconciliation receipt가 같은 material을 공유하므로 이 경로에서도 발생한다."
+          },
           "413": {
             "content": {
               "application/problem+json": {
