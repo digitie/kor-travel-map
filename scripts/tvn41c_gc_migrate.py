@@ -16,10 +16,11 @@ import os
 import sys
 from pathlib import Path
 
-from alembic import command
 from alembic.config import Config
-from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 from sqlalchemy.engine import make_url
+
+from alembic import command
+from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 from tests.integration._tvn34_migration_bootstrap import bootstrap_tvn34_migration_roles
 
 
