@@ -743,6 +743,18 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 
 - [~] **T-VN-41F1D-E — v4 compatible-pair live runner 퇴역·v5/v7 attestation 전환**
 
+  > 2026-08-20 — **저장소측(unit·script contract) 완료**. 남은 것은 F1D-D 순서를 따르는
+  > n150 data-dependent 실행뿐이다. `E2E_C7_COMPATIBLE_PAIR_MANIFEST`가
+  > `E2E_C7_PINNED_RUNTIME_MANIFEST` + `E2E_C7_REBUILD_JOURNAL`로 바뀌었고, runtime role은
+  > 다섯에서 **일곱**으로(PinVi web/dagster 추가), host attestation은 version 3 → 4로,
+  > 세 schema head와 pinset이 generation 값과 exact 대조된다. journal은 phase
+  > `committed` + candidate 전체 동등 + cancel probe `finalized`를 요구한다. v4를 억지로
+  > 넣어 통과하는 경로는 만들지 않았고, runner 계약 테스트가 v4 env 부재를 단언한다.
+  > 변이 8종(phase/candidate/cancel probe/schema head/journal digest/pinset/image 대조/
+  > manifest version)이 전부 red임을 실측했다. 실행 전제: v5/v7은
+  > `require_rebuildable_mode`가 걸려 rehearsal/rebuildable에서만 생성된다(n150은 해당).
+  > 아직 n150에 두 파일이 없다 — D1의 파괴적 rebuild가 처음 만든다.
+
   `run-c7-prod-live-e2e.sh`와 `run-admin-feature-live-acceptance.sh`가 요구하는 v4
   `E2E_C7_COMPATIBLE_PAIR_MANIFEST`를 제거한다. root-owned snapshot은 v5
   `PinnedRuntimeManifest.active_generation`, 일곱 immutable image·Map/PinVi revision·세 schema

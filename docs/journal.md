@@ -2,6 +2,43 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-20 — T-VN-41F1D-E: 세대가 자라도 검사는 자라지 않던 계약
+
+live runner 두 개(`run-c7-prod-live-e2e.sh`, `run-admin-feature-live-acceptance.sh`)가
+요구하던 v4 `E2E_C7_COMPATIBLE_PAIR_MANIFEST`를 없애고 v5 pinned runtime manifest +
+v7 rebuild journal로 옮겼다. 저장소측(unit·script contract)은 완료이고, n150
+data-dependent 실행은 F1D-D 순서를 따른다.
+
+**왜 문서를 둘로 나눴나.** manifest만 보면 "어떤 세대가 active인가"는 알아도 "그 세대가
+파괴적 rebuild를 끝까지 통과했는가"는 알 수 없다. 그건 journal만 안다. 그래서 journal의
+phase가 `committed`이고 candidate가 manifest의 active generation과 **글자 그대로 같아야**
+한다 — 부분 비교로는 두 문서가 같은 transaction의 앞뒤라는 것이 증명되지 않는다. cancel
+probe `finalized`까지 요구해 F1J fixture 수명주기가 끝난 세대만 통과시킨다.
+
+**가장 중요한 발견은 v4가 다섯만 보고 있었다는 것이다.** compatible pair는 Map API/UI/
+Dagster web/daemon과 PinVi API, 다섯 image만 담았다. PinVi web과 PinVi dagster는 세대
+밖이라, 그 둘이 어떤 image로 떠 있든 attestation이 통과했다. v5 generation은 일곱을 함께
+고정하므로 compose service env를 둘 추가해 일곱 전부를 실측 대조한다.
+
+같은 병이 테스트에도 있었다. image field 목록을 손으로 나열한 자리가 세 군데였고, 그래서
+세대가 자라도 검사는 자라지 않았다. 셋 다 모듈 상수에서 파생시켰다 — 다음에 runtime이
+늘면 테스트가 저절로 늘어난다.
+
+**v4 아카이브는 건드리지 않았다.** `t-vn-41-candidate-*` 세 artifact는 freeze 상수가
+"detached 이력으로 불변"이라고 이미 정해 둔 것이다. 현행 계약이 v5로 갔다고 과거 증거의
+모양을 바꿔 쓰면 그것은 이력이 아니라 위조다. 그래서 전방 계약(receipt)은 v5 generation
+일곱 role로 옮기되, 아카이브 검증에는 분리된 5-role 상수를 남겼다.
+
+변이 8종을 실측했다 — phase, candidate 동등성, cancel probe, schema head, journal digest,
+pinset, image 실측 대조, manifest version 고정. 전부 red. 첫 배터리는 bash heredoc 인용이
+깨져 **변이가 적용되지 않은 채 green을 보고**했는데, 그 green을 증거로 삼지 않고 스크립트를
+순수 Python으로 다시 써서 치환 여부를 `assert`로 확인한 뒤에만 판정하게 고쳤다.
+
+실행 전제 하나를 기록해 둔다 — v5/v7은 `require_rebuildable_mode`가 걸려 rehearsal/
+rebuildable에서만 만들어진다. n150은 `rehearsal`/`rebuildable`이라 해당되지만, **아직 두
+파일이 없다**. D1의 파괴적 rebuild가 처음 만든다. 또 ktdm의 state root는 Manager owner
+소유 `0700`이라 verifier의 root-owned 0600 요구를 그대로는 만족하지 않는다 — v4도 같은
+구조였고 운영자가 root 소유 사본을 건네는 것이 기존 절차다. runbook에 명시했다.
 ## 2026-08-20 — T-VN-41C GC 실측: 통과 자체보다 "통과가 무엇을 뜻하는가"
 
 cache-target snapshot GC의 백로그 AC(migration → 수동 GC → schedule ON → 다음 tick,
@@ -37,6 +74,7 @@ storage가 자기 alembic 계보를 같은 `public.alembic_version`에 stamp해�
 절차를 일회성으로 흘려보내지 않고 `scripts/verify-tvn41c-cache-target-gc.sh`로 고정했다.
 스키마나 GC 예산이 바뀌면 다시 돌려야 하는 게이트를 사람 기억에 두면 안 된다. 게이트는
 `DROP DATABASE`로 시작하므로 운영 DB 이름이 들어오면 그 전에 거부한다.
+||||||| parent of b0152b46 (docs(tvn41): F1D-E 저장소측 완료 기록 + 백로그 진척 표시)
 
 ## 2026-08-20 — T-VN-41C relay 종결성: 테스트가 결함을 보호하고 있었다
 

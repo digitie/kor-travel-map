@@ -1,5 +1,29 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-20 — T-VN-41F1D-E 저장소측 완료 (v4 퇴역 → v5/v7)
+
+live runner 두 개의 신뢰 경계를 v4 compatible-pair manifest에서 v5 pinned runtime
+manifest + v7 rebuild journal로 옮겼다. host attestation version 3 → 4.
+
+| 바뀐 것 | 내용 |
+|---|---|
+| env | `E2E_C7_COMPATIBLE_PAIR_MANIFEST` → `E2E_C7_PINNED_RUNTIME_MANIFEST` + `E2E_C7_REBUILD_JOURNAL` |
+| runtime role | 5 → **7** (PinVi web/dagster 추가, compose service env 2개 신설) |
+| 추가 대조 | 세 schema head, pinset digest, journal phase/candidate/cancel probe |
+| evidence | `pinned-runtime-generation.json` + `pinned-runtime-rebuild.json` 각각 digest 결박 |
+
+게이트: ruff green, 관련 4개 계약 테스트 + vnext artifact 테스트 전부 green
+(n150 unit+lint 2,369 passed — 남은 10건은 main에서도 같은 `test_docker_dagster_runtime`
+환경 실패). 변이 8종 전부 red 실측.
+
+### 다음 한 작업
+
+**T-VN-41F1D-D1** — n150 파괴적 rebuild로 v5/v7 문서를 처음 생성하고 일곱 image
+attestation을 받는다. 이것이 없으면 새 runner가 읽을 attested input 자체가 없다.
+그 뒤 D2(data-dependent live E2E) → T-VN-41C receipt `pending → candidate_verified`.
+
+주의: v5/v7은 `require_rebuildable_mode` 아래에서만 생성되고(n150은 rehearsal/
+rebuildable로 해당), runner에는 **root 소유 0600 사본**을 건네야 한다.
 ## 2026-08-20 — 파괴적 재구축을 배리어로 분리 (`T-VN-FINAL-REBUILD` 신설)
 
 사용자 결정: `T-VN-41F1D-D1`의 파괴적 rebuild(`ktdctl pinvi-pair rebuild-pinned --confirm` —
@@ -43,6 +67,7 @@ enable. 앞의 것이 PinVi vendor PR 병합에 물려 있으므로 먼저 그 �
 
 병행 가능: `T-VN-41S` ACL 방침 결정 후 `0227+`, `T-FE-MOCK-MANIFEST`,
 `T-C7-SCOPE-REGISTRY`, `T-C7-LIVE-SERIAL`.
+||||||| parent of b0152b46 (docs(tvn41): F1D-E 저장소측 완료 기록 + 백로그 진척 표시)
 
 ## 2026-08-20 — T-VN-40C 완료: 머지 4건 + prod 0225 적용
 
