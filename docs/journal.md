@@ -9,9 +9,9 @@ provider-contract를 같은 SHA로 고정했다. provider 로컬 gate는 ruff·s
 통과시켰다. 산림안전·산사태 endpoint 2건은 현재 키의 권한 범위를 서버가 거부해 xfail로
 기록했으며, n150 Playwright에서 provider debug UI의 API key 없는 오류 표면도 확인했다.
 
-운영 map live UI는 로그인 페이지 200까지 도달했으나 제공된 운영 자격증명으로 login POST가
-401이어서 인증 후 `/admin/features` 읽기 전용 검증을 완료하지 못했다. 비밀값을 출력하거나
-재시도·변경하지 않았으며, map PR은 해당 증거를 성공으로 표시하지 않고 CI와 함께 보류한다.
+운영 map live UI는 n150 Playwright에서 인증 후 `/admin/features`의 heading/table, 검색·kind
+필터를 확인했다. 인증 POST 이후 non-GET 요청은 0건으로, 읽기 전용 live UI E2E를 통과했다.
+자격증명 값은 출력·커밋하지 않았다.
 
 ## 2026-08-20 — T-VN-C05A~D: 산림청 route·weather·risk·notice 순차 연결
 

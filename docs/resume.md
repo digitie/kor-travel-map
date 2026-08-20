@@ -6,13 +6,13 @@
 map의 provider pin도 같은 SHA로 갱신했다. map 브랜치는 최신 `origin/main`에 재베이스했으며
 현재 Alembic head 뒤에 C05 catalog migration `0230`을 두어 기존 `0229` 경로를 보존한다.
 provider n150 debug UI 스모크와 data.go.kr live API 9건은 통과했고, 산림안전·산사태 2건은
-현재 키 권한 범위의 서버 거부를 xfail로 확인했다. map 운영 UI는 제공된 자격증명으로 login
-POST가 401이어서 인증 후 읽기 전용 `/admin/features` 스모크를 아직 완료하지 못했다.
+현재 키 권한 범위의 서버 거부를 xfail로 확인했다. map 운영 UI도 n150 Playwright에서 인증 후
+`/admin/features` heading/table과 검색·kind 필터를 확인했으며, 인증 후 non-GET 요청 0건으로
+읽기 전용 live UI E2E를 통과했다.
 
 ### 다음 한 작업
 
-map CI 전체 green을 확인하고, 유효한 운영 UI 인증으로 read-only live E2E를 완료한 뒤 map PR을
-merge한다. 인증이 갱신되기 전에는 UI E2E를 성공으로 주장하지 않는다.
+map CI 전체 green과 required review를 확인한 뒤 map PR을 merge한다.
 
 ## 2026-08-20 — T-VN-H50 마지막 planner 경로 보강
 
