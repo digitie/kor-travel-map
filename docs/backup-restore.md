@@ -735,7 +735,7 @@ feature 본문 결손을 메운다.** 백업 산출물이 읽히는지(절차 4)
 절차:
 
 1. **대상 선정** — 한 provider dataset에서 feature 5건을 고른다. `ops.feature_overrides`에
-   active 행이 있거나 `feature.curated_features` / `ops.dedup_review_queue`에 걸린 feature는
+   active 행이 있거나 `feature.curation_items` / `ops.dedup_review_queue`에 걸린 feature는
    제외한다 — 이들은 `feature.features` 삭제 때 FK CASCADE로 함께 사라지는데 replay가
    복원하지 않는다(전체 CASCADE 목록은 덤프에서
    `rg 'REFERENCES feature.features' alembic/baseline/schema.sql`).
@@ -752,7 +752,7 @@ feature 본문 결손을 메운다.** 백업 산출물이 읽히는지(절차 4)
    WHERE pd.dataset_key = :dataset_key
      AND NOT EXISTS (SELECT 1 FROM ops.feature_overrides o
                       WHERE o.feature_id = f.feature_id AND o.status = 'active')
-     AND NOT EXISTS (SELECT 1 FROM feature.curated_features c
+     AND NOT EXISTS (SELECT 1 FROM feature.curation_items c
                       WHERE c.feature_id = f.feature_id)
    LIMIT 5;
    ```
