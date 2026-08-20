@@ -18,6 +18,11 @@ trigger. `feature.curated_source_rules`에는 BEFORE UPDATE trigger
 write를 막는다. 이 migration은 그 fence를 **끄지 않는다**. 막히면 실패하고 어느 rule인지
 말한다 — 조용히 건너뛰면 남은 `curated` 행이 아래 CHECK에서 다시 막히고 원인이 감춰진다.
 
+번호. `0226`은 T-VN-M01이 예약했으나 그 revision은 아직 main에 없고(2026-08-20 기준 #1029는
+dirty draft) 이 변경은 그 내용과 독립이다. 그래서 번호는 `0227`로 두되 체인은 현재 head인
+`0225`에 직접 건다 — 단일 head는 유지되고 번호에만 공백이 남는다. M01이 나중에 착지할 때
+`down_revision`을 `0227`로 잡으면 된다(revision id는 문자열이고 순서는 체인이 정한다).
+
 forward-only. downgrade는 두지 않는다(ADR-021). 되돌리려면 `curated`가 무엇을 뜻했는지
 행마다 알아야 하는데 그 구분은 이 migration 뒤에 존재하지 않는다.
 """
@@ -32,7 +37,7 @@ from sqlalchemy import text
 from alembic import op
 
 revision: str = "0227_tvn40b_source_rule_action"
-down_revision: str | Sequence[str] | None = "0226_m01_manual_feature_create"
+down_revision: str | Sequence[str] | None = "0225_tvn40c_physical_removal"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
