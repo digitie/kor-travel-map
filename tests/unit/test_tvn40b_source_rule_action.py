@@ -53,4 +53,4 @@ def test_action_set_is_exactly_candidate_and_ignore() -> None:
     하는지는 여기가 말한다 — 값이 늘거나 줄면 이 테스트가 먼저 묻는다.
     """
 
-    assert _TYPED_RULE_ACTIONS == frozenset({"candidate", "ignore"})
+    assert frozenset({"candidate", "ignore"}) == _TYPED_RULE_ACTIONS
