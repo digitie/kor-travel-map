@@ -789,7 +789,9 @@ def test_promoted_paired_receipt_contract_accepts_a_well_formed_v5_receipt(
         (_ROOT / "packages/kor-travel-map-api/openapi.service.json").read_bytes()
     ).hexdigest()
 
-    _assert_promoted_paired_receipt(_synthetic_paired_receipt(state, service_sha256), service_sha256)
+    receipt = _synthetic_paired_receipt(state, service_sha256)
+
+    _assert_promoted_paired_receipt(receipt, service_sha256)
 
 
 @pytest.mark.parametrize(
