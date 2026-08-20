@@ -168,6 +168,13 @@ lock으로 직렬화했다. 두 domain command의 동시 provision은 한 쪽만
 뒤 같은 두 리뷰어에게 재심한다. PinVi consumer, isolated live UI E2E, no-owner restore drill 전에는
 M05 activation receipt를 계속 만들지 않는다.
 
+후속 DB 재심은 no-owner restore의 legacy sweep이 reader를 schema owner로 바꾸는 상태와, M05
+membership이 legacy exact-graph oracle에 섞이는 두 P0를 확인했다. `0232`는 reader 부재·전용
+owner·schema owner 세 상태를 명시 처리하고 임시 `USAGE, CREATE`를 모두 회수한다. legacy
+oracle은 M05의 네 membership을 기존 M01 경계처럼 제외한 뒤 M05 repair가 재확정한다. restored
+schema-owner reader를 restricted migrator로 실제 재정의하는 integration과 restore choreography의
+순서 계약을 추가했다.
+
 ## 2026-08-21 — T-VN-M05 forward-only delivery·subscription activation 보정
 
 적대 리뷰에서 이미 배포 가능한 `0231` migration을 고치면 기존 DB가 reader/ACK lock routine을

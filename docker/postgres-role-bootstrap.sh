@@ -1118,12 +1118,20 @@ BEGIN
               AND granted.rolname NOT IN (
                   'ktm_manual_feature_procedure_owner',
                   'ktm_manual_feature_admin_executor',
-                  'ktm_feature_create_provider_executor'
+                  'ktm_feature_create_provider_executor',
+                  'ktm_manual_provider_dedup_procedure_owner',
+                  'ktm_manual_provider_dedup_detector_executor',
+                  'ktm_manual_provider_dedup_admin_executor',
+                  'ktm_feature_reference_reconciliation_service_executor'
               )
               AND member.rolname NOT IN (
                   'ktm_manual_feature_procedure_owner',
                   'ktm_manual_feature_admin_executor',
-                  'ktm_feature_create_provider_executor'
+                  'ktm_feature_create_provider_executor',
+                  'ktm_manual_provider_dedup_procedure_owner',
+                  'ktm_manual_provider_dedup_detector_executor',
+                  'ktm_manual_provider_dedup_admin_executor',
+                  'ktm_feature_reference_reconciliation_service_executor'
               )
         )
         (SELECT * FROM expected EXCEPT SELECT * FROM actual)

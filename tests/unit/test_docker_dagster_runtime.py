@@ -603,6 +603,20 @@ def test_tvn_m01_role_phase_runs_only_after_legacy_0225_boundary() -> None:
     )
     assert "ktm_feature_reference_reconciliation_service_executor" in phase_script
     assert "ALTER FUNCTION feature.reject_manual_provider_dedup_evidence_mutation()" in phase_script
+    legacy_membership_start = phase_script.index("WITH expected_base(granted_role")
+    legacy_membership_end = phase_script.index(
+        "-- ``REASSIGN OWNED BY``", legacy_membership_start
+    )
+    legacy_membership_oracle = phase_script[
+        legacy_membership_start:legacy_membership_end
+    ]
+    for m05_role in (
+        "ktm_manual_provider_dedup_procedure_owner",
+        "ktm_manual_provider_dedup_detector_executor",
+        "ktm_manual_provider_dedup_admin_executor",
+        "ktm_feature_reference_reconciliation_service_executor",
+    ):
+        assert legacy_membership_oracle.count(f"'{m05_role}'") == 2
 
     migration_script = _script("docker/migrate-to-m01-bootstrap-boundary.sh")
     assert "alembic upgrade 0225_tvn40c_physical_removal" in migration_script

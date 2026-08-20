@@ -571,8 +571,27 @@ async def test_preview_reader_owner_can_run_0232_redefinition_before_repair(
         index
         for index, statement in enumerate(statements[start:], start)
         if statement
-        == "REVOKE CREATE ON SCHEMA feature FROM ktm_manual_provider_dedup_procedure_owner"
+        == "REVOKE USAGE, CREATE ON SCHEMA feature "
+        "FROM ktm_manual_provider_dedup_procedure_owner"
     )
+
+    # ``pg_restore --no-owner`` 뒤 legacy sweep이 만들 수 있는 schema owner 상태를
+    # 실제 routine에 적용한다. 이후 0232 범위는 restricted migrator login으로만
+    # 실행해 preview/restore 두 source ownership을 한 migration으로 복구한다.
+    async with migrated_engine.begin() as connection:
+        await connection.execute(
+            text(
+                "ALTER FUNCTION feature.list_manual_provider_dedup_cases("
+                "text, timestamptz, uuid, integer) "
+                "OWNER TO ktm_feature_schema_owner"
+            )
+        )
+        await connection.execute(
+            text(
+                "ALTER FUNCTION feature.read_manual_provider_dedup_case(uuid) "
+                "OWNER TO ktm_feature_schema_owner"
+            )
+        )
 
     migrator = make_async_engine(
         migrated_engine.url.set(
@@ -603,6 +622,24 @@ async def test_preview_reader_owner_can_run_0232_redefinition_before_repair(
                 )
                 == "ktm_manual_provider_dedup_procedure_owner"
             )
+        assert (
+            await connection.scalar(
+                text(
+                    "SELECT has_schema_privilege("
+                    "'ktm_manual_provider_dedup_procedure_owner', 'feature', 'USAGE')"
+                )
+            )
+            is False
+        )
+
+    # 이후 integration이 기대하는 repair 완료 DB 상태로 되돌린다.
+    async with migrated_engine.begin() as connection:
+        await connection.execute(
+            text(
+                "GRANT USAGE, CREATE ON SCHEMA feature "
+                "TO ktm_manual_provider_dedup_procedure_owner"
+            )
+        )
 
 
 async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_only(

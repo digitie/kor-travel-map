@@ -269,13 +269,49 @@ BEGIN
 END
 $m05_resolve_case_v2$;
 
--- A preview 0231 may already own these readers with the dedicated routine
--- owner.  The migration runs before the post-upgrade owner-repair phase, so
--- borrow CREATE only for this replacement and return the schema ACL to its
--- pre-repair state before continuing.  Creating as the schema owner would
--- fail on that preview because CREATE OR REPLACE may only replace a routine
--- owned by the current role.
+-- A preview 0231 owns these readers with the dedicated routine owner.  A
+-- `pg_restore --no-owner` followed by the legacy ownership sweep instead
+-- leaves them schema-owned.  Normalize only those two known ownership states
+-- before replacement, then use the dedicated owner for the actual body.
 GRANT USAGE, CREATE ON SCHEMA feature TO ktm_manual_provider_dedup_procedure_owner;
+DO $m05_reader_owner$
+BEGIN
+    IF to_regprocedure(
+        'feature.list_manual_provider_dedup_cases(text,timestamp with time zone,uuid,integer)'
+    ) IS NOT NULL
+       AND (SELECT proowner FROM pg_catalog.pg_proc
+            WHERE oid = to_regprocedure(
+                'feature.list_manual_provider_dedup_cases(text,timestamp with time zone,uuid,integer)'
+            )) = 'ktm_feature_schema_owner'::regrole THEN
+        EXECUTE
+            'ALTER FUNCTION feature.list_manual_provider_dedup_cases('
+            'text, timestamptz, uuid, integer) '
+            'OWNER TO ktm_manual_provider_dedup_procedure_owner';
+    END IF;
+    IF to_regprocedure('feature.read_manual_provider_dedup_case(uuid)') IS NOT NULL
+       AND (SELECT proowner FROM pg_catalog.pg_proc
+            WHERE oid = to_regprocedure('feature.read_manual_provider_dedup_case(uuid)'))
+           = 'ktm_feature_schema_owner'::regrole THEN
+        EXECUTE
+            'ALTER FUNCTION feature.read_manual_provider_dedup_case(uuid) '
+            'OWNER TO ktm_manual_provider_dedup_procedure_owner';
+    END IF;
+    IF (to_regprocedure(
+            'feature.list_manual_provider_dedup_cases(text,timestamp with time zone,uuid,integer)'
+        ) IS NOT NULL
+        AND (SELECT proowner FROM pg_catalog.pg_proc
+             WHERE oid = to_regprocedure(
+                 'feature.list_manual_provider_dedup_cases(text,timestamp with time zone,uuid,integer)'
+             )) IS DISTINCT FROM 'ktm_manual_provider_dedup_procedure_owner'::regrole)
+       OR (to_regprocedure('feature.read_manual_provider_dedup_case(uuid)') IS NOT NULL
+           AND (SELECT proowner FROM pg_catalog.pg_proc
+                WHERE oid = to_regprocedure('feature.read_manual_provider_dedup_case(uuid)'))
+               IS DISTINCT FROM 'ktm_manual_provider_dedup_procedure_owner'::regrole) THEN
+        RAISE EXCEPTION 'M05 reader owner is neither the schema nor dedicated procedure owner'
+            USING ERRCODE = '55000';
+    END IF;
+END
+$m05_reader_owner$;
 SET LOCAL ROLE ktm_manual_provider_dedup_procedure_owner;
 
 CREATE OR REPLACE FUNCTION feature.list_manual_provider_dedup_cases(
@@ -458,7 +494,7 @@ $m05_read_case$;
 
 RESET ROLE;
 SET LOCAL ROLE ktm_feature_schema_owner;
-REVOKE CREATE ON SCHEMA feature FROM ktm_manual_provider_dedup_procedure_owner;
+REVOKE USAGE, CREATE ON SCHEMA feature FROM ktm_manual_provider_dedup_procedure_owner;
 """
 
 

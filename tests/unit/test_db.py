@@ -180,6 +180,7 @@ def _runtime_privilege_row(
         "can_access_manual_feature_claims_directly": False,
         "can_access_feature_creation_origins_directly": False,
         "can_access_feature_requests_directly": False,
+        "can_access_manual_provider_dedup_directly": False,
         "can_mutate_feature_overrides_directly": False,
         "can_mutate_feature_base_values_directly": False,
         "can_mutate_feature_override_registry_directly": False,
@@ -201,6 +202,7 @@ def test_runtime_privilege_preflight_requires_procedures_but_denies_direct_dml()
     row["can_access_manual_feature_claims_directly"] = True
     row["can_access_feature_creation_origins_directly"] = True
     row["can_access_feature_requests_directly"] = True
+    row["can_access_manual_provider_dedup_directly"] = True
     row["can_mutate_feature_overrides_directly"] = True
     row["can_mutate_feature_base_values_directly"] = True
     row["can_mutate_feature_override_registry_directly"] = True
@@ -237,6 +239,7 @@ def test_runtime_privilege_preflight_requires_procedures_but_denies_direct_dml()
     assert "runtime login must not access manual Feature identity claims directly" in problems
     assert "runtime login must not access Feature creation origins directly" in problems
     assert "runtime login must not access Feature requests directly" in problems
+    assert "runtime login must not access manual/provider dedup evidence directly" in problems
     assert "runtime login must not mutate ops.feature_overrides directly" in problems
     assert (
         "runtime login must not mutate feature.feature_base_field_values directly"

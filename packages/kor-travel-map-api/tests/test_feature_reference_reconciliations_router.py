@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
 from fastapi import Request, Response
+from fastapi.responses import JSONResponse
 from kortravelmap.infra.feature_reference_reconciliation_repo import (
     FeatureReferenceReconciliationPreflight,
     FeatureReferenceReconciliationSubscriptionProvision,
@@ -189,6 +191,52 @@ async def test_subscription_provision_is_durable_admin_domain_command(
     assert result.data.initial_event_sequence == 0
     provision.assert_awaited_once()
     complete.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_subscription_provision_conflict_persists_request_id_for_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    command = DomainCommandHandle(
+        command_id=93,
+        actor="admin:reviewer",
+        operation="admin.feature-reference-reconciliation-subscription.provision.v1",
+        idempotency_key=str(_COMMAND_KEY),
+        request_fingerprint="f" * 64,
+    )
+    complete = AsyncMock()
+    monkeypatch.setattr(router, "begin_domain_command", AsyncMock(return_value=command))
+    monkeypatch.setattr(
+        router.reconciliation_repo,
+        "provision_feature_reference_reconciliation_subscription",
+        AsyncMock(
+            return_value=FeatureReferenceReconciliationSubscriptionProvision(
+                outcome="already_provisioned", initial_event_sequence=0
+            )
+        ),
+    )
+    monkeypatch.setattr(router, "complete_domain_command", complete)
+    request = _request()
+    request.state.request_id = "request-conflict-93"
+
+    result = await router.provision_feature_reference_reconciliation_subscription_route(
+        body=router.FeatureReferenceReconciliationSubscriptionProvisionInput(
+            initial_event_sequence=0
+        ),
+        request=request,
+        idempotency_key=_COMMAND_KEY,
+        context=_admin_context(),
+        session=_Session(),  # type: ignore[arg-type]
+    )
+
+    assert isinstance(result, JSONResponse)
+    assert result.media_type == "application/problem+json"
+    stored = complete.await_args.kwargs["response"]
+    assert stored["request_id"] == "request-conflict-93"
+    assert stored == json.loads(result.body)
+    assert complete.await_args.kwargs["response_headers"] == {
+        "Content-Type": "application/problem+json"
+    }
 
 
 @pytest.mark.asyncio

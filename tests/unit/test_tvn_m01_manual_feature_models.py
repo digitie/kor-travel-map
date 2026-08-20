@@ -175,6 +175,7 @@ def test_feature_creation_origin_metadata_matches_m00_contract() -> None:
     unique = _named_constraints(table, UniqueConstraint)
     assert {name: _column_names(constraint) for name, constraint in unique.items()} == {
         "uq_feature_creation_origins_command": ("creation_command_id",),
+        "uq_feature_creation_origins_feature_command": ("feature_id", "creation_command_id"),
     }
 
     foreign_keys = _named_constraints(table, ForeignKeyConstraint)

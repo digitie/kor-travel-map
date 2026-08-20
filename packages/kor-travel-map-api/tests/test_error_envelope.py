@@ -99,6 +99,7 @@ def test_domain_command_problem_result_replays_its_stored_media_type() -> None:
             "status": 409,
             "detail": "기존 immutable cursor를 유지합니다.",
             "code": "FEATURE_REFERENCE_RECONCILIATION_SUBSCRIPTION_EXISTS",
+            "request_id": "request-conflict-93",
             "errors": [],
         },
         response_headers={"Content-Type": "application/problem+json"},

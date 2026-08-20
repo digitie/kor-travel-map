@@ -147,6 +147,14 @@ def test_docker_restore_script_restores_backup_into_staging_targets() -> None:
     assert "docker-restore-verify.sh" in script
     assert '"$evidence_schema_version" == "3"' in script
     assert "repair_v3_restored_manual_feature_boundary" in script
+    repair = script.index("repair_v3_restored_manual_feature_boundary()")
+    legacy = script.index('run_restore_bootstrap_phase legacy "$restore_bootstrap_dsn"', repair)
+    m05_pre = script.index('run_restore_bootstrap_phase m05-pre "$restore_bootstrap_dsn"', legacy)
+    migration = script.index("api ./docker/migrate-m05.sh", m05_pre)
+    m05_repair = script.index(
+        'run_restore_bootstrap_phase m05-repair "$restore_bootstrap_dsn"', migration
+    )
+    assert legacy < m05_pre < migration < m05_repair
     assert "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" in script
     assert "kortravelmap.infra.runtime_privileges" in script
     assert "assert_runtime_db_privilege_boundary" in script

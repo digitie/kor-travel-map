@@ -87,6 +87,12 @@ subscription 409은 terminal receipt의 `application/problem+json`을 replay에�
 `pg_restore --no-owner --no-privileges` drill을 모두 통과하기 전까지 activation receipt는 만들지
 않는다.
 
+DB 재심의 추가 P0도 반영했다. no-owner restore의 legacy ownership sweep이 schema owner로
+되돌린 reader는 `0232`가 dedicated owner로 정규화한 후 재정의하고, reader가 아직 없는 fresh
+0231과 이미 dedicated owner인 preview도 그대로 통과한다. temporary schema 권한은 `USAGE`와
+`CREATE`를 함께 회수한다. legacy membership oracle은 M05 전용 네 edge를 별도 phase로 취급해
+rebootstrap이 migration 전에 실패하지 않게 했다.
+
 ## 2026-08-21 — T-VN-M05 Map admin 판단·service delivery contract
 
 M05 Map 쪽 admin case 목록/상세/판정과 reconciliation service lease/ACK contract를 완성했다.

@@ -324,13 +324,14 @@ def _ack_conflict(outcome: str) -> HTTPException:
     )
 
 
-def _subscription_provision_conflict_body() -> dict[str, Any]:
+def _subscription_provision_conflict_body(request: Request) -> dict[str, Any]:
     return {
         "type": "https://kor-travel-map/errors/feature-reference-reconciliation-subscription-exists",
         "title": "Feature 참조 reconciliation subscription이 이미 있습니다.",
         "status": status.HTTP_409_CONFLICT,
         "detail": "기존 immutable initial cursor를 바꾸지 않습니다.",
         "code": "FEATURE_REFERENCE_RECONCILIATION_SUBSCRIPTION_EXISTS",
+        "request_id": request_id(request),
         "errors": [],
     }
 
@@ -606,7 +607,7 @@ async def provision_feature_reference_reconciliation_subscription_route(
                     "subscription provision receipt가 불완전합니다."
                 )
             if receipt.outcome == "already_provisioned":
-                conflict_body = _subscription_provision_conflict_body()
+                conflict_body = _subscription_provision_conflict_body(request)
                 result: (
                     FeatureReferenceReconciliationSubscriptionProvisionResponse | JSONResponse
                 ) = JSONResponse(
