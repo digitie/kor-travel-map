@@ -22,7 +22,7 @@ barrier로 직렬화한다.
 - **Lane B — frontend hardening·PinVi 소비 API**
   - [~] `T-VN-41C`(#975 병합 / final exact-pair·prod consumer enable 잔여)
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환 — **저장소측 완료 2026-08-20**, live 실행은 배리어 대기)
-    ∥ [~] `T-VN-41S`(`0230` migration·양방향 공유·compactor·410 착지 2026-08-20 / EXPLAIN·n150 1M soak 잔여)
+    ∥ [~] `T-VN-41S`(`0230`·공유·compactor·410·EXPLAIN·1M soak 완료 / **build 예산 vs 상한 결정** 잔여)
   - **배리어**: [ ] `T-VN-FINAL-REBUILD`(주요 개발 완료 후 파괴적 재구축 — 사용자 결정 2026-08-20)
   - [x] `T-C7-BROWSER-EVIDENCE`(#995 잔여 — 2026-08-20 접어넣음)
   - [ ] `T-VN-40B` 잔여(source rule `curated` action 퇴역, `0229`, PR #1035) — 종결 되돌림
@@ -736,9 +736,10 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   material 재사용·관측 metric·typed future error 계약까지다. 독립 적대 리뷰 2명은 최종 head에서 P0~P3
   잔여 없음으로 GO했고, 단위/API/Dagster 집중 231개와 PostGIS stream repository 37개를 통과했다.
 
-  **후속 종료선(진행 중, #922 유지)** — 물리 모델(`0230`)·양방향 공유·compactor·repository 410은
-  2026-08-20에 착지했다(아래 후속 항목 참조). 남은 것은 **EXPLAIN 실측과 n150 1M+ soak**뿐이다.
-  그 둘이 끝나기 전에는 #922 또는 T-VN-41S 전체 완료로 표시하지 않는다.
+  **후속 종료선(구현·실측 완료, 결정 1건 잔여)** — 물리 모델(`0230`)·양방향 공유·compactor·
+  repository 410·EXPLAIN·n150 1M soak이 모두 착지했다(아래 후속 항목). 남은 것은 코드가 아니라
+  **결정 하나**다 — build 예산 300초와 item 상한 1,000,000이 서로 맞지 않는다는 실측 결과를
+  어떻게 처리할지. 그 결정 전에는 #922 또는 T-VN-41S 전체 완료로 표시하지 않는다.
 
   **이번 PR 완료 항목**
 
@@ -776,8 +777,28 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
     부재·receipt append-only fence·legacy FK 의존 순서 셋 다 빈 경로에서는 조용히 지나갔다.
     → ACL은 `ops` 스키마 전체를 fail-closed로 대칭화하면서 함께 닫았다. `feature`는 선언 없는
     relation을 막는데 `ops`만 침묵 기본값으로 full CRUD를 주고 있었다(표 57개 중 48개).
-  - [ ] EXPLAIN과 n150 PostGIS 1M admitted/1M+ rejection, concurrent mutation safe lower cursor,
+  - [x] EXPLAIN과 n150 PostGIS 1M admitted/1M+ rejection, concurrent mutation safe lower cursor,
     compaction/vacuum soak evidence를 통과한다.
+    → EXPLAIN은 `tests/integration/test_tvn41s_snapshot_material_explain.py`. fixture 모양이
+    곧 게이트의 유효성이라 세 번 고쳐 썼고(material 1개면 partial index 둘의 비용이 같고,
+    compaction 후보가 0개면 planner 선택이 무의미하고, material당 item 1행이면 정렬이
+    공짜다), 그 과정에서 **근거를 못 만든 인덱스 하나를 지웠다**.
+    → soak 실측 `docs/reports/t-vn-41s-1m-soak-2026-08-21.md`: 1,000,000 admitted 547.9초
+    (1,824 item/s) · **Python peak 2.02 MiB** · item 표 157.6 MB(157.6 B/item) ·
+    상한+1은 typed `413`에 partial row 0 · compaction 1,000,000행 32.6초 · VACUUM 157.6 MB
+    회수(증거 material/receipt는 보존).
+    → concurrent mutation의 fixed membership·safe lower cursor는 soak이 아니라 통합 테스트
+    셋이 본다(`test_fixed_snapshot_pages_ignore_concurrent_committed_write`,
+    `test_snapshot_barrier_keeps_outbox_cursor_commit_safe_across_writers`,
+    `test_generic_snapshot_reuse_ignores_nonmaterial_outbox_tail`). soak에서 흉내 내면 같은
+    성질을 덜 정확하게 보는 두 번째 게이트가 된다.
+  - [ ] **열린 결정 — build 예산 300초 vs item 상한 1,000,000.** 상한과 같은 크기의
+    snapshot은 배포 기본 예산에 **들지 않는다**(n150 실측 547.9초 > 300초). 지금 계약에서
+    1,000,000 item snapshot은 admission은 통과하고 build deadline에서 실패한다. 셋 중
+    하나를 골라야 한다 — 예산을 올린다(그만큼 stream share barrier가 유지되고, 그 값은
+    hung writer 최대 정지 시간이기도 하다) / 상한을 실제 도달 가능한 크기로 낮춘다 /
+    그대로 두되 "1,000,000까지 받되 5분 안에 끝나야 한다"로 계약 문서를 고친다.
+    근거와 수치는 위 soak 보고서 §"열린 결정".
 
 ### T-VN-41F1J — C6c cancel-probe fixture 수명주기 복구
 
