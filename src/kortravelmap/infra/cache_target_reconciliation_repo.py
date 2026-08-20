@@ -73,6 +73,9 @@ _SNAPSHOT_TTL_SQL = "interval '2 hours'"
 _SNAPSHOT_RETURN_MIN_TTL_SQL = "interval '75 minutes'"
 _SNAPSHOT_ITEM_PRUNE_LIMIT = 1000
 _SNAPSHOT_HEADER_PRUNE_LIMIT = 100
+#: terminal reconciliation의 item을 언제까지 붙잡아 둘 것인가. 감사에 필요한 것은
+#: root/count이고 그건 material row에 남는다 — item은 그 기간이 지나면 되찾는다.
+_MATERIAL_COMPACTION_RETENTION_SECONDS = 30 * 24 * 60 * 60
 _GENERIC_SNAPSHOT_COPY_LIMIT = 2
 _SNAPSHOT_CAPACITY_RETRY_AFTER_MAX_SECONDS = 7_200
 _SNAPSHOT_BUILD_STATEMENT_TIMEOUT = "5min"
@@ -298,6 +301,76 @@ WHERE snapshot.snapshot_id = candidates.snapshot_id
 RETURNING snapshot.snapshot_id
 """
 
+#: compaction 후보의 논리 조건. 넷을 모두 만족해야 한다.
+#:
+#: 1. 아직 compaction되지 않았다.
+#: 2. 미만료 receipt가 하나도 없다 — 하나라도 살아 있으면 그 consumer가 아직 page한다.
+#: 3. `preparing|running` reconciliation이 없다.
+#: 4. 이 material을 가리키는 **모든** reconciliation이 terminal이고 `completed_at`이
+#:    보존 기간보다 오래됐다.
+#:
+#: 그리고 두 가지를 더 요구한다. receipt가 하나라도 **있어야** 한다(하나도 없으면 그건
+#: compaction이 아니라 orphan GC의 일이다) — 그리고 item이 실제로 있어야 한다. item이
+#: 없는 material을 compaction으로 표시하면 되찾는 byte는 0인데 그 receipt의 정상적인
+#: 빈 page가 410으로 바뀐다.
+_COMPACTION_CANDIDATE_PREDICATE = """
+  material.compacted_at IS NULL
+  AND EXISTS (
+    SELECT 1
+    FROM ops.poi_cache_target_snapshots AS receipt
+    WHERE receipt.material_id = material.material_id
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM ops.poi_cache_target_snapshots AS receipt
+    WHERE receipt.material_id = material.material_id
+      AND receipt.expires_at > now()
+  )
+  AND NOT EXISTS (
+    SELECT 1
+    FROM ops.poi_cache_target_snapshots AS receipt
+    JOIN ops.poi_cache_target_reconciliation_requests AS request
+      ON request.snapshot_id = receipt.snapshot_id
+    WHERE receipt.material_id = material.material_id
+      AND (
+        request.status IN ('preparing','running')
+        OR request.completed_at IS NULL
+        OR request.completed_at
+           > now() - make_interval(
+               secs => CAST(:compaction_retention_seconds AS double precision)
+             )
+      )
+  )
+  AND EXISTS (
+    SELECT 1
+    FROM ops.poi_cache_target_snapshot_material_items AS item
+    WHERE item.material_id = material.material_id
+  )
+"""
+
+#: 먼저 표시하고 나중에 비운다. 반대로 하면 1,000,000행을 한 transaction에 지우거나,
+#: 부분적으로 비운 material을 표시되지 않은 채 남겨 다음 batch가 다시 후보로 잡는다.
+#: 표시가 곧 reader의 410 전환 시점이고, 그 시점부터 item은 계약상 없는 것이다.
+_MARK_COMPACTED_MATERIALS_SQL = f"""
+WITH candidates AS (
+  SELECT material.material_id
+  FROM ops.poi_cache_target_snapshot_materials AS material
+  WHERE material.external_system = :external_system
+    AND {_COMPACTION_CANDIDATE_PREDICATE.strip()}
+  ORDER BY material.materialized_at, material.material_id
+  LIMIT :limit
+  FOR UPDATE OF material SKIP LOCKED
+)
+UPDATE ops.poi_cache_target_snapshot_materials AS material
+SET compacted_at = clock_timestamp()
+FROM candidates
+WHERE material.material_id = candidates.material_id
+RETURNING material.material_id
+"""
+
+#: orphan(붙잡은 receipt 없음)과 compacted(표시됨)를 한 statement로 비운다. 둘 다
+#: "이 item은 더 이상 페이징되지 않는다"는 같은 뜻이고, 한 bound 안에서 지워야
+#: 한쪽이 다른 쪽을 굶기지 않는다.
 _PRUNE_ORPHANED_MATERIAL_ITEMS_SQL = """
 WITH candidates AS (
   SELECT item.material_id, item.row_number
@@ -305,10 +378,13 @@ WITH candidates AS (
   JOIN ops.poi_cache_target_snapshot_materials AS material
     ON material.material_id = item.material_id
   WHERE material.external_system = :external_system
-    AND NOT EXISTS (
-      SELECT 1
-      FROM ops.poi_cache_target_snapshots AS receipt
-      WHERE receipt.material_id = material.material_id
+    AND (
+      material.compacted_at IS NOT NULL
+      OR NOT EXISTS (
+        SELECT 1
+        FROM ops.poi_cache_target_snapshots AS receipt
+        WHERE receipt.material_id = material.material_id
+      )
     )
   ORDER BY item.material_id, item.row_number
   LIMIT :limit
@@ -346,10 +422,11 @@ WHERE material.material_id = candidates.material_id
 RETURNING material.material_id
 """
 
-#: backlog가 있는 system은 두 가지 중 하나다 — 지울 수 있는 만료 receipt가 있거나,
-#: receipt가 이미 사라져 orphan이 된 material이 남아 있거나. 앞의 것만 보면 마지막
-#: receipt를 지운 batch 뒤 orphan material이 영원히 남는다.
-_SELECT_EXPIRED_SNAPSHOT_GC_SYSTEM_SQL = """
+#: backlog가 있는 system은 넷 중 하나다 — 지울 수 있는 만료 receipt가 있거나,
+#: receipt가 사라져 orphan이 된 material이 있거나, 이미 compaction으로 표시됐지만
+#: item이 남은 material이 있거나, 새로 표시할 compaction 후보가 있거나.
+#: 앞의 것만 보면 마지막 receipt를 지운 batch 뒤 나머지가 영원히 남는다.
+_SELECT_EXPIRED_SNAPSHOT_GC_SYSTEM_SQL = f"""
 SELECT external_system
 FROM (
   SELECT snapshot.external_system
@@ -368,6 +445,19 @@ FROM (
     FROM ops.poi_cache_target_snapshots AS receipt
     WHERE receipt.material_id = material.material_id
   )
+  UNION
+  SELECT material.external_system
+  FROM ops.poi_cache_target_snapshot_materials AS material
+  WHERE material.compacted_at IS NOT NULL
+    AND EXISTS (
+      SELECT 1
+      FROM ops.poi_cache_target_snapshot_material_items AS item
+      WHERE item.material_id = material.material_id
+    )
+  UNION
+  SELECT material.external_system
+  FROM ops.poi_cache_target_snapshot_materials AS material
+  WHERE {_COMPACTION_CANDIDATE_PREDICATE.strip()}
 ) AS backlog
 WHERE CAST(:after_external_system AS text) IS NULL
    OR external_system COLLATE "C"
@@ -377,7 +467,7 @@ ORDER BY external_system COLLATE "C"
 LIMIT 1
 """
 
-_HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL = """
+_HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL = f"""
 SELECT EXISTS (
   SELECT 1
   FROM ops.poi_cache_target_snapshots AS snapshot
@@ -395,6 +485,19 @@ SELECT EXISTS (
     FROM ops.poi_cache_target_snapshots AS receipt
     WHERE receipt.material_id = material.material_id
   )
+) OR EXISTS (
+  SELECT 1
+  FROM ops.poi_cache_target_snapshot_materials AS material
+  WHERE material.compacted_at IS NOT NULL
+    AND EXISTS (
+      SELECT 1
+      FROM ops.poi_cache_target_snapshot_material_items AS item
+      WHERE item.material_id = material.material_id
+    )
+) OR EXISTS (
+  SELECT 1
+  FROM ops.poi_cache_target_snapshot_materials AS material
+  WHERE {_COMPACTION_CANDIDATE_PREDICATE.strip()}
 ) AS has_more
 """
 
@@ -820,6 +923,9 @@ class CacheTargetSnapshotGcBatchResult:
     external_system: str | None
     deleted_items: int
     deleted_headers: int
+    #: 이 batch에서 compaction으로 표시한 material 수. item은 같은 batch에서 다
+    #: 지워지지 않을 수 있다(bounded) — 남은 것은 다음 batch가 이어서 지운다.
+    compacted_materials: int
     has_more: bool
 
 
@@ -1501,15 +1607,21 @@ async def _prune_snapshot_generation(
     external_system: str,
     item_limit: int,
     header_limit: int,
-) -> tuple[int, int]:
-    """receipt -> orphan material item -> orphan material 순서로 한 batch 지운다.
+    compaction_retention_seconds: float = _MATERIAL_COMPACTION_RETENTION_SECONDS,
+) -> tuple[int, int, int]:
+    """한 system의 snapshot 저장 공간을 bounded 4단계로 되찾는다.
 
-    순서가 뜻을 갖는다. receipt를 먼저 지워야 material이 orphan이 되고, material을
-    지우려면 그 item이 먼저 비어 있어야 한다(FK는 CASCADE지만 1,000,000행을 한
-    statement로 지우지 않으려고 일부러 나눈다).
+    순서가 뜻을 갖는다.
 
-    반환은 ``(지운 item 수, 지운 receipt 수)``다. material 삭제 수는 item 삭제 수에
-    종속이라 따로 세지 않는다 — item이 0인 orphan만 지운다.
+    1. 만료·미참조 **receipt**를 지운다. 이래야 material이 orphan이 된다.
+    2. 보존 기간을 넘긴 terminal **material을 compaction으로 표시**한다. 표시가 곧
+       reader의 410 전환 시점이다.
+    3. orphan이거나 표시된 material의 **item**을 지운다. 둘을 한 bound 안에서 지워야
+       한쪽이 다른 쪽을 굶기지 않는다.
+    4. item이 빈 orphan **material**을 지운다. 표시된 material은 지우지 않는다 —
+       root/count가 감사 증거로 남아야 한다.
+
+    반환은 ``(지운 item 수, 지운 receipt 수, 표시한 material 수)``다.
     """
 
     deleted_headers = len(
@@ -1517,6 +1629,18 @@ async def _prune_snapshot_generation(
             await session.execute(
                 text(_PRUNE_EXPIRED_SNAPSHOT_HEADERS_SQL),
                 {"external_system": external_system, "limit": header_limit},
+            )
+        ).all()
+    )
+    compacted_materials = len(
+        (
+            await session.execute(
+                text(_MARK_COMPACTED_MATERIALS_SQL),
+                {
+                    "external_system": external_system,
+                    "limit": header_limit,
+                    "compaction_retention_seconds": compaction_retention_seconds,
+                },
             )
         ).all()
     )
@@ -1532,7 +1656,7 @@ async def _prune_snapshot_generation(
         text(_PRUNE_ORPHANED_MATERIALS_SQL),
         {"external_system": external_system, "limit": header_limit},
     )
-    return deleted_items, deleted_headers
+    return deleted_items, deleted_headers, compacted_materials
 
 
 async def prune_expired_cache_target_snapshots_batch(
@@ -1541,6 +1665,7 @@ async def prune_expired_cache_target_snapshots_batch(
     after_external_system: str | None = None,
     item_limit: int = _SNAPSHOT_ITEM_PRUNE_LIMIT,
     header_limit: int = _SNAPSHOT_HEADER_PRUNE_LIMIT,
+    compaction_retention_seconds: float = _MATERIAL_COMPACTION_RETENTION_SECONDS,
 ) -> CacheTargetSnapshotGcBatchResult:
     """만료·미참조 snapshot을 한 system/한 transaction 분량만 정리한다.
 
@@ -1559,42 +1684,58 @@ async def prune_expired_cache_target_snapshots_batch(
         raise ValueError("item_limit은 1 이상 10000 이하여야 합니다.")
     if not 0 < header_limit <= 1_000:
         raise ValueError("header_limit은 1 이상 1000 이하여야 합니다.")
+    if compaction_retention_seconds <= 0:
+        raise ValueError("compaction_retention_seconds는 0보다 커야 합니다.")
 
+    select_params: dict[str, object] = {
+        "after_external_system": after_external_system,
+        "compaction_retention_seconds": compaction_retention_seconds,
+    }
     system_row = (
         await session.execute(
             text(_SELECT_EXPIRED_SNAPSHOT_GC_SYSTEM_SQL),
-            {"after_external_system": after_external_system},
+            select_params,
         )
     ).one_or_none()
     if system_row is None and after_external_system is not None:
         system_row = (
             await session.execute(
                 text(_SELECT_EXPIRED_SNAPSHOT_GC_SYSTEM_SQL),
-                {"after_external_system": None},
+                {**select_params, "after_external_system": None},
             )
         ).one_or_none()
 
     external_system: str | None = None
     deleted_items = 0
     deleted_headers = 0
+    compacted_materials = 0
     if system_row is not None:
         external_system = str(system_row._mapping["external_system"])
-        deleted_items, deleted_headers = await _prune_snapshot_generation(
+        (
+            deleted_items,
+            deleted_headers,
+            compacted_materials,
+        ) = await _prune_snapshot_generation(
             session,
             external_system=external_system,
             item_limit=item_limit,
             header_limit=header_limit,
+            compaction_retention_seconds=compaction_retention_seconds,
         )
 
     has_more = bool(
         (
-            await session.execute(text(_HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL))
+            await session.execute(
+                text(_HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL),
+                {"compaction_retention_seconds": compaction_retention_seconds},
+            )
         ).scalar_one()
     )
     return CacheTargetSnapshotGcBatchResult(
         external_system=external_system,
         deleted_items=deleted_items,
         deleted_headers=deleted_headers,
+        compacted_materials=compacted_materials,
         has_more=has_more,
     )
 

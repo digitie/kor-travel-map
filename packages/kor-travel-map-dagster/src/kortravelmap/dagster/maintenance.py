@@ -548,6 +548,7 @@ async def drain_expired_cache_target_snapshots_op(
         "batches": result.batches,
         "deleted_items": result.deleted_items,
         "deleted_headers": result.deleted_headers,
+        "compacted_materials": result.compacted_materials,
         "remaining_items": (
             result.remaining_items
             if result.remaining_items is not None

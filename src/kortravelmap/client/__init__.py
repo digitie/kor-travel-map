@@ -495,6 +495,9 @@ class CacheTargetSnapshotGcDrainResult:
     deleted_headers: int
     remaining_items: int | None
     remaining_headers: int | None
+    #: 이 drain이 compaction으로 표시한 material 수(T-VN-41S). 표시와 item 삭제는
+    #: 서로 다른 batch에 걸쳐 있을 수 있으므로 `deleted_items`와 합이 맞지 않는다.
+    compacted_materials: int = 0
     total_items: int | None = None
     total_headers: int | None = None
     unexpired_unreferenced_items: int | None = None
@@ -648,10 +651,12 @@ class AsyncKorTravelMapClient:
                     deleted_headers=0,
                     remaining_items=None,
                     remaining_headers=None,
+                    compacted_materials=0,
                 )
             batches = 0
             deleted_items = 0
             deleted_headers = 0
+            compacted_materials = 0
             deadline = monotonic() + max_seconds
             after_external_system: str | None = None
             systems_seen_in_round: set[str] = set()
@@ -683,9 +688,16 @@ class AsyncKorTravelMapClient:
                         header_limit=header_limit,
                     )
                 batches += 1
-                batch_deleted = batch.deleted_items + batch.deleted_headers
+                # compaction 표시도 진행으로 센다. 빼면 "표시만 하고 item은 다음
+                # batch에서 지우는" 정상 진행이 no-progress로 읽혀 drain이 멈춘다.
+                batch_deleted = (
+                    batch.deleted_items
+                    + batch.deleted_headers
+                    + batch.compacted_materials
+                )
                 deleted_items += batch.deleted_items
                 deleted_headers += batch.deleted_headers
+                compacted_materials += batch.compacted_materials
                 after_external_system = batch.external_system
 
                 no_progress_round = False
@@ -740,6 +752,7 @@ class AsyncKorTravelMapClient:
                 batches=batches,
                 deleted_items=deleted_items,
                 deleted_headers=deleted_headers,
+                compacted_materials=compacted_materials,
                 remaining_items=backlog.remaining_items,
                 remaining_headers=backlog.remaining_headers,
                 total_items=backlog.total_items,
