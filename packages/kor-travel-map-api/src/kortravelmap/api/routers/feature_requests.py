@@ -37,6 +37,17 @@ admin_router = APIRouter(
     prefix="/admin/feature-requests", tags=["admin-feature-requests"]
 )
 
+_APPROVE_RESPONSE_HEADERS = {
+    "ETag": {
+        "description": "승인 또는 exact-conflict winner Feature의 strong entity tag.",
+        "schema": {"type": "string"},
+    },
+    "Location": {
+        "description": "승인 또는 exact-conflict winner Feature의 canonical resource URI.",
+        "schema": {"type": "string", "format": "uri-reference"},
+    },
+}
+
 
 class FeatureRequestCoordInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -255,6 +266,7 @@ async def list_feature_requests_route(
     response_model=FeatureRequestResponse,
     status_code=status.HTTP_200_OK,
     responses={
+        200: {"headers": _APPROVE_RESPONSE_HEADERS},
         403: {"description": "admin manual Feature create scope 없음"},
         503: {"description": "수동 Feature 생성 승인 경계 비활성"},
         409: {"description": "pending 상태 아님"},
@@ -286,12 +298,6 @@ async def approve_feature_request_route(
                 marker_icon=body.marker_icon,
                 command_id=current_domain_command().command_id,
             )
-            if isinstance(result, feature_request_repo.FeatureRequestExactConflict):
-                item = await _queue_item_or_404(session, request_id)
-                return FeatureRequestResponse(
-                    data=_request_data(item),
-                    meta=make_meta(request, started_at=started_at),
-                )
             item = await _queue_item_or_404(session, request_id)
     except feature_request_repo.FeatureRequestStateConflict as error:
         raise HTTPException(
@@ -312,8 +318,12 @@ async def approve_feature_request_route(
                 "details": {},
             },
         ) from error
+    if isinstance(result, feature_request_repo.FeatureRequestExactConflict):
+        feature_uuid = result.existing_feature_uuid
+    else:
+        feature_uuid = result.feature_uuid
     response.headers["ETag"] = revision_etag(result.row_revision)
-    response.headers["Location"] = f"/v1/admin/features/{result.feature_uuid}"
+    response.headers["Location"] = f"/v1/admin/features/{feature_uuid}"
     return FeatureRequestResponse(
         data=_request_data(item), meta=make_meta(request, started_at=started_at)
     )

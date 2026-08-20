@@ -32532,7 +32532,22 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "승인 또는 exact-conflict winner Feature의 strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Location": {
+                "description": "승인 또는 exact-conflict winner Feature의 canonical resource URI.",
+                "schema": {
+                  "format": "uri-reference",
+                  "type": "string"
+                }
+              }
+            }
           },
           "403": {
             "content": {

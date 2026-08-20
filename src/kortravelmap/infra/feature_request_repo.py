@@ -73,6 +73,7 @@ class FeatureRequestCreated:
 @dataclass(frozen=True)
 class FeatureRequestExactConflict:
     existing_feature_uuid: str
+    row_revision: int
 
 
 _SUBMIT_SQL: Final = """
@@ -97,6 +98,11 @@ SELECT * FROM feature.read_feature_request(CAST(:request_id AS uuid))
 """
 _LIST_SQL: Final = """
 SELECT * FROM feature.list_feature_requests(CAST(:status AS text), CAST(:limit AS integer))
+"""
+_EXACT_CONFLICT_FEATURE_SQL: Final = """
+SELECT feature_uuid, row_revision
+FROM feature.features
+WHERE feature_uuid = CAST(:feature_uuid AS uuid)
 """
 
 
@@ -296,7 +302,29 @@ async def approve_feature_request(
         winner = row.get("o_existing_feature_uuid")
         if not isinstance(winner, UUID):
             raise FeatureRequestError("Feature request exact conflict winner가 없습니다.")
-        return FeatureRequestExactConflict(existing_feature_uuid=str(winner))
+        existing = (
+            (
+                await session.execute(
+                    text(_EXACT_CONFLICT_FEATURE_SQL),
+                    {"feature_uuid": str(winner)},
+                )
+            )
+            .mappings()
+            .one_or_none()
+        )
+        if (
+            existing is None
+            or existing.get("feature_uuid") != winner
+            or not isinstance(existing.get("row_revision"), int)
+            or existing["row_revision"] < 1
+        ):
+            raise FeatureRequestError(
+                "Feature request exact conflict winner receipt가 불완전합니다."
+            )
+        return FeatureRequestExactConflict(
+            existing_feature_uuid=str(winner),
+            row_revision=existing["row_revision"],
+        )
     if outcome != "created":
         raise FeatureRequestError("Feature request approval writer outcome이 올바르지 않습니다.")
     observed_uuid = row.get("o_feature_uuid")

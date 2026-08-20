@@ -49,14 +49,14 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     ),
     # 2026-08-13 T-VN-40 — public legacy catalog 제거, scoped service snapshot/mapping,
     # admin catalog/import/candidate ETag·412/428 목표 diff를 machine freeze했다.
-    "openapi-diff-v1.json": ("07c71191b598db7b4453bc2597c5f397cccdde93713a9266274eec15af7845c3"),
+    "openapi-diff-v1.json": ("ea208eaecf34c9070b2e03b90044adb9dfbd0782fe24f2210621439887faab4e"),
     # 2026-08-13 T-VN-36 — receipt가 리베이스로 폐기된 커밋(c1fa5a4d)과 그때의
     # spec sha를 가리키고 있었다. 현재 head로 재핀했다.
-    # 2026-08-20 T-VN-M04 — service queue/admin resolution 계약 변경으로 active receipt를
+    # 2026-08-21 T-VN-M04 — service queue/admin resolution 계약 변경으로 active receipt를
     # pending으로 되돌렸다. 새 Map/PinVi paired live 증거 전에는 이전 completion을 재사용하지
     # 않는다.
     "consumer-rollout-v1.json": (
-        "587930e72bf5e2c0eac716526e2b0d507d1f4c2594d219444f195f1d77eca6e8"
+        "59d89db50deb60fcc15c73dfb86d0e92c32ea51b87018edd786c6f19968c0bab"
     ),
     # T-VN-41S service 계약 변경으로 active receipt가 pending으로 돌아가도, 이전
     # candidate archive·image·Live UI 증거 세트는 detached 이력으로 불변이어야 한다.
