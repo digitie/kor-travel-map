@@ -108,6 +108,18 @@ async def _seed(session: AsyncSession) -> None:
         ),
         {"material_id": _MATERIAL, "fingerprint": "b" * 64},
     )
+    # compaction 후보 조회의 값은 **이미 처리한 것을 건너뛴다**는 데 있다. 전부
+    # 미처리인 fixture에서는 partial index가 전체와 같아 planner가 고를 이유가 없다.
+    # 대부분을 compaction 상태로 만들어 그 술어를 선택적으로 만든다.
+    await session.execute(
+        text(
+            "UPDATE ops.poi_cache_target_snapshot_materials "
+            "SET compacted_at = now() "
+            "WHERE external_system = :system "
+            "AND material_high_watermark_relay_order > 10"
+        ),
+        {"system": _SYSTEM},
+    )
     for relation in (
         "ops.poi_cache_target_snapshot_materials",
         "ops.poi_cache_target_snapshot_material_items",
@@ -160,11 +172,9 @@ async def test_snapshot_material_hot_queries_have_index_paths(
             "compaction_retention_seconds": 30 * 24 * 60 * 60,
         },
     )
-    # 후보 조회는 `compacted_at IS NULL`에서만 도므로 partial index 둘 중 하나면 된다.
-    assert compaction & {
-        "idx_cache_target_snapshot_materials_compaction",
-        "uq_cache_target_snapshot_materials_live_identity",
-    }, compaction
+    # `(materialized_at, material_id) WHERE compacted_at IS NULL`은 술어와 정렬을 함께
+    # 만족한다 — 후보 조회가 이것을 타지 않으면 compaction된 material을 매 tick 다시 훑는다.
+    assert "idx_cache_target_snapshot_materials_compaction" in compaction, compaction
 
     receipt_by_material = await _explain(
         migrated_session,
