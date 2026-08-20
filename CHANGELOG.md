@@ -34,9 +34,11 @@
 - **FIXED**: `410 SNAPSHOT_MATERIAL_COMPACTED`가 도달 불가능했다. compaction 후보는 정의상
   미만료 receipt가 없어 만료 판정이 항상 먼저 이겼다. compaction 판정을 앞으로 옮겼다.
 - **ADDED (maintenance)**: hourly GC batch가 네 단계가 됐다 — 만료·미참조 receipt 삭제 →
-  보존 기간(기본 30일)을 넘긴 terminal material 표시 → orphan/표시된 material의 item drain →
-  item이 빈 orphan material 삭제. 표시된 material과 그 receipt는 지우지 않는다(root/count가
-  감사 증거다). Dagster metadata에 `compacted_materials`를 노출한다.
+  **되찾을 material 표시**(orphan, 그리고 보존 기간 기본 30일을 넘긴 terminal audit) →
+  **표시된** material의 item drain → item이 빈 orphan material 삭제. 표시는 되돌릴 수 없고,
+  item은 표시된 뒤에만 지운다 — 그래서 "표시되지 않았다"가 곧 "item이 온전하다"가 되고
+  재사용이 부분 배출된 material을 잡지 않는다. audit material과 그 receipt는 지우지 않는다
+  (root/count가 감사 증거다). Dagster metadata에 `compacted_materials`를 노출한다.
 - **CHANGED (runtime ACL)**: `ops` 스키마를 `feature`와 같은 강도로 만들었다. 선언 없는 ops
   relation은 조용히 full CRUD를 받는 대신 배포를 막는다. 실측으로 표 57개 중 48개가 그
   침묵 경로였고, 모델에 없는 ops 표 17개가 더 있었다.

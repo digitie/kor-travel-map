@@ -163,6 +163,13 @@ async def _drain(dsn: str) -> list[str]:
     #
     # 지켜야 하는 성질은 둘이고 그 둘은 위에서 이미 본다 — 적격 item이 남지 않았고
     # (`after["eligible_items"] == 0`), 지운 수가 적격 수 이상이다.
+    # 하한만 보면 `eligible_items`가 **죽어도**(항상 0이어도) 통과한다 — 그러면 위
+    # `after["eligible_items"] == 0`도 자명하게 참이라 게이트 전체가 공허해진다.
+    # seed가 적격 item을 반드시 만들므로 0이면 그 자체가 결함이다(적대 리뷰 지적).
+    if not before["eligible_items"]:
+        problems.append(
+            "적격 item이 0이다 — seed가 잘못됐거나 eligible_items 셈이 죽었다"
+        )
     if result.deleted_items < before["eligible_items"]:
         problems.append(
             "적격 item보다 적게 지웠다: "

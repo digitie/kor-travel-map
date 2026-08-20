@@ -2989,9 +2989,14 @@ async def test_partially_drained_material_is_never_reused(
     """
 
     system = "snapshot-partial-drain-test"
-    # item이 2행 있어야 "일부만 지운 상태"가 성립한다. 1행이면 하나 지운 순간 0행이라
-    # 되찾기 후보 조건(`EXISTS(item)`)에서 빠지고, 테스트가 재려는 상태가 아니게 된다.
-    for index in (1, 2):
+    # item이 **3행** 있어야 한다. 아래에서 `item_limit=1`로 한 batch만 돌려 1행을
+    # 배출하면 2행이 남고, phase 4는 item이 남은 material을 지우지 못한다 — 그것이
+    # 재려는 상태다(부분 배출된 채 **살아 있는** material).
+    #
+    # 2행 + `item_limit` 넉넉으로 두면 한 batch에서 전부 배출되고 material이 행째
+    # 사라져서, 아래 단언들이 "표시가 재사용을 막았다"가 아니라 "행이 없어졌다"로
+    # 만족된다 — 재사용 질의에서 `compacted_at IS NULL`을 빼도 통과한다(적대 리뷰 지적).
+    for index in (1, 2, 3):
         await _apply_snapshot_source(
             migrated_session,
             external_system=system,
@@ -3004,7 +3009,7 @@ async def test_partially_drained_material_is_never_reused(
         external_system=system,
         limit=10,
     )
-    assert first.count == 2
+    assert first.count == 3
 
     material_id = str(
         await migrated_session.scalar(
@@ -3016,8 +3021,7 @@ async def test_partially_drained_material_is_never_reused(
         )
     )
 
-    # receipt를 지워 orphan으로 만든 뒤, item을 **일부만** 지운 상태를 만든다.
-    # 이것이 bounded 배출 도중 commit된 상태다.
+    # receipt를 지워 orphan으로 만든다.
     await migrated_session.execute(
         text(
             "DELETE FROM ops.poi_cache_target_snapshots "
@@ -3025,34 +3029,38 @@ async def test_partially_drained_material_is_never_reused(
         ),
         {"snapshot_id": first.snapshot_id},
     )
-    await migrated_session.execute(
-        text(
-            "DELETE FROM ops.poi_cache_target_snapshot_material_items "
-            "WHERE material_id = CAST(:material_id AS uuid) AND row_number = 1"
-        ),
-        {"material_id": material_id},
-    )
-    # material row는 남아 있고 identity도 그대로다 — 표시가 없으면 재사용에 걸린다.
-    assert (
-        await migrated_session.scalar(
-            text(
-                "SELECT count(*) FROM ops.poi_cache_target_snapshot_materials "
-                "WHERE material_id = CAST(:material_id AS uuid) "
-                "AND compacted_at IS NULL"
-            ),
-            {"material_id": material_id},
-        )
-        == 1
-    )
 
-    # GC batch가 표시를 붙인다(phase 2). 배출의 전제이자 재사용 차단의 근거다.
+    # GC batch를 **item 1행 예산**으로 돌린다. phase 2가 표시하고 phase 3이 1행만
+    # 배출하므로 2행이 남고, phase 4는 item이 남은 material을 지우지 못한다.
     batch = await prune_expired_cache_target_snapshots_batch(
         migrated_session,
-        item_limit=1_000,
+        item_limit=1,
         header_limit=100,
     )
     assert batch.external_system == system
-    assert batch.compacted_materials >= 1
+    assert batch.compacted_materials == 1
+    assert batch.deleted_items == 1
+
+    # 이것이 재려는 상태다 — material은 **살아 있고**, 표시됐고, item이 모자란다.
+    partial = (
+        await migrated_session.execute(
+            text(
+                "SELECT material.compacted_at IS NOT NULL AS marked, ("
+                "  SELECT count(*)"
+                "  FROM ops.poi_cache_target_snapshot_material_items AS item"
+                "  WHERE item.material_id = material.material_id"
+                ") AS remaining, material.item_count "
+                "FROM ops.poi_cache_target_snapshot_materials AS material "
+                "WHERE material.material_id = CAST(:material_id AS uuid)"
+            ),
+            {"material_id": material_id},
+        )
+    ).one_or_none()
+    assert partial is not None, "material이 사라졌다 — 부분 배출 창을 만들지 못했다"
+    assert bool(partial.marked)
+    assert (int(partial.remaining), int(partial.item_count)) == (2, 3), (
+        "item이 모자란 채 남아 있어야 이 테스트가 뜻을 갖는다"
+    )
 
     rebuilt = await get_cache_target_snapshot(
         migrated_session,
@@ -3061,7 +3069,7 @@ async def test_partially_drained_material_is_never_reused(
     )
 
     # 부분 material을 돌려주지 않았다 — 새 material을 만들었고 count가 실제와 맞는다.
-    assert rebuilt.count == 2
+    assert rebuilt.count == 3
     rebuilt_material = str(
         await migrated_session.scalar(
             text(
@@ -3074,7 +3082,9 @@ async def test_partially_drained_material_is_never_reused(
     assert rebuilt_material != material_id, (
         "되찾기가 시작된 material을 재사용했다 — consumer가 모자란 page를 받는다"
     )
-    assert len(rebuilt.items) == rebuilt.count
+    # 하중이 실리는 단언이다. 표시된 material을 재사용했다면 header는 3을 말하는데
+    # item은 2행이라 여기서 깨진다.
+    assert len(rebuilt.items) == rebuilt.count == 3
 
 
 @pytest.mark.integration

@@ -11,9 +11,10 @@
    물려받을 수 있었지만(`_GET_REUSABLE_MATERIAL_SNAPSHOT_SQL`), 반대 방향은 막혀 있다
    (`_GET_REUSABLE_SNAPSHOT_SQL`의 `NOT EXISTS (... requests ...)`). 물려받으면 만료
    시각까지 함께 물려받기 때문이다. 단방향인 이유는 설계가 아니라 표가 하나여서였다.
-2. **terminal audit item compaction.** 끝난 reconciliation의 item 1,000,000행은 더
-   페이징되지 않지만 root/count는 감사 증거로 남아야 한다. header와 item이 같은 생애를
-   공유하면 "item만 지우고 receipt는 남긴다"를 표현할 수 없다.
+2. **item 되찾기.** 더 이상 페이징되지 않는 item 1,000,000행을 지우면서 root/count는
+   남겨야 하는 경우가 둘이다 — 끝난 reconciliation의 감사 증거(영구 보존), 그리고 아무
+   receipt도 붙잡지 않게 된 orphan(행째 삭제). header와 item이 같은 생애를 공유하면
+   "item만 지우고 나머지는 남긴다"를 표현할 수 없다.
 
 무엇. material 표와 material item 표를 만들고, 기존 snapshot을 receipt로 좁힌다. item의
 PK/FK는 `(material_id, row_number)`로 옮긴다. 같은 identity에 root/count/item이 **정확히**
@@ -43,6 +44,10 @@ PK/FK는 `(material_id, row_number)`로 옮긴다. 같은 identity에 root/count
   event**다. 더 높은 cursor를 광고하면 consumer가 그것들을 건너뛴다.
   `test_generic_snapshot_reuse_ignores_nonmaterial_outbox_tail`이 그 자리를 잡았다.
   material이 처음 고정될 때 관측한 전역 HWM을 적고 모든 receipt가 그 값을 쓴다.
+- **`compacted_at`의 뜻이 "감사용 compaction"보다 넓다.** 초안은 terminal audit만
+  염두에 뒀지만, 실제로는 orphan material도 배출 **전에** 이 표시를 받는다. 그래야
+  "표시되지 않았다 = item이 온전하다"가 성립하고 재사용이 부분 배출된 material을 잡지
+  않는다. 표시 없이 지우는 경로를 하나라도 남기면 그 불변이 깨진다.
 - **`material_bytes`는 NULL을 허용한다.** canonical leaf byte 수는 core의 leaf 인코딩
   (`_leaf_material`)이 정한다. 이 migration이 그 인코딩을 SQL로 옮겨 적으면 두 정의가
   갈라진다. 0230 이전 material에는 실측이 없으므로 **발명하지 않고 NULL로 둔다**.
@@ -94,13 +99,20 @@ _MATERIAL_ITEMS: Final[str] = "ops.poi_cache_target_snapshot_material_items"
 _RECEIPTS: Final[str] = "ops.poi_cache_target_snapshots"
 _LEGACY_ITEMS: Final[str] = "ops.poi_cache_target_snapshot_items"
 
-#: material은 `compacted_at`을 NULL에서 한 번 채우는 것 외에는 다시 쓰지 않는다.
-#:
-#: 그 표시의 뜻은 "이 material의 item을 되찾기 **시작**했다"이다. item은 표시된 뒤에만
-#: 지우고, 재사용은 표시된 material을 잡지 않는다 — 그래서 "표시되지 않았다"가 곧
-#: "item이 온전하다"가 된다. 그 결합이 없으면 부분 배출된 material이 재사용돼 consumer가
-#: 실제보다 큰 count/root와 함께 모자란 page를 받는다.
 _RECEIPT_FENCE_TRIGGER: Final[str] = "trg_poi_cache_target_snapshots_append_only"
+
+#: `compacted_at`은 **"이 material의 item을 되찾기 시작했다"**는 한 방향 표시다.
+#:
+#: 이 fence가 지키는 것은 감사 증거만이 아니다. item은 표시된 뒤에만 지우고
+#: (`_PRUNE_ORPHANED_MATERIAL_ITEMS_SQL`), 재사용은 표시된 material을 잡지 않으므로
+#: (`_GET_REUSABLE_MATERIAL_SQL`), **"표시되지 않았다"가 곧 "item이 온전하다"**가 된다.
+#: 그 불변을 성립시키는 것이 여기서 표시를 되돌릴 수 없게 만드는 일이다. 되돌릴 수 있으면
+#: 부분 배출된 material이 다시 재사용 가능해지고, consumer가 실제보다 큰 count/root와
+#: 함께 모자란 page를 받는다.
+#:
+#: 표시 대상은 둘이다 — 보존 기간을 넘긴 terminal audit material(표시가 영구히 남고 그
+#: receipt의 page는 410이 된다)과 orphan material(표를 비운 뒤 행째 사라진다). 그래서
+#: 이 표시를 "감사용 compaction"으로만 읽으면 안 된다.
 
 _MATERIAL_FENCE_SQL: Final[str] = """
 CREATE FUNCTION ops.reject_snapshot_material_mutation() RETURNS trigger

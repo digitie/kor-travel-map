@@ -808,6 +808,13 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
     PinVi re-vendor와 함께 묶는다 — T-VN-41 lane이 어차피 service re-vendor를 요구하므로
     추가 비용이 없다. 누락 자체는 이 브랜치 이전부터 있었다(41S가 410 schema만 예약했다).
     선언 위치와 근거 주석은 `cache_target_streams.py`의 generic snapshot route에 있다.
+    → **도달 조건은 backlog가 쌓인 stream뿐이다.** compaction 판정이 만료 판정보다 앞서므로
+    410은 "만료된 generic receipt인데 그 material이 표시됐다"에서만 난다. 보통은 phase 1이
+    같은 batch에서 그 receipt를 지우므로, `header_limit`/`SKIP LOCKED` 경계에 걸린 stream에서만
+    남는다. 후속을 "장식"으로 낮춰 보지도, "PinVi가 지금 깨진다"로 올려 보지도 않게 적어 둔다.
+    → 같은 후속에서 410 본문 문구도 고친다. 지금은 "보존 기간을 지나 compaction됐습니다"인데
+    orphan 표시에는 보존 기간이 없다. 지금은 도달 불가(orphan에는 page할 receipt가 없다)지만
+    불변이 바뀌는 순간 거짓말이 된다.
   - [ ] **`ops` fail-closed ACL의 탈출구가 없다(적대 리뷰 지적).** 선언 없는 ops relation은
     이제 배포를 막는다. 의도한 동작이지만, **운영에는 있고 fresh migrate DB에는 없는**
     relation이 걸린다 — 위험한 migration 앞에서 운영자가 만든 backup 표, `pg_dump` 복원
