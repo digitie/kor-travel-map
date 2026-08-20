@@ -33,6 +33,10 @@ import {
   type OpsDatasetDetailResponse,
   type TargetRef,
 } from "./_ops-c7-admin-api";
+import {
+  acquireC7ExactScopeLock,
+  type C7ExactScopeLockRelease,
+} from "./_ops-c7-exact-scope-lock";
 
 const CAP_TEST_TIMEOUT = 75 * 60 * 1000;
 const CAP_CLEANUP_TERMINAL_TIMEOUT = 4 * 60 * 1000;
@@ -49,6 +53,19 @@ type ScopeStateSnapshot = {
 };
 
 test.describe.configure({ mode: "serial", retries: 0 });
+
+// 이 spec은 카탈로그가 선언한 고정 scope 행 하나와 그에 붙은 provider_sync_state
+// 한 행을 다른 C7 spec과 공유한다. live config은 fullyParallel이고 worker가 4라
+// 잠금 없이는 서로의 membership_fingerprint와 cursor를 덮어쓴다(T-C7-LIVE-SERIAL).
+let releaseC7ExactScopeLock: C7ExactScopeLockRelease | null = null;
+test.beforeAll(async () => {
+  releaseC7ExactScopeLock = await acquireC7ExactScopeLock(C7_KMA_SYNC_SCOPE);
+});
+test.afterAll(async () => {
+  const release = releaseC7ExactScopeLock;
+  releaseC7ExactScopeLock = null;
+  await release?.();
+});
 
 async function createCapRequestFromUi(
   page: Page,

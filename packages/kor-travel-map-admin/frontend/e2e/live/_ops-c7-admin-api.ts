@@ -63,6 +63,16 @@ export type CleanupResult = {
   restored: boolean;
 };
 export type CleanupScenario = "active" | "empty" | "cap" | "invalidation";
+/** 요청 하나를 이 시나리오 것이라고 말할 수 있게 하는 canonical triple. */
+export type KmaScopeExpectation = {
+  operationKey: string;
+  providerDatasetId: number;
+  syncScope: string;
+};
+/** triple에 durable idempotency key까지 묶어 request id와 1:1로 만든다. */
+export type KmaRequestOwnership = KmaScopeExpectation & {
+  idempotencyKey: string;
+};
 type TrackedIdempotencyEntries = Map<
   string,
   {
@@ -74,6 +84,8 @@ type TrackedIdempotencyEntries = Map<
 export type CleanupState = {
   allIdempotencyEntries: TrackedIdempotencyEntries;
   allRequestIds: Set<string>;
+  allRequestOwnership: Map<string, KmaRequestOwnership>;
+  requestOwnership: Map<string, KmaRequestOwnership>;
   allRequestTerminalStatuses: Map<string, string>;
   cleanupResult: CleanupResult | null;
   completedScenarios: Set<CleanupScenario>;
@@ -106,6 +118,7 @@ type CleanupIssue = {
   kind:
     | "request_detail"
     | "request_cancel"
+    | "request_ownership"
     | "request_terminal_timeout"
     | "target_delete"
     | "target_intent_recovery"
@@ -140,6 +153,8 @@ export const C7_KMA_SYNC_SCOPE =
 
 export const KMA_PROVIDER = "python-kma-api" as const;
 export const KMA_DATASET_KEY = "kma_ultra_short_nowcast" as const;
+export const KMA_NOWCAST_OPERATION_KEY =
+  "feature_weather_kma_ultra_short_nowcast_job" as const;
 export const KMA_SAFE_DAGSTER_JOB =
   "feature_update_request_worker" as const;
 export const QUEUE_SENSOR_NAME = "feature_update_request_queue_sensor" as const;
@@ -220,6 +235,13 @@ type DurableCleanupJournal = {
   }>;
   phase: string;
   request_ids: string[];
+  request_ownership: Array<{
+    idempotency_key: string;
+    operation_key: string;
+    provider_dataset_id: number;
+    request_id: string;
+    sync_scope: string;
+  }>;
   request_terminal_statuses: Record<string, string>;
   run_id: string;
   scenario: CleanupScenario;
@@ -227,7 +249,7 @@ type DurableCleanupJournal = {
   target_refs: TargetJournalRef[];
   target_history: TargetJournalRef[];
   updated_at: string;
-  version: 3;
+  version: 4;
 };
 
 const UUID_PATTERN =
@@ -440,6 +462,10 @@ function durableJournal(
     ...state.allRequestIds,
     ...state.requestIds,
   ]);
+  const allRequestOwnership = new Map(state.allRequestOwnership);
+  for (const [requestId, ownership] of state.requestOwnership) {
+    allRequestOwnership.set(requestId, ownership);
+  }
   const allRequestTerminalStatuses = new Map(
     state.allRequestTerminalStatuses,
   );
@@ -460,6 +486,15 @@ function durableJournal(
       })),
     phase,
     request_ids: [...allRequestIds].sort(),
+    request_ownership: [...allRequestOwnership.entries()]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([requestId, ownership]) => ({
+        idempotency_key: ownership.idempotencyKey,
+        operation_key: ownership.operationKey,
+        provider_dataset_id: ownership.providerDatasetId,
+        request_id: requestId,
+        sync_scope: ownership.syncScope,
+      })),
     request_terminal_statuses: Object.fromEntries(
       [...allRequestTerminalStatuses.entries()].sort(
         ([left], [right]) => left.localeCompare(right),
@@ -479,7 +514,7 @@ function durableJournal(
       return (left.targetId ?? "").localeCompare(right.targetId ?? "");
     }),
     updated_at: new Date().toISOString(),
-    version: 3,
+    version: 4,
   };
 }
 
@@ -496,6 +531,7 @@ async function mergePreviousJournal(state: CleanupState): Promise<void> {
       idempotency_entries?: unknown;
       phase?: unknown;
       request_ids?: unknown;
+      request_ownership?: unknown;
       request_terminal_statuses?: unknown;
       run_id?: unknown;
       scenario?: unknown;
@@ -511,7 +547,8 @@ async function mergePreviousJournal(state: CleanupState): Promise<void> {
       previous.run_id === state.runId && previous.scenario === state.scenario;
     if (
       !isOrchestratorPlaceholder &&
-      (previous.version !== 3 ||
+      (previous.version !== 4 ||
+        !Array.isArray(previous.request_ownership) ||
         typeof previous.run_id !== "string" ||
         previous.run_id.length === 0 ||
         !isCleanupScenario(previous.scenario) ||
@@ -717,6 +754,46 @@ async function mergePreviousJournal(state: CleanupState): Promise<void> {
       }
     }
 
+    const requestOwnership = previous.request_ownership;
+    if (
+      requestOwnership !== undefined &&
+      (!Array.isArray(requestOwnership) ||
+        !requestOwnership.every((value) => {
+          const item = asRecord(value);
+          return (
+            item !== null &&
+            typeof item.request_id === "string" &&
+            UUID_PATTERN.test(item.request_id) &&
+            typeof item.idempotency_key === "string" &&
+            UUID_PATTERN.test(item.idempotency_key) &&
+            typeof item.operation_key === "string" &&
+            item.operation_key.length > 0 &&
+            typeof item.provider_dataset_id === "number" &&
+            Number.isInteger(item.provider_dataset_id) &&
+            typeof item.sync_scope === "string" &&
+            item.sync_scope.length > 0
+          );
+        }))
+    ) {
+      throw new Error("invalid request history");
+    }
+    if (Array.isArray(requestOwnership)) {
+      // 소유권 행은 request id에 1:1이어야 한다. 중복이거나 request 이력에 없는
+      // id를 가리키면 그 journal로는 무엇이 우리 것인지 말할 수 없다.
+      const seenOwnedRequestIds = new Set<string>();
+      for (const value of requestOwnership) {
+        const item =
+          value as DurableCleanupJournal["request_ownership"][number];
+        if (
+          seenOwnedRequestIds.has(item.request_id) ||
+          !(requestIds as string[] | undefined)?.includes(item.request_id)
+        ) {
+          throw new Error("invalid request history");
+        }
+        seenOwnedRequestIds.add(item.request_id);
+      }
+    }
+
     if (!isOrchestratorPlaceholder && !isCurrentScenario) {
       const cleanupResult = asRecord(previous.cleanup_result);
       const scenario = previous.scenario as CleanupScenario;
@@ -758,6 +835,18 @@ async function mergePreviousJournal(state: CleanupState): Promise<void> {
     for (const externalSystem of
       (externalSystems as string[] | undefined) ?? []) {
       state.allExternalSystems.add(externalSystem);
+    }
+    for (const item of
+      (requestOwnership as
+        | DurableCleanupJournal["request_ownership"]
+        | undefined) ?? []) {
+      if (state.requestOwnership.has(item.request_id)) continue;
+      state.allRequestOwnership.set(item.request_id, {
+        idempotencyKey: item.idempotency_key,
+        operationKey: item.operation_key,
+        providerDatasetId: item.provider_dataset_id,
+        syncScope: item.sync_scope,
+      });
     }
     for (const item of (targetRefs as TargetJournalRef[] | undefined) ?? []) {
       const key = targetJournalKey(item);
@@ -2290,6 +2379,302 @@ export function queueSensorOperational(response: PipelineOverviewResponse): bool
   );
 }
 
+function hasExactObjectKeys(
+  value: Record<string, unknown>,
+  expected: readonly string[],
+): boolean {
+  const actual = Object.keys(value).sort();
+  const sortedExpected = [...expected].sort();
+  return (
+    actual.length === sortedExpected.length &&
+    actual.every((key, index) => key === sortedExpected[index])
+  );
+}
+
+function equalStringSets(left: Set<string>, right: Set<string>): boolean {
+  return (
+    left.size === right.size && [...left].every((value) => right.has(value))
+  );
+}
+
+function journalBodyMatchesKmaScope(
+  body: unknown,
+  expected: KmaScopeExpectation,
+): boolean {
+  const scope = asRecord(asRecord(body)?.scope);
+  return (
+    scope !== null &&
+    scope.type === "provider_dataset" &&
+    expected.operationKey === KMA_NOWCAST_OPERATION_KEY &&
+    scope.provider_dataset_id === expected.providerDatasetId &&
+    scope.sync_scope === expected.syncScope &&
+    scope.operation_key === expected.operationKey
+  );
+}
+
+/**
+ * durable journal 하나만 보고 "cleanup이 취소해도 되는 요청 집합"이 성립하는지 본다.
+ *
+ * request id ↔ idempotency entry ↔ provider dataset/sync scope/operation 삼중이
+ * 빠짐없이 1:1이어야 한다. 하나라도 빠지거나 중복되면 그 journal로는 어느 요청이
+ * 우리 것인지 말할 수 없고, 그때 cleanup은 취소를 포기해야 한다(fail-closed).
+ */
+export function hasExactC7RequestOwnershipBinding(value: unknown): boolean {
+  const journal = asRecord(value);
+  if (
+    journal === null ||
+    journal.version !== 4 ||
+    !Array.isArray(journal.request_ids) ||
+    !Array.isArray(journal.idempotency_entries) ||
+    !Array.isArray(journal.request_ownership)
+  ) {
+    return false;
+  }
+
+  const requestIds = new Set<string>();
+  for (const requestId of journal.request_ids) {
+    if (typeof requestId !== "string" || !UUID_PATTERN.test(requestId)) {
+      return false;
+    }
+    if (requestIds.has(requestId)) return false;
+    requestIds.add(requestId);
+  }
+
+  const entriesByIdempotency = new Map<
+    string,
+    { body: unknown; requestId: string | null }
+  >();
+  const entryRequestIds = new Set<string>();
+  for (const entryValue of journal.idempotency_entries) {
+    const entry = asRecord(entryValue);
+    if (
+      entry === null ||
+      typeof entry.idempotency_key !== "string" ||
+      !UUID_PATTERN.test(entry.idempotency_key) ||
+      asRecord(entry.body) === null ||
+      (entry.request_id !== null &&
+        (typeof entry.request_id !== "string" ||
+          !UUID_PATTERN.test(entry.request_id))) ||
+      typeof entry.status !== "string" ||
+      entry.status.length === 0 ||
+      entriesByIdempotency.has(entry.idempotency_key)
+    ) {
+      return false;
+    }
+    const requestId = entry.request_id as string | null;
+    if (requestId !== null) {
+      if (entryRequestIds.has(requestId)) return false;
+      entryRequestIds.add(requestId);
+    }
+    entriesByIdempotency.set(entry.idempotency_key, {
+      body: entry.body,
+      requestId,
+    });
+  }
+
+  const ownershipRequestIds = new Set<string>();
+  const ownershipIdempotencyKeys = new Set<string>();
+  for (const ownershipValue of journal.request_ownership) {
+    const ownership = asRecord(ownershipValue);
+    if (
+      ownership === null ||
+      !hasExactObjectKeys(ownership, [
+        "idempotency_key",
+        "operation_key",
+        "provider_dataset_id",
+        "request_id",
+        "sync_scope",
+      ]) ||
+      typeof ownership.request_id !== "string" ||
+      !UUID_PATTERN.test(ownership.request_id) ||
+      typeof ownership.idempotency_key !== "string" ||
+      !UUID_PATTERN.test(ownership.idempotency_key) ||
+      ownership.operation_key !== KMA_NOWCAST_OPERATION_KEY ||
+      typeof ownership.provider_dataset_id !== "number" ||
+      !Number.isSafeInteger(ownership.provider_dataset_id) ||
+      ownership.provider_dataset_id <= 0 ||
+      typeof ownership.sync_scope !== "string" ||
+      !ownership.sync_scope.startsWith(EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX) ||
+      ownership.sync_scope === EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX ||
+      ownershipRequestIds.has(ownership.request_id) ||
+      ownershipIdempotencyKeys.has(ownership.idempotency_key)
+    ) {
+      return false;
+    }
+    const entry = entriesByIdempotency.get(ownership.idempotency_key);
+    if (
+      entry === undefined ||
+      entry.requestId !== ownership.request_id ||
+      !journalBodyMatchesKmaScope(entry.body, {
+        operationKey: ownership.operation_key,
+        providerDatasetId: ownership.provider_dataset_id,
+        syncScope: ownership.sync_scope,
+      })
+    ) {
+      return false;
+    }
+    ownershipRequestIds.add(ownership.request_id);
+    ownershipIdempotencyKeys.add(ownership.idempotency_key);
+  }
+
+  return (
+    equalStringSets(requestIds, entryRequestIds) &&
+    equalStringSets(requestIds, ownershipRequestIds) &&
+    equalStringSets(
+      ownershipIdempotencyKeys,
+      new Set(
+        [...entriesByIdempotency.entries()]
+          .filter(([, entry]) => entry.requestId !== null)
+          .map(([idempotencyKey]) => idempotencyKey),
+      ),
+    )
+  );
+}
+
+/** request body가 선언한 canonical triple을 뽑는다. 아니면 소유권 자체가 성립하지 않는다. */
+function kmaScopeExpectationFromRequestBody(
+  body: FeatureUpdateRequestCreateRequest,
+): KmaScopeExpectation {
+  const scope = body.scope;
+  if (
+    scope.type !== "provider_dataset" ||
+    scope.operation_key !== KMA_NOWCAST_OPERATION_KEY ||
+    !scope.sync_scope.startsWith(EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX)
+  ) {
+    throw new Error("KMA request scope canonical triple 계약 불일치");
+  }
+  return {
+    operationKey: scope.operation_key,
+    providerDatasetId: scope.provider_dataset_id,
+    syncScope: scope.sync_scope,
+  };
+}
+
+function sameKmaScope(
+  left: KmaScopeExpectation,
+  right: KmaScopeExpectation,
+): boolean {
+  return (
+    left.operationKey === right.operationKey &&
+    left.providerDatasetId === right.providerDatasetId &&
+    left.syncScope === right.syncScope
+  );
+}
+
+/**
+ * Dataset-detail의 active 하나를 cleanup 대상으로 삼기 전에, 그것이 **이 시나리오가
+ * durable하게 만든 그 요청**인지 본다. 축 하나라도 어긋나면 외부 요청일 수 있으므로
+ * false다 — cleanup은 그때 fail-closed한다.
+ *
+ * main의 발견 루프는 dataset에 붙은 active를 무조건 채택했다. C7 dataset에 외부 운영
+ * 요청이 활성이면 그것을 취소했다는 뜻이다.
+ */
+export function isExactScenarioOwnedActiveRequest(
+  datasetDetail: OpsDatasetDetailResponse,
+  requestDetail: PipelineExecutionDetailResponse,
+  ownership: KmaRequestOwnership | undefined,
+  idempotencyEntry:
+    | { body: FeatureUpdateRequestCreateRequest; requestId: string | null }
+    | undefined,
+): boolean {
+  if (ownership === undefined || idempotencyEntry === undefined) return false;
+  let bodyScope: KmaScopeExpectation;
+  try {
+    bodyScope = kmaScopeExpectationFromRequestBody(idempotencyEntry.body);
+  } catch {
+    return false;
+  }
+  const active = datasetDetail.data.active_execution;
+  const updateRequest = requestDetail.data.update_request;
+  return !(
+    !sameKmaScope(ownership, bodyScope) ||
+    idempotencyEntry.requestId === null ||
+    active === null ||
+    active.kind !== "update_request" ||
+    active.id !== idempotencyEntry.requestId ||
+    active.sync_scope !== ownership.syncScope ||
+    active.operation_key !== ownership.operationKey ||
+    datasetDetail.data.provider !== KMA_PROVIDER ||
+    datasetDetail.data.dataset_key !== KMA_DATASET_KEY ||
+    datasetDetail.data.scopes.filter(
+      (scope) => scope.sync_scope === ownership.syncScope,
+    ).length !== 1 ||
+    active.provider_datasets.length !== 1 ||
+    active.provider_datasets[0]?.provider !== KMA_PROVIDER ||
+    active.provider_datasets[0]?.dataset_key !== KMA_DATASET_KEY ||
+    active.provider_datasets[0]?.provider_dataset_id !==
+      ownership.providerDatasetId ||
+    active.provider_datasets[0]?.sync_scope !== ownership.syncScope ||
+    requestDetail.data.execution.kind !== "update_request" ||
+    requestDetail.data.execution.id !== active.id ||
+    updateRequest === null ||
+    updateRequest.request_id !== active.id ||
+    updateRequest.scope.type !== "provider_dataset" ||
+    updateRequest.scope.provider_dataset_id !== ownership.providerDatasetId ||
+    updateRequest.scope.sync_scope !== ownership.syncScope ||
+    updateRequest.scope.operation_key !== ownership.operationKey ||
+    updateRequest.dataset_memberships.length !== 1 ||
+    updateRequest.dataset_memberships[0]?.provider_dataset_id !==
+      ownership.providerDatasetId ||
+    updateRequest.dataset_memberships[0]?.sync_scope !== ownership.syncScope ||
+    updateRequest.dataset_memberships[0]?.operation_key !==
+      ownership.operationKey
+  );
+}
+
+/** cleanup이 cancel을 보낼 수 있는 소유 active 요청 id. 아니면 null이다. */
+export function cancellationCandidateForScenarioOwnedActiveRequest(
+  datasetDetail: OpsDatasetDetailResponse,
+  requestDetail: PipelineExecutionDetailResponse,
+  ownership: KmaRequestOwnership | undefined,
+  idempotencyEntry:
+    | { body: FeatureUpdateRequestCreateRequest; requestId: string | null }
+    | undefined,
+): string | null {
+  const active = datasetDetail.data.active_execution;
+  return active !== null &&
+    active.kind === "update_request" &&
+    isExactScenarioOwnedActiveRequest(
+      datasetDetail,
+      requestDetail,
+      ownership,
+      idempotencyEntry,
+    )
+    ? active.id
+    : null;
+}
+
+/**
+ * C7 runner가 첫 durable write 전에 두는 v3 bootstrap marker인지 본다.
+ *
+ * 실제 mutation/cleanup journal을 v3로 해석하면 소유권 검사를 통째로 건너뛸 수 있다.
+ * 그래서 v4 journal은 이 placeholder와 호환 변환하지 않는다 — placeholder는 shell이
+ * 쓰는 별도 문서이고, 소유권을 말할 수 있는 것은 v4뿐이다.
+ */
+export function isC7OrchestratorBootstrapPlaceholder(value: unknown): boolean {
+  return exactJson(value, {
+    cleanup_result: null,
+    completed_scenarios: [],
+    external_systems: [],
+    idempotency_entries: [],
+    phase: "restored",
+    request_ids: [],
+    request_terminal_statuses: {},
+    run_id: "__orchestrator_pending__",
+    target_history: [],
+    target_refs: [],
+    version: 3,
+  });
+}
+
+/**
+ * Live E2E가 요청 대상 immutable dataset ID를 화면 projection에서 얻는다.
+ * seed 순서나 DB sequence를 fixture 상수로 가정하지 않는다.
+ */
+export async function resolveKmaProviderDatasetId(page: Page): Promise<number> {
+  return (await resolveKmaDatasetIdentity(page)).providerDatasetId;
+}
+
 export async function cancelRequest(
   page: Page,
   requestId: string,
@@ -2312,6 +2697,8 @@ export function createCleanupState(
     allExternalSystems: new Set(),
     allIdempotencyEntries: new Map(),
     allRequestIds: new Set(),
+    allRequestOwnership: new Map(),
+    requestOwnership: new Map(),
     allRequestTerminalStatuses: new Map(),
     allTargetRefs: new Map(),
     cleanupResult: null,
@@ -2730,6 +3117,18 @@ export async function trackRequestResult(
   if (requestId) state.requestIds.add(requestId);
   if (idempotencyKey) {
     const entry = state.idempotencyEntries.get(idempotencyKey);
+    if (requestId !== undefined && entry !== undefined) {
+      // 소유권은 request id가 생기는 **그 순간** 기록해야 한다. 나중에 dataset detail을
+      // 보고 역추적하면 그때 붙어 있는 것이 우리 것인지 알 수 없다.
+      try {
+        state.requestOwnership.set(requestId, {
+          ...kmaScopeExpectationFromRequestBody(entry.body),
+          idempotencyKey,
+        });
+      } catch {
+        state.requestOwnership.delete(requestId);
+      }
+    }
     if (entry) {
       entry.requestId = requestId ?? null;
       entry.status = requestId ? `response_${result.status}` : `http_${result.status}`;
@@ -3123,6 +3522,8 @@ async function cleanupResources(
       ),
     })),
   );
+  const scenarioOwnedActiveRequestIds = new Set<string>();
+  let cleanupOwnershipIntact = true;
   for (const settled of activeDiscoveries) {
     if (settled.status === "rejected") {
       exactScopeDiscoveryComplete = false;
@@ -3145,7 +3546,41 @@ async function cleanupResources(
     }
     const active = result.body.data.active_execution;
     if (active?.kind === "update_request") {
-      state.requestIds.add(active.id);
+      // 이 dataset에 붙은 active를 **무조건** 채택하면, 외부 운영 요청이 활성일 때
+      // 그것을 우리 것으로 오인해 아래에서 취소한다. 소유 삼중이 맞을 때만 채택한다.
+      const ownership = state.requestOwnership.get(active.id);
+      const idempotencyEntry =
+        ownership === undefined
+          ? undefined
+          : state.idempotencyEntries.get(ownership.idempotencyKey);
+      let owned = false;
+      try {
+        const requestDetailResult = await getRequestDetail(page, active.id);
+        owned =
+          requestDetailResult.status === 200 &&
+          requestDetailResult.body !== null &&
+          active.sync_scope ===
+            `${EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX}${externalSystem}` &&
+          cancellationCandidateForScenarioOwnedActiveRequest(
+            result.body,
+            requestDetailResult.body,
+            ownership,
+            idempotencyEntry,
+          ) === active.id;
+      } catch {
+        owned = false;
+      }
+      if (owned) {
+        state.requestIds.add(active.id);
+        scenarioOwnedActiveRequestIds.add(active.id);
+      } else {
+        cleanupOwnershipIntact = false;
+        exactScopeDiscoveryComplete = false;
+        issues.push({
+          kind: "request_ownership",
+          resource: `${EXTERNAL_SYSTEM_SYNC_SCOPE_PREFIX}${externalSystem}`,
+        });
+      }
     } else if (active !== null) {
       exactScopeDiscoveryComplete = false;
       issues.push({
@@ -3179,9 +3614,31 @@ async function cleanupResources(
       continue;
     }
     const status = result.body.data.execution.status;
-    if (!TERMINAL_STATUSES.has(status)) cancelIds.push(requestId);
+    if (!TERMINAL_STATUSES.has(status)) {
+      const ownership = state.requestOwnership.get(requestId);
+      const idempotencyEntry =
+        ownership === undefined
+          ? undefined
+          : state.idempotencyEntries.get(ownership.idempotencyKey);
+      if (
+        !cleanupOwnershipIntact ||
+        ownership === undefined ||
+        idempotencyEntry === undefined ||
+        idempotencyEntry.requestId !== requestId ||
+        !scenarioOwnedActiveRequestIds.has(requestId)
+      ) {
+        // 하나라도 소유를 말할 수 없으면 이 run의 cancel 자체를 포기한다.
+        // 남은 것은 수동 정리로 넘긴다 — 남의 요청을 취소하는 것보다 낫다.
+        cleanupOwnershipIntact = false;
+        exactScopeDiscoveryComplete = false;
+        issues.push({ kind: "request_ownership", resource: requestId });
+        continue;
+      }
+      cancelIds.push(requestId);
+    }
   }
 
+  if (!cleanupOwnershipIntact) cancelIds.length = 0;
   if (cancelIds.length > 0) {
     await writeDurableJournal(state, "cleanup_cancel_pending");
   }

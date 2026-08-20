@@ -22,9 +22,11 @@ barrier로 직렬화한다.
 - **Lane B — frontend hardening·PinVi 소비 API**
   - [~] `T-VN-41C`(#975 병합 / final exact-pair·prod consumer enable 잔여)
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환 — **저장소측 완료 2026-08-20**, live 실행은 배리어 대기)
-    ∥ [~] `T-VN-41S`(#922 1차 구현·리뷰 GO, `0227+` migration/compactor·n150 1M 검증 잔여)
+    ∥ [~] `T-VN-41S`(#922 1차 구현·리뷰 GO, `0230+` migration/compactor·n150 1M 검증 잔여)
   - **배리어**: [ ] `T-VN-FINAL-REBUILD`(주요 개발 완료 후 파괴적 재구축 — 사용자 결정 2026-08-20)
-  - [ ] `T-C7-BROWSER-EVIDENCE`(#995 잔여 — 인수 게이트 아님, T-VN-41 마감 비차단)
+  - [x] `T-C7-BROWSER-EVIDENCE`(#995 잔여 — 2026-08-20 접어넣음)
+  - [ ] `T-VN-40B` 잔여(source rule `curated` action 퇴역, `0229`, PR #1035) — 종결 되돌림
+  - [ ] `T-FE-MOCK-MANIFEST`(manifest 층 종결 / flake 잔여) ∥ [ ] `T-FE-MOCK-FLAKE`(`/v1/ops/logs`)
     → [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2` → `T-VN-41C` receipt 승격
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정, T-VN-40 인수 뒤)**
   - [~] `T-VN-M01`(admin Feature 생성 API foundation 병합, `0226` DB/ACL/route 잔여) → [ ] `T-VN-M02`(origin 보존·불변)
@@ -40,9 +42,10 @@ barrier로 직렬화한다.
   - 32~38 join barrier 뒤 Lane B: `T-VN-40B`·`T-VN-40C`는 2026-08-20 prod 적용까지 완료했다.
     - 기반 구현 #974, 40A write fence #994, identity mapping #996, 40B candidate 전환,
       ③ sanctioned live/soak, ④ exact receipt, 40C 물리 삭제와 prod `0225` 적용까지
-      모두 완료했다. 상세 이력은 [`tasks-done.md`](tasks-done.md)에 이관했다.
-    - 인수 ③·④ 중 분리한 [ ] `T-C7-SCOPE-REGISTRY` ∥ [ ] `T-C7-LIVE-SERIAL`도
-      아래 인수 잔여 절이 소유한다.
+      완료했다. 상세 이력은 [`tasks-done.md`](tasks-done.md)에 이관했다.
+      **`T-VN-40B`는 2026-08-20 종결을 되돌렸다**(사용자 지시) — 아래 잔여 절 참조.
+    - 인수 ③·④ 중 분리했던 [x] `T-C7-SCOPE-REGISTRY` ∥ [x] `T-C7-LIVE-SERIAL`은
+      2026-08-20 닫혔다.
   - 최종 단일 cutover: [ ] `T-VN-39`
 - **보류/외부 추적**
   - [ ] `T-VN-H27` — #819 HAProxy WebSocket tunnel timeout(**보류: 운영자 환경 필요**,
@@ -80,7 +83,10 @@ barrier로 직렬화한다.
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
 - migration 정본: 단일 head 유지(2026-08-20 `origin/main` 기준
   `0225_tvn40c_physical_removal`; T-VN-40C는 **착지·prod 적용 완료**,
-  M01 후속이 `0226`, 41S 후속은 `0227+`).
+  #1029가 `0226`(M01)·`0227`(M02)·`0228`(M03)을 한 PR에 쥐고 있고,
+  **T-VN-40B 잔여가 `0229`**(PR #1035), 41S 후속은 `0230+`).
+  ⚠️ #1029의 `0226`과 PR #1035의 `0229`는 **둘 다 `down_revision`이 `0225`**다 —
+  나중에 머지하는 쪽이 자기 chain을 앞선 head 뒤로 다시 잡아야 head가 갈라지지 않는다.
   prod 적용 head는 배포 직전 live DB에서 다시 확인한다. 후속 migration 소유자는
   PR 직전 단일 head를 재확인한 뒤 번호를 배정한다. 두 lane의 migration-bearing PR은 번호 예약부터
   머지까지 직렬화한다. forward migration 뒤에는 수용 조건이나 실패 복구가 명시적으로 요구하지 않는
@@ -477,7 +483,9 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
   `test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible`의
   첫 gate(`_assert_uses_index(dedup_refresh, 'idx_source_entities_provider_dataset',
-  'idx_features_dedup_refresh_keyset')`)가 CI에서 간헐 실패한다. 2026-08-18까지 PR #975·#996·#998
+  'uq_source_entities_key_dataset', 'idx_features_dedup_refresh_keyset')` —
+  `tests/integration/test_t212d_perf_explain.py:1211-1216`, **받는 이름은 3개다**)가
+  CI에서 간헐 실패한다. 2026-08-18까지 PR #975·#996·#998
   세 번 모두 **재실행 한 번으로 통과**했다(코드와 무관). 실패 시 planner가 `idx_source_links_…`로
   진입한다 — `enable_seqscan=off`라 인덱스는 타지만 gate가 받는 이름 집합에 없다.
 - 원인 가설: `_seed_live_like_perf_data` 뒤 `ANALYZE` 표본이 실행마다 달라 동치 진입 경로 중
@@ -555,21 +563,96 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   기관·종류·발령시각 기반 사건 identity, 발령/해제 lifecycle을 fixture·live 표본으로
   확정한 뒤 `krforest_landslide_forecast_notices`를 `landslide_warning`으로 적재한다.
 
+### T-VN-40B 잔여 — source rule `curated` action 퇴역 (2026-08-20 종결 되돌림)
+
+> 이 항목은 2026-08-20 `tasks-done.md`로 이관됐다가 **사용자 지시로 되돌렸다**. 종결
+> 근거였던 "candidate lifecycle 전환"은 맞지만 아래 사실을 다루지 않는다.
+
+- [ ] **T-VN-40B 잔여 — `curated` action 퇴역 (`0229`, PR #1035)**
+
+  **prod 실측(2026-08-20)**: `feature.curated_source_rules`에 `default_action='curated'`
+  **35행**이 남아 있고 `ck_curated_source_rules_action`은 여전히
+  `('candidate','curated','ignore')`를 허용한다. 반면 write 경로
+  (`curated_repo._TYPED_RULE_ACTIONS`)는 `{candidate, ignore}`만 받는다 — **코드가 거부하는
+  값을 DB가 허용하고, 실제로 그 값이 남아 있다.** 값이 다시 들어올 문은 닫혀 있는데 이미
+  들어온 값은 그대로다.
+
+  ADR-092가 `curated` action을 automatic public membership이 아니라 **candidate 생성**으로
+  재해석해 `candidate`와 같은 뜻이 됐다. 같은 뜻의 값이 둘이면 읽는 사람마다 다르게
+  해석하므로 한쪽을 없앤다.
+
+  - [ ] `0229`가 35행을 `candidate`로 정규화하고 CHECK를 `('candidate','ignore')`로 좁힌다.
+    대상 표의 BEFORE trigger(`inactive provider dataset` write 차단)를 **끄지 않는다** —
+    막히면 어느 rule인지 말하고 멈춘다. 모델 CHECK와 write 허용값이 어긋나면 red가 되는
+    drift 게이트를 함께 둔다. 브랜치 `feat/tvn40b-source-rule-action`.
+  - **번호 제약**: #1029가 `0226`~`0228`을 쥐고 있어 그 셋을 피해 `0229`를 잡고 현재 head
+    `0225`에 직접 체인한다. 머지 시점에 단일 head가 되며, #1029는 착지할 때 자기 chain을
+    `0229` 뒤로 다시 잡는다.
+
+  **이 항목이 아닌 것**: "legacy candidate rows backfill"은 대상이 없다 — 그 legacy 행은
+  `0225`가 canonical collection/item으로 옮긴 뒤 물리 삭제했고 `theme_feature_candidates`는
+  0행이다. `ck_curated_source_rules_action`은 이미 `convalidated=true`라 VALIDATE할 것도 없다.
+
 ### T-VN-40 후속에서 분리한 C7 인수 잔여
 
 > T-VN-40B/C와 인수 ③~⑤는 2026-08-20에 모두 완료되어 [`tasks-done.md`](tasks-done.md)로
 > 이관했다. 아래는 그 완료와 독립적으로 남은 검증·운영 task만 둔다.
 
 - [ ] **T-FE-MOCK-MANIFEST** — mocked e2e checkpoint manifest
-  (`packages/kor-travel-map-admin/frontend/e2e/mocked-failure-manifest.json`)의
-  `discoveredTests: 284`·`testInventorySha256`가 실측 276과 어긋나 있다. `origin/main`과
-  40C branch 양쪽 모두 276이라 40C가 만든 drift가 아니다. suite 자체는 276/276
-  green(7.2분, flake 0)인데 checkpoint gate만 red다. baseline 재고정 시점은
-  expected-failure 인벤토리 의미와 함께 별도로 정한다.
-- [ ] **T-C7-SCOPE-REGISTRY** — `external_system:*` exact-target scope의 선언 주체·근거·
+  (`packages/kor-travel-map-admin/frontend/e2e/mocked-failure-manifest.json`) 재고정.
+
+  **2026-08-20 실측으로 drift가 세 겹임을 확인했다**(리포터의 identity 규칙을 그대로
+  재현해 셌다 — `e2e/<spec>::<titlePath>`).
+
+  1. **인벤토리** — main 실측 `276` / sha `0083e713…`인데 manifest는 `284` /
+     `57a9e1d8…`이다.
+  2. **expected-failure 원장** — 선언 89건 중 **10건이 존재하지 않는 테스트**를 가리킨다:
+     change-request 화면 삭제 3(`admin-ops` 2 + `change-requests-lifecycle.spec.ts` 전체),
+     M01 문구 변경 1, ADR-088 개명 2(`exact pair`→`membership`,
+     `prerequisite/provider 변경`→`provider dataset ID/ID 변경`), 소멸 4(MOIS 3 + 텍스트 필터 1).
+  3. **baseline 커밋** — `baselineRevision 31edfe0c`가 **저장소에 없는 커밋**이다(squash로
+     사라진 브랜치 커밋). 기준을 재현할 방법이 없다.
+
+  **재고정 방침**: 실행 결과로 통째 재생성하면 지금 실패 중인 것이 조용히 expected가
+  되고, 인벤토리 숫자만 갱신하면 사라진 테스트를 계속 "실패할 예정"이라 선언하는 원장이
+  남는다. 그래서 (a) 존재가 부정된 선언은 사유를 적어 제거, (b) 개명이 명확한 2건만 제목
+  갱신, (c) 인벤토리·baseline은 실측값으로 재고정, (d) runner를 실제로 돌려 게이트 통과를
+  증명한다.
+
+  **부수**: `run-mocked-checkpoint.mjs`의 `E2E_BASE_URL` 기본값이 `http://127.0.0.1:12705`
+  (**운영 admin UI 포트**)였다. 명시하지 않고 실행하면 운영 UI를 친다 — 기본값을 없앴다.
+
+  **2026-08-20 진행**: checkpoint A를 5회 돌려 판정했다. manifest 층은 닫혔다 —
+  선언 89건이 **하나도 실패하지 않아**(`expected-failures=89, actual-failures=0`) 원장이
+  통째로 낡은 것이었고, groups를 비우고 인벤토리·baseline을 실측값(285 / `5c647f69…`)으로
+  고정했다. 재고정 뒤 `expected-failures=0`·인벤토리 일치를 확인했다.
+  **남은 게이트 blocker는 아래 별도 항목의 flake 하나다.**
+
+- [ ] **T-FE-MOCK-FLAKE** — `e2e/admin-ops.spec.ts::admin/ops pages › /v1/ops/logs` 간헐 실패
+
+  System logs 표의 첫 columnheader `생성`이 15초 안에 보이지 않는다(`admin-ops.spec.ts:744`).
+  앞선 filter control 단언은 모두 통과하므로 표 mount 전에 header를 단언하는 순서 문제로
+  보인다. n150 5회 실행 중 2회 실패 — 부하가 높을 때 재현된다. mocked config가
+  `retries: process.env.CI ? 1 : 0`이라 **로컬은 재시도가 없어** 느린 렌더가 곧 실패가 된다.
+
+  이 spec은 T-C7-BROWSER-EVIDENCE 이식이 건드리지 않았고 mocked checkpoint는 CI 잡이
+  아니라 수동 게이트다 — 즉 **기존 flake**다. 표/행이 도착한 뒤 header를 단언하도록
+  고쳐야 하며, 재시도로 덮지 않는다.
+- [x] **T-C7-SCOPE-REGISTRY** — `external_system:*` exact-target scope의 선언 주체·근거·
   운영 조회 표면을 `docs/integration-map.md` 또는 ADR-088 consequences에 정본화한다.
-- [ ] **T-C7-LIVE-SERIAL** — 고정 `external_system:c7-e2e`를 쓰는 KMA live 3종이 서로의
+  → 2026-08-20 완료. 근거는 migration `0224`의 docstring 안에만 있어 저장소 밖에서
+  발견되지 않았다. `integration-map.md` §3.7(선언 주체·`target_grids`를 쓰지 않는 이유·
+  조회 표면 5곳·현재 선언된 이름·직렬화 제약)과 ADR-088 결과로 올렸다.
+- [x] **T-C7-LIVE-SERIAL** — 고정 `external_system:c7-e2e`를 쓰는 KMA live 3종이 서로의
   `membership_fingerprint`를 오염시키지 않도록 파일 병합 또는 worker lock으로 직렬화한다.
+  → 2026-08-20 완료. live config이 `fullyParallel: true` + worker 기본 4임을 실측했다.
+  **파일 병합 대신 cross-worker 잠금**을 택했다 — `describe.serial`은 한 파일 안에서만
+  순서를 강제하고, 1,575줄을 상수 이름 충돌과 함께 병합하면 회귀 위험이 크며 scope를
+  쓰는 spec이 늘 때마다 다시 합쳐야 한다. `e2e/live/_ops-c7-exact-scope-lock.ts`가
+  원자적 `mkdir` 잠금에 소유자 pid 생존·나이 상한을 얹어 crash가 이후 실행을 영구
+  차단하지 않게 한다. write 3종에 결선했고 read-only preflight는 **의도적으로 제외**
+  (근거를 spec에 명시). 잠금 자체는 mocked spec 4종으로 검증한다 — 상호배제·해제 멱등·
+  죽은 소유자 회수·취득 찰나를 빼앗지 않음.
 
 ## Lane B 상세 — b1 PinVi 결합·후속
 
@@ -654,7 +737,7 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   잔여 없음으로 GO했고, 단위/API/Dagster 집중 231개와 PostGIS stream repository 37개를 통과했다.
 
   **후속 종료선(미완료, #922 유지)** — `0225`는 2026-08-20 착지·prod 적용으로 barrier가
-  풀렸다. 남은 것은 `0227+`(‘0226’은 T-VN-M01이 선점) 물리 모델, 양방향 공유, 실제 compactor와
+  풀렸다. 남은 것은 `0230+`(`0226`~`0228`은 #1029 · `0229`는 T-VN-40B 잔여가 선점) 물리 모델, 양방향 공유, 실제 compactor와
   repository 410, migration/ACL/EXPLAIN 및 n150 1M+ 증거까지다. 이 항목들이 끝나기 전에는 #922 또는
   T-VN-41S 전체 완료로 표시하지 않는다.
 
@@ -727,7 +810,13 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   > 변이 8종(phase/candidate/cancel probe/schema head/journal digest/pinset/image 대조/
   > manifest version)이 전부 red임을 실측했다. 실행 전제: v5/v7은
   > `require_rebuildable_mode`가 걸려 rehearsal/rebuildable에서만 생성된다(n150은 해당).
-  > 아직 n150에 두 파일이 없다 — D1의 파괴적 rebuild가 처음 만든다.
+  > **2026-08-20 정정**: 앞서 "n150에 두 파일이 없다"고 적었으나 틀렸다. `digitie` 홈만
+  > 봤고 실제로는 **root 홈**(`/root/.local/state/kor-travel-docker-manager/…`)에
+  > `pinned-runtime-generation-v5.json`·`pinned-runtime-rebuild-v7-93dd4ac0….json`이
+  > root:root `0600`으로 실재한다 — runner의 소유권 요구는 이미 만족한다. 다만 그
+  > generation은 `map_application_head=0087_route_area_subtypes`인 2026-08-06 리허설
+  > 세대라 현 prod head `0225`와 exact 대조에서 red다. **재사용할 수 없을 뿐 없는 것이
+  > 아니다.** 현 세대 문서는 D1의 파괴적 rebuild가 만든다.
 
   `run-c7-prod-live-e2e.sh`와 `run-admin-feature-live-acceptance.sh`가 요구하는 v4
   `E2E_C7_COMPATIBLE_PAIR_MANIFEST`를 제거한다. root-owned snapshot은 v5
@@ -745,7 +834,12 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 > #995가 지우려던 `admin-ops.spec.ts`는 main에서 이미 정리돼 **통과 중**이다(지우면 살아 있는
 > 커버리지를 잃는다). 아래만 실제로 남은 고유 가치다.
 
-- [ ] **T-C7-BROWSER-EVIDENCE — browser-only C7 lane 커버리지 보강** *(인수 게이트 아님)*
+- [x] **T-C7-BROWSER-EVIDENCE — browser-only C7 lane 커버리지 보강** *(2026-08-20 접어넣음)*
+
+  > 사용자 지시로 백로그에 두지 않고 즉시 이식했다. #995의 helper를 통째로 가져오면
+  > main의 ADR-088 작업(`C7_KMA_SYNC_SCOPE` 계열 상수, `fillKmaRequestDialogScope`)을
+  > 지우므로 소유권 기능만 발췌해 얹었다. journal은 #995의 v5 대신 **v4**로 매겼다 —
+  > main이 v3이고 그 사이에 v4가 없어 번호를 비울 이유가 없다.
 
   C7 prod live 6-spec 게이트는 main에서 이미 GREEN이다(`d5693269`). 이 항목은 그 위에 얹는
   보강이며 `T-VN-41` 마감을 막지 않는다.
@@ -799,8 +893,13 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   - [ ] 고정 release candidate(Map/PinVi 커밋과 일곱 image)를 먼저 확정한다.
 
   **이 배리어가 푸는 것 (순서대로).**
-  1. v5/v7 문서가 n150에 **처음** 생긴다. 그전에는 새 live runner가 읽을 attested input이
-     아예 없다(2026-08-20 실측: 두 파일 모두 부재, v4 `compatible-pair-v4.json`만 존재).
+  1. **현 세대 기준의** v5/v7 문서가 생긴다. (2026-08-20 정정 — 앞선 "두 파일 모두 부재"는
+     틀렸다. `digitie` 홈만 봤고 실제로는 **root 홈**에 있다:
+     `/root/.local/state/kor-travel-docker-manager/kor-travel-docker-manager/`에
+     `pinned-runtime-generation-v5.json`과 `pinned-runtime-rebuild-v7-93dd4ac0….json`이
+     root:root `0600`으로 실재한다.) 다만 그 generation은
+     `map_application_head=0087_route_area_subtypes`인 2026-08-06 리허설 세대라 현 prod
+     head `0225`와 exact 대조에서 red다 — **재사용할 수 없을 뿐 없는 것이 아니다.**
   2. `T-VN-41F1D-D1` — 일곱 image·세 schema head·pinset attestation과 데이터 비의존 UI smoke.
   3. `T-VN-41F1D-E`의 n150 data-dependent 실행(저장소측 계약은 2026-08-20 완료).
   4. `T-VN-41F1D-D2` — 고정 ID를 요구하는 admin/PinVi mutating live E2E.
@@ -928,22 +1027,18 @@ cache-target 경로를 탄다. 그때 41C의 outbox가 그 링크를 전파한�
 H34가 41을 바꾸는 것이 아니다. 다만 **origin이 `manual_*`인 Feature를 41의 reconciliation이
 provider Feature와 다르게 취급해야 하는지**(예: provider 재적재로 사라질 수 있는 Feature와
 달리 수동 Feature는 restore epoch에서 어떻게 보이나)는 M02(origin 불변)와 41A(restore epoch)를
-함께 볼 때 정해야 한다. 지금은 41A가 미착수라 정할 수 없다 — **M02 설계 시 41A 소유자와
-확인 항목**으로 남긴다.
+함께 볼 때 정해야 한다. **`T-VN-41A`/`T-VN-41B`는 PR #975(merge `4672aa96`)로 완료돼
+[`tasks-done.md`](tasks-done.md)로 이관됐다** — 따라서 이 항목은 대기가 아니라 **M02 설계의
+입력**이다. restore epoch 계약과 ADR-093을 직접 읽어 판정한다.
 
 #### 아직 안 정해진 것
 
-- **`source_type` / `source_natural_key`** — `make_feature_id`의 입력이라 ID 체계에 들어간다.
-  origin 3종을 `source_type`으로 가를지(`manual_admin`/`manual_pinvi`/`manual_curation`),
-  아니면 `source_type`은 하나로 두고 origin은 별도 컬럼에 둘지. **전자면 origin이 ID에 박혀
-  불변이 공짜로 얻어지지만 origin을 정정할 수 없다.** 후자면 정정이 가능하지만 불변을 따로
-  강제해야 한다.
-- **natural key의 안정성** — 같은 실체를 두 번 만들면 같은 ID여야 하고, 이름을 고쳐도 ID가
-  바뀌면 안 된다(`trg_features_identity_fence`가 `feature_id` UPDATE를 막는다).
-- **3축 초기 상태** — 만들자마자 공개인가, 검토 후인가.
+> **2026-08-20 정리**: 아래 7건 중 4건은 ADR-093(proposed, 2026-08-19)이 이미 닫았다 —
+> `source_type=user_request`·`source_natural_key=manual::<uuid>`와 identity claim(§1),
+> 초기 3축 상태 제거·좌표 required(§4), command isolation `read-committed`(§5).
+> 닫힌 것을 "미정"으로 두면 같은 논의를 다시 하게 되므로 지웠다. 남은 것은 셋이다.
+
 - **PinVi 요청 큐** — 접수 → 승인 → 생성. 요청 자체의 저장 위치와 상태 모델.
-- **좌표** — `features.coord`는 nullable이지만, 지도에 안 찍히는 Feature가 공개 표면에
-  나가도 되는지.
 - **provider가 나중에 같은 실체를 발행하면** — 자동 병합하지 않는다까지는 정해졌다.
   admin에게 무엇을 보여주고 어떤 선택지를 주는지는 미정.
 - **공개 표면 노출** — public API/PinVi snapshot에 수동 Feature가 나가는지, 나간다면 소비자가
