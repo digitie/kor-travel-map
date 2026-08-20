@@ -143,9 +143,14 @@ _ROUTE_AREA_RUNTIME_GRANTS = tuple(
 # boundary after ownership transfer.  No ALTER DEFAULT PRIVILEGES is used:
 # this reconciler grants a newly-created table only during a deliberate startup
 # migration pass, never when a state/audit relation happens to be created.
+#: ops 표 선언이 쓰는 "평범한 ops 데이터" 권한. 상수로 두어 48개 선언이 같은 값을
+#: 가리키게 한다 — 값이 바뀌면 한 곳만 바뀐다.
+_ORDINARY_OPS: tuple[str, ...] = ("SELECT", "INSERT", "UPDATE", "DELETE")
+
+#: `ops`는 여기에 없다. 선언 없는 ops relation은 기본값으로 떨어지는 대신
+#: `_OPS_TABLE_PRIVILEGES`에서 막힌다(위 `_ORDINARY_OPS` 주석 참조).
 _ORDINARY_SCHEMA_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "provider_sync": ("SELECT", "INSERT", "UPDATE", "DELETE"),
-    "ops": ("SELECT", "INSERT", "UPDATE", "DELETE"),
 }
 
 # `ops.feature_overrides` can keep a provider-retired Feature from being
@@ -153,15 +158,60 @@ _ORDINARY_SCHEMA_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
 # directly.  A typed state-owner procedure owns author/revoke mutation so a
 # provider/admin connection cannot erase that fence through raw SQL.
 _OPS_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
-    "curation_catalog_command_effects": (),
-    "curation_import_collection_effects": (),
-    "curation_import_collection_touches": (),
-    "curation_import_plan_claims": (),
-    "curation_import_plan_commits": (),
-    "curation_concierge_legacy_owner_manifest": (),
-    "curation_provider_root_receipts": (),
-    "curation_provider_snapshot_receipts": (),
-    "curation_source_observation_receipts": (),
+    # 아래 48개는 2026-08-20까지 **선언 없이** full CRUD를 받던 표다. 이 목록은
+    # 그때의 유효 권한을 그대로 옮겨 적은 것이지 '좁혀도 되는지'를 심사한 결과가
+    # 아니다 — 심사는 후속으로 남긴다. 여기 적힌 이유는 선언하지 않으면 권한이
+    # 생기는 경로를 없애기 위해서다.
+    "backup_command_executions": _ORDINARY_OPS,
+    "c6c_cancel_probe_fixtures": _ORDINARY_OPS,
+    "cache_target_writer_drain_instigations": _ORDINARY_OPS,
+    "cache_target_writer_drain_leases": _ORDINARY_OPS,
+    "cache_target_writer_drain_runs": _ORDINARY_OPS,
+    "dagster_schedule_active_claims": _ORDINARY_OPS,
+    "dagster_schedule_audit_events": _ORDINARY_OPS,
+    "dagster_schedule_claim_resolutions": _ORDINARY_OPS,
+    "dagster_schedule_overrides": _ORDINARY_OPS,
+    "data_integrity_violations": _ORDINARY_OPS,
+    "dedup_review_queue": _ORDINARY_OPS,
+    "domain_command_results": _ORDINARY_OPS,
+    "domain_commands": _ORDINARY_OPS,
+    "enrichment_review_queue": _ORDINARY_OPS,
+    "feature_consistency_reports": _ORDINARY_OPS,
+    "feature_merge_history": _ORDINARY_OPS,
+    "feature_update_request_datasets": _ORDINARY_OPS,
+    "feature_update_request_idempotency": _ORDINARY_OPS,
+    "feature_update_requests": _ORDINARY_OPS,
+    "import_job_datasets": _ORDINARY_OPS,
+    "import_job_event_clock": _ORDINARY_OPS,
+    "import_job_events": _ORDINARY_OPS,
+    "import_jobs": _ORDINARY_OPS,
+    "integrity_finding_observations": _ORDINARY_OPS,
+    "integrity_observation_runs": _ORDINARY_OPS,
+    "integrity_observation_scopes": _ORDINARY_OPS,
+    "managed_file_events": _ORDINARY_OPS,
+    "managed_files": _ORDINARY_OPS,
+    "offline_upload_command_executions": _ORDINARY_OPS,
+    "offline_uploads": _ORDINARY_OPS,
+    "pipeline_cancellation_members": _ORDINARY_OPS,
+    "pipeline_cancellation_runs": _ORDINARY_OPS,
+    "pipeline_cancellations": _ORDINARY_OPS,
+    "poi_cache_target_feature_links": _ORDINARY_OPS,
+    "poi_cache_target_outbox_claim_events": _ORDINARY_OPS,
+    "poi_cache_target_outbox_claims": _ORDINARY_OPS,
+    "poi_cache_target_outbox_deliveries": _ORDINARY_OPS,
+    "poi_cache_target_outbox_events": _ORDINARY_OPS,
+    "poi_cache_target_reconciliation_requests": _ORDINARY_OPS,
+    "poi_cache_target_refresh_members": _ORDINARY_OPS,
+    "poi_cache_target_restore_fences": _ORDINARY_OPS,
+    "poi_cache_target_snapshot_gc_observations": _ORDINARY_OPS,
+    "poi_cache_target_snapshot_items": _ORDINARY_OPS,
+    "poi_cache_target_snapshots": _ORDINARY_OPS,
+    "poi_cache_target_source_events": _ORDINARY_OPS,
+    "poi_cache_target_source_heads": _ORDINARY_OPS,
+    "poi_cache_target_streams": _ORDINARY_OPS,
+    "poi_cache_targets": _ORDINARY_OPS,
+    "provider_refresh_policies": _ORDINARY_OPS,
+    # ── 아래는 좁힌 결정(심사 완료) ──
     # T-VN-40C service export is the only runtime reader.  The immutable
     # relation remains write-free for API/Dagster; the maintenance HTTP scope
     # is enforced above the database role boundary.
@@ -301,7 +351,7 @@ def _runtime_relation_grants(
     """catalog relation inventory를 ACL SQL와 fail-closed unknown 목록으로 바꾼다."""
 
     grants: list[str] = []
-    unknown_feature_relations: list[str] = []
+    unknown_relations: list[str] = []
     for row in rows:
         schema = str(row["schema_name"])
         relation = str(row["relation_name"])
@@ -326,7 +376,7 @@ def _runtime_relation_grants(
             if relation_kind == "v":
                 privileges = _FEATURE_VIEW_PRIVILEGES.get(relation)
                 if privileges is None:
-                    unknown_feature_relations.append(f"feature.{relation}")
+                    unknown_relations.append(f"feature.{relation}")
                     continue
                 grants.append(
                     _grant_sql(schema=schema, relation=relation, privileges=privileges)
@@ -338,17 +388,19 @@ def _runtime_relation_grants(
                 continue
             privileges = _FEATURE_TABLE_PRIVILEGES.get(relation)
             if privileges is None:
-                unknown_feature_relations.append(f"feature.{relation}")
+                unknown_relations.append(f"feature.{relation}")
                 continue
         else:
-            privileges = _OPS_TABLE_PRIVILEGES.get(
-                relation,
-                _ORDINARY_SCHEMA_PRIVILEGES[schema],
-            )
+            # `feature`와 같은 강도다. 선언이 없으면 권한을 주지 않고 이름을 들고 멈춘다 —
+            # 앞판은 여기서 조용히 full CRUD로 떨어졌다(T-VN-41S 선행).
+            privileges = _OPS_TABLE_PRIVILEGES.get(relation)
+            if privileges is None:
+                unknown_relations.append(f"{schema}.{relation}")
+                continue
             if not privileges:
                 continue
         grants.append(_grant_sql(schema=schema, relation=relation, privileges=privileges))
-    return grants, unknown_feature_relations
+    return grants, unknown_relations
 
 
 async def reconcile_runtime_privileges() -> None:
@@ -385,13 +437,13 @@ async def reconcile_runtime_privileges() -> None:
                 )
             )
             rows = list((await connection.execute(_APPLICATION_RELATIONS_SQL)).mappings().all())
-            grants, unknown_feature_relations = _runtime_relation_grants(
+            grants, unknown_relations = _runtime_relation_grants(
                 [cast(Mapping[str, object], row) for row in rows]
             )
-            if unknown_feature_relations:
+            if unknown_relations:
                 raise RuntimePrivilegeReconciliationError(
-                    "new feature relation has no deliberate runtime ACL policy: "
-                    + ", ".join(unknown_feature_relations)
+                    "new relation has no deliberate runtime ACL policy: "
+                    + ", ".join(unknown_relations)
                 )
             for statement in grants:
                 await connection.execute(text(statement))
