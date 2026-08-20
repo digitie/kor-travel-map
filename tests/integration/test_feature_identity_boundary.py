@@ -1,6 +1,6 @@
 """``infra/feature_identity`` + dual read 경계 (T-VN-32B/32C, ADR-068) 통합 검증.
 
-alembic head(0226 전)가 적용된 실 PostGIS에서:
+alembic head(0226)가 적용된 실 PostGIS에서:
 
 ① 경계 alias 해석 — legacy ``f_*`` alias·canonical UUID 양쪽 참조가 같은
    정본 키 쌍으로 해석되고, 미존재는 ``None``, 형식 오류는 fail-fast.
@@ -11,8 +11,8 @@ alembic head(0226 전)가 적용된 실 PostGIS에서:
    uuid + legacy alias를 만든다. **0083부터 신규 값은 비파생 UUIDv7**이므로
    기대값은 파생 재계산이 아니라 **저장/관측값**이고, writer는
    ``verify_feature_uuid``로 canonical·generator 이원화를 fail-close한다.
-   M01 admin create wrapper·claim·origin은 0226 migration 전에는 의도적으로
-   부재한다. ``count_features_missing_identity``는 alias 결측을 관측한다.
+   M01 admin create wrapper·claim·origin은 0226에서 physical boundary로 고정된다.
+   ``count_features_missing_identity``는 alias 결측을 관측한다.
 """
 
 from __future__ import annotations
@@ -382,7 +382,7 @@ async def test_upsert_wires_sent_and_inserted_into_verification(
     assert captured[0]["inserted"] is False
 
 
-async def test_admin_manual_create_db_objects_are_absent_before_m01_migration(
+async def test_admin_manual_create_db_objects_exist_at_m01_head(
     migrated_session: AsyncSession,
 ) -> None:
     procedure_count = (
@@ -412,9 +412,9 @@ async def test_admin_manual_create_db_objects_are_absent_before_m01_migration(
         )
     ).one()
 
-    assert procedure_count == 0
-    assert relations.claims is None
-    assert relations.origins is None
+    assert procedure_count == 1
+    assert relations.claims is not None
+    assert relations.origins is not None
 
 
 async def test_alias_uuid_drift_is_rejected_layer_by_layer(

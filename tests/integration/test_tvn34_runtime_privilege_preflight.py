@@ -159,7 +159,18 @@ async def test_tvn34_api_and_dagster_runtime_logins_pass_actual_catalog_prefligh
                             "'EXECUTE')"
                         )
                     )
-                ) is True
+                ) is (login == "ktm_feature_dagster_runtime")
+                assert (
+                    await connection.scalar(
+                        text(
+                            "SELECT has_function_privilege("
+                            "session_user, "
+                            "'feature.create_admin_manual_feature_with_initial_state("
+                            "jsonb,bigint)'::regprocedure, "
+                            "'EXECUTE')"
+                        )
+                    )
+                ) is (login == "ktm_feature_api_runtime")
                 assert (
                     await connection.scalar(
                         text(

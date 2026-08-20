@@ -42,20 +42,6 @@ UNMAPPED_APP_TABLES = frozenset(
     }
 )
 
-# T-VN-M01 foundation은 0225(T-VN-40C physical removal)가 main에 착지하기
-# 전까지 DB migration을 만들 수 없다. 아래 두 표는 HTTP/ORM 계약을 먼저
-# 고정했지만 현재 Alembic head에는 의도적으로 존재하지 않는다. env.py는 오직
-# metadata-only ``add_table`` 후보만 임시 제외하고, 같은 이름의 live table은
-# 정상 비교한다. 만료 revision이 graph에 생기면 env.py가 fail-close하므로 0226과
-# 같은 변경에서 이 ledger와 관련 예외를 반드시 제거해야 한다.
-PENDING_MIGRATION_TABLES = frozenset(
-    {
-        ("feature", "manual_feature_identity_claims"),
-        ("feature", "feature_creation_origins"),
-    }
-)
-PENDING_MIGRATION_TABLES_EXPIRE_AT = "0226_m01_manual_feature_create"
-
 # T-VN-34(0096/0097): 마지막 항목이던 ``idx_features_dedup_refresh_keyset``이
 # 사라졌다. 0096이 ``idx_features_updated_keyset``을 같은 정렬축 + 3축 술어
 # partial index로 다시 만들어 이 index의 역할을 흡수했고, 그 후속 index는
@@ -65,8 +51,6 @@ PENDING_MIGRATION_TABLES_EXPIRE_AT = "0226_m01_manual_feature_create"
 UNCOMPARED_INDEXES: frozenset[tuple[str, str]] = frozenset()
 
 __all__ = [
-    "PENDING_MIGRATION_TABLES",
-    "PENDING_MIGRATION_TABLES_EXPIRE_AT",
     "UNCOMPARED_INDEXES",
     "UNMAPPED_APP_TABLES",
 ]

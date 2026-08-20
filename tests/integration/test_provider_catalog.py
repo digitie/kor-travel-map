@@ -136,18 +136,15 @@ async def seed_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
     달라지는 같은 원인이다. ``bootstrapped_migrator_dsn``/``alembic_schema_owner_role``
     (배포 경로와 같은 helper, ADR-090)로 그 선행조건을 이 DB에도 그대로 세운다.
     """
-    import asyncio
     from pathlib import Path
 
     from alembic.config import Config
     from sqlalchemy import event
     from sqlalchemy.engine import make_url
 
-    from alembic import command
     from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
     from tests.integration._tvn34_migration_bootstrap import (
-        alembic_schema_owner_role,
-        bootstrapped_migrator_dsn,
+        upgrade_head_with_tvn_m01_phase,
     )
 
     admin_dsn = normalize_async_dsn(pg_container.get_connection_url())
@@ -172,9 +169,7 @@ async def seed_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
     root = Path(__file__).resolve().parents[2]  # noqa: ASYNC240  # sync path-arith
     cfg = Config(str(root / "alembic.ini"))
     cfg.set_main_option("script_location", str(root / "alembic"))
-    cfg.set_main_option("sqlalchemy.url", await bootstrapped_migrator_dsn(seed_dsn))
-    with alembic_schema_owner_role():
-        await asyncio.to_thread(command.upgrade, cfg, "head")
+    await upgrade_head_with_tvn_m01_phase(cfg, seed_dsn)
 
     # 읽기용 engine은 계속 컨테이너 admin 자격이다. migrator LOGIN은 아무것도 소유하지
     # 않고(소유자는 ``ktm_feature_schema_owner``) runtime ACL도 받지 않으므로, 이 파일이

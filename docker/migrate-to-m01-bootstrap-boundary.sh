@@ -12,7 +12,8 @@ export KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE=true
 # 이미 0226 이상인 DB를 0225로 되돌리지 않는다. 대상 relation 존재 여부는
 # forward-only M01 boundary의 durable marker다. partial DDL은 Alembic
 # transaction rollback 대상이므로 marker 하나만 있는 상태도 fail-loud하게 둔다.
-if python - <<'PY'
+set +e
+python - <<'PY'
 from __future__ import annotations
 
 import asyncio
@@ -27,25 +28,46 @@ async def main() -> int:
     engine = make_async_engine(os.environ["KOR_TRAVEL_MAP_PG_DSN"])
     try:
         async with engine.connect() as connection:
-            claim, origin = (
+            claim, origin, revision = (
                 await connection.execute(
                     text(
                         "SELECT to_regclass('feature.manual_feature_identity_claims'), "
-                        "to_regclass('feature.feature_creation_origins')"
+                        "to_regclass('feature.feature_creation_origins'), "
+                        "(SELECT version_num FROM public.alembic_version)"
                     )
                 )
             ).one()
     finally:
         await engine.dispose()
     if (claim is None) != (origin is None):
-        raise RuntimeError("M01 relation marker is partial; refusing bootstrap boundary")
-    return 0 if claim is not None else 1
+        print("M01 relation marker is partial; refusing bootstrap boundary", file=sys.stderr)
+        return 2
+    if claim is not None:
+        if revision != "0226_m01_manual_feature_create":
+            print("M01 relation marker requires exactly 0226", file=sys.stderr)
+            return 2
+        return 0
+    return 1
 
+
+import sys
 
 raise SystemExit(asyncio.run(main()))
 PY
-then
-  exit 0
-fi
+marker_status=$?
+set -e
+
+case "$marker_status" in
+  0) exit 0 ;;
+  1) ;;
+  2)
+    echo "M01 relation marker is partial; refusing bootstrap boundary" >&2
+    exit 1
+    ;;
+  *)
+    echo "M01 relation marker probe failed" >&2
+    exit "$marker_status"
+    ;;
+esac
 
 alembic upgrade 0225_tvn40c_physical_removal

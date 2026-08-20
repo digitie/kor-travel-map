@@ -661,25 +661,20 @@ async def _run_alembic_upgrade(dsn: str) -> None:
     env.py는 ``Config.get_main_option("sqlalchemy.url")``을 우선 사용하므로
     여기서 박은 DSN이 적용됨 (KOR_TRAVEL_MAP_PG_DSN env var 불필요).
     """
-    import asyncio
     from pathlib import Path
 
     from alembic.config import Config
 
-    from alembic import command
 
     project_root = Path(__file__).resolve().parents[2]  # noqa: ASYNC240  # sync IO is trivial path-arith here
     cfg = Config(str(project_root / "alembic.ini"))
     cfg.set_main_option("script_location", str(project_root / "alembic"))
     # 배포와 같은 경로로 돈다 — bootstrap 후 migrator 자격으로 upgrade.
     from tests.integration._tvn34_migration_bootstrap import (
-        alembic_schema_owner_role,
-        bootstrapped_migrator_dsn,
+        upgrade_head_with_tvn_m01_phase,
     )
 
-    cfg.set_main_option("sqlalchemy.url", await bootstrapped_migrator_dsn(dsn))
-    with alembic_schema_owner_role():
-        await asyncio.to_thread(command.upgrade, cfg, "head")
+    await upgrade_head_with_tvn_m01_phase(cfg, dsn)
 
 
 def _alembic_head_revision() -> str:

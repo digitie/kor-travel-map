@@ -27,7 +27,6 @@ from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import DBAPIError
 
 from alembic import command
-from kortravelmap.infra.alembic_exclusions import PENDING_MIGRATION_TABLES
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -37,7 +36,7 @@ pytestmark = pytest.mark.integration
 #: `alembic upgrade head`가 착지해야 하는 revision. 리터럴을 여러 곳에 박으면
 #: migration마다 흩어진 자리를 모두 고쳐야 하고, 한 곳을 놓치면 그 단언만 조용히
 #: 옛 head를 지킨다. 한 줄로 모은다.
-_EXPECTED_HEAD = "0232_tvn37d_notice_empty_range"
+_EXPECTED_HEAD = "0226_m01_manual_feature_create"
 
 _GATE_DB = "alembic_metadata_gate"
 
@@ -102,15 +101,12 @@ async def _upgrade_to_head_as_migrator(cfg: Config) -> str:
     """
 
     from tests.integration._tvn34_migration_bootstrap import (
-        alembic_schema_owner_role,
-        bootstrapped_migrator_dsn,
+        upgrade_head_with_tvn_m01_phase,
     )
 
     admin_dsn = cfg.get_main_option("sqlalchemy.url")
     assert admin_dsn is not None
-    cfg.set_main_option("sqlalchemy.url", await bootstrapped_migrator_dsn(admin_dsn))
-    with alembic_schema_owner_role():
-        await asyncio.to_thread(command.upgrade, cfg, "head")
+    await upgrade_head_with_tvn_m01_phase(cfg, admin_dsn)
     return admin_dsn
 
 
@@ -164,7 +160,6 @@ async def _assert_mapped_check_definitions_match(database_url: str) -> None:
     dialect = postgresql.dialect()
     quote = dialect.identifier_preparer.quote
     mismatches: list[str] = []
-    pending_tables_seen: set[tuple[str, str]] = set()
 
     def canonical(definition: str | None) -> str | None:
         """의미가 같은 varchar cast와 ``IN`` 집합 순서만 정규화한다."""
@@ -189,18 +184,6 @@ async def _assert_mapped_check_definitions_match(database_url: str) -> None:
         await conn.execute("SET search_path = public, feature, provider_sync, ops, x_extension")
         for index, table in enumerate(sorted(Base.metadata.tables.values(), key=str)):
             assert table.schema is not None
-            table_identity = (table.schema, table.name)
-            if table_identity in PENDING_MIGRATION_TABLES:
-                pending_tables_seen.add(table_identity)
-                assert (
-                    await conn.fetchval(
-                        "SELECT to_regclass($1) IS NULL",
-                        f"{table.schema}.{table.name}",
-                    )
-                    is True
-                )
-                continue
-
             checks = sorted(
                 (
                     constraint
@@ -258,7 +241,6 @@ async def _assert_mapped_check_definitions_match(database_url: str) -> None:
     finally:
         await conn.close()
 
-    assert pending_tables_seen == set(PENDING_MIGRATION_TABLES)
     assert not mismatches, "CHECK expression catalog drift:\n" + "\n".join(mismatches)
     await _admin_execute(
         database_url,
@@ -353,18 +335,36 @@ async def test_alembic_check_detects_non_extension_topology_table(
 
 @pytest.mark.filterwarnings("ignore:Cannot correctly sort tables:sqlalchemy.exc.SAWarning")
 @pytest.mark.filterwarnings("ignore:Computed default on:UserWarning")
-async def test_alembic_check_detects_incomplete_pending_migration_table(
+async def test_alembic_check_detects_incomplete_manual_feature_table(
     gate_alembic_config: Config,
 ) -> None:
-    """pending 이름의 live table은 metadata-only 예외로 숨기지 않는다."""
+    """0225의 partial manual table도 0226 metadata diff에서 숨기지 않는다."""
 
     cfg = gate_alembic_config
-    admin_dsn = await _upgrade_to_head_as_migrator(cfg)
+    from tests.integration._tvn34_migration_bootstrap import (
+        alembic_schema_owner_role,
+        bootstrapped_migrator_dsn,
+    )
+
+    admin_dsn = cfg.get_main_option("sqlalchemy.url")
+    assert admin_dsn is not None
+    cfg.set_main_option("sqlalchemy.url", await bootstrapped_migrator_dsn(admin_dsn))
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(command.upgrade, cfg, "0225_tvn40c_physical_removal")
     await _install_postgis_topology_fixture(admin_dsn)
     await _admin_execute(
         admin_dsn,
         "CREATE TABLE feature.manual_feature_identity_claims "
         "(feature_id uuid PRIMARY KEY)",
+    )
+    # ``alembic check``는 head DB에서만 autogenerate를 수행한다. 여기서는 broken
+    # deploy가 version을 0226으로 남겼지만 table DDL을 끝내지 못한 adversarial
+    # catalog를 의도적으로 만든다. include_object가 이름만 보고 숨기면 이 test가
+    # 통과해 버리므로, metadata-only ledger 제거를 실증한다.
+    await _admin_execute(
+        admin_dsn,
+        "UPDATE public.alembic_version "
+        "SET version_num = '0226_m01_manual_feature_create'",
     )
 
     with pytest.raises(
@@ -372,6 +372,124 @@ async def test_alembic_check_detects_incomplete_pending_migration_table(
         match="manual_feature_identity_claims",
     ):
         await _check_as_schema_owner(cfg)
+
+
+async def test_0226_backfills_only_a_verified_legacy_claim(
+    gate_alembic_config: Config,
+) -> None:
+    """0225의 old create evidence는 claim 하나로만 감사 가능하게 복구한다."""
+
+    from tests.integration._tvn34_migration_bootstrap import (
+        alembic_schema_owner_role,
+        bootstrap_tvn_m01_role_phase,
+        bootstrapped_migrator_dsn,
+    )
+
+    cfg = gate_alembic_config
+    admin_dsn = cfg.get_main_option("sqlalchemy.url")
+    assert admin_dsn is not None
+    cfg.set_main_option("sqlalchemy.url", await bootstrapped_migrator_dsn(admin_dsn))
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(command.upgrade, cfg, "0225_tvn40c_physical_removal")
+
+    await _admin_execute(
+        admin_dsn,
+        """
+        WITH command AS (
+            INSERT INTO ops.domain_commands (
+                actor, operation, idempotency_key, request_fingerprint
+            ) VALUES (
+                'admin:legacy-m01', 'admin.feature.create',
+                '018f1e40-7b1c-7abc-8def-0123456789ab'::uuid,
+                repeat('a', 64)
+            )
+            RETURNING command_id, actor, created_at
+        ), core AS (
+            INSERT INTO feature.features (
+                feature_id, feature_uuid, kind, name, category, coord,
+                coord_precision_digits, lifecycle_state, publication_state,
+                quality_state
+            ) VALUES (
+                'legacy-m01-feature',
+                '018f1e40-7b1c-7abc-8def-0123456789ac'::uuid,
+                'place', ' Legacy M01 Place ', '01070300',
+                x_extension.st_setsrid(x_extension.st_makepoint(127.5, 36.5), 4326),
+                6, 'active', 'published', 'valid'
+            )
+            RETURNING feature_id, feature_uuid
+        ), transition AS (
+            INSERT INTO feature.feature_state_transitions (
+                feature_id, feature_uuid, from_lifecycle_state,
+                from_publication_state, from_quality_state,
+                to_lifecycle_state, to_publication_state, to_quality_state,
+                transition_kind, reason_code, principal, causation_ref,
+                occurred_at, row_revision, invoker_role,
+                state_procedure_definer, audit_writer_definer
+            )
+            SELECT
+                core.feature_id, core.feature_uuid, NULL, NULL, NULL,
+                'active', 'published', 'valid',
+                'initial', 'admin_feature_create', command.actor,
+                'domain-command:' || command.command_id::text,
+                command.created_at, 1, 'ktm_feature_api_runtime',
+                'ktm_feature_state_procedure_owner', 'ktm_feature_audit_writer'
+            FROM command CROSS JOIN core
+            RETURNING transition_id
+        ), name_override AS (
+            INSERT INTO ops.feature_overrides (
+                feature_id, field_path, override_value, created_by, command_id
+            )
+            SELECT
+                core.feature_id, 'core.name', to_jsonb(' Legacy M01 Place '::text),
+                command.actor, command.command_id
+            FROM command CROSS JOIN core
+            RETURNING override_id
+        ), coord_override AS (
+            INSERT INTO ops.feature_overrides (
+                feature_id, field_path, override_value, value_geometry,
+                created_by, command_id
+            )
+            SELECT
+                core.feature_id, 'core.coord', NULL,
+                x_extension.st_setsrid(x_extension.st_makepoint(127.5, 36.5), 4326),
+                command.actor, command.command_id
+            FROM command CROSS JOIN core
+            RETURNING override_id
+        )
+        INSERT INTO ops.domain_command_results (
+            command_id, response_status, response_body
+        )
+        SELECT
+            command.command_id,
+            200,
+            jsonb_build_object(
+                'data', jsonb_build_object('feature_id', core.feature_uuid::text)
+            )
+        FROM command
+        CROSS JOIN core
+        CROSS JOIN transition
+        CROSS JOIN name_override
+        CROSS JOIN coord_override
+        """,
+    )
+
+    await bootstrap_tvn_m01_role_phase(admin_dsn)
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(command.upgrade, cfg, "head")
+
+    assert await _admin_fetchval(
+        admin_dsn,
+        "SELECT count(*) FROM feature.manual_feature_identity_claims "
+        "WHERE claim_basis = 'legacy_admin_route'",
+    ) == 1
+    assert await _admin_fetchval(
+        admin_dsn,
+        "SELECT count(*) FROM feature.feature_creation_origins",
+    ) == 0
+    assert await _admin_fetchval(
+        admin_dsn,
+        "SELECT name_key FROM feature.manual_feature_identity_claims",
+    ) == "legacy m01 place"
 
 
 async def test_squash_boundary_rejects_stamp_below_0200_before_mutation(
@@ -412,6 +530,7 @@ async def test_existing_0104_bridge_upgrades_to_tvn40_head_without_baseline_repl
 
     from tests.integration._tvn34_migration_bootstrap import (
         alembic_schema_owner_role,
+        bootstrap_tvn_m01_role_phase,
         bootstrapped_migrator_dsn,
     )
 
@@ -424,6 +543,9 @@ async def test_existing_0104_bridge_upgrades_to_tvn40_head_without_baseline_repl
         # Baseline과 catalog-equal인 fixture를 기존 prod revision으로 표시한다. 이 stamp는
         # 테스트 setup 전용이며 production 전환 절차가 아니다.
         await asyncio.to_thread(command.stamp, cfg, "0104_tvn36_final_fence")
+        await asyncio.to_thread(command.upgrade, cfg, "0225_tvn40c_physical_removal")
+    await bootstrap_tvn_m01_role_phase(admin_dsn)
+    with alembic_schema_owner_role():
         await asyncio.to_thread(command.upgrade, cfg, "head")
 
     assert (

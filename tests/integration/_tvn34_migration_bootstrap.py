@@ -16,6 +16,8 @@ import os
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
+from alembic.config import Config
+
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
@@ -187,6 +189,33 @@ async def bootstrap_tvn34_migration_roles(engine: AsyncEngine) -> str:
             "TO ktm_feature_state_procedure_owner, ktm_feature_runtime",
         ):
             await connection.execute(text(statement))
+        # PostgreSQL role은 cluster-wide지만 integration DB는 test마다 새로 만든다.
+        # 앞선 test가 M01 phase를 끝낸 뒤라면 0200/0202의 frozen membership oracle은
+        # 새 DB에도 그 global edge를 보게 된다. legacy bootstrap은 role 자체를 지우지
+        # 않고 M01 edge만 해제해 exact frozen graph를 다시 만든다. head path는 0225 뒤
+        # ``bootstrap_tvn_m01_role_phase``가 이 셋을 다시 정확히 부여한다.
+        await connection.execute(
+            text(
+                """
+                DO $m01_legacy_memberships$
+                BEGIN
+                    IF to_regrole('ktm_manual_feature_procedure_owner') IS NOT NULL THEN
+                        REVOKE ktm_manual_feature_procedure_owner
+                            FROM ktm_feature_schema_owner;
+                    END IF;
+                    IF to_regrole('ktm_manual_feature_admin_executor') IS NOT NULL THEN
+                        REVOKE ktm_manual_feature_admin_executor
+                            FROM ktm_feature_api_runtime, ktm_feature_dagster_runtime;
+                    END IF;
+                    IF to_regrole('ktm_feature_create_provider_executor') IS NOT NULL THEN
+                        REVOKE ktm_feature_create_provider_executor
+                            FROM ktm_feature_api_runtime, ktm_feature_dagster_runtime;
+                    END IF;
+                END
+                $m01_legacy_memberships$;
+                """
+            )
+        )
         # PostGIS image가 initdb에서 public에 둔 non-relocatable extension은
         # application relation이 없는 fresh DB에서만 다시 만든다. 이것은 production
         # bootstrap의 destructive-operation guard와 같은 fresh-only branch다.
@@ -258,6 +287,103 @@ async def bootstrapped_migrator_dsn(async_dsn: str) -> str:
         .set(username="ktm_feature_migrator", password=migrator_password)
         .render_as_string(hide_password=False)
     )
+
+
+async def bootstrap_tvn_m01_role_phase(async_dsn: str) -> None:
+    """0225 뒤에만 M01 owner/executor graph를 disposable DB에 만든다."""
+
+    from sqlalchemy import text
+
+    from kortravelmap.infra.db import make_async_engine
+
+    engine = make_async_engine(async_dsn, pool_size=1)
+    try:
+        async with engine.begin() as connection:
+            version = await connection.scalar(
+                text("SELECT version_num FROM public.alembic_version")
+            )
+            if version != "0225_tvn40c_physical_removal":
+                raise RuntimeError(
+                    "M01 test role phase requires exactly 0225, "
+                    f"not {version!r}"
+                )
+            await connection.execute(
+                text(
+                    """
+                    DO $m01_roles$
+                    BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_catalog.pg_roles
+                            WHERE rolname = 'ktm_manual_feature_procedure_owner'
+                        ) THEN
+                            CREATE ROLE ktm_manual_feature_procedure_owner NOLOGIN NOINHERIT;
+                        END IF;
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_catalog.pg_roles
+                            WHERE rolname = 'ktm_manual_feature_admin_executor'
+                        ) THEN
+                            CREATE ROLE ktm_manual_feature_admin_executor NOLOGIN NOINHERIT;
+                        END IF;
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_catalog.pg_roles
+                            WHERE rolname = 'ktm_feature_create_provider_executor'
+                        ) THEN
+                            CREATE ROLE ktm_feature_create_provider_executor NOLOGIN NOINHERIT;
+                        END IF;
+                    END
+                    $m01_roles$;
+                    """
+                )
+            )
+            for statement in (
+                "ALTER ROLE ktm_manual_feature_procedure_owner NOLOGIN NOINHERIT "
+                "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+                "ALTER ROLE ktm_manual_feature_admin_executor NOLOGIN NOINHERIT "
+                "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+                "ALTER ROLE ktm_feature_create_provider_executor NOLOGIN NOINHERIT "
+                "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+                "GRANT ktm_manual_feature_procedure_owner TO ktm_feature_schema_owner "
+                "WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
+                "GRANT ktm_manual_feature_admin_executor TO ktm_feature_api_runtime "
+                "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
+                "GRANT ktm_feature_create_provider_executor TO ktm_feature_dagster_runtime "
+                "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
+                "REVOKE ktm_manual_feature_admin_executor FROM ktm_feature_dagster_runtime",
+                "REVOKE ktm_feature_create_provider_executor FROM ktm_feature_api_runtime",
+                "GRANT USAGE, CREATE ON SCHEMA feature "
+                "TO ktm_manual_feature_procedure_owner",
+                "GRANT USAGE ON SCHEMA ops TO ktm_manual_feature_procedure_owner",
+                "GRANT SELECT, UPDATE(command_id) ON TABLE ops.domain_commands "
+                "TO ktm_manual_feature_procedure_owner",
+                "GRANT SELECT ON TABLE ops.domain_command_results "
+                "TO ktm_manual_feature_procedure_owner",
+                "GRANT EXECUTE ON PROCEDURE feature.create_feature_with_initial_state("
+                "jsonb, text, text, text, jsonb) "
+                "TO ktm_manual_feature_procedure_owner",
+            ):
+                await connection.execute(text(statement))
+    finally:
+        await engine.dispose()
+
+
+async def upgrade_head_with_tvn_m01_phase(config: Config, admin_dsn: str) -> None:
+    """frozen graph를 보존하는 fresh DB `0225 → M01 roles → head` helper."""
+
+    import asyncio
+
+    from alembic import command
+
+    # M01 role phase까지는 superuser가 필요하지만, Alembic 자체는 production과 같은
+    # restricted migrator → schema owner 경로로만 실행한다. 호출부마다 둘을 섞으면
+    # fresh DB test가 one-shot production choreography와 다시 갈라진다.
+    config.set_main_option(
+        "sqlalchemy.url", await bootstrapped_migrator_dsn(admin_dsn)
+    )
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(command.upgrade, config, "0225_tvn40c_physical_removal")
+    await bootstrap_tvn_m01_role_phase(admin_dsn)
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(command.upgrade, config, "head")
 
 
 @contextlib.contextmanager

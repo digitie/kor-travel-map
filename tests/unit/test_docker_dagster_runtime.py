@@ -555,12 +555,18 @@ def test_tvn_m01_role_phase_runs_only_after_legacy_0225_boundary() -> None:
         in phase_script
     )
     assert "M01 relation marker is partial; refusing role bootstrap" in phase_script
+    assert 'm01_repair_after_legacy=true' in phase_script
+    assert 'run_m01_phase' in phase_script
+    assert 'UPDATE(command_id) ON TABLE ops.domain_commands' in phase_script
+    assert 'M01 role must not inherit any application privilege role' in phase_script
     assert "membership.inherit_option IS FALSE" in phase_script
     assert "membership.set_option IS TRUE" in phase_script
 
     migration_script = _script("docker/migrate-to-m01-bootstrap-boundary.sh")
     assert "alembic upgrade 0225_tvn40c_physical_removal" in migration_script
     assert "M01 relation marker is partial" in migration_script
+    assert 'marker_status=$?' in migration_script
+    assert '2)' in migration_script
     assert "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" not in migration_script
     assert "migrate-to-m01-bootstrap-boundary.sh" in _script("docker/api.Dockerfile")
 

@@ -77,9 +77,11 @@ if [ "$is_superuser" != "t" ]; then
   exit 1
 fi
 
-# 재기동에서는 compose의 legacy service가 먼저 평가된다. 0226 marker가 완전하면
-# legacy exact graph를 다시 대조하지 않고 M01 repair phase로 승격한다. 한 relation만
-# 있으면 Alembic atomic DDL 가정이 깨진 상태이므로 어떤 role도 바꾸지 않는다.
+# 재기동에서는 compose의 legacy service가 먼저 평가된다. 0226 marker는 M01 relation
+# 존재 증거일 뿐 base role/ownership sweep 완료 증거가 아니다. marker가 완전하면
+# legacy phase를 한 번 끝까지 실행한 뒤 M01 owner repair를 이어서 실행한다. 한
+# relation만 있으면 Alembic atomic DDL 가정이 깨진 상태이므로 어떤 role도 바꾸지 않는다.
+m01_repair_after_legacy=false
 if [ "$bootstrap_phase" = "legacy" ]; then
   m01_relation_marker="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc "
     SELECT concat_ws(
@@ -89,8 +91,38 @@ if [ "$bootstrap_phase" = "legacy" ]; then
     )
   ")"
   case "$m01_relation_marker" in
-    t\|t) bootstrap_phase="m01" ;;
-    f\|f) ;;
+    t\|t) m01_repair_after_legacy=true ;;
+    f\|f)
+      # 0226 preflight가 role provisioning 뒤에 실패한 경우 relation marker는
+      # 없지만 M01 graph는 남는다. 0225에서만 M01 phase를 재실행해 복구한다.
+      m01_role_marker="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc "
+        SELECT EXISTS (
+          SELECT 1 FROM pg_catalog.pg_roles
+          WHERE rolname IN (
+            'ktm_manual_feature_procedure_owner',
+            'ktm_manual_feature_admin_executor',
+            'ktm_feature_create_provider_executor'
+          )
+        )
+      ")"
+      case "$m01_role_marker" in
+        f) ;;
+        t)
+          m01_revision="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc \
+            'SELECT version_num FROM public.alembic_version')"
+          if [ "$m01_revision" = "0225_tvn40c_physical_removal" ]; then
+            bootstrap_phase="m01"
+          else
+            echo "M01 role marker is incompatible with an absent relation marker" >&2
+            exit 1
+          fi
+          ;;
+        *)
+          echo "M01 role marker is incompatible with an absent relation marker" >&2
+          exit 1
+          ;;
+      esac
+      ;;
     *)
       echo "M01 relation marker is partial; refusing role bootstrap" >&2
       exit 1
@@ -102,7 +134,7 @@ fi
 # legacy graph로 0225까지 전진한 **뒤**에만 M01의 procedure owner/executor를
 # 추가한다. 0226 전 relation이 이미 있으면 restore 뒤 owner/role repair를 위한
 # 재실행으로만 허용한다.
-if [ "$bootstrap_phase" = "m01" ]; then
+run_m01_phase() {
   psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" \
     -v ON_ERROR_STOP=1 <<'SQL'
 DO $m01_phase_precondition$
@@ -117,11 +149,17 @@ BEGIN
         RAISE EXCEPTION 'M01 relation marker is partial; refusing role bootstrap'
             USING ERRCODE = '55000';
     END IF;
-    IF v_claim_exists THEN
-        RETURN;
-    END IF;
     IF to_regclass('public.alembic_version') IS NOT NULL THEN
         SELECT version_num INTO v_revision FROM public.alembic_version;
+    END IF;
+    IF v_claim_exists THEN
+        IF v_revision IS DISTINCT FROM '0226_m01_manual_feature_create' THEN
+            RAISE EXCEPTION
+                'M01 relation marker requires exactly 0226 (observed %)',
+                coalesce(v_revision, '<none>')
+                USING ERRCODE = '55000';
+        END IF;
+        RETURN;
     END IF;
     IF v_revision IS DISTINCT FROM '0225_tvn40c_physical_removal' THEN
         RAISE EXCEPTION
@@ -177,7 +215,11 @@ REVOKE ktm_feature_create_provider_executor FROM ktm_feature_api_runtime;
 
 GRANT USAGE, CREATE ON SCHEMA feature TO ktm_manual_feature_procedure_owner;
 GRANT USAGE ON SCHEMA ops TO ktm_manual_feature_procedure_owner;
-GRANT SELECT ON TABLE ops.domain_commands, ops.domain_command_results
+-- wrapper의 immutable command receipt 선점은 ``FOR UPDATE``라 SELECT만으로는
+-- 불가능하다. UPDATE는 LOGIN/runtime에는 주지 않고 procedure owner에만 둔다.
+GRANT SELECT, UPDATE(command_id) ON TABLE ops.domain_commands
+    TO ktm_manual_feature_procedure_owner;
+GRANT SELECT ON TABLE ops.domain_command_results
     TO ktm_manual_feature_procedure_owner;
 GRANT EXECUTE ON PROCEDURE feature.create_feature_with_initial_state(
     jsonb, text, text, text, jsonb
@@ -257,6 +299,18 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'M01 procedure owner/executor membership is unsafe';
     END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_auth_members AS membership
+        JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
+        WHERE member.rolname IN (
+            'ktm_manual_feature_procedure_owner',
+            'ktm_manual_feature_admin_executor',
+            'ktm_feature_create_provider_executor'
+        )
+    ) THEN
+        RAISE EXCEPTION 'M01 role must not inherit any application privilege role';
+    END IF;
 END
 $m01_role_assert$;
 
@@ -284,6 +338,10 @@ SELECT format(
 FROM existing
 \gexec
 SQL
+}
+
+if [ "$bootstrap_phase" = "m01" ]; then
+  run_m01_phase
   exit 0
 fi
 
@@ -519,7 +577,7 @@ BEGIN
         RAISE EXCEPTION 'curation executor membership is unsafe';
     END IF;
     IF EXISTS (
-        WITH expected(granted_role, member_role, admin_option, inherit_option, set_option) AS (
+        WITH expected_base(granted_role, member_role, admin_option, inherit_option, set_option) AS (
             VALUES
                 ('ktm_feature_schema_owner', 'ktm_feature_migrator', false, false, true),
                 ('ktm_feature_runtime', 'ktm_feature_api_runtime', false, true, false),
@@ -531,6 +589,9 @@ BEGIN
                 ('ktm_curation_admin_executor', 'ktm_feature_api_runtime', false, true, false),
                 ('ktm_curation_provider_executor', 'ktm_feature_dagster_runtime', false, true, false)
         ),
+        expected AS (
+            SELECT * FROM expected_base
+        ),
         actual AS (
             SELECT granted.rolname AS granted_role,
                    member.rolname AS member_role,
@@ -540,10 +601,22 @@ BEGIN
             FROM pg_catalog.pg_auth_members AS membership
             JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid
             JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
-            WHERE granted.rolname LIKE 'ktm_feature_%'
+            WHERE (
+                  granted.rolname LIKE 'ktm_feature_%'
                OR granted.rolname LIKE 'ktm_curation_%'
                OR member.rolname LIKE 'ktm_feature_%'
                OR member.rolname LIKE 'ktm_curation_%'
+            )
+              AND granted.rolname NOT IN (
+                  'ktm_manual_feature_procedure_owner',
+                  'ktm_manual_feature_admin_executor',
+                  'ktm_feature_create_provider_executor'
+              )
+              AND member.rolname NOT IN (
+                  'ktm_manual_feature_procedure_owner',
+                  'ktm_manual_feature_admin_executor',
+                  'ktm_feature_create_provider_executor'
+              )
         )
         (SELECT * FROM expected EXCEPT SELECT * FROM actual)
         UNION ALL
@@ -756,5 +829,11 @@ ALTER DEFAULT PRIVILEGES FOR ROLE ktm_feature_schema_owner IN SCHEMA provider_sy
 ALTER DEFAULT PRIVILEGES FOR ROLE ktm_feature_schema_owner IN SCHEMA ops
     REVOKE ALL ON SEQUENCES FROM ktm_feature_runtime;
 SQL
+
+if [ "$m01_repair_after_legacy" = "true" ]; then
+  # A no-owner/no-privileges restore needs the base role creation and complete
+  # ownership sweep above before these dedicated M01 owners can be restored.
+  run_m01_phase
+fi
 
 echo "kor-travel-map dedicated DB role bootstrap completed for $KOR_TRAVEL_MAP_POSTGRES_DB"

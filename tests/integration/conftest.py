@@ -175,14 +175,12 @@ async def migrated_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
     테이블까지 만든 엔진. search_path에 ``x_extension`` 포함 → unqualified ST_*
     (GeoAlchemy2 INSERT의 ``ST_GeomFromEWKT`` 등) 호출 가능 (ADR-008/012).
     """
-    import asyncio
     from pathlib import Path
 
     from alembic.config import Config
     from sqlalchemy import event
     from sqlalchemy.engine import make_url
 
-    from alembic import command
     from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 
     raw_dsn = pg_container.get_connection_url()  # type: ignore[attr-defined]
@@ -212,15 +210,11 @@ async def migrated_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
     cfg = Config(str(root / "alembic.ini"))
     cfg.set_main_option("script_location", str(root / "alembic"))
     cfg.set_main_option("sqlalchemy.url", migrator_dsn.render_as_string(hide_password=False))
-    previous_role_mode = os.environ.get("KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE")
-    os.environ["KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE"] = "true"
-    try:
-        await asyncio.to_thread(command.upgrade, cfg, "head")
-    finally:
-        if previous_role_mode is None:
-            os.environ.pop("KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE", None)
-        else:
-            os.environ["KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE"] = previous_role_mode
+    from tests.integration._tvn34_migration_bootstrap import (
+        upgrade_head_with_tvn_m01_phase,
+    )
+
+    await upgrade_head_with_tvn_m01_phase(cfg, async_dsn)
 
     # Production API entrypoint performs this immediately after Alembic while
     # only the migrator DSN exists.  Keep the shared fixture on that executable

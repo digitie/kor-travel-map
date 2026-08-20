@@ -5,8 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from alembic.config import Config
-from alembic.script import ScriptDirectory
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
@@ -19,11 +17,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID
 
 import kortravelmap.infra.models as models
-from kortravelmap.infra.alembic_exclusions import (
-    PENDING_MIGRATION_TABLES,
-    PENDING_MIGRATION_TABLES_EXPIRE_AT,
-    UNMAPPED_APP_TABLES,
-)
+from kortravelmap.infra.alembic_exclusions import UNMAPPED_APP_TABLES
 from kortravelmap.infra.models import (
     FeatureCreationOriginRow,
     ManualFeatureIdentityClaimRow,
@@ -196,7 +190,7 @@ def test_manual_feature_models_are_public_module_exports() -> None:
     assert "FeatureCreationOriginRow" in models.__all__
 
 
-def test_manual_feature_pending_migration_ledger_is_exact_and_unexpired() -> None:
+def test_manual_feature_tables_are_mapped_not_excluded_from_alembic() -> None:
     expected = {
         ("feature", "manual_feature_identity_claims"),
         ("feature", "feature_creation_origins"),
@@ -205,16 +199,25 @@ def test_manual_feature_pending_migration_ledger_is_exact_and_unexpired() -> Non
         (table.schema, table.name) for table in models.metadata.tables.values()
     }
 
-    assert expected == PENDING_MIGRATION_TABLES
-    assert metadata_tables >= PENDING_MIGRATION_TABLES
-    assert PENDING_MIGRATION_TABLES.isdisjoint(UNMAPPED_APP_TABLES)
-    assert PENDING_MIGRATION_TABLES_EXPIRE_AT == "0226_m01_manual_feature_create"
+    assert metadata_tables >= expected
+    assert expected.isdisjoint(UNMAPPED_APP_TABLES)
 
-    root = Path(__file__).resolve().parents[2]
-    config = Config(str(root / "alembic.ini"))
-    config.set_main_option("script_location", str(root / "alembic"))
-    active_revisions = {
-        revision.revision
-        for revision in ScriptDirectory.from_config(config).walk_revisions()
-    }
-    assert PENDING_MIGRATION_TABLES_EXPIRE_AT not in active_revisions
+
+def test_m01_migration_audits_and_backfills_legacy_claims_before_ddl() -> None:
+    """old admin create는 검증된 claim만 남기고 origin을 추정하지 않는다."""
+
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "alembic"
+        / "versions"
+        / "0226_m01_manual_feature_create.py"
+    ).read_text(encoding="utf-8")
+
+    assert "CREATE TEMP TABLE pg_temp.m01_legacy_claim_candidates" in source
+    assert "feature.feature_state_transitions" in source
+    assert "ops.domain_command_results" in source
+    assert "ops.feature_overrides" in source
+    assert "'legacy_admin_route'" in source
+    assert "M01 legacy claim backfill count/root mismatch" in source
+    assert "M01 legacy origin backfill is forbidden" in source
+    assert "for statement in _top_level_statements(_LEGACY_BACKFILL_SQL):" in source

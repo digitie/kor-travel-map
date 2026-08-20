@@ -177,6 +177,12 @@
         "0231_tvn41s_snapshot_material"
       ],
       "revision": "0232_tvn37d_notice_empty_range"
+    },
+    {
+      "down_revision": [
+        "0232_tvn37d_notice_empty_range"
+      ],
+      "revision": "0226_m01_manual_feature_create"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

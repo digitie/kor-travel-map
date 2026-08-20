@@ -251,9 +251,11 @@ _PROTECTED_FEATURE_TABLES = frozenset(
         "curation_import_plan_revisions",
         "curation_import_plan_rows",
         "curation_import_plans",
+        "feature_creation_origins",
         "features",
         "feature_base_field_values",
         "feature_state_transitions",
+        "manual_feature_identity_claims",
         "theme_candidate_generation_observations",
         "theme_candidate_generations",
         "theme_feature_candidate_transitions",
@@ -295,7 +297,8 @@ _STATE_OWNER_FUNCTION_ACL = (
     "REVOKE ALL ON FUNCTION feature.prepare_feature_state_context(jsonb, text) "
     "FROM PUBLIC, ktm_feature_runtime",
     "REVOKE ALL ON PROCEDURE feature.create_feature_with_initial_state("
-    "jsonb, text, text, text, jsonb) FROM PUBLIC",
+    "jsonb, text, text, text, jsonb) FROM PUBLIC, ktm_feature_runtime, "
+    "ktm_feature_api_runtime",
     "REVOKE ALL ON PROCEDURE feature.transition_feature_state("
     "text, text, text, text, bigint, jsonb) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.author_lifecycle_override("
@@ -313,7 +316,8 @@ _STATE_OWNER_FUNCTION_ACL = (
     "REVOKE ALL ON PROCEDURE feature.reactivate_admin_feature_state("
     "text, bigint, text, text, bigint, text, text) FROM PUBLIC",
     "GRANT EXECUTE ON PROCEDURE feature.create_feature_with_initial_state("
-    "jsonb, text, text, text, jsonb) TO ktm_feature_runtime",
+    "jsonb, text, text, text, jsonb) TO ktm_feature_create_provider_executor, "
+    "ktm_manual_feature_procedure_owner",
     "GRANT EXECUTE ON PROCEDURE feature.transition_feature_state("
     "text, text, text, text, bigint, jsonb) TO ktm_feature_runtime",
     "GRANT EXECUTE ON PROCEDURE feature.author_lifecycle_override("
@@ -337,6 +341,32 @@ _AUDIT_WRITER_FUNCTION_ACL = (
     "FROM PUBLIC, ktm_feature_runtime",
     "REVOKE ALL ON FUNCTION feature.reject_feature_state_transition_mutation() "
     "FROM PUBLIC, ktm_feature_runtime",
+    # 이 trigger function의 owner는 audit writer다. manual procedure owner가
+    # revoke하면 별도 grantor ACL은 지워도 owner/public ACL은 지우지 못해 API/Dagster
+    # preflight에서 unexpected SECURITY DEFINER function으로 잡힌다.
+    "REVOKE ALL ON FUNCTION feature.reject_manual_feature_evidence_mutation() "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, "
+    "ktm_feature_dagster_runtime, ktm_manual_feature_procedure_owner, "
+    "ktm_manual_feature_admin_executor, ktm_feature_create_provider_executor",
+)
+
+_MANUAL_FEATURE_TABLE_ACL = (
+    "REVOKE ALL ON TABLE feature.manual_feature_identity_claims, "
+    "feature.feature_creation_origins FROM PUBLIC, ktm_feature_runtime, "
+    "ktm_feature_api_runtime, ktm_feature_dagster_runtime",
+    "GRANT SELECT, INSERT ON TABLE feature.manual_feature_identity_claims, "
+    "feature.feature_creation_origins TO ktm_manual_feature_procedure_owner",
+)
+
+_MANUAL_FEATURE_WRITER_ACL = (
+    "REVOKE ALL ON PROCEDURE feature.create_admin_manual_feature_with_initial_state("
+    "jsonb, bigint) FROM PUBLIC, ktm_feature_runtime, ktm_feature_dagster_runtime, "
+    "ktm_feature_create_provider_executor",
+    "GRANT EXECUTE ON PROCEDURE feature.create_admin_manual_feature_with_initial_state("
+    "jsonb, bigint) TO ktm_manual_feature_admin_executor",
+    "REVOKE ALL ON FUNCTION feature.manual_feature_identity_key("
+    "text, text, numeric, numeric) FROM PUBLIC, ktm_feature_runtime, "
+    "ktm_feature_api_runtime, ktm_feature_dagster_runtime",
 )
 
 _SUBTYPE_READY_FUNCTION_ACL = (
@@ -483,6 +513,11 @@ async def reconcile_runtime_privileges() -> None:
                 await connection.execute(text(statement))
             for statement in _ROUTE_AREA_RUNTIME_GRANTS:
                 await connection.execute(text(statement))
+            # Evidence tables remain owned by the schema owner.  The manual
+            # SECURITY DEFINER owner only has the narrowly granted INSERT
+            # path, so it cannot reconcile relation ACLs itself.
+            for statement in _MANUAL_FEATURE_TABLE_ACL:
+                await connection.execute(text(statement))
 
             # Routine ownership is deliberately split from table ownership.
             # The schema owner has SET-only membership in each NOLOGIN routine
@@ -494,6 +529,9 @@ async def reconcile_runtime_privileges() -> None:
                 await connection.execute(text(statement))
             await connection.execute(text("SET ROLE ktm_feature_audit_writer"))
             for statement in _AUDIT_WRITER_FUNCTION_ACL:
+                await connection.execute(text(statement))
+            await connection.execute(text("SET ROLE ktm_manual_feature_procedure_owner"))
+            for statement in _MANUAL_FEATURE_WRITER_ACL:
                 await connection.execute(text(statement))
     finally:
         await engine.dispose()

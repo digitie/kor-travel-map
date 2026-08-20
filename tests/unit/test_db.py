@@ -156,7 +156,8 @@ def _runtime_privilege_row(
         "can_create_in_feature_schema": False,
         "can_read_public_features": True,
         "can_read_feature_override_field_paths": True,
-        "can_execute_create_procedure": True,
+        "can_execute_create_procedure": login == "ktm_feature_dagster_runtime",
+        "can_execute_manual_create_procedure": login == "ktm_feature_api_runtime",
         "can_execute_transition_procedure": True,
         "can_execute_author_lifecycle_override_procedure": True,
         "can_execute_revoke_lifecycle_override_procedure": True,
@@ -176,6 +177,8 @@ def _runtime_privilege_row(
         "can_update_publication_directly": False,
         "can_update_quality_directly": False,
         "can_mutate_transition_audit_directly": False,
+        "can_access_manual_feature_claims_directly": False,
+        "can_access_feature_creation_origins_directly": False,
         "can_mutate_feature_overrides_directly": False,
         "can_mutate_feature_base_values_directly": False,
         "can_mutate_feature_override_registry_directly": False,
@@ -194,6 +197,8 @@ def test_runtime_privilege_preflight_requires_procedures_but_denies_direct_dml()
 
     row["can_update_quality_directly"] = True
     row["can_mutate_transition_audit_directly"] = True
+    row["can_access_manual_feature_claims_directly"] = True
+    row["can_access_feature_creation_origins_directly"] = True
     row["can_mutate_feature_overrides_directly"] = True
     row["can_mutate_feature_base_values_directly"] = True
     row["can_mutate_feature_override_registry_directly"] = True
@@ -227,6 +232,8 @@ def test_runtime_privilege_preflight_requires_procedures_but_denies_direct_dml()
 
     assert "runtime login must not UPDATE feature.features.quality_state directly" in problems
     assert "runtime login must not mutate feature.feature_state_transitions directly" in problems
+    assert "runtime login must not access manual Feature identity claims directly" in problems
+    assert "runtime login must not access Feature creation origins directly" in problems
     assert "runtime login must not mutate ops.feature_overrides directly" in problems
     assert (
         "runtime login must not mutate feature.feature_base_field_values directly"
@@ -245,6 +252,7 @@ def test_runtime_privilege_preflight_requires_procedures_but_denies_direct_dml()
     assert "runtime login must EXECUTE revoke_feature_field_overrides" in problems
     assert "runtime login must EXECUTE transition_admin_feature_state" in problems
     assert "runtime login must EXECUTE reactivate_admin_feature_state" in problems
+    assert "API runtime must EXECUTE create_admin_manual_feature_with_initial_state" not in problems
     assert any(
         problem.startswith(
             "runtime login must not EXECUTE unexpected application procedures: "
@@ -266,6 +274,22 @@ def test_runtime_privilege_preflight_uses_role_specific_exact_procedure_sets() -
         api_row,
         expected_login="ktm_feature_api_runtime",
     ) == []
+
+    api_row["can_execute_create_procedure"] = True
+    api_row["can_execute_manual_create_procedure"] = False
+    api_boundary_problems = _runtime_db_privilege_problems(
+        api_row,
+        expected_login="ktm_feature_api_runtime",
+    )
+    assert (
+        "API runtime must not EXECUTE create_feature_with_initial_state directly"
+        in api_boundary_problems
+    )
+    assert (
+        "API runtime must EXECUTE create_admin_manual_feature_with_initial_state"
+        in api_boundary_problems
+    )
+    api_row = _runtime_privilege_row()
     assert _runtime_db_privilege_problems(
         dagster_row,
         expected_login="ktm_feature_dagster_runtime",

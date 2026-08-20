@@ -6,6 +6,8 @@ import pytest
 
 from kortravelmap.infra.runtime_privileges import (
     _CORE_FEATURE_GRANTS,
+    _MANUAL_FEATURE_TABLE_ACL,
+    _MANUAL_FEATURE_WRITER_ACL,
     _ROUTE_AREA_RUNTIME_GRANTS,
     _runtime_relation_grants,
 )
@@ -25,6 +27,16 @@ def test_runtime_acl_inventory_keeps_state_audit_and_its_sequence_ungranted() ->
             {
                 "schema_name": "feature",
                 "relation_name": "feature_state_transitions",
+                "relation_kind": "r",
+            },
+            {
+                "schema_name": "feature",
+                "relation_name": "manual_feature_identity_claims",
+                "relation_kind": "r",
+            },
+            {
+                "schema_name": "feature",
+                "relation_name": "feature_creation_origins",
                 "relation_kind": "r",
             },
             {
@@ -94,6 +106,8 @@ def test_runtime_acl_inventory_keeps_state_audit_and_its_sequence_ungranted() ->
     assert unknown == []
     rendered = "\n".join(grants)
     assert "feature_state_transitions" not in rendered
+    assert "manual_feature_identity_claims" not in rendered
+    assert "feature_creation_origins" not in rendered
     assert "feature_base_field_values" not in rendered
     assert "theme_feature_candidates" not in rendered
     assert "theme_feature_candidate_transitions" not in rendered
@@ -117,6 +131,19 @@ def test_runtime_acl_inventory_keeps_state_audit_and_its_sequence_ungranted() ->
         '"ops"."feature_override_field_paths"'
     ) not in rendered
     assert 'GRANT SELECT ON TABLE "feature"."public_features"' in rendered
+
+
+@pytest.mark.unit
+def test_manual_evidence_relation_acl_stays_with_schema_owner() -> None:
+    """manual procedure owner는 table owner가 아니므로 relation ACL을 재설정하지 않는다."""
+
+    table_acl = "\n".join(_MANUAL_FEATURE_TABLE_ACL)
+    writer_acl = "\n".join(_MANUAL_FEATURE_WRITER_ACL)
+
+    assert "manual_feature_identity_claims" in table_acl
+    assert "feature_creation_origins" in table_acl
+    assert "ON TABLE" not in writer_acl
+    assert "create_admin_manual_feature_with_initial_state" in writer_acl
 
 
 @pytest.mark.unit

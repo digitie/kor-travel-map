@@ -60,18 +60,25 @@ class RuntimeDbPrivilegeBoundaryError(RuntimeError):
     """실제 runtime DB session이 ADR-090 권한 경계를 벗어났을 때의 기동 오류."""
 
 
+_GENERIC_FEATURE_CREATE_PROCEDURE = (
+    "feature.create_feature_with_initial_state(jsonb,text,text,text,jsonb)"
+)
+
 _SHARED_RUNTIME_FEATURE_PROCEDURES = frozenset(
     {
         "feature.apply_provider_feature_field_patch(text,bigint,text,text,bigint,jsonb,jsonb)",
         "feature.author_feature_field_overrides(text,bigint,text,text,bigint,jsonb,jsonb)",
         "feature.author_lifecycle_override(text,text,text,boolean,text,text,bigint)",
-        "feature.create_feature_with_initial_state(jsonb,text,text,text,jsonb)",
         "feature.reactivate_admin_feature_state(text,bigint,text,text,bigint,text,text)",
         "feature.revoke_feature_field_overrides(text,bigint,text,text,bigint,text[])",
         "feature.revoke_lifecycle_override(text,text,bigint)",
         "feature.transition_admin_feature_state(text,text,text,text,bigint,text,text,text)",
         "feature.transition_feature_state(text,text,text,text,bigint,jsonb)",
     }
+)
+
+_MANUAL_FEATURE_CREATE_PROCEDURE = (
+    "feature.create_admin_manual_feature_with_initial_state(jsonb,bigint)"
 )
 
 _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
@@ -197,10 +204,13 @@ _ADMIN_CANCELLATION_SECURITY_DEFINER_FUNCTIONS = frozenset(
 
 _EXPECTED_RUNTIME_APPLICATION_PROCEDURES = {
     "ktm_feature_api_runtime": (
-        _SHARED_RUNTIME_FEATURE_PROCEDURES | _ADMIN_CURATION_FEATURE_PROCEDURES
+        _SHARED_RUNTIME_FEATURE_PROCEDURES
+        | frozenset({_MANUAL_FEATURE_CREATE_PROCEDURE})
+        | _ADMIN_CURATION_FEATURE_PROCEDURES
     ),
     "ktm_feature_dagster_runtime": (
         _SHARED_RUNTIME_FEATURE_PROCEDURES
+        | frozenset({_GENERIC_FEATURE_CREATE_PROCEDURE})
         | _PROVIDER_CURATION_FEATURE_PROCEDURES
         | _PROVIDER_OPERATION_PROCEDURES
     ),
@@ -239,6 +249,11 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
             'feature.create_feature_with_initial_state(jsonb,text,text,text,jsonb)'::regprocedure,
             'EXECUTE'
         ) AS can_execute_create_procedure,
+        has_function_privilege(
+            session_user,
+            'feature.create_admin_manual_feature_with_initial_state(jsonb,bigint)'::regprocedure,
+            'EXECUTE'
+        ) AS can_execute_manual_create_procedure,
         has_function_privilege(
             session_user,
             'feature.transition_feature_state(text,text,text,text,bigint,jsonb)'::regprocedure,
@@ -328,6 +343,40 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
             OR has_table_privilege(session_user, 'feature.feature_state_transitions', 'TRUNCATE')
         ) AS can_mutate_transition_audit_directly,
         (
+            has_table_privilege(
+                session_user, 'feature.manual_feature_identity_claims', 'SELECT'
+            )
+            OR has_table_privilege(
+                session_user, 'feature.manual_feature_identity_claims', 'INSERT'
+            )
+            OR has_table_privilege(
+                session_user, 'feature.manual_feature_identity_claims', 'UPDATE'
+            )
+            OR has_table_privilege(
+                session_user, 'feature.manual_feature_identity_claims', 'DELETE'
+            )
+            OR has_table_privilege(
+                session_user, 'feature.manual_feature_identity_claims', 'TRUNCATE'
+            )
+        ) AS can_access_manual_feature_claims_directly,
+        (
+            has_table_privilege(
+                session_user, 'feature.feature_creation_origins', 'SELECT'
+            )
+            OR has_table_privilege(
+                session_user, 'feature.feature_creation_origins', 'INSERT'
+            )
+            OR has_table_privilege(
+                session_user, 'feature.feature_creation_origins', 'UPDATE'
+            )
+            OR has_table_privilege(
+                session_user, 'feature.feature_creation_origins', 'DELETE'
+            )
+            OR has_table_privilege(
+                session_user, 'feature.feature_creation_origins', 'TRUNCATE'
+            )
+        ) AS can_access_feature_creation_origins_directly,
+        (
             has_table_privilege(session_user, 'ops.feature_overrides', 'INSERT')
             OR has_table_privilege(session_user, 'ops.feature_overrides', 'UPDATE')
             OR has_table_privilege(session_user, 'ops.feature_overrides', 'DELETE')
@@ -396,6 +445,12 @@ def _runtime_db_privilege_problems(
         "can_mutate_transition_audit_directly": (
             "runtime login must not mutate feature.feature_state_transitions directly"
         ),
+        "can_access_manual_feature_claims_directly": (
+            "runtime login must not access manual Feature identity claims directly"
+        ),
+        "can_access_feature_creation_origins_directly": (
+            "runtime login must not access Feature creation origins directly"
+        ),
         "can_mutate_feature_overrides_directly": (
             "runtime login must not mutate ops.feature_overrides directly"
         ),
@@ -419,9 +474,6 @@ def _runtime_db_privilege_problems(
         ),
         "can_read_feature_override_field_paths": (
             "runtime login must SELECT ops.feature_override_field_paths"
-        ),
-        "can_execute_create_procedure": (
-            "runtime login must EXECUTE create_feature_with_initial_state"
         ),
         "can_execute_transition_procedure": (
             "runtime login must EXECUTE transition_feature_state"
@@ -451,6 +503,25 @@ def _runtime_db_privilege_problems(
     for field_name, message in required_true_fields.items():
         if row.get(field_name) is not True:
             problems.append(message)
+
+    if expected_login == "ktm_feature_api_runtime":
+        if row.get("can_execute_create_procedure") is not False:
+            problems.append(
+                "API runtime must not EXECUTE create_feature_with_initial_state directly"
+            )
+        if row.get("can_execute_manual_create_procedure") is not True:
+            problems.append(
+                "API runtime must EXECUTE create_admin_manual_feature_with_initial_state"
+            )
+    elif expected_login == "ktm_feature_dagster_runtime":
+        if row.get("can_execute_create_procedure") is not True:
+            problems.append(
+                "Dagster runtime must EXECUTE create_feature_with_initial_state"
+            )
+        if row.get("can_execute_manual_create_procedure") is not False:
+            problems.append(
+                "Dagster runtime must not EXECUTE the manual Feature writer"
+            )
 
     expected_procedures = _EXPECTED_RUNTIME_APPLICATION_PROCEDURES.get(expected_login)
     if expected_procedures is None:

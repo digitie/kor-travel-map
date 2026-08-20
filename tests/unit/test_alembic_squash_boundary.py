@@ -47,10 +47,13 @@ _EXPECTED_REVISIONS = (
     "0223_tvn40_identity_mappings",
     "0224_c7_external_system_scope",
     "0225_tvn40c_physical_removal",
+    # M01 lane은 C05A가 같은 0229 기반으로 먼저 착지한 뒤 이어진다. revision ID의
+    # 숫자순이 아니라 down_revision graph가 실제 적용 순서를 정한다.
     "0229_tvn40b_source_rule_action",
     "0230_tvn_c05_krforest_datasets",
     "0231_tvn41s_snapshot_material",
     "0232_tvn37d_notice_empty_range",
+    "0226_m01_manual_feature_create",
 )
 #: `alembic_version.version_num`의 컬럼 폭(alembic 기본값).
 _ALEMBIC_VERSION_NUM_LENGTH = 32
