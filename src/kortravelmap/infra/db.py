@@ -81,9 +81,13 @@ _MANUAL_FEATURE_CREATE_PROCEDURE = (
     "feature.create_admin_manual_feature_with_initial_state(jsonb,bigint)"
 )
 _MANUAL_FEATURE_PROVENANCE_FUNCTION = "feature.read_admin_manual_feature_provenance(uuid)"
+_MANUAL_CURATION_FEATURE_CREATE_PROCEDURE = (
+    "feature.create_manual_curation_item_with_feature_command(jsonb,jsonb,bigint)"
+)
 
 _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
     {
+        _MANUAL_CURATION_FEATURE_CREATE_PROCEDURE,
         "feature.apply_curation_import_items_command(jsonb,text,text,bigint,text)",
         # 0222 — canonical collections lock. admin executor만(dedup review 라우터·ktmctl).
         "feature.merge_lock_curation_collections(text,text)",

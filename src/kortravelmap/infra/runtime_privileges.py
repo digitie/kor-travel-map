@@ -378,6 +378,15 @@ _MANUAL_FEATURE_WRITER_ACL = (
     "ktm_manual_feature_admin_executor, ktm_feature_create_provider_executor",
 )
 
+_MANUAL_CURATION_WRITER_ACL = (
+    "REVOKE ALL ON PROCEDURE feature.create_manual_curation_item_with_feature_command("
+    "jsonb, jsonb, bigint) FROM PUBLIC, ktm_feature_runtime, "
+    "ktm_feature_api_runtime, ktm_feature_dagster_runtime, "
+    "ktm_curation_provider_executor, ktm_manual_feature_admin_executor",
+    "GRANT EXECUTE ON PROCEDURE feature.create_manual_curation_item_with_feature_command("
+    "jsonb, jsonb, bigint) TO ktm_curation_admin_executor",
+)
+
 _SUBTYPE_READY_FUNCTION_ACL = (
     "REVOKE ALL ON FUNCTION feature.derive_subtype_public_ready() "
     "FROM PUBLIC, ktm_feature_runtime",
@@ -541,6 +550,9 @@ async def reconcile_runtime_privileges() -> None:
                 await connection.execute(text(statement))
             await connection.execute(text("SET ROLE ktm_manual_feature_procedure_owner"))
             for statement in _MANUAL_FEATURE_WRITER_ACL:
+                await connection.execute(text(statement))
+            await connection.execute(text("SET ROLE ktm_curation_command_owner"))
+            for statement in _MANUAL_CURATION_WRITER_ACL:
                 await connection.execute(text(statement))
     finally:
         await engine.dispose()

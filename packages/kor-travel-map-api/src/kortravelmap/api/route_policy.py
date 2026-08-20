@@ -248,6 +248,7 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/admin/curations/quarantine/{collection_id}/reclassify": (RoutePolicy.OPERATOR),
     "/v1/admin/curations/{collection_id}": RoutePolicy.OPERATOR,
     "/v1/admin/curations/{collection_id}/items": RoutePolicy.OPERATOR,
+    "/v1/admin/curations/{collection_id}/items/manual-feature": RoutePolicy.OPERATOR,
     "/v1/admin/curations/{collection_id}/items/{curation_item_id}": (RoutePolicy.OPERATOR),
     "/v1/admin/theme-feature-candidates": RoutePolicy.OPERATOR,
     "/v1/admin/theme-feature-candidates/{candidate_id}": RoutePolicy.OPERATOR,

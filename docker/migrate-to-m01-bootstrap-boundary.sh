@@ -46,6 +46,7 @@ async def main() -> int:
         if revision not in {
             "0226_m01_manual_feature_create",
             "0227_m02_feature_provenance",
+            "0228_m03_manual_curation",
         }:
             print("M01 relation marker requires a known M01/M02 head", file=sys.stderr)
             return 2

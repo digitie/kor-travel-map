@@ -1049,6 +1049,49 @@
         "title": "AdminCurationItemView",
         "type": "object"
       },
+      "AdminCurationManualFeatureItemData": {
+        "additionalProperties": false,
+        "description": "M03 combined writer의 UUID Feature·item commit receipt.",
+        "properties": {
+          "feature_id": {
+            "format": "uuid",
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "feature_row_revision": {
+            "minimum": 1.0,
+            "title": "Feature Row Revision",
+            "type": "integer"
+          },
+          "item": {
+            "$ref": "#/components/schemas/AdminCurationItemView"
+          }
+        },
+        "required": [
+          "feature_id",
+          "feature_row_revision",
+          "item"
+        ],
+        "title": "AdminCurationManualFeatureItemData",
+        "type": "object"
+      },
+      "AdminCurationManualFeatureItemResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminCurationManualFeatureItemData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "AdminCurationManualFeatureItemResponse",
+        "type": "object"
+      },
       "AdminCurationQuarantineCollectionView": {
         "additionalProperties": false,
         "properties": {
@@ -11968,6 +12011,349 @@
           "decided_at"
         ],
         "title": "CurationLinkAuditView",
+        "type": "object"
+      },
+      "CurationManualFeatureCoordInput": {
+        "additionalProperties": false,
+        "description": "M03 explicit manual Feature 좌표 — JSON finite number만 수용한다.",
+        "properties": {
+          "lat": {
+            "maximum": 39.5,
+            "minimum": 33.0,
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "maximum": 132.0,
+            "minimum": 124.0,
+            "title": "Lon",
+            "type": "number"
+          }
+        },
+        "required": [
+          "lon",
+          "lat"
+        ],
+        "title": "CurationManualFeatureCoordInput",
+        "type": "object"
+      },
+      "CurationManualFeatureCreateRequest": {
+        "additionalProperties": false,
+        "description": "M03 combined writer가 받는 manual Feature의 최소 typed input.",
+        "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "admin_dong_code": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{7,10}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Admin Dong Code"
+          },
+          "category": {
+            "pattern": "^\\d{8}$",
+            "title": "Category",
+            "type": "string"
+          },
+          "coord": {
+            "$ref": "#/components/schemas/CurationManualFeatureCoordInput"
+          },
+          "coord_precision_digits": {
+            "anyOf": [
+              {
+                "maximum": 8.0,
+                "minimum": 3.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coord Precision Digits"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "kind": {
+            "enum": [
+              "place",
+              "event"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "legal_dong_code": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{10}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legal Dong Code"
+          },
+          "marker_color": {
+            "pattern": "^P-(0[1-9]|1[0-6])$",
+            "title": "Marker Color",
+            "type": "string"
+          },
+          "marker_icon": {
+            "minLength": 1,
+            "title": "Marker Icon",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "parent_feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Feature Id"
+          },
+          "reason": {
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "road_address_management_no": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{20,26}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Road Address Management No"
+          },
+          "road_name_code": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{7,12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Road Name Code"
+          },
+          "sibling_group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sibling Group Id"
+          },
+          "sido_code": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{2}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sido Code"
+          },
+          "sigungu_code": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{5}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sigungu Code"
+          },
+          "urls": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Urls"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "category",
+          "coord",
+          "marker_icon",
+          "marker_color",
+          "reason"
+        ],
+        "title": "CurationManualFeatureCreateRequest",
+        "type": "object"
+      },
+      "CurationManualFeatureItemCreateRequest": {
+        "additionalProperties": false,
+        "description": "기존 item create와 분리된 M03 explicit manual Feature branch.",
+        "properties": {
+          "address_hint": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Hint"
+          },
+          "curation_relation": {
+            "default": "nearby_option",
+            "enum": [
+              "primary_stop",
+              "food_stop",
+              "cafe_stop",
+              "bookstore_stop",
+              "nearby_option",
+              "accessibility_support",
+              "pet_support",
+              "family_support",
+              "theme_area_anchor"
+            ],
+            "title": "Curation Relation",
+            "type": "string"
+          },
+          "external_component_id": {
+            "default": "primary",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "External Component Id",
+            "type": "string"
+          },
+          "external_item_id": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "External Item Id",
+            "type": "string"
+          },
+          "item_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Summary"
+          },
+          "item_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Title"
+          },
+          "manual_feature": {
+            "$ref": "#/components/schemas/CurationManualFeatureCreateRequest"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "place_name": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Place Name"
+          },
+          "reuse_policy": {
+            "default": "manual_review",
+            "enum": [
+              "allowed",
+              "blocked",
+              "manual_review"
+            ],
+            "title": "Reuse Policy",
+            "type": "string"
+          },
+          "sort_order": {
+            "default": 0,
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "status": {
+            "default": "included",
+            "enum": [
+              "candidate",
+              "included",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "manual_feature",
+          "external_item_id"
+        ],
+        "title": "CurationManualFeatureItemCreateRequest",
         "type": "object"
       },
       "CurationQuarantineOriginalCollectionView": {
@@ -31285,6 +31671,126 @@
           }
         ],
         "summary": "Add Admin Curation Item",
+        "tags": [
+          "admin-curations"
+        ]
+      }
+    },
+    "/v1/admin/curations/{collection_id}/items/manual-feature": {
+      "post": {
+        "description": "M03: explicit payload만으로 Feature와 curation item을 한 command에 묶는다.",
+        "operationId": "add_admin_curation_item_with_manual_feature_v1_admin_curations__collection_id__items_manual_feature_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Collection Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CurationManualFeatureItemCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminCurationManualFeatureItemResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 응답 representation의 strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "수동 Feature 생성 전용 scope 없음"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "manual exact identity 또는 curation item 충돌"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "manual Feature 또는 curation item input 오류"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "수동 Feature 생성 cutover 준비 전"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": [],
+            "AdminFeatureCreateBFF": []
+          }
+        ],
+        "summary": "Add Admin Curation Item With Manual Feature",
         "tags": [
           "admin-curations"
         ]

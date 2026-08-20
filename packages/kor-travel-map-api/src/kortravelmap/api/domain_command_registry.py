@@ -320,6 +320,16 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
         transaction_isolation="serializable",
     ),
     (
+        "POST",
+        "/v1/admin/curations/{collection_id}/items/manual-feature",
+    ): _domain(
+        "admin.curation-item.create.manual-feature-v1",
+        "manual Feature와 curation item을 하나의 SERIALIZABLE terminal 결과로 봉인",
+        success_status=201,
+        replay_headers=("ETag",),
+        transaction_isolation="serializable",
+    ),
+    (
         "PATCH",
         "/v1/admin/curations/{collection_id}/items/{curation_item_id}",
     ): _domain(

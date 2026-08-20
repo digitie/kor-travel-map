@@ -482,6 +482,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/curations/{collection_id}/items/manual-feature": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Admin Curation Item With Manual Feature
+         * @description M03: explicit payload만으로 Feature와 curation item을 한 command에 묶는다.
+         */
+        post: operations["add_admin_curation_item_with_manual_feature_v1_admin_curations__collection_id__items_manual_feature_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/curations/{collection_id}/items/{curation_item_id}": {
         parameters: {
             query?: never;
@@ -3191,6 +3211,25 @@ export interface components {
             updated_at: string;
             /** Updated By */
             updated_by: string | null;
+        };
+        /**
+         * AdminCurationManualFeatureItemData
+         * @description M03 combined writer의 UUID Feature·item commit receipt.
+         */
+        AdminCurationManualFeatureItemData: {
+            /**
+             * Feature Id
+             * Format: uuid
+             */
+            feature_id: string;
+            /** Feature Row Revision */
+            feature_row_revision: number;
+            item: components["schemas"]["AdminCurationItemView"];
+        };
+        /** AdminCurationManualFeatureItemResponse */
+        AdminCurationManualFeatureItemResponse: {
+            data: components["schemas"]["AdminCurationManualFeatureItemData"];
+            meta: components["schemas"]["Meta"];
         };
         /** AdminCurationQuarantineCollectionView */
         AdminCurationQuarantineCollectionView: {
@@ -7457,6 +7496,117 @@ export interface components {
             place_name: string;
             /** Resolver Version */
             resolver_version: string | null;
+        };
+        /**
+         * CurationManualFeatureCoordInput
+         * @description M03 explicit manual Feature 좌표 — JSON finite number만 수용한다.
+         */
+        CurationManualFeatureCoordInput: {
+            /** Lat */
+            lat: number;
+            /** Lon */
+            lon: number;
+        };
+        /**
+         * CurationManualFeatureCreateRequest
+         * @description M03 combined writer가 받는 manual Feature의 최소 typed input.
+         */
+        CurationManualFeatureCreateRequest: {
+            /** Address */
+            address?: {
+                [key: string]: unknown;
+            } | null;
+            /** Admin Dong Code */
+            admin_dong_code?: string | null;
+            /** Category */
+            category: string;
+            coord: components["schemas"]["CurationManualFeatureCoordInput"];
+            /** Coord Precision Digits */
+            coord_precision_digits?: number | null;
+            /** Detail */
+            detail?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "place" | "event";
+            /** Legal Dong Code */
+            legal_dong_code?: string | null;
+            /** Marker Color */
+            marker_color: string;
+            /** Marker Icon */
+            marker_icon: string;
+            /** Name */
+            name: string;
+            /** Parent Feature Id */
+            parent_feature_id?: string | null;
+            /** Reason */
+            reason: string;
+            /** Road Address Management No */
+            road_address_management_no?: string | null;
+            /** Road Name Code */
+            road_name_code?: string | null;
+            /** Sibling Group Id */
+            sibling_group_id?: string | null;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Urls */
+            urls?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * CurationManualFeatureItemCreateRequest
+         * @description 기존 item create와 분리된 M03 explicit manual Feature branch.
+         */
+        CurationManualFeatureItemCreateRequest: {
+            /** Address Hint */
+            address_hint?: string | null;
+            /**
+             * Curation Relation
+             * @default nearby_option
+             * @enum {string}
+             */
+            curation_relation: "primary_stop" | "food_stop" | "cafe_stop" | "bookstore_stop" | "nearby_option" | "accessibility_support" | "pet_support" | "family_support" | "theme_area_anchor";
+            /**
+             * External Component Id
+             * @default primary
+             */
+            external_component_id: string;
+            /** External Item Id */
+            external_item_id: string;
+            /** Item Summary */
+            item_summary?: string | null;
+            /** Item Title */
+            item_title?: string | null;
+            manual_feature: components["schemas"]["CurationManualFeatureCreateRequest"];
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /** Place Name */
+            place_name?: string | null;
+            /**
+             * Reuse Policy
+             * @default manual_review
+             * @enum {string}
+             */
+            reuse_policy: "allowed" | "blocked" | "manual_review";
+            /**
+             * Sort Order
+             * @default 0
+             */
+            sort_order: number;
+            /**
+             * Status
+             * @default included
+             * @enum {string}
+             */
+            status: "candidate" | "included" | "rejected";
         };
         /**
          * CurationQuarantineOriginalCollectionView
@@ -15221,6 +15371,82 @@ export interface operations {
             };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    add_admin_curation_item_with_manual_feature_v1_admin_curations__collection_id__items_manual_feature_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
+            path: {
+                collection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CurationManualFeatureItemCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    /** @description 현재 응답 representation의 strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminCurationManualFeatureItemResponse"];
+                };
+            };
+            /** @description 수동 Feature 생성 전용 scope 없음 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description manual exact identity 또는 curation item 충돌 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description manual Feature 또는 curation item input 오류 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 수동 Feature 생성 cutover 준비 전 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

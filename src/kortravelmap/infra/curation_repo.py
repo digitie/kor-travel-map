@@ -18,6 +18,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import text
 from sqlalchemy.engine import RowMapping
 
+from kortravelmap.core import make_feature_id
 from kortravelmap.core.address import normalize_korean_text
 from kortravelmap.core.curation_address import (
     CURATION_ADDRESS_RESOLVER_VERSION,
@@ -28,7 +29,9 @@ from kortravelmap.core.curation_cutover_mapping import (
     curation_cutover_identity_mapping_root,
 )
 from kortravelmap.infra.curation_link_basis import trusted_basis_sql
+from kortravelmap.infra.feature_identity import candidate_feature_uuid
 from kortravelmap.infra.feature_repo import public_active_notice_filter_sql
+from kortravelmap.infra.feature_subtype import write_subtype
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -47,6 +50,8 @@ __all__ = [
     "CurationCutoverIdentityMappingExport",
     "CurationLinkAudit",
     "CurationItem",
+    "CurationManualFeatureExactDuplicate",
+    "CurationManualFeatureItem",
     "CurationServiceCollectionSnapshot",
     "CurationServiceItemSnapshot",
     "CurationQuarantineCollection",
@@ -70,6 +75,7 @@ __all__ = [
     "confirm_curation_quarantine_standalone",
     "create_curation_collection",
     "create_curation_collection_command",
+    "create_manual_curation_item_with_feature_command",
     "get_curation_collection",
     "get_curation_import_batch",
     "get_curation_item",
@@ -139,6 +145,23 @@ QUARANTINE_CONFLICT_TARGET_MISSING: Final = "target_missing"
 
 class CurationRevisionConflictError(ValueError):
     """canonical collection/item command의 expected revision이 stale이다."""
+
+
+@dataclass(frozen=True)
+class CurationManualFeatureExactDuplicate:
+    """M03 exact claim winner 때문에 combined command가 중단된 결과."""
+
+    existing_feature_uuid: str
+
+
+@dataclass(frozen=True)
+class CurationManualFeatureItem:
+    """M03 one-command writer가 확정한 Feature와 curation item receipt."""
+
+    feature_id: str
+    feature_uuid: str
+    feature_row_revision: int
+    item: CurationItem
 
 
 @dataclass(frozen=True)
@@ -3783,6 +3806,163 @@ async def create_curation_item_command(
     if created is None:
         raise RuntimeError("created curation item could not be read")
     return created
+
+
+_CREATE_MANUAL_CURATION_ITEM_WITH_FEATURE_SQL: Final[str] = """
+CALL feature.create_manual_curation_item_with_feature_command(
+  CAST(:feature_payload AS jsonb), CAST(:item_payload AS jsonb),
+  CAST(:command_id AS bigint), NULL::text, NULL::text, NULL::uuid,
+  NULL::bigint, NULL::uuid, NULL::bigint, NULL::bigint, NULL::uuid
+)
+"""
+
+
+async def create_manual_curation_item_with_feature_command(
+    session: AsyncSession,
+    *,
+    collection_id: str,
+    manual_feature: Mapping[str, Any],
+    external_item_id: str,
+    external_component_id: str = "primary",
+    place_name: str | None = None,
+    address_hint: str | None = None,
+    status: str = "included",
+    sort_order: int = 0,
+    item_title: str | None = None,
+    item_summary: str | None = None,
+    curation_relation: str = "nearby_option",
+    reuse_policy: str = "manual_review",
+    metadata: Mapping[str, Any] | None = None,
+    command_id: int,
+    principal: str,
+) -> CurationManualFeatureItem | CurationManualFeatureExactDuplicate:
+    """M03 combined procedure로 explicit manual Feature와 item을 함께 만든다.
+
+    caller가 UUID, legacy ID, origin/claim/상태 tuple을 고를 수 없게 이 경계에서
+    새 UUIDv7과 opaque bridge를 한 번 발급한다. detail subtype은 같은 outer
+    SERIALIZABLE command transaction에서만 뒤이어 materialize된다.
+    """
+
+    if command_id < 1 or not principal.strip():
+        raise ValueError("manual curation command identity is required")
+    kind_value = manual_feature.get("kind")
+    kind = str(kind_value) if kind_value is not None else ""
+    if kind not in {"place", "event"}:
+        raise ValueError("manual_feature.kind must be place or event")
+    forbidden = {
+        "feature_id",
+        "feature_uuid",
+        "origin_kind",
+        "creator_principal_id",
+        "lifecycle_state",
+        "publication_state",
+        "quality_state",
+        "operator",
+        "idempotency_key",
+    }
+    supplied_forbidden = sorted(forbidden.intersection(manual_feature))
+    if supplied_forbidden:
+        raise ValueError(f"manual_feature.{supplied_forbidden[0]} is server-owned")
+    coord = manual_feature.get("coord")
+    if not isinstance(coord, Mapping):
+        raise ValueError("manual_feature.coord is required")
+    lon = coord.get("lon")
+    lat = coord.get("lat")
+    if lon is None or lat is None:
+        raise ValueError("manual_feature.coord is required")
+    feature_uuid = candidate_feature_uuid()
+    feature_id = make_feature_id(
+        bjd_code=None,
+        kind=kind,
+        category="manual_feature_v1",
+        source_type="user_request",
+        source_natural_key=f"manual::{feature_uuid}",
+        content_hash=None,
+    )
+    feature_payload = {
+        key: value
+        for key, value in manual_feature.items()
+        if key not in {"detail", "reason", "coord"}
+    }
+    feature_payload.update(
+        {
+            "feature_id": feature_id,
+            "feature_uuid": feature_uuid,
+            "lon": lon,
+            "lat": lat,
+            "coord_precision_digits": manual_feature.get("coord_precision_digits", 6),
+        }
+    )
+    item_payload: dict[str, Any] = {
+        "collection_id": collection_id,
+        "external_item_id": external_item_id.strip(),
+        "external_component_id": external_component_id.strip(),
+        "place_name": place_name.strip() if place_name else None,
+        "address_hint": address_hint.strip() if address_hint else None,
+        "status": status,
+        "sort_order": sort_order,
+        "item_title": item_title,
+        "item_summary": item_summary,
+        "curation_relation": curation_relation,
+        "reuse_policy": reuse_policy,
+        "metadata": dict(metadata or {}),
+        "source_record_key": None,
+    }
+    result = (
+        await session.execute(
+            text(_CREATE_MANUAL_CURATION_ITEM_WITH_FEATURE_SQL),
+            {
+                "command_id": command_id,
+                "feature_payload": json.dumps(
+                    feature_payload, ensure_ascii=False, default=str
+                ),
+                "item_payload": json.dumps(
+                    item_payload, ensure_ascii=False, default=str
+                ),
+            },
+        )
+    ).mappings().one()
+    outcome = result.get("o_outcome")
+    if outcome == "exact_conflict":
+        winner = result.get("o_existing_feature_uuid")
+        if not isinstance(winner, (str, UUID)):
+            raise RuntimeError("manual curation exact conflict has no winner UUID")
+        return CurationManualFeatureExactDuplicate(existing_feature_uuid=str(winner))
+    if outcome != "created":
+        raise RuntimeError("manual curation writer returned an unknown outcome")
+    observed_feature_id = result.get("o_feature_id")
+    observed_feature_uuid = result.get("o_feature_uuid")
+    item_id = result.get("o_curation_item_id")
+    feature_revision = result.get("o_feature_row_revision")
+    if (
+        observed_feature_id != feature_id
+        or str(observed_feature_uuid) != feature_uuid
+        or not isinstance(item_id, (str, UUID))
+        or type(feature_revision) is not int
+        or feature_revision < 1
+    ):
+        raise RuntimeError("manual curation writer receipt does not match server identity")
+    await write_subtype(
+        session,
+        feature_id=feature_id,
+        feature_uuid=feature_uuid,
+        kind=kind,
+        detail=manual_feature.get("detail"),
+    )
+    created = await get_curation_item(
+        session,
+        collection_id=collection_id,
+        curation_item_id=str(item_id),
+        include_archived=True,
+    )
+    if created is None:
+        raise RuntimeError("manual curation item could not be read")
+    return CurationManualFeatureItem(
+        feature_id=feature_id,
+        feature_uuid=feature_uuid,
+        feature_row_revision=feature_revision,
+        item=created,
+    )
 
 
 async def patch_curation_item_command(

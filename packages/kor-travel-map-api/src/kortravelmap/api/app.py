@@ -208,6 +208,9 @@ _MOIS_DEBUG_PATH = "/v1/debug/mois-license/{license_id}"
 _OPS_CANCEL_PATH = "/v1/ops/pipeline/executions/import_job/{execution_id}/cancel"
 _OPS_FIXTURE_PATH_PREFIX = "/v1/ops/contract-fixtures/c6c-cancel-probe/"
 _ADMIN_MANUAL_FEATURE_CREATE_PATH = "/v1/admin/features"
+_ADMIN_MANUAL_CURATION_FEATURE_CREATE_PATH = (
+    "/v1/admin/curations/{collection_id}/items/manual-feature"
+)
 _ADMIN_BFF_SECURITY: list[dict[str, list[str]]] = [{"AdminBFF": []}]
 _ADMIN_MANUAL_FEATURE_CREATE_SECURITY: list[dict[str, list[str]]] = [
     {"AdminBFF": [], "AdminFeatureCreateBFF": []}
@@ -446,9 +449,14 @@ def _apply_route_security_contract(
             else:
                 operation.pop("security", None)
 
-    admin_feature_path_item = paths.get(_ADMIN_MANUAL_FEATURE_CREATE_PATH)
-    if isinstance(admin_feature_path_item, dict):
-        operation = admin_feature_path_item.get("post")
+    for manual_feature_path in (
+        _ADMIN_MANUAL_FEATURE_CREATE_PATH,
+        _ADMIN_MANUAL_CURATION_FEATURE_CREATE_PATH,
+    ):
+        manual_feature_path_item = paths.get(manual_feature_path)
+        if not isinstance(manual_feature_path_item, dict):
+            continue
+        operation = manual_feature_path_item.get("post")
         if isinstance(operation, dict):
             operation["security"] = [
                 dict(requirement) for requirement in _ADMIN_MANUAL_FEATURE_CREATE_SECURITY

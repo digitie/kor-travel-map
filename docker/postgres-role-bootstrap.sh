@@ -155,7 +155,8 @@ BEGIN
     IF v_claim_exists THEN
         IF v_revision NOT IN (
             '0226_m01_manual_feature_create',
-            '0227_m02_feature_provenance'
+            '0227_m02_feature_provenance',
+            '0228_m03_manual_curation'
         ) THEN
             RAISE EXCEPTION
                 'M01 relation marker requires a known M01/M02 head (observed %)',
@@ -766,6 +767,7 @@ WITH dedicated_routine(signature, owner_role) AS (
       ('feature.create_curation_item_command(uuid,text,text,text,text,text,text,text,integer,text,text,text,text,jsonb,bigint,text)', 'ktm_curation_command_owner'),
       ('feature.patch_curation_item_command(uuid,uuid,bigint,text,text,text,text,text,text,text,integer,text,text,text,text,jsonb,bigint,text)', 'ktm_curation_command_owner'),
       ('feature.archive_curation_item_command(uuid,uuid,bigint,bigint,text)', 'ktm_curation_command_owner'),
+      ('feature.create_manual_curation_item_with_feature_command(jsonb,jsonb,bigint)', 'ktm_curation_command_owner'),
       ('feature.resolve_curation_import_collection_command(text,uuid,uuid,text,text,bigint,text)', 'ktm_curation_command_owner'),
       ('feature.touch_curation_import_collection_command(uuid,bigint,text)', 'ktm_curation_command_owner'),
       ('feature.reclassify_curation_quarantine_command(uuid,bigint,text,uuid,bigint,uuid[],text,text,bigint,text)', 'ktm_curation_command_owner'),
