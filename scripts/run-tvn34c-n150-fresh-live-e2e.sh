@@ -260,6 +260,11 @@ write_env_files() {
   curation_cutover_mapping_token="$(random_secret)"
   curation_snapshot_digest="$(printf %s "$curation_snapshot_token" | sha256sum | awk '{print $1}')"
   curation_cutover_mapping_digest="$(printf %s "$curation_cutover_mapping_token" | sha256sum | awk '{print $1}')"
+  # T-VN-M01: docker-compose.yml이 raw(UI)와 digest(API)를 각각 `:?`로 요구한다.
+  # API/Dagster entrypoint는 raw 유입을 거부하므로 map.env에는 둘 다 두되 compose가
+  # 서비스별로 갈라 넣는다. 값이 없으면 컨테이너 기동 전에 compose가 죽는다.
+  manual_feature_create_token="$(random_secret)"
+  manual_feature_create_digest="$(printf %s "$manual_feature_create_token" | sha256sum | awk '{print $1}')"
   ops_read="$(random_secret)"
   ops_cancel="$(random_secret)"
   ops_fixture="$(random_secret)"
@@ -330,6 +335,9 @@ KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN=$ops_cancel
 KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN=$ops_fixture
 KOR_TRAVEL_MAP_API_PINVI_CURATION_SNAPSHOT_TOKEN_SHA256=$curation_snapshot_digest
 KOR_TRAVEL_MAP_API_PINVI_CURATION_CUTOVER_MAPPING_TOKEN_SHA256=$curation_cutover_mapping_digest
+KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN=$manual_feature_create_token
+KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256=$manual_feature_create_digest
+KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED=false
 KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED=true
 KOR_TRAVEL_MAP_API_VWORLD_API_KEY=$(random_secret)
 KOR_TRAVEL_MAP_OBJECT_STORE_ACCESS_KEY_ID=tvn34c$RUN_KEY

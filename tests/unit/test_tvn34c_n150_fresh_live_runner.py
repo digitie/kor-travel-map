@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
@@ -126,3 +127,57 @@ def test_seed_helper_requires_dagster_runtime_preflight() -> None:
     assert "stale_after_minutes=24 * 60" in seeder
     assert '_PROVIDER: Final[str] = "python-khoa-api"' in seeder
     assert '_DATASET_KEY: Final[str] = "khoa_beaches"' in seeder
+
+
+def _compose_required_keys() -> set[str]:
+    """`docker-compose.yml`이 `${VAR:?...}`로 **반드시** 요구하는 env 이름."""
+    compose = _text(_ROOT / "docker-compose.yml")
+    return set(re.findall(r"\$\{([A-Z_][A-Z0-9_]*):\?", compose))
+
+
+def _runner_map_env_keys() -> set[str]:
+    """러너가 map.env heredoc에 실제로 쓰는 env 이름."""
+    runner = _text(_RUNNER)
+    start = runner.index('cat >"$MAP_ENV"')
+    end = runner.index("\nEOF", start)
+    body = runner[start:end]
+    return set(re.findall(r"^([A-Z_][A-Z0-9_]*)=", body, re.M))
+
+
+def test_runner_supplies_every_compose_required_env() -> None:
+    """compose가 `:?`로 요구하는 키를 러너가 하나라도 빠뜨리면 격리 실행이 기동 전에 죽는다.
+
+    T-VN-M01이 manual-create 자격증명 둘을 `:?`로 배선했을 때 러너가 그 값을 만들지 않아
+    실제로 이 상태가 됐다. 같은 누락이 prod compose에서도 있었고 배포를 막았다 — 이런 건
+    실행해 보기 전에는 안 드러나므로 집합 차이로 고정한다.
+    """
+    required = _compose_required_keys()
+    assert len(required) >= 5, f"compose 필수 키가 너무 적다 — 파싱 실패 의심: {required}"
+
+    produced = _runner_map_env_keys()
+    assert len(produced) >= 20, f"map.env 파싱 실패 의심: {len(produced)}개"
+
+    missing = sorted(required - produced)
+    assert not missing, (
+        "compose가 필수로 요구하는데 러너 map.env가 만들지 않는 env: "
+        f"{missing}. 격리 실행이 컨테이너 기동 전에 실패한다."
+    )
+
+
+def test_runner_keeps_manual_create_raw_and_digest_paired() -> None:
+    """raw는 UI에, digest는 API에 간다 — 짝이 어긋나면 인증이 조용히 실패한다.
+
+    entrypoint가 API/Dagster로의 raw 유입을 거부하므로 compose가 서비스별로 갈라 넣는다.
+    러너는 digest를 raw에서 파생해야 하고, 상수를 박아 두면 안 된다.
+    """
+    runner = _text(_RUNNER)
+    assert "manual_feature_create_token=\"$(random_secret)\"" in runner
+    assert (
+        'manual_feature_create_digest="$(printf %s "$manual_feature_create_token" '
+        "| sha256sum | awk '{print $1}')\"" in runner
+    ), "digest가 raw에서 파생되지 않는다"
+    assert "KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN=$manual_feature_create_token" in runner
+    assert (
+        "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256=$manual_feature_create_digest"
+        in runner
+    )
