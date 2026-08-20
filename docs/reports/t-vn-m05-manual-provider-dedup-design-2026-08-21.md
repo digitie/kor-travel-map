@@ -24,8 +24,9 @@ M01~M04 origin(`manual_admin`, `manual_curation`, `manual_request`) Feature와 p
 
 ## Map 불변 evidence 모델
 
-`0231_m05_manual_provider_dedup`는 아래 다섯 relation을 추가한다. 앞 네 evidence table은
-append-only trigger와 `RESTRICT` FK를 갖고, 다섯째는 delivery를 위한 mutable operational state다.
+`0231_m05_manual_provider_dedup`는 아래 여섯 relation을 추가한다. case·resolution·event·ACK와
+subscription은 append-only evidence이며 `RESTRICT` FK를 갖는다. lease만 delivery를 위한 mutable
+operational state다.
 raw table DML은 runtime login에서 거부한다.
 
 revision은 `0231_m05_manual_provider_dedup`이고 정확한
@@ -37,8 +38,8 @@ revision은 `0231_m05_manual_provider_dedup`이고 정확한
 | `ops.manual_provider_dedup_resolutions` | case의 유일한 terminal 판단 또는 detector의 `superseded` marker | case당 하나만 허용한다. admin 판단은 서로 다른 unique command FK·actor·reason이 필수이고 detector supersede만 command 없이 `superseded_by_case_id`와 ingestion causation이 필수다. |
 | `ops.feature_reference_reconciliation_events` | merge/detach가 외부 참조에 요구하는 immutable action | resolution당 0 또는 1행이다. monotonic `event_sequence`(gap 허용), canonical envelope/schema version/SHA-256, old feature pair, optional replacement pair, state transition/command, occurred-at를 고정한다. |
 | `ops.feature_reference_reconciliation_acks` | service principal이 local receipt를 commit한 뒤 남기는 ack | `(event_id, principal_id)` unique이며 update/delete 불가다. ack command FK와 stored event SHA-256/local receipt SHA-256가 필수다. |
-| `ops.feature_reference_reconciliation_subscriptions` | provision된 service principal의 immutable initial delivery cursor | evidence가 아닌 operational configuration이다. future principal의 historical replay 시작점을 명시적으로 고정한다. |
-| `ops.feature_reference_reconciliation_leases` | principal의 현재 single-worker delivery lease와 acked-through cursor | evidence가 아닌 mutable operational state다. live lease는 한 worker만 보유하며 cursor 앞의 event를 건너뛸 수 없다. |
+| `ops.feature_reference_reconciliation_subscriptions` | provision된 service principal의 immutable initial delivery cursor | principal, read/ack scope와 historical replay 시작점을 고정하므로 backup evidence root에 포함한다. |
+| `ops.feature_reference_reconciliation_leases` | principal의 현재 single-worker delivery lease와 acked-through cursor | evidence가 아닌 mutable operational state다. live lease는 한 worker만 보유하며 cursor 앞의 event를 건너뛸 수 없고 subscription initial cursor보다 낮아질 수 없다. |
 
 case fingerprint는 다음 canonical input의 SHA-256이다.
 
@@ -129,9 +130,9 @@ Map은 admin 조회 두 개와 service endpoint 두 개를 추가한다.
 | `GET /v1/service/feature-reference-reconciliations` | worker lease를 취득/연장하고 해당 principal의 acked-through prefix 다음 event 하나를 읽는다. | 전용 `feature-reference-reconciliation:read` token scope + UUID `X-Reconciliation-Worker-Id` |
 | `POST /v1/service/feature-reference-reconciliations/{event_id}/acks` | lease holder가 consumer의 이미 commit된 local receipt hash를 append-only ack로 기록하고 acked-through cursor를 전진한다. | 전용 `feature-reference-reconciliation:ack` scope + UUID `Idempotency-Key` + 같은 worker id |
 
-event response는 저장된 canonical envelope 그대로의 `payload_schema_version`, `event_sha256`,
-`event_id`, `event_sequence`, case/resolution id, `rebind|detach`, old
-`{feature_id, feature_uuid, row_revision}`, optional replacement pair, occurred-at을 가진다. Map은
+event response는 저장된 canonical envelope 그대로의 `payload_schema_version`, `event_id`,
+`event_sequence`, UTC `occurred_at`, `event_sha256`, case/resolution id, `rebind|detach`, old
+`{feature_id, feature_uuid, row_revision}`, optional replacement pair를 가진다. Map은
 live Feature join으로 event를 재조립하지 않는다. consumer 이름을 event, role, route, settings
 식별자에 넣지 않으며 service token 검증 결과의 principal만 ack identity다.
 
@@ -202,10 +203,10 @@ routine 일부는 어느 phase에서도 허용하지 않는다. pre-0226 frozen 
 catalog preflight는 API/Dagster가 네 evidence relation과 lease에 raw SELECT/DML을 못 함, PUBLIC
 EXECUTE가 없음, intended procedure만 EXECUTE 가능함을 모두 검증한다.
 
-backup manifest schema version을 v3로 올리고 기존 M01~M04 roots에 case/resolution/event/ack canonical
-JSONL count+SHA-256 roots(안정 PK: case, resolution, event sequence, ack event/principal)와 event
-envelope/hash를 더해 동일 application snapshot에서 캡처한다. lease/subscription은 immutable evidence
-root 밖의 operational state다. restore는 no-owner/no-privileges 뒤 M05 ownership/ACL/procedure repair
+backup manifest schema version을 v3로 올리고 기존 M01~M04 roots에 case/resolution/event/ack/subscription
+canonical JSONL count+SHA-256 roots(안정 PK: case, resolution, event sequence, ack event/principal,
+subscription principal)와 event envelope/hash를 더해 동일 application snapshot에서 캡처한다. lease만
+immutable evidence root 밖의 mutable operational state다. restore는 no-owner/no-privileges 뒤 M05 ownership/ACL/procedure repair
 → catalog preflight → v3 evidence root 재계산 → 모든 live lease holder/expiry 무효화 → subscription
 별 immutable ack의 연속 prefix에서 `acked_through` 재구축 순서로 검증해야 한다. 불연속 ack 또는
 event/hash 불일치는 fail-loud다. evidence FK는 모두 `ON DELETE RESTRICT`이고 cascade delete를 막는다.

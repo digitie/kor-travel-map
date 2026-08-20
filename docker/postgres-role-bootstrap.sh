@@ -515,10 +515,6 @@ BEGIN
         RAISE EXCEPTION 'M05 pre role bootstrap requires exactly 0230 (observed %)',
             coalesce(v_revision, '<none>') USING ERRCODE = '55000';
     END IF;
-    IF v_relation_count = 0 AND v_role_count <> 0 THEN
-        RAISE EXCEPTION 'M05 roles exist before the 0230 boundary'
-            USING ERRCODE = '55000';
-    END IF;
     IF v_relation_count = 6 AND v_revision IS DISTINCT FROM '0231_m05_manual_provider_dedup' THEN
         RAISE EXCEPTION 'M05 relation marker requires exactly 0231 (observed %)',
             coalesce(v_revision, '<none>') USING ERRCODE = '55000';
@@ -679,6 +675,7 @@ BEGIN
             USING ERRCODE = '55000';
     END IF;
     IF to_regprocedure('feature.reject_manual_provider_dedup_evidence_mutation()') IS NULL
+       OR to_regprocedure('feature.assert_feature_reference_reconciliation_lease_cursor()') IS NULL
        OR to_regprocedure('feature.record_manual_provider_dedup_candidate(text,text,jsonb,jsonb)') IS NULL
        OR to_regprocedure('feature.resolve_manual_provider_dedup_case(uuid,text,text,bigint,bigint,text,text,text,bigint)') IS NULL
        OR to_regprocedure('feature.lease_feature_reference_reconciliation_event(text,uuid)') IS NULL
@@ -726,7 +723,11 @@ GRANT SELECT, INSERT, UPDATE ON TABLE ops.manual_provider_dedup_cases,
     TO ktm_manual_provider_dedup_procedure_owner;
 GRANT SELECT, INSERT, UPDATE ON TABLE ops.feature_reference_reconciliation_leases
     TO ktm_manual_provider_dedup_procedure_owner;
+GRANT USAGE ON SEQUENCE ops.feature_reference_reconciliation_events_event_sequence_seq
+    TO ktm_manual_provider_dedup_procedure_owner;
 ALTER FUNCTION feature.reject_manual_provider_dedup_evidence_mutation()
+    OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER FUNCTION feature.assert_feature_reference_reconciliation_lease_cursor()
     OWNER TO ktm_manual_provider_dedup_procedure_owner;
 ALTER PROCEDURE feature.record_manual_provider_dedup_candidate(text, text, jsonb, jsonb)
     OWNER TO ktm_manual_provider_dedup_procedure_owner;
@@ -739,6 +740,8 @@ ALTER PROCEDURE feature.ack_feature_reference_reconciliation_event(
     text, uuid, uuid, bigint, text, text, bigint
 ) OWNER TO ktm_manual_provider_dedup_procedure_owner;
 REVOKE ALL ON FUNCTION feature.reject_manual_provider_dedup_evidence_mutation()
+    FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime;
+REVOKE ALL ON FUNCTION feature.assert_feature_reference_reconciliation_lease_cursor()
     FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime;
 REVOKE ALL ON PROCEDURE feature.record_manual_provider_dedup_candidate(text, text, jsonb, jsonb)
     FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime,

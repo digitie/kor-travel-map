@@ -472,10 +472,14 @@ async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_on
                     await connection.execute(
                         text(
                             """
-                        SELECT resolution.decision, event.action, event.event_sequence,
+                               SELECT resolution.decision, event.action, event.event_sequence,
+                                   event.occurred_at,
                                event.old_feature_uuid,
                                event.replacement_feature_uuid, event.event_payload,
                                event.event_sha256,
+                               encode(x_extension.digest(
+                                 convert_to(event.event_payload::text, 'UTF8'), 'sha256'
+                               ), 'hex') AS recomputed_event_sha256,
                                manual.lifecycle_state AS manual_lifecycle_state,
                                provider.lifecycle_state AS provider_lifecycle_state,
                                (SELECT count(*) FROM provider_sync.source_links
@@ -505,10 +509,15 @@ async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_on
         assert evidence["decision"] == "merged"
         assert evidence["action"] == "rebind"
         event_sequence = int(evidence["event_sequence"])
+        assert evidence["event_payload"]["event_sequence"] == event_sequence
+        assert evidence["event_payload"]["occurred_at"] == evidence[
+            "occurred_at"
+        ].isoformat(timespec="microseconds").replace("+00:00", "Z")
         assert evidence["old_feature_uuid"] == pair["manual_uuid"]
         assert evidence["replacement_feature_uuid"] == pair["provider_uuid"]
         assert evidence["event_payload"]["action"] == "rebind"
         assert len(evidence["event_sha256"]) == 64
+        assert evidence["event_sha256"] == evidence["recomputed_event_sha256"]
         assert evidence["manual_lifecycle_state"] == "retired"
         assert evidence["provider_lifecycle_state"] == "active"
         assert evidence["manual_source_links"] == 0
@@ -547,6 +556,42 @@ async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_on
                     "initial_event_sequence": event_sequence - 1,
                 },
             )
+        async with migrated_engine.begin() as connection:
+            invalid_lease_principal = f"{principal_id}:invalid"
+            await connection.execute(
+                text(
+                    """
+                    INSERT INTO ops.feature_reference_reconciliation_subscriptions (
+                      principal_id, initial_event_sequence, read_scope, ack_scope
+                    ) VALUES (
+                      :principal_id, :initial_event_sequence,
+                      'feature-reference-reconciliation:read',
+                      'feature-reference-reconciliation:ack'
+                    )
+                    """
+                ),
+                {
+                    "principal_id": invalid_lease_principal,
+                    "initial_event_sequence": event_sequence,
+                },
+            )
+        async with migrated_engine.connect() as connection:
+            with pytest.raises(
+                DBAPIError, match="precedes its subscription cursor"
+            ) as invalid_lease:
+                await connection.execute(
+                    text(
+                        """
+                        INSERT INTO ops.feature_reference_reconciliation_leases (
+                          principal_id, acked_through_sequence, worker_id, lease_epoch,
+                          lease_expires_at
+                        ) VALUES (:principal_id, 0, NULL, 0, NULL)
+                        """
+                    ),
+                    {"principal_id": invalid_lease_principal},
+                )
+            assert getattr(invalid_lease.value.orig, "sqlstate", None) == "23514"
+            await connection.rollback()
         worker_id = uuid4()
         leased = await _lease_event(api, principal_id=principal_id, worker_id=worker_id)
         assert leased["o_outcome"] == "leased"
@@ -623,11 +668,6 @@ async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_on
                 == rebuilt_lease["lease_epoch"]
             )
 
-        replay_command_id = await _open_command(
-            migrated_engine,
-            actor=principal_id,
-            operation="service.feature-reference-reconciliation.ack.v1",
-        )
         replayed = await _ack_event(
             api,
             principal_id=principal_id,
@@ -636,7 +676,7 @@ async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_on
             lease_epoch=int(leased["o_lease_epoch"]),
             event_sha256=str(leased["o_event_sha256"]),
             local_receipt_sha256=local_receipt_sha256,
-            command_id=replay_command_id,
+            command_id=ack_command_id,
         )
         assert replayed == {
             "o_outcome": "replayed",

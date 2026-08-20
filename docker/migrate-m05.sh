@@ -7,6 +7,7 @@ migrator_dsn="${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN i
 export KOR_TRAVEL_MAP_PG_DSN="$migrator_dsn"
 export KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE=true
 
+set +e
 python - <<'PY'
 from __future__ import annotations
 
@@ -25,6 +26,14 @@ _ROLES = (
     "ktm_manual_provider_dedup_admin_executor",
     "ktm_feature_reference_reconciliation_service_executor",
 )
+_RELATIONS = (
+    "ops.manual_provider_dedup_cases",
+    "ops.manual_provider_dedup_resolutions",
+    "ops.feature_reference_reconciliation_events",
+    "ops.feature_reference_reconciliation_subscriptions",
+    "ops.feature_reference_reconciliation_acks",
+    "ops.feature_reference_reconciliation_leases",
+)
 
 
 async def main() -> int:
@@ -41,15 +50,46 @@ async def main() -> int:
                 ),
                 {"roles": list(_ROLES)},
             )
+            relation_count = await connection.scalar(
+                text(
+                    "SELECT count(*) FROM unnest(CAST(:relations AS text[])) "
+                    "AS expected(relation_name) "
+                    "WHERE to_regclass(expected.relation_name) IS NOT NULL"
+                ),
+                {"relations": list(_RELATIONS)},
+            )
     finally:
         await engine.dispose()
-    if revision != "0230_m04_feature_request_queue" or role_count != len(_ROLES):
-        print("M05 migration requires the exact 0230 role boundary", file=sys.stderr)
-        return 2
-    return 0
+    if (
+        revision == "0230_m04_feature_request_queue"
+        and role_count == len(_ROLES)
+        and relation_count == 0
+    ):
+        return 1
+    if (
+        revision == "0231_m05_manual_provider_dedup"
+        and role_count == len(_ROLES)
+        and relation_count == len(_RELATIONS)
+    ):
+        return 0
+    print("M05 migration marker is not a retryable boundary", file=sys.stderr)
+    return 2
 
 
 raise SystemExit(asyncio.run(main()))
 PY
 
-alembic upgrade 0231_m05_manual_provider_dedup
+marker_status=$?
+set -e
+case "$marker_status" in
+  0) exit 0 ;;
+  1) alembic upgrade 0231_m05_manual_provider_dedup ;;
+  2)
+    echo "M05 migration marker is not a retryable boundary" >&2
+    exit 1
+    ;;
+  *)
+    echo "M05 migration marker probe failed" >&2
+    exit "$marker_status"
+    ;;
+esac

@@ -257,6 +257,10 @@ capture_evidence_jsonl \
   feature_reference_reconciliation_acks \
   "SELECT to_jsonb(ack)::text FROM ops.feature_reference_reconciliation_acks AS ack ORDER BY ack.event_id, ack.principal_id" \
   "$app_snapshot_id"
+capture_evidence_jsonl \
+  feature_reference_reconciliation_subscriptions \
+  "SELECT to_jsonb(subscription)::text FROM ops.feature_reference_reconciliation_subscriptions AS subscription ORDER BY subscription.principal_id" \
+  "$app_snapshot_id"
 release_app_snapshot
 
 claim_jsonl="$evidence_dir/manual_feature_identity_claims.jsonl"
@@ -268,6 +272,7 @@ cases_jsonl="$evidence_dir/manual_provider_dedup_cases.jsonl"
 resolutions_jsonl="$evidence_dir/manual_provider_dedup_resolutions.jsonl"
 events_jsonl="$evidence_dir/feature_reference_reconciliation_events.jsonl"
 acks_jsonl="$evidence_dir/feature_reference_reconciliation_acks.jsonl"
+subscriptions_jsonl="$evidence_dir/feature_reference_reconciliation_subscriptions.jsonl"
 claim_count="$(relation_count "$backup_dir/$claim_jsonl")"
 origin_count="$(relation_count "$backup_dir/$origin_jsonl")"
 commands_count="$(relation_count "$backup_dir/$commands_jsonl")"
@@ -277,6 +282,7 @@ cases_count="$(relation_count "$backup_dir/$cases_jsonl")"
 resolutions_count="$(relation_count "$backup_dir/$resolutions_jsonl")"
 events_count="$(relation_count "$backup_dir/$events_jsonl")"
 acks_count="$(relation_count "$backup_dir/$acks_jsonl")"
+subscriptions_count="$(relation_count "$backup_dir/$subscriptions_jsonl")"
 claim_sha256="$(relation_sha256 "$backup_dir/$claim_jsonl")"
 origin_sha256="$(relation_sha256 "$backup_dir/$origin_jsonl")"
 commands_sha256="$(relation_sha256 "$backup_dir/$commands_jsonl")"
@@ -286,6 +292,7 @@ cases_sha256="$(relation_sha256 "$backup_dir/$cases_jsonl")"
 resolutions_sha256="$(relation_sha256 "$backup_dir/$resolutions_jsonl")"
 events_sha256="$(relation_sha256 "$backup_dir/$events_jsonl")"
 acks_sha256="$(relation_sha256 "$backup_dir/$acks_jsonl")"
+subscriptions_sha256="$(relation_sha256 "$backup_dir/$subscriptions_jsonl")"
 
 echo "archiving RustFS Docker volume"
 "${compose[@]}" run --rm --no-deps --entrypoint sh \
@@ -325,7 +332,8 @@ cat > "$backup_dir/meta/manifest.json" <<EOF
       "manual_provider_dedup_cases": {"path": "$cases_jsonl", "row_count": $cases_count, "sha256": "$cases_sha256"},
       "manual_provider_dedup_resolutions": {"path": "$resolutions_jsonl", "row_count": $resolutions_count, "sha256": "$resolutions_sha256"},
       "feature_reference_reconciliation_events": {"path": "$events_jsonl", "row_count": $events_count, "sha256": "$events_sha256"},
-      "feature_reference_reconciliation_acks": {"path": "$acks_jsonl", "row_count": $acks_count, "sha256": "$acks_sha256"}
+      "feature_reference_reconciliation_acks": {"path": "$acks_jsonl", "row_count": $acks_count, "sha256": "$acks_sha256"},
+      "feature_reference_reconciliation_subscriptions": {"path": "$subscriptions_jsonl", "row_count": $subscriptions_count, "sha256": "$subscriptions_sha256"}
     }
   }
 }
@@ -336,6 +344,7 @@ EOF
   sha256sum "$app_dump" "$dagster_dump" "$rustfs_archive" \
     "$claim_jsonl" "$origin_jsonl" "$commands_jsonl" "$results_jsonl" "$requests_jsonl" \
     "$cases_jsonl" "$resolutions_jsonl" "$events_jsonl" "$acks_jsonl" \
+    "$subscriptions_jsonl" \
     > meta/SHA256SUMS
 )
 

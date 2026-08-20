@@ -37,6 +37,19 @@ services:
   db-role-bootstrap-m01:
     profiles: ["local-infra"]
 
+  # 외부 DB에서는 M05 전용 role/migration/repair도 운영자가 별도 수행한다.
+  db-migrate-to-m05-bootstrap-boundary:
+    profiles: ["local-infra"]
+
+  db-role-bootstrap-m05-pre:
+    profiles: ["local-infra"]
+
+  db-migrate-m05:
+    profiles: ["local-infra"]
+
+  db-role-bootstrap-m05-repair:
+    profiles: ["local-infra"]
+
   api:
     depends_on: !override
       rustfs-init:

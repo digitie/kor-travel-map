@@ -114,13 +114,16 @@ canonical JSONL로 내보내고, 각 row count와 SHA-256 root를 기록한다.
 - `ops.manual_provider_dedup_resolutions` (`resolution_id`)
 - `ops.feature_reference_reconciliation_events` (`event_sequence`)
 - `ops.feature_reference_reconciliation_acks` (`event_id`, `principal_id`)
+- `ops.feature_reference_reconciliation_subscriptions` (`principal_id`)
 
-subscription과 lease는 mutable operational state라 root 밖이다. 복구 verify는 staging DB에서 동일 JSONL
-root를 재계산해 manifest와 비교하고, event hash와 principal별 immutable ACK의 실제 연속 prefix를
-검증한다. 그 뒤 모든 worker/expiry를 무효화하고 prefix에서 `acked_through_sequence`를 재구성한다.
+lease만 mutable operational state라 root 밖이다. 복구 verify는 staging DB에서 동일 JSONL root를
+재계산해 manifest와 비교하고, event hash와 principal별 immutable ACK의 실제 연속 prefix 및
+subscription initial cursor 하한을 검증한다. 그 뒤 모든 worker/expiry를 무효화하고 prefix에서
+`acked_through_sequence`를 재구성한다.
 count/root, hash, ACK 순서 중 하나라도 다르거나 manifest가 없으면 swap/cache epoch fence를 진행하지
-않는다. owner repair, closed ACL reconcile, API/Dagster runtime preflight는 별도 activation gate로
-유지한다. 이 경계가 모두 완결되기 전에는 manual Feature route activation을 허용하지 않는다.
+않는다. v3 restore는 root 검증 전에 staging DB에 base/M01/M05 owner repair와 closed ACL reconcile을
+실행하고, API/Dagster runtime login catalog preflight를 통과해야 한다. 이 경계가 모두 완결되기
+전에는 manual Feature route activation을 허용하지 않는다.
 
 `scripts/docker-backup.sh`, `scripts/docker-restore.sh`,
 `scripts/docker-restore-swap.sh`는 `scripts/with-pg-advisory-lock.py`를 통해

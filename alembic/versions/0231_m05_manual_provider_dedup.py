@@ -220,6 +220,9 @@ CREATE TABLE ops.feature_reference_reconciliation_events (
 CREATE INDEX idx_feature_reference_reconciliation_events_sequence
     ON ops.feature_reference_reconciliation_events (event_sequence);
 
+GRANT USAGE ON SEQUENCE ops.feature_reference_reconciliation_events_event_sequence_seq
+    TO ktm_manual_provider_dedup_procedure_owner;
+
 CREATE TABLE ops.feature_reference_reconciliation_subscriptions (
     principal_id text PRIMARY KEY,
     initial_event_sequence bigint NOT NULL,
@@ -291,6 +294,30 @@ REVOKE ALL ON FUNCTION feature.reject_manual_provider_dedup_evidence_mutation()
     FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime,
     ktm_feature_dagster_runtime;
 
+CREATE FUNCTION feature.assert_feature_reference_reconciliation_lease_cursor()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, ops
+AS $m05_assert_lease_cursor$
+DECLARE
+    v_initial_event_sequence bigint;
+BEGIN
+    SELECT subscription.initial_event_sequence INTO v_initial_event_sequence
+    FROM ops.feature_reference_reconciliation_subscriptions AS subscription
+    WHERE subscription.principal_id = NEW.principal_id;
+    IF NOT FOUND OR NEW.acked_through_sequence < v_initial_event_sequence THEN
+        RAISE EXCEPTION 'reconciliation lease cursor precedes its subscription cursor'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_reconciliation_lease_initial_cursor';
+    END IF;
+    RETURN NEW;
+END
+$m05_assert_lease_cursor$;
+
+REVOKE ALL ON FUNCTION feature.assert_feature_reference_reconciliation_lease_cursor()
+    FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime,
+    ktm_feature_dagster_runtime;
+
 CREATE TRIGGER trg_manual_provider_dedup_cases_append_only
     BEFORE UPDATE OR DELETE ON ops.manual_provider_dedup_cases
     FOR EACH ROW EXECUTE FUNCTION feature.reject_manual_provider_dedup_evidence_mutation();
@@ -321,6 +348,10 @@ CREATE TRIGGER trg_feature_reference_reconciliation_subscriptions_append_only
 CREATE TRIGGER trg_feature_reference_reconciliation_subscriptions_no_truncate
     BEFORE TRUNCATE ON ops.feature_reference_reconciliation_subscriptions
     FOR EACH STATEMENT EXECUTE FUNCTION feature.reject_manual_provider_dedup_evidence_mutation();
+CREATE TRIGGER trg_feature_reference_reconciliation_leases_initial_cursor
+    BEFORE INSERT OR UPDATE OF principal_id, acked_through_sequence
+    ON ops.feature_reference_reconciliation_leases
+    FOR EACH ROW EXECUTE FUNCTION feature.assert_feature_reference_reconciliation_lease_cursor();
 
 CREATE PROCEDURE feature.record_manual_provider_dedup_candidate(
     IN p_manual_feature_id text,
@@ -591,6 +622,8 @@ DECLARE
     v_action text;
     v_payload jsonb;
     v_event_sha256 text;
+    v_event_sequence bigint;
+    v_occurred_at timestamptz;
 BEGIN
     IF current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'manual/provider dedup decision requires READ COMMITTED'
@@ -756,9 +789,17 @@ BEGIN
     END IF;
     v_action := CASE WHEN p_decision = 'merged' THEN 'rebind' ELSE 'detach' END;
     o_event_id := x_extension.gen_random_uuid();
+    SELECT nextval(pg_get_serial_sequence(
+        'ops.feature_reference_reconciliation_events', 'event_sequence'
+    )) INTO v_event_sequence;
+    v_occurred_at := clock_timestamp();
     v_payload := jsonb_build_object(
         'payload_schema_version', 1,
         'event_id', o_event_id,
+        'event_sequence', v_event_sequence,
+        'occurred_at', to_char(
+            v_occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+        ),
         'case_id', v_case.case_id,
         'resolution_id', o_resolution_id,
         'action', v_action,
@@ -780,19 +821,19 @@ BEGIN
         x_extension.digest(convert_to(v_payload::text, 'UTF8'), 'sha256'), 'hex'
     );
     INSERT INTO ops.feature_reference_reconciliation_events (
-        event_id, case_id, resolution_id, action,
+        event_id, event_sequence, case_id, resolution_id, action,
         old_feature_id, old_feature_uuid, old_feature_row_revision_before_transition,
         replacement_feature_id, replacement_feature_uuid, replacement_feature_row_revision,
         manual_retire_transition_id, manual_retire_row_revision_after_transition,
-        command_id, payload_schema_version, event_payload, event_sha256
-    ) VALUES (
-        o_event_id, v_case.case_id, o_resolution_id, v_action,
+        command_id, payload_schema_version, event_payload, event_sha256, occurred_at
+    ) OVERRIDING SYSTEM VALUE VALUES (
+        o_event_id, v_event_sequence, v_case.case_id, o_resolution_id, v_action,
         v_manual.feature_id, v_manual.feature_uuid, v_manual.row_revision,
         CASE WHEN v_action = 'rebind' THEN v_provider.feature_id END,
         CASE WHEN v_action = 'rebind' THEN v_provider.feature_uuid END,
         CASE WHEN v_action = 'rebind' THEN v_provider.row_revision END,
         v_transition_id, v_transition_row_revision, p_domain_command_id,
-        1, v_payload, v_event_sha256
+        1, v_payload, v_event_sha256, v_occurred_at
     );
     o_manual_feature_row_revision := v_transition_row_revision;
     o_outcome := p_decision;
@@ -855,6 +896,10 @@ BEGIN
     FOR UPDATE;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'feature reference reconciliation subscription lacks lease state'
+            USING ERRCODE = '55000';
+    END IF;
+    IF v_lease.acked_through_sequence < v_subscription.initial_event_sequence THEN
+        RAISE EXCEPTION 'feature reference reconciliation lease cursor is below subscription cursor'
             USING ERRCODE = '55000';
     END IF;
     SELECT event.* INTO v_event
@@ -1070,4 +1115,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError("T-VN-M05 evidence migration is forward-only")
+    raise RuntimeError("0231_m05_manual_provider_dedup is forward-only")

@@ -89,9 +89,11 @@ retire+`detach`를 global fence 안에서 append-only resolution/event로 만든
 cursor 다음의 실제 최소 sequence를 worker lease/epoch으로 독점하고 exact event hash와 local
 receipt hash를 strict-prefix ack로 결박한다. 실제 runtime login integration에서 executor 차단,
 candidate replay, merged lifecycle/event·source link 보존, 경쟁 lease, ack/replay와 API/Dagster
-catalog preflight를 검증했다. backup manifest v3는 case·resolution·event·ack root를 같은 snapshot에
-고정하며, restore verifier는 hash/연속 prefix를 다시 대조한 뒤 worker lease를 무효화하고 cursor를
-재구성한다.
+catalog preflight를 검증했다. event hash는 UTC `occurred_at`까지 포함한 canonical envelope 전체를
+고정한다. backup manifest v3는 case·resolution·event·ack·subscription root를 같은 snapshot에
+고정하며, restore verifier는 envelope/관계형 행 hash와 연속 prefix를 다시 대조한 뒤 worker lease를 무효화하고 cursor를
+재구성한다. v3 staging restore는 root 전에 base/M01/M05 ownership·ACL repair와 API/Dagster catalog
+preflight까지 실행한다.
 
 ### 다음 한 작업
 

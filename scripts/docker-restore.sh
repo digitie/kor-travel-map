@@ -174,6 +174,130 @@ fi
 
 compose=(docker compose --env-file /dev/null)
 
+rewrite_postgres_dsn_database() {
+  local dsn="$1"
+  local database_name="$2"
+  local python_bin
+  python_bin="$(select_python)"
+  KOR_TRAVEL_MAP_RESTORE_SOURCE_DSN="$dsn" \
+    "$python_bin" - "$database_name" <<'PY'
+from __future__ import annotations
+
+import os
+import sys
+from urllib.parse import quote, urlsplit, urlunsplit
+
+database = sys.argv[1]
+parts = urlsplit(os.environ["KOR_TRAVEL_MAP_RESTORE_SOURCE_DSN"])
+if not parts.scheme.startswith("postgresql") or not parts.netloc:
+    raise SystemExit("restore repair requires a PostgreSQL URL DSN")
+print(urlunsplit((parts.scheme, parts.netloc, "/" + quote(database, safe=""), parts.query, "")))
+PY
+}
+
+restore_evidence_schema_version() {
+  local python_bin
+  python_bin="$(select_python)"
+  "$python_bin" - "$manifest" <<'PY'
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+try:
+    value = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))[
+        "manual_feature_evidence"
+    ]["schema_version"]
+except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError):
+    value = 0
+print(value if isinstance(value, int) else 0)
+PY
+}
+
+require_restore_boundary_value() {
+  local name="$1"
+  if [[ -z "${!name:-}" ]]; then
+    echo "M05 restore boundary requires $name" >&2
+    exit 1
+  fi
+}
+
+run_restore_bootstrap_phase() {
+  local phase="$1"
+  local bootstrap_dsn="$2"
+  KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_ENABLED=true \
+  KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE="$phase" \
+  KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE="$KOR_TRAVEL_MAP_RESTORE_APP_DB" \
+  KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN="$bootstrap_dsn" \
+  KOR_TRAVEL_MAP_POSTGRES_DB="$KOR_TRAVEL_MAP_RESTORE_APP_DB" \
+    "${compose[@]}" run --rm --no-deps db-role-bootstrap
+}
+
+preflight_restored_runtime_login() {
+  local runtime_dsn="$1"
+  local expected_login="$2"
+  KOR_TRAVEL_MAP_PG_DSN="$runtime_dsn" \
+    "${compose[@]}" run --rm --no-deps --entrypoint python \
+      api - "$expected_login" <<'PY'
+from __future__ import annotations
+
+import asyncio
+import os
+import sys
+
+from kortravelmap.infra.db import assert_runtime_db_privilege_boundary, make_async_engine
+
+
+async def main() -> None:
+    engine = make_async_engine(os.environ["KOR_TRAVEL_MAP_PG_DSN"])
+    try:
+        await assert_runtime_db_privilege_boundary(engine, expected_login=sys.argv[1])
+    finally:
+        await engine.dispose()
+
+
+asyncio.run(main())
+PY
+}
+
+repair_v3_restored_manual_feature_boundary() {
+  if [[ "$(restore_evidence_schema_version)" != "3" ]]; then
+    return
+  fi
+
+  local required_name
+  for required_name in \
+    KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN \
+    KOR_TRAVEL_MAP_MIGRATOR_PG_DSN \
+    KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN \
+    KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN \
+    KOR_TRAVEL_MAP_MIGRATOR_PASSWORD \
+    KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD \
+    KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD; do
+    require_restore_boundary_value "$required_name"
+  done
+
+  local restore_bootstrap_dsn restore_migrator_dsn restore_api_dsn restore_dagster_dsn
+  restore_bootstrap_dsn="$(rewrite_postgres_dsn_database \
+    "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" "$KOR_TRAVEL_MAP_RESTORE_APP_DB")"
+  restore_migrator_dsn="$(rewrite_postgres_dsn_database \
+    "$KOR_TRAVEL_MAP_MIGRATOR_PG_DSN" "$KOR_TRAVEL_MAP_RESTORE_APP_DB")"
+  restore_api_dsn="$(rewrite_postgres_dsn_database \
+    "$KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN" "$KOR_TRAVEL_MAP_RESTORE_APP_DB")"
+  restore_dagster_dsn="$(rewrite_postgres_dsn_database \
+    "$KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN" "$KOR_TRAVEL_MAP_RESTORE_APP_DB")"
+
+  run_restore_bootstrap_phase legacy "$restore_bootstrap_dsn"
+  run_restore_bootstrap_phase m05-pre "$restore_bootstrap_dsn"
+  run_restore_bootstrap_phase m05-repair "$restore_bootstrap_dsn"
+  KOR_TRAVEL_MAP_PG_DSN="$restore_migrator_dsn" \
+    "${compose[@]}" run --rm --no-deps --entrypoint python \
+      api -m kortravelmap.infra.runtime_privileges
+  preflight_restored_runtime_login "$restore_api_dsn" ktm_feature_api_runtime
+  preflight_restored_runtime_login "$restore_dagster_dsn" ktm_feature_dagster_runtime
+}
+
 database_exists() {
   local database_name="$1"
   "${compose[@]}" exec -T postgres psql \
@@ -229,8 +353,9 @@ restore_database() {
     --analyze-in-stages
 }
 
+evidence_schema_version="$(restore_evidence_schema_version)"
 marker_verification="performed"
-if [[ "$KOR_TRAVEL_MAP_RESTORE_SKIP_VERIFY" == "1" ]]; then
+if [[ "$KOR_TRAVEL_MAP_RESTORE_SKIP_VERIFY" == "1" && "$evidence_schema_version" != "3" ]]; then
   marker_verification="skipped"
 fi
 
@@ -258,6 +383,8 @@ restore_database "$app_dump" "$KOR_TRAVEL_MAP_RESTORE_APP_DB"
 prepare_database "$KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB"
 restore_database "$dagster_dump" "$KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB"
 
+repair_v3_restored_manual_feature_boundary
+
 if [[ "$KOR_TRAVEL_MAP_RESTORE_SKIP_RUSTFS" != "1" ]]; then
   if docker volume inspect "$KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME" >/dev/null 2>&1; then
     if [[ "$KOR_TRAVEL_MAP_RESTORE_RECREATE" != "1" ]]; then
@@ -284,7 +411,9 @@ if [[ "$KOR_TRAVEL_MAP_RESTORE_SKIP_RUSTFS" != "1" ]]; then
   echo "RustFS volume: $KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME"
 fi
 
-if [[ "$KOR_TRAVEL_MAP_RESTORE_SKIP_VERIFY" != "1" ]]; then
+# v3은 M05 구독/ACK root에서 lease를 재구성해야 한다. 그 재구성은 root 검증기의
+# fail-closed 후처리이므로 일반적인 verify 우회로 건너뛸 수 없다.
+if [[ "$KOR_TRAVEL_MAP_RESTORE_SKIP_VERIFY" != "1" || "$evidence_schema_version" == "3" ]]; then
   KOR_TRAVEL_MAP_RESTORE_APP_DB="$KOR_TRAVEL_MAP_RESTORE_APP_DB" \
   KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB="$KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB" \
   KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME="$KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME" \

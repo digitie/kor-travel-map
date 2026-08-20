@@ -635,6 +635,9 @@ async def repair_tvn_m05_role_phase(async_dsn: str) -> None:
                 "GRANT SELECT, INSERT, UPDATE ON TABLE "
                 "ops.feature_reference_reconciliation_leases "
                 "TO ktm_manual_provider_dedup_procedure_owner",
+                "GRANT USAGE ON SEQUENCE "
+                "ops.feature_reference_reconciliation_events_event_sequence_seq "
+                "TO ktm_manual_provider_dedup_procedure_owner",
             ):
                 await connection.execute(text(statement))
             await connection.execute(
@@ -667,6 +670,13 @@ async def repair_tvn_m05_role_phase(async_dsn: str) -> None:
             await connection.execute(
                 text(
                     "ALTER FUNCTION feature.reject_manual_provider_dedup_evidence_mutation() "
+                    "OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER FUNCTION "
+                    "feature.assert_feature_reference_reconciliation_lease_cursor() "
                     "OWNER TO ktm_manual_provider_dedup_procedure_owner"
                 )
             )

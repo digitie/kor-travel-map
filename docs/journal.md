@@ -155,11 +155,17 @@ equal range, public/admin active predicate와 notice candidate detail 회귀를 
 수정 후 targeted integration 2건을 통과했다.
 ## 2026-08-21 — T-VN-M05 backup v3 evidence root와 restore lease 재구축
 
-backup manifest를 v3로 올려 case·resolution·reconciliation event·ACK을 같은 exported
+backup manifest를 v3로 올려 case·resolution·reconciliation event·ACK·immutable subscription을 같은 exported
 snapshot의 canonical JSONL count/SHA-256 root에 포함했다. restore verifier는 root 재계산 뒤
-ACK의 stored event hash와 subscription cursor 이후의 실제 event prefix를 검사한다. 불연속 ACK이나
-hash 불일치는 fail-loud이며, 통과하면 live worker/expiry를 지우고 prefix에서 cursor를 재구축한다.
+ACK의 stored event hash와 subscription cursor 이후의 실제 event prefix를 검사한다. event hash는
+UTC `occurred_at`까지 포함한 canonical envelope 전체이며 verifier는 관계형 행과 다시 조립해 대조한다.
+불연속 ACK이나 hash 불일치는 fail-loud이며, 통과하면 live worker/expiry를 지우고 prefix에서 cursor를
+재구축한다.
 이미 무효화된 lease에는 epoch를 재증가시키지 않아 verifier 재실행도 안정적이다.
+
+v3 staging restore는 root 검증 전에 base/M01/M05 ownership·ACL repair를 다시 실행하고, 두 runtime
+LOGIN의 catalog preflight까지 통과해야 한다. M05 pre/migrate phase는 `0230/role-ready` 재시도와
+`0231` 완료 재기동을 구분해 허용하고 partial marker는 계속 중단한다.
 
 운영 verifier의 SQL을 integration에서 그대로 실행해 ACK cursor 보존, worker fence 무효화와
 idempotent 재실행을 확인했다. backup runbook unit 13건과 M05 integration, ruff, Bash syntax가

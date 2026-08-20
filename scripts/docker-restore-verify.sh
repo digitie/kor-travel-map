@@ -135,6 +135,7 @@ try:
                 "manual_provider_dedup_resolutions",
                 "feature_reference_reconciliation_events",
                 "feature_reference_reconciliation_acks",
+                "feature_reference_reconciliation_subscriptions",
             )
         )
     for name in names:
@@ -186,6 +187,9 @@ PY
       feature_reference_reconciliation_acks)
         select_sql="SELECT to_jsonb(ack)::text FROM ops.feature_reference_reconciliation_acks AS ack ORDER BY ack.event_id, ack.principal_id"
         ;;
+      feature_reference_reconciliation_subscriptions)
+        select_sql="SELECT to_jsonb(subscription)::text FROM ops.feature_reference_reconciliation_subscriptions AS subscription ORDER BY subscription.principal_id"
+        ;;
       *)
         echo "Restore verification failed: unknown manual evidence relation" >&2
         exit 1
@@ -205,8 +209,8 @@ PY
 }
 
 rebuild_feature_reference_reconciliation_leases() {
-  # lease와 subscription은 mutable operational state라 v3 evidence root에는 넣지
-  # 않는다. 다만 immutable ACK/event의 실제 prefix에서 cursor를 다시 만들고,
+  # subscription은 immutable evidence root에 포함한다. lease만 mutable operational
+  # state라 root 밖이며, immutable ACK/event의 실제 prefix에서 cursor를 다시 만들고,
   # dump 시점의 worker fencing token은 반드시 무효화한다. 이 함수는 이미
   # 무효화된 lease에는 epoch를 다시 올리지 않아 verify 재실행에도 안정적이다.
   if ! docker compose --env-file /dev/null exec -T postgres psql \
@@ -217,6 +221,53 @@ DO $m05_restore_reconcile$
 BEGIN
     IF to_regclass('ops.feature_reference_reconciliation_events') IS NULL THEN
         RETURN;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM ops.feature_reference_reconciliation_events AS event
+        WHERE event.event_sha256 <> encode(
+            x_extension.digest(
+                convert_to(event.event_payload::text, 'UTF8'), 'sha256'
+            ), 'hex'
+        )
+    ) THEN
+        RAISE EXCEPTION 'M05 restore has an event payload hash mismatch'
+            USING ERRCODE = '55000';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM ops.feature_reference_reconciliation_events AS event
+        WHERE event.event_payload IS DISTINCT FROM jsonb_build_object(
+            'payload_schema_version', event.payload_schema_version,
+            'event_id', event.event_id,
+            'event_sequence', event.event_sequence,
+            'occurred_at', to_char(
+                event.occurred_at AT TIME ZONE 'UTC',
+                'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+            ),
+            'case_id', event.case_id,
+            'resolution_id', event.resolution_id,
+            'action', event.action,
+            'old_feature', jsonb_build_object(
+                'feature_id', event.old_feature_id,
+                'feature_uuid', event.old_feature_uuid,
+                'row_revision', event.old_feature_row_revision_before_transition
+            ),
+            'replacement_feature', CASE WHEN event.action = 'rebind' THEN jsonb_build_object(
+                'feature_id', event.replacement_feature_id,
+                'feature_uuid', event.replacement_feature_uuid,
+                'row_revision', event.replacement_feature_row_revision
+            ) ELSE NULL END,
+            'manual_retire_transition_id', event.manual_retire_transition_id,
+            'manual_retire_row_revision_after_transition',
+                event.manual_retire_row_revision_after_transition,
+            'command_id', event.command_id
+        )
+    ) THEN
+        RAISE EXCEPTION 'M05 restore has an event envelope/row mismatch'
+            USING ERRCODE = '55000';
     END IF;
 
     IF EXISTS (

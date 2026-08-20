@@ -430,6 +430,8 @@ _M05_SCHEMA_OWNER_DEPENDENCY_ACL = (
     "TO ktm_manual_provider_dedup_procedure_owner",
     "GRANT SELECT, INSERT, UPDATE ON TABLE ops.feature_reference_reconciliation_leases "
     "TO ktm_manual_provider_dedup_procedure_owner",
+    "GRANT USAGE ON SEQUENCE ops.feature_reference_reconciliation_events_event_sequence_seq "
+    "TO ktm_manual_provider_dedup_procedure_owner",
 )
 
 _M05_STATE_OWNER_DEPENDENCY_ACL = (
@@ -440,6 +442,9 @@ _M05_STATE_OWNER_DEPENDENCY_ACL = (
 
 _M05_WRITER_ACL = (
     "REVOKE ALL ON FUNCTION feature.reject_manual_provider_dedup_evidence_mutation() "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, "
+    "ktm_feature_dagster_runtime",
+    "REVOKE ALL ON FUNCTION feature.assert_feature_reference_reconciliation_lease_cursor() "
     "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, "
     "ktm_feature_dagster_runtime",
     "REVOKE ALL ON PROCEDURE feature.record_manual_provider_dedup_candidate("

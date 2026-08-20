@@ -91,7 +91,7 @@ def test_docker_compose_uses_persistent_dagster_storage_and_daemon() -> None:
     assert "dagster-db-init" in dagster["depends_on"]
     assert "dagster-db-init" in daemon["depends_on"]
     for service in (dagster, daemon):
-        assert service["depends_on"]["db-role-bootstrap-m01"] == {
+        assert service["depends_on"]["db-role-bootstrap-m05-repair"] == {
             "condition": "service_completed_successfully"
         }
 
@@ -111,7 +111,7 @@ def test_tvn34_compose_never_derives_runtime_or_metadata_credentials_from_bootst
         assert compose[service_name]["environment"]["KOR_TRAVEL_MAP_PG_DSN"].endswith(
             "is required}"
         )
-        assert compose[service_name]["depends_on"]["db-role-bootstrap-m01"] == {
+        assert compose[service_name]["depends_on"]["db-role-bootstrap-m05-repair"] == {
             "condition": "service_completed_successfully"
         }
 
@@ -615,7 +615,9 @@ def test_tvn_m01_role_phase_runs_only_after_legacy_0225_boundary() -> None:
     assert "M05 relation marker is partial" in m05_boundary_script
     assert "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" not in m05_boundary_script
     m05_migration_script = _script("docker/migrate-m05.sh")
-    assert "M05 migration requires the exact 0230 role boundary" in m05_migration_script
+    assert "M05 migration marker is not a retryable boundary" in m05_migration_script
+    assert "set +e" in m05_migration_script
+    assert "marker_status=$?" in m05_migration_script
     assert "alembic upgrade 0231_m05_manual_provider_dedup" in m05_migration_script
     dockerfile = _script("docker/api.Dockerfile")
     assert "migrate-to-m01-bootstrap-boundary.sh" in dockerfile
@@ -3496,6 +3498,7 @@ def test_external_overlays_keep_candidate_storage_migration_ordering(
         # 연결하며, profile-disabled service를 readiness edge로 참조하지 않는다.
         assert "db-role-bootstrap" not in depends, (overlay, name, depends)
         assert "db-role-bootstrap-m01" not in depends, (overlay, name, depends)
+        assert "db-role-bootstrap-m05-repair" not in depends, (overlay, name, depends)
         assert depends.get("dagster-storage-migrate", {}).get("condition") == (
             "service_completed_successfully"
         ), (overlay, name, depends)
@@ -3507,7 +3510,7 @@ def test_external_overlays_keep_candidate_storage_migration_ordering(
 
 
 @pytest.mark.unit
-def test_tvn_m01_external_db_overlays_do_not_start_local_phase_services() -> None:
+def test_tvn_m05_external_db_overlays_do_not_start_local_phase_services() -> None:
     """공유 DB는 같은 phase 절차를 운영자가 별도로 실행한다."""
 
     for overlay in (
@@ -3519,6 +3522,10 @@ def test_tvn_m01_external_db_overlays_do_not_start_local_phase_services() -> Non
             "db-role-bootstrap:",
             "db-migrate-to-m01-bootstrap-boundary:",
             "db-role-bootstrap-m01:",
+            "db-migrate-to-m05-bootstrap-boundary:",
+            "db-role-bootstrap-m05-pre:",
+            "db-migrate-m05:",
+            "db-role-bootstrap-m05-repair:",
         ):
             assert (
                 f'{service_name}\n    profiles: ["local-infra"]' in text

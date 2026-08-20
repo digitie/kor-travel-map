@@ -32,10 +32,11 @@ retired identity를 계속 보관한다. 반대로 Map이 소비자 DB를 직접
    `manual_retired`는 manual Feature만 retire하고 `detach` event를 낸다. `kept`는 Feature를
    바꾸지 않는다. 모든 판단은 `AdminBFF`가 필수이며 `merged`/`manual_retired`는 DB writer보다
    먼저 destructive kill-switch도 통과해야 한다.
-4. Map은 consumer-independent service contract로 event를 pull delivery하고 principal별 ack를
-   append-only로 보존한다. `event_sequence`은 global feature-curation advisory fence 안에서만
+4. Map은 consumer-independent service contract로 event를 pull delivery하고 principal별 ack와
+   immutable subscription cursor를 append-only로 보존한다. `event_sequence`은 global feature-curation advisory fence 안에서만
    발급·commit하여 commit-visible 순서와 같다. service principal마다 mutable operational lease와
-   acked-through prefix를 두어 한 worker만 가장 이른 미ack event를 처리하게 한다. 소비자는 자기
+   acked-through prefix를 두어 한 worker만 가장 이른 미ack event를 처리하게 한다. lease cursor는
+   subscription initial cursor보다 절대 낮아질 수 없다. 소비자는 자기
    DB transaction 안에서 참조 rebind/detach receipt와 영향 row를 commit한 뒤에만 그 event를
    ack한다. Map은 특정 소비자 이름을 식별자·role·환경변수·route에 넣지 않는다.
 5. 이 protocol은 **paired cutover**다. Map resolution writer는 consumer 재결합 service spec을
