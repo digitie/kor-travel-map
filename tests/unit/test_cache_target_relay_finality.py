@@ -95,9 +95,11 @@ def test_executor_suppresses_only_epoch_moved() -> None:
 
     source = inspect.getsource(feature_update_executor)
     assert "EPOCH_MOVED" in source, "억제 판단이 reason을 보지 않는다"
-    assert "not isinstance(\n                exc, CacheTargetRefreshProtocolViolation\n            )" not in source, (
-        "예외 클래스 전체를 억제하던 옛 규칙이 되살아났다"
+    old_rule = (
+        "not isinstance(\n                exc, "
+        "CacheTargetRefreshProtocolViolation\n            )"
     )
+    assert old_rule not in source, "예외 클래스 전체를 억제하던 옛 규칙이 되살아났다"
 
 
 def test_cancellation_service_uses_the_shared_helper_on_both_paths() -> None:
