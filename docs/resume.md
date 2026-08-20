@@ -30,6 +30,23 @@ ADR-094 추가 + ADR-076/079 superseded.
 
 주의: v5/v7은 `require_rebuildable_mode` 아래에서만 생성되고(n150은 rehearsal/
 rebuildable로 해당), runner에는 **root 소유 0600 사본**을 건네야 한다.
+## 2026-08-20 — #995 접어넣기 + C7 두 항목 종결
+
+`#995`가 v5/v7 attestation을 이미 구현하고 있었다(내 중복 착수). 정본은 #1032(ADR-094)로
+두고 supersede했으며, 남은 고유 가치를 main 위에 이식했다.
+
+| 무엇 | 결과 |
+|---|---|
+| C7 cleanup 소유권 결박 | journal v3 → **v4**(`request_ownership`). 발견 루프가 dataset의 active를 무조건 채택하던 것을 소유 삼중이 맞을 때만 채택하도록, 취소는 소유를 말할 수 없으면 포기하도록 |
+| 교차 경계 파손 | `run-c7-prod-live-e2e.sh`가 최종 journal을 `version != 3`으로 거부 → v4 + `request_ownership` 요구로, 계약 단언도 신설 |
+| `T-C7-LIVE-SERIAL` | cross-worker `mkdir` 잠금(`_ops-c7-exact-scope-lock.ts`) + write 3종 결선. read-only preflight는 근거를 남기고 제외 |
+| `T-C7-SCOPE-REGISTRY` | `integration-map.md` §3.7 + ADR-088 결과 |
+
+### 다음 한 작업
+
+`T-VN-41S` 후속 — `0227+` 정규화 migration, 양방향 material 공유, terminal compactor,
+repository 410, n150 1M soak. 이것이 migration head를 올리므로 `T-VN-FINAL-REBUILD`
+배리어보다 반드시 먼저 온다.
 
 ## 2026-08-20 — T-VN-34C fresh-live runner와 M01 credential 계약 정렬
 
@@ -49,6 +66,7 @@ backup tranche와 실제 route 활성화는 아직 남아 있다.
 `T-VN-M01`의 `0226` forward-only migration·ACL·backup tranche를 구현·검증한다. 그 뒤에도
 `T-VN-41S`·C05 provider dataset·H34 잔여가 `T-VN-FINAL-REBUILD` 배리어를 유지하며,
 파괴적 rebuild와 D1/D2/final C7 live는 주요 개발 완료 뒤에만 실행한다.
+||||||| parent of d77ea42d (docs(c7): #995 접어넣기와 C7 두 항목 종결 기록)
 
 ## 2026-08-20 — 파괴적 재구축을 배리어로 분리 (`T-VN-FINAL-REBUILD` 신설)
 

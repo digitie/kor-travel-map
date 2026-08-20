@@ -2,6 +2,56 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-20 — 중복 착수, 그리고 cleanup이 남의 요청을 취소할 수 있었다
+
+열린 PR을 훑다가 `#995`(codex, 8/18 draft)가 **내가 오늘 #1032에서 만든 v5/v7 attestation
+전환을 이미 구현해 두었다**는 것을 발견했다. role→image field 매핑 일곱 개가 이름까지
+같았다. 착수 전에 열린 PR을 확인하지 않은 내 잘못이다. 사용자가 `#1028`(CI 8/8 green인데
+내가 머지를 놓친 것)을 짚어 주지 않았다면 더 늦게 알았을 것이다.
+
+파일별로 대조해 보니 **공유 파일은 예외 없이 main이 앞서 있었다** — nav 19개(#995는 18),
+ADR-088 triple identity, 3축 상태 라벨, `provider_issues` 축 제거, `fillKmaRequestDialogScope`
+helper 추출. #995가 지우려던 `admin-ops.spec.ts` 1,028줄은 main에서 이미 정리돼 **통과
+중**이라, 그 삭제를 받았으면 살아 있는 커버리지를 잃었다. 그래서 정본은 #1032로 두고
+#995는 supersede했다.
+
+**남은 고유 가치는 접어넣었다.** 그리고 그 과정에서 이 이식의 진짜 값이 드러났다.
+
+main의 C7 cleanup 발견 루프는 dataset에 붙은 active execution을 **무조건**
+`state.requestIds`에 넣고, 이후 non-terminal이면 취소했다. C7 dataset에 외부 운영 요청이
+활성이면 **그것을 취소했다**는 뜻이다. 이제 request id ↔ idempotency entry ↔ provider
+dataset/sync scope/operation 삼중이 정확히 맞는 것만 채택하고, 하나라도 소유를 말할 수
+없으면 그 run의 cancel 자체를 포기한다(남은 것은 수동 정리로 넘긴다 — 남의 요청을
+취소하는 것보다 낫다). journal은 v3 → **v4**로 올려 `request_ownership`을 싣는다.
+
+#995를 통째로 가져오지 않은 이유가 여기서도 나온다 — 그 helper는 3,844줄 재작성이라
+main의 ADR-088 작업을 지운다. 소유권 기능만 발췌해 main 위에 얹었다.
+
+**이식 중 교차 경계 파손을 하나 잡았다.** `run-c7-prod-live-e2e.sh`가 최종 journal을
+`version != 3`으로 거부한다. 브라우저 lane만 v4로 올렸으면 러너가 자기 journal을 거부했을
+것이다 — 오늘 적대 리뷰가 attestation에서 지적한 "한쪽만 올린 version"과 정확히 같은
+모양이다. shell을 v4 + `request_ownership` 요구로 올리고, 이 버전을 고정하는 계약 단언이
+아예 없었기에 drift 게이트도 함께 넣었다.
+
+**그리고 오늘 두 번째로 mocked e2e를 운영 admin UI에 겨눴다.** mocked config는 `webServer`가
+없어 이미 떠 있는 `127.0.0.1:12705`(= 운영 admin UI)를 그대로 친다. 25분을 태우고 알아챘다.
+prod DB를 확인해 90분 내 write 0건으로 무해를 확인했지만(모든 REST가 `page.route`로
+가로채진다), 같은 실수를 세 번째로 하지 않도록 실행 스크립트가 전용 포트에 자체 서버를
+띄우고 빌드 env를 checkpoint runner와 같은 discard 포트(`127.0.0.1:9`)로 고정하게 했다.
+
+함께 닫은 두 항목:
+
+- **T-C7-LIVE-SERIAL** — live config이 `fullyParallel: true` + worker 4인데 고정
+  `external_system:c7-e2e`를 쓰는 spec들이 `provider_sync_state` 한 행과
+  `membership_fingerprint`를 공유한다. **파일 병합 대신 cross-worker 잠금**을 택했다.
+  `describe.serial`은 한 파일 안에서만 순서를 강제하고, 1,575줄을 상수 충돌과 함께 합치면
+  회귀 위험이 크며 scope를 쓰는 spec이 늘 때마다 다시 합쳐야 한다. 원자적 `mkdir` 잠금에
+  소유자 pid 생존·나이 상한을 얹어 crash가 이후 실행을 영구 차단하지 않게 했다. 취득
+  찰나(mkdir은 됐고 owner.json은 아직인 상태)를 빼앗지 않는 것까지 테스트로 고정했다.
+- **T-C7-SCOPE-REGISTRY** — `external_system:*` scope의 선언 주체·근거·조회 표면이
+  migration `0224`의 docstring 안에만 있어 저장소 밖에서 발견되지 않았다.
+  `integration-map.md` §3.7과 ADR-088 결과로 올렸다.
+
 ## 2026-08-20 — T-VN-41F1D-E: 세대가 자라도 검사는 자라지 않던 계약
 
 live runner 두 개(`run-c7-prod-live-e2e.sh`, `run-admin-feature-live-acceptance.sh`)가

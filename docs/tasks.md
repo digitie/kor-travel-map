@@ -566,10 +566,21 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   40C branch 양쪽 모두 276이라 40C가 만든 drift가 아니다. suite 자체는 276/276
   green(7.2분, flake 0)인데 checkpoint gate만 red다. baseline 재고정 시점은
   expected-failure 인벤토리 의미와 함께 별도로 정한다.
-- [ ] **T-C7-SCOPE-REGISTRY** — `external_system:*` exact-target scope의 선언 주체·근거·
+- [x] **T-C7-SCOPE-REGISTRY** — `external_system:*` exact-target scope의 선언 주체·근거·
   운영 조회 표면을 `docs/integration-map.md` 또는 ADR-088 consequences에 정본화한다.
-- [ ] **T-C7-LIVE-SERIAL** — 고정 `external_system:c7-e2e`를 쓰는 KMA live 3종이 서로의
+  → 2026-08-20 완료. 근거는 migration `0224`의 docstring 안에만 있어 저장소 밖에서
+  발견되지 않았다. `integration-map.md` §3.7(선언 주체·`target_grids`를 쓰지 않는 이유·
+  조회 표면 5곳·현재 선언된 이름·직렬화 제약)과 ADR-088 결과로 올렸다.
+- [x] **T-C7-LIVE-SERIAL** — 고정 `external_system:c7-e2e`를 쓰는 KMA live 3종이 서로의
   `membership_fingerprint`를 오염시키지 않도록 파일 병합 또는 worker lock으로 직렬화한다.
+  → 2026-08-20 완료. live config이 `fullyParallel: true` + worker 기본 4임을 실측했다.
+  **파일 병합 대신 cross-worker 잠금**을 택했다 — `describe.serial`은 한 파일 안에서만
+  순서를 강제하고, 1,575줄을 상수 이름 충돌과 함께 병합하면 회귀 위험이 크며 scope를
+  쓰는 spec이 늘 때마다 다시 합쳐야 한다. `e2e/live/_ops-c7-exact-scope-lock.ts`가
+  원자적 `mkdir` 잠금에 소유자 pid 생존·나이 상한을 얹어 crash가 이후 실행을 영구
+  차단하지 않게 한다. write 3종에 결선했고 read-only preflight는 **의도적으로 제외**
+  (근거를 spec에 명시). 잠금 자체는 mocked spec 4종으로 검증한다 — 상호배제·해제 멱등·
+  죽은 소유자 회수·취득 찰나를 빼앗지 않음.
 
 ## Lane B 상세 — b1 PinVi 결합·후속
 
@@ -745,7 +756,12 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 > #995가 지우려던 `admin-ops.spec.ts`는 main에서 이미 정리돼 **통과 중**이다(지우면 살아 있는
 > 커버리지를 잃는다). 아래만 실제로 남은 고유 가치다.
 
-- [ ] **T-C7-BROWSER-EVIDENCE — browser-only C7 lane 커버리지 보강** *(인수 게이트 아님)*
+- [x] **T-C7-BROWSER-EVIDENCE — browser-only C7 lane 커버리지 보강** *(2026-08-20 접어넣음)*
+
+  > 사용자 지시로 백로그에 두지 않고 즉시 이식했다. #995의 helper를 통째로 가져오면
+  > main의 ADR-088 작업(`C7_KMA_SYNC_SCOPE` 계열 상수, `fillKmaRequestDialogScope`)을
+  > 지우므로 소유권 기능만 발췌해 얹었다. journal은 #995의 v5 대신 **v4**로 매겼다 —
+  > main이 v3이고 그 사이에 v4가 없어 번호를 비울 이유가 없다.
 
   C7 prod live 6-spec 게이트는 main에서 이미 GREEN이다(`d5693269`). 이 항목은 그 위에 얹는
   보강이며 `T-VN-41` 마감을 막지 않는다.
