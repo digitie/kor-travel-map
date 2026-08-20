@@ -9,12 +9,17 @@
 2. **1,000,001 rejection의 zero partial row** — 상한을 하나 넘긴 상태에서 typed `413`이
    나고 material/receipt/item이 **한 행도** 남지 않는지 본다. admission은 header INSERT
    **전에** 판정하므로 rollback이 아니라 애초에 쓰지 않는 것이 계약이다.
-3. **concurrent mutation의 fixed membership** — scan이 도는 동안 source head를 바꾸고,
-   고정된 membership이 그 변경을 반영하지 않으며 replay cursor가 안전한 하한인지 본다.
-4. **compaction 전후 relation bytes/dead tuple/vacuum** — 되찾은 공간을 숫자로 남긴다.
+3. **compaction 전후 relation bytes/dead tuple/vacuum** — 되찾은 공간을 숫자로 남긴다.
 
-재지 않는 것: 운영 SLO, 동시 consumer 다수, VACUUM 튜닝. 이 스크립트는 **한 번의 실측
-증거**를 남길 뿐 처리량을 보증하지 않는다.
+**여기서 재지 않는 것**: 운영 SLO, 동시 consumer 다수, VACUUM 튜닝. 그리고
+**concurrent mutation의 fixed membership과 safe lower cursor는 이 스크립트가 재지
+않는다** — 그 성질은 `tests/integration/test_cache_target_stream_repo.py`의
+`test_fixed_snapshot_pages_ignore_concurrent_committed_write`,
+`test_snapshot_barrier_keeps_outbox_cursor_commit_safe_across_writers`,
+`test_generic_snapshot_reuse_ignores_nonmaterial_outbox_tail`이 작은 규모에서 정확히
+본다. 여기서 다시 흉내 내면 같은 성질을 덜 정확하게 보는 두 번째 게이트가 될 뿐이다.
+
+이 스크립트는 **한 번의 실측 증거**를 남길 뿐 처리량을 보증하지 않는다.
 
 **source head는 tombstone(`state='deleted'`)으로 심는다.** `active`는
 `target_id IS NOT NULL`을 요구하고 그 FK 때문에 `ops.poi_cache_targets` 1,000,000행이
