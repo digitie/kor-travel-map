@@ -200,6 +200,18 @@ async def test_snapshot_first_page_commits_for_next_request_session(
     assert second_body["meta"]["page"]["next_cursor"] is None
     assert reused.status_code == 200, reused.text
     reused_body = reused.json()
-    assert reused_body["data"]["snapshot_id"] == snapshot_id
-    assert reused_body["data"]["created_at"] == first_body["data"]["created_at"]
-    assert reused_body["data"]["expires_at"] == first_body["data"]["expires_at"]
+    # 재사용은 material을 공유하고 receipt는 새로 만든다(0230). consumer가 같은 것을
+    # 받았는지는 root/count로 판정한다 — snapshot_id는 이제 "누가 언제 받아갔는가"다.
+    assert reused_body["data"]["snapshot_id"] != snapshot_id
+    assert (
+        reused_body["data"]["merkle_root"],
+        reused_body["data"]["count"],
+        reused_body["data"]["high_watermark_cursor"],
+    ) == (
+        first_body["data"]["merkle_root"],
+        first_body["data"]["count"],
+        first_body["data"]["high_watermark_cursor"],
+    )
+    # 앞선 receipt의 만료를 물려받지 않는다.
+    assert reused_body["data"]["created_at"] > first_body["data"]["created_at"]
+    assert reused_body["data"]["expires_at"] > first_body["data"]["expires_at"]

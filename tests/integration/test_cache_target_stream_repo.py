@@ -2040,9 +2040,16 @@ async def test_fixed_snapshot_pages_ignore_concurrent_committed_write(
             external_system=system,
             limit=1,
         )
-    assert reused.snapshot_id == first.snapshot_id
-    assert reused.created_at == first.created_at
-    assert reused.expires_at == first.expires_at
+    # 재사용은 material을 공유하고 **receipt는 새로 만든다**(0230). snapshot_id는 이제
+    # "누가 언제 받아갔는가"이지 "무엇을 고정했는가"가 아니다 — 같은 material인지는
+    # root/count로 본다. replay cursor는 material이 들고 있으므로 그대로 같다.
+    assert reused.snapshot_id != first.snapshot_id
+    assert (reused.merkle_root, reused.count) == (first.merkle_root, first.count)
+    assert reused.high_watermark_cursor == first.high_watermark_cursor
+    # 앞선 receipt의 만료를 물려받지 않는다 — 이것이 재사용 전 잔여 TTL 검사를
+    # 없앨 수 있었던 이유다.
+    assert reused.created_at > first.created_at
+    assert reused.expires_at > first.expires_at
 
     async with AsyncSession(migrated_engine) as writer, writer.begin():
         await _apply_snapshot_source(
@@ -2113,7 +2120,12 @@ async def test_generic_snapshot_try_lock_fails_fast_and_then_reuses(
             external_system=system,
             limit=1,
         )
-    assert reused.snapshot_id == first.snapshot_id
+    # 재사용은 material을 공유하고 **receipt는 새로 만든다**(0230). snapshot_id는 이제
+    # "누가 언제 받아갔는가"이지 "무엇을 고정했는가"가 아니다 — 같은 material인지는
+    # root/count로 본다. replay cursor는 material이 들고 있으므로 그대로 같다.
+    assert reused.snapshot_id != first.snapshot_id
+    assert (reused.merkle_root, reused.count) == (first.merkle_root, first.count)
+    assert reused.high_watermark_cursor == first.high_watermark_cursor
 
 
 @pytest.mark.integration
@@ -2289,7 +2301,11 @@ async def test_snapshot_barrier_keeps_outbox_cursor_commit_safe_across_writers(
                 )
             ).scalars()
         )
-    assert reused.snapshot_id == page.snapshot_id
+    # 재사용은 material을 공유하고 **receipt는 새로 만든다**(0230). snapshot_id는 이제
+    # "누가 언제 받아갔는가"이지 "무엇을 고정했는가"가 아니다 — 같은 material인지는
+    # root/count로 본다. replay cursor는 material이 들고 있으므로 그대로 같다.
+    assert reused.snapshot_id != page.snapshot_id
+    assert (reused.merkle_root, reused.count) == (page.merkle_root, page.count)
     assert reused.high_watermark_cursor == page.high_watermark_cursor
     assert high_event_id != later.event_id
     assert replay_ids == {later.event_id}
@@ -2441,7 +2457,11 @@ async def test_generic_snapshot_reuse_ignores_nonmaterial_outbox_tail(
         external_system=system,
         limit=10,
     )
-    assert reused.snapshot_id == first.snapshot_id
+    # 재사용은 material을 공유하고 **receipt는 새로 만든다**(0230). snapshot_id는 이제
+    # "누가 언제 받아갔는가"이지 "무엇을 고정했는가"가 아니다 — 같은 material인지는
+    # root/count로 본다. replay cursor는 material이 들고 있으므로 그대로 같다.
+    assert reused.snapshot_id != first.snapshot_id
+    assert (reused.merkle_root, reused.count) == (first.merkle_root, first.count)
     assert reused.high_watermark_cursor == first.high_watermark_cursor
     assert reused.high_watermark_cursor != cache_target_event_cursor(
         int(nonmaterial_relay_order)
@@ -2916,6 +2936,18 @@ async def test_background_snapshot_gc_round_robins_systems_and_observes_once(
         item_limit=1,
         header_limit=1,
     )
+    # 마지막 item 하나와 빈 orphan material들이 남는다 — 다 비울 때까지 돌린다.
+    drained = wrapped
+    for _ in range(8):
+        if not drained.has_more:
+            break
+        drained = await prune_expired_cache_target_snapshots_batch(
+            migrated_session,
+            after_external_system=drained.external_system,
+            item_limit=1,
+            header_limit=1,
+        )
+    assert not drained.has_more
     backlog = await observe_expired_cache_target_snapshot_backlog(migrated_session)
 
     assert (first.external_system, second.external_system, wrapped.external_system) == (
@@ -2923,13 +2955,16 @@ async def test_background_snapshot_gc_round_robins_systems_and_observes_once(
         second_system,
         first_system,
     )
-    assert (first.deleted_items, first.deleted_headers, first.has_more) == (1, 0, True)
+    # 0230 전에는 header 삭제가 "item이 비어 있을 것"을 요구해 item보다 한 batch
+    # 늦었다. 이제 receipt는 만료 즉시 지우고, item은 orphan이 된 material에서 지운다.
+    assert (first.deleted_items, first.deleted_headers, first.has_more) == (1, 1, True)
     assert (second.deleted_items, second.deleted_headers, second.has_more) == (1, 1, True)
     assert (wrapped.deleted_items, wrapped.deleted_headers, wrapped.has_more) == (
         1,
-        1,
-        False,
+        0,
+        True,
     )
+    assert (first.compacted_materials, second.compacted_materials) == (0, 0)
     assert backlog.remaining_items == backlog.remaining_headers == 0
     assert backlog.snapshot_table_bytes > 0
     assert backlog.snapshot_index_bytes > 0
@@ -3005,7 +3040,8 @@ async def test_cursor_header_share_lock_makes_direct_item_gc_skip_snapshot(
             await reader.execute(
                 text(snapshot_repo._GET_SNAPSHOT_ITEMS_SQL),  # pyright: ignore[reportPrivateUsage]
                 {
-                    "snapshot_id": snapshot.snapshot_id,
+                    "external_system": system,
+                    "material_id": header.material_id,
                     "after_row_number": 0,
                     "limit": 10,
                 },
