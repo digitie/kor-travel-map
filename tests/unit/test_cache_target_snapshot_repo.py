@@ -64,9 +64,11 @@ class _Session:
         generic_snapshot_count: int = 0,
         oldest_expires_at: datetime | None = None,
         retry_after_seconds: int = 1,
+        issued_at: datetime | None = None,
     ) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []
         self._reusable = reusable
+        self._issued_at = issued_at or datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
         self._acquired = acquired
         self._return_ttls = list(return_ttls or [True])
         self._generic_snapshot_count = generic_snapshot_count
@@ -111,16 +113,22 @@ class _Session:
                     }
                 )
             )
-        if (
-            "FROM ops.poi_cache_target_snapshots AS snapshot" in sql
-            and "expires_at > now()" in sql
-        ):
+        if "FOR SHARE OF material" in sql:
             row = (
                 SimpleNamespace(_mapping=self._reusable)
                 if self._reusable is not None
                 else None
             )
             return _Result(row)
+        if "INSERT INTO ops.poi_cache_target_snapshots (" in sql:
+            return _Result(
+                SimpleNamespace(
+                    _mapping={
+                        "created_at": self._issued_at,
+                        "expires_at": self._issued_at + timedelta(hours=2),
+                    }
+                )
+            )
         return _Result()
 
 
@@ -137,7 +145,7 @@ class _GcSession:
     ) -> _Result:
         sql = str(statement)
         self.calls.append((sql, params or {}))
-        if "GROUP BY snapshot.external_system" in sql:
+        if "GROUP BY external_system" in sql:
             system = next(self._systems)
             row = (
                 SimpleNamespace(_mapping={"external_system": system})
@@ -145,8 +153,10 @@ class _GcSession:
                 else None
             )
             return _Result(row)
-        if "DELETE FROM ops.poi_cache_target_snapshot_items" in sql:
-            return _Result(rows=[("s1", 1), ("s1", 2)])
+        if "DELETE FROM ops.poi_cache_target_snapshot_material_items" in sql:
+            return _Result(rows=[("m1", 1), ("m1", 2)])
+        if "DELETE FROM ops.poi_cache_target_snapshot_materials" in sql:
+            return _Result(rows=[("m1",)])
         if "DELETE FROM ops.poi_cache_target_snapshots" in sql:
             return _Result(rows=[("s1",)])
         if "SELECT EXISTS" in sql:
@@ -279,10 +289,18 @@ class _PersistSession:
     def __init__(self, rows: list[Any]) -> None:
         self._rows = rows
         self.item_batch_sizes: list[int] = []
+        self.receipt_params: list[dict[str, Any]] = []
 
     async def execute(self, statement: Any, params: Any = None) -> _Result:
         sql = str(statement)
+        if "INSERT INTO ops.poi_cache_target_snapshot_materials (" in sql:
+            return _Result(
+                SimpleNamespace(
+                    _mapping={"materialized_at": datetime(2026, 8, 18, tzinfo=UTC)}
+                )
+            )
         if "INSERT INTO ops.poi_cache_target_snapshots (" in sql:
+            self.receipt_params.append(dict(params or {}))
             return _Result(
                 SimpleNamespace(
                     _mapping={
@@ -291,7 +309,7 @@ class _PersistSession:
                     }
                 )
             )
-        if "INSERT INTO ops.poi_cache_target_snapshot_items (" in sql:
+        if "INSERT INTO ops.poi_cache_target_snapshot_material_items (" in sql:
             assert isinstance(params, list)
             self.item_batch_sizes.append(len(params))
             return _Result()
@@ -353,12 +371,20 @@ async def test_background_gc_batch_uses_exact_keyset_and_reports_backlog() -> No
     )
     select_sql, select_params = session.calls[0]
     assert 'COLLATE "C"' in select_sql
-    assert "ORDER BY snapshot.external_system" in select_sql
+    assert "ORDER BY external_system" in select_sql
     assert select_params == {"after_external_system": "system-a"}
-    assert session.calls[1][1] == {"external_system": "system-b", "limit": 1_000}
-    assert session.calls[2][1] == {"external_system": "system-b", "limit": 100}
-    assert "SELECT EXISTS" in session.calls[3][0]
-    assert "count(*)" not in session.calls[3][0]
+    # receipt -> orphan item -> orphan material. 순서가 뜻을 갖는다 — receipt를 먼저
+    # 지워야 material이 orphan이 되고, material은 item이 빈 뒤에야 지워진다.
+    assert "DELETE FROM ops.poi_cache_target_snapshots" in session.calls[1][0]
+    assert session.calls[1][1] == {"external_system": "system-b", "limit": 100}
+    assert "DELETE FROM ops.poi_cache_target_snapshot_material_items" in (
+        session.calls[2][0]
+    )
+    assert session.calls[2][1] == {"external_system": "system-b", "limit": 1_000}
+    assert "DELETE FROM ops.poi_cache_target_snapshot_materials" in session.calls[3][0]
+    assert session.calls[3][1] == {"external_system": "system-b", "limit": 100}
+    assert "SELECT EXISTS" in session.calls[4][0]
+    assert "count(*)" not in session.calls[4][0]
 
 
 @pytest.mark.unit
@@ -405,19 +431,24 @@ async def test_background_gc_exact_backlog_is_a_separate_observation() -> None:
 def test_reuse_identity_filters_material_events_but_snapshot_cursor_stays_global() -> None:
     identity_sql = repo._GET_SNAPSHOT_IDENTITY_SQL  # pyright: ignore[reportPrivateUsage]
     capture_sql = repo._CAPTURE_VIEW_SQL  # pyright: ignore[reportPrivateUsage]
-    material_reuse_sql = repo._GET_REUSABLE_MATERIAL_SNAPSHOT_SQL  # pyright: ignore[reportPrivateUsage]
+    material_reuse_sql = repo._GET_REUSABLE_MATERIAL_SQL  # pyright: ignore[reportPrivateUsage]
 
     assert "event.event_type = 'cache_target.state_applied'" in identity_sql
     assert "material_high_watermark_relay_order" in identity_sql
+    # 재사용 receipt가 자기 시점 cursor를 받으려면 identity가 전역 HWM도 함께 줘야 한다.
+    assert "AS high_watermark_relay_order" in identity_sql
     assert "AS high_watermark_relay_order" in capture_sql
     assert "event.event_type = 'cache_target.state_applied'" in capture_sql
     assert "AS material_high_watermark_relay_order" in capture_sql
     assert "LIMIT :capture_limit" not in capture_sql
     assert "ORDER BY head.sort_key" in capture_sql
     assert "material_high_watermark_relay_order" in material_reuse_sql
-    assert "snapshot.expires_at > now()" in material_reuse_sql
-    assert "poi_cache_target_reconciliation_requests" in material_reuse_sql
-    assert "FOR SHARE OF snapshot" in material_reuse_sql
+    assert "material.compacted_at IS NULL" in material_reuse_sql
+    assert "FOR SHARE OF material" in material_reuse_sql
+    # 재사용이 만료 시각을 물려받지 않으므로 receipt TTL도 참조 여부도 보지 않는다.
+    # 그 둘을 다시 넣으면 공유가 한쪽으로만 흐른다.
+    assert "expires_at" not in material_reuse_sql
+    assert "poi_cache_target_reconciliation_requests" not in material_reuse_sql
 
 
 @pytest.mark.unit
@@ -618,7 +649,7 @@ async def test_snapshot_persistence_flushes_bounded_batches_and_returns_only_pag
         )
     scan = repo._SnapshotMaterialScan(  # pyright: ignore[reportPrivateUsage]
         header={
-            "snapshot_id": "11111111-1111-4111-8111-111111111111",
+            "material_id": "11111111-1111-4111-8111-111111111111",
             "external_system": "pinvi",
             "restore_epoch": 3,
             "high_watermark_relay_order": 8,
@@ -633,6 +664,7 @@ async def test_snapshot_persistence_flushes_bounded_batches_and_returns_only_pag
     header, returned = await repo._persist_snapshot_material(  # pyright: ignore[reportPrivateUsage]
         session,  # type: ignore[arg-type]
         scan=scan,
+        receipt_kind="generic",
         return_limit=7,
     )
 
@@ -640,14 +672,20 @@ async def test_snapshot_persistence_flushes_bounded_batches_and_returns_only_pag
     assert len(returned) == 7
     assert returned[-1].row_number == 7
     assert session.item_batch_sizes == [1_000, 5]
+    # receipt는 item을 다 쓰고 검증한 **뒤에** 붙는다. 뒤집으면 검증 실패로 되감기기
+    # 전 짧은 창 동안 불완전한 material을 가리키는 receipt가 존재한다.
+    assert len(session.receipt_params) == 1
+    assert session.receipt_params[0]["receipt_kind"] == "generic"
+    assert session.receipt_params[0]["material_id"] == header["material_id"]
 
 
 @pytest.mark.unit
 async def test_create_snapshot_reuses_exact_unreferenced_material(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    now = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
-    material = {
+    issued = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
+    built = {
+        "material_id": "11111111-1111-4111-8111-111111111111",
         "snapshot_id": "11111111-1111-4111-8111-111111111111",
         "external_system": "pinvi",
         "restore_epoch": 3,
@@ -656,19 +694,21 @@ async def test_create_snapshot_reuses_exact_unreferenced_material(
         "merkle_root": "a" * 64,
     }
     reusable = {
-        **material,
-        "snapshot_id": "22222222-2222-4222-8222-222222222222",
-        "created_at": now,
-        "expires_at": now + timedelta(minutes=90),
+        "material_id": "22222222-2222-4222-8222-222222222222",
+        "external_system": "pinvi",
+        "restore_epoch": 3,
+        "material_high_watermark_relay_order": 5,
+        "item_count": 0,
+        "merkle_root": "a" * 64,
     }
-    session = _Session(reusable)
-    create_calls: list[tuple[str, int]] = []
+    session = _Session(reusable, issued_at=issued)
+    create_calls: list[tuple[str, str, int]] = []
 
     async def _create(
-        _session: Any, *, external_system: str, return_limit: int
+        _session: Any, *, external_system: str, receipt_kind: str, return_limit: int
     ) -> tuple[Any, tuple[Any, ...]]:
-        create_calls.append((external_system, return_limit))
-        return material, ()
+        create_calls.append((external_system, receipt_kind, return_limit))
+        return built, ()
 
     monkeypatch.setattr(repo, "_create_snapshot", _create)
 
@@ -678,76 +718,80 @@ async def test_create_snapshot_reuses_exact_unreferenced_material(
         limit=10,
     )
 
-    assert header == reusable
     assert items == ()
     assert create_calls == []
+    assert header["material_id"] == reusable["material_id"]
+    assert header["receipt_kind"] == "generic"
+    # 재사용해도 receipt는 새로 만든다 — 만료 시각을 물려받지 않는다.
+    assert header["snapshot_id"] != reusable["material_id"]
+    assert header["created_at"] == issued
+    assert header["expires_at"] == issued + timedelta(hours=2)
+    # cursor는 **재사용 시점**의 전역 HWM이다. material HWM(5)이 아니라 8이어야 한다.
+    assert header["high_watermark_relay_order"] == 8
     assert "pg_try_advisory_xact_lock" in session.calls[0][0]
     assert "set_config('lock_timeout'" in session.calls[1][0]
     assert "FOR SHARE OF stream" in session.calls[2][0]
     assert "SELECT stream.restore_epoch" in session.calls[4][0]
-    assert "expires_at > now() + interval '75 minutes'" in session.calls[5][0]
-    assert "= :material_high_watermark_relay_order" in session.calls[5][0]
+    assert "FOR SHARE OF material" in session.calls[5][0]
     assert session.calls[5][1]["material_high_watermark_relay_order"] == 5
-    assert "poi_cache_target_reconciliation_requests" in session.calls[5][0]
-    assert "FOR SHARE OF snapshot" in session.calls[5][0]
-    assert "poi_cache_target_snapshot_items" in session.calls[6][0]
-    assert "clock_timestamp() + interval '75 minutes'" in session.calls[7][0]
+    assert "INSERT INTO ops.poi_cache_target_snapshots (" in session.calls[6][0]
+    assert "poi_cache_target_snapshot_material_items" in session.calls[7][0]
+    assert session.calls[7][1]["material_id"] == reusable["material_id"]
     assert all("DELETE FROM" not in sql for sql, _params in session.calls)
 
 
 @pytest.mark.unit
-async def test_reusable_snapshot_below_return_ttl_gate_is_rebuilt(
+async def test_handoff_ttl_floor_guards_the_build_path_only(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    now = datetime(2026, 8, 1, 12, 0, tzinfo=UTC)
-    material = {
+    """handoff floor는 빌드 경로에만 걸린다.
+
+    앞판에는 "재사용 후보의 잔여 TTL이 75분 미만이면 다시 만든다"는 분기가 있었다.
+    header 하나가 material과 receipt를 겸해 재사용이 만료 시각까지 물려받았기
+    때문이다. 이제 재사용도 새 receipt를 만들어 언제나 full TTL이라 그 분기 자체가
+    없다 — 남은 것은 "두 번 scan + 대량 INSERT가 floor를 먹었는가"뿐이다.
+    """
+
+    built = {
+        "material_id": "21111111-1111-4111-8111-111111111111",
         "snapshot_id": "21111111-1111-4111-8111-111111111111",
         "external_system": "pinvi",
         "restore_epoch": 3,
         "high_watermark_relay_order": 8,
         "item_count": 0,
         "merkle_root": "a" * 64,
-        "created_at": now,
-        "expires_at": now + timedelta(hours=2),
+        "created_at": datetime(2026, 8, 1, 12, 0, tzinfo=UTC),
+        "expires_at": datetime(2026, 8, 1, 12, 30, tzinfo=UTC),
     }
-    reusable = {
-        **material,
-        "snapshot_id": "22222222-2222-4222-8222-222222222222",
-        "expires_at": now + timedelta(minutes=75),
-    }
-    session = _Session(reusable, return_ttls=[False, True])
-    create_calls: list[tuple[str, int]] = []
+    session = _Session(return_ttls=[False])
 
     async def _create(
-        _session: Any, *, external_system: str, return_limit: int
+        _session: Any, *, external_system: str, receipt_kind: str, return_limit: int
     ) -> tuple[Any, tuple[Any, ...]]:
-        create_calls.append((external_system, return_limit))
-        return material, ()
+        del external_system, receipt_kind, return_limit
+        return built, ()
 
     monkeypatch.setattr(repo, "_create_snapshot", _create)
 
-    header, _items = await repo._create_generic_snapshot(  # pyright: ignore[reportPrivateUsage]
-        session,  # type: ignore[arg-type]
-        external_system="pinvi",
-        limit=10,
-    )
+    with pytest.raises(repo.CacheTargetStreamConflict) as short:
+        await repo._create_generic_snapshot(  # pyright: ignore[reportPrivateUsage]
+            session,  # type: ignore[arg-type]
+            external_system="pinvi",
+            limit=10,
+        )
 
-    assert header["snapshot_id"] == material["snapshot_id"]
-    assert create_calls == [("pinvi", 10)]
-    assert sum(
-        "clock_timestamp() + interval '75 minutes'" in sql
-        for sql, _params in session.calls
-    ) == 2
-    insert_sql = repo._INSERT_SNAPSHOT_SQL  # pyright: ignore[reportPrivateUsage]
-    assert "clock_timestamp() AS materialized_at" in insert_sql
-    assert "materialized_at, materialized_at + interval '2 hours'" in insert_sql
+    assert short.value.code == "snapshot_ttl_too_short"
+    receipt_sql = repo._INSERT_RECEIPT_SQL  # pyright: ignore[reportPrivateUsage]
+    assert "clock_timestamp() AS issued_at" in receipt_sql
+    assert "issued_at, issued_at + interval '2 hours'" in receipt_sql
 
 
 @pytest.mark.unit
 async def test_create_generic_snapshot_prunes_only_before_full_capture(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    material = {
+    built = {
+        "material_id": "33333333-3333-4333-8333-333333333333",
         "snapshot_id": "33333333-3333-4333-8333-333333333333",
         "external_system": "pinvi",
         "restore_epoch": 3,
@@ -758,13 +802,13 @@ async def test_create_generic_snapshot_prunes_only_before_full_capture(
         "expires_at": datetime(2026, 8, 1, 13, 0, tzinfo=UTC),
     }
     session = _Session()
-    create_calls: list[tuple[str, int]] = []
+    create_calls: list[tuple[str, str, int]] = []
 
     async def _create(
-        _session: Any, *, external_system: str, return_limit: int
+        _session: Any, *, external_system: str, receipt_kind: str, return_limit: int
     ) -> tuple[Any, tuple[Any, ...]]:
-        create_calls.append((external_system, return_limit))
-        return material, ()
+        create_calls.append((external_system, receipt_kind, return_limit))
+        return built, ()
 
     monkeypatch.setattr(repo, "_create_snapshot", _create)
 
@@ -774,16 +818,18 @@ async def test_create_generic_snapshot_prunes_only_before_full_capture(
         limit=10,
     )
 
-    assert header == material
+    assert header == built
     assert items == ()
-    assert create_calls == [("pinvi", 10)]
+    assert create_calls == [("pinvi", "generic", 10)]
     assert "set_config('lock_timeout'" in session.calls[1][0]
     assert "LIMIT 2" in session.calls[6][0]
-    assert "poi_cache_target_reconciliation_requests" in session.calls[6][0]
-    assert "FOR UPDATE OF snapshot, item SKIP LOCKED" in session.calls[7][0]
-    assert session.calls[7][1]["limit"] == 1000
-    assert "FOR UPDATE OF snapshot SKIP LOCKED" in session.calls[8][0]
-    assert session.calls[8][1]["limit"] == 100
+    assert "poi_cache_target_snapshot_materials" in session.calls[6][0]
+    assert "FOR UPDATE OF snapshot SKIP LOCKED" in session.calls[7][0]
+    assert session.calls[7][1]["limit"] == 100
+    assert "FOR UPDATE OF material, item SKIP LOCKED" in session.calls[8][0]
+    assert session.calls[8][1]["limit"] == 1000
+    assert "FOR UPDATE OF material SKIP LOCKED" in session.calls[9][0]
+    assert session.calls[9][1]["limit"] == 100
 
 
 @pytest.mark.unit
@@ -860,11 +906,20 @@ async def test_create_generic_snapshot_fails_fast_when_stream_is_busy(
 
 @pytest.mark.unit
 def test_snapshot_cursor_holds_header_share_lock_during_item_read() -> None:
-    assert repo._GET_SNAPSHOT_SQL.rstrip().endswith("FOR SHARE")  # pyright: ignore[reportPrivateUsage]
-    item_prune = repo._PRUNE_EXPIRED_SNAPSHOT_ITEMS_SQL  # pyright: ignore[reportPrivateUsage]
+    # receipt만 잠그면 compaction이 item을 지우는 사이에 부분 page가 나간다.
+    # material까지 함께 잠가야 정상 page 또는 410 중 하나만 보인다.
+    assert repo._GET_SNAPSHOT_SQL.rstrip().endswith(  # pyright: ignore[reportPrivateUsage]
+        "FOR SHARE OF snapshot, material"
+    )
+    item_prune = repo._PRUNE_ORPHANED_MATERIAL_ITEMS_SQL  # pyright: ignore[reportPrivateUsage]
+    material_prune = repo._PRUNE_ORPHANED_MATERIALS_SQL  # pyright: ignore[reportPrivateUsage]
     header_prune = repo._PRUNE_EXPIRED_SNAPSHOT_HEADERS_SQL  # pyright: ignore[reportPrivateUsage]
-    assert "expires_at <= now()" in item_prune
-    assert "NOT EXISTS" in item_prune
-    assert "FOR UPDATE OF snapshot, item SKIP LOCKED" in item_prune
+    assert "expires_at <= now()" in header_prune
     assert "NOT EXISTS" in header_prune
     assert "FOR UPDATE OF snapshot SKIP LOCKED" in header_prune
+    # item/material은 만료가 아니라 **orphan 여부**로 고른다. receipt가 하나라도
+    # 붙어 있으면 그 material은 아직 누군가의 것이다.
+    assert "expires_at" not in item_prune
+    assert "FOR UPDATE OF material, item SKIP LOCKED" in item_prune
+    assert "FOR UPDATE OF material SKIP LOCKED" in material_prune
+    assert "poi_cache_target_snapshot_material_items" in material_prune
