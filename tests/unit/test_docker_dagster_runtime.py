@@ -510,11 +510,15 @@ def test_tvn_m01_compose_keeps_manual_create_credentials_in_exact_runtimes() -> 
 
 @pytest.mark.unit
 def test_tvn_m01_role_phase_runs_only_after_legacy_0225_boundary() -> None:
-    """0200/0202의 frozen membership graph보다 먼저 M01 edge를 만들지 않는다."""
+    """M01/M05 role graph는 각 migration boundary 뒤에서만 만들어진다."""
 
     services = _compose()["services"]
     boundary = services["db-migrate-to-m01-bootstrap-boundary"]
     role_phase = services["db-role-bootstrap-m01"]
+    m05_boundary = services["db-migrate-to-m05-bootstrap-boundary"]
+    m05_pre = services["db-role-bootstrap-m05-pre"]
+    m05_migration = services["db-migrate-m05"]
+    m05_repair = services["db-role-bootstrap-m05-repair"]
     api = services["api"]
 
     assert boundary["depends_on"]["db-role-bootstrap"] == {
@@ -529,11 +533,30 @@ def test_tvn_m01_role_phase_runs_only_after_legacy_0225_boundary() -> None:
         "condition": "service_completed_successfully"
     }
     assert role_phase["environment"]["KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE"] == "m01"
-    assert api["depends_on"]["db-role-bootstrap-m01"] == {
+    assert m05_boundary["depends_on"]["db-role-bootstrap-m01"] == {
+        "condition": "service_completed_successfully"
+    }
+    assert m05_boundary["entrypoint"] == [
+        "/bin/sh",
+        "./docker/migrate-to-m05-bootstrap-boundary.sh",
+    ]
+    assert m05_pre["depends_on"]["db-migrate-to-m05-bootstrap-boundary"] == {
+        "condition": "service_completed_successfully"
+    }
+    assert m05_pre["environment"]["KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE"] == "m05-pre"
+    assert m05_migration["depends_on"]["db-role-bootstrap-m05-pre"] == {
+        "condition": "service_completed_successfully"
+    }
+    assert m05_migration["entrypoint"] == ["/bin/sh", "./docker/migrate-m05.sh"]
+    assert m05_repair["depends_on"]["db-migrate-m05"] == {
+        "condition": "service_completed_successfully"
+    }
+    assert m05_repair["environment"]["KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE"] == "m05-repair"
+    assert api["depends_on"]["db-role-bootstrap-m05-repair"] == {
         "condition": "service_completed_successfully"
     }
     for runtime_name in ("dagster", "dagster-daemon"):
-        assert services[runtime_name]["depends_on"]["db-role-bootstrap-m01"] == {
+        assert services[runtime_name]["depends_on"]["db-role-bootstrap-m05-repair"] == {
             "condition": "service_completed_successfully"
         }
 
@@ -566,6 +589,20 @@ def test_tvn_m01_role_phase_runs_only_after_legacy_0225_boundary() -> None:
     assert 'M01 role must not inherit any application privilege role' in phase_script
     assert "membership.inherit_option IS FALSE" in phase_script
     assert "membership.set_option IS TRUE" in phase_script
+    assert "M05 pre role bootstrap requires exactly 0230" in phase_script
+    assert "M05 relation marker is partial; refusing role bootstrap" in phase_script
+    assert "M05 post-upgrade marker is incomplete" in phase_script
+    assert "CREATE ROLE ktm_manual_provider_dedup_procedure_owner" in phase_script
+    assert (
+        "GRANT ktm_manual_provider_dedup_detector_executor "
+        "TO ktm_feature_dagster_runtime" in phase_script
+    )
+    assert (
+        "GRANT ktm_manual_provider_dedup_admin_executor "
+        "TO ktm_feature_api_runtime" in phase_script
+    )
+    assert "ktm_feature_reference_reconciliation_service_executor" in phase_script
+    assert "ALTER FUNCTION feature.reject_manual_provider_dedup_evidence_mutation()" in phase_script
 
     migration_script = _script("docker/migrate-to-m01-bootstrap-boundary.sh")
     assert "alembic upgrade 0225_tvn40c_physical_removal" in migration_script
@@ -573,7 +610,17 @@ def test_tvn_m01_role_phase_runs_only_after_legacy_0225_boundary() -> None:
     assert 'marker_status=$?' in migration_script
     assert '2)' in migration_script
     assert "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" not in migration_script
-    assert "migrate-to-m01-bootstrap-boundary.sh" in _script("docker/api.Dockerfile")
+    m05_boundary_script = _script("docker/migrate-to-m05-bootstrap-boundary.sh")
+    assert "alembic upgrade 0230_m04_feature_request_queue" in m05_boundary_script
+    assert "M05 relation marker is partial" in m05_boundary_script
+    assert "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" not in m05_boundary_script
+    m05_migration_script = _script("docker/migrate-m05.sh")
+    assert "M05 migration requires the exact 0230 role boundary" in m05_migration_script
+    assert "alembic upgrade 0231_m05_manual_provider_dedup" in m05_migration_script
+    dockerfile = _script("docker/api.Dockerfile")
+    assert "migrate-to-m01-bootstrap-boundary.sh" in dockerfile
+    assert "migrate-to-m05-bootstrap-boundary.sh" in dockerfile
+    assert "migrate-m05.sh" in dockerfile
 
 
 @pytest.mark.unit

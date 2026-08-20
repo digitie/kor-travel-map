@@ -422,8 +422,173 @@ async def bootstrap_tvn_m01_role_phase(async_dsn: str) -> None:
         await engine.dispose()
 
 
+async def bootstrap_tvn_m05_pre_role_phase(async_dsn: str) -> None:
+    """`0230 → M05 role만 → 0231` 운영 choreography를 disposable DB에 재현한다."""
+
+    from sqlalchemy import text
+
+    from kortravelmap.infra.db import make_async_engine
+
+    roles = (
+        "ktm_manual_provider_dedup_procedure_owner",
+        "ktm_manual_provider_dedup_detector_executor",
+        "ktm_manual_provider_dedup_admin_executor",
+        "ktm_feature_reference_reconciliation_service_executor",
+    )
+    relations = (
+        "ops.manual_provider_dedup_cases",
+        "ops.manual_provider_dedup_resolutions",
+        "ops.feature_reference_reconciliation_events",
+        "ops.feature_reference_reconciliation_subscriptions",
+        "ops.feature_reference_reconciliation_acks",
+        "ops.feature_reference_reconciliation_leases",
+    )
+    engine = make_async_engine(async_dsn, pool_size=1)
+    try:
+        async with engine.begin() as connection:
+            version = await connection.scalar(
+                text("SELECT version_num FROM public.alembic_version")
+            )
+            role_count = await connection.scalar(
+                text(
+                    "SELECT count(*) FROM pg_catalog.pg_roles "
+                    "WHERE rolname = ANY(CAST(:roles AS text[]))"
+                ),
+                {"roles": list(roles)},
+            )
+            relation_count = await connection.scalar(
+                text(
+                    "SELECT count(*) FROM unnest(CAST(:relations AS text[])) "
+                    "AS expected(relation_name) "
+                    "WHERE to_regclass(expected.relation_name) IS NOT NULL"
+                ),
+                {"relations": list(relations)},
+            )
+            if (
+                version != "0230_m04_feature_request_queue"
+                or role_count != 0
+                or relation_count != 0
+            ):
+                raise RuntimeError(
+                    "M05 test role phase requires pristine 0230 boundary, "
+                    f"not version={version!r}, roles={role_count}, relations={relation_count}"
+                )
+            await connection.execute(
+                text(
+                    """
+                    DO $m05_roles$
+                    BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_catalog.pg_roles
+                            WHERE rolname = 'ktm_manual_provider_dedup_procedure_owner'
+                        ) THEN
+                            CREATE ROLE ktm_manual_provider_dedup_procedure_owner NOLOGIN NOINHERIT;
+                        END IF;
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_catalog.pg_roles
+                            WHERE rolname = 'ktm_manual_provider_dedup_detector_executor'
+                        ) THEN
+                            CREATE ROLE ktm_manual_provider_dedup_detector_executor
+                                NOLOGIN NOINHERIT;
+                        END IF;
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_catalog.pg_roles
+                            WHERE rolname = 'ktm_manual_provider_dedup_admin_executor'
+                        ) THEN
+                            CREATE ROLE ktm_manual_provider_dedup_admin_executor NOLOGIN NOINHERIT;
+                        END IF;
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_catalog.pg_roles
+                            WHERE rolname = 'ktm_feature_reference_reconciliation_service_executor'
+                        ) THEN
+                            CREATE ROLE ktm_feature_reference_reconciliation_service_executor
+                                NOLOGIN NOINHERIT;
+                        END IF;
+                    END
+                    $m05_roles$;
+                    """
+                )
+            )
+            for statement in (
+                "ALTER ROLE ktm_manual_provider_dedup_procedure_owner NOLOGIN NOINHERIT "
+                "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+                "ALTER ROLE ktm_manual_provider_dedup_detector_executor NOLOGIN NOINHERIT "
+                "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+                "ALTER ROLE ktm_manual_provider_dedup_admin_executor NOLOGIN NOINHERIT "
+                "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+                "ALTER ROLE ktm_feature_reference_reconciliation_service_executor "
+                "NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE "
+                "NOBYPASSRLS NOREPLICATION",
+                "GRANT ktm_manual_provider_dedup_procedure_owner "
+                "TO ktm_feature_schema_owner WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
+                "GRANT ktm_manual_provider_dedup_detector_executor "
+                "TO ktm_feature_dagster_runtime WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
+                "GRANT ktm_manual_provider_dedup_admin_executor "
+                "TO ktm_feature_api_runtime WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
+                "GRANT ktm_feature_reference_reconciliation_service_executor "
+                "TO ktm_feature_api_runtime WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
+            ):
+                await connection.execute(text(statement))
+    finally:
+        await engine.dispose()
+
+
+async def repair_tvn_m05_role_phase(async_dsn: str) -> None:
+    """0231 뒤 dedicated M05 routine ownership marker를 production과 같이 확정한다."""
+
+    from sqlalchemy import text
+
+    from kortravelmap.infra.db import make_async_engine
+
+    engine = make_async_engine(async_dsn, pool_size=1)
+    try:
+        async with engine.begin() as connection:
+            version = await connection.scalar(
+                text("SELECT version_num FROM public.alembic_version")
+            )
+            relation_count = await connection.scalar(
+                text(
+                    "SELECT count(*) FROM unnest(CAST(:relations AS text[])) "
+                    "AS expected(relation_name) "
+                    "WHERE to_regclass(expected.relation_name) IS NOT NULL"
+                ),
+                {
+                    "relations": [
+                        "ops.manual_provider_dedup_cases",
+                        "ops.manual_provider_dedup_resolutions",
+                        "ops.feature_reference_reconciliation_events",
+                        "ops.feature_reference_reconciliation_subscriptions",
+                        "ops.feature_reference_reconciliation_acks",
+                        "ops.feature_reference_reconciliation_leases",
+                    ]
+                },
+            )
+            if version != "0231_m05_manual_provider_dedup" or relation_count != 6:
+                raise RuntimeError("M05 test post-upgrade marker is incomplete")
+            await connection.execute(
+                text(
+                    "GRANT USAGE, CREATE ON SCHEMA feature "
+                    "TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "GRANT USAGE ON SCHEMA ops "
+                    "TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER FUNCTION feature.reject_manual_provider_dedup_evidence_mutation() "
+                    "OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+    finally:
+        await engine.dispose()
+
+
 async def upgrade_head_with_tvn_m01_phase(config: Config, admin_dsn: str) -> None:
-    """frozen graph를 보존하는 fresh DB `0225 → M01 roles → head` helper."""
+    """frozen graph를 보존하는 fresh DB M01/M05 two-phase bootstrap helper."""
 
     import asyncio
 
@@ -439,7 +604,11 @@ async def upgrade_head_with_tvn_m01_phase(config: Config, admin_dsn: str) -> Non
         await asyncio.to_thread(command.upgrade, config, "0225_tvn40c_physical_removal")
     await bootstrap_tvn_m01_role_phase(admin_dsn)
     with alembic_schema_owner_role():
+        await asyncio.to_thread(command.upgrade, config, "0230_m04_feature_request_queue")
+    await bootstrap_tvn_m05_pre_role_phase(admin_dsn)
+    with alembic_schema_owner_role():
         await asyncio.to_thread(command.upgrade, config, "head")
+    await repair_tvn_m05_role_phase(admin_dsn)
 
 
 @contextlib.contextmanager

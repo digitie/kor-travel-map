@@ -81,11 +81,13 @@ rebind/detach는 generic service event와 principal ack로 전파한다.
 ADR-097 및 [M05 설계](reports/t-vn-m05-manual-provider-dedup-design-2026-08-21.md)를 accepted로
 확정했고, DB/HTTP 전문 적대 리뷰어 둘이 P0 보완본을 GO로 재검토했다. `0231`의 불변
 증적·subscription·lease model/migration과 runtime raw-access deny inventory까지 구현했으며,
-fresh migration Alembic check 1건과 ruff/strict mypy가 green이다.
+fresh migration Alembic check 1건과 ruff/strict mypy가 green이다. `0230 → role 전용 → 0231 →
+사후 복구` compose/DB helper도 연결해 frozen baseline을 건드리지 않은 role choreography를
+고정했다.
 
 ### 다음 한 작업
 
-two-phase role bootstrap과 dedicated detector/admin/service writer, backup v3 root를 구현한다.
+dedicated detector/admin/service writer와 backup v3 root를 구현한다.
 이어 Map admin/service contract와 첫 consumer의 durable reference receipt/rebind, exact vendor를
 같은 paired release로 구현한다.
 

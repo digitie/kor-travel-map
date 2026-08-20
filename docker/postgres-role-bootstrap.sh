@@ -46,9 +46,9 @@ require_identifier KOR_TRAVEL_MAP_POSTGRES_USER
 
 bootstrap_phase="${KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE:-legacy}"
 case "$bootstrap_phase" in
-  legacy | m01) ;;
+  legacy | m01 | m05-pre | m05-repair) ;;
   *)
-    echo "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE must be legacy or m01" >&2
+    echo "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE must be legacy, m01, m05-pre, or m05-repair" >&2
     exit 1
     ;;
 esac
@@ -157,7 +157,8 @@ BEGIN
             '0226_m01_manual_feature_create',
             '0227_m02_feature_provenance',
             '0228_m03_manual_curation',
-            '0230_m04_feature_request_queue'
+            '0230_m04_feature_request_queue',
+            '0231_m05_manual_provider_dedup'
         ) THEN
             RAISE EXCEPTION
                 'M01 relation marker requires a known M01/M02 head (observed %)',
@@ -470,8 +471,241 @@ FROM existing
 SQL
 }
 
+# M05는 M01과 달리 0230을 정확히 만든 뒤, M05 role만 먼저 provision하고
+# 0231을 적용한다. frozen 0200/0202 graph에는 닿지 않으며, pre phase에는
+# object ACL을 전혀 부여하지 않는다. relation 또는 role의 부분 marker는
+# 정상 재시도 가능한 상태가 아니므로 여기서 멈춘다.
+run_m05_pre_phase() {
+  psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" \
+    -v ON_ERROR_STOP=1 <<'SQL'
+DO $m05_precondition$
+DECLARE
+    v_revision text;
+    v_relation_count integer;
+    v_role_count integer;
+BEGIN
+    SELECT version_num INTO v_revision FROM public.alembic_version;
+    SELECT count(*) INTO v_relation_count
+    FROM unnest(ARRAY[
+        'ops.manual_provider_dedup_cases',
+        'ops.manual_provider_dedup_resolutions',
+        'ops.feature_reference_reconciliation_events',
+        'ops.feature_reference_reconciliation_subscriptions',
+        'ops.feature_reference_reconciliation_acks',
+        'ops.feature_reference_reconciliation_leases'
+    ]) AS expected(relation_name)
+    WHERE to_regclass(expected.relation_name) IS NOT NULL;
+    SELECT count(*) INTO v_role_count
+    FROM pg_catalog.pg_roles
+    WHERE rolname IN (
+        'ktm_manual_provider_dedup_procedure_owner',
+        'ktm_manual_provider_dedup_detector_executor',
+        'ktm_manual_provider_dedup_admin_executor',
+        'ktm_feature_reference_reconciliation_service_executor'
+    );
+    IF v_relation_count NOT IN (0, 6) THEN
+        RAISE EXCEPTION 'M05 relation marker is partial; refusing role bootstrap'
+            USING ERRCODE = '55000';
+    END IF;
+    IF v_role_count NOT IN (0, 4) THEN
+        RAISE EXCEPTION 'M05 role marker is partial; refusing role bootstrap'
+            USING ERRCODE = '55000';
+    END IF;
+    IF v_relation_count = 0 AND v_revision IS DISTINCT FROM '0230_m04_feature_request_queue' THEN
+        RAISE EXCEPTION 'M05 pre role bootstrap requires exactly 0230 (observed %)',
+            coalesce(v_revision, '<none>') USING ERRCODE = '55000';
+    END IF;
+    IF v_relation_count = 0 AND v_role_count <> 0 THEN
+        RAISE EXCEPTION 'M05 roles exist before the 0230 boundary'
+            USING ERRCODE = '55000';
+    END IF;
+    IF v_relation_count = 6 AND v_revision IS DISTINCT FROM '0231_m05_manual_provider_dedup' THEN
+        RAISE EXCEPTION 'M05 relation marker requires exactly 0231 (observed %)',
+            coalesce(v_revision, '<none>') USING ERRCODE = '55000';
+    END IF;
+END
+$m05_precondition$;
+
+DO $m05_roles$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_manual_provider_dedup_procedure_owner') THEN
+        CREATE ROLE ktm_manual_provider_dedup_procedure_owner NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_manual_provider_dedup_detector_executor') THEN
+        CREATE ROLE ktm_manual_provider_dedup_detector_executor NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_manual_provider_dedup_admin_executor') THEN
+        CREATE ROLE ktm_manual_provider_dedup_admin_executor NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_reference_reconciliation_service_executor') THEN
+        CREATE ROLE ktm_feature_reference_reconciliation_service_executor NOLOGIN NOINHERIT;
+    END IF;
+END
+$m05_roles$;
+
+ALTER ROLE ktm_manual_provider_dedup_procedure_owner NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_manual_provider_dedup_detector_executor NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_manual_provider_dedup_admin_executor NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_feature_reference_reconciliation_service_executor NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+
+GRANT ktm_manual_provider_dedup_procedure_owner TO ktm_feature_schema_owner
+    WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+GRANT ktm_manual_provider_dedup_detector_executor TO ktm_feature_dagster_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+GRANT ktm_manual_provider_dedup_admin_executor TO ktm_feature_api_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+GRANT ktm_feature_reference_reconciliation_service_executor TO ktm_feature_api_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+REVOKE ktm_manual_provider_dedup_detector_executor FROM ktm_feature_api_runtime;
+REVOKE ktm_manual_provider_dedup_admin_executor,
+    ktm_feature_reference_reconciliation_service_executor FROM ktm_feature_dagster_runtime;
+
+DO $m05_role_assert$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_roles
+        WHERE rolname IN (
+            'ktm_manual_provider_dedup_procedure_owner',
+            'ktm_manual_provider_dedup_detector_executor',
+            'ktm_manual_provider_dedup_admin_executor',
+            'ktm_feature_reference_reconciliation_service_executor'
+        ) AND (
+            rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb OR rolcreaterole
+            OR rolbypassrls OR rolreplication
+        )
+    ) THEN
+        RAISE EXCEPTION 'M05 NOLOGIN role has an unsafe attribute';
+    END IF;
+    IF (
+        SELECT count(*)
+        FROM pg_catalog.pg_auth_members AS membership
+        WHERE membership.roleid IN (
+            'ktm_manual_provider_dedup_procedure_owner'::regrole,
+            'ktm_manual_provider_dedup_detector_executor'::regrole,
+            'ktm_manual_provider_dedup_admin_executor'::regrole,
+            'ktm_feature_reference_reconciliation_service_executor'::regrole
+        )
+    ) <> 4 OR EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_auth_members AS membership
+        JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid
+        JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
+        WHERE granted.rolname IN (
+            'ktm_manual_provider_dedup_procedure_owner',
+            'ktm_manual_provider_dedup_detector_executor',
+            'ktm_manual_provider_dedup_admin_executor',
+            'ktm_feature_reference_reconciliation_service_executor'
+        ) AND NOT (
+            (granted.rolname = 'ktm_manual_provider_dedup_procedure_owner'
+             AND member.rolname = 'ktm_feature_schema_owner'
+             AND membership.admin_option IS FALSE
+             AND membership.inherit_option IS FALSE
+             AND membership.set_option IS TRUE)
+            OR (granted.rolname = 'ktm_manual_provider_dedup_detector_executor'
+                AND member.rolname = 'ktm_feature_dagster_runtime'
+                AND membership.admin_option IS FALSE
+                AND membership.inherit_option IS TRUE
+                AND membership.set_option IS FALSE)
+            OR (granted.rolname = 'ktm_manual_provider_dedup_admin_executor'
+                AND member.rolname = 'ktm_feature_api_runtime'
+                AND membership.admin_option IS FALSE
+                AND membership.inherit_option IS TRUE
+                AND membership.set_option IS FALSE)
+            OR (granted.rolname = 'ktm_feature_reference_reconciliation_service_executor'
+                AND member.rolname = 'ktm_feature_api_runtime'
+                AND membership.admin_option IS FALSE
+                AND membership.inherit_option IS TRUE
+                AND membership.set_option IS FALSE)
+        )
+    ) THEN
+        RAISE EXCEPTION 'M05 procedure owner/executor membership is unsafe';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_auth_members AS membership
+        JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
+        WHERE member.rolname IN (
+            'ktm_manual_provider_dedup_procedure_owner',
+            'ktm_manual_provider_dedup_detector_executor',
+            'ktm_manual_provider_dedup_admin_executor',
+            'ktm_feature_reference_reconciliation_service_executor'
+        )
+    ) THEN
+        RAISE EXCEPTION 'M05 role must not inherit any application privilege role';
+    END IF;
+END
+$m05_role_assert$;
+SQL
+}
+
+run_m05_repair_phase() {
+  psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" \
+    -v ON_ERROR_STOP=1 <<'SQL'
+DO $m05_repair_precondition$
+DECLARE
+    v_revision text;
+    v_relation_count integer;
+    v_role_count integer;
+BEGIN
+    SELECT version_num INTO v_revision FROM public.alembic_version;
+    SELECT count(*) INTO v_relation_count
+    FROM unnest(ARRAY[
+        'ops.manual_provider_dedup_cases',
+        'ops.manual_provider_dedup_resolutions',
+        'ops.feature_reference_reconciliation_events',
+        'ops.feature_reference_reconciliation_subscriptions',
+        'ops.feature_reference_reconciliation_acks',
+        'ops.feature_reference_reconciliation_leases'
+    ]) AS expected(relation_name)
+    WHERE to_regclass(expected.relation_name) IS NOT NULL;
+    SELECT count(*) INTO v_role_count
+    FROM pg_catalog.pg_roles
+    WHERE rolname IN (
+        'ktm_manual_provider_dedup_procedure_owner',
+        'ktm_manual_provider_dedup_detector_executor',
+        'ktm_manual_provider_dedup_admin_executor',
+        'ktm_feature_reference_reconciliation_service_executor'
+    );
+    IF v_revision IS DISTINCT FROM '0231_m05_manual_provider_dedup'
+       OR v_relation_count <> 6 OR v_role_count <> 4 THEN
+        RAISE EXCEPTION
+            'M05 post-upgrade marker is incomplete (revision %, relations %, roles %)',
+            coalesce(v_revision, '<none>'), v_relation_count, v_role_count
+            USING ERRCODE = '55000';
+    END IF;
+    IF to_regprocedure('feature.reject_manual_provider_dedup_evidence_mutation()') IS NULL THEN
+        RAISE EXCEPTION 'M05 dedicated routine marker is incomplete'
+            USING ERRCODE = '55000';
+    END IF;
+END
+$m05_repair_precondition$;
+
+GRANT USAGE, CREATE ON SCHEMA feature
+    TO ktm_manual_provider_dedup_procedure_owner;
+GRANT USAGE ON SCHEMA ops
+    TO ktm_manual_provider_dedup_procedure_owner;
+ALTER FUNCTION feature.reject_manual_provider_dedup_evidence_mutation()
+    OWNER TO ktm_manual_provider_dedup_procedure_owner;
+SQL
+}
+
 if [ "$bootstrap_phase" = "m01" ]; then
   run_m01_phase
+  exit 0
+fi
+
+if [ "$bootstrap_phase" = "m05-pre" ]; then
+  run_m05_pre_phase
+  exit 0
+fi
+
+if [ "$bootstrap_phase" = "m05-repair" ]; then
+  run_m05_repair_phase
   exit 0
 fi
 

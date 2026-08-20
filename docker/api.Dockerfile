@@ -48,12 +48,15 @@ COPY alembic/baseline ./alembic/baseline
 COPY alembic/versions ./alembic/versions
 COPY docker/api-entrypoint.sh ./docker/api-entrypoint.sh
 COPY docker/migrate-to-m01-bootstrap-boundary.sh ./docker/migrate-to-m01-bootstrap-boundary.sh
+COPY docker/migrate-to-m05-bootstrap-boundary.sh ./docker/migrate-to-m05-bootstrap-boundary.sh
+COPY docker/migrate-m05.sh ./docker/migrate-m05.sh
 COPY docker/pre-squash-revisions.txt ./docker/pre-squash-revisions.txt
 COPY --chown=appuser:appuser docker/application-schema-head.py /usr/local/bin/ktm-application-schema
 COPY --chown=appuser:appuser resources/curations ./resources/curations
 
 RUN chmod 0755 /usr/local/bin/ktm-application-schema \
     && chmod +x ./docker/api-entrypoint.sh ./docker/migrate-to-m01-bootstrap-boundary.sh \
+       ./docker/migrate-to-m05-bootstrap-boundary.sh ./docker/migrate-m05.sh \
     && chown -R appuser:appuser /app
 
 USER appuser

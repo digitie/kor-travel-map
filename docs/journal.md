@@ -163,7 +163,10 @@ subscription은 UPDATE/DELETE/TRUNCATE trigger로 막는다.
 
 runtime ACL inventory와 startup catalog preflight도 M05 여섯 relation의 raw SELECT/DML을
 금지하도록 먼저 닫았다. fresh DB migration과 Alembic metadata check 1건, ruff·strict mypy가
-통과했다. 다음 tranche는 two-phase role bootstrap, dedicated writer/lease procedure, backup v3 root다.
+통과했다. 이어 `0230 → M05 role 전용 → 0231 → 사후 복구` compose choreography와 disposable
+DB helper를 만들었다. 사전 phase에는 M05 object grant가 없고, 사후 복구가 trigger function
+owner와 schema usage/create를 확정한다. 같은 fresh migration/Alembic check와 shell·compose
+회귀도 통과했다. 다음 tranche는 dedicated writer/lease procedure와 backup v3 root다.
 
 ## 2026-08-21 — 완료 task를 `tasks-done.md`로 이관
 
