@@ -1,5 +1,26 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-20 — 파괴적 재구축을 배리어로 분리 (`T-VN-FINAL-REBUILD` 신설)
+
+사용자 결정: `T-VN-41F1D-D1`의 파괴적 rebuild(`ktdctl pinvi-pair rebuild-pinned --confirm` —
+Map application·Map Dagster·PinVi 세 DB 재생성 + 일곱 runtime 재기동 + 전량 ETL 재적재)는
+**모든 주요 개발이 끝난 뒤에** 실행한다. 실행 시점과 선행조건을 새 task
+`T-VN-FINAL-REBUILD`가 소유하고, D1 → D2 → `T-VN-41C` receipt 승격을 그 뒤에 매단다.
+
+배리어 해제 조건은 사람 판단이 아니라 **"세대를 낡게 만드는 변경이 남았는가"** 셋으로 판정한다 —
+migration head를 올리는 열린 task(B1), service/user OpenAPI 정본을 바꾸는 열린 task(B2),
+일곱 image 중 하나라도 바꾸는 열린 task(B3). v5 generation이 Map/PinVi source revision과
+일곱 image ID에 결박되므로, 개발이 남은 채 실행하면 다음 머지 즉시 증거가 무효가 되고
+전량 재적재 비용만 반복된다.
+
+### 다음 한 작업
+
+배리어 앞에 남은 개발을 진행한다. 우선순위 후보:
+`T-VN-41S`(ACL 방침 결정 후 `0227+` migration/compactor·n150 1M 검증),
+`T-VN-M01`~`M05`(수동 Feature 생성 lane), `T-VN-C05A`~`C05D`(provider dataset),
+`T-VN-H34` 잔여. 진행 중인 `T-VN-41F1D-E`(v5/v7 attestation 전환)는 저장소측이 끝났고
+live 실행만 배리어 뒤에 남는다.
+
 ## 2026-08-20 — T-VN-41C GC 축 종결
 
 cache-target snapshot GC의 실측 AC를 n150 격리 DB에서 6개 축 전부 통과시켰다

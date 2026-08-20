@@ -21,9 +21,10 @@ barrier로 직렬화한다.
   - [ ] `T-VN-H50`(CI planner 인덱스 선택 flake, map #990)
 - **Lane B — frontend hardening·PinVi 소비 API**
   - [~] `T-VN-41C`(#975 병합 / final exact-pair·prod consumer enable 잔여)
-  - [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2`(격리 리허설·data-dependent live UI E2E; #967 closed)
-  - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환) ∥ [~] `T-VN-41S`(#922 1차 구현·리뷰 GO,
-    `0227+` migration/compactor·n150 1M 검증 잔여)
+  - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환 — **저장소측 완료 2026-08-20**, live 실행은 배리어 대기)
+    ∥ [~] `T-VN-41S`(#922 1차 구현·리뷰 GO, `0227+` migration/compactor·n150 1M 검증 잔여)
+  - **배리어**: [ ] `T-VN-FINAL-REBUILD`(주요 개발 완료 후 파괴적 재구축 — 사용자 결정 2026-08-20)
+    → [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2` → `T-VN-41C` receipt 승격
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정, T-VN-40 인수 뒤)**
   - [ ] `T-VN-M01`(admin Feature 생성 API — ADR-093 accepted 전환) → [ ] `T-VN-M02`(origin 보존·불변)
   - [ ] `T-VN-M03`(curated 동시 생성 — T-VN-40 인수 뒤) ∥ [ ] `T-VN-M04`(PinVi 요청 큐 — cross-repo)
@@ -662,6 +663,8 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
     `_append_result_event`에 검사가 추가돼도 조용히 삼키지 않게. (d) 통합 suite 순서 의존
     (`test_cache_target_stream_repo` commit 잔여 → `test_feature_update_repo`)은 main부터의 기존 문제.
   - [~] Map/PinVi exact head로 n150 isolated live UI recovery와 최종 prod gate를 통과한다.
+    **선행: `T-VN-FINAL-REBUILD`** — v5/v7 문서가 없으면 새 live runner가 읽을 attested
+    input 자체가 없다(사용자 결정 2026-08-20으로 주요 개발 완료 후로 미뤘다).
     후보 Live UI recovery와 `blocked → ready` stream/replay/reconciliation 결박은 통과했다. 최종 prod
     gate는 별도 final main C7·production consumer enable 경계이며, PinVi system별 snapshot concurrency 1,
     `429/503 Retry-After` backoff, `413` non-retry, credential별 gateway limit 또는 동등한 외부 rate-limit과
@@ -708,6 +711,9 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 
 - [~] **T-VN-41F1D-D1 — 최종 격리 리허설·provenance attestation** *(공동, docs-only)*
 
+  > **착수 보류 (사용자 결정 2026-08-20)**: 파괴적 rebuild는 모든 주요 개발이 끝난 뒤에
+  > 실행한다. 실행 시점·선행조건은 `T-VN-FINAL-REBUILD`가 소유한다.
+
   C3가 결선된 새 generation에서 schema head, canonical `409` receipt, finalize와 **데이터
   비의존** 관리자 UI smoke(로그인 포함)를 기록한다. 2026-08-06 n150 rebuild는 committed했고
   Map application `0087_route_area_subtypes`, Map Dagster `29b539ebc72a`, PinVi `20260804_0049`와
@@ -723,6 +729,8 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   authority이며 이전 compatible-pair manifest를 재사용하지 않는다.
 
 - [ ] **T-VN-41F1D-D2 — data-dependent admin/PinVi live E2E** *(공동, docs-only)*
+
+  > D1을 따라 `T-VN-FINAL-REBUILD` 뒤로 밀린다(사용자 결정 2026-08-20).
 
   비어 있는 새 DB에서 **고정 curated/feature ID를 요구하는** admin live UI·PinVi mutating E2E를
   재실행한다. D1이 적재한 final-schema 데이터 위에서 돈다.
@@ -740,7 +748,55 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   `PinnedRuntimeManifest.active_generation`, 일곱 immutable image·Map/PinVi revision·세 schema
   head·pinset을 확인하고 v7 journal/host attestation과 함께 발행한다. v4 manifest를 억지 입력해
   통과하는 compatibility 경로는 만들지 않는다. final schema merge/재적재와 독립적으로 unit·script
-  contract까지 완료하고, 실제 n150 data-dependent 실행은 위 F1D-D 순서를 따른다.
+  contract까지 완료하고, 실제 n150 data-dependent 실행은 위 F1D-D 순서를 따른다
+  (그 순서는 `T-VN-FINAL-REBUILD` 배리어 뒤에 열린다).
+
+### T-VN-FINAL-REBUILD — 주요 개발 완료 후 파괴적 재구축 배리어 (2026-08-20 신설)
+
+> **사용자 결정 2026-08-20**: `T-VN-41F1D-D1`의 파괴적 rebuild는 **모든 주요 개발이 끝난 뒤에**
+> 실행한다. 그 실행 시점과 선행조건을 이 task가 소유하고, D1/D2와 F1D-E의 live 실행은 여기에
+> 매단다.
+
+- [ ] **T-VN-FINAL-REBUILD — 파괴적 재구축 + 전량 재적재 배리어**
+
+  `ktdctl pinvi-pair rebuild-pinned --confirm`은 Map application·Map Dagster·PinVi **세 DB를
+  파기형으로 재생성**하고 일곱 runtime을 고정 candidate로 재기동한 뒤 v5
+  `pinned-runtime-generation-v5.json`과 v7 `pinned-runtime-rebuild-v7-<pinset>.json`을 남긴다.
+  이어서 final schema 위로 provider source·ETL을 전량 재적재한다.
+
+  **왜 미루는가.** v5 generation은 Map/PinVi source revision과 일곱 image ID에 결박된다. 개발이
+  계속되는 동안 실행하면 (a) 다음 머지 즉시 세대가 낡아 attestation 증거가 무효가 되고,
+  (b) 전량 재적재 비용을 그때마다 다시 낸다. 이 acceptance는 두 번 돌릴 값이 아니다.
+
+  **배리어 해제 조건 (전부 참이어야 착수).** "주요 개발 완료"를 사람 판단에 맡기지 않고
+  아래 셋으로 판정한다 — 셋 다 "세대를 낡게 만드는 변경"의 정의다.
+  - [ ] B1. **migration head를 올리는 열린 task가 없다.** 현재 걸려 있는 것: `T-VN-41S`
+    (`0227+` migration/compactor), `T-VN-M01`~`M05` 중 DB를 바꾸는 것,
+    `T-VN-C05A`~`C05D`(provider dataset 신설), `T-VN-39`(최종 cutover).
+  - [ ] B2. **service/user OpenAPI 정본을 바꾸는 열린 task가 없다.** PinVi exact vendor가
+    재-vendor를 요구하는 변경이 남아 있으면 pair가 다시 어긋난다.
+  - [ ] B3. **일곱 image 중 하나라도 바꾸는 열린 task가 없다** (Map API/UI/Dagster web·daemon,
+    PinVi API/web/dagster). frontend·Dockerfile·의존 pin 변경 포함.
+
+  **선행 준비.**
+  - [ ] 세 DB의 백업/복구점 확보. 파기형이므로 되돌리기는 백업뿐이다(`ktdctl db-backup create`).
+  - [ ] n150 디스크 여유 — 일곱 image 재빌드 분. 2026-08-20 기준 101G free(78%)이고
+    dangling volume 52GB·구 playwright image 약 43GB가 추가 회수 가능하다.
+  - [ ] 고정 release candidate(Map/PinVi 커밋과 일곱 image)를 먼저 확정한다.
+
+  **이 배리어가 푸는 것 (순서대로).**
+  1. v5/v7 문서가 n150에 **처음** 생긴다. 그전에는 새 live runner가 읽을 attested input이
+     아예 없다(2026-08-20 실측: 두 파일 모두 부재, v4 `compatible-pair-v4.json`만 존재).
+  2. `T-VN-41F1D-D1` — 일곱 image·세 schema head·pinset attestation과 데이터 비의존 UI smoke.
+  3. `T-VN-41F1D-E`의 n150 data-dependent 실행(저장소측 계약은 2026-08-20 완료).
+  4. `T-VN-41F1D-D2` — 고정 ID를 요구하는 admin/PinVi mutating live E2E.
+  5. `T-VN-41C` receipt `pending → candidate_verified` → 최종 prod gate·production
+     consumer enable.
+
+  **실행 전제.** v5/v7은 `require_rebuildable_mode` 아래에서만 생성된다(n150은
+  `rehearsal`/`rebuildable`이라 해당). ktdm의 state root는 Manager owner 소유 `0700`이라
+  runner가 요구하는 root 소유 `0600`을 그대로 만족하지 않으므로, 두 문서의 root 소유 사본을
+  만들어 `E2E_C7_PINNED_RUNTIME_MANIFEST`/`E2E_C7_REBUILD_JOURNAL`로 넘긴다(runbook 참조).
 
 ## Wave 2 상세 — 구조 전환
 
