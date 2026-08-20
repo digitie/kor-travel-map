@@ -115,7 +115,8 @@ def _valid_evidence_manifest(run: Path) -> bool:
         return False
     keys = {
         "alembic_head",
-        "compatible_pair_manifest_sha256",
+        "pinned_runtime_manifest_sha256",
+        "rebuild_journal_sha256",
         "files",
         "finished_at",
         "host_attestation_sha256",
@@ -138,9 +139,10 @@ def _valid_evidence_manifest(run: Path) -> bool:
         or not isinstance(manifest["playwright_image_id"], str)
         or re.fullmatch(r"sha256:[0-9a-f]{64}", manifest["playwright_image_id"])
         is None
-        or not isinstance(manifest["compatible_pair_manifest_sha256"], str)
-        or _SHA256_PATTERN.fullmatch(manifest["compatible_pair_manifest_sha256"])
-        is None
+        or not isinstance(manifest["pinned_runtime_manifest_sha256"], str)
+        or _SHA256_PATTERN.fullmatch(manifest["pinned_runtime_manifest_sha256"]) is None
+        or not isinstance(manifest["rebuild_journal_sha256"], str)
+        or _SHA256_PATTERN.fullmatch(manifest["rebuild_journal_sha256"]) is None
         or not isinstance(manifest["host_attestation_sha256"], str)
         or _SHA256_PATTERN.fullmatch(manifest["host_attestation_sha256"]) is None
         or not isinstance(manifest["finished_at"], str)
@@ -178,13 +180,17 @@ def _valid_evidence_manifest(run: Path) -> bool:
         declared_files[path_value] = (item["sha256"], item["size"])
     if declared_files != observed_files:
         return False
-    attestation = observed_files.get("runtime-attestation.json")
-    compatible_pair = observed_files.get("compatible-pair.json")
-    return (
-        attestation is not None
-        and attestation[0] == manifest["host_attestation_sha256"]
-        and compatible_pair is not None
-        and compatible_pair[0] == manifest["compatible_pair_manifest_sha256"]
+    # evidence archive 안의 세 attested document가 manifest의 digest와 각각 맞아야
+    # "이 실행이 무엇을 근거로 통과했는가"가 사후에도 재구성된다.
+    attested = (
+        ("runtime-attestation.json", "host_attestation_sha256"),
+        ("pinned-runtime-generation.json", "pinned_runtime_manifest_sha256"),
+        ("pinned-runtime-rebuild.json", "rebuild_journal_sha256"),
+    )
+    return all(
+        observed_files.get(name) is not None
+        and observed_files[name][0] == manifest[digest_key]
+        for name, digest_key in attested
     )
 
 
@@ -580,7 +586,15 @@ def audit_state_root(root: Path) -> AuditResult:
             known = True
             temporary_files += int(not directory)
             outcome_paths[outcome_match.group(1)] = entry
-        elif name.startswith((".state.", "cap.", "attestation-", "compatible-pair-")):
+        elif name.startswith(
+            (
+                ".state.",
+                "cap.",
+                "attestation-",
+                "pinned-runtime-generation-",
+                "pinned-runtime-rebuild-",
+            )
+        ):
             known = True
             temporary_files += int(not directory)
         else:

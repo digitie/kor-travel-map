@@ -20,20 +20,56 @@ from urllib.parse import urlsplit, urlunsplit
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 IMAGE_PATTERN = re.compile(r"^sha256:[0-9a-f]{64}$")
 COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
-GENERATION_PATTERN = re.compile(r"^[a-z0-9][a-z0-9._-]{2,63}$")
+SCHEMA_HEAD_PATTERN = re.compile(r"^[0-9a-z][0-9a-z_.-]{0,127}$")
+UUID_PATTERN = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
 ORCHESTRATOR_PATHS = (
     "scripts/audit-c7-prod-live-state.py",
     "scripts/lib/c7-prod-runner-lifecycle.sh",
     "scripts/lib/c7_prod_attestation.py",
     "scripts/run-c7-prod-live-e2e.sh",
 )
-PAIR_RUNTIME_IMAGE_FIELDS = (
-    ("map_api", "map_image_id"),
+# v5 generation은 Map 4개와 PinVi 3개를 **함께** 고정한다. v4 pair는 PinVi web/dagster를
+# 담지 않아 두 runtime이 세대 밖에서 흔들려도 통과했다. 일곱 전부를 compose service로
+# 실측 대조하려고 role을 일곱으로 늘린다.
+GENERATION_RUNTIME_IMAGE_FIELDS = (
+    ("map_api", "map_api_image_id"),
     ("map_ui", "map_ui_image_id"),
     ("map_dagster_web", "map_dagster_image_id"),
     ("map_dagster_daemon", "map_dagster_daemon_image_id"),
-    ("pinvi_api", "pinvi_image_id"),
+    ("pinvi_api", "pinvi_api_image_id"),
+    ("pinvi_web", "pinvi_web_image_id"),
+    ("pinvi_dagster", "pinvi_dagster_image_id"),
 )
+GENERATION_SCHEMA_HEAD_FIELDS = (
+    "map_application_head",
+    "map_dagster_head",
+    "pinvi_head",
+)
+_PINVI_ROLES = frozenset({"pinvi_api", "pinvi_web", "pinvi_dagster"})
+# ktdm `PinnedRuntimeGeneration.to_payload()`의 exact key 집합. 하나라도 빠지거나 늘면
+# 세대 정의가 갈린 것이므로 통과시키지 않는다.
+_GENERATION_KEYS = frozenset(
+    {field for _, field in GENERATION_RUNTIME_IMAGE_FIELDS}
+    | set(GENERATION_SCHEMA_HEAD_FIELDS)
+    | {"map_source_revision", "pinvi_source_revision", "pinset_sha256", "recorded_at"}
+)
+# ktdm `PinnedRuntimeRebuildJournal`의 exact key 집합과 최종 phase.
+_JOURNAL_KEYS = frozenset(
+    {
+        "version",
+        "transaction_id",
+        "phase",
+        "candidate",
+        "environment_sha256",
+        "compose_sha256",
+        "resolved_compose_sha256",
+        "created_at",
+        "cancel_probe",
+    }
+)
+_JOURNAL_COMMITTED_PHASE = "committed"
 
 CommandRunner = Callable[[list[str], str], str]
 SecureReader = Callable[[Path, int], bytes]
@@ -302,48 +338,72 @@ def _compose_container(
     return records[0]
 
 
-def _validate_pair(value: object) -> None:
-    image_fields = {field for _, field in PAIR_RUNTIME_IMAGE_FIELDS}
-    if not _exact_dict(
-        value,
-        image_fields
-        | {
-            "contract_generation",
-            "map_source_revision",
-            "pinvi_source_revision",
-            "recorded_at",
-        },
-    ):
-        raise AttestationError("pair shape")
+def _validate_generation(value: object) -> None:
+    """v5 ``PinnedRuntimeGeneration`` payload를 exact shape으로 검증한다."""
+
+    if not _exact_dict(value, set(_GENERATION_KEYS)):
+        raise AttestationError("generation shape")
     assert isinstance(value, dict)
-    for field in image_fields:
+    for _, field in GENERATION_RUNTIME_IMAGE_FIELDS:
         image_id = value[field]
         if not isinstance(image_id, str) or IMAGE_PATTERN.fullmatch(image_id) is None:
-            raise AttestationError("pair image")
-    if (
-        not isinstance(value["map_source_revision"], str)
-        or COMMIT_PATTERN.fullmatch(value["map_source_revision"]) is None
-    ):
-        raise AttestationError("Map source revision")
-    if (
-        not isinstance(value["pinvi_source_revision"], str)
-        or COMMIT_PATTERN.fullmatch(value["pinvi_source_revision"]) is None
-    ):
-        raise AttestationError("PinVi source revision")
-    generation = value["contract_generation"]
-    if not isinstance(generation, str) or GENERATION_PATTERN.fullmatch(generation) is None:
-        raise AttestationError("generation")
-    recorded_at = value["recorded_at"]
-    if not isinstance(recorded_at, str):
-        raise AttestationError("recorded_at")
-    observed_at = datetime.fromisoformat(recorded_at)
+            raise AttestationError("generation image")
+    for field in ("map_source_revision", "pinvi_source_revision"):
+        revision = value[field]
+        if not isinstance(revision, str) or COMMIT_PATTERN.fullmatch(revision) is None:
+            raise AttestationError("generation source revision")
+    for field in GENERATION_SCHEMA_HEAD_FIELDS:
+        head = value[field]
+        if not isinstance(head, str) or SCHEMA_HEAD_PATTERN.fullmatch(head) is None:
+            raise AttestationError("generation schema head")
+    pinset = value["pinset_sha256"]
+    if not isinstance(pinset, str) or SHA256_PATTERN.fullmatch(pinset) is None:
+        raise AttestationError("generation pinset")
+    _validate_utc_timestamp(value["recorded_at"], "generation recorded_at")
+
+
+def _validate_utc_timestamp(value: object, label: str) -> None:
+    if not isinstance(value, str):
+        raise AttestationError(label)
+    observed_at = datetime.fromisoformat(value)
     if observed_at.tzinfo is None or observed_at.utcoffset() is None:
-        raise AttestationError("recorded_at")
+        raise AttestationError(label)
+
+
+def _validate_committed_journal(value: object, *, generation: Mapping[str, object]) -> None:
+    """v7 rebuild journal이 **이 세대를 commit한 그 transaction**인지 확인한다.
+
+    manifest만 보면 "어떤 세대가 active인가"는 알아도 "그 세대가 파괴적 rebuild를
+    끝까지 통과했는가"는 알 수 없다. journal의 phase가 ``committed``이고 candidate가
+    manifest의 active generation과 **글자 그대로 같아야** 두 문서가 한 transaction의
+    앞뒤라는 것이 증명된다. 그래서 부분 비교가 아니라 전체 동등성을 요구한다.
+    """
+
+    if not _exact_dict(value, set(_JOURNAL_KEYS)) or value["version"] != 7:
+        raise AttestationError("journal shape")
+    assert isinstance(value, dict)
+    transaction_id = value["transaction_id"]
+    if not isinstance(transaction_id, str) or UUID_PATTERN.fullmatch(transaction_id) is None:
+        raise AttestationError("journal transaction identity")
+    if value["phase"] != _JOURNAL_COMMITTED_PHASE:
+        raise AttestationError("journal is not committed")
+    for field in ("environment_sha256", "compose_sha256", "resolved_compose_sha256"):
+        digest = value[field]
+        if not isinstance(digest, str) or SHA256_PATTERN.fullmatch(digest) is None:
+            raise AttestationError("journal input digest")
+    _validate_utc_timestamp(value["created_at"], "journal created_at")
+    _validate_generation(value["candidate"])
+    if value["candidate"] != generation:
+        raise AttestationError("journal candidate is not the active generation")
+    cancel_probe = value["cancel_probe"]
+    if not isinstance(cancel_probe, dict) or cancel_probe.get("stage") != "finalized":
+        raise AttestationError("journal cancel probe is not finalized")
 
 
 def verify_runtime_attestation_payloads(
     attestation_bytes: bytes,
     manifest_bytes: bytes,
+    journal_bytes: bytes,
     *,
     project_directory: str,
     playwright_base: str,
@@ -351,32 +411,35 @@ def verify_runtime_attestation_payloads(
     machine_id: str,
     hostname: str,
     run_json: CommandRunner,
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     """이미 안전하게 읽은 document와 실제 Docker runtime을 exact 비교한다."""
 
     try:
         attestation = json.loads(attestation_bytes)
         manifest = json.loads(manifest_bytes)
+        journal = json.loads(journal_bytes)
     except (TypeError, ValueError) as exc:
         raise AttestationError("attestation document JSON") from exc
     top_keys = {
         "api_ws_origin_sha256",
-        "c6c_contract_generation",
-        "compatible_pair_manifest_sha256",
         "compose_project_sha256",
         "dagster_graphql_url_sha256",
         "hostname_sha256",
         "machine_id_sha256",
         "orchestrator_files",
+        "pinned_runtime_manifest_sha256",
+        "pinned_runtime_pinset_sha256",
         "playwright_base",
         "playwright_image_id",
+        "rebuild_journal_sha256",
         "repository_commit",
+        "schema_heads",
         "service_runtime",
         "source_commits",
         "ui_origin_sha256",
         "version",
     }
-    if not _exact_dict(attestation, top_keys) or attestation["version"] != 3:
+    if not _exact_dict(attestation, top_keys) or attestation["version"] != 4:
         raise AttestationError("attestation shape")
     assert isinstance(attestation, dict)
     orchestrator_files = attestation["orchestrator_files"]
@@ -398,11 +461,13 @@ def verify_runtime_attestation_payloads(
         raise AttestationError("source commit identity")
     for key in {
         "api_ws_origin_sha256",
-        "compatible_pair_manifest_sha256",
         "compose_project_sha256",
         "dagster_graphql_url_sha256",
         "hostname_sha256",
         "machine_id_sha256",
+        "pinned_runtime_manifest_sha256",
+        "pinned_runtime_pinset_sha256",
+        "rebuild_journal_sha256",
         "ui_origin_sha256",
     }:
         if (
@@ -418,27 +483,32 @@ def verify_runtime_attestation_payloads(
         or not isinstance(attestation["playwright_image_id"], str)
         or IMAGE_PATTERN.fullmatch(attestation["playwright_image_id"]) is None
         or attestation["playwright_image_id"] != environ["E2E_C7_PLAYWRIGHT_IMAGE"]
-        or not isinstance(attestation["c6c_contract_generation"], str)
-        or GENERATION_PATTERN.fullmatch(attestation["c6c_contract_generation"]) is None
         or not machine_id
     ):
         raise AttestationError("attestation identity")
 
     manifest_sha256 = _sha256_bytes(manifest_bytes)
-    if not _exact_dict(manifest, {"active", "rollback", "version"}) or manifest["version"] != 4:
+    journal_sha256 = _sha256_bytes(journal_bytes)
+    if not _exact_dict(manifest, {"active_generation", "version"}) or manifest["version"] != 5:
         raise AttestationError("manifest shape")
     assert isinstance(manifest, dict)
-    _validate_pair(manifest["active"])
-    _validate_pair(manifest["rollback"])
-    active = manifest["active"]
+    active = manifest["active_generation"]
+    _validate_generation(active)
     assert isinstance(active, dict)
+    _validate_committed_journal(journal, generation=active)
     if (
-        manifest_sha256 != attestation["compatible_pair_manifest_sha256"]
-        or active["contract_generation"] != attestation["c6c_contract_generation"]
+        manifest_sha256 != attestation["pinned_runtime_manifest_sha256"]
+        or journal_sha256 != attestation["rebuild_journal_sha256"]
+        or active["pinset_sha256"] != attestation["pinned_runtime_pinset_sha256"]
         or active["map_source_revision"] != source_commits["map"]
         or active["pinvi_source_revision"] != source_commits["pinvi"]
     ):
-        raise AttestationError("compatible pair mismatch")
+        raise AttestationError("pinned runtime generation mismatch")
+    if not _exact_dict(attestation["schema_heads"], set(GENERATION_SCHEMA_HEAD_FIELDS)) or any(
+        attestation["schema_heads"][field] != active[field]
+        for field in GENERATION_SCHEMA_HEAD_FIELDS
+    ):
+        raise AttestationError("schema head mismatch")
 
     observed_origins = {
         "api_ws_origin_sha256": _sha256_text(
@@ -465,6 +535,8 @@ def verify_runtime_attestation_payloads(
         "map_dagster_web": environ["E2E_C7_DAGSTER_WEB_SERVICE"],
         "map_ui": environ["E2E_C7_UI_SERVICE"],
         "pinvi_api": environ["E2E_C7_PINVI_API_SERVICE"],
+        "pinvi_dagster": environ["E2E_C7_PINVI_DAGSTER_SERVICE"],
+        "pinvi_web": environ["E2E_C7_PINVI_WEB_SERVICE"],
     }
     if len(set(role_services.values())) != len(role_services):
         raise AttestationError("compose services are not distinct")
@@ -562,7 +634,7 @@ def verify_runtime_attestation_payloads(
             raise AttestationError("runtime image inspect")
         image_config = image_records[0].get("Config")
         image_labels = image_config.get("Labels") if isinstance(image_config, dict) else None
-        expected_source_commit = source_commits["pinvi" if role == "pinvi_api" else "map"]
+        expected_source_commit = source_commits["pinvi" if role in _PINVI_ROLES else "map"]
         if (
             not isinstance(image_labels, dict)
             or image_labels.get("org.opencontainers.image.revision") != expected_source_commit
@@ -575,9 +647,9 @@ def verify_runtime_attestation_payloads(
         raise AttestationError("runtime containers are not distinct")
     if compose_project_hashes != {attestation["compose_project_sha256"]}:
         raise AttestationError("wrong compose project")
-    for role, field in PAIR_RUNTIME_IMAGE_FIELDS:
+    for role, field in GENERATION_RUNTIME_IMAGE_FIELDS:
         if observed_images[role] != active[field]:
-            raise AttestationError("active pair is not deployed")
+            raise AttestationError("active generation is not deployed")
 
     executor_records = json.loads(
         run_json(
@@ -602,12 +674,13 @@ def verify_runtime_attestation_payloads(
         or executor_labels.get("io.kortravelmap.c7.playwright-base") != playwright_base
     ):
         raise AttestationError("executor identity")
-    return manifest_sha256, _sha256_bytes(attestation_bytes)
+    return manifest_sha256, journal_sha256, _sha256_bytes(attestation_bytes)
 
 
 def verify_trusted_runtime_attestation(
     attestation_path: Path,
     manifest_path: Path,
+    journal_path: Path,
     project_directory: str,
     playwright_base: str,
     *,
@@ -616,15 +689,17 @@ def verify_trusted_runtime_attestation(
     machine_id_path: Path = Path("/etc/machine-id"),
     hostname: str | None = None,
     run_json: CommandRunner = _subprocess_output,
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     """root-owned documents를 읽고 실제 host·Docker runtime을 검증한다."""
 
     attestation_bytes = secure_reader(attestation_path, 0o600)
     manifest_bytes = secure_reader(manifest_path, 0o600)
+    journal_bytes = secure_reader(journal_path, 0o600)
     machine_id = machine_id_path.read_text(encoding="utf-8").strip()
     return verify_runtime_attestation_payloads(
         attestation_bytes,
         manifest_bytes,
+        journal_bytes,
         project_directory=project_directory,
         playwright_base=playwright_base,
         environ=environ,
@@ -650,14 +725,18 @@ def main(argv: list[str] | None = None) -> int:
                 arguments[7],
             )
             return 0
-        if len(arguments) == 5 and arguments[0] == "runtime":
-            manifest_sha256, attestation_sha256 = verify_trusted_runtime_attestation(
-                Path(arguments[1]),
-                Path(arguments[2]),
-                arguments[3],
-                arguments[4],
+        if len(arguments) == 6 and arguments[0] == "runtime":
+            manifest_sha256, journal_sha256, attestation_sha256 = (
+                verify_trusted_runtime_attestation(
+                    Path(arguments[1]),
+                    Path(arguments[2]),
+                    Path(arguments[3]),
+                    arguments[4],
+                    arguments[5],
+                )
             )
             print(manifest_sha256)
+            print(journal_sha256)
             print(attestation_sha256)
             return 0
     except (

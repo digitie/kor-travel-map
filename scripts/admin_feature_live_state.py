@@ -142,15 +142,18 @@ def _validated_execution_identity(payload: Any) -> dict[str, str]:
         or set(payload)
         != {
             "api_image_id",
-            "compatible_pair_manifest_sha256",
+            "pinned_runtime_manifest_sha256",
+            "rebuild_journal_sha256",
             "host_attestation_sha256",
             "playwright_image_id",
             "source_commit",
         }
         or not isinstance(payload.get("api_image_id"), str)
         or _IMAGE_ID_RE.fullmatch(payload["api_image_id"]) is None
-        or not isinstance(payload.get("compatible_pair_manifest_sha256"), str)
-        or _SHA256_RE.fullmatch(payload["compatible_pair_manifest_sha256"]) is None
+        or not isinstance(payload.get("pinned_runtime_manifest_sha256"), str)
+        or _SHA256_RE.fullmatch(payload["pinned_runtime_manifest_sha256"]) is None
+        or not isinstance(payload.get("rebuild_journal_sha256"), str)
+        or _SHA256_RE.fullmatch(payload["rebuild_journal_sha256"]) is None
         or not isinstance(payload.get("host_attestation_sha256"), str)
         or _SHA256_RE.fullmatch(payload["host_attestation_sha256"]) is None
         or not isinstance(payload.get("playwright_image_id"), str)
@@ -161,7 +164,8 @@ def _validated_execution_identity(payload: Any) -> dict[str, str]:
         raise ValueError("invalid execution identity")
     return {
         "api_image_id": payload["api_image_id"],
-        "compatible_pair_manifest_sha256": payload["compatible_pair_manifest_sha256"],
+        "pinned_runtime_manifest_sha256": payload["pinned_runtime_manifest_sha256"],
+        "rebuild_journal_sha256": payload["rebuild_journal_sha256"],
         "host_attestation_sha256": payload["host_attestation_sha256"],
         "playwright_image_id": payload["playwright_image_id"],
         "source_commit": payload["source_commit"],
@@ -172,7 +176,8 @@ def _execution_identity_from_args(args: argparse.Namespace) -> dict[str, str]:
     return _validated_execution_identity(
         {
             "api_image_id": args.api_image_id,
-            "compatible_pair_manifest_sha256": args.compatible_pair_sha256,
+            "pinned_runtime_manifest_sha256": args.pinned_runtime_manifest_sha256,
+            "rebuild_journal_sha256": args.rebuild_journal_sha256,
             "host_attestation_sha256": args.host_attestation_sha256,
             "playwright_image_id": args.playwright_image_id,
             "source_commit": args.source_commit,
@@ -316,7 +321,8 @@ def _write_result(args: argparse.Namespace) -> None:
     _atomic_write(
         args.path,
         {
-            "compatible_pair_manifest_sha256": execution["compatible_pair_manifest_sha256"],
+            "pinned_runtime_manifest_sha256": execution["pinned_runtime_manifest_sha256"],
+            "rebuild_journal_sha256": execution["rebuild_journal_sha256"],
             "execution_identity_sha256": _execution_identity_sha256(execution),
             "host_attestation_sha256": execution["host_attestation_sha256"],
             "owned_feature_id_sha256": [_sha256(value) for value in _owned_ids(args.run_id)],
@@ -916,7 +922,8 @@ def _add_execution_identity_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--source-commit", required=True)
     parser.add_argument("--api-image-id", required=True)
     parser.add_argument("--playwright-image-id", required=True)
-    parser.add_argument("--compatible-pair-sha256", required=True)
+    parser.add_argument("--pinned-runtime-manifest-sha256", required=True)
+    parser.add_argument("--rebuild-journal-sha256", required=True)
     parser.add_argument("--host-attestation-sha256", required=True)
 
 

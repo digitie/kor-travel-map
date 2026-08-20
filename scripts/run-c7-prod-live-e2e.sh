@@ -30,7 +30,8 @@ POI_STATE_FILE=""
 RUNTIME_DIR=""
 PLAYWRIGHT_IMAGE_ID=""
 REPOSITORY_COMMIT=""
-COMPATIBLE_PAIR_MANIFEST_SHA256=""
+PINNED_RUNTIME_MANIFEST_SHA256=""
+REBUILD_JOURNAL_SHA256=""
 ALEMBIC_HEAD=""
 ACTIVE_COMMAND_PID=""
 ACTIVE_COMMAND_PGID=""
@@ -40,7 +41,8 @@ ACTIVE_CREATE_OUTCOME_FILE=""
 ACTIVE_CONTAINER_NAME=""
 HOST_ATTESTATION_SHA256=""
 HOST_ATTESTATION_SNAPSHOT=""
-COMPATIBLE_PAIR_SNAPSHOT=""
+PINNED_RUNTIME_MANIFEST_SNAPSHOT=""
+REBUILD_JOURNAL_SNAPSHOT=""
 
 die() {
   printf 'C7 prod live E2E orchestrator failed: %s (values redacted)\n' "$1" >&2
@@ -233,14 +235,18 @@ validate_service_env() {
 
 snapshot_attested_inputs() {
   HOST_ATTESTATION_SNAPSHOT="$STATE_ROOT/attestation-$$.json"
-  COMPATIBLE_PAIR_SNAPSHOT="$STATE_ROOT/compatible-pair-$$.json"
+  PINNED_RUNTIME_MANIFEST_SNAPSHOT="$STATE_ROOT/pinned-runtime-generation-$$.json"
+  REBUILD_JOURNAL_SNAPSHOT="$STATE_ROOT/pinned-runtime-rebuild-$$.json"
   python3 - \
     "$HOST_ATTESTATION_FILE" \
     "$HOST_ATTESTATION_SNAPSHOT" \
     "$HOST_ATTESTATION_SHA256" \
-    "$E2E_C7_COMPATIBLE_PAIR_MANIFEST" \
-    "$COMPATIBLE_PAIR_SNAPSHOT" \
-    "$COMPATIBLE_PAIR_MANIFEST_SHA256" <<'PY'
+    "$E2E_C7_PINNED_RUNTIME_MANIFEST" \
+    "$PINNED_RUNTIME_MANIFEST_SNAPSHOT" \
+    "$PINNED_RUNTIME_MANIFEST_SHA256" \
+    "$E2E_C7_REBUILD_JOURNAL" \
+    "$REBUILD_JOURNAL_SNAPSHOT" \
+    "$REBUILD_JOURNAL_SHA256" <<'PY'
 import hashlib
 import os
 import stat
@@ -324,11 +330,13 @@ preserve_evidence() {
     "$ORCHESTRATOR_VERIFIED" \
     "$REPOSITORY_COMMIT" \
     "$PLAYWRIGHT_IMAGE_ID" \
-    "$COMPATIBLE_PAIR_MANIFEST_SHA256" \
+    "$PINNED_RUNTIME_MANIFEST_SHA256" \
+    "$REBUILD_JOURNAL_SHA256" \
     "$ALEMBIC_HEAD" \
     "$HOST_ATTESTATION_SHA256" \
     "$HOST_ATTESTATION_SNAPSHOT" \
-    "$COMPATIBLE_PAIR_SNAPSHOT" <<'PY'
+    "$PINNED_RUNTIME_MANIFEST_SNAPSHOT" \
+    "$REBUILD_JOURNAL_SNAPSHOT" <<'PY'
 import hashlib
 import json
 import os
@@ -349,11 +357,13 @@ from pathlib import Path
     verified_raw,
     repository_commit,
     playwright_image_id,
-    pair_manifest_sha256,
+    pinned_runtime_manifest_sha256,
+    rebuild_journal_sha256,
     alembic_head,
     host_attestation_sha256,
     host_attestation_raw,
-    compatible_pair_raw,
+    pinned_runtime_manifest_raw,
+    rebuild_journal_raw,
 ) = sys.argv[1:]
 destination = Path(destination_raw)
 runtime = Path(runtime_raw) if runtime_raw else None
@@ -379,18 +389,21 @@ for name, raw in (
     if source is not None and source.exists():
         copy_regular(source, destination / "journals" / name)
 
-for name, raw in (
-    ("runtime-attestation.json", host_attestation_raw),
-    ("compatible-pair.json", compatible_pair_raw),
-):
-    source = Path(raw)
-    copy_regular(source, destination / name)
+attested_evidence = (
+    ("runtime-attestation.json", host_attestation_raw, host_attestation_sha256),
+    (
+        "pinned-runtime-generation.json",
+        pinned_runtime_manifest_raw,
+        pinned_runtime_manifest_sha256,
+    ),
+    ("pinned-runtime-rebuild.json", rebuild_journal_raw, rebuild_journal_sha256),
+)
+for name, raw, _expected in attested_evidence:
+    copy_regular(Path(raw), destination / name)
 
-if (
-    hashlib.sha256((destination / "runtime-attestation.json").read_bytes()).hexdigest()
-    != host_attestation_sha256
-    or hashlib.sha256((destination / "compatible-pair.json").read_bytes()).hexdigest()
-    != pair_manifest_sha256
+if any(
+    hashlib.sha256((destination / name).read_bytes()).hexdigest() != expected
+    for name, _raw, expected in attested_evidence
 ):
     raise RuntimeError("attested evidence snapshot hash mismatch")
 
@@ -428,7 +441,8 @@ for path in sorted(destination.rglob("*")):
         )
 manifest = {
     "alembic_head": alembic_head,
-    "compatible_pair_manifest_sha256": pair_manifest_sha256,
+    "pinned_runtime_manifest_sha256": pinned_runtime_manifest_sha256,
+    "rebuild_journal_sha256": rebuild_journal_sha256,
     "files": files,
     "finished_at": datetime.now(UTC).isoformat(),
     "orchestrator_verified": verified_raw == "1",
@@ -501,7 +515,8 @@ finish() {
     status == 0 && ORCHESTRATOR_VERIFIED == 1 &&
       container_clean == 1 && evidence_preserved == 1
   )); then
-    rm -f -- "$HOST_ATTESTATION_SNAPSHOT" "$COMPATIBLE_PAIR_SNAPSHOT" || status=1
+    rm -f -- "$HOST_ATTESTATION_SNAPSHOT" "$PINNED_RUNTIME_MANIFEST_SNAPSHOT" \
+      "$REBUILD_JOURNAL_SNAPSHOT" || status=1
   fi
   if ((
     status == 0 && ORCHESTRATOR_VERIFIED == 1 &&
@@ -557,7 +572,8 @@ has_residual_state() {
     compgen -G "$STATE_ROOT/.state.*" >/dev/null ||
     compgen -G "$STATE_ROOT/cap.*" >/dev/null ||
     compgen -G "$STATE_ROOT/attestation-*.json" >/dev/null ||
-    compgen -G "$STATE_ROOT/compatible-pair-*.json" >/dev/null ||
+    compgen -G "$STATE_ROOT/pinned-runtime-generation-*.json" >/dev/null ||
+    compgen -G "$STATE_ROOT/pinned-runtime-rebuild-*.json" >/dev/null ||
     compgen -G "$STATE_ROOT/container-*.cid" >/dev/null ||
     compgen -G "$STATE_ROOT/container-*.json" >/dev/null ||
     compgen -G "$STATE_ROOT/container-*.outcome.json" >/dev/null
@@ -589,7 +605,8 @@ require_env E2E_ADMIN_PASSWORD
 require_env E2E_DAGSTER_JOB
 require_env E2E_C7_SCHEDULE
 require_env E2E_C7_EXPECTED_GIT_COMMIT
-require_env E2E_C7_COMPATIBLE_PAIR_MANIFEST
+require_env E2E_C7_PINNED_RUNTIME_MANIFEST
+require_env E2E_C7_REBUILD_JOURNAL
 require_env E2E_C7_PLAYWRIGHT_IMAGE
 validate_sha256_env E2E_C7_EXPECTED_UI_ORIGIN_SHA256
 validate_sha256_env E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256
@@ -599,13 +616,17 @@ validate_service_env E2E_C7_DAGSTER_DAEMON_SERVICE
 validate_service_env E2E_C7_UI_SERVICE
 validate_service_env E2E_C7_MAP_API_SERVICE
 validate_service_env E2E_C7_PINVI_API_SERVICE
+validate_service_env E2E_C7_PINVI_WEB_SERVICE
+validate_service_env E2E_C7_PINVI_DAGSTER_SERVICE
 
 [[ "$E2E_C7_EXPECTED_GIT_COMMIT" =~ ^[0-9a-f]{40}$ ]] ||
   die "expected Git commit is invalid"
 [[ "$E2E_C7_PLAYWRIGHT_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]] ||
   die "Playwright executor must be an immutable image ID"
-[[ "$E2E_C7_COMPATIBLE_PAIR_MANIFEST" == /* ]] ||
-  die "compatible-pair manifest path must be absolute"
+[[ "$E2E_C7_PINNED_RUNTIME_MANIFEST" == /* ]] ||
+  die "pinned runtime manifest path must be absolute"
+[[ "$E2E_C7_REBUILD_JOURNAL" == /* ]] ||
+  die "pinned runtime rebuild journal path must be absolute"
 
 require_enabled E2E_LIVE_ALLOW_PROD
 require_enabled E2E_ADMIN_WRITE
@@ -726,7 +747,8 @@ verify_trusted_runtime_attestation() {
   run_verified_attestation_module \
     runtime \
     "$HOST_ATTESTATION_FILE" \
-    "$E2E_C7_COMPATIBLE_PAIR_MANIFEST" \
+    "$E2E_C7_PINNED_RUNTIME_MANIFEST" \
+    "$E2E_C7_REBUILD_JOURNAL" \
     "$COMPOSE_PROJECT_DIR" \
     "$PLAYWRIGHT_BASE_IMAGE"
 }
@@ -1164,13 +1186,16 @@ verify_root_owned_orchestrator_snapshot ||
   die "runner is not the attested root-owned exact commit snapshot"
 source "$SCRIPT_DIR/lib/c7-prod-runner-lifecycle.sh"
 mapfile -t runtime_attestation_output < <(verify_trusted_runtime_attestation 2>/dev/null) ||
-  die "trusted host/runtime/compatible-pair attestation failed"
-(( ${#runtime_attestation_output[@]} == 2 )) ||
+  die "trusted host/runtime/pinned-generation attestation failed"
+(( ${#runtime_attestation_output[@]} == 3 )) ||
   die "trusted runtime attestation output cardinality is invalid"
-COMPATIBLE_PAIR_MANIFEST_SHA256="${runtime_attestation_output[0]}"
-HOST_ATTESTATION_SHA256="${runtime_attestation_output[1]}"
-[[ "$COMPATIBLE_PAIR_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
-  die "compatible-pair manifest attestation output is invalid"
+PINNED_RUNTIME_MANIFEST_SHA256="${runtime_attestation_output[0]}"
+REBUILD_JOURNAL_SHA256="${runtime_attestation_output[1]}"
+HOST_ATTESTATION_SHA256="${runtime_attestation_output[2]}"
+[[ "$PINNED_RUNTIME_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
+  die "pinned runtime manifest attestation output is invalid"
+[[ "$REBUILD_JOURNAL_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
+  die "pinned runtime rebuild journal attestation output is invalid"
 [[ "$HOST_ATTESTATION_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
   die "host runtime attestation output is invalid"
 PLAYWRIGHT_IMAGE_ID="$E2E_C7_PLAYWRIGHT_IMAGE"
