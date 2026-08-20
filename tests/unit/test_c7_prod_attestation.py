@@ -574,6 +574,28 @@ def test_runtime_attestation_rejects_non_v5_or_inexact_generation_shape(
         (lambda value: value.update({"environment_sha256": "short"}), "journal input digest"),
         (lambda value: value["cancel_probe"].update({"stage": "consumed"}), "cancel probe"),
         (
+            lambda value: value["cancel_probe"].update({"unexpected": True}),
+            "journal cancel probe shape",
+        ),
+        (
+            lambda value: value["cancel_probe"].pop("fixture_consumed_at"),
+            "journal cancel probe shape",
+        ),
+        (
+            lambda value: value["cancel_probe"]["outcome"].update({"status": 410}),
+            "journal cancel probe outcome",
+        ),
+        (
+            lambda value: value["cancel_probe"].update({"job_id": ""}),
+            "journal cancel probe identity",
+        ),
+        (
+            lambda value: value["cancel_probe"].update(
+                {"fixture_finalized_at": "2026-07-19T00:00:02"}
+            ),
+            "journal cancel probe timestamp",
+        ),
+        (
             lambda value: value["candidate"].update({"map_ui_image_id": "sha256:" + "f" * 64}),
             "journal candidate is not the active generation",
         ),
