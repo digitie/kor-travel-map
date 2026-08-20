@@ -2009,13 +2009,17 @@ async def get_cache_target_snapshot(
                 "snapshot_not_found",
                 "요청한 stream의 fixed snapshot이 없습니다.",
             )
+        header = dict(row._mapping)
+        # compaction을 만료보다 **먼저** 본다. compaction 후보는 정의상 미만료
+        # receipt가 없으므로, 만료를 먼저 보면 410은 영원히 도달하지 않는다.
+        # 둘 다 참일 때 더 구체적인 쪽을 답한다 — 410은 보존된 receipt 값(개수·root·
+        # compaction 시각)을 함께 실어 주고, 만료는 "다시 받아라"만 말한다.
+        _reject_compacted_material(header)
         if not bool(row._mapping["valid"]):
             raise CacheTargetStreamConflict(
                 "snapshot_expired",
                 "fixed snapshot이 만료됐습니다.",
             )
-        header = dict(row._mapping)
-        _reject_compacted_material(header)
         item_rows = (
             await session.execute(
                 text(_GET_SNAPSHOT_ITEMS_SQL),
@@ -2136,6 +2140,9 @@ async def get_cache_target_reconciliation_snapshot(
     if snapshot_row is None:
         raise RuntimeError("running reconciliation request의 snapshot이 없습니다.")
     header.update(dict(snapshot_row._mapping))
+    # 지금 계약에서는 도달하지 않는다 — compaction 후보는 참조 reconciliation이 전부
+    # terminal이어야 하고, 위에서 `running`이 아니면 이미 막힌다. 그래도 둔다. 그
+    # 불변이 깨지면 부분 page 대신 typed 410이 나가야 한다.
     _reject_compacted_material(header)
     after_row_number = 0
     if cursor is not None:
