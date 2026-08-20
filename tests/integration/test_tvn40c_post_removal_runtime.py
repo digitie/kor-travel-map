@@ -68,35 +68,39 @@ _RETAINED_ROUTE_TEMPLATES: tuple[str, ...] = (
 )
 
 
-def _app_route_paths() -> set[str]:
-    """`packages/kor-travel-map-api/scripts/export_openapi.py`와 같은 app을 본다.
+def _app_openapi_paths() -> set[str]:
+    """`export_openapi.py`와 같은 app의 **OpenAPI 표면**을 본다.
 
-    `create_app(ApiSettings(...))`로 최소 설정 앱을 만들면 admin/service 라우터가
-    아예 mount되지 않아 "잔존 표면이 살아 있다"를 검사할 수 없다 — 목록 전체가
-    자명하게 사라진 것처럼 보인다(이 테스트를 처음 썼을 때 실제로 그랬다).
+    `app.routes`를 직접 세면 안 된다 — 이 앱은 라우터를 `_IncludedRouter` 37개로
+    감싸 두어 top-level route 객체에는 `path`가 없다. 그래서 처음 이 검사를 썼을 때
+    잔존 표면 13개가 전부 "사라진" 것으로 보였고, 제거 표면 검사 쪽은 **아무 것도
+    안 보면서 초록**이었다. 계약 표면은 생성된 spec이 정본이다.
     """
     from kortravelmap.api.app import app
 
-    return {getattr(route, "path", "") for route in app.routes}
+    return set(app.openapi()["paths"])
 
 
-def test_removed_and_retained_route_sets_are_not_empty() -> None:
-    """양쪽 목록이 비면 아래 검사가 자명하게 통과한다."""
+def test_route_sets_and_the_app_surface_are_not_empty() -> None:
+    """목록이 비거나 표면을 못 읽으면 아래 검사가 자명하게 통과한다."""
     assert len(_REMOVED_ROUTE_TEMPLATES) == 11
     assert len(_RETAINED_ROUTE_TEMPLATES) == 13
     assert not set(_REMOVED_ROUTE_TEMPLATES) & set(_RETAINED_ROUTE_TEMPLATES)
+    paths = _app_openapi_paths()
+    assert len(paths) > 100, f"OpenAPI 표면이 너무 작다: {len(paths)}"
+    assert "/v1/features" in paths
 
 
 def test_removed_routes_are_absent_from_the_app() -> None:
     """제거된 라우트는 410/404가 아니라 **애초에 없다**."""
-    paths = _app_route_paths()
+    paths = _app_openapi_paths()
     still_mounted = sorted(p for p in _REMOVED_ROUTE_TEMPLATES if p in paths)
     assert not still_mounted, f"40C가 지운 라우트가 아직 mount돼 있다: {still_mounted}"
 
 
 def test_retained_routes_survive_the_removal() -> None:
     """제거가 잔존 표면까지 같이 걷어내지 않았는지 — 과잉 삭제 검출."""
-    paths = _app_route_paths()
+    paths = _app_openapi_paths()
     missing = sorted(p for p in _RETAINED_ROUTE_TEMPLATES if p not in paths)
     assert not missing, f"남아야 할 라우트가 사라졌다: {missing}"
 
