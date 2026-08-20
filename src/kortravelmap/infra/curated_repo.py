@@ -31,30 +31,7 @@ __all__ = [
     "archive_curated_source_rule_command",
 ]
 
-CursorKind = Literal["curated_features"]
 
-_CURATION_STATUSES: Final[frozenset[str]] = frozenset(
-    {"candidate", "curated", "rejected", "archived"}
-)
-_SELECTION_ORIGINS: Final[frozenset[str]] = frozenset(
-    {"source_rule", "admin", "external_api"}
-)
-_CURATION_RELATIONS: Final[frozenset[str]] = frozenset(
-    {
-        "primary_stop",
-        "food_stop",
-        "cafe_stop",
-        "bookstore_stop",
-        "nearby_option",
-        "accessibility_support",
-        "pet_support",
-        "family_support",
-        "theme_area_anchor",
-    }
-)
-_REUSE_POLICIES: Final[frozenset[str]] = frozenset(
-    {"allowed", "blocked", "manual_review"}
-)
 _THEME_VISIBILITIES: Final[frozenset[str]] = frozenset(
     {"admin_only", "public"}
 )
@@ -67,33 +44,8 @@ _UPDATE_CYCLES: Final[frozenset[str]] = frozenset(
 _PROVIDER_STATUSES: Final[frozenset[str]] = frozenset(
     {"implemented", "provider_needed", "manual_only", "deprecated"}
 )
-_RULE_ACTIONS: Final[frozenset[str]] = frozenset(
-    {"candidate", "curated", "ignore"}
-)
 _TYPED_RULE_ACTIONS: Final[frozenset[str]] = frozenset({"candidate", "ignore"})
-_MAX_PAGE_SIZE: Final[int] = 200
 _MAX_LIST_LIMIT: Final[int] = 500
-_CONCIERGE_PROVIDER: Final[str] = "kor-travel-concierge-youtube"
-_CONCIERGE_DATASET_KEY: Final[str] = "youtube_place_candidates"
-_PROVIDER_TITLE_SOURCE_PROVIDERS: Final[frozenset[str]] = frozenset(
-    {
-        "data.go.kr-standard",
-        "python-airkorea-api",
-        "python-datagokr-api",
-        "python-kasi-api",
-        "python-khoa-api",
-        "python-kma-api",
-        "python-knps-api",
-        "python-krairport-api",
-        "python-krex-api",
-        "python-krforest-api",
-        "python-krheritage-api",
-        "python-mcst-api",
-        "python-mois-api",
-        "python-opinet-api",
-        "python-visitkorea-api",
-    }
-)
 
 
 @dataclass(frozen=True)
@@ -169,11 +121,6 @@ class CuratedSourceRule:
     owner_provider_dataset_id: int | None = None
 
 
-
-
-
-
-
 _THEME_COLUMNS: Final[str] = (
     "theme_id::text AS theme_id, theme_slug, theme_name, theme_description, "
     "theme_group, visibility, metadata, created_at, updated_at, row_revision, "
@@ -194,56 +141,6 @@ _RULE_COLUMNS: Final[str] = (
     "r.priority, r.enabled, r.metadata, r.created_at, r.updated_at, "
     "r.row_revision, r.archived_at, r.owner_kind, r.owner_provider_dataset_id"
 )
-_FEATURE_COLUMNS: Final[str] = """
-    cf.curated_feature_id::text AS curated_feature_id,
-    cf.theme_id::text AS theme_id,
-    t.theme_slug,
-    t.theme_name,
-    t.theme_group,
-    cf.feature_id,
-    CAST(f.feature_uuid AS text) AS feature_uuid,
-    f.name AS feature_name,
-    f.category AS feature_category,
-    f.kind AS feature_kind,
-    x_extension.ST_X(f.coord) AS lon,
-    x_extension.ST_Y(f.coord) AS lat,
-    f.sido_code,
-    f.sigungu_code,
-    f.legal_dong_code,
-    f.address,
-    typed.detail,
-    cf.source_id::text AS source_id,
-    s.provider_dataset_id,
-    pd.provider,
-    pd.dataset_key,
-    s.source_name,
-    s.source_url,
-    cf.source_record_key,
-    cf.curation_status,
-    cf.selection_origin,
-    cf.selected_by,
-    cf.selected_at,
-    cf.rejected_by,
-    cf.rejected_at,
-    cf.rejection_reason,
-    cf.rank_score,
-    cf.display_title,
-    cf.display_summary,
-    cf.curation_relation,
-    cf.reuse_policy,
-    cf.content_version,
-    cf.metadata,
-    cf.created_at,
-    cf.updated_at,
-    cf.archived_at
-"""
-# 공개 read는 ADR-067 단일 공개 projection(``feature.public_features``)만 조인해
-# 비공개(draft/broken/hidden/inactive/soft-deleted) feature의 큐레이션 노출을 막는다
-# (T-VN-04, F-1). admin read는 기존대로 base table을 조인해 전 상태를 본다 —
-# legacy overlay 상태와 무관하게 공개 read가 새지 않는다.
-# admin reader는 core와 모든 typed subtype을 직접 LEFT JOIN해 detail을 조립한다.
-# public reader도 같은 ``typed`` alias를 제공해 두 select의 projection을 공유한다.
-
 
 
 _LIST_THEMES_SQL: Final[str] = f"""
@@ -310,25 +207,6 @@ ORDER BY t.theme_slug, pd.provider, pd.dataset_key, r.priority DESC, r.rule_id
 LIMIT :limit
 """
 
-# 필터(커서 제외) — 일반/dedup 두 변형이 공유한다.
-
-# keyset 커서 — 일반 변형(원본 cf 컬럼, uuid 비교).
-
-
-
-# 물리 feature당 1행 dedup 변형(지도 경로). 같은 feature가 여러 테마로 큐레이션되면
-# `/v1/admin/features/curated`가 같은 feature_id를 테마 수만큼 반환한다(부분 UNIQUE 인덱스가
-# (theme_id, feature_id)만 강제 → cross-theme 중복 허용). 지도는 물리 feature당 마커 1개여야
-# 하므로, feature_id별로 rank_score 최고(동점 시 최신 updated_at) 큐레이션 1건만 남긴다.
-# DISTINCT ON은 서브쿼리 안에서 (feature_id, rank_score DESC …)로 수행하고, 바깥에서 keyset
-# 커서 정렬을 적용해 페이지네이션 정합성을 유지한다(curated_feature_id는 서브쿼리에서 text로
-# alias돼 있어 커서 비교도 text — 표준 uuid는 text 정렬이 uuid 정렬과 일치).
-# 관리자 per-curation 목록은 이 변형을 쓰지 않아 모든 큐레이션을 그대로 본다.
-
-
-
-
-
 
 def _json_object(value: Any) -> dict[str, Any]:
     if isinstance(value, dict):
@@ -349,14 +227,6 @@ def _json_dumps(value: Mapping[str, Any] | None) -> str:
     )
 
 
-def _decimal_to_float(value: Any) -> float:
-    if isinstance(value, Decimal):
-        return float(value)
-    if isinstance(value, int | float):
-        return float(value)
-    return 0.0
-
-
 def _text(value: Any) -> str | None:
     if value is None:
         return None
@@ -371,19 +241,6 @@ def _validate_choice(value: str, allowed: frozenset[str], field_name: str) -> No
 
 def _safe_limit(limit: int, max_limit: int = _MAX_LIST_LIMIT) -> int:
     return max(1, min(limit, max_limit))
-
-
-def _q_pattern(q: str | None) -> str | None:
-    stripped = _text(q)
-    return f"%{stripped}%" if stripped else None
-
-
-
-
-
-
-
-
 
 
 def _theme(row: Any) -> CuratedTheme:
@@ -466,23 +323,6 @@ def _rule(row: Any) -> CuratedSourceRule:
             else None
         ),
     )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 async def list_curated_themes(
@@ -608,23 +448,6 @@ async def get_curated_source_rule(
     """retained source rule 단건을 조회한다."""
 
     return await _get_rule(session, rule_id)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 async def create_curated_theme_command(
@@ -1156,50 +979,3 @@ async def _get_rule(session: AsyncSession, rule_id: str) -> CuratedSourceRule | 
         )
     ).mappings().first()
     return _rule(rows) if rows is not None else None
-
-
-async def _update_simple(
-    session: AsyncSession,
-    *,
-    table: str,
-    id_column: str,
-    id_value: str,
-    updates: Mapping[str, Any],
-    allowed: set[str],
-    choice_fields: Mapping[str, frozenset[str]],
-    returning: str,
-) -> Any | None:
-    set_parts: list[str] = []
-    params: dict[str, Any] = {"id_value": id_value}
-    for key, value in updates.items():
-        if key not in allowed:
-            raise ValueError(f"unsupported update field: {key}")
-        if key in choice_fields:
-            _validate_choice(str(value), choice_fields[key], key)
-        if key in {"metadata", "region_scope", "detail_selector"}:
-            param_name = f"{key}_json"
-            set_parts.append(f"{key} = CAST(:{param_name} AS jsonb)")
-            params[param_name] = (
-                None
-                if key == "detail_selector" and value is None
-                else _json_dumps(value)
-            )
-        else:
-            set_parts.append(f"{key} = :{key}")
-            params[key] = value
-    if not set_parts:
-        return None
-    set_parts.append("updated_at = now()")
-    return (
-        await session.execute(
-            text(
-                f"""
-                UPDATE {table}
-                SET {", ".join(set_parts)}
-                WHERE {id_column} = CAST(:id_value AS uuid)
-                RETURNING {returning}
-                """
-            ),
-            params,
-        )
-    ).mappings().first()

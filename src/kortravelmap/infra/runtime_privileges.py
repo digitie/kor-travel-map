@@ -59,8 +59,8 @@ _FEATURE_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "feature_weather_values": ("SELECT", "INSERT"),
     # `weather_metric_series`(legacy 0069)는 vNext baseline에 없다 — phantom 항목이라 지웠다.
     # 표에 있어도 DB에 없으면 reconcile이 건너뛰므로 아무 것도 지키지 않는다.
-    # `tests/integration/test_tvn40a_legacy_write_fence_acl.py::
-    # test_every_declared_feature_relation_exists`가 phantom을 잡는다.
+    # phantom은 `tests/integration/test_runtime_privileges_acl.py::
+    # test_every_declared_feature_relation_exists`가 잡는다.
 }
 
 # Views are included in ``REVOKE ALL ON ALL TABLES`` but PostgreSQL does not

@@ -72,15 +72,6 @@ ProviderStatus = Literal[
 ]
 RuleAction = Literal["candidate", "ignore"]
 
-PLACE_SEARCH_LIMIT = 5
-KAKAO_LOCAL_KEYWORD_URL = "https://dapi.kakao.com/v2/local/search/keyword.json"
-NAVER_LOCAL_SEARCH_URL = "https://openapi.naver.com/v1/search/local.json"
-GOOGLE_PLACES_TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
-GOOGLE_PLACES_FIELD_MASK = (
-    "places.displayName,places.formattedAddress,places.location,places.primaryTypeDisplayName"
-)
-_HTML_TAG_RE = re.compile(r"<[^>]+>")
-
 
 def _omitted_patch_value() -> Any:
     """PATCH 생략값: schema는 optional/non-null, explicit null은 validation 실패."""
