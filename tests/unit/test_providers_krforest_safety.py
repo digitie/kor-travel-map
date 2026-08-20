@@ -8,7 +8,7 @@ from typing import Any
 
 import pytest
 
-from kortravelmap.dto import FeatureKind, ForecastStyle, WeatherDomain
+from kortravelmap.dto import FeatureKind, ForecastStyle, TimelineBucket, WeatherDomain
 from kortravelmap.providers.krforest_safety import (
     LANDSLIDE_FORECAST_DATASET_KEY,
     MOUNTAIN_WEATHER_DATASET_KEY,
@@ -113,6 +113,7 @@ def test_mountain_weather_creates_anchors_and_observed_values() -> None:
     assert {value.metric_key for value in values} == {"TMP", "REH", "WSD", "VEC", "VEC_NAME"}
     assert all(value.weather_domain is WeatherDomain.FOREST_MOUNTAIN_WEATHER for value in values)
     assert all(value.forecast_style is ForecastStyle.OBSERVED for value in values)
+    assert all(value.timeline_bucket is TimelineBucket.ULTRA_SHORT for value in values)
     assert all(value.source_record_key == "sr_weather_response" for value in values)
 
 
@@ -160,6 +161,12 @@ def test_wildfire_risk_keeps_region_identity_and_forecast_metrics() -> None:
         "FIRE_RISK_D4",
     }
     assert all(value.weather_domain is WeatherDomain.FOREST_FIRE_RISK for value in values)
+    assert all(value.timeline_bucket is TimelineBucket.SHORT for value in values)
+    assert {
+        value.valid_at
+        for value in values
+        if value.metric_key.startswith("FIRE_RISK_D")
+    } == {_now(9), _now(9) + timedelta(days=1), _now(9) + timedelta(days=3)}
 
 
 @pytest.mark.unit
@@ -176,7 +183,7 @@ def test_landslide_release_is_same_lineage_but_not_active() -> None:
         issue_kind_name="산사태주의보",
         issuing_institution="강원특별자치도",
         status="해제",
-        issued_at=_now(10),
+        issued_at=_now(8),
     )
     bundles = landslide_forecast_issues_to_bundles(
         [active, released], fetched_at=_now()
@@ -184,5 +191,28 @@ def test_landslide_release_is_same_lineage_but_not_active() -> None:
     assert len(bundles) == 1
     assert bundles[0].source_record.dataset_key == LANDSLIDE_FORECAST_DATASET_KEY
     assert bundles[0].feature.detail is not None
-    assert bundles[0].feature.detail.valid_end_time == _now(10)  # type: ignore[union-attr]
+    assert bundles[0].feature.detail.valid_end_time == _now()  # type: ignore[union-attr]
     assert not landslide_active_lineage_keys([released])
+
+
+@pytest.mark.unit
+def test_landslide_unknown_status_is_not_active_and_distinct_issue_times_split() -> None:
+    items = [
+        _LandslideIssue(
+            issue_kind_code="1",
+            issue_kind_name="산사태주의보",
+            issuing_institution="강원특별자치도",
+            status=None,
+            issued_at=_now(8),
+        ),
+        _LandslideIssue(
+            issue_kind_code="1",
+            issue_kind_name="산사태주의보",
+            issuing_institution="강원특별자치도",
+            status="발령",
+            issued_at=_now(10),
+        ),
+    ]
+    bundles = landslide_forecast_issues_to_bundles(items, fetched_at=_now())
+    assert len(bundles) == 2
+    assert not landslide_active_lineage_keys(items[:1])

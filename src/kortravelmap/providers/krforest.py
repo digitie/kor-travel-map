@@ -522,7 +522,10 @@ async def _forest_route_to_bundle(
         raw_payload_hash=payload_hash,
     )
     feature_id = make_feature_id(
-        bjd_code=address.bjd_code if address is not None else None,
+        # route identity is provider source-native.  Reverse-geocoder output may
+        # change when the route centroid or geocoder version changes, so it must
+        # remain display metadata rather than split the same source entity.
+        bjd_code=None,
         kind=FeatureKind.ROUTE.value,
         category=FOREST_ROUTE_CATEGORY,
         source_type=f"{KRFOREST_PROVIDER_NAME}:{dataset_key}",

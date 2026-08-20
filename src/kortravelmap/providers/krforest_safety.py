@@ -29,6 +29,7 @@ from kortravelmap.dto import (
     SourceLink,
     SourceRecord,
     SourceRole,
+    TimelineBucket,
     WeatherDomain,
     WeatherValue,
 )
@@ -375,7 +376,7 @@ def mountain_weather_to_values(
                     provider=normalize_provider_name(KRFOREST_PROVIDER_NAME),
                     weather_domain=WeatherDomain.FOREST_MOUNTAIN_WEATHER,
                     forecast_style=ForecastStyle.OBSERVED,
-                    timeline_bucket=None,
+                    timeline_bucket=TimelineBucket.ULTRA_SHORT,
                     metric_key=metric_key,
                     source_metric_key=attribute,
                     metric_name=metric_name,
@@ -405,6 +406,7 @@ def mountain_weather_to_values(
                     provider=normalize_provider_name(KRFOREST_PROVIDER_NAME),
                     weather_domain=WeatherDomain.FOREST_MOUNTAIN_WEATHER,
                     forecast_style=ForecastStyle.OBSERVED,
+                    timeline_bucket=TimelineBucket.ULTRA_SHORT,
                     metric_key=metric_key,
                     source_metric_key=attribute,
                     metric_name=metric_name,
@@ -496,6 +498,7 @@ def _wildfire_value(
     value: object,
     source_metric_key: str,
     issued_at: datetime,
+    valid_at: datetime,
     source_record_key: str | None,
 ) -> WeatherValue | None:
     value_number = _decimal(value)
@@ -506,13 +509,13 @@ def _wildfire_value(
         provider=normalize_provider_name(KRFOREST_PROVIDER_NAME),
         weather_domain=WeatherDomain.FOREST_FIRE_RISK,
         forecast_style=ForecastStyle.INDEX,
-        timeline_bucket=None,
+        timeline_bucket=TimelineBucket.SHORT,
         metric_key=metric_key,
         source_metric_key=source_metric_key,
         metric_name=metric_name,
         unit="score",
         issued_at=issued_at,
-        valid_at=issued_at,
+        valid_at=valid_at,
         value_number=value_number,
         normalization_version=KRFOREST_SAFETY_NORMALIZATION_VERSION,
         payload={
@@ -554,6 +557,7 @@ def wildfire_risk_to_values(
             value=aggregate,
             source_metric_key=aggregate_key,
             issued_at=issued_at,
+            valid_at=issued_at,
             source_record_key=source_record_key,
         )
         if aggregate_value is not None:
@@ -567,6 +571,7 @@ def wildfire_risk_to_values(
                 value=value,
                 source_metric_key=f"d{index}",
                 issued_at=issued_at,
+                valid_at=issued_at + timedelta(days=index - 1),
                 source_record_key=source_record_key,
             )
             if forecast_value is not None:
@@ -577,17 +582,37 @@ def wildfire_risk_to_values(
 def _landslide_key(item: LandslideForecastIssueItem) -> str:
     kind = _text(item.issue_kind_code) or _text(item.issue_kind_name) or "unknown"
     institution = _text(item.issuing_institution) or "unknown"
+    raw = getattr(item, "raw", {})
+    if isinstance(raw, Mapping):
+        for field in (
+            "issue_id",
+            "issueId",
+            "frstFrcstIssuNo",
+            "발령번호",
+            "발령ID",
+            "seq",
+            "id",
+        ):
+            raw_id = _text(raw.get(field))
+            if raw_id is not None:
+                return f"{kind}::{institution}::{raw_id}"
     # status는 같은 issue의 발령→해제 전이를 같은 Feature에 남겨야 하므로
-    # 자연키에서 제외한다. provider가 별도 사건 ID를 주지 않으므로 같은
-    # 종류·발령기관의 최신 상태만 snapshot에 남기고, 상태 변경은 source
-    # record/lifecycle로 표현한다.
-    return f"{kind}::{institution}"
+    # 자연키에서 제외한다. provider의 first-issue time은 별도 사건을
+    # 분리할 수 있는 유일한 typed 식별자이므로 fallback identity에 포함한다.
+    issued_at = _aware(item.issued_at)
+    issued_key = issued_at.isoformat() if issued_at is not None else "unknown"
+    return f"{kind}::{institution}::{issued_key}"
 
 
 def _landslide_is_active(item: LandslideForecastIssueItem) -> bool:
     status = (_text(item.status) or "").lower()
-    return not any(
+    if not status or any(
         token in status for token in ("해제", "종료", "해소", "취소", "release", "close")
+    ):
+        return False
+    return any(
+        token in status
+        for token in ("발령", "발효", "유지", "active", "issued", "ongoing", "warning", "alert")
     )
 
 
@@ -641,9 +666,9 @@ def landslide_forecast_issues_to_bundles(
             detail=NoticeDetail(
                 feature_id=feature_id,
                 notice_type=NOTICE_TYPE_LANDSLIDE,
-                severity=2 if active else 0,
-                valid_start_time=issued_at,
-                valid_end_time=None if active else issued_at,
+                    severity=2 if active else 0,
+                    valid_start_time=issued_at,
+                    valid_end_time=None if active else fetched_at,
                 source_agency=_text(item.issuing_institution),
                 payload={
                     "domain": "forest",
@@ -652,6 +677,7 @@ def landslide_forecast_issues_to_bundles(
                     "status": item.status,
                     "active": active,
                     "issued_at": issued_at.isoformat(),
+                    "closed_observed_at": None if active else fetched_at.isoformat(),
                     "provider_raw": raw_data["provider_raw"],
                 },
             ),

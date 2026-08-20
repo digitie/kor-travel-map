@@ -66,6 +66,11 @@ _DEFAULT_SCHEDULE_CRONS: dict[str, str] = {
     "feature_place_krforest_arboretums_monthly_schedule": "15 4 4 * *",
     "feature_route_krforest_mountain_trails_monthly_schedule": "25 4 4 * *",
     "feature_route_krforest_dulle_trails_monthly_schedule": "35 4 4 * *",
+    "feature_weather_krforest_mountain_weather_six_daily_schedule": "0 1,5,9,13,17,21 * * *",
+    "feature_weather_krforest_wildfire_risk_forecast_six_daily_schedule": "10 1,5,9,13,17,21 * * *",
+    "feature_notice_krforest_landslide_forecast_issues_six_daily_schedule": (
+        "20 1,5,9,13,17,21 * * *"
+    ),
     "feature_place_standard_museums_monthly_schedule": "25 4 4 * *",
     "feature_place_standard_tourist_attractions_monthly_schedule": "35 4 4 * *",
     "feature_place_standard_parking_lots_monthly_schedule": "45 4 4 * *",

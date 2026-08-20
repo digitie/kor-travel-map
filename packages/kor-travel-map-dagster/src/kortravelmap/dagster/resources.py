@@ -55,8 +55,11 @@ from .provider_fetchers import (
     fetch_krex_traffic_notices,
     fetch_krforest_arboretums,
     fetch_krforest_dulle_trails,
+    fetch_krforest_landslide_forecast_issues,
     fetch_krforest_mountain_trails,
+    fetch_krforest_mountain_weather,
     fetch_krforest_recreation_forests,
+    fetch_krforest_wildfire_risk_forecast,
     fetch_krheritage_events,
     fetch_krheritage_items,
     fetch_mcst_culture_records,
@@ -237,6 +240,30 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         setting_names=("data_go_kr_service_key",),
         source_env_names=("DATA_GO_KR_SERVICE_KEY",),
         note="PBD0000031 SHP aggregate를 route geometry로 파싱한다.",
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="krforest_mountain_weather",
+        provider_package="python-krforest-api",
+        dataset_key="krforest_mountain_weather",
+        setting_names=("data_go_kr_service_key",),
+        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+        note="산악기상 관측 station과 WeatherValue를 6회/일 snapshot으로 적재한다.",
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="krforest_wildfire_risk_forecast",
+        provider_package="python-krforest-api",
+        dataset_key="krforest_wildfire_risk_forecast",
+        setting_names=("data_go_kr_service_key",),
+        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+        note="forestPointV2 전국 산불위험 예보를 6회/일 snapshot으로 적재한다.",
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="krforest_landslide_forecast_issues",
+        provider_package="python-krforest-api",
+        dataset_key="krforest_landslide_forecast_issues",
+        setting_names=("data_go_kr_service_key",),
+        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+        note="산사태 예보발령·해제 notice snapshot을 6회/일 적재한다.",
     ),
     ProviderRecordResourceSpec(
         resource_key="standard_museums",
@@ -779,6 +806,42 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["krforest_dulle_trails"] = (
     build_provider_record_live_resource(
         _KRFOREST_DULLE_TRAILS_SPEC,
         fetch_krforest_dulle_trails,
+    )
+)
+
+_KRFOREST_MOUNTAIN_WEATHER_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "krforest_mountain_weather"
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["krforest_mountain_weather"] = (
+    build_provider_record_live_resource(
+        _KRFOREST_MOUNTAIN_WEATHER_SPEC,
+        fetch_krforest_mountain_weather,
+    )
+)
+
+_KRFOREST_WILDFIRE_RISK_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "krforest_wildfire_risk_forecast"
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["krforest_wildfire_risk_forecast"] = (
+    build_provider_record_live_resource(
+        _KRFOREST_WILDFIRE_RISK_SPEC,
+        fetch_krforest_wildfire_risk_forecast,
+    )
+)
+
+_KRFOREST_LANDSLIDE_FORECAST_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "krforest_landslide_forecast_issues"
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["krforest_landslide_forecast_issues"] = (
+    build_provider_record_live_resource(
+        _KRFOREST_LANDSLIDE_FORECAST_SPEC,
+        fetch_krforest_landslide_forecast_issues,
     )
 )
 

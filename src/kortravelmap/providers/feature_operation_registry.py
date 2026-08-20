@@ -85,6 +85,18 @@ _HANDLER_BINDINGS: Final[tuple[FeatureOperationHandlerBinding, ...]] = (
         "feature_route_krforest_dulle_trails_job",
         "feature_route_krforest_dulle_trails",
     ),
+    _handler(
+        "feature_weather_krforest_mountain_weather_job",
+        "feature_weather_krforest_mountain_weather",
+    ),
+    _handler(
+        "feature_weather_krforest_wildfire_risk_forecast_job",
+        "feature_weather_krforest_wildfire_risk_forecast",
+    ),
+    _handler(
+        "feature_notice_krforest_landslide_forecast_issues_job",
+        "feature_notice_krforest_landslide_forecast_issues",
+    ),
     _handler("feature_place_standard_museums_job", "feature_place_standard_museums"),
     _handler(
         "feature_place_standard_tourist_attractions_job",

@@ -269,7 +269,31 @@ def test_forest_route_reverse_geocoder_and_dataset_guard() -> None:
         reverse_geocoder=_fake_rg,
     )[0]
     assert bundle.feature.address.bjd_code == "1111010100"
-    assert bundle.feature.feature_id.startswith("f_1111010100_r_")
+    assert bundle.feature.feature_id.startswith("f_global_r_")
+
+
+@pytest.mark.unit
+def test_forest_route_identity_ignores_reverse_geocoder_bjd() -> None:
+    async def _rg_one(coord: Coordinate) -> Address | None:
+        return Address(bjd_code="1111010100", sigungu_code="11110", sido_code="11")
+
+    async def _rg_two(coord: Coordinate) -> Address | None:
+        return Address(bjd_code="1111010200", sigungu_code="11110", sido_code="11")
+
+    first = forest_trails_to_bundles(
+        [_TRAIL_LINE],
+        dataset_key=DATASET_KEY_MOUNTAIN_TRAILS,
+        fetched_at=_now(),
+        reverse_geocoder=_rg_one,
+    )[0]
+    second = forest_trails_to_bundles(
+        [_TRAIL_LINE],
+        dataset_key=DATASET_KEY_MOUNTAIN_TRAILS,
+        fetched_at=_now(),
+        reverse_geocoder=_rg_two,
+    )[0]
+    assert first.feature.feature_id == second.feature.feature_id
+    assert first.feature.address.bjd_code != second.feature.address.bjd_code
 
     with pytest.raises(KeyError, match="route dataset_key"):
         forest_trails_to_bundles(

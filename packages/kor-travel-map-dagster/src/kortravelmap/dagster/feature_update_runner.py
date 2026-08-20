@@ -48,6 +48,7 @@ from .assets import (
     run_feature_event_visitkorea_enrichment,
     run_feature_geometry_knps_records,
     run_feature_notice_krex_traffic_notices,
+    run_feature_notice_krforest_landslide_forecast_issues,
     run_feature_place_datagokr_file_data,
     run_feature_place_khoa_beaches,
     run_feature_place_knps_points,
@@ -69,6 +70,8 @@ from .assets import (
     run_feature_route_krforest_mountain_trails,
     run_feature_weather_airkorea_air_quality,
     run_feature_weather_krex_rest_areas,
+    run_feature_weather_krforest_mountain_weather,
+    run_feature_weather_krforest_wildfire_risk_forecast,
 )
 from .kma_weather import (
     run_feature_notice_kma_weather_alerts,
@@ -97,8 +100,11 @@ from .provider_fetchers import (
     fetch_krex_traffic_notices,
     fetch_krforest_arboretums,
     fetch_krforest_dulle_trails,
+    fetch_krforest_landslide_forecast_issues,
     fetch_krforest_mountain_trails,
+    fetch_krforest_mountain_weather,
     fetch_krforest_recreation_forests,
+    fetch_krforest_wildfire_risk_forecast,
     fetch_krheritage_events,
     fetch_krheritage_items,
     fetch_mcst_culture_records,
@@ -864,6 +870,29 @@ _OPERATION_RUNNER_SPEC_ROWS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
         run=run_feature_route_krforest_dulle_trails,
         resources=_records("krforest_dulle_trails", fetch_krforest_dulle_trails),
         asset_key="feature_route_krforest_dulle_trails",
+    ),
+    *_operation_specs(
+        "feature_weather_krforest_mountain_weather_job",
+        run=run_feature_weather_krforest_mountain_weather,
+        resources=_records("krforest_mountain_weather", fetch_krforest_mountain_weather),
+        asset_key="feature_weather_krforest_mountain_weather",
+    ),
+    *_operation_specs(
+        "feature_weather_krforest_wildfire_risk_forecast_job",
+        run=run_feature_weather_krforest_wildfire_risk_forecast,
+        resources=_records(
+            "krforest_wildfire_risk_forecast", fetch_krforest_wildfire_risk_forecast
+        ),
+        asset_key="feature_weather_krforest_wildfire_risk_forecast",
+    ),
+    *_operation_specs(
+        "feature_notice_krforest_landslide_forecast_issues_job",
+        run=run_feature_notice_krforest_landslide_forecast_issues,
+        resources=_records(
+            "krforest_landslide_forecast_issues",
+            fetch_krforest_landslide_forecast_issues,
+        ),
+        asset_key="feature_notice_krforest_landslide_forecast_issues",
     ),
     *_operation_specs(
         "feature_place_standard_museums_job",

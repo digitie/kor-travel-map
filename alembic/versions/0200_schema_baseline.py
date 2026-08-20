@@ -118,7 +118,7 @@ depends_on: str | Sequence[str] | None = None
 #: `alembic/legacy_versions/`에 있고 `versions/`로 되돌리면 root가 둘로 갈라진다.
 #: 최초 생성 때의 "체인 DB vs baseline DB" 대조는 squash 이전 트리에서만 재현된다.
 _SCHEMA_SHA256: Final[str] = "941819882c6afdc1af89cb495c8dfc37fa274564eb64d7404d5cac43f9a26b6f"
-_SEED_SHA256: Final[str] = "056de28cee0f0bbc2218e49afdf74aacd36b6e21e64c6524b2683a92bed956ec"
+_SEED_SHA256: Final[str] = "5198d57217c8417282fdbed6d9965cf76f269ce992122fa20f0b85204916b0cc"
 
 _BASELINE_DIR: Final[Path] = Path(__file__).resolve().parents[1] / "baseline"
 

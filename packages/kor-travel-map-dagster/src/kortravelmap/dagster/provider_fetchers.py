@@ -63,8 +63,11 @@ __all__ = [
     "fetch_krex_traffic_notices",
     "fetch_krforest_arboretums",
     "fetch_krforest_dulle_trails",
+    "fetch_krforest_landslide_forecast_issues",
     "fetch_krforest_mountain_trails",
+    "fetch_krforest_mountain_weather",
     "fetch_krforest_recreation_forests",
+    "fetch_krforest_wildfire_risk_forecast",
     "fetch_krheritage_events",
     "fetch_krheritage_items",
     "fetch_mcst_culture_records",
@@ -844,6 +847,81 @@ async def fetch_krforest_dulle_trails(
         records = await client.travel.dulle_trail_features()
         for record in records:
             yield record
+    finally:
+        await client.aclose()
+
+
+async def fetch_krforest_mountain_weather(
+    settings: KorTravelMapSettings,
+) -> AsyncIterator[Any]:
+    """산악기상 관측 typed row를 페이지 단위로 stream한다(C05B)."""
+
+    secret = settings.data_go_kr_service_key
+    if secret is None:
+        raise ProviderCredentialMissing(
+            "krforest mountain weather live fetch에는 "
+            "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
+            "필요하다."
+        )
+    krforest = cast(Any, importlib.import_module("krforest"))
+    client = krforest.ForestClient(api_key=secret.get_secret_value())
+    try:
+        async for page in client.iter_pages(
+            client.travel.mountain_weather,
+            num_of_rows=1000,
+        ):
+            for record in page.items:
+                yield record
+    finally:
+        await client.aclose()
+
+
+async def fetch_krforest_wildfire_risk_forecast(
+    settings: KorTravelMapSettings,
+) -> AsyncIterator[Any]:
+    """전국 산불위험예보 V2 typed row를 stream한다(C05C)."""
+
+    secret = settings.data_go_kr_service_key
+    if secret is None:
+        raise ProviderCredentialMissing(
+            "krforest wildfire risk live fetch에는 "
+            "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
+            "필요하다."
+        )
+    krforest = cast(Any, importlib.import_module("krforest"))
+    client = krforest.ForestClient(api_key=secret.get_secret_value())
+    try:
+        async for page in client.iter_pages(
+            client.safety.wildfire_risk_forecast,
+            num_of_rows=1000,
+        ):
+            for record in page.items:
+                yield record
+    finally:
+        await client.aclose()
+
+
+async def fetch_krforest_landslide_forecast_issues(
+    settings: KorTravelMapSettings,
+) -> AsyncIterator[Any]:
+    """산사태 예보발령·해제 typed row를 페이지 단위로 stream한다(C05D)."""
+
+    secret = settings.data_go_kr_service_key
+    if secret is None:
+        raise ProviderCredentialMissing(
+            "krforest landslide forecast live fetch에는 "
+            "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
+            "필요하다."
+        )
+    krforest = cast(Any, importlib.import_module("krforest"))
+    client = krforest.ForestClient(api_key=secret.get_secret_value())
+    try:
+        async for page in client.iter_pages(
+            client.safety.landslide_forecast_issues,
+            num_of_rows=1000,
+        ):
+            for record in page.items:
+                yield record
     finally:
         await client.aclose()
 
