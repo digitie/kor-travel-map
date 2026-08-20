@@ -2235,10 +2235,12 @@ async def test_snapshot_barrier_keeps_outbox_cursor_commit_safe_across_writers(
         persisted_orders = (
             await observer.execute(
                 text(
-                    "SELECT high_watermark_relay_order, "
-                    "material_high_watermark_relay_order "
-                    "FROM ops.poi_cache_target_snapshots "
-                    "WHERE snapshot_id = CAST(:snapshot_id AS uuid)"
+                    "SELECT material.safe_high_watermark_relay_order, "
+                    "material.material_high_watermark_relay_order "
+                    "FROM ops.poi_cache_target_snapshots AS receipt "
+                    "JOIN ops.poi_cache_target_snapshot_materials AS material "
+                    "ON material.material_id = receipt.material_id "
+                    "WHERE receipt.snapshot_id = CAST(:snapshot_id AS uuid)"
                 ),
                 {"snapshot_id": page.snapshot_id},
             )
@@ -2936,18 +2938,6 @@ async def test_background_snapshot_gc_round_robins_systems_and_observes_once(
         item_limit=1,
         header_limit=1,
     )
-    # 마지막 item 하나와 빈 orphan material들이 남는다 — 다 비울 때까지 돌린다.
-    drained = wrapped
-    for _ in range(8):
-        if not drained.has_more:
-            break
-        drained = await prune_expired_cache_target_snapshots_batch(
-            migrated_session,
-            after_external_system=drained.external_system,
-            item_limit=1,
-            header_limit=1,
-        )
-    assert not drained.has_more
     backlog = await observe_expired_cache_target_snapshot_backlog(migrated_session)
 
     assert (first.external_system, second.external_system, wrapped.external_system) == (
@@ -2959,10 +2949,12 @@ async def test_background_snapshot_gc_round_robins_systems_and_observes_once(
     # 늦었다. 이제 receipt는 만료 즉시 지우고, item은 orphan이 된 material에서 지운다.
     assert (first.deleted_items, first.deleted_headers, first.has_more) == (1, 1, True)
     assert (second.deleted_items, second.deleted_headers, second.has_more) == (1, 1, True)
+    # 세 batch로 전부 비워진다. 0230 전에는 header 삭제가 한 batch 늦어 여기서
+    # backlog가 남았다.
     assert (wrapped.deleted_items, wrapped.deleted_headers, wrapped.has_more) == (
         1,
         0,
-        True,
+        False,
     )
     assert (first.compacted_materials, second.compacted_materials) == (0, 0)
     assert backlog.remaining_items == backlog.remaining_headers == 0
