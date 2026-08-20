@@ -71,7 +71,7 @@ INSERT INTO ops.poi_cache_target_source_heads (
 )
 SELECT :stream, 'soak-' || lpad(value::text, 8, '0'), 'active', 1, 1,
        :fingerprint, value, now()
-FROM generate_series(:lo, :hi) AS value
+FROM generate_series(CAST(:lo AS bigint), CAST(:hi AS bigint)) AS value
 """
 
 _SEED_EVENT_SQL = """
