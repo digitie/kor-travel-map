@@ -42,6 +42,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from alembic import command
+from kortravelmap.infra import cache_target_reconciliation_repo as repo
 from kortravelmap.infra.cache_target_reconciliation_repo import (
     CacheTargetStreamConflict,
     get_cache_target_snapshot,
@@ -53,6 +54,13 @@ from tests.integration._tvn34_migration_bootstrap import bootstrap_tvn34_migrati
 STREAM = "soak:41s"
 ADMITTED = 1_000_000
 FINGERPRINT = "c" * 64
+
+#: 배포 기본값(`_SNAPSHOT_BUILD_TIMEOUT_SECONDS = 300`)은 상한과 같은 크기의 material을
+#: n150에서 만들지 못한다 — 첫 실행이 그 예산에서 잘렸다. 그것 자체가 이 soak의 결과이므로
+#: 숨기지 않는다. 실제 소요를 재기 위해 **측정 동안만** 예산을 늘리고, 배포 예산 대비
+#: 결과를 evidence에 함께 남긴다.
+_MEASUREMENT_BUILD_BUDGET_SECONDS = 3_600.0
+_SHIPPED_BUILD_BUDGET_SECONDS = repo._SNAPSHOT_BUILD_TIMEOUT_SECONDS  # noqa: SLF001
 
 failures: list[str] = []
 evidence: dict[str, Any] = {}
@@ -201,12 +209,15 @@ async def main() -> int:
 
         print(f"\n== 2) {ADMITTED:,} item admitted material 생성 ==")
         before = await _relation_stats(db)
+        repo._SNAPSHOT_BUILD_TIMEOUT_SECONDS = (  # noqa: SLF001
+            _MEASUREMENT_BUILD_BUDGET_SECONDS
+        )
         tracemalloc.start()
         build_started = time.monotonic()
         async with AsyncSession(db) as session, session.begin():
             await session.execute(text("SET ROLE ktm_feature_schema_owner"))
             await session.execute(
-                text("SELECT set_config('statement_timeout', '600s', true)")
+                text("SELECT set_config('statement_timeout', '3600s', true)")
             )
             page = await get_cache_target_snapshot(
                 session,
@@ -221,6 +232,11 @@ async def main() -> int:
         check("첫 page 크기", len(page.items), 500)
         note("build_seconds", round(build_seconds, 1))
         note("items_per_second", int(ADMITTED / build_seconds))
+        note("shipped_build_budget_seconds", _SHIPPED_BUILD_BUDGET_SECONDS)
+        note(
+            "fits_shipped_budget",
+            build_seconds <= _SHIPPED_BUILD_BUDGET_SECONDS,
+        )
         note("python_peak_mib", round(peak / 1024 / 1024, 2))
         note("merkle_root", page.merkle_root[:16] + "…")
 
@@ -260,7 +276,7 @@ async def main() -> int:
                 async with session.begin():
                     await session.execute(text("SET ROLE ktm_feature_schema_owner"))
                     await session.execute(
-                        text("SELECT set_config('statement_timeout', '600s', true)")
+                        text("SELECT set_config('statement_timeout', '3600s', true)")
                     )
                     await get_cache_target_snapshot(
                         session,
