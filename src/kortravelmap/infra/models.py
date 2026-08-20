@@ -61,7 +61,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSTZRANGE, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.schema import conv
 
@@ -856,7 +856,9 @@ class FeatureNoticeRow(_FeatureSubtypeBase):
 
     ``valid_start_time``/``valid_end_time``이 typed timestamptz가 되면서
     read 필터의 ``detail->>'valid_end_time'`` 파싱(+ ``pg_input_is_valid``
-    방어 cast)이 소멸한다 — 35D의 최대 실익.
+    방어 cast)이 소멸한다 — 35D의 최대 실익. ``valid_during``은 두 시각에서
+    파생되는 stored ``tstzrange``이며 발효 전 철회(``end < start``)를
+    ``empty``로 표현한다(T-VN-37D).
     """
 
     __tablename__ = "feature_notices"
@@ -877,6 +879,23 @@ class FeatureNoticeRow(_FeatureSubtypeBase):
     severity: Mapped[int | None] = mapped_column(SmallInteger)
     valid_start_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     valid_end_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    valid_during: Mapped[Any] = mapped_column(
+        TSTZRANGE,
+        Computed(
+            """
+            CASE
+                WHEN valid_start_time IS NULL AND valid_end_time IS NULL
+                    THEN NULL::tstzrange
+                WHEN valid_start_time IS NOT NULL
+                     AND valid_end_time IS NOT NULL
+                     AND valid_end_time < valid_start_time
+                    THEN 'empty'::tstzrange
+                ELSE tstzrange(valid_start_time, valid_end_time, '[)'::text)
+            END
+            """,
+            persisted=True,
+        ),
+    )
     source_agency: Mapped[str | None] = mapped_column(String)
     officer_name: Mapped[str | None] = mapped_column(String)
     payload: Mapped[dict[str, Any]] = mapped_column(

@@ -193,6 +193,10 @@ NOTICE_TYPE_COASTAL_ISOLATION  = "coastal_isolation"
 `normalize_notice_type(value)`가 한국어 alias("호우주의보", "교통사고", ...)도
 처리한다.
 
+`valid_start_time`과 `valid_end_time`은 순서를 검증하지 않는다. provider가 미래
+발효 공지를 발효 전에 철회하면 `end < start`가 정당하게 생길 수 있으며, DB의
+`feature_notices.valid_during`이 이를 `empty` `tstzrange`로 표현한다(ADR-095).
+
 ## 8. `RouteDetail`
 
 ```python

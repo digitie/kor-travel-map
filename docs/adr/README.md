@@ -108,6 +108,7 @@
 | ADR-092 | 큐레이션 membership과 자동 후보를 분리해 단일 쓰기 정본으로 만든다 | [092-curation-canonical-membership-and-candidates.md](092-curation-canonical-membership-and-candidates.md) |
 | ADR-093 | 수동 Feature 생성 origin과 identity를 별도 정본으로 둔다 | [093-manual-feature-origin-and-identity.md](093-manual-feature-origin-and-identity.md) |
 | ADR-094 | C7 신뢰 경계를 pinned runtime generation v5 + rebuild journal v7로 옮긴다 | [094-c7-pinned-runtime-generation-attestation.md](094-c7-pinned-runtime-generation-attestation.md) |
+| ADR-095 | notice 발효 전 철회를 empty 효력 범위로 표현한다 | [095-notice-empty-validity-range.md](095-notice-empty-validity-range.md) |
 
 ## 새 ADR 작성 규약
 

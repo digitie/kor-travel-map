@@ -280,6 +280,10 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 subtype 테이블 자체가 kind로 갈리므로 `WHERE kind=...` 부분 조건이 필요 없다. 공간 술어는
 조립 뷰(`features_detailed`)의 산출 `geom`이 아니라 GiST가 붙은 subtype을 직접 참조해야 한다.
 
+`feature_notices.valid_during`은 `valid_start_time`/`valid_end_time`에서 파생되는
+stored `tstzrange`다. 발효 전 철회(`end < start`)는 `empty`로 표현하지만, active
+notice 조회는 미래 경고를 보존하기 위해 기존 `valid_end_time` 비교를 사용한다.
+
 | 테이블 | 인덱스 |
 |--------|--------|
 | `feature_opening_periods` | (start_weekday, start_time) |
@@ -582,17 +586,19 @@ squash(2026-08-14) 이후 baseline과 bridge, T-VN-40 migration만 있다.
 - `0201_squash_bridge.py` — revision id는 파일명이 아니라 **`0104_tvn36_final_fence`**다.
   이미 `0104`에 있는 DB가 이 그래프에서도 해석되게 하는 노드다.
 - `0202_tvn40_curation_receipts.py`부터 `0225_tvn40c_physical_removal.py`까지 —
-  bridge 뒤에 이어지는 T-VN-40 단일 체인이며, 현재 head는
-  `0225_tvn40c_physical_removal`이다.
+  bridge 뒤에 이어지는 T-VN-40 단일 체인이다. 그 뒤에 이미 적용된
+  `0229_tvn40b_source_rule_action`, `0230_tvn_c05_krforest_datasets`,
+  `0231_tvn41s_snapshot_material`, `0232_tvn37d_notice_empty_range`가 순서대로
+  이어지며 현재 head는 `0232_tvn37d_notice_empty_range`다.
 
 `0001~0104` 체인 109개는 `alembic/legacy_versions/`의 실행되지 않는 아카이브다
 ([README](../../alembic/legacy_versions/README.md)). **`versions/`로 되돌리지 마라** —
 bridge와 아카이브가 `0104_tvn36_final_fence`를 둘 다 선언하면 Alembic graph가 손상된다.
 
-#### 다음 migration(`0231`~) 작성
+#### 다음 migration(`0233`~) 작성
 
-1. 파일은 `alembic/versions/0231_<name>.py`,
-   `down_revision = "0230_tvn_c05_krforest_datasets"`(= 현재 head)로 잇는다.
+1. 파일은 `alembic/versions/0233_<name>.py`,
+   `down_revision = "0232_tvn37d_notice_empty_range"`(= 현재 head)로 잇는다.
    **`0201`을 쓰지 마라** — 그건 bridge 파일명이고 revision id가 아니다.
 2. `0105`~`0199`처럼 아카이브와 겹치는 번호는 쓰지 않는다. 파일 정렬이 `0200`보다
    앞서면서 `down_revision`은 뒤를 가리키는 파일이 생겨 읽는 사람을 오도한다.

@@ -8,6 +8,15 @@ dataset(#1037), C7 browser evidence·scope registry·live serial·mock manifest(
 `T-VN-40B` 잔여와 `T-FE-MOCK-FLAKE`는 열린 task로 유지했다. `resume.md`의 현재 진척도도
 같은 기준으로 갱신했다.
 
+## 2026-08-21 — T-VN-37D notice empty range 구현 착수
+
+제품 결정을 명시했다. notice 유형과 무관하게 미래 발효 공지는 기존처럼 공개하고,
+provider 철회로 `valid_end_time < valid_start_time`이 된 notice는
+`feature.feature_notices.valid_during` generated `tstzrange`의 `empty`로 표현한다.
+공개·admin active 술어는 `@> now()`로 바꾸지 않고 기존 `valid_end_time` 비교를 유지해
+사전 경고를 숨기지 않는다. migration `0232_tvn37d_notice_empty_range`, ADR-095,
+ORM metadata와 empty/bounded range integration regression을 추가했다.
+
 ## 2026-08-20 — map CI catalog 회귀값 갱신
 
 원격 Python 3.11~3.13 CI가 API unit 1,198건을 실행한 뒤 기존

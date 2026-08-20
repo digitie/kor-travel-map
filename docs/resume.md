@@ -43,6 +43,15 @@ barrier가 유지되고 그 값은 hung writer 최대 정지 시간이기도 하
 결정이다. 선택지 셋과 비용은 soak 보고서 §"열린 결정"과 `docs/tasks.md`에 있다.
 
 그 결정 뒤에 #922와 T-VN-41S를 완료로 표시한다.
+## 2026-08-21 — T-VN-37D notice empty range 구현
+
+`feature.feature_notices.valid_during`을 `valid_start_time`/`valid_end_time`에서
+파생하는 stored `tstzrange`로 추가했다. 정상 범위는 `[start, end)`, 미래 발효 전
+철회(`end < start`)는 PostgreSQL `empty`로 표현하며, 두 시각이 모두 없으면 NULL이다.
+미래 경고를 숨기지 않도록 공개·admin active read는 기존 `valid_end_time` 비교를
+유지하고, `NoticeDetail`/OpenAPI 응답 계약은 바꾸지 않았다. ADR-095와 migration
+`0232_tvn37d_notice_empty_range`를 추가했으며 integration regression을 작성했다.
+
 ## 2026-08-21 — 완료 task를 정본 원장으로 이관
 
 `T-VN-H50`(PR #1036), `T-VN-C05A`~`C05D`(PR #1037),
@@ -52,8 +61,8 @@ barrier가 유지되고 그 값은 hung writer 최대 정지 시간이기도 하
 
 ### 다음 한 작업
 
-완료 이관 뒤의 우선순위는 [`tasks.md`](tasks.md) 상단 인덱스의 열린 항목을 따른다.
-이번 정리에서 새 구현 작업은 추가하지 않았다.
+두 전문 리뷰어의 적대적 검토와 map 4 게이트(특히 migration metadata/PostGIS)를
+실행한 뒤 draft PR을 열고, 중간 결과를 원격에 자주 push한다.
 
 ## 2026-08-20 — T-VN-C05A~D provider 머지 후 map 최종 게이트
 

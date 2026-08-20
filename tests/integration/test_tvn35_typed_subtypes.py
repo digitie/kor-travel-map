@@ -519,6 +519,82 @@ async def test_event_and_notice_bundles_round_trip_through_subtype(
     assert reread["valid_end_time"] is None
 
 
+async def test_notice_valid_during_preserves_empty_range_without_changing_read_contract(
+    migrated_session: AsyncSession,
+) -> None:
+    """T-VN-37D의 파생 range가 empty를 보존하되 미래 공지는 계속 노출한다."""
+    withdrawn_id = "tvn37d:empty:notice"
+    future_id = "tvn37d:future:notice"
+    reference_now = datetime.now(_KST)
+    withdrawn_start = reference_now + timedelta(days=30)
+    withdrawn_end = reference_now - timedelta(days=1)
+    future_start = reference_now + timedelta(days=3)
+    future_end = reference_now + timedelta(days=10)
+
+    withdrawn = _notice_feature(
+        withdrawn_id,
+        valid_start_time=withdrawn_start,
+        valid_end_time=withdrawn_end,
+    )
+    future = _notice_feature(
+        future_id,
+        valid_start_time=future_start,
+        valid_end_time=future_end,
+    )
+    await feature_repo.load_bundle(
+        migrated_session,
+        _bundle(withdrawn, source_entity_id="T-VN-37D-empty"),
+    )
+    await feature_repo.load_bundle(
+        migrated_session,
+        _bundle(future, source_entity_id="T-VN-37D-future"),
+    )
+    await migrated_session.flush()
+
+    rows = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT feature_id,
+                       valid_during IS NULL AS is_null,
+                       isempty(valid_during) AS is_empty,
+                       lower(valid_during) AS lower_bound,
+                       upper(valid_during) AS upper_bound
+                FROM feature.feature_notices
+                WHERE feature_id = ANY(CAST(:feature_ids AS text[]))
+                ORDER BY feature_id
+                """
+            ),
+            {"feature_ids": [withdrawn_id, future_id]},
+        )
+    ).mappings().all()
+    by_id = {str(row["feature_id"]): row for row in rows}
+
+    empty = by_id[withdrawn_id]
+    assert empty["is_null"] is False
+    assert empty["is_empty"] is True
+    assert empty["lower_bound"] is None
+    assert empty["upper_bound"] is None
+
+    bounded = by_id[future_id]
+    assert bounded["is_null"] is False
+    assert bounded["is_empty"] is False
+    assert bounded["lower_bound"] == future_start
+    assert bounded["upper_bound"] == future_end
+
+    # T-VN-37D는 `@> now()`로 바꾸지 않는다. 미래 발효 공지는 기존처럼 보이고,
+    # 이미 끝난 empty 공지는 기존 valid_end_time 감산으로 숨겨진다.
+    visible = await feature_repo.public_active_notice_feature_identities(
+        migrated_session, [withdrawn_id, future_id]
+    )
+    assert set(visible) == {future_id}
+
+    # 저장 range는 내부 표현이고 공개 detail 계약은 두 typed timestamp를 유지한다.
+    assembled = await _detail_from_reader(migrated_session, withdrawn_id)
+    assert NoticeDetail.model_validate(assembled).valid_start_time == withdrawn_start
+    assert NoticeDetail.model_validate(assembled).valid_end_time == withdrawn_end
+
+
 async def test_assembled_notice_times_do_not_depend_on_session_timezone(
     migrated_session: AsyncSession,
 ) -> None:
