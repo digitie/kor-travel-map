@@ -38,7 +38,7 @@ a11y·e2e 커버 관점에서 점검**하기 위한 체크리스트다. T-218(ad
 | `/admin/features` | q/kind/status/has_issue | ✓ sort/order | ✓ | ✓ | ✓ | deactivate | 필터 라벨 | `admin-ops` |
 | `/admin/features/new` (생성 폼) | — | — | — | — | ✓ | create | ✓ FormField+검증(필수/좌표/JSON) | e2e 없음 |
 | `/admin/features/change-requests` | status/action/q | — | — | ✓ | ✓ | review_mode·approve/reject | ✓ `<label htmlFor>`(기존) | `admin-ops`(+음성 JSON, T-218d) |
-| `/admin/features/curated` | curation_status/enabled/provider | — | ✓ | ✓ | ✓ | select/unselect/archive·rule apply | 필터 라벨 | e2e 없음 |
+| `/admin/features/curated` | collection status/visibility/theme | — | ✓ | ✓ | ✓ | collection·item command·CSV import·quarantine reclassify | 필터 라벨 | `curated-features`·`curated-features-mutations`·`curation-quarantine` |
 | `/admin/issues` | q/status/severity/type/provider/dataset/bbox | — | ✓ | ✓ | ✓ | manual_override | ✓ manual-override FormField(T-218b-3) | `admin-ops`(+검증/포커스) |
 | `/admin/features/dedup-reviews` | status/kind | — | ✓ | ✓ | ✓ | accept/reject/ignore/merge | — | `admin-ops`(smoke) |
 | `/admin/features/enrichment-reviews` | status/kind | — | ✓ | ✓ | ✓ | accept/reject/ignore | — | `admin-ops`(cursor) |

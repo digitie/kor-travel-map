@@ -452,8 +452,11 @@ def test_warns_when_binding_to_all_interfaces(caplog):
 
 admin frontend의 Playwright e2e suite는 n150 Linux 우선으로 실행하며, 현재 **render-smoke 위주**라
 "33/33 passing" 같은 통과 수치가 곧 **UI-level 커버리지**를 뜻하지는 않는다.
-curated-features, `features/new`, 그리고 3개 상세 페이지는 아직 시나리오로
-커버되지 않는다 (상세는 `docs/reports/e2e-scenario-coverage-2026-06-16.md`).
+`features/new`와 3개 상세 페이지는 아직 시나리오로 커버되지 않는다
+(상세는 `docs/reports/e2e-scenario-coverage-2026-06-16.md`). 당시 함께 적혀 있던
+legacy curated-features 화면은 T-VN-40C에서 삭제됐고, canonical
+`/admin/features/curated`는 mocked e2e 3종(`curated-features`,
+`curated-features-mutations`, `curation-quarantine`)이 덮는다.
 
 #### 5.4.1 ops mocked UI projection·pagination 수용 기준
 
