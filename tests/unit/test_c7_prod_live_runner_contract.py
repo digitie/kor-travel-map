@@ -544,7 +544,10 @@ def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidenc
     # 서로 다른 version을 요구하는 상태가 CI green으로 남는다(2026-08-20 실측).
     assert 'state.get("version") != 4' in script
     assert 'state.get("request_ownership"), list' in script
-    assert '"run_id":"__orchestrator_pending__","target_history":[],"target_refs":[],"version":3}' in script
+    assert (
+        '"run_id":"__orchestrator_pending__","target_history":[],'
+        '"target_refs":[],"version":3}' in script
+    )
     assert 'docker create --pull=never' in script
     assert 'docker start --attach --interactive' in script
     assert "--network bridge --ipc private" in script
