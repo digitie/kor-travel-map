@@ -12,7 +12,7 @@ integration 회귀를 추가했다. 두 reviewer의 최종 판정은 P0/P1 없�
 
 두 독립 reviewer는 P0 없이 range 표현의 운영 잠금과 경계 회귀 공백, admin curation
 candidate의 `to_jsonb(notice)`에 내부 generated column이 누출되는 P1을 찾았다. migration
-0231에 transaction-local `lock_timeout=30s`와 writer fence/maintenance 전제를 기록하고,
+0232에 transaction-local `lock_timeout=30s`와 writer fence/maintenance 전제를 기록하고,
 candidate SQL은 `valid_during`을 response JSON에서 제외하도록 수정했다. NULL·one-sided·
 equal range, public/admin active predicate와 notice candidate detail 회귀를 추가했으며,
 수정 후 targeted integration 2건을 통과했다.

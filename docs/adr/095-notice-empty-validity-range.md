@@ -32,7 +32,7 @@ timestamp만 읽으면 "효력 범위가 없음"이라는 사실을 별도 typed
 5. 이 컬럼에는 GiST 인덱스를 추가하지 않는다. 현재 notice는 feature당 subtype
    한 행이고 active 판정은 의도적으로 upper-bound 기반이므로, ADR-087에서
    폐기한 range hot-path 전환을 다시 도입하지 않는다.
-6. `0231_tvn37d_notice_empty_range`는 기존 행을 다시 계산하는 stored-column DDL이므로
+6. `0232_tvn37d_notice_empty_range`는 기존 행을 다시 계산하는 stored-column DDL이므로
    writer fence/maintenance window에서 적용한다. migration은 `lock_timeout = 30s`를
    transaction-local로 설정해 잠금 대기를 무기한 허용하지 않고 fail-closed한다.
 
