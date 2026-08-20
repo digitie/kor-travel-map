@@ -9,6 +9,8 @@ provider n150 debug UI 스모크와 data.go.kr live API 9건은 통과했고, �
 현재 키 권한 범위의 서버 거부를 xfail로 확인했다. map 운영 UI도 n150 Playwright에서 인증 후
 `/admin/features` heading/table과 검색·kind 필터를 확인했으며, 인증 후 non-GET 요청 0건으로
 읽기 전용 live UI E2E를 통과했다.
+첫 원격 Python matrix는 C05A~D 신규 handler 5개를 반영하지 않은 기존 registry count 33에서
+실패했으며, 기대값을 38로 갱신해 재실행한다.
 
 ### 다음 한 작업
 

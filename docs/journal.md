@@ -1,5 +1,12 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-20 — map CI catalog 회귀값 갱신
+
+원격 Python 3.11~3.13 CI가 API unit 1,198건을 실행한 뒤 기존
+`test_handler_registry_is_key_to_handler_only`의 `33` 고정값에서 실패했다. C05A route 2종과
+C05B~D 3종의 정식 handler binding이 추가되어 실제 registry는 38개였으며, 테스트 기대값을
+38로 갱신했다. 해당 테스트 5건과 ruff는 로컬에서 통과했고, 새 SHA로 CI를 재실행한다.
+
 ## 2026-08-20 — T-VN-C05A~D provider 머지 및 map pin 고정
 
 두 전문 리뷰어의 적대 검토를 반영한 `python-krforest-api` PR #9를 merge commit
