@@ -24,6 +24,7 @@ from kortravelmap.infra.feature_repo import (
     AirQualityLoadResult,
     FeatureLoadResult,
     NoticeFeatureLoadResult,
+    NoticeReconcileResult,
 )
 from kortravelmap.infra.integrity_violation_repo import (
     IntegrityObservationReceipt as DurableIntegrityObservationReceipt,
@@ -100,6 +101,25 @@ from kortravelmap.providers.krforest import (
     dulle_trails_to_bundles,
     mountain_trails_to_bundles,
     recreation_forests_to_bundles,
+)
+from kortravelmap.providers.krforest_safety import (
+    LANDSLIDE_FORECAST_DATASET_KEY as KRFOREST_LANDSLIDE_FORECAST_DATASET_KEY,
+)
+from kortravelmap.providers.krforest_safety import (
+    LANDSLIDE_FORECAST_SOURCE_ENTITY_TYPE,
+    MOUNTAIN_WEATHER_SOURCE_ENTITY_TYPE,
+    WILDFIRE_RISK_SOURCE_ENTITY_TYPE,
+    landslide_forecast_issues_to_bundles,
+    mountain_weather_stations_to_bundles,
+    mountain_weather_to_values,
+    wildfire_risk_forecasts_to_bundles,
+    wildfire_risk_to_values,
+)
+from kortravelmap.providers.krforest_safety import (
+    MOUNTAIN_WEATHER_DATASET_KEY as KRFOREST_MOUNTAIN_WEATHER_DATASET_KEY,
+)
+from kortravelmap.providers.krforest_safety import (
+    WILDFIRE_RISK_DATASET_KEY as KRFOREST_WILDFIRE_RISK_DATASET_KEY,
 )
 from kortravelmap.providers.krheritage import (
     DATASET_KEY_EVENT as KRHERITAGE_EVENT_DATASET_KEY,
@@ -1236,6 +1256,8 @@ async def run_feature_route_krforest_mountain_trails(
         dataset_key=KRFOREST_MOUNTAIN_TRAILS_DATASET_KEY,
         bundles=bundles,
         authoritative_snapshot_complete=True,
+        source_entity_type="mountain_trail_segment",
+        retire_absent_from_snapshot=True,
     )
 
 
@@ -1267,6 +1289,8 @@ async def run_feature_route_krforest_dulle_trails(
         dataset_key=KRFOREST_DULLE_TRAILS_DATASET_KEY,
         bundles=bundles,
         authoritative_snapshot_complete=True,
+        source_entity_type="dulle_trail_segment",
+        retire_absent_from_snapshot=True,
     )
 
 
@@ -1279,6 +1303,228 @@ async def feature_route_krforest_dulle_trails(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
     return await run_tracked_feature_asset(context, run_feature_route_krforest_dulle_trails)
+
+
+async def _run_krforest_weather_values_asset(
+    context: AssetExecutionContext,
+    *,
+    resource_key: str,
+    dataset_key: str,
+    make_bundles: Callable[..., list[Any]],
+    make_values: Callable[..., list[Any]],
+    feature_id_mapping: Callable[[list[Any]], Mapping[str, str]],
+    source_entity_type: str,
+) -> DagsterFeatureLoadResult:
+    """산림청 weather anchor와 값 fact를 한 provider run에서 적재한다."""
+
+    records = await _record_list(context, resource_key)
+    fetched_at = await _fetched_at(context)
+    bundles = make_bundles(records, fetched_at=fetched_at)
+    result = await _load(
+        context,
+        provider=KRFOREST_PROVIDER_NAME,
+        dataset_key=dataset_key,
+        bundles=bundles,
+        authoritative_snapshot_complete=True,
+        source_entity_type=source_entity_type,
+        retire_absent_from_snapshot=True,
+        record_sync_state=False,
+    )
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    membership = await _exact_sync_membership(
+        context,
+        client,
+        boundary="feature_weather_values",
+        provider=KRFOREST_PROVIDER_NAME,
+        dataset_key=dataset_key,
+    )
+    response_record = _value_response_source_record(
+        provider=KRFOREST_PROVIDER_NAME,
+        dataset_key=dataset_key,
+        source_entity_type="weather_response",
+        source_entity_id=f"snapshot:{fetched_at.isoformat()}",
+        records=records,
+        fetched_at=fetched_at,
+    )
+    values = make_values(
+        records,
+        feature_id_mapping(bundles),
+        source_record_key=response_record.source_record_key,
+    )
+    values_loaded = await client.load_weather_values(
+        values,
+        provider_dataset_id=membership.provider_dataset_id,
+        source_record=response_record,
+    )
+    context.log.info(
+        "산림청 %s weather anchor %d건, WeatherValue %d건 적재.",
+        dataset_key,
+        len(bundles),
+        values_loaded,
+    )
+    _add_output_metadata(
+        context,
+        {
+            "provider": KRFOREST_PROVIDER_NAME,
+            "dataset_key": dataset_key,
+            "features_total": len(bundles),
+            "weather_values_loaded": values_loaded,
+        },
+    )
+    await _record_feature_sync_success(
+        context,
+        client,
+        provider=KRFOREST_PROVIDER_NAME,
+        dataset_key=dataset_key,
+        cursor_extra={
+            "features_total": len(bundles),
+            "weather_values_loaded": values_loaded,
+        },
+        observation_receipt=result.observation_receipt,
+    )
+    return result
+
+
+async def run_feature_weather_krforest_mountain_weather(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    """산악기상 station과 관측 WeatherValue를 적재한다(C05B)."""
+
+    return await _run_krforest_weather_values_asset(
+        context,
+        resource_key="krforest_mountain_weather",
+        dataset_key=KRFOREST_MOUNTAIN_WEATHER_DATASET_KEY,
+        make_bundles=mountain_weather_stations_to_bundles,
+        make_values=lambda records, mapping, source_record_key: mountain_weather_to_values(
+            records,
+            feature_id_by_obs_id=mapping,
+            source_record_key=source_record_key,
+        ),
+        feature_id_mapping=lambda bundles: {
+            bundle.source_record.source_entity_id: bundle.feature.feature_id
+            for bundle in bundles
+        },
+        source_entity_type=MOUNTAIN_WEATHER_SOURCE_ENTITY_TYPE,
+    )
+
+
+@asset(
+    group_name="features_weather",
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"krforest_mountain_weather"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+)
+async def feature_weather_krforest_mountain_weather(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    return await run_tracked_feature_asset(
+        context, run_feature_weather_krforest_mountain_weather
+    )
+
+
+async def run_feature_weather_krforest_wildfire_risk_forecast(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    """전국 산불위험예보 anchor와 지수 WeatherValue를 적재한다(C05C)."""
+
+    return await _run_krforest_weather_values_asset(
+        context,
+        resource_key="krforest_wildfire_risk_forecast",
+        dataset_key=KRFOREST_WILDFIRE_RISK_DATASET_KEY,
+        make_bundles=wildfire_risk_forecasts_to_bundles,
+        make_values=lambda records, mapping, source_record_key: wildfire_risk_to_values(
+            records,
+            feature_id_by_region_key=mapping,
+            source_record_key=source_record_key,
+        ),
+        feature_id_mapping=lambda bundles: {
+            bundle.source_record.source_entity_id: bundle.feature.feature_id
+            for bundle in bundles
+        },
+        source_entity_type=WILDFIRE_RISK_SOURCE_ENTITY_TYPE,
+    )
+
+
+@asset(
+    group_name="features_weather",
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"krforest_wildfire_risk_forecast"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+)
+async def feature_weather_krforest_wildfire_risk_forecast(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    return await run_tracked_feature_asset(
+        context, run_feature_weather_krforest_wildfire_risk_forecast
+    )
+
+
+async def run_feature_notice_krforest_landslide_forecast_issues(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    """산사태 예보발령·해제 notice snapshot을 적재한다(C05D)."""
+
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    records = await _record_list(context, "krforest_landslide_forecast_issues")
+    fetched_at = await _fetched_at(context)
+    bundles = landslide_forecast_issues_to_bundles(records, fetched_at=fetched_at)
+    active_lineage_keys = {
+        bundle.source_record.source_entity_id
+        for bundle in bundles
+        if bundle.feature.detail is not None
+        and bool(bundle.feature.detail.payload.get("active"))
+    }
+    reconciled: NoticeReconcileResult | None = None
+
+    async def load_snapshot_atomically(
+        validated_bundles: Sequence[Any],
+    ) -> FeatureLoadResult:
+        nonlocal reconciled
+        atomic_load = getattr(client, "load_authoritative_notice_snapshot", None)
+        if not callable(atomic_load):
+            raise RuntimeError("산사태 notice snapshot은 atomic snapshot load client가 필요하다.")
+        outcome = cast(
+            NoticeFeatureLoadResult,
+            await atomic_load(
+                bundles=validated_bundles,
+                provider=KRFOREST_PROVIDER_NAME,
+                dataset_key=KRFOREST_LANDSLIDE_FORECAST_DATASET_KEY,
+                source_entity_type=LANDSLIDE_FORECAST_SOURCE_ENTITY_TYPE,
+                active_lineage_keys=active_lineage_keys,
+                observed_at=fetched_at,
+            ),
+        )
+        reconciled = outcome.reconcile
+        return outcome.load
+
+    result = await _load(
+        context,
+        provider=KRFOREST_PROVIDER_NAME,
+        dataset_key=KRFOREST_LANDSLIDE_FORECAST_DATASET_KEY,
+        bundles=bundles,
+        authoritative_snapshot_complete=True,
+        load_all=load_snapshot_atomically,
+    )
+    if reconciled is None:
+        raise RuntimeError("산사태 notice atomic load가 reconcile 결과를 반환하지 않았다.")
+    context.log.info(
+        "산사태 notice %d건 적재, %d건 종료, %d건 재개.",
+        len(bundles),
+        reconciled.closed,
+        reconciled.reopened,
+    )
+    return result
+
+
+@asset(
+    group_name="features_notice",
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"krforest_landslide_forecast_issues"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+)
+async def feature_notice_krforest_landslide_forecast_issues(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    return await run_tracked_feature_asset(
+        context, run_feature_notice_krforest_landslide_forecast_issues
+    )
 
 
 async def run_feature_place_standard_museums(
@@ -1803,6 +2049,9 @@ FEATURE_LOAD_ASSETS: Final = [
     feature_place_krforest_arboretums,
     feature_route_krforest_mountain_trails,
     feature_route_krforest_dulle_trails,
+    feature_weather_krforest_mountain_weather,
+    feature_weather_krforest_wildfire_risk_forecast,
+    feature_notice_krforest_landslide_forecast_issues,
     feature_place_standard_museums,
     feature_place_standard_tourist_attractions,
     feature_place_standard_parking_lots,
@@ -1825,6 +2074,8 @@ async def _load(
     dataset_key: str,
     bundles: list[Any],
     authoritative_snapshot_complete: bool,
+    source_entity_type: str | None = None,
+    retire_absent_from_snapshot: bool = False,
     record_sync_state: bool = True,
     load_all: Callable[[Sequence[Any]], Awaitable[FeatureLoadResult]] | None = None,
 ) -> DagsterFeatureLoadResult:
@@ -1842,6 +2093,8 @@ async def _load(
         dataset_key=dataset_key,
         strict_address=strict_address,
         authoritative_snapshot_complete=authoritative_snapshot_complete,
+        source_entity_type=source_entity_type,
+        retire_absent_from_snapshot=retire_absent_from_snapshot,
         load_all=load_all,
     )
     if record_sync_state:

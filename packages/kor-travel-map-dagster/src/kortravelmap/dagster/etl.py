@@ -197,6 +197,8 @@ async def load_feature_bundles_for_dagster(
     dataset_key: str,
     strict_address: bool | str = True,
     authoritative_snapshot_complete: bool = False,
+    source_entity_type: str | None = None,
+    retire_absent_from_snapshot: bool = False,
     chunk_size: int = FEATURE_LOAD_CHUNK_SIZE,
     load_all: Callable[[Sequence[FeatureBundle]], Awaitable[FeatureLoadResult]]
     | None = None,
@@ -320,9 +322,22 @@ async def load_feature_bundles_for_dagster(
         # Curation child receipt must be causally tied to one committed DB image.
         # Chunk transactions would allow another run to interleave and make the
         # last chunk's seal describe a mixed snapshot.
-        load = await client.load_feature_bundles(
-            bundles, curation_dataset=(provider, dataset_key)
-        )
+        if retire_absent_from_snapshot:
+            if source_entity_type is None:
+                raise ValueError(
+                    "snapshot retirement에는 source_entity_type이 필요합니다"
+                )
+            load, _ = await client.load_authoritative_feature_snapshot(
+                bundles,
+                provider=provider,
+                dataset_key=dataset_key,
+                source_entity_type=source_entity_type,
+                retire_absent_from_snapshot=True,
+            )
+        else:
+            load = await client.load_feature_bundles(
+                bundles, curation_dataset=(provider, dataset_key)
+            )
     else:
         load = None
         for start in range(0, len(bundles), chunk_size):
