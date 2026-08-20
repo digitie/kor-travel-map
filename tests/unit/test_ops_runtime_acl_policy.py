@@ -14,8 +14,8 @@ from typing import Final
 
 from kortravelmap.infra.models import Base
 from kortravelmap.infra.runtime_privileges import (
-    _ORDINARY_SCHEMA_PRIVILEGES,
     _OPS_TABLE_PRIVILEGES,
+    _ORDINARY_SCHEMA_PRIVILEGES,
 )
 
 _OPS_SCHEMA: Final[str] = "ops"

@@ -390,13 +390,21 @@ def _runtime_relation_grants(
             if privileges is None:
                 unknown_relations.append(f"feature.{relation}")
                 continue
-        else:
+        elif schema == "ops":
             # `feature`와 같은 강도다. 선언이 없으면 권한을 주지 않고 이름을 들고 멈춘다 —
             # 앞판은 여기서 조용히 full CRUD로 떨어졌다(T-VN-41S 선행).
+            #
+            # `provider_sync`는 아래 기본값을 그대로 쓴다. 그 스키마는 provider 적재가
+            # 소유하는 평범한 데이터라 표마다 좁힐 결정이 없고, 여기서 함께 엄격하게
+            # 만들면 이 변경의 범위를 넘는다.
             privileges = _OPS_TABLE_PRIVILEGES.get(relation)
             if privileges is None:
                 unknown_relations.append(f"{schema}.{relation}")
                 continue
+            if not privileges:
+                continue
+        else:
+            privileges = _ORDINARY_SCHEMA_PRIVILEGES[schema]
             if not privileges:
                 continue
         grants.append(_grant_sql(schema=schema, relation=relation, privileges=privileges))
