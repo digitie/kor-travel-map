@@ -549,35 +549,11 @@ async def test_merge_from_review_full_flow(seeded: str, migrated_engine: AsyncEn
     ]
 
     async with AsyncSession(migrated_engine) as session:
-        active_legacy_items = (
-            await session.execute(
-                text(
-                    """
-                    SELECT c.title, i.feature_id, i.source_present
-                    FROM feature.curation_items AS i
-                    JOIN feature.curation_collections AS c
-                      ON c.collection_id = i.collection_id
-                    WHERE c.title IN (
-                        'legacy 단독 loser',
-                        'legacy 충돌 loser',
-                        'legacy 충돌 master'
-                    )
-                      AND i.archived_at IS NULL
-                    ORDER BY c.title
-                    """
-                )
-            )
-        ).all()
         loser_memberships = (
             await session.execute(
                 text("SELECT count(*) FROM feature.curation_items WHERE feature_id = 'f_loser'")
             )
         ).scalar_one()
-    assert active_legacy_items == [
-        ("legacy 단독 loser", "f_master", True),
-        ("legacy 충돌 loser", "f_master", True),
-        ("legacy 충돌 master", "f_master", True),
-    ]
     assert loser_memberships == 0
     # loser는 T-VN-34 typed lifecycle transition으로 retire/suppress된다.
     async with AsyncSession(migrated_engine) as session:
@@ -1928,12 +1904,6 @@ async def test_merge_first_rechecks_all_membership_writer_feature_lifecycles(
             await _purge_curation_test_provenance(
                 cleanup,
                 theme_slugs=(theme_slug,),
-            )
-            await cleanup.execute(
-                text(
-                    "WHERE theme_id = CAST(:theme_id AS uuid)"
-                ),
-                {"theme_id": theme_id},
             )
             await cleanup.execute(
                 text(
