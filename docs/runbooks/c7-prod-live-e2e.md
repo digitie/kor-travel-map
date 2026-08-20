@@ -8,9 +8,12 @@
 
 C7은 다음 조건을 모두 만족해야 완료다.
 
-1. `T-ADM-C6c` compatible-pair capture가 성공했고 Manager v4 manifest의 active
-   Map API·UI·Dagster web·Dagster daemon·PinVi API image가 실제 다섯
-   runtime container image와 각각 일치한다.
+1. Manager의 rebuildable transaction이 v5 `pinned-runtime-generation-v5.json`과 그 pinset의
+   v7 `pinned-runtime-rebuild-v7-<pinset>.json`을 남겼고, active generation의 일곱 image
+   (Map API·UI·Dagster web·Dagster daemon, PinVi API·web·dagster)가 실제 일곱 runtime
+   container image와 각각 일치한다. journal은 phase `committed`이고 candidate가 active
+   generation과 전체 동등해야 한다 — 그래야 이 세대가 파괴적 rebuild를 완주했다는 것이
+   증명된다.
 2. host runner/helper/attestation 검증 모듈/상태 감사기는 exact commit의 root-owned Git archive snapshot으로
    고정되고, API·UI·Dagster web·Dagster daemon·
    PinVi API의 image/command/environment hash가 root-owned attestation과 일치한다.
@@ -115,23 +118,30 @@ group/other writable ancestor, mode `0555`, hash 불일치를 모두 거부한 �
 
 `/etc/kor-travel-map/c7-prod-live-e2e-attestation.json`은 배포가 끝난 뒤 local-only
 절차로 원자 생성한다. mode는 `0600`, owner는 `root:root`, version은 runner가 요구하는
-정확한 version 3이어야 한다. 이 version은 host attestation document 계약이며
-Manager compatible-pair manifest version과 다르다. Manager canonical compatible-pair manifest는
-정확한 version 4이고, active/rollback은 각각
-`map_image_id`, `map_ui_image_id`, `map_dagster_image_id`,
-`map_dagster_daemon_image_id`, `map_source_revision`, `pinvi_image_id`,
-`pinvi_source_revision`, `contract_generation`, `recorded_at`만 가지는 exact pair여야 한다.
-v3 manifest나 누락·추가 필드는 호환 변환 없이 거부한다. capture 직후 bytes를
-root-owned `0600` snapshot으로 만들고, runner에는 그 absolute path를 전달한다. 원본과 snapshot
-SHA-256이 다르면 실행하지 않는다. attestation에는 다음 비민감 증거만 넣는다.
+정확한 version 4여야 한다. 이 version은 host attestation document 계약이며 Manager
+pinned runtime manifest version과 다르다. Manager canonical manifest는 정확한 version 5이고
+`{version, active_generation}` 두 키만 가진다. `active_generation`은 일곱 image ID
+(`map_api_image_id`, `map_ui_image_id`, `map_dagster_image_id`,
+`map_dagster_daemon_image_id`, `pinvi_api_image_id`, `pinvi_web_image_id`,
+`pinvi_dagster_image_id`), `map_source_revision`, `pinvi_source_revision`, 세 schema head
+(`map_application_head`, `map_dagster_head`, `pinvi_head`), `pinset_sha256`, `recorded_at`을
+**정확히** 가진다. rebuild journal은 version 7이고 `{version, transaction_id, phase,
+candidate, environment_sha256, compose_sha256, resolved_compose_sha256, created_at,
+cancel_probe}`를 정확히 가진다. v4 compatible-pair manifest나 누락·추가 필드는 호환 변환
+없이 거부한다 — v4를 억지로 넣어 통과하는 경로는 두지 않는다.
+
+두 문서 bytes를 root-owned `0600` snapshot으로 만들고, runner에는 그 absolute path 두 개를
+전달한다. 원본과 snapshot SHA-256이 다르면 실행하지 않는다. attestation에는 다음 비민감
+증거만 넣는다.
 
 - machine-id·hostname·공개 UI/API WebSocket/Dagster GraphQL origin의 SHA-256
 - compose project 이름의 SHA-256
 - clean repository commit
 - Map·PinVi source commit과 각 immutable image의 `org.opencontainers.image.revision`
 - root-owned runner/helper/attestation 검증 모듈/상태 감사기 상대경로 4개의 SHA-256(`orchestrator_files`)
-- C6c compatible-pair manifest bytes의 SHA-256과 contract generation
-- Map API·UI·Dagster web·Dagster daemon·PinVi API별 image ID, canonical
+- v5 manifest bytes와 v7 journal bytes의 SHA-256, generation의 `pinset_sha256`,
+  세 schema head(generation 값과 exact 일치해야 한다)
+- 일곱 runtime(Map API·UI·Dagster web·Dagster daemon, PinVi API·web·dagster)별 image ID, canonical
   `{Path,Args,Entrypoint,Cmd}` command SHA-256,
   정렬된 environment 전체의 SHA-256
 - C7 Playwright executor image ID와 고정 base image reference
@@ -198,7 +208,7 @@ origin hash·Git commit·manifest path·executor image ID와 destructive opt-in�
 
 runner는 아래 순서를 지킨다.
 
-1. env/command/root-owned orchestrator snapshot/host/runtime/compatible-pair/Alembic을 read-only 검증하고 UI login을
+1. env/command/root-owned orchestrator snapshot/host/runtime/pinned-generation/journal/Alembic을 read-only 검증하고 UI login을
    domain-state 비파괴 preflight한다. 로그인은 session/auth audit를 만들 수 있지만
    provider/request/POI/schedule state는 바꾸지 않는다.
 2. root state lock을 잡고 기존 `BLOCKED.json`, journal, `.state.*`, `runtime.*` residue가
@@ -212,8 +222,10 @@ runner는 아래 순서를 지킨다.
    Playwright report, attachment와 auth storage는 evidence로 복사하지 않는다. C7 raw
    `test-results` output은 evidence bind 밖 container tmpfs
    `/tmp/kor-travel-map-c7-test-results-<pid>`에만 생성하고 container 제거와 함께 폐기한다.
-   비밀값이 없는 root runtime attestation과 compatible-pair snapshot은 함께 복제하고 manifest
-   hash로 결박한다.
+   비밀값이 없는 root runtime attestation과 pinned generation·rebuild journal snapshot은
+   함께 복제하고 manifest hash로 결박한다(evidence 안 파일명은
+   `runtime-attestation.json`, `pinned-runtime-generation.json`,
+   `pinned-runtime-rebuild.json`).
 6. 원격 상태를 다시 읽어 exact restoration을 검증하고 evidence를 fsync한 뒤에만
    journal과 `BLOCKED.json`을 제거한다.
 

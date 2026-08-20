@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Final
 
 from kortravelmap.core.cache_target_stream import SnapshotMerkleRowV1
-from scripts.lib.c7_prod_attestation import PAIR_RUNTIME_IMAGE_FIELDS
+from scripts.lib.c7_prod_attestation import GENERATION_RUNTIME_IMAGE_FIELDS
 
 _ROOT: Final = Path(__file__).resolve().parents[2]
 _CONTRACTS: Final = _ROOT / "contracts" / "vnext"
@@ -101,16 +101,23 @@ _WAVE2_TASKS: Final = (
     "T-VN-39",
 )
 _REVENDOR_VALUES: Final = frozenset({"yes", "no", "deferred-to-implementation"})
+# 전방 계약: 다음 candidate 승격은 v5 pinned runtime generation으로 발행된다.
+# 목록을 손으로 적으면 generation에 runtime이 늘어도 receipt는 그대로여서 늘어난
+# image가 증거 밖에 남는다 — v4가 정확히 그 상태였다(PinVi web/dagster 누락).
 _C7_ROLE_RECEIPT_FIELDS: Final[dict[str, tuple[str, str]]] = {
-    "map_api": ("map_image_id", "map_api_image_id"),
-    "map_ui": ("map_ui_image_id", "map_ui_image_id"),
-    "map_dagster_web": ("map_dagster_image_id", "map_dagster_web_image_id"),
-    "map_dagster_daemon": (
-        "map_dagster_daemon_image_id",
-        "map_dagster_daemon_image_id",
-    ),
-    "pinvi_api": ("pinvi_image_id", "pinvi_api_image_id"),
+    role: (generation_field, f"{role}_image_id")
+    for role, generation_field in GENERATION_RUNTIME_IMAGE_FIELDS
 }
+# detached 이력: 아래 세 archive artifact는 v4 compatible-pair 시절의 후보 증거이며
+# freeze 상수로 불변이다. 현행 계약이 v5로 옮겨갔다고 해서 과거 증거의 모양을
+# 바꿔 쓰면 그것은 이력이 아니라 위조다. 그래서 전방 계약과 **분리된** 목록을 둔다.
+_DETACHED_V4_CANDIDATE_ROLES: Final[tuple[str, ...]] = (
+    "map_api",
+    "map_ui",
+    "map_dagster_web",
+    "map_dagster_daemon",
+    "pinvi_api",
+)
 
 
 def _load_json(name: str) -> dict[str, Any]:
@@ -310,16 +317,17 @@ def test_consumer_rollout_shape() -> None:
             "pinvi_service_vendor_sha256",
             "verification",
         }
-        assert dict(PAIR_RUNTIME_IMAGE_FIELDS) == {
-            role: active_field for role, (active_field, _) in _C7_ROLE_RECEIPT_FIELDS.items()
+        assert set(_C7_ROLE_RECEIPT_FIELDS) == {
+            role for role, _ in GENERATION_RUNTIME_IMAGE_FIELDS
         }
         if paired_receipt["state"] == "candidate_verified":
             prefix = "candidate_"
             state_keys = {
                 f"{prefix}map_commit",
                 f"{prefix}pinvi_commit",
-                f"{prefix}compatible_pair_manifest_sha256",
-                f"{prefix}compatible_pair_attestation_sha256",
+                f"{prefix}pinned_runtime_manifest_sha256",
+                f"{prefix}rebuild_journal_sha256",
+                f"{prefix}pinned_runtime_attestation_sha256",
                 f"{prefix}live_e2e_evidence_sha256",
                 "final_c7_required",
             }
@@ -329,23 +337,25 @@ def test_consumer_rollout_shape() -> None:
             state_keys = {
                 f"{prefix}map_commit",
                 f"{prefix}pinvi_commit",
-                f"{prefix}compatible_pair_manifest_sha256",
+                f"{prefix}pinned_runtime_manifest_sha256",
+                f"{prefix}rebuild_journal_sha256",
                 f"{prefix}c7_attestation_sha256",
                 f"{prefix}live_e2e_evidence_sha256",
             }
         image_keys = {
             f"{prefix}{receipt_field}" for _, receipt_field in _C7_ROLE_RECEIPT_FIELDS.values()
         }
-        assert len(image_keys) == len(PAIR_RUNTIME_IMAGE_FIELDS)
+        assert len(image_keys) == len(GENERATION_RUNTIME_IMAGE_FIELDS)
         assert set(paired_receipt) == required_keys | state_keys | image_keys
         for key in (f"{prefix}map_commit", f"{prefix}pinvi_commit"):
             assert re.fullmatch(r"[0-9a-f]{40}", paired_receipt[key]), key
         for key in (
             "map_service_openapi_sha256",
             "pinvi_service_vendor_sha256",
-            f"{prefix}compatible_pair_manifest_sha256",
+            f"{prefix}pinned_runtime_manifest_sha256",
+            f"{prefix}rebuild_journal_sha256",
             (
-                f"{prefix}compatible_pair_attestation_sha256"
+                f"{prefix}pinned_runtime_attestation_sha256"
                 if paired_receipt["state"] == "candidate_verified"
                 else f"{prefix}c7_attestation_sha256"
             ),
@@ -475,13 +485,12 @@ def test_tvn41_candidate_artifacts_bind_immutable_live_evidence() -> None:
     manifest_sha256 = hashlib.sha256(manifest_path.read_bytes()).hexdigest()
     attestation_sha256 = hashlib.sha256(attestation_path.read_bytes()).hexdigest()
     evidence_sha256 = hashlib.sha256(evidence_path.read_bytes()).hexdigest()
-    if receipt["state"] == "candidate_verified":
-        assert receipt["candidate_compatible_pair_manifest_sha256"] == manifest_sha256
-        assert receipt["candidate_compatible_pair_attestation_sha256"] == attestation_sha256
-        assert receipt["candidate_live_e2e_evidence_sha256"] == evidence_sha256
-    else:
-        assert receipt["state"] == "pending"
-        assert manifest["map_service_openapi_sha256"] != receipt["map_service_openapi_sha256"]
+    # 이 archive는 v4 시절 증거다. receipt가 다시 candidate_verified가 될 때는 v5
+    # generation으로 발행된 **새 archive**를 가리키므로, 이 파일들이 그 자리에 다시
+    # 들어오는 일은 없어야 한다. 아래는 detached 이력의 내부 정합성만 본다.
+    assert receipt["state"] == "pending"
+    assert manifest["map_service_openapi_sha256"] != receipt["map_service_openapi_sha256"]
+    assert manifest_sha256 and attestation_sha256 and evidence_sha256
 
     assert set(manifest) == {
         "schema",
@@ -500,14 +509,7 @@ def test_tvn41_candidate_artifacts_bind_immutable_live_evidence() -> None:
         assert manifest["pinvi_service_vendor_sha256"] == receipt["pinvi_service_vendor_sha256"]
 
     expected_images = manifest["runtime_images"]
-    assert dict(PAIR_RUNTIME_IMAGE_FIELDS) == {
-        role: active_field for role, (active_field, _) in _C7_ROLE_RECEIPT_FIELDS.items()
-    }
-    if receipt["state"] == "candidate_verified":
-        assert expected_images == {
-            role: receipt[f"candidate_{receipt_field}"]
-            for role, (_, receipt_field) in _C7_ROLE_RECEIPT_FIELDS.items()
-        }
+    assert set(expected_images) == set(_DETACHED_V4_CANDIDATE_ROLES)
 
     assert set(attestation) == {
         "schema",
@@ -523,7 +525,7 @@ def test_tvn41_candidate_artifacts_bind_immutable_live_evidence() -> None:
     assert attestation["runtime_images"] == expected_images
     assert attestation["runtime_image_revisions"] == {
         role: manifest["pinvi_commit"] if role == "pinvi_api" else manifest["map_commit"]
-        for role, _ in PAIR_RUNTIME_IMAGE_FIELDS
+        for role in _DETACHED_V4_CANDIDATE_ROLES
     }
     assert attestation["map_application_schema_head"]
     assert attestation["pinvi_application_schema_head"]
