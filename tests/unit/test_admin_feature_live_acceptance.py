@@ -421,6 +421,45 @@ def test_targeted_lane_is_not_part_of_strict_c7_runner() -> None:
     assert "admin-feature-acceptance-write" not in _C7_RUNNER.read_text()
 
 
+@pytest.mark.parametrize("version", [3, 5, "4", None])
+def test_c7_module_bootstrap_rejects_non_v4_host_attestation(
+    tmp_path: Path,
+    version: object,
+) -> None:
+    """bootstrap 검증이 host attestation version을 **실제로** 판정하는지 본다.
+
+    문자열 위치 단언만 있으면 상수가 어긋나도 통과한다. 실제로 이 브랜치에서
+    검증 모듈은 v4를 요구하는데 bootstrap은 v3를 요구해 admin lane이 통째로
+    fail-closed되는 상태가 CI green으로 남아 있었다(2026-08-20 적대 리뷰).
+    """
+
+    commit = "5" * 40
+    module = tmp_path / "c7_prod_attestation.py"
+    module.write_text("# module\n", encoding="utf-8")
+    attestation = tmp_path / "attestation.json"
+    payload: dict[str, object] = {
+        "repository_commit": commit,
+        "orchestrator_files": {
+            "scripts/audit-c7-prod-live-state.py": "0" * 64,
+            "scripts/lib/c7-prod-runner-lifecycle.sh": "0" * 64,
+            "scripts/lib/c7_prod_attestation.py": _STATE_MODULE._file_sha256(module),  # noqa: SLF001
+            "scripts/run-c7-prod-live-e2e.sh": "0" * 64,
+        },
+    }
+    if version is not None:
+        payload["version"] = version
+    attestation.write_text(json.dumps(payload), encoding="utf-8")
+
+    args = SimpleNamespace(
+        expected_commit=commit,
+        module=_STATE_MODULE._C7_BASE / commit / _STATE_MODULE._C7_MODULE_RELATIVE,  # noqa: SLF001
+        attestation=attestation,
+    )
+    # 경로 검증은 이 테스트의 대상이 아니므로 module 경로 자체를 기대값으로 맞춘다.
+    with pytest.raises(ValueError):
+        _STATE_MODULE._validate_c7_module(args)  # noqa: SLF001
+
+
 def test_runner_uses_trusted_c7_v4_v5_v7_runtime_attestation_before_state() -> None:
     runner = _RUNNER.read_text()
     state = _STATE.read_text()
@@ -431,7 +470,7 @@ def test_runner_uses_trusted_c7_v4_v5_v7_runtime_attestation_before_state() -> N
     assert validate < runtime < initialize
     assert 'readonly HOST_ATTESTATION_FILE="/etc/kor-travel-map/' in runner
     assert 'readonly C7_INSTALL_BASE="/usr/local/lib/kor-travel-map/c7-runner"' in runner
-    assert 'attestation.get("version") != 3' in state
+    assert 'attestation.get("version") != 4' in state
     assert 'manifest["version"] != 5' in attestation
     assert 'value["version"] != 7' in attestation
     assert 'value["phase"] != _JOURNAL_COMMITTED_PHASE' in attestation

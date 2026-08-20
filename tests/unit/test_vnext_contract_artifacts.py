@@ -102,11 +102,19 @@ _WAVE2_TASKS: Final = (
 )
 _REVENDOR_VALUES: Final = frozenset({"yes", "no", "deferred-to-implementation"})
 # 전방 계약: 다음 candidate 승격은 v5 pinned runtime generation으로 발행된다.
-# 목록을 손으로 적으면 generation에 runtime이 늘어도 receipt는 그대로여서 늘어난
-# image가 증거 밖에 남는다 — v4가 정확히 그 상태였다(PinVi web/dagster 누락).
+# 목록은 **테스트가 직접 적는다**. 모듈 상수에서 파생시키면 "모듈이 스스로를 만족한다"는
+# 항등식이 되어 drift를 못 잡는다(2026-08-20 적대 리뷰 지적).
 _C7_ROLE_RECEIPT_FIELDS: Final[dict[str, tuple[str, str]]] = {
-    role: (generation_field, f"{role}_image_id")
-    for role, generation_field in GENERATION_RUNTIME_IMAGE_FIELDS
+    "map_api": ("map_api_image_id", "map_api_image_id"),
+    "map_ui": ("map_ui_image_id", "map_ui_image_id"),
+    "map_dagster_web": ("map_dagster_image_id", "map_dagster_web_image_id"),
+    "map_dagster_daemon": (
+        "map_dagster_daemon_image_id",
+        "map_dagster_daemon_image_id",
+    ),
+    "pinvi_api": ("pinvi_api_image_id", "pinvi_api_image_id"),
+    "pinvi_web": ("pinvi_web_image_id", "pinvi_web_image_id"),
+    "pinvi_dagster": ("pinvi_dagster_image_id", "pinvi_dagster_image_id"),
 }
 # detached 이력: 아래 세 archive artifact는 v4 compatible-pair 시절의 후보 증거이며
 # freeze 상수로 불변이다. 현행 계약이 v5로 옮겨갔다고 해서 과거 증거의 모양을
@@ -317,8 +325,9 @@ def test_consumer_rollout_shape() -> None:
             "pinvi_service_vendor_sha256",
             "verification",
         }
-        assert set(_C7_ROLE_RECEIPT_FIELDS) == {
-            role for role, _ in GENERATION_RUNTIME_IMAGE_FIELDS
+        assert dict(GENERATION_RUNTIME_IMAGE_FIELDS) == {
+            role: generation_field
+            for role, (generation_field, _) in _C7_ROLE_RECEIPT_FIELDS.items()
         }
         if paired_receipt["state"] == "candidate_verified":
             prefix = "candidate_"

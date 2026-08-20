@@ -70,6 +70,25 @@ _JOURNAL_KEYS = frozenset(
     }
 )
 _JOURNAL_COMMITTED_PHASE = "committed"
+# ktdm `PinnedRuntimeCancelProbeReceipt.to_payload()` / `PinnedRuntimeCancelProbeOutcome`의
+# exact key 집합. 다른 sub-document와 같은 강도로 고정한다 — 여기만 느슨하면 ktdm에서
+# 계약이 갈려도 감지되지 않는다.
+_CANCEL_PROBE_KEYS = frozenset(
+    {
+        "stage",
+        "job_id",
+        "cancellation_id",
+        "outcome",
+        "fixture_created_at",
+        "fixture_consumed_at",
+        "fixture_finalized_at",
+    }
+)
+_CANCEL_PROBE_OUTCOME = {
+    "name": "pinvi_cancel_error",
+    "status": 409,
+    "code": "PIPELINE_CANCELLATION_UNSAFE",
+}
 
 CommandRunner = Callable[[list[str], str], str]
 SecureReader = Callable[[Path, int], bytes]
@@ -396,8 +415,18 @@ def _validate_committed_journal(value: object, *, generation: Mapping[str, objec
     if value["candidate"] != generation:
         raise AttestationError("journal candidate is not the active generation")
     cancel_probe = value["cancel_probe"]
-    if not isinstance(cancel_probe, dict) or cancel_probe.get("stage") != "finalized":
+    if not _exact_dict(cancel_probe, set(_CANCEL_PROBE_KEYS)):
+        raise AttestationError("journal cancel probe shape")
+    assert isinstance(cancel_probe, dict)
+    if cancel_probe["stage"] != "finalized":
         raise AttestationError("journal cancel probe is not finalized")
+    if cancel_probe["outcome"] != _CANCEL_PROBE_OUTCOME:
+        raise AttestationError("journal cancel probe outcome")
+    for field in ("job_id", "cancellation_id"):
+        if not isinstance(cancel_probe[field], str) or not cancel_probe[field]:
+            raise AttestationError("journal cancel probe identity")
+    for field in ("fixture_created_at", "fixture_consumed_at", "fixture_finalized_at"):
+        _validate_utc_timestamp(cancel_probe[field], "journal cancel probe timestamp")
 
 
 def verify_runtime_attestation_payloads(

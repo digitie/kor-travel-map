@@ -191,7 +191,7 @@ validate_runtime() {
     --source-commit "$E2E_C7_EXPECTED_GIT_COMMIT"
     --api-image-id "$API_IMAGE_ID"
     --playwright-image-id "$E2E_C7_PLAYWRIGHT_IMAGE"
-    --pinned-runtime-manifest-sha256 "$PINNED_RUNTIME_MANIFEST_SHA256" \
+    --pinned-runtime-manifest-sha256 "$PINNED_RUNTIME_MANIFEST_SHA256"
     --rebuild-journal-sha256 "$REBUILD_JOURNAL_SHA256"
     --host-attestation-sha256 "$HOST_ATTESTATION_SHA256"
   )

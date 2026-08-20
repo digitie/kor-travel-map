@@ -4,6 +4,23 @@ from pathlib import Path
 
 from scripts.lib import c7_prod_attestation as _ATTESTATION_MODULE
 
+# 기대 목록은 **테스트가** 적는다. 모듈 상수에서 파생시키면 "모듈이 스스로를 만족한다"는
+# 항등식이 되어 아무것도 보지 않는다(2026-08-20 적대 리뷰 지적).
+_EXPECTED_GENERATION_IMAGE_FIELDS = (
+    "map_api_image_id",
+    "map_ui_image_id",
+    "map_dagster_image_id",
+    "map_dagster_daemon_image_id",
+    "pinvi_api_image_id",
+    "pinvi_web_image_id",
+    "pinvi_dagster_image_id",
+)
+_EXPECTED_GENERATION_SCHEMA_HEAD_FIELDS = (
+    "map_application_head",
+    "map_dagster_head",
+    "pinvi_head",
+)
+
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER = ROOT / "scripts" / "run-c7-prod-live-e2e.sh"
 ATTESTATION = ROOT / "scripts" / "lib" / "c7_prod_attestation.py"
@@ -503,11 +520,20 @@ def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidenc
     assert '"source_commits"' in attestation
     assert 'manifest["version"] != 5' in attestation
     assert 'value["version"] != 7' in attestation
-    # v5 generation의 일곱 image field가 모듈 안에 실제로 있어야 한다. 목록을 손으로
-    # 적으면 generation이 늘어도 이 계약은 그대로여서, 늘어난 runtime이 검사 밖에 남는다.
-    for _role, field in _ATTESTATION_MODULE.GENERATION_RUNTIME_IMAGE_FIELDS:
-        assert field in attestation
-    for field in _ATTESTATION_MODULE.GENERATION_SCHEMA_HEAD_FIELDS:
+    # 모듈 상수가 기대 목록과 **정확히** 같아야 한다. 빠지면 그 runtime이 검사 밖에
+    # 남고(그것이 v4의 결함이었다), 늘면 테스트가 모르는 runtime이 생긴 것이다.
+    assert (
+        tuple(field for _, field in _ATTESTATION_MODULE.GENERATION_RUNTIME_IMAGE_FIELDS)
+        == _EXPECTED_GENERATION_IMAGE_FIELDS
+    )
+    assert (
+        tuple(_ATTESTATION_MODULE.GENERATION_SCHEMA_HEAD_FIELDS)
+        == _EXPECTED_GENERATION_SCHEMA_HEAD_FIELDS
+    )
+    for field in (
+        *_EXPECTED_GENERATION_IMAGE_FIELDS,
+        *_EXPECTED_GENERATION_SCHEMA_HEAD_FIELDS,
+    ):
         assert field in attestation
     assert 'active["map_source_revision"] != source_commits["map"]' in attestation
     assert 'active["pinvi_source_revision"] != source_commits["pinvi"]' in attestation

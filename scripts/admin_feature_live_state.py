@@ -577,7 +577,7 @@ def _validate_c7_module(args: argparse.Namespace) -> None:
     attestation = json.loads(_read_regular(args.attestation, 0o600))
     orchestrator_files = attestation.get("orchestrator_files")
     if (
-        attestation.get("version") != 3
+        attestation.get("version") != 4
         or attestation.get("repository_commit") != args.expected_commit
         or not isinstance(orchestrator_files, dict)
         or set(orchestrator_files)
