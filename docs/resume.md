@@ -10,8 +10,8 @@ cache-target snapshot GC의 실측 AC를 n150 격리 DB에서 6개 축 전부 �
 |---|---|
 | migration | fresh DB → head `0225_tvn40c_physical_removal` |
 | 수동 GC | 적격 56/2,800 전부 삭제, 보존 대조군 24 불변, remaining 0 |
-| 처리량 | 54,795 items/s vs 유입 14,439 items/s |
-| schedule ON → tick | t+36초 run 생성 · t+41초 SUCCESS · backlog 0/0 |
+| 처리량 | 65,214 items/s vs 유입 12,951 items/s |
+| schedule ON → tick | t+21초 run 생성 · t+26초 SUCCESS · backlog 0/0 |
 | alert | 보존 ceiling·증가율 독립 발화, 기본값에서 침묵 |
 
 ### 다음 한 작업

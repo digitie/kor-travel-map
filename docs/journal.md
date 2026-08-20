@@ -9,8 +9,8 @@ cache-target snapshot GC의 백로그 AC(migration → 수동 GC → schedule ON
 DB에서 전부 실측했다. 6개 축 모두 PASS.
 기록 `docs/reports/t-vn-41c-cache-target-gc-verification-2026-08-20.md`.
 
-숫자는 여유가 크다 — 유입 14,439 items/s에 GC 54,795 items/s, tick은 schedule을 켠 지
-36초 만에 run을 만들고 41초에 SUCCESS, backlog 42/2,100 → 0/0. 하지만 이 숫자들은
+숫자는 여유가 크다 — 유입 12,951 items/s에 GC 65,214 items/s, tick은 schedule을 켠 지
+21초 만에 run을 만들고 26초에 SUCCESS, backlog 42/2,100 → 0/0. 하지만 이 숫자들은
 **대조군이 있어야만 의미가 있다.** 그래서 이번 실측의 설계는 전부 "통과가 공허하지 않은가"를
 겨눴다.
 

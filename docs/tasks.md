@@ -643,7 +643,7 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   - [x] n150 격리 DB에서 migration → 수동 GC → schedule ON → 다음 tick 순서로 검증하고,
     GC 처리량이 유입률을 상회하며 remaining backlog가 0인지 증명한다. referenced snapshot 증가율과
     보존 임계치 alert도 함께 확인한다.
-    → 6개 축 전부 PASS. 처리량 54,795 items/s vs 유입 14,439 items/s, tick t+36초 생성·t+41초
+    → 6개 축 전부 PASS. 처리량 65,214 items/s vs 유입 12,951 items/s, tick t+21초 생성·t+26초
     SUCCESS, backlog 0/0, alert는 조인 임계치에서 발화·기본값에서 침묵.
     실측 기록 `docs/reports/t-vn-41c-cache-target-gc-verification-2026-08-20.md`,
     재실행 게이트 `scripts/verify-tvn41c-cache-target-gc.sh`(일회성 절차로 두지 않았다 —
