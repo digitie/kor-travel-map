@@ -249,7 +249,7 @@ type DurableCleanupJournal = {
   target_refs: TargetJournalRef[];
   target_history: TargetJournalRef[];
   updated_at: string;
-  version: 3;
+  version: 4;
 };
 
 const UUID_PATTERN =
