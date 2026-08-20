@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "e463218dc2ccf628202cd8ce45bcc7b3c3a5d06d73e8397b3fa48f39c6db9d1d"
+      "sha256": "590f49d1c4abe6558cf46da5a4a4b6b787bb007c3194c07f343f97a3b6b8d9be"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -13,10 +13,15 @@
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
-      "sha256": "8019e36f150ed006f5580e5ff224a0ba72030808b5303273f8c4c51aa0496431"
+      "sha256": "c878531af2acdea0a25861d81f2e87f4768244d8ff37b94cb610194e3db85c96"
     }
   },
   "revisions": [
+    {
+      "date": "2026-08-20",
+      "task": "T-VN-M04",
+      "change": "범용 Feature 요청 service submit과 admin 승인·거절 계약을 현재 OpenAPI에 반영해 admin/service baseline을 재동결했다. Wave 2 목표 operation 집합은 바꾸지 않으며, 새 Map/PinVi 격리 paired live 증거 전에는 consumer rollout receipt를 pending으로 유지한다."
+    },
     {
       "date": "2026-08-18",
       "task": "T-VN-41S",

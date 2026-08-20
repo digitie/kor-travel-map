@@ -145,16 +145,30 @@ def test_feature_creation_origin_metadata_matches_m00_contract() -> None:
 
     checks = _named_constraints(table, CheckConstraint)
     assert {name: str(constraint.sqltext) for name, constraint in checks.items()} == {
-        "ck_feature_creation_origins_kind": "origin_kind = 'manual_admin'",
+        "ck_feature_creation_origins_kind": (
+            "origin_kind IN ('manual_admin', 'manual_curation', 'manual_request')"
+        ),
         "ck_feature_creation_origins_principal": (
-            "creator_principal_id = 'admin-ui-bff.manual-feature-create.v1'"
+            "(origin_kind = 'manual_admin' "
+            "AND creator_principal_id = 'admin-ui-bff.manual-feature-create.v1') "
+            "OR (origin_kind = 'manual_curation' "
+            "AND creator_principal_id = 'admin-ui-bff.manual-curation-feature-create.v1') "
+            "OR (origin_kind = 'manual_request' "
+            "AND creator_principal_id = 'feature-request.approval.v1')"
         ),
         "ck_feature_creation_origins_actor": (
             "btrim(created_by_actor) <> '' AND char_length(created_by_actor) <= 200"
         ),
         "ck_feature_creation_origins_roles": (
-            "invoker_role = 'ktm_feature_api_runtime' "
-            "AND procedure_definer = 'ktm_manual_feature_procedure_owner'"
+            "(origin_kind = 'manual_admin' "
+            "AND invoker_role = 'ktm_feature_api_runtime' "
+            "AND procedure_definer = 'ktm_manual_feature_procedure_owner') "
+            "OR (origin_kind = 'manual_curation' "
+            "AND invoker_role = 'ktm_feature_api_runtime' "
+            "AND procedure_definer = 'ktm_curation_command_owner') "
+            "OR (origin_kind = 'manual_request' "
+            "AND invoker_role = 'ktm_feature_api_runtime' "
+            "AND procedure_definer = 'ktm_feature_request_procedure_owner')"
         ),
     }
 

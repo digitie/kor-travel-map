@@ -165,19 +165,13 @@
         "admin-detail": "yes"
       },
       "pinvi_snapshot_receipt": {
-        "state": "complete",
-        "map_commit": "4c50fe86d3c2f617e09ea1ea55e0886dfed9edf1",
-        "pinvi_commit": "07340d9ef7246c2f7f120cb391d8d1b00ca155dc",
+        "state": "pending",
         "map_user_openapi_sha256": "489b05d3e62e3531233e3e7eb8c97f9ddf92aa1ecf1573b7557a5951e7f6a61b",
-        "map_service_openapi_sha256": "8019e36f150ed006f5580e5ff224a0ba72030808b5303273f8c4c51aa0496431",
-        "map_full_openapi_sha256": "e463218dc2ccf628202cd8ce45bcc7b3c3a5d06d73e8397b3fa48f39c6db9d1d",
+        "map_service_openapi_sha256": "c878531af2acdea0a25861d81f2e87f4768244d8ff37b94cb610194e3db85c96",
+        "map_full_openapi_sha256": "590f49d1c4abe6558cf46da5a4a4b6b787bb007c3194c07f343f97a3b6b8d9be",
         "pinvi_user_vendor_sha256": "489b05d3e62e3531233e3e7eb8c97f9ddf92aa1ecf1573b7557a5951e7f6a61b",
-        "pinvi_service_vendor_sha256": "8019e36f150ed006f5580e5ff224a0ba72030808b5303273f8c4c51aa0496431",
-        "verification": [
-          "PinVi user/service vendor bytes are exact",
-          "PinVi canonical curation importer has no legacy admin snapshot consumer",
-          "paired Map/PinVi n150 canonical snapshot live acceptance passed"
-        ]
+        "pinvi_service_vendor_sha256": "c878531af2acdea0a25861d81f2e87f4768244d8ff37b94cb610194e3db85c96",
+        "blocking_reason": "T-VN-M04가 generic Feature 요청 service queue와 admin resolution을 추가해 Map admin/service OpenAPI bytes를 바꿨다. PinVi exact vendor는 갱신했지만 새 Map/PinVi source pair의 격리 paired live UI E2E가 아직 없으므로 complete receipt로 승격하지 않는다."
       }
     },
     "T-VN-41": {
@@ -196,9 +190,9 @@
       },
       "pinvi_snapshot_receipt": {
         "state": "pending",
-        "map_service_openapi_sha256": "8019e36f150ed006f5580e5ff224a0ba72030808b5303273f8c4c51aa0496431",
-        "pinvi_service_vendor_sha256": "8019e36f150ed006f5580e5ff224a0ba72030808b5303273f8c4c51aa0496431",
-        "blocking_reason": "T-VN-41S typed snapshot 410/413가 service 계약을 바꿨다. PinVi exact vendor는 갱신했지만 기존 77821001/e8e0fec 후보 archive·image·Live UI 증거는 이전 service bytes만 검증했으므로 새 Map/PinVi source pair의 isolated acceptance 전까지 candidate_verified로 승격하지 않는다."
+        "map_service_openapi_sha256": "c878531af2acdea0a25861d81f2e87f4768244d8ff37b94cb610194e3db85c96",
+        "pinvi_service_vendor_sha256": "c878531af2acdea0a25861d81f2e87f4768244d8ff37b94cb610194e3db85c96",
+        "blocking_reason": "T-VN-M04 generic Feature 요청 queue가 service 계약을 바꿨다. PinVi exact vendor는 갱신했지만 기존 77821001/e8e0fec 후보 archive·image·Live UI 증거는 이전 service bytes만 검증했으므로 새 Map/PinVi source pair의 isolated acceptance 전까지 candidate_verified로 승격하지 않는다."
       }
     },
     "T-VN-39": {

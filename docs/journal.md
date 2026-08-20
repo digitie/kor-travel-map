@@ -362,6 +362,10 @@ bootstrap/reconciler가 세 owner에 걸친 identity-key·core-create·claim/ori
 grant를 다시 만들며, 실제 revoke 뒤 submit+approve smoke로 복구를 검증했다. runtime의
 raw queue SELECT/DML은 catalog preflight와 실제 integration에서 함께 거부한다.
 
+M04가 바꾼 admin/service OpenAPI baseline과 active consumer receipt도 함께 재동결했다. 새
+Map/PinVi 격리 paired live UI E2E 전에는 receipt를 `pending`으로 유지해 이전 live 증거를
+현재 queue 계약의 completion으로 재사용하지 않는다.
+
 ## 2026-08-20 — T-VN-M03: 수동 curation Feature 생성 원자 writer
 
 M03는 curation item과 수동 Feature를 하나의 serialized writer로 생성하고 provenance를

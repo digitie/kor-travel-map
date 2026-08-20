@@ -204,6 +204,8 @@ Map의 M04 식별자·경로·역할·환경변수에서 제거했다.
 DB/HTTP 적대 리뷰에서 나온 P0/P1을 모두 반영했다: no-owner/no-privileges restore ACL
 repair, raw queue access preflight, direct procedure payload validation, terminal 409·missing
 404, OpenAPI response 선언, REST catalog 정본. M04 통합 3건과 관련 단위 195건은 green이다.
+M04가 바꾼 admin/service OpenAPI baseline과 active consumer receipt는 새 source pair의
+격리 paired live UI E2E 전까지 `pending`으로 유지한다.
 
 ### 다음 한 작업
 
