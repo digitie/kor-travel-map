@@ -30,7 +30,6 @@ from kortravelmap.api.routers.cache_target_streams import (
 )
 from kortravelmap.api.routers.categories import router as categories_router
 from kortravelmap.api.routers.curated import admin_router as admin_curated_router
-from kortravelmap.api.routers.curated import router as curated_router
 from kortravelmap.api.routers.curation_snapshots import (
     cutover_router as service_curation_cutover_router,
 )
@@ -113,6 +112,5 @@ __all__ = [
     "service_curation_snapshots_router",
     "service_feature_alias_maps_router",
     "weather_router",
-    "curated_router",
     "curations_router",
 ]

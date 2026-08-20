@@ -29,11 +29,11 @@ from kortravelmap.api.domain_command_service import (
 from kortravelmap.api.http_revision import parse_revision_header, revision_etag
 from kortravelmap.api.response import Meta, make_meta
 
-__all__ = ["admin_router", "router"]
+__all__ = ["admin_router"]
 
-router = APIRouter(tags=["curated"])
-
-
+# T-VN-40C: 공개 `/v1/curated-*` 라우트가 모두 사라져 public router는 빈 껍데기가 됐다.
+# 빈 router를 mount하면 라우팅에는 영향이 없지만 "이 모듈에 공개 표면이 있다"는
+# 잘못된 신호를 남기므로 함께 지운다. 공개 큐레이션 표면은 `curations` 라우터다.
 admin_router = APIRouter(
     prefix="/admin",
     tags=["admin-curated"],

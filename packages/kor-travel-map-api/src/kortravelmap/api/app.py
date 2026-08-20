@@ -81,7 +81,6 @@ from kortravelmap.api.routers import (
     admin_restore_router,
     admin_weather_router,
     categories_router,
-    curated_router,
     curations_router,
     dedup_review_router,
     enrichment_review_router,
@@ -995,11 +994,6 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         )
         application.include_router(
             weather_router,
-            prefix="/v1",
-            dependencies=public_dependencies,
-        )
-        application.include_router(
-            curated_router,
             prefix="/v1",
             dependencies=public_dependencies,
         )
