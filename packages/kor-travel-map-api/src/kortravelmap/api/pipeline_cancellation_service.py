@@ -677,8 +677,17 @@ async def _poll_terminal_status(
         )
 
 
-def _terminal_mapping(status: str) -> tuple[str, str, str, str | None]:
-    mappings = {
+def _terminal_mapping(
+    status: str,
+) -> tuple[str, str, CacheTargetRefreshStatus, str | None]:
+    """Dagster terminal status를 (run_result, stored_terminal, target_status, error)로 푼다.
+
+    세 번째 값은 그대로 relay status event로 나간다. 처음에는 `str`이라 호출부에서
+    `done`을 `failed`로 접어도 타입이 잡지 못했다(적대 리뷰 P1). `CacheTargetRefreshStatus`로
+    좁혀 "세 값 전부가 유효한 relay status"를 타입이 강제하게 한다.
+    """
+
+    mappings: dict[str, tuple[str, str, CacheTargetRefreshStatus, str | None]] = {
         "CANCELED": ("cancelled", "CANCELED", "cancelled", None),
         "SUCCESS": ("already_terminal", "SUCCESS", "done", None),
         "FAILURE": (
