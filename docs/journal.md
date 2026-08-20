@@ -2,6 +2,56 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-20 — T-VN-40C prod 배포: 0225 적용과 M01이 만든 기동 게이트
+
+`0225`를 prod에 올렸다. 최종 상태는 head `0225_tvn40c_physical_removal`, legacy
+relation·컬럼·`pg_proc.prosrc` 본문 전부 0, 보존 대상은 mapping 4,424 / item 4,424 /
+collection 59 / theme 52 / source 19 / rule 53, curation command procedure는
+`ktm_curation_command_owner` 소유 SECDEF 13 + helper 1, rekey FK는 전부 `ON UPDATE` 없음,
+API 표면은 제거 라우트 404 · `/v1/curations` 401(public key 필요) · health/version 200,
+4개 컨테이너 healthy.
+
+**되돌릴 수 없는 migration이라 실데이터 리허설을 먼저 했다.** prod 백업(615MB, sha256
+검증, TOC 1,587항)을 같은 서버의 별도 database로 복원해 `0225`를 실제로 돌렸다. 첫
+복원은 `--no-owner`를 써서 procedure 소유자가 전부 `kor_travel_map`이 됐는데, prod는
+`ktm_curation_command_owner` 20 / `ktm_feature_schema_owner` 4 / `ktm_curation_audit_writer` 1로
+나뉜다. D4가 `SET ROLE ktm_curation_command_owner` 아래에서 procedure를 `CREATE OR REPLACE`
+하므로 그 상태로는 D4를 검증할 수 없어 소유권을 보존해 다시 복원했다. 리허설 결과는
+rc=0 · **4초** · 사후 zero 3항 · 보존 3항 · D4/D8 통과였고, 이 4초가 prod 다운타임 예측이
+됐다. 대상 표가 전부 소형(2.7MB·40KB·5MB·3.4MB)이라 D8의 FK 재검증 스캔도 짧다.
+
+**배포는 두 번 막혔고 둘 다 게이트가 제 몫을 했다.**
+
+첫 번째는 내가 쓴 배포 스크립트의 가드였다. 스냅샷이 `0225`를 담았는지 보려고
+`grep 'down_revision = "0224…"'`를 썼는데 실제 줄은
+`down_revision: str | Sequence[str] | None = "0224…"`라 어노테이션 때문에 매칭되지 않았다.
+`.env`나 컨테이너를 건드리기 전 단계라 부작용은 없었다. 패턴을 고치면서 revision id
+검증도 함께 넣었다.
+
+두 번째가 본질적이다. 같은 날 머지된 **T-VN-M01(#1016)이 production에서
+`KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256`을 flag가 `false`여도 필수**로
+만들었는데, prod `.env`에도 docker-manager compose에도 그 키가 없었다. API가 재시작
+루프에 빠졌다. 중요한 건 **DB head가 `0224` 그대로였다는 것** — M01의 launcher preflight가
+설계대로 alembic보다 앞서 죽어 부분 상태가 생기지 않았다. 2026-08-03 사고 이후 "schema
+변경이 컨테이너 기동의 부수효과로 일어나는 것"을 막으려고 넣은 구조가 정확히 그 자리에서
+작동했다.
+
+복구는 전진으로 했다. 이전 API 이미지는 `latest-main` 태그가 덮여 롤백해도 재빌드가
+필요했고, 그 시간이면 배선이 끝난다. raw 44자를 만들어 UI(Next server)에만 주고 API에는
+sha256 digest만 주도록 `.env`와 compose를 배선했다(API/Dagster entrypoint는 raw 유입을
+거부한다). 기존 secret과 digest가 겹치지 않는지도 확인했다. 재기동 뒤 API는 5회 폴링만에
+healthy가 됐고 alembic이 `0224 → 0225`를 올렸다.
+
+**이 배포에서 내가 잘못한 것 하나.** compose 배선을 확인하려고
+`docker compose config | grep …ADMIN_PROXY_SECRET`을 돌렸는데, `config`는 값을 전개하므로
+평문 secret 3개가 로그에 찍혔다. 키 이름만 보려면 원문 파일을 읽었어야 했다. 이후
+확인은 값이 전개되지 않는 방식(원문 grep + `${VAR:-}` 우변 마스킹)으로만 했고, 노출된
+값의 회전은 운영자 판단으로 넘겼다.
+
+**남은 것**: docker-manager의 compose·`.env` 변경은 호스트에서 직접 했다(그 저장소는
+git 관리 대상이 아니다). `.env.bak-m01cred-*`·`docker-compose.yml.bak-m01cred-*` 백업을
+남겼다.
+
 ## 2026-08-20 — T-VN-40C: legacy curation overlay 물리 제거
 
 40A의 write fence와 40B의 consumer 선전환 뒤 남아 있던 legacy overlay를 DB·코드·계약·
