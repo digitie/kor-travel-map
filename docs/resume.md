@@ -19,16 +19,30 @@
 end-to-end 테스트를 쓰고서야 알았다. (3) 초안의 `safe_high_watermark_relay_order`를 뺀 것이
 오판이었다 — 기존 테스트가 잡았고 되돌렸다.
 
-게이트: ruff / mypy `--strict` green, 단위 38 + PostGIS 통합 **49 passed**,
-격리 DB 리허설 12절 PASS(`scripts/verify-tvn41s-snapshot-material.sh`),
+**n150 1M soak 실측**(`docs/reports/t-vn-41s-1m-soak-2026-08-21.md`):
+
+| 축 | 실측 |
+|---|---|
+| 1,000,000 admitted | 547.9초 (1,824 item/s) |
+| Python peak | **2.02 MiB** — `O(log N)` 주장이 상한에서 성립 |
+| item 표 / 인덱스 | 157.6 MB (157.6 B/item) / 90.5 MB |
+| 상한 + 1 | typed `413`, partial row **0** |
+| compaction drain | 1,000,000행 / 32.6초 / 100 round |
+| VACUUM 회수 | 157.6 MB → 57 KB (증거 material·receipt는 보존) |
+
+게이트: ruff / mypy `--strict` ×3 / import-linter green, unit 2,387 · api 1,199 ·
+dagster 548 passed, PostGIS 통합 49 + EXPLAIN, 격리 DB 리허설 12절 PASS,
 ACL 변이 배터리 6종 전부 red.
 
 ### 다음 한 작업
 
-`T-VN-41S`의 남은 두 축 — **EXPLAIN 실측**과 **n150 PostGIS 1M soak**(1M admitted /
-1M+ rejection zero partial row / concurrent mutation safe lower cursor / compaction 전후
-relation bytes·dead tuple·vacuum 추세)을 같은 evidence receipt에 기록한다. 그 뒤에야
-#922와 T-VN-41S를 완료로 표시한다.
+**결정 하나가 남았다 — build 예산 300초 vs item 상한 1,000,000.** 상한과 같은 크기의
+snapshot은 배포 기본 예산에 들지 않는다(실측 547.9초). 지금 계약에서 그런 snapshot은
+admission을 통과하고 build deadline에서 실패한다. 예산을 올리면 그 시간만큼 stream share
+barrier가 유지되고 그 값은 hung writer 최대 정지 시간이기도 하므로, 코드가 아니라 정책
+결정이다. 선택지 셋과 비용은 soak 보고서 §"열린 결정"과 `docs/tasks.md`에 있다.
+
+그 결정 뒤에 #922와 T-VN-41S를 완료로 표시한다.
 
 ## 2026-08-20 — T-VN-41F1D-E 저장소측 완료 (v4 퇴역 → v5/v7)
 
