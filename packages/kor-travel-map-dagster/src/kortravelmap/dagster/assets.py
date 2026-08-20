@@ -1525,8 +1525,6 @@ async def feature_notice_krforest_landslide_forecast_issues(
     return await run_tracked_feature_asset(
         context, run_feature_notice_krforest_landslide_forecast_issues
     )
-
-
 async def run_feature_place_standard_museums(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
