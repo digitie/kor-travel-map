@@ -206,10 +206,10 @@ def test_unlisted_wiring_gap_fails(monkeypatch: pytest.MonkeyPatch) -> None:
     # 즉시 실패한다.
     monkeypatch.setitem(
         ROUTE_POLICIES,
-        "/v1/curated-themes",
+        "/v1/curations",
         RoutePolicy.OPERATOR,
     )
-    with pytest.raises(RoutePolicyError, match="/v1/curated-themes"):
+    with pytest.raises(RoutePolicyError, match="/v1/curations"):
         assert_route_policy_wiring(_representative_app())
 
 
@@ -217,7 +217,7 @@ def test_unlisted_wiring_gap_fails(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.parametrize(
     ("path", "wrong_policy"),
     [
-        ("/v1/curated-themes", RoutePolicy.OPERATOR),
+        ("/v1/curations", RoutePolicy.OPERATOR),
         ("/v1/ops/metrics", RoutePolicy.PUBLIC_KEYED),
     ],
 )
@@ -397,11 +397,11 @@ def test_mois_debug_route_is_operator_gated_and_disappears_with_debug_flag() -> 
 def test_t_vn_03_public_and_ops_routes_have_exact_enforcement() -> None:
     matrix = build_route_policy_matrix(_representative_app())
     rows = {row.path: row for row in matrix}
+    # T-VN-40C — 공개 `/v1/curated-*`는 물리 삭제됐다. 공개 read의 public-keyed
+    # 경계는 남아 있는 curations 표면으로 확인한다.
     public_curated = {
-        "/v1/curated-features",
-        "/v1/curated-features/{curated_feature_id}",
-        "/v1/curated-sources",
-        "/v1/curated-themes",
+        "/v1/curations",
+        "/v1/curations/collections",
     }
     ops_observability = {
         "/v1/ops/api-call-logs",

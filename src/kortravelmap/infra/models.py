@@ -117,7 +117,6 @@ __all__ = [
     "CuratedThemeRow",
     "CuratedSourceRow",
     "CuratedSourceRuleRow",
-    "CuratedFeatureRow",
     "CurationCollectionRow",
     "CurationItemRow",
     "CurationCutoverIdentityMappingRow",
@@ -1649,149 +1648,6 @@ class CuratedSourceRuleRow(Base):
     )
 
 
-class CuratedFeatureRow(Base):
-    """``feature.curated_features`` row mapping — feature overlay 본체."""
-
-    __tablename__ = "curated_features"
-    __table_args__ = (
-        CheckConstraint(
-            "curation_status IN ('candidate','curated','rejected','archived')",
-            name=conv("ck_curated_features_status"),
-        ),
-        CheckConstraint(
-            "selection_origin IN ('source_rule','admin','external_api')",
-            name=conv("ck_curated_features_selection_origin"),
-        ),
-        CheckConstraint(
-            "curation_relation IN ("
-            "'primary_stop','food_stop','cafe_stop','bookstore_stop',"
-            "'nearby_option','accessibility_support','pet_support',"
-            "'family_support','theme_area_anchor'"
-            ")",
-            name=conv("ck_curated_features_curation_relation"),
-        ),
-        CheckConstraint(
-            "reuse_policy IN ('allowed','blocked','manual_review')",
-            name=conv("ck_curated_features_reuse_policy"),
-        ),
-        CheckConstraint(
-            "content_version >= 1",
-            name=conv("ck_curated_features_content_version"),
-        ),
-        CheckConstraint(
-            "jsonb_typeof(metadata) = 'object'",
-            name=conv("ck_curated_features_metadata"),
-        ),
-        Index(
-            "uq_curated_features_theme_feature_active",
-            "theme_id",
-            "feature_id",
-            unique=True,
-            postgresql_where=text("archived_at IS NULL"),
-        ),
-        Index(
-            "idx_curated_features_status_keyset",
-            "curation_status",
-            text("updated_at DESC"),
-            text("curated_feature_id DESC"),
-        ),
-        Index(
-            "idx_curated_features_theme_status_score",
-            "theme_id",
-            "curation_status",
-            text("rank_score DESC"),
-            text("curated_feature_id DESC"),
-        ),
-        Index("idx_curated_features_source_status", "source_id", "curation_status"),
-        Index("idx_curated_features_feature", "feature_id"),
-        {"schema": "feature"},
-    )
-
-    curated_feature_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False),
-        primary_key=True,
-        server_default=text("x_extension.gen_random_uuid()"),
-    )
-    theme_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False),
-        ForeignKey("feature.curated_themes.theme_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    feature_id: Mapped[str] = mapped_column(
-        Text,
-        ForeignKey("feature.features.feature_id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    source_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False),
-        ForeignKey("feature.curated_sources.source_id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    source_record_key: Mapped[str | None] = mapped_column(
-        Text,
-        ForeignKey(
-            "provider_sync.source_records.source_record_key",
-            ondelete="SET NULL",
-        ),
-    )
-    curation_status: Mapped[str] = mapped_column(
-        Text,
-        nullable=False,
-        server_default=text("'candidate'"),
-    )
-    selection_origin: Mapped[str] = mapped_column(
-        Text,
-        nullable=False,
-        server_default=text("'source_rule'"),
-    )
-    selected_by: Mapped[str | None] = mapped_column(Text)
-    selected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    rejected_by: Mapped[str | None] = mapped_column(Text)
-    rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    rejection_reason: Mapped[str | None] = mapped_column(Text)
-    rank_score: Mapped[Any] = mapped_column(
-        Numeric(10, 4),
-        nullable=False,
-        server_default=text("0"),
-    )
-    display_title: Mapped[str | None] = mapped_column(Text)
-    display_summary: Mapped[str | None] = mapped_column(Text)
-    curation_relation: Mapped[str] = mapped_column(
-        Text,
-        nullable=False,
-        server_default=text("'nearby_option'"),
-    )
-    reuse_policy: Mapped[str] = mapped_column(
-        Text,
-        nullable=False,
-        server_default=text("'manual_review'"),
-    )
-    content_version: Mapped[int] = mapped_column(
-        Integer,
-        nullable=False,
-        server_default=text("1"),
-    )
-    metadata_: Mapped[dict[str, Any]] = mapped_column(
-        "metadata",
-        JSONB,
-        nullable=False,
-        server_default=text("'{}'::jsonb"),
-    )
-    operator_updated_by: Mapped[str | None] = mapped_column(Text)
-    operator_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=text("now()"),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=text("now()"),
-    )
-    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-
-
 class CurationCollectionRow(Base):
     """테마·제목·회차·공식 출처를 공유하는 큐레이션 묶음."""
 
@@ -1917,12 +1773,6 @@ class CurationItemRow(Base):
             ),
         ),
         Index(
-            "uq_curation_items_legacy_projection_id",
-            "legacy_projection_id",
-            unique=True,
-            postgresql_where=text("legacy_projection_id IS NOT NULL"),
-        ),
-        Index(
             "idx_curation_items_collection_status_order",
             "collection_id",
             "source_present",
@@ -1998,15 +1848,6 @@ class CurationItemRow(Base):
     source_record_key: Mapped[str | None] = mapped_column(
         Text,
         ForeignKey("provider_sync.source_records.source_record_key", ondelete="SET NULL"),
-    )
-    legacy_projection_id: Mapped[str | None] = mapped_column(
-        UUID(as_uuid=False),
-        ForeignKey(
-            "feature.curated_features.curated_feature_id",
-            ondelete="NO ACTION",
-            deferrable=True,
-            initially="DEFERRED",
-        ),
     )
     current_import_row_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
     accepted_link_decision_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
@@ -2631,7 +2472,6 @@ class CurationImportRowRow(Base):
             # 재작성한다(`merge_repo._DETACH_CONFLICTING_LEGACY_CURATION_ITEMS_SQL`).
             # NO ACTION(기본값)이면 그 UPDATE 자체가 FK 위반을 낸다 — T-VN-H41,
             # `0074_curation_item_rekey_cascade`.
-            onupdate="CASCADE",
         ),
         UniqueConstraint(
             "import_batch_id",
@@ -2717,7 +2557,6 @@ class CurationLinkDecisionRow(Base):
             name=conv("fk_curation_link_decisions_item"),
             ondelete="RESTRICT",
             # T-VN-H41 — `fk_curation_import_rows_item`과 같은 이유.
-            onupdate="CASCADE",
         ),
         ForeignKeyConstraint(
             ["import_row_id", "curation_item_id"],
@@ -2729,7 +2568,6 @@ class CurationLinkDecisionRow(Base):
             ondelete="RESTRICT",
             # item이 재작성되면 import row 쪽도 위 FK로 먼저 캐스케이드된다. 이
             # 합성 FK도 같이 캐스케이드하지 않으면 그 직후 자기모순 상태가 된다.
-            onupdate="CASCADE",
         ),
         ForeignKeyConstraint(
             ["supersedes_decision_id", "curation_item_id"],
@@ -2741,7 +2579,6 @@ class CurationLinkDecisionRow(Base):
             ondelete="RESTRICT",
             # supersedes 사슬은 전부 같은 item에 묶여 있다는 불변식을 이 합성
             # 키가 강제한다. item이 재작성되면 사슬 전체가 같이 옮겨가야 한다.
-            onupdate="CASCADE",
         ),
         UniqueConstraint(
             "decision_id",
@@ -2795,53 +2632,6 @@ class CurationLinkDecisionRow(Base):
         server_default=text("now()"),
     )
     supersedes_decision_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
-
-
-class CuratedFeatureDetailSnapshotRow(Base):
-    """``feature.curated_feature_detail_snapshots`` row mapping — detail cache."""
-
-    __tablename__ = "curated_feature_detail_snapshots"
-    __table_args__ = (
-        CheckConstraint(
-            "content_version >= 1",
-            name=conv("ck_curated_feature_detail_snapshots_version"),
-        ),
-        CheckConstraint(
-            "jsonb_typeof(snapshot) = 'object'",
-            name=conv("ck_curated_feature_detail_snapshots_snapshot"),
-        ),
-        Index(
-            "idx_curated_feature_detail_snapshots_updated",
-            text("updated_at DESC"),
-            text("curated_feature_id DESC"),
-        ),
-        Index("idx_curated_feature_detail_snapshots_etag", "etag"),
-        {"schema": "feature"},
-    )
-
-    curated_feature_id: Mapped[str] = mapped_column(
-        UUID(as_uuid=False),
-        ForeignKey("feature.curated_features.curated_feature_id", ondelete="CASCADE"),
-        primary_key=True,
-    )
-    content_version: Mapped[int] = mapped_column(Integer, nullable=False)
-    etag: Mapped[str] = mapped_column(Text, nullable=False)
-    snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    materialized_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=text("now()"),
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        server_default=text("now()"),
-    )
-
-
-# =============================================================================
-# provider_sync.provider_sync_state  (docs/architecture/data-model.md §4)
-# =============================================================================
 
 
 class ProviderSyncStateRow(Base):

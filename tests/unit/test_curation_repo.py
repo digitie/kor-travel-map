@@ -727,11 +727,6 @@ async def _update_item_with_current(
     actor: str | None = None,
 ) -> repo.CurationItem | None:
     monkeypatch.setattr(repo, "_lock_collection", AsyncMock(return_value=True))
-    monkeypatch.setattr(
-        repo,
-        "_lock_legacy_projections_for_item",
-        AsyncMock(return_value=False),
-    )
     monkeypatch.setattr(repo, "get_curation_item", AsyncMock(return_value=_item()))
     return await repo.update_curation_item(
         _FakeSession(*results),
@@ -824,11 +819,6 @@ async def test_update_item_noop_update_miss_and_full_success(
 ) -> None:
     current = _item()
     monkeypatch.setattr(repo, "_lock_collection", AsyncMock(return_value=True))
-    monkeypatch.setattr(
-        repo,
-        "_lock_legacy_projections_for_item",
-        AsyncMock(return_value=False),
-    )
     get_item = AsyncMock(return_value=current)
     monkeypatch.setattr(repo, "get_curation_item", get_item)
 
@@ -913,11 +903,6 @@ async def test_update_item_allows_source_absent_but_rejects_archived_current(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(repo, "_lock_collection", AsyncMock(return_value=True))
-    monkeypatch.setattr(
-        repo,
-        "_lock_legacy_projections_for_item",
-        AsyncMock(return_value=False),
-    )
     source_absent = _item(source_present=False)
     archived = _item(status="archived", archived_at=_NOW)
     get_item = AsyncMock(side_effect=[source_absent, archived, archived])

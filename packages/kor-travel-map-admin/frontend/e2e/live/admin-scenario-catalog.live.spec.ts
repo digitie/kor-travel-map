@@ -17,12 +17,6 @@ function smokeRoute(route: string): string | null {
       ? route.replace("{feature_id}", encodeURIComponent(featureId))
       : null;
   }
-  if (route.includes("{curated_feature_id}")) {
-    const curatedId = F.CURATED_IDS[0];
-    return curatedId
-      ? route.replace("{curated_feature_id}", encodeURIComponent(curatedId))
-      : null;
-  }
   if (route.includes("{job_id}")) {
     const jobId = F.IMPORT_JOB_IDS[0];
     return jobId ? route.replace("{job_id}", encodeURIComponent(jobId)) : null;

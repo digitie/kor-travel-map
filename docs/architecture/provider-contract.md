@@ -154,9 +154,10 @@ system
 
 ### 3.1 curated source 후보
 
-테마형 source는 [`docs/curated-features.md`](../curated-features.md)가 정본이다. 현재
-구현된 `mcst_<slug>` 13종과 T-223b fileData/특화거리 source는
-`feature.curated_source_rules`의 기본 후보로 바로 쓸 수 있다.
+테마형 source는 [`docs/curated-features.md`](../curated-features.md)가 정본이다(그
+문서의 catalog 절 — `curated_themes`/`curated_sources`/`curated_source_rules`는 40C
+이후에도 provider 후보화의 입력으로 남는다). 현재 구현된 `mcst_<slug>` 13종과 T-223b
+fileData/특화거리 source는 `feature.curated_source_rules`의 기본 후보로 바로 쓸 수 있다.
 
 - `python-mcst-api`: 중고서점은 `mcst_used_bookstores_csv`로 구현됐다(T-223b,
   provider PR#11). 독립서점·카페가 있는 서점·아동서점·세계음식점 계열과 같은

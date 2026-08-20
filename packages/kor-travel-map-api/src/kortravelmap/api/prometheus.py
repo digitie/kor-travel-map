@@ -306,7 +306,7 @@ def _route_surface(raw_path: str) -> str:
         return "ops"
     if root == "debug":
         return "debug"
-    if root in {"categories", "curated-features", "features", "providers", "public"}:
+    if root in {"categories", "features", "providers", "public"}:
         return "public"
     return "other"
 

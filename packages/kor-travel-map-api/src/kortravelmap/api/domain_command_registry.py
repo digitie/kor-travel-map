@@ -202,26 +202,6 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
         replay_headers=("ETag",),
         fingerprint_headers=("If-Match",),
     ),
-    ("POST", "/v1/admin/features/curated"): _domain(
-        "admin.curated-feature.create",
-        _MUTATION_RESULT,
-    ),
-    (
-        "PATCH",
-        "/v1/admin/features/curated/{curated_feature_id}",
-    ): _domain("admin.curated-feature.patch", _MUTATION_RESULT),
-    (
-        "DELETE",
-        "/v1/admin/features/curated/{curated_feature_id}",
-    ): _domain("admin.curated-feature.delete", _MUTATION_RESULT),
-    (
-        "POST",
-        "/v1/admin/features/curated/{curated_feature_id}/select",
-    ): _domain("admin.curated-feature.select", _MUTATION_RESULT),
-    (
-        "POST",
-        "/v1/admin/features/curated/{curated_feature_id}/unselect",
-    ): _domain("admin.curated-feature.unselect", _MUTATION_RESULT),
     ("POST", "/v1/admin/curated-themes"): _domain(
         "admin.curated-theme.create",
         _MUTATION_RESULT,

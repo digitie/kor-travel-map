@@ -233,13 +233,15 @@ CREATE INDEX idx_feature_versions_request
 - 사용자 요청 삭제는 version 1 `change_kind='delete'`와 `feature.features` soft delete
   marker를 함께 남긴다.
 
-### 1.2 `feature.curated_*` (테마형 overlay, T-223c-1/T-223c-2 구현)
+### 1.2 `feature.curated_*` (테마 catalog)
 
-테마형 큐레이션은 `feature.features`를 복제하지 않고 overlay로 관리한다. 정본 계약은
+테마형 큐레이션의 **입력 catalog**다. 정본 계약은
 [`docs/curated-features.md`](../curated-features.md)다. DB schema는 `feature`에 둔다.
-T-223c-1에서 Alembic `0025_curated_features`로 4개 테이블과 1차 seed metadata/rule을
-추가했고, T-223c-2에서 Alembic `0026_curated_copy_snapshots`로 PinVi copy snapshot
-cache를 추가했다.
+T-VN-40C(alembic `0225`)가 overlay 본체 `feature.curated_features`와 그 부속
+표(`curated_feature_detail_snapshots`, PinVi copy snapshot cache)를 물리 삭제했고,
+아래 3개 catalog 표만 남는다. 삭제된 overlay의 컬럼·인덱스·enum 원문은
+[`docs/archive/curated-features-legacy-overlay.md`](../archive/curated-features-legacy-overlay.md)에
+동결돼 있다.
 
 테이블:
 
@@ -250,40 +252,21 @@ cache를 추가했다.
   `last_source_modified_at`, `last_checked_at`, `next_expected_at`, `row_count`,
   `freshness_note`, `provider_status`, source metadata.
 - `feature.curated_source_rules` — provider/dataset/category/place_kind 조건을
-  `candidate`/`curated`/`ignore` 기본 action으로 매핑한다.
-- `feature.curated_features` — `theme_id + feature_id` overlay 본체. 상태와
-  PinVi 복사 정책을 저장한다.
-- `feature.curated_pinvi_copy_snapshots` — Dagster가 materialize한 PinVi 복사용
-  snapshot cache. `curated_feature_id` PK, `copy_version`, `etag`, `snapshot`,
-  `materialized_at`, `updated_at`을 가진다.
+  `candidate`/`ignore` 기본 action으로 매핑한다.
 
-핵심 상태:
+세 표의 write는 SECURITY DEFINER typed command
+(`create/patch/archive_curated_{theme,source,source_rule}_command`)가 소유하고
+EXECUTE는 `ktm_curation_admin_executor`가 갖는다. runtime role은 직접 쓰지 않는다.
 
-- `curation_status`: `candidate` / `curated` / `rejected` / `archived`
-- `selection_origin`: `source_rule` / `admin` / `external_api`
-- `pinvi_relation`: `primary_stop` / `food_stop` / `cafe_stop` /
-  `bookstore_stop` / `nearby_option` / `accessibility_support` / `pet_support` /
-  `family_support` / `theme_area_anchor`
-
-인덱스 기준:
-
-- `UNIQUE (theme_id, feature_id) WHERE archived_at IS NULL`
-- `INDEX (curation_status, updated_at DESC, curated_feature_id DESC)`
-- `INDEX (theme_id, curation_status, rank_score DESC)`
-- `INDEX (source_id, curation_status)`
-- `INDEX (feature_id)`
-- snapshot cache: `PRIMARY KEY (curated_feature_id)`,
-  `INDEX (updated_at DESC, curated_feature_id DESC)`, `INDEX (etag)`
-
-`rejected`/`archived` row는 provider 재적재나 source rule 재적용으로 되살리지 않는다.
-PinVi는 REST snapshot을 읽어 `app.curated_trip_plans` /
+`rejected`/`archived` membership은 provider 재적재나 source rule 재적용으로 되살리지
+않는다. PinVi는 REST detail-snapshot을 읽어 `app.curated_trip_plans` /
 `app.curated_plan_pois`로 복사하며, kor-travel-map DB에 직접 접근하지 않는다.
 
 ### 1.3 `feature.curation_*` (ADR-063, alembic 0045·0065·0066·0072)
 
 공식 목록·회차·캠페인처럼 하나의 Feature가 여러 큐레이션 사실을 동시에 가질 수 있는
-데이터는 collection과 membership을 분리한다. 기존 `feature.curated_features`의 source-rule
-자동 후보화 표면은 유지하지만, 신규 공식·수동 큐레이션의 정본은 아래 두 테이블이다.
+데이터는 collection과 membership을 분리한다. 공식·수동 큐레이션의 정본은 아래 두
+테이블이며, source-rule 자동 후보화의 입력은 §1.2 catalog다.
 0065 이후 legacy projection용 collection key는
 `legacy:<theme UUID>:<source UUID>:<md5(title)>`이며 mutable `theme_slug`를 identity로 쓰지 않는다.
 같은 semantic group의 복수 collection은 상태를 강제 병합하지 않고
@@ -326,9 +309,6 @@ CREATE TABLE feature.curation_items (
   feature_id TEXT REFERENCES feature.features(feature_id) ON DELETE SET NULL,
   source_record_key TEXT
     REFERENCES provider_sync.source_records(source_record_key) ON DELETE SET NULL,
-  legacy_projection_id UUID
-    REFERENCES feature.curated_features(curated_feature_id)
-    DEFERRABLE INITIALLY DEFERRED,
   current_import_row_id UUID,
   accepted_link_decision_id UUID,
   external_item_id TEXT NOT NULL,
@@ -378,9 +358,6 @@ ALTER TABLE feature.curation_items
 CREATE UNIQUE INDEX uq_curation_items_active_source_feature
   ON feature.curation_items (collection_id, external_item_id, feature_id)
   WHERE source_present AND archived_at IS NULL AND feature_id IS NOT NULL;
-CREATE UNIQUE INDEX uq_curation_items_legacy_projection_id
-  ON feature.curation_items (legacy_projection_id)
-  WHERE legacy_projection_id IS NOT NULL;
 CREATE INDEX idx_curation_collections_theme_status_edition
   ON feature.curation_collections (theme_id, status, edition_key, collection_id);
 CREATE INDEX idx_curation_collections_source_status
@@ -490,11 +467,11 @@ component exact identity는 archived tombstone까지 포함해 DB unique로 한 
 것은 source에 현재 존재할 때 partial unique가 막는다. source에서 빠진 이력 행은 동일
 Feature를 참조하는 새 current component를 막지 않는다. 연결 component와 미연결 component의 공존은 복합 장소를
 무손실로 나타내므로 허용한다.
-`legacy_projection_id`는 전환기 `curated_features`와 durable item 관계의 정본이다.
-`curation_item_id`가 우연히 legacy UUID와 같은지 추론하지 않으며, Feature merge로 canonical-only
-item과 projection UUID를 분리해도 관계를 잃지 않는다.
-0064의 mutable slug가 재사용된 collection에서 migration은 `legacy_projection_id`가 명시하는
-projection owner만 자동 복구한다. canonical-only item은 원 projection durable link가 없고 external
+전환기에는 `legacy_projection_id`가 `curated_features`와 durable item 관계의 정본이었다.
+T-VN-40C(`0225`)가 legacy 표와 함께 그 컬럼·인덱스를 지웠고, 남은 legacy↔canonical 대응은
+불변 기록 `ops.curation_cutover_identity_mappings`가 갖는다.
+0064의 mutable slug가 재사용된 collection에서 migration은 그 durable link가 명시하는
+projection owner만 자동 복구했다. canonical-only item은 원 projection durable link가 없고 external
 identity도 theme 간 공유될 수 있으므로 exact pair처럼 보여도 owner를 추정하지 않는다. 모든
 legacy-marker collection에서 원 payload와 identity를 유지한 `draft/admin_only` quarantine
 collection으로 옮겨 명시적 재분류 대상으로 보존한다. 이전 projection 삭제로 mismatch row가 남지
@@ -544,9 +521,9 @@ CSV commit은 파일이 언급한 collection을 한 transaction에서 authoritat
 0066 전 다중 membership의 `legacy:<UUID>` component는 source 누락 상태까지 포함해 첫 import에서 동일 source item·
 동일 non-null Feature target의 incoming component로 원자적으로 identity를 승계한다.
 이 경로도 UUID와 operator 필드·감사 이력을 보존하며 dry-run은 insert/removal이 아니라
-update로 예고한다. `legacy_projection_id`를 가진 전환기 projection membership은 DB
-BEFORE INSERT trigger가 신규 projection에만 projection UUID 기반 component를 부여하므로
-authoritative import의 명시적 component 승계를 되감지 않는다. 구 flat writer가 같은 source
+update로 예고한다. 전환기 projection membership은 DB BEFORE INSERT trigger가 신규
+projection에만 projection UUID 기반 component를 부여했으므로 authoritative import의 명시적
+component 승계를 되감지 않았다. 구 flat writer가 같은 source
 record를 여러 Feature에 투영해도 component identity를 공유하지 않는다.
 보관된 legacy tombstone은 component key만 승계하고 provider/source/operator/archive 필드는
 그대로 둔다. 따라서 preview와 commit 모두 신규 insert가 아니라 identity update로 보고하며
@@ -575,11 +552,15 @@ source에서 빠져 기본 projection에서 제외되는 건수다. 동일 파�
 그 직후 참조 active Feature를 정렬 잠근 다음 theme/source/collection을 만들거나 잠그고 item을
 쓴다. 여러 대상 collection row도 UUID 정렬 순서로 `FOR UPDATE`하며, 수동 item write는 parent
 collection을 먼저 잠가 import와 충돌하지 않게 한다. Feature merge는 master/loser Feature를
-정렬 잠근 뒤 legacy→collection→item으로 진행한다. legacy trigger의 cross-title identity 조회는
-target collection 뒤 source collection parent를 역순 잠그지 않고 item만 잠근다. 기존
-`curated_features` writer는 0045 trigger가 collection item으로 동기화해 전환 중 두 표면이
-갈라지지 않게 한다. 0065 이후 legacy writer의 UPDATE/DELETE도 물리 DELETE/INSERT를 하지
-않는다. source presence와 제공자 파생 필드는 source revision만 전진시키고 operator
+정렬 잠근 뒤 collection→item으로 진행한다.
+
+> 아래 한 문단은 **전환기(0045~0223) 기록**이다. T-VN-40C(`0225`)가 legacy 표와 그 동기화
+> trigger를 지운 뒤로는 canonical item write 하나만 남는다. 당시 legacy trigger의 cross-title
+> identity 조회는 target collection 뒤 source collection parent를 역순 잠그지 않고 item만
+> 잠갔고, `curated_features` writer는 0045 trigger가 collection item으로 동기화해 두 표면이
+> 갈라지지 않게 했다. 0065 이후 legacy writer의 UPDATE/DELETE도 물리 DELETE/INSERT를 하지
+> 않았다.
+ source presence와 제공자 파생 필드는 source revision만 전진시키고 operator
 상태·relation·reuse는 별도 provenance가 전진한 경우에만 반영한다. canonical item의 운영자
 수정도 같은 transaction에서 legacy row로 역동기화한다. legacy row가 DELETE 후 새 UUID로
 재생성돼도 안정적인 `source_record_key` exact identity가 기존 source-absent membership을
@@ -595,7 +576,8 @@ detached marker가 하나라도 있으면 `P0001`로 중단한다. 이전 스키
 0066 downgrade는 같은 source item의 여러 component가 구
 `collection_id + external_item_id + feature_id` identity로 충돌하면 mutation 전에 중단한다.
 0045 downgrade도 구 `curated_features`에서
-완전히 재구성할 수 있는 legacy 행만 허용한다.
+완전히 재구성할 수 있는 legacy 행만 허용했다(그 표는 `0225`에서 사라졌으므로 지금은
+`0225` 아래로 내려가는 downgrade 자체가 성립하지 않는다 — migration은 forward-only다).
 신규 collection/item, 수동 변경, collection actor 또는 legacy `selected_by`와 일치하지 않는
 item actor처럼 표현력이 더 큰 데이터가 있으면 PostgreSQL `P0001` 예외로 transaction 전체를
 중단한다. 먼저 export 또는 명시적 정리하지 않은 데이터를 조용히 삭제하지 않는다.

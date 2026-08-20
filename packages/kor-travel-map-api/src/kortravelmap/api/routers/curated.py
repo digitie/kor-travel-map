@@ -2,97 +2,41 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
-import html
 import json
-import re
-from collections.abc import Awaitable
 from datetime import date, datetime
 from time import perf_counter
-from typing import Annotated, Any, Final, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
-import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from kortravelmap.infra import curated_repo
-from kortravelmap.settings import KorTravelMapSettings
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    SecretStr,
     field_validator,
 )
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
-from kortravelmap.api.curated_public_schema import (
-    PublicCuratedFeatureResponse,
-    PublicCuratedFeaturesData,
-    PublicCuratedFeaturesResponse,
-    PublicCuratedFeatureView,
-    public_curated_feature_view,
-)
 from kortravelmap.api.db import get_session
 from kortravelmap.api.domain_command_service import (
     current_domain_command,
     domain_command_transaction,
     idempotent_domain_command,
 )
-from kortravelmap.api.feature_ref import resolve_feature_ref_or_error
 from kortravelmap.api.http_revision import parse_revision_header, revision_etag
 from kortravelmap.api.response import Meta, make_meta
 
-__all__ = ["admin_router", "router"]
+__all__ = ["admin_router"]
 
-router = APIRouter(tags=["curated"])
-
-
-# T-VN-40A fence 대상 legacy write 경로. `/admin` prefix 아래의 두 alias만이며 뒤에
-# 하위 segment(`/{id}`, `/{id}/select` …)가 오거나 끝난다.
-_LEGACY_WRITE_PATH: Final = re.compile(r"/admin/(?:features/curated|curated-features)(?:/|$)")
-
-
-async def _fence_legacy_curated_writes(request: Request) -> None:
-    """T-VN-40A route 층 — legacy admin curated **write** route는 410 Gone.
-
-    설계(plan §40B step 4)는 "`/v1/curated-features`와 legacy admin surface는 같은
-    release에서 제거하며 redirect/no-op parameter를 두지 않는다"고 했다. 물리 삭제(40C)는
-    soak 뒤에만 가능하므로(ADR-075 결정 4) 그때까지 이 route는 **읽기 전용**이다.
-
-    static 층(`infra/legacy_write_fence.py`)과 ACL 층(`runtime_privileges`)이 같은 것을
-    막지만, route에서 먼저 410을 주면 (a) 클라이언트가 재시도하지 않고 (b) 감사 로그에
-    "왜 실패했는지"가 500이 아니라 의도된 상태로 남는다.
-
-    읽기(GET/HEAD/OPTIONS)는 통과시킨다 — soak 동안 legacy를 **읽어서** canonical과
-    대조해야 한다.
-    """
-    if request.method in {"GET", "HEAD", "OPTIONS"}:
-        return
-    # theme/source/rule catalog는 legacy가 아니다 — T-VN-40 계획서(plan:28)가 "catalog
-    # input만 유지"로 정했고 0207~0209가 T-VN-40에서 새 procedure로 그 표에 쓴다. 그 route는
-    # 살려 둔다. legacy는 `curated_features` overlay(`/features/curated*`,
-    # `/curated-features*`)뿐이다.
-    # segment 단위로 본다 — substring이면 `/features/curated-imports` 같은 미래 route까지
-    # 조용히 410이 된다(리뷰 P2). `/features/curated` 뒤는 끝이거나 `/`여야 한다.
-    if _LEGACY_WRITE_PATH.search(request.url.path) is None:
-        return
-    raise HTTPException(
-        status_code=410,
-        detail=(
-            "legacy curated write surface is fenced (T-VN-40A). "
-            "정본은 curation_collections/curation_items이며 쓰기 경로는 "
-            "POST /v1/admin/curations/imports/preview → import-plans/{id}/commit 이다."
-        ),
-    )
-
-
+# T-VN-40C: 공개 `/v1/curated-*` 라우트가 모두 사라져 public router는 빈 껍데기가 됐다.
+# 빈 router를 mount하면 라우팅에는 영향이 없지만 "이 모듈에 공개 표면이 있다"는
+# 잘못된 신호를 남기므로 함께 지운다. 공개 큐레이션 표면은 `curations` 라우터다.
 admin_router = APIRouter(
     prefix="/admin",
     tags=["admin-curated"],
-    dependencies=[Depends(_fence_legacy_curated_writes)],
 )
 
 CurationStatus = Literal["candidate", "curated", "rejected", "archived"]
@@ -126,15 +70,6 @@ ProviderStatus = Literal[
     "deprecated",
 ]
 RuleAction = Literal["candidate", "ignore"]
-
-PLACE_SEARCH_LIMIT = 5
-KAKAO_LOCAL_KEYWORD_URL = "https://dapi.kakao.com/v2/local/search/keyword.json"
-NAVER_LOCAL_SEARCH_URL = "https://openapi.naver.com/v1/search/local.json"
-GOOGLE_PLACES_TEXT_SEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
-GOOGLE_PLACES_FIELD_MASK = (
-    "places.displayName,places.formattedAddress,places.location,places.primaryTypeDisplayName"
-)
-_HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 
 def _omitted_patch_value() -> Any:
@@ -686,46 +621,6 @@ def _rule_view(row: curated_repo.CuratedSourceRule) -> CuratedSourceRuleView:
     return CuratedSourceRuleView.model_validate(payload)
 
 
-def _feature_view(row: curated_repo.CuratedFeature) -> CuratedFeatureView:
-    # T-VN-32C PR-2 — admin curated 뷰도 feature 참조를 UUID 정본으로 통일한다
-    # (admin features 목록과 같은 규약 — 프론트 왕복은 write-측 경계 해석이
-    # 수용). splat 원본 row의 legacy 값은 내부 키로만 쓴다.
-    payload = dict(row.__dict__)
-    uuid_text = payload.pop("feature_uuid", None)
-    if not uuid_text:
-        raise ValueError(
-            "CuratedFeature.feature_uuid 결측 — read projection 누락 (T-VN-32C)"
-        )
-    payload["feature_id"] = uuid_text
-    return CuratedFeatureView(**payload)
-
-
-def _public_feature_view(
-    row: curated_repo.CuratedFeature,
-) -> PublicCuratedFeatureView | None:
-    """테스트/호출부가 공유하는 공개 projection 진입점."""
-
-    return public_curated_feature_view(row)
-
-
-def _snapshot_view(
-    row: curated_repo.CuratedFeatureDetailSnapshot,
-) -> CuratedFeatureDetailSnapshotView:
-    return CuratedFeatureDetailSnapshotView(
-        curated_feature_id=row.curated_feature_id,
-        version=row.version,
-        etag=row.etag,
-        updated_at=row.updated_at,
-        # T-VN-H07D: 생성부(`curated_repo._feature_detail_snapshot`)가 고정 key로 만든 payload를
-        # typed view로 검증한다. key가 어긋나면 여기서 fail-closed된다(etag 계산 대상인 repo
-        # payload dict 자체는 바꾸지 않아 기존 etag/캐시 계약은 그대로다).
-        theme=CuratedFeatureDetailThemeView(**row.theme),
-        content=CuratedFeatureDetailContentView(**row.content),
-        source=CuratedFeatureDetailSourceView(**row.source),
-        items=[CuratedFeatureDetailItemView(**item.__dict__) for item in row.items],
-    )
-
-
 def _integrity_error(exc: IntegrityError) -> HTTPException:
     return HTTPException(
         status_code=status.HTTP_409_CONFLICT,
@@ -817,273 +712,6 @@ _CATALOG_IF_MATCH_OPENAPI_PARAMETER = {
 }
 
 
-def _secret_value(secret: SecretStr | None) -> str | None:
-    if secret is None:
-        return None
-    value = secret.get_secret_value().strip()
-    return value or None
-
-
-def _clean_place_text(value: Any) -> str | None:
-    if not isinstance(value, str):
-        return None
-    text = html.unescape(_HTML_TAG_RE.sub("", value)).strip()
-    return text or None
-
-
-def _float_or_none(value: Any) -> float | None:
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        return float(value)
-    if isinstance(value, str):
-        try:
-            return float(value.strip())
-        except ValueError:
-            return None
-    return None
-
-
-def _naver_wgs84_coord(value: Any) -> float | None:
-    coord = _float_or_none(value)
-    if coord is None:
-        return None
-    if abs(coord) > 180:
-        return coord / 10_000_000
-    return coord
-
-
-def _google_display_text(value: Any) -> str | None:
-    if isinstance(value, dict):
-        return _clean_place_text(value.get("text"))
-    return _clean_place_text(value)
-
-
-async def _search_kakao_places(
-    client: httpx.AsyncClient,
-    *,
-    api_key: str,
-    query: str,
-) -> list[PlaceSearchHitView]:
-    response = await client.get(
-        KAKAO_LOCAL_KEYWORD_URL,
-        headers={"Authorization": f"KakaoAK {api_key}"},
-        params={"query": query, "size": PLACE_SEARCH_LIMIT},
-    )
-    response.raise_for_status()
-    payload = response.json()
-    raw_items = payload.get("documents") if isinstance(payload, dict) else None
-    if not isinstance(raw_items, list):
-        return []
-
-    hits: list[PlaceSearchHitView] = []
-    for item in raw_items:
-        if not isinstance(item, dict):
-            continue
-        hits.append(
-            PlaceSearchHitView(
-                provider="kakao",
-                name=_clean_place_text(item.get("place_name")),
-                address=_clean_place_text(item.get("address_name")),
-                road_address=_clean_place_text(item.get("road_address_name")),
-                latitude=_float_or_none(item.get("y")),
-                longitude=_float_or_none(item.get("x")),
-                category=_clean_place_text(item.get("category_name")),
-            )
-        )
-    return hits
-
-
-async def _search_naver_places(
-    client: httpx.AsyncClient,
-    *,
-    client_id: str,
-    client_secret: str,
-    query: str,
-) -> list[PlaceSearchHitView]:
-    response = await client.get(
-        NAVER_LOCAL_SEARCH_URL,
-        headers={
-            "X-Naver-Client-Id": client_id,
-            "X-Naver-Client-Secret": client_secret,
-        },
-        params={"query": query, "display": PLACE_SEARCH_LIMIT},
-    )
-    response.raise_for_status()
-    payload = response.json()
-    raw_items = payload.get("items") if isinstance(payload, dict) else None
-    if not isinstance(raw_items, list):
-        return []
-
-    hits: list[PlaceSearchHitView] = []
-    for item in raw_items:
-        if not isinstance(item, dict):
-            continue
-        hits.append(
-            PlaceSearchHitView(
-                provider="naver",
-                name=_clean_place_text(item.get("title")),
-                address=_clean_place_text(item.get("address")),
-                road_address=_clean_place_text(item.get("roadAddress")),
-                latitude=_naver_wgs84_coord(item.get("mapy")),
-                longitude=_naver_wgs84_coord(item.get("mapx")),
-                category=_clean_place_text(item.get("category")),
-            )
-        )
-    return hits
-
-
-async def _search_google_places(
-    client: httpx.AsyncClient,
-    *,
-    api_key: str,
-    query: str,
-) -> list[PlaceSearchHitView]:
-    response = await client.post(
-        GOOGLE_PLACES_TEXT_SEARCH_URL,
-        headers={
-            "X-Goog-Api-Key": api_key,
-            "X-Goog-FieldMask": GOOGLE_PLACES_FIELD_MASK,
-        },
-        json={
-            "textQuery": query,
-            "languageCode": "ko",
-            "regionCode": "KR",
-            "maxResultCount": PLACE_SEARCH_LIMIT,
-        },
-    )
-    response.raise_for_status()
-    payload = response.json()
-    raw_items = payload.get("places") if isinstance(payload, dict) else None
-    if not isinstance(raw_items, list):
-        return []
-
-    hits: list[PlaceSearchHitView] = []
-    for item in raw_items:
-        if not isinstance(item, dict):
-            continue
-        location = item.get("location")
-        primary_type = item.get("primaryTypeDisplayName")
-        hits.append(
-            PlaceSearchHitView(
-                provider="google",
-                name=_google_display_text(item.get("displayName")),
-                address=_clean_place_text(item.get("formattedAddress")),
-                road_address=None,
-                latitude=_float_or_none(location.get("latitude"))
-                if isinstance(location, dict)
-                else None,
-                longitude=_float_or_none(location.get("longitude"))
-                if isinstance(location, dict)
-                else None,
-                category=_google_display_text(primary_type),
-            )
-        )
-    return hits
-
-
-async def _capture_place_search(
-    provider: str,
-    awaitable: Awaitable[list[PlaceSearchHitView]],
-) -> tuple[str, list[PlaceSearchHitView], str | None]:
-    try:
-        return provider, await awaitable, None
-    except httpx.HTTPStatusError as exc:
-        return provider, [], f"HTTP {exc.response.status_code}"
-    except httpx.HTTPError:
-        return provider, [], "호출 실패"
-    except ValueError:
-        return provider, [], "응답 파싱 실패"
-
-
-async def _direct_place_search(query: str) -> CuratedPlaceSearchData:
-    settings = KorTravelMapSettings()
-    google_key = _secret_value(settings.google_places_api_key)
-    kakao_key = _secret_value(settings.kakao_local_rest_api_key)
-    naver_client_id = _secret_value(settings.naver_search_client_id)
-    naver_client_secret = _secret_value(settings.naver_search_client_secret)
-
-    google: list[PlaceSearchHitView] = []
-    kakao: list[PlaceSearchHitView] = []
-    naver: list[PlaceSearchHitView] = []
-    errors: dict[str, str] = {}
-
-    if google_key is None:
-        errors["google"] = "KOR_TRAVEL_MAP_GOOGLE_PLACES_API_KEY env가 없습니다."
-    if kakao_key is None:
-        errors["kakao"] = "KOR_TRAVEL_MAP_KAKAO_LOCAL_REST_API_KEY env가 없습니다."
-    if naver_client_id is None or naver_client_secret is None:
-        errors["naver"] = (
-            "KOR_TRAVEL_MAP_NAVER_SEARCH_CLIENT_ID/SECRET env가 없습니다."
-        )
-
-    tasks: list[Awaitable[tuple[str, list[PlaceSearchHitView], str | None]]] = []
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        if google_key is not None:
-            tasks.append(
-                _capture_place_search(
-                    "google",
-                    _search_google_places(client, api_key=google_key, query=query),
-                )
-            )
-        if kakao_key is not None:
-            tasks.append(
-                _capture_place_search(
-                    "kakao",
-                    _search_kakao_places(client, api_key=kakao_key, query=query),
-                )
-            )
-        if naver_client_id is not None and naver_client_secret is not None:
-            tasks.append(
-                _capture_place_search(
-                    "naver",
-                    _search_naver_places(
-                        client,
-                        client_id=naver_client_id,
-                        client_secret=naver_client_secret,
-                        query=query,
-                    ),
-                )
-            )
-        results = await asyncio.gather(*tasks) if tasks else []
-
-    for provider, hits, error in results:
-        if error is not None:
-            errors[provider] = error
-        elif provider == "google":
-            google = hits
-        elif provider == "kakao":
-            kakao = hits
-        elif provider == "naver":
-            naver = hits
-
-    return CuratedPlaceSearchData(
-        query=query,
-        google=google,
-        kakao=kakao,
-        naver=naver,
-        errors=errors,
-    )
-
-
-async def _feature_or_404(
-    session: AsyncSession,
-    curated_feature_id: str,
-    *,
-    include_archived: bool = False,
-    public_only: bool = False,
-) -> curated_repo.CuratedFeature:
-    row = await curated_repo.get_curated_feature(
-        session,
-        curated_feature_id=curated_feature_id,
-        include_archived=include_archived,
-        public_only=public_only,
-    )
-    if row is None:
-        raise HTTPException(status_code=404, detail="curated feature 없음")
-    return row
-
-
 async def _list_curated_themes_response(
     session: Annotated[AsyncSession, Depends(get_session)],
     *,
@@ -1100,414 +728,6 @@ async def _list_curated_themes_response(
     )
     return CuratedThemesResponse(
         data=CuratedThemesData(items=[_theme_view(row) for row in rows]),
-        meta=make_meta(started_at=started_at),
-    )
-
-
-@router.get("/curated-themes", response_model=CuratedThemesResponse)
-async def list_curated_themes_route(
-    session: Annotated[AsyncSession, Depends(get_session)],
-    theme_group: Annotated[str | None, Query()] = None,
-    limit: Annotated[int, Query(ge=1, le=500)] = 200,
-) -> CuratedThemesResponse:
-    return await _list_curated_themes_response(
-        session,
-        visibility="public",
-        theme_group=theme_group,
-        limit=limit,
-    )
-
-
-@router.get("/curated-sources", response_model=CuratedSourcesResponse)
-async def list_curated_sources_route(
-    session: Annotated[AsyncSession, Depends(get_session)],
-    provider_dataset_id: Annotated[int | None, Query(gt=0)] = None,
-    provider_status: Annotated[ProviderStatus | None, Query()] = None,
-    limit: Annotated[int, Query(ge=1, le=500)] = 200,
-) -> CuratedSourcesResponse:
-    started_at = perf_counter()
-    rows = await curated_repo.list_curated_sources(
-        session,
-        provider_dataset_id=provider_dataset_id,
-        provider_status=provider_status,
-        limit=limit,
-    )
-    return CuratedSourcesResponse(
-        data=CuratedSourcesData(items=[_source_view(row) for row in rows]),
-        meta=make_meta(started_at=started_at),
-    )
-
-
-@router.get(
-    "/curated-features",
-    response_model=PublicCuratedFeaturesResponse,
-    response_model_exclude_none=True,
-)
-async def list_curated_features_route(
-    session: Annotated[AsyncSession, Depends(get_session)],
-    theme_slug: Annotated[str | None, Query()] = None,
-    region_code: Annotated[str | None, Query()] = None,
-    sido_code: Annotated[str | None, Query()] = None,
-    sigungu_code: Annotated[str | None, Query()] = None,
-    min_lon: Annotated[float | None, Query()] = None,
-    min_lat: Annotated[float | None, Query()] = None,
-    max_lon: Annotated[float | None, Query()] = None,
-    max_lat: Annotated[float | None, Query()] = None,
-    q: Annotated[str | None, Query()] = None,
-    feature_name: Annotated[str | None, Query()] = None,
-    display_title: Annotated[str | None, Query()] = None,
-    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
-    cursor: Annotated[str | None, Query()] = None,
-) -> PublicCuratedFeaturesResponse:
-    started_at = perf_counter()
-    try:
-        page = await curated_repo.list_curated_features(
-            session,
-            theme_slug=theme_slug,
-            curation_status="curated",
-            region_code=region_code,
-            sido_code=sido_code,
-            sigungu_code=sigungu_code,
-            min_lon=min_lon,
-            min_lat=min_lat,
-            max_lon=max_lon,
-            max_lat=max_lat,
-            q=q,
-            feature_name=feature_name,
-            display_title=display_title,
-            page_size=page_size,
-            cursor=cursor,
-            public_only=True,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return PublicCuratedFeaturesResponse(
-        data=PublicCuratedFeaturesData(
-            items=[item for row in page.items if (item := _public_feature_view(row)) is not None]
-        ),
-        meta=make_meta(started_at=started_at, next_cursor=page.next_cursor),
-    )
-
-
-@router.get(
-    "/curated-features/{curated_feature_id}",
-    response_model=PublicCuratedFeatureResponse,
-    response_model_exclude_none=True,
-)
-async def get_curated_feature_route(
-    curated_feature_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> PublicCuratedFeatureResponse:
-    started_at = perf_counter()
-    # 공개 표면 — underlying feature가 공개 projection에 없으면 404 (ADR-067).
-    row = await _feature_or_404(session, curated_feature_id, public_only=True)
-    view = _public_feature_view(row)
-    if view is None:
-        raise HTTPException(status_code=404, detail="지원하지 않는 공개 feature kind")
-    return PublicCuratedFeatureResponse(
-        data=view,
-        meta=make_meta(started_at=started_at),
-    )
-
-
-@admin_router.get("/features/curated", response_model=CuratedFeaturesResponse)
-@admin_router.get(
-    "/curated-features",
-    response_model=CuratedFeaturesResponse,
-    include_in_schema=False,
-)
-async def list_admin_curated_features_route(
-    session: Annotated[AsyncSession, Depends(get_session)],
-    theme_id: Annotated[str | None, Query()] = None,
-    theme_slug: Annotated[str | None, Query()] = None,
-    source_id: Annotated[str | None, Query()] = None,
-    provider_dataset_id: Annotated[int | None, Query(gt=0)] = None,
-    curation_status: Annotated[CurationStatus | None, Query()] = None,
-    region_code: Annotated[str | None, Query()] = None,
-    sido_code: Annotated[str | None, Query()] = None,
-    sigungu_code: Annotated[str | None, Query()] = None,
-    min_lon: Annotated[float | None, Query()] = None,
-    min_lat: Annotated[float | None, Query()] = None,
-    max_lon: Annotated[float | None, Query()] = None,
-    max_lat: Annotated[float | None, Query()] = None,
-    q: Annotated[str | None, Query()] = None,
-    feature_name: Annotated[str | None, Query()] = None,
-    display_title: Annotated[str | None, Query()] = None,
-    display_titles: Annotated[list[str] | None, Query()] = None,
-    include_archived: Annotated[bool, Query()] = False,
-    page_size: Annotated[int, Query(ge=1, le=200)] = 50,
-    cursor: Annotated[str | None, Query()] = None,
-    distinct_by_feature: Annotated[bool, Query()] = False,
-) -> CuratedFeaturesResponse:
-    started_at = perf_counter()
-    try:
-        page = await curated_repo.list_curated_features(
-            session,
-            theme_id=theme_id,
-            theme_slug=theme_slug,
-            source_id=source_id,
-            provider_dataset_id=provider_dataset_id,
-            curation_status=curation_status,
-            region_code=region_code,
-            sido_code=sido_code,
-            sigungu_code=sigungu_code,
-            min_lon=min_lon,
-            min_lat=min_lat,
-            max_lon=max_lon,
-            max_lat=max_lat,
-            q=q,
-            feature_name=feature_name,
-            display_title=display_title,
-            display_titles=display_titles,
-            include_archived=include_archived,
-            page_size=page_size,
-            cursor=cursor,
-            distinct_by_feature=distinct_by_feature,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return CuratedFeaturesResponse(
-        data=CuratedFeaturesData(items=[_feature_view(row) for row in page.items]),
-        meta=make_meta(started_at=started_at, next_cursor=page.next_cursor),
-    )
-
-
-@admin_router.get(
-    "/features/curated/{curated_feature_id}",
-    response_model=CuratedFeatureResponse,
-)
-@admin_router.get(
-    "/curated-features/{curated_feature_id}",
-    response_model=CuratedFeatureResponse,
-    include_in_schema=False,
-)
-async def get_admin_curated_feature_route(
-    curated_feature_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> CuratedFeatureResponse:
-    started_at = perf_counter()
-    row = await _feature_or_404(session, curated_feature_id, include_archived=True)
-    return CuratedFeatureResponse(
-        data=_feature_view(row),
-        meta=make_meta(started_at=started_at),
-    )
-
-
-@admin_router.get(
-    "/features/curated/{curated_feature_id}/detail-snapshot",
-    response_model=CuratedFeatureDetailSnapshotResponse,
-)
-async def get_admin_curated_feature_detail_snapshot_route(
-    curated_feature_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> CuratedFeatureDetailSnapshotResponse:
-    started_at = perf_counter()
-    row = await curated_repo.get_curated_feature_detail_snapshot(
-        session,
-        curated_feature_id=curated_feature_id,
-    )
-    if row is None:
-        raise HTTPException(status_code=404, detail="curated feature 없음")
-    return CuratedFeatureDetailSnapshotResponse(
-        data=_snapshot_view(row),
-        meta=make_meta(started_at=started_at),
-    )
-
-
-@admin_router.get(
-    "/features/curated/{curated_feature_id}/place-search",
-    response_model=CuratedPlaceSearchResponse,
-)
-@admin_router.get(
-    "/curated-features/{curated_feature_id}/place-search",
-    response_model=CuratedPlaceSearchResponse,
-    include_in_schema=False,
-)
-async def search_admin_curated_feature_places_route(
-    curated_feature_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
-    q: Annotated[str | None, Query(min_length=1)] = None,
-) -> CuratedPlaceSearchResponse:
-    started_at = perf_counter()
-    feature = await _feature_or_404(session, curated_feature_id, include_archived=True)
-    query = (q or feature.display_title or feature.feature_name or feature.source_name).strip()
-    if not query:
-        raise HTTPException(status_code=400, detail="검색어 q가 필요합니다")
-    data = await _direct_place_search(query)
-    return CuratedPlaceSearchResponse(
-        data=data,
-        meta=make_meta(started_at=started_at),
-    )
-
-
-@admin_router.post("/features/curated", response_model=CuratedFeatureResponse)
-@admin_router.post(
-    "/curated-features",
-    response_model=CuratedFeatureResponse,
-    include_in_schema=False,
-)
-@idempotent_domain_command("admin.curated-feature.create")
-async def create_admin_curated_feature_route(
-    body: CuratedFeatureCreateRequest,
-    session: Annotated[AsyncSession, Depends(get_session)],
-    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
-) -> CuratedFeatureResponse:
-    started_at = perf_counter()
-    payload = body.model_dump()
-    # T-VN-32C PR-2 — 값 전환 후 admin이 응답에서 복사한 UUID 참조를 legacy
-    # 정본 키로 경계 해석한다 (미존재는 404, 형식 오류 422 — W5).
-    identity = await resolve_feature_ref_or_error(session, payload["feature_id"])
-    payload["feature_id"] = identity.feature_id
-    curation_status = payload["curation_status"]
-    try:
-        async with domain_command_transaction(session):
-            row = await curated_repo.create_curated_feature(
-                session,
-                **payload,
-                selection_origin="admin",
-                selected_by=context.actor if curation_status == "curated" else None,
-                rejected_by=context.actor if curation_status == "rejected" else None,
-                actor=context.actor,
-            )
-    except IntegrityError as exc:
-        raise _integrity_error(exc) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return CuratedFeatureResponse(
-        data=_feature_view(row),
-        meta=make_meta(started_at=started_at),
-    )
-
-
-@admin_router.patch(
-    "/features/curated/{curated_feature_id}",
-    response_model=CuratedFeatureResponse,
-)
-@admin_router.patch(
-    "/curated-features/{curated_feature_id}",
-    response_model=CuratedFeatureResponse,
-    include_in_schema=False,
-)
-@idempotent_domain_command("admin.curated-feature.patch")
-async def patch_admin_curated_feature_route(
-    curated_feature_id: str,
-    body: CuratedFeaturePatchRequest,
-    session: Annotated[AsyncSession, Depends(get_session)],
-    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
-) -> CuratedFeatureResponse:
-    started_at = perf_counter()
-    try:
-        async with domain_command_transaction(session):
-            row = await curated_repo.update_curated_feature(
-                session,
-                curated_feature_id=curated_feature_id,
-                updates=body.model_dump(exclude_unset=True),
-                actor=context.actor,
-            )
-    except IntegrityError as exc:
-        raise _integrity_error(exc) from exc
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if row is None:
-        raise HTTPException(status_code=404, detail="curated feature 없음")
-    return CuratedFeatureResponse(
-        data=_feature_view(row),
-        meta=make_meta(started_at=started_at),
-    )
-
-
-@admin_router.delete(
-    "/features/curated/{curated_feature_id}",
-    response_model=CuratedFeatureResponse,
-)
-@admin_router.delete(
-    "/curated-features/{curated_feature_id}",
-    response_model=CuratedFeatureResponse,
-    include_in_schema=False,
-)
-@idempotent_domain_command("admin.curated-feature.delete")
-async def delete_admin_curated_feature_route(
-    curated_feature_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
-    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
-) -> CuratedFeatureResponse:
-    started_at = perf_counter()
-    async with domain_command_transaction(session):
-        row = await curated_repo.archive_curated_feature(
-            session,
-            curated_feature_id=curated_feature_id,
-            actor=context.actor,
-        )
-    if row is None:
-        raise HTTPException(status_code=404, detail="curated feature 없음")
-    return CuratedFeatureResponse(
-        data=_feature_view(row),
-        meta=make_meta(started_at=started_at),
-    )
-
-
-@admin_router.post(
-    "/features/curated/{curated_feature_id}/select",
-    response_model=CuratedFeatureResponse,
-)
-@admin_router.post(
-    "/curated-features/{curated_feature_id}/select",
-    response_model=CuratedFeatureResponse,
-    include_in_schema=False,
-)
-@idempotent_domain_command("admin.curated-feature.select")
-async def select_admin_curated_feature_route(
-    curated_feature_id: str,
-    body: CuratedFeatureStatusRequest,
-    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> CuratedFeatureResponse:
-    started_at = perf_counter()
-    async with domain_command_transaction(session):
-        row = await curated_repo.set_curated_feature_status(
-            session,
-            curated_feature_id=curated_feature_id,
-            curation_status="curated",
-            actor=context.actor,
-            reason=body.reason,
-        )
-    if row is None:
-        raise HTTPException(status_code=404, detail="curated feature 없음")
-    return CuratedFeatureResponse(
-        data=_feature_view(row),
-        meta=make_meta(started_at=started_at),
-    )
-
-
-@admin_router.post(
-    "/features/curated/{curated_feature_id}/unselect",
-    response_model=CuratedFeatureResponse,
-)
-@admin_router.post(
-    "/curated-features/{curated_feature_id}/unselect",
-    response_model=CuratedFeatureResponse,
-    include_in_schema=False,
-)
-@idempotent_domain_command("admin.curated-feature.unselect")
-async def unselect_admin_curated_feature_route(
-    curated_feature_id: str,
-    body: CuratedFeatureStatusRequest,
-    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
-    session: Annotated[AsyncSession, Depends(get_session)],
-) -> CuratedFeatureResponse:
-    started_at = perf_counter()
-    async with domain_command_transaction(session):
-        row = await curated_repo.set_curated_feature_status(
-            session,
-            curated_feature_id=curated_feature_id,
-            curation_status="rejected",
-            actor=context.actor,
-            reason=body.reason,
-        )
-    if row is None:
-        raise HTTPException(status_code=404, detail="curated feature 없음")
-    return CuratedFeatureResponse(
-        data=_feature_view(row),
         meta=make_meta(started_at=started_at),
     )
 
@@ -1669,6 +889,25 @@ async def archive_admin_curated_theme_route(
     )
 
 
+async def _list_curated_sources_response(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    provider_dataset_id: Annotated[int | None, Query(gt=0)] = None,
+    provider_status: Annotated[ProviderStatus | None, Query()] = None,
+    limit: Annotated[int, Query(ge=1, le=500)] = 200,
+) -> CuratedSourcesResponse:
+    started_at = perf_counter()
+    rows = await curated_repo.list_curated_sources(
+        session,
+        provider_dataset_id=provider_dataset_id,
+        provider_status=provider_status,
+        limit=limit,
+    )
+    return CuratedSourcesResponse(
+        data=CuratedSourcesData(items=[_source_view(row) for row in rows]),
+        meta=make_meta(started_at=started_at),
+    )
+
+
 @admin_router.get("/curated-sources", response_model=CuratedSourcesResponse)
 async def list_admin_curated_sources_route(
     session: Annotated[AsyncSession, Depends(get_session)],
@@ -1676,7 +915,7 @@ async def list_admin_curated_sources_route(
     provider_status: Annotated[ProviderStatus | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=500)] = 200,
 ) -> CuratedSourcesResponse:
-    return await list_curated_sources_route(
+    return await _list_curated_sources_response(
         session=session,
         provider_dataset_id=provider_dataset_id,
         provider_status=provider_status,

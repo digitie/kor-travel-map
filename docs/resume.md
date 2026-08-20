@@ -1,5 +1,51 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-20 — T-VN-40C legacy overlay 물리 제거 (머지 대기)
+
+`0225`가 legacy `curated_features` overlay·snapshot 표·trigger·`legacy_projection_id`·
+rekey 예외·legacy ACL을 지운다. API 라우트 13개, admin UI 라우트 2개와 read hook,
+dead symbol 20개를 함께 제거했고, 삭제한 테스트에 섞여 있던 legacy와 무관한 검사 9개는
+새 모듈로 복구했다. 정적 zero gate와 post-removal runtime 검증을 저장소 안 테스트로
+고정하고 변이 6종으로 red를 확인했다.
+
+게이트: ruff / mypy ×3 / import-linter green, pytest **4,435 passed**(unit+lint+api
+3,436 · integration 999), frontend CI-parity 13단계 green, mocked e2e **276/276
+passed**(7.2분, flake 0). 남은 실패 6건은 n150 환경(PG_DSN·geo 키)이고 main에서도 같다.
+mocked checkpoint gate는 manifest의 `discoveredTests: 284`가 실측 276과 어긋나 red인데,
+`origin/main`에서도 276이라 40C가 만든 drift가 아니다(백로그 `T-FE-MOCK-MANIFEST`).
+
+### 다음 한 작업
+
+PR [#1023](https://github.com/digitie/kor-travel-map/pull/1023)의 CI green 확인 후
+머지. 머지 순서에 **의존이 있다**:
+
+1. **#1023(40C, `0225`) 먼저.** `0226`을 쓰는 #1016은 그 뒤이며, 40C가
+   `map_full_openapi_sha256`/`map_user_openapi_sha256`를 바꿨으므로 #1016은 재-pin이
+   필요하다.
+2. **머지 직후 P7 PinVi lockstep.** `apps/api/tests/contract/kor-travel-map-openapi-user.json`을
+   재-vendor하고(sha `6a2ee0f9…` → `489b05d3…`), `test_kor_travel_map_contract.py`의
+   `_UPSTREAM_COMMIT`과 `contracts/kor-travel-map-service-provenance-v1.json`의
+   `map_release_revision`을 40C 머지 SHA로 올린 뒤 paired receipt를 돌린다. 그 다음
+   Map 쪽 `consumer-rollout-v1.json`의 T-VN-40 `pinvi_snapshot_receipt.state`를
+   `complete`로 바꾼다. service spec은 무변경이라 재-vendor 대상이 아니다.
+3. PR #1022(T-VN-40 receipt)는 merge `82b4d1da`로 이미 들어갔다. 이 branch는 그 위로
+   리베이스했고, 40C가 spec을 바꿨으므로 receipt를 `pending`으로 되돌렸다 — 2번이
+   그것을 다시 `complete`로 만드는 단계다.
+
+## 2026-08-20 — T-VN-40 인수 ③ 완료, receipt 봉인 (pair: Map `f00e7f48` · PinVi `5cad141a`)
+
+C7 prod live가 `f00e7f48`에서 `RESULT: GREEN`(6 spec 17 case, orchestrator_verified,
+BLOCKED 없음, 실행 뒤 audit rc=0)으로 끝났고, T-VN-40 receipt를 `complete`로 봉인했다.
+
+> **후속(2026-08-20)**: 여기서 봉인한 `complete`는 T-VN-40C가 `openapi.user.json`을
+> 바꾸면서 이 트리의 spec을 더 이상 서술하지 않게 됐다. 40C branch가 receipt를
+> `pending`으로 되돌리고 세 sha를 재핀했다 — 위 §"T-VN-40C" 항목의 P7 lockstep 참조.
+> 이 항목이 예고한 ⑤는 그 branch에서 실행됐다.
+
+병행 가능한 것: T-VN-41 최종 C7 인수(receipt가 `candidate_verified`이고 candidate
+증적이 non-ancestor 커밋에 묶여 있다), 백로그 `T-C7-SCOPE-REGISTRY`(external_system
+선언 규약 정본화)·`T-C7-LIVE-SERIAL`(직렬 실행을 코드로 보장).
+
 ## 2026-08-19 — T-VN-H45 Alembic 1.19 CHECK 비교 적응 완료
 
 Alembic 1.19.1 fresh DB에서 named CHECK removed 208건 / added 167건을 재현한 뒤,
@@ -75,23 +121,6 @@ proposed 상태다.
 T-VN-M01을 별도 구현 작업으로 연다. migration/API/admin UI/OpenAPI/PinVi paired fence와 vNext
 freeze를 설계 보고서의 단일 cutover 순서로 구현하고, ADR-093의 accepted 전환은 그 구현·계약 검증과
 함께 한다. 이 M00 PR에는 M01 코드를 섞지 않는다.
-
-## 2026-08-20 — T-VN-40 인수 ③ 완료, receipt 봉인 (pair: Map `f00e7f48` · PinVi `5cad141a`)
-
-C7 prod live가 `f00e7f48`에서 `RESULT: GREEN`(6 spec 17 case, orchestrator_verified,
-BLOCKED 없음, 실행 뒤 audit rc=0)으로 끝났고, T-VN-40 receipt를 `complete`로 봉인했다.
-
-### 다음 한 작업
-
-⑤ **T-VN-40C 물리 삭제**. 선행조건 P1(receipt complete)이 이제 참이다. manifest
-`contracts/vnext/t-vn-40c-removal-manifest-v1.json`(예약 revision `0225`)의 P2~P7을
-차례로 확인한 뒤 migration + 구현 PR을 낸다 — D1~D12 순서, 정적 zero gate, 그리고
-P7 lockstep(40C가 `openapi.user.json`을 바꾸므로 PinVi 재-vendor + 두 번째 paired
-receipt cycle이 같은 release에 묶인다).
-
-병행 가능한 것: T-VN-41 최종 C7 인수(receipt가 `candidate_verified`이고 candidate
-증적이 non-ancestor 커밋에 묶여 있다), 백로그 `T-C7-SCOPE-REGISTRY`(external_system
-선언 규약 정본화)·`T-C7-LIVE-SERIAL`(직렬 실행을 코드로 보장).
 
 ## 2026-08-19 — C7 인수 ③ 진행: 계약 드리프트 4건 + 하네스 경합 1건
 

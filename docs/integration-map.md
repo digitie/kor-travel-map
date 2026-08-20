@@ -67,7 +67,7 @@
                                                         ▼
                           [PinVi api :9021] ◀──(read: in-bounds/search/nearby/
                             trip·POI·공유·협업          {id}/weather/batch/categories
-                                  ▲                     /providers + curated-features
+                                  ▲                     /providers + curations
                                   │                     + /weather/* forecast/history)
                                   │                  ◀──(admin: /v1/admin/features*
                           [PinVi web :9022]          — 사용자 제안 승인 반영, ADR-051;
@@ -137,9 +137,12 @@
 | import job 목록 | `GET /v1/ops/import-jobs` | `GET /v1/ops/pipeline/executions?kind=import_job` | legacy job envelope를 root execution timeline·cursor 계약으로 교체 |
 | import job 취소 | `POST /v1/ops/import-jobs/{id}/cancel` | `POST /v1/ops/pipeline/executions/import_job/{id}/cancel` | body operator 제거, 인증 principal actor + reason만 전달 |
 
-- PinVi curated plan import: kor-travel-map `curated_features`를 REST로 읽어 PinVi
-  `app.curated_trip_plans` / `app.curated_plan_pois`에 복사한다. `notice_plans`는
-  PinVi 호환 API alias일 뿐 신규 정본명이 아니다.
+- PinVi curated plan import: kor-travel-map canonical curation collection/item을
+  service detail-snapshot(`/v1/service/curation-{collections,items}/…/detail-snapshot`)으로
+  읽어 PinVi `app.curated_trip_plans` / `app.curated_plan_pois`에 복사한다.
+  `notice_plans`는 PinVi 호환 API alias일 뿐 신규 정본명이 아니다. 전환기 legacy
+  `curated_features` overlay와 그 REST 표면은 T-VN-40C에서 물리 삭제됐고, 예전 참조를
+  옮기는 대응표는 `GET /v1/service/curation-cutover/identity-mappings`가 제공한다.
 - kor-travel-concierge → kor-travel-map: **pull 모델** — concierge는 export API만 제공, krtour Dagster가
   가져가 `FeatureBundle`로 소유(ADR-053). `operation=upsert` 적재 /
   `reject`·`tombstone` → 대응 feature `status='inactive'` 전환(ADR-050 #4, T-217b).

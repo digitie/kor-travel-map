@@ -144,18 +144,6 @@ ORDER BY feature_id
 FOR UPDATE
 """
 
-# T-VN-40A(0222): legacy mirror 4문은 SECURITY DEFINER procedure다. fence가 runtime의
-# `curated_features` write 권한을 뺐으므로(ACL 층) runtime이 직접 UPDATE/FOR UPDATE를
-# 하면 42501이다. `ktm_curation_command_owner` 소유 procedure를 CALL해 mirror만 열어 둔다 —
-# 0214의 canonical→legacy mirror와 같은 패턴. 4문을 하나로 합치지 않은 이유는 사이에
-# canonical 작업이 끼어 호출 **순서**가 계약이기 때문이다. 40C에서 legacy와 함께 사라진다.
-#
-# Merge는 Feature lifecycle을 먼저 고정한 뒤 legacy→collection→item 순서로
-# 잠근다. Legacy DML의 row→collection→item 순서와 import의 Feature→collection
-# 순서를 모두 확장하므로 양방향 sync/import와 교착하지 않는다.
-_LOCK_CURATION_LEGACY_PROJECTIONS_SQL: Final[str] = """
-CALL feature.merge_lock_legacy_curated_features(CAST(:master AS text), CAST(:loser AS text))
-"""
 
 # Feature를 선잠근 merge와 legacy-backed writer는 legacy row를 거쳐
 # collection(parent)→item(child) 순서로 들어간다. 영향 collection은 UUID
@@ -677,11 +665,6 @@ RETURNING
     survivor.accepted_link_decision_id
 """
 
-# Duplicate reconcile가 loser의 최신 operator state/tombstone을 master canonical
-# survivor에 반영했으면 master legacy projection도 같은 transaction에서 맞춘다.
-_SYNC_MASTER_LEGACY_PROJECTIONS_SQL: Final[str] = """
-CALL feature.merge_sync_master_legacy_curated_features(CAST(:master AS text))
-"""
 
 # Legacy projection 동기화 전에는 duplicate history의 target을 비워 둔다. 같은
 # collection/external item에서 survivor와 archived history가 모두 master를 가리키면
@@ -703,68 +686,9 @@ WHERE item.feature_id IS NULL
 RETURNING item.curation_item_id
 """
 
-# 0045 전환 trigger는 legacy curated_feature UUID와 같은 curation_item UUID를 다시
-# 만든다. master에도 같은 theme의 active legacy row가 있으면 loser legacy row를
-# active 상태로 옮길 수 없으므로, 먼저 해당 item의 UUID를 분리해 richer membership을
-# 보존한 뒤 legacy row만 archive한다.
-_DETACH_CONFLICTING_LEGACY_CURATION_ITEMS_SQL: Final[str] = """
-UPDATE feature.curation_items AS item
-SET curation_item_id = x_extension.gen_random_uuid(),
-    legacy_projection_id = NULL,
-    updated_at = now()
-FROM feature.curated_features AS loser_curated
-WHERE loser_curated.curated_feature_id = item.legacy_projection_id
-  AND loser_curated.feature_id = :loser
-  AND loser_curated.archived_at IS NULL
-  AND item.archived_at IS NULL
-  AND EXISTS (
-      SELECT 1
-      FROM feature.curated_features AS master_curated
-      WHERE master_curated.feature_id = :master
-        AND master_curated.theme_id = loser_curated.theme_id
-        AND master_curated.archived_at IS NULL
-  )
-RETURNING loser_curated.curated_feature_id
-"""
 
-# 0223(T-VN-40-mapping) 이후 `ops.curation_cutover_identity_mappings.curation_item_id`가
-# item PK를 ON UPDATE CASCADE 없이 참조한다 — PinVi cutover의 identity 안정성이 목적이다.
-# 위 DETACH는 item UUID를 rekey하므로 mapping이 잡은 item에 대해서는 FK로 막힌다. raw
-# 23503 대신 명시적 MergeConflictError를 내기 위해 같은 술어로 먼저 검사한다.
-_PINNED_LEGACY_CONFLICT_ITEMS_SQL: Final[str] = """
-SELECT item.curation_item_id
-FROM feature.curation_items AS item
-JOIN feature.curated_features AS loser_curated
-  ON loser_curated.curated_feature_id = item.legacy_projection_id
-JOIN ops.curation_cutover_identity_mappings AS mapping
-  ON mapping.curation_item_id = item.curation_item_id
-WHERE loser_curated.feature_id = :loser
-  AND loser_curated.archived_at IS NULL
-  AND item.archived_at IS NULL
-  AND EXISTS (
-      SELECT 1
-      FROM feature.curated_features AS master_curated
-      WHERE master_curated.feature_id = :master
-        AND master_curated.theme_id = loser_curated.theme_id
-        AND master_curated.archived_at IS NULL
-  )
-ORDER BY item.curation_item_id
-"""
 
-# UUID가 분리된 same-theme legacy conflict 또는 아직 이동하지 않은 loser UUID item과
-# 같은 stored collection/external identity의 master canonical pair만 archive한다.
-# Mutable slug/title로 collection key를 재계산하거나 MOVE 뒤 feature_id를 증거로 쓰지 않는다.
-_ARCHIVE_CONFLICTING_LEGACY_CURATED_FEATURES_SQL: Final[str] = """
-CALL feature.merge_archive_conflicting_legacy_curated_features(
-    CAST(:master AS text), CAST(:loser AS text)
-)
-"""
 
-# 충돌을 정리한 뒤 남은 active/archived legacy row도 master로 옮긴다. 이 UPDATE로
-# 0045 trigger가 다시 실행되어도 NEW.feature_id가 master이므로 병합이 되돌아가지 않는다.
-_MOVE_LEGACY_CURATED_FEATURES_SQL: Final[str] = """
-CALL feature.merge_move_legacy_curated_features(CAST(:master AS text), CAST(:loser AS text))
-"""
 
 _TRANSITION_LOSER_LIFECYCLE_SQL: Final[str] = """
 CALL feature.transition_feature_state(
@@ -884,10 +808,6 @@ async def apply_feature_merge(
     if loser_state is None:
         raise MergeConflictError(f"loser feature 없음 — {loser_id!r}")
     await session.execute(
-        text(_LOCK_CURATION_LEGACY_PROJECTIONS_SQL),
-        {"master": master_id, "loser": loser_id},
-    )
-    await session.execute(
         text(_LOCK_CURATION_COLLECTIONS_SQL),
         {"master": master_id, "loser": loser_id},
     )
@@ -898,29 +818,6 @@ async def apply_feature_merge(
     )
     dropped = len(
         (await session.execute(text(_DROP_LEFTOVER_LINKS_SQL), {"loser": loser_id})).fetchall()
-    )
-    pinned = [
-        str(row[0])
-        for row in (
-            await session.execute(
-                text(_PINNED_LEGACY_CONFLICT_ITEMS_SQL),
-                {"master": master_id, "loser": loser_id},
-            )
-        ).fetchall()
-    ]
-    if pinned:
-        raise MergeConflictError(
-            "same-theme legacy conflict item(s) are pinned by the T-VN-40 cutover identity "
-            f"mapping and cannot be re-keyed — {pinned!r}. Resolve on the canonical side "
-            "(archive/retarget the item through admin commands) before merging."
-        )
-    await session.execute(
-        text(_DETACH_CONFLICTING_LEGACY_CURATION_ITEMS_SQL),
-        {"master": master_id, "loser": loser_id},
-    )
-    await session.execute(
-        text(_ARCHIVE_CONFLICTING_LEGACY_CURATED_FEATURES_SQL),
-        {"master": master_id, "loser": loser_id},
     )
     merge_actor = (merged_by or "system:feature-merge").strip()
     if not merge_actor:
@@ -1003,15 +900,7 @@ async def apply_feature_merge(
         curation_merge_params,
     )
     await session.execute(
-        text(_SYNC_MASTER_LEGACY_PROJECTIONS_SQL),
-        {"master": master_id},
-    )
-    await session.execute(
         text(_MOVE_ARCHIVED_DUPLICATE_CURATION_HISTORY_SQL),
-        {"master": master_id, "loser": loser_id},
-    )
-    await session.execute(
-        text(_MOVE_LEGACY_CURATED_FEATURES_SQL),
         {"master": master_id, "loser": loser_id},
     )
     merge_reason = (reason or "feature merge").strip() or "feature merge"

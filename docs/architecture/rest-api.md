@@ -56,8 +56,7 @@ admin/operator raw DTO는 상속하지 않으며 서로 독립된 projection이�
 `place|event|notice|area|route|price|weather` union이다. 주소와 kind별 detail은 strict
 중첩 DTO이며, place의 시설·영업시간·전화·리뷰 링크도 검토된 키와 값만 새로 조립한다.
 따라서 `detail.payload`, concierge YouTube/transcript/evidence 미러, 알 수 없는 nested raw,
-DB/source identity, 선정 감사 필드는 직렬화되지 않고 `/v1/admin/features/curated*`에만
-남는다. 알 수 없는 kind는 공개 목록에서 제외하고 상세는 404다(T-VN-05R).
+DB/source identity, 선정 감사 필드는 직렬화되지 않고 admin 표면에만 남는다. 알 수 없는 kind는 공개 목록에서 제외하고 상세는 404다(T-VN-05R).
 `include_geometry`는 동일 candidate set의 serialization만 바꾸고, `include_total=false`이면 COUNT를
 실행하지 않는다. search cursor는 version과 정규화 query fingerprint를 검증하고 HMAC-SHA256으로
 payload 무결성을 보호한다. 다른 query 재사용은 `CURSOR_QUERY_MISMATCH`, 변조는
@@ -456,32 +455,35 @@ GET /v1/admin/features/weather/alerts            # 원문·lineage 포함 operat
   보존한다. 별도 alert history table은 만들지 않는다. forecast의 상세 lineage는 기존
   `/v1/features/{feature_id}/sources|observations` operator 표면에서 조회한다.
 
-### 2.4.3 `/v1/curated-features*` — 테마형 큐레이션 후보 (T-223c-1 구현)
+### 2.4.3 `/v1/curations*` — 테마형 큐레이션 (collection/item)
 
 세계음식점, 독립서점, 카페가 있는 서점, 도서관, 무장애 관광지 같은 테마형 source는
-[`docs/curated-features.md`](../curated-features.md)의 `feature.curated_*` overlay 계약을
-따른다. PinVi는 이 표면을 읽어 `app.curated_trip_plans` /
-`app.curated_plan_pois`로 1:1 복사한다. PinVi의 `/notice-plans`는 호환 API alias일
+[`docs/curated-features.md`](../curated-features.md)의 collection/item 계약을 따른다.
+PinVi는 service detail-snapshot 표면을 읽어 `app.curated_trip_plans` /
+`app.curated_plan_pois`로 복사한다. PinVi의 `/notice-plans`는 호환 API alias일
 뿐 신규 정본명이 아니다.
 
-T-223c-1부터 다음 read 표면은 `openapi.user.json` 사용자 profile과
+> T-VN-40C(alembic `0225`)가 legacy overlay 표면
+> (`GET /v1/curated-features*`, `/v1/curated-sources`, `/v1/curated-themes`)을 물리
+> 삭제했다. 그 계약 원문은
+> [`docs/archive/curated-features-legacy-overlay.md`](../archive/curated-features-legacy-overlay.md).
+
+공개 read 표면은 `openapi.user.json` 사용자 profile과
 `@kor-travel-map/map-user-client` 타입에 포함한다.
 
 ```
-GET /v1/curated-themes
-GET /v1/curated-sources
-GET /v1/curated-features
-GET /v1/curated-features/{curated_feature_id}
-GET /v1/curated-features/{curated_feature_id}/pinvi-copy
+GET /v1/curations
+GET /v1/curations/collections
+GET /v1/curations/collections/{collection_id}
+GET /v1/curations/features/{feature_id}
 ```
 
-공개 목록은 `theme_slug`, 표시 텍스트(`q`, `feature_name`, `display_title`), 행정구역·bbox와
-cursor만 받는다. `theme_id`, `source_id`, `provider`, `dataset_key` 같은 내부 identity
-필터는 `/v1/admin/features/curated`에만 둔다. 응답의 7종 판별 union과 strict nested
-projection은 알 수 없는 kind/필드를 fail-closed 처리한다(T-VN-05R).
+공개 목록은 표시 텍스트와 cursor만 받는다. `theme_id`, `source_id`,
+`provider_dataset_id` 같은 내부 identity 필터는 admin 표면에만 둔다. 응답의 판별 union과
+strict nested projection은 알 수 없는 kind/필드를 fail-closed 처리한다(T-VN-05R).
 
-write/admin 표면은 `/v1/admin/curated-*`로 둔다. T-223c-1은 DB/API foundation과
-rule apply endpoint까지 제공하며, Dagster 자동 실행과 Admin UI는 T-223c-2/c-3 후속이다.
+write/admin 표면은 `/v1/admin/curations*`(collection/item)과
+`/v1/admin/curated-{themes,sources,source-rules}`(catalog)로 둔다.
 
 ### 2.4.4 `/v1/curations*` — collection/item 큐레이션 (ADR-063)
 
@@ -1113,7 +1115,7 @@ MOIS route는 원본 provider payload를 포함하므로 `local-dev`에서
 production은 `debug_routes_enabled=false`를 기동 조건으로 강제해 route 자체가 없으며,
 debug token·legacy header·경로 alias는 제공하지 않는다.
 
-`GET /v1/curated-features*`, `/v1/curated-sources`, `/v1/curated-themes`를 포함한 모든
+`GET /v1/curations*`를 포함한 모든
 public-keyed operation은 같은 `require_public_api_key` 경계다. production keyless 요청은
 401이고 public key 또는 service principal만 public OpenAPI 계약에 선언한다. trusted admin
 BFF의 내부 우회는 기존 same-origin UI 동작을 위한 runtime 경계이며 user OpenAPI principal로
@@ -1223,11 +1225,10 @@ BFF의 내부 우회는 기존 same-origin UI 동작을 위한 runtime 경계이
 - **codegen(T-210e)**: `/v1` 안정 commit에서 진행.
 - **PinVi T-130 공개 뷰**: 해수욕장/축제 공개 뷰는
   `docs/architecture/public-views-api.md`와 `openapi.user.json`을 따른다(T-222b).
-- **curated_features**: 테마형 큐레이션 후보는
-  `docs/curated-features.md`와 `openapi.user.json`을 따른다(T-223c-1 read 표면).
-- **curation collections**: 신규 공식·수동 목록은 ADR-063의 `/v1/curations*` 계약을
-  사용한다. 구 source-rule 후보 계약은 유지하지만 서로 다른 회차 정보를 대표 1행으로
-  접는 용도로 사용하지 않는다.
+- **curation collections**: 공식·수동 목록은 ADR-063의 `/v1/curations*` 계약을
+  사용하며 `docs/curated-features.md`와 `openapi.user.json`을 따른다. 서로 다른 회차
+  정보를 대표 1행으로 접지 않는다. 구 `curated_features` overlay 표면은 T-VN-40C에서
+  물리 삭제됐다.
 
 ---
 

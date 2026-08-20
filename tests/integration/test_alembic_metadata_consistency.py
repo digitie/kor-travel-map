@@ -358,7 +358,7 @@ async def test_squash_boundary_rejects_stamp_below_0200_before_mutation(
             admin_dsn,
             "SELECT version_num FROM public.alembic_version",
         )
-        == "0224_c7_external_system_scope"
+        == "0225_tvn40c_physical_removal"
     )
 
 
@@ -388,7 +388,7 @@ async def test_existing_0104_bridge_upgrades_to_tvn40_head_without_baseline_repl
             admin_dsn,
             "SELECT version_num FROM public.alembic_version",
         )
-        == "0224_c7_external_system_scope"
+        == "0225_tvn40c_physical_removal"
     )
     assert (
         await _admin_fetchval(

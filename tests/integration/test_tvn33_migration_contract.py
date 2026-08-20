@@ -184,24 +184,6 @@ async def test_tvn33_final_schema_enforces_canonical_membership_links(
     )
 
 
-async def test_tvn33_final_curation_rule_trigger_uses_canonical_source_lineage(
-    migrated_session: AsyncSession,
-) -> None:
-    """source-rule trigger는 제거된 record pair shadow를 읽지 않는다."""
-
-    definition = await migrated_session.scalar(
-        text(
-            "SELECT pg_get_functiondef("
-            "'feature.issue_curation_source_rule_decision()'::regprocedure)"
-        )
-    )
-    assert definition is not None
-    normalized = " ".join(definition.lower().split())
-    assert "provider_sync.source_entities as entity" in normalized
-    assert "provider_sync.provider_datasets as dataset" in normalized
-    assert "entity.provider_dataset_id" in normalized
-    assert "record.provider" not in normalized
-    assert "record.dataset_key" not in normalized
 
 
 async def test_offline_upload_guard_rejects_disabled_sibling_operation(

@@ -12,55 +12,19 @@ type AdminCuratedThemesQuery = NonNullable<
   paths["/v1/admin/curated-themes"]["get"]["parameters"]["query"]
 >;
 
-export type CuratedFeature = CuratedSchemas["CuratedFeatureView"];
-export type CuratedFeaturePatchRequest =
-  CuratedSchemas["CuratedFeaturePatchRequest"];
-export type CuratedFeatureResponse = CuratedSchemas["CuratedFeatureResponse"];
-export type CuratedFeatureStatusRequest =
-  CuratedSchemas["CuratedFeatureStatusRequest"];
 export type CuratedSource = CuratedSchemas["CuratedSourceView"];
 export type CuratedSourcesResponse = CuratedSchemas["CuratedSourcesResponse"];
 export type CuratedTheme = CuratedSchemas["CuratedThemeView"];
 export type CuratedThemesResponse = CuratedSchemas["CuratedThemesResponse"];
-export type CuratedFeatureDetailSnapshot =
-  CuratedSchemas["CuratedFeatureDetailSnapshotView"];
-export type CuratedFeatureDetailSnapshotResponse =
-  CuratedSchemas["CuratedFeatureDetailSnapshotResponse"];
 
-export type CuratedReusePolicy = Exclude<
-  CuratedFeaturePatchRequest["reuse_policy"],
-  null | undefined
->;
-export type CuratedCurationRelation = Exclude<
-  CuratedFeaturePatchRequest["curation_relation"],
-  null | undefined
->;
 export type AdminCuratedSourcesParams = AdminCuratedSourcesQuery;
 export type AdminCuratedThemesParams = AdminCuratedThemesQuery;
 
-// T-VN-40A: legacy `curated_features` write mutation(select/unselect/archive/patch)은 fence로
-// 410이 됐고 여기서 삭제했다. 이 모듈은 read hook만 남는다 — 40C에서 legacy 표와 함께 지운다.
-// canonical 편집은 `./curations`(collection/item command)다.
+// T-VN-40C: legacy `curated_features` 표와 그 read hook(useAdminCuratedFeature /
+// useCuratedFeatureDetailSnapshot)은 물리 제거됐다. 이 모듈에는 canonical
+// source/theme 카탈로그 read hook만 남는다 — feature 단위 큐레이션 편집·조회는
+// `./curations`(collection/item command)가 정본이다.
 
-async function fetchAdminCuratedFeature(
-  curatedFeatureId: string,
-  signal?: AbortSignal,
-): Promise<CuratedFeatureResponse> {
-  return getJson<CuratedFeatureResponse>(
-    `/v1/admin/features/curated/${encodeURIComponent(curatedFeatureId)}`,
-    { signal },
-  );
-}
-
-export function useAdminCuratedFeature(curatedFeatureId: string | null) {
-  return useQuery<CuratedFeatureResponse, Error>({
-    queryKey: ["curated-feature", curatedFeatureId] as const,
-    queryFn: ({ signal }) =>
-      fetchAdminCuratedFeature(curatedFeatureId as string, signal),
-    enabled: curatedFeatureId !== null && curatedFeatureId.length > 0,
-    staleTime: 30_000,
-  });
-}
 async function fetchAdminCuratedSources(
   params: AdminCuratedSourcesParams,
   signal?: AbortSignal,
@@ -108,26 +72,3 @@ export function useAdminCuratedThemes(
     staleTime: 60_000,
   });
 }
-
-async function fetchCuratedFeatureDetailSnapshot(
-  curatedFeatureId: string,
-  signal?: AbortSignal,
-): Promise<CuratedFeatureDetailSnapshotResponse> {
-  return getJson<CuratedFeatureDetailSnapshotResponse>(
-    `/v1/admin/features/curated/${encodeURIComponent(
-      curatedFeatureId,
-    )}/detail-snapshot`,
-    { signal },
-  );
-}
-
-export function useCuratedFeatureDetailSnapshot(curatedFeatureId: string | null) {
-  return useQuery<CuratedFeatureDetailSnapshotResponse, Error>({
-    queryKey: ["curated-feature-detail", curatedFeatureId] as const,
-    queryFn: ({ signal }) =>
-      fetchCuratedFeatureDetailSnapshot(curatedFeatureId as string, signal),
-    enabled: curatedFeatureId !== null && curatedFeatureId.length > 0,
-    staleTime: 30_000,
-  });
-}
-

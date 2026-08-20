@@ -5,6 +5,48 @@
 
 ## [Unreleased]
 
+### T-VN-40C — legacy curation overlay 물리 제거 (2026-08-20)
+
+ADR-075 보존 우선 cutover의 마지막 단계. 40A(write fence)·40B(consumer 선전환) 뒤
+남아 있던 legacy overlay를 DB·코드·계약·문서에서 한 release로 지운다. 호환 alias나
+shim은 만들지 않는다.
+
+- **REMOVED (DB)**: migration `0225_tvn40c_physical_removal`이 `feature.curated_features`
+  overlay 본체와 `curated_feature_detail_snapshots`, 단방향 동기화 trigger,
+  `curation_items.legacy_projection_id` 컬럼·partial unique index, `0074`의
+  `curation_item_id` rekey CASCADE/append-only 예외, legacy ACL을 삭제한다.
+  `ops.curation_cutover_identity_mappings`는 **남긴다** — PinVi가 자기 쪽 예전 참조를
+  canonical로 옮기는 불변 증거다.
+- **REMOVED (API)**: 공개 `/v1/curated-features*`·`/v1/curated-sources`·`/v1/curated-themes`와
+  admin `/v1/admin/features/curated*` 등 라우트 13개. user spec은 path 4·schema 29가
+  줄었고 남은 path의 본문 변경은 없다(순수 제거). service spec은 무변경이라 PinVi의
+  service 소비 계약은 영향을 받지 않는다. catalog(`/v1/admin/curated-{themes,sources,source-rules}`)와
+  collection/item(`/v1/curations*`, `/v1/admin/curations*`)은 그대로다.
+- **REMOVED (admin UI)**: `/admin/curated-features` 목록·상세 라우트, legacy read hook
+  (`useAdminCuratedFeature`/`useCuratedFeatureDetailSnapshot`), legacy 상태 어휘 모듈.
+  canonical 화면 `/admin/features/curated`는 유지한다. live e2e fixture의
+  `CURATED_IDS`(legacy UUID)는 canonical `CURATION_ITEM_IDS`로 재표집했다.
+- **CHANGED**: `docs/curated-features.md`가 catalog + collection/item 정본 문서로 다시
+  쓰였고, 40C 이전 overlay 설계는 `docs/archive/curated-features-legacy-overlay.md`로
+  동결했다. data-model·rest-api·openapi-admin-contract·postgres-schema·backup-restore도
+  같이 갱신했다.
+- **TEST**: 제거가 실제로 성립하는지를 저장소 안 gate로 고정한다 —
+  `tests/lint/test_tvn40c_static_zero_gate.py`(살아 있는 참조 0, 제거 고지 문장은 사유와
+  함께 열거하고 죽은 예외도 잡는다)와
+  `tests/integration/test_tvn40c_post_removal_runtime.py`(catalog·`pg_proc.prosrc` zero,
+  runtime ACL 일치, 제거 라우트 11 부재 + 잔존 라우트 13 생존, curation typed command의
+  SECURITY DEFINER·owner·dagster EXECUTE 금지). 두 gate 모두 변이를 주입해 red를 확인했다.
+- **TEST**: 삭제한 테스트 파일에 섞여 있던 **legacy와 무관한 검사 9개**를 새 모듈로
+  복구했다 — ACL 표의 phantom 항목 검출, 잔존 catalog 명령의 strong ETag·CAS 계약,
+  theme seed 집합, superseded Python writer의 runtime 도달 불가.
+- **FIXED**: 제거가 남긴 dead symbol 20개를 정리했다. 그중 `_FEATURE_COLUMNS`는 드롭된
+  표의 컬럼을 그대로 projection하는 SQL 상수였다.
+
+> **미완(merge 의존)**: `contracts/vnext/consumer-rollout-v1.json`의 T-VN-40
+> `pinvi_snapshot_receipt.state`는 `pending`으로 둔다. PinVi 재-vendor는 Map 쪽 pin이
+> **머지된 commit**이어야 성립하므로(`contract-pin-consistency`가 그 SHA를 체크아웃한다)
+> 40C 머지 뒤에 수행한다. 세 spec sha는 이미 이 branch 산출물과 일치한다.
+
 ### C7 인수용 exact-target refresh scope 선언 (2026-08-19, T-VN-40 인수 ③)
 
 - **ADDED**: migration `0224_c7_external_system_scope`가 KMA 초단기실황

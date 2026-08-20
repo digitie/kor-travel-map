@@ -276,8 +276,6 @@ from kortravelmap.infra.jobs_repo import (
 )
 from kortravelmap.infra.models import (
     Base,
-    CuratedFeatureDetailSnapshotRow,
-    CuratedFeatureRow,
     CuratedSourceRow,
     CuratedSourceRuleRow,
     CuratedThemeRow,
@@ -478,11 +476,9 @@ __all__ = [
     # models (PR#28, ADR-004 / ADR-007 / ADR-018)
     "Base",
     "metadata",
-    "CuratedFeatureRow",
     "CuratedSourceRow",
     "CuratedSourceRuleRow",
     "CuratedThemeRow",
-    "CuratedFeatureDetailSnapshotRow",
     "FeatureRow",
     "SourceRecordRow",
     "SourceLinkRow",

@@ -1,7 +1,7 @@
 {
   "artifact": "t-vn-40c-removal-manifest-v1",
   "owner": "T-VN-40C",
-  "status": "draft-v2 (reviewed x2, P1/P2 folded)",
+  "status": "executed-on-branch (PR #1023, unmerged; P7 PinVi lockstep pending merge)",
   "description": "T-VN-40C physical removal manifest - typed tombstone. Lists every legacy object/path removed by migration 0225 and the code/frontend/contract removals in the same release. Executed only after the T-VN-40 receipt is complete (docs/reports/t-vn-40c-physical-removal-manifest-2026-08-18.md section 0). This file is an allowed location for legacy identifiers under the static zero gate.",
   "preconditions": [
     {
@@ -341,5 +341,29 @@
     "admin frontend build + mock e2e; user-client gen:types:check",
     "PinVi re-vendored user spec sha == map_user_openapi_sha256 in the new paired receipt"
   ],
-  "rollback": "none - forward-only; failure inside 0225 rolls the whole transaction back (RESTRICT surfaces unknown dependents); post-apply issues are forward-fixed; backup per P5"
+  "rollback": "none - forward-only; failure inside 0225 rolls the whole transaction back (RESTRICT surfaces unknown dependents); post-apply issues are forward-fixed; backup per P5",
+  "execution_notes": {
+    "date": "2026-08-20",
+    "branch": "feat/tvn40c-physical-removal",
+    "migration": "0225_tvn40c_physical_removal (fresh PostGIS 0200 -> 0225 verified)",
+    "gates_added": [
+      "tests/lint/test_tvn40c_static_zero_gate.py — manifest identifiers를 읽어 live reference 0을 요구하고 tombstone prose 10건을 (경로, 식별자, 사유)로 열거한다",
+      "tests/integration/test_tvn40c_post_removal_runtime.py — DB catalog·pg_proc.prosrc zero, runtime ACL 일치, 제거 라우트 11 부재 + 잔존 라우트 13 생존, curation command SECDEF/owner/dagster EXECUTE 금지, D8 FK pg_get_constraintdef 고정"
+    ],
+    "manifest_corrections": [
+      "code_removals.frontend.delete 목록이 불완전했다 — `src/app/admin/features/curated/[curatedFeatureId]/`(legacy detail client 재노출)와 `src/lib/curated-labels.ts`(소비자 소멸로 도달 불가)가 빠져 있었다. 후자는 React Doctor deslop/unused-file이 잡았다.",
+      "contract_updates의 tombstone 수가 실제와 달랐다 — 실제 적용은 user 4 + admin 11 = 15건이다.",
+      "test 삭제 목록이 파일 단위라, legacy 식별자를 전혀 참조하지 않는 검사 9개가 함께 사라질 뻔했다(ACL phantom 검출, 잔존 catalog 명령 ETag/CAS, theme seed, superseded writer 도달 불가). 새 모듈로 복구했다.",
+      "static_zero_gate.identifiers는 `_FEATURE_COLUMNS`처럼 **드롭된 표의 컬럼을 projection하는 상수**를 잡지 못한다. `main` 대비 차등 dead-symbol 스캔으로 20개를 별도 발견했다."
+    ],
+    "verification_results": {
+      "ruff / mypy --strict x3 / import-linter": "green",
+      "pytest": "unit+lint+api 3,436 passed · integration 999 passed (남은 실패 6건은 n150 환경 — PG_DSN·geo 키, main도 동일)",
+      "frontend CI-parity": "13 steps green (npm-tree · eslint 0 warnings · React Doctor · vitest · gen:types:check x2 · type-check x2 · next build 등)",
+      "mutation_testing": "두 gate 각각 3변이 주입 → 모두 red, 원복 시 green"
+    },
+    "blocked": {
+      "P7": "PinVi 재-vendor는 Map pin이 머지된 commit이어야 성립한다(contract-pin-consistency가 그 SHA를 체크아웃한다). manifest preconditions P7 자체가 '40C PR merged -> PinVi re-vendor PR -> paired candidate receipt' 순서를 규정한다. 사전 확인 완료: user spec delta는 path 4·schema 29 순수 제거이고 남은 path 본문 변경 0, service spec sha 무변경, PinVi Map curation client는 service 표면 2개만 호출한다."
+    }
+  }
 }

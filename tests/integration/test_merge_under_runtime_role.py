@@ -1,6 +1,6 @@
 """Feature merge가 **실제 API runtime role**로 돈다.
 
-PR #994(T-VN-40A fence)의 적대 리뷰가 잡은 것: ACL 층이 `curated_features`에서 runtime의
+PR #994(T-VN-40A fence)의 적대 리뷰가 잡은 것: ACL 층이 legacy overlay에서 runtime의
 write 권한을 뺐는데, `merge_repo.apply_feature_merge`가 legacy 표를 `FOR UPDATE`로 잠그고
 3번 UPDATE한다. PostgreSQL은 `FOR UPDATE`에도 UPDATE 권한을 요구하므로 merge가 42501로
 죽는다 — dedup review 병합(`PATCH /v1/admin/dedup-reviews/{id}` decision=merged)과
@@ -66,9 +66,7 @@ async def test_apply_feature_merge_succeeds_as_api_runtime(
 @pytest.mark.parametrize(
     "call",
     [
-        "CALL feature.merge_lock_legacy_curated_features('f_master', 'f_loser')",
         "CALL feature.merge_lock_curation_collections('f_master', 'f_loser')",
-        "CALL feature.merge_move_legacy_curated_features('f_master', 'f_loser')",
     ],
 )
 async def test_dagster_runtime_cannot_call_merge_procedures(

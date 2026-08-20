@@ -3357,40 +3357,6 @@ async def _lock_collection(session: AsyncSession, collection_id: str) -> bool:
     return row is not None
 
 
-async def _lock_legacy_projections_for_item(
-    session: AsyncSession,
-    *,
-    collection_id: str,
-    curation_item_id: str,
-) -> bool:
-    """Legacy-backed item은 legacy→collection→item 순서로 직렬화한다."""
-
-    rows = (
-        await session.execute(
-            text(
-                """
-                SELECT legacy.curated_feature_id
-                FROM feature.curation_items AS item
-                JOIN feature.curated_features AS legacy
-                  ON legacy.curated_feature_id = item.legacy_projection_id
-                WHERE item.collection_id = CAST(:collection_id AS uuid)
-                  AND item.curation_item_id = CAST(:curation_item_id AS uuid)
-                  AND legacy.archived_at IS NULL
-                  AND NOT legacy.metadata
-                      @> '{"merge_projection_detached": true}'::jsonb
-                ORDER BY legacy.curated_feature_id
-                FOR UPDATE OF legacy
-                """
-            ),
-            {
-                "collection_id": collection_id,
-                "curation_item_id": curation_item_id,
-            },
-        )
-    ).all()
-    return bool(rows)
-
-
 async def _touch_collection(
     session: AsyncSession, *, collection_id: str, actor: str | None
 ) -> None:
@@ -4294,16 +4260,6 @@ async def update_curation_item(
         if target_is_active is None:
             raise ValueError("feature_id에 해당하는 Feature가 없습니다.")
 
-    legacy_backed = await _lock_legacy_projections_for_item(
-        session,
-        collection_id=collection_id,
-        curation_item_id=curation_item_id,
-    )
-    if legacy_backed and source_owned_changed:
-        raise ValueError(
-            "legacy projection 기반 curation item의 source 필드는 "
-            "legacy writer에서 수정해야 합니다."
-        )
     if not await _lock_collection(session, collection_id):
         return None
     current = await get_curation_item(
@@ -4463,66 +4419,6 @@ async def update_curation_item(
                     "reason": "명시적 feature_id=null",
                 },
             )
-    if operator_owned_changed:
-        target_status = str(normalized.get("status", current.status))
-        target_relation = str(normalized.get("curation_relation", current.curation_relation))
-        target_reuse_policy = str(normalized.get("reuse_policy", current.reuse_policy))
-        await session.execute(
-            text(
-                """
-                UPDATE feature.curated_features AS legacy
-                SET curation_status = :legacy_status,
-                    selection_origin = 'admin',
-                    selected_by = CASE
-                        WHEN :legacy_status = 'curated' THEN :actor
-                        ELSE selected_by
-                    END,
-                    selected_at = CASE
-                        WHEN :legacy_status = 'curated' THEN now()
-                        ELSE selected_at
-                    END,
-                    rejected_by = CASE
-                        WHEN :legacy_status = 'rejected' THEN :actor
-                        WHEN :legacy_status IN ('curated', 'candidate') THEN NULL
-                        ELSE rejected_by
-                    END,
-                    rejected_at = CASE
-                        WHEN :legacy_status = 'rejected' THEN now()
-                        WHEN :legacy_status IN ('curated', 'candidate') THEN NULL
-                        ELSE rejected_at
-                    END,
-                    rejection_reason = CASE
-                        WHEN :legacy_status IN ('curated', 'candidate') THEN NULL
-                        ELSE rejection_reason
-                    END,
-                    curation_relation = :curation_relation,
-                    reuse_policy = :reuse_policy,
-                    operator_updated_by = :actor,
-                    operator_updated_at = clock_timestamp(),
-                    archived_at = CASE
-                        WHEN :legacy_status = 'archived' THEN now()
-                        ELSE NULL
-                    END,
-                    updated_at = now(),
-                    content_version = content_version + 1
-                FROM feature.curation_items AS item
-                WHERE item.collection_id = CAST(:collection_id AS uuid)
-                  AND item.curation_item_id =
-                      CAST(:curation_item_id AS uuid)
-                  AND item.legacy_projection_id =
-                      legacy.curated_feature_id
-                  AND legacy.archived_at IS NULL
-                """
-            ),
-            {
-                "curation_item_id": curation_item_id,
-                "collection_id": collection_id,
-                "legacy_status": ("curated" if target_status == "included" else target_status),
-                "curation_relation": target_relation,
-                "reuse_policy": target_reuse_policy,
-                "actor": actor,
-            },
-        )
     await _touch_collection(session, collection_id=collection_id, actor=actor)
     return await get_curation_item(
         session,

@@ -27,7 +27,6 @@ from kortravelmap.core.ids import make_payload_hash, make_source_record_key
 from kortravelmap.dto import SourceRecord
 from kortravelmap.dto.weather import WeatherValue
 from kortravelmap.infra import (
-    curated_repo,
     curation_repo,
     feature_repo,
     public_views_repo,
@@ -161,59 +160,6 @@ def _expected_public(ids: dict[str, str]) -> set[str]:
 
 
 
-async def _seed_legacy_curated_row(
-    session: AsyncSession,
-    *,
-    theme_id: str,
-    feature_id: str,
-    source_id: str,
-    curation_status: str = "curated",
-    selected_by: str | None = "pytest",
-    rejected_by: str | None = None,
-    rejection_reason: str | None = None,
-    metadata: dict[str, object] | None = None,
-) -> str:
-    """legacy `curated_features` row를 **테스트 fixture로만** 심는다 (T-VN-40A).
-
-    `curated_repo.create_curated_feature`는 fence 뒤로 static 층에서 막힌다. 이 파일은
-    공개 **read** 경로를 검증하므로 legacy row가 있어야 하고, 그 read는 soak 동안 살아
-    있어야 한다. 테스트 owner role이라 raw INSERT가 되는 것이지 fence 우회가 아니다 —
-    앱 role은 ACL 층이 막는다. **이 helper를 앱 코드로 옮기지 마라.**
-    """
-    row = await session.execute(
-        text(
-            """
-            INSERT INTO feature.curated_features (
-                theme_id, feature_id, source_id, curation_status,
-                selection_origin, selected_by, selected_at,
-                rejected_by, rejected_at, rejection_reason,
-                curation_relation, reuse_policy, metadata, updated_at
-            ) VALUES (
-                CAST(:theme_id AS uuid), :feature_id, CAST(:source_id AS uuid),
-                :curation_status, 'admin',
-                CAST(:selected_by AS text),
-                CASE WHEN CAST(:selected_by AS text) IS NULL THEN NULL ELSE now() END,
-                CAST(:rejected_by AS text),
-                CASE WHEN CAST(:rejected_by AS text) IS NULL THEN NULL ELSE now() END,
-                CAST(:rejection_reason AS text),
-                'nearby_option', 'manual_review',
-                CAST(:metadata_json AS jsonb), now()
-            )
-            RETURNING curated_feature_id::text
-            """
-        ),
-        {
-            "theme_id": theme_id,
-            "feature_id": feature_id,
-            "source_id": source_id,
-            "curation_status": curation_status,
-            "selected_by": selected_by,
-            "rejected_by": rejected_by,
-            "rejection_reason": rejection_reason,
-            "metadata_json": json.dumps(metadata or {}),
-        },
-    )
-    return str(row.scalar_one())
 
 
 async def test_view_exists_with_single_predicate(migrated_session: AsyncSession) -> None:
@@ -871,201 +817,6 @@ async def test_curation_group_reads_use_projection(migrated_session: AsyncSessio
         assert group is None, f"non-public feature exposed via curation group: {hidden}"
 
 
-async def test_curated_public_read_uses_projection_admin_unchanged(
-    migrated_session: AsyncSession,
-) -> None:
-    """공개 curated read는 public theme의 curated overlay만 노출한다 (리뷰 S1)."""
-    theme_id, source_id = await _seed_curation_foundation(migrated_session)
-    # 이 테스트가 재현하려는 상황은 "overlay가 이미 있는데 그 feature가 공개 밖으로
-    # 나갔다"이지, "공개 밖 feature에 overlay를 새로 달 수 있다"가 아니다. 두 축을
-    # 나눠야 하는 이유: ``create_curated_feature``의 생성 가드는 legacy
-    # ``status NOT IN ('deleted','hidden')``의 3축 등가물
-    # (lifecycle='active' AND publication <> 'suppressed')이라 suppressed를 생성
-    # 시점에 막는다. 그래서 공개 상태에서 overlay를 만든 뒤 feature만 suppressed로
-    # 옮긴다 — 큐레이션 후 비공개 전환이라는 실제 운영 경로와 같은 최종 상태다.
-    for suffix, publication_state in (("active", "published"), ("suppressed", "suppressed")):
-        await _ins_feature(
-            migrated_session,
-            feature_id=f"pfv:curated:{suffix}",
-            name=f"레거시 큐레이션 {suffix}",
-        )
-        await _seed_legacy_curated_row(
-            migrated_session,
-            theme_id=theme_id,
-            feature_id=f"pfv:curated:{suffix}",
-            source_id=source_id,
-        )
-        if publication_state != "published":
-            await migrated_session.execute(
-                text(
-                    "UPDATE feature.features SET publication_state = :publication_state "
-                    "WHERE feature_id = :feature_id"
-                ),
-                {
-                    "publication_state": publication_state,
-                    "feature_id": f"pfv:curated:{suffix}",
-                },
-            )
-            await migrated_session.flush()
-
-    admin_theme_id = str(
-        (
-            await migrated_session.execute(
-                text(
-                    """
-                    INSERT INTO feature.curated_themes (
-                      theme_slug, theme_name, theme_description, theme_group,
-                      default_curated, visibility, metadata, row_revision,
-                      owner_kind, owner_provider_dataset_id
-                    ) VALUES (
-                      'pfv-admin-only-theme', '관리자 전용 테마', '', 'internal',
-                      false, 'admin_only', '{}'::jsonb, 1, 'operator', NULL
-                    )
-                    RETURNING theme_id::text
-                    """
-                )
-            )
-        ).scalar_one()
-    )
-    overlay_cases = (
-        ("admin-theme", admin_theme_id, "curated"),
-        ("candidate", theme_id, "candidate"),
-        ("rejected", theme_id, "rejected"),
-    )
-    restricted_overlays = []
-    for suffix, overlay_theme_id, curation_status in overlay_cases:
-        await _ins_feature(
-            migrated_session,
-            feature_id=f"pfv:curated:{suffix}",
-            name=f"제한 큐레이션 {suffix}",
-        )
-        restricted_overlays.append(
-            await _seed_legacy_curated_row(
-                migrated_session,
-                theme_id=overlay_theme_id,
-                feature_id=f"pfv:curated:{suffix}",
-                source_id=source_id,
-                curation_status=curation_status,
-                selected_by="private-operator",
-                rejected_by=("private-reviewer" if curation_status == "rejected" else None),
-                rejection_reason=("internal reason" if curation_status == "rejected" else None),
-                metadata={"internal": True},
-            )
-        )
-
-    public_page = await curated_repo.list_curated_features(
-        migrated_session, public_only=True
-    )
-    assert {row.feature_id for row in public_page.items} == {"pfv:curated:active"}
-    rejected_public_page = await curated_repo.list_curated_features(
-        migrated_session, curation_status="rejected", public_only=True
-    )
-    assert rejected_public_page.items == ()
-
-    admin_page = await curated_repo.list_curated_features(
-        migrated_session, curation_status=None
-    )
-    assert {row.feature_id for row in admin_page.items} == {
-        "pfv:curated:active",
-        "pfv:curated:suppressed",
-        "pfv:curated:admin-theme",
-        "pfv:curated:candidate",
-        "pfv:curated:rejected",
-    }
-
-    # 단건: 공개는 비공개 feature에서 None, admin은 조회 가능.
-    suppressed_curated = next(
-        row for row in admin_page.items if row.feature_id == "pfv:curated:suppressed"
-    )
-    assert (
-        await curated_repo.get_curated_feature(
-            migrated_session,
-            curated_feature_id=suppressed_curated.curated_feature_id,
-            public_only=True,
-        )
-        is None
-    )
-    assert (
-        await curated_repo.get_curated_feature(
-            migrated_session,
-            curated_feature_id=suppressed_curated.curated_feature_id,
-        )
-        is not None
-    )
-    for restricted in restricted_overlays:
-        assert (
-            await curated_repo.get_curated_feature(
-                migrated_session,
-                curated_feature_id=restricted,
-                public_only=True,
-            )
-            is None
-        )
-
-    admin_collection = await curation_repo.create_curation_collection(
-        migrated_session,
-        collection_key="pfv-admin-only:2026",
-        theme_id=admin_theme_id,
-        source_id=source_id,
-        title="관리자 전용 테마의 공개 표시 컬렉션",
-        edition_key="2026",
-        status="published",
-        visibility="public",
-    )
-    admin_theme_feature_id = "pfv:curation:admin-theme"
-    await _ins_feature(
-        migrated_session,
-        feature_id=admin_theme_feature_id,
-        name="관리자 전용 큐레이션 연결 장소",
-    )
-    await curation_repo.add_curation_item(
-        migrated_session,
-        collection_id=admin_collection.collection_id,
-        feature_id=admin_theme_feature_id,
-        external_item_id="pfv-admin-theme-item",
-        status="included",
-        metadata={"internal": True},
-    )
-    public_collections, _cursor = await curation_repo.list_curation_collections(
-        migrated_session, public_only=True
-    )
-    assert admin_collection.collection_id not in {
-        collection.collection_id for collection in public_collections
-    }
-    assert (
-        await curation_repo.get_curation_collection(
-            migrated_session,
-            collection_id=admin_collection.collection_id,
-            public_only=True,
-        )
-        is None
-    )
-    public_groups, _cursor = await curation_repo.list_feature_curation_groups(
-        migrated_session, public_only=True
-    )
-    assert admin_theme_feature_id not in {group.feature_id for group in public_groups}
-    assert (
-        await curation_repo.get_feature_curation_group(
-            migrated_session,
-            feature_id=admin_theme_feature_id,
-            public_only=True,
-        )
-        is None
-    )
-    assert (
-        await curation_repo.list_curation_items_by_feature_ids(
-            migrated_session,
-            feature_ids=[admin_theme_feature_id],
-            public_only=True,
-        )
-        == {}
-    )
-    admin_items = await curation_repo.list_curation_items_by_feature_ids(
-        migrated_session,
-        feature_ids=[admin_theme_feature_id],
-        public_only=False,
-    )
-    assert admin_items[admin_theme_feature_id][0].metadata == {"internal": True}
 
 
 async def test_ended_notice_is_hidden_from_curation_and_curated_surfaces(
@@ -1080,12 +831,6 @@ async def test_ended_notice_is_hidden_from_curation_and_curated_surfaces(
         name="종료된 공개 특보",
         kind="notice",
         detail=json.dumps({"valid_end_time": "2000-01-01T00:00:00+00:00"}),
-    )
-    overlay_id = await _seed_legacy_curated_row(
-        migrated_session,
-        theme_id=theme_id,
-        feature_id=feature_id,
-        source_id=source_id,
     )
     collection = await curation_repo.create_curation_collection(
         migrated_session,
@@ -1105,18 +850,7 @@ async def test_ended_notice_is_hidden_from_curation_and_curated_surfaces(
         status="included",
     )
 
-    assert (
-        await curated_repo.get_curated_feature(
-            migrated_session,
-            curated_feature_id=overlay_id,
-            public_only=True,
-        )
-        is None
-    )
-    public_overlays = await curated_repo.list_curated_features(
-        migrated_session, theme_slug="pfv-matrix-theme", public_only=True
-    )
-    assert feature_id not in {item.feature_id for item in public_overlays.items}
+    # T-VN-40C — legacy overlay read 축은 물리 삭제됐다. canonical curation 표면만 본다.
     assert (
         await curation_repo.get_feature_curation_group(
             migrated_session, feature_id=feature_id, public_only=True

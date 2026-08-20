@@ -576,128 +576,128 @@ test.describe("live/poi-cache-targets (read-only)", () => {
     await expect(page.getByText("target을 선택하세요")).toBeVisible({ timeout: 15000 });
   });
 
-  test("poi deep-link ?target=curated[0] loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?target=${F.CURATED_IDS[0]}`);
+  test("poi deep-link ?target=item[0] loads heading", async ({ page }) => {
+    await page.goto(`/admin/poi-cache-targets?target=${F.CURATION_ITEM_IDS[0]}`);
     await expectHeading(page, HEADINGS.poi);
   });
 
-  test("poi deep-link ?target=curated[1] loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?target=${F.CURATED_IDS[1]}`);
+  test("poi deep-link ?target=item[1] loads heading", async ({ page }) => {
+    await page.goto(`/admin/poi-cache-targets?target=${F.CURATION_ITEM_IDS[1]}`);
     await expectHeading(page, HEADINGS.poi);
   });
 
-  test("poi deep-link ?target=curated[2] loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?target=${F.CURATED_IDS[2]}`);
+  test("poi deep-link ?target=item[2] loads heading", async ({ page }) => {
+    await page.goto(`/admin/poi-cache-targets?target=${F.CURATION_ITEM_IDS[2]}`);
     await expectHeading(page, HEADINGS.poi);
   });
 
-  test("poi deep-link ?target=curated[3] loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?target=${F.CURATED_IDS[3]}`);
+  test("poi deep-link ?target=item[3] loads heading", async ({ page }) => {
+    await page.goto(`/admin/poi-cache-targets?target=${F.CURATION_ITEM_IDS[3]}`);
     await expectHeading(page, HEADINGS.poi);
   });
 
-  test("poi deep-link ?target=curated[4] loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?target=${F.CURATED_IDS[4]}`);
+  test("poi deep-link ?target=item[4] loads heading", async ({ page }) => {
+    await page.goto(`/admin/poi-cache-targets?target=${F.CURATION_ITEM_IDS[4]}`);
     await expectHeading(page, HEADINGS.poi);
   });
 
-  test("poi deep-link ?target=curated[5] loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?target=${F.CURATED_IDS[5]}`);
+  test("poi deep-link ?target=item[5] loads heading", async ({ page }) => {
+    await page.goto(`/admin/poi-cache-targets?target=${F.CURATION_ITEM_IDS[5]}`);
     await expectHeading(page, HEADINGS.poi);
   });
 
-  test("poi deep-link ?target=curated[6] loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?target=${F.CURATED_IDS[6]}`);
+  test("poi deep-link ?target=item[6] loads heading", async ({ page }) => {
+    await page.goto(`/admin/poi-cache-targets?target=${F.CURATION_ITEM_IDS[6]}`);
     await expectHeading(page, HEADINGS.poi);
   });
 
-  test("poi deep-link ?target=curated[7] loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?target=${F.CURATED_IDS[7]}`);
+  test("poi deep-link ?target=item[7] loads heading", async ({ page }) => {
+    await page.goto(`/admin/poi-cache-targets?target=${F.CURATION_ITEM_IDS[7]}`);
     await expectHeading(page, HEADINGS.poi);
   });
 
-  test("poi deep-link ?target=curated[8] loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?target=${F.CURATED_IDS[8]}`);
+  test("poi deep-link ?target=item[8] loads heading", async ({ page }) => {
+    await page.goto(`/admin/poi-cache-targets?target=${F.CURATION_ITEM_IDS[8]}`);
     await expectHeading(page, HEADINGS.poi);
   });
 
-  test("poi deep-link ?target=curated[9] loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?target=${F.CURATED_IDS[9]}`);
+  test("poi deep-link ?target=item[9] loads heading", async ({ page }) => {
+    await page.goto(`/admin/poi-cache-targets?target=${F.CURATION_ITEM_IDS[9]}`);
     await expectHeading(page, HEADINGS.poi);
   });
 
-  test("poi deep-link ?target=curated[10] loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?target=${F.CURATED_IDS[10]}`);
+  test("poi deep-link ?target=item[10] loads heading", async ({ page }) => {
+    await page.goto(`/admin/poi-cache-targets?target=${F.CURATION_ITEM_IDS[10]}`);
     await expectHeading(page, HEADINGS.poi);
   });
 
-  test("poi deep-link ?target=curated[11] loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?target=${F.CURATED_IDS[11]}`);
+  test("poi deep-link ?target=item[11] loads heading", async ({ page }) => {
+    await page.goto(`/admin/poi-cache-targets?target=${F.CURATION_ITEM_IDS[11]}`);
     await expectHeading(page, HEADINGS.poi);
   });
 
-  test("poi deep-link ?target=curated[12] loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?target=${F.CURATED_IDS[12]}`);
+  test("poi deep-link ?target=item[12] loads heading", async ({ page }) => {
+    await page.goto(`/admin/poi-cache-targets?target=${F.CURATION_ITEM_IDS[12]}`);
     await expectHeading(page, HEADINGS.poi);
   });
 
-  test("poi deep-link ?target=curated[13] loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?target=${F.CURATED_IDS[13]}`);
+  test("poi deep-link ?target=item[13] loads heading", async ({ page }) => {
+    await page.goto(`/admin/poi-cache-targets?target=${F.CURATION_ITEM_IDS[13]}`);
     await expectHeading(page, HEADINGS.poi);
   });
 
-  test("poi deep-link ?target=curated[14] loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?target=${F.CURATED_IDS[14]}`);
+  test("poi deep-link ?target=item[14] loads heading", async ({ page }) => {
+    await page.goto(`/admin/poi-cache-targets?target=${F.CURATION_ITEM_IDS[14]}`);
     await expectHeading(page, HEADINGS.poi);
   });
 
-  test("poi deep-link ?target=curated[15] loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?target=${F.CURATED_IDS[15]}`);
+  test("poi deep-link ?target=item[15] loads heading", async ({ page }) => {
+    await page.goto(`/admin/poi-cache-targets?target=${F.CURATION_ITEM_IDS[15]}`);
     await expectHeading(page, HEADINGS.poi);
   });
 
-  test("poi deep-link ?target=curated[16] loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?target=${F.CURATED_IDS[16]}`);
+  test("poi deep-link ?target=item[16] loads heading", async ({ page }) => {
+    await page.goto(`/admin/poi-cache-targets?target=${F.CURATION_ITEM_IDS[16]}`);
     await expectHeading(page, HEADINGS.poi);
   });
 
-  test("poi deep-link ?target=curated[17] loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?target=${F.CURATED_IDS[17]}`);
+  test("poi deep-link ?target=item[17] loads heading", async ({ page }) => {
+    await page.goto(`/admin/poi-cache-targets?target=${F.CURATION_ITEM_IDS[17]}`);
     await expectHeading(page, HEADINGS.poi);
   });
 
-  test("poi deep-link ?target=curated[18] loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?target=${F.CURATED_IDS[18]}`);
+  test("poi deep-link ?target=item[18] loads heading", async ({ page }) => {
+    await page.goto(`/admin/poi-cache-targets?target=${F.CURATION_ITEM_IDS[18]}`);
     await expectHeading(page, HEADINGS.poi);
   });
 
-  test("poi deep-link ?target=curated[19] loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?target=${F.CURATED_IDS[19]}`);
+  test("poi deep-link ?target=item[19] loads heading", async ({ page }) => {
+    await page.goto(`/admin/poi-cache-targets?target=${F.CURATION_ITEM_IDS[19]}`);
     await expectHeading(page, HEADINGS.poi);
   });
 
-  test("poi deep-link ?target=curated[20] loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?target=${F.CURATED_IDS[20]}`);
+  test("poi deep-link ?target=item[20] loads heading", async ({ page }) => {
+    await page.goto(`/admin/poi-cache-targets?target=${F.CURATION_ITEM_IDS[20]}`);
     await expectHeading(page, HEADINGS.poi);
   });
 
-  test("poi deep-link ?target=curated[21] loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?target=${F.CURATED_IDS[21]}`);
+  test("poi deep-link ?target=item[21] loads heading", async ({ page }) => {
+    await page.goto(`/admin/poi-cache-targets?target=${F.CURATION_ITEM_IDS[21]}`);
     await expectHeading(page, HEADINGS.poi);
   });
 
-  test("poi deep-link ?target=curated[22] loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?target=${F.CURATED_IDS[22]}`);
+  test("poi deep-link ?target=item[22] loads heading", async ({ page }) => {
+    await page.goto(`/admin/poi-cache-targets?target=${F.CURATION_ITEM_IDS[22]}`);
     await expectHeading(page, HEADINGS.poi);
   });
 
-  test("poi deep-link ?target=curated[23] loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?target=${F.CURATED_IDS[23]}`);
+  test("poi deep-link ?target=item[23] loads heading", async ({ page }) => {
+    await page.goto(`/admin/poi-cache-targets?target=${F.CURATION_ITEM_IDS[23]}`);
     await expectHeading(page, HEADINGS.poi);
   });
 
-  test("poi deep-link ?target=curated[24] loads heading", async ({ page }) => {
-    await page.goto(`/admin/poi-cache-targets?target=${F.CURATED_IDS[24]}`);
+  test("poi deep-link ?target=item[24] loads heading", async ({ page }) => {
+    await page.goto(`/admin/poi-cache-targets?target=${F.CURATION_ITEM_IDS[24]}`);
     await expectHeading(page, HEADINGS.poi);
   });
 

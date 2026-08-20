@@ -1414,44 +1414,6 @@ def test_curation_paths_are_in_openapi(client: TestClient) -> None:
     assert set(template_content) == {"text/csv"}
 
 
-@pytest.mark.unit
-@pytest.mark.parametrize(
-    ("method", "path", "body"),
-    [
-        ("post", "/v1/admin/features/curated", {"feature_id": "f_x", "theme_id": "t"}),
-        ("post", "/v1/admin/curated-features", {"feature_id": "f_x", "theme_id": "t"}),
-        ("patch", "/v1/admin/features/curated/cf-1", {"reuse_policy": "allowed"}),
-        ("delete", "/v1/admin/features/curated/cf-1", None),
-        ("post", "/v1/admin/features/curated/cf-1/select", {"reason": "x"}),
-        ("post", "/v1/admin/features/curated/cf-1/unselect", {"reason": "x"}),
-        # body actor·spoofable provenance·reserved marker — 예전엔 각각 422를 검증했다.
-        # 지금은 body를 읽기 전에 410이므로 그 검증은 도달 불가다. 같은 성질은
-        # canonical route가 갖는지가 진짜 질문이고 그건 다른 테스트가 본다.
-        ("post", "/v1/admin/features/curated/cf-1/select", {"actor": "attacker"}),
-        ("post", "/v1/admin/features/curated", {"selection_origin": "external_api"}),
-        ("post", "/v1/admin/features/curated", {"feature_id": "__detach__"}),
-    ],
-)
-def test_legacy_curated_write_routes_are_fenced_410(
-    client: TestClient, method: str, path: str, body: dict[str, object] | None
-) -> None:
-    """T-VN-40A route 층 — legacy admin curated **write** route는 body와 무관하게 410.
-
-    원래 이 자리에는 legacy write route의 입력 검증 테스트 6개가 있었다(body actor
-    거부, spoofable provenance 거부, reserved detach marker 거부, principal 기록). fence
-    뒤로 그 route는 body를 읽기도 전에 410이라 그 검증들은 **도달 불가**다.
-
-    410인 이유는 설계(plan §40B step 4)가 "legacy admin surface는 같은 release에서 제거하며
-    redirect/no-op parameter를 두지 않는다"고 했기 때문이다. 물리 삭제(40C)는 soak 뒤에만
-    가능하므로(ADR-075 결정 4) 그때까지 이 route는 읽기 전용이다.
-    """
-    call = getattr(client, method)
-    response = call(path, json=body) if body is not None else call(path)
-    assert response.status_code == 410, (
-        f"{method.upper()} {path} -> {response.status_code}. "
-        "legacy write route가 410이 아니면 T-VN-40A route fence가 풀린 것이다."
-    )
-    assert "T-VN-40A" in response.text
 
 
 @pytest.mark.unit

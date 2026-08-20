@@ -138,8 +138,9 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
   Feature merge가 충돌 해소용으로 archive한 detached legacy projection은 이후 trigger source가
   될 수 없다.
 - legacy cross-title 이동은 target collection을 잡은 뒤 source parent를 역순 잠그지 않고
-  `curation_items` row만 잠근다. migration 0065는 과거 mutable slug 재사용으로 탈취된
-  active/archived projection을 명시적 `legacy_projection_id`로 자동 복구한다. durable owner link가
+  `curation_items` row만 잠갔다. migration 0065는 과거 mutable slug 재사용으로 탈취된
+  active/archived projection을 명시적 durable owner link로 자동 복구했다(그 링크 컬럼은
+  T-VN-40C `0225`가 legacy 표와 함께 지웠다). durable owner link가
   없는 canonical-only item은 external identity가 일치해도 추정하지 않고 모든 legacy-marker
   collection에서 `draft/admin_only` quarantine에 보존한다. upgrade 전 old projection이 삭제된
   경우도 같은 규칙을 적용한다. mutable metadata marker가 지워진 이력은 immutable `legacy:`

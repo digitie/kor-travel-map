@@ -1573,26 +1573,35 @@ T-222b(2026-06-12)부터 다음 표면은 `openapi.user.json` 사용자 profile�
 - `GET /v1/public/festivals/map-markers`
 - `GET /v1/public/festivals/{feature_id}`
 
-### 8.2 curated_features read profile
+### 8.2 큐레이션 read profile
 
-T-223c-1(2026-06-12)부터 테마형 큐레이션 read 표면은 PinVi import용
-사용자 profile에 포함한다. write/admin 표면(`/v1/admin/curated-*`)은 내부 운영
-profile에만 둔다.
+테마형 큐레이션 read 표면은 PinVi import용 사용자 profile에 포함한다. catalog write와
+collection/item write는 내부 운영 profile에만 둔다.
 
-- `GET /v1/curated-themes`
-- `GET /v1/curated-sources`
-- `GET /v1/curated-features`
-- `GET /v1/curated-features/{curated_feature_id}`
-- `GET /v1/curated-features/{curated_feature_id}/pinvi-copy`
+- `GET /v1/curations`
+- `GET /v1/curations/collections`
+- `GET /v1/curations/collections/{collection_id}`
+- `GET /v1/curations/features/{feature_id}`
 
-### 8.3 legacy curated admin write provenance
+PinVi가 소비하는 service 표면은 별도 principal이다:
+`GET /v1/service/curation-collections/{collection_id}/detail-snapshot`,
+`GET /v1/service/curation-items/{curation_item_id}/detail-snapshot`,
+`GET /v1/service/curation-cutover/identity-mappings`.
 
-전환기 legacy overlay write인 `POST /v1/admin/features/curated`,
-`PATCH /v1/admin/features/curated/{curated_feature_id}`,
-`DELETE /v1/admin/features/curated/{curated_feature_id}`는 admin proxy가 인증한 principal을
-`operator_updated_by`에 기록한다. actor/provenance는 요청 body 계약이 아니며 create body의
-`selection_origin`·`selected_by`·`rejected_by`는 `extra="forbid"` 검증으로 거부한다.
-status가 `curated`/`rejected`이면 같은 principal을 각각 `selected_by`/`rejected_by`에도 기록한다.
+> T-VN-40C(alembic `0225`)가 legacy overlay 표면 13개
+> (`/v1/curated-features*`, `/v1/curated-sources`, `/v1/curated-themes`,
+> `/v1/admin/features/curated*`)를 물리 삭제했다. 제거 목록은
+> `contracts/vnext/openapi-diff-v1.json`의 T-VN-40C tombstone이 정본이고, 계약 원문은
+> [`docs/archive/curated-features-legacy-overlay.md`](../archive/curated-features-legacy-overlay.md)에
+> 동결돼 있다.
+
+### 8.3 curated catalog admin write provenance
+
+catalog write(`POST`/`PATCH`/`DELETE` `/v1/admin/curated-themes`,
+`/v1/admin/curated-sources`, `/v1/admin/curated-source-rules`)는 admin proxy가 인증한
+principal을 `operator_updated_by`에 기록한다. actor/provenance는 요청 body 계약이 아니며
+body에 담긴 actor 필드는 `extra="forbid"` 검증으로 거부한다. 세 표면 모두 strong ETag +
+`If-Match` CAS이며, 표현(ETag)과 CAS 입력(`row_revision`)을 분리한다.
 
 ### 8.4 curation component identity
 

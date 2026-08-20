@@ -516,7 +516,7 @@ function CuratedFeatureMapClientView({
           </Link>
           <Link
             className={buttonVariants({ variant: "outline" })}
-            href="/admin/curated-features"
+            href="/admin/features/curated"
           >
             큐레이션 관리
           </Link>
