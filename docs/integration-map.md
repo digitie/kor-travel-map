@@ -407,26 +407,24 @@ operation)` **한 행**을 스케줄 job과 공유해 실행이 운영 cursor를
 (`e2e/live/_ops-c7-exact-scope-lock.ts`, T-C7-LIVE-SERIAL). 잠금 없이 병렬로 돌리면 실패가
 실제 회귀인지 경합인지 구분할 수 없다.
 
-### 3.6 PinVi Feature 생성 요청 (T-VN-M04, 2026-08-18 결정 — **미구현**)
+### 3.6 범용 Feature 요청 (T-VN-M04)
 
-PinVi가 Map에 **없는 Feature**를 필요로 할 때, PinVi가 직접 만들지 않고 Map에 **요청**하고
-Map admin이 승인한다. 승인 시 Map이 Feature를 만들고 origin을 `manual_pinvi`로 남긴다.
+외부 consumer가 Map에 없는 Feature를 필요로 하면 직접 생성하지 않고 Map에 요청한다. Map admin만
+승인·거절할 수 있으며, 승인으로 생긴 Feature는 `manual_request` origin과 제출·해결 domain command
+두 인과 edge를 함께 보존한다. PinVi는 이 계약의 첫 consumer일 뿐 endpoint·role·origin은 PinVi에
+종속되지 않는다.
 
-- **방향**: PinVi → Map (요청). 생성 주체는 항상 Map이다.
-- **왜 PinVi가 직접 안 만드나**: Feature ID 체계(`make_feature_id`, ADR-009)와 3축 상태,
-  dedup 판정이 Map 소유다. 밖에서 만들면 그 규칙을 두 곳이 갖게 된다.
-- **origin 불변**: 승인으로 생긴 Feature가 나중에 수정돼도 "PinVi 요청에서 왔다"는 사실은
-  바뀌지 않는다. provider가 같은 실체를 발행하면 **자동 병합하지 않고** Map admin이 판정한다.
-
-2026-08-19 paired fence는 구현 중이다. PinVi draft PR
-[#458](https://github.com/digitie/pinvi/pull/458) `8fec7d3e`는 `new_place` 승인을 503/pending으로
-닫아 Map outbound와 status/ref/reviewer/audit/POI 변경을 모두 막는다. Map draft PR
-[#1016](https://github.com/digitie/kor-travel-map/pull/1016)은 admin UI BFF 전용 생성 token과 기본 off
-route를 준비하지만, 실제 `0225`→`0226` DB cutover와 M04 queue가 끝나기 전에는 활성화하지 않는다.
-
-⚠️ **아직 계약이 없다.** endpoint·요청 body·승인 상태 모델·인증이 전부 미정이고, 정해지면
-이 절과 `docs/tasks.md`의 `T-VN-M04`가 함께 갱신된다. PinVi 쪽 구현을 시작하기 전에 이
-절이 채워져야 한다.
+- **제출**: `POST /v1/service/feature-requests`, `ServiceToken`과 `Idempotency-Key`가 필수다.
+  body는 client UUID `request_id`, `kind`, `name`, 한국 좌표(`lon` 124..132, `lat` 33..39.5),
+  `categories`, 선택 `note`다. 서비스 principal은 `service:feature-request`이고 request는 immutable이다.
+- **발견·결정**: Admin BFF는 `GET /v1/admin/feature-requests?status=pending`으로 대기 요청을 보고,
+  `POST /v1/admin/feature-requests/{request_id}/approve` 또는 `/reject`를 보낸다. 승인은 8자리 category와
+  `P-01`..`P-16` marker만 고르며, 이름·종류·좌표는 제출 payload와 반드시 같다.
+- **결과**: 승인 성공은 200과 terminal `approved`, exact identity 충돌도 durable terminal
+  `exact_conflict` 200으로 남긴다. 이미 처리된 요청의 다른 전이는 409이다. provider가 나중에 같은
+  실체를 발행해도 자동 병합하지 않고 M05의 운영자 판정으로 넘긴다.
+- **권한**: 서비스 제출·admin 승인/거절·raw table DML은 각 SECURITY DEFINER routine 및 executor ACL로
+  분리한다. runtime은 queue relation을 직접 읽거나 쓰지 못한다.
 
 ## 4. 계약 정본 위치
 

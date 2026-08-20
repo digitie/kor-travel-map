@@ -520,6 +520,77 @@ export interface paths {
         patch: operations["patch_admin_curation_item_v1_admin_curations__collection_id__items__curation_item_id__patch"];
         trace?: never;
     };
+    "/v1/admin/feature-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Feature Requests Route
+         * @description Map admin이 pending queue를 UUID를 알기 전부터 발견할 수 있는 목록.
+         */
+        get: operations["list_feature_requests_route_v1_admin_feature_requests_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/feature-requests/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Feature Request Route */
+        get: operations["get_feature_request_route_v1_admin_feature_requests__request_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/feature-requests/{request_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Feature Request Route */
+        post: operations["approve_feature_request_route_v1_admin_feature_requests__request_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/feature-requests/{request_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Feature Request Route */
+        post: operations["reject_feature_request_route_v1_admin_feature_requests__request_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/features": {
         parameters: {
             query?: never;
@@ -2840,6 +2911,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/service/feature-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit Feature Request Route */
+        post: operations["submit_feature_request_route_v1_service_feature_requests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/service/refresh-requests": {
         parameters: {
             query?: never;
@@ -3469,9 +3557,9 @@ export interface components {
             invoker_role: string;
             /**
              * Origin Kind
-             * @constant
+             * @enum {string}
              */
-            origin_kind: "manual_admin";
+            origin_kind: "manual_admin" | "manual_curation" | "manual_request";
             /** Procedure Definer */
             procedure_definer: string;
         };
@@ -8765,6 +8853,100 @@ export interface components {
         FeaturePriceSnapshotResponse: {
             data: components["schemas"]["PriceSnapshotData"];
             meta: components["schemas"]["Meta"];
+        };
+        /** FeatureRequestApprovalInput */
+        FeatureRequestApprovalInput: {
+            /** Category */
+            category: string;
+            /** Marker Color */
+            marker_color: string;
+            /** Marker Icon */
+            marker_icon: string;
+        };
+        /** FeatureRequestCoordInput */
+        FeatureRequestCoordInput: {
+            /** Lat */
+            lat: number;
+            /** Lon */
+            lon: number;
+        };
+        /** FeatureRequestData */
+        FeatureRequestData: {
+            /** Categories */
+            categories: string[];
+            coord: components["schemas"]["FeatureRequestCoordInput"];
+            /** Feature Id */
+            feature_id: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "place" | "event";
+            /** Name */
+            name: string;
+            /** Note */
+            note: string | null;
+            /** Rejection Reason */
+            rejection_reason: string | null;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /** Resolved At */
+            resolved_at: string | null;
+            /** Resolved By Actor */
+            resolved_by_actor: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "approved" | "rejected" | "exact_conflict";
+            /**
+             * Submitted At
+             * Format: date-time
+             */
+            submitted_at: string;
+        };
+        /** FeatureRequestPageData */
+        FeatureRequestPageData: {
+            /** Items */
+            items: components["schemas"]["FeatureRequestData"][];
+        };
+        /** FeatureRequestPageResponse */
+        FeatureRequestPageResponse: {
+            data: components["schemas"]["FeatureRequestPageData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** FeatureRequestRejectInput */
+        FeatureRequestRejectInput: {
+            /** Reason */
+            reason: string;
+        };
+        /** FeatureRequestResponse */
+        FeatureRequestResponse: {
+            data: components["schemas"]["FeatureRequestData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** FeatureRequestSubmitInput */
+        FeatureRequestSubmitInput: {
+            /** Categories */
+            categories?: string[];
+            coord: components["schemas"]["FeatureRequestCoordInput"];
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "place" | "event";
+            /** Name */
+            name: string;
+            /** Note */
+            note?: string | null;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
         };
         /**
          * FeatureSearchData
@@ -15583,6 +15765,262 @@ export interface operations {
             };
             /** @description If-Match 누락 */
             428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_feature_requests_route_v1_admin_feature_requests_get: {
+        parameters: {
+            query?: {
+                status?: ("pending" | "approved" | "rejected" | "exact_conflict") | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureRequestPageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_feature_request_route_v1_admin_feature_requests__request_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureRequestResponse"];
+                };
+            };
+            /** @description Feature 요청 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    approve_feature_request_route_v1_admin_feature_requests__request_id__approve_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeatureRequestApprovalInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureRequestResponse"];
+                };
+            };
+            /** @description admin manual Feature create scope 없음 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Feature 요청 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description pending 상태 아님 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description approval 입력 오류 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 수동 Feature 생성 승인 경계 비활성 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    reject_feature_request_route_v1_admin_feature_requests__request_id__reject_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeatureRequestRejectInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureRequestResponse"];
+                };
+            };
+            /** @description admin manual Feature create scope 없음 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Feature 요청 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description pending 상태 아님 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 거절 입력 오류 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 수동 Feature 생성 승인 경계 비활성 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -23779,6 +24217,78 @@ export interface operations {
             };
             /** @description FEATURE_ALIAS_MAP_INTEGRITY — 저장 행이 canonical 계약 위반 (DB 층 보장 붕괴, 이관 중단 — 파생 등식은 0083부터 계약이 아님) */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    submit_feature_request_route_v1_service_feature_requests_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeatureRequestSubmitInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureRequestResponse"];
+                };
+            };
+            /** @description Feature request service token 없음/불일치 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 다른 service scope token */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description M04 queue credential/activation 전 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

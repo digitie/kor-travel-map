@@ -194,6 +194,22 @@ asyncpg/identity 호환을 포함한 Alembic metadata integration 7건을 통과
 두 PR의 CI·live UI E2E와 provider 병합을 확인한 뒤, 병합 SHA로 map provider pin을 갱신하고
 map PR을 병합한다.
 
+## 2026-08-20 — T-VN-M04 범용 Feature 요청 큐 구현·검증 완료
+
+`0230_m04_feature_request_queue`가 service submit과 Map admin approve/reject를 generic
+queue로 분리했다. `ops.feature_requests`는 immutable submit payload와 submission/resolution
+command FK를 보존하고, approved Feature의 origin은 `manual_request`다. PinVi 고유 이름은
+Map의 M04 식별자·경로·역할·환경변수에서 제거했다.
+
+DB/HTTP 적대 리뷰에서 나온 P0/P1을 모두 반영했다: no-owner/no-privileges restore ACL
+repair, raw queue access preflight, direct procedure payload validation, terminal 409·missing
+404, OpenAPI response 선언, REST catalog 정본. M04 통합 3건과 관련 단위 195건은 green이다.
+
+### 다음 한 작업
+
+Map의 exact OpenAPI commit을 PinVi 최초 consumer branch에 vendor하고 direct Feature create를
+generic request submit으로 cutover한다. 그 뒤 M05를 같은 순서로 진행한다.
+
 ## 2026-08-20 — T-VN-41F1D-E 저장소측 완료 (v4 퇴역 → v5/v7)
 
 live runner 두 개의 신뢰 경계를 v4 compatible-pair manifest에서 v5 pinned runtime

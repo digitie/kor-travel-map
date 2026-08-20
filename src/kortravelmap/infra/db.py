@@ -84,6 +84,17 @@ _MANUAL_FEATURE_PROVENANCE_FUNCTION = "feature.read_admin_manual_feature_provena
 _MANUAL_CURATION_FEATURE_CREATE_PROCEDURE = (
     "feature.create_manual_curation_item_with_feature_command(jsonb,jsonb,bigint)"
 )
+_FEATURE_REQUEST_SUBMIT_PROCEDURE = (
+    "feature.submit_feature_request(uuid,jsonb,bigint)"
+)
+_FEATURE_REQUEST_APPROVE_PROCEDURE = (
+    "feature.approve_feature_request_with_initial_state(uuid,jsonb,bigint)"
+)
+_FEATURE_REQUEST_REJECT_PROCEDURE = (
+    "feature.reject_feature_request(uuid,text,bigint)"
+)
+_FEATURE_REQUEST_READ_FUNCTION = "feature.read_feature_request(uuid)"
+_FEATURE_REQUEST_LIST_FUNCTION = "feature.list_feature_requests(text,integer)"
 
 _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
     {
@@ -210,7 +221,14 @@ _ADMIN_CANCELLATION_SECURITY_DEFINER_FUNCTIONS = frozenset(
 _EXPECTED_RUNTIME_APPLICATION_PROCEDURES = {
     "ktm_feature_api_runtime": (
         _SHARED_RUNTIME_FEATURE_PROCEDURES
-        | frozenset({_MANUAL_FEATURE_CREATE_PROCEDURE})
+        | frozenset(
+            {
+                _MANUAL_FEATURE_CREATE_PROCEDURE,
+                _FEATURE_REQUEST_SUBMIT_PROCEDURE,
+                _FEATURE_REQUEST_APPROVE_PROCEDURE,
+                _FEATURE_REQUEST_REJECT_PROCEDURE,
+            }
+        )
         | _ADMIN_CURATION_FEATURE_PROCEDURES
     ),
     "ktm_feature_dagster_runtime": (
@@ -223,7 +241,13 @@ _EXPECTED_RUNTIME_APPLICATION_PROCEDURES = {
 
 _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS = {
     "ktm_feature_api_runtime": _ADMIN_CANCELLATION_SECURITY_DEFINER_FUNCTIONS
-    | frozenset({_MANUAL_FEATURE_PROVENANCE_FUNCTION}),
+    | frozenset(
+        {
+            _MANUAL_FEATURE_PROVENANCE_FUNCTION,
+            _FEATURE_REQUEST_READ_FUNCTION,
+            _FEATURE_REQUEST_LIST_FUNCTION,
+        }
+    ),
     "ktm_feature_dagster_runtime": frozenset(),
 }
 
@@ -383,6 +407,13 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
             )
         ) AS can_access_feature_creation_origins_directly,
         (
+            has_table_privilege(session_user, 'ops.feature_requests', 'SELECT')
+            OR has_table_privilege(session_user, 'ops.feature_requests', 'INSERT')
+            OR has_table_privilege(session_user, 'ops.feature_requests', 'UPDATE')
+            OR has_table_privilege(session_user, 'ops.feature_requests', 'DELETE')
+            OR has_table_privilege(session_user, 'ops.feature_requests', 'TRUNCATE')
+        ) AS can_access_feature_requests_directly,
+        (
             has_table_privilege(session_user, 'ops.feature_overrides', 'INSERT')
             OR has_table_privilege(session_user, 'ops.feature_overrides', 'UPDATE')
             OR has_table_privilege(session_user, 'ops.feature_overrides', 'DELETE')
@@ -456,6 +487,9 @@ def _runtime_db_privilege_problems(
         ),
         "can_access_feature_creation_origins_directly": (
             "runtime login must not access Feature creation origins directly"
+        ),
+        "can_access_feature_requests_directly": (
+            "runtime login must not access Feature requests directly"
         ),
         "can_mutate_feature_overrides_directly": (
             "runtime login must not mutate ops.feature_overrides directly"

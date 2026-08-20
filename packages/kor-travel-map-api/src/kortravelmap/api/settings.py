@@ -531,6 +531,16 @@ class ApiSettings(BaseSettings):
             "``KOR_TRAVEL_MAP_API_PINVI_CURATION_CUTOVER_MAPPING_TOKEN_SHA256``."
         ),
     )
+    feature_request_token_sha256: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        description=(
+            "Feature 요청 큐 등록 전용 ServiceToken의 lowercase SHA-256 digest. "
+            "generic service/cache-target/admin token은 이 쓰기 권한을 얻지 못한다. env "
+            "``KOR_TRAVEL_MAP_API_FEATURE_REQUEST_TOKEN_SHA256``."
+        ),
+    )
     cursor_signing_secret: SecretStr | None = Field(
         default=None,
         description=(
@@ -911,11 +921,12 @@ class ApiSettings(BaseSettings):
     @field_validator(
         "pinvi_curation_snapshot_token_sha256",
         "pinvi_curation_cutover_mapping_token_sha256",
+        "feature_request_token_sha256",
         mode="before",
     )
     @classmethod
-    def _validate_pinvi_curation_service_token_sha256(cls, value: object) -> object:
-        """빈 문자열을 unset(None)으로 정규화하고 lowercase SHA-256 hex만 받는다.
+    def _validate_scoped_service_token_sha256(cls, value: object) -> object:
+        """scoped token의 빈 문자열을 unset(None)으로 정규화한다.
 
         docker-manager compose는 이 두 env를 ``${NAME:-}``로 항상 주입한다 — PinVi
         raw pair가 비어 있는(T-VN-40 receipt pending, legacy compatible-pair) 배포에서는
@@ -931,19 +942,20 @@ class ApiSettings(BaseSettings):
                 return None
             if _LOWER_SHA256_HEX_PATTERN.fullmatch(value) is None:
                 raise ValueError(
-                    "PinVi curation service token digest must be lowercase SHA-256 hex"
+                    "Scoped service token digest must be lowercase SHA-256 hex"
                 )
         return value
 
     @model_validator(mode="after")
-    def _validate_pinvi_curation_service_tokens_distinct(self) -> ApiSettings:
+    def _validate_scoped_service_tokens_distinct(self) -> ApiSettings:
         digests = {
             "snapshot": self.pinvi_curation_snapshot_token_sha256,
             "cutover mapping": self.pinvi_curation_cutover_mapping_token_sha256,
+            "feature request": self.feature_request_token_sha256,
         }
         configured = {name: digest for name, digest in digests.items() if digest is not None}
         if len(configured) != len(set(configured.values())):
-            raise ValueError("PinVi curation service token digests must be distinct")
+            raise ValueError("Scoped service token digests must be distinct")
         cache_target_digests = {
             principal.token_sha256 for principal in self.cache_target_service_principals
         }
@@ -960,7 +972,7 @@ class ApiSettings(BaseSettings):
         for curation_name, digest in configured.items():
             if digest in cache_target_digests:
                 raise ValueError(
-                    f"PinVi curation {curation_name} token digest must be distinct from "
+                    f"Scoped {curation_name} token digest must be distinct from "
                     "cache-target tokens"
                 )
             for protected_name, protected_secret in protected_secrets.items():
@@ -972,7 +984,7 @@ class ApiSettings(BaseSettings):
                     protected_raw.encode("utf-8")
                 ).hexdigest() == digest:
                     raise ValueError(
-                        f"PinVi curation {curation_name} token digest must be distinct from "
+                        f"Scoped {curation_name} token digest must be distinct from "
                         f"{protected_name}"
                     )
         return self

@@ -30,7 +30,7 @@ barrier로 직렬화한다.
   - [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2` → `T-VN-41C` receipt 승격
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정)**
   - [~] `T-VN-M01`(admin Feature 생성 API foundation 병합, `0226` DB/ACL/route 잔여) → [ ] `T-VN-M02`(origin 보존·불변)
-  - [ ] `T-VN-M03`(curated 동시 생성) ∥ [ ] `T-VN-M04`(PinVi 요청 큐 — cross-repo)
+  - [ ] `T-VN-M03`(curated 동시 생성) ∥ [ ] `T-VN-M04`(범용 Feature 요청 큐 — 첫 consumer는 PinVi)
   - [ ] `T-VN-M05`(provider 발행 시 중복 판정 — 자동 병합 금지)
 - **Lane C — 사문화 정리·미구현 dataset (다른 lane과 무관, 아무 때나)**
 - **최종 cutover**
@@ -871,11 +871,11 @@ dataset에도 없다(kind·lifecycle·publication 무관 전수 검색).
 
 1. **ETL과 무관한 Feature는 admin UI/API로 추가할 수 있다.** provider가 발행하지 않는
    실체(국가정원·테마파크 복합·호수 등)가 대상이다.
-2. **PinVi의 Feature 생성 요청도 같은 API를 쓴다.** PinVi가 직접 만들지 않고 **요청**하며
+2. **외부 consumer의 Feature 생성 요청도 같은 API를 쓴다.** PinVi를 포함한 consumer는 직접 만들지 않고 **요청**하며
    admin이 승인한다.
 3. **curated Feature를 추가할 때 대상 Feature가 없으면** 이 API로 Feature를 만들고
    curation에도 함께 넣는다.
-4. **origin(누가 만들었나)을 구분해 보존한다** — admin 직접 / PinVi 요청 승인 / curation
+4. **origin(누가 만들었나)을 구분해 보존한다** — admin 직접 / 외부 요청 승인 / curation
    추가 중 생성. **Feature가 나중에 수정돼도 origin은 바뀌지 않는다.** ETL이 같은 실체를
    발행하는 상황이 되면 admin이 따로 판정한다.
 
@@ -911,7 +911,7 @@ item을 만들 수 있다.
   (`cache_target_outbox_repo.py`에 `feature.features` 참조 0건).
 - **H34/M01은 `feature.features`를 만드는 표면이다.** `create_feature_with_initial_state`
   procedure를 admin API에 잇는다. cache-target을 건드리지 않는다.
-- **PinVi의 Feature 생성 요청(M04)은 이미 별도 경로다.** PinVi main의
+- **Feature 생성 요청(M04)은 별도 경로다.** 첫 consumer인 PinVi main의
   `feature_requests.py:254`가 `admin_client.create_feature(payload)`로 **`POST /v1/admin/features`**를
   친다(`kor_travel_map_admin.py:3` — "`/v1/admin/features*` change API"). cache-target을 만지지
   않는다(`grep cache_target` 0건). 즉 M04는 41의 outbox를 타지 않고 admin API를 탄다.
@@ -927,12 +927,11 @@ provider Feature와 다르게 취급해야 하는지**(예: provider 재적재�
 
 #### 아직 안 정해진 것
 
-> **2026-08-20 정리**: 아래 7건 중 4건은 ADR-093(proposed, 2026-08-19)이 이미 닫았다 —
+> **2026-08-20 정리**: 아래 7건 중 5건은 ADR-093(proposed, 2026-08-19)과 M04가 이미 닫았다 —
 > `source_type=user_request`·`source_natural_key=manual::<uuid>`와 identity claim(§1),
-> 초기 3축 상태 제거·좌표 required(§4), command isolation `read-committed`(§5).
-> 닫힌 것을 "미정"으로 두면 같은 논의를 다시 하게 되므로 지웠다. 남은 것은 셋이다.
-
-- **PinVi 요청 큐** — 접수 → 승인 → 생성. 요청 자체의 저장 위치와 상태 모델.
+> 초기 3축 상태 제거·좌표 required(§4), command isolation `read-committed`(§5), 범용 Feature
+> 요청 큐의 immutable submit·admin resolve 분리(M04)다. 닫힌 것을 "미정"으로 두면 같은 논의를
+> 다시 하게 되므로 지웠다. 남은 것은 둘이다.
 - **provider가 나중에 같은 실체를 발행하면** — 자동 병합하지 않는다까지는 정해졌다.
   admin에게 무엇을 보여주고 어떤 선택지를 주는지는 미정.
 - **공개 표면 노출** — public API/PinVi snapshot에 수동 Feature가 나가는지, 나간다면 소비자가
@@ -951,7 +950,7 @@ P1 6건 중 셋이 설계 방향을 바꾼다. 실측 근거가 붙어 있어 �
 승인으로 생긴 Feature가 전부 `manual_admin`으로 **영구·불변** 각인된다 — 초안이 스스로
 "불변 컬럼에 추정값을 넣으면 그 추정이 영구 기록"이라며 M01/M02 분리를 반대한 논거가
 자기 자신에게 적용된다.
-→ **M01은 origin을 `manual_admin` 단일 값으로만 발급한다.** `manual_pinvi`/`manual_curation`은
+→ **M01은 origin을 `manual_admin` 단일 값으로만 발급한다.** `manual_request`/`manual_curation`은
 인증 경계가 실제로 갈린 뒤(별도 route 또는 별도 ops-token scope)에만 값 도메인에 넣는다.
 도달 불가능한 값을 미리 등록하면 "구분되고 있다"는 오해까지 영구 기록된다.
 
@@ -1011,13 +1010,13 @@ proposed ADR-093에서 닫았고, exact checkpoint `2aa17c27`에 API·DB 전문 
   이 보강은 runner preflight만 닫은 것이며 route flag는 계속 false다. DB/ACL/backup tranche는
   `0226_m01_manual_feature_create`로만 잇고 실제 활성화·완료 이관은 그 검증 뒤에 한다.
 - [ ] **T-VN-M02 — origin 보존과 불변** (결정 4). origin/claim read model과 Feature 수정·purge,
-  backup/restore에서의 불변을 스키마·테스트로 고정한다. `manual_pinvi`/`manual_curation` 값은 각
+  backup/restore에서의 불변을 스키마·테스트로 고정한다. `manual_request`/`manual_curation` 값은 각
   인증 writer가 생기는 M04/M03 전에는 등록하지 않는다.
 - [ ] **T-VN-M03 — curated 동시 생성** (결정 3). curation import/admin 편집에서 대상 Feature가
   없을 때 M01을 호출해 만들고 `curation_items`에 잇는다. **T-VN-40의 write model과 같은
   표면**이라 그 인수 뒤에 얹는다.
-- [ ] **T-VN-M04 — PinVi 요청 큐** (결정 2). PinVi가 HTTP로 요청하고 admin이 승인한다. 승인
-  시 M01을 호출하고 origin을 `manual_pinvi`로 남긴다. cross-repo 계약이라
+- [ ] **T-VN-M04 — 범용 Feature 요청 큐** (결정 2). 외부 consumer가 HTTP로 요청하고 admin이 승인한다. 승인
+  시 Map이 Feature를 만들고 origin을 `manual_request`로 남긴다. PinVi는 첫 consumer이며 cross-repo 계약은
   `docs/integration-map.md`에도 추가한다.
 - [ ] **T-VN-M05 — provider 발행 시 중복 판정** (결정 4 후단). 수동 Feature와 같은 실체를
   provider가 발행하면 dedup 후보로 올리고 **자동 병합하지 않는다.** admin이 병합/유지/수동본

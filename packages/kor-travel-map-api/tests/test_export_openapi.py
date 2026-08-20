@@ -348,9 +348,10 @@ def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -
         "/v1/service/curation-cutover/identity-mappings",
         "/v1/service/curation-items/{curation_item_id}/detail-snapshot",
         # T-VN-32C alias-map DB-to-DB 이관 표면 (ADR-068 전환·복구 경계 read).
-        "/v1/service/feature-alias-maps",
-        "/v1/service/feature-alias-maps/checksum",
-        "/v1/service/refresh-requests",
+            "/v1/service/feature-alias-maps",
+            "/v1/service/feature-alias-maps/checksum",
+            "/v1/service/feature-requests",
+            "/v1/service/refresh-requests",
         "/v1/service/refresh-requests/{request_id}",
     }
     assert set(service["components"]["securitySchemes"]) == {

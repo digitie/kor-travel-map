@@ -558,6 +558,11 @@ def test_tvn_m01_role_phase_runs_only_after_legacy_0225_boundary() -> None:
     assert 'm01_repair_after_legacy=true' in phase_script
     assert 'run_m01_phase' in phase_script
     assert 'UPDATE(command_id) ON TABLE ops.domain_commands' in phase_script
+    assert "M04 feature request dependency inventory is incomplete" in phase_script
+    assert "feature.manual_feature_identity_key(" in phase_script
+    assert "feature.create_feature_with_initial_state(" in phase_script
+    assert "feature.manual_feature_identity_claims," in phase_script
+    assert "ops.feature_requests TO ktm_feature_request_procedure_owner" in phase_script
     assert 'M01 role must not inherit any application privilege role' in phase_script
     assert "membership.inherit_option IS FALSE" in phase_script
     assert "membership.set_option IS TRUE" in phase_script

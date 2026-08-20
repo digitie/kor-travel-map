@@ -156,7 +156,8 @@ BEGIN
         IF v_revision NOT IN (
             '0226_m01_manual_feature_create',
             '0227_m02_feature_provenance',
-            '0228_m03_manual_curation'
+            '0228_m03_manual_curation',
+            '0230_m04_feature_request_queue'
         ) THEN
             RAISE EXCEPTION
                 'M01 relation marker requires a known M01/M02 head (observed %)',
@@ -194,6 +195,24 @@ BEGIN
     ) THEN
         CREATE ROLE ktm_feature_create_provider_executor NOLOGIN NOINHERIT;
     END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_roles
+        WHERE rolname = 'ktm_feature_request_procedure_owner'
+    ) THEN
+        CREATE ROLE ktm_feature_request_procedure_owner NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_roles
+        WHERE rolname = 'ktm_feature_request_service_executor'
+    ) THEN
+        CREATE ROLE ktm_feature_request_service_executor NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_roles
+        WHERE rolname = 'ktm_feature_request_admin_executor'
+    ) THEN
+        CREATE ROLE ktm_feature_request_admin_executor NOLOGIN NOINHERIT;
+    END IF;
 END
 $m01_roles$;
 
@@ -202,6 +221,12 @@ ALTER ROLE ktm_manual_feature_procedure_owner NOLOGIN NOINHERIT
 ALTER ROLE ktm_manual_feature_admin_executor NOLOGIN NOINHERIT
     NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
 ALTER ROLE ktm_feature_create_provider_executor NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_feature_request_procedure_owner NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_feature_request_service_executor NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_feature_request_admin_executor NOLOGIN NOINHERIT
     NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
 
 -- PostgreSQL 16 membership options are part of the API-only writer boundary.
@@ -214,11 +239,25 @@ GRANT ktm_manual_feature_admin_executor TO ktm_feature_api_runtime
     WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
 GRANT ktm_feature_create_provider_executor TO ktm_feature_dagster_runtime
     WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+GRANT ktm_feature_request_procedure_owner TO ktm_feature_schema_owner
+    WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+GRANT ktm_feature_request_service_executor TO ktm_feature_api_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+GRANT ktm_feature_request_admin_executor TO ktm_feature_api_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
 REVOKE ktm_manual_feature_admin_executor FROM ktm_feature_dagster_runtime;
 REVOKE ktm_feature_create_provider_executor FROM ktm_feature_api_runtime;
+REVOKE ktm_feature_request_service_executor,
+    ktm_feature_request_admin_executor FROM ktm_feature_dagster_runtime;
 
 GRANT USAGE, CREATE ON SCHEMA feature TO ktm_manual_feature_procedure_owner;
 GRANT USAGE ON SCHEMA ops TO ktm_manual_feature_procedure_owner;
+GRANT USAGE, CREATE ON SCHEMA feature TO ktm_feature_request_procedure_owner;
+GRANT USAGE ON SCHEMA ops TO ktm_feature_request_procedure_owner;
+GRANT SELECT, UPDATE(command_id) ON TABLE ops.domain_commands
+    TO ktm_feature_request_procedure_owner;
+GRANT SELECT ON TABLE ops.domain_command_results
+    TO ktm_feature_request_procedure_owner;
 -- wrapper의 immutable command receipt 선점은 ``FOR UPDATE``라 SELECT만으로는
 -- 불가능하다. UPDATE는 LOGIN/runtime에는 주지 않고 procedure owner에만 둔다.
 GRANT SELECT, UPDATE(command_id) ON TABLE ops.domain_commands
@@ -231,6 +270,42 @@ GRANT EXECUTE ON PROCEDURE feature.create_feature_with_initial_state(
     jsonb, text, text, text, jsonb
 ) TO ktm_manual_feature_procedure_owner;
 
+-- 0229 이후 restore repair에서는 M04 procedure owner의 cross-owner dependency
+-- grants도 다시 만들어야 한다. 0225→0226 bootstrap에는 M04 object가 아직 없으므로
+-- relation marker가 없을 때는 아무 grant도 시도하지 않는다.
+DO $m04_owner_dependency_acl$
+BEGIN
+    IF to_regclass('ops.feature_requests') IS NULL THEN
+        RETURN;
+    END IF;
+    IF to_regprocedure('feature.manual_feature_identity_key(text,text,numeric,numeric)') IS NULL
+       OR to_regprocedure('feature.create_feature_with_initial_state(jsonb,text,text,text,jsonb)') IS NULL
+       OR to_regclass('feature.manual_feature_identity_claims') IS NULL
+       OR to_regclass('feature.feature_creation_origins') IS NULL
+       OR to_regclass('ops.domain_commands') IS NULL
+       OR to_regclass('ops.domain_command_results') IS NULL THEN
+        RAISE EXCEPTION 'M04 feature request dependency inventory is incomplete'
+            USING ERRCODE = '55000';
+    END IF;
+    GRANT EXECUTE ON FUNCTION feature.manual_feature_identity_key(
+        text, text, numeric, numeric
+    ) TO ktm_feature_request_procedure_owner;
+    GRANT EXECUTE ON PROCEDURE feature.create_feature_with_initial_state(
+        jsonb, text, text, text, jsonb
+    ) TO ktm_feature_request_procedure_owner;
+    GRANT SELECT, INSERT ON TABLE feature.manual_feature_identity_claims,
+        feature.feature_creation_origins TO ktm_feature_request_procedure_owner;
+    GRANT SELECT, INSERT, UPDATE (
+        status, resolved_at, resolved_by_actor, resolution_command_id,
+        resolved_feature_id, rejection_reason
+    ) ON TABLE ops.feature_requests TO ktm_feature_request_procedure_owner;
+    GRANT SELECT, UPDATE(command_id) ON TABLE ops.domain_commands
+        TO ktm_feature_request_procedure_owner;
+    GRANT SELECT ON TABLE ops.domain_command_results
+        TO ktm_feature_request_procedure_owner;
+END
+$m04_owner_dependency_acl$;
+
 DO $m01_role_assert$
 BEGIN
     IF EXISTS (
@@ -238,7 +313,10 @@ BEGIN
         WHERE rolname IN (
             'ktm_manual_feature_procedure_owner',
             'ktm_manual_feature_admin_executor',
-            'ktm_feature_create_provider_executor'
+            'ktm_feature_create_provider_executor',
+            'ktm_feature_request_procedure_owner',
+            'ktm_feature_request_service_executor',
+            'ktm_feature_request_admin_executor'
         )
           AND (
               rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb
@@ -267,15 +345,26 @@ BEGIN
         'ktm_feature_api_runtime',
         'ktm_feature_create_provider_executor',
         'member'
+    ) OR pg_has_role(
+        'ktm_feature_dagster_runtime',
+        'ktm_feature_request_service_executor',
+        'member'
+    ) OR pg_has_role(
+        'ktm_feature_dagster_runtime',
+        'ktm_feature_request_admin_executor',
+        'member'
     ) OR (
         SELECT count(*)
         FROM pg_catalog.pg_auth_members AS membership
         WHERE membership.roleid IN (
             'ktm_manual_feature_procedure_owner'::regrole,
             'ktm_manual_feature_admin_executor'::regrole,
-            'ktm_feature_create_provider_executor'::regrole
+            'ktm_feature_create_provider_executor'::regrole,
+            'ktm_feature_request_procedure_owner'::regrole,
+            'ktm_feature_request_service_executor'::regrole,
+            'ktm_feature_request_admin_executor'::regrole
         )
-    ) <> 3 OR EXISTS (
+    ) <> 6 OR EXISTS (
         SELECT 1
         FROM pg_catalog.pg_auth_members AS membership
         JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid
@@ -283,7 +372,10 @@ BEGIN
         WHERE granted.rolname IN (
             'ktm_manual_feature_procedure_owner',
             'ktm_manual_feature_admin_executor',
-            'ktm_feature_create_provider_executor'
+            'ktm_feature_create_provider_executor',
+            'ktm_feature_request_procedure_owner',
+            'ktm_feature_request_service_executor',
+            'ktm_feature_request_admin_executor'
         )
           AND NOT (
               (granted.rolname = 'ktm_manual_feature_procedure_owner'
@@ -301,6 +393,21 @@ BEGIN
                   AND membership.admin_option IS FALSE
                   AND membership.inherit_option IS TRUE
                   AND membership.set_option IS FALSE)
+              OR (granted.rolname = 'ktm_feature_request_procedure_owner'
+                  AND member.rolname = 'ktm_feature_schema_owner'
+                  AND membership.admin_option IS FALSE
+                  AND membership.inherit_option IS FALSE
+                  AND membership.set_option IS TRUE)
+              OR (granted.rolname = 'ktm_feature_request_service_executor'
+                  AND member.rolname = 'ktm_feature_api_runtime'
+                  AND membership.admin_option IS FALSE
+                  AND membership.inherit_option IS TRUE
+                  AND membership.set_option IS FALSE)
+              OR (granted.rolname = 'ktm_feature_request_admin_executor'
+                  AND member.rolname = 'ktm_feature_api_runtime'
+                  AND membership.admin_option IS FALSE
+                  AND membership.inherit_option IS TRUE
+                  AND membership.set_option IS FALSE)
           )
     ) THEN
         RAISE EXCEPTION 'M01 procedure owner/executor membership is unsafe';
@@ -312,7 +419,10 @@ BEGIN
         WHERE member.rolname IN (
             'ktm_manual_feature_procedure_owner',
             'ktm_manual_feature_admin_executor',
-            'ktm_feature_create_provider_executor'
+            'ktm_feature_create_provider_executor',
+            'ktm_feature_request_procedure_owner',
+            'ktm_feature_request_service_executor',
+            'ktm_feature_request_admin_executor'
         )
     ) THEN
         RAISE EXCEPTION 'M01 role must not inherit any application privilege role';
@@ -334,6 +444,16 @@ WITH dedicated_routine(signature, owner_role) AS (
        'ktm_manual_feature_procedure_owner'),
       ('feature.reject_manual_feature_evidence_mutation()',
        'ktm_feature_audit_writer')
+      ,('feature.submit_feature_request(uuid,jsonb,bigint)',
+       'ktm_feature_request_procedure_owner')
+      ,('feature.approve_feature_request_with_initial_state(uuid,jsonb,bigint)',
+       'ktm_feature_request_procedure_owner')
+      ,('feature.reject_feature_request(uuid,text,bigint)',
+       'ktm_feature_request_procedure_owner')
+      ,('feature.read_feature_request(uuid)',
+       'ktm_feature_request_procedure_owner')
+      ,('feature.list_feature_requests(text,integer)',
+       'ktm_feature_request_procedure_owner')
 ), existing AS (
     SELECT signature, owner_role, proc.prokind
     FROM dedicated_routine

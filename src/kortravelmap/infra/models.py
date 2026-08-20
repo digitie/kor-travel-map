@@ -106,6 +106,7 @@ __all__ = [
     "FeatureStateTransitionRow",
     "ManualFeatureIdentityClaimRow",
     "FeatureCreationOriginRow",
+    "FeatureRequestRow",
     "FeatureAliasRow",
     "ProviderDatasetRow",
     "ProviderDatasetOperationRow",
@@ -677,11 +678,16 @@ class FeatureCreationOriginRow(Base):
     __tablename__ = "feature_creation_origins"
     __table_args__ = (
         CheckConstraint(
-            "origin_kind = 'manual_admin'",
+            "origin_kind IN ('manual_admin', 'manual_curation', 'manual_request')",
             name=conv("ck_feature_creation_origins_kind"),
         ),
         CheckConstraint(
-            "creator_principal_id = 'admin-ui-bff.manual-feature-create.v1'",
+            "(origin_kind = 'manual_admin' "
+            "AND creator_principal_id = 'admin-ui-bff.manual-feature-create.v1') "
+            "OR (origin_kind = 'manual_curation' "
+            "AND creator_principal_id = 'admin-ui-bff.manual-curation-feature-create.v1') "
+            "OR (origin_kind = 'manual_request' "
+            "AND creator_principal_id = 'feature-request.approval.v1')",
             name=conv("ck_feature_creation_origins_principal"),
         ),
         CheckConstraint(
@@ -689,8 +695,15 @@ class FeatureCreationOriginRow(Base):
             name=conv("ck_feature_creation_origins_actor"),
         ),
         CheckConstraint(
-            "invoker_role = 'ktm_feature_api_runtime' "
-            "AND procedure_definer = 'ktm_manual_feature_procedure_owner'",
+            "(origin_kind = 'manual_admin' "
+            "AND invoker_role = 'ktm_feature_api_runtime' "
+            "AND procedure_definer = 'ktm_manual_feature_procedure_owner') "
+            "OR (origin_kind = 'manual_curation' "
+            "AND invoker_role = 'ktm_feature_api_runtime' "
+            "AND procedure_definer = 'ktm_curation_command_owner') "
+            "OR (origin_kind = 'manual_request' "
+            "AND invoker_role = 'ktm_feature_api_runtime' "
+            "AND procedure_definer = 'ktm_feature_request_procedure_owner')",
             name=conv("ck_feature_creation_origins_roles"),
         ),
         UniqueConstraint(
@@ -730,6 +743,99 @@ class FeatureCreationOriginRow(Base):
     )
     invoker_role: Mapped[str] = mapped_column(Text, nullable=False)
     procedure_definer: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class FeatureRequestRow(Base):
+    """M04의 immutable external submit와 admin-only resolution queue."""
+
+    __tablename__ = "feature_requests"
+    __table_args__ = (
+        CheckConstraint(
+            "submitted_by_principal = 'service:feature-request'",
+            name=conv("ck_feature_requests_principal"),
+        ),
+        CheckConstraint(
+            "jsonb_typeof(request_payload) = 'object' "
+            "AND jsonb_typeof(request_payload -> 'kind') = 'string' "
+            "AND request_payload ->> 'kind' IN ('place', 'event') "
+            "AND jsonb_typeof(request_payload -> 'name') = 'string' "
+            "AND nullif(btrim(request_payload ->> 'name'), '') IS NOT NULL "
+            "AND char_length(request_payload ->> 'name') <= 200 "
+            "AND jsonb_typeof(request_payload -> 'lon') = 'number' "
+            "AND (request_payload ->> 'lon')::numeric BETWEEN 124 AND 132 "
+            "AND jsonb_typeof(request_payload -> 'lat') = 'number' "
+            "AND (request_payload ->> 'lat')::numeric BETWEEN 33 AND 39.5 "
+            "AND jsonb_typeof(request_payload -> 'categories') = 'array' "
+            "AND jsonb_array_length(request_payload -> 'categories') <= 10 "
+            "AND NOT jsonb_path_exists(request_payload, "
+            "'$.categories[*] ? (@.type() != \"string\")') "
+            "AND (NOT request_payload ? 'note' OR ("
+            "jsonb_typeof(request_payload -> 'note') = 'string' "
+            "AND char_length(request_payload ->> 'note') <= 2000))",
+            name=conv("ck_feature_requests_payload"),
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'approved', 'rejected', 'exact_conflict')",
+            name=conv("ck_feature_requests_status"),
+        ),
+        CheckConstraint(
+            "(status = 'pending' AND resolved_at IS NULL AND resolved_by_actor IS NULL "
+            "AND resolution_command_id IS NULL AND resolved_feature_id IS NULL "
+            "AND rejection_reason IS NULL) "
+            "OR (status IN ('approved', 'exact_conflict') AND resolved_at IS NOT NULL "
+            "AND resolved_by_actor IS NOT NULL AND resolution_command_id IS NOT NULL "
+            "AND resolved_feature_id IS NOT NULL AND rejection_reason IS NULL) "
+            "OR (status = 'rejected' AND resolved_at IS NOT NULL "
+            "AND resolved_by_actor IS NOT NULL AND resolution_command_id IS NOT NULL "
+            "AND resolved_feature_id IS NULL "
+            "AND nullif(btrim(rejection_reason), '') IS NOT NULL)",
+            name=conv("ck_feature_requests_resolution"),
+        ),
+        UniqueConstraint(
+            "resolution_command_id",
+            name=conv("uq_feature_requests_resolution_command"),
+        ),
+        UniqueConstraint(
+            "submission_command_id",
+            name=conv("uq_feature_requests_submission_command"),
+        ),
+        ForeignKeyConstraint(
+            ["submission_command_id"],
+            ["ops.domain_commands.command_id"],
+            name=conv("feature_requests_submission_command_id_fkey"),
+        ),
+        ForeignKeyConstraint(
+            ["resolution_command_id"],
+            ["ops.domain_commands.command_id"],
+            name=conv("feature_requests_resolution_command_id_fkey"),
+        ),
+        ForeignKeyConstraint(
+            ["resolved_feature_id"],
+            ["feature.features.feature_uuid"],
+            name=conv("feature_requests_resolved_feature_id_fkey"),
+        ),
+        {"schema": "ops"},
+    )
+
+    request_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    submitted_by_principal: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'service:feature-request'"),
+    )
+    request_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'pending'")
+    )
+    submitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")
+    )
+    submission_command_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_by_actor: Mapped[str | None] = mapped_column(Text)
+    resolution_command_id: Mapped[int | None] = mapped_column(BigInteger)
+    resolved_feature_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    rejection_reason: Mapped[str | None] = mapped_column(Text)
 
 
 # =============================================================================

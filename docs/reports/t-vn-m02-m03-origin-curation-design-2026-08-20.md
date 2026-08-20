@@ -111,7 +111,7 @@ M02는 다음을 SQL catalog와 실제 mutation으로 함께 검증한다.
    SHA-256 root를 함께 기록한다. `--no-owner --no-privileges` restore 뒤 owner repair,
    closed ACL reconciliation, 두 runtime login preflight를 통과하기 전 service를 열지 않는다.
 
-M02는 origin kind를 넓히지 않는다. `manual_pinvi`는 M04의 separate authenticated queue,
+M02는 origin kind를 넓히지 않는다. `manual_request`는 M04의 separate authenticated queue,
 `manual_curation`은 아래 M03 writer와 같은 migration에서만 추가한다.
 
 ## 4. M03 — curation과 manual Feature의 하나의 command
@@ -172,7 +172,7 @@ closed signature, owner, executor privilege와 operation check가 origin의 인�
 M03 migration에서만 `ck_feature_creation_origins_kind`를
 `manual_admin|manual_curation`으로 확장한다. curation origin은 M03 combined procedure에서만
 insert 가능하고, `manual_admin` writer는 계속 `manual_admin` 하나만 쓴다. M04 전에는
-`manual_pinvi`를 constraint, reader, OpenAPI enum 어느 곳에도 넣지 않는다.
+`manual_request`를 constraint, reader, OpenAPI enum 어느 곳에도 넣지 않는다.
 
 `manual_curation` CHECK는 value 목록만 넓히지 않는다. `(origin_kind,
 creator_principal_id, invoker_role, procedure_definer)` 조합을 허용 쌍으로 닫아 cross-pair를
@@ -254,7 +254,7 @@ M03 migration은 parent/import-row/child-command의 immutable linkage와 one-row
 ## 7. 비목표
 
 - provider/manual fuzzy dedup 또는 자동 merge(M05)
-- PinVi request queue와 `manual_pinvi` origin(M04)
+- 범용 Feature request queue와 `manual_request` origin(M04, PinVi는 첫 consumer)
 - public/service API 또는 PinVi snapshot에 provenance/actor/claim 노출
 - M01/M02를 건너뛴 curation CSV 제목·주소 기반 Feature 추정 생성
 - frozen `0200` baseline 및 sidecar 변경

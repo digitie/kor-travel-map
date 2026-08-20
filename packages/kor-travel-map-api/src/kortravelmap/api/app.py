@@ -79,6 +79,7 @@ from kortravelmap.api.routers import (
     admin_curated_router,
     admin_curation_candidates_router,
     admin_curations_router,
+    admin_feature_requests_router,
     admin_features_router,
     admin_files_router,
     admin_issues_router,
@@ -108,6 +109,7 @@ from kortravelmap.api.routers import (
     service_curation_cutover_router,
     service_curation_snapshots_router,
     service_feature_alias_maps_router,
+    service_feature_requests_router,
     weather_router,
 )
 from kortravelmap.api.routers.admin_features import (
@@ -210,6 +212,12 @@ _OPS_FIXTURE_PATH_PREFIX = "/v1/ops/contract-fixtures/c6c-cancel-probe/"
 _ADMIN_MANUAL_FEATURE_CREATE_PATH = "/v1/admin/features"
 _ADMIN_MANUAL_CURATION_FEATURE_CREATE_PATH = (
     "/v1/admin/curations/{collection_id}/items/manual-feature"
+)
+_ADMIN_FEATURE_REQUEST_APPROVE_PATH = (
+    "/v1/admin/feature-requests/{request_id}/approve"
+)
+_ADMIN_FEATURE_REQUEST_REJECT_PATH = (
+    "/v1/admin/feature-requests/{request_id}/reject"
 )
 _ADMIN_BFF_SECURITY: list[dict[str, list[str]]] = [{"AdminBFF": []}]
 _ADMIN_MANUAL_FEATURE_CREATE_SECURITY: list[dict[str, list[str]]] = [
@@ -452,6 +460,8 @@ def _apply_route_security_contract(
     for manual_feature_path in (
         _ADMIN_MANUAL_FEATURE_CREATE_PATH,
         _ADMIN_MANUAL_CURATION_FEATURE_CREATE_PATH,
+        _ADMIN_FEATURE_REQUEST_APPROVE_PATH,
+        _ADMIN_FEATURE_REQUEST_REJECT_PATH,
     ):
         manual_feature_path_item = paths.get(manual_feature_path)
         if not isinstance(manual_feature_path_item, dict):
@@ -1140,6 +1150,10 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             service_feature_alias_maps_router,
             prefix="/v1",
         )
+        application.include_router(
+            service_feature_requests_router,
+            prefix="/v1",
+        )
         # Step D on-demand 상세는 DB(적재된 raw_data) 필요 → features와 동일 gate.
         # raw provider payload이므로 local-dev debug mount에서도 operator BFF를
         # 요구한다. production은 debug_routes_enabled=false라 route 자체가 없다.
@@ -1210,6 +1224,11 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         )
         application.include_router(
             admin_features_router,
+            prefix="/v1",
+            dependencies=admin_dependencies,
+        )
+        application.include_router(
+            admin_feature_requests_router,
             prefix="/v1",
             dependencies=admin_dependencies,
         )

@@ -20,7 +20,7 @@ clean cutover다.
    원자화한다.
 5. claim/origin을 포함하는 최소 backup·restore·ACL·hard-purge 안전망도 M01 활성화 전에 끝낸다.
 
-`manual_pinvi`와 `manual_curation`은 M01 값 도메인에 넣지 않는다. 각 값을 발급할 별도 route와 권한
+`manual_request`와 `manual_curation`은 M01 값 도메인에 넣지 않는다. 각 값을 발급할 별도 route와 권한
 scope가 실제로 배포되는 M04와 M03에서 제약을 확장한다. provider가 같은 실체를 나중에 발행하는
 경우도 M01에서 자동 병합하지 않고 M05의 검토 대상으로 남긴다.
 
@@ -75,10 +75,10 @@ T-VN-39에서 재작성하지 않는다. procedure의 current/target 출력 차�
 
 | 단계 | 이 단계가 소유하는 것 | 이 단계에 넣지 않는 것 |
 |---|---|---|
-| M01 | 기존 admin create clean cutover, UUID, exact claim, `manual_admin`, 전용 BFF 2차 인증, 최소 backup·restore·ACL·hard-purge fence | PinVi·curation origin, fuzzy dedup |
+| M01 | 기존 admin create clean cutover, UUID, exact claim, `manual_admin`, 전용 BFF 2차 인증, 최소 backup·restore·ACL·hard-purge fence | 외부 요청·curation origin, fuzzy dedup |
 | M02 | origin/claim read model, patch·state·purge의 전체 불변 검증, 운영 restore drill | M01 이전의 안전하지 않은 purge 허용 |
 | M03 | T-VN-40 command 경계에서 동시 Feature+curation 생성, 그때 `manual_curation` 추가 | 일반 admin route에서 curation 추론 |
-| M04 | PinVi 요청 queue와 Map 승인 경계, 그때 `manual_pinvi` 추가 | PinVi의 `/v1/admin/features` 직접 호출 |
+| M04 | 범용 Feature 요청 queue와 Map 승인 경계, 그때 `manual_request` 추가 (PinVi는 첫 consumer) | 외부 consumer의 `/v1/admin/features` 직접 호출 |
 | M05 | provider/manual fuzzy 후보 생성과 운영자 판정 | 자동 병합, identity 자동 교체 |
 
 배포는 다음 순서를 바꾸지 않는다.

@@ -237,20 +237,27 @@ capture_evidence_jsonl \
   domain_command_results \
   "SELECT to_jsonb(result)::text FROM ops.domain_command_results AS result ORDER BY result.command_id" \
   "$app_snapshot_id"
+capture_evidence_jsonl \
+  feature_requests \
+  "SELECT to_jsonb(request)::text FROM ops.feature_requests AS request ORDER BY request.request_id" \
+  "$app_snapshot_id"
 release_app_snapshot
 
 claim_jsonl="$evidence_dir/manual_feature_identity_claims.jsonl"
 origin_jsonl="$evidence_dir/feature_creation_origins.jsonl"
 commands_jsonl="$evidence_dir/domain_commands.jsonl"
 results_jsonl="$evidence_dir/domain_command_results.jsonl"
+requests_jsonl="$evidence_dir/feature_requests.jsonl"
 claim_count="$(relation_count "$backup_dir/$claim_jsonl")"
 origin_count="$(relation_count "$backup_dir/$origin_jsonl")"
 commands_count="$(relation_count "$backup_dir/$commands_jsonl")"
 results_count="$(relation_count "$backup_dir/$results_jsonl")"
+requests_count="$(relation_count "$backup_dir/$requests_jsonl")"
 claim_sha256="$(relation_sha256 "$backup_dir/$claim_jsonl")"
 origin_sha256="$(relation_sha256 "$backup_dir/$origin_jsonl")"
 commands_sha256="$(relation_sha256 "$backup_dir/$commands_jsonl")"
 results_sha256="$(relation_sha256 "$backup_dir/$results_jsonl")"
+requests_sha256="$(relation_sha256 "$backup_dir/$requests_jsonl")"
 
 echo "archiving RustFS Docker volume"
 "${compose[@]}" run --rm --no-deps --entrypoint sh \
@@ -279,13 +286,14 @@ cat > "$backup_dir/meta/manifest.json" <<EOF
     "volume_service": "rustfs-perms:/data"
   },
   "manual_feature_evidence": {
-    "schema_version": 1,
+    "schema_version": 2,
     "snapshot_consistency": "pg_export_snapshot",
     "relations": {
       "manual_feature_identity_claims": {"path": "$claim_jsonl", "row_count": $claim_count, "sha256": "$claim_sha256"},
       "feature_creation_origins": {"path": "$origin_jsonl", "row_count": $origin_count, "sha256": "$origin_sha256"},
       "domain_commands": {"path": "$commands_jsonl", "row_count": $commands_count, "sha256": "$commands_sha256"},
-      "domain_command_results": {"path": "$results_jsonl", "row_count": $results_count, "sha256": "$results_sha256"}
+      "domain_command_results": {"path": "$results_jsonl", "row_count": $results_count, "sha256": "$results_sha256"},
+      "feature_requests": {"path": "$requests_jsonl", "row_count": $requests_count, "sha256": "$requests_sha256"}
     }
   }
 }
@@ -294,7 +302,7 @@ EOF
 (
   cd "$backup_dir"
   sha256sum "$app_dump" "$dagster_dump" "$rustfs_archive" \
-    "$claim_jsonl" "$origin_jsonl" "$commands_jsonl" "$results_jsonl" \
+    "$claim_jsonl" "$origin_jsonl" "$commands_jsonl" "$results_jsonl" "$requests_jsonl" \
     > meta/SHA256SUMS
 )
 

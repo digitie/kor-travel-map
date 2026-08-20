@@ -36,7 +36,7 @@ pytestmark = pytest.mark.integration
 #: `alembic upgrade head`가 착지해야 하는 revision. 리터럴을 여러 곳에 박으면
 #: migration마다 흩어진 자리를 모두 고쳐야 하고, 한 곳을 놓치면 그 단언만 조용히
 #: 옛 head를 지킨다. 한 줄로 모은다.
-_EXPECTED_HEAD = "0226_m01_manual_feature_create"
+_EXPECTED_HEAD = "0230_m04_feature_request_queue"
 
 _GATE_DB = "alembic_metadata_gate"
 
@@ -358,13 +358,13 @@ async def test_alembic_check_detects_incomplete_manual_feature_table(
         "(feature_id uuid PRIMARY KEY)",
     )
     # ``alembic check``는 head DB에서만 autogenerate를 수행한다. 여기서는 broken
-    # deploy가 version을 0226으로 남겼지만 table DDL을 끝내지 못한 adversarial
+    # deploy가 현재 head를 남겼지만 table DDL을 끝내지 못한 adversarial
     # catalog를 의도적으로 만든다. include_object가 이름만 보고 숨기면 이 test가
     # 통과해 버리므로, metadata-only ledger 제거를 실증한다.
     await _admin_execute(
         admin_dsn,
         "UPDATE public.alembic_version "
-        "SET version_num = '0226_m01_manual_feature_create'",
+        "SET version_num = '0230_m04_feature_request_queue'",
     )
 
     with pytest.raises(

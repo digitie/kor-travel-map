@@ -345,6 +345,29 @@ prod DB를 확인해 90분 내 write 0건으로 무해를 확인했지만(모든
   migration `0224`의 docstring 안에만 있어 저장소 밖에서 발견되지 않았다.
   `integration-map.md` §3.7과 ADR-088 결과로 올렸다.
 
+## 2026-08-20 — T-VN-M04: consumer 한 곳이 아니라 범용 Feature 요청 큐
+
+외부 service가 Feature relation을 직접 쓰지 않고 immutable 요청만 제출하며, Map admin이
+별도 command로 승인 또는 거절하는 M04 queue를 추가했다. 이름·경로·역할·origin은 모두
+`feature_request`/`manual_request`로 일반화했고, PinVi는 최초 consumer일 뿐 정본 식별자가
+아니다.
+
+승인은 M01 identity claim과 canonical Feature·origin·queue terminal 상태를 한
+READ COMMITTED transaction으로 묶는다. exact duplicate도 예외로 rollback하지 않고
+`exact_conflict` terminal receipt로 commit하므로 재시도가 pending을 되살리지 않는다.
+제출과 승인 command의 두 causal edge는 각각 unique FK로 보존한다.
+
+적대 리뷰에서 확인된 복원 경계도 닫았다. `pg_restore --no-owner --no-privileges` 뒤
+bootstrap/reconciler가 세 owner에 걸친 identity-key·core-create·claim/origin·queue·command
+grant를 다시 만들며, 실제 revoke 뒤 submit+approve smoke로 복구를 검증했다. runtime의
+raw queue SELECT/DML은 catalog preflight와 실제 integration에서 함께 거부한다.
+
+## 2026-08-20 — T-VN-M03: 수동 curation Feature 생성 원자 writer
+
+M03는 curation item과 수동 Feature를 하나의 serialized writer로 생성하고 provenance를
+`manual_curation`으로 남긴다. M01 writer의 READ COMMITTED 계약을 import batch의
+SERIALIZABLE 경로와 섞지 않도록 별도 command/transaction 경계로 만들었다.
+
 ## 2026-08-20 — T-VN-41F1D-E: 세대가 자라도 검사는 자라지 않던 계약
 
 live runner 두 개(`run-c7-prod-live-e2e.sh`, `run-admin-feature-live-acceptance.sh`)가

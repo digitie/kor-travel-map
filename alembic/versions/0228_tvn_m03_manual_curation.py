@@ -410,4 +410,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError("0228_tvn_m03_manual_curation is forward-only")
+    raise RuntimeError("0228_m03_manual_curation is forward-only")

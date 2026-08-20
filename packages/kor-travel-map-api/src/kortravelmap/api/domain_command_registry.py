@@ -172,6 +172,27 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
         replay_headers=("ETag", "Location"),
         transaction_isolation="read-committed",
     ),
+    ("POST", "/v1/service/feature-requests"): _domain(
+        "service.feature-request.submit.v1",
+        "외부 Feature 요청을 immutable queue receipt로 한 번만 등록",
+        success_status=201,
+        transaction_isolation="read-committed",
+    ),
+    ("POST", "/v1/admin/feature-requests/{request_id}/approve"): _domain(
+        "admin.feature-request.approve.v1",
+        _MUTATION_RESULT,
+        # exact claim winner도 queue terminal result로 보존한다. transport 409을
+        # raise하면 outer ledger transaction이 rollback되므로, 승인 결과는 200과
+        # data.status(approved/exact_conflict)로 명시한다.
+        success_status=200,
+        replay_headers=("ETag", "Location"),
+        transaction_isolation="read-committed",
+    ),
+    ("POST", "/v1/admin/feature-requests/{request_id}/reject"): _domain(
+        "admin.feature-request.reject.v1",
+        _MUTATION_RESULT,
+        transaction_isolation="read-committed",
+    ),
     ("POST", "/v1/admin/features/{feature_id}/field-overrides"): _domain(
         "admin.feature.override.author",
         _MUTATION_RESULT,

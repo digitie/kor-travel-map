@@ -211,6 +211,18 @@ async def bootstrap_tvn34_migration_roles(engine: AsyncEngine) -> str:
                         REVOKE ktm_feature_create_provider_executor
                             FROM ktm_feature_api_runtime, ktm_feature_dagster_runtime;
                     END IF;
+                    IF to_regrole('ktm_feature_request_procedure_owner') IS NOT NULL THEN
+                        REVOKE ktm_feature_request_procedure_owner
+                            FROM ktm_feature_schema_owner;
+                    END IF;
+                    IF to_regrole('ktm_feature_request_service_executor') IS NOT NULL THEN
+                        REVOKE ktm_feature_request_service_executor
+                            FROM ktm_feature_api_runtime, ktm_feature_dagster_runtime;
+                    END IF;
+                    IF to_regrole('ktm_feature_request_admin_executor') IS NOT NULL THEN
+                        REVOKE ktm_feature_request_admin_executor
+                            FROM ktm_feature_api_runtime, ktm_feature_dagster_runtime;
+                    END IF;
                 END
                 $m01_legacy_memberships$;
                 """
@@ -330,6 +342,24 @@ async def bootstrap_tvn_m01_role_phase(async_dsn: str) -> None:
                         ) THEN
                             CREATE ROLE ktm_feature_create_provider_executor NOLOGIN NOINHERIT;
                         END IF;
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_catalog.pg_roles
+                            WHERE rolname = 'ktm_feature_request_procedure_owner'
+                        ) THEN
+                            CREATE ROLE ktm_feature_request_procedure_owner NOLOGIN NOINHERIT;
+                        END IF;
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_catalog.pg_roles
+                            WHERE rolname = 'ktm_feature_request_service_executor'
+                        ) THEN
+                            CREATE ROLE ktm_feature_request_service_executor NOLOGIN NOINHERIT;
+                        END IF;
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_catalog.pg_roles
+                            WHERE rolname = 'ktm_feature_request_admin_executor'
+                        ) THEN
+                            CREATE ROLE ktm_feature_request_admin_executor NOLOGIN NOINHERIT;
+                        END IF;
                     END
                     $m01_roles$;
                     """
@@ -342,17 +372,41 @@ async def bootstrap_tvn_m01_role_phase(async_dsn: str) -> None:
                 "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
                 "ALTER ROLE ktm_feature_create_provider_executor NOLOGIN NOINHERIT "
                 "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+                "ALTER ROLE ktm_feature_request_procedure_owner NOLOGIN NOINHERIT "
+                "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+                "ALTER ROLE ktm_feature_request_service_executor NOLOGIN NOINHERIT "
+                "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+                "ALTER ROLE ktm_feature_request_admin_executor NOLOGIN NOINHERIT "
+                "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
                 "GRANT ktm_manual_feature_procedure_owner TO ktm_feature_schema_owner "
                 "WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
                 "GRANT ktm_manual_feature_admin_executor TO ktm_feature_api_runtime "
                 "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
                 "GRANT ktm_feature_create_provider_executor TO ktm_feature_dagster_runtime "
                 "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
+                "GRANT ktm_feature_request_procedure_owner TO ktm_feature_schema_owner "
+                "WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
+                "GRANT ktm_feature_request_service_executor TO ktm_feature_api_runtime "
+                "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
+                "GRANT ktm_feature_request_admin_executor TO ktm_feature_api_runtime "
+                "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
                 "REVOKE ktm_manual_feature_admin_executor FROM ktm_feature_dagster_runtime",
                 "REVOKE ktm_feature_create_provider_executor FROM ktm_feature_api_runtime",
+                "REVOKE ktm_feature_request_service_executor, "
+                "ktm_feature_request_admin_executor FROM ktm_feature_dagster_runtime",
                 "GRANT USAGE, CREATE ON SCHEMA feature "
                 "TO ktm_manual_feature_procedure_owner",
                 "GRANT USAGE ON SCHEMA ops TO ktm_manual_feature_procedure_owner",
+                "GRANT USAGE, CREATE ON SCHEMA feature "
+                "TO ktm_feature_request_procedure_owner",
+                "GRANT USAGE ON SCHEMA ops TO ktm_feature_request_procedure_owner",
+                "GRANT SELECT, UPDATE(command_id) ON TABLE ops.domain_commands "
+                "TO ktm_feature_request_procedure_owner",
+                "GRANT SELECT ON TABLE ops.domain_command_results "
+                "TO ktm_feature_request_procedure_owner",
+                "GRANT EXECUTE ON PROCEDURE feature.create_feature_with_initial_state("
+                "jsonb, text, text, text, jsonb) "
+                "TO ktm_feature_request_procedure_owner",
                 "GRANT SELECT, UPDATE(command_id) ON TABLE ops.domain_commands "
                 "TO ktm_manual_feature_procedure_owner",
                 "GRANT SELECT ON TABLE ops.domain_command_results "

@@ -117,14 +117,18 @@ try:
     raw = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
     evidence = raw["manual_feature_evidence"]
     relations = evidence["relations"]
-    if evidence["schema_version"] != 1 or evidence["snapshot_consistency"] != "pg_export_snapshot":
+    schema_version = evidence["schema_version"]
+    if schema_version not in {1, 2} or evidence["snapshot_consistency"] != "pg_export_snapshot":
         raise ValueError("unsupported evidence manifest")
-    for name in (
+    names = [
         "manual_feature_identity_claims",
         "feature_creation_origins",
         "domain_commands",
         "domain_command_results",
-    ):
+    ]
+    if schema_version >= 2:
+        names.append("feature_requests")
+    for name in names:
         item = relations[name]
         count = item["row_count"]
         digest = item["sha256"]
@@ -157,6 +161,9 @@ PY
         ;;
       domain_command_results)
         select_sql="SELECT to_jsonb(result)::text FROM ops.domain_command_results AS result ORDER BY result.command_id"
+        ;;
+      feature_requests)
+        select_sql="SELECT to_jsonb(request)::text FROM ops.feature_requests AS request ORDER BY request.request_id"
         ;;
       *)
         echo "Restore verification failed: unknown manual evidence relation" >&2

@@ -365,6 +365,7 @@ def test_service_policy_covers_feature_and_weather_batches() -> None:
         # T-VN-32C alias-map DB-to-DB 이관 표면 (ADR-068 전환·복구 경계 read).
         "/v1/service/feature-alias-maps",
         "/v1/service/feature-alias-maps/checksum",
+        "/v1/service/feature-requests",
         "/v1/service/refresh-requests",
         "/v1/service/refresh-requests/{request_id}",
     }
@@ -379,6 +380,8 @@ def test_service_policy_covers_feature_and_weather_batches() -> None:
             expected_enforcement = {"require_curation_cutover_service_principal"}
         elif row.path.startswith("/v1/service/curation-"):
             expected_enforcement = {"require_curation_snapshot_service_principal"}
+        elif row.path == "/v1/service/feature-requests":
+            expected_enforcement = {"require_feature_request_service_principal"}
         assert expected_enforcement & set(row.observed_enforcement)
 
 

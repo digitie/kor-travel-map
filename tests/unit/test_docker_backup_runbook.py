@@ -45,6 +45,8 @@ def test_docker_backup_script_captures_standalone_backup_bundle() -> None:
     assert "feature_creation_origins.jsonl" in script
     assert "domain_commands.jsonl" in script
     assert "domain_command_results.jsonl" in script
+    assert "feature_requests.jsonl" in script
+    assert '"schema_version": 2' in script
     assert '"manual_feature_evidence"' in script
     assert "with-pg-advisory-lock.py" in script
     assert "maintenance:backup-restore" in script
@@ -242,6 +244,8 @@ def test_restore_verify_script_checks_staging_counts() -> None:
     assert "verify_manual_feature_evidence" in script
     assert "manual_feature_evidence" in script
     assert "manual evidence root mismatch" in script
+    assert 'schema_version not in {1, 2}' in script
+    assert "feature_requests" in script
     assert "KOR_TRAVEL_MAP_RESTORE_BACKUP_DIR" in script
 
 

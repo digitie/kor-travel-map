@@ -479,7 +479,7 @@ class AdminFeatureCreationOriginRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    origin_kind: Literal["manual_admin"]
+    origin_kind: Literal["manual_admin", "manual_curation", "manual_request"]
     creation_command_id: int = Field(ge=1)
     creator_principal_id: str
     created_by_actor: str
