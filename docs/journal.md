@@ -54,7 +54,7 @@ stream share barrier가 유지되고 그 값은 hung writer의 최대 정지 시
 상한 + 1은 typed `413`에 partial row 0, compaction이 1,000,000행을 39.5초에 비우고 VACUUM이
 157.6 MB를 되찾는 동안 material/receipt 증거는 남았다.
 
-EXPLAIN 게이트는 fixture를 세 번 고쳐 쓰게 했다. material이 하나면 partial index 둘의 비용이
+EXPLAIN 게이트는 fixture를 다섯 번 고쳐 쓰게 했다. material이 하나면 partial index 둘의 비용이
 같고, compaction 후보가 0개면 planner 선택이 무의미하고, material당 item이 1행이면 정렬이
 공짜다 — 셋 다 "인덱스를 탄다"는 통과를 만들면서 아무 것도 재지 않는다. 그 과정에서 내가
 추가했던 인덱스 하나가 planner에게 선택되는 것을 끝내 보이지 못해 지웠다. 근거를 못 만든

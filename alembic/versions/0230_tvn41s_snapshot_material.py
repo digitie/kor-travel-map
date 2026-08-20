@@ -113,7 +113,6 @@ _RECEIPT_FENCE_TRIGGER: Final[str] = "trg_poi_cache_target_snapshots_append_only
 #: 표시 대상은 둘이다 — 보존 기간을 넘긴 terminal audit material(표시가 영구히 남고 그
 #: receipt의 page는 410이 된다)과 orphan material(표를 비운 뒤 행째 사라진다). 그래서
 #: 이 표시를 "감사용 compaction"으로만 읽으면 안 된다.
-
 _MATERIAL_FENCE_SQL: Final[str] = """
 CREATE FUNCTION ops.reject_snapshot_material_mutation() RETURNS trigger
 LANGUAGE plpgsql AS $$

@@ -161,10 +161,27 @@ async def test_truncate_is_refused_on_both_new_tables(
     assert "cannot truncate" in reason, reason
 
     # 2선: CASCADE로 그 1선을 넘어도 fence가 막는다.
+    #
+    # 그런데 CASCADE는 receipt 표까지 truncate 집합에 끌어들이고, 그 표에는 `0230` 이전부터
+    # 같은 함수를 쓰는 fence가 있다 — 둘이 **같은 문자열**을 낸다. 그대로 두면 materials
+    # fence를 지워도 이 단언이 통과한다(적대 리뷰 지적). receipt fence를 savepoint 안에서
+    # 잠시 끄면 그 문자열을 낼 수 있는 것은 materials fence뿐이다.
+    await migrated_session.execute(
+        text(
+            "ALTER TABLE ops.poi_cache_target_snapshots "
+            "DISABLE TRIGGER trg_poi_cache_target_snapshots_no_truncate"
+        )
+    )
     reason = await _refused(
         migrated_session, "TRUNCATE ops.poi_cache_target_snapshot_materials CASCADE"
     )
     assert "append-only" in reason, reason
+    await migrated_session.execute(
+        text(
+            "ALTER TABLE ops.poi_cache_target_snapshots "
+            "ENABLE TRIGGER trg_poi_cache_target_snapshots_no_truncate"
+        )
+    )
 
     # 참조가 없는 쪽은 곧장 fence다.
     reason = await _refused(
