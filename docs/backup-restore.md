@@ -99,6 +99,22 @@ API request에서 `allow_running=true`를 명시한다.
 forward journal replay를 함께 준비한다(ADR-075). upstream 재수집은 정본·감사·3년 weather 이력의
 복구 수단이 아니다.
 
+### 수동 Feature evidence manifest
+
+M02 이후 `meta/manifest.json`에는 `manual_feature_evidence`가 추가된다. application dump와 같은
+PostgreSQL exported snapshot에서 다음 네 relation을 PK 순서 canonical JSONL로 내보내고, 각 row count와
+SHA-256 root를 기록한다.
+
+- `feature.manual_feature_identity_claims`
+- `feature.feature_creation_origins`
+- `ops.domain_commands`
+- `ops.domain_command_results`
+
+복구 verify는 staging DB에서 동일 JSONL root를 재계산해 manifest와 비교한다. count/root가 하나라도
+다르거나 manifest가 없으면 swap/cache epoch fence를 진행하지 않는다. owner repair, closed ACL reconcile,
+API/Dagster runtime preflight는 별도 activation gate로 유지한다. 이 경계가 모두 완결되기 전에는 manual
+Feature route activation을 허용하지 않는다.
+
 `scripts/docker-backup.sh`, `scripts/docker-restore.sh`,
 `scripts/docker-restore-swap.sh`는 `scripts/with-pg-advisory-lock.py`를 통해
 PostgreSQL advisory lock `maintenance:backup-restore`를 잡고 실행된다. lock이 이미

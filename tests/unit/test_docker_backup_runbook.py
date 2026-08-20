@@ -39,6 +39,13 @@ def test_docker_backup_script_captures_standalone_backup_bundle() -> None:
     assert "rustfs-data.tar.gz" in script
     assert "manifest.json" in script
     assert "SHA256SUMS" in script
+    assert "pg_export_snapshot" in script
+    assert "--snapshot=$snapshot_id" in script
+    assert "manual_feature_identity_claims.jsonl" in script
+    assert "feature_creation_origins.jsonl" in script
+    assert "domain_commands.jsonl" in script
+    assert "domain_command_results.jsonl" in script
+    assert '"manual_feature_evidence"' in script
     assert "with-pg-advisory-lock.py" in script
     assert "maintenance:backup-restore" in script
     assert "write-domain-command-marker.py" in script
@@ -232,6 +239,10 @@ def test_restore_verify_script_checks_staging_counts() -> None:
     assert "information_schema.tables" in script
     assert "docker volume inspect" in script
     assert "file_count" in script
+    assert "verify_manual_feature_evidence" in script
+    assert "manual_feature_evidence" in script
+    assert "manual evidence root mismatch" in script
+    assert "KOR_TRAVEL_MAP_RESTORE_BACKUP_DIR" in script
 
 
 @pytest.mark.unit

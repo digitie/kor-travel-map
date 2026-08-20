@@ -88,9 +88,11 @@ if [[ "$RESTORE_SWAP_SKIP_VERIFY" == "1" && "$KOR_TRAVEL_MAP_COMMAND_RECOVERY" !
   marker_verification="skipped"
 else
   KOR_TRAVEL_MAP_RESTORE_APP_DB="$RESTORE_APP_DB" \
-    KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB="$RESTORE_DAGSTER_DB" \
-    KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME="$RESTORE_RUSTFS_VOLUME" \
-    bash "$ROOT_DIR/scripts/docker-restore-verify.sh"
+  KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB="$RESTORE_DAGSTER_DB" \
+  KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME="$RESTORE_RUSTFS_VOLUME" \
+  KOR_TRAVEL_MAP_RESTORE_BACKUP_DIR="${KOR_TRAVEL_MAP_RESTORE_BACKUP_DIR:-}" \
+  KOR_TRAVEL_MAP_RESTORE_BACKUP_ID="${KOR_TRAVEL_MAP_RESTORE_BACKUP_ID:-}" \
+  bash "$ROOT_DIR/scripts/docker-restore-verify.sh"
   if [[ "$KOR_TRAVEL_MAP_COMMAND_RECOVERY" == "1" ]]; then
     marker_verification="recovery_performed"
   fi
@@ -116,9 +118,11 @@ if [[ "$RESTORE_SWAP_APPLY" == "1" ]]; then
   "${COMPOSE_COMMAND[@]}" up -d rustfs-perms rustfs rustfs-init api frontend dagster dagster-daemon
   if [[ "$RESTORE_SWAP_SKIP_VERIFY" != "1" || "$KOR_TRAVEL_MAP_COMMAND_RECOVERY" == "1" ]]; then
     KOR_TRAVEL_MAP_RESTORE_APP_DB="$RESTORE_APP_DB" \
-      KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB="$RESTORE_DAGSTER_DB" \
-      KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME="$RESTORE_RUSTFS_VOLUME" \
-      bash "$ROOT_DIR/scripts/docker-restore-verify.sh"
+    KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB="$RESTORE_DAGSTER_DB" \
+    KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME="$RESTORE_RUSTFS_VOLUME" \
+    KOR_TRAVEL_MAP_RESTORE_BACKUP_DIR="${KOR_TRAVEL_MAP_RESTORE_BACKUP_DIR:-}" \
+    KOR_TRAVEL_MAP_RESTORE_BACKUP_ID="${KOR_TRAVEL_MAP_RESTORE_BACKUP_ID:-}" \
+    bash "$ROOT_DIR/scripts/docker-restore-verify.sh"
   fi
   marker_effect_state="swap_applied"
 else
