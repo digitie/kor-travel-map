@@ -2499,10 +2499,11 @@ async def _seed_snapshot_material(
         text(
             "INSERT INTO ops.poi_cache_target_snapshot_materials ("
             "material_id, external_system, restore_epoch, "
-            "material_high_watermark_relay_order, item_count, merkle_root, "
-            "materialized_at) VALUES ("
+            "material_high_watermark_relay_order, safe_high_watermark_relay_order, "
+            "item_count, merkle_root, materialized_at) VALUES ("
             "CAST(:material_id AS uuid), :external_system, 1, :material_order, "
-            ":item_count, :merkle_root, now() - interval '2 hours')"
+            ":material_order, :item_count, :merkle_root, "
+            "now() - interval '2 hours')"
         ),
         {
             "material_id": material_id,
@@ -2520,7 +2521,6 @@ async def _seed_snapshot_receipt(
     snapshot_id: str,
     material_id: str,
     external_system: str,
-    material_order: int,
     created_at: str,
     expires_at: str,
     receipt_kind: str = "generic",
@@ -2531,10 +2531,9 @@ async def _seed_snapshot_receipt(
         text(
             "INSERT INTO ops.poi_cache_target_snapshots ("
             "snapshot_id, material_id, receipt_kind, external_system, "
-            "high_watermark_relay_order, material_high_watermark_relay_order, "
             "created_at, expires_at) VALUES ("
             "CAST(:snapshot_id AS uuid), CAST(:material_id AS uuid), "
-            ":receipt_kind, :external_system, :material_order, :material_order, "
+            ":receipt_kind, :external_system, "
             f"{created_at}, {expires_at})"
         ),
         {
@@ -2542,7 +2541,6 @@ async def _seed_snapshot_receipt(
             "material_id": material_id,
             "receipt_kind": receipt_kind,
             "external_system": external_system,
-            "material_order": material_order,
         },
     )
 
@@ -2591,7 +2589,6 @@ async def test_generic_snapshot_gc_is_bounded_and_preserves_referenced_snapshot(
         snapshot_id=expired_id,
         material_id=expired_material,
         external_system=system,
-        material_order=0,
         created_at="now() - interval '2 hours'",
         expires_at="now() - interval '1 hour'",
     )
@@ -2600,7 +2597,6 @@ async def test_generic_snapshot_gc_is_bounded_and_preserves_referenced_snapshot(
         snapshot_id=referenced_id,
         material_id=referenced_material,
         external_system=system,
-        material_order=1,
         created_at="now() - interval '2 hours'",
         expires_at="now() - interval '1 hour'",
     )
@@ -2750,7 +2746,6 @@ async def test_generic_snapshot_capacity_excludes_expired_and_referenced_copies(
             snapshot_id=snapshot_id,
             material_id=material_id,
             external_system=system,
-            material_order=material_order,
             created_at=(
                 "now() - interval '3 hours'"
                 if expired
@@ -2877,7 +2872,6 @@ async def test_background_snapshot_gc_round_robins_systems_and_observes_once(
         snapshot_id="a3000000-0000-4000-8000-000000000001",
         material_id=first_material,
         external_system=first_system,
-        material_order=0,
         created_at="now() - interval '2 hours'",
         expires_at="now() - interval '1 hour'",
     )
@@ -2886,7 +2880,6 @@ async def test_background_snapshot_gc_round_robins_systems_and_observes_once(
         snapshot_id="a3000000-0000-4000-8000-000000000002",
         material_id=second_material,
         external_system=second_system,
-        material_order=0,
         created_at="now() - interval '2 hours'",
         expires_at="now() - interval '1 hour'",
     )

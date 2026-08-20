@@ -103,11 +103,6 @@ SELECT stream.restore_epoch,
          SELECT max(event.relay_order)
          FROM ops.poi_cache_target_outbox_events AS event
          WHERE event.external_system = stream.external_system
-       ), 0) AS high_watermark_relay_order,
-       COALESCE((
-         SELECT max(event.relay_order)
-         FROM ops.poi_cache_target_outbox_events AS event
-         WHERE event.external_system = stream.external_system
            AND event.event_type = 'cache_target.state_applied'
        ), 0) AS material_high_watermark_relay_order
 FROM ops.poi_cache_target_streams AS stream
@@ -146,29 +141,27 @@ FOR SHARE OF stream
 _INSERT_MATERIAL_SQL = """
 INSERT INTO ops.poi_cache_target_snapshot_materials (
     material_id, external_system, restore_epoch,
-    material_high_watermark_relay_order, item_count, material_bytes,
-    merkle_root, materialized_at
+    material_high_watermark_relay_order, safe_high_watermark_relay_order,
+    item_count, material_bytes, merkle_root, materialized_at
 ) VALUES (
     CAST(:material_id AS uuid), :external_system, :restore_epoch,
-    :material_high_watermark_relay_order, :item_count, :material_bytes,
-    :merkle_root, clock_timestamp()
+    :material_high_watermark_relay_order, :safe_high_watermark_relay_order,
+    :item_count, :material_bytes, :merkle_root, clock_timestamp()
 )
 RETURNING materialized_at
 """
 
 #: receipt는 자기 시점에 새로 만든다. 그래서 재사용해도 만료 시각을 물려받지 않고
 #: 언제나 full TTL로 시작한다 — 앞판의 "최소 잔여 TTL" 검사가 필요 없어진 이유다.
+#: replay cursor는 receipt가 아니라 material이 갖는다(`safe_high_watermark_relay_order`).
 _INSERT_RECEIPT_SQL = f"""
 INSERT INTO ops.poi_cache_target_snapshots (
     snapshot_id, material_id, receipt_kind, external_system,
-    high_watermark_relay_order, material_high_watermark_relay_order,
     created_at, expires_at
 )
 SELECT
     CAST(:snapshot_id AS uuid), CAST(:material_id AS uuid), :receipt_kind,
-    :external_system, :high_watermark_relay_order,
-    :material_high_watermark_relay_order,
-    issued_at, issued_at + {_SNAPSHOT_TTL_SQL}
+    :external_system, issued_at, issued_at + {_SNAPSHOT_TTL_SQL}
 FROM (SELECT clock_timestamp() AS issued_at) AS clock
 RETURNING created_at, expires_at
 """
@@ -193,11 +186,12 @@ INSERT INTO ops.poi_cache_target_snapshot_material_items (
 #: page를 보지 않는다.
 _GET_SNAPSHOT_SQL = """
 SELECT snapshot.snapshot_id, snapshot.material_id, snapshot.receipt_kind,
-       snapshot.external_system, snapshot.high_watermark_relay_order,
-       snapshot.material_high_watermark_relay_order,
-       snapshot.created_at, snapshot.expires_at,
+       snapshot.external_system, snapshot.created_at, snapshot.expires_at,
        snapshot.expires_at > now() AS valid,
        material.restore_epoch, material.item_count, material.merkle_root,
+       material.material_high_watermark_relay_order,
+       material.safe_high_watermark_relay_order
+         AS high_watermark_relay_order,
        material.compacted_at
 FROM ops.poi_cache_target_snapshots AS snapshot
 JOIN ops.poi_cache_target_snapshot_materials AS material
@@ -216,8 +210,10 @@ FOR SHARE OF snapshot, material
 #: 강제하므로 정렬·LIMIT이 필요 없다. 둘 이상 나오면 그것이 사고이므로 그대로 터진다.
 _GET_REUSABLE_MATERIAL_SQL = """
 SELECT material.material_id, material.external_system, material.restore_epoch,
-       material.material_high_watermark_relay_order, material.item_count,
-       material.material_bytes, material.merkle_root, material.materialized_at
+       material.material_high_watermark_relay_order,
+       material.safe_high_watermark_relay_order AS high_watermark_relay_order,
+       material.item_count, material.material_bytes, material.merkle_root,
+       material.materialized_at
 FROM ops.poi_cache_target_snapshot_materials AS material
 WHERE material.external_system = :external_system
   AND material.restore_epoch = :restore_epoch
@@ -617,7 +613,8 @@ _GET_RECONCILIATION_SNAPSHOT_SQL = """
 SELECT request.request_id, request.status AS reconciliation_status,
        request.phase_version,
        snapshot.snapshot_id, snapshot.external_system, material.restore_epoch,
-       snapshot.high_watermark_relay_order, material.item_count,
+       material.safe_high_watermark_relay_order AS high_watermark_relay_order,
+       material.item_count,
        material.merkle_root, snapshot.created_at, snapshot.expires_at,
        stream.consumer_id, stream.control_version
 FROM ops.poi_cache_target_reconciliation_requests AS request
@@ -639,8 +636,8 @@ SELECT request.request_id, request.external_system, request.status,
        stream.consumer_id, stream.restore_epoch AS stream_restore_epoch,
        stream.control_version,
        material.restore_epoch, material.restore_epoch AS snapshot_restore_epoch,
-       snapshot.high_watermark_relay_order, material.item_count,
-       material.merkle_root
+       material.safe_high_watermark_relay_order AS high_watermark_relay_order,
+       material.item_count, material.merkle_root
 FROM ops.poi_cache_target_reconciliation_requests AS request
 JOIN ops.poi_cache_target_streams AS stream
   ON stream.external_system = request.external_system
@@ -665,7 +662,7 @@ LEFT JOIN LATERAL (
          snapshot.snapshot_id,
          material.restore_epoch AS snapshot_restore_epoch,
          material.item_count, material.merkle_root,
-         snapshot.high_watermark_relay_order,
+         material.safe_high_watermark_relay_order AS high_watermark_relay_order,
          request.created_at AS reconciliation_created_at
   FROM ops.poi_cache_target_reconciliation_requests AS request
   LEFT JOIN ops.poi_cache_target_snapshots AS snapshot
@@ -700,7 +697,9 @@ LEFT JOIN ops.poi_cache_target_outbox_deliveries AS delivery
   ON delivery.event_id = event.event_id
 LEFT JOIN LATERAL (
   SELECT fixed.snapshot_id, fixed_material.item_count, fixed_material.merkle_root,
-         fixed.high_watermark_relay_order, fixed.created_at
+         fixed_material.safe_high_watermark_relay_order
+           AS high_watermark_relay_order,
+         fixed.created_at
   FROM ops.poi_cache_target_snapshots AS fixed
   JOIN ops.poi_cache_target_snapshot_materials AS fixed_material
     ON fixed_material.material_id = fixed.material_id
@@ -1453,17 +1452,15 @@ async def _mint_receipt(
     *,
     material: Mapping[str, Any],
     receipt_kind: str,
-    high_watermark_relay_order: int,
 ) -> dict[str, Any]:
     """material 하나에 새 receipt를 붙인다.
 
     generic page와 reconciliation이 같은 material을 공유하는 지점이다. 각자 receipt를
     만들기 때문에 만료 시각을 물려받지 않고, 공유가 양방향이 된다.
 
-    `high_watermark_relay_order`는 **재사용 시점**의 값이다. membership을 정하는 것은
-    `cache_target.state_applied` relay order뿐이고 그 동일성은 호출자가
-    `FOR SHARE OF stream` 아래에서 이미 확인했다. 사이에 낀 비-membership event는
-    membership을 바꾸지 않으므로 더 높은 cursor를 그대로 쓰는 편이 정확하다.
+    replay cursor는 여기서 정하지 않는다. material이 **처음 고정될 때** 관측한 값을
+    쓴다 — 재사용 시점의 더 높은 값을 광고하면 그 사이에 낀 비-membership event를
+    consumer가 건너뛴다.
     """
 
     snapshot_id = str(uuid4())
@@ -1475,10 +1472,6 @@ async def _mint_receipt(
                 "material_id": material["material_id"],
                 "receipt_kind": receipt_kind,
                 "external_system": material["external_system"],
-                "high_watermark_relay_order": high_watermark_relay_order,
-                "material_high_watermark_relay_order": material[
-                    "material_high_watermark_relay_order"
-                ],
             },
         )
     ).one()
@@ -1486,7 +1479,6 @@ async def _mint_receipt(
         **dict(material),
         "snapshot_id": snapshot_id,
         "receipt_kind": receipt_kind,
-        "high_watermark_relay_order": high_watermark_relay_order,
         "created_at": issued._mapping["created_at"],
         "expires_at": issued._mapping["expires_at"],
     }
@@ -1509,6 +1501,9 @@ async def _persist_snapshot_material(
                 "restore_epoch": header["restore_epoch"],
                 "material_high_watermark_relay_order": header[
                     "material_high_watermark_relay_order"
+                ],
+                "safe_high_watermark_relay_order": header[
+                    "high_watermark_relay_order"
                 ],
                 "item_count": header["item_count"],
                 "material_bytes": scan.material_bytes,
@@ -1567,7 +1562,6 @@ async def _persist_snapshot_material(
             session,
             material=header,
             receipt_kind=receipt_kind,
-            high_watermark_relay_order=int(header["high_watermark_relay_order"]),
         ),
         tuple(return_items),
     )
@@ -1873,7 +1867,6 @@ async def _reuse_or_build_material(
         session,
         material=material,
         receipt_kind=receipt_kind,
-        high_watermark_relay_order=int(identity["high_watermark_relay_order"]),
     )
     if return_limit <= 0:
         return header, ()
@@ -1928,7 +1921,6 @@ async def _create_generic_snapshot(
             session,
             material=material,
             receipt_kind="generic",
-            high_watermark_relay_order=int(identity["high_watermark_relay_order"]),
         )
         item_rows = (
             await session.execute(
@@ -2771,7 +2763,6 @@ async def _seal_cache_target_reconciliation(
             session,
             material=header,
             receipt_kind="reconciliation",
-            high_watermark_relay_order=int(identity["high_watermark_relay_order"]),
         )
     await session.execute(
         text(_SEAL_RECONCILIATION_SQL),

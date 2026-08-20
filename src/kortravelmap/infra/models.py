@@ -6262,6 +6262,8 @@ class PoiCacheTargetSnapshotMaterialRow(Base):
     __table_args__ = (
         CheckConstraint(
             "restore_epoch > 0 AND material_high_watermark_relay_order >= 0 "
+            "AND safe_high_watermark_relay_order "
+            ">= material_high_watermark_relay_order "
             "AND item_count >= 0 "
             "AND (material_bytes IS NULL OR material_bytes >= 0)",
             name=conv("ck_poi_cache_target_snapshot_materials_counts"),
@@ -6277,7 +6279,6 @@ class PoiCacheTargetSnapshotMaterialRow(Base):
         UniqueConstraint(
             "material_id",
             "external_system",
-            "material_high_watermark_relay_order",
             name=conv("uq_cache_target_snapshot_materials_receipt"),
         ),
         Index(
@@ -6313,6 +6314,13 @@ class PoiCacheTargetSnapshotMaterialRow(Base):
     )
     restore_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
     material_high_watermark_relay_order: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+    )
+    #: material을 처음 고정할 때 관측한 **전역** relay order. 모든 receipt가 이 값을
+    #: replay cursor로 광고한다. 재사용 시점의 더 높은 값을 쓰면 그 사이에 낀
+    #: 비-membership event를 consumer가 건너뛴다.
+    safe_high_watermark_relay_order: Mapped[int] = mapped_column(
         BigInteger,
         nullable=False,
     )
@@ -6388,24 +6396,17 @@ class PoiCacheTargetSnapshotRow(Base):
             name=conv("ck_poi_cache_target_snapshots_receipt_kind"),
         ),
         CheckConstraint(
-            "material_high_watermark_relay_order >= 0 "
-            "AND high_watermark_relay_order >= material_high_watermark_relay_order",
-            name=conv("ck_poi_cache_target_snapshots_cursor"),
-        ),
-        CheckConstraint(
             "expires_at > created_at",
             name=conv("ck_poi_cache_target_snapshots_ck_cache_target_snapshots_expiry"),
         ),
-        # material의 `external_system`/material order와 묶는다. 두 열을 receipt에
-        # 남긴 이유가 조회 술어와 위 CHECK인데, 복합 FK가 없으면 그 사본이 material과
-        # 조용히 갈라질 수 있다.
+        # material의 `external_system`과 묶는다. receipt가 그 열을 들고 있는 이유는
+        # stream FK와 조회 술어인데, 복합 FK가 없으면 그 사본이 material과 조용히
+        # 갈라질 수 있다.
         ForeignKeyConstraint(
-            ["material_id", "external_system", "material_high_watermark_relay_order"],
+            ["material_id", "external_system"],
             [
                 "ops.poi_cache_target_snapshot_materials.material_id",
                 "ops.poi_cache_target_snapshot_materials.external_system",
-                "ops.poi_cache_target_snapshot_materials"
-                ".material_high_watermark_relay_order",
             ],
             name="fk_cache_target_snapshots_material",
             ondelete="RESTRICT",
@@ -6452,14 +6453,6 @@ class PoiCacheTargetSnapshotRow(Base):
     )
     material_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     receipt_kind: Mapped[str] = mapped_column(Text, nullable=False)
-    high_watermark_relay_order: Mapped[int] = mapped_column(
-        BigInteger,
-        nullable=False,
-    )
-    material_high_watermark_relay_order: Mapped[int] = mapped_column(
-        BigInteger,
-        nullable=False,
-    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

@@ -444,8 +444,9 @@ def test_reuse_identity_filters_material_events_but_snapshot_cursor_stays_global
 
     assert "event.event_type = 'cache_target.state_applied'" in identity_sql
     assert "material_high_watermark_relay_order" in identity_sql
-    # 재사용 receipt가 자기 시점 cursor를 받으려면 identity가 전역 HWM도 함께 줘야 한다.
-    assert "AS high_watermark_relay_order" in identity_sql
+    # identity는 membership을 정하는 값만 준다. replay cursor는 material이 처음
+    # 고정될 때 관측한 값이고 material row에 남는다 — 재사용 시점에 다시 재지 않는다.
+    assert "AS high_watermark_relay_order" not in identity_sql
     assert "AS high_watermark_relay_order" in capture_sql
     assert "event.event_type = 'cache_target.state_applied'" in capture_sql
     assert "AS material_high_watermark_relay_order" in capture_sql
@@ -709,6 +710,7 @@ async def test_create_snapshot_reuses_exact_unreferenced_material(
         "external_system": "pinvi",
         "restore_epoch": 3,
         "material_high_watermark_relay_order": 5,
+        "high_watermark_relay_order": 6,
         "item_count": 0,
         "merkle_root": "a" * 64,
     }
@@ -737,8 +739,9 @@ async def test_create_snapshot_reuses_exact_unreferenced_material(
     assert header["snapshot_id"] != reusable["material_id"]
     assert header["created_at"] == issued
     assert header["expires_at"] == issued + timedelta(hours=2)
-    # cursor는 **재사용 시점**의 전역 HWM이다. material HWM(5)이 아니라 8이어야 한다.
-    assert header["high_watermark_relay_order"] == 8
+    # cursor는 material이 들고 온 값 그대로다. 재사용 시점에 다시 재면 그 사이에 낀
+    # 비-membership event를 consumer가 건너뛴다.
+    assert header["high_watermark_relay_order"] == 6
     assert "pg_try_advisory_xact_lock" in session.calls[0][0]
     assert "set_config('lock_timeout'" in session.calls[1][0]
     assert "FOR SHARE OF stream" in session.calls[2][0]

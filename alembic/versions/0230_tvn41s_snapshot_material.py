@@ -26,21 +26,22 @@ PK/FK는 `(material_id, row_number)`로 옮긴다. 같은 identity에 root/count
   material이 그 identity를 영구 점유해서, 같은 source 상태가 다시 필요해졌을 때 새
   material을 만들 수 없다. `WHERE compacted_at IS NULL` partial unique로 "살아 있는
   material은 identity마다 하나"만 강제한다.
-- **`safe_high_watermark_relay_order`를 두지 않았다.** membership을 정하는 것은
-  `cache_target.state_applied` event의 relay order뿐이고, 재사용 시점에 그 값의 동일성을
-  `FOR SHARE OF stream` 아래에서 다시 확인한다. 그 사이에 낀 비-membership event는
-  membership을 바꾸지 않으므로, 재사용 receipt는 자기 시점의 더 높은 cursor를 그대로
-  쓰는 것이 안전하고 더 정확하다. 쓰이지 않을 보수적 하한을 열로 박지 않는다.
+- **`safe_high_watermark_relay_order`는 초안대로 둔다.** 처음에는 뺐다 — "재사용
+  시점의 더 높은 cursor가 더 정확하다"고 봤는데 틀렸다. material HWM과 전역 HWM 사이에
+  낀 비-membership event는 membership을 바꾸지 않지만 **consumer가 아직 처리하지 않은
+  event**다. 더 높은 cursor를 광고하면 consumer가 그것들을 건너뛴다.
+  `test_generic_snapshot_reuse_ignores_nonmaterial_outbox_tail`이 그 자리를 잡았다.
+  material이 처음 고정될 때 관측한 전역 HWM을 적고 모든 receipt가 그 값을 쓴다.
 - **`material_bytes`는 NULL을 허용한다.** canonical leaf byte 수는 core의 leaf 인코딩
   (`_leaf_material`)이 정한다. 이 migration이 그 인코딩을 SQL로 옮겨 적으면 두 정의가
   갈라진다. 0230 이전 material에는 실측이 없으므로 **발명하지 않고 NULL로 둔다**.
 
-receipt에 남긴 열의 기준. `external_system`은 stream FK와 거의 모든 조회 술어가 쓰므로
-남긴다. `material_high_watermark_relay_order`는 기존 CHECK
-(`high_watermark_relay_order >= material_high_watermark_relay_order`)를 정규화 과정에서
-조용히 잃지 않기 위해 남기고, 복합 FK로 material의 값과 묶어 denormalization이 갈라질
-수 없게 한다. `restore_epoch`/`item_count`/`merkle_root`는 그 둘 중 어느 역할도 하지
-않으므로 material에서만 읽는다.
+receipt에 남긴 열의 기준. `external_system`만 남는다 — stream FK와 거의 모든 조회
+술어가 쓰기 때문이고, 복합 FK로 material의 값과 묶어 사본이 갈라질 수 없게 한다. 두 HWM은
+둘 다 material로 간다(위 참조). 그래서 기존 CHECK
+`high_watermark_relay_order >= material_high_watermark_relay_order`는 사라지지 않고
+material 안의 `safe_high_watermark_relay_order >= material_high_watermark_relay_order`가
+된다. `restore_epoch`/`item_count`/`merkle_root`도 material에서만 읽는다.
 
 fence. `ops.poi_cache_target_snapshots`와 `..._snapshot_items`에는
 `ops.reject_cache_target_history_mutation()` append-only trigger가 걸려 있다. 두 가지를
@@ -98,11 +99,13 @@ BEGIN
       USING ERRCODE = '55000';
   END IF;
   IF (NEW.material_id, NEW.external_system, NEW.restore_epoch,
-      NEW.material_high_watermark_relay_order, NEW.item_count,
+      NEW.material_high_watermark_relay_order,
+      NEW.safe_high_watermark_relay_order, NEW.item_count,
       NEW.material_bytes, NEW.merkle_root, NEW.materialized_at)
      IS DISTINCT FROM
      (OLD.material_id, OLD.external_system, OLD.restore_epoch,
-      OLD.material_high_watermark_relay_order, OLD.item_count,
+      OLD.material_high_watermark_relay_order,
+      OLD.safe_high_watermark_relay_order, OLD.item_count,
       OLD.material_bytes, OLD.merkle_root, OLD.materialized_at) THEN
     RAISE EXCEPTION 'snapshot material compaction must not change the material'
       USING ERRCODE = '55000';
@@ -186,6 +189,7 @@ def _create_material_tables() -> None:
                 external_system text NOT NULL,
                 restore_epoch bigint NOT NULL,
                 material_high_watermark_relay_order bigint NOT NULL,
+                safe_high_watermark_relay_order bigint NOT NULL,
                 item_count bigint NOT NULL,
                 material_bytes bigint,
                 merkle_root text NOT NULL,
@@ -198,11 +202,12 @@ def _create_material_tables() -> None:
                     REFERENCES ops.poi_cache_target_streams(external_system)
                     ON DELETE RESTRICT,
                 CONSTRAINT uq_cache_target_snapshot_materials_receipt
-                    UNIQUE (material_id, external_system,
-                            material_high_watermark_relay_order),
+                    UNIQUE (material_id, external_system),
                 CONSTRAINT ck_poi_cache_target_snapshot_materials_counts
                     CHECK (restore_epoch > 0
                            AND material_high_watermark_relay_order >= 0
+                           AND safe_high_watermark_relay_order
+                               >= material_high_watermark_relay_order
                            AND item_count >= 0
                            AND (material_bytes IS NULL OR material_bytes >= 0)),
                 CONSTRAINT ck_poi_cache_target_snapshot_materials_root
@@ -323,12 +328,17 @@ def _backfill_materials() -> None:
             f"""
             INSERT INTO {_MATERIALS} (
                 material_id, external_system, restore_epoch,
-                material_high_watermark_relay_order, item_count, material_bytes,
+                material_high_watermark_relay_order,
+                safe_high_watermark_relay_order, item_count, material_bytes,
                 merkle_root, materialized_at
             )
             SELECT CAST(min(CAST(snapshot_id AS text)) AS uuid),
                    external_system, restore_epoch,
-                   material_high_watermark_relay_order, min(item_count), NULL,
+                   material_high_watermark_relay_order,
+                   -- receipt마다 값이 다를 수 있다. 보수적으로 **가장 낮은** 것을
+                   -- 고른다 — cursor를 높게 잡으면 consumer가 event를 건너뛴다.
+                   min(high_watermark_relay_order),
+                   min(item_count), NULL,
                    min(merkle_root), min(created_at)
             FROM {_RECEIPTS}
             GROUP BY external_system, restore_epoch,
@@ -489,17 +499,13 @@ def _narrow_receipts() -> None:
                 DROP COLUMN restore_epoch,
                 DROP COLUMN item_count,
                 DROP COLUMN merkle_root,
+                DROP COLUMN high_watermark_relay_order,
+                DROP COLUMN material_high_watermark_relay_order,
                 ADD CONSTRAINT ck_poi_cache_target_snapshots_receipt_kind
                     CHECK (receipt_kind IN ('generic','reconciliation')),
-                ADD CONSTRAINT ck_poi_cache_target_snapshots_cursor
-                    CHECK (material_high_watermark_relay_order >= 0
-                           AND high_watermark_relay_order
-                               >= material_high_watermark_relay_order),
                 ADD CONSTRAINT fk_cache_target_snapshots_material
-                    FOREIGN KEY (material_id, external_system,
-                                 material_high_watermark_relay_order)
-                    REFERENCES {_MATERIALS} (material_id, external_system,
-                                             material_high_watermark_relay_order)
+                    FOREIGN KEY (material_id, external_system)
+                    REFERENCES {_MATERIALS} (material_id, external_system)
                     ON DELETE RESTRICT
             """
         )
