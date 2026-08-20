@@ -42,6 +42,21 @@ receipt에 남긴 열의 기준. `external_system`은 stream FK와 거의 모든
 수 없게 한다. `restore_epoch`/`item_count`/`merkle_root`는 그 둘 중 어느 역할도 하지
 않으므로 material에서만 읽는다.
 
+fence. `ops.poi_cache_target_snapshots`와 `..._snapshot_items`에는
+`ops.reject_cache_target_history_mutation()` append-only trigger가 걸려 있다. 두 가지를
+한다.
+
+- **backfill UPDATE 동안만 receipt fence를 끈다.** 0229는 fence를 끄지 않았는데, 그것은
+  그 fence가 "비활성 dataset의 rule을 고치지 말라"는 **데이터 정합성** 규칙이라 막히는
+  것 자체가 신호였기 때문이다. 여기 fence는 "receipt는 다시 쓰지 않는다"는 이력 규칙이고,
+  이 migration은 그 이력을 **어디에 담을지**를 바꾸는 구조 변경이라 fence가 말할 것이
+  없다. 같은 transaction 안에서 끄고 되켠다.
+- **새 표에도 같은 fence를 건다.** 정규화하면서 조용히 append-only를 잃지 않게 한다.
+  material item은 legacy item과 똑같이 UPDATE/TRUNCATE만 막는다(compaction DELETE는
+  허용해야 한다). material은 `compacted_at`을 NULL에서 한 번 채우는 것만 허용하고 나머지
+  열이 함께 바뀌면 막는 전용 fence를 쓴다 — root/count가 조용히 다시 쓰이면 감사 증거가
+  증거가 아니게 된다.
+
 forward-only. downgrade는 두지 않는다(ADR-021). 이 migration은 N개 receipt를 material
 하나로 합치므로, 되돌리려면 합쳐진 item을 receipt 수만큼 **다시 복제**해야 한다. 그것은
 이 migration이 없애려는 저장 형태 자체이고, compaction이 한 번이라도 돌면 item은 root와
@@ -66,6 +81,36 @@ _MATERIALS: Final[str] = "ops.poi_cache_target_snapshot_materials"
 _MATERIAL_ITEMS: Final[str] = "ops.poi_cache_target_snapshot_material_items"
 _RECEIPTS: Final[str] = "ops.poi_cache_target_snapshots"
 _LEGACY_ITEMS: Final[str] = "ops.poi_cache_target_snapshot_items"
+
+#: material은 `compacted_at`을 NULL에서 한 번 채우는 것 외에는 다시 쓰지 않는다.
+_RECEIPT_FENCE_TRIGGER: Final[str] = "trg_poi_cache_target_snapshots_append_only"
+
+_MATERIAL_FENCE_SQL: Final[str] = """
+CREATE FUNCTION ops.reject_snapshot_material_mutation() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+  IF OLD.compacted_at IS NOT NULL THEN
+    RAISE EXCEPTION 'snapshot material is already compacted'
+      USING ERRCODE = '55000';
+  END IF;
+  IF NEW.compacted_at IS NULL THEN
+    RAISE EXCEPTION 'snapshot material is append-only except compaction'
+      USING ERRCODE = '55000';
+  END IF;
+  IF (NEW.material_id, NEW.external_system, NEW.restore_epoch,
+      NEW.material_high_watermark_relay_order, NEW.item_count,
+      NEW.material_bytes, NEW.merkle_root, NEW.materialized_at)
+     IS DISTINCT FROM
+     (OLD.material_id, OLD.external_system, OLD.restore_epoch,
+      OLD.material_high_watermark_relay_order, OLD.item_count,
+      OLD.material_bytes, OLD.merkle_root, OLD.materialized_at) THEN
+    RAISE EXCEPTION 'snapshot material compaction must not change the material'
+      USING ERRCODE = '55000';
+  END IF;
+  RETURN NEW;
+END;
+$$
+"""
 
 #: 그룹 안에서 item이 정말 같은지 보는 지문. `target_key`에 구분자가 들어가도 갈라지지
 #: 않도록 길이를 함께 넣는다.
@@ -189,6 +234,33 @@ def _create_material_tables() -> None:
             """
         )
     )
+    op.execute(text(_MATERIAL_FENCE_SQL))
+    op.execute(
+        text(
+            "ALTER FUNCTION ops.reject_snapshot_material_mutation() "
+            "OWNER TO ktm_feature_schema_owner"
+        )
+    )
+    op.execute(
+        text(
+            f"""
+            CREATE TRIGGER trg_poi_cache_target_snapshot_materials_compaction_only
+                BEFORE UPDATE ON {_MATERIALS}
+                FOR EACH ROW
+                EXECUTE FUNCTION ops.reject_snapshot_material_mutation()
+            """
+        )
+    )
+    op.execute(
+        text(
+            f"""
+            CREATE TRIGGER trg_poi_cache_target_snapshot_materials_no_truncate
+                BEFORE TRUNCATE ON {_MATERIALS}
+                FOR EACH STATEMENT
+                EXECUTE FUNCTION ops.reject_cache_target_history_mutation()
+            """
+        )
+    )
     op.execute(
         text(
             f"""
@@ -214,6 +286,28 @@ def _create_material_tables() -> None:
                 CONSTRAINT ck_poi_cache_target_snapshot_material_items_digest
                     CHECK (source_payload_fingerprint ~ '^[0-9a-f]{{64}}$')
             )
+            """
+        )
+    )
+    # legacy item 표와 같은 강도다. compaction DELETE는 허용해야 하므로 UPDATE와
+    # TRUNCATE만 막는다.
+    op.execute(
+        text(
+            f"""
+            CREATE TRIGGER trg_poi_cache_target_snapshot_material_items_append_only
+                BEFORE UPDATE ON {_MATERIAL_ITEMS}
+                FOR EACH ROW
+                EXECUTE FUNCTION ops.reject_cache_target_history_mutation()
+            """
+        )
+    )
+    op.execute(
+        text(
+            f"""
+            CREATE TRIGGER trg_poi_cache_target_snapshot_material_items_no_truncate
+                BEFORE TRUNCATE ON {_MATERIAL_ITEMS}
+                FOR EACH STATEMENT
+                EXECUTE FUNCTION ops.reject_cache_target_history_mutation()
             """
         )
     )
@@ -266,6 +360,11 @@ def _backfill_materials() -> None:
             """
         )
     )
+    # 아래 UPDATE 한 문장만을 위해 끈다. 켜는 것을 같은 함수 안에 둬서, 중간에
+    # 실패하면 transaction이 통째로 되감기고 fence가 꺼진 채 남지 않는다.
+    op.execute(
+        text(f"ALTER TABLE {_RECEIPTS} DISABLE TRIGGER {_RECEIPT_FENCE_TRIGGER}")
+    )
     op.execute(
         text(
             f"""
@@ -287,6 +386,28 @@ def _backfill_materials() -> None:
             """
         )
     )
+    op.execute(
+        text(f"ALTER TABLE {_RECEIPTS} ENABLE TRIGGER {_RECEIPT_FENCE_TRIGGER}")
+    )
+    enabled = (
+        op.get_bind()
+        .execute(
+            text(
+                """
+                SELECT tgenabled
+                FROM pg_trigger
+                WHERE tgname = :trigger
+                  AND tgrelid = 'ops.poi_cache_target_snapshots'::regclass
+                """
+            ),
+            {"trigger": _RECEIPT_FENCE_TRIGGER},
+        )
+        .scalar_one()
+    )
+    if enabled != "O":
+        raise RuntimeError(
+            f"0230: receipt append-only fence가 다시 켜지지 않았습니다(tgenabled={enabled!r})."
+        )
 
 
 def _assert_backfill_lost_nothing() -> None:
