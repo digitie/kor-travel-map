@@ -3,11 +3,17 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
-## 2026-08-20 — T-VN-40B/C 및 인수 ③~⑤ 종결
+## 2026-08-20 — T-VN-40C 및 인수 ③~⑤ 종결
 
-- [x] T-VN-40B / T-VN-40C — **curation write model consumer cutover와 legacy surface 물리 제거**
+> **2026-08-20 정정(사용자 지시)**: 이 절은 원래 `T-VN-40B`를 함께 종결로 적었으나,
+> 40B에는 실측으로 확인된 잔여가 있어 `tasks.md`로 되돌렸다. 종결 근거였던 "candidate
+> lifecycle 전환"은 맞지만, **source rule의 `curated` action 퇴역**은 그 문장이 다루지
+> 않는다 — prod에 `default_action='curated'` 35행이 남아 있고 CHECK도 여전히 그 값을
+> 허용한다(write 경로는 이미 거부). 아래 서술은 40C 범위로 읽는다.
 
-  40B의 candidate lifecycle 전환과 40C의 legacy overlay·snapshot·trigger·`legacy_projection_id`·
+- [x] T-VN-40C — **legacy surface 물리 제거**
+
+  40C의 legacy overlay·snapshot·trigger·`legacy_projection_id`·
   rekey 예외·legacy ACL 제거를 한 흐름으로 닫았다. PR [#1023](https://github.com/digitie/kor-travel-map/pull/1023),
   merge `4c50fe86`의 `0225_tvn40c_physical_removal`이 정본이며, static-zero/runtime 검증과
   PinVi user spec 재-vendor를 포함한 paired receipt 후속은 아래 인수 항목에서 봉인했다.

@@ -22,9 +22,10 @@ barrier로 직렬화한다.
 - **Lane B — frontend hardening·PinVi 소비 API**
   - [~] `T-VN-41C`(#975 병합 / final exact-pair·prod consumer enable 잔여)
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환 — **저장소측 완료 2026-08-20**, live 실행은 배리어 대기)
-    ∥ [~] `T-VN-41S`(#922 1차 구현·리뷰 GO, `0227+` migration/compactor·n150 1M 검증 잔여)
+    ∥ [~] `T-VN-41S`(#922 1차 구현·리뷰 GO, `0228+` migration/compactor·n150 1M 검증 잔여)
   - **배리어**: [ ] `T-VN-FINAL-REBUILD`(주요 개발 완료 후 파괴적 재구축 — 사용자 결정 2026-08-20)
-  - [ ] `T-C7-BROWSER-EVIDENCE`(#995 잔여 — 인수 게이트 아님, T-VN-41 마감 비차단)
+  - [x] `T-C7-BROWSER-EVIDENCE`(#995 잔여 — 2026-08-20 접어넣음)
+  - [ ] `T-VN-40B` 잔여(source rule `curated` action 퇴역, `0227`) — 종결 되돌림
     → [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2` → `T-VN-41C` receipt 승격
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정, T-VN-40 인수 뒤)**
   - [~] `T-VN-M01`(admin Feature 생성 API foundation 병합, `0226` DB/ACL/route 잔여) → [ ] `T-VN-M02`(origin 보존·불변)
@@ -40,9 +41,10 @@ barrier로 직렬화한다.
   - 32~38 join barrier 뒤 Lane B: `T-VN-40B`·`T-VN-40C`는 2026-08-20 prod 적용까지 완료했다.
     - 기반 구현 #974, 40A write fence #994, identity mapping #996, 40B candidate 전환,
       ③ sanctioned live/soak, ④ exact receipt, 40C 물리 삭제와 prod `0225` 적용까지
-      모두 완료했다. 상세 이력은 [`tasks-done.md`](tasks-done.md)에 이관했다.
-    - 인수 ③·④ 중 분리한 [ ] `T-C7-SCOPE-REGISTRY` ∥ [ ] `T-C7-LIVE-SERIAL`도
-      아래 인수 잔여 절이 소유한다.
+      완료했다. 상세 이력은 [`tasks-done.md`](tasks-done.md)에 이관했다.
+      **`T-VN-40B`는 2026-08-20 종결을 되돌렸다**(사용자 지시) — 아래 잔여 절 참조.
+    - 인수 ③·④ 중 분리했던 [x] `T-C7-SCOPE-REGISTRY` ∥ [x] `T-C7-LIVE-SERIAL`은
+      2026-08-20 닫혔다.
   - 최종 단일 cutover: [ ] `T-VN-39`
 - **보류/외부 추적**
   - [ ] `T-VN-H27` — #819 HAProxy WebSocket tunnel timeout(**보류: 운영자 환경 필요**,
@@ -80,7 +82,7 @@ barrier로 직렬화한다.
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
 - migration 정본: 단일 head 유지(2026-08-20 `origin/main` 기준
   `0225_tvn40c_physical_removal`; T-VN-40C는 **착지·prod 적용 완료**,
-  M01 후속이 `0226`, 41S 후속은 `0227+`).
+  M01 후속이 `0226`(#1029 in-flight), **T-VN-40B 잔여가 `0227`**, 41S 후속은 `0228+`).
   prod 적용 head는 배포 직전 live DB에서 다시 확인한다. 후속 migration 소유자는
   PR 직전 단일 head를 재확인한 뒤 번호를 배정한다. 두 lane의 migration-bearing PR은 번호 예약부터
   머지까지 직렬화한다. forward migration 뒤에는 수용 조건이나 실패 복구가 명시적으로 요구하지 않는
@@ -555,17 +557,63 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   기관·종류·발령시각 기반 사건 identity, 발령/해제 lifecycle을 fixture·live 표본으로
   확정한 뒤 `krforest_landslide_forecast_notices`를 `landslide_warning`으로 적재한다.
 
+### T-VN-40B 잔여 — source rule `curated` action 퇴역 (2026-08-20 종결 되돌림)
+
+> 이 항목은 2026-08-20 `tasks-done.md`로 이관됐다가 **사용자 지시로 되돌렸다**. 종결
+> 근거였던 "candidate lifecycle 전환"은 맞지만 아래 사실을 다루지 않는다.
+
+- [ ] **T-VN-40B 잔여 — `curated` action 퇴역 (`0227`)**
+
+  **prod 실측(2026-08-20)**: `feature.curated_source_rules`에 `default_action='curated'`
+  **35행**이 남아 있고 `ck_curated_source_rules_action`은 여전히
+  `('candidate','curated','ignore')`를 허용한다. 반면 write 경로
+  (`curated_repo._TYPED_RULE_ACTIONS`)는 `{candidate, ignore}`만 받는다 — **코드가 거부하는
+  값을 DB가 허용하고, 실제로 그 값이 남아 있다.** 값이 다시 들어올 문은 닫혀 있는데 이미
+  들어온 값은 그대로다.
+
+  ADR-092가 `curated` action을 automatic public membership이 아니라 **candidate 생성**으로
+  재해석해 `candidate`와 같은 뜻이 됐다. 같은 뜻의 값이 둘이면 읽는 사람마다 다르게
+  해석하므로 한쪽을 없앤다.
+
+  - [ ] `0227`이 35행을 `candidate`로 정규화하고 CHECK를 `('candidate','ignore')`로 좁힌다.
+    대상 표의 BEFORE trigger(`inactive provider dataset` write 차단)를 **끄지 않는다** —
+    막히면 어느 rule인지 말하고 멈춘다. 모델 CHECK와 write 허용값이 어긋나면 red가 되는
+    drift 게이트를 함께 둔다. 브랜치 `feat/tvn40b-source-rule-action`.
+  - **번호 제약**: `0226`을 M01이 in-flight(#1029)로 쓰고 있어 `0226` 뒤에 붙는다. 따라서
+    이 PR은 `0226` 착지 뒤에 머지한다.
+
+  **이 항목이 아닌 것**: "legacy candidate rows backfill"은 대상이 없다 — 그 legacy 행은
+  `0225`가 canonical collection/item으로 옮긴 뒤 물리 삭제했고 `theme_feature_candidates`는
+  0행이다. `ck_curated_source_rules_action`은 이미 `convalidated=true`라 VALIDATE할 것도 없다.
+
 ### T-VN-40 후속에서 분리한 C7 인수 잔여
 
 > T-VN-40B/C와 인수 ③~⑤는 2026-08-20에 모두 완료되어 [`tasks-done.md`](tasks-done.md)로
 > 이관했다. 아래는 그 완료와 독립적으로 남은 검증·운영 task만 둔다.
 
 - [ ] **T-FE-MOCK-MANIFEST** — mocked e2e checkpoint manifest
-  (`packages/kor-travel-map-admin/frontend/e2e/mocked-failure-manifest.json`)의
-  `discoveredTests: 284`·`testInventorySha256`가 실측 276과 어긋나 있다. `origin/main`과
-  40C branch 양쪽 모두 276이라 40C가 만든 drift가 아니다. suite 자체는 276/276
-  green(7.2분, flake 0)인데 checkpoint gate만 red다. baseline 재고정 시점은
-  expected-failure 인벤토리 의미와 함께 별도로 정한다.
+  (`packages/kor-travel-map-admin/frontend/e2e/mocked-failure-manifest.json`) 재고정.
+
+  **2026-08-20 실측으로 drift가 세 겹임을 확인했다**(리포터의 identity 규칙을 그대로
+  재현해 셌다 — `e2e/<spec>::<titlePath>`).
+
+  1. **인벤토리** — main 실측 `276` / sha `0083e713…`인데 manifest는 `284` /
+     `57a9e1d8…`이다.
+  2. **expected-failure 원장** — 선언 89건 중 **10건이 존재하지 않는 테스트**를 가리킨다:
+     change-request 화면 삭제 3(`admin-ops` 2 + `change-requests-lifecycle.spec.ts` 전체),
+     M01 문구 변경 1, ADR-088 개명 2(`exact pair`→`membership`,
+     `prerequisite/provider 변경`→`provider dataset ID/ID 변경`), 소멸 4(MOIS 3 + 텍스트 필터 1).
+  3. **baseline 커밋** — `baselineRevision 31edfe0c`가 **저장소에 없는 커밋**이다(squash로
+     사라진 브랜치 커밋). 기준을 재현할 방법이 없다.
+
+  **재고정 방침**: 실행 결과로 통째 재생성하면 지금 실패 중인 것이 조용히 expected가
+  되고, 인벤토리 숫자만 갱신하면 사라진 테스트를 계속 "실패할 예정"이라 선언하는 원장이
+  남는다. 그래서 (a) 존재가 부정된 선언은 사유를 적어 제거, (b) 개명이 명확한 2건만 제목
+  갱신, (c) 인벤토리·baseline은 실측값으로 재고정, (d) runner를 실제로 돌려 게이트 통과를
+  증명한다.
+
+  **부수**: `run-mocked-checkpoint.mjs`의 `E2E_BASE_URL` 기본값이 `http://127.0.0.1:12705`
+  (**운영 admin UI 포트**)다. 명시하지 않고 실행하면 운영 UI를 친다 — 기본값을 없앤다.
 - [x] **T-C7-SCOPE-REGISTRY** — `external_system:*` exact-target scope의 선언 주체·근거·
   운영 조회 표면을 `docs/integration-map.md` 또는 ADR-088 consequences에 정본화한다.
   → 2026-08-20 완료. 근거는 migration `0224`의 docstring 안에만 있어 저장소 밖에서
@@ -665,7 +713,7 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   잔여 없음으로 GO했고, 단위/API/Dagster 집중 231개와 PostGIS stream repository 37개를 통과했다.
 
   **후속 종료선(미완료, #922 유지)** — `0225`는 2026-08-20 착지·prod 적용으로 barrier가
-  풀렸다. 남은 것은 `0227+`(‘0226’은 T-VN-M01이 선점) 물리 모델, 양방향 공유, 실제 compactor와
+  풀렸다. 남은 것은 `0228+`(‘0226’ M01 · ‘0227’ T-VN-40B 잔여가 선점) 물리 모델, 양방향 공유, 실제 compactor와
   repository 410, migration/ACL/EXPLAIN 및 n150 1M+ 증거까지다. 이 항목들이 끝나기 전에는 #922 또는
   T-VN-41S 전체 완료로 표시하지 않는다.
 
