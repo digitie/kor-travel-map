@@ -370,11 +370,18 @@ async def main() -> int:
                     f" DISABLE TRIGGER {RECEIPT_FENCE}"
                 )
             )
+        # receipt가 material에서 물려받은 사본은 `external_system` 하나다(safe cursor를
+        # material로 옮긴 뒤). **존재하는 다른 stream**으로 바꿔야 stream FK는 만족하고
+        # material 복합 FK만 걸린다 — 없는 stream을 쓰면 stream FK가 먼저 막아서 이
+        # 검사가 다른 것을 보게 된다.
+        async with db.begin() as conn:
+            await conn.execute(text("SET ROLE ktm_feature_schema_owner"))
+            await conn.execute(text(_SEED_STREAM_SQL), {"stream": f"{STREAM}:other"})
         try:
             await refused_by(
                 db,
                 "UPDATE ops.poi_cache_target_snapshots"
-                " SET material_high_watermark_relay_order = 6",
+                f" SET external_system = '{STREAM}:other'",
                 "fk_cache_target_snapshots_material",
             )
         finally:
