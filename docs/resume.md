@@ -12,15 +12,21 @@ manifest + v7 rebuild journal로 옮겼다. host attestation version 3 → 4.
 | 추가 대조 | 세 schema head, pinset digest, journal phase/candidate/cancel probe |
 | evidence | `pinned-runtime-generation.json` + `pinned-runtime-rebuild.json` 각각 digest 결박 |
 
-게이트: ruff green, 관련 4개 계약 테스트 + vnext artifact 테스트 전부 green
-(n150 unit+lint 2,369 passed — 남은 10건은 main에서도 같은 `test_docker_dagster_runtime`
-환경 실패). 변이 8종 전부 red 실측.
+적대 리뷰 2명이 둘 다 NO_GO를 냈고 전부 반영했다. 주요 지적:
+host attestation version을 한쪽만 올려 admin lane이 실행 불가였던 것(그 결함을 내 테스트가
+고정하고 있었다), image field 목록을 모듈 상수에서 파생시켜 항등식을 만든 것,
+evidence manifest version을 안 올려 기존 archive가 있는 host에서 preflight가 죽는 것,
+runner가 이미 측정하던 실제 Alembic head를 generation과 대조하지 않던 것.
+ADR-094 추가 + ADR-076/079 superseded.
+
+게이트: ruff / mypy ×3 / lint-imports green, n150 unit+lint **2,394 passed**
+(남은 10건은 main에서도 같은 `test_docker_dagster_runtime` 환경 실패). 변이 배터리
+3회(8종·4종·7종) 전부 red — 그 중 두 번은 "게이트만 넣고 검증은 안 붙인" 상태를 잡았다.
 
 ### 다음 한 작업
 
-**T-VN-41F1D-D1** — n150 파괴적 rebuild로 v5/v7 문서를 처음 생성하고 일곱 image
-attestation을 받는다. 이것이 없으면 새 runner가 읽을 attested input 자체가 없다.
-그 뒤 D2(data-dependent live E2E) → T-VN-41C receipt `pending → candidate_verified`.
+`T-VN-FINAL-REBUILD` 배리어 앞의 개발을 계속한다. F1D-E의 n150 실행은 v5/v7 문서가
+생겨야 가능하고, 그 문서는 파괴적 rebuild가 처음 만든다.
 
 주의: v5/v7은 `require_rebuildable_mode` 아래에서만 생성되고(n150은 rehearsal/
 rebuildable로 해당), runner에는 **root 소유 0600 사본**을 건네야 한다.

@@ -34,6 +34,43 @@ pinset, image 실측 대조, manifest version 고정. 전부 red. 첫 배터리�
 깨져 **변이가 적용되지 않은 채 green을 보고**했는데, 그 green을 증거로 삼지 않고 스크립트를
 순수 Python으로 다시 써서 치환 여부를 `assert`로 확인한 뒤에만 판정하게 고쳤다.
 
+
+**적대 리뷰 2명이 둘 다 NO_GO를 냈고, 둘 다 옳았다.**
+
+가장 큰 것은 내가 한쪽만 올린 version이다. host attestation을 3에서 4로 올리면서
+`admin_feature_live_state.py`의 bootstrap 검증은 3을 계속 요구하도록 남겨 뒀다. v4 문서를
+깔면 bootstrap에서, v3를 유지하면 검증 모듈에서 막혀 **admin lane이 어느 쪽으로도 실행되지
+않는** 상태였다. C7 runner는 자체 bootstrap heredoc을 쓰므로 C7만 돌려서는 보이지 않는다.
+그리고 그 결함을 **내 테스트가 고정하고 있었다** — `assert 'attestation.get("version") != 3'
+in state`가 v4/v5/v7로 이름까지 바꾼 테스트 안에 그대로 남아 CI는 green이었다.
+
+두 번째는 내가 이 세션 내내 남에게 지적해온 그 병을 내가 새로 만든 것이다. image field
+목록을 모듈 상수에서 파생시켜 "모듈이 스스로를 만족하는" 항등식을 만들었다. 리뷰어가 직접
+`pinvi_web`을 지우고 돌려 보니 전체 스위트가 green이었다. 원래 하드코딩 목록의 존재 이유가
+"세대가 **줄면** 잡는다"였는데, 파생은 정확히 그 방향을 잃는다. 기대 목록을 테스트가 다시
+적고, 모듈 상수가 그것과 정확히 같은지 양방향으로 본다.
+
+세 번째는 운영 차단이다. evidence manifest의 key 집합을 바꿔 놓고 `version`을 1로 뒀다.
+기존 evidence archive가 있는 host에서는 첫 실행이 audit preflight의 `unsafe_entries > 0`로
+죽는다 — 그리고 그 host가 바로 이 acceptance를 돌릴 n150이다. version을 2로 올리고, audit은
+v1을 legacy로 인정하되 **그 시절 계약으로 그대로 검사**한다. 과거 증거를 지우게 만들지
+않으면서 "옛것은 무조건 통과"도 아니게 하는 유일한 지점이다.
+
+리뷰어가 준 것 중 가장 값진 지적은 **무료로 얻을 수 있던 실측 결박**이었다. runner는 이미
+Map DB의 실제 Alembic head를 측정해 evidence에만 적고 있었다. image 일곱은 `docker inspect`로
+실측 대조하면서 head 셋만 두 root 문서가 서로 같은지만 봤다. 배포 코드와 DB head 불일치는
+2026-07-27 사고가 지목한 실패 모드다. 이제 측정값과 generation을 대조한다.
+
+그밖에 `_validate_utc_timestamp`가 UTC를 보지 않던 것(tz-aware면 `+09:00`도 통과), journal
+`transaction_id`가 아무것과도 결박되지 않아 장식이던 것, cancel probe만 exact shape 검증에서
+빠져 손으로 적은 `{"stage":"finalized"}`가 통과하던 것, `match=`가 없어 세 guard를 지워도
+green이던 것, 전방 receipt 블록이 `pending` 동안 한 줄도 실행되지 않던 것을 모두 닫았다.
+ADR-094를 추가하고 ADR-076/079를 superseded로 표시했다 — v4 유지를 결정한 ADR을 근거 없이
+뒤집으면 다음 사람이 그 ADR을 들고 되돌리러 온다.
+
+변이 배터리는 세 차례 돌렸다(8종 → 4종 → 7종, 전부 red). 그 중 두 번은 "게이트만 넣고
+검증은 안 붙인" 상태를 배터리가 잡아냈다 — cancel probe exact shape와 evidence v1 legacy 경로다.
+
 실행 전제 하나를 기록해 둔다 — v5/v7은 `require_rebuildable_mode`가 걸려 rehearsal/
 rebuildable에서만 만들어진다. n150은 `rehearsal`/`rebuildable`이라 해당되지만, **아직 두
 파일이 없다**. D1의 파괴적 rebuild가 처음 만든다. 또 ktdm의 state root는 Manager owner
