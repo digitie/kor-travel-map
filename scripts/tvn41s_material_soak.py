@@ -80,16 +80,14 @@ SELECT :stream, 'soak-' || lpad(value::text, 8, '0'), 'deleted', 1, 1,
 FROM generate_series(CAST(:lo AS bigint), CAST(:hi AS bigint)) AS value
 """
 
-_SEED_EVENT_SQL = """
-INSERT INTO ops.poi_cache_target_outbox_events (
-    event_id, event_type, event_scope, external_system, target_key,
-    restore_epoch, source_generation, target_sequence,
-    source_payload_fingerprint, payload_fingerprint, payload, occurred_at
-) VALUES (
-    x_extension.gen_random_uuid(), 'cache_target.state_applied', 'target',
-    :stream, :target_key, 1, 1, :sequence, :fingerprint, :fingerprint,
-    '{}'::jsonb, now()
-)
+#: material identity를 바꿔 재사용을 막는 가장 싼 방법. outbox event로 material
+#: watermark를 올리려면 `target` scope event가 `target_id`를 요구하고 그 FK 때문에
+#: 실제 `ops.poi_cache_targets` 행(좌표 계열 CHECK 포함)이 필요해진다. 여기서 재는 것은
+#: admission이지 fencing이 아니므로 identity의 다른 축인 `restore_epoch`을 올린다.
+_BUMP_RESTORE_EPOCH_SQL = """
+UPDATE ops.poi_cache_target_streams
+SET restore_epoch = restore_epoch + 1, updated_at = now()
+WHERE external_system = :stream
 """
 
 
@@ -118,15 +116,6 @@ async def _seed_source(engine: AsyncEngine, *, rows: int) -> None:
         print(f"    seeded {hi:,}/{rows:,}")
     async with engine.begin() as conn:
         await conn.execute(text("SET ROLE ktm_feature_schema_owner"))
-        await conn.execute(
-            text(_SEED_EVENT_SQL),
-            {
-                "stream": STREAM,
-                "target_key": "soak-00000001",
-                "sequence": 1,
-                "fingerprint": FINGERPRINT,
-            },
-        )
         await conn.execute(text("ANALYZE ops.poi_cache_target_source_heads"))
 
 
@@ -262,16 +251,9 @@ async def main() -> int:
                     "hi": ADMITTED + 1,
                 },
             )
-            # membership을 바꿔 재사용을 막는다 — 재사용하면 admission을 타지 않는다.
-            await conn.execute(
-                text(_SEED_EVENT_SQL),
-                {
-                    "stream": STREAM,
-                    "target_key": f"soak-{ADMITTED + 1:08d}",
-                    "sequence": ADMITTED + 1,
-                    "fingerprint": FINGERPRINT,
-                },
-            )
+            # identity를 바꿔 재사용을 막는다 — 재사용하면 admission을 타지 않고
+            # 이 단계가 아무 것도 재지 않는다.
+            await conn.execute(text(_BUMP_RESTORE_EPOCH_SQL), {"stream": STREAM})
         rejected: str | None = None
         async with AsyncSession(db) as session:
             try:
