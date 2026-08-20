@@ -16,6 +16,7 @@ from kortravelmap.infra.models import Base
 from kortravelmap.infra.runtime_privileges import (
     _OPS_TABLE_PRIVILEGES,
     _ORDINARY_SCHEMA_PRIVILEGES,
+    _runtime_relation_grants,
 )
 
 _OPS_SCHEMA: Final[str] = "ops"
@@ -51,10 +52,49 @@ def test_no_acl_declaration_points_at_a_removed_table() -> None:
     )
 
 
+def test_undeclared_ops_relation_is_refused_not_granted() -> None:
+    """상수가 아니라 동작을 본다 — 선언 없는 ops 표는 권한 대신 이름으로 나와야 한다.
+
+    상수만 보면(`"ops" not in _ORDINARY_SCHEMA_PRIVILEGES`) 분기가 다시 기본값으로
+    떨어져도 green이 될 수 있다. inventory를 직접 통과시켜 판정한다.
+    """
+
+    grants, unknown = _runtime_relation_grants(
+        [
+            {
+                "schema_name": _OPS_SCHEMA,
+                "relation_name": "acl_probe_never_declared",
+                "relation_kind": "r",
+            }
+        ]
+    )
+
+    assert grants == [], f"선언 없는 ops 표에 권한이 나갔습니다: {grants}"
+    assert unknown == [f"{_OPS_SCHEMA}.acl_probe_never_declared"]
+
+
 def test_ops_has_no_silent_schema_default() -> None:
-    """기본값이 남아 있으면 위 두 게이트를 우회해 다시 조용히 권한이 생긴다."""
+    """위 동작 게이트가 기대는 전제 — 기본값 자체가 남아 있으면 안 된다."""
 
     assert _OPS_SCHEMA not in _ORDINARY_SCHEMA_PRIVILEGES
+
+
+def test_provider_sync_still_uses_the_ordinary_schema_default() -> None:
+    """엄격해진 것은 `ops`뿐이다 — 옆 스키마를 함께 잠그면 이 변경의 범위를 넘는다."""
+
+    grants, unknown = _runtime_relation_grants(
+        [
+            {
+                "schema_name": "provider_sync",
+                "relation_name": "source_records",
+                "relation_kind": "r",
+            }
+        ]
+    )
+
+    assert unknown == []
+    assert len(grants) == 1
+    assert "provider_sync" in grants[0]
 
 
 def test_declared_privileges_are_a_subset_of_ordinary_crud() -> None:
