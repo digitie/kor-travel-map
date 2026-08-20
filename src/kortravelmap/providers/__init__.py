@@ -18,7 +18,7 @@ gateway 신규 생성 금지 (ADR-006).
 | ``kor_travel_concierge`` | kor-travel-concierge | YouTube 장소 후보 |
 | ``krairport`` | python-krairport-api | 공항 메타데이터 |
 | ``krex`` | python-krex-api | 휴게소 multi-kind |
-| ``krforest`` | python-krforest-api | 휴양림·수목원 |
+| ``krforest`` | python-krforest-api | 휴양림·수목원·등산로·둘레길 |
 | ``krheritage`` | python-krheritage-api | 국가유산 place/area/event |
 | ``mcst`` | python-mcst-api | 문체부 파일데이터 CSV |
 | ``mois`` | python-mois-api | 인허가 LOCALDATA lifecycle |
@@ -31,11 +31,9 @@ gateway 신규 생성 금지 (ADR-006).
 - ``feature_operation_registry`` — DB operation key → Dagster handler 결박 registry (T-VN-33)
 - ``knps_name_translations`` — ``knps``가 쓰는 이름 대역표
 
-ADR-034의 9단계 **계획 순서**와 미구현 dataset(``krforest_trails`` /
-``krforest_mountain_weather`` / ``krforest_safety_notices`` / ``forest_fire_risk`` /
-``khoa_coastal_notices``)의 정본은 ``docs/architecture/provider-contract.md``다.
-여기에 계획을 다시 적지 않는다 — 2026-05 계획표가 그대로 굳어 존재하지 않는 모듈 3개를
-나열하고 실재하는 6개를 빠뜨린 것이 이 문단을 고쳐 쓰게 된 이유다.
+ADR-034의 9단계 **계획 순서**와 C05B~D 미구현 dataset(``krforest_mountain_weather`` /
+``krforest_wildfire_risk_forecast`` / ``krforest_landslide_forecast_notices``)의 정본은
+``docs/architecture/provider-contract.md``다. C05A route는 이 모듈에서 구현한다.
 
 ADR 참조
 --------
@@ -155,14 +153,22 @@ from kortravelmap.providers.krex import (
 )
 from kortravelmap.providers.krforest import (
     ARBORETUM_CATEGORY,
+    DATASET_KEY_DULLE_TRAILS,
     DATASET_KEY_ARBORETUMS,
+    DATASET_KEY_MOUNTAIN_TRAILS,
     DATASET_KEY_RECREATION_FORESTS,
+    FOREST_ROUTE_CATEGORY,
+    FOREST_ROUTE_MARKER_COLOR,
     KRFOREST_MARKER_COLOR,
     KRFOREST_PROVIDER_NAME,
     RECREATION_FOREST_CATEGORY,
     ForestSpatialItem,
+    ForestTrailItem,
     RecreationForestItem,
     arboretums_to_bundles,
+    dulle_trails_to_bundles,
+    forest_trails_to_bundles,
+    mountain_trails_to_bundles,
     recreation_forests_to_bundles,
 )
 from kortravelmap.providers.krheritage import (
@@ -356,12 +362,20 @@ __all__ = [
     # krforest (T-RV-53, ADR-034 8단계 — 휴양림/수목원, MOIS-sibling)
     "RecreationForestItem",
     "ForestSpatialItem",
+    "ForestTrailItem",
     "recreation_forests_to_bundles",
     "arboretums_to_bundles",
+    "forest_trails_to_bundles",
+    "mountain_trails_to_bundles",
+    "dulle_trails_to_bundles",
     "DATASET_KEY_RECREATION_FORESTS",
     "DATASET_KEY_ARBORETUMS",
+    "DATASET_KEY_MOUNTAIN_TRAILS",
+    "DATASET_KEY_DULLE_TRAILS",
     "RECREATION_FOREST_CATEGORY",
     "ARBORETUM_CATEGORY",
+    "FOREST_ROUTE_CATEGORY",
+    "FOREST_ROUTE_MARKER_COLOR",
     "KRFOREST_MARKER_COLOR",
     "KRFOREST_PROVIDER_NAME",
     # kma (PR#38 short, PR#39 nowcast, PR#41 ultra_short, PR#46 alerts —

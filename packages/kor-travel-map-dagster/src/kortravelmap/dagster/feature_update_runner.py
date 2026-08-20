@@ -65,6 +65,8 @@ from .assets import (
     run_feature_place_standard_tourist_attractions,
     run_feature_price_krex_rest_areas,
     run_feature_price_opinet_stations,
+    run_feature_route_krforest_dulle_trails,
+    run_feature_route_krforest_mountain_trails,
     run_feature_weather_airkorea_air_quality,
     run_feature_weather_krex_rest_areas,
 )
@@ -94,6 +96,8 @@ from .provider_fetchers import (
     fetch_krex_rest_areas,
     fetch_krex_traffic_notices,
     fetch_krforest_arboretums,
+    fetch_krforest_dulle_trails,
+    fetch_krforest_mountain_trails,
     fetch_krforest_recreation_forests,
     fetch_krheritage_events,
     fetch_krheritage_items,
@@ -848,6 +852,18 @@ _OPERATION_RUNNER_SPEC_ROWS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
         run=run_feature_place_krforest_arboretums,
         resources=_records("krforest_arboretums", fetch_krforest_arboretums),
         asset_key="feature_place_krforest_arboretums",
+    ),
+    *_operation_specs(
+        "feature_route_krforest_mountain_trails_job",
+        run=run_feature_route_krforest_mountain_trails,
+        resources=_records("krforest_mountain_trails", fetch_krforest_mountain_trails),
+        asset_key="feature_route_krforest_mountain_trails",
+    ),
+    *_operation_specs(
+        "feature_route_krforest_dulle_trails_job",
+        run=run_feature_route_krforest_dulle_trails,
+        resources=_records("krforest_dulle_trails", fetch_krforest_dulle_trails),
+        asset_key="feature_route_krforest_dulle_trails",
     ),
     *_operation_specs(
         "feature_place_standard_museums_job",

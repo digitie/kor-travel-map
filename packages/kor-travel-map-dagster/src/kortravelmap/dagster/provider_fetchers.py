@@ -62,6 +62,8 @@ __all__ = [
     "fetch_krex_rest_areas",
     "fetch_krex_traffic_notices",
     "fetch_krforest_arboretums",
+    "fetch_krforest_dulle_trails",
+    "fetch_krforest_mountain_trails",
     "fetch_krforest_recreation_forests",
     "fetch_krheritage_events",
     "fetch_krheritage_items",
@@ -796,6 +798,50 @@ async def fetch_krforest_arboretums(
     client = krforest.ForestClient(api_key=api_key)
     try:
         records = await client.travel.recreation_forest_arboretums()
+        for record in records:
+            yield record
+    finally:
+        await client.aclose()
+
+
+async def fetch_krforest_mountain_trails(
+    settings: KorTravelMapSettings,
+) -> AsyncIterator[Any]:
+    """산림청 등산로 SHP route feature를 `ForestSpatialFeature`로 stream한다."""
+
+    secret = settings.data_go_kr_service_key
+    if secret is None:
+        raise ProviderCredentialMissing(
+            "krforest mountain trails live fetch에는 "
+            "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
+            "필요하다."
+        )
+    krforest = cast(Any, importlib.import_module("krforest"))
+    client = krforest.ForestClient(api_key=secret.get_secret_value())
+    try:
+        records = await client.travel.forest_trail_file_features()
+        for record in records:
+            yield record
+    finally:
+        await client.aclose()
+
+
+async def fetch_krforest_dulle_trails(
+    settings: KorTravelMapSettings,
+) -> AsyncIterator[Any]:
+    """산림청 둘레길 SHP route feature를 `ForestSpatialFeature`로 stream한다."""
+
+    secret = settings.data_go_kr_service_key
+    if secret is None:
+        raise ProviderCredentialMissing(
+            "krforest dulle trails live fetch에는 "
+            "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
+            "필요하다."
+        )
+    krforest = cast(Any, importlib.import_module("krforest"))
+    client = krforest.ForestClient(api_key=secret.get_secret_value())
+    try:
+        records = await client.travel.dulle_trail_features()
         for record in records:
             yield record
     finally:

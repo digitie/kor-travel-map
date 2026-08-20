@@ -86,11 +86,19 @@ from kortravelmap.providers.krforest import (
     DATASET_KEY_ARBORETUMS as KRFOREST_ARBORETUMS_DATASET_KEY,
 )
 from kortravelmap.providers.krforest import (
+    DATASET_KEY_DULLE_TRAILS as KRFOREST_DULLE_TRAILS_DATASET_KEY,
+)
+from kortravelmap.providers.krforest import (
+    DATASET_KEY_MOUNTAIN_TRAILS as KRFOREST_MOUNTAIN_TRAILS_DATASET_KEY,
+)
+from kortravelmap.providers.krforest import (
     DATASET_KEY_RECREATION_FORESTS as KRFOREST_RECREATION_FORESTS_DATASET_KEY,
 )
 from kortravelmap.providers.krforest import (
     KRFOREST_PROVIDER_NAME,
     arboretums_to_bundles,
+    dulle_trails_to_bundles,
+    mountain_trails_to_bundles,
     recreation_forests_to_bundles,
 )
 from kortravelmap.providers.krheritage import (
@@ -1211,6 +1219,68 @@ async def feature_place_krforest_arboretums(
     return await run_tracked_feature_asset(context, run_feature_place_krforest_arboretums)
 
 
+async def run_feature_route_krforest_mountain_trails(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    """산림청 등산로 SHP route를 적재한다(C05A)."""
+    records = await _record_list(context, "krforest_mountain_trails")
+    fetched_at = await _fetched_at(context)
+    bundles = await mountain_trails_to_bundles(
+        records,
+        fetched_at=fetched_at,
+        reverse_geocoder=_reverse_geocoder(context),
+    )
+    return await _load(
+        context,
+        provider=KRFOREST_PROVIDER_NAME,
+        dataset_key=KRFOREST_MOUNTAIN_TRAILS_DATASET_KEY,
+        bundles=bundles,
+        authoritative_snapshot_complete=True,
+    )
+
+
+@asset(
+    group_name="features_route",
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"krforest_mountain_trails"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+)
+async def feature_route_krforest_mountain_trails(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    return await run_tracked_feature_asset(context, run_feature_route_krforest_mountain_trails)
+
+
+async def run_feature_route_krforest_dulle_trails(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    """산림청 둘레길 SHP route를 적재한다(C05A)."""
+    records = await _record_list(context, "krforest_dulle_trails")
+    fetched_at = await _fetched_at(context)
+    bundles = await dulle_trails_to_bundles(
+        records,
+        fetched_at=fetched_at,
+        reverse_geocoder=_reverse_geocoder(context),
+    )
+    return await _load(
+        context,
+        provider=KRFOREST_PROVIDER_NAME,
+        dataset_key=KRFOREST_DULLE_TRAILS_DATASET_KEY,
+        bundles=bundles,
+        authoritative_snapshot_complete=True,
+    )
+
+
+@asset(
+    group_name="features_route",
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"krforest_dulle_trails"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+)
+async def feature_route_krforest_dulle_trails(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    return await run_tracked_feature_asset(context, run_feature_route_krforest_dulle_trails)
+
+
 async def run_feature_place_standard_museums(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
@@ -1731,6 +1801,8 @@ FEATURE_LOAD_ASSETS: Final = [
     feature_geometry_knps_records,
     feature_place_krforest_recreation_forests,
     feature_place_krforest_arboretums,
+    feature_route_krforest_mountain_trails,
+    feature_route_krforest_dulle_trails,
     feature_place_standard_museums,
     feature_place_standard_tourist_attractions,
     feature_place_standard_parking_lots,

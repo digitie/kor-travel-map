@@ -12,6 +12,13 @@ allowlist 안에 있는지 검사하도록 gate를 좁혔다. forced/default pla
 
 두 전문 리뷰어에게 H50 최종 재검토를 요청하고, GitHub Actions 전체 green 확인 후 H50
 문서·PR을 갱신하고 merge한다.
+## 2026-08-20 — T-VN-C05A 산림청 route 연결
+
+`python-krforest-api` C05A가 중첩 SHP archive를 `ForestSpatialFeature`로 파싱하고,
+`kor-travel-map`이 `LineString`/`MultiLineString`만 route Feature로 정규화해 Dagster,
+operation registry, fixture preview, baseline seed에 연결했다. 등산로(`PBD0000041`)와
+둘레길(`PBD0000031`)은 월 1회 schedule을 사용한다. upstream route source identity에 대한
+적대 리뷰 P0도 반영했다. 다음 작업은 upstream typed C05B 산악기상 모델이다.
 
 ## 2026-08-20 — T-VN-41F1D-E 저장소측 완료 (v4 퇴역 → v5/v7)
 

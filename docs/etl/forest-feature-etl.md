@@ -17,10 +17,10 @@
 | 항목 | 값 |
 |------|----|
 | provider | `python-krforest-api` |
-| dataset_key | 구현: `krforest_recreation_forests`, `krforest_arboretums`; 계획: `krforest_mountain_trails`, `krforest_dulle_trails`, `krforest_mountain_weather`, `krforest_wildfire_risk_forecast` |
+| dataset_key | 구현: `krforest_recreation_forests`, `krforest_arboretums`, `krforest_mountain_trails`, `krforest_dulle_trails`; 계획: `krforest_mountain_weather`, `krforest_wildfire_risk_forecast`, `krforest_landslide_forecast_notices` |
 | Feature.kind | `place`, `route` / `WeatherValue` |
-| 코드 entrypoint | 구현: `kortravelmap.providers.krforest`; C05A~D entrypoint는 각 구현 PR에서 확정 |
-| 갱신 주기 | provider별 (place/area/route 월~분기, 산악기상 시간 단위) |
+| 코드 entrypoint | `kortravelmap.providers.krforest` |
+| 갱신 주기 | C05A route 월 1회; C05B~D 하루 6회; place는 기존 schedule 유지 |
 
 ## 2. dataset 매핑
 
@@ -28,8 +28,8 @@
 |-------------|---------------------|----------------|
 | `krforest_recreation_forests` | `travel.recreation_forests()` | `place`, `place_kind="recreation_forest"` |
 | `krforest_arboretums` | `travel.arboretums()` | `place`, `place_kind="arboretum"` |
-| `krforest_mountain_trails` _(C05A)_ | `travel.forest_trail_file_features()` / `ForestSpatialFeature` (`PBD0000041`) | LineString/MultiLineString → `route` |
-| `krforest_dulle_trails` _(C05A)_ | `travel.dulle_trail_features()` / `ForestSpatialFeature` (`PBD0000031`) | LineString/MultiLineString → `route` |
+| `krforest_mountain_trails` | `travel.forest_trail_file_features()` / `ForestSpatialFeature` (`PBD0000041`) | LineString/MultiLineString → `route` (C05A 구현) |
+| `krforest_dulle_trails` | `travel.dulle_trail_features()` / `ForestSpatialFeature` (`PBD0000031`) | LineString/MultiLineString → `route` (C05A 구현) |
 | `krforest_mountain_weather` _(C05B)_ | data.go.kr `15084696`; upstream typed 관측 model 선행 | `WeatherValue`, `observed` |
 | `krforest_wildfire_risk_forecast` _(C05C)_ | data.go.kr `15084817` V2; upstream typed 예보 model 선행 | `WeatherValue`, `index` |
 
@@ -146,11 +146,11 @@ await upsert_weather_values(session, values)
 |-------|-------------|------|-------|
 | `feature_place_krforest_recreation` | `krforest_recreation_forests` | `0 2 1 * *` (월 1회) | `features_place` |
 | `feature_place_krforest_arboretums` | `krforest_arboretums` | `0 2 1 * *` | `features_place` |
-| `feature_route_krforest_mountain_trails` _(C05A)_ | `krforest_mountain_trails` | 월 1회 | `features_route` |
-| `feature_route_krforest_dulle_trails` _(C05A)_ | `krforest_dulle_trails` | 월 1회 | `features_route` |
+| `feature_route_krforest_mountain_trails` | `krforest_mountain_trails` | 월 1회 | `features_route` |
+| `feature_route_krforest_dulle_trails` | `krforest_dulle_trails` | 월 1회 | `features_route` |
 | `weather_krforest_mountain` _(C05B)_ | `krforest_mountain_weather` | 시간 | `features_weather` |
-| `weather_krforest_wildfire_risk` _(C05C)_ | `krforest_wildfire_risk_forecast` | 3시간 | `features_weather` |
-| `notice_krforest_landslide_forecast` _(C05D)_ | `krforest_landslide_forecast_notices` | 30분 | `features_notice` |
+| `weather_krforest_wildfire_risk` _(C05C)_ | `krforest_wildfire_risk_forecast` | 하루 6회 | `features_weather` |
+| `notice_krforest_landslide_forecast` _(C05D)_ | `krforest_landslide_forecast_notices` | 하루 6회 | `features_notice` |
 
 ConcurrencyConfig: `krforest_api: max_concurrent=1`.
 

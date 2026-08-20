@@ -79,6 +79,8 @@ provider record resource:
 - `knps_geometry_records`
 - `krforest_recreation_forests`
 - `krforest_arboretums`
+- `krforest_mountain_trails`
+- `krforest_dulle_trails`
 - `standard_museums`
 - `standard_tourist_attractions`
 - `standard_parking_lots`
@@ -112,6 +114,8 @@ credential이 없거나 아직 guard로 남은 resource는 운영 실행 전에
 | `knps_geometry_records` | `python-knps-api` | 없음 | 없음 |
 | `krforest_recreation_forests` | `python-krforest-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `krforest_arboretums` | `python-krforest-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
+| `krforest_mountain_trails` | `python-krforest-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
+| `krforest_dulle_trails` | `python-krforest-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `standard_museums` | `python-datagokr-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `standard_tourist_attractions` | `python-datagokr-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `standard_parking_lots` | `python-datagokr-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |

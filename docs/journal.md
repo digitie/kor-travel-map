@@ -1,5 +1,14 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-20 — T-VN-C05A: 산림청 등산로·둘레길 route 연결
+
+`python-krforest-api`의 `ForestSpatialFeature`를 직접 소비하는 순수 변환을 추가했다.
+이름·유효 geometry·source identity가 있는 선형 데이터만 `FeatureKind.ROUTE`로 승격하고,
+원천 geometry WKT와 archive lineage를 `SourceRecord`에 보존한다. C05A 두 asset은
+`features_route` 그룹과 월 1회 schedule에 등록했고, API fixture/operation registry와
+baseline provider dataset·operation scope를 함께 갱신했다. C05B~D는 provider typed
+client가 먼저 병합된 뒤 순차 연결한다.
+
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
 ## 2026-08-20 — T-VN-H50 planner gate의 마지막 false-fail 경로 제거

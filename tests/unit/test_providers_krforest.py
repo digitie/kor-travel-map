@@ -19,12 +19,19 @@ from kortravelmap.dto import Address, Coordinate, FeatureBundle, FeatureKind, So
 from kortravelmap.providers.krforest import (
     ARBORETUM_CATEGORY,
     DATASET_KEY_ARBORETUMS,
+    DATASET_KEY_DULLE_TRAILS,
+    DATASET_KEY_MOUNTAIN_TRAILS,
     DATASET_KEY_RECREATION_FORESTS,
+    FOREST_ROUTE_CATEGORY,
+    FOREST_ROUTE_MARKER_COLOR,
     KRFOREST_MARKER_COLOR,
     RECREATION_FOREST_CATEGORY,
 )
 from kortravelmap.providers.krforest import (
     arboretums_to_bundles as _arboretums_async,
+)
+from kortravelmap.providers.krforest import (
+    forest_trails_to_bundles as _forest_trails_async,
 )
 from kortravelmap.providers.krforest import (
     recreation_forests_to_bundles as _recreation_forests_async,
@@ -39,6 +46,10 @@ def recreation_forests_to_bundles(items: Iterable[Any], **kwargs: Any) -> list[F
 
 def arboretums_to_bundles(items: Iterable[Any], **kwargs: Any) -> list[FeatureBundle]:
     return asyncio.run(_arboretums_async(items, **kwargs))
+
+
+def forest_trails_to_bundles(items: Iterable[Any], **kwargs: Any) -> list[FeatureBundle]:
+    return asyncio.run(_forest_trails_async(items, **kwargs))
 
 
 @dataclass(frozen=True)
@@ -70,6 +81,20 @@ class _Arb:
     longitude: float | None
     region_code: str | None
     region_name: str | None
+    raw: Any = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class _Trail:
+    """``ForestTrailItem`` Protocol 만족 fixture."""
+
+    name: str | None
+    source_id: str | None
+    source_file: str | None
+    layer_name: str | None
+    geometry_type: str | None
+    geometry: dict[str, Any] | None
+    bbox: tuple[float, float, float, float] | None
     raw: Any = field(default_factory=dict)
 
 
@@ -110,8 +135,146 @@ _ARB_1 = _Arb(
 )
 
 
+_TRAIL_LINE = _Trail(
+    name="북악산 부암동구간",
+    source_id="mountain/111100101.zip/PMNTN.shp:PMNTN_SN:26719",
+    source_file="mountain/111100101.zip/PMNTN.shp",
+    layer_name="PMNTN",
+    geometry_type="LineString",
+    geometry={
+        "type": "LineString",
+        "coordinates": [[126.9700, 37.5900], [126.9800, 37.5950]],
+    },
+    bbox=(126.9700, 37.5900, 126.9800, 37.5950),
+    raw={"MNTN_NM": "북악산", "PMNTN_NM": "부암동구간", "PMNTN_SN": "26719"},
+)
+
+_TRAIL_MULTI = _Trail(
+    name="지리산둘레길 1구간",
+    source_id="dulle/1.shp:Name:1",
+    source_file="dulle/1.shp",
+    layer_name="dulle",
+    geometry_type="MultiLineString",
+    geometry={
+        "type": "MultiLineString",
+        "coordinates": [
+            [[127.7000, 35.3000], [127.7100, 35.3050]],
+            [[127.7200, 35.3100], [127.7300, 35.3150]],
+        ],
+    },
+    bbox=(127.7000, 35.3000, 127.7300, 35.3150),
+    raw={"Name": "1", "ID": "DULE-1"},
+)
+
+_TRAIL_POINT = _Trail(
+    name="산 정상 표지",
+    source_id="point-1",
+    source_file="point.shp",
+    layer_name="point",
+    geometry_type="Point",
+    geometry={"type": "Point", "coordinates": [126.9750, 37.5920]},
+    bbox=(126.9750, 37.5920, 126.9750, 37.5920),
+)
+
+_TRAIL_POLYGON = _Trail(
+    name="산림 구역",
+    source_id="polygon-1",
+    source_file="polygon.shp",
+    layer_name="polygon",
+    geometry_type="Polygon",
+    geometry={
+        "type": "Polygon",
+        "coordinates": [
+            [
+                [126.9700, 37.5900],
+                [126.9800, 37.5900],
+                [126.9800, 37.6000],
+                [126.9700, 37.5900],
+            ]
+        ],
+    },
+    bbox=(126.9700, 37.5900, 126.9800, 37.6000),
+)
+
+_TRAIL_EMPTY = _Trail(
+    name="빈 경로",
+    source_id="empty-1",
+    source_file="empty.shp",
+    layer_name="empty",
+    geometry_type="LineString",
+    geometry={"type": "LineString", "coordinates": []},
+    bbox=None,
+)
+
+
 def _now() -> datetime:
     return datetime(2026, 6, 7, 12, 0, 0, tzinfo=KST)
+
+
+@pytest.mark.unit
+def test_forest_trails_promote_only_lines_and_preserve_lineage() -> None:
+    duplicate = replace(_TRAIL_LINE, name="중복 입력은 첫 행 승리")
+    bundles = forest_trails_to_bundles(
+        [_TRAIL_LINE, duplicate, _TRAIL_MULTI, _TRAIL_POINT, _TRAIL_POLYGON, _TRAIL_EMPTY],
+        dataset_key=DATASET_KEY_MOUNTAIN_TRAILS,
+        fetched_at=_now(),
+    )
+
+    assert len(bundles) == 2
+    first, second = bundles
+    assert first.feature.kind == FeatureKind.ROUTE
+    assert first.feature.category == FOREST_ROUTE_CATEGORY
+    assert first.feature.marker_color == FOREST_ROUTE_MARKER_COLOR
+    assert first.feature.geom is not None
+    assert first.feature.geom.startswith("LINESTRING")
+    assert first.feature.name == "북악산 부암동구간"
+    assert first.feature.detail is not None
+    assert first.feature.detail.route_type == "hiking_trail"  # type: ignore[union-attr]
+    assert first.source_record.source_entity_type == "mountain_trail_segment"
+    assert first.source_record.raw_data["_kortravelmap_spatial"]["geometry_type"] == (
+        "LineString"
+    )
+    assert second.feature.geom is not None
+    assert second.feature.geom.startswith("MULTILINESTRING")
+    assert second.feature.detail is not None
+    assert second.feature.detail.route_type == "hiking_trail"  # type: ignore[union-attr]
+
+
+@pytest.mark.unit
+def test_forest_dulle_route_type_and_deterministic_fallback_key() -> None:
+    no_source_id = replace(_TRAIL_MULTI, source_id=None)
+    a = forest_trails_to_bundles(
+        [no_source_id], dataset_key=DATASET_KEY_DULLE_TRAILS, fetched_at=_now()
+    )[0]
+    b = forest_trails_to_bundles(
+        [no_source_id], dataset_key=DATASET_KEY_DULLE_TRAILS, fetched_at=_now()
+    )[0]
+
+    assert a.source_record.source_entity_type == "dulle_trail_segment"
+    assert a.source_record.source_entity_id == b.source_record.source_entity_id
+    assert a.feature.feature_id == b.feature.feature_id
+    assert a.feature.detail is not None
+    assert a.feature.detail.route_type == "trekking"  # type: ignore[union-attr]
+
+
+@pytest.mark.unit
+def test_forest_route_reverse_geocoder_and_dataset_guard() -> None:
+    async def _fake_rg(coord: Coordinate) -> Address | None:
+        return Address(bjd_code="1111010100", sigungu_code="11110", sido_code="11")
+
+    bundle = forest_trails_to_bundles(
+        [_TRAIL_LINE],
+        dataset_key=DATASET_KEY_MOUNTAIN_TRAILS,
+        fetched_at=_now(),
+        reverse_geocoder=_fake_rg,
+    )[0]
+    assert bundle.feature.address.bjd_code == "1111010100"
+    assert bundle.feature.feature_id.startswith("f_1111010100_r_")
+
+    with pytest.raises(KeyError, match="route dataset_key"):
+        forest_trails_to_bundles(
+            [_TRAIL_LINE], dataset_key="krforest_unknown", fetched_at=_now()
+        )
 
 
 @pytest.mark.unit

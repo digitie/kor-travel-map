@@ -54,6 +54,8 @@ from .provider_fetchers import (
     fetch_krex_rest_areas,
     fetch_krex_traffic_notices,
     fetch_krforest_arboretums,
+    fetch_krforest_dulle_trails,
+    fetch_krforest_mountain_trails,
     fetch_krforest_recreation_forests,
     fetch_krheritage_events,
     fetch_krheritage_items,
@@ -219,6 +221,22 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         setting_names=("data_go_kr_service_key",),
         source_env_names=("DATA_GO_KR_SERVICE_KEY",),
         note="수목원은 SHP file 다운로드/파싱(provider geo extra 필요할 수 있음).",
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="krforest_mountain_trails",
+        provider_package="python-krforest-api",
+        dataset_key="krforest_mountain_trails",
+        setting_names=("data_go_kr_service_key",),
+        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+        note="PBD0000041 중첩 SHP aggregate를 route geometry로 파싱한다.",
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="krforest_dulle_trails",
+        provider_package="python-krforest-api",
+        dataset_key="krforest_dulle_trails",
+        setting_names=("data_go_kr_service_key",),
+        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+        note="PBD0000031 SHP aggregate를 route geometry로 파싱한다.",
     ),
     ProviderRecordResourceSpec(
         resource_key="standard_museums",
@@ -737,6 +755,30 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["krforest_arboretums"] = (
     build_provider_record_live_resource(
         _KRFOREST_ARBORETUMS_SPEC,
         fetch_krforest_arboretums,
+    )
+)
+
+_KRFOREST_MOUNTAIN_TRAILS_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "krforest_mountain_trails"
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["krforest_mountain_trails"] = (
+    build_provider_record_live_resource(
+        _KRFOREST_MOUNTAIN_TRAILS_SPEC,
+        fetch_krforest_mountain_trails,
+    )
+)
+
+_KRFOREST_DULLE_TRAILS_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "krforest_dulle_trails"
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["krforest_dulle_trails"] = (
+    build_provider_record_live_resource(
+        _KRFOREST_DULLE_TRAILS_SPEC,
+        fetch_krforest_dulle_trails,
     )
 )
 

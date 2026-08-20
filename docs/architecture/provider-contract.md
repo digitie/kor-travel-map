@@ -116,8 +116,8 @@ system
 | `khoa_beaches` | python-khoa-api | 해수욕장 정보. 이 문자열은 source_type/feature_id/source_record_key에 baked → 변경 시 기존 행 re-key 필요 (실제 코드 `khoa.py:64`) |
 | `krforest_recreation_forests` | python-krforest-api | 휴양림 (구현, `krforest.py:91`) |
 | `krforest_arboretums` | python-krforest-api | 수목원 (구현, `krforest.py:92`) |
-| `krforest_mountain_trails` | python-krforest-api | forest.go.kr `PBD0000041` 등산로 route **(C05A 계획 — 미구현)** |
-| `krforest_dulle_trails` | python-krforest-api | forest.go.kr `PBD0000031` 둘레길 route **(C05A 계획 — 미구현)** |
+| `krforest_mountain_trails` | python-krforest-api | forest.go.kr `PBD0000041` 등산로 route (C05A 구현) |
+| `krforest_dulle_trails` | python-krforest-api | forest.go.kr `PBD0000031` 둘레길 route (C05A 구현) |
 | `krforest_mountain_weather` | python-krforest-api | data.go.kr `15084696` 산악기상 관측 **(C05B 계획 — upstream typed model 선행)** |
 | `krforest_wildfire_risk_forecast` | python-krforest-api | data.go.kr `15084817` 산불위험 V2 72시간 예보 **(C05C 계획 — upstream V2 typed model 선행)** |
 | `krforest_landslide_forecast_notices` | python-krforest-api | data.go.kr `15074798` 산사태 발령·해제 **(C05D 계획 — upstream typed model 선행)** |

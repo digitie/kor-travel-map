@@ -46,6 +46,8 @@ from kortravelmap.providers.krex import (
 )
 from kortravelmap.providers.krforest import (
     arboretums_to_bundles,
+    dulle_trails_to_bundles,
+    mountain_trails_to_bundles,
     recreation_forests_to_bundles,
 )
 from kortravelmap.providers.mcst import (
@@ -729,6 +731,79 @@ async def _convert_krforest_arboretums(items: Sequence[Any]) -> list[Any]:
 
 
 @dataclass(frozen=True)
+class _ForestTrail:
+    """`ForestTrailItem` Protocol 준수 (C05A 공간 feature fixture)."""
+
+    name: str | None
+    source_id: str | None
+    source_file: str | None
+    layer_name: str | None
+    geometry_type: str | None
+    geometry: dict[str, Any] | None
+    bbox: tuple[float, float, float, float] | None
+    raw: Any = None
+
+
+def _krforest_mountain_trails_fixture() -> Sequence[_ForestTrail]:
+    return [
+        _ForestTrail(
+            name="북악산 등산로 1구간",
+            source_id="mountain/111100101.zip/PMNTN.shp:keys:segment-1",
+            source_file="mountain/111100101.zip/PMNTN.shp",
+            layer_name="PMNTN",
+            geometry_type="LineString",
+            geometry={
+                "type": "LineString",
+                "coordinates": [[126.981, 37.592], [126.989, 37.598]],
+            },
+            bbox=(126.981, 37.592, 126.989, 37.598),
+            raw={"MNTN_NM": "북악산", "PMNTN_NM": "등산로 1구간"},
+        ),
+        _ForestTrail(
+            name="빈 geometry는 제외",
+            source_id="mountain/bad.shp:keys:empty",
+            source_file="mountain/bad.shp",
+            layer_name="bad",
+            geometry_type="Point",
+            geometry={"type": "Point", "coordinates": [126.99, 37.6]},
+            bbox=(126.99, 37.6, 126.99, 37.6),
+            raw={"MNTN_NM": "잘못된 행"},
+        ),
+    ]
+
+
+def _krforest_dulle_trails_fixture() -> Sequence[_ForestTrail]:
+    return [
+        _ForestTrail(
+            name="지리산둘레길 1구간",
+            source_id="dulle/dule.shp:keys:dulle-1",
+            source_file="dulle/dule.shp",
+            layer_name="dule",
+            geometry_type="MultiLineString",
+            geometry={
+                "type": "MultiLineString",
+                "coordinates":[
+                    [[127.7, 35.3], [127.71, 35.31]],
+                    [[127.71, 35.31], [127.72, 35.32]],
+                ],
+            },
+            bbox=(127.7, 35.3, 127.72, 35.32),
+            raw={"Name": "지리산둘레길 1구간", "ID": "dulle-1"},
+        ),
+    ]
+
+
+async def _convert_krforest_mountain_trails(items: Sequence[Any]) -> list[Any]:
+    bundles = await mountain_trails_to_bundles(items, fetched_at=_now())
+    return [b.model_dump(mode="json") for b in bundles]
+
+
+async def _convert_krforest_dulle_trails(items: Sequence[Any]) -> list[Any]:
+    bundles = await dulle_trails_to_bundles(items, fetched_at=_now())
+    return [b.model_dump(mode="json") for b in bundles]
+
+
+@dataclass(frozen=True)
 class _Museum:
     """`PublicMuseumArtItem` Protocol 준수 (provider `PublicMuseumArtGallery` 정합)."""
 
@@ -1211,6 +1286,22 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
         description="수목원/식물원(SHP) → place Feature (ADR-034 8단계). T-RV-53.",
         build_fixture=_krforest_arboretums_fixture,
         convert=_convert_krforest_arboretums,
+    ),
+    EtlFixtureEntry(
+        provider="python-krforest-api",
+        dataset="krforest_mountain_trails",
+        variant="FeatureBundle",
+        description="산림청 PBD0000041 등산로 SHP → route Feature(C05A).",
+        build_fixture=_krforest_mountain_trails_fixture,
+        convert=_convert_krforest_mountain_trails,
+    ),
+    EtlFixtureEntry(
+        provider="python-krforest-api",
+        dataset="krforest_dulle_trails",
+        variant="FeatureBundle",
+        description="산림청 PBD0000031 둘레길 SHP → route Feature(C05A).",
+        build_fixture=_krforest_dulle_trails_fixture,
+        convert=_convert_krforest_dulle_trails,
     ),
     EtlFixtureEntry(
         provider="data.go.kr-standard",

@@ -104,6 +104,8 @@ Dagster asset으로 연결한다. provider API 호출은 resource가 record iter
 | `feature_geometry_knps_records` | `knps_geometry_records` | `knps_geometry_dataset_key` resource | `features_geometry` |
 | `feature_place_krforest_recreation_forests` | `krforest_recreation_forests` | `krforest_recreation_forests` | `features_place` |
 | `feature_place_krforest_arboretums` | `krforest_arboretums` | `krforest_arboretums` | `features_place` |
+| `feature_route_krforest_mountain_trails` | `krforest_mountain_trails` | `krforest_mountain_trails` | `features_route` |
+| `feature_route_krforest_dulle_trails` | `krforest_dulle_trails` | `krforest_dulle_trails` | `features_route` |
 | `feature_place_standard_museums` | `standard_museums` | `datagokr_museums` | `features_place` |
 | `feature_place_standard_tourist_attractions` | `standard_tourist_attractions` | `datagokr_tourist_attractions` | `features_place` |
 | `feature_place_standard_parking_lots` | `standard_parking_lots` | `datagokr_parking_lots` | `features_place` |
@@ -261,8 +263,8 @@ kor-travel-map Dagster의 asset/job 이름 **명명 가이드라인**이다. 실
 | `feature_area_krheritage_gis_spca` (forward-looking) | `krheritage_gis_spca` | `features_area` |
 | `feature_event_krheritage_events` | `krheritage_event_list` | `features_event` |
 | `feature_place_krforest_recreation_forests` | `krforest_recreation_forests` | `features_place` |
-| `feature_route_krforest_mountain_trails` (C05A) | `krforest_mountain_trails` | `features_route` |
-| `feature_route_krforest_dulle_trails` (C05A) | `krforest_dulle_trails` | `features_route` |
+| `feature_route_krforest_mountain_trails` | `krforest_mountain_trails` | `features_route` |
+| `feature_route_krforest_dulle_trails` | `krforest_dulle_trails` | `features_route` |
 | `feature_place_krex_rest_areas` | `krex_rest_areas` | `features_place` |
 | `price_krex_rest_area_fuel` (forward-looking) | `krex_rest_area_prices` | `features_price` |
 | `feature_weather_kma_short_forecast` | `kma_short_forecast` | `features_weather` |

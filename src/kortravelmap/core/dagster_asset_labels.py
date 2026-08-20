@@ -19,6 +19,8 @@ DAGSTER_ASSET_KOREAN_LABELS: Final[dict[str, str]] = {
     "feature_geometry_knps_records": "국립공원 경로/구역",
     "feature_place_krforest_recreation_forests": "자연휴양림",
     "feature_place_krforest_arboretums": "수목원",
+    "feature_route_krforest_mountain_trails": "산림청 등산로",
+    "feature_route_krforest_dulle_trails": "산림청 둘레길",
     "feature_place_standard_museums": "박물관/미술관",
     "feature_place_standard_tourist_attractions": "관광지",
     "feature_place_standard_parking_lots": "주차장",

@@ -68,6 +68,8 @@ REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
     "knps_geometry_dataset_key",
     "krforest_recreation_forests",
     "krforest_arboretums",
+    "krforest_mountain_trails",
+    "krforest_dulle_trails",
     "standard_museums",
     "standard_tourist_attractions",
     "standard_parking_lots",

@@ -56,6 +56,8 @@ from .assets import (
     feature_place_standard_tourist_attractions,
     feature_price_krex_rest_areas,
     feature_price_opinet_stations,
+    feature_route_krforest_dulle_trails,
+    feature_route_krforest_mountain_trails,
     feature_weather_airkorea_air_quality,
     feature_weather_krex_rest_areas,
 )
@@ -352,6 +354,20 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         schedule_name="feature_place_krforest_arboretums_monthly_schedule",
         cron_schedule="15 4 4 * *",
         description="휴양림 수목원 place Feature 월 1회 적재.",
+    ),
+    FeatureLoadScheduleSpec(
+        asset=feature_route_krforest_mountain_trails,
+        job_name="feature_route_krforest_mountain_trails_job",
+        schedule_name="feature_route_krforest_mountain_trails_monthly_schedule",
+        cron_schedule="25 4 4 * *",
+        description="산림청 등산로 route Feature 월 1회 적재(C05A).",
+    ),
+    FeatureLoadScheduleSpec(
+        asset=feature_route_krforest_dulle_trails,
+        job_name="feature_route_krforest_dulle_trails_job",
+        schedule_name="feature_route_krforest_dulle_trails_monthly_schedule",
+        cron_schedule="35 4 4 * *",
+        description="산림청 둘레길 route Feature 월 1회 적재(C05A).",
     ),
     FeatureLoadScheduleSpec(
         asset=feature_place_standard_museums,
