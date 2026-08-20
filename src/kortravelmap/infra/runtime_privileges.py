@@ -204,13 +204,16 @@ _OPS_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "poi_cache_target_refresh_members": _ORDINARY_OPS,
     "poi_cache_target_restore_fences": _ORDINARY_OPS,
     "poi_cache_target_snapshot_gc_observations": _ORDINARY_OPS,
-    "poi_cache_target_snapshot_items": _ORDINARY_OPS,
     "poi_cache_target_snapshots": _ORDINARY_OPS,
     "poi_cache_target_source_events": _ORDINARY_OPS,
     "poi_cache_target_source_heads": _ORDINARY_OPS,
     "poi_cache_target_streams": _ORDINARY_OPS,
     "poi_cache_targets": _ORDINARY_OPS,
     "provider_refresh_policies": _ORDINARY_OPS,
+    # `0230`이 위 `poi_cache_target_snapshot_items`를 material/receipt로 가른 뒤
+    # 생긴 두 표다. 앞 표의 권한을 그대로 물려받았을 뿐 심사한 결과가 아니다.
+    "poi_cache_target_snapshot_material_items": _ORDINARY_OPS,
+    "poi_cache_target_snapshot_materials": _ORDINARY_OPS,
     # ── 아래는 좁힌 결정(심사 완료) ──
     # T-VN-40C service export is the only runtime reader.  The immutable
     # relation remains write-free for API/Dagster; the maintenance HTTP scope

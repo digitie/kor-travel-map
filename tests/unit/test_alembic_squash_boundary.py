@@ -50,6 +50,7 @@ _EXPECTED_REVISIONS = (
     # #1029가 `0226`~`0228`을 쥐고 있어 40B 잔여는 `0229`를 잡고 `0225`에 직접 체인했다.
     # 번호에만 공백이 남는다(migration docstring 참조).
     "0229_tvn40b_source_rule_action",
+    "0230_tvn41s_snapshot_material",
 )
 #: `alembic_version.version_num`의 컬럼 폭(alembic 기본값).
 _ALEMBIC_VERSION_NUM_LENGTH = 32
@@ -258,7 +259,7 @@ def test_revision_identifiers_fit_alembic_version_column() -> None:
     )
 
 
-def test_active_graph_is_only_0200_bridge_to_0225() -> None:
+def test_active_graph_is_only_0200_bridge_to_head() -> None:
     paths = sorted(_ACTIVE.glob("[0-9]*.py"))
     revisions = tuple(str(_literal(path, "revision")) for path in paths)
     parents = tuple(_literal(path, "down_revision") for path in paths)

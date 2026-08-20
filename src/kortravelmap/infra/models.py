@@ -170,7 +170,8 @@ __all__ = [
     "PoiCacheTargetOutboxDeliveryRow",
     "PoiCacheTargetOutboxClaimEventRow",
     "PoiCacheTargetSnapshotRow",
-    "PoiCacheTargetSnapshotItemRow",
+    "PoiCacheTargetSnapshotMaterialRow",
+    "PoiCacheTargetSnapshotMaterialItemRow",
     "PoiCacheTargetSnapshotGcObservationRow",
     "ProviderRefreshPolicyRow",
     "DagsterScheduleAuditEventRow",
@@ -6249,30 +6250,165 @@ class PoiCacheTargetOutboxClaimEventRow(Base):
     ack_payload_fingerprint: Mapped[str | None] = mapped_column(Text)
 
 
+class PoiCacheTargetSnapshotMaterialRow(Base):
+    """한 MVCC view에서 고정한 source membership 하나(0230).
+
+    identity는 `(external_system, restore_epoch, material_high_watermark_relay_order)`다.
+    UNIQUE는 `compacted_at IS NULL`에만 건다 — compaction된 material이 identity를 영구
+    점유하면 같은 source 상태를 다시 고정할 수 없다.
+    """
+
+    __tablename__ = "poi_cache_target_snapshot_materials"
+    __table_args__ = (
+        CheckConstraint(
+            "restore_epoch > 0 AND material_high_watermark_relay_order >= 0 "
+            "AND item_count >= 0 "
+            "AND (material_bytes IS NULL OR material_bytes >= 0)",
+            name=conv("ck_poi_cache_target_snapshot_materials_counts"),
+        ),
+        CheckConstraint(
+            "merkle_root ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_poi_cache_target_snapshot_materials_root"),
+        ),
+        CheckConstraint(
+            "compacted_at IS NULL OR compacted_at >= materialized_at",
+            name=conv("ck_poi_cache_target_snapshot_materials_compaction"),
+        ),
+        UniqueConstraint(
+            "material_id",
+            "external_system",
+            "material_high_watermark_relay_order",
+            name=conv("uq_cache_target_snapshot_materials_receipt"),
+        ),
+        Index(
+            "uq_cache_target_snapshot_materials_live_identity",
+            "external_system",
+            "restore_epoch",
+            "material_high_watermark_relay_order",
+            unique=True,
+            postgresql_where=text("compacted_at IS NULL"),
+        ),
+        Index(
+            "idx_cache_target_snapshot_materials_compaction",
+            "materialized_at",
+            "material_id",
+            postgresql_where=text("compacted_at IS NULL"),
+        ),
+        {"schema": "ops"},
+    )
+
+    material_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    external_system: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "ops.poi_cache_target_streams.external_system",
+            name="fk_cache_target_snapshot_materials_stream",
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    restore_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    material_high_watermark_relay_order: Mapped[int] = mapped_column(
+        BigInteger,
+        nullable=False,
+    )
+    item_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    #: 0230 이전 material에는 canonical byte 실측이 없다. 발명하지 않고 NULL로 둔다.
+    material_bytes: Mapped[int | None] = mapped_column(BigInteger)
+    merkle_root: Mapped[str] = mapped_column(Text, nullable=False)
+    materialized_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("now()"),
+    )
+    compacted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PoiCacheTargetSnapshotMaterialItemRow(Base):
+    """material에 고정한 NFC byte-order canonical row(0230).
+
+    `external_system`은 material이 소유하므로 여기 두지 않는다 — 1,000,000행짜리 표에서
+    material마다 같은 값을 되풀이할 이유가 없다.
+    """
+
+    __tablename__ = "poi_cache_target_snapshot_material_items"
+    __table_args__ = (
+        CheckConstraint(
+            "row_number > 0 AND source_generation > 0",
+            name=conv("ck_poi_cache_target_snapshot_material_items_bounds"),
+        ),
+        CheckConstraint(
+            "state IN ('active','deleted')",
+            name=conv("ck_poi_cache_target_snapshot_material_items_state"),
+        ),
+        CheckConstraint(
+            "source_payload_fingerprint ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_poi_cache_target_snapshot_material_items_digest"),
+        ),
+        UniqueConstraint(
+            "material_id",
+            "target_key",
+            name=conv("uq_cache_target_snapshot_material_items_key"),
+        ),
+        {"schema": "ops"},
+    )
+
+    material_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.poi_cache_target_snapshot_materials.material_id",
+            name="fk_cache_target_snapshot_material_items_material",
+            ondelete="CASCADE",
+        ),
+        primary_key=True,
+    )
+    row_number: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    target_key: Mapped[str] = mapped_column(Text, nullable=False)
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    source_generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source_payload_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+
+
 class PoiCacheTargetSnapshotRow(Base):
-    """한 MVCC view에서 만든 fixed paged reconciliation snapshot."""
+    """material 하나를 누가 언제 받아갔는지 적는 immutable receipt(0230).
+
+    material은 `PoiCacheTargetSnapshotMaterialRow`가 소유한다. generic page와
+    reconciliation은 각자 receipt를 만들고 같은 material을 가리키므로, 한쪽이 다른 쪽의
+    만료 시각까지 물려받지 않고도 item을 공유한다.
+    """
 
     __tablename__ = "poi_cache_target_snapshots"
     __table_args__ = (
         CheckConstraint(
-            "merkle_root ~ '^[0-9a-f]{64}$'",
-            name=conv("ck_poi_cache_target_snapshots_ck_cache_target_snapshots_0ecd"),
+            "receipt_kind IN ('generic','reconciliation')",
+            name=conv("ck_poi_cache_target_snapshots_receipt_kind"),
         ),
         CheckConstraint(
-            "restore_epoch > 0 AND high_watermark_relay_order >= 0 "
-            "AND material_high_watermark_relay_order >= 0 "
-            "AND high_watermark_relay_order >= material_high_watermark_relay_order "
-            "AND item_count >= 0",
-            name=conv("ck_poi_cache_target_snapshots_ck_cache_target_snapshots_counts"),
+            "material_high_watermark_relay_order >= 0 "
+            "AND high_watermark_relay_order >= material_high_watermark_relay_order",
+            name=conv("ck_poi_cache_target_snapshots_cursor"),
         ),
         CheckConstraint(
             "expires_at > created_at",
             name=conv("ck_poi_cache_target_snapshots_ck_cache_target_snapshots_expiry"),
         ),
-        UniqueConstraint(
-            "snapshot_id",
-            "external_system",
-            name=conv("uq_cache_target_snapshots_stream"),
+        # material의 `external_system`/material order와 묶는다. 두 열을 receipt에
+        # 남긴 이유가 조회 술어와 위 CHECK인데, 복합 FK가 없으면 그 사본이 material과
+        # 조용히 갈라질 수 있다.
+        ForeignKeyConstraint(
+            ["material_id", "external_system", "material_high_watermark_relay_order"],
+            [
+                "ops.poi_cache_target_snapshot_materials.material_id",
+                "ops.poi_cache_target_snapshot_materials.external_system",
+                "ops.poi_cache_target_snapshot_materials"
+                ".material_high_watermark_relay_order",
+            ],
+            name="fk_cache_target_snapshots_material",
+            ondelete="RESTRICT",
         ),
         Index(
             "idx_cache_target_snapshots_stream_time",
@@ -6288,6 +6424,12 @@ class PoiCacheTargetSnapshotRow(Base):
         Index(
             "idx_cache_target_snapshots_stream_expiry",
             "external_system",
+            "expires_at",
+            "snapshot_id",
+        ),
+        Index(
+            "idx_cache_target_snapshots_material",
+            "material_id",
             "expires_at",
             "snapshot_id",
         ),
@@ -6308,7 +6450,8 @@ class PoiCacheTargetSnapshotRow(Base):
         ),
         nullable=False,
     )
-    restore_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    material_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    receipt_kind: Mapped[str] = mapped_column(Text, nullable=False)
     high_watermark_relay_order: Mapped[int] = mapped_column(
         BigInteger,
         nullable=False,
@@ -6317,58 +6460,12 @@ class PoiCacheTargetSnapshotRow(Base):
         BigInteger,
         nullable=False,
     )
-    item_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    merkle_root: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=text("now()"),
     )
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-
-
-class PoiCacheTargetSnapshotItemRow(Base):
-    """snapshot에 고정한 NFC byte-order canonical row."""
-
-    __tablename__ = "poi_cache_target_snapshot_items"
-    __table_args__ = (
-        CheckConstraint(
-            "source_payload_fingerprint ~ '^[0-9a-f]{64}$'",
-            name=conv("ck_poi_cache_target_snapshot_items_ck_cache_target_snap_879d"),
-        ),
-        CheckConstraint(
-            "row_number > 0 AND source_generation > 0",
-            name=conv("ck_poi_cache_target_snapshot_items_ck_cache_target_snap_0ba2"),
-        ),
-        CheckConstraint(
-            "state IN ('active','deleted')",
-            name=conv("ck_poi_cache_target_snapshot_items_ck_cache_target_snap_96c2"),
-        ),
-        ForeignKeyConstraint(
-            ["snapshot_id", "external_system"],
-            [
-                "ops.poi_cache_target_snapshots.snapshot_id",
-                "ops.poi_cache_target_snapshots.external_system",
-            ],
-            name=conv("fk_cache_target_snapshot_items_snapshot"),
-            ondelete="CASCADE",
-        ),
-        UniqueConstraint(
-            "snapshot_id",
-            "external_system",
-            "target_key",
-            name=conv("uq_cache_target_snapshot_items_key"),
-        ),
-        {"schema": "ops"},
-    )
-
-    snapshot_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
-    row_number: Mapped[int] = mapped_column(BigInteger, primary_key=True)
-    external_system: Mapped[str] = mapped_column(Text, nullable=False)
-    target_key: Mapped[str] = mapped_column(Text, nullable=False)
-    state: Mapped[str] = mapped_column(Text, nullable=False)
-    source_generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    source_payload_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
 
 
 class PoiCacheTargetSnapshotGcObservationRow(Base):
