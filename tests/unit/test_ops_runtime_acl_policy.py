@@ -1,18 +1,20 @@
-"""`ops` 스키마의 runtime ACL 선언이 실제 표 집합과 정확히 맞는지 본다.
+"""`ops` 스키마 runtime ACL의 **동작** 게이트.
 
-2026-08-20까지 `ops`는 선언이 없으면 조용히 full CRUD로 떨어졌다 — 표 57개 중 48개가
-그 경로였다. 같은 파일의 `feature`는 선언 없는 relation을 예외로 막고 있었으므로 이건
-설계 차이가 아니라 비대칭이었다. 대칭을 맞춘 뒤, 그 대칭이 다시 무너지지 않게 한다.
+2026-08-20까지 `ops`는 선언이 없으면 조용히 full CRUD로 떨어졌다. 같은 파일의
+`feature`는 선언 없는 relation을 예외로 막고 있었으므로 이건 설계 차이가 아니라
+비대칭이었다. 대칭을 맞춘 뒤, 그 대칭이 다시 무너지지 않게 한다.
 
-양방향을 본다. 선언이 빠지면 새 표가 권한을 그냥 얻고, 선언이 남으면 없는 표를 가리켜
-다음 사람이 그 표가 아직 있다고 읽는다(`0225`가 지운 `curation_*` 9개가 실제로 그랬다).
+**목록이 실제와 맞는지는 여기서 보지 않는다.** 첫 판은 `Base.metadata`의 ops 표와
+선언을 맞춰 봤는데, reconcile이 순회하는 것은 metadata가 아니라 DB다. 실제로 모델에
+없는 ops 표가 17개 있어서 그 게이트는 green인 채로 아무 것도 보지 못했다(n150 격리
+DB 리허설이 잡았다). 목록 대조는 `tests/integration/test_runtime_privileges_acl.py`가
+migrate된 DB를 상대로 양방향으로 한다.
 """
 
 from __future__ import annotations
 
 from typing import Final
 
-from kortravelmap.infra.models import Base
 from kortravelmap.infra.runtime_privileges import (
     _OPS_TABLE_PRIVILEGES,
     _ORDINARY_SCHEMA_PRIVILEGES,
@@ -20,36 +22,6 @@ from kortravelmap.infra.runtime_privileges import (
 )
 
 _OPS_SCHEMA: Final[str] = "ops"
-
-
-def _ops_tables() -> frozenset[str]:
-    return frozenset(
-        table.name
-        for table in Base.metadata.tables.values()
-        if table.schema == _OPS_SCHEMA
-    )
-
-
-def test_every_ops_table_has_a_deliberate_acl_declaration() -> None:
-    """선언하지 않으면 권한이 생기던 경로를 막는다."""
-
-    undeclared = sorted(_ops_tables() - set(_OPS_TABLE_PRIVILEGES))
-
-    assert undeclared == [], (
-        "ops 표에 runtime ACL 선언이 없습니다. `_OPS_TABLE_PRIVILEGES`에 명시하세요 — "
-        "선언을 빠뜨리면 그 표는 권한 심사 없이 지나갑니다: " + ", ".join(undeclared)
-    )
-
-
-def test_no_acl_declaration_points_at_a_removed_table() -> None:
-    """없는 표를 가리키는 선언은 그 표가 아직 있다고 읽히게 만든다."""
-
-    stale = sorted(set(_OPS_TABLE_PRIVILEGES) - _ops_tables())
-
-    assert stale == [], (
-        "metadata에 없는 ops 표의 ACL 선언이 남아 있습니다. 표를 지웠다면 선언도 "
-        "지우세요: " + ", ".join(stale)
-    )
 
 
 def test_undeclared_ops_relation_is_refused_not_granted() -> None:

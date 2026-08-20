@@ -40,6 +40,50 @@ async def test_every_declared_feature_relation_exists(
     assert not phantom, f"ACL 표에 있지만 DB에 없는 feature relation: {phantom}"
 
 
+_OPS_RELATION_SQL = (
+    "SELECT relname FROM pg_catalog.pg_class AS c "
+    "JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace "
+    "WHERE n.nspname = 'ops' AND c.relkind IN ('r', 'p', 'v', 'm', 'f')"
+)
+
+
+async def test_every_ops_relation_in_the_database_is_declared(
+    migrated_session: AsyncSession,
+) -> None:
+    """`ops`도 `feature`처럼 선언 없이는 권한이 생기지 않는다 — 그 목록을 DB로 잰다.
+
+    선언이 빠진 relation은 배포를 막는다(`RuntimePrivilegeReconciliationError`). 그래서
+    이 게이트가 없으면 새 ops 표를 만든 사람이 배포 시점에야 알게 된다. `Base.metadata`로
+    재면 안 된다 — 모델에 없는 ops 표가 실제로 있다.
+    """
+    from kortravelmap.infra import runtime_privileges
+
+    rows = await migrated_session.execute(text(_OPS_RELATION_SQL))
+    existing = {row[0] for row in rows}
+    declared = set(runtime_privileges._OPS_TABLE_PRIVILEGES)  # noqa: SLF001
+    undeclared = sorted(existing - declared)
+
+    assert not undeclared, (
+        "ops relation에 runtime ACL 선언이 없습니다. `_OPS_TABLE_PRIVILEGES`에 "
+        "명시하세요 — 선언이 없으면 reconcile이 배포를 막습니다: "
+        + ", ".join(undeclared)
+    )
+
+
+async def test_every_declared_ops_relation_exists(
+    migrated_session: AsyncSession,
+) -> None:
+    """반대 방향. 없는 표를 가리키는 선언은 그 표가 아직 있다고 읽히게 만든다."""
+    from kortravelmap.infra import runtime_privileges
+
+    rows = await migrated_session.execute(text(_OPS_RELATION_SQL))
+    existing = {row[0] for row in rows}
+    declared = set(runtime_privileges._OPS_TABLE_PRIVILEGES)  # noqa: SLF001
+    phantom = sorted(declared - existing)
+
+    assert not phantom, f"ACL 표에 있지만 DB에 없는 ops relation: {phantom}"
+
+
 async def test_theme_catalog_procedure_stays_executable(
     migrated_session: AsyncSession,
 ) -> None:
