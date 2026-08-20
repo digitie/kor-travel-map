@@ -163,12 +163,16 @@ async def test_snapshot_first_page_commits_for_next_request_session(
             persisted = (
                 await probe.execute(
                     text(
-                        "SELECT snapshot.item_count, count(item.row_number) AS item_rows "
+                        "SELECT material.item_count, "
+                        "count(item.row_number) AS item_rows "
                         "FROM ops.poi_cache_target_snapshots AS snapshot "
-                        "LEFT JOIN ops.poi_cache_target_snapshot_items AS item "
-                        "ON item.snapshot_id = snapshot.snapshot_id "
+                        "JOIN ops.poi_cache_target_snapshot_materials AS material "
+                        "ON material.material_id = snapshot.material_id "
+                        "LEFT JOIN "
+                        "ops.poi_cache_target_snapshot_material_items AS item "
+                        "ON item.material_id = snapshot.material_id "
                         "WHERE snapshot.snapshot_id = CAST(:snapshot_id AS uuid) "
-                        "GROUP BY snapshot.item_count"
+                        "GROUP BY material.item_count"
                     ),
                     {"snapshot_id": snapshot_id},
                 )

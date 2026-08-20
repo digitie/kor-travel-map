@@ -249,6 +249,16 @@ WITH candidates AS MATERIALIZED (
       WHERE receipt.material_id = material.material_id
         AND receipt.expires_at > clock_timestamp()
     )
+    -- reconciliation이 잡고 있는 material은 세지 않는다. 세면 오래 걸리는
+    -- reconciliation 하나가 그 stream의 generic paging을 상한으로 영구히 막는다.
+    -- 앞판의 `NOT EXISTS (... requests ...)`가 지키던 성질이다.
+    AND NOT EXISTS (
+      SELECT 1
+      FROM ops.poi_cache_target_snapshots AS receipt
+      JOIN ops.poi_cache_target_reconciliation_requests AS request
+        ON request.snapshot_id = receipt.snapshot_id
+      WHERE receipt.material_id = material.material_id
+    )
   ORDER BY 1, material.material_id
   LIMIT {_GENERIC_SNAPSHOT_COPY_LIMIT}
 ), capacity AS (

@@ -1704,8 +1704,11 @@ async def test_snapshot_materialization_streams_more_than_one_insert_batch(
     assert (
         await migrated_session.scalar(
             text(
-                "SELECT count(*) FROM ops.poi_cache_target_snapshot_items "
-                "WHERE snapshot_id = CAST(:snapshot_id AS uuid)"
+                "SELECT count(*) "
+                "FROM ops.poi_cache_target_snapshot_material_items AS item "
+                "JOIN ops.poi_cache_target_snapshots AS receipt "
+                "ON receipt.material_id = item.material_id "
+                "WHERE receipt.snapshot_id = CAST(:snapshot_id AS uuid)"
             ),
             {"snapshot_id": page.snapshot_id},
         )
@@ -1760,8 +1763,11 @@ async def test_snapshot_cumulative_timeout_rolls_back_and_releases_writer(
         assert (
             await session.scalar(
                 text(
-                    "SELECT count(*) FROM ops.poi_cache_target_snapshot_items "
-                    "WHERE external_system = :external_system"
+                    "SELECT count(*) "
+                    "FROM ops.poi_cache_target_snapshot_material_items AS item "
+                    "JOIN ops.poi_cache_target_snapshot_materials AS material "
+                    "ON material.material_id = item.material_id "
+                    "WHERE material.external_system = :external_system"
                 ),
                 {"external_system": external_system},
             )
@@ -1830,8 +1836,11 @@ async def test_snapshot_cumulative_timeout_rolls_back_and_releases_writer(
         assert (
             await observer.scalar(
                 text(
-                    "SELECT count(*) FROM ops.poi_cache_target_snapshot_items "
-                    "WHERE external_system = :external_system"
+                    "SELECT count(*) "
+                    "FROM ops.poi_cache_target_snapshot_material_items AS item "
+                    "JOIN ops.poi_cache_target_snapshot_materials AS material "
+                    "ON material.material_id = item.material_id "
+                    "WHERE material.external_system = :external_system"
                 ),
                 {"external_system": system},
             )
@@ -2230,8 +2239,11 @@ async def test_snapshot_barrier_keeps_outbox_cursor_commit_safe_across_writers(
                 "AND event.event_type = 'cache_target.state_applied' "
                 "AND event.relay_order <= :high_watermark "
                 "AND NOT EXISTS ("
-                "SELECT 1 FROM ops.poi_cache_target_snapshot_items AS item "
-                "WHERE item.snapshot_id = CAST(:snapshot_id AS uuid) "
+                "SELECT 1 "
+                "FROM ops.poi_cache_target_snapshot_material_items AS item "
+                "JOIN ops.poi_cache_target_snapshots AS receipt "
+                "ON receipt.material_id = item.material_id "
+                "WHERE receipt.snapshot_id = CAST(:snapshot_id AS uuid) "
                 "AND item.target_key = event.target_key)"
             ),
             {
@@ -2467,6 +2479,74 @@ async def test_generic_snapshot_reuse_ignores_nonmaterial_outbox_tail(
     assert "idx_cache_target_outbox_state_material_order" in plan
 
 
+async def _seed_snapshot_material(
+    session: AsyncSession,
+    *,
+    material_id: str,
+    external_system: str,
+    material_order: int,
+    item_count: int,
+    merkle_root: str,
+) -> None:
+    """GC/용량 경계용 material을 직접 심는다.
+
+    같은 `(external_system, restore_epoch, material_order)`를 두 번 주면 살아 있는
+    material은 identity마다 하나라는 partial unique에 걸린다(0230). 여러 개가 필요한
+    테스트는 `material_order`를 갈라야 한다.
+    """
+
+    await session.execute(
+        text(
+            "INSERT INTO ops.poi_cache_target_snapshot_materials ("
+            "material_id, external_system, restore_epoch, "
+            "material_high_watermark_relay_order, item_count, merkle_root, "
+            "materialized_at) VALUES ("
+            "CAST(:material_id AS uuid), :external_system, 1, :material_order, "
+            ":item_count, :merkle_root, now() - interval '2 hours')"
+        ),
+        {
+            "material_id": material_id,
+            "external_system": external_system,
+            "material_order": material_order,
+            "item_count": item_count,
+            "merkle_root": merkle_root,
+        },
+    )
+
+
+async def _seed_snapshot_receipt(
+    session: AsyncSession,
+    *,
+    snapshot_id: str,
+    material_id: str,
+    external_system: str,
+    material_order: int,
+    created_at: str,
+    expires_at: str,
+    receipt_kind: str = "generic",
+) -> None:
+    """material 하나에 receipt를 붙인다. 시각은 SQL 식으로 받는다."""
+
+    await session.execute(
+        text(
+            "INSERT INTO ops.poi_cache_target_snapshots ("
+            "snapshot_id, material_id, receipt_kind, external_system, "
+            "high_watermark_relay_order, material_high_watermark_relay_order, "
+            "created_at, expires_at) VALUES ("
+            "CAST(:snapshot_id AS uuid), CAST(:material_id AS uuid), "
+            ":receipt_kind, :external_system, :material_order, :material_order, "
+            f"{created_at}, {expires_at})"
+        ),
+        {
+            "snapshot_id": snapshot_id,
+            "material_id": material_id,
+            "receipt_kind": receipt_kind,
+            "external_system": external_system,
+            "material_order": material_order,
+        },
+    )
+
+
 @pytest.mark.integration
 async def test_generic_snapshot_gc_is_bounded_and_preserves_referenced_snapshot(
     migrated_session: AsyncSession,
@@ -2486,54 +2566,63 @@ async def test_generic_snapshot_gc_is_bounded_and_preserves_referenced_snapshot(
     )
     expired_id = "97000000-0000-4000-8000-000000000001"
     referenced_id = "97000000-0000-4000-8000-000000000002"
-    await migrated_session.execute(
-        text(
-            "INSERT INTO ops.poi_cache_target_snapshots ("
-            "snapshot_id, external_system, restore_epoch, "
-            "high_watermark_relay_order, material_high_watermark_relay_order, "
-            "item_count, merkle_root, "
-            "created_at, expires_at) VALUES "
-            "(CAST(:expired_id AS uuid), :external_system, 1, 0, 0, 1001, "
-            ":expired_root, now() - interval '2 hours', now() - interval '1 hour'), "
-            "(CAST(:referenced_id AS uuid), :external_system, 1, 0, 0, 1, "
-            ":referenced_root, now() - interval '2 hours', now() - interval '1 hour')"
-        ),
-        {
-            "expired_id": expired_id,
-            "referenced_id": referenced_id,
-            "external_system": system,
-            "expired_root": "c" * 64,
-            "referenced_root": "d" * 64,
-        },
+    # 두 receipt는 서로 다른 material을 갖는다. 같은 identity를 주면 살아 있는
+    # material은 identity마다 하나라는 partial unique에 걸린다(0230).
+    expired_material = "97100000-0000-4000-8000-000000000001"
+    referenced_material = "97100000-0000-4000-8000-000000000002"
+    await _seed_snapshot_material(
+        migrated_session,
+        material_id=expired_material,
+        external_system=system,
+        material_order=0,
+        item_count=1001,
+        merkle_root="c" * 64,
+    )
+    await _seed_snapshot_material(
+        migrated_session,
+        material_id=referenced_material,
+        external_system=system,
+        material_order=1,
+        item_count=1,
+        merkle_root="d" * 64,
+    )
+    await _seed_snapshot_receipt(
+        migrated_session,
+        snapshot_id=expired_id,
+        material_id=expired_material,
+        external_system=system,
+        material_order=0,
+        created_at="now() - interval '2 hours'",
+        expires_at="now() - interval '1 hour'",
+    )
+    await _seed_snapshot_receipt(
+        migrated_session,
+        snapshot_id=referenced_id,
+        material_id=referenced_material,
+        external_system=system,
+        material_order=1,
+        created_at="now() - interval '2 hours'",
+        expires_at="now() - interval '1 hour'",
     )
     await migrated_session.execute(
         text(
-            "INSERT INTO ops.poi_cache_target_snapshot_items ("
-            "snapshot_id, row_number, external_system, target_key, state, "
+            "INSERT INTO ops.poi_cache_target_snapshot_material_items ("
+            "material_id, row_number, target_key, state, "
             "source_generation, source_payload_fingerprint) "
-            "SELECT CAST(:snapshot_id AS uuid), value, :external_system, "
+            "SELECT CAST(:material_id AS uuid), value, "
             "'expired-' || value::text, 'active', 1, :fingerprint "
             "FROM generate_series(1, 1001) AS value"
         ),
-        {
-            "snapshot_id": expired_id,
-            "external_system": system,
-            "fingerprint": "e" * 64,
-        },
+        {"material_id": expired_material, "fingerprint": "e" * 64},
     )
     await migrated_session.execute(
         text(
-            "INSERT INTO ops.poi_cache_target_snapshot_items ("
-            "snapshot_id, row_number, external_system, target_key, state, "
+            "INSERT INTO ops.poi_cache_target_snapshot_material_items ("
+            "material_id, row_number, target_key, state, "
             "source_generation, source_payload_fingerprint) VALUES ("
-            "CAST(:snapshot_id AS uuid), 1, :external_system, 'referenced', "
-            "'active', 1, :fingerprint)"
+            "CAST(:material_id AS uuid), 1, 'referenced', 'active', 1, :fingerprint)"
         ),
-        {
-            "snapshot_id": referenced_id,
-            "external_system": system,
-            "fingerprint": "f" * 64,
-        },
+        {"material_id": referenced_material, "fingerprint": "f" * 64},
     )
     command_id = await _reconciliation_command(
         migrated_session,
@@ -2574,18 +2663,18 @@ async def test_generic_snapshot_gc_is_bounded_and_preserves_referenced_snapshot(
     assert first_gc.snapshot_id != current.snapshot_id
     remaining = await migrated_session.scalar(
         text(
-            "SELECT count(*) FROM ops.poi_cache_target_snapshot_items "
-            "WHERE snapshot_id = CAST(:snapshot_id AS uuid)"
+            "SELECT count(*) FROM ops.poi_cache_target_snapshot_material_items "
+            "WHERE material_id = CAST(:material_id AS uuid)"
         ),
-        {"snapshot_id": expired_id},
+        {"material_id": expired_material},
     )
     assert remaining == 1
     assert await migrated_session.scalar(
         text(
-            "SELECT count(*) FROM ops.poi_cache_target_snapshot_items "
-            "WHERE snapshot_id = CAST(:snapshot_id AS uuid)"
+            "SELECT count(*) FROM ops.poi_cache_target_snapshot_material_items "
+            "WHERE material_id = CAST(:material_id AS uuid)"
         ),
-        {"snapshot_id": referenced_id},
+        {"material_id": referenced_material},
     ) == 1
 
     background_gc = await prune_expired_cache_target_snapshots_batch(
@@ -2595,7 +2684,18 @@ async def test_generic_snapshot_gc_is_bounded_and_preserves_referenced_snapshot(
     )
     assert background_gc.external_system == system
     assert background_gc.deleted_items == 1
-    assert background_gc.deleted_headers == 1
+    # receipt는 앞선 snapshot 생성이 이미 지웠다. 0230 전에는 header 삭제에
+    # "item이 비어 있을 것"이라는 조건이 붙어 있어 여기까지 밀렸다 — 이제 item은
+    # material에 달려 있으므로 receipt는 만료 즉시 지운다.
+    assert background_gc.deleted_headers == 0
+    assert background_gc.compacted_materials == 0
+    assert await migrated_session.scalar(
+        text(
+            "SELECT count(*) FROM ops.poi_cache_target_snapshot_materials "
+            "WHERE material_id = CAST(:material_id AS uuid)"
+        ),
+        {"material_id": expired_material},
+    ) == 0
     assert await migrated_session.scalar(
         text(
             "SELECT count(*) FROM ops.poi_cache_target_snapshots "
@@ -2628,28 +2728,40 @@ async def test_generic_snapshot_capacity_excludes_expired_and_referenced_copies(
     unreferenced_id = "a3000000-0000-4000-8000-000000000011"
     expired_id = "a3000000-0000-4000-8000-000000000012"
     referenced_id = "a3000000-0000-4000-8000-000000000013"
-    await migrated_session.execute(
-        text(
-            "INSERT INTO ops.poi_cache_target_snapshots ("
-            "snapshot_id, external_system, restore_epoch, "
-            "high_watermark_relay_order, material_high_watermark_relay_order, "
-            "item_count, merkle_root, "
-            "created_at, expires_at) VALUES "
-            "(CAST(:unreferenced_id AS uuid), :external_system, 1, 0, 0, 0, "
-            ":empty_root, now() - interval '10 minutes', now() + interval '90 minutes'), "
-            "(CAST(:expired_id AS uuid), :external_system, 1, 0, 0, 0, "
-            ":empty_root, now() - interval '3 hours', now() - interval '1 hour'), "
-            "(CAST(:referenced_id AS uuid), :external_system, 1, 0, 0, 0, "
-            ":empty_root, now() - interval '10 minutes', now() + interval '90 minutes')"
-        ),
-        {
-            "unreferenced_id": unreferenced_id,
-            "expired_id": expired_id,
-            "referenced_id": referenced_id,
-            "external_system": system,
-            "empty_root": snapshot_merkle_root([]),
-        },
-    )
+    # 상한이 세는 것은 **살아 있는 material** 수다. 셋에 같은 identity를 주면 material
+    # 하나가 되어 상한을 시험하지 못한다 — material order를 갈라 셋으로 만든다.
+    materials = {
+        unreferenced_id: ("a3100000-0000-4000-8000-000000000011", 0),
+        expired_id: ("a3100000-0000-4000-8000-000000000012", 1),
+        referenced_id: ("a3100000-0000-4000-8000-000000000013", 2),
+    }
+    for snapshot_id, (material_id, material_order) in materials.items():
+        await _seed_snapshot_material(
+            migrated_session,
+            material_id=material_id,
+            external_system=system,
+            material_order=material_order,
+            item_count=0,
+            merkle_root=snapshot_merkle_root([]),
+        )
+        expired = snapshot_id == expired_id
+        await _seed_snapshot_receipt(
+            migrated_session,
+            snapshot_id=snapshot_id,
+            material_id=material_id,
+            external_system=system,
+            material_order=material_order,
+            created_at=(
+                "now() - interval '3 hours'"
+                if expired
+                else "now() - interval '10 minutes'"
+            ),
+            expires_at=(
+                "now() - interval '1 hour'"
+                if expired
+                else "now() + interval '90 minutes'"
+            ),
+        )
     command_id = await _reconciliation_command(
         migrated_session,
         key="a4000000-0000-4000-8000-000000000011",
@@ -2742,42 +2854,54 @@ async def test_background_snapshot_gc_round_robins_systems_and_observes_once(
         event_id="a1000000-0000-4000-8000-000000000002",
         idempotency_key="a2000000-0000-4000-8000-000000000002",
     )
-    await migrated_session.execute(
-        text(
-            "INSERT INTO ops.poi_cache_target_snapshots ("
-            "snapshot_id, external_system, restore_epoch, "
-            "high_watermark_relay_order, material_high_watermark_relay_order, "
-            "item_count, merkle_root, "
-            "created_at, expires_at) VALUES "
-            "('a3000000-0000-4000-8000-000000000001', :first_system, "
-            "1, 0, 0, 2, :first_root, now() - interval '2 hours', "
-            "now() - interval '1 hour'), "
-            "('a3000000-0000-4000-8000-000000000002', :second_system, "
-            "1, 0, 0, 1, :second_root, now() - interval '2 hours', "
-            "now() - interval '1 hour')"
-        ),
-        {
-            "first_system": first_system,
-            "second_system": second_system,
-            "first_root": "1" * 64,
-            "second_root": "2" * 64,
-        },
+    first_material = "a3100000-0000-4000-8000-000000000001"
+    second_material = "a3100000-0000-4000-8000-000000000002"
+    await _seed_snapshot_material(
+        migrated_session,
+        material_id=first_material,
+        external_system=first_system,
+        material_order=0,
+        item_count=2,
+        merkle_root="1" * 64,
+    )
+    await _seed_snapshot_material(
+        migrated_session,
+        material_id=second_material,
+        external_system=second_system,
+        material_order=0,
+        item_count=1,
+        merkle_root="2" * 64,
+    )
+    await _seed_snapshot_receipt(
+        migrated_session,
+        snapshot_id="a3000000-0000-4000-8000-000000000001",
+        material_id=first_material,
+        external_system=first_system,
+        material_order=0,
+        created_at="now() - interval '2 hours'",
+        expires_at="now() - interval '1 hour'",
+    )
+    await _seed_snapshot_receipt(
+        migrated_session,
+        snapshot_id="a3000000-0000-4000-8000-000000000002",
+        material_id=second_material,
+        external_system=second_system,
+        material_order=0,
+        created_at="now() - interval '2 hours'",
+        expires_at="now() - interval '1 hour'",
     )
     await migrated_session.execute(
         text(
-            "INSERT INTO ops.poi_cache_target_snapshot_items ("
-            "snapshot_id, row_number, external_system, target_key, state, "
+            "INSERT INTO ops.poi_cache_target_snapshot_material_items ("
+            "material_id, row_number, target_key, state, "
             "source_generation, source_payload_fingerprint) VALUES "
-            "('a3000000-0000-4000-8000-000000000001', 1, :first_system, "
-            "'a-1', 'active', 1, :fingerprint), "
-            "('a3000000-0000-4000-8000-000000000001', 2, :first_system, "
-            "'a-2', 'active', 1, :fingerprint), "
-            "('a3000000-0000-4000-8000-000000000002', 1, :second_system, "
-            "'z-1', 'active', 1, :fingerprint)"
+            "(CAST(:first_material AS uuid), 1, 'a-1', 'active', 1, :fingerprint), "
+            "(CAST(:first_material AS uuid), 2, 'a-2', 'active', 1, :fingerprint), "
+            "(CAST(:second_material AS uuid), 1, 'z-1', 'active', 1, :fingerprint)"
         ),
         {
-            "first_system": first_system,
-            "second_system": second_system,
+            "first_material": first_material,
+            "second_material": second_material,
             "fingerprint": "3" * 64,
         },
     )
@@ -3173,11 +3297,25 @@ async def test_two_phase_reconciliation_reuses_current_generic_snapshot_material
         expected_merkle_root=expected_root,
     )
 
-    assert sealed.snapshot_id == generic.snapshot_id
+    # 0230 전에는 seal이 generic snapshot **행 자체**를 물려받아 두 역할이 같은
+    # snapshot_id를 썼다. 이제 각자 receipt를 만들고 material만 공유한다 — 그래야
+    # 한쪽이 다른 쪽의 만료 시각을 물려받지 않고, 공유가 양방향이 된다.
+    assert sealed.snapshot_id != generic.snapshot_id
     assert (
         await migrated_session.scalar(
             text(
                 "SELECT count(*) FROM ops.poi_cache_target_snapshots "
+                "WHERE external_system = :system"
+            ),
+            {"system": system},
+        )
+        == 2
+    )
+    assert (
+        await migrated_session.scalar(
+            text(
+                "SELECT count(DISTINCT material_id) "
+                "FROM ops.poi_cache_target_snapshots "
                 "WHERE external_system = :system"
             ),
             {"system": system},
@@ -3187,8 +3325,22 @@ async def test_two_phase_reconciliation_reuses_current_generic_snapshot_material
     assert (
         await migrated_session.scalar(
             text(
-                "SELECT count(*) FROM ops.poi_cache_target_snapshot_items "
+                "SELECT string_agg(receipt_kind, ',' ORDER BY receipt_kind) "
+                "FROM ops.poi_cache_target_snapshots "
                 "WHERE external_system = :system"
+            ),
+            {"system": system},
+        )
+        == "generic,reconciliation"
+    )
+    assert (
+        await migrated_session.scalar(
+            text(
+                "SELECT count(*) "
+                "FROM ops.poi_cache_target_snapshot_material_items AS item "
+                "JOIN ops.poi_cache_target_snapshot_materials AS material "
+                "ON material.material_id = item.material_id "
+                "WHERE material.external_system = :system"
             ),
             {"system": system},
         )
@@ -3311,8 +3463,11 @@ async def test_two_phase_reconciliation_seal_is_exact_and_transactional(
     assert (
         await migrated_session.scalar(
             text(
-                "SELECT count(*) FROM ops.poi_cache_target_snapshot_items "
-                "WHERE external_system = :system"
+                "SELECT count(*) "
+                "FROM ops.poi_cache_target_snapshot_material_items AS item "
+                "JOIN ops.poi_cache_target_snapshot_materials AS material "
+                "ON material.material_id = item.material_id "
+                "WHERE material.external_system = :system"
             ),
             {"system": system},
         )
