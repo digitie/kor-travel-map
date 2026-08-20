@@ -21,6 +21,13 @@ PK/FK는 `(material_id, row_number)`로 옮긴다. 같은 identity에 root/count
 
 초안(`docs/reports/tvn41s/snapshot-material-schema.sql.draft`)과 다른 점 셋. 근거를 남긴다.
 
+- **정리용 인덱스를 partial이 아닌 하나로 합쳤다.** 초안은 `(external_system, restore_epoch,
+  material_high_watermark_relay_order) WHERE compacted_at IS NULL` 하나만 뒀다. GC batch에는
+  술어가 다른 훑기가 둘 있다 — compaction 후보(`compacted_at IS NULL`)와 orphan material
+  정리(compaction 여부와 무관, `materialized_at` 순서). 앞의 것은 아래 partial unique가
+  그대로 받고, 뒤의 것은 받을 인덱스가 없어 full index scan으로 떨어졌다(EXPLAIN 게이트
+  실측). 그래서 `idx_cache_target_snapshot_materials_sweep (external_system,
+  materialized_at, material_id)`를 **비-partial**로 둔다.
 - **identity UNIQUE를 partial로 바꿨다.** 초안은 `(external_system, restore_epoch,
   material_high_watermark_relay_order)`에 평범한 UNIQUE를 걸었다. 그러면 compaction된
   material이 그 identity를 영구 점유해서, 같은 source 상태가 다시 필요해졌을 때 새
@@ -233,9 +240,8 @@ def _create_material_tables() -> None:
     op.execute(
         text(
             f"""
-            CREATE INDEX idx_cache_target_snapshot_materials_compaction
+            CREATE INDEX idx_cache_target_snapshot_materials_sweep
                 ON {_MATERIALS} (external_system, materialized_at, material_id)
-                WHERE compacted_at IS NULL
             """
         )
     )

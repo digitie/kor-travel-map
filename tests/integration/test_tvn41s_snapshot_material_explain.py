@@ -211,9 +211,22 @@ async def test_snapshot_material_hot_queries_have_index_paths(
             "compaction_retention_seconds": 30 * 24 * 60 * 60,
         },
     )
-    # `(materialized_at, material_id) WHERE compacted_at IS NULL`은 술어와 정렬을 함께
-    # 만족한다 — 후보 조회가 이것을 타지 않으면 compaction된 material을 매 tick 다시 훑는다.
-    assert "idx_cache_target_snapshot_materials_compaction" in compaction, compaction
+    # 후보는 `external_system` + `compacted_at IS NULL` 범위다. partial unique가 그
+    # 범위를 그대로 주므로 이것을 탄다 — 타지 않으면 compaction된 material을 매 tick
+    # 다시 훑는다. 살아 있는 material은 stream당 소수라(generic 상한이 2다) 남은
+    # `materialized_at` 정렬은 그 소수만 정렬한다.
+    assert "uq_cache_target_snapshot_materials_live_identity" in compaction, compaction
+
+    orphan_materials = await _explain(
+        migrated_session,
+        repo._PRUNE_ORPHANED_MATERIALS_SQL,  # pyright: ignore[reportPrivateUsage]
+        {"external_system": _SYSTEM, "limit": 100},
+    )
+    # 이쪽은 compaction 여부와 무관해 partial index가 받지 못한다. 전용 sweep 인덱스가
+    # 없으면 GC tick마다 material 표를 full index scan한다.
+    assert "idx_cache_target_snapshot_materials_sweep" in orphan_materials, (
+        orphan_materials
+    )
 
     receipt_by_material = await _explain(
         migrated_session,
