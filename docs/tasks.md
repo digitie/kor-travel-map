@@ -640,9 +640,15 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   - [x] acquired GC run별 referenced item/header count를 Map DB에 멱등 영속화하고 직전 적격 baseline
     대비 시간당 증가율·보존 ceiling, 직전 acquired 대비 간격 무관 inventory loss 및 관측 불능을 Dagster metadata와
     warning alert로 노출한다.
-  - [ ] n150 격리 DB에서 migration → 수동 GC → schedule ON → 다음 tick 순서로 검증하고,
+  - [x] n150 격리 DB에서 migration → 수동 GC → schedule ON → 다음 tick 순서로 검증하고,
     GC 처리량이 유입률을 상회하며 remaining backlog가 0인지 증명한다. referenced snapshot 증가율과
     보존 임계치 alert도 함께 확인한다.
+    → 6개 축 전부 PASS. 처리량 54,795 items/s vs 유입 14,439 items/s, tick t+36초 생성·t+41초
+    SUCCESS, backlog 0/0, alert는 조인 임계치에서 발화·기본값에서 침묵.
+    실측 기록 `docs/reports/t-vn-41c-cache-target-gc-verification-2026-08-20.md`,
+    재실행 게이트 `scripts/verify-tvn41c-cache-target-gc.sh`(일회성 절차로 두지 않았다 —
+    스키마·GC 예산이 바뀌면 다시 돌려야 한다). Dagster storage DB는 애플리케이션 DB와
+    분리해야 한다(storage가 자기 alembic 계보를 같은 `public.alembic_version`에 stamp한다).
   - [x] (#975 적대 재리뷰 P2) relay 종결성 보강 — PR #1026(merge `b2e9c43a`). 착수 전 조사에서
     넷 다 미구현으로 확인됐고, (c)는 '향후 위험'이 아니라 이미 현재 위험이었다. typed reason
     도입 + 억제/삼킴을 `epoch_moved`에만 한정, running 취소 전이에 relay event 추가, 생산자

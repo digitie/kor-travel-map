@@ -144,7 +144,13 @@ def _alert(seed_command: str) -> list[str]:
 
     def run(label: str, config: dict[str, object]) -> dict[str, Any]:
         metadata = job.execute_in_process(
-            run_config={"ops": {node: {"config": config}}}, raise_on_error=True
+            run_config={
+                "ops": {node: {"config": config}},
+                # DEBUG는 step 진행 로그로 화면을 덮어 정작 증거인 alert WARNING을 묻는다.
+                # WARNING만 남기면 op이 실제로 낸 경보가 그대로 보인다.
+                "loggers": {"console": {"config": {"log_level": "WARNING"}}},
+            },
+            raise_on_error=True,
         ).output_for_node(node)
         picked = {k: metadata.get(k) for k in _WATCHED_ALERT_KEYS if k in metadata}
         print(f"  [{label}] " + json.dumps(picked, ensure_ascii=False, default=str))
