@@ -46,7 +46,11 @@ def test_docker_backup_script_captures_standalone_backup_bundle() -> None:
     assert "domain_commands.jsonl" in script
     assert "domain_command_results.jsonl" in script
     assert "feature_requests.jsonl" in script
-    assert '"schema_version": 2' in script
+    assert "manual_provider_dedup_cases.jsonl" in script
+    assert "manual_provider_dedup_resolutions.jsonl" in script
+    assert "feature_reference_reconciliation_events.jsonl" in script
+    assert "feature_reference_reconciliation_acks.jsonl" in script
+    assert '"schema_version": 3' in script
     assert '"manual_feature_evidence"' in script
     assert "with-pg-advisory-lock.py" in script
     assert "maintenance:backup-restore" in script
@@ -244,8 +248,16 @@ def test_restore_verify_script_checks_staging_counts() -> None:
     assert "verify_manual_feature_evidence" in script
     assert "manual_feature_evidence" in script
     assert "manual evidence root mismatch" in script
-    assert 'schema_version not in {1, 2}' in script
+    assert 'schema_version not in {1, 2, 3}' in script
     assert "feature_requests" in script
+    assert "manual_provider_dedup_cases" in script
+    assert "manual_provider_dedup_resolutions" in script
+    assert "feature_reference_reconciliation_events" in script
+    assert "feature_reference_reconciliation_acks" in script
+    assert "rebuild_feature_reference_reconciliation_leases" in script
+    assert "M05 restore has a non-prefix reconciliation ACK" in script
+    assert "M05 restore has an ACK/event hash mismatch" in script
+    assert "lease_epoch = CASE" in script
     assert "KOR_TRAVEL_MAP_RESTORE_BACKUP_DIR" in script
 
 

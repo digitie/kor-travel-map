@@ -101,19 +101,26 @@ forward journal replay를 함께 준비한다(ADR-075). upstream 재수집은 �
 
 ### 수동 Feature evidence manifest
 
-M02 이후 `meta/manifest.json`에는 `manual_feature_evidence`가 추가된다. application dump와 같은
-PostgreSQL exported snapshot에서 다음 네 relation을 PK 순서 canonical JSONL로 내보내고, 각 row count와
-SHA-256 root를 기록한다.
+M05 이후 `meta/manifest.json`의 `manual_feature_evidence.schema_version`은 `3`이다. application dump와
+같은 PostgreSQL exported snapshot에서 기존 M01~M04 relation과 다음 M05 불변 relation을 안정 PK 순서
+canonical JSONL로 내보내고, 각 row count와 SHA-256 root를 기록한다.
 
 - `feature.manual_feature_identity_claims`
 - `feature.feature_creation_origins`
 - `ops.domain_commands`
 - `ops.domain_command_results`
+- `ops.feature_requests`
+- `ops.manual_provider_dedup_cases` (`case_id`)
+- `ops.manual_provider_dedup_resolutions` (`resolution_id`)
+- `ops.feature_reference_reconciliation_events` (`event_sequence`)
+- `ops.feature_reference_reconciliation_acks` (`event_id`, `principal_id`)
 
-복구 verify는 staging DB에서 동일 JSONL root를 재계산해 manifest와 비교한다. count/root가 하나라도
-다르거나 manifest가 없으면 swap/cache epoch fence를 진행하지 않는다. owner repair, closed ACL reconcile,
-API/Dagster runtime preflight는 별도 activation gate로 유지한다. 이 경계가 모두 완결되기 전에는 manual
-Feature route activation을 허용하지 않는다.
+subscription과 lease는 mutable operational state라 root 밖이다. 복구 verify는 staging DB에서 동일 JSONL
+root를 재계산해 manifest와 비교하고, event hash와 principal별 immutable ACK의 실제 연속 prefix를
+검증한다. 그 뒤 모든 worker/expiry를 무효화하고 prefix에서 `acked_through_sequence`를 재구성한다.
+count/root, hash, ACK 순서 중 하나라도 다르거나 manifest가 없으면 swap/cache epoch fence를 진행하지
+않는다. owner repair, closed ACL reconcile, API/Dagster runtime preflight는 별도 activation gate로
+유지한다. 이 경계가 모두 완결되기 전에는 manual Feature route activation을 허용하지 않는다.
 
 `scripts/docker-backup.sh`, `scripts/docker-restore.sh`,
 `scripts/docker-restore-swap.sh`는 `scripts/with-pg-advisory-lock.py`를 통해

@@ -118,7 +118,7 @@ try:
     evidence = raw["manual_feature_evidence"]
     relations = evidence["relations"]
     schema_version = evidence["schema_version"]
-    if schema_version not in {1, 2} or evidence["snapshot_consistency"] != "pg_export_snapshot":
+    if schema_version not in {1, 2, 3} or evidence["snapshot_consistency"] != "pg_export_snapshot":
         raise ValueError("unsupported evidence manifest")
     names = [
         "manual_feature_identity_claims",
@@ -128,6 +128,15 @@ try:
     ]
     if schema_version >= 2:
         names.append("feature_requests")
+    if schema_version >= 3:
+        names.extend(
+            (
+                "manual_provider_dedup_cases",
+                "manual_provider_dedup_resolutions",
+                "feature_reference_reconciliation_events",
+                "feature_reference_reconciliation_acks",
+            )
+        )
     for name in names:
         item = relations[name]
         count = item["row_count"]
@@ -165,6 +174,18 @@ PY
       feature_requests)
         select_sql="SELECT to_jsonb(request)::text FROM ops.feature_requests AS request ORDER BY request.request_id"
         ;;
+      manual_provider_dedup_cases)
+        select_sql="SELECT to_jsonb(dedup_case)::text FROM ops.manual_provider_dedup_cases AS dedup_case ORDER BY dedup_case.case_id"
+        ;;
+      manual_provider_dedup_resolutions)
+        select_sql="SELECT to_jsonb(resolution)::text FROM ops.manual_provider_dedup_resolutions AS resolution ORDER BY resolution.resolution_id"
+        ;;
+      feature_reference_reconciliation_events)
+        select_sql="SELECT to_jsonb(event)::text FROM ops.feature_reference_reconciliation_events AS event ORDER BY event.event_sequence"
+        ;;
+      feature_reference_reconciliation_acks)
+        select_sql="SELECT to_jsonb(ack)::text FROM ops.feature_reference_reconciliation_acks AS ack ORDER BY ack.event_id, ack.principal_id"
+        ;;
       *)
         echo "Restore verification failed: unknown manual evidence relation" >&2
         exit 1
@@ -181,6 +202,119 @@ PY
     fi
   done <<< "$manifest_rows"
   rm -rf "$evidence_tmp"
+}
+
+rebuild_feature_reference_reconciliation_leases() {
+  # lease와 subscription은 mutable operational state라 v3 evidence root에는 넣지
+  # 않는다. 다만 immutable ACK/event의 실제 prefix에서 cursor를 다시 만들고,
+  # dump 시점의 worker fencing token은 반드시 무효화한다. 이 함수는 이미
+  # 무효화된 lease에는 epoch를 다시 올리지 않아 verify 재실행에도 안정적이다.
+  if ! docker compose --env-file /dev/null exec -T postgres psql \
+    -X -v ON_ERROR_STOP=1 \
+    -U "$POSTGRES_USER" \
+    -d "$RESTORE_APP_DB" <<'SQL'
+DO $m05_restore_reconcile$
+BEGIN
+    IF to_regclass('ops.feature_reference_reconciliation_events') IS NULL THEN
+        RETURN;
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM ops.feature_reference_reconciliation_acks AS ack
+        JOIN ops.feature_reference_reconciliation_events AS event
+          ON event.event_id = ack.event_id
+        WHERE ack.event_sha256 <> event.event_sha256
+    ) THEN
+        RAISE EXCEPTION 'M05 restore has an ACK/event hash mismatch'
+            USING ERRCODE = '55000';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM ops.feature_reference_reconciliation_acks AS ack
+        JOIN ops.feature_reference_reconciliation_events AS event
+          ON event.event_id = ack.event_id
+        JOIN ops.feature_reference_reconciliation_subscriptions AS subscription
+          ON subscription.principal_id = ack.principal_id
+        WHERE event.event_sequence <= subscription.initial_event_sequence
+    ) THEN
+        RAISE EXCEPTION 'M05 restore has an ACK at or before its initial cursor'
+            USING ERRCODE = '55000';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM ops.feature_reference_reconciliation_subscriptions AS subscription
+        CROSS JOIN LATERAL (
+            SELECT min(event.event_sequence) AS first_missing_sequence
+            FROM ops.feature_reference_reconciliation_events AS event
+            LEFT JOIN ops.feature_reference_reconciliation_acks AS ack
+              ON ack.event_id = event.event_id
+             AND ack.principal_id = subscription.principal_id
+            WHERE event.event_sequence > subscription.initial_event_sequence
+              AND ack.event_id IS NULL
+        ) AS missing
+        JOIN ops.feature_reference_reconciliation_acks AS later_ack
+          ON later_ack.principal_id = subscription.principal_id
+        JOIN ops.feature_reference_reconciliation_events AS later_event
+          ON later_event.event_id = later_ack.event_id
+        WHERE missing.first_missing_sequence IS NOT NULL
+          AND later_event.event_sequence > missing.first_missing_sequence
+    ) THEN
+        RAISE EXCEPTION 'M05 restore has a non-prefix reconciliation ACK'
+            USING ERRCODE = '55000';
+    END IF;
+
+    INSERT INTO ops.feature_reference_reconciliation_leases AS lease (
+        principal_id, acked_through_sequence, worker_id, lease_epoch,
+        lease_expires_at
+    )
+    SELECT subscription.principal_id,
+           prefix.acked_through_sequence,
+           NULL,
+           0,
+           NULL
+    FROM ops.feature_reference_reconciliation_subscriptions AS subscription
+    CROSS JOIN LATERAL (
+        SELECT min(event.event_sequence) AS first_missing_sequence
+        FROM ops.feature_reference_reconciliation_events AS event
+        LEFT JOIN ops.feature_reference_reconciliation_acks AS ack
+          ON ack.event_id = event.event_id
+         AND ack.principal_id = subscription.principal_id
+        WHERE event.event_sequence > subscription.initial_event_sequence
+          AND ack.event_id IS NULL
+    ) AS missing
+    CROSS JOIN LATERAL (
+        SELECT coalesce(
+            max(event.event_sequence), subscription.initial_event_sequence
+        ) AS acked_through_sequence
+        FROM ops.feature_reference_reconciliation_events AS event
+        WHERE event.event_sequence > subscription.initial_event_sequence
+          AND (
+              missing.first_missing_sequence IS NULL
+              OR event.event_sequence < missing.first_missing_sequence
+          )
+    ) AS prefix
+    ON CONFLICT (principal_id) DO UPDATE
+    SET acked_through_sequence = EXCLUDED.acked_through_sequence,
+        worker_id = NULL,
+        lease_epoch = CASE
+            WHEN lease.worker_id IS NULL
+             AND lease.lease_expires_at IS NULL
+             AND lease.acked_through_sequence = EXCLUDED.acked_through_sequence
+            THEN lease.lease_epoch
+            ELSE lease.lease_epoch + 1
+        END,
+        lease_expires_at = NULL,
+        updated_at = clock_timestamp();
+END
+$m05_restore_reconcile$;
+SQL
+  then
+    echo "Restore verification failed: M05 reconciliation lease rebuild failed" >&2
+    exit 1
+  fi
 }
 
 require_command docker
@@ -220,6 +354,7 @@ else
 fi
 
 verify_manual_feature_evidence
+rebuild_feature_reference_reconciliation_leases
 
 cat <<SUMMARY
 Restore verification complete:

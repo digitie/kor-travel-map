@@ -153,6 +153,18 @@ candidate의 `to_jsonb(notice)`에 내부 generated column이 누출되는 P1을
 candidate SQL은 `valid_during`을 response JSON에서 제외하도록 수정했다. NULL·one-sided·
 equal range, public/admin active predicate와 notice candidate detail 회귀를 추가했으며,
 수정 후 targeted integration 2건을 통과했다.
+## 2026-08-21 — T-VN-M05 backup v3 evidence root와 restore lease 재구축
+
+backup manifest를 v3로 올려 case·resolution·reconciliation event·ACK을 같은 exported
+snapshot의 canonical JSONL count/SHA-256 root에 포함했다. restore verifier는 root 재계산 뒤
+ACK의 stored event hash와 subscription cursor 이후의 실제 event prefix를 검사한다. 불연속 ACK이나
+hash 불일치는 fail-loud이며, 통과하면 live worker/expiry를 지우고 prefix에서 cursor를 재구축한다.
+이미 무효화된 lease에는 epoch를 재증가시키지 않아 verifier 재실행도 안정적이다.
+
+운영 verifier의 SQL을 integration에서 그대로 실행해 ACK cursor 보존, worker fence 무효화와
+idempotent 재실행을 확인했다. backup runbook unit 13건과 M05 integration, ruff, Bash syntax가
+통과했다. 다음 tranche는 Map admin/service HTTP contract와 first consumer durable receipt/rebind다.
+
 ## 2026-08-21 — T-VN-M05 strict-prefix service delivery writer
 
 `0231_m05_manual_provider_dedup`에 service 전용 event lease·ack writer를 추가했다.

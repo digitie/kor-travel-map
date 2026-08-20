@@ -89,12 +89,13 @@ retire+`detach`를 global fence 안에서 append-only resolution/event로 만든
 cursor 다음의 실제 최소 sequence를 worker lease/epoch으로 독점하고 exact event hash와 local
 receipt hash를 strict-prefix ack로 결박한다. 실제 runtime login integration에서 executor 차단,
 candidate replay, merged lifecycle/event·source link 보존, 경쟁 lease, ack/replay와 API/Dagster
-catalog preflight를 검증했다.
+catalog preflight를 검증했다. backup manifest v3는 case·resolution·event·ack root를 같은 snapshot에
+고정하며, restore verifier는 hash/연속 prefix를 다시 대조한 뒤 worker lease를 무효화하고 cursor를
+재구성한다.
 
 ### 다음 한 작업
 
-backup v3 root와 restore 뒤 strict-prefix cursor/lease 복구를 구현한다.
-이어 Map admin/service contract와 첫 consumer의 durable reference receipt/rebind, exact vendor를
+Map admin/service contract와 첫 consumer의 durable reference receipt/rebind, exact vendor를
 같은 paired release로 구현한다.
 
 ## 2026-08-20 — T-VN-41S material/receipt 분리 착지 (`0231`)
