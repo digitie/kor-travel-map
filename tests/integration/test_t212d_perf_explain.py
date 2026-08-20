@@ -8,6 +8,7 @@ provider/dataset/지역/상태/이슈 분포와 실제 한국 지명 기반 검�
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -543,7 +544,11 @@ def _relation_names(plan: dict[str, Any]) -> set[str]:
 
 def _assert_uses_index(plan: dict[str, Any], *expected: str) -> None:
     used = _index_names(plan)
-    assert set(expected) & used, f"expected one of {expected}, used={sorted(used)}"
+    assert set(expected) & used, (
+        f"expected one of {expected}, used={sorted(used)}\n"
+        "EXPLAIN (FORMAT JSON, COSTS OFF):\n"
+        f"{json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True)}"
+    )
 
 
 _COORD_SPATIAL_INDEXES = ("idx_features_coord_gist", "idx_features_coord")
@@ -580,6 +585,32 @@ _ENRICHMENT_REVIEW_ACCESS = (
     "idx_enrichment_review_status_score",
     "idx_enrichment_review_queue_source_entity_record",
 )
+
+# T-VN-H50: dedup refresh의 dataset 제한은 planner가 source link에서 entity로
+# 들어가는 비용이 더 낮다고 판단하면 ``idx_source_links_entity``를 고를 수 있다.
+# 그 경로도 entity의 canonical dataset FK를 ``uq_source_entities_key_dataset``로
+# 확인하므로 full scan 없는 동치 경로다. 인덱스 이름 하나를 고정하는 대신 허용된
+# 진입점과 모든 대량 relation의 Seq Scan 부재를 함께 검사한다.
+_DEDUP_REFRESH_ACCESS = (
+    "idx_source_entities_provider_dataset",
+    "uq_source_entities_key_dataset",
+    "idx_source_links_entity",
+    "idx_features_dedup_refresh_keyset",
+)
+_DEDUP_REFRESH_RELATIONS = (
+    "features",
+    "source_links",
+    "source_entities",
+    "provider_datasets",
+    "source_entity_heads",
+    "source_records",
+)
+
+
+def _assert_dedup_refresh_is_index_compatible(plan: dict[str, Any]) -> None:
+    _assert_uses_index(plan, *_DEDUP_REFRESH_ACCESS)
+    for relation_name in _DEDUP_REFRESH_RELATIONS:
+        _assert_no_seq_scan_on(plan, relation_name)
 
 
 def _assert_no_seq_scan_on(plan: dict[str, Any], relation_name: str) -> None:
@@ -1203,17 +1234,12 @@ async def test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible(
             "limit": 500,
         },
     )
-    # T-VN-33: record가 dataset 자연키 사본을 잃으면서
+    # T-VN-33/H50: record가 dataset 자연키 사본을 잃으면서
     # ``idx_source_records_provider_dataset_entity``가 사라졌다. planner는 dataset에서
     # entity로 들어가면 ``idx_source_entities_provider_dataset``를, source link에서
-    # entity로 들어가면 exact key+dataset unique index를 쓸 수 있다. 둘 다 entity의
-    # canonical dataset FK를 타는 index-compatible 경로다.
-    _assert_uses_index(
-        dedup_refresh,
-        "idx_source_entities_provider_dataset",
-        "uq_source_entities_key_dataset",
-        "idx_features_dedup_refresh_keyset",
-    )
+    # entity로 들어가면 exact key+dataset unique index를 쓸 수 있다. CI의 비용 경계에서
+    # ``idx_source_links_entity``를 고르는 경우도 같은 canonical dataset FK 경로다.
+    _assert_dedup_refresh_is_index_compatible(dedup_refresh)
 
     f4_sample = await _explain_json(
         migrated_session,
