@@ -421,8 +421,66 @@ def test_targeted_lane_is_not_part_of_strict_c7_runner() -> None:
     assert "admin-feature-acceptance-write" not in _C7_RUNNER.read_text()
 
 
+_MODULE_DIGEST = "1" * 64
+
+
+def _bootstrap_args(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    payload: dict[str, object],
+) -> SimpleNamespace:
+    """`_validate_c7_module`의 version 분기까지 **실제로 도달하게** 만든다.
+
+    이 함수는 root 소유 절대경로 전제(경로 고정·ancestor 검사·0600 읽기) 뒤에야
+    version을 본다. 그 전제를 그대로 두면 테스트가 version 분기에 닿지 못하고
+    다른 이유로 raise되어, 무엇을 검사했는지 알 수 없는 통과가 된다.
+    """
+
+    commit = "5" * 40
+    monkeypatch.setattr(_STATE_MODULE, "_C7_BASE", tmp_path)
+    monkeypatch.setattr(_STATE_MODULE, "_safe_ancestors", lambda _path: None)
+    monkeypatch.setattr(
+        _STATE_MODULE,
+        "_read_regular",
+        lambda *_args, **_kwargs: json.dumps(payload).encode("utf-8"),
+    )
+    monkeypatch.setattr(_STATE_MODULE, "_file_sha256", lambda *_args, **_kwargs: _MODULE_DIGEST)
+    return SimpleNamespace(
+        expected_commit=commit,
+        module=tmp_path / commit / _STATE_MODULE._C7_MODULE_RELATIVE,  # noqa: SLF001
+        attestation=tmp_path / "attestation.json",
+    )
+
+
+def _bootstrap_payload(version: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "repository_commit": "5" * 40,
+        "orchestrator_files": {
+            "scripts/audit-c7-prod-live-state.py": "0" * 64,
+            "scripts/lib/c7-prod-runner-lifecycle.sh": "0" * 64,
+            "scripts/lib/c7_prod_attestation.py": _MODULE_DIGEST,
+            "scripts/run-c7-prod-live-e2e.sh": "0" * 64,
+        },
+    }
+    if version is not None:
+        payload["version"] = version
+    return payload
+
+
+def test_c7_module_bootstrap_accepts_v4_host_attestation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """양성 경로가 없으면 아래 음성 테스트는 '항상 raise'와 구별되지 않는다."""
+
+    args = _bootstrap_args(monkeypatch, tmp_path, _bootstrap_payload(4))
+
+    _STATE_MODULE._validate_c7_module(args)  # noqa: SLF001
+
+
 @pytest.mark.parametrize("version", [3, 5, "4", None])
 def test_c7_module_bootstrap_rejects_non_v4_host_attestation(
+    monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     version: object,
 ) -> None:
@@ -433,30 +491,9 @@ def test_c7_module_bootstrap_rejects_non_v4_host_attestation(
     fail-closed되는 상태가 CI green으로 남아 있었다(2026-08-20 적대 리뷰).
     """
 
-    commit = "5" * 40
-    module = tmp_path / "c7_prod_attestation.py"
-    module.write_text("# module\n", encoding="utf-8")
-    attestation = tmp_path / "attestation.json"
-    payload: dict[str, object] = {
-        "repository_commit": commit,
-        "orchestrator_files": {
-            "scripts/audit-c7-prod-live-state.py": "0" * 64,
-            "scripts/lib/c7-prod-runner-lifecycle.sh": "0" * 64,
-            "scripts/lib/c7_prod_attestation.py": _STATE_MODULE._file_sha256(module),  # noqa: SLF001
-            "scripts/run-c7-prod-live-e2e.sh": "0" * 64,
-        },
-    }
-    if version is not None:
-        payload["version"] = version
-    attestation.write_text(json.dumps(payload), encoding="utf-8")
+    args = _bootstrap_args(monkeypatch, tmp_path, _bootstrap_payload(version))
 
-    args = SimpleNamespace(
-        expected_commit=commit,
-        module=_STATE_MODULE._C7_BASE / commit / _STATE_MODULE._C7_MODULE_RELATIVE,  # noqa: SLF001
-        attestation=attestation,
-    )
-    # 경로 검증은 이 테스트의 대상이 아니므로 module 경로 자체를 기대값으로 맞춘다.
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="C7 module bootstrap mismatch"):
         _STATE_MODULE._validate_c7_module(args)  # noqa: SLF001
 
 
