@@ -2956,7 +2956,9 @@ async def test_background_snapshot_gc_round_robins_systems_and_observes_once(
         0,
         False,
     )
-    assert (first.compacted_materials, second.compacted_materials) == (0, 0)
+    # orphan material도 배출 전에 표시를 받는다(부분 배출된 material이 재사용되지
+    # 않게 하는 장치다). 그래서 batch마다 표시가 하나씩 나온다.
+    assert (first.compacted_materials, second.compacted_materials) == (1, 1)
     assert backlog.remaining_items == backlog.remaining_headers == 0
     assert backlog.snapshot_table_bytes > 0
     assert backlog.snapshot_index_bytes > 0
@@ -2987,19 +2989,22 @@ async def test_partially_drained_material_is_never_reused(
     """
 
     system = "snapshot-partial-drain-test"
-    await _apply_snapshot_source(
-        migrated_session,
-        external_system=system,
-        target_key="target-a",
-        event_id="9c100000-0000-4000-8000-000000000001",
-        idempotency_key="9d100000-0000-4000-8000-000000000001",
-    )
+    # item이 2행 있어야 "일부만 지운 상태"가 성립한다. 1행이면 하나 지운 순간 0행이라
+    # 되찾기 후보 조건(`EXISTS(item)`)에서 빠지고, 테스트가 재려는 상태가 아니게 된다.
+    for index in (1, 2):
+        await _apply_snapshot_source(
+            migrated_session,
+            external_system=system,
+            target_key=f"target-{index}",
+            event_id=f"9c100000-0000-4000-8000-00000000000{index}",
+            idempotency_key=f"9d100000-0000-4000-8000-00000000000{index}",
+        )
     first = await get_cache_target_snapshot(
         migrated_session,
         external_system=system,
         limit=10,
     )
-    assert first.count == 1
+    assert first.count == 2
 
     material_id = str(
         await migrated_session.scalar(
@@ -3055,7 +3060,7 @@ async def test_partially_drained_material_is_never_reused(
     )
 
     # 부분 material을 돌려주지 않았다 — 새 material을 만들었고 count가 실제와 맞는다.
-    assert rebuilt.count == 1
+    assert rebuilt.count == 2
     rebuilt_material = str(
         await migrated_session.scalar(
             text(

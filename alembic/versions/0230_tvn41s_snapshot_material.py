@@ -421,10 +421,12 @@ def _backfill_materials() -> None:
         raise RuntimeError(
             "0230: receipt append-only fence가 migration 시작 시점에 이미 꺼져 있었습니다."
         )
+    enable_mode = {"A": "ENABLE ALWAYS", "R": "ENABLE REPLICA"}.get(
+        before_fence, "ENABLE"
+    )
     op.execute(
         text(
-            f"ALTER TABLE {_RECEIPTS} "
-            f"{'ENABLE ALWAYS' if before_fence == 'A' else 'ENABLE REPLICA' if before_fence == 'R' else 'ENABLE'} "
+            f"ALTER TABLE {_RECEIPTS} {enable_mode} "
             f"TRIGGER {_RECEIPT_FENCE_TRIGGER}"
         )
     )
