@@ -516,7 +516,11 @@ async def _explain_json(
         text("EXPLAIN (FORMAT JSON, SETTINGS) " + sql),
         params or {},
     )
-    return result.scalar_one()[0]["Plan"]
+    explain = result.scalar_one()[0]
+    plan = dict(explain["Plan"])
+    plan["_explain_settings"] = explain.get("Settings", [])
+    plan["_planner_mode"] = "forced-index" if force_index else "default"
+    return plan
 
 
 def _walk_plan(plan: dict[str, Any]) -> list[dict[str, Any]]:
@@ -616,8 +620,16 @@ _DEDUP_REFRESH_ACCESS_BY_RELATION = {
     ),
     "source_entities": (
         "idx_source_entities_provider_dataset",
-        "source_entities_pkey",
         "uq_source_entities_key_dataset",
+    ),
+    "source_entity_heads": (
+        "pk_source_entity_heads",
+        "source_entity_heads_pkey",
+    ),
+    "source_records": (
+        "pk_source_records",
+        "source_records_pkey",
+        "uq_source_records_entity_record",
     ),
 }
 _DEDUP_REFRESH_NO_SEQ_SCAN_RELATIONS = (
@@ -1282,6 +1294,16 @@ async def test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible(
         "cursor_feature_id": None,
         "limit": 500,
     }
+    provider_dataset_count = int(
+        await migrated_session.scalar(
+            text("SELECT count(*) FROM provider_sync.provider_datasets")
+        )
+        or 0
+    )
+    assert provider_dataset_count <= 100, (
+        "provider_datasets dimension grew beyond the H50 small-table Seq Scan exception: "
+        f"count={provider_dataset_count}"
+    )
     dedup_refresh = await _explain_json(
         migrated_session,
         dedup_refresh_repo._LIST_DEDUP_FEATURES_SQL,
