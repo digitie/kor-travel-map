@@ -4159,13 +4159,21 @@ async def test_restore_fence_rejects_previously_queued_service_refresh_status_ev
     assert "restore epoch" in protocol_error
     stored_request = await get_update_request(migrated_session, request.request_id)
     assert stored_request is not None
-    with pytest.raises(CacheTargetRefreshProtocolViolation, match="restore epoch"):
+    with pytest.raises(
+        CacheTargetRefreshProtocolViolation, match="restore epoch"
+    ) as fence_violation:
         await append_cache_target_refresh_status_events(
             migrated_session,
             request_id=request.request_id,
             job_id=stored_request.job_id,
             status="running",
         )
+    # #975 적대 재리뷰 P2: 호출자는 예외 클래스가 아니라 reason으로 분기한다. fence 이동만
+    # 억제 근거를 가지므로 이 경로가 정확히 그 reason을 달고 나와야 한다.
+    assert (
+        fence_violation.value.reason
+        == CacheTargetRefreshProtocolViolation.EPOCH_MOVED
+    )
     assert (
         await migrated_session.scalar(
             text(
