@@ -1,5 +1,17 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-20 — T-VN-C05A~D provider 머지 및 map pin 고정
+
+두 전문 리뷰어의 적대 검토를 반영한 `python-krforest-api` PR #9를 merge commit
+`4681bc7892239adc28aeeab19dba707aefb1dbde`로 머지하고, map의 provider dependency와
+provider-contract를 같은 SHA로 고정했다. provider 로컬 gate는 ruff·strict mypy·pytest
+42건을 통과했고, data.go.kr 키가 없는 환경에서는 live API 11건을 안전하게 skip했다.
+n150 Playwright에서 provider debug UI의 API key 없는 오류 표면은 확인했다.
+
+운영 map live UI는 로그인 페이지 200까지 도달했으나 제공된 운영 자격증명으로 login POST가
+401이어서 인증 후 `/admin/features` 읽기 전용 검증을 완료하지 못했다. 비밀값을 출력하거나
+재시도·변경하지 않았으며, map PR은 해당 증거를 성공으로 표시하지 않고 CI와 함께 보류한다.
+
 ## 2026-08-20 — T-VN-C05A~D: 산림청 route·weather·risk·notice 순차 연결
 
 `python-krforest-api`의 C05A nested SHP route, C05B 산악기상 typed 관측, C05C 산불위험
@@ -18,8 +30,8 @@ fallback schedule까지 추가했다.
 두 전문 리뷰어의 적대 검토에서 발견한 strict mypy 오류, sigungu 공식 코드 우선순위,
 이름만 있는 route의 source identity 충돌, HTTP 200 error body의 키 노출을 provider에서
 수정했다. map 쪽에서는 source record·raw lineage와 산사태 발령→해제 snapshot을 보존한다.
-다음은 CI와 두 저장소 live UI E2E 증거를 확인하고 provider PR 병합 SHA로 map 의존성 pin을
-올리는 단계다.
+provider PR 병합과 SHA pin은 완료했고, 다음은 map PR의 CI green 및 인증 가능한 운영 map
+읽기 전용 UI E2E 증거를 확인하는 단계다.
 
 ## 2026-08-20 — T-VN-C05A: 산림청 등산로·둘레길 route 연결
 

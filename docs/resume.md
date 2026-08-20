@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-20 — T-VN-C05A~D provider 머지 후 map 최종 게이트
+
+`python-krforest-api` PR #9를 `4681bc7892239adc28aeeab19dba707aefb1dbde`로 머지했고,
+map의 provider pin도 같은 SHA로 갱신했다. map 브랜치는 최신 `origin/main`에 재베이스했으며
+현재 Alembic head 뒤에 C05 catalog migration `0230`을 두어 기존 `0229` 경로를 보존한다.
+provider n150 debug UI 스모크는 통과했지만, map 운영 UI는 제공된 자격증명으로 login POST가
+401이어서 인증 후 읽기 전용 `/admin/features` 스모크를 아직 완료하지 못했다.
+
+### 다음 한 작업
+
+map CI 전체 green을 확인하고, 유효한 운영 UI 인증으로 read-only live E2E를 완료한 뒤 map PR을
+merge한다. 인증이 갱신되기 전에는 UI E2E를 성공으로 주장하지 않는다.
+
 ## 2026-08-20 — T-VN-H50 마지막 planner 경로 보강
 
 H50의 두 적대 리뷰어가 공통으로 재현한 `source_entities_pkey` false-fail을 수정했다.
@@ -8,7 +21,7 @@ allowlist 안에 있는지 검사하도록 gate를 좁혔다. forced/default pla
 `provider_datasets` 예외의 cardinality bound는 유지한다. 로컬 대상 테스트 6회 연속과
 모듈 전체 8건은 통과했고 GitHub Actions의 남은 3.12 job 완료를 기다린다.
 
-### 다음 한 작업
+### 당시 다음 한 작업
 
 두 전문 리뷰어에게 H50 최종 재검토를 요청하고, GitHub Actions 전체 green 확인 후 H50
 문서·PR을 갱신하고 merge한다.
@@ -23,7 +36,7 @@ mypy, 시군구 코드, source identity 충돌, body-level API key redaction을 
 최신 main의 기존 `0229`를 보존하면서 C05 catalog를 `0230`으로 `0229` 뒤에 연결했고,
 asyncpg/identity 호환을 포함한 Alembic metadata integration 7건을 통과시켰다.
 
-### 다음 한 작업
+### 당시 다음 한 작업
 
 두 PR의 CI·live UI E2E와 provider 병합을 확인한 뒤, 병합 SHA로 map provider pin을 갱신하고
 map PR을 병합한다.
