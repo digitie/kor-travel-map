@@ -2,6 +2,42 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-20 — T-VN-41C GC 실측: 통과 자체보다 "통과가 무엇을 뜻하는가"
+
+cache-target snapshot GC의 백로그 AC(migration → 수동 GC → schedule ON → 다음 tick,
+처리량 > 유입률, remaining backlog 0, referenced 증가율·보존 임계치 alert)를 n150 격리
+DB에서 전부 실측했다. 6개 축 모두 PASS.
+기록 `docs/reports/t-vn-41c-cache-target-gc-verification-2026-08-20.md`.
+
+숫자는 여유가 크다 — 유입 12,951 items/s에 GC 65,214 items/s, tick은 schedule을 켠 지
+21초 만에 run을 만들고 26초에 SUCCESS, backlog 42/2,100 → 0/0. 하지만 이 숫자들은
+**대조군이 있어야만 의미가 있다.** 그래서 이번 실측의 설계는 전부 "통과가 공허하지 않은가"를
+겨눴다.
+
+- **시딩에 보존 대조군 2종을 못박았다.** 만료+참조됨(B)과 미만료(C)가 없으면 "만료된 것을
+  전부 지운다"는 잘못된 구현도 통과한다. 실제로 단언은 "적격이 0이 됐다"가 아니라
+  "적격만 사라지고 대조군 24는 그대로"다.
+- **tick을 우연과 분리했다.** 코드 기본 cron은 `15 * * * *`라 정시를 우연히 맞은 것과
+  구별되지 않는다. `ops.dagster_schedule_overrides`에 `* * * * *`를 넣고 **새 프로세스가
+  그 값을 집는지 먼저 단언**한 뒤에 daemon을 띄웠다. override 경로가 죽어 있으면 거기서 멈춘다.
+- **alert를 양방향으로 봤다.** 조인 임계치에서 켜지는 것만 보면 상수를 반환하는 alert와
+  구별되지 않는다. 같은 데이터에서 기본 임계치일 때 꺼지는 것까지 단언하고, 증가율은 개수
+  ceiling을 기본값으로 둔 채 따로 터뜨려 발화 사유를 분리했다.
+- **code location은 실물을 import한다.** 정의를 복제하면 `cron_for_schedule`의 import-time
+  해석과 `default_status=STOPPED`라는 검증 대상 자체가 사본이 된다.
+
+과정에서 두 가지를 배웠다. 하나, **Dagster storage DB는 애플리케이션 DB와 분리해야 한다** —
+storage가 자기 alembic 계보를 같은 `public.alembic_version`에 stamp해서 우리 head를
+`Can't locate revision '0225_tvn40c_physical_removal'`로 못 찾고 죽는다. 운영이 이미
+`kor_travel_map` / `kor_travel_map_dagster`로 나뉘어 있는 이유가 이것이었다. 둘,
+**growth baseline에는 1초 debounce가 있다.** backlog가 0인 상태에서 job을 연속 실행하면
+각 run이 0.1초라 직전 관측이 baseline 자격을 잃고 증가율이 "관측 불가"로 빠진다 — 처음에
+증가율 alert가 안 켜진 원인이 결함이 아니라 이것이었다.
+
+절차를 일회성으로 흘려보내지 않고 `scripts/verify-tvn41c-cache-target-gc.sh`로 고정했다.
+스키마나 GC 예산이 바뀌면 다시 돌려야 하는 게이트를 사람 기억에 두면 안 된다. 게이트는
+`DROP DATABASE`로 시작하므로 운영 DB 이름이 들어오면 그 전에 거부한다.
+
 ## 2026-08-20 — T-VN-41C relay 종결성: 테스트가 결함을 보호하고 있었다
 
 `#975` 적대 재리뷰 P2의 (a)~(d)를 닫았다(PR #1026, merge `b2e9c43a`). 착수 전 서브시스템

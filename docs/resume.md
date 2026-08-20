@@ -1,5 +1,28 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-20 — T-VN-41C GC 축 종결
+
+cache-target snapshot GC의 실측 AC를 n150 격리 DB에서 6개 축 전부 통과시켰다
+(`docs/reports/t-vn-41c-cache-target-gc-verification-2026-08-20.md`). 절차는
+`scripts/verify-tvn41c-cache-target-gc.sh`로 재실행 가능하게 고정했다.
+
+| 축 | 결과 |
+|---|---|
+| migration | fresh DB → head `0225_tvn40c_physical_removal` |
+| 수동 GC | 적격 56/2,800 전부 삭제, 보존 대조군 24 불변, remaining 0 |
+| 처리량 | 65,214 items/s vs 유입 12,951 items/s |
+| schedule ON → tick | t+21초 run 생성 · t+26초 SUCCESS · backlog 0/0 |
+| alert | 보존 ceiling·증가율 독립 발화, 기본값에서 침묵 |
+
+### 다음 한 작업
+
+T-VN-41C에 남은 것은 GC와 독립인 두 항목이다 — PinVi exact-pair receipt 전환
+(`pending` → `candidate_verified` → `complete`)과 최종 prod gate·production consumer
+enable. 앞의 것이 PinVi vendor PR 병합에 물려 있으므로 먼저 그 상태를 확인한다.
+
+병행 가능: `T-VN-41S` ACL 방침 결정 후 `0227+`, `T-FE-MOCK-MANIFEST`,
+`T-C7-SCOPE-REGISTRY`, `T-C7-LIVE-SERIAL`.
+
 ## 2026-08-20 — T-VN-40C 완료: 머지 4건 + prod 0225 적용
 
 T-VN-40C가 코드·계약·문서·prod DB까지 모두 닫혔다.
