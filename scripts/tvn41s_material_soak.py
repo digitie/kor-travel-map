@@ -16,6 +16,12 @@
 재지 않는 것: 운영 SLO, 동시 consumer 다수, VACUUM 튜닝. 이 스크립트는 **한 번의 실측
 증거**를 남길 뿐 처리량을 보증하지 않는다.
 
+**source head는 tombstone(`state='deleted'`)으로 심는다.** `active`는
+`target_id IS NOT NULL`을 요구하고 그 FK 때문에 `ops.poi_cache_targets` 1,000,000행이
+따로 필요해진다. membership은 두 state를 모두 담고(merkle leaf는 state 1바이트만 다르다)
+item 행에는 `target_id`가 없으므로, 여기서 재는 축(scan 처리량·item 행 크기·compaction
+회수량)에는 차이가 없다. `active` 혼합 분포를 재고 싶다면 target을 함께 심어야 한다.
+
 usage: scripts/verify-tvn41s-1m-soak.sh
 대상 DB는 ``KOR_TRAVEL_MAP_PG_DSN``으로 받는다 — 인자로 주면 자격증명이 ps에 남는다.
 """
@@ -69,7 +75,7 @@ INSERT INTO ops.poi_cache_target_source_heads (
     external_system, target_key, state, restore_epoch, source_generation,
     source_payload_fingerprint, target_sequence, updated_at
 )
-SELECT :stream, 'soak-' || lpad(value::text, 8, '0'), 'active', 1, 1,
+SELECT :stream, 'soak-' || lpad(value::text, 8, '0'), 'deleted', 1, 1,
        :fingerprint, value, now()
 FROM generate_series(CAST(:lo AS bigint), CAST(:hi AS bigint)) AS value
 """
