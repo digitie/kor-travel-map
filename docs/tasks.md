@@ -22,7 +22,7 @@ barrier로 직렬화한다.
 - **Lane B — frontend hardening·PinVi 소비 API**
   - [~] `T-VN-41C`(#975 병합 / final exact-pair·prod consumer enable 잔여)
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환 — **저장소측 완료 2026-08-20**, live 실행은 배리어 대기)
-    ∥ [~] `T-VN-41S`(#922 1차 구현·리뷰 GO, `0228+` migration/compactor·n150 1M 검증 잔여)
+    ∥ [~] `T-VN-41S`(#922 1차 구현·리뷰 GO, `0230+` migration/compactor·n150 1M 검증 잔여)
   - **배리어**: [ ] `T-VN-FINAL-REBUILD`(주요 개발 완료 후 파괴적 재구축 — 사용자 결정 2026-08-20)
   - [x] `T-C7-BROWSER-EVIDENCE`(#995 잔여 — 2026-08-20 접어넣음)
   - [ ] `T-VN-40B` 잔여(source rule `curated` action 퇴역, `0227`) — 종결 되돌림
@@ -82,7 +82,10 @@ barrier로 직렬화한다.
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
 - migration 정본: 단일 head 유지(2026-08-20 `origin/main` 기준
   `0225_tvn40c_physical_removal`; T-VN-40C는 **착지·prod 적용 완료**,
-  M01 후속이 `0226`(#1029 in-flight), **T-VN-40B 잔여가 `0227`**, 41S 후속은 `0228+`).
+  #1029가 `0226`(M01)·`0227`(M02)·`0228`(M03)을 한 PR에 쥐고 있고,
+  **T-VN-40B 잔여가 `0229`**(PR #1035), 41S 후속은 `0230+`).
+  ⚠️ #1029의 `0226`과 PR #1035의 `0229`는 **둘 다 `down_revision`이 `0225`**다 —
+  나중에 머지하는 쪽이 자기 chain을 앞선 head 뒤로 다시 잡아야 head가 갈라지지 않는다.
   prod 적용 head는 배포 직전 live DB에서 다시 확인한다. 후속 migration 소유자는
   PR 직전 단일 head를 재확인한 뒤 번호를 배정한다. 두 lane의 migration-bearing PR은 번호 예약부터
   머지까지 직렬화한다. forward migration 뒤에는 수용 조건이나 실패 복구가 명시적으로 요구하지 않는
@@ -562,7 +565,7 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 > 이 항목은 2026-08-20 `tasks-done.md`로 이관됐다가 **사용자 지시로 되돌렸다**. 종결
 > 근거였던 "candidate lifecycle 전환"은 맞지만 아래 사실을 다루지 않는다.
 
-- [ ] **T-VN-40B 잔여 — `curated` action 퇴역 (`0227`)**
+- [ ] **T-VN-40B 잔여 — `curated` action 퇴역 (`0229`, PR #1035)**
 
   **prod 실측(2026-08-20)**: `feature.curated_source_rules`에 `default_action='curated'`
   **35행**이 남아 있고 `ck_curated_source_rules_action`은 여전히
@@ -575,12 +578,13 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   재해석해 `candidate`와 같은 뜻이 됐다. 같은 뜻의 값이 둘이면 읽는 사람마다 다르게
   해석하므로 한쪽을 없앤다.
 
-  - [ ] `0227`이 35행을 `candidate`로 정규화하고 CHECK를 `('candidate','ignore')`로 좁힌다.
+  - [ ] `0229`가 35행을 `candidate`로 정규화하고 CHECK를 `('candidate','ignore')`로 좁힌다.
     대상 표의 BEFORE trigger(`inactive provider dataset` write 차단)를 **끄지 않는다** —
     막히면 어느 rule인지 말하고 멈춘다. 모델 CHECK와 write 허용값이 어긋나면 red가 되는
     drift 게이트를 함께 둔다. 브랜치 `feat/tvn40b-source-rule-action`.
-  - **번호 제약**: `0226`을 M01이 in-flight(#1029)로 쓰고 있어 `0226` 뒤에 붙는다. 따라서
-    이 PR은 `0226` 착지 뒤에 머지한다.
+  - **번호 제약**: #1029가 `0226`~`0228`을 쥐고 있어 그 셋을 피해 `0229`를 잡고 현재 head
+    `0225`에 직접 체인한다. 머지 시점에 단일 head가 되며, #1029는 착지할 때 자기 chain을
+    `0229` 뒤로 다시 잡는다.
 
   **이 항목이 아닌 것**: "legacy candidate rows backfill"은 대상이 없다 — 그 legacy 행은
   `0225`가 canonical collection/item으로 옮긴 뒤 물리 삭제했고 `theme_feature_candidates`는
@@ -713,7 +717,7 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   잔여 없음으로 GO했고, 단위/API/Dagster 집중 231개와 PostGIS stream repository 37개를 통과했다.
 
   **후속 종료선(미완료, #922 유지)** — `0225`는 2026-08-20 착지·prod 적용으로 barrier가
-  풀렸다. 남은 것은 `0228+`(‘0226’ M01 · ‘0227’ T-VN-40B 잔여가 선점) 물리 모델, 양방향 공유, 실제 compactor와
+  풀렸다. 남은 것은 `0230+`(`0226`~`0228`은 #1029 · `0229`는 T-VN-40B 잔여가 선점) 물리 모델, 양방향 공유, 실제 compactor와
   repository 410, migration/ACL/EXPLAIN 및 n150 1M+ 증거까지다. 이 항목들이 끝나기 전에는 #922 또는
   T-VN-41S 전체 완료로 표시하지 않는다.
 
@@ -786,7 +790,13 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   > 변이 8종(phase/candidate/cancel probe/schema head/journal digest/pinset/image 대조/
   > manifest version)이 전부 red임을 실측했다. 실행 전제: v5/v7은
   > `require_rebuildable_mode`가 걸려 rehearsal/rebuildable에서만 생성된다(n150은 해당).
-  > 아직 n150에 두 파일이 없다 — D1의 파괴적 rebuild가 처음 만든다.
+  > **2026-08-20 정정**: 앞서 "n150에 두 파일이 없다"고 적었으나 틀렸다. `digitie` 홈만
+  > 봤고 실제로는 **root 홈**(`/root/.local/state/kor-travel-docker-manager/…`)에
+  > `pinned-runtime-generation-v5.json`·`pinned-runtime-rebuild-v7-93dd4ac0….json`이
+  > root:root `0600`으로 실재한다 — runner의 소유권 요구는 이미 만족한다. 다만 그
+  > generation은 `map_application_head=0087_route_area_subtypes`인 2026-08-06 리허설
+  > 세대라 현 prod head `0225`와 exact 대조에서 red다. **재사용할 수 없을 뿐 없는 것이
+  > 아니다.** 현 세대 문서는 D1의 파괴적 rebuild가 만든다.
 
   `run-c7-prod-live-e2e.sh`와 `run-admin-feature-live-acceptance.sh`가 요구하는 v4
   `E2E_C7_COMPATIBLE_PAIR_MANIFEST`를 제거한다. root-owned snapshot은 v5
@@ -863,8 +873,13 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   - [ ] 고정 release candidate(Map/PinVi 커밋과 일곱 image)를 먼저 확정한다.
 
   **이 배리어가 푸는 것 (순서대로).**
-  1. v5/v7 문서가 n150에 **처음** 생긴다. 그전에는 새 live runner가 읽을 attested input이
-     아예 없다(2026-08-20 실측: 두 파일 모두 부재, v4 `compatible-pair-v4.json`만 존재).
+  1. **현 세대 기준의** v5/v7 문서가 생긴다. (2026-08-20 정정 — 앞선 "두 파일 모두 부재"는
+     틀렸다. `digitie` 홈만 봤고 실제로는 **root 홈**에 있다:
+     `/root/.local/state/kor-travel-docker-manager/kor-travel-docker-manager/`에
+     `pinned-runtime-generation-v5.json`과 `pinned-runtime-rebuild-v7-93dd4ac0….json`이
+     root:root `0600`으로 실재한다.) 다만 그 generation은
+     `map_application_head=0087_route_area_subtypes`인 2026-08-06 리허설 세대라 현 prod
+     head `0225`와 exact 대조에서 red다 — **재사용할 수 없을 뿐 없는 것이 아니다.**
   2. `T-VN-41F1D-D1` — 일곱 image·세 schema head·pinset attestation과 데이터 비의존 UI smoke.
   3. `T-VN-41F1D-E`의 n150 data-dependent 실행(저장소측 계약은 2026-08-20 완료).
   4. `T-VN-41F1D-D2` — 고정 ID를 요구하는 admin/PinVi mutating live E2E.

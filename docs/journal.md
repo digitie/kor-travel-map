@@ -123,7 +123,10 @@ ADR-094를 추가하고 ADR-076/079를 superseded로 표시했다 — v4 유지�
 
 실행 전제 하나를 기록해 둔다 — v5/v7은 `require_rebuildable_mode`가 걸려 rehearsal/
 rebuildable에서만 만들어진다. n150은 `rehearsal`/`rebuildable`이라 해당되지만, **아직 두
-파일이 없다**. D1의 파괴적 rebuild가 처음 만든다. 또 ktdm의 state root는 Manager owner
+파일이 없다**. D1의 파괴적 rebuild가 처음 만든다.
+**(2026-08-20 정정 — 이 실측은 틀렸다.** `digitie` 홈만 봤고 실제로는 root 홈에
+두 문서가 root:root `0600`으로 실재한다. 2026-08-06 리허설 세대라 현 head와 대조에서
+red일 뿐 없는 것이 아니다. 소유권 요구는 이미 만족한다.) 또 ktdm의 state root는 Manager owner
 소유 `0700`이라 verifier의 root-owned 0600 요구를 그대로는 만족하지 않는다 — v4도 같은
 구조였고 운영자가 root 소유 사본을 건네는 것이 기존 절차다. runbook에 명시했다.
 ## 2026-08-20 — T-VN-34C fresh-live runner를 M01 필수 자격증명과 동기화

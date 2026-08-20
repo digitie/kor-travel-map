@@ -26,7 +26,8 @@ ADR-094 추가 + ADR-076/079 superseded.
 ### 다음 한 작업
 
 `T-VN-FINAL-REBUILD` 배리어 앞의 개발을 계속한다. F1D-E의 n150 실행은 v5/v7 문서가
-생겨야 가능하고, 그 문서는 파괴적 rebuild가 처음 만든다.
+생겨야 가능하다(root 홈에 2026-08-06 리허설 세대가 남아 있으나 head가 달라
+재사용할 수 없다 — 현 세대 문서는 파괴적 rebuild가 만든다).
 
 주의: v5/v7은 `require_rebuildable_mode` 아래에서만 생성되고(n150은 rehearsal/
 rebuildable로 해당), runner에는 **root 소유 0600 사본**을 건네야 한다.
