@@ -10,8 +10,14 @@
 4. **compaction 후보 조회** — `WHERE compacted_at IS NULL` partial index.
 
 계획을 강제하지 않는다. `enable_seqscan = off`로 "탈 인덱스가 있는가"를 묻는 것이 이
-게이트의 질문이고(작은 fixture에서 planner는 어차피 seq scan을 고른다), 실제 처리량은
-n150 soak이 따로 잰다.
+게이트의 질문이고, 실제 처리량은 n150 soak이 따로 잰다.
+
+**fixture 모양이 곧 이 게이트의 유효성이다.** 세 번 고쳐 쓰면서 알았다. material이
+하나면 두 partial index의 비용이 같아 아무 것이나 골라도 통과했고, compaction 후보가
+0개면 planner의 선택 자체가 무의미했고, material마다 item이 1행이면 정렬이 공짜라
+`(material_id, row_number)` PK 대신 `(material_id, target_key)` UNIQUE를 골랐다.
+그래서 여기 fixture는 실제 모양을 흉내 낸다 — 한 material에 item 5,000행,
+material 201개 중 190개는 이미 compaction, 후보 10개.
 """
 
 from __future__ import annotations
@@ -71,7 +77,7 @@ async def _seed(session: AsyncSession) -> None:
             "material_id, external_system, restore_epoch, "
             "material_high_watermark_relay_order, safe_high_watermark_relay_order, "
             "item_count, merkle_root, materialized_at) VALUES ("
-            "CAST(:material_id AS uuid), :system, 1, 0, 0, 3, :root, now())"
+            "CAST(:material_id AS uuid), :system, 1, 0, 0, 5000, :root, now())"
         ),
         {"material_id": _MATERIAL, "system": _SYSTEM, "root": _ROOT},
     )
@@ -137,7 +143,7 @@ async def _seed(session: AsyncSession) -> None:
             "material_id, row_number, target_key, state, source_generation, "
             "source_payload_fingerprint) "
             "SELECT CAST(:material_id AS uuid), value, 'key-' || value::text, "
-            "'active', 1, :fingerprint FROM generate_series(1, 3) AS value"
+            "'active', 1, :fingerprint FROM generate_series(1, 5000) AS value"
         ),
         {"material_id": _MATERIAL, "fingerprint": "b" * 64},
     )
