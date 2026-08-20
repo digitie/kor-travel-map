@@ -39,14 +39,16 @@ _C7_RUNNER = _ROOT / "scripts" / "run-c7-prod-live-e2e.sh"
 
 _ORIGIN_EXECUTION = {
     "api_image_id": "sha256:" + "1" * 64,
-    "compatible_pair_manifest_sha256": "2" * 64,
+    "pinned_runtime_manifest_sha256": "2" * 64,
+    "rebuild_journal_sha256": "b" * 64,
     "host_attestation_sha256": "3" * 64,
     "playwright_image_id": "sha256:" + "4" * 64,
     "source_commit": "5" * 40,
 }
 _RECOVERY_EXECUTION = {
     "api_image_id": "sha256:" + "6" * 64,
-    "compatible_pair_manifest_sha256": "7" * 64,
+    "pinned_runtime_manifest_sha256": "7" * 64,
+    "rebuild_journal_sha256": "c" * 64,
     "host_attestation_sha256": "8" * 64,
     "playwright_image_id": "sha256:" + "9" * 64,
     "source_commit": "a" * 40,
@@ -146,7 +148,8 @@ def test_live_fixture_counts_only_direct_feature_id_references() -> None:
 def _execution_args(path: Path, identity: dict[str, str]) -> SimpleNamespace:
     return SimpleNamespace(
         api_image_id=identity["api_image_id"],
-        compatible_pair_sha256=identity["compatible_pair_manifest_sha256"],
+        pinned_runtime_manifest_sha256=identity["pinned_runtime_manifest_sha256"],
+        rebuild_journal_sha256=identity["rebuild_journal_sha256"],
         host_attestation_sha256=identity["host_attestation_sha256"],
         path=path,
         playwright_image_id=identity["playwright_image_id"],
@@ -354,13 +357,14 @@ def test_result_v3_durably_preserves_execution_identity(
     result = written["payload"]
     assert isinstance(result, dict)
     assert set(result) == {
-        "compatible_pair_manifest_sha256",
         "execution_identity_sha256",
         "host_attestation_sha256",
         "owned_feature_id_sha256",
         "phase",
         "recorded_at",
         "recovery_attempt",
+        "pinned_runtime_manifest_sha256",
+        "rebuild_journal_sha256",
         "run_id_sha256",
         "status",
         "version",
@@ -369,7 +373,8 @@ def test_result_v3_durably_preserves_execution_identity(
     assert result["execution_identity_sha256"] == (
         _STATE_MODULE._execution_identity_sha256(_ORIGIN_EXECUTION)  # noqa: SLF001
     )
-    assert result["compatible_pair_manifest_sha256"] == "2" * 64
+    assert result["pinned_runtime_manifest_sha256"] == "2" * 64
+    assert result["rebuild_journal_sha256"] == "b" * 64
     assert result["host_attestation_sha256"] == "3" * 64
 
 
@@ -416,7 +421,7 @@ def test_targeted_lane_is_not_part_of_strict_c7_runner() -> None:
     assert "admin-feature-acceptance-write" not in _C7_RUNNER.read_text()
 
 
-def test_runner_uses_trusted_c7_v3_v4_runtime_attestation_before_state() -> None:
+def test_runner_uses_trusted_c7_v4_v5_v7_runtime_attestation_before_state() -> None:
     runner = _RUNNER.read_text()
     state = _STATE.read_text()
     attestation = _ATTESTATION.read_text()
@@ -427,14 +432,19 @@ def test_runner_uses_trusted_c7_v3_v4_runtime_attestation_before_state() -> None
     assert 'readonly HOST_ATTESTATION_FILE="/etc/kor-travel-map/' in runner
     assert 'readonly C7_INSTALL_BASE="/usr/local/lib/kor-travel-map/c7-runner"' in runner
     assert 'attestation.get("version") != 3' in state
-    assert 'manifest["version"] != 4' in attestation
+    assert 'manifest["version"] != 5' in attestation
+    assert 'value["version"] != 7' in attestation
+    assert 'value["phase"] != _JOURNAL_COMMITTED_PHASE' in attestation
+    assert 'value["candidate"] != generation' in attestation
     assert 'active["map_source_revision"] != source_commits["map"]' in attestation
     assert 'compose_project_hashes != {attestation["compose_project_sha256"]}' in attestation
     assert 'environment_sha256 != expected["environment_sha256"]' in attestation
     assert 'command_sha256 != expected["command_sha256"]' in attestation
     assert 'observed_images[role] != active[field]' in attestation
     assert '_public_origin(environ["E2E_BASE_URL"])' in attestation
-    assert 'E2E_C7_COMPATIBLE_PAIR_MANIFEST' in runner
+    assert 'E2E_C7_PINNED_RUNTIME_MANIFEST' in runner
+    assert 'E2E_C7_REBUILD_JOURNAL' in runner
+    assert 'E2E_C7_COMPATIBLE_PAIR_MANIFEST' not in runner
     assert 'E2E_C7_EXPECTED_GIT_COMMIT' in runner
 
 

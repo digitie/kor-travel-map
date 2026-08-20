@@ -55,11 +55,12 @@ def test_final_runner_anchors_host_login_and_causal_poi_spec() -> None:
     assert '/etc/kor-travel-map/c7-prod-live-e2e-attestation.json' in script
     assert 'machine_id_sha256' in attestation
     assert 'hostname_sha256' in attestation
-    assert 'compatible_pair_manifest_sha256' in attestation
+    assert 'pinned_runtime_manifest_sha256' in attestation
+    assert 'rebuild_journal_sha256' in attestation
     assert 'compose_project_sha256' in attestation
     assert 'service_runtime' in attestation
     assert '"orchestrator_files"' in script
-    assert 'attestation["version"] != 3' in attestation
+    assert 'attestation["version"] != 4' in attestation
     assert 'expected_base: Path = Path("/usr/local/lib/kor-travel-map/c7-runner")' in attestation
     assert 'scripts/lib/c7_prod_attestation.py' in script
     assert 'scripts/audit-c7-prod-live-state.py' in script

@@ -214,14 +214,19 @@ def test_evidence_manifest_hashes_are_recomputed(
     attestation_file = run / "runtime-attestation.json"
     attestation_file.write_text("{}\n", encoding="utf-8")
     attestation_file.chmod(0o600)
-    compatible_pair_file = run / "compatible-pair.json"
-    compatible_pair_file.write_text("{}\n", encoding="utf-8")
-    compatible_pair_file.chmod(0o600)
+    generation_file = run / "pinned-runtime-generation.json"
+    generation_file.write_text('{"version": 5}\n', encoding="utf-8")
+    generation_file.chmod(0o600)
+    journal_file = run / "pinned-runtime-rebuild.json"
+    journal_file.write_text('{"version": 7}\n', encoding="utf-8")
+    journal_file.chmod(0o600)
     attestation_hash = hashlib.sha256(attestation_file.read_bytes()).hexdigest()
-    compatible_pair_hash = hashlib.sha256(compatible_pair_file.read_bytes()).hexdigest()
+    generation_hash = hashlib.sha256(generation_file.read_bytes()).hexdigest()
+    journal_hash = hashlib.sha256(journal_file.read_bytes()).hexdigest()
     manifest = {
         "alembic_head": "0058_example",
-        "compatible_pair_manifest_sha256": compatible_pair_hash,
+        "pinned_runtime_manifest_sha256": generation_hash,
+        "rebuild_journal_sha256": journal_hash,
         "files": [
             {
                 "path": "journals/sensor.json",
@@ -234,9 +239,14 @@ def test_evidence_manifest_hashes_are_recomputed(
                 "size": attestation_file.stat().st_size,
             },
             {
-                "path": "compatible-pair.json",
-                "sha256": compatible_pair_hash,
-                "size": compatible_pair_file.stat().st_size,
+                "path": "pinned-runtime-generation.json",
+                "sha256": generation_hash,
+                "size": generation_file.stat().st_size,
+            },
+            {
+                "path": "pinned-runtime-rebuild.json",
+                "sha256": journal_hash,
+                "size": journal_file.stat().st_size,
             },
         ],
         "finished_at": "2026-07-19T01:01:01+00:00",
