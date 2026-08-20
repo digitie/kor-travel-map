@@ -7,7 +7,7 @@
     "service",
     "admin-detail"
   ],
-  "deployment_receipt_task": "T-VN-41",
+  "deployment_receipt_task": "T-VN-40",
   "rollout_principles": [
     "consumer(PinVi)를 먼저 배포한 뒤 KTM과 PinVi를 순차 전환한다 (ADR-075 결정 2)",
     "rollback window에는 write fence를 유지하거나 forward journal replay를 준비한다 — 없으면 rollback 가능하다고 선언하지 않는다 (ADR-075 결정 3)",
@@ -196,9 +196,9 @@
       },
       "pinvi_snapshot_receipt": {
         "state": "pending",
-        "map_service_openapi_sha256": "4ecc3e046689586643d5b5e48a6d63436b8096778aff6208501d57ec2c48fa2d",
+        "map_service_openapi_sha256": "8019e36f150ed006f5580e5ff224a0ba72030808b5303273f8c4c51aa0496431",
         "pinvi_service_vendor_sha256": "8019e36f150ed006f5580e5ff224a0ba72030808b5303273f8c4c51aa0496431",
-        "blocking_reason": "T-VN-41S가 service 계약을 두 번 바꿨다 — typed snapshot 410/413 도입, 그리고 generic snapshot cursor 경로의 `410 SNAPSHOT_MATERIAL_COMPACTED` 선언(material과 receipt가 갈리면서 두 receipt가 material을 공유하므로 그 경로에서도 발생한다). PinVi vendor는 아직 이전 service bytes(8019e36f150e…)를 들고 있어 Map 현행(4ecc3e046689…)과 갈렸다. exact re-vendor와 새 Map/PinVi source pair의 isolated acceptance 전까지 candidate_verified로 승격하지 않는다."
+        "blocking_reason": "T-VN-41S typed snapshot 410/413가 service 계약을 바꿨다. PinVi exact vendor는 갱신했지만 기존 77821001/e8e0fec 후보 archive·image·Live UI 증거는 이전 service bytes만 검증했으므로 새 Map/PinVi source pair의 isolated acceptance 전까지 candidate_verified로 승격하지 않는다."
       }
     },
     "T-VN-39": {

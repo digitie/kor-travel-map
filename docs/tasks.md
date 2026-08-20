@@ -793,6 +793,15 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
     `test_snapshot_barrier_keeps_outbox_cursor_commit_safe_across_writers`,
     `test_generic_snapshot_reuse_ignores_nonmaterial_outbox_tail`). soak에서 흉내 내면 같은
     성질을 덜 정확하게 보는 두 번째 게이트가 된다.
+  - [ ] **service spec이 도달 가능한 `410`을 선언하지 않는다(적대 리뷰 지적, 사용자 결정
+    2026-08-21로 후속 분리).** generic snapshot cursor 경로는 `410
+    SNAPSHOT_MATERIAL_COMPACTED`를 실제로 낸다(두 receipt가 material을 공유하므로).
+    그런데 route에 선언하면 `openapi.service.json` bytes가 바뀌어 **PinVi vendor 재고정이
+    같은 호흡으로** 필요해지고, T-VN-40 deployment receipt의 "PinVi vendor bytes are
+    exact" 주장이 깨진다. 이 브랜치의 범위는 material/receipt 정규화이므로 선언을 다음
+    PinVi re-vendor와 함께 묶는다 — T-VN-41 lane이 어차피 service re-vendor를 요구하므로
+    추가 비용이 없다. 누락 자체는 이 브랜치 이전부터 있었다(41S가 410 schema만 예약했다).
+    선언 위치와 근거 주석은 `cache_target_streams.py`의 generic snapshot route에 있다.
   - [ ] **`ops` fail-closed ACL의 탈출구가 없다(적대 리뷰 지적).** 선언 없는 ops relation은
     이제 배포를 막는다. 의도한 동작이지만, **운영에는 있고 fresh migrate DB에는 없는**
     relation이 걸린다 — 위험한 migration 앞에서 운영자가 만든 backup 표, `pg_dump` 복원

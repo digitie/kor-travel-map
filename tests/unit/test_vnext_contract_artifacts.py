@@ -49,18 +49,13 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     ),
     # 2026-08-13 T-VN-40 — public legacy catalog 제거, scoped service snapshot/mapping,
     # admin catalog/import/candidate ETag·412/428 목표 diff를 machine freeze했다.
-    "openapi-diff-v1.json": ("dc8cb524fbf689a2c7a77f66365ba81c6a1dfef035cd02bf2e8c442cbf5e7de3"),
+    "openapi-diff-v1.json": ("bf462eccdbccdf813e319b35d6a92e9d9b9cfb2756698f79501c89cc0adf399f"),
     # 2026-08-13 T-VN-36 — receipt가 리베이스로 폐기된 커밋(c1fa5a4d)과 그때의
     # spec sha를 가리키고 있었다. 현재 head로 재핀했다.
     # 2026-08-19 T-VN-40 ③ 완료 — C7 prod live 6-spec GREEN(f00e7f48) 뒤 receipt를
     # complete로 봉인했다.
-    # 2026-08-21 T-VN-41S — generic snapshot cursor 경로에 `410
-    # SNAPSHOT_MATERIAL_COMPACTED`를 선언해 service/full spec bytes가 바뀌었다. T-VN-40
-    # receipt의 "PinVi vendor bytes are exact" 주장은 현재 트리에 대해 더 이상 참이 아니라
-    # active receipt 포인터를 T-VN-41(pending)로 옮겼다. sha만 갈아 끼우면 검증하지 않은
-    # 것을 검증했다고 적는 것이 된다.
     "consumer-rollout-v1.json": (
-        "5d7d59d17671a7f4d478993c813b1c8df163345fc8b76aeb424b98c081c20e26"
+        "03b79f491ac258d3864dde5d1626f4f6bd2eac302a0a2601b5d57433c9f1d53d"
     ),
     # T-VN-41S service 계약 변경으로 active receipt가 pending으로 돌아가도, 이전
     # candidate archive·image·Live UI 증거 세트는 detached 이력으로 불변이어야 한다.
@@ -433,32 +428,11 @@ def test_active_pinvi_receipt_describes_current_consumed_specs() -> None:
     assert task in rollout["tasks"]
     receipt = rollout["tasks"][task]["pinvi_snapshot_receipt"]
     api_root = _ROOT / "packages/kor-travel-map-api"
-
-    # 어떤 surface를 서술해야 하는지는 그 lane의 `pinvi_snapshot_revendor`가 정한다.
-    # 세 개를 무조건 요구하면 service만 revendor하는 lane(T-VN-41)이 자기 lane과
-    # 무관한 surface를 적어야 하고, 반대로 receipt가 surface를 **빼서** 이 검사를
-    # 피할 수도 있다. 둘을 묶으면 양쪽이 닫힌다.
-    surface_spec = {
-        "user": ("openapi.user.json", "map_user_openapi_sha256"),
-        "service": ("openapi.service.json", "map_service_openapi_sha256"),
-        "admin-detail": ("openapi.json", "map_full_openapi_sha256"),
-    }
-    revendor = rollout["tasks"][task]["pinvi_snapshot_revendor"]
-    required = {
-        surface_spec[surface][1]
-        for surface, value in revendor.items()
-        if value == "yes"
-    }
-    assert required, f"{task}가 revendor하는 surface가 없다 — receipt lane이 아니다"
-    declared = {key for key in receipt if key.startswith("map_") and key.endswith("_sha256")}
-    assert declared == required, (
-        f"{task} receipt가 서술하는 spec surface가 그 lane의 revendor 선언과 다르다: "
-        f"declared={sorted(declared)} required={sorted(required)}"
-    )
-    for surface, value in revendor.items():
-        if value != "yes":
-            continue
-        name, key = surface_spec[surface]
+    for name, key in (
+        ("openapi.user.json", "map_user_openapi_sha256"),
+        ("openapi.service.json", "map_service_openapi_sha256"),
+        ("openapi.json", "map_full_openapi_sha256"),
+    ):
         observed = hashlib.sha256((api_root / name).read_bytes()).hexdigest()
         assert observed == receipt[key], (
             f"{name}이 {task} receipt와 다르다 — receipt를 현재 head로 재핀하라 "
