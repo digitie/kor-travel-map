@@ -656,6 +656,13 @@ async def repair_tvn_m05_role_phase(async_dsn: str) -> None:
             )
             await connection.execute(
                 text(
+                    "ALTER PROCEDURE feature.resolve_manual_provider_dedup_case_v2("
+                    "uuid, text, text, bigint, bigint, text, text, text, bigint) "
+                    "OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
                     "ALTER PROCEDURE feature.lease_feature_reference_reconciliation_event("
                     "text, uuid) OWNER TO ktm_manual_provider_dedup_procedure_owner"
                 )

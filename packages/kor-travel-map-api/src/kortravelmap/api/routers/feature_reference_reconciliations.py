@@ -116,7 +116,7 @@ class FeatureReferenceReconciliationAckResponse(BaseModel):
 class FeatureReferenceReconciliationSubscriptionProvisionInput(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    initial_event_sequence: int = Field(ge=0)
+    initial_event_sequence: int = Field(ge=0, le=0)
 
 
 class FeatureReferenceReconciliationSubscriptionProvisionData(BaseModel):
@@ -395,8 +395,7 @@ async def lease_feature_reference_reconciliation_event_route(
             detail={
                 "code": "FEATURE_REFERENCE_RECONCILIATION_UNAVAILABLE",
                 "message": (
-                    "Feature 참조 reconciliation subscription이 아직 provision되지 "
-                    "않았습니다."
+                    "Feature 참조 reconciliation subscription이 아직 provision되지 않았습니다."
                 ),
                 "details": {},
             },
@@ -550,6 +549,14 @@ async def ack_feature_reference_reconciliation_event_route(
     "",
     response_model=FeatureReferenceReconciliationSubscriptionProvisionResponse,
     responses={
+        200: {
+            "headers": {
+                "Idempotency-Replayed": {
+                    "description": "동일 provision receipt를 replay했을 때 true.",
+                    "schema": {"type": "string", "enum": ["true"]},
+                }
+            }
+        },
         403: {"description": "AdminBFF 거부"},
         409: {"description": "subscription이 이미 있어 initial cursor를 변경할 수 없음"},
         422: {"description": "initial cursor 입력 오류"},
@@ -579,11 +586,11 @@ async def provision_feature_reference_reconciliation_subscription_route(
             )
             receipt = (
                 await reconciliation_repo.provision_feature_reference_reconciliation_subscription(
-                session,
-                principal_id=principal_id,
-                initial_event_sequence=body.initial_event_sequence,
-                actor=context.actor,
-                command_id=command.command_id,
+                    session,
+                    principal_id=principal_id,
+                    initial_event_sequence=body.initial_event_sequence,
+                    actor=context.actor,
+                    command_id=command.command_id,
                 )
             )
             if receipt.initial_event_sequence is None:
@@ -595,9 +602,10 @@ async def provision_feature_reference_reconciliation_subscription_route(
                 result: (
                     FeatureReferenceReconciliationSubscriptionProvisionResponse | JSONResponse
                 ) = JSONResponse(
-                        status_code=status.HTTP_409_CONFLICT,
-                        content=conflict_body,
-                    )
+                    status_code=status.HTTP_409_CONFLICT,
+                    content=conflict_body,
+                    media_type="application/problem+json",
+                )
                 await complete_domain_command(
                     session,
                     command=command,
@@ -618,6 +626,15 @@ async def provision_feature_reference_reconciliation_subscription_route(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "VALIDATION_ERROR", "message": str(error), "details": {}},
+        ) from error
+    except reconciliation_repo.FeatureReferenceReconciliationUnavailable as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "FEATURE_REFERENCE_RECONCILIATION_UNAVAILABLE",
+                "message": str(error),
+                "details": {},
+            },
         ) from error
     except reconciliation_repo.FeatureReferenceReconciliationError as error:
         raise HTTPException(
@@ -753,9 +770,7 @@ async def get_manual_provider_dedup_case_route(
     del context
     started_at = perf_counter()
     try:
-        item = await reconciliation_repo.get_manual_provider_dedup_case(
-            session, case_id=case_id
-        )
+        item = await reconciliation_repo.get_manual_provider_dedup_case(session, case_id=case_id)
     except reconciliation_repo.FeatureReferenceReconciliationValidationError as error:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
@@ -791,6 +806,7 @@ async def get_manual_provider_dedup_case_route(
         403: {"description": "AdminBFF 또는 destructive decision kill-switch 거부"},
         409: {"description": "stale evidence 또는 Idempotency-Key 충돌"},
         422: {"description": "decision 입력 오류"},
+        503: {"description": "paired reconciliation subscription이 아직 활성화되지 않음"},
     },
     dependencies=[Depends(require_destructive_enabled_for_manual_provider_dedup_decision)],
 )
@@ -847,6 +863,7 @@ async def resolve_manual_provider_dedup_case_route(
                 result: ManualProviderDedupCaseDecisionResponse | JSONResponse = JSONResponse(
                     status_code=status.HTTP_409_CONFLICT,
                     content=stale_body,
+                    media_type="application/problem+json",
                 )
             else:
                 if (
@@ -854,8 +871,7 @@ async def resolve_manual_provider_dedup_case_route(
                     or receipt.manual_feature_id is None
                     or receipt.manual_feature_row_revision is None
                     or (
-                        receipt.outcome in {"merged", "manual_retired"}
-                        and receipt.event_id is None
+                        receipt.outcome in {"merged", "manual_retired"} and receipt.event_id is None
                     )
                 ):
                     raise reconciliation_repo.FeatureReferenceReconciliationError(
@@ -876,6 +892,15 @@ async def resolve_manual_provider_dedup_case_route(
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "VALIDATION_ERROR", "message": str(error), "details": {}},
+        ) from error
+    except reconciliation_repo.FeatureReferenceReconciliationUnavailable as error:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "FEATURE_REFERENCE_RECONCILIATION_UNAVAILABLE",
+                "message": str(error),
+                "details": {},
+            },
         ) from error
     except reconciliation_repo.FeatureReferenceReconciliationError as error:
         raise HTTPException(

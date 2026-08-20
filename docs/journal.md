@@ -158,9 +158,13 @@ equal range, public/admin active predicate와 notice candidate detail 회귀를 
 적대 리뷰에서 이미 배포 가능한 `0231` migration을 고치면 기존 DB가 reader/ACK lock routine을
 잃는다는 문제를 확인했다. 해당 revision은 evidence base로 복원하고, 새
 `0232_m05_reconciliation_delivery`에 ACK common lease lock, admin case reader, typed delivery audit,
-그리고 explicit initial cursor를 받는 AdminBFF subscription provisioning procedure를 두었다.
-restore는 M05 pre role phase 뒤 0232까지 migrate한 뒤에만 ownership/ACL repair를 실행한다.
-fresh PostGIS migration integration과 API route/registry/policy test를 다시 고정했다.
+그리고 fixed principal·cursor-zero만 허용하는 AdminBFF subscription provisioning procedure를 두었다.
+이 immutable activation receipt가 없으면 모든 M05 case decision은 503으로 멈춘다. 기존 `0231`에
+이미 들어간 reader function은 `CREATE OR REPLACE`로 안전하게 재선언하고, legacy lease/ACK/decision
+procedure의 runtime EXECUTE는 회수해 v2 경로만 허용했다. restore는 M05 pre role phase 뒤 0232까지
+migrate한 뒤에만 ownership/ACL repair를 실행한다. fresh PostGIS migration integration과 API
+route/registry/policy test를 다시 고정했다. PinVi paired consumer와 격리 live UI E2E가 끝날 때까지
+activation receipt는 운영에서 만들지 않는다.
 
 ## 2026-08-21 — T-VN-M05 admin 판정과 service delivery 경쟁 경계
 

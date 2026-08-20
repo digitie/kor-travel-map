@@ -15950,6 +15950,7 @@
         "additionalProperties": false,
         "properties": {
           "initial_event_sequence": {
+            "maximum": 0.0,
             "minimum": 0.0,
             "title": "Initial Event Sequence",
             "type": "integer"
@@ -33195,7 +33196,18 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "Idempotency-Replayed": {
+                "description": "동일 provision receipt를 replay했을 때 true.",
+                "schema": {
+                  "enum": [
+                    "true"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
           },
           "403": {
             "content": {
@@ -37860,6 +37872,16 @@
               }
             },
             "description": "decision 입력 오류"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "paired reconciliation subscription이 아직 활성화되지 않음"
           },
           "default": {
             "content": {

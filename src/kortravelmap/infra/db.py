@@ -93,7 +93,8 @@ _FEATURE_REQUEST_READ_FUNCTION = "feature.read_feature_request(uuid)"
 _FEATURE_REQUEST_LIST_FUNCTION = "feature.list_feature_requests(text,integer)"
 _M05_CANDIDATE_PROCEDURE = "feature.record_manual_provider_dedup_candidate(text,text,jsonb,jsonb)"
 _M05_DECISION_PROCEDURE = (
-    "feature.resolve_manual_provider_dedup_case(uuid,text,text,bigint,bigint,text,text,text,bigint)"
+    "feature.resolve_manual_provider_dedup_case_v2("
+    "uuid,text,text,bigint,bigint,text,text,text,bigint)"
 )
 _M05_LEASE_PROCEDURE = "feature.lease_feature_reference_reconciliation_event_v2(text,uuid)"
 _M05_ACK_PROCEDURE = (

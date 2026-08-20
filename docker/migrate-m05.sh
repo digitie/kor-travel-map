@@ -80,7 +80,7 @@ async def main() -> int:
     ):
         return 0
     print("M05 migration marker is not a retryable boundary", file=sys.stderr)
-    return 2
+    return 3
 
 
 raise SystemExit(asyncio.run(main()))
@@ -91,7 +91,7 @@ set -e
 case "$marker_status" in
   0) exit 0 ;;
   1|2) alembic upgrade 0232_m05_reconciliation_delivery ;;
-  2)
+  3)
     echo "M05 migration marker is not a retryable boundary" >&2
     exit 1
     ;;

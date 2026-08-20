@@ -386,12 +386,27 @@ async def test_reconciliation_subscription_is_provisioned_only_by_admin_writer(
 
     api = _runtime_engine(migrated_engine, login="ktm_feature_api_runtime")
     principal_id = "service:feature-reference-reconciliation"
-    command_id = await _open_command(
-        migrated_engine,
-        actor="admin:m05-subscription",
-        operation="admin.feature-reference-reconciliation-subscription.provision.v1",
-    )
     try:
+        async with api.connect() as connection:
+            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
+            with pytest.raises(DBAPIError) as not_ready:
+                await connection.execute(
+                    text(
+                        "CALL feature.resolve_manual_provider_dedup_case_v2("
+                        "CAST(:case_id AS uuid), 'kept', repeat('0', 64), 1, 1, NULL::text, "
+                        "'activation gate', 'admin:m05-subscription', 1, NULL::text, "
+                        "NULL::uuid, NULL::uuid, NULL::text, NULL::bigint)"
+                    ),
+                    {"case_id": str(uuid4())},
+                )
+            await connection.rollback()
+        assert getattr(not_ready.value.orig, "sqlstate", None) == "P0002"
+
+        command_id = await _open_command(
+            migrated_engine,
+            actor="admin:m05-subscription",
+            operation="admin.feature-reference-reconciliation-subscription.provision.v1",
+        )
         async with api.begin() as connection:
             await connection.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
             provisioned = dict(
@@ -461,6 +476,30 @@ async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_on
             worker_id=uuid4(),
         )
         assert not_ready["o_outcome"] == "not_ready"
+
+        async with migrated_engine.connect() as connection:
+            assert (
+                await connection.scalar(
+                    text(
+                        "SELECT has_function_privilege("
+                        "'ktm_feature_api_runtime', "
+                        "'feature.lease_feature_reference_reconciliation_event("
+                        "text,uuid)'::regprocedure, 'EXECUTE')"
+                    )
+                )
+                is False
+            )
+            assert (
+                await connection.scalar(
+                    text(
+                        "SELECT has_function_privilege("
+                        "'ktm_feature_api_runtime', "
+                        "'feature.lease_feature_reference_reconciliation_event_v2("
+                        "text,uuid)'::regprocedure, 'EXECUTE')"
+                    )
+                )
+                is True
+            )
 
         async with api.connect() as connection:
             await connection.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
@@ -570,6 +609,31 @@ async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_on
                 .mappings()
                 .one()
             )
+        activation_command = await _open_command(
+            migrated_engine,
+            actor=str(pair["actor"]),
+            operation="admin.feature-reference-reconciliation-subscription.provision.v1",
+        )
+        async with api.begin() as connection:
+            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
+            activation = dict(
+                (
+                    await connection.execute(
+                        text(
+                            """
+                            CALL feature.provision_feature_reference_reconciliation_subscription(
+                              'service:feature-reference-reconciliation', 0, :actor,
+                              :command_id, NULL::text, NULL::bigint
+                            )
+                            """
+                        ),
+                        {"actor": pair["actor"], "command_id": activation_command},
+                    )
+                )
+                .mappings()
+                .one()
+            )
+        assert activation["o_outcome"] == "already_provisioned"
         decision_command = await _open_command(
             migrated_engine,
             actor=str(pair["actor"]),
@@ -582,7 +646,7 @@ async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_on
                     await connection.execute(
                         text(
                             """
-                            CALL feature.resolve_manual_provider_dedup_case(
+                            CALL feature.resolve_manual_provider_dedup_case_v2(
                               CAST(:case_id AS uuid), 'merged', CAST(:fingerprint AS text),
                               CAST(:manual_revision AS bigint), CAST(:provider_revision AS bigint),
                               CAST(:survivor_feature_id AS text), 'same location confirmed',

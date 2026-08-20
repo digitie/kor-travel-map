@@ -679,6 +679,7 @@ BEGIN
        OR to_regprocedure('feature.assert_feature_reference_reconciliation_lease_cursor()') IS NULL
        OR to_regprocedure('feature.record_manual_provider_dedup_candidate(text,text,jsonb,jsonb)') IS NULL
        OR to_regprocedure('feature.resolve_manual_provider_dedup_case(uuid,text,text,bigint,bigint,text,text,text,bigint)') IS NULL
+       OR to_regprocedure('feature.resolve_manual_provider_dedup_case_v2(uuid,text,text,bigint,bigint,text,text,text,bigint)') IS NULL
        OR to_regprocedure('feature.lease_feature_reference_reconciliation_event(text,uuid)') IS NULL
        OR to_regprocedure('feature.lease_feature_reference_reconciliation_event_v2(text,uuid)') IS NULL
        OR to_regprocedure('feature.ack_feature_reference_reconciliation_event(text,uuid,uuid,bigint,text,text,bigint)') IS NULL
@@ -752,6 +753,9 @@ ALTER PROCEDURE feature.record_manual_provider_dedup_candidate(text, text, jsonb
 ALTER PROCEDURE feature.resolve_manual_provider_dedup_case(
     uuid, text, text, bigint, bigint, text, text, text, bigint
 ) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER PROCEDURE feature.resolve_manual_provider_dedup_case_v2(
+    uuid, text, text, bigint, bigint, text, text, text, bigint
+) OWNER TO ktm_manual_provider_dedup_procedure_owner;
 ALTER PROCEDURE feature.lease_feature_reference_reconciliation_event(text, uuid)
     OWNER TO ktm_manual_provider_dedup_procedure_owner;
 ALTER PROCEDURE feature.lease_feature_reference_reconciliation_event_v2(text, uuid)
@@ -797,13 +801,15 @@ REVOKE ALL ON PROCEDURE feature.record_manual_provider_dedup_candidate(text, tex
     ktm_feature_reference_reconciliation_service_executor;
 REVOKE ALL ON PROCEDURE feature.resolve_manual_provider_dedup_case(
     uuid, text, text, bigint, bigint, text, text, text, bigint
+), feature.resolve_manual_provider_dedup_case_v2(
+    uuid, text, text, bigint, bigint, text, text, text, bigint
 ) FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime,
     ktm_manual_provider_dedup_detector_executor,
     ktm_feature_reference_reconciliation_service_executor;
 GRANT EXECUTE ON PROCEDURE feature.record_manual_provider_dedup_candidate(
     text, text, jsonb, jsonb
 ) TO ktm_manual_provider_dedup_detector_executor;
-GRANT EXECUTE ON PROCEDURE feature.resolve_manual_provider_dedup_case(
+GRANT EXECUTE ON PROCEDURE feature.resolve_manual_provider_dedup_case_v2(
     uuid, text, text, bigint, bigint, text, text, text, bigint
 ) TO ktm_manual_provider_dedup_admin_executor;
 REVOKE ALL ON PROCEDURE feature.provision_feature_reference_reconciliation_subscription(
@@ -822,7 +828,8 @@ REVOKE ALL ON PROCEDURE feature.lease_feature_reference_reconciliation_event(tex
         text, uuid, uuid, bigint, text, text, bigint
     ) FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime,
     ktm_feature_dagster_runtime, ktm_manual_provider_dedup_detector_executor,
-    ktm_manual_provider_dedup_admin_executor;
+    ktm_manual_provider_dedup_admin_executor,
+    ktm_feature_reference_reconciliation_service_executor;
 GRANT EXECUTE ON PROCEDURE feature.lease_feature_reference_reconciliation_event_v2(text, uuid),
     feature.ack_feature_reference_reconciliation_event_v2(
         text, uuid, uuid, bigint, text, text, bigint

@@ -16241,6 +16241,8 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
+                    /** @description 동일 provision receipt를 replay했을 때 true. */
+                    "Idempotency-Replayed"?: "true";
                     [name: string]: unknown;
                 };
                 content: {
@@ -18510,6 +18512,15 @@ export interface operations {
             };
             /** @description decision 입력 오류 */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description paired reconciliation subscription이 아직 활성화되지 않음 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

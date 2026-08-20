@@ -61,7 +61,7 @@ retired identity를 계속 보관한다. 반대로 Map이 소비자 DB를 직접
 
 - `0231_m05_manual_provider_dedup` evidence migration과 forward-only
   `0232_m05_reconciliation_delivery` delivery extension(`down_revision =
-  0230_tvn_m04_feature_request_queue`; C05→M01→M04 graph 다음), 전용
+  0231_m05_manual_provider_dedup`; C05→M01→M04 graph 다음), 전용
   procedures/ACL/bootstrap/restore/root를 구현한다.
 - Map admin list/detail/decision 및 service event/ack contract를 추가하고 OpenAPI를 재동결한다.
 - 첫 consumer가 durable reference reconciliation receipt와 exact vendor를 구현한다.

@@ -146,7 +146,7 @@ _READ_CASE_SQL: Final = """
 SELECT * FROM feature.read_manual_provider_dedup_case(CAST(:case_id AS uuid))
 """
 _RESOLVE_CASE_SQL: Final = """
-CALL feature.resolve_manual_provider_dedup_case(
+CALL feature.resolve_manual_provider_dedup_case_v2(
     CAST(:case_id AS uuid), CAST(:decision AS text),
     CAST(:expected_case_fingerprint AS text),
     CAST(:expected_manual_row_revision AS bigint),

@@ -79,7 +79,7 @@ BEGIN
     FOR UPDATE;
     IF NOT FOUND THEN
         RAISE EXCEPTION 'feature reference reconciliation subscription is absent'
-            USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_reconciliation_ack_input';
+            USING ERRCODE = 'P0002';
     END IF;
     RETURN QUERY
     SELECT *
@@ -157,7 +157,7 @@ BEGIN
             USING ERRCODE = '42501', CONSTRAINT = 'ck_m05_subscription_provision_executor';
     END IF;
     IF p_principal_id <> 'service:feature-reference-reconciliation'
-       OR p_initial_event_sequence IS NULL OR p_initial_event_sequence < 0
+       OR p_initial_event_sequence IS DISTINCT FROM 0
        OR nullif(btrim(p_actor), '') IS NULL OR char_length(p_actor) > 200
        OR p_domain_command_id IS NULL OR p_domain_command_id < 1 THEN
         RAISE EXCEPTION 'feature reference reconciliation subscription provision input is invalid'
@@ -217,7 +217,54 @@ BEGIN
 END
 $m05_provision_subscription$;
 
-CREATE FUNCTION feature.list_manual_provider_dedup_cases(
+CREATE PROCEDURE feature.resolve_manual_provider_dedup_case_v2(
+    IN p_case_id uuid,
+    IN p_decision text,
+    IN p_expected_case_fingerprint text,
+    IN p_expected_manual_row_revision bigint,
+    IN p_expected_provider_row_revision bigint,
+    IN p_survivor_feature_id text,
+    IN p_reason text,
+    IN p_actor text,
+    IN p_domain_command_id bigint,
+    OUT o_outcome text,
+    OUT o_resolution_id uuid,
+    OUT o_event_id uuid,
+    OUT o_manual_feature_id text,
+    OUT o_manual_feature_row_revision bigint
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, feature, ops
+AS $m05_resolve_case_v2$
+BEGIN
+    -- An immutable cursor-zero subscription is the paired-consumer activation
+    -- receipt. No M05 resolution (including "kept") can predate it.
+    PERFORM 1
+    FROM ops.feature_reference_reconciliation_subscriptions AS subscription
+    JOIN ops.feature_reference_reconciliation_leases AS lease
+      ON lease.principal_id = subscription.principal_id
+    WHERE subscription.principal_id = 'service:feature-reference-reconciliation'
+      AND subscription.initial_event_sequence = 0
+      AND subscription.read_scope = 'feature-reference-reconciliation:read'
+      AND subscription.ack_scope = 'feature-reference-reconciliation:ack'
+      AND lease.acked_through_sequence >= 0
+    FOR SHARE OF subscription, lease;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'feature reference reconciliation subscription is not provisioned'
+            USING ERRCODE = 'P0002';
+    END IF;
+    CALL feature.resolve_manual_provider_dedup_case(
+        p_case_id, p_decision, p_expected_case_fingerprint,
+        p_expected_manual_row_revision, p_expected_provider_row_revision,
+        p_survivor_feature_id, p_reason, p_actor, p_domain_command_id,
+        o_outcome, o_resolution_id, o_event_id, o_manual_feature_id,
+        o_manual_feature_row_revision
+    );
+END
+$m05_resolve_case_v2$;
+
+CREATE OR REPLACE FUNCTION feature.list_manual_provider_dedup_cases(
     p_status text,
     p_after_created_at timestamptz,
     p_after_case_id uuid,
@@ -295,7 +342,7 @@ BEGIN
 END
 $m05_list_cases$;
 
-CREATE FUNCTION feature.read_manual_provider_dedup_case(p_case_id uuid)
+CREATE OR REPLACE FUNCTION feature.read_manual_provider_dedup_case(p_case_id uuid)
 RETURNS TABLE(o_data jsonb)
 LANGUAGE plpgsql
 SECURITY DEFINER

@@ -149,10 +149,11 @@ event 생성은 resolution transaction의 global feature-curation advisory fence
 gap을 허용하므로 `acked_through + 1`이 아니라 해당 principal의 cursor보다 큰 event 중 실제
 `MIN(event_sequence)`만 다음 event다. principal은 token/HTTP header가 아닌 token verification이
 반환하는 안정적 server-side principal ID이고, token rotation 뒤에도 같은 subscription/ack cursor를
-쓴다. activation 때 immutable `initial_event_sequence`와 scope를 가진 subscription으로 provision하며
-first consumer는 flag가 off인 `0` cursor에서 시작한다. subscription의 stable principal ID가
-lease/ack의 FK다. 이후 consumer는 historical replay 여부를 activation procedure의 명시 cursor로만
-정한다.
+쓴다. activation receipt는 immutable `initial_event_sequence=0`와 read/ack scope를 가진 fixed-principal
+subscription이다. 이 receipt가 없으면 Map은 어떤 M05 decision도 확정하지 않는다. 따라서 first
+consumer는 release 시점부터 모든 event를 읽으며, 별도 consumer의 historical replay는 이 activation
+모델을 재사용하지 않는 별도 protocol으로만 추가한다. subscription의 stable principal ID가 lease/ack의
+FK다.
 
 `GET`은 subscription/lease row를 잠그고, live lease가 다른 worker에 있으면 retryable 409을 낸다.
 lease는 UUID worker id, increment-only `lease_epoch`, 만료시각을 응답에 돌려주며 ACK은 같은 worker와
@@ -221,7 +222,8 @@ M05 case가 있는 provider Feature/source record의 hard purge도 거절한다.
 
 ## paired rollout과 검증
 
-1. Map migration/ACL/API/admin UI와 service OpenAPI를 release하되 decision flag는 off로 둔다.
+1. Map migration/ACL/API/admin UI와 service OpenAPI를 release하되 fixed-principal activation receipt는
+   아직 만들지 않는다.
 2. PinVi가 exact service spec을 vendor하고 local receipt migration/worker/UI impact projection을
    release한다. raw token/digest는 consumer runtime 전용 경계를 유지한다.
 3. isolated Map+PinVi stack에서 M04 manual request → provider candidate → admin decision →
@@ -229,7 +231,7 @@ M05 case가 있는 provider Feature/source record의 hard purge도 거절한다.
    completion 근거가 될 수 없다.
 4. 두 전문 적대 리뷰, Map/PinVi CI, fresh upgrade, restore drill, ACL negative test, replay/crash
    injection, event sequence commit-order race, multi-worker lease/contiguous ACK race, OpenAPI vendor
-   byte proof가 모두 green일 때만 flag를 켠다. UI는 default `kept`, provider survivor 고정,
+   byte proof가 모두 green일 때만 activation receipt를 만든다. UI는 default `kept`, provider survivor 고정,
    destructive confirmation/reason, principal별 unacked age를 보여야 하며 generic dedup 화면을
    재사용하지 않는다. consumer blocked reason/attempt/impact는 consumer UI에서만 보인다; Map은
    consumer가 별도 generic report protocol을 도입하기 전까지 unacked age만 보여 completion으로

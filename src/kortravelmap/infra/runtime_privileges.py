@@ -468,11 +468,13 @@ _M05_WRITER_ACL = (
     "GRANT EXECUTE ON PROCEDURE feature.record_manual_provider_dedup_candidate("
     "text, text, jsonb, jsonb) TO ktm_manual_provider_dedup_detector_executor",
     "REVOKE ALL ON PROCEDURE feature.resolve_manual_provider_dedup_case("
+    "uuid, text, text, bigint, bigint, text, text, text, bigint), "
+    "feature.resolve_manual_provider_dedup_case_v2("
     "uuid, text, text, bigint, bigint, text, text, text, bigint) FROM PUBLIC, "
     "ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime, "
     "ktm_manual_provider_dedup_detector_executor, "
     "ktm_feature_reference_reconciliation_service_executor",
-    "GRANT EXECUTE ON PROCEDURE feature.resolve_manual_provider_dedup_case("
+    "GRANT EXECUTE ON PROCEDURE feature.resolve_manual_provider_dedup_case_v2("
     "uuid, text, text, bigint, bigint, text, text, text, bigint) "
     "TO ktm_manual_provider_dedup_admin_executor",
     "REVOKE ALL ON PROCEDURE feature.provision_feature_reference_reconciliation_subscription("
@@ -489,7 +491,8 @@ _M05_WRITER_ACL = (
     "text, uuid, uuid, bigint, text, text, bigint) FROM PUBLIC, "
     "ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime, "
     "ktm_manual_provider_dedup_detector_executor, "
-    "ktm_manual_provider_dedup_admin_executor",
+    "ktm_manual_provider_dedup_admin_executor, "
+    "ktm_feature_reference_reconciliation_service_executor",
     "GRANT EXECUTE ON PROCEDURE feature.lease_feature_reference_reconciliation_event_v2("
     "text, uuid), feature.ack_feature_reference_reconciliation_event_v2("
     "text, uuid, uuid, bigint, text, text, bigint) "

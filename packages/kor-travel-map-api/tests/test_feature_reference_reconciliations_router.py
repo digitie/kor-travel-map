@@ -163,7 +163,7 @@ async def test_subscription_provision_is_durable_admin_domain_command(
     )
     provision = AsyncMock(
         return_value=FeatureReferenceReconciliationSubscriptionProvision(
-            outcome="provisioned", initial_event_sequence=7
+            outcome="provisioned", initial_event_sequence=0
         )
     )
     complete = AsyncMock()
@@ -177,7 +177,7 @@ async def test_subscription_provision_is_durable_admin_domain_command(
 
     result = await router.provision_feature_reference_reconciliation_subscription_route(
         body=router.FeatureReferenceReconciliationSubscriptionProvisionInput(
-            initial_event_sequence=7
+            initial_event_sequence=0
         ),
         request=_request(),
         idempotency_key=_COMMAND_KEY,
@@ -185,10 +185,8 @@ async def test_subscription_provision_is_durable_admin_domain_command(
         session=_Session(),  # type: ignore[arg-type]
     )
 
-    assert isinstance(
-        result, router.FeatureReferenceReconciliationSubscriptionProvisionResponse
-    )
-    assert result.data.initial_event_sequence == 7
+    assert isinstance(result, router.FeatureReferenceReconciliationSubscriptionProvisionResponse)
+    assert result.data.initial_event_sequence == 0
     provision.assert_awaited_once()
     complete.assert_awaited_once()
 
