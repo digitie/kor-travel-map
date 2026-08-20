@@ -9,7 +9,8 @@
 * `reconcile_runtime_privileges`가 실제 DB와 맞는지 — ACL 표에 없는 relation에 runtime
   권한이 남아 있지 않은지.
 * API smoke — 제거된 라우트가 앱에 아예 없고, 잔존 catalog·공개 curation 라우트는 산다.
-* Dagster runtime preflight가 제거 뒤에도 통과하는지(ADR-090 경계).
+* curation typed command가 SECURITY DEFINER·command owner·dagster EXECUTE 금지를
+  유지하는지 — D4가 procedure를 재작성했으므로 경계가 흘렀는지 본다.
 
 `migrated_session` fixture가 fresh DB를 `head`(= `0225`)까지 올리고
 `reconcile_runtime_privileges()`를 실행한 뒤를 본다.
@@ -18,8 +19,6 @@
 from __future__ import annotations
 
 import pytest
-from kortravelmap.api.app import create_app
-from kortravelmap.api.settings import ApiSettings
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -70,7 +69,14 @@ _RETAINED_ROUTE_TEMPLATES: tuple[str, ...] = (
 
 
 def _app_route_paths() -> set[str]:
-    app = create_app(ApiSettings(_env_file=None, public_api_key_required=False))
+    """`packages/kor-travel-map-api/scripts/export_openapi.py`와 같은 app을 본다.
+
+    `create_app(ApiSettings(...))`로 최소 설정 앱을 만들면 admin/service 라우터가
+    아예 mount되지 않아 "잔존 표면이 살아 있다"를 검사할 수 없다 — 목록 전체가
+    자명하게 사라진 것처럼 보인다(이 테스트를 처음 썼을 때 실제로 그랬다).
+    """
+    from kortravelmap.api.app import app
+
     return {getattr(route, "path", "") for route in app.routes}
 
 
@@ -166,8 +172,14 @@ async def test_runtime_privileges_table_matches_the_database(
     """
     from kortravelmap.infra import runtime_privileges
 
-    declared = set(runtime_privileges._FEATURE_TABLE_PRIVILEGES) | set(  # noqa: SLF001
-        runtime_privileges._FEATURE_VIEW_PRIVILEGES  # noqa: SLF001
+    # `_runtime_relation_grants`가 권한을 주는 경로는 넷이다. 표 두 개만 세면
+    # column-level `_CORE_FEATURE_GRANTS`로 권한을 받는 protected 표가 전부
+    # "미선언"으로 잡혀 검사가 늘 red다.
+    declared = (
+        set(runtime_privileges._FEATURE_TABLE_PRIVILEGES)  # noqa: SLF001
+        | set(runtime_privileges._FEATURE_VIEW_PRIVILEGES)  # noqa: SLF001
+        | set(runtime_privileges._PROTECTED_FEATURE_TABLES)  # noqa: SLF001
+        | set(runtime_privileges._ROUTE_AREA_RUNTIME_INSERT_COLUMNS)  # noqa: SLF001
     )
     rows = await migrated_session.execute(
         text(
@@ -193,29 +205,47 @@ async def test_runtime_privileges_table_matches_the_database(
     )
 
 
-async def test_dagster_runtime_privilege_boundary_still_holds(
+async def test_curation_command_procedures_keep_their_owner_and_fence(
     migrated_session: AsyncSession,
 ) -> None:
-    """ADR-090 preflight가 읽는 경계 catalog가 제거 뒤에도 성립한다.
+    """curation typed command가 40C 뒤에도 SECURITY DEFINER + dagster EXECUTE 금지인지.
 
-    entrypoint의 `python -m kortravelmap.dagster.runtime_preflight`와 같은 검사다.
-    procedure-only 경계가 40C의 procedure 삭제로 깨졌다면 여기서 red다.
+    40C는 legacy procedure를 지우면서 canonical command 정의도 재작성했다(D4).
+    재작성이 `SECURITY DEFINER`나 소유자를 흘리면 권한 경계가 조용히 열린다 —
+    `reconcile_runtime_privileges`는 표 권한만 보므로 여기서 잡는다.
     """
-    row = (
+    rows = (
         await migrated_session.execute(
             text(
                 """
-                SELECT
-                  has_schema_privilege('ktm_feature_dagster_runtime', 'feature', 'USAGE')
-                    AS schema_usage,
-                  has_table_privilege(
-                    'ktm_feature_dagster_runtime', 'feature.curation_items', 'DELETE'
-                  ) AS direct_delete
+                SELECT p.proname,
+                       pg_get_userbyid(p.proowner) AS owner,
+                       p.prosecdef AS security_definer,
+                       has_function_privilege(
+                         'ktm_feature_dagster_runtime', p.oid, 'EXECUTE'
+                       ) AS dagster_execute
+                FROM pg_catalog.pg_proc AS p
+                JOIN pg_catalog.pg_namespace AS n ON n.oid = p.pronamespace
+                WHERE n.nspname = 'feature'
+                  AND p.proname LIKE '%curation%command%'
+                ORDER BY p.proname
                 """
             )
         )
-    ).mappings().one()
-    assert row["schema_usage"] is True, "dagster runtime이 feature schema를 못 본다"
-    assert row["direct_delete"] is False, (
-        "dagster runtime이 canonical 표에 직접 DELETE 권한을 가졌다 — ADR-090 위반"
+    ).mappings().all()
+
+    assert len(rows) >= 10, f"curation command procedure가 너무 적다: {len(rows)}"
+
+    bad_owner = [r["proname"] for r in rows if r["owner"] != "ktm_curation_command_owner"]
+    assert not bad_owner, f"소유자가 command owner가 아닌 procedure: {bad_owner}"
+
+    reachable = [r["proname"] for r in rows if r["dagster_execute"]]
+    assert not reachable, f"dagster runtime이 EXECUTE 가능한 command: {reachable}"
+
+    # `claim_*_effect`는 command 본문이 부르는 내부 helper라 SECDEF가 아니다.
+    not_definer = sorted(
+        r["proname"]
+        for r in rows
+        if not r["security_definer"] and not r["proname"].startswith("claim_")
     )
+    assert not not_definer, f"SECURITY DEFINER가 아닌 command: {not_definer}"
