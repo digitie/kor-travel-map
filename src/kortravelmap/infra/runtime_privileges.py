@@ -115,9 +115,7 @@ _ROUTE_AREA_RUNTIME_INSERT_COLUMNS: Mapping[str, tuple[str, ...]] = {
 
 _ROUTE_AREA_RUNTIME_UPDATE_COLUMNS: Mapping[str, tuple[str, ...]] = {
     relation: tuple(
-        column
-        for column in columns
-        if column not in {"feature_id", "feature_uuid", "kind"}
+        column for column in columns if column not in {"feature_id", "feature_uuid", "kind"}
     )
     for relation, columns in _ROUTE_AREA_RUNTIME_INSERT_COLUMNS.items()
 }
@@ -127,8 +125,7 @@ _ROUTE_AREA_RUNTIME_GRANTS = tuple(
     for relation, insert_columns in _ROUTE_AREA_RUNTIME_INSERT_COLUMNS.items()
     for statement in (
         f"GRANT SELECT ON feature.{relation} TO ktm_feature_runtime",
-        f"GRANT INSERT ({', '.join(insert_columns)}) ON feature.{relation} "
-        "TO ktm_feature_runtime",
+        f"GRANT INSERT ({', '.join(insert_columns)}) ON feature.{relation} TO ktm_feature_runtime",
         f"GRANT UPDATE ({', '.join(_ROUTE_AREA_RUNTIME_UPDATE_COLUMNS[relation])}) "
         f"ON feature.{relation} TO ktm_feature_runtime",
         f"GRANT SELECT (feature_id, public_ready), UPDATE (public_ready) "
@@ -314,8 +311,7 @@ _STATE_OWNER_FUNCTION_ACL = (
     "text, text, text, text, bigint, jsonb) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.author_lifecycle_override("
     "text, text, text, boolean, text, text, bigint) FROM PUBLIC",
-    "REVOKE ALL ON PROCEDURE feature.revoke_lifecycle_override("
-    "text, text, bigint) FROM PUBLIC",
+    "REVOKE ALL ON PROCEDURE feature.revoke_lifecycle_override(text, text, bigint) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.apply_provider_feature_field_patch("
     "text, bigint, text, text, bigint, jsonb, jsonb) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.author_feature_field_overrides("
@@ -388,8 +384,7 @@ _FEATURE_REQUEST_SCHEMA_OWNER_DEPENDENCY_ACL = (
     "ON TABLE ops.feature_requests TO ktm_feature_request_procedure_owner",
     "GRANT SELECT, UPDATE(command_id) ON TABLE ops.domain_commands "
     "TO ktm_feature_request_procedure_owner",
-    "GRANT SELECT ON TABLE ops.domain_command_results "
-    "TO ktm_feature_request_procedure_owner",
+    "GRANT SELECT ON TABLE ops.domain_command_results TO ktm_feature_request_procedure_owner",
 )
 
 _FEATURE_REQUEST_MANUAL_OWNER_DEPENDENCY_ACL = (
@@ -409,8 +404,7 @@ _FEATURE_REQUEST_STATE_OWNER_DEPENDENCY_ACL = (
 _M05_SCHEMA_OWNER_DEPENDENCY_ACL = (
     "GRANT USAGE ON SCHEMA feature, provider_sync, ops, x_extension "
     "TO ktm_manual_provider_dedup_procedure_owner",
-    "GRANT SELECT, UPDATE ON TABLE feature.features "
-    "TO ktm_manual_provider_dedup_procedure_owner",
+    "GRANT SELECT, UPDATE ON TABLE feature.features TO ktm_manual_provider_dedup_procedure_owner",
     "GRANT SELECT ON TABLE feature.manual_feature_identity_claims, "
     "feature.feature_creation_origins "
     "TO ktm_manual_provider_dedup_procedure_owner",
@@ -420,8 +414,7 @@ _M05_SCHEMA_OWNER_DEPENDENCY_ACL = (
     "TO ktm_manual_provider_dedup_procedure_owner",
     "GRANT SELECT, UPDATE ON TABLE ops.domain_commands "
     "TO ktm_manual_provider_dedup_procedure_owner",
-    "GRANT SELECT ON TABLE ops.domain_command_results "
-    "TO ktm_manual_provider_dedup_procedure_owner",
+    "GRANT SELECT ON TABLE ops.domain_command_results TO ktm_manual_provider_dedup_procedure_owner",
     "GRANT SELECT, INSERT, UPDATE ON TABLE ops.manual_provider_dedup_cases, "
     "ops.manual_provider_dedup_resolutions, "
     "ops.feature_reference_reconciliation_events, "
@@ -447,6 +440,13 @@ _M05_WRITER_ACL = (
     "REVOKE ALL ON FUNCTION feature.assert_feature_reference_reconciliation_lease_cursor() "
     "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, "
     "ktm_feature_dagster_runtime",
+    "REVOKE ALL ON FUNCTION feature.preflight_feature_reference_reconciliation_ack("
+    "text, uuid, text, text) FROM PUBLIC, ktm_feature_runtime, "
+    "ktm_feature_dagster_runtime, ktm_manual_provider_dedup_detector_executor, "
+    "ktm_manual_provider_dedup_admin_executor",
+    "GRANT EXECUTE ON FUNCTION feature.preflight_feature_reference_reconciliation_ack("
+    "text, uuid, text, text) "
+    "TO ktm_feature_reference_reconciliation_service_executor",
     "REVOKE ALL ON PROCEDURE feature.record_manual_provider_dedup_candidate("
     "text, text, jsonb, jsonb) FROM PUBLIC, ktm_feature_runtime, "
     "ktm_feature_api_runtime, ktm_feature_dagster_runtime, "
@@ -529,10 +529,8 @@ _FEATURE_REQUEST_WRITER_ACL = (
 )
 
 _SUBTYPE_READY_FUNCTION_ACL = (
-    "REVOKE ALL ON FUNCTION feature.derive_subtype_public_ready() "
-    "FROM PUBLIC, ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION feature.sync_subtype_public_ready() "
-    "FROM PUBLIC, ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION feature.derive_subtype_public_ready() FROM PUBLIC, ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION feature.sync_subtype_public_ready() FROM PUBLIC, ktm_feature_runtime",
 )
 
 
@@ -591,9 +589,7 @@ def _runtime_relation_grants(
                 if privileges is None:
                     unknown_relations.append(f"feature.{relation}")
                     continue
-                grants.append(
-                    _grant_sql(schema=schema, relation=relation, privileges=privileges)
-                )
+                grants.append(_grant_sql(schema=schema, relation=relation, privileges=privileges))
                 continue
             if relation in _PROTECTED_FEATURE_TABLES:
                 continue
@@ -707,14 +703,10 @@ async def reconcile_runtime_privileges() -> None:
             await connection.execute(text("SET ROLE ktm_curation_command_owner"))
             for statement in _MANUAL_CURATION_WRITER_ACL:
                 await connection.execute(text(statement))
-            await connection.execute(
-                text("SET ROLE ktm_feature_request_procedure_owner")
-            )
+            await connection.execute(text("SET ROLE ktm_feature_request_procedure_owner"))
             for statement in _FEATURE_REQUEST_WRITER_ACL:
                 await connection.execute(text(statement))
-            await connection.execute(
-                text("SET ROLE ktm_manual_provider_dedup_procedure_owner")
-            )
+            await connection.execute(text("SET ROLE ktm_manual_provider_dedup_procedure_owner"))
             for statement in _M05_WRITER_ACL:
                 await connection.execute(text(statement))
     finally:

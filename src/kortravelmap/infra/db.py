@@ -84,28 +84,23 @@ _MANUAL_FEATURE_PROVENANCE_FUNCTION = "feature.read_admin_manual_feature_provena
 _MANUAL_CURATION_FEATURE_CREATE_PROCEDURE = (
     "feature.create_manual_curation_item_with_feature_command(jsonb,jsonb,bigint)"
 )
-_FEATURE_REQUEST_SUBMIT_PROCEDURE = (
-    "feature.submit_feature_request(uuid,jsonb,bigint)"
-)
+_FEATURE_REQUEST_SUBMIT_PROCEDURE = "feature.submit_feature_request(uuid,jsonb,bigint)"
 _FEATURE_REQUEST_APPROVE_PROCEDURE = (
     "feature.approve_feature_request_with_initial_state(uuid,jsonb,bigint)"
 )
-_FEATURE_REQUEST_REJECT_PROCEDURE = (
-    "feature.reject_feature_request(uuid,text,bigint)"
-)
+_FEATURE_REQUEST_REJECT_PROCEDURE = "feature.reject_feature_request(uuid,text,bigint)"
 _FEATURE_REQUEST_READ_FUNCTION = "feature.read_feature_request(uuid)"
 _FEATURE_REQUEST_LIST_FUNCTION = "feature.list_feature_requests(text,integer)"
-_M05_CANDIDATE_PROCEDURE = (
-    "feature.record_manual_provider_dedup_candidate(text,text,jsonb,jsonb)"
-)
+_M05_CANDIDATE_PROCEDURE = "feature.record_manual_provider_dedup_candidate(text,text,jsonb,jsonb)"
 _M05_DECISION_PROCEDURE = (
-    "feature.resolve_manual_provider_dedup_case("
-    "uuid,text,text,bigint,bigint,text,text,text,bigint)"
+    "feature.resolve_manual_provider_dedup_case(uuid,text,text,bigint,bigint,text,text,text,bigint)"
 )
 _M05_LEASE_PROCEDURE = "feature.lease_feature_reference_reconciliation_event(text,uuid)"
 _M05_ACK_PROCEDURE = (
-    "feature.ack_feature_reference_reconciliation_event("
-    "text,uuid,uuid,bigint,text,text,bigint)"
+    "feature.ack_feature_reference_reconciliation_event(text,uuid,uuid,bigint,text,text,bigint)"
+)
+_M05_ACK_PREFLIGHT_FUNCTION = (
+    "feature.preflight_feature_reference_reconciliation_ack(text,uuid,text,text)"
 )
 
 _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
@@ -142,10 +137,7 @@ _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
             "feature.create_curation_item_command("
             "uuid,text,text,text,text,text,text,text,integer,text,text,text,text,jsonb,bigint,text)"
         ),
-        (
-            "feature.materialize_theme_candidate_generation("
-            "uuid,text,uuid,uuid,bigint,text,jsonb)"
-        ),
+        ("feature.materialize_theme_candidate_generation(uuid,text,uuid,uuid,bigint,text,jsonb)"),
         (
             "feature.patch_curated_source_command("
             "uuid,bigint,text,text,text,text,text,text,text,jsonb,bigint,text)"
@@ -188,10 +180,7 @@ _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
 _PROVIDER_CURATION_FEATURE_PROCEDURES = frozenset(
     {
         "feature.finalize_provider_curation_root(uuid)",
-        (
-            "feature.seal_provider_curation_snapshot_receipt("
-            "uuid,bigint,text,text,bigint,text)"
-        ),
+        ("feature.seal_provider_curation_snapshot_receipt(uuid,bigint,text,text,bigint,text)"),
     }
 )
 
@@ -218,10 +207,7 @@ _PROVIDER_OPERATION_PROCEDURES = frozenset(
 
 _ADMIN_CANCELLATION_SECURITY_DEFINER_FUNCTIONS = frozenset(
     {
-        (
-            "ops.fill_provider_cancellation_starts_command("
-            "uuid,text,timestamp with time zone)"
-        ),
+        ("ops.fill_provider_cancellation_starts_command(uuid,text,timestamp with time zone)"),
         (
             "ops.transition_provider_cancellation_job_command("
             "uuid,uuid,text,text[],text,text,text,timestamp with time zone,"
@@ -261,6 +247,7 @@ _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS = {
             _MANUAL_FEATURE_PROVENANCE_FUNCTION,
             _FEATURE_REQUEST_READ_FUNCTION,
             _FEATURE_REQUEST_LIST_FUNCTION,
+            _M05_ACK_PREFLIGHT_FUNCTION,
         }
     ),
     "ktm_feature_dagster_runtime": frozenset(),
@@ -493,12 +480,8 @@ def _runtime_db_privilege_problems(
         "has_schema_owner_membership": (
             "runtime login must not be a ktm_feature_schema_owner member"
         ),
-        "can_set_schema_owner_role": (
-            "runtime login must not SET ROLE ktm_feature_schema_owner"
-        ),
-        "can_set_runtime_group_role": (
-            "runtime login must not SET ROLE ktm_feature_runtime"
-        ),
+        "can_set_schema_owner_role": ("runtime login must not SET ROLE ktm_feature_schema_owner"),
+        "can_set_runtime_group_role": ("runtime login must not SET ROLE ktm_feature_runtime"),
         "can_create_in_feature_schema": "runtime login must not CREATE in feature schema",
         "can_insert_feature_directly": "runtime login must not INSERT feature.features directly",
         "can_update_lifecycle_directly": (
@@ -543,15 +526,11 @@ def _runtime_db_privilege_problems(
             problems.append(message)
 
     required_true_fields = {
-        "can_read_public_features": (
-            "runtime login must SELECT feature.public_features"
-        ),
+        "can_read_public_features": ("runtime login must SELECT feature.public_features"),
         "can_read_feature_override_field_paths": (
             "runtime login must SELECT ops.feature_override_field_paths"
         ),
-        "can_execute_transition_procedure": (
-            "runtime login must EXECUTE transition_feature_state"
-        ),
+        "can_execute_transition_procedure": ("runtime login must EXECUTE transition_feature_state"),
         "can_execute_author_lifecycle_override_procedure": (
             "runtime login must EXECUTE author_lifecycle_override"
         ),
@@ -589,13 +568,9 @@ def _runtime_db_privilege_problems(
             )
     elif expected_login == "ktm_feature_dagster_runtime":
         if row.get("can_execute_create_procedure") is not True:
-            problems.append(
-                "Dagster runtime must EXECUTE create_feature_with_initial_state"
-            )
+            problems.append("Dagster runtime must EXECUTE create_feature_with_initial_state")
         if row.get("can_execute_manual_create_procedure") is not False:
-            problems.append(
-                "Dagster runtime must not EXECUTE the manual Feature writer"
-            )
+            problems.append("Dagster runtime must not EXECUTE the manual Feature writer")
 
     expected_procedures = _EXPECTED_RUNTIME_APPLICATION_PROCEDURES.get(expected_login)
     if expected_procedures is None:
@@ -609,9 +584,7 @@ def _runtime_db_privilege_problems(
         problems.append("runtime application procedure catalog must be a PostgreSQL text array")
         return problems
     actual_procedures = frozenset(
-        procedure
-        for procedure in actual_procedures_value
-        if isinstance(procedure, str)
+        procedure for procedure in actual_procedures_value if isinstance(procedure, str)
     )
     if len(actual_procedures) != len(actual_procedures_value):
         problems.append("runtime application procedure catalog must contain only text signatures")
@@ -640,13 +613,10 @@ def _runtime_db_privilege_problems(
         )
         return problems
 
-    actual_functions_value = row.get(
-        "executable_application_security_definer_functions"
-    )
+    actual_functions_value = row.get("executable_application_security_definer_functions")
     if not isinstance(actual_functions_value, (list, tuple)):
         problems.append(
-            "runtime application SECURITY DEFINER function catalog must be a "
-            "PostgreSQL text array"
+            "runtime application SECURITY DEFINER function catalog must be a PostgreSQL text array"
         )
         return problems
     actual_functions = frozenset(
@@ -669,8 +639,7 @@ def _runtime_db_privilege_problems(
     if unexpected_functions:
         problems.append(
             "runtime login must not EXECUTE unexpected application SECURITY DEFINER "
-            "functions: "
-            + ", ".join(unexpected_functions)
+            "functions: " + ", ".join(unexpected_functions)
         )
     return problems
 
@@ -748,8 +717,7 @@ def normalize_async_dsn(dsn: str) -> str:
     if dsn.startswith("postgres://"):
         return _ASYNCPG_PREFIX + dsn[len("postgres://") :]
     raise ValueError(
-        f"dsn={dsn!r}은 PostgreSQL scheme이 아님 "
-        f"(postgresql:// 또는 postgresql+asyncpg:// 필요)."
+        f"dsn={dsn!r}은 PostgreSQL scheme이 아님 (postgresql:// 또는 postgresql+asyncpg:// 필요)."
     )
 
 
@@ -763,8 +731,7 @@ def require_pg_dsn(settings: KorTravelMapSettings) -> SecretStr:
 
     if settings.pg_dsn is None:
         raise RuntimeError(
-            "KOR_TRAVEL_MAP_PG_DSN runtime DSN is required; "
-            "no application DSN fallback exists"
+            "KOR_TRAVEL_MAP_PG_DSN runtime DSN is required; no application DSN fallback exists"
         )
     return settings.pg_dsn
 
@@ -811,9 +778,7 @@ def make_async_engine(
         max_overflow=max_overflow,
         pool_pre_ping=pool_pre_ping,
         connect_args=(
-            {"server_settings": dict(server_settings)}
-            if server_settings is not None
-            else {}
+            {"server_settings": dict(server_settings)} if server_settings is not None else {}
         ),
     )
 

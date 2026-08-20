@@ -64,17 +64,14 @@ class CommandPolicy:
                 "Retry-After",
             }
             if unsupported:
-                raise ValueError(
-                    f"unsupported terminal response headers: {sorted(unsupported)}"
-                )
+                raise ValueError(f"unsupported terminal response headers: {sorted(unsupported)}")
             unsupported_fingerprint_headers = set(self.fingerprint_headers) - {
                 "If-Match",
                 "If-None-Match",
             }
             if unsupported_fingerprint_headers:
                 raise ValueError(
-                    "unsupported fingerprint headers: "
-                    f"{sorted(unsupported_fingerprint_headers)}"
+                    f"unsupported fingerprint headers: {sorted(unsupported_fingerprint_headers)}"
                 )
             if self.transaction_isolation not in {
                 None,
@@ -82,8 +79,7 @@ class CommandPolicy:
                 "serializable",
             }:
                 raise ValueError(
-                    "unsupported domain transaction isolation: "
-                    f"{self.transaction_isolation}"
+                    f"unsupported domain transaction isolation: {self.transaction_isolation}"
                 )
         elif (
             self.success_status is not None
@@ -176,6 +172,11 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
         "service.feature-request.submit.v1",
         "외부 Feature 요청을 immutable queue receipt로 한 번만 등록",
         success_status=201,
+        transaction_isolation="read-committed",
+    ),
+    ("POST", "/v1/service/feature-reference-reconciliations/{event_id}/acks"): _domain(
+        "service.feature-reference-reconciliation.ack.v1",
+        "Feature 참조 reconciliation ACK evidence를 한 번만 기록",
         transaction_isolation="read-committed",
     ),
     ("POST", "/v1/admin/feature-requests/{request_id}/approve"): _domain(
@@ -488,9 +489,7 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
     (
         "PUT",
         "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}",
-    ): _resource(
-        "transaction_id가 Map 소유 cancel-probe fixture resource와 멱등 ensure를 식별"
-    ),
+    ): _resource("transaction_id가 Map 소유 cancel-probe fixture resource와 멱등 ensure를 식별"),
     (
         "POST",
         "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}/finalize",

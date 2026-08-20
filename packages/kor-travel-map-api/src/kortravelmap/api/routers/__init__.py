@@ -54,6 +54,9 @@ from kortravelmap.api.routers.enrichment_review import (
 from kortravelmap.api.routers.feature_alias_maps import (
     service_router as service_feature_alias_maps_router,
 )
+from kortravelmap.api.routers.feature_reference_reconciliations import (
+    service_router as service_feature_reference_reconciliations_router,
+)
 from kortravelmap.api.routers.feature_requests import (
     admin_router as admin_feature_requests_router,
 )
@@ -119,6 +122,7 @@ __all__ = [
     "service_curation_snapshots_router",
     "service_feature_alias_maps_router",
     "service_feature_requests_router",
+    "service_feature_reference_reconciliations_router",
     "weather_router",
     "curations_router",
 ]

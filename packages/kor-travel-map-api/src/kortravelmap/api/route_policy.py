@@ -43,6 +43,8 @@ from kortravelmap.api.auth import (
     require_cache_target_service_principal,
     require_curation_cutover_service_principal,
     require_curation_snapshot_service_principal,
+    require_feature_reference_reconciliation_ack_service_principal,
+    require_feature_reference_reconciliation_read_service_principal,
     require_feature_request_service_principal,
     require_metrics_token,
     require_ops_fixture_principal,
@@ -86,14 +88,14 @@ class RoutePolicyError(RuntimeError):
 #: 관측 가능한 enforcing dependency — dependency callable identity로만 판정한다.
 _ENFORCEMENT_BY_CALLABLE: dict[Callable[..., Any], str] = {
     require_cache_target_service_principal: "require_cache_target_service_principal",
-    require_curation_snapshot_service_principal: (
-        "require_curation_snapshot_service_principal"
+    require_curation_snapshot_service_principal: ("require_curation_snapshot_service_principal"),
+    require_curation_cutover_service_principal: ("require_curation_cutover_service_principal"),
+    require_feature_request_service_principal: ("require_feature_request_service_principal"),
+    require_feature_reference_reconciliation_read_service_principal: (
+        "require_feature_reference_reconciliation_read_service_principal"
     ),
-    require_curation_cutover_service_principal: (
-        "require_curation_cutover_service_principal"
-    ),
-    require_feature_request_service_principal: (
-        "require_feature_request_service_principal"
+    require_feature_reference_reconciliation_ack_service_principal: (
+        "require_feature_reference_reconciliation_ack_service_principal"
     ),
     require_public_api_key: "require_public_api_key",
     require_service_token: "require_service_token",
@@ -218,6 +220,8 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/service/refresh-requests": RoutePolicy.SERVICE,
     "/v1/service/refresh-requests/{request_id}": RoutePolicy.SERVICE,
     "/v1/service/feature-requests": RoutePolicy.SERVICE,
+    "/v1/service/feature-reference-reconciliations": RoutePolicy.SERVICE,
+    "/v1/service/feature-reference-reconciliations/{event_id}/acks": RoutePolicy.SERVICE,
     # C6c Map-owned cancel-probe service API — generic ServiceToken이 아닌 exact
     # Docker Manager ops:fixture principal을 요구하지만 service artifact에만 노출한다.
     "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}": RoutePolicy.SERVICE,
@@ -507,6 +511,8 @@ def _wiring_satisfied(row: RoutePolicyMatrixRow) -> bool:
                 "require_curation_cutover_service_principal",
                 "require_curation_snapshot_service_principal",
                 "require_feature_request_service_principal",
+                "require_feature_reference_reconciliation_read_service_principal",
+                "require_feature_reference_reconciliation_ack_service_principal",
                 "require_ops_fixture_principal",
             }
         )

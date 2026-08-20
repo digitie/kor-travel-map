@@ -71,6 +71,23 @@ prod 덤프 사본(features 1,008,852까지 완전 일치)에서 `0225→0229→
 2026-08-21 한 배포로 prod에 올라갔다(prod head = `0232_tvn37d_notice_empty_range`).
 상세는 이 문서 최상단 배포 항목에 있다.
 
+## 2026-08-21 — T-VN-M05 Map service lease/ACK 경계
+
+M05 service 정본의 `GET /v1/service/feature-reference-reconciliations`와
+`POST /v1/service/feature-reference-reconciliations/{event_id}/acks`를 구현했다.
+read/ACK token digest와 DB executor를 분리했고, runtime은 M05 evidence table을 직접
+읽거나 쓰지 않는다. ACK은 기존 receipt의 exact hash를 SECURITY DEFINER preflight로
+**domain command claim 전에** 확인한다. 따라서 응답 유실 뒤 다른 `Idempotency-Key`로
+같은 ACK을 보내도 새 claim-only command가 생기지 않으며, 200 replay receipt만 돌려준다.
+fresh M05 migration integration, route policy/OpenAPI/command registry, strict mypy와 ruff를
+표적으로 확인했다.
+
+### 다음 한 작업
+
+Map admin case 목록·상세·결정 contract와 destructive decision preclaim gate를 만든 뒤,
+정확한 Map OpenAPI SHA를 PinVi consumer/UI vendor에 결박한다. M05 활성화와 mutating live
+E2E는 그 paired 구현이 모두 끝날 때까지 금지한다.
+
 ## 2026-08-21 — T-VN-M05 paired manual/provider dedup 설계
 
 사용자가 paired cutover를 선택했다. M05는 generic dedup 큐나 auto master/merge를 확장하지

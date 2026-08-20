@@ -109,6 +109,7 @@ from kortravelmap.api.routers import (
     service_curation_cutover_router,
     service_curation_snapshots_router,
     service_feature_alias_maps_router,
+    service_feature_reference_reconciliations_router,
     service_feature_requests_router,
     weather_router,
 )
@@ -213,12 +214,8 @@ _ADMIN_MANUAL_FEATURE_CREATE_PATH = "/v1/admin/features"
 _ADMIN_MANUAL_CURATION_FEATURE_CREATE_PATH = (
     "/v1/admin/curations/{collection_id}/items/manual-feature"
 )
-_ADMIN_FEATURE_REQUEST_APPROVE_PATH = (
-    "/v1/admin/feature-requests/{request_id}/approve"
-)
-_ADMIN_FEATURE_REQUEST_REJECT_PATH = (
-    "/v1/admin/feature-requests/{request_id}/reject"
-)
+_ADMIN_FEATURE_REQUEST_APPROVE_PATH = "/v1/admin/feature-requests/{request_id}/approve"
+_ADMIN_FEATURE_REQUEST_REJECT_PATH = "/v1/admin/feature-requests/{request_id}/reject"
 _ADMIN_BFF_SECURITY: list[dict[str, list[str]]] = [{"AdminBFF": []}]
 _ADMIN_MANUAL_FEATURE_CREATE_SECURITY: list[dict[str, list[str]]] = [
     {"AdminBFF": [], "AdminFeatureCreateBFF": []}
@@ -318,14 +315,18 @@ def _declares_problem_schema(
     if isinstance(required, list) and _PROBLEM_REQUIRED_FIELDS.issubset(required):
         return True
     alternatives = candidate.get("oneOf", candidate.get("anyOf"))
-    return bool(alternatives) and isinstance(alternatives, list) and all(
-        isinstance(alternative, Mapping)
-        and _declares_problem_schema(
-            alternative,
-            components,
-            _seen_refs=_seen_refs,
+    return (
+        bool(alternatives)
+        and isinstance(alternatives, list)
+        and all(
+            isinstance(alternative, Mapping)
+            and _declares_problem_schema(
+                alternative,
+                components,
+                _seen_refs=_seen_refs,
+            )
+            for alternative in alternatives
         )
-        for alternative in alternatives
     )
 
 
@@ -682,7 +683,6 @@ def _error_response(
     )
 
 
-
 async def _verify_kor_travel_geo_credentials(core_settings: KorTravelMapSettings) -> None:
     """기동 시 geo가 이 API key를 실제로 받아들이는지 확인한다 (T-VN-H46C).
 
@@ -724,9 +724,8 @@ async def _verify_kor_travel_geo_credentials(core_settings: KorTravelMapSettings
             await client.verify_credentials()
         except GeoRequestError as exc:
             # 판정 불가. 기동을 막지 않는다.
-            _logger.warning(
-                "kor-travel-geo 자격증명 확인 불가 — 기동은 계속한다: %s", exc
-            )
+            _logger.warning("kor-travel-geo 자격증명 확인 불가 — 기동은 계속한다: %s", exc)
+
 
 def create_app(settings: ApiSettings | None = None) -> FastAPI:
     """FastAPI application factory.
@@ -1028,11 +1027,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         )
         return _error_response(
             status_code=500,
-            code=(
-                "INTERNAL_SERVER_ERROR"
-                if is_manual_feature_create
-                else "INTERNAL_ERROR"
-            ),
+            code=("INTERNAL_SERVER_ERROR" if is_manual_feature_create else "INTERNAL_ERROR"),
             message=(
                 "수동 Feature 생성 중 내부 오류가 발생했습니다."
                 if is_manual_feature_create
@@ -1152,6 +1147,10 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         )
         application.include_router(
             service_feature_requests_router,
+            prefix="/v1",
+        )
+        application.include_router(
+            service_feature_reference_reconciliations_router,
             prefix="/v1",
         )
         # Step D on-demand 상세는 DB(적재된 raw_data) 필요 → features와 동일 gate.

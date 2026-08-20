@@ -345,6 +345,40 @@ async def _ack_event(
         )
 
 
+async def _preflight_ack(
+    engine: AsyncEngine,
+    *,
+    principal_id: str,
+    event_id: UUID,
+    event_sha256: str,
+    local_receipt_sha256: str,
+) -> dict[str, object]:
+    async with engine.begin() as connection:
+        await connection.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
+        return dict(
+            (
+                await connection.execute(
+                    text(
+                        """
+                        SELECT * FROM feature.preflight_feature_reference_reconciliation_ack(
+                          CAST(:principal_id AS text), CAST(:event_id AS uuid),
+                          CAST(:event_sha256 AS text), CAST(:local_receipt_sha256 AS text)
+                        )
+                        """
+                    ),
+                    {
+                        "principal_id": principal_id,
+                        "event_id": str(event_id),
+                        "event_sha256": event_sha256,
+                        "local_receipt_sha256": local_receipt_sha256,
+                    },
+                )
+            )
+            .mappings()
+            .one()
+        )
+
+
 async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_only(
     migrated_engine: AsyncEngine,
 ) -> None:
@@ -680,6 +714,28 @@ async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_on
         )
         assert replayed == {
             "o_outcome": "replayed",
+            "o_acked_through_sequence": event_sequence,
+        }
+        preflight_replayed = await _preflight_ack(
+            api,
+            principal_id=principal_id,
+            event_id=UUID(str(leased["o_event_id"])),
+            event_sha256=str(leased["o_event_sha256"]),
+            local_receipt_sha256=local_receipt_sha256,
+        )
+        assert preflight_replayed == {
+            "o_outcome": "replayed",
+            "o_acked_through_sequence": event_sequence,
+        }
+        preflight_conflict = await _preflight_ack(
+            api,
+            principal_id=principal_id,
+            event_id=UUID(str(leased["o_event_id"])),
+            event_sha256=str(leased["o_event_sha256"]),
+            local_receipt_sha256="e" * 64,
+        )
+        assert preflight_conflict == {
+            "o_outcome": "conflict",
             "o_acked_through_sequence": event_sequence,
         }
     finally:

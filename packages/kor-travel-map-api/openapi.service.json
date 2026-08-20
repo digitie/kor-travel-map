@@ -3637,6 +3637,208 @@
         "title": "FeatureBatchUnchangedItem",
         "type": "object"
       },
+      "FeatureReferenceReconciliationAckData": {
+        "additionalProperties": false,
+        "properties": {
+          "acked_through_sequence": {
+            "title": "Acked Through Sequence",
+            "type": "integer"
+          },
+          "outcome": {
+            "enum": [
+              "acked",
+              "replayed"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome",
+          "acked_through_sequence"
+        ],
+        "title": "FeatureReferenceReconciliationAckData",
+        "type": "object"
+      },
+      "FeatureReferenceReconciliationAckInput": {
+        "additionalProperties": false,
+        "properties": {
+          "event_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Event Sha256",
+            "type": "string"
+          },
+          "lease_epoch": {
+            "minimum": 1.0,
+            "title": "Lease Epoch",
+            "type": "integer"
+          },
+          "local_receipt_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Local Receipt Sha256",
+            "type": "string"
+          },
+          "worker_id": {
+            "format": "uuid",
+            "title": "Worker Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "worker_id",
+          "lease_epoch",
+          "event_sha256",
+          "local_receipt_sha256"
+        ],
+        "title": "FeatureReferenceReconciliationAckInput",
+        "type": "object"
+      },
+      "FeatureReferenceReconciliationAckResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeatureReferenceReconciliationAckData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeatureReferenceReconciliationAckResponse",
+        "type": "object"
+      },
+      "FeatureReferenceReconciliationEventData": {
+        "additionalProperties": false,
+        "properties": {
+          "action": {
+            "enum": [
+              "rebind",
+              "retire"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "case_id": {
+            "format": "uuid",
+            "title": "Case Id",
+            "type": "string"
+          },
+          "event_id": {
+            "format": "uuid",
+            "title": "Event Id",
+            "type": "string"
+          },
+          "event_sequence": {
+            "title": "Event Sequence",
+            "type": "integer"
+          },
+          "occurred_at": {
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "resolution_id": {
+            "format": "uuid",
+            "title": "Resolution Id",
+            "type": "string"
+          },
+          "sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "event_sequence",
+          "case_id",
+          "resolution_id",
+          "action",
+          "payload",
+          "sha256",
+          "occurred_at"
+        ],
+        "title": "FeatureReferenceReconciliationEventData",
+        "type": "object"
+      },
+      "FeatureReferenceReconciliationLeaseData": {
+        "additionalProperties": false,
+        "properties": {
+          "event": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FeatureReferenceReconciliationEventData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "lease_epoch": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lease Epoch"
+          },
+          "lease_expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lease Expires At"
+          },
+          "outcome": {
+            "enum": [
+              "leased",
+              "empty",
+              "lease_conflict"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome",
+          "lease_epoch",
+          "lease_expires_at",
+          "event"
+        ],
+        "title": "FeatureReferenceReconciliationLeaseData",
+        "type": "object"
+      },
+      "FeatureReferenceReconciliationLeaseResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeatureReferenceReconciliationLeaseData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeatureReferenceReconciliationLeaseResponse",
+        "type": "object"
+      },
       "FeatureRequestCoordInput": {
         "additionalProperties": false,
         "properties": {
@@ -7461,6 +7663,214 @@
         "summary": "alias-map 전체 merkle root (양 저장소 checksum 대조)",
         "tags": [
           "service-feature-alias-maps"
+        ]
+      }
+    },
+    "/v1/service/feature-reference-reconciliations": {
+      "get": {
+        "description": "consumer별 earliest unacknowledged event에 fenced lease를 부여한다.",
+        "operationId": "lease_feature_reference_reconciliation_event_route_v1_service_feature_reference_reconciliations_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Reconciliation-Worker-Id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "X-Reconciliation-Worker-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureReferenceReconciliationLeaseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "reconciliation read token 없음/불일치"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "다른 service scope token"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "M05 reconciliation read boundary 비활성"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Lease Feature Reference Reconciliation Event Route",
+        "tags": [
+          "service-feature-reference-reconciliations"
+        ]
+      }
+    },
+    "/v1/service/feature-reference-reconciliations/{event_id}/acks": {
+      "post": {
+        "description": "ACK evidence를 한 번 기록하고, semantic replay는 claim 전에 종료한다.",
+        "operationId": "ack_feature_reference_reconciliation_event_route_v1_service_feature_reference_reconciliations__event_id__acks_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeatureReferenceReconciliationAckInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureReferenceReconciliationAckResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "reconciliation ACK token 없음/불일치"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "다른 service scope token"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "ACK hash, lease 또는 event order 충돌"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "ACK 입력 오류"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "M05 reconciliation ACK boundary 비활성"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Ack Feature Reference Reconciliation Event Route",
+        "tags": [
+          "service-feature-reference-reconciliations"
         ]
       }
     },

@@ -5613,3 +5613,14 @@ re-render**(button attach/detach + `scheduleControlsDisabled` 깜빡임)로 star
 비활성화 → `ops.dagster_schedule_overrides` 정리 + dagster reload로 `20 * * * *` 복원. 현 prod: cron=20, RUNNING.
 **descope 방법**: `scripts/run-c7-prod-live-e2e.sh` SPECS에서 schedule-write 제외(spec 파일·contract test content 계약은
 유지). spec은 b5375a52 배포본 유지(WIP fix는 위 6개로 문서화 — 재적용 시 참조). **머지**: #837(gate descope) + #74.
+# 2026-08-21 — T-VN-M05 Map service reconciliation lease/ACK 경계
+
+- `GET /v1/service/feature-reference-reconciliations`는 server-owned read principal과
+  `X-Reconciliation-Worker-Id`로만 fenced lease를 얻는다. event evidence의 raw table access는
+  API runtime에 부여하지 않는다.
+- `POST /v1/service/feature-reference-reconciliations/{event_id}/acks`는 ACK 전용 digest와
+  executor를 쓴다. exact `(event_sha256, local_receipt_sha256)` receipt는 definer preflight가
+  domain-command claim 전에 replay 처리해 새 key의 claim-only ledger 행을 막는다.
+- generated OpenAPI, static write registry, route policy, fresh migration integration과 strict
+  mypy/ruff를 함께 갱신했다. admin decision/PinVi paired consumer/live mutation E2E는 아직
+  미구현이므로 activation하지 않는다.

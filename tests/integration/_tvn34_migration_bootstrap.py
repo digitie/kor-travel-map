@@ -680,6 +680,14 @@ async def repair_tvn_m05_role_phase(async_dsn: str) -> None:
                     "OWNER TO ktm_manual_provider_dedup_procedure_owner"
                 )
             )
+            await connection.execute(
+                text(
+                    "ALTER FUNCTION "
+                    "feature.preflight_feature_reference_reconciliation_ack("
+                    "text, uuid, text, text) "
+                    "OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
     finally:
         await engine.dispose()
 

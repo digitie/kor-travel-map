@@ -729,6 +729,9 @@ ALTER FUNCTION feature.reject_manual_provider_dedup_evidence_mutation()
     OWNER TO ktm_manual_provider_dedup_procedure_owner;
 ALTER FUNCTION feature.assert_feature_reference_reconciliation_lease_cursor()
     OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER FUNCTION feature.preflight_feature_reference_reconciliation_ack(
+    text, uuid, text, text
+) OWNER TO ktm_manual_provider_dedup_procedure_owner;
 ALTER PROCEDURE feature.record_manual_provider_dedup_candidate(text, text, jsonb, jsonb)
     OWNER TO ktm_manual_provider_dedup_procedure_owner;
 ALTER PROCEDURE feature.resolve_manual_provider_dedup_case(
@@ -743,6 +746,13 @@ REVOKE ALL ON FUNCTION feature.reject_manual_provider_dedup_evidence_mutation()
     FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime;
 REVOKE ALL ON FUNCTION feature.assert_feature_reference_reconciliation_lease_cursor()
     FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime;
+REVOKE ALL ON FUNCTION feature.preflight_feature_reference_reconciliation_ack(
+    text, uuid, text, text
+) FROM PUBLIC, ktm_feature_runtime, ktm_feature_dagster_runtime,
+    ktm_manual_provider_dedup_detector_executor, ktm_manual_provider_dedup_admin_executor;
+GRANT EXECUTE ON FUNCTION feature.preflight_feature_reference_reconciliation_ack(
+    text, uuid, text, text
+) TO ktm_feature_reference_reconciliation_service_executor;
 REVOKE ALL ON PROCEDURE feature.record_manual_provider_dedup_candidate(text, text, jsonb, jsonb)
     FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime,
     ktm_manual_provider_dedup_admin_executor,

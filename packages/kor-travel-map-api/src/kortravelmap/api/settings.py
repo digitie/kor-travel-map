@@ -35,9 +35,7 @@ _CACHE_TARGET_EXTERNAL_SYSTEM_PATTERN = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_.:-
 _LOWER_SHA256_HEX_PATTERN = re.compile(r"\A[0-9a-f]{64}\Z")
 _LOCAL_DEV_CURSOR_SIGNING_KEY = secrets.token_bytes(32)
 _CURSOR_SIGNING_SECRET_NAME = "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET"
-_ADMIN_FEATURE_CREATE_TOKEN_SHA256_NAME = (
-    "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256"
-)
+_ADMIN_FEATURE_CREATE_TOKEN_SHA256_NAME = "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256"
 _CURSOR_SIGNING_PROTECTED_FIELDS = (
     ("admin proxy secret", "admin_proxy_secret"),
     ("service token", "service_token"),
@@ -268,9 +266,7 @@ def _admin_feature_create_credential_problems(
         except ValueError as exc:
             problems.append(str(exc))
         else:
-            if admin_proxy_secret is None or not _deployable_secret_shape(
-                admin_proxy_secret
-            ):
+            if admin_proxy_secret is None or not _deployable_secret_shape(admin_proxy_secret):
                 problems.append(
                     "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET must be set to at least 32 "
                     "characters without surrounding whitespace while manual Feature "
@@ -280,14 +276,10 @@ def _admin_feature_create_credential_problems(
     digest = getattr(settings, "admin_feature_create_token_sha256", None)
     if digest in (None, ""):
         if require_digest:
-            problems.append(
-                f"{_ADMIN_FEATURE_CREATE_TOKEN_SHA256_NAME} must be configured"
-            )
+            problems.append(f"{_ADMIN_FEATURE_CREATE_TOKEN_SHA256_NAME} must be configured")
         return problems
     if not isinstance(digest, str) or _LOWER_SHA256_HEX_PATTERN.fullmatch(digest) is None:
-        problems.append(
-            f"{_ADMIN_FEATURE_CREATE_TOKEN_SHA256_NAME} must be lowercase SHA-256 hex"
-        )
+        problems.append(f"{_ADMIN_FEATURE_CREATE_TOKEN_SHA256_NAME} must be lowercase SHA-256 hex")
         return problems
 
     protected_secrets = {
@@ -312,8 +304,7 @@ def _admin_feature_create_credential_problems(
             digest,
         ):
             problems.append(
-                "admin feature create token digest must be distinct from "
-                f"{protected_name}"
+                f"admin feature create token digest must be distinct from {protected_name}"
             )
 
     for curation_name, curation_digest in (
@@ -328,8 +319,7 @@ def _admin_feature_create_credential_problems(
     ):
         if isinstance(curation_digest, str) and hmac.compare_digest(curation_digest, digest):
             problems.append(
-                "admin feature create token digest must be distinct from "
-                f"{curation_name}"
+                f"admin feature create token digest must be distinct from {curation_name}"
             )
 
     for principal in getattr(settings, "cache_target_service_principals", ()):
@@ -343,8 +333,7 @@ def _admin_feature_create_credential_problems(
             digest,
         ):
             problems.append(
-                "admin feature create token digest must be distinct from "
-                "cache-target tokens"
+                "admin feature create token digest must be distinct from cache-target tokens"
             )
             break
     return problems
@@ -539,6 +528,27 @@ class ApiSettings(BaseSettings):
             "Feature 요청 큐 등록 전용 ServiceToken의 lowercase SHA-256 digest. "
             "generic service/cache-target/admin token은 이 쓰기 권한을 얻지 못한다. env "
             "``KOR_TRAVEL_MAP_API_FEATURE_REQUEST_TOKEN_SHA256``."
+        ),
+    )
+    feature_reference_reconciliation_read_token_sha256: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        description=(
+            "M05 Feature 참조 reconciliation event read/lease 전용 ServiceToken의 "
+            "lowercase SHA-256 digest. ack token 및 다른 service token과 공유하지 "
+            "않는다. env "
+            "``KOR_TRAVEL_MAP_API_FEATURE_REFERENCE_RECONCILIATION_READ_TOKEN_SHA256``."
+        ),
+    )
+    feature_reference_reconciliation_ack_token_sha256: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        description=(
+            "M05 Feature 참조 reconciliation event ACK 전용 ServiceToken의 lowercase "
+            "SHA-256 digest. read token 및 다른 service token과 공유하지 않는다. env "
+            "``KOR_TRAVEL_MAP_API_FEATURE_REFERENCE_RECONCILIATION_ACK_TOKEN_SHA256``."
         ),
     )
     cursor_signing_secret: SecretStr | None = Field(
@@ -750,8 +760,7 @@ class ApiSettings(BaseSettings):
                 return None
             if _LOWER_SHA256_HEX_PATTERN.fullmatch(value) is None:
                 raise ValueError(
-                    f"{_ADMIN_FEATURE_CREATE_TOKEN_SHA256_NAME} must be lowercase "
-                    "SHA-256 hex"
+                    f"{_ADMIN_FEATURE_CREATE_TOKEN_SHA256_NAME} must be lowercase SHA-256 hex"
                 )
         return value
 
@@ -922,6 +931,8 @@ class ApiSettings(BaseSettings):
         "pinvi_curation_snapshot_token_sha256",
         "pinvi_curation_cutover_mapping_token_sha256",
         "feature_request_token_sha256",
+        "feature_reference_reconciliation_read_token_sha256",
+        "feature_reference_reconciliation_ack_token_sha256",
         mode="before",
     )
     @classmethod
@@ -941,9 +952,7 @@ class ApiSettings(BaseSettings):
             if value == "":
                 return None
             if _LOWER_SHA256_HEX_PATTERN.fullmatch(value) is None:
-                raise ValueError(
-                    "Scoped service token digest must be lowercase SHA-256 hex"
-                )
+                raise ValueError("Scoped service token digest must be lowercase SHA-256 hex")
         return value
 
     @model_validator(mode="after")
@@ -952,6 +961,12 @@ class ApiSettings(BaseSettings):
             "snapshot": self.pinvi_curation_snapshot_token_sha256,
             "cutover mapping": self.pinvi_curation_cutover_mapping_token_sha256,
             "feature request": self.feature_request_token_sha256,
+            "feature reference reconciliation read": (
+                self.feature_reference_reconciliation_read_token_sha256
+            ),
+            "feature reference reconciliation ack": (
+                self.feature_reference_reconciliation_ack_token_sha256
+            ),
         }
         configured = {name: digest for name, digest in digests.items() if digest is not None}
         if len(configured) != len(set(configured.values())):
@@ -972,17 +987,17 @@ class ApiSettings(BaseSettings):
         for curation_name, digest in configured.items():
             if digest in cache_target_digests:
                 raise ValueError(
-                    f"Scoped {curation_name} token digest must be distinct from "
-                    "cache-target tokens"
+                    f"Scoped {curation_name} token digest must be distinct from cache-target tokens"
                 )
             for protected_name, protected_secret in protected_secrets.items():
                 protected_raw = _optional_secret_text(
                     protected_secret,
                     setting_name=protected_name,
                 )
-                if protected_raw is not None and hashlib.sha256(
-                    protected_raw.encode("utf-8")
-                ).hexdigest() == digest:
+                if (
+                    protected_raw is not None
+                    and hashlib.sha256(protected_raw.encode("utf-8")).hexdigest() == digest
+                ):
                     raise ValueError(
                         f"Scoped {curation_name} token digest must be distinct from "
                         f"{protected_name}"
@@ -1245,9 +1260,7 @@ class ApiSettings(BaseSettings):
         problems.extend(
             _admin_feature_create_credential_problems(
                 self,
-                require_digest=(
-                    self.is_production or self.admin_manual_feature_create_enabled
-                ),
+                require_digest=(self.is_production or self.admin_manual_feature_create_enabled),
             )
         )
 
