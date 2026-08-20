@@ -643,7 +643,12 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   - [ ] n150 격리 DB에서 migration → 수동 GC → schedule ON → 다음 tick 순서로 검증하고,
     GC 처리량이 유입률을 상회하며 remaining backlog가 0인지 증명한다. referenced snapshot 증가율과
     보존 임계치 alert도 함께 확인한다.
-  - [ ] (#975 적대 재리뷰 P2, 후속) relay 종결성 보강 — (a) run 중 source generation 변경으로 실패할 때
+  - [x] (#975 적대 재리뷰 P2) relay 종결성 보강 — PR #1026(merge `b2e9c43a`). 착수 전 조사에서
+    넷 다 미구현으로 확인됐고, (c)는 '향후 위험'이 아니라 이미 현재 위험이었다. typed reason
+    도입 + 억제/삼킴을 `epoch_moved`에만 한정, running 취소 전이에 relay event 추가, 생산자
+    모듈의 autouse truncate로 순서 의존 제거. 적대 리뷰 2명이 NO_GO를 냈고, 검증을 통과한
+    P1(내 변경이 `done`을 `failed`로 접던 것)과 공허했던 새 테스트를 고쳐 재검증했다.
+    원래 항목 서술: (a) run 중 source generation 변경으로 실패할 때
     stale generation tuple에도 `failed` status event를 내는 것이 안전하다(`_append_result_event`는
     generation을 검사하지 않음) → 억제 대신 emit; (b) running member의 operator cancel 전이
     (`_TRANSITION_JOB_MEMBER_SQL`)에도 queued 경로처럼 savepoint-guarded status event append.
