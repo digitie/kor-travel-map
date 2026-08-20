@@ -1,5 +1,17 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-21 — 완료 task를 정본 원장으로 이관
+
+`T-VN-H50`(PR #1036), `T-VN-C05A`~`C05D`(PR #1037),
+`T-C7-BROWSER-EVIDENCE`·`T-C7-SCOPE-REGISTRY`·`T-C7-LIVE-SERIAL`·
+`T-FE-MOCK-MANIFEST`(PR #1038)는 모두 머지되어 `tasks-done.md`로 이관했다.
+`tasks.md`에는 `T-VN-40B` 잔여와 `T-FE-MOCK-FLAKE`를 포함한 미완료 실행 단위만 남겼다.
+
+### 다음 한 작업
+
+완료 이관 뒤의 우선순위는 [`tasks.md`](tasks.md) 상단 인덱스의 열린 항목을 따른다.
+이번 정리에서 새 구현 작업은 추가하지 않았다.
+
 ## 2026-08-20 — T-VN-C05A~D provider 머지 후 map 최종 게이트
 
 `python-krforest-api` PR #9를 `4681bc7892239adc28aeeab19dba707aefb1dbde`로 머지했고,

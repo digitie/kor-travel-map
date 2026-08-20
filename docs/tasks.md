@@ -5,10 +5,13 @@
 [`docs/resume.md`](resume.md)가 정본이다. 작성·유지 규약은
 [`docs/tasks-rule.md`](tasks-rule.md)를 따른다.
 
-## 진행 중인 작업 인덱스 (2026-08-20 전면 재대조)
+## 진행 중인 작업 인덱스 (2026-08-21 완료 이관)
 
 완료한 `T-VN-32`·`T-VN-33`·`T-VN-37`·`T-VN-38`·`T-VN-40`과 선행 운영 task는
-[`tasks-done.md`](tasks-done.md)로 이관했다. 아래에는 아직 닫히지 않은 실행 단위만 둔다.
+[`tasks-done.md`](tasks-done.md)로 이관했다. 이번 재대조에서 완료된
+`T-VN-H50`·`T-VN-C05A`~`C05D`·`T-C7-BROWSER-EVIDENCE`·`T-C7-SCOPE-REGISTRY`·
+`T-C7-LIVE-SERIAL`·`T-FE-MOCK-MANIFEST`도 이관했다. 아래에는 아직 닫히지 않은
+실행 단위만 둔다.
 
 **Lane A (Claude Code)**와 **Lane B (codex)**는 서로 병렬 실행한다. 각 lane 내부는 아래 순서를
 지키며, 같은 migration head·OpenAPI 정본·같은 cross-repo pair를 만지는 시점만 공통 규율의
@@ -18,25 +21,19 @@ barrier로 직렬화한다.
   - [~] `T-VN-H34`(공식 curation 미연결 membership 잔여 AC — `T-VN-M01`~`M03` 선행 필요)
   - [~] `T-VN-H43`(실 production 전환 시 manager #148로 정기화 재개)
   - [~] `T-VN-H49`(4분할 baseline·primitive 완료 / 주기 실행·보존·off-box 증거 잔여)
-  - [ ] `T-VN-H50`(CI planner 인덱스 선택 flake, map #990)
 - **Lane B — frontend hardening·PinVi 소비 API**
   - [~] `T-VN-41C`(#975 병합 / final exact-pair·prod consumer enable 잔여)
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환 — **저장소측 완료 2026-08-20**, live 실행은 배리어 대기)
     ∥ [~] `T-VN-41S`(#922 1차 구현·리뷰 GO, `0230+` migration/compactor·n150 1M 검증 잔여)
   - **배리어**: [ ] `T-VN-FINAL-REBUILD`(주요 개발 완료 후 파괴적 재구축 — 사용자 결정 2026-08-20)
-  - [x] `T-C7-BROWSER-EVIDENCE`(#995 잔여 — 2026-08-20 접어넣음)
   - [ ] `T-VN-40B` 잔여(source rule `curated` action 퇴역, `0229`, PR #1035) — 종결 되돌림
-  - [ ] `T-FE-MOCK-MANIFEST`(manifest 층 종결 / flake 잔여) ∥ [ ] `T-FE-MOCK-FLAKE`(`/v1/ops/logs`)
-    → [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2` → `T-VN-41C` receipt 승격
+  - [ ] `T-FE-MOCK-FLAKE`(`/v1/ops/logs`)
+  - [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2` → `T-VN-41C` receipt 승격
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정, T-VN-40 인수 뒤)**
   - [~] `T-VN-M01`(admin Feature 생성 API foundation 병합, `0226` DB/ACL/route 잔여) → [ ] `T-VN-M02`(origin 보존·불변)
   - [ ] `T-VN-M03`(curated 동시 생성) ∥ [ ] `T-VN-M04`(PinVi 요청 큐 — cross-repo)
   - [ ] `T-VN-M05`(provider 발행 시 중복 판정 — 자동 병합 금지)
 - **Lane C — 사문화 정리·미구현 dataset (다른 lane과 무관, 아무 때나)**
-  - [x] `T-VN-C05A`(산림청 등산로·둘레길 route 구현, PR 진행)
-  - [x] `T-VN-C05B`(산악기상 typed model·WeatherValue 구현, PR 진행)
-  - [x] `T-VN-C05C`(산불위험 V2 typed model·WeatherValue 구현, PR 진행)
-  - [x] `T-VN-C05D`(산사태 예보발령 notice 구현, PR 진행)
 - **Wave 2 barrier 이후**
   - Lane A: [ ] `T-VN-37D`(notice empty range 표현 — 제품 결정 대기)
   - 32~38 join barrier 뒤 Lane B: `T-VN-40B`·`T-VN-40C`는 2026-08-20 prod 적용까지 완료했다.
@@ -44,8 +41,8 @@ barrier로 직렬화한다.
       ③ sanctioned live/soak, ④ exact receipt, 40C 물리 삭제와 prod `0225` 적용까지
       완료했다. 상세 이력은 [`tasks-done.md`](tasks-done.md)에 이관했다.
       **`T-VN-40B`는 2026-08-20 종결을 되돌렸다**(사용자 지시) — 아래 잔여 절 참조.
-    - 인수 ③·④ 중 분리했던 [x] `T-C7-SCOPE-REGISTRY` ∥ [x] `T-C7-LIVE-SERIAL`은
-      2026-08-20 닫혔다.
+    - 인수 ③·④ 중 분리했던 `T-C7-SCOPE-REGISTRY`·`T-C7-LIVE-SERIAL`과 C7 browser
+      evidence·mock manifest는 PR #1038에서 닫혀 [`tasks-done.md`](tasks-done.md)로 이관했다.
   - 최종 단일 cutover: [ ] `T-VN-39`
 - **보류/외부 추적**
   - [ ] `T-VN-H27` — #819 HAProxy WebSocket tunnel timeout(**보류: 운영자 환경 필요**,
@@ -476,27 +473,6 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 - **종결**: map #738은 lane 분배 정본을 본 문서로 이관해 닫혔다. map #930(geo key
   미결선 — dagster job 고착)은 docker-manager compose 결선(#114 트랙) + 3 컨테이너
   env 실측 + krex job 연속 SUCCESS로 2026-08-05 close.
-### T-VN-H50 — CI integration flake: `test_t212d_perf_explain.py:546` planner 인덱스 선택
-
-- [x] T-VN-H50 — **planner 인덱스 선택 CI flake 해소**
-
-  2026-08-20에 gate를 SQL join 역할별 의미 조건으로 재작성했다. `features`,
-  `source_links`, `source_entities`, `source_entity_heads`, `source_records`는
-  `Seq Scan`·`Parallel Seq Scan`을 허용하지 않고 각 relation의 정본 index만 허용한다.
-  `source_entities_pkey`도 `source_entity_key` 동등 join의 canonical 경로로 포함하며,
-  `source_records`의 선두 컬럼이 맞지 않는 복합 unique index는 허용 목록에서 제거했다.
-- forced plan(`enable_seqscan=off`)과 default plan을 모두 같은 semantic gate로 검사하고,
-  JSON `Settings`와 planner mode를 failure 진단에 보존한다. 작은 catalog dimension인
-  `provider_datasets`만 예외로 두되 seed cardinality를 `count(*) <= 100`으로 제한한다.
-- `_index_names_for_relation`은 child `Bitmap Index Scan`의 relation 문맥을 전파하고,
-  allowlist는 하나의 허용 index가 있는지만 보지 않고 해당 relation의 모든 index scan이
-  허용 집합 안에 있는지도 검사한다.
-- 적대적 리뷰 2명은 초기 전역 OR gate와 진단 손실을 NO-GO로 지적했고, role별 gate·전체
-  EXPLAIN settings·dimension bound를 반영한 뒤 마지막에는 `source_entities_pkey` 누락을
-  동일하게 P1로 재현했다. 이번 수정으로 그 경로까지 포함했다.
-- 로컬 대상 테스트 6회 연속 및 모듈 전체 8건은 통과했다. GitHub Actions는 Python
-  3.11·3.13과 fixture replay가 통과했고, 3.12 API unit 단계 완료를 대기 중이다.
-
 ### T-VN-H49 — 4분할 인스턴스 백업 운영 잔여
 
 - [~] T-VN-H49 — **주기 실행·bounded retention·off-box 증거 완성**
@@ -522,42 +498,6 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 ## Lane C 상세 — 사문화 정리·미구현 dataset (2026-08-17 신설)
 
 > 다른 lane과 barrier를 공유하지 않는다. 아무 때나 착수할 수 있다.
-
-### T-VN-C05 — C03 결정 후속 구현
-
-> C03이 제품 범위와 authoritative source를 확정해 완료 이관됐다. 아래 네 task는 서로
-> 독립이며, upstream public model을 먼저 고치는 task는 해당 provider 저장소 PR을 선행한다.
-
-- [x] T-VN-C05A — **산림청 등산로·둘레길 route 구현**
-
-  `python-krforest-api` PR#9의 `travel.forest_trail_file_features()`
-  (`forest.go.kr` `PBD0000041`)와 `travel.dulle_trail_features()`(`PBD0000031`)가 반환하는
-  `ForestSpatialFeature`를 각각 `krforest_mountain_trails`와
-  `krforest_dulle_trails`로 적재한다. LineString/MultiLineString만 route로 승격하고,
-  live 파일 census로 안정 자연키·중복·빈 geometry 정책을 먼저 봉인한다. 산림청이
-  통제·폐쇄 여부는 실시간이 아니라고 명시하므로 이 source를 운영상 이용 가능 여부나
-  notice로 사용하지 않는다.
-
-- [x] T-VN-C05B — **산악기상 typed model·WeatherValue 구현**
-
-  authoritative source는 공공데이터포털 `15084696`의
-  `1400377/mtweather/mountListSearch`다. `python-krforest-api`의 `MountainWeather` typed model을
-  관측소 ID·이름·관측시각·기온/습도/풍향/풍속/강수 typed 필드로 먼저 안정화하고,
-  관측소 anchor와 `WeatherValue` identity를 검증한 뒤 `krforest_mountain_weather`를 적재한다.
-
-- [x] T-VN-C05C — **산불위험 V2 typed model·WeatherValue 구현**
-
-  authoritative source는 공공데이터포털 `15084817`의 현행
-  `1400377/forestPointV2` 전국/시도/시군구 API다. pinned upstream의 구 V1 경로와
-  `WildfireRiskForecast` V2 typed model로 교체하고 지역 anchor·D1~D4 예보 identity를
-  확정한 뒤 `krforest_wildfire_risk_forecast`를 지수성 `WeatherValue`로 적재한다.
-
-- [x] T-VN-C05D — **산사태 예보발령 notice 구현**
-
-  산림 안전 API 중 실제 발령·해제 의미를 가진 공공데이터포털 `15074798`
-  `forecastIssueService/forecastIssueList`만 source로 채택한다. upstream typed model,
-  기관·종류·발령시각 기반 사건 identity, 발령/해제 lifecycle을 fixture·live 표본으로
-  확정한 뒤 `krforest_landslide_forecast_issues`를 notice FeatureBundle로 적재한다.
 
 ### T-VN-40B 잔여 — source rule `curated` action 퇴역 (2026-08-20 종결 되돌림)
 
@@ -593,35 +533,10 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 > T-VN-40B/C와 인수 ③~⑤는 2026-08-20에 모두 완료되어 [`tasks-done.md`](tasks-done.md)로
 > 이관했다. 아래는 그 완료와 독립적으로 남은 검증·운영 task만 둔다.
 
-- [ ] **T-FE-MOCK-MANIFEST** — mocked e2e checkpoint manifest
-  (`packages/kor-travel-map-admin/frontend/e2e/mocked-failure-manifest.json`) 재고정.
-
-  **2026-08-20 실측으로 drift가 세 겹임을 확인했다**(리포터의 identity 규칙을 그대로
-  재현해 셌다 — `e2e/<spec>::<titlePath>`).
-
-  1. **인벤토리** — main 실측 `276` / sha `0083e713…`인데 manifest는 `284` /
-     `57a9e1d8…`이다.
-  2. **expected-failure 원장** — 선언 89건 중 **10건이 존재하지 않는 테스트**를 가리킨다:
-     change-request 화면 삭제 3(`admin-ops` 2 + `change-requests-lifecycle.spec.ts` 전체),
-     M01 문구 변경 1, ADR-088 개명 2(`exact pair`→`membership`,
-     `prerequisite/provider 변경`→`provider dataset ID/ID 변경`), 소멸 4(MOIS 3 + 텍스트 필터 1).
-  3. **baseline 커밋** — `baselineRevision 31edfe0c`가 **저장소에 없는 커밋**이다(squash로
-     사라진 브랜치 커밋). 기준을 재현할 방법이 없다.
-
-  **재고정 방침**: 실행 결과로 통째 재생성하면 지금 실패 중인 것이 조용히 expected가
-  되고, 인벤토리 숫자만 갱신하면 사라진 테스트를 계속 "실패할 예정"이라 선언하는 원장이
-  남는다. 그래서 (a) 존재가 부정된 선언은 사유를 적어 제거, (b) 개명이 명확한 2건만 제목
-  갱신, (c) 인벤토리·baseline은 실측값으로 재고정, (d) runner를 실제로 돌려 게이트 통과를
-  증명한다.
-
-  **부수**: `run-mocked-checkpoint.mjs`의 `E2E_BASE_URL` 기본값이 `http://127.0.0.1:12705`
-  (**운영 admin UI 포트**)였다. 명시하지 않고 실행하면 운영 UI를 친다 — 기본값을 없앴다.
-
-  **2026-08-20 진행**: checkpoint A를 5회 돌려 판정했다. manifest 층은 닫혔다 —
-  선언 89건이 **하나도 실패하지 않아**(`expected-failures=89, actual-failures=0`) 원장이
-  통째로 낡은 것이었고, groups를 비우고 인벤토리·baseline을 실측값(285 / `5c647f69…`)으로
-  고정했다. 재고정 뒤 `expected-failures=0`·인벤토리 일치를 확인했다.
-  **남은 게이트 blocker는 아래 별도 항목의 flake 하나다.**
+- `T-FE-MOCK-MANIFEST`는 PR #1038에서 완료했다. checkpoint A 5회 실측 결과 groups와
+  expected-failures를 비우고, 인벤토리 285 및 baseline `5c647f69…`를 고정했으며
+  `expected-failures=0`·인벤토리 일치를 확인했다. 남은 blocker는 아래
+  `T-FE-MOCK-FLAKE` 하나다.
 
 - [ ] **T-FE-MOCK-FLAKE** — `e2e/admin-ops.spec.ts::admin/ops pages › /v1/ops/logs` 간헐 실패
 
@@ -633,21 +548,9 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   이 spec은 T-C7-BROWSER-EVIDENCE 이식이 건드리지 않았고 mocked checkpoint는 CI 잡이
   아니라 수동 게이트다 — 즉 **기존 flake**다. 표/행이 도착한 뒤 header를 단언하도록
   고쳐야 하며, 재시도로 덮지 않는다.
-- [x] **T-C7-SCOPE-REGISTRY** — `external_system:*` exact-target scope의 선언 주체·근거·
-  운영 조회 표면을 `docs/integration-map.md` 또는 ADR-088 consequences에 정본화한다.
-  → 2026-08-20 완료. 근거는 migration `0224`의 docstring 안에만 있어 저장소 밖에서
-  발견되지 않았다. `integration-map.md` §3.7(선언 주체·`target_grids`를 쓰지 않는 이유·
-  조회 표면 5곳·현재 선언된 이름·직렬화 제약)과 ADR-088 결과로 올렸다.
-- [x] **T-C7-LIVE-SERIAL** — 고정 `external_system:c7-e2e`를 쓰는 KMA live 3종이 서로의
-  `membership_fingerprint`를 오염시키지 않도록 파일 병합 또는 worker lock으로 직렬화한다.
-  → 2026-08-20 완료. live config이 `fullyParallel: true` + worker 기본 4임을 실측했다.
-  **파일 병합 대신 cross-worker 잠금**을 택했다 — `describe.serial`은 한 파일 안에서만
-  순서를 강제하고, 1,575줄을 상수 이름 충돌과 함께 병합하면 회귀 위험이 크며 scope를
-  쓰는 spec이 늘 때마다 다시 합쳐야 한다. `e2e/live/_ops-c7-exact-scope-lock.ts`가
-  원자적 `mkdir` 잠금에 소유자 pid 생존·나이 상한을 얹어 crash가 이후 실행을 영구
-  차단하지 않게 한다. write 3종에 결선했고 read-only preflight는 **의도적으로 제외**
-  (근거를 spec에 명시). 잠금 자체는 mocked spec 4종으로 검증한다 — 상호배제·해제 멱등·
-  죽은 소유자 회수·취득 찰나를 빼앗지 않음.
+- `T-C7-SCOPE-REGISTRY`와 `T-C7-LIVE-SERIAL`은 PR #1038에서 완료했다. scope 선언
+  주체·조회 표면을 `integration-map.md` §3.7과 ADR-088 결과에 정본화했고,
+  `external_system:c7-e2e` live write 3종에는 cross-worker `mkdir` 잠금을 결선했다.
 
 ## Lane B 상세 — b1 PinVi 결합·후속
 
@@ -820,39 +723,6 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   통과하는 compatibility 경로는 만들지 않는다. final schema merge/재적재와 독립적으로 unit·script
   contract까지 완료하고, 실제 n150 data-dependent 실행은 위 F1D-D 순서를 따른다
   (그 순서는 `T-VN-FINAL-REBUILD` 배리어 뒤에 열린다).
-
-### T-C7-BROWSER-EVIDENCE — #995 잔여 browser-only 증거 보강 (2026-08-20 신설)
-
-> **`#995`는 superseded로 닫았다(2026-08-20).** 그 PR의 v5/v7 attestation 전환은 ADR-094(#1032)가
-> 대체했고, frontend 부분은 main이 그 사이 59 커밋 앞서가며 대부분 추월했다 — 공유 파일마다
-> main 쪽이 ADR-088 triple identity·3축 상태 라벨·nav 19개·리디자인을 이미 반영하고 있었고,
-> #995가 지우려던 `admin-ops.spec.ts`는 main에서 이미 정리돼 **통과 중**이다(지우면 살아 있는
-> 커버리지를 잃는다). 아래만 실제로 남은 고유 가치다.
-
-- [x] **T-C7-BROWSER-EVIDENCE — browser-only C7 lane 커버리지 보강** *(2026-08-20 접어넣음)*
-
-  > 사용자 지시로 백로그에 두지 않고 즉시 이식했다. #995의 helper를 통째로 가져오면
-  > main의 ADR-088 작업(`C7_KMA_SYNC_SCOPE` 계열 상수, `fillKmaRequestDialogScope`)을
-  > 지우므로 소유권 기능만 발췌해 얹었다. journal은 #995의 v5 대신 **v4**로 매겼다 —
-  > main이 v3이고 그 사이에 v4가 없어 번호를 비울 이유가 없다.
-
-  C7 prod live 6-spec 게이트는 main에서 이미 GREEN이다(`d5693269`). 이 항목은 그 위에 얹는
-  보강이며 `T-VN-41` 마감을 막지 않는다.
-
-  가져올 것 (원본 `origin/feat/tvn41-f1d-evidence-followup` = `eb26981e`):
-  - [ ] `e2e/ops-c7-cleanup-ownership.spec.ts` (신규 256줄) — cleanup 소유권 경계 mocked 회귀
-  - [ ] `e2e/live/ops-c7-kma-contract-preflight.live.spec.ts` (신규 108줄) — KMA 계약 preflight
-  - [ ] 위 둘이 요구하는 `e2e/live/_ops-c7-admin-api.ts` 심볼 6개 —
-    `KmaRequestOwnership`(L70), `KMA_NOWCAST_OPERATION_KEY`(L137),
-    `isC7OrchestratorBootstrapPlaceholder`(L509), `hasExactC7RequestOwnershipBinding`(L534),
-    `cancellationCandidateForScenarioOwnedActiveRequest`(L1814),
-    `resolveKmaProviderDatasetId`(L2561). 원본 helper는 3,844줄 재작성이라 통째로 가져오면
-    main이 이미 반영한 ADR-088 이후 계약을 되돌린다 — **여섯 심볼만 발췌 이식**한다.
-  - [ ] `e2e/mocked-failure-manifest.json` 변경분이 `T-FE-MOCK-MANIFEST`(discoveredTests 284 vs
-    실측 276)를 푸는지 대조한다. 같은 파일을 건드리므로 두 항목을 함께 본다.
-
-  **가져오지 말 것**: attestation 계약 파일 9종과 runbook·integration-map(ADR-094가 정본),
-  `admin-ops.spec.ts` 삭제, 공유 e2e spec 변경(main이 앞선다).
 
 ### T-VN-FINAL-REBUILD — 주요 개발 완료 후 파괴적 재구축 배리어 (2026-08-20 신설)
 

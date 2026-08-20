@@ -1,5 +1,13 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-21 — 완료 task를 `tasks-done.md`로 이관
+
+최신 `origin/main`의 머지 상태를 대조해 H50 planner gate(#1036), 산림청 C05A~D
+dataset(#1037), C7 browser evidence·scope registry·live serial·mock manifest(#1038)를
+완료 원장으로 옮겼다. `tasks.md`의 완료 인덱스·상세 블록을 제거하고, 실제로 남은
+`T-VN-40B` 잔여와 `T-FE-MOCK-FLAKE`는 열린 task로 유지했다. `resume.md`의 현재 진척도도
+같은 기준으로 갱신했다.
+
 ## 2026-08-20 — map CI catalog 회귀값 갱신
 
 원격 Python 3.11~3.13 CI가 API unit 1,198건을 실행한 뒤 기존
