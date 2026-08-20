@@ -79,35 +79,59 @@ def main() -> int:
                 """,
                 (system, f"{tag}-consumer"),
             )
+            material_order = 0
             for snapshot_index in range(snapshots):
                 kind, expires_expression = _classify(snapshot_index)
                 snapshot_id = str(uuid.uuid4())
+                # `0230`: receipt마다 자기 material을 만든다. 같은 identity를 두 번
+                # 주면 살아 있는 material은 identity마다 하나라는 partial unique에
+                # 걸리므로 `material_order`를 receipt마다 벌린다.
+                material_id = str(uuid.uuid4())
+                cur.execute(
+                    """
+                    INSERT INTO ops.poi_cache_target_snapshot_materials (
+                      material_id, external_system, restore_epoch,
+                      material_high_watermark_relay_order,
+                      safe_high_watermark_relay_order,
+                      item_count, merkle_root, materialized_at
+                    ) VALUES (
+                      %s, %s, 1, %s, %s, %s, %s, now() - interval '2 hour'
+                    )
+                    """,
+                    (
+                        material_id,
+                        system,
+                        material_order,
+                        material_order,
+                        items,
+                        _fingerprint(f"root:{snapshot_id}"),
+                    ),
+                )
+                material_order += 1
                 cur.execute(
                     f"""
                     INSERT INTO ops.poi_cache_target_snapshots (
-                      snapshot_id, external_system, restore_epoch,
-                      high_watermark_relay_order, material_high_watermark_relay_order,
-                      item_count, merkle_root, created_at, expires_at
+                      snapshot_id, material_id, receipt_kind, external_system,
+                      created_at, expires_at
                     ) VALUES (
-                      %s, %s, 1, 0, 0, %s, %s,
+                      %s, %s, 'generic', %s,
                       now() - interval '2 hour', {expires_expression}
                     )
                     """,  # noqa: S608 — expires 표현식은 _classify가 만드는 리터럴이다.
-                    (snapshot_id, system, items, _fingerprint(f"root:{snapshot_id}")),
+                    (snapshot_id, material_id, system),
                 )
                 if items:
                     cur.executemany(
                         """
-                        INSERT INTO ops.poi_cache_target_snapshot_items (
-                          snapshot_id, row_number, external_system, target_key,
+                        INSERT INTO ops.poi_cache_target_snapshot_material_items (
+                          material_id, row_number, target_key,
                           state, source_generation, source_payload_fingerprint
-                        ) VALUES (%s, %s, %s, %s, 'active', 1, %s)
+                        ) VALUES (%s, %s, %s, 'active', 1, %s)
                         """,
                         [
                             (
-                                snapshot_id,
+                                material_id,
                                 row,
-                                system,
                                 f"{tag}-target-{row}",
                                 _fingerprint(f"{snapshot_id}:{row}"),
                             )

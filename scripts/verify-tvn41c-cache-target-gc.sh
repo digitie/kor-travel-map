@@ -74,10 +74,14 @@ eligible_counts() {
 SELECT (SELECT count(*) FROM ops.poi_cache_target_snapshots s
           LEFT JOIN ops.poi_cache_target_reconciliation_requests r ON r.snapshot_id=s.snapshot_id
           WHERE s.expires_at <= now() AND r.request_id IS NULL) || '/' ||
-       (SELECT count(*) FROM ops.poi_cache_target_snapshot_items i
-          JOIN ops.poi_cache_target_snapshots s ON s.snapshot_id=i.snapshot_id
-          LEFT JOIN ops.poi_cache_target_reconciliation_requests r ON r.snapshot_id=s.snapshot_id
-          WHERE s.expires_at <= now() AND r.request_id IS NULL)"
+       (SELECT count(*) FROM ops.poi_cache_target_snapshot_material_items i
+          WHERE NOT EXISTS (
+            SELECT 1 FROM ops.poi_cache_target_snapshots s
+            WHERE s.material_id = i.material_id
+              AND (s.expires_at > now()
+                   OR EXISTS (SELECT 1
+                              FROM ops.poi_cache_target_reconciliation_requests r
+                              WHERE r.snapshot_id = s.snapshot_id))))"
 }
 
 fail() { echo; echo "GATE: FAIL — $1" >&2; exit 4; }

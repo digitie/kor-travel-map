@@ -30,18 +30,26 @@ from kortravelmap.infra.db import make_async_engine
 
 _COUNTS_SQL: Final = text(
     """
+    -- `0230` 뒤 item은 material에 달려 있다. "적격 item"은 **정리 대상 material의
+    -- item**이다 — 만료·미참조 receipt가 지워지면 그 material이 orphan이 되고 그때
+    -- item이 지워진다. receipt 하나를 보고 그 item을 세던 앞판 셈은 receipt N개가
+    -- material 하나를 공유하는 지금 모델에서 같은 item을 여러 번 센다.
     SELECT
       (SELECT count(*) FROM ops.poi_cache_target_snapshots) AS headers,
-      (SELECT count(*) FROM ops.poi_cache_target_snapshot_items) AS items,
+      (SELECT count(*) FROM ops.poi_cache_target_snapshot_material_items) AS items,
       (SELECT count(*) FROM ops.poi_cache_target_snapshots s
          LEFT JOIN ops.poi_cache_target_reconciliation_requests r
            ON r.snapshot_id = s.snapshot_id
          WHERE s.expires_at <= now() AND r.request_id IS NULL) AS eligible_headers,
-      (SELECT count(*) FROM ops.poi_cache_target_snapshot_items i
-         JOIN ops.poi_cache_target_snapshots s ON s.snapshot_id = i.snapshot_id
-         LEFT JOIN ops.poi_cache_target_reconciliation_requests r
-           ON r.snapshot_id = s.snapshot_id
-         WHERE s.expires_at <= now() AND r.request_id IS NULL) AS eligible_items,
+      (SELECT count(*) FROM ops.poi_cache_target_snapshot_material_items i
+         WHERE NOT EXISTS (
+           SELECT 1 FROM ops.poi_cache_target_snapshots s
+           WHERE s.material_id = i.material_id
+             AND (s.expires_at > now()
+                  OR EXISTS (SELECT 1
+                             FROM ops.poi_cache_target_reconciliation_requests r
+                             WHERE r.snapshot_id = s.snapshot_id))
+         )) AS eligible_items,
       (SELECT count(*) FROM ops.poi_cache_target_snapshots s
          JOIN ops.poi_cache_target_reconciliation_requests r
            ON r.snapshot_id = s.snapshot_id) AS referenced_headers,
