@@ -303,9 +303,11 @@ async def main() -> int:
                 )
             )
             await conn.execute(
+                # `expires_at > created_at` CHECK가 있다. 방금 만든 receipt라
+                # `now() - 1 hour`는 created_at보다 이르다.
                 text(
                     "UPDATE ops.poi_cache_target_snapshots "
-                    "SET expires_at = now() - interval '1 hour'"
+                    "SET expires_at = created_at + interval '1 millisecond'"
                 )
             )
             await conn.execute(
