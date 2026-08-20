@@ -15,7 +15,8 @@
 #   KTM_GC_VERIFY_DAGSTER_DB  기본 ktm_gcverify_dagster (Dagster storage 격리 DB)
 #   KTM_GC_VERIFY_PG_PASSWORD 미설정이면 postgres 컨테이너의 password file에서 읽는다
 #   KTM_GC_VERIFY_PG_CONTAINER 기본 kor-travel-map-postgres
-#   KTM_GC_VERIFY_PYTHON      기본 python3
+#   KTM_GC_VERIFY_PYTHON      기본 python3 (dagster CLI는 같은 bin 디렉터리에서 찾는다)
+#   KTM_GC_VERIFY_DOCKER      기본 docker (docker group이 아니면 "sudo -n docker")
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -26,6 +27,11 @@ PG_HOST="${KTM_GC_VERIFY_PG_HOST:-127.0.0.1}"
 PG_PORT="${KTM_GC_VERIFY_PG_PORT:-12700}"
 PG_USER="${KTM_GC_VERIFY_PG_USER:-kor_travel_map}"
 PYTHON="${KTM_GC_VERIFY_PYTHON:-python3}"
+DOCKER="${KTM_GC_VERIFY_DOCKER:-docker}"
+# venv에 설치된 python을 줬다면 dagster CLI도 그 venv 것을 써야 같은 코드를 본다.
+PYTHON_BIN_DIR="$(dirname "$PYTHON")"
+DAGSTER="$PYTHON_BIN_DIR/dagster"; [ -x "$DAGSTER" ] || DAGSTER="dagster"
+DAGSTER_DAEMON="$PYTHON_BIN_DIR/dagster-daemon"; [ -x "$DAGSTER_DAEMON" ] || DAGSTER_DAEMON="dagster-daemon"
 SCHEDULE="cache_target_snapshot_gc_hourly_schedule"
 DAGSTER_HOME_DIR="${KTM_GC_VERIFY_DAGSTER_HOME:-/tmp/ktm-gcverify-dagster}"
 
@@ -39,7 +45,7 @@ for forbidden in kor_travel_map kor_travel_map_dagster postgres template0 templa
 done
 
 if [ -z "${KTM_GC_VERIFY_PG_PASSWORD:-}" ]; then
-  KTM_GC_VERIFY_PG_PASSWORD="$(docker exec "$PG_CONTAINER" \
+  KTM_GC_VERIFY_PG_PASSWORD="$($DOCKER exec "$PG_CONTAINER" \
     sh -c 'cat "$POSTGRES_PASSWORD_FILE"')" || {
     echo "postgres password를 읽지 못했다. KTM_GC_VERIFY_PG_PASSWORD를 직접 주라." >&2
     exit 2
@@ -55,9 +61,9 @@ export KOR_TRAVEL_MAP_DAGSTER_SCHEDULE_OVERRIDES_REQUIRED=true
 export DAGSTER_HOME="$DAGSTER_HOME_DIR"
 export DAGSTER_DISABLE_TELEMETRY=1
 
-psql_app() { docker exec -e PGPASSWORD="$KTM_GC_VERIFY_PG_PASSWORD" "$PG_CONTAINER" psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$DB" -At -F'|' "$@"; }
-psql_dag() { docker exec -e PGPASSWORD="$KTM_GC_VERIFY_PG_PASSWORD" "$PG_CONTAINER" psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$DAGSTER_DB" -At -F'|' "$@"; }
-psql_adm() { docker exec -e PGPASSWORD="$KTM_GC_VERIFY_PG_PASSWORD" "$PG_CONTAINER" psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d postgres -v ON_ERROR_STOP=1 "$@"; }
+psql_app() { $DOCKER exec -e PGPASSWORD="$KTM_GC_VERIFY_PG_PASSWORD" "$PG_CONTAINER" psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$DB" -At -F'|' "$@"; }
+psql_dag() { $DOCKER exec -e PGPASSWORD="$KTM_GC_VERIFY_PG_PASSWORD" "$PG_CONTAINER" psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$DAGSTER_DB" -At -F'|' "$@"; }
+psql_adm() { $DOCKER exec -e PGPASSWORD="$KTM_GC_VERIFY_PG_PASSWORD" "$PG_CONTAINER" psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d postgres -v ON_ERROR_STOP=1 "$@"; }
 
 seed_command() {
   echo "KTM_GC_VERIFY_PG_PASSWORD='$KTM_GC_VERIFY_PG_PASSWORD' $PYTHON $REPO_ROOT/scripts/tvn41c_gc_seed.py $DB $1 $2 $3 $4"
@@ -93,13 +99,15 @@ echo "=== ③ 수동 GC — 적격만 지우고 대조군은 보존"
 
 echo
 echo "=== ④ 유입률 대비 처리량"
-inflow_started="$(date +%s.%N)"
+# bc 없이 밀리초 정수 산술로 유입률을 낸다 — 이 게이트는 coreutils만 요구해야 한다.
+inflow_started_ms=$(( $(date +%s%N) / 1000000 ))
 eval "$(seed_command 6 40 100 inflow)" || fail "유입 시딩 실패"
-inflow_seconds="$(echo "$(date +%s.%N) - $inflow_started" | bc)"
+inflow_elapsed_ms=$(( $(date +%s%N) / 1000000 - inflow_started_ms ))
+[ "$inflow_elapsed_ms" -gt 0 ] || inflow_elapsed_ms=1
 inflow_items=24000
-echo "  유입: item ${inflow_items}건 / ${inflow_seconds}초"
+echo "  유입: item ${inflow_items}건 / ${inflow_elapsed_ms}ms = $(( inflow_items * 1000 / inflow_elapsed_ms )) items/s"
 "$PYTHON" "$REPO_ROOT/scripts/tvn41c_gc_assert.py" drain || fail "유입 후 GC 단언 실패"
-echo "  유입률 = $(echo "scale=0; $inflow_items / $inflow_seconds" | bc) items/s — 위 처리량과 대조하라"
+echo "  위 '처리량' 줄이 이 유입률을 상회해야 한다."
 
 echo
 echo "=== ⑤ cron override -> schedule ON -> 다음 tick"
@@ -136,7 +144,7 @@ run_monitoring:
   poll_interval_seconds: 15
 YAML
 
-dagster-daemon run -m tvn41c_gc_defs > /tmp/tvn41c-gc-daemon.log 2>&1 &
+"$DAGSTER_DAEMON" run -m tvn41c_gc_defs > /tmp/tvn41c-gc-daemon.log 2>&1 &
 daemon_pid=$!
 trap 'kill "$daemon_pid" 2>/dev/null; wait "$daemon_pid" 2>/dev/null' EXIT
 for _ in $(seq 1 30); do
@@ -147,7 +155,7 @@ grep -q "Instance is configured" /tmp/tvn41c-gc-daemon.log || {
   tail -30 /tmp/tvn41c-gc-daemon.log >&2; fail "daemon 기동 실패"
 }
 
-dagster schedule start "$SCHEDULE" -m tvn41c_gc_defs 2>&1 | tail -1
+"$DAGSTER" schedule start "$SCHEDULE" -m tvn41c_gc_defs 2>&1 | tail -1
 tick_started="$(date +%s)"
 run_id=""
 for _ in $(seq 1 40); do
@@ -165,7 +173,7 @@ for _ in $(seq 1 40); do
   sleep 5
 done
 echo "  run status=$run_status  경과=$(( $(date +%s) - tick_started ))초"
-dagster schedule stop "$SCHEDULE" -m tvn41c_gc_defs >/dev/null 2>&1
+"$DAGSTER" schedule stop "$SCHEDULE" -m tvn41c_gc_defs >/dev/null 2>&1
 [ "$run_status" = "SUCCESS" ] || {
   psql_dag -c "SELECT event FROM event_logs WHERE run_id='$run_id' AND dagster_event_type='STEP_FAILURE' LIMIT 1" | head -c 900 >&2
   fail "tick이 만든 run이 성공하지 않았다: $run_status"
