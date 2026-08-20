@@ -307,53 +307,73 @@ WHERE snapshot.snapshot_id = candidates.snapshot_id
 RETURNING snapshot.snapshot_id
 """
 
-#: compaction 후보의 논리 조건. 넷을 모두 만족해야 한다.
+#: **되찾기 후보**의 논리 조건. `compacted_at`은 "이 material의 item을 되찾기
+#: **시작**했다"는 표시이고, item은 **표시된 뒤에만** 지운다. 그래서 재사용 쪽의
+#: `compacted_at IS NULL` 하나가 "item이 온전하다"의 충분조건이 된다.
 #:
-#: 1. 아직 compaction되지 않았다.
-#: 2. reconciliation이 참조하는 receipt가 **하나라도 있다**. compaction은 GC가 지울 수
-#:    없는 감사 영수증 때문에 존재한다 — generic receipt만 붙은 material은 receipt가
-#:    만료되면 orphan이 되어 통째로 지워지므로 compaction의 일이 아니다. 이 조건이
-#:    없으면 아직 재사용 가능한 generic material을 (bounded receipt 삭제가 한 batch에
-#:    끝나지 않은 틈에) compaction으로 표시해 재사용 자체를 막을 수 있다.
-#: 3. 미만료 receipt가 하나도 없다 — 하나라도 살아 있으면 그 consumer가 아직 page한다.
-#: 4. `preparing|running` reconciliation이 없고, 이 material을 가리키는 **모든**
-#:    reconciliation이 terminal이며 `completed_at`이 보존 기간보다 오래됐다.
-#: 5. item이 실제로 있다. item이 없는 material을 표시하면 되찾는 byte는 0인데 그
-#:    receipt의 정상적인 빈 page가 410으로 바뀐다.
+#: 그 결합이 없으면 이런 일이 난다. GC가 orphan material의 item을 1,000행씩 지우는
+#: 도중(commit된 상태)에 그 material이 그대로 재사용 가능해서, consumer가 5,000을
+#: 말하는 root/count와 함께 4,000행을 받는다. receipt가 붙는 순간 orphan이 아니게 되어
+#: 배출도 멈추므로 손상이 영구가 된다. `0230` 이전에는 재사용이 "만료까지 75분 이상"을,
+#: item 정리가 "만료됨"을 봐서 두 술어가 만료를 축으로 상보적이었다 — 정규화하면서
+#: 그 결합이 사라졌고, 이 표시가 그것을 대신한다.
+#:
+#: 공통 조건 둘.
+#:
+#: 1. 아직 표시되지 않았다.
+#: 2. item이 실제로 있다. 빈 material을 표시하면 되찾는 byte는 0인데 그 receipt의
+#:    정상적인 빈 page가 410으로 바뀐다.
+#:
+#: 그리고 아래 둘 중 하나다.
+#:
+#: - **orphan** — 붙잡은 receipt가 하나도 없다. 표를 비운 뒤 행째 사라진다(phase 4).
+#: - **terminal audit** — reconciliation이 참조하는 receipt가 있고, 미만료 receipt는
+#:   없으며, 참조하는 **모든** reconciliation이 terminal이고 `completed_at`이 보존
+#:   기간보다 오래됐다. 이쪽은 표시가 영구히 남는다 — root/count가 감사 증거이고
+#:   그 receipt의 page는 typed 410이 된다.
 _COMPACTION_CANDIDATE_PREDICATE = """
   material.compacted_at IS NULL
   AND EXISTS (
     SELECT 1
-    FROM ops.poi_cache_target_snapshots AS receipt
-    JOIN ops.poi_cache_target_reconciliation_requests AS request
-      ON request.snapshot_id = receipt.snapshot_id
-    WHERE receipt.material_id = material.material_id
-  )
-  AND NOT EXISTS (
-    SELECT 1
-    FROM ops.poi_cache_target_snapshots AS receipt
-    WHERE receipt.material_id = material.material_id
-      AND receipt.expires_at > now()
-  )
-  AND NOT EXISTS (
-    SELECT 1
-    FROM ops.poi_cache_target_snapshots AS receipt
-    JOIN ops.poi_cache_target_reconciliation_requests AS request
-      ON request.snapshot_id = receipt.snapshot_id
-    WHERE receipt.material_id = material.material_id
-      AND (
-        request.status IN ('preparing','running')
-        OR request.completed_at IS NULL
-        OR request.completed_at
-           > now() - make_interval(
-               secs => CAST(:compaction_retention_seconds AS double precision)
-             )
-      )
-  )
-  AND EXISTS (
-    SELECT 1
     FROM ops.poi_cache_target_snapshot_material_items AS item
     WHERE item.material_id = material.material_id
+  )
+  AND (
+    NOT EXISTS (
+      SELECT 1
+      FROM ops.poi_cache_target_snapshots AS receipt
+      WHERE receipt.material_id = material.material_id
+    )
+    OR (
+      EXISTS (
+        SELECT 1
+        FROM ops.poi_cache_target_snapshots AS receipt
+        JOIN ops.poi_cache_target_reconciliation_requests AS request
+          ON request.snapshot_id = receipt.snapshot_id
+        WHERE receipt.material_id = material.material_id
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM ops.poi_cache_target_snapshots AS receipt
+        WHERE receipt.material_id = material.material_id
+          AND receipt.expires_at > now()
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM ops.poi_cache_target_snapshots AS receipt
+        JOIN ops.poi_cache_target_reconciliation_requests AS request
+          ON request.snapshot_id = receipt.snapshot_id
+        WHERE receipt.material_id = material.material_id
+          AND (
+            request.status IN ('preparing','running')
+            OR request.completed_at IS NULL
+            OR request.completed_at
+               > now() - make_interval(
+                   secs => CAST(:compaction_retention_seconds AS double precision)
+                 )
+          )
+      )
+    )
   )
 """
 
@@ -377,9 +397,9 @@ WHERE material.material_id = candidates.material_id
 RETURNING material.material_id
 """
 
-#: orphan(붙잡은 receipt 없음)과 compacted(표시됨)를 한 statement로 비운다. 둘 다
-#: "이 item은 더 이상 페이징되지 않는다"는 같은 뜻이고, 한 bound 안에서 지워야
-#: 한쪽이 다른 쪽을 굶기지 않는다.
+#: **표시된** material의 item만 지운다. orphan도 표시를 먼저 받으므로 여기서 따로
+#: 보지 않는다 — `NOT EXISTS(receipt)`를 여기 두면 표시 없이 지우는 경로가 살아나고,
+#: 그것이 부분 배출된 material을 재사용 가능하게 만든 구멍이었다.
 _PRUNE_ORPHANED_MATERIAL_ITEMS_SQL = """
 WITH candidates AS (
   SELECT item.material_id, item.row_number
@@ -387,14 +407,7 @@ WITH candidates AS (
   JOIN ops.poi_cache_target_snapshot_materials AS material
     ON material.material_id = item.material_id
   WHERE material.external_system = :external_system
-    AND (
-      material.compacted_at IS NOT NULL
-      OR NOT EXISTS (
-        SELECT 1
-        FROM ops.poi_cache_target_snapshots AS receipt
-        WHERE receipt.material_id = material.material_id
-      )
-    )
+    AND material.compacted_at IS NOT NULL
   ORDER BY item.material_id, item.row_number
   LIMIT :limit
   FOR UPDATE OF material, item SKIP LOCKED
@@ -1631,12 +1644,13 @@ async def _prune_snapshot_generation(
     순서가 뜻을 갖는다.
 
     1. 만료·미참조 **receipt**를 지운다. 이래야 material이 orphan이 된다.
-    2. 보존 기간을 넘긴 terminal **material을 compaction으로 표시**한다. 표시가 곧
-       reader의 410 전환 시점이다.
-    3. orphan이거나 표시된 material의 **item**을 지운다. 둘을 한 bound 안에서 지워야
-       한쪽이 다른 쪽을 굶기지 않는다.
-    4. item이 빈 orphan **material**을 지운다. 표시된 material은 지우지 않는다 —
-       root/count가 감사 증거로 남아야 한다.
+    2. 되찾을 material을 **표시**한다(orphan, 그리고 보존 기간을 넘긴 terminal audit).
+       표시는 "item을 되찾기 시작했다"는 뜻이고, **재사용은 표시된 material을 잡지
+       않는다**. audit material에서는 이 순간이 reader의 410 전환 시점이기도 하다.
+    3. **표시된** material의 **item**을 지운다. 표시 없이 지우는 경로를 두면 부분
+       배출된 material이 재사용 가능해진다(적대 리뷰가 잡은 구멍).
+    4. item이 빈 orphan **material**을 지운다. audit material은 표시된 채로 남는다 —
+       root/count가 감사 증거다.
 
     반환은 ``(지운 item 수, 지운 receipt 수, 표시한 material 수)``다.
     """

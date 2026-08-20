@@ -2968,6 +2968,110 @@ async def test_background_snapshot_gc_round_robins_systems_and_observes_once(
 
 
 @pytest.mark.integration
+async def test_partially_drained_material_is_never_reused(
+    migrated_session: AsyncSession,
+) -> None:
+    """되찾기가 시작된 material은 재사용 후보가 아니다.
+
+    적대 리뷰가 잡은 구멍이다. 재사용이 `compacted_at IS NULL`만 보고 item 배출이
+    "표시됐거나 **orphan이거나**"를 보면 두 술어가 상보적이지 않다. GC가 orphan
+    material의 item을 bounded로 지우는 도중(commit된 상태)에 그 material이 그대로
+    재사용 가능해서, consumer가 실제보다 큰 count/root와 함께 모자란 page를 받는다.
+    receipt가 붙는 순간 orphan이 아니게 되어 배출도 멈추므로 손상이 영구가 된다.
+
+    `0230` 이전에는 재사용이 "만료까지 75분 이상"을, item 정리가 "만료됨"을 봐서 두
+    술어가 만료를 축으로 상보적이었다. 그 결합을 대신하는 것이 "배출 전 표시"다.
+
+    여기서는 그 상태를 직접 만든다 — orphan material의 item을 **일부만** 지운 뒤
+    재사용을 요청하고, 그것이 부분 material을 돌려주지 않는지 본다.
+    """
+
+    system = "snapshot-partial-drain-test"
+    await _apply_snapshot_source(
+        migrated_session,
+        external_system=system,
+        target_key="target-a",
+        event_id="9c100000-0000-4000-8000-000000000001",
+        idempotency_key="9d100000-0000-4000-8000-000000000001",
+    )
+    first = await get_cache_target_snapshot(
+        migrated_session,
+        external_system=system,
+        limit=10,
+    )
+    assert first.count == 1
+
+    material_id = str(
+        await migrated_session.scalar(
+            text(
+                "SELECT material_id FROM ops.poi_cache_target_snapshots "
+                "WHERE snapshot_id = CAST(:snapshot_id AS uuid)"
+            ),
+            {"snapshot_id": first.snapshot_id},
+        )
+    )
+
+    # receipt를 지워 orphan으로 만든 뒤, item을 **일부만** 지운 상태를 만든다.
+    # 이것이 bounded 배출 도중 commit된 상태다.
+    await migrated_session.execute(
+        text(
+            "DELETE FROM ops.poi_cache_target_snapshots "
+            "WHERE snapshot_id = CAST(:snapshot_id AS uuid)"
+        ),
+        {"snapshot_id": first.snapshot_id},
+    )
+    await migrated_session.execute(
+        text(
+            "DELETE FROM ops.poi_cache_target_snapshot_material_items "
+            "WHERE material_id = CAST(:material_id AS uuid) AND row_number = 1"
+        ),
+        {"material_id": material_id},
+    )
+    # material row는 남아 있고 identity도 그대로다 — 표시가 없으면 재사용에 걸린다.
+    assert (
+        await migrated_session.scalar(
+            text(
+                "SELECT count(*) FROM ops.poi_cache_target_snapshot_materials "
+                "WHERE material_id = CAST(:material_id AS uuid) "
+                "AND compacted_at IS NULL"
+            ),
+            {"material_id": material_id},
+        )
+        == 1
+    )
+
+    # GC batch가 표시를 붙인다(phase 2). 배출의 전제이자 재사용 차단의 근거다.
+    batch = await prune_expired_cache_target_snapshots_batch(
+        migrated_session,
+        item_limit=1_000,
+        header_limit=100,
+    )
+    assert batch.compacted_materials >= 1
+
+    rebuilt = await get_cache_target_snapshot(
+        migrated_session,
+        external_system=system,
+        limit=10,
+    )
+
+    # 부분 material을 돌려주지 않았다 — 새 material을 만들었고 count가 실제와 맞는다.
+    assert rebuilt.count == 1
+    rebuilt_material = str(
+        await migrated_session.scalar(
+            text(
+                "SELECT material_id FROM ops.poi_cache_target_snapshots "
+                "WHERE snapshot_id = CAST(:snapshot_id AS uuid)"
+            ),
+            {"snapshot_id": rebuilt.snapshot_id},
+        )
+    )
+    assert rebuilt_material != material_id, (
+        "되찾기가 시작된 material을 재사용했다 — consumer가 모자란 page를 받는다"
+    )
+    assert len(rebuilt.items) == rebuilt.count
+
+
+@pytest.mark.integration
 async def test_terminal_material_compaction_drains_items_and_serves_typed_410(
     migrated_session: AsyncSession,
 ) -> None:
@@ -3113,8 +3217,9 @@ async def test_terminal_material_compaction_drains_items_and_serves_typed_410(
     )
 
     assert batch.external_system == system
-    # 후보는 하나뿐이다. `fresh`는 보존 기간 안이고 `live`는 미만료 receipt를 갖는다.
-    assert batch.compacted_materials == 1
+    # 표시 대상은 둘이다 — `old`(terminal audit, 보존 기간 초과)와 phase 1이 orphan으로
+    # 만든 `generic`. `fresh`는 보존 기간 안이고 `live`는 미만료 receipt를 갖는다.
+    assert batch.compacted_materials == 2
     # 표시된 material 2행 + orphan이 된 generic material 2행.
     assert batch.deleted_items == 4
     # reconciliation이 참조하는 receipt는 만료돼도 지우지 않는다 — 감사 증거다.
@@ -3144,9 +3249,10 @@ async def test_terminal_material_compaction_drains_items_and_serves_typed_410(
             {"system": system},
         )
     ).all()
-    # generic 전용 material은 phase 1이 그 receipt를 지워 orphan이 됐고, 같은 batch의
-    # phase 3이 item을 비웠으며 phase 4가 material까지 지웠다 — compaction으로 표시되는
-    # 길이 아니라 통째로 사라지는 길이다.
+    # generic 전용 material은 phase 1이 그 receipt를 지워 orphan이 됐고, phase 2가
+    # **되찾기 시작** 표시를 붙였으며(표시가 배출의 전제다), phase 3이 item을 비우고
+    # phase 4가 행째 지웠다. audit material과 갈리는 지점은 "표시되느냐"가 아니라
+    # "표시된 뒤에도 남느냐"다.
     #
     # "표시되지 않았다"로 단언하면 안 된다. 그 행은 이미 **삭제**됐으므로 `compacted_at
     # IS NOT NULL` 개수는 어느 쪽이든 0이고, 그 단언은 아무 것도 보지 못한다.

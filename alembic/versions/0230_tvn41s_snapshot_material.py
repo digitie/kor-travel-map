@@ -92,6 +92,11 @@ _RECEIPTS: Final[str] = "ops.poi_cache_target_snapshots"
 _LEGACY_ITEMS: Final[str] = "ops.poi_cache_target_snapshot_items"
 
 #: material은 `compacted_at`을 NULL에서 한 번 채우는 것 외에는 다시 쓰지 않는다.
+#:
+#: 그 표시의 뜻은 "이 material의 item을 되찾기 **시작**했다"이다. item은 표시된 뒤에만
+#: 지우고, 재사용은 표시된 material을 잡지 않는다 — 그래서 "표시되지 않았다"가 곧
+#: "item이 온전하다"가 된다. 그 결합이 없으면 부분 배출된 material이 재사용돼 consumer가
+#: 실제보다 큰 count/root와 함께 모자란 page를 받는다.
 _RECEIPT_FENCE_TRIGGER: Final[str] = "trg_poi_cache_target_snapshots_append_only"
 
 _MATERIAL_FENCE_SQL: Final[str] = """

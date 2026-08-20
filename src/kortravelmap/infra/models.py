@@ -6327,6 +6327,10 @@ class PoiCacheTargetSnapshotMaterialRow(Base):
         nullable=False,
         server_default=text("now()"),
     )
+    #: "item을 되찾기 **시작**했다"는 표시. item은 표시된 뒤에만 지우고 재사용은 표시된
+    #: material을 잡지 않으므로, 표시되지 않았다는 것이 곧 item이 온전하다는 뜻이다.
+    #: audit receipt가 붙은 material은 이 표시가 영구히 남아 page가 410이 되고, orphan은
+    #: 표를 비운 뒤 행째 사라진다.
     compacted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
