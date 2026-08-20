@@ -574,6 +574,13 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   vendor sha/verification)는 gate가 `pending`에서 금지하므로 함께 떼어냈다. 40C 머지 뒤
   두 번째 paired cycle이 필요하며, gate는 이미 fail-closed다(`state == complete`이면
   `map_user_openapi_sha256 == pinvi_user_vendor_sha256` 요구).
+- [ ] **T-FE-MOCK-MANIFEST** — mocked e2e checkpoint manifest
+  (`packages/kor-travel-map-admin/frontend/e2e/mocked-failure-manifest.json`)의
+  `discoveredTests: 284`·`testInventorySha256`가 실제 suite와 어긋나 있다. 실측은
+  `origin/main`(`82b4d1da`)과 T-VN-40C branch 양쪽 모두 **276**이라 40C가 만든 drift가
+  아니다. suite 자체는 276/276 green(7.2분, flake 0)인데 checkpoint gate만 red다.
+  baseline을 언제·왜 재고정할지는 expected-failure 인벤토리 의미와 함께 별도로 정한다 —
+  숫자만 맞추면 그 gate가 지키던 것을 잃는다.
 - [ ] **T-C7-SCOPE-REGISTRY** — `external_system:*` exact-target scope의 선언 주체·근거·
   운영 조회 표면을 `docs/integration-map.md` 또는 ADR-088 consequences에 정본화한다.
 - [ ] **T-C7-LIVE-SERIAL** — 고정 `external_system:c7-e2e`를 쓰는 KMA live 3종이 서로의

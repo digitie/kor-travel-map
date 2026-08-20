@@ -69,7 +69,17 @@ frontend는 legacy 라우트 2개와 read hook 2개, 상태 어휘 모듈을 지
 green. pytest unit+lint+api **3,436 passed**, integration **999 passed**. 남은 실패
 6건은 전부 n150 환경(`KOR_TRAVEL_MAP_PG_DSN` 설정, geo API 키 미설정)이고 `main`에서도
 같다. frontend CI-parity 게이트 13단계(npm-tree · eslint 0 warnings · React Doctor ·
-vitest · gen:types:check ×2 · type-check ×2 · next build 등) 전부 green.
+vitest · gen:types:check ×2 · type-check ×2 · next build 등) 전부 green. mocked e2e는
+자기 소유 컨테이너를 exact HEAD에서 빌드해 돌리는 checkpoint runner로 **276/276
+passed**(7.2분, flake 0)다.
+
+mocked checkpoint를 처음 돌렸을 때는 baseURL 기본값이 `127.0.0.1:12705`, 즉 n150에서
+**실제로 LISTEN 중인 prod admin UI**를 가리켜 프로덕션 화면을 테스트하고 있었다.
+`E2E_BASE_URL`을 빈 포트로 옮겨 self-owned 빌드를 보게 고쳤다. 그 상태의 gate는 여전히
+red인데, manifest가 고정한 `discoveredTests: 284`가 실측 276과 다르기 때문이다.
+`origin/main`(`82b4d1da`)에서도 276이 나오므로 40C가 만든 drift가 아니다 — 백로그
+`T-FE-MOCK-MANIFEST`로 분리했다. 숫자만 맞추면 그 gate가 지키던 expected-failure
+인벤토리의 의미를 잃으므로 여기서 손대지 않는다.
 
 **남은 것**: `contracts/vnext/consumer-rollout-v1.json`의 T-VN-40
 `pinvi_snapshot_receipt.state`는 `pending`이다. PinVi 재-vendor는 Map pin이 **머지된

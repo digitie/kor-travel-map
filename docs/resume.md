@@ -9,8 +9,10 @@ dead symbol 20개를 함께 제거했고, 삭제한 테스트에 섞여 있던 l
 고정하고 변이 6종으로 red를 확인했다.
 
 게이트: ruff / mypy ×3 / import-linter green, pytest **4,435 passed**(unit+lint+api
-3,436 · integration 999), frontend CI-parity 13단계 green. 남은 실패 6건은 n150
-환경(PG_DSN·geo 키)이고 main에서도 같다.
+3,436 · integration 999), frontend CI-parity 13단계 green, mocked e2e **276/276
+passed**(7.2분, flake 0). 남은 실패 6건은 n150 환경(PG_DSN·geo 키)이고 main에서도 같다.
+mocked checkpoint gate는 manifest의 `discoveredTests: 284`가 실측 276과 어긋나 red인데,
+`origin/main`에서도 276이라 40C가 만든 drift가 아니다(백로그 `T-FE-MOCK-MANIFEST`).
 
 ### 다음 한 작업
 
