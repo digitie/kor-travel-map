@@ -20,7 +20,7 @@ C05D 산사태 예보발령 typed 모델을 구현하고, `kor-travel-map`에 �
 각 데이터셋은 Dagster resource/fetcher/asset, operation registry, fixture preview, baseline
 provider dataset·scope까지 등록했다. 두 전문 리뷰어의 P1 지적을 반영해 typed API strict
 mypy, 시군구 코드, source identity 충돌, body-level API key redaction을 보강했다.
-최신 main과의 migration graph drift도 `0225 → 0226 → 0229` 단일 체인으로 정리했고,
+최신 main의 기존 `0229`를 보존하면서 C05 catalog를 `0230`으로 `0229` 뒤에 연결했고,
 asyncpg/identity 호환을 포함한 Alembic metadata integration 7건을 통과시켰다.
 
 ### 다음 한 작업

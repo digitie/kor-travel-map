@@ -18,10 +18,11 @@ trigger. `feature.curated_source_rules`에는 BEFORE UPDATE trigger
 write를 막는다. 이 migration은 그 fence를 **끄지 않는다**. 막히면 실패하고 어느 rule인지
 말한다 — 조용히 건너뛰면 남은 `curated` 행이 아래 CHECK에서 다시 막히고 원인이 감춰진다.
 
-번호. `0226`은 산림청 C05 catalog를 기존 DB에 보충하는 이 PR의 선행 migration이다.
-따라서 이 migration은 `0226` 뒤에 연결해, C05 catalog와 source-rule 정규화가 하나의
-application graph를 이루도록 한다. revision id의 숫자 순서와 실제 체인 순서는 다를 수
-있으며, 이 경우에도 `down_revision`이 실행 순서를 정한다.
+번호. #1029가 `0226`(M01)·`0227`(M02)·`0228`(M03)을 한 PR에 쥐고 있어 그 셋을 피해 `0229`를
+잡는다. 그 revision들은 아직 main에 없고(2026-08-20 기준 #1029는 OPEN draft) 이 변경은 그
+내용과 독립이므로, 체인은 현재 head인 `0225`에 직접 건다 — 머지 시점에 단일 head가 되고
+번호에만 공백이 남는다. #1029가 나중에 착지할 때 자기 chain의 `down_revision`을 `0229`로
+다시 잡으면 된다(revision id는 문자열이고 순서는 체인이 정한다).
 
 forward-only. downgrade는 두지 않는다(ADR-021). 되돌리려면 `curated`가 무엇을 뜻했는지
 행마다 알아야 하는데 그 구분은 이 migration 뒤에 존재하지 않는다.
@@ -37,7 +38,7 @@ from sqlalchemy import text
 from alembic import op
 
 revision: str = "0229_tvn40b_source_rule_action"
-down_revision: str | Sequence[str] | None = "0226_tvn_c05_krforest_datasets"
+down_revision: str | Sequence[str] | None = "0225_tvn40c_physical_removal"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

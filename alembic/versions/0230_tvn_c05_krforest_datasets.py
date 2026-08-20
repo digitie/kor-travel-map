@@ -1,7 +1,7 @@
 """TVN-C05 — 산림청 C05A~D provider catalog를 기존 DB에도 선언한다.
 
-Revision ID: 0226_tvn_c05_krforest_datasets
-Revises: 0225_tvn40c_physical_removal
+Revision ID: 0230_tvn_c05_krforest_datasets
+Revises: 0229_tvn40b_source_rule_action
 
 baseline seed에는 이미 같은 catalog가 포함되지만, 0225 이후 기존 DB는 seed.sql을
 재실행하지 않는다. 따라서 C05A~D의 provider dataset·operation·dataset_wide scope를
@@ -15,8 +15,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0226_tvn_c05_krforest_datasets"
-down_revision: str | Sequence[str] | None = "0225_tvn40c_physical_removal"
+revision: str = "0230_tvn_c05_krforest_datasets"
+down_revision: str | Sequence[str] | None = "0229_tvn40b_source_rule_action"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -151,6 +151,6 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     raise RuntimeError(
-        "0226_tvn_c05_krforest_datasets is forward-only; "
+        "0230_tvn_c05_krforest_datasets is forward-only; "
         "이미 기록된 C05A~D source/operation state를 안전하게 되돌릴 수 없음"
     )

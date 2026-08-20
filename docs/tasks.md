@@ -82,11 +82,10 @@ barrier로 직렬화한다.
   **prod 환경 보전·호환성·기존 문서 계약·최소 수정은 비제약** — 필요 시 DB 스키마·문서
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
 - migration 정본: 단일 head 유지(2026-08-20 `origin/main` 기준
-  `0225_tvn40c_physical_removal`; T-VN-40C는 **착지·prod 적용 완료**,
-  #1029가 `0226`(M01)·`0227`(M02)·`0228`(M03)을 한 PR에 쥐고 있고,
-  **T-VN-40B 잔여가 `0229`**(PR #1035), 41S 후속은 `0230+`).
-  ⚠️ #1029의 `0226`과 PR #1035의 `0229`는 **둘 다 `down_revision`이 `0225`**다 —
-  나중에 머지하는 쪽이 자기 chain을 앞선 head 뒤로 다시 잡아야 head가 갈라지지 않는다.
+  `0229_tvn40b_source_rule_action`; T-VN-40C와 T-VN-40B는 **착지·prod 적용 완료**,
+  #1029가 `0226`(M01)·`0227`(M02)·`0228`(M03)을 한 PR에 쥐고 있으며,
+  C05 catalog는 이 PR의 `0230_tvn_c05_krforest_datasets`로 `0229` 뒤에 연결한다.
+  41S 후속은 그 다음 revision을 예약한다.
   prod 적용 head는 배포 직전 live DB에서 다시 확인한다. 후속 migration 소유자는
   PR 직전 단일 head를 재확인한 뒤 번호를 배정한다. 두 lane의 migration-bearing PR은 번호 예약부터
   머지까지 직렬화한다. forward migration 뒤에는 수용 조건이나 실패 복구가 명시적으로 요구하지 않는
@@ -582,9 +581,8 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
     대상 표의 BEFORE trigger(`inactive provider dataset` write 차단)를 **끄지 않는다** —
     막히면 어느 rule인지 말하고 멈춘다. 모델 CHECK와 write 허용값이 어긋나면 red가 되는
     drift 게이트를 함께 둔다. 브랜치 `feat/tvn40b-source-rule-action`.
-  - **번호 제약**: #1029가 `0226`~`0228`을 쥐고 있어 그 셋을 피해 `0229`를 잡고 현재 head
-    `0225`에 직접 체인한다. 머지 시점에 단일 head가 되며, #1029는 착지할 때 자기 chain을
-    `0229` 뒤로 다시 잡는다.
+  - **번호 제약**: `0229`는 이미 main에 적용된 T-VN-40B head이므로, C05 catalog는 기존
+    `0229` migration을 다시 쓰지 않고 `0230`으로 `0229` 뒤에 연결한다.
 
   **이 항목이 아닌 것**: "legacy candidate rows backfill"은 대상이 없다 — 그 legacy 행은
   `0225`가 canonical collection/item으로 옮긴 뒤 물리 삭제했고 `theme_feature_candidates`는
@@ -734,7 +732,7 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   잔여 없음으로 GO했고, 단위/API/Dagster 집중 231개와 PostGIS stream repository 37개를 통과했다.
 
   **후속 종료선(미완료, #922 유지)** — `0225`는 2026-08-20 착지·prod 적용으로 barrier가
-  풀렸다. 남은 것은 `0230+`(`0226`~`0228`은 #1029 · `0229`는 T-VN-40B 잔여가 선점) 물리 모델, 양방향 공유, 실제 compactor와
+  풀렸다. 남은 것은 `0231+`(`0226`~`0228`은 #1029 · `0229`는 T-VN-40B 잔여 · `0230`은 C05 catalog가 선점) 물리 모델, 양방향 공유, 실제 compactor와
   repository 410, migration/ACL/EXPLAIN 및 n150 1M+ 증거까지다. 이 항목들이 끝나기 전에는 #922 또는
   T-VN-41S 전체 완료로 표시하지 않는다.
 

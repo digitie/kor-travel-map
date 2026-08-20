@@ -47,9 +47,8 @@ _EXPECTED_REVISIONS = (
     "0223_tvn40_identity_mappings",
     "0224_c7_external_system_scope",
     "0225_tvn40c_physical_removal",
-    "0226_tvn_c05_krforest_datasets",
-    # revision id 숫자와 무관하게 down_revision이 C05 catalog 뒤의 실행 순서를 고정한다.
     "0229_tvn40b_source_rule_action",
+    "0230_tvn_c05_krforest_datasets",
 )
 #: `alembic_version.version_num`의 컬럼 폭(alembic 기본값).
 _ALEMBIC_VERSION_NUM_LENGTH = 32
