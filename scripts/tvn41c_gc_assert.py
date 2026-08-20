@@ -54,7 +54,20 @@ _COUNTS_SQL: Final = text(
          JOIN ops.poi_cache_target_reconciliation_requests r
            ON r.snapshot_id = s.snapshot_id) AS referenced_headers,
       (SELECT count(*) FROM ops.poi_cache_target_snapshots
-         WHERE expires_at > now()) AS live_headers
+         WHERE expires_at > now()) AS live_headers,
+      -- **보호돼야 하는 item**: 붙잡은 receipt 중 하나라도 미만료거나 reconciliation이
+      -- 참조하면 그 material의 item은 GC가 건드리면 안 된다. item 삭제 수를 정확
+      -- 일치로 보던 검사를 하한으로 바꾸면서 과다 삭제를 볼 눈이 사라졌다(적대 리뷰
+      -- 지적) — 그 눈을 여기로 옮긴다.
+      (SELECT count(*) FROM ops.poi_cache_target_snapshot_material_items AS i
+         WHERE EXISTS (
+           SELECT 1 FROM ops.poi_cache_target_snapshots AS s
+           WHERE s.material_id = i.material_id
+             AND (s.expires_at > now()
+                  OR EXISTS (SELECT 1
+                             FROM ops.poi_cache_target_reconciliation_requests AS r
+                             WHERE r.snapshot_id = s.snapshot_id))
+         )) AS protected_items
     """
 )
 
@@ -131,9 +144,13 @@ async def _drain(dsn: str) -> list[str]:
             f"remaining backlog가 0이 아니다: headers={result.remaining_headers} "
             f"items={result.remaining_items}"
         )
-    for key, label in (("referenced_headers", "참조된"), ("live_headers", "미만료")):
+    for key, label in (
+        ("referenced_headers", "참조된"),
+        ("live_headers", "미만료"),
+        ("protected_items", "보호 대상 item"),
+    ):
         if after[key] != before[key]:
-            problems.append(f"{label} snapshot이 지워졌다: {before[key]} -> {after[key]}")
+            problems.append(f"{label}이 지워졌다: {before[key]} -> {after[key]}")
     if result.deleted_headers != before["eligible_headers"]:
         problems.append(
             "삭제 수 불일치 eligible_headers: "

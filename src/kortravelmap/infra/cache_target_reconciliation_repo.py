@@ -208,6 +208,16 @@ FOR SHARE OF snapshot, material
 #:
 #: partial unique(`compacted_at IS NULL`)가 identity마다 살아 있는 material을 하나로
 #: 강제하므로 정렬·LIMIT이 필요 없다. 둘 이상 나오면 그것이 사고이므로 그대로 터진다.
+#:
+#: **receipt 존재를 보지 않는 이유.** "item이 온전한가"의 권한은 `compacted_at` 하나다 —
+#: 배출은 표시된 material만 건드리므로(`_PRUNE_ORPHANED_MATERIAL_ITEMS_SQL`) 표시가 없다는
+#: 것이 곧 온전하다는 뜻이다. receipt가 없는 orphan이어도 아직 표시되지 않았다면 item은
+#: 그대로이고 재사용해도 된다.
+#:
+#: 그런 상태는 실제로 존재한다 — 표시는 batch당 `header_limit`(기본 100)로 bounded라
+#: 후보가 더 많으면 남는다. 그러니 "표시 뒤에는 orphan이 없다"는 식으로 읽고
+#: `_PRUNE_ORPHANED_MATERIAL_ITEMS_SQL`에 `OR NOT EXISTS(receipt)`를 되돌리면 안 된다.
+#: 그것이 부분 배출된 material을 재사용 가능하게 만든 구멍이었다.
 _GET_REUSABLE_MATERIAL_SQL = """
 SELECT material.material_id, material.external_system, material.restore_epoch,
        material.material_high_watermark_relay_order,

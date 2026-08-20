@@ -780,13 +780,19 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   - [x] EXPLAIN과 n150 PostGIS 1M admitted/1M+ rejection, concurrent mutation safe lower cursor,
     compaction/vacuum soak evidence를 통과한다.
     → EXPLAIN은 `tests/integration/test_tvn41s_snapshot_material_explain.py`. fixture 모양이
-    곧 게이트의 유효성이라 세 번 고쳐 썼고(material 1개면 partial index 둘의 비용이 같고,
-    compaction 후보가 0개면 planner 선택이 무의미하고, material당 item 1행이면 정렬이
-    공짜다), 그 과정에서 **근거를 못 만든 인덱스 하나를 지웠다**.
+    곧 게이트의 유효성이라 **다섯 번** 고쳐 썼다 — material 1개면 partial index 둘의 비용이
+    같고, material당 item 1행이면 정렬이 공짜고, compaction 후보가 0개면 planner 선택이
+    무의미하고, stream이 하나면 `external_system` 제한이 공짜다. 그리고 `enable_seqscan =
+    off` 아래의 "Seq Scan 노드가 없다"는 **반증 불가능**했다(적대 리뷰 지적).
+    → 그 반증 불가능한 단언을 근거로 `idx_cache_target_snapshot_materials_sweep`를 한 번
+    지웠다가 **되살렸다**. 근거가 없어진 것이지 인덱스가 불필요하다고 밝혀진 것이 아니었다.
+    지금 근거는 planner 선택이 아니라 술어 구조다 — orphan 정리는 `compacted_at`을 보지
+    않아 partial index에 걸리지 못하고, `external_system` equality를 좁히지 못하면 다른
+    stream의 material까지 훑는다.
     → soak 실측 `docs/reports/t-vn-41s-1m-soak-2026-08-21.md`(2회): 1,000,000 admitted
     **368.4초**(2,714 item/s, 조용한 호스트 / 동시 부하에서는 547.9초) ·
     **Python peak 2.02 MiB** · item 표 157.6 MB(157.6 B/item) ·
-    상한+1은 typed `413`에 partial row 0 · compaction 1,000,000행 32.6초 · VACUUM 157.6 MB
+    상한+1은 typed `413`에 partial row 0 · compaction 1,000,000행 39.5초 · VACUUM 157.6 MB
     회수(증거 material/receipt는 보존).
     → concurrent mutation의 fixed membership·safe lower cursor는 soak이 아니라 통합 테스트
     셋이 본다(`test_fixed_snapshot_pages_ignore_concurrent_committed_write`,
@@ -812,7 +818,8 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   - [ ] **compacted material이 영구 누적되며 GC batch마다 훑인다(적대 리뷰 지적).**
     `_HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL`의 "표시됐고 item이 남은 material" 분기는
     compacted material마다 item 인덱스 probe 한 번이다. audit material은 증거로 영구
-    보존되므로 그 수가 단조 증가한다. reconciliation은 운영자 시작이라 증가 속도가 느리고
+    보존되므로 그 수가 단조 증가한다. **비용이 가장 큰 때가 한가할 때다** — backlog가
+    있으면 첫 hit에서 멈추지만, 없으면 전부 훑고 나서 false를 낸다. reconciliation은 운영자 시작이라 증가 속도가 느리고
     probe는 index-only라 지금 규모에서 문제가 아니지만, 상한이 없다. `compaction_drained_at`
     같은 상태 열 + partial index로 "아직 배출 중"만 색인하면 상수로 떨어진다.
   - [ ] **열린 결정 — build 예산 300초 vs item 상한 1,000,000.** 상한과 같은 크기의

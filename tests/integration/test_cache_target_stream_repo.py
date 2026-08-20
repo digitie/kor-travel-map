@@ -3051,6 +3051,7 @@ async def test_partially_drained_material_is_never_reused(
         item_limit=1_000,
         header_limit=100,
     )
+    assert batch.external_system == system
     assert batch.compacted_materials >= 1
 
     rebuilt = await get_cache_target_snapshot(

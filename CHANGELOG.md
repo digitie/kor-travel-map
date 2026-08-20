@@ -26,8 +26,11 @@
   물려받지 않고 매번 full TTL로 시작하며, 그래서 "잔여 TTL이 75분 넘는 material만
   재사용한다"는 문턱이 사라졌다. `high_watermark_cursor`는 같은 material을 쓰는 동안 같지만
   material이 거둬진 뒤 재생성되면 더 높아진다 — 여전히 안전한 lower-bound다.
-- **CHANGED (service API)**: `410 SNAPSHOT_MATERIAL_COMPACTED`를 generic snapshot cursor
-  경로에도 선언했다. 두 receipt가 material을 공유하므로 그 경로에서도 발생한다.
+- **NOTE (service API, 미선언)**: `410 SNAPSHOT_MATERIAL_COMPACTED`는 generic snapshot
+  cursor 경로에서도 **발생한다**(두 receipt가 material을 공유하므로). 다만 이 release는
+  그 status를 service spec에 **선언하지 않는다** — 선언하면 `openapi.service.json` bytes가
+  바뀌어 PinVi vendor 재고정이 같은 호흡으로 필요해진다. 선언은 다음 PinVi re-vendor와
+  함께 묶는다(`docs/tasks.md` T-VN-41S 잔여 항목). 이 release의 spec bytes는 무변경이다.
 - **FIXED**: `410 SNAPSHOT_MATERIAL_COMPACTED`가 도달 불가능했다. compaction 후보는 정의상
   미만료 receipt가 없어 만료 판정이 항상 먼저 이겼다. compaction 판정을 앞으로 옮겼다.
 - **ADDED (maintenance)**: hourly GC batch가 네 단계가 됐다 — 만료·미참조 receipt 삭제 →
