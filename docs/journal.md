@@ -1,5 +1,13 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-21 — T-VN-37D 두 번째 리뷰 P2 반영
+
+두 번째 독립 reviewer가 curation candidate의 `to_jsonb(notice)` timestamp가 DB 세션
+timezone에 따라 달라져 representation ETag가 흔들릴 수 있음을 P2로 지적했다. notice
+candidate SQL은 `valid_start_time`/`valid_end_time`을 KST 고정 문자열로 다시 써서
+`feature_projection.py`와 같은 표현을 사용하게 했고, UTC·Asia/Seoul 세션 결과가 같은지
+integration 회귀를 추가했다. 두 reviewer의 최종 판정은 P0/P1 없음, GO였다.
+
 ## 2026-08-21 — T-VN-37D 전문 리뷰 findings 반영
 
 두 독립 reviewer는 P0 없이 range 표현의 운영 잠금과 경계 회귀 공백, admin curation

@@ -912,14 +912,26 @@ async def test_notice_candidate_detail_excludes_internal_validity_range(
         )
 
     async with async_sessionmaker(migrated_engine, expire_on_commit=False)() as session:
+        await session.execute(text("SET LOCAL TIME ZONE 'UTC'"))
+        candidate_utc = await curation_candidate_repo.get_theme_candidate(
+            session,
+            candidate_id=str(seeded["candidate_id"]),
+        )
+
+    async with async_sessionmaker(migrated_engine, expire_on_commit=False)() as session:
+        await session.execute(text("SET LOCAL TIME ZONE 'Asia/Seoul'"))
         candidate = await curation_candidate_repo.get_theme_candidate(
             session,
             candidate_id=str(seeded["candidate_id"]),
         )
 
+    assert candidate_utc is not None
     assert candidate is not None
+    assert candidate_utc.feature_detail == candidate.feature_detail
     assert candidate.feature_kind == "notice"
     assert candidate.feature_detail["notice_type"] == "traffic"
+    assert candidate.feature_detail["valid_start_time"] == "2026-08-01T09:00:00+09:00"
+    assert candidate.feature_detail["valid_end_time"] == "2026-08-02T09:00:00+09:00"
     assert "valid_during" not in candidate.feature_detail
 
 

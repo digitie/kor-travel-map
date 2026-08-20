@@ -43,6 +43,18 @@ barrier가 유지되고 그 값은 hung writer 최대 정지 시간이기도 하
 결정이다. 선택지 셋과 비용은 soak 보고서 §"열린 결정"과 `docs/tasks.md`에 있다.
 
 그 결정 뒤에 #922와 T-VN-41S를 완료로 표시한다.
+## 2026-08-21 — T-VN-37D 두 번째 리뷰 P2 반영
+
+두 번째 전문 reviewer가 발견한 curation candidate timestamp의 세션 timezone 의존성을
+해소했다. notice detail의 `valid_start_time`/`valid_end_time`을 KST 고정 JSON으로
+직렬화하고 UTC·Asia/Seoul 세션 동일성 회귀를 추가했으며, targeted integration 2건이
+통과했다. 두 reviewer 모두 P0/P1 없음, GO로 최종 재검토를 완료했다.
+
+### 다음 한 작업
+
+최신 수정본을 리베이스·보안 감사 후 push하고 PR #1041의 Python matrix와 필요한 live UI
+인수 증거를 확인한다. 모든 required check와 review가 green일 때만 merge한다.
+
 ## 2026-08-21 — T-VN-37D 적대 리뷰 findings 반영
 
 전문 reviewer 2명 모두 P0 없이 검토를 완료했다. `valid_during`의 stored-column 잠금
@@ -50,11 +62,6 @@ barrier가 유지되고 그 값은 hung writer 최대 정지 시간이기도 하
 admin curation candidate의 `to_jsonb(notice)` 내부 필드 누출 P1은 SQL에서 `valid_during`을
 제외하도록 수정했다. NULL·one-sided·equal range, public/admin active read, candidate
 detail shape 회귀를 추가했으며 수정 후 targeted integration 2건이 통과했다.
-
-### 다음 한 작업
-
-수정본을 두 reviewer에게 재확인시키고, 새 체크포인트를 push한 뒤 PR #1041의 Python matrix와
-필요한 live UI 인수 증거를 확인한다. 모든 required check와 review가 green일 때만 merge한다.
 
 ## 2026-08-21 — T-VN-37D notice empty range 구현
 
