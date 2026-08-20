@@ -402,6 +402,60 @@ _FEATURE_REQUEST_STATE_OWNER_DEPENDENCY_ACL = (
     "jsonb, text, text, text, jsonb) TO ktm_feature_request_procedure_owner",
 )
 
+# M05 owner is a SECURITY DEFINER principal, not a relation owner.  These
+# grants are intentionally reconstructed by the schema owner after every
+# migration so a ``pg_restore --no-owner --no-privileges`` cannot leave the
+# candidate/decision writers callable but unable to revalidate their proof.
+_M05_SCHEMA_OWNER_DEPENDENCY_ACL = (
+    "GRANT USAGE ON SCHEMA feature, provider_sync, ops, x_extension "
+    "TO ktm_manual_provider_dedup_procedure_owner",
+    "GRANT SELECT, UPDATE ON TABLE feature.features "
+    "TO ktm_manual_provider_dedup_procedure_owner",
+    "GRANT SELECT ON TABLE feature.manual_feature_identity_claims, "
+    "feature.feature_creation_origins "
+    "TO ktm_manual_provider_dedup_procedure_owner",
+    "GRANT SELECT, UPDATE ON TABLE provider_sync.source_links, "
+    "provider_sync.source_entities, provider_sync.source_entity_heads, "
+    "provider_sync.source_records "
+    "TO ktm_manual_provider_dedup_procedure_owner",
+    "GRANT SELECT, UPDATE ON TABLE ops.domain_commands "
+    "TO ktm_manual_provider_dedup_procedure_owner",
+    "GRANT SELECT ON TABLE ops.domain_command_results "
+    "TO ktm_manual_provider_dedup_procedure_owner",
+    "GRANT SELECT, INSERT, UPDATE ON TABLE ops.manual_provider_dedup_cases, "
+    "ops.manual_provider_dedup_resolutions, "
+    "ops.feature_reference_reconciliation_events, "
+    "ops.feature_reference_reconciliation_subscriptions, "
+    "ops.feature_reference_reconciliation_acks "
+    "TO ktm_manual_provider_dedup_procedure_owner",
+    "GRANT SELECT, INSERT, UPDATE ON TABLE ops.feature_reference_reconciliation_leases "
+    "TO ktm_manual_provider_dedup_procedure_owner",
+)
+
+_M05_STATE_OWNER_DEPENDENCY_ACL = (
+    "GRANT EXECUTE ON PROCEDURE feature.transition_admin_feature_state("
+    "text, text, text, text, bigint, text, text, text) "
+    "TO ktm_manual_provider_dedup_procedure_owner",
+)
+
+_M05_WRITER_ACL = (
+    "REVOKE ALL ON PROCEDURE feature.record_manual_provider_dedup_candidate("
+    "text, text, jsonb, jsonb) FROM PUBLIC, ktm_feature_runtime, "
+    "ktm_feature_api_runtime, ktm_feature_dagster_runtime, "
+    "ktm_manual_provider_dedup_admin_executor, "
+    "ktm_feature_reference_reconciliation_service_executor",
+    "GRANT EXECUTE ON PROCEDURE feature.record_manual_provider_dedup_candidate("
+    "text, text, jsonb, jsonb) TO ktm_manual_provider_dedup_detector_executor",
+    "REVOKE ALL ON PROCEDURE feature.resolve_manual_provider_dedup_case("
+    "uuid, text, text, bigint, bigint, text, text, text, bigint) FROM PUBLIC, "
+    "ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime, "
+    "ktm_manual_provider_dedup_detector_executor, "
+    "ktm_feature_reference_reconciliation_service_executor",
+    "GRANT EXECUTE ON PROCEDURE feature.resolve_manual_provider_dedup_case("
+    "uuid, text, text, bigint, bigint, text, text, text, bigint) "
+    "TO ktm_manual_provider_dedup_admin_executor",
+)
+
 _MANUAL_FEATURE_WRITER_ACL = (
     "REVOKE ALL ON PROCEDURE feature.create_admin_manual_feature_with_initial_state("
     "jsonb, bigint) FROM PUBLIC, ktm_feature_runtime, ktm_feature_dagster_runtime, "
@@ -609,6 +663,8 @@ async def reconcile_runtime_privileges() -> None:
                 await connection.execute(text(statement))
             for statement in _FEATURE_REQUEST_SCHEMA_OWNER_DEPENDENCY_ACL:
                 await connection.execute(text(statement))
+            for statement in _M05_SCHEMA_OWNER_DEPENDENCY_ACL:
+                await connection.execute(text(statement))
 
             # Routine ownership is deliberately split from table ownership.
             # The schema owner has SET-only membership in each NOLOGIN routine
@@ -619,6 +675,8 @@ async def reconcile_runtime_privileges() -> None:
             for statement in _SUBTYPE_READY_FUNCTION_ACL:
                 await connection.execute(text(statement))
             for statement in _FEATURE_REQUEST_STATE_OWNER_DEPENDENCY_ACL:
+                await connection.execute(text(statement))
+            for statement in _M05_STATE_OWNER_DEPENDENCY_ACL:
                 await connection.execute(text(statement))
             await connection.execute(text("SET ROLE ktm_feature_audit_writer"))
             for statement in _AUDIT_WRITER_FUNCTION_ACL:
@@ -635,6 +693,11 @@ async def reconcile_runtime_privileges() -> None:
                 text("SET ROLE ktm_feature_request_procedure_owner")
             )
             for statement in _FEATURE_REQUEST_WRITER_ACL:
+                await connection.execute(text(statement))
+            await connection.execute(
+                text("SET ROLE ktm_manual_provider_dedup_procedure_owner")
+            )
+            for statement in _M05_WRITER_ACL:
                 await connection.execute(text(statement))
     finally:
         await engine.dispose()

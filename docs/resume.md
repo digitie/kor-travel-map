@@ -83,11 +83,15 @@ ADR-097 및 [M05 설계](reports/t-vn-m05-manual-provider-dedup-design-2026-08-2
 증적·subscription·lease model/migration과 runtime raw-access deny inventory까지 구현했으며,
 fresh migration Alembic check 1건과 ruff/strict mypy가 green이다. `0230 → role 전용 → 0231 →
 사후 복구` compose/DB helper도 연결해 frozen baseline을 건드리지 않은 role choreography를
-고정했다.
+고정했다. Dagster-only candidate writer는 manual origin/claim과 정확히 하나인 provider
+primary source head를 freeze하고, admin-only writer는 `kept`/manual retire+`rebind`/manual
+retire+`detach`를 global fence 안에서 append-only resolution/event로 만든다. 실제 runtime
+login integration에서 executor 차단·candidate replay·merged lifecycle/event·source link 보존을
+검증했다.
 
 ### 다음 한 작업
 
-dedicated detector/admin/service writer와 backup v3 root를 구현한다.
+strict-prefix service lease/ack writer와 backup v3 root를 구현한다.
 이어 Map admin/service contract와 첫 consumer의 durable reference receipt/rebind, exact vendor를
 같은 paired release로 구현한다.
 

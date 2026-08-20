@@ -678,7 +678,9 @@ BEGIN
             coalesce(v_revision, '<none>'), v_relation_count, v_role_count
             USING ERRCODE = '55000';
     END IF;
-    IF to_regprocedure('feature.reject_manual_provider_dedup_evidence_mutation()') IS NULL THEN
+    IF to_regprocedure('feature.reject_manual_provider_dedup_evidence_mutation()') IS NULL
+       OR to_regprocedure('feature.record_manual_provider_dedup_candidate(text,text,jsonb,jsonb)') IS NULL
+       OR to_regprocedure('feature.resolve_manual_provider_dedup_case(uuid,text,text,bigint,bigint,text,text,text,bigint)') IS NULL THEN
         RAISE EXCEPTION 'M05 dedicated routine marker is incomplete'
             USING ERRCODE = '55000';
     END IF;
@@ -687,10 +689,65 @@ $m05_repair_precondition$;
 
 GRANT USAGE, CREATE ON SCHEMA feature
     TO ktm_manual_provider_dedup_procedure_owner;
-GRANT USAGE ON SCHEMA ops
+GRANT USAGE ON SCHEMA provider_sync, ops, x_extension
+    TO ktm_manual_provider_dedup_procedure_owner;
+GRANT SELECT, UPDATE ON TABLE feature.features
+    TO ktm_manual_provider_dedup_procedure_owner;
+GRANT SELECT ON TABLE feature.manual_feature_identity_claims,
+    feature.feature_creation_origins
+    TO ktm_manual_provider_dedup_procedure_owner;
+GRANT SELECT, UPDATE ON TABLE
+    provider_sync.source_links,
+    provider_sync.source_entities,
+    provider_sync.source_entity_heads,
+    provider_sync.source_records
+    TO ktm_manual_provider_dedup_procedure_owner;
+GRANT SELECT, UPDATE ON TABLE ops.domain_commands
+    TO ktm_manual_provider_dedup_procedure_owner;
+GRANT SELECT ON TABLE ops.domain_command_results
+    TO ktm_manual_provider_dedup_procedure_owner;
+GRANT EXECUTE ON PROCEDURE feature.transition_admin_feature_state(
+    text, text, text, text, bigint, text, text, text
+) TO ktm_manual_provider_dedup_procedure_owner;
+REVOKE ALL ON TABLE ops.manual_provider_dedup_cases,
+    ops.manual_provider_dedup_resolutions,
+    ops.feature_reference_reconciliation_events,
+    ops.feature_reference_reconciliation_subscriptions,
+    ops.feature_reference_reconciliation_acks,
+    ops.feature_reference_reconciliation_leases
+    FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime;
+GRANT SELECT, INSERT, UPDATE ON TABLE ops.manual_provider_dedup_cases,
+    ops.manual_provider_dedup_resolutions,
+    ops.feature_reference_reconciliation_events,
+    ops.feature_reference_reconciliation_subscriptions,
+    ops.feature_reference_reconciliation_acks
+    TO ktm_manual_provider_dedup_procedure_owner;
+GRANT SELECT, INSERT, UPDATE ON TABLE ops.feature_reference_reconciliation_leases
     TO ktm_manual_provider_dedup_procedure_owner;
 ALTER FUNCTION feature.reject_manual_provider_dedup_evidence_mutation()
     OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER PROCEDURE feature.record_manual_provider_dedup_candidate(text, text, jsonb, jsonb)
+    OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER PROCEDURE feature.resolve_manual_provider_dedup_case(
+    uuid, text, text, bigint, bigint, text, text, text, bigint
+) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+REVOKE ALL ON FUNCTION feature.reject_manual_provider_dedup_evidence_mutation()
+    FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime;
+REVOKE ALL ON PROCEDURE feature.record_manual_provider_dedup_candidate(text, text, jsonb, jsonb)
+    FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime,
+    ktm_manual_provider_dedup_admin_executor,
+    ktm_feature_reference_reconciliation_service_executor;
+REVOKE ALL ON PROCEDURE feature.resolve_manual_provider_dedup_case(
+    uuid, text, text, bigint, bigint, text, text, text, bigint
+) FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime,
+    ktm_manual_provider_dedup_detector_executor,
+    ktm_feature_reference_reconciliation_service_executor;
+GRANT EXECUTE ON PROCEDURE feature.record_manual_provider_dedup_candidate(
+    text, text, jsonb, jsonb
+) TO ktm_manual_provider_dedup_detector_executor;
+GRANT EXECUTE ON PROCEDURE feature.resolve_manual_provider_dedup_case(
+    uuid, text, text, bigint, bigint, text, text, text, bigint
+) TO ktm_manual_provider_dedup_admin_executor;
 SQL
 }
 

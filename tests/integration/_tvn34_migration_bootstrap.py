@@ -190,10 +190,10 @@ async def bootstrap_tvn34_migration_roles(engine: AsyncEngine) -> str:
         ):
             await connection.execute(text(statement))
         # PostgreSQL role은 cluster-wide지만 integration DB는 test마다 새로 만든다.
-        # 앞선 test가 M01 phase를 끝낸 뒤라면 0200/0202의 frozen membership oracle은
-        # 새 DB에도 그 global edge를 보게 된다. legacy bootstrap은 role 자체를 지우지
-        # 않고 M01 edge만 해제해 exact frozen graph를 다시 만든다. head path는 0225 뒤
-        # ``bootstrap_tvn_m01_role_phase``가 이 셋을 다시 정확히 부여한다.
+        # 앞선 test의 M01/M04/M05 phase가 남긴 membership은 새 DB의 frozen legacy
+        # membership oracle에도 보인다. role 자체를 지우지 않고 post-legacy edge만
+        # 해제해 exact frozen graph를 만든다. head path가 각 boundary 뒤 정확한 edge를
+        # 다시 부여한다.
         await connection.execute(
             text(
                 """
@@ -221,6 +221,22 @@ async def bootstrap_tvn34_migration_roles(engine: AsyncEngine) -> str:
                     END IF;
                     IF to_regrole('ktm_feature_request_admin_executor') IS NOT NULL THEN
                         REVOKE ktm_feature_request_admin_executor
+                            FROM ktm_feature_api_runtime, ktm_feature_dagster_runtime;
+                    END IF;
+                    IF to_regrole('ktm_manual_provider_dedup_procedure_owner') IS NOT NULL THEN
+                        REVOKE ktm_manual_provider_dedup_procedure_owner
+                            FROM ktm_feature_schema_owner;
+                    END IF;
+                    IF to_regrole('ktm_manual_provider_dedup_detector_executor') IS NOT NULL THEN
+                        REVOKE ktm_manual_provider_dedup_detector_executor
+                            FROM ktm_feature_api_runtime, ktm_feature_dagster_runtime;
+                    END IF;
+                    IF to_regrole('ktm_manual_provider_dedup_admin_executor') IS NOT NULL THEN
+                        REVOKE ktm_manual_provider_dedup_admin_executor
+                            FROM ktm_feature_api_runtime, ktm_feature_dagster_runtime;
+                    END IF;
+                    IF to_regrole('ktm_feature_reference_reconciliation_service_executor') IS NOT NULL THEN
+                        REVOKE ktm_feature_reference_reconciliation_service_executor
                             FROM ktm_feature_api_runtime, ktm_feature_dagster_runtime;
                     END IF;
                 END
@@ -466,7 +482,7 @@ async def bootstrap_tvn_m05_pre_role_phase(async_dsn: str) -> None:
             )
             if (
                 version != "0230_m04_feature_request_queue"
-                or role_count != 0
+                or role_count not in (0, 4)
                 or relation_count != 0
             ):
                 raise RuntimeError(
@@ -575,6 +591,62 @@ async def repair_tvn_m05_role_phase(async_dsn: str) -> None:
                 text(
                     "GRANT USAGE ON SCHEMA ops "
                     "TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "GRANT USAGE ON SCHEMA provider_sync, x_extension "
+                    "TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            for statement in (
+                "GRANT SELECT, UPDATE ON TABLE feature.features "
+                "TO ktm_manual_provider_dedup_procedure_owner",
+                "GRANT SELECT ON TABLE feature.manual_feature_identity_claims, "
+                "feature.feature_creation_origins "
+                "TO ktm_manual_provider_dedup_procedure_owner",
+                "GRANT SELECT, UPDATE ON TABLE provider_sync.source_links, "
+                "provider_sync.source_entities, provider_sync.source_entity_heads, "
+                "provider_sync.source_records "
+                "TO ktm_manual_provider_dedup_procedure_owner",
+                "GRANT SELECT, UPDATE ON TABLE ops.domain_commands "
+                "TO ktm_manual_provider_dedup_procedure_owner",
+                "GRANT SELECT ON TABLE ops.domain_command_results "
+                "TO ktm_manual_provider_dedup_procedure_owner",
+                "GRANT EXECUTE ON PROCEDURE feature.transition_admin_feature_state("
+                "text, text, text, text, bigint, text, text, text) "
+                "TO ktm_manual_provider_dedup_procedure_owner",
+                "REVOKE ALL ON TABLE ops.manual_provider_dedup_cases, "
+                "ops.manual_provider_dedup_resolutions, "
+                "ops.feature_reference_reconciliation_events, "
+                "ops.feature_reference_reconciliation_subscriptions, "
+                "ops.feature_reference_reconciliation_acks, "
+                "ops.feature_reference_reconciliation_leases "
+                "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, "
+                "ktm_feature_dagster_runtime",
+                "GRANT SELECT, INSERT, UPDATE ON TABLE ops.manual_provider_dedup_cases, "
+                "ops.manual_provider_dedup_resolutions, "
+                "ops.feature_reference_reconciliation_events, "
+                "ops.feature_reference_reconciliation_subscriptions, "
+                "ops.feature_reference_reconciliation_acks "
+                "TO ktm_manual_provider_dedup_procedure_owner",
+                "GRANT SELECT, INSERT, UPDATE ON TABLE "
+                "ops.feature_reference_reconciliation_leases "
+                "TO ktm_manual_provider_dedup_procedure_owner",
+            ):
+                await connection.execute(text(statement))
+            await connection.execute(
+                text(
+                    "ALTER PROCEDURE feature.record_manual_provider_dedup_candidate("
+                    "text, text, jsonb, jsonb) "
+                    "OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER PROCEDURE feature.resolve_manual_provider_dedup_case("
+                    "uuid, text, text, bigint, bigint, text, text, text, bigint) "
+                    "OWNER TO ktm_manual_provider_dedup_procedure_owner"
                 )
             )
             await connection.execute(

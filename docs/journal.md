@@ -153,6 +153,25 @@ candidate의 `to_jsonb(notice)`에 내부 generated column이 누출되는 P1을
 candidate SQL은 `valid_during`을 response JSON에서 제외하도록 수정했다. NULL·one-sided·
 equal range, public/admin active predicate와 notice candidate detail 회귀를 추가했으며,
 수정 후 targeted integration 2건을 통과했다.
+## 2026-08-21 — T-VN-M05 dedicated candidate·admin decision writer
+
+`0231_m05_manual_provider_dedup`에 Dagster-only candidate writer와 admin-only
+decision writer를 추가했다. candidate는 immutable manual origin/claim, 정확히 하나인
+provider primary source/head/record를 현재 row revision과 함께 freeze하며, 같은
+fingerprint만 idempotent로 돌린다. 새 source head/row revision은 종전 미종결 case에
+`superseded` resolution을 append하고 새 episode로 분리한다.
+
+admin 판단은 global curation fence와 UUID 정렬 Feature lock 뒤 모든 proof를 다시
+대조한다. `kept`는 evidence만 남기고, `merged`는 명시한 provider survivor를 유지한 채
+manual만 canonical retire하고 `rebind` event를, `manual_retired`는 `detach` event를
+같은 transaction에 남긴다. stale은 evidence·Feature·event를 쓰지 않는 terminal outcome이다.
+generic dedup queue/auto-master/source link 이동은 어느 writer도 호출하지 않는다.
+
+M05 SECURITY DEFINER owner의 cross-owner ACL은 bootstrap과 startup reconciler 모두에서
+복원하도록 고정했다. 실제 API/Dagster LOGIN integration은 candidate executor 거부,
+candidate exact replay, merged state/event, provider source 보존을 검증했다. 다음 tranche는
+strict-prefix service lease/ack와 backup v3 evidence root다.
+
 ## 2026-08-21 — T-VN-M05 증적 스키마와 ACL 기본 경계 착수
 
 두 전문 적대 리뷰의 P0를 ADR-097과 설계 보고서에 반영했고, 두 reviewer가 모두 GO를

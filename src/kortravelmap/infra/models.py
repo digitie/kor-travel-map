@@ -1106,6 +1106,12 @@ class FeatureReferenceReconciliationEventRow(Base):
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
+            ["manual_retire_transition_id"],
+            ["feature.feature_state_transitions.transition_id"],
+            name=conv("fk_feature_reference_reconciliation_events_transition"),
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
             ["old_feature_id", "old_feature_uuid"],
             ["feature.features.feature_id", "feature.features.feature_uuid"],
             name=conv("fk_feature_reference_reconciliation_events_old_identity"),
