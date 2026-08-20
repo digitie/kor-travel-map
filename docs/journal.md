@@ -60,6 +60,63 @@ client가 먼저 병합된 뒤 순차 연결한다.
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-20 — snapshot을 material과 receipt로 가르고, 내가 만든 두 개의 공허를 잡혔다
+
+`T-VN-41S`의 후속 종료선 대부분을 닫았다. `ops.poi_cache_target_snapshots` 한 표가 **무엇을
+고정했는가**(material)와 **누가 언제 받아갔는가**(receipt)를 겸하고 있었고, 그래서 두 가지가
+표현 불가능했다 — material 양방향 공유와 terminal item compaction. 이제 material 표가 membership을
+소유하고 receipt는 `material_id`만 가리킨다.
+
+**단방향 공유는 설계가 아니라 표가 하나여서였다.** reconciliation seal은 generic snapshot을
+물려받을 수 있었지만 반대는 막혀 있었다(`NOT EXISTS (... requests ...)`). 물려받으면 만료 시각까지
+함께 물려받기 때문이다. 각자 receipt를 만들게 되자 재사용 질의 둘이 하나로 합쳐졌고, "잔여 TTL이
+75분 넘는 material만 재사용한다"는 문턱도 함께 사라졌다 — 새 receipt는 언제나 full TTL이다.
+
+**빈 DB로는 이 migration을 검증할 수 없다.** backfill/dedupe 문장을 한 줄도 타지 않기 때문이다.
+심은 경로에서만 세 개가 드러났다: PostgreSQL에 `min(uuid)` aggregate가 없다, receipt에 append-only
+trigger가 걸려 backfill UPDATE가 막힌다, legacy item의 FK가 지우려는 UNIQUE 인덱스에 걸려 있다.
+그 사실을 게이트 스크립트 docstring에 적어 다음 사람이 빈 DB 결과를 통과로 읽지 않게 했다.
+
+**내가 만든 공허 두 개를 다른 것이 잡았다.**
+
+하나. `ops` runtime ACL을 fail-closed로 대칭화하면서, 목록이 실제와 맞는지 보는 게이트를
+`Base.metadata` 기준으로 썼다. reconcile이 순회하는 것은 metadata가 아니라 DB다. 모델에 없는 ops
+표가 17개 있었고 그 게이트는 green인 채 아무 것도 보지 못했다 — n150 격리 DB 리허설에서
+`reconcile_runtime_privileges`가 17개를 들고 배포를 막고서야 드러났다. 그중 9개는 내가 "0225가
+물리 삭제했다"고 잘못 판단해 선언을 지운 `curation_*`이다. 0225는 그 표들을 지우지 않았다.
+
+둘. `410 SNAPSHOT_MATERIAL_COMPACTED`가 **도달 불가능**했다. compaction 후보는 정의상 미만료
+receipt가 없으므로, 만료를 먼저 판정하면 언제나 `snapshot_expired`가 이긴다. end-to-end 통합
+테스트를 쓰고 나서야 알았다. 판정 순서를 바꿨다 — 둘 다 참일 때 더 구체적인 쪽을 답한다.
+
+**그리고 기존 테스트가 내 오판을 하나 잡았다.** 초안의 `safe_high_watermark_relay_order`를
+"재사용 시점의 더 높은 cursor가 더 정확하다"며 뺐는데, 그러면 material HWM과 전역 HWM 사이에 낀
+비-membership event를 consumer가 건너뛴다. membership은 안 바뀌지만 그 event들은 consumer가 아직
+처리하지 않은 것이다. `test_generic_snapshot_reuse_ignores_nonmaterial_outbox_tail`이 그 자리를
+지키고 있었다. 초안이 옳았고 되돌렸다.
+
+compactor는 별도 job/schedule을 만들지 않고 hourly GC batch의 한 단계로 넣었다. 같은 표를 같은
+잠금 아래 bounded로 훑는 일이고, 나누면 lock·drain loop·timeout·no-progress 판정·backlog 관측을
+통째로 복제하게 된다. 표시가 곧 reader의 410 전환 시점이고, 먼저 표시한 뒤 나중에 비운다 —
+반대로 하면 1,000,000행을 한 transaction에 지우거나 부분적으로 비운 material이 표시되지 않은 채
+남는다.
+
+**그리고 실측이 계약 불일치를 하나 내놓았다.** 1M soak 첫 실행이 배포 기본 build 예산
+300초에서 잘렸다. 예산을 측정용으로 늘려 재니 조용한 호스트에서 368.4초다(첫 측정은
+동시 부하 아래 547.9초였다) — 즉 지금 계약에서 1,000,000 item
+snapshot은 **admission은 통과하고 build deadline에서 실패한다**. 예산을 올리면 그 시간만큼
+stream share barrier가 유지되고 그 값은 hung writer의 최대 정지 시간이기도 해서, 내가
+임의로 고를 일이 아니다. 선택지 셋과 각각의 비용을 적어 결정 항목으로 세웠다.
+
+나머지 수치는 설계 주장을 그대로 확인해 줬다. 상한과 같은 크기에서 Python peak 2.02 MiB,
+상한 + 1은 typed `413`에 partial row 0, compaction이 1,000,000행을 39.5초에 비우고 VACUUM이
+157.6 MB를 되찾는 동안 material/receipt 증거는 남았다.
+
+EXPLAIN 게이트는 fixture를 다섯 번 고쳐 쓰게 했다. material이 하나면 partial index 둘의 비용이
+같고, compaction 후보가 0개면 planner 선택이 무의미하고, material당 item이 1행이면 정렬이
+공짜다 — 셋 다 "인덱스를 탄다"는 통과를 만들면서 아무 것도 재지 않는다. 그 과정에서 내가
+추가했던 인덱스 하나가 planner에게 선택되는 것을 끝내 보이지 못해 지웠다. 근거를 못 만든
+인덱스는 쓰기 비용만 남는다.
 ## 2026-08-20 — T-VN-H50 planner gate의 마지막 false-fail 경로 제거
 
 H50 적대적 리뷰어 2명이 최신 구현에서 동일한 P1을 독립 재현했다. `source_entities`가

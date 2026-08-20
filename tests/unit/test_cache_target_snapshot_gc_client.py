@@ -121,8 +121,8 @@ async def test_snapshot_gc_drain_uses_global_try_lock_and_transaction_per_batch(
 
     batches = iter(
         [
-            CacheTargetSnapshotGcBatchResult("system-a", 1_000, 0, True),
-            CacheTargetSnapshotGcBatchResult("system-b", 5, 1, False),
+            CacheTargetSnapshotGcBatchResult("system-a", 1_000, 0, 0, True),
+            CacheTargetSnapshotGcBatchResult("system-b", 5, 1, 0, False),
         ]
     )
     batch_calls: list[dict[str, Any]] = []
@@ -370,9 +370,9 @@ async def test_snapshot_gc_drain_stops_after_full_round_without_progress(
 
     batches = iter(
         [
-            CacheTargetSnapshotGcBatchResult("system-a", 0, 0, True),
-            CacheTargetSnapshotGcBatchResult("system-b", 0, 0, True),
-            CacheTargetSnapshotGcBatchResult("system-a", 0, 0, True),
+            CacheTargetSnapshotGcBatchResult("system-a", 0, 0, 0, True),
+            CacheTargetSnapshotGcBatchResult("system-b", 0, 0, 0, True),
+            CacheTargetSnapshotGcBatchResult("system-a", 0, 0, 0, True),
         ]
     )
     calls = 0

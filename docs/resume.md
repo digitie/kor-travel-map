@@ -1,5 +1,48 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-20 — T-VN-41S material/receipt 분리 착지 (`0231`)
+
+`T-VN-41S`의 후속 종료선에서 **EXPLAIN·1M soak을 뺀 전부**가 닫혔다.
+
+| 바뀐 것 | 내용 |
+|---|---|
+| DB | `ops.poi_cache_target_snapshot_materials` / `..._material_items` 신설, `poi_cache_target_snapshots`는 receipt로 축소, legacy item 표 삭제 |
+| identity | `(external_system, restore_epoch, material_high_watermark_relay_order)` · partial unique `WHERE compacted_at IS NULL` |
+| 공유 | 재사용 질의 둘 → 하나. generic/reconciliation이 **양방향**으로 material을 공유하고 각자 receipt를 만든다 |
+| service API | 재사용 시 `snapshot_id`가 달라진다(root/count/cursor는 같다). 만료를 물려받지 않아 매번 full TTL |
+| compactor | hourly GC batch의 4단계 중 2·3단계. 보존 기본 30일. receipt/material row는 남긴다 |
+| 410 | 도달 불가였던 것을 고쳤다 — compaction 판정이 만료 판정보다 앞선다 |
+| ACL | `ops`를 `feature`와 같은 강도로. 침묵 full CRUD 경로 제거(표 57개 중 48개가 그 경로였다) |
+
+**잡힌 것 셋.** (1) ACL 목록 게이트를 `Base.metadata`로 재서 green인 채 아무 것도 못 봤다 —
+모델에 없는 ops 표가 17개 있었고 n150 리허설이 잡았다. (2) `410`이 도달 불가능했다 —
+end-to-end 테스트를 쓰고서야 알았다. (3) 초안의 `safe_high_watermark_relay_order`를 뺀 것이
+오판이었다 — 기존 테스트가 잡았고 되돌렸다.
+
+**n150 1M soak 실측**(`docs/reports/t-vn-41s-1m-soak-2026-08-21.md`):
+
+| 축 | 실측 |
+|---|---|
+| 1,000,000 admitted | **368.4초** (2,714 item/s; 동시 부하 아래 547.9초) |
+| Python peak | **2.02 MiB** — `O(log N)` 주장이 상한에서 성립 |
+| item 표 / 인덱스 | 157.6 MB (157.6 B/item) / 90.5 MB |
+| 상한 + 1 | typed `413`, partial row **0** |
+| compaction drain | 1,000,000행 / 39.5초 / 100 round |
+| VACUUM 회수 | 157.6 MB → 57 KB (증거 material·receipt는 보존) |
+
+게이트: ruff / mypy `--strict` ×3 / import-linter green, unit 2,387 · api 1,199 ·
+dagster 548 passed, PostGIS 통합 49 + EXPLAIN, 격리 DB 리허설 12절 PASS,
+ACL 변이 배터리 6종 전부 red.
+
+### 다음 한 작업
+
+**결정 하나가 남았다 — build 예산 300초 vs item 상한 1,000,000.** 상한과 같은 크기의
+snapshot은 배포 기본 예산에 들지 않는다(실측 368.4초 > 300초). 지금 계약에서 그런 snapshot은
+admission을 통과하고 build deadline에서 실패한다. 예산을 올리면 그 시간만큼 stream share
+barrier가 유지되고 그 값은 hung writer 최대 정지 시간이기도 하므로, 코드가 아니라 정책
+결정이다. 선택지 셋과 비용은 soak 보고서 §"열린 결정"과 `docs/tasks.md`에 있다.
+
+그 결정 뒤에 #922와 T-VN-41S를 완료로 표시한다.
 ## 2026-08-21 — 완료 task를 정본 원장으로 이관
 
 `T-VN-H50`(PR #1036), `T-VN-C05A`~`C05D`(PR #1037),

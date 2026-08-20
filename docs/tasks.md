@@ -24,9 +24,11 @@ barrier로 직렬화한다.
 - **Lane B — frontend hardening·PinVi 소비 API**
   - [~] `T-VN-41C`(#975 병합 / final exact-pair·prod consumer enable 잔여)
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환 — **저장소측 완료 2026-08-20**, live 실행은 배리어 대기)
-    ∥ [~] `T-VN-41S`(#922 1차 구현·리뷰 GO, `0230+` migration/compactor·n150 1M 검증 잔여)
+    ∥ [~] `T-VN-41S`(`0231`·공유·compactor·410·EXPLAIN·1M soak 완료 / **build 예산 vs 상한 결정** 잔여)
+  - [ ] `T-VN-40B` prod 적용 — **41S 머지와 함께 한 배포로**(사용자 결정 2026-08-21).
+    현재 prod admin rule 조회 500. `0229`+`0230`+`0231`이 같이 올라간다.
   - **배리어**: [ ] `T-VN-FINAL-REBUILD`(주요 개발 완료 후 파괴적 재구축 — 사용자 결정 2026-08-20)
-  - [ ] `T-VN-40B` 잔여(source rule `curated` action 퇴역, `0229`, PR #1035) — 종결 되돌림
+  - [ ] `T-VN-40B` 잔여 — 코드 착지(#1035), **prod 미적용 → admin rule 조회 500**(2026-08-21)
   - [ ] `T-FE-MOCK-FLAKE`(`/v1/ops/logs`)
   - [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2` → `T-VN-41C` receipt 승격
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정, T-VN-40 인수 뒤)**
@@ -36,7 +38,9 @@ barrier로 직렬화한다.
 - **Lane C — 사문화 정리·미구현 dataset (다른 lane과 무관, 아무 때나)**
 - **Wave 2 barrier 이후**
   - Lane A: [ ] `T-VN-37D`(notice empty range 표현 — 제품 결정 대기)
-  - 32~38 join barrier 뒤 Lane B: `T-VN-40B`·`T-VN-40C`는 2026-08-20 prod 적용까지 완료했다.
+  - 32~38 join barrier 뒤 Lane B: `T-VN-40C`는 2026-08-20 prod 적용까지 완료했다.
+    **`T-VN-40B`는 코드만 착지했고 prod 미적용이다** — 그 미적용이 admin rule 조회 500을
+    내고 있다(2026-08-21 실측, 아래 잔여 절).
     - 기반 구현 #974, 40A write fence #994, identity mapping #996, 40B candidate 전환,
       ③ sanctioned live/soak, ④ exact receipt, 40C 물리 삭제와 prod `0225` 적용까지
       완료했다. 상세 이력은 [`tasks-done.md`](tasks-done.md)에 이관했다.
@@ -503,26 +507,62 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 
 > 이 항목은 2026-08-20 `tasks-done.md`로 이관됐다가 **사용자 지시로 되돌렸다**. 종결
 > 근거였던 "candidate lifecycle 전환"은 맞지만 아래 사실을 다루지 않는다.
+>
+> **되돌린 것이 옳았다.** 2026-08-21 감사에서 이 미적용이 운영 결함을 내고 있다는 것이
+> 실측으로 드러났다(아래 🔴). 문서 여러 곳이 "40B는 prod 적용까지 완료"라고 적고 있었고,
+> 그 주장을 그대로 뒀다면 500을 내는 endpoint를 아무도 보지 않았을 것이다.
 
-- [ ] **T-VN-40B 잔여 — `curated` action 퇴역 (`0229`, PR #1035)**
+- [ ] **T-VN-40B 잔여 — `0229` prod 적용 (코드는 착지 완료)**
 
-  **prod 실측(2026-08-20)**: `feature.curated_source_rules`에 `default_action='curated'`
-  **35행**이 남아 있고 `ck_curated_source_rules_action`은 여전히
-  `('candidate','curated','ignore')`를 허용한다. 반면 write 경로
-  (`curated_repo._TYPED_RULE_ACTIONS`)는 `{candidate, ignore}`만 받는다 — **코드가 거부하는
-  값을 DB가 허용하고, 실제로 그 값이 남아 있다.** 값이 다시 들어올 문은 닫혀 있는데 이미
-  들어온 값은 그대로다.
+  **2026-08-21 감사로 상태가 갈렸다.** 코드는 `fa22d0fe`(PR #1035, merged 2026-08-20)로
+  main에 있다. 남은 것은 **prod 적용뿐이며, 그 미적용이 지금 운영 결함을 내고 있다.**
+
+  **🔴 운영 결함 (2026-08-21 실측)**: `GET /v1/admin/curated-source-rules`가 **500**이다.
+
+  ```
+  ValidationError: 1 validation error for CuratedSourceRuleView
+  default_action  Input should be 'candidate' or 'ignore' [input_value='curated']
+  처리되지 않은 예외 … /v1/admin/curated-source-rules
+  ```
+
+  #1035는 write 경로(`curated_repo._TYPED_RULE_ACTIONS`)만이 아니라 **read 경로**
+  (`routers/curated.py`의 `RuleAction` Literal)도 좁혔다. 그런데 값을 정규화하는 `0229`가
+  prod에 없으므로, `curated` 행을 읽는 순간 응답 검증에서 터진다. 백로그가 이것을 "값이
+  다시 들어올 문은 닫혀 있는데 이미 들어온 값은 그대로다"라고만 적어 **잠복**으로 읽히게
+  한 것이 오독이었다 — 잠복이 아니라 이미 터지고 있었다.
+
+  **prod 실측(2026-08-21, 읽기 전용)**:
+
+  | 축 | 값 |
+  |---|---|
+  | `alembic_version` | `0225_tvn40c_physical_removal` (≠ `0229`) |
+  | `default_action` 분포 | `candidate=18`, `curated=35` |
+  | `ck_curated_source_rules_action` | `('candidate','curated','ignore')` — 안 좁혀짐 |
+  | 실행 중 image의 마지막 migration | `0225` — **`0229` 파일 자체가 없다** |
+  | `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD` | `0225_tvn40c_physical_removal` |
+
+  즉 **DB만 올릴 수 없다.** 이미지 재빌드와 `.env` 갱신이 선행이다.
 
   ADR-092가 `curated` action을 automatic public membership이 아니라 **candidate 생성**으로
   재해석해 `candidate`와 같은 뜻이 됐다. 같은 뜻의 값이 둘이면 읽는 사람마다 다르게
   해석하므로 한쪽을 없앤다.
 
-  - [ ] `0229`가 35행을 `candidate`로 정규화하고 CHECK를 `('candidate','ignore')`로 좁힌다.
-    대상 표의 BEFORE trigger(`inactive provider dataset` write 차단)를 **끄지 않는다** —
-    막히면 어느 rule인지 말하고 멈춘다. 모델 CHECK와 write 허용값이 어긋나면 red가 되는
-    drift 게이트를 함께 둔다. 브랜치 `feat/tvn40b-source-rule-action`.
+  - [x] `0229`가 35행을 `candidate`로 정규화하고 CHECK를 `('candidate','ignore')`로 좁힌다.
+    대상 표의 BEFORE trigger를 끄지 않고, 모델 CHECK와 write 허용값의 drift 게이트도 함께
+    뒀다. → `fa22d0fe`(PR #1035)로 main 착지.
+  - [ ] **prod 적용.** 사용자 결정(2026-08-21): **T-VN-41S 머지 뒤 한 번에 배포한다** —
+    그러면 `0229`·`0230`(C05)·`0231`(41S)이 같은 배포에 올라가 배포 횟수가 준다.
+    순서는 (1) `origin/main` 기준 image 재빌드 (2) `.env`의 `EXPECTED_HEAD` 갱신
+    (3) DB 백업 → 배포 → migration 적용 (4) `GET /v1/admin/curated-source-rules` 200 확인
+    (5) 문서 동기화. 사전조건은 clear다 — `0229`가 막을 rule(inactive provider dataset에
+    걸린 것) 0건.
+  - [ ] **read 경로 Literal을 drift 게이트에 넣는다.** #1035의 게이트는 모델 CHECK ↔
+    `_TYPED_RULE_ACTIONS`만 대조하고 응답 모델 Literal(`routers/curated.py`)은 보지 않는다.
+    이번 500이 정확히 그 사각에서 났다 — 게이트가 봤다면 "DB에 있는 값을 응답 모델이
+    거부한다"를 배포 전에 잡았다.
   - **번호 제약**: `0229`는 이미 main에 적용된 T-VN-40B head이므로, C05 catalog는 기존
-    `0229` migration을 다시 쓰지 않고 `0230`으로 `0229` 뒤에 연결한다.
+    `0229` migration을 다시 쓰지 않고 `0230`으로 `0229` 뒤에 연결한다. T-VN-41S는 그
+    뒤 `0231`이다(2026-08-21 재번호 — 같은 parent를 쓰던 충돌을 이 감사가 잡았다).
 
   **이 항목이 아닌 것**: "legacy candidate rows backfill"은 대상이 없다 — 그 legacy 행은
   `0225`가 canonical collection/item으로 옮긴 뒤 물리 삭제했고 `theme_feature_candidates`는
@@ -634,10 +674,10 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   material 재사용·관측 metric·typed future error 계약까지다. 독립 적대 리뷰 2명은 최종 head에서 P0~P3
   잔여 없음으로 GO했고, 단위/API/Dagster 집중 231개와 PostGIS stream repository 37개를 통과했다.
 
-  **후속 종료선(미완료, #922 유지)** — `0225`는 2026-08-20 착지·prod 적용으로 barrier가
-  풀렸다. 남은 것은 `0231+`(`0226`~`0228`은 #1029 · `0229`는 T-VN-40B 잔여 · `0230`은 C05 catalog가 선점) 물리 모델, 양방향 공유, 실제 compactor와
-  repository 410, migration/ACL/EXPLAIN 및 n150 1M+ 증거까지다. 이 항목들이 끝나기 전에는 #922 또는
-  T-VN-41S 전체 완료로 표시하지 않는다.
+  **후속 종료선(구현·실측 완료, 결정 1건 잔여)** — 물리 모델(`0231`)·양방향 공유·compactor·
+  repository 410·EXPLAIN·n150 1M soak이 모두 착지했다(아래 후속 항목). 남은 것은 코드가 아니라
+  **결정 하나**다 — build 예산 300초와 item 상한 1,000,000이 서로 맞지 않는다는 실측 결과를
+  어떻게 처리할지. 그 결정 전에는 #922 또는 T-VN-41S 전체 완료로 표시하지 않는다.
 
   **이번 PR 완료 항목**
 
@@ -652,10 +692,89 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 
   **후속 항목**
 
-  - [ ] (`0225` barrier 해제됨) `0227+`로 receipt/material/item 정규화 migration, 양방향 material
-    공유, terminal retention compactor와 실제 repository 410 경로를 구현한다.
-  - [ ] migration upgrade/downgrade·ACL/catalog·EXPLAIN과 n150 PostGIS 1M admitted/1M+ rejection,
-    concurrent mutation safe lower cursor, compaction/vacuum soak evidence를 통과한다.
+  - [x] `0231`로 receipt/material/item 정규화 migration, 양방향 material 공유, terminal
+    retention compactor와 실제 repository 410 경로를 구현한다.
+    → material은 exact source membership 하나(identity `(external_system, restore_epoch,
+    material_high_watermark_relay_order)`, partial unique `WHERE compacted_at IS NULL`)를 소유하고,
+    `poi_cache_target_snapshots`는 `material_id`/`receipt_kind`만 갖는 immutable receipt로 좁혔다.
+    item PK/FK는 `(material_id, row_number)`로 옮기고 `external_system`은 material이 소유한다.
+    재사용 질의가 둘에서 하나로 합쳐지며 공유가 양방향이 됐고, 재사용이 만료 시각을 물려받지
+    않게 되어 "잔여 TTL 75분" 문턱이 사라졌다. compactor는 hourly GC batch의 한 단계다
+    (receipt 삭제 → 후보 표시 → item drain → orphan material 삭제).
+    → 초안(`docs/reports/tvn41s/snapshot-material-schema.sql.draft`)과 셋이 다르다. identity UNIQUE를
+    partial로 바꿨고(compaction된 material이 identity를 영구 점유하는 것을 막는다), `material_bytes`는
+    legacy에 NULL을 허용하며(leaf 인코딩을 SQL로 옮겨 적지 않는다), 새 표에도 append-only fence를
+    걸었다(material은 `compacted_at` 1회 전이만 허용). `safe_high_watermark_relay_order`는 한 번
+    뺐다가 되돌렸다 — 재사용 receipt가 자기 시점 cursor를 광고하면 비-membership event를 consumer가
+    건너뛴다는 것을 `test_generic_snapshot_reuse_ignores_nonmaterial_outbox_tail`이 잡았다.
+    → 410은 처음에 **도달 불가능**했다. compaction 후보는 정의상 미만료 receipt가 없어 만료 판정이
+    항상 먼저 이겼다. compaction을 앞으로 옮겨 고쳤고 end-to-end 통합 테스트로 고정했다.
+  - [x] migration upgrade/downgrade·ACL/catalog를 통과한다.
+    → 격리 DB 리허설 12절 PASS(`scripts/verify-tvn41s-snapshot-material.sh`). **빈 DB로는 이
+    migration을 검증할 수 없다** — backfill/dedupe 문장을 한 줄도 타지 않는다. 실제로 `min(uuid)`
+    부재·receipt append-only fence·legacy FK 의존 순서 셋 다 빈 경로에서는 조용히 지나갔다.
+    → ACL은 `ops` 스키마 전체를 fail-closed로 대칭화하면서 함께 닫았다. `feature`는 선언 없는
+    relation을 막는데 `ops`만 침묵 기본값으로 full CRUD를 주고 있었다(표 57개 중 48개).
+  - [x] EXPLAIN과 n150 PostGIS 1M admitted/1M+ rejection, concurrent mutation safe lower cursor,
+    compaction/vacuum soak evidence를 통과한다.
+    → EXPLAIN은 `tests/integration/test_tvn41s_snapshot_material_explain.py`. fixture 모양이
+    곧 게이트의 유효성이라 **다섯 번** 고쳐 썼다 — material 1개면 partial index 둘의 비용이
+    같고, material당 item 1행이면 정렬이 공짜고, compaction 후보가 0개면 planner 선택이
+    무의미하고, stream이 하나면 `external_system` 제한이 공짜다. 그리고 `enable_seqscan =
+    off` 아래의 "Seq Scan 노드가 없다"는 **반증 불가능**했다(적대 리뷰 지적).
+    → 그 반증 불가능한 단언을 근거로 `idx_cache_target_snapshot_materials_sweep`를 한 번
+    지웠다가 **되살렸다**. 근거가 없어진 것이지 인덱스가 불필요하다고 밝혀진 것이 아니었다.
+    지금 근거는 planner 선택이 아니라 술어 구조다 — orphan 정리는 `compacted_at`을 보지
+    않아 partial index에 걸리지 못하고, `external_system` equality를 좁히지 못하면 다른
+    stream의 material까지 훑는다.
+    → soak 실측 `docs/reports/t-vn-41s-1m-soak-2026-08-21.md`(2회): 1,000,000 admitted
+    **368.4초**(2,714 item/s, 조용한 호스트 / 동시 부하에서는 547.9초) ·
+    **Python peak 2.02 MiB** · item 표 157.6 MB(157.6 B/item) ·
+    상한+1은 typed `413`에 partial row 0 · compaction 1,000,000행 39.5초 · VACUUM 157.6 MB
+    회수(증거 material/receipt는 보존).
+    → concurrent mutation의 fixed membership·safe lower cursor는 soak이 아니라 통합 테스트
+    셋이 본다(`test_fixed_snapshot_pages_ignore_concurrent_committed_write`,
+    `test_snapshot_barrier_keeps_outbox_cursor_commit_safe_across_writers`,
+    `test_generic_snapshot_reuse_ignores_nonmaterial_outbox_tail`). soak에서 흉내 내면 같은
+    성질을 덜 정확하게 보는 두 번째 게이트가 된다.
+  - [ ] **service spec이 도달 가능한 `410`을 선언하지 않는다(적대 리뷰 지적, 사용자 결정
+    2026-08-21로 후속 분리).** generic snapshot cursor 경로는 `410
+    SNAPSHOT_MATERIAL_COMPACTED`를 실제로 낸다(두 receipt가 material을 공유하므로).
+    그런데 route에 선언하면 `openapi.service.json` bytes가 바뀌어 **PinVi vendor 재고정이
+    같은 호흡으로** 필요해지고, T-VN-40 deployment receipt의 "PinVi vendor bytes are
+    exact" 주장이 깨진다. 이 브랜치의 범위는 material/receipt 정규화이므로 선언을 다음
+    PinVi re-vendor와 함께 묶는다 — T-VN-41 lane이 어차피 service re-vendor를 요구하므로
+    추가 비용이 없다. 누락 자체는 이 브랜치 이전부터 있었다(41S가 410 schema만 예약했다).
+    선언 위치와 근거 주석은 `cache_target_streams.py`의 generic snapshot route에 있다.
+    → **도달 조건은 backlog가 쌓인 stream뿐이다.** compaction 판정이 만료 판정보다 앞서므로
+    410은 "만료된 generic receipt인데 그 material이 표시됐다"에서만 난다. 보통은 phase 1이
+    같은 batch에서 그 receipt를 지우므로, `header_limit`/`SKIP LOCKED` 경계에 걸린 stream에서만
+    남는다. 후속을 "장식"으로 낮춰 보지도, "PinVi가 지금 깨진다"로 올려 보지도 않게 적어 둔다.
+    → 같은 후속에서 410 본문 문구도 고친다. 지금은 "보존 기간을 지나 compaction됐습니다"인데
+    orphan 표시에는 보존 기간이 없다. 지금은 도달 불가(orphan에는 page할 receipt가 없다)지만
+    불변이 바뀌는 순간 거짓말이 된다.
+  - [ ] **`ops` fail-closed ACL의 탈출구가 없다(적대 리뷰 지적).** 선언 없는 ops relation은
+    이제 배포를 막는다. 의도한 동작이지만, **운영에는 있고 fresh migrate DB에는 없는**
+    relation이 걸린다 — 위험한 migration 앞에서 운영자가 만든 backup 표, `pg_dump` 복원
+    잔재가 그렇다(선언 목록에 이미 `tvn36_legacy_freeze_preflight_manifest` 같은 일회성
+    이름이 있는 것이 그 증거다). 지금은 코드 수정 없이는 풀 수 없다. env로 여는 allowlist는
+    방금 세운 fence를 약하게 하므로 채택하지 않았고, **대신 어떤 경로로 풀 것인지**를
+    정해야 한다(임시 표는 `ops` 밖에 만든다 / 선언 1줄 + hotfix / 명시적 prefix 예외).
+  - [ ] **compacted material이 영구 누적되며 GC batch마다 훑인다(적대 리뷰 지적).**
+    `_HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL`의 "표시됐고 item이 남은 material" 분기는
+    compacted material마다 item 인덱스 probe 한 번이다. audit material은 증거로 영구
+    보존되므로 그 수가 단조 증가한다. **비용이 가장 큰 때가 한가할 때다** — backlog가
+    있으면 첫 hit에서 멈추지만, 없으면 전부 훑고 나서 false를 낸다. reconciliation은 운영자 시작이라 증가 속도가 느리고
+    probe는 index-only라 지금 규모에서 문제가 아니지만, 상한이 없다. `compaction_drained_at`
+    같은 상태 열 + partial index로 "아직 배출 중"만 색인하면 상수로 떨어진다.
+  - [ ] **열린 결정 — build 예산 300초 vs item 상한 1,000,000.** 상한과 같은 크기의
+    snapshot은 배포 기본 예산에 **들지 않는다**(n150 실측 368.4초 > 300초; 동시 부하
+    아래에서는 547.9초). 지금 계약에서
+    1,000,000 item snapshot은 admission은 통과하고 build deadline에서 실패한다. 셋 중
+    하나를 골라야 한다 — 예산을 올린다(그만큼 stream share barrier가 유지되고, 그 값은
+    hung writer 최대 정지 시간이기도 하다) / 상한을 실제 도달 가능한 크기로 낮춘다 /
+    그대로 두되 "1,000,000까지 받되 5분 안에 끝나야 한다"로 계약 문서를 고친다.
+    근거와 수치는 위 soak 보고서 §"열린 결정".
 
 ### T-VN-41F1J — C6c cancel-probe fixture 수명주기 복구
 

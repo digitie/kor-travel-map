@@ -247,6 +247,20 @@ stream에서 늦게 commit되는 더 낮은 event를 추월하지 않는 commit-
 전역 uniqueness만 제공하고 서로 다른 stream의 commit 순서를 보장하지 않는다. snapshot reuse cursor는 생성 당시의 안전한 lower-bound로
 유지될 수 있으므로 PinVi는 그 뒤 event를 재조회하고 immutable inbox receipt로 중복을 제거한다.
 
+**2026-08-20(Map migration `0231`)**: snapshot이 material(무엇을 고정했는가)과 receipt(누가 언제
+받아갔는가)로 갈렸다. PinVi가 보는 변화는 하나다 — 같은 source 상태를 다시 요청하면 `snapshot_id`가
+**달라진다**. 따라서 "같은 snapshot을 받았는가"는 `snapshot_id`가 아니라 `merkle_root`/`count`로
+판정해야 한다. 재사용 receipt는 만료 시각을 물려받지 않고 매번 full TTL로 시작한다.
+
+`high_watermark_cursor`는 **그 material이 처음 고정될 때**의 안전한 lower-bound다. 같은 material을
+재사용하는 동안에는 값이 올라가지 않지만, GC나 compaction이 그 material을 거둬 간 뒤 같은 source
+상태로 다시 만들면 **더 높은 값**이 나온다(그 시점의 `max(relay_order)`). 여전히 안전한 lower-bound라
+동작에는 문제가 없고, PinVi는 위 문단대로 그 뒤 event를 재조회하면 된다 — 다만 "root/count가 같으면
+cursor도 같다"로 읽으면 안 된다.
+
+`410 SNAPSHOT_MATERIAL_COMPACTED`는 reconciliation 경로뿐 아니라 **generic snapshot cursor에서도**
+난다. 두 receipt가 같은 material을 공유하기 때문이다.
+
 restore/cutover는 stream GET의 raw ETag를 기준으로 restore-fence command를 호출해 Map epoch를
 N+1로 올린 뒤 writer를 연다. 이 transaction은 더 낮은 epoch의 모든 non-delivered delivery를
 terminal `superseded`로 종결하므로 구 pending/retry/lease/dead가 새 epoch claim이나 dead gate에

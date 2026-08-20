@@ -11,7 +11,7 @@ import asyncio
 import base64
 import binascii
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Mapping
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime
@@ -66,10 +66,16 @@ __all__ = [
 ]
 
 _SNAPSHOT_TTL_SQL = "interval '2 hours'"
-_SNAPSHOT_REUSE_MIN_TTL_SQL = "interval '75 minutes'"
+#: 재사용은 더 이상 만료 시각을 물려받지 않는다(receipt를 새로 만든다). 그래서
+#: "재사용하려면 잔여 TTL이 75분 이상이어야 한다"는 문턱이 사라졌다. handoff floor는
+#: 아래 `_SNAPSHOT_RETURN_MIN_TTL_SQL`로 남는다 — 그건 만든 시각이 아니라 **건네주는**
+#: 시각을 재는 검사라서 여전히 뜻이 있다(빌드가 오래 끌면 새 receipt도 짧아진다).
 _SNAPSHOT_RETURN_MIN_TTL_SQL = "interval '75 minutes'"
 _SNAPSHOT_ITEM_PRUNE_LIMIT = 1000
 _SNAPSHOT_HEADER_PRUNE_LIMIT = 100
+#: terminal reconciliation의 item을 언제까지 붙잡아 둘 것인가. 감사에 필요한 것은
+#: root/count이고 그건 material row에 남는다 — item은 그 기간이 지나면 되찾는다.
+_MATERIAL_COMPACTION_RETENTION_SECONDS = 30 * 24 * 60 * 60
 _GENERIC_SNAPSHOT_COPY_LIMIT = 2
 _SNAPSHOT_CAPACITY_RETRY_AFTER_MAX_SECONDS = 7_200
 _SNAPSHOT_BUILD_STATEMENT_TIMEOUT = "5min"
@@ -132,18 +138,31 @@ ORDER BY head.sort_key
 FOR SHARE OF stream
 """
 
-_INSERT_SNAPSHOT_SQL = f"""
+_INSERT_MATERIAL_SQL = """
+INSERT INTO ops.poi_cache_target_snapshot_materials (
+    material_id, external_system, restore_epoch,
+    material_high_watermark_relay_order, safe_high_watermark_relay_order,
+    item_count, material_bytes, merkle_root, materialized_at
+) VALUES (
+    CAST(:material_id AS uuid), :external_system, :restore_epoch,
+    :material_high_watermark_relay_order, :safe_high_watermark_relay_order,
+    :item_count, :material_bytes, :merkle_root, clock_timestamp()
+)
+RETURNING materialized_at
+"""
+
+#: receipt는 자기 시점에 새로 만든다. 그래서 재사용해도 만료 시각을 물려받지 않고
+#: 언제나 full TTL로 시작한다 — 앞판의 "최소 잔여 TTL" 검사가 필요 없어진 이유다.
+#: replay cursor는 receipt가 아니라 material이 갖는다(`safe_high_watermark_relay_order`).
+_INSERT_RECEIPT_SQL = f"""
 INSERT INTO ops.poi_cache_target_snapshots (
-    snapshot_id, external_system, restore_epoch,
-    high_watermark_relay_order, material_high_watermark_relay_order,
-    item_count, merkle_root, created_at, expires_at
+    snapshot_id, material_id, receipt_kind, external_system,
+    created_at, expires_at
 )
 SELECT
-    CAST(:snapshot_id AS uuid), :external_system, :restore_epoch,
-    :high_watermark_relay_order, :material_high_watermark_relay_order,
-    :item_count, :merkle_root,
-    materialized_at, materialized_at + {_SNAPSHOT_TTL_SQL}
-FROM (SELECT clock_timestamp() AS materialized_at) AS clock
+    CAST(:snapshot_id AS uuid), CAST(:material_id AS uuid), :receipt_kind,
+    :external_system, issued_at, issued_at + {_SNAPSHOT_TTL_SQL}
+FROM (SELECT clock_timestamp() AS issued_at) AS clock
 RETURNING created_at, expires_at
 """
 
@@ -152,89 +171,101 @@ SELECT CAST(:expires_at AS timestamptz)
        >= clock_timestamp() + {_SNAPSHOT_RETURN_MIN_TTL_SQL}
 """
 
-_INSERT_SNAPSHOT_ITEM_SQL = """
-INSERT INTO ops.poi_cache_target_snapshot_items (
-    snapshot_id, row_number, external_system, target_key, state,
+_INSERT_MATERIAL_ITEM_SQL = """
+INSERT INTO ops.poi_cache_target_snapshot_material_items (
+    material_id, row_number, target_key, state,
     source_generation, source_payload_fingerprint
 ) VALUES (
-    CAST(:snapshot_id AS uuid), :row_number, :external_system, :target_key,
+    CAST(:material_id AS uuid), :row_number, :target_key,
     :state, :source_generation, :source_payload_fingerprint
 )
 """
 
+#: receipt와 그 material을 함께 잡는다. ``FOR SHARE OF material``은 compaction과
+#: 겹치지 않게 한다 — page reader는 정상 page 또는 typed 410 중 하나만 보고 부분
+#: page를 보지 않는다.
 _GET_SNAPSHOT_SQL = """
-SELECT snapshot_id, external_system, restore_epoch,
-       high_watermark_relay_order, material_high_watermark_relay_order,
-       item_count, merkle_root,
-       created_at, expires_at, expires_at > now() AS valid
-FROM ops.poi_cache_target_snapshots
-WHERE snapshot_id = CAST(:snapshot_id AS uuid)
-FOR SHARE
-"""
-
-_GET_REUSABLE_SNAPSHOT_SQL = f"""
-SELECT snapshot.snapshot_id, snapshot.external_system, snapshot.restore_epoch,
-       snapshot.high_watermark_relay_order,
-       snapshot.material_high_watermark_relay_order, snapshot.item_count,
-       snapshot.merkle_root, snapshot.created_at, snapshot.expires_at
+SELECT snapshot.snapshot_id, snapshot.material_id, snapshot.receipt_kind,
+       snapshot.external_system, snapshot.created_at, snapshot.expires_at,
+       snapshot.expires_at > now() AS valid,
+       material.restore_epoch, material.item_count, material.merkle_root,
+       material.material_high_watermark_relay_order,
+       material.safe_high_watermark_relay_order
+         AS high_watermark_relay_order,
+       material.compacted_at
 FROM ops.poi_cache_target_snapshots AS snapshot
-WHERE snapshot.external_system = :external_system
-  AND snapshot.restore_epoch = :restore_epoch
-  AND snapshot.material_high_watermark_relay_order
-      = :material_high_watermark_relay_order
-  AND snapshot.expires_at > now() + {_SNAPSHOT_REUSE_MIN_TTL_SQL}
-  AND NOT EXISTS (
-    SELECT 1
-    FROM ops.poi_cache_target_reconciliation_requests AS request
-    WHERE request.snapshot_id = snapshot.snapshot_id
-  )
-ORDER BY snapshot.created_at DESC, snapshot.snapshot_id DESC
-LIMIT 1
-FOR SHARE OF snapshot
+JOIN ops.poi_cache_target_snapshot_materials AS material
+  ON material.material_id = snapshot.material_id
+WHERE snapshot.snapshot_id = CAST(:snapshot_id AS uuid)
+FOR SHARE OF snapshot, material
 """
 
-_GET_REUSABLE_MATERIAL_SNAPSHOT_SQL = f"""
-SELECT snapshot.snapshot_id, snapshot.external_system, snapshot.restore_epoch,
-       snapshot.high_watermark_relay_order,
-       snapshot.material_high_watermark_relay_order, snapshot.item_count,
-       snapshot.merkle_root, snapshot.created_at, snapshot.expires_at
-FROM ops.poi_cache_target_snapshots AS snapshot
-WHERE snapshot.external_system = :external_system
-  AND snapshot.restore_epoch = :restore_epoch
-  AND snapshot.material_high_watermark_relay_order
+#: 앞판에는 재사용 질의가 둘이었다. generic은 reconciliation이 참조한 snapshot을
+#: 쓰지 못했고(`NOT EXISTS (... requests ...)`), reconciliation만 generic을 물려받을 수
+#: 있었다. 물려받으면 만료 시각까지 함께 물려받기 때문이고, 그건 header 하나가 material과
+#: receipt를 겸했기 때문이다. 이제 둘 다 **같은 material**을 찾아 **각자 receipt**를
+#: 만들므로 질의 하나로 충분하고 공유가 양방향이 된다.
+#:
+#: partial unique(`compacted_at IS NULL`)가 identity마다 살아 있는 material을 하나로
+#: 강제하므로 정렬·LIMIT이 필요 없다. 둘 이상 나오면 그것이 사고이므로 그대로 터진다.
+#:
+#: **receipt 존재를 보지 않는 이유.** "item이 온전한가"의 권한은 `compacted_at` 하나다 —
+#: 배출은 표시된 material만 건드리므로(`_PRUNE_ORPHANED_MATERIAL_ITEMS_SQL`) 표시가 없다는
+#: 것이 곧 온전하다는 뜻이다. receipt가 없는 orphan이어도 아직 표시되지 않았다면 item은
+#: 그대로이고 재사용해도 된다.
+#:
+#: 그런 상태는 실제로 존재한다 — 표시는 batch당 `header_limit`(기본 100)로 bounded라
+#: 후보가 더 많으면 남는다. 그러니 "표시 뒤에는 orphan이 없다"는 식으로 읽고
+#: `_PRUNE_ORPHANED_MATERIAL_ITEMS_SQL`에 `OR NOT EXISTS(receipt)`를 되돌리면 안 된다.
+#: 그것이 부분 배출된 material을 재사용 가능하게 만든 구멍이었다.
+_GET_REUSABLE_MATERIAL_SQL = """
+SELECT material.material_id, material.external_system, material.restore_epoch,
+       material.material_high_watermark_relay_order,
+       material.safe_high_watermark_relay_order AS high_watermark_relay_order,
+       material.item_count, material.material_bytes, material.merkle_root,
+       material.materialized_at
+FROM ops.poi_cache_target_snapshot_materials AS material
+WHERE material.external_system = :external_system
+  AND material.restore_epoch = :restore_epoch
+  AND material.material_high_watermark_relay_order
       = :material_high_watermark_relay_order
-  AND (
-    snapshot.expires_at > now() + {_SNAPSHOT_REUSE_MIN_TTL_SQL}
-    OR EXISTS (
-      SELECT 1
-      FROM ops.poi_cache_target_reconciliation_requests AS request
-      WHERE request.snapshot_id = snapshot.snapshot_id
-    )
-  )
-ORDER BY
-  EXISTS (
-    SELECT 1
-    FROM ops.poi_cache_target_reconciliation_requests AS request
-    WHERE request.snapshot_id = snapshot.snapshot_id
-  ) DESC,
-  snapshot.created_at DESC,
-  snapshot.snapshot_id DESC
-LIMIT 1
-FOR SHARE OF snapshot
+  AND material.compacted_at IS NULL
+FOR SHARE OF material
 """
 
+#: 상한이 막는 것은 **item 사본의 수**다. 앞판에서는 사본 하나에 receipt 하나였으므로
+#: 미만료 generic receipt를 셌다. 이제 receipt N개가 material 하나를 공유하므로 receipt를
+#: 세면 저장 비용과 무관한 수를 세게 된다 — 살아 있는 material을 센다.
+#:
+#: `oldest_expires_at`은 그 material을 붙잡고 있는 receipt 중 가장 늦게 만료되는 것이다.
+#: 그 시각이 지나야 material이 orphan이 되어 GC 대상이 되기 때문이다.
 _GET_GENERIC_SNAPSHOT_CAPACITY_SQL = f"""
 WITH candidates AS MATERIALIZED (
-  SELECT snapshot.expires_at
-  FROM ops.poi_cache_target_snapshots AS snapshot
-  WHERE snapshot.external_system = :external_system
-    AND snapshot.expires_at > clock_timestamp()
+  SELECT (
+    SELECT max(receipt.expires_at)
+    FROM ops.poi_cache_target_snapshots AS receipt
+    WHERE receipt.material_id = material.material_id
+  ) AS expires_at
+  FROM ops.poi_cache_target_snapshot_materials AS material
+  WHERE material.external_system = :external_system
+    AND material.compacted_at IS NULL
+    AND EXISTS (
+      SELECT 1
+      FROM ops.poi_cache_target_snapshots AS receipt
+      WHERE receipt.material_id = material.material_id
+        AND receipt.expires_at > clock_timestamp()
+    )
+    -- reconciliation이 잡고 있는 material은 세지 않는다. 세면 오래 걸리는
+    -- reconciliation 하나가 그 stream의 generic paging을 상한으로 영구히 막는다.
+    -- 앞판의 `NOT EXISTS (... requests ...)`가 지키던 성질이다.
     AND NOT EXISTS (
       SELECT 1
-      FROM ops.poi_cache_target_reconciliation_requests AS request
-      WHERE request.snapshot_id = snapshot.snapshot_id
+      FROM ops.poi_cache_target_snapshots AS receipt
+      JOIN ops.poi_cache_target_reconciliation_requests AS request
+        ON request.snapshot_id = receipt.snapshot_id
+      WHERE receipt.material_id = material.material_id
     )
-  ORDER BY snapshot.expires_at, snapshot.snapshot_id
+  ORDER BY 1, material.material_id
   LIMIT {_GENERIC_SNAPSHOT_COPY_LIMIT}
 ), capacity AS (
   SELECT count(*) AS snapshot_count,
@@ -261,30 +292,10 @@ _RESET_SNAPSHOT_BARRIER_LOCK_TIMEOUT_SQL = """
 SELECT set_config('lock_timeout', '0', true)
 """
 
-_PRUNE_EXPIRED_SNAPSHOT_ITEMS_SQL = """
-WITH candidates AS (
-  SELECT item.snapshot_id, item.row_number
-  FROM ops.poi_cache_target_snapshot_items AS item
-  JOIN ops.poi_cache_target_snapshots AS snapshot
-    ON snapshot.snapshot_id = item.snapshot_id
-  WHERE snapshot.external_system = :external_system
-    AND snapshot.expires_at <= now()
-    AND NOT EXISTS (
-      SELECT 1
-      FROM ops.poi_cache_target_reconciliation_requests AS request
-      WHERE request.snapshot_id = snapshot.snapshot_id
-    )
-  ORDER BY item.snapshot_id, item.row_number
-  LIMIT :limit
-  FOR UPDATE OF snapshot, item SKIP LOCKED
-)
-DELETE FROM ops.poi_cache_target_snapshot_items AS item
-USING candidates
-WHERE item.snapshot_id = candidates.snapshot_id
-  AND item.row_number = candidates.row_number
-RETURNING item.snapshot_id, item.row_number
-"""
-
+#: 0231 뒤 GC 순서는 **receipt -> orphan material item -> orphan material**이다.
+#: receipt를 먼저 지워야 material이 orphan이 되고, item은 그 다음이다. item 삭제를
+#: material CASCADE에 맡기지 않는 이유는 1,000,000행짜리 material 하나가 transaction
+#: 하나를 통째로 삼키기 때문이다 — 앞판이 item을 따로 bounded 삭제하던 이유와 같다.
 _PRUNE_EXPIRED_SNAPSHOT_HEADERS_SQL = """
 WITH candidates AS (
   SELECT snapshot.snapshot_id
@@ -296,11 +307,6 @@ WITH candidates AS (
       FROM ops.poi_cache_target_reconciliation_requests AS request
       WHERE request.snapshot_id = snapshot.snapshot_id
     )
-    AND NOT EXISTS (
-      SELECT 1
-      FROM ops.poi_cache_target_snapshot_items AS item
-      WHERE item.snapshot_id = snapshot.snapshot_id
-    )
   ORDER BY snapshot.expires_at, snapshot.snapshot_id
   LIMIT :limit
   FOR UPDATE OF snapshot SKIP LOCKED
@@ -311,26 +317,189 @@ WHERE snapshot.snapshot_id = candidates.snapshot_id
 RETURNING snapshot.snapshot_id
 """
 
-_SELECT_EXPIRED_SNAPSHOT_GC_SYSTEM_SQL = """
-SELECT snapshot.external_system
-FROM ops.poi_cache_target_snapshots AS snapshot
-WHERE snapshot.expires_at <= now()
-  AND NOT EXISTS (
+#: **되찾기 후보**의 논리 조건. `compacted_at`은 "이 material의 item을 되찾기
+#: **시작**했다"는 표시이고, item은 **표시된 뒤에만** 지운다. 그래서 재사용 쪽의
+#: `compacted_at IS NULL` 하나가 "item이 온전하다"의 충분조건이 된다.
+#:
+#: 그 결합이 없으면 이런 일이 난다. GC가 orphan material의 item을 1,000행씩 지우는
+#: 도중(commit된 상태)에 그 material이 그대로 재사용 가능해서, consumer가 5,000을
+#: 말하는 root/count와 함께 4,000행을 받는다. receipt가 붙는 순간 orphan이 아니게 되어
+#: 배출도 멈추므로 손상이 영구가 된다. `0231` 이전에는 재사용이 "만료까지 75분 이상"을,
+#: item 정리가 "만료됨"을 봐서 두 술어가 만료를 축으로 상보적이었다 — 정규화하면서
+#: 그 결합이 사라졌고, 이 표시가 그것을 대신한다.
+#:
+#: 공통 조건 둘.
+#:
+#: 1. 아직 표시되지 않았다.
+#: 2. item이 실제로 있다. 빈 material을 표시하면 되찾는 byte는 0인데 그 receipt의
+#:    정상적인 빈 page가 410으로 바뀐다.
+#:
+#: 그리고 아래 둘 중 하나다.
+#:
+#: - **orphan** — 붙잡은 receipt가 하나도 없다. 표를 비운 뒤 행째 사라진다(phase 4).
+#: - **terminal audit** — reconciliation이 참조하는 receipt가 있고, 미만료 receipt는
+#:   없으며, 참조하는 **모든** reconciliation이 terminal이고 `completed_at`이 보존
+#:   기간보다 오래됐다. 이쪽은 표시가 영구히 남는다 — root/count가 감사 증거이고
+#:   그 receipt의 page는 typed 410이 된다.
+_COMPACTION_CANDIDATE_PREDICATE = """
+  material.compacted_at IS NULL
+  AND EXISTS (
     SELECT 1
-    FROM ops.poi_cache_target_reconciliation_requests AS request
-    WHERE request.snapshot_id = snapshot.snapshot_id
+    FROM ops.poi_cache_target_snapshot_material_items AS item
+    WHERE item.material_id = material.material_id
   )
   AND (
-    CAST(:after_external_system AS text) IS NULL
-    OR snapshot.external_system COLLATE "C"
-       > CAST(:after_external_system AS text) COLLATE "C"
+    NOT EXISTS (
+      SELECT 1
+      FROM ops.poi_cache_target_snapshots AS receipt
+      WHERE receipt.material_id = material.material_id
+    )
+    OR (
+      EXISTS (
+        SELECT 1
+        FROM ops.poi_cache_target_snapshots AS receipt
+        JOIN ops.poi_cache_target_reconciliation_requests AS request
+          ON request.snapshot_id = receipt.snapshot_id
+        WHERE receipt.material_id = material.material_id
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM ops.poi_cache_target_snapshots AS receipt
+        WHERE receipt.material_id = material.material_id
+          AND receipt.expires_at > now()
+      )
+      AND NOT EXISTS (
+        SELECT 1
+        FROM ops.poi_cache_target_snapshots AS receipt
+        JOIN ops.poi_cache_target_reconciliation_requests AS request
+          ON request.snapshot_id = receipt.snapshot_id
+        WHERE receipt.material_id = material.material_id
+          AND (
+            request.status IN ('preparing','running')
+            OR request.completed_at IS NULL
+            OR request.completed_at
+               > now() - make_interval(
+                   secs => CAST(:compaction_retention_seconds AS double precision)
+                 )
+          )
+      )
+    )
   )
-GROUP BY snapshot.external_system
-ORDER BY snapshot.external_system COLLATE "C"
+"""
+
+#: 먼저 표시하고 나중에 비운다. 반대로 하면 1,000,000행을 한 transaction에 지우거나,
+#: 부분적으로 비운 material을 표시되지 않은 채 남겨 다음 batch가 다시 후보로 잡는다.
+#: 표시가 곧 reader의 410 전환 시점이고, 그 시점부터 item은 계약상 없는 것이다.
+_MARK_COMPACTED_MATERIALS_SQL = f"""
+WITH candidates AS (
+  SELECT material.material_id
+  FROM ops.poi_cache_target_snapshot_materials AS material
+  WHERE material.external_system = :external_system
+    AND {_COMPACTION_CANDIDATE_PREDICATE.strip()}
+  ORDER BY material.materialized_at, material.material_id
+  LIMIT :limit
+  FOR UPDATE OF material SKIP LOCKED
+)
+UPDATE ops.poi_cache_target_snapshot_materials AS material
+SET compacted_at = clock_timestamp()
+FROM candidates
+WHERE material.material_id = candidates.material_id
+RETURNING material.material_id
+"""
+
+#: **표시된** material의 item만 지운다. orphan도 표시를 먼저 받으므로 여기서 따로
+#: 보지 않는다 — `NOT EXISTS(receipt)`를 여기 두면 표시 없이 지우는 경로가 살아나고,
+#: 그것이 부분 배출된 material을 재사용 가능하게 만든 구멍이었다.
+_PRUNE_ORPHANED_MATERIAL_ITEMS_SQL = """
+WITH candidates AS (
+  SELECT item.material_id, item.row_number
+  FROM ops.poi_cache_target_snapshot_material_items AS item
+  JOIN ops.poi_cache_target_snapshot_materials AS material
+    ON material.material_id = item.material_id
+  WHERE material.external_system = :external_system
+    AND material.compacted_at IS NOT NULL
+  ORDER BY item.material_id, item.row_number
+  LIMIT :limit
+  FOR UPDATE OF material, item SKIP LOCKED
+)
+DELETE FROM ops.poi_cache_target_snapshot_material_items AS item
+USING candidates
+WHERE item.material_id = candidates.material_id
+  AND item.row_number = candidates.row_number
+RETURNING item.material_id, item.row_number
+"""
+
+_PRUNE_ORPHANED_MATERIALS_SQL = """
+WITH candidates AS (
+  SELECT material.material_id
+  FROM ops.poi_cache_target_snapshot_materials AS material
+  WHERE material.external_system = :external_system
+    AND NOT EXISTS (
+      SELECT 1
+      FROM ops.poi_cache_target_snapshots AS receipt
+      WHERE receipt.material_id = material.material_id
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM ops.poi_cache_target_snapshot_material_items AS item
+      WHERE item.material_id = material.material_id
+    )
+  ORDER BY material.materialized_at, material.material_id
+  LIMIT :limit
+  FOR UPDATE OF material SKIP LOCKED
+)
+DELETE FROM ops.poi_cache_target_snapshot_materials AS material
+USING candidates
+WHERE material.material_id = candidates.material_id
+RETURNING material.material_id
+"""
+
+#: backlog가 있는 system은 넷 중 하나다 — 지울 수 있는 만료 receipt가 있거나,
+#: receipt가 사라져 orphan이 된 material이 있거나, 이미 compaction으로 표시됐지만
+#: item이 남은 material이 있거나, 새로 표시할 compaction 후보가 있거나.
+#: 앞의 것만 보면 마지막 receipt를 지운 batch 뒤 나머지가 영원히 남는다.
+_SELECT_EXPIRED_SNAPSHOT_GC_SYSTEM_SQL = f"""
+SELECT external_system
+FROM (
+  SELECT snapshot.external_system
+  FROM ops.poi_cache_target_snapshots AS snapshot
+  WHERE snapshot.expires_at <= now()
+    AND NOT EXISTS (
+      SELECT 1
+      FROM ops.poi_cache_target_reconciliation_requests AS request
+      WHERE request.snapshot_id = snapshot.snapshot_id
+    )
+  UNION
+  SELECT material.external_system
+  FROM ops.poi_cache_target_snapshot_materials AS material
+  WHERE NOT EXISTS (
+    SELECT 1
+    FROM ops.poi_cache_target_snapshots AS receipt
+    WHERE receipt.material_id = material.material_id
+  )
+  UNION
+  SELECT material.external_system
+  FROM ops.poi_cache_target_snapshot_materials AS material
+  WHERE material.compacted_at IS NOT NULL
+    AND EXISTS (
+      SELECT 1
+      FROM ops.poi_cache_target_snapshot_material_items AS item
+      WHERE item.material_id = material.material_id
+    )
+  UNION
+  SELECT material.external_system
+  FROM ops.poi_cache_target_snapshot_materials AS material
+  WHERE {_COMPACTION_CANDIDATE_PREDICATE.strip()}
+) AS backlog
+WHERE CAST(:after_external_system AS text) IS NULL
+   OR external_system COLLATE "C"
+      > CAST(:after_external_system AS text) COLLATE "C"
+GROUP BY external_system
+ORDER BY external_system COLLATE "C"
 LIMIT 1
 """
 
-_HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL = """
+_HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL = f"""
 SELECT EXISTS (
   SELECT 1
   FROM ops.poi_cache_target_snapshots AS snapshot
@@ -340,6 +509,27 @@ SELECT EXISTS (
       FROM ops.poi_cache_target_reconciliation_requests AS request
       WHERE request.snapshot_id = snapshot.snapshot_id
     )
+) OR EXISTS (
+  SELECT 1
+  FROM ops.poi_cache_target_snapshot_materials AS material
+  WHERE NOT EXISTS (
+    SELECT 1
+    FROM ops.poi_cache_target_snapshots AS receipt
+    WHERE receipt.material_id = material.material_id
+  )
+) OR EXISTS (
+  SELECT 1
+  FROM ops.poi_cache_target_snapshot_materials AS material
+  WHERE material.compacted_at IS NOT NULL
+    AND EXISTS (
+      SELECT 1
+      FROM ops.poi_cache_target_snapshot_material_items AS item
+      WHERE item.material_id = material.material_id
+    )
+) OR EXISTS (
+  SELECT 1
+  FROM ops.poi_cache_target_snapshot_materials AS material
+  WHERE {_COMPACTION_CANDIDATE_PREDICATE.strip()}
 ) AS has_more
 """
 
@@ -360,16 +550,44 @@ WITH snapshot_inventory AS MATERIALIZED (
            AS unexpired_unreferenced_headers,
          count(*) FILTER (WHERE referenced) AS referenced_headers
   FROM snapshot_inventory
+), material_inventory AS MATERIALIZED (
+  -- item의 분류 축은 이제 receipt가 아니라 material이다. receipt N개가 material
+  -- 하나를 공유하므로 "이 item이 만료됐는가"를 receipt 하나로 물을 수 없다.
+  --
+  --   reclaimable = 되찾기가 표시됐거나 붙잡은 receipt가 없다 -> **GC가 지울 item**
+  --   referenced  = 그 외 중 reconciliation이 참조하는 receipt가 있다
+  --   그 외       = 살아 있는 receipt가 붙잡고 있다
+  --
+  -- `reclaimable`을 orphan만으로 정의하면 표시된 audit material의 item이 어느 축에도
+  -- 잡히지 않아, drain이 남아 있는데 `remaining_items = 0`이 된다(적대 리뷰 지적).
+  -- 세 축은 서로 겹치지 않아야 합계가 맞으므로 우선순위를 둔다.
+  SELECT material.material_id,
+         (
+           material.compacted_at IS NOT NULL
+           OR NOT EXISTS (
+             SELECT 1
+             FROM ops.poi_cache_target_snapshots AS receipt
+             WHERE receipt.material_id = material.material_id
+           )
+         ) AS reclaimable,
+         EXISTS (
+           SELECT 1
+           FROM ops.poi_cache_target_snapshots AS receipt
+           JOIN ops.poi_cache_target_reconciliation_requests AS request
+             ON request.snapshot_id = receipt.snapshot_id
+           WHERE receipt.material_id = material.material_id
+         ) AS referenced
+  FROM ops.poi_cache_target_snapshot_materials AS material
 ), item_counts AS (
   SELECT count(*) AS total_items,
-         count(*) FILTER (WHERE inventory.expired AND NOT inventory.referenced)
-           AS remaining_items,
-         count(*) FILTER (WHERE NOT inventory.expired AND NOT inventory.referenced)
+         count(*) FILTER (WHERE inventory.reclaimable) AS remaining_items,
+         count(*) FILTER (WHERE NOT inventory.reclaimable AND NOT inventory.referenced)
            AS unexpired_unreferenced_items,
-         count(*) FILTER (WHERE inventory.referenced) AS referenced_items
-  FROM ops.poi_cache_target_snapshot_items AS item
-  JOIN snapshot_inventory AS inventory
-    ON inventory.snapshot_id = item.snapshot_id
+         count(*) FILTER (WHERE NOT inventory.reclaimable AND inventory.referenced)
+           AS referenced_items
+  FROM ops.poi_cache_target_snapshot_material_items AS item
+  JOIN material_inventory AS inventory
+    ON inventory.material_id = item.material_id
 ), relation_stats AS (
   SELECT COALESCE(sum(pg_table_size(relation.oid)), 0)::bigint
            AS snapshot_table_bytes,
@@ -396,7 +614,8 @@ WITH snapshot_inventory AS MATERIALIZED (
   WHERE namespace.nspname = 'ops'
     AND relation.relname IN (
       'poi_cache_target_snapshots',
-      'poi_cache_target_snapshot_items'
+      'poi_cache_target_snapshot_materials',
+      'poi_cache_target_snapshot_material_items'
     )
 )
 SELECT item_counts.remaining_items, header_counts.remaining_headers,
@@ -413,11 +632,13 @@ CROSS JOIN header_counts
 CROSS JOIN relation_stats
 """
 
+#: `external_system`은 material이 소유한다. item 행마다 되풀이하지 않고 bind로 넘긴다 —
+#: 호출자는 이미 receipt를 읽어 알고 있다.
 _GET_SNAPSHOT_ITEMS_SQL = """
-SELECT external_system, target_key, state, source_generation,
+SELECT :external_system AS external_system, target_key, state, source_generation,
        source_payload_fingerprint, row_number
-FROM ops.poi_cache_target_snapshot_items
-WHERE snapshot_id = CAST(:snapshot_id AS uuid)
+FROM ops.poi_cache_target_snapshot_material_items
+WHERE material_id = CAST(:material_id AS uuid)
   AND row_number > :after_row_number
 ORDER BY row_number
 LIMIT :limit
@@ -426,13 +647,16 @@ LIMIT :limit
 _GET_RECONCILIATION_SNAPSHOT_SQL = """
 SELECT request.request_id, request.status AS reconciliation_status,
        request.phase_version,
-       snapshot.snapshot_id, snapshot.external_system, snapshot.restore_epoch,
-       snapshot.high_watermark_relay_order, snapshot.item_count,
-       snapshot.merkle_root, snapshot.created_at, snapshot.expires_at,
+       snapshot.snapshot_id, snapshot.external_system, material.restore_epoch,
+       material.safe_high_watermark_relay_order AS high_watermark_relay_order,
+       material.item_count,
+       material.merkle_root, snapshot.created_at, snapshot.expires_at,
        stream.consumer_id, stream.control_version
 FROM ops.poi_cache_target_reconciliation_requests AS request
 LEFT JOIN ops.poi_cache_target_snapshots AS snapshot
   ON snapshot.snapshot_id = request.snapshot_id
+LEFT JOIN ops.poi_cache_target_snapshot_materials AS material
+  ON material.material_id = snapshot.material_id
 JOIN ops.poi_cache_target_streams AS stream
   ON stream.external_system = request.external_system
 WHERE request.request_id = CAST(:request_id AS uuid)
@@ -446,14 +670,16 @@ SELECT request.request_id, request.external_system, request.status,
        request.created_at, request.started_at, request.completed_at,
        stream.consumer_id, stream.restore_epoch AS stream_restore_epoch,
        stream.control_version,
-       snapshot.restore_epoch, snapshot.restore_epoch AS snapshot_restore_epoch,
-       snapshot.high_watermark_relay_order, snapshot.item_count,
-       snapshot.merkle_root
+       material.restore_epoch, material.restore_epoch AS snapshot_restore_epoch,
+       material.safe_high_watermark_relay_order AS high_watermark_relay_order,
+       material.item_count, material.merkle_root
 FROM ops.poi_cache_target_reconciliation_requests AS request
 JOIN ops.poi_cache_target_streams AS stream
   ON stream.external_system = request.external_system
 LEFT JOIN ops.poi_cache_target_snapshots AS snapshot
   ON snapshot.snapshot_id = request.snapshot_id
+LEFT JOIN ops.poi_cache_target_snapshot_materials AS material
+  ON material.material_id = snapshot.material_id
 WHERE request.request_id = CAST(:request_id AS uuid)
 """
 
@@ -469,13 +695,15 @@ LEFT JOIN LATERAL (
   SELECT request.request_id, request.status AS reconciliation_status,
          request.phase_version,
          snapshot.snapshot_id,
-         snapshot.restore_epoch AS snapshot_restore_epoch,
-         snapshot.item_count, snapshot.merkle_root,
-         snapshot.high_watermark_relay_order,
+         material.restore_epoch AS snapshot_restore_epoch,
+         material.item_count, material.merkle_root,
+         material.safe_high_watermark_relay_order AS high_watermark_relay_order,
          request.created_at AS reconciliation_created_at
   FROM ops.poi_cache_target_reconciliation_requests AS request
   LEFT JOIN ops.poi_cache_target_snapshots AS snapshot
     ON snapshot.snapshot_id = request.snapshot_id
+  LEFT JOIN ops.poi_cache_target_snapshot_materials AS material
+    ON material.material_id = snapshot.material_id
   WHERE request.external_system = stream.external_system
     AND request.status IN ('preparing', 'running')
   ORDER BY request.created_at DESC, request.request_id DESC
@@ -503,9 +731,13 @@ LEFT JOIN ops.poi_cache_target_outbox_events AS event
 LEFT JOIN ops.poi_cache_target_outbox_deliveries AS delivery
   ON delivery.event_id = event.event_id
 LEFT JOIN LATERAL (
-  SELECT fixed.snapshot_id, fixed.item_count, fixed.merkle_root,
-         fixed.high_watermark_relay_order, fixed.created_at
+  SELECT fixed.snapshot_id, fixed_material.item_count, fixed_material.merkle_root,
+         fixed_material.safe_high_watermark_relay_order
+           AS high_watermark_relay_order,
+         fixed.created_at
   FROM ops.poi_cache_target_snapshots AS fixed
+  JOIN ops.poi_cache_target_snapshot_materials AS fixed_material
+    ON fixed_material.material_id = fixed.material_id
   WHERE fixed.external_system = stream.external_system
   ORDER BY fixed.created_at DESC, fixed.snapshot_id DESC
   LIMIT 1
@@ -525,7 +757,7 @@ _GET_RECONCILIATION_BY_COMMAND_SQL = """
 SELECT request.request_id, request.external_system, request.status,
        request.phase_version, request.snapshot_id,
        request.expected_merkle_root, request.actual_merkle_root, request.error_code,
-       snapshot.restore_epoch, snapshot.item_count,
+       material.restore_epoch, material.item_count,
        stream.control_version,
        request.created_at, request.started_at, request.completed_at
 FROM ops.poi_cache_target_reconciliation_requests AS request
@@ -533,6 +765,8 @@ JOIN ops.poi_cache_target_streams AS stream
   ON stream.external_system = request.external_system
 LEFT JOIN ops.poi_cache_target_snapshots AS snapshot
   ON snapshot.snapshot_id = request.snapshot_id
+LEFT JOIN ops.poi_cache_target_snapshot_materials AS material
+  ON material.material_id = snapshot.material_id
 WHERE request.command_id = :command_id
 """
 
@@ -618,13 +852,15 @@ SELECT request.request_id, request.external_system, request.status,
        request.phase_version, request.snapshot_id, request.expected_merkle_root,
        request.actual_merkle_root, request.error_code,
        request.created_at, request.started_at, request.completed_at,
-       snapshot.restore_epoch, snapshot.item_count,
+       material.restore_epoch, material.item_count,
        stream.control_version
 FROM ops.poi_cache_target_reconciliation_requests AS request
 JOIN ops.poi_cache_target_streams AS stream
   ON stream.external_system = request.external_system
 LEFT JOIN ops.poi_cache_target_snapshots AS snapshot
   ON snapshot.snapshot_id = request.snapshot_id
+LEFT JOIN ops.poi_cache_target_snapshot_materials AS material
+  ON material.material_id = snapshot.material_id
 WHERE request.request_id = CAST(:request_id AS uuid)
 FOR UPDATE OF request
 """
@@ -741,6 +977,9 @@ class CacheTargetSnapshotGcBatchResult:
     external_system: str | None
     deleted_items: int
     deleted_headers: int
+    #: 이 batch에서 compaction으로 표시한 material 수. item은 같은 batch에서 다
+    #: 지워지지 않을 수 있다(bounded) — 남은 것은 다음 batch가 이어서 지운다.
+    compacted_materials: int
     has_more: bool
 
 
@@ -1229,7 +1468,7 @@ async def _scan_snapshot_material(
         )
     return _SnapshotMaterialScan(
         header={
-            "snapshot_id": str(uuid4()),
+            "material_id": str(uuid4()),
             "external_system": external_system,
             "restore_epoch": int(first["restore_epoch"]),
             "high_watermark_relay_order": int(first["high_watermark_relay_order"]),
@@ -1243,32 +1482,69 @@ async def _scan_snapshot_material(
     )
 
 
+async def _mint_receipt(
+    session: AsyncSession,
+    *,
+    material: Mapping[str, Any],
+    receipt_kind: str,
+) -> dict[str, Any]:
+    """material 하나에 새 receipt를 붙인다.
+
+    generic page와 reconciliation이 같은 material을 공유하는 지점이다. 각자 receipt를
+    만들기 때문에 만료 시각을 물려받지 않고, 공유가 양방향이 된다.
+
+    replay cursor는 여기서 정하지 않는다. material이 **처음 고정될 때** 관측한 값을
+    쓴다 — 재사용 시점의 더 높은 값을 광고하면 그 사이에 낀 비-membership event를
+    consumer가 건너뛴다.
+    """
+
+    snapshot_id = str(uuid4())
+    issued = (
+        await session.execute(
+            text(_INSERT_RECEIPT_SQL),
+            {
+                "snapshot_id": snapshot_id,
+                "material_id": material["material_id"],
+                "receipt_kind": receipt_kind,
+                "external_system": material["external_system"],
+            },
+        )
+    ).one()
+    return {
+        **dict(material),
+        "snapshot_id": snapshot_id,
+        "receipt_kind": receipt_kind,
+        "created_at": issued._mapping["created_at"],
+        "expires_at": issued._mapping["expires_at"],
+    }
+
+
 async def _persist_snapshot_material(
     session: AsyncSession,
     *,
     scan: _SnapshotMaterialScan,
+    receipt_kind: str,
     return_limit: int,
 ) -> tuple[Any, tuple[CacheTargetSnapshotItem, ...]]:
     header = scan.header
     try:
-        persisted = (
-            await session.execute(
-                text(_INSERT_SNAPSHOT_SQL),
-                {
-                    "snapshot_id": header["snapshot_id"],
-                    "external_system": header["external_system"],
-                    "restore_epoch": header["restore_epoch"],
-                    "high_watermark_relay_order": header[
-                        "high_watermark_relay_order"
-                    ],
-                    "material_high_watermark_relay_order": header[
-                        "material_high_watermark_relay_order"
-                    ],
-                    "item_count": header["item_count"],
-                    "merkle_root": header["merkle_root"],
-                },
-            )
-        ).one()
+        await session.execute(
+            text(_INSERT_MATERIAL_SQL),
+            {
+                "material_id": header["material_id"],
+                "external_system": header["external_system"],
+                "restore_epoch": header["restore_epoch"],
+                "material_high_watermark_relay_order": header[
+                    "material_high_watermark_relay_order"
+                ],
+                "safe_high_watermark_relay_order": header[
+                    "high_watermark_relay_order"
+                ],
+                "item_count": header["item_count"],
+                "material_bytes": scan.material_bytes,
+                "merkle_root": header["merkle_root"],
+            },
+        )
         accumulator = SnapshotMerkleAccumulatorV1()
         batch: list[dict[str, object]] = []
         return_items: list[CacheTargetSnapshotItem] = []
@@ -1284,9 +1560,8 @@ async def _persist_snapshot_material(
                 return_items.append(item)
             batch.append(
                 {
-                    "snapshot_id": header["snapshot_id"],
+                    "material_id": header["material_id"],
                     "row_number": item.row_number,
-                    "external_system": item.external_system,
                     "target_key": item.target_key,
                     "state": item.state,
                     "source_generation": item.source_generation,
@@ -1296,12 +1571,12 @@ async def _persist_snapshot_material(
             if len(batch) < _SNAPSHOT_STREAM_BATCH_SIZE:
                 continue
             await session.execute(
-                text(_INSERT_SNAPSHOT_ITEM_SQL),
+                text(_INSERT_MATERIAL_ITEM_SQL),
                 batch,
             )
             batch = []
         if batch:
-            await session.execute(text(_INSERT_SNAPSHOT_ITEM_SQL), batch)
+            await session.execute(text(_INSERT_MATERIAL_ITEM_SQL), batch)
     except DBAPIError as exc:
         if getattr(exc.orig, "sqlstate", None) == "57014":
             raise CacheTargetStreamConflict(
@@ -1315,12 +1590,14 @@ async def _persist_snapshot_material(
         or accumulator.hexdigest() != str(header["merkle_root"])
     ):
         raise RuntimeError("snapshot 두 번째 material scan이 최초 checksum과 다릅니다.")
+    # receipt는 item을 다 쓰고 검증한 **뒤에** 붙인다. 순서를 뒤집으면 검증 실패로
+    # rollback되기 전 아주 짧은 창 동안 불완전한 material을 가리키는 receipt가 존재한다.
     return (
-        {
-            **header,
-            "created_at": persisted._mapping["created_at"],
-            "expires_at": persisted._mapping["expires_at"],
-        },
+        await _mint_receipt(
+            session,
+            material=header,
+            receipt_kind=receipt_kind,
+        ),
         tuple(return_items),
     )
 
@@ -1329,6 +1606,7 @@ async def _create_snapshot(
     session: AsyncSession,
     *,
     external_system: str,
+    receipt_kind: str,
     return_limit: int = 0,
 ) -> tuple[Any, tuple[CacheTargetSnapshotItem, ...]]:
     async with _snapshot_build_deadline():
@@ -1339,6 +1617,7 @@ async def _create_snapshot(
         return await _persist_snapshot_material(
             session,
             scan=scan,
+            receipt_kind=receipt_kind,
             return_limit=return_limit,
         )
 
@@ -1348,19 +1627,11 @@ async def _prune_expired_generic_snapshots(
     *,
     external_system: str,
 ) -> None:
-    await session.execute(
-        text(_PRUNE_EXPIRED_SNAPSHOT_ITEMS_SQL),
-        {
-            "external_system": external_system,
-            "limit": _SNAPSHOT_ITEM_PRUNE_LIMIT,
-        },
-    )
-    await session.execute(
-        text(_PRUNE_EXPIRED_SNAPSHOT_HEADERS_SQL),
-        {
-            "external_system": external_system,
-            "limit": _SNAPSHOT_HEADER_PRUNE_LIMIT,
-        },
+    await _prune_snapshot_generation(
+        session,
+        external_system=external_system,
+        item_limit=_SNAPSHOT_ITEM_PRUNE_LIMIT,
+        header_limit=_SNAPSHOT_HEADER_PRUNE_LIMIT,
     )
 
 
@@ -1379,12 +1650,72 @@ async def _snapshot_has_minimum_return_ttl(
     )
 
 
+async def _prune_snapshot_generation(
+    session: AsyncSession,
+    *,
+    external_system: str,
+    item_limit: int,
+    header_limit: int,
+    compaction_retention_seconds: float = _MATERIAL_COMPACTION_RETENTION_SECONDS,
+) -> tuple[int, int, int]:
+    """한 system의 snapshot 저장 공간을 bounded 4단계로 되찾는다.
+
+    순서가 뜻을 갖는다.
+
+    1. 만료·미참조 **receipt**를 지운다. 이래야 material이 orphan이 된다.
+    2. 되찾을 material을 **표시**한다(orphan, 그리고 보존 기간을 넘긴 terminal audit).
+       표시는 "item을 되찾기 시작했다"는 뜻이고, **재사용은 표시된 material을 잡지
+       않는다**. audit material에서는 이 순간이 reader의 410 전환 시점이기도 하다.
+    3. **표시된** material의 **item**을 지운다. 표시 없이 지우는 경로를 두면 부분
+       배출된 material이 재사용 가능해진다(적대 리뷰가 잡은 구멍).
+    4. item이 빈 orphan **material**을 지운다. audit material은 표시된 채로 남는다 —
+       root/count가 감사 증거다.
+
+    반환은 ``(지운 item 수, 지운 receipt 수, 표시한 material 수)``다.
+    """
+
+    deleted_headers = len(
+        (
+            await session.execute(
+                text(_PRUNE_EXPIRED_SNAPSHOT_HEADERS_SQL),
+                {"external_system": external_system, "limit": header_limit},
+            )
+        ).all()
+    )
+    compacted_materials = len(
+        (
+            await session.execute(
+                text(_MARK_COMPACTED_MATERIALS_SQL),
+                {
+                    "external_system": external_system,
+                    "limit": header_limit,
+                    "compaction_retention_seconds": compaction_retention_seconds,
+                },
+            )
+        ).all()
+    )
+    deleted_items = len(
+        (
+            await session.execute(
+                text(_PRUNE_ORPHANED_MATERIAL_ITEMS_SQL),
+                {"external_system": external_system, "limit": item_limit},
+            )
+        ).all()
+    )
+    await session.execute(
+        text(_PRUNE_ORPHANED_MATERIALS_SQL),
+        {"external_system": external_system, "limit": header_limit},
+    )
+    return deleted_items, deleted_headers, compacted_materials
+
+
 async def prune_expired_cache_target_snapshots_batch(
     session: AsyncSession,
     *,
     after_external_system: str | None = None,
     item_limit: int = _SNAPSHOT_ITEM_PRUNE_LIMIT,
     header_limit: int = _SNAPSHOT_HEADER_PRUNE_LIMIT,
+    compaction_retention_seconds: float = _MATERIAL_COMPACTION_RETENTION_SECONDS,
 ) -> CacheTargetSnapshotGcBatchResult:
     """만료·미참조 snapshot을 한 system/한 transaction 분량만 정리한다.
 
@@ -1403,58 +1734,58 @@ async def prune_expired_cache_target_snapshots_batch(
         raise ValueError("item_limit은 1 이상 10000 이하여야 합니다.")
     if not 0 < header_limit <= 1_000:
         raise ValueError("header_limit은 1 이상 1000 이하여야 합니다.")
+    if compaction_retention_seconds <= 0:
+        raise ValueError("compaction_retention_seconds는 0보다 커야 합니다.")
 
+    select_params: dict[str, object] = {
+        "after_external_system": after_external_system,
+        "compaction_retention_seconds": compaction_retention_seconds,
+    }
     system_row = (
         await session.execute(
             text(_SELECT_EXPIRED_SNAPSHOT_GC_SYSTEM_SQL),
-            {"after_external_system": after_external_system},
+            select_params,
         )
     ).one_or_none()
     if system_row is None and after_external_system is not None:
         system_row = (
             await session.execute(
                 text(_SELECT_EXPIRED_SNAPSHOT_GC_SYSTEM_SQL),
-                {"after_external_system": None},
+                {**select_params, "after_external_system": None},
             )
         ).one_or_none()
 
     external_system: str | None = None
     deleted_items = 0
     deleted_headers = 0
+    compacted_materials = 0
     if system_row is not None:
         external_system = str(system_row._mapping["external_system"])
-        deleted_items = len(
-            (
-                await session.execute(
-                    text(_PRUNE_EXPIRED_SNAPSHOT_ITEMS_SQL),
-                    {
-                        "external_system": external_system,
-                        "limit": item_limit,
-                    },
-                )
-            ).all()
-        )
-        deleted_headers = len(
-            (
-                await session.execute(
-                    text(_PRUNE_EXPIRED_SNAPSHOT_HEADERS_SQL),
-                    {
-                        "external_system": external_system,
-                        "limit": header_limit,
-                    },
-                )
-            ).all()
+        (
+            deleted_items,
+            deleted_headers,
+            compacted_materials,
+        ) = await _prune_snapshot_generation(
+            session,
+            external_system=external_system,
+            item_limit=item_limit,
+            header_limit=header_limit,
+            compaction_retention_seconds=compaction_retention_seconds,
         )
 
     has_more = bool(
         (
-            await session.execute(text(_HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL))
+            await session.execute(
+                text(_HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL),
+                {"compaction_retention_seconds": compaction_retention_seconds},
+            )
         ).scalar_one()
     )
     return CacheTargetSnapshotGcBatchResult(
         external_system=external_system,
         deleted_items=deleted_items,
         deleted_headers=deleted_headers,
+        compacted_materials=compacted_materials,
         has_more=has_more,
     )
 
@@ -1494,12 +1825,12 @@ async def observe_expired_cache_target_snapshot_backlog(
     )
 
 
-async def _get_reusable_reconciliation_material(
+async def _read_stream_identity(
     session: AsyncSession,
     *,
     external_system: str,
-) -> dict[str, Any] | None:
-    """현재 source material과 같은 기존 snapshot header/item을 공유한다."""
+) -> dict[str, Any]:
+    """`FOR SHARE OF stream` 아래에서 현재 material identity와 cursor를 읽는다."""
 
     await _barrier_snapshot_stream(session, external_system=external_system)
     identity_row = (
@@ -1513,10 +1844,24 @@ async def _get_reusable_reconciliation_material(
             "stream_not_found",
             "snapshot을 만들 cache target stream이 없습니다.",
         )
-    identity = identity_row._mapping
+    return dict(identity_row._mapping)
+
+
+async def _get_reusable_material(
+    session: AsyncSession,
+    *,
+    identity: Mapping[str, Any],
+    external_system: str,
+) -> dict[str, Any] | None:
+    """현재 source membership과 같은 **살아 있는** material을 찾는다.
+
+    generic page와 reconciliation seal이 같은 이 함수를 쓴다. 앞판에서는 질의가 둘로
+    갈려 공유가 단방향이었다(`0231` migration docstring 참조).
+    """
+
     reusable = (
         await session.execute(
-            text(_GET_REUSABLE_MATERIAL_SNAPSHOT_SQL),
+            text(_GET_REUSABLE_MATERIAL_SQL),
             {
                 "external_system": external_system,
                 "restore_epoch": int(identity["restore_epoch"]),
@@ -1527,6 +1872,52 @@ async def _get_reusable_reconciliation_material(
         )
     ).one_or_none()
     return dict(reusable._mapping) if reusable is not None else None
+
+
+async def _reuse_or_build_material(
+    session: AsyncSession,
+    *,
+    external_system: str,
+    receipt_kind: str,
+    return_limit: int,
+) -> tuple[dict[str, Any], tuple[CacheTargetSnapshotItem, ...]]:
+    """살아 있는 material이 있으면 receipt만 붙이고, 없으면 새로 만든다."""
+
+    identity = await _read_stream_identity(
+        session,
+        external_system=external_system,
+    )
+    material = await _get_reusable_material(
+        session,
+        identity=identity,
+        external_system=external_system,
+    )
+    if material is None:
+        return await _create_snapshot(
+            session,
+            external_system=external_system,
+            receipt_kind=receipt_kind,
+            return_limit=return_limit,
+        )
+    header = await _mint_receipt(
+        session,
+        material=material,
+        receipt_kind=receipt_kind,
+    )
+    if return_limit <= 0:
+        return header, ()
+    item_rows = (
+        await session.execute(
+            text(_GET_SNAPSHOT_ITEMS_SQL),
+            {
+                "external_system": external_system,
+                "material_id": header["material_id"],
+                "after_row_number": 0,
+                "limit": return_limit,
+            },
+        )
+    ).all()
+    return header, tuple(_snapshot_item(item) for item in item_rows)
 
 
 async def _create_generic_snapshot(
@@ -1549,51 +1940,36 @@ async def _create_generic_snapshot(
             "snapshot_busy",
             "같은 stream의 generic snapshot 생성이 이미 진행 중입니다.",
         )
-    await _barrier_snapshot_stream(
+    identity = await _read_stream_identity(
         session,
         external_system=external_system,
     )
-    identity_row = (
-        await session.execute(
-            text(_GET_SNAPSHOT_IDENTITY_SQL),
-            {"external_system": external_system},
+    material = await _get_reusable_material(
+        session,
+        identity=identity,
+        external_system=external_system,
+    )
+    if material is not None:
+        # 새 receipt는 언제나 full TTL로 시작한다. 앞판이 재사용 전에 잔여 TTL을
+        # 재던 검사(`_snapshot_has_minimum_return_ttl`)는 header 하나를 물려받아
+        # 만료 시각까지 함께 물려받았기 때문에 필요했다 — 이제 필요 없다.
+        header = await _mint_receipt(
+            session,
+            material=material,
+            receipt_kind="generic",
         )
-    ).one_or_none()
-    if identity_row is None:
-        raise CacheTargetStreamConflict(
-            "stream_not_found",
-            "snapshot을 만들 cache target stream이 없습니다.",
-        )
-    identity = identity_row._mapping
-    reusable = (
-        await session.execute(
-            text(_GET_REUSABLE_SNAPSHOT_SQL),
-            {
-                "external_system": external_system,
-                "restore_epoch": int(identity["restore_epoch"]),
-                "material_high_watermark_relay_order": int(
-                    identity["material_high_watermark_relay_order"]
-                ),
-            },
-        )
-    ).one_or_none()
-    if reusable is not None:
-        header = dict(reusable._mapping)
         item_rows = (
             await session.execute(
                 text(_GET_SNAPSHOT_ITEMS_SQL),
                 {
-                    "snapshot_id": header["snapshot_id"],
+                    "external_system": external_system,
+                    "material_id": header["material_id"],
                     "after_row_number": 0,
                     "limit": limit,
                 },
             )
         ).all()
-        if await _snapshot_has_minimum_return_ttl(
-            session,
-            expires_at=cast(datetime, header["expires_at"]),
-        ):
-            return header, tuple(_snapshot_item(item) for item in item_rows)
+        return header, tuple(_snapshot_item(item) for item in item_rows)
     capacity_row = (
         await session.execute(
             text(_GET_GENERIC_SNAPSHOT_CAPACITY_SQL),
@@ -1601,7 +1977,7 @@ async def _create_generic_snapshot(
         )
     ).one()
     capacity = capacity_row._mapping
-    if int(capacity["snapshot_count"]) >= _GENERIC_SNAPSHOT_COPY_LIMIT:
+    if int(capacity["snapshot_count"] or 0) >= _GENERIC_SNAPSHOT_COPY_LIMIT:
         oldest_expires_at = cast(datetime, capacity["oldest_expires_at"])
         raise CacheTargetStreamConflict(
             "snapshot_capacity_exceeded",
@@ -1620,8 +1996,12 @@ async def _create_generic_snapshot(
     header, items = await _create_snapshot(
         session,
         external_system=external_system,
+        receipt_kind="generic",
         return_limit=limit,
     )
+    # 재사용 경로에는 걸지 않는다. 거기 receipt는 방금 만들어져 언제나 full TTL이고,
+    # 검사해도 통과만 하는 게이트가 된다. 여기서만 뜻이 있다 — 두 번의 scan과
+    # 1,000,000행 INSERT가 handoff floor를 먹어치울 수 있는 유일한 경로다.
     if not await _snapshot_has_minimum_return_ttl(
         session,
         expires_at=cast(datetime, header["expires_at"]),
@@ -1665,17 +2045,23 @@ async def get_cache_target_snapshot(
                 "snapshot_not_found",
                 "요청한 stream의 fixed snapshot이 없습니다.",
             )
+        header = dict(row._mapping)
+        # compaction을 만료보다 **먼저** 본다. compaction 후보는 정의상 미만료
+        # receipt가 없으므로, 만료를 먼저 보면 410은 영원히 도달하지 않는다.
+        # 둘 다 참일 때 더 구체적인 쪽을 답한다 — 410은 보존된 receipt 값(개수·root·
+        # compaction 시각)을 함께 실어 주고, 만료는 "다시 받아라"만 말한다.
+        _reject_compacted_material(header)
         if not bool(row._mapping["valid"]):
             raise CacheTargetStreamConflict(
                 "snapshot_expired",
                 "fixed snapshot이 만료됐습니다.",
             )
-        header = dict(row._mapping)
         item_rows = (
             await session.execute(
                 text(_GET_SNAPSHOT_ITEMS_SQL),
                 {
-                    "snapshot_id": snapshot_id,
+                    "external_system": external_system,
+                    "material_id": header["material_id"],
                     "after_row_number": after_row_number,
                     "limit": limit,
                 },
@@ -1684,6 +2070,29 @@ async def get_cache_target_snapshot(
         items = tuple(_snapshot_item(item) for item in item_rows)
 
     return _snapshot_page(header=header, items=tuple(items), after_row_number=after_row_number)
+
+
+def _reject_compacted_material(header: Mapping[str, Any]) -> None:
+    """terminal compaction된 material을 typed 410으로 돌린다.
+
+    `_GET_SNAPSHOT_SQL`이 receipt와 material을 함께 `FOR SHARE`로 잡으므로, 이 판정을
+    통과한 뒤 compaction이 끼어들 수 없다 — reader는 정상 page 또는 410 중 하나만 보고
+    부분 page를 보지 않는다.
+    """
+
+    compacted_at = header.get("compacted_at")
+    if compacted_at is None:
+        return
+    raise CacheTargetStreamConflict(
+        "snapshot_material_compacted",
+        "snapshot material이 보존 기간을 지나 compaction됐습니다.",
+        current={
+            "snapshot_id": str(header["snapshot_id"]),
+            "item_count": int(header["item_count"]),
+            "merkle_root": str(header["merkle_root"]),
+            "compacted_at": cast(datetime, compacted_at).isoformat(),
+        },
+    )
 
 
 def _snapshot_page(
@@ -1767,6 +2176,10 @@ async def get_cache_target_reconciliation_snapshot(
     if snapshot_row is None:
         raise RuntimeError("running reconciliation request의 snapshot이 없습니다.")
     header.update(dict(snapshot_row._mapping))
+    # 지금 계약에서는 도달하지 않는다 — compaction 후보는 참조 reconciliation이 전부
+    # terminal이어야 하고, 위에서 `running`이 아니면 이미 막힌다. 그래도 둔다. 그
+    # 불변이 깨지면 부분 page 대신 typed 410이 나가야 한다.
+    _reject_compacted_material(header)
     after_row_number = 0
     if cursor is not None:
         cursor_snapshot_id, after_row_number = _parse_snapshot_cursor(cursor)
@@ -1780,7 +2193,8 @@ async def get_cache_target_reconciliation_snapshot(
         await session.execute(
             text(_GET_SNAPSHOT_ITEMS_SQL),
             {
-                "snapshot_id": snapshot_id,
+                "external_system": str(header["external_system"]),
+                "material_id": header["material_id"],
                 "after_row_number": after_row_number,
                 "limit": limit,
             },
@@ -2347,8 +2761,13 @@ async def _seal_cache_target_reconciliation(
                 ),
             },
         )
-    header = await _get_reusable_reconciliation_material(
+    identity = await _read_stream_identity(
         session,
+        external_system=external_system,
+    )
+    header = await _get_reusable_material(
+        session,
+        identity=identity,
         external_system=external_system,
     )
     scan = None
@@ -2358,6 +2777,8 @@ async def _seal_cache_target_reconciliation(
             external_system=external_system,
         )
         header = scan.header
+    # 검사를 **쓰기 전에** 한다. `_reuse_or_build_material`을 쓰면 checksum이 어긋난
+    # 경우에도 receipt를 먼저 붙였다가 되감게 된다.
     actual = {
         "restore_epoch": int(header["restore_epoch"]),
         "item_count": int(header["item_count"]),
@@ -2377,10 +2798,15 @@ async def _seal_cache_target_reconciliation(
         persisted, _ = await _persist_snapshot_material(
             session,
             scan=scan,
+            receipt_kind="reconciliation",
             return_limit=0,
         )
     else:
-        persisted = header
+        persisted = await _mint_receipt(
+            session,
+            material=header,
+            receipt_kind="reconciliation",
+        )
     await session.execute(
         text(_SEAL_RECONCILIATION_SQL),
         {
@@ -2475,15 +2901,12 @@ async def _request_cache_target_reconciliation(
         text(_HALT_STREAM_SQL),
         {"external_system": external_system},
     )
-    header = await _get_reusable_reconciliation_material(
+    header, _ = await _reuse_or_build_material(
         session,
         external_system=external_system,
+        receipt_kind="reconciliation",
+        return_limit=0,
     )
-    if header is None:
-        header, _ = await _create_snapshot(
-            session,
-            external_system=external_system,
-        )
     request_id = str(uuid4())
     inserted = (
         await session.execute(

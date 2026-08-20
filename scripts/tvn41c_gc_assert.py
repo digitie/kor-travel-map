@@ -30,23 +30,44 @@ from kortravelmap.infra.db import make_async_engine
 
 _COUNTS_SQL: Final = text(
     """
+    -- `0231` 뒤 item은 material에 달려 있다. "적격 item"은 **정리 대상 material의
+    -- item**이다 — 만료·미참조 receipt가 지워지면 그 material이 orphan이 되고 그때
+    -- item이 지워진다. receipt 하나를 보고 그 item을 세던 앞판 셈은 receipt N개가
+    -- material 하나를 공유하는 지금 모델에서 같은 item을 여러 번 센다.
     SELECT
       (SELECT count(*) FROM ops.poi_cache_target_snapshots) AS headers,
-      (SELECT count(*) FROM ops.poi_cache_target_snapshot_items) AS items,
+      (SELECT count(*) FROM ops.poi_cache_target_snapshot_material_items) AS items,
       (SELECT count(*) FROM ops.poi_cache_target_snapshots s
          LEFT JOIN ops.poi_cache_target_reconciliation_requests r
            ON r.snapshot_id = s.snapshot_id
          WHERE s.expires_at <= now() AND r.request_id IS NULL) AS eligible_headers,
-      (SELECT count(*) FROM ops.poi_cache_target_snapshot_items i
-         JOIN ops.poi_cache_target_snapshots s ON s.snapshot_id = i.snapshot_id
-         LEFT JOIN ops.poi_cache_target_reconciliation_requests r
-           ON r.snapshot_id = s.snapshot_id
-         WHERE s.expires_at <= now() AND r.request_id IS NULL) AS eligible_items,
+      (SELECT count(*) FROM ops.poi_cache_target_snapshot_material_items i
+         WHERE NOT EXISTS (
+           SELECT 1 FROM ops.poi_cache_target_snapshots s
+           WHERE s.material_id = i.material_id
+             AND (s.expires_at > now()
+                  OR EXISTS (SELECT 1
+                             FROM ops.poi_cache_target_reconciliation_requests r
+                             WHERE r.snapshot_id = s.snapshot_id))
+         )) AS eligible_items,
       (SELECT count(*) FROM ops.poi_cache_target_snapshots s
          JOIN ops.poi_cache_target_reconciliation_requests r
            ON r.snapshot_id = s.snapshot_id) AS referenced_headers,
       (SELECT count(*) FROM ops.poi_cache_target_snapshots
-         WHERE expires_at > now()) AS live_headers
+         WHERE expires_at > now()) AS live_headers,
+      -- **보호돼야 하는 item**: 붙잡은 receipt 중 하나라도 미만료거나 reconciliation이
+      -- 참조하면 그 material의 item은 GC가 건드리면 안 된다. item 삭제 수를 정확
+      -- 일치로 보던 검사를 하한으로 바꾸면서 과다 삭제를 볼 눈이 사라졌다(적대 리뷰
+      -- 지적) — 그 눈을 여기로 옮긴다.
+      (SELECT count(*) FROM ops.poi_cache_target_snapshot_material_items AS i
+         WHERE EXISTS (
+           SELECT 1 FROM ops.poi_cache_target_snapshots AS s
+           WHERE s.material_id = i.material_id
+             AND (s.expires_at > now()
+                  OR EXISTS (SELECT 1
+                             FROM ops.poi_cache_target_reconciliation_requests AS r
+                             WHERE r.snapshot_id = s.snapshot_id))
+         )) AS protected_items
     """
 )
 
@@ -123,15 +144,37 @@ async def _drain(dsn: str) -> list[str]:
             f"remaining backlog가 0이 아니다: headers={result.remaining_headers} "
             f"items={result.remaining_items}"
         )
-    for key, label in (("referenced_headers", "참조된"), ("live_headers", "미만료")):
-        if after[key] != before[key]:
-            problems.append(f"{label} snapshot이 지워졌다: {before[key]} -> {after[key]}")
-    for key, deleted in (
-        ("eligible_headers", result.deleted_headers),
-        ("eligible_items", result.deleted_items),
+    for key, label in (
+        ("referenced_headers", "참조된"),
+        ("live_headers", "미만료"),
+        ("protected_items", "보호 대상 item"),
     ):
-        if deleted != before[key]:
-            problems.append(f"삭제 수 불일치 {key}: deleted={deleted} expected={before[key]}")
+        if after[key] != before[key]:
+            problems.append(f"{label}이 지워졌다: {before[key]} -> {after[key]}")
+    if result.deleted_headers != before["eligible_headers"]:
+        problems.append(
+            "삭제 수 불일치 eligible_headers: "
+            f"deleted={result.deleted_headers} expected={before['eligible_headers']}"
+        )
+    # item은 **정확 일치를 요구하지 않는다.** `0231` 뒤 GC는 적격 item(붙잡은 receipt가
+    # 전부 만료·미참조인 material의 item) 외에 보존 기간을 넘긴 terminal audit
+    # material의 item도 지운다. 그쪽은 정의상 "적격"이 아니므로 정확 일치를 요구하면
+    # 보존 기간이 조정되는 순간 게이트가 거짓 실패한다(적대 리뷰 지적).
+    #
+    # 지켜야 하는 성질은 둘이고 그 둘은 위에서 이미 본다 — 적격 item이 남지 않았고
+    # (`after["eligible_items"] == 0`), 지운 수가 적격 수 이상이다.
+    # 하한만 보면 `eligible_items`가 **죽어도**(항상 0이어도) 통과한다 — 그러면 위
+    # `after["eligible_items"] == 0`도 자명하게 참이라 게이트 전체가 공허해진다.
+    # seed가 적격 item을 반드시 만들므로 0이면 그 자체가 결함이다(적대 리뷰 지적).
+    if not before["eligible_items"]:
+        problems.append(
+            "적격 item이 0이다 — seed가 잘못됐거나 eligible_items 셈이 죽었다"
+        )
+    if result.deleted_items < before["eligible_items"]:
+        problems.append(
+            "적격 item보다 적게 지웠다: "
+            f"deleted={result.deleted_items} eligible={before['eligible_items']}"
+        )
     return problems
 
 
