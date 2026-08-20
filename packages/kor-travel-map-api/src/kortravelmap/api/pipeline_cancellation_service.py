@@ -22,6 +22,7 @@ from kortravelmap.infra.c6c_cancel_probe_fixture_repo import (
     mark_c6c_cancel_probe_consumed,
 )
 from kortravelmap.infra.cache_target_event_repo import (
+    CacheTargetRefreshStatus,
     CacheTargetRefreshProtocolViolation,
     append_cache_target_refresh_status_events,
 )
@@ -737,7 +738,7 @@ async def _append_cache_target_terminal_relay_event(
     session: AsyncSession,
     *,
     job_id: str,
-    status: str,
+    status: CacheTargetRefreshStatus,
     origin: str,
 ) -> None:
     """취소/실패로 종결된 member의 cache-target relay status event를 같은 transaction에 남긴다.
