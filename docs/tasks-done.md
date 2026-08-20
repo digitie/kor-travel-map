@@ -3,6 +3,26 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-08-21 — 완료 task 백로그 정리
+
+- [x] `T-VN-H50` — planner 인덱스 선택 CI flake를 semantic SQL join gate로 안정화했다.
+  PR [#1036](https://github.com/digitie/kor-travel-map/pull/1036), merge
+  `2f122e9b3e2358668ffe4a4cbc49051bb53a6838`; Python 3.11~3.13, fixture replay,
+  PostGIS integration, frontend, lint, OpenAPI drift 등 8개 검사가 모두 성공했다.
+- [x] `T-VN-C05A`~`T-VN-C05D` — 산림청 route·산악기상·산불위험 V2·산사태 예보발령
+  dataset 연결을 완료했다. PR [#1037](https://github.com/digitie/kor-travel-map/pull/1037),
+  merge `739bf2fcb8c891c14cad9081db44be9f8ab01599`; provider pin과 `0230` catalog를
+  포함한 8개 검사가 모두 성공했다.
+- [x] `T-C7-BROWSER-EVIDENCE` — #995 잔여 browser-only C7 소유권·preflight 증거를
+  이식했다. PR [#1038](https://github.com/digitie/kor-travel-map/pull/1038), merge
+  `cf4e3d3bb7b95856c07d233f9b2e2a01e3cf3ac1`; C7 cleanup ownership, KMA preflight와
+  mocked checkpoint를 포함한 8개 검사가 모두 성공했다.
+- [x] `T-C7-SCOPE-REGISTRY`·`T-C7-LIVE-SERIAL` — scope 선언·조회 정본화와
+  `external_system:c7-e2e` cross-worker 잠금을 완료했다(PR #1038).
+- [x] `T-FE-MOCK-MANIFEST` — mocked checkpoint manifest를 실측 인벤토리 285,
+  baseline `5c647f69…`, `expected-failures=0`으로 재고정했다(PR #1038). 남은
+  `/v1/ops/logs` 간헐 실패는 `T-FE-MOCK-FLAKE`로 분리해 `tasks.md`에서 추적한다.
+
 ## 2026-08-20 — T-VN-40C 및 인수 ③~⑤ 종결
 
 > **2026-08-20 정정(사용자 지시)**: 이 절은 원래 `T-VN-40B`를 함께 종결로 적었으나,
@@ -23,8 +43,8 @@
   ③은 `f00e7f48`에서 6-spec/17-case strict live를 통과했고, ④는 PR [#1024](https://github.com/digitie/kor-travel-map/pull/1024),
   merge `294db534`와 PinVi #459의 재-vendor 뒤 exact receipt `complete`를 봉인했다. ⑤는 prod head
   `0225_tvn40c_physical_removal` 적용과 legacy zero·보존 mapping 4,424건·collection 59개·API 표면
-  smoke까지 확인했다. 독립적으로 남은 mocked manifest·C7 scope registry·live serial task는
-  [`tasks.md`](tasks.md)에서 계속 추적한다.
+  smoke까지 확인했다. mocked manifest·C7 scope registry·live serial은 PR #1038에서
+  완료 이관했고, `/v1/ops/logs` 간헐 실패만 `tasks.md`의 `T-FE-MOCK-FLAKE`로 계속 추적한다.
 
 ## 2026-08-19 — backlog 전면 재대조·완료 이관
 
