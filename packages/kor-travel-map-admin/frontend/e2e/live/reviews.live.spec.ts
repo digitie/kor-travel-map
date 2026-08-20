@@ -478,11 +478,11 @@ test.describe("reviews live — status × viewport cross matrix", () => {
 
 // Deep-link query dimension: append a harmless GET query string to each route
 // (the pages ignore unknown params) and assert the page still loads. Reuses
-// FEATURE_IDS/CURATED_IDS as opaque param values to scale the matrix.
+// FEATURE_IDS/CURATION_ITEM_IDS as opaque param values to scale the matrix.
 test.describe("reviews live — deeplink query string dimension", () => {
   const QUERY_VALUES = [
     ...F.FEATURE_IDS.slice(0, 4),
-    ...F.CURATED_IDS.slice(0, 2),
+    ...F.CURATION_ITEM_IDS.slice(0, 2),
   ];
   for (const cfg of PAGES) {
     for (const value of QUERY_VALUES) {

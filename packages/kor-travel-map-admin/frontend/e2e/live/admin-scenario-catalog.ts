@@ -214,17 +214,16 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     route: "/admin/features/curated",
     readyHeading: "큐레이션 관리",
     readApis: [
-      "/v1/admin/features/curated",
       "/v1/admin/curated-source-rules",
       "/v1/admin/curated-sources",
       "/v1/admin/curated-themes",
       "/v1/admin/curations/quarantine",
       "/v1/admin/curations/quarantine/{collection_id}/items",
     ],
-    // T-VN-40A: legacy `curated_features` write API(POST/PATCH/DELETE
-    // /v1/admin/features/curated*)는 fence로 410이라 write 계약에서 뺐다. canonical
-    // 편집은 `curation-collections` surface의 collection/item command다.
-    // (`/v1/curated-features/{id}/pinvi-copy`는 API에 이미 없어 함께 정리.)
+    // T-VN-40C: legacy `curated_features` API(list/detail/write, detail-snapshot)는
+    // 표와 함께 물리 제거됐다. 이 surface의 read/write 계약은 canonical
+    // curated-source-rules / curations quarantine 뿐이고, feature 단위 편집은
+    // `curation-collections` surface의 collection/item command가 정본이다.
     writeApis: [
       writeApi("PATCH", "/v1/admin/curated-source-rules/{rule_id}"),
       writeApi(
@@ -232,19 +231,7 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
         "/v1/admin/curations/quarantine/{collection_id}/reclassify",
       ),
     ],
-    reflectedSurfaces: [
-      "/admin/features/curated/{curated_feature_id}",
-      "/ops/pipeline",
-    ],
-  },
-  {
-    id: "curated-feature-detail",
-    route: "/admin/features/curated/{curated_feature_id}",
-    readyHeading: "큐레이션 상세",
-    readApis: ["/v1/admin/features/curated/{curated_feature_id}"],
-    // T-VN-40A: 이 화면은 읽기 전용이 됐다 — write 컨트롤은 fence와 함께 제거.
-    writeApis: [],
-    reflectedSurfaces: ["/admin/features/curated"],
+    reflectedSurfaces: ["/ops/pipeline"],
   },
   {
     id: "issues",
@@ -406,7 +393,7 @@ export function buildAdminLiveScenarioCatalog(): AdminLiveScenario[] {
   const pageSizes = F.PAGE_SIZES.slice(0, 4);
   const categories = F.CATEGORY_CODES.slice(0, 40);
   const featureIds = F.FEATURE_IDS.slice(0, 120);
-  const curatedIds = F.CURATED_IDS.slice(0, 40);
+  const curationItemIds = F.CURATION_ITEM_IDS.slice(0, 40);
 
   for (const surface of ADMIN_SURFACES) {
     for (const viewport of VIEWPORTS) {
@@ -518,19 +505,23 @@ export function buildAdminLiveScenarioCatalog(): AdminLiveScenario[] {
     }
   }
 
-  for (const curatedId of curatedIds) {
+  // T-VN-40C: legacy `curated_features` list/detail API와 상세 라우트가 사라져,
+  // 이 축은 canonical collection/item 축(`/v1/admin/curations`)으로 옮겼다. 상세는
+  // 별도 라우트가 아니라 collections 화면 안에서 열리므로 reflectedSurface도 같은
+  // 화면이다.
+  for (const curationItemId of curationItemIds) {
     for (const term of searchTerms) {
       for (const size of pageSizes) {
         addScenario(scenarios, {
           apiExpectation:
-            "/v1/admin/features/curated list/detail and pinvi-copy preview parity",
-          idParts: ["curated", curatedId, term, String(size)],
+            "/v1/admin/curations list and /v1/admin/curations/{collection_id}/items detail parity",
+          idParts: ["curation-item", curationItemId, term, String(size)],
           mode: "catalog",
-          reflectedSurface: `/admin/features/curated/${curatedId}`,
+          reflectedSurface: "/admin/features/curated",
           risk: "cross_surface",
           route: `/admin/features/curated?q=${encodeURIComponent(term)}&page_size=${size}`,
           surface: "curated-features",
-          uiAction: `filter curated candidates by ${term}, open ${curatedId}`,
+          uiAction: `filter curation collections by ${term}, open item ${curationItemId}`,
         });
       }
     }
