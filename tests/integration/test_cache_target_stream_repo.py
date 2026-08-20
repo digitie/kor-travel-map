@@ -2968,6 +2968,189 @@ async def test_background_snapshot_gc_round_robins_systems_and_observes_once(
 
 
 @pytest.mark.integration
+async def test_terminal_material_compaction_drains_items_and_serves_typed_410(
+    migrated_session: AsyncSession,
+) -> None:
+    """보존 기간을 넘긴 terminal reconciliation의 item만 되찾고 증거는 남긴다.
+
+    보는 것 넷이다.
+
+    1. 후보가 아닌 material(보존 기간 안, 또는 미만료 receipt 보유)은 건드리지 않는다.
+    2. 후보는 표시되고 item이 빈다.
+    3. **receipt와 material row는 남는다** — root/count가 감사 증거다.
+    4. 그 receipt를 page하면 typed `410 snapshot_material_compacted`이고, 본문에
+       보존된 snapshot_id/item_count/merkle_root/compacted_at이 실린다.
+    """
+
+    system = "snapshot-compaction-test"
+    await _apply_snapshot_source(
+        migrated_session,
+        external_system=system,
+        target_key="target-a",
+        event_id="9c000000-0000-4000-8000-000000000001",
+        idempotency_key="9d000000-0000-4000-8000-000000000001",
+    )
+
+    old_material = "9e100000-0000-4000-8000-000000000001"
+    fresh_material = "9e100000-0000-4000-8000-000000000002"
+    live_material = "9e100000-0000-4000-8000-000000000003"
+    old_receipt = "9e000000-0000-4000-8000-000000000001"
+    fresh_receipt = "9e000000-0000-4000-8000-000000000002"
+    live_receipt = "9e000000-0000-4000-8000-000000000003"
+    root = "a" * 64
+
+    for index, (material_id, receipt_id) in enumerate(
+        (
+            (old_material, old_receipt),
+            (fresh_material, fresh_receipt),
+            (live_material, live_receipt),
+        )
+    ):
+        await _seed_snapshot_material(
+            migrated_session,
+            material_id=material_id,
+            external_system=system,
+            material_order=index,
+            item_count=1,
+            merkle_root=root,
+        )
+        await _seed_snapshot_receipt(
+            migrated_session,
+            snapshot_id=receipt_id,
+            material_id=material_id,
+            external_system=system,
+            created_at="now() - interval '2 hours'",
+            # `live`만 아직 만료되지 않았다 — 그것만으로 후보에서 빠져야 한다.
+            expires_at=(
+                "now() + interval '2 hours'"
+                if material_id == live_material
+                else "now() - interval '1 hour'"
+            ),
+            receipt_kind="reconciliation",
+        )
+        await migrated_session.execute(
+            text(
+                "INSERT INTO ops.poi_cache_target_snapshot_material_items ("
+                "material_id, row_number, target_key, state, "
+                "source_generation, source_payload_fingerprint) VALUES ("
+                "CAST(:material_id AS uuid), 1, 'kept', 'active', 1, :fingerprint)"
+            ),
+            {"material_id": material_id, "fingerprint": "b" * 64},
+        )
+
+    # 셋 다 terminal reconciliation이 참조한다. 다른 것은 `completed_at`뿐이다.
+    for index, (receipt_id, completed) in enumerate(
+        (
+            (old_receipt, "now() - interval '40 days'"),
+            (fresh_receipt, "now() - interval '1 hour'"),
+            (live_receipt, "now() - interval '40 days'"),
+        )
+    ):
+        command_id = await _reconciliation_command(
+            migrated_session,
+            key=f"9f000000-0000-4000-8000-00000000000{index + 1}",
+            operation="snapshot.compaction.retention",
+        )
+        await migrated_session.execute(
+            text(
+                "INSERT INTO ops.poi_cache_target_reconciliation_requests ("
+                "request_id, external_system, command_id, reason, status, "
+                "phase_version, snapshot_id, expected_merkle_root, "
+                "actual_merkle_root, started_at, completed_at) VALUES ("
+                "CAST(:request_id AS uuid), :external_system, :command_id, "
+                "'compaction retention', 'succeeded', 3, "
+                "CAST(:snapshot_id AS uuid), :root, :root, "
+                f"now() - interval '41 days', {completed})"
+            ),
+            {
+                "request_id": f"9f100000-0000-4000-8000-00000000000{index + 1}",
+                "external_system": system,
+                "command_id": command_id,
+                "snapshot_id": receipt_id,
+                "root": root,
+            },
+        )
+
+    batch = await prune_expired_cache_target_snapshots_batch(
+        migrated_session,
+        item_limit=1_000,
+        header_limit=100,
+        compaction_retention_seconds=30 * 24 * 60 * 60,
+    )
+
+    assert batch.external_system == system
+    # 후보는 하나뿐이다. `fresh`는 보존 기간 안이고 `live`는 미만료 receipt를 갖는다.
+    assert batch.compacted_materials == 1
+    assert batch.deleted_items == 1
+    # reconciliation이 참조하는 receipt는 만료돼도 지우지 않는다 — 감사 증거다.
+    assert batch.deleted_headers == 0
+
+    compacted = (
+        await migrated_session.execute(
+            text(
+                "SELECT material_id FROM ops.poi_cache_target_snapshot_materials "
+                "WHERE external_system = :system AND compacted_at IS NOT NULL"
+            ),
+            {"system": system},
+        )
+    ).scalars().all()
+    assert [str(value) for value in compacted] == [old_material]
+
+    surviving_items = (
+        await migrated_session.execute(
+            text(
+                "SELECT item.material_id, count(*) "
+                "FROM ops.poi_cache_target_snapshot_material_items AS item "
+                "JOIN ops.poi_cache_target_snapshot_materials AS material "
+                "ON material.material_id = item.material_id "
+                "WHERE material.external_system = :system "
+                "GROUP BY item.material_id"
+            ),
+            {"system": system},
+        )
+    ).all()
+    assert {str(row[0]) for row in surviving_items} == {fresh_material, live_material}
+
+    # 증거는 남는다.
+    assert (
+        await migrated_session.scalar(
+            text(
+                "SELECT count(*) FROM ops.poi_cache_target_snapshots "
+                "WHERE snapshot_id = CAST(:snapshot_id AS uuid)"
+            ),
+            {"snapshot_id": old_receipt},
+        )
+        == 1
+    )
+    preserved = (
+        await migrated_session.execute(
+            text(
+                "SELECT item_count, merkle_root "
+                "FROM ops.poi_cache_target_snapshot_materials "
+                "WHERE material_id = CAST(:material_id AS uuid)"
+            ),
+            {"material_id": old_material},
+        )
+    ).one()
+    assert (int(preserved.item_count), str(preserved.merkle_root)) == (1, root)
+
+    with pytest.raises(CacheTargetStreamConflict) as compacted_page:
+        await get_cache_target_snapshot(
+            migrated_session,
+            external_system=system,
+            limit=10,
+            cursor=snapshot_repo._snapshot_cursor(old_receipt, 0),  # pyright: ignore[reportPrivateUsage]
+        )
+    assert compacted_page.value.code == "snapshot_material_compacted"
+    current = compacted_page.value.current
+    assert current is not None
+    assert current["snapshot_id"] == old_receipt
+    assert current["item_count"] == 1
+    assert current["merkle_root"] == root
+    assert isinstance(current["compacted_at"], str)
+
+
+@pytest.mark.integration
 async def test_cursor_header_share_lock_makes_direct_item_gc_skip_snapshot(
     migrated_engine: AsyncEngine,
 ) -> None:
