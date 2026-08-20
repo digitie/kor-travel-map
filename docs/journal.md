@@ -152,6 +152,39 @@ H45 1.19.1은 fresh migration에서 named CHECK removed 208/added 167을 재현�
 provider exact pin을 1차 근거로 보아 trail·weather/fire·safety notice·KHOA notice를 서로
 다른 결정/implementation task로 분해해야 함을 활성 원장에 기록했다.
 
+## 2026-08-19 — T-VN-M01 수동 Feature 생성 foundation 구현 시작
+
+PR #1012 merge `ac77a7d1`을 exact base로 `feat/tvn-m01-manual-feature-create`를 열었다. API
+foundation은 기존 `POST /v1/admin/features`를 `admin.feature.create.manual-v1` command로 clean
+cutover하고, caller identity/state/origin 입력을 제거했다. 서버가 UUIDv7 후보를 한 번 발급해 current
+opaque legacy bridge를 만들며, 전용 wrapper의 exact loser와 winner OUT shape, core identity,
+override command receipt를 typed invariant로 검증한다. allow-list된 request/identity constraint만 안전한
+422/409로 내리고 unknown DB 진단과 trusted generator/wrapper fault는 중앙 500으로 보낸다.
+
+생성은 기본 비활성 flag, 실제 AdminBFF secret과 별도 SHA-256 create credential의 AND gate, 필수 strict
+대한민국 좌표, 201 UUID-only response + strong ETag/Location, READ COMMITTED domain-command 경계로
+묶었다. exact claim과 `manual_admin` origin ORM은 모든 필수 열을 명시적 NOT NULL로 선언하고 command
+unique/FK 및 origin→claim composite FK를 `ON DELETE RESTRICT`로 고정했다. 두 독립 전문 리뷰는 P0
+0건이었고 공통 P1인 DB 오류 오분류/raw driver message 노출과 trusted OUT 4xx 오분류는 전용
+mapper/invariant와 rollback 관측 테스트로 닫았다. API 입력 오류는 stable `errors[].field`만 공개하며
+raw Pydantic input이나 driver message는 응답에 싣지 않는다.
+
+PinVi direct `new_place` caller는 paired draft PR
+[#458](https://github.com/digitie/pinvi/pull/458)에서 먼저 제거했다. queue cutover 전 승인은 outbound,
+status/ref/reviewer/audit, 연결 POI를 바꾸지 않고 503으로 fail-close하며 correction/closure는 유지한다.
+targeted unit/integration 127건과 Ruff/mypy가 통과했다.
+
+DB migration은 만들지 않았다. active head는 `0224_c7_external_system_scope`이고 T-VN-40C가 `0225`를
+예약했으므로, 실제 `0225`가 main에 착지한 뒤에만 M01을 `0226_tvn_m01_manual_feature_create`로 잇는다.
+`0226→0224` 임시 head나 byte-frozen `0200` baseline 수정은 금지한다.
+
+foundation 뒤 배포 역조사에서 설계의 두 drift를 추가로 찾았다. 긴 revision literal은 PostgreSQL의
+32자 `alembic_version` gate를 넘으므로 30자 ID로 줄였다. 또한 갱신 role membership을 fresh DB의
+0200/0202보다 먼저 bootstrap하면 historical exact graph 검사가 실패한다. 따라서 기존 graph로
+`0225`까지 upgrade한 뒤 M01 bootstrap을 재실행하고 `0226`을 적용하는 2단계 provisioning이 필수다.
+production digest 상시 필수 fail-close는 유지하며, UI raw/API digest를 flag=false 배포보다 먼저 secret
+store에서 provision하도록 설계 순서를 교정했다.
+
 ## 2026-08-19 — T-VN-M00 수동 Feature 생성 설계·전문 리뷰 완료
 
 T-VN-H34 잔여의 "없는 것은 Feature로 추가" 요구를 M lane으로 분리한 뒤, M01 구현 전에 닫아야 할

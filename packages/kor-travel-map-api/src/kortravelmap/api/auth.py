@@ -41,6 +41,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ADMIN_ACTOR_HEADER",
+    "ADMIN_FEATURE_CREATE_TOKEN_HEADER",
     "ADMIN_PROXY_SECRET_HEADER",
     "CACHE_TARGET_CONSUMER_HEADER",
     "METRICS_AUTHORIZATION_SCHEME",
@@ -51,6 +52,7 @@ __all__ = [
     "OPS_AUTH_ERROR_RESPONSES",
     "PUBLIC_API_KEY_HEADER",
     "SERVICE_TOKEN_HEADER",
+    "AdminManualFeatureCreateContext",
     "AdminProxyContext",
     "CacheTargetServicePrincipalContext",
     "CurationSnapshotServicePrincipalContext",
@@ -60,6 +62,7 @@ __all__ = [
     "require_cache_target_service_scope",
     "require_curation_cutover_service_principal",
     "require_curation_snapshot_service_principal",
+    "require_admin_manual_feature_create",
     "require_admin_frontend",
     "require_metrics_token",
     "require_ops_operator",
@@ -72,6 +75,7 @@ __all__ = [
 ]
 
 ADMIN_ACTOR_HEADER = "X-Kor-Travel-Map-Actor"
+ADMIN_FEATURE_CREATE_TOKEN_HEADER = "X-Kor-Travel-Map-Admin-Feature-Create-Token"
 ADMIN_PROXY_SECRET_HEADER = "X-Kor-Travel-Map-Admin-Proxy-Secret"
 CACHE_TARGET_CONSUMER_HEADER = "X-Kor-Travel-Map-Cache-Target-Consumer"
 METRICS_AUTHORIZATION_SCHEME = "Bearer"
@@ -128,6 +132,16 @@ _admin_proxy_secret_scheme = APIKeyHeader(
     ),
 )
 
+_admin_feature_create_token_scheme = APIKeyHeader(
+    name=ADMIN_FEATURE_CREATE_TOKEN_HEADER,
+    scheme_name="AdminFeatureCreateBFF",
+    auto_error=False,
+    description=(
+        "trusted admin frontend BFF가 수동 Feature 생성 요청에만 주입하는 "
+        "server-only 전용 token. AdminBFF와 함께 검증한다."
+    ),
+)
+
 _ops_token_scheme = APIKeyHeader(
     name=OPS_TOKEN_HEADER,
     scheme_name="OpsToken",
@@ -144,6 +158,15 @@ class AdminProxyContext:
     """Next.js admin frontend proxy가 주입한 운영자 컨텍스트."""
 
     actor: str
+
+
+@dataclass(frozen=True, slots=True)
+class AdminManualFeatureCreateContext:
+    """수동 Feature 생성 전용 transport principal 컨텍스트."""
+
+    principal_id: str
+    actor: str
+    scopes: frozenset[str]
 
 
 @dataclass(frozen=True, slots=True)
@@ -277,6 +300,53 @@ def require_admin_frontend(
             detail=f"{ADMIN_ACTOR_HEADER} 헤더가 필요합니다.",
         )
     return AdminProxyContext(actor=actor)
+
+
+def require_admin_manual_feature_create(
+    request: Request,
+    admin_context: Annotated[
+        AdminProxyContext,
+        Depends(require_admin_frontend),
+    ],
+    token: Annotated[
+        str | None,
+        Security(_admin_feature_create_token_scheme),
+    ] = None,
+) -> AdminManualFeatureCreateContext:
+    """기존 AdminBFF와 생성 전용 token을 모두 검증한다."""
+
+    settings = _settings(request)
+    if not settings.admin_manual_feature_create_enabled:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "MANUAL_FEATURE_CREATE_NOT_READY",
+                "message": "수동 Feature 생성 기능이 아직 준비되지 않았습니다.",
+                "details": {},
+            },
+        )
+
+    expected_digest = settings.admin_feature_create_token_sha256
+    supplied_digest = _token_digest(token) if token else None
+    if (
+        expected_digest is None
+        or supplied_digest is None
+        or not hmac.compare_digest(supplied_digest, expected_digest)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "ADMIN_FEATURE_CREATE_SCOPE_REQUIRED",
+                "message": "수동 Feature 생성 권한이 없습니다.",
+                "details": {"required_scope": "admin:feature:create"},
+            },
+        )
+
+    return AdminManualFeatureCreateContext(
+        principal_id="admin-ui-bff.manual-feature-create.v1",
+        actor=admin_context.actor,
+        scopes=frozenset({"admin:feature:create"}),
+    )
 
 
 def _ops_auth_error(status_code: int, code: str, message: str) -> HTTPException:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
@@ -24,28 +25,60 @@ from kortravelmap.infra.admin_feature_repo import (
     AdminFeatureStateTransition,
     AdminFeatureStateTransitionAudit,
     AdminFeatureStateTransitionAuditPage,
+    AdminManualFeatureCreated,
+    AdminManualFeatureExactDuplicate,
+    AdminManualFeatureInvariantError,
+    AdminManualFeatureValidationError,
 )
+from kortravelmap.infra.domain_command_repo import DomainCommandRecord
+from sqlalchemy.exc import DBAPIError
 
 from kortravelmap.api.app import create_app
 from kortravelmap.api.db import get_session
+from kortravelmap.api.domain_command_service import (
+    DomainCommandHandle,
+    DomainCommandReplay,
+)
 from kortravelmap.api.settings import ApiSettings
+
+ADMIN_ACTOR = "admin:manual-feature-test"
+ADMIN_PROXY_SECRET = "admin-manual-feature-proxy-secret-0000000000000000"
+ADMIN_FEATURE_CREATE_TOKEN = "admin-feature-create-router-test"
+IDEMPOTENCY_KEY = "95000000-0000-4000-8000-000000000001"
 
 
 class _Tx:
+    def __init__(self, session: _FakeSession) -> None:
+        self._session = session
+
     async def __aenter__(self) -> None:
         return None
 
-    async def __aexit__(self, *_exc: object) -> None:
-        return None
+    async def __aexit__(
+        self,
+        exc_type: object,
+        _exc: object,
+        _traceback: object,
+    ) -> None:
+        if exc_type is None:
+            self._session.commit_count += 1
+        else:
+            self._session.rollback_count += 1
 
 
 class _FakeSession:
     def __init__(self) -> None:
         self.begin_count = 0
+        self.commit_count = 0
+        self.rollback_count = 0
+        self.statements: list[str] = []
 
     def begin(self) -> _Tx:
         self.begin_count += 1
-        return _Tx()
+        return _Tx(self)
+
+    async def execute(self, statement: object) -> None:
+        self.statements.append(str(statement))
 
 
 @pytest.fixture
@@ -63,7 +96,11 @@ def client(
     app = create_app(
         ApiSettings(
             admin_destructive_enabled=True,
-            admin_proxy_secret=None,
+            admin_manual_feature_create_enabled=True,
+            admin_feature_create_token_sha256=hashlib.sha256(
+                ADMIN_FEATURE_CREATE_TOKEN.encode("utf-8")
+            ).hexdigest(),
+            admin_proxy_secret=ADMIN_PROXY_SECRET,
             public_api_key_required=False,
             service_token=None,
             vworld_api_key=None,
@@ -78,11 +115,11 @@ def client(
         domain_command_service,
         "begin_domain_command",
         AsyncMock(
-            return_value=domain_command_service.DomainCommandHandle(
+            return_value=DomainCommandHandle(
                 command_id=1,
-                actor="local-dev",
-                operation="admin.feature.create",
-                idempotency_key="95000000-0000-4000-8000-000000000001",
+                actor=ADMIN_ACTOR,
+                operation="admin.feature.create.manual-v1",
+                idempotency_key=IDEMPOTENCY_KEY,
                 request_fingerprint="a" * 64,
             )
         ),
@@ -94,8 +131,43 @@ def client(
     )
     return TestClient(
         app,
-        headers={"Idempotency-Key": "95000000-0000-4000-8000-000000000001"},
+        client=("127.0.0.1", 50000),
+        headers={
+            "Idempotency-Key": IDEMPOTENCY_KEY,
+            "X-Kor-Travel-Map-Admin-Proxy-Secret": ADMIN_PROXY_SECRET,
+            "X-Kor-Travel-Map-Actor": ADMIN_ACTOR,
+            "X-Kor-Travel-Map-Admin-Feature-Create-Token": (
+                ADMIN_FEATURE_CREATE_TOKEN
+            ),
+        },
     )
+
+
+def _manual_create_payload(**updates: object) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "kind": "place",
+        "name": "사용자 장소",
+        "category": "01070300",
+        "coord": {"lon": 126.98, "lat": 37.57},
+        "marker_icon": "map-pin",
+        "marker_color": "P-01",
+        "reason": "사용자 제보",
+    }
+    payload.update(updates)
+    return payload
+
+
+def _reverse_json_object_order(value: Any) -> Any:
+    """PostgreSQL jsonb 왕복이 object key 순서를 보존하지 않는 상황을 모사한다."""
+
+    if isinstance(value, dict):
+        return {
+            key: _reverse_json_object_order(value[key])
+            for key in reversed(value)
+        }
+    if isinstance(value, list):
+        return [_reverse_json_object_order(item) for item in value]
+    return value
 
 
 def _expected_uuid(feature_id: str) -> str:
@@ -772,15 +844,16 @@ def test_create_feature_authors_typed_override_receipt(
         assert kwargs["payload"]["kind"] == "place"
         assert kwargs["payload"]["name"] == "사용자 장소"
         assert kwargs["payload"]["coord"] == {"lon": 126.98, "lat": 37.57}
-        assert kwargs["payload"]["lifecycle_state"] == "active"
-        assert kwargs["payload"]["publication_state"] == "published"
-        assert kwargs["payload"]["quality_state"] == "valid"
+        assert "feature_id" not in kwargs
+        assert "lifecycle_state" not in kwargs
+        assert "publication_state" not in kwargs
+        assert "quality_state" not in kwargs
         assert kwargs["reason_code"] == "사용자 제보"
-        assert kwargs["operator"] == "local-dev"
+        assert kwargs["operator"] == ADMIN_ACTOR
         assert kwargs["command_id"] == 1
-        return router_mod.FeatureFieldOverrideCommand(
-            feature_id=kwargs["feature_id"],
-            feature_uuid=_expected_uuid(kwargs["feature_id"]),
+        return AdminManualFeatureCreated(
+            feature_id="f_global_p_9f9480adb6abef69",
+            feature_uuid="0198d9f1-7a31-7e52-8ea8-cb2548d3a891",
             row_revision=2,
             command_id=1,
             applied_field_count=7,
@@ -798,19 +871,24 @@ def test_create_feature_authors_typed_override_receipt(
             "marker_icon": "map-pin",
             "marker_color": "P-01",
             "reason": "사용자 제보",
-            "operator": "admin-user",
         },
     )
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     body = response.json()
     assert response.headers["ETag"] == '"2"'
+    assert response.headers["Location"] == (
+        "/v1/admin/features/0198d9f1-7a31-7e52-8ea8-cb2548d3a891"
+    )
+    assert body["data"]["feature_id"] == "0198d9f1-7a31-7e52-8ea8-cb2548d3a891"
+    assert body["data"]["creation_origin"] == "manual_admin"
     assert body["data"]["command_id"] == 1
     assert body["data"]["applied_field_count"] == 7
     assert session.begin_count == 1
+    assert session.commit_count == 1
+    assert session.rollback_count == 0
 
-    # T-VN-32C 회귀 (W1) — 응답에서 복사한 UUID 형식 feature_id를 신규 legacy
-    # id로 지정하는 요청은 422 fail-close다 (유령 행 각인 차단, DB 도달 전).
+    # M01 clean cutover — canonical identity는 caller 입력이 아니라 서버 발급이다.
     uuid_body = client.post(
         "/v1/admin/features",
         json={
@@ -825,7 +903,634 @@ def test_create_feature_authors_typed_override_receipt(
         },
     )
     assert uuid_body.status_code == 422
-    assert "UUID" in uuid_body.json()["detail"]
+    assert uuid_body.json()["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.unit
+def test_create_feature_name_bound_is_deferred_to_exact_key(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    raw_name = f" {'a' * 200} "
+
+    async def _create(_session: Any, **kwargs: Any) -> Any:
+        assert kwargs["payload"]["name"] == raw_name
+        return AdminManualFeatureCreated(
+            feature_id="f_global_p_9f9480adb6abef69",
+            feature_uuid="0198d9f1-7a31-7e52-8ea8-cb2548d3a891",
+            row_revision=2,
+            command_id=1,
+            applied_field_count=7,
+        )
+
+    monkeypatch.setattr(router_mod, "create_admin_feature_with_field_overrides", _create)
+
+    response = client.post(
+        "/v1/admin/features",
+        json=_manual_create_payload(name=raw_name),
+    )
+
+    assert response.status_code == 201
+
+
+@pytest.mark.unit
+def test_create_feature_replay_is_byte_equivalent_and_does_not_write_twice(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api import domain_command_service
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    created = AdminManualFeatureCreated(
+        feature_id="f_global_p_9f9480adb6abef69",
+        feature_uuid="0198d9f1-7a31-7e52-8ea8-cb2548d3a891",
+        row_revision=2,
+        command_id=1,
+        applied_field_count=7,
+    )
+    create = AsyncMock(return_value=created)
+    monkeypatch.setattr(router_mod, "create_admin_feature_with_field_overrides", create)
+    command = DomainCommandHandle(
+        command_id=1,
+        actor=ADMIN_ACTOR,
+        operation="admin.feature.create.manual-v1",
+        idempotency_key=IDEMPOTENCY_KEY,
+        request_fingerprint="a" * 64,
+    )
+    terminal_record: DomainCommandRecord | None = None
+
+    async def _begin(_session: Any, **_kwargs: Any) -> DomainCommandHandle:
+        if terminal_record is not None:
+            raise DomainCommandReplay(terminal_record)
+        return command
+
+    async def _complete(
+        _session: Any,
+        *,
+        command: DomainCommandHandle,
+        response: Any,
+        status_code: int,
+        response_headers: dict[str, str],
+    ) -> None:
+        nonlocal terminal_record
+        assert command.command_id == 1
+        assert status_code == 201
+        assert response_headers == {
+            "ETag": '"2"',
+            "Location": "/v1/admin/features/0198d9f1-7a31-7e52-8ea8-cb2548d3a891",
+        }
+        completed_at = datetime(2026, 8, 19, tzinfo=UTC)
+        serialized = response.model_dump(mode="json")
+        reordered = _reverse_json_object_order(serialized)
+        assert isinstance(reordered, dict)
+        assert tuple(reordered) == tuple(reversed(tuple(serialized)))
+        assert tuple(reordered["data"]) == tuple(
+            reversed(tuple(serialized["data"]))
+        )
+        terminal_record = DomainCommandRecord(
+            command_id=command.command_id,
+            actor=command.actor,
+            operation=command.operation,
+            idempotency_key=command.idempotency_key,
+            fingerprint_version=1,
+            request_fingerprint=command.request_fingerprint,
+            response_status=status_code,
+            response_body=reordered,
+            response_headers=response_headers,
+            claimed_at=completed_at,
+            completed_at=completed_at,
+        )
+
+    begin = AsyncMock(side_effect=_begin)
+    complete = AsyncMock(side_effect=_complete)
+    monkeypatch.setattr(domain_command_service, "begin_domain_command", begin)
+    monkeypatch.setattr(domain_command_service, "complete_domain_command", complete)
+
+    first = client.post("/v1/admin/features", json=_manual_create_payload())
+    replay = client.post("/v1/admin/features", json=_manual_create_payload())
+
+    assert first.status_code == replay.status_code == 201
+    assert first.content == replay.content
+    assert replay.headers["ETag"] == first.headers["ETag"] == '"2"'
+    assert replay.headers["Location"] == first.headers["Location"]
+    assert replay.headers["X-Request-ID"] == first.headers["X-Request-ID"]
+    assert "Idempotency-Replayed" not in first.headers
+    assert replay.headers["Idempotency-Replayed"] == "true"
+    create.assert_awaited_once()
+    assert begin.await_count == 2
+    complete.assert_awaited_once()
+    assert session.begin_count == 2
+    assert session.commit_count == 1
+    assert session.rollback_count == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("headers", "expected_code"),
+    [
+        (
+            {
+                "Idempotency-Key": IDEMPOTENCY_KEY,
+                "X-Kor-Travel-Map-Admin-Proxy-Secret": ADMIN_PROXY_SECRET,
+                "X-Kor-Travel-Map-Actor": ADMIN_ACTOR,
+            },
+            "ADMIN_FEATURE_CREATE_SCOPE_REQUIRED",
+        ),
+        (
+            {
+                "Idempotency-Key": IDEMPOTENCY_KEY,
+                "X-Kor-Travel-Map-Actor": ADMIN_ACTOR,
+                "X-Kor-Travel-Map-Admin-Feature-Create-Token": (
+                    ADMIN_FEATURE_CREATE_TOKEN
+                ),
+            },
+            "FORBIDDEN",
+        ),
+        (
+            {
+                "Idempotency-Key": IDEMPOTENCY_KEY,
+                "X-Kor-Travel-Map-Admin-Proxy-Secret": ADMIN_PROXY_SECRET,
+                "X-Kor-Travel-Map-Actor": ADMIN_ACTOR,
+                "X-Kor-Travel-Map-Admin-Feature-Create-Token": "wrong",
+            },
+            "ADMIN_FEATURE_CREATE_SCOPE_REQUIRED",
+        ),
+        (
+            {
+                "Idempotency-Key": IDEMPOTENCY_KEY,
+                "X-Kor-Travel-Map-Admin-Proxy-Secret": "wrong",
+                "X-Kor-Travel-Map-Actor": ADMIN_ACTOR,
+                "X-Kor-Travel-Map-Admin-Feature-Create-Token": (
+                    ADMIN_FEATURE_CREATE_TOKEN
+                ),
+            },
+            "FORBIDDEN",
+        ),
+    ],
+)
+def test_manual_create_auth_failures_never_claim_or_write(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+    headers: dict[str, str],
+    expected_code: str,
+) -> None:
+    from kortravelmap.api import domain_command_service
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    create = AsyncMock()
+    monkeypatch.setattr(router_mod, "create_admin_feature_with_field_overrides", create)
+    probe = TestClient(
+        client.app,
+        client=("127.0.0.1", 50000),
+        headers=headers,
+    )
+    response = probe.post("/v1/admin/features", json=_manual_create_payload())
+    probe.close()
+
+    assert response.status_code == 403
+    assert response.json()["code"] == expected_code
+    domain_command_service.begin_domain_command.assert_not_awaited()
+    domain_command_service.complete_domain_command.assert_not_awaited()
+    create.assert_not_awaited()
+    assert session.begin_count == 0
+    assert session.rollback_count == 0
+
+
+@pytest.mark.unit
+def test_manual_create_disabled_flag_returns_503_before_ledger(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api import domain_command_service
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    client.app.state.settings.admin_manual_feature_create_enabled = False
+    create = AsyncMock()
+    monkeypatch.setattr(router_mod, "create_admin_feature_with_field_overrides", create)
+
+    response = client.post("/v1/admin/features", json=_manual_create_payload())
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "MANUAL_FEATURE_CREATE_NOT_READY"
+    domain_command_service.begin_domain_command.assert_not_awaited()
+    domain_command_service.complete_domain_command.assert_not_awaited()
+    create.assert_not_awaited()
+    assert session.begin_count == 0
+    assert session.rollback_count == 0
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("feature_id", "f_caller_owned"),
+        ("idempotency_key", "caller-owned"),
+        ("operator", "caller-owned"),
+        ("lifecycle_state", "active"),
+        ("publication_state", "published"),
+        ("quality_state", "valid"),
+    ],
+)
+def test_create_feature_rejects_caller_owned_identity_and_state(
+    client: TestClient,
+    field: str,
+    value: str,
+) -> None:
+    payload = {
+        "kind": "place",
+        "name": "사용자 장소",
+        "category": "01070300",
+        "coord": {"lon": 126.98, "lat": 37.57},
+        "marker_icon": "map-pin",
+        "marker_color": "P-01",
+        "reason": "사용자 제보",
+        field: value,
+    }
+    response = client.post("/v1/admin/features", json=payload)
+    assert response.status_code == 422
+    body = response.json()
+    assert body["code"] == "VALIDATION_ERROR"
+    assert body["errors"] == [
+        {
+            "field": field,
+            "message": "요청 값이 수동 Feature 생성 계약과 맞지 않습니다.",
+        }
+    ]
+    assert "input" not in body["errors"][0]
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("coord", "expected_field"),
+    [
+        (None, "coord"),
+        ({"lon": "126.98", "lat": 37.57}, "coord.lon"),
+        ({"lon": True, "lat": 37.57}, "coord.lon"),
+        ({"lon": 123.999999, "lat": 37.57}, "coord.lon"),
+        ({"lon": 126.98, "lat": 39.500001}, "coord.lat"),
+    ],
+)
+def test_create_feature_requires_strict_korea_coord(
+    client: TestClient,
+    coord: object,
+    expected_field: str,
+) -> None:
+    response = client.post(
+        "/v1/admin/features",
+        json={
+            "kind": "place",
+            "name": "사용자 장소",
+            "category": "01070300",
+            "coord": coord,
+            "marker_icon": "map-pin",
+            "marker_color": "P-01",
+            "reason": "사용자 제보",
+        },
+    )
+    assert response.status_code == 422
+    assert response.json()["errors"] == [
+        {
+            "field": expected_field,
+            "message": "요청 값이 수동 Feature 생성 계약과 맞지 않습니다.",
+        }
+    ]
+
+
+@pytest.mark.unit
+def test_create_feature_missing_coord_has_stable_sanitized_error(
+    client: TestClient,
+) -> None:
+    payload = _manual_create_payload()
+    payload.pop("coord")
+
+    response = client.post("/v1/admin/features", json=payload)
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["errors"] == [
+        {
+            "field": "coord",
+            "message": "요청 값이 수동 Feature 생성 계약과 맞지 않습니다.",
+        }
+    ]
+    assert "input" not in response.text
+
+
+@pytest.mark.unit
+def test_create_whitespace_only_name_reaches_named_db_validation(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api import domain_command_service
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    raw_name = " \t "
+
+    async def _invalid(_session: Any, **kwargs: Any) -> Any:
+        assert kwargs["payload"]["name"] == raw_name
+        raise AdminManualFeatureValidationError(
+            field="name",
+            constraint="ck_manual_feature_identity_claims_name_key",
+        )
+
+    monkeypatch.setattr(router_mod, "create_admin_feature_with_field_overrides", _invalid)
+
+    response = client.post(
+        "/v1/admin/features",
+        json=_manual_create_payload(name=raw_name),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["errors"] == [
+        {
+            "field": "name",
+            "message": "요청 값이 수동 Feature 생성 계약과 맞지 않습니다.",
+        }
+    ]
+    assert response.json()["details"]["constraint"] == (
+        "ck_manual_feature_identity_claims_name_key"
+    )
+    domain_command_service.complete_domain_command.assert_not_awaited()
+    assert session.commit_count == 0
+    assert session.rollback_count == 1
+
+
+@pytest.mark.unit
+def test_create_preserves_raw_trimmed_multibyte_name_for_db_normalization(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    normalized_name = "가" * 170
+    raw_name = f"{' ' * 20}{normalized_name}{' ' * 20}"
+    assert len(raw_name) > 200
+    assert len(raw_name.strip()) == 170
+    assert len(raw_name.strip().encode("utf-8")) == 510
+
+    async def _create(_session: Any, **kwargs: Any) -> AdminManualFeatureCreated:
+        assert kwargs["payload"]["name"] == raw_name
+        return AdminManualFeatureCreated(
+            feature_id="f_global_p_9f9480adb6abef69",
+            feature_uuid="0198d9f1-7a31-7e52-8ea8-cb2548d3a891",
+            row_revision=2,
+            command_id=1,
+            applied_field_count=7,
+        )
+
+    monkeypatch.setattr(router_mod, "create_admin_feature_with_field_overrides", _create)
+
+    response = client.post(
+        "/v1/admin/features",
+        json=_manual_create_payload(name=raw_name),
+    )
+
+    assert response.status_code == 201
+
+
+@pytest.mark.unit
+def test_create_python_identity_validation_uses_typed_envelope_and_rolls_back(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.infra import feature_identity
+
+    from kortravelmap.api import domain_command_service
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    async def _missing_parent(_session: Any, _ref: str) -> None:
+        return None
+
+    monkeypatch.setattr(feature_identity, "resolve_feature_identity", _missing_parent)
+    create = AsyncMock()
+    monkeypatch.setattr(router_mod, "create_admin_feature_with_field_overrides", create)
+    rejected_ref = "f_rejected-parent-input"
+
+    response = client.post(
+        "/v1/admin/features",
+        json=_manual_create_payload(parent_feature_id=rejected_ref),
+    )
+
+    assert response.status_code == 422
+    assert response.json()["errors"] == [
+        {
+            "field": "parent_feature_id",
+            "message": "요청 값이 수동 Feature 생성 계약과 맞지 않습니다.",
+        }
+    ]
+    assert rejected_ref not in response.text
+    domain_command_service.begin_domain_command.assert_awaited_once()
+    domain_command_service.complete_domain_command.assert_not_awaited()
+    create.assert_not_awaited()
+    assert session.begin_count == 1
+    assert session.commit_count == 0
+    assert session.rollback_count == 1
+
+
+@pytest.mark.unit
+def test_create_typed_db_validation_has_stable_field_and_no_terminal(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api import domain_command_service
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    async def _invalid(_session: Any, **_kwargs: Any) -> Any:
+        raise AdminManualFeatureValidationError(
+            field="coord.lon",
+            constraint="ck_manual_feature_identity_coord_range",
+        )
+
+    monkeypatch.setattr(router_mod, "create_admin_feature_with_field_overrides", _invalid)
+
+    response = client.post("/v1/admin/features", json=_manual_create_payload())
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["errors"] == [
+        {
+            "field": "coord.lon",
+            "message": "요청 값이 수동 Feature 생성 계약과 맞지 않습니다.",
+        }
+    ]
+    assert body["details"]["constraint"] == (
+        "ck_manual_feature_identity_coord_range"
+    )
+    domain_command_service.complete_domain_command.assert_not_awaited()
+    assert session.begin_count == 1
+    assert session.commit_count == 0
+    assert session.rollback_count == 1
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("failure", "private_fragments"),
+    [
+        pytest.param(
+            AdminManualFeatureInvariantError(
+                "receipt invariant failed for secret-feature-payload"
+            ),
+            ("receipt invariant", "secret-feature-payload"),
+            id="trusted-receipt-invariant",
+        ),
+        pytest.param(
+            DBAPIError(
+                "CALL feature.secret_manual_create(:payload)",
+                {"payload": "private-request-payload"},
+                RuntimeError(
+                    "driver detail: constraint ck_private_internal_causation"
+                ),
+                False,
+            ),
+            (
+                "feature.secret_manual_create",
+                "private-request-payload",
+                "driver detail",
+                "ck_private_internal_causation",
+            ),
+            id="unknown-dbapi",
+        ),
+    ],
+)
+def test_create_internal_fault_is_sanitized_and_rolls_back_without_terminal(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+    failure: Exception,
+    private_fragments: tuple[str, ...],
+) -> None:
+    from kortravelmap.api import domain_command_service
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    async def _fail(_session: Any, **_kwargs: Any) -> Any:
+        raise failure
+
+    monkeypatch.setattr(router_mod, "create_admin_feature_with_field_overrides", _fail)
+
+    response = client.post("/v1/admin/features", json=_manual_create_payload())
+
+    assert response.status_code == 500
+    body = response.json()
+    assert body["code"] == "INTERNAL_SERVER_ERROR"
+    assert "details" not in body
+    assert body["request_id"] == response.headers["X-Request-ID"]
+    for fragment in private_fragments:
+        assert fragment not in response.text
+    domain_command_service.complete_domain_command.assert_not_awaited()
+    assert session.begin_count == 1
+    assert session.commit_count == 0
+    assert session.rollback_count == 1
+
+
+@pytest.mark.unit
+def test_create_ledger_dbapi_fault_uses_m01_internal_code_without_write(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api import domain_command_service
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    private_fragments = (
+        "ops.secret_domain_claim",
+        "private-ledger-payload",
+        "driver ledger detail",
+        "ck_private_ledger_constraint",
+    )
+    begin = AsyncMock(
+        side_effect=DBAPIError(
+            "SELECT ops.secret_domain_claim(:payload)",
+            {"payload": "private-ledger-payload"},
+            RuntimeError(
+                "driver ledger detail: constraint ck_private_ledger_constraint"
+            ),
+            False,
+        )
+    )
+    create = AsyncMock()
+    monkeypatch.setattr(domain_command_service, "begin_domain_command", begin)
+    monkeypatch.setattr(router_mod, "create_admin_feature_with_field_overrides", create)
+    probe = TestClient(
+        client.app,
+        client=("127.0.0.1", 50000),
+        raise_server_exceptions=False,
+        headers={
+            "Idempotency-Key": IDEMPOTENCY_KEY,
+            "X-Kor-Travel-Map-Admin-Proxy-Secret": ADMIN_PROXY_SECRET,
+            "X-Kor-Travel-Map-Actor": ADMIN_ACTOR,
+            "X-Kor-Travel-Map-Admin-Feature-Create-Token": (
+                ADMIN_FEATURE_CREATE_TOKEN
+            ),
+        },
+    )
+
+    response = probe.post("/v1/admin/features", json=_manual_create_payload())
+    probe.close()
+
+    assert response.status_code == 500
+    body = response.json()
+    assert body["code"] == "INTERNAL_SERVER_ERROR"
+    assert "details" not in body
+    assert body["request_id"] == response.headers["X-Request-ID"]
+    for fragment in private_fragments:
+        assert fragment not in response.text
+    begin.assert_awaited_once()
+    domain_command_service.complete_domain_command.assert_not_awaited()
+    create.assert_not_awaited()
+    assert session.begin_count == 1
+    assert session.commit_count == 0
+    assert session.rollback_count == 1
+
+
+@pytest.mark.unit
+def test_create_feature_exact_duplicate_returns_existing_uuid(
+    client: TestClient,
+    session: _FakeSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api import domain_command_service
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    async def _duplicate(_session: Any, **_kwargs: Any) -> Any:
+        return AdminManualFeatureExactDuplicate(
+            existing_feature_uuid="0198d9f1-7a31-7e52-8ea8-cb2548d3a891"
+        )
+
+    monkeypatch.setattr(
+        router_mod,
+        "create_admin_feature_with_field_overrides",
+        _duplicate,
+    )
+    response = client.post(
+        "/v1/admin/features",
+        json={
+            "kind": "place",
+            "name": "사용자 장소",
+            "category": "01070300",
+            "coord": {"lon": 126.98, "lat": 37.57},
+            "marker_icon": "map-pin",
+            "marker_color": "P-01",
+            "reason": "사용자 제보",
+        },
+    )
+    assert response.status_code == 409
+    assert response.json()["code"] == "MANUAL_FEATURE_EXACT_DUPLICATE"
+    assert response.json()["details"] == {
+        "constraint": "uq_manual_feature_identity_claims_exact",
+        "existing_feature_id": "0198d9f1-7a31-7e52-8ea8-cb2548d3a891",
+    }
+    domain_command_service.complete_domain_command.assert_not_awaited()
+    assert session.begin_count == 1
+    assert session.commit_count == 0
+    assert session.rollback_count == 1
 
 
 @pytest.mark.unit
@@ -841,7 +1546,7 @@ def test_patch_feature_authors_typed_override_receipt(
         assert kwargs["payload"] == {"name": "수정된 장소"}
         assert kwargs["expected_row_revision"] == 4  # If-Match row_revision
         assert kwargs["reason_code"] == "사용자 수정"
-        assert kwargs["operator"] == "local-dev"
+        assert kwargs["operator"] == ADMIN_ACTOR
         assert kwargs["command_id"] == 1
         return router_mod.FeatureFieldOverrideCommand(
             feature_id="feature-1",
@@ -865,6 +1570,38 @@ def test_patch_feature_authors_typed_override_receipt(
     assert response.headers["ETag"] == '"5"'
     assert response.json()["data"]["applied_field_count"] == 1
     assert session.begin_count == 1
+
+
+@pytest.mark.unit
+def test_create_strict_coord_does_not_change_patch_coercion_contract(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    _patch_admin_resolved_identity(monkeypatch)
+
+    async def _patch(_session: Any, **kwargs: Any) -> Any:
+        assert kwargs["payload"]["coord"] == {"lon": 126.98, "lat": 37.57}
+        return router_mod.FeatureFieldOverrideCommand(
+            feature_id="feature-1",
+            row_revision=5,
+            command_id=1,
+            applied_field_count=2,
+        )
+
+    monkeypatch.setattr(router_mod, "patch_admin_feature_with_field_overrides", _patch)
+
+    response = client.patch(
+        "/v1/admin/features/feature-1",
+        headers={"If-Match": '"4"'},
+        json={
+            "coord": {"lon": "126.98", "lat": "37.57"},
+            "reason": "좌표 보정",
+        },
+    )
+
+    assert response.status_code == 200
 
 
 @pytest.mark.unit
@@ -1027,7 +1764,7 @@ def test_feature_state_retire_is_atomic_and_returns_audited_etag(
             "quality_state": None,
             "expected_row_revision": 7,
             "reason_code": "admin_retire",
-            "operator": "local-dev",
+            "operator": ADMIN_ACTOR,
         }
         return AdminFeatureStateTransition(
             feature_id="feature-1",
@@ -1190,7 +1927,7 @@ def test_feature_state_reactivation_requires_current_source_evidence(
         assert kwargs == {
             "expected_row_revision": 8,
             "reason_code": "source_revalidated",
-            "operator": "local-dev",
+            "operator": ADMIN_ACTOR,
             "provider_dataset_id": 7,
             "source_entity_key": "entity-1",
             "source_record_key": "record-1",
@@ -1240,7 +1977,7 @@ def test_feature_field_override_author_uses_open_domain_command_and_etag(
         assert kwargs == {
             "expected_row_revision": 8,
             "reason_code": "correct_address",
-            "operator": "local-dev",
+            "operator": ADMIN_ACTOR,
             "command_id": 1,
             "values": {"core.address": {"road": "새 주소"}},
             "geometry_wkt": {},

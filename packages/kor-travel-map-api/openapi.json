@@ -1630,14 +1630,7 @@
             "type": "string"
           },
           "coord": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AdminFeatureCoordInput"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "$ref": "#/components/schemas/AdminManualFeatureCreateCoordInput"
           },
           "coord_precision_digits": {
             "anyOf": [
@@ -1664,30 +1657,6 @@
             ],
             "title": "Detail"
           },
-          "feature_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "기존 provider feature와 겹치는 사용자 version을 만들 때 명시한다. 미지정 시 user_request 자연키로 새 feature_id를 생성한다.",
-            "title": "Feature Id"
-          },
-          "idempotency_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "feature_id 미지정 시 source_natural_key로 쓰는 caller-provided key.",
-            "title": "Idempotency Key"
-          },
           "kind": {
             "enum": [
               "place",
@@ -1708,15 +1677,6 @@
             ],
             "title": "Legal Dong Code"
           },
-          "lifecycle_state": {
-            "default": "active",
-            "enum": [
-              "active",
-              "retired"
-            ],
-            "title": "Lifecycle State",
-            "type": "string"
-          },
           "marker_color": {
             "pattern": "^P-(0[1-9]|1[0-6])$",
             "title": "Marker Color",
@@ -1728,22 +1688,8 @@
             "type": "string"
           },
           "name": {
-            "minLength": 1,
             "title": "Name",
             "type": "string"
-          },
-          "operator": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "deprecated": true,
-            "description": "[deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 (ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, PinVi는 전송 중단 예정 (docs/integration-map.md).",
-            "title": "Operator"
           },
           "parent_feature_id": {
             "anyOf": [
@@ -1755,25 +1701,6 @@
               }
             ],
             "title": "Parent Feature Id"
-          },
-          "publication_state": {
-            "default": "published",
-            "enum": [
-              "draft",
-              "published",
-              "suppressed"
-            ],
-            "title": "Publication State",
-            "type": "string"
-          },
-          "quality_state": {
-            "default": "valid",
-            "enum": [
-              "valid",
-              "quarantined"
-            ],
-            "title": "Quality State",
-            "type": "string"
           },
           "reason": {
             "minLength": 1,
@@ -1855,6 +1782,7 @@
         "required": [
           "name",
           "category",
+          "coord",
           "marker_icon",
           "marker_color",
           "kind",
@@ -3361,6 +3289,7 @@
             "title": "Lon"
           },
           "name": {
+            "minLength": 1,
             "title": "Name",
             "type": "string"
           },
@@ -4401,6 +4330,88 @@
           "last_seen_at"
         ],
         "title": "AdminIssueRecord",
+        "type": "object"
+      },
+      "AdminManualFeatureCreateCoordInput": {
+        "additionalProperties": false,
+        "description": "수동 생성에서만 coercion과 non-finite 값을 거부하는 좌표 입력.",
+        "properties": {
+          "lat": {
+            "maximum": 39.5,
+            "minimum": 33.0,
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "maximum": 132.0,
+            "minimum": 124.0,
+            "title": "Lon",
+            "type": "number"
+          }
+        },
+        "required": [
+          "lon",
+          "lat"
+        ],
+        "title": "AdminManualFeatureCreateCoordInput",
+        "type": "object"
+      },
+      "AdminManualFeatureCreateData": {
+        "additionalProperties": false,
+        "description": "검증된 수동 Feature 생성 command의 commit receipt.",
+        "properties": {
+          "applied_field_count": {
+            "minimum": 1.0,
+            "title": "Applied Field Count",
+            "type": "integer"
+          },
+          "command_id": {
+            "minimum": 1.0,
+            "title": "Command Id",
+            "type": "integer"
+          },
+          "creation_origin": {
+            "const": "manual_admin",
+            "title": "Creation Origin",
+            "type": "string"
+          },
+          "feature_id": {
+            "format": "uuid",
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "row_revision": {
+            "minimum": 1.0,
+            "title": "Row Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "feature_id",
+          "creation_origin",
+          "row_revision",
+          "command_id",
+          "applied_field_count"
+        ],
+        "title": "AdminManualFeatureCreateData",
+        "type": "object"
+      },
+      "AdminManualFeatureCreateResponse": {
+        "additionalProperties": false,
+        "description": "``POST /admin/features``의 manual-v1 성공 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminManualFeatureCreateData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "AdminManualFeatureCreateResponse",
         "type": "object"
       },
       "AdminThemeCandidatePageData": {
@@ -27574,6 +27585,12 @@
         "name": "X-Kor-Travel-Map-Admin-Proxy-Secret",
         "type": "apiKey"
       },
+      "AdminFeatureCreateBFF": {
+        "description": "trusted admin frontend BFF가 수동 Feature 생성 요청에만 주입하는 server-only 전용 token. AdminBFF와 함께 검증한다.",
+        "in": "header",
+        "name": "X-Kor-Travel-Map-Admin-Feature-Create-Token",
+        "type": "apiKey"
+      },
       "OpsScope": {
         "description": "service principal 사용 시 OpsToken과 함께 필수인 scope 헤더. GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이다. scope 문자열만으로는 권한을 얻지 못하며 token 종류와 method/exact path도 일치해야 한다.",
         "in": "header",
@@ -31742,11 +31759,11 @@
           "required": true
         },
         "responses": {
-          "200": {
+          "201": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AdminFeatureFieldOverrideResponse"
+                  "$ref": "#/components/schemas/AdminManualFeatureCreateResponse"
                 }
               }
             },
@@ -31757,8 +31774,39 @@
                 "schema": {
                   "type": "string"
                 }
+              },
+              "Idempotency-Replayed": {
+                "description": "exact Idempotency-Key replay일 때만 `true`.",
+                "schema": {
+                  "enum": [
+                    "true"
+                  ],
+                  "type": "string"
+                }
+              },
+              "Location": {
+                "description": "생성된 canonical UUID Feature의 상대 admin URI.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Request-ID": {
+                "description": "최초 실행의 요청 ID. exact replay도 최초 요청과 같은 값을 반환한다.",
+                "schema": {
+                  "type": "string"
+                }
               }
             }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "수동 Feature 생성 전용 scope 없음"
           },
           "409": {
             "content": {
@@ -31768,7 +31816,7 @@
                 }
               }
             },
-            "description": "feature identity가 이미 존재함"
+            "description": "수동 Feature exact identity가 이미 존재함"
           },
           "422": {
             "content": {
@@ -31779,6 +31827,16 @@
               }
             },
             "description": "typed field registry 또는 create input 오류"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "수동 Feature 생성 cutover 준비 전"
           },
           "default": {
             "content": {
@@ -31793,7 +31851,8 @@
         },
         "security": [
           {
-            "AdminBFF": []
+            "AdminBFF": [],
+            "AdminFeatureCreateBFF": []
           }
         ],
         "summary": "Create Feature Route",

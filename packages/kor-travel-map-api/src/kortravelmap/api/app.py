@@ -41,6 +41,7 @@ from starlette.responses import JSONResponse, Response
 
 from kortravelmap.api import __version__
 from kortravelmap.api.auth import (
+    ADMIN_FEATURE_CREATE_TOKEN_HEADER,
     OPS_SCOPE_HEADER,
     PUBLIC_API_KEY_HEADER,
     require_admin_destructive_enabled,
@@ -105,6 +106,9 @@ from kortravelmap.api.routers import (
     service_curation_snapshots_router,
     service_feature_alias_maps_router,
     weather_router,
+)
+from kortravelmap.api.routers.admin_features import (
+    AdminManualFeatureCanonicalJSONResponse,
 )
 from kortravelmap.api.settings import ApiSettings
 
@@ -197,7 +201,11 @@ _OPS_OBSERVABILITY_PATHS = frozenset(
 _MOIS_DEBUG_PATH = "/v1/debug/mois-license/{license_id}"
 _OPS_CANCEL_PATH = "/v1/ops/pipeline/executions/import_job/{execution_id}/cancel"
 _OPS_FIXTURE_PATH_PREFIX = "/v1/ops/contract-fixtures/c6c-cancel-probe/"
+_ADMIN_MANUAL_FEATURE_CREATE_PATH = "/v1/admin/features"
 _ADMIN_BFF_SECURITY: list[dict[str, list[str]]] = [{"AdminBFF": []}]
+_ADMIN_MANUAL_FEATURE_CREATE_SECURITY: list[dict[str, list[str]]] = [
+    {"AdminBFF": [], "AdminFeatureCreateBFF": []}
+]
 # service principal 대안은 OpsToken과 OpsScope를 AND로 함께 요구한다 — 런타임
 # 판정(require_ops_operator)이 token만으로는 통과시키지 않고 scope 헤더 누락을
 # 422로 거부하는 계약과 일치시킨다.
@@ -236,6 +244,15 @@ _PUBLIC_API_KEY_SECURITY_SCHEME: dict[str, str] = {
         "헤더로 전달한다. ServiceToken 요청은 같은 runtime dependency에서 별도 "
         "principal로 허용한다. T-VN-H01 — 접근 로그·Referer 유출을 막기 위해 이전 "
         "?key= 쿼리 파라미터는 제거됐다."
+    ),
+}
+_ADMIN_FEATURE_CREATE_SECURITY_SCHEME: dict[str, str] = {
+    "type": "apiKey",
+    "in": "header",
+    "name": ADMIN_FEATURE_CREATE_TOKEN_HEADER,
+    "description": (
+        "trusted admin frontend BFF가 수동 Feature 생성 요청에만 주입하는 "
+        "server-only 전용 token. AdminBFF와 함께 검증한다."
     ),
 }
 
@@ -389,6 +406,10 @@ def _apply_route_security_contract(
             "PublicApiKey",
             dict(_PUBLIC_API_KEY_SECURITY_SCHEME),
         )
+        security_schemes.setdefault(
+            "AdminFeatureCreateBFF",
+            dict(_ADMIN_FEATURE_CREATE_SECURITY_SCHEME),
+        )
 
     paths = schema.get("paths")
     if not isinstance(paths, dict):
@@ -418,6 +439,14 @@ def _apply_route_security_contract(
                 operation["security"] = [dict(requirement) for requirement in security]
             else:
                 operation.pop("security", None)
+
+    admin_feature_path_item = paths.get(_ADMIN_MANUAL_FEATURE_CREATE_PATH)
+    if isinstance(admin_feature_path_item, dict):
+        operation = admin_feature_path_item.get("post")
+        if isinstance(operation, dict):
+            operation["security"] = [
+                dict(requirement) for requirement in _ADMIN_MANUAL_FEATURE_CREATE_SECURITY
+            ]
 
     for path, path_item in paths.items():
         if not isinstance(path, str):
@@ -557,6 +586,27 @@ def _http_error_payload(
             {},
         )
     return _status_error_code(status_code), f"HTTP {status_code} error", detail
+
+
+def _manual_feature_create_validation_errors(
+    exc: RequestValidationError,
+) -> list[dict[str, str]]:
+    """M01 create 입력 오류를 Pydantic 버전·원문 값과 분리해 공개한다."""
+
+    sanitized: list[dict[str, str]] = []
+    for error in exc.errors():
+        location = error.get("loc")
+        parts = list(location) if isinstance(location, tuple | list) else []
+        if parts and parts[0] == "body":
+            parts.pop(0)
+        field = ".".join(str(part) for part in parts) or "body"
+        sanitized.append(
+            {
+                "field": field,
+                "message": "요청 값이 수동 Feature 생성 계약과 맞지 않습니다.",
+            }
+        )
+    return sanitized
 
 
 def _error_response(
@@ -766,6 +816,19 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         exc: RequestValidationError,
     ) -> JSONResponse:
         request_id = _request_id(request)
+        if (
+            request.method == "POST"
+            and request.scope.get("path") == _ADMIN_MANUAL_FEATURE_CREATE_PATH
+        ):
+            return _error_response(
+                status_code=422,
+                code="VALIDATION_ERROR",
+                message="수동 Feature 생성 요청 값이 올바르지 않습니다.",
+                details={
+                    "errors": _manual_feature_create_validation_errors(exc),
+                },
+                request_id=request_id,
+            )
         return _error_response(
             status_code=422,
             code="VALIDATION_ERROR",
@@ -792,7 +855,12 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         }
         if original_request_id:
             headers["X-Request-ID"] = original_request_id
-        return JSONResponse(
+        response_class = (
+            AdminManualFeatureCanonicalJSONResponse
+            if exc.record.operation == "admin.feature.create.manual-v1"
+            else JSONResponse
+        )
+        return response_class(
             status_code=exc.record.response_status,
             content=jsonable_encoder(body),
             headers=headers,
@@ -914,10 +982,22 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             request.url.path,
             exc_info=exc,
         )
+        is_manual_feature_create = (
+            request.method == "POST"
+            and request.scope.get("path") == _ADMIN_MANUAL_FEATURE_CREATE_PATH
+        )
         return _error_response(
             status_code=500,
-            code="INTERNAL_ERROR",
-            message="서버 내부 오류가 발생했습니다.",
+            code=(
+                "INTERNAL_SERVER_ERROR"
+                if is_manual_feature_create
+                else "INTERNAL_ERROR"
+            ),
+            message=(
+                "수동 Feature 생성 중 내부 오류가 발생했습니다."
+                if is_manual_feature_create
+                else "서버 내부 오류가 발생했습니다."
+            ),
             details={},
             request_id=request_id,
         )

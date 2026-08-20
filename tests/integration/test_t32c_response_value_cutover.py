@@ -13,9 +13,9 @@
 ③ batch echo 등식 (R2) — service feature batch·weather batch의 item
    ``feature_id``는 **요청 표기 그대로** 돌아온다(legacy in → legacy out,
    UUID in → UUID out). PinVi 클라이언트가 이 등식을 런타임 강제 중이다.
-④ write 해석 → legacy FK (R4) — admin create의 UUID ``feature_id`` 거부(422),
-   ``parent_feature_id`` UUID 참조의 legacy 해석 기록, update-request
-   scope.feature_ids의 UUID→legacy 해석과 미해석 422 fail-close.
+④ write 해석 → legacy FK (R4) — M01 migration 전 admin create는 legacy UUID
+   해석·body validation·DB write보다 먼저 503으로 닫히고, update-request
+   scope.feature_ids는 UUID→legacy 해석과 미해석 422 fail-close를 유지한다.
 ⑤ admin 검색 UUID fast-path (R5) — ``list_admin_features(q=<uuid>)``가 해당
    feature 1건을 반환한다 (#639 풀스캔 회귀의 기능 축; EXPLAIN 등가는
    ``test_t212d_perf_explain``).
@@ -85,6 +85,35 @@ _NEARBY_CENTER = (124.6050, 33.1050)
 
 _MISSING_LEGACY_REF = "f_global_p_t32cmissing00001"
 _MISSING_UUID_REF = "00000000-0000-7000-8000-00000000dead"
+
+_MANUAL_CREATE_WRITE_RELATIONS = (
+    ("feature.features", "SELECT count(*) FROM feature.features"),
+    ("feature.feature_aliases", "SELECT count(*) FROM feature.feature_aliases"),
+    ("feature.feature_places", "SELECT count(*) FROM feature.feature_places"),
+    ("feature.feature_events", "SELECT count(*) FROM feature.feature_events"),
+    (
+        "feature.feature_state_transitions",
+        "SELECT count(*) FROM feature.feature_state_transitions",
+    ),
+    (
+        "feature.feature_base_field_values",
+        "SELECT count(*) FROM feature.feature_base_field_values",
+    ),
+    (
+        "feature.manual_feature_identity_claims",
+        "SELECT count(*) FROM feature.manual_feature_identity_claims",
+    ),
+    (
+        "feature.feature_creation_origins",
+        "SELECT count(*) FROM feature.feature_creation_origins",
+    ),
+    ("ops.domain_commands", "SELECT count(*) FROM ops.domain_commands"),
+    (
+        "ops.domain_command_results",
+        "SELECT count(*) FROM ops.domain_command_results",
+    ),
+    ("ops.feature_overrides", "SELECT count(*) FROM ops.feature_overrides"),
+)
 
 
 @dataclass(frozen=True)
@@ -240,6 +269,7 @@ async def _seed_beaches(session: AsyncSession) -> tuple[_SeededIdentity, ...]:
 def _api_settings() -> ApiSettings:
     return ApiSettings(
         _env_file=None,
+        admin_manual_feature_create_enabled=False,
         admin_proxy_secret=None,
         ops_cancel_token=None,
         ops_fixture_token=None,
@@ -496,74 +526,82 @@ def _admin_create_body(**overrides: Any) -> dict[str, Any]:
     return body
 
 
-def _idempotency_headers() -> dict[str, str]:
-    return {"Idempotency-Key": str(uuid_module.uuid4())}
-
-
-async def test_admin_create_rejects_uuid_feature_id(
-    cutover_env: _CutoverEnv,
-) -> None:
-    """UUID를 신규 legacy PK로 각인하는 유령 행 생성 차단 (W1 — 422)."""
-    response = await cutover_env.client.post(
-        "/v1/admin/features",
-        json=_admin_create_body(feature_id=cutover_env.places[0].feature_uuid),
-        headers=_idempotency_headers(),
-    )
-    assert response.status_code == 422, response.text
-
-
-async def test_admin_create_resolves_parent_uuid_ref_to_legacy(
-    cutover_env: _CutoverEnv,
-) -> None:
-    """parent_feature_id의 UUID 참조는 legacy 정본 키로 해석되어 기록된다."""
-    parent = cutover_env.places[0]
-    response = await cutover_env.client.post(
-        "/v1/admin/features",
-        json=_admin_create_body(parent_feature_id=parent.feature_uuid),
-        headers=_idempotency_headers(),
-    )
-    assert response.status_code == 200, response.text
-    created_uuid = response.json()["data"]["feature_id"]
-
-    # T-VN-36D가 whole-row change request를 물리 삭제했으므로 "저장된 값"의 정본은
-    # effective core와 그것을 만든 field override receipt 둘이다. 응답만 정규화되는
-    # 착시를 차단하려면 **둘 다** legacy 정본 키여야 한다(FK 오염은 저장값이 진실이다).
-    async with AsyncSession(
-        bind=cutover_env.connection,
-        join_transaction_mode="create_savepoint",
-    ) as probe:
-        stored = (
-            await probe.execute(
-                text(
-                    "SELECT feature_id, parent_feature_id FROM feature.features "
-                    "WHERE feature_uuid = CAST(:feature_uuid AS uuid)"
-                ),
-                {"feature_uuid": created_uuid},
-            )
-        ).mappings().one()
-        override_text = (
-            await probe.execute(
-                text(
-                    "SELECT override_value #>> '{}' FROM ops.feature_overrides "
-                    "WHERE feature_id = :feature_id "
-                    "AND field_path = 'core.parent_feature_id' AND status = 'active'"
-                ),
-                {"feature_id": stored["feature_id"]},
+async def _manual_create_write_counts(
+    connection: AsyncConnection,
+) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for relation, count_sql in _MANUAL_CREATE_WRITE_RELATIONS:
+        exists = (
+            await connection.execute(
+                text("SELECT to_regclass(:relation) IS NOT NULL"),
+                {"relation": relation},
             )
         ).scalar_one()
-    assert stored["parent_feature_id"] == parent.feature_id
-    assert override_text == parent.feature_id
+        if exists:
+            counts[relation] = int(
+                (await connection.execute(text(count_sql))).scalar_one()
+            )
+    return counts
 
 
-async def test_admin_create_rejects_unresolvable_parent_uuid_ref(
+async def _assert_manual_create_not_ready_without_writes(
     cutover_env: _CutoverEnv,
+    body: dict[str, Any],
 ) -> None:
+    before = await _manual_create_write_counts(cutover_env.connection)
+    request_id = str(uuid_module.uuid4())
     response = await cutover_env.client.post(
         "/v1/admin/features",
-        json=_admin_create_body(parent_feature_id=_MISSING_UUID_REF),
-        headers=_idempotency_headers(),
+        json=body,
+        headers={
+            "Idempotency-Key": str(uuid_module.uuid4()),
+            "X-Request-ID": request_id,
+        },
     )
-    assert response.status_code == 422, response.text
+    after = await _manual_create_write_counts(cutover_env.connection)
+
+    assert response.status_code == 503, response.text
+    assert response.headers["content-type"].startswith("application/problem+json")
+    problem = response.json()
+    assert problem["status"] == 503
+    assert problem["code"] == "MANUAL_FEATURE_CREATE_NOT_READY"
+    assert problem["request_id"] == request_id
+    assert response.headers["x-request-id"] == request_id
+    assert problem["errors"] == []
+    assert "location" not in response.headers
+    assert "etag" not in response.headers
+    assert "idempotency-replayed" not in response.headers
+    assert after == before
+
+
+async def test_admin_create_flag_closes_before_caller_uuid_validation(
+    cutover_env: _CutoverEnv,
+) -> None:
+    """0226 전에는 caller UUID validation보다 flag 503이 먼저 선다."""
+    await _assert_manual_create_not_ready_without_writes(
+        cutover_env,
+        _admin_create_body(feature_id=cutover_env.places[0].feature_uuid),
+    )
+
+
+async def test_admin_create_flag_closes_before_parent_uuid_resolution(
+    cutover_env: _CutoverEnv,
+) -> None:
+    """0226 전에는 존재하는 parent UUID도 해석·저장하지 않는다."""
+    parent = cutover_env.places[0]
+    await _assert_manual_create_not_ready_without_writes(
+        cutover_env,
+        _admin_create_body(parent_feature_id=parent.feature_uuid),
+    )
+
+
+async def test_admin_create_flag_closes_before_missing_parent_validation(
+    cutover_env: _CutoverEnv,
+) -> None:
+    await _assert_manual_create_not_ready_without_writes(
+        cutover_env,
+        _admin_create_body(parent_feature_id=_MISSING_UUID_REF),
+    )
 
 
 async def test_update_request_scope_resolves_uuid_refs_to_legacy(

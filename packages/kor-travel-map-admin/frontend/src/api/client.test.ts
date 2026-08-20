@@ -665,6 +665,68 @@ describe("api client AbortSignal forwarding (concierge #111 class fix)", () => {
     expect(randomUUID).toHaveBeenCalledTimes(2);
   });
 
+  it.each([
+    "MANUAL_FEATURE_CREATE_BFF_NOT_READY",
+    "MANUAL_FEATURE_CREATE_NOT_READY",
+  ])("%s 503은 mutation 전 실패로 frozen submission을 폐기한다", async (code) => {
+    const randomUUID = stubIdempotencyBrowser([
+      "91919191-9191-4919-8919-919191919191",
+      "92929292-9292-4929-8929-929292929292",
+    ]);
+    const release = vi.fn();
+    const seen: Array<{ body: { name: string }; key: string }> = [];
+    const original = { body: { name: "원본" } };
+    const changed = { body: { name: "변경" } };
+    const error = new ApiClientError(
+      "manual feature create pre-mutation failure",
+      503,
+      "/v1/admin/features",
+      {
+        code,
+        detail: "manual feature create is not ready",
+        errors: [],
+        request_id: "manual-create-pre-mutation",
+        status: 503,
+        title: "manual feature create is not ready",
+        type: `https://kor-travel-map/errors/${code.toLowerCase().replaceAll("_", "-")}`,
+      },
+    );
+
+    await expect(
+      withDomainIdempotencySubmission(
+        "admin.feature.create.manual-v1:draft:feature-create",
+        original,
+        async (submission, key) => {
+          seen.push({ body: submission.body, key });
+          throw error;
+        },
+        { onRelease: release },
+      ),
+    ).rejects.toBe(error);
+    await withDomainIdempotencySubmission(
+      "admin.feature.create.manual-v1:draft:feature-create",
+      changed,
+      async (submission, key) => {
+        seen.push({ body: submission.body, key });
+        return "ok";
+      },
+      { onRelease: release },
+    );
+
+    expect(seen).toEqual([
+      {
+        body: { name: "원본" },
+        key: "91919191-9191-4919-8919-919191919191",
+      },
+      {
+        body: { name: "변경" },
+        key: "92929292-9292-4929-8929-929292929292",
+      },
+    ]);
+    expect(release).toHaveBeenCalledTimes(2);
+    expect(randomUUID).toHaveBeenCalledTimes(2);
+  });
+
   it.each([408, 425, 429, 499, 500, 502, 503])(
     "HTTP %s 불확실 응답은 같은 idempotency key를 유지한다",
     async (status) => {

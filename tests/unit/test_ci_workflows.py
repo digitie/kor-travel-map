@@ -32,6 +32,17 @@ def test_ci_workflow_splits_unit_integration_and_fixture_replay_jobs() -> None:
     assert unit["name"] == "pytest (Python ${{ matrix.python-version }})"
     assert unit["strategy"]["matrix"]["python-version"] == ["3.11", "3.12", "3.13"]
     unit_steps = _steps_by_name(unit)
+    node_setup = unit_steps["Set up Node 22.23.1"]
+    assert node_setup["uses"] == "actions/setup-node@v4"
+    assert node_setup["with"] == {
+        "node-version": "22.23.1",
+        "cache": "npm",
+        "cache-dependency-path": "package-lock.json",
+    }
+    assert unit_steps["Install Next env parser for unit tests"]["run"] == (
+        "npx --yes npm@12.0.1 ci --workspaces=false --omit=dev "
+        "--ignore-scripts --no-audit --no-fund"
+    )
     main_test = unit_steps["Run unit + lint tests"]["run"]
     assert "pytest tests/unit tests/lint -q" in main_test
     assert "--cov=src/kortravelmap" in main_test

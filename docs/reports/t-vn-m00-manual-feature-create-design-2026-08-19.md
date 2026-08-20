@@ -84,9 +84,13 @@ T-VN-39에서 재작성하지 않는다. procedure의 current/target 출력 차�
 배포는 다음 순서를 바꾸지 않는다.
 
 1. PinVi paired commit을 먼저 배포해 `new_place` 승인에서 Map 호출과 상태 변경을 모두 막는다.
-2. Map migration, API, admin UI, role bootstrap, backup/restore manifest를 route flag `false`로 배포한다.
-3. admin UI BFF에만 생성 token을 주입하고 API에는 그 token의 SHA-256 digest만 주입한다.
-4. startup catalog/ACL preflight와 restore dry-run을 통과한다.
+2. route flag는 `false`로 둔 채 생성 token을 secret store에서 만들고, admin UI BFF에는 raw token만,
+   API에는 그 SHA-256 digest만 사전 provision한다. production API는 flag와 무관하게 digest 누락을
+   startup에서 거부한다.
+3. Map migration, API, admin UI, role bootstrap, backup/restore manifest를 배포한다. raw token은
+   tracked 파일, image build arg/fingerprint, API/Dagster/bootstrap process에 들어가지 않는다.
+4. launcher의 raw↔digest 일치·credential 분리 검증, startup catalog/ACL preflight와 restore dry-run을
+   통과한다.
 5. route flag를 `true`로 바꾸고 §4.2 auth matrix와 §11 smoke를 수행한다.
 
 중간 상태에서 route는 `503 MANUAL_FEATURE_CREATE_NOT_READY`이며 어떠한 command·claim·Feature도
@@ -226,7 +230,7 @@ X-Request-ID: 6af0b664-3df1-4c57-8871-a170a75d2ed4
     "creation_origin": "manual_admin",
     "row_revision": 2,
     "command_id": 1842,
-    "applied_field_count": 5
+    "applied_field_count": 6
   },
   "meta": {
     "duration_ms": 12,
@@ -724,19 +728,24 @@ CI reverse inventory는 CHECK·UNIQUE만 세지 않는다. current migration과 
 
 ### 10.1 migration 번호와 단계
 
-T-VN-40C가 `0224`를 예약했다. M01은 번호를 지금 선점하지 않고 main rebase 때 T-VN-41S와 조정해
-`0225+` 실제 head를 배정한다. 새 노드는 실제 head에 잇는 forward-only migration이며
-`downgrade()`는 row count와 무관하게 DDL 없이 `RuntimeError`를 낸다.
+T-VN-40C는 현행 `0225`를 예약했다. M01은 그 실제 revision이 main에 착지한 뒤에만
+`0226_m01_manual_feature_create`(revision ID 30자)로 잇는다. 파일명은 더 길 수 있지만 revision ID는
+현행 `alembic_version.version_num varchar(32)` gate를 넘지 않는다. 새 노드는 실제 head에 잇는
+forward-only migration이며 `downgrade()`는 row count와 무관하게 DDL 없이 `RuntimeError`를 낸다.
 
 1. old route flag false와 PinVi paired receipt 확인
-2. 수정된 bootstrap을 먼저 실행해 NOLOGIN owner/executor와 schema ownership grant를 생성·검증
-3. read-only legacy preflight와 relation lock
-4. normalizer, table, FK/check/unique, append-only function/trigger, wrapper 생성과 owner 이전
-5. legacy claim INSERT, candidate count/ordered SHA-256 root 검증, origin backfill 0 단언
-6. owner·ACL reconciliation과 두 login preflight
-7. API/admin UI/OpenAPI clean cutover, registry operation/status/header/isolation 변경
-8. backup/restore manifest 및 hard-purge fence 검증
-9. 전용 token 배포 뒤 route flag와 auth/201/replay smoke
+2. fresh DB는 기존 role graph로 historical migration을 실제 `0225`까지 먼저 적용한다. 갱신된
+   bootstrap을 0200/0202보다 먼저 실행하면 byte-frozen migration의 exact membership 검사가 실패하므로
+   단일 `upgrade head` 앞 bootstrap으로 합치지 않는다.
+3. 수정된 bootstrap을 두 번째 phase로 실행해 M01 NOLOGIN owner/executor와 최소 membership을
+   생성·검증한다.
+4. read-only legacy preflight와 relation lock
+5. `0226`에서 normalizer, table, FK/check/unique, append-only function/trigger, wrapper 생성과 owner 이전
+6. legacy claim INSERT, candidate count/ordered SHA-256 root 검증, origin backfill 0 단언
+7. owner·ACL reconciliation과 두 login preflight
+8. API/admin UI/OpenAPI clean cutover, registry operation/status/header/isolation 변경
+9. backup/restore manifest 및 hard-purge fence 검증
+10. 사전 provision된 credential parity를 재검증한 뒤 route flag와 auth/201/replay smoke
 
 ### 10.2 vNext freeze
 

@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import json
 import re
 from datetime import datetime
+from math import isfinite
 from time import perf_counter
 from typing import Annotated, Any, Literal
+from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request, Response, status
-from kortravelmap.core import make_feature_id
 from kortravelmap.dto import EventDetail, PlaceDetail
 from kortravelmap.infra import curation_repo, feature_identity, price_repo, weather_repo
 from kortravelmap.infra.admin_feature_repo import (
@@ -27,6 +29,11 @@ from kortravelmap.infra.admin_feature_repo import (
     AdminFeatureStateTransitionAudit,
     AdminFeatureStateTransitionAuditPage,
     AdminFeatureStateValidationError,
+    AdminManualFeatureCreated,
+    AdminManualFeatureExactDuplicate,
+    AdminManualFeatureIdentityConflict,
+    AdminManualFeatureInvariantError,
+    AdminManualFeatureValidationError,
     FeatureFieldOverrideCommand,
     FeatureFieldOverrideNotFound,
     FeatureFieldOverridePreconditionFailed,
@@ -53,12 +60,16 @@ from pydantic import (
     field_validator,
     model_validator,
 )
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.responses import JSONResponse
 
 from kortravelmap.api.auth import (
+    AdminManualFeatureCreateContext,
     AdminProxyContext,
     require_admin_destructive_enabled,
     require_admin_frontend,
+    require_admin_manual_feature_create,
 )
 from kortravelmap.api.db import get_session
 from kortravelmap.api.domain_command_service import (
@@ -94,6 +105,8 @@ __all__ = [
     "AdminFeatureStateResponse",
     "AdminFeatureStateTransitionsResponse",
     "AdminFeatureCreateRequest",
+    "AdminManualFeatureCanonicalJSONResponse",
+    "AdminManualFeatureCreateResponse",
     "AdminFeaturePatchRequest",
 ]
 
@@ -118,6 +131,19 @@ AdminFeatureSort = Literal[
     "issue_count",
 ]
 SortOrder = Literal["asc", "desc"]
+
+
+class AdminManualFeatureCanonicalJSONResponse(JSONResponse):
+    """M01 terminal/replay가 jsonb key order와 무관하게 같은 bytes를 내도록 한다."""
+
+    def render(self, content: Any) -> bytes:
+        return json.dumps(
+            content,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
 
 
 class AdminFeatureIssueRecord(BaseModel):
@@ -151,7 +177,7 @@ class AdminFeatureRecord(BaseModel):
         ),
     )
     kind: str
-    name: str
+    name: str = Field(min_length=1)
     category: str
     lifecycle_state: Literal["active", "retired"]
     publication_state: Literal["draft", "published", "suppressed"]
@@ -409,6 +435,27 @@ class AdminFeatureFieldOverrideResponse(BaseModel):
     meta: Meta
 
 
+class AdminManualFeatureCreateData(BaseModel):
+    """검증된 수동 Feature 생성 command의 commit receipt."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: UUID
+    creation_origin: Literal["manual_admin"]
+    row_revision: int = Field(ge=1)
+    command_id: int = Field(ge=1)
+    applied_field_count: int = Field(ge=1)
+
+
+class AdminManualFeatureCreateResponse(BaseModel):
+    """``POST /admin/features``의 manual-v1 성공 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: AdminManualFeatureCreateData
+    meta: Meta
+
+
 class AdminFeatureCoordInput(BaseModel):
     """Feature mutation 좌표 입력."""
 
@@ -416,6 +463,19 @@ class AdminFeatureCoordInput(BaseModel):
 
     lon: float = Field(ge=124.0, le=132.0)
     lat: float = Field(ge=33.0, le=39.5)
+
+
+class AdminManualFeatureCreateCoordInput(AdminFeatureCoordInput):
+    """수동 생성에서만 coercion과 non-finite 값을 거부하는 좌표 입력."""
+
+    @field_validator("lon", "lat", mode="before")
+    @classmethod
+    def _require_finite_json_number(cls, value: object) -> object:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("좌표는 JSON number여야 합니다.")
+        if not isfinite(float(value)):
+            raise ValueError("좌표는 finite JSON number여야 합니다.")
+        return value
 
 
 class AdminFeatureBaseMutation(BaseModel):
@@ -524,35 +584,16 @@ class AdminFeatureCreateRequest(AdminFeatureBaseMutation):
     기본값으로 채운다. 맞지 않으면 422다.
     """
 
-    feature_id: str | None = Field(
-        default=None,
-        description=(
-            "기존 provider feature와 겹치는 사용자 version을 만들 때 명시한다. "
-            "미지정 시 user_request 자연키로 새 feature_id를 생성한다."
-        ),
-    )
     kind: Literal["place", "event"]
-    name: str = Field(min_length=1)
+    # exact-key NFKC/trim 뒤의 1..200자·UTF-8 512 byte 제한은 DB named
+    # validation이 판정한다. raw 값의 앞뒤 공백은 저장 입력으로 보존하므로 여기서
+    # raw 길이를 재면 정상화 뒤 유효한 값을 과도하게 거부한다.
+    name: str
     category: str = Field(pattern=r"^\d{8}$")
+    coord: AdminManualFeatureCreateCoordInput
     marker_icon: str = Field(min_length=1)
     marker_color: str = Field(pattern=r"^P-(0[1-9]|1[0-6])$")
-    lifecycle_state: Literal["active", "retired"] = "active"
-    publication_state: Literal["draft", "published", "suppressed"] = "published"
-    quality_state: Literal["valid", "quarantined"] = "valid"
     reason: str = Field(min_length=1)
-    operator: str | None = Field(
-        default=None,
-        deprecated=True,
-        description=(
-            "[deprecated·ignored] 감사 actor는 인증 principal에서만 파생한다 "
-            "(ADR-066 D-2, T-VN-20). PinVi 호환을 위해 수용하되 값은 무시하며, "
-            "PinVi는 전송 중단 예정 (docs/integration-map.md)."
-        ),
-    )
-    idempotency_key: str | None = Field(
-        default=None,
-        description="feature_id 미지정 시 source_natural_key로 쓰는 caller-provided key.",
-    )
 
     @model_validator(mode="after")
     def _detail_matches_kind(self) -> AdminFeatureCreateRequest:
@@ -938,23 +979,57 @@ def _payload(body: AdminFeatureBaseMutation) -> dict[str, Any]:
         exclude={"reason", "operator", "idempotency_key"},
         exclude_unset=True,
     )
-    if isinstance(body, AdminFeatureCreateRequest):
-        # 생성 요청의 axis 기본값은 review payload에도 명시적으로 보존한다. 그렇지
-        # 않으면 ``exclude_unset``이 기본값을 지워 승인 시 저장 경계가 의도와 다른
-        # 기본값을 선택할 여지를 만든다.
-        raw.update(
-            lifecycle_state=body.lifecycle_state,
-            publication_state=body.publication_state,
-            quality_state=body.quality_state,
-        )
     coord = raw.get("coord")
     if isinstance(coord, dict):
         raw["coord"] = {"lon": coord["lon"], "lat": coord["lat"]}
     return raw
 
 
+def _manual_feature_create_validation_error(
+    *,
+    field: str,
+    constraint: str | None = None,
+) -> HTTPException:
+    """수동 생성의 Python/DB validation을 한 안정된 problem detail로 합친다."""
+
+    details: dict[str, Any] = {
+        "errors": [
+            {
+                "field": field,
+                "message": "요청 값이 수동 Feature 생성 계약과 맞지 않습니다.",
+            }
+        ]
+    }
+    if constraint is not None:
+        details["constraint"] = constraint
+    return HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail={
+            "code": "VALIDATION_ERROR",
+            "message": "수동 Feature 생성 요청 값이 올바르지 않습니다.",
+            "details": details,
+        },
+    )
+
+
+def _manual_feature_create_internal_error() -> HTTPException:
+    """M01 내부/미분류 DB fault를 driver 세부 정보 없이 공개한다."""
+
+    return HTTPException(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        detail={
+            "code": "INTERNAL_SERVER_ERROR",
+            "message": "수동 Feature 생성 중 내부 오류가 발생했습니다.",
+            "details": {},
+        },
+    )
+
+
 async def _resolve_mutation_identity_refs(
-    session: AsyncSession, payload: dict[str, Any]
+    session: AsyncSession,
+    payload: dict[str, Any],
+    *,
+    manual_create: bool = False,
 ) -> None:
     """mutation payload의 feature 참조를 legacy 정본 키로 해석한다 (T-VN-32C PR-2).
 
@@ -968,8 +1043,14 @@ async def _resolve_mutation_identity_refs(
         try:
             identity = await feature_identity.resolve_feature_identity(session, parent)
         except feature_identity.FeatureIdentityRefError as exc:
+            if manual_create:
+                raise AdminManualFeatureValidationError(
+                    field="parent_feature_id"
+                ) from exc
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         if identity is None:
+            if manual_create:
+                raise AdminManualFeatureValidationError(field="parent_feature_id")
             raise HTTPException(
                 status_code=422,
                 detail=f"parent_feature_id를 해석할 수 없습니다: {parent!r}",
@@ -979,6 +1060,8 @@ async def _resolve_mutation_identity_refs(
     if sibling is not None and await feature_identity.feature_uuid_in_use(
         session, sibling
     ):
+        if manual_create:
+            raise AdminManualFeatureValidationError(field="sibling_group_id")
         raise HTTPException(
             status_code=422,
             detail=(
@@ -986,33 +1069,6 @@ async def _resolve_mutation_identity_refs(
                 "참조가 아니라 sibling group 식별자를 전달해야 합니다."
             ),
         )
-
-
-def _create_feature_id(body: AdminFeatureCreateRequest) -> str:
-    if body.feature_id:
-        # T-VN-32C PR-2 (W1) — 값 전환 후 응답에서 복사한 UUID가 신규 legacy
-        # PK로 조용히 각인되는 유령 행 생성을 차단한다. 신규 feature_id는
-        # legacy 표기만 허용한다(UUID는 시스템이 발급).
-        if feature_identity.is_canonical_uuid_ref(body.feature_id):
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    "feature_id에 UUID를 지정할 수 없습니다 — 신규 feature의 "
-                    "legacy id는 f_* 표기여야 하며 UUID는 시스템이 발급합니다."
-                ),
-            )
-        return body.feature_id
-    coord_key = "global"
-    if body.coord is not None:
-        coord_key = f"{body.coord.lon:.6f},{body.coord.lat:.6f}"
-    natural_key = body.idempotency_key or f"{body.name}:{coord_key}"
-    return make_feature_id(
-        bjd_code=body.legal_dong_code,
-        kind=body.kind,
-        category=body.category,
-        source_type="user_request",
-        source_natural_key=natural_key,
-    )
 
 
 # ── If-Match row-revision 낙관적 동시성 (T-VN-13, D-10-3) ─────────────────────
@@ -1059,6 +1115,25 @@ def _field_override_response(
     )
 
 
+def _manual_feature_create_response(
+    row: AdminManualFeatureCreated,
+    *,
+    started_at: float,
+) -> AdminManualFeatureCreateResponse:
+    """수동 생성 commit receipt를 UUID-only HTTP 응답으로 고정한다."""
+
+    return AdminManualFeatureCreateResponse(
+        data=AdminManualFeatureCreateData(
+            feature_id=UUID(row.feature_uuid),
+            creation_origin=row.creation_origin,
+            row_revision=row.row_revision,
+            command_id=row.command_id,
+            applied_field_count=row.applied_field_count,
+        ),
+        meta=make_meta(started_at=started_at),
+    )
+
+
 def _require_if_match_revision(request: Request) -> int:
     """correction 요청의 ``If-Match``를 row_revision으로 파싱한다.
 
@@ -1090,6 +1165,23 @@ _ETAG_RESPONSE_HEADER = {
         "description": "현재 feature의 server-owned row_revision strong entity tag.",
         "schema": {"type": "string"},
     }
+}
+_MANUAL_CREATE_RESPONSE_HEADERS = {
+    **_ETAG_RESPONSE_HEADER,
+    "Location": {
+        "description": "생성된 canonical UUID Feature의 상대 admin URI.",
+        "schema": {"type": "string"},
+    },
+    "X-Request-ID": {
+        "description": (
+            "최초 실행의 요청 ID. exact replay도 최초 요청과 같은 값을 반환한다."
+        ),
+        "schema": {"type": "string"},
+    },
+    "Idempotency-Replayed": {
+        "description": "exact Idempotency-Key replay일 때만 `true`.",
+        "schema": {"type": "string", "enum": ["true"]},
+    },
 }
 _IF_MATCH_OPENAPI_PARAMETER = {
     "name": "If-Match",
@@ -1529,55 +1621,78 @@ async def get_feature_detail_route(
 
 @router.post(
     "",
-    response_model=AdminFeatureFieldOverrideResponse,
+    response_model=AdminManualFeatureCreateResponse,
+    response_class=AdminManualFeatureCanonicalJSONResponse,
+    status_code=status.HTTP_201_CREATED,
     responses={
-        409: {"description": "feature identity가 이미 존재함"},
+        403: {"description": "수동 Feature 생성 전용 scope 없음"},
+        409: {"description": "수동 Feature exact identity가 이미 존재함"},
         422: {"description": "typed field registry 또는 create input 오류"},
-        200: {"headers": _ETAG_RESPONSE_HEADER},
+        503: {"description": "수동 Feature 생성 cutover 준비 전"},
+        201: {"headers": _MANUAL_CREATE_RESPONSE_HEADERS},
     },
 )
-@idempotent_domain_command("admin.feature.create")
+@idempotent_domain_command("admin.feature.create.manual-v1")
 async def create_feature_route(
     body: AdminFeatureCreateRequest,
     request: Request,
     response: Response,
-    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
+    context: Annotated[
+        AdminManualFeatureCreateContext,
+        Depends(require_admin_manual_feature_create),
+    ],
     session: Annotated[AsyncSession, Depends(get_session)],
-) -> AdminFeatureFieldOverrideResponse:
+) -> AdminManualFeatureCreateResponse:
     started_at = perf_counter()
-    feature_id = _create_feature_id(body)
     payload = _payload(body)
-    payload["feature_id"] = feature_id
-    await _resolve_mutation_identity_refs(session, payload)
-    async with domain_command_transaction(session):
-        try:
+    try:
+        await _resolve_mutation_identity_refs(
+            session,
+            payload,
+            manual_create=True,
+        )
+        async with domain_command_transaction(session):
             result = await create_admin_feature_with_field_overrides(
                 session,
-                feature_id=feature_id,
                 payload=payload,
-                lifecycle_state=body.lifecycle_state,
-                publication_state=body.publication_state,
-                quality_state=body.quality_state,
                 reason_code=body.reason,
                 operator=context.actor,
                 command_id=current_domain_command().command_id,
             )
-        except FeatureFieldOverrideValidationError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail=str(exc),
-            ) from exc
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail=str(exc),
-            ) from exc
+    except AdminManualFeatureIdentityConflict as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "FEATURE_IDENTITY_CONFLICT",
+                "message": "수동 Feature canonical identity가 충돌합니다.",
+                "details": {
+                    "constraint": exc.constraint,
+                    "feature_id": exc.feature_uuid,
+                },
+            },
+        ) from exc
+    except AdminManualFeatureValidationError as exc:
+        raise _manual_feature_create_validation_error(
+            field=exc.field,
+            constraint=exc.constraint,
+        ) from exc
+    except (AdminManualFeatureInvariantError, DBAPIError, ValueError) as exc:
+        raise _manual_feature_create_internal_error() from exc
+    if isinstance(result, AdminManualFeatureExactDuplicate):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "MANUAL_FEATURE_EXACT_DUPLICATE",
+                "message": "같은 수동 Feature가 이미 존재합니다.",
+                "details": {
+                    "constraint": result.constraint,
+                    "existing_feature_id": result.existing_feature_uuid,
+                },
+            },
+        )
     _set_feature_etag(response, result.row_revision)
-    return _field_override_response(
-        result,
-        feature_id=result.feature_uuid or result.feature_id,
-        started_at=started_at,
-    )
+    response.headers["Location"] = f"/v1/admin/features/{result.feature_uuid}"
+    return _manual_feature_create_response(result, started_at=started_at)
 
 
 @router.patch(

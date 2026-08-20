@@ -23,10 +23,12 @@ import {
 } from "react";
 
 import { useCategories, type CategorySummary } from "@/api/categories";
+import { ApiClientError } from "@/api/client";
 import {
   useCreateAdminFeatureMutation,
   useNearbyFeatures,
   type AdminFeatureCreateRequest,
+  type AdminFeatureCreateKind,
 } from "@/api/features";
 import {
   geocodeAddress,
@@ -94,12 +96,10 @@ interface FeatureCreateFormState {
   duplicateRadiusM: string;
   endDate: string;
   eventStatus: string;
-  featureId: string;
   geocodeQuery: string;
   geocodeType: "parcel" | "road";
   homepageUrl: string;
-  idempotencyKey: string;
-  kind: AdminFeatureCreateRequest["kind"];
+  kind: AdminFeatureCreateKind;
   lat: string;
   legalDongCode: string;
   lon: string;
@@ -116,9 +116,6 @@ interface FeatureCreateFormState {
   sigunguCode: string;
   sourceUrl: string;
   startDate: string;
-  lifecycleState: AdminFeatureCreateRequest["lifecycle_state"];
-  publicationState: AdminFeatureCreateRequest["publication_state"];
-  qualityState: AdminFeatureCreateRequest["quality_state"];
   urlsExtraJson: string;
   venue: string;
 }
@@ -135,11 +132,9 @@ function initialForm(): FeatureCreateFormState {
     duplicateRadiusM: "150",
     endDate: "",
     eventStatus: "",
-    featureId: "",
     geocodeQuery: "",
     geocodeType: "road",
     homepageUrl: "",
-    idempotencyKey: "",
     kind: "place",
     lat: "",
     legalDongCode: "",
@@ -157,9 +152,6 @@ function initialForm(): FeatureCreateFormState {
     sigunguCode: "",
     sourceUrl: "",
     startDate: "",
-    lifecycleState: "active",
-    publicationState: "published",
-    qualityState: "valid",
     urlsExtraJson: "",
     venue: "",
   };
@@ -329,12 +321,7 @@ function buildCreatePayload(
     coord,
     marker_icon: form.markerIcon.trim(),
     marker_color: form.markerColor.trim(),
-    lifecycle_state: form.lifecycleState,
-    publication_state: form.publicationState,
-    quality_state: form.qualityState,
     reason: form.reason.trim(),
-    feature_id: optionalString(form.featureId),
-    idempotency_key: optionalString(form.idempotencyKey),
     sigungu_code: optionalString(form.sigunguCode),
     sido_code: optionalString(form.sidoCode),
     legal_dong_code: optionalString(form.legalDongCode),
@@ -345,6 +332,92 @@ function buildCreatePayload(
     detail,
     urls,
   };
+}
+
+const SERVER_FIELD_TO_FORM_FIELDS = {
+  body: [],
+  category: ["category"],
+  coord: ["lon", "lat"],
+  "coord.lat": ["lat"],
+  "coord.lon": ["lon"],
+  lat: ["lat"],
+  lon: ["lon"],
+  marker_color: ["markerColor"],
+  marker_icon: ["markerIcon"],
+  name: ["name"],
+  reason: ["reason"],
+} satisfies Record<string, readonly FeatureCreateField[]>;
+
+function problemErrorField(error: Record<string, unknown>): string | null {
+  if (typeof error.field === "string" && error.field.trim().length > 0) {
+    return error.field.trim();
+  }
+  const location = error.loc;
+  if (Array.isArray(location)) {
+    const parts: string[] = [];
+    for (const item of location) {
+      if (item !== "body") {
+        parts.push(String(item));
+      }
+    }
+    return parts.length > 0 ? parts.join(".") : "body";
+  }
+  return null;
+}
+
+function problemErrorMessage(error: Record<string, unknown>): string | null {
+  if (typeof error.message === "string" && error.message.trim().length > 0) {
+    return error.message.trim();
+  }
+  if (typeof error.msg === "string" && error.msg.trim().length > 0) {
+    return error.msg.trim();
+  }
+  return null;
+}
+
+function manualCreateValidationErrors(
+  error: unknown,
+): Partial<Record<FeatureCreateField, string>> | null {
+  if (!(error instanceof ApiClientError) || error.status !== 422) {
+    return null;
+  }
+  const fieldErrors: Partial<Record<FeatureCreateField, string>> = {};
+  for (const item of error.problem?.errors ?? []) {
+    if (typeof item !== "object" || item === null) continue;
+    const problemError = item as Record<string, unknown>;
+    const field = problemErrorField(problemError);
+    const message =
+      problemErrorMessage(problemError) ??
+      "요청 값이 수동 Feature 생성 계약과 맞지 않습니다.";
+    const formFields =
+      field && field in SERVER_FIELD_TO_FORM_FIELDS
+        ? SERVER_FIELD_TO_FORM_FIELDS[
+            field as keyof typeof SERVER_FIELD_TO_FORM_FIELDS
+          ]
+        : [];
+    for (const formField of formFields) {
+      fieldErrors[formField] = message;
+    }
+  }
+  return Object.keys(fieldErrors).length > 0 ? fieldErrors : null;
+}
+
+function manualCreateErrorMessage(error: unknown): string {
+  if (error instanceof ApiClientError) {
+    switch (error.problem?.code) {
+      case "MANUAL_FEATURE_EXACT_DUPLICATE":
+        return "같은 이름·종류·좌표의 수동 Feature가 이미 있습니다. 중복 후보를 확인하세요.";
+      case "FEATURE_IDENTITY_CONFLICT":
+        return "서버가 발급한 Feature identity가 기존 값과 충돌했습니다. 새로고침 후 다시 시도하세요.";
+      case "MANUAL_FEATURE_CREATE_NOT_READY":
+        return "수동 Feature 생성 기능이 아직 활성화되지 않았습니다.";
+      case "ADMIN_FEATURE_CREATE_SCOPE_REQUIRED":
+        return "수동 Feature 생성 전용 권한을 확인하지 못했습니다.";
+      default:
+        return error.message;
+    }
+  }
+  return error instanceof Error ? error.message : String(error);
 }
 
 function fieldText(value: unknown): string | undefined {
@@ -601,9 +674,9 @@ function useFeatureCreateClientController() {
       type: "patch-form",
       selectedCandidateKey: korTravelGeoCandidateKey(candidate),
       patch: {
-        ...(addressAdmin !== null ? { addressAdmin } : {}),
-        ...(addressLegal !== null ? { addressLegal } : {}),
-        ...(addressRoad !== null ? { addressRoad } : {}),
+        ...(addressAdmin !== undefined ? { addressAdmin } : {}),
+        ...(addressLegal !== undefined ? { addressLegal } : {}),
+        ...(addressRoad !== undefined ? { addressRoad } : {}),
         ...(addressText ? { geocodeQuery: addressText } : {}),
         ...(codes.admin_dong_code
           ? { adminDongCode: codes.admin_dong_code }
@@ -720,8 +793,11 @@ function useFeatureCreateClientController() {
       const response = await createFeature.mutateAsync(payload);
       dispatch({ type: "create-success", featureId: response.data.feature_id });
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      dispatch({ type: "create-error", message });
+      const fieldErrors = manualCreateValidationErrors(error);
+      if (fieldErrors !== null) {
+        dispatch({ type: "validation-errors", errors: fieldErrors });
+      }
+      dispatch({ type: "create-error", message: manualCreateErrorMessage(error) });
     } finally {
       submitCreateInFlightRef.current = false;
     }
@@ -806,14 +882,14 @@ function FeatureCreateFeedback({
           <CheckCircle2Icon data-icon="inline-start" />
           <AlertTitle>Feature 생성됨</AlertTitle>
           <AlertDescription>
-            변경 요청으로 등록되었습니다. 생성된 feature{" "}
+            수동 Feature가 생성되었습니다. 생성된 feature{" "}
             <Link
               className="rounded-control text-brand underline underline-offset-4 hover:text-brand-hover focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
               href={featureDetailHref(createdFeatureId)}
             >
               {createdFeatureId}
             </Link>
-            에서 상태와 소스를 확인하세요.
+            에서 상세와 상태를 확인하세요.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -1092,20 +1168,19 @@ function FeatureCreateIdentityFields({
         nameError={fieldErrors.name}
         placeKind={form.placeKind}
         required
-        lifecycleState={form.lifecycleState}
-        publicationState={form.publicationState}
-        qualityState={form.qualityState}
+        lifecycleState="active"
+        publicationState="published"
+        qualityState="valid"
+        showStateControls={false}
         onCategoryChange={(value) => updateForm("category", value)}
         onKindChange={(value) =>
-          updateForm("kind", value as AdminFeatureCreateRequest["kind"])
+          updateForm("kind", value as AdminFeatureCreateKind)
         }
         onNameChange={(value) => updateForm("name", value)}
         onPlaceKindChange={(value) => updateForm("placeKind", value)}
-        onLifecycleStateChange={(value) => updateForm("lifecycleState", value)}
-        onPublicationStateChange={(value) =>
-          updateForm("publicationState", value)
-        }
-        onQualityStateChange={(value) => updateForm("qualityState", value)}
+        onLifecycleStateChange={() => undefined}
+        onPublicationStateChange={() => undefined}
+        onQualityStateChange={() => undefined}
       />
       {categories.isError ? (
         <Alert variant="destructive">
@@ -1137,6 +1212,7 @@ function FeatureCreateIdentityFields({
             onChange={(event) => updateForm("lat", event.target.value)}
           />
           <FormSelect
+            error={fieldErrors.markerIcon}
             label="마커 아이콘"
             value={form.markerIcon}
             onChange={(event) => updateForm("markerIcon", event.target.value)}
@@ -1148,6 +1224,7 @@ function FeatureCreateIdentityFields({
             ))}
           </FormSelect>
           <FormSelect
+            error={fieldErrors.markerColor}
             label="마커 색상"
             style={markerColorSelectStyle(form.markerColor)}
             value={form.markerColor}
@@ -1175,20 +1252,6 @@ function FeatureCreateIdentityFields({
             required
             value={form.reason}
             onChange={(event) => updateForm("reason", event.target.value)}
-          />
-          <FormField
-            hint="비우면 자동 생성됩니다."
-            label="Feature ID"
-            value={form.featureId}
-            onChange={(event) => updateForm("featureId", event.target.value)}
-          />
-          <FormField
-            hint="같은 키로 다시 보내면 중복 생성되지 않습니다."
-            label="중복 방지 키"
-            value={form.idempotencyKey}
-            onChange={(event) =>
-              updateForm("idempotencyKey", event.target.value)
-            }
           />
         </div>
       </SectionCard>
@@ -1292,7 +1355,7 @@ function FeatureCreateClientView({
           </Link>
         </>
       }
-      description="새 Feature를 변경 요청으로 등록합니다. 좌표를 먼저 정하고, 기본 정보·주소·상세를 채운 뒤 맨 아래에서 요청을 생성합니다."
+      description="새 Feature를 수동으로 생성합니다. 좌표를 먼저 정하고, 기본 정보·주소·상세를 채운 뒤 맨 아래에서 생성합니다."
       title="새 Feature"
     >
       <form className="flex flex-col gap-4" onSubmit={submitCreate}>
@@ -1348,7 +1411,7 @@ function FeatureCreateClientView({
           </Button>
           <Button loading={createFeature.isPending} type="submit">
             <CheckCircle2Icon data-icon="inline-start" />
-            요청 생성
+            Feature 생성
           </Button>
         </div>
       </form>

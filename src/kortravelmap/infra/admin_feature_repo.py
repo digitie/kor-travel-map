@@ -17,12 +17,14 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Final, Literal, NoReturn
+from typing import TYPE_CHECKING, Any, Final, Literal, NoReturn, TypeAlias
 
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 
+from kortravelmap.core import make_feature_id
 from kortravelmap.infra.feature_identity import (
+    FeatureIdentityInvariantError,
     candidate_feature_uuid,
     verify_feature_uuid,
 )
@@ -30,7 +32,11 @@ from kortravelmap.infra.feature_projection import (
     TYPED_FEATURE_DETAIL_COLUMNS_SQL,
     typed_feature_detail_joins_sql,
 )
-from kortravelmap.infra.feature_subtype import subtype_params, write_subtype
+from kortravelmap.infra.feature_subtype import (
+    SubtypeDetailError,
+    subtype_params,
+    write_subtype,
+)
 from kortravelmap.infra.feature_update_active_repo import _driver_constraint_identity
 from kortravelmap.infra.merge_repo import (
     MergeConflictError,
@@ -72,6 +78,12 @@ __all__ = [
     "AdminFeatureStateTransition",
     "FeatureOverride",
     "FeatureFieldOverrideCommand",
+    "AdminManualFeatureCreated",
+    "AdminManualFeatureExactDuplicate",
+    "AdminManualFeatureCreateResult",
+    "AdminManualFeatureIdentityConflict",
+    "AdminManualFeatureInvariantError",
+    "AdminManualFeatureValidationError",
     "FeatureFieldOverrideNotFound",
     "FeatureFieldOverridePreconditionFailed",
     "FeatureFieldOverrideValidationError",
@@ -304,6 +316,33 @@ class FeatureFieldOverrideCommand:
 
 
 @dataclass(frozen=True)
+class AdminManualFeatureCreated:
+    """수동 Feature 생성 wrapper와 override가 확정한 commit receipt."""
+
+    feature_id: str
+    feature_uuid: str
+    row_revision: int
+    command_id: int
+    applied_field_count: int
+    creation_origin: Literal["manual_admin"] = "manual_admin"
+
+
+@dataclass(frozen=True)
+class AdminManualFeatureExactDuplicate:
+    """DB exact claim의 동시 승자가 이미 존재함을 나타내는 typed 결과."""
+
+    existing_feature_uuid: str
+    constraint: Literal["uq_manual_feature_identity_claims_exact"] = (
+        "uq_manual_feature_identity_claims_exact"
+    )
+
+
+AdminManualFeatureCreateResult: TypeAlias = (
+    AdminManualFeatureCreated | AdminManualFeatureExactDuplicate
+)
+
+
+@dataclass(frozen=True)
 class AdminFeatureStateTransition:
     """Admin state command가 원자적으로 남긴 상태·revision·감사 식별자."""
 
@@ -390,6 +429,32 @@ class FeatureFieldOverridePreconditionFailed(ValueError):
 
 class FeatureFieldOverrideValidationError(ValueError):
     """registry/receipt/값 contract를 만족하지 않는 field override command."""
+
+    def __init__(self, message: str, *, constraint: str | None = None) -> None:
+        self.constraint = constraint
+        super().__init__(message)
+
+
+class AdminManualFeatureValidationError(ValueError):
+    """수동 생성의 allow-list된 request-derived DB validation 오류."""
+
+    def __init__(self, *, field: str, constraint: str | None = None) -> None:
+        self.field = field
+        self.constraint = constraint
+        super().__init__("수동 Feature 생성 요청 값이 올바르지 않습니다.")
+
+
+class AdminManualFeatureIdentityConflict(RuntimeError):
+    """exact duplicate와 구분되는 canonical identity 불변 충돌."""
+
+    def __init__(self, *, feature_uuid: str, constraint: str) -> None:
+        self.feature_uuid = feature_uuid
+        self.constraint = constraint
+        super().__init__("수동 Feature canonical identity가 기존 값과 충돌합니다.")
+
+
+class AdminManualFeatureInvariantError(RuntimeError):
+    """trusted generator/wrapper/receipt가 M01 내부 계약을 위반했다."""
 
 
 @dataclass(frozen=True)
@@ -2416,7 +2481,7 @@ def _raise_field_override_procedure_error(
     (2026-08-12 T-VN-34 적대 리뷰 실측). 두 벌을 두지 않는다.
     """
 
-    sqlstate, _constraint = _driver_constraint_identity(error)
+    sqlstate, constraint = _driver_constraint_identity(error)
     if sqlstate == "P0002":
         raise FeatureFieldOverrideNotFound(
             f"feature 또는 active field override 없음: {feature_id!r}"
@@ -2427,8 +2492,89 @@ def _raise_field_override_procedure_error(
             expected=expected_row_revision,
         ) from error
     if sqlstate == "23514":
-        raise FeatureFieldOverrideValidationError(str(error.orig)) from error
+        raise FeatureFieldOverrideValidationError(
+            str(error.orig),
+            constraint=constraint,
+        ) from error
     raise error
+
+
+_MANUAL_FEATURE_CREATE_IDENTITY_CONSTRAINTS: Final[frozenset[str]] = frozenset(
+    {
+        "ck_feature_aliases_legacy_identity",
+        "ck_manual_feature_create_core_identity",
+        "fk_feature_aliases_identity_pair",
+        "pk_feature_aliases",
+        "pk_feature_creation_origins",
+        "pk_features",
+        "pk_manual_feature_identity_claims",
+        "uq_feature_creation_origins_command",
+        "uq_features_feature_uuid",
+        "uq_features_identity_pair",
+        "uq_manual_feature_identity_claims_command",
+        "uq_manual_feature_identity_claims_feature_command",
+    }
+)
+
+_MANUAL_FEATURE_CREATE_VALIDATION_FIELDS: Final[dict[str, str]] = {
+    "ck_feature_create_payload": "body",
+    "ck_feature_override_field_path": "body",
+    "ck_features_ck_features_coord_pair": "coord",
+    "ck_features_ck_features_coord_precision": "coord_precision_digits",
+    "ck_features_ck_features_kind": "kind",
+    "ck_manual_feature_identity_claims_kind": "kind",
+    "ck_manual_feature_identity_claims_lat_e6": "coord.lat",
+    "ck_manual_feature_identity_claims_lon_e6": "coord.lon",
+    "ck_manual_feature_identity_claims_name_key": "name",
+    "ck_manual_feature_identity_coord_range": "coord",
+    "ck_manual_feature_identity_coord_rounding": "coord",
+}
+
+
+def _raise_admin_manual_feature_create_procedure_error(
+    error: DBAPIError,
+    *,
+    attempted_feature_uuid: str,
+) -> NoReturn:
+    """manual-v1 wrapper의 공개 가능한 422/409만 allow-list로 분류한다.
+
+    executor/isolation/causation/append-only/NOT NULL과 미등록 진단은 변환하지
+    않는다. 중앙 500 handler가 raw driver message를 숨기게 두는 것이 계약이다.
+    """
+
+    sqlstate, constraint = _driver_constraint_identity(error)
+    if constraint in _MANUAL_FEATURE_CREATE_IDENTITY_CONSTRAINTS and sqlstate in {
+        "23503",
+        "23505",
+        "23514",
+    }:
+        raise AdminManualFeatureIdentityConflict(
+            feature_uuid=attempted_feature_uuid,
+            constraint=constraint,
+        ) from error
+    field = _MANUAL_FEATURE_CREATE_VALIDATION_FIELDS.get(constraint or "")
+    if sqlstate == "23514" and field is not None:
+        raise AdminManualFeatureValidationError(
+            field=field,
+            constraint=constraint,
+        ) from error
+    raise error
+
+
+def _canonical_uuid7_or_invariant(value: object, *, field: str) -> str:
+    """trusted generator/procedure UUID를 canonical UUIDv7로 fail-close한다."""
+
+    try:
+        parsed = uuid.UUID(str(value))
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise AdminManualFeatureInvariantError(
+            f"수동 Feature 내부 {field}가 canonical UUID가 아닙니다."
+        ) from exc
+    if parsed.version != 7:
+        raise AdminManualFeatureInvariantError(
+            f"수동 Feature 내부 {field}가 UUIDv7이 아닙니다."
+        )
+    return str(parsed)
 
 
 async def author_admin_feature_field_overrides(
@@ -2531,40 +2677,68 @@ async def revoke_admin_feature_field_overrides(
 async def create_admin_feature_with_field_overrides(
     session: AsyncSession,
     *,
-    feature_id: str,
     payload: Mapping[str, Any],
-    lifecycle_state: str,
-    publication_state: str,
-    quality_state: str,
     reason_code: str,
     operator: str,
     command_id: int,
-) -> FeatureFieldOverrideCommand:
-    """user-created Feature를 initial state와 explicit field overrides로 생성한다.
+) -> AdminManualFeatureCreateResult:
+    """검증된 admin command로 수동 Feature와 exact claim/origin을 생성한다.
 
-    core initial insert는 identity/subtype 생성에만 쓰고, operator-owned business
-    fields는 즉시 registry command로 다시 materialize한다. 따라서 provider base가
-    없는 user-created row도 field별 ownership을 남긴다.
+    canonical UUIDv7과 current legacy bridge ID는 request가 아니라 이 repository
+    경계에서 한 번 발급한다. DB wrapper가 exact claim, core initial tuple,
+    ``manual_admin`` origin을 먼저 원자화하고, winner에만 subtype과 field override를
+    같은 외부 transaction에서 이어 쓴다.
     """
 
-    _validated_operator_and_reason_code(operator=operator, reason_code=reason_code)
+    if not operator.strip():
+        raise AdminManualFeatureInvariantError(
+            "수동 Feature 생성 command에 인증 actor가 없습니다."
+        )
+    if not reason_code.strip():
+        raise AdminManualFeatureValidationError(field="reason")
     if command_id < 1:
-        raise ValueError("feature create에는 open domain command receipt가 필요합니다.")
-    kind = str(payload["kind"])
+        raise AdminManualFeatureInvariantError(
+            "수동 Feature 생성에 open domain command receipt가 없습니다."
+        )
+    kind_value = payload.get("kind")
+    kind = str(kind_value) if kind_value is not None else ""
     if kind not in {"place", "event"}:
-        raise ValueError("admin create는 place 또는 event kind만 지원합니다.")
+        raise AdminManualFeatureValidationError(field="kind")
+    forbidden_keys = {
+        "feature_id",
+        "feature_uuid",
+        "idempotency_key",
+        "operator",
+        "lifecycle_state",
+        "publication_state",
+        "quality_state",
+        "origin_kind",
+        "creator_principal_id",
+    }
+    supplied_forbidden = sorted(forbidden_keys.intersection(payload))
+    if supplied_forbidden:
+        raise AdminManualFeatureValidationError(field=supplied_forbidden[0])
+
+    feature_uuid = _canonical_uuid7_or_invariant(
+        candidate_feature_uuid(),
+        field="candidate feature_uuid",
+    )
+    feature_id = make_feature_id(
+        bjd_code=None,
+        kind=kind,
+        category="manual_feature_v1",
+        source_type="user_request",
+        source_natural_key=f"manual::{feature_uuid}",
+        content_hash=None,
+    )
     initial_payload = {
         key: value
         for key, value in payload.items()
-        # 상태 tuple은 create procedure의 별도 typed argument다. review payload에는
-        # axis 기본값을 보존하지만, JSON payload에 함께 넘기면 procedure의 runtime
-        # state-injection fence가 정확히 이를 거부한다.
+        # subtype detail은 Python writer가 같은 transaction에서 별도로 저장한다.
+        # state/identity/origin은 위 forbidden set과 DB wrapper가 함께 막는다.
         if key
         not in {
             "detail",
-            "lifecycle_state",
-            "publication_state",
-            "quality_state",
         }
     }
     # HTTP/admin DTO는 좌표를 ``coord: {lon, lat}``로 표현하지만, initial
@@ -2572,87 +2746,156 @@ async def create_admin_feature_with_field_overrides(
     # point를 만들기 위해 ``lon``/``lat``만 받는다. 이후 field override에는
     # 원래 typed ``coord`` payload를 계속 사용한다.
     initial_coord = initial_payload.pop("coord", None)
-    if initial_coord is not None:
-        if not isinstance(initial_coord, Mapping):
-            raise ValueError("admin create coord는 object 또는 null이어야 합니다.")
-        lon = initial_coord.get("lon")
-        lat = initial_coord.get("lat")
-        if lon is None or lat is None:
-            raise ValueError("admin create coord에는 lon과 lat이 모두 필요합니다.")
-        initial_payload["lon"] = lon
-        initial_payload["lat"] = lat
+    if not isinstance(initial_coord, Mapping):
+        raise AdminManualFeatureValidationError(field="coord")
+    lon = initial_coord.get("lon")
+    lat = initial_coord.get("lat")
+    if lon is None or lat is None:
+        raise AdminManualFeatureValidationError(field="coord")
+    initial_payload["lon"] = lon
+    initial_payload["lat"] = lat
+    initial_payload["coord_precision_digits"] = payload.get(
+        "coord_precision_digits",
+        6,
+    )
     initial_payload["feature_id"] = feature_id
-    initial_payload["feature_uuid"] = candidate_feature_uuid()
+    initial_payload["feature_uuid"] = feature_uuid
     try:
-        inserted = (
+        wrapper_result = (
             await session.execute(
-                text(_CREATE_FEATURE_WITH_INITIAL_STATE_SQL),
+                text(_CREATE_ADMIN_MANUAL_FEATURE_WITH_INITIAL_STATE_SQL),
                 {
                     "feature_payload": json.dumps(
                         initial_payload, ensure_ascii=False, default=str
                     ),
-                    "lifecycle_state": lifecycle_state,
-                    "publication_state": publication_state,
-                    "quality_state": quality_state,
-                    "state_context": json.dumps(
-                        {
-                            "transition_kind": "initial",
-                            "reason_code": "admin_feature_create",
-                            "principal": operator,
-                            "causation_ref": f"domain-command:{command_id}",
-                        },
-                        ensure_ascii=False,
-                    ),
+                    "domain_command_id": command_id,
                 },
             )
         ).mappings().one()
     except DBAPIError as error:
-        _raise_field_override_procedure_error(
+        _raise_admin_manual_feature_create_procedure_error(
             error,
+            attempted_feature_uuid=feature_uuid,
+        )
+
+    outcome = wrapper_result.get("o_outcome")
+    if outcome == "exact_conflict":
+        if any(
+            wrapper_result.get(field) is not None
+            for field in ("o_feature_id", "o_feature_uuid", "o_row_revision")
+        ):
+            raise AdminManualFeatureInvariantError(
+                "exact conflict 결과에 success OUT 값이 함께 반환됐습니다."
+            )
+        return AdminManualFeatureExactDuplicate(
+            existing_feature_uuid=_canonical_uuid7_or_invariant(
+                wrapper_result.get("o_existing_feature_uuid"),
+                field="exact-conflict winner UUID",
+            )
+        )
+    if outcome != "created":
+        raise AdminManualFeatureInvariantError(
+            "수동 Feature wrapper가 알 수 없는 outcome을 반환했습니다."
+        )
+    if wrapper_result.get("o_existing_feature_uuid") is not None:
+        raise AdminManualFeatureInvariantError(
+            "created 결과에 exact-conflict winner UUID가 함께 반환됐습니다."
+        )
+    observed_feature_id_raw = wrapper_result.get("o_feature_id")
+    if not isinstance(observed_feature_id_raw, str):
+        raise AdminManualFeatureInvariantError(
+            "created 결과에 legacy identity가 없습니다."
+        )
+    observed_feature_id = observed_feature_id_raw
+    observed_feature_uuid = _canonical_uuid7_or_invariant(
+        wrapper_result.get("o_feature_uuid"),
+        field="created feature_uuid",
+    )
+    initial_row_revision = wrapper_result.get("o_row_revision")
+    if type(initial_row_revision) is not int or initial_row_revision < 1:
+        raise AdminManualFeatureInvariantError(
+            "created 결과의 initial row revision이 유효하지 않습니다."
+        )
+    if observed_feature_id != feature_id:
+        raise AdminManualFeatureIdentityConflict(
+            feature_uuid=feature_uuid,
+            constraint="ck_manual_feature_create_core_identity",
+        )
+    try:
+        verify_feature_uuid(
+            feature_id,
+            observed_feature_uuid,
+            sent_feature_uuid=feature_uuid,
+            inserted=True,
+        )
+    except FeatureIdentityInvariantError as exc:
+        raise AdminManualFeatureIdentityConflict(
+            feature_uuid=feature_uuid,
+            constraint="ck_manual_feature_create_core_identity",
+        ) from exc
+    try:
+        await write_subtype(
+            session,
             feature_id=feature_id,
-            expected_row_revision=1,
+            feature_uuid=observed_feature_uuid,
+            kind=kind,
+            detail=payload.get("detail"),
         )
-    if not bool(inserted["o_inserted"]):
-        raise FeatureFieldOverrideValidationError(
-            f"feature가 이미 존재합니다: {feature_id!r}"
+    except SubtypeDetailError as exc:
+        raise AdminManualFeatureValidationError(field="detail") from exc
+    try:
+        values, geometry_wkt = _override_payload_for_change(
+            feature_id=feature_id,
+            feature_uuid=observed_feature_uuid,
+            kind=kind,
+            payload=dict(payload),
+            include_required_create_fields=True,
         )
-    feature_uuid = str(inserted["o_feature_uuid"])
-    verify_feature_uuid(
-        feature_id,
-        feature_uuid,
-        sent_feature_uuid=str(initial_payload["feature_uuid"]),
-        inserted=True,
-    )
-    await write_subtype(
-        session,
+    except SubtypeDetailError as exc:
+        raise AdminManualFeatureValidationError(field="detail") from exc
+    except ValueError as exc:
+        raise AdminManualFeatureValidationError(field="body") from exc
+    try:
+        command = await author_admin_feature_field_overrides(
+            session,
+            feature_id,
+            expected_row_revision=initial_row_revision,
+            reason_code=reason_code,
+            operator=operator,
+            command_id=command_id,
+            values=values,
+            geometry_wkt=geometry_wkt,
+        )
+    except FeatureFieldOverrideValidationError as exc:
+        field = _MANUAL_FEATURE_CREATE_VALIDATION_FIELDS.get(exc.constraint or "")
+        if field is not None:
+            raise AdminManualFeatureValidationError(
+                field=field,
+                constraint=exc.constraint,
+            ) from exc
+        raise AdminManualFeatureInvariantError(
+            "수동 Feature override writer가 내부 계약을 거부했습니다."
+        ) from exc
+    except (FeatureFieldOverrideNotFound, FeatureFieldOverridePreconditionFailed) as exc:
+        raise AdminManualFeatureInvariantError(
+            "수동 Feature override writer가 방금 생성한 core row를 잃었습니다."
+        ) from exc
+    expected_applied_field_count = len(values) + len(geometry_wkt)
+    if (
+        command.feature_id != feature_id
+        or command.command_id != command_id
+        or command.row_revision <= initial_row_revision
+        or command.applied_field_count != expected_applied_field_count
+    ):
+        raise AdminManualFeatureInvariantError(
+            "수동 Feature override receipt가 command/core causation과 다릅니다."
+        )
+    return AdminManualFeatureCreated(
         feature_id=feature_id,
-        feature_uuid=feature_uuid,
-        kind=kind,
-        detail=payload.get("detail"),
-    )
-    values, geometry_wkt = _override_payload_for_change(
-        feature_id=feature_id,
-        feature_uuid=feature_uuid,
-        kind=kind,
-        payload=dict(payload),
-        include_required_create_fields=True,
-    )
-    command = await author_admin_feature_field_overrides(
-        session,
-        feature_id,
-        expected_row_revision=int(inserted["o_row_revision"]),
-        reason_code=reason_code,
-        operator=operator,
-        command_id=command_id,
-        values=values,
-        geometry_wkt=geometry_wkt,
-    )
-    return FeatureFieldOverrideCommand(
-        feature_id=command.feature_id,
+        feature_uuid=observed_feature_uuid,
         row_revision=command.row_revision,
-        command_id=command.command_id,
+        command_id=command_id,
         applied_field_count=command.applied_field_count,
-        feature_uuid=feature_uuid,
     )
 
 
@@ -2695,24 +2938,20 @@ async def patch_admin_feature_with_field_overrides(
     )
 
 
-# feature_uuid는 T-VN-32C(0083) 정본 generator — 비파생 UUIDv7 후보를 명시
-# INSERT하고 fill 트리거는 raw SQL 안전망으로 유지한다. ON CONFLICT DO NOTHING
-# 이므로 RETURNING 행 존재 = 신규 insert — 관측값은 보낸 후보와 같아야 한다
-# (generator 이원화 fail-close, 적대 리뷰 1 M1).
+# feature_uuid는 Python 경계가 발급한 비파생 UUIDv7이고, current legacy ID는
+# 그 UUID만 재료로 만든 opaque bridge다. DB wrapper가 exact claim과
+# ``manual_admin`` origin을 core initial insert와 먼저 원자화한다.
 # T-VN-35(0086): core에 ``detail``/``geom`` 컬럼이 없다. kind별 값은
 # subtype(``feature_places``/``feature_events``)이 **유일한 정본**이며 core
 # INSERT 직후 같은 트랜잭션에서 ``feature_subtype.write_subtype``이 쓴다. admin mutation은
 # ``kind IN ('place','event')``(API Literal)이라 geometry는 애초에 대상이
 # 아니다 — geometry가 필수인 kind는 route/area뿐이고 그 값은 subtype 컬럼에
 # NOT NULL로 산다.
-_CREATE_FEATURE_WITH_INITIAL_STATE_SQL: Final[str] = """
-CALL feature.create_feature_with_initial_state(
+_CREATE_ADMIN_MANUAL_FEATURE_WITH_INITIAL_STATE_SQL: Final[str] = """
+CALL feature.create_admin_manual_feature_with_initial_state(
     CAST(:feature_payload AS jsonb),
-    CAST(:lifecycle_state AS text),
-    CAST(:publication_state AS text),
-    CAST(:quality_state AS text),
-    CAST(:state_context AS jsonb),
-    NULL, NULL, NULL, NULL
+    CAST(:domain_command_id AS bigint),
+    NULL, NULL, NULL, NULL, NULL
 )
 """
 

@@ -39,6 +39,7 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
     }
     assert root_package["packageManager"] == "npm@12.0.1"
     assert root_package["engines"] == expected_engines
+    assert root_package["dependencies"] == {"@next/env": "16.2.12"}
     assert frontend_package["engines"] == expected_engines
     # 차단 게이트는 **배포되는 의존성만** 본다. dev 전용 빌드 도구의 취약점은
     # 사용자에게 나가지 않으므로 머지를 막지 않는다 —
@@ -84,6 +85,10 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
     assert '"import-x/no-anonymous-default-export": "warn"' in eslint_config
 
     assert lock_packages["node_modules/next"]["version"] == "16.2.12"
+    assert lock_packages["node_modules/@next/env"]["version"] == "16.2.12"
+    assert lock_packages["node_modules/next"]["dependencies"]["@next/env"] == (
+        "16.2.12"
+    )
     assert lock_packages["node_modules/postcss"]["version"] == "8.5.23"
     assert lock_packages["node_modules/sharp"]["version"] == "0.35.3"
     assert lock_packages["node_modules/@playwright/test"]["version"] == "1.60.0"
@@ -94,6 +99,7 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
     assert lock_packages["node_modules/minimatch"]["version"] == "10.2.5"
     assert lock_packages["node_modules/js-yaml"]["version"] == "4.3.0"
     assert lock_packages[""]["engines"] == expected_engines
+    assert lock_packages[""]["dependencies"] == {"@next/env": "16.2.12"}
     assert lock_packages[str(FRONTEND.relative_to(ROOT))]["engines"] == (
         expected_engines
     )

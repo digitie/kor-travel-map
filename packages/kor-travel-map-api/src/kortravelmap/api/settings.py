@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import re
 import secrets
 from collections.abc import Mapping
@@ -34,6 +35,9 @@ _CACHE_TARGET_EXTERNAL_SYSTEM_PATTERN = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9_.:-
 _LOWER_SHA256_HEX_PATTERN = re.compile(r"\A[0-9a-f]{64}\Z")
 _LOCAL_DEV_CURSOR_SIGNING_KEY = secrets.token_bytes(32)
 _CURSOR_SIGNING_SECRET_NAME = "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET"
+_ADMIN_FEATURE_CREATE_TOKEN_SHA256_NAME = (
+    "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256"
+)
 _CURSOR_SIGNING_PROTECTED_FIELDS = (
     ("admin proxy secret", "admin_proxy_secret"),
     ("service token", "service_token"),
@@ -247,6 +251,105 @@ def _cursor_signing_protected_secrets(settings: object) -> dict[str, object]:
     }
 
 
+def _admin_feature_create_credential_problems(
+    settings: object,
+    *,
+    require_digest: bool,
+) -> list[str]:
+    """수동 Feature 생성 digest의 형태·전용성 문제를 민감값 없이 반환한다."""
+
+    problems: list[str] = []
+    if bool(getattr(settings, "admin_manual_feature_create_enabled", False)):
+        try:
+            admin_proxy_secret = _optional_secret_text(
+                getattr(settings, "admin_proxy_secret", None),
+                setting_name="KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET",
+            )
+        except ValueError as exc:
+            problems.append(str(exc))
+        else:
+            if admin_proxy_secret is None or not _deployable_secret_shape(
+                admin_proxy_secret
+            ):
+                problems.append(
+                    "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET must be set to at least 32 "
+                    "characters without surrounding whitespace while manual Feature "
+                    "create is enabled"
+                )
+
+    digest = getattr(settings, "admin_feature_create_token_sha256", None)
+    if digest in (None, ""):
+        if require_digest:
+            problems.append(
+                f"{_ADMIN_FEATURE_CREATE_TOKEN_SHA256_NAME} must be configured"
+            )
+        return problems
+    if not isinstance(digest, str) or _LOWER_SHA256_HEX_PATTERN.fullmatch(digest) is None:
+        problems.append(
+            f"{_ADMIN_FEATURE_CREATE_TOKEN_SHA256_NAME} must be lowercase SHA-256 hex"
+        )
+        return problems
+
+    protected_secrets = {
+        "admin proxy secret": getattr(settings, "admin_proxy_secret", None),
+        "service token": getattr(settings, "service_token", None),
+        "ops read token": getattr(settings, "ops_read_token", None),
+        "ops cancel token": getattr(settings, "ops_cancel_token", None),
+        "ops fixture token": getattr(settings, "ops_fixture_token", None),
+        "metrics token": getattr(settings, "metrics_token", None),
+    }
+    for protected_name, protected_secret in protected_secrets.items():
+        try:
+            protected_raw = _optional_secret_text(
+                protected_secret,
+                setting_name=protected_name,
+            )
+        except ValueError as exc:
+            problems.append(str(exc))
+            continue
+        if protected_raw is not None and hmac.compare_digest(
+            hashlib.sha256(protected_raw.encode("utf-8")).hexdigest(),
+            digest,
+        ):
+            problems.append(
+                "admin feature create token digest must be distinct from "
+                f"{protected_name}"
+            )
+
+    for curation_name, curation_digest in (
+        (
+            "PinVi curation snapshot token digest",
+            getattr(settings, "pinvi_curation_snapshot_token_sha256", None),
+        ),
+        (
+            "PinVi curation cutover mapping token digest",
+            getattr(settings, "pinvi_curation_cutover_mapping_token_sha256", None),
+        ),
+    ):
+        if isinstance(curation_digest, str) and hmac.compare_digest(curation_digest, digest):
+            problems.append(
+                "admin feature create token digest must be distinct from "
+                f"{curation_name}"
+            )
+
+    for principal in getattr(settings, "cache_target_service_principals", ()):
+        principal_digest = (
+            principal.get("token_sha256")
+            if isinstance(principal, Mapping)
+            else getattr(principal, "token_sha256", None)
+        )
+        if isinstance(principal_digest, str) and hmac.compare_digest(
+            principal_digest,
+            digest,
+        ):
+            problems.append(
+                "admin feature create token digest must be distinct from "
+                "cache-target tokens"
+            )
+            break
+    return problems
+
+
 class ApiSettings(BaseSettings):
     """디버그/관리 API 백엔드 설정 (`KOR_TRAVEL_MAP_API_*` env prefix).
 
@@ -316,6 +419,14 @@ class ApiSettings(BaseSettings):
             "``/admin/...`` 운영 라우터 활성 여부. None이면 "
             "``features_routes_enabled`` 값을 따른다. DB 없는 부팅 검증에서는 "
             "features/admin을 함께 False로 내려 write surface를 닫는다."
+        ),
+    )
+    admin_manual_feature_create_enabled: bool = Field(
+        default=False,
+        description=(
+            "``POST /v1/admin/features`` 수동 Feature 생성 route의 배포 kill-switch. "
+            "False면 기존 AdminBFF 인증 뒤 ``503 MANUAL_FEATURE_CREATE_NOT_READY``로 "
+            "닫는다. env ``KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED``."
         ),
     )
     ops_routes_enabled: bool | None = Field(
@@ -442,6 +553,16 @@ class ApiSettings(BaseSettings):
             "``X-Kor-Travel-Map-Actor``가 모두 맞아야 통과한다. 미설정이면 기존 "
             "로컬/테스트 하위호환으로 admin gate를 강제하지 않는다. API와 frontend가 "
             "공유하는 env 정본은 ``KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET``이다."
+        ),
+    )
+    admin_feature_create_token_sha256: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        description=(
+            "admin UI BFF의 수동 Feature 생성 전용 raw token을 SHA-256으로 해시한 "
+            "lowercase hex digest. API에는 raw token을 저장하지 않는다. env "
+            "``KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256``."
         ),
     )
     ops_read_token: SecretStr | None = Field(
@@ -605,6 +726,23 @@ class ApiSettings(BaseSettings):
         raw = _validated_cursor_signing_secret(value)
         if raw is None:
             return None
+        return value
+
+    @field_validator("admin_feature_create_token_sha256", mode="before")
+    @classmethod
+    def _validate_admin_feature_create_token_sha256(cls, value: object) -> object:
+        """빈 문자열은 unset으로 접고 lowercase SHA-256 hex만 허용한다."""
+
+        if value is None:
+            return value
+        if isinstance(value, str):
+            if value == "":
+                return None
+            if _LOWER_SHA256_HEX_PATTERN.fullmatch(value) is None:
+                raise ValueError(
+                    f"{_ADMIN_FEATURE_CREATE_TOKEN_SHA256_NAME} must be lowercase "
+                    "SHA-256 hex"
+                )
         return value
 
     @model_validator(mode="after")
@@ -837,6 +975,16 @@ class ApiSettings(BaseSettings):
                         f"PinVi curation {curation_name} token digest must be distinct from "
                         f"{protected_name}"
                     )
+        return self
+
+    @model_validator(mode="after")
+    def _validate_admin_feature_create_credential(self) -> ApiSettings:
+        problems = _admin_feature_create_credential_problems(
+            self,
+            require_digest=self.admin_manual_feature_create_enabled,
+        )
+        if problems:
+            raise ValueError("; ".join(problems))
         return self
 
     @property
@@ -1081,6 +1229,15 @@ class ApiSettings(BaseSettings):
                     _cursor_signing_protected_secrets(self),
                 )
             )
+
+        problems.extend(
+            _admin_feature_create_credential_problems(
+                self,
+                require_digest=(
+                    self.is_production or self.admin_manual_feature_create_enabled
+                ),
+            )
+        )
 
         if not self.is_production:
             if problems:

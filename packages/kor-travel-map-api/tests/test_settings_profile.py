@@ -7,6 +7,7 @@ profile에서만 유지되어야 한다.
 
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 import pytest
@@ -23,6 +24,10 @@ SERVICE_TOKEN = "service-token-0000000000000000000000000000"
 METRICS_TOKEN = "metrics-token-0000000000000000000000000000"
 CURSOR_SIGNING_SECRET = "cursor-signing-secret-000000000000000000000000"
 PUBLIC_API_KEY = "public-api-key-0000000000000000000000000000"
+ADMIN_FEATURE_CREATE_TOKEN = "manual-feature-create-token-000000000000000000"
+ADMIN_FEATURE_CREATE_TOKEN_SHA256 = hashlib.sha256(
+    ADMIN_FEATURE_CREATE_TOKEN.encode("utf-8")
+).hexdigest()
 
 # 명시하지 않은 필드에 ambient host env가 스며들어 기본값 검증을 오염시키지
 # 않도록, 이 파일의 모든 테스트에서 관련 env를 제거한다.
@@ -31,6 +36,8 @@ _HERMETIC_ENV_VARS = (
     "KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED",
     "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED",
     "KOR_TRAVEL_MAP_API_ADMIN_ROUTES_ENABLED",
+    "KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED",
+    "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256",
     "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED",
     "KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED",
     "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET",
@@ -57,6 +64,7 @@ def _hermetic_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def _local_settings(**overrides: Any) -> ApiSettings:
     values: dict[str, Any] = {
         "admin_proxy_secret": None,
+        "admin_feature_create_token_sha256": None,
         "ops_cancel_token": None,
         "ops_fixture_token": None,
         "ops_read_token": None,
@@ -81,6 +89,7 @@ def _production_settings(**overrides: Any) -> ApiSettings:
     values: dict[str, Any] = {
         "profile": "production",
         "admin_proxy_secret": ADMIN_PROXY_SECRET,
+        "admin_feature_create_token_sha256": ADMIN_FEATURE_CREATE_TOKEN_SHA256,
         "ops_read_token": OPS_READ_TOKEN,
         "ops_cancel_token": OPS_CANCEL_TOKEN,
         "ops_fixture_token": OPS_FIXTURE_TOKEN,
@@ -102,6 +111,51 @@ def _production_settings(**overrides: Any) -> ApiSettings:
     return ApiSettings(_env_file=None, **values)
 
 
+def _cache_target_principals(
+    *,
+    command_digest: str,
+) -> list[dict[str, object]]:
+    def _digest(value: str) -> str:
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+    common = {
+        "consumer_id": "pinvi-consumer",
+        "external_systems": ["pinvi"],
+    }
+    return [
+        {
+            **common,
+            "principal_id": "svc:pinvi-command",
+            "token_sha256": command_digest,
+            "scopes": ["cache-target:command"],
+        },
+        {
+            **common,
+            "principal_id": "svc:pinvi-consumer",
+            "token_sha256": _digest("cache-target-consumer-token"),
+            "scopes": [
+                "cache-target:read",
+                "cache-target:claim",
+                "cache-target:ack",
+                "cache-target:nack",
+                "cache-target:snapshot",
+            ],
+        },
+        {
+            **common,
+            "principal_id": "svc:pinvi-restore",
+            "token_sha256": _digest("cache-target-restore-token"),
+            "scopes": ["cache-target:restore-fence"],
+        },
+        {
+            **common,
+            "principal_id": "svc:pinvi-recovery",
+            "token_sha256": _digest("cache-target-recovery-token"),
+            "scopes": ["cache-target:recovery", "cache-target:recovery-replay"],
+        },
+    ]
+
+
 # ── profile 자체 ─────────────────────────────────────────────────────────────
 
 
@@ -112,6 +166,8 @@ def test_default_profile_is_local_dev_and_keeps_fallbacks() -> None:
     assert not settings.is_production
     # 하위호환: local-dev는 secret 전무 + fail-open 기본값으로도 생성된다.
     assert settings.admin_proxy_secret is None
+    assert settings.admin_feature_create_token_sha256 is None
+    assert not settings.admin_manual_feature_create_enabled
     assert not settings.public_api_key_required
     assert settings.debug_routes_enabled
 
@@ -127,6 +183,10 @@ def test_profile_rejects_unknown_values(profile: str) -> None:
 def test_profile_reads_env_name(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_PROFILE", "production")
     monkeypatch.setenv("KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET", ADMIN_PROXY_SECRET)
+    monkeypatch.setenv(
+        "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256",
+        ADMIN_FEATURE_CREATE_TOKEN_SHA256,
+    )
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_READ_TOKEN", OPS_READ_TOKEN)
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN", OPS_CANCEL_TOKEN)
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN", OPS_FIXTURE_TOKEN)
@@ -169,6 +229,10 @@ def test_production_docker_compose_env_equivalent_boots(
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED", "false")
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED", "true")
     monkeypatch.setenv("KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET", ADMIN_PROXY_SECRET)
+    monkeypatch.setenv(
+        "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256",
+        ADMIN_FEATURE_CREATE_TOKEN_SHA256,
+    )
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED", "true")
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_READ_TOKEN", OPS_READ_TOKEN)
     monkeypatch.setenv("KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN", OPS_CANCEL_TOKEN)
@@ -230,6 +294,133 @@ def test_production_rejects_service_token_reused_as_admin_secret() -> None:
     message = str(excinfo.value)
     assert "KOR_TRAVEL_MAP_API_SERVICE_TOKEN" in message
     assert "distinct from KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET" in message
+
+
+# ── 수동 Feature 생성 전용 transport principal (T-VN-M01) ──────────────────
+
+
+@pytest.mark.unit
+def test_admin_feature_create_settings_read_exact_env_names(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET", ADMIN_PROXY_SECRET)
+    monkeypatch.setenv(
+        "KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED",
+        "true",
+    )
+    monkeypatch.setenv(
+        "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256",
+        ADMIN_FEATURE_CREATE_TOKEN_SHA256,
+    )
+
+    settings = ApiSettings(_env_file=None)
+
+    assert settings.admin_manual_feature_create_enabled is True
+    assert settings.admin_feature_create_token_sha256 == ADMIN_FEATURE_CREATE_TOKEN_SHA256
+
+
+@pytest.mark.unit
+def test_local_admin_feature_create_flag_requires_digest() -> None:
+    with pytest.raises(ValidationError, match="must be configured"):
+        _local_settings(admin_manual_feature_create_enabled=True)
+
+
+@pytest.mark.unit
+def test_local_admin_feature_create_flag_requires_real_admin_bff_secret() -> None:
+    with pytest.raises(ValidationError) as excinfo:
+        _local_settings(
+            admin_manual_feature_create_enabled=True,
+            admin_feature_create_token_sha256=ADMIN_FEATURE_CREATE_TOKEN_SHA256,
+            admin_proxy_secret=None,
+        )
+    assert "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET" in str(excinfo.value)
+
+
+@pytest.mark.unit
+def test_local_admin_feature_create_accepts_dual_auth_configuration() -> None:
+    settings = _local_settings(
+        admin_manual_feature_create_enabled=True,
+        admin_feature_create_token_sha256=ADMIN_FEATURE_CREATE_TOKEN_SHA256,
+        admin_proxy_secret=ADMIN_PROXY_SECRET,
+    )
+    assert settings.admin_manual_feature_create_enabled is True
+    assert settings.admin_proxy_secret is not None
+
+
+@pytest.mark.unit
+def test_production_requires_admin_feature_create_digest_even_while_flag_is_off() -> None:
+    with pytest.raises(ValidationError) as excinfo:
+        _production_settings(admin_feature_create_token_sha256=None)
+    assert "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256" in str(excinfo.value)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "digest",
+    ["short", "A" * 64, "g" * 64, " " + "a" * 64, "a" * 64 + " "],
+)
+def test_admin_feature_create_digest_requires_lowercase_sha256_hex(
+    digest: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        _local_settings(admin_feature_create_token_sha256=digest)
+
+
+@pytest.mark.unit
+def test_empty_admin_feature_create_digest_is_unset_when_disabled() -> None:
+    settings = _local_settings(admin_feature_create_token_sha256="")
+    assert settings.admin_feature_create_token_sha256 is None
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("field", "protected_name"),
+    [
+        ("admin_proxy_secret", "admin proxy secret"),
+        ("service_token", "service token"),
+        ("metrics_token", "metrics token"),
+    ],
+)
+def test_admin_feature_create_digest_is_distinct_from_raw_credentials(
+    field: str,
+    protected_name: str,
+) -> None:
+    with pytest.raises(ValidationError, match=f"distinct from {protected_name}"):
+        _local_settings(
+            admin_feature_create_token_sha256=ADMIN_FEATURE_CREATE_TOKEN_SHA256,
+            **{field: ADMIN_FEATURE_CREATE_TOKEN},
+        )
+
+
+@pytest.mark.unit
+def test_admin_feature_create_digest_is_distinct_from_ops_credentials() -> None:
+    with pytest.raises(ValidationError, match="distinct from ops read token"):
+        _local_settings(
+            admin_feature_create_token_sha256=ADMIN_FEATURE_CREATE_TOKEN_SHA256,
+            ops_read_token=ADMIN_FEATURE_CREATE_TOKEN,
+            ops_cancel_token=OPS_CANCEL_TOKEN,
+            ops_fixture_token=OPS_FIXTURE_TOKEN,
+        )
+
+
+@pytest.mark.unit
+def test_admin_feature_create_digest_is_distinct_from_curation_digests() -> None:
+    with pytest.raises(ValidationError, match="distinct from PinVi curation snapshot"):
+        _local_settings(
+            admin_feature_create_token_sha256=ADMIN_FEATURE_CREATE_TOKEN_SHA256,
+            pinvi_curation_snapshot_token_sha256=ADMIN_FEATURE_CREATE_TOKEN_SHA256,
+        )
+
+
+@pytest.mark.unit
+def test_admin_feature_create_digest_is_distinct_from_cache_target_digests() -> None:
+    with pytest.raises(ValidationError, match="distinct from cache-target tokens"):
+        _local_settings(
+            admin_feature_create_token_sha256=ADMIN_FEATURE_CREATE_TOKEN_SHA256,
+            cache_target_service_principals=_cache_target_principals(
+                command_digest=ADMIN_FEATURE_CREATE_TOKEN_SHA256,
+            ),
+        )
 
 
 # ── production 거부 matrix ───────────────────────────────────────────────────
@@ -562,6 +753,7 @@ def test_production_error_aggregates_every_missing_requirement() -> None:
     assert "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET" in message
     assert "KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED" in message
     assert "KOR_TRAVEL_MAP_API_METRICS_TOKEN" in message
+    assert "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256" in message
 
 
 # ── local-dev 격리 ───────────────────────────────────────────────────────────
@@ -601,6 +793,10 @@ def test_create_app_boots_with_production_settings_and_omits_debug_routes() -> N
 @pytest.mark.parametrize(
     ("updates", "expected_problem"),
     [
+        (
+            {"admin_feature_create_token_sha256": None},
+            "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256",
+        ),
         ({"service_token": None}, "KOR_TRAVEL_MAP_API_SERVICE_TOKEN"),
         ({"public_api_key_required": False}, "KOR_TRAVEL_MAP_API_PUBLIC_API_KEY_REQUIRED"),
         ({"debug_routes_enabled": True}, "KOR_TRAVEL_MAP_API_DEBUG_ROUTES_ENABLED"),
@@ -708,4 +904,18 @@ def test_create_app_revalidates_local_dev_cursor_secret(
 ) -> None:
     bypassed = _local_settings().model_copy(update=updates)
     with pytest.raises(ValueError, match="runtime settings are invalid"):
+        create_app(settings=bypassed)
+
+
+@pytest.mark.unit
+def test_create_app_revalidates_manual_create_admin_bff_secret_in_local_profile() -> None:
+    bypassed = _local_settings().model_copy(
+        update={
+            "admin_manual_feature_create_enabled": True,
+            "admin_feature_create_token_sha256": ADMIN_FEATURE_CREATE_TOKEN_SHA256,
+            "admin_proxy_secret": None,
+        }
+    )
+
+    with pytest.raises(ValueError, match="KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET"):
         create_app(settings=bypassed)

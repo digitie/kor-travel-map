@@ -267,6 +267,13 @@ const UNCERTAIN_IDEMPOTENCY_ERROR_CODES = [
   "IDEMPOTENCY_RESULT_PENDING",
 ] as const;
 
+const EXPLICIT_PRE_MUTATION_FAILURE_CODES = [
+  "DAGSTER_SCHEDULE_STORAGE_UNAVAILABLE",
+  "INVALID_SCHEDULE_COMMAND",
+  "MANUAL_FEATURE_CREATE_BFF_NOT_READY",
+  "MANUAL_FEATURE_CREATE_NOT_READY",
+] as const;
+
 function shouldClearIdempotencyKeyOnError(error: unknown): boolean {
   const problemDetails =
     error instanceof ApiClientError &&
@@ -279,10 +286,10 @@ function shouldClearIdempotencyKeyOnError(error: unknown): boolean {
     problemDetails.audit_status === "recorded";
   const explicitPreMutationFailure =
     error instanceof ApiClientError &&
-    [
-      "DAGSTER_SCHEDULE_STORAGE_UNAVAILABLE",
-      "INVALID_SCHEDULE_COMMAND",
-    ].includes(error.problem?.code ?? "");
+    EXPLICIT_PRE_MUTATION_FAILURE_CODES.includes(
+      error.problem
+        ?.code as (typeof EXPLICIT_PRE_MUTATION_FAILURE_CODES)[number],
+    );
   const uncertainConflict =
     error instanceof ApiClientError &&
     UNCERTAIN_IDEMPOTENCY_ERROR_CODES.includes(

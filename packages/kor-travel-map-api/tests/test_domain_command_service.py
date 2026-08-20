@@ -25,7 +25,7 @@ from kortravelmap.api.auth import AdminProxyContext
 
 _KEY = UUID("95000000-0000-4000-8000-000000000001")
 _ACTOR = "admin:alice"
-_OPERATION = "admin.feature.create"
+_OPERATION = "admin.feature.create.manual-v1"
 _PAYLOAD = {"path": {}, "body": {"name": "서울"}}
 _NOW = datetime(2026, 7, 31, tzinfo=UTC)
 
@@ -53,7 +53,10 @@ def _record() -> DomainCommandRecord:
         request_fingerprint=canonical_domain_command_fingerprint(_PAYLOAD),
         response_status=201,
         response_body={"data": {"feature_id": "feature-1"}},
-        response_headers={"Location": "/v1/admin/features/feature-1"},
+        response_headers={
+            "ETag": '"revision-1"',
+            "Location": "/v1/admin/features/feature-1",
+        },
         claimed_at=_NOW,
         completed_at=_NOW,
     )
@@ -294,10 +297,11 @@ async def test_same_key_and_body_with_different_if_match_conflicts(
 
 
 @pytest.mark.asyncio
-async def test_route_decorator_exposes_required_header_and_wraps_terminal_result(
+async def test_manual_create_decorator_sets_isolation_before_claim_and_wraps_201_terminal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    operation = "admin.feature.patch"
+    operation = _OPERATION
+    events: list[str] = []
     command = service.DomainCommandHandle(
         command_id=1,
         actor=_ACTOR,
@@ -305,10 +309,16 @@ async def test_route_decorator_exposes_required_header_and_wraps_terminal_result
         idempotency_key=str(_KEY),
         request_fingerprint="a" * 64,
     )
-    begin = AsyncMock(return_value=command)
-    complete = AsyncMock()
+    async def begin(*_args: object, **_kwargs: object) -> service.DomainCommandHandle:
+        events.append("claim")
+        return command
+
+    async def complete(*_args: object, **_kwargs: object) -> None:
+        events.append("terminal")
+
     monkeypatch.setattr(service, "begin_domain_command", begin)
-    monkeypatch.setattr(service, "complete_domain_command", complete)
+    complete_mock = AsyncMock(side_effect=complete)
+    monkeypatch.setattr(service, "complete_domain_command", complete_mock)
 
     @service.idempotent_domain_command(operation)
     async def _route(
@@ -318,6 +328,7 @@ async def test_route_decorator_exposes_required_header_and_wraps_terminal_result
         request: Request,
         response: Response,
     ) -> _Response:
+        events.append("mutation")
         response.headers["ETag"] = '"revision-7"'
         response.headers["Location"] = "/v1/admin/features/feature-1"
         return body
@@ -326,7 +337,7 @@ async def test_route_decorator_exposes_required_header_and_wraps_terminal_result
     header = exposed.parameters["__domain_idempotency_key"]
     assert header.annotation is UUID
     assert header.default.alias == "Idempotency-Key"
-    session = _Session()
+    session = _SerializableSession(events)
     response = _Response(data={"feature_id": "feature-1"})
     http_response = Response()
 
@@ -341,16 +352,70 @@ async def test_route_decorator_exposes_required_header_and_wraps_terminal_result
 
     assert result is response
     assert session.begin_count == 1
-    begin.assert_awaited_once()
-    complete.assert_awaited_once_with(
+    assert events == [
+        "sql:SET TRANSACTION ISOLATION LEVEL READ COMMITTED",
+        "claim",
+        "mutation",
+        "terminal",
+    ]
+    complete_mock.assert_awaited_once_with(
         session,
         command=command,
         response=response,
-        status_code=200,
+        status_code=201,
         response_headers={
             "ETag": '"revision-7"',
+            "Location": "/v1/admin/features/feature-1",
         },
     )
+
+
+@pytest.mark.asyncio
+async def test_read_committed_manual_create_does_not_retry_serialization_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    events: list[str] = []
+    command = service.DomainCommandHandle(
+        command_id=1,
+        actor=_ACTOR,
+        operation=_OPERATION,
+        idempotency_key=str(_KEY),
+        request_fingerprint="a" * 64,
+    )
+
+    async def begin(*_args: object, **_kwargs: object) -> service.DomainCommandHandle:
+        events.append("claim")
+        return command
+
+    monkeypatch.setattr(service, "begin_domain_command", begin)
+    complete = AsyncMock()
+    monkeypatch.setattr(service, "complete_domain_command", complete)
+
+    @service.idempotent_domain_command(_OPERATION)
+    async def _route(
+        context: AdminProxyContext,
+        session: _SerializableSession,
+        request: Request,
+    ) -> _Response:
+        events.append("mutation")
+        raise DBAPIError(None, None, _SqlStateError("40001"), False)
+
+    session = _SerializableSession(events)
+    with pytest.raises(DBAPIError):
+        await _route(
+            context=AdminProxyContext(actor=_ACTOR),
+            session=session,
+            request=_request(),
+            __domain_idempotency_key=_KEY,
+        )
+
+    assert session.begin_count == 1
+    assert events == [
+        "sql:SET TRANSACTION ISOLATION LEVEL READ COMMITTED",
+        "claim",
+        "mutation",
+    ]
+    complete.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -551,7 +616,7 @@ async def test_route_error_rolls_back_claim_and_does_not_persist_terminal(
     ) -> _Response:
         raise HTTPException(status_code=503, detail="temporary provider failure")
 
-    session = _Session()
+    session = _SerializableSession([])
     with pytest.raises(HTTPException) as raised:
         await _route(
             context=AdminProxyContext(actor=_ACTOR),

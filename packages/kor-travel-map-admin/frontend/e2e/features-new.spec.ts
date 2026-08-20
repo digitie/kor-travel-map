@@ -75,7 +75,7 @@ test.describe("/admin/features/new", () => {
     await expect(
       page.getByRole("textbox", { name: "위도", exact: true }),
     ).toBeVisible();
-    await expect(page.getByRole("button", { name: "요청 생성" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Feature 생성" })).toBeVisible();
   });
 
   test("kind 옵션은 place/event 2종", async ({ page }) => {
@@ -95,7 +95,7 @@ test.describe("/admin/features/new", () => {
     await page.goto("/admin/features/new");
 
     // 기본값: name 빈값, reason 빈값. 그대로 제출 → name 필수에서 throw.
-    await page.getByRole("button", { name: "요청 생성" }).click();
+    await page.getByRole("button", { name: "Feature 생성" }).click();
 
     await expect(page.getByText("name은 필수입니다.").first()).toBeVisible();
   });
@@ -107,7 +107,7 @@ test.describe("/admin/features/new", () => {
     await page.getByRole("textbox", { name: "사유", exact: true }).fill("e2e");
     await page.getByRole("textbox", { name: "경도", exact: true }).fill("200");
     await page.getByRole("textbox", { name: "위도", exact: true }).fill("10");
-    await page.getByRole("button", { name: "요청 생성" }).click();
+    await page.getByRole("button", { name: "Feature 생성" }).click();
 
     await expect(
       page
