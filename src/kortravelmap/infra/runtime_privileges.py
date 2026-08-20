@@ -247,6 +247,14 @@ _OPS_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     # T-VN-M04 queue는 service와 admin route가 SECURITY DEFINER routine을
     # 통해서만 접근한다. runtime의 raw queue read/DML은 허용하지 않는다.
     "feature_requests": (),
+    # T-VN-M05 evidence/delivery는 전용 SECURITY DEFINER writer만 접근한다.
+    # lease까지 default ops grant에서 빼야 runtime이 cursor를 건너뛸 수 없다.
+    "manual_provider_dedup_cases": (),
+    "manual_provider_dedup_resolutions": (),
+    "feature_reference_reconciliation_events": (),
+    "feature_reference_reconciliation_acks": (),
+    "feature_reference_reconciliation_subscriptions": (),
+    "feature_reference_reconciliation_leases": (),
 }
 
 _PROTECTED_FEATURE_TABLES = frozenset(

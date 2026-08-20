@@ -153,7 +153,17 @@ candidate의 `to_jsonb(notice)`에 내부 generated column이 누출되는 P1을
 candidate SQL은 `valid_during`을 response JSON에서 제외하도록 수정했다. NULL·one-sided·
 equal range, public/admin active predicate와 notice candidate detail 회귀를 추가했으며,
 수정 후 targeted integration 2건을 통과했다.
-||||||| parent of 511be40f (docs: 0230 대리키 사건과 자연키 수정을 journal/resume/tasks에 기록)
+## 2026-08-21 — T-VN-M05 증적 스키마와 ACL 기본 경계 착수
+
+두 전문 적대 리뷰의 P0를 ADR-097과 설계 보고서에 반영했고, 두 reviewer가 모두 GO를
+재확인했다. `0231_m05_manual_provider_dedup`는 범용 dedup queue와 분리된 불변
+case·resolution·event·ack와 principal subscription, strict-prefix lease를 만든다. case는
+manual origin/claim 및 provider source record를 `RESTRICT` FK로 결박하고, evidence와
+subscription은 UPDATE/DELETE/TRUNCATE trigger로 막는다.
+
+runtime ACL inventory와 startup catalog preflight도 M05 여섯 relation의 raw SELECT/DML을
+금지하도록 먼저 닫았다. fresh DB migration과 Alembic metadata check 1건, ruff·strict mypy가
+통과했다. 다음 tranche는 two-phase role bootstrap, dedicated writer/lease procedure, backup v3 root다.
 
 ## 2026-08-21 — 완료 task를 `tasks-done.md`로 이관
 

@@ -413,6 +413,22 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
             OR has_table_privilege(session_user, 'ops.feature_requests', 'DELETE')
             OR has_table_privilege(session_user, 'ops.feature_requests', 'TRUNCATE')
         ) AS can_access_feature_requests_directly,
+        EXISTS (
+            SELECT 1
+            FROM unnest(ARRAY[
+                'ops.manual_provider_dedup_cases',
+                'ops.manual_provider_dedup_resolutions',
+                'ops.feature_reference_reconciliation_events',
+                'ops.feature_reference_reconciliation_acks',
+                'ops.feature_reference_reconciliation_subscriptions',
+                'ops.feature_reference_reconciliation_leases'
+            ]::text[]) AS m05(relation_name)
+            WHERE has_table_privilege(session_user, m05.relation_name, 'SELECT')
+               OR has_table_privilege(session_user, m05.relation_name, 'INSERT')
+               OR has_table_privilege(session_user, m05.relation_name, 'UPDATE')
+               OR has_table_privilege(session_user, m05.relation_name, 'DELETE')
+               OR has_table_privilege(session_user, m05.relation_name, 'TRUNCATE')
+        ) AS can_access_manual_provider_dedup_directly,
         (
             has_table_privilege(session_user, 'ops.feature_overrides', 'INSERT')
             OR has_table_privilege(session_user, 'ops.feature_overrides', 'UPDATE')
@@ -490,6 +506,9 @@ def _runtime_db_privilege_problems(
         ),
         "can_access_feature_requests_directly": (
             "runtime login must not access Feature requests directly"
+        ),
+        "can_access_manual_provider_dedup_directly": (
+            "runtime login must not access manual/provider dedup evidence directly"
         ),
         "can_mutate_feature_overrides_directly": (
             "runtime login must not mutate ops.feature_overrides directly"

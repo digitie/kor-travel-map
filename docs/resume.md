@@ -78,14 +78,16 @@ prod 덤프 사본(features 1,008,852까지 완전 일치)에서 `0225→0229→
 evidence로 구현한다. Map decision은 provider survivor만 명시적으로 허용하며, external reference
 rebind/detach는 generic service event와 principal ack로 전파한다.
 
-ADR-097 및 [M05 설계](reports/t-vn-m05-manual-provider-dedup-design-2026-08-21.md)를 추가했고,
-DB/HTTP 전문 적대 리뷰어 둘에게 implementation-ready 재검토를 요청했다.
+ADR-097 및 [M05 설계](reports/t-vn-m05-manual-provider-dedup-design-2026-08-21.md)를 accepted로
+확정했고, DB/HTTP 전문 적대 리뷰어 둘이 P0 보완본을 GO로 재검토했다. `0231`의 불변
+증적·subscription·lease model/migration과 runtime raw-access deny inventory까지 구현했으며,
+fresh migration Alembic check 1건과 ruff/strict mypy가 green이다.
 
 ### 다음 한 작업
 
-두 리뷰의 P0/P1을 반영해 0231 schema/ACL/backup roots와 Map service/admin contract를
-구현한다. 이어 첫 consumer의 durable reference receipt/rebind와 exact vendor를 같은 paired
-release로 구현한다.
+two-phase role bootstrap과 dedicated detector/admin/service writer, backup v3 root를 구현한다.
+이어 Map admin/service contract와 첫 consumer의 durable reference receipt/rebind, exact vendor를
+같은 paired release로 구현한다.
 
 ## 2026-08-20 — T-VN-41S material/receipt 분리 착지 (`0231`)
 
