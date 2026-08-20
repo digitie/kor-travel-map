@@ -51,6 +51,8 @@ async def _explain(
         nodes.extend(node.get("Plans", []))
         if node.get("Index Name") is not None:
             index_names.add(str(node["Index Name"]))
+    if not index_names:  # pragma: no cover - 실패 진단용
+        index_names.add(f"(no index) plan={plan}")
     return index_names
 
 
@@ -77,16 +79,47 @@ async def _seed(session: AsyncSession) -> None:
     # 하나뿐이면 두 partial index의 비용이 같아 아무 것이나 골라도 게이트가 통과한다 —
     # 그러면 "identity로 한 행을 찍는다"를 보는 게 아니라 "인덱스를 아무거나 탄다"를
     # 보는 게 된다.
+    # 이 200개는 **실제 compaction 후보의 모양**을 갖춰야 한다 — receipt가 있고, 그
+    # receipt가 만료됐고, item이 있다. 그렇지 않으면 후보가 0개라 planner의 선택이
+    # 무의미해지고 게이트는 아무 것도 재지 않는다.
     await session.execute(
         text(
             "INSERT INTO ops.poi_cache_target_snapshot_materials ("
             "material_id, external_system, restore_epoch, "
             "material_high_watermark_relay_order, safe_high_watermark_relay_order, "
             "item_count, merkle_root, materialized_at) "
-            "SELECT x_extension.gen_random_uuid(), :system, 1, value, value, 0, "
-            ":root, now() FROM generate_series(1, 200) AS value"
+            "SELECT CAST(lpad(to_hex(value), 8, '0') "
+            "|| '-0000-4000-8000-000000000002' AS uuid), "
+            ":system, 1, value, value, 1, :root, now() - make_interval(mins => value) "
+            "FROM generate_series(1, 200) AS value"
         ),
         {"system": _SYSTEM, "root": _ROOT},
+    )
+    await session.execute(
+        text(
+            "INSERT INTO ops.poi_cache_target_snapshots ("
+            "snapshot_id, material_id, receipt_kind, external_system, "
+            "created_at, expires_at) "
+            "SELECT x_extension.gen_random_uuid(), material.material_id, "
+            "'reconciliation', :system, now() - interval '3 hours', "
+            "now() - interval '1 hour' "
+            "FROM ops.poi_cache_target_snapshot_materials AS material "
+            "WHERE material.external_system = :system "
+            "AND material.material_high_watermark_relay_order > 0"
+        ),
+        {"system": _SYSTEM},
+    )
+    await session.execute(
+        text(
+            "INSERT INTO ops.poi_cache_target_snapshot_material_items ("
+            "material_id, row_number, target_key, state, source_generation, "
+            "source_payload_fingerprint) "
+            "SELECT material.material_id, 1, 'k', 'active', 1, :fingerprint "
+            "FROM ops.poi_cache_target_snapshot_materials AS material "
+            "WHERE material.external_system = :system "
+            "AND material.material_high_watermark_relay_order > 0"
+        ),
+        {"system": _SYSTEM, "fingerprint": "b" * 64},
     )
     await session.execute(
         text(
