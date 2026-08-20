@@ -144,16 +144,33 @@ async def test_truncate_is_refused_on_both_new_tables(
     UPDATE fence만 시험하면 나중에 TRUNCATE trigger 둘을 떨어뜨려도 `pytest -q`와
     `alembic check`가 모두 초록이다(적대 리뷰 지적). bounded DELETE로 되찾는 설계에서
     TRUNCATE는 한 문장으로 전량을 날리는 우회로다.
+
+    두 표가 막히는 **방식이 다르다**. `material_items`는 아무도 참조하지 않으므로 평범한
+    TRUNCATE가 곧장 fence에 닿는다. `materials`는 FK로 참조되고 있어 PostgreSQL이 먼저
+    거부한다(`cannot truncate a table referenced in a foreign key constraint`) — fence에
+    닿으려면 `CASCADE`가 필요하다. 그래서 둘 다 확인한다: FK가 1선이고 fence가 2선이다.
+    FK만 믿으면 참조가 사라지는 날 조용히 뚫린다.
     """
 
     await _seed(migrated_session)
 
-    for relation in (
-        "ops.poi_cache_target_snapshot_material_items",
-        "ops.poi_cache_target_snapshot_materials",
-    ):
-        reason = await _refused(migrated_session, f"TRUNCATE {relation}")
-        assert "append-only" in reason, (relation, reason)
+    # 1선: 참조가 있어 평범한 TRUNCATE는 PostgreSQL이 거부한다.
+    reason = await _refused(
+        migrated_session, "TRUNCATE ops.poi_cache_target_snapshot_materials"
+    )
+    assert "cannot truncate" in reason, reason
+
+    # 2선: CASCADE로 그 1선을 넘어도 fence가 막는다.
+    reason = await _refused(
+        migrated_session, "TRUNCATE ops.poi_cache_target_snapshot_materials CASCADE"
+    )
+    assert "append-only" in reason, reason
+
+    # 참조가 없는 쪽은 곧장 fence다.
+    reason = await _refused(
+        migrated_session, "TRUNCATE ops.poi_cache_target_snapshot_material_items"
+    )
+    assert "append-only" in reason, reason
 
 
 async def test_compaction_delete_of_material_items_stays_allowed(
