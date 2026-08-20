@@ -234,7 +234,8 @@ async def test_active_operation_and_handler_sets_must_match_exactly() -> None:
 
 @pytest.mark.unit
 def test_handler_registry_is_key_to_handler_only() -> None:
-    assert len(FEATURE_OPERATION_HANDLERS) == 33
+    # C05A route 2종과 C05B~D 관측·위험·발령 3종을 포함한 현재 정본 수.
+    assert len(FEATURE_OPERATION_HANDLERS) == 38
     assert feature_operation_handler_keys() == frozenset(FEATURE_OPERATION_HANDLERS)
     binding = resolve_feature_operation_handler("feature_place_knps_points_job")
     assert binding.job_name == "feature_place_knps_points_job"

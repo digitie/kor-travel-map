@@ -46,7 +46,16 @@ from kortravelmap.providers.krex import (
 )
 from kortravelmap.providers.krforest import (
     arboretums_to_bundles,
+    dulle_trails_to_bundles,
+    mountain_trails_to_bundles,
     recreation_forests_to_bundles,
+)
+from kortravelmap.providers.krforest_safety import (
+    landslide_forecast_issues_to_bundles,
+    mountain_weather_stations_to_bundles,
+    mountain_weather_to_values,
+    wildfire_risk_forecasts_to_bundles,
+    wildfire_risk_to_values,
 )
 from kortravelmap.providers.mcst import (
     file_rows_to_bundles,
@@ -729,6 +738,265 @@ async def _convert_krforest_arboretums(items: Sequence[Any]) -> list[Any]:
 
 
 @dataclass(frozen=True)
+class _ForestTrail:
+    """`ForestTrailItem` Protocol 준수 (C05A 공간 feature fixture)."""
+
+    name: str | None
+    source_id: str | None
+    source_file: str | None
+    layer_name: str | None
+    geometry_type: str | None
+    geometry: dict[str, Any] | None
+    bbox: tuple[float, float, float, float] | None
+    raw: Any = None
+
+
+def _krforest_mountain_trails_fixture() -> Sequence[_ForestTrail]:
+    return [
+        _ForestTrail(
+            name="북악산 등산로 1구간",
+            source_id="mountain/111100101.zip/PMNTN.shp:keys:segment-1",
+            source_file="mountain/111100101.zip/PMNTN.shp",
+            layer_name="PMNTN",
+            geometry_type="LineString",
+            geometry={
+                "type": "LineString",
+                "coordinates": [[126.981, 37.592], [126.989, 37.598]],
+            },
+            bbox=(126.981, 37.592, 126.989, 37.598),
+            raw={"MNTN_NM": "북악산", "PMNTN_NM": "등산로 1구간"},
+        ),
+        _ForestTrail(
+            name="북악산 등산로 2구간",
+            source_id="mountain/111100101.zip/PMNTN.shp:keys:segment-2",
+            source_file="mountain/111100101.zip/PMNTN.shp",
+            layer_name="PMNTN",
+            geometry_type="LineString",
+            geometry={
+                "type": "LineString",
+                "coordinates": [[126.989, 37.598], [126.997, 37.601]],
+            },
+            bbox=(126.989, 37.598, 126.997, 37.601),
+            raw={"MNTN_NM": "북악산", "PMNTN_NM": "등산로 2구간"},
+        ),
+        _ForestTrail(
+            name="빈 geometry는 제외",
+            source_id="mountain/bad.shp:keys:empty",
+            source_file="mountain/bad.shp",
+            layer_name="bad",
+            geometry_type="Point",
+            geometry={"type": "Point", "coordinates": [126.99, 37.6]},
+            bbox=(126.99, 37.6, 126.99, 37.6),
+            raw={"MNTN_NM": "잘못된 행"},
+        ),
+    ]
+
+
+def _krforest_dulle_trails_fixture() -> Sequence[_ForestTrail]:
+    return [
+        _ForestTrail(
+            name="지리산둘레길 1구간",
+            source_id="dulle/dule.shp:keys:dulle-1",
+            source_file="dulle/dule.shp",
+            layer_name="dule",
+            geometry_type="MultiLineString",
+            geometry={
+                "type": "MultiLineString",
+                "coordinates":[
+                    [[127.7, 35.3], [127.71, 35.31]],
+                    [[127.71, 35.31], [127.72, 35.32]],
+                ],
+            },
+            bbox=(127.7, 35.3, 127.72, 35.32),
+            raw={"Name": "지리산둘레길 1구간", "ID": "dulle-1"},
+        ),
+        _ForestTrail(
+            name="지리산둘레길 2구간",
+            source_id="dulle/dule.shp:keys:dulle-2",
+            source_file="dulle/dule.shp",
+            layer_name="dule",
+            geometry_type="LineString",
+            geometry={
+                "type": "LineString",
+                "coordinates": [[127.72, 35.32], [127.73, 35.33]],
+            },
+            bbox=(127.72, 35.32, 127.73, 35.33),
+            raw={"Name": "지리산둘레길 2구간", "ID": "dulle-2"},
+        ),
+    ]
+
+
+async def _convert_krforest_mountain_trails(items: Sequence[Any]) -> list[Any]:
+    bundles = await mountain_trails_to_bundles(items, fetched_at=_now())
+    return [b.model_dump(mode="json") for b in bundles]
+
+
+async def _convert_krforest_dulle_trails(items: Sequence[Any]) -> list[Any]:
+    bundles = await dulle_trails_to_bundles(items, fetched_at=_now())
+    return [b.model_dump(mode="json") for b in bundles]
+
+
+@dataclass(frozen=True)
+class _MountainWeather:
+    """`MountainWeatherItem` Protocol 준수 (C05B 관측 fixture)."""
+
+    obs_id: str | None
+    obs_name: str | None
+    local_area: str | None
+    observed_at: datetime | None
+    temperature_10m: float | None
+    temperature_2m: float | None
+    humidity_10m: float | None
+    humidity_2m: float | None
+    pressure: float | None
+    rainfall_tipping: float | None
+    rainfall_weight: float | None
+    ground_temperature: float | None
+    wind_direction_10m: float | None
+    wind_direction_10m_name: str | None
+    wind_direction_2m: float | None
+    wind_direction_2m_name: str | None
+    wind_speed_10m: float | None
+    wind_speed_2m: float | None
+    latitude: float | None
+    longitude: float | None
+    raw: Any = None
+
+
+def _krforest_mountain_weather_fixture() -> Sequence[_MountainWeather]:
+    return [
+        _MountainWeather(
+            obs_id="M-001",
+            obs_name="설악산 산악기상관측소",
+            local_area="강원특별자치도 속초시",
+            observed_at=_now(),
+            temperature_10m=19.4,
+            temperature_2m=18.8,
+            humidity_10m=72.0,
+            humidity_2m=76.0,
+            pressure=918.2,
+            rainfall_tipping=0.0,
+            rainfall_weight=0.0,
+            ground_temperature=17.1,
+            wind_direction_10m=225.0,
+            wind_direction_10m_name="남서",
+            wind_direction_2m=210.0,
+            wind_direction_2m_name="남남서",
+            wind_speed_10m=3.2,
+            wind_speed_2m=2.1,
+            latitude=38.1200,
+            longitude=128.4700,
+            raw={"obsid": "M-001", "tm2m": "18.8", "hm2m": "76"},
+        ),
+    ]
+
+
+async def _convert_krforest_mountain_weather(items: Sequence[Any]) -> list[Any]:
+    anchors = mountain_weather_stations_to_bundles(items, fetched_at=_now())
+    feature_ids = {
+        bundle.source_record.source_entity_id: bundle.feature.feature_id
+        for bundle in anchors
+    }
+    values = mountain_weather_to_values(items, feature_id_by_obs_id=feature_ids)
+    return [value.model_dump(mode="json") for value in values]
+
+
+@dataclass(frozen=True)
+class _WildfireRisk:
+    """`WildfireRiskForecastItem` Protocol 준수 (C05C V2 fixture)."""
+
+    scope: str
+    analysis_at: datetime | None
+    area: str | None
+    region_code: str | None
+    region_name: str | None
+    upper_region_code: str | None
+    d1: float | None
+    d2: float | None
+    d3: float | None
+    d4: float | None
+    maximum: float | None
+    mean_average: float | None
+    minimum: float | None
+    standard_deviation: float | None
+    raw: Any = None
+
+
+def _krforest_wildfire_risk_fixture() -> Sequence[_WildfireRisk]:
+    return [
+        _WildfireRisk(
+            scope="sigungu",
+            analysis_at=_now(),
+            area="강원특별자치도",
+            region_code="51820",
+            region_name="속초시",
+            upper_region_code="51",
+            d1=2.0,
+            d2=3.0,
+            d3=3.0,
+            d4=4.0,
+            maximum=4.0,
+            mean_average=2.5,
+            minimum=1.0,
+            standard_deviation=0.8,
+            raw={"regioncode": "51820", "meanavg": "2.5", "d1": "2"},
+        ),
+    ]
+
+
+async def _convert_krforest_wildfire_risk(items: Sequence[Any]) -> list[Any]:
+    anchors = wildfire_risk_forecasts_to_bundles(items, fetched_at=_now())
+    feature_ids = {
+        bundle.source_record.source_entity_id: bundle.feature.feature_id
+        for bundle in anchors
+    }
+    values = wildfire_risk_to_values(
+        items,
+        feature_id_by_region_key=feature_ids,
+    )
+    return [value.model_dump(mode="json") for value in values]
+
+
+@dataclass(frozen=True)
+class _LandslideIssue:
+    """`LandslideForecastIssueItem` Protocol 준수 (C05D lifecycle fixture)."""
+
+    issue_kind_code: str | None
+    issue_kind_name: str | None
+    issuing_institution: str | None
+    status: str | None
+    issued_at: datetime | None
+    raw: Any = None
+
+
+def _krforest_landslide_issues_fixture() -> Sequence[_LandslideIssue]:
+    issued_at = _now()
+    return [
+        _LandslideIssue(
+            issue_kind_code="1",
+            issue_kind_name="산사태주의보",
+            issuing_institution="강원특별자치도",
+            status="발령",
+            issued_at=issued_at,
+            raw={"kind": "1", "status": "발령"},
+        ),
+        _LandslideIssue(
+            issue_kind_code="1",
+            issue_kind_name="산사태주의보",
+            issuing_institution="강원특별자치도",
+            status="해제",
+            issued_at=issued_at,
+            raw={"kind": "1", "status": "해제"},
+        ),
+    ]
+
+
+async def _convert_krforest_landslide_issues(items: Sequence[Any]) -> list[Any]:
+    bundles = landslide_forecast_issues_to_bundles(items, fetched_at=_now())
+    return [bundle.model_dump(mode="json") for bundle in bundles]
+
+
+@dataclass(frozen=True)
 class _Museum:
     """`PublicMuseumArtItem` Protocol 준수 (provider `PublicMuseumArtGallery` 정합)."""
 
@@ -1211,6 +1479,46 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
         description="수목원/식물원(SHP) → place Feature (ADR-034 8단계). T-RV-53.",
         build_fixture=_krforest_arboretums_fixture,
         convert=_convert_krforest_arboretums,
+    ),
+    EtlFixtureEntry(
+        provider="python-krforest-api",
+        dataset="krforest_mountain_trails",
+        variant="FeatureBundle",
+        description="산림청 PBD0000041 등산로 SHP → route Feature(C05A).",
+        build_fixture=_krforest_mountain_trails_fixture,
+        convert=_convert_krforest_mountain_trails,
+    ),
+    EtlFixtureEntry(
+        provider="python-krforest-api",
+        dataset="krforest_dulle_trails",
+        variant="FeatureBundle",
+        description="산림청 PBD0000031 둘레길 SHP → route Feature(C05A).",
+        build_fixture=_krforest_dulle_trails_fixture,
+        convert=_convert_krforest_dulle_trails,
+    ),
+    EtlFixtureEntry(
+        provider="python-krforest-api",
+        dataset="krforest_mountain_weather",
+        variant="WeatherValue",
+        description="산림청 15084696 산악기상 관측 → WeatherValue(C05B).",
+        build_fixture=_krforest_mountain_weather_fixture,
+        convert=_convert_krforest_mountain_weather,
+    ),
+    EtlFixtureEntry(
+        provider="python-krforest-api",
+        dataset="krforest_wildfire_risk_forecast",
+        variant="WeatherValue",
+        description="산림청 15084817 산불위험 V2 예보 → WeatherValue(C05C).",
+        build_fixture=_krforest_wildfire_risk_fixture,
+        convert=_convert_krforest_wildfire_risk,
+    ),
+    EtlFixtureEntry(
+        provider="python-krforest-api",
+        dataset="krforest_landslide_forecast_issues",
+        variant="FeatureBundle",
+        description="산림청 15074798 산사태 예보발령·해제 → notice Feature(C05D).",
+        build_fixture=_krforest_landslide_issues_fixture,
+        convert=_convert_krforest_landslide_issues,
     ),
     EtlFixtureEntry(
         provider="data.go.kr-standard",

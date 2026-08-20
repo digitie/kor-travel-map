@@ -17,10 +17,10 @@
 | 항목 | 값 |
 |------|----|
 | provider | `python-krforest-api` |
-| dataset_key | 구현: `krforest_recreation_forests`, `krforest_arboretums`; 계획: `krforest_mountain_trails`, `krforest_dulle_trails`, `krforest_mountain_weather`, `krforest_wildfire_risk_forecast` |
+| dataset_key | 구현: `krforest_recreation_forests`, `krforest_arboretums`, `krforest_mountain_trails`, `krforest_dulle_trails`, `krforest_mountain_weather`, `krforest_wildfire_risk_forecast`, `krforest_landslide_forecast_issues` |
 | Feature.kind | `place`, `route` / `WeatherValue` |
-| 코드 entrypoint | 구현: `kortravelmap.providers.krforest`; C05A~D entrypoint는 각 구현 PR에서 확정 |
-| 갱신 주기 | provider별 (place/area/route 월~분기, 산악기상 시간 단위) |
+| 코드 entrypoint | `kortravelmap.providers.krforest`, `kortravelmap.providers.krforest_safety` |
+| 갱신 주기 | C05A route 월 1회; C05B~D 하루 6회; place는 기존 schedule 유지 |
 
 ## 2. dataset 매핑
 
@@ -28,10 +28,11 @@
 |-------------|---------------------|----------------|
 | `krforest_recreation_forests` | `travel.recreation_forests()` | `place`, `place_kind="recreation_forest"` |
 | `krforest_arboretums` | `travel.arboretums()` | `place`, `place_kind="arboretum"` |
-| `krforest_mountain_trails` _(C05A)_ | `travel.forest_trail_file_features()` / `ForestSpatialFeature` (`PBD0000041`) | LineString/MultiLineString → `route` |
-| `krforest_dulle_trails` _(C05A)_ | `travel.dulle_trail_features()` / `ForestSpatialFeature` (`PBD0000031`) | LineString/MultiLineString → `route` |
-| `krforest_mountain_weather` _(C05B)_ | data.go.kr `15084696`; upstream typed 관측 model 선행 | `WeatherValue`, `observed` |
-| `krforest_wildfire_risk_forecast` _(C05C)_ | data.go.kr `15084817` V2; upstream typed 예보 model 선행 | `WeatherValue`, `index` |
+| `krforest_mountain_trails` | `travel.forest_trail_file_features()` / `ForestSpatialFeature` (`PBD0000041`) | LineString/MultiLineString → `route` (C05A 구현) |
+| `krforest_dulle_trails` | `travel.dulle_trail_features()` / `ForestSpatialFeature` (`PBD0000031`) | LineString/MultiLineString → `route` (C05A 구현) |
+| `krforest_mountain_weather` _(C05B)_ | data.go.kr [`15084696`](https://www.data.go.kr/data/15084696/openapi.do), `1400377/mtweather/mountListSearch` | 관측소 anchor + `WeatherValue`, `observed` |
+| `krforest_wildfire_risk_forecast` _(C05C)_ | data.go.kr [`15084817`](https://www.data.go.kr/data/15084817/openapi.do), `1400377/forestPointV2` 전국/시도/시군구 | 지역 anchor + `WeatherValue`, `index` |
+| `krforest_landslide_forecast_issues` _(C05D)_ | data.go.kr [`15074798`](https://www.data.go.kr/data/15074798/openapi.do), `1400000/forecastIssueService/forecastIssueList` | 발령/해제 `notice` FeatureBundle |
 
 ## 3. 매핑 룰
 
@@ -69,42 +70,34 @@
 
 ## 5. 핵심 함수
 
-아래는 C05A~D의 목표 형태를 설명하는 의사 코드이며 현재 public API가 아니다.
+C05A~D는 provider typed model을 직접 받는 순수 변환 함수로 구현되어 있다. API 호출은
+`python-krforest-api`가 소유하고, map 저장 경계는 Dagster asset이 소유한다.
 
 ```python
-# providers/krforest.py
-async def recreation_forests_to_bundles(items, *, fetched_at, reverse_geocoder=None) -> AsyncIterator[FeatureBundle]:
-    ...
-
-async def arboretums_to_bundles(items, *, fetched_at, reverse_geocoder=None) -> AsyncIterator[FeatureBundle]:
-    ...
-
-async def forest_trails_to_bundles(items, *, dataset_key, fetched_at) -> AsyncIterator[FeatureBundle]:
-    """LineString/MultiLineString만 route로 변환하고 그 밖의 geometry는 skip한다."""
-    ...
-
-async def mountain_weather_to_values(items, *, feature_id_by_obs_id, fetched_at) -> AsyncIterator[WeatherValue]:
-    """관측소 ID → feature_id 매핑 dict 필요."""
-    ...
+from kortravelmap.providers.krforest import (
+    dulle_trails_to_bundles,
+    mountain_trails_to_bundles,
+)
+from kortravelmap.providers.krforest_safety import (
+    landslide_forecast_issues_to_bundles,
+    mountain_weather_stations_to_bundles,
+    mountain_weather_to_values,
+    wildfire_risk_forecasts_to_bundles,
+    wildfire_risk_to_values,
+)
 ```
 
 ## 6. DB 적재
 
-아래 import 역시 목표 형태이며 현재 `kortravelmap.forest` 모듈은 존재하지 않는다.
+실제 적재는 `packages/kor-travel-map-dagster`의 provider resource와 asset이 담당한다.
+메인 라이브러리에는 단순 전달용 forest facade를 만들지 않는다.
 
 ```python
-from kortravelmap.forest import (
-    collect_krforest_recreation_features,
-    collect_krforest_arboretum_features,
-    collect_krforest_trail_features,
-    collect_krforest_mountain_weather_values,
-    load_krforest_result,
-)
-
-async def run_krforest_recreation(client, async_session, reverse_geocoder):
-    result = await collect_krforest_recreation_features(client, reverse_geocoder=reverse_geocoder)
-    await load_krforest_result(async_session, result)
-    await async_session.commit()
+# packages/kor-travel-map-dagster/src/kortravelmap/dagster/assets.py
+async def run_feature_route_krforest_mountain_trails(context):
+    records = await _record_list(context, "krforest_mountain_trails")
+    bundles = await mountain_trails_to_bundles(records, fetched_at=...)
+    return await _load(..., authoritative_snapshot_complete=True)
 ```
 
 ## 7. 산악기상 매핑
@@ -144,13 +137,13 @@ await upsert_weather_values(session, values)
 
 | asset | dataset_key | cron | group |
 |-------|-------------|------|-------|
-| `feature_place_krforest_recreation` | `krforest_recreation_forests` | `0 2 1 * *` (월 1회) | `features_place` |
-| `feature_place_krforest_arboretums` | `krforest_arboretums` | `0 2 1 * *` | `features_place` |
-| `feature_route_krforest_mountain_trails` _(C05A)_ | `krforest_mountain_trails` | 월 1회 | `features_route` |
-| `feature_route_krforest_dulle_trails` _(C05A)_ | `krforest_dulle_trails` | 월 1회 | `features_route` |
-| `weather_krforest_mountain` _(C05B)_ | `krforest_mountain_weather` | 시간 | `features_weather` |
-| `weather_krforest_wildfire_risk` _(C05C)_ | `krforest_wildfire_risk_forecast` | 3시간 | `features_weather` |
-| `notice_krforest_landslide_forecast` _(C05D)_ | `krforest_landslide_forecast_notices` | 30분 | `features_notice` |
+| `feature_place_krforest_recreation_forests` | `krforest_recreation_forests` | `5 4 4 * *` (월 1회) | `features_place` |
+| `feature_place_krforest_arboretums` | `krforest_arboretums` | `15 4 4 * *` (월 1회) | `features_place` |
+| `feature_route_krforest_mountain_trails` | `krforest_mountain_trails` | `25 4 4 * *` (월 1회) | `features_route` |
+| `feature_route_krforest_dulle_trails` | `krforest_dulle_trails` | `35 4 4 * *` (월 1회) | `features_route` |
+| `feature_weather_krforest_mountain_weather` _(C05B)_ | `krforest_mountain_weather` | 하루 6회 (`0 1,5,9,13,17,21 * * *`) | `features_weather` |
+| `feature_weather_krforest_wildfire_risk_forecast` _(C05C)_ | `krforest_wildfire_risk_forecast` | 하루 6회 (`10 1,5,9,13,17,21 * * *`) | `features_weather` |
+| `feature_notice_krforest_landslide_forecast_issues` _(C05D)_ | `krforest_landslide_forecast_issues` | 하루 6회 (`20 1,5,9,13,17,21 * * *`) | `features_notice` |
 
 ConcurrencyConfig: `krforest_api: max_concurrent=1`.
 
@@ -163,6 +156,7 @@ ConcurrencyConfig: `krforest_api: max_concurrent=1`.
 - `trail_with_linestring.json` — 등산로 (route)
 - `trail_with_multilinestring.json` — 둘레길 (route)
 - `mountain_weather_typical.json` — 산악기상
+- fixture registry — 산악기상 관측값, 산불위험 D1~D4, 산사태 발령→해제 lifecycle
 
 ### 통합 테스트
 
@@ -173,8 +167,6 @@ ConcurrencyConfig: `krforest_api: max_concurrent=1`.
 ## 10. 후속
 
 - 산 경계 polygon source 추가 (산림청 provider 결정).
-- 산사태 발령 notice — `docs/etl/notice-feature-etl.md`의
-  `krforest_landslide_forecast_notices`.
 - 산불위험 예보는 notice가 아니라 `weather_domain=forest_fire_risk` 지수성
   `WeatherValue`다 — `docs/etl/weather-feature-normalization.md` §3.
 

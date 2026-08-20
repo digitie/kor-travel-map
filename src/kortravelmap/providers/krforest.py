@@ -29,10 +29,12 @@ ADR 참조
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Final, Protocol, runtime_checkable
+
+from shapely.geometry import shape as shape_geometry
 
 from kortravelmap.category import (
     PlaceCategoryCode,
@@ -43,6 +45,11 @@ from kortravelmap.core.address import (
     extract_sigungu_code,
     normalize_korean_text,
     normalize_phone_number,
+)
+from kortravelmap.core.geometry import (
+    ROUTE_GEOMETRY_TYPES,
+    GeometryError,
+    normalize_geometry,
 )
 from kortravelmap.core.ids import (
     make_feature_id,
@@ -59,10 +66,12 @@ from kortravelmap.dto import (
     FeatureBundle,
     FeatureKind,
     PlaceDetail,
+    RouteDetail,
     SourceLink,
     SourceRecord,
     SourceRole,
 )
+from kortravelmap.dto.route import ROUTE_TYPE_HIKING_TRAIL, ROUTE_TYPE_TREKKING
 from kortravelmap.geocoding import (
     AddressResolver,
     ReverseGeocoder,
@@ -72,13 +81,21 @@ from kortravelmap.geocoding import (
 
 __all__ = [
     "ForestSpatialItem",
+    "ForestTrailItem",
     "RecreationForestItem",
     "arboretums_to_bundles",
+    "dulle_trails_to_bundles",
+    "forest_trails_to_bundles",
+    "mountain_trails_to_bundles",
     "recreation_forests_to_bundles",
     # 상수
     "ARBORETUM_CATEGORY",
     "DATASET_KEY_ARBORETUMS",
+    "DATASET_KEY_DULLE_TRAILS",
+    "DATASET_KEY_MOUNTAIN_TRAILS",
     "DATASET_KEY_RECREATION_FORESTS",
+    "FOREST_ROUTE_CATEGORY",
+    "FOREST_ROUTE_MARKER_COLOR",
     "KRFOREST_MARKER_COLOR",
     "KRFOREST_PROVIDER_NAME",
     "RECREATION_FOREST_CATEGORY",
@@ -92,9 +109,13 @@ KRFOREST_PROVIDER_NAME: Final[str] = "python-krforest-api"
 
 DATASET_KEY_RECREATION_FORESTS: Final[str] = "krforest_recreation_forests"
 DATASET_KEY_ARBORETUMS: Final[str] = "krforest_arboretums"
+DATASET_KEY_MOUNTAIN_TRAILS: Final[str] = "krforest_mountain_trails"
+DATASET_KEY_DULLE_TRAILS: Final[str] = "krforest_dulle_trails"
 
 _RECREATION_FOREST_ENTITY_TYPE: Final[str] = "recreation_forest"
 _ARBORETUM_ENTITY_TYPE: Final[str] = "arboretum"
+_MOUNTAIN_TRAIL_ENTITY_TYPE: Final[str] = "mountain_trail_segment"
+_DULLE_TRAIL_ENTITY_TYPE: Final[str] = "dulle_trail_segment"
 
 RECREATION_FOREST_CATEGORY: Final[str] = PlaceCategoryCode.LODGING_RECREATION_FOREST.value
 """``Feature.category`` — 휴양림 03030000."""
@@ -102,11 +123,17 @@ RECREATION_FOREST_CATEGORY: Final[str] = PlaceCategoryCode.LODGING_RECREATION_FO
 ARBORETUM_CATEGORY: Final[str] = PlaceCategoryCode.TOURISM_BOTANICAL.value
 """``Feature.category`` — 수목원·식물원 01030000."""
 
+FOREST_ROUTE_CATEGORY: Final[str] = PlaceCategoryCode.TOURISM_ACTIVITY_TREKKING.value
+"""등산로·둘레길 route의 보조 category 01080500."""
+
 RECREATION_FOREST_PLACE_KIND: Final[str] = "recreation_forest"
 ARBORETUM_PLACE_KIND: Final[str] = "arboretum"
 
 KRFOREST_MARKER_COLOR: Final[str] = "P-05"
 """산림 계열 marker color (녹색 계열 팔레트, ADR-029 P-01~P-16 범위)."""
+
+FOREST_ROUTE_MARKER_COLOR: Final[str] = "P-06"
+"""등산로·둘레길 route marker color."""
 
 _DEFAULT_MARKER_ICON: Final[str] = "park"
 """category maki 매핑이 없을 때의 fallback Maki icon."""
@@ -187,6 +214,24 @@ class ForestSpatialItem(Protocol):
     region_name: str | None
     """행정구역명(자연키 파생 보조)."""
 
+    raw: Any
+
+
+@runtime_checkable
+class ForestTrailItem(Protocol):
+    """산림청 SHP/GeoJSON/GPX route 1건 입력 shape.
+
+    `python-krforest-api`의 `ForestSpatialFeature`가 이 Protocol을 만족한다.
+    공간 파일 파싱·좌표계 변환은 provider 책임이며, map은 WGS84 GeoJSON과
+    source natural key를 그대로 받아 `FeatureBundle`로 정규화한다.
+    """
+
+    name: str | None
+    source_file: str | None
+    layer_name: str | None
+    geometry_type: str | None
+    geometry: Mapping[str, Any] | None
+    bbox: tuple[float, float, float, float] | None
     raw: Any
 
 
@@ -370,6 +415,241 @@ def _build_place_bundle(
         source_record=source_record,
         source_link=source_link,
         admin_evidence=admin_evidence,
+    )
+
+
+# -- route 변환 -----------------------------------------------------------
+
+_FOREST_ROUTE_SPECS: Final[dict[str, tuple[str, str]]] = {
+    DATASET_KEY_MOUNTAIN_TRAILS: (
+        ROUTE_TYPE_HIKING_TRAIL,
+        _MOUNTAIN_TRAIL_ENTITY_TYPE,
+    ),
+    DATASET_KEY_DULLE_TRAILS: (ROUTE_TYPE_TREKKING, _DULLE_TRAIL_ENTITY_TYPE),
+}
+
+
+def _forest_route_spec(dataset_key: str) -> tuple[str, str]:
+    try:
+        return _FOREST_ROUTE_SPECS[dataset_key]
+    except KeyError as exc:
+        raise KeyError(
+            f"krforest route dataset_key가 아님: {dataset_key!r}. "
+            f"지원: {sorted(_FOREST_ROUTE_SPECS)}"
+        ) from exc
+
+
+def _forest_route_source_id(
+    item: ForestTrailItem,
+    *,
+    name: str,
+    canonical_wkt: str,
+) -> str:
+    """provider source_id를 우선하고, 구 provider에는 deterministic fallback을 쓴다."""
+
+    # C05A adds `source_id` to the provider model.  The fallback keeps this
+    # converter safe while older pins are still used by local preview jobs.
+    source_id = getattr(item, "source_id", None)
+    if isinstance(source_id, str):
+        normalized_source_id = normalize_korean_text(source_id)
+        if normalized_source_id is not None:
+            return normalized_source_id
+
+    source_file = item.source_file or "unknown-file"
+    layer_name = item.layer_name or "unknown-layer"
+    geometry_hash = make_payload_hash(
+        {"name": name, "source_file": source_file, "layer_name": layer_name, "wkt": canonical_wkt}
+    )
+    return _derived_key(name, source_file, layer_name, geometry_hash)
+
+
+def _forest_route_geometry(
+    item: ForestTrailItem,
+) -> tuple[str, Coordinate, str] | None:
+    """provider GeoJSON geometry를 canonical WKT·centroid·type으로 변환한다."""
+
+    geometry = item.geometry
+    if not isinstance(geometry, Mapping):
+        return None
+    try:
+        source_geometry = shape_geometry(dict(geometry))
+        canonical_wkt, centroid = normalize_geometry(
+            source_geometry.wkt,
+            allowed_types=ROUTE_GEOMETRY_TYPES,
+        )
+    except (AttributeError, GeometryError, KeyError, TypeError, ValueError):
+        return None
+    return canonical_wkt, centroid, source_geometry.geom_type
+
+
+async def _forest_route_to_bundle(
+    item: ForestTrailItem,
+    *,
+    dataset_key: str,
+    route_type: str,
+    source_entity_type: str,
+    fetched_at: datetime,
+    reverse_geocoder: ReverseGeocoder | None,
+) -> FeatureBundle | None:
+    name = normalize_korean_text(item.name)
+    if name is None:
+        return None
+
+    geometry_result = _forest_route_geometry(item)
+    if geometry_result is None:
+        return None
+    canonical_wkt, coord, geometry_type = geometry_result
+    source_id = _forest_route_source_id(item, name=name, canonical_wkt=canonical_wkt)
+    address = await reverse_geocoder(coord) if reverse_geocoder is not None else None
+    spatial_payload = {
+        "source_file": item.source_file,
+        "layer_name": item.layer_name,
+        "source_id": source_id,
+        "geometry_type": geometry_type,
+        "geometry_wkt": canonical_wkt,
+        "bbox": list(item.bbox) if item.bbox is not None else None,
+    }
+    raw_data = dict(item.raw) if isinstance(item.raw, Mapping) else {}
+    # provider raw에는 geometry가 별도 model field로 있으므로 payload hash에도
+    # geometry snapshot을 포함해 선형 geometry 변경을 새 source record로 남긴다.
+    raw_data["_kortravelmap_spatial"] = spatial_payload
+    payload_hash = make_payload_hash(raw_data)
+    source_record_key = make_source_record_key(
+        provider=KRFOREST_PROVIDER_NAME,
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        source_entity_id=source_id,
+        raw_payload_hash=payload_hash,
+    )
+    feature_id = make_feature_id(
+        # route identity is provider source-native.  Reverse-geocoder output may
+        # change when the route centroid or geocoder version changes, so it must
+        # remain display metadata rather than split the same source entity.
+        bjd_code=None,
+        kind=FeatureKind.ROUTE.value,
+        category=FOREST_ROUTE_CATEGORY,
+        source_type=f"{KRFOREST_PROVIDER_NAME}:{dataset_key}",
+        source_natural_key=source_id,
+    )
+    feature = Feature(
+        feature_id=feature_id,
+        kind=FeatureKind.ROUTE,
+        name=name,
+        coord=coord,
+        address=address or Address(),
+        geom=canonical_wkt,
+        category=FOREST_ROUTE_CATEGORY,
+        marker_icon=_maki_for(FOREST_ROUTE_CATEGORY),
+        marker_color=FOREST_ROUTE_MARKER_COLOR,
+        detail=RouteDetail(
+            feature_id=feature_id,
+            route_type=route_type,
+            geometry_source="krforest",
+            geometry_status="provided",
+            payload={
+                "dataset_key": dataset_key,
+                "source_file": item.source_file,
+                "layer_name": item.layer_name,
+                "source_id": source_id,
+                "geometry_type": geometry_type,
+                "availability_status_source": "not_available",
+            },
+        ),
+    )
+    source_record = SourceRecord(
+        provider=normalize_provider_name(KRFOREST_PROVIDER_NAME),
+        dataset_key=dataset_key,
+        source_entity_type=source_entity_type,
+        source_entity_id=source_id,
+        raw_payload_hash=payload_hash,
+        raw_data=raw_data,
+        fetched_at=fetched_at,
+        source_record_key=source_record_key,
+    )
+    source_link = SourceLink(
+        feature_id=feature_id,
+        source_record_key=source_record_key,
+        source_role=SourceRole.PRIMARY,
+        match_method="natural_key",
+        confidence=100,
+    )
+    return FeatureBundle(
+        feature=feature,
+        source_record=source_record,
+        source_link=source_link,
+    )
+
+
+async def forest_trails_to_bundles(
+    items: Iterable[ForestTrailItem],
+    *,
+    dataset_key: str,
+    fetched_at: datetime,
+    reverse_geocoder: ReverseGeocoder | None = None,
+) -> list[FeatureBundle]:
+    """산림청 route 공간 피처를 `FeatureBundle`로 정규화한다.
+
+    LineString/MultiLineString만 route로 승격하며 이름 없음·빈/불량 geometry·중복
+    source natural key는 결과에서 제외한다. forest.go.kr 파일은 폐쇄·통행 가능
+    상태의 실시간 source가 아니므로 운영 상태를 추정하지 않는다.
+    """
+
+    route_type, source_entity_type = _forest_route_spec(dataset_key)
+    geocoder = (
+        cached_reverse_geocoder(reverse_geocoder)
+        if reverse_geocoder is not None
+        else None
+    )
+    bundles: list[FeatureBundle] = []
+    seen_source_ids: set[str] = set()
+    for item in items:
+        bundle = await _forest_route_to_bundle(
+            item,
+            dataset_key=dataset_key,
+            route_type=route_type,
+            source_entity_type=source_entity_type,
+            fetched_at=fetched_at,
+            reverse_geocoder=geocoder,
+        )
+        if bundle is None:
+            continue
+        source_id = bundle.source_record.source_entity_id
+        if source_id in seen_source_ids:
+            continue
+        seen_source_ids.add(source_id)
+        bundles.append(bundle)
+    return bundles
+
+
+async def mountain_trails_to_bundles(
+    items: Iterable[ForestTrailItem],
+    *,
+    fetched_at: datetime,
+    reverse_geocoder: ReverseGeocoder | None = None,
+) -> list[FeatureBundle]:
+    """산림청 등산로(`PBD0000041`) route를 변환한다."""
+
+    return await forest_trails_to_bundles(
+        items,
+        dataset_key=DATASET_KEY_MOUNTAIN_TRAILS,
+        fetched_at=fetched_at,
+        reverse_geocoder=reverse_geocoder,
+    )
+
+
+async def dulle_trails_to_bundles(
+    items: Iterable[ForestTrailItem],
+    *,
+    fetched_at: datetime,
+    reverse_geocoder: ReverseGeocoder | None = None,
+) -> list[FeatureBundle]:
+    """산림청 둘레길(`PBD0000031`) route를 변환한다."""
+
+    return await forest_trails_to_bundles(
+        items,
+        dataset_key=DATASET_KEY_DULLE_TRAILS,
+        fetched_at=fetched_at,
+        reverse_geocoder=reverse_geocoder,
     )
 
 

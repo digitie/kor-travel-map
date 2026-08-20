@@ -159,6 +159,12 @@
         "0225_tvn40c_physical_removal"
       ],
       "revision": "0229_tvn40b_source_rule_action"
+    },
+    {
+      "down_revision": [
+        "0229_tvn40b_source_rule_action"
+      ],
+      "revision": "0230_tvn_c05_krforest_datasets"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

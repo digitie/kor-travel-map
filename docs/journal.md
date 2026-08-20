@@ -1,5 +1,55 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-20 — map CI catalog 회귀값 갱신
+
+원격 Python 3.11~3.13 CI가 API unit 1,198건을 실행한 뒤 기존
+`test_handler_registry_is_key_to_handler_only`의 `33` 고정값에서 실패했다. C05A route 2종과
+C05B~D 3종의 정식 handler binding이 추가되어 실제 registry는 38개였으며, 테스트 기대값을
+38로 갱신했다. 해당 테스트 5건과 ruff는 로컬에서 통과했고, 새 SHA로 CI를 재실행한다.
+
+## 2026-08-20 — T-VN-C05A~D provider 머지 및 map pin 고정
+
+두 전문 리뷰어의 적대 검토를 반영한 `python-krforest-api` PR #9를 merge commit
+`4681bc7892239adc28aeeab19dba707aefb1dbde`로 머지하고, map의 provider dependency와
+provider-contract를 같은 SHA로 고정했다. provider 로컬 gate는 ruff·strict mypy·pytest
+42건을 통과했고, n150에 배선된 기존 data.go.kr 키를 출력하지 않고 live API를 실행해 9건을
+통과시켰다. 산림안전·산사태 endpoint 2건은 현재 키의 권한 범위를 서버가 거부해 xfail로
+기록했으며, n150 Playwright에서 provider debug UI의 API key 없는 오류 표면도 확인했다.
+
+운영 map live UI는 n150 Playwright에서 인증 후 `/admin/features`의 heading/table, 검색·kind
+필터를 확인했다. 인증 POST 이후 non-GET 요청은 0건으로, 읽기 전용 live UI E2E를 통과했다.
+자격증명 값은 출력·커밋하지 않았다.
+
+## 2026-08-20 — T-VN-C05A~D: 산림청 route·weather·risk·notice 순차 연결
+
+`python-krforest-api`의 C05A nested SHP route, C05B 산악기상 typed 관측, C05C 산불위험
+V2 예보, C05D 산사태 예보발령 typed 모델을 upstream에서 안정화하고 `kor-travel-map`이
+각 public model을 직접 `FeatureBundle`·`WeatherValue`·notice로 변환하도록 연결했다. C05A는
+월 1회, C05B~D는 하루 6회(`01/05/09/13/17/21시`, 분산 offset)를 사용한다. provider
+dataset 72~74, fixture preview, Dagster record resource/fetcher/asset, operation scope,
+fallback schedule까지 추가했다.
+
+원격 Python 3.12 CI와 rebase에서 최신 main의 `0229`가 이미 머지된 사실을 확인했다. 기존
+`0229`를 다시 쓰지 않고 C05 catalog를 새 forward-only `0230`으로 `0229` 뒤에 연결했다.
+새 migration은 asyncpg가 허용하는 단일 statement 단위로 실행하고 identity key에는
+`OVERRIDING SYSTEM VALUE`를 사용하며, graph artifact·경계 회귀값을 재생성했다.
+`test_alembic_metadata_consistency.py` 7건과 관련 ruff 검사를 통과했다.
+
+두 전문 리뷰어의 적대 검토에서 발견한 strict mypy 오류, sigungu 공식 코드 우선순위,
+이름만 있는 route의 source identity 충돌, HTTP 200 error body의 키 노출을 provider에서
+수정했다. map 쪽에서는 source record·raw lineage와 산사태 발령→해제 snapshot을 보존한다.
+provider PR 병합과 SHA pin은 완료했고, 다음은 map PR의 CI green 및 인증 가능한 운영 map
+읽기 전용 UI E2E 증거를 확인하는 단계다.
+
+## 2026-08-20 — T-VN-C05A: 산림청 등산로·둘레길 route 연결
+
+`python-krforest-api`의 `ForestSpatialFeature`를 직접 소비하는 순수 변환을 추가했다.
+이름·유효 geometry·source identity가 있는 선형 데이터만 `FeatureKind.ROUTE`로 승격하고,
+원천 geometry WKT와 archive lineage를 `SourceRecord`에 보존한다. C05A 두 asset은
+`features_route` 그룹과 월 1회 schedule에 등록했고, API fixture/operation registry와
+baseline provider dataset·operation scope를 함께 갱신했다. C05B~D는 provider typed
+client가 먼저 병합된 뒤 순차 연결한다.
+
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
 ## 2026-08-20 — T-VN-H50 planner gate의 마지막 false-fail 경로 제거
