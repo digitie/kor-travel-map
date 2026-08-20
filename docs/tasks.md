@@ -25,8 +25,10 @@ barrier로 직렬화한다.
   - [~] `T-VN-41C`(#975 병합 / final exact-pair·prod consumer enable 잔여)
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환 — **저장소측 완료 2026-08-20**, live 실행은 배리어 대기)
     ∥ [~] `T-VN-41S`(`0231`·공유·compactor·410·EXPLAIN·1M soak 완료 / **build 예산 vs 상한 결정** 잔여)
+  - [ ] `T-VN-40B` prod 적용 — **41S 머지와 함께 한 배포로**(사용자 결정 2026-08-21).
+    현재 prod admin rule 조회 500. `0229`+`0230`+`0231`이 같이 올라간다.
   - **배리어**: [ ] `T-VN-FINAL-REBUILD`(주요 개발 완료 후 파괴적 재구축 — 사용자 결정 2026-08-20)
-  - [ ] `T-VN-40B` 잔여(source rule `curated` action 퇴역, `0229`, PR #1035) — 종결 되돌림
+  - [ ] `T-VN-40B` 잔여 — 코드 착지(#1035), **prod 미적용 → admin rule 조회 500**(2026-08-21)
   - [ ] `T-FE-MOCK-FLAKE`(`/v1/ops/logs`)
   - [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2` → `T-VN-41C` receipt 승격
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정, T-VN-40 인수 뒤)**
@@ -36,7 +38,9 @@ barrier로 직렬화한다.
 - **Lane C — 사문화 정리·미구현 dataset (다른 lane과 무관, 아무 때나)**
 - **Wave 2 barrier 이후**
   - Lane A: [ ] `T-VN-37D`(notice empty range 표현 — 제품 결정 대기)
-  - 32~38 join barrier 뒤 Lane B: `T-VN-40B`·`T-VN-40C`는 2026-08-20 prod 적용까지 완료했다.
+  - 32~38 join barrier 뒤 Lane B: `T-VN-40C`는 2026-08-20 prod 적용까지 완료했다.
+    **`T-VN-40B`는 코드만 착지했고 prod 미적용이다** — 그 미적용이 admin rule 조회 500을
+    내고 있다(2026-08-21 실측, 아래 잔여 절).
     - 기반 구현 #974, 40A write fence #994, identity mapping #996, 40B candidate 전환,
       ③ sanctioned live/soak, ④ exact receipt, 40C 물리 삭제와 prod `0225` 적용까지
       완료했다. 상세 이력은 [`tasks-done.md`](tasks-done.md)에 이관했다.
@@ -503,26 +507,62 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 
 > 이 항목은 2026-08-20 `tasks-done.md`로 이관됐다가 **사용자 지시로 되돌렸다**. 종결
 > 근거였던 "candidate lifecycle 전환"은 맞지만 아래 사실을 다루지 않는다.
+>
+> **되돌린 것이 옳았다.** 2026-08-21 감사에서 이 미적용이 운영 결함을 내고 있다는 것이
+> 실측으로 드러났다(아래 🔴). 문서 여러 곳이 "40B는 prod 적용까지 완료"라고 적고 있었고,
+> 그 주장을 그대로 뒀다면 500을 내는 endpoint를 아무도 보지 않았을 것이다.
 
-- [ ] **T-VN-40B 잔여 — `curated` action 퇴역 (`0229`, PR #1035)**
+- [ ] **T-VN-40B 잔여 — `0229` prod 적용 (코드는 착지 완료)**
 
-  **prod 실측(2026-08-20)**: `feature.curated_source_rules`에 `default_action='curated'`
-  **35행**이 남아 있고 `ck_curated_source_rules_action`은 여전히
-  `('candidate','curated','ignore')`를 허용한다. 반면 write 경로
-  (`curated_repo._TYPED_RULE_ACTIONS`)는 `{candidate, ignore}`만 받는다 — **코드가 거부하는
-  값을 DB가 허용하고, 실제로 그 값이 남아 있다.** 값이 다시 들어올 문은 닫혀 있는데 이미
-  들어온 값은 그대로다.
+  **2026-08-21 감사로 상태가 갈렸다.** 코드는 `fa22d0fe`(PR #1035, merged 2026-08-20)로
+  main에 있다. 남은 것은 **prod 적용뿐이며, 그 미적용이 지금 운영 결함을 내고 있다.**
+
+  **🔴 운영 결함 (2026-08-21 실측)**: `GET /v1/admin/curated-source-rules`가 **500**이다.
+
+  ```
+  ValidationError: 1 validation error for CuratedSourceRuleView
+  default_action  Input should be 'candidate' or 'ignore' [input_value='curated']
+  처리되지 않은 예외 … /v1/admin/curated-source-rules
+  ```
+
+  #1035는 write 경로(`curated_repo._TYPED_RULE_ACTIONS`)만이 아니라 **read 경로**
+  (`routers/curated.py`의 `RuleAction` Literal)도 좁혔다. 그런데 값을 정규화하는 `0229`가
+  prod에 없으므로, `curated` 행을 읽는 순간 응답 검증에서 터진다. 백로그가 이것을 "값이
+  다시 들어올 문은 닫혀 있는데 이미 들어온 값은 그대로다"라고만 적어 **잠복**으로 읽히게
+  한 것이 오독이었다 — 잠복이 아니라 이미 터지고 있었다.
+
+  **prod 실측(2026-08-21, 읽기 전용)**:
+
+  | 축 | 값 |
+  |---|---|
+  | `alembic_version` | `0225_tvn40c_physical_removal` (≠ `0229`) |
+  | `default_action` 분포 | `candidate=18`, `curated=35` |
+  | `ck_curated_source_rules_action` | `('candidate','curated','ignore')` — 안 좁혀짐 |
+  | 실행 중 image의 마지막 migration | `0225` — **`0229` 파일 자체가 없다** |
+  | `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD` | `0225_tvn40c_physical_removal` |
+
+  즉 **DB만 올릴 수 없다.** 이미지 재빌드와 `.env` 갱신이 선행이다.
 
   ADR-092가 `curated` action을 automatic public membership이 아니라 **candidate 생성**으로
   재해석해 `candidate`와 같은 뜻이 됐다. 같은 뜻의 값이 둘이면 읽는 사람마다 다르게
   해석하므로 한쪽을 없앤다.
 
-  - [ ] `0229`가 35행을 `candidate`로 정규화하고 CHECK를 `('candidate','ignore')`로 좁힌다.
-    대상 표의 BEFORE trigger(`inactive provider dataset` write 차단)를 **끄지 않는다** —
-    막히면 어느 rule인지 말하고 멈춘다. 모델 CHECK와 write 허용값이 어긋나면 red가 되는
-    drift 게이트를 함께 둔다. 브랜치 `feat/tvn40b-source-rule-action`.
+  - [x] `0229`가 35행을 `candidate`로 정규화하고 CHECK를 `('candidate','ignore')`로 좁힌다.
+    대상 표의 BEFORE trigger를 끄지 않고, 모델 CHECK와 write 허용값의 drift 게이트도 함께
+    뒀다. → `fa22d0fe`(PR #1035)로 main 착지.
+  - [ ] **prod 적용.** 사용자 결정(2026-08-21): **T-VN-41S 머지 뒤 한 번에 배포한다** —
+    그러면 `0229`·`0230`(C05)·`0231`(41S)이 같은 배포에 올라가 배포 횟수가 준다.
+    순서는 (1) `origin/main` 기준 image 재빌드 (2) `.env`의 `EXPECTED_HEAD` 갱신
+    (3) DB 백업 → 배포 → migration 적용 (4) `GET /v1/admin/curated-source-rules` 200 확인
+    (5) 문서 동기화. 사전조건은 clear다 — `0229`가 막을 rule(inactive provider dataset에
+    걸린 것) 0건.
+  - [ ] **read 경로 Literal을 drift 게이트에 넣는다.** #1035의 게이트는 모델 CHECK ↔
+    `_TYPED_RULE_ACTIONS`만 대조하고 응답 모델 Literal(`routers/curated.py`)은 보지 않는다.
+    이번 500이 정확히 그 사각에서 났다 — 게이트가 봤다면 "DB에 있는 값을 응답 모델이
+    거부한다"를 배포 전에 잡았다.
   - **번호 제약**: `0229`는 이미 main에 적용된 T-VN-40B head이므로, C05 catalog는 기존
-    `0229` migration을 다시 쓰지 않고 `0230`으로 `0229` 뒤에 연결한다.
+    `0229` migration을 다시 쓰지 않고 `0230`으로 `0229` 뒤에 연결한다. T-VN-41S는 그
+    뒤 `0231`이다(2026-08-21 재번호 — 같은 parent를 쓰던 충돌을 이 감사가 잡았다).
 
   **이 항목이 아닌 것**: "legacy candidate rows backfill"은 대상이 없다 — 그 legacy 행은
   `0225`가 canonical collection/item으로 옮긴 뒤 물리 삭제했고 `theme_feature_candidates`는
