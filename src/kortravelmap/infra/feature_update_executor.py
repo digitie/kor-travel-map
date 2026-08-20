@@ -836,10 +836,16 @@ async def _finish_failed_execution(
                             error_code=event_code,
                         )
                 except CacheTargetRefreshProtocolViolation as violation:
+                    # epoch 이동만 삼킨다. 다른 reason은 append가 성공했어야 하므로 삼키면
+                    # 원인을 잃는다 — 향후 `_append_result_event`에 검사가 추가돼도 조용히
+                    # 사라지지 않도록 여기서 다시 올린다(#975 적대 재리뷰 P2-c).
+                    if not suppresses_relay_finalization(violation):
+                        raise
                     _LOG.warning(
                         "cache target refresh failed status persisted without relay event — "
-                        "restore fence moved during execution: request_id=%s detail=%s",
+                        "restore fence moved during execution: request_id=%s reason=%s detail=%s",
                         failed.request_id,
+                        violation.reason,
                         violation,
                     )
             if event_code is not None:
@@ -1281,10 +1287,26 @@ async def _execute_feature_update_request_locked(
                 if isinstance(exc, ProviderDatasetRefreshFailure)
                 else None
             ),
-            append_cache_target_status_events=not isinstance(
-                exc, CacheTargetRefreshProtocolViolation
-            ),
+            append_cache_target_status_events=not suppresses_relay_finalization(exc),
         )
+
+
+def suppresses_relay_finalization(exc: BaseException) -> bool:
+    """이 예외가 cache-target relay 종결 event 발행을 **억제해도 되는가**.
+
+    억제 근거를 가진 것은 restore fence 이동뿐이다 — 그때만 옛 epoch event가 설계상
+    거부된다(runbook §5-5). 나머지 reason은 종결 event를 내야 PinVi가 요청의 끝을 본다.
+
+    순수 함수로 뽑은 이유: 이 규칙을 호출부 표현식으로 두면 테스트가 소스 문자열을 보게
+    되고, 실제로 그 테스트는 규칙을 되돌려도 초록이었다(적대 리뷰 P2, 실측). 값으로
+    검사할 수 있어야 규칙이 지켜진다. ``isinstance``로 좁혀 무관한 예외의 ``.reason``
+    속성이 판정에 끼어들지 않게 한다.
+    """
+
+    return (
+        isinstance(exc, CacheTargetRefreshProtocolViolation)
+        and exc.reason == CacheTargetRefreshProtocolViolation.EPOCH_MOVED
+    )
 
 
 async def execute_next_feature_update_request(

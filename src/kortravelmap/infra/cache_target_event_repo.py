@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Final, Literal, cast
 from uuid import UUID, uuid4
 
 from sqlalchemy import text
@@ -84,8 +84,40 @@ class CacheTargetResultEvent:
     idempotent_replay: bool = False
 
 
+CacheTargetRefreshReason = Literal[
+    "epoch_moved",
+    "generation_advanced",
+    "fingerprint_changed",
+    "head_missing",
+]
+
+
 class CacheTargetRefreshProtocolViolation(RuntimeError):
-    """PinVi refresh가 source snapshot/restore fence 정본을 벗어났다."""
+    """PinVi refresh가 source snapshot/restore fence 정본을 벗어났다.
+
+    ``reason``은 호출자가 **무엇이 어긋났는지로 분기**하기 위한 판별값이다. 이 예외 하나가
+    서로 다른 네 원인에서 올라오는데, 그중 restore fence 이동(``epoch_moved``)만이 "옛 epoch
+    event는 설계상 거부되므로 relay event 없이 끝낸다"는 근거를 갖는다(runbook §5-5).
+    generation 전진·fingerprint 변경·head 소멸은 stale tuple에라도 종결 event를 내는 편이
+    PinVi 쪽 relay 종결성에 낫다 — 소비자가 요청의 끝을 못 보고 매달리는 것이 더 나쁘다.
+    reason 없이 예외 클래스만 보고 삼키면 이 구분이 사라진다(#975 적대 재리뷰 P2-c).
+    """
+
+    #: restore fence가 지나가 captured epoch가 stale이다. 옛 epoch event는 거부된다.
+    EPOCH_MOVED: Final[CacheTargetRefreshReason] = "epoch_moved"
+    #: source generation이 전진했다. 같은 epoch 안이라 stale tuple에도 event를 낼 수 있다.
+    GENERATION_ADVANCED: Final[CacheTargetRefreshReason] = "generation_advanced"
+    #: source payload fingerprint가 바뀌었다. generation과 같은 취급.
+    FINGERPRINT_CHANGED: Final[CacheTargetRefreshReason] = "fingerprint_changed"
+    #: captured member가 가리키던 head row 자체가 사라졌다.
+    HEAD_MISSING: Final[CacheTargetRefreshReason] = "head_missing"
+
+    def __init__(self, message: str, reason: CacheTargetRefreshReason) -> None:
+        # reason을 위치 인자로 받아 `args`에 담는다 — keyword-only로 두면 `BaseException`의
+        # 기본 `__reduce__`가 `args`만으로 재구성하지 못해 pickle/copy 왕복이 깨진다
+        # (적대 리뷰 P3, 실측). 예외는 프로세스 경계를 넘을 수 있어야 한다.
+        super().__init__(message, reason)
+        self.reason: CacheTargetRefreshReason = reason
 
 
 _PINVI_CACHE_TARGET_SYSTEM = "pinvi"
@@ -493,17 +525,27 @@ async def assert_cache_target_refresh_members_current(
         ).one_or_none()
         if head is None:
             raise CacheTargetRefreshProtocolViolation(
-                "captured cache target refresh member의 source head가 사라졌습니다."
+                "captured cache target refresh member의 source head가 사라졌습니다.",
+                CacheTargetRefreshProtocolViolation.HEAD_MISSING,
             )
         values = head._mapping
+        if int(values["restore_epoch"]) != member.restore_epoch:
+            raise CacheTargetRefreshProtocolViolation(
+                "captured cache target refresh member의 restore epoch가 현재 head와 다릅니다.",
+                CacheTargetRefreshProtocolViolation.EPOCH_MOVED,
+            )
+        if int(values["source_generation"]) != member.source_generation:
+            raise CacheTargetRefreshProtocolViolation(
+                "captured cache target refresh member의 source generation이 전진했습니다.",
+                CacheTargetRefreshProtocolViolation.GENERATION_ADVANCED,
+            )
         if (
-            int(values["restore_epoch"]) != member.restore_epoch
-            or int(values["source_generation"]) != member.source_generation
-            or str(values["source_payload_fingerprint"])
+            str(values["source_payload_fingerprint"])
             != member.source_payload_fingerprint
         ):
             raise CacheTargetRefreshProtocolViolation(
-                "captured cache target refresh member의 source tuple이 현재 head와 다릅니다."
+                "captured cache target refresh member의 source fingerprint가 바뀌었습니다.",
+                CacheTargetRefreshProtocolViolation.FINGERPRINT_CHANGED,
             )
     return members
 
@@ -600,7 +642,8 @@ async def _append_result_event(
         raise RuntimeError("captured cache target stream이 사라졌습니다.")
     if int(stream_restore_epoch) != member.restore_epoch:
         raise CacheTargetRefreshProtocolViolation(
-            "captured cache target refresh member의 restore epoch가 현재 stream과 다릅니다."
+            "captured cache target refresh member의 restore epoch가 현재 stream과 다릅니다.",
+            CacheTargetRefreshProtocolViolation.EPOCH_MOVED,
         )
     await session.execute(
         text("SELECT pg_advisory_xact_lock(CAST(:lock_id AS bigint))"),

@@ -83,10 +83,53 @@ from kortravelmap.infra.feature_update_repo import (
 )
 from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget
 from kortravelmap.infra.poi_cache_target_repo import upsert_poi_cache_target
+from tests.integration._db_cleanup import truncate_committed_test_rows
 
 _SYSTEM = "pinvi-test"
 _CONSUMER = "pinvi-cache-consumer"
 _TARGET_KEY = "trip-day-poi:1"
+
+
+# 이 모듈의 여러 테스트가 session-scope `migrated_engine`에 **commit**한다(테스트 격리 밖).
+# `test_feature_update_repo.py`는 같은 표에 전역 `count(*) == 0`을 단언하므로, 정리하지
+# 않으면 두 모듈 사이에 수집 순서 의존이 생긴다. 지금까지는 알파벳 순서상 중간 모듈의
+# autouse truncate가 우연히 지워 줘서 통과했을 뿐이라, 모듈을 골라 돌리면 깨진다
+# (#975 적대 재리뷰 P2-d). 생산자가 자기 뒤처리를 한다.
+# 이 모듈이 commit하는 표 — 새 commit 지점이 생기면 여기도 늘린다.
+# 첫 판은 ops 계열만 담았다가 적대 리뷰에서 잡혔다: `_seed_scope_feature`가
+# `feature.features`와 `provider_sync.source_*`에 commit해 `test_mois_loader`의 전역
+# `count(feature.features) == 0`이 순서에 따라 깨진다.
+# 주의 — `truncate_committed_test_rows`는 이 목록 앞에 curation 전체 reset을 무조건
+# 붙이고 CASCADE 폐포로 managed_files·offline_uploads·cache-target 하위 표까지 함께
+# 비운다. 이 모듈은 매 테스트가 자기 데이터를 새로 seed하므로 그 범위를 감수한다.
+_STREAM_TRUNCATE_SQL = """
+TRUNCATE
+    feature.features,
+    provider_sync.source_links,
+    provider_sync.source_records,
+    provider_sync.source_entity_heads,
+    provider_sync.source_entities,
+    provider_sync.provider_sync_state,
+    ops.poi_cache_target_feature_links,
+    ops.poi_cache_targets,
+    ops.pipeline_cancellation_members,
+    ops.pipeline_cancellation_runs,
+    ops.pipeline_cancellations,
+    ops.feature_update_requests,
+    ops.import_job_events,
+    ops.import_jobs
+RESTART IDENTITY CASCADE
+"""
+
+
+@pytest.fixture(autouse=True)
+async def _cleanup_committed_stream_rows(
+    migrated_engine: AsyncEngine,
+) -> AsyncIterator[None]:
+    """이 모듈이 commit한 행을 테스트마다 제거해 모듈 간 순서 의존을 없앤다."""
+    yield
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        await truncate_committed_test_rows(session, _STREAM_TRUNCATE_SQL)
 
 
 async def _canonical_membership(session: AsyncSession) -> ImportJobDatasetTarget:
@@ -4129,13 +4172,21 @@ async def test_restore_fence_rejects_previously_queued_service_refresh_status_ev
     assert "restore epoch" in protocol_error
     stored_request = await get_update_request(migrated_session, request.request_id)
     assert stored_request is not None
-    with pytest.raises(CacheTargetRefreshProtocolViolation, match="restore epoch"):
+    with pytest.raises(
+        CacheTargetRefreshProtocolViolation, match="restore epoch"
+    ) as fence_violation:
         await append_cache_target_refresh_status_events(
             migrated_session,
             request_id=request.request_id,
             job_id=stored_request.job_id,
             status="running",
         )
+    # #975 적대 재리뷰 P2: 호출자는 예외 클래스가 아니라 reason으로 분기한다. fence 이동만
+    # 억제 근거를 가지므로 이 경로가 정확히 그 reason을 달고 나와야 한다.
+    assert (
+        fence_violation.value.reason
+        == CacheTargetRefreshProtocolViolation.EPOCH_MOVED
+    )
     assert (
         await migrated_session.scalar(
             text(

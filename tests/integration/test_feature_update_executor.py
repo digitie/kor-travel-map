@@ -710,7 +710,7 @@ async def test_source_generation_change_fails_before_final_link_and_freshness(
     assert result is not None
     assert result.status == "failed"
     assert result.error_message is not None
-    assert "source tuple" in result.error_message
+    assert "source generation" in result.error_message
     stored = await get_update_request(execution_session, request.request_id)
     assert stored is not None
     assert stored.status == "failed"
@@ -735,9 +735,15 @@ async def test_source_generation_change_fails_before_final_link_and_freshness(
             {"request_id": request.request_id},
         )
     ).all()
+    # #975 적대 재리뷰 P2-a: 예전에는 여기서 `failed` event가 **없었다** —
+    # `CacheTargetRefreshProtocolViolation` 전체를 억제했기 때문이다. 그 결과 PinVi는
+    # 요청이 queued/running까지만 보이고 끝을 보지 못한 채 매달렸다. 억제 근거를 가진 것은
+    # restore fence 이동(`epoch_moved`)뿐이고, generation 전진은 같은 epoch 안이라
+    # stale tuple에도 종결 event를 낼 수 있다. 이 단언이 그 계약을 고정한다.
     assert [(row.event_type, row.status) for row in refresh_events] == [
         ("refresh_request.status_changed", "queued"),
         ("refresh_request.status_changed", "running"),
+        ("refresh_request.status_changed", "failed"),
     ]
 
 

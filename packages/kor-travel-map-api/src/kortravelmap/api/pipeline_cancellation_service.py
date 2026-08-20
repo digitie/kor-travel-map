@@ -23,7 +23,11 @@ from kortravelmap.infra.c6c_cancel_probe_fixture_repo import (
 )
 from kortravelmap.infra.cache_target_event_repo import (
     CacheTargetRefreshProtocolViolation,
+    CacheTargetRefreshStatus,
     append_cache_target_refresh_status_events,
+)
+from kortravelmap.infra.feature_update_executor import (
+    suppresses_relay_finalization,
 )
 from kortravelmap.infra.feature_update_repo import get_update_request_by_job_id
 from kortravelmap.infra.log_repo import record_system_log
@@ -673,8 +677,17 @@ async def _poll_terminal_status(
         )
 
 
-def _terminal_mapping(status: str) -> tuple[str, str, str, str | None]:
-    mappings = {
+def _terminal_mapping(
+    status: str,
+) -> tuple[str, str, CacheTargetRefreshStatus, str | None]:
+    """Dagster terminal status를 (run_result, stored_terminal, target_status, error)로 푼다.
+
+    세 번째 값은 그대로 relay status event로 나간다. 처음에는 `str`이라 호출부에서
+    `done`을 `failed`로 접어도 타입이 잡지 못했다(적대 리뷰 P1). `CacheTargetRefreshStatus`로
+    좁혀 "세 값 전부가 유효한 relay status"를 타입이 강제하게 한다.
+    """
+
+    mappings: dict[str, tuple[str, str, CacheTargetRefreshStatus, str | None]] = {
         "CANCELED": ("cancelled", "CANCELED", "cancelled", None),
         "SUCCESS": ("already_terminal", "SUCCESS", "done", None),
         "FAILURE": (
@@ -723,32 +736,58 @@ async def _cancel_queued_members(
                     cancellation_id=detail.attempt.cancellation_id,
                     message="queued cancellation member CAS ownership was lost",
                 )
-                request = await get_update_request_by_job_id(
+                await _append_cache_target_terminal_relay_event(
                     session,
-                    member.job_id,
+                    job_id=member.job_id,
+                    status="cancelled",
+                    origin="cancelled after queue",
                 )
-                if request is not None and request.scope_type == "cache_target_keys":
-                    # queued 뒤 restore fence가 지나간 request의 member epoch는 stale이라
-                    # append가 protocol violation을 낸다. 취소 자체(ledger CAS)는 성립해야
-                    # 하므로 savepoint 안에서 시도하고, fence 뒤에는 relay event 없이 끝낸다
-                    # (옛 epoch event는 설계상 거부 — 500이 아니라 조용한 생략이 맞다).
-                    try:
-                        async with session.begin_nested():
-                            await append_cache_target_refresh_status_events(
-                                session,
-                                request_id=request.request_id,
-                                job_id=request.job_id,
-                                status="cancelled",
-                            )
-                    except CacheTargetRefreshProtocolViolation as violation:
-                        _LOG.warning(
-                            "cache target refresh cancelled without relay event — restore fence "
-                            "moved after queue: request_id=%s detail=%s",
-                            request.request_id,
-                            violation,
-                        )
     async with session.begin():
         return await _reload_attempt(session, detail.attempt.cancellation_id)
+
+
+async def _append_cache_target_terminal_relay_event(
+    session: AsyncSession,
+    *,
+    job_id: str,
+    status: CacheTargetRefreshStatus,
+    origin: str,
+) -> None:
+    """취소/실패로 종결된 member의 cache-target relay status event를 같은 transaction에 남긴다.
+
+    queued 경로와 running 경로가 같은 규칙을 쓰게 하려고 뽑았다(#975 적대 재리뷰 P2-b).
+    running member는 Dagster terminate + ledger 전이로 봉인되는데, 여기에 event가 없으면
+    PinVi는 요청의 **끝을 영영 보지 못한다** — 실행자 프로세스 안에서 죽는 경로
+    (`feature_update_executor`의 CancelledError)와는 별개 경로다.
+
+    savepoint로 감싸는 이유는 append 실패가 취소 자체(ledger CAS)를 되돌리면 안 되기
+    때문이다. 삼키는 것은 restore fence 이동뿐이다 — 그때만 옛 epoch event가 설계상
+    거부된다(runbook §5-5). 다른 reason은 원인을 잃지 않도록 그대로 올린다.
+    """
+
+    request = await get_update_request_by_job_id(session, job_id)
+    if request is None or request.scope_type != "cache_target_keys":
+        return
+    try:
+        async with session.begin_nested():
+            await append_cache_target_refresh_status_events(
+                session,
+                request_id=request.request_id,
+                job_id=request.job_id,
+                status=status,
+            )
+    except CacheTargetRefreshProtocolViolation as violation:
+        if not suppresses_relay_finalization(violation):
+            raise
+        _LOG.warning(
+            "cache target refresh %s without relay event — restore fence moved "
+            "(%s): request_id=%s reason=%s detail=%s",
+            status,
+            origin,
+            request.request_id,
+            violation.reason,
+            violation,
+        )
 
 
 async def _record_run_failure(
@@ -1014,6 +1053,18 @@ async def _record_terminal_run(
             except PipelineCancellationConflict:
                 changed = False
             if changed:
+                # #975 적대 재리뷰 P2-b: running member는 Dagster terminate + ledger 전이로
+                # 봉인되는데 여기에 relay event가 없으면 PinVi가 요청의 끝을 못 본다.
+                # `target_status`는 `_terminal_mapping`이 주는 {cancelled, done, failed}
+                # 셋뿐이고 셋 다 `CacheTargetRefreshStatus`에 있다. 처음에 `done`을 `failed`로
+                # 접었다가 적대 리뷰에서 잡혔다 — Dagster SUCCESS로 ledger가 `done`을 커밋한
+                # 같은 transaction에서 PinVi에 `failed`를 보내 종결 상태가 정면으로 어긋났다.
+                await _append_cache_target_terminal_relay_event(
+                    session,
+                    job_id=member.job_id,
+                    status=target_status,
+                    origin="running member reconcile",
+                )
                 continue
             current = await get_pipeline_cancellation_detail(
                 session,
