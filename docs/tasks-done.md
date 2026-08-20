@@ -3,6 +3,23 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-08-20 — T-VN-40B/C 및 인수 ③~⑤ 종결
+
+- [x] T-VN-40B / T-VN-40C — **curation write model consumer cutover와 legacy surface 물리 제거**
+
+  40B의 candidate lifecycle 전환과 40C의 legacy overlay·snapshot·trigger·`legacy_projection_id`·
+  rekey 예외·legacy ACL 제거를 한 흐름으로 닫았다. PR [#1023](https://github.com/digitie/kor-travel-map/pull/1023),
+  merge `4c50fe86`의 `0225_tvn40c_physical_removal`이 정본이며, static-zero/runtime 검증과
+  PinVi user spec 재-vendor를 포함한 paired receipt 후속은 아래 인수 항목에서 봉인했다.
+
+- [x] T-VN-40 인수 ③~⑤ — **live/soak·exact receipt·prod 적용**
+
+  ③은 `f00e7f48`에서 6-spec/17-case strict live를 통과했고, ④는 PR [#1024](https://github.com/digitie/kor-travel-map/pull/1024),
+  merge `294db534`와 PinVi #459의 재-vendor 뒤 exact receipt `complete`를 봉인했다. ⑤는 prod head
+  `0225_tvn40c_physical_removal` 적용과 legacy zero·보존 mapping 4,424건·collection 59개·API 표면
+  smoke까지 확인했다. 독립적으로 남은 mocked manifest·C7 scope registry·live serial task는
+  [`tasks.md`](tasks.md)에서 계속 추적한다.
+
 ## 2026-08-19 — backlog 전면 재대조·완료 이관
 
 - [x] T-VN-C03 — **보조 dataset 5종 제품 범위·authoritative source 결정**
@@ -80,8 +97,8 @@
 
   PR #1001의 prod `0104→0223` 단일 transaction migration과 PR #1006의 PinVi
   mapping receipt(root `69eb85ec…`, 4,424 item), legacy preflight `ready=true`, canonical
-  collection 59개/POI 4,424 import를 완주했다. 활성 잔여는 ③ live/soak → ④ exact
-  receipt → ⑤ 40C physical removal이다.
+  collection 59개/POI 4,424 import를 완주했다. **2026-08-19 당시** 활성 잔여였던 ③
+  live/soak → ④ exact receipt → ⑤ 40C physical removal도 다음 날 완료 이관했다.
 
 - [x] T-VN-41A / T-VN-41B — **source generation·restore epoch·transaction-coupled outbox**
 

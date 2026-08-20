@@ -581,18 +581,18 @@ squash(2026-08-14) 이후 baseline과 bridge, T-VN-40 migration만 있다.
   `alembic/baseline/{schema,seed}.sql`을 byte sha로 잠근 채 적용한다.
 - `0201_squash_bridge.py` — revision id는 파일명이 아니라 **`0104_tvn36_final_fence`**다.
   이미 `0104`에 있는 DB가 이 그래프에서도 해석되게 하는 노드다.
-- `0202_tvn40_curation_receipts.py`부터 `0224_c7_external_system_scope.py`까지 —
+- `0202_tvn40_curation_receipts.py`부터 `0225_tvn40c_physical_removal.py`까지 —
   bridge 뒤에 이어지는 T-VN-40 단일 체인이며, 현재 head는
-  `0224_c7_external_system_scope`다.
+  `0225_tvn40c_physical_removal`이다.
 
 `0001~0104` 체인 109개는 `alembic/legacy_versions/`의 실행되지 않는 아카이브다
 ([README](../../alembic/legacy_versions/README.md)). **`versions/`로 되돌리지 마라** —
 bridge와 아카이브가 `0104_tvn36_final_fence`를 둘 다 선언하면 Alembic graph가 손상된다.
 
-#### 다음 migration(`0225`~) 작성
+#### 다음 migration(`0226`~) 작성
 
-1. 파일은 `alembic/versions/0225_<name>.py`,
-   `down_revision = "0224_c7_external_system_scope"`(= 현재 head)로 잇는다.
+1. 파일은 `alembic/versions/0226_<name>.py`,
+   `down_revision = "0225_tvn40c_physical_removal"`(= 현재 head)로 잇는다.
    **`0201`을 쓰지 마라** — 그건 bridge 파일명이고 revision id가 아니다.
 2. `0105`~`0199`처럼 아카이브와 겹치는 번호는 쓰지 않는다. 파일 정렬이 `0200`보다
    앞서면서 `down_revision`은 뒤를 가리키는 파일이 생겨 읽는 사람을 오도한다.
