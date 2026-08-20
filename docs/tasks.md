@@ -23,7 +23,7 @@ barrier로 직렬화한다.
   - [~] `T-VN-41C`(#975 병합 / final exact-pair·prod consumer enable 잔여)
   - [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2`(격리 리허설·data-dependent live UI E2E; #967 closed)
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환) ∥ [~] `T-VN-41S`(#922 1차 구현·리뷰 GO,
-    `0226+` migration/compactor·n150 1M 검증 잔여)
+    `0227+` migration/compactor·n150 1M 검증 잔여)
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정, T-VN-40 인수 뒤)**
   - [ ] `T-VN-M01`(admin Feature 생성 API — ADR-093 accepted 전환) → [ ] `T-VN-M02`(origin 보존·불변)
   - [ ] `T-VN-M03`(curated 동시 생성 — T-VN-40 인수 뒤) ∥ [ ] `T-VN-M04`(PinVi 요청 큐 — cross-repo)
@@ -82,7 +82,8 @@ barrier로 직렬화한다.
   **prod 환경 보전·호환성·기존 문서 계약·최소 수정은 비제약** — 필요 시 DB 스키마·문서
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
 - migration 정본: 단일 head 유지(2026-08-19 `main` 기준
-  `0224_c7_external_system_scope`; T-VN-40C는 `0225`, 41S 후속은 `0226+` 예약).
+  `0224_c7_external_system_scope`; T-VN-40C `0225`는 **착지·prod 적용 완료**,
+  M01 후속이 `0226`, 41S 후속은 `0227+`).
   prod 적용 head는 배포 직전 live DB에서 다시 확인한다. 후속 migration 소유자는
   PR 직전 단일 head를 재확인한 뒤 번호를 배정한다. 두 lane의 migration-bearing PR은 번호 예약부터
   머지까지 직렬화한다. forward migration 뒤에는 수용 조건이나 실패 복구가 명시적으로 요구하지 않는
@@ -664,7 +665,8 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   material 재사용·관측 metric·typed future error 계약까지다. 독립 적대 리뷰 2명은 최종 head에서 P0~P3
   잔여 없음으로 GO했고, 단위/API/Dagster 집중 231개와 PostGIS stream repository 37개를 통과했다.
 
-  **후속 종료선(미완료, #922 유지)** — `0225` 착지 뒤 `0226+` 물리 모델, 양방향 공유, 실제 compactor와
+  **후속 종료선(미완료, #922 유지)** — `0225`는 2026-08-20 착지·prod 적용으로 barrier가
+  풀렸다. 남은 것은 `0227+`(‘0226’은 T-VN-M01이 선점) 물리 모델, 양방향 공유, 실제 compactor와
   repository 410, migration/ACL/EXPLAIN 및 n150 1M+ 증거까지다. 이 항목들이 끝나기 전에는 #922 또는
   T-VN-41S 전체 완료로 표시하지 않는다.
 
@@ -681,7 +683,7 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 
   **후속 항목**
 
-  - [ ] T-VN-40C 예약 `0225` 착지 뒤 `0226+`로 receipt/material/item 정규화 migration, 양방향 material
+  - [ ] (`0225` barrier 해제됨) `0227+`로 receipt/material/item 정규화 migration, 양방향 material
     공유, terminal retention compactor와 실제 repository 410 경로를 구현한다.
   - [ ] migration upgrade/downgrade·ACL/catalog·EXPLAIN과 n150 PostGIS 1M admitted/1M+ rejection,
     concurrent mutation safe lower cursor, compaction/vacuum soak evidence를 통과한다.

@@ -144,7 +144,9 @@ PinVi paired draft PR [#458](https://github.com/digitie/pinvi/pull/458)은 direc
 ### 다음 한 작업
 
 첫 Map foundation checkpoint를 draft PR로 push한 뒤 Admin UI BFF/form을 같은 PR의 후속 commit으로 붙인다.
-실제 `0225` T-VN-40C migration이 main에 착지하기 전에는 `0226` DB/ACL/backup/vNext tranche를 만들지
+(2026-08-20 후속: `0225`는 착지·prod 적용 완료로 이 barrier는 풀렸다. M01 후속은 `0226`,
+T-VN-41S 후속은 `0227+`다.) 당시 기준으로는 — 실제 `0225` T-VN-40C migration이 main에
+착지하기 전에는 `0226` DB/ACL/backup/vNext tranche를 만들지
 않는다. ADR-093 accepted 전환과 T-VN-M01 완료 이관은 그 migration 및 실제 PostgreSQL concurrency/restore
 검증 뒤에만 수행한다.
 
