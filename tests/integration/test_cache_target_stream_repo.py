@@ -3145,8 +3145,23 @@ async def test_terminal_material_compaction_drains_items_and_serves_typed_410(
         )
     ).all()
     # generic 전용 material은 phase 1이 그 receipt를 지워 orphan이 됐고, 같은 batch의
-    # phase 3이 item을 비웠다 — compaction으로 표시된 것이 아니라 통째로 사라지는 길이다.
+    # phase 3이 item을 비웠으며 phase 4가 material까지 지웠다 — compaction으로 표시되는
+    # 길이 아니라 통째로 사라지는 길이다.
+    #
+    # "표시되지 않았다"로 단언하면 안 된다. 그 행은 이미 **삭제**됐으므로 `compacted_at
+    # IS NOT NULL` 개수는 어느 쪽이든 0이고, 그 단언은 아무 것도 보지 못한다.
     assert {str(row[0]) for row in surviving_items} == {fresh_material, live_material}
+    assert (
+        await migrated_session.scalar(
+            text(
+                "SELECT count(*) FROM ops.poi_cache_target_snapshot_materials "
+                "WHERE material_id = CAST(:material_id AS uuid)"
+            ),
+            {"material_id": generic_material},
+        )
+        == 0
+    ), "generic 전용 material이 남았다 — orphan 경로로 사라져야 한다"
+    # 반대로 표시된 material은 남는다. 이 둘을 함께 봐야 두 경로가 갈린 것이 보인다.
     assert (
         await migrated_session.scalar(
             text(
@@ -3154,9 +3169,9 @@ async def test_terminal_material_compaction_drains_items_and_serves_typed_410(
                 "WHERE material_id = CAST(:material_id AS uuid) "
                 "AND compacted_at IS NOT NULL"
             ),
-            {"material_id": generic_material},
+            {"material_id": old_material},
         )
-        == 0
+        == 1
     )
 
     # 증거는 남는다.
