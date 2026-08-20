@@ -71,6 +71,27 @@ prod 덤프 사본(features 1,008,852까지 완전 일치)에서 `0225→0229→
 2026-08-21 한 배포로 prod에 올라갔다(prod head = `0232_tvn37d_notice_empty_range`).
 상세는 이 문서 최상단 배포 항목에 있다.
 
+## 2026-08-21 — T-VN-M05 Map admin 판단·service delivery contract
+
+M05 Map 쪽 admin case 목록/상세/판정과 reconciliation service lease/ACK contract를 완성했다.
+admin은 raw evidence relation을 읽지 않고 전용 SECURITY DEFINER reader만 호출한다. list는 stable
+keyset page, detail은 immutable evidence와 subscription별 unacked 상태, decision은 provider-only
+survivor·expected fingerprint/revision·reason을 모두 다시 대조한다. `kept`는 AdminBFF만,
+`merged`/`manual_retired`는 DB session 생성 전 body-based destructive flag까지 통과해야 한다.
+stale 409도 domain command terminal receipt로 commit해 같은 key를 안전하게 replay한다.
+
+service event는 stored canonical envelope와 hash를 live Feature join 없이 그대로 돌려주며, event가
+없으면 204, 다른 worker의 live lease면 409이다. ACK은 idempotency key lock과 principal lease
+row lock을 함께 보유해 new-key semantic replay 경쟁에서도 claim-only command를 남기지 않는다.
+read/ACK digest는 all-or-nothing으로 설정되고 executor/ACL/catalog marker에 각각 결박됐다.
+full/service OpenAPI export와 route/command policy, API unit 및 fresh PostGIS migration을 확인했다.
+
+### 다음 한 작업
+
+동일 Map commit을 두 전문 적대 리뷰어에게 재검토시키고 결과를 반영한다. 이어 PinVi가 exact
+service OpenAPI를 vendor하여 durable delivery receipt/blocked impact/UI를 구현하고, isolated
+Map+PinVi mutating UI E2E와 restore/ACL drill을 통과하기 전에는 M05 activation을 계속 금지한다.
+
 ## 2026-08-21 — T-VN-M05 Map service lease/ACK 경계
 
 M05 service 정본의 `GET /v1/service/feature-reference-reconciliations`와

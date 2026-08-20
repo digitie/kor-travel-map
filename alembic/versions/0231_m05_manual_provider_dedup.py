@@ -989,6 +989,17 @@ BEGIN
         RAISE EXCEPTION 'feature reference reconciliation ack input is invalid'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_reconciliation_ack_input';
     END IF;
+    -- ACK preflight와 writer는 같은 lease row를 먼저 잠근다. absent 판정 뒤
+    -- command claim 전에 다른 worker가 ACK을 commit할 수 없으므로 새 key의
+    -- semantic replay가 claim-only domain command를 남기지 않는다.
+    PERFORM 1
+    FROM ops.feature_reference_reconciliation_leases AS lease
+    WHERE lease.principal_id = p_principal_id
+    FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'feature reference reconciliation subscription lacks lease state'
+            USING ERRCODE = '55000';
+    END IF;
     SELECT ack.* INTO v_existing_ack
     FROM ops.feature_reference_reconciliation_acks AS ack
     WHERE ack.event_id = p_event_id AND ack.principal_id = p_principal_id
@@ -1111,6 +1122,19 @@ BEGIN
             USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_reconciliation_ack_input';
     END IF;
 
+    -- A fresh key must serialize with the ACK writer before inspecting an
+    -- existing receipt.  Otherwise two requests can both observe ``absent``
+    -- and the loser creates a semantic-replay command claim after the winner
+    -- commits.  The subscription lease row is the common per-principal lock.
+    PERFORM 1
+    FROM ops.feature_reference_reconciliation_leases AS lease
+    WHERE lease.principal_id = p_principal_id
+    FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'feature reference reconciliation subscription is absent'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_reconciliation_ack_input';
+    END IF;
+
     SELECT ack.* INTO v_existing_ack
     FROM ops.feature_reference_reconciliation_acks AS ack
     WHERE ack.event_id = p_event_id AND ack.principal_id = p_principal_id
@@ -1133,6 +1157,173 @@ BEGIN
     RETURN NEXT;
 END
 $m05_ack_preflight$;
+
+CREATE FUNCTION feature.list_manual_provider_dedup_cases(
+    p_status text,
+    p_after_created_at timestamptz,
+    p_after_case_id uuid,
+    p_limit integer
+)
+RETURNS TABLE(
+    o_case_id uuid,
+    o_status text,
+    o_created_at timestamptz,
+    o_evidence_fingerprint text,
+    o_manual_feature jsonb,
+    o_provider_feature jsonb,
+    o_scores jsonb
+)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, feature, ops
+AS $m05_list_cases$
+BEGIN
+    IF session_user <> 'ktm_feature_api_runtime'
+       OR NOT pg_has_role(
+           session_user, 'ktm_manual_provider_dedup_admin_executor', 'member'
+       ) THEN
+        RAISE EXCEPTION 'manual/provider dedup case read requires the admin-only executor'
+            USING ERRCODE = '42501', CONSTRAINT = 'ck_m05_case_read_executor';
+    END IF;
+    IF p_status NOT IN ('pending', 'terminal') AND p_status IS NOT NULL
+       OR p_limit IS NULL OR p_limit < 1 OR p_limit > 100
+       OR (p_after_created_at IS NULL) <> (p_after_case_id IS NULL) THEN
+        RAISE EXCEPTION 'manual/provider dedup case list input is invalid'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_case_read_input';
+    END IF;
+
+    RETURN QUERY
+    SELECT
+        candidate.case_id,
+        CASE WHEN resolution.case_id IS NULL THEN 'pending' ELSE 'terminal' END,
+        candidate.created_at,
+        candidate.evidence_fingerprint,
+        jsonb_build_object(
+            'feature_id', candidate.manual_feature_id,
+            'feature_uuid', candidate.manual_feature_uuid,
+            'row_revision', candidate.manual_feature_row_revision,
+            'snapshot', candidate.manual_feature_snapshot
+        ),
+        jsonb_build_object(
+            'feature_id', candidate.provider_feature_id,
+            'feature_uuid', candidate.provider_feature_uuid,
+            'row_revision', candidate.provider_feature_row_revision,
+            'snapshot', candidate.provider_feature_snapshot
+        ),
+        jsonb_build_object(
+            'scorer_id', candidate.scorer_id,
+            'scorer_input_sha256', candidate.scorer_input_sha256,
+            'name_score', candidate.name_score,
+            'spatial_score', candidate.spatial_score,
+            'category_score', candidate.category_score,
+            'total_score', candidate.total_score,
+            'distance_meters', candidate.distance_meters
+        )
+    FROM ops.manual_provider_dedup_cases AS candidate
+    LEFT JOIN ops.manual_provider_dedup_resolutions AS resolution
+      ON resolution.case_id = candidate.case_id
+    WHERE (
+        (p_status IS NULL)
+        OR (p_status = 'pending' AND resolution.case_id IS NULL)
+        OR (p_status = 'terminal' AND resolution.case_id IS NOT NULL)
+    )
+      AND (
+          p_after_created_at IS NULL
+          OR (candidate.created_at, candidate.case_id) < (p_after_created_at, p_after_case_id)
+      )
+    ORDER BY candidate.created_at DESC, candidate.case_id DESC
+    LIMIT p_limit;
+END
+$m05_list_cases$;
+
+CREATE FUNCTION feature.read_manual_provider_dedup_case(p_case_id uuid)
+RETURNS TABLE(o_data jsonb)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, feature, ops
+AS $m05_read_case$
+BEGIN
+    IF session_user <> 'ktm_feature_api_runtime'
+       OR NOT pg_has_role(
+           session_user, 'ktm_manual_provider_dedup_admin_executor', 'member'
+       ) THEN
+        RAISE EXCEPTION 'manual/provider dedup case read requires the admin-only executor'
+            USING ERRCODE = '42501', CONSTRAINT = 'ck_m05_case_read_executor';
+    END IF;
+    IF p_case_id IS NULL THEN
+        RAISE EXCEPTION 'manual/provider dedup case id is invalid'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_case_read_input';
+    END IF;
+
+    RETURN QUERY
+    SELECT jsonb_build_object(
+        'case_id', candidate.case_id,
+        'status', CASE WHEN resolution.case_id IS NULL THEN 'pending' ELSE 'terminal' END,
+        'created_at', candidate.created_at,
+        'evidence_fingerprint', candidate.evidence_fingerprint,
+        'manual_feature', jsonb_build_object(
+            'feature_id', candidate.manual_feature_id,
+            'feature_uuid', candidate.manual_feature_uuid,
+            'row_revision', candidate.manual_feature_row_revision,
+            'creation_command_id', candidate.manual_creation_command_id,
+            'snapshot', candidate.manual_feature_snapshot
+        ),
+        'provider_feature', jsonb_build_object(
+            'feature_id', candidate.provider_feature_id,
+            'feature_uuid', candidate.provider_feature_uuid,
+            'row_revision', candidate.provider_feature_row_revision,
+            'dataset_id', candidate.provider_dataset_id,
+            'source_entity_key', candidate.source_entity_key,
+            'source_record_key', candidate.source_record_key,
+            'source_record_raw_payload_hash', candidate.source_record_raw_payload_hash,
+            'source_head_observed_at', candidate.source_head_observed_at,
+            'snapshot', candidate.provider_feature_snapshot
+        ),
+        'scores', jsonb_build_object(
+            'scorer_id', candidate.scorer_id,
+            'scorer_input_sha256', candidate.scorer_input_sha256,
+            'name_score', candidate.name_score,
+            'spatial_score', candidate.spatial_score,
+            'category_score', candidate.category_score,
+            'total_score', candidate.total_score,
+            'distance_meters', candidate.distance_meters,
+            'detector_causation', candidate.detector_causation
+        ),
+        'resolution', CASE WHEN resolution.case_id IS NULL THEN NULL ELSE jsonb_build_object(
+            'resolution_id', resolution.resolution_id,
+            'decision', resolution.decision,
+            'command_id', resolution.command_id,
+            'actor', resolution.actor,
+            'reason', resolution.reason,
+            'superseded_by_case_id', resolution.superseded_by_case_id,
+            'resolved_at', resolution.resolved_at
+        ) END,
+        'event', event.event_payload,
+        'subscriptions', COALESCE((
+            SELECT jsonb_agg(jsonb_build_object(
+                'principal_id', subscription.principal_id,
+                'acked_through_sequence', lease.acked_through_sequence,
+                'lease_epoch', lease.lease_epoch,
+                'lease_expires_at', lease.lease_expires_at,
+                'oldest_unacked_at', (
+                    SELECT min(unacked_event.occurred_at)
+                    FROM ops.feature_reference_reconciliation_events AS unacked_event
+                    WHERE unacked_event.event_sequence > lease.acked_through_sequence
+                )
+            ) ORDER BY subscription.principal_id)
+            FROM ops.feature_reference_reconciliation_subscriptions AS subscription
+            JOIN ops.feature_reference_reconciliation_leases AS lease
+              ON lease.principal_id = subscription.principal_id
+        ), '[]'::jsonb)
+    )
+    FROM ops.manual_provider_dedup_cases AS candidate
+    LEFT JOIN ops.manual_provider_dedup_resolutions AS resolution
+      ON resolution.case_id = candidate.case_id
+    LEFT JOIN ops.feature_reference_reconciliation_events AS event
+      ON event.resolution_id = resolution.resolution_id
+    WHERE candidate.case_id = p_case_id;
+END
+$m05_read_case$;
 """
 
 

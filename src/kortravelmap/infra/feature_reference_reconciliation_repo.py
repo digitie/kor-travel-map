@@ -20,13 +20,19 @@ if TYPE_CHECKING:
 
 __all__ = [
     "FeatureReferenceReconciliationAck",
+    "ManualProviderDedupCase",
+    "ManualProviderDedupCaseDetail",
+    "ManualProviderDedupCaseResolution",
     "FeatureReferenceReconciliationError",
     "FeatureReferenceReconciliationLease",
     "FeatureReferenceReconciliationPreflight",
     "FeatureReferenceReconciliationValidationError",
     "ack_feature_reference_reconciliation_event",
+    "get_manual_provider_dedup_case",
     "lease_feature_reference_reconciliation_event",
+    "list_manual_provider_dedup_cases",
     "preflight_feature_reference_reconciliation_ack",
+    "resolve_manual_provider_dedup_case",
 ]
 
 
@@ -65,6 +71,31 @@ class FeatureReferenceReconciliationAck:
     acked_through_sequence: int | None
 
 
+@dataclass(frozen=True, slots=True)
+class ManualProviderDedupCase:
+    case_id: UUID
+    status: str
+    created_at: datetime
+    evidence_fingerprint: str
+    manual_feature: Mapping[str, Any]
+    provider_feature: Mapping[str, Any]
+    scores: Mapping[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class ManualProviderDedupCaseDetail:
+    data: Mapping[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class ManualProviderDedupCaseResolution:
+    outcome: str
+    resolution_id: UUID | None
+    event_id: UUID | None
+    manual_feature_id: str | None
+    manual_feature_row_revision: int | None
+
+
 _LEASE_SQL: Final = """
 CALL feature.lease_feature_reference_reconciliation_event(
     CAST(:principal_id AS text), CAST(:worker_id AS uuid),
@@ -87,6 +118,26 @@ CALL feature.ack_feature_reference_reconciliation_event(
     NULL::text, NULL::bigint
 )
 """
+_LIST_CASES_SQL: Final = """
+SELECT * FROM feature.list_manual_provider_dedup_cases(
+    CAST(:status AS text), CAST(:after_created_at AS timestamptz),
+    CAST(:after_case_id AS uuid), CAST(:limit AS integer)
+)
+"""
+_READ_CASE_SQL: Final = """
+SELECT * FROM feature.read_manual_provider_dedup_case(CAST(:case_id AS uuid))
+"""
+_RESOLVE_CASE_SQL: Final = """
+CALL feature.resolve_manual_provider_dedup_case(
+    CAST(:case_id AS uuid), CAST(:decision AS text),
+    CAST(:expected_case_fingerprint AS text),
+    CAST(:expected_manual_row_revision AS bigint),
+    CAST(:expected_provider_row_revision AS bigint),
+    CAST(:survivor_feature_id AS text), CAST(:reason AS text), CAST(:actor AS text),
+    CAST(:command_id AS bigint), NULL::text, NULL::uuid, NULL::uuid, NULL::text,
+    NULL::bigint
+)
+"""
 
 
 def _procedure_error(error: DBAPIError) -> NoReturn:
@@ -102,6 +153,9 @@ def _procedure_error(error: DBAPIError) -> NoReturn:
         "ck_m05_reconciliation_ack_isolation",
         "ck_m05_reconciliation_lease_isolation",
         "ck_m05_reconciliation_ack_command",
+        "ck_m05_case_read_input",
+        "ck_m05_decision_input",
+        "ck_m05_decision_command",
     } or sqlstate in {"22003", "22P02"}:
         raise FeatureReferenceReconciliationValidationError(
             "Feature 참조 reconciliation 요청 값이 올바르지 않습니다."
@@ -240,4 +294,135 @@ async def ack_feature_reference_reconciliation_event(
     return FeatureReferenceReconciliationAck(
         outcome=outcome,
         acked_through_sequence=_int_or_none(row.get("o_acked_through_sequence")),
+    )
+
+
+def _case_from_row(row: Mapping[str, Any]) -> ManualProviderDedupCase:
+    created_at = row.get("o_created_at")
+    manual_feature = row.get("o_manual_feature")
+    provider_feature = row.get("o_provider_feature")
+    scores = row.get("o_scores")
+    status = row.get("o_status")
+    fingerprint = row.get("o_evidence_fingerprint")
+    if (
+        not isinstance(created_at, datetime)
+        or not isinstance(manual_feature, Mapping)
+        or not isinstance(provider_feature, Mapping)
+        or not isinstance(scores, Mapping)
+        or status not in {"pending", "terminal"}
+        or not isinstance(fingerprint, str)
+    ):
+        raise FeatureReferenceReconciliationError(
+            "manual/provider dedup case receipt가 불완전합니다."
+        )
+    return ManualProviderDedupCase(
+        case_id=UUID(str(row["o_case_id"])),
+        status=status,
+        created_at=created_at,
+        evidence_fingerprint=fingerprint,
+        manual_feature=cast(Mapping[str, Any], manual_feature),
+        provider_feature=cast(Mapping[str, Any], provider_feature),
+        scores=cast(Mapping[str, Any], scores),
+    )
+
+
+async def list_manual_provider_dedup_cases(
+    session: AsyncSession,
+    *,
+    status: str | None,
+    after_created_at: datetime | None,
+    after_case_id: UUID | None,
+    limit: int,
+) -> tuple[ManualProviderDedupCase, ...]:
+    try:
+        rows = (
+            (
+                await session.execute(
+                    text(_LIST_CASES_SQL),
+                    {
+                        "status": status,
+                        "after_created_at": after_created_at,
+                        "after_case_id": str(after_case_id) if after_case_id else None,
+                        "limit": limit,
+                    },
+                )
+            )
+            .mappings()
+            .all()
+        )
+    except DBAPIError as error:
+        _procedure_error(error)
+    return tuple(_case_from_row(cast(Mapping[str, Any], row)) for row in rows)
+
+
+async def get_manual_provider_dedup_case(
+    session: AsyncSession, *, case_id: UUID
+) -> ManualProviderDedupCaseDetail | None:
+    try:
+        row = (
+            (await session.execute(text(_READ_CASE_SQL), {"case_id": str(case_id)}))
+            .mappings()
+            .one_or_none()
+        )
+    except DBAPIError as error:
+        _procedure_error(error)
+    if row is None:
+        return None
+    data = row.get("o_data")
+    if not isinstance(data, Mapping):
+        raise FeatureReferenceReconciliationError(
+            "manual/provider dedup case detail이 불완전합니다."
+        )
+    return ManualProviderDedupCaseDetail(data=cast(Mapping[str, Any], data))
+
+
+async def resolve_manual_provider_dedup_case(
+    session: AsyncSession,
+    *,
+    case_id: UUID,
+    decision: str,
+    expected_case_fingerprint: str,
+    expected_manual_row_revision: int,
+    expected_provider_row_revision: int,
+    survivor_feature_id: str | None,
+    reason: str,
+    actor: str,
+    command_id: int,
+) -> ManualProviderDedupCaseResolution:
+    try:
+        row = (
+            (
+                await session.execute(
+                    text(_RESOLVE_CASE_SQL),
+                    {
+                        "case_id": str(case_id),
+                        "decision": decision,
+                        "expected_case_fingerprint": expected_case_fingerprint,
+                        "expected_manual_row_revision": expected_manual_row_revision,
+                        "expected_provider_row_revision": expected_provider_row_revision,
+                        "survivor_feature_id": survivor_feature_id,
+                        "reason": reason,
+                        "actor": actor,
+                        "command_id": command_id,
+                    },
+                )
+            )
+            .mappings()
+            .one()
+        )
+    except DBAPIError as error:
+        _procedure_error(error)
+    outcome = row.get("o_outcome")
+    if outcome not in {"kept", "merged", "manual_retired", "stale"}:
+        raise FeatureReferenceReconciliationError(
+            "manual/provider dedup decision receipt가 올바르지 않습니다."
+        )
+    return ManualProviderDedupCaseResolution(
+        outcome=outcome,
+        resolution_id=_uuid_or_none(row.get("o_resolution_id")),
+        event_id=_uuid_or_none(row.get("o_event_id")),
+        manual_feature_id=(
+            str(row["o_manual_feature_id"]) if row.get("o_manual_feature_id") is not None else None
+        ),
+        manual_feature_row_revision=_int_or_none(row.get("o_manual_feature_row_revision")),
     )

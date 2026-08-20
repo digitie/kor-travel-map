@@ -102,6 +102,10 @@ _M05_ACK_PROCEDURE = (
 _M05_ACK_PREFLIGHT_FUNCTION = (
     "feature.preflight_feature_reference_reconciliation_ack(text,uuid,text,text)"
 )
+_M05_CASE_READ_FUNCTION = "feature.read_manual_provider_dedup_case(uuid)"
+_M05_CASE_LIST_FUNCTION = (
+    "feature.list_manual_provider_dedup_cases(text,timestamp with time zone,uuid,integer)"
+)
 
 _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
     {
@@ -248,6 +252,8 @@ _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS = {
             _FEATURE_REQUEST_READ_FUNCTION,
             _FEATURE_REQUEST_LIST_FUNCTION,
             _M05_ACK_PREFLIGHT_FUNCTION,
+            _M05_CASE_READ_FUNCTION,
+            _M05_CASE_LIST_FUNCTION,
         }
     ),
     "ktm_feature_dagster_runtime": frozenset(),

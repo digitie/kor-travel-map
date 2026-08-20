@@ -447,6 +447,14 @@ _M05_WRITER_ACL = (
     "GRANT EXECUTE ON FUNCTION feature.preflight_feature_reference_reconciliation_ack("
     "text, uuid, text, text) "
     "TO ktm_feature_reference_reconciliation_service_executor",
+    "REVOKE ALL ON FUNCTION feature.list_manual_provider_dedup_cases("
+    "text, timestamptz, uuid, integer), feature.read_manual_provider_dedup_case(uuid) "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_dagster_runtime, "
+    "ktm_manual_provider_dedup_detector_executor, "
+    "ktm_feature_reference_reconciliation_service_executor",
+    "GRANT EXECUTE ON FUNCTION feature.list_manual_provider_dedup_cases("
+    "text, timestamptz, uuid, integer), feature.read_manual_provider_dedup_case(uuid) "
+    "TO ktm_manual_provider_dedup_admin_executor",
     "REVOKE ALL ON PROCEDURE feature.record_manual_provider_dedup_candidate("
     "text, text, jsonb, jsonb) FROM PUBLIC, ktm_feature_runtime, "
     "ktm_feature_api_runtime, ktm_feature_dagster_runtime, "

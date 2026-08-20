@@ -679,7 +679,10 @@ BEGIN
        OR to_regprocedure('feature.record_manual_provider_dedup_candidate(text,text,jsonb,jsonb)') IS NULL
        OR to_regprocedure('feature.resolve_manual_provider_dedup_case(uuid,text,text,bigint,bigint,text,text,text,bigint)') IS NULL
        OR to_regprocedure('feature.lease_feature_reference_reconciliation_event(text,uuid)') IS NULL
-       OR to_regprocedure('feature.ack_feature_reference_reconciliation_event(text,uuid,uuid,bigint,text,text,bigint)') IS NULL THEN
+       OR to_regprocedure('feature.ack_feature_reference_reconciliation_event(text,uuid,uuid,bigint,text,text,bigint)') IS NULL
+       OR to_regprocedure('feature.preflight_feature_reference_reconciliation_ack(text,uuid,text,text)') IS NULL
+       OR to_regprocedure('feature.list_manual_provider_dedup_cases(text,timestamp with time zone,uuid,integer)') IS NULL
+       OR to_regprocedure('feature.read_manual_provider_dedup_case(uuid)') IS NULL THEN
         RAISE EXCEPTION 'M05 dedicated routine marker is incomplete'
             USING ERRCODE = '55000';
     END IF;
@@ -732,6 +735,11 @@ ALTER FUNCTION feature.assert_feature_reference_reconciliation_lease_cursor()
 ALTER FUNCTION feature.preflight_feature_reference_reconciliation_ack(
     text, uuid, text, text
 ) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER FUNCTION feature.list_manual_provider_dedup_cases(
+    text, timestamptz, uuid, integer
+) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER FUNCTION feature.read_manual_provider_dedup_case(uuid)
+    OWNER TO ktm_manual_provider_dedup_procedure_owner;
 ALTER PROCEDURE feature.record_manual_provider_dedup_candidate(text, text, jsonb, jsonb)
     OWNER TO ktm_manual_provider_dedup_procedure_owner;
 ALTER PROCEDURE feature.resolve_manual_provider_dedup_case(
@@ -753,6 +761,16 @@ REVOKE ALL ON FUNCTION feature.preflight_feature_reference_reconciliation_ack(
 GRANT EXECUTE ON FUNCTION feature.preflight_feature_reference_reconciliation_ack(
     text, uuid, text, text
 ) TO ktm_feature_reference_reconciliation_service_executor;
+REVOKE ALL ON FUNCTION feature.list_manual_provider_dedup_cases(
+    text, timestamptz, uuid, integer
+), feature.read_manual_provider_dedup_case(uuid)
+    FROM PUBLIC, ktm_feature_runtime, ktm_feature_dagster_runtime,
+    ktm_manual_provider_dedup_detector_executor,
+    ktm_feature_reference_reconciliation_service_executor;
+GRANT EXECUTE ON FUNCTION feature.list_manual_provider_dedup_cases(
+    text, timestamptz, uuid, integer
+), feature.read_manual_provider_dedup_case(uuid)
+    TO ktm_manual_provider_dedup_admin_executor;
 REVOKE ALL ON PROCEDURE feature.record_manual_provider_dedup_candidate(text, text, jsonb, jsonb)
     FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime,
     ktm_manual_provider_dedup_admin_executor,

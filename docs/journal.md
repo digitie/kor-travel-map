@@ -153,6 +153,24 @@ candidate의 `to_jsonb(notice)`에 내부 generated column이 누출되는 P1을
 candidate SQL은 `valid_during`을 response JSON에서 제외하도록 수정했다. NULL·one-sided·
 equal range, public/admin active predicate와 notice candidate detail 회귀를 추가했으며,
 수정 후 targeted integration 2건을 통과했다.
+## 2026-08-21 — T-VN-M05 admin 판정과 service delivery 경쟁 경계
+
+`GET /v1/admin/manual-provider-dedup-cases`, 상세 조회와
+`POST /v1/admin/manual-provider-dedup-cases/{case_id}/decisions`를 추가했다. 목록은
+`(created_at, case_id)` keyset과 pending/terminal filter만 지원하며, 상세는 immutable
+case·resolution·event와 subscription별 delivery 상태를 procedure-only로 읽는다. decision은
+`kept`에는 AdminBFF만, `merged`/`manual_retired`에는 body를 해석한 뒤 DB session보다 먼저
+destructive kill-switch까지 요구한다. stale evidence의 409은 domain command terminal result로
+기록하고 정상 return하므로 resolution 없이도 exact replay가 가능하다.
+
+service ACK은 동일 Idempotency-Key의 claim/replay를 먼저 잠그고, principal lease row도
+preflight와 writer가 공통 `FOR UPDATE`로 잠근다. 따라서 새 key 동시 요청이 모두 absent를
+읽어 뒤늦게 빈 domain command를 만드는 경쟁을 막는다. lease는 empty=204, 다른 worker=409으로
+명시하고, event는 재조립하지 않은 stored canonical envelope와 SHA-256을 그대로 반환한다.
+read/ACK digest는 함께만 설정되며 OpenAPI full/service와 command·route policy inventory를
+동기화했다. route/registry 40건, domain command 13건, fresh M05 PostGIS migration을 표적으로
+검증했다. 다음은 두 전문 적대 리뷰의 재검토와 PinVi paired consumer/UI contract 구현이다.
+
 ## 2026-08-21 — T-VN-M05 backup v3 evidence root와 restore lease 재구축
 
 backup manifest를 v3로 올려 case·resolution·reconciliation event·ACK·immutable subscription을 같은 exported

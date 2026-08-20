@@ -957,6 +957,13 @@ class ApiSettings(BaseSettings):
 
     @model_validator(mode="after")
     def _validate_scoped_service_tokens_distinct(self) -> ApiSettings:
+        if (self.feature_reference_reconciliation_read_token_sha256 is None) != (
+            self.feature_reference_reconciliation_ack_token_sha256 is None
+        ):
+            raise ValueError(
+                "Feature reference reconciliation read and ACK token digests must be "
+                "configured together"
+            )
         digests = {
             "snapshot": self.pinvi_curation_snapshot_token_sha256,
             "cutover mapping": self.pinvi_curation_cutover_mapping_token_sha256,

@@ -443,6 +443,40 @@ async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_on
         )
         assert second == {"o_case_id": case_id, "o_outcome": "idempotent"}
 
+        async with api.connect() as connection:
+            page = (
+                await connection.execute(
+                    text(
+                        "SELECT * FROM feature.list_manual_provider_dedup_cases("
+                        "'pending', NULL::timestamptz, NULL::uuid, 50)"
+                    )
+                )
+            ).mappings().all()
+            detail = (
+                await connection.execute(
+                    text(
+                        "SELECT * FROM feature.read_manual_provider_dedup_case("
+                        "CAST(:case_id AS uuid))"
+                    ),
+                    {"case_id": case_id},
+                )
+            ).mappings().one()
+        selected = next(row for row in page if row["o_case_id"] == case_id)
+        assert selected["o_status"] == "pending"
+        assert detail["o_data"]["case_id"] == str(case_id)
+        assert detail["o_data"]["status"] == "pending"
+
+        async with dagster.connect() as connection:
+            with pytest.raises(DBAPIError) as denied_case_read:
+                await connection.execute(
+                    text(
+                        "SELECT * FROM feature.list_manual_provider_dedup_cases("
+                        "'pending', NULL::timestamptz, NULL::uuid, 50)"
+                    )
+                )
+            await connection.rollback()
+        assert getattr(denied_case_read.value.orig, "sqlstate", None) == "42501"
+
         async with migrated_engine.begin() as connection:
             case = (
                 (

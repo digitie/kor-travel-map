@@ -3712,11 +3712,12 @@
       },
       "FeatureReferenceReconciliationEventData": {
         "additionalProperties": false,
+        "description": "DB가 보존한 canonical event payload를 재조립 없이 그대로 노출한다.",
         "properties": {
           "action": {
             "enum": [
               "rebind",
-              "retire"
+              "detach"
             ],
             "title": "Action",
             "type": "string"
@@ -3726,46 +3727,100 @@
             "title": "Case Id",
             "type": "string"
           },
+          "command_id": {
+            "minimum": 1.0,
+            "title": "Command Id",
+            "type": "integer"
+          },
           "event_id": {
             "format": "uuid",
             "title": "Event Id",
             "type": "string"
           },
           "event_sequence": {
+            "minimum": 1.0,
             "title": "Event Sequence",
+            "type": "integer"
+          },
+          "manual_retire_row_revision_after_transition": {
+            "minimum": 2.0,
+            "title": "Manual Retire Row Revision After Transition",
+            "type": "integer"
+          },
+          "manual_retire_transition_id": {
+            "minimum": 1.0,
+            "title": "Manual Retire Transition Id",
             "type": "integer"
           },
           "occurred_at": {
             "title": "Occurred At",
             "type": "string"
           },
-          "payload": {
-            "additionalProperties": true,
-            "title": "Payload",
-            "type": "object"
+          "old_feature": {
+            "$ref": "#/components/schemas/FeatureReferenceReconciliationFeatureReference"
+          },
+          "payload_schema_version": {
+            "const": 1,
+            "title": "Payload Schema Version",
+            "type": "integer"
+          },
+          "replacement_feature": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FeatureReferenceReconciliationFeatureReference"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "resolution_id": {
             "format": "uuid",
             "title": "Resolution Id",
             "type": "string"
-          },
-          "sha256": {
-            "pattern": "^[0-9a-f]{64}$",
-            "title": "Sha256",
-            "type": "string"
           }
         },
         "required": [
+          "payload_schema_version",
           "event_id",
           "event_sequence",
+          "occurred_at",
           "case_id",
           "resolution_id",
           "action",
-          "payload",
-          "sha256",
-          "occurred_at"
+          "old_feature",
+          "replacement_feature",
+          "manual_retire_transition_id",
+          "manual_retire_row_revision_after_transition",
+          "command_id"
         ],
         "title": "FeatureReferenceReconciliationEventData",
+        "type": "object"
+      },
+      "FeatureReferenceReconciliationFeatureReference": {
+        "additionalProperties": false,
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "feature_uuid": {
+            "format": "uuid",
+            "title": "Feature Uuid",
+            "type": "string"
+          },
+          "row_revision": {
+            "minimum": 1.0,
+            "title": "Row Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "feature_id",
+          "feature_uuid",
+          "row_revision"
+        ],
+        "title": "FeatureReferenceReconciliationFeatureReference",
         "type": "object"
       },
       "FeatureReferenceReconciliationLeaseData": {
@@ -3780,6 +3835,18 @@
                 "type": "null"
               }
             ]
+          },
+          "event_sha256": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9a-f]{64}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Sha256"
           },
           "lease_epoch": {
             "anyOf": [
@@ -7693,6 +7760,9 @@
             },
             "description": "Successful Response"
           },
+          "204": {
+            "description": "unacknowledged event 없음"
+          },
           "401": {
             "content": {
               "application/problem+json": {
@@ -7712,6 +7782,16 @@
               }
             },
             "description": "다른 service scope token"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "다른 worker의 유효한 lease가 존재"
           },
           "422": {
             "content": {
@@ -7800,7 +7880,18 @@
                 }
               }
             },
-            "description": "Successful Response"
+            "description": "Successful Response",
+            "headers": {
+              "Idempotency-Replayed": {
+                "description": "기존 ACK receipt를 replay했을 때 true.",
+                "schema": {
+                  "enum": [
+                    "true"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
           },
           "401": {
             "content": {

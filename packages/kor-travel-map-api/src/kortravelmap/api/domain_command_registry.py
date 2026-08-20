@@ -62,6 +62,7 @@ class CommandPolicy:
                 "ETag",
                 "Location",
                 "Retry-After",
+                "Idempotency-Replayed",
             }
             if unsupported:
                 raise ValueError(f"unsupported terminal response headers: {sorted(unsupported)}")
@@ -177,6 +178,12 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
     ("POST", "/v1/service/feature-reference-reconciliations/{event_id}/acks"): _domain(
         "service.feature-reference-reconciliation.ack.v1",
         "Feature 참조 reconciliation ACK evidence를 한 번만 기록",
+        replay_headers=("Idempotency-Replayed",),
+        transaction_isolation="read-committed",
+    ),
+    ("POST", "/v1/admin/manual-provider-dedup-cases/{case_id}/decisions"): _domain(
+        "admin.manual-provider-dedup-case.resolve.v1",
+        _MUTATION_RESULT,
         transaction_isolation="read-committed",
     ),
     ("POST", "/v1/admin/feature-requests/{request_id}/approve"): _domain(

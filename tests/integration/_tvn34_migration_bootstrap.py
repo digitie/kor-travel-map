@@ -688,6 +688,19 @@ async def repair_tvn_m05_role_phase(async_dsn: str) -> None:
                     "OWNER TO ktm_manual_provider_dedup_procedure_owner"
                 )
             )
+            await connection.execute(
+                text(
+                    "ALTER FUNCTION feature.list_manual_provider_dedup_cases("
+                    "text, timestamptz, uuid, integer) "
+                    "OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER FUNCTION feature.read_manual_provider_dedup_case(uuid) "
+                    "OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
     finally:
         await engine.dispose()
 
