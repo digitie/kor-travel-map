@@ -1,6 +1,6 @@
 # T-VN-M02/M03 — 생성 provenance 보존과 curation 동시 생성 설계
 
-- 상태: proposed — DB/curation 전문 적대 검토 반영, M03 import 범위 사용자 결정 대기
+- 상태: proposed — DB/curation 전문 적대 검토 반영, M03 import 행별 child command 결정
 - 기준: `origin/main` `546b92e54b7e83dfd8378d372340a67e5a1ea38e`
 - 선행: T-VN-M01 foundation `14792385`, T-VN-40C `0225_tvn40c_physical_removal`
 - 관련: ADR-066, ADR-074, ADR-090, ADR-093, T-VN-M01~M05
@@ -138,10 +138,10 @@ headers를 byte-identical하게 돌려주고, same key/different body는 기존 
 
 CSV/import plan의 multi-row create는 이 single-item command를 그대로 재사용하지 않는다. claim의
 `claimed_by_command_id`와 origin의 `creation_command_id`는 각각 unique이므로, 하나의
-`admin.curation.import` receipt로 여러 manual Feature를 만들 수 없다. import branch는 plan-row마다
-stable child command/terminal result를 발급하고 그 child 하나가 Feature+item 한 쌍을 소유하게 하거나,
-그 child-command contract가 구현되기 전까지 manual Feature create를 preview의 blocking error로
-닫는다. outer import receipt만으로 여러 provenance 행을 만드는 우회는 금지한다.
+`admin.curation.import` receipt로 여러 manual Feature를 만들 수 없다. **2026-08-20 사용자 결정으로
+M03 import는 행별 child command를 발급한다.** 각 typed manual row는 stable child command/terminal
+result 하나를 갖고, 그 child 하나만 Feature+item 한 쌍과 claim/origin을 소유한다. outer import
+receipt만으로 여러 provenance 행을 만드는 우회는 금지한다.
 
 ### 4.2 combined DB writer
 
@@ -211,20 +211,29 @@ M03 curation 원자성 전문 리뷰가 같은 reviewed SHA에서 모두 GO가 �
 production credential 배선을 활성화하지 않는다. M01 `READ COMMITTED` writer를 완화하거나,
 curation write policy를 낮춰 isolation을 맞추는 방식은 취하지 않는다.
 
-## 6. 구현 전 사용자 결정이 필요한 M03 import 범위
+## 6. 확정된 M03 import child-command 범위
 
-single-item admin editing은 위 writer 하나와 command 하나로 닫힌다. 반면 import batch의 missing
-Feature는 다음 중 하나를 선택해야 한다. 이는 command/receipt/preview/OpenAPI와 운영 failure
-semantics를 다르게 만든다.
+single-item admin editing은 위 writer 하나와 command 하나로 닫힌다. import는 parent
+`admin.curation.import` command가 batch의 preview/commit lifecycle을 소유하고, 실제 manual Feature
+생성은 plan row마다 다음의 private child command로 분리한다.
 
-| 선택 | 결과 |
-|---|---|
-| row별 child command | outer import plan은 parent receipt를 유지하고, manual row마다 immutable typed payload와 별도 child command/result를 만든다. 여러 row를 지원하지만 migration·retry·restore evidence 범위가 넓어진다. |
-| 1차 import 차단 | M03 첫 tranche는 dedicated admin editing만 지원하고, CSV/import preview는 manual Feature create intent를 blocking error로 돌린다. 기존 unlinked import는 계속 허용한다. |
+1. preview는 row별 typed `manual_feature` payload와 canonical payload SHA-256을 immutable plan에
+   저장한다. `metadata_json`에 untyped input을 숨기지 않는다.
+2. commit은 `(parent_command_id, import_row_id, payload_sha256)`에서 결정적으로 child idempotency
+   identity를 만들고, `admin.curation-import.manual-feature-row.create-v1` command와 terminal result를
+   만든다. 외부 HTTP가 child key를 제공하거나 child command를 단독 replay하는 route는 없다.
+3. child 하나는 `claim → Feature/core/initial state → origin → subtype/override → curation item →
+   accepted link decision → child terminal result`를 소유한다. parent command/result에는 ordered row별
+   child command ID, Feature UUID, curation item ID와 terminal status의 canonical summary만 남긴다.
+4. import commit은 하나의 `SERIALIZABLE` transaction으로 parent와 모든 child mutation/result를 함께
+   확정한다. 하나라도 실패하면 parent result, child command/result, claim/origin, Feature, item, link
+   decision 모두 rollback한다. `40001`은 기존 parent command decorator가 전체 batch를 재시도한다.
+5. 재시도와 parent replay는 immutable plan hash 및 ordered child identity를 대조한다. 기존 child를
+   임의로 재사용하거나 다른 row payload에 연결할 수 없다.
 
-어느 경우든 `admin.curation.import` 하나에 여러 claim/origin을 직접 묶거나, `metadata_json`에
-untyped manual Feature를 숨기는 방법은 허용하지 않는다. 선택 전에는 M03 write migration을 만들지
-않는다.
+M03 migration은 parent/import-row/child-command의 immutable linkage와 one-row/one-child uniqueness를
+선언적으로 만든다. 이 linkage는 claim/origin의 command FK를 대체하지 않는다. 어느 경로에서도
+`admin.curation.import` 하나에 여러 claim/origin을 직접 묶거나 manual row를 추론해서는 안 된다.
 
 ## 7. 비목표
 
