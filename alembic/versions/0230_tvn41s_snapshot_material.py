@@ -221,7 +221,9 @@ def _create_material_tables() -> None:
 
 def _backfill_materials() -> None:
     # 그룹 대표는 `min(snapshot_id)`다 — 결정적이고, 어느 receipt에서 왔는지 나중에
-    # 되짚을 수 있다. `material_bytes`는 위 docstring대로 실측이 없어 NULL이다.
+    # 되짚을 수 있다. PostgreSQL에는 `min(uuid)` aggregate가 없어 canonical text로
+    # 비교한다(자릿수가 고정이라 text 순서와 uuid 순서가 같다).
+    # `material_bytes`는 위 docstring대로 실측이 없어 NULL이다.
     op.execute(
         text(
             f"""
@@ -230,7 +232,8 @@ def _backfill_materials() -> None:
                 material_high_watermark_relay_order, item_count, material_bytes,
                 merkle_root, materialized_at
             )
-            SELECT min(snapshot_id), external_system, restore_epoch,
+            SELECT CAST(min(CAST(snapshot_id AS text)) AS uuid),
+                   external_system, restore_epoch,
                    material_high_watermark_relay_order, min(item_count), NULL,
                    min(merkle_root), min(created_at)
             FROM {_RECEIPTS}
