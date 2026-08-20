@@ -47,6 +47,9 @@ _EXPECTED_REVISIONS = (
     "0223_tvn40_identity_mappings",
     "0224_c7_external_system_scope",
     "0225_tvn40c_physical_removal",
+    # `0226`은 T-VN-M01이 예약했으나 아직 main에 없다. 40B 잔여는 단일 head를 지키려고
+    # `0225`에 직접 체인했고 번호에만 공백이 남는다(migration docstring 참조).
+    "0227_tvn40b_source_rule_action",
 )
 #: `alembic_version.version_num`의 컬럼 폭(alembic 기본값).
 _ALEMBIC_VERSION_NUM_LENGTH = 32
