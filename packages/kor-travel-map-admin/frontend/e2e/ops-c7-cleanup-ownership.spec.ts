@@ -93,7 +93,7 @@ const idempotencyEntry: {
   requestId: OWNED_REQUEST_ID,
 };
 
-function durableV5Journal(): object {
+function durableV4Journal(): object {
   return {
     cleanup_result: null,
     completed_scenarios: [],
@@ -188,8 +188,8 @@ test("C7 cleanup never selects an operation-mismatched active, detail, or member
   }
 });
 
-test("C7 v5 journal requires one-to-one request/idempotency/scope/operation ownership", () => {
-  const journal = durableV5Journal() as {
+test("C7 v4 journal requires one-to-one request/idempotency/scope/operation ownership", () => {
+  const journal = durableV4Journal() as {
     idempotency_entries: Array<{
       body: { scope: { provider_dataset_id: number; type: string } };
     }>;
@@ -216,13 +216,13 @@ test("C7 v5 journal requires one-to-one request/idempotency/scope/operation owne
   journalScope.provider_dataset_id += 1;
   expect(hasExactC7RequestOwnershipBinding(journal)).toBe(false);
 
-  const missingOperation = durableV5Journal() as {
+  const missingOperation = durableV4Journal() as {
     request_ownership: Array<Record<string, unknown>>;
   };
   delete missingOperation.request_ownership[0]!.operation_key;
   expect(hasExactC7RequestOwnershipBinding(missingOperation)).toBe(false);
 
-  const foreignOperation = durableV5Journal() as {
+  const foreignOperation = durableV4Journal() as {
     request_ownership: Array<Record<string, unknown>>;
   };
   foreignOperation.request_ownership[0]!.operation_key =
@@ -230,7 +230,7 @@ test("C7 v5 journal requires one-to-one request/idempotency/scope/operation owne
   expect(hasExactC7RequestOwnershipBinding(foreignOperation)).toBe(false);
 });
 
-test("C7 v3 is only the exact empty bootstrap placeholder, never a final journal", () => {
+test("C7 v3는 bootstrap placeholder 전용이고 최종 journal이 될 수 없다, never a final journal", () => {
   const bootstrap = {
     cleanup_result: null,
     completed_scenarios: [],
@@ -247,10 +247,13 @@ test("C7 v3 is only the exact empty bootstrap placeholder, never a final journal
   expect(isC7OrchestratorBootstrapPlaceholder(bootstrap)).toBe(true);
   expect(hasExactC7RequestOwnershipBinding(bootstrap)).toBe(false);
 
-  const legacyFinal = { ...durableV5Journal(), version: 3 };
+  const legacyFinal = { ...durableV4Journal(), version: 3 };
   expect(isC7OrchestratorBootstrapPlaceholder(legacyFinal)).toBe(false);
   expect(hasExactC7RequestOwnershipBinding(legacyFinal)).toBe(false);
 
-  const v4Final = { ...durableV5Journal(), version: 4 };
-  expect(hasExactC7RequestOwnershipBinding(v4Final)).toBe(false);
+  // 미지 version은 앞뒤 어느 쪽도 소유권을 말할 수 없다. v3는 placeholder 전용이고
+  // v5는 아직 없는 계약이다 — 둘 다 최종 journal로 해석하면 검사를 건너뛰게 된다.
+  const futureFinal = { ...durableV4Journal(), version: 5 };
+  expect(isC7OrchestratorBootstrapPlaceholder(futureFinal)).toBe(false);
+  expect(hasExactC7RequestOwnershipBinding(futureFinal)).toBe(false);
 });
