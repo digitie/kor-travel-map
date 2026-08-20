@@ -46,7 +46,7 @@ API는 미래 compaction 뒤 request-bound page에 사용할
 각 code와 details를 typed OpenAPI schema로 내보내 codegen이 generic map 없이 판독할 수 있게 한다.
 
 > **2026-08-20 갱신**: 아래 §2의 barrier는 풀렸고 §3의 목표 물리 모델은
-> `0230_tvn41s_snapshot_material`로 착지했다. 초안과 다른 넷(identity partial unique,
+> `0231_tvn41s_snapshot_material`로 착지했다. 초안과 다른 넷(identity partial unique,
 > `material_bytes` NULL 허용, 정리용 추가 인덱스 없음, 새 표의 append-only fence)과 그
 > 근거는 그 migration docstring에 있다. §5 "남은 gate" 중 남은 것은 n150 1M soak뿐이다 —
 > migration upgrade·ACL/catalog는 `scripts/verify-tvn41s-snapshot-material.sh`,

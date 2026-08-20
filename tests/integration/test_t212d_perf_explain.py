@@ -8,6 +8,7 @@ provider/dataset/지역/상태/이슈 분포와 실제 한국 지명 기반 검�
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -512,10 +513,14 @@ async def _explain_json(
         text(f"SET LOCAL enable_seqscan = {'off' if force_index else 'on'}")
     )
     result = await session.execute(
-        text("EXPLAIN (FORMAT JSON, COSTS OFF) " + sql),
+        text("EXPLAIN (FORMAT JSON, SETTINGS) " + sql),
         params or {},
     )
-    return result.scalar_one()[0]["Plan"]
+    explain = result.scalar_one()[0]
+    plan = dict(explain["Plan"])
+    plan["_explain_settings"] = explain.get("Settings", [])
+    plan["_planner_mode"] = "forced-index" if force_index else "default"
+    return plan
 
 
 def _walk_plan(plan: dict[str, Any]) -> list[dict[str, Any]]:
@@ -541,9 +546,17 @@ def _relation_names(plan: dict[str, Any]) -> set[str]:
     }
 
 
+def _format_plan(plan: dict[str, Any]) -> str:
+    return json.dumps(plan, ensure_ascii=False, indent=2, sort_keys=True)
+
+
 def _assert_uses_index(plan: dict[str, Any], *expected: str) -> None:
     used = _index_names(plan)
-    assert set(expected) & used, f"expected one of {expected}, used={sorted(used)}"
+    assert set(expected) & used, (
+        f"expected one of {expected}, used={sorted(used)}\n"
+        "EXPLAIN (FORMAT JSON, SETTINGS):\n"
+        f"{_format_plan(plan)}"
+    )
 
 
 _COORD_SPATIAL_INDEXES = ("idx_features_coord_gist", "idx_features_coord")
@@ -581,15 +594,104 @@ _ENRICHMENT_REVIEW_ACCESS = (
     "idx_enrichment_review_queue_source_entity_record",
 )
 
+# T-VN-H50: dedup refresh의 planner 진입점은 이름 하나가 아니라 SQL join 역할별로
+# 검증한다. ``idx_source_links_entity`` 하나만 있어도 다른 relation을 우연히 index로
+# 읽은 plan이 통과하던 false-pass를 막는다. 각 집합은 현재 ORM/baseline의 정본 index다.
+#
+# - features: 현재 ``idx_features_updated_keyset``(구 ``idx_features_dedup_refresh_keyset``
+#   는 0096에서 제거됨) 또는 feature_id 동등 조회용 PK/covering index
+# - source_links: source_entity_key 진입, primary partial 진입, feature/entity PK 진입
+# - source_entities: dataset-driven, source_entity_key-driven, key+dataset FK bridge
+#   ``source_entities_pkey`` is the canonical PK path for the source_entity_key join.
+# ``provider_datasets``는 이 seed에서 dataset당 한 행인 catalog dimension이다. 기본
+# planner가 이 작은 relation을 Seq Scan하는 것은 회귀가 아니므로 no-Seq-Scan 대상에서
+# 제외한다. 대량 relation의 index path만 역할별로 고정한다.
+_DEDUP_REFRESH_ACCESS_BY_RELATION = {
+    "features": (
+        "idx_features_updated_keyset",
+        "pk_features",
+        "features_pkey",
+        "uq_features_identity_pair",
+        "uq_features_identity_kind",
+    ),
+    "source_links": (
+        "idx_source_links_entity",
+        "idx_source_links_primary",
+        "pk_source_links",
+    ),
+    "source_entities": (
+        "idx_source_entities_provider_dataset",
+        "uq_source_entities_key_dataset",
+        "source_entities_pkey",
+    ),
+    "source_entity_heads": (
+        "pk_source_entity_heads",
+        "source_entity_heads_pkey",
+    ),
+    "source_records": (
+        "pk_source_records",
+        "source_records_pkey",
+    ),
+}
+_DEDUP_REFRESH_NO_SEQ_SCAN_RELATIONS = (
+    "features",
+    "source_links",
+    "source_entities",
+    "source_entity_heads",
+    "source_records",
+)
+
 
 def _assert_no_seq_scan_on(plan: dict[str, Any], relation_name: str) -> None:
     seq_scans = [
         node
         for node in _walk_plan(plan)
-        if node.get("Node Type") == "Seq Scan"
+        if node.get("Node Type") in {"Seq Scan", "Parallel Seq Scan"}
         and node.get("Relation Name") == relation_name
     ]
-    assert not seq_scans, f"unexpected Seq Scan on {relation_name}: {seq_scans}"
+    assert not seq_scans, (
+        f"unexpected sequential scan on {relation_name}: {seq_scans}\n"
+        "EXPLAIN (FORMAT JSON, SETTINGS):\n"
+        f"{_format_plan(plan)}"
+    )
+
+
+def _index_names_for_relation(plan: dict[str, Any], relation_name: str) -> set[str]:
+    index_names: set[str] = set()
+
+    def visit(node: dict[str, Any], active_relation: str | None = None) -> None:
+        node_relation = node.get("Relation Name") or active_relation
+        if node_relation == relation_name and node.get("Index Name") is not None:
+            index_names.add(str(node["Index Name"]))
+        for child in node.get("Plans", []):
+            visit(child, node_relation)
+
+    visit(plan)
+    return index_names
+
+
+def _assert_relation_uses_index(
+    plan: dict[str, Any], relation_name: str, *expected: str
+) -> None:
+    used = _index_names_for_relation(plan, relation_name)
+    allowed = set(expected)
+    assert used, (
+        f"{relation_name} expected an index from {expected}, used={sorted(used)}\n"
+        "EXPLAIN (FORMAT JSON, SETTINGS):\n"
+        f"{_format_plan(plan)}"
+    )
+    assert used <= allowed, (
+        f"{relation_name} expected only indexes from {expected}, used={sorted(used)}\n"
+        "EXPLAIN (FORMAT JSON, SETTINGS):\n"
+        f"{_format_plan(plan)}"
+    )
+
+
+def _assert_dedup_refresh_is_index_compatible(plan: dict[str, Any]) -> None:
+    for relation_name in _DEDUP_REFRESH_NO_SEQ_SCAN_RELATIONS:
+        _assert_no_seq_scan_on(plan, relation_name)
+    for relation_name, expected in _DEDUP_REFRESH_ACCESS_BY_RELATION.items():
+        _assert_relation_uses_index(plan, relation_name, *expected)
 
 
 async def _walk_dedup_review_ids(
@@ -1190,30 +1292,48 @@ async def test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible(
 ) -> None:
     await _seed_live_like_perf_data(migrated_session)
 
+    dedup_params = {
+        "provider": "python-mois-api",
+        "dataset_key": "mois_license_features_bulk",
+        "kinds": ["place"],
+        "categories": None,
+        "cursor_updated_at": None,
+        "cursor_feature_id": None,
+        "limit": 500,
+    }
+    provider_dataset_count = int(
+        await migrated_session.scalar(
+            text("SELECT count(*) FROM provider_sync.provider_datasets")
+        )
+        or 0
+    )
+    assert provider_dataset_count <= 100, (
+        "provider_datasets dimension grew beyond the H50 small-table Seq Scan exception: "
+        f"count={provider_dataset_count}"
+    )
     dedup_refresh = await _explain_json(
         migrated_session,
         dedup_refresh_repo._LIST_DEDUP_FEATURES_SQL,
-        {
-            "provider": "python-mois-api",
-            "dataset_key": "mois_license_features_bulk",
-            "kinds": ["place"],
-            "categories": None,
-            "cursor_updated_at": None,
-            "cursor_feature_id": None,
-            "limit": 500,
-        },
+        dedup_params,
     )
-    # T-VN-33: record가 dataset 자연키 사본을 잃으면서
+    # T-VN-33/H50: record가 dataset 자연키 사본을 잃으면서
     # ``idx_source_records_provider_dataset_entity``가 사라졌다. planner는 dataset에서
     # entity로 들어가면 ``idx_source_entities_provider_dataset``를, source link에서
-    # entity로 들어가면 exact key+dataset unique index를 쓸 수 있다. 둘 다 entity의
-    # canonical dataset FK를 타는 index-compatible 경로다.
-    _assert_uses_index(
-        dedup_refresh,
-        "idx_source_entities_provider_dataset",
-        "uq_source_entities_key_dataset",
-        "idx_features_dedup_refresh_keyset",
+    # entity로 들어가면 entity PK/``uq_source_entities_key_dataset``를 쓸 수 있다. CI의
+    # 비용 경계에서 ``idx_source_links_entity``를 고르는 경우도 source_links·source_entities·
+    # provider_datasets 각 relation의 역할별 index 조건을 함께 만족해야 한다.
+    _assert_dedup_refresh_is_index_compatible(dedup_refresh)
+
+    # H50: forced-index compatibility만 보면 ``enable_seqscan=off``가 숨긴 기본
+    # planner 회귀를 놓친다. 같은 seed·통계에서 default planner도 동일한 semantic
+    # relation/index 조건을 만족해야 한다.
+    dedup_refresh_default = await _explain_json(
+        migrated_session,
+        dedup_refresh_repo._LIST_DEDUP_FEATURES_SQL,
+        dedup_params,
+        force_index=False,
     )
+    _assert_dedup_refresh_is_index_compatible(dedup_refresh_default)
 
     f4_sample = await _explain_json(
         migrated_session,

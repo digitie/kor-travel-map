@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# T-VN-41S `0230` 격리 DB 리허설 게이트.
+# T-VN-41S `0231` 격리 DB 리허설 게이트.
 #
 # 본문은 scripts/tvn41s_material_rehearsal.py에 있다 — 왜 빈 DB로는 검증이 안 되는지도
 # 그 docstring에 적혀 있다. 이 파일은 격리 DB를 만들고 자격증명을 넘긴 뒤 지우는

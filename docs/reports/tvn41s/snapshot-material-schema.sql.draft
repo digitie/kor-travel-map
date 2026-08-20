@@ -1,10 +1,10 @@
--- SUPERSEDED (2026-08-20): 실제 revision은 `alembic/versions/0230_tvn41s_snapshot_material.py`다.
+-- SUPERSEDED (2026-08-20): 실제 revision은 `alembic/versions/0231_tvn41s_snapshot_material.py`다.
 -- 이 파일은 그 migration이 무엇에서 출발했는지 보여 주는 **역사 기록**이며 현재 스키마가
--- 아니다. 아래와 실제가 다른 곳이 넷 있고, 각각의 근거는 0230 docstring에 있다.
+-- 아니다. 아래와 실제가 다른 곳이 넷 있고, 각각의 근거는 0231 docstring에 있다.
 --
 --   1. identity UNIQUE -> `WHERE compacted_at IS NULL` partial unique
 --      (compaction된 material이 identity를 영구 점유하는 것을 막는다)
---   2. `material_bytes` NOT NULL -> NULL 허용 (0230 이전 material에는 실측이 없다)
+--   2. `material_bytes` NOT NULL -> NULL 허용 (0231 이전 material에는 실측이 없다)
 --   3. 정리용 추가 인덱스 없음 (planner가 고르는 것을 보이지 못했다)
 --   4. 새 두 표에 append-only fence 추가 (material은 `compacted_at` 1회 전이만 허용)
 --

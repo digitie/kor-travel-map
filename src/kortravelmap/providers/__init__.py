@@ -18,7 +18,8 @@ gateway 신규 생성 금지 (ADR-006).
 | ``kor_travel_concierge`` | kor-travel-concierge | YouTube 장소 후보 |
 | ``krairport`` | python-krairport-api | 공항 메타데이터 |
 | ``krex`` | python-krex-api | 휴게소 multi-kind |
-| ``krforest`` | python-krforest-api | 휴양림·수목원 |
+| ``krforest`` | python-krforest-api | 휴양림·수목원·등산로·둘레길 |
+| ``krforest_safety`` | python-krforest-api | 산악기상·산불위험·산사태 예보 |
 | ``krheritage`` | python-krheritage-api | 국가유산 place/area/event |
 | ``mcst`` | python-mcst-api | 문체부 파일데이터 CSV |
 | ``mois`` | python-mois-api | 인허가 LOCALDATA lifecycle |
@@ -31,11 +32,9 @@ gateway 신규 생성 금지 (ADR-006).
 - ``feature_operation_registry`` — DB operation key → Dagster handler 결박 registry (T-VN-33)
 - ``knps_name_translations`` — ``knps``가 쓰는 이름 대역표
 
-ADR-034의 9단계 **계획 순서**와 미구현 dataset(``krforest_trails`` /
-``krforest_mountain_weather`` / ``krforest_safety_notices`` / ``forest_fire_risk`` /
-``khoa_coastal_notices``)의 정본은 ``docs/architecture/provider-contract.md``다.
-여기에 계획을 다시 적지 않는다 — 2026-05 계획표가 그대로 굳어 존재하지 않는 모듈 3개를
-나열하고 실재하는 6개를 빠뜨린 것이 이 문단을 고쳐 쓰게 된 이유다.
+ADR-034의 9단계 **계획 순서**와 krforest dataset의 정본은
+``docs/architecture/provider-contract.md``다. C05A route와 C05B~D 안전·기상 변환은
+이 namespace에서 구현한다.
 
 ADR 참조
 --------
@@ -156,14 +155,47 @@ from kortravelmap.providers.krex import (
 from kortravelmap.providers.krforest import (
     ARBORETUM_CATEGORY,
     DATASET_KEY_ARBORETUMS,
+    DATASET_KEY_DULLE_TRAILS,
+    DATASET_KEY_MOUNTAIN_TRAILS,
     DATASET_KEY_RECREATION_FORESTS,
+    FOREST_ROUTE_CATEGORY,
+    FOREST_ROUTE_MARKER_COLOR,
     KRFOREST_MARKER_COLOR,
     KRFOREST_PROVIDER_NAME,
     RECREATION_FOREST_CATEGORY,
     ForestSpatialItem,
+    ForestTrailItem,
     RecreationForestItem,
     arboretums_to_bundles,
+    dulle_trails_to_bundles,
+    forest_trails_to_bundles,
+    mountain_trails_to_bundles,
     recreation_forests_to_bundles,
+)
+from kortravelmap.providers.krforest_safety import (
+    KRFOREST_SAFETY_NORMALIZATION_VERSION,
+    LANDSLIDE_FORECAST_DATASET_KEY,
+    LANDSLIDE_FORECAST_MARKER_COLOR,
+    LANDSLIDE_FORECAST_MARKER_ICON,
+    LANDSLIDE_FORECAST_SOURCE_ENTITY_TYPE,
+    MOUNTAIN_WEATHER_DATASET_KEY,
+    MOUNTAIN_WEATHER_MARKER_COLOR,
+    MOUNTAIN_WEATHER_MARKER_ICON,
+    MOUNTAIN_WEATHER_SOURCE_ENTITY_TYPE,
+    WILDFIRE_RISK_DATASET_KEY,
+    WILDFIRE_RISK_MARKER_COLOR,
+    WILDFIRE_RISK_MARKER_ICON,
+    WILDFIRE_RISK_SOURCE_ENTITY_TYPE,
+    LandslideForecastIssueItem,
+    MountainWeatherItem,
+    WildfireRiskForecastItem,
+    landslide_active_lineage_keys,
+    landslide_forecast_issues_to_bundles,
+    mountain_weather_stations_to_bundles,
+    mountain_weather_to_values,
+    wildfire_risk_forecasts_to_bundles,
+    wildfire_risk_region_key,
+    wildfire_risk_to_values,
 )
 from kortravelmap.providers.krheritage import (
     DATASET_KEY_EVENT as KRHERITAGE_DATASET_KEY_EVENT,
@@ -356,14 +388,46 @@ __all__ = [
     # krforest (T-RV-53, ADR-034 8단계 — 휴양림/수목원, MOIS-sibling)
     "RecreationForestItem",
     "ForestSpatialItem",
+    "ForestTrailItem",
     "recreation_forests_to_bundles",
     "arboretums_to_bundles",
+    "forest_trails_to_bundles",
+    "mountain_trails_to_bundles",
+    "dulle_trails_to_bundles",
     "DATASET_KEY_RECREATION_FORESTS",
     "DATASET_KEY_ARBORETUMS",
+    "DATASET_KEY_MOUNTAIN_TRAILS",
+    "DATASET_KEY_DULLE_TRAILS",
     "RECREATION_FOREST_CATEGORY",
     "ARBORETUM_CATEGORY",
+    "FOREST_ROUTE_CATEGORY",
+    "FOREST_ROUTE_MARKER_COLOR",
     "KRFOREST_MARKER_COLOR",
     "KRFOREST_PROVIDER_NAME",
+    # krforest safety (C05B~D — 산악기상·산불위험·산사태)
+    "MountainWeatherItem",
+    "mountain_weather_stations_to_bundles",
+    "mountain_weather_to_values",
+    "MOUNTAIN_WEATHER_DATASET_KEY",
+    "MOUNTAIN_WEATHER_SOURCE_ENTITY_TYPE",
+    "MOUNTAIN_WEATHER_MARKER_ICON",
+    "MOUNTAIN_WEATHER_MARKER_COLOR",
+    "WildfireRiskForecastItem",
+    "wildfire_risk_forecasts_to_bundles",
+    "wildfire_risk_region_key",
+    "wildfire_risk_to_values",
+    "WILDFIRE_RISK_DATASET_KEY",
+    "WILDFIRE_RISK_SOURCE_ENTITY_TYPE",
+    "WILDFIRE_RISK_MARKER_ICON",
+    "WILDFIRE_RISK_MARKER_COLOR",
+    "LandslideForecastIssueItem",
+    "landslide_forecast_issues_to_bundles",
+    "landslide_active_lineage_keys",
+    "LANDSLIDE_FORECAST_DATASET_KEY",
+    "LANDSLIDE_FORECAST_SOURCE_ENTITY_TYPE",
+    "LANDSLIDE_FORECAST_MARKER_ICON",
+    "LANDSLIDE_FORECAST_MARKER_COLOR",
+    "KRFOREST_SAFETY_NORMALIZATION_VERSION",
     # kma (PR#38 short, PR#39 nowcast, PR#41 ultra_short, PR#46 alerts —
     # ADR-010)
     "KmaShortForecastItem",

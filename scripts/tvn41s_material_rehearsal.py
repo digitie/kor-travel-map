@@ -1,4 +1,4 @@
-"""T-VN-41S `0230` migration을 격리 DB에서 실측한다.
+"""T-VN-41S `0231` migration을 격리 DB에서 실측한다.
 
 **빈 DB로는 이 migration을 검증할 수 없다.** backfill/dedupe 문장을 한 줄도 타지 않기
 때문이다. 실제로 빈 경로에서는 `min(uuid)` aggregate 부재, receipt append-only fence,
@@ -124,7 +124,7 @@ async def main() -> int:
     os.environ["KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE"] = "true"
 
     print("\n== 1) 0229까지 ==")
-    await asyncio.to_thread(command.upgrade, config, "0229_tvn40b_source_rule_action")
+    await asyncio.to_thread(command.upgrade, config, "0230_tvn_c05_krforest_datasets")
 
     print("\n== 2) 합칠 그룹 심기 (identity 1 · receipt 3 · item 2행씩) ==")
     db = make_async_engine(
@@ -182,8 +182,8 @@ async def main() -> int:
             ).scalar_one()
         print(f"  심은 receipt={seeded_receipts} item={seeded_items}")
 
-        print("\n== 3) 0230 ==")
-        await asyncio.to_thread(command.upgrade, config, "0230_tvn41s_snapshot_material")
+        print("\n== 3) 0231 ==")
+        await asyncio.to_thread(command.upgrade, config, "0231_tvn41s_snapshot_material")
 
         print("\n== 4) 결과 ==")
         async with db.connect() as conn:
@@ -414,7 +414,7 @@ async def main() -> int:
     except RuntimeError as error:
         # "forward-only"만 보면 `alembic/env.py`의 0200 경계 guard가 발화해도
         # 통과한다(그 문구도 forward-only를 담는다). revision id까지 본다.
-        refused = "0230_tvn41s_snapshot_material is forward-only" in str(error)
+        refused = "0231_tvn41s_snapshot_material is forward-only" in str(error)
         print(f"  거부됨: {str(error)[:90]}")
     check("downgrade 거부", refused, True)
 

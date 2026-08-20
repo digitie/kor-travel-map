@@ -104,6 +104,24 @@ class _Client:
         )
 
 
+class _SnapshotClient(_Client):
+    def __init__(self) -> None:
+        super().__init__()
+        self.snapshot_calls: list[dict[str, object]] = []
+
+    async def load_authoritative_feature_snapshot(
+        self, bundles: list[_Bundle], **kwargs: object
+    ) -> tuple[FeatureLoadResult, int]:
+        self.snapshot_calls.append(dict(kwargs))
+        return (
+            FeatureLoadResult(
+                bundles_total=len(bundles),
+                features_inserted=len(bundles),
+            ),
+            0,
+        )
+
+
 def _receipt(
     *,
     authoritative_snapshot_complete: bool = True,
@@ -205,6 +223,45 @@ async def test_load_feature_bundles_for_dagster_chunks_db_load(
     assert result.load.bundles_total == 5
     assert result.load.features_inserted == 5
     assert context.metadata[-1]["bundles_total"] == 5
+
+
+async def test_authoritative_snapshot_can_retire_absent_source_entities(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bundles = [_bundle("route-1"), _bundle("route-2")]
+    context = _Context()
+    client = _SnapshotClient()
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.validate_feature_bundles_address",
+        lambda items: FeatureAddressValidationSummary(
+            total=len(items),
+            issue_count=0,
+            error_count=0,
+            warning_count=0,
+            issues=(),
+        ),
+    )
+
+    result = await load_feature_bundles_for_dagster(
+        context=context,  # type: ignore[arg-type]
+        client=client,  # type: ignore[arg-type]
+        bundles=bundles,  # type: ignore[arg-type]
+        provider="python-krforest-api",
+        dataset_key="krforest_mountain_trails",
+        authoritative_snapshot_complete=True,
+        source_entity_type="mountain_trail_segment",
+        retire_absent_from_snapshot=True,
+    )
+
+    assert result.load.bundles_total == 2
+    assert client.snapshot_calls == [
+        {
+            "provider": "python-krforest-api",
+            "dataset_key": "krforest_mountain_trails",
+            "source_entity_type": "mountain_trail_segment",
+            "retire_absent_from_snapshot": True,
+        }
+    ]
 
 
 async def test_streaming_feature_batches_keep_one_atomic_loader_call(

@@ -1,6 +1,6 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-08-20 — T-VN-41S material/receipt 분리 착지 (`0230`)
+## 2026-08-20 — T-VN-41S material/receipt 분리 착지 (`0231`)
 
 `T-VN-41S`의 후속 종료선에서 **EXPLAIN·1M soak을 뺀 전부**가 닫혔다.
 
@@ -43,6 +43,61 @@ barrier가 유지되고 그 값은 hung writer 최대 정지 시간이기도 하
 결정이다. 선택지 셋과 비용은 soak 보고서 §"열린 결정"과 `docs/tasks.md`에 있다.
 
 그 결정 뒤에 #922와 T-VN-41S를 완료로 표시한다.
+## 2026-08-21 — 완료 task를 정본 원장으로 이관
+
+`T-VN-H50`(PR #1036), `T-VN-C05A`~`C05D`(PR #1037),
+`T-C7-BROWSER-EVIDENCE`·`T-C7-SCOPE-REGISTRY`·`T-C7-LIVE-SERIAL`·
+`T-FE-MOCK-MANIFEST`(PR #1038)는 모두 머지되어 `tasks-done.md`로 이관했다.
+`tasks.md`에는 `T-VN-40B` 잔여와 `T-FE-MOCK-FLAKE`를 포함한 미완료 실행 단위만 남겼다.
+
+### 다음 한 작업
+
+완료 이관 뒤의 우선순위는 [`tasks.md`](tasks.md) 상단 인덱스의 열린 항목을 따른다.
+이번 정리에서 새 구현 작업은 추가하지 않았다.
+
+## 2026-08-20 — T-VN-C05A~D provider 머지 후 map 최종 게이트
+
+`python-krforest-api` PR #9를 `4681bc7892239adc28aeeab19dba707aefb1dbde`로 머지했고,
+map의 provider pin도 같은 SHA로 갱신했다. map 브랜치는 최신 `origin/main`에 재베이스했으며
+현재 Alembic head 뒤에 C05 catalog migration `0230`을 두어 기존 `0229` 경로를 보존한다.
+provider n150 debug UI 스모크와 data.go.kr live API 9건은 통과했고, 산림안전·산사태 2건은
+현재 키 권한 범위의 서버 거부를 xfail로 확인했다. map 운영 UI도 n150 Playwright에서 인증 후
+`/admin/features` heading/table과 검색·kind 필터를 확인했으며, 인증 후 non-GET 요청 0건으로
+읽기 전용 live UI E2E를 통과했다.
+첫 원격 Python matrix는 C05A~D 신규 handler 5개를 반영하지 않은 기존 registry count 33에서
+실패했으며, 기대값을 38로 갱신해 재실행한다.
+
+### 다음 한 작업
+
+map CI 전체 green과 required review를 확인한 뒤 map PR을 merge한다.
+
+## 2026-08-20 — T-VN-H50 마지막 planner 경로 보강
+
+H50의 두 적대 리뷰어가 공통으로 재현한 `source_entities_pkey` false-fail을 수정했다.
+`source_records`의 근거 약한 복합 unique 허용도 제거하고, relation별 모든 index scan이
+allowlist 안에 있는지 검사하도록 gate를 좁혔다. forced/default plan, `Settings`, 작은
+`provider_datasets` 예외의 cardinality bound는 유지한다. 로컬 대상 테스트 6회 연속과
+모듈 전체 8건은 통과했고 GitHub Actions의 남은 3.12 job 완료를 기다린다.
+
+### 당시 다음 한 작업
+
+두 전문 리뷰어에게 H50 최종 재검토를 요청하고, GitHub Actions 전체 green 확인 후 H50
+문서·PR을 갱신하고 merge한다.
+## 2026-08-20 — T-VN-C05A~D 산림청 데이터 연결 완료
+
+`python-krforest-api`에 C05A 중첩 SHP route와 C05B 산악기상, C05C 산불위험 V2,
+C05D 산사태 예보발령 typed 모델을 구현하고, `kor-travel-map`에 순차적으로 직접 연결했다.
+등산로·둘레길은 월 1회, 산악기상·산불위험·산사태는 KST 기준 하루 6회 schedule을 사용한다.
+각 데이터셋은 Dagster resource/fetcher/asset, operation registry, fixture preview, baseline
+provider dataset·scope까지 등록했다. 두 전문 리뷰어의 P1 지적을 반영해 typed API strict
+mypy, 시군구 코드, source identity 충돌, body-level API key redaction을 보강했다.
+최신 main의 기존 `0229`를 보존하면서 C05 catalog를 `0230`으로 `0229` 뒤에 연결했고,
+asyncpg/identity 호환을 포함한 Alembic metadata integration 7건을 통과시켰다.
+
+### 당시 다음 한 작업
+
+두 PR의 CI·live UI E2E와 provider 병합을 확인한 뒤, 병합 SHA로 map provider pin을 갱신하고
+map PR을 병합한다.
 
 ## 2026-08-20 — T-VN-41F1D-E 저장소측 완료 (v4 퇴역 → v5/v7)
 
@@ -111,8 +166,6 @@ backup tranche와 실제 route 활성화는 아직 남아 있다.
 `T-VN-M01`의 `0226` forward-only migration·ACL·backup tranche를 구현·검증한다. 그 뒤에도
 `T-VN-41S`·C05 provider dataset·H34 잔여가 `T-VN-FINAL-REBUILD` 배리어를 유지하며,
 파괴적 rebuild와 D1/D2/final C7 live는 주요 개발 완료 뒤에만 실행한다.
-||||||| parent of d77ea42d (docs(c7): #995 접어넣기와 C7 두 항목 종결 기록)
-
 ## 2026-08-20 — 파괴적 재구축을 배리어로 분리 (`T-VN-FINAL-REBUILD` 신설)
 
 사용자 결정: `T-VN-41F1D-D1`의 파괴적 rebuild(`ktdctl pinvi-pair rebuild-pinned --confirm` —

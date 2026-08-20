@@ -222,7 +222,7 @@ _OPS_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "poi_cache_target_refresh_members": _ORDINARY_OPS,
     "poi_cache_target_restore_fences": _ORDINARY_OPS,
     "poi_cache_target_snapshot_gc_observations": _ORDINARY_OPS,
-    # 아래 둘은 `0230`이 legacy `poi_cache_target_snapshot_items`를
+    # 아래 둘은 `0231`이 legacy `poi_cache_target_snapshot_items`를
     # material/receipt로 가르며 생겼다. 그 표의 권한을 물려받았을 뿐이다.
     "poi_cache_target_snapshot_material_items": _ORDINARY_OPS,
     "poi_cache_target_snapshot_materials": _ORDINARY_OPS,

@@ -164,7 +164,13 @@
       "down_revision": [
         "0229_tvn40b_source_rule_action"
       ],
-      "revision": "0230_tvn41s_snapshot_material"
+      "revision": "0230_tvn_c05_krforest_datasets"
+    },
+    {
+      "down_revision": [
+        "0230_tvn_c05_krforest_datasets"
+      ],
+      "revision": "0231_tvn41s_snapshot_material"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

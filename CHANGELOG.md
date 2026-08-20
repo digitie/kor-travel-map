@@ -11,7 +11,7 @@
 받아갔는가**(receipt)를 겸하고 item FK도 `snapshot_id`를 직접 가리켰다. 그래서 material
 양방향 공유와 terminal item compaction이 둘 다 표현 불가능했다.
 
-- **ADDED (DB)**: migration `0230_tvn41s_snapshot_material`이
+- **ADDED (DB)**: migration `0231_tvn41s_snapshot_material`이
   `ops.poi_cache_target_snapshot_materials`(identity `(external_system, restore_epoch,
   material_high_watermark_relay_order)` · partial unique `WHERE compacted_at IS NULL`)와
   `ops.poi_cache_target_snapshot_material_items`(PK/FK `(material_id, row_number)`)를 만든다.
@@ -42,6 +42,14 @@
 - **CHANGED (runtime ACL)**: `ops` 스키마를 `feature`와 같은 강도로 만들었다. 선언 없는 ops
   relation은 조용히 full CRUD를 받는 대신 배포를 막는다. 실측으로 표 57개 중 48개가 그
   침묵 경로였고, 모델에 없는 ops 표 17개가 더 있었다.
+### 산림청 C05A~D 연결 (2026-08-20)
+
+- **ADDED**: `python-krforest-api`의 등산로·둘레길 route, 산악기상 관측,
+  산불위험 V2 지수, 산사태 예보발령·해제 typed source를 map ETL에 연결했다.
+- **ADDED**: route 월 1회, 산악기상·산불위험·산사태 하루 6회 Dagster schedule과
+  provider dataset/operation/fixture preview를 등록했다.
+- **FIXED**: source lineage와 snapshot lifecycle을 보존하고, provider typed 모델의
+  시군구 identity·HTTP error redaction·route source identity 경계를 보강했다.
 
 ### T-VN-40C — legacy curation overlay 물리 제거 (2026-08-20)
 

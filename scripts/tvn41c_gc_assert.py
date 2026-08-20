@@ -30,7 +30,7 @@ from kortravelmap.infra.db import make_async_engine
 
 _COUNTS_SQL: Final = text(
     """
-    -- `0230` 뒤 item은 material에 달려 있다. "적격 item"은 **정리 대상 material의
+    -- `0231` 뒤 item은 material에 달려 있다. "적격 item"은 **정리 대상 material의
     -- item**이다 — 만료·미참조 receipt가 지워지면 그 material이 orphan이 되고 그때
     -- item이 지워진다. receipt 하나를 보고 그 item을 세던 앞판 셈은 receipt N개가
     -- material 하나를 공유하는 지금 모델에서 같은 item을 여러 번 센다.
@@ -156,7 +156,7 @@ async def _drain(dsn: str) -> list[str]:
             "삭제 수 불일치 eligible_headers: "
             f"deleted={result.deleted_headers} expected={before['eligible_headers']}"
         )
-    # item은 **정확 일치를 요구하지 않는다.** `0230` 뒤 GC는 적격 item(붙잡은 receipt가
+    # item은 **정확 일치를 요구하지 않는다.** `0231` 뒤 GC는 적격 item(붙잡은 receipt가
     # 전부 만료·미참조인 material의 item) 외에 보존 기간을 넘긴 terminal audit
     # material의 item도 지운다. 그쪽은 정의상 "적격"이 아니므로 정확 일치를 요구하면
     # 보존 기간이 조정되는 순간 게이트가 거짓 실패한다(적대 리뷰 지적).

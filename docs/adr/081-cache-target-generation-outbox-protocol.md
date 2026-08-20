@@ -193,7 +193,7 @@ UUID를 성공 응답으로 내보내지 않는다. 응답은 `created_at`과 `e
 capture 당시 material watermark와 global cursor를 **각각** 저장하고, 현재 material watermark와 exact
 equality일 때 full head 재주사 없이 재사용한다.
 
-**2026-08-20(migration `0230`) 갱신**: "75분보다 긴 수명이 남을 때만"이라는 조건이 사라졌다. 그
+**2026-08-20(migration `0231`) 갱신**: "75분보다 긴 수명이 남을 때만"이라는 조건이 사라졌다. 그
 조건은 재사용이 앞선 snapshot **행 자체**를 물려받아 만료 시각까지 함께 물려받던 시절의 것이다.
 material과 receipt가 갈린 뒤 재사용은 새 receipt를 만들므로 언제나 full TTL로 시작한다. 대신
 consumer가 보는 것이 하나 바뀐다 — 같은 source 상태를 다시 요청하면 `snapshot_id`가 **달라지고**
@@ -248,8 +248,8 @@ reconciliation seal도 generic page와 **같은** 재사용 경로를 쓴다. ex
 살아 있는(`compacted_at IS NULL`) material을 찾아 자기 receipt를 붙인다. 재사용 후보에서 "만료됐는가",
 "reconciliation이 참조하는가"를 보지 않는다 — 그 둘은 receipt의 성질이지 material의 성질이 아니다.
 
-**2026-08-20(migration `0230`) 착지**: generic/reconciliation별 독립 receipt가 같은 material을 양방향
-공유하고 terminal item을 compact하는 정규화 스키마가 들어갔다. `0225` 뒤 `0230`이다.
+**2026-08-20(migration `0231`) 착지**: generic/reconciliation별 독립 receipt가 같은 material을 양방향
+공유하고 terminal item을 compact하는 정규화 스키마가 들어갔다. `0225` 뒤 `0231`이다.
 `ops.poi_cache_target_snapshot_materials`가 membership을, `ops.poi_cache_target_snapshots`가 receipt를
 소유하며 item PK/FK는 `(material_id, row_number)`다. 살아 있는 material은 identity마다 하나
 (partial unique `WHERE compacted_at IS NULL`)이고, compaction된 material은 그 identity를 비워 준다.

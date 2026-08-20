@@ -247,7 +247,7 @@ stream에서 늦게 commit되는 더 낮은 event를 추월하지 않는 commit-
 전역 uniqueness만 제공하고 서로 다른 stream의 commit 순서를 보장하지 않는다. snapshot reuse cursor는 생성 당시의 안전한 lower-bound로
 유지될 수 있으므로 PinVi는 그 뒤 event를 재조회하고 immutable inbox receipt로 중복을 제거한다.
 
-**2026-08-20(Map migration `0230`)**: snapshot이 material(무엇을 고정했는가)과 receipt(누가 언제
+**2026-08-20(Map migration `0231`)**: snapshot이 material(무엇을 고정했는가)과 receipt(누가 언제
 받아갔는가)로 갈렸다. PinVi가 보는 변화는 하나다 — 같은 source 상태를 다시 요청하면 `snapshot_id`가
 **달라진다**. 따라서 "같은 snapshot을 받았는가"는 `snapshot_id`가 아니라 `merkle_root`/`count`로
 판정해야 한다. 재사용 receipt는 만료 시각을 물려받지 않고 매번 full TTL로 시작한다.

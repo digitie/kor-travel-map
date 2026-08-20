@@ -79,6 +79,11 @@ provider record resource:
 - `knps_geometry_records`
 - `krforest_recreation_forests`
 - `krforest_arboretums`
+- `krforest_mountain_trails`
+- `krforest_dulle_trails`
+- `krforest_mountain_weather`
+- `krforest_wildfire_risk_forecast`
+- `krforest_landslide_forecast_issues`
 - `standard_museums`
 - `standard_tourist_attractions`
 - `standard_parking_lots`
@@ -112,6 +117,11 @@ credential이 없거나 아직 guard로 남은 resource는 운영 실행 전에
 | `knps_geometry_records` | `python-knps-api` | 없음 | 없음 |
 | `krforest_recreation_forests` | `python-krforest-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `krforest_arboretums` | `python-krforest-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
+| `krforest_mountain_trails` | `python-krforest-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
+| `krforest_dulle_trails` | `python-krforest-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
+| `krforest_mountain_weather` | `python-krforest-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
+| `krforest_wildfire_risk_forecast` | `python-krforest-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
+| `krforest_landslide_forecast_issues` | `python-krforest-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `standard_museums` | `python-datagokr-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `standard_tourist_attractions` | `python-datagokr-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `standard_parking_lots` | `python-datagokr-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
@@ -139,6 +149,11 @@ credential이 없거나 아직 guard로 남은 resource는 운영 실행 전에
 | `feature_place_knps_points_monthly_schedule` | `feature_place_knps_points_job` | `45 3 3 * *` |
 | `feature_geometry_knps_records_monthly_schedule` | `feature_geometry_knps_records_job` | `15 4 3 * *` |
 | `feature_place_kor_travel_concierge_youtube_monthly_schedule` | `feature_place_kor_travel_concierge_youtube_job` | `40 3 3 * *` |
+| `feature_route_krforest_mountain_trails_monthly_schedule` | `feature_route_krforest_mountain_trails_job` | `0 2 1 * *` |
+| `feature_route_krforest_dulle_trails_monthly_schedule` | `feature_route_krforest_dulle_trails_job` | `15 2 1 * *` |
+| `feature_weather_krforest_mountain_weather_six_daily_schedule` | `feature_weather_krforest_mountain_weather_job` | `0 1,5,9,13,17,21 * * *` |
+| `feature_weather_krforest_wildfire_risk_forecast_six_daily_schedule` | `feature_weather_krforest_wildfire_risk_forecast_job` | `10 1,5,9,13,17,21 * * *` |
+| `feature_notice_krforest_landslide_forecast_issues_six_daily_schedule` | `feature_notice_krforest_landslide_forecast_issues_job` | `20 1,5,9,13,17,21 * * *` |
 
 ## Curation candidate 갱신
 

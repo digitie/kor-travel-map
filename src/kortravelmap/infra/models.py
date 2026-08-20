@@ -6251,7 +6251,7 @@ class PoiCacheTargetOutboxClaimEventRow(Base):
 
 
 class PoiCacheTargetSnapshotMaterialRow(Base):
-    """한 MVCC view에서 고정한 source membership 하나(0230).
+    """한 MVCC view에서 고정한 source membership 하나(0231).
 
     identity는 `(external_system, restore_epoch, material_high_watermark_relay_order)`다.
     UNIQUE는 `compacted_at IS NULL`에만 건다 — compaction된 material이 identity를 영구
@@ -6329,7 +6329,7 @@ class PoiCacheTargetSnapshotMaterialRow(Base):
         nullable=False,
     )
     item_count: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    #: 0230 이전 material에는 canonical byte 실측이 없다. 발명하지 않고 NULL로 둔다.
+    #: 0231 이전 material에는 canonical byte 실측이 없다. 발명하지 않고 NULL로 둔다.
     material_bytes: Mapped[int | None] = mapped_column(BigInteger)
     merkle_root: Mapped[str] = mapped_column(Text, nullable=False)
     materialized_at: Mapped[datetime] = mapped_column(
@@ -6345,7 +6345,7 @@ class PoiCacheTargetSnapshotMaterialRow(Base):
 
 
 class PoiCacheTargetSnapshotMaterialItemRow(Base):
-    """material에 고정한 NFC byte-order canonical row(0230).
+    """material에 고정한 NFC byte-order canonical row(0231).
 
     `external_system`은 material이 소유하므로 여기 두지 않는다 — 1,000,000행짜리 표에서
     material마다 같은 값을 되풀이할 이유가 없다.
@@ -6390,7 +6390,7 @@ class PoiCacheTargetSnapshotMaterialItemRow(Base):
 
 
 class PoiCacheTargetSnapshotRow(Base):
-    """material 하나를 누가 언제 받아갔는지 적는 immutable receipt(0230).
+    """material 하나를 누가 언제 받아갔는지 적는 immutable receipt(0231).
 
     material은 `PoiCacheTargetSnapshotMaterialRow`가 소유한다. generic page와
     reconciliation은 각자 receipt를 만들고 같은 material을 가리키므로, 한쪽이 다른 쪽의

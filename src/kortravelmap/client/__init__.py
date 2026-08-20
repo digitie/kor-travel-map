@@ -164,6 +164,7 @@ from kortravelmap.infra.feature_repo import (
     load_bundles,
     load_source_record_links,
     resolve_active_provider_dataset_id,
+    retire_features_absent_from_snapshot,
     retire_features_by_source_entity_ids,
     retire_geometryless_area_features_by_source,
     supersede_stale_notice_features,
@@ -1073,22 +1074,40 @@ class AsyncKorTravelMapClient:
         source_entity_type: str,
         retired_source_entity_ids: set[str] | None = None,
         retire_geometryless_areas: bool = False,
+        retire_absent_from_snapshot: bool = False,
     ) -> tuple[FeatureLoadResult, int]:
         """적재·provider lifecycle·curation seal을 한 causal transaction으로 닫는다."""
 
-        if retired_source_entity_ids and retire_geometryless_areas:
+        if (
+            retired_source_entity_ids is not None
+            and retire_geometryless_areas
+        ) or (
+            retired_source_entity_ids is not None
+            and retire_absent_from_snapshot
+        ) or (retire_geometryless_areas and retire_absent_from_snapshot):
             raise ValueError("retirement mode는 하나만 선택해야 합니다")
         materialized = list(bundles)
         async with self._session_factory() as session, session.begin():
             result = await load_bundles(session, materialized)
             retired = 0
-            if retired_source_entity_ids:
+            if retired_source_entity_ids is not None:
                 retired = await retire_features_by_source_entity_ids(
                     session,
                     provider=provider,
                     dataset_key=dataset_key,
                     source_entity_type=source_entity_type,
                     source_entity_ids=retired_source_entity_ids,
+                )
+            elif retire_absent_from_snapshot:
+                retired = await retire_features_absent_from_snapshot(
+                    session,
+                    provider=provider,
+                    dataset_key=dataset_key,
+                    source_entity_type=source_entity_type,
+                    snapshot_source_entity_ids={
+                        bundle.source_record.source_entity_id
+                        for bundle in materialized
+                    },
                 )
             elif retire_geometryless_areas:
                 retired = await retire_geometryless_area_features_by_source(

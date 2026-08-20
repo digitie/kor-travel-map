@@ -1,5 +1,63 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-21 — 완료 task를 `tasks-done.md`로 이관
+
+최신 `origin/main`의 머지 상태를 대조해 H50 planner gate(#1036), 산림청 C05A~D
+dataset(#1037), C7 browser evidence·scope registry·live serial·mock manifest(#1038)를
+완료 원장으로 옮겼다. `tasks.md`의 완료 인덱스·상세 블록을 제거하고, 실제로 남은
+`T-VN-40B` 잔여와 `T-FE-MOCK-FLAKE`는 열린 task로 유지했다. `resume.md`의 현재 진척도도
+같은 기준으로 갱신했다.
+
+## 2026-08-20 — map CI catalog 회귀값 갱신
+
+원격 Python 3.11~3.13 CI가 API unit 1,198건을 실행한 뒤 기존
+`test_handler_registry_is_key_to_handler_only`의 `33` 고정값에서 실패했다. C05A route 2종과
+C05B~D 3종의 정식 handler binding이 추가되어 실제 registry는 38개였으며, 테스트 기대값을
+38로 갱신했다. 해당 테스트 5건과 ruff는 로컬에서 통과했고, 새 SHA로 CI를 재실행한다.
+
+## 2026-08-20 — T-VN-C05A~D provider 머지 및 map pin 고정
+
+두 전문 리뷰어의 적대 검토를 반영한 `python-krforest-api` PR #9를 merge commit
+`4681bc7892239adc28aeeab19dba707aefb1dbde`로 머지하고, map의 provider dependency와
+provider-contract를 같은 SHA로 고정했다. provider 로컬 gate는 ruff·strict mypy·pytest
+42건을 통과했고, n150에 배선된 기존 data.go.kr 키를 출력하지 않고 live API를 실행해 9건을
+통과시켰다. 산림안전·산사태 endpoint 2건은 현재 키의 권한 범위를 서버가 거부해 xfail로
+기록했으며, n150 Playwright에서 provider debug UI의 API key 없는 오류 표면도 확인했다.
+
+운영 map live UI는 n150 Playwright에서 인증 후 `/admin/features`의 heading/table, 검색·kind
+필터를 확인했다. 인증 POST 이후 non-GET 요청은 0건으로, 읽기 전용 live UI E2E를 통과했다.
+자격증명 값은 출력·커밋하지 않았다.
+
+## 2026-08-20 — T-VN-C05A~D: 산림청 route·weather·risk·notice 순차 연결
+
+`python-krforest-api`의 C05A nested SHP route, C05B 산악기상 typed 관측, C05C 산불위험
+V2 예보, C05D 산사태 예보발령 typed 모델을 upstream에서 안정화하고 `kor-travel-map`이
+각 public model을 직접 `FeatureBundle`·`WeatherValue`·notice로 변환하도록 연결했다. C05A는
+월 1회, C05B~D는 하루 6회(`01/05/09/13/17/21시`, 분산 offset)를 사용한다. provider
+dataset 72~74, fixture preview, Dagster record resource/fetcher/asset, operation scope,
+fallback schedule까지 추가했다.
+
+원격 Python 3.12 CI와 rebase에서 최신 main의 `0229`가 이미 머지된 사실을 확인했다. 기존
+`0229`를 다시 쓰지 않고 C05 catalog를 새 forward-only `0230`으로 `0229` 뒤에 연결했다.
+새 migration은 asyncpg가 허용하는 단일 statement 단위로 실행하고 identity key에는
+`OVERRIDING SYSTEM VALUE`를 사용하며, graph artifact·경계 회귀값을 재생성했다.
+`test_alembic_metadata_consistency.py` 7건과 관련 ruff 검사를 통과했다.
+
+두 전문 리뷰어의 적대 검토에서 발견한 strict mypy 오류, sigungu 공식 코드 우선순위,
+이름만 있는 route의 source identity 충돌, HTTP 200 error body의 키 노출을 provider에서
+수정했다. map 쪽에서는 source record·raw lineage와 산사태 발령→해제 snapshot을 보존한다.
+provider PR 병합과 SHA pin은 완료했고, 다음은 map PR의 CI green 및 인증 가능한 운영 map
+읽기 전용 UI E2E 증거를 확인하는 단계다.
+
+## 2026-08-20 — T-VN-C05A: 산림청 등산로·둘레길 route 연결
+
+`python-krforest-api`의 `ForestSpatialFeature`를 직접 소비하는 순수 변환을 추가했다.
+이름·유효 geometry·source identity가 있는 선형 데이터만 `FeatureKind.ROUTE`로 승격하고,
+원천 geometry WKT와 archive lineage를 `SourceRecord`에 보존한다. C05A 두 asset은
+`features_route` 그룹과 월 1회 schedule에 등록했고, API fixture/operation registry와
+baseline provider dataset·operation scope를 함께 갱신했다. C05B~D는 provider typed
+client가 먼저 병합된 뒤 순차 연결한다.
+
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
 ## 2026-08-20 — snapshot을 material과 receipt로 가르고, 내가 만든 두 개의 공허를 잡혔다
@@ -59,6 +117,19 @@ EXPLAIN 게이트는 fixture를 다섯 번 고쳐 쓰게 했다. material이 하
 공짜다 — 셋 다 "인덱스를 탄다"는 통과를 만들면서 아무 것도 재지 않는다. 그 과정에서 내가
 추가했던 인덱스 하나가 planner에게 선택되는 것을 끝내 보이지 못해 지웠다. 근거를 못 만든
 인덱스는 쓰기 비용만 남는다.
+## 2026-08-20 — T-VN-H50 planner gate의 마지막 false-fail 경로 제거
+
+H50 적대적 리뷰어 2명이 최신 구현에서 동일한 P1을 독립 재현했다. `source_entities`가
+`source_entity_key` 동등 join을 PK(`source_entities_pkey`)로 읽는 것은 유효한 canonical
+경로인데 allowlist에서 빠져 있어, source-links-driven plan이 그 경로를 택하면 다시
+false-fail할 수 있었다. `source_entities_pkey`를 추가하고, 실제 SQL의 선두 조건과 맞지
+않는 `source_records` 복합 unique index는 제거했다.
+
+동시에 relation별로 수집한 모든 index scan이 role allowlist에 포함되는지 검사하도록 gate를
+강화했다. forced/default EXPLAIN의 `Settings`·planner mode·전체 plan 진단은 유지하고,
+`provider_datasets`의 Seq Scan 예외는 seed cardinality 100 이하로 제한한다. 대상 테스트
+6회 연속 및 모듈 전체 8건은 통과했으며, GitHub Actions는 Python 3.11·3.13/fixture replay가
+통과하고 3.12 API unit을 실행 중이다.
 
 ## 2026-08-20 — 중복 착수, 그리고 cleanup이 남의 요청을 취소할 수 있었다
 

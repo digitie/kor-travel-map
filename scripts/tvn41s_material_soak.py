@@ -22,8 +22,10 @@
 이 스크립트는 **한 번의 실측 증거**를 남길 뿐 처리량을 보증하지 않는다.
 
 **종료 코드는 셋이다.** `0` = 전부 통과, `3` = 측정 축은 통과했고 **결정 대기** 항목만
-남음, `4` = 실제 퇴행. `0`은 예산·상한 결정이 백로그에서 닫히고 이 스크립트의 결정 항목이
-제거된 뒤에만 나온다 — 그 전까지는 예산 안에 들든 안 들든 `3`이다(둘 다 사람이 볼 일이다). 지금은 `3`이다 — 광고한 1,000,000 item 상한이 배포 build 예산
+남음, `4` = 실제 퇴행, `5` = **결정 대기 항목이 통과하기 시작**했다(보고서·백로그가 낡았다).
+`3`과 `5`를 나눈 이유는 둘이 운영상 반대 신호이기 때문이다 — `3`은 "아직", `5`는 "이제
+됐으니 문서를 고쳐라"다. `0`은 결정이 백로그에서 닫히고 이 스크립트의 결정 항목이 제거된
+뒤에만 나온다. 지금은 `3`이다 — 광고한 1,000,000 item 상한이 배포 build 예산
 (300초) 안에 들지 않는다. 그것을 그냥 `note`로 적고 `PASS(0)`을 찍으면 종료 코드가
 보고서와 반대를 말하고, 반대로 `FAIL(4)`로 뭉뚱그리면 다른 다섯 축이 퇴행해도 종료
 코드가 그대로라 아무도 차이를 못 본다. 근거는
@@ -85,6 +87,9 @@ failures: list[str] = []
 #: 결정 대기 중이라 red인 것이 정상인 항목. `failures`와 섞지 않는다 — 섞으면 다른 축이
 #: 퇴행해도 종료 코드가 같아 아무도 차이를 못 본다.
 known_open: list[str] = []
+#: 반대 신호 — 결정 대기 항목이 **통과하기 시작**했다. "아직 안 됐다"와 "이제 됐으니 문서를
+#: 고쳐라"는 운영상 반대 뜻이므로 종료 코드를 나눈다(적대 리뷰 지적).
+docs_stale: list[str] = []
 evidence: dict[str, Any] = {}
 
 
@@ -265,7 +270,7 @@ async def main() -> int:
         # 반대 방향도 본다. 예산·상한이 조정돼 이것이 **통과하기 시작하면** 그때는
         # 보고서와 백로그를 갱신해야 하므로 그것도 알려야 한다.
         if build_seconds <= _SHIPPED_BUILD_BUDGET_SECONDS:
-            known_open.append(
+            docs_stale.append(
                 "1,000,000 item이 이제 배포 예산 안에 든다 — 열린 결정과 보고서를 "
                 f"갱신하라(build={build_seconds:.1f}s <= "
                 f"{_SHIPPED_BUILD_BUDGET_SECONDS:.0f}s)"
@@ -434,13 +439,16 @@ async def main() -> int:
     for key, value in evidence.items():
         print(f"  {key} = {value}")
     print()
-    for item in known_open:
+    for item in known_open + docs_stale:
         print("  ~", item)
     if failures:
         print("SOAK: FAIL")
         for failure in failures:
             print("  !", failure)
         return 4
+    if docs_stale:
+        print("SOAK: PASS (열린 결정이 해소됐다 — 보고서·백로그를 갱신하라)")
+        return 5
     if known_open:
         # 측정 축은 전부 통과했고 남은 것은 결정뿐이다. 종료 코드를 나눠 둬야
         # 퇴행(4)과 미결(3)을 wrapper가 구분할 수 있다.

@@ -37,7 +37,7 @@ pytestmark = pytest.mark.integration
 #: `alembic upgrade head`가 착지해야 하는 revision. 리터럴을 여러 곳에 박으면
 #: migration마다 흩어진 자리를 모두 고쳐야 하고, 한 곳을 놓치면 그 단언만 조용히
 #: 옛 head를 지킨다. 한 줄로 모은다.
-_EXPECTED_HEAD = "0230_tvn41s_snapshot_material"
+_EXPECTED_HEAD = "0231_tvn41s_snapshot_material"
 
 _GATE_DB = "alembic_metadata_gate"
 

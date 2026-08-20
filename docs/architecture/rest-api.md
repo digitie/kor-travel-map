@@ -707,7 +707,7 @@ material을 만들지 않고 각각 `413 snapshot_item_limit_exceeded`,
 material은 368.4초가 걸려 누적 build 예산 300초를 넘는다. 즉 상한과 같은 크기의 요청은 admission을
 통과하고 `503 snapshot_build_timeout`으로 끝난다. 예산·상한 조정은 열린 결정이다.
 
-**material/receipt 분리(T-VN-41S, migration `0230`)**. 고정한 source membership은 `material`이 소유하고,
+**material/receipt 분리(T-VN-41S, migration `0231`)**. 고정한 source membership은 `material`이 소유하고,
 `snapshot_id`는 "누가 언제 그것을 받아갔는가"를 적는 immutable **receipt**다. generic page와 two-phase
 reconciliation seal은 같은 material을 **양방향으로** 공유하되 각자 receipt를 만든다. 그래서 세 가지가
 consumer에게 보인다.

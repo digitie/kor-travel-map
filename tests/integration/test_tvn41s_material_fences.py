@@ -1,6 +1,6 @@
-"""`0230`이 새 표에 건 append-only fence가 실제로 존재하고 막는지 본다.
+"""`0231`이 새 표에 건 append-only fence가 실제로 존재하고 막는지 본다.
 
-`0230` docstring은 "새 표에도 같은 fence를 건다"를 보장으로 제시한다. 그런데 `alembic
+`0231` docstring은 "새 표에도 같은 fence를 건다"를 보장으로 제시한다. 그런데 `alembic
 check`는 trigger를 비교하지 않고, 저장소 어디에도 그 fence들을 부르는 테스트가 없었다
 (적대 리뷰 지적). 그 상태에서는 나중에 어떤 migration이 `ops.reject_snapshot_material_
 mutation()`을 지우거나 약화시켜도 `pytest -q`와 `alembic check`가 모두 초록이다.
@@ -139,7 +139,7 @@ async def test_material_row_allows_only_the_compaction_transition(
 async def test_truncate_is_refused_on_both_new_tables(
     migrated_session: AsyncSession,
 ) -> None:
-    """`0230`은 "UPDATE/TRUNCATE만 막는다"를 보장으로 적었다 — TRUNCATE 쪽도 본다.
+    """`0231`은 "UPDATE/TRUNCATE만 막는다"를 보장으로 적었다 — TRUNCATE 쪽도 본다.
 
     UPDATE fence만 시험하면 나중에 TRUNCATE trigger 둘을 떨어뜨려도 `pytest -q`와
     `alembic check`가 모두 초록이다(적대 리뷰 지적). bounded DELETE로 되찾는 설계에서
@@ -162,26 +162,33 @@ async def test_truncate_is_refused_on_both_new_tables(
 
     # 2선: CASCADE로 그 1선을 넘어도 fence가 막는다.
     #
-    # 그런데 CASCADE는 receipt 표까지 truncate 집합에 끌어들이고, 그 표에는 `0230` 이전부터
-    # 같은 함수를 쓰는 fence가 있다 — 둘이 **같은 문자열**을 낸다. 그대로 두면 materials
-    # fence를 지워도 이 단언이 통과한다(적대 리뷰 지적). receipt fence를 savepoint 안에서
-    # 잠시 끄면 그 문자열을 낼 수 있는 것은 materials fence뿐이다.
-    await migrated_session.execute(
-        text(
-            "ALTER TABLE ops.poi_cache_target_snapshots "
-            "DISABLE TRIGGER trg_poi_cache_target_snapshots_no_truncate"
-        )
+    # 그런데 CASCADE는 materials를 FK로 참조하는 표를 **전부** truncate 집합에 끌어들인다 —
+    # receipt 표와 material item 표 둘 다다. 셋의 fence가 같은 함수를 써서 **같은 문자열**을
+    # 내므로, 그대로 두면 materials fence를 지워도 형제가 대신 막아 단언이 통과한다
+    # (적대 리뷰 지적 2회). 형제 둘을 savepoint 안에서 잠시 끄면 그 문자열을 낼 수 있는
+    # 것은 materials fence뿐이다.
+    siblings = (
+        (
+            "ops.poi_cache_target_snapshots",
+            "trg_poi_cache_target_snapshots_no_truncate",
+        ),
+        (
+            "ops.poi_cache_target_snapshot_material_items",
+            "trg_poi_cache_target_snapshot_material_items_no_truncate",
+        ),
     )
+    for relation, trigger in siblings:
+        await migrated_session.execute(
+            text(f"ALTER TABLE {relation} DISABLE TRIGGER {trigger}")
+        )
     reason = await _refused(
         migrated_session, "TRUNCATE ops.poi_cache_target_snapshot_materials CASCADE"
     )
     assert "append-only" in reason, reason
-    await migrated_session.execute(
-        text(
-            "ALTER TABLE ops.poi_cache_target_snapshots "
-            "ENABLE TRIGGER trg_poi_cache_target_snapshots_no_truncate"
+    for relation, trigger in siblings:
+        await migrated_session.execute(
+            text(f"ALTER TABLE {relation} ENABLE TRIGGER {trigger}")
         )
-    )
 
     # 참조가 없는 쪽은 곧장 fence다.
     reason = await _refused(

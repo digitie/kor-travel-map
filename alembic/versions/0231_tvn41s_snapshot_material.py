@@ -50,7 +50,7 @@ PK/FK는 `(material_id, row_number)`로 옮긴다. 같은 identity에 root/count
   않는다. 표시 없이 지우는 경로를 하나라도 남기면 그 불변이 깨진다.
 - **`material_bytes`는 NULL을 허용한다.** canonical leaf byte 수는 core의 leaf 인코딩
   (`_leaf_material`)이 정한다. 이 migration이 그 인코딩을 SQL로 옮겨 적으면 두 정의가
-  갈라진다. 0230 이전 material에는 실측이 없으므로 **발명하지 않고 NULL로 둔다**.
+  갈라진다. 0231 이전 material에는 실측이 없으므로 **발명하지 않고 NULL로 둔다**.
 
 receipt에 남긴 열의 기준. `external_system`만 남는다 — stream FK와 거의 모든 조회
 술어가 쓰기 때문이고, 복합 FK로 material의 값과 묶어 사본이 갈라질 수 없게 한다. 두 HWM은
@@ -89,8 +89,8 @@ from sqlalchemy import text
 
 from alembic import op
 
-revision: str = "0230_tvn41s_snapshot_material"
-down_revision: str | Sequence[str] | None = "0229_tvn40b_source_rule_action"
+revision: str = "0231_tvn41s_snapshot_material"
+down_revision: str | Sequence[str] | None = "0230_tvn_c05_krforest_datasets"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -193,14 +193,14 @@ def _assert_groups_are_mergeable() -> None:
     divergent = bind.execute(text(_HEADER_DIVERGENCE_SQL)).all()
     if divergent:
         raise RuntimeError(
-            "0230: 같은 material identity의 snapshot header가 서로 다른 "
+            "0231: 같은 material identity의 snapshot header가 서로 다른 "
             "merkle_root/item_count를 갖습니다 — 합치면 둘 중 하나를 조용히 "
             f"버리게 됩니다: {[tuple(row) for row in divergent]}"
         )
     mixed = bind.execute(text(_ITEM_FINGERPRINT_SQL)).all()
     if mixed:
         raise RuntimeError(
-            "0230: 같은 material identity의 snapshot item 집합이 서로 다릅니다 — "
+            "0231: 같은 material identity의 snapshot item 집합이 서로 다릅니다 — "
             "root가 같은데 item이 다르다면 그 자체가 조사 대상입니다: "
             f"{[tuple(row) for row in mixed]}"
         )
@@ -430,7 +430,7 @@ def _backfill_materials() -> None:
     )
     if before_fence == "D":
         raise RuntimeError(
-            "0230: receipt append-only fence가 migration 시작 시점에 이미 꺼져 있었습니다."
+            "0231: receipt append-only fence가 migration 시작 시점에 이미 꺼져 있었습니다."
         )
     enable_mode = {"A": "ENABLE ALWAYS", "R": "ENABLE REPLICA"}.get(
         before_fence, "ENABLE"
@@ -444,7 +444,7 @@ def _backfill_materials() -> None:
     after_fence = _receipt_fence_state()
     if after_fence != before_fence:
         raise RuntimeError(
-            "0230: receipt append-only fence 상태가 바뀐 채 남았습니다"
+            "0231: receipt append-only fence 상태가 바뀐 채 남았습니다"
             f"(before={before_fence!r} after={after_fence!r})."
         )
 
@@ -483,7 +483,7 @@ def _assert_backfill_lost_nothing() -> None:
     ).scalar_one()
     if unbound:
         raise RuntimeError(
-            f"0230: material에 묶이지 못한 snapshot receipt가 {unbound}건 남았습니다."
+            f"0231: material에 묶이지 못한 snapshot receipt가 {unbound}건 남았습니다."
         )
     orphaned = bind.execute(
         text(
@@ -508,7 +508,7 @@ def _assert_backfill_lost_nothing() -> None:
     ).scalar_one()
     if orphaned:
         raise RuntimeError(
-            f"0230: 새 material item으로 옮겨지지 않은 legacy item이 {orphaned}행 "
+            f"0231: 새 material item으로 옮겨지지 않은 legacy item이 {orphaned}행 "
             "남았습니다 — legacy 표를 지우면 그만큼 잃습니다."
         )
     miscounted = bind.execute(
@@ -526,7 +526,7 @@ def _assert_backfill_lost_nothing() -> None:
     ).scalar_one()
     if miscounted:
         raise RuntimeError(
-            f"0230: item_count와 실제 material item 수가 다른 material이 "
+            f"0231: item_count와 실제 material item 수가 다른 material이 "
             f"{miscounted}건입니다."
         )
 
@@ -582,14 +582,14 @@ def upgrade() -> None:
     materials = bind.execute(text(f"SELECT count(*) FROM {_MATERIALS}")).scalar_one()
     receipts = bind.execute(text(f"SELECT count(*) FROM {_RECEIPTS}")).scalar_one()
     print(
-        "0230 tvn41s snapshot material/receipt split: "
+        "0231 tvn41s snapshot material/receipt split: "
         f"material {materials}건 · receipt {receipts}건"
     )
 
 
 def downgrade() -> None:
     raise RuntimeError(
-        "0230_tvn41s_snapshot_material is forward-only; "
+        "0231_tvn41s_snapshot_material is forward-only; "
         "receipt N개가 material 하나를 공유하므로 되돌리려면 item을 receipt 수만큼 "
         "다시 복제해야 하고, compaction 뒤에는 item을 root/count에서 복원할 수 "
         "없다(ADR-021)."

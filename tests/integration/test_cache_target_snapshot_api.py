@@ -200,7 +200,7 @@ async def test_snapshot_first_page_commits_for_next_request_session(
     assert second_body["meta"]["page"]["next_cursor"] is None
     assert reused.status_code == 200, reused.text
     reused_body = reused.json()
-    # 재사용은 material을 공유하고 receipt는 새로 만든다(0230). consumer가 같은 것을
+    # 재사용은 material을 공유하고 receipt는 새로 만든다(0231). consumer가 같은 것을
     # 받았는지는 root/count로 판정한다 — snapshot_id는 이제 "누가 언제 받아갔는가"다.
     assert reused_body["data"]["snapshot_id"] != snapshot_id
     assert (

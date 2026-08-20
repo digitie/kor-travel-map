@@ -28,7 +28,7 @@ import psycopg
 _KIND_EXPIRED_REFERENCED: Final = "B_expired_referenced"
 _KIND_LIVE: Final = "C_live"
 _KIND_EXPIRED_UNREFERENCED: Final = "A_expired_unreferenced"
-#: `0230` 뒤에만 존재하는 부류 — receipt 둘이 material 하나를 공유하고, 그중 하나가
+#: `0231` 뒤에만 존재하는 부류 — receipt 둘이 material 하나를 공유하고, 그중 하나가
 #: 아직 살아 있다. 새 `eligible_items` 셈이 바로 이 경우를 위해 다시 쓰였다.
 _KIND_SHARED: Final = "D_shared_live"
 
@@ -49,7 +49,7 @@ def _dsn(dbname: str) -> str:
 def _classify(index: int) -> tuple[str, str]:
     """snapshot 순번을 네 부류로 나눈다.
 
-    비율보다 **네 부류가 다 나오는 것**이 중요하다. `D_shared_live`는 `0230` 뒤에만
+    비율보다 **네 부류가 다 나오는 것**이 중요하다. `D_shared_live`는 `0231` 뒤에만
     존재한다 — receipt 둘이 material 하나를 공유하고 그중 하나가 살아 있어서, "붙잡은
     receipt가 하나라도 살아 있으면 그 item은 적격이 아니다"라는 새 셈을 실제로 시험한다.
     """
@@ -98,7 +98,7 @@ def main() -> int:
             for snapshot_index in range(snapshots):
                 kind, expires_expression = _classify(snapshot_index)
                 snapshot_id = str(uuid.uuid4())
-                # `0230`: receipt마다 자기 material을 만든다. 같은 identity를 두 번
+                # `0231`: receipt마다 자기 material을 만든다. 같은 identity를 두 번
                 # 주면 살아 있는 material은 identity마다 하나라는 partial unique에
                 # 걸리므로 material watermark를 `snapshot_index`로 벌린다.
                 material_id = str(uuid.uuid4())
@@ -135,7 +135,7 @@ def main() -> int:
                     (snapshot_id, material_id, system),
                 )
                 if kind == _KIND_SHARED:
-                    # `0230`의 핵심은 receipt N개가 material 하나를 공유한다는 것이고,
+                    # `0231`의 핵심은 receipt N개가 material 하나를 공유한다는 것이고,
                     # 새 `eligible_items` 셈은 바로 그 경우를 위해 다시 쓰였다. 공유를
                     # 한 번도 만들지 않으면 옛 셈과 새 셈이 수치상 같아 게이트가 그
                     # 이유를 검증하지 않는다(적대 리뷰 지적).

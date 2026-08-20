@@ -292,7 +292,7 @@ _RESET_SNAPSHOT_BARRIER_LOCK_TIMEOUT_SQL = """
 SELECT set_config('lock_timeout', '0', true)
 """
 
-#: 0230 뒤 GC 순서는 **receipt -> orphan material item -> orphan material**이다.
+#: 0231 뒤 GC 순서는 **receipt -> orphan material item -> orphan material**이다.
 #: receipt를 먼저 지워야 material이 orphan이 되고, item은 그 다음이다. item 삭제를
 #: material CASCADE에 맡기지 않는 이유는 1,000,000행짜리 material 하나가 transaction
 #: 하나를 통째로 삼키기 때문이다 — 앞판이 item을 따로 bounded 삭제하던 이유와 같다.
@@ -324,7 +324,7 @@ RETURNING snapshot.snapshot_id
 #: 그 결합이 없으면 이런 일이 난다. GC가 orphan material의 item을 1,000행씩 지우는
 #: 도중(commit된 상태)에 그 material이 그대로 재사용 가능해서, consumer가 5,000을
 #: 말하는 root/count와 함께 4,000행을 받는다. receipt가 붙는 순간 orphan이 아니게 되어
-#: 배출도 멈추므로 손상이 영구가 된다. `0230` 이전에는 재사용이 "만료까지 75분 이상"을,
+#: 배출도 멈추므로 손상이 영구가 된다. `0231` 이전에는 재사용이 "만료까지 75분 이상"을,
 #: item 정리가 "만료됨"을 봐서 두 술어가 만료를 축으로 상보적이었다 — 정규화하면서
 #: 그 결합이 사라졌고, 이 표시가 그것을 대신한다.
 #:
@@ -1856,7 +1856,7 @@ async def _get_reusable_material(
     """현재 source membership과 같은 **살아 있는** material을 찾는다.
 
     generic page와 reconciliation seal이 같은 이 함수를 쓴다. 앞판에서는 질의가 둘로
-    갈려 공유가 단방향이었다(`0230` migration docstring 참조).
+    갈려 공유가 단방향이었다(`0231` migration docstring 참조).
     """
 
     reusable = (

@@ -1,4 +1,4 @@
-"""`0230` material/receipt 모델의 hot query가 실제로 인덱스를 타는지 본다.
+"""`0231` material/receipt 모델의 hot query가 실제로 인덱스를 타는지 본다.
 
 정규화가 만든 새 접근 경로 넷을 잰다.
 

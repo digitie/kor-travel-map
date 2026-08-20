@@ -2040,7 +2040,7 @@ async def test_fixed_snapshot_pages_ignore_concurrent_committed_write(
             external_system=system,
             limit=1,
         )
-    # 재사용은 material을 공유하고 **receipt는 새로 만든다**(0230). snapshot_id는 이제
+    # 재사용은 material을 공유하고 **receipt는 새로 만든다**(0231). snapshot_id는 이제
     # "누가 언제 받아갔는가"이지 "무엇을 고정했는가"가 아니다 — 같은 material인지는
     # root/count로 본다. replay cursor는 material이 들고 있으므로 그대로 같다.
     assert reused.snapshot_id != first.snapshot_id
@@ -2120,7 +2120,7 @@ async def test_generic_snapshot_try_lock_fails_fast_and_then_reuses(
             external_system=system,
             limit=1,
         )
-    # 재사용은 material을 공유하고 **receipt는 새로 만든다**(0230). snapshot_id는 이제
+    # 재사용은 material을 공유하고 **receipt는 새로 만든다**(0231). snapshot_id는 이제
     # "누가 언제 받아갔는가"이지 "무엇을 고정했는가"가 아니다 — 같은 material인지는
     # root/count로 본다. replay cursor는 material이 들고 있으므로 그대로 같다.
     assert reused.snapshot_id != first.snapshot_id
@@ -2303,7 +2303,7 @@ async def test_snapshot_barrier_keeps_outbox_cursor_commit_safe_across_writers(
                 )
             ).scalars()
         )
-    # 재사용은 material을 공유하고 **receipt는 새로 만든다**(0230). snapshot_id는 이제
+    # 재사용은 material을 공유하고 **receipt는 새로 만든다**(0231). snapshot_id는 이제
     # "누가 언제 받아갔는가"이지 "무엇을 고정했는가"가 아니다 — 같은 material인지는
     # root/count로 본다. replay cursor는 material이 들고 있으므로 그대로 같다.
     assert reused.snapshot_id != page.snapshot_id
@@ -2459,7 +2459,7 @@ async def test_generic_snapshot_reuse_ignores_nonmaterial_outbox_tail(
         external_system=system,
         limit=10,
     )
-    # 재사용은 material을 공유하고 **receipt는 새로 만든다**(0230). snapshot_id는 이제
+    # 재사용은 material을 공유하고 **receipt는 새로 만든다**(0231). snapshot_id는 이제
     # "누가 언제 받아갔는가"이지 "무엇을 고정했는가"가 아니다 — 같은 material인지는
     # root/count로 본다. replay cursor는 material이 들고 있으므로 그대로 같다.
     assert reused.snapshot_id != first.snapshot_id
@@ -2513,7 +2513,7 @@ async def _seed_snapshot_material(
     """GC/용량 경계용 material을 직접 심는다.
 
     같은 `(external_system, restore_epoch, material_order)`를 두 번 주면 살아 있는
-    material은 identity마다 하나라는 partial unique에 걸린다(0230). 여러 개가 필요한
+    material은 identity마다 하나라는 partial unique에 걸린다(0231). 여러 개가 필요한
     테스트는 `material_order`를 갈라야 한다.
     """
 
@@ -2587,7 +2587,7 @@ async def test_generic_snapshot_gc_is_bounded_and_preserves_referenced_snapshot(
     expired_id = "97000000-0000-4000-8000-000000000001"
     referenced_id = "97000000-0000-4000-8000-000000000002"
     # 두 receipt는 서로 다른 material을 갖는다. 같은 identity를 주면 살아 있는
-    # material은 identity마다 하나라는 partial unique에 걸린다(0230).
+    # material은 identity마다 하나라는 partial unique에 걸린다(0231).
     expired_material = "97100000-0000-4000-8000-000000000001"
     referenced_material = "97100000-0000-4000-8000-000000000002"
     await _seed_snapshot_material(
@@ -2702,7 +2702,7 @@ async def test_generic_snapshot_gc_is_bounded_and_preserves_referenced_snapshot(
     )
     assert background_gc.external_system == system
     assert background_gc.deleted_items == 1
-    # receipt는 앞선 snapshot 생성이 이미 지웠다. 0230 전에는 header 삭제에
+    # receipt는 앞선 snapshot 생성이 이미 지웠다. 0231 전에는 header 삭제에
     # "item이 비어 있을 것"이라는 조건이 붙어 있어 여기까지 밀렸다 — 이제 item은
     # material에 달려 있으므로 receipt는 만료 즉시 지운다.
     assert background_gc.deleted_headers == 0
@@ -2945,11 +2945,11 @@ async def test_background_snapshot_gc_round_robins_systems_and_observes_once(
         second_system,
         first_system,
     )
-    # 0230 전에는 header 삭제가 "item이 비어 있을 것"을 요구해 item보다 한 batch
+    # 0231 전에는 header 삭제가 "item이 비어 있을 것"을 요구해 item보다 한 batch
     # 늦었다. 이제 receipt는 만료 즉시 지우고, item은 orphan이 된 material에서 지운다.
     assert (first.deleted_items, first.deleted_headers, first.has_more) == (1, 1, True)
     assert (second.deleted_items, second.deleted_headers, second.has_more) == (1, 1, True)
-    # 세 batch로 전부 비워진다. 0230 전에는 header 삭제가 한 batch 늦어 여기서
+    # 세 batch로 전부 비워진다. 0231 전에는 header 삭제가 한 batch 늦어 여기서
     # backlog가 남았다.
     assert (wrapped.deleted_items, wrapped.deleted_headers, wrapped.has_more) == (
         1,
@@ -2981,7 +2981,7 @@ async def test_partially_drained_material_is_never_reused(
     재사용 가능해서, consumer가 실제보다 큰 count/root와 함께 모자란 page를 받는다.
     receipt가 붙는 순간 orphan이 아니게 되어 배출도 멈추므로 손상이 영구가 된다.
 
-    `0230` 이전에는 재사용이 "만료까지 75분 이상"을, item 정리가 "만료됨"을 봐서 두
+    `0231` 이전에는 재사용이 "만료까지 75분 이상"을, item 정리가 "만료됨"을 봐서 두
     술어가 만료를 축으로 상보적이었다. 그 결합을 대신하는 것이 "배출 전 표시"다.
 
     여기서는 그 상태를 직접 만든다 — orphan material의 item을 **일부만** 지운 뒤
@@ -3687,7 +3687,7 @@ async def test_two_phase_reconciliation_reuses_current_generic_snapshot_material
         expected_merkle_root=expected_root,
     )
 
-    # 0230 전에는 seal이 generic snapshot **행 자체**를 물려받아 두 역할이 같은
+    # 0231 전에는 seal이 generic snapshot **행 자체**를 물려받아 두 역할이 같은
     # snapshot_id를 썼다. 이제 각자 receipt를 만들고 material만 공유한다 — 그래야
     # 한쪽이 다른 쪽의 만료 시각을 물려받지 않고, 공유가 양방향이 된다.
     assert sealed.snapshot_id != generic.snapshot_id
