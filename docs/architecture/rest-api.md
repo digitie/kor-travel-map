@@ -702,15 +702,20 @@ live generic 저장량을 stream cardinality의 2배로 제한한다. request-bo
 단일 snapshot은 server cursor 두 번 순회와 incremental Merkle로 process memory를 `O(log N)`에
 가깝게 유지한다. item 1,000,000개 또는 canonical material 512 MiB를 넘으면 header/item 부분
 material을 만들지 않고 각각 `413 snapshot_item_limit_exceeded`,
-`413 snapshot_byte_limit_exceeded`로 실패한다.
+`413 snapshot_byte_limit_exceeded`로 실패한다. **item 상한 1,000,000은 memory/byte 방어선이며
+시간 방어선과 별개다** — n150 실측(`docs/reports/t-vn-41s-1m-soak-2026-08-21.md`)에서 그 크기의
+material은 368.4초가 걸려 누적 build 예산 300초를 넘는다. 즉 상한과 같은 크기의 요청은 admission을
+통과하고 `503 snapshot_build_timeout`으로 끝난다. 예산·상한 조정은 열린 결정이다.
 
 **material/receipt 분리(T-VN-41S, migration `0230`)**. 고정한 source membership은 `material`이 소유하고,
 `snapshot_id`는 "누가 언제 그것을 받아갔는가"를 적는 immutable **receipt**다. generic page와 two-phase
 reconciliation seal은 같은 material을 **양방향으로** 공유하되 각자 receipt를 만든다. 그래서 세 가지가
 consumer에게 보인다.
 
-- 같은 source 상태를 다시 요청하면 `snapshot_id`는 **달라지고** `merkle_root`/`count`/
-  `high_watermark_cursor`는 같다. 같은 것을 받았는지는 root/count로 판정한다.
+- 같은 source 상태를 다시 요청하면 `snapshot_id`는 **달라진다**. 같은 것을 받았는지는
+  `merkle_root`/`count`로 판정한다. `high_watermark_cursor`는 같은 material을 재사용하는 동안
+  같지만, GC/compaction이 그 material을 거둬 간 뒤 다시 만들면 더 높은 값이 나온다 — 여전히
+  안전한 lower-bound다.
 - 재사용해도 `expires_at`은 물려받지 않고 매번 full TTL로 시작한다. 그래서 "잔여 TTL이 75분 넘는
   material만 재사용한다"는 앞선 문턱이 사라졌다.
 - `high_watermark_cursor`는 material을 **처음 고정할 때** 관측한 값이다. 재사용 시점의 더 높은 값을

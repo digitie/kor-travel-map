@@ -22,9 +22,12 @@
   `receipt_kind`를 갖고 `restore_epoch`/`item_count`/`merkle_root`/두 watermark 열을 잃는다.
   `ops.poi_cache_target_snapshot_items`는 삭제됐다.
 - **CHANGED (service API)**: 같은 source 상태를 다시 요청하면 `snapshot_id`가 **달라진다**.
-  `merkle_root`/`count`/`high_watermark_cursor`는 같다 — 같은 material을 받았는지는 root/count로
-  판정한다. 재사용해도 `expires_at`을 물려받지 않고 매번 full TTL로 시작하며, 그래서 "잔여
-  TTL이 75분 넘는 material만 재사용한다"는 문턱이 사라졌다.
+  같은 material을 받았는지는 `merkle_root`/`count`로 판정한다. 재사용해도 `expires_at`을
+  물려받지 않고 매번 full TTL로 시작하며, 그래서 "잔여 TTL이 75분 넘는 material만
+  재사용한다"는 문턱이 사라졌다. `high_watermark_cursor`는 같은 material을 쓰는 동안 같지만
+  material이 거둬진 뒤 재생성되면 더 높아진다 — 여전히 안전한 lower-bound다.
+- **CHANGED (service API)**: `410 SNAPSHOT_MATERIAL_COMPACTED`를 generic snapshot cursor
+  경로에도 선언했다. 두 receipt가 material을 공유하므로 그 경로에서도 발생한다.
 - **FIXED**: `410 SNAPSHOT_MATERIAL_COMPACTED`가 도달 불가능했다. compaction 후보는 정의상
   미만료 receipt가 없어 만료 판정이 항상 먼저 이겼다. compaction 판정을 앞으로 옮겼다.
 - **ADDED (maintenance)**: hourly GC batch가 네 단계가 됐다 — 만료·미참조 receipt 삭제 →

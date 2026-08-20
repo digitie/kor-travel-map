@@ -21,6 +21,11 @@
 
 이 스크립트는 **한 번의 실측 증거**를 남길 뿐 처리량을 보증하지 않는다.
 
+**지금 이 게이트는 FAIL로 끝난다.** 광고한 1,000,000 item 상한이 배포 build 예산(300초)
+안에 들지 않기 때문이다. 그것을 `note`로 적어 두고 `PASS`를 찍으면 종료 코드가 보고서와
+반대를 말하므로 `check`로 둔다. 예산·상한 결정이 내려지면 그때 초록이 된다 —
+`docs/reports/t-vn-41s-1m-soak-2026-08-21.md` §"열린 결정".
+
 **source head는 tombstone(`state='deleted'`)으로 심는다.** `active`는
 `target_id IS NOT NULL`을 요구하고 그 FK 때문에 `ops.poi_cache_targets` 1,000,000행이
 따로 필요해진다. membership은 두 state를 모두 담고(merkle leaf는 state 1바이트만 다르다)
@@ -60,6 +65,12 @@ STREAM = "soak:41s"
 ADMITTED = 1_000_000
 FINGERPRINT = "c" * 64
 
+#: **주의**: 아래 예산은 누적 build deadline만 늘린다. 개별 statement의 상한은
+#: `_SNAPSHOT_BUILD_STATEMENT_TIMEOUT`(5분)이 barrier 진입 때 다시 설정하므로, 이
+#: 스크립트가 session에 건 `statement_timeout`은 build 경로에서 덮인다. 지금 측정이
+#: 성립하는 것은 개별 statement가 5분을 넘지 않았기 때문이고, 더 느린 호스트나 더 큰
+#: batch에서는 `snapshot_build_timeout`으로 끝날 수 있다(적대 리뷰 지적).
+#:
 #: 배포 기본값(`_SNAPSHOT_BUILD_TIMEOUT_SECONDS = 300`)은 상한과 같은 크기의 material을
 #: n150에서 만들지 못한다 — 첫 실행이 그 예산에서 잘렸다. 그것 자체가 이 soak의 결과이므로
 #: 숨기지 않는다. 실제 소요를 재기 위해 **측정 동안만** 예산을 늘리고, 배포 예산 대비
@@ -238,9 +249,13 @@ async def main() -> int:
         note("build_seconds", round(build_seconds, 1))
         note("items_per_second", int(ADMITTED / build_seconds))
         note("shipped_build_budget_seconds", _SHIPPED_BUILD_BUDGET_SECONDS)
-        note(
-            "fits_shipped_budget",
+        # `note`가 아니라 `check`다. "광고한 상한이 실제로 도달 가능하다"는 이 soak이
+        # 재는 성질이고, 지금 그것은 **거짓**이다. 거짓인 채 `SOAK: PASS`를 찍으면
+        # 종료 코드가 보고서와 반대를 말한다(적대 리뷰 지적).
+        check(
+            "1,000,000 item이 배포 build 예산 안에 든다",
             build_seconds <= _SHIPPED_BUILD_BUDGET_SECONDS,
+            True,
         )
         note("python_peak_mib", round(peak / 1024 / 1024, 2))
         note("merkle_root", page.merkle_root[:16] + "…")

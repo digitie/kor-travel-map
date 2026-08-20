@@ -40,10 +40,13 @@ async def test_every_declared_feature_relation_exists(
     assert not phantom, f"ACL 표에 있지만 DB에 없는 feature relation: {phantom}"
 
 
+#: reconciler의 inventory와 **같은 relkind 집합**이어야 한다. 넓게 잡으면 fail-close
+#: 대상이 아닌 relation(materialized view 등)에까지 선언을 요구해, 실제로 배포를 막지
+#: 않는 것을 막힌다고 읽게 만든다.
 _OPS_RELATION_SQL = (
     "SELECT relname FROM pg_catalog.pg_class AS c "
     "JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace "
-    "WHERE n.nspname = 'ops' AND c.relkind IN ('r', 'p', 'v', 'm', 'f')"
+    "WHERE n.nspname = 'ops' AND c.relkind IN ('r', 'p', 'v')"
 )
 
 

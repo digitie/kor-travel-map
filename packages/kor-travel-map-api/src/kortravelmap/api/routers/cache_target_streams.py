@@ -1686,6 +1686,15 @@ async def complete_service_cache_target_reconciliation(
                 "admission 상한을 초과함."
             )
         },
+        410: {
+            "model": CacheTargetSnapshotMaterialCompactedProblem,
+            "description": (
+                "cursor가 가리키는 snapshot material이 보존 기간을 지나 compaction됐다. "
+                "재시도 불가이며 보존된 snapshot ID/count/root/compaction 시각을 함께 "
+                "반환한다. generic receipt와 reconciliation receipt가 같은 material을 "
+                "공유하므로 이 경로에서도 발생한다."
+            ),
+        },
         429: {
             "description": (
                 "미만료·미참조 generic snapshot copy 상한 도달. 가장 오래된 "
