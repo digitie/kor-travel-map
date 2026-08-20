@@ -471,6 +471,10 @@ def _assert_backfill_lost_nothing() -> None:
 
 
 def _narrow_receipts() -> None:
+    # legacy item 표를 먼저 지운다. 그 표의 FK가
+    # `uq_cache_target_snapshots_stream` 인덱스에 걸려 있어, 순서를 바꾸면 아래
+    # ALTER가 `DependentObjectsStillExistError`로 막힌다.
+    op.execute(text(f"DROP TABLE {_LEGACY_ITEMS}"))
     op.execute(
         text(
             f"""
@@ -508,7 +512,6 @@ def _narrow_receipts() -> None:
             """
         )
     )
-    op.execute(text(f"DROP TABLE {_LEGACY_ITEMS}"))
 
 
 def upgrade() -> None:
