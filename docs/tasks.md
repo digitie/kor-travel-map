@@ -483,7 +483,9 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 
   `test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible`의
   첫 gate(`_assert_uses_index(dedup_refresh, 'idx_source_entities_provider_dataset',
-  'idx_features_dedup_refresh_keyset')`)가 CI에서 간헐 실패한다. 2026-08-18까지 PR #975·#996·#998
+  'uq_source_entities_key_dataset', 'idx_features_dedup_refresh_keyset')` —
+  `tests/integration/test_t212d_perf_explain.py:1211-1216`, **받는 이름은 3개다**)가
+  CI에서 간헐 실패한다. 2026-08-18까지 PR #975·#996·#998
   세 번 모두 **재실행 한 번으로 통과**했다(코드와 무관). 실패 시 planner가 `idx_source_links_…`로
   진입한다 — `enable_seqscan=off`라 인덱스는 타지만 gate가 받는 이름 집합에 없다.
 - 원인 가설: `_seed_live_like_perf_data` 뒤 `ANALYZE` 표본이 실행마다 달라 동치 진입 경로 중
@@ -1025,22 +1027,18 @@ cache-target 경로를 탄다. 그때 41C의 outbox가 그 링크를 전파한�
 H34가 41을 바꾸는 것이 아니다. 다만 **origin이 `manual_*`인 Feature를 41의 reconciliation이
 provider Feature와 다르게 취급해야 하는지**(예: provider 재적재로 사라질 수 있는 Feature와
 달리 수동 Feature는 restore epoch에서 어떻게 보이나)는 M02(origin 불변)와 41A(restore epoch)를
-함께 볼 때 정해야 한다. 지금은 41A가 미착수라 정할 수 없다 — **M02 설계 시 41A 소유자와
-확인 항목**으로 남긴다.
+함께 볼 때 정해야 한다. **`T-VN-41A`/`T-VN-41B`는 PR #975(merge `4672aa96`)로 완료돼
+[`tasks-done.md`](tasks-done.md)로 이관됐다** — 따라서 이 항목은 대기가 아니라 **M02 설계의
+입력**이다. restore epoch 계약과 ADR-093을 직접 읽어 판정한다.
 
 #### 아직 안 정해진 것
 
-- **`source_type` / `source_natural_key`** — `make_feature_id`의 입력이라 ID 체계에 들어간다.
-  origin 3종을 `source_type`으로 가를지(`manual_admin`/`manual_pinvi`/`manual_curation`),
-  아니면 `source_type`은 하나로 두고 origin은 별도 컬럼에 둘지. **전자면 origin이 ID에 박혀
-  불변이 공짜로 얻어지지만 origin을 정정할 수 없다.** 후자면 정정이 가능하지만 불변을 따로
-  강제해야 한다.
-- **natural key의 안정성** — 같은 실체를 두 번 만들면 같은 ID여야 하고, 이름을 고쳐도 ID가
-  바뀌면 안 된다(`trg_features_identity_fence`가 `feature_id` UPDATE를 막는다).
-- **3축 초기 상태** — 만들자마자 공개인가, 검토 후인가.
+> **2026-08-20 정리**: 아래 7건 중 4건은 ADR-093(proposed, 2026-08-19)이 이미 닫았다 —
+> `source_type=user_request`·`source_natural_key=manual::<uuid>`와 identity claim(§1),
+> 초기 3축 상태 제거·좌표 required(§4), command isolation `read-committed`(§5).
+> 닫힌 것을 "미정"으로 두면 같은 논의를 다시 하게 되므로 지웠다. 남은 것은 셋이다.
+
 - **PinVi 요청 큐** — 접수 → 승인 → 생성. 요청 자체의 저장 위치와 상태 모델.
-- **좌표** — `features.coord`는 nullable이지만, 지도에 안 찍히는 Feature가 공개 표면에
-  나가도 되는지.
 - **provider가 나중에 같은 실체를 발행하면** — 자동 병합하지 않는다까지는 정해졌다.
   admin에게 무엇을 보여주고 어떤 선택지를 주는지는 미정.
 - **공개 표면 노출** — public API/PinVi snapshot에 수동 Feature가 나가는지, 나간다면 소비자가
