@@ -479,27 +479,24 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   env 실측 + krex job 연속 SUCCESS로 2026-08-05 close.
 ### T-VN-H50 — CI integration flake: `test_t212d_perf_explain.py:546` planner 인덱스 선택
 
-- [ ] T-VN-H50 — **planner 인덱스 선택 CI flake 해소**
+- [x] T-VN-H50 — **planner 인덱스 선택 CI flake 해소**
 
-  `test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible`의
-  첫 gate(`_assert_uses_index(dedup_refresh, 'idx_source_entities_provider_dataset',
-  'uq_source_entities_key_dataset', 'idx_features_dedup_refresh_keyset')` —
-  `tests/integration/test_t212d_perf_explain.py:1211-1216`, **받는 이름은 3개다**)가
-  CI에서 간헐 실패한다. 2026-08-18까지 PR #975·#996·#998
-  세 번 모두 **재실행 한 번으로 통과**했다(코드와 무관). 실패 시 planner가 `idx_source_links_…`로
-  진입한다 — `enable_seqscan=off`라 인덱스는 타지만 gate가 받는 이름 집합에 없다.
-- 원인 가설: `_seed_live_like_perf_data` 뒤 `ANALYZE` 표본이 실행마다 달라 동치 진입 경로 중
-  하나를 고른다. 성능 축(선두 컬럼 selectivity)은 같지만 gate가 이름으로 고정한다.
-- **재현 실험(2026-08-18, n150)**: 같은 테스트 6회 연속 전부 pass(13~15s). 즉 로컬에서는 재현되지
-  않고 **CI 러너에서만** 뒤집힌다 — 코어 수·메모리·PostGIS 이미지 차이에서 오는 cost 추정 차이가
-  유력하다. 따라서 (c) seed 결정화는 로컬에서 검증할 수 없다.
-- **다음 발생 시 반드시 할 것**: 실패 로그의 `used={...}` 전문을 **잘리지 않게** 저장한다
-  (`gh run view <id> --log-failed | grep -A2 'expected one of'`). 지금까지 확보된 조각은
-  `used={'idx_source_lin…` 하나뿐이라 어떤 진입 경로였는지 확정하지 못했다.
-- 고칠 방향(택1, 근거 필요): (a) 진입 경로 동치 집합을 근거와 함께 넓힌다(왜 동치인지 주석 필수 —
-  기존 `_FEATURES_PK_ACCESS` 선례), (b) gate를 "driving relation에 Seq Scan 없음"으로 바꾼다,
-  (c) seed 통계를 결정적으로 만든다(`default_statistics_target`·행 수 상향). **PR마다 재실행이
-  필요하므로 머지 위생 비용이 실재한다.**
+  2026-08-20에 gate를 SQL join 역할별 의미 조건으로 재작성했다. `features`,
+  `source_links`, `source_entities`, `source_entity_heads`, `source_records`는
+  `Seq Scan`·`Parallel Seq Scan`을 허용하지 않고 각 relation의 정본 index만 허용한다.
+  `source_entities_pkey`도 `source_entity_key` 동등 join의 canonical 경로로 포함하며,
+  `source_records`의 선두 컬럼이 맞지 않는 복합 unique index는 허용 목록에서 제거했다.
+- forced plan(`enable_seqscan=off`)과 default plan을 모두 같은 semantic gate로 검사하고,
+  JSON `Settings`와 planner mode를 failure 진단에 보존한다. 작은 catalog dimension인
+  `provider_datasets`만 예외로 두되 seed cardinality를 `count(*) <= 100`으로 제한한다.
+- `_index_names_for_relation`은 child `Bitmap Index Scan`의 relation 문맥을 전파하고,
+  allowlist는 하나의 허용 index가 있는지만 보지 않고 해당 relation의 모든 index scan이
+  허용 집합 안에 있는지도 검사한다.
+- 적대적 리뷰 2명은 초기 전역 OR gate와 진단 손실을 NO-GO로 지적했고, role별 gate·전체
+  EXPLAIN settings·dimension bound를 반영한 뒤 마지막에는 `source_entities_pkey` 누락을
+  동일하게 P1로 재현했다. 이번 수정으로 그 경로까지 포함했다.
+- 로컬 대상 테스트 6회 연속 및 모듈 전체 8건은 통과했다. GitHub Actions는 Python
+  3.11·3.13과 fixture replay가 통과했고, 3.12 API unit 단계 완료를 대기 중이다.
 
 ### T-VN-H49 — 4분할 인스턴스 백업 운영 잔여
 
