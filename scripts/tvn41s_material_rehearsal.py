@@ -412,7 +412,9 @@ async def main() -> int:
     try:
         await asyncio.to_thread(command.downgrade, config, "-1")
     except RuntimeError as error:
-        refused = "forward-only" in str(error)
+        # "forward-only"만 보면 `alembic/env.py`의 0200 경계 guard가 발화해도
+        # 통과한다(그 문구도 forward-only를 담는다). revision id까지 본다.
+        refused = "0230_tvn41s_snapshot_material is forward-only" in str(error)
         print(f"  거부됨: {str(error)[:90]}")
     check("downgrade 거부", refused, True)
 

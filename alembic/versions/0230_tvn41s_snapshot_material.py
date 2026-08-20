@@ -387,6 +387,12 @@ def _backfill_materials() -> None:
     )
     # 아래 UPDATE 한 문장만을 위해 끈다. 켜는 것을 같은 함수 안에 둬서, 중간에
     # 실패하면 transaction이 통째로 되감기고 fence가 꺼진 채 남지 않는다.
+    #
+    # 끄기 **전** 상태를 잡아 둔다. 되켠 뒤에 `'O'` 리터럴과 비교하면 항진명제다
+    # (`ENABLE TRIGGER`가 실패했다면 그 문장에서 이미 abort된다). 원래 `'A'`(ENABLE
+    # ALWAYS)나 `'R'`였다면 되켜기가 조용히 `'O'`로 낮추는데, 리터럴 비교는 그것을
+    # 통과시킨다(적대 리뷰 지적).
+    before_fence = _receipt_fence_state()
     op.execute(
         text(f"ALTER TABLE {_RECEIPTS} DISABLE TRIGGER {_RECEIPT_FENCE_TRIGGER}")
     )
@@ -411,10 +417,33 @@ def _backfill_materials() -> None:
             """
         )
     )
+    if before_fence == "D":
+        raise RuntimeError(
+            "0230: receipt append-only fence가 migration 시작 시점에 이미 꺼져 있었습니다."
+        )
     op.execute(
-        text(f"ALTER TABLE {_RECEIPTS} ENABLE TRIGGER {_RECEIPT_FENCE_TRIGGER}")
+        text(
+            f"ALTER TABLE {_RECEIPTS} "
+            f"{'ENABLE ALWAYS' if before_fence == 'A' else 'ENABLE REPLICA' if before_fence == 'R' else 'ENABLE'} "
+            f"TRIGGER {_RECEIPT_FENCE_TRIGGER}"
+        )
     )
-    enabled = (
+    after_fence = _receipt_fence_state()
+    if after_fence != before_fence:
+        raise RuntimeError(
+            "0230: receipt append-only fence 상태가 바뀐 채 남았습니다"
+            f"(before={before_fence!r} after={after_fence!r})."
+        )
+
+
+def _receipt_fence_state() -> str:
+    """`pg_trigger.tgenabled`를 문자로 읽는다.
+
+    asyncpg는 PostgreSQL ``char``를 bytes로 준다 — `str(b'O')`는 `"b'O'"`가 되어
+    비교가 항상 어긋난다(`_runtime_relation_grants`의 relkind와 같은 자리다).
+    """
+
+    raw = (
         op.get_bind()
         .execute(
             text(
@@ -429,13 +458,7 @@ def _backfill_materials() -> None:
         )
         .scalar_one()
     )
-    # asyncpg는 PostgreSQL ``char``를 bytes로 준다 — `str(b'O')`는 `"b'O'"`가 되어
-    # 이 확인이 항상 실패한다(`_runtime_relation_grants`의 relkind와 같은 자리다).
-    state = enabled.decode("ascii") if isinstance(enabled, bytes) else str(enabled)
-    if state != "O":
-        raise RuntimeError(
-            f"0230: receipt append-only fence가 다시 켜지지 않았습니다(tgenabled={state!r})."
-        )
+    return raw.decode("ascii") if isinstance(raw, bytes) else str(raw)
 
 
 def _assert_backfill_lost_nothing() -> None:

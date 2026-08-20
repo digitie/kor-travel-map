@@ -793,6 +793,19 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
     `test_snapshot_barrier_keeps_outbox_cursor_commit_safe_across_writers`,
     `test_generic_snapshot_reuse_ignores_nonmaterial_outbox_tail`). soak에서 흉내 내면 같은
     성질을 덜 정확하게 보는 두 번째 게이트가 된다.
+  - [ ] **`ops` fail-closed ACL의 탈출구가 없다(적대 리뷰 지적).** 선언 없는 ops relation은
+    이제 배포를 막는다. 의도한 동작이지만, **운영에는 있고 fresh migrate DB에는 없는**
+    relation이 걸린다 — 위험한 migration 앞에서 운영자가 만든 backup 표, `pg_dump` 복원
+    잔재가 그렇다(선언 목록에 이미 `tvn36_legacy_freeze_preflight_manifest` 같은 일회성
+    이름이 있는 것이 그 증거다). 지금은 코드 수정 없이는 풀 수 없다. env로 여는 allowlist는
+    방금 세운 fence를 약하게 하므로 채택하지 않았고, **대신 어떤 경로로 풀 것인지**를
+    정해야 한다(임시 표는 `ops` 밖에 만든다 / 선언 1줄 + hotfix / 명시적 prefix 예외).
+  - [ ] **compacted material이 영구 누적되며 GC batch마다 훑인다(적대 리뷰 지적).**
+    `_HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL`의 "표시됐고 item이 남은 material" 분기는
+    compacted material마다 item 인덱스 probe 한 번이다. audit material은 증거로 영구
+    보존되므로 그 수가 단조 증가한다. reconciliation은 운영자 시작이라 증가 속도가 느리고
+    probe는 index-only라 지금 규모에서 문제가 아니지만, 상한이 없다. `compaction_drained_at`
+    같은 상태 열 + partial index로 "아직 배출 중"만 색인하면 상수로 떨어진다.
   - [ ] **열린 결정 — build 예산 300초 vs item 상한 1,000,000.** 상한과 같은 크기의
     snapshot은 배포 기본 예산에 **들지 않는다**(n150 실측 368.4초 > 300초; 동시 부하
     아래에서는 547.9초). 지금 계약에서
