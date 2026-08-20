@@ -1,6 +1,8 @@
 # ADR-079: OpenAPI digest를 compatible-pair manifest에 핀하지 않는다
 
-- 상태: accepted
+- 상태: superseded by [ADR-094](094-c7-pinned-runtime-generation-attestation.md)
+  (2026-08-20 — **판단은 유지된다**. OpenAPI digest 결박은 여전히 receipt/contract 계층이
+  소유한다. 다만 이 ADR의 대상인 compatible-pair manifest 자체가 C7 경계에서 퇴역했다)
 - 날짜: 2026-07-29
 - 결정자: human, AI agent
 - 관계: [ADR-076](076-c6c-manifest-v4-map-runtime-provenance.md)의 manifest v4를 **유지**한다.

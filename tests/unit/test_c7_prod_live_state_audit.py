@@ -214,14 +214,19 @@ def test_evidence_manifest_hashes_are_recomputed(
     attestation_file = run / "runtime-attestation.json"
     attestation_file.write_text("{}\n", encoding="utf-8")
     attestation_file.chmod(0o600)
-    compatible_pair_file = run / "compatible-pair.json"
-    compatible_pair_file.write_text("{}\n", encoding="utf-8")
-    compatible_pair_file.chmod(0o600)
+    generation_file = run / "pinned-runtime-generation.json"
+    generation_file.write_text('{"version": 5}\n', encoding="utf-8")
+    generation_file.chmod(0o600)
+    journal_file = run / "pinned-runtime-rebuild.json"
+    journal_file.write_text('{"version": 7}\n', encoding="utf-8")
+    journal_file.chmod(0o600)
     attestation_hash = hashlib.sha256(attestation_file.read_bytes()).hexdigest()
-    compatible_pair_hash = hashlib.sha256(compatible_pair_file.read_bytes()).hexdigest()
+    generation_hash = hashlib.sha256(generation_file.read_bytes()).hexdigest()
+    journal_hash = hashlib.sha256(journal_file.read_bytes()).hexdigest()
     manifest = {
         "alembic_head": "0058_example",
-        "compatible_pair_manifest_sha256": compatible_pair_hash,
+        "pinned_runtime_manifest_sha256": generation_hash,
+        "rebuild_journal_sha256": journal_hash,
         "files": [
             {
                 "path": "journals/sensor.json",
@@ -234,9 +239,67 @@ def test_evidence_manifest_hashes_are_recomputed(
                 "size": attestation_file.stat().st_size,
             },
             {
+                "path": "pinned-runtime-generation.json",
+                "sha256": generation_hash,
+                "size": generation_file.stat().st_size,
+            },
+            {
+                "path": "pinned-runtime-rebuild.json",
+                "sha256": journal_hash,
+                "size": journal_file.stat().st_size,
+            },
+        ],
+        "finished_at": "2026-07-19T01:01:01+00:00",
+        "host_attestation_sha256": attestation_hash,
+        "orchestrator_verified": True,
+        "playwright_image_id": f"sha256:{'c' * 64}",
+        "repository_commit": "d" * 40,
+        "status": 0,
+        "version": 2,
+    }
+    _write_json(run / "manifest.json", manifest)
+
+    assert auditor._valid_evidence_manifest(run) is True
+    result_file.write_text("tampered\n", encoding="utf-8")
+    result_file.chmod(0o600)
+    assert auditor._valid_evidence_manifest(run) is False
+
+
+def test_legacy_v1_evidence_manifest_stays_clean_but_is_still_checked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """v4 시절 evidence archive는 legacy로 인정하되 그 시절 계약으로 검사한다.
+
+    key 집합이 바뀐 채 version을 올리지 않으면, 기존 archive가 있는 host에서 첫
+    실행이 audit preflight의 unsafe 판정으로 죽는다(2026-08-20 적대 리뷰). 그렇다고
+    "옛것은 무조건 통과"로 두면 과거 증거의 무결성이 사라진다.
+    """
+
+    auditor = _load_auditor()
+    monkeypatch.setattr(auditor, "_safe_entry", _portable_safe_entry)
+    run = tmp_path / "run-20260719T010101Z-11"
+    run.mkdir(mode=0o700)
+    attestation_file = run / "runtime-attestation.json"
+    attestation_file.write_text("{}\n", encoding="utf-8")
+    attestation_file.chmod(0o600)
+    pair_file = run / "compatible-pair.json"
+    pair_file.write_text('{"version": 4}\n', encoding="utf-8")
+    pair_file.chmod(0o600)
+    attestation_hash = hashlib.sha256(attestation_file.read_bytes()).hexdigest()
+    pair_hash = hashlib.sha256(pair_file.read_bytes()).hexdigest()
+    manifest = {
+        "alembic_head": "0058_example",
+        "compatible_pair_manifest_sha256": pair_hash,
+        "files": [
+            {
                 "path": "compatible-pair.json",
-                "sha256": compatible_pair_hash,
-                "size": compatible_pair_file.stat().st_size,
+                "sha256": pair_hash,
+                "size": pair_file.stat().st_size,
+            },
+            {
+                "path": "runtime-attestation.json",
+                "sha256": attestation_hash,
+                "size": attestation_file.stat().st_size,
             },
         ],
         "finished_at": "2026-07-19T01:01:01+00:00",
@@ -250,9 +313,12 @@ def test_evidence_manifest_hashes_are_recomputed(
     _write_json(run / "manifest.json", manifest)
 
     assert auditor._valid_evidence_manifest(run) is True
-    result_file.write_text("tampered\n", encoding="utf-8")
-    result_file.chmod(0o600)
+
+    # legacy라도 파일이 변조되면 그 시절 계약으로 unsafe다.
+    pair_file.write_text('{"version": 4, "tampered": true}\n', encoding="utf-8")
+    pair_file.chmod(0o600)
     assert auditor._valid_evidence_manifest(run) is False
+
 
 
 def test_active_lock_is_detected_across_process_boundary(

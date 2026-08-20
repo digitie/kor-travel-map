@@ -1,6 +1,7 @@
 # ADR-076: C6c manifest v4에 Map 네 runtime image provenance를 결박한다
 
-- 상태: accepted
+- 상태: superseded by [ADR-094](094-c7-pinned-runtime-generation-attestation.md)
+  (2026-08-20 — C7 신뢰 경계가 pinned runtime generation v5 + rebuild journal v7로 옮겨졌다)
 - 날짜: 2026-07-19
 - 결정자: human, AI agent
 

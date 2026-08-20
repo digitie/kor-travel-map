@@ -156,7 +156,7 @@ buildx는 clean 여부를 검증할 수 없는 worktree와 dirty worktree를 모
 context는 worktree `.`이 아니라 exact 40자 HEAD의 `git archive`로 한 번 고정하므로 ignored
 파일이나 순차 build 도중 변경이 image에 섞이지 않는다. API·admin·Dagster web·daemon image
 모두 같은 HEAD를 build arg와 `org.opencontainers.image.revision` label로 강제한다. runtime의
-네 image ID·revision 대조는 ADR-076의 C6c/C7 compatible-pair attestation이 맡는다.
+일곱 image ID·revision 대조는 ADR-094의 C7 pinned runtime generation attestation이 맡는다.
 
 기본 image 이름은 다음과 같다.
 

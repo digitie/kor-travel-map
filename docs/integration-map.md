@@ -176,14 +176,23 @@ production compatible pair에 반영됐다. sparse weather batch처럼 생산자
 cache target처럼 미완인 항목은 각 T-VN task와 PinVi consumer가 함께 준비된 compatible
 pair에서만 활성화한다. 현재 계약은 배포 source에 결박된 OpenAPI snapshot으로 판정한다.
 
-Production C6c compatible-pair manifest의 정본은 docker-manager의 version 4다.
-active/rollback 각 pair는 Map API·UI·Dagster web·Dagster daemon image ID 네 개,
-공통 Map source revision, PinVi API image ID/source revision, contract generation, recorded time의
-exact 9-field를 갖는다. Map C7 attestation은 이 네 Map image ID와 실제 compose runtime을
-각각 비교하며 v3 manifest나 확장 필드를 허용하지 않는다(ADR-076).
+**2026-08-20(ADR-094) 이후 정본은 docker-manager의 pinned runtime manifest version 5와
+rebuild journal version 7이다.** v4 compatible-pair manifest는 C7 신뢰 경계에서 퇴역했다.
+
+- v5 manifest는 `{version, active_generation}` 두 키만 갖는다. `active_generation`은 일곱
+  image ID(Map API·UI·Dagster web·Dagster daemon, PinVi API·web·dagster), Map/PinVi source
+  revision, 세 schema head(`map_application_head`·`map_dagster_head`·`pinvi_head`),
+  `pinset_sha256`, `recorded_at`의 exact 14-field다. rollback slot은 v5에 없다.
+- v7 journal은 그 세대를 commit한 transaction의 receipt다. C7은 phase `committed`,
+  candidate가 manifest `active_generation`과 **전체 동등**, cancel probe `finalized`를 요구한다.
+- Map C7 attestation(host document version 4)은 일곱 image ID를 실제 compose runtime과 각각
+  비교하고, 세 schema head·`pinset_sha256`·journal `transaction_id`를 generation과 exact
+  대조한다. Map application head는 runner가 측정한 실제 Alembic head와도 대조한다.
+  v4 manifest나 누락·추가 필드는 호환 변환 없이 거부한다.
+
 C7P 코드 병합만으로 production 활성화가 되지는 않는다. initial C6c/C7 cutover는
-producer/consumer blocker를 닫고 main의 exact commit으로 image를 빌드한 뒤 v4 capture와
-C7 live를 통과해 2026-07-27 완료했다. 후속 pair도 같은 capture → attestation → live
+producer/consumer blocker를 닫고 main의 exact commit으로 image를 빌드한 뒤 2026-07-27
+완료했다(당시 v4 capture 경로). 후속 세대는 rebuildable transaction → attestation → live
 인수 순서를 반복한다.
 
 | 변경 | PinVi 선행 조건 | KTM 전환 조건 |

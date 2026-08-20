@@ -212,26 +212,32 @@ def test_secure_reader_rejects_wrong_mode_and_writable_ancestor(tmp_path: Path) 
         )
 
 
-def _runtime_fixture() -> tuple[dict[str, object], dict[str, object], dict[str, str], Callable]:
+def _runtime_fixture() -> tuple[
+    dict[str, object], dict[str, object], dict[str, object], dict[str, str], Callable
+]:
     map_commit = "a" * 40
     pinvi_commit = "b" * 40
-    map_images = {
+    role_images = {
         "map_api": "sha256:" + "1" * 64,
         "map_ui": "sha256:" + "4" * 64,
         "map_dagster_web": "sha256:" + "5" * 64,
         "map_dagster_daemon": "sha256:" + "6" * 64,
+        "pinvi_api": "sha256:" + "2" * 64,
+        "pinvi_web": "sha256:" + "7" * 64,
+        "pinvi_dagster": "sha256:" + "8" * 64,
     }
-    pinvi_image = "sha256:" + "2" * 64
     executor_image = "sha256:" + "3" * 64
     project_name = "kor-travel-map-prod"
     playwright_base = "playwright@example"
-    generation = "c6c-v4"
+    pinset = "c" * 64
     services = {
         "map_api": "map-api",
         "map_dagster_daemon": "map-daemon",
         "map_dagster_web": "map-web",
         "map_ui": "map-ui",
         "pinvi_api": "pinvi-api",
+        "pinvi_dagster": "pinvi-dagster",
+        "pinvi_web": "pinvi-web",
     }
     environments = {role: ["A=1"] for role in services}
     environments["map_api"] = [
@@ -250,31 +256,30 @@ def _runtime_fixture() -> tuple[dict[str, object], dict[str, object], dict[str, 
     records: dict[str, dict[str, object]] = {}
     image_records: dict[str, dict[str, object]] = {
         image_id: {
-            "Config": {"Labels": {"org.opencontainers.image.revision": map_commit}}
+            "Config": {
+                "Labels": {
+                    "org.opencontainers.image.revision": (
+                        pinvi_commit if role in ATTESTATION._PINVI_ROLES else map_commit
+                    )
+                }
+            }
         }
-        for image_id in map_images.values()
+        for role, image_id in role_images.items()
     }
-    image_records.update(
-        {
-            pinvi_image: {
-                "Config": {"Labels": {"org.opencontainers.image.revision": pinvi_commit}}
-            },
-            executor_image: {
-                "Config": {
-                    "Labels": {
-                        "io.kortravelmap.c7.playwright-base": playwright_base,
-                        "io.kortravelmap.c7.repository-commit": map_commit,
-                    }
-                },
-                "Id": executor_image,
-            },
-        }
-    )
+    image_records[executor_image] = {
+        "Config": {
+            "Labels": {
+                "io.kortravelmap.c7.playwright-base": playwright_base,
+                "io.kortravelmap.c7.repository-commit": map_commit,
+            }
+        },
+        "Id": executor_image,
+    }
     runtime: dict[str, object] = {}
     service_ids: dict[str, str] = {}
-    for index, (role, service) in enumerate(services.items(), start=4):
-        container_id = str(index) * 64
-        image_id = pinvi_image if role == "pinvi_api" else map_images[role]
+    for index, (role, service) in enumerate(services.items(), start=1):
+        container_id = f"{index:x}" * 64
+        image_id = role_images[role]
         config = {
             "Cmd": ["serve"],
             "Entrypoint": ["/entrypoint"],
@@ -310,19 +315,46 @@ def _runtime_fixture() -> tuple[dict[str, object], dict[str, object], dict[str, 
             ),
             "image_id": image_id,
         }
-    pair = {
-        "contract_generation": generation,
-        "map_image_id": map_images["map_api"],
-        "map_ui_image_id": map_images["map_ui"],
-        "map_dagster_image_id": map_images["map_dagster_web"],
-        "map_dagster_daemon_image_id": map_images["map_dagster_daemon"],
+    schema_heads = {
+        "map_application_head": "0225_tvn40c_physical_removal",
+        "map_dagster_head": "29b539ebc72a",
+        "pinvi_head": "20260804_0049",
+    }
+    generation = {
+        **{field: role_images[role] for role, field in ATTESTATION.GENERATION_RUNTIME_IMAGE_FIELDS},
+        **schema_heads,
         "map_source_revision": map_commit,
-        "pinvi_image_id": pinvi_image,
         "pinvi_source_revision": pinvi_commit,
+        "pinset_sha256": pinset,
         "recorded_at": "2026-07-19T00:00:00+00:00",
     }
-    manifest = {"active": pair, "rollback": copy.deepcopy(pair), "version": 4}
+    manifest = {"active_generation": generation, "version": 5}
+    transaction_id = "11111111-2222-3333-4444-555555555555"
+    journal = {
+        "candidate": copy.deepcopy(generation),
+        "cancel_probe": {
+            "cancellation_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+            "fixture_consumed_at": "2026-07-19T00:00:01+00:00",
+            "fixture_created_at": "2026-07-19T00:00:00+00:00",
+            "fixture_finalized_at": "2026-07-19T00:00:02+00:00",
+            "job_id": "99999999-8888-7777-6666-555555555555",
+            "outcome": {
+                "code": "PIPELINE_CANCELLATION_UNSAFE",
+                "name": "pinvi_cancel_error",
+                "status": 409,
+            },
+            "stage": "finalized",
+        },
+        "compose_sha256": "d" * 64,
+        "created_at": "2026-07-19T00:00:00+00:00",
+        "environment_sha256": "e" * 64,
+        "phase": "committed",
+        "resolved_compose_sha256": "f" * 64,
+        "transaction_id": transaction_id,
+        "version": 7,
+    }
     manifest_bytes = _canonical_json(manifest)
+    journal_bytes = _canonical_json(journal)
     environ = {
         "E2E_BASE_URL": "https://map.example.test",
         "E2E_C7_DAGSTER_DAEMON_SERVICE": services["map_dagster_daemon"],
@@ -330,6 +362,8 @@ def _runtime_fixture() -> tuple[dict[str, object], dict[str, object], dict[str, 
         "E2E_C7_EXPECTED_GIT_COMMIT": map_commit,
         "E2E_C7_MAP_API_SERVICE": services["map_api"],
         "E2E_C7_PINVI_API_SERVICE": services["pinvi_api"],
+        "E2E_C7_PINVI_DAGSTER_SERVICE": services["pinvi_dagster"],
+        "E2E_C7_PINVI_WEB_SERVICE": services["pinvi_web"],
         "E2E_C7_PLAYWRIGHT_IMAGE": executor_image,
         "E2E_C7_UI_SERVICE": services["map_ui"],
         "E2E_DAGSTER_URL": "https://dagster.example.test/graphql",
@@ -355,18 +389,21 @@ def _runtime_fixture() -> tuple[dict[str, object], dict[str, object], dict[str, 
     )
     attestation = {
         **observed,
-        "c6c_contract_generation": generation,
-        "compatible_pair_manifest_sha256": _sha256_bytes(manifest_bytes),
         "compose_project_sha256": _sha256_bytes(project_name.encode()),
         "orchestrator_files": {
             relative: "0" * 64 for relative in ATTESTATION.ORCHESTRATOR_PATHS
         },
+        "pinned_runtime_manifest_sha256": _sha256_bytes(manifest_bytes),
+        "pinned_runtime_pinset_sha256": pinset,
         "playwright_base": playwright_base,
         "playwright_image_id": executor_image,
+        "rebuild_journal_sha256": _sha256_bytes(journal_bytes),
+        "rebuild_transaction_id": transaction_id,
         "repository_commit": map_commit,
+        "schema_heads": dict(schema_heads),
         "service_runtime": runtime,
         "source_commits": {"map": map_commit, "pinvi": pinvi_commit},
-        "version": 3,
+        "version": 4,
     }
 
     def run_command(command: list[str], _project_directory: str) -> str:
@@ -378,18 +415,20 @@ def _runtime_fixture() -> tuple[dict[str, object], dict[str, object], dict[str, 
             return json.dumps([image_records[command[4]]])
         raise AssertionError("unexpected command")
 
-    return attestation, manifest, environ, run_command
+    return attestation, manifest, journal, environ, run_command
 
 
 def _verify_runtime(
     attestation: dict[str, object],
     manifest: dict[str, object],
+    journal: dict[str, object],
     environ: dict[str, str],
     run_command: Callable,
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     return ATTESTATION.verify_runtime_attestation_payloads(
         _canonical_json(attestation),
         _canonical_json(manifest),
+        _canonical_json(journal),
         project_directory="/srv/kor-travel-map",
         playwright_base="playwright@example",
         environ=environ,
@@ -412,6 +451,8 @@ def _mutate_runtime_environment(
         "map_dagster_web": "E2E_C7_DAGSTER_WEB_SERVICE",
         "map_ui": "E2E_C7_UI_SERVICE",
         "pinvi_api": "E2E_C7_PINVI_API_SERVICE",
+        "pinvi_dagster": "E2E_C7_PINVI_DAGSTER_SERVICE",
+        "pinvi_web": "E2E_C7_PINVI_WEB_SERVICE",
     }
     service = environ[service_env[role]]
     container_id = original_run_command(
@@ -446,13 +487,14 @@ def _mutate_runtime_environment(
 
 
 def test_runtime_attestation_fixture_accepts_exact_metadata() -> None:
-    attestation, manifest, environ, run_command = _runtime_fixture()
+    attestation, manifest, journal, environ, run_command = _runtime_fixture()
 
-    manifest_sha256, attestation_sha256 = _verify_runtime(
-        attestation, manifest, environ, run_command
+    manifest_sha256, journal_sha256, attestation_sha256 = _verify_runtime(
+        attestation, manifest, journal, environ, run_command
     )
 
     assert manifest_sha256 == _sha256_bytes(_canonical_json(manifest))
+    assert journal_sha256 == _sha256_bytes(_canonical_json(journal))
     assert attestation_sha256 == _sha256_bytes(_canonical_json(attestation))
 
 
@@ -472,69 +514,218 @@ def test_runtime_attestation_fixture_accepts_exact_metadata() -> None:
 def test_runtime_attestation_rejects_wrong_shape_or_image_metadata(
     mutation: Callable[[dict[str, object]], object],
 ) -> None:
-    attestation, manifest, environ, run_command = _runtime_fixture()
+    attestation, manifest, journal, environ, run_command = _runtime_fixture()
     mutation(attestation)
 
     with pytest.raises(ATTESTATION.AttestationError):
-        _verify_runtime(attestation, manifest, environ, run_command)
-
-
-def test_runtime_attestation_rejects_compatible_pair_hash_mismatch() -> None:
-    attestation, manifest, environ, run_command = _runtime_fixture()
-    attestation["compatible_pair_manifest_sha256"] = "f" * 64
-
-    with pytest.raises(ATTESTATION.AttestationError, match="compatible pair mismatch"):
-        _verify_runtime(attestation, manifest, environ, run_command)
+        _verify_runtime(attestation, manifest, journal, environ, run_command)
 
 
 @pytest.mark.parametrize(
-    "mutation",
+    "key",
     [
-        lambda value: value.update({"version": 3}),
-        lambda value: value["active"].pop("map_ui_image_id"),
-        lambda value: value["rollback"].update({"unexpected": True}),
+        "pinned_runtime_manifest_sha256",
+        "rebuild_journal_sha256",
+        "pinned_runtime_pinset_sha256",
     ],
 )
-def test_runtime_attestation_rejects_non_v4_or_inexact_pair_shape(
-    mutation: Callable[[dict[str, object]], object],
+def test_runtime_attestation_rejects_each_pinned_generation_digest_mismatch(
+    key: str,
 ) -> None:
-    attestation, manifest, environ, run_command = _runtime_fixture()
+    attestation, manifest, journal, environ, run_command = _runtime_fixture()
+    attestation[key] = "f" * 64
+
+    with pytest.raises(
+        ATTESTATION.AttestationError, match="pinned runtime generation mismatch"
+    ):
+        _verify_runtime(attestation, manifest, journal, environ, run_command)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    [
+        (lambda value: value.update({"version": 4}), "manifest shape"),
+        (
+            lambda value: value.update({"active": value["active_generation"]}),
+            "manifest shape",
+        ),
+        (lambda value: value["active_generation"].pop("map_ui_image_id"), "generation shape"),
+        (
+            lambda value: value["active_generation"].update({"unexpected": True}),
+            "generation shape",
+        ),
+        (
+            lambda value: value["active_generation"].update({"pinset_sha256": "not-a-digest"}),
+            "generation pinset",
+        ),
+        (
+            lambda value: value["active_generation"].update({"pinvi_head": "NOT LOWER"}),
+            "generation schema head",
+        ),
+        (
+            lambda value: value["active_generation"].update({"map_dagster_head": 7}),
+            "generation schema head",
+        ),
+        (
+            lambda value: value["active_generation"].update(
+                {"recorded_at": "2026-07-19T00:00:00"}
+            ),
+            "generation recorded_at",
+        ),
+        (
+            lambda value: value["active_generation"].update(
+                {"recorded_at": "2026-07-19T09:00:00+09:00"}
+            ),
+            "generation recorded_at",
+        ),
+    ],
+)
+def test_runtime_attestation_rejects_non_v5_or_inexact_generation_shape(
+    mutation: Callable[[dict[str, object]], object],
+    expected: str,
+) -> None:
+    """`match=`가 없으면 다른 guard가 대신 잡아 주어 해당 guard를 지워도 green이 된다.
+
+    적대 리뷰가 exact-shape·version·schema head 세 guard를 각각 제거해도 스위트가
+    통과함을 실측했다(2026-08-20). 사유 문자열까지 고정한다.
+    """
+
+    attestation, manifest, journal, environ, run_command = _runtime_fixture()
     mutation(manifest)
-    attestation["compatible_pair_manifest_sha256"] = _sha256_bytes(
+    attestation["pinned_runtime_manifest_sha256"] = _sha256_bytes(
         _canonical_json(manifest)
     )
 
-    with pytest.raises(ATTESTATION.AttestationError):
-        _verify_runtime(attestation, manifest, environ, run_command)
+    with pytest.raises(ATTESTATION.AttestationError, match=expected):
+        _verify_runtime(attestation, manifest, journal, environ, run_command)
+
+
+@pytest.mark.parametrize("version", [3, 5, "4", None])
+def test_runtime_attestation_rejects_non_v4_attestation_version(version: object) -> None:
+    attestation, manifest, journal, environ, run_command = _runtime_fixture()
+    if version is None:
+        attestation.pop("version")
+    else:
+        attestation["version"] = version
+
+    with pytest.raises(ATTESTATION.AttestationError, match="attestation shape"):
+        _verify_runtime(attestation, manifest, journal, environ, run_command)
+
+
+def test_runtime_attestation_rejects_journal_from_another_rebuild_transaction() -> None:
+    """journal의 transaction_id가 attestation과 결박되지 않으면 순수 장식이 된다."""
+
+    attestation, manifest, journal, environ, run_command = _runtime_fixture()
+    attestation["rebuild_transaction_id"] = "00000000-0000-0000-0000-000000000000"
+
+    with pytest.raises(
+        ATTESTATION.AttestationError, match="not bound to this rebuild transaction"
+    ):
+        _verify_runtime(attestation, manifest, journal, environ, run_command)
 
 
 @pytest.mark.parametrize(
-    "field",
+    ("mutation", "expected"),
     [
-        "map_image_id",
-        "map_ui_image_id",
-        "map_dagster_image_id",
-        "map_dagster_daemon_image_id",
-        "pinvi_image_id",
+        (lambda value: value.update({"version": 6}), "journal shape"),
+        (lambda value: value.pop("cancel_probe"), "journal shape"),
+        (lambda value: value.update({"phase": "manifest_committing"}), "journal is not committed"),
+        (lambda value: value.update({"transaction_id": "not-a-uuid"}), "journal transaction"),
+        (lambda value: value.update({"environment_sha256": "short"}), "journal input digest"),
+        (lambda value: value["cancel_probe"].update({"stage": "consumed"}), "cancel probe"),
+        (
+            lambda value: value["cancel_probe"].update({"unexpected": True}),
+            "journal cancel probe shape",
+        ),
+        (
+            lambda value: value["cancel_probe"].pop("fixture_consumed_at"),
+            "journal cancel probe shape",
+        ),
+        (
+            lambda value: value["cancel_probe"]["outcome"].update({"status": 410}),
+            "journal cancel probe outcome",
+        ),
+        (
+            lambda value: value["cancel_probe"].update({"job_id": "job-1"}),
+            "journal cancel probe identity",
+        ),
+        (
+            lambda value: value["cancel_probe"].update({"cancellation_id": "cancel-1"}),
+            "journal cancel probe identity",
+        ),
+        (
+            lambda value: value["cancel_probe"].update(
+                {"fixture_finalized_at": "2026-07-19T00:00:02"}
+            ),
+            "journal cancel probe timestamp",
+        ),
+        (
+            lambda value: value["candidate"].update({"map_ui_image_id": "sha256:" + "f" * 64}),
+            "journal candidate is not the active generation",
+        ),
     ],
+)
+def test_runtime_attestation_rejects_journal_that_did_not_commit_this_generation(
+    mutation: Callable[[dict[str, object]], object],
+    expected: str,
+) -> None:
+    """journal은 "이 세대가 rebuild를 끝까지 통과했다"는 유일한 증거다.
+
+    manifest만 보면 active generation이 무엇인지는 알아도 그것이 파괴적
+    transaction을 완주했는지는 알 수 없다. 그래서 phase·candidate·cancel probe가
+    하나라도 어긋나면 통과시키지 않는다.
+    """
+
+    attestation, manifest, journal, environ, run_command = _runtime_fixture()
+    mutation(journal)
+    attestation["rebuild_journal_sha256"] = _sha256_bytes(_canonical_json(journal))
+
+    with pytest.raises(ATTESTATION.AttestationError, match=expected):
+        _verify_runtime(attestation, manifest, journal, environ, run_command)
+
+
+@pytest.mark.parametrize("field", list(ATTESTATION.GENERATION_SCHEMA_HEAD_FIELDS))
+def test_runtime_attestation_rejects_each_schema_head_mismatch(field: str) -> None:
+    attestation, manifest, journal, environ, run_command = _runtime_fixture()
+    schema_heads = attestation["schema_heads"]
+    assert isinstance(schema_heads, dict)
+    schema_heads[field] = "0000_other_head"
+
+    with pytest.raises(ATTESTATION.AttestationError, match="schema head mismatch"):
+        _verify_runtime(attestation, manifest, journal, environ, run_command)
+
+
+@pytest.mark.parametrize(
+    "field", [field for _, field in ATTESTATION.GENERATION_RUNTIME_IMAGE_FIELDS]
 )
 def test_runtime_attestation_rejects_each_active_runtime_image_mismatch(
     field: str,
 ) -> None:
-    attestation, manifest, environ, run_command = _runtime_fixture()
-    active = manifest["active"]
+    """일곱 image를 **전부** 실측 대조한다.
+
+    v4 pair는 PinVi web/dagster를 담지 않아 그 둘이 세대 밖에서 바뀌어도 통과했다.
+    parametrize를 v5 generation의 image field에서 직접 만들어, 세대가 늘어나면
+    이 테스트도 자동으로 늘어나게 둔다.
+    """
+
+    attestation, manifest, journal, environ, run_command = _runtime_fixture()
+    active = manifest["active_generation"]
     assert isinstance(active, dict)
     active[field] = "sha256:" + "f" * 64
-    attestation["compatible_pair_manifest_sha256"] = _sha256_bytes(
+    journal["candidate"] = copy.deepcopy(active)
+    attestation["pinned_runtime_manifest_sha256"] = _sha256_bytes(
         _canonical_json(manifest)
     )
+    attestation["rebuild_journal_sha256"] = _sha256_bytes(_canonical_json(journal))
 
-    with pytest.raises(ATTESTATION.AttestationError, match="active pair is not deployed"):
-        _verify_runtime(attestation, manifest, environ, run_command)
+    with pytest.raises(
+        ATTESTATION.AttestationError, match="active generation is not deployed"
+    ):
+        _verify_runtime(attestation, manifest, journal, environ, run_command)
 
 
 def test_runtime_attestation_rejects_wrong_oci_revision() -> None:
-    attestation, manifest, environ, original_run_command = _runtime_fixture()
+    attestation, manifest, journal, environ, original_run_command = _runtime_fixture()
 
     def tampered_run_command(command: list[str], project_directory: str) -> str:
         output = original_run_command(command, project_directory)
@@ -547,7 +738,7 @@ def test_runtime_attestation_rejects_wrong_oci_revision() -> None:
         return json.dumps(records)
 
     with pytest.raises(ATTESTATION.AttestationError, match="source provenance"):
-        _verify_runtime(attestation, manifest, environ, tampered_run_command)
+        _verify_runtime(attestation, manifest, journal, environ, tampered_run_command)
 
 
 @pytest.mark.parametrize(
@@ -598,7 +789,7 @@ def test_runtime_attestation_rejects_wrong_oci_revision() -> None:
 def test_runtime_attestation_rejects_invalid_api_cursor_secret_shape(
     mutation: Callable[[list[str]], None],
 ) -> None:
-    attestation, manifest, environ, original_run_command = _runtime_fixture()
+    attestation, manifest, journal, environ, original_run_command = _runtime_fixture()
     run_command = _mutate_runtime_environment(
         attestation,
         environ,
@@ -608,7 +799,7 @@ def test_runtime_attestation_rejects_invalid_api_cursor_secret_shape(
     )
 
     with pytest.raises(ATTESTATION.AttestationError, match="cursor secret runtime shape"):
-        _verify_runtime(attestation, manifest, environ, run_command)
+        _verify_runtime(attestation, manifest, journal, environ, run_command)
 
 
 @pytest.mark.parametrize(
@@ -626,7 +817,7 @@ def test_runtime_attestation_rejects_invalid_api_cursor_secret_shape(
 def test_runtime_attestation_rejects_api_cursor_secret_reuse(
     protected_name: str,
 ) -> None:
-    attestation, manifest, environ, original_run_command = _runtime_fixture()
+    attestation, manifest, journal, environ, original_run_command = _runtime_fixture()
 
     def reuse_protected_value(values: list[str]) -> None:
         cursor = next(
@@ -650,11 +841,11 @@ def test_runtime_attestation_rejects_api_cursor_secret_reuse(
     )
 
     with pytest.raises(ATTESTATION.AttestationError, match="cursor secret runtime reuse"):
-        _verify_runtime(attestation, manifest, environ, run_command)
+        _verify_runtime(attestation, manifest, journal, environ, run_command)
 
 
 def test_runtime_attestation_rejects_duplicate_cursor_secret_name() -> None:
-    attestation, manifest, environ, original_run_command = _runtime_fixture()
+    attestation, manifest, journal, environ, original_run_command = _runtime_fixture()
     run_command = _mutate_runtime_environment(
         attestation,
         environ,
@@ -666,7 +857,7 @@ def test_runtime_attestation_rejects_duplicate_cursor_secret_name() -> None:
     )
 
     with pytest.raises(ATTESTATION.AttestationError, match="runtime environment shape"):
-        _verify_runtime(attestation, manifest, environ, run_command)
+        _verify_runtime(attestation, manifest, journal, environ, run_command)
 
 
 @pytest.mark.parametrize(
@@ -674,7 +865,7 @@ def test_runtime_attestation_rejects_duplicate_cursor_secret_name() -> None:
     ["map_dagster_daemon", "map_dagster_web", "map_ui", "pinvi_api"],
 )
 def test_runtime_attestation_rejects_cursor_secret_outside_api(role: str) -> None:
-    attestation, manifest, environ, original_run_command = _runtime_fixture()
+    attestation, manifest, journal, environ, original_run_command = _runtime_fixture()
     run_command = _mutate_runtime_environment(
         attestation,
         environ,
@@ -686,4 +877,4 @@ def test_runtime_attestation_rejects_cursor_secret_outside_api(role: str) -> Non
     )
 
     with pytest.raises(ATTESTATION.AttestationError, match="escaped API runtime"):
-        _verify_runtime(attestation, manifest, environ, run_command)
+        _verify_runtime(attestation, manifest, journal, environ, run_command)

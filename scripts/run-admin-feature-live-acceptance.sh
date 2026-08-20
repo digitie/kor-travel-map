@@ -29,7 +29,8 @@ RUNTIME_DIR=""
 LIFECYCLE_DIR=""
 API_CONTAINER_ID=""
 API_IMAGE_ID=""
-COMPATIBLE_PAIR_SHA256=""
+PINNED_RUNTIME_MANIFEST_SHA256=""
+REBUILD_JOURNAL_SHA256=""
 HOST_ATTESTATION_SHA256=""
 BARRIER_FD=""
 declare -a EXECUTION_IDENTITY_ARGS=()
@@ -114,7 +115,8 @@ validate_runtime() {
   require_env E2E_DAGSTER_URL
   require_env E2E_ADMIN_PASSWORD
   require_env E2E_C7_EXPECTED_GIT_COMMIT
-  require_env E2E_C7_COMPATIBLE_PAIR_MANIFEST
+  require_env E2E_C7_PINNED_RUNTIME_MANIFEST
+  require_env E2E_C7_REBUILD_JOURNAL
   require_env E2E_C7_PLAYWRIGHT_IMAGE
   validate_sha256_env E2E_C7_EXPECTED_UI_ORIGIN_SHA256
   validate_sha256_env E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256
@@ -124,6 +126,8 @@ validate_runtime() {
   validate_service_env E2E_C7_UI_SERVICE
   validate_service_env E2E_C7_MAP_API_SERVICE
   validate_service_env E2E_C7_PINVI_API_SERVICE
+  validate_service_env E2E_C7_PINVI_WEB_SERVICE
+  validate_service_env E2E_C7_PINVI_DAGSTER_SERVICE
 
   [[ "${E2E_LIVE_ALLOW_PROD-}" == "1" ]] || die "E2E_LIVE_ALLOW_PROD=1 opt-in required"
   [[ "${E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE-}" == "1" ]] ||
@@ -132,8 +136,10 @@ validate_runtime() {
     die "expected Git commit is invalid"
   [[ "$E2E_C7_PLAYWRIGHT_IMAGE" =~ ^sha256:[0-9a-f]{64}$ ]] ||
     die "Playwright executor must be an immutable image ID"
-  [[ "$E2E_C7_COMPATIBLE_PAIR_MANIFEST" == /* ]] ||
-    die "compatible-pair manifest path must be absolute"
+  [[ "$E2E_C7_PINNED_RUNTIME_MANIFEST" == /* ]] ||
+    die "pinned runtime manifest path must be absolute"
+  [[ "$E2E_C7_REBUILD_JOURNAL" == /* ]] ||
+    die "pinned runtime rebuild journal path must be absolute"
 
   local expected_root c7_module
   expected_root="$INSTALL_BASE/$E2E_C7_EXPECTED_GIT_COMMIT"
@@ -157,14 +163,19 @@ validate_runtime() {
   mapfile -t attestation_output < <(
     python3 -I -B "$c7_module" runtime \
       "$HOST_ATTESTATION_FILE" \
-      "$E2E_C7_COMPATIBLE_PAIR_MANIFEST" \
+      "$E2E_C7_PINNED_RUNTIME_MANIFEST" \
+      "$E2E_C7_REBUILD_JOURNAL" \
       "$PWD" \
       "$PLAYWRIGHT_BASE_IMAGE" 2>/dev/null
-  ) || die "trusted C7 v3/v4 runtime attestation failed"
-  (( ${#attestation_output[@]} == 2 )) || die "runtime attestation output is invalid"
-  COMPATIBLE_PAIR_SHA256="${attestation_output[0]}"
-  HOST_ATTESTATION_SHA256="${attestation_output[1]}"
-  [[ "$COMPATIBLE_PAIR_SHA256" =~ ^[0-9a-f]{64}$ ]] || die "pair hash is invalid"
+  ) || die "trusted C7 v4/v5/v7 runtime attestation failed"
+  (( ${#attestation_output[@]} == 3 )) || die "runtime attestation output is invalid"
+  PINNED_RUNTIME_MANIFEST_SHA256="${attestation_output[0]}"
+  REBUILD_JOURNAL_SHA256="${attestation_output[1]}"
+  HOST_ATTESTATION_SHA256="${attestation_output[2]}"
+  [[ "$PINNED_RUNTIME_MANIFEST_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
+    die "pinned runtime manifest hash is invalid"
+  [[ "$REBUILD_JOURNAL_SHA256" =~ ^[0-9a-f]{64}$ ]] ||
+    die "pinned runtime rebuild journal hash is invalid"
   [[ "$HOST_ATTESTATION_SHA256" =~ ^[0-9a-f]{64}$ ]] || die "attestation hash is invalid"
 
   API_CONTAINER_ID="$(
@@ -180,7 +191,8 @@ validate_runtime() {
     --source-commit "$E2E_C7_EXPECTED_GIT_COMMIT"
     --api-image-id "$API_IMAGE_ID"
     --playwright-image-id "$E2E_C7_PLAYWRIGHT_IMAGE"
-    --compatible-pair-sha256 "$COMPATIBLE_PAIR_SHA256"
+    --pinned-runtime-manifest-sha256 "$PINNED_RUNTIME_MANIFEST_SHA256"
+    --rebuild-journal-sha256 "$REBUILD_JOURNAL_SHA256"
     --host-attestation-sha256 "$HOST_ATTESTATION_SHA256"
   )
 }

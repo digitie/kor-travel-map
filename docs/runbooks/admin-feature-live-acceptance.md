@@ -2,8 +2,8 @@
 
 이 runbook은 issue #741·#785와 `T-VN-15`의 남은 production 증거를 한 번의 owned
 Feature lane에서 검증한다. strict `T-ADM-C7`의 상태·증거에는 mutation을 섞지 않지만,
-실행 전 신뢰 경계는 C7 host attestation v3와 compatible-pair manifest v4를 그대로
-재사용한다. C7 성공을 대신하거나 C7보다 넓은 배포 조합을 허용하지 않는다.
+실행 전 신뢰 경계는 C7 host attestation v4와 pinned runtime manifest v5 + rebuild
+journal v7을 그대로 재사용한다. C7 성공을 대신하거나 C7보다 넓은 배포 조합을 허용하지 않는다.
 
 ## 1. 불변식
 
@@ -73,7 +73,8 @@ export E2E_ADMIN_PASSWORD='<admin-password>'
 export E2E_LIVE_ALLOW_PROD=1
 export E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE=1
 export E2E_C7_EXPECTED_GIT_COMMIT='<40-hex>'
-export E2E_C7_COMPATIBLE_PAIR_MANIFEST='<root-owned-v4-manifest-path>'
+export E2E_C7_PINNED_RUNTIME_MANIFEST='<root-owned-pinned-runtime-generation-v5.json>'
+export E2E_C7_REBUILD_JOURNAL='<root-owned-pinned-runtime-rebuild-v7-<pinset>.json>'
 export E2E_C7_PLAYWRIGHT_IMAGE='sha256:<64-hex>'
 export E2E_C7_EXPECTED_UI_ORIGIN_SHA256='<64-hex>'
 export E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256='<64-hex>'
@@ -83,27 +84,39 @@ export E2E_C7_UI_SERVICE='<compose-service>'
 export E2E_C7_DAGSTER_WEB_SERVICE='<compose-service>'
 export E2E_C7_DAGSTER_DAEMON_SERVICE='<compose-service>'
 export E2E_C7_PINVI_API_SERVICE='<compose-service>'
+export E2E_C7_PINVI_WEB_SERVICE='<compose-service>'
+export E2E_C7_PINVI_DAGSTER_SERVICE='<compose-service>'
 ```
+
+> 두 attested input은 ktdm이 rebuildable transaction에서 만든 v5/v7 문서의 **root 소유
+> 0600 사본**이어야 한다. ktdm의 state root는 Manager owner 소유 `0700`이라 그대로는
+> verifier의 root-owned 요구를 만족하지 않는다. 사본을 만들 때 내용은 바꾸지 않는다 —
+> verifier가 두 파일의 SHA256을 attestation과 대조하므로 한 바이트만 달라도 멈춘다.
 
 root snapshot의 C7 verifier는 mutation 전에 다음을 actual runtime과 exact 비교한다.
 
 - host machine ID·hostname, compose project, 공개 UI/API/Dagster origin
-- active compatible pair의 Map API/UI/Dagster web/daemon 및 PinVi immutable image ID
+- v5 active generation의 일곱 immutable image ID(Map API/UI/Dagster web/daemon,
+  PinVi API/web/dagster)와 세 schema head(map application·map dagster·pinvi), pinset digest
+- v7 rebuild journal이 **이 세대를 commit했다는 것** — phase `committed`, candidate가
+  manifest active generation과 전체 동등, cancel probe `finalized`
 - Map/PinVi source commit, OCI source revision, command hash, environment hash
 - Playwright executor image와 base image identity
 - Map API의 `profile=production`, features route `true`, 중복 없는 cursor signing secret
   1개(32자 이상·공백 없음), admin/service/ops read/ops cancel/metrics/VWorld credential과의 분리
-- Map UI·Dagster web·Dagster daemon·PinVi API에 cursor signing secret이 없다는 음성 계약
+- Map API 외 여섯 runtime(Map UI·Dagster web·Dagster daemon, PinVi API·web·dagster)에
+  cursor signing secret이 없다는 음성 계약
 
 caller가 임의 OCI label이나 자체 생성 attestation으로 이 경계를 우회할 수 없다. 검증 성공
-출력은 compatible-pair manifest와 host attestation의 SHA256 두 개뿐이며 result에 hash로만 남는다.
+출력은 pinned runtime manifest·rebuild journal·host attestation의 SHA256 세 개뿐이며
+result에 hash로만 남는다.
 
 ## 4. 실행 순서
 
 compose project directory에서 필요한 env를 보존해 commit별 runner를 실행한다.
 
 ```bash
-sudo --preserve-env=E2E_BASE_URL,NEXT_PUBLIC_KOR_TRAVEL_MAP_API,E2E_DAGSTER_URL,E2E_ADMIN_PASSWORD,E2E_ADMIN_USERNAME,E2E_LIVE_ALLOW_PROD,E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE,E2E_C7_EXPECTED_GIT_COMMIT,E2E_C7_COMPATIBLE_PAIR_MANIFEST,E2E_C7_PLAYWRIGHT_IMAGE,E2E_C7_EXPECTED_UI_ORIGIN_SHA256,E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256,E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256,E2E_C7_MAP_API_SERVICE,E2E_C7_UI_SERVICE,E2E_C7_DAGSTER_WEB_SERVICE,E2E_C7_DAGSTER_DAEMON_SERVICE,E2E_C7_PINVI_API_SERVICE \
+sudo --preserve-env=E2E_BASE_URL,NEXT_PUBLIC_KOR_TRAVEL_MAP_API,E2E_DAGSTER_URL,E2E_ADMIN_PASSWORD,E2E_ADMIN_USERNAME,E2E_LIVE_ALLOW_PROD,E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE,E2E_C7_EXPECTED_GIT_COMMIT,E2E_C7_PINNED_RUNTIME_MANIFEST,E2E_C7_REBUILD_JOURNAL,E2E_C7_PLAYWRIGHT_IMAGE,E2E_C7_EXPECTED_UI_ORIGIN_SHA256,E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256,E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256,E2E_C7_MAP_API_SERVICE,E2E_C7_UI_SERVICE,E2E_C7_DAGSTER_WEB_SERVICE,E2E_C7_DAGSTER_DAEMON_SERVICE,E2E_C7_PINVI_API_SERVICE,E2E_C7_PINVI_WEB_SERVICE,E2E_C7_PINVI_DAGSTER_SERVICE \
   /usr/local/lib/kor-travel-map/admin-feature-live-acceptance/<40-hex>/run-admin-feature-live-acceptance.sh run
 ```
 
@@ -173,13 +186,13 @@ v3 helper로 변환하거나 삭제하지 않는다. v2에는 실행 identity가
 유지한다. BLOCKED가 완전히 종결된 뒤에만 v3 snapshot을 활성화한다.
 
 같은 배포 env와 commit snapshot으로 실행한다. 최초 실행은 BLOCKED v3에 source commit,
-API·Playwright image ID, compatible-pair manifest와 host attestation hash의 exact execution
+API·Playwright image ID, pinned runtime manifest·rebuild journal·host attestation hash의 exact execution
 identity를 기록한다. recovery는 현재 runtime attestation에서 다시 얻은 identity가 BLOCKED와
 완전히 같을 때만 attempt를 증가시키며, 하나라도 다르면 mutation 전에 fail-closed한다. 성공 result
 v3에는 exact identity의 canonical SHA256과 pair/attestation hash만 남기고 원문은 남기지 않는다.
 
 ```bash
-sudo --preserve-env=E2E_BASE_URL,NEXT_PUBLIC_KOR_TRAVEL_MAP_API,E2E_DAGSTER_URL,E2E_ADMIN_PASSWORD,E2E_ADMIN_USERNAME,E2E_LIVE_ALLOW_PROD,E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE,E2E_C7_EXPECTED_GIT_COMMIT,E2E_C7_COMPATIBLE_PAIR_MANIFEST,E2E_C7_PLAYWRIGHT_IMAGE,E2E_C7_EXPECTED_UI_ORIGIN_SHA256,E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256,E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256,E2E_C7_MAP_API_SERVICE,E2E_C7_UI_SERVICE,E2E_C7_DAGSTER_WEB_SERVICE,E2E_C7_DAGSTER_DAEMON_SERVICE,E2E_C7_PINVI_API_SERVICE \
+sudo --preserve-env=E2E_BASE_URL,NEXT_PUBLIC_KOR_TRAVEL_MAP_API,E2E_DAGSTER_URL,E2E_ADMIN_PASSWORD,E2E_ADMIN_USERNAME,E2E_LIVE_ALLOW_PROD,E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE,E2E_C7_EXPECTED_GIT_COMMIT,E2E_C7_PINNED_RUNTIME_MANIFEST,E2E_C7_REBUILD_JOURNAL,E2E_C7_PLAYWRIGHT_IMAGE,E2E_C7_EXPECTED_UI_ORIGIN_SHA256,E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256,E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256,E2E_C7_MAP_API_SERVICE,E2E_C7_UI_SERVICE,E2E_C7_DAGSTER_WEB_SERVICE,E2E_C7_DAGSTER_DAEMON_SERVICE,E2E_C7_PINVI_API_SERVICE,E2E_C7_PINVI_WEB_SERVICE,E2E_C7_PINVI_DAGSTER_SERVICE \
   /usr/local/lib/kor-travel-map/admin-feature-live-acceptance/<40-hex>/run-admin-feature-live-acceptance.sh recover
 ```
 
@@ -212,6 +225,6 @@ fingerprint가 다르면 다른 운영 row일 수 있으므로 아무 것도 삭
 - 같은 exact tree의 PostgreSQL regression 증거에서 search `include_total=false` COUNT 0회,
   `include_total=true` COUNT 1회. production HTTP 결과만으로 SQL 실행 횟수를 추정하지 않음
 
-이슈에는 실행 시각, exact source commit, compatible-pair/attestation hash, passed/recovered,
+이슈에는 실행 시각, exact source commit, pinned generation/journal/attestation hash, passed/recovered,
 cleanup/audit/container 0 결과만 적는다. secret·origin·host·run ID·Feature ID·container ID·cursor
 원문은 적지 않는다.

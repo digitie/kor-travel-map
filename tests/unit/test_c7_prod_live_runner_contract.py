@@ -2,6 +2,25 @@
 
 from pathlib import Path
 
+from scripts.lib import c7_prod_attestation as _ATTESTATION_MODULE
+
+# 기대 목록은 **테스트가** 적는다. 모듈 상수에서 파생시키면 "모듈이 스스로를 만족한다"는
+# 항등식이 되어 아무것도 보지 않는다(2026-08-20 적대 리뷰 지적).
+_EXPECTED_GENERATION_IMAGE_FIELDS = (
+    "map_api_image_id",
+    "map_ui_image_id",
+    "map_dagster_image_id",
+    "map_dagster_daemon_image_id",
+    "pinvi_api_image_id",
+    "pinvi_web_image_id",
+    "pinvi_dagster_image_id",
+)
+_EXPECTED_GENERATION_SCHEMA_HEAD_FIELDS = (
+    "map_application_head",
+    "map_dagster_head",
+    "pinvi_head",
+)
+
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER = ROOT / "scripts" / "run-c7-prod-live-e2e.sh"
 ATTESTATION = ROOT / "scripts" / "lib" / "c7_prod_attestation.py"
@@ -55,11 +74,12 @@ def test_final_runner_anchors_host_login_and_causal_poi_spec() -> None:
     assert '/etc/kor-travel-map/c7-prod-live-e2e-attestation.json' in script
     assert 'machine_id_sha256' in attestation
     assert 'hostname_sha256' in attestation
-    assert 'compatible_pair_manifest_sha256' in attestation
+    assert 'pinned_runtime_manifest_sha256' in attestation
+    assert 'rebuild_journal_sha256' in attestation
     assert 'compose_project_sha256' in attestation
     assert 'service_runtime' in attestation
     assert '"orchestrator_files"' in script
-    assert 'attestation["version"] != 3' in attestation
+    assert 'attestation["version"] != 4' in attestation
     assert 'expected_base: Path = Path("/usr/local/lib/kor-travel-map/c7-runner")' in attestation
     assert 'scripts/lib/c7_prod_attestation.py' in script
     assert 'scripts/audit-c7-prod-live-state.py' in script
@@ -498,13 +518,21 @@ def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidenc
     assert 'executor.get("Id") != environ["E2E_C7_PLAYWRIGHT_IMAGE"]' in attestation
     assert 'image_labels.get("org.opencontainers.image.revision")' in attestation
     assert '"source_commits"' in attestation
-    assert 'manifest["version"] != 4' in attestation
+    assert 'manifest["version"] != 5' in attestation
+    assert 'value["version"] != 7' in attestation
+    # 모듈 상수가 기대 목록과 **정확히** 같아야 한다. 빠지면 그 runtime이 검사 밖에
+    # 남고(그것이 v4의 결함이었다), 늘면 테스트가 모르는 runtime이 생긴 것이다.
+    assert (
+        tuple(field for _, field in _ATTESTATION_MODULE.GENERATION_RUNTIME_IMAGE_FIELDS)
+        == _EXPECTED_GENERATION_IMAGE_FIELDS
+    )
+    assert (
+        tuple(_ATTESTATION_MODULE.GENERATION_SCHEMA_HEAD_FIELDS)
+        == _EXPECTED_GENERATION_SCHEMA_HEAD_FIELDS
+    )
     for field in (
-        "map_image_id",
-        "map_ui_image_id",
-        "map_dagster_image_id",
-        "map_dagster_daemon_image_id",
-        "pinvi_image_id",
+        *_EXPECTED_GENERATION_IMAGE_FIELDS,
+        *_EXPECTED_GENERATION_SCHEMA_HEAD_FIELDS,
     ):
         assert field in attestation
     assert 'active["map_source_revision"] != source_commits["map"]' in attestation

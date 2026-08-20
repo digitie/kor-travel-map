@@ -2,6 +2,80 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-20 — T-VN-41F1D-E: 세대가 자라도 검사는 자라지 않던 계약
+
+live runner 두 개(`run-c7-prod-live-e2e.sh`, `run-admin-feature-live-acceptance.sh`)가
+요구하던 v4 `E2E_C7_COMPATIBLE_PAIR_MANIFEST`를 없애고 v5 pinned runtime manifest +
+v7 rebuild journal로 옮겼다. 저장소측(unit·script contract)은 완료이고, n150
+data-dependent 실행은 F1D-D 순서를 따른다.
+
+**왜 문서를 둘로 나눴나.** manifest만 보면 "어떤 세대가 active인가"는 알아도 "그 세대가
+파괴적 rebuild를 끝까지 통과했는가"는 알 수 없다. 그건 journal만 안다. 그래서 journal의
+phase가 `committed`이고 candidate가 manifest의 active generation과 **글자 그대로 같아야**
+한다 — 부분 비교로는 두 문서가 같은 transaction의 앞뒤라는 것이 증명되지 않는다. cancel
+probe `finalized`까지 요구해 F1J fixture 수명주기가 끝난 세대만 통과시킨다.
+
+**가장 중요한 발견은 v4가 다섯만 보고 있었다는 것이다.** compatible pair는 Map API/UI/
+Dagster web/daemon과 PinVi API, 다섯 image만 담았다. PinVi web과 PinVi dagster는 세대
+밖이라, 그 둘이 어떤 image로 떠 있든 attestation이 통과했다. v5 generation은 일곱을 함께
+고정하므로 compose service env를 둘 추가해 일곱 전부를 실측 대조한다.
+
+같은 병이 테스트에도 있었다. image field 목록을 손으로 나열한 자리가 세 군데였고, 그래서
+세대가 자라도 검사는 자라지 않았다. 셋 다 모듈 상수에서 파생시켰다 — 다음에 runtime이
+늘면 테스트가 저절로 늘어난다.
+
+**v4 아카이브는 건드리지 않았다.** `t-vn-41-candidate-*` 세 artifact는 freeze 상수가
+"detached 이력으로 불변"이라고 이미 정해 둔 것이다. 현행 계약이 v5로 갔다고 과거 증거의
+모양을 바꿔 쓰면 그것은 이력이 아니라 위조다. 그래서 전방 계약(receipt)은 v5 generation
+일곱 role로 옮기되, 아카이브 검증에는 분리된 5-role 상수를 남겼다.
+
+변이 8종을 실측했다 — phase, candidate 동등성, cancel probe, schema head, journal digest,
+pinset, image 실측 대조, manifest version 고정. 전부 red. 첫 배터리는 bash heredoc 인용이
+깨져 **변이가 적용되지 않은 채 green을 보고**했는데, 그 green을 증거로 삼지 않고 스크립트를
+순수 Python으로 다시 써서 치환 여부를 `assert`로 확인한 뒤에만 판정하게 고쳤다.
+
+
+**적대 리뷰 2명이 둘 다 NO_GO를 냈고, 둘 다 옳았다.**
+
+가장 큰 것은 내가 한쪽만 올린 version이다. host attestation을 3에서 4로 올리면서
+`admin_feature_live_state.py`의 bootstrap 검증은 3을 계속 요구하도록 남겨 뒀다. v4 문서를
+깔면 bootstrap에서, v3를 유지하면 검증 모듈에서 막혀 **admin lane이 어느 쪽으로도 실행되지
+않는** 상태였다. C7 runner는 자체 bootstrap heredoc을 쓰므로 C7만 돌려서는 보이지 않는다.
+그리고 그 결함을 **내 테스트가 고정하고 있었다** — `assert 'attestation.get("version") != 3'
+in state`가 v4/v5/v7로 이름까지 바꾼 테스트 안에 그대로 남아 CI는 green이었다.
+
+두 번째는 내가 이 세션 내내 남에게 지적해온 그 병을 내가 새로 만든 것이다. image field
+목록을 모듈 상수에서 파생시켜 "모듈이 스스로를 만족하는" 항등식을 만들었다. 리뷰어가 직접
+`pinvi_web`을 지우고 돌려 보니 전체 스위트가 green이었다. 원래 하드코딩 목록의 존재 이유가
+"세대가 **줄면** 잡는다"였는데, 파생은 정확히 그 방향을 잃는다. 기대 목록을 테스트가 다시
+적고, 모듈 상수가 그것과 정확히 같은지 양방향으로 본다.
+
+세 번째는 운영 차단이다. evidence manifest의 key 집합을 바꿔 놓고 `version`을 1로 뒀다.
+기존 evidence archive가 있는 host에서는 첫 실행이 audit preflight의 `unsafe_entries > 0`로
+죽는다 — 그리고 그 host가 바로 이 acceptance를 돌릴 n150이다. version을 2로 올리고, audit은
+v1을 legacy로 인정하되 **그 시절 계약으로 그대로 검사**한다. 과거 증거를 지우게 만들지
+않으면서 "옛것은 무조건 통과"도 아니게 하는 유일한 지점이다.
+
+리뷰어가 준 것 중 가장 값진 지적은 **무료로 얻을 수 있던 실측 결박**이었다. runner는 이미
+Map DB의 실제 Alembic head를 측정해 evidence에만 적고 있었다. image 일곱은 `docker inspect`로
+실측 대조하면서 head 셋만 두 root 문서가 서로 같은지만 봤다. 배포 코드와 DB head 불일치는
+2026-07-27 사고가 지목한 실패 모드다. 이제 측정값과 generation을 대조한다.
+
+그밖에 `_validate_utc_timestamp`가 UTC를 보지 않던 것(tz-aware면 `+09:00`도 통과), journal
+`transaction_id`가 아무것과도 결박되지 않아 장식이던 것, cancel probe만 exact shape 검증에서
+빠져 손으로 적은 `{"stage":"finalized"}`가 통과하던 것, `match=`가 없어 세 guard를 지워도
+green이던 것, 전방 receipt 블록이 `pending` 동안 한 줄도 실행되지 않던 것을 모두 닫았다.
+ADR-094를 추가하고 ADR-076/079를 superseded로 표시했다 — v4 유지를 결정한 ADR을 근거 없이
+뒤집으면 다음 사람이 그 ADR을 들고 되돌리러 온다.
+
+변이 배터리는 세 차례 돌렸다(8종 → 4종 → 7종, 전부 red). 그 중 두 번은 "게이트만 넣고
+검증은 안 붙인" 상태를 배터리가 잡아냈다 — cancel probe exact shape와 evidence v1 legacy 경로다.
+
+실행 전제 하나를 기록해 둔다 — v5/v7은 `require_rebuildable_mode`가 걸려 rehearsal/
+rebuildable에서만 만들어진다. n150은 `rehearsal`/`rebuildable`이라 해당되지만, **아직 두
+파일이 없다**. D1의 파괴적 rebuild가 처음 만든다. 또 ktdm의 state root는 Manager owner
+소유 `0700`이라 verifier의 root-owned 0600 요구를 그대로는 만족하지 않는다 — v4도 같은
+구조였고 운영자가 root 소유 사본을 건네는 것이 기존 절차다. runbook에 명시했다.
 ## 2026-08-20 — T-VN-41C GC 실측: 통과 자체보다 "통과가 무엇을 뜻하는가"
 
 cache-target snapshot GC의 백로그 AC(migration → 수동 GC → schedule ON → 다음 tick,
@@ -37,6 +111,7 @@ storage가 자기 alembic 계보를 같은 `public.alembic_version`에 stamp해�
 절차를 일회성으로 흘려보내지 않고 `scripts/verify-tvn41c-cache-target-gc.sh`로 고정했다.
 스키마나 GC 예산이 바뀌면 다시 돌려야 하는 게이트를 사람 기억에 두면 안 된다. 게이트는
 `DROP DATABASE`로 시작하므로 운영 DB 이름이 들어오면 그 전에 거부한다.
+||||||| parent of b0152b46 (docs(tvn41): F1D-E 저장소측 완료 기록 + 백로그 진척 표시)
 
 ## 2026-08-20 — T-VN-41C relay 종결성: 테스트가 결함을 보호하고 있었다
 
