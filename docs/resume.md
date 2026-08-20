@@ -71,6 +71,22 @@ prod 덤프 사본(features 1,008,852까지 완전 일치)에서 `0225→0229→
 2026-08-21 한 배포로 prod에 올라갔다(prod head = `0232_tvn37d_notice_empty_range`).
 상세는 이 문서 최상단 배포 항목에 있다.
 
+## 2026-08-21 — T-VN-M05 `0232` forward repair 재심 보정
+
+M05는 아직 activation하지 않는다. `0231` preview의 reader owner와 v1 admin EXECUTE가 남는 실제
+forward-upgrade/ACL 결함을 `0232`와 runtime/bootstrap repair에서 닫았다. reader를 기존 dedicated
+owner로 재선언할 때만 임시 schema `CREATE`를 주고 곧 회수하므로 fresh DB와 post-0231 preview가
+같은 forward path를 쓴다. subscription 최초 생성은 absence race를 transaction advisory lock으로
+직렬화해 두 동시 command가 각각 `provisioned`/`already_provisioned`로 종료한다. stale 및 existing
+subscription 409은 terminal receipt의 `application/problem+json`을 replay에도 보존한다.
+
+### 다음 한 작업
+
+이 exact Map commit을 최신 `origin/main` 위로 rebase·push하고 DB/HTTP 전문 적대 리뷰어 두 명의
+최종 판정을 받는다. 이후 PinVi exact OpenAPI vendor·consumer/UI, isolated mutating UI E2E와
+`pg_restore --no-owner --no-privileges` drill을 모두 통과하기 전까지 activation receipt는 만들지
+않는다.
+
 ## 2026-08-21 — T-VN-M05 Map admin 판단·service delivery contract
 
 M05 Map 쪽 admin case 목록/상세/판정과 reconciliation service lease/ACK contract를 완성했다.

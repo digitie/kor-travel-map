@@ -153,6 +153,21 @@ candidate의 `to_jsonb(notice)`에 내부 generated column이 누출되는 P1을
 candidate SQL은 `valid_during`을 response JSON에서 제외하도록 수정했다. NULL·one-sided·
 equal range, public/admin active predicate와 notice candidate detail 회귀를 추가했으며,
 수정 후 targeted integration 2건을 통과했다.
+## 2026-08-21 — T-VN-M05 `0232` forward repair 재심 보정
+
+두 전문 적대 리뷰에서 `0231` preview DB의 v1 admin 실행권이 repair 뒤에도 남는 ACL 우회와,
+전용 owner가 이미 소유한 reader를 schema owner가 `CREATE OR REPLACE`할 수 없어 forward
+upgrade가 중단되는 문제를 재현했다. runtime reconciler와 bootstrap은 v1을 admin executor에서도
+명시 회수하고, `0232`는 reader 재선언에만 owner의 임시 schema `CREATE`를 부여한 뒤 즉시
+회수한다. fresh migration과 preview owner 재정의 모두 실제 migrator login으로 검증했다.
+
+subscription 최초 생성은 row가 없을 때 `FOR UPDATE`가 경쟁을 막지 못하므로 transaction advisory
+lock으로 직렬화했다. 두 domain command의 동시 provision은 한 쪽만 `provisioned`, 다른 쪽은
+500 대신 durable `already_provisioned`가 된다. terminal 409 receipt도 저장한
+`application/problem+json` media type을 replay하도록 고정했다. 이 변경은 다시 리베이스·푸시한
+뒤 같은 두 리뷰어에게 재심한다. PinVi consumer, isolated live UI E2E, no-owner restore drill 전에는
+M05 activation receipt를 계속 만들지 않는다.
+
 ## 2026-08-21 — T-VN-M05 forward-only delivery·subscription activation 보정
 
 적대 리뷰에서 이미 배포 가능한 `0231` migration을 고치면 기존 DB가 reader/ACK lock routine을

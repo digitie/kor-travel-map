@@ -473,6 +473,7 @@ _M05_WRITER_ACL = (
     "uuid, text, text, bigint, bigint, text, text, text, bigint) FROM PUBLIC, "
     "ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime, "
     "ktm_manual_provider_dedup_detector_executor, "
+    "ktm_manual_provider_dedup_admin_executor, "
     "ktm_feature_reference_reconciliation_service_executor",
     "GRANT EXECUTE ON PROCEDURE feature.resolve_manual_provider_dedup_case_v2("
     "uuid, text, text, bigint, bigint, text, text, text, bigint) "

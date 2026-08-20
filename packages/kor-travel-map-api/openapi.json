@@ -33227,7 +33227,18 @@
                 }
               }
             },
-            "description": "subscription이 이미 있어 initial cursor를 변경할 수 없음"
+            "description": "subscription이 이미 있어 initial cursor를 변경할 수 없음",
+            "headers": {
+              "Idempotency-Replayed": {
+                "description": "동일 conflict receipt를 replay했을 때 true.",
+                "schema": {
+                  "enum": [
+                    "true"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
           },
           "422": {
             "content": {
@@ -37861,7 +37872,18 @@
                 }
               }
             },
-            "description": "stale evidence 또는 Idempotency-Key 충돌"
+            "description": "stale evidence 또는 Idempotency-Key 충돌",
+            "headers": {
+              "Idempotency-Replayed": {
+                "description": "동일 stale receipt를 replay했을 때 true.",
+                "schema": {
+                  "enum": [
+                    "true"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
           },
           "422": {
             "content": {

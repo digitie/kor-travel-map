@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from time import perf_counter
 
@@ -84,6 +85,35 @@ def test_domain_command_terminal_result_replays_exact_response() -> None:
     assert response.headers["x-request-id"] == "request-original"
     assert response.headers["location"] == "/v1/admin/features/feature-1"
     assert response.json() == _domain_record().response_body
+
+
+@pytest.mark.unit
+def test_domain_command_problem_result_replays_its_stored_media_type() -> None:
+    app = create_app(ApiSettings())
+    record = replace(
+        _domain_record(),
+        response_status=409,
+        response_body={
+            "type": "https://kor-travel-map/errors/subscription-exists",
+            "title": "subscription이 이미 있습니다.",
+            "status": 409,
+            "detail": "기존 immutable cursor를 유지합니다.",
+            "code": "FEATURE_REFERENCE_RECONCILIATION_SUBSCRIPTION_EXISTS",
+            "errors": [],
+        },
+        response_headers={"Content-Type": "application/problem+json"},
+    )
+
+    @app.post("/domain-problem-replay")
+    async def _domain_problem_replay() -> None:
+        raise DomainCommandReplay(record)
+
+    response = TestClient(app).post("/domain-problem-replay")
+
+    assert response.status_code == 409
+    assert response.headers["idempotency-replayed"] == "true"
+    assert response.headers["content-type"].startswith("application/problem+json")
+    assert response.json() == record.response_body
 
 
 @pytest.mark.unit

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import os
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -12,6 +15,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine
 
 from kortravelmap.infra.db import make_async_engine
+from kortravelmap.infra.runtime_privileges import reconcile_runtime_privileges
 
 pytestmark = pytest.mark.integration
 
@@ -402,32 +406,63 @@ async def test_reconciliation_subscription_is_provisioned_only_by_admin_writer(
             await connection.rollback()
         assert getattr(not_ready.value.orig, "sqlstate", None) == "P0002"
 
-        command_id = await _open_command(
+        first_command_id = await _open_command(
             migrated_engine,
             actor="admin:m05-subscription",
             operation="admin.feature-reference-reconciliation-subscription.provision.v1",
         )
-        async with api.begin() as connection:
-            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
-            provisioned = dict(
-                (
-                    await connection.execute(
-                        text(
-                            """
-                            CALL feature.provision_feature_reference_reconciliation_subscription(
-                              :principal_id, 0, 'admin:m05-subscription', :command_id,
-                              NULL::text, NULL::bigint
-                            )
-                            """
-                        ),
-                        {"principal_id": principal_id, "command_id": command_id},
+        second_command_id = await _open_command(
+            migrated_engine,
+            actor="admin:m05-subscription",
+            operation="admin.feature-reference-reconciliation-subscription.provision.v1",
+        )
+        first_ready = asyncio.Event()
+        release_first = asyncio.Event()
+
+        async def provision_once(
+            command_id: int,
+            *,
+            ready: asyncio.Event | None = None,
+            release: asyncio.Event | None = None,
+        ) -> dict[str, object]:
+            async with api.begin() as connection:
+                await connection.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
+                receipt = dict(
+                    (
+                        await connection.execute(
+                            text(
+                                "CALL feature."
+                                "provision_feature_reference_reconciliation_subscription("
+                                ":principal_id, 0, 'admin:m05-subscription', :command_id, "
+                                "NULL::text, NULL::bigint)"
+                            ),
+                            {"principal_id": principal_id, "command_id": command_id},
+                        )
                     )
+                    .mappings()
+                    .one()
                 )
-                .mappings()
-                .one()
-            )
+                if ready is not None:
+                    ready.set()
+                if release is not None:
+                    await release.wait()
+                return receipt
+
+        first_task = asyncio.create_task(
+            provision_once(first_command_id, ready=first_ready, release=release_first)
+        )
+        await asyncio.wait_for(first_ready.wait(), timeout=5)
+        second_task = asyncio.create_task(provision_once(second_command_id))
+        done, _pending = await asyncio.wait({second_task}, timeout=0.1)
+        assert not done
+        release_first.set()
+        provisioned, raced = await asyncio.gather(first_task, second_task)
         assert provisioned == {
             "o_outcome": "provisioned",
+            "o_initial_event_sequence": 0,
+        }
+        assert raced == {
+            "o_outcome": "already_provisioned",
             "o_initial_event_sequence": 0,
         }
 
@@ -461,6 +496,113 @@ async def test_reconciliation_subscription_is_provisioned_only_by_admin_writer(
         }
     finally:
         await api.dispose()
+
+
+async def test_runtime_reconciler_revokes_deployed_v1_decision_grant(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """0231 preview DB의 v1 grant는 0232 repair 뒤에 남을 수 없다."""
+
+    v1 = (
+        "feature.resolve_manual_provider_dedup_case("
+        "uuid,text,text,bigint,bigint,text,text,text,bigint)"
+    )
+    async with migrated_engine.begin() as connection:
+        await connection.execute(
+            text(f"GRANT EXECUTE ON PROCEDURE {v1} TO ktm_manual_provider_dedup_admin_executor")
+        )
+        assert (
+            await connection.scalar(
+                text(
+                    "SELECT has_function_privilege("
+                    "'ktm_feature_api_runtime', "
+                    f"'{v1}'::regprocedure, 'EXECUTE')"
+                )
+            )
+            is True
+        )
+
+    previous_dsn = os.environ.get("KOR_TRAVEL_MAP_PG_DSN")
+    os.environ["KOR_TRAVEL_MAP_PG_DSN"] = migrated_engine.url.set(
+        username="ktm_feature_migrator",
+        password="tvn34-test-only-migrator-password",
+    ).render_as_string(hide_password=False)
+    try:
+        await reconcile_runtime_privileges()
+    finally:
+        if previous_dsn is None:
+            os.environ.pop("KOR_TRAVEL_MAP_PG_DSN", None)
+        else:
+            os.environ["KOR_TRAVEL_MAP_PG_DSN"] = previous_dsn
+
+    async with migrated_engine.connect() as connection:
+        assert (
+            await connection.scalar(
+                text(
+                    "SELECT has_function_privilege("
+                    "'ktm_feature_api_runtime', "
+                    f"'{v1}'::regprocedure, 'EXECUTE')"
+                )
+            )
+            is False
+        )
+
+
+async def test_preview_reader_owner_can_run_0232_redefinition_before_repair(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """repair 전 dedicated owner reader가 있는 preview DB도 forward upgrade한다."""
+
+    migration_path = _ROOT / "alembic/versions/0232_m05_reconciliation_delivery.py"
+    spec = spec_from_file_location("_tvn_m05_delivery_migration", migration_path)
+    assert spec is not None
+    assert spec.loader is not None
+    migration = module_from_spec(spec)
+    spec.loader.exec_module(migration)
+    statements = migration._top_level_statements(migration._DDL_SQL)
+    start = next(
+        index
+        for index, statement in enumerate(statements)
+        if statement.endswith(
+            "GRANT USAGE, CREATE ON SCHEMA feature TO ktm_manual_provider_dedup_procedure_owner"
+        )
+    )
+    end = next(
+        index
+        for index, statement in enumerate(statements[start:], start)
+        if statement
+        == "REVOKE CREATE ON SCHEMA feature FROM ktm_manual_provider_dedup_procedure_owner"
+    )
+
+    migrator = make_async_engine(
+        migrated_engine.url.set(
+            username="ktm_feature_migrator",
+            password="tvn34-test-only-migrator-password",
+        ).render_as_string(hide_password=False),
+        pool_size=1,
+    )
+    try:
+        async with migrator.begin() as connection:
+            await connection.execute(text("SET ROLE ktm_feature_schema_owner"))
+            for statement in statements[start : end + 1]:
+                await connection.exec_driver_sql(statement)
+    finally:
+        await migrator.dispose()
+
+    async with migrated_engine.connect() as connection:
+        for routine in (
+            "feature.list_manual_provider_dedup_cases(text,timestamp with time zone,uuid,integer)",
+            "feature.read_manual_provider_dedup_case(uuid)",
+        ):
+            assert (
+                await connection.scalar(
+                    text(
+                        "SELECT pg_get_userbyid(proowner) FROM pg_catalog.pg_proc "
+                        f"WHERE oid = '{routine}'::regprocedure"
+                    )
+                )
+                == "ktm_manual_provider_dedup_procedure_owner"
+            )
 
 
 async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_only(

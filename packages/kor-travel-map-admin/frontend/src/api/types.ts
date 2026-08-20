@@ -16261,6 +16261,8 @@ export interface operations {
             /** @description subscription이 이미 있어 initial cursor를 변경할 수 없음 */
             409: {
                 headers: {
+                    /** @description 동일 conflict receipt를 replay했을 때 true. */
+                    "Idempotency-Replayed"?: "true";
                     [name: string]: unknown;
                 };
                 content: {
@@ -18504,6 +18506,8 @@ export interface operations {
             /** @description stale evidence 또는 Idempotency-Key 충돌 */
             409: {
                 headers: {
+                    /** @description 동일 stale receipt를 replay했을 때 true. */
+                    "Idempotency-Replayed"?: "true";
                     [name: string]: unknown;
                 };
                 content: {

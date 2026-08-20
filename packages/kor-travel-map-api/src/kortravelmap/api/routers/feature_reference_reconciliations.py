@@ -558,7 +558,15 @@ async def ack_feature_reference_reconciliation_event_route(
             }
         },
         403: {"description": "AdminBFF 거부"},
-        409: {"description": "subscription이 이미 있어 initial cursor를 변경할 수 없음"},
+        409: {
+            "description": "subscription이 이미 있어 initial cursor를 변경할 수 없음",
+            "headers": {
+                "Idempotency-Replayed": {
+                    "description": "동일 conflict receipt를 replay했을 때 true.",
+                    "schema": {"type": "string", "enum": ["true"]},
+                }
+            },
+        },
         422: {"description": "initial cursor 입력 오류"},
     },
 )
@@ -611,6 +619,7 @@ async def provision_feature_reference_reconciliation_subscription_route(
                     command=command,
                     response=conflict_body,
                     status_code=status.HTTP_409_CONFLICT,
+                    response_headers={"Content-Type": "application/problem+json"},
                 )
             else:
                 result = FeatureReferenceReconciliationSubscriptionProvisionResponse(
@@ -804,7 +813,15 @@ async def get_manual_provider_dedup_case_route(
     response_model=ManualProviderDedupCaseDecisionResponse,
     responses={
         403: {"description": "AdminBFF 또는 destructive decision kill-switch 거부"},
-        409: {"description": "stale evidence 또는 Idempotency-Key 충돌"},
+        409: {
+            "description": "stale evidence 또는 Idempotency-Key 충돌",
+            "headers": {
+                "Idempotency-Replayed": {
+                    "description": "동일 stale receipt를 replay했을 때 true.",
+                    "schema": {"type": "string", "enum": ["true"]},
+                }
+            },
+        },
         422: {"description": "decision 입력 오류"},
         503: {"description": "paired reconciliation subscription이 아직 활성화되지 않음"},
     },
@@ -859,6 +876,7 @@ async def resolve_manual_provider_dedup_case_route(
                     command=command,
                     response=stale_body,
                     status_code=status.HTTP_409_CONFLICT,
+                    response_headers={"Content-Type": "application/problem+json"},
                 )
                 result: ManualProviderDedupCaseDecisionResponse | JSONResponse = JSONResponse(
                     status_code=status.HTTP_409_CONFLICT,
