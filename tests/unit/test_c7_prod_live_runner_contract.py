@@ -499,7 +499,8 @@ def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidenc
     assert 'executor.get("Id") != environ["E2E_C7_PLAYWRIGHT_IMAGE"]' in attestation
     assert 'image_labels.get("org.opencontainers.image.revision")' in attestation
     assert '"source_commits"' in attestation
-    assert 'manifest["version"] != 4' in attestation
+    assert 'manifest["version"] != 5' in attestation
+    assert 'value["version"] != 7' in attestation
     for field in (
         "map_image_id",
         "map_ui_image_id",
