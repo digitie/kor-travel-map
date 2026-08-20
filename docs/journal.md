@@ -2,6 +2,85 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-20 — T-VN-40C: legacy curation overlay 물리 제거
+
+40A의 write fence와 40B의 consumer 선전환 뒤 남아 있던 legacy overlay를 DB·코드·계약·
+문서에서 한 release로 지웠다. migration `0225`가 `feature.curated_features`와
+`curated_feature_detail_snapshots`, 단방향 동기화 trigger, `curation_items`의
+`legacy_projection_id` 컬럼·partial unique index, `0074`의 rekey 예외, legacy ACL을
+삭제한다. `ops.curation_cutover_identity_mappings`는 PinVi가 예전 참조를 canonical로
+옮기는 불변 증거라 남긴다. fresh PostGIS에서 `0200 → 0225`를 실제로 돌려 확인했다.
+
+이 작업에서 반복해서 드러난 것은 **삭제가 lint를 통과한다고 해서 끝난 게 아니라는
+점**이었다. 제거 자체는 manifest가 지시한 대로 기계적이지만, 그 뒤에 남는 잔해는
+manifest에 없다.
+
+- `main` 대비 차등 dead-symbol 스캔으로 40C가 새로 죽인 심볼 20개를 찾았다. 그중
+  `_FEATURE_COLUMNS`는 드롭된 표의 컬럼(`cf.curation_status`, `cf.rank_score` …)을
+  그대로 projection하는 SQL 상수였고, 정적 zero gate의 식별자 목록에는 걸리지 않는
+  이름이었다. ast `end_lineno` 기반 제거가 주석을 남긴 자리도 넷 있었다.
+- 삭제한 테스트 파일 7개를 함수 단위로 훑어 **legacy 식별자를 전혀 참조하지 않는**
+  검사 9개를 찾아 새 모듈로 복구했다. `test_tvn40a_legacy_write_fence_acl.py`에는
+  fence와 무관한 ACL phantom 검출이 섞여 있었고, `test_curated_routes.py`에는 40C
+  이후에도 살아 있는 catalog 명령의 strong ETag·CAS 계약 검사가 있었다. 파일 이름만
+  보고 지웠으면 그 커버리지는 조용히 사라졌을 것이다.
+
+정적 zero gate는 처음에 45건이 남았는데, 문서를 고치고 나니 10건이 남았고 그 10건은
+전부 "이건 40C에서 지웠다"고 말하는 문장이었다. 이 구분을 스크립트가 아니라 저장소 안
+테스트로 옮겼다 — `tests/lint/test_tvn40c_static_zero_gate.py`가 manifest의 식별자
+목록을 읽어 살아 있는 참조 0을 요구하고, 제거 고지 문장은 (경로, 식별자, 사유) 10건으로
+열거한다. 등록되지 않은 새 언급과 더 이상 등장하지 않는 죽은 예외를 양쪽 다 실패로
+잡는다. 스크립트로만 존재하는 gate는 아무도 돌리지 않으면 아무 것도 지키지 않는다.
+
+runtime 검증도 같은 이유로 통합 테스트로 박았다
+(`tests/integration/test_tvn40c_post_removal_runtime.py`). 여기서 내 단언이 세 번
+틀렸고, 세 번 다 코드가 아니라 검사 쪽 문제였다.
+
+1. 라우트 검사를 `create_app(최소 ApiSettings)`로 만든 앱에서 했더니 admin/service
+   라우터가 아예 mount되지 않아 잔존 표면 13개가 전부 "사라진" 것으로 보였다.
+2. module-level `app`으로 바꿔도 여전히 red였다. 이 앱은 라우터를 `_IncludedRouter`
+   37개로 감싸 top-level route 객체에 `path`가 없다. 즉 **제거 표면 검사 쪽은 아무
+   것도 안 보면서 초록이었다** — 이 저장소가 반복해서 겪은 "검사한다고 주장하는 것을
+   실제로는 안 보는" 형태 그대로다. `app.openapi()["paths"]`로 바꾸고, 표면 크기와
+   대표 경로 존재를 별도 단언으로 함께 막았다.
+3. ACL 검사의 declared 집합을 표 2개로 잡아 column-level `_CORE_FEATURE_GRANTS`로
+   권한을 받는 protected 표 4개가 미선언으로 잡혔다. dagster 경계도 "canonical 표
+   DELETE 금지"로 잘못 짚었다 — 실제 불변식은 curation typed command가 command owner
+   소유 SECURITY DEFINER이고 dagster runtime EXECUTE가 false라는 것이고, prod에서
+   14개 procedure로 확인했다.
+
+두 gate 모두 변이를 주입해 red를 확인했다. 코드에 live reference 주입, tombstone 예외
+삭제, 죽은 예외 추가, 잔존 목록에 없는 경로 넣기, legacy 이름 표 생성, procedure 본문에
+식별자 심기 — 여섯 변이가 모두 각각의 검사를 red로 만들고 원복 시 green이었다.
+
+문서는 `docs/curated-features.md`를 catalog + collection/item 정본으로 다시 쓰고, 40C
+이전 overlay 설계(컬럼·인덱스·enum·PinVi copy 계약 원문)는
+`docs/archive/curated-features-legacy-overlay.md`로 동결했다. data-model·rest-api·
+openapi-admin-contract·postgres-schema·backup-restore도 같이 갱신했다. `docs/deploy.md`의
+2026-08-18 실행 기록은 당시 사실이라 손대지 않았다.
+
+frontend는 legacy 라우트 2개와 read hook 2개, 상태 어휘 모듈을 지웠다. React Doctor의
+`deslop/unused-file`이 `src/lib/curated-labels.ts`가 도달 불가능해진 것을 잡아줬다 —
+소비자를 지우면 그 어휘도 죽는다는 걸 게이트가 먼저 말해줬다. live e2e fixture의
+`CURATED_IDS`(legacy UUID 40개)는 prod `feature.curation_items` 4,424행에서
+`CURATION_ITEM_IDS`로 재표집했다.
+
+**게이트 결과**: ruff / mypy `--strict` ×3(144+67+24 files) / import-linter 4 contracts
+green. pytest unit+lint+api **3,436 passed**, integration **999 passed**. 남은 실패
+6건은 전부 n150 환경(`KOR_TRAVEL_MAP_PG_DSN` 설정, geo API 키 미설정)이고 `main`에서도
+같다. frontend CI-parity 게이트 13단계(npm-tree · eslint 0 warnings · React Doctor ·
+vitest · gen:types:check ×2 · type-check ×2 · next build 등) 전부 green.
+
+**남은 것**: `contracts/vnext/consumer-rollout-v1.json`의 T-VN-40
+`pinvi_snapshot_receipt.state`는 `pending`이다. PinVi 재-vendor는 Map pin이 **머지된
+commit**이어야 성립한다 — `contract-pin-consistency`가 그 SHA를 체크아웃해 vendored
+스냅샷과 비교하기 때문이다. 40C 머지 뒤에 수행한다. 사전 확인은 마쳤다: user spec
+delta는 path 4·schema 29 **순수 제거**이고 남은 path의 본문 변경이 없으며, service
+spec sha(`8019e36f`)는 PinVi가 이미 vendor한 값과 같다. PinVi의 Map curation client는
+`/v1/service/curation-collections/{id}/detail-snapshot`과
+`/v1/service/curation-cutover/identity-mappings`만 호출하므로 제거 표면을 소비하지
+않는다(추적 코드 기준 0건).
+
 ## 2026-08-19 — T-VN-H45: Alembic 1.19 named CHECK 373개 정렬
 
 Alembic 1.18.5 기준으로 잠가 둔 천장을 1.19.1로 올리고 fresh PostGIS
