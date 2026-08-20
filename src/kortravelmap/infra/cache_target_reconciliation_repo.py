@@ -543,15 +543,23 @@ WITH snapshot_inventory AS MATERIALIZED (
 ), material_inventory AS MATERIALIZED (
   -- item의 분류 축은 이제 receipt가 아니라 material이다. receipt N개가 material
   -- 하나를 공유하므로 "이 item이 만료됐는가"를 receipt 하나로 물을 수 없다.
-  --   orphaned   = 붙잡은 receipt가 없다        -> GC가 지울 backlog
-  --   referenced = reconciliation이 참조하는 receipt가 하나라도 있다
-  --   그 외      = 살아 있는 receipt가 붙잡고 있다
+  --
+  --   reclaimable = 되찾기가 표시됐거나 붙잡은 receipt가 없다 -> **GC가 지울 item**
+  --   referenced  = 그 외 중 reconciliation이 참조하는 receipt가 있다
+  --   그 외       = 살아 있는 receipt가 붙잡고 있다
+  --
+  -- `reclaimable`을 orphan만으로 정의하면 표시된 audit material의 item이 어느 축에도
+  -- 잡히지 않아, drain이 남아 있는데 `remaining_items = 0`이 된다(적대 리뷰 지적).
+  -- 세 축은 서로 겹치지 않아야 합계가 맞으므로 우선순위를 둔다.
   SELECT material.material_id,
-         NOT EXISTS (
-           SELECT 1
-           FROM ops.poi_cache_target_snapshots AS receipt
-           WHERE receipt.material_id = material.material_id
-         ) AS orphaned,
+         (
+           material.compacted_at IS NOT NULL
+           OR NOT EXISTS (
+             SELECT 1
+             FROM ops.poi_cache_target_snapshots AS receipt
+             WHERE receipt.material_id = material.material_id
+           )
+         ) AS reclaimable,
          EXISTS (
            SELECT 1
            FROM ops.poi_cache_target_snapshots AS receipt
@@ -562,10 +570,11 @@ WITH snapshot_inventory AS MATERIALIZED (
   FROM ops.poi_cache_target_snapshot_materials AS material
 ), item_counts AS (
   SELECT count(*) AS total_items,
-         count(*) FILTER (WHERE inventory.orphaned) AS remaining_items,
-         count(*) FILTER (WHERE NOT inventory.orphaned AND NOT inventory.referenced)
+         count(*) FILTER (WHERE inventory.reclaimable) AS remaining_items,
+         count(*) FILTER (WHERE NOT inventory.reclaimable AND NOT inventory.referenced)
            AS unexpired_unreferenced_items,
-         count(*) FILTER (WHERE inventory.referenced) AS referenced_items
+         count(*) FILTER (WHERE NOT inventory.reclaimable AND inventory.referenced)
+           AS referenced_items
   FROM ops.poi_cache_target_snapshot_material_items AS item
   JOIN material_inventory AS inventory
     ON inventory.material_id = item.material_id

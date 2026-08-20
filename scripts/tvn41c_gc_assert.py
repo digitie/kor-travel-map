@@ -134,12 +134,23 @@ async def _drain(dsn: str) -> list[str]:
     for key, label in (("referenced_headers", "참조된"), ("live_headers", "미만료")):
         if after[key] != before[key]:
             problems.append(f"{label} snapshot이 지워졌다: {before[key]} -> {after[key]}")
-    for key, deleted in (
-        ("eligible_headers", result.deleted_headers),
-        ("eligible_items", result.deleted_items),
-    ):
-        if deleted != before[key]:
-            problems.append(f"삭제 수 불일치 {key}: deleted={deleted} expected={before[key]}")
+    if result.deleted_headers != before["eligible_headers"]:
+        problems.append(
+            "삭제 수 불일치 eligible_headers: "
+            f"deleted={result.deleted_headers} expected={before['eligible_headers']}"
+        )
+    # item은 **정확 일치를 요구하지 않는다.** `0230` 뒤 GC는 적격 item(붙잡은 receipt가
+    # 전부 만료·미참조인 material의 item) 외에 보존 기간을 넘긴 terminal audit
+    # material의 item도 지운다. 그쪽은 정의상 "적격"이 아니므로 정확 일치를 요구하면
+    # 보존 기간이 조정되는 순간 게이트가 거짓 실패한다(적대 리뷰 지적).
+    #
+    # 지켜야 하는 성질은 둘이고 그 둘은 위에서 이미 본다 — 적격 item이 남지 않았고
+    # (`after["eligible_items"] == 0`), 지운 수가 적격 수 이상이다.
+    if result.deleted_items < before["eligible_items"]:
+        problems.append(
+            "적격 item보다 적게 지웠다: "
+            f"deleted={result.deleted_items} eligible={before['eligible_items']}"
+        )
     return problems
 
 
