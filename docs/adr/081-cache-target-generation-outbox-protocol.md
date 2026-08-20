@@ -189,9 +189,17 @@ UUID를 성공 응답으로 내보내지 않는다. 응답은 `created_at`과 `e
 전진한다. link/refresh 및 stream-scope `cache_target.reconciled` event는 snapshot leaf 밖의 상태만
 바꾸므로 material version을 전진시키지 않는다.
 재사용 identity는 `(restore_epoch, material_high_watermark_relay_order)`이며 partial index
-`(external_system, relay_order DESC) WHERE event_type='cache_target.state_applied'`로 조회한다. snapshot의
-내부 header에 capture 당시 material watermark를 global cursor와 별도 저장하고, 현재 material watermark와
-exact equality이며 75분보다 긴 수명이 남을 때만 full head 재주사 없이 재사용한다.
+`(external_system, relay_order DESC) WHERE event_type='cache_target.state_applied'`로 조회한다. material은
+capture 당시 material watermark와 global cursor를 **각각** 저장하고, 현재 material watermark와 exact
+equality일 때 full head 재주사 없이 재사용한다.
+
+**2026-08-20(migration `0230`) 갱신**: "75분보다 긴 수명이 남을 때만"이라는 조건이 사라졌다. 그
+조건은 재사용이 앞선 snapshot **행 자체**를 물려받아 만료 시각까지 함께 물려받던 시절의 것이다.
+material과 receipt가 갈린 뒤 재사용은 새 receipt를 만들므로 언제나 full TTL로 시작한다. 대신
+consumer가 보는 것이 하나 바뀐다 — 같은 source 상태를 다시 요청하면 `snapshot_id`가 **달라지고**
+`merkle_root`/`count`/`high_watermark_cursor`가 같다. 같은 material을 받았는지는 root/count로 판정한다.
+`high_watermark_cursor`는 material이 **처음 고정될 때** 관측한 global cursor다 — 재사용 시점의 더 높은
+값을 주면 그 사이에 낀 비-membership event를 consumer가 건너뛴다.
 
 snapshot transaction은 advisory single-flight 획득 뒤 **별도 SQL statement**로 stream row `FOR SHARE`
 barrier를 먼저 완료한다. 기존 outbox writer가 끝날 때까지 기다리고 transaction 끝까지 새 writer를
@@ -236,14 +244,22 @@ Merkle v1 accumulator로 count/root/canonical material bytes를 `O(log N)` 메�
 1,000행 batch INSERT와 첫 응답 page만 보관하고 count/byte/root를 첫 scan과 재대조한다. 두 scan은 같은
 transaction의 stream share barrier 안에 있어 source membership이 고정되며 불일치는 전체 rollback한다.
 
-reconciliation seal은 exact material identity이고 75분 넘게 남은 generic 또는 이미 request가 참조하는 snapshot이
-있으면 같은 header/item을 재사용한다. 만료·미참조 snapshot은 GC가 일부 item을 지웠을 수 있어
-재사용하지 않는다. generic/reconciliation별 독립 receipt가 같은 material을 양방향 공유하고 terminal
-item을 compact하는 정규화 스키마는 T-VN-40C 예약 revision `0225` 뒤의 `0226+` migration으로 제한한다.
-그 전에는 revision 번호 없는 설계 초안만 유지한다. 만료된 일반 snapshot은
-reconciliation request가 참조하지 않을 때만 item 1,000행/header 100행 이하의 `SKIP LOCKED` 배치로
-정리한다. page reader의 header share lock은 GC가 빈 반복 page를 만드는 race를 막는다. terminal request가
-참조하는 snapshot도 checksum 감사 영수증이므로 보존한다.
+reconciliation seal도 generic page와 **같은** 재사용 경로를 쓴다. exact material identity를 가진
+살아 있는(`compacted_at IS NULL`) material을 찾아 자기 receipt를 붙인다. 재사용 후보에서 "만료됐는가",
+"reconciliation이 참조하는가"를 보지 않는다 — 그 둘은 receipt의 성질이지 material의 성질이 아니다.
+
+**2026-08-20(migration `0230`) 착지**: generic/reconciliation별 독립 receipt가 같은 material을 양방향
+공유하고 terminal item을 compact하는 정규화 스키마가 들어갔다. `0225` 뒤 `0230`이다.
+`ops.poi_cache_target_snapshot_materials`가 membership을, `ops.poi_cache_target_snapshots`가 receipt를
+소유하며 item PK/FK는 `(material_id, row_number)`다. 살아 있는 material은 identity마다 하나
+(partial unique `WHERE compacted_at IS NULL`)이고, compaction된 material은 그 identity를 비워 준다.
+
+GC batch는 네 단계다 — 만료·미참조 receipt 삭제 → 보존 기간(기본 30일)을 넘긴 terminal material
+표시 → orphan이거나 표시된 material의 item drain(1,000행 이하 `SKIP LOCKED`) → item이 빈 orphan
+material 삭제. **표시된 material과 그 receipt는 지우지 않는다** — `item_count`/`merkle_root`가 감사
+영수증이다. page reader는 receipt와 material을 함께 `FOR SHARE`로 잡으므로 정상 page 또는 typed
+`410 SNAPSHOT_MATERIAL_COMPACTED` 중 하나만 보고 부분 page를 보지 않는다. 그 410 판정은 만료 판정보다
+**앞선다** — compaction 후보는 정의상 미만료 receipt가 없어, 만료를 먼저 보면 410이 도달 불가능해진다.
 
 foreground GC는 요청 transaction의 부수 정리일 뿐 retention 정본이 아니다. hourly
 `cache_target_snapshot_gc`는 별도 physical connection의 session advisory try-lock으로 중복 실행을 즉시
