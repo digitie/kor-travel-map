@@ -79,6 +79,45 @@ services:
       - ./docker/postgres-role-bootstrap.sh:/usr/local/bin/postgres-role-bootstrap:ro
     entrypoint: ["/bin/sh", "/usr/local/bin/postgres-role-bootstrap"]
 
+  # T-VN-M01은 frozen 0200/0202 membership graph를 보존해야 한다. 따라서
+  # 일반 bootstrap 뒤 restricted migrator가 0225까지만 올리고, 그 다음에만
+  # M01 procedure owner/executor role을 superuser boundary에서 만든다.
+  db-migrate-to-m01-bootstrap-boundary:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+      args:
+        KOR_TRAVEL_MAP_GIT_COMMIT: ${KOR_TRAVEL_MAP_GIT_COMMIT:-development}
+    environment:
+      KOR_TRAVEL_MAP_MIGRATOR_PG_DSN: ${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required}
+    depends_on:
+      db-role-bootstrap:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "./docker/migrate-to-m01-bootstrap-boundary.sh"]
+
+  db-role-bootstrap-m01:
+    image: postgres:16-alpine
+    depends_on:
+      db-migrate-to-m01-bootstrap-boundary:
+        condition: service_completed_successfully
+      postgres:
+        condition: service_healthy
+    environment:
+      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_ENABLED: "true"
+      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE: m01
+      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE: ${KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE:-}
+      KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN: ${KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN:-}
+      KOR_TRAVEL_MAP_POSTGRES_DB: ${KOR_TRAVEL_MAP_POSTGRES_DB:-kor_travel_map}
+      KOR_TRAVEL_MAP_POSTGRES_USER: ${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}
+      KOR_TRAVEL_MAP_MIGRATOR_PASSWORD: ${KOR_TRAVEL_MAP_MIGRATOR_PASSWORD:-}
+      KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD: ${KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD:-}
+      KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD: ${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD:-}
+    volumes:
+      - ./docker/postgres-role-bootstrap.sh:/usr/local/bin/postgres-role-bootstrap:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/postgres-role-bootstrap"]
+
   rustfs-perms:
     image: alpine:3.20
     user: root
@@ -222,7 +261,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      db-role-bootstrap:
+      db-role-bootstrap-m01:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
@@ -350,7 +389,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      db-role-bootstrap:
+      db-role-bootstrap-m01:
         condition: service_completed_successfully
       dagster-db-init:
         condition: service_completed_successfully
@@ -425,7 +464,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      db-role-bootstrap:
+      db-role-bootstrap-m01:
         condition: service_completed_successfully
       dagster-db-init:
         condition: service_completed_successfully

@@ -31,6 +31,12 @@ services:
   db-role-bootstrap:
     profiles: ["local-infra"]
 
+  db-migrate-to-m01-bootstrap-boundary:
+    profiles: ["local-infra"]
+
+  db-role-bootstrap-m01:
+    profiles: ["local-infra"]
+
   api:
     depends_on: !override
       rustfs-init:

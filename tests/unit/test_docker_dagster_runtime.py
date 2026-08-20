@@ -91,7 +91,7 @@ def test_docker_compose_uses_persistent_dagster_storage_and_daemon() -> None:
     assert "dagster-db-init" in dagster["depends_on"]
     assert "dagster-db-init" in daemon["depends_on"]
     for service in (dagster, daemon):
-        assert service["depends_on"]["db-role-bootstrap"] == {
+        assert service["depends_on"]["db-role-bootstrap-m01"] == {
             "condition": "service_completed_successfully"
         }
 
@@ -111,7 +111,7 @@ def test_tvn34_compose_never_derives_runtime_or_metadata_credentials_from_bootst
         assert compose[service_name]["environment"]["KOR_TRAVEL_MAP_PG_DSN"].endswith(
             "is required}"
         )
-        assert compose[service_name]["depends_on"]["db-role-bootstrap"] == {
+        assert compose[service_name]["depends_on"]["db-role-bootstrap-m01"] == {
             "condition": "service_completed_successfully"
         }
 
@@ -506,6 +506,63 @@ def test_tvn_m01_compose_keeps_manual_create_credentials_in_exact_runtimes() -> 
         for credential_name in credential_names:
             assert f'--build-arg "{credential_name}=' not in text, build_script
             assert f"--secret id={credential_name}" not in text, build_script
+
+
+@pytest.mark.unit
+def test_tvn_m01_role_phase_runs_only_after_legacy_0225_boundary() -> None:
+    """0200/0202의 frozen membership graph보다 먼저 M01 edge를 만들지 않는다."""
+
+    services = _compose()["services"]
+    boundary = services["db-migrate-to-m01-bootstrap-boundary"]
+    role_phase = services["db-role-bootstrap-m01"]
+    api = services["api"]
+
+    assert boundary["depends_on"]["db-role-bootstrap"] == {
+        "condition": "service_completed_successfully"
+    }
+    assert boundary["entrypoint"] == [
+        "/bin/sh",
+        "./docker/migrate-to-m01-bootstrap-boundary.sh",
+    ]
+    assert set(boundary["environment"]) == {"KOR_TRAVEL_MAP_MIGRATOR_PG_DSN"}
+    assert role_phase["depends_on"]["db-migrate-to-m01-bootstrap-boundary"] == {
+        "condition": "service_completed_successfully"
+    }
+    assert role_phase["environment"]["KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE"] == "m01"
+    assert api["depends_on"]["db-role-bootstrap-m01"] == {
+        "condition": "service_completed_successfully"
+    }
+    for runtime_name in ("dagster", "dagster-daemon"):
+        assert services[runtime_name]["depends_on"]["db-role-bootstrap-m01"] == {
+            "condition": "service_completed_successfully"
+        }
+
+    phase_script = _script("docker/postgres-role-bootstrap.sh")
+    prerequisite = phase_script.index("M01 role bootstrap requires exactly 0225")
+    create_role = phase_script.index("CREATE ROLE ktm_manual_feature_procedure_owner")
+    assert prerequisite < create_role
+    assert "GRANT ktm_manual_feature_admin_executor TO ktm_feature_api_runtime" in phase_script
+    assert (
+        "GRANT ktm_feature_create_provider_executor TO ktm_feature_dagster_runtime"
+        in phase_script
+    )
+    assert (
+        "REVOKE ktm_manual_feature_admin_executor FROM ktm_feature_dagster_runtime"
+        in phase_script
+    )
+    assert (
+        "REVOKE ktm_feature_create_provider_executor FROM ktm_feature_api_runtime"
+        in phase_script
+    )
+    assert "M01 relation marker is partial; refusing role bootstrap" in phase_script
+    assert "membership.inherit_option IS FALSE" in phase_script
+    assert "membership.set_option IS TRUE" in phase_script
+
+    migration_script = _script("docker/migrate-to-m01-bootstrap-boundary.sh")
+    assert "alembic upgrade 0225_tvn40c_physical_removal" in migration_script
+    assert "M01 relation marker is partial" in migration_script
+    assert "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" not in migration_script
+    assert "migrate-to-m01-bootstrap-boundary.sh" in _script("docker/api.Dockerfile")
 
 
 @pytest.mark.unit
@@ -3380,6 +3437,7 @@ def test_external_overlays_keep_candidate_storage_migration_ordering(
         # 비활성화한다. 따라서 runtime은 운영자가 사전 provision한 전용 DB에만
         # 연결하며, profile-disabled service를 readiness edge로 참조하지 않는다.
         assert "db-role-bootstrap" not in depends, (overlay, name, depends)
+        assert "db-role-bootstrap-m01" not in depends, (overlay, name, depends)
         assert depends.get("dagster-storage-migrate", {}).get("condition") == (
             "service_completed_successfully"
         ), (overlay, name, depends)
@@ -3388,3 +3446,25 @@ def test_external_overlays_keep_candidate_storage_migration_ordering(
             name,
             depends,
         )
+
+
+@pytest.mark.unit
+def test_tvn_m01_external_db_overlays_do_not_start_local_phase_services() -> None:
+    """공유 DB는 같은 phase 절차를 운영자가 별도로 실행한다."""
+
+    for overlay in (
+        "docker-compose.external-infra.yml",
+        "docker-compose.external-db.yml",
+    ):
+        text = _script(overlay)
+        for service_name in (
+            "db-role-bootstrap:",
+            "db-migrate-to-m01-bootstrap-boundary:",
+            "db-role-bootstrap-m01:",
+        ):
+            assert (
+                f'{service_name}\n    profiles: ["local-infra"]' in text
+            ), (overlay, service_name)
+
+    object_store = _script("docker-compose.external-object-store.yml")
+    assert "db-role-bootstrap-m01:" in object_store

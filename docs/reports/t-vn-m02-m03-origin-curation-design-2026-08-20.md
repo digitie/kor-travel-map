@@ -211,6 +211,13 @@ M03 curation 원자성 전문 리뷰가 같은 reviewed SHA에서 모두 GO가 �
 production credential 배선을 활성화하지 않는다. M01 `READ COMMITTED` writer를 완화하거나,
 curation write policy를 낮춰 isolation을 맞추는 방식은 취하지 않는다.
 
+local Docker는 legacy role graph로 `0225`까지만 올리는 restricted migrator를 먼저 실행하고,
+그 뒤에만 M01 owner·executor role phase와 `0226` head upgrade를 연다. 재기동 때 relation marker가
+완전하면 legacy bootstrap은 M01 repair phase로 승격한다. marker가 partial이면 어느 role도 바꾸지
+않는다. external DB/infra overlay는 이 세 local service를 profile로 제외하므로, 운영자는 같은
+`legacy bootstrap → 0225 one-shot → M01 phase → application upgrade` 순서를 별도 orchestration으로
+사전 완료해야 한다.
+
 ## 6. 확정된 M03 import child-command 범위
 
 single-item admin editing은 위 writer 하나와 command 하나로 닫힌다. import는 parent
@@ -219,17 +226,26 @@ single-item admin editing은 위 writer 하나와 command 하나로 닫힌다. i
 
 1. preview는 row별 typed `manual_feature` payload와 canonical payload SHA-256을 immutable plan에
    저장한다. `metadata_json`에 untyped input을 숨기지 않는다.
-2. commit은 `(parent_command_id, import_row_id, payload_sha256)`에서 결정적으로 child idempotency
-   identity를 만들고, `admin.curation-import.manual-feature-row.create-v1` command와 terminal result를
-   만든다. 외부 HTTP가 child key를 제공하거나 child command를 단독 replay하는 route는 없다.
+2. child idempotency identity는 retry마다 새로 생기는 `parent_command_id`나 commit 결과인
+   `import_row_id`를 쓰지 않는다. locked parent의 `actor + operation + Idempotency-Key + request
+   fingerprint`와 immutable `import_plan_id + plan_sha256 + plan_row_number + typed manual payload
+   SHA-256`에서 결정적으로 유도한다. child operation은
+   `admin.curation-import.manual-feature-row.create-v1`이며 외부 HTTP가 child key를 제공하거나
+   child command를 단독 replay하는 route는 없다.
 3. child 하나는 `claim → Feature/core/initial state → origin → subtype/override → curation item →
    accepted link decision → child terminal result`를 소유한다. parent command/result에는 ordered row별
    child command ID, Feature UUID, curation item ID와 terminal status의 canonical summary만 남긴다.
 4. import commit은 하나의 `SERIALIZABLE` transaction으로 parent와 모든 child mutation/result를 함께
    확정한다. 하나라도 실패하면 parent result, child command/result, claim/origin, Feature, item, link
    decision 모두 rollback한다. `40001`은 기존 parent command decorator가 전체 batch를 재시도한다.
-5. 재시도와 parent replay는 immutable plan hash 및 ordered child identity를 대조한다. 기존 child를
-   임의로 재사용하거나 다른 row payload에 연결할 수 없다.
+   parent replay는 route/plan 검증보다 먼저 저장된 parent response를 byte-identical하게 반환하며
+   child를 다시 검증·생성하지 않는다.
+5. `ops.curation_import_manual_feature_children`는 `(import_plan_id, plan_row_number)` PK,
+   `UNIQUE(child_command_id)`, `UNIQUE(import_row_id)`를 갖는다. plan claim과 typed payload SHA,
+   child command, `(feature_uuid, child_command_id)` claim causation, `(import_row_id, curation_item_id)`
+   receipt, `(link_decision_id, curation_item_id, import_row_id)` decision evidence를 FK로 묶고
+   append-only trigger로 봉인한다. parent summary는 요청 JSON이 아니라 이 linkage에서 순서대로
+   구성한다.
 
 M03 migration은 parent/import-row/child-command의 immutable linkage와 one-row/one-child uniqueness를
 선언적으로 만든다. 이 linkage는 claim/origin의 command FK를 대체하지 않는다. 어느 경로에서도

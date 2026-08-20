@@ -44,6 +44,15 @@ require_value KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD
 require_identifier KOR_TRAVEL_MAP_POSTGRES_DB
 require_identifier KOR_TRAVEL_MAP_POSTGRES_USER
 
+bootstrap_phase="${KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE:-legacy}"
+case "$bootstrap_phase" in
+  legacy | m01) ;;
+  *)
+    echo "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE must be legacy or m01" >&2
+    exit 1
+    ;;
+esac
+
 # An operator must repeat the exact target name.  This stops an accidental
 # `docker compose up` from transferring ownership on an arbitrary server DB.
 if [ "${KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE:-}" \
@@ -66,6 +75,216 @@ fi
 if [ "$is_superuser" != "t" ]; then
   echo "bootstrap DSN must use the dedicated DB superuser" >&2
   exit 1
+fi
+
+# 재기동에서는 compose의 legacy service가 먼저 평가된다. 0226 marker가 완전하면
+# legacy exact graph를 다시 대조하지 않고 M01 repair phase로 승격한다. 한 relation만
+# 있으면 Alembic atomic DDL 가정이 깨진 상태이므로 어떤 role도 바꾸지 않는다.
+if [ "$bootstrap_phase" = "legacy" ]; then
+  m01_relation_marker="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc "
+    SELECT concat_ws(
+      '|',
+      (to_regclass('feature.manual_feature_identity_claims') IS NOT NULL)::text,
+      (to_regclass('feature.feature_creation_origins') IS NOT NULL)::text
+    )
+  ")"
+  case "$m01_relation_marker" in
+    t\|t) bootstrap_phase="m01" ;;
+    f\|f) ;;
+    *)
+      echo "M01 relation marker is partial; refusing role bootstrap" >&2
+      exit 1
+      ;;
+  esac
+fi
+
+# M01은 frozen 0200/0202의 exact membership graph를 바꾸면 안 된다. 이 phase는
+# legacy graph로 0225까지 전진한 **뒤**에만 M01의 procedure owner/executor를
+# 추가한다. 0226 전 relation이 이미 있으면 restore 뒤 owner/role repair를 위한
+# 재실행으로만 허용한다.
+if [ "$bootstrap_phase" = "m01" ]; then
+  psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" \
+    -v ON_ERROR_STOP=1 <<'SQL'
+DO $m01_phase_precondition$
+DECLARE
+    v_revision text;
+    v_claim_exists boolean;
+    v_origin_exists boolean;
+BEGIN
+    v_claim_exists := to_regclass('feature.manual_feature_identity_claims') IS NOT NULL;
+    v_origin_exists := to_regclass('feature.feature_creation_origins') IS NOT NULL;
+    IF v_claim_exists <> v_origin_exists THEN
+        RAISE EXCEPTION 'M01 relation marker is partial; refusing role bootstrap'
+            USING ERRCODE = '55000';
+    END IF;
+    IF v_claim_exists THEN
+        RETURN;
+    END IF;
+    IF to_regclass('public.alembic_version') IS NOT NULL THEN
+        SELECT version_num INTO v_revision FROM public.alembic_version;
+    END IF;
+    IF v_revision IS DISTINCT FROM '0225_tvn40c_physical_removal' THEN
+        RAISE EXCEPTION
+            'M01 role bootstrap requires exactly 0225 before 0226 (observed %)',
+            coalesce(v_revision, '<none>')
+            USING ERRCODE = '55000';
+    END IF;
+END
+$m01_phase_precondition$;
+
+DO $m01_roles$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_roles
+        WHERE rolname = 'ktm_manual_feature_procedure_owner'
+    ) THEN
+        CREATE ROLE ktm_manual_feature_procedure_owner NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_roles
+        WHERE rolname = 'ktm_manual_feature_admin_executor'
+    ) THEN
+        CREATE ROLE ktm_manual_feature_admin_executor NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_roles
+        WHERE rolname = 'ktm_feature_create_provider_executor'
+    ) THEN
+        CREATE ROLE ktm_feature_create_provider_executor NOLOGIN NOINHERIT;
+    END IF;
+END
+$m01_roles$;
+
+ALTER ROLE ktm_manual_feature_procedure_owner NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_manual_feature_admin_executor NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_feature_create_provider_executor NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+
+-- PostgreSQL 16 membership options are part of the API-only writer boundary.
+-- The restricted migrator enters schema owner, which can SET the procedure
+-- owner only while applying/reconciling M01 objects. Runtime logins inherit
+-- EXECUTE but can never SET ROLE into either NOLOGIN group.
+GRANT ktm_manual_feature_procedure_owner TO ktm_feature_schema_owner
+    WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+GRANT ktm_manual_feature_admin_executor TO ktm_feature_api_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+GRANT ktm_feature_create_provider_executor TO ktm_feature_dagster_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+REVOKE ktm_manual_feature_admin_executor FROM ktm_feature_dagster_runtime;
+REVOKE ktm_feature_create_provider_executor FROM ktm_feature_api_runtime;
+
+GRANT USAGE, CREATE ON SCHEMA feature TO ktm_manual_feature_procedure_owner;
+GRANT USAGE ON SCHEMA ops TO ktm_manual_feature_procedure_owner;
+GRANT SELECT ON TABLE ops.domain_commands, ops.domain_command_results
+    TO ktm_manual_feature_procedure_owner;
+GRANT EXECUTE ON PROCEDURE feature.create_feature_with_initial_state(
+    jsonb, text, text, text, jsonb
+) TO ktm_manual_feature_procedure_owner;
+
+DO $m01_role_assert$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_catalog.pg_roles
+        WHERE rolname IN (
+            'ktm_manual_feature_procedure_owner',
+            'ktm_manual_feature_admin_executor',
+            'ktm_feature_create_provider_executor'
+        )
+          AND (
+              rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb
+              OR rolcreaterole OR rolbypassrls OR rolreplication
+          )
+    ) THEN
+        RAISE EXCEPTION 'M01 NOLOGIN role has an unsafe attribute';
+    END IF;
+    IF NOT pg_has_role(
+        'ktm_feature_schema_owner',
+        'ktm_manual_feature_procedure_owner',
+        'member'
+    ) OR NOT pg_has_role(
+        'ktm_feature_api_runtime',
+        'ktm_manual_feature_admin_executor',
+        'member'
+    ) OR NOT pg_has_role(
+        'ktm_feature_dagster_runtime',
+        'ktm_feature_create_provider_executor',
+        'member'
+    ) OR pg_has_role(
+        'ktm_feature_dagster_runtime',
+        'ktm_manual_feature_admin_executor',
+        'member'
+    ) OR pg_has_role(
+        'ktm_feature_api_runtime',
+        'ktm_feature_create_provider_executor',
+        'member'
+    ) OR (
+        SELECT count(*)
+        FROM pg_catalog.pg_auth_members AS membership
+        WHERE membership.roleid IN (
+            'ktm_manual_feature_procedure_owner'::regrole,
+            'ktm_manual_feature_admin_executor'::regrole,
+            'ktm_feature_create_provider_executor'::regrole
+        )
+    ) <> 3 OR EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_auth_members AS membership
+        JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid
+        JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
+        WHERE granted.rolname IN (
+            'ktm_manual_feature_procedure_owner',
+            'ktm_manual_feature_admin_executor',
+            'ktm_feature_create_provider_executor'
+        )
+          AND NOT (
+              (granted.rolname = 'ktm_manual_feature_procedure_owner'
+               AND member.rolname = 'ktm_feature_schema_owner'
+               AND membership.admin_option IS FALSE
+               AND membership.inherit_option IS FALSE
+               AND membership.set_option IS TRUE)
+              OR (granted.rolname = 'ktm_manual_feature_admin_executor'
+                  AND member.rolname = 'ktm_feature_api_runtime'
+                  AND membership.admin_option IS FALSE
+                  AND membership.inherit_option IS TRUE
+                  AND membership.set_option IS FALSE)
+              OR (granted.rolname = 'ktm_feature_create_provider_executor'
+                  AND member.rolname = 'ktm_feature_dagster_runtime'
+                  AND membership.admin_option IS FALSE
+                  AND membership.inherit_option IS TRUE
+                  AND membership.set_option IS FALSE)
+          )
+    ) THEN
+        RAISE EXCEPTION 'M01 procedure owner/executor membership is unsafe';
+    END IF;
+END
+$m01_role_assert$;
+
+-- Restore/owner-repair reruns this phase after 0226. Initial 0225 phase sees
+-- no row here; after 0226 it restores the closed routine owners idempotently.
+WITH dedicated_routine(signature, owner_role) AS (
+    VALUES
+      ('feature.manual_feature_identity_key(text,text,numeric,numeric)',
+       'ktm_manual_feature_procedure_owner'),
+      ('feature.create_admin_manual_feature_with_initial_state(jsonb,bigint)',
+       'ktm_manual_feature_procedure_owner'),
+      ('feature.reject_manual_feature_evidence_mutation()',
+       'ktm_feature_audit_writer')
+), existing AS (
+    SELECT signature, owner_role, proc.prokind
+    FROM dedicated_routine
+    JOIN pg_catalog.pg_proc AS proc ON proc.oid = to_regprocedure(signature)
+)
+SELECT format(
+    'ALTER %s %s OWNER TO %I',
+    CASE prokind WHEN 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END,
+    signature,
+    owner_role
+)
+FROM existing
+\gexec
+SQL
+  exit 0
 fi
 
 # psql variables keep passwords out of SQL source and repo files.  PostgreSQL
