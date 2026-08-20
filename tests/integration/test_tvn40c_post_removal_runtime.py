@@ -253,3 +253,64 @@ async def test_curation_command_procedures_keep_their_owner_and_fence(
         if not r["security_definer"] and not r["proname"].startswith("claim_")
     )
     assert not not_definer, f"SECURITY DEFINER가 아닌 command: {not_definer}"
+
+
+# D8: `0074`가 rekey를 위해 넣었던 ON UPDATE CASCADE 4개. rekey 경로가 사라졌으므로
+# NO ACTION으로 되돌린다. 열·참조·DELETE 규칙은 baseline과 같아야 한다.
+_REKEY_FK_DEFS: dict[str, str] = {
+    "fk_curation_import_rows_item": (
+        "FOREIGN KEY (curation_item_id) "
+        "REFERENCES feature.curation_items(curation_item_id) ON DELETE RESTRICT"
+    ),
+    "fk_curation_link_decisions_import_row": (
+        "FOREIGN KEY (import_row_id, curation_item_id) "
+        "REFERENCES feature.curation_import_rows(import_row_id, curation_item_id) "
+        "ON DELETE RESTRICT"
+    ),
+    "fk_curation_link_decisions_item": (
+        "FOREIGN KEY (curation_item_id) "
+        "REFERENCES feature.curation_items(curation_item_id) ON DELETE RESTRICT"
+    ),
+    "fk_curation_link_decisions_supersedes": (
+        "FOREIGN KEY (supersedes_decision_id, curation_item_id) "
+        "REFERENCES feature.curation_link_decisions(decision_id, curation_item_id) "
+        "ON DELETE RESTRICT"
+    ),
+}
+
+
+async def test_rekey_cascade_fks_are_no_action(
+    migrated_session: AsyncSession,
+) -> None:
+    """`0225` D8이 4개 FK를 재정의하면서 열·참조·DELETE 규칙까지 바꾸지 않았는지.
+
+    `DROP CONSTRAINT` + `ADD CONSTRAINT`로 다시 만들기 때문에, 손으로 옮긴 정의에
+    오타가 있으면 FK가 조용히 다른 열을 가리키게 된다. `pg_get_constraintdef`로
+    실제 정의를 읽어 baseline과 대조한다 — PostgreSQL은 `NO ACTION`이 기본값이라
+    정의 문자열에 `ON UPDATE`를 출력하지 않는다.
+    """
+    rows = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT con.conname, pg_get_constraintdef(con.oid) AS definition
+                FROM pg_catalog.pg_constraint AS con
+                JOIN pg_catalog.pg_namespace AS n ON n.oid = con.connamespace
+                WHERE n.nspname = 'feature' AND con.conname = ANY(:names)
+                """
+            ),
+            {"names": list(_REKEY_FK_DEFS)},
+        )
+    ).mappings().all()
+
+    observed = {row["conname"]: row["definition"] for row in rows}
+    missing = sorted(set(_REKEY_FK_DEFS) - set(observed))
+    assert not missing, f"D8 대상 FK가 없다: {missing}"
+
+    for name, expected in _REKEY_FK_DEFS.items():
+        assert observed[name] == expected, (
+            f"{name} 정의가 baseline과 다르다\n  기대: {expected}\n  실제: {observed[name]}"
+        )
+        assert "ON UPDATE" not in observed[name], (
+            f"{name}에 ON UPDATE 규칙이 남았다 — rekey 경로가 살아 있다: {observed[name]}"
+        )

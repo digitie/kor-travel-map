@@ -440,8 +440,10 @@ ALTER TABLE feature.curation_link_decisions
         FOREIGN KEY (supersedes_decision_id, curation_item_id) REFERENCES feature.curation_link_decisions(decision_id, curation_item_id)
         ON UPDATE NO ACTION ON DELETE RESTRICT;
 """
-# TODO(draft): 위 4 FK의 정확한 열·참조·DEFERRABLE 옵션은 baseline schema.sql 12748~12800의 정의를 그대로 복사해
-#              ON UPDATE만 바꾼다. 적용 전 실제 정의와 대조(테스트가 pg_get_constraintdef로 고정).
+# 위 4 FK는 baseline schema.sql 12748~12796의 정의를 그대로 옮기고 `ON UPDATE`만 바꿨다
+# (baseline에 DEFERRABLE 옵션 없음). 재정의가 열·참조·DELETE 규칙을 조용히 바꾸지 않는지는
+# `tests/integration/test_tvn40c_post_removal_runtime.py::test_rekey_cascade_fks_are_no_action`이
+# `pg_get_constraintdef`로 고정한다.
 
 # D9 — history 가드 무조건 거부
 _D9_SQL = """
@@ -538,7 +540,7 @@ def upgrade() -> None:
     _execute_commands(_D2_SQL)
     _execute_commands(_D3_SQL)
     _execute_commands(_D3B_SQL)
-    _execute_commands(_D4_SQL)  # TODO(draft): 본문 채운 뒤 활성
+    _execute_commands(_D4_SQL)
     _execute_commands(_D5_SQL)
     _execute_commands(_D6_D7_SQL)
     _execute_commands(_D8_SQL)
