@@ -563,18 +563,37 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 > canonical collection 59개 import ②는 완료해 [`tasks-done.md`](tasks-done.md)로 이관했다.
 > 활성 원장에는 실제 잔여 단계만 둔다.
 
-- [ ] **③ sanctioned live/soak** — [`c7-prod-live-e2e.md`](runbooks/c7-prod-live-e2e.md)의
-  strict runner를 current Map/PinVi exact pair에서 통과하고 evidence·cleanup을 봉인한다.
-  PR #1010·#1011로 드러난 sparse KPI·ADR-088 exact scope 결함은 병합됐고, KMA canonical
-  identity/detail 단언 보강도 PR #1013(merge `dbba2ab6`)으로 병합됐다.
-- [ ] **④ receipt complete** — exact 9키로 `pending`을 해소하고 `blocking_reason`을 제거하며
-  `contracts/vnext/consumer-rollout-v1.json`과 freeze 상수를 같은 변경에서 갱신한다.
+- [x] **③ sanctioned live/soak** — strict runner가 `f00e7f48`에서 6-spec / 17-case
+  RESULT: GREEN(`orchestrator_verified=true`, BLOCKED 없음, audit rc=0). PR #1010·#1011의
+  sparse KPI·ADR-088 exact scope 결함과 PR #1013의 KMA canonical identity/detail 보강은
+  모두 병합됐다.
+- [~] **④ receipt complete** — PR [#1022](https://github.com/digitie/kor-travel-map/pull/1022)가
+  exact 9키로 `pending`을 해소한다(CI 8/8 green, **미머지**). 단
+  **⑤가 user spec을 바꿨으므로 이 receipt는 40C 머지 뒤 두 번째 paired cycle이 필요하다** —
+  40C branch는 세 sha를 재핀하고 `blocking_reason`을 그 사유로 교체해 `pending`을 유지한다.
+  gate는 이미 fail-closed다(`state == complete`이면
+  `map_user_openapi_sha256 == pinvi_user_vendor_sha256` 요구).
 - [ ] **T-C7-SCOPE-REGISTRY** — `external_system:*` exact-target scope의 선언 주체·근거·
   운영 조회 표면을 `docs/integration-map.md` 또는 ADR-088 consequences에 정본화한다.
 - [ ] **T-C7-LIVE-SERIAL** — 고정 `external_system:c7-e2e`를 쓰는 KMA live 3종이 서로의
   `membership_fingerprint`를 오염시키지 않도록 파일 병합 또는 worker lock으로 직렬화한다.
-- [ ] **⑤ physical removal 실행** — ④ 뒤 `0225` forward migration과 exact removal manifest로
-  legacy repository·trigger·table·API·ACL을 제거한다. 상세 AC는 아래 `T-VN-40C`가 소유한다.
+- [~] **⑤ physical removal 실행** — `0225` forward migration과 exact removal manifest로
+  legacy repository·trigger·table·API·ACL을 제거했다. PR
+  [#1023](https://github.com/digitie/kor-travel-map/pull/1023) (draft, **미머지**).
+  fresh PostGIS `0200 → 0225` 확인, 라우트 13 제거, admin UI 라우트 2 + read hook 제거,
+  dead symbol 20 정리, 삭제 테스트에 섞여 있던 legacy 무관 검사 9개 복구. 정적 zero gate와
+  post-removal runtime 검증을 저장소 안 테스트로 고정하고 변이 6종으로 red를 확인했다.
+  게이트: ruff / mypy ×3 / import-linter green, pytest **4,435 passed**, frontend
+  CI-parity 13단계 green(남은 실패 6건은 n150 환경이며 main에서도 같다).
+
+  **잔여 — 머지 의존 2건.**
+  - [ ] 머지 순서: #1023(`0225`) → #1016(`0226`, 40C가 full/user spec sha를 바꿨으므로 재-pin 필요).
+  - [ ] **P7 PinVi lockstep** — 40C 머지 뒤 PinVi가 post-40C user spec을
+    재-vendor하고(`6a2ee0f9…` → `489b05d3…`), `_UPSTREAM_COMMIT`과
+    `map_release_revision`을 40C 머지 SHA로 올린 뒤 paired receipt를 만든다.
+    `contract-pin-consistency`가 pin SHA를 체크아웃하므로 **머지 전에는 성립하지 않는다**.
+    사전 확인 완료: user spec delta는 path 4·schema 29 순수 제거(남은 path 본문 변경 없음),
+    service spec sha는 무변경, PinVi Map curation client는 service 표면 2개만 호출한다.
 
 ## Lane B 상세 — b1 PinVi 결합·후속
 
