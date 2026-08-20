@@ -198,9 +198,7 @@
         "state": "pending",
         "map_service_openapi_sha256": "4ecc3e046689586643d5b5e48a6d63436b8096778aff6208501d57ec2c48fa2d",
         "pinvi_service_vendor_sha256": "8019e36f150ed006f5580e5ff224a0ba72030808b5303273f8c4c51aa0496431",
-        "blocking_reason": "T-VN-41S가 service 계약을 두 번 바꿨다 — typed snapshot 410/413 도입, 그리고 generic snapshot cursor 경로의 `410 SNAPSHOT_MATERIAL_COMPACTED` 선언(material과 receipt가 갈리면서 두 receipt가 material을 공유하므로 그 경로에서도 발생한다). PinVi vendor는 아직 이전 service bytes(8019e36f150e…)를 들고 있어 Map 현행(4ecc3e046689…)과 갈렸다. exact re-vendor와 새 Map/PinVi source pair의 isolated acceptance 전까지 candidate_verified로 승격하지 않는다.",
-        "map_user_openapi_sha256": "489b05d3e62e3531233e3e7eb8c97f9ddf92aa1ecf1573b7557a5951e7f6a61b",
-        "map_full_openapi_sha256": "c1d056d43c3a24bbbcd6c6a2451ce114a606710f29c92aad8f6dc99fa9ba3810"
+        "blocking_reason": "T-VN-41S가 service 계약을 두 번 바꿨다 — typed snapshot 410/413 도입, 그리고 generic snapshot cursor 경로의 `410 SNAPSHOT_MATERIAL_COMPACTED` 선언(material과 receipt가 갈리면서 두 receipt가 material을 공유하므로 그 경로에서도 발생한다). PinVi vendor는 아직 이전 service bytes(8019e36f150e…)를 들고 있어 Map 현행(4ecc3e046689…)과 갈렸다. exact re-vendor와 새 Map/PinVi source pair의 isolated acceptance 전까지 candidate_verified로 승격하지 않는다."
       }
     },
     "T-VN-39": {
