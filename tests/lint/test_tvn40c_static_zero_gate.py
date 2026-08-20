@@ -60,6 +60,10 @@ _TOMBSTONE_PROSE: dict[tuple[str, str], str] = {
         "/v1/admin/features/curated",
     ): "§8.2 제거 고지",
     ("docs/deploy.md", "legacy_projection_id"): "2026-08-18 실행 기록(당시 사실)",
+    (
+        "docs/runbooks/tvn40-pinvi-cutover.md",
+        "/v1/curated-features",
+    ): "S7 사전 확인 표의 제거된 path 목록",
 }
 
 
