@@ -35,7 +35,7 @@ barrier로 직렬화한다.
   - [ ] `T-VN-C05D`(산사태 예보발령 notice 구현)
 - **Wave 2 barrier 이후**
   - Lane A: [ ] `T-VN-37D`(notice empty range 표현 — 제품 결정 대기)
-  - 32~38 join barrier 뒤 Lane B: [~] `T-VN-40B` → [~] `T-VN-40C`
+  - 32~38 join barrier 뒤 Lane B: [x] `T-VN-40B` → [x] `T-VN-40C`(2026-08-20 prod 적용 완료)
     - 기반 구현 #974, 40A write fence #994, identity mapping #996, prod migration과 PinVi
       mapping 소비·59개 collection import는 완료 이관했다. 남은 것은 40B의 source-rule
       transition, ③ sanctioned live/soak, ④ exact receipt, 40C 물리 삭제다.
@@ -557,51 +557,43 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   기관·종류·발령시각 기반 사건 identity, 발령/해제 lifecycle을 fixture·live 표본으로
   확정한 뒤 `krforest_landslide_forecast_notices`를 `landslide_warning`으로 적재한다.
 
-### T-VN-40 인수 — 잔여 (2026-08-19 재대조)
+### T-VN-40 인수 — 완료 (2026-08-20)
 
-> 40A write fence(PR #994), identity mapping(PR #996), prod migration ①과 PinVi mapping 소비·
-> canonical collection 59개 import ②는 완료해 [`tasks-done.md`](tasks-done.md)로 이관했다.
-> 활성 원장에는 실제 잔여 단계만 둔다.
+> ①~⑤ 전부 닫혔다. 상세 서사는 [`journal.md`](journal.md) 2026-08-20 두 항목.
 
 - [x] **③ sanctioned live/soak** — strict runner가 `f00e7f48`에서 6-spec / 17-case
-  RESULT: GREEN(`orchestrator_verified=true`, BLOCKED 없음, audit rc=0). PR #1010·#1011의
-  sparse KPI·ADR-088 exact scope 결함과 PR #1013의 KMA canonical identity/detail 보강은
-  모두 병합됐다.
-- [~] **④ receipt complete** — PR [#1022](https://github.com/digitie/kor-travel-map/pull/1022)가
-  exact 9키로 `pending`을 해소했다(merge `82b4d1da`). 단 **⑤가 user/full spec을 바꿨으므로
-  그 `complete`는 더 이상 이 트리의 spec을 서술하지 않는다** — 40C branch가 receipt를
-  `pending`으로 되돌리고 세 sha를 재핀했다. complete 전용 키(`map_commit`/`pinvi_commit`/
-  vendor sha/verification)는 gate가 `pending`에서 금지하므로 함께 떼어냈다. 40C 머지 뒤
-  두 번째 paired cycle이 필요하며, gate는 이미 fail-closed다(`state == complete`이면
-  `map_user_openapi_sha256 == pinvi_user_vendor_sha256` 요구).
+  RESULT: GREEN(`orchestrator_verified=true`, BLOCKED 없음, audit rc=0).
+- [x] **④ receipt complete** — PR [#1024](https://github.com/digitie/kor-travel-map/pull/1024)
+  (merge `294db534`). 40C가 user spec을 바꿔 #1022의 봉인이 무효가 됐으므로
+  PinVi 재-vendor([pinvi#459](https://github.com/digitie/pinvi/pull/459), merge `07340d9e`)
+  뒤 두 번째 paired cycle로 exact 9키를 다시 봉인했다.
+  `map_commit=4c50fe86` · `pinvi_commit=07340d9e` ·
+  `map_user_openapi_sha256 == pinvi_user_vendor_sha256 == 489b05d3`.
+- [x] **⑤ physical removal 실행** — PR [#1023](https://github.com/digitie/kor-travel-map/pull/1023)
+  (merge `4c50fe86`). `0225`가 legacy overlay·snapshot 표·trigger·`legacy_projection_id`·
+  `0074` rekey 예외·legacy ACL을 삭제한다. 라우트 13개, admin UI 라우트 2개와 read hook,
+  dead symbol 20개를 함께 지웠고, 삭제 테스트에 섞여 있던 legacy 무관 검사 9개는 복구했다.
+  정적 zero gate와 post-removal runtime 검증을 저장소 안 테스트로 고정하고 변이 6종으로
+  red를 확인했다.
+- [x] **prod 적용 (2026-08-20)** — head `0225_tvn40c_physical_removal`. 되돌릴 수 없는
+  migration이라 prod 백업을 별도 database로 복원해(소유권 보존) 실데이터 리허설을 먼저
+  했다 — rc=0 · 4초 · 사후 zero 3항 · 보존 3항 · D4/D8 통과. prod 사후검증도 legacy
+  relation·컬럼·`pg_proc.prosrc` 0, 보존 mapping 4,424 / item 4,424 / collection 59 /
+  theme 52 / source 19 / rule 53, rekey FK `ON UPDATE` 없음, 제거 라우트 404 · 잔존 401/200,
+  4개 컨테이너 healthy. 복구점
+  `~/backups/kor_travel_map_0224_c7_external_system_scope_pre0225_20260820T034138Z.dump`
+  (615MB, sha256 검증).
+
 - [ ] **T-FE-MOCK-MANIFEST** — mocked e2e checkpoint manifest
   (`packages/kor-travel-map-admin/frontend/e2e/mocked-failure-manifest.json`)의
-  `discoveredTests: 284`·`testInventorySha256`가 실제 suite와 어긋나 있다. 실측은
-  `origin/main`(`82b4d1da`)과 T-VN-40C branch 양쪽 모두 **276**이라 40C가 만든 drift가
-  아니다. suite 자체는 276/276 green(7.2분, flake 0)인데 checkpoint gate만 red다.
-  baseline을 언제·왜 재고정할지는 expected-failure 인벤토리 의미와 함께 별도로 정한다 —
-  숫자만 맞추면 그 gate가 지키던 것을 잃는다.
+  `discoveredTests: 284`·`testInventorySha256`가 실측 276과 어긋나 있다. `origin/main`과
+  40C branch 양쪽 모두 276이라 40C가 만든 drift가 아니다. suite 자체는 276/276
+  green(7.2분, flake 0)인데 checkpoint gate만 red다. baseline 재고정 시점은
+  expected-failure 인벤토리 의미와 함께 별도로 정한다.
 - [ ] **T-C7-SCOPE-REGISTRY** — `external_system:*` exact-target scope의 선언 주체·근거·
   운영 조회 표면을 `docs/integration-map.md` 또는 ADR-088 consequences에 정본화한다.
 - [ ] **T-C7-LIVE-SERIAL** — 고정 `external_system:c7-e2e`를 쓰는 KMA live 3종이 서로의
   `membership_fingerprint`를 오염시키지 않도록 파일 병합 또는 worker lock으로 직렬화한다.
-- [~] **⑤ physical removal 실행** — `0225` forward migration과 exact removal manifest로
-  legacy repository·trigger·table·API·ACL을 제거했다. PR
-  [#1023](https://github.com/digitie/kor-travel-map/pull/1023) (draft, **미머지**).
-  fresh PostGIS `0200 → 0225` 확인, 라우트 13 제거, admin UI 라우트 2 + read hook 제거,
-  dead symbol 20 정리, 삭제 테스트에 섞여 있던 legacy 무관 검사 9개 복구. 정적 zero gate와
-  post-removal runtime 검증을 저장소 안 테스트로 고정하고 변이 6종으로 red를 확인했다.
-  게이트: ruff / mypy ×3 / import-linter green, pytest **4,435 passed**, frontend
-  CI-parity 13단계 green(남은 실패 6건은 n150 환경이며 main에서도 같다).
-
-  **잔여 — 머지 의존 2건.**
-  - [ ] 머지 순서: #1023(`0225`) → #1016(`0226`, 40C가 full/user spec sha를 바꿨으므로 재-pin 필요).
-  - [ ] **P7 PinVi lockstep** — 40C 머지 뒤 PinVi가 post-40C user spec을
-    재-vendor하고(`6a2ee0f9…` → `489b05d3…`), `_UPSTREAM_COMMIT`과
-    `map_release_revision`을 40C 머지 SHA로 올린 뒤 paired receipt를 만든다.
-    `contract-pin-consistency`가 pin SHA를 체크아웃하므로 **머지 전에는 성립하지 않는다**.
-    사전 확인 완료: user spec delta는 path 4·schema 29 순수 제거(남은 path 본문 변경 없음),
-    service spec sha는 무변경, PinVi Map curation client는 service 표면 2개만 호출한다.
 
 ## Lane B 상세 — b1 PinVi 결합·후속
 

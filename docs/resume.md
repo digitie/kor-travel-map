@@ -1,5 +1,31 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-20 — T-VN-40C 완료: 머지 4건 + prod 0225 적용
+
+T-VN-40C가 코드·계약·문서·prod DB까지 모두 닫혔다.
+
+| 대상 | 커밋 |
+|------|------|
+| ktm#1023 T-VN-40C 물리 제거(`0225`) | `4c50fe86` |
+| pinvi#459 P7 user spec 재-vendor | `07340d9e` |
+| ktm#1016 T-VN-M01 foundation | `14792385` |
+| ktm#1024 receipt `complete` 봉인 | `294db534` |
+
+removal manifest의 `verification` 9항이 모두 닫혔고, prod는 head
+`0225_tvn40c_physical_removal`로 올라가 legacy zero 3항·보존 6항·API 표면 smoke를
+통과했다. 복구점은 `~/backups/kor_travel_map_0224_c7_external_system_scope_pre0225_*.dump`
+(615MB, sha256 검증).
+
+### 다음 한 작업
+
+`T-VN-M01` 후속 — `0226_m01_manual_feature_create`로 DB/ACL/backup tranche와 route 활성화를
+진행한다. prod에는 이미 manual-create 자격증명이 배선돼 있고 flag는 `false`다
+(raw는 UI만, digest는 API만; digest sha8 `dba1d833`).
+
+병행 가능: 백로그 `T-FE-MOCK-MANIFEST`(mocked e2e checkpoint manifest의 `discoveredTests`가
+실측 276과 어긋남 — 40C가 만든 drift 아님), `T-C7-SCOPE-REGISTRY`, `T-C7-LIVE-SERIAL`,
+T-VN-41 최종 C7 인수.
+
 ## 2026-08-20 — T-VN-40C legacy overlay 물리 제거 (머지 대기)
 
 `0225`가 legacy `curated_features` overlay·snapshot 표·trigger·`legacy_projection_id`·
