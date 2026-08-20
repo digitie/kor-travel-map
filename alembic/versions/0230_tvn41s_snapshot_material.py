@@ -234,7 +234,7 @@ def _create_material_tables() -> None:
         text(
             f"""
             CREATE INDEX idx_cache_target_snapshot_materials_compaction
-                ON {_MATERIALS} (materialized_at, material_id)
+                ON {_MATERIALS} (external_system, materialized_at, material_id)
                 WHERE compacted_at IS NULL
             """
         )

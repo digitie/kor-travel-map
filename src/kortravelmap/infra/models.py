@@ -6289,8 +6289,12 @@ class PoiCacheTargetSnapshotMaterialRow(Base):
             unique=True,
             postgresql_where=text("compacted_at IS NULL"),
         ),
+        # compaction 후보 조회는 system 하나를 골라 오래된 것부터 훑는다. 선두에
+        # `external_system`이 없으면 그 equality를 인덱스로 좁히지 못해 planner가
+        # 다른 인덱스의 full scan을 고른다(EXPLAIN 게이트가 그 상태를 잡았다).
         Index(
             "idx_cache_target_snapshot_materials_compaction",
+            "external_system",
             "materialized_at",
             "material_id",
             postgresql_where=text("compacted_at IS NULL"),
