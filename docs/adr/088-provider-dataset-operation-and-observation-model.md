@@ -59,6 +59,11 @@ pair 정본으로 남고, 동일 raw payload 재관측이 immutable record를 UP
   성립한다.
 - 구현 범위가 넓어 migration은 expand/constraint/cutover 세 revision으로 나뉘며, cutover 뒤
   rollback은 final-schema rebuild/ETL 재실행으로 한정된다.
+- **`external_system:*` scope도 카탈로그 선언 대상이다.** 이름을 코드나 env에서 만들 수 없고
+  `provider_dataset_operation_scopes` 행이 있어야 제출된다. 선언 주체·근거·운영 조회 표면과
+  현재 선언된 이름은 [`integration-map.md` §3.7](../integration-map.md)이 정본이다
+  (T-C7-SCOPE-REGISTRY). 같은 이름을 쓰는 실행은 `provider_sync_state` 한 행을 공유하므로
+  서로 직렬화해야 한다(T-C7-LIVE-SERIAL).
 
 ## 관련 결정
 

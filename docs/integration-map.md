@@ -355,6 +355,44 @@ cancel을 다시 보내지 않는다. 세부 상태 전이와 API는
 [`architecture/c6c-cancel-probe-fixture.md`](architecture/c6c-cancel-probe-fixture.md) 및
 ADR-084가 정본이다.
 
+### 3.7 `external_system:*` exact-target scope 레지스트리 (T-C7-SCOPE-REGISTRY)
+
+**선언 주체는 카탈로그다.** 제출 가능한 `sync_scope` 집합의 정본은
+`provider_sync.provider_dataset_operation_scopes` 행이며 `external_system:*`도 예외가 아니다
+(ADR-088). 이름을 코드나 env에서 즉석으로 만들 수 없다 — 선언되지 않은 값은
+`infra/feature_update_repo.py`의 `_ACTIVE_DATASET_MEMBERSHIPS_SQL` exact join에서 0행이 되어
+preview/create가 `422`로 죽고, 요청·job·sync state 표의 exact FK 4종이 그 행을 구조로 요구한다.
+`api/ops_dataset_service.py::_scope_refresh_capability`가 "external_system:*는 scope 행으로
+선언돼야 허용된다"를 강제한다.
+
+**근거 — 왜 `target_grids`가 아닌가.** 고정 external system scope는 인수·외부 소비자 실행을
+스케줄 운영에서 격리한다. `target_grids`를 쓰면 (a) 실행 대상이 "모든 활성 cache target +
+extra points"라 PinVi가 target을 등록하는 순간 그 실행이 전체 대상에 provider I/O를 내고
+`membership_fingerprint`가 비결정적이 되며, (b) `provider_sync_state(dataset, target_grids,
+operation)` **한 행**을 스케줄 job과 공유해 실행이 운영 cursor를 덮는다. external system scope는
+`provider_sync_state(dataset, external_system:<name>, operation)` 전용 행으로 갈라진다.
+
+**운영 조회 표면.**
+
+| 무엇 | 어디 |
+|---|---|
+| 선언된 scope 목록 | `provider_sync.provider_dataset_operation_scopes` |
+| 화면/API 투영 | `/v1/ops/datasets` grid·detail의 `scopes[]` (`sync_scope`, `operation_key`, `provider_dataset_id`) |
+| 제출 가능 여부 판정 | `api/ops_dataset_service.py::_scope_refresh_capability` |
+| 요청 시 exact join | `infra/feature_update_repo.py::_ACTIVE_DATASET_MEMBERSHIPS_SQL` |
+| 실행 cursor | `provider_sync_state(provider_dataset_id, sync_scope, operation_key)` |
+
+**현재 선언된 이름.** `external_system:c7-e2e` 하나이며 migration
+`0224_c7_external_system_scope`가 KMA 초단기실황(`python-kma-api` /
+`kma_ultra_short_nowcast`)에 선언했다. 새 이름을 쓰려면 **migration으로 행을 선언**해야 하고,
+그 migration은 dataset의 enabled refresh operation이 정확히 하나임을 확인한 뒤 넣는다 —
+조용히 0행을 넣고 통과하면 소비자가 `422`로 죽고 원인이 감춰진다.
+
+**동시 실행 제약.** 같은 이름을 쓰는 실행끼리는 `provider_sync_state` 한 행과
+`membership_fingerprint`를 공유한다. 따라서 그 scope를 쓰는 live 실행은 서로 직렬화해야 한다
+(`e2e/live/_ops-c7-exact-scope-lock.ts`, T-C7-LIVE-SERIAL). 잠금 없이 병렬로 돌리면 실패가
+실제 회귀인지 경합인지 구분할 수 없다.
+
 ### 3.6 PinVi Feature 생성 요청 (T-VN-M04, 2026-08-18 결정 — **미구현**)
 
 PinVi가 Map에 **없는 Feature**를 필요로 할 때, PinVi가 직접 만들지 않고 Map에 **요청**하고
