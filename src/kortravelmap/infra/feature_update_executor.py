@@ -836,10 +836,16 @@ async def _finish_failed_execution(
                             error_code=event_code,
                         )
                 except CacheTargetRefreshProtocolViolation as violation:
+                    # epoch 이동만 삼킨다. 다른 reason은 append가 성공했어야 하므로 삼키면
+                    # 원인을 잃는다 — 향후 `_append_result_event`에 검사가 추가돼도 조용히
+                    # 사라지지 않도록 여기서 다시 올린다(#975 적대 재리뷰 P2-c).
+                    if violation.reason != CacheTargetRefreshProtocolViolation.EPOCH_MOVED:
+                        raise
                     _LOG.warning(
                         "cache target refresh failed status persisted without relay event — "
-                        "restore fence moved during execution: request_id=%s detail=%s",
+                        "restore fence moved during execution: request_id=%s reason=%s detail=%s",
                         failed.request_id,
+                        violation.reason,
                         violation,
                     )
             if event_code is not None:
@@ -1281,8 +1287,13 @@ async def _execute_feature_update_request_locked(
                 if isinstance(exc, ProviderDatasetRefreshFailure)
                 else None
             ),
-            append_cache_target_status_events=not isinstance(
-                exc, CacheTargetRefreshProtocolViolation
+            # #975 적대 재리뷰 P2-a: 예외 클래스 전체를 억제하면 generation 전진·
+            # fingerprint 변경·head 소멸까지 relay 종결 event가 사라져 PinVi가 요청의 끝을
+            # 보지 못한다. 억제 근거를 가진 것은 restore fence 이동뿐이다 — 그때만 옛 epoch
+            # event가 설계상 거부되기 때문이다(runbook §5-5). 나머지는 stale tuple에라도 낸다.
+            append_cache_target_status_events=(
+                getattr(exc, "reason", None)
+                != CacheTargetRefreshProtocolViolation.EPOCH_MOVED
             ),
         )
 

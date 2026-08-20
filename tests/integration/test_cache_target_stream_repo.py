@@ -73,6 +73,8 @@ from kortravelmap.infra.cache_target_stream_repo import (
     get_cache_target_stream,
     lock_cache_target_stream,
 )
+from tests.integration._db_cleanup import truncate_committed_test_rows
+
 from kortravelmap.infra.domain_command_repo import (
     canonical_domain_command_fingerprint,
     create_domain_command_claim,
@@ -87,6 +89,35 @@ from kortravelmap.infra.poi_cache_target_repo import upsert_poi_cache_target
 _SYSTEM = "pinvi-test"
 _CONSUMER = "pinvi-cache-consumer"
 _TARGET_KEY = "trip-day-poi:1"
+
+
+# 이 모듈의 여러 테스트가 session-scope `migrated_engine`에 **commit**한다(테스트 격리 밖).
+# `test_feature_update_repo.py`는 같은 표에 전역 `count(*) == 0`을 단언하므로, 정리하지
+# 않으면 두 모듈 사이에 수집 순서 의존이 생긴다. 지금까지는 알파벳 순서상 중간 모듈의
+# autouse truncate가 우연히 지워 줘서 통과했을 뿐이라, 모듈을 골라 돌리면 깨진다
+# (#975 적대 재리뷰 P2-d). 생산자가 자기 뒤처리를 한다.
+_STREAM_TRUNCATE_SQL = """
+TRUNCATE
+    ops.poi_cache_target_feature_links,
+    ops.poi_cache_targets,
+    ops.pipeline_cancellation_members,
+    ops.pipeline_cancellation_runs,
+    ops.pipeline_cancellations,
+    ops.feature_update_requests,
+    ops.import_job_events,
+    ops.import_jobs
+RESTART IDENTITY CASCADE
+"""
+
+
+@pytest.fixture(autouse=True)
+async def _cleanup_committed_stream_rows(
+    migrated_engine: AsyncEngine,
+) -> AsyncIterator[None]:
+    """이 모듈이 commit한 행을 테스트마다 제거해 모듈 간 순서 의존을 없앤다."""
+    yield
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        await truncate_committed_test_rows(session, _STREAM_TRUNCATE_SQL)
 
 
 async def _canonical_membership(session: AsyncSession) -> ImportJobDatasetTarget:
