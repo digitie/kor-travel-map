@@ -104,7 +104,8 @@ root snapshot의 C7 verifier는 mutation 전에 다음을 actual runtime과 exac
 - Playwright executor image와 base image identity
 - Map API의 `profile=production`, features route `true`, 중복 없는 cursor signing secret
   1개(32자 이상·공백 없음), admin/service/ops read/ops cancel/metrics/VWorld credential과의 분리
-- Map UI·Dagster web·Dagster daemon·PinVi API에 cursor signing secret이 없다는 음성 계약
+- Map API 외 여섯 runtime(Map UI·Dagster web·Dagster daemon, PinVi API·web·dagster)에
+  cursor signing secret이 없다는 음성 계약
 
 caller가 임의 OCI label이나 자체 생성 attestation으로 이 경계를 우회할 수 없다. 검증 성공
 출력은 pinned runtime manifest·rebuild journal·host attestation의 SHA256 세 개뿐이며

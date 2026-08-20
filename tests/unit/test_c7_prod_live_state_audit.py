@@ -255,7 +255,7 @@ def test_evidence_manifest_hashes_are_recomputed(
         "playwright_image_id": f"sha256:{'c' * 64}",
         "repository_commit": "d" * 40,
         "status": 0,
-        "version": 1,
+        "version": 2,
     }
     _write_json(run / "manifest.json", manifest)
 

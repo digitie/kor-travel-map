@@ -107,30 +107,57 @@ def _lock_is_active(lock_path: Path) -> bool:
         os.close(fd)
 
 
-def _valid_evidence_manifest(run: Path) -> bool:
-    manifest_path = run / "manifest.json"
-    try:
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, json.JSONDecodeError):
-        return False
-    keys = {
-        "alembic_head",
+# evidence manifest는 attested document 구성이 바뀔 때 version을 올린다.
+# v1 = v4 compatible-pair 시절, v2 = v5 pinned generation + v7 rebuild journal.
+_EVIDENCE_DIGEST_KEYS: Final[dict[int, tuple[str, ...]]] = {
+    1: ("compatible_pair_manifest_sha256", "host_attestation_sha256"),
+    2: (
         "pinned_runtime_manifest_sha256",
         "rebuild_journal_sha256",
+        "host_attestation_sha256",
+    ),
+}
+_EVIDENCE_ATTESTED_FILES: Final[dict[int, tuple[tuple[str, str], ...]]] = {
+    1: (
+        ("runtime-attestation.json", "host_attestation_sha256"),
+        ("compatible-pair.json", "compatible_pair_manifest_sha256"),
+    ),
+    2: (
+        ("runtime-attestation.json", "host_attestation_sha256"),
+        ("pinned-runtime-generation.json", "pinned_runtime_manifest_sha256"),
+        ("pinned-runtime-rebuild.json", "rebuild_journal_sha256"),
+    ),
+}
+_EVIDENCE_COMMON_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "alembic_head",
         "files",
         "finished_at",
-        "host_attestation_sha256",
         "orchestrator_verified",
         "playwright_image_id",
         "repository_commit",
         "status",
         "version",
     }
-    if not isinstance(manifest, dict) or set(manifest) != keys:
+)
+
+
+def _valid_evidence_manifest(run: Path) -> bool:
+    manifest_path = run / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+        return False
+    if not isinstance(manifest, dict):
+        return False
+    version = manifest.get("version")
+    if version not in _EVIDENCE_DIGEST_KEYS:
+        return False
+    digest_keys = _EVIDENCE_DIGEST_KEYS[version]
+    if set(manifest) != _EVIDENCE_COMMON_KEYS | set(digest_keys):
         return False
     if (
-        manifest["version"] != 1
-        or type(manifest["status"]) is not int
+        type(manifest["status"]) is not int
         or type(manifest["orchestrator_verified"]) is not bool
         or not isinstance(manifest["alembic_head"], str)
         or not re.fullmatch(r"[0-9A-Za-z_]+", manifest["alembic_head"])
@@ -139,12 +166,11 @@ def _valid_evidence_manifest(run: Path) -> bool:
         or not isinstance(manifest["playwright_image_id"], str)
         or re.fullmatch(r"sha256:[0-9a-f]{64}", manifest["playwright_image_id"])
         is None
-        or not isinstance(manifest["pinned_runtime_manifest_sha256"], str)
-        or _SHA256_PATTERN.fullmatch(manifest["pinned_runtime_manifest_sha256"]) is None
-        or not isinstance(manifest["rebuild_journal_sha256"], str)
-        or _SHA256_PATTERN.fullmatch(manifest["rebuild_journal_sha256"]) is None
-        or not isinstance(manifest["host_attestation_sha256"], str)
-        or _SHA256_PATTERN.fullmatch(manifest["host_attestation_sha256"]) is None
+        or any(
+            not isinstance(manifest[key], str)
+            or _SHA256_PATTERN.fullmatch(manifest[key]) is None
+            for key in digest_keys
+        )
         or not isinstance(manifest["finished_at"], str)
         or not manifest["finished_at"]
         or not isinstance(manifest["files"], list)
@@ -180,17 +206,13 @@ def _valid_evidence_manifest(run: Path) -> bool:
         declared_files[path_value] = (item["sha256"], item["size"])
     if declared_files != observed_files:
         return False
-    # evidence archive 안의 세 attested document가 manifest의 digest와 각각 맞아야
-    # "이 실행이 무엇을 근거로 통과했는가"가 사후에도 재구성된다.
-    attested = (
-        ("runtime-attestation.json", "host_attestation_sha256"),
-        ("pinned-runtime-generation.json", "pinned_runtime_manifest_sha256"),
-        ("pinned-runtime-rebuild.json", "rebuild_journal_sha256"),
-    )
+    # evidence archive 안의 attested document가 manifest의 digest와 각각 맞아야
+    # "이 실행이 무엇을 근거로 통과했는가"가 사후에도 재구성된다. version별로 구성이
+    # 다르므로 그 version의 계약으로 검사한다.
     return all(
         observed_files.get(name) is not None
         and observed_files[name][0] == manifest[digest_key]
-        for name, digest_key in attested
+        for name, digest_key in _EVIDENCE_ATTESTED_FILES[version]
     )
 
 

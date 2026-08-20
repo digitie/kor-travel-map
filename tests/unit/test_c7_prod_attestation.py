@@ -329,14 +329,15 @@ def _runtime_fixture() -> tuple[
         "recorded_at": "2026-07-19T00:00:00+00:00",
     }
     manifest = {"active_generation": generation, "version": 5}
+    transaction_id = "11111111-2222-3333-4444-555555555555"
     journal = {
         "candidate": copy.deepcopy(generation),
         "cancel_probe": {
-            "cancellation_id": "cancel-1",
+            "cancellation_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
             "fixture_consumed_at": "2026-07-19T00:00:01+00:00",
             "fixture_created_at": "2026-07-19T00:00:00+00:00",
             "fixture_finalized_at": "2026-07-19T00:00:02+00:00",
-            "job_id": "job-1",
+            "job_id": "99999999-8888-7777-6666-555555555555",
             "outcome": {
                 "code": "PIPELINE_CANCELLATION_UNSAFE",
                 "name": "pinvi_cancel_error",
@@ -349,7 +350,7 @@ def _runtime_fixture() -> tuple[
         "environment_sha256": "e" * 64,
         "phase": "committed",
         "resolved_compose_sha256": "f" * 64,
-        "transaction_id": "11111111-2222-3333-4444-555555555555",
+        "transaction_id": transaction_id,
         "version": 7,
     }
     manifest_bytes = _canonical_json(manifest)
@@ -397,6 +398,7 @@ def _runtime_fixture() -> tuple[
         "playwright_base": playwright_base,
         "playwright_image_id": executor_image,
         "rebuild_journal_sha256": _sha256_bytes(journal_bytes),
+        "rebuild_transaction_id": transaction_id,
         "repository_commit": map_commit,
         "schema_heads": dict(schema_heads),
         "service_runtime": runtime,
@@ -540,27 +542,85 @@ def test_runtime_attestation_rejects_each_pinned_generation_digest_mismatch(
 
 
 @pytest.mark.parametrize(
-    "mutation",
+    ("mutation", "expected"),
     [
-        lambda value: value.update({"version": 4}),
-        lambda value: value.update({"active": value["active_generation"]}),
-        lambda value: value["active_generation"].pop("map_ui_image_id"),
-        lambda value: value["active_generation"].update({"unexpected": True}),
-        lambda value: value["active_generation"].update({"pinset_sha256": "not-a-digest"}),
-        lambda value: value["active_generation"].update({"pinvi_head": "NOT LOWER"}),
-        lambda value: value["active_generation"].update({"recorded_at": "2026-07-19T00:00:00"}),
+        (lambda value: value.update({"version": 4}), "manifest shape"),
+        (
+            lambda value: value.update({"active": value["active_generation"]}),
+            "manifest shape",
+        ),
+        (lambda value: value["active_generation"].pop("map_ui_image_id"), "generation shape"),
+        (
+            lambda value: value["active_generation"].update({"unexpected": True}),
+            "generation shape",
+        ),
+        (
+            lambda value: value["active_generation"].update({"pinset_sha256": "not-a-digest"}),
+            "generation pinset",
+        ),
+        (
+            lambda value: value["active_generation"].update({"pinvi_head": "NOT LOWER"}),
+            "generation schema head",
+        ),
+        (
+            lambda value: value["active_generation"].update({"map_dagster_head": 7}),
+            "generation schema head",
+        ),
+        (
+            lambda value: value["active_generation"].update(
+                {"recorded_at": "2026-07-19T00:00:00"}
+            ),
+            "generation recorded_at",
+        ),
+        (
+            lambda value: value["active_generation"].update(
+                {"recorded_at": "2026-07-19T09:00:00+09:00"}
+            ),
+            "generation recorded_at",
+        ),
     ],
 )
 def test_runtime_attestation_rejects_non_v5_or_inexact_generation_shape(
     mutation: Callable[[dict[str, object]], object],
+    expected: str,
 ) -> None:
+    """`match=`가 없으면 다른 guard가 대신 잡아 주어 해당 guard를 지워도 green이 된다.
+
+    적대 리뷰가 exact-shape·version·schema head 세 guard를 각각 제거해도 스위트가
+    통과함을 실측했다(2026-08-20). 사유 문자열까지 고정한다.
+    """
+
     attestation, manifest, journal, environ, run_command = _runtime_fixture()
     mutation(manifest)
     attestation["pinned_runtime_manifest_sha256"] = _sha256_bytes(
         _canonical_json(manifest)
     )
 
-    with pytest.raises(ATTESTATION.AttestationError):
+    with pytest.raises(ATTESTATION.AttestationError, match=expected):
+        _verify_runtime(attestation, manifest, journal, environ, run_command)
+
+
+@pytest.mark.parametrize("version", [3, 5, "4", None])
+def test_runtime_attestation_rejects_non_v4_attestation_version(version: object) -> None:
+    attestation, manifest, journal, environ, run_command = _runtime_fixture()
+    if version is None:
+        attestation.pop("version")
+    else:
+        attestation["version"] = version
+
+    with pytest.raises(ATTESTATION.AttestationError, match="attestation shape"):
+        _verify_runtime(attestation, manifest, journal, environ, run_command)
+
+
+def test_runtime_attestation_rejects_journal_from_another_rebuild_transaction() -> None:
+    """journal의 transaction_id가 attestation과 결박되지 않으면 순수 장식이 된다."""
+
+    attestation, manifest, journal, environ, run_command = _runtime_fixture()
+    attestation["rebuild_transaction_id"] = "00000000-0000-0000-0000-000000000000"
+
+    with pytest.raises(
+        ATTESTATION.AttestationError, match="not bound to this rebuild transaction"
+    ):
         _verify_runtime(attestation, manifest, journal, environ, run_command)
 
 
@@ -586,7 +646,11 @@ def test_runtime_attestation_rejects_non_v5_or_inexact_generation_shape(
             "journal cancel probe outcome",
         ),
         (
-            lambda value: value["cancel_probe"].update({"job_id": ""}),
+            lambda value: value["cancel_probe"].update({"job_id": "job-1"}),
+            "journal cancel probe identity",
+        ),
+        (
+            lambda value: value["cancel_probe"].update({"cancellation_id": "cancel-1"}),
             "journal cancel probe identity",
         ),
         (

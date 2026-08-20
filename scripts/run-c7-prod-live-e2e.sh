@@ -450,7 +450,7 @@ manifest = {
     "playwright_image_id": playwright_image_id,
     "repository_commit": repository_commit,
     "status": int(status_raw),
-    "version": 1,
+    "version": 2,
 }
 manifest_path = destination / "manifest.json"
 manifest_path.write_text(
@@ -572,6 +572,7 @@ has_residual_state() {
     compgen -G "$STATE_ROOT/.state.*" >/dev/null ||
     compgen -G "$STATE_ROOT/cap.*" >/dev/null ||
     compgen -G "$STATE_ROOT/attestation-*.json" >/dev/null ||
+    compgen -G "$STATE_ROOT/compatible-pair-*.json" >/dev/null ||
     compgen -G "$STATE_ROOT/pinned-runtime-generation-*.json" >/dev/null ||
     compgen -G "$STATE_ROOT/pinned-runtime-rebuild-*.json" >/dev/null ||
     compgen -G "$STATE_ROOT/container-*.cid" >/dev/null ||
@@ -1203,7 +1204,20 @@ actual_dagster_origin_sha256="$(canonical_dagster_graphql_sha256)" ||
   die "Dagster GraphQL HTTPS endpoint canonicalization failed"
 [[ "$actual_dagster_origin_sha256" == "$E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256" ]] ||
   die "Dagster GraphQL endpoint origin attestation mismatch"
-ALEMBIC_HEAD="$(verify_alembic_state)" ||
+ALEMBIC_HEAD="$(verify_alembic_state)"
+[[ -n "$ALEMBIC_HEAD" ]] || die "Alembic head measurement is empty"
+attested_map_application_head="$(
+  python3 -I -B - "$PINNED_RUNTIME_MANIFEST_SNAPSHOT" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+payload = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+print(payload["active_generation"]["map_application_head"])
+PY
+)" || die "pinned generation schema head read failed"
+[[ "$ALEMBIC_HEAD" == "$attested_map_application_head" ]] ||
+  die "Map application schema head does not match the pinned generation" ||
   die "Map API Alembic current/head/check attestation failed"
 [[ "$ALEMBIC_HEAD" =~ ^[0-9A-Za-z_]+$ ]] || die "Alembic head output is invalid"
 web_cap="$(read_cap "$E2E_C7_DAGSTER_WEB_SERVICE")" ||

@@ -13,7 +13,7 @@ import stat
 import subprocess
 import sys
 from collections.abc import Callable, Mapping
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
@@ -382,10 +382,18 @@ def _validate_generation(value: object) -> None:
 
 
 def _validate_utc_timestamp(value: object, label: str) -> None:
+    """ktdm과 같은 강도로 **UTC**를 요구한다.
+
+    앞 판은 tz-aware이기만 하면 통과시켰다. ktdm은 offset 0을 강제하므로
+    (`pinned_runtime_generation.py`) `+09:00` 문서는 애초에 만들어지지 않는다.
+    이름이 UTC라고 말하면서 UTC를 보지 않으면, 다음 사람이 이 함수를 근거로
+    "타임존은 검증된다"고 믿는다.
+    """
+
     if not isinstance(value, str):
         raise AttestationError(label)
     observed_at = datetime.fromisoformat(value)
-    if observed_at.tzinfo is None or observed_at.utcoffset() is None:
+    if observed_at.utcoffset() != timedelta(0):
         raise AttestationError(label)
 
 
@@ -423,7 +431,8 @@ def _validate_committed_journal(value: object, *, generation: Mapping[str, objec
     if cancel_probe["outcome"] != _CANCEL_PROBE_OUTCOME:
         raise AttestationError("journal cancel probe outcome")
     for field in ("job_id", "cancellation_id"):
-        if not isinstance(cancel_probe[field], str) or not cancel_probe[field]:
+        identifier = cancel_probe[field]
+        if not isinstance(identifier, str) or UUID_PATTERN.fullmatch(identifier) is None:
             raise AttestationError("journal cancel probe identity")
     for field in ("fixture_created_at", "fixture_consumed_at", "fixture_finalized_at"):
         _validate_utc_timestamp(cancel_probe[field], "journal cancel probe timestamp")
@@ -461,6 +470,7 @@ def verify_runtime_attestation_payloads(
         "playwright_base",
         "playwright_image_id",
         "rebuild_journal_sha256",
+        "rebuild_transaction_id",
         "repository_commit",
         "schema_heads",
         "service_runtime",
@@ -505,6 +515,11 @@ def verify_runtime_attestation_payloads(
         ):
             raise AttestationError("attestation hash")
     if (
+        not isinstance(attestation["rebuild_transaction_id"], str)
+        or UUID_PATTERN.fullmatch(attestation["rebuild_transaction_id"]) is None
+    ):
+        raise AttestationError("attestation rebuild transaction identity")
+    if (
         not isinstance(attestation["repository_commit"], str)
         or COMMIT_PATTERN.fullmatch(attestation["repository_commit"]) is None
         or attestation["repository_commit"] != environ["E2E_C7_EXPECTED_GIT_COMMIT"]
@@ -525,6 +540,9 @@ def verify_runtime_attestation_payloads(
     _validate_generation(active)
     assert isinstance(active, dict)
     _validate_committed_journal(journal, generation=active)
+    assert isinstance(journal, dict)
+    if journal["transaction_id"] != attestation["rebuild_transaction_id"]:
+        raise AttestationError("attestation is not bound to this rebuild transaction")
     if (
         manifest_sha256 != attestation["pinned_runtime_manifest_sha256"]
         or journal_sha256 != attestation["rebuild_journal_sha256"]
