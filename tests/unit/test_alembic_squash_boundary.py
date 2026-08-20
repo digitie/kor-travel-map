@@ -47,8 +47,8 @@ _EXPECTED_REVISIONS = (
     "0223_tvn40_identity_mappings",
     "0224_c7_external_system_scope",
     "0225_tvn40c_physical_removal",
-    # #1029가 `0226`~`0228`을 쥐고 있어 40B 잔여는 `0229`를 잡고 `0225`에 직접 체인했다.
-    # 번호에만 공백이 남는다(migration docstring 참조).
+    "0226_tvn_c05_krforest_datasets",
+    # revision id 숫자와 무관하게 down_revision이 C05 catalog 뒤의 실행 순서를 고정한다.
     "0229_tvn40b_source_rule_action",
 )
 #: `alembic_version.version_num`의 컬럼 폭(alembic 기본값).

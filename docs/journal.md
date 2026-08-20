@@ -9,6 +9,12 @@ V2 예보, C05D 산사태 예보발령 typed 모델을 upstream에서 안정화�
 dataset 72~74, fixture preview, Dagster record resource/fetcher/asset, operation scope,
 fallback schedule까지 추가했다.
 
+원격 Python 3.12 CI에서 최신 `0229`와 C05 `0226`이 병렬 head가 되는 회귀를 확인해
+`0225 → 0226 → 0229` 단일 graph로 정리했다. migration은 asyncpg가 허용하는 단일
+statement 단위로 실행하고 identity key에는 `OVERRIDING SYSTEM VALUE`를 사용하도록
+보강했으며, graph artifact·경계 회귀값을 재생성했다. `test_alembic_metadata_consistency.py`
+7건과 관련 ruff 검사를 통과했다.
+
 두 전문 리뷰어의 적대 검토에서 발견한 strict mypy 오류, sigungu 공식 코드 우선순위,
 이름만 있는 route의 source identity 충돌, HTTP 200 error body의 키 노출을 provider에서
 수정했다. map 쪽에서는 source record·raw lineage와 산사태 발령→해제 snapshot을 보존한다.

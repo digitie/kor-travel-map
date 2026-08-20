@@ -21,7 +21,7 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
-_DATASETS_SQL = """
+_CATALOG_CHECK_SQL = """
 DO $tvn_c05_catalog_check$
 DECLARE
     expected RECORD;
@@ -54,10 +54,13 @@ BEGIN
     END LOOP;
 END
 $tvn_c05_catalog_check$;
+"""
 
+_DATASET_INSERT_SQL = """
 INSERT INTO provider_sync.provider_datasets
     (provider_dataset_id, provider, dataset_key, display_name, source_kind,
      is_active, capabilities, created_at, updated_at)
+OVERRIDING SYSTEM VALUE
 VALUES
     (70, 'python-krforest-api', 'krforest_mountain_trails',
      '산림청 등산로(PBD0000041) route', 'openapi', true,
@@ -80,7 +83,9 @@ VALUES
      '{"produces": ["notice"], "extensions": {}, "schema_version": 1}',
      '2026-08-20 00:00:00+00', '2026-08-20 00:00:00+00')
 ON CONFLICT (provider_dataset_id) DO NOTHING;
+"""
 
+_OPERATION_INSERT_SQL = """
 INSERT INTO provider_sync.provider_dataset_operations
     (provider_dataset_id, operation_key, operation_kind, is_enabled, config,
      created_at, updated_at)
@@ -106,7 +111,9 @@ VALUES
     (74, 'feature_notice_krforest_landslide_forecast_issues_job.preview', 'preview', true,
      '{"handler": "fixture"}', '2026-08-20 00:00:00+00', '2026-08-20 00:00:00+00')
 ON CONFLICT (provider_dataset_id, operation_key) DO NOTHING;
+"""
 
+_SCOPE_INSERT_SQL = """
 INSERT INTO provider_sync.provider_dataset_operation_scopes
     (provider_dataset_id, sync_scope, operation_key, operation_kind)
 VALUES
@@ -116,7 +123,9 @@ VALUES
     (73, 'dataset_wide', 'feature_weather_krforest_wildfire_risk_forecast_job', 'refresh'),
     (74, 'dataset_wide', 'feature_notice_krforest_landslide_forecast_issues_job', 'refresh')
 ON CONFLICT (provider_dataset_id, sync_scope, operation_key) DO NOTHING;
+"""
 
+_SEQUENCE_SQL = """
 SELECT setval(
     'provider_sync.provider_datasets_provider_dataset_id_seq',
     GREATEST((SELECT COALESCE(max(provider_dataset_id), 1)
@@ -128,7 +137,16 @@ SELECT setval(
 
 def upgrade() -> None:
     op.execute("SET ROLE ktm_feature_schema_owner")
-    op.execute(_DATASETS_SQL)
+    # asyncpg prepared statements do not accept multiple SQL commands. Keep each
+    # statement separate while Alembic still wraps the migration transactionally.
+    for statement in (
+        _CATALOG_CHECK_SQL,
+        _DATASET_INSERT_SQL,
+        _OPERATION_INSERT_SQL,
+        _SCOPE_INSERT_SQL,
+        _SEQUENCE_SQL,
+    ):
+        op.execute(statement)
 
 
 def downgrade() -> None:
