@@ -34,6 +34,11 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.integration
 
+#: `alembic upgrade head`가 착지해야 하는 revision. 리터럴을 여러 곳에 박으면
+#: migration마다 흩어진 자리를 모두 고쳐야 하고, 한 곳을 놓치면 그 단언만 조용히
+#: 옛 head를 지킨다. 한 줄로 모은다.
+_EXPECTED_HEAD = "0229_tvn40b_source_rule_action"
+
 _GATE_DB = "alembic_metadata_gate"
 
 
@@ -396,7 +401,7 @@ async def test_squash_boundary_rejects_stamp_below_0200_before_mutation(
             admin_dsn,
             "SELECT version_num FROM public.alembic_version",
         )
-        == "0225_tvn40c_physical_removal"
+        == _EXPECTED_HEAD
     )
 
 
@@ -426,7 +431,7 @@ async def test_existing_0104_bridge_upgrades_to_tvn40_head_without_baseline_repl
             admin_dsn,
             "SELECT version_num FROM public.alembic_version",
         )
-        == "0225_tvn40c_physical_removal"
+        == _EXPECTED_HEAD
     )
     assert (
         await _admin_fetchval(
