@@ -539,6 +539,12 @@ def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidenc
     assert 'active["pinvi_source_revision"] != source_commits["pinvi"]' in attestation
     assert "len(set(role_services.values())) != len(role_services)" in attestation
     assert "len(observed_containers) != len(role_services)" in attestation
+    # cleanup journal 계약: 최종본은 v4이고 소유권 결박을 싣는다. v3는 첫 durable
+    # write 전 bootstrap placeholder 전용이다. 이 단언이 없으면 browser lane과 shell이
+    # 서로 다른 version을 요구하는 상태가 CI green으로 남는다(2026-08-20 실측).
+    assert 'state.get("version") != 4' in script
+    assert 'state.get("request_ownership"), list' in script
+    assert '"run_id":"__orchestrator_pending__","target_history":[],"target_refs":[],"version":3}' in script
     assert 'docker create --pull=never' in script
     assert 'docker start --attach --interactive' in script
     assert "--network bridge --ipc private" in script

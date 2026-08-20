@@ -230,7 +230,7 @@ test("C7 v4 journal requires one-to-one request/idempotency/scope/operation owne
   expect(hasExactC7RequestOwnershipBinding(foreignOperation)).toBe(false);
 });
 
-test("C7 v3는 bootstrap placeholder 전용이고 최종 journal이 될 수 없다, never a final journal", () => {
+test("C7 v3는 bootstrap placeholder 전용이고 최종 journal이 될 수 없다", () => {
   const bootstrap = {
     cleanup_result: null,
     completed_scenarios: [],

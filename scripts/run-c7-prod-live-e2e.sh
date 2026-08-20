@@ -1464,7 +1464,12 @@ elif kind == "schedule":
     ):
         raise SystemExit(5)
 elif kind == "kma":
-    if state.get("version") != 3:
+    # 최종 journal은 v4다(v3는 첫 durable write 전 bootstrap placeholder 전용).
+    # 소유권 결박이 없는 문서를 최종본으로 받으면 cleanup이 무엇을 취소했는지
+    # 사후에 말할 수 없으므로 request_ownership 존재도 함께 요구한다.
+    if state.get("version") != 4 or not isinstance(
+        state.get("request_ownership"), list
+    ):
         raise SystemExit(19)
     cleanup = state.get("cleanup_result")
     if (
