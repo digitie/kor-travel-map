@@ -73,8 +73,6 @@ from kortravelmap.infra.cache_target_stream_repo import (
     get_cache_target_stream,
     lock_cache_target_stream,
 )
-from tests.integration._db_cleanup import truncate_committed_test_rows
-
 from kortravelmap.infra.domain_command_repo import (
     canonical_domain_command_fingerprint,
     create_domain_command_claim,
@@ -85,6 +83,7 @@ from kortravelmap.infra.feature_update_repo import (
 )
 from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget
 from kortravelmap.infra.poi_cache_target_repo import upsert_poi_cache_target
+from tests.integration._db_cleanup import truncate_committed_test_rows
 
 _SYSTEM = "pinvi-test"
 _CONSUMER = "pinvi-cache-consumer"

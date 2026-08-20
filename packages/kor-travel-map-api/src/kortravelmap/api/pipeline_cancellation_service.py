@@ -22,8 +22,8 @@ from kortravelmap.infra.c6c_cancel_probe_fixture_repo import (
     mark_c6c_cancel_probe_consumed,
 )
 from kortravelmap.infra.cache_target_event_repo import (
-    CacheTargetRefreshStatus,
     CacheTargetRefreshProtocolViolation,
+    CacheTargetRefreshStatus,
     append_cache_target_refresh_status_events,
 )
 from kortravelmap.infra.feature_update_repo import get_update_request_by_job_id
