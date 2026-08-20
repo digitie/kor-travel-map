@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-20 — T-VN-H50 마지막 planner 경로 보강
+
+H50의 두 적대 리뷰어가 공통으로 재현한 `source_entities_pkey` false-fail을 수정했다.
+`source_records`의 근거 약한 복합 unique 허용도 제거하고, relation별 모든 index scan이
+allowlist 안에 있는지 검사하도록 gate를 좁혔다. forced/default plan, `Settings`, 작은
+`provider_datasets` 예외의 cardinality bound는 유지한다. 로컬 대상 테스트 6회 연속과
+모듈 전체 8건은 통과했고 GitHub Actions의 남은 3.12 job 완료를 기다린다.
+
+### 다음 한 작업
+
+두 전문 리뷰어에게 H50 최종 재검토를 요청하고, GitHub Actions 전체 green 확인 후 H50
+문서·PR을 갱신하고 merge한다.
+
 ## 2026-08-20 — T-VN-41F1D-E 저장소측 완료 (v4 퇴역 → v5/v7)
 
 live runner 두 개의 신뢰 경계를 v4 compatible-pair manifest에서 v5 pinned runtime

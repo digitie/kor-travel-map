@@ -602,6 +602,7 @@ _ENRICHMENT_REVIEW_ACCESS = (
 #   는 0096에서 제거됨) 또는 feature_id 동등 조회용 PK/covering index
 # - source_links: source_entity_key 진입, primary partial 진입, feature/entity PK 진입
 # - source_entities: dataset-driven, source_entity_key-driven, key+dataset FK bridge
+#   ``source_entities_pkey`` is the canonical PK path for the source_entity_key join.
 # ``provider_datasets``는 이 seed에서 dataset당 한 행인 catalog dimension이다. 기본
 # planner가 이 작은 relation을 Seq Scan하는 것은 회귀가 아니므로 no-Seq-Scan 대상에서
 # 제외한다. 대량 relation의 index path만 역할별로 고정한다.
@@ -621,6 +622,7 @@ _DEDUP_REFRESH_ACCESS_BY_RELATION = {
     "source_entities": (
         "idx_source_entities_provider_dataset",
         "uq_source_entities_key_dataset",
+        "source_entities_pkey",
     ),
     "source_entity_heads": (
         "pk_source_entity_heads",
@@ -629,7 +631,6 @@ _DEDUP_REFRESH_ACCESS_BY_RELATION = {
     "source_records": (
         "pk_source_records",
         "source_records_pkey",
-        "uq_source_records_entity_record",
     ),
 }
 _DEDUP_REFRESH_NO_SEQ_SCAN_RELATIONS = (
@@ -673,8 +674,14 @@ def _assert_relation_uses_index(
     plan: dict[str, Any], relation_name: str, *expected: str
 ) -> None:
     used = _index_names_for_relation(plan, relation_name)
-    assert set(expected) & used, (
-        f"{relation_name} expected one of {expected}, used={sorted(used)}\n"
+    allowed = set(expected)
+    assert used, (
+        f"{relation_name} expected an index from {expected}, used={sorted(used)}\n"
+        "EXPLAIN (FORMAT JSON, SETTINGS):\n"
+        f"{_format_plan(plan)}"
+    )
+    assert used <= allowed, (
+        f"{relation_name} expected only indexes from {expected}, used={sorted(used)}\n"
         "EXPLAIN (FORMAT JSON, SETTINGS):\n"
         f"{_format_plan(plan)}"
     )

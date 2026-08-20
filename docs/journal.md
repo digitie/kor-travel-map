@@ -2,6 +2,20 @@
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
 
+## 2026-08-20 — T-VN-H50 planner gate의 마지막 false-fail 경로 제거
+
+H50 적대적 리뷰어 2명이 최신 구현에서 동일한 P1을 독립 재현했다. `source_entities`가
+`source_entity_key` 동등 join을 PK(`source_entities_pkey`)로 읽는 것은 유효한 canonical
+경로인데 allowlist에서 빠져 있어, source-links-driven plan이 그 경로를 택하면 다시
+false-fail할 수 있었다. `source_entities_pkey`를 추가하고, 실제 SQL의 선두 조건과 맞지
+않는 `source_records` 복합 unique index는 제거했다.
+
+동시에 relation별로 수집한 모든 index scan이 role allowlist에 포함되는지 검사하도록 gate를
+강화했다. forced/default EXPLAIN의 `Settings`·planner mode·전체 plan 진단은 유지하고,
+`provider_datasets`의 Seq Scan 예외는 seed cardinality 100 이하로 제한한다. 대상 테스트
+6회 연속 및 모듈 전체 8건은 통과했으며, GitHub Actions는 Python 3.11·3.13/fixture replay가
+통과하고 3.12 API unit을 실행 중이다.
+
 ## 2026-08-20 — 중복 착수, 그리고 cleanup이 남의 요청을 취소할 수 있었다
 
 열린 PR을 훑다가 `#995`(codex, 8/18 draft)가 **내가 오늘 #1032에서 만든 v5/v7 attestation
