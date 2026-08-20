@@ -115,7 +115,10 @@ GET /v1/curations/collections/{collection_id}
 GET /v1/curations/features/{feature_id}
 ```
 
-published + public collection만 보인다. Feature 자체의 공개 여부는 ADR-067 단일 공개
+공개 조건은 세 개가 모두 참일 때다 — collection `status = published`,
+collection `visibility = public`, 그리고 그 collection이 속한 theme의
+`visibility = public`. theme 하나를 admin_only로 내리면 그 아래 published collection도
+함께 사라진다. Feature 자체의 공개 여부는 ADR-067 단일 공개
 projection(`feature.public_features`)이 판정하므로, 비공개 Feature는 membership을
 통해서도 새지 않는다.
 
