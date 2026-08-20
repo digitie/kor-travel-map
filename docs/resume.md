@@ -23,11 +23,11 @@ end-to-end 테스트를 쓰고서야 알았다. (3) 초안의 `safe_high_waterma
 
 | 축 | 실측 |
 |---|---|
-| 1,000,000 admitted | 547.9초 (1,824 item/s) |
+| 1,000,000 admitted | **368.4초** (2,714 item/s; 동시 부하 아래 547.9초) |
 | Python peak | **2.02 MiB** — `O(log N)` 주장이 상한에서 성립 |
 | item 표 / 인덱스 | 157.6 MB (157.6 B/item) / 90.5 MB |
 | 상한 + 1 | typed `413`, partial row **0** |
-| compaction drain | 1,000,000행 / 32.6초 / 100 round |
+| compaction drain | 1,000,000행 / 39.5초 / 100 round |
 | VACUUM 회수 | 157.6 MB → 57 KB (증거 material·receipt는 보존) |
 
 게이트: ruff / mypy `--strict` ×3 / import-linter green, unit 2,387 · api 1,199 ·
@@ -37,7 +37,7 @@ ACL 변이 배터리 6종 전부 red.
 ### 다음 한 작업
 
 **결정 하나가 남았다 — build 예산 300초 vs item 상한 1,000,000.** 상한과 같은 크기의
-snapshot은 배포 기본 예산에 들지 않는다(실측 547.9초). 지금 계약에서 그런 snapshot은
+snapshot은 배포 기본 예산에 들지 않는다(실측 368.4초 > 300초). 지금 계약에서 그런 snapshot은
 admission을 통과하고 build deadline에서 실패한다. 예산을 올리면 그 시간만큼 stream share
 barrier가 유지되고 그 값은 hung writer 최대 정지 시간이기도 하므로, 코드가 아니라 정책
 결정이다. 선택지 셋과 비용은 soak 보고서 §"열린 결정"과 `docs/tasks.md`에 있다.

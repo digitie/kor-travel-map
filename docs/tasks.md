@@ -783,8 +783,9 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
     곧 게이트의 유효성이라 세 번 고쳐 썼고(material 1개면 partial index 둘의 비용이 같고,
     compaction 후보가 0개면 planner 선택이 무의미하고, material당 item 1행이면 정렬이
     공짜다), 그 과정에서 **근거를 못 만든 인덱스 하나를 지웠다**.
-    → soak 실측 `docs/reports/t-vn-41s-1m-soak-2026-08-21.md`: 1,000,000 admitted 547.9초
-    (1,824 item/s) · **Python peak 2.02 MiB** · item 표 157.6 MB(157.6 B/item) ·
+    → soak 실측 `docs/reports/t-vn-41s-1m-soak-2026-08-21.md`(2회): 1,000,000 admitted
+    **368.4초**(2,714 item/s, 조용한 호스트 / 동시 부하에서는 547.9초) ·
+    **Python peak 2.02 MiB** · item 표 157.6 MB(157.6 B/item) ·
     상한+1은 typed `413`에 partial row 0 · compaction 1,000,000행 32.6초 · VACUUM 157.6 MB
     회수(증거 material/receipt는 보존).
     → concurrent mutation의 fixed membership·safe lower cursor는 soak이 아니라 통합 테스트
@@ -793,7 +794,8 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
     `test_generic_snapshot_reuse_ignores_nonmaterial_outbox_tail`). soak에서 흉내 내면 같은
     성질을 덜 정확하게 보는 두 번째 게이트가 된다.
   - [ ] **열린 결정 — build 예산 300초 vs item 상한 1,000,000.** 상한과 같은 크기의
-    snapshot은 배포 기본 예산에 **들지 않는다**(n150 실측 547.9초 > 300초). 지금 계약에서
+    snapshot은 배포 기본 예산에 **들지 않는다**(n150 실측 368.4초 > 300초; 동시 부하
+    아래에서는 547.9초). 지금 계약에서
     1,000,000 item snapshot은 admission은 통과하고 build deadline에서 실패한다. 셋 중
     하나를 골라야 한다 — 예산을 올린다(그만큼 stream share barrier가 유지되고, 그 값은
     hung writer 최대 정지 시간이기도 하다) / 상한을 실제 도달 가능한 크기로 낮춘다 /
