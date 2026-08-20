@@ -6289,15 +6289,6 @@ class PoiCacheTargetSnapshotMaterialRow(Base):
             unique=True,
             postgresql_where=text("compacted_at IS NULL"),
         ),
-        # GC batch의 orphan material 정리가 쓰는 훑기 순서다. compaction 여부와
-        # 무관하므로 partial로 두지 않는다 — compaction 후보 쪽은 위 partial unique가
-        # 이미 `external_system` + `compacted_at IS NULL` 범위를 준다.
-        Index(
-            "idx_cache_target_snapshot_materials_sweep",
-            "external_system",
-            "materialized_at",
-            "material_id",
-        ),
         {"schema": "ops"},
     )
 
