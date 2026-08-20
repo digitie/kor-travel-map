@@ -153,6 +153,12 @@
         "0224_c7_external_system_scope"
       ],
       "revision": "0225_tvn40c_physical_removal"
+    },
+    {
+      "down_revision": [
+        "0225_tvn40c_physical_removal"
+      ],
+      "revision": "0227_tvn40b_source_rule_action"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

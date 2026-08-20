@@ -100,6 +100,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     raise RuntimeError(
-        "0227은 forward-only입니다. `curated`가 뜻하던 구분은 이 migration 뒤에 "
-        "존재하지 않으므로 되돌리면 값을 발명하게 됩니다(ADR-021)."
+        "0227_tvn40b_source_rule_action is forward-only; "
+        "`curated`가 뜻하던 구분은 이 migration 뒤에 존재하지 않으므로 "
+        "되돌리면 값을 발명하게 된다(ADR-021)."
     )
