@@ -46,7 +46,7 @@ from kortravelmap.dto import (
     SourceRecord,
     SourceRole,
 )
-from kortravelmap.infra import feature_repo, merge_repo
+from kortravelmap.infra import admin_feature_repo, feature_repo, merge_repo
 from kortravelmap.infra.feature_subtype import (
     SUBTYPE_TABLES,
     subtype_params,
@@ -525,11 +525,18 @@ async def test_notice_valid_during_preserves_empty_range_without_changing_read_c
     """T-VN-37D의 파생 range가 empty를 보존하되 미래 공지는 계속 노출한다."""
     withdrawn_id = "tvn37d:empty:notice"
     future_id = "tvn37d:future:notice"
+    null_id = "tvn37d:null:notice"
+    start_only_id = "tvn37d:start-only:notice"
+    end_only_id = "tvn37d:end-only:notice"
+    equal_id = "tvn37d:equal:notice"
     reference_now = datetime.now(_KST)
     withdrawn_start = reference_now + timedelta(days=30)
     withdrawn_end = reference_now - timedelta(days=1)
     future_start = reference_now + timedelta(days=3)
     future_end = reference_now + timedelta(days=10)
+    start_only = reference_now + timedelta(days=15)
+    end_only = reference_now + timedelta(days=20)
+    equal_bound = reference_now + timedelta(days=25)
 
     withdrawn = _notice_feature(
         withdrawn_id,
@@ -541,6 +548,18 @@ async def test_notice_valid_during_preserves_empty_range_without_changing_read_c
         valid_start_time=future_start,
         valid_end_time=future_end,
     )
+    null_notice = _notice_feature(null_id, valid_end_time=None)
+    start_only_notice = _notice_feature(
+        start_only_id,
+        valid_start_time=start_only,
+        valid_end_time=None,
+    )
+    end_only_notice = _notice_feature(end_only_id, valid_end_time=end_only)
+    equal_notice = _notice_feature(
+        equal_id,
+        valid_start_time=equal_bound,
+        valid_end_time=equal_bound,
+    )
     await feature_repo.load_bundle(
         migrated_session,
         _bundle(withdrawn, source_entity_id="T-VN-37D-empty"),
@@ -548,6 +567,36 @@ async def test_notice_valid_during_preserves_empty_range_without_changing_read_c
     await feature_repo.load_bundle(
         migrated_session,
         _bundle(future, source_entity_id="T-VN-37D-future"),
+    )
+    for notice, source_entity_id in (
+        (null_notice, "T-VN-37D-null"),
+        (start_only_notice, "T-VN-37D-start-only"),
+        (end_only_notice, "T-VN-37D-end-only"),
+        (equal_notice, "T-VN-37D-equal"),
+    ):
+        await feature_repo.load_bundle(
+            migrated_session,
+            _bundle(notice, source_entity_id=source_entity_id),
+        )
+    await migrated_session.flush()
+
+    # ``_notice_feature`` uses a historical start default for existing lifecycle
+    # tests. Overwrite it here to exercise an explicit NULL lower bound and the
+    # both-NULL representation.
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.feature_notices "
+            "SET valid_start_time = NULL "
+            "WHERE feature_id IN (:null_id, :end_only_id)"
+        ),
+        {"null_id": null_id, "end_only_id": end_only_id},
+    )
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.feature_notices SET valid_end_time = NULL "
+            "WHERE feature_id = :null_id"
+        ),
+        {"null_id": null_id},
     )
     await migrated_session.flush()
 
@@ -565,7 +614,16 @@ async def test_notice_valid_during_preserves_empty_range_without_changing_read_c
                 ORDER BY feature_id
                 """
             ),
-            {"feature_ids": [withdrawn_id, future_id]},
+            {
+                "feature_ids": [
+                    withdrawn_id,
+                    future_id,
+                    null_id,
+                    start_only_id,
+                    end_only_id,
+                    equal_id,
+                ]
+            },
         )
     ).mappings().all()
     by_id = {str(row["feature_id"]): row for row in rows}
@@ -582,12 +640,54 @@ async def test_notice_valid_during_preserves_empty_range_without_changing_read_c
     assert bounded["lower_bound"] == future_start
     assert bounded["upper_bound"] == future_end
 
+    null_range = by_id[null_id]
+    assert null_range["is_null"] is True
+    assert null_range["is_empty"] is None
+
+    start_only_range = by_id[start_only_id]
+    assert start_only_range["is_null"] is False
+    assert start_only_range["is_empty"] is False
+    assert start_only_range["lower_bound"] == start_only
+    assert start_only_range["upper_bound"] is None
+
+    end_only_range = by_id[end_only_id]
+    assert end_only_range["is_null"] is False
+    assert end_only_range["is_empty"] is False
+    assert end_only_range["lower_bound"] is None
+    assert end_only_range["upper_bound"] == end_only
+
+    equal_range = by_id[equal_id]
+    assert equal_range["is_null"] is False
+    assert equal_range["is_empty"] is True
+    assert equal_range["lower_bound"] is None
+    assert equal_range["upper_bound"] is None
+
     # T-VN-37D는 `@> now()`로 바꾸지 않는다. 미래 발효 공지는 기존처럼 보이고,
     # 이미 끝난 empty 공지는 기존 valid_end_time 감산으로 숨겨진다.
     visible = await feature_repo.public_active_notice_feature_identities(
         migrated_session, [withdrawn_id, future_id]
     )
     assert set(visible) == {future_id}
+
+    admin_default = await admin_feature_repo.list_admin_features(
+        migrated_session,
+        q=withdrawn_id,
+        page_size=10,
+    )
+    assert admin_default.items == ()
+    admin_including_ended = await admin_feature_repo.list_admin_features(
+        migrated_session,
+        q=withdrawn_id,
+        include_ended=True,
+        page_size=10,
+    )
+    assert [row.feature_id for row in admin_including_ended.items] == [withdrawn_id]
+    admin_future = await admin_feature_repo.list_admin_features(
+        migrated_session,
+        q=future_id,
+        page_size=10,
+    )
+    assert [row.feature_id for row in admin_future.items] == [future_id]
 
     # 저장 range는 내부 표현이고 공개 detail 계약은 두 typed timestamp를 유지한다.
     assembled = await _detail_from_reader(migrated_session, withdrawn_id)

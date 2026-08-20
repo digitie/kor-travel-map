@@ -114,7 +114,9 @@ core.category AS feature_category,
 CASE core.kind
   WHEN 'place' THEN COALESCE(to_jsonb(place), '{}'::jsonb)
   WHEN 'event' THEN COALESCE(to_jsonb(event), '{}'::jsonb)
-  WHEN 'notice' THEN COALESCE(to_jsonb(notice), '{}'::jsonb)
+  -- valid_during is an internal generated projection, not part of the
+  -- NoticeDetail/admin response contract.
+  WHEN 'notice' THEN COALESCE(to_jsonb(notice) - 'valid_during', '{}'::jsonb)
   WHEN 'route' THEN COALESCE(to_jsonb(route), '{}'::jsonb)
   WHEN 'area' THEN COALESCE(to_jsonb(area_row), '{}'::jsonb)
   ELSE '{}'::jsonb

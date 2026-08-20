@@ -77,7 +77,7 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 | `features` | `feature_id` | kind/name/category/coord/coord_precision_digits/coord_5179(generated)/address/legal_dong_code/marker_*/parent/sibling_group_id/raw_refs/status/data_origin/data_version/user_change_*; `UNIQUE (feature_id, kind)`는 아래 subtype 배타 arc의 참조 대상. kind별 detail과 선·면 geometry는 core에 없고 typed subtype이 정본이다 (ADR-086) |
 | `feature_places` | `feature_id` | place_kind (NOT NULL), phones `text[]` (≤3), biz_number, license_date, business_hours, facility_info, reviews_link, payload |
 | `feature_events` | `feature_id` | event_kind (NOT NULL), starts_on/ends_on (CHECK), timezone, opening_hours, venue_name, tel, content_id, content_type_id, area_code, sigungu_code, payload |
-| `feature_notices` | `feature_id` | notice_type (NOT NULL), severity (0-5 CHECK), valid_start/end_time `timestamptz`, source_agency, officer_name, payload |
+| `feature_notices` | `feature_id` | notice_type (NOT NULL), severity (0-5 CHECK), valid_start/end_time `timestamptz`, generated `valid_during` `tstzrange`, source_agency, officer_name, payload |
 | `feature_routes` | `feature_id` | geom `MULTILINESTRING(4326)` NOT NULL, route_type (NOT NULL), geometry_source/status, total_distance_meters, expected_duration_minutes, difficulty, begin_*/end_*, payload |
 | `feature_areas` | `feature_id` | geom `MULTIPOLYGON(4326)` NOT NULL, area_kind (NOT NULL), boundary_source, area_square_meters, regulation_scope, administrative_office, description, payload |
 | `features_detailed` (view) | — | core + subtype 5종에서 `detail`/`geom`을 조립하는 단일 정본. `public_features`는 이 뷰 위의 `active AND deleted_at IS NULL` projection이다 |

@@ -37,6 +37,8 @@
   계속 노출하고 active/admin read는 `valid_end_time <= now()` 비교를 유지한다.
   `NoticeDetail`/OpenAPI 응답은 변경하지 않았다. ADR-095, migration
   `0232_tvn37d_notice_empty_range`, ORM metadata와 integration regression이 정본이다.
+  적대 리뷰에서 발견한 admin candidate JSON 누출은 내부 `valid_during` 제외로 고쳤고,
+  migration lock timeout과 NULL/one-sided/equal/admin 회귀도 추가했다.
 
 ## 2026-08-20 — T-VN-40C 및 인수 ③~⑤ 종결
 

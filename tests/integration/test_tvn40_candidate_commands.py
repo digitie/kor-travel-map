@@ -13,6 +13,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
+from kortravelmap.infra import curation_candidate_repo
 from kortravelmap.infra.db import make_async_engine
 from kortravelmap.infra.feature_operation_repo import (
     ensure_dagster_feature_operation,
@@ -864,6 +865,62 @@ async def test_promotion_rejects_stale_typed_feature_detail(
         assert state == ("open", 1, 0, 0)
     finally:
         await api.dispose()
+
+
+async def test_notice_candidate_detail_excludes_internal_validity_range(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """admin candidate detail은 generated 내부 range를 공개 shape에 넣지 않는다."""
+    seeded = await _seed_candidate(
+        migrated_engine,
+        operation="admin.theme-feature-candidate.reject",
+    )
+    async with migrated_engine.begin() as connection:
+        await connection.execute(
+            text(
+                "DELETE FROM feature.feature_places WHERE feature_id = :feature_id"
+            ),
+            seeded,
+        )
+        await connection.execute(
+            text(
+                "UPDATE feature.features SET kind = 'notice' "
+                "WHERE feature_id = :feature_id"
+            ),
+            seeded,
+        )
+        await connection.execute(
+            text(
+                """
+                INSERT INTO feature.feature_notices (
+                    feature_id, feature_uuid, kind, notice_type, severity,
+                    valid_start_time, valid_end_time, source_agency, payload
+                )
+                SELECT feature_id, feature_uuid, kind, 'traffic', 2,
+                       CAST(:valid_start AS timestamptz),
+                       CAST(:valid_end AS timestamptz),
+                       'test-agency', '{}'::jsonb
+                FROM feature.features
+                WHERE feature_id = :feature_id
+                """
+            ),
+            {
+                **seeded,
+                "valid_start": datetime(2026, 8, 1, tzinfo=UTC),
+                "valid_end": datetime(2026, 8, 2, tzinfo=UTC),
+            },
+        )
+
+    async with async_sessionmaker(migrated_engine, expire_on_commit=False)() as session:
+        candidate = await curation_candidate_repo.get_theme_candidate(
+            session,
+            candidate_id=str(seeded["candidate_id"]),
+        )
+
+    assert candidate is not None
+    assert candidate.feature_kind == "notice"
+    assert candidate.feature_detail["notice_type"] == "traffic"
+    assert "valid_during" not in candidate.feature_detail
 
 
 async def test_rule_reconcile_generation_is_server_derived_and_replay_safe(

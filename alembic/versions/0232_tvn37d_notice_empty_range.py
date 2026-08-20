@@ -9,6 +9,10 @@
 두 시각이 모두 없으면 기존의 "기간 정보 없음" 의미를 보존하기 위해 NULL이다.
 공개 notice read는 미래 발효 경고를 숨기지 않도록 기존 `valid_end_time` 술어를
 유지한다. 이 migration은 표현을 추가할 뿐 read contract를 바꾸지 않는다.
+
+stored generated column 추가는 기존 행을 다시 계산하고 테이블 잠금을 얻으므로
+writer fence/maintenance window에서 실행한다. 잠금 대기는 30초에서 fail-closed해
+운영 요청이 무기한 대기하지 않게 한다.
 """
 
 from __future__ import annotations
@@ -38,6 +42,7 @@ END
 
 def upgrade() -> None:
     op.execute("SET ROLE ktm_feature_schema_owner")
+    op.execute("SET LOCAL lock_timeout = '30s'")
     op.execute(
         f"""
         ALTER TABLE feature.feature_notices

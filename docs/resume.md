@@ -43,6 +43,19 @@ barrier가 유지되고 그 값은 hung writer 최대 정지 시간이기도 하
 결정이다. 선택지 셋과 비용은 soak 보고서 §"열린 결정"과 `docs/tasks.md`에 있다.
 
 그 결정 뒤에 #922와 T-VN-41S를 완료로 표시한다.
+## 2026-08-21 — T-VN-37D 적대 리뷰 findings 반영
+
+전문 reviewer 2명 모두 P0 없이 검토를 완료했다. `valid_during`의 stored-column 잠금
+위험에는 migration-local 30초 `lock_timeout`과 writer fence/maintenance 전제를 추가했고,
+admin curation candidate의 `to_jsonb(notice)` 내부 필드 누출 P1은 SQL에서 `valid_during`을
+제외하도록 수정했다. NULL·one-sided·equal range, public/admin active read, candidate
+detail shape 회귀를 추가했으며 수정 후 targeted integration 2건이 통과했다.
+
+### 다음 한 작업
+
+수정본을 두 reviewer에게 재확인시키고, 새 체크포인트를 push한 뒤 PR #1041의 Python matrix와
+필요한 live UI 인수 증거를 확인한다. 모든 required check와 review가 green일 때만 merge한다.
+
 ## 2026-08-21 — T-VN-37D notice empty range 구현
 
 `feature.feature_notices.valid_during`을 `valid_start_time`/`valid_end_time`에서
@@ -58,11 +71,6 @@ barrier가 유지되고 그 값은 hung writer 최대 정지 시간이기도 하
 `T-C7-BROWSER-EVIDENCE`·`T-C7-SCOPE-REGISTRY`·`T-C7-LIVE-SERIAL`·
 `T-FE-MOCK-MANIFEST`(PR #1038)는 모두 머지되어 `tasks-done.md`로 이관했다.
 `tasks.md`에는 `T-VN-40B` 잔여와 `T-FE-MOCK-FLAKE`를 포함한 미완료 실행 단위만 남겼다.
-
-### 다음 한 작업
-
-두 전문 리뷰어의 적대적 검토와 map 4 게이트(특히 migration metadata/PostGIS)를
-실행한 뒤 draft PR을 열고, 중간 결과를 원격에 자주 push한다.
 
 ## 2026-08-20 — T-VN-C05A~D provider 머지 후 map 최종 게이트
 
