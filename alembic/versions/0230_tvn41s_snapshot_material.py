@@ -404,9 +404,12 @@ def _backfill_materials() -> None:
         )
         .scalar_one()
     )
-    if enabled != "O":
+    # asyncpg는 PostgreSQL ``char``를 bytes로 준다 — `str(b'O')`는 `"b'O'"`가 되어
+    # 이 확인이 항상 실패한다(`_runtime_relation_grants`의 relkind와 같은 자리다).
+    state = enabled.decode("ascii") if isinstance(enabled, bytes) else str(enabled)
+    if state != "O":
         raise RuntimeError(
-            f"0230: receipt append-only fence가 다시 켜지지 않았습니다(tgenabled={enabled!r})."
+            f"0230: receipt append-only fence가 다시 켜지지 않았습니다(tgenabled={state!r})."
         )
 
 
