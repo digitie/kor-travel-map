@@ -644,6 +644,26 @@ export interface paths {
         patch: operations["patch_feature_route_v1_admin_features__feature_id__patch"];
         trace?: never;
     };
+    "/v1/admin/features/{feature_id}/creation-provenance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Admin manual Feature creation provenance
+         * @description 현재 Feature에 결박된 claim/origin만 읽고 absence를 추정하지 않는다.
+         */
+        get: operations["get_feature_creation_provenance_route_v1_admin_features__feature_id__creation_provenance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/features/{feature_id}/field-overrides": {
         parameters: {
             query?: never;
@@ -3391,6 +3411,32 @@ export interface components {
             } | null;
         };
         /**
+         * AdminFeatureCreationOriginRecord
+         * @description 검증된 creation causation snapshot; 부재를 추정하지 않는다.
+         */
+        AdminFeatureCreationOriginRecord: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By Actor */
+            created_by_actor: string;
+            /** Creation Command Id */
+            creation_command_id: number;
+            /** Creator Principal Id */
+            creator_principal_id: string;
+            /** Invoker Role */
+            invoker_role: string;
+            /**
+             * Origin Kind
+             * @constant
+             */
+            origin_kind: "manual_admin";
+            /** Procedure Definer */
+            procedure_definer: string;
+        };
+        /**
          * AdminFeatureDeleteRequest
          * @description ``DELETE /admin/features/{feature_id}`` body.
          */
@@ -4352,6 +4398,61 @@ export interface components {
          */
         AdminManualFeatureCreateResponse: {
             data: components["schemas"]["AdminManualFeatureCreateData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * AdminManualFeatureIdentityClaimRecord
+         * @description 현재 manual Feature의 immutable exact-identity claim.
+         */
+        AdminManualFeatureIdentityClaimRecord: {
+            /**
+             * Claim Basis
+             * @enum {string}
+             */
+            claim_basis: "manual_create" | "legacy_admin_route";
+            /**
+             * Claimed At
+             * Format: date-time
+             */
+            claimed_at: string;
+            /** Claimed By Command Id */
+            claimed_by_command_id: number;
+            /**
+             * Feature Id
+             * Format: uuid
+             */
+            feature_id: string;
+            /**
+             * Feature Kind
+             * @enum {string}
+             */
+            feature_kind: "place" | "event";
+            /** Lat E6 */
+            lat_e6: number;
+            /** Lon E6 */
+            lon_e6: number;
+            /** Name Key */
+            name_key: string;
+        };
+        /**
+         * AdminManualFeatureProvenanceData
+         * @description M02 admin-only provenance reader의 현재 Feature snapshot.
+         */
+        AdminManualFeatureProvenanceData: {
+            claim: components["schemas"]["AdminManualFeatureIdentityClaimRecord"] | null;
+            /**
+             * Feature Id
+             * Format: uuid
+             */
+            feature_id: string;
+            origin: components["schemas"]["AdminFeatureCreationOriginRecord"] | null;
+        };
+        /**
+         * AdminManualFeatureProvenanceResponse
+         * @description ``GET /admin/features/{feature_id}/creation-provenance`` 응답.
+         */
+        AdminManualFeatureProvenanceResponse: {
+            data: components["schemas"]["AdminManualFeatureProvenanceData"];
             meta: components["schemas"]["Meta"];
         };
         /** AdminThemeCandidatePageData */
@@ -16054,6 +16155,55 @@ export interface operations {
             };
             /** @description If-Match 누락 */
             428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_feature_creation_provenance_route_v1_admin_features__feature_id__creation_provenance_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminManualFeatureProvenanceResponse"];
+                };
+            };
+            /** @description feature 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description feature 참조 형식 오류 */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

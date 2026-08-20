@@ -357,6 +357,8 @@ async def bootstrap_tvn_m01_role_phase(async_dsn: str) -> None:
                 "TO ktm_manual_feature_procedure_owner",
                 "GRANT SELECT ON TABLE ops.domain_command_results "
                 "TO ktm_manual_feature_procedure_owner",
+                "GRANT SELECT (feature_uuid) ON TABLE feature.features "
+                "TO ktm_manual_feature_procedure_owner",
                 "GRANT EXECUTE ON PROCEDURE feature.create_feature_with_initial_state("
                 "jsonb, text, text, text, jsonb) "
                 "TO ktm_manual_feature_procedure_owner",

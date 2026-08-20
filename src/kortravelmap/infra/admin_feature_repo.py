@@ -17,7 +17,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import TYPE_CHECKING, Any, Final, Literal, NoReturn, TypeAlias
+from typing import TYPE_CHECKING, Any, Final, Literal, NoReturn, TypeAlias, cast
 
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
@@ -84,6 +84,9 @@ __all__ = [
     "AdminManualFeatureIdentityConflict",
     "AdminManualFeatureInvariantError",
     "AdminManualFeatureValidationError",
+    "AdminManualFeatureProvenance",
+    "ManualFeatureIdentityClaim",
+    "FeatureCreationOrigin",
     "FeatureFieldOverrideNotFound",
     "FeatureFieldOverridePreconditionFailed",
     "FeatureFieldOverrideValidationError",
@@ -92,6 +95,7 @@ __all__ = [
     "author_admin_feature_field_overrides",
     "revoke_admin_feature_field_overrides",
     "create_admin_feature_with_field_overrides",
+    "get_admin_manual_feature_provenance",
     "patch_admin_feature_with_field_overrides",
     "get_admin_feature_detail",
     "list_admin_feature_state_transitions",
@@ -118,6 +122,42 @@ AdminFeatureSort = Literal[
 ]
 SortOrder = Literal["asc", "desc"]
 DedupDecision = Literal["accepted", "rejected", "ignored"]
+
+
+@dataclass(frozen=True)
+class ManualFeatureIdentityClaim:
+    """M02 admin reader가 반환하는 immutable exact-identity snapshot."""
+
+    feature_id: str
+    feature_kind: str
+    name_key: str
+    lon_e6: int
+    lat_e6: int
+    claim_basis: str
+    claimed_at: datetime
+    claimed_by_command_id: int
+
+
+@dataclass(frozen=True)
+class FeatureCreationOrigin:
+    """M02 admin reader가 반환하는 verified creation provenance."""
+
+    origin_kind: str
+    creation_command_id: int
+    creator_principal_id: str
+    created_by_actor: str
+    created_at: datetime
+    invoker_role: str
+    procedure_definer: str
+
+
+@dataclass(frozen=True)
+class AdminManualFeatureProvenance:
+    """현재 존재하는 Feature의 manual evidence; 없는 provenance는 추정하지 않는다."""
+
+    feature_id: str
+    claim: ManualFeatureIdentityClaim | None
+    origin: FeatureCreationOrigin | None
 
 
 @dataclass(frozen=True)
@@ -2671,6 +2711,90 @@ async def revoke_admin_feature_field_overrides(
         row_revision=int(row["o_row_revision"]),
         command_id=int(row["o_command_id"]),
         applied_field_count=int(row["o_applied_field_count"]),
+    )
+
+
+_READ_ADMIN_MANUAL_FEATURE_PROVENANCE_SQL: Final[str] = """
+SELECT *
+FROM feature.read_admin_manual_feature_provenance(CAST(:feature_uuid AS uuid))
+"""
+
+
+async def get_admin_manual_feature_provenance(
+    session: AsyncSession,
+    *,
+    feature_uuid: str,
+) -> AdminManualFeatureProvenance | None:
+    """현재 Feature에만 닫힌 manual claim/origin snapshot을 읽는다.
+
+    function은 ``features``를 driving relation으로 사용한다. 따라서 hard purge 뒤
+    남은 evidence를 조회할 수 없고, non-manual Feature는 ``claim=None``으로 명시한다.
+    """
+
+    row = (
+        await session.execute(
+            text(_READ_ADMIN_MANUAL_FEATURE_PROVENANCE_SQL),
+            {"feature_uuid": feature_uuid},
+        )
+    ).mappings().one_or_none()
+    if row is None:
+        return None
+
+    claim: ManualFeatureIdentityClaim | None = None
+    if row["feature_kind"] is not None:
+        required_claim = (
+            "feature_id",
+            "feature_kind",
+            "name_key",
+            "lon_e6",
+            "lat_e6",
+            "claim_basis",
+            "claimed_at",
+            "claimed_by_command_id",
+        )
+        if any(row[field] is None for field in required_claim):
+            raise AdminManualFeatureInvariantError(
+                "수동 Feature claim snapshot이 부분 행입니다."
+            )
+        claim = ManualFeatureIdentityClaim(
+            feature_id=str(row["feature_id"]),
+            feature_kind=str(row["feature_kind"]),
+            name_key=str(row["name_key"]),
+            lon_e6=int(row["lon_e6"]),
+            lat_e6=int(row["lat_e6"]),
+            claim_basis=str(row["claim_basis"]),
+            claimed_at=cast(datetime, row["claimed_at"]),
+            claimed_by_command_id=int(row["claimed_by_command_id"]),
+        )
+
+    origin: FeatureCreationOrigin | None = None
+    if row["origin_kind"] is not None:
+        required_origin = (
+            "origin_kind",
+            "creation_command_id",
+            "creator_principal_id",
+            "created_by_actor",
+            "origin_created_at",
+            "invoker_role",
+            "procedure_definer",
+        )
+        if claim is None or any(row[field] is None for field in required_origin):
+            raise AdminManualFeatureInvariantError(
+                "수동 Feature origin snapshot이 claim과 짝을 이루지 않습니다."
+            )
+        origin = FeatureCreationOrigin(
+            origin_kind=str(row["origin_kind"]),
+            creation_command_id=int(row["creation_command_id"]),
+            creator_principal_id=str(row["creator_principal_id"]),
+            created_by_actor=str(row["created_by_actor"]),
+            created_at=cast(datetime, row["origin_created_at"]),
+            invoker_role=str(row["invoker_role"]),
+            procedure_definer=str(row["procedure_definer"]),
+        )
+    return AdminManualFeatureProvenance(
+        feature_id=str(row["feature_id"]),
+        claim=claim,
+        origin=origin,
     )
 
 

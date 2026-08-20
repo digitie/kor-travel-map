@@ -153,9 +153,12 @@ BEGIN
         SELECT version_num INTO v_revision FROM public.alembic_version;
     END IF;
     IF v_claim_exists THEN
-        IF v_revision IS DISTINCT FROM '0226_m01_manual_feature_create' THEN
+        IF v_revision NOT IN (
+            '0226_m01_manual_feature_create',
+            '0227_m02_feature_provenance'
+        ) THEN
             RAISE EXCEPTION
-                'M01 relation marker requires exactly 0226 (observed %)',
+                'M01 relation marker requires a known M01/M02 head (observed %)',
                 coalesce(v_revision, '<none>')
                 USING ERRCODE = '55000';
         END IF;
@@ -220,6 +223,8 @@ GRANT USAGE ON SCHEMA ops TO ktm_manual_feature_procedure_owner;
 GRANT SELECT, UPDATE(command_id) ON TABLE ops.domain_commands
     TO ktm_manual_feature_procedure_owner;
 GRANT SELECT ON TABLE ops.domain_command_results
+    TO ktm_manual_feature_procedure_owner;
+GRANT SELECT (feature_uuid) ON TABLE feature.features
     TO ktm_manual_feature_procedure_owner;
 GRANT EXECUTE ON PROCEDURE feature.create_feature_with_initial_state(
     jsonb, text, text, text, jsonb
@@ -321,6 +326,10 @@ WITH dedicated_routine(signature, owner_role) AS (
       ('feature.manual_feature_identity_key(text,text,numeric,numeric)',
        'ktm_manual_feature_procedure_owner'),
       ('feature.create_admin_manual_feature_with_initial_state(jsonb,bigint)',
+       'ktm_manual_feature_procedure_owner'),
+      ('feature.read_admin_manual_feature_provenance(uuid)',
+       'ktm_manual_feature_procedure_owner'),
+      ('feature.reject_manual_feature_hard_purge()',
        'ktm_manual_feature_procedure_owner'),
       ('feature.reject_manual_feature_evidence_mutation()',
        'ktm_feature_audit_writer')

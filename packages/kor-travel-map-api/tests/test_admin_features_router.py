@@ -28,7 +28,10 @@ from kortravelmap.infra.admin_feature_repo import (
     AdminManualFeatureCreated,
     AdminManualFeatureExactDuplicate,
     AdminManualFeatureInvariantError,
+    AdminManualFeatureProvenance,
     AdminManualFeatureValidationError,
+    FeatureCreationOrigin,
+    ManualFeatureIdentityClaim,
 )
 from kortravelmap.infra.domain_command_repo import DomainCommandRecord
 from sqlalchemy.exc import DBAPIError
@@ -830,6 +833,99 @@ def test_list_feature_state_transitions_returns_404_before_audit_query(
     monkeypatch.setattr(router_mod, "get_feature_row_revision", _missing)
     response = client.get("/v1/admin/features/missing/state/transitions")
     assert response.status_code == 404
+
+
+@pytest.mark.unit
+def test_feature_creation_provenance_returns_explicit_evidence_absence(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """existing non-manual Feature에는 fabricated provenance 대신 null을 낸다."""
+
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    _patch_admin_resolved_identity(monkeypatch)
+
+    async def _read(_session: Any, *, feature_uuid: str) -> AdminManualFeatureProvenance:
+        assert feature_uuid == _expected_uuid("feature-1")
+        return AdminManualFeatureProvenance(
+            feature_id=feature_uuid,
+            claim=None,
+            origin=None,
+        )
+
+    monkeypatch.setattr(router_mod, "get_admin_manual_feature_provenance", _read)
+
+    response = client.get("/v1/admin/features/feature-1/creation-provenance")
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {
+        "feature_id": _expected_uuid("feature-1"),
+        "claim": None,
+        "origin": None,
+    }
+
+
+@pytest.mark.unit
+def test_feature_creation_provenance_returns_claim_and_origin(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """manual evidence는 UUID canonical path와 legacy alias 양쪽에서 같은 snapshot이다."""
+
+    from kortravelmap.api.routers import admin_features as router_mod
+
+    feature_uuid = "0198d9f1-7a31-7e52-8ea8-cb2548d3a891"
+    _patch_admin_resolved_identity(monkeypatch, feature_id="manual-feature")
+
+    async def _read(_session: Any, *, feature_uuid: str) -> AdminManualFeatureProvenance:
+        return AdminManualFeatureProvenance(
+            feature_id=feature_uuid,
+            claim=ManualFeatureIdentityClaim(
+                feature_id=feature_uuid,
+                feature_kind="place",
+                name_key="m02 provenance 장소",
+                lon_e6=127_500_000,
+                lat_e6=36_500_000,
+                claim_basis="manual_create",
+                claimed_at=datetime(2026, 8, 20, tzinfo=UTC),
+                claimed_by_command_id=71,
+            ),
+            origin=FeatureCreationOrigin(
+                origin_kind="manual_admin",
+                creation_command_id=71,
+                creator_principal_id="admin-ui-bff.manual-feature-create.v1",
+                created_by_actor="admin:m02",
+                created_at=datetime(2026, 8, 20, tzinfo=UTC),
+                invoker_role="ktm_feature_api_runtime",
+                procedure_definer="ktm_manual_feature_procedure_owner",
+            ),
+        )
+
+    monkeypatch.setattr(router_mod, "get_admin_manual_feature_provenance", _read)
+    # canonical ref를 써도 DB reader는 resolve된 canonical UUID만 받는다.
+    async def _resolve(_session: Any, _ref: str) -> Any:
+        from kortravelmap.infra.feature_identity import FeatureIdentity
+
+        return FeatureIdentity(feature_id="manual-feature", feature_uuid=feature_uuid)
+
+    monkeypatch.setattr(router_mod, "resolve_feature_ref_or_error", _resolve)
+
+    response = client.get(f"/v1/admin/features/{feature_uuid}/creation-provenance")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["feature_id"] == feature_uuid
+    assert data["claim"]["claimed_by_command_id"] == 71
+    assert data["origin"] == {
+        "origin_kind": "manual_admin",
+        "creation_command_id": 71,
+        "creator_principal_id": "admin-ui-bff.manual-feature-create.v1",
+        "created_by_actor": "admin:m02",
+        "created_at": "2026-08-20T00:00:00Z",
+        "invoker_role": "ktm_feature_api_runtime",
+        "procedure_definer": "ktm_manual_feature_procedure_owner",
+    }
 
 
 @pytest.mark.unit

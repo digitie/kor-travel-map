@@ -30,6 +30,9 @@ class _Mappings:
     def one(self) -> dict[str, Any]:
         return self._rows[0]
 
+    def one_or_none(self) -> dict[str, Any] | None:
+        return self._rows[0] if self._rows else None
+
 
 class _Result:
     def __init__(self, rows: list[dict[str, Any]] | None = None) -> None:
@@ -387,6 +390,100 @@ def test_manual_create_db_error_mapper_is_allow_listed_and_does_not_leak_driver_
             attempted_feature_uuid=attempted_uuid,
         )
     assert unknown.value is driver_error
+
+
+@pytest.mark.asyncio
+async def test_manual_feature_provenance_reader_maps_verified_snapshot() -> None:
+    feature_uuid = "0198d9f1-7a31-7e52-8ea8-cb2548d3a891"
+    session = _Session(
+        [
+            _Result(
+                [
+                    {
+                        "feature_id": feature_uuid,
+                        "feature_kind": "place",
+                        "name_key": "m02 provenance 장소",
+                        "lon_e6": 127_500_000,
+                        "lat_e6": 36_500_000,
+                        "claim_basis": "manual_create",
+                        "claimed_at": _NOW,
+                        "claimed_by_command_id": 71,
+                        "origin_kind": "manual_admin",
+                        "creation_command_id": 71,
+                        "creator_principal_id": "admin-ui-bff.manual-feature-create.v1",
+                        "created_by_actor": "admin:m02",
+                        "origin_created_at": _NOW,
+                        "invoker_role": "ktm_feature_api_runtime",
+                        "procedure_definer": "ktm_manual_feature_procedure_owner",
+                    }
+                ]
+            )
+        ]
+    )
+
+    provenance = await repo.get_admin_manual_feature_provenance(
+        session,  # type: ignore[arg-type]
+        feature_uuid=feature_uuid,
+    )
+
+    assert provenance == repo.AdminManualFeatureProvenance(
+        feature_id=feature_uuid,
+        claim=repo.ManualFeatureIdentityClaim(
+            feature_id=feature_uuid,
+            feature_kind="place",
+            name_key="m02 provenance 장소",
+            lon_e6=127_500_000,
+            lat_e6=36_500_000,
+            claim_basis="manual_create",
+            claimed_at=_NOW,
+            claimed_by_command_id=71,
+        ),
+        origin=repo.FeatureCreationOrigin(
+            origin_kind="manual_admin",
+            creation_command_id=71,
+            creator_principal_id="admin-ui-bff.manual-feature-create.v1",
+            created_by_actor="admin:m02",
+            created_at=_NOW,
+            invoker_role="ktm_feature_api_runtime",
+            procedure_definer="ktm_manual_feature_procedure_owner",
+        ),
+    )
+    assert session.calls[0]["params"] == {"feature_uuid": feature_uuid}
+
+
+@pytest.mark.asyncio
+async def test_manual_feature_provenance_reader_rejects_partial_evidence() -> None:
+    session = _Session(
+        [
+            _Result(
+                [
+                    {
+                        "feature_id": "0198d9f1-7a31-7e52-8ea8-cb2548d3a891",
+                        "feature_kind": "place",
+                        "name_key": None,
+                        "lon_e6": 127_500_000,
+                        "lat_e6": 36_500_000,
+                        "claim_basis": "manual_create",
+                        "claimed_at": _NOW,
+                        "claimed_by_command_id": 71,
+                        "origin_kind": None,
+                        "creation_command_id": None,
+                        "creator_principal_id": None,
+                        "created_by_actor": None,
+                        "origin_created_at": None,
+                        "invoker_role": None,
+                        "procedure_definer": None,
+                    }
+                ]
+            )
+        ]
+    )
+
+    with pytest.raises(repo.AdminManualFeatureInvariantError, match="부분 행"):
+        await repo.get_admin_manual_feature_provenance(
+            session,  # type: ignore[arg-type]
+            feature_uuid="0198d9f1-7a31-7e52-8ea8-cb2548d3a891",
+        )
 
 
 @pytest.mark.asyncio

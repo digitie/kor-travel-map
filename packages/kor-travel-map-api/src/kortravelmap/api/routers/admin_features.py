@@ -33,6 +33,7 @@ from kortravelmap.infra.admin_feature_repo import (
     AdminManualFeatureExactDuplicate,
     AdminManualFeatureIdentityConflict,
     AdminManualFeatureInvariantError,
+    AdminManualFeatureProvenance,
     AdminManualFeatureValidationError,
     FeatureFieldOverrideCommand,
     FeatureFieldOverrideNotFound,
@@ -44,6 +45,7 @@ from kortravelmap.infra.admin_feature_repo import (
     cluster_admin_features_in_bbox,
     create_admin_feature_with_field_overrides,
     get_admin_feature_detail,
+    get_admin_manual_feature_provenance,
     get_feature_row_revision,
     list_admin_feature_state_transitions,
     list_admin_features,
@@ -107,6 +109,7 @@ __all__ = [
     "AdminFeatureCreateRequest",
     "AdminManualFeatureCanonicalJSONResponse",
     "AdminManualFeatureCreateResponse",
+    "AdminManualFeatureProvenanceResponse",
     "AdminFeaturePatchRequest",
 ]
 
@@ -453,6 +456,54 @@ class AdminManualFeatureCreateResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     data: AdminManualFeatureCreateData
+    meta: Meta
+
+
+class AdminManualFeatureIdentityClaimRecord(BaseModel):
+    """현재 manual Feature의 immutable exact-identity claim."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: UUID
+    feature_kind: Literal["place", "event"]
+    name_key: str
+    lon_e6: int
+    lat_e6: int
+    claim_basis: Literal["manual_create", "legacy_admin_route"]
+    claimed_at: datetime
+    claimed_by_command_id: int = Field(ge=1)
+
+
+class AdminFeatureCreationOriginRecord(BaseModel):
+    """검증된 creation causation snapshot; 부재를 추정하지 않는다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    origin_kind: Literal["manual_admin"]
+    creation_command_id: int = Field(ge=1)
+    creator_principal_id: str
+    created_by_actor: str
+    created_at: datetime
+    invoker_role: str
+    procedure_definer: str
+
+
+class AdminManualFeatureProvenanceData(BaseModel):
+    """M02 admin-only provenance reader의 현재 Feature snapshot."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: UUID
+    claim: AdminManualFeatureIdentityClaimRecord | None
+    origin: AdminFeatureCreationOriginRecord | None
+
+
+class AdminManualFeatureProvenanceResponse(BaseModel):
+    """``GET /admin/features/{feature_id}/creation-provenance`` 응답."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: AdminManualFeatureProvenanceData
     meta: Meta
 
 
@@ -1134,6 +1185,50 @@ def _manual_feature_create_response(
     )
 
 
+def _manual_feature_provenance_response(
+    provenance: AdminManualFeatureProvenance,
+    *,
+    started_at: float,
+) -> AdminManualFeatureProvenanceResponse:
+    """repo immutable snapshot을 public/admin response shape로만 투영한다."""
+
+    claim = provenance.claim
+    origin = provenance.origin
+    return AdminManualFeatureProvenanceResponse(
+        data=AdminManualFeatureProvenanceData(
+            feature_id=UUID(provenance.feature_id),
+            claim=(
+                None
+                if claim is None
+                else AdminManualFeatureIdentityClaimRecord(
+                    feature_id=UUID(claim.feature_id),
+                    feature_kind=claim.feature_kind,
+                    name_key=claim.name_key,
+                    lon_e6=claim.lon_e6,
+                    lat_e6=claim.lat_e6,
+                    claim_basis=claim.claim_basis,
+                    claimed_at=claim.claimed_at,
+                    claimed_by_command_id=claim.claimed_by_command_id,
+                )
+            ),
+            origin=(
+                None
+                if origin is None
+                else AdminFeatureCreationOriginRecord(
+                    origin_kind=origin.origin_kind,
+                    creation_command_id=origin.creation_command_id,
+                    creator_principal_id=origin.creator_principal_id,
+                    created_by_actor=origin.created_by_actor,
+                    created_at=origin.created_at,
+                    invoker_role=origin.invoker_role,
+                    procedure_definer=origin.procedure_definer,
+                )
+            ),
+        ),
+        meta=make_meta(started_at=started_at),
+    )
+
+
 def _require_if_match_revision(request: Request) -> int:
     """correction 요청의 ``If-Match``를 row_revision으로 파싱한다.
 
@@ -1580,6 +1675,35 @@ async def list_feature_state_transitions_route(
             ),
         ),
     )
+
+
+@router.get(
+    "/{feature_id}/creation-provenance",
+    response_model=AdminManualFeatureProvenanceResponse,
+    summary="Admin manual Feature creation provenance",
+    responses={
+        404: {"description": "feature 없음"},
+        422: {"description": "feature 참조 형식 오류"},
+    },
+)
+async def get_feature_creation_provenance_route(
+    feature_id: str,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AdminManualFeatureProvenanceResponse:
+    """현재 Feature에 결박된 claim/origin만 읽고 absence를 추정하지 않는다."""
+
+    started_at = perf_counter()
+    identity = await resolve_feature_ref_or_error(session, feature_id)
+    provenance = await get_admin_manual_feature_provenance(
+        session,
+        feature_uuid=identity.feature_uuid,
+    )
+    if provenance is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"feature 없음: {feature_id!r}",
+        )
+    return _manual_feature_provenance_response(provenance, started_at=started_at)
 
 
 @router.get(

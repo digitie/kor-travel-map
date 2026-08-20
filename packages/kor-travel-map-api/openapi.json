@@ -1791,6 +1791,54 @@
         "title": "AdminFeatureCreateRequest",
         "type": "object"
       },
+      "AdminFeatureCreationOriginRecord": {
+        "additionalProperties": false,
+        "description": "검증된 creation causation snapshot; 부재를 추정하지 않는다.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by_actor": {
+            "title": "Created By Actor",
+            "type": "string"
+          },
+          "creation_command_id": {
+            "minimum": 1.0,
+            "title": "Creation Command Id",
+            "type": "integer"
+          },
+          "creator_principal_id": {
+            "title": "Creator Principal Id",
+            "type": "string"
+          },
+          "invoker_role": {
+            "title": "Invoker Role",
+            "type": "string"
+          },
+          "origin_kind": {
+            "const": "manual_admin",
+            "title": "Origin Kind",
+            "type": "string"
+          },
+          "procedure_definer": {
+            "title": "Procedure Definer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "origin_kind",
+          "creation_command_id",
+          "creator_principal_id",
+          "created_by_actor",
+          "created_at",
+          "invoker_role",
+          "procedure_definer"
+        ],
+        "title": "AdminFeatureCreationOriginRecord",
+        "type": "object"
+      },
       "AdminFeatureDeleteRequest": {
         "additionalProperties": false,
         "description": "``DELETE /admin/features/{feature_id}`` body.",
@@ -4412,6 +4460,123 @@
           "meta"
         ],
         "title": "AdminManualFeatureCreateResponse",
+        "type": "object"
+      },
+      "AdminManualFeatureIdentityClaimRecord": {
+        "additionalProperties": false,
+        "description": "현재 manual Feature의 immutable exact-identity claim.",
+        "properties": {
+          "claim_basis": {
+            "enum": [
+              "manual_create",
+              "legacy_admin_route"
+            ],
+            "title": "Claim Basis",
+            "type": "string"
+          },
+          "claimed_at": {
+            "format": "date-time",
+            "title": "Claimed At",
+            "type": "string"
+          },
+          "claimed_by_command_id": {
+            "minimum": 1.0,
+            "title": "Claimed By Command Id",
+            "type": "integer"
+          },
+          "feature_id": {
+            "format": "uuid",
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "feature_kind": {
+            "enum": [
+              "place",
+              "event"
+            ],
+            "title": "Feature Kind",
+            "type": "string"
+          },
+          "lat_e6": {
+            "title": "Lat E6",
+            "type": "integer"
+          },
+          "lon_e6": {
+            "title": "Lon E6",
+            "type": "integer"
+          },
+          "name_key": {
+            "title": "Name Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "feature_kind",
+          "name_key",
+          "lon_e6",
+          "lat_e6",
+          "claim_basis",
+          "claimed_at",
+          "claimed_by_command_id"
+        ],
+        "title": "AdminManualFeatureIdentityClaimRecord",
+        "type": "object"
+      },
+      "AdminManualFeatureProvenanceData": {
+        "additionalProperties": false,
+        "description": "M02 admin-only provenance reader의 현재 Feature snapshot.",
+        "properties": {
+          "claim": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminManualFeatureIdentityClaimRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "feature_id": {
+            "format": "uuid",
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminFeatureCreationOriginRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "feature_id",
+          "claim",
+          "origin"
+        ],
+        "title": "AdminManualFeatureProvenanceData",
+        "type": "object"
+      },
+      "AdminManualFeatureProvenanceResponse": {
+        "additionalProperties": false,
+        "description": "``GET /admin/features/{feature_id}/creation-provenance`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminManualFeatureProvenanceData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "AdminManualFeatureProvenanceResponse",
         "type": "object"
       },
       "AdminThemeCandidatePageData": {
@@ -33374,6 +33539,74 @@
           }
         ],
         "summary": "Patch Feature Route",
+        "tags": [
+          "admin-features"
+        ]
+      }
+    },
+    "/v1/admin/features/{feature_id}/creation-provenance": {
+      "get": {
+        "description": "현재 Feature에 결박된 claim/origin만 읽고 absence를 추정하지 않는다.",
+        "operationId": "get_feature_creation_provenance_route_v1_admin_features__feature_id__creation_provenance_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminManualFeatureProvenanceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "feature 없음"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "feature 참조 형식 오류"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Admin manual Feature creation provenance",
         "tags": [
           "admin-features"
         ]

@@ -144,6 +144,8 @@ def test_manual_evidence_relation_acl_stays_with_schema_owner() -> None:
     assert "feature_creation_origins" in table_acl
     assert "ON TABLE" not in writer_acl
     assert "create_admin_manual_feature_with_initial_state" in writer_acl
+    assert "read_admin_manual_feature_provenance" in writer_acl
+    assert "reject_manual_feature_hard_purge" in writer_acl
 
 
 @pytest.mark.unit

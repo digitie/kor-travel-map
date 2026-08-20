@@ -54,6 +54,7 @@ _EXPECTED_REVISIONS = (
     "0231_tvn41s_snapshot_material",
     "0232_tvn37d_notice_empty_range",
     "0226_m01_manual_feature_create",
+    "0227_m02_feature_provenance",
 )
 #: `alembic_version.version_num`의 컬럼 폭(alembic 기본값).
 _ALEMBIC_VERSION_NUM_LENGTH = 32

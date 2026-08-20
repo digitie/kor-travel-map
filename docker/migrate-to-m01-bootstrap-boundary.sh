@@ -43,8 +43,11 @@ async def main() -> int:
         print("M01 relation marker is partial; refusing bootstrap boundary", file=sys.stderr)
         return 2
     if claim is not None:
-        if revision != "0226_m01_manual_feature_create":
-            print("M01 relation marker requires exactly 0226", file=sys.stderr)
+        if revision not in {
+            "0226_m01_manual_feature_create",
+            "0227_m02_feature_provenance",
+        }:
+            print("M01 relation marker requires a known M01/M02 head", file=sys.stderr)
             return 2
         return 0
     return 1

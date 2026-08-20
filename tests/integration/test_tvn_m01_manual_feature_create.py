@@ -6,12 +6,14 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from kortravelmap.infra.admin_feature_repo import (
     AdminManualFeatureCreated,
     AdminManualFeatureExactDuplicate,
     create_admin_feature_with_field_overrides,
+    get_admin_manual_feature_provenance,
 )
 from kortravelmap.infra.db import (
     assert_runtime_db_privilege_boundary,
@@ -106,6 +108,19 @@ async def test_api_manual_create_writes_immutable_claim_and_origin_once(
         assert isinstance(loser, AdminManualFeatureExactDuplicate)
         assert loser.existing_feature_uuid == winner.feature_uuid
 
+        async with AsyncSession(api_engine, expire_on_commit=False) as session:
+            provenance = await get_admin_manual_feature_provenance(
+                session,
+                feature_uuid=winner.feature_uuid,
+            )
+        assert provenance is not None
+        assert provenance.claim is not None
+        assert provenance.origin is not None
+        assert provenance.claim.feature_id == winner.feature_uuid
+        assert provenance.claim.claimed_by_command_id == command_id
+        assert provenance.origin.creation_command_id == command_id
+        assert provenance.origin.origin_kind == "manual_admin"
+
         async with migrated_engine.connect() as connection:
             evidence = (
                 await connection.execute(
@@ -158,5 +173,22 @@ async def test_api_manual_create_writes_immutable_claim_and_origin_once(
             "ktm_manual_feature_procedure_owner",
         )
         assert counts == (1, 1, 1)
+
+        # M02 hard-purge fence — evidence를 orphan으로 남길 정책/restore proof가
+        # 생기기 전에는 privileged raw delete도 named DB constraint로 닫는다.
+        async with migrated_engine.begin() as connection:
+            with pytest.raises(DBAPIError) as blocked:
+                await connection.execute(
+                    text(
+                        "DELETE FROM feature.features "
+                        "WHERE feature_uuid = CAST(:feature_uuid AS uuid)"
+                    ),
+                    {"feature_uuid": winner.feature_uuid},
+                )
+        driver_error = blocked.value.orig
+        assert (
+            getattr(driver_error, "constraint_name", None)
+            or getattr(getattr(driver_error, "__cause__", None), "constraint_name", None)
+        ) == "ck_manual_feature_purge_not_ready"
     finally:
         await api_engine.dispose()

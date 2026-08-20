@@ -80,6 +80,7 @@ _SHARED_RUNTIME_FEATURE_PROCEDURES = frozenset(
 _MANUAL_FEATURE_CREATE_PROCEDURE = (
     "feature.create_admin_manual_feature_with_initial_state(jsonb,bigint)"
 )
+_MANUAL_FEATURE_PROVENANCE_FUNCTION = "feature.read_admin_manual_feature_provenance(uuid)"
 
 _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
     {
@@ -217,7 +218,8 @@ _EXPECTED_RUNTIME_APPLICATION_PROCEDURES = {
 }
 
 _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS = {
-    "ktm_feature_api_runtime": _ADMIN_CANCELLATION_SECURITY_DEFINER_FUNCTIONS,
+    "ktm_feature_api_runtime": _ADMIN_CANCELLATION_SECURITY_DEFINER_FUNCTIONS
+    | frozenset({_MANUAL_FEATURE_PROVENANCE_FUNCTION}),
     "ktm_feature_dagster_runtime": frozenset(),
 }
 

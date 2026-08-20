@@ -364,9 +364,18 @@ _MANUAL_FEATURE_WRITER_ACL = (
     "ktm_feature_create_provider_executor",
     "GRANT EXECUTE ON PROCEDURE feature.create_admin_manual_feature_with_initial_state("
     "jsonb, bigint) TO ktm_manual_feature_admin_executor",
+    "REVOKE ALL ON FUNCTION feature.read_admin_manual_feature_provenance(uuid) "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_dagster_runtime, "
+    "ktm_feature_create_provider_executor",
+    "GRANT EXECUTE ON FUNCTION feature.read_admin_manual_feature_provenance(uuid) "
+    "TO ktm_manual_feature_admin_executor",
     "REVOKE ALL ON FUNCTION feature.manual_feature_identity_key("
     "text, text, numeric, numeric) FROM PUBLIC, ktm_feature_runtime, "
     "ktm_feature_api_runtime, ktm_feature_dagster_runtime",
+    "REVOKE ALL ON FUNCTION feature.reject_manual_feature_hard_purge() "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, "
+    "ktm_feature_dagster_runtime, ktm_manual_feature_procedure_owner, "
+    "ktm_manual_feature_admin_executor, ktm_feature_create_provider_executor",
 )
 
 _SUBTYPE_READY_FUNCTION_ACL = (
