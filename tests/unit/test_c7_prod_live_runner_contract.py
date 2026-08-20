@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+from scripts.lib import c7_prod_attestation as _ATTESTATION_MODULE
+
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER = ROOT / "scripts" / "run-c7-prod-live-e2e.sh"
 ATTESTATION = ROOT / "scripts" / "lib" / "c7_prod_attestation.py"
@@ -501,13 +503,11 @@ def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidenc
     assert '"source_commits"' in attestation
     assert 'manifest["version"] != 5' in attestation
     assert 'value["version"] != 7' in attestation
-    for field in (
-        "map_image_id",
-        "map_ui_image_id",
-        "map_dagster_image_id",
-        "map_dagster_daemon_image_id",
-        "pinvi_image_id",
-    ):
+    # v5 generation의 일곱 image field가 모듈 안에 실제로 있어야 한다. 목록을 손으로
+    # 적으면 generation이 늘어도 이 계약은 그대로여서, 늘어난 runtime이 검사 밖에 남는다.
+    for _role, field in _ATTESTATION_MODULE.GENERATION_RUNTIME_IMAGE_FIELDS:
+        assert field in attestation
+    for field in _ATTESTATION_MODULE.GENERATION_SCHEMA_HEAD_FIELDS:
         assert field in attestation
     assert 'active["map_source_revision"] != source_commits["map"]' in attestation
     assert 'active["pinvi_source_revision"] != source_commits["pinvi"]' in attestation

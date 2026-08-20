@@ -490,7 +490,6 @@ def test_tvn41_candidate_artifacts_bind_immutable_live_evidence() -> None:
     # 들어오는 일은 없어야 한다. 아래는 detached 이력의 내부 정합성만 본다.
     assert receipt["state"] == "pending"
     assert manifest["map_service_openapi_sha256"] != receipt["map_service_openapi_sha256"]
-    assert manifest_sha256 and attestation_sha256 and evidence_sha256
 
     assert set(manifest) == {
         "schema",
@@ -541,6 +540,8 @@ def test_tvn41_candidate_artifacts_bind_immutable_live_evidence() -> None:
     }
     assert evidence["schema"] == "t-vn-41-candidate-live-e2e-evidence-v1"
     assert evidence["candidate_compatible_pair_attestation_sha256"] == attestation_sha256
+    # detached 이력이라도 파일 자체는 읽혀야 한다 — evidence digest는 그 확인용이다.
+    assert re.fullmatch(r"[0-9a-f]{64}", evidence_sha256)
     initial = evidence["initial_blocked_stream"]
     final = evidence["final_ready_stream"]
     assert set(initial) == {
