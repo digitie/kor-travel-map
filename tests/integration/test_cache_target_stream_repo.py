@@ -3011,7 +3011,7 @@ async def test_terminal_material_compaction_drains_items_and_serves_typed_410(
             material_id=material_id,
             external_system=system,
             material_order=index,
-            item_count=1,
+            item_count=2,
             merkle_root=root,
         )
         await _seed_snapshot_receipt(
@@ -3032,8 +3032,11 @@ async def test_terminal_material_compaction_drains_items_and_serves_typed_410(
             text(
                 "INSERT INTO ops.poi_cache_target_snapshot_material_items ("
                 "material_id, row_number, target_key, state, "
-                "source_generation, source_payload_fingerprint) VALUES ("
-                "CAST(:material_id AS uuid), 1, 'kept', 'active', 1, :fingerprint)"
+                "source_generation, source_payload_fingerprint) VALUES "
+                "(CAST(:material_id AS uuid), 1, 'kept-1', 'active', 1, "
+                ":fingerprint), "
+                "(CAST(:material_id AS uuid), 2, 'kept-2', 'active', 1, "
+                ":fingerprint)"
             ),
             {"material_id": material_id, "fingerprint": "b" * 64},
         )
@@ -3081,7 +3084,7 @@ async def test_terminal_material_compaction_drains_items_and_serves_typed_410(
     assert batch.external_system == system
     # 후보는 하나뿐이다. `fresh`는 보존 기간 안이고 `live`는 미만료 receipt를 갖는다.
     assert batch.compacted_materials == 1
-    assert batch.deleted_items == 1
+    assert batch.deleted_items == 2
     # reconciliation이 참조하는 receipt는 만료돼도 지우지 않는다 — 감사 증거다.
     assert batch.deleted_headers == 0
 
@@ -3132,20 +3135,21 @@ async def test_terminal_material_compaction_drains_items_and_serves_typed_410(
             {"material_id": old_material},
         )
     ).one()
-    assert (int(preserved.item_count), str(preserved.merkle_root)) == (1, root)
+    assert (int(preserved.item_count), str(preserved.merkle_root)) == (2, root)
 
     with pytest.raises(CacheTargetStreamConflict) as compacted_page:
         await get_cache_target_snapshot(
             migrated_session,
             external_system=system,
             limit=10,
-            cursor=snapshot_repo._snapshot_cursor(old_receipt, 0),  # pyright: ignore[reportPrivateUsage]
+            # 첫 page를 받아 두 번째를 요청하는 자연스러운 지점에서 410이 나야 한다.
+            cursor=snapshot_repo._snapshot_cursor(old_receipt, 1),  # pyright: ignore[reportPrivateUsage]
         )
     assert compacted_page.value.code == "snapshot_material_compacted"
     current = compacted_page.value.current
     assert current is not None
     assert current["snapshot_id"] == old_receipt
-    assert current["item_count"] == 1
+    assert current["item_count"] == 2
     assert current["merkle_root"] == root
     assert isinstance(current["compacted_at"], str)
 
