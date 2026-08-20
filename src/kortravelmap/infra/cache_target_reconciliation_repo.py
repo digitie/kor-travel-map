@@ -628,14 +628,16 @@ SELECT request.request_id, request.external_system, request.status,
        request.created_at, request.started_at, request.completed_at,
        stream.consumer_id, stream.restore_epoch AS stream_restore_epoch,
        stream.control_version,
-       snapshot.restore_epoch, snapshot.restore_epoch AS snapshot_restore_epoch,
-       snapshot.high_watermark_relay_order, snapshot.item_count,
-       snapshot.merkle_root
+       material.restore_epoch, material.restore_epoch AS snapshot_restore_epoch,
+       snapshot.high_watermark_relay_order, material.item_count,
+       material.merkle_root
 FROM ops.poi_cache_target_reconciliation_requests AS request
 JOIN ops.poi_cache_target_streams AS stream
   ON stream.external_system = request.external_system
 LEFT JOIN ops.poi_cache_target_snapshots AS snapshot
   ON snapshot.snapshot_id = request.snapshot_id
+LEFT JOIN ops.poi_cache_target_snapshot_materials AS material
+  ON material.material_id = snapshot.material_id
 WHERE request.request_id = CAST(:request_id AS uuid)
 """
 
@@ -651,13 +653,15 @@ LEFT JOIN LATERAL (
   SELECT request.request_id, request.status AS reconciliation_status,
          request.phase_version,
          snapshot.snapshot_id,
-         snapshot.restore_epoch AS snapshot_restore_epoch,
-         snapshot.item_count, snapshot.merkle_root,
+         material.restore_epoch AS snapshot_restore_epoch,
+         material.item_count, material.merkle_root,
          snapshot.high_watermark_relay_order,
          request.created_at AS reconciliation_created_at
   FROM ops.poi_cache_target_reconciliation_requests AS request
   LEFT JOIN ops.poi_cache_target_snapshots AS snapshot
     ON snapshot.snapshot_id = request.snapshot_id
+  LEFT JOIN ops.poi_cache_target_snapshot_materials AS material
+    ON material.material_id = snapshot.material_id
   WHERE request.external_system = stream.external_system
     AND request.status IN ('preparing', 'running')
   ORDER BY request.created_at DESC, request.request_id DESC
@@ -685,9 +689,11 @@ LEFT JOIN ops.poi_cache_target_outbox_events AS event
 LEFT JOIN ops.poi_cache_target_outbox_deliveries AS delivery
   ON delivery.event_id = event.event_id
 LEFT JOIN LATERAL (
-  SELECT fixed.snapshot_id, fixed.item_count, fixed.merkle_root,
+  SELECT fixed.snapshot_id, fixed_material.item_count, fixed_material.merkle_root,
          fixed.high_watermark_relay_order, fixed.created_at
   FROM ops.poi_cache_target_snapshots AS fixed
+  JOIN ops.poi_cache_target_snapshot_materials AS fixed_material
+    ON fixed_material.material_id = fixed.material_id
   WHERE fixed.external_system = stream.external_system
   ORDER BY fixed.created_at DESC, fixed.snapshot_id DESC
   LIMIT 1
@@ -707,7 +713,7 @@ _GET_RECONCILIATION_BY_COMMAND_SQL = """
 SELECT request.request_id, request.external_system, request.status,
        request.phase_version, request.snapshot_id,
        request.expected_merkle_root, request.actual_merkle_root, request.error_code,
-       snapshot.restore_epoch, snapshot.item_count,
+       material.restore_epoch, material.item_count,
        stream.control_version,
        request.created_at, request.started_at, request.completed_at
 FROM ops.poi_cache_target_reconciliation_requests AS request
@@ -715,6 +721,8 @@ JOIN ops.poi_cache_target_streams AS stream
   ON stream.external_system = request.external_system
 LEFT JOIN ops.poi_cache_target_snapshots AS snapshot
   ON snapshot.snapshot_id = request.snapshot_id
+LEFT JOIN ops.poi_cache_target_snapshot_materials AS material
+  ON material.material_id = snapshot.material_id
 WHERE request.command_id = :command_id
 """
 
@@ -800,13 +808,15 @@ SELECT request.request_id, request.external_system, request.status,
        request.phase_version, request.snapshot_id, request.expected_merkle_root,
        request.actual_merkle_root, request.error_code,
        request.created_at, request.started_at, request.completed_at,
-       snapshot.restore_epoch, snapshot.item_count,
+       material.restore_epoch, material.item_count,
        stream.control_version
 FROM ops.poi_cache_target_reconciliation_requests AS request
 JOIN ops.poi_cache_target_streams AS stream
   ON stream.external_system = request.external_system
 LEFT JOIN ops.poi_cache_target_snapshots AS snapshot
   ON snapshot.snapshot_id = request.snapshot_id
+LEFT JOIN ops.poi_cache_target_snapshot_materials AS material
+  ON material.material_id = snapshot.material_id
 WHERE request.request_id = CAST(:request_id AS uuid)
 FOR UPDATE OF request
 """
