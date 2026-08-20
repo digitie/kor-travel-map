@@ -329,10 +329,11 @@ async def main() -> int:
                     """
                     INSERT INTO ops.poi_cache_target_snapshot_materials (
                       material_id, external_system, restore_epoch,
-                      material_high_watermark_relay_order, item_count,
+                      material_high_watermark_relay_order,
+                      safe_high_watermark_relay_order, item_count,
                       merkle_root, materialized_at
                     ) VALUES (
-                      '44444444-4444-4444-8444-444444444444', :stream, 1, 5, 2,
+                      '44444444-4444-4444-8444-444444444444', :stream, 1, 5, 7, 2,
                       repeat('ab', 32), now()
                     )
                     """
@@ -347,17 +348,18 @@ async def main() -> int:
             """
             INSERT INTO ops.poi_cache_target_snapshot_materials (
               material_id, external_system, restore_epoch,
-              material_high_watermark_relay_order, item_count,
+              material_high_watermark_relay_order,
+              safe_high_watermark_relay_order, item_count,
               merkle_root, materialized_at
             ) VALUES (
-              '55555555-5555-4555-8555-555555555555', 'rehearsal:41s', 1, 5, 2,
+              '55555555-5555-4555-8555-555555555555', 'rehearsal:41s', 1, 5, 7, 2,
               repeat('ab', 32), now()
             )
             """,
             "uq_cache_target_snapshot_materials_live_identity",
         )
 
-        print("\n== 10) 복합 FK가 receipt 사본 drift를 막는가 ==")
+        print("\n== 10) 복합 FK가 receipt의 external_system 사본 drift를 막는가 ==")
         # receipt fence를 먼저 끈다 — 켜 둔 채 시험하면 trigger가 막고 FK는 한 번도
         # 평가되지 않는데, 결과만 보면 FK가 막은 것처럼 읽힌다.
         async with db.begin() as conn:

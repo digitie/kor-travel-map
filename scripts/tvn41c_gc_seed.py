@@ -79,13 +79,12 @@ def main() -> int:
                 """,
                 (system, f"{tag}-consumer"),
             )
-            material_order = 0
             for snapshot_index in range(snapshots):
                 kind, expires_expression = _classify(snapshot_index)
                 snapshot_id = str(uuid.uuid4())
                 # `0230`: receipt마다 자기 material을 만든다. 같은 identity를 두 번
                 # 주면 살아 있는 material은 identity마다 하나라는 partial unique에
-                # 걸리므로 `material_order`를 receipt마다 벌린다.
+                # 걸리므로 material watermark를 `snapshot_index`로 벌린다.
                 material_id = str(uuid.uuid4())
                 cur.execute(
                     """
@@ -101,13 +100,12 @@ def main() -> int:
                     (
                         material_id,
                         system,
-                        material_order,
-                        material_order,
+                        snapshot_index,
+                        snapshot_index,
                         items,
                         _fingerprint(f"root:{snapshot_id}"),
                     ),
                 )
-                material_order += 1
                 cur.execute(
                     f"""
                     INSERT INTO ops.poi_cache_target_snapshots (
