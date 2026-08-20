@@ -59,6 +59,11 @@ async function canonicalKmaScope(
   return scopes[0];
 }
 
+// T-C7-LIVE-SERIAL의 exact-scope 잠금을 **의도적으로 잡지 않는다**. 이 spec은 read-only
+// 이고 단언 대상이 서버의 거부 semantics(다른 operation_key/scope는 거부된다)라
+// membership_fingerprint나 cursor 상태에 의존하지 않는다. scope 행 자체는 migration
+// `0224`가 선언한 것이라 write spec 실행 중에도 사라지지 않는다. 잠금을 잡으면 75분짜리
+// write spec 뒤에 줄만 서고 얻는 것이 없다.
 test.describe("C7 KMA exact-triple API preflight (read-only, live)", () => {
   test.describe.configure({ mode: "serial", retries: 0 });
 
