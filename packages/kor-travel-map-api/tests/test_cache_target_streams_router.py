@@ -12,7 +12,10 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
-from kortravelmap.infra import cache_target_event_cursor
+from kortravelmap.infra import (
+    cache_target_event_cursor,
+    snapshot_build_budget_seconds,
+)
 from kortravelmap.infra.cache_target_stream_repo import CacheTargetStreamConflict
 from pydantic import ValidationError
 
@@ -2463,15 +2466,17 @@ def test_service_snapshot_rolls_back_route_owned_transaction_on_error() -> None:
     ("code", "expected_code"),
     [
         ("snapshot_barrier_timeout", "SNAPSHOT_BARRIER_TIMEOUT"),
-        ("snapshot_build_timeout", "SNAPSHOT_BUILD_TIMEOUT"),
         ("snapshot_busy", "SNAPSHOT_BUSY"),
         ("snapshot_ttl_too_short", "SNAPSHOT_TTL_TOO_SHORT"),
+        ("stream_busy", "STREAM_BUSY"),
     ],
 )
 def test_service_snapshot_unavailable_is_retryable_without_waiting(
     code: str,
     expected_code: str,
 ) -> None:
+    """barrier/lock을 못 잡은 실패는 아무것도 태우지 않았으므로 곧바로 다시 와도 된다."""
+
     service = _FakeCacheTargetService()
     service.snapshot_error = CacheTargetStreamConflict(
         code,
@@ -2490,6 +2495,34 @@ def test_service_snapshot_unavailable_is_retryable_without_waiting(
     assert response.json()["code"] == expected_code
     assert session.commit_calls == 0
     assert session.rollback_calls == 1
+
+
+@pytest.mark.unit
+def test_service_snapshot_build_timeout_waits_out_the_whole_budget() -> None:
+    """예산을 통째로 태운 실패는 1초 뒤 재시도를 지시하면 안 된다.
+
+    재시도가 즉시 advisory lock을 다시 잡고 같은 예산을 또 태우므로, 그 stream은
+    barrier를 놓지 않는 100% duty cycle로 물린다. 그동안 writer는 계속 밀린다.
+    """
+
+    service = _FakeCacheTargetService()
+    service.snapshot_error = CacheTargetStreamConflict(
+        "snapshot_build_timeout",
+        "snapshot materialization 누적 제한 시간이 초과되었습니다.",
+    )
+    session = _FakeSession()
+    client = _client(service, session=session)
+
+    response = client.get(
+        f"/v1/service/cache-target-snapshots/{EXTERNAL_SYSTEM}",
+        headers=_service_headers(),
+    )
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "SNAPSHOT_BUILD_TIMEOUT"
+    retry_after = int(response.headers["retry-after"])
+    assert retry_after == int(snapshot_build_budget_seconds())
+    assert retry_after > 1
 
 
 @pytest.mark.unit
