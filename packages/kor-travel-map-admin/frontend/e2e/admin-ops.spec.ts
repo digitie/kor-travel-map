@@ -721,15 +721,19 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByLabel("system log search")).toBeVisible();
     await expect(page.getByLabel("system log level")).toBeVisible();
     await expect(page.getByLabel("system log source")).toBeVisible();
+    const systemLogTable = page.getByRole("table", { name: "system log 목록" });
+    await expect(systemLogTable.getByRole("row").nth(1)).toBeVisible();
     for (const column of ["생성", "레벨", "소스", "이벤트", "메시지", "요청"]) {
       await expect(
-        page.getByRole("columnheader", { name: column }),
+        systemLogTable.getByRole("columnheader", { name: column }),
       ).toBeVisible();
     }
     await page.getByRole("tab", { name: "API call logs" }).click();
     await expect(page.getByLabel("api log method")).toBeVisible();
     await expect(page.getByLabel("api log path")).toBeVisible();
     await expect(page.getByLabel("api log min status")).toBeVisible();
+    const apiLogTable = page.getByRole("table", { name: "API call log 목록" });
+    await expect(apiLogTable.getByRole("row").nth(1)).toBeVisible();
     for (const column of [
       "생성",
       "방식",
@@ -740,7 +744,7 @@ test.describe("admin/ops pages", () => {
       "오류",
     ]) {
       await expect(
-        page.getByRole("columnheader", { name: column }),
+        apiLogTable.getByRole("columnheader", { name: column }),
       ).toBeVisible();
     }
   });
