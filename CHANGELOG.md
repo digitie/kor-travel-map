@@ -5,6 +5,22 @@
 
 ## [Unreleased]
 
+### TVN-C05 — provider catalog migration을 자연키로 옮긴다 (2026-08-21)
+
+`0230_tvn_c05_krforest_datasets`가 `provider_dataset_id` 70~74를 SQL에 적어 뒀다. 그 컬럼은
+`Identity(always=True)` 대리키이고 정본 identity는 `(provider, dataset_key)`다. 번호는
+환경마다 다르며 실제로 달라서, prod 배포가 이 migration에서 중단됐다(ADR-096).
+
+- **CHANGED (DB)**: `0230`은 dataset을 identity sequence가 매긴 번호로 넣고, operation·scope는
+  자연키 JOIN으로 그 번호를 되찾는다. 충돌 판정도 `ON CONFLICT (provider, dataset_key)`다.
+  적재 뒤 dataset·operation·scope 존재, 기존 dataset의 계약 일치, operation `is_enabled`를
+  확인하고 어긋나면 중단한다.
+- **CHANGED (DB)**: 대리키 sequence 보정이 되감지 않고(`GREATEST(max(id), last_value)`)
+  dataset INSERT보다 **먼저** 돈다.
+- **BREAKING (운영 관측)**: `provider_dataset_id`는 **환경 지역값이다.** 이 migration이
+  적용된 DB에서 C05 5종의 번호는 baseline seed의 70~74와 다를 수 있다(prod: 104~108).
+  환경 간에 이 값을 비교하거나 인용하지 않는다.
+
 ### T-VN-41S — cache-target snapshot을 material과 receipt로 가른다 (2026-08-20)
 
 `ops.poi_cache_target_snapshots` 한 표가 **무엇을 고정했는가**(material)와 **누가 언제

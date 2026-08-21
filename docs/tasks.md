@@ -508,6 +508,8 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 
 ### T-VN-C05-CATALOG-KEY — `0230`이 대리키를 계약으로 적었다 (2026-08-21)
 
+> 규칙은 [ADR-096](adr/096-catalog-identity-is-the-natural-key.md)이 정본이다.
+
 - [ ] **`0230_tvn_c05_krforest_datasets`를 자연키 기준으로 고쳐 머지한다.**
 
   `0229`+`0230`+`0231` 묶음 배포가 `0230`에서 멈췄다.
