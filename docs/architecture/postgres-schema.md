@@ -588,8 +588,11 @@ squash(2026-08-14) 이후 baseline과 bridge, T-VN-40 migration만 있다.
 - `0202_tvn40_curation_receipts.py`부터 `0225_tvn40c_physical_removal.py`까지 —
   bridge 뒤에 이어지는 T-VN-40 단일 체인이다. 그 뒤에 이미 적용된
   `0229_tvn40b_source_rule_action`, `0230_tvn_c05_krforest_datasets`,
-  `0231_tvn41s_snapshot_material`, `0232_tvn37d_notice_empty_range`가 순서대로
-  이어지며 현재 head는 `0232_tvn37d_notice_empty_range`다.
+  `0231_tvn41s_snapshot_material`, `0232_tvn37d_notice_empty_range`,
+  `0226_m01_manual_feature_create`, `0227_m02_feature_provenance`,
+  `0228_m03_manual_curation`, `0230_m04_feature_request_queue`,
+  `0231_m05_manual_provider_dedup`, `0232_m05_reconciliation_delivery`가
+  dependency graph 순서로 이어지며 현재 head는 `0232_m05_reconciliation_delivery`다.
 
 `0001~0104` 체인 109개는 `alembic/legacy_versions/`의 실행되지 않는 아카이브다
 ([README](../../alembic/legacy_versions/README.md)). **`versions/`로 되돌리지 마라** —
