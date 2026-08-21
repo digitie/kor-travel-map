@@ -125,11 +125,21 @@ async def c05_alembic_config(pg_container: object) -> AsyncIterator[Config]:
         await _execute(raw_dsn, f'DROP DATABASE IF EXISTS "{_GATE_DB}" WITH (FORCE)')
 
 
-async def _upgrade(cfg: Config, revision: str) -> None:
+# upgrade 대상은 리터럴 상수로만 넘긴다 — ``test_alembic_squash_boundary``의
+# revision scanner는 인자로 받은 이름을 정적으로 풀 수 없어 "dynamic/unresolved"로
+# 막는다(0200 이전 archive 실행 차단). 두 helper로 나눠 두면 scanner가 각각을 읽는다.
+async def _upgrade_before_c05(cfg: Config) -> None:
     from tests.integration._tvn34_migration_bootstrap import alembic_schema_owner_role
 
     with alembic_schema_owner_role():
-        await asyncio.to_thread(command.upgrade, cfg, revision)
+        await asyncio.to_thread(command.upgrade, cfg, _BEFORE_C05)
+
+
+async def _upgrade_c05(cfg: Config) -> None:
+    from tests.integration._tvn34_migration_bootstrap import alembic_schema_owner_role
+
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(command.upgrade, cfg, _C05)
 
 
 async def _stage_before_c05(cfg: Config) -> str:
@@ -145,7 +155,7 @@ async def _stage_before_c05(cfg: Config) -> str:
     admin_dsn = cfg.get_main_option("sqlalchemy.url")
     assert admin_dsn is not None
     cfg.set_main_option("sqlalchemy.url", await bootstrapped_migrator_dsn(admin_dsn))
-    await _upgrade(cfg, _BEFORE_C05)
+    await _upgrade_before_c05(cfg)
     return admin_dsn
 
 
@@ -227,7 +237,7 @@ async def test_c05_catalog_binds_by_natural_key_when_surrogate_id_is_taken(
     await _execute(admin_dsn, _MAKE_PROD_SHAPE_SQL)
     await _assert_prod_shape(admin_dsn)
 
-    await _upgrade(cfg, _C05)
+    await _upgrade_c05(cfg)
 
     dataset_ids = await _c05_dataset_ids(admin_dsn)
     assert set(dataset_ids) == {key for key, _ in _C05_DATASETS}
@@ -298,7 +308,7 @@ async def test_c05_catalog_migration_is_idempotent_on_seeded_db(
         "(SELECT count(*) FROM provider_sync.provider_dataset_operation_scopes)",
     )
 
-    await _upgrade(cfg, _C05)
+    await _upgrade_c05(cfg)
 
     assert await _c05_dataset_ids(admin_dsn) == before_ids
     after_counts = await _fetchval(
@@ -336,7 +346,7 @@ async def test_c05_catalog_migration_does_not_rewind_the_identity_sequence(
         f"(sequence={before}, max={max_id})"
     )
 
-    await _upgrade(cfg, _C05)
+    await _upgrade_c05(cfg)
 
     after = await _fetchval(
         admin_dsn,
@@ -368,4 +378,4 @@ async def test_c05_catalog_migration_refuses_a_conflicting_contract(
     )
 
     with pytest.raises(DBAPIError, match="계약이 선언과 다르다"):
-        await _upgrade(cfg, _C05)
+        await _upgrade_c05(cfg)
