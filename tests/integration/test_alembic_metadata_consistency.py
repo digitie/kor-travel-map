@@ -36,7 +36,7 @@ pytestmark = pytest.mark.integration
 #: `alembic upgrade head`가 착지해야 하는 revision. 리터럴을 여러 곳에 박으면
 #: migration마다 흩어진 자리를 모두 고쳐야 하고, 한 곳을 놓치면 그 단언만 조용히
 #: 옛 head를 지킨다. 한 줄로 모은다.
-_EXPECTED_HEAD = "0230_m04_feature_request_queue"
+_EXPECTED_HEAD = "0232_m05_reconciliation_delivery"
 
 _GATE_DB = "alembic_metadata_gate"
 
@@ -364,7 +364,7 @@ async def test_alembic_check_detects_incomplete_manual_feature_table(
     await _admin_execute(
         admin_dsn,
         "UPDATE public.alembic_version "
-        "SET version_num = '0230_m04_feature_request_queue'",
+        f"SET version_num = '{_EXPECTED_HEAD}'",
     )
 
     with pytest.raises(
@@ -475,7 +475,7 @@ async def test_0226_backfills_only_a_verified_legacy_claim(
 
     await bootstrap_tvn_m01_role_phase(admin_dsn)
     with alembic_schema_owner_role():
-        await asyncio.to_thread(command.upgrade, cfg, "head")
+        await asyncio.to_thread(command.upgrade, cfg, "0226_m01_manual_feature_create")
 
     assert await _admin_fetchval(
         admin_dsn,
@@ -531,7 +531,9 @@ async def test_existing_0104_bridge_upgrades_to_tvn40_head_without_baseline_repl
     from tests.integration._tvn34_migration_bootstrap import (
         alembic_schema_owner_role,
         bootstrap_tvn_m01_role_phase,
+        bootstrap_tvn_m05_pre_role_phase,
         bootstrapped_migrator_dsn,
+        repair_tvn_m05_role_phase,
     )
 
     cfg = gate_alembic_config
@@ -546,7 +548,11 @@ async def test_existing_0104_bridge_upgrades_to_tvn40_head_without_baseline_repl
         await asyncio.to_thread(command.upgrade, cfg, "0225_tvn40c_physical_removal")
     await bootstrap_tvn_m01_role_phase(admin_dsn)
     with alembic_schema_owner_role():
+        await asyncio.to_thread(command.upgrade, cfg, "0230_m04_feature_request_queue")
+    await bootstrap_tvn_m05_pre_role_phase(admin_dsn)
+    with alembic_schema_owner_role():
         await asyncio.to_thread(command.upgrade, cfg, "head")
+    await repair_tvn_m05_role_phase(admin_dsn)
 
     assert (
         await _admin_fetchval(

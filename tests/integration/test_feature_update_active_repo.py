@@ -23,7 +23,6 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from alembic import command
 from kortravelmap.infra.advisory_lock import advisory_lock_key
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 from kortravelmap.infra.feature_update_active_repo import (
@@ -43,6 +42,8 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
 pytestmark = pytest.mark.integration
+
+_ROOT = Path(__file__).resolve().parents[2]
 
 _PROVIDER = "python-kma-api"
 _DATASET = "kma_short_forecast"
@@ -141,14 +142,6 @@ def _scope(member: ImportJobDatasetTarget) -> dict[str, object]:
     }
 
 
-def _upgrade_head(dsn: str) -> None:
-    root = Path(__file__).resolve().parents[2]
-    config = Config(str(root / "alembic.ini"))
-    config.set_main_option("script_location", str(root / "alembic"))
-    config.set_main_option("sqlalchemy.url", dsn)
-    command.upgrade(config, "head")
-
-
 async def _create_isolated_migrated_engine(
     pg_container: Any,
 ) -> tuple[str, AsyncEngine]:
@@ -174,13 +167,12 @@ async def _create_isolated_migrated_engine(
     # 여기서만 다른 경로로 올리면 경합을 재는 대상 schema가 배포와 달라지므로,
     # conftest·다른 자기-DB 테스트가 쓰는 공유 helper를 그대로 쓴다.
     from tests.integration._tvn34_migration_bootstrap import (
-        alembic_schema_owner_role,
-        bootstrapped_migrator_dsn,
+        upgrade_head_with_tvn_m01_phase,
     )
 
-    migrator_dsn = await bootstrapped_migrator_dsn(target_dsn)
-    with alembic_schema_owner_role():
-        await asyncio.to_thread(_upgrade_head, migrator_dsn)
+    await upgrade_head_with_tvn_m01_phase(
+        Config(str(_ROOT / "alembic.ini")), target_dsn
+    )
     # 테스트 본문은 계속 컨테이너 admin 자격으로 붙는다 — 검증 대상은 ACL이 아니라
     # active-scope 경합이고, migration이 남긴 소유권과 무관하게 읽고 써야 한다.
     return target_dsn, make_async_engine(target_dsn)

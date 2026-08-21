@@ -71,6 +71,21 @@ prod 덤프 사본(features 1,008,852까지 완전 일치)에서 `0225→0229→
 2026-08-21 한 배포로 prod에 올라갔다(prod head = `0232_tvn37d_notice_empty_range`).
 상세는 이 문서 최상단 배포 항목에 있다.
 
+## 2026-08-21 — M05 이후 통합 migration CI fixture 정합화
+
+M01~M05 배포 choreography를 반영해 기존 PostGIS 통합 fixture의 shared-database 순서 결합을
+제거했다. Alembic test는 전용 database에서 실행하고, T-VN34/T-VN34C provider 초기 생성은
+직접 executor role 전환 대신 deployable Dagster runtime의 inherited executor 권한을 쓴다.
+M01 role이 같은 cluster의 다른 database에만 남은 정상 재시작도 bootstrap이 legacy base sweep을
+완료하며, 이 database가 0226 이후 partial 상태인 경우는 여전히 중단한다. 표적 integration은
+24 passed 및 21 passed·6 skipped다.
+
+### 다음 한 작업
+
+이 test-only 보정을 최신 `origin/main`에 다시 rebase·push하고 Map CI를 확인한다. 그 뒤 CI
+green과 N150 격리 mutating browser E2E가 모두 확인되기 전에는 M05 activation receipt와 Hallmark
+작업을 시작하지 않는다.
+
 ## 2026-08-21 — M05 contract receipt와 fresh bootstrap 보정
 
 Map service/admin OpenAPI의 M05 변경을 PinVi가 이미 vendor한 exact bytes와 재결박해 contract

@@ -138,6 +138,18 @@ C05는 sequence가 매긴 **104~108**을 받았고 73번 선점자는 자식 0�
 103→108로 전진만 했다. `0229`가 `curated` 35행을 `candidate`로 정규화하므로 미해결이던
 admin `/v1/admin/curated-source-rules` 500도 이 배포로 풀릴 전망이다.
 
+## 2026-08-21 — M05 이후 기존 PostGIS migration fixture 격리
+
+M01~M05 role choreography가 적용된 뒤에도 기존 통합 테스트가 shared default DB의 head와
+partial bootstrap을 섞어 사용해 CI에서 순서 의존적으로 실패했다. Alembic fixture는 UUID 전용
+database를 만들고 제거하며, legacy M01 backfill은 정확히 `0226`까지만 검증하도록 경계를
+명확히 했다. T-VN34/T-VN34C provider 초기 생성은 executor group을 직접 `SET ROLE`하지 않고,
+실제 Dagster runtime login의 상속 권한으로 실행한다. 다른 DB에만 존재하는 M01 role marker는
+fresh legacy database의 bootstrap을 막지 않되, 이 database가 `0226` 이후인데 relation marker가
+없으면 계속 fail-closed한다.
+
+표적 PostGIS 묶음은 24 passed, executor/feature-update 묶음은 21 passed·6 skipped로 확인했다.
+
 ## 2026-08-21 — M05 paired service contract와 fresh bootstrap 정합화
 
 M05 service surface가 바뀐 뒤 Map의 `openapi-diff-v1` baseline과 pending consumer receipt가 이전

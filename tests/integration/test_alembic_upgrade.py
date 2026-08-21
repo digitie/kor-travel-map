@@ -702,19 +702,44 @@ async def pg_engine_with_migrations(pg_container: object) -> object:
     ``pg_engine``의 schema/extension 직접 생성 fixture를 우회 — alembic가
     혼자 만들어내는지 확인하기 위함.
     """
+    from uuid import uuid4
+
+    from sqlalchemy import text
+    from sqlalchemy.engine import make_url
+
     from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 
     raw_dsn = pg_container.get_connection_url()  # type: ignore[attr-defined]
     async_dsn = normalize_async_dsn(raw_dsn)
+    database_name = f"alembic_upgrade_{uuid4().hex}"
+    database_dsn = make_url(async_dsn).set(database=database_name).render_as_string(
+        hide_password=False
+    )
 
-    # alembic은 본인이 schema/extension 생성하므로 pg_engine의 setup은 건너뛴다.
-    await _run_alembic_upgrade(async_dsn)
-
-    engine = make_async_engine(async_dsn)
+    admin_engine = make_async_engine(async_dsn, pool_size=1)
     try:
+        async with admin_engine.connect() as connection:
+            autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
+            await autocommit.execute(text(f'CREATE DATABASE "{database_name}"'))
+    finally:
+        await admin_engine.dispose()
+
+    engine = None
+    try:
+        # alembic은 본인이 schema/extension 생성하므로 pg_engine의 setup은 건너뛴다.
+        await _run_alembic_upgrade(database_dsn)
+        engine = make_async_engine(database_dsn)
         yield engine
     finally:
-        await engine.dispose()
+        if engine is not None:
+            await engine.dispose()
+        admin_engine = make_async_engine(async_dsn, pool_size=1)
+        try:
+            async with admin_engine.connect() as connection:
+                autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
+                await autocommit.execute(text(f'DROP DATABASE "{database_name}" WITH (FORCE)'))
+        finally:
+            await admin_engine.dispose()
 
 
 async def test_alembic_creates_4_schemas(pg_engine_with_migrations: AsyncEngine) -> None:

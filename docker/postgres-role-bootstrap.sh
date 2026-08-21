@@ -106,8 +106,11 @@ if [ "$bootstrap_phase" = "legacy" ]; then
   case "$m01_relation_marker" in
     true\|true) m01_repair_after_legacy=true ;;
     false\|false)
-      # 0226 preflight가 role provisioning 뒤에 실패한 경우 relation marker는
-      # 없지만 M01 graph는 남는다. 0225에서만 M01 phase를 재실행해 복구한다.
+      # Role은 PostgreSQL cluster-wide지만 relation marker는 DB별이다. 그래서
+      # 다른 DB가 이미 M01을 쓴 shared cluster에서 새 legacy DB를 bootstrap할 수
+      # 있다. 이 DB가 0225라면 M01 preflight 실패 재시도이므로 M01 phase로
+      # 승격하고, M01 이후 revision인데 relation이 없다면 실제 partial DDL로
+      # fail-closed한다. 그 밖의 legacy revision은 base sweep을 계속한다.
       m01_role_marker="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc "
         SELECT EXISTS (
           SELECT 1 FROM pg_catalog.pg_roles
@@ -123,12 +126,19 @@ if [ "$bootstrap_phase" = "legacy" ]; then
         t)
           m01_revision="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc \
             'SELECT version_num FROM public.alembic_version')"
-          if [ "$m01_revision" = "0225_tvn40c_physical_removal" ]; then
-            bootstrap_phase="m01"
-          else
-            echo "M01 role marker is incompatible with an absent relation marker" >&2
-            exit 1
-          fi
+          case "$m01_revision" in
+            0225_tvn40c_physical_removal)
+              bootstrap_phase="m01"
+              ;;
+            0226_m01_manual_feature_create|0227_m02_feature_provenance|\
+            0228_m03_manual_curation|0230_m04_feature_request_queue|\
+            0231_m05_manual_provider_dedup|0232_m05_reconciliation_delivery)
+              echo "M01 relation marker is absent after an M01/M05 revision" >&2
+              exit 1
+              ;;
+            *)
+              ;;
+          esac
           ;;
         *)
           echo "M01 role marker is incompatible with an absent relation marker" >&2
