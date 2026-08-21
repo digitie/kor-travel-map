@@ -1,5 +1,14 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-21 (codex) — T-VN-40 완료 항목 archive 정리
+
+완료된 T-VN-40B/C·인수와 C7 evidence task를 `tasks-done.md`로 이관해 `tasks.md`에는 열린
+작업만 남겼다. `origin/main`의 migration head는 `0232`이며, draft #1029는 M01~M05의
+`0226`~`0235`를 그 위에 직렬로 둔다.
+
+**다음 한 작업**: 문서 PR을 병합한 뒤 Map #1029와 PinVi M05 PR을 최신 main에 rebase하고,
+각 CI·격리 live E2E 근거를 다시 대조한다.
+
 ## 2026-08-21 — `0229`~`0232` 묶음 prod 배포 완료, admin 500 해소
 
 | 축 | 배포 전 | 배포 후 |

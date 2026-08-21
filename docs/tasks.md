@@ -28,25 +28,13 @@ barrier로 직렬화한다.
   - **배리어**: [ ] `T-VN-FINAL-REBUILD`(주요 개발 완료 후 파괴적 재구축 — 사용자 결정 2026-08-20)
   - [ ] `T-FE-MOCK-FLAKE`(`/v1/ops/logs`)
   - [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2` → `T-VN-41C` receipt 승격
-- **Lane M — 수동 Feature 생성 (2026-08-18 결정, T-VN-40 인수 뒤)**
+- **Lane M — 수동 Feature 생성 (2026-08-18 결정)**
   - [~] `T-VN-M01`(admin Feature 생성 API foundation 병합, `0226` DB/ACL/route 잔여) → [ ] `T-VN-M02`(origin 보존·불변)
   - [ ] `T-VN-M03`(curated 동시 생성) ∥ [ ] `T-VN-M04`(PinVi 요청 큐 — cross-repo)
   - [ ] `T-VN-M05`(provider 발행 시 중복 판정 — 자동 병합 금지)
 - **Lane C — 사문화 정리·미구현 dataset (다른 lane과 무관, 아무 때나)**
-- **Wave 2 barrier 이후**
-  - Lane A: [x] `T-VN-37D`(notice empty range 표현 — ADR-095, migration 0232)
-  - 32~38 join barrier 뒤 Lane B: `T-VN-40C`는 2026-08-20 prod 적용까지 완료했다.
-    **`T-VN-40B`도 2026-08-21 배포로 prod 적용까지 완료했다** — `0229`가 prod에 올라가
-    `curated_source_rules` 53행이 전부 `candidate`(`curated` 0행)이고 admin rule
-    조회(`GET /v1/admin/curated-source-rules`)는 200이다. 그 전까지는 미적용 탓에 500이었다.
-    - 기반 구현 #974, 40A write fence #994, identity mapping #996, 40B candidate 전환,
-      ③ sanctioned live/soak, ④ exact receipt, 40C 물리 삭제와 prod `0225` 적용까지
-      완료했다. 상세 이력은 [`tasks-done.md`](tasks-done.md)에 이관했다.
-      **`T-VN-40B`는 2026-08-20 종결을 한 번 되돌렸다가**(사용자 지시, 그 시점 prod 미적용)
-      2026-08-21 배포로 최종 완료했다 — [`tasks-done.md`](tasks-done.md) 참조.
-    - 인수 ③·④ 중 분리했던 `T-C7-SCOPE-REGISTRY`·`T-C7-LIVE-SERIAL`과 C7 browser
-      evidence·mock manifest는 PR #1038에서 닫혀 [`tasks-done.md`](tasks-done.md)로 이관했다.
-  - 최종 단일 cutover: [ ] `T-VN-39`
+- **최종 cutover**
+  - [ ] `T-VN-39`
 - **보류/외부 추적**
   - [ ] `T-VN-H27` — #819 HAProxy WebSocket tunnel timeout(**보류: 운영자 환경 필요**,
     사용자 지시 2026-07-29). 프록시는 **OPNsense 라우터의 HAProxy**이고 저장소에 config가 없다
@@ -81,11 +69,10 @@ barrier로 직렬화한다.
   (AGENTS.md), 그 아래 설계적 우수성 > 확장성 > 성능 > 불필요한 코드 반복(래퍼류) 금지.
   **prod 환경 보전·호환성·기존 문서 계약·최소 수정은 비제약** — 필요 시 DB 스키마·문서
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
-- migration 정본: 단일 head 유지(2026-08-20 `origin/main` 기준
-  `0229_tvn40b_source_rule_action`; T-VN-40C와 T-VN-40B는 **착지·prod 적용 완료**,
-  #1029가 `0226`(M01)·`0227`(M02)·`0228`(M03)을 한 PR에 쥐고 있으며,
-  C05 catalog는 이 PR의 `0230_tvn_c05_krforest_datasets`로 `0229` 뒤에 연결한다.
-  41S 후속은 그 다음 revision을 예약한다.
+- migration 정본: 단일 head 유지. `origin/main`은
+  `0232_tvn37d_notice_empty_range`까지이며, draft #1029는 그 위에
+  `0226`(M01)→`0227`(M02)→`0228`(M03)→`0233`(M04)→`0234`·`0235`(M05)를 직렬로
+  연결한다.
   prod 적용 head는 배포 직전 live DB에서 다시 확인한다. 후속 migration 소유자는
   PR 직전 단일 head를 재확인한 뒤 번호를 배정한다. 두 lane의 migration-bearing PR은 번호 예약부터
   머지까지 직렬화한다. forward migration 뒤에는 수용 조건이나 실패 복구가 명시적으로 요구하지 않는
@@ -127,9 +114,7 @@ barrier로 직렬화한다.
   완전성 검사가 새 write route를 미등록 상태로 둘 수 없게 한다. 미래 H22B reclassification
   command도 생성 시점부터 같은 actor-scoped ledger 계약을 등록해야 하므로 종전의 H22B
   선행 barrier는 없다.
-  Wave 2는 T-VN-31A~C freeze가 모두 머지되기 전에 시작하지 않는다.
-  T-VN-40은 양 lane의 T-VN-32~38 하위 task가 모두 끝난 join barrier 뒤에 시작하며,
-  최종 T-VN-39는 T-VN-32~38·40의 모든 하위 task가 끝난 뒤에만 시작한다.
+  Wave 2 join barrier는 완료됐으며, 최종 `T-VN-39`만 남았다.
 - **OpenAPI 계약 변경 규율(2026-07-29 개정)**: admin/user OpenAPI를 바꾸는 task는
   두 spec을 재생성하고 실제 소비자가 핀한 Map commit에서 vendored 스냅샷을 다시 추출해
   `contract-pin-consistency`를 통과시킨다. 소비자가 읽지 않는 파생 digest manifest는 만들지
@@ -502,15 +487,7 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 
 > 다른 lane과 barrier를 공유하지 않는다. 아무 때나 착수할 수 있다.
 
-### T-VN-40 후속에서 분리한 C7 인수 잔여
-
-> T-VN-40B/C와 인수 ③~⑤는 2026-08-20에 모두 완료되어 [`tasks-done.md`](tasks-done.md)로
-> 이관했다. 아래는 그 완료와 독립적으로 남은 검증·운영 task만 둔다.
-
-- `T-FE-MOCK-MANIFEST`는 PR #1038에서 완료했다. checkpoint A 5회 실측 결과 groups와
-  expected-failures를 비우고, 인벤토리 285 및 baseline `5c647f69…`를 고정했으며
-  `expected-failures=0`·인벤토리 일치를 확인했다. 남은 blocker는 아래
-  `T-FE-MOCK-FLAKE` 하나다.
+### C7 후속 검증 잔여
 
 - [ ] **T-FE-MOCK-FLAKE** — `e2e/admin-ops.spec.ts::admin/ops pages › /v1/ops/logs` 간헐 실패
 
@@ -519,12 +496,9 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   보인다. n150 5회 실행 중 2회 실패 — 부하가 높을 때 재현된다. mocked config가
   `retries: process.env.CI ? 1 : 0`이라 **로컬은 재시도가 없어** 느린 렌더가 곧 실패가 된다.
 
-  이 spec은 T-C7-BROWSER-EVIDENCE 이식이 건드리지 않았고 mocked checkpoint는 CI 잡이
+  이 spec은 완료된 C7 browser evidence 이식이 건드리지 않았고 mocked checkpoint는 CI 잡이
   아니라 수동 게이트다 — 즉 **기존 flake**다. 표/행이 도착한 뒤 header를 단언하도록
   고쳐야 하며, 재시도로 덮지 않는다.
-- `T-C7-SCOPE-REGISTRY`와 `T-C7-LIVE-SERIAL`은 PR #1038에서 완료했다. scope 선언
-  주체·조회 표면을 `integration-map.md` §3.7과 ADR-088 결과에 정본화했고,
-  `external_system:c7-e2e` live write 3종에는 cross-worker `mkdir` 잠금을 결선했다.
 
 ## Lane B 상세 — b1 PinVi 결합·후속
 

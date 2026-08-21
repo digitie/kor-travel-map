@@ -3,6 +3,15 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-08-21 — T-VN-40·C7 완료 잔재를 진행 백로그에서 이관
+
+- [x] `T-VN-40A`·mapping·40B·40C와 인수 ①~⑤의 완료 근거는 이 파일의 2026-08-19~21
+  엔트리에 모두 보존했다. 진행 백로그에 중복돼 있던 Wave 2 완료 서술은 제거해, `tasks.md`에는
+  열린 `T-VN-39`와 Lane M/41 작업만 남겼다.
+- [x] `T-C7-BROWSER-EVIDENCE`·`T-C7-SCOPE-REGISTRY`·`T-C7-LIVE-SERIAL`·
+  `T-FE-MOCK-MANIFEST`의 완료 근거도 아래 2026-08-21 정리 엔트리가 정본이다. 남은
+  `T-FE-MOCK-FLAKE`만 진행 백로그에서 추적한다.
+
 ## 2026-08-21 — `0229`~`0232` prod 배포로 T-VN-40B·T-VN-C05-CATALOG-KEY 종결
 
 - [x] **`T-VN-40B` — source rule `curated` action 퇴역. prod 적용까지 완료.**
