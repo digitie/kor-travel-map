@@ -58,10 +58,13 @@ cluster 전체에 남는다. 그 bootstrap이 M01/M04/M05의 post-legacy members
 해제한 뒤 공유 migrated DB를 쓰는 다음 lane test가 실행되어, CI에서 procedure grant·runtime
 role 검증이 연쇄 실패했다. M01/M04/M05 lane별 fixture가 완료된 M05 head에서 role graph만
 멱등적으로 복구하게 하고, pristine `0233` choreography bootstrap과 post-head restore 경로를
-분리했다. 정확한 C05 → M01/M04/M05 순서 표적 integration은 `18 passed`다.
+분리했다. 적대적 role 리뷰의 P1을 반영해 운영 bootstrap과 동일하게 금지된 실행자 간
+membership을 `REVOKE`하고, role 속성·membership option·중첩을 정확히 확인하는 단언으로
+즉시 중단하게 정규화했다. 정확한 C05 → M01/M04/M05 순서 표적 integration은 `18 passed`다.
 
 같은 CI의 dedup EXPLAIN은 `source_entities` 3,200행 중 provider/dataset 하나가 정확히 20%를
-고르는 fixture에서 기본 planner의 정상 Seq Scan을 회귀로 오판했다. forced-index gate는
+고르는 fixture에서 기본 planner의 정상 Seq Scan을 회귀로 오판했다. 이 20% 선택성은 seed
+관례가 아니라 실행 시 단언으로 고정했다. forced-index gate는
 provider/dataset index 호환성을 그대로 검증하고, 기본 planner gate는 나머지 고선택성 대량
 relation의 index path만 강제하도록 분리했다. 표적 dedup EXPLAIN은 `1 passed`다.
 

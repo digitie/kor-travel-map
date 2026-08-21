@@ -444,6 +444,111 @@ async def bootstrap_tvn_m01_role_phase(async_dsn: str) -> None:
                 "TO ktm_manual_feature_procedure_owner",
             ):
                 await connection.execute(text(statement))
+            await connection.execute(
+                text(
+                    """
+                    DO $m01_role_assert$
+                    BEGIN
+                        IF EXISTS (
+                            SELECT 1
+                            FROM pg_catalog.pg_roles
+                            WHERE rolname IN (
+                                'ktm_manual_feature_procedure_owner',
+                                'ktm_manual_feature_admin_executor',
+                                'ktm_feature_create_provider_executor',
+                                'ktm_feature_request_procedure_owner',
+                                'ktm_feature_request_service_executor',
+                                'ktm_feature_request_admin_executor'
+                            ) AND (
+                                rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb
+                                OR rolcreaterole OR rolbypassrls OR rolreplication
+                            )
+                        ) THEN
+                            RAISE EXCEPTION 'M01 NOLOGIN role has an unsafe attribute';
+                        END IF;
+                        IF (
+                            SELECT count(*)
+                            FROM pg_catalog.pg_auth_members AS membership
+                            WHERE membership.roleid IN (
+                                'ktm_manual_feature_procedure_owner'::regrole,
+                                'ktm_manual_feature_admin_executor'::regrole,
+                                'ktm_feature_create_provider_executor'::regrole,
+                                'ktm_feature_request_procedure_owner'::regrole,
+                                'ktm_feature_request_service_executor'::regrole,
+                                'ktm_feature_request_admin_executor'::regrole
+                            )
+                        ) <> 6 OR EXISTS (
+                            SELECT 1
+                            FROM pg_catalog.pg_auth_members AS membership
+                            JOIN pg_catalog.pg_roles AS granted
+                                ON granted.oid = membership.roleid
+                            JOIN pg_catalog.pg_roles AS member
+                                ON member.oid = membership.member
+                            WHERE granted.rolname IN (
+                                'ktm_manual_feature_procedure_owner',
+                                'ktm_manual_feature_admin_executor',
+                                'ktm_feature_create_provider_executor',
+                                'ktm_feature_request_procedure_owner',
+                                'ktm_feature_request_service_executor',
+                                'ktm_feature_request_admin_executor'
+                            ) AND NOT (
+                                (granted.rolname = 'ktm_manual_feature_procedure_owner'
+                                 AND member.rolname = 'ktm_feature_schema_owner'
+                                 AND membership.admin_option IS FALSE
+                                 AND membership.inherit_option IS FALSE
+                                 AND membership.set_option IS TRUE)
+                                OR (granted.rolname = 'ktm_manual_feature_admin_executor'
+                                    AND member.rolname = 'ktm_feature_api_runtime'
+                                    AND membership.admin_option IS FALSE
+                                    AND membership.inherit_option IS TRUE
+                                    AND membership.set_option IS FALSE)
+                                OR (granted.rolname = 'ktm_feature_create_provider_executor'
+                                    AND member.rolname = 'ktm_feature_dagster_runtime'
+                                    AND membership.admin_option IS FALSE
+                                    AND membership.inherit_option IS TRUE
+                                    AND membership.set_option IS FALSE)
+                                OR (granted.rolname = 'ktm_feature_request_procedure_owner'
+                                    AND member.rolname = 'ktm_feature_schema_owner'
+                                    AND membership.admin_option IS FALSE
+                                    AND membership.inherit_option IS FALSE
+                                    AND membership.set_option IS TRUE)
+                                OR (granted.rolname = 'ktm_feature_request_service_executor'
+                                    AND member.rolname = 'ktm_feature_api_runtime'
+                                    AND membership.admin_option IS FALSE
+                                    AND membership.inherit_option IS TRUE
+                                    AND membership.set_option IS FALSE)
+                                OR (granted.rolname = 'ktm_feature_request_admin_executor'
+                                    AND member.rolname = 'ktm_feature_api_runtime'
+                                    AND membership.admin_option IS FALSE
+                                    AND membership.inherit_option IS TRUE
+                                    AND membership.set_option IS FALSE)
+                            )
+                        ) THEN
+                            RAISE EXCEPTION
+                                'M01 procedure owner/executor membership is unsafe';
+                        END IF;
+                        IF EXISTS (
+                            SELECT 1
+                            FROM pg_catalog.pg_auth_members AS membership
+                            JOIN pg_catalog.pg_roles AS member
+                                ON member.oid = membership.member
+                            WHERE member.rolname IN (
+                                'ktm_manual_feature_procedure_owner',
+                                'ktm_manual_feature_admin_executor',
+                                'ktm_feature_create_provider_executor',
+                                'ktm_feature_request_procedure_owner',
+                                'ktm_feature_request_service_executor',
+                                'ktm_feature_request_admin_executor'
+                            )
+                        ) THEN
+                            RAISE EXCEPTION
+                                'M01 role must not inherit any application privilege role';
+                        END IF;
+                    END
+                    $m01_role_assert$;
+                    """
+                )
+            )
     finally:
         await engine.dispose()
 
@@ -507,8 +612,96 @@ async def _apply_tvn_m05_role_graph(connection: AsyncConnection) -> None:
         "TO ktm_feature_api_runtime WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
         "GRANT ktm_feature_reference_reconciliation_service_executor "
         "TO ktm_feature_api_runtime WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
+        "REVOKE ktm_manual_provider_dedup_detector_executor "
+        "FROM ktm_feature_api_runtime",
+        "REVOKE ktm_manual_provider_dedup_admin_executor, "
+        "ktm_feature_reference_reconciliation_service_executor "
+        "FROM ktm_feature_dagster_runtime",
     ):
         await connection.execute(text(statement))
+    await connection.execute(
+        text(
+            """
+            DO $m05_role_assert$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1
+                    FROM pg_catalog.pg_roles
+                    WHERE rolname IN (
+                        'ktm_manual_provider_dedup_procedure_owner',
+                        'ktm_manual_provider_dedup_detector_executor',
+                        'ktm_manual_provider_dedup_admin_executor',
+                        'ktm_feature_reference_reconciliation_service_executor'
+                    ) AND (
+                        rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb
+                        OR rolcreaterole OR rolbypassrls OR rolreplication
+                    )
+                ) THEN
+                    RAISE EXCEPTION 'M05 NOLOGIN role has an unsafe attribute';
+                END IF;
+                IF (
+                    SELECT count(*)
+                    FROM pg_catalog.pg_auth_members AS membership
+                    WHERE membership.roleid IN (
+                        'ktm_manual_provider_dedup_procedure_owner'::regrole,
+                        'ktm_manual_provider_dedup_detector_executor'::regrole,
+                        'ktm_manual_provider_dedup_admin_executor'::regrole,
+                        'ktm_feature_reference_reconciliation_service_executor'::regrole
+                    )
+                ) <> 4 OR EXISTS (
+                    SELECT 1
+                    FROM pg_catalog.pg_auth_members AS membership
+                    JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid
+                    JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
+                    WHERE granted.rolname IN (
+                        'ktm_manual_provider_dedup_procedure_owner',
+                        'ktm_manual_provider_dedup_detector_executor',
+                        'ktm_manual_provider_dedup_admin_executor',
+                        'ktm_feature_reference_reconciliation_service_executor'
+                    ) AND NOT (
+                        (granted.rolname = 'ktm_manual_provider_dedup_procedure_owner'
+                         AND member.rolname = 'ktm_feature_schema_owner'
+                         AND membership.admin_option IS FALSE
+                         AND membership.inherit_option IS FALSE
+                         AND membership.set_option IS TRUE)
+                        OR (granted.rolname = 'ktm_manual_provider_dedup_detector_executor'
+                            AND member.rolname = 'ktm_feature_dagster_runtime'
+                            AND membership.admin_option IS FALSE
+                            AND membership.inherit_option IS TRUE
+                            AND membership.set_option IS FALSE)
+                        OR (granted.rolname = 'ktm_manual_provider_dedup_admin_executor'
+                            AND member.rolname = 'ktm_feature_api_runtime'
+                            AND membership.admin_option IS FALSE
+                            AND membership.inherit_option IS TRUE
+                            AND membership.set_option IS FALSE)
+                        OR (granted.rolname =
+                                'ktm_feature_reference_reconciliation_service_executor'
+                            AND member.rolname = 'ktm_feature_api_runtime'
+                            AND membership.admin_option IS FALSE
+                            AND membership.inherit_option IS TRUE
+                            AND membership.set_option IS FALSE)
+                    )
+                ) THEN
+                    RAISE EXCEPTION 'M05 procedure owner/executor membership is unsafe';
+                END IF;
+                IF EXISTS (
+                    SELECT 1
+                    FROM pg_catalog.pg_auth_members AS membership
+                    JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
+                    WHERE member.rolname IN (
+                        'ktm_manual_provider_dedup_procedure_owner',
+                        'ktm_manual_provider_dedup_detector_executor',
+                        'ktm_manual_provider_dedup_admin_executor',
+                        'ktm_feature_reference_reconciliation_service_executor'
+                    )
+                ) THEN
+                    RAISE EXCEPTION 'M05 role must not inherit any application privilege role';
+                END IF;
+            END
+            $m05_role_assert$;
+            """
+        )
+    )
 
 
 async def bootstrap_tvn_m05_pre_role_phase(async_dsn: str) -> None:

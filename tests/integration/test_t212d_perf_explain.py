@@ -1330,6 +1330,33 @@ async def test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible(
         "provider_datasets dimension grew beyond the H50 small-table Seq Scan exception: "
         f"count={provider_dataset_count}"
     )
+    scoped_source_entities, perf_source_entities = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT
+                    count(*) FILTER (
+                        WHERE pd.provider = :provider
+                          AND pd.dataset_key = :dataset_key
+                    ),
+                    count(*)
+                FROM provider_sync.source_entities AS se
+                JOIN provider_sync.provider_datasets AS pd
+                  ON pd.provider_dataset_id = se.provider_dataset_id
+                WHERE se.source_entity_key LIKE 'perf:se:%'
+                """
+            ),
+            dedup_params,
+        )
+    ).one()
+    assert perf_source_entities > 0, (
+        "perf fixture source_entities가 비어 있어 선택성을 검증할 수 없다"
+    )
+    assert scoped_source_entities * 5 == perf_source_entities, (
+        "source_entities Seq Scan 예외는 perf fixture의 정확히 20% provider/dataset "
+        f"선택성에만 적용된다: scoped={scoped_source_entities}, "
+        f"total={perf_source_entities}"
+    )
     dedup_refresh = await _explain_json(
         migrated_session,
         dedup_refresh_repo._LIST_DEDUP_FEATURES_SQL,

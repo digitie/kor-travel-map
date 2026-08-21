@@ -14,10 +14,13 @@
 C05 legacy migration test가 별도 database에서 M01/M04/M05 membership을 해제하면 PostgreSQL
 cluster 전역 role graph가 바뀌어, 뒤따르는 shared migrated DB lane test가 순서 의존적으로
 실패했다. 완료 head의 role graph만 다시 확정하는 lane fixture를 두고 M05 pristine-0233
-bootstrap과 restore를 분리했다. C05 → M01/M04/M05 표적 integration은 `18 passed`다.
+bootstrap과 restore를 분리했다. 금지된 실행자 간 membership revoke와 role 속성·membership
+option·중첩을 정확히 확인하는 단언으로 fixture가 즉시 중단하게 했다. C05 → M01/M04/M05 표적
+integration은 `18 passed`다.
 
 provider/dataset 하나가 `source_entities` fixture의 20%를 선택하는 dedup default EXPLAIN은
-PostgreSQL 비용 경계에서 정상 Seq Scan일 수 있다. forced-index gate로 해당 index 호환성은
+PostgreSQL 비용 경계에서 정상 Seq Scan일 수 있다. 이 선택성은 실행 시 단언으로 검증한다.
+forced-index gate로 해당 index 호환성은
 그대로 유지하고, default gate는 나머지 고선택성 대량 relation의 index path를 검증한다.
 표적 dedup EXPLAIN은 `1 passed`다.
 
