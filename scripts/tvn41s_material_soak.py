@@ -319,7 +319,7 @@ async def main() -> int:
                     # ADMITTED + 1은 상한 아래라 아무것도 거부되지 않고, 그런데도 그 아래
                     # 단언들이 ADMITTED를 기대해 통과처럼 보이지 않고 엉뚱하게 실패한다.
                     "lo": ADMITTED + 1,
-                    "hi": _CEILING,
+                    "hi": _CEILING + 1,
                 },
             )
             # identity를 바꿔 재사용을 막는다 — 재사용하면 admission을 타지 않고
