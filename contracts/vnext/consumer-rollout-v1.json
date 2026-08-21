@@ -176,7 +176,7 @@
         "verification": [
           "PinVi user/service vendor bytes are exact",
           "PinVi canonical curation importer has no legacy admin snapshot consumer",
-          "paired Map/PinVi n150 canonical snapshot live acceptance passed"
+          "paired Map/PinVi n150 canonical snapshot API live acceptance passed"
         ]
       }
     },

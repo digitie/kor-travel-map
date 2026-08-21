@@ -25,9 +25,15 @@ user/service vendor bytes는 각각 `489b05d3…`·`e1152a05…`·`697a08c4…`�
 - 격리 Pinvi DB에는 canonical plan 1건·POI 1건·완료 receipt 2건·legacy source plan 0건이
   남았다. 운영 DB에는 쓰지 않았으며, 이 증거는 API-level isolated acceptance다.
 
-이에 `contracts/vnext/consumer-rollout-v1.json`의 T-VN-40 receipt를 `complete`로
-승격하고, exact artifact hash를 갱신했다. T-VN-40C의 별도 물리 삭제 gate는 이 receipt와
-분리된 후속 작업으로 유지한다.
+세부 fixture 식별자·응답 상태·격리 DB postcondition·정리 결과는
+`contracts/vnext/tvn40-live-acceptance-v1.json`에 secret-free로 봉인했다. 별도로 실행한
+T-VN-34C UI runner는 `tvn36-direct-state-cutover`에서 browser fetch `503`으로
+`1 passed / 1 failed`에 그쳤다. 이 runner는 TVN40 canonical import/refresh gate가 아니므로
+TVN40 receipt의 성공 근거로 세지 않았고, 실패 상태와 run digest만 같은 증거 파일에 남겼다.
+
+이에 `contracts/vnext/consumer-rollout-v1.json`의 T-VN-40 receipt를 API-level paired
+acceptance 범위에서 `complete`로 승격하고, exact artifact hash를 갱신했다. T-VN-40C의
+PinVi legacy column 물리 삭제 gate는 이 receipt와 분리된 후속 작업으로 유지한다.
 
 ## 2026-08-21 — T-FE-MOCK-FLAKE 표 준비 단언 보강
 

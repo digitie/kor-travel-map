@@ -231,7 +231,9 @@ branch가 receipt를 `pending`으로 되돌리고 세 sha를 재핀해 뒀다.
 
 **절차 (PinVi repo)**
 
-1. `MAP_SHA=<40C 머지 커밋 40자>`를 확정한다.
+1. `MAP_SHA=<40C 머지 커밋 40자>`를 확정한다. receipt의 Map/PinVi source SHA가
+   현재 checkout의 branch/tag에 없더라도 설치기가 `origin`에서 exact SHA를 fetch하므로,
+   해당 SHA가 원격 object 조회로 재현 가능한지 먼저 확인한다.
 2. 스냅샷 교체 — Map의 `packages/kor-travel-map-api/openapi.user.json`을
    `apps/api/tests/contract/kor-travel-map-openapi-user.json`으로 **byte-for-byte** 복사.
    결과 sha256은 `489b05d3e62e3531233e3e7eb8c97f9ddf92aa1ecf1573b7557a5951e7f6a61b`여야 한다.

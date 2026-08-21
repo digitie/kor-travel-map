@@ -27,7 +27,10 @@ n150 격리 Map/PinVi에서 canonical collection import/refresh 수용을 완료
 plan/POI 생성 및 legacy source plan 0건을 확인했다. 운영 DB 변경은 없었다.
 
 T-VN-40 receipt를 `complete`로 봉인했으며, 현재 PR은 계약 hash·증거 기록만 변경한다.
-T-VN-40C 물리 삭제 gate는 별도 후속 범위다.
+세부 secret-free 증거는 `contracts/vnext/tvn40-live-acceptance-v1.json`에 기록했다.
+별도 T-VN-34C UI runner는 `tvn36-direct-state-cutover` browser fetch `503`으로
+`1 passed / 1 failed`였으며 TVN40 canonical import/refresh 근거로 사용하지 않았다.
+T-VN-40C PinVi legacy column 물리 삭제 gate는 별도 후속 범위다.
 
 ## 2026-08-21 — T-FE-MOCK-FLAKE 진행: 표 준비 대기 보강, live auth 재개 필요
 
