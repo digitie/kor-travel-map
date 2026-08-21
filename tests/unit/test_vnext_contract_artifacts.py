@@ -531,6 +531,7 @@ def test_tvn40_live_acceptance_evidence_is_secret_free_and_scoped() -> None:
     )
     assert re.fullmatch(r"sha256:[0-9a-f]{64}", evidence["map_snapshot"]["etag"])
     assert evidence["map_snapshot"]["first_page_status"] == 200
+    assert evidence["map_snapshot"]["collection_revision_before_cleanup"] == 2
     assert evidence["schema_version"] == 1
     receipt = _load_json("consumer-rollout-v1.json")["tasks"]["T-VN-40"][
         "pinvi_snapshot_receipt"
@@ -584,6 +585,8 @@ def test_tvn40_live_acceptance_evidence_is_secret_free_and_scoped() -> None:
     assert ui_runner["result"] == "blocked"
     assert ui_runner["stage"] == "tvn36-direct-state-cutover"
     assert ui_runner["last_browser_fetch_status"] == 503
+    assert ui_runner["tests_planned"] == ui_runner["tests_observed"] == 2
+    assert ui_runner["tests_passed"] + ui_runner["tests_failed"] == ui_runner["tests_observed"]
     assert ui_runner["tests_passed"] == 1
     assert ui_runner["tests_failed"] == 1
 
