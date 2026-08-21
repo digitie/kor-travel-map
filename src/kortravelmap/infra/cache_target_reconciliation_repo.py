@@ -464,7 +464,10 @@ RETURNING item.material_id, item.row_number
 #: `compaction_drained_at IS NULL`을 조건에 두어 한 번만 찍히게 한다(fence도 같은 것을 막는다).
 _MARK_DRAINED_MATERIALS_SQL = """
 UPDATE ops.poi_cache_target_snapshot_materials AS material
-   SET compaction_drained_at = now()
+   -- `now()`가 아니라 `clock_timestamp()`다. `now()`는 **transaction 시작 시각**이라
+   -- 같은 transaction에서 `clock_timestamp()`로 찍힌 `compacted_at`보다 이를 수 있고,
+   -- 그러면 "배출이 표시보다 앞선다"가 되어 CHECK가 막는다(게이트가 잡았다).
+   SET compaction_drained_at = clock_timestamp()
  WHERE material.external_system = :external_system
    AND material.compacted_at IS NOT NULL
    AND material.compaction_drained_at IS NULL

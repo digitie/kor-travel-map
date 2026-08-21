@@ -87,7 +87,7 @@ BEGIN
       OLD.material_high_watermark_relay_order,
       OLD.safe_high_watermark_relay_order, OLD.item_count,
       OLD.material_bytes, OLD.merkle_root, OLD.materialized_at) THEN
-    RAISE EXCEPTION 'snapshot material is append-only except compaction marks'
+    RAISE EXCEPTION 'snapshot material compaction must not change the material'
       USING ERRCODE = '55000';
   END IF;
 

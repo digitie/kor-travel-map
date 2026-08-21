@@ -6832,7 +6832,9 @@ class PoiCacheTargetSnapshotMaterialRow(Base):
         CheckConstraint(
             "compaction_drained_at IS NULL "
             "OR (compacted_at IS NOT NULL AND compaction_drained_at >= compacted_at)",
-            name="ck_poi_cache_target_snapshot_materials_drained_after_compacted",
+            name=conv(
+                "ck_poi_cache_target_snapshot_materials_drained_after_compacted"
+            ),
         ),
         UniqueConstraint(
             "material_id",
