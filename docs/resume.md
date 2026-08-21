@@ -1,5 +1,26 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-21 — T-FE-MOCK-FLAKE 진행: 표 준비 대기 보강, live auth 재개 필요
+
+PR [#1045](https://github.com/digitie/kor-travel-map/pull/1045)의 `admin-ops.spec.ts`
+`/v1/ops/logs` smoke에 system/API 표별 locator scope, body row 준비 대기, `aria-busy` 해제
+대기를 넣었다. 커밋은 `09d47cf7`과 `d208b76a`이고 draft PR을 원격에 유지 중이다.
+
+- 전문 리뷰어 2명: 최종 누적 diff P0/P1/P2 모두 0건
+- frontend type-check/lint: 통과
+- npm tree / Next-Sharp ABI: 통과
+- Vitest: 354/356 통과; 기존 NTFS Unix mode 테스트 2건 실패
+- n150 mocked checkpoint A: 281/285 통과; 대상 로그 표는 mock backend 응답 부재로
+  `aria-busy=true` timeout, 나머지 3건은 기존 실패 표면
+- n150 live GET-only logs: prod auth setup 401, 2개 본 스펙 미실행
+- GitHub CI 4개(`ci`, `lint`, `frontend`, `openapi`): 모두 green
+
+### 다음 한 작업
+
+최신 n150 운영 자격증명을 확인한 뒤 live GET-only logs 스펙을 재실행한다. credential을
+추측하거나 회전하지 않는다.
+
+## 2026-08-21 (codex) — T-VN-40 완료 항목 archive 정리
 ## 2026-08-21 (codex) — T-VN-40 완료 항목 archive 정리
 
 완료된 T-VN-40B/C·인수와 C7 evidence task를 `tasks-done.md`로 이관해 `tasks.md`에는 열린

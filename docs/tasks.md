@@ -489,7 +489,7 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 
 ### C7 후속 검증 잔여
 
-- [ ] **T-FE-MOCK-FLAKE** — `e2e/admin-ops.spec.ts::admin/ops pages › /v1/ops/logs` 간헐 실패
+- [~] **T-FE-MOCK-FLAKE** — `e2e/admin-ops.spec.ts::admin/ops pages › /v1/ops/logs` 간헐 실패
 
   System logs 표의 첫 columnheader `생성`이 15초 안에 보이지 않는다(`admin-ops.spec.ts:744`).
   앞선 filter control 단언은 모두 통과하므로 표 mount 전에 header를 단언하는 순서 문제로
@@ -499,6 +499,15 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   이 spec은 완료된 C7 browser evidence 이식이 건드리지 않았고 mocked checkpoint는 CI 잡이
   아니라 수동 게이트다 — 즉 **기존 flake**다. 표/행이 도착한 뒤 header를 단언하도록
   고쳐야 하며, 재시도로 덮지 않는다.
+  2026-08-21 PR #1045에서 표별 locator scope와 body row 준비 대기, `aria-busy` 해제 대기를
+  추가했다(`09d47cf7` → `d208b76a`). 전문 리뷰어 2명이 누적 diff를 재검토해 P0/P1/P2
+  0건을 확인했다. n150 mocked checkpoint A는 281/285 passed였고 이 spec은 self-owned
+  mock backend의 응답 부재로 `aria-busy=true`가 15초 유지되어 실패했다. 나머지 3건도
+  기존 실패 표면이다. n150 live GET-only logs 스펙은 현재 local-only 자격증명과 prod
+  credential 불일치로 auth setup 401에서 중단되어, 최신 자격증명 확인 뒤 재개해야 한다.
+- `T-C7-SCOPE-REGISTRY`와 `T-C7-LIVE-SERIAL`은 PR #1038에서 완료했다. scope 선언
+  주체·조회 표면을 `integration-map.md` §3.7과 ADR-088 결과에 정본화했고,
+  `external_system:c7-e2e` live write 3종에는 cross-worker `mkdir` 잠금을 결선했다.
 
 ## Lane B 상세 — b1 PinVi 결합·후속
 
