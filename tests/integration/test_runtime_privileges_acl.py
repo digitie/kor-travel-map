@@ -12,6 +12,8 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kortravelmap.infra import runtime_privileges
+
 pytestmark = pytest.mark.integration
 
 
@@ -108,3 +110,41 @@ async def test_theme_catalog_procedure_stays_executable(
         )
     )
     assert result.scalar_one() is True, "theme catalog procedure까지 막혔다 — plan:28 위반"
+
+
+@pytest.mark.integration
+def test_undeclared_relation_failure_names_the_sanctioned_escape() -> None:
+    """fence가 배포를 막을 때 메시지가 **무엇을 하라**를 말해야 한다.
+
+    예전 문구는 관계 이름만 나열했다. 새벽에 그것만 보면 "코드를 고쳐 재배포한다" 말고는
+    길이 없어 보이고, 하필 위험한 migration 직전이 그 상황이다. 실제 탈출구는 fence를
+    여는 것이 아니라 **관장 밖에 두는 것**이다 — 이 조정기는 세 schema만 훑으므로
+    운영자의 임시·백업 표는 `public`에 두면 애초에 걸리지 않는다.
+
+    이 테스트가 없으면 메시지가 조용히 옛 나열형으로 돌아가도 아무도 모른다.
+    """
+
+    message = runtime_privileges._undeclared_relation_message(  # noqa: SLF001
+        ["ops.tvn36_legacy_freeze_preflight_manifest", "ops.backup_20260821"]
+    )
+
+    # 무엇이 걸렸는지는 그대로 나와야 한다.
+    assert "ops.backup_20260821" in message
+    # 그리고 두 갈래 조치가 모두 있어야 한다.
+    assert "선언 목록" in message, message
+    assert "public" in message, message
+    # env allowlist는 채택하지 않았다 — 그런 길을 암시하면 안 된다.
+    assert "allowlist" not in message.lower(), message
+
+
+@pytest.mark.integration
+def test_reconciler_governs_exactly_three_schemas() -> None:
+    """위 탈출구가 성립하려면 `public`이 관장 밖이어야 한다.
+
+    조정기가 훑는 schema 집합이 넓어지면 "public에 두면 된다"는 안내가 거짓이 된다.
+    그때는 안내와 코드가 함께 바뀌어야 하므로 여기서 함께 묶어 둔다.
+    """
+
+    sql = str(runtime_privileges._APPLICATION_RELATIONS_SQL)  # noqa: SLF001
+    assert "'feature', 'provider_sync', 'ops'" in sql, sql
+    assert "public" not in sql, sql

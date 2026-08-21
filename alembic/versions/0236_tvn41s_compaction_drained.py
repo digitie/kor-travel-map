@@ -125,12 +125,12 @@ _CAPTURE_TRIGGER_MODE_SQL = """
 SELECT tgenabled
 FROM pg_trigger
 WHERE tgrelid = 'ops.poi_cache_target_snapshot_materials'::regclass
-  AND tgname = 'trg_poi_cache_target_snapshot_materials_append_only'
+  AND tgname = 'trg_poi_cache_target_snapshot_materials_compaction_only'
 """
 
 _DISABLE_FENCE_SQL = """
 ALTER TABLE ops.poi_cache_target_snapshot_materials
-    DISABLE TRIGGER trg_poi_cache_target_snapshot_materials_append_only
+    DISABLE TRIGGER trg_poi_cache_target_snapshot_materials_compaction_only
 """
 
 
@@ -153,7 +153,7 @@ def upgrade() -> None:
             "ALTER TABLE ops.poi_cache_target_snapshot_materials "
             f"ENABLE {'ALWAYS ' if before_mode == 'A' else ''}"
             f"{'REPLICA ' if before_mode == 'R' else ''}"
-            "TRIGGER trg_poi_cache_target_snapshot_materials_append_only"
+            "TRIGGER trg_poi_cache_target_snapshot_materials_compaction_only"
         )
 
     after = connection.exec_driver_sql(_CAPTURE_TRIGGER_MODE_SQL).scalar_one()
