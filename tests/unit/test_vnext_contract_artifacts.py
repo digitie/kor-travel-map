@@ -52,11 +52,10 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     "openapi-diff-v1.json": ("e31cb9b97dcee83b80b60013110a4ad11b288ab4d23fe236251a72a789351071"),
     # 2026-08-13 T-VN-36 — receipt가 리베이스로 폐기된 커밋(c1fa5a4d)과 그때의
     # spec sha를 가리키고 있었다. 현재 head로 재핀했다.
-    # 2026-08-21 T-VN-M04 — service queue/admin resolution 계약 변경으로 active receipt를
-    # pending으로 되돌렸다. 새 Map/PinVi paired live 증거 전에는 이전 completion을 재사용하지
-    # 않는다.
+    # 2026-08-21 T-VN-40 — M04 이후 exact vendor bytes와 n150 격리 canonical
+    # import/refresh 수용을 재검증해 receipt를 complete로 승격했다.
     "consumer-rollout-v1.json": (
-        "680e04f753eff55d32bd065d67ba2026fcca849c91c5241e2fac08ba813578ba"
+        "6fe437375193abaa6d4abb841cf206c400262422942cea67a23e5f4d420cd4ad"
     ),
     # T-VN-41S service 계약 변경으로 active receipt가 pending으로 돌아가도, 이전
     # candidate archive·image·Live UI 증거 세트는 detached 이력으로 불변이어야 한다.

@@ -11,6 +11,24 @@
 frontend e2e type-check와 lint가 통과했고, n150에서 대상 두 spec을 읽기 전용 게이트로
 실행해 `7 passed, 1 skipped`를 확인했다. 임시 checkout과 인증 산출물은 실행 후 제거했다.
 
+## 2026-08-21 (codex) — T-VN-40 paired receipt 재봉인
+
+M04 이후 갱신된 Map/PinVi 계약을 다시 대조하고 n150 격리 스택에서 canonical curation
+collection import/refresh를 실행했다. 검증에 사용한 source pair는 Map
+`81835cf9d31df61169bd522fc16437d51d90fc35`·PinVi
+`5f1c0a0a5568c236e32e6f6bd4c14ba23191817b`이며, user/service/full OpenAPI와 PinVi
+user/service vendor bytes는 각각 `489b05d3…`·`e1152a05…`·`697a08c4…`로 일치했다.
+
+- Map detail snapshot 첫 페이지 1건과 동일 ETag 조건부 요청 `304`를 확인했다.
+- PinVi import는 plan 1건·POI 1건을 만들었고, 같은 idempotency key replay는 terminal
+  create receipt를 반환했다. refresh는 `200 not_modified=true`였다.
+- 격리 Pinvi DB에는 canonical plan 1건·POI 1건·완료 receipt 2건·legacy source plan 0건이
+  남았다. 운영 DB에는 쓰지 않았으며, 이 증거는 API-level isolated acceptance다.
+
+이에 `contracts/vnext/consumer-rollout-v1.json`의 T-VN-40 receipt를 `complete`로
+승격하고, exact artifact hash를 갱신했다. T-VN-40C의 별도 물리 삭제 gate는 이 receipt와
+분리된 후속 작업으로 유지한다.
+
 ## 2026-08-21 — T-FE-MOCK-FLAKE 표 준비 단언 보강
 
 PR #1045에서 `admin-ops.spec.ts`의 `/v1/ops/logs` smoke를 표별 accessible name으로
