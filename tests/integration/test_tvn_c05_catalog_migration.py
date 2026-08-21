@@ -621,7 +621,8 @@ def _catalog_assert_sql() -> str:
     root = Path(__file__).resolve().parents[2]  # noqa: ASYNC240 — 순수 경로 연산.
     path = root / "alembic" / "versions" / f"{_C05}.py"
     spec = importlib.util.spec_from_file_location("tvn_c05_under_test", path)
-    assert spec is not None and spec.loader is not None
+    assert spec is not None
+    assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     statement: str = module._CATALOG_ASSERT_SQL  # noqa: SLF001 — 검증 대상 그 자체.
