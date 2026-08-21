@@ -24,7 +24,10 @@ from kortravelmap.infra.domain_command_repo import (
     create_domain_command_claim,
 )
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.usefixtures("tvn_m01_m05_role_graph"),
+]
 
 _API_RUNTIME_PASSWORD = "tvn40-test-only-runtime-password"
 _OPERATION = "admin.feature.create.manual-v1"

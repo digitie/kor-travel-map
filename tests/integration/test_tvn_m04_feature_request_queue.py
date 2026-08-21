@@ -14,7 +14,10 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from kortravelmap.infra.db import make_async_engine
 from kortravelmap.infra.runtime_privileges import reconcile_runtime_privileges
 
-pytestmark = pytest.mark.integration
+pytestmark = [
+    pytest.mark.integration,
+    pytest.mark.usefixtures("tvn_m01_m05_role_graph"),
+]
 
 _RUNTIME_PASSWORD = "tvn40-test-only-runtime-password"
 

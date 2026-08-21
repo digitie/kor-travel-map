@@ -51,6 +51,24 @@ byte 상한 512 MiB도 손봤다. `material_bytes`는 heap이 아니라 leaf 인
 하지 않는 죽은 코드였다. `target_key`가 512자까지 허용돼 같은 item 수에서도 재료량이 16배
 흔들리므로 item 상한만으로는 폭 축을 못 묶는다. 56 MiB(139초)로 조였다.
 
+## 2026-08-21 — M01~M05 cluster-wide role 순서 의존과 dedup planner gate 보정
+
+C05 frozen-legacy migration 검증은 별도 database에서 실행되지만 PostgreSQL role/membership은
+cluster 전체에 남는다. 그 bootstrap이 M01/M04/M05의 post-legacy membership을 의도적으로
+해제한 뒤 공유 migrated DB를 쓰는 다음 lane test가 실행되어, CI에서 procedure grant·runtime
+role 검증이 연쇄 실패했다. M01/M04/M05 lane별 fixture가 완료된 M05 head에서 role graph만
+멱등적으로 복구하게 하고, pristine `0233` choreography bootstrap과 post-head restore 경로를
+분리했다. 정확한 C05 → M01/M04/M05 순서 표적 integration은 `18 passed`다.
+
+같은 CI의 dedup EXPLAIN은 `source_entities` 3,200행 중 provider/dataset 하나가 정확히 20%를
+고르는 fixture에서 기본 planner의 정상 Seq Scan을 회귀로 오판했다. forced-index gate는
+provider/dataset index 호환성을 그대로 검증하고, 기본 planner gate는 나머지 고선택성 대량
+relation의 index path만 강제하도록 분리했다. 표적 dedup EXPLAIN은 `1 passed`다.
+
+로컬 CI 구성 전체 integration은 `1037 passed, 12 skipped`까지 진행했다. NTFS 임시 디렉터리가
+mode `0700`을 보존하지 않아 domain command marker trust test 두 건만 실패했으며, 이는 Linux
+CI와 변경 코드의 실패가 아니다.
+
 ## 2026-08-21 — main `0232` 재베이스 뒤 M04/M05 migration ID 충돌 해소
 
 `origin/main`이 `0232_tvn37d_notice_empty_range`까지 전진한 상태에서 unmerged M04/M05가 동일한

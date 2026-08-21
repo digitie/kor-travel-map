@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 from alembic.config import Config
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncEngine
+    from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 _TVN34_TEST_MIGRATOR_PASSWORD = "tvn34-test-only-migrator-password"
 _TVN40_TEST_RUNTIME_PASSWORD = "tvn40-test-only-runtime-password"
@@ -320,7 +320,7 @@ async def bootstrapped_migrator_dsn(async_dsn: str) -> str:
 
 
 async def bootstrap_tvn_m01_role_phase(async_dsn: str) -> None:
-    """0225 뒤에만 M01 owner/executor graph를 disposable DB에 만든다."""
+    """0225 또는 M01 이후 head에서 M01/M04 role graph를 재확정한다."""
 
     from sqlalchemy import text
 
@@ -332,9 +332,17 @@ async def bootstrap_tvn_m01_role_phase(async_dsn: str) -> None:
             version = await connection.scalar(
                 text("SELECT version_num FROM public.alembic_version")
             )
-            if version != "0225_tvn40c_physical_removal":
+            if version not in {
+                "0225_tvn40c_physical_removal",
+                "0226_m01_manual_feature_create",
+                "0227_m02_feature_provenance",
+                "0228_m03_manual_curation",
+                "0233_m04_feature_request_queue",
+                "0234_m05_manual_provider_dedup",
+                "0235_m05_reconciliation_delivery",
+            }:
                 raise RuntimeError(
-                    "M01 test role phase requires exactly 0225, "
+                    "M01 test role phase requires the M01/M05 graph, "
                     f"not {version!r}"
                 )
             await connection.execute(
@@ -440,6 +448,69 @@ async def bootstrap_tvn_m01_role_phase(async_dsn: str) -> None:
         await engine.dispose()
 
 
+async def _apply_tvn_m05_role_graph(connection: AsyncConnection) -> None:
+    """M05 dedicated role과 membership을 멱등적으로 확정한다."""
+
+    from sqlalchemy import text
+
+    await connection.execute(
+        text(
+            """
+            DO $m05_roles$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_roles
+                    WHERE rolname = 'ktm_manual_provider_dedup_procedure_owner'
+                ) THEN
+                    CREATE ROLE ktm_manual_provider_dedup_procedure_owner NOLOGIN NOINHERIT;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_roles
+                    WHERE rolname = 'ktm_manual_provider_dedup_detector_executor'
+                ) THEN
+                    CREATE ROLE ktm_manual_provider_dedup_detector_executor
+                        NOLOGIN NOINHERIT;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_roles
+                    WHERE rolname = 'ktm_manual_provider_dedup_admin_executor'
+                ) THEN
+                    CREATE ROLE ktm_manual_provider_dedup_admin_executor NOLOGIN NOINHERIT;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_roles
+                    WHERE rolname = 'ktm_feature_reference_reconciliation_service_executor'
+                ) THEN
+                    CREATE ROLE ktm_feature_reference_reconciliation_service_executor
+                        NOLOGIN NOINHERIT;
+                END IF;
+            END
+            $m05_roles$;
+            """
+        )
+    )
+    for statement in (
+        "ALTER ROLE ktm_manual_provider_dedup_procedure_owner NOLOGIN NOINHERIT "
+        "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+        "ALTER ROLE ktm_manual_provider_dedup_detector_executor NOLOGIN NOINHERIT "
+        "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+        "ALTER ROLE ktm_manual_provider_dedup_admin_executor NOLOGIN NOINHERIT "
+        "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+        "ALTER ROLE ktm_feature_reference_reconciliation_service_executor "
+        "NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE "
+        "NOBYPASSRLS NOREPLICATION",
+        "GRANT ktm_manual_provider_dedup_procedure_owner "
+        "TO ktm_feature_schema_owner WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
+        "GRANT ktm_manual_provider_dedup_detector_executor "
+        "TO ktm_feature_dagster_runtime WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
+        "GRANT ktm_manual_provider_dedup_admin_executor "
+        "TO ktm_feature_api_runtime WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
+        "GRANT ktm_feature_reference_reconciliation_service_executor "
+        "TO ktm_feature_api_runtime WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
+    ):
+        await connection.execute(text(statement))
+
+
 async def bootstrap_tvn_m05_pre_role_phase(async_dsn: str) -> None:
     """`0233 → M05 role만 → 0234` 운영 choreography를 disposable DB에 재현한다."""
 
@@ -491,62 +562,30 @@ async def bootstrap_tvn_m05_pre_role_phase(async_dsn: str) -> None:
                     "M05 test role phase requires pristine 0233 boundary, "
                     f"not version={version!r}, roles={role_count}, relations={relation_count}"
                 )
-            await connection.execute(
-                text(
-                    """
-                    DO $m05_roles$
-                    BEGIN
-                        IF NOT EXISTS (
-                            SELECT 1 FROM pg_catalog.pg_roles
-                            WHERE rolname = 'ktm_manual_provider_dedup_procedure_owner'
-                        ) THEN
-                            CREATE ROLE ktm_manual_provider_dedup_procedure_owner NOLOGIN NOINHERIT;
-                        END IF;
-                        IF NOT EXISTS (
-                            SELECT 1 FROM pg_catalog.pg_roles
-                            WHERE rolname = 'ktm_manual_provider_dedup_detector_executor'
-                        ) THEN
-                            CREATE ROLE ktm_manual_provider_dedup_detector_executor
-                                NOLOGIN NOINHERIT;
-                        END IF;
-                        IF NOT EXISTS (
-                            SELECT 1 FROM pg_catalog.pg_roles
-                            WHERE rolname = 'ktm_manual_provider_dedup_admin_executor'
-                        ) THEN
-                            CREATE ROLE ktm_manual_provider_dedup_admin_executor NOLOGIN NOINHERIT;
-                        END IF;
-                        IF NOT EXISTS (
-                            SELECT 1 FROM pg_catalog.pg_roles
-                            WHERE rolname = 'ktm_feature_reference_reconciliation_service_executor'
-                        ) THEN
-                            CREATE ROLE ktm_feature_reference_reconciliation_service_executor
-                                NOLOGIN NOINHERIT;
-                        END IF;
-                    END
-                    $m05_roles$;
-                    """
-                )
+            await _apply_tvn_m05_role_graph(connection)
+    finally:
+        await engine.dispose()
+
+
+async def restore_tvn_m05_role_graph(async_dsn: str) -> None:
+    """완료된 M05 graph에서 cluster-wide role membership만 복구한다."""
+
+    from sqlalchemy import text
+
+    from kortravelmap.infra.db import make_async_engine
+
+    engine = make_async_engine(async_dsn, pool_size=1)
+    try:
+        async with engine.begin() as connection:
+            version = await connection.scalar(
+                text("SELECT version_num FROM public.alembic_version")
             )
-            for statement in (
-                "ALTER ROLE ktm_manual_provider_dedup_procedure_owner NOLOGIN NOINHERIT "
-                "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
-                "ALTER ROLE ktm_manual_provider_dedup_detector_executor NOLOGIN NOINHERIT "
-                "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
-                "ALTER ROLE ktm_manual_provider_dedup_admin_executor NOLOGIN NOINHERIT "
-                "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
-                "ALTER ROLE ktm_feature_reference_reconciliation_service_executor "
-                "NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE "
-                "NOBYPASSRLS NOREPLICATION",
-                "GRANT ktm_manual_provider_dedup_procedure_owner "
-                "TO ktm_feature_schema_owner WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
-                "GRANT ktm_manual_provider_dedup_detector_executor "
-                "TO ktm_feature_dagster_runtime WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
-                "GRANT ktm_manual_provider_dedup_admin_executor "
-                "TO ktm_feature_api_runtime WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
-                "GRANT ktm_feature_reference_reconciliation_service_executor "
-                "TO ktm_feature_api_runtime WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
-            ):
-                await connection.execute(text(statement))
+            if version != "0235_m05_reconciliation_delivery":
+                raise RuntimeError(
+                    "M05 role graph restore requires the completed M05 head, "
+                    f"not {version!r}"
+                )
+            await _apply_tvn_m05_role_graph(connection)
     finally:
         await engine.dispose()
 

@@ -605,7 +605,10 @@ _ENRICHMENT_REVIEW_ACCESS = (
 #   ``source_entities_pkey`` is the canonical PK path for the source_entity_key join.
 # ``provider_datasets``는 이 seed에서 dataset당 한 행인 catalog dimension이다. 기본
 # planner가 이 작은 relation을 Seq Scan하는 것은 회귀가 아니므로 no-Seq-Scan 대상에서
-# 제외한다. 대량 relation의 index path만 역할별로 고정한다.
+# 제외한다. ``source_entities``도 이 전용 fixture에서는 provider/dataset 하나가 정확히
+# 20%를 선택하므로, 기본 planner가 3,200행 relation을 순차 읽는 것이 정상적인 비용
+# 선택일 수 있다. 이 경우에도 강제-index plan으로 provider/dataset index의 호환성은
+# 별도로 고정한다. 나머지 대량 relation은 기본 planner에서도 index path를 강제한다.
 _DEDUP_REFRESH_ACCESS_BY_RELATION = {
     "features": (
         "idx_features_updated_keyset",
@@ -692,6 +695,22 @@ def _assert_dedup_refresh_is_index_compatible(plan: dict[str, Any]) -> None:
         _assert_no_seq_scan_on(plan, relation_name)
     for relation_name, expected in _DEDUP_REFRESH_ACCESS_BY_RELATION.items():
         _assert_relation_uses_index(plan, relation_name, *expected)
+
+
+def _assert_dedup_refresh_default_plan(plan: dict[str, Any]) -> None:
+    """기본 planner가 고선택성 relation을 순차 scan으로 퇴화시키지 않는다.
+
+    ``source_entities``의 provider/dataset 조건은 perf fixture에서 정확히 20%를
+    반환한다. PostgreSQL 버전·통계의 비용 경계에 따라 이 작은 relation은 정상적으로
+    Seq Scan을 고를 수 있으므로, index 유효성은 위의 forced-index gate가 담당한다.
+    """
+
+    for relation_name in _DEDUP_REFRESH_NO_SEQ_SCAN_RELATIONS:
+        if relation_name != "source_entities":
+            _assert_no_seq_scan_on(plan, relation_name)
+    for relation_name, expected in _DEDUP_REFRESH_ACCESS_BY_RELATION.items():
+        if relation_name != "source_entities":
+            _assert_relation_uses_index(plan, relation_name, *expected)
 
 
 async def _walk_dedup_review_ids(
@@ -1325,15 +1344,16 @@ async def test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible(
     _assert_dedup_refresh_is_index_compatible(dedup_refresh)
 
     # H50: forced-index compatibility만 보면 ``enable_seqscan=off``가 숨긴 기본
-    # planner 회귀를 놓친다. 같은 seed·통계에서 default planner도 동일한 semantic
-    # relation/index 조건을 만족해야 한다.
+    # planner 회귀를 놓친다. 단, 이 fixture의 provider/dataset은 source_entities의
+    # 정확히 20%를 고르므로 그 relation의 기본 Seq Scan은 비용상 정상이다. 다른 대량
+    # relation은 기본 planner에서도 index 조건을 만족해야 한다.
     dedup_refresh_default = await _explain_json(
         migrated_session,
         dedup_refresh_repo._LIST_DEDUP_FEATURES_SQL,
         dedup_params,
         force_index=False,
     )
-    _assert_dedup_refresh_is_index_compatible(dedup_refresh_default)
+    _assert_dedup_refresh_default_plan(dedup_refresh_default)
 
     f4_sample = await _explain_json(
         migrated_session,

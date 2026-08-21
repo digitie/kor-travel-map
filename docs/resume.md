@@ -9,6 +9,23 @@
 **다음 한 작업**: 문서 PR을 병합한 뒤 Map #1029와 PinVi M05 PR을 최신 main에 rebase하고,
 각 CI·격리 live E2E 근거를 다시 대조한다.
 
+## 2026-08-21 — M01~M05 role isolation 및 dedup default planner CI 보정
+
+C05 legacy migration test가 별도 database에서 M01/M04/M05 membership을 해제하면 PostgreSQL
+cluster 전역 role graph가 바뀌어, 뒤따르는 shared migrated DB lane test가 순서 의존적으로
+실패했다. 완료 head의 role graph만 다시 확정하는 lane fixture를 두고 M05 pristine-0233
+bootstrap과 restore를 분리했다. C05 → M01/M04/M05 표적 integration은 `18 passed`다.
+
+provider/dataset 하나가 `source_entities` fixture의 20%를 선택하는 dedup default EXPLAIN은
+PostgreSQL 비용 경계에서 정상 Seq Scan일 수 있다. forced-index gate로 해당 index 호환성은
+그대로 유지하고, default gate는 나머지 고선택성 대량 relation의 index path를 검증한다.
+표적 dedup EXPLAIN은 `1 passed`다.
+
+### 다음 한 작업
+
+변경을 최신 `origin/main`에 rebase·push해 draft PR #1029 CI를 다시 확인한다. 모든 CI가
+green이 된 뒤에만 N150 격리 mutating browser E2E를 시작한다.
+
 ## 2026-08-21 — main `0232` 재베이스 뒤 M04/M05 migration graph 재연결
 
 `origin/main`이 `0232_tvn37d_notice_empty_range`까지 전진한 뒤, 아직 머지되지 않은 M04/M05가
