@@ -1013,7 +1013,7 @@ T-216f/g와 PinVi-agent provider 반영 후 T-212d를 다시 실행했다. 전�
 T-VN-41S snapshot은 전체 head/item Python list와 한 번의 무제한 `executemany`를 금지한다. DB 정렬
 cursor를 `yield_per=1,000`으로 읽고 incremental Merkle level stack만 유지한다. 첫 scan은 admission과
 root를 확정하고, 두 번째 scan은 1,000행 INSERT batch와 응답 page만 유지한다. item **500,000**개와
-canonical material **60 MiB**는 서로 독립인 fail-close ceiling이며, **둘 다 build 예산의 절반
+canonical material **56 MiB**는 서로 독립인 fail-close ceiling이며, **둘 다 build 예산의 절반
 안에 끝나도록** 실측으로 정한 값이다(`docs/reports/t-vn-41s-budget-ceiling-2026-08-21.md`). 두 번째 scan의 count/bytes/root가
 다르면 같은 transaction을 rollback한다.
 

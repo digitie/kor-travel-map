@@ -8,8 +8,8 @@
 ### T-VN-41S — snapshot admission 상한을 실측으로 맞추고 writer 무한 대기를 막는다 (2026-08-21)
 
 - **BREAKING (service API)**: `GET /v1/service/cache-target-snapshots/{system}`의 admission
-  상한이 낮아졌다 — item `1,000,000` → **`500,000`**, canonical material `512 MiB` → **`60 MiB`**.
-  두 값 모두 build 예산(300초)의 절반 안에 끝나도록 n150에서 실측해 정했다(500,000 = 118.3초).
+  상한이 낮아졌다 — item `1,000,000` → **`500,000`**, canonical material `512 MiB` → **`56 MiB`**.
+  두 값 모두 build 예산(300초)의 절반 안에 끝나도록 n150에서 배포 예산 그대로 실측해 정했다(500,000 = 123.0초).
   prod의 가장 큰 stream이 179 target이므로 실사용에는 영향이 없다.
   `provider_dataset_id`처럼 환경마다 달라지는 값이 아니라 **계약값**이다.
 - **CHANGED (service API)**: `503 snapshot_build_timeout`의 `Retry-After`가 `1` → **build 예산**

@@ -703,13 +703,13 @@ reuse miss 뒤 system별 미만료·미참조 generic snapshot이 이미 2개면
 가장 오래된 expiry까지 `429 snapshot_capacity_exceeded + Retry-After`로 대기시켜 유효 cursor를 보존하고
 live generic 저장량을 stream cardinality의 2배로 제한한다. request-bound snapshot은 이 count에서 제외한다.
 단일 snapshot은 server cursor 두 번 순회와 incremental Merkle로 process memory를 `O(log N)`에
-가깝게 유지한다. item **500,000**개 또는 canonical material **60 MiB**를 넘으면 header/item 부분
+가깝게 유지한다. item **500,000**개 또는 canonical material **56 MiB**를 넘으면 header/item 부분
 material을 만들지 않고 각각 `413 snapshot_item_limit_exceeded`,
 `413 snapshot_byte_limit_exceeded`로 실패한다.
 
 **두 상한은 모두 시간 방어선이다** — admission이 받아들인 크기는 build 예산의 절반 안에
 끝나야 한다. n150 실측(`docs/reports/t-vn-41s-budget-ceiling-2026-08-21.md`)에서 500,000은
-118.3초로 예산 300초의 39%다. byte 상한이 따로 있는 이유는 `target_key`가 계약상 512자까지
+123.0초로 예산 300초의 41%다. byte 상한이 따로 있는 이유는 `target_key`가 계약상 512자까지
 허용돼 같은 item 수에서도 재료량이 16배 흔들리기 때문이며, 정상 폭(103 B/item) stream에서는
 item 상한이 먼저 걸린다. 두 관계는 CI가 지킨다
 (`test_snapshot_item_limit_fits_the_shipped_build_budget`,

@@ -93,9 +93,8 @@ _SNAPSHOT_BARRIER_LOCK_TIMEOUT = "5s"
 #: `test_snapshot_item_limit_fits_the_shipped_build_budget`이 지킨다.
 #:
 #: 값의 근거는 실측이다(대표성 fixture, n150, 배포 예산):
-#: 250,000 → 59.1초 · 500,000 → **118.3초** · 1,000,000 → 235.7초, 처리량 약 4,225 item/s.
-#: 1,000,000은 조용한 호스트에서 예산의 79%를 쓴다 — 부하 아래에서는 넘친다. 500,000은
-#: 39%로 안전계수 2를 만족한다. 출처: docs/reports/t-vn-41s-budget-ceiling-2026-08-21.md
+#: 500,000 → **123.0초**(배포 예산 그대로 돈 soak, 4,065 item/s). 1,000,000은 예산의
+#: 79%를 써서 여유가 없다. 500,000은 41%로 안전계수 2를 만족한다. 출처: docs/reports/t-vn-41s-budget-ceiling-2026-08-21.md
 _SNAPSHOT_ITEM_LIMIT = 500_000
 #: material 재료 바이트 상한. item 상한과 **같은 성질**(예산 절반 안에 끝난다)을 갖는다.
 #:
@@ -106,11 +105,12 @@ _SNAPSHOT_ITEM_LIMIT = 500_000
 #: 500,000으로 낮춘 뒤로는 ASCII stream에서 아예 발화하지 않는 죽은 코드였다
 #: (계약 최대 폭에서도 500,000 × 683 B = 325.7 MiB < 512 MiB).
 #:
-#: 60 MiB는 실측 439,600 B/s에서 143초로 예산 절반(150초) 안이다. 정상 폭 stream은
-#: 그대로다 — 103 B/item이면 610,000 item에 해당해 item 상한(500,000)이 먼저 걸린다.
+#: 56 MiB는 실측 422,764 B/s에서 139초로 예산 절반(150초) 안이다. 60 MiB는 148.8초로
+#: 게이트에 1.2초만 남아 다음 측정에 뒤집히므로 쓰지 않는다. 정상 폭 stream은 그대로다
+#: — 103 B/item이면 570,000 item에 해당해 item 상한(500,000)이 먼저 걸린다.
 #: 즉 이 상한은 **비정상적으로 넓은 키**만 잡는다.
 #: 근거: docs/reports/t-vn-41s-budget-ceiling-2026-08-21.md
-_SNAPSHOT_MATERIAL_BYTE_LIMIT = 60 * 1024 * 1024
+_SNAPSHOT_MATERIAL_BYTE_LIMIT = 56 * 1024 * 1024
 _SNAPSHOT_STREAM_BATCH_SIZE = 1_000
 _LOWERCASE_HEX = frozenset("0123456789abcdef")
 

@@ -944,14 +944,14 @@ def test_snapshot_cursor_holds_header_share_lock_during_item_read() -> None:
 
 #: build 예산 안에서 상한 크기를 실제로 만들 수 있는지는 **측정으로만** 안다. 이 값은
 #: 대표성 있는 fixture(prod 실측 키 폭 37자·삽입 순서와 정렬 순서 무상관)로 n150에서
-#: 잰 처리량이며, 출처는 `docs/reports/t-vn-41s-budget-ceiling-2026-08-21.md`다.
+#: **배포 예산 그대로** 잰 처리량이며(500,000 item / 123.0초), 출처는 `docs/reports/t-vn-41s-budget-ceiling-2026-08-21.md`다.
 #:
 #: **유도하지 않는다.** `_SNAPSHOT_ITEM_LIMIT`을 `예산 × 처리량 / 안전계수`로 정의하면
 #: 아래 단언이 항등식이 되어 **어떤 예산에서도 통과한다** — 예산을 절반으로 내리는 한 줄
 #: 변경에서도 green이라, 클라이언트가 보는 상한이 조용히 반토막 나도 아무도 모른다.
 #: 상한은 client가 보는 capacity 경계이므로 그 변경은 자동화가 아니라 **사람이 봐야 할
 #: 결정**이어야 한다. 그래서 둘을 독립 리터럴로 두고 이 테스트가 관계만 지킨다.
-_MEASURED_BUILD_ITEMS_PER_SECOND = 4_225
+_MEASURED_BUILD_ITEMS_PER_SECOND = 4_065
 
 #: 안전계수는 repo가 정본이다 — soak도 같은 상수를 읽는다.
 _REQUIRED_BUILD_SAFETY_FACTOR = repo.SNAPSHOT_BUILD_SAFETY_FACTOR
@@ -982,7 +982,7 @@ def test_snapshot_item_limit_fits_the_shipped_build_budget() -> None:
 
 #: leaf 인코딩(`_leaf_material`) 실측 재료 처리량. item 처리량과 별개 축이다 —
 #: `target_key` 폭이 계약상 512자까지 흔들리므로 item 수만으로는 build 시간을 묶지 못한다.
-_MEASURED_BUILD_MATERIAL_BYTES_PER_SECOND = 439_600
+_MEASURED_BUILD_MATERIAL_BYTES_PER_SECOND = 422_764
 
 
 @pytest.mark.unit

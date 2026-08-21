@@ -26,7 +26,7 @@
 ### 다음 한 작업
 
 **T-VN-41S build 예산/상한 결정은 닫혔다** — 예산 300초 유지, item 상한 500,000, 재료 상한
-60 MiB(`docs/reports/t-vn-41s-budget-ceiling-2026-08-21.md`). 같은 조사에서 나온 도달 가능한
+56 MiB(`docs/reports/t-vn-41s-budget-ceiling-2026-08-21.md`). 같은 조사에서 나온 도달 가능한
 장애 둘(writer 무한 대기 → pool 고갈, build timeout의 1초 재시도 → duty-cycle wedge)도 함께
 고쳤다.
 
