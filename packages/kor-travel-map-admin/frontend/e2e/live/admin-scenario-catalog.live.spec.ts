@@ -1,5 +1,6 @@
 import { expect, test } from "@playwright/test";
 
+import type { components } from "../../src/api/types";
 import {
   ADMIN_SURFACES,
   type AdminLiveScenario,
@@ -90,8 +91,29 @@ test.describe("admin live scenario catalog", () => {
 
     await page.getByRole("button", { name: "갱신 요청 생성" }).click();
     const dialog = page.getByRole("dialog", { name: "갱신 요청 생성" });
-    await dialog.getByLabel("provider").first().fill("python-mois-api");
-    await dialog.getByLabel("dataset_key").fill("mois_licenses");
+    const catalog = await page.evaluate(async () => {
+      const response = await fetch("/api/proxy/v1/ops/datasets", {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      return (await response.json()) as components["schemas"]["OpsDatasetsGridResponse"];
+    });
+    const moisRow = catalog.data.items.find(
+      (row) =>
+        row.catalog_state === "canonical" &&
+        row.mutable &&
+        row.catalog?.is_refreshable === true &&
+        row.provider.toLowerCase().includes("mois"),
+    );
+    expect(moisRow, "live canonical MOIS refresh dataset is required").toBeDefined();
+    if (!moisRow) {
+      throw new Error("live canonical MOIS refresh dataset is required");
+    }
+    // T-VN-33/ADR-088: the dialog accepts the canonical provider_dataset_id
+    // selected from /v1/ops/datasets; provider and dataset_key are projections.
+    await dialog
+      .getByLabel("대상 데이터셋")
+      .selectOption(String(moisRow.provider_dataset_id));
 
     await expect
       .poll(

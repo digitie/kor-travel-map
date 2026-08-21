@@ -1,5 +1,16 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-21 — live E2E의 provider/dataset 계약 drift 수정
+
+머지된 T-FE-MOCK-FLAKE 이후 n150 live suite를 확장 실행하면서, `admin/issues` 테스트가
+이미 퇴역한 문자열 `provider`/`dataset_key` 필드를 입력해 `input[type=number]`에 문자열을
+넣는 오류와, 파이프라인 시나리오가 제거된 문자열 provider/dataset 입력을 찾는 오류를
+재현했다. 정본 frontend/API가 사용하는 `provider_dataset_id`와 canonical catalog 선택으로
+두 live 시나리오를 갱신했다. 운영 UI/API 코드는 변경하지 않았다.
+
+frontend e2e type-check와 lint가 통과했고, n150에서 대상 두 spec을 읽기 전용 게이트로
+실행해 `7 passed, 1 skipped`를 확인했다. 임시 checkout과 인증 산출물은 실행 후 제거했다.
+
 ## 2026-08-21 — T-FE-MOCK-FLAKE 표 준비 단언 보강
 
 PR #1045에서 `admin-ops.spec.ts`의 `/v1/ops/logs` smoke를 표별 accessible name으로
