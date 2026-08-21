@@ -78,6 +78,20 @@ _REPLACE_FENCE_SQL = """
 CREATE OR REPLACE FUNCTION ops.reject_snapshot_material_mutation() RETURNS trigger
 LANGUAGE plpgsql AS $reject_snapshot_material_mutation$
 BEGIN
+  -- 검사 **순서가 계약이다**. "표시가 아예 아니다"를 불변성보다 먼저 본다.
+  -- 그래야 `SET item_count = 99`(표시 없이 내용만 바꿈)와
+  -- `SET compacted_at = now(), merkle_root = ...`(표시를 구실로 내용도 바꿈)이
+  -- 서로 다른 이유로 거부되고, 운영자가 어느 규칙에 걸렸는지 알 수 있다.
+  IF NEW.compacted_at IS NULL THEN
+    RAISE EXCEPTION 'snapshot material is append-only except compaction'
+      USING ERRCODE = '55000';
+  END IF;
+
+  IF NEW.compaction_drained_at IS NOT NULL AND NEW.compacted_at IS NULL THEN
+    RAISE EXCEPTION 'snapshot material cannot be drained before it is compacted'
+      USING ERRCODE = '55000';
+  END IF;
+
   IF (NEW.material_id, NEW.external_system, NEW.restore_epoch,
       NEW.material_high_watermark_relay_order,
       NEW.safe_high_watermark_relay_order, NEW.item_count,
@@ -91,6 +105,7 @@ BEGIN
       USING ERRCODE = '55000';
   END IF;
 
+  -- 두 표시는 각각 한 방향이다. 이미 찍힌 값을 바꾸거나 지우는 것을 막는다.
   IF OLD.compacted_at IS NOT NULL
      AND NEW.compacted_at IS DISTINCT FROM OLD.compacted_at THEN
     RAISE EXCEPTION 'snapshot material compaction mark is one-way'
@@ -103,13 +118,10 @@ BEGIN
       USING ERRCODE = '55000';
   END IF;
 
-  IF NEW.compacted_at IS NULL AND NEW.compaction_drained_at IS NOT NULL THEN
-    RAISE EXCEPTION 'snapshot material cannot be drained before it is compacted'
-      USING ERRCODE = '55000';
-  END IF;
-
-  IF NEW.compacted_at IS NULL THEN
-    RAISE EXCEPTION 'snapshot material is append-only except compaction marks'
+  -- 이미 표시된 행에 대한 UPDATE는 **배출 표시일 때만** 허용한다. 그 밖에는
+  -- 예전과 같이 "이미 compaction됐다"로 거부한다.
+  IF OLD.compacted_at IS NOT NULL AND NEW.compaction_drained_at IS NULL THEN
+    RAISE EXCEPTION 'snapshot material is already compacted'
       USING ERRCODE = '55000';
   END IF;
 
