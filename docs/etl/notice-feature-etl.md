@@ -3,20 +3,21 @@
 본 문서는 3개 provider의 짧은 수명 공지성 데이터를 `Feature(kind=notice)` +
 `NoticeDetail`로 통합 적재하는 ETL이다.
 
-> **구현 현황 (2026-07-14)**: 현재 notice Feature를 실제로 emit하는 변환부는
-> **krex(`traffic_notices_to_bundles` → `krex_traffic_notices`)** 와
-> **kma(`weather_alerts_to_notice_bundles` → `kma_weather_alerts`)** 2개뿐이다.
-> `krforest_landslide_forecast_notices`는 **C05D 계획/미구현** 상태로,
-> src/dagster에 변환 함수·dataset이 아직 없다. C03에서 근거 source가 없던
-> `khoa_coastal_notices` 계획은 폐기했다. 해양 지수·관측값을 임의 threshold로
-> notice화하지 않는다.
+> **구현 현황 (2026-08-21)**: notice Feature를 emit하는 변환부는
+> **krex(`traffic_notices_to_bundles` → `krex_traffic_notices`)**,
+> **kma(`weather_alerts_to_notice_bundles` → `kma_weather_alerts`)**,
+> **krforest(`krforest_safety.landslide_forecast_issues_to_bundles` →
+> `krforest_landslide_forecast_issues`, C05D)** 3개다. C05D는 PR #1037로 구현됐고
+> catalog migration `0230`이 2026-08-21 prod에 적용됐다(prod head
+> `0232_tvn37d_notice_empty_range`). C03에서 근거 source가 없던 `khoa_coastal_notices`
+> 계획은 폐기했다. 해양 지수·관측값을 임의 threshold로 notice화하지 않는다.
 
 ## 1. 문서 정보
 
 | 항목 | 값 |
 |------|----|
 | provider | `python-krex-api`, `python-kma-api`, `python-krforest-api` |
-| dataset_key | `krex_traffic_notices`, `kma_weather_alerts` (구현됨) · `krforest_landslide_forecast_notices` (C05D 계획/미구현) |
+| dataset_key | `krex_traffic_notices`, `kma_weather_alerts`, `krforest_landslide_forecast_issues` (셋 다 구현됨) |
 | Feature.kind | `notice` |
 | 상세 테이블 | `feature_notices` |
 | 코드 entrypoint | `kortravelmap.providers.{krex,kma,krforest,khoa}`, `kortravelmap.notices` |
@@ -27,7 +28,7 @@
 |-------------|---------|----------|------|
 | `krex_traffic_notices` | `python-krex-api` | **10분** | 사고/공사/통제 즉시 영향 |
 | `kma_weather_alerts` | `python-kma-api` | **10분** | 특보 발효/해제 짧은 시간 변경 |
-| `krforest_landslide_forecast_notices` _(C05D 계획/미구현)_ | `python-krforest-api` | **30분** | 산사태 발령·해제 |
+| `krforest_landslide_forecast_issues` | `python-krforest-api` | **하루 6회** (`20 1,5,9,13,17,21 * * *`) | 산사태 발령·해제 — 예보 갱신 주기에 맞춘다 |
 
 ## 2.5 카테고리 매핑
 
@@ -154,7 +155,7 @@ krex#8/PR#9, #378) 기준:
 복제하거나, 단일 feature + `payload.affected_areas`로 처리. v2 1차: 후자
 (단일 feature).
 
-### 5.3 krforest_landslide_forecast_notices _(C05D 계획/미구현)_
+### 5.3 krforest_landslide_forecast_issues _(C05D 구현됨)_
 
 authoritative source는 공공데이터포털 `15074798`
 `forecastIssueService/forecastIssueList` 하나다. 산불위험지수는 WeatherValue,
@@ -309,8 +310,10 @@ async def traffic_notice_to_bundle(item, *, fetched_at) -> FeatureBundle:
 async def weather_alert_to_bundle(item, *, fetched_at) -> FeatureBundle:
     ...
 
-# providers/krforest.py  (planned/미구현 — 현재 함수 없음)
-async def safety_notice_to_bundle(item, *, fetched_at) -> FeatureBundle:
+# providers/krforest_safety.py  (구현됨 — dataset_key: krforest_landslide_forecast_issues)
+def landslide_forecast_issues_to_bundles(
+    items: Iterable[LandslideForecastIssueItem], *, fetched_at: datetime
+) -> list[FeatureBundle]:
     ...
 
 # providers/khoa.py  (planned/미구현 — 현재 beaches_to_bundles(place)만 존재)
@@ -337,11 +340,11 @@ def notice_job_specs() -> list[EtlJobSpec]:
             interval_minutes=10, suggested_group_name="features_notice",
             ...
         ),
-        # --- 아래 spec은 C05D planned/미구현 (변환 함수·dataset 미존재) ---
+        # --- C05D (구현됨) ---
         EtlJobSpec(
             provider="python-krforest-api",
-            dataset_key="krforest_landslide_forecast_notices",
-            source_entity_type="landslide_forecast_notice",
+            dataset_key="krforest_landslide_forecast_issues",
+            source_entity_type="landslide_forecast_issue",
             feature_kind=FeatureKind.NOTICE,
             interval_minutes=30, ...
         ),
@@ -371,7 +374,7 @@ def notice_job_specs() -> list[EtlJobSpec]:
 |-------|-------------|------|-------|
 | `notice_krex_traffic` | `krex_traffic_notices` | `*/10 * * * *` | `features_notice` |
 | `notice_kma_weather_alerts` | `kma_weather_alerts` | `*/10 * * * *` | `features_notice` |
-| `notice_krforest_landslide_forecast` _(C05D 계획)_ | `krforest_landslide_forecast_notices` | `*/30 * * * *` | `features_notice` |
+| `feature_notice_krforest_landslide_forecast_issues` | `krforest_landslide_forecast_issues` | `20 1,5,9,13,17,21 * * *` | `features_notice` |
 
 ConcurrencyConfig: provider별 `max_concurrent=1`.
 

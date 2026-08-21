@@ -1021,7 +1021,9 @@ GC 관측은 논리 row count만으로 bloat를 숨기지 않는다. `pg_table_s
 vacuum 이력이 없는 relation은 age 0이 아니라 관측 불능이다. threshold는 초기 운영 guardrail이며
 n150 1M admitted materialization/compaction soak에서 처리량, relation 감소, dead tuple 회수와 실제
 autovacuum cadence를 측정해 조정한다. final receipt/material schema의 hot path와 compaction 후보 SQL은
-`0225+` migration 뒤 natural planner EXPLAIN으로 index scan과 bounded lock set을 검증한다.
+`0231_tvn41s_snapshot_material` 뒤 natural planner EXPLAIN으로 index scan과 bounded lock set을 검증했다
+(`tests/integration/test_tvn41s_snapshot_material_explain.py`). `enable_seqscan=off`는 쓰지 않는다 —
+`disable_cost` 때문에 "Seq Scan 없음" 단언이 반증 불가능해진다.
 
 ## 15. 운영 체크리스트 (Sprint 5 진입 전)
 

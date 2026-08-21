@@ -1,5 +1,40 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-21 — `0229`~`0232` 묶음 prod 배포 완료, admin 500 해소
+
+PR #1042(자연키 C05 catalog)가 CI 8/8로 머지돼 main이 `e47a389f`가 됐고, 그 위에서
+`0229`·`0230`·`0231`·`0232`를 한 배포로 올렸다. prod DB head는
+`0225_tvn40c_physical_removal` → `0232_tvn37d_notice_empty_range`.
+
+리베이스로 main에서 `0232`(T-VN-37D notice empty range, #1041)가 함께 들어왔는데, 그것은
+prod 데이터로 검증된 적이 없었다. notice 표에 `lock_timeout=30s`를 거는 migration이라
+그냥 넘기지 않고, `0231`에 서 있던 리허설 DB에서 이어 돌려 확인한 뒤 배포했다.
+리베이스가 잡아 준 것이 하나 더 있다 — ADR 번호가 겹쳤다(#1041이 095를 가져갔다).
+내 ADR을 096으로 옮겼다.
+
+**배포 실측이 리허설 예측과 한 항목도 어긋나지 않았다.**
+
+| 축 | 결과 |
+|---|---|
+| `curated_source_rules` | 53행 전부 `candidate` (`curated` 35 → 0) |
+| `GET /v1/admin/curated-source-rules` | **500 → 200** (53항목 전부 `candidate`) |
+| C05 `provider_dataset_id` | **104~108** — baseline seed의 70~74와 다르다(환경 지역값) |
+| `provider_dataset_id 73` | `python-datagokr-api/standard_special_streets` 그대로, 자식 0 |
+| identity sequence | 103 → 108 (전진만) |
+| ops relation | 71 → 72, fail-closed ACL 조정 exit 0 |
+| `features` / `source_records` | 1,008,852 / 1,009,164 무손실 |
+
+배포 뒤 문서를 전역으로 훑어 **낡은 서술 31건**을 고쳤다. 이 세션에서 "prod 적용 완료"라는
+거짓 서술을 이미 세 번 발견했기 때문에 손으로만 보지 않았다. 나온 것 중 절반은 내 변경
+밖이었다 — `AGENTS.md`가 "다음 ADR 후보 = ADR-079"라고 적고 있었는데 079는 이미 존재하는
+번호였고(그대로 뒀다면 다음 ADR이 충돌한다), `notice-feature-etl.md`는 C05D를 "계획/미구현"
+으로 두고 코드에 없는 폐기 dataset_key(`krforest_landslide_forecast_notices`)를 6곳에서
+쓰고 있었다. `data-model.md`는 material/receipt 분리를 아직 "`0226+`가 소유할 미래"로
+적고 있었다.
+
+번호·개수처럼 잘 바뀌는 값을 진입 문서에 박아 두면 반드시 낡는다. `AGENTS.md`와
+`README.md`의 ADR 번호 서술은 값을 지우고 `docs/adr/README.md`를 가리키게 바꿨다.
+
 ## 2026-08-21 — prod 배포가 `0230`에서 멈췄다: 대리키를 계약으로 착각한 catalog migration
 
 `0229`+`0230`+`0231` 묶음 배포가 `0230_tvn_c05_krforest_datasets`에서 중단됐다.

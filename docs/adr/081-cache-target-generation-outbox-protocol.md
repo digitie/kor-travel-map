@@ -248,7 +248,7 @@ reconciliation seal도 generic page와 **같은** 재사용 경로를 쓴다. ex
 살아 있는(`compacted_at IS NULL`) material을 찾아 자기 receipt를 붙인다. 재사용 후보에서 "만료됐는가",
 "reconciliation이 참조하는가"를 보지 않는다 — 그 둘은 receipt의 성질이지 material의 성질이 아니다.
 
-**2026-08-20(migration `0231`) 착지**: generic/reconciliation별 독립 receipt가 같은 material을 양방향
+**2026-08-20(migration `0231`) 착지 · 2026-08-21 prod 적용**: generic/reconciliation별 독립 receipt가 같은 material을 양방향
 공유하고 terminal item을 compact하는 정규화 스키마가 들어갔다. `0225` 뒤 `0231`이다.
 `ops.poi_cache_target_snapshot_materials`가 membership을, `ops.poi_cache_target_snapshots`가 receipt를
 소유하며 item PK/FK는 `(material_id, row_number)`다. 살아 있는 material은 identity마다 하나

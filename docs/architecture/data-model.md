@@ -2694,7 +2694,7 @@ T-VN-41 producer foundation은 projection row와 source 순서를 분리한다. 
 | refresh member | `(request_id, target_id)` | request 시작 시 epoch/generation을 캡처한 late-result fence |
 | outbox event | `event_id`, unique `relay_order` | target/link/refresh/reconciliation 결과와 같은 transaction에서 만든 불변 typed event |
 | delivery/claim | event/claim identity | lease, attempt, retry, contiguous ACK, dead/replay와 epoch supersession 상태 |
-| fixed snapshot | `snapshot_id`, `(snapshot_id, row_number)` | 한 MVCC view의 epoch/high-watermark/head set과 Merkle root를 immutable page로 고정 |
+| fixed snapshot | material `material_id` + item `(material_id, row_number)`, receipt `snapshot_id` | 한 MVCC view의 epoch/high-watermark/head set과 Merkle root를 material이 고정하고, receipt는 "누가 언제 받아갔는가"만 갖는다 (`0231`) |
 | reconciliation | `request_id`, unique `command_id` | checksum receipt, halt/resume와 terminal 성공/실패/복원 대체 이력 |
 | GC referenced 관측 | `observation_id`, unique `dagster_run_id` | acquired GC run의 referenced count, 복사된 증가율 기준선과 승격 여부 |
 
@@ -2735,13 +2735,18 @@ view에서 읽어 ADR-081 Merkle v1으로 checksum한다. page 중 새 write가 
 동일 epoch, dead-letter 0을 모두 확인해야만 enable하며 mismatch terminal receipt는 다른 checksum으로
 resume할 수 없다. legacy target에는 임의 epoch를 백필하지 않으며 첫 권위 snapshot이 head를 채택한다.
 
-T-VN-41S는 현재 표에서 먼저 server cursor/incremental Merkle와 bounded item INSERT를 적용하고, 75분 넘게 남은
-generic snapshot을 reconciliation seal이 같은 header/item으로 재사용한다. generic/reconciliation별
-receipt와 공용 material/item을 물리 분리하는 최종 모델은 T-VN-40C 예약 `0225` 뒤 `0226+` migration이
-소유한다. 목표 material은 exact `(external_system, restore_epoch,
-material_high_watermark_relay_order)`, safe lower cursor, count/bytes/root와 compacted 시각을 보존한다.
-receipt는 새 snapshot ID와 kind/expiry를 갖고 material FK를 공유한다. terminal retention 뒤 item을
-compact해도 receipt ID, count/root/cursor와 reconciliation terminal 인과관계는 삭제하지 않는다.
+T-VN-41S는 server cursor/incremental Merkle와 bounded item INSERT를 적용했고, generic/reconciliation별
+receipt와 공용 material/item의 물리 분리는 migration `0231_tvn41s_snapshot_material`이 소유한다
+(2026-08-21 prod 적용). `ops.poi_cache_target_snapshot_materials`가 membership을 소유하며 exact
+`(external_system, restore_epoch, material_high_watermark_relay_order)`(살아 있는 material 한정
+partial unique `WHERE compacted_at IS NULL`), safe lower cursor, count/bytes/root와 compacted 시각을
+보존한다. `material_bytes`는 `0231` 이전 material에 실측이 없어 NULL을 허용한다.
+`ops.poi_cache_target_snapshots`는 receipt로 좁혀져 새 snapshot ID와 kind/expiry를 갖고 material FK를
+공유하며, item의 PK/FK는 `(material_id, row_number)`다. generic page와 reconciliation seal은 같은
+material을 **양방향으로** 공유하되 각자 receipt를 만든다. 재사용해도 `expires_at`을 물려받지 않고
+매번 full TTL로 시작하므로 "잔여 TTL이 75분 넘는 snapshot만 재사용한다"는 앞선 문턱은 사라졌다.
+terminal retention 뒤 item을 compact해도 receipt ID, count/root/cursor와 reconciliation terminal
+인과관계는 삭제하지 않는다.
 
 `ops.poi_cache_target_snapshot_gc_observations`는 감사 snapshot 자체가 아니라 그 개수를 다시 셀 수
 있는 파생 운영 관측이다. 새 행은 직전 acquired 행의 run/time/count와 마지막
@@ -2760,7 +2765,8 @@ acquired count와 비교하고 증가율은 적격 baseline과 비교한다. DB 
 명시적 Alembic downgrade만 테이블을 파괴하며, 다시 0078로 upgrade하면 빈 테이블로 재생성되어 첫
 acquired run이 새 기준선이 된다. snapshot/reconciliation 원본은 이 경로에서 삭제되지 않는다.
 
-GC 종료 관측은 위 count 외에 snapshot header/item 두 relation의 table/TOAST bytes, index bytes,
+GC 종료 관측은 위 count 외에 snapshot receipt/item 두 relation(`0231` 이후 각각
+`ops.poi_cache_target_snapshots`와 `ops.poi_cache_target_snapshot_material_items`)의 table/TOAST bytes, index bytes,
 `n_dead_tup`, 가장 긴 vacuum lag도 같은 transaction에서 읽는다. 이 네 값은 운영 metadata이며 감사
 snapshot 원본이 아니다. vacuum 이력이 없는 relation이 하나라도 있으면 lag를 임의 0으로 만들지 않고
 관측 불능으로 남긴다.

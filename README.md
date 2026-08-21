@@ -180,7 +180,7 @@ python packages/kor-travel-map-api/scripts/export_openapi.py --profile all --che
 - [`docs/architecture/provider-contract.md`](docs/architecture/provider-contract.md): provider 사용 원칙과 카탈로그
 - [`docs/architecture/performance.md`](docs/architecture/performance.md): 공간 쿼리, index, bulk 성능 규칙
 - [`docs/test-strategy.md`](docs/test-strategy.md): 테스트 구조와 커버리지 목표
-- [`docs/adr/README.md`](docs/adr/README.md): ADR 색인, 현재 ADR-001~059 accepted
+- [`docs/adr/README.md`](docs/adr/README.md): ADR 색인 (개수·다음 번호는 그 문서 상단이 정본)
 
 운영과 배포:
 
