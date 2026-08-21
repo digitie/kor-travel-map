@@ -67,8 +67,13 @@ from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 from tests.integration._tvn34_migration_bootstrap import bootstrap_tvn34_migration_roles
 
 STREAM = "soak:41s"
-ADMITTED = 1_000_000
-FINGERPRINT = "c" * 64
+#: 측정 대상 item 수. 인자로 주면 그 값, 없으면 배포 상한을 그대로 잰다 —
+#: soak이 상한과 다른 크기를 재고 있으면 그 결과는 상한을 보증하지 못한다.
+ADMITTED = (
+    int(sys.argv[2])
+    if len(sys.argv) > 2
+    else repo._SNAPSHOT_ITEM_LIMIT  # noqa: SLF001
+)
 
 #: **주의**: 아래 예산은 누적 build deadline만 늘린다. 개별 statement의 상한은
 #: `_SNAPSHOT_BUILD_STATEMENT_TIMEOUT`(5분)이 barrier 진입 때 다시 설정하므로, 이
@@ -105,13 +110,25 @@ def note(label: str, value: object) -> None:
     print(f"  ·  {label}: {value}")
 
 
+#: fixture는 정렬 비용을 정직하게 재야 한다. 예전 판은 `'soak-' || lpad(value, 8)`로
+#: **13자 ASCII를 삽입 순서대로** 심었는데, build의 정렬 키가
+#: `convert_to(normalize(target_key, NFC), 'UTF8')`이고 그 표현식에 인덱스가 없으므로
+#: 그 fixture는 heap correlation ≈ 1.0인 **최선 조건**을 잰 것이었다. prod 실측 키는
+#: 24~36자(평균 35.1, 전부 ASCII)이므로 md5 기반 37자로 맞춘다 — md5는 삽입 순서와
+#: 정렬 순서의 상관도 함께 끊어 준다.
+#: state와 fingerprint도 상수를 쓰지 않는다. 상수 fingerprint는 sha256 입력 지역성과
+#: 페이지 압축률을 비현실적으로 좋게 만든다.
 _SEED_HEADS_SQL = """
 INSERT INTO ops.poi_cache_target_source_heads (
     external_system, target_key, state, restore_epoch, source_generation,
     source_payload_fingerprint, target_sequence, updated_at
 )
-SELECT :stream, 'soak-' || lpad(value::text, 8, '0'), 'deleted', 1, 1,
-       :fingerprint, value, now()
+SELECT :stream,
+       's-' || md5(value::text) || '-' || lpad((value % 100)::text, 2, '0'),
+       CASE WHEN value % 7 = 0 THEN 'active' ELSE 'deleted' END,
+       1, 1,
+       md5(value::text) || md5((value + 1)::text),
+       value, now()
 FROM generate_series(CAST(:lo AS bigint), CAST(:hi AS bigint)) AS value
 """
 
@@ -146,7 +163,7 @@ async def _seed_source(engine: AsyncEngine, *, rows: int) -> None:
             await conn.execute(text("SET ROLE ktm_feature_schema_owner"))
             await conn.execute(
                 text(_SEED_HEADS_SQL),
-                {"stream": STREAM, "fingerprint": FINGERPRINT, "lo": lo, "hi": hi},
+                {"stream": STREAM, "lo": lo, "hi": hi},
             )
         print(f"    seeded {hi:,}/{rows:,}")
     async with engine.begin() as conn:
@@ -305,7 +322,6 @@ async def main() -> int:
                 text(_SEED_HEADS_SQL),
                 {
                     "stream": STREAM,
-                    "fingerprint": FINGERPRINT,
                     "lo": ADMITTED + 1,
                     "hi": ADMITTED + 1,
                 },
