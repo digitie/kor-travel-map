@@ -136,10 +136,16 @@ JOIN provider_sync.provider_datasets AS dataset
 ON CONFLICT (provider_dataset_id, sync_scope, operation_key) DO NOTHING;
 """
 
-# baseline seed는 ``OVERRIDING SYSTEM VALUE``로 행을 넣고 자기 setval을 남기므로
-# sequence가 max보다 뒤처지는 경우는 복원된 dump 정도다. 그때만 앞으로 민다 —
+# baseline seed는 identity 값을 직접 지정해 행을 넣고 자기 setval을 남기므로
+# sequence가 max보다 뒤처지는 경우는 data-only 복사본 정도다. 그때만 앞으로 민다 —
 # **되감지 않는다**. 예전 판은 무조건 ``setval(max(id))``라, sequence가 이미 앞서
 # 있는 prod에서 103 → max로 되감았다.
+#
+# 이 문장은 dataset INSERT보다 **먼저** 돈다. 뒤처진 sequence를 고치는 것이 목적인데
+# 뒤에 두면 정작 그 상황에서 INSERT가 먼저 죽는다 — nextval이 이미 쓰이는 id를
+# 돌려줘 ``pk_provider_datasets`` 위반이 나고, ``ON CONFLICT (provider, dataset_key)``
+# 는 자연키 arbiter라 대리키 충돌을 잡지 못한다. GREATEST의 결과는 항상 max(id)
+# 이상이므로 다음 nextval은 반드시 비어 있는 번호다.
 _SEQUENCE_SQL = """
 SELECT setval(
     'provider_sync.provider_datasets_provider_dataset_id_seq',
@@ -163,6 +169,7 @@ DECLARE
     missing_datasets text;
     mismatched_datasets text;
     missing_operations text;
+    disabled_operations text;
     missing_scopes text;
 BEGIN
     WITH declared(dataset_key, source_kind, capabilities) AS (
@@ -249,6 +256,30 @@ BEGIN
             USING ERRCODE = '23502';
     END IF;
 
+    -- "선언됐다"와 "돌 수 있다"는 다르다. is_enabled가 꺼진 채로 통과하면 catalog는
+    -- 서 있는데 refresh는 영영 돌지 않는다.
+    SELECT string_agg(
+               format('%s/%s', dataset.dataset_key, operation.operation_key), ', ')
+      INTO disabled_operations
+      FROM provider_sync.provider_dataset_operations AS operation
+      JOIN provider_sync.provider_datasets AS dataset
+        ON dataset.provider_dataset_id = operation.provider_dataset_id
+     WHERE dataset.provider = 'python-krforest-api'
+       AND dataset.dataset_key IN (
+            'krforest_mountain_trails',
+            'krforest_dulle_trails',
+            'krforest_mountain_weather',
+            'krforest_wildfire_risk_forecast',
+            'krforest_landslide_forecast_issues'
+       )
+       AND NOT operation.is_enabled;
+
+    IF disabled_operations IS NOT NULL THEN
+        RAISE EXCEPTION
+            'TVN-C05 provider dataset operation이 꺼져 있다: %', disabled_operations
+            USING ERRCODE = '23514';
+    END IF;
+
     SELECT string_agg(
                format('%s/%s', declared.dataset_key, declared.operation_key), ', ')
       INTO missing_scopes
@@ -290,10 +321,11 @@ def upgrade() -> None:
     # asyncpg prepared statements do not accept multiple SQL commands. Keep each
     # statement separate while Alembic still wraps the migration transactionally.
     for statement in (
+        # sequence 보정이 맨 앞이다 — _SEQUENCE_SQL 주석 참조.
+        _SEQUENCE_SQL,
         _DATASET_INSERT_SQL,
         _OPERATION_INSERT_SQL,
         _SCOPE_INSERT_SQL,
-        _SEQUENCE_SQL,
         _CATALOG_ASSERT_SQL,
     ):
         op.execute(statement)
