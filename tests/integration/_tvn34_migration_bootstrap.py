@@ -441,7 +441,7 @@ async def bootstrap_tvn_m01_role_phase(async_dsn: str) -> None:
 
 
 async def bootstrap_tvn_m05_pre_role_phase(async_dsn: str) -> None:
-    """`0230 → M05 role만 → 0231` 운영 choreography를 disposable DB에 재현한다."""
+    """`0233 → M05 role만 → 0234` 운영 choreography를 disposable DB에 재현한다."""
 
     from sqlalchemy import text
 
@@ -483,12 +483,12 @@ async def bootstrap_tvn_m05_pre_role_phase(async_dsn: str) -> None:
                 {"relations": list(relations)},
             )
             if (
-                version != "0230_m04_feature_request_queue"
+                version != "0233_m04_feature_request_queue"
                 or role_count not in (0, 4)
                 or relation_count != 0
             ):
                 raise RuntimeError(
-                    "M05 test role phase requires pristine 0230 boundary, "
+                    "M05 test role phase requires pristine 0233 boundary, "
                     f"not version={version!r}, roles={role_count}, relations={relation_count}"
                 )
             await connection.execute(
@@ -552,7 +552,7 @@ async def bootstrap_tvn_m05_pre_role_phase(async_dsn: str) -> None:
 
 
 async def repair_tvn_m05_role_phase(async_dsn: str) -> None:
-    """0231 뒤 dedicated M05 routine ownership marker를 production과 같이 확정한다."""
+    """0234 뒤 dedicated M05 routine ownership marker를 production과 같이 확정한다."""
 
     from sqlalchemy import text
 
@@ -581,7 +581,7 @@ async def repair_tvn_m05_role_phase(async_dsn: str) -> None:
                     ]
                 },
             )
-            if version != "0232_m05_reconciliation_delivery" or relation_count != 6:
+            if version != "0235_m05_reconciliation_delivery" or relation_count != 6:
                 raise RuntimeError("M05 test post-upgrade marker is incomplete")
             await connection.execute(
                 text(
@@ -758,7 +758,7 @@ async def upgrade_head_with_tvn_m01_phase(config: Config, admin_dsn: str) -> Non
         await asyncio.to_thread(command.upgrade, config, "0225_tvn40c_physical_removal")
     await bootstrap_tvn_m01_role_phase(admin_dsn)
     with alembic_schema_owner_role():
-        await asyncio.to_thread(command.upgrade, config, "0230_m04_feature_request_queue")
+        await asyncio.to_thread(command.upgrade, config, "0233_m04_feature_request_queue")
     await bootstrap_tvn_m05_pre_role_phase(admin_dsn)
     with alembic_schema_owner_role():
         await asyncio.to_thread(command.upgrade, config, "head")

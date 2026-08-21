@@ -1,6 +1,6 @@
 """T-VN-M04 — 범용 Feature 요청 큐와 Map admin 승인 writer.
 
-Revision ID: 0230_m04_feature_request_queue
+Revision ID: 0233_m04_feature_request_queue
 Revises: 0228_m03_manual_curation
 
 외부 consumer는 이 revision 뒤에도 Feature relation을 직접 쓸 수 없다. service scope는
@@ -17,7 +17,7 @@ from alembic import op
 
 # ruff: noqa: E501
 
-revision: str = "0230_m04_feature_request_queue"
+revision: str = "0233_m04_feature_request_queue"
 down_revision: str | Sequence[str] | None = "0228_m03_manual_curation"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -434,4 +434,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError("0230_m04_feature_request_queue is forward-only")
+    raise RuntimeError("0233_m04_feature_request_queue is forward-only")

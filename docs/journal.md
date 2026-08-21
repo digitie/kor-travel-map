@@ -51,6 +51,15 @@ byte 상한 512 MiB도 손봤다. `material_bytes`는 heap이 아니라 leaf 인
 하지 않는 죽은 코드였다. `target_key`가 512자까지 허용돼 같은 item 수에서도 재료량이 16배
 흔들리므로 item 상한만으로는 폭 축을 못 묶는다. 56 MiB(139초)로 조였다.
 
+## 2026-08-21 — main `0232` 재베이스 뒤 M04/M05 migration ID 충돌 해소
+
+`origin/main`이 `0232_tvn37d_notice_empty_range`까지 전진한 상태에서 unmerged M04/M05가 동일한
+`0230`~`0232` revision ID를 선언했다. 그 결과 fresh PostGIS CI가 main chain을 우회해 M01/M04/M05
+procedure와 role grant가 없는 head를 만들었다. main의 적용 revision은 불변으로 두고 M04/M05를
+`0233_m04_feature_request_queue` → `0234_m05_manual_provider_dedup` →
+`0235_m05_reconciliation_delivery`로 재번호화했다. two-phase bootstrap, restore boundary, generated
+application graph, integration head assertion까지 함께 바꿔 migration graph 하나만 정본으로 남겼다.
+
 ## 2026-08-21 — catalog 대리키 lint 범위를 provider catalog로 한정
 
 `OVERRIDING SYSTEM VALUE` 탐지는 provider catalog의 identity 대리키 하드코딩만 막아야 한다.
@@ -190,12 +199,12 @@ candidate의 `to_jsonb(notice)`에 내부 generated column이 누출되는 P1을
 candidate SQL은 `valid_during`을 response JSON에서 제외하도록 수정했다. NULL·one-sided·
 equal range, public/admin active predicate와 notice candidate detail 회귀를 추가했으며,
 수정 후 targeted integration 2건을 통과했다.
-## 2026-08-21 — T-VN-M05 `0232` forward repair 재심 보정
+## 2026-08-21 — T-VN-M05 `0235` forward repair 재심 보정
 
-두 전문 적대 리뷰에서 `0231` preview DB의 v1 admin 실행권이 repair 뒤에도 남는 ACL 우회와,
+두 전문 적대 리뷰에서 `0234` preview DB의 v1 admin 실행권이 repair 뒤에도 남는 ACL 우회와,
 전용 owner가 이미 소유한 reader를 schema owner가 `CREATE OR REPLACE`할 수 없어 forward
 upgrade가 중단되는 문제를 재현했다. runtime reconciler와 bootstrap은 v1을 admin executor에서도
-명시 회수하고, `0232`는 reader 재선언에만 owner의 임시 schema `CREATE`를 부여한 뒤 즉시
+명시 회수하고, `0235`는 reader 재선언에만 owner의 임시 schema `CREATE`를 부여한 뒤 즉시
 회수한다. fresh migration과 preview owner 재정의 모두 실제 migrator login으로 검증했다.
 
 subscription 최초 생성은 row가 없을 때 `FOR UPDATE`가 경쟁을 막지 못하므로 transaction advisory
@@ -211,7 +220,7 @@ problem의 top-level `request_id`를 fallback으로 사용해 stored body와 hea
 보존한다.
 
 후속 DB 재심은 no-owner restore의 legacy sweep이 reader를 schema owner로 바꾸는 상태와, M05
-membership이 legacy exact-graph oracle에 섞이는 두 P0를 확인했다. `0232`는 reader 부재·전용
+membership이 legacy exact-graph oracle에 섞이는 두 P0를 확인했다. `0235`는 reader 부재·전용
 owner·schema owner 세 상태를 명시 처리하고 임시 `USAGE, CREATE`를 모두 회수한다. legacy
 oracle은 M05의 네 membership을 기존 M01 경계처럼 제외한 뒤 M05 repair가 재확정한다. restored
 schema-owner reader를 restricted migrator로 실제 재정의하는 integration과 restore choreography의
@@ -219,13 +228,13 @@ schema-owner reader를 restricted migrator로 실제 재정의하는 integration
 
 ## 2026-08-21 — T-VN-M05 forward-only delivery·subscription activation 보정
 
-적대 리뷰에서 이미 배포 가능한 `0231` migration을 고치면 기존 DB가 reader/ACK lock routine을
+적대 리뷰에서 이미 배포 가능한 `0234` migration을 고치면 기존 DB가 reader/ACK lock routine을
 잃는다는 문제를 확인했다. 해당 revision은 evidence base로 복원하고, 새
-`0232_m05_reconciliation_delivery`에 ACK common lease lock, admin case reader, typed delivery audit,
+`0235_m05_reconciliation_delivery`에 ACK common lease lock, admin case reader, typed delivery audit,
 그리고 fixed principal·cursor-zero만 허용하는 AdminBFF subscription provisioning procedure를 두었다.
-이 immutable activation receipt가 없으면 모든 M05 case decision은 503으로 멈춘다. 기존 `0231`에
+이 immutable activation receipt가 없으면 모든 M05 case decision은 503으로 멈춘다. 기존 `0234`에
 이미 들어간 reader function은 `CREATE OR REPLACE`로 안전하게 재선언하고, legacy lease/ACK/decision
-procedure의 runtime EXECUTE는 회수해 v2 경로만 허용했다. restore는 M05 pre role phase 뒤 0232까지
+procedure의 runtime EXECUTE는 회수해 v2 경로만 허용했다. restore는 M05 pre role phase 뒤 0235까지
 migrate한 뒤에만 ownership/ACL repair를 실행한다. fresh PostGIS migration integration과 API
 route/registry/policy test를 다시 고정했다. PinVi paired consumer와 격리 live UI E2E가 끝날 때까지
 activation receipt는 운영에서 만들지 않는다.
@@ -259,8 +268,8 @@ UTC `occurred_at`까지 포함한 canonical envelope 전체이며 verifier는 �
 이미 무효화된 lease에는 epoch를 재증가시키지 않아 verifier 재실행도 안정적이다.
 
 v3 staging restore는 root 검증 전에 base/M01/M05 ownership·ACL repair를 다시 실행하고, 두 runtime
-LOGIN의 catalog preflight까지 통과해야 한다. M05 pre/migrate phase는 `0230/role-ready` 재시도와
-`0231` 완료 재기동을 구분해 허용하고 partial marker는 계속 중단한다.
+LOGIN의 catalog preflight까지 통과해야 한다. M05 pre/migrate phase는 `0233/role-ready` 재시도와
+`0234` 완료 재기동을 구분해 허용하고 partial marker는 계속 중단한다.
 
 운영 verifier의 SQL을 integration에서 그대로 실행해 ACK cursor 보존, worker fence 무효화와
 idempotent 재실행을 확인했다. backup runbook unit 13건과 M05 integration, ruff, Bash syntax가
@@ -268,7 +277,7 @@ idempotent 재실행을 확인했다. backup runbook unit 13건과 M05 integrati
 
 ## 2026-08-21 — T-VN-M05 strict-prefix service delivery writer
 
-`0231_m05_manual_provider_dedup`에 service 전용 event lease·ack writer를 추가했다.
+`0234_m05_manual_provider_dedup`에 service 전용 event lease·ack writer를 추가했다.
 subscription의 현재 ack cursor 뒤에서 실제 최소 `event_sequence`만 lease하고, worker·epoch·만료
 시각을 검증한 뒤 정확히 그 event의 hash와 local receipt hash를 append-only ack로 결박한다.
 따라서 sequence의 commit 가시 순서가 달라도 누락 번호를 가정하지 않으며, 경쟁 worker는
@@ -283,7 +292,7 @@ consumer의 durable receipt/rebind다.
 
 ## 2026-08-21 — T-VN-M05 dedicated candidate·admin decision writer
 
-`0231_m05_manual_provider_dedup`에 Dagster-only candidate writer와 admin-only
+`0234_m05_manual_provider_dedup`에 Dagster-only candidate writer와 admin-only
 decision writer를 추가했다. candidate는 immutable manual origin/claim, 정확히 하나인
 provider primary source/head/record를 현재 row revision과 함께 freeze하며, 같은
 fingerprint만 idempotent로 돌린다. 새 source head/row revision은 종전 미종결 case에
@@ -303,14 +312,14 @@ strict-prefix service lease/ack와 backup v3 evidence root다.
 ## 2026-08-21 — T-VN-M05 증적 스키마와 ACL 기본 경계 착수
 
 두 전문 적대 리뷰의 P0를 ADR-097과 설계 보고서에 반영했고, 두 reviewer가 모두 GO를
-재확인했다. `0231_m05_manual_provider_dedup`는 범용 dedup queue와 분리된 불변
+재확인했다. `0234_m05_manual_provider_dedup`는 범용 dedup queue와 분리된 불변
 case·resolution·event·ack와 principal subscription, strict-prefix lease를 만든다. case는
 manual origin/claim 및 provider source record를 `RESTRICT` FK로 결박하고, evidence와
 subscription은 UPDATE/DELETE/TRUNCATE trigger로 막는다.
 
 runtime ACL inventory와 startup catalog preflight도 M05 여섯 relation의 raw SELECT/DML을
 금지하도록 먼저 닫았다. fresh DB migration과 Alembic metadata check 1건, ruff·strict mypy가
-통과했다. 이어 `0230 → M05 role 전용 → 0231 → 사후 복구` compose choreography와 disposable
+통과했다. 이어 `0233 → M05 role 전용 → 0234 → 사후 복구` compose choreography와 disposable
 DB helper를 만들었다. 사전 phase에는 M05 object grant가 없고, 사후 복구가 trigger function
 owner와 schema usage/create를 확정한다. 같은 fresh migration/Alembic check와 shell·compose
 회귀도 통과했다. 다음 tranche는 dedicated writer/lease procedure와 backup v3 root다.

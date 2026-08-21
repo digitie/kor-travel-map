@@ -1,6 +1,6 @@
-"""T-VN-M05 delivery extension — deployed 0231 DB의 forward-only repair.
+"""T-VN-M05 delivery extension — deployed 0234 DB의 forward-only repair.
 
-0231을 이미 적용한 database에도 admin reader, subscription activation, ACK
+0234를 이미 적용한 database에도 admin reader, subscription activation, ACK
 serialization을 안전하게 추가한다.
 """
 
@@ -13,8 +13,8 @@ from alembic import op
 
 # ruff: noqa: E501
 
-revision: str = "0232_m05_reconciliation_delivery"
-down_revision: str | Sequence[str] | None = "0231_m05_manual_provider_dedup"
+revision: str = "0235_m05_reconciliation_delivery"
+down_revision: str | Sequence[str] | None = "0234_m05_manual_provider_dedup"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -105,7 +105,7 @@ SECURITY DEFINER
 SET search_path = pg_catalog, feature, ops
 AS $m05_ack_event_v2$
 BEGIN
-    -- The old 0231 writer remains callable only by this definer.  Preserve its
+    -- The old 0234 writer remains callable only by this definer.  Preserve its
     -- exact validation/receipt behavior while adding the common lease lock.
     PERFORM 1
     FROM ops.feature_reference_reconciliation_leases AS lease
@@ -269,7 +269,7 @@ BEGIN
 END
 $m05_resolve_case_v2$;
 
--- A preview 0231 owns these readers with the dedicated routine owner.  A
+-- A preview 0234 owns these readers with the dedicated routine owner.  A
 -- `pg_restore --no-owner` followed by the legacy ownership sweep instead
 -- leaves them schema-owned.  Normalize only those two known ownership states
 -- before replacement, then use the dedicated owner for the actual body.
@@ -536,4 +536,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError("0232_m05_reconciliation_delivery is forward-only")
+    raise RuntimeError("0235_m05_reconciliation_delivery is forward-only")

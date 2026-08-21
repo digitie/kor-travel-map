@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 # T-VN-M05 — superuser가 M05 NOLOGIN graph를 완성한 뒤 restricted migrator가
-# 0231 기반 증거 테이블 뒤 delivery extension 0232까지 적용한다. API 기동이 이
+# 0234 기반 증거 테이블 뒤 delivery extension 0235까지 적용한다. API 기동이 이
 # choreography를 우회해 head를 만들 수 없다.
 set -eu
 
@@ -62,19 +62,19 @@ async def main() -> int:
     finally:
         await engine.dispose()
     if (
-        revision == "0230_m04_feature_request_queue"
+        revision == "0233_m04_feature_request_queue"
         and role_count == len(_ROLES)
         and relation_count == 0
     ):
         return 1
     if (
-        revision == "0231_m05_manual_provider_dedup"
+        revision == "0234_m05_manual_provider_dedup"
         and role_count == len(_ROLES)
         and relation_count == len(_RELATIONS)
     ):
         return 2
     if (
-        revision == "0232_m05_reconciliation_delivery"
+        revision == "0235_m05_reconciliation_delivery"
         and role_count == len(_ROLES)
         and relation_count == len(_RELATIONS)
     ):
@@ -90,7 +90,7 @@ marker_status=$?
 set -e
 case "$marker_status" in
   0) exit 0 ;;
-  1|2) alembic upgrade 0232_m05_reconciliation_delivery ;;
+  1|2) alembic upgrade 0235_m05_reconciliation_delivery ;;
   3)
     echo "M05 migration marker is not a retryable boundary" >&2
     exit 1

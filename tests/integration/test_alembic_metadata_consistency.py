@@ -36,7 +36,7 @@ pytestmark = pytest.mark.integration
 #: `alembic upgrade head`가 착지해야 하는 revision. 리터럴을 여러 곳에 박으면
 #: migration마다 흩어진 자리를 모두 고쳐야 하고, 한 곳을 놓치면 그 단언만 조용히
 #: 옛 head를 지킨다. 한 줄로 모은다.
-_EXPECTED_HEAD = "0232_m05_reconciliation_delivery"
+_EXPECTED_HEAD = "0235_m05_reconciliation_delivery"
 
 _GATE_DB = "alembic_metadata_gate"
 
@@ -548,7 +548,7 @@ async def test_existing_0104_bridge_upgrades_to_tvn40_head_without_baseline_repl
         await asyncio.to_thread(command.upgrade, cfg, "0225_tvn40c_physical_removal")
     await bootstrap_tvn_m01_role_phase(admin_dsn)
     with alembic_schema_owner_role():
-        await asyncio.to_thread(command.upgrade, cfg, "0230_m04_feature_request_queue")
+        await asyncio.to_thread(command.upgrade, cfg, "0233_m04_feature_request_queue")
     await bootstrap_tvn_m05_pre_role_phase(admin_dsn)
     with alembic_schema_owner_role():
         await asyncio.to_thread(command.upgrade, cfg, "head")

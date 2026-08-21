@@ -1,7 +1,7 @@
 """T-VN-M05 — 수동/provider dedup evidence와 참조 재결합 delivery 기반.
 
-Revision ID: 0231_m05_manual_provider_dedup
-Revises: 0230_m04_feature_request_queue
+Revision ID: 0234_m05_manual_provider_dedup
+Revises: 0233_m04_feature_request_queue
 
 M05는 기존 generic dedup queue/merge writer와 완전히 분리된 append-only evidence
 relation을 만든다. executable writer/ACL은 이 revision 안에서 추가하되, runtime
@@ -17,8 +17,8 @@ from alembic import op
 
 # ruff: noqa: E501
 
-revision: str = "0231_m05_manual_provider_dedup"
-down_revision: str | Sequence[str] | None = "0230_m04_feature_request_queue"
+revision: str = "0234_m05_manual_provider_dedup"
+down_revision: str | Sequence[str] | None = "0233_m04_feature_request_queue"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -1174,4 +1174,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError("0231_m05_manual_provider_dedup is forward-only")
+    raise RuntimeError("0234_m05_manual_provider_dedup is forward-only")

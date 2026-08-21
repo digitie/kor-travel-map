@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
-# T-VN-M05 — M01 role graph 뒤에서만 0230을 확정하는 two-phase boundary.
-# M05 role은 이 script 다음 superuser phase가 만들며, 여기서는 0231 object를
+# T-VN-M05 — M01 role graph 뒤에서만 0233을 확정하는 two-phase boundary.
+# M05 role은 이 script 다음 superuser phase가 만들며, 여기서는 0234 object를
 # 절대 만들지 않는다.
 set -eu
 
@@ -54,8 +54,8 @@ async def main() -> int:
         return 2
     if relation_count == len(_RELATIONS):
         if revision not in {
-            "0231_m05_manual_provider_dedup",
-            "0232_m05_reconciliation_delivery",
+            "0234_m05_manual_provider_dedup",
+            "0235_m05_reconciliation_delivery",
         }:
             print("M05 relation marker requires an M05 revision", file=sys.stderr)
             return 2
@@ -81,4 +81,4 @@ case "$marker_status" in
     ;;
 esac
 
-alembic upgrade 0230_m04_feature_request_queue
+alembic upgrade 0233_m04_feature_request_queue

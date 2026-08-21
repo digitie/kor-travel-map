@@ -595,7 +595,7 @@ def test_tvn_m01_role_phase_runs_only_after_legacy_0225_boundary() -> None:
     assert 'M01 role must not inherit any application privilege role' in phase_script
     assert "membership.inherit_option IS FALSE" in phase_script
     assert "membership.set_option IS TRUE" in phase_script
-    assert "M05 pre role bootstrap requires exactly 0230" in phase_script
+    assert "M05 pre role bootstrap requires exactly 0233" in phase_script
     assert "M05 relation marker is partial; refusing role bootstrap" in phase_script
     assert "M05 post-upgrade marker is incomplete" in phase_script
     assert "CREATE ROLE ktm_manual_provider_dedup_procedure_owner" in phase_script
@@ -631,15 +631,15 @@ def test_tvn_m01_role_phase_runs_only_after_legacy_0225_boundary() -> None:
     assert '2)' in migration_script
     assert "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" not in migration_script
     m05_boundary_script = _script("docker/migrate-to-m05-bootstrap-boundary.sh")
-    assert "alembic upgrade 0230_m04_feature_request_queue" in m05_boundary_script
+    assert "alembic upgrade 0233_m04_feature_request_queue" in m05_boundary_script
     assert "M05 relation marker is partial" in m05_boundary_script
     assert "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" not in m05_boundary_script
     m05_migration_script = _script("docker/migrate-m05.sh")
     assert "M05 migration marker is not a retryable boundary" in m05_migration_script
     assert "set +e" in m05_migration_script
     assert "marker_status=$?" in m05_migration_script
-    assert "alembic upgrade 0232_m05_reconciliation_delivery" in m05_migration_script
-    assert "1|2) alembic upgrade 0232_m05_reconciliation_delivery" in m05_migration_script
+    assert "alembic upgrade 0235_m05_reconciliation_delivery" in m05_migration_script
+    assert "1|2) alembic upgrade 0235_m05_reconciliation_delivery" in m05_migration_script
     assert "  3)" in m05_migration_script
     dockerfile = _script("docker/api.Dockerfile")
     assert "migrate-to-m01-bootstrap-boundary.sh" in dockerfile

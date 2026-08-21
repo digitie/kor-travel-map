@@ -131,8 +131,8 @@ if [ "$bootstrap_phase" = "legacy" ]; then
               bootstrap_phase="m01"
               ;;
             0226_m01_manual_feature_create|0227_m02_feature_provenance|\
-            0228_m03_manual_curation|0230_m04_feature_request_queue|\
-            0231_m05_manual_provider_dedup|0232_m05_reconciliation_delivery)
+            0228_m03_manual_curation|0233_m04_feature_request_queue|\
+            0234_m05_manual_provider_dedup|0235_m05_reconciliation_delivery)
               echo "M01 relation marker is absent after an M01/M05 revision" >&2
               exit 1
               ;;
@@ -180,9 +180,9 @@ BEGIN
             '0226_m01_manual_feature_create',
             '0227_m02_feature_provenance',
             '0228_m03_manual_curation',
-            '0230_m04_feature_request_queue',
-            '0231_m05_manual_provider_dedup',
-            '0232_m05_reconciliation_delivery'
+            '0233_m04_feature_request_queue',
+            '0234_m05_manual_provider_dedup',
+            '0235_m05_reconciliation_delivery'
         ) THEN
             RAISE EXCEPTION
                 'M01 relation marker requires a known M01/M02 head (observed %)',
@@ -495,8 +495,8 @@ FROM existing
 SQL
 }
 
-# M05는 M01과 달리 0230을 정확히 만든 뒤, M05 role만 먼저 provision하고
-# 0231을 적용한다. frozen 0200/0202 graph에는 닿지 않으며, pre phase에는
+# M05는 M01과 달리 0233을 정확히 만든 뒤, M05 role만 먼저 provision하고
+# 0234를 적용한다. frozen 0200/0202 graph에는 닿지 않으며, pre phase에는
 # object ACL을 전혀 부여하지 않는다. relation 또는 role의 부분 marker는
 # 정상 재시도 가능한 상태가 아니므로 여기서 멈춘다.
 run_m05_pre_phase() {
@@ -535,11 +535,11 @@ BEGIN
         RAISE EXCEPTION 'M05 role marker is partial; refusing role bootstrap'
             USING ERRCODE = '55000';
     END IF;
-    IF v_relation_count = 0 AND v_revision IS DISTINCT FROM '0230_m04_feature_request_queue' THEN
-        RAISE EXCEPTION 'M05 pre role bootstrap requires exactly 0230 (observed %)',
+    IF v_relation_count = 0 AND v_revision IS DISTINCT FROM '0233_m04_feature_request_queue' THEN
+        RAISE EXCEPTION 'M05 pre role bootstrap requires exactly 0233 (observed %)',
             coalesce(v_revision, '<none>') USING ERRCODE = '55000';
     END IF;
-    IF v_relation_count = 6 AND v_revision NOT IN ('0231_m05_manual_provider_dedup', '0232_m05_reconciliation_delivery') THEN
+    IF v_relation_count = 6 AND v_revision NOT IN ('0234_m05_manual_provider_dedup', '0235_m05_reconciliation_delivery') THEN
         RAISE EXCEPTION 'M05 relation marker requires an M05 revision (observed %)',
             coalesce(v_revision, '<none>') USING ERRCODE = '55000';
     END IF;
@@ -691,7 +691,7 @@ BEGIN
         'ktm_manual_provider_dedup_admin_executor',
         'ktm_feature_reference_reconciliation_service_executor'
     );
-    IF v_revision IS DISTINCT FROM '0232_m05_reconciliation_delivery'
+    IF v_revision IS DISTINCT FROM '0235_m05_reconciliation_delivery'
        OR v_relation_count <> 6 OR v_role_count <> 4 THEN
         RAISE EXCEPTION
             'M05 post-upgrade marker is incomplete (revision %, relations %, roles %)',

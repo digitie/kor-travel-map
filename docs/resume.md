@@ -9,6 +9,19 @@
 **다음 한 작업**: 문서 PR을 병합한 뒤 Map #1029와 PinVi M05 PR을 최신 main에 rebase하고,
 각 CI·격리 live E2E 근거를 다시 대조한다.
 
+## 2026-08-21 — main `0232` 재베이스 뒤 M04/M05 migration graph 재연결
+
+`origin/main`이 `0232_tvn37d_notice_empty_range`까지 전진한 뒤, 아직 머지되지 않은 M04/M05가
+같은 `0230`~`0232` revision ID를 선언해 fresh PostGIS CI에서 M01/M04/M05 procedure와 ACL이
+누락됐다. main의 적용 이력은 바꾸지 않고 M04/M05를 `0233`→`0234`→`0235`로 재번호화해
+`0232`→M01→M02→M03→M04→M05 dependency graph를 단일 head로 복구했다. bootstrap·restore
+boundary·migration graph artifact·integration expectation도 같은 revision ID로 결박했다.
+
+### 다음 한 작업
+
+이 graph 재연결을 표적 Alembic/role-bootstrap integration과 lint로 다시 검증하고, draft PR CI가
+green이 된 뒤에만 N150 격리 mutating browser E2E를 시작한다.
+
 ## 2026-08-21 — M05 event sequence가 catalog 대리키 lint에 오인되던 CI 보정
 
 `OVERRIDING SYSTEM VALUE` lint를 provider catalog INSERT 범위로 한정했다. M05 reconciliation event의
@@ -121,11 +134,11 @@ N150 접근이 회복되면 현재 Map/PinVi draft head로 격리 stack을 다�
 M05 subscription/decision → PinVi reference rebind 및 ACK를 browser E2E로 증명한다. 이 증거와
 CI green 전에는 M05 activation receipt와 Hallmark 작업을 시작하지 않는다.
 
-## 2026-08-21 — T-VN-M05 `0232` forward repair 재심 보정
+## 2026-08-21 — T-VN-M05 `0235` forward repair 재심 보정
 
-M05는 아직 activation하지 않는다. `0231` preview의 reader owner와 v1 admin EXECUTE가 남는 실제
-forward-upgrade/ACL 결함을 `0232`와 runtime/bootstrap repair에서 닫았다. reader를 기존 dedicated
-owner로 재선언할 때만 임시 schema `CREATE`를 주고 곧 회수하므로 fresh DB와 post-0231 preview가
+M05는 아직 activation하지 않는다. `0234` preview의 reader owner와 v1 admin EXECUTE가 남는 실제
+forward-upgrade/ACL 결함을 `0235`와 runtime/bootstrap repair에서 닫았다. reader를 기존 dedicated
+owner로 재선언할 때만 임시 schema `CREATE`를 주고 곧 회수하므로 fresh DB와 post-0234 preview가
 같은 forward path를 쓴다. subscription 최초 생성은 absence race를 transaction advisory lock으로
 직렬화해 두 동시 command가 각각 `provisioned`/`already_provisioned`로 종료한다. stale 및 existing
 subscription 409은 terminal receipt의 `application/problem+json`을 replay에도 보존한다.
@@ -140,16 +153,16 @@ Problem receipt는 top-level `request_id`를 replay header의 fallback source로
 않는다.
 
 DB 재심의 추가 P0도 반영했다. no-owner restore의 legacy ownership sweep이 schema owner로
-되돌린 reader는 `0232`가 dedicated owner로 정규화한 후 재정의하고, reader가 아직 없는 fresh
-0231과 이미 dedicated owner인 preview도 그대로 통과한다. temporary schema 권한은 `USAGE`와
+되돌린 reader는 `0235`가 dedicated owner로 정규화한 후 재정의하고, reader가 아직 없는 fresh
+0234와 이미 dedicated owner인 preview도 그대로 통과한다. temporary schema 권한은 `USAGE`와
 `CREATE`를 함께 회수한다. legacy membership oracle은 M05 전용 네 edge를 별도 phase로 취급해
 rebootstrap이 migration 전에 실패하지 않게 했다.
 
 ## 2026-08-21 — T-VN-M05 Map admin 판단·service delivery contract
 
 M05 Map 쪽 admin case 목록/상세/판정과 reconciliation service lease/ACK contract를 완성했다.
-이미 적용 가능한 `0231` evidence revision은 바꾸지 않고, reader·subscription provisioning·ACK common
-lease lock은 forward-only `0232_m05_reconciliation_delivery`로 분리했다. subscription은 AdminBFF
+이미 적용 가능한 `0234` evidence revision은 바꾸지 않고, reader·subscription provisioning·ACK common
+lease lock은 forward-only `0235_m05_reconciliation_delivery`로 분리했다. subscription은 AdminBFF
 domain-command receipt의 fixed principal·immutable `initial_event_sequence=0`으로만 만들 수 있다.
 이 activation receipt가 없으면 어떤 M05 decision도 확정하지 않고 503으로 멈춘다.
 admin은 raw evidence relation을 읽지 않고 전용 SECURITY DEFINER reader만 호출한다. list는 stable
@@ -196,9 +209,9 @@ evidence로 구현한다. Map decision은 provider survivor만 명시적으로 �
 rebind/detach는 generic service event와 principal ack로 전파한다.
 
 ADR-097 및 [M05 설계](reports/t-vn-m05-manual-provider-dedup-design-2026-08-21.md)를 accepted로
-확정했고, DB/HTTP 전문 적대 리뷰어 둘이 P0 보완본을 GO로 재검토했다. `0231`의 불변
+확정했고, DB/HTTP 전문 적대 리뷰어 둘이 P0 보완본을 GO로 재검토했다. `0234`의 불변
 증적·subscription·lease model/migration과 runtime raw-access deny inventory까지 구현했으며,
-fresh migration Alembic check 1건과 ruff/strict mypy가 green이다. `0230 → role 전용 → 0231 →
+fresh migration Alembic check 1건과 ruff/strict mypy가 green이다. `0233 → role 전용 → 0234 →
 사후 복구` compose/DB helper도 연결해 frozen baseline을 건드리지 않은 role choreography를
 고정했다. Dagster-only candidate writer는 manual origin/claim과 정확히 하나인 provider
 primary source head를 freeze하고, admin-only writer는 `kept`/manual retire+`rebind`/manual
@@ -342,7 +355,7 @@ map PR을 병합한다.
 
 ## 2026-08-20 — T-VN-M04 범용 Feature 요청 큐 구현·검증 완료
 
-`0230_m04_feature_request_queue`가 service submit과 Map admin approve/reject를 generic
+`0233_m04_feature_request_queue`가 service submit과 Map admin approve/reject를 generic
 queue로 분리했다. `ops.feature_requests`는 immutable submit payload와 submission/resolution
 command FK를 보존하고, approved Feature의 origin은 `manual_request`다. PinVi 고유 이름은
 Map의 M04 식별자·경로·역할·환경변수에서 제거했다.

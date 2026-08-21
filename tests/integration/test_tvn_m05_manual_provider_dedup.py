@@ -501,7 +501,7 @@ async def test_reconciliation_subscription_is_provisioned_only_by_admin_writer(
 async def test_runtime_reconciler_revokes_deployed_v1_decision_grant(
     migrated_engine: AsyncEngine,
 ) -> None:
-    """0231 preview DB의 v1 grant는 0232 repair 뒤에 남을 수 없다."""
+    """0234 preview DB의 v1 grant는 0235 repair 뒤에 남을 수 없다."""
 
     v1 = (
         "feature.resolve_manual_provider_dedup_case("
@@ -548,12 +548,12 @@ async def test_runtime_reconciler_revokes_deployed_v1_decision_grant(
         )
 
 
-async def test_preview_reader_owner_can_run_0232_redefinition_before_repair(
+async def test_preview_reader_owner_can_run_0235_redefinition_before_repair(
     migrated_engine: AsyncEngine,
 ) -> None:
     """repair 전 dedicated owner reader가 있는 preview DB도 forward upgrade한다."""
 
-    migration_path = _ROOT / "alembic/versions/0232_m05_reconciliation_delivery.py"
+    migration_path = _ROOT / "alembic/versions/0235_m05_reconciliation_delivery.py"
     spec = spec_from_file_location("_tvn_m05_delivery_migration", migration_path)
     assert spec is not None
     assert spec.loader is not None
@@ -576,7 +576,7 @@ async def test_preview_reader_owner_can_run_0232_redefinition_before_repair(
     )
 
     # ``pg_restore --no-owner`` 뒤 legacy sweep이 만들 수 있는 schema owner 상태를
-    # 실제 routine에 적용한다. 이후 0232 범위는 restricted migrator login으로만
+    # 실제 routine에 적용한다. 이후 0235 범위는 restricted migrator login으로만
     # 실행해 preview/restore 두 source ownership을 한 migration으로 복구한다.
     async with migrated_engine.begin() as connection:
         await connection.execute(
