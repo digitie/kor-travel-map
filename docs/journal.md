@@ -1,5 +1,22 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-21 — T-VN-37D 두 번째 리뷰 P2 반영
+
+두 번째 독립 reviewer가 curation candidate의 `to_jsonb(notice)` timestamp가 DB 세션
+timezone에 따라 달라져 representation ETag가 흔들릴 수 있음을 P2로 지적했다. notice
+candidate SQL은 `valid_start_time`/`valid_end_time`을 KST 고정 문자열로 다시 써서
+`feature_projection.py`와 같은 표현을 사용하게 했고, UTC·Asia/Seoul 세션 결과가 같은지
+integration 회귀를 추가했다. 두 reviewer의 최종 판정은 P0/P1 없음, GO였다.
+
+## 2026-08-21 — T-VN-37D 전문 리뷰 findings 반영
+
+두 독립 reviewer는 P0 없이 range 표현의 운영 잠금과 경계 회귀 공백, admin curation
+candidate의 `to_jsonb(notice)`에 내부 generated column이 누출되는 P1을 찾았다. migration
+0232에 transaction-local `lock_timeout=30s`와 writer fence/maintenance 전제를 기록하고,
+candidate SQL은 `valid_during`을 response JSON에서 제외하도록 수정했다. NULL·one-sided·
+equal range, public/admin active predicate와 notice candidate detail 회귀를 추가했으며,
+수정 후 targeted integration 2건을 통과했다.
+
 ## 2026-08-21 — 완료 task를 `tasks-done.md`로 이관
 
 최신 `origin/main`의 머지 상태를 대조해 H50 planner gate(#1036), 산림청 C05A~D
@@ -7,6 +24,15 @@ dataset(#1037), C7 browser evidence·scope registry·live serial·mock manifest(
 완료 원장으로 옮겼다. `tasks.md`의 완료 인덱스·상세 블록을 제거하고, 실제로 남은
 `T-VN-40B` 잔여와 `T-FE-MOCK-FLAKE`는 열린 task로 유지했다. `resume.md`의 현재 진척도도
 같은 기준으로 갱신했다.
+
+## 2026-08-21 — T-VN-37D notice empty range 구현 착수
+
+제품 결정을 명시했다. notice 유형과 무관하게 미래 발효 공지는 기존처럼 공개하고,
+provider 철회로 `valid_end_time < valid_start_time`이 된 notice는
+`feature.feature_notices.valid_during` generated `tstzrange`의 `empty`로 표현한다.
+공개·admin active 술어는 `@> now()`로 바꾸지 않고 기존 `valid_end_time` 비교를 유지해
+사전 경고를 숨기지 않는다. migration `0232_tvn37d_notice_empty_range`, ADR-095,
+ORM metadata와 empty/bounded range integration regression을 추가했다.
 
 ## 2026-08-20 — map CI catalog 회귀값 갱신
 

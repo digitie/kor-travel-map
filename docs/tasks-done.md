@@ -23,6 +23,24 @@
   baseline `5c647f69…`, `expected-failures=0`으로 재고정했다(PR #1038). 남은
   `/v1/ops/logs` 간헐 실패는 `T-FE-MOCK-FLAKE`로 분리해 `tasks.md`에서 추적한다.
 
+## 2026-08-21 — T-VN-37D notice empty range 표현
+
+- [x] T-VN-37D — **notice 발효 전 철회를 empty range로 표현**
+
+  `feature.feature_notices.valid_during`을 `valid_start_time`/`valid_end_time`에서
+  파생하는 stored `tstzrange`로 추가했다. 정상 범위는 `[start, end)`, `end < start`인
+  발효 전 철회는 `empty`, 두 경계가 모두 없으면 NULL이다. provider가 만드는 실재
+  상태에 순서 CHECK를 추가하지 않았고, writer가 파생 컬럼을 직접 쓸 수 없도록
+  generated column으로 고정했다.
+
+  제품 의미는 기존 read contract를 보존하는 것으로 결정했다. 미래 발효 공지는
+  계속 노출하고 active/admin read는 `valid_end_time <= now()` 비교를 유지한다.
+  `NoticeDetail`/OpenAPI 응답은 변경하지 않았다. ADR-095, migration
+  `0232_tvn37d_notice_empty_range`, ORM metadata와 integration regression이 정본이다.
+  적대 리뷰에서 발견한 admin candidate JSON 누출은 내부 `valid_during` 제외로 고쳤고,
+  notice timestamp는 KST 고정으로 직렬화해 세션 timezone에 따른 representation ETag
+  변동도 막았다. migration lock timeout과 NULL/one-sided/equal/admin 회귀도 추가했다.
+
 ## 2026-08-20 — T-VN-40C 및 인수 ③~⑤ 종결
 
 > **2026-08-20 정정(사용자 지시)**: 이 절은 원래 `T-VN-40B`를 함께 종결로 적었으나,

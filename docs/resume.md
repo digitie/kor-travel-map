@@ -43,17 +43,41 @@ barrier가 유지되고 그 값은 hung writer 최대 정지 시간이기도 하
 결정이다. 선택지 셋과 비용은 soak 보고서 §"열린 결정"과 `docs/tasks.md`에 있다.
 
 그 결정 뒤에 #922와 T-VN-41S를 완료로 표시한다.
+## 2026-08-21 — T-VN-37D 두 번째 리뷰 P2 반영
+
+두 번째 전문 reviewer가 발견한 curation candidate timestamp의 세션 timezone 의존성을
+해소했다. notice detail의 `valid_start_time`/`valid_end_time`을 KST 고정 JSON으로
+직렬화하고 UTC·Asia/Seoul 세션 동일성 회귀를 추가했으며, targeted integration 2건이
+통과했다. 두 reviewer 모두 P0/P1 없음, GO로 최종 재검토를 완료했다.
+
+### 다음 한 작업
+
+최신 수정본을 리베이스·보안 감사 후 push하고 PR #1041의 Python matrix와 필요한 live UI
+인수 증거를 확인한다. 모든 required check와 review가 green일 때만 merge한다.
+
+## 2026-08-21 — T-VN-37D 적대 리뷰 findings 반영
+
+전문 reviewer 2명 모두 P0 없이 검토를 완료했다. `valid_during`의 stored-column 잠금
+위험에는 migration-local 30초 `lock_timeout`과 writer fence/maintenance 전제를 추가했고,
+admin curation candidate의 `to_jsonb(notice)` 내부 필드 누출 P1은 SQL에서 `valid_during`을
+제외하도록 수정했다. NULL·one-sided·equal range, public/admin active read, candidate
+detail shape 회귀를 추가했으며 수정 후 targeted integration 2건이 통과했다.
+
+## 2026-08-21 — T-VN-37D notice empty range 구현
+
+`feature.feature_notices.valid_during`을 `valid_start_time`/`valid_end_time`에서
+파생하는 stored `tstzrange`로 추가했다. 정상 범위는 `[start, end)`, 미래 발효 전
+철회(`end < start`)는 PostgreSQL `empty`로 표현하며, 두 시각이 모두 없으면 NULL이다.
+미래 경고를 숨기지 않도록 공개·admin active read는 기존 `valid_end_time` 비교를
+유지하고, `NoticeDetail`/OpenAPI 응답 계약은 바꾸지 않았다. ADR-095와 migration
+`0232_tvn37d_notice_empty_range`를 추가했으며 integration regression을 작성했다.
+
 ## 2026-08-21 — 완료 task를 정본 원장으로 이관
 
 `T-VN-H50`(PR #1036), `T-VN-C05A`~`C05D`(PR #1037),
 `T-C7-BROWSER-EVIDENCE`·`T-C7-SCOPE-REGISTRY`·`T-C7-LIVE-SERIAL`·
 `T-FE-MOCK-MANIFEST`(PR #1038)는 모두 머지되어 `tasks-done.md`로 이관했다.
 `tasks.md`에는 `T-VN-40B` 잔여와 `T-FE-MOCK-FLAKE`를 포함한 미완료 실행 단위만 남겼다.
-
-### 다음 한 작업
-
-완료 이관 뒤의 우선순위는 [`tasks.md`](tasks.md) 상단 인덱스의 열린 항목을 따른다.
-이번 정리에서 새 구현 작업은 추가하지 않았다.
 
 ## 2026-08-20 — T-VN-C05A~D provider 머지 후 map 최종 게이트
 

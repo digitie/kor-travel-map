@@ -980,6 +980,15 @@ CREATE TABLE feature.feature_notices (
   severity                SMALLINT,
   valid_start_time        TIMESTAMPTZ,
   valid_end_time          TIMESTAMPTZ,
+  valid_during            TSTZRANGE GENERATED ALWAYS AS (
+    CASE
+      WHEN valid_start_time IS NULL AND valid_end_time IS NULL THEN NULL::tstzrange
+      WHEN valid_start_time IS NOT NULL
+       AND valid_end_time IS NOT NULL
+       AND valid_end_time < valid_start_time THEN 'empty'::tstzrange
+      ELSE tstzrange(valid_start_time, valid_end_time, '[)')
+    END
+  ) STORED,
   source_agency           TEXT,
   officer_name            TEXT,
   payload                 JSONB NOT NULL DEFAULT '{}'::jsonb,
@@ -994,11 +1003,14 @@ CREATE INDEX idx_feature_notices_validity
   ON feature.feature_notices (valid_end_time, valid_start_time);
 ```
 
-유효기간은 typed `timestamptz`다 — read 필터가 문자열 파싱이나 방어용 cast 없이 직접
-비교한다. **`valid_start_time <= valid_end_time` CHECK는 두지 않는다**: provider가 미래
+유효기간의 원본 경계는 typed `timestamptz`다 — read 필터가 문자열 파싱이나 방어용 cast 없이 직접
+비교한다. `valid_during`은 이 두 경계에서 파생되는 typed `tstzrange`다. **`valid_start_time <= valid_end_time`
+CHECK는 두지 않는다**: provider가 미래
 발효 공고를 공표한 뒤 발효 전에 내리면 lifecycle이 `valid_end_time=철회시각`을 써
 `end < start`가 되며, 이는 "발효 전에 철회됨"이라는 정당한 사실이지 결함이 아니다.
-CHECK는 DTO가 실제로 강제하는 불변식(§6.2 event 기간)에만 둔다.
+이 경우 `valid_during`은 `empty`가 된다. 공개 read는 미래 발효 경고를 보존하기 위해
+기존 `valid_end_time` 술어를 유지한다. CHECK는 DTO가 실제로 강제하는 불변식(§6.2
+event 기간)에만 둔다.
 
 ### 6.4 `feature.feature_routes`
 

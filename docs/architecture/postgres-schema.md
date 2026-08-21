@@ -77,7 +77,7 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 | `features` | `feature_id` | kind/name/category/coord/coord_precision_digits/coord_5179(generated)/address/legal_dong_code/marker_*/parent/sibling_group_id/raw_refs/status/data_origin/data_version/user_change_*; `UNIQUE (feature_id, kind)`는 아래 subtype 배타 arc의 참조 대상. kind별 detail과 선·면 geometry는 core에 없고 typed subtype이 정본이다 (ADR-086) |
 | `feature_places` | `feature_id` | place_kind (NOT NULL), phones `text[]` (≤3), biz_number, license_date, business_hours, facility_info, reviews_link, payload |
 | `feature_events` | `feature_id` | event_kind (NOT NULL), starts_on/ends_on (CHECK), timezone, opening_hours, venue_name, tel, content_id, content_type_id, area_code, sigungu_code, payload |
-| `feature_notices` | `feature_id` | notice_type (NOT NULL), severity (0-5 CHECK), valid_start/end_time `timestamptz`, source_agency, officer_name, payload |
+| `feature_notices` | `feature_id` | notice_type (NOT NULL), severity (0-5 CHECK), valid_start/end_time `timestamptz`, generated `valid_during` `tstzrange`, source_agency, officer_name, payload |
 | `feature_routes` | `feature_id` | geom `MULTILINESTRING(4326)` NOT NULL, route_type (NOT NULL), geometry_source/status, total_distance_meters, expected_duration_minutes, difficulty, begin_*/end_*, payload |
 | `feature_areas` | `feature_id` | geom `MULTIPOLYGON(4326)` NOT NULL, area_kind (NOT NULL), boundary_source, area_square_meters, regulation_scope, administrative_office, description, payload |
 | `features_detailed` (view) | — | core + subtype 5종에서 `detail`/`geom`을 조립하는 단일 정본. `public_features`는 이 뷰 위의 `active AND deleted_at IS NULL` projection이다 |
@@ -279,6 +279,10 @@ membership을 batch로 붙여 fan-out이 page 경계를 바꾸지 않게 한다.
 
 subtype 테이블 자체가 kind로 갈리므로 `WHERE kind=...` 부분 조건이 필요 없다. 공간 술어는
 조립 뷰(`features_detailed`)의 산출 `geom`이 아니라 GiST가 붙은 subtype을 직접 참조해야 한다.
+
+`feature_notices.valid_during`은 `valid_start_time`/`valid_end_time`에서 파생되는
+stored `tstzrange`다. 발효 전 철회(`end < start`)는 `empty`로 표현하지만, active
+notice 조회는 미래 경고를 보존하기 위해 기존 `valid_end_time` 비교를 사용한다.
 
 | 테이블 | 인덱스 |
 |--------|--------|
@@ -582,17 +586,19 @@ squash(2026-08-14) 이후 baseline과 bridge, T-VN-40 migration만 있다.
 - `0201_squash_bridge.py` — revision id는 파일명이 아니라 **`0104_tvn36_final_fence`**다.
   이미 `0104`에 있는 DB가 이 그래프에서도 해석되게 하는 노드다.
 - `0202_tvn40_curation_receipts.py`부터 `0225_tvn40c_physical_removal.py`까지 —
-  bridge 뒤에 이어지는 T-VN-40 단일 체인이며, 현재 head는
-  `0225_tvn40c_physical_removal`이다.
+  bridge 뒤에 이어지는 T-VN-40 단일 체인이다. 그 뒤에 이미 적용된
+  `0229_tvn40b_source_rule_action`, `0230_tvn_c05_krforest_datasets`,
+  `0231_tvn41s_snapshot_material`, `0232_tvn37d_notice_empty_range`가 순서대로
+  이어지며 현재 head는 `0232_tvn37d_notice_empty_range`다.
 
 `0001~0104` 체인 109개는 `alembic/legacy_versions/`의 실행되지 않는 아카이브다
 ([README](../../alembic/legacy_versions/README.md)). **`versions/`로 되돌리지 마라** —
 bridge와 아카이브가 `0104_tvn36_final_fence`를 둘 다 선언하면 Alembic graph가 손상된다.
 
-#### 다음 migration(`0231`~) 작성
+#### 다음 migration(`0233`~) 작성
 
-1. 파일은 `alembic/versions/0231_<name>.py`,
-   `down_revision = "0230_tvn_c05_krforest_datasets"`(= 현재 head)로 잇는다.
+1. 파일은 `alembic/versions/0233_<name>.py`,
+   `down_revision = "0232_tvn37d_notice_empty_range"`(= 현재 head)로 잇는다.
    **`0201`을 쓰지 마라** — 그건 bridge 파일명이고 revision id가 아니다.
 2. `0105`~`0199`처럼 아카이브와 겹치는 번호는 쓰지 않는다. 파일 정렬이 `0200`보다
    앞서면서 `down_revision`은 뒤를 가리키는 파일이 생겨 읽는 사람을 오도한다.

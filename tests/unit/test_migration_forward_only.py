@@ -38,6 +38,7 @@ FORWARD_ONLY_REVISIONS = (
     "0091_tvn33_cutover_fence",
     "0092_tvn33_offline_cleanup",
     "0200_schema_baseline",
+    "0232_tvn37d_notice_empty_range",
     # bridge도 forward-only다. 목록에 없으면 동적 스캔에만 걸리는데, 이 파일 자신이
     # "선언 문자열만 검사하면 선언을 지우는 것으로 게이트를 통과할 수 있다"고 적어 둔
     # 바로 그 무방비 상태가 된다. 파일 stem으로 적는다 — revision id는 옛 head다.

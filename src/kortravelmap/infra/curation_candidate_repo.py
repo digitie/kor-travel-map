@@ -114,7 +114,31 @@ core.category AS feature_category,
 CASE core.kind
   WHEN 'place' THEN COALESCE(to_jsonb(place), '{}'::jsonb)
   WHEN 'event' THEN COALESCE(to_jsonb(event), '{}'::jsonb)
-  WHEN 'notice' THEN COALESCE(to_jsonb(notice), '{}'::jsonb)
+  -- valid_during is an internal generated projection, not part of the
+  -- NoticeDetail/admin response contract.  Keep timestamptz values in the
+  -- same KST representation as the public feature projection so the
+  -- candidate representation ETag is independent of the session timezone.
+  WHEN 'notice' THEN CASE WHEN notice.feature_id IS NULL THEN '{}'::jsonb ELSE
+    jsonb_set(
+      jsonb_set(
+        to_jsonb(notice) - 'valid_during',
+        '{valid_start_time}',
+        to_jsonb(to_char(
+          notice.valid_start_time AT TIME ZONE 'Asia/Seoul',
+          CASE WHEN EXTRACT(microsecond FROM notice.valid_start_time)::bigint % 1000000 = 0
+               THEN 'YYYY-MM-DD"T"HH24:MI:SS"+09:00"'
+               ELSE 'YYYY-MM-DD"T"HH24:MI:SS.US"+09:00"' END
+        ))
+      ),
+      '{valid_end_time}',
+      to_jsonb(to_char(
+        notice.valid_end_time AT TIME ZONE 'Asia/Seoul',
+        CASE WHEN EXTRACT(microsecond FROM notice.valid_end_time)::bigint % 1000000 = 0
+             THEN 'YYYY-MM-DD"T"HH24:MI:SS"+09:00"'
+             ELSE 'YYYY-MM-DD"T"HH24:MI:SS.US"+09:00"' END
+      ))
+    )
+  END
   WHEN 'route' THEN COALESCE(to_jsonb(route), '{}'::jsonb)
   WHEN 'area' THEN COALESCE(to_jsonb(area_row), '{}'::jsonb)
   ELSE '{}'::jsonb

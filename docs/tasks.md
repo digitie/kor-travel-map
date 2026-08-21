@@ -11,6 +11,7 @@
 [`tasks-done.md`](tasks-done.md)로 이관했다. 이번 재대조에서 완료된
 `T-VN-H50`·`T-VN-C05A`~`C05D`·`T-C7-BROWSER-EVIDENCE`·`T-C7-SCOPE-REGISTRY`·
 `T-C7-LIVE-SERIAL`·`T-FE-MOCK-MANIFEST`도 이관했다. 아래에는 아직 닫히지 않은
+`T-VN-37D`도 이번 구현으로 완료되어 `tasks-done.md`에 기록했다. 아래에는 아직 닫히지 않은
 실행 단위만 둔다.
 
 **Lane A (Claude Code)**와 **Lane B (codex)**는 서로 병렬 실행한다. 각 lane 내부는 아래 순서를
@@ -37,7 +38,7 @@ barrier로 직렬화한다.
   - [ ] `T-VN-M05`(provider 발행 시 중복 판정 — 자동 병합 금지)
 - **Lane C — 사문화 정리·미구현 dataset (다른 lane과 무관, 아무 때나)**
 - **Wave 2 barrier 이후**
-  - Lane A: [ ] `T-VN-37D`(notice empty range 표현 — 제품 결정 대기)
+  - Lane A: [x] `T-VN-37D`(notice empty range 표현 — ADR-095, migration 0232)
   - 32~38 join barrier 뒤 Lane B: `T-VN-40C`는 2026-08-20 prod 적용까지 완료했다.
     **`T-VN-40B`는 코드만 착지했고 prod 미적용이다** — 그 미적용이 admin rule 조회 500을
     내고 있다(2026-08-21 실측, 아래 잔여 절).
@@ -901,18 +902,20 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 > ADR-066~075가 목표 스펙 정본이다. 각 migration task는 forward-only 격리 clone에서 검증하고,
 > 명시적 downgrade 수용 조건이 없는 한 전진 뒤 rollback하지 않는다.
 
-### T-VN-37D — notice empty range 표현 (보류)
+### T-VN-37D — notice empty range 표현 (완료)
 
 > 계보 key 물화·인덱스 probe(`T-VN-37`, PR #968)는 완료 이력으로
-> [`tasks-done.md`](tasks-done.md)에 옮겼다. 이 항목은 별도 제품 결정이 필요한 후속이다.
+> [`tasks-done.md`](tasks-done.md)에 옮겼다. 이 후속은 ADR-095에서 제품 의미를
+> 확정하고 구현했다.
 
-- [ ] T-VN-37D — **empty range 표현 (보류)**
+- [x] T-VN-37D — **empty range 표현**
 
   provider가 미래 시행 공지를 철회하면 `end < start`가 실재한다(실측
   `start=2026-07-13/end=2026-06-02`). 결함이 아니라 "발효 전에 철회됨"이고, 35B가
-  CHECK를 두지 않은 이유다. 이를 `tstzrange` empty로 **정확히 표현**하는 것은
-  여전히 가치가 있으나, 위 성능 문제와 무관하고 read 술어 변경(=제품 결정)이
-  선행돼야 하므로 분리한다. notice_type별 "미래 발효를 보일 것인가" 결정이 먼저다.
+  CHECK를 두지 않은 이유다. `feature_notices.valid_during` generated column이
+  정상 범위는 `[start, end)`, 발효 전 철회는 `empty`로 표현한다. 모든 notice
+  유형의 미래 발효 공지는 계속 노출하고, active read는 기존 `valid_end_time`
+  술어를 유지한다(ADR-095, migration `0232_tvn37d_notice_empty_range`).
 
 - [ ] T-VN-39 — **KTM·PinVi write-fence cutover**
 

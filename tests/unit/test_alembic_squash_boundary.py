@@ -50,6 +50,7 @@ _EXPECTED_REVISIONS = (
     "0229_tvn40b_source_rule_action",
     "0230_tvn_c05_krforest_datasets",
     "0231_tvn41s_snapshot_material",
+    "0232_tvn37d_notice_empty_range",
 )
 #: `alembic_version.version_num`의 컬럼 폭(alembic 기본값).
 _ALEMBIC_VERSION_NUM_LENGTH = 32
