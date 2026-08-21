@@ -39,6 +39,20 @@ def test_docker_backup_script_captures_standalone_backup_bundle() -> None:
     assert "rustfs-data.tar.gz" in script
     assert "manifest.json" in script
     assert "SHA256SUMS" in script
+    assert "pg_export_snapshot" in script
+    assert "--snapshot=$snapshot_id" in script
+    assert "manual_feature_identity_claims.jsonl" in script
+    assert "feature_creation_origins.jsonl" in script
+    assert "domain_commands.jsonl" in script
+    assert "domain_command_results.jsonl" in script
+    assert "feature_requests.jsonl" in script
+    assert "manual_provider_dedup_cases.jsonl" in script
+    assert "manual_provider_dedup_resolutions.jsonl" in script
+    assert "feature_reference_reconciliation_events.jsonl" in script
+    assert "feature_reference_reconciliation_acks.jsonl" in script
+    assert "feature_reference_reconciliation_subscriptions.jsonl" in script
+    assert '"schema_version": 3' in script
+    assert '"manual_feature_evidence"' in script
     assert "with-pg-advisory-lock.py" in script
     assert "maintenance:backup-restore" in script
     assert "write-domain-command-marker.py" in script
@@ -86,10 +100,8 @@ def test_all_backup_effect_scripts_require_preacquired_durable_docker_fence() ->
         ),
     ):
         script = _read(path)
-        assert "source \"$ROOT_DIR/scripts/domain-command-fence.sh\"" in script
-        assert script.index("acquire_domain_command_fence") < script.index(
-            first_mutation
-        )
+        assert 'source "$ROOT_DIR/scripts/domain-command-fence.sh"' in script
+        assert script.index("acquire_domain_command_fence") < script.index(first_mutation)
         assert script.index("write-domain-command-marker.py") < script.index(
             "release_domain_command_fence"
         )
@@ -133,6 +145,22 @@ def test_docker_restore_script_restores_backup_into_staging_targets() -> None:
     assert "docker run --rm" in script
     assert "KOR_TRAVEL_MAP_RESTORE_SKIP_VERIFY" in script
     assert "docker-restore-verify.sh" in script
+    assert '"$evidence_schema_version" == "3"' in script
+    assert "repair_v3_restored_manual_feature_boundary" in script
+    repair = script.index("repair_v3_restored_manual_feature_boundary()")
+    legacy = script.index('run_restore_bootstrap_phase legacy "$restore_bootstrap_dsn"', repair)
+    m05_pre = script.index('run_restore_bootstrap_phase m05-pre "$restore_bootstrap_dsn"', legacy)
+    migration = script.index("api ./docker/migrate-m05.sh", m05_pre)
+    m05_repair = script.index(
+        'run_restore_bootstrap_phase m05-repair "$restore_bootstrap_dsn"', migration
+    )
+    assert legacy < m05_pre < migration < m05_repair
+    assert "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" in script
+    assert "kortravelmap.infra.runtime_privileges" in script
+    assert "assert_runtime_db_privilege_boundary" in script
+    assert script.index("repair_v3_restored_manual_feature_boundary") < script.index(
+        'if [[ "$KOR_TRAVEL_MAP_RESTORE_SKIP_RUSTFS" != "1" ]]'
+    )
     assert "with-pg-advisory-lock.py" in script
     assert "maintenance:backup-restore" in script
     assert "KOR_TRAVEL_MAP_COMMAND_RECOVERY" in script
@@ -175,7 +203,7 @@ def test_restore_recovery_does_not_adopt_healthy_stale_targets(
     fake_docker.write_text(
         "#!/usr/bin/env bash\n"
         f"printf '%s\\n' \"$*\" >> {docker_log}\n"
-        "if [[ \"$*\" == *\"SELECT 1 FROM pg_database\"* ]]; then\n"
+        'if [[ "$*" == *"SELECT 1 FROM pg_database"* ]]; then\n'
         "  printf '1\\n'\n"
         "fi\n",
         encoding="utf-8",
@@ -232,6 +260,23 @@ def test_restore_verify_script_checks_staging_counts() -> None:
     assert "information_schema.tables" in script
     assert "docker volume inspect" in script
     assert "file_count" in script
+    assert "verify_manual_feature_evidence" in script
+    assert "manual_feature_evidence" in script
+    assert "manual evidence root mismatch" in script
+    assert "schema_version not in {1, 2, 3}" in script
+    assert "feature_requests" in script
+    assert "manual_provider_dedup_cases" in script
+    assert "manual_provider_dedup_resolutions" in script
+    assert "feature_reference_reconciliation_events" in script
+    assert "feature_reference_reconciliation_acks" in script
+    assert "feature_reference_reconciliation_subscriptions" in script
+    assert "event envelope/row mismatch" in script
+    assert "rebuild_feature_reference_reconciliation_leases" in script
+    assert "M05 restore has a non-prefix reconciliation ACK" in script
+    assert "M05 restore has an ACK/event hash mismatch" in script
+    assert "M05 restore has an event payload hash mismatch" in script
+    assert "lease_epoch = CASE" in script
+    assert "KOR_TRAVEL_MAP_RESTORE_BACKUP_DIR" in script
 
 
 @pytest.mark.unit

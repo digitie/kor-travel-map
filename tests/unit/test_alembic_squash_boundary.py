@@ -47,10 +47,18 @@ _EXPECTED_REVISIONS = (
     "0223_tvn40_identity_mappings",
     "0224_c7_external_system_scope",
     "0225_tvn40c_physical_removal",
+    # M01 lane은 C05A가 같은 0229 기반으로 먼저 착지한 뒤 이어진다. revision ID의
+    # 숫자순이 아니라 down_revision graph가 실제 적용 순서를 정한다.
     "0229_tvn40b_source_rule_action",
     "0230_tvn_c05_krforest_datasets",
     "0231_tvn41s_snapshot_material",
     "0232_tvn37d_notice_empty_range",
+    "0226_m01_manual_feature_create",
+    "0227_m02_feature_provenance",
+    "0228_m03_manual_curation",
+    "0233_m04_feature_request_queue",
+    "0234_m05_manual_provider_dedup",
+    "0235_m05_reconciliation_delivery",
 )
 #: `alembic_version.version_num`의 컬럼 폭(alembic 기본값).
 _ALEMBIC_VERSION_NUM_LENGTH = 32
@@ -259,19 +267,29 @@ def test_revision_identifiers_fit_alembic_version_column() -> None:
     )
 
 
-def test_active_graph_is_only_0200_bridge_to_head() -> None:
+def test_active_graph_is_only_0200_bridge_to_current_head() -> None:
     paths = sorted(_ACTIVE.glob("[0-9]*.py"))
     revisions = tuple(str(_literal(path, "revision")) for path in paths)
-    parents = tuple(_literal(path, "down_revision") for path in paths)
+    parents_by_revision = {
+        str(_literal(path, "revision")): _literal(path, "down_revision") for path in paths
+    }
 
-    assert revisions == _EXPECTED_REVISIONS
-    assert parents == (None, *_EXPECTED_REVISIONS[:-1])
+    # 파일명 정렬은 과거 번호와 새 upstream 번호가 교차하면 실제 적용 순서가 될 수 없다.
+    # Alembic의 정본은 revision/down_revision graph이므로, 파일 집합과 parent map을 분리해
+    # 검증한다.
+    assert set(revisions) == set(_EXPECTED_REVISIONS)
+    assert len(revisions) == len(_EXPECTED_REVISIONS)
+    assert parents_by_revision == dict(
+        zip(_EXPECTED_REVISIONS, (None, *_EXPECTED_REVISIONS[:-1]), strict=True)
+    )
     assert json.loads(_GRAPH.read_text(encoding="utf-8"))["revisions"] == [
         {
             "revision": revision,
             "down_revision": [] if parent is None else [parent],
         }
-        for revision, parent in zip(revisions, parents, strict=True)
+        for revision, parent in zip(
+            _EXPECTED_REVISIONS, (None, *_EXPECTED_REVISIONS[:-1]), strict=True
+        )
     ]
 
 

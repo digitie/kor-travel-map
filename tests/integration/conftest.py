@@ -175,14 +175,12 @@ async def migrated_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
     테이블까지 만든 엔진. search_path에 ``x_extension`` 포함 → unqualified ST_*
     (GeoAlchemy2 INSERT의 ``ST_GeomFromEWKT`` 등) 호출 가능 (ADR-008/012).
     """
-    import asyncio
     from pathlib import Path
 
     from alembic.config import Config
     from sqlalchemy import event
     from sqlalchemy.engine import make_url
 
-    from alembic import command
     from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 
     raw_dsn = pg_container.get_connection_url()  # type: ignore[attr-defined]
@@ -212,15 +210,11 @@ async def migrated_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
     cfg = Config(str(root / "alembic.ini"))
     cfg.set_main_option("script_location", str(root / "alembic"))
     cfg.set_main_option("sqlalchemy.url", migrator_dsn.render_as_string(hide_password=False))
-    previous_role_mode = os.environ.get("KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE")
-    os.environ["KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE"] = "true"
-    try:
-        await asyncio.to_thread(command.upgrade, cfg, "head")
-    finally:
-        if previous_role_mode is None:
-            os.environ.pop("KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE", None)
-        else:
-            os.environ["KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE"] = previous_role_mode
+    from tests.integration._tvn34_migration_bootstrap import (
+        upgrade_head_with_tvn_m01_phase,
+    )
+
+    await upgrade_head_with_tvn_m01_phase(cfg, async_dsn)
 
     # Production API entrypoint performs this immediately after Alembic while
     # only the migrator DSN exists.  Keep the shared fixture on that executable
@@ -280,6 +274,27 @@ async def migrated_session(migrated_engine: AsyncEngine) -> AsyncIterator[AsyncS
     ):
         yield session
         await session.rollback()
+
+
+@pytest.fixture
+async def tvn_m01_m05_role_graph(migrated_engine: AsyncEngine) -> AsyncIterator[None]:
+    """독립 migration test가 해제한 cluster-wide M01~M05 edge를 다시 세운다.
+
+    테스트별 PostgreSQL database는 격리돼도 role/membership은 testcontainer cluster 전체에
+    남는다. C05처럼 legacy frozen graph를 검증하는 독립 DB bootstrap은 post-legacy edge를
+    의도적으로 해제한다. 이 fixture는 이미 head까지 올라간 공유 migrated DB에서 M01/M04/M05
+    runtime role graph만 다시 확정해 뒤따르는 lane 검증이 collection 순서에 의존하지 않게 한다.
+    """
+    from tests.integration._tvn34_migration_bootstrap import (
+        bootstrap_tvn_m01_role_phase,
+        repair_tvn_m05_role_phase,
+        restore_tvn_m05_role_graph,
+    )
+
+    admin_dsn = migrated_engine.url.render_as_string(hide_password=False)
+    await bootstrap_tvn_m01_role_phase(admin_dsn)
+    await restore_tvn_m05_role_graph(admin_dsn)
+    await repair_tvn_m05_role_phase(admin_dsn)
 
 
 @pytest.fixture(scope="session")

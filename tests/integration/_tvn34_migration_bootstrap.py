@@ -16,8 +16,10 @@ import os
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
+from alembic.config import Config
+
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncEngine
+    from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 _TVN34_TEST_MIGRATOR_PASSWORD = "tvn34-test-only-migrator-password"
 _TVN40_TEST_RUNTIME_PASSWORD = "tvn40-test-only-runtime-password"
@@ -187,6 +189,63 @@ async def bootstrap_tvn34_migration_roles(engine: AsyncEngine) -> str:
             "TO ktm_feature_state_procedure_owner, ktm_feature_runtime",
         ):
             await connection.execute(text(statement))
+        # PostgreSQL role은 cluster-wide지만 integration DB는 test마다 새로 만든다.
+        # 앞선 test의 M01/M04/M05 phase가 남긴 membership은 새 DB의 frozen legacy
+        # membership oracle에도 보인다. role 자체를 지우지 않고 post-legacy edge만
+        # 해제해 exact frozen graph를 만든다. head path가 각 boundary 뒤 정확한 edge를
+        # 다시 부여한다.
+        await connection.execute(
+            text(
+                """
+                DO $m01_legacy_memberships$
+                BEGIN
+                    IF to_regrole('ktm_manual_feature_procedure_owner') IS NOT NULL THEN
+                        REVOKE ktm_manual_feature_procedure_owner
+                            FROM ktm_feature_schema_owner;
+                    END IF;
+                    IF to_regrole('ktm_manual_feature_admin_executor') IS NOT NULL THEN
+                        REVOKE ktm_manual_feature_admin_executor
+                            FROM ktm_feature_api_runtime, ktm_feature_dagster_runtime;
+                    END IF;
+                    IF to_regrole('ktm_feature_create_provider_executor') IS NOT NULL THEN
+                        REVOKE ktm_feature_create_provider_executor
+                            FROM ktm_feature_api_runtime, ktm_feature_dagster_runtime;
+                    END IF;
+                    IF to_regrole('ktm_feature_request_procedure_owner') IS NOT NULL THEN
+                        REVOKE ktm_feature_request_procedure_owner
+                            FROM ktm_feature_schema_owner;
+                    END IF;
+                    IF to_regrole('ktm_feature_request_service_executor') IS NOT NULL THEN
+                        REVOKE ktm_feature_request_service_executor
+                            FROM ktm_feature_api_runtime, ktm_feature_dagster_runtime;
+                    END IF;
+                    IF to_regrole('ktm_feature_request_admin_executor') IS NOT NULL THEN
+                        REVOKE ktm_feature_request_admin_executor
+                            FROM ktm_feature_api_runtime, ktm_feature_dagster_runtime;
+                    END IF;
+                    IF to_regrole('ktm_manual_provider_dedup_procedure_owner') IS NOT NULL THEN
+                        REVOKE ktm_manual_provider_dedup_procedure_owner
+                            FROM ktm_feature_schema_owner;
+                    END IF;
+                    IF to_regrole('ktm_manual_provider_dedup_detector_executor') IS NOT NULL THEN
+                        REVOKE ktm_manual_provider_dedup_detector_executor
+                            FROM ktm_feature_api_runtime, ktm_feature_dagster_runtime;
+                    END IF;
+                    IF to_regrole('ktm_manual_provider_dedup_admin_executor') IS NOT NULL THEN
+                        REVOKE ktm_manual_provider_dedup_admin_executor
+                            FROM ktm_feature_api_runtime, ktm_feature_dagster_runtime;
+                    END IF;
+                    IF to_regrole(
+                        'ktm_feature_reference_reconciliation_service_executor'
+                    ) IS NOT NULL THEN
+                        REVOKE ktm_feature_reference_reconciliation_service_executor
+                            FROM ktm_feature_api_runtime, ktm_feature_dagster_runtime;
+                    END IF;
+                END
+                $m01_legacy_memberships$;
+                """
+            )
+        )
         # PostGIS image가 initdb에서 public에 둔 non-relocatable extension은
         # application relation이 없는 fresh DB에서만 다시 만든다. 이것은 production
         # bootstrap의 destructive-operation guard와 같은 fresh-only branch다.
@@ -258,6 +317,684 @@ async def bootstrapped_migrator_dsn(async_dsn: str) -> str:
         .set(username="ktm_feature_migrator", password=migrator_password)
         .render_as_string(hide_password=False)
     )
+
+
+async def bootstrap_tvn_m01_role_phase(async_dsn: str) -> None:
+    """0225 또는 M01 이후 head에서 M01/M04 role graph를 재확정한다."""
+
+    from sqlalchemy import text
+
+    from kortravelmap.infra.db import make_async_engine
+
+    engine = make_async_engine(async_dsn, pool_size=1)
+    try:
+        async with engine.begin() as connection:
+            version = await connection.scalar(
+                text("SELECT version_num FROM public.alembic_version")
+            )
+            if version not in {
+                "0225_tvn40c_physical_removal",
+                "0226_m01_manual_feature_create",
+                "0227_m02_feature_provenance",
+                "0228_m03_manual_curation",
+                "0233_m04_feature_request_queue",
+                "0234_m05_manual_provider_dedup",
+                "0235_m05_reconciliation_delivery",
+            }:
+                raise RuntimeError(
+                    "M01 test role phase requires the M01/M05 graph, "
+                    f"not {version!r}"
+                )
+            await connection.execute(
+                text(
+                    """
+                    DO $m01_roles$
+                    BEGIN
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_catalog.pg_roles
+                            WHERE rolname = 'ktm_manual_feature_procedure_owner'
+                        ) THEN
+                            CREATE ROLE ktm_manual_feature_procedure_owner NOLOGIN NOINHERIT;
+                        END IF;
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_catalog.pg_roles
+                            WHERE rolname = 'ktm_manual_feature_admin_executor'
+                        ) THEN
+                            CREATE ROLE ktm_manual_feature_admin_executor NOLOGIN NOINHERIT;
+                        END IF;
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_catalog.pg_roles
+                            WHERE rolname = 'ktm_feature_create_provider_executor'
+                        ) THEN
+                            CREATE ROLE ktm_feature_create_provider_executor NOLOGIN NOINHERIT;
+                        END IF;
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_catalog.pg_roles
+                            WHERE rolname = 'ktm_feature_request_procedure_owner'
+                        ) THEN
+                            CREATE ROLE ktm_feature_request_procedure_owner NOLOGIN NOINHERIT;
+                        END IF;
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_catalog.pg_roles
+                            WHERE rolname = 'ktm_feature_request_service_executor'
+                        ) THEN
+                            CREATE ROLE ktm_feature_request_service_executor NOLOGIN NOINHERIT;
+                        END IF;
+                        IF NOT EXISTS (
+                            SELECT 1 FROM pg_catalog.pg_roles
+                            WHERE rolname = 'ktm_feature_request_admin_executor'
+                        ) THEN
+                            CREATE ROLE ktm_feature_request_admin_executor NOLOGIN NOINHERIT;
+                        END IF;
+                    END
+                    $m01_roles$;
+                    """
+                )
+            )
+            for statement in (
+                "ALTER ROLE ktm_manual_feature_procedure_owner NOLOGIN NOINHERIT "
+                "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+                "ALTER ROLE ktm_manual_feature_admin_executor NOLOGIN NOINHERIT "
+                "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+                "ALTER ROLE ktm_feature_create_provider_executor NOLOGIN NOINHERIT "
+                "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+                "ALTER ROLE ktm_feature_request_procedure_owner NOLOGIN NOINHERIT "
+                "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+                "ALTER ROLE ktm_feature_request_service_executor NOLOGIN NOINHERIT "
+                "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+                "ALTER ROLE ktm_feature_request_admin_executor NOLOGIN NOINHERIT "
+                "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+                "GRANT ktm_manual_feature_procedure_owner TO ktm_feature_schema_owner "
+                "WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
+                "GRANT ktm_manual_feature_admin_executor TO ktm_feature_api_runtime "
+                "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
+                "GRANT ktm_feature_create_provider_executor TO ktm_feature_dagster_runtime "
+                "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
+                "GRANT ktm_feature_request_procedure_owner TO ktm_feature_schema_owner "
+                "WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
+                "GRANT ktm_feature_request_service_executor TO ktm_feature_api_runtime "
+                "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
+                "GRANT ktm_feature_request_admin_executor TO ktm_feature_api_runtime "
+                "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
+                "REVOKE ktm_manual_feature_admin_executor FROM ktm_feature_dagster_runtime",
+                "REVOKE ktm_feature_create_provider_executor FROM ktm_feature_api_runtime",
+                "REVOKE ktm_feature_request_service_executor, "
+                "ktm_feature_request_admin_executor FROM ktm_feature_dagster_runtime",
+                "GRANT USAGE, CREATE ON SCHEMA feature "
+                "TO ktm_manual_feature_procedure_owner",
+                "GRANT USAGE ON SCHEMA ops TO ktm_manual_feature_procedure_owner",
+                "GRANT USAGE, CREATE ON SCHEMA feature "
+                "TO ktm_feature_request_procedure_owner",
+                "GRANT USAGE ON SCHEMA ops TO ktm_feature_request_procedure_owner",
+                "GRANT SELECT, UPDATE(command_id) ON TABLE ops.domain_commands "
+                "TO ktm_feature_request_procedure_owner",
+                "GRANT SELECT ON TABLE ops.domain_command_results "
+                "TO ktm_feature_request_procedure_owner",
+                "GRANT EXECUTE ON PROCEDURE feature.create_feature_with_initial_state("
+                "jsonb, text, text, text, jsonb) "
+                "TO ktm_feature_request_procedure_owner",
+                "GRANT SELECT, UPDATE(command_id) ON TABLE ops.domain_commands "
+                "TO ktm_manual_feature_procedure_owner",
+                "GRANT SELECT ON TABLE ops.domain_command_results "
+                "TO ktm_manual_feature_procedure_owner",
+                "GRANT SELECT (feature_uuid) ON TABLE feature.features "
+                "TO ktm_manual_feature_procedure_owner",
+                "GRANT EXECUTE ON PROCEDURE feature.create_feature_with_initial_state("
+                "jsonb, text, text, text, jsonb) "
+                "TO ktm_manual_feature_procedure_owner",
+            ):
+                await connection.execute(text(statement))
+            await connection.execute(
+                text(
+                    """
+                    DO $m01_role_assert$
+                    BEGIN
+                        IF EXISTS (
+                            SELECT 1
+                            FROM pg_catalog.pg_roles
+                            WHERE rolname IN (
+                                'ktm_manual_feature_procedure_owner',
+                                'ktm_manual_feature_admin_executor',
+                                'ktm_feature_create_provider_executor',
+                                'ktm_feature_request_procedure_owner',
+                                'ktm_feature_request_service_executor',
+                                'ktm_feature_request_admin_executor'
+                            ) AND (
+                                rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb
+                                OR rolcreaterole OR rolbypassrls OR rolreplication
+                            )
+                        ) THEN
+                            RAISE EXCEPTION 'M01 NOLOGIN role has an unsafe attribute';
+                        END IF;
+                        IF (
+                            SELECT count(*)
+                            FROM pg_catalog.pg_auth_members AS membership
+                            WHERE membership.roleid IN (
+                                'ktm_manual_feature_procedure_owner'::regrole,
+                                'ktm_manual_feature_admin_executor'::regrole,
+                                'ktm_feature_create_provider_executor'::regrole,
+                                'ktm_feature_request_procedure_owner'::regrole,
+                                'ktm_feature_request_service_executor'::regrole,
+                                'ktm_feature_request_admin_executor'::regrole
+                            )
+                        ) <> 6 OR EXISTS (
+                            SELECT 1
+                            FROM pg_catalog.pg_auth_members AS membership
+                            JOIN pg_catalog.pg_roles AS granted
+                                ON granted.oid = membership.roleid
+                            JOIN pg_catalog.pg_roles AS member
+                                ON member.oid = membership.member
+                            WHERE granted.rolname IN (
+                                'ktm_manual_feature_procedure_owner',
+                                'ktm_manual_feature_admin_executor',
+                                'ktm_feature_create_provider_executor',
+                                'ktm_feature_request_procedure_owner',
+                                'ktm_feature_request_service_executor',
+                                'ktm_feature_request_admin_executor'
+                            ) AND NOT (
+                                (granted.rolname = 'ktm_manual_feature_procedure_owner'
+                                 AND member.rolname = 'ktm_feature_schema_owner'
+                                 AND membership.admin_option IS FALSE
+                                 AND membership.inherit_option IS FALSE
+                                 AND membership.set_option IS TRUE)
+                                OR (granted.rolname = 'ktm_manual_feature_admin_executor'
+                                    AND member.rolname = 'ktm_feature_api_runtime'
+                                    AND membership.admin_option IS FALSE
+                                    AND membership.inherit_option IS TRUE
+                                    AND membership.set_option IS FALSE)
+                                OR (granted.rolname = 'ktm_feature_create_provider_executor'
+                                    AND member.rolname = 'ktm_feature_dagster_runtime'
+                                    AND membership.admin_option IS FALSE
+                                    AND membership.inherit_option IS TRUE
+                                    AND membership.set_option IS FALSE)
+                                OR (granted.rolname = 'ktm_feature_request_procedure_owner'
+                                    AND member.rolname = 'ktm_feature_schema_owner'
+                                    AND membership.admin_option IS FALSE
+                                    AND membership.inherit_option IS FALSE
+                                    AND membership.set_option IS TRUE)
+                                OR (granted.rolname = 'ktm_feature_request_service_executor'
+                                    AND member.rolname = 'ktm_feature_api_runtime'
+                                    AND membership.admin_option IS FALSE
+                                    AND membership.inherit_option IS TRUE
+                                    AND membership.set_option IS FALSE)
+                                OR (granted.rolname = 'ktm_feature_request_admin_executor'
+                                    AND member.rolname = 'ktm_feature_api_runtime'
+                                    AND membership.admin_option IS FALSE
+                                    AND membership.inherit_option IS TRUE
+                                    AND membership.set_option IS FALSE)
+                            )
+                        ) THEN
+                            RAISE EXCEPTION
+                                'M01 procedure owner/executor membership is unsafe';
+                        END IF;
+                        IF EXISTS (
+                            SELECT 1
+                            FROM pg_catalog.pg_auth_members AS membership
+                            JOIN pg_catalog.pg_roles AS member
+                                ON member.oid = membership.member
+                            WHERE member.rolname IN (
+                                'ktm_manual_feature_procedure_owner',
+                                'ktm_manual_feature_admin_executor',
+                                'ktm_feature_create_provider_executor',
+                                'ktm_feature_request_procedure_owner',
+                                'ktm_feature_request_service_executor',
+                                'ktm_feature_request_admin_executor'
+                            )
+                        ) THEN
+                            RAISE EXCEPTION
+                                'M01 role must not inherit any application privilege role';
+                        END IF;
+                    END
+                    $m01_role_assert$;
+                    """
+                )
+            )
+    finally:
+        await engine.dispose()
+
+
+async def _apply_tvn_m05_role_graph(connection: AsyncConnection) -> None:
+    """M05 dedicated role과 membership을 멱등적으로 확정한다."""
+
+    from sqlalchemy import text
+
+    await connection.execute(
+        text(
+            """
+            DO $m05_roles$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_roles
+                    WHERE rolname = 'ktm_manual_provider_dedup_procedure_owner'
+                ) THEN
+                    CREATE ROLE ktm_manual_provider_dedup_procedure_owner NOLOGIN NOINHERIT;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_roles
+                    WHERE rolname = 'ktm_manual_provider_dedup_detector_executor'
+                ) THEN
+                    CREATE ROLE ktm_manual_provider_dedup_detector_executor
+                        NOLOGIN NOINHERIT;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_roles
+                    WHERE rolname = 'ktm_manual_provider_dedup_admin_executor'
+                ) THEN
+                    CREATE ROLE ktm_manual_provider_dedup_admin_executor NOLOGIN NOINHERIT;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_roles
+                    WHERE rolname = 'ktm_feature_reference_reconciliation_service_executor'
+                ) THEN
+                    CREATE ROLE ktm_feature_reference_reconciliation_service_executor
+                        NOLOGIN NOINHERIT;
+                END IF;
+            END
+            $m05_roles$;
+            """
+        )
+    )
+    for statement in (
+        "ALTER ROLE ktm_manual_provider_dedup_procedure_owner NOLOGIN NOINHERIT "
+        "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+        "ALTER ROLE ktm_manual_provider_dedup_detector_executor NOLOGIN NOINHERIT "
+        "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+        "ALTER ROLE ktm_manual_provider_dedup_admin_executor NOLOGIN NOINHERIT "
+        "NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION",
+        "ALTER ROLE ktm_feature_reference_reconciliation_service_executor "
+        "NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE "
+        "NOBYPASSRLS NOREPLICATION",
+        "GRANT ktm_manual_provider_dedup_procedure_owner "
+        "TO ktm_feature_schema_owner WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
+        "GRANT ktm_manual_provider_dedup_detector_executor "
+        "TO ktm_feature_dagster_runtime WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
+        "GRANT ktm_manual_provider_dedup_admin_executor "
+        "TO ktm_feature_api_runtime WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
+        "GRANT ktm_feature_reference_reconciliation_service_executor "
+        "TO ktm_feature_api_runtime WITH ADMIN FALSE, INHERIT TRUE, SET FALSE",
+        "REVOKE ktm_manual_provider_dedup_detector_executor "
+        "FROM ktm_feature_api_runtime",
+        "REVOKE ktm_manual_provider_dedup_admin_executor, "
+        "ktm_feature_reference_reconciliation_service_executor "
+        "FROM ktm_feature_dagster_runtime",
+    ):
+        await connection.execute(text(statement))
+    await connection.execute(
+        text(
+            """
+            DO $m05_role_assert$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1
+                    FROM pg_catalog.pg_roles
+                    WHERE rolname IN (
+                        'ktm_manual_provider_dedup_procedure_owner',
+                        'ktm_manual_provider_dedup_detector_executor',
+                        'ktm_manual_provider_dedup_admin_executor',
+                        'ktm_feature_reference_reconciliation_service_executor'
+                    ) AND (
+                        rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb
+                        OR rolcreaterole OR rolbypassrls OR rolreplication
+                    )
+                ) THEN
+                    RAISE EXCEPTION 'M05 NOLOGIN role has an unsafe attribute';
+                END IF;
+                IF (
+                    SELECT count(*)
+                    FROM pg_catalog.pg_auth_members AS membership
+                    WHERE membership.roleid IN (
+                        'ktm_manual_provider_dedup_procedure_owner'::regrole,
+                        'ktm_manual_provider_dedup_detector_executor'::regrole,
+                        'ktm_manual_provider_dedup_admin_executor'::regrole,
+                        'ktm_feature_reference_reconciliation_service_executor'::regrole
+                    )
+                ) <> 4 OR EXISTS (
+                    SELECT 1
+                    FROM pg_catalog.pg_auth_members AS membership
+                    JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid
+                    JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
+                    WHERE granted.rolname IN (
+                        'ktm_manual_provider_dedup_procedure_owner',
+                        'ktm_manual_provider_dedup_detector_executor',
+                        'ktm_manual_provider_dedup_admin_executor',
+                        'ktm_feature_reference_reconciliation_service_executor'
+                    ) AND NOT (
+                        (granted.rolname = 'ktm_manual_provider_dedup_procedure_owner'
+                         AND member.rolname = 'ktm_feature_schema_owner'
+                         AND membership.admin_option IS FALSE
+                         AND membership.inherit_option IS FALSE
+                         AND membership.set_option IS TRUE)
+                        OR (granted.rolname = 'ktm_manual_provider_dedup_detector_executor'
+                            AND member.rolname = 'ktm_feature_dagster_runtime'
+                            AND membership.admin_option IS FALSE
+                            AND membership.inherit_option IS TRUE
+                            AND membership.set_option IS FALSE)
+                        OR (granted.rolname = 'ktm_manual_provider_dedup_admin_executor'
+                            AND member.rolname = 'ktm_feature_api_runtime'
+                            AND membership.admin_option IS FALSE
+                            AND membership.inherit_option IS TRUE
+                            AND membership.set_option IS FALSE)
+                        OR (granted.rolname =
+                                'ktm_feature_reference_reconciliation_service_executor'
+                            AND member.rolname = 'ktm_feature_api_runtime'
+                            AND membership.admin_option IS FALSE
+                            AND membership.inherit_option IS TRUE
+                            AND membership.set_option IS FALSE)
+                    )
+                ) THEN
+                    RAISE EXCEPTION 'M05 procedure owner/executor membership is unsafe';
+                END IF;
+                IF EXISTS (
+                    SELECT 1
+                    FROM pg_catalog.pg_auth_members AS membership
+                    JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
+                    WHERE member.rolname IN (
+                        'ktm_manual_provider_dedup_procedure_owner',
+                        'ktm_manual_provider_dedup_detector_executor',
+                        'ktm_manual_provider_dedup_admin_executor',
+                        'ktm_feature_reference_reconciliation_service_executor'
+                    )
+                ) THEN
+                    RAISE EXCEPTION 'M05 role must not inherit any application privilege role';
+                END IF;
+            END
+            $m05_role_assert$;
+            """
+        )
+    )
+
+
+async def bootstrap_tvn_m05_pre_role_phase(async_dsn: str) -> None:
+    """`0233 → M05 role만 → 0234` 운영 choreography를 disposable DB에 재현한다."""
+
+    from sqlalchemy import text
+
+    from kortravelmap.infra.db import make_async_engine
+
+    roles = (
+        "ktm_manual_provider_dedup_procedure_owner",
+        "ktm_manual_provider_dedup_detector_executor",
+        "ktm_manual_provider_dedup_admin_executor",
+        "ktm_feature_reference_reconciliation_service_executor",
+    )
+    relations = (
+        "ops.manual_provider_dedup_cases",
+        "ops.manual_provider_dedup_resolutions",
+        "ops.feature_reference_reconciliation_events",
+        "ops.feature_reference_reconciliation_subscriptions",
+        "ops.feature_reference_reconciliation_acks",
+        "ops.feature_reference_reconciliation_leases",
+    )
+    engine = make_async_engine(async_dsn, pool_size=1)
+    try:
+        async with engine.begin() as connection:
+            version = await connection.scalar(
+                text("SELECT version_num FROM public.alembic_version")
+            )
+            role_count = await connection.scalar(
+                text(
+                    "SELECT count(*) FROM pg_catalog.pg_roles "
+                    "WHERE rolname = ANY(CAST(:roles AS text[]))"
+                ),
+                {"roles": list(roles)},
+            )
+            relation_count = await connection.scalar(
+                text(
+                    "SELECT count(*) FROM unnest(CAST(:relations AS text[])) "
+                    "AS expected(relation_name) "
+                    "WHERE to_regclass(expected.relation_name) IS NOT NULL"
+                ),
+                {"relations": list(relations)},
+            )
+            if (
+                version != "0233_m04_feature_request_queue"
+                or role_count not in (0, 4)
+                or relation_count != 0
+            ):
+                raise RuntimeError(
+                    "M05 test role phase requires pristine 0233 boundary, "
+                    f"not version={version!r}, roles={role_count}, relations={relation_count}"
+                )
+            await _apply_tvn_m05_role_graph(connection)
+    finally:
+        await engine.dispose()
+
+
+async def restore_tvn_m05_role_graph(async_dsn: str) -> None:
+    """완료된 M05 graph에서 cluster-wide role membership만 복구한다."""
+
+    from sqlalchemy import text
+
+    from kortravelmap.infra.db import make_async_engine
+
+    engine = make_async_engine(async_dsn, pool_size=1)
+    try:
+        async with engine.begin() as connection:
+            version = await connection.scalar(
+                text("SELECT version_num FROM public.alembic_version")
+            )
+            if version != "0235_m05_reconciliation_delivery":
+                raise RuntimeError(
+                    "M05 role graph restore requires the completed M05 head, "
+                    f"not {version!r}"
+                )
+            await _apply_tvn_m05_role_graph(connection)
+    finally:
+        await engine.dispose()
+
+
+async def repair_tvn_m05_role_phase(async_dsn: str) -> None:
+    """0234 뒤 dedicated M05 routine ownership marker를 production과 같이 확정한다."""
+
+    from sqlalchemy import text
+
+    from kortravelmap.infra.db import make_async_engine
+
+    engine = make_async_engine(async_dsn, pool_size=1)
+    try:
+        async with engine.begin() as connection:
+            version = await connection.scalar(
+                text("SELECT version_num FROM public.alembic_version")
+            )
+            relation_count = await connection.scalar(
+                text(
+                    "SELECT count(*) FROM unnest(CAST(:relations AS text[])) "
+                    "AS expected(relation_name) "
+                    "WHERE to_regclass(expected.relation_name) IS NOT NULL"
+                ),
+                {
+                    "relations": [
+                        "ops.manual_provider_dedup_cases",
+                        "ops.manual_provider_dedup_resolutions",
+                        "ops.feature_reference_reconciliation_events",
+                        "ops.feature_reference_reconciliation_subscriptions",
+                        "ops.feature_reference_reconciliation_acks",
+                        "ops.feature_reference_reconciliation_leases",
+                    ]
+                },
+            )
+            if version != "0235_m05_reconciliation_delivery" or relation_count != 6:
+                raise RuntimeError("M05 test post-upgrade marker is incomplete")
+            await connection.execute(
+                text(
+                    "GRANT USAGE, CREATE ON SCHEMA feature "
+                    "TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "GRANT USAGE ON SCHEMA ops "
+                    "TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "GRANT USAGE ON SCHEMA provider_sync, x_extension "
+                    "TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            for statement in (
+                "GRANT SELECT, UPDATE ON TABLE feature.features "
+                "TO ktm_manual_provider_dedup_procedure_owner",
+                "GRANT SELECT ON TABLE feature.manual_feature_identity_claims, "
+                "feature.feature_creation_origins "
+                "TO ktm_manual_provider_dedup_procedure_owner",
+                "GRANT SELECT, UPDATE ON TABLE provider_sync.source_links, "
+                "provider_sync.source_entities, provider_sync.source_entity_heads, "
+                "provider_sync.source_records "
+                "TO ktm_manual_provider_dedup_procedure_owner",
+                "GRANT SELECT, UPDATE ON TABLE ops.domain_commands "
+                "TO ktm_manual_provider_dedup_procedure_owner",
+                "GRANT SELECT ON TABLE ops.domain_command_results "
+                "TO ktm_manual_provider_dedup_procedure_owner",
+                "GRANT EXECUTE ON PROCEDURE feature.transition_admin_feature_state("
+                "text, text, text, text, bigint, text, text, text) "
+                "TO ktm_manual_provider_dedup_procedure_owner",
+                "REVOKE ALL ON TABLE ops.manual_provider_dedup_cases, "
+                "ops.manual_provider_dedup_resolutions, "
+                "ops.feature_reference_reconciliation_events, "
+                "ops.feature_reference_reconciliation_subscriptions, "
+                "ops.feature_reference_reconciliation_acks, "
+                "ops.feature_reference_reconciliation_leases "
+                "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, "
+                "ktm_feature_dagster_runtime",
+                "GRANT SELECT, INSERT, UPDATE ON TABLE ops.manual_provider_dedup_cases, "
+                "ops.manual_provider_dedup_resolutions, "
+                "ops.feature_reference_reconciliation_events, "
+                "ops.feature_reference_reconciliation_subscriptions, "
+                "ops.feature_reference_reconciliation_acks "
+                "TO ktm_manual_provider_dedup_procedure_owner",
+                "GRANT SELECT, INSERT, UPDATE ON TABLE "
+                "ops.feature_reference_reconciliation_leases "
+                "TO ktm_manual_provider_dedup_procedure_owner",
+                "GRANT USAGE ON SEQUENCE "
+                "ops.feature_reference_reconciliation_events_event_sequence_seq "
+                "TO ktm_manual_provider_dedup_procedure_owner",
+            ):
+                await connection.execute(text(statement))
+            await connection.execute(
+                text(
+                    "ALTER PROCEDURE feature.record_manual_provider_dedup_candidate("
+                    "text, text, jsonb, jsonb) "
+                    "OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER PROCEDURE feature.resolve_manual_provider_dedup_case("
+                    "uuid, text, text, bigint, bigint, text, text, text, bigint) "
+                    "OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER PROCEDURE feature.resolve_manual_provider_dedup_case_v2("
+                    "uuid, text, text, bigint, bigint, text, text, text, bigint) "
+                    "OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER PROCEDURE feature.lease_feature_reference_reconciliation_event("
+                    "text, uuid) OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER PROCEDURE feature.lease_feature_reference_reconciliation_event_v2("
+                    "text, uuid) OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER PROCEDURE feature.ack_feature_reference_reconciliation_event("
+                    "text, uuid, uuid, bigint, text, text, bigint) "
+                    "OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER PROCEDURE feature.ack_feature_reference_reconciliation_event_v2("
+                    "text, uuid, uuid, bigint, text, text, bigint) "
+                    "OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER PROCEDURE "
+                    "feature.provision_feature_reference_reconciliation_subscription("
+                    "text, bigint, text, bigint) "
+                    "OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER FUNCTION feature.reject_manual_provider_dedup_evidence_mutation() "
+                    "OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER FUNCTION "
+                    "feature.assert_feature_reference_reconciliation_lease_cursor() "
+                    "OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER FUNCTION "
+                    "feature.preflight_feature_reference_reconciliation_ack("
+                    "text, uuid, text, text) "
+                    "OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER FUNCTION "
+                    "feature.preflight_feature_reference_reconciliation_ack_v2("
+                    "text, uuid, text, text) "
+                    "OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER FUNCTION feature.list_manual_provider_dedup_cases("
+                    "text, timestamptz, uuid, integer) "
+                    "OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+            await connection.execute(
+                text(
+                    "ALTER FUNCTION feature.read_manual_provider_dedup_case(uuid) "
+                    "OWNER TO ktm_manual_provider_dedup_procedure_owner"
+                )
+            )
+    finally:
+        await engine.dispose()
+
+
+async def upgrade_head_with_tvn_m01_phase(config: Config, admin_dsn: str) -> None:
+    """frozen graph를 보존하는 fresh DB M01/M05 two-phase bootstrap helper."""
+
+    import asyncio
+
+    from alembic import command
+
+    # M01 role phase까지는 superuser가 필요하지만, Alembic 자체는 production과 같은
+    # restricted migrator → schema owner 경로로만 실행한다. 호출부마다 둘을 섞으면
+    # fresh DB test가 one-shot production choreography와 다시 갈라진다.
+    config.set_main_option(
+        "sqlalchemy.url", await bootstrapped_migrator_dsn(admin_dsn)
+    )
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(command.upgrade, config, "0225_tvn40c_physical_removal")
+    await bootstrap_tvn_m01_role_phase(admin_dsn)
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(command.upgrade, config, "0233_m04_feature_request_queue")
+    await bootstrap_tvn_m05_pre_role_phase(admin_dsn)
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(command.upgrade, config, "head")
+    await repair_tvn_m05_role_phase(admin_dsn)
 
 
 @contextlib.contextmanager

@@ -1049,6 +1049,49 @@
         "title": "AdminCurationItemView",
         "type": "object"
       },
+      "AdminCurationManualFeatureItemData": {
+        "additionalProperties": false,
+        "description": "M03 combined writer의 UUID Feature·item commit receipt.",
+        "properties": {
+          "feature_id": {
+            "format": "uuid",
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "feature_row_revision": {
+            "minimum": 1.0,
+            "title": "Feature Row Revision",
+            "type": "integer"
+          },
+          "item": {
+            "$ref": "#/components/schemas/AdminCurationItemView"
+          }
+        },
+        "required": [
+          "feature_id",
+          "feature_row_revision",
+          "item"
+        ],
+        "title": "AdminCurationManualFeatureItemData",
+        "type": "object"
+      },
+      "AdminCurationManualFeatureItemResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminCurationManualFeatureItemData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "AdminCurationManualFeatureItemResponse",
+        "type": "object"
+      },
       "AdminCurationQuarantineCollectionView": {
         "additionalProperties": false,
         "properties": {
@@ -1789,6 +1832,58 @@
           "reason"
         ],
         "title": "AdminFeatureCreateRequest",
+        "type": "object"
+      },
+      "AdminFeatureCreationOriginRecord": {
+        "additionalProperties": false,
+        "description": "검증된 creation causation snapshot; 부재를 추정하지 않는다.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by_actor": {
+            "title": "Created By Actor",
+            "type": "string"
+          },
+          "creation_command_id": {
+            "minimum": 1.0,
+            "title": "Creation Command Id",
+            "type": "integer"
+          },
+          "creator_principal_id": {
+            "title": "Creator Principal Id",
+            "type": "string"
+          },
+          "invoker_role": {
+            "title": "Invoker Role",
+            "type": "string"
+          },
+          "origin_kind": {
+            "enum": [
+              "manual_admin",
+              "manual_curation",
+              "manual_request"
+            ],
+            "title": "Origin Kind",
+            "type": "string"
+          },
+          "procedure_definer": {
+            "title": "Procedure Definer",
+            "type": "string"
+          }
+        },
+        "required": [
+          "origin_kind",
+          "creation_command_id",
+          "creator_principal_id",
+          "created_by_actor",
+          "created_at",
+          "invoker_role",
+          "procedure_definer"
+        ],
+        "title": "AdminFeatureCreationOriginRecord",
         "type": "object"
       },
       "AdminFeatureDeleteRequest": {
@@ -4412,6 +4507,123 @@
           "meta"
         ],
         "title": "AdminManualFeatureCreateResponse",
+        "type": "object"
+      },
+      "AdminManualFeatureIdentityClaimRecord": {
+        "additionalProperties": false,
+        "description": "현재 manual Feature의 immutable exact-identity claim.",
+        "properties": {
+          "claim_basis": {
+            "enum": [
+              "manual_create",
+              "legacy_admin_route"
+            ],
+            "title": "Claim Basis",
+            "type": "string"
+          },
+          "claimed_at": {
+            "format": "date-time",
+            "title": "Claimed At",
+            "type": "string"
+          },
+          "claimed_by_command_id": {
+            "minimum": 1.0,
+            "title": "Claimed By Command Id",
+            "type": "integer"
+          },
+          "feature_id": {
+            "format": "uuid",
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "feature_kind": {
+            "enum": [
+              "place",
+              "event"
+            ],
+            "title": "Feature Kind",
+            "type": "string"
+          },
+          "lat_e6": {
+            "title": "Lat E6",
+            "type": "integer"
+          },
+          "lon_e6": {
+            "title": "Lon E6",
+            "type": "integer"
+          },
+          "name_key": {
+            "title": "Name Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "feature_kind",
+          "name_key",
+          "lon_e6",
+          "lat_e6",
+          "claim_basis",
+          "claimed_at",
+          "claimed_by_command_id"
+        ],
+        "title": "AdminManualFeatureIdentityClaimRecord",
+        "type": "object"
+      },
+      "AdminManualFeatureProvenanceData": {
+        "additionalProperties": false,
+        "description": "M02 admin-only provenance reader의 현재 Feature snapshot.",
+        "properties": {
+          "claim": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminManualFeatureIdentityClaimRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "feature_id": {
+            "format": "uuid",
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "origin": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AdminFeatureCreationOriginRecord"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "feature_id",
+          "claim",
+          "origin"
+        ],
+        "title": "AdminManualFeatureProvenanceData",
+        "type": "object"
+      },
+      "AdminManualFeatureProvenanceResponse": {
+        "additionalProperties": false,
+        "description": "``GET /admin/features/{feature_id}/creation-provenance`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminManualFeatureProvenanceData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "AdminManualFeatureProvenanceResponse",
         "type": "object"
       },
       "AdminThemeCandidatePageData": {
@@ -11805,6 +12017,349 @@
         "title": "CurationLinkAuditView",
         "type": "object"
       },
+      "CurationManualFeatureCoordInput": {
+        "additionalProperties": false,
+        "description": "M03 explicit manual Feature 좌표 — JSON finite number만 수용한다.",
+        "properties": {
+          "lat": {
+            "maximum": 39.5,
+            "minimum": 33.0,
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "maximum": 132.0,
+            "minimum": 124.0,
+            "title": "Lon",
+            "type": "number"
+          }
+        },
+        "required": [
+          "lon",
+          "lat"
+        ],
+        "title": "CurationManualFeatureCoordInput",
+        "type": "object"
+      },
+      "CurationManualFeatureCreateRequest": {
+        "additionalProperties": false,
+        "description": "M03 combined writer가 받는 manual Feature의 최소 typed input.",
+        "properties": {
+          "address": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address"
+          },
+          "admin_dong_code": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{7,10}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Admin Dong Code"
+          },
+          "category": {
+            "pattern": "^\\d{8}$",
+            "title": "Category",
+            "type": "string"
+          },
+          "coord": {
+            "$ref": "#/components/schemas/CurationManualFeatureCoordInput"
+          },
+          "coord_precision_digits": {
+            "anyOf": [
+              {
+                "maximum": 8.0,
+                "minimum": 3.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coord Precision Digits"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detail"
+          },
+          "kind": {
+            "enum": [
+              "place",
+              "event"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "legal_dong_code": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{10}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legal Dong Code"
+          },
+          "marker_color": {
+            "pattern": "^P-(0[1-9]|1[0-6])$",
+            "title": "Marker Color",
+            "type": "string"
+          },
+          "marker_icon": {
+            "minLength": 1,
+            "title": "Marker Icon",
+            "type": "string"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "parent_feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Feature Id"
+          },
+          "reason": {
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "road_address_management_no": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{20,26}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Road Address Management No"
+          },
+          "road_name_code": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{7,12}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Road Name Code"
+          },
+          "sibling_group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sibling Group Id"
+          },
+          "sido_code": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{2}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sido Code"
+          },
+          "sigungu_code": {
+            "anyOf": [
+              {
+                "pattern": "^\\d{5}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sigungu Code"
+          },
+          "urls": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Urls"
+          }
+        },
+        "required": [
+          "kind",
+          "name",
+          "category",
+          "coord",
+          "marker_icon",
+          "marker_color",
+          "reason"
+        ],
+        "title": "CurationManualFeatureCreateRequest",
+        "type": "object"
+      },
+      "CurationManualFeatureItemCreateRequest": {
+        "additionalProperties": false,
+        "description": "기존 item create와 분리된 M03 explicit manual Feature branch.",
+        "properties": {
+          "address_hint": {
+            "anyOf": [
+              {
+                "maxLength": 1000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Hint"
+          },
+          "curation_relation": {
+            "default": "nearby_option",
+            "enum": [
+              "primary_stop",
+              "food_stop",
+              "cafe_stop",
+              "bookstore_stop",
+              "nearby_option",
+              "accessibility_support",
+              "pet_support",
+              "family_support",
+              "theme_area_anchor"
+            ],
+            "title": "Curation Relation",
+            "type": "string"
+          },
+          "external_component_id": {
+            "default": "primary",
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "External Component Id",
+            "type": "string"
+          },
+          "external_item_id": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "External Item Id",
+            "type": "string"
+          },
+          "item_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Summary"
+          },
+          "item_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Title"
+          },
+          "manual_feature": {
+            "$ref": "#/components/schemas/CurationManualFeatureCreateRequest"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "place_name": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Place Name"
+          },
+          "reuse_policy": {
+            "default": "manual_review",
+            "enum": [
+              "allowed",
+              "blocked",
+              "manual_review"
+            ],
+            "title": "Reuse Policy",
+            "type": "string"
+          },
+          "sort_order": {
+            "default": 0,
+            "maximum": 2147483647.0,
+            "minimum": 0.0,
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "status": {
+            "default": "included",
+            "enum": [
+              "candidate",
+              "included",
+              "rejected"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "manual_feature",
+          "external_item_id"
+        ],
+        "title": "CurationManualFeatureItemCreateRequest",
+        "type": "object"
+      },
       "CurationQuarantineOriginalCollectionView": {
         "additionalProperties": false,
         "description": "`0065` marker가 기록한 원본 collection의 현재 상태 (병렬 표시 전용).",
@@ -15017,6 +15572,705 @@
         "title": "FeaturePriceSnapshotResponse",
         "type": "object"
       },
+      "FeatureReferenceReconciliationAckAuditData": {
+        "additionalProperties": false,
+        "properties": {
+          "acked_at": {
+            "format": "date-time",
+            "title": "Acked At",
+            "type": "string"
+          },
+          "command_id": {
+            "minimum": 1.0,
+            "title": "Command Id",
+            "type": "integer"
+          },
+          "event_id": {
+            "format": "uuid",
+            "title": "Event Id",
+            "type": "string"
+          },
+          "event_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Event Sha256",
+            "type": "string"
+          },
+          "local_receipt_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Local Receipt Sha256",
+            "type": "string"
+          }
+        },
+        "required": [
+          "event_id",
+          "event_sha256",
+          "local_receipt_sha256",
+          "command_id",
+          "acked_at"
+        ],
+        "title": "FeatureReferenceReconciliationAckAuditData",
+        "type": "object"
+      },
+      "FeatureReferenceReconciliationAckData": {
+        "additionalProperties": false,
+        "properties": {
+          "acked_through_sequence": {
+            "title": "Acked Through Sequence",
+            "type": "integer"
+          },
+          "outcome": {
+            "enum": [
+              "acked",
+              "replayed"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome",
+          "acked_through_sequence"
+        ],
+        "title": "FeatureReferenceReconciliationAckData",
+        "type": "object"
+      },
+      "FeatureReferenceReconciliationAckInput": {
+        "additionalProperties": false,
+        "properties": {
+          "event_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Event Sha256",
+            "type": "string"
+          },
+          "lease_epoch": {
+            "minimum": 1.0,
+            "title": "Lease Epoch",
+            "type": "integer"
+          },
+          "local_receipt_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Local Receipt Sha256",
+            "type": "string"
+          },
+          "worker_id": {
+            "format": "uuid",
+            "title": "Worker Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "worker_id",
+          "lease_epoch",
+          "event_sha256",
+          "local_receipt_sha256"
+        ],
+        "title": "FeatureReferenceReconciliationAckInput",
+        "type": "object"
+      },
+      "FeatureReferenceReconciliationAckResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeatureReferenceReconciliationAckData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeatureReferenceReconciliationAckResponse",
+        "type": "object"
+      },
+      "FeatureReferenceReconciliationEventData": {
+        "additionalProperties": false,
+        "description": "DB가 보존한 canonical event payload를 재조립 없이 그대로 노출한다.",
+        "properties": {
+          "action": {
+            "enum": [
+              "rebind",
+              "detach"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "case_id": {
+            "format": "uuid",
+            "title": "Case Id",
+            "type": "string"
+          },
+          "command_id": {
+            "minimum": 1.0,
+            "title": "Command Id",
+            "type": "integer"
+          },
+          "event_id": {
+            "format": "uuid",
+            "title": "Event Id",
+            "type": "string"
+          },
+          "event_sequence": {
+            "minimum": 1.0,
+            "title": "Event Sequence",
+            "type": "integer"
+          },
+          "manual_retire_row_revision_after_transition": {
+            "minimum": 2.0,
+            "title": "Manual Retire Row Revision After Transition",
+            "type": "integer"
+          },
+          "manual_retire_transition_id": {
+            "minimum": 1.0,
+            "title": "Manual Retire Transition Id",
+            "type": "integer"
+          },
+          "occurred_at": {
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "old_feature": {
+            "$ref": "#/components/schemas/FeatureReferenceReconciliationFeatureReference"
+          },
+          "payload_schema_version": {
+            "const": 1,
+            "title": "Payload Schema Version",
+            "type": "integer"
+          },
+          "replacement_feature": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FeatureReferenceReconciliationFeatureReference"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resolution_id": {
+            "format": "uuid",
+            "title": "Resolution Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "payload_schema_version",
+          "event_id",
+          "event_sequence",
+          "occurred_at",
+          "case_id",
+          "resolution_id",
+          "action",
+          "old_feature",
+          "replacement_feature",
+          "manual_retire_transition_id",
+          "manual_retire_row_revision_after_transition",
+          "command_id"
+        ],
+        "title": "FeatureReferenceReconciliationEventData",
+        "type": "object"
+      },
+      "FeatureReferenceReconciliationFeatureReference": {
+        "additionalProperties": false,
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "feature_uuid": {
+            "format": "uuid",
+            "title": "Feature Uuid",
+            "type": "string"
+          },
+          "row_revision": {
+            "minimum": 1.0,
+            "title": "Row Revision",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "feature_id",
+          "feature_uuid",
+          "row_revision"
+        ],
+        "title": "FeatureReferenceReconciliationFeatureReference",
+        "type": "object"
+      },
+      "FeatureReferenceReconciliationLeaseData": {
+        "additionalProperties": false,
+        "properties": {
+          "event": {
+            "$ref": "#/components/schemas/FeatureReferenceReconciliationEventData"
+          },
+          "event_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Event Sha256",
+            "type": "string"
+          },
+          "lease_epoch": {
+            "minimum": 1.0,
+            "title": "Lease Epoch",
+            "type": "integer"
+          },
+          "lease_expires_at": {
+            "title": "Lease Expires At",
+            "type": "string"
+          },
+          "outcome": {
+            "const": "leased",
+            "title": "Outcome",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome",
+          "lease_epoch",
+          "lease_expires_at",
+          "event",
+          "event_sha256"
+        ],
+        "title": "FeatureReferenceReconciliationLeaseData",
+        "type": "object"
+      },
+      "FeatureReferenceReconciliationLeaseResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeatureReferenceReconciliationLeaseData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeatureReferenceReconciliationLeaseResponse",
+        "type": "object"
+      },
+      "FeatureReferenceReconciliationSubscriptionDeliveryData": {
+        "additionalProperties": false,
+        "properties": {
+          "ack": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FeatureReferenceReconciliationAckAuditData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "acked_through_sequence": {
+            "minimum": 0.0,
+            "title": "Acked Through Sequence",
+            "type": "integer"
+          },
+          "initial_event_sequence": {
+            "minimum": 0.0,
+            "title": "Initial Event Sequence",
+            "type": "integer"
+          },
+          "lease_epoch": {
+            "minimum": 0.0,
+            "title": "Lease Epoch",
+            "type": "integer"
+          },
+          "lease_expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lease Expires At"
+          },
+          "oldest_unacked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Oldest Unacked At"
+          },
+          "principal_id": {
+            "title": "Principal Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "principal_id",
+          "initial_event_sequence",
+          "acked_through_sequence",
+          "lease_epoch",
+          "lease_expires_at",
+          "oldest_unacked_at",
+          "ack"
+        ],
+        "title": "FeatureReferenceReconciliationSubscriptionDeliveryData",
+        "type": "object"
+      },
+      "FeatureReferenceReconciliationSubscriptionProvisionData": {
+        "additionalProperties": false,
+        "properties": {
+          "initial_event_sequence": {
+            "minimum": 0.0,
+            "title": "Initial Event Sequence",
+            "type": "integer"
+          },
+          "outcome": {
+            "const": "provisioned",
+            "title": "Outcome",
+            "type": "string"
+          },
+          "principal_id": {
+            "const": "service:feature-reference-reconciliation",
+            "title": "Principal Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome",
+          "principal_id",
+          "initial_event_sequence"
+        ],
+        "title": "FeatureReferenceReconciliationSubscriptionProvisionData",
+        "type": "object"
+      },
+      "FeatureReferenceReconciliationSubscriptionProvisionInput": {
+        "additionalProperties": false,
+        "properties": {
+          "initial_event_sequence": {
+            "maximum": 0.0,
+            "minimum": 0.0,
+            "title": "Initial Event Sequence",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "initial_event_sequence"
+        ],
+        "title": "FeatureReferenceReconciliationSubscriptionProvisionInput",
+        "type": "object"
+      },
+      "FeatureReferenceReconciliationSubscriptionProvisionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeatureReferenceReconciliationSubscriptionProvisionData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeatureReferenceReconciliationSubscriptionProvisionResponse",
+        "type": "object"
+      },
+      "FeatureRequestApprovalInput": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "pattern": "^\\d{8}$",
+            "title": "Category",
+            "type": "string"
+          },
+          "marker_color": {
+            "pattern": "^P-(?:0[1-9]|1[0-6])$",
+            "title": "Marker Color",
+            "type": "string"
+          },
+          "marker_icon": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Marker Icon",
+            "type": "string"
+          }
+        },
+        "required": [
+          "category",
+          "marker_color",
+          "marker_icon"
+        ],
+        "title": "FeatureRequestApprovalInput",
+        "type": "object"
+      },
+      "FeatureRequestCoordInput": {
+        "additionalProperties": false,
+        "properties": {
+          "lat": {
+            "maximum": 39.5,
+            "minimum": 33.0,
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "maximum": 132.0,
+            "minimum": 124.0,
+            "title": "Lon",
+            "type": "number"
+          }
+        },
+        "required": [
+          "lon",
+          "lat"
+        ],
+        "title": "FeatureRequestCoordInput",
+        "type": "object"
+      },
+      "FeatureRequestData": {
+        "additionalProperties": false,
+        "properties": {
+          "categories": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Categories",
+            "type": "array"
+          },
+          "coord": {
+            "$ref": "#/components/schemas/FeatureRequestCoordInput"
+          },
+          "feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Id"
+          },
+          "kind": {
+            "enum": [
+              "place",
+              "event"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "rejection_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rejection Reason"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "resolved_by_actor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved By Actor"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "approved",
+              "rejected",
+              "exact_conflict"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "submitted_at": {
+            "format": "date-time",
+            "title": "Submitted At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "status",
+          "kind",
+          "name",
+          "coord",
+          "categories",
+          "note",
+          "submitted_at",
+          "resolved_at",
+          "resolved_by_actor",
+          "feature_id",
+          "rejection_reason"
+        ],
+        "title": "FeatureRequestData",
+        "type": "object"
+      },
+      "FeatureRequestPageData": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FeatureRequestData"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "FeatureRequestPageData",
+        "type": "object"
+      },
+      "FeatureRequestPageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeatureRequestPageData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeatureRequestPageResponse",
+        "type": "object"
+      },
+      "FeatureRequestRejectInput": {
+        "additionalProperties": false,
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "FeatureRequestRejectInput",
+        "type": "object"
+      },
+      "FeatureRequestResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/FeatureRequestData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "FeatureRequestResponse",
+        "type": "object"
+      },
+      "FeatureRequestSubmitInput": {
+        "additionalProperties": false,
+        "properties": {
+          "categories": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 10,
+            "title": "Categories",
+            "type": "array"
+          },
+          "coord": {
+            "$ref": "#/components/schemas/FeatureRequestCoordInput"
+          },
+          "kind": {
+            "enum": [
+              "place",
+              "event"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "request_id": {
+            "format": "uuid",
+            "title": "Request Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "request_id",
+          "kind",
+          "name",
+          "coord"
+        ],
+        "title": "FeatureRequestSubmitInput",
+        "type": "object"
+      },
       "FeatureSearchData": {
         "additionalProperties": false,
         "description": "사용자 feature 검색 data payload.",
@@ -17217,6 +18471,426 @@
           "meta"
         ],
         "title": "ManagedFileSummaryResponse",
+        "type": "object"
+      },
+      "ManualProviderDedupCaseData": {
+        "additionalProperties": false,
+        "properties": {
+          "case_id": {
+            "format": "uuid",
+            "title": "Case Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "evidence_fingerprint": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Evidence Fingerprint",
+            "type": "string"
+          },
+          "manual_feature": {
+            "$ref": "#/components/schemas/ManualProviderDedupFeatureEvidence"
+          },
+          "provider_feature": {
+            "$ref": "#/components/schemas/ManualProviderDedupFeatureEvidence"
+          },
+          "scores": {
+            "$ref": "#/components/schemas/ManualProviderDedupScores"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "terminal"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "case_id",
+          "status",
+          "created_at",
+          "evidence_fingerprint",
+          "manual_feature",
+          "provider_feature",
+          "scores"
+        ],
+        "title": "ManualProviderDedupCaseData",
+        "type": "object"
+      },
+      "ManualProviderDedupCaseDecisionData": {
+        "additionalProperties": false,
+        "properties": {
+          "event_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Id"
+          },
+          "manual_feature_id": {
+            "title": "Manual Feature Id",
+            "type": "string"
+          },
+          "manual_feature_row_revision": {
+            "minimum": 1.0,
+            "title": "Manual Feature Row Revision",
+            "type": "integer"
+          },
+          "outcome": {
+            "enum": [
+              "kept",
+              "merged",
+              "manual_retired"
+            ],
+            "title": "Outcome",
+            "type": "string"
+          },
+          "resolution_id": {
+            "format": "uuid",
+            "title": "Resolution Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "outcome",
+          "resolution_id",
+          "event_id",
+          "manual_feature_id",
+          "manual_feature_row_revision"
+        ],
+        "title": "ManualProviderDedupCaseDecisionData",
+        "type": "object"
+      },
+      "ManualProviderDedupCaseDecisionInput": {
+        "additionalProperties": false,
+        "properties": {
+          "decision": {
+            "enum": [
+              "kept",
+              "merged",
+              "manual_retired"
+            ],
+            "title": "Decision",
+            "type": "string"
+          },
+          "expected_case_fingerprint": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Expected Case Fingerprint",
+            "type": "string"
+          },
+          "expected_manual_row_revision": {
+            "minimum": 1.0,
+            "title": "Expected Manual Row Revision",
+            "type": "integer"
+          },
+          "expected_provider_row_revision": {
+            "minimum": 1.0,
+            "title": "Expected Provider Row Revision",
+            "type": "integer"
+          },
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          },
+          "survivor_feature_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Survivor Feature Id"
+          }
+        },
+        "required": [
+          "decision",
+          "expected_case_fingerprint",
+          "expected_manual_row_revision",
+          "expected_provider_row_revision",
+          "reason"
+        ],
+        "title": "ManualProviderDedupCaseDecisionInput",
+        "type": "object"
+      },
+      "ManualProviderDedupCaseDecisionResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ManualProviderDedupCaseDecisionData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ManualProviderDedupCaseDecisionResponse",
+        "type": "object"
+      },
+      "ManualProviderDedupCaseDetailData": {
+        "additionalProperties": false,
+        "properties": {
+          "case_id": {
+            "format": "uuid",
+            "title": "Case Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "event": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FeatureReferenceReconciliationEventData"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "evidence_fingerprint": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Evidence Fingerprint",
+            "type": "string"
+          },
+          "manual_feature": {
+            "additionalProperties": true,
+            "title": "Manual Feature",
+            "type": "object"
+          },
+          "provider_feature": {
+            "additionalProperties": true,
+            "title": "Provider Feature",
+            "type": "object"
+          },
+          "resolution": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolution"
+          },
+          "scores": {
+            "additionalProperties": true,
+            "title": "Scores",
+            "type": "object"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "terminal"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "subscriptions": {
+            "items": {
+              "$ref": "#/components/schemas/FeatureReferenceReconciliationSubscriptionDeliveryData"
+            },
+            "title": "Subscriptions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "case_id",
+          "status",
+          "created_at",
+          "evidence_fingerprint",
+          "manual_feature",
+          "provider_feature",
+          "scores",
+          "resolution",
+          "event",
+          "subscriptions"
+        ],
+        "title": "ManualProviderDedupCaseDetailData",
+        "type": "object"
+      },
+      "ManualProviderDedupCaseDetailResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ManualProviderDedupCaseDetailData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ManualProviderDedupCaseDetailResponse",
+        "type": "object"
+      },
+      "ManualProviderDedupCasePageData": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ManualProviderDedupCaseData"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_after_case_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next After Case Id"
+          },
+          "next_after_created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next After Created At"
+          }
+        },
+        "required": [
+          "items",
+          "next_after_created_at",
+          "next_after_case_id"
+        ],
+        "title": "ManualProviderDedupCasePageData",
+        "type": "object"
+      },
+      "ManualProviderDedupCasePageResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ManualProviderDedupCasePageData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ManualProviderDedupCasePageResponse",
+        "type": "object"
+      },
+      "ManualProviderDedupFeatureEvidence": {
+        "additionalProperties": false,
+        "properties": {
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "feature_uuid": {
+            "format": "uuid",
+            "title": "Feature Uuid",
+            "type": "string"
+          },
+          "row_revision": {
+            "minimum": 1.0,
+            "title": "Row Revision",
+            "type": "integer"
+          },
+          "snapshot": {
+            "additionalProperties": true,
+            "title": "Snapshot",
+            "type": "object"
+          }
+        },
+        "required": [
+          "feature_id",
+          "feature_uuid",
+          "row_revision",
+          "snapshot"
+        ],
+        "title": "ManualProviderDedupFeatureEvidence",
+        "type": "object"
+      },
+      "ManualProviderDedupScores": {
+        "additionalProperties": false,
+        "properties": {
+          "category_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Category Score",
+            "type": "number"
+          },
+          "distance_meters": {
+            "minimum": 0.0,
+            "title": "Distance Meters",
+            "type": "number"
+          },
+          "name_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Name Score",
+            "type": "number"
+          },
+          "scorer_id": {
+            "title": "Scorer Id",
+            "type": "string"
+          },
+          "scorer_input_sha256": {
+            "pattern": "^[0-9a-f]{64}$",
+            "title": "Scorer Input Sha256",
+            "type": "string"
+          },
+          "spatial_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Spatial Score",
+            "type": "number"
+          },
+          "total_score": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Total Score",
+            "type": "number"
+          }
+        },
+        "required": [
+          "scorer_id",
+          "scorer_input_sha256",
+          "name_score",
+          "spatial_score",
+          "category_score",
+          "total_score",
+          "distance_meters"
+        ],
+        "title": "ManualProviderDedupScores",
         "type": "object"
       },
       "Meta": {
@@ -31125,6 +32799,126 @@
         ]
       }
     },
+    "/v1/admin/curations/{collection_id}/items/manual-feature": {
+      "post": {
+        "description": "M03: explicit payload만으로 Feature와 curation item을 한 command에 묶는다.",
+        "operationId": "add_admin_curation_item_with_manual_feature_v1_admin_curations__collection_id__items_manual_feature_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Collection Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CurationManualFeatureItemCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminCurationManualFeatureItemResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "현재 응답 representation의 strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "수동 Feature 생성 전용 scope 없음"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "manual exact identity 또는 curation item 충돌"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "manual Feature 또는 curation item input 오류"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "수동 Feature 생성 cutover 준비 전"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": [],
+            "AdminFeatureCreateBFF": []
+          }
+        ],
+        "summary": "Add Admin Curation Item With Manual Feature",
+        "tags": [
+          "admin-curations"
+        ]
+      }
+    },
     "/v1/admin/curations/{collection_id}/items/{curation_item_id}": {
       "delete": {
         "operationId": "archive_admin_curation_item_v1_admin_curations__collection_id__items__curation_item_id__delete",
@@ -31364,6 +33158,526 @@
         "summary": "Patch Admin Curation Item",
         "tags": [
           "admin-curations"
+        ]
+      }
+    },
+    "/v1/admin/feature-reference-reconciliation-subscriptions": {
+      "post": {
+        "description": "paired consumer의 immutable initial cursor를 admin receipt로 한 번만 등록한다.",
+        "operationId": "provision_feature_reference_reconciliation_subscription_route_v1_admin_feature_reference_reconciliation_subscriptions_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeatureReferenceReconciliationSubscriptionProvisionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureReferenceReconciliationSubscriptionProvisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "Idempotency-Replayed": {
+                "description": "동일 provision receipt를 replay했을 때 true.",
+                "schema": {
+                  "enum": [
+                    "true"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "AdminBFF 거부"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "subscription이 이미 있어 initial cursor를 변경할 수 없음",
+            "headers": {
+              "Idempotency-Replayed": {
+                "description": "동일 conflict receipt를 replay했을 때 true.",
+                "schema": {
+                  "enum": [
+                    "true"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "initial cursor 입력 오류"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Provision Feature Reference Reconciliation Subscription Route",
+        "tags": [
+          "admin-feature-reference-reconciliation-subscriptions"
+        ]
+      }
+    },
+    "/v1/admin/feature-requests": {
+      "get": {
+        "description": "Map admin이 pending queue를 UUID를 알기 전부터 발견할 수 있는 목록.",
+        "operationId": "list_feature_requests_route_v1_admin_feature_requests_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "approved",
+                    "rejected",
+                    "exact_conflict"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "pending",
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureRequestPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "List Feature Requests Route",
+        "tags": [
+          "admin-feature-requests"
+        ]
+      }
+    },
+    "/v1/admin/feature-requests/{request_id}": {
+      "get": {
+        "operationId": "get_feature_request_route_v1_admin_feature_requests__request_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Request Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureRequestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Feature 요청 없음"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Get Feature Request Route",
+        "tags": [
+          "admin-feature-requests"
+        ]
+      }
+    },
+    "/v1/admin/feature-requests/{request_id}/approve": {
+      "post": {
+        "operationId": "approve_feature_request_route_v1_admin_feature_requests__request_id__approve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Request Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeatureRequestApprovalInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureRequestResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "ETag": {
+                "description": "승인 또는 exact-conflict winner Feature의 strong entity tag.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "Location": {
+                "description": "승인 또는 exact-conflict winner Feature의 canonical resource URI.",
+                "schema": {
+                  "format": "uri-reference",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "admin manual Feature create scope 없음"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Feature 요청 없음"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "pending 상태 아님"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "approval 입력 오류"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "수동 Feature 생성 승인 경계 비활성"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": [],
+            "AdminFeatureCreateBFF": []
+          }
+        ],
+        "summary": "Approve Feature Request Route",
+        "tags": [
+          "admin-feature-requests"
+        ]
+      }
+    },
+    "/v1/admin/feature-requests/{request_id}/reject": {
+      "post": {
+        "operationId": "reject_feature_request_route_v1_admin_feature_requests__request_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "request_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Request Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeatureRequestRejectInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureRequestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "admin manual Feature create scope 없음"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Feature 요청 없음"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "pending 상태 아님"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "거절 입력 오류"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "수동 Feature 생성 승인 경계 비활성"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": [],
+            "AdminFeatureCreateBFF": []
+          }
+        ],
+        "summary": "Reject Feature Request Route",
+        "tags": [
+          "admin-feature-requests"
         ]
       }
     },
@@ -33379,6 +35693,74 @@
         ]
       }
     },
+    "/v1/admin/features/{feature_id}/creation-provenance": {
+      "get": {
+        "description": "현재 Feature에 결박된 claim/origin만 읽고 absence를 추정하지 않는다.",
+        "operationId": "get_feature_creation_provenance_route_v1_admin_features__feature_id__creation_provenance_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminManualFeatureProvenanceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "feature 없음"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "feature 참조 형식 오류"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Admin manual Feature creation provenance",
+        "tags": [
+          "admin-features"
+        ]
+      }
+    },
     "/v1/admin/features/{feature_id}/field-overrides": {
       "post": {
         "description": "registry typed effective field를 author하고 exact command receipt를 돌려준다.",
@@ -35237,6 +37619,311 @@
         "summary": "Patch Admin Issue",
         "tags": [
           "admin-issues"
+        ]
+      }
+    },
+    "/v1/admin/manual-provider-dedup-cases": {
+      "get": {
+        "description": "admin BFF가 immutable M05 case의 stable keyset page를 읽는다.",
+        "operationId": "list_manual_provider_dedup_cases_route_v1_admin_manual_provider_dedup_cases_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "pending",
+                    "terminal"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": "pending",
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after_created_at",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After Created At"
+            }
+          },
+          {
+            "in": "query",
+            "name": "after_case_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After Case Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManualProviderDedupCasePageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "List Manual Provider Dedup Cases Route",
+        "tags": [
+          "admin-manual-provider-dedup-cases"
+        ]
+      }
+    },
+    "/v1/admin/manual-provider-dedup-cases/{case_id}": {
+      "get": {
+        "description": "case의 immutable evidence, resolution/event, subscription delivery 상태를 읽는다.",
+        "operationId": "get_manual_provider_dedup_case_route_v1_admin_manual_provider_dedup_cases__case_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Case Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManualProviderDedupCaseDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "manual/provider dedup case 없음"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Get Manual Provider Dedup Case Route",
+        "tags": [
+          "admin-manual-provider-dedup-cases"
+        ]
+      }
+    },
+    "/v1/admin/manual-provider-dedup-cases/{case_id}/decisions": {
+      "post": {
+        "description": "admin decision과 immutable resolution/event를 같은 command transaction으로 확정한다.",
+        "operationId": "resolve_manual_provider_dedup_case_route_v1_admin_manual_provider_dedup_cases__case_id__decisions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "case_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Case Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManualProviderDedupCaseDecisionInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManualProviderDedupCaseDecisionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "AdminBFF 또는 destructive decision kill-switch 거부"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "stale evidence 또는 Idempotency-Key 충돌",
+            "headers": {
+              "Idempotency-Replayed": {
+                "description": "동일 stale receipt를 replay했을 때 true.",
+                "schema": {
+                  "enum": [
+                    "true"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "decision 입력 오류"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "paired reconciliation subscription이 아직 활성화되지 않음"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "Resolve Manual Provider Dedup Case Route",
+        "tags": [
+          "admin-manual-provider-dedup-cases"
         ]
       }
     },
@@ -48093,6 +50780,338 @@
         "summary": "alias-map 전체 merkle root (양 저장소 checksum 대조)",
         "tags": [
           "service-feature-alias-maps"
+        ]
+      }
+    },
+    "/v1/service/feature-reference-reconciliations": {
+      "get": {
+        "description": "consumer별 earliest unacknowledged event에 fenced lease를 부여한다.",
+        "operationId": "lease_feature_reference_reconciliation_event_route_v1_service_feature_reference_reconciliations_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Reconciliation-Worker-Id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "X-Reconciliation-Worker-Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureReferenceReconciliationLeaseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "204": {
+            "description": "unacknowledged event 없음"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "reconciliation read token 없음/불일치"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "다른 service scope token"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "다른 worker의 유효한 lease가 존재"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "M05 reconciliation read boundary 비활성"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Lease Feature Reference Reconciliation Event Route",
+        "tags": [
+          "service-feature-reference-reconciliations"
+        ]
+      }
+    },
+    "/v1/service/feature-reference-reconciliations/{event_id}/acks": {
+      "post": {
+        "description": "ACK evidence를 한 번 기록하고, semantic replay는 claim 전에 종료한다.",
+        "operationId": "ack_feature_reference_reconciliation_event_route_v1_service_feature_reference_reconciliations__event_id__acks_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "event_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Event Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeatureReferenceReconciliationAckInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureReferenceReconciliationAckResponse"
+                }
+              }
+            },
+            "description": "Successful Response",
+            "headers": {
+              "Idempotency-Replayed": {
+                "description": "기존 ACK receipt를 replay했을 때 true.",
+                "schema": {
+                  "enum": [
+                    "true"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "reconciliation ACK token 없음/불일치"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "다른 service scope token"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "ACK hash, lease 또는 event order 충돌"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "ACK 입력 오류"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "M05 reconciliation ACK boundary 비활성"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Ack Feature Reference Reconciliation Event Route",
+        "tags": [
+          "service-feature-reference-reconciliations"
+        ]
+      }
+    },
+    "/v1/service/feature-requests": {
+      "post": {
+        "operationId": "submit_feature_request_route_v1_service_feature_requests_post",
+        "parameters": [
+          {
+            "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": true,
+            "schema": {
+              "description": "같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409.",
+              "format": "uuid",
+              "title": "Idempotency-Key",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeatureRequestSubmitInput"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FeatureRequestResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Feature request service token 없음/불일치"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "다른 service scope token"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "M04 queue credential/activation 전"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Submit Feature Request Route",
+        "tags": [
+          "service-feature-requests"
         ]
       }
     },

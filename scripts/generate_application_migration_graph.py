@@ -146,6 +146,43 @@ def _validate_graph(
         )
 
 
+def _topologically_order_revisions(
+    revisions: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    """파일명과 무관하게 parent가 항상 먼저 오는 stable graph 순서를 만든다."""
+    records: dict[str, dict[str, object]] = {}
+    remaining_parents: dict[str, int] = {}
+    children: dict[str, list[str]] = {}
+    for record in revisions:
+        revision = record["revision"]
+        parents = record["down_revision"]
+        if not isinstance(revision, str) or not isinstance(parents, list):
+            raise ApplicationMigrationGraphError("application migration graph is invalid")
+        records[revision] = record
+        remaining_parents[revision] = len(parents)
+        for parent in parents:
+            if not isinstance(parent, str):
+                raise ApplicationMigrationGraphError("application migration graph is invalid")
+            children.setdefault(parent, []).append(revision)
+
+    ready = sorted(
+        revision for revision, parent_count in remaining_parents.items() if parent_count == 0
+    )
+    ordered: list[dict[str, object]] = []
+    while ready:
+        revision = ready.pop(0)
+        ordered.append(records[revision])
+        for child in sorted(children.get(revision, ())):
+            remaining_parents[child] -= 1
+            if remaining_parents[child] == 0:
+                ready.append(child)
+        ready.sort()
+
+    if len(ordered) != len(revisions):
+        raise ApplicationMigrationGraphError("application migration graph contains a cycle")
+    return ordered
+
+
 def build_application_migration_graph(versions_directory: Path) -> dict[str, object]:
     """Alembic module을 실행하지 않고 정규화된 graph artifact를 만든다."""
     paths = sorted(versions_directory.glob("*.py"))
@@ -188,7 +225,10 @@ def build_application_migration_graph(versions_directory: Path) -> dict[str, obj
         revision_ids=seen,
         referenced_parents=referenced_parents,
     )
-    return {"schema": _GRAPH_SCHEMA, "revisions": revisions}
+    return {
+        "schema": _GRAPH_SCHEMA,
+        "revisions": _topologically_order_revisions(revisions),
+    }
 
 
 def _canonical_json(payload: dict[str, object]) -> str:

@@ -37,6 +37,12 @@ services:
   db-role-bootstrap:
     network_mode: host
 
+  db-migrate-to-m01-bootstrap-boundary:
+    network_mode: host
+
+  db-role-bootstrap-m01:
+    network_mode: host
+
   rustfs-perms:
     network_mode: host
 

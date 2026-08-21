@@ -54,6 +54,21 @@ from kortravelmap.api.routers.enrichment_review import (
 from kortravelmap.api.routers.feature_alias_maps import (
     service_router as service_feature_alias_maps_router,
 )
+from kortravelmap.api.routers.feature_reference_reconciliations import (
+    activation_router as admin_feature_reference_reconciliation_subscriptions_router,
+)
+from kortravelmap.api.routers.feature_reference_reconciliations import (
+    admin_router as admin_manual_provider_dedup_cases_router,
+)
+from kortravelmap.api.routers.feature_reference_reconciliations import (
+    service_router as service_feature_reference_reconciliations_router,
+)
+from kortravelmap.api.routers.feature_requests import (
+    admin_router as admin_feature_requests_router,
+)
+from kortravelmap.api.routers.feature_requests import (
+    service_router as service_feature_requests_router,
+)
 from kortravelmap.api.routers.features import (
     router as features_router,
 )
@@ -93,6 +108,9 @@ __all__ = [
     "enrichment_review_router",
     "feature_enrichment_review_router",
     "poi_cache_targets_router",
+    "admin_feature_requests_router",
+    "admin_feature_reference_reconciliation_subscriptions_router",
+    "admin_manual_provider_dedup_cases_router",
     "features_router",
     "categories_router",
     "mois_detail_router",
@@ -111,6 +129,8 @@ __all__ = [
     "service_curation_cutover_router",
     "service_curation_snapshots_router",
     "service_feature_alias_maps_router",
+    "service_feature_requests_router",
+    "service_feature_reference_reconciliations_router",
     "weather_router",
     "curations_router",
 ]

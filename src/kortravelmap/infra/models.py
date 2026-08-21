@@ -106,6 +106,13 @@ __all__ = [
     "FeatureStateTransitionRow",
     "ManualFeatureIdentityClaimRow",
     "FeatureCreationOriginRow",
+    "FeatureRequestRow",
+    "ManualProviderDedupCaseRow",
+    "ManualProviderDedupResolutionRow",
+    "FeatureReferenceReconciliationEventRow",
+    "FeatureReferenceReconciliationAckRow",
+    "FeatureReferenceReconciliationSubscriptionRow",
+    "FeatureReferenceReconciliationLeaseRow",
     "FeatureAliasRow",
     "ProviderDatasetRow",
     "ProviderDatasetOperationRow",
@@ -677,11 +684,16 @@ class FeatureCreationOriginRow(Base):
     __tablename__ = "feature_creation_origins"
     __table_args__ = (
         CheckConstraint(
-            "origin_kind = 'manual_admin'",
+            "origin_kind IN ('manual_admin', 'manual_curation', 'manual_request')",
             name=conv("ck_feature_creation_origins_kind"),
         ),
         CheckConstraint(
-            "creator_principal_id = 'admin-ui-bff.manual-feature-create.v1'",
+            "(origin_kind = 'manual_admin' "
+            "AND creator_principal_id = 'admin-ui-bff.manual-feature-create.v1') "
+            "OR (origin_kind = 'manual_curation' "
+            "AND creator_principal_id = 'admin-ui-bff.manual-curation-feature-create.v1') "
+            "OR (origin_kind = 'manual_request' "
+            "AND creator_principal_id = 'feature-request.approval.v1')",
             name=conv("ck_feature_creation_origins_principal"),
         ),
         CheckConstraint(
@@ -689,13 +701,25 @@ class FeatureCreationOriginRow(Base):
             name=conv("ck_feature_creation_origins_actor"),
         ),
         CheckConstraint(
-            "invoker_role = 'ktm_feature_api_runtime' "
-            "AND procedure_definer = 'ktm_manual_feature_procedure_owner'",
+            "(origin_kind = 'manual_admin' "
+            "AND invoker_role = 'ktm_feature_api_runtime' "
+            "AND procedure_definer = 'ktm_manual_feature_procedure_owner') "
+            "OR (origin_kind = 'manual_curation' "
+            "AND invoker_role = 'ktm_feature_api_runtime' "
+            "AND procedure_definer = 'ktm_curation_command_owner') "
+            "OR (origin_kind = 'manual_request' "
+            "AND invoker_role = 'ktm_feature_api_runtime' "
+            "AND procedure_definer = 'ktm_feature_request_procedure_owner')",
             name=conv("ck_feature_creation_origins_roles"),
         ),
         UniqueConstraint(
             "creation_command_id",
             name=conv("uq_feature_creation_origins_command"),
+        ),
+        UniqueConstraint(
+            "feature_id",
+            "creation_command_id",
+            name=conv("uq_feature_creation_origins_feature_command"),
         ),
         ForeignKeyConstraint(
             ["creation_command_id"],
@@ -730,6 +754,515 @@ class FeatureCreationOriginRow(Base):
     )
     invoker_role: Mapped[str] = mapped_column(Text, nullable=False)
     procedure_definer: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class FeatureRequestRow(Base):
+    """M04의 immutable external submit와 admin-only resolution queue."""
+
+    __tablename__ = "feature_requests"
+    __table_args__ = (
+        CheckConstraint(
+            "submitted_by_principal = 'service:feature-request'",
+            name=conv("ck_feature_requests_principal"),
+        ),
+        CheckConstraint(
+            "jsonb_typeof(request_payload) = 'object' "
+            "AND jsonb_typeof(request_payload -> 'kind') = 'string' "
+            "AND request_payload ->> 'kind' IN ('place', 'event') "
+            "AND jsonb_typeof(request_payload -> 'name') = 'string' "
+            "AND nullif(btrim(request_payload ->> 'name'), '') IS NOT NULL "
+            "AND char_length(request_payload ->> 'name') <= 200 "
+            "AND jsonb_typeof(request_payload -> 'lon') = 'number' "
+            "AND (request_payload ->> 'lon')::numeric BETWEEN 124 AND 132 "
+            "AND jsonb_typeof(request_payload -> 'lat') = 'number' "
+            "AND (request_payload ->> 'lat')::numeric BETWEEN 33 AND 39.5 "
+            "AND jsonb_typeof(request_payload -> 'categories') = 'array' "
+            "AND jsonb_array_length(request_payload -> 'categories') <= 10 "
+            "AND NOT jsonb_path_exists(request_payload, "
+            "'$.categories[*] ? (@.type() != \"string\")') "
+            "AND (NOT request_payload ? 'note' OR ("
+            "jsonb_typeof(request_payload -> 'note') = 'string' "
+            "AND char_length(request_payload ->> 'note') <= 2000))",
+            name=conv("ck_feature_requests_payload"),
+        ),
+        CheckConstraint(
+            "status IN ('pending', 'approved', 'rejected', 'exact_conflict')",
+            name=conv("ck_feature_requests_status"),
+        ),
+        CheckConstraint(
+            "(status = 'pending' AND resolved_at IS NULL AND resolved_by_actor IS NULL "
+            "AND resolution_command_id IS NULL AND resolved_feature_id IS NULL "
+            "AND rejection_reason IS NULL) "
+            "OR (status IN ('approved', 'exact_conflict') AND resolved_at IS NOT NULL "
+            "AND resolved_by_actor IS NOT NULL AND resolution_command_id IS NOT NULL "
+            "AND resolved_feature_id IS NOT NULL AND rejection_reason IS NULL) "
+            "OR (status = 'rejected' AND resolved_at IS NOT NULL "
+            "AND resolved_by_actor IS NOT NULL AND resolution_command_id IS NOT NULL "
+            "AND resolved_feature_id IS NULL "
+            "AND nullif(btrim(rejection_reason), '') IS NOT NULL)",
+            name=conv("ck_feature_requests_resolution"),
+        ),
+        UniqueConstraint(
+            "resolution_command_id",
+            name=conv("uq_feature_requests_resolution_command"),
+        ),
+        UniqueConstraint(
+            "submission_command_id",
+            name=conv("uq_feature_requests_submission_command"),
+        ),
+        ForeignKeyConstraint(
+            ["submission_command_id"],
+            ["ops.domain_commands.command_id"],
+            name=conv("feature_requests_submission_command_id_fkey"),
+        ),
+        ForeignKeyConstraint(
+            ["resolution_command_id"],
+            ["ops.domain_commands.command_id"],
+            name=conv("feature_requests_resolution_command_id_fkey"),
+        ),
+        ForeignKeyConstraint(
+            ["resolved_feature_id"],
+            ["feature.features.feature_uuid"],
+            name=conv("feature_requests_resolved_feature_id_fkey"),
+        ),
+        {"schema": "ops"},
+    )
+
+    request_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    submitted_by_principal: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+        server_default=text("'service:feature-request'"),
+    )
+    request_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'pending'")
+    )
+    submitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")
+    )
+    submission_command_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    resolved_by_actor: Mapped[str | None] = mapped_column(Text)
+    resolution_command_id: Mapped[int | None] = mapped_column(BigInteger)
+    resolved_feature_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    rejection_reason: Mapped[str | None] = mapped_column(Text)
+
+
+# =============================================================================
+# ops.manual_provider_dedup_* / feature reference reconciliation (T-VN-M05)
+# =============================================================================
+
+
+class ManualProviderDedupCaseRow(Base):
+    """수동 Feature와 provider Feature의 immutable dedup episode evidence."""
+
+    __tablename__ = "manual_provider_dedup_cases"
+    __table_args__ = (
+        CheckConstraint(
+            "scorer_id = 'manual-provider-v1'",
+            name=conv("ck_manual_provider_dedup_cases_scorer"),
+        ),
+        CheckConstraint(
+            "manual_feature_row_revision >= 1 "
+            "AND provider_feature_row_revision >= 1 "
+            "AND distance_meters >= 0",
+            name=conv("ck_manual_provider_dedup_cases_revisions"),
+        ),
+        CheckConstraint(
+            "name_score BETWEEN 0 AND 1 AND spatial_score BETWEEN 0 AND 1 "
+            "AND category_score BETWEEN 0 AND 1 AND total_score BETWEEN 0 AND 1",
+            name=conv("ck_manual_provider_dedup_cases_scores"),
+        ),
+        CheckConstraint(
+            "evidence_fingerprint ~ '^[0-9a-f]{64}$' "
+            "AND scorer_input_sha256 ~ '^[0-9a-f]{64}$' "
+            "AND source_record_raw_payload_hash ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_manual_provider_dedup_cases_hashes"),
+        ),
+        CheckConstraint(
+            "jsonb_typeof(manual_feature_snapshot) = 'object' "
+            "AND jsonb_typeof(provider_feature_snapshot) = 'object' "
+            "AND jsonb_typeof(detector_causation) = 'object'",
+            name=conv("ck_manual_provider_dedup_cases_json"),
+        ),
+        ForeignKeyConstraint(
+            ["manual_feature_id", "manual_feature_uuid"],
+            ["feature.features.feature_id", "feature.features.feature_uuid"],
+            name=conv("fk_manual_provider_dedup_cases_manual_identity"),
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["provider_feature_id", "provider_feature_uuid"],
+            ["feature.features.feature_id", "feature.features.feature_uuid"],
+            name=conv("fk_manual_provider_dedup_cases_provider_identity"),
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["manual_feature_uuid", "manual_creation_command_id"],
+            [
+                "feature.feature_creation_origins.feature_id",
+                "feature.feature_creation_origins.creation_command_id",
+            ],
+            name=conv("fk_manual_provider_dedup_cases_manual_origin"),
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["manual_feature_uuid", "manual_creation_command_id"],
+            [
+                "feature.manual_feature_identity_claims.feature_id",
+                "feature.manual_feature_identity_claims.claimed_by_command_id",
+            ],
+            name=conv("fk_manual_provider_dedup_cases_manual_claim"),
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["provider_feature_id", "source_entity_key"],
+            [
+                "provider_sync.source_links.feature_id",
+                "provider_sync.source_links.source_entity_key",
+            ],
+            name=conv("fk_manual_provider_dedup_cases_provider_link"),
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["source_entity_key", "source_record_key"],
+            [
+                "provider_sync.source_records.source_entity_key",
+                "provider_sync.source_records.source_record_key",
+            ],
+            name=conv("fk_manual_provider_dedup_cases_source_record"),
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["provider_dataset_id"],
+            ["provider_sync.provider_datasets.provider_dataset_id"],
+            name=conv("fk_manual_provider_dedup_cases_provider_dataset"),
+            ondelete="RESTRICT",
+        ),
+        Index(
+            "idx_manual_provider_dedup_cases_manual_pending",
+            "manual_feature_id",
+            text("created_at DESC"),
+        ),
+        Index(
+            "idx_manual_provider_dedup_cases_provider_pending",
+            "provider_feature_id",
+            text("created_at DESC"),
+        ),
+        {"schema": "ops"},
+    )
+
+    case_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    manual_feature_id: Mapped[str] = mapped_column(Text, nullable=False)
+    manual_feature_uuid: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    manual_creation_command_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    manual_feature_row_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    provider_feature_id: Mapped[str] = mapped_column(Text, nullable=False)
+    provider_feature_uuid: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    provider_feature_row_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    provider_dataset_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source_entity_key: Mapped[str] = mapped_column(Text, nullable=False)
+    source_record_key: Mapped[str] = mapped_column(Text, nullable=False)
+    source_record_raw_payload_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    source_head_observed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    manual_feature_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    provider_feature_snapshot: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    scorer_id: Mapped[str] = mapped_column(Text, nullable=False)
+    scorer_input_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    name_score: Mapped[float] = mapped_column(Numeric(9, 8), nullable=False)
+    spatial_score: Mapped[float] = mapped_column(Numeric(9, 8), nullable=False)
+    category_score: Mapped[float] = mapped_column(Numeric(9, 8), nullable=False)
+    total_score: Mapped[float] = mapped_column(Numeric(9, 8), nullable=False)
+    distance_meters: Mapped[float] = mapped_column(Numeric(14, 3), nullable=False)
+    evidence_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
+    detector_causation: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("clock_timestamp()"),
+    )
+
+
+class ManualProviderDedupResolutionRow(Base):
+    """case별 유일한 immutable terminal resolution."""
+
+    __tablename__ = "manual_provider_dedup_resolutions"
+    __table_args__ = (
+        CheckConstraint(
+            "decision IN ('kept', 'merged', 'manual_retired', 'superseded')",
+            name=conv("ck_manual_provider_dedup_resolutions_decision"),
+        ),
+        CheckConstraint(
+            "(decision = 'superseded' AND command_id IS NULL AND actor IS NULL "
+            "AND reason IS NULL AND superseded_by_case_id IS NOT NULL "
+            "AND jsonb_typeof(detector_causation) = 'object') "
+            "OR (decision IN ('kept', 'merged', 'manual_retired') "
+            "AND command_id IS NOT NULL AND nullif(btrim(actor), '') IS NOT NULL "
+            "AND nullif(btrim(reason), '') IS NOT NULL "
+            "AND superseded_by_case_id IS NULL AND detector_causation IS NULL)",
+            name=conv("ck_manual_provider_dedup_resolutions_causation"),
+        ),
+        UniqueConstraint("case_id", name=conv("uq_manual_provider_dedup_resolutions_case")),
+        UniqueConstraint("command_id", name=conv("uq_manual_provider_dedup_resolutions_command")),
+        ForeignKeyConstraint(
+            ["case_id"],
+            ["ops.manual_provider_dedup_cases.case_id"],
+            name=conv("fk_manual_provider_dedup_resolutions_case"),
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["command_id"],
+            ["ops.domain_commands.command_id"],
+            name=conv("fk_manual_provider_dedup_resolutions_command"),
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["superseded_by_case_id"],
+            ["ops.manual_provider_dedup_cases.case_id"],
+            name=conv("fk_manual_provider_dedup_resolutions_superseded_case"),
+            ondelete="RESTRICT",
+        ),
+        {"schema": "ops"},
+    )
+
+    resolution_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    case_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    decision: Mapped[str] = mapped_column(Text, nullable=False)
+    command_id: Mapped[int | None] = mapped_column(BigInteger)
+    actor: Mapped[str | None] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text)
+    superseded_by_case_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    detector_causation: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    resolved_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("clock_timestamp()"),
+    )
+
+
+class FeatureReferenceReconciliationEventRow(Base):
+    """manual retire resolution의 immutable consumer delivery envelope."""
+
+    __tablename__ = "feature_reference_reconciliation_events"
+    __table_args__ = (
+        CheckConstraint(
+            "action IN ('rebind', 'detach')",
+            name=conv("ck_feature_reference_reconciliation_events_action"),
+        ),
+        CheckConstraint(
+            "payload_schema_version = 1 AND event_sha256 ~ '^[0-9a-f]{64}$' "
+            "AND jsonb_typeof(event_payload) = 'object'",
+            name=conv("ck_feature_reference_reconciliation_events_payload"),
+        ),
+        CheckConstraint(
+            "old_feature_row_revision_before_transition >= 1 "
+            "AND manual_retire_row_revision_after_transition >= 2",
+            name=conv("ck_feature_reference_reconciliation_events_revisions"),
+        ),
+        CheckConstraint(
+            "(action = 'rebind' AND replacement_feature_id IS NOT NULL "
+            "AND replacement_feature_uuid IS NOT NULL "
+            "AND replacement_feature_row_revision IS NOT NULL) "
+            "OR (action = 'detach' AND replacement_feature_id IS NULL "
+            "AND replacement_feature_uuid IS NULL "
+            "AND replacement_feature_row_revision IS NULL)",
+            name=conv("ck_feature_reference_reconciliation_events_replacement"),
+        ),
+        UniqueConstraint(
+            "resolution_id",
+            name=conv("uq_feature_reference_reconciliation_events_resolution"),
+        ),
+        UniqueConstraint(
+            "event_sequence",
+            name=conv("uq_feature_reference_reconciliation_events_sequence"),
+        ),
+        ForeignKeyConstraint(
+            ["resolution_id"],
+            ["ops.manual_provider_dedup_resolutions.resolution_id"],
+            name=conv("fk_feature_reference_reconciliation_events_resolution"),
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["case_id"],
+            ["ops.manual_provider_dedup_cases.case_id"],
+            name=conv("fk_feature_reference_reconciliation_events_case"),
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["command_id"],
+            ["ops.domain_commands.command_id"],
+            name=conv("fk_feature_reference_reconciliation_events_command"),
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["manual_retire_transition_id"],
+            ["feature.feature_state_transitions.transition_id"],
+            name=conv("fk_feature_reference_reconciliation_events_transition"),
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["old_feature_id", "old_feature_uuid"],
+            ["feature.features.feature_id", "feature.features.feature_uuid"],
+            name=conv("fk_feature_reference_reconciliation_events_old_identity"),
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["replacement_feature_id", "replacement_feature_uuid"],
+            ["feature.features.feature_id", "feature.features.feature_uuid"],
+            name=conv("fk_feature_reference_reconciliation_events_replacement_identity"),
+            ondelete="RESTRICT",
+        ),
+        Index("idx_feature_reference_reconciliation_events_sequence", "event_sequence"),
+        {"schema": "ops"},
+    )
+
+    event_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    event_sequence: Mapped[int] = mapped_column(
+        BigInteger, Identity(always=True), nullable=False
+    )
+    case_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    resolution_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    action: Mapped[str] = mapped_column(Text, nullable=False)
+    old_feature_id: Mapped[str] = mapped_column(Text, nullable=False)
+    old_feature_uuid: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    old_feature_row_revision_before_transition: Mapped[int] = mapped_column(
+        BigInteger, nullable=False
+    )
+    replacement_feature_id: Mapped[str | None] = mapped_column(Text)
+    replacement_feature_uuid: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    replacement_feature_row_revision: Mapped[int | None] = mapped_column(BigInteger)
+    manual_retire_transition_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    manual_retire_row_revision_after_transition: Mapped[int] = mapped_column(
+        BigInteger, nullable=False
+    )
+    command_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    payload_schema_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    event_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    event_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("clock_timestamp()"),
+    )
+
+
+class FeatureReferenceReconciliationSubscriptionRow(Base):
+    """service principal의 immutable reconciliation activation cursor."""
+
+    __tablename__ = "feature_reference_reconciliation_subscriptions"
+    __table_args__ = (
+        CheckConstraint(
+            "initial_event_sequence >= 0",
+            name=conv("ck_ref_recon_subscriptions_initial_cursor"),
+        ),
+        CheckConstraint(
+            "btrim(principal_id) <> '' AND char_length(principal_id) <= 200",
+            name=conv("ck_feature_reference_reconciliation_subscriptions_principal"),
+        ),
+        {"schema": "ops"},
+    )
+
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    initial_event_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    read_scope: Mapped[str] = mapped_column(Text, nullable=False)
+    ack_scope: Mapped[str] = mapped_column(Text, nullable=False)
+    activated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("clock_timestamp()"),
+    )
+
+
+class FeatureReferenceReconciliationAckRow(Base):
+    """principal별 event의 append-only local receipt acknowledgement."""
+
+    __tablename__ = "feature_reference_reconciliation_acks"
+    __table_args__ = (
+        CheckConstraint(
+            "event_sha256 ~ '^[0-9a-f]{64}$' "
+            "AND local_receipt_sha256 ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_feature_reference_reconciliation_acks_hashes"),
+        ),
+        UniqueConstraint(
+            "command_id",
+            name=conv("uq_feature_reference_reconciliation_acks_command"),
+        ),
+        ForeignKeyConstraint(
+            ["event_id"],
+            ["ops.feature_reference_reconciliation_events.event_id"],
+            name=conv("fk_feature_reference_reconciliation_acks_event"),
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["principal_id"],
+            ["ops.feature_reference_reconciliation_subscriptions.principal_id"],
+            name=conv("fk_feature_reference_reconciliation_acks_principal"),
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["command_id"],
+            ["ops.domain_commands.command_id"],
+            name=conv("fk_feature_reference_reconciliation_acks_command"),
+            ondelete="RESTRICT",
+        ),
+        {"schema": "ops"},
+    )
+
+    event_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    event_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    local_receipt_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    command_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    acked_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("clock_timestamp()"),
+    )
+
+
+class FeatureReferenceReconciliationLeaseRow(Base):
+    """strict prefix delivery의 mutable server-issued lease/fencing state."""
+
+    __tablename__ = "feature_reference_reconciliation_leases"
+    __table_args__ = (
+        CheckConstraint(
+            "acked_through_sequence >= 0 AND lease_epoch >= 0",
+            name=conv("ck_feature_reference_reconciliation_leases_cursor"),
+        ),
+        ForeignKeyConstraint(
+            ["principal_id"],
+            ["ops.feature_reference_reconciliation_subscriptions.principal_id"],
+            name=conv("fk_feature_reference_reconciliation_leases_principal"),
+            ondelete="RESTRICT",
+        ),
+        {"schema": "ops"},
+    )
+
+    principal_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    acked_through_sequence: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    worker_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    lease_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=text("clock_timestamp()"),
+    )
 
 
 # =============================================================================

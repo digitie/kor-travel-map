@@ -51,6 +51,42 @@ byte 상한 512 MiB도 손봤다. `material_bytes`는 heap이 아니라 leaf 인
 하지 않는 죽은 코드였다. `target_key`가 512자까지 허용돼 같은 item 수에서도 재료량이 16배
 흔들리므로 item 상한만으로는 폭 축을 못 묶는다. 56 MiB(139초)로 조였다.
 
+## 2026-08-21 — M01~M05 cluster-wide role 순서 의존과 dedup planner gate 보정
+
+C05 frozen-legacy migration 검증은 별도 database에서 실행되지만 PostgreSQL role/membership은
+cluster 전체에 남는다. 그 bootstrap이 M01/M04/M05의 post-legacy membership을 의도적으로
+해제한 뒤 공유 migrated DB를 쓰는 다음 lane test가 실행되어, CI에서 procedure grant·runtime
+role 검증이 연쇄 실패했다. M01/M04/M05 lane별 fixture가 완료된 M05 head에서 role graph만
+멱등적으로 복구하게 하고, pristine `0233` choreography bootstrap과 post-head restore 경로를
+분리했다. 적대적 role 리뷰의 P1을 반영해 운영 bootstrap과 동일하게 금지된 실행자 간
+membership을 `REVOKE`하고, role 속성·membership option·중첩을 정확히 확인하는 단언으로
+즉시 중단하게 정규화했다. 정확한 C05 → M01/M04/M05 순서 표적 integration은 `18 passed`다.
+
+같은 CI의 dedup EXPLAIN은 `source_entities` 3,200행 중 provider/dataset 하나가 정확히 20%를
+고르는 fixture에서 기본 planner의 정상 Seq Scan을 회귀로 오판했다. 이 20% 선택성은 seed
+관례가 아니라 실행 시 단언으로 고정했다. forced-index gate는
+provider/dataset index 호환성을 그대로 검증하고, 기본 planner gate는 나머지 고선택성 대량
+relation의 index path만 강제하도록 분리했다. 표적 dedup EXPLAIN은 `1 passed`다.
+
+로컬 CI 구성 전체 integration은 `1037 passed, 12 skipped`까지 진행했다. NTFS 임시 디렉터리가
+mode `0700`을 보존하지 않아 domain command marker trust test 두 건만 실패했으며, 이는 Linux
+CI와 변경 코드의 실패가 아니다.
+
+## 2026-08-21 — main `0232` 재베이스 뒤 M04/M05 migration ID 충돌 해소
+
+`origin/main`이 `0232_tvn37d_notice_empty_range`까지 전진한 상태에서 unmerged M04/M05가 동일한
+`0230`~`0232` revision ID를 선언했다. 그 결과 fresh PostGIS CI가 main chain을 우회해 M01/M04/M05
+procedure와 role grant가 없는 head를 만들었다. main의 적용 revision은 불변으로 두고 M04/M05를
+`0233_m04_feature_request_queue` → `0234_m05_manual_provider_dedup` →
+`0235_m05_reconciliation_delivery`로 재번호화했다. two-phase bootstrap, restore boundary, generated
+application graph, integration head assertion까지 함께 바꿔 migration graph 하나만 정본으로 남겼다.
+
+## 2026-08-21 — catalog 대리키 lint 범위를 provider catalog로 한정
+
+`OVERRIDING SYSTEM VALUE` 탐지는 provider catalog의 identity 대리키 하드코딩만 막아야 한다.
+M05 reconciliation event의 독립 sequence를 procedure 안에서 명시하는 합법 SQL까지 전역적으로
+거부해 Python CI가 실패하던 것을, catalog INSERT가 확인된 SQL 상수에만 검사하도록 고쳤다.
+
 ## 2026-08-21 — `0229`~`0232` 묶음 prod 배포 완료, admin 500 해소
 
 PR #1042(자연키 C05 catalog)가 CI 8/8로 머지돼 main이 `e47a389f`가 됐고, 그 위에서
@@ -137,6 +173,37 @@ prod 덤프(587M)를 별도 DB로 복원해 실제 migrator 자격으로 리허�
 C05는 sequence가 매긴 **104~108**을 받았고 73번 선점자는 자식 0으로 무사하다. sequence는
 103→108로 전진만 했다. `0229`가 `curated` 35행을 `candidate`로 정규화하므로 미해결이던
 admin `/v1/admin/curated-source-rules` 500도 이 배포로 풀릴 전망이다.
+
+## 2026-08-21 — M04 role marker가 있는 shared cluster legacy bootstrap 보정
+
+PostGIS CI의 기존-object bootstrap 검증에서, 다른 database가 만든 M04 Feature request
+전용 NOLOGIN role의 membership이 legacy base graph에 섞여 exact-graph assertion이 실패했다.
+이 역할들은 M01/M05 전용 role과 마찬가지로 cluster 범위 객체이므로 legacy 비교에서는 제외하고,
+각각의 M01 repair/M04 전용 phase에서 별도로 exact ACL·membership을 검증한다. 대상 기존-object
+integration과 Docker runtime unit은 `159 passed`로 다시 확인했다.
+
+## 2026-08-21 — M05 이후 기존 PostGIS migration fixture 격리
+
+M01~M05 role choreography가 적용된 뒤에도 기존 통합 테스트가 shared default DB의 head와
+partial bootstrap을 섞어 사용해 CI에서 순서 의존적으로 실패했다. Alembic fixture는 UUID 전용
+database를 만들고 제거하며, legacy M01 backfill은 정확히 `0226`까지만 검증하도록 경계를
+명확히 했다. T-VN34/T-VN34C provider 초기 생성은 executor group을 직접 `SET ROLE`하지 않고,
+실제 Dagster runtime login의 상속 권한으로 실행한다. 다른 DB에만 존재하는 M01 role marker는
+fresh legacy database의 bootstrap을 막지 않되, 이 database가 `0226` 이후인데 relation marker가
+없으면 계속 fail-closed한다.
+
+표적 PostGIS 묶음은 24 passed, executor/feature-update 묶음은 21 passed·6 skipped로 확인했다.
+
+## 2026-08-21 — M05 paired service contract와 fresh bootstrap 정합화
+
+M05 service surface가 바뀐 뒤 Map의 `openapi-diff-v1` baseline과 pending consumer receipt가 이전
+service/admin SHA를 가리켜 Python CI가 실패했다. PinVi의 현재 exact vendor bytes와 같은
+user/service/admin SHA로 Map contract freeze를 재결박하고 artifact fingerprint gate를 통과시켰다.
+
+격리 fresh start에서는 PostgreSQL healthcheck가 Unix socket을 먼저 통과해 role bootstrap의 첫
+TCP probe가 connection refused로 끝나는 경쟁도 재현했다. bootstrap은 권한 변경 전 30초 bounded
+probe를 수행하도록 해 Compose start 순서가 network accept보다 빠른 경우에도 fail-closed하면서
+재시도한다.
 ## 2026-08-21 — T-VN-37D 두 번째 리뷰 P2 반영
 
 두 번째 독립 reviewer가 curation candidate의 `to_jsonb(notice)` timestamp가 DB 세션
@@ -153,7 +220,130 @@ candidate의 `to_jsonb(notice)`에 내부 generated column이 누출되는 P1을
 candidate SQL은 `valid_during`을 response JSON에서 제외하도록 수정했다. NULL·one-sided·
 equal range, public/admin active predicate와 notice candidate detail 회귀를 추가했으며,
 수정 후 targeted integration 2건을 통과했다.
-||||||| parent of 511be40f (docs: 0230 대리키 사건과 자연키 수정을 journal/resume/tasks에 기록)
+## 2026-08-21 — T-VN-M05 `0235` forward repair 재심 보정
+
+두 전문 적대 리뷰에서 `0234` preview DB의 v1 admin 실행권이 repair 뒤에도 남는 ACL 우회와,
+전용 owner가 이미 소유한 reader를 schema owner가 `CREATE OR REPLACE`할 수 없어 forward
+upgrade가 중단되는 문제를 재현했다. runtime reconciler와 bootstrap은 v1을 admin executor에서도
+명시 회수하고, `0235`는 reader 재선언에만 owner의 임시 schema `CREATE`를 부여한 뒤 즉시
+회수한다. fresh migration과 preview owner 재정의 모두 실제 migrator login으로 검증했다.
+
+subscription 최초 생성은 row가 없을 때 `FOR UPDATE`가 경쟁을 막지 못하므로 transaction advisory
+lock으로 직렬화했다. 두 domain command의 동시 provision은 한 쪽만 `provisioned`, 다른 쪽은
+500 대신 durable `already_provisioned`가 된다. terminal 409 receipt도 저장한
+`application/problem+json` media type을 replay하도록 고정했다. 이 변경은 다시 리베이스·푸시한
+뒤 같은 두 리뷰어에게 재심한다. PinVi consumer, isolated live UI E2E, no-owner restore drill 전에는
+M05 activation receipt를 계속 만들지 않는다.
+
+HTTP 재심에서 subscription 409의 top-level `request_id`와 replay `X-Request-ID`가 달라지는
+경계를 추가로 닫았다. replay handler는 성공 envelope의 `meta.request_id`를 우선하고, RFC 7807
+problem의 top-level `request_id`를 fallback으로 사용해 stored body와 header가 같은 최초 요청 ID를
+보존한다.
+
+후속 DB 재심은 no-owner restore의 legacy sweep이 reader를 schema owner로 바꾸는 상태와, M05
+membership이 legacy exact-graph oracle에 섞이는 두 P0를 확인했다. `0235`는 reader 부재·전용
+owner·schema owner 세 상태를 명시 처리하고 임시 `USAGE, CREATE`를 모두 회수한다. legacy
+oracle은 M05의 네 membership을 기존 M01 경계처럼 제외한 뒤 M05 repair가 재확정한다. restored
+schema-owner reader를 restricted migrator로 실제 재정의하는 integration과 restore choreography의
+순서 계약을 추가했다.
+
+## 2026-08-21 — T-VN-M05 forward-only delivery·subscription activation 보정
+
+적대 리뷰에서 이미 배포 가능한 `0234` migration을 고치면 기존 DB가 reader/ACK lock routine을
+잃는다는 문제를 확인했다. 해당 revision은 evidence base로 복원하고, 새
+`0235_m05_reconciliation_delivery`에 ACK common lease lock, admin case reader, typed delivery audit,
+그리고 fixed principal·cursor-zero만 허용하는 AdminBFF subscription provisioning procedure를 두었다.
+이 immutable activation receipt가 없으면 모든 M05 case decision은 503으로 멈춘다. 기존 `0234`에
+이미 들어간 reader function은 `CREATE OR REPLACE`로 안전하게 재선언하고, legacy lease/ACK/decision
+procedure의 runtime EXECUTE는 회수해 v2 경로만 허용했다. restore는 M05 pre role phase 뒤 0235까지
+migrate한 뒤에만 ownership/ACL repair를 실행한다. fresh PostGIS migration integration과 API
+route/registry/policy test를 다시 고정했다. PinVi paired consumer와 격리 live UI E2E가 끝날 때까지
+activation receipt는 운영에서 만들지 않는다.
+
+## 2026-08-21 — T-VN-M05 admin 판정과 service delivery 경쟁 경계
+
+`GET /v1/admin/manual-provider-dedup-cases`, 상세 조회와
+`POST /v1/admin/manual-provider-dedup-cases/{case_id}/decisions`를 추가했다. 목록은
+`(created_at, case_id)` keyset과 pending/terminal filter만 지원하며, 상세는 immutable
+case·resolution·event와 subscription별 delivery 상태를 procedure-only로 읽는다. decision은
+`kept`에는 AdminBFF만, `merged`/`manual_retired`에는 body를 해석한 뒤 DB session보다 먼저
+destructive kill-switch까지 요구한다. stale evidence의 409은 domain command terminal result로
+기록하고 정상 return하므로 resolution 없이도 exact replay가 가능하다.
+
+service ACK은 동일 Idempotency-Key의 claim/replay를 먼저 잠그고, principal lease row도
+preflight와 writer가 공통 `FOR UPDATE`로 잠근다. 따라서 새 key 동시 요청이 모두 absent를
+읽어 뒤늦게 빈 domain command를 만드는 경쟁을 막는다. lease는 empty=204, 다른 worker=409으로
+명시하고, event는 재조립하지 않은 stored canonical envelope와 SHA-256을 그대로 반환한다.
+read/ACK digest는 함께만 설정되며 OpenAPI full/service와 command·route policy inventory를
+동기화했다. route/registry 40건, domain command 13건, fresh M05 PostGIS migration을 표적으로
+검증했다. 다음은 두 전문 적대 리뷰의 재검토와 PinVi paired consumer/UI contract 구현이다.
+
+## 2026-08-21 — T-VN-M05 backup v3 evidence root와 restore lease 재구축
+
+backup manifest를 v3로 올려 case·resolution·reconciliation event·ACK·immutable subscription을 같은 exported
+snapshot의 canonical JSONL count/SHA-256 root에 포함했다. restore verifier는 root 재계산 뒤
+ACK의 stored event hash와 subscription cursor 이후의 실제 event prefix를 검사한다. event hash는
+UTC `occurred_at`까지 포함한 canonical envelope 전체이며 verifier는 관계형 행과 다시 조립해 대조한다.
+불연속 ACK이나 hash 불일치는 fail-loud이며, 통과하면 live worker/expiry를 지우고 prefix에서 cursor를
+재구축한다.
+이미 무효화된 lease에는 epoch를 재증가시키지 않아 verifier 재실행도 안정적이다.
+
+v3 staging restore는 root 검증 전에 base/M01/M05 ownership·ACL repair를 다시 실행하고, 두 runtime
+LOGIN의 catalog preflight까지 통과해야 한다. M05 pre/migrate phase는 `0233/role-ready` 재시도와
+`0234` 완료 재기동을 구분해 허용하고 partial marker는 계속 중단한다.
+
+운영 verifier의 SQL을 integration에서 그대로 실행해 ACK cursor 보존, worker fence 무효화와
+idempotent 재실행을 확인했다. backup runbook unit 13건과 M05 integration, ruff, Bash syntax가
+통과했다. 다음 tranche는 Map admin/service HTTP contract와 first consumer durable receipt/rebind다.
+
+## 2026-08-21 — T-VN-M05 strict-prefix service delivery writer
+
+`0234_m05_manual_provider_dedup`에 service 전용 event lease·ack writer를 추가했다.
+subscription의 현재 ack cursor 뒤에서 실제 최소 `event_sequence`만 lease하고, worker·epoch·만료
+시각을 검증한 뒤 정확히 그 event의 hash와 local receipt hash를 append-only ack로 결박한다.
+따라서 sequence의 commit 가시 순서가 달라도 누락 번호를 가정하지 않으며, 경쟁 worker는
+`lease_conflict`로 멈춘다. ack 뒤에는 strict-prefix cursor만 전진하고 같은 receipt는 replay로
+읽힌다.
+
+trigger function의 PostgreSQL 기본 `PUBLIC EXECUTE`도 migration·bootstrap·startup ACL
+reconciler에서 모두 회수했다. M05 integration은 API/Dagster runtime catalog preflight와 함께
+candidate·decision·event lease·경쟁 lease·ack·replay를 검증했고, fresh Alembic metadata check,
+ruff, shell syntax도 통과했다. 다음 tranche는 Map admin/service HTTP와 backup v3 root, 첫
+consumer의 durable receipt/rebind다.
+
+## 2026-08-21 — T-VN-M05 dedicated candidate·admin decision writer
+
+`0234_m05_manual_provider_dedup`에 Dagster-only candidate writer와 admin-only
+decision writer를 추가했다. candidate는 immutable manual origin/claim, 정확히 하나인
+provider primary source/head/record를 현재 row revision과 함께 freeze하며, 같은
+fingerprint만 idempotent로 돌린다. 새 source head/row revision은 종전 미종결 case에
+`superseded` resolution을 append하고 새 episode로 분리한다.
+
+admin 판단은 global curation fence와 UUID 정렬 Feature lock 뒤 모든 proof를 다시
+대조한다. `kept`는 evidence만 남기고, `merged`는 명시한 provider survivor를 유지한 채
+manual만 canonical retire하고 `rebind` event를, `manual_retired`는 `detach` event를
+같은 transaction에 남긴다. stale은 evidence·Feature·event를 쓰지 않는 terminal outcome이다.
+generic dedup queue/auto-master/source link 이동은 어느 writer도 호출하지 않는다.
+
+M05 SECURITY DEFINER owner의 cross-owner ACL은 bootstrap과 startup reconciler 모두에서
+복원하도록 고정했다. 실제 API/Dagster LOGIN integration은 candidate executor 거부,
+candidate exact replay, merged state/event, provider source 보존을 검증했다. 다음 tranche는
+strict-prefix service lease/ack와 backup v3 evidence root다.
+
+## 2026-08-21 — T-VN-M05 증적 스키마와 ACL 기본 경계 착수
+
+두 전문 적대 리뷰의 P0를 ADR-097과 설계 보고서에 반영했고, 두 reviewer가 모두 GO를
+재확인했다. `0234_m05_manual_provider_dedup`는 범용 dedup queue와 분리된 불변
+case·resolution·event·ack와 principal subscription, strict-prefix lease를 만든다. case는
+manual origin/claim 및 provider source record를 `RESTRICT` FK로 결박하고, evidence와
+subscription은 UPDATE/DELETE/TRUNCATE trigger로 막는다.
+
+runtime ACL inventory와 startup catalog preflight도 M05 여섯 relation의 raw SELECT/DML을
+금지하도록 먼저 닫았다. fresh DB migration과 Alembic metadata check 1건, ruff·strict mypy가
+통과했다. 이어 `0233 → M05 role 전용 → 0234 → 사후 복구` compose choreography와 disposable
+DB helper를 만들었다. 사전 phase에는 M05 object grant가 없고, 사후 복구가 trigger function
+owner와 schema usage/create를 확정한다. 같은 fresh migration/Alembic check와 shell·compose
+회귀도 통과했다. 다음 tranche는 dedicated writer/lease procedure와 backup v3 root다.
 
 ## 2026-08-21 — 완료 task를 `tasks-done.md`로 이관
 
@@ -223,6 +413,22 @@ baseline provider dataset·operation scope를 함께 갱신했다. C05B~D는 pro
 client가 먼저 병합된 뒤 순차 연결한다.
 
 가장 위가 가장 최근. 새 엔트리는 위에 append.
+
+## 2026-08-21 — T-VN-M05 paired cutover 설계 착수
+
+사용자는 M05의 consumer 처리를 단순 Map-only merge가 아니라 **paired cutover**로 선택했다.
+기존 generic dedup을 그대로 쓰면 manual origin이 후보 입력에서 빠지고, 높은 점수의 자동
+master·source link 이동까지 열리므로 사용할 수 없다.
+
+ADR-097과 M05 설계 보고서는 manual/provider case, terminal resolution, reconciliation event,
+principal별 ack를 append-only evidence로 분리했다. merge는 admin이 명시한 provider survivor만
+허용하고 manual만 retire하며, manual-retire는 detach event를 낸다. generic merge·auto action·
+source link 재배치는 모두 금지다.
+
+첫 consumer는 event를 local transaction의 immutable receipt와 exact reference impacts로 먼저
+처리하고 ack한다. Map은 consumer 이름을 소유하지 않는 generic service contract만 제공한다.
+현재 DB/HTTP 전문 적대 리뷰어 두 명에게 stale/supersede, restore/ACL, event/ack, UI/consumer
+delivery를 독립 재검토하도록 요청했다.
 
 ## 2026-08-20 — snapshot을 material과 receipt로 가르고, 내가 만든 두 개의 공허를 잡혔다
 
@@ -344,6 +550,33 @@ prod DB를 확인해 90분 내 write 0건으로 무해를 확인했지만(모든
 - **T-C7-SCOPE-REGISTRY** — `external_system:*` scope의 선언 주체·근거·조회 표면이
   migration `0224`의 docstring 안에만 있어 저장소 밖에서 발견되지 않았다.
   `integration-map.md` §3.7과 ADR-088 결과로 올렸다.
+
+## 2026-08-20 — T-VN-M04: consumer 한 곳이 아니라 범용 Feature 요청 큐
+
+외부 service가 Feature relation을 직접 쓰지 않고 immutable 요청만 제출하며, Map admin이
+별도 command로 승인 또는 거절하는 M04 queue를 추가했다. 이름·경로·역할·origin은 모두
+`feature_request`/`manual_request`로 일반화했고, PinVi는 최초 consumer일 뿐 정본 식별자가
+아니다.
+
+승인은 M01 identity claim과 canonical Feature·origin·queue terminal 상태를 한
+READ COMMITTED transaction으로 묶는다. exact duplicate도 예외로 rollback하지 않고
+`exact_conflict` terminal receipt로 commit하므로 재시도가 pending을 되살리지 않는다.
+제출과 승인 command의 두 causal edge는 각각 unique FK로 보존한다.
+
+적대 리뷰에서 확인된 복원 경계도 닫았다. `pg_restore --no-owner --no-privileges` 뒤
+bootstrap/reconciler가 세 owner에 걸친 identity-key·core-create·claim/origin·queue·command
+grant를 다시 만들며, 실제 revoke 뒤 submit+approve smoke로 복구를 검증했다. runtime의
+raw queue SELECT/DML은 catalog preflight와 실제 integration에서 함께 거부한다.
+
+M04가 바꾼 admin/service OpenAPI baseline과 active consumer receipt도 함께 재동결했다. 새
+Map/PinVi 격리 paired live UI E2E 전에는 receipt를 `pending`으로 유지해 이전 live 증거를
+현재 queue 계약의 completion으로 재사용하지 않는다.
+
+## 2026-08-20 — T-VN-M03: 수동 curation Feature 생성 원자 writer
+
+M03는 curation item과 수동 Feature를 하나의 serialized writer로 생성하고 provenance를
+`manual_curation`으로 남긴다. M01 writer의 READ COMMITTED 계약을 import batch의
+SERIALIZABLE 경로와 섞지 않도록 별도 command/transaction 경계로 만들었다.
 
 ## 2026-08-20 — T-VN-41F1D-E: 세대가 자라도 검사는 자라지 않던 계약
 
@@ -5505,3 +5738,14 @@ re-render**(button attach/detach + `scheduleControlsDisabled` 깜빡임)로 star
 비활성화 → `ops.dagster_schedule_overrides` 정리 + dagster reload로 `20 * * * *` 복원. 현 prod: cron=20, RUNNING.
 **descope 방법**: `scripts/run-c7-prod-live-e2e.sh` SPECS에서 schedule-write 제외(spec 파일·contract test content 계약은
 유지). spec은 b5375a52 배포본 유지(WIP fix는 위 6개로 문서화 — 재적용 시 참조). **머지**: #837(gate descope) + #74.
+# 2026-08-21 — T-VN-M05 Map service reconciliation lease/ACK 경계
+
+- `GET /v1/service/feature-reference-reconciliations`는 server-owned read principal과
+  `X-Reconciliation-Worker-Id`로만 fenced lease를 얻는다. event evidence의 raw table access는
+  API runtime에 부여하지 않는다.
+- `POST /v1/service/feature-reference-reconciliations/{event_id}/acks`는 ACK 전용 digest와
+  executor를 쓴다. exact `(event_sha256, local_receipt_sha256)` receipt는 definer preflight가
+  domain-command claim 전에 replay 처리해 새 key의 claim-only ledger 행을 막는다.
+- generated OpenAPI, static write registry, route policy, fresh migration integration과 strict
+  mypy/ruff를 함께 갱신했다. admin decision/PinVi paired consumer/live mutation E2E는 아직
+  미구현이므로 activation하지 않는다.

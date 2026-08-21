@@ -44,6 +44,15 @@ require_value KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD
 require_identifier KOR_TRAVEL_MAP_POSTGRES_DB
 require_identifier KOR_TRAVEL_MAP_POSTGRES_USER
 
+bootstrap_phase="${KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE:-legacy}"
+case "$bootstrap_phase" in
+  legacy | m01 | m05-pre | m05-repair) ;;
+  *)
+    echo "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE must be legacy, m01, m05-pre, or m05-repair" >&2
+    exit 1
+    ;;
+esac
+
 # An operator must repeat the exact target name.  This stops an accidental
 # `docker compose up` from transferring ownership on an arbitrary server DB.
 if [ "${KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE:-}" \
@@ -51,6 +60,19 @@ if [ "${KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE:-}" \
   echo "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE must equal KOR_TRAVEL_MAP_POSTGRES_DB" >&2
   exit 1
 fi
+
+# Compose healthcheck가 PostgreSQL의 Unix socket을 먼저 확인할 수 있어, 같은
+# network에서 오는 첫 TCP connection은 잠시 뒤에야 accept되는 경우가 있다. role
+# 변경 전에는 bounded probe로 그 짧은 경합만 흡수하고, 계속 실패하면 fail-closed한다.
+bootstrap_probe_attempt=0
+until psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc 'SELECT 1' >/dev/null 2>&1; do
+  bootstrap_probe_attempt=$((bootstrap_probe_attempt + 1))
+  if [ "$bootstrap_probe_attempt" -ge 30 ]; then
+    echo "bootstrap DSN did not accept connections within 30 seconds" >&2
+    exit 1
+  fi
+  sleep 1
+done
 
 actual_database="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc 'SELECT current_database()')"
 actual_role="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc 'SELECT current_user')"
@@ -66,6 +88,792 @@ fi
 if [ "$is_superuser" != "t" ]; then
   echo "bootstrap DSN must use the dedicated DB superuser" >&2
   exit 1
+fi
+
+# 재기동에서는 compose의 legacy service가 먼저 평가된다. 0226 marker는 M01 relation
+# 존재 증거일 뿐 base role/ownership sweep 완료 증거가 아니다. marker가 완전하면
+# legacy phase를 한 번 끝까지 실행한 뒤 M01 owner repair를 이어서 실행한다. 한
+# relation만 있으면 Alembic atomic DDL 가정이 깨진 상태이므로 어떤 role도 바꾸지 않는다.
+m01_repair_after_legacy=false
+if [ "$bootstrap_phase" = "legacy" ]; then
+  m01_relation_marker="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc "
+    SELECT concat_ws(
+      '|',
+      (to_regclass('feature.manual_feature_identity_claims') IS NOT NULL)::text,
+      (to_regclass('feature.feature_creation_origins') IS NOT NULL)::text
+    )
+  ")"
+  case "$m01_relation_marker" in
+    true\|true) m01_repair_after_legacy=true ;;
+    false\|false)
+      # Role은 PostgreSQL cluster-wide지만 relation marker는 DB별이다. 그래서
+      # 다른 DB가 이미 M01을 쓴 shared cluster에서 새 legacy DB를 bootstrap할 수
+      # 있다. 이 DB가 0225라면 M01 preflight 실패 재시도이므로 M01 phase로
+      # 승격하고, M01 이후 revision인데 relation이 없다면 실제 partial DDL로
+      # fail-closed한다. 그 밖의 legacy revision은 base sweep을 계속한다.
+      m01_role_marker="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc "
+        SELECT EXISTS (
+          SELECT 1 FROM pg_catalog.pg_roles
+          WHERE rolname IN (
+            'ktm_manual_feature_procedure_owner',
+            'ktm_manual_feature_admin_executor',
+            'ktm_feature_create_provider_executor'
+          )
+        )
+      ")"
+      case "$m01_role_marker" in
+        f) ;;
+        t)
+          m01_revision="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc \
+            'SELECT version_num FROM public.alembic_version')"
+          case "$m01_revision" in
+            0225_tvn40c_physical_removal)
+              bootstrap_phase="m01"
+              ;;
+            0226_m01_manual_feature_create|0227_m02_feature_provenance|\
+            0228_m03_manual_curation|0233_m04_feature_request_queue|\
+            0234_m05_manual_provider_dedup|0235_m05_reconciliation_delivery)
+              echo "M01 relation marker is absent after an M01/M05 revision" >&2
+              exit 1
+              ;;
+            *)
+              ;;
+          esac
+          ;;
+        *)
+          echo "M01 role marker is incompatible with an absent relation marker" >&2
+          exit 1
+          ;;
+      esac
+      ;;
+    *)
+      echo "M01 relation marker is partial; refusing role bootstrap" >&2
+      exit 1
+      ;;
+  esac
+fi
+
+# M01은 frozen 0200/0202의 exact membership graph를 바꾸면 안 된다. 이 phase는
+# legacy graph로 0225까지 전진한 **뒤**에만 M01의 procedure owner/executor를
+# 추가한다. 0226 전 relation이 이미 있으면 restore 뒤 owner/role repair를 위한
+# 재실행으로만 허용한다.
+run_m01_phase() {
+  psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" \
+    -v ON_ERROR_STOP=1 <<'SQL'
+DO $m01_phase_precondition$
+DECLARE
+    v_revision text;
+    v_claim_exists boolean;
+    v_origin_exists boolean;
+BEGIN
+    v_claim_exists := to_regclass('feature.manual_feature_identity_claims') IS NOT NULL;
+    v_origin_exists := to_regclass('feature.feature_creation_origins') IS NOT NULL;
+    IF v_claim_exists <> v_origin_exists THEN
+        RAISE EXCEPTION 'M01 relation marker is partial; refusing role bootstrap'
+            USING ERRCODE = '55000';
+    END IF;
+    IF to_regclass('public.alembic_version') IS NOT NULL THEN
+        SELECT version_num INTO v_revision FROM public.alembic_version;
+    END IF;
+    IF v_claim_exists THEN
+        IF v_revision NOT IN (
+            '0226_m01_manual_feature_create',
+            '0227_m02_feature_provenance',
+            '0228_m03_manual_curation',
+            '0233_m04_feature_request_queue',
+            '0234_m05_manual_provider_dedup',
+            '0235_m05_reconciliation_delivery'
+        ) THEN
+            RAISE EXCEPTION
+                'M01 relation marker requires a known M01/M02 head (observed %)',
+                coalesce(v_revision, '<none>')
+                USING ERRCODE = '55000';
+        END IF;
+        RETURN;
+    END IF;
+    IF v_revision IS DISTINCT FROM '0225_tvn40c_physical_removal' THEN
+        RAISE EXCEPTION
+            'M01 role bootstrap requires exactly 0225 before 0226 (observed %)',
+            coalesce(v_revision, '<none>')
+            USING ERRCODE = '55000';
+    END IF;
+END
+$m01_phase_precondition$;
+
+DO $m01_roles$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_roles
+        WHERE rolname = 'ktm_manual_feature_procedure_owner'
+    ) THEN
+        CREATE ROLE ktm_manual_feature_procedure_owner NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_roles
+        WHERE rolname = 'ktm_manual_feature_admin_executor'
+    ) THEN
+        CREATE ROLE ktm_manual_feature_admin_executor NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_roles
+        WHERE rolname = 'ktm_feature_create_provider_executor'
+    ) THEN
+        CREATE ROLE ktm_feature_create_provider_executor NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_roles
+        WHERE rolname = 'ktm_feature_request_procedure_owner'
+    ) THEN
+        CREATE ROLE ktm_feature_request_procedure_owner NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_roles
+        WHERE rolname = 'ktm_feature_request_service_executor'
+    ) THEN
+        CREATE ROLE ktm_feature_request_service_executor NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_roles
+        WHERE rolname = 'ktm_feature_request_admin_executor'
+    ) THEN
+        CREATE ROLE ktm_feature_request_admin_executor NOLOGIN NOINHERIT;
+    END IF;
+END
+$m01_roles$;
+
+ALTER ROLE ktm_manual_feature_procedure_owner NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_manual_feature_admin_executor NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_feature_create_provider_executor NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_feature_request_procedure_owner NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_feature_request_service_executor NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_feature_request_admin_executor NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+
+-- PostgreSQL 16 membership options are part of the API-only writer boundary.
+-- The restricted migrator enters schema owner, which can SET the procedure
+-- owner only while applying/reconciling M01 objects. Runtime logins inherit
+-- EXECUTE but can never SET ROLE into either NOLOGIN group.
+GRANT ktm_manual_feature_procedure_owner TO ktm_feature_schema_owner
+    WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+GRANT ktm_manual_feature_admin_executor TO ktm_feature_api_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+GRANT ktm_feature_create_provider_executor TO ktm_feature_dagster_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+GRANT ktm_feature_request_procedure_owner TO ktm_feature_schema_owner
+    WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+GRANT ktm_feature_request_service_executor TO ktm_feature_api_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+GRANT ktm_feature_request_admin_executor TO ktm_feature_api_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+REVOKE ktm_manual_feature_admin_executor FROM ktm_feature_dagster_runtime;
+REVOKE ktm_feature_create_provider_executor FROM ktm_feature_api_runtime;
+REVOKE ktm_feature_request_service_executor,
+    ktm_feature_request_admin_executor FROM ktm_feature_dagster_runtime;
+
+GRANT USAGE, CREATE ON SCHEMA feature TO ktm_manual_feature_procedure_owner;
+GRANT USAGE ON SCHEMA ops TO ktm_manual_feature_procedure_owner;
+GRANT USAGE, CREATE ON SCHEMA feature TO ktm_feature_request_procedure_owner;
+GRANT USAGE ON SCHEMA ops TO ktm_feature_request_procedure_owner;
+GRANT SELECT, UPDATE(command_id) ON TABLE ops.domain_commands
+    TO ktm_feature_request_procedure_owner;
+GRANT SELECT ON TABLE ops.domain_command_results
+    TO ktm_feature_request_procedure_owner;
+-- wrapper의 immutable command receipt 선점은 ``FOR UPDATE``라 SELECT만으로는
+-- 불가능하다. UPDATE는 LOGIN/runtime에는 주지 않고 procedure owner에만 둔다.
+GRANT SELECT, UPDATE(command_id) ON TABLE ops.domain_commands
+    TO ktm_manual_feature_procedure_owner;
+GRANT SELECT ON TABLE ops.domain_command_results
+    TO ktm_manual_feature_procedure_owner;
+GRANT SELECT (feature_uuid) ON TABLE feature.features
+    TO ktm_manual_feature_procedure_owner;
+GRANT EXECUTE ON PROCEDURE feature.create_feature_with_initial_state(
+    jsonb, text, text, text, jsonb
+) TO ktm_manual_feature_procedure_owner;
+
+-- 0229 이후 restore repair에서는 M04 procedure owner의 cross-owner dependency
+-- grants도 다시 만들어야 한다. 0225→0226 bootstrap에는 M04 object가 아직 없으므로
+-- relation marker가 없을 때는 아무 grant도 시도하지 않는다.
+DO $m04_owner_dependency_acl$
+BEGIN
+    IF to_regclass('ops.feature_requests') IS NULL THEN
+        RETURN;
+    END IF;
+    IF to_regprocedure('feature.manual_feature_identity_key(text,text,numeric,numeric)') IS NULL
+       OR to_regprocedure('feature.create_feature_with_initial_state(jsonb,text,text,text,jsonb)') IS NULL
+       OR to_regclass('feature.manual_feature_identity_claims') IS NULL
+       OR to_regclass('feature.feature_creation_origins') IS NULL
+       OR to_regclass('ops.domain_commands') IS NULL
+       OR to_regclass('ops.domain_command_results') IS NULL THEN
+        RAISE EXCEPTION 'M04 feature request dependency inventory is incomplete'
+            USING ERRCODE = '55000';
+    END IF;
+    GRANT EXECUTE ON FUNCTION feature.manual_feature_identity_key(
+        text, text, numeric, numeric
+    ) TO ktm_feature_request_procedure_owner;
+    GRANT EXECUTE ON PROCEDURE feature.create_feature_with_initial_state(
+        jsonb, text, text, text, jsonb
+    ) TO ktm_feature_request_procedure_owner;
+    GRANT SELECT, INSERT ON TABLE feature.manual_feature_identity_claims,
+        feature.feature_creation_origins TO ktm_feature_request_procedure_owner;
+    GRANT SELECT, INSERT, UPDATE (
+        status, resolved_at, resolved_by_actor, resolution_command_id,
+        resolved_feature_id, rejection_reason
+    ) ON TABLE ops.feature_requests TO ktm_feature_request_procedure_owner;
+    GRANT SELECT, UPDATE(command_id) ON TABLE ops.domain_commands
+        TO ktm_feature_request_procedure_owner;
+    GRANT SELECT ON TABLE ops.domain_command_results
+        TO ktm_feature_request_procedure_owner;
+END
+$m04_owner_dependency_acl$;
+
+DO $m01_role_assert$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM pg_catalog.pg_roles
+        WHERE rolname IN (
+            'ktm_manual_feature_procedure_owner',
+            'ktm_manual_feature_admin_executor',
+            'ktm_feature_create_provider_executor',
+            'ktm_feature_request_procedure_owner',
+            'ktm_feature_request_service_executor',
+            'ktm_feature_request_admin_executor'
+        )
+          AND (
+              rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb
+              OR rolcreaterole OR rolbypassrls OR rolreplication
+          )
+    ) THEN
+        RAISE EXCEPTION 'M01 NOLOGIN role has an unsafe attribute';
+    END IF;
+    IF NOT pg_has_role(
+        'ktm_feature_schema_owner',
+        'ktm_manual_feature_procedure_owner',
+        'member'
+    ) OR NOT pg_has_role(
+        'ktm_feature_api_runtime',
+        'ktm_manual_feature_admin_executor',
+        'member'
+    ) OR NOT pg_has_role(
+        'ktm_feature_dagster_runtime',
+        'ktm_feature_create_provider_executor',
+        'member'
+    ) OR pg_has_role(
+        'ktm_feature_dagster_runtime',
+        'ktm_manual_feature_admin_executor',
+        'member'
+    ) OR pg_has_role(
+        'ktm_feature_api_runtime',
+        'ktm_feature_create_provider_executor',
+        'member'
+    ) OR pg_has_role(
+        'ktm_feature_dagster_runtime',
+        'ktm_feature_request_service_executor',
+        'member'
+    ) OR pg_has_role(
+        'ktm_feature_dagster_runtime',
+        'ktm_feature_request_admin_executor',
+        'member'
+    ) OR (
+        SELECT count(*)
+        FROM pg_catalog.pg_auth_members AS membership
+        WHERE membership.roleid IN (
+            'ktm_manual_feature_procedure_owner'::regrole,
+            'ktm_manual_feature_admin_executor'::regrole,
+            'ktm_feature_create_provider_executor'::regrole,
+            'ktm_feature_request_procedure_owner'::regrole,
+            'ktm_feature_request_service_executor'::regrole,
+            'ktm_feature_request_admin_executor'::regrole
+        )
+    ) <> 6 OR EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_auth_members AS membership
+        JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid
+        JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
+        WHERE granted.rolname IN (
+            'ktm_manual_feature_procedure_owner',
+            'ktm_manual_feature_admin_executor',
+            'ktm_feature_create_provider_executor',
+            'ktm_feature_request_procedure_owner',
+            'ktm_feature_request_service_executor',
+            'ktm_feature_request_admin_executor'
+        )
+          AND NOT (
+              (granted.rolname = 'ktm_manual_feature_procedure_owner'
+               AND member.rolname = 'ktm_feature_schema_owner'
+               AND membership.admin_option IS FALSE
+               AND membership.inherit_option IS FALSE
+               AND membership.set_option IS TRUE)
+              OR (granted.rolname = 'ktm_manual_feature_admin_executor'
+                  AND member.rolname = 'ktm_feature_api_runtime'
+                  AND membership.admin_option IS FALSE
+                  AND membership.inherit_option IS TRUE
+                  AND membership.set_option IS FALSE)
+              OR (granted.rolname = 'ktm_feature_create_provider_executor'
+                  AND member.rolname = 'ktm_feature_dagster_runtime'
+                  AND membership.admin_option IS FALSE
+                  AND membership.inherit_option IS TRUE
+                  AND membership.set_option IS FALSE)
+              OR (granted.rolname = 'ktm_feature_request_procedure_owner'
+                  AND member.rolname = 'ktm_feature_schema_owner'
+                  AND membership.admin_option IS FALSE
+                  AND membership.inherit_option IS FALSE
+                  AND membership.set_option IS TRUE)
+              OR (granted.rolname = 'ktm_feature_request_service_executor'
+                  AND member.rolname = 'ktm_feature_api_runtime'
+                  AND membership.admin_option IS FALSE
+                  AND membership.inherit_option IS TRUE
+                  AND membership.set_option IS FALSE)
+              OR (granted.rolname = 'ktm_feature_request_admin_executor'
+                  AND member.rolname = 'ktm_feature_api_runtime'
+                  AND membership.admin_option IS FALSE
+                  AND membership.inherit_option IS TRUE
+                  AND membership.set_option IS FALSE)
+          )
+    ) THEN
+        RAISE EXCEPTION 'M01 procedure owner/executor membership is unsafe';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_auth_members AS membership
+        JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
+        WHERE member.rolname IN (
+            'ktm_manual_feature_procedure_owner',
+            'ktm_manual_feature_admin_executor',
+            'ktm_feature_create_provider_executor',
+            'ktm_feature_request_procedure_owner',
+            'ktm_feature_request_service_executor',
+            'ktm_feature_request_admin_executor'
+        )
+    ) THEN
+        RAISE EXCEPTION 'M01 role must not inherit any application privilege role';
+    END IF;
+END
+$m01_role_assert$;
+
+-- Restore/owner-repair reruns this phase after 0226. Initial 0225 phase sees
+-- no row here; after 0226 it restores the closed routine owners idempotently.
+WITH dedicated_routine(signature, owner_role) AS (
+    VALUES
+      ('feature.manual_feature_identity_key(text,text,numeric,numeric)',
+       'ktm_manual_feature_procedure_owner'),
+      ('feature.create_admin_manual_feature_with_initial_state(jsonb,bigint)',
+       'ktm_manual_feature_procedure_owner'),
+      ('feature.read_admin_manual_feature_provenance(uuid)',
+       'ktm_manual_feature_procedure_owner'),
+      ('feature.reject_manual_feature_hard_purge()',
+       'ktm_manual_feature_procedure_owner'),
+      ('feature.reject_manual_feature_evidence_mutation()',
+       'ktm_feature_audit_writer')
+      ,('feature.submit_feature_request(uuid,jsonb,bigint)',
+       'ktm_feature_request_procedure_owner')
+      ,('feature.approve_feature_request_with_initial_state(uuid,jsonb,bigint)',
+       'ktm_feature_request_procedure_owner')
+      ,('feature.reject_feature_request(uuid,text,bigint)',
+       'ktm_feature_request_procedure_owner')
+      ,('feature.read_feature_request(uuid)',
+       'ktm_feature_request_procedure_owner')
+      ,('feature.list_feature_requests(text,integer)',
+       'ktm_feature_request_procedure_owner')
+), existing AS (
+    SELECT signature, owner_role, proc.prokind
+    FROM dedicated_routine
+    JOIN pg_catalog.pg_proc AS proc ON proc.oid = to_regprocedure(signature)
+)
+SELECT format(
+    'ALTER %s %s OWNER TO %I',
+    CASE prokind WHEN 'p' THEN 'PROCEDURE' ELSE 'FUNCTION' END,
+    signature,
+    owner_role
+)
+FROM existing
+\gexec
+SQL
+}
+
+# M05는 M01과 달리 0233을 정확히 만든 뒤, M05 role만 먼저 provision하고
+# 0234를 적용한다. frozen 0200/0202 graph에는 닿지 않으며, pre phase에는
+# object ACL을 전혀 부여하지 않는다. relation 또는 role의 부분 marker는
+# 정상 재시도 가능한 상태가 아니므로 여기서 멈춘다.
+run_m05_pre_phase() {
+  psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" \
+    -v ON_ERROR_STOP=1 <<'SQL'
+DO $m05_precondition$
+DECLARE
+    v_revision text;
+    v_relation_count integer;
+    v_role_count integer;
+BEGIN
+    SELECT version_num INTO v_revision FROM public.alembic_version;
+    SELECT count(*) INTO v_relation_count
+    FROM unnest(ARRAY[
+        'ops.manual_provider_dedup_cases',
+        'ops.manual_provider_dedup_resolutions',
+        'ops.feature_reference_reconciliation_events',
+        'ops.feature_reference_reconciliation_subscriptions',
+        'ops.feature_reference_reconciliation_acks',
+        'ops.feature_reference_reconciliation_leases'
+    ]) AS expected(relation_name)
+    WHERE to_regclass(expected.relation_name) IS NOT NULL;
+    SELECT count(*) INTO v_role_count
+    FROM pg_catalog.pg_roles
+    WHERE rolname IN (
+        'ktm_manual_provider_dedup_procedure_owner',
+        'ktm_manual_provider_dedup_detector_executor',
+        'ktm_manual_provider_dedup_admin_executor',
+        'ktm_feature_reference_reconciliation_service_executor'
+    );
+    IF v_relation_count NOT IN (0, 6) THEN
+        RAISE EXCEPTION 'M05 relation marker is partial; refusing role bootstrap'
+            USING ERRCODE = '55000';
+    END IF;
+    IF v_role_count NOT IN (0, 4) THEN
+        RAISE EXCEPTION 'M05 role marker is partial; refusing role bootstrap'
+            USING ERRCODE = '55000';
+    END IF;
+    IF v_relation_count = 0 AND v_revision IS DISTINCT FROM '0233_m04_feature_request_queue' THEN
+        RAISE EXCEPTION 'M05 pre role bootstrap requires exactly 0233 (observed %)',
+            coalesce(v_revision, '<none>') USING ERRCODE = '55000';
+    END IF;
+    IF v_relation_count = 6 AND v_revision NOT IN ('0234_m05_manual_provider_dedup', '0235_m05_reconciliation_delivery') THEN
+        RAISE EXCEPTION 'M05 relation marker requires an M05 revision (observed %)',
+            coalesce(v_revision, '<none>') USING ERRCODE = '55000';
+    END IF;
+END
+$m05_precondition$;
+
+DO $m05_roles$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_manual_provider_dedup_procedure_owner') THEN
+        CREATE ROLE ktm_manual_provider_dedup_procedure_owner NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_manual_provider_dedup_detector_executor') THEN
+        CREATE ROLE ktm_manual_provider_dedup_detector_executor NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_manual_provider_dedup_admin_executor') THEN
+        CREATE ROLE ktm_manual_provider_dedup_admin_executor NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = 'ktm_feature_reference_reconciliation_service_executor') THEN
+        CREATE ROLE ktm_feature_reference_reconciliation_service_executor NOLOGIN NOINHERIT;
+    END IF;
+END
+$m05_roles$;
+
+ALTER ROLE ktm_manual_provider_dedup_procedure_owner NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_manual_provider_dedup_detector_executor NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_manual_provider_dedup_admin_executor NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+ALTER ROLE ktm_feature_reference_reconciliation_service_executor NOLOGIN NOINHERIT
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOREPLICATION;
+
+GRANT ktm_manual_provider_dedup_procedure_owner TO ktm_feature_schema_owner
+    WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+GRANT ktm_manual_provider_dedup_detector_executor TO ktm_feature_dagster_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+GRANT ktm_manual_provider_dedup_admin_executor TO ktm_feature_api_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+GRANT ktm_feature_reference_reconciliation_service_executor TO ktm_feature_api_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+REVOKE ktm_manual_provider_dedup_detector_executor FROM ktm_feature_api_runtime;
+REVOKE ktm_manual_provider_dedup_admin_executor,
+    ktm_feature_reference_reconciliation_service_executor FROM ktm_feature_dagster_runtime;
+
+DO $m05_role_assert$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_roles
+        WHERE rolname IN (
+            'ktm_manual_provider_dedup_procedure_owner',
+            'ktm_manual_provider_dedup_detector_executor',
+            'ktm_manual_provider_dedup_admin_executor',
+            'ktm_feature_reference_reconciliation_service_executor'
+        ) AND (
+            rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb OR rolcreaterole
+            OR rolbypassrls OR rolreplication
+        )
+    ) THEN
+        RAISE EXCEPTION 'M05 NOLOGIN role has an unsafe attribute';
+    END IF;
+    IF (
+        SELECT count(*)
+        FROM pg_catalog.pg_auth_members AS membership
+        WHERE membership.roleid IN (
+            'ktm_manual_provider_dedup_procedure_owner'::regrole,
+            'ktm_manual_provider_dedup_detector_executor'::regrole,
+            'ktm_manual_provider_dedup_admin_executor'::regrole,
+            'ktm_feature_reference_reconciliation_service_executor'::regrole
+        )
+    ) <> 4 OR EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_auth_members AS membership
+        JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid
+        JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
+        WHERE granted.rolname IN (
+            'ktm_manual_provider_dedup_procedure_owner',
+            'ktm_manual_provider_dedup_detector_executor',
+            'ktm_manual_provider_dedup_admin_executor',
+            'ktm_feature_reference_reconciliation_service_executor'
+        ) AND NOT (
+            (granted.rolname = 'ktm_manual_provider_dedup_procedure_owner'
+             AND member.rolname = 'ktm_feature_schema_owner'
+             AND membership.admin_option IS FALSE
+             AND membership.inherit_option IS FALSE
+             AND membership.set_option IS TRUE)
+            OR (granted.rolname = 'ktm_manual_provider_dedup_detector_executor'
+                AND member.rolname = 'ktm_feature_dagster_runtime'
+                AND membership.admin_option IS FALSE
+                AND membership.inherit_option IS TRUE
+                AND membership.set_option IS FALSE)
+            OR (granted.rolname = 'ktm_manual_provider_dedup_admin_executor'
+                AND member.rolname = 'ktm_feature_api_runtime'
+                AND membership.admin_option IS FALSE
+                AND membership.inherit_option IS TRUE
+                AND membership.set_option IS FALSE)
+            OR (granted.rolname = 'ktm_feature_reference_reconciliation_service_executor'
+                AND member.rolname = 'ktm_feature_api_runtime'
+                AND membership.admin_option IS FALSE
+                AND membership.inherit_option IS TRUE
+                AND membership.set_option IS FALSE)
+        )
+    ) THEN
+        RAISE EXCEPTION 'M05 procedure owner/executor membership is unsafe';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_auth_members AS membership
+        JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
+        WHERE member.rolname IN (
+            'ktm_manual_provider_dedup_procedure_owner',
+            'ktm_manual_provider_dedup_detector_executor',
+            'ktm_manual_provider_dedup_admin_executor',
+            'ktm_feature_reference_reconciliation_service_executor'
+        )
+    ) THEN
+        RAISE EXCEPTION 'M05 role must not inherit any application privilege role';
+    END IF;
+END
+$m05_role_assert$;
+SQL
+}
+
+run_m05_repair_phase() {
+  psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" \
+    -v ON_ERROR_STOP=1 <<'SQL'
+DO $m05_repair_precondition$
+DECLARE
+    v_revision text;
+    v_relation_count integer;
+    v_role_count integer;
+BEGIN
+    SELECT version_num INTO v_revision FROM public.alembic_version;
+    SELECT count(*) INTO v_relation_count
+    FROM unnest(ARRAY[
+        'ops.manual_provider_dedup_cases',
+        'ops.manual_provider_dedup_resolutions',
+        'ops.feature_reference_reconciliation_events',
+        'ops.feature_reference_reconciliation_subscriptions',
+        'ops.feature_reference_reconciliation_acks',
+        'ops.feature_reference_reconciliation_leases'
+    ]) AS expected(relation_name)
+    WHERE to_regclass(expected.relation_name) IS NOT NULL;
+    SELECT count(*) INTO v_role_count
+    FROM pg_catalog.pg_roles
+    WHERE rolname IN (
+        'ktm_manual_provider_dedup_procedure_owner',
+        'ktm_manual_provider_dedup_detector_executor',
+        'ktm_manual_provider_dedup_admin_executor',
+        'ktm_feature_reference_reconciliation_service_executor'
+    );
+    IF v_revision IS DISTINCT FROM '0235_m05_reconciliation_delivery'
+       OR v_relation_count <> 6 OR v_role_count <> 4 THEN
+        RAISE EXCEPTION
+            'M05 post-upgrade marker is incomplete (revision %, relations %, roles %)',
+            coalesce(v_revision, '<none>'), v_relation_count, v_role_count
+            USING ERRCODE = '55000';
+    END IF;
+    IF to_regprocedure('feature.reject_manual_provider_dedup_evidence_mutation()') IS NULL
+       OR to_regprocedure('feature.assert_feature_reference_reconciliation_lease_cursor()') IS NULL
+       OR to_regprocedure('feature.record_manual_provider_dedup_candidate(text,text,jsonb,jsonb)') IS NULL
+       OR to_regprocedure('feature.resolve_manual_provider_dedup_case(uuid,text,text,bigint,bigint,text,text,text,bigint)') IS NULL
+       OR to_regprocedure('feature.resolve_manual_provider_dedup_case_v2(uuid,text,text,bigint,bigint,text,text,text,bigint)') IS NULL
+       OR to_regprocedure('feature.lease_feature_reference_reconciliation_event(text,uuid)') IS NULL
+       OR to_regprocedure('feature.lease_feature_reference_reconciliation_event_v2(text,uuid)') IS NULL
+       OR to_regprocedure('feature.ack_feature_reference_reconciliation_event(text,uuid,uuid,bigint,text,text,bigint)') IS NULL
+       OR to_regprocedure('feature.ack_feature_reference_reconciliation_event_v2(text,uuid,uuid,bigint,text,text,bigint)') IS NULL
+       OR to_regprocedure('feature.provision_feature_reference_reconciliation_subscription(text,bigint,text,bigint)') IS NULL
+       OR to_regprocedure('feature.preflight_feature_reference_reconciliation_ack_v2(text,uuid,text,text)') IS NULL
+       OR to_regprocedure('feature.list_manual_provider_dedup_cases(text,timestamp with time zone,uuid,integer)') IS NULL
+       OR to_regprocedure('feature.read_manual_provider_dedup_case(uuid)') IS NULL THEN
+        RAISE EXCEPTION 'M05 dedicated routine marker is incomplete'
+            USING ERRCODE = '55000';
+    END IF;
+END
+$m05_repair_precondition$;
+
+GRANT USAGE, CREATE ON SCHEMA feature
+    TO ktm_manual_provider_dedup_procedure_owner;
+GRANT USAGE ON SCHEMA provider_sync, ops, x_extension
+    TO ktm_manual_provider_dedup_procedure_owner;
+GRANT SELECT, UPDATE ON TABLE feature.features
+    TO ktm_manual_provider_dedup_procedure_owner;
+GRANT SELECT ON TABLE feature.manual_feature_identity_claims,
+    feature.feature_creation_origins
+    TO ktm_manual_provider_dedup_procedure_owner;
+GRANT SELECT, UPDATE ON TABLE
+    provider_sync.source_links,
+    provider_sync.source_entities,
+    provider_sync.source_entity_heads,
+    provider_sync.source_records
+    TO ktm_manual_provider_dedup_procedure_owner;
+GRANT SELECT, UPDATE ON TABLE ops.domain_commands
+    TO ktm_manual_provider_dedup_procedure_owner;
+GRANT SELECT ON TABLE ops.domain_command_results
+    TO ktm_manual_provider_dedup_procedure_owner;
+GRANT EXECUTE ON PROCEDURE feature.transition_admin_feature_state(
+    text, text, text, text, bigint, text, text, text
+) TO ktm_manual_provider_dedup_procedure_owner;
+REVOKE ALL ON TABLE ops.manual_provider_dedup_cases,
+    ops.manual_provider_dedup_resolutions,
+    ops.feature_reference_reconciliation_events,
+    ops.feature_reference_reconciliation_subscriptions,
+    ops.feature_reference_reconciliation_acks,
+    ops.feature_reference_reconciliation_leases
+    FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime;
+GRANT SELECT, INSERT, UPDATE ON TABLE ops.manual_provider_dedup_cases,
+    ops.manual_provider_dedup_resolutions,
+    ops.feature_reference_reconciliation_events,
+    ops.feature_reference_reconciliation_subscriptions,
+    ops.feature_reference_reconciliation_acks
+    TO ktm_manual_provider_dedup_procedure_owner;
+GRANT SELECT, INSERT, UPDATE ON TABLE ops.feature_reference_reconciliation_leases
+    TO ktm_manual_provider_dedup_procedure_owner;
+GRANT USAGE ON SEQUENCE ops.feature_reference_reconciliation_events_event_sequence_seq
+    TO ktm_manual_provider_dedup_procedure_owner;
+ALTER FUNCTION feature.reject_manual_provider_dedup_evidence_mutation()
+    OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER FUNCTION feature.assert_feature_reference_reconciliation_lease_cursor()
+    OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER FUNCTION feature.preflight_feature_reference_reconciliation_ack(
+    text, uuid, text, text
+) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER FUNCTION feature.preflight_feature_reference_reconciliation_ack_v2(
+    text, uuid, text, text
+) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER FUNCTION feature.list_manual_provider_dedup_cases(
+    text, timestamptz, uuid, integer
+) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER FUNCTION feature.read_manual_provider_dedup_case(uuid)
+    OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER PROCEDURE feature.record_manual_provider_dedup_candidate(text, text, jsonb, jsonb)
+    OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER PROCEDURE feature.resolve_manual_provider_dedup_case(
+    uuid, text, text, bigint, bigint, text, text, text, bigint
+) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER PROCEDURE feature.resolve_manual_provider_dedup_case_v2(
+    uuid, text, text, bigint, bigint, text, text, text, bigint
+) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER PROCEDURE feature.lease_feature_reference_reconciliation_event(text, uuid)
+    OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER PROCEDURE feature.lease_feature_reference_reconciliation_event_v2(text, uuid)
+    OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER PROCEDURE feature.ack_feature_reference_reconciliation_event(
+    text, uuid, uuid, bigint, text, text, bigint
+) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER PROCEDURE feature.ack_feature_reference_reconciliation_event_v2(
+    text, uuid, uuid, bigint, text, text, bigint
+) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+ALTER PROCEDURE feature.provision_feature_reference_reconciliation_subscription(
+    text, bigint, text, bigint
+) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+REVOKE ALL ON FUNCTION feature.reject_manual_provider_dedup_evidence_mutation()
+    FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime;
+REVOKE ALL ON FUNCTION feature.assert_feature_reference_reconciliation_lease_cursor()
+    FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime;
+REVOKE ALL ON FUNCTION feature.preflight_feature_reference_reconciliation_ack(
+    text, uuid, text, text
+) FROM PUBLIC, ktm_feature_runtime, ktm_feature_dagster_runtime,
+    ktm_manual_provider_dedup_detector_executor, ktm_manual_provider_dedup_admin_executor,
+    ktm_feature_reference_reconciliation_service_executor;
+REVOKE ALL ON FUNCTION feature.preflight_feature_reference_reconciliation_ack_v2(
+    text, uuid, text, text
+) FROM PUBLIC, ktm_feature_runtime, ktm_feature_dagster_runtime,
+    ktm_manual_provider_dedup_detector_executor, ktm_manual_provider_dedup_admin_executor;
+GRANT EXECUTE ON FUNCTION feature.preflight_feature_reference_reconciliation_ack_v2(
+    text, uuid, text, text
+) TO ktm_feature_reference_reconciliation_service_executor;
+REVOKE ALL ON FUNCTION feature.list_manual_provider_dedup_cases(
+    text, timestamptz, uuid, integer
+), feature.read_manual_provider_dedup_case(uuid)
+    FROM PUBLIC, ktm_feature_runtime, ktm_feature_dagster_runtime,
+    ktm_manual_provider_dedup_detector_executor,
+    ktm_feature_reference_reconciliation_service_executor;
+GRANT EXECUTE ON FUNCTION feature.list_manual_provider_dedup_cases(
+    text, timestamptz, uuid, integer
+), feature.read_manual_provider_dedup_case(uuid)
+    TO ktm_manual_provider_dedup_admin_executor;
+REVOKE ALL ON PROCEDURE feature.record_manual_provider_dedup_candidate(text, text, jsonb, jsonb)
+    FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime,
+    ktm_manual_provider_dedup_admin_executor,
+    ktm_feature_reference_reconciliation_service_executor;
+REVOKE ALL ON PROCEDURE feature.resolve_manual_provider_dedup_case(
+    uuid, text, text, bigint, bigint, text, text, text, bigint
+), feature.resolve_manual_provider_dedup_case_v2(
+    uuid, text, text, bigint, bigint, text, text, text, bigint
+) FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime,
+    ktm_manual_provider_dedup_detector_executor,
+    ktm_manual_provider_dedup_admin_executor,
+    ktm_feature_reference_reconciliation_service_executor;
+GRANT EXECUTE ON PROCEDURE feature.record_manual_provider_dedup_candidate(
+    text, text, jsonb, jsonb
+) TO ktm_manual_provider_dedup_detector_executor;
+GRANT EXECUTE ON PROCEDURE feature.resolve_manual_provider_dedup_case_v2(
+    uuid, text, text, bigint, bigint, text, text, text, bigint
+) TO ktm_manual_provider_dedup_admin_executor;
+REVOKE ALL ON PROCEDURE feature.provision_feature_reference_reconciliation_subscription(
+    text, bigint, text, bigint
+) FROM PUBLIC, ktm_feature_runtime, ktm_feature_dagster_runtime,
+    ktm_manual_provider_dedup_detector_executor,
+    ktm_feature_reference_reconciliation_service_executor;
+GRANT EXECUTE ON PROCEDURE feature.provision_feature_reference_reconciliation_subscription(
+    text, bigint, text, bigint
+) TO ktm_manual_provider_dedup_admin_executor;
+REVOKE ALL ON PROCEDURE feature.lease_feature_reference_reconciliation_event(text, uuid),
+    feature.lease_feature_reference_reconciliation_event_v2(text, uuid),
+    feature.ack_feature_reference_reconciliation_event(
+        text, uuid, uuid, bigint, text, text, bigint
+    ), feature.ack_feature_reference_reconciliation_event_v2(
+        text, uuid, uuid, bigint, text, text, bigint
+    ) FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime,
+    ktm_feature_dagster_runtime, ktm_manual_provider_dedup_detector_executor,
+    ktm_manual_provider_dedup_admin_executor,
+    ktm_feature_reference_reconciliation_service_executor;
+GRANT EXECUTE ON PROCEDURE feature.lease_feature_reference_reconciliation_event_v2(text, uuid),
+    feature.ack_feature_reference_reconciliation_event_v2(
+        text, uuid, uuid, bigint, text, text, bigint
+    ) TO ktm_feature_reference_reconciliation_service_executor;
+SQL
+}
+
+if [ "$bootstrap_phase" = "m01" ]; then
+  run_m01_phase
+  exit 0
+fi
+
+if [ "$bootstrap_phase" = "m05-pre" ]; then
+  run_m05_pre_phase
+  exit 0
+fi
+
+if [ "$bootstrap_phase" = "m05-repair" ]; then
+  run_m05_repair_phase
+  exit 0
 fi
 
 # psql variables keep passwords out of SQL source and repo files.  PostgreSQL
@@ -300,7 +1108,7 @@ BEGIN
         RAISE EXCEPTION 'curation executor membership is unsafe';
     END IF;
     IF EXISTS (
-        WITH expected(granted_role, member_role, admin_option, inherit_option, set_option) AS (
+        WITH expected_base(granted_role, member_role, admin_option, inherit_option, set_option) AS (
             VALUES
                 ('ktm_feature_schema_owner', 'ktm_feature_migrator', false, false, true),
                 ('ktm_feature_runtime', 'ktm_feature_api_runtime', false, true, false),
@@ -312,6 +1120,9 @@ BEGIN
                 ('ktm_curation_admin_executor', 'ktm_feature_api_runtime', false, true, false),
                 ('ktm_curation_provider_executor', 'ktm_feature_dagster_runtime', false, true, false)
         ),
+        expected AS (
+            SELECT * FROM expected_base
+        ),
         actual AS (
             SELECT granted.rolname AS granted_role,
                    member.rolname AS member_role,
@@ -321,10 +1132,36 @@ BEGIN
             FROM pg_catalog.pg_auth_members AS membership
             JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid
             JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
-            WHERE granted.rolname LIKE 'ktm_feature_%'
+            WHERE (
+                  granted.rolname LIKE 'ktm_feature_%'
                OR granted.rolname LIKE 'ktm_curation_%'
                OR member.rolname LIKE 'ktm_feature_%'
                OR member.rolname LIKE 'ktm_curation_%'
+            )
+              AND granted.rolname NOT IN (
+                  'ktm_manual_feature_procedure_owner',
+                  'ktm_manual_feature_admin_executor',
+                  'ktm_feature_create_provider_executor',
+                  'ktm_feature_request_procedure_owner',
+                  'ktm_feature_request_service_executor',
+                  'ktm_feature_request_admin_executor',
+                  'ktm_manual_provider_dedup_procedure_owner',
+                  'ktm_manual_provider_dedup_detector_executor',
+                  'ktm_manual_provider_dedup_admin_executor',
+                  'ktm_feature_reference_reconciliation_service_executor'
+              )
+              AND member.rolname NOT IN (
+                  'ktm_manual_feature_procedure_owner',
+                  'ktm_manual_feature_admin_executor',
+                  'ktm_feature_create_provider_executor',
+                  'ktm_feature_request_procedure_owner',
+                  'ktm_feature_request_service_executor',
+                  'ktm_feature_request_admin_executor',
+                  'ktm_manual_provider_dedup_procedure_owner',
+                  'ktm_manual_provider_dedup_detector_executor',
+                  'ktm_manual_provider_dedup_admin_executor',
+                  'ktm_feature_reference_reconciliation_service_executor'
+              )
         )
         (SELECT * FROM expected EXCEPT SELECT * FROM actual)
         UNION ALL
@@ -465,6 +1302,7 @@ WITH dedicated_routine(signature, owner_role) AS (
       ('feature.create_curation_item_command(uuid,text,text,text,text,text,text,text,integer,text,text,text,text,jsonb,bigint,text)', 'ktm_curation_command_owner'),
       ('feature.patch_curation_item_command(uuid,uuid,bigint,text,text,text,text,text,text,text,integer,text,text,text,text,jsonb,bigint,text)', 'ktm_curation_command_owner'),
       ('feature.archive_curation_item_command(uuid,uuid,bigint,bigint,text)', 'ktm_curation_command_owner'),
+      ('feature.create_manual_curation_item_with_feature_command(jsonb,jsonb,bigint)', 'ktm_curation_command_owner'),
       ('feature.resolve_curation_import_collection_command(text,uuid,uuid,text,text,bigint,text)', 'ktm_curation_command_owner'),
       ('feature.touch_curation_import_collection_command(uuid,bigint,text)', 'ktm_curation_command_owner'),
       ('feature.reclassify_curation_quarantine_command(uuid,bigint,text,uuid,bigint,uuid[],text,text,bigint,text)', 'ktm_curation_command_owner'),
@@ -537,5 +1375,11 @@ ALTER DEFAULT PRIVILEGES FOR ROLE ktm_feature_schema_owner IN SCHEMA provider_sy
 ALTER DEFAULT PRIVILEGES FOR ROLE ktm_feature_schema_owner IN SCHEMA ops
     REVOKE ALL ON SEQUENCES FROM ktm_feature_runtime;
 SQL
+
+if [ "$m01_repair_after_legacy" = "true" ]; then
+  # A no-owner/no-privileges restore needs the base role creation and complete
+  # ownership sweep above before these dedicated M01 owners can be restored.
+  run_m01_phase
+fi
 
 echo "kor-travel-map dedicated DB role bootstrap completed for $KOR_TRAVEL_MAP_POSTGRES_DB"

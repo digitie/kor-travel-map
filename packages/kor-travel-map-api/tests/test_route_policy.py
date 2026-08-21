@@ -325,11 +325,7 @@ def test_metrics_route_is_gated_by_metrics_token_dependency() -> None:
 @pytest.mark.unit
 def test_manual_feature_create_route_observes_both_admin_enforcements() -> None:
     matrix = build_route_policy_matrix(_representative_app())
-    row = next(
-        row
-        for row in matrix
-        if row.path == "/v1/admin/features" and "POST" in row.methods
-    )
+    row = next(row for row in matrix if row.path == "/v1/admin/features" and "POST" in row.methods)
     assert row.policy is RoutePolicy.OPERATOR
     assert set(row.observed_enforcement) == {
         "require_admin_frontend",
@@ -365,6 +361,9 @@ def test_service_policy_covers_feature_and_weather_batches() -> None:
         # T-VN-32C alias-map DB-to-DB 이관 표면 (ADR-068 전환·복구 경계 read).
         "/v1/service/feature-alias-maps",
         "/v1/service/feature-alias-maps/checksum",
+        "/v1/service/feature-reference-reconciliations",
+        "/v1/service/feature-reference-reconciliations/{event_id}/acks",
+        "/v1/service/feature-requests",
         "/v1/service/refresh-requests",
         "/v1/service/refresh-requests/{request_id}",
     }
@@ -379,6 +378,16 @@ def test_service_policy_covers_feature_and_weather_batches() -> None:
             expected_enforcement = {"require_curation_cutover_service_principal"}
         elif row.path.startswith("/v1/service/curation-"):
             expected_enforcement = {"require_curation_snapshot_service_principal"}
+        elif row.path == "/v1/service/feature-requests":
+            expected_enforcement = {"require_feature_request_service_principal"}
+        elif row.path == "/v1/service/feature-reference-reconciliations":
+            expected_enforcement = {
+                "require_feature_reference_reconciliation_read_service_principal"
+            }
+        elif row.path == "/v1/service/feature-reference-reconciliations/{event_id}/acks":
+            expected_enforcement = {
+                "require_feature_reference_reconciliation_ack_service_principal"
+            }
         assert expected_enforcement & set(row.observed_enforcement)
 
 

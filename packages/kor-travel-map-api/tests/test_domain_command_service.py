@@ -37,8 +37,7 @@ def _claim(*, fingerprint: str | None = None) -> DomainCommandClaim:
         operation=_OPERATION,
         idempotency_key=str(_KEY),
         fingerprint_version=1,
-        request_fingerprint=fingerprint
-        or canonical_domain_command_fingerprint(_PAYLOAD),
+        request_fingerprint=fingerprint or canonical_domain_command_fingerprint(_PAYLOAD),
         created_at=_NOW,
     )
 
@@ -87,6 +86,27 @@ async def test_begin_creates_new_actor_scoped_claim(
     assert handle.request_fingerprint == canonical_domain_command_fingerprint(_PAYLOAD)
     lock.assert_awaited_once()
     create_claim.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_preflight_keeps_new_command_unclaimed_but_locks_its_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    lock = AsyncMock()
+    get_claim = AsyncMock(return_value=None)
+    monkeypatch.setattr(service, "lock_domain_command", lock)
+    monkeypatch.setattr(service, "get_domain_command_claim", get_claim)
+
+    await service.preflight_domain_command_claim(
+        AsyncMock(),
+        actor=_ACTOR,
+        operation=_OPERATION,
+        idempotency_key=_KEY,
+        payload=_PAYLOAD,
+    )
+
+    lock.assert_awaited_once()
+    get_claim.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -259,9 +279,7 @@ async def test_same_key_and_body_with_different_if_match_conflicts(
             first_fingerprint = fingerprint
             return command
         if fingerprint != first_fingerprint:
-            raise service.DomainCommandFingerprintConflict(
-                _claim(fingerprint=first_fingerprint)
-            )
+            raise service.DomainCommandFingerprintConflict(_claim(fingerprint=first_fingerprint))
         return command
 
     monkeypatch.setattr(service, "begin_domain_command", _begin)
@@ -309,6 +327,7 @@ async def test_manual_create_decorator_sets_isolation_before_claim_and_wraps_201
         idempotency_key=str(_KEY),
         request_fingerprint="a" * 64,
     )
+
     async def begin(*_args: object, **_kwargs: object) -> service.DomainCommandHandle:
         events.append("claim")
         return command
@@ -515,15 +534,11 @@ async def test_serializable_multipart_fingerprint_streams_and_rewinds_each_retry
     assert reads == [content, content]
     assert payloads == [
         {
-            "file": {
-                "sha256": "b3bd60f28eb1639d2a58118ba9626bcc43ff4d1f26caae00aaad62cc8186b80f"
-            },
+            "file": {"sha256": "b3bd60f28eb1639d2a58118ba9626bcc43ff4d1f26caae00aaad62cc8186b80f"},
             "provenance_file": None,
         },
         {
-            "file": {
-                "sha256": "b3bd60f28eb1639d2a58118ba9626bcc43ff4d1f26caae00aaad62cc8186b80f"
-            },
+            "file": {"sha256": "b3bd60f28eb1639d2a58118ba9626bcc43ff4d1f26caae00aaad62cc8186b80f"},
             "provenance_file": None,
         },
     ]

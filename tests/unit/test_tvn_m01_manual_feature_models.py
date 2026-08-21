@@ -5,8 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from alembic.config import Config
-from alembic.script import ScriptDirectory
 from sqlalchemy import (
     BigInteger,
     CheckConstraint,
@@ -19,11 +17,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import UUID
 
 import kortravelmap.infra.models as models
-from kortravelmap.infra.alembic_exclusions import (
-    PENDING_MIGRATION_TABLES,
-    PENDING_MIGRATION_TABLES_EXPIRE_AT,
-    UNMAPPED_APP_TABLES,
-)
+from kortravelmap.infra.alembic_exclusions import UNMAPPED_APP_TABLES
 from kortravelmap.infra.models import (
     FeatureCreationOriginRow,
     ManualFeatureIdentityClaimRow,
@@ -151,22 +145,37 @@ def test_feature_creation_origin_metadata_matches_m00_contract() -> None:
 
     checks = _named_constraints(table, CheckConstraint)
     assert {name: str(constraint.sqltext) for name, constraint in checks.items()} == {
-        "ck_feature_creation_origins_kind": "origin_kind = 'manual_admin'",
+        "ck_feature_creation_origins_kind": (
+            "origin_kind IN ('manual_admin', 'manual_curation', 'manual_request')"
+        ),
         "ck_feature_creation_origins_principal": (
-            "creator_principal_id = 'admin-ui-bff.manual-feature-create.v1'"
+            "(origin_kind = 'manual_admin' "
+            "AND creator_principal_id = 'admin-ui-bff.manual-feature-create.v1') "
+            "OR (origin_kind = 'manual_curation' "
+            "AND creator_principal_id = 'admin-ui-bff.manual-curation-feature-create.v1') "
+            "OR (origin_kind = 'manual_request' "
+            "AND creator_principal_id = 'feature-request.approval.v1')"
         ),
         "ck_feature_creation_origins_actor": (
             "btrim(created_by_actor) <> '' AND char_length(created_by_actor) <= 200"
         ),
         "ck_feature_creation_origins_roles": (
-            "invoker_role = 'ktm_feature_api_runtime' "
-            "AND procedure_definer = 'ktm_manual_feature_procedure_owner'"
+            "(origin_kind = 'manual_admin' "
+            "AND invoker_role = 'ktm_feature_api_runtime' "
+            "AND procedure_definer = 'ktm_manual_feature_procedure_owner') "
+            "OR (origin_kind = 'manual_curation' "
+            "AND invoker_role = 'ktm_feature_api_runtime' "
+            "AND procedure_definer = 'ktm_curation_command_owner') "
+            "OR (origin_kind = 'manual_request' "
+            "AND invoker_role = 'ktm_feature_api_runtime' "
+            "AND procedure_definer = 'ktm_feature_request_procedure_owner')"
         ),
     }
 
     unique = _named_constraints(table, UniqueConstraint)
     assert {name: _column_names(constraint) for name, constraint in unique.items()} == {
         "uq_feature_creation_origins_command": ("creation_command_id",),
+        "uq_feature_creation_origins_feature_command": ("feature_id", "creation_command_id"),
     }
 
     foreign_keys = _named_constraints(table, ForeignKeyConstraint)
@@ -196,7 +205,7 @@ def test_manual_feature_models_are_public_module_exports() -> None:
     assert "FeatureCreationOriginRow" in models.__all__
 
 
-def test_manual_feature_pending_migration_ledger_is_exact_and_unexpired() -> None:
+def test_manual_feature_tables_are_mapped_not_excluded_from_alembic() -> None:
     expected = {
         ("feature", "manual_feature_identity_claims"),
         ("feature", "feature_creation_origins"),
@@ -205,16 +214,25 @@ def test_manual_feature_pending_migration_ledger_is_exact_and_unexpired() -> Non
         (table.schema, table.name) for table in models.metadata.tables.values()
     }
 
-    assert expected == PENDING_MIGRATION_TABLES
-    assert metadata_tables >= PENDING_MIGRATION_TABLES
-    assert PENDING_MIGRATION_TABLES.isdisjoint(UNMAPPED_APP_TABLES)
-    assert PENDING_MIGRATION_TABLES_EXPIRE_AT == "0226_m01_manual_feature_create"
+    assert metadata_tables >= expected
+    assert expected.isdisjoint(UNMAPPED_APP_TABLES)
 
-    root = Path(__file__).resolve().parents[2]
-    config = Config(str(root / "alembic.ini"))
-    config.set_main_option("script_location", str(root / "alembic"))
-    active_revisions = {
-        revision.revision
-        for revision in ScriptDirectory.from_config(config).walk_revisions()
-    }
-    assert PENDING_MIGRATION_TABLES_EXPIRE_AT not in active_revisions
+
+def test_m01_migration_audits_and_backfills_legacy_claims_before_ddl() -> None:
+    """old admin create는 검증된 claim만 남기고 origin을 추정하지 않는다."""
+
+    source = (
+        Path(__file__).resolve().parents[2]
+        / "alembic"
+        / "versions"
+        / "0226_m01_manual_feature_create.py"
+    ).read_text(encoding="utf-8")
+
+    assert "CREATE TEMP TABLE pg_temp.m01_legacy_claim_candidates" in source
+    assert "feature.feature_state_transitions" in source
+    assert "ops.domain_command_results" in source
+    assert "ops.feature_overrides" in source
+    assert "'legacy_admin_route'" in source
+    assert "M01 legacy claim backfill count/root mismatch" in source
+    assert "M01 legacy origin backfill is forbidden" in source
+    assert "for statement in _top_level_statements(_LEGACY_BACKFILL_SQL):" in source

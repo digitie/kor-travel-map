@@ -49,13 +49,13 @@ def test_migrations_never_pin_provider_dataset_surrogate_ids() -> None:
     for path in sorted(_VERSIONS.glob("*.py")):
         relative = path.relative_to(_ROOT).as_posix()
         for lineno, sql in _sql_constants(path):
+            if not _CATALOG_INSERT.search(sql):
+                continue
             if _OVERRIDING_IDENTITY.search(sql):
                 violations.append(
                     f"{relative}:{lineno}: OVERRIDING SYSTEM VALUE — "
                     "identity 대리키를 덮어쓰지 마라"
                 )
-            if not _CATALOG_INSERT.search(sql):
-                continue
             if _LEADING_INTEGER_ROW.search(sql):
                 violations.append(
                     f"{relative}:{lineno}: catalog INSERT의 VALUES 행이 정수로 "

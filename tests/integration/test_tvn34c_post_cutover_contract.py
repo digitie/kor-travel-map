@@ -56,14 +56,17 @@ def _feature_payload(feature_id: str, kind: str) -> str:
     )
 
 
-async def _create_as_runtime(
+async def _create_as_provider_executor(
     session: AsyncSession,
     *,
     feature_id: str,
     kind: str,
     state: tuple[str, str, str] = ("active", "published", "valid"),
 ) -> None:
-    await session.execute(text("SET ROLE ktm_feature_runtime"))
+    # The executor is inherited by Dagster and deliberately cannot be SET
+    # directly.  Exercise the deployable login boundary rather than bypassing
+    # its schema privileges in this fixture.
+    await session.execute(text("SET ROLE ktm_feature_dagster_runtime"))
     try:
         await session.execute(
             text(
@@ -150,7 +153,7 @@ async def test_tvn34c_direct_typed_assembly_covers_eight_tuples_and_subtypes(
     for number, state in enumerate(_LEGAL_TUPLES, start=1):
         feature_id = f"tvn34c-tuple-{number}-{uuid4().hex}"
         tuple_ids.append(feature_id)
-        await _create_as_runtime(
+        await _create_as_provider_executor(
             migrated_session,
             feature_id=feature_id,
             kind="place",
@@ -226,7 +229,7 @@ async def test_tvn34c_direct_typed_assembly_covers_eight_tuples_and_subtypes(
         feature_id = f"tvn34c-subtype-{kind}-{uuid4().hex}"
         feature_ids.append(feature_id)
         expected_detail[feature_id] = (detail_key, detail_value)
-        await _create_as_runtime(migrated_session, feature_id=feature_id, kind=kind)
+        await _create_as_provider_executor(migrated_session, feature_id=feature_id, kind=kind)
         await migrated_session.execute(text(insert_sql), {"feature_id": feature_id})
         await _materialize_provider_as_runtime(migrated_session, feature_id)
 
@@ -285,7 +288,7 @@ async def test_tvn34c_user_receipt_is_request_bound_immutable_and_concurrent(
     feature_id = f"tvn34c-receipt-{uuid4().hex}"
     request_id = uuid4()
     async with AsyncSession(migrated_engine) as setup_session, setup_session.begin():
-        await _create_as_runtime(setup_session, feature_id=feature_id, kind="place")
+        await _create_as_provider_executor(setup_session, feature_id=feature_id, kind="place")
         await setup_session.execute(
             text(
                 """
@@ -369,7 +372,7 @@ async def test_tvn34c_request_lock_serializes_first_receipt_against_request_muta
     feature_id = f"tvn34c-receipt-race-{uuid4().hex}"
     request_id = uuid4()
     async with AsyncSession(migrated_engine) as setup_session, setup_session.begin():
-        await _create_as_runtime(setup_session, feature_id=feature_id, kind="place")
+        await _create_as_provider_executor(setup_session, feature_id=feature_id, kind="place")
         await setup_session.execute(
             text(
                 """
@@ -492,7 +495,7 @@ async def test_tvn34c_admin_reactivation_derives_exact_current_source_evidence(
         ),
         {"entity_key": entity_key, "record_key": record_key},
     )
-    await _create_as_runtime(
+    await _create_as_provider_executor(
         migrated_session,
         feature_id=feature_id,
         kind="place",
@@ -638,13 +641,15 @@ async def test_tvn34c_provider_evidence_lock_rejects_head_advance_races(
             ),
             {"entity_key": entity_key, "record_key": record_one},
         )
-        await _create_as_runtime(
+        await _create_as_provider_executor(
             setup_session,
             feature_id=admin_feature_id,
             kind="place",
             state=("retired", "suppressed", "valid"),
         )
-        await _create_as_runtime(setup_session, feature_id=provider_feature_id, kind="place")
+        await _create_as_provider_executor(
+            setup_session, feature_id=provider_feature_id, kind="place"
+        )
         for feature_id in (admin_feature_id, provider_feature_id):
             await setup_session.execute(
                 text(
@@ -795,7 +800,7 @@ async def test_tvn34c_generic_non_provider_retirement_writes_lifecycle_fence(
     """Generic non-provider transitions cannot leave a retirement unfenced."""
 
     feature_id = f"tvn34c-retirement-fence-{transition_kind}"
-    await _create_as_runtime(migrated_session, feature_id=feature_id, kind="place")
+    await _create_as_provider_executor(migrated_session, feature_id=feature_id, kind="place")
     await migrated_session.execute(text("SET ROLE ktm_feature_runtime"))
     try:
         await migrated_session.execute(

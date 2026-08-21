@@ -115,9 +115,7 @@ _ROUTE_AREA_RUNTIME_INSERT_COLUMNS: Mapping[str, tuple[str, ...]] = {
 
 _ROUTE_AREA_RUNTIME_UPDATE_COLUMNS: Mapping[str, tuple[str, ...]] = {
     relation: tuple(
-        column
-        for column in columns
-        if column not in {"feature_id", "feature_uuid", "kind"}
+        column for column in columns if column not in {"feature_id", "feature_uuid", "kind"}
     )
     for relation, columns in _ROUTE_AREA_RUNTIME_INSERT_COLUMNS.items()
 }
@@ -127,8 +125,7 @@ _ROUTE_AREA_RUNTIME_GRANTS = tuple(
     for relation, insert_columns in _ROUTE_AREA_RUNTIME_INSERT_COLUMNS.items()
     for statement in (
         f"GRANT SELECT ON feature.{relation} TO ktm_feature_runtime",
-        f"GRANT INSERT ({', '.join(insert_columns)}) ON feature.{relation} "
-        "TO ktm_feature_runtime",
+        f"GRANT INSERT ({', '.join(insert_columns)}) ON feature.{relation} TO ktm_feature_runtime",
         f"GRANT UPDATE ({', '.join(_ROUTE_AREA_RUNTIME_UPDATE_COLUMNS[relation])}) "
         f"ON feature.{relation} TO ktm_feature_runtime",
         f"GRANT SELECT (feature_id, public_ready), UPDATE (public_ready) "
@@ -244,6 +241,17 @@ _OPS_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "curation_rule_reconcile_scope_members": (),
     "feature_override_field_paths": ("SELECT",),
     "feature_overrides": ("SELECT",),
+    # T-VN-M04 queue는 service와 admin route가 SECURITY DEFINER routine을
+    # 통해서만 접근한다. runtime의 raw queue read/DML은 허용하지 않는다.
+    "feature_requests": (),
+    # T-VN-M05 evidence/delivery는 전용 SECURITY DEFINER writer만 접근한다.
+    # lease까지 default ops grant에서 빼야 runtime이 cursor를 건너뛸 수 없다.
+    "manual_provider_dedup_cases": (),
+    "manual_provider_dedup_resolutions": (),
+    "feature_reference_reconciliation_events": (),
+    "feature_reference_reconciliation_acks": (),
+    "feature_reference_reconciliation_subscriptions": (),
+    "feature_reference_reconciliation_leases": (),
 }
 
 _PROTECTED_FEATURE_TABLES = frozenset(
@@ -251,9 +259,11 @@ _PROTECTED_FEATURE_TABLES = frozenset(
         "curation_import_plan_revisions",
         "curation_import_plan_rows",
         "curation_import_plans",
+        "feature_creation_origins",
         "features",
         "feature_base_field_values",
         "feature_state_transitions",
+        "manual_feature_identity_claims",
         "theme_candidate_generation_observations",
         "theme_candidate_generations",
         "theme_feature_candidate_transitions",
@@ -295,13 +305,13 @@ _STATE_OWNER_FUNCTION_ACL = (
     "REVOKE ALL ON FUNCTION feature.prepare_feature_state_context(jsonb, text) "
     "FROM PUBLIC, ktm_feature_runtime",
     "REVOKE ALL ON PROCEDURE feature.create_feature_with_initial_state("
-    "jsonb, text, text, text, jsonb) FROM PUBLIC",
+    "jsonb, text, text, text, jsonb) FROM PUBLIC, ktm_feature_runtime, "
+    "ktm_feature_api_runtime",
     "REVOKE ALL ON PROCEDURE feature.transition_feature_state("
     "text, text, text, text, bigint, jsonb) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.author_lifecycle_override("
     "text, text, text, boolean, text, text, bigint) FROM PUBLIC",
-    "REVOKE ALL ON PROCEDURE feature.revoke_lifecycle_override("
-    "text, text, bigint) FROM PUBLIC",
+    "REVOKE ALL ON PROCEDURE feature.revoke_lifecycle_override(text, text, bigint) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.apply_provider_feature_field_patch("
     "text, bigint, text, text, bigint, jsonb, jsonb) FROM PUBLIC",
     "REVOKE ALL ON PROCEDURE feature.author_feature_field_overrides("
@@ -313,7 +323,8 @@ _STATE_OWNER_FUNCTION_ACL = (
     "REVOKE ALL ON PROCEDURE feature.reactivate_admin_feature_state("
     "text, bigint, text, text, bigint, text, text) FROM PUBLIC",
     "GRANT EXECUTE ON PROCEDURE feature.create_feature_with_initial_state("
-    "jsonb, text, text, text, jsonb) TO ktm_feature_runtime",
+    "jsonb, text, text, text, jsonb) TO ktm_feature_create_provider_executor, "
+    "ktm_manual_feature_procedure_owner",
     "GRANT EXECUTE ON PROCEDURE feature.transition_feature_state("
     "text, text, text, text, bigint, jsonb) TO ktm_feature_runtime",
     "GRANT EXECUTE ON PROCEDURE feature.author_lifecycle_override("
@@ -337,13 +348,215 @@ _AUDIT_WRITER_FUNCTION_ACL = (
     "FROM PUBLIC, ktm_feature_runtime",
     "REVOKE ALL ON FUNCTION feature.reject_feature_state_transition_mutation() "
     "FROM PUBLIC, ktm_feature_runtime",
+    # 이 trigger function의 owner는 audit writer다. manual procedure owner가
+    # revoke하면 별도 grantor ACL은 지워도 owner/public ACL은 지우지 못해 API/Dagster
+    # preflight에서 unexpected SECURITY DEFINER function으로 잡힌다.
+    "REVOKE ALL ON FUNCTION feature.reject_manual_feature_evidence_mutation() "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, "
+    "ktm_feature_dagster_runtime, ktm_manual_feature_procedure_owner, "
+    "ktm_manual_feature_admin_executor, ktm_feature_create_provider_executor",
+)
+
+_MANUAL_FEATURE_TABLE_ACL = (
+    "REVOKE ALL ON TABLE feature.manual_feature_identity_claims, "
+    "feature.feature_creation_origins FROM PUBLIC, ktm_feature_runtime, "
+    "ktm_feature_api_runtime, ktm_feature_dagster_runtime",
+    "GRANT SELECT, INSERT ON TABLE feature.manual_feature_identity_claims, "
+    "feature.feature_creation_origins TO ktm_manual_feature_procedure_owner",
+)
+
+_FEATURE_REQUEST_TABLE_ACL = (
+    "REVOKE ALL ON TABLE ops.feature_requests FROM PUBLIC, "
+    "ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime",
+    "GRANT SELECT, INSERT, UPDATE (status, resolved_at, resolved_by_actor, "
+    "resolution_command_id, resolved_feature_id, rejection_reason) "
+    "ON TABLE ops.feature_requests TO ktm_feature_request_procedure_owner",
+)
+
+# M04 procedure owner는 세 owner로 나뉜 기존 writer를 연쇄 호출한다. dump/restore의
+# ``--no-owner --no-privileges``는 이 dependent grant를 보존하지 않으므로, relation
+# owner/ routine owner별 reconciler가 매 기동 뒤 정확히 복원한다.
+_FEATURE_REQUEST_SCHEMA_OWNER_DEPENDENCY_ACL = (
+    "GRANT SELECT, INSERT ON TABLE feature.manual_feature_identity_claims, "
+    "feature.feature_creation_origins TO ktm_feature_request_procedure_owner",
+    "GRANT SELECT, INSERT, UPDATE (status, resolved_at, resolved_by_actor, "
+    "resolution_command_id, resolved_feature_id, rejection_reason) "
+    "ON TABLE ops.feature_requests TO ktm_feature_request_procedure_owner",
+    "GRANT SELECT, UPDATE(command_id) ON TABLE ops.domain_commands "
+    "TO ktm_feature_request_procedure_owner",
+    "GRANT SELECT ON TABLE ops.domain_command_results TO ktm_feature_request_procedure_owner",
+)
+
+_FEATURE_REQUEST_MANUAL_OWNER_DEPENDENCY_ACL = (
+    "GRANT EXECUTE ON FUNCTION feature.manual_feature_identity_key("
+    "text, text, numeric, numeric) TO ktm_feature_request_procedure_owner",
+)
+
+_FEATURE_REQUEST_STATE_OWNER_DEPENDENCY_ACL = (
+    "GRANT EXECUTE ON PROCEDURE feature.create_feature_with_initial_state("
+    "jsonb, text, text, text, jsonb) TO ktm_feature_request_procedure_owner",
+)
+
+# M05 owner is a SECURITY DEFINER principal, not a relation owner.  These
+# grants are intentionally reconstructed by the schema owner after every
+# migration so a ``pg_restore --no-owner --no-privileges`` cannot leave the
+# candidate/decision writers callable but unable to revalidate their proof.
+_M05_SCHEMA_OWNER_DEPENDENCY_ACL = (
+    "GRANT USAGE ON SCHEMA feature, provider_sync, ops, x_extension "
+    "TO ktm_manual_provider_dedup_procedure_owner",
+    "GRANT SELECT, UPDATE ON TABLE feature.features TO ktm_manual_provider_dedup_procedure_owner",
+    "GRANT SELECT ON TABLE feature.manual_feature_identity_claims, "
+    "feature.feature_creation_origins "
+    "TO ktm_manual_provider_dedup_procedure_owner",
+    "GRANT SELECT, UPDATE ON TABLE provider_sync.source_links, "
+    "provider_sync.source_entities, provider_sync.source_entity_heads, "
+    "provider_sync.source_records "
+    "TO ktm_manual_provider_dedup_procedure_owner",
+    "GRANT SELECT, UPDATE ON TABLE ops.domain_commands "
+    "TO ktm_manual_provider_dedup_procedure_owner",
+    "GRANT SELECT ON TABLE ops.domain_command_results TO ktm_manual_provider_dedup_procedure_owner",
+    "GRANT SELECT, INSERT, UPDATE ON TABLE ops.manual_provider_dedup_cases, "
+    "ops.manual_provider_dedup_resolutions, "
+    "ops.feature_reference_reconciliation_events, "
+    "ops.feature_reference_reconciliation_subscriptions, "
+    "ops.feature_reference_reconciliation_acks "
+    "TO ktm_manual_provider_dedup_procedure_owner",
+    "GRANT SELECT, INSERT, UPDATE ON TABLE ops.feature_reference_reconciliation_leases "
+    "TO ktm_manual_provider_dedup_procedure_owner",
+    "GRANT USAGE ON SEQUENCE ops.feature_reference_reconciliation_events_event_sequence_seq "
+    "TO ktm_manual_provider_dedup_procedure_owner",
+)
+
+_M05_STATE_OWNER_DEPENDENCY_ACL = (
+    "GRANT EXECUTE ON PROCEDURE feature.transition_admin_feature_state("
+    "text, text, text, text, bigint, text, text, text) "
+    "TO ktm_manual_provider_dedup_procedure_owner",
+)
+
+_M05_WRITER_ACL = (
+    "REVOKE ALL ON FUNCTION feature.reject_manual_provider_dedup_evidence_mutation() "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, "
+    "ktm_feature_dagster_runtime",
+    "REVOKE ALL ON FUNCTION feature.assert_feature_reference_reconciliation_lease_cursor() "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, "
+    "ktm_feature_dagster_runtime",
+    "REVOKE ALL ON FUNCTION feature.preflight_feature_reference_reconciliation_ack("
+    "text, uuid, text, text) FROM PUBLIC, ktm_feature_runtime, "
+    "ktm_feature_dagster_runtime, ktm_manual_provider_dedup_detector_executor, "
+    "ktm_manual_provider_dedup_admin_executor, "
+    "ktm_feature_reference_reconciliation_service_executor",
+    "REVOKE ALL ON FUNCTION feature.preflight_feature_reference_reconciliation_ack_v2("
+    "text, uuid, text, text) "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_dagster_runtime, "
+    "ktm_manual_provider_dedup_detector_executor, ktm_manual_provider_dedup_admin_executor",
+    "GRANT EXECUTE ON FUNCTION feature.preflight_feature_reference_reconciliation_ack_v2("
+    "text, uuid, text, text) "
+    "TO ktm_feature_reference_reconciliation_service_executor",
+    "REVOKE ALL ON FUNCTION feature.list_manual_provider_dedup_cases("
+    "text, timestamptz, uuid, integer), feature.read_manual_provider_dedup_case(uuid) "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_dagster_runtime, "
+    "ktm_manual_provider_dedup_detector_executor, "
+    "ktm_feature_reference_reconciliation_service_executor",
+    "GRANT EXECUTE ON FUNCTION feature.list_manual_provider_dedup_cases("
+    "text, timestamptz, uuid, integer), feature.read_manual_provider_dedup_case(uuid) "
+    "TO ktm_manual_provider_dedup_admin_executor",
+    "REVOKE ALL ON PROCEDURE feature.record_manual_provider_dedup_candidate("
+    "text, text, jsonb, jsonb) FROM PUBLIC, ktm_feature_runtime, "
+    "ktm_feature_api_runtime, ktm_feature_dagster_runtime, "
+    "ktm_manual_provider_dedup_admin_executor, "
+    "ktm_feature_reference_reconciliation_service_executor",
+    "GRANT EXECUTE ON PROCEDURE feature.record_manual_provider_dedup_candidate("
+    "text, text, jsonb, jsonb) TO ktm_manual_provider_dedup_detector_executor",
+    "REVOKE ALL ON PROCEDURE feature.resolve_manual_provider_dedup_case("
+    "uuid, text, text, bigint, bigint, text, text, text, bigint), "
+    "feature.resolve_manual_provider_dedup_case_v2("
+    "uuid, text, text, bigint, bigint, text, text, text, bigint) FROM PUBLIC, "
+    "ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime, "
+    "ktm_manual_provider_dedup_detector_executor, "
+    "ktm_manual_provider_dedup_admin_executor, "
+    "ktm_feature_reference_reconciliation_service_executor",
+    "GRANT EXECUTE ON PROCEDURE feature.resolve_manual_provider_dedup_case_v2("
+    "uuid, text, text, bigint, bigint, text, text, text, bigint) "
+    "TO ktm_manual_provider_dedup_admin_executor",
+    "REVOKE ALL ON PROCEDURE feature.provision_feature_reference_reconciliation_subscription("
+    "text, bigint, text, bigint) FROM PUBLIC, ktm_feature_runtime, "
+    "ktm_feature_dagster_runtime, ktm_manual_provider_dedup_detector_executor, "
+    "ktm_feature_reference_reconciliation_service_executor",
+    "GRANT EXECUTE ON PROCEDURE feature.provision_feature_reference_reconciliation_subscription("
+    "text, bigint, text, bigint) TO ktm_manual_provider_dedup_admin_executor",
+    "REVOKE ALL ON PROCEDURE feature.lease_feature_reference_reconciliation_event("
+    "text, uuid), feature.lease_feature_reference_reconciliation_event_v2("
+    "text, uuid), feature.ack_feature_reference_reconciliation_event("
+    "text, uuid, uuid, bigint, text, text, bigint), "
+    "feature.ack_feature_reference_reconciliation_event_v2("
+    "text, uuid, uuid, bigint, text, text, bigint) FROM PUBLIC, "
+    "ktm_feature_runtime, ktm_feature_api_runtime, ktm_feature_dagster_runtime, "
+    "ktm_manual_provider_dedup_detector_executor, "
+    "ktm_manual_provider_dedup_admin_executor, "
+    "ktm_feature_reference_reconciliation_service_executor",
+    "GRANT EXECUTE ON PROCEDURE feature.lease_feature_reference_reconciliation_event_v2("
+    "text, uuid), feature.ack_feature_reference_reconciliation_event_v2("
+    "text, uuid, uuid, bigint, text, text, bigint) "
+    "TO ktm_feature_reference_reconciliation_service_executor",
+)
+
+_MANUAL_FEATURE_WRITER_ACL = (
+    "REVOKE ALL ON PROCEDURE feature.create_admin_manual_feature_with_initial_state("
+    "jsonb, bigint) FROM PUBLIC, ktm_feature_runtime, ktm_feature_dagster_runtime, "
+    "ktm_feature_create_provider_executor",
+    "GRANT EXECUTE ON PROCEDURE feature.create_admin_manual_feature_with_initial_state("
+    "jsonb, bigint) TO ktm_manual_feature_admin_executor",
+    "REVOKE ALL ON FUNCTION feature.read_admin_manual_feature_provenance(uuid) "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_dagster_runtime, "
+    "ktm_feature_create_provider_executor",
+    "GRANT EXECUTE ON FUNCTION feature.read_admin_manual_feature_provenance(uuid) "
+    "TO ktm_manual_feature_admin_executor",
+    "REVOKE ALL ON FUNCTION feature.manual_feature_identity_key("
+    "text, text, numeric, numeric) FROM PUBLIC, ktm_feature_runtime, "
+    "ktm_feature_api_runtime, ktm_feature_dagster_runtime",
+    "REVOKE ALL ON FUNCTION feature.reject_manual_feature_hard_purge() "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_api_runtime, "
+    "ktm_feature_dagster_runtime, ktm_manual_feature_procedure_owner, "
+    "ktm_manual_feature_admin_executor, ktm_feature_create_provider_executor",
+)
+
+_MANUAL_CURATION_WRITER_ACL = (
+    "REVOKE ALL ON PROCEDURE feature.create_manual_curation_item_with_feature_command("
+    "jsonb, jsonb, bigint) FROM PUBLIC, ktm_feature_runtime, "
+    "ktm_feature_api_runtime, ktm_feature_dagster_runtime, "
+    "ktm_curation_provider_executor, ktm_manual_feature_admin_executor",
+    "GRANT EXECUTE ON PROCEDURE feature.create_manual_curation_item_with_feature_command("
+    "jsonb, jsonb, bigint) TO ktm_curation_admin_executor",
+)
+
+_FEATURE_REQUEST_WRITER_ACL = (
+    "REVOKE ALL ON PROCEDURE feature.submit_feature_request(uuid, jsonb, bigint) "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_dagster_runtime, "
+    "ktm_manual_feature_admin_executor, ktm_curation_admin_executor, "
+    "ktm_feature_request_admin_executor",
+    "GRANT EXECUTE ON PROCEDURE feature.submit_feature_request(uuid, jsonb, bigint) "
+    "TO ktm_feature_request_service_executor",
+    "REVOKE ALL ON PROCEDURE feature.approve_feature_request_with_initial_state("
+    "uuid, jsonb, bigint), feature.reject_feature_request(uuid, text, bigint) "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_dagster_runtime, "
+    "ktm_manual_feature_admin_executor, ktm_curation_admin_executor, "
+    "ktm_feature_request_service_executor",
+    "GRANT EXECUTE ON PROCEDURE feature.approve_feature_request_with_initial_state("
+    "uuid, jsonb, bigint), feature.reject_feature_request(uuid, text, bigint) "
+    "TO ktm_feature_request_admin_executor",
+    "REVOKE ALL ON FUNCTION feature.read_feature_request(uuid) FROM PUBLIC, "
+    "ktm_feature_runtime, ktm_feature_dagster_runtime",
+    "GRANT EXECUTE ON FUNCTION feature.read_feature_request(uuid) "
+    "TO ktm_feature_request_admin_executor",
+    "REVOKE ALL ON FUNCTION feature.list_feature_requests(text, integer) FROM PUBLIC, "
+    "ktm_feature_runtime, ktm_feature_dagster_runtime",
+    "GRANT EXECUTE ON FUNCTION feature.list_feature_requests(text, integer) "
+    "TO ktm_feature_request_admin_executor",
 )
 
 _SUBTYPE_READY_FUNCTION_ACL = (
-    "REVOKE ALL ON FUNCTION feature.derive_subtype_public_ready() "
-    "FROM PUBLIC, ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION feature.sync_subtype_public_ready() "
-    "FROM PUBLIC, ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION feature.derive_subtype_public_ready() FROM PUBLIC, ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION feature.sync_subtype_public_ready() FROM PUBLIC, ktm_feature_runtime",
 )
 
 
@@ -402,9 +615,7 @@ def _runtime_relation_grants(
                 if privileges is None:
                     unknown_relations.append(f"feature.{relation}")
                     continue
-                grants.append(
-                    _grant_sql(schema=schema, relation=relation, privileges=privileges)
-                )
+                grants.append(_grant_sql(schema=schema, relation=relation, privileges=privileges))
                 continue
             if relation in _PROTECTED_FEATURE_TABLES:
                 continue
@@ -483,6 +694,17 @@ async def reconcile_runtime_privileges() -> None:
                 await connection.execute(text(statement))
             for statement in _ROUTE_AREA_RUNTIME_GRANTS:
                 await connection.execute(text(statement))
+            # Evidence tables remain owned by the schema owner.  The manual
+            # SECURITY DEFINER owner only has the narrowly granted INSERT
+            # path, so it cannot reconcile relation ACLs itself.
+            for statement in _MANUAL_FEATURE_TABLE_ACL:
+                await connection.execute(text(statement))
+            for statement in _FEATURE_REQUEST_TABLE_ACL:
+                await connection.execute(text(statement))
+            for statement in _FEATURE_REQUEST_SCHEMA_OWNER_DEPENDENCY_ACL:
+                await connection.execute(text(statement))
+            for statement in _M05_SCHEMA_OWNER_DEPENDENCY_ACL:
+                await connection.execute(text(statement))
 
             # Routine ownership is deliberately split from table ownership.
             # The schema owner has SET-only membership in each NOLOGIN routine
@@ -492,8 +714,26 @@ async def reconcile_runtime_privileges() -> None:
                 await connection.execute(text(statement))
             for statement in _SUBTYPE_READY_FUNCTION_ACL:
                 await connection.execute(text(statement))
+            for statement in _FEATURE_REQUEST_STATE_OWNER_DEPENDENCY_ACL:
+                await connection.execute(text(statement))
+            for statement in _M05_STATE_OWNER_DEPENDENCY_ACL:
+                await connection.execute(text(statement))
             await connection.execute(text("SET ROLE ktm_feature_audit_writer"))
             for statement in _AUDIT_WRITER_FUNCTION_ACL:
+                await connection.execute(text(statement))
+            await connection.execute(text("SET ROLE ktm_manual_feature_procedure_owner"))
+            for statement in _MANUAL_FEATURE_WRITER_ACL:
+                await connection.execute(text(statement))
+            for statement in _FEATURE_REQUEST_MANUAL_OWNER_DEPENDENCY_ACL:
+                await connection.execute(text(statement))
+            await connection.execute(text("SET ROLE ktm_curation_command_owner"))
+            for statement in _MANUAL_CURATION_WRITER_ACL:
+                await connection.execute(text(statement))
+            await connection.execute(text("SET ROLE ktm_feature_request_procedure_owner"))
+            for statement in _FEATURE_REQUEST_WRITER_ACL:
+                await connection.execute(text(statement))
+            await connection.execute(text("SET ROLE ktm_manual_provider_dedup_procedure_owner"))
+            for statement in _M05_WRITER_ACL:
                 await connection.execute(text(statement))
     finally:
         await engine.dispose()

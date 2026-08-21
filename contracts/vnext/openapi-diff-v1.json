@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "e463218dc2ccf628202cd8ce45bcc7b3c3a5d06d73e8397b3fa48f39c6db9d1d"
+      "sha256": "697a08c475fc28ba730af1dd14da89998a3a56cafbfb7676bfb3fa4a0b9ef6fd"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -13,10 +13,20 @@
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
-      "sha256": "8019e36f150ed006f5580e5ff224a0ba72030808b5303273f8c4c51aa0496431"
+      "sha256": "e1152a058e176f4f3aaeb4bb0965434f657601639786463f873ac82c6f3018eb"
     }
   },
   "revisions": [
+    {
+      "date": "2026-08-21",
+      "task": "T-VN-M04",
+      "change": "Feature 요청 승인 exact-conflict도 durable terminal 200으로 같은 winner Feature를 가리키므로, created와 정확히 같은 ETag·Location response header를 반환·문서화하도록 admin baseline을 재동결했다. user/service bytes와 Wave 2 목표 operation 집합은 변하지 않는다."
+    },
+    {
+      "date": "2026-08-20",
+      "task": "T-VN-M04",
+      "change": "범용 Feature 요청 service submit과 admin 승인·거절 계약을 현재 OpenAPI에 반영해 admin/service baseline을 재동결했다. Wave 2 목표 operation 집합은 바꾸지 않으며, 새 Map/PinVi 격리 paired live 증거 전에는 consumer rollout receipt를 pending으로 유지한다."
+    },
     {
       "date": "2026-08-18",
       "task": "T-VN-41S",

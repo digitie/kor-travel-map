@@ -237,7 +237,7 @@ external_db="${KOR_TRAVEL_MAP_DB_EXTERNAL:-false}"
 external_object_store="${KOR_TRAVEL_MAP_OBJECT_STORE_EXTERNAL:-false}"
 
 compose_files=(-f docker-compose.yml)
-services=(postgres dagster-db-init db-role-bootstrap dagster-storage-migrate api frontend dagster dagster-daemon)
+services=(postgres dagster-db-init db-role-bootstrap db-migrate-to-m01-bootstrap-boundary db-role-bootstrap-m01 db-migrate-to-m05-bootstrap-boundary db-role-bootstrap-m05-pre db-migrate-m05 db-role-bootstrap-m05-repair dagster-storage-migrate api frontend dagster dagster-daemon)
 ports=("$KOR_TRAVEL_MAP_API_PORT" "$KOR_TRAVEL_MAP_ADMIN_WEB_PORT" "$KOR_TRAVEL_MAP_DAGSTER_PORT")
 
 if [[ "$external_infra" == "true" ]]; then
@@ -250,7 +250,7 @@ elif [[ "$external_db" == "true" ]]; then
 elif [[ "$external_object_store" == "true" ]]; then
   compose_files+=(-f docker-compose.external-object-store.yml)
 else
-  services=(postgres dagster-db-init db-role-bootstrap rustfs rustfs-init dagster-storage-migrate api frontend dagster dagster-daemon)
+  services=(postgres dagster-db-init db-role-bootstrap db-migrate-to-m01-bootstrap-boundary db-role-bootstrap-m01 db-migrate-to-m05-bootstrap-boundary db-role-bootstrap-m05-pre db-migrate-m05 db-role-bootstrap-m05-repair rustfs rustfs-init dagster-storage-migrate api frontend dagster dagster-daemon)
   ports+=("$KOR_TRAVEL_MAP_RUSTFS_API_PORT" "$KOR_TRAVEL_MAP_RUSTFS_CONSOLE_PORT")
 fi
 

@@ -8,6 +8,7 @@ import io
 import json
 from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
+from math import isfinite
 from time import perf_counter
 from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
@@ -38,13 +39,18 @@ from kortravelmap.curation_provenance import (
     requires_lighthouse_provenance,
 )
 from kortravelmap.infra import curation_candidate_repo, curation_repo, feature_identity
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api import domain_command_service
-from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
+from kortravelmap.api.auth import (
+    AdminManualFeatureCreateContext,
+    AdminProxyContext,
+    require_admin_frontend,
+    require_admin_manual_feature_create,
+)
 from kortravelmap.api.db import get_session
 from kortravelmap.api.domain_command_service import (
     domain_command_transaction,
@@ -495,6 +501,23 @@ class AdminCurationItemResponse(BaseModel):
     meta: Meta
 
 
+class AdminCurationManualFeatureItemData(BaseModel):
+    """M03 combined writer의 UUID Feature·item commit receipt."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: UUID
+    feature_row_revision: int = Field(ge=1)
+    item: AdminCurationItemView
+
+
+class AdminCurationManualFeatureItemResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    data: AdminCurationManualFeatureItemData
+    meta: Meta
+
+
 class CurationCollectionCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -546,6 +569,73 @@ class CurationItemCreateRequest(BaseModel):
         if self.feature_id or self.place_name:
             return self
         raise ValueError("feature_id 또는 place_name이 필요합니다.")
+
+
+class CurationManualFeatureCoordInput(BaseModel):
+    """M03 explicit manual Feature 좌표 — JSON finite number만 수용한다."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    lon: float = Field(ge=124.0, le=132.0)
+    lat: float = Field(ge=33.0, le=39.5)
+
+    @field_validator("lon", "lat", mode="before")
+    @classmethod
+    def _require_finite_json_number(cls, value: object) -> object:
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise ValueError("좌표는 JSON number여야 합니다.")
+        if not isfinite(float(value)):
+            raise ValueError("좌표는 finite JSON number여야 합니다.")
+        return value
+
+
+class CurationManualFeatureCreateRequest(BaseModel):
+    """M03 combined writer가 받는 manual Feature의 최소 typed input."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["place", "event"]
+    name: str = Field(min_length=1)
+    category: str = Field(pattern=r"^\d{8}$")
+    coord: CurationManualFeatureCoordInput
+    coord_precision_digits: int | None = Field(default=None, ge=3, le=8)
+    address: dict[str, Any] | None = None
+    legal_dong_code: str | None = Field(default=None, pattern=r"^\d{10}$")
+    road_name_code: str | None = Field(default=None, pattern=r"^\d{7,12}$")
+    road_address_management_no: str | None = Field(
+        default=None, pattern=r"^\d{20,26}$"
+    )
+    admin_dong_code: str | None = Field(default=None, pattern=r"^\d{7,10}$")
+    sido_code: str | None = Field(default=None, pattern=r"^\d{2}$")
+    sigungu_code: str | None = Field(default=None, pattern=r"^\d{5}$")
+    urls: dict[str, Any] | None = None
+    marker_icon: str = Field(min_length=1)
+    marker_color: str = Field(pattern=r"^P-(0[1-9]|1[0-6])$")
+    parent_feature_id: str | None = None
+    sibling_group_id: str | None = None
+    detail: dict[str, Any] | None = None
+    reason: str = Field(min_length=1)
+
+
+class CurationManualFeatureItemCreateRequest(BaseModel):
+    """기존 item create와 분리된 M03 explicit manual Feature branch."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    manual_feature: CurationManualFeatureCreateRequest
+    external_item_id: str = Field(min_length=1, max_length=300)
+    external_component_id: str = Field(
+        default="primary", min_length=1, max_length=300
+    )
+    place_name: str | None = Field(default=None, min_length=1, max_length=500)
+    address_hint: str | None = Field(default=None, max_length=1000)
+    status: ActiveItemStatus = "included"
+    sort_order: int = Field(default=0, ge=0, le=CURATION_INTEGER_MAX)
+    item_title: str | None = None
+    item_summary: str | None = None
+    curation_relation: CurationRelation = "nearby_option"
+    reuse_policy: ReusePolicy = "manual_review"
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class CurationItemPatchRequest(BaseModel):
@@ -2760,6 +2850,79 @@ async def archive_admin_curation_collection(
         data=AdminCurationCollectionData(
             collection=_admin_collection_view(result[0]),
             items=[_admin_item_view(item) for item in result[1]],
+        ),
+        meta=make_meta(request, started_at=started_at),
+    )
+    response.headers["ETag"] = _curation_representation_etag(result_response.data)
+    return result_response
+
+
+@admin_router.post(
+    "/{collection_id}/items/manual-feature",
+    response_model=AdminCurationManualFeatureItemResponse,
+    status_code=201,
+    responses={
+        201: {"headers": _ETAG_RESPONSE_HEADER},
+        403: {"description": "수동 Feature 생성 전용 scope 없음"},
+        409: {"description": "manual exact identity 또는 curation item 충돌"},
+        422: {"description": "manual Feature 또는 curation item input 오류"},
+        503: {"description": "수동 Feature 생성 cutover 준비 전"},
+    },
+)
+@idempotent_domain_command("admin.curation-item.create.manual-feature-v1")
+async def add_admin_curation_item_with_manual_feature(
+    request: Request,
+    collection_id: UUID,
+    body: CurationManualFeatureItemCreateRequest,
+    response: Response,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    context: Annotated[
+        AdminManualFeatureCreateContext,
+        Depends(require_admin_manual_feature_create),
+    ],
+) -> AdminCurationManualFeatureItemResponse:
+    """M03: explicit payload만으로 Feature와 curation item을 한 command에 묶는다."""
+
+    started_at = perf_counter()
+    manual_feature = body.manual_feature.model_dump(
+        exclude={"reason"}, exclude_unset=True
+    )
+    coord = manual_feature.get("coord")
+    if isinstance(coord, dict):
+        manual_feature["coord"] = {"lon": coord["lon"], "lat": coord["lat"]}
+    payload = body.model_dump(exclude={"manual_feature"})
+    try:
+        async with domain_command_transaction(session):
+            command = domain_command_service.current_domain_command()
+            result = await curation_repo.create_manual_curation_item_with_feature_command(
+                session,
+                collection_id=str(collection_id),
+                manual_feature=manual_feature,
+                command_id=command.command_id,
+                principal=context.actor,
+                **payload,
+            )
+    except DBAPIError as exc:
+        raise _item_command_error(exc) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if isinstance(result, curation_repo.CurationManualFeatureExactDuplicate):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "MANUAL_FEATURE_EXACT_DUPLICATE",
+                "message": "같은 수동 Feature가 이미 존재합니다.",
+                "details": {
+                    "constraint": "uq_manual_feature_identity_claims_exact",
+                    "existing_feature_id": result.existing_feature_uuid,
+                },
+            },
+        )
+    result_response = AdminCurationManualFeatureItemResponse(
+        data=AdminCurationManualFeatureItemData(
+            feature_id=UUID(result.feature_uuid),
+            feature_row_revision=result.feature_row_revision,
+            item=_admin_item_view(result.item),
         ),
         meta=make_meta(request, started_at=started_at),
     )

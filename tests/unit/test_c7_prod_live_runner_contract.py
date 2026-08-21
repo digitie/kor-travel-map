@@ -509,7 +509,7 @@ def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidenc
         source = _read(ROOT / "docker" / image_dockerfile)
         assert 'LABEL org.opencontainers.image.revision="$KOR_TRAVEL_MAP_GIT_COMMIT"' in source
     revision_arg = "KOR_TRAVEL_MAP_GIT_COMMIT: ${KOR_TRAVEL_MAP_GIT_COMMIT:-development}"
-    assert compose.count(revision_arg) == 5
+    assert compose.count(revision_arg) == 8
     frontend_build = _section(compose, "  frontend:\n", "    environment:\n")
     assert frontend_build.count("      args:\n") == 1
     assert "        KOR_TRAVEL_MAP_GIT_COMMIT:" in frontend_build

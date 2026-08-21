@@ -98,6 +98,19 @@
 - **FIXED**: source lineage와 snapshot lifecycle을 보존하고, provider typed 모델의
   시군구 identity·HTTP error redaction·route source identity 경계를 보강했다.
 
+### T-VN-M04 — 범용 Feature 요청 큐 (2026-08-20)
+
+- **ADDED (DB/API)**: service `POST /v1/service/feature-requests`와 Map admin의
+  `GET /v1/admin/feature-requests[/{id}]`, `POST /{id}/approve|reject`를 추가했다.
+  외부 consumer는 immutable request만 제출하며, approval만 canonical Feature와
+  `manual_request` creation origin을 만든다.
+- **SECURITY**: service/admin executor와 SECURITY DEFINER owner를 분리하고 raw
+  `ops.feature_requests` relation access를 runtime preflight와 ACL에서 금지한다.
+  no-owner/no-privileges restore 뒤 cross-owner dependency grant도 bootstrap/reconciler가
+  재생성한다.
+- **CHANGED**: request queue는 특정 consumer에 묶이지 않는다. PinVi는 최초 consumer일
+  뿐 Map source의 route·role·origin·환경변수 식별자는 generic `feature_request`다.
+
 ### T-VN-40C — legacy curation overlay 물리 제거 (2026-08-20)
 
 ADR-075 보존 우선 cutover의 마지막 단계. 40A(write fence)·40B(consumer 선전환) 뒤

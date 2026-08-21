@@ -115,19 +115,15 @@ async def _build_base_database(raw_dsn: str) -> None:
     """배포와 같은 경로(migrator LOGIN → SET ROLE schema owner, ADR-090)로 head까지."""
     from alembic.config import Config
 
-    from alembic import command
     from kortravelmap.infra.db import normalize_async_dsn
     from tests.integration._tvn34_migration_bootstrap import (
-        alembic_schema_owner_role,
-        bootstrapped_migrator_dsn,
+        upgrade_head_with_tvn_m01_phase,
     )
 
     base_dsn = normalize_async_dsn(_with_database(raw_dsn, _BASE_DB))
     cfg = Config(str(_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_ROOT / "alembic"))
-    cfg.set_main_option("sqlalchemy.url", await bootstrapped_migrator_dsn(base_dsn))
-    with alembic_schema_owner_role():
-        await asyncio.to_thread(command.upgrade, cfg, "head")
+    await upgrade_head_with_tvn_m01_phase(cfg, base_dsn)
 
 
 def _run(command: list[str]) -> subprocess.CompletedProcess[str]:

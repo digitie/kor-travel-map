@@ -62,19 +62,17 @@ class CommandPolicy:
                 "ETag",
                 "Location",
                 "Retry-After",
+                "Idempotency-Replayed",
             }
             if unsupported:
-                raise ValueError(
-                    f"unsupported terminal response headers: {sorted(unsupported)}"
-                )
+                raise ValueError(f"unsupported terminal response headers: {sorted(unsupported)}")
             unsupported_fingerprint_headers = set(self.fingerprint_headers) - {
                 "If-Match",
                 "If-None-Match",
             }
             if unsupported_fingerprint_headers:
                 raise ValueError(
-                    "unsupported fingerprint headers: "
-                    f"{sorted(unsupported_fingerprint_headers)}"
+                    f"unsupported fingerprint headers: {sorted(unsupported_fingerprint_headers)}"
                 )
             if self.transaction_isolation not in {
                 None,
@@ -82,8 +80,7 @@ class CommandPolicy:
                 "serializable",
             }:
                 raise ValueError(
-                    "unsupported domain transaction isolation: "
-                    f"{self.transaction_isolation}"
+                    f"unsupported domain transaction isolation: {self.transaction_isolation}"
                 )
         elif (
             self.success_status is not None
@@ -170,6 +167,44 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
         _MUTATION_RESULT,
         success_status=201,
         replay_headers=("ETag", "Location"),
+        transaction_isolation="read-committed",
+    ),
+    ("POST", "/v1/service/feature-requests"): _domain(
+        "service.feature-request.submit.v1",
+        "외부 Feature 요청을 immutable queue receipt로 한 번만 등록",
+        success_status=201,
+        transaction_isolation="read-committed",
+    ),
+    ("POST", "/v1/service/feature-reference-reconciliations/{event_id}/acks"): _domain(
+        "service.feature-reference-reconciliation.ack.v1",
+        "Feature 참조 reconciliation ACK evidence를 한 번만 기록",
+        replay_headers=("Idempotency-Replayed",),
+        transaction_isolation="read-committed",
+    ),
+    ("POST", "/v1/admin/feature-reference-reconciliation-subscriptions"): _domain(
+        "admin.feature-reference-reconciliation-subscription.provision.v1",
+        _MUTATION_RESULT,
+        replay_headers=("Idempotency-Replayed",),
+        transaction_isolation="read-committed",
+    ),
+    ("POST", "/v1/admin/manual-provider-dedup-cases/{case_id}/decisions"): _domain(
+        "admin.manual-provider-dedup-case.resolve.v1",
+        _MUTATION_RESULT,
+        transaction_isolation="read-committed",
+    ),
+    ("POST", "/v1/admin/feature-requests/{request_id}/approve"): _domain(
+        "admin.feature-request.approve.v1",
+        _MUTATION_RESULT,
+        # exact claim winner도 queue terminal result로 보존한다. transport 409을
+        # raise하면 outer ledger transaction이 rollback되므로, 승인 결과는 200과
+        # data.status(approved/exact_conflict)로 명시한다.
+        success_status=200,
+        replay_headers=("ETag", "Location"),
+        transaction_isolation="read-committed",
+    ),
+    ("POST", "/v1/admin/feature-requests/{request_id}/reject"): _domain(
+        "admin.feature-request.reject.v1",
+        _MUTATION_RESULT,
         transaction_isolation="read-committed",
     ),
     ("POST", "/v1/admin/features/{feature_id}/field-overrides"): _domain(
@@ -320,6 +355,16 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
         transaction_isolation="serializable",
     ),
     (
+        "POST",
+        "/v1/admin/curations/{collection_id}/items/manual-feature",
+    ): _domain(
+        "admin.curation-item.create.manual-feature-v1",
+        "manual Feature와 curation item을 하나의 SERIALIZABLE terminal 결과로 봉인",
+        success_status=201,
+        replay_headers=("ETag",),
+        transaction_isolation="serializable",
+    ),
+    (
         "PATCH",
         "/v1/admin/curations/{collection_id}/items/{curation_item_id}",
     ): _domain(
@@ -457,9 +502,7 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
     (
         "PUT",
         "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}",
-    ): _resource(
-        "transaction_id가 Map 소유 cancel-probe fixture resource와 멱등 ensure를 식별"
-    ),
+    ): _resource("transaction_id가 Map 소유 cancel-probe fixture resource와 멱등 ensure를 식별"),
     (
         "POST",
         "/v1/ops/contract-fixtures/c6c-cancel-probe/{transaction_id}/finalize",

@@ -54,8 +54,8 @@ reason prefix로 origin이나 principal을 선택하지 않는다.
 origin의 kind, command, principal, actor, 시각, invoker role, procedure definer도 모두 명시적
 NOT NULL이다.
 
-`manual_pinvi`와 `manual_curation`은 각 queue/writer 및 인증 경계를 실제로 배포하는 M04/M03에서만
-CHECK domain에 추가한다. 과거 admin/PinVi 공유 경계에서 만들어진 행에는 origin을 추정하지 않는다.
+`manual_request`와 `manual_curation`은 각 queue/writer 및 인증 경계를 실제로 배포하는 M04/M03에서만
+CHECK domain에 추가한다. 과거 admin/외부 consumer 공유 경계에서 만들어진 행에는 origin을 추정하지 않는다.
 
 ### 3. admin UI BFF 생성 전용 자격
 
@@ -164,5 +164,5 @@ restore 뒤에도 그 불변식을 되살린다.
   최소 backup·restore·hard-purge fence 구현.
 - T-VN-M02: origin/claim read model과 patch·state·purge 전체 불변, 운영 restore drill.
 - T-VN-M03: curation item 생성 중 missing Feature를 같은 transaction으로 생성.
-- T-VN-M04: PinVi 요청 queue와 별도 인증 경계 뒤 `manual_pinvi` 추가.
+- T-VN-M04: 범용 Feature 요청 queue와 별도 인증 경계 뒤 `manual_request` 추가. PinVi는 첫 consumer다.
 - T-VN-M05: provider Feature가 나중에 발행한 같은 실체를 dedup 후보로 올리고 자동 병합하지 않음.

@@ -36,6 +36,7 @@ PinVi가 소비하는 변경은 [`integration-map.md`](../integration-map.md)의
 | public-keyed | `GET /v1/collections`, `GET /v1/collections/{id}` | collection/item 단일 curation read 정본 |
 | service | `POST /v1/features/batch` | `found|retired|suppressed|missing|unchanged` + revision; transport 503 분리 |
 | service | `POST /v1/features/weather/batch` | sparse `targets[]`/`known_at` 다중 시각 bitemporal query |
+| service | `POST /v1/service/feature-requests` | 범용 외부 Feature 요청의 immutable submit; service token + Idempotency-Key |
 | service | `PUT/GET/DELETE /v1/service/cache-targets/{system}/{key}` | 단조 source generation, If-None-Match/ETag/If-Match, Idempotency-Key |
 | service | `POST/GET /v1/service/refresh-requests[/{id}]` | Idempotency-Key, 202 operation resource |
 | service | `/v1/service/cache-target-streams/*`, `/v1/service/cache-target-event-*` | restore fence와 pull claim/ACK/NACK/dead/replay |
@@ -46,6 +47,7 @@ PinVi가 소비하는 변경은 [`integration-map.md`](../integration-map.md)의
 | operator | `/v1/feature-change-requests` | principal actor, revision 재검사 |
 | operator | `/v1/ops/datasets/*`, `/v1/ops/pipeline/*` | ADR-064 canonical control plane 유지 |
 | operator | `/v1/provider-datasets` | ADR-069 DB-owned dataset 관리 |
+| admin | `GET /v1/admin/feature-requests[/{id}]`, `POST /{id}/approve|reject` | pending 목록, manual-create 권한의 terminal 승인/거절과 `manual_request` provenance |
 
 공개 DTO에는 `raw_data`, `raw_payload_hash`, `source_record_key`, provider payload passthrough와
 ingestion timestamp(`fetched_at`/`imported_at`/`last_seen_at`)가 없다. 공개 operation의 response

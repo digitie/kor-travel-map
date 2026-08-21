@@ -482,6 +482,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/curations/{collection_id}/items/manual-feature": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Add Admin Curation Item With Manual Feature
+         * @description M03: explicit payload만으로 Feature와 curation item을 한 command에 묶는다.
+         */
+        post: operations["add_admin_curation_item_with_manual_feature_v1_admin_curations__collection_id__items_manual_feature_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/curations/{collection_id}/items/{curation_item_id}": {
         parameters: {
             query?: never;
@@ -498,6 +518,97 @@ export interface paths {
         head?: never;
         /** Patch Admin Curation Item */
         patch: operations["patch_admin_curation_item_v1_admin_curations__collection_id__items__curation_item_id__patch"];
+        trace?: never;
+    };
+    "/v1/admin/feature-reference-reconciliation-subscriptions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Provision Feature Reference Reconciliation Subscription Route
+         * @description paired consumer의 immutable initial cursor를 admin receipt로 한 번만 등록한다.
+         */
+        post: operations["provision_feature_reference_reconciliation_subscription_route_v1_admin_feature_reference_reconciliation_subscriptions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/feature-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Feature Requests Route
+         * @description Map admin이 pending queue를 UUID를 알기 전부터 발견할 수 있는 목록.
+         */
+        get: operations["list_feature_requests_route_v1_admin_feature_requests_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/feature-requests/{request_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Feature Request Route */
+        get: operations["get_feature_request_route_v1_admin_feature_requests__request_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/feature-requests/{request_id}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Approve Feature Request Route */
+        post: operations["approve_feature_request_route_v1_admin_feature_requests__request_id__approve_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/feature-requests/{request_id}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reject Feature Request Route */
+        post: operations["reject_feature_request_route_v1_admin_feature_requests__request_id__reject_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/admin/features": {
@@ -642,6 +753,26 @@ export interface paths {
         head?: never;
         /** Patch Feature Route */
         patch: operations["patch_feature_route_v1_admin_features__feature_id__patch"];
+        trace?: never;
+    };
+    "/v1/admin/features/{feature_id}/creation-provenance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Admin manual Feature creation provenance
+         * @description 현재 Feature에 결박된 claim/origin만 읽고 absence를 추정하지 않는다.
+         */
+        get: operations["get_feature_creation_provenance_route_v1_admin_features__feature_id__creation_provenance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/admin/features/{feature_id}/field-overrides": {
@@ -969,6 +1100,66 @@ export interface paths {
          * @description 이슈 상태 전이 + kor-travel-geo 재지오코딩/주소 덮어쓰기.
          */
         patch: operations["patch_admin_issue_v1_admin_issues__issue_id__patch"];
+        trace?: never;
+    };
+    "/v1/admin/manual-provider-dedup-cases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Manual Provider Dedup Cases Route
+         * @description admin BFF가 immutable M05 case의 stable keyset page를 읽는다.
+         */
+        get: operations["list_manual_provider_dedup_cases_route_v1_admin_manual_provider_dedup_cases_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/manual-provider-dedup-cases/{case_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Manual Provider Dedup Case Route
+         * @description case의 immutable evidence, resolution/event, subscription delivery 상태를 읽는다.
+         */
+        get: operations["get_manual_provider_dedup_case_route_v1_admin_manual_provider_dedup_cases__case_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/manual-provider-dedup-cases/{case_id}/decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resolve Manual Provider Dedup Case Route
+         * @description admin decision과 immutable resolution/event를 같은 command transaction으로 확정한다.
+         */
+        post: operations["resolve_manual_provider_dedup_case_route_v1_admin_manual_provider_dedup_cases__case_id__decisions_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/admin/offline-uploads": {
@@ -2800,6 +2991,63 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/service/feature-reference-reconciliations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Lease Feature Reference Reconciliation Event Route
+         * @description consumer별 earliest unacknowledged event에 fenced lease를 부여한다.
+         */
+        get: operations["lease_feature_reference_reconciliation_event_route_v1_service_feature_reference_reconciliations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/feature-reference-reconciliations/{event_id}/acks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ack Feature Reference Reconciliation Event Route
+         * @description ACK evidence를 한 번 기록하고, semantic replay는 claim 전에 종료한다.
+         */
+        post: operations["ack_feature_reference_reconciliation_event_route_v1_service_feature_reference_reconciliations__event_id__acks_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/feature-requests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Submit Feature Request Route */
+        post: operations["submit_feature_request_route_v1_service_feature_requests_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/service/refresh-requests": {
         parameters: {
             query?: never;
@@ -3172,6 +3420,25 @@ export interface components {
             /** Updated By */
             updated_by: string | null;
         };
+        /**
+         * AdminCurationManualFeatureItemData
+         * @description M03 combined writer의 UUID Feature·item commit receipt.
+         */
+        AdminCurationManualFeatureItemData: {
+            /**
+             * Feature Id
+             * Format: uuid
+             */
+            feature_id: string;
+            /** Feature Row Revision */
+            feature_row_revision: number;
+            item: components["schemas"]["AdminCurationItemView"];
+        };
+        /** AdminCurationManualFeatureItemResponse */
+        AdminCurationManualFeatureItemResponse: {
+            data: components["schemas"]["AdminCurationManualFeatureItemData"];
+            meta: components["schemas"]["Meta"];
+        };
         /** AdminCurationQuarantineCollectionView */
         AdminCurationQuarantineCollectionView: {
             /**
@@ -3389,6 +3656,32 @@ export interface components {
             urls?: {
                 [key: string]: unknown;
             } | null;
+        };
+        /**
+         * AdminFeatureCreationOriginRecord
+         * @description 검증된 creation causation snapshot; 부재를 추정하지 않는다.
+         */
+        AdminFeatureCreationOriginRecord: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Created By Actor */
+            created_by_actor: string;
+            /** Creation Command Id */
+            creation_command_id: number;
+            /** Creator Principal Id */
+            creator_principal_id: string;
+            /** Invoker Role */
+            invoker_role: string;
+            /**
+             * Origin Kind
+             * @enum {string}
+             */
+            origin_kind: "manual_admin" | "manual_curation" | "manual_request";
+            /** Procedure Definer */
+            procedure_definer: string;
         };
         /**
          * AdminFeatureDeleteRequest
@@ -4352,6 +4645,61 @@ export interface components {
          */
         AdminManualFeatureCreateResponse: {
             data: components["schemas"]["AdminManualFeatureCreateData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * AdminManualFeatureIdentityClaimRecord
+         * @description 현재 manual Feature의 immutable exact-identity claim.
+         */
+        AdminManualFeatureIdentityClaimRecord: {
+            /**
+             * Claim Basis
+             * @enum {string}
+             */
+            claim_basis: "manual_create" | "legacy_admin_route";
+            /**
+             * Claimed At
+             * Format: date-time
+             */
+            claimed_at: string;
+            /** Claimed By Command Id */
+            claimed_by_command_id: number;
+            /**
+             * Feature Id
+             * Format: uuid
+             */
+            feature_id: string;
+            /**
+             * Feature Kind
+             * @enum {string}
+             */
+            feature_kind: "place" | "event";
+            /** Lat E6 */
+            lat_e6: number;
+            /** Lon E6 */
+            lon_e6: number;
+            /** Name Key */
+            name_key: string;
+        };
+        /**
+         * AdminManualFeatureProvenanceData
+         * @description M02 admin-only provenance reader의 현재 Feature snapshot.
+         */
+        AdminManualFeatureProvenanceData: {
+            claim: components["schemas"]["AdminManualFeatureIdentityClaimRecord"] | null;
+            /**
+             * Feature Id
+             * Format: uuid
+             */
+            feature_id: string;
+            origin: components["schemas"]["AdminFeatureCreationOriginRecord"] | null;
+        };
+        /**
+         * AdminManualFeatureProvenanceResponse
+         * @description ``GET /admin/features/{feature_id}/creation-provenance`` 응답.
+         */
+        AdminManualFeatureProvenanceResponse: {
+            data: components["schemas"]["AdminManualFeatureProvenanceData"];
             meta: components["schemas"]["Meta"];
         };
         /** AdminThemeCandidatePageData */
@@ -7358,6 +7706,117 @@ export interface components {
             resolver_version: string | null;
         };
         /**
+         * CurationManualFeatureCoordInput
+         * @description M03 explicit manual Feature 좌표 — JSON finite number만 수용한다.
+         */
+        CurationManualFeatureCoordInput: {
+            /** Lat */
+            lat: number;
+            /** Lon */
+            lon: number;
+        };
+        /**
+         * CurationManualFeatureCreateRequest
+         * @description M03 combined writer가 받는 manual Feature의 최소 typed input.
+         */
+        CurationManualFeatureCreateRequest: {
+            /** Address */
+            address?: {
+                [key: string]: unknown;
+            } | null;
+            /** Admin Dong Code */
+            admin_dong_code?: string | null;
+            /** Category */
+            category: string;
+            coord: components["schemas"]["CurationManualFeatureCoordInput"];
+            /** Coord Precision Digits */
+            coord_precision_digits?: number | null;
+            /** Detail */
+            detail?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "place" | "event";
+            /** Legal Dong Code */
+            legal_dong_code?: string | null;
+            /** Marker Color */
+            marker_color: string;
+            /** Marker Icon */
+            marker_icon: string;
+            /** Name */
+            name: string;
+            /** Parent Feature Id */
+            parent_feature_id?: string | null;
+            /** Reason */
+            reason: string;
+            /** Road Address Management No */
+            road_address_management_no?: string | null;
+            /** Road Name Code */
+            road_name_code?: string | null;
+            /** Sibling Group Id */
+            sibling_group_id?: string | null;
+            /** Sido Code */
+            sido_code?: string | null;
+            /** Sigungu Code */
+            sigungu_code?: string | null;
+            /** Urls */
+            urls?: {
+                [key: string]: unknown;
+            } | null;
+        };
+        /**
+         * CurationManualFeatureItemCreateRequest
+         * @description 기존 item create와 분리된 M03 explicit manual Feature branch.
+         */
+        CurationManualFeatureItemCreateRequest: {
+            /** Address Hint */
+            address_hint?: string | null;
+            /**
+             * Curation Relation
+             * @default nearby_option
+             * @enum {string}
+             */
+            curation_relation: "primary_stop" | "food_stop" | "cafe_stop" | "bookstore_stop" | "nearby_option" | "accessibility_support" | "pet_support" | "family_support" | "theme_area_anchor";
+            /**
+             * External Component Id
+             * @default primary
+             */
+            external_component_id: string;
+            /** External Item Id */
+            external_item_id: string;
+            /** Item Summary */
+            item_summary?: string | null;
+            /** Item Title */
+            item_title?: string | null;
+            manual_feature: components["schemas"]["CurationManualFeatureCreateRequest"];
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /** Place Name */
+            place_name?: string | null;
+            /**
+             * Reuse Policy
+             * @default manual_review
+             * @enum {string}
+             */
+            reuse_policy: "allowed" | "blocked" | "manual_review";
+            /**
+             * Sort Order
+             * @default 0
+             */
+            sort_order: number;
+            /**
+             * Status
+             * @default included
+             * @enum {string}
+             */
+            status: "candidate" | "included" | "rejected";
+        };
+        /**
          * CurationQuarantineOriginalCollectionView
          * @description `0065` marker가 기록한 원본 collection의 현재 상태 (병렬 표시 전용).
          */
@@ -8515,6 +8974,264 @@ export interface components {
             data: components["schemas"]["PriceSnapshotData"];
             meta: components["schemas"]["Meta"];
         };
+        /** FeatureReferenceReconciliationAckAuditData */
+        FeatureReferenceReconciliationAckAuditData: {
+            /**
+             * Acked At
+             * Format: date-time
+             */
+            acked_at: string;
+            /** Command Id */
+            command_id: number;
+            /**
+             * Event Id
+             * Format: uuid
+             */
+            event_id: string;
+            /** Event Sha256 */
+            event_sha256: string;
+            /** Local Receipt Sha256 */
+            local_receipt_sha256: string;
+        };
+        /** FeatureReferenceReconciliationAckData */
+        FeatureReferenceReconciliationAckData: {
+            /** Acked Through Sequence */
+            acked_through_sequence: number;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "acked" | "replayed";
+        };
+        /** FeatureReferenceReconciliationAckInput */
+        FeatureReferenceReconciliationAckInput: {
+            /** Event Sha256 */
+            event_sha256: string;
+            /** Lease Epoch */
+            lease_epoch: number;
+            /** Local Receipt Sha256 */
+            local_receipt_sha256: string;
+            /**
+             * Worker Id
+             * Format: uuid
+             */
+            worker_id: string;
+        };
+        /** FeatureReferenceReconciliationAckResponse */
+        FeatureReferenceReconciliationAckResponse: {
+            data: components["schemas"]["FeatureReferenceReconciliationAckData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * FeatureReferenceReconciliationEventData
+         * @description DB가 보존한 canonical event payload를 재조립 없이 그대로 노출한다.
+         */
+        FeatureReferenceReconciliationEventData: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "rebind" | "detach";
+            /**
+             * Case Id
+             * Format: uuid
+             */
+            case_id: string;
+            /** Command Id */
+            command_id: number;
+            /**
+             * Event Id
+             * Format: uuid
+             */
+            event_id: string;
+            /** Event Sequence */
+            event_sequence: number;
+            /** Manual Retire Row Revision After Transition */
+            manual_retire_row_revision_after_transition: number;
+            /** Manual Retire Transition Id */
+            manual_retire_transition_id: number;
+            /** Occurred At */
+            occurred_at: string;
+            old_feature: components["schemas"]["FeatureReferenceReconciliationFeatureReference"];
+            /**
+             * Payload Schema Version
+             * @constant
+             */
+            payload_schema_version: 1;
+            replacement_feature: components["schemas"]["FeatureReferenceReconciliationFeatureReference"] | null;
+            /**
+             * Resolution Id
+             * Format: uuid
+             */
+            resolution_id: string;
+        };
+        /** FeatureReferenceReconciliationFeatureReference */
+        FeatureReferenceReconciliationFeatureReference: {
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * Feature Uuid
+             * Format: uuid
+             */
+            feature_uuid: string;
+            /** Row Revision */
+            row_revision: number;
+        };
+        /** FeatureReferenceReconciliationLeaseData */
+        FeatureReferenceReconciliationLeaseData: {
+            event: components["schemas"]["FeatureReferenceReconciliationEventData"];
+            /** Event Sha256 */
+            event_sha256: string;
+            /** Lease Epoch */
+            lease_epoch: number;
+            /** Lease Expires At */
+            lease_expires_at: string;
+            /**
+             * Outcome
+             * @constant
+             */
+            outcome: "leased";
+        };
+        /** FeatureReferenceReconciliationLeaseResponse */
+        FeatureReferenceReconciliationLeaseResponse: {
+            data: components["schemas"]["FeatureReferenceReconciliationLeaseData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** FeatureReferenceReconciliationSubscriptionDeliveryData */
+        FeatureReferenceReconciliationSubscriptionDeliveryData: {
+            ack: components["schemas"]["FeatureReferenceReconciliationAckAuditData"] | null;
+            /** Acked Through Sequence */
+            acked_through_sequence: number;
+            /** Initial Event Sequence */
+            initial_event_sequence: number;
+            /** Lease Epoch */
+            lease_epoch: number;
+            /** Lease Expires At */
+            lease_expires_at: string | null;
+            /** Oldest Unacked At */
+            oldest_unacked_at: string | null;
+            /** Principal Id */
+            principal_id: string;
+        };
+        /** FeatureReferenceReconciliationSubscriptionProvisionData */
+        FeatureReferenceReconciliationSubscriptionProvisionData: {
+            /** Initial Event Sequence */
+            initial_event_sequence: number;
+            /**
+             * Outcome
+             * @constant
+             */
+            outcome: "provisioned";
+            /**
+             * Principal Id
+             * @constant
+             */
+            principal_id: "service:feature-reference-reconciliation";
+        };
+        /** FeatureReferenceReconciliationSubscriptionProvisionInput */
+        FeatureReferenceReconciliationSubscriptionProvisionInput: {
+            /** Initial Event Sequence */
+            initial_event_sequence: number;
+        };
+        /** FeatureReferenceReconciliationSubscriptionProvisionResponse */
+        FeatureReferenceReconciliationSubscriptionProvisionResponse: {
+            data: components["schemas"]["FeatureReferenceReconciliationSubscriptionProvisionData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** FeatureRequestApprovalInput */
+        FeatureRequestApprovalInput: {
+            /** Category */
+            category: string;
+            /** Marker Color */
+            marker_color: string;
+            /** Marker Icon */
+            marker_icon: string;
+        };
+        /** FeatureRequestCoordInput */
+        FeatureRequestCoordInput: {
+            /** Lat */
+            lat: number;
+            /** Lon */
+            lon: number;
+        };
+        /** FeatureRequestData */
+        FeatureRequestData: {
+            /** Categories */
+            categories: string[];
+            coord: components["schemas"]["FeatureRequestCoordInput"];
+            /** Feature Id */
+            feature_id: string | null;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "place" | "event";
+            /** Name */
+            name: string;
+            /** Note */
+            note: string | null;
+            /** Rejection Reason */
+            rejection_reason: string | null;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+            /** Resolved At */
+            resolved_at: string | null;
+            /** Resolved By Actor */
+            resolved_by_actor: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "approved" | "rejected" | "exact_conflict";
+            /**
+             * Submitted At
+             * Format: date-time
+             */
+            submitted_at: string;
+        };
+        /** FeatureRequestPageData */
+        FeatureRequestPageData: {
+            /** Items */
+            items: components["schemas"]["FeatureRequestData"][];
+        };
+        /** FeatureRequestPageResponse */
+        FeatureRequestPageResponse: {
+            data: components["schemas"]["FeatureRequestPageData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** FeatureRequestRejectInput */
+        FeatureRequestRejectInput: {
+            /** Reason */
+            reason: string;
+        };
+        /** FeatureRequestResponse */
+        FeatureRequestResponse: {
+            data: components["schemas"]["FeatureRequestData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** FeatureRequestSubmitInput */
+        FeatureRequestSubmitInput: {
+            /** Categories */
+            categories?: string[];
+            coord: components["schemas"]["FeatureRequestCoordInput"];
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "place" | "event";
+            /** Name */
+            name: string;
+            /** Note */
+            note?: string | null;
+            /**
+             * Request Id
+             * Format: uuid
+             */
+            request_id: string;
+        };
         /**
          * FeatureSearchData
          * @description 사용자 feature 검색 data payload.
@@ -9283,6 +10000,162 @@ export interface components {
         ManagedFileSummaryResponse: {
             data: components["schemas"]["ManagedFileSummaryData"];
             meta: components["schemas"]["Meta"];
+        };
+        /** ManualProviderDedupCaseData */
+        ManualProviderDedupCaseData: {
+            /**
+             * Case Id
+             * Format: uuid
+             */
+            case_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Evidence Fingerprint */
+            evidence_fingerprint: string;
+            manual_feature: components["schemas"]["ManualProviderDedupFeatureEvidence"];
+            provider_feature: components["schemas"]["ManualProviderDedupFeatureEvidence"];
+            scores: components["schemas"]["ManualProviderDedupScores"];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "terminal";
+        };
+        /** ManualProviderDedupCaseDecisionData */
+        ManualProviderDedupCaseDecisionData: {
+            /** Event Id */
+            event_id: string | null;
+            /** Manual Feature Id */
+            manual_feature_id: string;
+            /** Manual Feature Row Revision */
+            manual_feature_row_revision: number;
+            /**
+             * Outcome
+             * @enum {string}
+             */
+            outcome: "kept" | "merged" | "manual_retired";
+            /**
+             * Resolution Id
+             * Format: uuid
+             */
+            resolution_id: string;
+        };
+        /** ManualProviderDedupCaseDecisionInput */
+        ManualProviderDedupCaseDecisionInput: {
+            /**
+             * Decision
+             * @enum {string}
+             */
+            decision: "kept" | "merged" | "manual_retired";
+            /** Expected Case Fingerprint */
+            expected_case_fingerprint: string;
+            /** Expected Manual Row Revision */
+            expected_manual_row_revision: number;
+            /** Expected Provider Row Revision */
+            expected_provider_row_revision: number;
+            /** Reason */
+            reason: string;
+            /** Survivor Feature Id */
+            survivor_feature_id?: string | null;
+        };
+        /** ManualProviderDedupCaseDecisionResponse */
+        ManualProviderDedupCaseDecisionResponse: {
+            data: components["schemas"]["ManualProviderDedupCaseDecisionData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** ManualProviderDedupCaseDetailData */
+        ManualProviderDedupCaseDetailData: {
+            /**
+             * Case Id
+             * Format: uuid
+             */
+            case_id: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            event: components["schemas"]["FeatureReferenceReconciliationEventData"] | null;
+            /** Evidence Fingerprint */
+            evidence_fingerprint: string;
+            /** Manual Feature */
+            manual_feature: {
+                [key: string]: unknown;
+            };
+            /** Provider Feature */
+            provider_feature: {
+                [key: string]: unknown;
+            };
+            /** Resolution */
+            resolution: {
+                [key: string]: unknown;
+            } | null;
+            /** Scores */
+            scores: {
+                [key: string]: unknown;
+            };
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "terminal";
+            /** Subscriptions */
+            subscriptions: components["schemas"]["FeatureReferenceReconciliationSubscriptionDeliveryData"][];
+        };
+        /** ManualProviderDedupCaseDetailResponse */
+        ManualProviderDedupCaseDetailResponse: {
+            data: components["schemas"]["ManualProviderDedupCaseDetailData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** ManualProviderDedupCasePageData */
+        ManualProviderDedupCasePageData: {
+            /** Items */
+            items: components["schemas"]["ManualProviderDedupCaseData"][];
+            /** Next After Case Id */
+            next_after_case_id: string | null;
+            /** Next After Created At */
+            next_after_created_at: string | null;
+        };
+        /** ManualProviderDedupCasePageResponse */
+        ManualProviderDedupCasePageResponse: {
+            data: components["schemas"]["ManualProviderDedupCasePageData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** ManualProviderDedupFeatureEvidence */
+        ManualProviderDedupFeatureEvidence: {
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * Feature Uuid
+             * Format: uuid
+             */
+            feature_uuid: string;
+            /** Row Revision */
+            row_revision: number;
+            /** Snapshot */
+            snapshot: {
+                [key: string]: unknown;
+            };
+        };
+        /** ManualProviderDedupScores */
+        ManualProviderDedupScores: {
+            /** Category Score */
+            category_score: number;
+            /** Distance Meters */
+            distance_meters: number;
+            /** Name Score */
+            name_score: number;
+            /** Scorer Id */
+            scorer_id: string;
+            /** Scorer Input Sha256 */
+            scorer_input_sha256: string;
+            /** Spatial Score */
+            spatial_score: number;
+            /** Total Score */
+            total_score: number;
         };
         /**
          * Meta
@@ -15138,6 +16011,82 @@ export interface operations {
             };
         };
     };
+    add_admin_curation_item_with_manual_feature_v1_admin_curations__collection_id__items_manual_feature_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
+            path: {
+                collection_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CurationManualFeatureItemCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    /** @description 현재 응답 representation의 strong entity tag. */
+                    ETag?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminCurationManualFeatureItemResponse"];
+                };
+            };
+            /** @description 수동 Feature 생성 전용 scope 없음 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description manual exact identity 또는 curation item 충돌 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description manual Feature 또는 curation item input 오류 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 수동 Feature 생성 cutover 준비 전 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     archive_admin_curation_item_v1_admin_curations__collection_id__items__curation_item_id__delete: {
         parameters: {
             query?: never;
@@ -15256,6 +16205,332 @@ export interface operations {
             };
             /** @description If-Match 누락 */
             428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    provision_feature_reference_reconciliation_subscription_route_v1_admin_feature_reference_reconciliation_subscriptions_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeatureReferenceReconciliationSubscriptionProvisionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description 동일 provision receipt를 replay했을 때 true. */
+                    "Idempotency-Replayed"?: "true";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureReferenceReconciliationSubscriptionProvisionResponse"];
+                };
+            };
+            /** @description AdminBFF 거부 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description subscription이 이미 있어 initial cursor를 변경할 수 없음 */
+            409: {
+                headers: {
+                    /** @description 동일 conflict receipt를 replay했을 때 true. */
+                    "Idempotency-Replayed"?: "true";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description initial cursor 입력 오류 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_feature_requests_route_v1_admin_feature_requests_get: {
+        parameters: {
+            query?: {
+                status?: ("pending" | "approved" | "rejected" | "exact_conflict") | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureRequestPageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_feature_request_route_v1_admin_feature_requests__request_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureRequestResponse"];
+                };
+            };
+            /** @description Feature 요청 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    approve_feature_request_route_v1_admin_feature_requests__request_id__approve_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeatureRequestApprovalInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description 승인 또는 exact-conflict winner Feature의 strong entity tag. */
+                    ETag?: string;
+                    /** @description 승인 또는 exact-conflict winner Feature의 canonical resource URI. */
+                    Location?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureRequestResponse"];
+                };
+            };
+            /** @description admin manual Feature create scope 없음 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Feature 요청 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description pending 상태 아님 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description approval 입력 오류 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 수동 Feature 생성 승인 경계 비활성 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    reject_feature_request_route_v1_admin_feature_requests__request_id__reject_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
+            path: {
+                request_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeatureRequestRejectInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureRequestResponse"];
+                };
+            };
+            /** @description admin manual Feature create scope 없음 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Feature 요청 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description pending 상태 아님 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 거절 입력 오류 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 수동 Feature 생성 승인 경계 비활성 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -16054,6 +17329,55 @@ export interface operations {
             };
             /** @description If-Match 누락 */
             428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_feature_creation_provenance_route_v1_admin_features__feature_id__creation_provenance_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminManualFeatureProvenanceResponse"];
+                };
+            };
+            /** @description feature 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description feature 참조 형식 오류 */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -17033,6 +18357,173 @@ export interface operations {
                 };
             };
             /** @description kor-travel-geo 미설정 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_manual_provider_dedup_cases_route_v1_admin_manual_provider_dedup_cases_get: {
+        parameters: {
+            query?: {
+                status?: ("pending" | "terminal") | null;
+                after_created_at?: string | null;
+                after_case_id?: string | null;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManualProviderDedupCasePageResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_manual_provider_dedup_case_route_v1_admin_manual_provider_dedup_cases__case_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManualProviderDedupCaseDetailResponse"];
+                };
+            };
+            /** @description manual/provider dedup case 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    resolve_manual_provider_dedup_case_route_v1_admin_manual_provider_dedup_cases__case_id__decisions_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                case_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManualProviderDedupCaseDecisionInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManualProviderDedupCaseDecisionResponse"];
+                };
+            };
+            /** @description AdminBFF 또는 destructive decision kill-switch 거부 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description stale evidence 또는 Idempotency-Key 충돌 */
+            409: {
+                headers: {
+                    /** @description 동일 stale receipt를 replay했을 때 true. */
+                    "Idempotency-Replayed"?: "true";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description decision 입력 오류 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description paired reconciliation subscription이 아직 활성화되지 않음 */
             503: {
                 headers: {
                     [name: string]: unknown;
@@ -23403,6 +24894,245 @@ export interface operations {
             };
             /** @description FEATURE_ALIAS_MAP_INTEGRITY — 저장 행이 canonical 계약 위반 (DB 층 보장 붕괴, 이관 중단 — 파생 등식은 0083부터 계약이 아님) */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    lease_feature_reference_reconciliation_event_route_v1_service_feature_reference_reconciliations_get: {
+        parameters: {
+            query?: never;
+            header: {
+                "X-Reconciliation-Worker-Id": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureReferenceReconciliationLeaseResponse"];
+                };
+            };
+            /** @description unacknowledged event 없음 */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description reconciliation read token 없음/불일치 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 다른 service scope token */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 다른 worker의 유효한 lease가 존재 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description M05 reconciliation read boundary 비활성 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    ack_feature_reference_reconciliation_event_route_v1_service_feature_reference_reconciliations__event_id__acks_post: {
+        parameters: {
+            query?: never;
+            header: {
+                "Idempotency-Key": string;
+            };
+            path: {
+                event_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeatureReferenceReconciliationAckInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    /** @description 기존 ACK receipt를 replay했을 때 true. */
+                    "Idempotency-Replayed"?: "true";
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureReferenceReconciliationAckResponse"];
+                };
+            };
+            /** @description reconciliation ACK token 없음/불일치 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 다른 service scope token */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description ACK hash, lease 또는 event order 충돌 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description ACK 입력 오류 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description M05 reconciliation ACK boundary 비활성 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    submit_feature_request_route_v1_service_feature_requests_post: {
+        parameters: {
+            query?: never;
+            header: {
+                /** @description 같은 인증 actor가 동일 command를 재시도할 때 재사용하는 UUID. 다른 canonical payload 재사용은 409. */
+                "Idempotency-Key": string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeatureRequestSubmitInput"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureRequestResponse"];
+                };
+            };
+            /** @description Feature request service token 없음/불일치 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description 다른 service scope token */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description M04 queue credential/activation 전 */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };

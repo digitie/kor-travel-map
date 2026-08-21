@@ -14,7 +14,6 @@ default collation ``en_US.utf8``)를 별도로 띄워:
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 from uuid import uuid4
@@ -24,7 +23,6 @@ from alembic.config import Config
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
 
-from alembic import command
 from kortravelmap.core.feature_alias_map import (
     FeatureAliasMapRowV1,
     feature_alias_map_merkle_root,
@@ -102,13 +100,10 @@ async def glibc_engine(glibc_pg_container: Any) -> AsyncIterator[AsyncEngine]:
     # bootstrap → migrator 자격 upgrade(ADR-090)까지 배포와 동일 경로다.
     # collation 검증 축(alias 정렬)은 이 변경과 무관하며 그대로다.
     from tests.integration._tvn34_migration_bootstrap import (
-        alembic_schema_owner_role,
-        bootstrapped_migrator_dsn,
+        upgrade_head_with_tvn_m01_phase,
     )
 
-    migrator_dsn = await bootstrapped_migrator_dsn(dsn)
-    with alembic_schema_owner_role():
-        await asyncio.to_thread(command.upgrade, _alembic_config(migrator_dsn), "head")
+    await upgrade_head_with_tvn_m01_phase(_alembic_config(dsn), dsn)
 
     engine = make_async_engine(dsn)
     try:

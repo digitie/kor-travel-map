@@ -177,6 +177,42 @@
         "0231_tvn41s_snapshot_material"
       ],
       "revision": "0232_tvn37d_notice_empty_range"
+    },
+    {
+      "down_revision": [
+        "0232_tvn37d_notice_empty_range"
+      ],
+      "revision": "0226_m01_manual_feature_create"
+    },
+    {
+      "down_revision": [
+        "0226_m01_manual_feature_create"
+      ],
+      "revision": "0227_m02_feature_provenance"
+    },
+    {
+      "down_revision": [
+        "0227_m02_feature_provenance"
+      ],
+      "revision": "0228_m03_manual_curation"
+    },
+    {
+      "down_revision": [
+        "0228_m03_manual_curation"
+      ],
+      "revision": "0233_m04_feature_request_queue"
+    },
+    {
+      "down_revision": [
+        "0233_m04_feature_request_queue"
+      ],
+      "revision": "0234_m05_manual_provider_dedup"
+    },
+    {
+      "down_revision": [
+        "0234_m05_manual_provider_dedup"
+      ],
+      "revision": "0235_m05_reconciliation_delivery"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

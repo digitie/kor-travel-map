@@ -60,12 +60,15 @@ class RuntimeDbPrivilegeBoundaryError(RuntimeError):
     """실제 runtime DB session이 ADR-090 권한 경계를 벗어났을 때의 기동 오류."""
 
 
+_GENERIC_FEATURE_CREATE_PROCEDURE = (
+    "feature.create_feature_with_initial_state(jsonb,text,text,text,jsonb)"
+)
+
 _SHARED_RUNTIME_FEATURE_PROCEDURES = frozenset(
     {
         "feature.apply_provider_feature_field_patch(text,bigint,text,text,bigint,jsonb,jsonb)",
         "feature.author_feature_field_overrides(text,bigint,text,text,bigint,jsonb,jsonb)",
         "feature.author_lifecycle_override(text,text,text,boolean,text,text,bigint)",
-        "feature.create_feature_with_initial_state(jsonb,text,text,text,jsonb)",
         "feature.reactivate_admin_feature_state(text,bigint,text,text,bigint,text,text)",
         "feature.revoke_feature_field_overrides(text,bigint,text,text,bigint,text[])",
         "feature.revoke_lifecycle_override(text,text,bigint)",
@@ -74,8 +77,43 @@ _SHARED_RUNTIME_FEATURE_PROCEDURES = frozenset(
     }
 )
 
+_MANUAL_FEATURE_CREATE_PROCEDURE = (
+    "feature.create_admin_manual_feature_with_initial_state(jsonb,bigint)"
+)
+_MANUAL_FEATURE_PROVENANCE_FUNCTION = "feature.read_admin_manual_feature_provenance(uuid)"
+_MANUAL_CURATION_FEATURE_CREATE_PROCEDURE = (
+    "feature.create_manual_curation_item_with_feature_command(jsonb,jsonb,bigint)"
+)
+_FEATURE_REQUEST_SUBMIT_PROCEDURE = "feature.submit_feature_request(uuid,jsonb,bigint)"
+_FEATURE_REQUEST_APPROVE_PROCEDURE = (
+    "feature.approve_feature_request_with_initial_state(uuid,jsonb,bigint)"
+)
+_FEATURE_REQUEST_REJECT_PROCEDURE = "feature.reject_feature_request(uuid,text,bigint)"
+_FEATURE_REQUEST_READ_FUNCTION = "feature.read_feature_request(uuid)"
+_FEATURE_REQUEST_LIST_FUNCTION = "feature.list_feature_requests(text,integer)"
+_M05_CANDIDATE_PROCEDURE = "feature.record_manual_provider_dedup_candidate(text,text,jsonb,jsonb)"
+_M05_DECISION_PROCEDURE = (
+    "feature.resolve_manual_provider_dedup_case_v2("
+    "uuid,text,text,bigint,bigint,text,text,text,bigint)"
+)
+_M05_LEASE_PROCEDURE = "feature.lease_feature_reference_reconciliation_event_v2(text,uuid)"
+_M05_ACK_PROCEDURE = (
+    "feature.ack_feature_reference_reconciliation_event_v2(text,uuid,uuid,bigint,text,text,bigint)"
+)
+_M05_SUBSCRIPTION_PROVISION_PROCEDURE = (
+    "feature.provision_feature_reference_reconciliation_subscription(text,bigint,text,bigint)"
+)
+_M05_ACK_PREFLIGHT_FUNCTION = (
+    "feature.preflight_feature_reference_reconciliation_ack_v2(text,uuid,text,text)"
+)
+_M05_CASE_READ_FUNCTION = "feature.read_manual_provider_dedup_case(uuid)"
+_M05_CASE_LIST_FUNCTION = (
+    "feature.list_manual_provider_dedup_cases(text,timestamp with time zone,uuid,integer)"
+)
+
 _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
     {
+        _MANUAL_CURATION_FEATURE_CREATE_PROCEDURE,
         "feature.apply_curation_import_items_command(jsonb,text,text,bigint,text)",
         # 0222 — canonical collections lock. admin executor만(dedup review 라우터·ktmctl).
         "feature.merge_lock_curation_collections(text,text)",
@@ -107,10 +145,7 @@ _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
             "feature.create_curation_item_command("
             "uuid,text,text,text,text,text,text,text,integer,text,text,text,text,jsonb,bigint,text)"
         ),
-        (
-            "feature.materialize_theme_candidate_generation("
-            "uuid,text,uuid,uuid,bigint,text,jsonb)"
-        ),
+        ("feature.materialize_theme_candidate_generation(uuid,text,uuid,uuid,bigint,text,jsonb)"),
         (
             "feature.patch_curated_source_command("
             "uuid,bigint,text,text,text,text,text,text,text,jsonb,bigint,text)"
@@ -153,10 +188,7 @@ _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
 _PROVIDER_CURATION_FEATURE_PROCEDURES = frozenset(
     {
         "feature.finalize_provider_curation_root(uuid)",
-        (
-            "feature.seal_provider_curation_snapshot_receipt("
-            "uuid,bigint,text,text,bigint,text)"
-        ),
+        ("feature.seal_provider_curation_snapshot_receipt(uuid,bigint,text,text,bigint,text)"),
     }
 )
 
@@ -183,10 +215,7 @@ _PROVIDER_OPERATION_PROCEDURES = frozenset(
 
 _ADMIN_CANCELLATION_SECURITY_DEFINER_FUNCTIONS = frozenset(
     {
-        (
-            "ops.fill_provider_cancellation_starts_command("
-            "uuid,text,timestamp with time zone)"
-        ),
+        ("ops.fill_provider_cancellation_starts_command(uuid,text,timestamp with time zone)"),
         (
             "ops.transition_provider_cancellation_job_command("
             "uuid,uuid,text,text[],text,text,text,timestamp with time zone,"
@@ -197,17 +226,41 @@ _ADMIN_CANCELLATION_SECURITY_DEFINER_FUNCTIONS = frozenset(
 
 _EXPECTED_RUNTIME_APPLICATION_PROCEDURES = {
     "ktm_feature_api_runtime": (
-        _SHARED_RUNTIME_FEATURE_PROCEDURES | _ADMIN_CURATION_FEATURE_PROCEDURES
+        _SHARED_RUNTIME_FEATURE_PROCEDURES
+        | frozenset(
+            {
+                _MANUAL_FEATURE_CREATE_PROCEDURE,
+                _FEATURE_REQUEST_SUBMIT_PROCEDURE,
+                _FEATURE_REQUEST_APPROVE_PROCEDURE,
+                _FEATURE_REQUEST_REJECT_PROCEDURE,
+                _M05_DECISION_PROCEDURE,
+                _M05_LEASE_PROCEDURE,
+                _M05_ACK_PROCEDURE,
+                _M05_SUBSCRIPTION_PROVISION_PROCEDURE,
+            }
+        )
+        | _ADMIN_CURATION_FEATURE_PROCEDURES
     ),
     "ktm_feature_dagster_runtime": (
         _SHARED_RUNTIME_FEATURE_PROCEDURES
+        | frozenset({_GENERIC_FEATURE_CREATE_PROCEDURE, _M05_CANDIDATE_PROCEDURE})
         | _PROVIDER_CURATION_FEATURE_PROCEDURES
         | _PROVIDER_OPERATION_PROCEDURES
     ),
 }
 
 _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS = {
-    "ktm_feature_api_runtime": _ADMIN_CANCELLATION_SECURITY_DEFINER_FUNCTIONS,
+    "ktm_feature_api_runtime": _ADMIN_CANCELLATION_SECURITY_DEFINER_FUNCTIONS
+    | frozenset(
+        {
+            _MANUAL_FEATURE_PROVENANCE_FUNCTION,
+            _FEATURE_REQUEST_READ_FUNCTION,
+            _FEATURE_REQUEST_LIST_FUNCTION,
+            _M05_ACK_PREFLIGHT_FUNCTION,
+            _M05_CASE_READ_FUNCTION,
+            _M05_CASE_LIST_FUNCTION,
+        }
+    ),
     "ktm_feature_dagster_runtime": frozenset(),
 }
 
@@ -239,6 +292,11 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
             'feature.create_feature_with_initial_state(jsonb,text,text,text,jsonb)'::regprocedure,
             'EXECUTE'
         ) AS can_execute_create_procedure,
+        has_function_privilege(
+            session_user,
+            'feature.create_admin_manual_feature_with_initial_state(jsonb,bigint)'::regprocedure,
+            'EXECUTE'
+        ) AS can_execute_manual_create_procedure,
         has_function_privilege(
             session_user,
             'feature.transition_feature_state(text,text,text,text,bigint,jsonb)'::regprocedure,
@@ -328,6 +386,63 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
             OR has_table_privilege(session_user, 'feature.feature_state_transitions', 'TRUNCATE')
         ) AS can_mutate_transition_audit_directly,
         (
+            has_table_privilege(
+                session_user, 'feature.manual_feature_identity_claims', 'SELECT'
+            )
+            OR has_table_privilege(
+                session_user, 'feature.manual_feature_identity_claims', 'INSERT'
+            )
+            OR has_table_privilege(
+                session_user, 'feature.manual_feature_identity_claims', 'UPDATE'
+            )
+            OR has_table_privilege(
+                session_user, 'feature.manual_feature_identity_claims', 'DELETE'
+            )
+            OR has_table_privilege(
+                session_user, 'feature.manual_feature_identity_claims', 'TRUNCATE'
+            )
+        ) AS can_access_manual_feature_claims_directly,
+        (
+            has_table_privilege(
+                session_user, 'feature.feature_creation_origins', 'SELECT'
+            )
+            OR has_table_privilege(
+                session_user, 'feature.feature_creation_origins', 'INSERT'
+            )
+            OR has_table_privilege(
+                session_user, 'feature.feature_creation_origins', 'UPDATE'
+            )
+            OR has_table_privilege(
+                session_user, 'feature.feature_creation_origins', 'DELETE'
+            )
+            OR has_table_privilege(
+                session_user, 'feature.feature_creation_origins', 'TRUNCATE'
+            )
+        ) AS can_access_feature_creation_origins_directly,
+        (
+            has_table_privilege(session_user, 'ops.feature_requests', 'SELECT')
+            OR has_table_privilege(session_user, 'ops.feature_requests', 'INSERT')
+            OR has_table_privilege(session_user, 'ops.feature_requests', 'UPDATE')
+            OR has_table_privilege(session_user, 'ops.feature_requests', 'DELETE')
+            OR has_table_privilege(session_user, 'ops.feature_requests', 'TRUNCATE')
+        ) AS can_access_feature_requests_directly,
+        EXISTS (
+            SELECT 1
+            FROM unnest(ARRAY[
+                'ops.manual_provider_dedup_cases',
+                'ops.manual_provider_dedup_resolutions',
+                'ops.feature_reference_reconciliation_events',
+                'ops.feature_reference_reconciliation_acks',
+                'ops.feature_reference_reconciliation_subscriptions',
+                'ops.feature_reference_reconciliation_leases'
+            ]::text[]) AS m05(relation_name)
+            WHERE has_table_privilege(session_user, m05.relation_name, 'SELECT')
+               OR has_table_privilege(session_user, m05.relation_name, 'INSERT')
+               OR has_table_privilege(session_user, m05.relation_name, 'UPDATE')
+               OR has_table_privilege(session_user, m05.relation_name, 'DELETE')
+               OR has_table_privilege(session_user, m05.relation_name, 'TRUNCATE')
+        ) AS can_access_manual_provider_dedup_directly,
+        (
             has_table_privilege(session_user, 'ops.feature_overrides', 'INSERT')
             OR has_table_privilege(session_user, 'ops.feature_overrides', 'UPDATE')
             OR has_table_privilege(session_user, 'ops.feature_overrides', 'DELETE')
@@ -376,12 +491,8 @@ def _runtime_db_privilege_problems(
         "has_schema_owner_membership": (
             "runtime login must not be a ktm_feature_schema_owner member"
         ),
-        "can_set_schema_owner_role": (
-            "runtime login must not SET ROLE ktm_feature_schema_owner"
-        ),
-        "can_set_runtime_group_role": (
-            "runtime login must not SET ROLE ktm_feature_runtime"
-        ),
+        "can_set_schema_owner_role": ("runtime login must not SET ROLE ktm_feature_schema_owner"),
+        "can_set_runtime_group_role": ("runtime login must not SET ROLE ktm_feature_runtime"),
         "can_create_in_feature_schema": "runtime login must not CREATE in feature schema",
         "can_insert_feature_directly": "runtime login must not INSERT feature.features directly",
         "can_update_lifecycle_directly": (
@@ -395,6 +506,18 @@ def _runtime_db_privilege_problems(
         ),
         "can_mutate_transition_audit_directly": (
             "runtime login must not mutate feature.feature_state_transitions directly"
+        ),
+        "can_access_manual_feature_claims_directly": (
+            "runtime login must not access manual Feature identity claims directly"
+        ),
+        "can_access_feature_creation_origins_directly": (
+            "runtime login must not access Feature creation origins directly"
+        ),
+        "can_access_feature_requests_directly": (
+            "runtime login must not access Feature requests directly"
+        ),
+        "can_access_manual_provider_dedup_directly": (
+            "runtime login must not access manual/provider dedup evidence directly"
         ),
         "can_mutate_feature_overrides_directly": (
             "runtime login must not mutate ops.feature_overrides directly"
@@ -414,18 +537,11 @@ def _runtime_db_privilege_problems(
             problems.append(message)
 
     required_true_fields = {
-        "can_read_public_features": (
-            "runtime login must SELECT feature.public_features"
-        ),
+        "can_read_public_features": ("runtime login must SELECT feature.public_features"),
         "can_read_feature_override_field_paths": (
             "runtime login must SELECT ops.feature_override_field_paths"
         ),
-        "can_execute_create_procedure": (
-            "runtime login must EXECUTE create_feature_with_initial_state"
-        ),
-        "can_execute_transition_procedure": (
-            "runtime login must EXECUTE transition_feature_state"
-        ),
+        "can_execute_transition_procedure": ("runtime login must EXECUTE transition_feature_state"),
         "can_execute_author_lifecycle_override_procedure": (
             "runtime login must EXECUTE author_lifecycle_override"
         ),
@@ -452,6 +568,21 @@ def _runtime_db_privilege_problems(
         if row.get(field_name) is not True:
             problems.append(message)
 
+    if expected_login == "ktm_feature_api_runtime":
+        if row.get("can_execute_create_procedure") is not False:
+            problems.append(
+                "API runtime must not EXECUTE create_feature_with_initial_state directly"
+            )
+        if row.get("can_execute_manual_create_procedure") is not True:
+            problems.append(
+                "API runtime must EXECUTE create_admin_manual_feature_with_initial_state"
+            )
+    elif expected_login == "ktm_feature_dagster_runtime":
+        if row.get("can_execute_create_procedure") is not True:
+            problems.append("Dagster runtime must EXECUTE create_feature_with_initial_state")
+        if row.get("can_execute_manual_create_procedure") is not False:
+            problems.append("Dagster runtime must not EXECUTE the manual Feature writer")
+
     expected_procedures = _EXPECTED_RUNTIME_APPLICATION_PROCEDURES.get(expected_login)
     if expected_procedures is None:
         problems.append(
@@ -464,9 +595,7 @@ def _runtime_db_privilege_problems(
         problems.append("runtime application procedure catalog must be a PostgreSQL text array")
         return problems
     actual_procedures = frozenset(
-        procedure
-        for procedure in actual_procedures_value
-        if isinstance(procedure, str)
+        procedure for procedure in actual_procedures_value if isinstance(procedure, str)
     )
     if len(actual_procedures) != len(actual_procedures_value):
         problems.append("runtime application procedure catalog must contain only text signatures")
@@ -495,13 +624,10 @@ def _runtime_db_privilege_problems(
         )
         return problems
 
-    actual_functions_value = row.get(
-        "executable_application_security_definer_functions"
-    )
+    actual_functions_value = row.get("executable_application_security_definer_functions")
     if not isinstance(actual_functions_value, (list, tuple)):
         problems.append(
-            "runtime application SECURITY DEFINER function catalog must be a "
-            "PostgreSQL text array"
+            "runtime application SECURITY DEFINER function catalog must be a PostgreSQL text array"
         )
         return problems
     actual_functions = frozenset(
@@ -524,8 +650,7 @@ def _runtime_db_privilege_problems(
     if unexpected_functions:
         problems.append(
             "runtime login must not EXECUTE unexpected application SECURITY DEFINER "
-            "functions: "
-            + ", ".join(unexpected_functions)
+            "functions: " + ", ".join(unexpected_functions)
         )
     return problems
 
@@ -603,8 +728,7 @@ def normalize_async_dsn(dsn: str) -> str:
     if dsn.startswith("postgres://"):
         return _ASYNCPG_PREFIX + dsn[len("postgres://") :]
     raise ValueError(
-        f"dsn={dsn!r}은 PostgreSQL scheme이 아님 "
-        f"(postgresql:// 또는 postgresql+asyncpg:// 필요)."
+        f"dsn={dsn!r}은 PostgreSQL scheme이 아님 (postgresql:// 또는 postgresql+asyncpg:// 필요)."
     )
 
 
@@ -618,8 +742,7 @@ def require_pg_dsn(settings: KorTravelMapSettings) -> SecretStr:
 
     if settings.pg_dsn is None:
         raise RuntimeError(
-            "KOR_TRAVEL_MAP_PG_DSN runtime DSN is required; "
-            "no application DSN fallback exists"
+            "KOR_TRAVEL_MAP_PG_DSN runtime DSN is required; no application DSN fallback exists"
         )
     return settings.pg_dsn
 
@@ -666,9 +789,7 @@ def make_async_engine(
         max_overflow=max_overflow,
         pool_pre_ping=pool_pre_ping,
         connect_args=(
-            {"server_settings": dict(server_settings)}
-            if server_settings is not None
-            else {}
+            {"server_settings": dict(server_settings)} if server_settings is not None else {}
         ),
     )
 

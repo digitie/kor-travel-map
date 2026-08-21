@@ -118,6 +118,31 @@ def test_application_head_never_executes_migration_module_top_level(
 
 
 @pytest.mark.unit
+def test_application_graph_uses_dependencies_not_migration_filename_order(
+    tmp_path: Path,
+) -> None:
+    """upstream 번호를 먼저 쓰더라도 artifact는 Alembic 적용 순서를 보존한다."""
+    generator = _generator_module()
+    versions = tmp_path / "versions"
+    versions.mkdir()
+    (versions / "0226_manual.py").write_text(
+        "revision = 'manual'\n"
+        "down_revision = 'upstream'\n",
+        encoding="utf-8",
+    )
+    (versions / "0229_upstream.py").write_text(
+        "revision = 'upstream'\n"
+        "down_revision = None\n",
+        encoding="utf-8",
+    )
+
+    assert generator.build_application_migration_graph(versions)["revisions"] == [
+        {"revision": "upstream", "down_revision": []},
+        {"revision": "manual", "down_revision": ["upstream"]},
+    ]
+
+
+@pytest.mark.unit
 def test_application_graph_artifact_matches_literal_source_graph() -> None:
     """새 migration은 immutable installed artifact를 함께 갱신해야 한다."""
     generator = _generator_module()

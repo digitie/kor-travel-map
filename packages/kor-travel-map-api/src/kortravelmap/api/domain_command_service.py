@@ -49,6 +49,7 @@ __all__ = [
     "DomainCommandPending",
     "DomainCommandReplay",
     "begin_domain_command",
+    "preflight_domain_command_claim",
     "commit_domain_command_transaction",
     "complete_domain_command",
     "current_domain_command",
@@ -89,14 +90,10 @@ def _sqlstate(error: BaseException) -> str | None:
         ):
             if candidate is None:
                 continue
-            value = getattr(candidate, "sqlstate", None) or getattr(
-                candidate, "pgcode", None
-            )
+            value = getattr(candidate, "sqlstate", None) or getattr(candidate, "pgcode", None)
             if value is not None:
                 return str(value)
-        current = getattr(current, "orig", None) or getattr(
-            current, "__cause__", None
-        )
+        current = getattr(current, "orig", None) or getattr(current, "__cause__", None)
     return None
 
 
@@ -154,11 +151,7 @@ def current_domain_command() -> DomainCommandHandle:
 
 
 def _response_body(response: BaseModel | dict[str, Any]) -> dict[str, Any]:
-    body = (
-        response.model_dump(mode="json")
-        if isinstance(response, BaseModel)
-        else response
-    )
+    body = response.model_dump(mode="json") if isinstance(response, BaseModel) else response
     if not isinstance(body, dict):
         raise TypeError("domain command response must serialize to a JSON object")
     return body
@@ -222,6 +215,47 @@ async def begin_domain_command(
     )
 
 
+async def preflight_domain_command_claim(
+    session: AsyncSession,
+    *,
+    actor: str,
+    operation: str,
+    idempotency_key: UUID,
+    payload: object,
+) -> None:
+    """기존 key의 replay/conflict를 새 semantic preflight보다 먼저 해석한다.
+
+    새 command를 만들지 않고 actor/operation/key advisory lock을 transaction 끝까지
+    보유한다. route가 이후 semantic receipt를 exact-replay로 끝내면 claim-only
+    command를 남기지 않으며, 같은 key의 다른 payload는 이 지점에서 409으로 닫힌다.
+    """
+
+    if operation not in _DOMAIN_OPERATIONS:
+        raise ValueError(f"operation is not registered for domain ledger: {operation}")
+    normalized_key = str(idempotency_key)
+    request_fingerprint = canonical_domain_command_fingerprint(payload)
+    await lock_domain_command(
+        session,
+        actor=actor,
+        operation=operation,
+        idempotency_key=normalized_key,
+    )
+    claim = await get_domain_command_claim(
+        session,
+        actor=actor,
+        operation=operation,
+        idempotency_key=normalized_key,
+    )
+    if claim is None:
+        return
+    if claim.request_fingerprint != request_fingerprint:
+        raise DomainCommandFingerprintConflict(claim)
+    record = await get_domain_command_record(session, command_id=claim.command_id)
+    if record is not None:
+        raise DomainCommandReplay(record)
+    raise DomainCommandPending(claim)
+
+
 async def complete_domain_command(
     session: AsyncSession,
     *,
@@ -269,9 +303,7 @@ def _material_response_headers(
     if not isinstance(response, Response):
         return {}
     return {
-        name: value
-        for name in header_names
-        if (value := response.headers.get(name)) is not None
+        name: value for name in header_names if (value := response.headers.get(name)) is not None
     }
 
 

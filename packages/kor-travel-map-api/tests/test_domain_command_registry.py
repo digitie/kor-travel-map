@@ -42,7 +42,7 @@ def test_every_openapi_write_operation_has_exact_static_policy() -> None:
     writes = _openapi_writes()
 
     assert set(COMMAND_REGISTRY) == set(writes)
-    assert len(writes) == 72
+    assert len(writes) == 79
 
 
 def test_registered_domain_and_specialized_ledgers_have_stable_operation_names() -> None:
@@ -120,7 +120,16 @@ def test_generic_domain_ledger_is_admin_bff_only() -> None:
         if path.startswith("/v1/admin/"):
             expected_security = (
                 [{"AdminBFF": [], "AdminFeatureCreateBFF": []}]
-                if key == ("POST", "/v1/admin/features")
+                if key
+                in {
+                    ("POST", "/v1/admin/features"),
+                    (
+                        "POST",
+                        "/v1/admin/curations/{collection_id}/items/manual-feature",
+                    ),
+                    ("POST", "/v1/admin/feature-requests/{request_id}/approve"),
+                    ("POST", "/v1/admin/feature-requests/{request_id}/reject"),
+                }
                 else [{"AdminBFF": []}]
             )
             assert writes[key]["security"] == expected_security, key
@@ -236,9 +245,7 @@ def test_tvn40_canonical_collection_and_item_commands_are_serializable() -> None
 def test_manual_feature_create_has_versioned_read_committed_terminal_contract() -> None:
     policy = COMMAND_REGISTRY[("POST", "/v1/admin/features")]
     response_headers = set(
-        _openapi_writes()[("POST", "/v1/admin/features")]["responses"]["201"][
-            "headers"
-        ]
+        _openapi_writes()[("POST", "/v1/admin/features")]["responses"]["201"]["headers"]
     )
 
     assert policy.kind is CommandPolicyKind.DOMAIN_LEDGER

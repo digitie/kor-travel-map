@@ -56,12 +56,17 @@ __all__ = [
     "AdminProxyContext",
     "CacheTargetServicePrincipalContext",
     "CurationSnapshotServicePrincipalContext",
+    "FeatureRequestServiceContext",
+    "FeatureReferenceReconciliationServiceContext",
     "OpsOperatorContext",
     "OpsFixtureContext",
     "require_cache_target_service_principal",
     "require_cache_target_service_scope",
     "require_curation_cutover_service_principal",
     "require_curation_snapshot_service_principal",
+    "require_feature_request_service_principal",
+    "require_feature_reference_reconciliation_ack_service_principal",
+    "require_feature_reference_reconciliation_read_service_principal",
     "require_admin_manual_feature_create",
     "require_admin_frontend",
     "require_metrics_token",
@@ -199,6 +204,22 @@ class CurationSnapshotServicePrincipalContext:
 
     principal_id: str
     scopes: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class FeatureRequestServiceContext:
+    """M04 queue submit에만 쓰는 범용 service principal."""
+
+    actor: str
+    principal_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class FeatureReferenceReconciliationServiceContext:
+    """M05 reconciliation delivery의 server-owned service principal."""
+
+    actor: str
+    principal_id: str
 
 
 def _settings(request: Request) -> ApiSettings:
@@ -611,7 +632,7 @@ async def require_cache_target_service_principal(
     )
 
 
-async def _require_pinvi_curation_service_principal(
+async def _require_scoped_service_principal(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
     token: Annotated[str | None, Security(_service_token_scheme)] = None,
@@ -621,7 +642,7 @@ async def _require_pinvi_curation_service_principal(
     principal_id: str,
     error_prefix: str,
 ) -> CurationSnapshotServicePrincipalContext:
-    """PinVi curation service token을 정확한 one-scope principal로 해석한다."""
+    """scope가 고정된 service token을 정확한 one-scope principal로 해석한다."""
 
     if token is None or token == "":
         settings = _settings(request)
@@ -694,6 +715,9 @@ async def _require_pinvi_curation_service_principal(
     for other_digest in (
         settings.pinvi_curation_snapshot_token_sha256,
         settings.pinvi_curation_cutover_mapping_token_sha256,
+        settings.feature_request_token_sha256,
+        settings.feature_reference_reconciliation_read_token_sha256,
+        settings.feature_reference_reconciliation_ack_token_sha256,
     ):
         if other_digest is not None and other_digest != expected_digest:
             known_other_scope = known_other_scope or hmac.compare_digest(digest, other_digest)
@@ -730,7 +754,7 @@ async def require_curation_snapshot_service_principal(
     """PinVi snapshot token digest를 exact principal/scope로 fail-closed 해석한다."""
 
     settings = _settings(request)
-    return await _require_pinvi_curation_service_principal(
+    return await _require_scoped_service_principal(
         request,
         session,
         token,
@@ -749,7 +773,7 @@ async def require_curation_cutover_service_principal(
     """T-VN-40C mapping export의 maintenance-only PinVi principal을 확인한다."""
 
     settings = _settings(request)
-    return await _require_pinvi_curation_service_principal(
+    return await _require_scoped_service_principal(
         request,
         session,
         token,
@@ -757,6 +781,101 @@ async def require_curation_cutover_service_principal(
         scope="pinvi:curation-cutover:read",
         principal_id="service:pinvi:curation-cutover",
         error_prefix="CURATION_CUTOVER",
+    )
+
+
+async def require_feature_request_service_principal(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    token: Annotated[str | None, Security(_service_token_scheme)] = None,
+) -> FeatureRequestServiceContext:
+    """M04 request-submit token을 generic service token과 분리해 검증한다."""
+
+    settings = _settings(request)
+    expected = settings.feature_request_token_sha256
+    if expected is None:
+        raise _cache_target_auth_error(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "FEATURE_REQUEST_QUEUE_UNAVAILABLE",
+            "Feature 요청 큐가 아직 활성화되지 않았습니다.",
+        )
+    context = await _require_scoped_service_principal(
+        request,
+        session,
+        token,
+        expected_digest=expected,
+        scope="feature-request:submit",
+        principal_id="service:feature-request",
+        error_prefix="FEATURE_REQUEST",
+    )
+    return FeatureRequestServiceContext(
+        actor="service:feature-request",
+        principal_id=context.principal_id,
+    )
+
+
+async def _require_feature_reference_reconciliation_service_principal(
+    request: Request,
+    session: AsyncSession,
+    token: str | None,
+    *,
+    expected_digest: str | None,
+    scope: str,
+) -> FeatureReferenceReconciliationServiceContext:
+    """M05 read/ack token을 동일한 server-owned consumer principal로 해석한다."""
+
+    if expected_digest is None:
+        raise _cache_target_auth_error(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "FEATURE_REFERENCE_RECONCILIATION_UNAVAILABLE",
+            "Feature 참조 reconciliation 전달 경계가 아직 활성화되지 않았습니다.",
+        )
+    context = await _require_scoped_service_principal(
+        request,
+        session,
+        token,
+        expected_digest=expected_digest,
+        scope=scope,
+        principal_id="service:feature-reference-reconciliation",
+        error_prefix="FEATURE_REFERENCE_RECONCILIATION",
+    )
+    return FeatureReferenceReconciliationServiceContext(
+        actor="service:feature-reference-reconciliation",
+        principal_id=context.principal_id,
+    )
+
+
+async def require_feature_reference_reconciliation_read_service_principal(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    token: Annotated[str | None, Security(_service_token_scheme)] = None,
+) -> FeatureReferenceReconciliationServiceContext:
+    """M05 event lease/read scope를 exact token digest로 검증한다."""
+
+    settings = _settings(request)
+    return await _require_feature_reference_reconciliation_service_principal(
+        request,
+        session,
+        token,
+        expected_digest=settings.feature_reference_reconciliation_read_token_sha256,
+        scope="feature-reference-reconciliation:read",
+    )
+
+
+async def require_feature_reference_reconciliation_ack_service_principal(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    token: Annotated[str | None, Security(_service_token_scheme)] = None,
+) -> FeatureReferenceReconciliationServiceContext:
+    """M05 event ACK scope를 exact token digest로 검증한다."""
+
+    settings = _settings(request)
+    return await _require_feature_reference_reconciliation_service_principal(
+        request,
+        session,
+        token,
+        expected_digest=settings.feature_reference_reconciliation_ack_token_sha256,
+        scope="feature-reference-reconciliation:ack",
     )
 
 
