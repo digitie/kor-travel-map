@@ -37,6 +37,9 @@
     "raw_credentials_or_tokens_saved": false
   },
   "separate_tvn34c_ui_runner": {
+    "command": "run-tvn34c-n150-fresh-live-e2e.sh run",
+    "report": "map-playwright/c7-summary.json",
+    "report_sha256": "b3f33d53543d8fd18b3298aa499147b311ee16a82bde52fca9ad18e442574bac",
     "run_id_sha256": "c6d3ee30d6c00f38de59041d7a304c696b78d34574129c84f139d1fe1439b69c",
     "result": "blocked",
     "stage": "tvn36-direct-state-cutover",
