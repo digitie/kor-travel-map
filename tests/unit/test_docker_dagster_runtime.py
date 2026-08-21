@@ -578,6 +578,10 @@ def test_tvn_m01_role_phase_runs_only_after_legacy_0225_boundary() -> None:
         in phase_script
     )
     assert "M01 relation marker is partial; refusing role bootstrap" in phase_script
+    # PostgreSQL text 출력의 boolean은 ``t``/``f``가 아니라 ``true``/``false``다.
+    # 이 분기를 잘못 쓰면 fresh DB bootstrap이 partial marker로 중단된다.
+    assert 'true\\|true) m01_repair_after_legacy=true' in phase_script
+    assert 'false\\|false)' in phase_script
     assert 'm01_repair_after_legacy=true' in phase_script
     assert 'run_m01_phase' in phase_script
     assert 'UPDATE(command_id) ON TABLE ops.domain_commands' in phase_script

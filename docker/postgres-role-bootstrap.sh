@@ -91,8 +91,8 @@ if [ "$bootstrap_phase" = "legacy" ]; then
     )
   ")"
   case "$m01_relation_marker" in
-    t\|t) m01_repair_after_legacy=true ;;
-    f\|f)
+    true\|true) m01_repair_after_legacy=true ;;
+    false\|false)
       # 0226 preflight가 role provisioning 뒤에 실패한 경우 relation marker는
       # 없지만 M01 graph는 남는다. 0225에서만 M01 phase를 재실행해 복구한다.
       m01_role_marker="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc "
