@@ -165,13 +165,19 @@
         "admin-detail": "yes"
       },
       "pinvi_snapshot_receipt": {
-        "state": "pending",
+        "state": "complete",
+        "map_commit": "81835cf9d31df61169bd522fc16437d51d90fc35",
+        "pinvi_commit": "5f1c0a0a5568c236e32e6f6bd4c14ba23191817b",
         "map_user_openapi_sha256": "489b05d3e62e3531233e3e7eb8c97f9ddf92aa1ecf1573b7557a5951e7f6a61b",
         "map_service_openapi_sha256": "e1152a058e176f4f3aaeb4bb0965434f657601639786463f873ac82c6f3018eb",
         "map_full_openapi_sha256": "697a08c475fc28ba730af1dd14da89998a3a56cafbfb7676bfb3fa4a0b9ef6fd",
         "pinvi_user_vendor_sha256": "489b05d3e62e3531233e3e7eb8c97f9ddf92aa1ecf1573b7557a5951e7f6a61b",
         "pinvi_service_vendor_sha256": "e1152a058e176f4f3aaeb4bb0965434f657601639786463f873ac82c6f3018eb",
-        "blocking_reason": "T-VN-M04가 generic Feature 요청 service queue와 admin resolution을 추가해 Map admin/service OpenAPI bytes를 바꿨다. PinVi exact vendor는 갱신했지만 새 Map/PinVi source pair의 격리 paired live UI E2E가 아직 없으므로 complete receipt로 승격하지 않는다."
+        "verification": [
+          "PinVi user/service vendor bytes are exact",
+          "PinVi canonical curation importer has no legacy admin snapshot consumer",
+          "paired Map/PinVi n150 canonical snapshot API live acceptance passed"
+        ]
       }
     },
     "T-VN-41": {

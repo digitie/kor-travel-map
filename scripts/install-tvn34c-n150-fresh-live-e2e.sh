@@ -63,7 +63,7 @@ if set(receipt) != expected_keys:
 if receipt["verification"] != [
     "PinVi user/service vendor bytes are exact",
     "PinVi canonical curation importer has no legacy admin snapshot consumer",
-    "paired Map/PinVi n150 canonical snapshot live acceptance passed",
+    "paired Map/PinVi n150 canonical snapshot API live acceptance passed",
 ]:
     raise SystemExit(f"{task} paired consumer verification is invalid")
 keys = (
@@ -95,8 +95,21 @@ readonly MAP_FULL_OPENAPI_SHA256="${receipt_values[4]}"
 readonly PINVI_USER_VENDOR_SHA256="${receipt_values[5]}"
 readonly PINVI_SERVICE_VENDOR_SHA256="${receipt_values[6]}"
 
-git -C "$MAP_REPOSITORY" cat-file -e "$MAP_COMMIT^{commit}" || die "receipt Map commit is unavailable locally"
-git -C "$PINVI_REPOSITORY" cat-file -e "$PINVI_COMMIT^{commit}" || die "receipt PinVi commit is unavailable locally"
+ensure_commit() {
+  local repository="$1"
+  local commit="$2"
+  local label="$3"
+  if git -C "$repository" cat-file -e "$commit^{commit}" 2>/dev/null; then
+    return
+  fi
+  git -C "$repository" fetch --no-tags origin "$commit" >/dev/null 2>&1 ||
+    die "receipt $label commit is unavailable locally and exact-SHA fetch failed"
+  git -C "$repository" cat-file -e "$commit^{commit}" 2>/dev/null ||
+    die "receipt $label commit is unavailable after exact-SHA fetch"
+}
+
+ensure_commit "$MAP_REPOSITORY" "$MAP_COMMIT" "Map"
+ensure_commit "$PINVI_REPOSITORY" "$PINVI_COMMIT" "PinVi"
 
 hash_git_path() {
   local repository="$1"

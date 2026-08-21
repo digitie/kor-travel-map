@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "captured_on": "2026-08-21",
+  "source_pair": {
+    "map_commit": "81835cf9d31df61169bd522fc16437d51d90fc35",
+    "pinvi_commit": "5f1c0a0a5568c236e32e6f6bd4c14ba23191817b",
+    "exact_sha_fetch_verified": true
+  },
+  "map_snapshot": {
+    "collection_id": "03353923-238d-42cb-a4c3-ec67ec1c7812",
+    "item_id": "6256e675-2874-4b08-a451-5e801df4620f",
+    "first_page_status": 200,
+    "first_page_items": 1,
+    "conditional_status": 304,
+    "collection_revision_before_cleanup": 2,
+    "etag": "sha256:14a513e3fc5b4ca5cd33763fe9b02784ebf9a599b00ce219237783832c7efcd1"
+  },
+  "pinvi_canonical_import": {
+    "create_status": 201,
+    "same_key_replay_status": 201,
+    "refresh_status": 200,
+    "refresh_not_modified": true,
+    "source_collections": 1,
+    "copied_pois": 1
+  },
+  "isolated_database_postconditions": {
+    "plans": 1,
+    "pois": 1,
+    "canonical_plans": 1,
+    "receipts": 2,
+    "legacy_plans": 0,
+    "production_mutation": false
+  },
+  "cleanup": {
+    "map_fixture_archived": true,
+    "pinvi_isolated_stack_removed": true,
+    "raw_credentials_or_tokens_saved": false
+  },
+  "separate_tvn34c_ui_runner": {
+    "command": "run-tvn34c-n150-fresh-live-e2e.sh run",
+    "report": "map-playwright/c7-summary.json",
+    "report_sha256": "b3f33d53543d8fd18b3298aa499147b311ee16a82bde52fca9ad18e442574bac",
+    "run_id_sha256": "c6d3ee30d6c00f38de59041d7a304c696b78d34574129c84f139d1fe1439b69c",
+    "result": "blocked",
+    "stage": "tvn36-direct-state-cutover",
+    "last_browser_fetch_status": 503,
+    "tests_planned": 2,
+    "tests_observed": 2,
+    "tests_passed": 1,
+    "tests_failed": 1
+  }
+}

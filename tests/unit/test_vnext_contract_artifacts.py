@@ -52,11 +52,13 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     "openapi-diff-v1.json": ("e31cb9b97dcee83b80b60013110a4ad11b288ab4d23fe236251a72a789351071"),
     # 2026-08-13 T-VN-36 — receipt가 리베이스로 폐기된 커밋(c1fa5a4d)과 그때의
     # spec sha를 가리키고 있었다. 현재 head로 재핀했다.
-    # 2026-08-21 T-VN-M04 — service queue/admin resolution 계약 변경으로 active receipt를
-    # pending으로 되돌렸다. 새 Map/PinVi paired live 증거 전에는 이전 completion을 재사용하지
-    # 않는다.
+    # 2026-08-21 T-VN-40 — M04 이후 exact vendor bytes와 n150 격리 canonical
+    # import/refresh API 수용을 재검증해 receipt를 complete로 승격했다.
     "consumer-rollout-v1.json": (
-        "680e04f753eff55d32bd065d67ba2026fcca849c91c5241e2fac08ba813578ba"
+        "452bb4ba86817f5d5291880f5a5379a424673299673cb9cdeb5d4476c114cbb0"
+    ),
+    "tvn40-live-acceptance-v1.json": (
+        "b1e8ffdf05fe0b07b274f521305f1f8b4af0daed16d44c4a0b847ddf81402d0e"
     ),
     # T-VN-41S service 계약 변경으로 active receipt가 pending으로 돌아가도, 이전
     # candidate archive·image·Live UI 증거 세트는 detached 이력으로 불변이어야 한다.
@@ -471,7 +473,7 @@ def test_active_pinvi_receipt_describes_current_consumed_specs() -> None:
         assert receipt["verification"] == [
             "PinVi user/service vendor bytes are exact",
             "PinVi canonical curation importer has no legacy admin snapshot consumer",
-            "paired Map/PinVi n150 canonical snapshot live acceptance passed",
+            "paired Map/PinVi n150 canonical snapshot API live acceptance passed",
         ]
     entries = rollout["removal_manifest"]["entries"]
     assert entries, "removal manifest가 비어 있다"
@@ -485,6 +487,108 @@ def test_active_pinvi_receipt_describes_current_consumed_specs() -> None:
         assert entry["fenced_by"].startswith("T-VN-")
         assert isinstance(entry["object"], str)
         assert entry["object"]
+
+
+def test_tvn40_live_acceptance_evidence_is_secret_free_and_scoped() -> None:
+    """TVN40 live 증거가 API gate와 별도 UI runner 범위를 혼동하지 않는지 본다."""
+
+    evidence = _load_json("tvn40-live-acceptance-v1.json")
+    assert set(evidence) == {
+        "schema_version",
+        "captured_on",
+        "source_pair",
+        "map_snapshot",
+        "pinvi_canonical_import",
+        "isolated_database_postconditions",
+        "cleanup",
+        "separate_tvn34c_ui_runner",
+    }
+    assert set(evidence["source_pair"]) == {
+        "map_commit",
+        "pinvi_commit",
+        "exact_sha_fetch_verified",
+    }
+    assert re.fullmatch(r"[0-9a-f]{40}", evidence["source_pair"]["map_commit"])
+    assert re.fullmatch(r"[0-9a-f]{40}", evidence["source_pair"]["pinvi_commit"])
+    assert evidence["source_pair"]["exact_sha_fetch_verified"] is True
+    assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", evidence["captured_on"])
+    assert set(evidence["map_snapshot"]) == {
+        "collection_id",
+        "item_id",
+        "first_page_status",
+        "first_page_items",
+        "conditional_status",
+        "collection_revision_before_cleanup",
+        "etag",
+    }
+    assert re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+        evidence["map_snapshot"]["collection_id"],
+    )
+    assert re.fullmatch(
+        r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+        evidence["map_snapshot"]["item_id"],
+    )
+    assert re.fullmatch(r"sha256:[0-9a-f]{64}", evidence["map_snapshot"]["etag"])
+    assert evidence["map_snapshot"]["first_page_status"] == 200
+    assert evidence["map_snapshot"]["collection_revision_before_cleanup"] == 2
+    assert evidence["schema_version"] == 1
+    receipt = _load_json("consumer-rollout-v1.json")["tasks"]["T-VN-40"][
+        "pinvi_snapshot_receipt"
+    ]
+    assert evidence["source_pair"] == {
+        "map_commit": receipt["map_commit"],
+        "pinvi_commit": receipt["pinvi_commit"],
+        "exact_sha_fetch_verified": True,
+    }
+    assert evidence["map_snapshot"]["first_page_items"] == 1
+    assert evidence["map_snapshot"]["conditional_status"] == 304
+    assert evidence["pinvi_canonical_import"] == {
+        "create_status": 201,
+        "same_key_replay_status": 201,
+        "refresh_status": 200,
+        "refresh_not_modified": True,
+        "source_collections": 1,
+        "copied_pois": 1,
+    }
+    assert evidence["isolated_database_postconditions"] == {
+        "plans": 1,
+        "pois": 1,
+        "canonical_plans": 1,
+        "receipts": 2,
+        "legacy_plans": 0,
+        "production_mutation": False,
+    }
+    assert evidence["cleanup"] == {
+        "map_fixture_archived": True,
+        "pinvi_isolated_stack_removed": True,
+        "raw_credentials_or_tokens_saved": False,
+    }
+    ui_runner = evidence["separate_tvn34c_ui_runner"]
+    assert set(ui_runner) == {
+        "command",
+        "report",
+        "report_sha256",
+        "run_id_sha256",
+        "result",
+        "stage",
+        "last_browser_fetch_status",
+        "tests_planned",
+        "tests_observed",
+        "tests_passed",
+        "tests_failed",
+    }
+    assert ui_runner["command"] == "run-tvn34c-n150-fresh-live-e2e.sh run"
+    assert ui_runner["report"] == "map-playwright/c7-summary.json"
+    assert re.fullmatch(r"[0-9a-f]{64}", ui_runner["report_sha256"])
+    assert re.fullmatch(r"[0-9a-f]{64}", ui_runner["run_id_sha256"])
+    assert ui_runner["result"] == "blocked"
+    assert ui_runner["stage"] == "tvn36-direct-state-cutover"
+    assert ui_runner["last_browser_fetch_status"] == 503
+    assert ui_runner["tests_planned"] == ui_runner["tests_observed"] == 2
+    assert ui_runner["tests_passed"] + ui_runner["tests_failed"] == ui_runner["tests_observed"]
+    assert ui_runner["tests_passed"] == 1
+    assert ui_runner["tests_failed"] == 1
 
 
 def test_tvn41_candidate_artifacts_bind_immutable_live_evidence() -> None:
