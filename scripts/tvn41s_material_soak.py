@@ -87,6 +87,9 @@ ADMITTED = (
 #: 결과를 evidence에 함께 남긴다.
 _MEASUREMENT_BUILD_BUDGET_SECONDS = 3_600.0
 _SHIPPED_BUILD_BUDGET_SECONDS = repo._SNAPSHOT_BUILD_TIMEOUT_SECONDS  # noqa: SLF001
+#: 상한 크기 build가 예산의 몇 분의 1 안에 들어야 하는가. 조용한 호스트 한 번의
+#: 측정을 운영 하한으로 쓰지 않기 위한 여유다.
+_REQUIRED_SAFETY_FACTOR = 2.0
 
 failures: list[str] = []
 #: 결정 대기 중이라 red인 것이 정상인 항목. `failures`와 섞지 않는다 — 섞으면 다른 축이
@@ -283,22 +286,25 @@ async def main() -> int:
         # `note`가 아니라 `check`다. "광고한 상한이 실제로 도달 가능하다"는 이 soak이
         # 재는 성질이고, 지금 그것은 **거짓**이다. 거짓인 채 `SOAK: PASS`를 찍으면
         # 종료 코드가 보고서와 반대를 말한다(적대 리뷰 지적).
-        # 이 하나는 **정책 결정이 날 때까지 red인 것이 정상**이다. 그래서 다른 실패와
-        # 섞지 않고 따로 센다 — 섞으면 나머지 다섯 축이 퇴행해도 종료 코드가 그대로라
-        # 운영자가 차이를 못 본다(적대 리뷰 지적).
+        # 상한과 같은 크기가 **배포 예산 안에서, 여유를 갖고** 끝나는지가 이 soak의
+        # 본 판정이다. 예전에는 정책 결정 대기라 red를 따로 셌지만, 결정이 닫힌 뒤로는
+        # 그냥 실패다 — admission이 받아들인 크기를 build가 못 끝내면 계약이 거짓말이다.
         #
-        # 반대 방향도 본다. 예산·상한이 조정돼 이것이 **통과하기 시작하면** 그때는
-        # 보고서와 백로그를 갱신해야 하므로 그것도 알려야 한다.
-        if build_seconds <= _SHIPPED_BUILD_BUDGET_SECONDS:
+        # 여유를 요구하는 이유: 이 측정은 조용한 호스트의 한 번이고, 운영에서는 항상
+        # 다른 부하가 있다. 정렬 키 표현식에 인덱스가 없어 비용이 Θ(N log N)이고
+        # work_mem 절벽도 있으므로, 예산에 겨우 드는 값은 상한으로 삼을 수 없다.
+        budget_ceiling = _SHIPPED_BUILD_BUDGET_SECONDS / _REQUIRED_SAFETY_FACTOR
+        check(
+            f"build이 예산/{_REQUIRED_SAFETY_FACTOR:.0f} 안에 든다"
+            f" ({build_seconds:.1f}s <= {budget_ceiling:.0f}s)",
+            build_seconds <= budget_ceiling,
+            True,
+        )
+        if ADMITTED != repo._SNAPSHOT_ITEM_LIMIT:  # noqa: SLF001
             docs_stale.append(
-                "1,000,000 item이 이제 배포 예산 안에 든다 — 열린 결정과 보고서를 "
-                f"갱신하라(build={build_seconds:.1f}s <= "
-                f"{_SHIPPED_BUILD_BUDGET_SECONDS:.0f}s)"
-            )
-        else:
-            known_open.append(
-                "1,000,000 item이 배포 build 예산을 넘는다(열린 결정): "
-                f"build={build_seconds:.1f}s > {_SHIPPED_BUILD_BUDGET_SECONDS:.0f}s"
+                f"soak이 상한이 아닌 크기를 쟀다: ADMITTED={ADMITTED:,} != "
+                f"상한 {repo._SNAPSHOT_ITEM_LIMIT:,}"  # noqa: SLF001
+                " — 이 결과는 상한을 보증하지 않는다"
             )
         note("python_peak_mib", round(peak / 1024 / 1024, 2))
         note("merkle_root", page.merkle_root[:16] + "…")

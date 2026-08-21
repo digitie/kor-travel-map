@@ -81,7 +81,17 @@ _SNAPSHOT_CAPACITY_RETRY_AFTER_MAX_SECONDS = 7_200
 _SNAPSHOT_BUILD_STATEMENT_TIMEOUT = "5min"
 _SNAPSHOT_BUILD_TIMEOUT_SECONDS = 300.0
 _SNAPSHOT_BARRIER_LOCK_TIMEOUT = "5s"
-_SNAPSHOT_ITEM_LIMIT = 1_000_000
+#: admission이 받아들이는 최대 item 수. **예산에서 유도하지 않는다** — 유도하면
+#: `상한/처리량 ≤ 예산` 단언이 항등식이 되어 어떤 예산에서도 통과하고, 예산을 내리는
+#: 한 줄 변경이 client가 보는 413 문턱을 조용히 반토막 낸다. 상한은 capacity 계약이므로
+#: 그 변경은 사람이 봐야 한다. 둘의 관계는
+#: `test_snapshot_item_limit_fits_the_shipped_build_budget`이 지킨다.
+#:
+#: 값의 근거는 실측이다(대표성 fixture, n150, 배포 예산):
+#: 250,000 → 59.1초 · 500,000 → **118.3초** · 1,000,000 → 235.7초, 처리량 약 4,225 item/s.
+#: 1,000,000은 조용한 호스트에서 예산의 79%를 쓴다 — 부하 아래에서는 넘친다. 500,000은
+#: 39%로 안전계수 2를 만족한다. 출처: docs/reports/t-vn-41s-budget-ceiling-2026-08-21.md
+_SNAPSHOT_ITEM_LIMIT = 500_000
 _SNAPSHOT_MATERIAL_BYTE_LIMIT = 512 * 1024 * 1024
 _SNAPSHOT_STREAM_BATCH_SIZE = 1_000
 _LOWERCASE_HEX = frozenset("0123456789abcdef")

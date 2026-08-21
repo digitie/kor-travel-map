@@ -175,6 +175,9 @@ _CACHE_TARGET_UNAVAILABLE_CODES = frozenset(
         "snapshot_build_timeout",
         "snapshot_busy",
         "snapshot_ttl_too_short",
+        # writer가 stream row lock을 제 시간에 못 잡았다. 클라이언트 잘못이 아니라
+        # 지금 서버가 그 stream을 다른 작업에 쓰고 있다는 뜻이므로 재시도 가능한 503이다.
+        "stream_busy",
         "stream_version_exhausted",
     }
 )
@@ -568,6 +571,7 @@ def _cache_target_retry_after(exc: CacheTargetStreamConflict) -> str | None:
         "snapshot_barrier_timeout",
         "snapshot_busy",
         "snapshot_ttl_too_short",
+        "stream_busy",
     }:
         return "1"
     if exc.code != "snapshot_capacity_exceeded":

@@ -463,21 +463,22 @@ def test_reuse_identity_filters_material_events_but_snapshot_cursor_stays_global
 
 @pytest.mark.unit
 def test_snapshot_item_ceiling_accepts_exact_limit_and_rejects_limit_plus_one() -> None:
+    limit = repo._SNAPSHOT_ITEM_LIMIT  # pyright: ignore[reportPrivateUsage]
     repo._enforce_snapshot_admission(  # pyright: ignore[reportPrivateUsage]
-        item_count=1_000_000,
+        item_count=limit,
         material_bytes=536_870_912,
     )
 
     with pytest.raises(repo.CacheTargetStreamConflict) as exceeded:
         repo._enforce_snapshot_admission(  # pyright: ignore[reportPrivateUsage]
-            item_count=1_000_001,
+            item_count=limit + 1,
             material_bytes=1,
         )
 
     assert exceeded.value.code == "snapshot_item_limit_exceeded"
     assert exceeded.value.current == {
-        "item_count_lower_bound": 1_000_001,
-        "item_limit": 1_000_000,
+        "item_count_lower_bound": limit + 1,
+        "item_limit": limit,
     }
 
     with pytest.raises(repo.CacheTargetStreamConflict) as byte_exceeded:
@@ -938,3 +939,49 @@ def test_snapshot_cursor_holds_header_share_lock_during_item_read() -> None:
     assert "FOR UPDATE OF material, item SKIP LOCKED" in item_prune
     assert "FOR UPDATE OF material SKIP LOCKED" in material_prune
     assert "poi_cache_target_snapshot_material_items" in material_prune
+
+
+#: build 예산 안에서 상한 크기를 실제로 만들 수 있는지는 **측정으로만** 안다. 이 값은
+#: 대표성 있는 fixture(prod 실측 키 폭 37자·삽입 순서와 정렬 순서 무상관)로 n150에서
+#: 잰 처리량이며, 출처는 `docs/reports/t-vn-41s-budget-ceiling-2026-08-21.md`다.
+#:
+#: **유도하지 않는다.** `_SNAPSHOT_ITEM_LIMIT`을 `예산 × 처리량 / 안전계수`로 정의하면
+#: 아래 단언이 항등식이 되어 **어떤 예산에서도 통과한다** — 예산을 절반으로 내리는 한 줄
+#: 변경에서도 green이라, 클라이언트가 보는 상한이 조용히 반토막 나도 아무도 모른다.
+#: 상한은 client가 보는 capacity 경계이므로 그 변경은 자동화가 아니라 **사람이 봐야 할
+#: 결정**이어야 한다. 그래서 둘을 독립 리터럴로 두고 이 테스트가 관계만 지킨다.
+_MEASURED_BUILD_ITEMS_PER_SECOND = 4_225
+_REQUIRED_BUILD_SAFETY_FACTOR = 2.0
+
+
+@pytest.mark.unit
+def test_snapshot_item_limit_fits_the_shipped_build_budget() -> None:
+    """admission이 받아들이는 최대 크기는 예산의 절반 안에 끝나야 한다.
+
+    이 관계가 깨진 채로 배포된 적이 있다 — 상한 1,000,000 · 예산 300초인데 실측이
+    368~548초였다(2026-08-21). admission은 통과하고 build는 반드시 실패하는 계약이었다.
+    """
+
+    worst_case_seconds = (
+        repo._SNAPSHOT_ITEM_LIMIT / _MEASURED_BUILD_ITEMS_PER_SECOND  # noqa: SLF001
+    )
+    allowed_seconds = (
+        repo.snapshot_build_budget_seconds() / _REQUIRED_BUILD_SAFETY_FACTOR
+    )
+    assert worst_case_seconds <= allowed_seconds, (
+        f"상한 {repo._SNAPSHOT_ITEM_LIMIT:,} item은 실측 처리량 "  # noqa: SLF001
+        f"{_MEASURED_BUILD_ITEMS_PER_SECOND:,} item/s에서 {worst_case_seconds:.1f}초가 "
+        f"걸려 예산 {repo.snapshot_build_budget_seconds():.0f}초의 절반"
+        f"({allowed_seconds:.0f}초)을 넘는다. 예산을 내렸다면 상한도 함께 내려라 — "
+        "그 결정은 client가 보는 413 문턱을 바꾼다."
+    )
+
+
+@pytest.mark.unit
+def test_build_statement_timeout_matches_the_build_budget() -> None:
+    """PG statement_timeout과 누적 예산이 어긋나면 어느 쪽이 먼저 터질지 알 수 없다."""
+
+    statement_timeout = repo._SNAPSHOT_BUILD_STATEMENT_TIMEOUT  # noqa: SLF001
+    assert statement_timeout.endswith("min")
+    minutes = int(statement_timeout.removesuffix("min"))
+    assert minutes * 60 == int(repo.snapshot_build_budget_seconds())
