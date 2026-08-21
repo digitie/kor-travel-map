@@ -28,6 +28,8 @@ pytestmark = pytest.mark.integration
 _SYSTEM = "drained:41s"
 _MATERIAL = "d1000000-0000-4000-8000-000000000001"
 _RECEIPT = "d2000000-0000-4000-8000-000000000001"
+#: 아직 표시되지 않은 별도 material. 배출 전제 위반을 재는 테스트에만 쓴다.
+_LIVE_MATERIAL = "d3000000-0000-4000-8000-000000000001"
 _ROOT = "c" * 64
 
 
@@ -41,6 +43,10 @@ async def _seed_compacted_material_with_items(
     fence가 `compacted_at`을 한 방향으로만 열어 두므로, 표시된 상태를 만들려면 INSERT
     시점에 이미 표시해 둔다(UPDATE로 표시하면 이 fixture가 fence를 거치게 되어 무엇을
     재는 테스트인지 흐려진다).
+
+    **receipt를 반드시 붙인다.** receipt 없는 material은 orphan이라 item을 비운 뒤 행째
+    삭제되고, 그러면 배출 표시를 확인할 대상이 사라진다. 배출 표시가 뜻을 갖는 것은
+    audit 증거로 **영구 보존되는** material 쪽이다 — GC가 매 batch 훑는 것도 그쪽이다.
     """
 
     await session.execute(
@@ -66,6 +72,16 @@ async def _seed_compacted_material_with_items(
             "items": max(items, 1),
             "root": _ROOT,
         },
+    )
+    await session.execute(
+        text(
+            "INSERT INTO ops.poi_cache_target_snapshots ("
+            "snapshot_id, material_id, receipt_kind, external_system, "
+            "created_at, expires_at) VALUES ("
+            "CAST(:receipt_id AS uuid), CAST(:material_id AS uuid), 'generic', "
+            ":system, now(), now() + interval '2 hours')"
+        ),
+        {"receipt_id": _RECEIPT, "material_id": _MATERIAL, "system": _SYSTEM},
     )
     for row_number in range(1, items + 1):
         await session.execute(
@@ -230,14 +246,14 @@ async def test_a_material_cannot_be_drained_before_it_is_compacted(
             "item_count, merkle_root, materialized_at) VALUES ("
             "CAST(:material_id AS uuid), :system, 2, 0, 0, 1, :root, now())"
         ),
-        {"material_id": _RECEIPT, "system": _SYSTEM, "root": _ROOT},
+        {"material_id": _LIVE_MATERIAL, "system": _SYSTEM, "root": _ROOT},
     )
 
     reason = await _refused(
         migrated_session,
         "UPDATE ops.poi_cache_target_snapshot_materials "
         "SET compaction_drained_at = now() "
-        f"WHERE material_id = CAST('{_RECEIPT}' AS uuid)",
+        f"WHERE material_id = CAST('{_LIVE_MATERIAL}' AS uuid)",
     )
     # CHECK와 fence 중 어느 쪽이 먼저 잡아도 된다 — 둘 다 이 상태를 표현 불가로 만든다.
     assert (
