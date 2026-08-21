@@ -813,8 +813,16 @@ async def repair_tvn_m05_role_phase(async_dsn: str) -> None:
                     ]
                 },
             )
-            if version != "0235_m05_reconciliation_delivery" or relation_count != 6:
-                raise RuntimeError("M05 test post-upgrade marker is incomplete")
+            # 이 GRANT의 전제는 **M05 relation이 섰다**는 것이고, 그 증거는 위
+            # `relation_count`다. 예전에는 head가 `0235`와 정확히 같은지도 함께 봤는데,
+            # 그러면 M05와 무관한 다음 migration이 붙는 순간 이 부트스트랩이 깨진다
+            # (0236에서 실제로 깨졌다). head는 `test_alembic_metadata_consistency`가
+            # 이미 단일 정본으로 지킨다 — 여기서 두 번째 사본을 들고 있을 이유가 없다.
+            if version is None or relation_count != 6:
+                raise RuntimeError(
+                    "M05 test post-upgrade marker is incomplete: "
+                    f"version={version!r} relations={relation_count}/6"
+                )
             await connection.execute(
                 text(
                     "GRANT USAGE, CREATE ON SCHEMA feature "
