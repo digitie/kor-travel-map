@@ -2150,7 +2150,12 @@ def _reject_compacted_material(header: Mapping[str, Any]) -> None:
         return
     raise CacheTargetStreamConflict(
         "snapshot_material_compacted",
-        "snapshot material이 보존 기간을 지나 compaction됐습니다.",
+        # "보존 기간을 지나"라고 쓰지 않는다. compaction 표시는 두 경로에서 붙는데,
+        # 보존 기간을 지난 terminal audit material만이 아니라 **참조가 사라진 orphan**도
+        # 표시된다. orphan에는 보존 기간이라는 것이 없으므로 그 문구는 절반만 참이다.
+        # 지금은 orphan에 page할 receipt가 없어 도달하지 않지만, 그 불변이 바뀌는 순간
+        # 이 문장이 거짓말이 된다 — 도달 불가에 기대어 틀린 문구를 두지 않는다.
+        "snapshot material의 item이 회수돼 이 page를 더 제공할 수 없습니다.",
         current={
             "snapshot_id": str(header["snapshot_id"]),
             "item_count": int(header["item_count"]),

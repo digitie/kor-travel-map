@@ -1,5 +1,28 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-21 — T-VN-41S 종료
+
+후속 종료선에 남아 있던 셋 중 둘을 고치고 하나는 lane을 옮겼다.
+
+| 항목 | 결과 |
+|---|---|
+| `ops` fail-closed ACL 탈출구 | fence는 그대로. 관장 밖(`public`)을 정본 경로로 하고 **실패 메시지가 직접 안내**한다. 메시지와 관장 schema 집합을 테스트로 묶었다 |
+| compacted material 무한 누적 스캔 | `0236` — `compaction_drained_at` + partial index. "표시됐지만 아직 배출 중"만 색인해 backlog 판정이 상수로 떨어진다 |
+| service spec `410` 선언 | **T-VN-41C로 이월.** 교차 저장소 re-vendor가 필요하고 41C가 어차피 그것을 요구한다. 오늘 깨진 것은 없다 — PinVi가 이미 그 410을 런타임에서 처리한다 |
+
+게이트: ruff / mypy `--strict` ×2 / lint-imports / migration graph `--check` clean,
+관련 **103 passed**.
+
+### 다음 한 작업
+
+**`T-VN-41C`에서 `410` 선언 + PinVi re-vendor를 함께 한다.** 실행 절차와 막는 요인(하나)은
+`docs/tasks.md`의 `T-VN-41C` 항목에 적어 뒀다 — `tvn40-live-acceptance-v1.json`이 T-VN-40
+receipt의 커밋 쌍과 `pending` 가드 없이 결박돼 있어, **paired acceptance 재실행**과
+**가드 추가 + receipt를 `pending`으로** 중 하나를 사용자가 골라야 한다.
+
+그 밖에 41S에서 남긴 숙제는 **부하 아래 재측정**이다(안전계수 2가 유일한 부하 관측 2.32배에
+거의 소진된다).
+
 ## 2026-08-21 — live E2E 계약 drift 수정 및 운영 재검증
 
 머지된 T-FE-MOCK-FLAKE 뒤 확장 live 실행에서 발견한 두 계약 오류를 `fix/live-contract-inputs`
