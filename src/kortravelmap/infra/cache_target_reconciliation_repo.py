@@ -447,6 +447,7 @@ WITH candidates AS (
     ON material.material_id = item.material_id
   WHERE material.external_system = :external_system
     AND material.compacted_at IS NOT NULL
+    AND material.compaction_drained_at IS NULL
   ORDER BY item.material_id, item.row_number
   LIMIT :limit
   FOR UPDATE OF material, item SKIP LOCKED
@@ -456,6 +457,23 @@ USING candidates
 WHERE item.material_id = candidates.material_id
   AND item.row_number = candidates.row_number
 RETURNING item.material_id, item.row_number
+"""
+
+#: item을 다 비운 material에 배출 완료를 찍는다. 이 표시가 없으면 그 material은 영원히
+#: "배출 중"으로 남아 GC backlog 판정에 계속 걸린다 — 이 후속이 없애려던 바로 그 비용이다.
+#: `compaction_drained_at IS NULL`을 조건에 두어 한 번만 찍히게 한다(fence도 같은 것을 막는다).
+_MARK_DRAINED_MATERIALS_SQL = """
+UPDATE ops.poi_cache_target_snapshot_materials AS material
+   SET compaction_drained_at = now()
+ WHERE material.external_system = :external_system
+   AND material.compacted_at IS NOT NULL
+   AND material.compaction_drained_at IS NULL
+   AND NOT EXISTS (
+     SELECT 1
+     FROM ops.poi_cache_target_snapshot_material_items AS item
+     WHERE item.material_id = material.material_id
+   )
+RETURNING material.material_id
 """
 
 _PRUNE_ORPHANED_MATERIALS_SQL = """
@@ -547,14 +565,14 @@ SELECT EXISTS (
     WHERE receipt.material_id = material.material_id
   )
 ) OR EXISTS (
+  -- "표시됐지만 아직 배출 중"은 상태 열로 묻는다. item 존재를 직접 재면 compacted
+  -- material 하나마다 index probe 한 번이고, audit material은 영구 보존이라 그 수가
+  -- 단조 증가한다 — backlog가 **없을 때** 전수를 훑고 false를 내는 것이 가장 비쌌다.
+  -- `idx_poi_cache_target_snapshot_materials_draining`(partial)이 이 분기를 받는다.
   SELECT 1
   FROM ops.poi_cache_target_snapshot_materials AS material
   WHERE material.compacted_at IS NOT NULL
-    AND EXISTS (
-      SELECT 1
-      FROM ops.poi_cache_target_snapshot_material_items AS item
-      WHERE item.material_id = material.material_id
-    )
+    AND material.compaction_drained_at IS NULL
 ) OR EXISTS (
   SELECT 1
   FROM ops.poi_cache_target_snapshot_materials AS material
@@ -1739,6 +1757,12 @@ async def _prune_snapshot_generation(
                 {"external_system": external_system, "limit": item_limit},
             )
         ).all()
+    )
+    # 표시는 배출 **뒤**에 한다. 앞에 두면 이번 batch가 지울 item이 아직 남아 있어
+    # 아무것도 찍히지 않고, 그 material은 다음 batch까지 backlog로 남는다.
+    await session.execute(
+        text(_MARK_DRAINED_MATERIALS_SQL),
+        {"external_system": external_system},
     )
     await session.execute(
         text(_PRUNE_ORPHANED_MATERIALS_SQL),

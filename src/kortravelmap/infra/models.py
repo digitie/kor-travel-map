@@ -6828,6 +6828,12 @@ class PoiCacheTargetSnapshotMaterialRow(Base):
             "compacted_at IS NULL OR compacted_at >= materialized_at",
             name=conv("ck_poi_cache_target_snapshot_materials_compaction"),
         ),
+        # 배출은 표시 이후에만 있을 수 있고 표시보다 앞설 수 없다. 두 시각의 순서를 DB가 쥔다.
+        CheckConstraint(
+            "compaction_drained_at IS NULL "
+            "OR (compacted_at IS NOT NULL AND compaction_drained_at >= compacted_at)",
+            name="ck_poi_cache_target_snapshot_materials_drained_after_compacted",
+        ),
         UniqueConstraint(
             "material_id",
             "external_system",
@@ -6845,6 +6851,15 @@ class PoiCacheTargetSnapshotMaterialRow(Base):
         # 않아 위 partial index에 걸리지 못하고, `external_system` equality와
         # `materialized_at` 순서를 함께 받는 인덱스가 없으면 다른 stream의 material까지
         # 훑는다. 그래서 비-partial로 둔다.
+        # GC backlog 판정 전용. "표시됐지만 아직 배출 중"만 담으므로 배출이 끝난 material은
+        # 빠진다 — audit material이 아무리 쌓여도 이 판정이 커지지 않는다(0233).
+        Index(
+            "idx_poi_cache_target_snapshot_materials_draining",
+            "material_id",
+            postgresql_where=text(
+                "compacted_at IS NOT NULL AND compaction_drained_at IS NULL"
+            ),
+        ),
         Index(
             "idx_cache_target_snapshot_materials_sweep",
             "external_system",
@@ -6894,6 +6909,13 @@ class PoiCacheTargetSnapshotMaterialRow(Base):
     #: audit receipt가 붙은 material은 이 표시가 영구히 남아 page가 410이 되고, orphan은
     #: 표를 비운 뒤 행째 사라진다.
     compacted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: item을 다 비운 시각(0233). `compacted_at`이 "회수를 시작했다"라면 이것은 "다 비웠다"다.
+    #: 둘을 나눠 두는 이유는 GC backlog 판정 때문이다 — item 존재를 직접 재면 compacted
+    #: material 하나마다 index probe 한 번이고 audit material은 영구 보존이라 그 수가 단조
+    #: 증가한다. 이 열의 partial index가 그 질문을 상수 시간으로 만든다.
+    compaction_drained_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True)
+    )
 
 
 class PoiCacheTargetSnapshotMaterialItemRow(Base):
