@@ -28,8 +28,10 @@ barrier로 직렬화한다.
     ∥ [~] `T-VN-41S`(`0231`·공유·compactor·410·EXPLAIN·1M soak 완료 / **build 예산 vs 상한 결정** 잔여)
   - [ ] `T-VN-40B` prod 적용 — **41S 머지와 함께 한 배포로**(사용자 결정 2026-08-21).
     현재 prod admin rule 조회 500. `0229`+`0230`+`0231`이 같이 올라간다.
+    **1차 시도는 `0230`에서 중단·롤백**했다(2026-08-21) → `T-VN-C05-CATALOG-KEY` 선행.
   - **배리어**: [ ] `T-VN-FINAL-REBUILD`(주요 개발 완료 후 파괴적 재구축 — 사용자 결정 2026-08-20)
   - [ ] `T-VN-40B` 잔여 — 코드 착지(#1035), **prod 미적용 → admin rule 조회 500**(2026-08-21)
+  - [ ] `T-VN-C05-CATALOG-KEY`(`0230` 대리키 하드코딩 수정 — 위 배포의 선행)
   - [ ] `T-FE-MOCK-FLAKE`(`/v1/ops/logs`)
   - [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2` → `T-VN-41C` receipt 승격
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정, T-VN-40 인수 뒤)**
@@ -504,6 +506,59 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 
 > 다른 lane과 barrier를 공유하지 않는다. 아무 때나 착수할 수 있다.
 
+### T-VN-C05-CATALOG-KEY — `0230`이 대리키를 계약으로 적었다 (2026-08-21)
+
+> 규칙은 [ADR-096](adr/096-catalog-identity-is-the-natural-key.md)이 정본이다.
+
+- [ ] **`0230_tvn_c05_krforest_datasets`를 자연키 기준으로 고쳐 머지한다.**
+
+  `0229`+`0230`+`0231` 묶음 배포가 `0230`에서 멈췄다.
+
+  ```
+  TVN-C05 provider_dataset_id 73 is already assigned to
+  python-datagokr-api/standard_special_streets;
+  expected python-krforest-api/krforest_wildfire_risk_forecast
+  ```
+
+  **가드는 제 역할을 했다. 잘못된 쪽은 migration이다.** `provider_dataset_id`는
+  `Identity(always=True)` 대리키이고 catalog identity의 정본은 자연키
+  `uq_provider_datasets_identity (provider, dataset_key)`다. 번호는 환경마다 다르며 실제로
+  달랐다 — baseline seed는 `python-datagokr-api/standard_special_streets`를 **69**번으로
+  매기는데 prod는 **73**번을 배정해 뒀다. 가드가 없었다면 dataset은 `ON CONFLICT
+  (provider_dataset_id) DO NOTHING`으로 건너뛰고 operation만 같은 숫자로 들어가 **남의
+  dataset에 C05 operation이 달라붙었을** 것이다.
+
+  **prod 실측(2026-08-21, 읽기 전용)**:
+
+  | 축 | 값 |
+  |---|---|
+  | `provider_datasets` | 64행 — id 1..63 연속 + **73** |
+  | id 73 | `python-datagokr-api/standard_special_streets`, `source_kind=system`, 자식 0 |
+  | identity sequence | `last_value=103` (`is_called=true`) |
+  | krforest 신규 5종 | 없음 (기존 `krforest_recreation_forests`=25, `_arboretums`=26) |
+  | 70~74 숫자 하드코딩 코드·테스트 | **없음** — 전부 자연키로 해석 |
+
+  **CI가 늘 초록이었던 이유**: 통합 테스트 DB는 `0200`이 `seed.sql`을 실행하므로 C05가
+  이미 70~74로 서 있는 DB만 본다. 그 DB에서 이 migration은 순수 no-op이라 prod 조건을
+  한 번도 보지 못했다.
+
+  - [x] dataset은 identity sequence가 번호를 매기게 두고, operation·scope는 자연키 JOIN으로
+    그 번호를 되찾는다. 숫자를 다시 적지 않으므로 남의 dataset에 붙는 경로가 사라진다.
+  - [x] `_SEQUENCE_SQL`을 dataset INSERT **앞**으로 옮긴다. 뒤처진 sequence를 고치는 것이
+    존재 이유인데 뒤에 두면 정작 그 상황에서 INSERT가 먼저 죽는다(적대적 리뷰어 2명 독립 지적).
+  - [x] 사후 단언: dataset/operation/scope 존재, 기존 dataset 계약 일치, operation `is_enabled`.
+  - [x] gate — 대리키 **70~74 전 구간**을 남이 선점한 DB를 만들고, 세 catalog 테이블을
+    자연키로 정규화해 통째로 스냅숏해 delta를 단언한다. `pytest.raises(match=)`는 쓰지
+    않는다(SQLAlchemy가 실행 SQL 원문을 예외 문자열에 붙이는데 그 안에 단언용 메시지가
+    그대로 있어 무엇으로 죽든 맞는다) — sqlstate와 SQL에 없는 payload로 결합한다.
+  - [x] 재발 방지 lint — `alembic/versions/*.py`가 `provider_sync` catalog에 대리키를
+    하드코딩하지 못하게 막는다(`tests/lint/test_alembic_surrogate_identity_literals.py`).
+  - [x] **prod 덤프 리허설**: 587M 덤프를 별도 DB로 복원(features 1,008,852 /
+    source_records 1,009,164까지 prod와 완전 일치)해 실제 migrator 자격으로
+    `0225→0229→0230→0231` 30초 통과, fail-closed runtime ACL 조정 exit 0. C05는 **104~108**,
+    73번 선점자는 자식 0으로 무사, sequence 103→108 전진만.
+  - [ ] PR → CI green → 머지 → 묶음 재배포.
+
 ### T-VN-40B 잔여 — source rule `curated` action 퇴역 (2026-08-20 종결 되돌림)
 
 > 이 항목은 2026-08-20 `tasks-done.md`로 이관됐다가 **사용자 지시로 되돌렸다**. 종결
@@ -551,7 +606,10 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   - [x] `0229`가 35행을 `candidate`로 정규화하고 CHECK를 `('candidate','ignore')`로 좁힌다.
     대상 표의 BEFORE trigger를 끄지 않고, 모델 CHECK와 write 허용값의 drift 게이트도 함께
     뒀다. → `fa22d0fe`(PR #1035)로 main 착지.
-  - [ ] **prod 적용.** 사용자 결정(2026-08-21): **T-VN-41S 머지 뒤 한 번에 배포한다** —
+  - [ ] **prod 적용.** ⚠️ **1차 시도 2026-08-21 중단·롤백** — `0230`(C05 catalog)이
+    대리키 충돌로 실패했고 alembic이 전체를 한 transaction으로 감싸므로 `0229`·`0231`까지
+    같이 롤백됐다. prod는 `0225`로 되돌렸고 배포 전 상태 그대로다. 선행은
+    `T-VN-C05-CATALOG-KEY`. 사용자 결정(2026-08-21): **T-VN-41S 머지 뒤 한 번에 배포한다** —
     그러면 `0229`·`0230`(C05)·`0231`(41S)이 같은 배포에 올라가 배포 횟수가 준다.
     순서는 (1) `origin/main` 기준 image 재빌드 (2) `.env`의 `EXPECTED_HEAD` 갱신
     (3) DB 백업 → 배포 → migration 적용 (4) `GET /v1/admin/curated-source-rules` 200 확인

@@ -1,6 +1,6 @@
 # ADR — Architecture Decision Records
 
-`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-095.**
+`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-097.**
 
 - ADR은 **프로그램 핵심 구조**(의존 계층·데이터/식별 모델·패키지/서비스 구조·REST 계약·
   운영 모델) 결정만 둔다. provider/ETL·도메인 taxonomy·알고리즘·process·운영 결정은 해당 topic
@@ -109,6 +109,7 @@
 | ADR-093 | 수동 Feature 생성 origin과 identity를 별도 정본으로 둔다 | [093-manual-feature-origin-and-identity.md](093-manual-feature-origin-and-identity.md) |
 | ADR-094 | C7 신뢰 경계를 pinned runtime generation v5 + rebuild journal v7로 옮긴다 | [094-c7-pinned-runtime-generation-attestation.md](094-c7-pinned-runtime-generation-attestation.md) |
 | ADR-095 | notice 발효 전 철회를 empty 효력 범위로 표현한다 | [095-notice-empty-validity-range.md](095-notice-empty-validity-range.md) |
+| ADR-096 | catalog identity는 자연키다 — migration은 Identity 대리키를 고정하지 않는다 | [096-catalog-identity-is-the-natural-key.md](096-catalog-identity-is-the-natural-key.md) |
 
 ## 새 ADR 작성 규약
 

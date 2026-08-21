@@ -1,5 +1,37 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-21 — `0230` 대리키 하드코딩으로 prod 배포 중단 → 자연키로 수정
+
+`0229`+`0230`+`0231` 묶음 배포가 `0230_tvn_c05_krforest_datasets`에서 멈췄다.
+`provider_dataset_id 73`을 prod가 이미 `python-datagokr-api/standard_special_streets`에
+배정해 뒀는데 migration이 그 번호를 `krforest_wildfire_risk_forecast`로 적어 뒀다.
+alembic이 전체를 한 transaction으로 감싸므로 30회 재시도가 매번 전량 롤백됐다.
+prod는 `0225`로 롤백해 배포 전 상태 그대로다(head·`curated` 35행·container health 확인).
+
+`provider_dataset_id`는 `Identity(always=True)` 대리키이고 catalog identity의 정본은
+자연키 `(provider, dataset_key)`다. baseline seed(69번)와 prod(73번)의 번호 배치가 애초에
+갈려 있었으므로 대리키를 계약에 적은 것 자체가 결함이다. CI가 늘 초록이었던 이유도
+같다 — 통합 테스트 DB는 `0200`이 `seed.sql`을 실행해 C05가 이미 70~74로 서 있는 DB만
+봤고, 거기서 이 migration은 순수 no-op이다.
+
+`fix/tvn-c05-natural-key-catalog`에서 자연키 기준으로 다시 썼고(dataset은 sequence가
+번호를 매기고 operation·scope는 자연키 JOIN으로 되찾는다), `_SEQUENCE_SQL`을 INSERT 앞으로
+옮겼으며(적대적 리뷰어 2명이 독립 지적), 사후 단언 4가지와 재발 방지 lint를 세웠다.
+
+prod 덤프 사본(features 1,008,852까지 완전 일치)에서 `0225→0229→0230→0231`이 30초에
+통과했고 fail-closed runtime ACL 조정도 exit 0이었다. C05는 **104~108**을 받았고 73번
+선점자는 자식 0으로 무사, sequence는 103→108로 전진만 했다.
+
+### 다음 한 작업
+
+**PR → CI green → 머지 → `0229`+`0230`+`0231` 묶음 재배포.** 복구점은
+`kor_travel_map_0225_pre-tvn41s_20260820T234727Z.dump`(587M, sha256 확인)와
+`manager.env_pre-tvn41s_...bak`이 그대로 있다. 배포 후 `/v1/admin/curated-source-rules`
+500이 풀렸는지 확인한다 — `0229`가 `curated` 35행을 `candidate`로 정규화하므로 읽기 경로의
+좁아진 Literal과 다시 맞는다.
+
+그 다음이 아래 T-VN-41S의 build 예산 결정이다.
+
 ## 2026-08-20 — T-VN-41S material/receipt 분리 착지 (`0231`)
 
 `T-VN-41S`의 후속 종료선에서 **EXPLAIN·1M soak을 뺀 전부**가 닫혔다.
