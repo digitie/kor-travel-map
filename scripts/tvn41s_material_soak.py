@@ -116,8 +116,11 @@ def note(label: str, value: object) -> None:
 #: 그 fixture는 heap correlation ≈ 1.0인 **최선 조건**을 잰 것이었다. prod 실측 키는
 #: 24~36자(평균 35.1, 전부 ASCII)이므로 md5 기반 37자로 맞춘다 — md5는 삽입 순서와
 #: 정렬 순서의 상관도 함께 끊어 준다.
-#: state와 fingerprint도 상수를 쓰지 않는다. 상수 fingerprint는 sha256 입력 지역성과
-#: 페이지 압축률을 비현실적으로 좋게 만든다.
+#: fingerprint도 상수를 쓰지 않는다 — 상수 fingerprint는 sha256 입력 지역성과 페이지
+#: 압축률을 비현실적으로 좋게 만든다. state는 `deleted`로 둔다: `active` head는
+#: `target_id`가 가리키는 실제 `ops.poi_cache_targets` 행(좌표 계열 CHECK 포함)을
+#: 요구하므로 fixture 비용이 측정 대상을 압도한다. 정렬 비용은 키 폭·순서가 지배하고
+#: state는 leaf 1바이트라 이 축의 대표성을 해치지 않는다.
 _SEED_HEADS_SQL = """
 INSERT INTO ops.poi_cache_target_source_heads (
     external_system, target_key, state, restore_epoch, source_generation,
@@ -125,7 +128,7 @@ INSERT INTO ops.poi_cache_target_source_heads (
 )
 SELECT :stream,
        's-' || md5(value::text) || '-' || lpad((value % 100)::text, 2, '0'),
-       CASE WHEN value % 7 = 0 THEN 'active' ELSE 'deleted' END,
+       'deleted',
        1, 1,
        md5(value::text) || md5((value + 1)::text),
        value, now()
