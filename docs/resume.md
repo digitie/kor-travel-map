@@ -71,6 +71,19 @@ prod 덤프 사본(features 1,008,852까지 완전 일치)에서 `0225→0229→
 2026-08-21 한 배포로 prod에 올라갔다(prod head = `0232_tvn37d_notice_empty_range`).
 상세는 이 문서 최상단 배포 항목에 있다.
 
+## 2026-08-21 — M04 shared-cluster role graph CI 보정
+
+다른 database의 M04 request role이 legacy DB bootstrap의 base-role exact graph에 섞이던
+PostGIS CI 실패를 고쳤다. M04 role은 M01/M05 role과 같이 legacy 비교에서 제외하고 전용
+role phase에서만 검증한다. Docker runtime unit과 existing-object bootstrap integration은
+`159 passed`다.
+
+### 다음 한 작업
+
+이 보정을 최신 `origin/main`에 rebase·push한 뒤 Map PostGIS CI를 다시 확인한다. Map과 PinVi
+CI가 모두 green이고 N150 격리 mutating browser E2E가 끝나기 전에는 M05 activation receipt와
+Hallmark 작업을 시작하지 않는다.
+
 ## 2026-08-21 — M05 이후 통합 migration CI fixture 정합화
 
 M01~M05 배포 choreography를 반영해 기존 PostGIS 통합 fixture의 shared-database 순서 결합을

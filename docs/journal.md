@@ -138,6 +138,14 @@ C05는 sequence가 매긴 **104~108**을 받았고 73번 선점자는 자식 0�
 103→108로 전진만 했다. `0229`가 `curated` 35행을 `candidate`로 정규화하므로 미해결이던
 admin `/v1/admin/curated-source-rules` 500도 이 배포로 풀릴 전망이다.
 
+## 2026-08-21 — M04 role marker가 있는 shared cluster legacy bootstrap 보정
+
+PostGIS CI의 기존-object bootstrap 검증에서, 다른 database가 만든 M04 Feature request
+전용 NOLOGIN role의 membership이 legacy base graph에 섞여 exact-graph assertion이 실패했다.
+이 역할들은 M01/M05 전용 role과 마찬가지로 cluster 범위 객체이므로 legacy 비교에서는 제외하고,
+각각의 M01 repair/M04 전용 phase에서 별도로 exact ACL·membership을 검증한다. 대상 기존-object
+integration과 Docker runtime unit은 `159 passed`로 다시 확인했다.
+
 ## 2026-08-21 — M05 이후 기존 PostGIS migration fixture 격리
 
 M01~M05 role choreography가 적용된 뒤에도 기존 통합 테스트가 shared default DB의 head와
