@@ -183,6 +183,11 @@ async def lock_stream_row_or_conflict(
         result = await session.execute(text(statement), params)
     except DBAPIError as exc:
         # 55P03 lock_not_available / 57014 statement 취소. 둘 다 "지금은 못 잡았다"다.
+        #
+        # 여기서 상한을 되돌리지 **않는다**. 실패한 문장은 transaction을 abort 상태로
+        # 만들고, 그 뒤 어떤 문장도 `InFailedSQLTransactionError`가 되어 **원래 오류를
+        # 가린다**. 그리고 abort된 transaction은 어차피 rollback되므로 transaction 범위
+        # 설정도 함께 사라진다 — 되돌릴 것이 없다.
         if getattr(exc.orig, "sqlstate", None) not in {"55P03", "57014"}:
             raise
         raise CacheTargetStreamConflict(
@@ -190,8 +195,7 @@ async def lock_stream_row_or_conflict(
             "stream이 다른 작업에 잡혀 있어 지금 쓰기를 받을 수 없습니다.",
             current={"lock_timeout": STREAM_WRITER_LOCK_TIMEOUT},
         ) from exc
-    finally:
-        await session.execute(text(_RESET_STREAM_WRITER_LOCK_TIMEOUT_SQL))
+    await session.execute(text(_RESET_STREAM_WRITER_LOCK_TIMEOUT_SQL))
     return result
 
 _LOCK_HEAD_SQL = """

@@ -1802,15 +1802,21 @@ async def test_snapshot_cumulative_timeout_rolls_back_and_releases_writer(
     writer_task: asyncio.Task[Any] | None = None
     try:
         await asyncio.wait_for(first_item_batch_inserted.wait(), timeout=5)
+        # writer는 이제 **기다리지 않는다**. barrier가 잡혀 있으면 bounded lock 대기 뒤
+        # typed `stream_busy`로 즉시 돌아온다 — connection을 문 채 build 예산 전 구간을
+        # 버티면 전 endpoint 공유 pool이 마르기 때문이다(2026-08-21).
         writer_task = asyncio.create_task(_write_source())
-        with pytest.raises(TimeoutError):
-            await asyncio.wait_for(asyncio.shield(writer_task), timeout=0.1)
+        with pytest.raises(CacheTargetStreamConflict) as busy:
+            await asyncio.wait_for(writer_task, timeout=5)
+        assert busy.value.code == "stream_busy"
 
         with pytest.raises(CacheTargetStreamConflict) as timed_out:
             await asyncio.wait_for(build_task, timeout=5)
         assert timed_out.value.code == "snapshot_build_timeout"
 
-        written = await asyncio.wait_for(writer_task, timeout=3)
+        # build가 예산에서 rollback하며 barrier를 놓았으므로, 재시도는 성공해야 한다.
+        # 그것이 이 테스트의 본 뜻이다 — writer가 영구히 막히지 않는다.
+        written = await _write_source()
         assert written.target_key == "writer-target"
     finally:
         pending = tuple(

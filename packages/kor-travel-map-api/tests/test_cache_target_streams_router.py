@@ -2470,7 +2470,6 @@ def test_service_snapshot_rolls_back_route_owned_transaction_on_error() -> None:
         ("snapshot_barrier_timeout", "SNAPSHOT_BARRIER_TIMEOUT"),
         ("snapshot_busy", "SNAPSHOT_BUSY"),
         ("snapshot_ttl_too_short", "SNAPSHOT_TTL_TOO_SHORT"),
-        ("stream_busy", "STREAM_BUSY"),
     ],
 )
 def test_service_snapshot_unavailable_is_retryable_without_waiting(
