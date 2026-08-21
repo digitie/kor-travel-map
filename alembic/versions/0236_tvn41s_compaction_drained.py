@@ -82,13 +82,15 @@ BEGIN
   -- 그래야 `SET item_count = 99`(표시 없이 내용만 바꿈)와
   -- `SET compacted_at = now(), merkle_root = ...`(표시를 구실로 내용도 바꿈)이
   -- 서로 다른 이유로 거부되고, 운영자가 어느 규칙에 걸렸는지 알 수 있다.
-  IF NEW.compacted_at IS NULL THEN
-    RAISE EXCEPTION 'snapshot material is append-only except compaction'
+  -- 배출 전제 위반을 가장 먼저 본다. 뒤에 두면 "표시가 아니다"가 먼저 잡아
+  -- 일반 문구로 거부되고, 무엇을 어겼는지가 메시지에서 사라진다.
+  IF NEW.compaction_drained_at IS NOT NULL AND NEW.compacted_at IS NULL THEN
+    RAISE EXCEPTION 'snapshot material cannot be drained before it is compacted'
       USING ERRCODE = '55000';
   END IF;
 
-  IF NEW.compaction_drained_at IS NOT NULL AND NEW.compacted_at IS NULL THEN
-    RAISE EXCEPTION 'snapshot material cannot be drained before it is compacted'
+  IF NEW.compacted_at IS NULL THEN
+    RAISE EXCEPTION 'snapshot material is append-only except compaction'
       USING ERRCODE = '55000';
   END IF;
 
