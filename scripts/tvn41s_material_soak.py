@@ -69,27 +69,17 @@ from tests.integration._tvn34_migration_bootstrap import bootstrap_tvn34_migrati
 STREAM = "soak:41s"
 #: 측정 대상 item 수. 인자로 주면 그 값, 없으면 배포 상한을 그대로 잰다 —
 #: soak이 상한과 다른 크기를 재고 있으면 그 결과는 상한을 보증하지 못한다.
-ADMITTED = (
-    int(sys.argv[2])
-    if len(sys.argv) > 2
-    else repo._SNAPSHOT_ITEM_LIMIT  # noqa: SLF001
-)
+_CEILING = repo._SNAPSHOT_ITEM_LIMIT  # noqa: SLF001
+ADMITTED = int(sys.argv[2]) if len(sys.argv) > 2 else _CEILING
 
-#: **주의**: 아래 예산은 누적 build deadline만 늘린다. 개별 statement의 상한은
-#: `_SNAPSHOT_BUILD_STATEMENT_TIMEOUT`(5분)이 barrier 진입 때 다시 설정하므로, 이
-#: 스크립트가 session에 건 `statement_timeout`은 build 경로에서 덮인다. 지금 측정이
-#: 성립하는 것은 개별 statement가 5분을 넘지 않았기 때문이고, 더 느린 호스트나 더 큰
-#: batch에서는 `snapshot_build_timeout`으로 끝날 수 있다(적대 리뷰 지적).
-#:
-#: 배포 기본값(`_SNAPSHOT_BUILD_TIMEOUT_SECONDS = 300`)은 상한과 같은 크기의 material을
-#: n150에서 만들지 못한다 — 첫 실행이 그 예산에서 잘렸다. 그것 자체가 이 soak의 결과이므로
-#: 숨기지 않는다. 실제 소요를 재기 위해 **측정 동안만** 예산을 늘리고, 배포 예산 대비
-#: 결과를 evidence에 함께 남긴다.
-_MEASUREMENT_BUILD_BUDGET_SECONDS = 3_600.0
+#: **예산을 우회하지 않는다.** 예전 판은 측정 동안 `_SNAPSHOT_BUILD_TIMEOUT_SECONDS`를
+#: 3,600초로 덮고 session `statement_timeout`도 3,600초로 올렸다. 그러면 `build_seconds`가
+#: 배포 예산보다 작다는 **사후 비교**만 남고 `_snapshot_build_deadline`은 한 번도 돌지
+#: 않는다 — 상한 크기 build가 배포 deadline을 넘기 시작해도 typed `snapshot_build_timeout`
+#: 이 아니라 그냥 큰 숫자로 보인다. 지금은 배포 예산 그대로 돌고, 넘으면 그 자체가 실패다.
 _SHIPPED_BUILD_BUDGET_SECONDS = repo._SNAPSHOT_BUILD_TIMEOUT_SECONDS  # noqa: SLF001
-#: 상한 크기 build가 예산의 몇 분의 1 안에 들어야 하는가. 조용한 호스트 한 번의
-#: 측정을 운영 하한으로 쓰지 않기 위한 여유다.
-_REQUIRED_SAFETY_FACTOR = 2.0
+#: 안전계수는 repo가 정본이다 — soak과 단위 테스트가 같은 값을 읽어야 한다.
+REQUIRED_SAFETY_FACTOR = repo.SNAPSHOT_BUILD_SAFETY_FACTOR
 
 failures: list[str] = []
 #: 결정 대기 중이라 red인 것이 정상인 항목. `failures`와 섞지 않는다 — 섞으면 다른 축이
@@ -259,16 +249,10 @@ async def main() -> int:
 
         print(f"\n== 2) {ADMITTED:,} item admitted material 생성 ==")
         before = await _relation_stats(db)
-        repo._SNAPSHOT_BUILD_TIMEOUT_SECONDS = (  # noqa: SLF001
-            _MEASUREMENT_BUILD_BUDGET_SECONDS
-        )
         tracemalloc.start()
         build_started = time.monotonic()
         async with AsyncSession(db) as session, session.begin():
             await session.execute(text("SET ROLE ktm_feature_schema_owner"))
-            await session.execute(
-                text("SELECT set_config('statement_timeout', '3600s', true)")
-            )
             page = await get_cache_target_snapshot(
                 session,
                 external_system=STREAM,
@@ -293,9 +277,9 @@ async def main() -> int:
         # 여유를 요구하는 이유: 이 측정은 조용한 호스트의 한 번이고, 운영에서는 항상
         # 다른 부하가 있다. 정렬 키 표현식에 인덱스가 없어 비용이 Θ(N log N)이고
         # work_mem 절벽도 있으므로, 예산에 겨우 드는 값은 상한으로 삼을 수 없다.
-        budget_ceiling = _SHIPPED_BUILD_BUDGET_SECONDS / _REQUIRED_SAFETY_FACTOR
+        budget_ceiling = _SHIPPED_BUILD_BUDGET_SECONDS / REQUIRED_SAFETY_FACTOR
         check(
-            f"build이 예산/{_REQUIRED_SAFETY_FACTOR:.0f} 안에 든다"
+            f"build이 예산/{REQUIRED_SAFETY_FACTOR:.0f} 안에 든다"
             f" ({build_seconds:.1f}s <= {budget_ceiling:.0f}s)",
             build_seconds <= budget_ceiling,
             True,
@@ -331,8 +315,11 @@ async def main() -> int:
                 text(_SEED_HEADS_SQL),
                 {
                     "stream": STREAM,
+                    # 3단계가 재는 것은 **상한 + 1 거부**다. ADMITTED가 상한보다 작으면
+                    # ADMITTED + 1은 상한 아래라 아무것도 거부되지 않고, 그런데도 그 아래
+                    # 단언들이 ADMITTED를 기대해 통과처럼 보이지 않고 엉뚱하게 실패한다.
                     "lo": ADMITTED + 1,
-                    "hi": ADMITTED + 1,
+                    "hi": _CEILING,
                 },
             )
             # identity를 바꿔 재사용을 막는다 — 재사용하면 admission을 타지 않고
@@ -343,9 +330,6 @@ async def main() -> int:
             try:
                 async with session.begin():
                     await session.execute(text("SET ROLE ktm_feature_schema_owner"))
-                    await session.execute(
-                        text("SELECT set_config('statement_timeout', '3600s', true)")
-                    )
                     await get_cache_target_snapshot(
                         session,
                         external_system=STREAM,

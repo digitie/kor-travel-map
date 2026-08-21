@@ -561,17 +561,24 @@ def _cache_target_stream_conflict_status(code: str) -> int:
 #: barrier를 놓지 않는 100% duty cycle로 물린다 — 재시도가 즉시 advisory lock을 다시
 #: 잡고 같은 예산을 또 태우기 때문이다. 그동안 writer는 계속 밀린다. 실패에 든 시간
 #: 만큼은 비워 줘야 부하가 실제로 빠진다.
-_CACHE_TARGET_BUILD_RETRY_AFTER_SECONDS = int(snapshot_build_budget_seconds())
+#: `stream_busy`의 재시도 간격은 lock 대기보다 **길어야** 한다. 대기 1초 뒤 곧바로 다시
+#: 오면 서버는 그 client 몫으로 connection을 계속 붙들고 있는 셈이라(대기/주기 = duty cycle)
+#: 무한 대기를 고친 효과가 대부분 사라진다. 이 관계는
+#: `test_stream_busy_retry_after_is_longer_than_the_lock_wait`이 지킨다.
+_STREAM_BUSY_RETRY_AFTER_SECONDS = 10
 
 
 def _cache_target_retry_after(exc: CacheTargetStreamConflict) -> str | None:
     if exc.code == "snapshot_build_timeout":
-        return str(_CACHE_TARGET_BUILD_RETRY_AFTER_SECONDS)
+        # 상수를 여기 다시 적지 않고 **요청 시점에** 읽는다. import 시각에 얼려 두면
+        # 예산을 바꾼 프로세스에서 wire 값과 실제 예산이 갈린다.
+        return str(int(snapshot_build_budget_seconds()))
+    if exc.code == "stream_busy":
+        return str(_STREAM_BUSY_RETRY_AFTER_SECONDS)
     if exc.code in {
         "snapshot_barrier_timeout",
         "snapshot_busy",
         "snapshot_ttl_too_short",
-        "stream_busy",
     }:
         return "1"
     if exc.code != "snapshot_capacity_exceeded":

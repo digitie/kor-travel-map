@@ -80,6 +80,11 @@ _GENERIC_SNAPSHOT_COPY_LIMIT = 2
 _SNAPSHOT_CAPACITY_RETRY_AFTER_MAX_SECONDS = 7_200
 _SNAPSHOT_BUILD_STATEMENT_TIMEOUT = "5min"
 _SNAPSHOT_BUILD_TIMEOUT_SECONDS = 300.0
+#: 상한 크기 build가 예산의 몇 분의 1 안에 끝나야 하는가. 조용한 호스트 한 번의 측정을
+#: 운영 하한으로 쓰지 않기 위한 여유이며, soak과 단위 테스트가 **같은 값**을 써야 하므로
+#: 여기 한 곳에서만 정의한다. 두 곳에 적으면 한쪽만 조여도 다른 쪽이 green이라
+#: "게이트가 있다"는 착각만 남는다.
+SNAPSHOT_BUILD_SAFETY_FACTOR = 2.0
 _SNAPSHOT_BARRIER_LOCK_TIMEOUT = "5s"
 #: admission이 받아들이는 최대 item 수. **예산에서 유도하지 않는다** — 유도하면
 #: `상한/처리량 ≤ 예산` 단언이 항등식이 되어 어떤 예산에서도 통과하고, 예산을 내리는
@@ -92,7 +97,20 @@ _SNAPSHOT_BARRIER_LOCK_TIMEOUT = "5s"
 #: 1,000,000은 조용한 호스트에서 예산의 79%를 쓴다 — 부하 아래에서는 넘친다. 500,000은
 #: 39%로 안전계수 2를 만족한다. 출처: docs/reports/t-vn-41s-budget-ceiling-2026-08-21.md
 _SNAPSHOT_ITEM_LIMIT = 500_000
-_SNAPSHOT_MATERIAL_BYTE_LIMIT = 512 * 1024 * 1024
+#: material 재료 바이트 상한. item 상한과 **같은 성질**(예산 절반 안에 끝난다)을 갖는다.
+#:
+#: item 수만으로는 build 시간을 묶지 못한다. `target_key`는 계약상 512자까지 허용되므로
+#: leaf 인코딩이 item당 103 B(prod 실측 35자)에서 1,611 B(512자 한글)까지 **16배** 흔들리고,
+#: build는 그 키로 인덱스 없는 표현식 정렬을 두 번 한다. 예전 512 MiB는 실측 재료 처리량
+#: 429 KiB/s 기준 **1,221초 = 예산의 4.1배**라 시간 방어선이 될 수 없었고, item 상한을
+#: 500,000으로 낮춘 뒤로는 ASCII stream에서 아예 발화하지 않는 죽은 코드였다
+#: (계약 최대 폭에서도 500,000 × 683 B = 325.7 MiB < 512 MiB).
+#:
+#: 60 MiB는 실측 439,600 B/s에서 143초로 예산 절반(150초) 안이다. 정상 폭 stream은
+#: 그대로다 — 103 B/item이면 610,000 item에 해당해 item 상한(500,000)이 먼저 걸린다.
+#: 즉 이 상한은 **비정상적으로 넓은 키**만 잡는다.
+#: 근거: docs/reports/t-vn-41s-budget-ceiling-2026-08-21.md
+_SNAPSHOT_MATERIAL_BYTE_LIMIT = 60 * 1024 * 1024
 _SNAPSHOT_STREAM_BATCH_SIZE = 1_000
 _LOWERCASE_HEX = frozenset("0123456789abcdef")
 

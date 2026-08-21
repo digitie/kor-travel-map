@@ -464,9 +464,10 @@ def test_reuse_identity_filters_material_events_but_snapshot_cursor_stays_global
 @pytest.mark.unit
 def test_snapshot_item_ceiling_accepts_exact_limit_and_rejects_limit_plus_one() -> None:
     limit = repo._SNAPSHOT_ITEM_LIMIT  # pyright: ignore[reportPrivateUsage]
+    byte_limit = repo._SNAPSHOT_MATERIAL_BYTE_LIMIT  # pyright: ignore[reportPrivateUsage]
     repo._enforce_snapshot_admission(  # pyright: ignore[reportPrivateUsage]
         item_count=limit,
-        material_bytes=536_870_912,
+        material_bytes=byte_limit,
     )
 
     with pytest.raises(repo.CacheTargetStreamConflict) as exceeded:
@@ -484,12 +485,12 @@ def test_snapshot_item_ceiling_accepts_exact_limit_and_rejects_limit_plus_one() 
     with pytest.raises(repo.CacheTargetStreamConflict) as byte_exceeded:
         repo._enforce_snapshot_admission(  # pyright: ignore[reportPrivateUsage]
             item_count=1,
-            material_bytes=536_870_913,
+            material_bytes=byte_limit + 1,
         )
     assert byte_exceeded.value.code == "snapshot_byte_limit_exceeded"
     assert byte_exceeded.value.current == {
-        "material_bytes_lower_bound": 536_870_913,
-        "material_byte_limit": 536_870_912,
+        "material_bytes_lower_bound": byte_limit + 1,
+        "material_byte_limit": byte_limit,
     }
 
 
@@ -951,7 +952,9 @@ def test_snapshot_cursor_holds_header_share_lock_during_item_read() -> None:
 #: 상한은 client가 보는 capacity 경계이므로 그 변경은 자동화가 아니라 **사람이 봐야 할
 #: 결정**이어야 한다. 그래서 둘을 독립 리터럴로 두고 이 테스트가 관계만 지킨다.
 _MEASURED_BUILD_ITEMS_PER_SECOND = 4_225
-_REQUIRED_BUILD_SAFETY_FACTOR = 2.0
+
+#: 안전계수는 repo가 정본이다 — soak도 같은 상수를 읽는다.
+_REQUIRED_BUILD_SAFETY_FACTOR = repo.SNAPSHOT_BUILD_SAFETY_FACTOR
 
 
 @pytest.mark.unit
@@ -974,6 +977,32 @@ def test_snapshot_item_limit_fits_the_shipped_build_budget() -> None:
         f"걸려 예산 {repo.snapshot_build_budget_seconds():.0f}초의 절반"
         f"({allowed_seconds:.0f}초)을 넘는다. 예산을 내렸다면 상한도 함께 내려라 — "
         "그 결정은 client가 보는 413 문턱을 바꾼다."
+    )
+
+
+#: leaf 인코딩(`_leaf_material`) 실측 재료 처리량. item 처리량과 별개 축이다 —
+#: `target_key` 폭이 계약상 512자까지 흔들리므로 item 수만으로는 build 시간을 묶지 못한다.
+_MEASURED_BUILD_MATERIAL_BYTES_PER_SECOND = 439_600
+
+
+@pytest.mark.unit
+def test_material_byte_limit_fits_the_shipped_build_budget() -> None:
+    """byte 축도 item 축과 같은 성질을 가져야 한다.
+
+    예전 512 MiB는 실측 재료 처리량에서 예산의 4.1배였고, item 상한을 낮춘 뒤로는 ASCII
+    stream에서 아예 발화하지 않는 죽은 코드였다. 두 상한 중 어느 쪽으로 들어와도 build가
+    예산 절반 안에 끝나야 admission이 거짓말을 하지 않는다.
+    """
+
+    byte_limit = repo._SNAPSHOT_MATERIAL_BYTE_LIMIT  # noqa: SLF001
+    worst_case_seconds = byte_limit / _MEASURED_BUILD_MATERIAL_BYTES_PER_SECOND
+    allowed_seconds = (
+        repo.snapshot_build_budget_seconds() / _REQUIRED_BUILD_SAFETY_FACTOR
+    )
+    assert worst_case_seconds <= allowed_seconds, (
+        f"재료 상한 {byte_limit / 1024 / 1024:.0f} MiB는 실측 "
+        f"{_MEASURED_BUILD_MATERIAL_BYTES_PER_SECOND / 1024:.0f} KiB/s에서 "
+        f"{worst_case_seconds:.0f}초가 걸려 예산 절반({allowed_seconds:.0f}초)을 넘는다."
     )
 
 

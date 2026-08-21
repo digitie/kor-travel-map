@@ -5055,12 +5055,16 @@ async def test_stream_writer_does_not_wait_forever_for_a_held_stream_lock(
             async with AsyncSession(migrated_engine) as writer:
                 await writer.begin()
                 try:
-                    with pytest.raises(CacheTargetStreamConflict) as busy:
-                        await lock_cache_target_stream(
-                            writer,
-                            external_system=external_system,
-                            consumer_id=_CONSUMER,
-                        )
+                    # `asyncio.timeout`이 없으면 lock_timeout 한 줄을 지웠을 때 이 테스트는
+                    # **실패하지 않고 영원히 멈춘다** — 회귀가 red가 아니라 hang한 CI로
+                    # 나타나 원인 추적이 불가능해진다. pytest-timeout은 의존성에 없다.
+                    async with asyncio.timeout(30):
+                        with pytest.raises(CacheTargetStreamConflict) as busy:
+                            await lock_cache_target_stream(
+                                writer,
+                                external_system=external_system,
+                                consumer_id=_CONSUMER,
+                            )
                 finally:
                     await writer.rollback()
             waited = time.monotonic() - started
@@ -5070,4 +5074,4 @@ async def test_stream_writer_does_not_wait_forever_for_a_held_stream_lock(
     assert busy.value.code == "stream_busy"
     # 무한 대기가 아니라는 것이 이 테스트의 전부다. 상한을 넉넉히 잡아 느린 호스트에서
     # flaky해지지 않게 하되, "결국 돌아왔다"가 아니라 "제 시간에 돌아왔다"를 본다.
-    assert waited < 30.0, f"writer가 {waited:.1f}초나 기다렸다 — lock_timeout이 안 걸렸다"
+    assert waited < 10.0, f"writer가 {waited:.1f}초나 기다렸다 — lock_timeout이 안 걸렸다"

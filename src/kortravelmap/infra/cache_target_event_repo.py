@@ -20,6 +20,7 @@ from kortravelmap.core.cache_target_stream import (
     validate_cache_target_key,
 )
 from kortravelmap.infra.advisory_lock import advisory_lock_key
+from kortravelmap.infra.cache_target_stream_repo import lock_stream_row_or_conflict
 from kortravelmap.infra.domain_command_repo import canonical_domain_command_fingerprint
 
 if TYPE_CHECKING:
@@ -316,10 +317,14 @@ async def _lock_result_streams(
     systems = tuple(sorted(set(external_systems), key=lambda value: value.encode()))
     if not systems:
         return
+    # build barrier가 같은 row를 `FOR SHARE OF stream`으로 예산 전 구간 쥔다. 여기서
+    # 무한 대기하면 connection을 문 채 쌓이고 전 endpoint 공유 pool이 마른다 —
+    # `lock_cache_target_stream` 경로만 고치면 이 경로로 같은 일이 그대로 일어난다.
     locked = (
         (
-            await session.execute(
-                text(_LOCK_RESULT_STREAMS_SQL),
+            await lock_stream_row_or_conflict(
+                session,
+                _LOCK_RESULT_STREAMS_SQL,
                 {"external_systems": list(systems)},
             )
         )

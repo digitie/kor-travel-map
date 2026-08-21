@@ -9,7 +9,7 @@
 | `_SNAPSHOT_BUILD_TIMEOUT_SECONDS` | `300.0` | **`300.0` (유지)** |
 | `_SNAPSHOT_BUILD_STATEMENT_TIMEOUT` | `"5min"` | `"5min"` (유지, CI가 예산과 대조) |
 | `_SNAPSHOT_ITEM_LIMIT` | `1_000_000` | **`500_000`** |
-| `_SNAPSHOT_MATERIAL_BYTE_LIMIT` | `512 MiB` | 유지 (memory·이상 데이터 방어선) |
+| `_SNAPSHOT_MATERIAL_BYTE_LIMIT` | `512 MiB` | **`60 MiB`** (아래 §byte 축) |
 
 **예산은 올리지 않는다.** 이 값은 stream share barrier가 유지되는 시간이자 그 stream의
 outbox writer가 막히는 최대 시간이다. 올리면 아래 §"도달 가능한 장애"가 커진다.
@@ -28,8 +28,14 @@ outbox writer가 막히는 최대 시간이다. 올리면 아래 §"도달 가�
 
 ## 측정
 
-n150(운영 하드웨어), 격리 DB, **배포 예산 그대로**(측정용 예산 우회 없음),
-대표성 fixture(아래 §fixture).
+n150(운영 하드웨어), 격리 DB, 대표성 fixture(아래 §fixture).
+
+> **측정 조건 정정.** 아래 세 수치를 잰 시점의 soak은 측정 동안
+> `_SNAPSHOT_BUILD_TIMEOUT_SECONDS`를 3,600초로 덮고 session `statement_timeout`도
+> 3,600초로 올린 상태였다(적대 리뷰가 잡았다). 따라서 소요 시간 자체는 유효하지만
+> **배포 deadline 아래에서 완주가 증명된 것은 아니다** — `_snapshot_build_deadline`이
+> 한 번도 돌지 않았다. 그 우회를 제거했으므로 앞으로의 soak은 배포 예산 그대로 돌고,
+> 넘으면 그 자체가 실패다.
 
 | N | seed | build | item/s | 예산 300초 대비 | 게이트(≤150초) |
 |---|---|---|---|---|---|
@@ -63,6 +69,39 @@ prod의 external_system별 cache target 수는 가장 큰 stream(`c7-e2e`)이 **
 500,000은 관측 최대의 **2,793배**다. 즉 이 상한 인하는 실사용을 전혀 좁히지 않는다.
 `feature.features` 1,008,852행은 cache target이 아니므로 이 축과 무관하다.
 
+## byte 축 — item 수만으로는 build 시간을 묶지 못한다
+
+`_SNAPSHOT_MATERIAL_BYTE_LIMIT`은 `material_bytes`(= `_leaf_material` 인코딩 길이 합,
+`10 + 4 + |system| + 4 + |key| + 1 + 8 + 32`)와 비교한다. heap 크기가 아니다.
+
+| 키 모양 | B/item | 500,000 재료 | byte 상한 발화 지점 |
+|---|---|---|---|
+| soak fixture 37자 ASCII | 104 | 49.6 MiB | 5,162,220 |
+| prod 실측 35자 ASCII | 103 | 49.1 MiB | 5,212,338 |
+| 계약 최대 512자 ASCII | 683 | 325.7 MiB | 786,048 |
+| 512자 한글 NFC | 1,611 | 768.2 MiB | 333,253 |
+
+`target_key`는 계약상 **512자**까지 허용된다(`validate_cache_target_key`). 그래서 같은
+item 수에서도 재료량이 **16배** 흔들리고, build는 그 키로 인덱스 없는 표현식 정렬을 두 번
+한다. item 상한만으로는 그 폭 축을 전혀 묶지 못한다.
+
+예전 512 MiB는 실측 재료 처리량 **439,600 B/s**(500,000 × 104 B / 118.3초) 기준
+**1,221초 = 예산의 4.1배**라 시간 방어선이 될 수 없었다. 게다가 item 상한을 500,000으로
+낮춘 뒤로는 계약 최대 폭에서도 500,000 × 683 B = 325.7 MiB < 512 MiB라 **ASCII stream에서
+아예 발화하지 않는 죽은 코드**가 됐다.
+
+**60 MiB**로 조인다. 439,600 B/s에서 143초로 예산 절반(150초) 안이다. 정상 폭 stream은
+영향이 없다 — 103 B/item이면 610,820 item에 해당해 item 상한(500,000)이 먼저 걸린다.
+즉 이 상한은 **비정상적으로 넓은 키**만 잡는다. 두 축 모두
+`tests/unit/test_cache_target_snapshot_repo.py`가 예산 절반 성질을 지킨다.
+
+## 안전계수 2가 넉넉한가
+
+넉넉하지 않다. 이 저장소가 가진 유일한 동시 부하 관측은 앞선 보고서의 1M 547.9초 대
+오늘의 235.7초 = **2.32배**다. 상한에 적용하면 118.3 × 2.32 = 274.5초로 예산의 91.5%다.
+즉 2배 여유는 그 한 점의 부하 배수에 거의 정확히 소진되며, 폭 축(위 §byte)에는 남는 것이
+없다. 그래서 byte 축을 별도로 조였다. 부하 아래 재측정은 남은 숙제다.
+
 ## fixture — 예전 측정이 왜 낙관적이었나
 
 예전 fixture는 `'soak-' || lpad(value::text, 8, '0')`로 **13자 ASCII를 삽입 순서대로** 심었다.
@@ -93,7 +132,21 @@ prod 실측 `target_key`는 24~36자(평균 35.1, 전부 ASCII)다. 새 fixture�
    stream을 예산 전 구간 `FOR SHARE`로 쥐는 동안 writer는 **connection을 문 채** 쌓이고,
    그 pool은 전 endpoint 공유다(`make_async_engine` 기본 `pool_size=5 + max_overflow=10`
    = 15). build 하나가 지도 조회까지 포함한 API 전체를 마르게 할 수 있었다.
-   → `lock_timeout = 5s` + typed `stream_busy`(503, `Retry-After: 1`).
+   → `lock_timeout = 1s` + typed `stream_busy`(503, `Retry-After: 10`).
+
+   여기서 두 가지를 더 잡았다(적대 리뷰). 첫째, `set_config(..., is_local => true)`는
+   statement가 아니라 **transaction** 범위다. 상한을 걸어 놓고 되돌리지 않으면 같은 writer
+   transaction의 이후 lock 대기가 전부 그것을 물려받는데 거기에는 handler가 없어
+   처리되지 않은 `DBAPIError` → **500**이 된다. 고치려던 것보다 나쁘다. 그래서 상한은
+   `lock_stream_row_or_conflict` helper가 **그 문장에만** 걸고 곧바로 `0`으로 되돌린다.
+   둘째, `Retry-After`가 lock 대기보다 짧으면 duty cycle이 높아 무한 대기를 고친 효과가
+   대부분 사라진다(대기 5초 · 재시도 1초 = 83%). 대기를 1초로 줄이고 재시도를 10초로
+   벌려 9%로 만든다.
+
+   그리고 **고친 경로가 하나뿐이면 의미가 없다.** `cache_target_event_repo`의
+   `_LOCK_RESULT_STREAMS_SQL`(`FOR UPDATE OF stream`)도 같은 row를 잡는데 `lock_timeout`이
+   0건이었고, 그쪽이 오히려 더 유력한 피해자다 — PinVi의 refresh-request 생성이 그 경로다.
+   같은 helper를 적용했다.
 
 2. **재시도 폭주.** `snapshot_build_timeout`의 `Retry-After: 1`은 예산을 통째로 태우고 실패한
    요청에 1초 뒤 재시도를 지시한다. 재시도가 즉시 advisory lock을 다시 잡고 같은 예산을 또
