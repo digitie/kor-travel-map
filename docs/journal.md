@@ -1,5 +1,13 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-21 (codex) — 완료된 T-VN-40·C7 잔재를 task archive로 정리
+
+- `tasks.md`에 중복으로 남은 T-VN-40B/C·인수 ①~⑤와 완료된 C7 증거 task의 상태 서술을
+  `tasks-done.md`의 정본 근거로 이관했다. 진행 백로그에는 `T-VN-39`, Lane M/41과
+  `T-FE-MOCK-FLAKE`만 남긴다.
+- migration 정본도 main `0232`와 draft #1029의 M01~M05 직렬 `0226`~`0235`를 명시해,
+  완료된 T-VN-40 revision을 활성 migration 계획처럼 읽지 않게 했다.
+
 ## 2026-08-21 — build 예산 vs 상한 결정을 닫고, 그 옆의 도달 가능한 장애를 고쳤다
 
 `_SNAPSHOT_ITEM_LIMIT = 1_000_000`과 `_SNAPSHOT_BUILD_TIMEOUT_SECONDS = 300`이 같은 사실을
