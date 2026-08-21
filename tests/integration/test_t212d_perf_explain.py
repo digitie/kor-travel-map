@@ -713,6 +713,75 @@ def _assert_dedup_refresh_default_plan(plan: dict[str, Any]) -> None:
             _assert_relation_uses_index(plan, relation_name, *expected)
 
 
+def test_t212d_default_gate_accepts_small_source_entities_seq_scan() -> None:
+    """#990의 planner cost 경계에서 정상적인 dimension Seq Scan을 허용한다.
+
+    provider/dataset 조건이 fixture ``source_entities``의 20%를 고르면 PostgreSQL은
+    버전·캐시·CPU에 따라 그 작은 relation을 순차 읽는 것이 더 싸다고 판단할 수 있다.
+    이 경로를 회귀로 오판하면 문서 전용 변경도 CI에서 막힌다. 반대로 나머지 대량
+    relation의 index 경로는 계속 고정해야 하므로 그 단언은 그대로 유지한다.
+    """
+
+    plan = {
+        "Node Type": "Nested Loop",
+        "Plans": [
+            {
+                "Node Type": "Index Scan",
+                "Relation Name": "features",
+                "Index Name": "idx_features_updated_keyset",
+            },
+            {
+                "Node Type": "Index Scan",
+                "Relation Name": "source_links",
+                "Index Name": "idx_source_links_entity",
+            },
+            {"Node Type": "Seq Scan", "Relation Name": "source_entities"},
+            {
+                "Node Type": "Index Scan",
+                "Relation Name": "source_entity_heads",
+                "Index Name": "pk_source_entity_heads",
+            },
+            {
+                "Node Type": "Index Scan",
+                "Relation Name": "source_records",
+                "Index Name": "pk_source_records",
+            },
+        ],
+    }
+
+    _assert_dedup_refresh_default_plan(plan)
+
+
+def test_t212d_default_gate_still_rejects_large_relation_seq_scan() -> None:
+    """작은 dimension 예외가 대량 ``features`` Seq Scan으로 넓어지지 않게 한다."""
+
+    plan = {
+        "Node Type": "Nested Loop",
+        "Plans": [
+            {"Node Type": "Seq Scan", "Relation Name": "features"},
+            {"Node Type": "Seq Scan", "Relation Name": "source_entities"},
+            {
+                "Node Type": "Index Scan",
+                "Relation Name": "source_links",
+                "Index Name": "idx_source_links_entity",
+            },
+            {
+                "Node Type": "Index Scan",
+                "Relation Name": "source_entity_heads",
+                "Index Name": "pk_source_entity_heads",
+            },
+            {
+                "Node Type": "Index Scan",
+                "Relation Name": "source_records",
+                "Index Name": "pk_source_records",
+            },
+        ],
+    }
+
+    with pytest.raises(AssertionError, match="unexpected sequential scan on features"):
+        _assert_dedup_refresh_default_plan(plan)
+
+
 async def _walk_dedup_review_ids(
     session: AsyncSession, *, page_size: int = 37
 ) -> list[str]:
