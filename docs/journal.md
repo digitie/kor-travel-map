@@ -51,6 +51,12 @@ byte 상한 512 MiB도 손봤다. `material_bytes`는 heap이 아니라 leaf 인
 하지 않는 죽은 코드였다. `target_key`가 512자까지 허용돼 같은 item 수에서도 재료량이 16배
 흔들리므로 item 상한만으로는 폭 축을 못 묶는다. 56 MiB(139초)로 조였다.
 
+## 2026-08-21 — catalog 대리키 lint 범위를 provider catalog로 한정
+
+`OVERRIDING SYSTEM VALUE` 탐지는 provider catalog의 identity 대리키 하드코딩만 막아야 한다.
+M05 reconciliation event의 독립 sequence를 procedure 안에서 명시하는 합법 SQL까지 전역적으로
+거부해 Python CI가 실패하던 것을, catalog INSERT가 확인된 SQL 상수에만 검사하도록 고쳤다.
+
 ## 2026-08-21 — `0229`~`0232` 묶음 prod 배포 완료, admin 500 해소
 
 PR #1042(자연키 C05 catalog)가 CI 8/8로 머지돼 main이 `e47a389f`가 됐고, 그 위에서

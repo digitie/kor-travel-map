@@ -9,6 +9,15 @@
 **다음 한 작업**: 문서 PR을 병합한 뒤 Map #1029와 PinVi M05 PR을 최신 main에 rebase하고,
 각 CI·격리 live E2E 근거를 다시 대조한다.
 
+## 2026-08-21 — M05 event sequence가 catalog 대리키 lint에 오인되던 CI 보정
+
+`OVERRIDING SYSTEM VALUE` lint를 provider catalog INSERT 범위로 한정했다. M05 reconciliation event의
+독립 sequence write는 catalog identity가 아니므로 허용하고, 실제 catalog 대리키 고정 회귀는 계속 막는다.
+
+### 다음 한 작업
+
+보정 커밋을 푸시해 Map CI를 다시 확인한다. CI green 뒤에만 N150 격리 mutating browser E2E를 시작한다.
+
 ## 2026-08-21 — `0229`~`0232` 묶음 prod 배포 완료, admin 500 해소
 
 | 축 | 배포 전 | 배포 후 |
