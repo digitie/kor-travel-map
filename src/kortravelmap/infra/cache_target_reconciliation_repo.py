@@ -1299,6 +1299,15 @@ def _enforce_snapshot_admission(*, item_count: int, material_bytes: int) -> None
         )
 
 
+def snapshot_build_budget_seconds() -> float:
+    """build 예산(초). API가 `Retry-After`를 이 값에서 계산한다.
+
+    상수를 API 쪽에 다시 적지 않는다 — 두 곳에 적으면 예산을 바꿀 때 한쪽이 남는다.
+    """
+
+    return _SNAPSHOT_BUILD_TIMEOUT_SECONDS
+
+
 @asynccontextmanager
 async def _snapshot_build_deadline() -> AsyncIterator[None]:
     """첫 stream lock부터 두 scan과 모든 INSERT까지의 단일 누적 예산."""

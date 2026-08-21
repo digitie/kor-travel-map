@@ -31,7 +31,10 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from kortravelmap.core.exceptions import GeoAuthNotConfiguredError, GeoRequestError
-from kortravelmap.infra import CacheTargetStreamConflict
+from kortravelmap.infra import (
+    CacheTargetStreamConflict,
+    snapshot_build_budget_seconds,
+)
 from kortravelmap.infra.db import assert_runtime_db_privilege_boundary
 from kortravelmap.infra.feature_subtype import SubtypeDetailError
 from kortravelmap.infra.log_repo import record_api_call
@@ -551,10 +554,18 @@ def _cache_target_stream_conflict_status(code: str) -> int:
     return 409
 
 
+#: build 예산을 통째로 태우고 실패한 요청에 1초 뒤 재시도를 지시하면, 그 stream은
+#: barrier를 놓지 않는 100% duty cycle로 물린다 — 재시도가 즉시 advisory lock을 다시
+#: 잡고 같은 예산을 또 태우기 때문이다. 그동안 writer는 계속 밀린다. 실패에 든 시간
+#: 만큼은 비워 줘야 부하가 실제로 빠진다.
+_CACHE_TARGET_BUILD_RETRY_AFTER_SECONDS = int(snapshot_build_budget_seconds())
+
+
 def _cache_target_retry_after(exc: CacheTargetStreamConflict) -> str | None:
+    if exc.code == "snapshot_build_timeout":
+        return str(_CACHE_TARGET_BUILD_RETRY_AFTER_SECONDS)
     if exc.code in {
         "snapshot_barrier_timeout",
-        "snapshot_build_timeout",
         "snapshot_busy",
         "snapshot_ttl_too_short",
     }:

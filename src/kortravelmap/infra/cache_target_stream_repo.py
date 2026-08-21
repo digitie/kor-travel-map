@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID, uuid4
 
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from kortravelmap.core.cache_target_stream import (
     ActiveCacheTargetSourceV1,
@@ -137,6 +138,18 @@ WHERE external_system = :external_system
 """
 
 _LOCK_STREAM_SQL = _GET_STREAM_SQL + " FOR UPDATE"
+
+#: writer가 stream row lock을 무한정 기다리지 않게 한다. snapshot build는 같은 stream을
+#: `FOR SHARE`로 build 예산 전 구간(최대 `_SNAPSHOT_BUILD_TIMEOUT_SECONDS`) 쥔다. 그동안
+#: writer가 `lock_timeout=0`(PG 기본)으로 기다리면 **connection을 문 채** 쌓이고, 그 pool은
+#: 전 endpoint가 공유하므로(`make_async_engine` 기본 `pool_size=5 + max_overflow=10`) build
+#: 하나가 API 전체를 마르게 할 수 있다. 이 경로는 stream 크기와 무관하게 발생한다.
+#: 기다리지 못하면 typed `stream_busy`로 빠르게 돌려보내고 재시도는 클라이언트가 한다.
+_STREAM_WRITER_LOCK_TIMEOUT = "5s"
+
+_SET_STREAM_WRITER_LOCK_TIMEOUT_SQL = """
+SELECT set_config('lock_timeout', :lock_timeout, true)
+"""
 
 _LOCK_HEAD_SQL = """
 SELECT external_system, target_key, target_id, state, restore_epoch,
@@ -380,6 +393,10 @@ async def _lock_or_create_stream(
 ) -> CacheTargetStreamControl:
     if not consumer_id or consumer_id != consumer_id.strip() or len(consumer_id) > 128:
         raise ValueError("consumer_id는 trim된 1~128자 문자열이어야 합니다.")
+    await session.execute(
+        text(_SET_STREAM_WRITER_LOCK_TIMEOUT_SQL),
+        {"lock_timeout": _STREAM_WRITER_LOCK_TIMEOUT},
+    )
     created = (
         await session.execute(
             text(_CREATE_STREAM_SQL),
@@ -388,12 +405,22 @@ async def _lock_or_create_stream(
     ).one_or_none()
     row = created
     if row is None:
-        row = (
-            await session.execute(
-                text(_LOCK_STREAM_SQL),
-                {"external_system": external_system},
-            )
-        ).one()
+        try:
+            row = (
+                await session.execute(
+                    text(_LOCK_STREAM_SQL),
+                    {"external_system": external_system},
+                )
+            ).one()
+        except DBAPIError as exc:
+            # 55P03 lock_not_available / 57014 statement 취소. 둘 다 "지금은 못 잡았다"다.
+            if getattr(exc.orig, "sqlstate", None) not in {"55P03", "57014"}:
+                raise
+            raise CacheTargetStreamConflict(
+                "stream_busy",
+                "stream이 다른 작업에 잡혀 있어 지금 쓰기를 받을 수 없습니다.",
+                current={"lock_timeout": _STREAM_WRITER_LOCK_TIMEOUT},
+            ) from exc
     control = _stream(row)
     if control.consumer_id != consumer_id:
         raise CacheTargetStreamConflict(
