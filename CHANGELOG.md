@@ -9,8 +9,9 @@
 
 - **ADDED (DB)**: migration `0236_tvn41s_compaction_drained`가
   `ops.poi_cache_target_snapshot_materials`에 `compaction_drained_at`과 partial index를 더한다.
-  GC backlog 판정이 "표시됐고 item이 남은 material"을 item 존재 probe 대신 상태 조회로 묻게 되어,
-  영구 보존되는 audit material이 쌓여도 판정 비용이 커지지 않는다. forward-only.
+  GC backlog 판정의 "표시됐고 item이 남은 material" 갈래가 item 존재 probe 대신 상태 조회가 되어
+  상수 시간으로 떨어진다. **같은 판정의 orphan 갈래는 아직 선형이다** — 그쪽은 `compacted_at`
+  필터가 없어 보존되는 audit material까지 anti-join한다(잔여 항목으로 남겼다). forward-only.
 - **CHANGED (DB)**: material append-only fence가 `compacted_at`과 `compaction_drained_at` 두
   표시를 각각 **한 방향**으로 허용한다. 나머지 열은 여전히 불변이며, 검사 순서(전제 → 표시 여부
   → 불변성 → 한 방향 → 이미 표시됨)가 계약이라 어느 규칙에 걸렸는지 메시지로 구분된다.

@@ -145,6 +145,20 @@ def test_reconciler_governs_exactly_three_schemas() -> None:
     그때는 안내와 코드가 함께 바뀌어야 하므로 여기서 함께 묶어 둔다.
     """
 
+    # 문자열 부분일치로 보면 안 된다. `IN ('feature','provider_sync','ops','staging')`은
+    # 두 단언을 모두 통과한다 — 잡으려던 확장이 바로 그 모양이다. 반대로 줄바꿈이나
+    # `= ANY(ARRAY[...])`로 바꾸기만 해도 거짓 red가 난다. 그래서 SQL이 아니라 **정본
+    # 튜플**을 본다(SQL은 그 튜플에서 만들어진다).
+    assert runtime_privileges._GOVERNED_SCHEMAS == (  # noqa: SLF001
+        "feature",
+        "provider_sync",
+        "ops",
+    ), (
+        "관장 schema 집합이 바뀌었다. 실패 메시지의 `public` 안내가 여전히 참인지 "
+        "확인하고 두 곳을 함께 고쳐라."
+    )
+    assert "public" not in runtime_privileges._GOVERNED_SCHEMAS  # noqa: SLF001
+    # SQL이 그 튜플에서 만들어지는지도 본다 — 튜플만 두고 SQL에 손으로 적으면 갈라진다.
     sql = str(runtime_privileges._APPLICATION_RELATIONS_SQL)  # noqa: SLF001
-    assert "'feature', 'provider_sync', 'ops'" in sql, sql
-    assert "public" not in sql, sql
+    for schema in runtime_privileges._GOVERNED_SCHEMAS:  # noqa: SLF001
+        assert f"'{schema}'" in sql, sql

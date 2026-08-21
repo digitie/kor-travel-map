@@ -24,7 +24,8 @@ barrier로 직렬화한다.
 - **Lane B — frontend hardening·PinVi 소비 API**
   - [~] `T-VN-41C`(#975 병합 / final exact-pair·prod consumer enable 잔여)
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환 — **저장소측 완료 2026-08-20**, live 실행은 배리어 대기)
-    ∥ [x] `T-VN-41S` — 완료(2026-08-21). `410` service spec 선언은 `T-VN-41C` re-vendor로 이월
+    ∥ [~] `T-VN-41S`(예산/상한·ACL 탈출구·배출 상태 완료 / **GC orphan 갈래 선형 비용** 잔여,
+      `410` 선언은 `T-VN-41C` re-vendor로 이월)
   - **배리어**: [ ] `T-VN-FINAL-REBUILD`(주요 개발 완료 후 파괴적 재구축 — 사용자 결정 2026-08-20)
   - [ ] `T-FE-MOCK-FLAKE`(`/v1/ops/logs`)
   - [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2` → `T-VN-41C` receipt 승격
@@ -536,8 +537,10 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 
     **함께 실을 것 — service spec `410` 선언(T-VN-41S에서 이월).** 조사 결과(2026-08-21):
 
-    - 바뀌는 산출물은 **둘**이다. `openapi.service.json`과 `openapi.json`(전체 spec도 service
-      route를 담는다). `openapi.user.json`은 그대로다.
+    - 바뀌는 산출물은 **셋**이다. `openapi.service.json`, `openapi.json`(전체 spec도 service
+      route를 담는다), 그리고 그 둘에서 생성되는 admin frontend `src/api/types.ts`
+      (`.github/workflows/frontend.yml`의 `gen:types:check`가 gate한다). `openapi.user.json`은
+      그대로다.
     - 재생성은 서버·DB 없이 된다:
       `python packages/kor-travel-map-api/scripts/export_openapi.py --profile all --output ... --user-output ... --service-output ...`
       `openapi-drift` CI가 같은 명령을 `--check`로 돌려 문자열 비교하므로 재생성본을 함께 커밋해야 한다.
@@ -545,12 +548,24 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
       full SHA로 checkout하므로 **미머지 Map 브랜치에서도 vendoring이 성립한다**(실제로 PinVi가
       Map main에 없는 `037e2469`를 핀하고 있다). Map을 먼저 올리면 `pinvi_service_vendor_sha256`에
       PinVi main이 갖고 있지 않은 해시를 적게 되어 계약이 거짓이 된다.
-    - **막는 것 하나**: `contracts/vnext/tvn40-live-acceptance-v1.json`이 T-VN-40 receipt의
+    - **함께 고쳐야 할 것 — spec이 지금 거짓을 말한다.** `0229`~ 이후 코드가 강제하는 admission
+      상한은 `item 500,000 / material 56 MiB`인데, route docstring 3곳
+      (`routers/cache_target_streams.py`)과 거기서 생성된 두 spec은 아직
+      `1,000,000 / 512 MiB`라고 적는다. 누락이 아니라 **틀린 서술**이고, 소비자가 읽을 수 있는
+      유일한 문서다. 고치는 비용은 410 선언과 정확히 같으므로(같은 spec bytes) 반드시 함께 싣는다.
+    - **막는 것 셋.** 아래 (1)만 truthfulness 문제이고 (2)(3)은 spec bytes가 움직이는 순간
+      바로 red가 되는 hard gate다.
+      1. `contracts/vnext/tvn40-live-acceptance-v1.json`이 T-VN-40 receipt의
       `map_commit`/`pinvi_commit`과 결박돼 있는데 `pending` 가드가 없다. receipt는 `complete`이고
-      `map_commit`의 spec 해시는 옛 값이라, spec을 바꾸면 그 주장이 거짓이 된다. 둘 중 하나를
-      골라야 한다 — (a) 새 pair로 n150 paired live acceptance를 재실행해 재봉인, (b) 교차 결박에
-      `state == "complete"` 가드를 두고 T-VN-40을 `pending`으로. (b)는 서명된 acceptance를
-      미검증으로 되돌리므로 사용자 결정이 필요하다.
+         `map_commit`의 spec 해시는 옛 값이라, spec을 바꾸면 그 주장이 거짓이 된다. 둘 중 하나를
+         골라야 한다 — (a) 새 pair로 n150 paired live acceptance를 재실행해 재봉인, (b) 교차 결박에
+         `state == "complete"` 가드를 두고 T-VN-40을 `pending`으로. (b)는 서명된 acceptance를
+         미검증으로 되돌리므로 사용자 결정이 필요하다.
+      2. `tests/unit/test_vnext_contract_artifacts.py`가 세 spec 파일 해시를 T-VN-40
+         deployment receipt와 대조한다 — spec이 움직이면 그 receipt를 함께 옮겨야 한다.
+      3. 같은 파일이 T-VN-41 receipt에 대해 `map_service_openapi_sha256ㆍ== 현재 tree 해시`이고
+         `== pinvi_service_vendor_sha256`임을 **`pending` 갈래에서도** 단언한다. 그래서 PinVi를
+         먼저 머지해야 그 등식이 참인 채로 Map을 올릴 수 있다.
 
     active paired receipt는 `pending`으로 되돌렸으며, 기존 `77821001`/`e8e0fec` 후보 archive·image·Live UI
     증거는 이전 service bytes의 이력일 뿐이다. PinVi vendor PR 병합과 새 exact pair의 적대 재리뷰·n150
@@ -602,7 +617,7 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
     `429/503 Retry-After` backoff, `413` non-retry, credential별 gateway limit 또는 동등한 외부 rate-limit과
     실제 호출 cadence를 함께 증명한다.
 
-- [x] T-VN-41S — **snapshot materialization streaming·audit compaction 확장 (#922, C enable 비차단)**
+- [~] T-VN-41S — **snapshot materialization streaming·audit compaction 확장 (#922, C enable 비차단)**
 
   DB-side/bounded streaming Merkle materialization, receipt/material 공유, terminal audit item compaction,
   item/byte admission과 relation bytes/dead-tuple/vacuum metric을 1M+ synthetic/n150 soak로 검증한다.
@@ -611,7 +626,7 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   material 재사용·관측 metric·typed future error 계약까지다. 독립 적대 리뷰 2명은 최종 head에서 P0~P3
   잔여 없음으로 GO했고, 단위/API/Dagster 집중 231개와 PostGIS stream repository 37개를 통과했다.
 
-  **후속 종료선 — 닫혔다(2026-08-21).** 물리 모델(`0231`)·양방향 공유·compactor·repository
+  **후속 종료선 — 대부분 닫혔고 하나가 남았다(2026-08-21).** 물리 모델(`0231`)·양방향 공유·compactor·repository
   410·EXPLAIN·n150 soak에 더해, 마지막까지 남았던 세 항목을 모두 처리했다.
 
   - **예산 vs 상한 결정** — 예산 300초 유지, item 상한 `1,000,000 → 500,000`, 재료 상한
@@ -623,11 +638,15 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
     걸리지 않는다. 그 경로를 실패 메시지가 직접 안내하게 하고 테스트로 고정했다. env로 여는
     allowlist는 채택하지 않았다 — fence를 약하게 만들고, 한 번 열면 닫혔는지 아무도 확인하지 않는다.
   - **compacted material의 무한 누적 스캔** — `0236`이 `compaction_drained_at`과 partial index를
-    더해 "표시됐지만 아직 배출 중"만 색인한다. audit material이 아무리 쌓여도 backlog 판정이
-    커지지 않는다.
+    더해 "표시됐지만 아직 배출 중"만 색인한다. 그 갈래는 상수 시간으로 떨어졌다. **다만 같은
+    두 질의의 orphan 갈래는 아직 선형이다** — 아래 잔여 항목.
 
-  **하나는 이 lane 밖으로 넘긴다** — service spec의 `410` 선언(아래 항목). 교차 저장소
-  re-vendor가 필요하고 T-VN-41 lane이 어차피 그것을 요구하므로 거기서 함께 한다.
+  **하나는 이 lane 밖으로 넘기고, 하나는 잔여로 남긴다.** `410` 선언은 교차 저장소
+  re-vendor가 필요해 `T-VN-41C`로 넘긴다. GC backlog의 **orphan 갈래 선형 비용**은 이
+  블록의 열린 항목으로 남는다 — `0236`이 그 갈래는 건드리지 않았다.
+
+  **`#922`는 열어 둔다.** 그 issue의 종결 조건이던 예산/상한 결정은 닫혔지만 위 두 잔여가
+  남아 있다. issue를 닫으려면 orphan 갈래까지 처리하거나, 그것을 별도 issue로 떼어내야 한다.
 
   **이번 PR 완료 항목**
 
@@ -687,12 +706,22 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
     `test_snapshot_barrier_keeps_outbox_cursor_commit_safe_across_writers`,
     `test_generic_snapshot_reuse_ignores_nonmaterial_outbox_tail`). soak에서 흉내 내면 같은
     성질을 덜 정확하게 보는 두 번째 게이트가 된다.
+  - [ ] **GC backlog 판정의 orphan 갈래가 아직 선형이다(적대 리뷰 지적, 2026-08-21).**
+    `0236`은 "표시됐지만 아직 배출 중" 갈래만 상수로 만들었다. 같은 두 질의
+    (`_SELECT_EXPIRED_SNAPSHOT_GC_SYSTEM_SQL`·`_HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL`)의
+    orphan 갈래는 `compacted_at` 필터가 없어 **영구 보존되는 audit material까지 전부**
+    anti-join한다(material마다 receipt index probe 한 번). 네 갈래가 `OR`/`UNION`으로 묶여
+    backlog가 **없을 때** 전부 평가되므로, 원래 지목된 "한가할 때가 가장 비싸다"가 그 갈래에
+    그대로 남아 있다. → orphan 여부도 상태로 들고 partial index에 태우거나(그러면 receipt
+    삭제 시 갱신 경로가 필요하다), 두 질의를 orphan 전용 색인으로 받는다. 지금 규모에서
+    문제는 아니지만 **상한이 없다** — `0236`이 없앤 것과 같은 종류의 비용이다.
   - [>] **service spec이 도달 가능한 `410`을 선언하지 않는다 → `T-VN-41C`로 이월(2026-08-21).**
     generic snapshot cursor 경로는 `410 SNAPSHOT_MATERIAL_COMPACTED`를 실제로 낸다. 선언하면
     `openapi.service.json`과 `openapi.json` bytes가 함께 바뀌어 PinVi re-vendor가 같은 호흡으로
     필요하다. T-VN-41C가 어차피 service re-vendor를 요구하므로 거기서 함께 한다 — 실행 절차는
     아래 T-VN-41C 항목에 적었다. **오늘 깨진 것은 없다**: PinVi는 이미 그 410을 런타임에서
-    처리한다(`apps/api/tests/unit/test_cache_target_transport.py`가 410 → typed 오류를 단언).
+    처리한다 — 공유 transport(`apps/api/app/clients/kor_travel_map_cache_target.py`)가
+    응답 `code`만 보고 typed 오류로 올린다. route별 테스트가 아니라 그 transport가 근거다.
     410 본문 문구("보존 기간을 지나")는 orphan 표시에 맞지 않아 이번에 함께 고쳤다 — runtime
     문자열이라 spec을 건드리지 않는다.
   - [x] **`ops` fail-closed ACL의 탈출구가 없다(적대 리뷰 지적).** → `public`을 정본 경로로,
@@ -808,6 +837,7 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   **배리어 해제 조건 (전부 참이어야 착수).** "주요 개발 완료"를 사람 판단에 맡기지 않고
   아래 셋으로 판정한다 — 셋 다 "세대를 낡게 만드는 변경"의 정의다.
   - [ ] B1. **migration head를 올리는 열린 task가 없다.** 현재 걸려 있는 것: `T-VN-41S`
+    (`0236`까지 착지했고 남은 잔여는 migration을 요구하지 않는다)
     (`0227+` migration/compactor), `T-VN-M01`~`M05` 중 DB를 바꾸는 것,
     `T-VN-C05A`~`C05D`(provider dataset 신설), `T-VN-39`(최종 cutover).
   - [ ] B2. **service/user OpenAPI 정본을 바꾸는 열린 task가 없다.** PinVi exact vendor가

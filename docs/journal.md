@@ -1,6 +1,6 @@
 # journal.md — 작업 일지 (역시간순)
 
-## 2026-08-21 — T-VN-41S를 닫았다: 남은 셋 중 둘을 고치고 하나는 lane을 옮겼다
+## 2026-08-21 — T-VN-41S 잔여를 처리하다 절반만 고친 것을 리뷰가 잡았다
 
 41S의 후속 종료선에 남아 있던 것은 셋이었다.
 
@@ -12,10 +12,21 @@
 "public에 두면 된다"는 안내가 거짓이 되므로 함께 red가 되어야 한다). env allowlist는
 채택하지 않았다 — fence를 약하게 만들고, 한 번 열면 닫혔는지 아무도 확인하지 않는다.
 
-**② compacted material의 무한 누적 스캔.** `0236`이 `compaction_drained_at`과 partial index를
-더한다. "표시됐고 item이 남은 material"을 item 존재 probe로 재면 compacted material 하나마다
+**② compacted material의 무한 누적 스캔 — 절반만 고쳤다.** `0236`이 `compaction_drained_at`과
+partial index를 더한다. "표시됐고 item이 남은 material"을 item 존재 probe로 재면 compacted material 하나마다
 index probe 한 번이고, audit material은 영구 보존이라 그 수가 단조 증가한다. 비용이 가장 큰
 때가 하필 한가할 때다 — backlog가 있으면 첫 hit에서 멈추지만 없으면 전부 훑고 false를 낸다.
+
+그런데 적대 리뷰가 **같은 판정의 orphan 갈래는 그대로**라는 것을 잡았다. 그 갈래는
+`compacted_at` 필터가 없어 영구 보존되는 audit material까지 전부 anti-join하고, 네 갈래가
+`OR`로 묶여 backlog가 없을 때 전부 평가된다. 즉 지목한 비용 구조가 절반 남았다. 문서 세 곳의
+"판정 비용이 커지지 않는다"를 실제 성질로 고치고 잔여를 열린 항목으로 남겼다 — **닫으면서
+남은 것을 지우면 다음 사람은 같은 벽에 두 배 크기로 부딪힌다.**
+
+리뷰가 하나 더 잡았다. 내가 고친 것은 두 backlog 질의 중 **하나뿐**이었고, 고치지 않은 쪽이
+매 batch에서 먼저 돈다. `UNION` 뒤에 `LIMIT 1`이 걸려 갈래마다 전량 평가되므로 짧게 끊기지도
+않는다 — 그대로 뒀다면 열과 인덱스만 늘고 비용은 그대로였다. 두 질의가 같은 술어를 쓰는지
+테스트로 묶었다(동작 테스트는 둘이 우연히 같은 답을 낼 때 통과하므로 술어를 본다).
 
 **③ service spec의 `410` 선언 → T-VN-41C로 이월.** 선언하면 spec 두 개가 함께 바뀌고 PinVi
 re-vendor가 같은 호흡으로 필요하다. 41C가 어차피 re-vendor를 요구하므로 거기서 함께 한다.

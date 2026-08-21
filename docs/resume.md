@@ -1,27 +1,34 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-08-21 — T-VN-41S 종료
+## 2026-08-21 — T-VN-41S 잔여 셋 중 둘 처리, 하나는 이월 (task는 아직 열림)
 
-후속 종료선에 남아 있던 셋 중 둘을 고치고 하나는 lane을 옮겼다.
+후속 종료선에 남아 있던 셋 중 둘을 고치고 하나는 lane을 옮겼다. **다만 적대 리뷰가
+둘 중 하나(GC 스캔)를 절반만 고쳤다는 것을 잡아, task는 닫지 않았다.**
 
 | 항목 | 결과 |
 |---|---|
 | `ops` fail-closed ACL 탈출구 | fence는 그대로. 관장 밖(`public`)을 정본 경로로 하고 **실패 메시지가 직접 안내**한다. 메시지와 관장 schema 집합을 테스트로 묶었다 |
-| compacted material 무한 누적 스캔 | `0236` — `compaction_drained_at` + partial index. "표시됐지만 아직 배출 중"만 색인해 backlog 판정이 상수로 떨어진다 |
+| compacted material 무한 누적 스캔 | `0236` — `compaction_drained_at` + partial index. **"아직 배출 중" 갈래**가 상수로 떨어진다. 같은 두 질의의 **orphan 갈래는 여전히 선형**이다(아래 잔여) |
 | service spec `410` 선언 | **T-VN-41C로 이월.** 교차 저장소 re-vendor가 필요하고 41C가 어차피 그것을 요구한다. 오늘 깨진 것은 없다 — PinVi가 이미 그 410을 런타임에서 처리한다 |
 
-게이트: ruff / mypy `--strict` ×2 / lint-imports / migration graph `--check` clean,
-관련 **103 passed**.
+게이트: ruff / mypy `--strict` ×2 / lint-imports / migration graph `--check` clean.
+관련 통합·단위 스위트는 n150에서 통과했다(선택 목록은 `docs/tasks.md`의 41S 항목).
 
 ### 다음 한 작업
 
-**`T-VN-41C`에서 `410` 선언 + PinVi re-vendor를 함께 한다.** 실행 절차와 막는 요인(하나)은
+**GC backlog의 orphan 갈래를 마저 처리한다** — 그것이 `T-VN-41S`의 마지막 잔여다.
+그 다음이 **`T-VN-41C`에서 `410` 선언 + PinVi re-vendor를 함께 한다.** 실행 절차와 막는 요인(하나)은
 `docs/tasks.md`의 `T-VN-41C` 항목에 적어 뒀다 — `tvn40-live-acceptance-v1.json`이 T-VN-40
 receipt의 커밋 쌍과 `pending` 가드 없이 결박돼 있어, **paired acceptance 재실행**과
 **가드 추가 + receipt를 `pending`으로** 중 하나를 사용자가 골라야 한다.
 
-그 밖에 41S에서 남긴 숙제는 **부하 아래 재측정**이다(안전계수 2가 유일한 부하 관측 2.32배에
-거의 소진된다).
+그 밖에 41S가 남긴 잔여는 둘이다.
+
+- **GC backlog 판정의 orphan 갈래가 아직 선형이다.** `0236`은 "아직 배출 중" 갈래만 상수로
+  만들었다. orphan 갈래는 `compacted_at` 필터가 없어 영구 보존되는 audit material까지 전부
+  anti-join하며, 네 갈래가 `OR`로 묶여 backlog가 **없을 때** 전부 평가된다 — 원래 지목된
+  "한가할 때가 가장 비싸다"가 그 갈래에는 그대로 남아 있다(적대 리뷰 지적).
+- **부하 아래 재측정** — 안전계수 2가 유일한 부하 관측 2.32배에 거의 소진된다.
 
 ## 2026-08-21 — live E2E 계약 drift 수정 및 운영 재검증
 
