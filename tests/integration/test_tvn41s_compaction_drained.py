@@ -311,3 +311,35 @@ async def test_the_draining_index_only_holds_undrained_materials(
         "배출된 material이 index 술어에서 빠지지 않았다 — 그러면 audit material이 "
         "쌓일수록 backlog 판정이 계속 무거워진다"
     )
+
+
+def test_both_backlog_queries_ask_the_same_question_about_drained_materials() -> None:
+    """두 backlog 질의가 같은 술어를 써야 한다.
+
+    한쪽만 고치면 이 migration은 **아무것도 고치지 않는다**. `_SELECT_..._SYSTEM_SQL`이
+    매 batch에서 먼저 돌고, 네 갈래가 `UNION`으로 합쳐진 뒤에야 `LIMIT 1`이 걸리므로
+    갈래마다 전량 평가된다 — 옛 `EXISTS(item)` 술어가 거기 남아 있으면 compacted
+    material마다 index probe 한 번이 그대로 계속된다(적대 리뷰가 실제로 이 상태를 잡았다).
+
+    SQL 문자열을 보는 이유: 동작 테스트는 두 질의가 **우연히 같은 답**을 낼 때 통과한다.
+    여기서 지키려는 것은 답이 아니라 비용이므로 술어 자체를 본다.
+    """
+
+    from kortravelmap.infra import cache_target_reconciliation_repo as repo
+
+    select_sql = repo._SELECT_EXPIRED_SNAPSHOT_GC_SYSTEM_SQL  # noqa: SLF001
+    has_sql = repo._HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL  # noqa: SLF001
+
+    for name, sql in (("select_system", select_sql), ("has_backlog", has_sql)):
+        assert "material.compaction_drained_at IS NULL" in sql, (
+            f"{name}이 배출 상태를 보지 않는다 — partial index가 쓰이지 않는다"
+        )
+
+    # 옛 술어가 어느 쪽에도 남아 있으면 안 된다. `compacted_at IS NOT NULL` 바로 뒤에
+    # item 존재를 묻는 형태가 그것이다.
+    stale = "material.compacted_at IS NOT NULL\n    AND EXISTS ("
+    for name, sql in (("select_system", select_sql), ("has_backlog", has_sql)):
+        assert stale not in sql, (
+            f"{name}에 옛 item-probe 술어가 남아 있다 — compacted material마다 "
+            "index probe 한 번이 그대로다"
+        )

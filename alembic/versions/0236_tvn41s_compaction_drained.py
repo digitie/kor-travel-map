@@ -20,6 +20,13 @@ item 인덱스 probe 한 번**이다. audit material은 증거로 영구 보존�
 
 forward-only. 되돌리려면 배출 완료 사실을 잃고 GC가 이미 빈 material을 영원히 다시
 훑게 된다.
+
+**잠금 프로파일.** 이 migration은 `ADD COLUMN`부터 commit까지 `ACCESS EXCLUSIVE`를 쥐고,
+그 안에서 검증형 `ADD CONSTRAINT ... CHECK`(전수 스캔)·전량 backfill·비-`CONCURRENTLY`
+`CREATE INDEX`를 한다. 이 head에서 그 표는 prod 기준 0행이라 순간이다. 그러나 이 표는
+설계상 **단조 증가**하므로, 행이 쌓인 DB(복원본·다른 환경·나중 baseline 재구축)에 이걸
+그대로 다시 돌리면 snapshot 경로가 그 시간만큼 멈춘다. 그때는 `NOT VALID` + 별도
+`VALIDATE`, batch backfill, autocommit block의 `CONCURRENTLY` index로 나눠야 한다.
 """
 
 from __future__ import annotations
@@ -94,15 +101,15 @@ BEGIN
       USING ERRCODE = '55000';
   END IF;
 
-  IF (NEW.material_id, NEW.external_system, NEW.restore_epoch,
-      NEW.material_high_watermark_relay_order,
-      NEW.safe_high_watermark_relay_order, NEW.item_count,
-      NEW.material_bytes, NEW.merkle_root, NEW.materialized_at)
+  -- **열을 열거하지 않는다.** `0231` fence는 이미 표시된 행을 첫 문장에서 통째로
+  -- 거부해서 닫힌 기본값이었다. 배출 표시를 허용하려면 그 문을 열어야 하는데, 열면서
+  -- 불변 열을 손으로 열거하면 기본값이 **뒤집힌다** — 다음 migration이 이 표에 열을
+  -- 더하는 순간 그 열은 아무 규칙도 보지 않아 compacted 행에서 조용히 쓰기 가능해지고,
+  -- 어떤 테스트도 그것을 보지 못한다. 감사 증거를 지키는 fence에서 그 성질을 잃을 수
+  -- 없으므로, 두 표시 열만 제외하고 **나머지 전부**를 비교한다.
+  IF to_jsonb(NEW) - 'compacted_at' - 'compaction_drained_at'
      IS DISTINCT FROM
-     (OLD.material_id, OLD.external_system, OLD.restore_epoch,
-      OLD.material_high_watermark_relay_order,
-      OLD.safe_high_watermark_relay_order, OLD.item_count,
-      OLD.material_bytes, OLD.merkle_root, OLD.materialized_at) THEN
+     to_jsonb(OLD) - 'compacted_at' - 'compaction_drained_at' THEN
     RAISE EXCEPTION 'snapshot material compaction must not change the material'
       USING ERRCODE = '55000';
   END IF;

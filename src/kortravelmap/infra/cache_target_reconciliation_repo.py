@@ -471,6 +471,15 @@ UPDATE ops.poi_cache_target_snapshot_materials AS material
  WHERE material.external_system = :external_system
    AND material.compacted_at IS NOT NULL
    AND material.compaction_drained_at IS NULL
+   -- orphan에는 찍지 않는다. 표시가 뜻을 갖는 것은 **살아남는** material 뿐이고,
+   -- orphan은 바로 다음 단계에서 행째 지워진다 — 곧 사라질 행에 row version과 trigger
+   -- 호출을 태우는 것은 순수 비용이다. header_limit에 걸려 이번 batch에서 못 지운
+   -- orphan은 두 backlog 질의의 orphan 갈래가 계속 본다.
+   AND EXISTS (
+     SELECT 1
+     FROM ops.poi_cache_target_snapshots AS receipt
+     WHERE receipt.material_id = material.material_id
+   )
    AND NOT EXISTS (
      SELECT 1
      FROM ops.poi_cache_target_snapshot_material_items AS item
@@ -528,14 +537,13 @@ FROM (
     WHERE receipt.material_id = material.material_id
   )
   UNION
+  -- 아래 두 질의는 **같은 질문**을 한다. 한쪽만 고치면 이 변경은 아무것도 고치지 않는다 —
+  -- 이 질의가 매 batch에서 먼저 돌고, 네 갈래가 `UNION`으로 합쳐진 뒤에야 `LIMIT 1`이
+  -- 걸리므로 갈래마다 전량 평가된다(짧게 끊기지 않는다).
   SELECT material.external_system
   FROM ops.poi_cache_target_snapshot_materials AS material
   WHERE material.compacted_at IS NOT NULL
-    AND EXISTS (
-      SELECT 1
-      FROM ops.poi_cache_target_snapshot_material_items AS item
-      WHERE item.material_id = material.material_id
-    )
+    AND material.compaction_drained_at IS NULL
   UNION
   SELECT material.external_system
   FROM ops.poi_cache_target_snapshot_materials AS material
