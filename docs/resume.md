@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-21 — live E2E 계약 drift 수정 및 운영 재검증
+
+머지된 T-FE-MOCK-FLAKE 뒤 확장 live 실행에서 발견한 두 계약 오류를 `fix/live-contract-inputs`
+브랜치에서 수정했다. `admin/issues`는 `provider_dataset_id` numeric 필터를 사용하도록
+갱신했고, 파이프라인 갱신 요청 시나리오는 `/v1/ops/datasets`의 canonical MOIS row를
+선택해 `provider_dataset_id` 기반 precheck를 확인하도록 갱신했다. 운영 frontend/API는
+변경하지 않았다.
+
+- frontend e2e type-check: 통과
+- frontend lint: 통과
+- n150 대상 live spec: `7 passed, 1 skipped` (읽기 전용 게이트)
+- 임시 n150 checkout·인증 산출물: 정리 완료
+
+### 다음 한 작업
+
+변경을 커밋·push하고 draft PR을 만든 뒤 CI와 전문 리뷰를 확인한다. 별도 merge 지시 전에는
+main에 merge하지 않는다.
+
 ## 2026-08-21 — T-FE-MOCK-FLAKE 진행: 표 준비 대기 보강, live auth 재개 필요
 
 PR [#1045](https://github.com/digitie/kor-travel-map/pull/1045)의 `admin-ops.spec.ts`

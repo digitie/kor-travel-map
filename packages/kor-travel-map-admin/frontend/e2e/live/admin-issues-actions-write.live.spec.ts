@@ -18,6 +18,7 @@ type BrowserFetchResult<T> = {
 const UI_TIMEOUT = 15_000;
 const FLOW_TIMEOUT = 5 * 60 * 1000;
 const T = { timeout: UI_TIMEOUT } as const;
+const ISSUE_PROVIDER_DATASET_ID = "101";
 
 const RUN_ID = `live-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 // resolve/reopen은 ops.data_integrity_violations의 status만 바꾸는 가역 전이라
@@ -233,17 +234,26 @@ test.describe("/admin/issues live read + reversible status write", () => {
       expect((await wait).status()).toBe(200);
     });
 
-    await test.step("provider 입력 → ?provider=python-kma-api", async () => {
-      const wait = waitForIssuesQuery(page, { provider: "python-kma-api" });
-      await page.getByLabel("issue provider").fill("python-kma-api");
-      expect((await wait).status()).toBe(200);
-    });
+    await test.step(
+      "provider dataset ID 입력 → ?provider_dataset_id=101",
+      async () => {
+        const wait = waitForIssuesQuery(page, {
+          provider_dataset_id: ISSUE_PROVIDER_DATASET_ID,
+        });
+        await page
+          .getByLabel("issue provider dataset ID")
+          .fill(ISSUE_PROVIDER_DATASET_ID);
+        expect((await wait).status()).toBe(200);
+      },
+    );
 
-    await test.step("dataset_key 입력 → ?dataset_key=kma_weather_values", async () => {
+    await test.step("feature_id 입력 → ?feature_id=...", async () => {
       const wait = waitForIssuesQuery(page, {
-        dataset_key: "kma_weather_values",
+        feature_id: "00000000-0000-4000-8000-000000000001",
       });
-      await page.getByLabel("issue dataset").fill("kma_weather_values");
+      await page
+        .getByLabel("issue feature id")
+        .fill("00000000-0000-4000-8000-000000000001");
       expect((await wait).status()).toBe(200);
     });
 
