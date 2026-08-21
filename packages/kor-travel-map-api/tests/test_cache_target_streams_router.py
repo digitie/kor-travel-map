@@ -14,10 +14,10 @@ from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
 from kortravelmap.infra import (
     cache_target_event_cursor,
+    cache_target_reconciliation_repo,
+    cache_target_stream_repo,
     snapshot_build_budget_seconds,
 )
-from kortravelmap.infra import cache_target_reconciliation_repo
-from kortravelmap.infra import cache_target_stream_repo
 from kortravelmap.infra.cache_target_stream_repo import CacheTargetStreamConflict
 from pydantic import ValidationError
 

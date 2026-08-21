@@ -944,7 +944,8 @@ def test_snapshot_cursor_holds_header_share_lock_during_item_read() -> None:
 
 #: build 예산 안에서 상한 크기를 실제로 만들 수 있는지는 **측정으로만** 안다. 이 값은
 #: 대표성 있는 fixture(prod 실측 키 폭 37자·삽입 순서와 정렬 순서 무상관)로 n150에서
-#: **배포 예산 그대로** 잰 처리량이며(500,000 item / 123.0초), 출처는 `docs/reports/t-vn-41s-budget-ceiling-2026-08-21.md`다.
+#: **배포 예산 그대로** 잰 처리량이며(500,000 item / 123.0초), 출처는
+#: `docs/reports/t-vn-41s-budget-ceiling-2026-08-21.md`다.
 #:
 #: **유도하지 않는다.** `_SNAPSHOT_ITEM_LIMIT`을 `예산 × 처리량 / 안전계수`로 정의하면
 #: 아래 단언이 항등식이 되어 **어떤 예산에서도 통과한다** — 예산을 절반으로 내리는 한 줄

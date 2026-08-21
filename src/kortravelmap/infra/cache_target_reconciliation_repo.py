@@ -94,7 +94,8 @@ _SNAPSHOT_BARRIER_LOCK_TIMEOUT = "5s"
 #:
 #: 값의 근거는 실측이다(대표성 fixture, n150, 배포 예산):
 #: 500,000 → **123.0초**(배포 예산 그대로 돈 soak, 4,065 item/s). 1,000,000은 예산의
-#: 79%를 써서 여유가 없다. 500,000은 41%로 안전계수 2를 만족한다. 출처: docs/reports/t-vn-41s-budget-ceiling-2026-08-21.md
+#: 79%를 써서 여유가 없다. 500,000은 41%로 안전계수 2를 만족한다.
+#: 출처: docs/reports/t-vn-41s-budget-ceiling-2026-08-21.md
 _SNAPSHOT_ITEM_LIMIT = 500_000
 #: material 재료 바이트 상한. item 상한과 **같은 성질**(예산 절반 안에 끝난다)을 갖는다.
 #:
