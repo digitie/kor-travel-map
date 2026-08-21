@@ -1,12 +1,43 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-21 — `0229`~`0232` 묶음 prod 배포 완료, admin 500 해소
+
+| 축 | 배포 전 | 배포 후 |
+|---|---|---|
+| prod DB head | `0225_tvn40c_physical_removal` | **`0232_tvn37d_notice_empty_range`** |
+| 적용 migration | — | `0229`·`0230`·`0231`·`0232` |
+| image / `.env` | `294db534` / EXPECTED_HEAD `0225` | `e47a389f` / EXPECTED_HEAD `0232_tvn37d_notice_empty_range` |
+| `curated_source_rules` | `candidate` 18 + `curated` 35 | **53행 전부 `candidate`**(`curated` 0) |
+| `GET /v1/admin/curated-source-rules` | **500** | **200** (53항목 전부 `candidate`) |
+| C05 `provider_dataset_id` | 없음 | **104~108** (baseline seed는 70~74 — 환경 지역값이라 다른 것이 정상) |
+| `provider_dataset_id 73` | `python-datagokr-api/standard_special_streets` | 그대로, 자식 0건 |
+| identity sequence | 103 | 108 (전진만) |
+| ops relation | 71 | 72 |
+| `features` / `source_records` | 1,008,852 / 1,009,164 | 동일 (무손실) |
+
+배포 전 587M prod 덤프를 별도 DB로 복원해 실제 migrator 자격으로 전 구간을 리허설했고
+(fail-closed runtime ACL 조정 포함 exit 0), **실배포 실측이 리허설 예측과 한 항목도
+어긋나지 않았다.** 복구점(`kor_travel_map_0225_pre-tvn41s_20260820T234727Z.dump` +
+`manager.env_pre-tvn41s_...bak`)은 보존돼 있다.
+
+`T-VN-40B`(source rule `curated` 퇴역)와 `T-VN-C05-CATALOG-KEY`(대리키 → 자연키, ADR-096)가
+이 배포로 닫혔다.
+
+### 다음 한 작업
+
+**T-VN-41S — build 예산 `300초` vs item 상한 `1,000,000` 결정.** 실측 368.4초 > 300초이므로
+상한과 같은 크기의 snapshot은 admission을 통과하고 build deadline에서 실패한다. 예산을
+올릴지 상한을 내릴지 고르는 정책 결정이며, 선택지와 비용은 아래 2026-08-20 절과
+`docs/tasks.md`에 있다. 이것이 남은 유일한 열린 결정이다.
+
 ## 2026-08-21 — `0230` 대리키 하드코딩으로 prod 배포 중단 → 자연키로 수정
 
 `0229`+`0230`+`0231` 묶음 배포가 `0230_tvn_c05_krforest_datasets`에서 멈췄다.
 `provider_dataset_id 73`을 prod가 이미 `python-datagokr-api/standard_special_streets`에
 배정해 뒀는데 migration이 그 번호를 `krforest_wildfire_risk_forecast`로 적어 뒀다.
 alembic이 전체를 한 transaction으로 감싸므로 30회 재시도가 매번 전량 롤백됐다.
-prod는 `0225`로 롤백해 배포 전 상태 그대로다(head·`curated` 35행·container health 확인).
+그 시점 prod는 `0225`로 롤백돼 배포 전 상태 그대로였다(head·`curated` 35행·container
+health 확인). **재배포는 2026-08-21에 끝났다 — 아래 최상단 항목 참조.**
 
 `provider_dataset_id`는 `Identity(always=True)` 대리키이고 catalog identity의 정본은
 자연키 `(provider, dataset_key)`다. baseline seed(69번)와 prod(73번)의 번호 배치가 애초에
@@ -22,15 +53,9 @@ prod 덤프 사본(features 1,008,852까지 완전 일치)에서 `0225→0229→
 통과했고 fail-closed runtime ACL 조정도 exit 0이었다. C05는 **104~108**을 받았고 73번
 선점자는 자식 0으로 무사, sequence는 103→108로 전진만 했다.
 
-### 다음 한 작업
-
-**PR → CI green → 머지 → `0229`+`0230`+`0231` 묶음 재배포.** 복구점은
-`kor_travel_map_0225_pre-tvn41s_20260820T234727Z.dump`(587M, sha256 확인)와
-`manager.env_pre-tvn41s_...bak`이 그대로 있다. 배포 후 `/v1/admin/curated-source-rules`
-500이 풀렸는지 확인한다 — `0229`가 `curated` 35행을 `candidate`로 정규화하므로 읽기 경로의
-좁아진 Literal과 다시 맞는다.
-
-그 다음이 아래 T-VN-41S의 build 예산 결정이다.
+**끝났다.** PR #1042가 머지돼 main HEAD = `e47a389f`이고, `0229`·`0230`·`0231`·`0232`가
+2026-08-21 한 배포로 prod에 올라갔다(prod head = `0232_tvn37d_notice_empty_range`).
+상세는 이 문서 최상단 배포 항목에 있다.
 
 ## 2026-08-20 — T-VN-41S material/receipt 분리 착지 (`0231`)
 

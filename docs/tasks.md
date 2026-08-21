@@ -8,11 +8,10 @@
 ## 진행 중인 작업 인덱스 (2026-08-21 완료 이관)
 
 완료한 `T-VN-32`·`T-VN-33`·`T-VN-37`·`T-VN-38`·`T-VN-40`과 선행 운영 task는
-[`tasks-done.md`](tasks-done.md)로 이관했다. 이번 재대조에서 완료된
-`T-VN-H50`·`T-VN-C05A`~`C05D`·`T-C7-BROWSER-EVIDENCE`·`T-C7-SCOPE-REGISTRY`·
-`T-C7-LIVE-SERIAL`·`T-FE-MOCK-MANIFEST`도 이관했다. 아래에는 아직 닫히지 않은
-`T-VN-37D`도 이번 구현으로 완료되어 `tasks-done.md`에 기록했다. 아래에는 아직 닫히지 않은
-실행 단위만 둔다.
+[`tasks-done.md`](tasks-done.md)로 이관했다. 이후 완료된 `T-VN-H50`·`T-VN-C05A`~`C05D`·
+`T-C7-BROWSER-EVIDENCE`·`T-C7-SCOPE-REGISTRY`·`T-C7-LIVE-SERIAL`·`T-FE-MOCK-MANIFEST`·
+`T-VN-37D`도 같은 곳에 있다. **2026-08-21 `0229`~`0232` 묶음 prod 배포로 종결된
+`T-VN-40B`·`T-VN-C05-CATALOG-KEY`도 이관했다.** 아래에는 아직 닫히지 않은 실행 단위만 둔다.
 
 **Lane A (Claude Code)**와 **Lane B (codex)**는 서로 병렬 실행한다. 각 lane 내부는 아래 순서를
 지키며, 같은 migration head·OpenAPI 정본·같은 cross-repo pair를 만지는 시점만 공통 규율의
@@ -26,12 +25,7 @@ barrier로 직렬화한다.
   - [~] `T-VN-41C`(#975 병합 / final exact-pair·prod consumer enable 잔여)
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환 — **저장소측 완료 2026-08-20**, live 실행은 배리어 대기)
     ∥ [~] `T-VN-41S`(`0231`·공유·compactor·410·EXPLAIN·1M soak 완료 / **build 예산 vs 상한 결정** 잔여)
-  - [ ] `T-VN-40B` prod 적용 — **41S 머지와 함께 한 배포로**(사용자 결정 2026-08-21).
-    현재 prod admin rule 조회 500. `0229`+`0230`+`0231`이 같이 올라간다.
-    **1차 시도는 `0230`에서 중단·롤백**했다(2026-08-21) → `T-VN-C05-CATALOG-KEY` 선행.
   - **배리어**: [ ] `T-VN-FINAL-REBUILD`(주요 개발 완료 후 파괴적 재구축 — 사용자 결정 2026-08-20)
-  - [ ] `T-VN-40B` 잔여 — 코드 착지(#1035), **prod 미적용 → admin rule 조회 500**(2026-08-21)
-  - [ ] `T-VN-C05-CATALOG-KEY`(`0230` 대리키 하드코딩 수정 — 위 배포의 선행)
   - [ ] `T-FE-MOCK-FLAKE`(`/v1/ops/logs`)
   - [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2` → `T-VN-41C` receipt 승격
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정, T-VN-40 인수 뒤)**
@@ -42,12 +36,14 @@ barrier로 직렬화한다.
 - **Wave 2 barrier 이후**
   - Lane A: [x] `T-VN-37D`(notice empty range 표현 — ADR-095, migration 0232)
   - 32~38 join barrier 뒤 Lane B: `T-VN-40C`는 2026-08-20 prod 적용까지 완료했다.
-    **`T-VN-40B`는 코드만 착지했고 prod 미적용이다** — 그 미적용이 admin rule 조회 500을
-    내고 있다(2026-08-21 실측, 아래 잔여 절).
+    **`T-VN-40B`도 2026-08-21 배포로 prod 적용까지 완료했다** — `0229`가 prod에 올라가
+    `curated_source_rules` 53행이 전부 `candidate`(`curated` 0행)이고 admin rule
+    조회(`GET /v1/admin/curated-source-rules`)는 200이다. 그 전까지는 미적용 탓에 500이었다.
     - 기반 구현 #974, 40A write fence #994, identity mapping #996, 40B candidate 전환,
       ③ sanctioned live/soak, ④ exact receipt, 40C 물리 삭제와 prod `0225` 적용까지
       완료했다. 상세 이력은 [`tasks-done.md`](tasks-done.md)에 이관했다.
-      **`T-VN-40B`는 2026-08-20 종결을 되돌렸다**(사용자 지시) — 아래 잔여 절 참조.
+      **`T-VN-40B`는 2026-08-20 종결을 한 번 되돌렸다가**(사용자 지시, 그 시점 prod 미적용)
+      2026-08-21 배포로 최종 완료했다 — [`tasks-done.md`](tasks-done.md) 참조.
     - 인수 ③·④ 중 분리했던 `T-C7-SCOPE-REGISTRY`·`T-C7-LIVE-SERIAL`과 C7 browser
       evidence·mock manifest는 PR #1038에서 닫혀 [`tasks-done.md`](tasks-done.md)로 이관했다.
   - 최종 단일 cutover: [ ] `T-VN-39`
@@ -505,127 +501,6 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 ## Lane C 상세 — 사문화 정리·미구현 dataset (2026-08-17 신설)
 
 > 다른 lane과 barrier를 공유하지 않는다. 아무 때나 착수할 수 있다.
-
-### T-VN-C05-CATALOG-KEY — `0230`이 대리키를 계약으로 적었다 (2026-08-21)
-
-> 규칙은 [ADR-096](adr/096-catalog-identity-is-the-natural-key.md)이 정본이다.
-
-- [ ] **`0230_tvn_c05_krforest_datasets`를 자연키 기준으로 고쳐 머지한다.**
-
-  `0229`+`0230`+`0231` 묶음 배포가 `0230`에서 멈췄다.
-
-  ```
-  TVN-C05 provider_dataset_id 73 is already assigned to
-  python-datagokr-api/standard_special_streets;
-  expected python-krforest-api/krforest_wildfire_risk_forecast
-  ```
-
-  **가드는 제 역할을 했다. 잘못된 쪽은 migration이다.** `provider_dataset_id`는
-  `Identity(always=True)` 대리키이고 catalog identity의 정본은 자연키
-  `uq_provider_datasets_identity (provider, dataset_key)`다. 번호는 환경마다 다르며 실제로
-  달랐다 — baseline seed는 `python-datagokr-api/standard_special_streets`를 **69**번으로
-  매기는데 prod는 **73**번을 배정해 뒀다. 가드가 없었다면 dataset은 `ON CONFLICT
-  (provider_dataset_id) DO NOTHING`으로 건너뛰고 operation만 같은 숫자로 들어가 **남의
-  dataset에 C05 operation이 달라붙었을** 것이다.
-
-  **prod 실측(2026-08-21, 읽기 전용)**:
-
-  | 축 | 값 |
-  |---|---|
-  | `provider_datasets` | 64행 — id 1..63 연속 + **73** |
-  | id 73 | `python-datagokr-api/standard_special_streets`, `source_kind=system`, 자식 0 |
-  | identity sequence | `last_value=103` (`is_called=true`) |
-  | krforest 신규 5종 | 없음 (기존 `krforest_recreation_forests`=25, `_arboretums`=26) |
-  | 70~74 숫자 하드코딩 코드·테스트 | **없음** — 전부 자연키로 해석 |
-
-  **CI가 늘 초록이었던 이유**: 통합 테스트 DB는 `0200`이 `seed.sql`을 실행하므로 C05가
-  이미 70~74로 서 있는 DB만 본다. 그 DB에서 이 migration은 순수 no-op이라 prod 조건을
-  한 번도 보지 못했다.
-
-  - [x] dataset은 identity sequence가 번호를 매기게 두고, operation·scope는 자연키 JOIN으로
-    그 번호를 되찾는다. 숫자를 다시 적지 않으므로 남의 dataset에 붙는 경로가 사라진다.
-  - [x] `_SEQUENCE_SQL`을 dataset INSERT **앞**으로 옮긴다. 뒤처진 sequence를 고치는 것이
-    존재 이유인데 뒤에 두면 정작 그 상황에서 INSERT가 먼저 죽는다(적대적 리뷰어 2명 독립 지적).
-  - [x] 사후 단언: dataset/operation/scope 존재, 기존 dataset 계약 일치, operation `is_enabled`.
-  - [x] gate — 대리키 **70~74 전 구간**을 남이 선점한 DB를 만들고, 세 catalog 테이블을
-    자연키로 정규화해 통째로 스냅숏해 delta를 단언한다. `pytest.raises(match=)`는 쓰지
-    않는다(SQLAlchemy가 실행 SQL 원문을 예외 문자열에 붙이는데 그 안에 단언용 메시지가
-    그대로 있어 무엇으로 죽든 맞는다) — sqlstate와 SQL에 없는 payload로 결합한다.
-  - [x] 재발 방지 lint — `alembic/versions/*.py`가 `provider_sync` catalog에 대리키를
-    하드코딩하지 못하게 막는다(`tests/lint/test_alembic_surrogate_identity_literals.py`).
-  - [x] **prod 덤프 리허설**: 587M 덤프를 별도 DB로 복원(features 1,008,852 /
-    source_records 1,009,164까지 prod와 완전 일치)해 실제 migrator 자격으로
-    `0225→0229→0230→0231` 30초 통과, fail-closed runtime ACL 조정 exit 0. C05는 **104~108**,
-    73번 선점자는 자식 0으로 무사, sequence 103→108 전진만.
-  - [ ] PR → CI green → 머지 → 묶음 재배포.
-
-### T-VN-40B 잔여 — source rule `curated` action 퇴역 (2026-08-20 종결 되돌림)
-
-> 이 항목은 2026-08-20 `tasks-done.md`로 이관됐다가 **사용자 지시로 되돌렸다**. 종결
-> 근거였던 "candidate lifecycle 전환"은 맞지만 아래 사실을 다루지 않는다.
->
-> **되돌린 것이 옳았다.** 2026-08-21 감사에서 이 미적용이 운영 결함을 내고 있다는 것이
-> 실측으로 드러났다(아래 🔴). 문서 여러 곳이 "40B는 prod 적용까지 완료"라고 적고 있었고,
-> 그 주장을 그대로 뒀다면 500을 내는 endpoint를 아무도 보지 않았을 것이다.
-
-- [ ] **T-VN-40B 잔여 — `0229` prod 적용 (코드는 착지 완료)**
-
-  **2026-08-21 감사로 상태가 갈렸다.** 코드는 `fa22d0fe`(PR #1035, merged 2026-08-20)로
-  main에 있다. 남은 것은 **prod 적용뿐이며, 그 미적용이 지금 운영 결함을 내고 있다.**
-
-  **🔴 운영 결함 (2026-08-21 실측)**: `GET /v1/admin/curated-source-rules`가 **500**이다.
-
-  ```
-  ValidationError: 1 validation error for CuratedSourceRuleView
-  default_action  Input should be 'candidate' or 'ignore' [input_value='curated']
-  처리되지 않은 예외 … /v1/admin/curated-source-rules
-  ```
-
-  #1035는 write 경로(`curated_repo._TYPED_RULE_ACTIONS`)만이 아니라 **read 경로**
-  (`routers/curated.py`의 `RuleAction` Literal)도 좁혔다. 그런데 값을 정규화하는 `0229`가
-  prod에 없으므로, `curated` 행을 읽는 순간 응답 검증에서 터진다. 백로그가 이것을 "값이
-  다시 들어올 문은 닫혀 있는데 이미 들어온 값은 그대로다"라고만 적어 **잠복**으로 읽히게
-  한 것이 오독이었다 — 잠복이 아니라 이미 터지고 있었다.
-
-  **prod 실측(2026-08-21, 읽기 전용)**:
-
-  | 축 | 값 |
-  |---|---|
-  | `alembic_version` | `0225_tvn40c_physical_removal` (≠ `0229`) |
-  | `default_action` 분포 | `candidate=18`, `curated=35` |
-  | `ck_curated_source_rules_action` | `('candidate','curated','ignore')` — 안 좁혀짐 |
-  | 실행 중 image의 마지막 migration | `0225` — **`0229` 파일 자체가 없다** |
-  | `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD` | `0225_tvn40c_physical_removal` |
-
-  즉 **DB만 올릴 수 없다.** 이미지 재빌드와 `.env` 갱신이 선행이다.
-
-  ADR-092가 `curated` action을 automatic public membership이 아니라 **candidate 생성**으로
-  재해석해 `candidate`와 같은 뜻이 됐다. 같은 뜻의 값이 둘이면 읽는 사람마다 다르게
-  해석하므로 한쪽을 없앤다.
-
-  - [x] `0229`가 35행을 `candidate`로 정규화하고 CHECK를 `('candidate','ignore')`로 좁힌다.
-    대상 표의 BEFORE trigger를 끄지 않고, 모델 CHECK와 write 허용값의 drift 게이트도 함께
-    뒀다. → `fa22d0fe`(PR #1035)로 main 착지.
-  - [ ] **prod 적용.** ⚠️ **1차 시도 2026-08-21 중단·롤백** — `0230`(C05 catalog)이
-    대리키 충돌로 실패했고 alembic이 전체를 한 transaction으로 감싸므로 `0229`·`0231`까지
-    같이 롤백됐다. prod는 `0225`로 되돌렸고 배포 전 상태 그대로다. 선행은
-    `T-VN-C05-CATALOG-KEY`. 사용자 결정(2026-08-21): **T-VN-41S 머지 뒤 한 번에 배포한다** —
-    그러면 `0229`·`0230`(C05)·`0231`(41S)이 같은 배포에 올라가 배포 횟수가 준다.
-    순서는 (1) `origin/main` 기준 image 재빌드 (2) `.env`의 `EXPECTED_HEAD` 갱신
-    (3) DB 백업 → 배포 → migration 적용 (4) `GET /v1/admin/curated-source-rules` 200 확인
-    (5) 문서 동기화. 사전조건은 clear다 — `0229`가 막을 rule(inactive provider dataset에
-    걸린 것) 0건.
-  - [ ] **read 경로 Literal을 drift 게이트에 넣는다.** #1035의 게이트는 모델 CHECK ↔
-    `_TYPED_RULE_ACTIONS`만 대조하고 응답 모델 Literal(`routers/curated.py`)은 보지 않는다.
-    이번 500이 정확히 그 사각에서 났다 — 게이트가 봤다면 "DB에 있는 값을 응답 모델이
-    거부한다"를 배포 전에 잡았다.
-  - **번호 제약**: `0229`는 이미 main에 적용된 T-VN-40B head이므로, C05 catalog는 기존
-    `0229` migration을 다시 쓰지 않고 `0230`으로 `0229` 뒤에 연결한다. T-VN-41S는 그
-    뒤 `0231`이다(2026-08-21 재번호 — 같은 parent를 쓰던 충돌을 이 감사가 잡았다).
-
-  **이 항목이 아닌 것**: "legacy candidate rows backfill"은 대상이 없다 — 그 legacy 행은
-  `0225`가 canonical collection/item으로 옮긴 뒤 물리 삭제했고 `theme_feature_candidates`는
-  0행이다. `ck_curated_source_rules_action`은 이미 `convalidated=true`라 VALIDATE할 것도 없다.
 
 ### T-VN-40 후속에서 분리한 C7 인수 잔여
 

@@ -3,6 +3,42 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-08-21 — `0229`~`0232` prod 배포로 T-VN-40B·T-VN-C05-CATALOG-KEY 종결
+
+- [x] **`T-VN-40B` — source rule `curated` action 퇴역. prod 적용까지 완료.**
+  코드 착지 `fa22d0fe`(PR #1035, 2026-08-20) → **prod 적용 2026-08-21**. `0229`·`0230`·
+  `0231`·`0232`가 한 배포로 올라가 prod head = `0232_tvn37d_notice_empty_range`이고
+  manager `.env`의 `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`도 같다.
+  `feature.curated_source_rules` 53행이 전부 `default_action='candidate'`이고 `'curated'`는
+  0행, CHECK는 `('candidate','ignore')`만 허용한다.
+  `GET /v1/admin/curated-source-rules`는 **500 → 200**(53항목 전부 `candidate`)으로 회복했다.
+  1차 시도가 `0230`에서 중단·롤백된 건은 아래 `T-VN-C05-CATALOG-KEY`가 해소했다.
+
+- [x] **`T-VN-C05-CATALOG-KEY` — `0230`이 대리키를 계약으로 적었다.**
+  `provider_dataset_id`는 `Identity(always=True)` 대리키인데 `0230`이 70~74를 SQL에
+  하드코딩했다. 정본 identity는 자연키 `uq_provider_datasets_identity (provider,
+  dataset_key)`이고 번호는 환경마다 다르다 — baseline seed는
+  `python-datagokr-api/standard_special_streets`를 69번으로, prod는 73번으로 들고 있었다.
+  그래서 prod 배포가 이 migration에서 멈췄고, alembic이 전체를 한 transaction으로 감싸므로
+  30회 재시도가 매번 전량 롤백됐다.
+
+  가드가 없었다면 dataset은 `ON CONFLICT (provider_dataset_id) DO NOTHING`으로 건너뛰고
+  operation·scope만 같은 숫자로 들어가 **남의 dataset에 달라붙었을** 것이다. CI가 늘
+  초록이었던 이유는 통합 테스트 DB가 `0200`의 `seed.sql`로 만들어져 C05가 이미 70~74로 서
+  있는 DB만 봤기 때문이다 — 그 DB에서 이 migration은 순수 no-op이었다.
+
+  PR #1042(main `e47a389f`)로 자연키 기준 재작성. dataset은 identity sequence가 번호를 매기고
+  operation·scope는 자연키 JOIN으로 되찾는다. `_SEQUENCE_SQL`은 되감지 않고 INSERT보다 먼저
+  돈다. 사후 단언 4가지(dataset·operation·scope 존재 / 기존 dataset 계약 일치 / operation
+  `is_enabled`)를 둔다.
+
+  규칙 정본은 [ADR-096](adr/096-catalog-identity-is-the-natural-key.md).
+  게이트는 `tests/integration/test_tvn_c05_catalog_migration.py`(10건)과
+  `tests/lint/test_alembic_surrogate_identity_literals.py`(재발 차단).
+  prod 덤프 587M 사본으로 전 구간 리허설(runtime ACL 조정 포함 exit 0) 후 배포했고,
+  실배포 실측이 리허설 예측과 한 항목도 어긋나지 않았다. prod C05는 **104~108**을 받았고
+  `provider_dataset_id 73` 선점자는 자식 0으로 무사하다.
+
 ## 2026-08-21 — 완료 task 백로그 정리
 
 - [x] `T-VN-H50` — planner 인덱스 선택 CI flake를 semantic SQL join gate로 안정화했다.
@@ -46,7 +82,7 @@
 > **2026-08-20 정정(사용자 지시)**: 이 절은 원래 `T-VN-40B`를 함께 종결로 적었으나,
 > 40B에는 실측으로 확인된 잔여가 있어 `tasks.md`로 되돌렸다. 종결 근거였던 "candidate
 > lifecycle 전환"은 맞지만, **source rule의 `curated` action 퇴역**은 그 문장이 다루지
-> 않는다 — prod에 `default_action='curated'` 35행이 남아 있고 CHECK도 여전히 그 값을
+> 않는다 — 2026-08-20 시점 prod에는 `default_action='curated'` 35행이 남아 있었고 CHECK도 그 값을
 > 허용한다(write 경로는 이미 거부). 아래 서술은 40C 범위로 읽는다.
 
 - [x] T-VN-40C — **legacy surface 물리 제거**

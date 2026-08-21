@@ -5,6 +5,20 @@
 
 ## [Unreleased]
 
+### prod 반영 (2026-08-21)
+
+`0229`·`0230`·`0231`·`0232`가 한 배포로 prod에 올라갔다. prod DB head는
+`0232_tvn37d_notice_empty_range`이고 image는 `e47a389f`다.
+
+- `0229` — `feature.curated_source_rules` 53행이 전부 `default_action='candidate'`가 됐고
+  (`curated` 35행 정규화) `GET /v1/admin/curated-source-rules`가 **500 → 200**으로 회복했다.
+- `0230` — C05 provider catalog가 prod에서 `provider_dataset_id` **104~108**을 받았다.
+  baseline seed의 70~74와 다르다 — **이 값은 환경 지역값이다**(ADR-096).
+- `0231` — snapshot material/receipt 분리 스키마가 prod 스키마가 됐다.
+- `0232` — notice 효력 범위의 empty 상태 표현이 prod 스키마가 됐다.
+- `features` 1,008,852 / `source_records` 1,009,164 무손실, `ops` relation 71 → 72.
+
+
 ### TVN-C05 — provider catalog migration을 자연키로 옮긴다 (2026-08-21)
 
 `0230_tvn_c05_krforest_datasets`가 `provider_dataset_id` 70~74를 SQL에 적어 뒀다. 그 컬럼은
@@ -104,10 +118,9 @@ shim은 만들지 않는다.
 - **FIXED**: 제거가 남긴 dead symbol 20개를 정리했다. 그중 `_FEATURE_COLUMNS`는 드롭된
   표의 컬럼을 그대로 projection하는 SQL 상수였다.
 
-> **미완(merge 의존)**: `contracts/vnext/consumer-rollout-v1.json`의 T-VN-40
-> `pinvi_snapshot_receipt.state`는 `pending`으로 둔다. PinVi 재-vendor는 Map 쪽 pin이
-> **머지된 commit**이어야 성립하므로(`contract-pin-consistency`가 그 SHA를 체크아웃한다)
-> 40C 머지 뒤에 수행한다. 세 spec sha는 이미 이 branch 산출물과 일치한다.
+> **해소됨**: `contracts/vnext/consumer-rollout-v1.json`의
+> `tasks.T-VN-40.pinvi_snapshot_receipt.state`는 40C 머지 뒤 `complete`가 됐다.
+> 지금 `pending`인 것은 `T-VN-41` 쪽이다.
 ### 수동 Feature 생성 clean cutover 준비 (2026-08-19, T-VN-M01 진행 중)
 
 - **API/SECURITY**: 기존 `POST /v1/admin/features`를

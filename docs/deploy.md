@@ -227,7 +227,8 @@ forward-fix한다. lock acquisition timeout과 실제 중단 시간은 별도로
 
 ## T-VN-33 (0084~0091) 배포 — 단발·forward-only
 
-prod alembic head는 `0083`이고 `0084`~`0091`이 한 번에 올라간다. 되돌리는 revision은
+(이 절은 T-VN-33 당시 기록이다. **현재 prod head는 `0232_tvn37d_notice_empty_range`**
+— 2026-08-21 `0229`~`0232` 배포.) 그 시점 prod alembic head는 `0083`이었고 `0084`~`0091`이 한 번에 올라갔다. 되돌리는 revision은
 없다(`0090`/`0091`의 `downgrade()`가 `RuntimeError`를 던진다). 아래는 이 구간에만
 해당하는 사항이며, 위 ADR-075 절차와 함께 읽는다.
 
