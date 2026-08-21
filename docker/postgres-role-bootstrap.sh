@@ -61,6 +61,19 @@ if [ "${KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE:-}" \
   exit 1
 fi
 
+# Compose healthcheck가 PostgreSQL의 Unix socket을 먼저 확인할 수 있어, 같은
+# network에서 오는 첫 TCP connection은 잠시 뒤에야 accept되는 경우가 있다. role
+# 변경 전에는 bounded probe로 그 짧은 경합만 흡수하고, 계속 실패하면 fail-closed한다.
+bootstrap_probe_attempt=0
+until psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc 'SELECT 1' >/dev/null 2>&1; do
+  bootstrap_probe_attempt=$((bootstrap_probe_attempt + 1))
+  if [ "$bootstrap_probe_attempt" -ge 30 ]; then
+    echo "bootstrap DSN did not accept connections within 30 seconds" >&2
+    exit 1
+  fi
+  sleep 1
+done
+
 actual_database="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc 'SELECT current_database()')"
 actual_role="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc 'SELECT current_user')"
 is_superuser="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc 'SELECT rolsuper FROM pg_catalog.pg_roles WHERE rolname = current_user')"

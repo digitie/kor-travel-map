@@ -582,6 +582,8 @@ def test_tvn_m01_role_phase_runs_only_after_legacy_0225_boundary() -> None:
     # 이 분기를 잘못 쓰면 fresh DB bootstrap이 partial marker로 중단된다.
     assert 'true\\|true) m01_repair_after_legacy=true' in phase_script
     assert 'false\\|false)' in phase_script
+    assert "bootstrap DSN did not accept connections within 30 seconds" in phase_script
+    assert "until psql \"$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN\" -Atqc 'SELECT 1'" in phase_script
     assert 'm01_repair_after_legacy=true' in phase_script
     assert 'run_m01_phase' in phase_script
     assert 'UPDATE(command_id) ON TABLE ops.domain_commands' in phase_script
