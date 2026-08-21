@@ -1,7 +1,7 @@
 """T-VN-41S 후속 — compacted material의 배출 완료를 상태로 기록한다.
 
-Revision ID: 0233_tvn41s_compaction_drained
-Revises: 0232_tvn37d_notice_empty_range
+Revision ID: 0236_tvn41s_compaction_drained
+Revises: 0235_m05_reconciliation_delivery
 
 GC batch의 backlog 판정에는 "표시됐고 item이 남은 material" 분기가 있다. 그것을
 ``compacted_at IS NOT NULL AND EXISTS(item)``으로 재면 **compacted material 하나마다
@@ -28,8 +28,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "0233_tvn41s_compaction_drained"
-down_revision: str | Sequence[str] | None = "0232_tvn37d_notice_empty_range"
+revision: str = "0236_tvn41s_compaction_drained"
+down_revision: str | Sequence[str] | None = "0235_m05_reconciliation_delivery"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -168,13 +168,13 @@ def upgrade() -> None:
     op.execute(_ADD_INDEX_SQL)
 
     print(  # noqa: T201 — migration 로그는 배포 로그로 남는다.
-        f"0233 tvn41s compaction drained: 이미 비어 있던 material {drained}건을 "
+        f"0236 tvn41s compaction drained: 이미 비어 있던 material {drained}건을 "
         "배출 완료로 표시했다"
     )
 
 
 def downgrade() -> None:
     raise RuntimeError(
-        "0233_tvn41s_compaction_drained is forward-only; "
+        "0236_tvn41s_compaction_drained is forward-only; "
         "배출 완료 사실을 잃으면 GC가 이미 빈 material을 영원히 다시 훑는다"
     )
