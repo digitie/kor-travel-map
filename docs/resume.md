@@ -17,8 +17,9 @@ PR [#1045](https://github.com/digitie/kor-travel-map/pull/1045)의 `admin-ops.sp
 
 ### 다음 한 작업
 
-최신 n150 운영 자격증명을 확인한 뒤 live GET-only logs 스펙을 재실행한다. credential을
-추측하거나 회전하지 않는다.
+리베이스 후 최신 CI를 확인하고 PR #1045를 merge한다. n150 live GET-only logs 스펙은
+prod auth setup 401로 본 스펙 실행 전에 중단됐으므로, 최신 운영 자격증명 확인 전에는
+재실행하지 않는다. credential을 추측하거나 회전하지 않는다.
 
 ## 2026-08-21 (codex) — T-VN-40 완료 항목 archive 정리
 ## 2026-08-21 (codex) — T-VN-40 완료 항목 archive 정리
@@ -71,7 +72,6 @@ green이 된 뒤에만 N150 격리 mutating browser E2E를 시작한다.
 ### 다음 한 작업
 
 보정 커밋을 푸시해 Map CI를 다시 확인한다. CI green 뒤에만 N150 격리 mutating browser E2E를 시작한다.
-
 ## 2026-08-21 — `0229`~`0232` 묶음 prod 배포 완료, admin 500 해소
 
 | 축 | 배포 전 | 배포 후 |

@@ -12,8 +12,9 @@ P2를 `d208b76a`에서 반영했다. 최종 재리뷰는 두 명 모두 P0/P1/P2
 2건은 NTFS에서 Unix mode `0700/0600`을 보존하지 못하는 기존 `auth-session-security`
 테스트다. n150 mocked checkpoint A는 281/285 passed였으며 대상 spec은 self-owned mock
 backend의 응답 부재를 감지해 `aria-busy=true` timeout으로 실패했다. n150 live GET-only
-logs 스펙은 prod auth setup 401로 본 스펙 실행 전에 중단됐다. 최신 운영 자격증명 확인과
-live 재실행이 남아 있어 PR은 draft로 유지한다.
+logs 스펙은 prod auth setup 401로 본 스펙 실행 전에 중단됐다. 이후 n150에서 같은 스펙을
+재시도했지만 동일한 401이었다. PR head의 GitHub CI 4개는 모두 green이며, 최신 운영
+자격증명 확인과 live 재실행이 남아 있어 PR은 draft로 유지한다.
 
 ## 2026-08-21 (codex) — 완료된 T-VN-40·C7 잔재를 task archive로 정리
 ## 2026-08-21 (codex) — 완료된 T-VN-40·C7 잔재를 task archive로 정리

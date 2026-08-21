@@ -503,8 +503,9 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   추가했다(`09d47cf7` → `d208b76a`). 전문 리뷰어 2명이 누적 diff를 재검토해 P0/P1/P2
   0건을 확인했다. n150 mocked checkpoint A는 281/285 passed였고 이 spec은 self-owned
   mock backend의 응답 부재로 `aria-busy=true`가 15초 유지되어 실패했다. 나머지 3건도
-  기존 실패 표면이다. n150 live GET-only logs 스펙은 현재 local-only 자격증명과 prod
-  credential 불일치로 auth setup 401에서 중단되어, 최신 자격증명 확인 뒤 재개해야 한다.
+  기존 실패 표면이다. PR head `14db3b5c`의 CI 4개(`ci`, `lint`, `frontend`, `openapi`)는
+  모두 green이다. n150 live GET-only logs 스펙은 현재 local-only 자격증명과 prod credential
+  불일치로 재시도에서도 auth setup 401에서 중단되어, 최신 자격증명 확인 뒤 재개해야 한다.
 - `T-C7-SCOPE-REGISTRY`와 `T-C7-LIVE-SERIAL`은 PR #1038에서 완료했다. scope 선언
   주체·조회 표면을 `integration-map.md` §3.7과 ADR-088 결과에 정본화했고,
   `external_system:c7-e2e` live write 3종에는 cross-worker `mkdir` 잠금을 결선했다.
