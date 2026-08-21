@@ -1,5 +1,22 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-21 — T-FE-MOCK-FLAKE 표 준비 단언 보강
+
+PR #1045에서 `admin-ops.spec.ts`의 `/v1/ops/logs` smoke를 표별 accessible name으로
+scope하고, system/API 각 표의 body row가 나타난 뒤 `aria-busy=true`가 해제될 때 header를
+단언하도록 고쳤다. retry나 timeout 증가는 하지 않았다. 첫 checkpoint `09d47cf7`를 원격에
+올린 뒤 전문 리뷰어 2명의 적대 리뷰를 받았고, skeleton row가 fetch 미완료를 통과할 수 있다는
+P2를 `d208b76a`에서 반영했다. 최종 재리뷰는 두 명 모두 P0/P1/P2 0건이었다.
+
+정적 게이트는 npm tree/Next-Sharp/type-check가 통과했고 Vitest는 354/356 통과였다. 나머지
+2건은 NTFS에서 Unix mode `0700/0600`을 보존하지 못하는 기존 `auth-session-security`
+테스트다. n150 mocked checkpoint A는 281/285 passed였으며 대상 spec은 self-owned mock
+backend의 응답 부재를 감지해 `aria-busy=true` timeout으로 실패했다. n150 live GET-only
+logs 스펙은 prod auth setup 401로 본 스펙 실행 전에 중단됐다. 이후 n150에서 같은 스펙을
+재시도했지만 동일한 401이었다. PR head의 GitHub CI 4개는 모두 green이며, 최신 운영
+자격증명 확인과 live 재실행이 남아 있어 PR은 draft로 유지한다.
+
+## 2026-08-21 (codex) — 완료된 T-VN-40·C7 잔재를 task archive로 정리
 ## 2026-08-21 (codex) — 완료된 T-VN-40·C7 잔재를 task archive로 정리
 
 - `tasks.md`에 중복으로 남은 T-VN-40B/C·인수 ①~⑤와 완료된 C7 증거 task의 상태 서술을
@@ -7,7 +24,6 @@
   `T-FE-MOCK-FLAKE`만 남긴다.
 - migration 정본도 main `0232`와 draft #1029의 M01~M05 직렬 `0226`~`0235`를 명시해,
   완료된 T-VN-40 revision을 활성 migration 계획처럼 읽지 않게 했다.
-
 ## 2026-08-21 — build 예산 vs 상한 결정을 닫고, 그 옆의 도달 가능한 장애를 고쳤다
 
 `_SNAPSHOT_ITEM_LIMIT = 1_000_000`과 `_SNAPSHOT_BUILD_TIMEOUT_SECONDS = 300`이 같은 사실을
