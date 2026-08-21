@@ -2654,8 +2654,8 @@ def test_service_snapshot_byte_ceiling_returns_non_retryable_payload_too_large()
         "snapshot_byte_limit_exceeded",
         "snapshot byte capacity reached",
         current={
-            "material_bytes_lower_bound": 62_914_561,
-            "material_byte_limit": 62_914_560,
+            "material_bytes_lower_bound": 58_720_257,
+            "material_byte_limit": 58_720_256,
         },
     )
     session = _FakeSession()
@@ -2669,7 +2669,7 @@ def test_service_snapshot_byte_ceiling_returns_non_retryable_payload_too_large()
     assert response.status_code == 413
     assert "retry-after" not in response.headers
     assert response.json()["code"] == "SNAPSHOT_BYTE_LIMIT_EXCEEDED"
-    assert response.json()["details"]["material_byte_limit"] == 62_914_560
+    assert response.json()["details"]["material_byte_limit"] == 58_720_256
     assert session.commit_calls == 0
     assert session.rollback_calls == 1
 
