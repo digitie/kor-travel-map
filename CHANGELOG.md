@@ -5,6 +5,23 @@
 
 ## [Unreleased]
 
+### T-VN-41S — snapshot admission 상한을 실측으로 맞추고 writer 무한 대기를 막는다 (2026-08-21)
+
+- **BREAKING (service API)**: `GET /v1/service/cache-target-snapshots/{system}`의 admission
+  상한이 낮아졌다 — item `1,000,000` → **`500,000`**, canonical material `512 MiB` → **`56 MiB`**.
+  두 값 모두 build 예산(300초)의 절반 안에 끝나도록 n150에서 배포 예산 그대로 실측해 정했다(500,000 = 123.0초).
+  prod의 가장 큰 stream이 179 target이므로 실사용에는 영향이 없다.
+  `provider_dataset_id`처럼 환경마다 달라지는 값이 아니라 **계약값**이다.
+- **CHANGED (service API)**: `503 snapshot_build_timeout`의 `Retry-After`가 `1` → **build 예산**
+  으로 바뀐다. 예산을 통째로 태운 요청에 1초 뒤 재시도를 지시하면 그 stream이 barrier를
+  놓지 않는 100% duty cycle로 물린다.
+- **ADDED (service API)**: `503 stream_busy` (`Retry-After: 10`). stream writer가 bounded
+  대기 뒤에도 row lock을 못 잡으면 반환한다. 이전에는 **무한 대기**하며 pooled connection을
+  붙들었고, 그 pool은 전 endpoint 공유(15개)라 build 하나가 API 전체를 마르게 할 수 있었다.
+- **CHANGED (동작)**: snapshot build가 진행 중인 stream에 쓰기가 오면 이전에는 build가
+  끝날 때까지 **블록됐다가 성공**했으나, 이제 `stream_busy`로 즉시 돌아온다. 클라이언트는
+  `Retry-After` 뒤 재시도한다.
+
 ### prod 반영 (2026-08-21)
 
 `0229`·`0230`·`0231`·`0232`가 한 배포로 prod에 올라갔다. prod DB head는

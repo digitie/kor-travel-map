@@ -218,7 +218,9 @@ barrier 전에 transaction-local `lock_timeout=5s`, `statement_timeout=5min`을 
 기한을 넘기면 advisory single-flight를 해제하고 `503 snapshot_barrier_timeout + Retry-After: 1`로
 fail-close한다.
 barrier 이후 capture/item persist statement가 5분을 넘기면 별도
-`503 snapshot_build_timeout + Retry-After: 1`로 rollback해 lock wait와 build 병목을 구분한다.
+`503 snapshot_build_timeout + Retry-After: <build 예산>`으로 rollback해 lock wait와 build 병목을
+구분한다. 이 하나만 `Retry-After: 1`이 아닌 이유는 그 요청이 예산을 통째로 태웠기 때문이다 —
+1초 뒤 재시도는 같은 예산을 또 태워 stream을 100% duty cycle로 물린다(2026-08-21 정정).
 server cursor의 `statement_timeout`은 각 `FETCH`마다 다시 적용되므로, generic의 첫 barrier 또는
 seal/request의 첫 stream lock부터 두 scan·모든 bounded INSERT·receipt 조회를 함께 감싸는 monotonic
 누적 5분 application deadline도 둔다. 첫 stream lock은 5초 lock timeout을 적용하고, 누적 deadline

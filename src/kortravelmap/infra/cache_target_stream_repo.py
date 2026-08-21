@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID, uuid4
 
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from kortravelmap.core.cache_target_stream import (
     ActiveCacheTargetSourceV1,
@@ -137,6 +138,65 @@ WHERE external_system = :external_system
 """
 
 _LOCK_STREAM_SQL = _GET_STREAM_SQL + " FOR UPDATE"
+
+#: writer가 stream row lock을 무한정 기다리지 않게 한다. snapshot build는 같은 stream을
+#: `FOR SHARE`로 build 예산 전 구간(최대 `_SNAPSHOT_BUILD_TIMEOUT_SECONDS`) 쥔다. 그동안
+#: writer가 `lock_timeout=0`(PG 기본)으로 기다리면 **connection을 문 채** 쌓이고, 그 pool은
+#: 전 endpoint가 공유하므로(`make_async_engine` 기본 `pool_size=5 + max_overflow=10`) build
+#: 하나가 API 전체를 마르게 할 수 있다. 이 경로는 stream 크기와 무관하게 발생한다.
+#: 기다리지 못하면 typed `stream_busy`로 빠르게 돌려보내고 재시도는 클라이언트가 한다.
+STREAM_WRITER_LOCK_TIMEOUT = "1s"
+
+_SET_STREAM_WRITER_LOCK_TIMEOUT_SQL = """
+SELECT set_config('lock_timeout', :lock_timeout, true)
+"""
+
+#: **반드시 되돌린다.** `set_config(..., is_local => true)`는 statement가 아니라
+#: **transaction** 범위다. 걸어 놓고 그대로 두면 같은 writer transaction의 이후 lock 대기가
+#: 전부 이 상한을 물려받는데, 그것들에는 handler가 없어 처리되지 않은 `DBAPIError`가 되고
+#: 결국 typed 503이 아니라 **500**이 된다 — 고치려던 것보다 나쁘다.
+#: (`cache_target_reconciliation_repo`의 barrier가 쓰는 것과 같은 패턴이다.)
+_RESET_STREAM_WRITER_LOCK_TIMEOUT_SQL = """
+SELECT set_config('lock_timeout', '0', true)
+"""
+
+
+async def lock_stream_row_or_conflict(
+    session: AsyncSession,
+    statement: str,
+    params: dict[str, Any],
+) -> Any:
+    """`ops.poi_cache_target_streams` row lock을 bounded 대기로 잡는다.
+
+    lock을 못 잡으면 typed `stream_busy`를 던진다. 상한은 **이 문장에만** 걸고 곧바로
+    되돌린다 — transaction 범위 설정이 남으면 뒤따르는 무방비 lock들이 500이 된다.
+
+    build barrier(`FOR SHARE OF stream`)와 부딪히는 writer 경로는 이 helper를 쓴다.
+    한 경로만 고치면 나머지 경로로 같은 pool 고갈이 그대로 일어난다.
+    """
+
+    await session.execute(
+        text(_SET_STREAM_WRITER_LOCK_TIMEOUT_SQL),
+        {"lock_timeout": STREAM_WRITER_LOCK_TIMEOUT},
+    )
+    try:
+        result = await session.execute(text(statement), params)
+    except DBAPIError as exc:
+        # 55P03 lock_not_available / 57014 statement 취소. 둘 다 "지금은 못 잡았다"다.
+        #
+        # 여기서 상한을 되돌리지 **않는다**. 실패한 문장은 transaction을 abort 상태로
+        # 만들고, 그 뒤 어떤 문장도 `InFailedSQLTransactionError`가 되어 **원래 오류를
+        # 가린다**. 그리고 abort된 transaction은 어차피 rollback되므로 transaction 범위
+        # 설정도 함께 사라진다 — 되돌릴 것이 없다.
+        if getattr(exc.orig, "sqlstate", None) not in {"55P03", "57014"}:
+            raise
+        raise CacheTargetStreamConflict(
+            "stream_busy",
+            "stream이 다른 작업에 잡혀 있어 지금 쓰기를 받을 수 없습니다.",
+            current={"lock_timeout": STREAM_WRITER_LOCK_TIMEOUT},
+        ) from exc
+    await session.execute(text(_RESET_STREAM_WRITER_LOCK_TIMEOUT_SQL))
+    return result
 
 _LOCK_HEAD_SQL = """
 SELECT external_system, target_key, target_id, state, restore_epoch,
@@ -380,6 +440,9 @@ async def _lock_or_create_stream(
 ) -> CacheTargetStreamControl:
     if not consumer_id or consumer_id != consumer_id.strip() or len(consumer_id) > 128:
         raise ValueError("consumer_id는 trim된 1~128자 문자열이어야 합니다.")
+    # `_CREATE_STREAM_SQL`은 상한 밖에 둔다. create 경합에서 밀린 쪽은 winner의 commit까지
+    # 블록된 뒤 stable row로 다시 판정하는 것이 `poi_cache_target_repo`가 문서화한 알고리즘이라,
+    # 여기에 5초 상한을 걸면 멀쩡히 성공하던 쓰기가 오류가 된다.
     created = (
         await session.execute(
             text(_CREATE_STREAM_SQL),
@@ -389,8 +452,9 @@ async def _lock_or_create_stream(
     row = created
     if row is None:
         row = (
-            await session.execute(
-                text(_LOCK_STREAM_SQL),
+            await lock_stream_row_or_conflict(
+                session,
+                _LOCK_STREAM_SQL,
                 {"external_system": external_system},
             )
         ).one()

@@ -1,5 +1,48 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-21 — build 예산 vs 상한 결정을 닫고, 그 옆의 도달 가능한 장애를 고쳤다
+
+`_SNAPSHOT_ITEM_LIMIT = 1_000_000`과 `_SNAPSHOT_BUILD_TIMEOUT_SECONDS = 300`이 같은 사실을
+두 번 말하면서 서로 달랐다. 결정: **예산 유지, 상한 500,000, 유도식 기각.**
+
+렌즈 넷 중 셋이 "상한을 예산에서 유도한다"를 골랐고 나도 그쪽으로 기울었다. 반증이
+뒤집었다 — `limit = budget × rate / safety`로 정의하면 `limit / rate × safety ≡ budget`
+이라 불변식이 **항등식**이 된다. 예산을 절반으로 내리는 한 줄 변경에서 CI가 green인 채
+client가 보는 413 문턱이 반토막 나고, PinVi는 `Retry-After` 없는 terminal 413을 받아
+reconciliation이 영구 정지하는데 서버는 build가 아예 안 돌아 지표까지 조용해진다.
+**유도식은 drift를 없앤 것이 아니라 drift 경보를 없앤다.** 변이로 확인했다: 예산을 120초로
+내리면 지금 설계는 불변식 3건이 동시에 red다.
+
+**전제가 재현되지 않았다.** 앞선 보고서는 1M이 예산을 68~248초 넘는다고 적었으나, 오늘
+같은 코드·더 넓은 키로 235.7초다. 처리량이 250k/500k/1M에서 4,225~4,242로 선형이다.
+그래도 1M을 두지 않은 것은 예산의 79%를 쓰는 값이 상한일 수 없기 때문이다.
+
+**측정이 왜 낙관적이었나.** 예전 fixture는 13자 ASCII를 삽입 순서대로 심었는데, build의
+정렬 키가 인덱스 없는 표현식(`convert_to(normalize(target_key,NFC),'UTF8')`)이라 그것은
+heap correlation 1.0인 **최선 조건**이었다 — 잰 처리량이 하한이 아니라 상한이었다.
+prod 실측 키 폭(평균 35.1자)에 맞추고 삽입/정렬 순서 상관을 끊었다.
+
+**내가 넣은 회귀 셋을 리뷰가 잡았다.** ① `set_config(..., is_local)`은 transaction 범위인데
+되돌리지 않아 이후 모든 lock 대기가 handler 없는 상한을 물려받아 500이 됐다. ② 고친 경로가
+하나뿐이라 `cache_target_event_repo`의 `FOR UPDATE OF stream`으로 같은 pool 고갈이 그대로
+남았고, 하필 그쪽이 PinVi refresh-request 경로라 더 유력했다. ③ 새 통합 테스트가 수정을
+지웠을 때 실패가 아니라 **hang**했다(변이 exit=124). 그리고 게이트가 넷째를 잡았다 —
+`finally`의 reset이 abort된 transaction에서 `InFailedSQLTransactionError`가 되어 원래
+`stream_busy`를 가렸다.
+
+**내 보고서도 거짓을 적고 있었다.** soak이 측정 동안 예산을 3,600초로 덮고 있는데 보고서는
+"배포 예산 그대로"라고 썼다. 우회를 제거했다.
+
+마지막으로 상한에서 배포 예산 그대로 soak을 돌려 확정했다 — build 123.0초(4,065 item/s,
+예산의 41%), 상한+1 typed 거부, partial row 0, compaction 500,000행 7.2초. CI 불변식이 쓰는
+상수는 이 확정 측정이고, 탐색 단계의 4,225(예산을 덮은 실행)는 쓰지 않는다.
+
+byte 상한 512 MiB도 손봤다. `material_bytes`는 heap이 아니라 leaf 인코딩 합이고, 실측
+재료 처리량 439,600 B/s에서 512 MiB는 **1,221초 = 예산의 4.1배**였다. 게다가 상한을
+500,000으로 낮춘 뒤로는 계약 최대 폭(512자)에서도 325.7 MiB라 ASCII stream에서 발화조차
+하지 않는 죽은 코드였다. `target_key`가 512자까지 허용돼 같은 item 수에서도 재료량이 16배
+흔들리므로 item 상한만으로는 폭 축을 못 묶는다. 56 MiB(139초)로 조였다.
+
 ## 2026-08-21 — `0229`~`0232` 묶음 prod 배포 완료, admin 500 해소
 
 PR #1042(자연키 C05 catalog)가 CI 8/8로 머지돼 main이 `e47a389f`가 됐고, 그 위에서

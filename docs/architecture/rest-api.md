@@ -694,18 +694,28 @@ link/refresh/stream-reconciled event는 재사용을 깨지 않는다. 재사용
 barrier/첫 stream lock wait는 5초, snapshot statement는 5분으로 제한한다. server cursor의 statement
 timeout은 각 `FETCH`마다 재적용되므로 generic 첫 barrier 또는 seal/request 첫 lock부터 두 scan, 모든
 INSERT와 receipt 조회까지 별도 누적 5분 deadline을 적용한다. 초과는 각각
-`503 snapshot_barrier_timeout`, `503 snapshot_build_timeout`과 `Retry-After: 1`로 반환한다.
+`503 snapshot_barrier_timeout + Retry-After: 1`, `503 snapshot_build_timeout + Retry-After: 300`
+으로 반환한다. build timeout만 예산값을 쓰는 이유는 그 요청이 예산을 **통째로 태웠기**
+때문이다 — 1초 뒤 재시도는 즉시 advisory lock을 다시 잡고 같은 예산을 또 태워 그 stream을
+barrier를 놓지 않는 100% duty cycle로 물린다.
 
 reuse miss 뒤 system별 미만료·미참조 generic snapshot이 이미 2개면 세 번째 복사를 만들지 않는다.
 가장 오래된 expiry까지 `429 snapshot_capacity_exceeded + Retry-After`로 대기시켜 유효 cursor를 보존하고
 live generic 저장량을 stream cardinality의 2배로 제한한다. request-bound snapshot은 이 count에서 제외한다.
 단일 snapshot은 server cursor 두 번 순회와 incremental Merkle로 process memory를 `O(log N)`에
-가깝게 유지한다. item 1,000,000개 또는 canonical material 512 MiB를 넘으면 header/item 부분
+가깝게 유지한다. item **500,000**개 또는 canonical material **56 MiB**를 넘으면 header/item 부분
 material을 만들지 않고 각각 `413 snapshot_item_limit_exceeded`,
-`413 snapshot_byte_limit_exceeded`로 실패한다. **item 상한 1,000,000은 memory/byte 방어선이며
-시간 방어선과 별개다** — n150 실측(`docs/reports/t-vn-41s-1m-soak-2026-08-21.md`)에서 그 크기의
-material은 368.4초가 걸려 누적 build 예산 300초를 넘는다. 즉 상한과 같은 크기의 요청은 admission을
-통과하고 `503 snapshot_build_timeout`으로 끝난다. 예산·상한 조정은 열린 결정이다.
+`413 snapshot_byte_limit_exceeded`로 실패한다.
+
+**두 상한은 모두 시간 방어선이다** — admission이 받아들인 크기는 build 예산의 절반 안에
+끝나야 한다. n150 실측(`docs/reports/t-vn-41s-budget-ceiling-2026-08-21.md`)에서 500,000은
+123.0초로 예산 300초의 41%다. byte 상한이 따로 있는 이유는 `target_key`가 계약상 512자까지
+허용돼 같은 item 수에서도 재료량이 16배 흔들리기 때문이며, 정상 폭(103 B/item) stream에서는
+item 상한이 먼저 걸린다. 두 관계는 CI가 지킨다
+(`test_snapshot_item_limit_fits_the_shipped_build_budget`,
+`test_material_byte_limit_fits_the_shipped_build_budget`).
+
+413은 `Retry-After`가 없는 terminal이다 — stream을 나눠 다시 요청해야 한다.
 
 **material/receipt 분리(T-VN-41S, migration `0231`)**. 고정한 source membership은 `material`이 소유하고,
 `snapshot_id`는 "누가 언제 그것을 받아갔는가"를 적는 immutable **receipt**다. generic page와 two-phase

@@ -67,21 +67,19 @@ from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 from tests.integration._tvn34_migration_bootstrap import bootstrap_tvn34_migration_roles
 
 STREAM = "soak:41s"
-ADMITTED = 1_000_000
-FINGERPRINT = "c" * 64
+#: 측정 대상 item 수. 인자로 주면 그 값, 없으면 배포 상한을 그대로 잰다 —
+#: soak이 상한과 다른 크기를 재고 있으면 그 결과는 상한을 보증하지 못한다.
+_CEILING = repo._SNAPSHOT_ITEM_LIMIT  # noqa: SLF001
+ADMITTED = int(sys.argv[2]) if len(sys.argv) > 2 else _CEILING
 
-#: **주의**: 아래 예산은 누적 build deadline만 늘린다. 개별 statement의 상한은
-#: `_SNAPSHOT_BUILD_STATEMENT_TIMEOUT`(5분)이 barrier 진입 때 다시 설정하므로, 이
-#: 스크립트가 session에 건 `statement_timeout`은 build 경로에서 덮인다. 지금 측정이
-#: 성립하는 것은 개별 statement가 5분을 넘지 않았기 때문이고, 더 느린 호스트나 더 큰
-#: batch에서는 `snapshot_build_timeout`으로 끝날 수 있다(적대 리뷰 지적).
-#:
-#: 배포 기본값(`_SNAPSHOT_BUILD_TIMEOUT_SECONDS = 300`)은 상한과 같은 크기의 material을
-#: n150에서 만들지 못한다 — 첫 실행이 그 예산에서 잘렸다. 그것 자체가 이 soak의 결과이므로
-#: 숨기지 않는다. 실제 소요를 재기 위해 **측정 동안만** 예산을 늘리고, 배포 예산 대비
-#: 결과를 evidence에 함께 남긴다.
-_MEASUREMENT_BUILD_BUDGET_SECONDS = 3_600.0
+#: **예산을 우회하지 않는다.** 예전 판은 측정 동안 `_SNAPSHOT_BUILD_TIMEOUT_SECONDS`를
+#: 3,600초로 덮고 session `statement_timeout`도 3,600초로 올렸다. 그러면 `build_seconds`가
+#: 배포 예산보다 작다는 **사후 비교**만 남고 `_snapshot_build_deadline`은 한 번도 돌지
+#: 않는다 — 상한 크기 build가 배포 deadline을 넘기 시작해도 typed `snapshot_build_timeout`
+#: 이 아니라 그냥 큰 숫자로 보인다. 지금은 배포 예산 그대로 돌고, 넘으면 그 자체가 실패다.
 _SHIPPED_BUILD_BUDGET_SECONDS = repo._SNAPSHOT_BUILD_TIMEOUT_SECONDS  # noqa: SLF001
+#: 안전계수는 repo가 정본이다 — soak과 단위 테스트가 같은 값을 읽어야 한다.
+REQUIRED_SAFETY_FACTOR = repo.SNAPSHOT_BUILD_SAFETY_FACTOR
 
 failures: list[str] = []
 #: 결정 대기 중이라 red인 것이 정상인 항목. `failures`와 섞지 않는다 — 섞으면 다른 축이
@@ -105,13 +103,28 @@ def note(label: str, value: object) -> None:
     print(f"  ·  {label}: {value}")
 
 
+#: fixture는 정렬 비용을 정직하게 재야 한다. 예전 판은 `'soak-' || lpad(value, 8)`로
+#: **13자 ASCII를 삽입 순서대로** 심었는데, build의 정렬 키가
+#: `convert_to(normalize(target_key, NFC), 'UTF8')`이고 그 표현식에 인덱스가 없으므로
+#: 그 fixture는 heap correlation ≈ 1.0인 **최선 조건**을 잰 것이었다. prod 실측 키는
+#: 24~36자(평균 35.1, 전부 ASCII)이므로 md5 기반 37자로 맞춘다 — md5는 삽입 순서와
+#: 정렬 순서의 상관도 함께 끊어 준다.
+#: fingerprint도 상수를 쓰지 않는다 — 상수 fingerprint는 sha256 입력 지역성과 페이지
+#: 압축률을 비현실적으로 좋게 만든다. state는 `deleted`로 둔다: `active` head는
+#: `target_id`가 가리키는 실제 `ops.poi_cache_targets` 행(좌표 계열 CHECK 포함)을
+#: 요구하므로 fixture 비용이 측정 대상을 압도한다. 정렬 비용은 키 폭·순서가 지배하고
+#: state는 leaf 1바이트라 이 축의 대표성을 해치지 않는다.
 _SEED_HEADS_SQL = """
 INSERT INTO ops.poi_cache_target_source_heads (
     external_system, target_key, state, restore_epoch, source_generation,
     source_payload_fingerprint, target_sequence, updated_at
 )
-SELECT :stream, 'soak-' || lpad(value::text, 8, '0'), 'deleted', 1, 1,
-       :fingerprint, value, now()
+SELECT :stream,
+       's-' || md5(value::text) || '-' || lpad((value % 100)::text, 2, '0'),
+       'deleted',
+       1, 1,
+       md5(value::text) || md5((value + 1)::text),
+       value, now()
 FROM generate_series(CAST(:lo AS bigint), CAST(:hi AS bigint)) AS value
 """
 
@@ -146,7 +159,7 @@ async def _seed_source(engine: AsyncEngine, *, rows: int) -> None:
             await conn.execute(text("SET ROLE ktm_feature_schema_owner"))
             await conn.execute(
                 text(_SEED_HEADS_SQL),
-                {"stream": STREAM, "fingerprint": FINGERPRINT, "lo": lo, "hi": hi},
+                {"stream": STREAM, "lo": lo, "hi": hi},
             )
         print(f"    seeded {hi:,}/{rows:,}")
     async with engine.begin() as conn:
@@ -236,16 +249,10 @@ async def main() -> int:
 
         print(f"\n== 2) {ADMITTED:,} item admitted material 생성 ==")
         before = await _relation_stats(db)
-        repo._SNAPSHOT_BUILD_TIMEOUT_SECONDS = (  # noqa: SLF001
-            _MEASUREMENT_BUILD_BUDGET_SECONDS
-        )
         tracemalloc.start()
         build_started = time.monotonic()
         async with AsyncSession(db) as session, session.begin():
             await session.execute(text("SET ROLE ktm_feature_schema_owner"))
-            await session.execute(
-                text("SELECT set_config('statement_timeout', '3600s', true)")
-            )
             page = await get_cache_target_snapshot(
                 session,
                 external_system=STREAM,
@@ -263,22 +270,25 @@ async def main() -> int:
         # `note`가 아니라 `check`다. "광고한 상한이 실제로 도달 가능하다"는 이 soak이
         # 재는 성질이고, 지금 그것은 **거짓**이다. 거짓인 채 `SOAK: PASS`를 찍으면
         # 종료 코드가 보고서와 반대를 말한다(적대 리뷰 지적).
-        # 이 하나는 **정책 결정이 날 때까지 red인 것이 정상**이다. 그래서 다른 실패와
-        # 섞지 않고 따로 센다 — 섞으면 나머지 다섯 축이 퇴행해도 종료 코드가 그대로라
-        # 운영자가 차이를 못 본다(적대 리뷰 지적).
+        # 상한과 같은 크기가 **배포 예산 안에서, 여유를 갖고** 끝나는지가 이 soak의
+        # 본 판정이다. 예전에는 정책 결정 대기라 red를 따로 셌지만, 결정이 닫힌 뒤로는
+        # 그냥 실패다 — admission이 받아들인 크기를 build가 못 끝내면 계약이 거짓말이다.
         #
-        # 반대 방향도 본다. 예산·상한이 조정돼 이것이 **통과하기 시작하면** 그때는
-        # 보고서와 백로그를 갱신해야 하므로 그것도 알려야 한다.
-        if build_seconds <= _SHIPPED_BUILD_BUDGET_SECONDS:
+        # 여유를 요구하는 이유: 이 측정은 조용한 호스트의 한 번이고, 운영에서는 항상
+        # 다른 부하가 있다. 정렬 키 표현식에 인덱스가 없어 비용이 Θ(N log N)이고
+        # work_mem 절벽도 있으므로, 예산에 겨우 드는 값은 상한으로 삼을 수 없다.
+        budget_ceiling = _SHIPPED_BUILD_BUDGET_SECONDS / REQUIRED_SAFETY_FACTOR
+        check(
+            f"build이 예산/{REQUIRED_SAFETY_FACTOR:.0f} 안에 든다"
+            f" ({build_seconds:.1f}s <= {budget_ceiling:.0f}s)",
+            build_seconds <= budget_ceiling,
+            True,
+        )
+        if ADMITTED != repo._SNAPSHOT_ITEM_LIMIT:  # noqa: SLF001
             docs_stale.append(
-                "1,000,000 item이 이제 배포 예산 안에 든다 — 열린 결정과 보고서를 "
-                f"갱신하라(build={build_seconds:.1f}s <= "
-                f"{_SHIPPED_BUILD_BUDGET_SECONDS:.0f}s)"
-            )
-        else:
-            known_open.append(
-                "1,000,000 item이 배포 build 예산을 넘는다(열린 결정): "
-                f"build={build_seconds:.1f}s > {_SHIPPED_BUILD_BUDGET_SECONDS:.0f}s"
+                f"soak이 상한이 아닌 크기를 쟀다: ADMITTED={ADMITTED:,} != "
+                f"상한 {repo._SNAPSHOT_ITEM_LIMIT:,}"  # noqa: SLF001
+                " — 이 결과는 상한을 보증하지 않는다"
             )
         note("python_peak_mib", round(peak / 1024 / 1024, 2))
         note("merkle_root", page.merkle_root[:16] + "…")
@@ -305,9 +315,11 @@ async def main() -> int:
                 text(_SEED_HEADS_SQL),
                 {
                     "stream": STREAM,
-                    "fingerprint": FINGERPRINT,
+                    # 3단계가 재는 것은 **상한 + 1 거부**다. ADMITTED가 상한보다 작으면
+                    # ADMITTED + 1은 상한 아래라 아무것도 거부되지 않고, 그런데도 그 아래
+                    # 단언들이 ADMITTED를 기대해 통과처럼 보이지 않고 엉뚱하게 실패한다.
                     "lo": ADMITTED + 1,
-                    "hi": ADMITTED + 1,
+                    "hi": _CEILING + 1,
                 },
             )
             # identity를 바꿔 재사용을 막는다 — 재사용하면 admission을 타지 않고
@@ -318,9 +330,6 @@ async def main() -> int:
             try:
                 async with session.begin():
                     await session.execute(text("SET ROLE ktm_feature_schema_owner"))
-                    await session.execute(
-                        text("SELECT set_config('statement_timeout', '3600s', true)")
-                    )
                     await get_cache_target_snapshot(
                         session,
                         external_system=STREAM,

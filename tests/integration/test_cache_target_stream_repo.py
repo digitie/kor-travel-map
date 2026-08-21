@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
@@ -1801,15 +1802,21 @@ async def test_snapshot_cumulative_timeout_rolls_back_and_releases_writer(
     writer_task: asyncio.Task[Any] | None = None
     try:
         await asyncio.wait_for(first_item_batch_inserted.wait(), timeout=5)
+        # writer는 이제 **기다리지 않는다**. barrier가 잡혀 있으면 bounded lock 대기 뒤
+        # typed `stream_busy`로 즉시 돌아온다 — connection을 문 채 build 예산 전 구간을
+        # 버티면 전 endpoint 공유 pool이 마르기 때문이다(2026-08-21).
         writer_task = asyncio.create_task(_write_source())
-        with pytest.raises(TimeoutError):
-            await asyncio.wait_for(asyncio.shield(writer_task), timeout=0.1)
+        with pytest.raises(CacheTargetStreamConflict) as busy:
+            await asyncio.wait_for(writer_task, timeout=5)
+        assert busy.value.code == "stream_busy"
 
         with pytest.raises(CacheTargetStreamConflict) as timed_out:
             await asyncio.wait_for(build_task, timeout=5)
         assert timed_out.value.code == "snapshot_build_timeout"
 
-        written = await asyncio.wait_for(writer_task, timeout=3)
+        # build가 예산에서 rollback하며 barrier를 놓았으므로, 재시도는 성공해야 한다.
+        # 그것이 이 테스트의 본 뜻이다 — writer가 영구히 막히지 않는다.
+        written = await _write_source()
         assert written.target_key == "writer-target"
     finally:
         pending = tuple(
@@ -5013,3 +5020,64 @@ async def test_service_refresh_rejects_inactive_or_unknown_keys_at_intake(
         )
         == events_before
     )
+
+
+@pytest.mark.integration
+async def test_stream_writer_does_not_wait_forever_for_a_held_stream_lock(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """build가 stream을 쥔 동안 writer는 connection을 문 채 무한정 기다리지 않는다.
+
+    snapshot build는 같은 stream row를 build 예산 전 구간 `FOR SHARE`로 쥔다. writer가
+    `lock_timeout=0`(PG 기본)으로 기다리면 그 세션은 **connection을 점유한 채** 쌓이고,
+    그 pool은 전 endpoint가 공유하므로 build 하나가 API 전체를 마르게 할 수 있다.
+    이 경로는 stream 크기와 무관하다 — 179건짜리 stream에서도 똑같이 일어난다.
+
+    그래서 writer는 기다리다 포기하고 typed `stream_busy`로 돌아와야 한다. 이 테스트가
+    없으면 `lock_timeout` 한 줄이 지워져도 아무도 모른다.
+    """
+
+    external_system = "writer-lock-timeout-test"
+    async with AsyncSession(migrated_engine) as setup, setup.begin():
+        await lock_cache_target_stream(
+            setup,
+            external_system=external_system,
+            consumer_id=_CONSUMER,
+        )
+
+    # holder가 stream row를 잡고 놓지 않는다 (build barrier와 같은 모양).
+    async with AsyncSession(migrated_engine) as holder:
+        await holder.begin()
+        try:
+            await holder.execute(
+                text(
+                    "SELECT external_system FROM ops.poi_cache_target_streams "
+                    "WHERE external_system = :external_system FOR SHARE"
+                ),
+                {"external_system": external_system},
+            )
+
+            started = time.monotonic()
+            async with AsyncSession(migrated_engine) as writer:
+                await writer.begin()
+                try:
+                    # `asyncio.timeout`이 없으면 lock_timeout 한 줄을 지웠을 때 이 테스트는
+                    # **실패하지 않고 영원히 멈춘다** — 회귀가 red가 아니라 hang한 CI로
+                    # 나타나 원인 추적이 불가능해진다. pytest-timeout은 의존성에 없다.
+                    async with asyncio.timeout(30):
+                        with pytest.raises(CacheTargetStreamConflict) as busy:
+                            await lock_cache_target_stream(
+                                writer,
+                                external_system=external_system,
+                                consumer_id=_CONSUMER,
+                            )
+                finally:
+                    await writer.rollback()
+            waited = time.monotonic() - started
+        finally:
+            await holder.rollback()
+
+    assert busy.value.code == "stream_busy"
+    # 무한 대기가 아니라는 것이 이 테스트의 전부다. 상한을 넉넉히 잡아 느린 호스트에서
+    # flaky해지지 않게 하되, "결국 돌아왔다"가 아니라 "제 시간에 돌아왔다"를 본다.
+    assert waited < 10.0, f"writer가 {waited:.1f}초나 기다렸다 — lock_timeout이 안 걸렸다"

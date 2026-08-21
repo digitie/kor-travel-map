@@ -31,7 +31,10 @@ from fastapi import Depends, FastAPI, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from kortravelmap.core.exceptions import GeoAuthNotConfiguredError, GeoRequestError
-from kortravelmap.infra import CacheTargetStreamConflict
+from kortravelmap.infra import (
+    CacheTargetStreamConflict,
+    snapshot_build_budget_seconds,
+)
 from kortravelmap.infra.db import assert_runtime_db_privilege_boundary
 from kortravelmap.infra.feature_subtype import SubtypeDetailError
 from kortravelmap.infra.log_repo import record_api_call
@@ -172,6 +175,9 @@ _CACHE_TARGET_UNAVAILABLE_CODES = frozenset(
         "snapshot_build_timeout",
         "snapshot_busy",
         "snapshot_ttl_too_short",
+        # writer가 stream row lock을 제 시간에 못 잡았다. 클라이언트 잘못이 아니라
+        # 지금 서버가 그 stream을 다른 작업에 쓰고 있다는 뜻이므로 재시도 가능한 503이다.
+        "stream_busy",
         "stream_version_exhausted",
     }
 )
@@ -551,10 +557,26 @@ def _cache_target_stream_conflict_status(code: str) -> int:
     return 409
 
 
+#: build 예산을 통째로 태우고 실패한 요청에 1초 뒤 재시도를 지시하면, 그 stream은
+#: barrier를 놓지 않는 100% duty cycle로 물린다 — 재시도가 즉시 advisory lock을 다시
+#: 잡고 같은 예산을 또 태우기 때문이다. 그동안 writer는 계속 밀린다. 실패에 든 시간
+#: 만큼은 비워 줘야 부하가 실제로 빠진다.
+#: `stream_busy`의 재시도 간격은 lock 대기보다 **길어야** 한다. 대기 1초 뒤 곧바로 다시
+#: 오면 서버는 그 client 몫으로 connection을 계속 붙들고 있는 셈이라(대기/주기 = duty cycle)
+#: 무한 대기를 고친 효과가 대부분 사라진다. 이 관계는
+#: `test_stream_busy_retry_after_is_longer_than_the_lock_wait`이 지킨다.
+_STREAM_BUSY_RETRY_AFTER_SECONDS = 10
+
+
 def _cache_target_retry_after(exc: CacheTargetStreamConflict) -> str | None:
+    if exc.code == "snapshot_build_timeout":
+        # 상수를 여기 다시 적지 않고 **요청 시점에** 읽는다. import 시각에 얼려 두면
+        # 예산을 바꾼 프로세스에서 wire 값과 실제 예산이 갈린다.
+        return str(int(snapshot_build_budget_seconds()))
+    if exc.code == "stream_busy":
+        return str(_STREAM_BUSY_RETRY_AFTER_SECONDS)
     if exc.code in {
         "snapshot_barrier_timeout",
-        "snapshot_build_timeout",
         "snapshot_busy",
         "snapshot_ttl_too_short",
     }:

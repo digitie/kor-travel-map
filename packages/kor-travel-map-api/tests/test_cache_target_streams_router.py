@@ -12,7 +12,12 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from jsonschema import Draft202012Validator
-from kortravelmap.infra import cache_target_event_cursor
+from kortravelmap.infra import (
+    cache_target_event_cursor,
+    cache_target_reconciliation_repo,
+    cache_target_stream_repo,
+    snapshot_build_budget_seconds,
+)
 from kortravelmap.infra.cache_target_stream_repo import CacheTargetStreamConflict
 from pydantic import ValidationError
 
@@ -2463,7 +2468,6 @@ def test_service_snapshot_rolls_back_route_owned_transaction_on_error() -> None:
     ("code", "expected_code"),
     [
         ("snapshot_barrier_timeout", "SNAPSHOT_BARRIER_TIMEOUT"),
-        ("snapshot_build_timeout", "SNAPSHOT_BUILD_TIMEOUT"),
         ("snapshot_busy", "SNAPSHOT_BUSY"),
         ("snapshot_ttl_too_short", "SNAPSHOT_TTL_TOO_SHORT"),
     ],
@@ -2472,6 +2476,8 @@ def test_service_snapshot_unavailable_is_retryable_without_waiting(
     code: str,
     expected_code: str,
 ) -> None:
+    """barrier/lock을 못 잡은 실패는 아무것도 태우지 않았으므로 곧바로 다시 와도 된다."""
+
     service = _FakeCacheTargetService()
     service.snapshot_error = CacheTargetStreamConflict(
         code,
@@ -2490,6 +2496,95 @@ def test_service_snapshot_unavailable_is_retryable_without_waiting(
     assert response.json()["code"] == expected_code
     assert session.commit_calls == 0
     assert session.rollback_calls == 1
+
+
+@pytest.mark.unit
+def test_service_snapshot_build_timeout_waits_out_the_whole_budget() -> None:
+    """예산을 통째로 태운 실패는 1초 뒤 재시도를 지시하면 안 된다.
+
+    재시도가 즉시 advisory lock을 다시 잡고 같은 예산을 또 태우므로, 그 stream은
+    barrier를 놓지 않는 100% duty cycle로 물린다. 그동안 writer는 계속 밀린다.
+    """
+
+    service = _FakeCacheTargetService()
+    service.snapshot_error = CacheTargetStreamConflict(
+        "snapshot_build_timeout",
+        "snapshot materialization 누적 제한 시간이 초과되었습니다.",
+    )
+    session = _FakeSession()
+    client = _client(service, session=session)
+
+    response = client.get(
+        f"/v1/service/cache-target-snapshots/{EXTERNAL_SYSTEM}",
+        headers=_service_headers(),
+    )
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "SNAPSHOT_BUILD_TIMEOUT"
+    retry_after = int(response.headers["retry-after"])
+    assert retry_after == int(snapshot_build_budget_seconds())
+    assert retry_after > 1
+
+
+@pytest.mark.unit
+def test_build_timeout_retry_after_follows_the_budget_at_request_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """예산을 바꾸면 wire 값도 따라와야 한다.
+
+    import 시각에 얼려 두면 예산을 바꾼 프로세스에서 둘이 갈린다. 예산과 같은지만 보는
+    단언은 양쪽이 같은 상수를 읽으므로 그 어긋남을 보지 못한다 — 그래서 흔든다.
+    """
+
+    monkeypatch.setattr(
+        cache_target_reconciliation_repo,
+        "_SNAPSHOT_BUILD_TIMEOUT_SECONDS",
+        123.0,
+    )
+    service = _FakeCacheTargetService()
+    service.snapshot_error = CacheTargetStreamConflict(
+        "snapshot_build_timeout",
+        "snapshot materialization 누적 제한 시간이 초과되었습니다.",
+    )
+    client = _client(service, session=_FakeSession())
+
+    response = client.get(
+        f"/v1/service/cache-target-snapshots/{EXTERNAL_SYSTEM}",
+        headers=_service_headers(),
+    )
+
+    assert response.headers["retry-after"] == "123"
+
+
+@pytest.mark.unit
+def test_stream_busy_retry_after_is_longer_than_the_lock_wait() -> None:
+    """재시도 간격이 lock 대기보다 짧으면 duty cycle이 높아 무한 대기와 크게 다르지 않다.
+
+    대기 `w`초, 재시도 간격 `r`초면 한 client가 붙드는 connection 몫은 `w / (w + r)`이다.
+    `w=5, r=1`이면 83%다 — 그건 pool 고갈을 고친 것이 아니라 17% 할인이다.
+    """
+
+    service = _FakeCacheTargetService()
+    service.snapshot_error = CacheTargetStreamConflict(
+        "stream_busy",
+        "stream이 다른 작업에 잡혀 있습니다.",
+    )
+    client = _client(service, session=_FakeSession())
+
+    response = client.get(
+        f"/v1/service/cache-target-snapshots/{EXTERNAL_SYSTEM}",
+        headers=_service_headers(),
+    )
+
+    assert response.status_code == 503
+    retry_after = int(response.headers["retry-after"])
+    lock_wait_seconds = int(
+        cache_target_stream_repo.STREAM_WRITER_LOCK_TIMEOUT.removesuffix("s")
+    )
+    assert retry_after > lock_wait_seconds, (
+        f"재시도 간격 {retry_after}초가 lock 대기 {lock_wait_seconds}초보다 짧다 — "
+        f"duty cycle {lock_wait_seconds / (lock_wait_seconds + retry_after):.0%}"
+    )
 
 
 @pytest.mark.unit
@@ -2559,8 +2654,8 @@ def test_service_snapshot_byte_ceiling_returns_non_retryable_payload_too_large()
         "snapshot_byte_limit_exceeded",
         "snapshot byte capacity reached",
         current={
-            "material_bytes_lower_bound": 536_870_913,
-            "material_byte_limit": 536_870_912,
+            "material_bytes_lower_bound": 58_720_257,
+            "material_byte_limit": 58_720_256,
         },
     )
     session = _FakeSession()
@@ -2574,7 +2669,7 @@ def test_service_snapshot_byte_ceiling_returns_non_retryable_payload_too_large()
     assert response.status_code == 413
     assert "retry-after" not in response.headers
     assert response.json()["code"] == "SNAPSHOT_BYTE_LIMIT_EXCEEDED"
-    assert response.json()["details"]["material_byte_limit"] == 536_870_912
+    assert response.json()["details"]["material_byte_limit"] == 58_720_256
     assert session.commit_calls == 0
     assert session.rollback_calls == 1
 
