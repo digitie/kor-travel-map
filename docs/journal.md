@@ -1,5 +1,56 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-21 — prod 배포가 `0230`에서 멈췄다: 대리키를 계약으로 착각한 catalog migration
+
+`0229`+`0230`+`0231` 묶음 배포가 `0230_tvn_c05_krforest_datasets`에서 중단됐다.
+
+```
+TVN-C05 provider_dataset_id 73 is already assigned to
+python-datagokr-api/standard_special_streets;
+expected python-krforest-api/krforest_wildfire_risk_forecast
+```
+
+`alembic/env.py`는 `run_migrations()` 전체를 한 transaction으로 감싸므로 30회 재시도가
+매번 전량 롤백됐고 API는 끝내 뜨지 않았다. 롤백해 prod를 `0225`로 되돌렸다 — head·
+`curated` 35행·container health 모두 배포 전 그대로였다.
+
+원인은 catalog identity를 대리키로 적은 것이다. `provider_dataset_id`는
+`Identity(always=True)` 대리키이고 정본은 자연키 `uq_provider_datasets_identity
+(provider, dataset_key)`다. 번호는 환경마다 다르며 실제로 달랐다 — baseline seed는
+`python-datagokr-api/standard_special_streets`를 69번으로 매기는데 prod는 73번을 배정해
+뒀다. `0230`이 그 73번을 자기 것으로 적어 뒀으므로 가드가 정확히 발동한 것이고, 잘못된
+쪽은 migration이다. 가드가 없었다면 dataset은 건너뛰고 operation만 같은 숫자로 들어가
+**남의 dataset에 C05 operation이 달라붙었을** 것이다.
+
+CI가 늘 초록이었던 이유도 같은 자리에 있다. 통합 테스트 DB는 `0200`이 `seed.sql`을
+실행하므로 C05가 이미 70~74로 서 있는 DB만 봤다 — 그 DB에서 이 migration은 순수
+no-op이라 prod 조건을 한 번도 보지 못했다.
+
+고친 내용(`fix/tvn-c05-natural-key-catalog`):
+
+- dataset은 identity sequence가 번호를 매기게 두고, operation·scope는 자연키 JOIN으로
+  그 번호를 되찾는다. 숫자를 다시 적지 않으므로 남의 dataset에 붙는 경로가 사라진다.
+- `_SEQUENCE_SQL`을 dataset INSERT **앞**으로 옮겼다. 뒤처진 sequence를 고치는 것이
+  존재 이유인데 뒤에 두면 정작 그 상황에서 INSERT가 먼저 죽는다 — nextval이 이미 쓰이는
+  번호를 돌려주고 자연키 arbiter는 대리키 충돌을 잡지 못한다. 적대적 리뷰어 두 명이
+  독립적으로 같은 지점을 짚었다.
+- 사후 단언 블록: dataset/operation/scope 존재, 기존 dataset의 계약 일치, operation
+  `is_enabled`. "선언됐다"와 "돌 수 있다"는 다르다.
+- gate는 대리키 70~74를 전부 남이 선점한 DB를 만들고, 세 catalog 테이블을 자연키로
+  정규화해 통째로 스냅숏해 delta를 단언한다. 73 하나만 보면 "73만 피해 가는" 구현이
+  통과한다. `pytest.raises(match=)`도 버렸다 — SQLAlchemy가 실행 SQL 원문을 예외
+  문자열에 붙이는데 그 SQL 안에 단언용 메시지가 그대로 있어 무엇으로 죽든 맞는다.
+  sqlstate와 SQL에 없는 payload로 결합한다.
+- 재발 방지 lint: `alembic/versions/*.py`가 `provider_sync` catalog에 대리키를
+  하드코딩하지 못하게 막는다. 이 사건 회귀 테스트는 `0230` 하나에만 붙어 다음
+  migration에는 아무것도 강제하지 못했다.
+
+prod 덤프(587M)를 별도 DB로 복원해 실제 migrator 자격으로 리허설했다. features
+1,008,852 / source_records 1,009,164까지 prod와 완전 일치하는 사본에서
+`0225→0229→0230→0231`이 30초에 통과했고 fail-closed runtime ACL 조정도 exit 0이었다.
+C05는 sequence가 매긴 **104~108**을 받았고 73번 선점자는 자식 0으로 무사하다. sequence는
+103→108로 전진만 했다. `0229`가 `curated` 35행을 `candidate`로 정규화하므로 미해결이던
+admin `/v1/admin/curated-source-rules` 500도 이 배포로 풀릴 전망이다.
 ## 2026-08-21 — T-VN-37D 두 번째 리뷰 P2 반영
 
 두 번째 독립 reviewer가 curation candidate의 `to_jsonb(notice)` timestamp가 DB 세션
@@ -16,6 +67,7 @@ candidate의 `to_jsonb(notice)`에 내부 generated column이 누출되는 P1을
 candidate SQL은 `valid_during`을 response JSON에서 제외하도록 수정했다. NULL·one-sided·
 equal range, public/admin active predicate와 notice candidate detail 회귀를 추가했으며,
 수정 후 targeted integration 2건을 통과했다.
+||||||| parent of 511be40f (docs: 0230 대리키 사건과 자연키 수정을 journal/resume/tasks에 기록)
 
 ## 2026-08-21 — 완료 task를 `tasks-done.md`로 이관
 
