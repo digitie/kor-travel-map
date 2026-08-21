@@ -137,6 +137,17 @@ prod 덤프(587M)를 별도 DB로 복원해 실제 migrator 자격으로 리허�
 C05는 sequence가 매긴 **104~108**을 받았고 73번 선점자는 자식 0으로 무사하다. sequence는
 103→108로 전진만 했다. `0229`가 `curated` 35행을 `candidate`로 정규화하므로 미해결이던
 admin `/v1/admin/curated-source-rules` 500도 이 배포로 풀릴 전망이다.
+
+## 2026-08-21 — M05 paired service contract와 fresh bootstrap 정합화
+
+M05 service surface가 바뀐 뒤 Map의 `openapi-diff-v1` baseline과 pending consumer receipt가 이전
+service/admin SHA를 가리켜 Python CI가 실패했다. PinVi의 현재 exact vendor bytes와 같은
+user/service/admin SHA로 Map contract freeze를 재결박하고 artifact fingerprint gate를 통과시켰다.
+
+격리 fresh start에서는 PostgreSQL healthcheck가 Unix socket을 먼저 통과해 role bootstrap의 첫
+TCP probe가 connection refused로 끝나는 경쟁도 재현했다. bootstrap은 권한 변경 전 30초 bounded
+probe를 수행하도록 해 Compose start 순서가 network accept보다 빠른 경우에도 fail-closed하면서
+재시도한다.
 ## 2026-08-21 — T-VN-37D 두 번째 리뷰 P2 반영
 
 두 번째 독립 reviewer가 curation candidate의 `to_jsonb(notice)` timestamp가 DB 세션

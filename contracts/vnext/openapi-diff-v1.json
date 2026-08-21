@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "18187b2b6613ad669348da020e1c629fc6634180d1453170317d73090cac8d25"
+      "sha256": "697a08c475fc28ba730af1dd14da89998a3a56cafbfb7676bfb3fa4a0b9ef6fd"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -13,7 +13,7 @@
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
-      "sha256": "c878531af2acdea0a25861d81f2e87f4768244d8ff37b94cb610194e3db85c96"
+      "sha256": "e1152a058e176f4f3aaeb4bb0965434f657601639786463f873ac82c6f3018eb"
     }
   },
   "revisions": [

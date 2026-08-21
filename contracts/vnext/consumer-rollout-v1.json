@@ -167,10 +167,10 @@
       "pinvi_snapshot_receipt": {
         "state": "pending",
         "map_user_openapi_sha256": "489b05d3e62e3531233e3e7eb8c97f9ddf92aa1ecf1573b7557a5951e7f6a61b",
-        "map_service_openapi_sha256": "c878531af2acdea0a25861d81f2e87f4768244d8ff37b94cb610194e3db85c96",
-        "map_full_openapi_sha256": "18187b2b6613ad669348da020e1c629fc6634180d1453170317d73090cac8d25",
+        "map_service_openapi_sha256": "e1152a058e176f4f3aaeb4bb0965434f657601639786463f873ac82c6f3018eb",
+        "map_full_openapi_sha256": "697a08c475fc28ba730af1dd14da89998a3a56cafbfb7676bfb3fa4a0b9ef6fd",
         "pinvi_user_vendor_sha256": "489b05d3e62e3531233e3e7eb8c97f9ddf92aa1ecf1573b7557a5951e7f6a61b",
-        "pinvi_service_vendor_sha256": "c878531af2acdea0a25861d81f2e87f4768244d8ff37b94cb610194e3db85c96",
+        "pinvi_service_vendor_sha256": "e1152a058e176f4f3aaeb4bb0965434f657601639786463f873ac82c6f3018eb",
         "blocking_reason": "T-VN-M04가 generic Feature 요청 service queue와 admin resolution을 추가해 Map admin/service OpenAPI bytes를 바꿨다. PinVi exact vendor는 갱신했지만 새 Map/PinVi source pair의 격리 paired live UI E2E가 아직 없으므로 complete receipt로 승격하지 않는다."
       }
     },
@@ -190,8 +190,8 @@
       },
       "pinvi_snapshot_receipt": {
         "state": "pending",
-        "map_service_openapi_sha256": "c878531af2acdea0a25861d81f2e87f4768244d8ff37b94cb610194e3db85c96",
-        "pinvi_service_vendor_sha256": "c878531af2acdea0a25861d81f2e87f4768244d8ff37b94cb610194e3db85c96",
+        "map_service_openapi_sha256": "e1152a058e176f4f3aaeb4bb0965434f657601639786463f873ac82c6f3018eb",
+        "pinvi_service_vendor_sha256": "e1152a058e176f4f3aaeb4bb0965434f657601639786463f873ac82c6f3018eb",
         "blocking_reason": "T-VN-M04 generic Feature 요청 queue가 service 계약을 바꿨다. PinVi exact vendor는 갱신했지만 기존 77821001/e8e0fec 후보 archive·image·Live UI 증거는 이전 service bytes만 검증했으므로 새 Map/PinVi source pair의 isolated acceptance 전까지 candidate_verified로 승격하지 않는다."
       }
     },

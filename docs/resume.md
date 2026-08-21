@@ -71,6 +71,19 @@ prod 덤프 사본(features 1,008,852까지 완전 일치)에서 `0225→0229→
 2026-08-21 한 배포로 prod에 올라갔다(prod head = `0232_tvn37d_notice_empty_range`).
 상세는 이 문서 최상단 배포 항목에 있다.
 
+## 2026-08-21 — M05 contract receipt와 fresh bootstrap 보정
+
+Map service/admin OpenAPI의 M05 변경을 PinVi가 이미 vendor한 exact bytes와 재결박해 contract
+freeze CI를 복구했다. 또한 fresh Compose에서 role bootstrap의 PostgreSQL TCP accept 경쟁을 30초
+bounded probe로 흡수한다. Map/PinVi의 표적 unit·integration은 통과했지만, N150 격리 host의 SSH가
+응답하지 않아 실제 mutating browser evidence는 아직 생성하지 않았다.
+
+### 다음 한 작업
+
+N150 접근이 회복되면 현재 Map/PinVi draft head로 격리 stack을 다시 기동하고 M04 request 승인 →
+M05 subscription/decision → PinVi reference rebind 및 ACK를 browser E2E로 증명한다. 이 증거와
+CI green 전에는 M05 activation receipt와 Hallmark 작업을 시작하지 않는다.
+
 ## 2026-08-21 — T-VN-M05 `0232` forward repair 재심 보정
 
 M05는 아직 activation하지 않는다. `0231` preview의 reader owner와 v1 admin EXECUTE가 남는 실제
