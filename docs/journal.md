@@ -1,5 +1,14 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-22 — #1054 OpenAPI baseline·T-VN-40 pending receipt 재고정
+
+T-VN-41S에서 갱신한 `packages/kor-travel-map-api/openapi.json`의 admin SHA를
+`contracts/vnext/openapi-diff-v1.json`에 반영하고, 같은 현재 full spec SHA를
+`contracts/vnext/consumer-rollout-v1.json`의 T-VN-40 pending receipt에 재고정했다.
+user/service SHA와 PinVi service vendor SHA는 바꾸지 않았다. 따라서 T-VN-40의
+교차 저장소 paired acceptance는 여전히 `pending`이며, 이 변경은 receipt가 현재
+Map tree를 기술하도록 만드는 정합성 수정이다.
+
 ## 2026-08-22 — #922 후속 PR #1051 병합 및 task 정합성 대조
 
 T-VN-41S/#922 후속 계약·migration gate를 [PR #1051](https://github.com/digitie/kor-travel-map/pull/1051),

@@ -168,7 +168,7 @@
         "state": "pending",
         "map_user_openapi_sha256": "489b05d3e62e3531233e3e7eb8c97f9ddf92aa1ecf1573b7557a5951e7f6a61b",
         "map_service_openapi_sha256": "99ba6c178bf55401d3e1bb638a01b96f66bbac38d604534aa126a70f4be53d3d",
-        "map_full_openapi_sha256": "7ae7fbc68eaa666fb9c22d4d6e4bc554339a0eb878dd05d14df090a5c173fae6",
+        "map_full_openapi_sha256": "2c02ecfead95b06306db7189278c975ec83a9e2a793f3f0e18ca0bd96240f3cb",
         "blocking_reason": "T-VN-40 service contract changed with the generic snapshot 410 declaration and corrected admission ceilings. Re-run the paired Map/PinVi service acceptance before restoring the complete receipt.",
         "pinvi_user_vendor_sha256": "489b05d3e62e3531233e3e7eb8c97f9ddf92aa1ecf1573b7557a5951e7f6a61b",
         "pinvi_service_vendor_sha256": "e1152a058e176f4f3aaeb4bb0965434f657601639786463f873ac82c6f3018eb"

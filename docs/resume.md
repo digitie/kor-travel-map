@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-22 — #1054 OpenAPI baseline·consumer receipt 정합성 수정
+
+T-VN-41S의 generic snapshot `410`/admission 계약으로 재생성된 full/admin OpenAPI와
+`openapi-diff-v1.json`·T-VN-40 pending receipt의 SHA를 일치시켰다. user/service
+표면과 PinVi vendor는 변하지 않았고, 교차 저장소 paired acceptance가 끝날 때까지
+T-VN-40 receipt는 `pending`으로 유지한다. `tasks.md`의 T-VN-41C·FINAL-REBUILD
+배리어와 M01~M05 활성화/paired 잔여 상태는 그대로다.
+
+### 다음 한 작업
+
+CI green과 두 전문 적대 리뷰의 현재 head 재확인 후 #1054를 병합한다. 그 다음
+`tasks.md`의 남은 실행 단위를 다시 대조해, cross-repo acceptance가 필요한 항목과
+문서/코드로 독립 진행 가능한 항목을 분리한다.
+
 ## 2026-08-22 — #922 후속 PR #1051 병합 및 백로그 정합성 감사
 
 T-VN-41S/#922 후속 무결성 게이트를 [PR #1051](https://github.com/digitie/kor-travel-map/pull/1051)로
