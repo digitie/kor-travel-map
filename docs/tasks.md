@@ -67,8 +67,9 @@ barrier로 직렬화한다.
   (AGENTS.md), 그 아래 설계적 우수성 > 확장성 > 성능 > 불필요한 코드 반복(래퍼류) 금지.
   **prod 환경 보전·호환성·기존 문서 계약·최소 수정은 비제약** — 필요 시 DB 스키마·문서
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
-- migration 정본: 단일 head 유지. **2026-08-22 현재 `origin/main`은
-  `fadc029c`(#1054 병합)이고 head는 `0236_tvn41s_compaction_drained`다.**
+- migration 정본: 단일 head 유지. **2026-08-22 현재 migration/code baseline은
+  `fadc029c`(#1054 병합)이고 head는 `0236_tvn41s_compaction_drained`다.** #1055는
+  문서 전용 병합이므로 migration head와 code baseline을 바꾸지 않는다.
   Map PR #1029(`57c9d99a`)는 이미 병합됐으며 `0226`(M01)→`0227`(M02)→`0228`(M03)→
   `0233`(M04)→`0234`·`0235`(M05) 뒤에 `0236`이 직렬로 연결돼 있다.
   prod 적용 head는 배포 직전 live DB에서 다시 확인한다. 후속 migration 소유자는
