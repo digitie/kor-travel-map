@@ -30,6 +30,7 @@ _MATERIAL = "d1000000-0000-4000-8000-000000000001"
 _RECEIPT = "d2000000-0000-4000-8000-000000000001"
 #: 아직 표시되지 않은 별도 material. 배출 전제 위반을 재는 테스트에만 쓴다.
 _LIVE_MATERIAL = "d3000000-0000-4000-8000-000000000001"
+_COMPACTED_RECEIPT = "d4000000-0000-4000-8000-000000000001"
 _ROOT = "c" * 64
 
 
@@ -40,9 +41,9 @@ async def _seed_compacted_material_with_items(
 ) -> None:
     """이미 표시됐지만 아직 배출되지 않은 material을 만든다.
 
-    fence가 `compacted_at`을 한 방향으로만 열어 두므로, 표시된 상태를 만들려면 INSERT
-    시점에 이미 표시해 둔다(UPDATE로 표시하면 이 fixture가 fence를 거치게 되어 무엇을
-    재는 테스트인지 흐려진다).
+    receipt를 붙인 뒤 `compacted_at`을 한 방향으로 표시한다. terminal material에는 새
+    receipt를 붙일 수 없다는 `0236` fence 때문에 producer가 실제로 수행하는 순서를
+    fixture도 그대로 따른다.
 
     **receipt를 반드시 붙인다.** receipt 없는 material은 orphan이라 item을 비운 뒤 행째
     삭제되고, 그러면 배출 표시를 확인할 대상이 사라진다. 배출 표시가 뜻을 갖는 것은
@@ -62,9 +63,9 @@ async def _seed_compacted_material_with_items(
             "INSERT INTO ops.poi_cache_target_snapshot_materials ("
             "material_id, external_system, restore_epoch, "
             "material_high_watermark_relay_order, safe_high_watermark_relay_order, "
-            "item_count, merkle_root, materialized_at, compacted_at) VALUES ("
+            "item_count, merkle_root, materialized_at) VALUES ("
             "CAST(:material_id AS uuid), :system, 1, 0, 0, :items, :root, "
-            "now() - interval '1 hour', now() - interval '1 minute')"
+            "now() - interval '1 hour')"
         ),
         {
             "material_id": _MATERIAL,
@@ -82,6 +83,17 @@ async def _seed_compacted_material_with_items(
             ":system, now(), now() + interval '2 hours')"
         ),
         {"receipt_id": _RECEIPT, "material_id": _MATERIAL, "system": _SYSTEM},
+    )
+    # Receipt를 먼저 붙인 live material만 compaction한다. `0236`은 terminal material에
+    # 새 receipt를 붙이는 것을 차단하므로, 이미 compacted인 행에 receipt를 넣는 fixture는
+    # 정상 producer 순서를 거꾸로 재현하게 된다.
+    await session.execute(
+        text(
+            "UPDATE ops.poi_cache_target_snapshot_materials "
+            "SET compacted_at = now() - interval '1 minute' "
+            "WHERE material_id = CAST(:material_id AS uuid)"
+        ),
+        {"material_id": _MATERIAL},
     )
     for row_number in range(1, items + 1):
         await session.execute(
@@ -234,6 +246,64 @@ async def test_last_receipt_marks_orphan_and_blocks_reuse(
         f"WHERE material_id = CAST('{_MATERIAL}' AS uuid)",
     )
     assert "one-way" in moved or "receipt trigger" in moved, moved
+
+
+async def test_compacted_material_blocks_new_receipt(
+    migrated_session: AsyncSession,
+) -> None:
+    """terminal audit material은 orphan이 아니어도 새 receipt를 받을 수 없다."""
+
+    await migrated_session.execute(
+        text(
+            "INSERT INTO ops.poi_cache_target_streams ("
+            "external_system, consumer_id, restore_epoch) "
+            "VALUES (:system, 'drained-compacted', 1) ON CONFLICT DO NOTHING"
+        ),
+        {"system": _SYSTEM},
+    )
+    await migrated_session.execute(
+        text(
+            "INSERT INTO ops.poi_cache_target_snapshot_materials ("
+            "material_id, external_system, restore_epoch, "
+            "material_high_watermark_relay_order, safe_high_watermark_relay_order, "
+            "item_count, merkle_root, materialized_at) VALUES ("
+            "CAST(:material_id AS uuid), :system, 1, 0, 0, 1, :root, now())"
+        ),
+        {"material_id": _LIVE_MATERIAL, "system": _SYSTEM, "root": _ROOT},
+    )
+    await migrated_session.execute(
+        text(
+            "INSERT INTO ops.poi_cache_target_snapshots ("
+            "snapshot_id, material_id, receipt_kind, external_system, "
+            "created_at, expires_at) VALUES ("
+            "CAST(:receipt_id AS uuid), CAST(:material_id AS uuid), 'generic', "
+            ":system, now(), now() + interval '2 hours')"
+        ),
+        {
+            "receipt_id": _RECEIPT,
+            "material_id": _LIVE_MATERIAL,
+            "system": _SYSTEM,
+        },
+    )
+    await migrated_session.execute(
+        text(
+            "UPDATE ops.poi_cache_target_snapshot_materials "
+            "SET compacted_at = clock_timestamp() "
+            "WHERE material_id = CAST(:material_id AS uuid)"
+        ),
+        {"material_id": _LIVE_MATERIAL},
+    )
+
+    reason = await _refused(
+        migrated_session,
+        "INSERT INTO ops.poi_cache_target_snapshots ("
+        "snapshot_id, material_id, receipt_kind, external_system, "
+        "created_at, expires_at) VALUES ("
+        f"CAST('{_COMPACTED_RECEIPT}' AS uuid), "
+        f"CAST('{_LIVE_MATERIAL}' AS uuid), 'reconciliation', '{_SYSTEM}', "
+        "now(), now() + interval '2 hours')",
+    )
+    assert "already compacted" in reason, reason
 
 
 async def test_backlog_ignores_a_drained_material(

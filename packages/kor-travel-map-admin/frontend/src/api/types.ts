@@ -14413,7 +14413,7 @@ export interface operations {
                     "application/json": components["schemas"]["CacheTargetOperationResponse"];
                 };
             };
-            /** @description snapshot item 1,000,000개 또는 canonical material 512 MiB admission 상한을 초과함. */
+            /** @description snapshot item 500,000개 또는 canonical material 56 MiB admission 상한을 초과함. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -24120,7 +24120,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description snapshot item 1,000,000개 또는 canonical material 512 MiB admission 상한을 초과함. */
+            /** @description snapshot item 500,000개 또는 canonical material 56 MiB admission 상한을 초과함. */
             413: {
                 headers: {
                     [name: string]: unknown;
@@ -24251,7 +24251,16 @@ export interface operations {
                     "application/json": components["schemas"]["CacheTargetSnapshotResponse"];
                 };
             };
-            /** @description snapshot item 1,000,000개 또는 canonical material 512 MiB admission 상한을 초과함. */
+            /** @description terminal audit 보존 기간 뒤 snapshot item material이 compact되어 header/root receipt만 남음. */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["CacheTargetSnapshotMaterialCompactedProblem"];
+                };
+            };
+            /** @description snapshot item 500,000개 또는 canonical material 56 MiB admission 상한을 초과함. */
             413: {
                 headers: {
                     [name: string]: unknown;

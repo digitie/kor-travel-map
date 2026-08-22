@@ -29,9 +29,11 @@ WebSocket 관찰 로그는 이 저장소 세션에서 직접 읽지 못했으므
 `_SELECT_EXPIRED_SNAPSHOT_GC_SYSTEM_SQL`과 `_HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL`은
 `orphaned_at` partial index를 사용해 audit material마다 receipt anti-join을 반복하지 않는다.
 material migration 0236, ORM metadata, orphan fence/trigger, EXPLAIN 및 integration gate를
-함께 갱신했다. service spec `410` 선언은 기존 계획대로 `T-VN-41C` re-vendor에 남긴다.
+함께 갱신했다. generic snapshot route에도 실제 runtime `410`을 선언하고 item 500,000 /
+material 56 MiB 상한을 service/full spec과 admin 타입에 반영했다. 교차 저장소 PinVi
+re-vendor와 paired acceptance 전까지 관련 receipt는 `pending`으로 fail-closed한다.
 
-- compaction-drained integration: 7 passed
+- compaction-drained integration: 8 passed
 - cache-target stream integration: 40 passed
 - snapshot-material EXPLAIN: 1 passed
 - migration metadata: 8 passed; snapshot unit/migration boundary: 44 passed

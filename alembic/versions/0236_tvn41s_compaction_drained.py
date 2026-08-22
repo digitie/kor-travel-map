@@ -139,12 +139,17 @@ BEGIN
   END IF;
 
   IF NEW.compacted_at IS NULL THEN
-    IF NEW.orphaned_at IS DISTINCT FROM OLD.orphaned_at
-       AND pg_trigger_depth() >= 2 THEN
-      RETURN NEW;
+    IF NOT (
+      NEW.orphaned_at IS NOT DISTINCT FROM OLD.orphaned_at
+      OR (
+        NEW.orphaned_at IS NOT NULL
+        AND OLD.orphaned_at IS NULL
+        AND pg_trigger_depth() >= 2
+      )
+    ) THEN
+      RAISE EXCEPTION 'snapshot material is append-only except compaction'
+        USING ERRCODE = '55000';
     END IF;
-    RAISE EXCEPTION 'snapshot material is append-only except compaction'
-      USING ERRCODE = '55000';
   END IF;
 
   -- **열을 열거하지 않는다.** `0231` fence는 이미 표시된 행을 첫 문장에서 통째로
@@ -191,6 +196,7 @@ _RECEIPT_ORPHAN_GUARD_SQL = """
 CREATE OR REPLACE FUNCTION ops.reject_snapshot_receipt_for_orphaned_material() RETURNS trigger
 LANGUAGE plpgsql AS $reject_snapshot_receipt_for_orphaned_material$
 DECLARE
+  material_compacted_at timestamptz;
   material_orphaned_at timestamptz;
 BEGIN
   IF TG_OP = 'UPDATE' AND NEW.material_id IS DISTINCT FROM OLD.material_id THEN
@@ -198,14 +204,19 @@ BEGIN
       USING ERRCODE = '55000';
   END IF;
 
-  SELECT material.orphaned_at
-    INTO material_orphaned_at
+  SELECT material.compacted_at, material.orphaned_at
+    INTO material_compacted_at, material_orphaned_at
     FROM ops.poi_cache_target_snapshot_materials AS material
    WHERE material.material_id = NEW.material_id
    FOR SHARE;
 
   IF material_orphaned_at IS NOT NULL THEN
     RAISE EXCEPTION 'snapshot material is already orphaned'
+      USING ERRCODE = '55000';
+  END IF;
+
+  IF material_compacted_at IS NOT NULL THEN
+    RAISE EXCEPTION 'snapshot material is already compacted'
       USING ERRCODE = '55000';
   END IF;
 
@@ -273,12 +284,22 @@ def upgrade() -> None:
         drained = connection.exec_driver_sql(_BACKFILL_SQL).rowcount
         orphaned = connection.exec_driver_sql(_BACKFILL_ORPHANED_SQL).rowcount
     finally:
-        op.execute(
-            "ALTER TABLE ops.poi_cache_target_snapshot_materials "
-            f"ENABLE {'ALWAYS ' if before_mode == 'A' else ''}"
-            f"{'REPLICA ' if before_mode == 'R' else ''}"
-            "TRIGGER trg_poi_cache_target_snapshot_materials_compaction_only"
-        )
+        if before_mode == "D":
+            op.execute(
+                "ALTER TABLE ops.poi_cache_target_snapshot_materials "
+                "DISABLE TRIGGER trg_poi_cache_target_snapshot_materials_compaction_only"
+            )
+        else:
+            trigger_mode = {"A": "ALWAYS ", "R": "REPLICA ", "O": ""}.get(
+                before_mode
+            )
+            if trigger_mode is None:
+                raise RuntimeError(f"알 수 없는 material fence trigger mode: {before_mode!r}")
+            op.execute(
+                "ALTER TABLE ops.poi_cache_target_snapshot_materials "
+                f"ENABLE {trigger_mode}TRIGGER "
+                "trg_poi_cache_target_snapshot_materials_compaction_only"
+            )
 
     after = connection.exec_driver_sql(_CAPTURE_TRIGGER_MODE_SQL).scalar_one()
     after_mode = after.decode() if isinstance(after, bytes) else str(after)

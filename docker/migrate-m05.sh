@@ -79,6 +79,12 @@ async def main() -> int:
         and relation_count == len(_RELATIONS)
     ):
         return 0
+    if (
+        revision == "0236_tvn41s_compaction_drained"
+        and role_count == len(_ROLES)
+        and relation_count == len(_RELATIONS)
+    ):
+        return 0
     print("M05 migration marker is not a retryable boundary", file=sys.stderr)
     return 3
 

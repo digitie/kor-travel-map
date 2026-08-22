@@ -49,13 +49,15 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     ),
     # 2026-08-13 T-VN-40 — public legacy catalog 제거, scoped service snapshot/mapping,
     # admin catalog/import/candidate ETag·412/428 목표 diff를 machine freeze했다.
-    "openapi-diff-v1.json": ("e31cb9b97dcee83b80b60013110a4ad11b288ab4d23fe236251a72a789351071"),
+    "openapi-diff-v1.json": (
+        "c752d432d82317dab0f0b7abfeaeb858b26dccc460872b87f55a0ebd9138fe5b"
+    ),
     # 2026-08-13 T-VN-36 — receipt가 리베이스로 폐기된 커밋(c1fa5a4d)과 그때의
     # spec sha를 가리키고 있었다. 현재 head로 재핀했다.
     # 2026-08-21 T-VN-40 — M04 이후 exact vendor bytes와 n150 격리 canonical
     # import/refresh API 수용을 재검증해 receipt를 complete로 승격했다.
     "consumer-rollout-v1.json": (
-        "452bb4ba86817f5d5291880f5a5379a424673299673cb9cdeb5d4476c114cbb0"
+        "bbddda9b8ec714f68a9235f54295f479953463b9f9711ea0273c37ce64d3ace8"
     ),
     "tvn40-live-acceptance-v1.json": (
         "b1e8ffdf05fe0b07b274f521305f1f8b4af0daed16d44c4a0b847ddf81402d0e"
@@ -320,10 +322,7 @@ def test_consumer_rollout_shape() -> None:
         }
         assert paired_receipt["blocking_reason"].strip()
         assert paired_receipt["map_service_openapi_sha256"] == service_sha256
-        assert (
-            paired_receipt["map_service_openapi_sha256"]
-            == paired_receipt["pinvi_service_vendor_sha256"]
-        )
+        assert paired_receipt["pinvi_service_vendor_sha256"] != service_sha256
     else:
         _assert_promoted_paired_receipt(paired_receipt, service_sha256)
 
@@ -536,11 +535,17 @@ def test_tvn40_live_acceptance_evidence_is_secret_free_and_scoped() -> None:
     receipt = _load_json("consumer-rollout-v1.json")["tasks"]["T-VN-40"][
         "pinvi_snapshot_receipt"
     ]
-    assert evidence["source_pair"] == {
-        "map_commit": receipt["map_commit"],
-        "pinvi_commit": receipt["pinvi_commit"],
-        "exact_sha_fetch_verified": True,
-    }
+    if receipt["state"] == "complete":
+        assert evidence["source_pair"] == {
+            "map_commit": receipt["map_commit"],
+            "pinvi_commit": receipt["pinvi_commit"],
+            "exact_sha_fetch_verified": True,
+        }
+    else:
+        # OpenAPI drift invalidates the old paired acceptance. Keep the evidence as
+        # detached history until a new Map/PinVi source pair is re-run.
+        assert "map_commit" not in receipt
+        assert "pinvi_commit" not in receipt
     assert evidence["map_snapshot"]["first_page_items"] == 1
     assert evidence["map_snapshot"]["conditional_status"] == 304
     assert evidence["pinvi_canonical_import"] == {
