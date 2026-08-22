@@ -36,7 +36,7 @@ trigger를 추가했고, 실제 batch 크기·순서는 repository의 ordered `S
 이관했다.
 
 - `tests/integration/test_tvn41s_compaction_drained.py`: 10 passed
-- `tests/integration/test_tvn41s_material_fences.py`: 4 passed
+- `tests/integration/test_tvn41s_material_fences.py`: 5 passed
 - `tests/integration/test_cache_target_stream_repo.py`: 40 passed
 - `tests/integration/test_tvn41s_snapshot_material_explain.py`: 1 passed
 - migration metadata gate: 8 passed, snapshot unit/migration boundary: 44 passed
