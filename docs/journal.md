@@ -1,5 +1,17 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-22 — PinVi #465 service/admin 계약 재vendor 병합
+
+PinVi [PR #465](https://github.com/digitie/pinvi/pull/465)를 squash
+`27fe2043b7b8e747fbb42d91e461ea462f930bb7`로 병합했다. Map #1051 service와 #1054
+full/admin artifact를 각각 `99ba6c17…`/`2c02ecfe…`로 byte-exact 재고정했고 user
+`489b05d3…` pin은 유지했다. 두 전문 적대 리뷰에서 P0~P2는 0건이었고 contract-pin,
+provenance, lint/typecheck/test 전체 CI가 green이었다.
+
+이로써 T-VN-41C의 consumer 계약 pair는 정합하지만, isolated paired live acceptance와
+receipt 승격·production consumer enable은 아직 `pending`이다. 다음은 Docker-manager
+v5 release authority의 Map/PinVi source revision과 pinset digest 재핀이다.
+
 ## 2026-08-22 — #1055 문서 병합 및 migration baseline 표현 고정
 
 문서 전용 [PR #1055](https://github.com/digitie/kor-travel-map/pull/1055)를 병합했다
@@ -8,8 +20,8 @@
 `0236_tvn41s_compaction_drained`와 #1054 code baseline `fadc029c`를 그대로 유지한다.
 
 `tasks.md`의 기준 문구를 docs-only merge 뒤에도 반복해서 stale되지 않도록
-`origin/main` 대신 migration/code baseline으로 바꿨다. PinVi service re-vendor는 draft
-PR #465에서 별도 진행 중이며 paired receipt는 아직 `pending`이다.
+`origin/main` 대신 migration/code baseline으로 바꿨다. PinVi service re-vendor PR #465는
+이후 병합됐으며 paired receipt는 아직 `pending`이다.
 
 ## 2026-08-22 — #1054 병합 및 backlog 기준 SHA 갱신
 

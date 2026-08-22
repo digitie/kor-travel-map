@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-22 — PinVi #465 service/admin 계약 재vendor 병합
+
+PinVi [PR #465](https://github.com/digitie/pinvi/pull/465)가 두 전문 적대 리뷰(P0~P2 0건)와
+전체 CI green을 통과해 squash `27fe2043b7b8e747fbb42d91e461ea462f930bb7`로 병합됐다.
+Map #1051 service(`db319a47` / SHA `99ba6c17…`)와 #1054 full/admin
+(`fadc029c` / SHA `2c02ecfe…`)을 PinVi에 byte-exact로 재고정했고 user pin
+(`037e2469` / SHA `489b05d3…`)은 유지했다. 따라서 T-VN-41C의 계약·provenance pair는
+정합하지만, paired live acceptance·receipt 승격·production consumer enable은 여전히
+`pending`이다.
+
+### 다음 한 작업
+
+Docker-manager v5 release authority에 Map 현재 main `e420c89e…`와 PinVi merge
+`27fe2043…`를 재핀하고 pinset digest를 갱신한다. 이후 FINAL-REBUILD 선행조건을 다시
+대조하며 n150 격리 live 증적 없이는 T-VN-41C/M01~M05 활성화를 완료 처리하지 않는다.
+
 ## 2026-08-22 — #1055 문서 병합 및 code baseline 표현 고정
 
 문서 전용 [PR #1055](https://github.com/digitie/kor-travel-map/pull/1055)를 두 전문 적대 리뷰
@@ -8,8 +24,8 @@ P0~P3 0건과 로컬 문서/redaction gate 확인 후 병합했다. squash merge
 `fadc029c`로 변하지 않았다. `tasks.md`는 docs-only merge마다 stale해지는
 `origin/main` 표현 대신 migration/code baseline을 명시한다.
 
-PinVi service vendor 대조 결과는 별도 draft PR #465에서 진행 중이며, T-VN-40/T-VN-41
-receipt와 M01~M05·FINAL-REBUILD·live 운영 잔여는 계속 `pending`/미완료로 유지한다.
+PinVi service vendor는 별도 PR #465로 병합됐지만, T-VN-40/T-VN-41 receipt와
+M01~M05·FINAL-REBUILD·live 운영 잔여는 계속 `pending`/미완료로 유지한다.
 
 ## 2026-08-22 — #1054 병합 및 다음 실행 단위 재정렬
 
@@ -21,9 +37,9 @@ CI green과 두 전문 적대 리뷰(P0~P3 각 0건) 확인 후 병합했다. sq
 
 ### 다음 한 작업
 
-PinVi가 보유한 Map service `410` 계약을 현재 Map artifact와 byte 단위로 대조하고,
-불일치하면 PinVi service re-vendor를 별도 draft PR로 진행한다. 그 뒤 T-VN-41C와
-M01~M05의 남은 consumer/live acceptance를 다시 대조한다. FINAL-REBUILD와 live
+PinVi가 보유한 Map service `410` 계약을 현재 Map artifact와 byte 단위로 대조해
+PR #465에서 재vendor·병합했다. 다음은 Docker-manager v5 source pinset 재핀과
+T-VN-41C·M01~M05의 남은 consumer/live acceptance 대조다. FINAL-REBUILD와 live
 운영 항목은 증적·권한 없이 완료로 승격하지 않는다.
 
 ## 2026-08-22 — #1054 OpenAPI baseline·consumer receipt 정합성 수정
