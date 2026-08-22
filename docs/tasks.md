@@ -37,11 +37,6 @@ barrier로 직렬화한다.
 - **최종 cutover**
   - [ ] `T-VN-39`
 - **보류/외부 추적**
-  - [ ] `T-VN-H27` — #819 HAProxy WebSocket tunnel timeout(**보류: 운영자 환경 필요**,
-    사용자 지시 2026-07-29). 프록시는 **OPNsense 라우터의 HAProxy**이고 저장소에 config가 없다
-    (docker-manager `*haproxy*` 0건, n150은 haproxy inactive·`/etc/haproxy/` 없음). 설정 적용도
-    proxy metric 확인도 라우터 접근이 필요해 에이전트가 실행할 수 없다. 라우터에
-    `timeout tunnel` 적용 후 quiet 2주기 실증 → #819 close.
   - [ ] `T-101` — Materialized View 도입 검토(조건 발생 시)
 
 ## 공통 규율 (2026-07-28 개정)
@@ -145,15 +140,6 @@ barrier로 직렬화한다.
 
 > 2026-07-27 open-PR·이슈 전수 확인에서 main에 잔존하는 미수정 버그/하드닝을 백로그화.
 > 각 항목은 GitHub 이슈에 tasks.md 백로그 링크를 함께 기록한다.
-
-- [ ] T-VN-H27 — **#819 HAProxy WebSocket tunnel timeout 적용·실증** — **보류(2026-07-29)**
-
-  조사 결과 프록시는 **OPNsense 라우터의 HAProxy**다. docker-manager에 HAProxy config가 없고
-  (`*haproxy*` 파일 0건, `timeout tunnel` 언급 0건), n150에서도 haproxy는 inactive이며
-  `/etc/haproxy/`가 없다. 즉 tasks가 전제한 "docker-manager 공개 base config"는 존재하지 않고,
-  설정 적용과 proxy metric 확인 모두 **라우터 접근**이 필요해 에이전트가 수행할 수 없다.
-  사용자 지시로 보류한다 — 운영자가 라우터에 `timeout tunnel`을 적용한 뒤 quiet 2주기 실증으로
-  #819를 닫는다.
 
 ### T-VN-H25 — 공식 curation 미연결 membership 해소
 
@@ -458,7 +444,7 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
 > (dm#63·#70·map#712·#719·#777·#694), map#684는 H17에서 조건 #8을 "write/error UI 엣지는
 > mock, read·URL·freshness + write 계약은 live"로 명시 축소한 뒤 close했다.
 
-- **task로 승격**: map #673=`T-VN-H28A/B`, map #819=`T-VN-H27`(보류).
+- **task로 승격**: map #673=`T-VN-H28A/B`, map #819=`T-VN-H27`(2026-08-22 종결·`tasks-done.md` 이관).
 - **종결**: map #738은 lane 분배 정본을 본 문서로 이관해 닫혔다. map #930(geo key
   미결선 — dagster job 고착)은 docker-manager compose 결선(#114 트랙) + 3 컨테이너
   env 실측 + krex job 연속 SUCCESS로 2026-08-05 close.
