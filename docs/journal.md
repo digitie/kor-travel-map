@@ -7,6 +7,18 @@
 `tasks-done.md`로 이관하고 GitHub issue #819를 닫았다. OPNsense effective config와 quiet
 WebSocket 관찰 로그는 이 저장소 세션에서 직접 읽지 못했으므로 완료 근거는 운영자 확인이다.
 
+## 2026-08-22 — #990 planner false-fail 회귀 단언 추가
+
+`test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible`의 실제 planner gate
+수정은 이미 [PR #1036](https://github.com/digitie/kor-travel-map/pull/1036)에서 병합됐다. 해당
+수정은 전역 인덱스 이름 OR 비교를 relation별 semantic allowlist로 바꾸고, provider/dataset
+선택성이 20%인 작은 `source_entities`의 기본 Seq Scan을 정상 비용 선택으로 분리했다.
+
+이번 closure PR에는 두 회귀 단언을 추가했다. 작은 dimension Seq Scan은 통과하지만 대량
+`features` Seq Scan은 계속 거부한다. 따라서 planner cost 경계가 바뀌어도 문서 전용 PR을
+막지 않으면서, 실제 대량 scan 회귀는 놓치지 않는다. 순수 helper 테스트는 `2 passed`, 대상
+파일 ruff도 통과했다.
+
 ## 2026-08-22 — T-VN-41S / #922 orphan GC 갈래를 상태 partial index로 종결
 
 두 번째 적대 리뷰가 지적한 마지막 비용 경계를 실제 상태 전이로 닫았다. receipt 삭제 trigger가

@@ -7,6 +7,22 @@
 `tasks-done.md`로 이관했고 GitHub issue #819를 닫았다. 라우터의 effective config와 quiet
 WebSocket 관찰 로그는 이 세션에서 직접 읽지 못했으므로 완료 근거는 운영자 확인이다.
 
+## 2026-08-22 — #990 planner false-fail 종결 준비
+
+H50 dedup EXPLAIN의 실제 수정은 [PR #1036](https://github.com/digitie/kor-travel-map/pull/1036)에서
+이미 병합됐다. relation별 semantic gate와 작은 `source_entities` dimension의 정상 Seq Scan
+예외가 비용 경계에서 인덱스 이름을 잘못 단언하지 않도록 고정한다. 이번 PR은 그 경계를 순수
+회귀 단언으로 남겨 문서 전용 변경이 같은 false-fail을 되살리지 못하게 하고 #990을 닫는다.
+
+- planner helper 회귀 단언: 2 passed
+- 대상 `test_t212d_perf_explain.py` ruff: 통과
+
+### 다음 한 작업
+
+T-VN-41S 본체는 #922에서 완료했다. 현재 후속 계약·마이그레이션 게이트 PR
+#1051의 CI와 적대적 리뷰를 마무리한 뒤, 다음 백로그 작업인 `T-VN-41C`의
+final exact-pair·prod consumer enable을 진행한다.
+
 ## 2026-08-22 — T-VN-41S / #922 완료, orphan GC backlog 상태화
 
 마지막으로 남아 있던 GC orphan 갈래를 닫았다. receipt가 마지막으로 삭제될 때
