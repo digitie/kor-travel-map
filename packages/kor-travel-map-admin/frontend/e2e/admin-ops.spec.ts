@@ -11,6 +11,8 @@ type PoiCacheTargetRecord = components["schemas"]["PoiCacheTargetRecord"];
 type CategoriesResponse = components["schemas"]["CategoriesResponse"];
 type CategorySummary = components["schemas"]["CategorySummary"];
 type BackupRecord = components["schemas"]["BackupRecord"];
+type SystemLogsResponse = components["schemas"]["SystemLogsResponse"];
+type ApiCallLogsResponse = components["schemas"]["ApiCallLogsResponse"];
 
 const MOCK_NOW = "2026-06-08T00:00:00.000Z";
 const OFFLINE_UPLOAD_ID = "11111111-1111-4111-8111-111111111111";
@@ -139,6 +141,48 @@ function categoriesResponse(): CategoriesResponse {
   };
 }
 
+const MOCK_LOG_META = {
+  duration_ms: 1,
+  page: { next_cursor: null, page_size: 100, total: 1 },
+  request_id: "e2e-ops-logs",
+} satisfies SystemLogsResponse["meta"];
+
+const MOCK_SYSTEM_LOGS: SystemLogsResponse = {
+  data: {
+    items: [
+      {
+        created_at: MOCK_NOW,
+        detail: { checkpoint: "admin-ops" },
+        event: "mock_checkpoint",
+        level: "info",
+        log_id: "55555555-5555-4555-8555-555555555555",
+        message: "mocked system log",
+        request_id: "e2e-system-log",
+        source: "e2e",
+      },
+    ],
+  },
+  meta: MOCK_LOG_META,
+};
+
+const MOCK_API_CALL_LOGS: ApiCallLogsResponse = {
+  data: {
+    items: [
+      {
+        created_at: MOCK_NOW,
+        duration_ms: 1,
+        error_code: null,
+        log_id: "66666666-6666-4666-8666-666666666666",
+        method: "GET",
+        path: "/v1/ops/system-logs",
+        request_id: "e2e-api-call-log",
+        status_code: 200,
+      },
+    ],
+  },
+  meta: MOCK_LOG_META,
+};
+
 async function mockCategories(page: Page) {
   await page.route("**/v1/categories**", async (route) => {
     const request = route.request();
@@ -149,6 +193,29 @@ async function mockCategories(page: Page) {
     }
     throw new Error(
       `Unhandled categories route: ${request.method()} ${apiPath}`,
+    );
+  });
+}
+
+async function mockOpsLogs(page: Page) {
+  await page.route("**/api/proxy/v1/ops/system-logs**", async (route) => {
+    const request = route.request();
+    const apiPath = bffApiPath(request.url());
+    if (request.method() === "GET" && apiPath === "/v1/ops/system-logs") {
+      await fulfillJson(route, MOCK_SYSTEM_LOGS);
+      return;
+    }
+    throw new Error(`Unhandled system logs route: ${request.method()} ${apiPath}`);
+  });
+  await page.route("**/api/proxy/v1/ops/api-call-logs**", async (route) => {
+    const request = route.request();
+    const apiPath = bffApiPath(request.url());
+    if (request.method() === "GET" && apiPath === "/v1/ops/api-call-logs") {
+      await fulfillJson(route, MOCK_API_CALL_LOGS);
+      return;
+    }
+    throw new Error(
+      `Unhandled API call logs route: ${request.method()} ${apiPath}`,
     );
   });
 }
@@ -602,6 +669,7 @@ test.describe("admin/ops pages", () => {
   test.beforeEach(async ({ page }) => {
     await mockCategories(page);
     await mockOpsDatasetCatalog(page);
+    await mockOpsLogs(page);
   });
 
   test("/v1/admin/features", async ({ page }) => {
