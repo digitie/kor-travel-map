@@ -19,7 +19,8 @@
 
 2026-08-22 교차 저장소 계약 pair는 Map #1051 service `db319a47`/SHA
 `99ba6c17…`, Map #1054 full/admin `fadc029c`/SHA `2c02ecfe…`, PinVi #465 merge
-`27fe2043`로 정합화됐다. Map #1057 병합으로 현재 Map main은 `02341eae…`가 됐고,
+`27fe2043`로 정합화됐다. Map #1057 및 #1059 병합으로 현재 Map main은
+`813a8a76…`가 됐고,
 Docker-manager #189가 Map `e420c89e…`·PinVi `27fe2043…`를 v5 source pinset으로
 재고정해 canonical digest `de5206dc…`를 남겼다. isolated live acceptance·receipt
 승격 전에는 완료로 올리지 않는다.

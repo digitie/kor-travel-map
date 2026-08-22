@@ -11,6 +11,10 @@ mocked checkpoint는 해소됐지만 n150 live GET-only logs는 local-only 자�
 credential 불일치로 auth setup 401에서 중단되어 `[~]` 상태를 유지한다. 실데이터·운영
 권한 없이 live acceptance나 receipt 승격을 실행하지 않는다.
 
+두 전문 적대 리뷰에서 P0~P3 이슈는 0건이었고, lint·OpenAPI drift·Python 3.11/3.12/3.13·
+fixture replay·PostGIS·type-check/Next build 전체 CI가 green인 것을 확인한 뒤 squash
+`813a8a76ffa84f281ad46c9fb0e9bd2462fe5e21`로 병합했다.
+
 ## 2026-08-22 — Map #1057 병합 및 Docker-manager v5 pinset 정합화
 
 Map [PR #1057](https://github.com/digitie/kor-travel-map/pull/1057)을 squash
