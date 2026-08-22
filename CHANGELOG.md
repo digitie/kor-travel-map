@@ -5,7 +5,7 @@
 
 ## [Unreleased]
 
-### T-VN-41S 후속 — compaction 배출 상태와 ACL 실패 안내 (2026-08-21)
+### T-VN-41S 후속 — compaction·orphan 배출 상태와 ACL 실패 안내 (2026-08-22)
 
 - **ADDED (DB)**: migration `0236_tvn41s_compaction_drained`가
   `ops.poi_cache_target_snapshot_materials`에 `compaction_drained_at`과 partial index를 더한다.
