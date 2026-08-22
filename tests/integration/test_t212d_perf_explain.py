@@ -697,19 +697,23 @@ def _assert_dedup_refresh_is_index_compatible(plan: dict[str, Any]) -> None:
         _assert_relation_uses_index(plan, relation_name, *expected)
 
 
-def _assert_dedup_refresh_default_plan(plan: dict[str, Any]) -> None:
+def _assert_dedup_refresh_default_plan(
+    plan: dict[str, Any], *, allow_small_source_entities: bool = False
+) -> None:
     """기본 planner가 고선택성 relation을 순차 scan으로 퇴화시키지 않는다.
 
     ``source_entities``의 provider/dataset 조건은 perf fixture에서 정확히 20%를
     반환한다. PostgreSQL 버전·통계의 비용 경계에 따라 이 작은 relation은 정상적으로
-    Seq Scan을 고를 수 있으므로, index 유효성은 위의 forced-index gate가 담당한다.
+    Seq Scan을 고를 수 있으므로, 호출자가 실제 relation cardinality를 상한으로 고정한
+    경우에만 ``allow_small_source_entities``로 index 단언을 생략한다. index 유효성은
+    위의 forced-index gate가 담당한다.
     """
 
     for relation_name in _DEDUP_REFRESH_NO_SEQ_SCAN_RELATIONS:
-        if relation_name != "source_entities":
+        if relation_name != "source_entities" or not allow_small_source_entities:
             _assert_no_seq_scan_on(plan, relation_name)
     for relation_name, expected in _DEDUP_REFRESH_ACCESS_BY_RELATION.items():
-        if relation_name != "source_entities":
+        if relation_name != "source_entities" or not allow_small_source_entities:
             _assert_relation_uses_index(plan, relation_name, *expected)
 
 
@@ -749,7 +753,7 @@ def test_t212d_default_gate_accepts_small_source_entities_seq_scan() -> None:
         ],
     }
 
-    _assert_dedup_refresh_default_plan(plan)
+    _assert_dedup_refresh_default_plan(plan, allow_small_source_entities=True)
 
 
 def test_t212d_default_gate_still_rejects_large_relation_seq_scan() -> None:
@@ -1399,6 +1403,16 @@ async def test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible(
         "provider_datasets dimension grew beyond the H50 small-table Seq Scan exception: "
         f"count={provider_dataset_count}"
     )
+    source_entity_count = int(
+        await migrated_session.scalar(
+            text("SELECT count(*) FROM provider_sync.source_entities")
+        )
+        or 0
+    )
+    assert source_entity_count <= 10_000, (
+        "source_entities dimension grew beyond the small-table Seq Scan exception: "
+        f"count={source_entity_count}"
+    )
     scoped_source_entities, perf_source_entities = (
         await migrated_session.execute(
             text(
@@ -1449,7 +1463,10 @@ async def test_t212d_dedup_refresh_and_consistency_checks_are_index_compatible(
         dedup_params,
         force_index=False,
     )
-    _assert_dedup_refresh_default_plan(dedup_refresh_default)
+    _assert_dedup_refresh_default_plan(
+        dedup_refresh_default,
+        allow_small_source_entities=True,
+    )
 
     f4_sample = await _explain_json(
         migrated_session,
