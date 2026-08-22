@@ -249,7 +249,9 @@ DECLARE
 BEGIN
   -- compaction이 부모를 표시한 뒤에만 item을 되찾게 한다. 부모 행을 같은
   -- 잠금으로 직렬화해야 compaction UPDATE와 임의 DELETE가 서로의 이전 상태를
-  -- 보지 않는다.
+  -- 보지 않는다. 실제 batch 크기와 material 순서는 repository의 ordered
+  -- SKIP LOCKED query가 보장한다. 이 trigger는 raw DELETE를 batch writer로
+  -- 오인시키지 않고, 표시 전 삭제만 DB에서 fail-close한다.
   SELECT material.compacted_at
     INTO material_compacted_at
     FROM ops.poi_cache_target_snapshot_materials AS material

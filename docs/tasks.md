@@ -566,7 +566,7 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   - [x] server cursor의 per-FETCH timeout과 별도로 두 scan/모든 INSERT의 누적 5분 deadline을 두고
     capture/persist 초과를 retryable `snapshot_build_timeout`으로 구분한다.
   - [x] system별 미만료 generic snapshot을 2개로 제한하고 동적 `429 + Retry-After` admission을 구현한다.
-  - [x] 단일 snapshot 1,000,000 item/512 MiB 독립 ceiling과 초과 `413` fail-close로 process
+  - [x] 단일 snapshot 500,000 item/56 MiB 독립 ceiling과 초과 `413` fail-close로 process
     memory와 canonical material 크기를 bound한다.
   - [x] 만료·미참조 snapshot의 reader-safe foreground bounded GC를 구현한다.
   - [x] 전역 mutex·system round-robin·batch commit·시간/statement/no-progress 예산을 가진 hourly

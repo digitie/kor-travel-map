@@ -231,3 +231,18 @@ async def test_compaction_delete_of_material_items_stays_allowed(
         )
     ).rowcount
     assert deleted == 1
+
+
+async def test_live_material_delete_cascade_is_fail_closed(
+    migrated_session: AsyncSession,
+) -> None:
+    """부모 DELETE의 ON DELETE CASCADE도 live item fence를 우회하지 못한다."""
+
+    await _seed(migrated_session)
+
+    reason = await _refused(
+        migrated_session,
+        "DELETE FROM ops.poi_cache_target_snapshot_materials "
+        f"WHERE material_id = CAST('{_MATERIAL}' AS uuid)",
+    )
+    assert "before compaction" in reason, reason
