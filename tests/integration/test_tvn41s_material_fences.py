@@ -5,9 +5,10 @@ check`는 trigger를 비교하지 않고, 저장소 어디에도 그 fence들을
 (적대 리뷰 지적). 그 상태에서는 나중에 어떤 migration이 `ops.reject_snapshot_material_
 mutation()`을 지우거나 약화시켜도 `pytest -q`와 `alembic check`가 모두 초록이다.
 
-새 표에 걸린 trigger는 **넷**이다 — 두 표의 UPDATE fence와 두 표의 TRUNCATE fence. 넷을
-다 본다. UPDATE만 보면 TRUNCATE trigger를 떨어뜨려도 초록이고, bounded DELETE로 되찾는
-설계에서 TRUNCATE는 한 문장으로 전량을 날리는 우회로다.
+0231에서 새 표에 걸린 trigger는 **넷**이었다 — 두 표의 UPDATE fence와 두 표의
+TRUNCATE fence. 0236은 여기에 item의 INSERT/DELETE 상태 fence를 추가한다. UPDATE만
+보면 TRUNCATE trigger를 떨어뜨려도 초록이고, bounded DELETE로 되찾는 설계에서
+TRUNCATE는 한 문장으로 전량을 날리는 우회로다.
 
 여기서는 trigger의 **존재**가 아니라 **거부**를 본다. 존재만 보면 함수 본문이 `RETURN
 NEW`로 바뀌어도 통과한다.
@@ -200,9 +201,25 @@ async def test_truncate_is_refused_on_both_new_tables(
 async def test_compaction_delete_of_material_items_stays_allowed(
     migrated_session: AsyncSession,
 ) -> None:
-    """fence가 DELETE까지 막으면 compaction 자체가 불가능해진다."""
+    """live item은 막고, compaction 표시 뒤의 bounded DELETE만 허용한다."""
 
     await _seed(migrated_session)
+
+    reason = await _refused(
+        migrated_session,
+        "DELETE FROM ops.poi_cache_target_snapshot_material_items "
+        f"WHERE material_id = CAST('{_MATERIAL}' AS uuid)",
+    )
+    assert "before compaction" in reason, reason
+
+    await migrated_session.execute(
+        text(
+            "UPDATE ops.poi_cache_target_snapshot_materials "
+            "SET compacted_at = clock_timestamp() "
+            "WHERE material_id = CAST(:material_id AS uuid)"
+        ),
+        {"material_id": _MATERIAL},
+    )
 
     deleted = (
         await migrated_session.execute(

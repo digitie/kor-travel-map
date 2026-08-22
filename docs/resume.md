@@ -23,20 +23,25 @@ T-VN-41S 본체는 #922에서 완료했다. 현재 후속 계약·마이그레�
 #1051의 CI와 적대적 리뷰를 마무리한 뒤, 다음 백로그 작업인 `T-VN-41C`의
 final exact-pair·prod consumer enable을 진행한다.
 
-## 2026-08-22 — T-VN-41S / #922 완료, orphan GC backlog 상태화
+## 2026-08-22 — T-VN-41S / #922 후속 무결성 게이트 보강
 
-마지막으로 남아 있던 GC orphan 갈래를 닫았다. receipt가 마지막으로 삭제될 때
+마지막으로 남아 있던 GC orphan 갈래를 닫았고, 적대 DB 리뷰가 찾은 live item DELETE
+우회도 막았다. receipt가 마지막으로 삭제될 때
 DB trigger가 material의 `orphaned_at`을 단방향으로 기록하고, 새 receipt가 orphan material을
 되살리지 못하게 막는다. `_SELECT_EXPIRED_SNAPSHOT_GC_SYSTEM_SQL`과
 `_HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL`은 이제 receipt anti-join 대신 orphan partial index를
-사용한다. 완료 항목은 `docs/tasks-done.md`로 이관했다.
+사용한다. live material item은 `compacted_at` 이후에만 삭제할 수 있게 부모 row lock 기반
+trigger를 추가했고, 실제 batch 크기·순서는 repository의 ordered `SKIP LOCKED` 경로가
+보장한다. 완료 항목은 `docs/tasks-done.md`로
+이관했다.
 
 - `tests/integration/test_tvn41s_compaction_drained.py`: 10 passed
+- `tests/integration/test_tvn41s_material_fences.py`: 4 passed
 - `tests/integration/test_cache_target_stream_repo.py`: 40 passed
 - `tests/integration/test_tvn41s_snapshot_material_explain.py`: 1 passed
 - migration metadata gate: 8 passed, snapshot unit/migration boundary: 44 passed
 
-다음 한 작업은 `T-VN-41C`에서 이번에 갱신한 service spec을 PinVi에 re-vendor하고
+다음 한 작업은 #1051 후속 PR의 CI/리뷰를 마친 뒤 `T-VN-41C`에서 이번에 갱신한 service spec을 PinVi에 re-vendor하고
 paired acceptance를 다시 실행해 pending receipt를 승격하는 것이다. Map 쪽 runtime
 410 선언과 OpenAPI/admin 타입 갱신은 이번 PR에서 닫았다.
 

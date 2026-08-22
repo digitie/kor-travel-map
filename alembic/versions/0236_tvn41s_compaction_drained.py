@@ -241,6 +241,31 @@ END;
 $reject_snapshot_material_item_insert$
 """
 
+_MATERIAL_ITEM_DELETE_FENCE_SQL = """
+CREATE OR REPLACE FUNCTION ops.reject_live_snapshot_material_item_delete() RETURNS trigger
+LANGUAGE plpgsql AS $reject_live_snapshot_material_item_delete$
+DECLARE
+  material_compacted_at timestamptz;
+BEGIN
+  -- compaction이 부모를 표시한 뒤에만 item을 되찾게 한다. 부모 행을 같은
+  -- 잠금으로 직렬화해야 compaction UPDATE와 임의 DELETE가 서로의 이전 상태를
+  -- 보지 않는다.
+  SELECT material.compacted_at
+    INTO material_compacted_at
+    FROM ops.poi_cache_target_snapshot_materials AS material
+   WHERE material.material_id = OLD.material_id
+   FOR UPDATE;
+
+  IF material_compacted_at IS NULL THEN
+    RAISE EXCEPTION 'live snapshot material items cannot be deleted before compaction'
+      USING ERRCODE = '55000';
+  END IF;
+
+  RETURN OLD;
+END;
+$reject_live_snapshot_material_item_delete$
+"""
+
 _RECEIPT_ORPHAN_GUARD_SQL = """
 CREATE OR REPLACE FUNCTION ops.reject_snapshot_receipt_for_orphaned_material() RETURNS trigger
 LANGUAGE plpgsql AS $reject_snapshot_receipt_for_orphaned_material$
@@ -379,6 +404,19 @@ def upgrade() -> None:
             BEFORE INSERT ON ops.poi_cache_target_snapshot_material_items
             FOR EACH ROW
             EXECUTE FUNCTION ops.reject_snapshot_material_item_insert()
+        """
+    )
+    op.execute(_MATERIAL_ITEM_DELETE_FENCE_SQL)
+    op.execute(
+        "ALTER FUNCTION ops.reject_live_snapshot_material_item_delete() "
+        "OWNER TO ktm_feature_schema_owner"
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_poi_cache_target_snapshot_material_items_compaction_only_delete
+            BEFORE DELETE ON ops.poi_cache_target_snapshot_material_items
+            FOR EACH ROW
+            EXECUTE FUNCTION ops.reject_live_snapshot_material_item_delete()
         """
     )
     op.execute(

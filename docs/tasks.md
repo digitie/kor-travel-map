@@ -24,8 +24,6 @@ barrier로 직렬화한다.
 - **Lane B — frontend hardening·PinVi 소비 API**
   - [~] `T-VN-41C`(#975 병합 / final exact-pair·prod consumer enable 잔여)
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환 — **저장소측 완료 2026-08-20**, live 실행은 배리어 대기)
-    ∥ [x] `T-VN-41S` 완료(2026-08-22; GC orphan 갈래도 상태 partial index로 종결).
-      service `410` 선언은 Map에서 완료했고, PinVi re-vendor/paired acceptance만 `T-VN-41C`에 남김
   - **배리어**: [ ] `T-VN-FINAL-REBUILD`(주요 개발 완료 후 파괴적 재구축 — 사용자 결정 2026-08-20)
   - [ ] `T-FE-MOCK-FLAKE`(`/v1/ops/logs`)
   - [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2` → `T-VN-41C` receipt 승격
@@ -605,133 +603,6 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
     `429/503 Retry-After` backoff, `413` non-retry, credential별 gateway limit 또는 동등한 외부 rate-limit과
     실제 호출 cadence를 함께 증명한다.
 
-- [x] T-VN-41S — **snapshot materialization streaming·audit compaction 확장 (#922, C enable 비차단)**
-
-  DB-side/bounded streaming Merkle materialization, receipt/material 공유, terminal audit item compaction,
-  item/byte admission과 relation bytes/dead-tuple/vacuum metric을 1M+ synthetic/n150 soak로 검증한다.
-
-  **이번 PR 종료선(완료)** — migration 없는 bounded streaming/admission·현재 스키마에서 안전한 단방향
-  material 재사용·관측 metric·typed future error 계약까지다. 독립 적대 리뷰 2명은 최종 head에서 P0~P3
-  잔여 없음으로 GO했고, 단위/API/Dagster 집중 231개와 PostGIS stream repository 37개를 통과했다.
-
-  **후속 종료선 — 모두 닫혔다(2026-08-22).** 물리 모델(`0231`)·양방향 공유·compactor·repository
-  410·EXPLAIN·n150 soak에 더해, 마지막까지 남았던 세 항목을 모두 처리했다.
-
-  - **예산 vs 상한 결정** — 예산 300초 유지, item 상한 `1,000,000 → 500,000`, 재료 상한
-    `512 MiB → 56 MiB`. 예산에서 유도하지 않고 독립 리터럴로 두되 관계를 CI가 지킨다
-    (유도식은 불변식을 항등식으로 만들어 drift 경보를 없앤다).
-    근거: [`t-vn-41s-budget-ceiling-2026-08-21.md`](reports/t-vn-41s-budget-ceiling-2026-08-21.md).
-  - **`ops` fail-closed ACL 탈출구** — fence를 열지 않는다. 조정기가 관장하는 것은
-    `feature`/`provider_sync`/`ops` 셋뿐이므로, 운영자의 임시·백업 표는 `public`에 두면 애초에
-    걸리지 않는다. 그 경로를 실패 메시지가 직접 안내하게 하고 테스트로 고정했다. env로 여는
-    allowlist는 채택하지 않았다 — fence를 약하게 만들고, 한 번 열면 닫혔는지 아무도 확인하지 않는다.
-  - **compacted material과 orphan material의 무한 누적 스캔** — `0236`이
-    `compaction_drained_at`과 `orphaned_at`을 각각 partial index로 색인한다.
-    마지막 receipt 삭제 trigger가 orphan 상태를 단방향으로 기록하므로 두 backlog 질의가
-    audit material의 receipt anti-join을 반복하지 않는다.
-
-  **Map 쪽 `#922` 완료선은 닫혔다.** runtime에 이미 도달하는 `410`을 service/full
-  OpenAPI에 선언하고 실제 상한(`500,000`/`56 MiB`)을 함께 정정했다. 두 spec과 admin
-  타입을 재생성했으며, 교차 저장소 PinVi re-vendor와 paired acceptance는 `T-VN-41C`가
-  소유한다. 그 전까지 T-VN-40/T-VN-41 receipt는 `pending`으로 fail-closed한다.
-
-  **이번 PR 완료 항목**
-
-  - [x] PostgreSQL server cursor 2-pass scan, incremental Merkle v1, 1,000행 INSERT batch와 first-page만
-    보관하는 process-memory bounded 경로를 구현한다.
-  - [x] item 500,000/canonical material 56 MiB admission을 header INSERT 전에 검사하고 typed `413`으로
-    fail-close한다.
-  - [x] 유효 generic material을 two-phase reconciliation seal이 같은 snapshot으로 재사용하고,
-    relation/index bytes·dead tuple·vacuum lag Dagster metric/alert를 추가한다.
-  - [x] future terminal compaction page의 non-retryable `410 SNAPSHOT_MATERIAL_COMPACTED` API 계약과
-    번호 없는 receipt/material DDL·upgrade/downgrade 설계를 고정한다.
-
-  **후속 항목**
-
-  - [x] `0231`로 receipt/material/item 정규화 migration, 양방향 material 공유, terminal
-    retention compactor와 실제 repository 410 경로를 구현한다.
-    → material은 exact source membership 하나(identity `(external_system, restore_epoch,
-    material_high_watermark_relay_order)`, partial unique `WHERE compacted_at IS NULL`)를 소유하고,
-    `poi_cache_target_snapshots`는 `material_id`/`receipt_kind`만 갖는 immutable receipt로 좁혔다.
-    item PK/FK는 `(material_id, row_number)`로 옮기고 `external_system`은 material이 소유한다.
-    재사용 질의가 둘에서 하나로 합쳐지며 공유가 양방향이 됐고, 재사용이 만료 시각을 물려받지
-    않게 되어 "잔여 TTL 75분" 문턱이 사라졌다. compactor는 hourly GC batch의 한 단계다
-    (receipt 삭제 → 후보 표시 → item drain → orphan material 삭제).
-    → 초안(`docs/reports/tvn41s/snapshot-material-schema.sql.draft`)과 셋이 다르다. identity UNIQUE를
-    partial로 바꿨고(compaction된 material이 identity를 영구 점유하는 것을 막는다), `material_bytes`는
-    legacy에 NULL을 허용하며(leaf 인코딩을 SQL로 옮겨 적지 않는다), 새 표에도 append-only fence를
-    걸었다(material은 `compacted_at` 1회 전이만 허용). `safe_high_watermark_relay_order`는 한 번
-    뺐다가 되돌렸다 — 재사용 receipt가 자기 시점 cursor를 광고하면 비-membership event를 consumer가
-    건너뛴다는 것을 `test_generic_snapshot_reuse_ignores_nonmaterial_outbox_tail`이 잡았다.
-    → 410은 처음에 **도달 불가능**했다. compaction 후보는 정의상 미만료 receipt가 없어 만료 판정이
-    항상 먼저 이겼다. compaction을 앞으로 옮겨 고쳤고 end-to-end 통합 테스트로 고정했다.
-  - [x] migration upgrade/downgrade·ACL/catalog를 통과한다.
-    → 격리 DB 리허설 12절 PASS(`scripts/verify-tvn41s-snapshot-material.sh`). **빈 DB로는 이
-    migration을 검증할 수 없다** — backfill/dedupe 문장을 한 줄도 타지 않는다. 실제로 `min(uuid)`
-    부재·receipt append-only fence·legacy FK 의존 순서 셋 다 빈 경로에서는 조용히 지나갔다.
-    → ACL은 `ops` 스키마 전체를 fail-closed로 대칭화하면서 함께 닫았다. `feature`는 선언 없는
-    relation을 막는데 `ops`만 침묵 기본값으로 full CRUD를 주고 있었다(표 57개 중 48개).
-  - [x] EXPLAIN과 n150 PostGIS 1M admitted/1M+ rejection, concurrent mutation safe lower cursor,
-    compaction/vacuum soak evidence를 통과한다.
-    → EXPLAIN은 `tests/integration/test_tvn41s_snapshot_material_explain.py`. fixture 모양이
-    곧 게이트의 유효성이라 **다섯 번** 고쳐 썼다 — material 1개면 partial index 둘의 비용이
-    같고, material당 item 1행이면 정렬이 공짜고, compaction 후보가 0개면 planner 선택이
-    무의미하고, stream이 하나면 `external_system` 제한이 공짜다. 그리고 `enable_seqscan =
-    off` 아래의 "Seq Scan 노드가 없다"는 **반증 불가능**했다(적대 리뷰 지적).
-    → 그 반증 불가능한 단언을 근거로 전체 sweep index를 한 번 지웠다가 **receipt 삭제
-    상태 partial index로 교체했다**. 근거가 없어진 것이지 인덱스가 불필요하다고 밝혀진
-    것이 아니었다. 지금 근거는 planner 선택이 아니라 술어 구조다 — orphan 정리는
-    receipt anti-join 대신 `orphaned_at` 상태를 보고 `external_system` equality를
-    좁히므로 다른 stream의 material까지 훑지 않는다.
-    → soak 실측 `docs/reports/t-vn-41s-1m-soak-2026-08-21.md`(2회): 1,000,000 admitted
-    **368.4초**(2,714 item/s, 조용한 호스트 / 동시 부하에서는 547.9초) ·
-    **Python peak 2.02 MiB** · item 표 157.6 MB(157.6 B/item) ·
-    상한+1은 typed `413`에 partial row 0 · compaction 1,000,000행 39.5초 · VACUUM 157.6 MB
-    회수(증거 material/receipt는 보존).
-    → concurrent mutation의 fixed membership·safe lower cursor는 soak이 아니라 통합 테스트
-    셋이 본다(`test_fixed_snapshot_pages_ignore_concurrent_committed_write`,
-    `test_snapshot_barrier_keeps_outbox_cursor_commit_safe_across_writers`,
-    `test_generic_snapshot_reuse_ignores_nonmaterial_outbox_tail`). soak에서 흉내 내면 같은
-    성질을 덜 정확하게 보는 두 번째 게이트가 된다.
-  - [x] **GC backlog 판정의 orphan 갈래 선형 비용(적대 리뷰 지적, 2026-08-22).**
-    `0236`이 마지막 receipt 삭제 trigger로 `orphaned_at`을 단방향 기록하고
-    `idx_cache_target_snapshot_materials_orphaned` partial index를 추가했다. 같은 두 질의
-    (`_SELECT_EXPIRED_SNAPSHOT_GC_SYSTEM_SQL`·`_HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL`)가
-    이제 상태를 읽으므로 audit material마다 receipt anti-join을 반복하지 않는다.
-    새 receipt가 orphan material을 되살리지 못하는 fence와 integration/EXPLAIN 게이트를 함께
-    고정했다.
-  - [x] **service spec이 도달 가능한 `410`을 선언하지 않던 문제를 닫았다(2026-08-22).**
-    generic snapshot cursor 경로의 `410 SNAPSHOT_MATERIAL_COMPACTED`를 route responses에
-    선언하고, 실제 상한 `item 500,000 / material 56 MiB`를 세 route 설명에 반영했다.
-    `openapi.service.json`, `openapi.json`, admin `src/api/types.ts`를 재생성했으며,
-    PinVi vendor가 새 service bytes를 고정하기 전에는 paired receipt를 `pending`으로
-    유지한다. 410 본문 문구도 orphan 표시에 맞지 않던 표현을 이미 고쳤다.
-  - [x] **`ops` fail-closed ACL의 탈출구가 없다(적대 리뷰 지적).** → `public`을 정본 경로로,
-    실패 메시지가 직접 안내한다(2026-08-21). 선언 없는 ops relation은
-    이제 배포를 막는다. 의도한 동작이지만, **운영에는 있고 fresh migrate DB에는 없는**
-    relation이 걸린다 — 위험한 migration 앞에서 운영자가 만든 backup 표, `pg_dump` 복원
-    잔재가 그렇다(선언 목록에 이미 `tvn36_legacy_freeze_preflight_manifest` 같은 일회성
-    이름이 있는 것이 그 증거다). 지금은 코드 수정 없이는 풀 수 없다. env로 여는 allowlist는
-    방금 세운 fence를 약하게 하므로 채택하지 않았고, **대신 어떤 경로로 풀 것인지**를
-    정해야 한다(임시 표는 `ops` 밖에 만든다 / 선언 1줄 + hotfix / 명시적 prefix 예외).
-  - [x] **compacted material이 영구 누적되며 GC batch마다 훑인다(적대 리뷰 지적).** → `0236`
-    `compaction_drained_at` + partial index(2026-08-21).
-    `_HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL`의 "표시됐고 item이 남은 material" 분기는
-    compacted material마다 item 인덱스 probe 한 번이다. audit material은 증거로 영구
-    보존되므로 그 수가 단조 증가한다. **비용이 가장 큰 때가 한가할 때다** — backlog가
-    있으면 첫 hit에서 멈추지만, 없으면 전부 훑고 나서 false를 낸다. reconciliation은 운영자 시작이라 증가 속도가 느리고
-    probe는 index-only라 지금 규모에서 문제가 아니지만, 상한이 없다. `compaction_drained_at`
-    같은 상태 열 + partial index로 "아직 배출 중"만 색인하면 상수로 떨어진다.
-  - [x] **열린 결정 — build 예산 300초 vs item 상한 1,000,000.** → 예산 유지, 상한 500,000,
-    재료 상한 56 MiB(2026-08-21). 상한과 같은 크기의
-    snapshot은 배포 기본 예산에 **들지 않는다**(n150 실측 368.4초 > 300초; 동시 부하
-    아래에서는 547.9초). 지금 계약에서
-    1,000,000 item snapshot은 admission은 통과하고 build deadline에서 실패한다. 셋 중
-    하나를 골라야 한다 — 예산을 올린다(그만큼 stream share barrier가 유지되고, 그 값은
-    hung writer 최대 정지 시간이기도 하다) / 상한을 실제 도달 가능한 크기로 낮춘다 /
-    그대로 두되 "1,000,000까지 받되 5분 안에 끝나야 한다"로 계약 문서를 고친다.
-    근거와 수치는 위 soak 보고서 §"열린 결정".
-
 ### T-VN-41F1J — C6c cancel-probe fixture 수명주기 복구
 
 > 2026-08-06 F1D의 `cancel=404`는 Manager/PinVi read·cancel relay 문제가 아니라, 정적
@@ -818,9 +689,8 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 
   **배리어 해제 조건 (전부 참이어야 착수).** "주요 개발 완료"를 사람 판단에 맡기지 않고
   아래 셋으로 판정한다 — 셋 다 "세대를 낡게 만드는 변경"의 정의다.
-  - [ ] B1. **migration head를 올리는 열린 task가 없다.** 현재 걸려 있는 것: `T-VN-41S`
-    (`0236`까지 착지했고 남은 잔여는 migration을 요구하지 않는다)
-    (`0227+` migration/compactor), `T-VN-M01`~`M05` 중 DB를 바꾸는 것,
+  - [ ] B1. **migration head를 올리는 열린 task가 없다.** 현재 걸려 있는 것은
+    `T-VN-41C`의 cross-repo exact-pair 재검증, `T-VN-M01`~`M05` 중 DB를 바꾸는 것,
     `T-VN-C05A`~`C05D`(provider dataset 신설), `T-VN-39`(최종 cutover).
   - [ ] B2. **service/user OpenAPI 정본을 바꾸는 열린 task가 없다.** PinVi exact vendor가
     재-vendor를 요구하는 변경이 남아 있으면 pair가 다시 어긋난다.

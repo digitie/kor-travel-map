@@ -19,6 +19,18 @@ WebSocket 관찰 로그는 이 저장소 세션에서 직접 읽지 못했으므
 막지 않으면서, 실제 대량 scan 회귀는 놓치지 않는다. 순수 helper 테스트는 `2 passed`, 대상
 파일 ruff도 통과했다.
 
+## 2026-08-22 — #922 live material item DELETE 우회 차단
+
+DB 적대 리뷰가 runtime 역할의 `DELETE` 권한과 기존 UPDATE/TRUNCATE-only fence 사이의
+틈을 찾아냈다. compaction 표시 전 live item을 직접 지우면 `item_count`·`merkle_root`와
+실제 item 집합이 달라질 수 있었다. `0236`에 부모 material을 `FOR UPDATE`로 잠그고
+`compacted_at IS NOT NULL`일 때만 DELETE를 허용하는 trigger를 추가했다. compactor의
+ordered·bounded batch는 계속 허용되며, live DELETE 거부와 표시 후 DELETE 허용을
+integration fence 테스트로 고정했다.
+
+- `test_tvn41s_material_fences.py`: 5 passed
+- `test_tvn41s_compaction_drained.py`: 10 passed
+
 ## 2026-08-22 — T-VN-41S / #922 orphan GC 갈래를 상태 partial index로 종결
 
 두 번째 적대 리뷰가 지적한 마지막 비용 경계를 실제 상태 전이로 닫았다. receipt 삭제 trigger가

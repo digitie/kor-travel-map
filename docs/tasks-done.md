@@ -28,6 +28,9 @@
   배출 중인 material로 한정하고, 마지막 receipt 삭제 trigger의 `orphaned_at`·partial index로
   orphan backlog도 상태 조회로 한정했다. one-way fence·fail-closed `ops` ACL remediation을 고정했다.
   item 500,000/material 56 MiB admission과 EXPLAIN·n150 soak evidence도 반영했다.
+  후속 DB 적대 리뷰에서 발견한 live material item DELETE 우회도 `0236` 부모 row-lock
+  trigger로 차단했다. compaction 표시 전 DELETE는 거부하고 표시 후 bounded DELETE만
+  허용한다.
 - [x] 검증 근거: snapshot repository·migration boundary unit 44건, compaction-drained
   integration 10건, ACL/metadata integration 14건, cache-target stream integration 40건,
   EXPLAIN integration 1건, API router targeted 14건 통과. `ruff`, `mypy --strict`
