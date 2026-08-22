@@ -1,5 +1,22 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-22 — Map #1057 병합 및 Docker-manager v5 pinset 정합화
+
+Map [PR #1057](https://github.com/digitie/kor-travel-map/pull/1057)을 squash
+`02341eaeed2fddfc191a7ef3551bc03385a54433`로 병합했다. 두 전문 적대 리뷰에서 P0~P3는
+0건이었고, lint·OpenAPI drift·Python 3.11/3.12/3.13·fixture replay·PostGIS·
+type-check/Next build가 모두 green이었다. contract artifact SHA freeze와 PinVi #465
+exact pair를 문서·테스트에 고정했다.
+
+Docker-manager [PR #189](https://github.com/digitie/kor-travel-docker-manager/pull/189)는
+Map `e420c89e…`·PinVi `27fe2043…`를 v5 source pinset으로 재고정해 squash
+`28b121d07d6906f4b41294476d9add9e8023f9f9`, canonical digest `de5206dc…`로 병합됐다.
+이로써 release authority 정합성은 확보됐지만, isolated paired live acceptance,
+receipt 승격, production consumer enable과 M01~M05 활성화는 `pending`으로 유지한다.
+
+다음은 `T-VN-41F1D-D1`/`D2`의 비파괴 증거와 isolated acceptance 실행 가능성 대조다.
+실데이터·n150 권한 없이 receipt 승격이나 `T-VN-FINAL-REBUILD`를 실행하지 않는다.
+
 ## 2026-08-22 — PinVi #465 service/admin 계약 재vendor 병합
 
 PinVi [PR #465](https://github.com/digitie/pinvi/pull/465)를 squash
@@ -9,8 +26,8 @@ full/admin artifact를 각각 `99ba6c17…`/`2c02ecfe…`로 byte-exact 재고�
 provenance, lint/typecheck/test 전체 CI가 green이었다.
 
 이로써 T-VN-41C의 consumer 계약 pair는 정합하지만, isolated paired live acceptance와
-receipt 승격·production consumer enable은 아직 `pending`이다. 다음은 Docker-manager
-v5 release authority의 Map/PinVi source revision과 pinset digest 재핀이다.
+receipt 승격·production consumer enable은 아직 `pending`이다. Docker-manager v5 source
+pinset 재핀은 후속 PR #189에서 병합됐다.
 
 ## 2026-08-22 — #1055 문서 병합 및 migration baseline 표현 고정
 

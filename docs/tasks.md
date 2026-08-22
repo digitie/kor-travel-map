@@ -19,9 +19,10 @@
 
 2026-08-22 교차 저장소 계약 pair는 Map #1051 service `db319a47`/SHA
 `99ba6c17…`, Map #1054 full/admin `fadc029c`/SHA `2c02ecfe…`, PinVi #465 merge
-`27fe2043`로 정합화됐다. Map #1056 문서 병합 뒤 현재 Map main은 `e420c89e…`이며,
-다음 release authority 작업은 Docker-manager v5 source pinset 재핀이다. isolated live
-acceptance·receipt 승격 전에는 완료로 올리지 않는다.
+`27fe2043`로 정합화됐다. Map #1057 병합으로 현재 Map main은 `02341eae…`가 됐고,
+Docker-manager #189가 Map `e420c89e…`·PinVi `27fe2043…`를 v5 source pinset으로
+재고정해 canonical digest `de5206dc…`를 남겼다. isolated live acceptance·receipt
+승격 전에는 완료로 올리지 않는다.
 
 **Lane A (Claude Code)**와 **Lane B (codex)**는 서로 병렬 실행한다. 각 lane 내부는 아래 순서를
 지키며, 같은 migration head·OpenAPI 정본·같은 cross-repo pair를 만지는 시점만 공통 규율의
@@ -530,8 +531,8 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
     전환하고, restore clone은 sync disabled 상태에서 immutable pre-CAS receipt를 써 응답 유실 exact replay까지
     완료한다. 동일 key의 병렬 `201`/`200`도 terminal payload·ETag가 같으면 한 durable receipt로 수렴한다.
     T-VN-41S로 Map service OpenAPI SHA가 바뀐 뒤 PinVi #465가 service/full-admin exact vendor를
-    새 Map artifact에 다시 고정했다. 남은 것은 Docker-manager v5 source pinset과 isolated
-    live acceptance다.
+    새 Map artifact에 다시 고정했고, Docker-manager #189가 v5 source pinset과
+    canonical digest `de5206dc…`를 병합했다. 남은 것은 isolated live acceptance다.
 
     **조사 기록(2026-08-21) — service spec `410` 선언(T-VN-41S에서 이월)과 당시 대응안.**
     아래의 “아직/막는 것” 표현은 조사 당시 상태를 기록한 것이며, 현재 반영 상태는 마지막 문단을 따른다.
