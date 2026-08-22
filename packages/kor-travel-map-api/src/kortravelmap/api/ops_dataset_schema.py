@@ -205,8 +205,9 @@ class OpsDatasetGridRow(BaseModel):
     같은 ``sync_scope``를 공유할 수 있으므로, pair로 접으면 형제 operation의 상태가
     무경고로 사라진다 — 실패 중인 operation이 형제에 가려 보이지 않는다.
 
-    ``operation_key``가 null인 행은 **결박할 refresh membership이 없는 catalog 행**이다.
-    exact membership 실행 identity는 없지만, orphan/policy-only placeholder에는 같은
+    ``operation_key``가 null인 행은 **결박할 refresh membership이 없는 canonical catalog
+    또는 orphan/policy-only placeholder 행**이다. exact membership 실행 identity는 없지만,
+    orphan/policy-only placeholder에는 같은
     scope의 실행을 ``latest_execution``/``active_execution`` scope rollup으로 붙일 수
     있다. 이때 row의 null은 embedded execution의 identity까지 null이라는 뜻이 아니다 —
     embedded execution 자체의 ``operation_key``는 항상 non-null이다. 운영자에게 catalog
@@ -225,7 +226,8 @@ class OpsDatasetGridRow(BaseModel):
     operation_key: str | None = Field(
         description=(
             "이 행이 가리키는 exact membership operation. null이면 결박할 refresh "
-            "membership가 없는 catalog 전용 행이다. 이 경우에도 latest_execution/"
+            "membership가 없는 canonical catalog 또는 orphan/policy-only placeholder "
+            "행이다. 이 경우에도 latest_execution/"
             "active_execution에는 같은 scope의 rollup이 들어갈 수 있으며, embedded "
             "execution 자체 operation_key는 null이 아니다."
         )
