@@ -201,7 +201,7 @@ async def test_truncate_is_refused_on_both_new_tables(
 async def test_compaction_delete_of_material_items_stays_allowed(
     migrated_session: AsyncSession,
 ) -> None:
-    """live item은 막고, compaction 표시 뒤의 compactor DELETE만 허용한다."""
+    """live item은 막고, 표시 후 DELETE를 허용하며 batch 순서는 compactor가 보장한다."""
 
     await _seed(migrated_session)
 
