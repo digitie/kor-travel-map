@@ -5,6 +5,27 @@
 
 ## [Unreleased]
 
+### T-VN-41S 후속 — compaction·orphan 배출 상태와 ACL 실패 안내 (2026-08-22)
+
+- **ADDED (DB)**: migration `0236_tvn41s_compaction_drained`가
+  `ops.poi_cache_target_snapshot_materials`에 `compaction_drained_at`과 partial index를 더한다.
+  GC backlog 판정의 "표시됐고 item이 남은 material" 갈래가 item 존재 probe 대신 상태 조회가 되어
+  상수 시간으로 떨어진다. 후속 보강에서 마지막 receipt 삭제 trigger가 `orphaned_at`을 기록하고
+  orphan partial index를 사용해 같은 판정의 orphan 갈래도 상수 시간으로 떨어진다. forward-only.
+- **ADDED (DB)**: `orphaned_at` 단방향 상태와
+  `idx_cache_target_snapshot_materials_orphaned` partial index를 추가했다. orphan material에는
+  새 receipt를 붙일 수 없고, 두 backlog 질의가 receipt anti-join을 반복하지 않는다.
+- **CHANGED (DB)**: material append-only fence가 `compacted_at`과 `compaction_drained_at` 두
+  표시를 각각 **한 방향**으로 허용한다. 나머지 열은 여전히 불변이며, 검사 순서(전제 → 표시 여부
+  → 불변성 → 한 방향 → 이미 표시됨)가 계약이라 어느 규칙에 걸렸는지 메시지로 구분된다.
+- **CHANGED (운영)**: 선언 없는 `ops` relation이 배포를 막을 때, 실패 메시지가 두 갈래 조치를
+  직접 안내한다 — 애플리케이션 소유면 선언 목록에 추가하고, 운영자의 임시·백업 표라면 `public`에
+  둔다(조정기는 `feature`/`provider_sync`/`ops` 셋만 관장한다). fence 자체는 그대로다.
+- **CHANGED (service API)**: `410 SNAPSHOT_MATERIAL_COMPACTED` 본문 문구를 고쳤다. "보존 기간을
+  지나"는 orphan 표시에 맞지 않는다 — 그 경로에는 보존 기간이 없다. 코드는 그대로이고 문구만
+  바뀐다(spec 불변). 이 응답의 **route 선언**은 PinVi re-vendor가 필요해 `T-VN-41C`로 이월했다.
+
+
 ### T-VN-41S — snapshot admission 상한을 실측으로 맞추고 writer 무한 대기를 막는다 (2026-08-21)
 
 - **BREAKING (service API)**: `GET /v1/service/cache-target-snapshots/{system}`의 admission

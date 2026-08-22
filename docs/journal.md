@@ -1,5 +1,75 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-22 — T-VN-41S / #922 orphan GC 갈래를 상태 partial index로 종결
+
+두 번째 적대 리뷰가 지적한 마지막 비용 경계를 실제 상태 전이로 닫았다. receipt 삭제 trigger가
+마지막 receipt를 확인한 뒤 `orphaned_at`을 한 번만 기록하고, material fence는 그 상태를
+되돌리거나 직접 쓰지 못하게 한다. orphan material에는 새 receipt를 붙일 수 없으므로
+`_GET_REUSABLE_MATERIAL_SQL`도 부분 배출/재사용 창을 만들지 않는다.
+
+`_SELECT_EXPIRED_SNAPSHOT_GC_SYSTEM_SQL`과 `_HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL`은
+`orphaned_at` partial index를 사용해 audit material마다 receipt anti-join을 반복하지 않는다.
+material migration 0236, ORM metadata, orphan fence/trigger, EXPLAIN 및 integration gate를
+함께 갱신했다. service spec `410` 선언은 기존 계획대로 `T-VN-41C` re-vendor에 남긴다.
+
+- compaction-drained integration: 7 passed
+- cache-target stream integration: 40 passed
+- snapshot-material EXPLAIN: 1 passed
+- migration metadata: 8 passed; snapshot unit/migration boundary: 44 passed
+
+## 2026-08-21 — T-VN-41S 잔여를 처리하다 절반만 고친 것을 리뷰가 잡았다
+
+41S의 후속 종료선에 남아 있던 것은 셋이었다.
+
+**① `ops` fail-closed ACL의 탈출구.** fence를 열지 않기로 했다. 조정기가 관장하는 것은
+`feature`/`provider_sync`/`ops` 셋뿐이므로 운영자의 임시·백업 표는 `public`에 두면 애초에
+걸리지 않는다. 정작 없던 것은 탈출구가 아니라 **안내**였다 — 실패 메시지가 관계 이름만
+나열해서, 새벽에 그것만 보면 코드를 고쳐 재배포하는 길밖에 없어 보였다. 메시지가 두 갈래
+조치를 직접 말하게 하고, 메시지와 관장 schema 집합을 테스트로 묶었다(집합이 넓어지면
+"public에 두면 된다"는 안내가 거짓이 되므로 함께 red가 되어야 한다). env allowlist는
+채택하지 않았다 — fence를 약하게 만들고, 한 번 열면 닫혔는지 아무도 확인하지 않는다.
+
+**② compacted material의 무한 누적 스캔 — 절반만 고쳤다.** `0236`이 `compaction_drained_at`과
+partial index를 더한다. "표시됐고 item이 남은 material"을 item 존재 probe로 재면 compacted material 하나마다
+index probe 한 번이고, audit material은 영구 보존이라 그 수가 단조 증가한다. 비용이 가장 큰
+때가 하필 한가할 때다 — backlog가 있으면 첫 hit에서 멈추지만 없으면 전부 훑고 false를 낸다.
+
+그런데 적대 리뷰가 **같은 판정의 orphan 갈래는 그대로**라는 것을 잡았다. 그 갈래는
+`compacted_at` 필터가 없어 영구 보존되는 audit material까지 전부 anti-join하고, 네 갈래가
+`OR`로 묶여 backlog가 없을 때 전부 평가된다. 즉 지목한 비용 구조가 절반 남았다. 문서 세 곳의
+"판정 비용이 커지지 않는다"를 실제 성질로 고치고 잔여를 열린 항목으로 남겼다 — **닫으면서
+남은 것을 지우면 다음 사람은 같은 벽에 두 배 크기로 부딪힌다.**
+
+리뷰가 하나 더 잡았다. 내가 고친 것은 두 backlog 질의 중 **하나뿐**이었고, 고치지 않은 쪽이
+매 batch에서 먼저 돈다. `UNION` 뒤에 `LIMIT 1`이 걸려 갈래마다 전량 평가되므로 짧게 끊기지도
+않는다 — 그대로 뒀다면 열과 인덱스만 늘고 비용은 그대로였다. 두 질의가 같은 술어를 쓰는지
+테스트로 묶었다(동작 테스트는 둘이 우연히 같은 답을 낼 때 통과하므로 술어를 본다).
+
+**③ service spec의 `410` 선언 → T-VN-41C로 이월.** 선언하면 spec 두 개가 함께 바뀌고 PinVi
+re-vendor가 같은 호흡으로 필요하다. 41C가 어차피 re-vendor를 요구하므로 거기서 함께 한다.
+**오늘 깨진 것은 없다** — PinVi는 이미 그 410을 런타임에서 처리한다. 다만 조사에서 새 차단
+요인이 나왔다: `tvn40-live-acceptance-v1.json`이 T-VN-40 receipt의 커밋 쌍과 `pending` 가드
+없이 결박돼 있어, spec을 바꾸면 그 receipt가 거짓이 된다. 실행 절차와 두 선택지를 41C 항목에
+적어 뒀다 — 조사를 버리면 다음 사람이 처음부터 다시 판다.
+
+**게이트가 잡은 것 넷.** (1) main이 M lane의 `0233`~`0235`를 가져가 내 migration이 두 번째
+head를 만들고 있었다. (2) `0231`의 fence 이름을 `_append_only`로 잘못 적어 migration이
+`NoResultFound`로 죽었다(실제 이름은 `_compaction_only`). (3) M05 부트스트랩이 alembic head를
+리터럴로 고정해 두어, M05와 무관한 migration이 붙는 순간 통합 테스트 49건이 fixture 단계에서
+죽었다 — 그 검사의 실제 전제는 관계 6개 존재이고 바로 위에서 이미 세고 있어 과다 명세를
+걷어냈다. (4) 배출 표시를 `now()`로 찍었는데 그것은 **transaction 시작 시각**이라, 같은
+transaction에서 `clock_timestamp()`로 찍힌 `compacted_at`보다 이른 시각이 기록돼 방금 세운
+CHECK가 스스로를 막았다. CHECK가 없었다면 시간 순서가 뒤집힌 감사 기록이 조용히 쌓였을 것이다.
+
+**fence는 검사 순서가 곧 계약이다.** 불변성 검사를 맨 앞에 두니 "표시가 아예 아닌 UPDATE"와
+"표시를 구실로 내용도 바꾸는 UPDATE"가 같은 이유로 거부됐다. `0231` 테스트가 그 구분을 지키고
+있었다 — 구분이 사라지면 운영자가 어느 규칙에 걸렸는지 알 수 없다.
+
+그리고 게이트 실행 자체에도 결함이 있었다. n150 워크트리에 이전 실행이 남긴 미커밋 변경 때문에
+`checkout`이 조용히 실패해 **옛 커밋을 계속 테스트**하면서 같은 7건이 반복 실패했다. 매 실행마다
+`reset --hard`로 초기화하게 고쳤다.
+
+
 ## 2026-08-21 — live E2E의 provider/dataset 계약 drift 수정
 
 머지된 T-FE-MOCK-FLAKE 이후 n150 live suite를 확장 실행하면서, `admin/issues` 테스트가

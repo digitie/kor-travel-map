@@ -155,6 +155,8 @@ class _GcSession:
             return _Result(row)
         if "SET compacted_at = clock_timestamp()" in sql:
             return _Result(rows=[("m9",)])
+        if "SET compaction_drained_at = clock_timestamp()" in sql:
+            return _Result(rows=[("m7",)])
         if "DELETE FROM ops.poi_cache_target_snapshot_material_items" in sql:
             return _Result(rows=[("m1", 1), ("m1", 2)])
         if "DELETE FROM ops.poi_cache_target_snapshot_materials" in sql:
@@ -379,9 +381,11 @@ async def test_background_gc_batch_uses_exact_keyset_and_reports_backlog() -> No
         "after_external_system": "system-a",
         "compaction_retention_seconds": repo._MATERIAL_COMPACTION_RETENTION_SECONDS,  # pyright: ignore[reportPrivateUsage]
     }
-    # receipt -> compaction 표시 -> item -> orphan material. 순서가 뜻을 갖는다.
-    # receipt를 먼저 지워야 material이 orphan이 되고, 표시가 item 삭제보다 앞서야
-    # 부분적으로 비운 material이 표시되지 않은 채 남지 않는다.
+    # receipt -> compaction 표시 -> item -> 배출 표시 -> orphan material.
+    # 순서가 뜻을 갖는다. receipt를 먼저 지워야 material이 orphan이 되고, compaction
+    # 표시가 item 삭제보다 앞서야 부분적으로 비운 material이 표시되지 않은 채 남지 않으며,
+    # **배출 표시는 item 삭제 뒤**여야 한다 — 앞에 두면 이번 batch가 지울 item이 아직
+    # 남아 아무것도 찍히지 않는다(0236).
     assert "DELETE FROM ops.poi_cache_target_snapshots" in session.calls[1][0]
     assert session.calls[1][1] == {"external_system": "system-b", "limit": 100}
     assert "SET compacted_at = clock_timestamp()" in session.calls[2][0]
@@ -390,10 +394,12 @@ async def test_background_gc_batch_uses_exact_keyset_and_reports_backlog() -> No
         session.calls[3][0]
     )
     assert session.calls[3][1] == {"external_system": "system-b", "limit": 1_000}
-    assert "DELETE FROM ops.poi_cache_target_snapshot_materials" in session.calls[4][0]
+    assert "SET compaction_drained_at = clock_timestamp()" in session.calls[4][0]
     assert session.calls[4][1] == {"external_system": "system-b", "limit": 100}
-    assert "SELECT EXISTS" in session.calls[5][0]
-    assert "count(*)" not in session.calls[5][0]
+    assert "DELETE FROM ops.poi_cache_target_snapshot_materials" in session.calls[5][0]
+    assert session.calls[5][1] == {"external_system": "system-b", "limit": 100}
+    assert "SELECT EXISTS" in session.calls[6][0]
+    assert "count(*)" not in session.calls[6][0]
 
 
 @pytest.mark.unit
@@ -845,8 +851,13 @@ async def test_create_generic_snapshot_prunes_only_before_full_capture(
     assert "SET compacted_at = clock_timestamp()" in session.calls[8][0]
     assert "FOR UPDATE OF material, item SKIP LOCKED" in session.calls[9][0]
     assert session.calls[9][1]["limit"] == 1000
-    assert "FOR UPDATE OF material SKIP LOCKED" in session.calls[10][0]
+    # 배출 표시(0236)와 orphan 삭제는 둘 다 `FOR UPDATE OF material SKIP LOCKED`를 쓴다.
+    # 구분되는 부분으로 단언해야 순서가 바뀌어도 이 테스트가 알아챈다.
+    assert "SET compaction_drained_at = clock_timestamp()" in session.calls[10][0]
     assert session.calls[10][1]["limit"] == 100
+    assert "DELETE FROM ops.poi_cache_target_snapshot_materials" in session.calls[11][0]
+    assert "FOR UPDATE OF material SKIP LOCKED" in session.calls[11][0]
+    assert session.calls[11][1]["limit"] == 100
 
 
 @pytest.mark.unit

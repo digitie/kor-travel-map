@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import os
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import cast
 
 from sqlalchemy import text
@@ -277,14 +277,49 @@ _PROTECTED_FEATURE_SEQUENCES = frozenset(
     }
 )
 
+#: 이 조정기가 관장하는 schema. 아래 SQL과 실패 메시지의 안내가 **같은 값**을 봐야
+#: 한다 — 집합이 넓어지는데 안내가 그대로면 "public에 두면 된다"가 거짓이 된다.
+_GOVERNED_SCHEMAS: tuple[str, ...] = ("feature", "provider_sync", "ops")
+_GOVERNED_SCHEMA_SQL_LIST = ", ".join(f"'{schema}'" for schema in _GOVERNED_SCHEMAS)
+
+#: 이 fence가 배포를 막을 때 운영자가 무엇을 해야 하는지 메시지가 직접 말해야 한다.
+#: 예전 문구는 관계 이름만 나열했다 — 새벽에 그것만 보면 "코드를 고쳐 재배포한다" 말고는
+#: 길이 없어 보이고, 하필 위험한 migration 직전이 그 상황이다.
+#:
+#: 탈출구는 **fence를 여는 것이 아니라 관장 밖에 두는 것**이다. 이 조정기는
+#: `feature`/`provider_sync`/`ops` 세 schema만 훑으므로(`_APPLICATION_RELATIONS_SQL`),
+#: 운영자가 만드는 임시·백업 표는 `public`에 만들면 애초에 걸리지 않는다. env로 여는
+#: allowlist는 채택하지 않았다 — fence를 약하게 만들고, 한 번 열면 닫혔는지 아무도
+#: 확인하지 않는다.
+_UNDECLARED_RELATION_REMEDY = (
+    "이 relation들이 애플리케이션 소유라면 이 모듈의 선언 목록에 명시적 정책을 "
+    "추가하라(런타임 role이 무엇을 할 수 있는지 한 줄로 적는 것이 이 fence의 목적이다). "
+    "위험한 migration 앞에서 만든 임시·백업 표라면 삭제하거나 `public` schema로 옮겨라 "
+    "— 이 조정기가 관장하는 것은 "
+    + "/".join(_GOVERNED_SCHEMAS)
+    + " 뿐이므로 `public`의 표는 배포를 막지 않는다. "
+    "`public`은 database owner 소유이므로 migrator 세션에서는 "
+    "`SET ROLE ktm_feature_schema_owner` 뒤에 만들거나 옮겨야 한다."
+)
+
+
+def _undeclared_relation_message(unknown_relations: Sequence[str]) -> str:
+    return (
+        "new relation has no deliberate runtime ACL policy: "
+        + ", ".join(unknown_relations)
+        + ". "
+        + _UNDECLARED_RELATION_REMEDY
+    )
+
+
 _APPLICATION_RELATIONS_SQL = text(
-    """
+    f"""
     SELECT namespace.nspname AS schema_name, relation.relname AS relation_name,
            relation.relkind AS relation_kind
     FROM pg_catalog.pg_class AS relation
     JOIN pg_catalog.pg_namespace AS namespace
       ON namespace.oid = relation.relnamespace
-    WHERE namespace.nspname IN ('feature', 'provider_sync', 'ops')
+    WHERE namespace.nspname IN ({_GOVERNED_SCHEMA_SQL_LIST})
       AND relation.relkind IN ('r', 'p', 'v', 'S')
     ORDER BY namespace.nspname, relation.relkind, relation.relname
     """
@@ -685,8 +720,7 @@ async def reconcile_runtime_privileges() -> None:
             )
             if unknown_relations:
                 raise RuntimePrivilegeReconciliationError(
-                    "new relation has no deliberate runtime ACL policy: "
-                    + ", ".join(unknown_relations)
+                    _undeclared_relation_message(unknown_relations)
                 )
             for statement in grants:
                 await connection.execute(text(statement))

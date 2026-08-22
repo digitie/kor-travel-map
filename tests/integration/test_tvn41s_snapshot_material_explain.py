@@ -318,9 +318,10 @@ async def test_snapshot_material_hot_queries_have_index_paths(
     # `materialized_at` 정렬은 그 소수만 정렬한다.
     assert "uq_cache_target_snapshot_materials_live_identity" in compaction, compaction
 
-    # orphan material 정리는 `compacted_at`을 보지 않아 partial index에 걸리지 못한다.
-    # 전용 sweep 인덱스가 없으면 `external_system` 제한을 인덱스로 좁히지 못해 다른
-    # stream의 material까지 훑는다 — fixture에 stream이 셋 있어 그 차이가 실재한다.
+    # orphan material 정리는 receipt anti-join이 아니라 삭제 trigger가 기록한
+    # `orphaned_at` 상태를 본다. 전용 partial index가 없으면 `external_system` 제한을
+    # 인덱스로 좁히지 못해 다른 stream의 material까지 훑는다 — fixture에 stream이 셋
+    # 있어 그 차이가 실재한다.
     #
     # 앞판은 여기서 `enable_seqscan = off` 아래 "Seq Scan 노드가 없다"를 단언했는데,
     # 그 설정이 seq scan에 disable_cost를 더하므로 인덱스가 있는 표에서는 어떤
@@ -330,7 +331,7 @@ async def test_snapshot_material_hot_queries_have_index_paths(
         repo._PRUNE_ORPHANED_MATERIALS_SQL,  # pyright: ignore[reportPrivateUsage]
         {"external_system": _SYSTEM, "limit": 100},
     )
-    assert "idx_cache_target_snapshot_materials_sweep" in orphan_materials, (
+    assert "idx_cache_target_snapshot_materials_orphaned" in orphan_materials, (
         orphan_materials
     )
 

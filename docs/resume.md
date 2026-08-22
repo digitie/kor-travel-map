@@ -1,5 +1,51 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-22 — T-VN-41S / #922 완료, orphan GC backlog 상태화
+
+마지막으로 남아 있던 GC orphan 갈래를 닫았다. receipt가 마지막으로 삭제될 때
+DB trigger가 material의 `orphaned_at`을 단방향으로 기록하고, 새 receipt가 orphan material을
+되살리지 못하게 막는다. `_SELECT_EXPIRED_SNAPSHOT_GC_SYSTEM_SQL`과
+`_HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL`은 이제 receipt anti-join 대신 orphan partial index를
+사용한다. 완료 항목은 `docs/tasks-done.md`로 이관했다.
+
+- `tests/integration/test_tvn41s_compaction_drained.py`: 7 passed
+- `tests/integration/test_cache_target_stream_repo.py`: 40 passed
+- `tests/integration/test_tvn41s_snapshot_material_explain.py`: 1 passed
+- migration metadata gate: 8 passed, snapshot unit/migration boundary: 44 passed
+
+다음 한 작업은 `T-VN-41C`에서 service spec의 도달 가능한 `410` 선언과 cross-repo
+re-vendor를 처리하는 것이다.
+
+## 2026-08-21 — T-VN-41S 잔여 셋 중 둘 처리, 하나는 이월 (task는 아직 열림)
+
+후속 종료선에 남아 있던 셋 중 둘을 고치고 하나는 lane을 옮겼다. **다만 적대 리뷰가
+둘 중 하나(GC 스캔)를 절반만 고쳤다는 것을 잡아, task는 닫지 않았다.**
+
+| 항목 | 결과 |
+|---|---|
+| `ops` fail-closed ACL 탈출구 | fence는 그대로. 관장 밖(`public`)을 정본 경로로 하고 **실패 메시지가 직접 안내**한다. 메시지와 관장 schema 집합을 테스트로 묶었다 |
+| compacted material 무한 누적 스캔 | `0236` — `compaction_drained_at` + partial index. **"아직 배출 중" 갈래**가 상수로 떨어진다. 같은 두 질의의 **orphan 갈래는 여전히 선형**이다(아래 잔여) |
+| service spec `410` 선언 | **T-VN-41C로 이월.** 교차 저장소 re-vendor가 필요하고 41C가 어차피 그것을 요구한다. 오늘 깨진 것은 없다 — PinVi가 이미 그 410을 런타임에서 처리한다 |
+
+게이트: ruff / mypy `--strict` ×2 / lint-imports / migration graph `--check` clean.
+관련 통합·단위 스위트는 n150에서 통과했다(선택 목록은 `docs/tasks.md`의 41S 항목).
+
+### 다음 한 작업
+
+**GC backlog의 orphan 갈래를 마저 처리한다** — 그것이 `T-VN-41S`의 마지막 잔여다.
+그 다음이 **`T-VN-41C`에서 `410` 선언 + PinVi re-vendor를 함께 한다.** 실행 절차와 막는 요인(하나)은
+`docs/tasks.md`의 `T-VN-41C` 항목에 적어 뒀다 — `tvn40-live-acceptance-v1.json`이 T-VN-40
+receipt의 커밋 쌍과 `pending` 가드 없이 결박돼 있어, **paired acceptance 재실행**과
+**가드 추가 + receipt를 `pending`으로** 중 하나를 사용자가 골라야 한다.
+
+그 밖에 41S가 남긴 잔여는 둘이다.
+
+- **GC backlog 판정의 orphan 갈래가 아직 선형이다.** `0236`은 "아직 배출 중" 갈래만 상수로
+  만들었다. orphan 갈래는 `compacted_at` 필터가 없어 영구 보존되는 audit material까지 전부
+  anti-join하며, 네 갈래가 `OR`로 묶여 backlog가 **없을 때** 전부 평가된다 — 원래 지목된
+  "한가할 때가 가장 비싸다"가 그 갈래에는 그대로 남아 있다(적대 리뷰 지적).
+- **부하 아래 재측정** — 안전계수 2가 유일한 부하 관측 2.32배에 거의 소진된다.
+
 ## 2026-08-21 — live E2E 계약 drift 수정 및 운영 재검증
 
 머지된 T-FE-MOCK-FLAKE 뒤 확장 live 실행에서 발견한 두 계약 오류를 `fix/live-contract-inputs`

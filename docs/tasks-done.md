@@ -3,6 +3,22 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-08-22 — T-VN-41S / #922 snapshot materialization 확장 완료
+
+- [x] **T-VN-41S — snapshot materialization streaming·audit compaction 확장.** PostgreSQL
+  server cursor 2-pass·incremental Merkle·bounded memory 경로, `0231` receipt/material/item
+  정규화와 양방향 material 공유, terminal `410` repository 경로를 완료했다.
+  `0236_tvn41s_compaction_drained`의 `compaction_drained_at`·partial index로 GC backlog를
+  배출 중인 material로 한정하고, 마지막 receipt 삭제 trigger의 `orphaned_at`·partial index로
+  orphan backlog도 상태 조회로 한정했다. one-way fence·fail-closed `ops` ACL remediation을 고정했다.
+  item 500,000/material 56 MiB admission과 EXPLAIN·n150 soak evidence도 반영했다.
+- [x] 검증 근거: snapshot repository·migration boundary unit 44건, compaction-drained
+  integration 7건, ACL/metadata integration 14건, cache-target stream integration 40건,
+  EXPLAIN integration 1건, API router targeted 14건 통과. `ruff`, `mypy --strict`
+  (147 source files), `lint-imports`, migration graph check 및 redaction check 통과.
+- [>] service spec의 도달 가능한 `410` 선언은 `T-VN-41C`의 cross-repo re-vendor에서
+  처리한다. 현재 runtime 410과 reconciliation OpenAPI 선언은 유지된다.
+
 ## 2026-08-21 — T-VN-40·C7 완료 잔재를 진행 백로그에서 이관
 
 - [x] `T-VN-40A`·mapping·40B·40C와 인수 ①~⑤의 완료 근거는 이 파일의 2026-08-19~21

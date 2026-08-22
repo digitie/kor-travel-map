@@ -259,6 +259,7 @@ WHERE material.external_system = :external_system
   AND material.material_high_watermark_relay_order
       = :material_high_watermark_relay_order
   AND material.compacted_at IS NULL
+  AND material.orphaned_at IS NULL
 FOR SHARE OF material
 """
 
@@ -278,6 +279,7 @@ WITH candidates AS MATERIALIZED (
   FROM ops.poi_cache_target_snapshot_materials AS material
   WHERE material.external_system = :external_system
     AND material.compacted_at IS NULL
+    AND material.orphaned_at IS NULL
     AND EXISTS (
       SELECT 1
       FROM ops.poi_cache_target_snapshots AS receipt
@@ -365,7 +367,8 @@ RETURNING snapshot.snapshot_id
 #:
 #: 그리고 아래 둘 중 하나다.
 #:
-#: - **orphan** — 붙잡은 receipt가 하나도 없다. 표를 비운 뒤 행째 사라진다(phase 4).
+#: - **orphan** — 붙잡은 receipt가 하나도 없다. receipt 삭제 trigger가
+#:   `orphaned_at`을 찍고, 표를 비운 뒤 행째 사라진다(phase 4).
 #: - **terminal audit** — reconciliation이 참조하는 receipt가 있고, 미만료 receipt는
 #:   없으며, 참조하는 **모든** reconciliation이 terminal이고 `completed_at`이 보존
 #:   기간보다 오래됐다. 이쪽은 표시가 영구히 남는다 — root/count가 감사 증거이고
@@ -378,11 +381,7 @@ _COMPACTION_CANDIDATE_PREDICATE = """
     WHERE item.material_id = material.material_id
   )
   AND (
-    NOT EXISTS (
-      SELECT 1
-      FROM ops.poi_cache_target_snapshots AS receipt
-      WHERE receipt.material_id = material.material_id
-    )
+    material.orphaned_at IS NOT NULL
     OR (
       EXISTS (
         SELECT 1
@@ -447,6 +446,7 @@ WITH candidates AS (
     ON material.material_id = item.material_id
   WHERE material.external_system = :external_system
     AND material.compacted_at IS NOT NULL
+    AND material.compaction_drained_at IS NULL
   ORDER BY item.material_id, item.row_number
   LIMIT :limit
   FOR UPDATE OF material, item SKIP LOCKED
@@ -458,16 +458,48 @@ WHERE item.material_id = candidates.material_id
 RETURNING item.material_id, item.row_number
 """
 
+#: item을 다 비운 material에 배출 완료를 찍는다. 이 표시가 없으면 그 material은 영원히
+#: "배출 중"으로 남아 GC backlog 판정에 계속 걸린다 — 이 후속이 없애려던 바로 그 비용이다.
+#: `compaction_drained_at IS NULL`을 조건에 두어 한 번만 찍히게 한다(fence도 같은 것을 막는다).
+_MARK_DRAINED_MATERIALS_SQL = """
+WITH candidates AS (
+  SELECT material.material_id
+  FROM ops.poi_cache_target_snapshot_materials AS material
+  WHERE material.external_system = :external_system
+    AND material.compacted_at IS NOT NULL
+    AND material.compaction_drained_at IS NULL
+    -- orphan은 바로 다음 단계에서 행째 지워진다 — 곧 사라질 행에 row version과 trigger
+    -- 호출을 태우는 것은 순수 비용이다. `orphaned_at`은 receipt 삭제 시점에 이미 찍혔고,
+    -- header_limit에 걸려 이번 batch에서 못 지운 orphan도 partial index로 bounded하게 본다.
+    AND material.orphaned_at IS NULL
+    AND NOT EXISTS (
+      SELECT 1
+      FROM ops.poi_cache_target_snapshot_material_items AS item
+      WHERE item.material_id = material.material_id
+    )
+  ORDER BY material.materialized_at, material.material_id
+  LIMIT :limit
+  -- 다른 세 단계와 같은 모양이다. 이것만 bounded/`SKIP LOCKED`가 아니면, page를 읽는
+  -- reader가 `FOR SHARE OF material`을 쥔 material에서 **막힌다** — 이 함수가
+  -- "bounded 4단계"라고 적어 둔 성질을 이 단계 하나가 깨뜨린다(적대 리뷰 지적).
+  FOR UPDATE OF material SKIP LOCKED
+)
+UPDATE ops.poi_cache_target_snapshot_materials AS material
+   -- `now()`가 아니라 `clock_timestamp()`다. `now()`는 **transaction 시작 시각**이라
+   -- 같은 transaction에서 `clock_timestamp()`로 찍힌 `compacted_at`보다 이를 수 있고,
+   -- 그러면 "배출이 표시보다 앞선다"가 되어 CHECK가 막는다(게이트가 잡았다).
+   SET compaction_drained_at = clock_timestamp()
+  FROM candidates
+ WHERE material.material_id = candidates.material_id
+RETURNING material.material_id
+"""
+
 _PRUNE_ORPHANED_MATERIALS_SQL = """
 WITH candidates AS (
   SELECT material.material_id
   FROM ops.poi_cache_target_snapshot_materials AS material
   WHERE material.external_system = :external_system
-    AND NOT EXISTS (
-      SELECT 1
-      FROM ops.poi_cache_target_snapshots AS receipt
-      WHERE receipt.material_id = material.material_id
-    )
+    AND material.orphaned_at IS NOT NULL
     AND NOT EXISTS (
       SELECT 1
       FROM ops.poi_cache_target_snapshot_material_items AS item
@@ -484,7 +516,7 @@ RETURNING material.material_id
 """
 
 #: backlog가 있는 system은 넷 중 하나다 — 지울 수 있는 만료 receipt가 있거나,
-#: receipt가 사라져 orphan이 된 material이 있거나, 이미 compaction으로 표시됐지만
+#: receipt 삭제 trigger가 표시한 orphan material이 있거나, 이미 compaction으로 표시됐지만
 #: item이 남은 material이 있거나, 새로 표시할 compaction 후보가 있거나.
 #: 앞의 것만 보면 마지막 receipt를 지운 batch 뒤 나머지가 영원히 남는다.
 _SELECT_EXPIRED_SNAPSHOT_GC_SYSTEM_SQL = f"""
@@ -501,20 +533,15 @@ FROM (
   UNION
   SELECT material.external_system
   FROM ops.poi_cache_target_snapshot_materials AS material
-  WHERE NOT EXISTS (
-    SELECT 1
-    FROM ops.poi_cache_target_snapshots AS receipt
-    WHERE receipt.material_id = material.material_id
-  )
+  WHERE material.orphaned_at IS NOT NULL
   UNION
+  -- 아래 두 질의는 **같은 질문**을 한다. 한쪽만 고치면 이 변경은 아무것도 고치지 않는다 —
+  -- 이 질의가 매 batch에서 먼저 돌고, 네 갈래가 `UNION`으로 합쳐진 뒤에야 `LIMIT 1`이
+  -- 걸리므로 갈래마다 전량 평가된다(짧게 끊기지 않는다).
   SELECT material.external_system
   FROM ops.poi_cache_target_snapshot_materials AS material
   WHERE material.compacted_at IS NOT NULL
-    AND EXISTS (
-      SELECT 1
-      FROM ops.poi_cache_target_snapshot_material_items AS item
-      WHERE item.material_id = material.material_id
-    )
+    AND material.compaction_drained_at IS NULL
   UNION
   SELECT material.external_system
   FROM ops.poi_cache_target_snapshot_materials AS material
@@ -541,20 +568,16 @@ SELECT EXISTS (
 ) OR EXISTS (
   SELECT 1
   FROM ops.poi_cache_target_snapshot_materials AS material
-  WHERE NOT EXISTS (
-    SELECT 1
-    FROM ops.poi_cache_target_snapshots AS receipt
-    WHERE receipt.material_id = material.material_id
-  )
+  WHERE material.orphaned_at IS NOT NULL
 ) OR EXISTS (
+  -- "표시됐지만 아직 배출 중"은 상태 열로 묻는다. item 존재를 직접 재면 compacted
+  -- material 하나마다 index probe 한 번이고, audit material은 영구 보존이라 그 수가
+  -- 단조 증가한다 — backlog가 **없을 때** 전수를 훑고 false를 내는 것이 가장 비쌌다.
+  -- `idx_poi_cache_target_snapshot_materials_draining`(partial)이 이 분기를 받는다.
   SELECT 1
   FROM ops.poi_cache_target_snapshot_materials AS material
   WHERE material.compacted_at IS NOT NULL
-    AND EXISTS (
-      SELECT 1
-      FROM ops.poi_cache_target_snapshot_material_items AS item
-      WHERE item.material_id = material.material_id
-    )
+    AND material.compaction_drained_at IS NULL
 ) OR EXISTS (
   SELECT 1
   FROM ops.poi_cache_target_snapshot_materials AS material
@@ -593,11 +616,7 @@ WITH snapshot_inventory AS MATERIALIZED (
   SELECT material.material_id,
          (
            material.compacted_at IS NOT NULL
-           OR NOT EXISTS (
-             SELECT 1
-             FROM ops.poi_cache_target_snapshots AS receipt
-             WHERE receipt.material_id = material.material_id
-           )
+           OR material.orphaned_at IS NOT NULL
          ) AS reclaimable,
          EXISTS (
            SELECT 1
@@ -1740,6 +1759,12 @@ async def _prune_snapshot_generation(
             )
         ).all()
     )
+    # 표시는 배출 **뒤**에 한다. 앞에 두면 이번 batch가 지울 item이 아직 남아 있어
+    # 아무것도 찍히지 않고, 그 material은 다음 batch까지 backlog로 남는다.
+    await session.execute(
+        text(_MARK_DRAINED_MATERIALS_SQL),
+        {"external_system": external_system, "limit": header_limit},
+    )
     await session.execute(
         text(_PRUNE_ORPHANED_MATERIALS_SQL),
         {"external_system": external_system, "limit": header_limit},
@@ -2123,7 +2148,12 @@ def _reject_compacted_material(header: Mapping[str, Any]) -> None:
         return
     raise CacheTargetStreamConflict(
         "snapshot_material_compacted",
-        "snapshot material이 보존 기간을 지나 compaction됐습니다.",
+        # 문구는 이 함수가 **실제로 보는 것**에 맞춘다. 판정 기준은 `compacted_at`
+        # 하나이고 그것은 "회수를 시작했다"는 표시다. 그래서 두 가지를 쓰지 않는다 —
+        # "보존 기간을 지나"는 orphan 경로에 보존 기간이 없어 절반만 참이고,
+        # "item이 회수됐다"는 배출이 batch로 나뉘어 **아직 item이 남은 동안에도** 이
+        # 오류가 나므로 도달 가능한 상태에서 거짓이다(적대 리뷰 지적).
+        "이 snapshot material은 회수 대상으로 표시돼 더 이상 page를 제공하지 않습니다.",
         current={
             "snapshot_id": str(header["snapshot_id"]),
             "item_count": int(header["item_count"]),

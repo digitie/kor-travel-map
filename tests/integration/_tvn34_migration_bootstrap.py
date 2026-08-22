@@ -319,6 +319,24 @@ async def bootstrapped_migrator_dsn(async_dsn: str) -> str:
     )
 
 
+def _application_graph_revisions() -> frozenset[str]:
+    """배포 artifact가 아는 revision 집합.
+
+    `src/kortravelmap/_application_migration_graph.json`은 migration module을 import하지
+    않고 AST로 만든 immutable graph다(`scripts/generate_application_migration_graph.py`).
+    새 migration이 붙으면 그 생성기가 함께 갱신하므로 이 판정은 낡지 않는다.
+    """
+
+    import json
+    from pathlib import Path
+
+    graph = Path(__file__).resolve().parents[2] / "src" / "kortravelmap"
+    payload = json.loads(
+        (graph / "_application_migration_graph.json").read_text(encoding="utf-8")
+    )
+    return frozenset(str(entry["revision"]) for entry in payload["revisions"])
+
+
 async def bootstrap_tvn_m01_role_phase(async_dsn: str) -> None:
     """0225 또는 M01 이후 head에서 M01/M04 role graph를 재확정한다."""
 
@@ -332,18 +350,15 @@ async def bootstrap_tvn_m01_role_phase(async_dsn: str) -> None:
             version = await connection.scalar(
                 text("SELECT version_num FROM public.alembic_version")
             )
-            if version not in {
-                "0225_tvn40c_physical_removal",
-                "0226_m01_manual_feature_create",
-                "0227_m02_feature_provenance",
-                "0228_m03_manual_curation",
-                "0233_m04_feature_request_queue",
-                "0234_m05_manual_provider_dedup",
-                "0235_m05_reconciliation_delivery",
-            }:
+            # 예전에는 revision id를 손으로 열거했다. 그 목록은 **head가 바뀔 때마다
+            # 낡는다** — `0236`이 붙자 M01/M04/M05 통합 8건이 전부 fixture 단계에서
+            # 죽었다. 이 함수의 본체는 멱등한 `CREATE ROLE ... IF NOT EXISTS`뿐이라
+            # 특정 migration을 요구하지 않는다. 지켜야 할 것은 "이 애플리케이션의
+            # DB인가"이므로, 배포 artifact인 migration graph에 있는 revision인지만 본다.
+            if version not in _application_graph_revisions():
                 raise RuntimeError(
-                    "M01 test role phase requires the M01/M05 graph, "
-                    f"not {version!r}"
+                    "M01 test role phase requires an application migration graph "
+                    f"revision, not {version!r}"
                 )
             await connection.execute(
                 text(
@@ -773,10 +788,28 @@ async def restore_tvn_m05_role_graph(async_dsn: str) -> None:
             version = await connection.scalar(
                 text("SELECT version_num FROM public.alembic_version")
             )
-            if version != "0235_m05_reconciliation_delivery":
+            # "완료된 M05"의 증거는 head 동등이 아니라 **M05 relation이 서 있다**는 것이다.
+            # head로 재면 M05와 무관한 다음 migration이 붙는 순간 깨진다(`0236`에서 실제로
+            # 깨졌다). `:765`의 pristine-0233 검사는 그 자리에서 **의도적으로 staged한**
+            # 위치를 보는 것이라 다르다 — 그쪽은 그대로 둔다.
+            m05_relations = await connection.scalar(
+                text(
+                    "SELECT count(*) FROM unnest(CAST(:relations AS text[])) "
+                    "AS expected(relation_name) "
+                    "WHERE to_regclass(expected.relation_name) IS NOT NULL"
+                ),
+                {
+                    "relations": [
+                        "ops.manual_provider_dedup_cases",
+                        "ops.feature_reference_reconciliation_events",
+                        "ops.feature_reference_reconciliation_leases",
+                    ]
+                },
+            )
+            if version is None or m05_relations != 3:
                 raise RuntimeError(
-                    "M05 role graph restore requires the completed M05 head, "
-                    f"not {version!r}"
+                    "M05 role graph restore requires the completed M05 relations, "
+                    f"not version={version!r} relations={m05_relations}/3"
                 )
             await _apply_tvn_m05_role_graph(connection)
     finally:
@@ -813,8 +846,16 @@ async def repair_tvn_m05_role_phase(async_dsn: str) -> None:
                     ]
                 },
             )
-            if version != "0235_m05_reconciliation_delivery" or relation_count != 6:
-                raise RuntimeError("M05 test post-upgrade marker is incomplete")
+            # 이 GRANT의 전제는 **M05 relation이 섰다**는 것이고, 그 증거는 위
+            # `relation_count`다. 예전에는 head가 `0235`와 정확히 같은지도 함께 봤는데,
+            # 그러면 M05와 무관한 다음 migration이 붙는 순간 이 부트스트랩이 깨진다
+            # (0236에서 실제로 깨졌다). head는 `test_alembic_metadata_consistency`가
+            # 이미 단일 정본으로 지킨다 — 여기서 두 번째 사본을 들고 있을 이유가 없다.
+            if version is None or relation_count != 6:
+                raise RuntimeError(
+                    "M05 test post-upgrade marker is incomplete: "
+                    f"version={version!r} relations={relation_count}/6"
+                )
             await connection.execute(
                 text(
                     "GRANT USAGE, CREATE ON SCHEMA feature "
