@@ -757,8 +757,8 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 > 생성 경계는 M01/M03/M04가 소유한다. H34의 미연결 membership·좌표·운영 acceptance 잔여만
 > 이 절의 active task로 남긴다.
 
-사용자 지시: 재연결 대상이 없던 3건을 **Feature로 추가**하라. 조사 결과 **지금 바로는
-못 한다** — 그 경로가 저장소에 없다.
+사용자 지시: 재연결 대상이 없던 3건을 **Feature로 추가**하라. **당시 조사 결과**
+즉시 추가할 수 없었다 — 그 시점에는 해당 경로가 저장소에 없었다.
 
 **실측.** 세 항목은 prod에 **축제(event)로만** 존재하고 장소 자체는 어떤 provider
 dataset에도 없다(kind·lifecycle·publication 무관 전수 검색).
@@ -769,17 +769,18 @@ dataset에도 없다(kind·lifecycle·publication 무관 전수 검색).
 | 반디랜드&태권도원 | **0건**(place/event/area 어디에도 없다) |
 | 청풍호 | `제30회 제천청풍호벚꽃축제` event 1건 + 호수 시설(전망대·케이블카) |
 
-**왜 못 만드나.** `Feature`는 provider ETL이 만드는 것이 계약이다. 큐레이션이 Feature를
-만드는 경로는 없고, `T-VN-40`의 write model도 **기존 public Feature에 링크**만 한다
-(`docs/reports/t-vn-40-…-plan-2026-08-11.md:161` — "public Feature만 반환").
+**당시 왜 못 만들었나.** `Feature`는 provider ETL이 만드는 것이 계약이었다. 당시
+큐레이션이 Feature를 만드는 경로는 없었고, `T-VN-40`의 write model도 **기존 public
+Feature에 링크**만 했다 (`docs/reports/t-vn-40-…-plan-2026-08-11.md:161` — "public
+Feature만 반환").
 
-만들려면 새 표면이 필요하다:
+당시 만들려면 새 표면이 필요했다:
 
 - **새 `source_type`**(예: `curation_manual`) — `make_feature_id`의 입력이라 ID 체계에 들어간다
 - **writer 경로와 소유권** — 누가 갱신하나? provider가 나중에 그 실체를 발행하면 dedup은?
 - **lifecycle** — 3축(`lifecycle_state`/`publication_state`/`quality_state`)을 누가 정하나
-- **T-VN-40과 충돌** — 그 릴리스가 지금 curation write model을 바꾸는 중이고, 사용자가
-  이번 PR에서 **제외**하라고 한 범위다
+- **T-VN-40과 충돌** — 그 릴리스가 당시 curation write model을 바꾸는 중이었고, 사용자가
+  해당 PR에서 **제외**하라고 한 범위였다
 
 ### 결정 (2026-08-18, 사용자) — ETL 무관 Feature는 admin/API로 만든다
 
