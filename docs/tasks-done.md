@@ -31,8 +31,9 @@
   후속 DB 적대 리뷰에서 발견한 live material item DELETE 우회도 `0236` 부모 row-lock
   trigger로 차단했다. compaction 표시 전 DELETE는 거부하고 표시된 material만
   compactor의 ordered·bounded batch가 배출한다(표시 후 raw DELETE 자체는 상태상 허용).
-- [x] 검증 근거: snapshot repository·migration boundary unit 44건, compaction-drained
-  integration 10건, ACL/metadata integration 14건, cache-target stream integration 40건,
+- [x] 검증 근거: snapshot repository·migration boundary unit 44건, material fence
+  integration 5건, compaction-drained integration 10건, ACL/metadata integration 14건,
+  cache-target stream integration 40건,
   EXPLAIN integration 1건, API router targeted 14건 통과. `ruff`, `mypy --strict`
   (147 source files), `lint-imports`, migration graph check 및 redaction check 통과.
 - [x] service spec의 도달 가능한 `410` 선언과 실제 admission 상한 설명을 Map 쪽에서

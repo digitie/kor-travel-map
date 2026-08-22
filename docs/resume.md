@@ -7,12 +7,14 @@
 `tasks-done.md`로 이관했고 GitHub issue #819를 닫았다. 라우터의 effective config와 quiet
 WebSocket 관찰 로그는 이 세션에서 직접 읽지 못했으므로 완료 근거는 운영자 확인이다.
 
-## 2026-08-22 — #990 planner false-fail 종결 준비
+## 2026-08-22 — #990 planner false-fail 종결 (#1049 병합)
 
 H50 dedup EXPLAIN의 실제 수정은 [PR #1036](https://github.com/digitie/kor-travel-map/pull/1036)에서
 이미 병합됐다. relation별 semantic gate와 작은 `source_entities` dimension의 정상 Seq Scan
-예외가 비용 경계에서 인덱스 이름을 잘못 단언하지 않도록 고정한다. 이번 PR은 그 경계를 순수
-회귀 단언으로 남겨 문서 전용 변경이 같은 false-fail을 되살리지 못하게 하고 #990을 닫는다.
+예외가 비용 경계에서 인덱스 이름을 잘못 단언하지 않도록 고정한다. 후속 회귀 단언 PR
+[#1049](https://github.com/digitie/kor-travel-map/pull/1049)은 `5dee44a3`으로 병합됐고,
+문서 전용 변경이 같은 false-fail을 되살리지 않도록 작은 dimension Seq Scan 허용과 대량
+`features` Seq Scan 거부를 함께 고정했다.
 
 - planner helper 회귀 단언: 2 passed
 - 대상 `test_t212d_perf_explain.py` ruff: 통과
