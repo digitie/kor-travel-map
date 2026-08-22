@@ -487,7 +487,7 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 
 ### C7 후속 검증 잔여
 
-- [~] **T-FE-MOCK-FLAKE** — `e2e/admin-ops.spec.ts::admin/ops pages › /v1/ops/logs` 간헐 실패
+- [~] **T-FE-MOCK-FLAKE** — mocked checkpoint 해소, n150 live GET-only 잔여
 
   **초기 관찰(2026-08-21)**: System logs 표의 첫 columnheader `생성`이 15초 안에
   보이지 않았다(`admin-ops.spec.ts:744`, 당시 위치). 앞선 filter control 단언은 모두
@@ -495,9 +495,9 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   실패했다. 부하가 높을 때 재현됐으며 mocked config가 `retries: process.env.CI ? 1 : 0`이라
   **로컬은 재시도가 없어** 느린 렌더가 곧 실패가 됐다.
 
-  이 spec은 완료된 C7 browser evidence 이식이 건드리지 않았고 mocked checkpoint는 CI 잡이
-  아니라 수동 게이트다 — 즉 **기존 flake**다. 표/행이 도착한 뒤 header를 단언하도록
-  고쳐야 하며, 재시도로 덮지 않는다.
+  당시 이 spec은 완료된 C7 browser evidence 이식이 건드리지 않았고 mocked checkpoint는
+  CI 잡이 아니라 수동 게이트였다. 따라서 표/행이 도착한 뒤 header를 단언하도록 고정하고,
+  재시도로 덮지 않는 방향으로 처리했다. 아래 PR #1059에서 실제 mock 응답 부재까지 해소했다.
   2026-08-21 PR #1045에서 표별 locator scope와 body row 준비 대기, `aria-busy` 해제 대기를
   추가했다(`09d47cf7` → `d208b76a`). 전문 리뷰어 2명이 누적 diff를 재검토해 P0/P1/P2
   0건을 확인했다. 이후 self-owned mock backend가 로그 두 stream을 응답하지 않아
