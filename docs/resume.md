@@ -1,5 +1,23 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-22 — T-FE-MOCK-FLAKE 로그 mock 경계 고정
+
+`T-FE-MOCK-FLAKE`의 self-owned mocked checkpoint에서 `/v1/ops/system-logs`와
+`/v1/ops/api-call-logs`가 응답되지 않아 표가 `aria-busy` 상태로 남던 경계를
+[PR #1059](https://github.com/digitie/kor-travel-map/pull/1059)에서 고쳤다. 생성된
+OpenAPI `SystemLogsResponse`·`ApiCallLogsResponse` 타입으로 BFF mock payload를 고정했고,
+targeted Playwright 1회 및 `--repeat-each=5`(총 6/6)가 통과했다.
+
+따라서 mocked checkpoint 부분은 해소됐지만 `T-FE-MOCK-FLAKE`는 `[~]`로 유지한다.
+n150 live GET-only 로그 검증은 local-only 자격증명과 prod credential 불일치로 auth setup
+401에서 중단됐으므로, 최신 자격증명과 읽기 전용 실행 증거가 확보될 때까지 완료 처리하지 않는다.
+
+### 다음 한 작업
+
+PR #1059의 원격 CI와 두 전문 적대 리뷰를 확인한 뒤, live credential 경계를 제외한
+mocked checkpoint 결과를 task 기록에 반영한다. 이후 `T-VN-41F1D-D1`/`D2`의 비파괴 증거와
+isolated acceptance 실행 가능성을 재대조한다.
+
 ## 2026-08-22 — Map #1057 계약 pair 기록 및 Docker-manager v5 pinset 병합
 
 Map [PR #1057](https://github.com/digitie/kor-travel-map/pull/1057)을 두 전문 적대 리뷰
