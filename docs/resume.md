@@ -1,5 +1,20 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-22 — #1054 병합 및 다음 실행 단위 재정렬
+
+`fix/ops-dataset-rollup-contract`의 [PR #1054](https://github.com/digitie/kor-travel-map/pull/1054)를
+CI green과 두 전문 적대 리뷰(P0~P3 각 0건) 확인 후 병합했다. squash merge는
+`fadc029ce2b0cd730c604697e04d1fccdff02ce9`이며, `tasks.md`의 현재 `origin/main` 기준도
+`fadc029c`로 갱신했다. full/admin OpenAPI와 생성 타입·baseline SHA는 현재 tree와
+일치하지만 T-VN-40/T-VN-41 receipt는 교차 저장소 paired acceptance 전까지 `pending`이다.
+
+### 다음 한 작업
+
+PinVi가 보유한 Map service `410` 계약을 현재 Map artifact와 byte 단위로 대조하고,
+불일치하면 PinVi service re-vendor를 별도 draft PR로 진행한다. 그 뒤 T-VN-41C와
+M01~M05의 남은 consumer/live acceptance를 다시 대조한다. FINAL-REBUILD와 live
+운영 항목은 증적·권한 없이 완료로 승격하지 않는다.
+
 ## 2026-08-22 — #1054 OpenAPI baseline·consumer receipt 정합성 수정
 
 T-VN-41S의 generic snapshot `410`/admission 계약으로 재생성된 full/admin OpenAPI와
@@ -8,12 +23,6 @@ T-VN-41S의 generic snapshot `410`/admission 계약으로 재생성된 full/admi
 T-VN-40 receipt는 `pending`으로 유지한다. `tasks.md`의 T-VN-41C·FINAL-REBUILD
 배리어와 M01~M05 활성화/paired 잔여 상태는 그대로다. admin 생성 타입과
 `tasks.md`의 #1053 기준 SHA도 현재 tree에 맞췄다.
-
-### 다음 한 작업
-
-CI green과 두 전문 적대 리뷰의 현재 head 재확인 후 #1054를 병합한다. 그 다음
-`tasks.md`의 남은 실행 단위를 다시 대조해, cross-repo acceptance가 필요한 항목과
-문서/코드로 독립 진행 가능한 항목을 분리한다.
 
 ## 2026-08-22 — #922 후속 PR #1051 병합 및 백로그 정합성 감사
 

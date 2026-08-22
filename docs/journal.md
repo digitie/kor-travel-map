@@ -1,5 +1,19 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-22 — #1054 병합 및 backlog 기준 SHA 갱신
+
+`fix/ops-dataset-rollup-contract`의 [PR #1054](https://github.com/digitie/kor-travel-map/pull/1054)를
+CI green과 두 전문 적대 리뷰(P0~P3 각 0건) 확인 후 squash merge
+`fadc029ce2b0cd730c604697e04d1fccdff02ce9`로 병합했다. `tasks.md`의 migration 기준을
+현재 `origin/main=fadc029c`로 맞췄으며 단일 migration head
+`0236_tvn41s_compaction_drained`는 유지된다.
+
+full/admin OpenAPI, 생성 admin 타입, frozen baseline과 T-VN-40 pending receipt의
+SHA는 현재 Map tree와 일치한다. 그러나 T-VN-40/T-VN-41은 PinVi re-vendor와 paired
+acceptance 증적이 필요하므로 `pending` 상태를 유지한다. 다음은 PinVi service artifact
+byte 대조 및 필요 시 별도 re-vendor PR이며, M01~M05·FINAL-REBUILD·live 운영 항목은
+실제 증적 없이는 완료 처리하지 않는다.
+
 ## 2026-08-22 — #1054 OpenAPI baseline·T-VN-40 pending receipt 재고정
 
 T-VN-41S에서 갱신한 `packages/kor-travel-map-api/openapi.json`의 admin SHA를
