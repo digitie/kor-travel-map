@@ -125,7 +125,9 @@ T-VN-40 receipt를 `complete`로 봉인했으며, 현재 PR은 계약 hash·증�
 세부 secret-free 증거는 `contracts/vnext/tvn40-live-acceptance-v1.json`에 기록했다.
 별도 T-VN-34C UI runner는 `tvn36-direct-state-cutover` browser fetch `503`으로
 `1 passed / 1 failed`였으며 TVN40 canonical import/refresh 근거로 사용하지 않았다.
-T-VN-40C PinVi legacy column 물리 삭제 gate는 별도 후속 범위다.
+당시 별도 후속으로 적었던 T-VN-40C PinVi legacy column 물리 삭제 gate도 완료 이력에
+포함됐다. 현재 `tasks.md`에는 독립적인 T-VN-40 잔여를 두지 않고, 후속 cross-repo 검증은
+T-VN-41C가 소유한다.
 
 ## 2026-08-21 — T-FE-MOCK-FLAKE 진행: 표 준비 대기 보강, live auth 재개 필요
 
@@ -149,14 +151,16 @@ prod auth setup 401로 본 스펙 실행 전에 중단됐으므로, 최신 운�
 재실행하지 않는다. credential을 추측하거나 회전하지 않는다.
 
 ## 2026-08-21 (codex) — T-VN-40 완료 항목 archive 정리
-## 2026-08-21 (codex) — T-VN-40 완료 항목 archive 정리
 
 완료된 T-VN-40B/C·인수와 C7 evidence task를 `tasks-done.md`로 이관해 `tasks.md`에는 열린
-작업만 남겼다. `origin/main`의 migration head는 `0232`이며, draft #1029는 M01~M05의
-`0226`~`0235`를 그 위에 직렬로 둔다.
+작업만 남겼다. 당시 기준으로는 `origin/main`의 migration head가 `0232`였고 #1029가
+M01~M05의 `0226`~`0235`를 그 위에 직렬로 두는 draft였다. 이후 #1029와 #1051이 병합되어
+현재 head·활성 잔여는 상단 최신 엔트리와 `tasks.md`가 소유한다.
 
-**다음 한 작업**: 문서 PR을 병합한 뒤 Map #1029와 PinVi M05 PR을 최신 main에 rebase하고,
-각 CI·격리 live E2E 근거를 다시 대조한다.
+### 당시 다음 한 작업
+
+이 기록 시점의 “#1029/PinVi M05 rebase” 지시는 완료됐다. 현재는 `T-VN-41C`의 exact-pair
+re-vendor와 paired acceptance를 진행한다.
 
 ## 2026-08-21 — M01~M05 role isolation 및 dedup default planner CI 보정
 

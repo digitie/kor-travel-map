@@ -67,10 +67,10 @@ barrier로 직렬화한다.
   (AGENTS.md), 그 아래 설계적 우수성 > 확장성 > 성능 > 불필요한 코드 반복(래퍼류) 금지.
   **prod 환경 보전·호환성·기존 문서 계약·최소 수정은 비제약** — 필요 시 DB 스키마·문서
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
-- migration 정본: 단일 head 유지. `origin/main`은
-  `0232_tvn37d_notice_empty_range`까지이며, draft #1029는 그 위에
-  `0226`(M01)→`0227`(M02)→`0228`(M03)→`0233`(M04)→`0234`·`0235`(M05)를 직렬로
-  연결한다.
+- migration 정본: 단일 head 유지. **2026-08-22 현재 `origin/main`은
+  `db319a47`(#1051 병합)이고 head는 `0236_tvn41s_compaction_drained`다.**
+  Map PR #1029(`57c9d99a`)는 이미 병합됐으며 `0226`(M01)→`0227`(M02)→`0228`(M03)→
+  `0233`(M04)→`0234`·`0235`(M05) 뒤에 `0236`이 직렬로 연결돼 있다.
   prod 적용 head는 배포 직전 live DB에서 다시 확인한다. 후속 migration 소유자는
   PR 직전 단일 head를 재확인한 뒤 번호를 배정한다. 두 lane의 migration-bearing PR은 번호 예약부터
   머지까지 직렬화한다. forward migration 뒤에는 수용 조건이나 실패 복구가 명시적으로 요구하지 않는
@@ -112,7 +112,8 @@ barrier로 직렬화한다.
   완전성 검사가 새 write route를 미등록 상태로 둘 수 없게 한다. 미래 H22B reclassification
   command도 생성 시점부터 같은 actor-scoped ledger 계약을 등록해야 하므로 종전의 H22B
   선행 barrier는 없다.
-  Wave 2 join barrier는 완료됐으며, 최종 `T-VN-39`만 남았다.
+  Wave 2의 선행 join barrier는 완료됐지만, 최종 `T-VN-39` cutover는 현재 Lane B의
+  `T-VN-41C`/FINAL-REBUILD와 Lane M의 활성화·paired gate가 끝난 뒤에 수행한다.
 - **OpenAPI 계약 변경 규율(2026-07-29 개정)**: admin/user OpenAPI를 바꾸는 task는
   두 spec을 재생성하고 실제 소비자가 핀한 Map commit에서 vendored 스냅샷을 다시 추출해
   `contract-pin-consistency`를 통과시킨다. 소비자가 읽지 않는 파생 digest manifest는 만들지
@@ -750,6 +751,11 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 `UNIQUE` 인덱스와 batch gate 연결을 함께 설계한다.
 
 ### T-VN-H34 잔여 — "없는 것은 Feature로 추가" (2026-08-18 조사)
+
+> 아래의 "경로가 없다"는 문장은 **2026-08-18 조사 당시 상태**다. 이후 Map #1029의
+> `0228` M03 combined writer와 `0233` M04 request writer가 병합됐으므로, 현재 Feature
+> 생성 경계는 M01/M03/M04가 소유한다. H34의 미연결 membership·좌표·운영 acceptance 잔여만
+> 이 절의 active task로 남긴다.
 
 사용자 지시: 재연결 대상이 없던 3건을 **Feature로 추가**하라. 조사 결과 **지금 바로는
 못 한다** — 그 경로가 저장소에 없다.
