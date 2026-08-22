@@ -20,7 +20,7 @@
     {
       "date": "2026-08-22",
       "task": "T-VN-41S",
-      "change": "generic cache-target snapshot GET이 실제 runtime 410 SNAPSHOT_MATERIAL_COMPACTED를 OpenAPI에 선언하고, snapshot admission 설명을 실제 상한 item 500,000/material 56 MiB로 정정했다. service/full spec과 admin 타입을 재생성했으며 PinVi paired service receipt는 re-vendor 전까지 pending이다."
+      "change": "generic cache-target snapshot GET이 실제 runtime 410 SNAPSHOT_MATERIAL_COMPACTED를 OpenAPI에 선언하고, snapshot admission 설명을 실제 상한 item 500,000/material 56 MiB로 정정했다. service/full spec과 admin 타입을 재생성했으며 PinVi #465 exact vendor merge 뒤에도 Docker-manager v5 pinset과 isolated paired acceptance 전까지 paired service receipt는 pending이다."
     },
     {
       "date": "2026-08-21",

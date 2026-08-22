@@ -192,7 +192,7 @@
         "state": "pending",
         "map_service_openapi_sha256": "99ba6c178bf55401d3e1bb638a01b96f66bbac38d604534aa126a70f4be53d3d",
         "pinvi_service_vendor_sha256": "e1152a058e176f4f3aaeb4bb0965434f657601639786463f873ac82c6f3018eb",
-        "blocking_reason": "T-VN-41S added the reachable generic snapshot 410 and corrected the admission ceilings. PinVi must re-vendor the new service bytes before this pending receipt can be promoted."
+        "blocking_reason": "T-VN-41S added the reachable generic snapshot 410 and corrected the admission ceilings. PinVi #465 merged the exact service/full-admin vendor; Docker-manager v5 pinset and isolated paired acceptance remain before this pending receipt can be promoted."
       }
     },
     "T-VN-39": {

@@ -17,6 +17,12 @@
 `T-VN-41C`·`T-VN-41F1D-*`·`T-VN-FINAL-REBUILD`·`T-VN-M01`~`M05`의 활성화/paired
 검증은 각각의 현재 계약을 소유하며, 완료된 T-VN-40 선행 작업을 다시 열지 않는다.
 
+2026-08-22 교차 저장소 계약 pair는 Map #1051 service `db319a47`/SHA
+`99ba6c17…`, Map #1054 full/admin `fadc029c`/SHA `2c02ecfe…`, PinVi #465 merge
+`27fe2043`로 정합화됐다. Map #1056 문서 병합 뒤 현재 Map main은 `e420c89e…`이며,
+다음 release authority 작업은 Docker-manager v5 source pinset 재핀이다. isolated live
+acceptance·receipt 승격 전에는 완료로 올리지 않는다.
+
 **Lane A (Claude Code)**와 **Lane B (codex)**는 서로 병렬 실행한다. 각 lane 내부는 아래 순서를
 지키며, 같은 migration head·OpenAPI 정본·같은 cross-repo pair를 만지는 시점만 공통 규율의
 barrier로 직렬화한다.
@@ -523,7 +529,9 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   - [~] PinVi command writer가 CAS source GET과 refresh `Location` polling에서 consumer credential로
     전환하고, restore clone은 sync disabled 상태에서 immutable pre-CAS receipt를 써 응답 유실 exact replay까지
     완료한다. 동일 key의 병렬 `201`/`200`도 terminal payload·ETag가 같으면 한 durable receipt로 수렴한다.
-    T-VN-41S로 Map service OpenAPI SHA가 바뀌어 PinVi exact vendor를 새 Map head에 다시 고정한다.
+    T-VN-41S로 Map service OpenAPI SHA가 바뀐 뒤 PinVi #465가 service/full-admin exact vendor를
+    새 Map artifact에 다시 고정했다. 남은 것은 Docker-manager v5 source pinset과 isolated
+    live acceptance다.
 
     **조사 기록(2026-08-21) — service spec `410` 선언(T-VN-41S에서 이월)과 당시 대응안.**
     아래의 “아직/막는 것” 표현은 조사 당시 상태를 기록한 것이며, 현재 반영 상태는 마지막 문단을 따른다.
@@ -560,8 +568,9 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 
     active paired receipt는 `pending`으로 되돌렸으며, 기존 `77821001`/`e8e0fec` 후보 archive·image·Live UI
     증거는 이전 service bytes의 이력일 뿐이다. Map 쪽은 이번 PR에서 실제 runtime 410 선언과 상한 설명을
-    service/full spec에 반영했고, PinVi vendor PR 병합과 새 exact pair의 적대 재리뷰·n150
-    isolated evidence를 통과한 뒤에만 `candidate_verified` 승격과 후속 reconciliation/cutover로 진행한다.
+    service/full spec에 반영했고, PinVi #465 vendor 병합·적대 재리뷰·CI는 완료됐다. 새 exact pair의
+    Docker-manager pinset과 n150 isolated evidence를 통과한 뒤에만 `candidate_verified` 승격과
+    후속 reconciliation/cutover로 진행한다.
   - [x] 일반 snapshot first page를 route transaction으로 durable commit하고 실제 만료 시각을 노출한다.
   - [x] source-material watermark reuse와 75분 server handoff/1시간 client receipt gate를 구현한다.
   - [x] stream share barrier와 snapshot 내부 exact material watermark로 lock-wait stale MVCC 누락을 막는다.
@@ -928,8 +937,8 @@ proposed ADR-093에서 닫았고, exact checkpoint `2aa17c27`에 API·DB 전문 
   runtime/Dagster 권한 분리를 고정했다. import 행별 child-command와 격리 live acceptance를 남긴다.
 - [~] **T-VN-M04 — 범용 Feature 요청 큐** (결정 2, 구현 병합). #1029의 `0233` service submit/admin
   approve·reject queue와 `manual_request` origin, OpenAPI/ACL/restore gate가 정본이다. 첫 consumer
-  PinVi #458은 병합됐지만 새 Map service spec re-vendor와 paired request→approval receipt는
-  `T-VN-41C`에서 완료한다.
+  PinVi #458과 Map #1051 service re-vendor를 반영한 PinVi #465는 병합됐지만 paired
+  request→approval receipt와 isolated acceptance는 `T-VN-41C`에서 완료한다.
 - [~] **T-VN-M05 — provider 발행 시 중복 판정** (결정 4 후단). 수동 Feature와 같은 실체를
   provider가 발행하면 dedup 후보로 올리고 **자동 병합하지 않는다.** admin이 병합/유지/수동본
   폐기를 고른다. 2026-08-21 사용자 선택은 paired cutover이며, ADR-097과
