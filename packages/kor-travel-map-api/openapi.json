@@ -29932,7 +29932,7 @@
                 }
               }
             },
-            "description": "snapshot item 1,000,000개 또는 canonical material 512 MiB admission 상한을 초과함."
+            "description": "snapshot item 500,000개 또는 canonical material 56 MiB admission 상한을 초과함."
           },
           "422": {
             "content": {
@@ -49281,7 +49281,7 @@
                 }
               }
             },
-            "description": "snapshot item 1,000,000개 또는 canonical material 512 MiB admission 상한을 초과함."
+            "description": "snapshot item 500,000개 또는 canonical material 56 MiB admission 상한을 초과함."
           },
           "422": {
             "content": {
@@ -49535,6 +49535,16 @@
             },
             "description": "Successful Response"
           },
+          "410": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CacheTargetSnapshotMaterialCompactedProblem"
+                }
+              }
+            },
+            "description": "terminal audit 보존 기간 뒤 snapshot item material이 compact되어 header/root receipt만 남음."
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -49558,7 +49568,7 @@
                 }
               }
             },
-            "description": "snapshot item 1,000,000개 또는 canonical material 512 MiB admission 상한을 초과함."
+            "description": "snapshot item 500,000개 또는 canonical material 56 MiB admission 상한을 초과함."
           },
           "422": {
             "content": {

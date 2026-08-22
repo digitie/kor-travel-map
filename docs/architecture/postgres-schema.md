@@ -591,8 +591,9 @@ squash(2026-08-14) 이후 baseline과 bridge, T-VN-40 migration만 있다.
   `0231_tvn41s_snapshot_material`, `0232_tvn37d_notice_empty_range`,
   `0226_m01_manual_feature_create`, `0227_m02_feature_provenance`,
   `0228_m03_manual_curation`, `0233_m04_feature_request_queue`,
-  `0234_m05_manual_provider_dedup`, `0235_m05_reconciliation_delivery`가
-  dependency graph 순서로 이어지며 현재 head는 `0235_m05_reconciliation_delivery`다.
+  `0234_m05_manual_provider_dedup`, `0235_m05_reconciliation_delivery`,
+  `0236_tvn41s_compaction_drained`가 dependency graph 순서로 이어지며 현재 head는
+  `0236_tvn41s_compaction_drained`다.
 
 `0001~0104` 체인 109개는 `alembic/legacy_versions/`의 실행되지 않는 아카이브다
 ([README](../../alembic/legacy_versions/README.md)). **`versions/`로 되돌리지 마라** —

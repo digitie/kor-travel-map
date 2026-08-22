@@ -241,7 +241,7 @@ generic live storage를 최대 `2 × stream cardinality`로 제한한다. reconc
 
 T-VN-41S(#922)는 capture를 PostgreSQL server cursor로 두 번 순회한다. 첫 scan은 level stack만 가진
 Merkle v1 accumulator로 count/root/canonical material bytes를 `O(log N)` 메모리에서 계산한다. item
-1,000,000개 또는 512 MiB를 넘으면 header INSERT 전에 각각
+500,000개 또는 56 MiB를 넘으면 header INSERT 전에 각각
 `413 snapshot_item_limit_exceeded`, `413 snapshot_byte_limit_exceeded`로 fail-close한다. 두 번째 scan은
 1,000행 batch INSERT와 첫 응답 page만 보관하고 count/byte/root를 첫 scan과 재대조한다. 두 scan은 같은
 transaction의 stream share barrier 안에 있어 source membership이 고정되며 불일치는 전체 rollback한다.

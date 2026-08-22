@@ -640,6 +640,9 @@ def test_tvn_m01_role_phase_runs_only_after_legacy_0225_boundary() -> None:
     assert "marker_status=$?" in m05_migration_script
     assert "alembic upgrade 0235_m05_reconciliation_delivery" in m05_migration_script
     assert "1|2) alembic upgrade 0235_m05_reconciliation_delivery" in m05_migration_script
+    assert 'revision == "0236_tvn41s_compaction_drained"' in m05_migration_script
+    assert '"0236_tvn41s_compaction_drained"' in m05_boundary_script
+    assert "0236_tvn41s_compaction_drained" in phase_script
     assert "  3)" in m05_migration_script
     dockerfile = _script("docker/api.Dockerfile")
     assert "migrate-to-m01-bootstrap-boundary.sh" in dockerfile

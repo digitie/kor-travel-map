@@ -25,7 +25,7 @@ barrier로 직렬화한다.
   - [~] `T-VN-41C`(#975 병합 / final exact-pair·prod consumer enable 잔여)
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환 — **저장소측 완료 2026-08-20**, live 실행은 배리어 대기)
     ∥ [x] `T-VN-41S` 완료(2026-08-22; GC orphan 갈래도 상태 partial index로 종결).
-      `410` 선언은 `T-VN-41C` re-vendor로 이월
+      service `410` 선언은 Map에서 완료했고, PinVi re-vendor/paired acceptance만 `T-VN-41C`에 남김
   - **배리어**: [ ] `T-VN-FINAL-REBUILD`(주요 개발 완료 후 파괴적 재구축 — 사용자 결정 2026-08-20)
   - [ ] `T-FE-MOCK-FLAKE`(`/v1/ops/logs`)
   - [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2` → `T-VN-41C` receipt 승격
@@ -568,7 +568,8 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
          먼저 머지해야 그 등식이 참인 채로 Map을 올릴 수 있다.
 
     active paired receipt는 `pending`으로 되돌렸으며, 기존 `77821001`/`e8e0fec` 후보 archive·image·Live UI
-    증거는 이전 service bytes의 이력일 뿐이다. PinVi vendor PR 병합과 새 exact pair의 적대 재리뷰·n150
+    증거는 이전 service bytes의 이력일 뿐이다. Map 쪽은 이번 PR에서 실제 runtime 410 선언과 상한 설명을
+    service/full spec에 반영했고, PinVi vendor PR 병합과 새 exact pair의 적대 재리뷰·n150
     isolated evidence를 통과한 뒤에만 `candidate_verified` 승격과 후속 reconciliation/cutover로 진행한다.
   - [x] 일반 snapshot first page를 route transaction으로 durable commit하고 실제 만료 시각을 노출한다.
   - [x] source-material watermark reuse와 75분 server handoff/1시간 client receipt gate를 구현한다.
@@ -642,17 +643,16 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
     마지막 receipt 삭제 trigger가 orphan 상태를 단방향으로 기록하므로 두 backlog 질의가
     audit material의 receipt anti-join을 반복하지 않는다.
 
-  **하나는 이 lane 밖으로 넘긴다.** `410` 선언은 교차 저장소 re-vendor가 필요해
-  `T-VN-41C`로 넘긴다. 나머지 GC backlog 경로는 `0236`에서 상태화했다.
-
-  **`#922`는 완료한다.** service spec의 `410` 선언만 교차 저장소
-  `T-VN-41C` 후속으로 남긴다.
+  **Map 쪽 `#922` 완료선은 닫혔다.** runtime에 이미 도달하는 `410`을 service/full
+  OpenAPI에 선언하고 실제 상한(`500,000`/`56 MiB`)을 함께 정정했다. 두 spec과 admin
+  타입을 재생성했으며, 교차 저장소 PinVi re-vendor와 paired acceptance는 `T-VN-41C`가
+  소유한다. 그 전까지 T-VN-40/T-VN-41 receipt는 `pending`으로 fail-closed한다.
 
   **이번 PR 완료 항목**
 
   - [x] PostgreSQL server cursor 2-pass scan, incremental Merkle v1, 1,000행 INSERT batch와 first-page만
     보관하는 process-memory bounded 경로를 구현한다.
-  - [x] item 1,000,000/canonical material 512 MiB admission을 header INSERT 전에 검사하고 typed `413`으로
+  - [x] item 500,000/canonical material 56 MiB admission을 header INSERT 전에 검사하고 typed `413`으로
     fail-close한다.
   - [x] 유효 generic material을 two-phase reconciliation seal이 같은 snapshot으로 재사용하고,
     relation/index bytes·dead tuple·vacuum lag Dagster metric/alert를 추가한다.
@@ -713,15 +713,12 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
     이제 상태를 읽으므로 audit material마다 receipt anti-join을 반복하지 않는다.
     새 receipt가 orphan material을 되살리지 못하는 fence와 integration/EXPLAIN 게이트를 함께
     고정했다.
-  - [>] **service spec이 도달 가능한 `410`을 선언하지 않는다 → `T-VN-41C`로 이월(2026-08-21).**
-    generic snapshot cursor 경로는 `410 SNAPSHOT_MATERIAL_COMPACTED`를 실제로 낸다. 선언하면
-    `openapi.service.json`과 `openapi.json` bytes가 함께 바뀌어 PinVi re-vendor가 같은 호흡으로
-    필요하다. T-VN-41C가 어차피 service re-vendor를 요구하므로 거기서 함께 한다 — 실행 절차는
-    아래 T-VN-41C 항목에 적었다. **오늘 깨진 것은 없다**: PinVi는 이미 그 410을 런타임에서
-    처리한다 — 공유 transport(`apps/api/app/clients/kor_travel_map_cache_target.py`)가
-    응답 `code`만 보고 typed 오류로 올린다. route별 테스트가 아니라 그 transport가 근거다.
-    410 본문 문구("보존 기간을 지나")는 orphan 표시에 맞지 않아 이번에 함께 고쳤다 — runtime
-    문자열이라 spec을 건드리지 않는다.
+  - [x] **service spec이 도달 가능한 `410`을 선언하지 않던 문제를 닫았다(2026-08-22).**
+    generic snapshot cursor 경로의 `410 SNAPSHOT_MATERIAL_COMPACTED`를 route responses에
+    선언하고, 실제 상한 `item 500,000 / material 56 MiB`를 세 route 설명에 반영했다.
+    `openapi.service.json`, `openapi.json`, admin `src/api/types.ts`를 재생성했으며,
+    PinVi vendor가 새 service bytes를 고정하기 전에는 paired receipt를 `pending`으로
+    유지한다. 410 본문 문구도 orphan 표시에 맞지 않던 표현을 이미 고쳤다.
   - [x] **`ops` fail-closed ACL의 탈출구가 없다(적대 리뷰 지적).** → `public`을 정본 경로로,
     실패 메시지가 직접 안내한다(2026-08-21). 선언 없는 ops relation은
     이제 배포를 막는다. 의도한 동작이지만, **운영에는 있고 fresh migrate DB에는 없는**

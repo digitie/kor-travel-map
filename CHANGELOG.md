@@ -21,9 +21,10 @@
 - **CHANGED (운영)**: 선언 없는 `ops` relation이 배포를 막을 때, 실패 메시지가 두 갈래 조치를
   직접 안내한다 — 애플리케이션 소유면 선언 목록에 추가하고, 운영자의 임시·백업 표라면 `public`에
   둔다(조정기는 `feature`/`provider_sync`/`ops` 셋만 관장한다). fence 자체는 그대로다.
-- **CHANGED (service API)**: `410 SNAPSHOT_MATERIAL_COMPACTED` 본문 문구를 고쳤다. "보존 기간을
-  지나"는 orphan 표시에 맞지 않는다 — 그 경로에는 보존 기간이 없다. 코드는 그대로이고 문구만
-  바뀐다(spec 불변). 이 응답의 **route 선언**은 PinVi re-vendor가 필요해 `T-VN-41C`로 이월했다.
+- **CHANGED (service API)**: `410 SNAPSHOT_MATERIAL_COMPACTED` 본문 문구를 고치고 generic
+  snapshot route에도 이 응답을 선언했다. 실제 admission 상한(item 500,000/material 56 MiB)도
+  route 설명에 맞췄으며 service/full spec과 admin 타입을 재생성했다. PinVi re-vendor와
+  paired acceptance 전까지 관련 receipt는 `pending`으로 유지한다.
 
 
 ### T-VN-41S — snapshot admission 상한을 실측으로 맞추고 writer 무한 대기를 막는다 (2026-08-21)

@@ -13,11 +13,13 @@
   orphan backlog도 상태 조회로 한정했다. one-way fence·fail-closed `ops` ACL remediation을 고정했다.
   item 500,000/material 56 MiB admission과 EXPLAIN·n150 soak evidence도 반영했다.
 - [x] 검증 근거: snapshot repository·migration boundary unit 44건, compaction-drained
-  integration 7건, ACL/metadata integration 14건, cache-target stream integration 40건,
+  integration 8건, ACL/metadata integration 14건, cache-target stream integration 40건,
   EXPLAIN integration 1건, API router targeted 14건 통과. `ruff`, `mypy --strict`
   (147 source files), `lint-imports`, migration graph check 및 redaction check 통과.
-- [>] service spec의 도달 가능한 `410` 선언은 `T-VN-41C`의 cross-repo re-vendor에서
-  처리한다. 현재 runtime 410과 reconciliation OpenAPI 선언은 유지된다.
+- [x] service spec의 도달 가능한 `410` 선언과 실제 admission 상한 설명을 Map 쪽에서
+  반영했다. `openapi.service.json`/`openapi.json`/admin 타입을 재생성했고, PinVi
+  cross-repo re-vendor와 paired acceptance는 `T-VN-41C`가 소유하므로 관련 receipt는
+  재검증 전까지 `pending`으로 유지한다.
 
 ## 2026-08-21 — T-VN-40·C7 완료 잔재를 진행 백로그에서 이관
 

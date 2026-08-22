@@ -2626,7 +2626,7 @@ def test_service_snapshot_item_ceiling_returns_non_retryable_payload_too_large()
     service.snapshot_error = CacheTargetStreamConflict(
         "snapshot_item_limit_exceeded",
         "snapshot item capacity reached",
-        current={"item_count_lower_bound": 1_000_001, "item_limit": 1_000_000},
+        current={"item_count_lower_bound": 500_001, "item_limit": 500_000},
     )
     session = _FakeSession()
     client = _client(service, session=session)
@@ -2640,8 +2640,8 @@ def test_service_snapshot_item_ceiling_returns_non_retryable_payload_too_large()
     assert "retry-after" not in response.headers
     assert response.json()["code"] == "SNAPSHOT_ITEM_LIMIT_EXCEEDED"
     assert response.json()["details"] == {
-        "item_count_lower_bound": 1_000_001,
-        "item_limit": 1_000_000,
+        "item_count_lower_bound": 500_001,
+        "item_limit": 500_000,
     }
     assert session.commit_calls == 0
     assert session.rollback_calls == 1
@@ -2692,6 +2692,33 @@ def test_reconciliation_snapshot_compaction_returns_typed_gone_receipt() -> None
     response = client.get(
         "/v1/service/cache-target-reconciliations/"
         f"{RECONCILIATION_REQUEST_ID}/snapshot",
+        headers=_service_headers(),
+    )
+
+    assert response.status_code == 410
+    assert "retry-after" not in response.headers
+    assert response.json()["code"] == "SNAPSHOT_MATERIAL_COMPACTED"
+    assert response.json()["details"]["snapshot_id"] == RECONCILIATION_SNAPSHOT_ID
+    assert response.json()["details"]["merkle_root"] == "a" * 64
+
+
+@pytest.mark.unit
+def test_service_snapshot_compaction_returns_typed_gone_receipt() -> None:
+    service = _FakeCacheTargetService()
+    service.snapshot_error = CacheTargetStreamConflict(
+        "snapshot_material_compacted",
+        "snapshot item material compacted",
+        current={
+            "snapshot_id": RECONCILIATION_SNAPSHOT_ID,
+            "item_count": 1,
+            "merkle_root": "a" * 64,
+            "compacted_at": "2026-08-18T00:00:00+00:00",
+        },
+    )
+    client = _client(service)
+
+    response = client.get(
+        f"/v1/service/cache-target-snapshots/{EXTERNAL_SYSTEM}",
         headers=_service_headers(),
     )
 

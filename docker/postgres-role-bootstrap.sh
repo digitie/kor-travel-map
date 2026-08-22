@@ -132,7 +132,8 @@ if [ "$bootstrap_phase" = "legacy" ]; then
               ;;
             0226_m01_manual_feature_create|0227_m02_feature_provenance|\
             0228_m03_manual_curation|0233_m04_feature_request_queue|\
-            0234_m05_manual_provider_dedup|0235_m05_reconciliation_delivery)
+            0234_m05_manual_provider_dedup|0235_m05_reconciliation_delivery|\
+            0236_tvn41s_compaction_drained)
               echo "M01 relation marker is absent after an M01/M05 revision" >&2
               exit 1
               ;;
@@ -182,7 +183,8 @@ BEGIN
             '0228_m03_manual_curation',
             '0233_m04_feature_request_queue',
             '0234_m05_manual_provider_dedup',
-            '0235_m05_reconciliation_delivery'
+            '0235_m05_reconciliation_delivery',
+            '0236_tvn41s_compaction_drained'
         ) THEN
             RAISE EXCEPTION
                 'M01 relation marker requires a known M01/M02 head (observed %)',
@@ -539,7 +541,13 @@ BEGIN
         RAISE EXCEPTION 'M05 pre role bootstrap requires exactly 0233 (observed %)',
             coalesce(v_revision, '<none>') USING ERRCODE = '55000';
     END IF;
-    IF v_relation_count = 6 AND v_revision NOT IN ('0234_m05_manual_provider_dedup', '0235_m05_reconciliation_delivery') THEN
+    IF v_relation_count = 6 AND (
+        v_revision IS NULL OR v_revision NOT IN (
+        '0234_m05_manual_provider_dedup',
+        '0235_m05_reconciliation_delivery',
+        '0236_tvn41s_compaction_drained'
+        )
+    ) THEN
         RAISE EXCEPTION 'M05 relation marker requires an M05 revision (observed %)',
             coalesce(v_revision, '<none>') USING ERRCODE = '55000';
     END IF;
@@ -691,7 +699,10 @@ BEGIN
         'ktm_manual_provider_dedup_admin_executor',
         'ktm_feature_reference_reconciliation_service_executor'
     );
-    IF v_revision IS DISTINCT FROM '0235_m05_reconciliation_delivery'
+    IF v_revision IS NULL OR v_revision NOT IN (
+           '0235_m05_reconciliation_delivery',
+           '0236_tvn41s_compaction_drained'
+       )
        OR v_relation_count <> 6 OR v_role_count <> 4 THEN
         RAISE EXCEPTION
             'M05 post-upgrade marker is incomplete (revision %, relations %, roles %)',

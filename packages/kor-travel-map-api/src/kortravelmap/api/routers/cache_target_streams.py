@@ -1521,7 +1521,7 @@ async def begin_service_cache_target_reconciliation(
         413: {
             "model": CacheTargetSnapshotAdmissionProblem,
             "description": (
-                "snapshot item 1,000,000개 또는 canonical material 512 MiB "
+                "snapshot item 500,000개 또는 canonical material 56 MiB "
                 "admission 상한을 초과함."
             )
         },
@@ -1682,16 +1682,17 @@ async def complete_service_cache_target_reconciliation(
         413: {
             "model": CacheTargetSnapshotAdmissionProblem,
             "description": (
-                "snapshot item 1,000,000개 또는 canonical material 512 MiB "
+                "snapshot item 500,000개 또는 canonical material 56 MiB "
                 "admission 상한을 초과함."
             )
         },
-        # NOTE(T-VN-41S): 이 경로는 `410 SNAPSHOT_MATERIAL_COMPACTED`를 **실제로**
-        # 낸다(generic/reconciliation receipt가 material을 공유하므로). 그런데 여기
-        # 선언하면 service spec bytes가 바뀌어 PinVi vendor 재고정이 같은 호흡으로
-        # 필요해진다 — paired receipt가 그것을 요구한다. 이 브랜치의 범위는 material/
-        # receipt 정규화이므로 선언은 다음 PinVi re-vendor와 함께 묶는다
-        # (`docs/tasks.md`의 `T-VN-41C` 항목). 누락 자체는 이 브랜치 이전부터 있었다.
+        410: {
+            "model": CacheTargetSnapshotMaterialCompactedProblem,
+            "description": (
+                "terminal audit 보존 기간 뒤 snapshot item material이 compact되어 "
+                "header/root receipt만 남음."
+            ),
+        },
         429: {
             "description": (
                 "미만료·미참조 generic snapshot copy 상한 도달. 가장 오래된 "
@@ -2044,7 +2045,7 @@ async def replay_admin_cache_target_dead_letter(
         413: {
             "model": CacheTargetSnapshotAdmissionProblem,
             "description": (
-                "snapshot item 1,000,000개 또는 canonical material 512 MiB "
+                "snapshot item 500,000개 또는 canonical material 56 MiB "
                 "admission 상한을 초과함."
             )
         },

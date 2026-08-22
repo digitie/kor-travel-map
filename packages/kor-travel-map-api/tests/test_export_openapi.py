@@ -402,6 +402,10 @@ def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -
     assert retry_after_schema == {"type": "integer", "minimum": 1, "maximum": 7_200}
     assert "application/problem+json" in capacity_response["content"]
     assert "413" in snapshot_responses
+    assert "410" in snapshot_responses
+    assert snapshot_responses["410"]["content"]["application/problem+json"]["schema"] == {
+        "$ref": "#/components/schemas/CacheTargetSnapshotMaterialCompactedProblem"
+    }
     assert "503" in snapshot_responses
     assert "Retry-After" in snapshot_responses["503"]["headers"]
     assert "headers" not in snapshot_responses["413"]
