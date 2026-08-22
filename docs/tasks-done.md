@@ -3,6 +3,15 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-08-22 — T-VN-H27 OPNsense HAProxy WebSocket tunnel timeout
+
+- [x] **T-VN-H27 — #819 HAProxy WebSocket tunnel timeout 적용 완료**
+
+  운영자 확인에 따라 OPNsense HAProxy의 Map·Geo·PinVi 등 외부 노출 API backend에
+  `timeout tunnel 1h`를 적용했다. H27은 저장소 코드나 PR 변경이 아닌 edge 설정 task이며,
+  적용 완료를 #819에 기록하고 이슈를 닫았다. OPNsense 설정은 저장소 외부에 있으므로
+  완료 근거는 운영자 확인으로 남긴다.
+
 ## 2026-08-22 — T-VN-41S / #922 snapshot materialization 확장 완료
 
 - [x] **T-VN-41S — snapshot materialization streaming·audit compaction 확장.** PostgreSQL

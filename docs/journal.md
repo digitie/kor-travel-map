@@ -1,5 +1,12 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-22 — T-VN-H27/#819 OPNsense HAProxy 설정 완료
+
+운영자 확인으로 OPNsense HAProxy의 Map·Geo·PinVi 등 외부 노출 API backend에
+`timeout tunnel 1h`를 적용했다. H27은 저장소 코드/PR 변경이 아닌 edge 설정 task이므로
+`tasks-done.md`로 이관하고 GitHub issue #819를 닫았다. OPNsense effective config와 quiet
+WebSocket 관찰 로그는 이 저장소 세션에서 직접 읽지 못했으므로 완료 근거는 운영자 확인이다.
+
 ## 2026-08-22 — T-VN-41S / #922 orphan GC 갈래를 상태 partial index로 종결
 
 두 번째 적대 리뷰가 지적한 마지막 비용 경계를 실제 상태 전이로 닫았다. receipt 삭제 trigger가

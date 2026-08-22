@@ -1,5 +1,12 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-22 — T-VN-H27/#819 완료
+
+운영자 확인으로 OPNsense HAProxy의 Map·Geo·PinVi 등 외부 노출 API backend에
+`timeout tunnel 1h` 적용이 완료됐다. H27은 저장소 코드/PR 변경이 없는 edge 설정 task라
+`tasks-done.md`로 이관했고 GitHub issue #819를 닫았다. 라우터의 effective config와 quiet
+WebSocket 관찰 로그는 이 세션에서 직접 읽지 못했으므로 완료 근거는 운영자 확인이다.
+
 ## 2026-08-22 — T-VN-41S / #922 완료, orphan GC backlog 상태화
 
 마지막으로 남아 있던 GC orphan 갈래를 닫았다. receipt가 마지막으로 삭제될 때
