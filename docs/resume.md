@@ -19,9 +19,9 @@ H50 dedup EXPLAIN의 실제 수정은 [PR #1036](https://github.com/digitie/kor-
 
 ### 다음 한 작업
 
-T-VN-41S 본체는 #922에서 완료했고, 현재 후속 계약·마이그레이션 게이트 PR #1051의
-CI와 적대적 리뷰를 마무리한다. 그 다음 백로그 작업인 `T-VN-41C`의 final exact-pair·
-prod consumer enable을 진행한다.
+T-VN-41S 본체는 #922에서 완료했다. 현재 후속 계약·마이그레이션 게이트 PR
+#1051의 CI와 적대적 리뷰를 마무리한 뒤, 다음 백로그 작업인 `T-VN-41C`의
+final exact-pair·prod consumer enable을 진행한다.
 
 ## 2026-08-22 — T-VN-41S / #922 완료, orphan GC backlog 상태화
 
