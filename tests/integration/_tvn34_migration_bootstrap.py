@@ -319,6 +319,24 @@ async def bootstrapped_migrator_dsn(async_dsn: str) -> str:
     )
 
 
+def _application_graph_revisions() -> frozenset[str]:
+    """배포 artifact가 아는 revision 집합.
+
+    `src/kortravelmap/_application_migration_graph.json`은 migration module을 import하지
+    않고 AST로 만든 immutable graph다(`scripts/generate_application_migration_graph.py`).
+    새 migration이 붙으면 그 생성기가 함께 갱신하므로 이 판정은 낡지 않는다.
+    """
+
+    import json
+    from pathlib import Path
+
+    graph = Path(__file__).resolve().parents[2] / "src" / "kortravelmap"
+    payload = json.loads(
+        (graph / "_application_migration_graph.json").read_text(encoding="utf-8")
+    )
+    return frozenset(str(entry["revision"]) for entry in payload["revisions"])
+
+
 async def bootstrap_tvn_m01_role_phase(async_dsn: str) -> None:
     """0225 또는 M01 이후 head에서 M01/M04 role graph를 재확정한다."""
 
@@ -332,18 +350,15 @@ async def bootstrap_tvn_m01_role_phase(async_dsn: str) -> None:
             version = await connection.scalar(
                 text("SELECT version_num FROM public.alembic_version")
             )
-            if version not in {
-                "0225_tvn40c_physical_removal",
-                "0226_m01_manual_feature_create",
-                "0227_m02_feature_provenance",
-                "0228_m03_manual_curation",
-                "0233_m04_feature_request_queue",
-                "0234_m05_manual_provider_dedup",
-                "0235_m05_reconciliation_delivery",
-            }:
+            # 예전에는 revision id를 손으로 열거했다. 그 목록은 **head가 바뀔 때마다
+            # 낡는다** — `0236`이 붙자 M01/M04/M05 통합 8건이 전부 fixture 단계에서
+            # 죽었다. 이 함수의 본체는 멱등한 `CREATE ROLE ... IF NOT EXISTS`뿐이라
+            # 특정 migration을 요구하지 않는다. 지켜야 할 것은 "이 애플리케이션의
+            # DB인가"이므로, 배포 artifact인 migration graph에 있는 revision인지만 본다.
+            if version not in _application_graph_revisions():
                 raise RuntimeError(
-                    "M01 test role phase requires the M01/M05 graph, "
-                    f"not {version!r}"
+                    "M01 test role phase requires an application migration graph "
+                    f"revision, not {version!r}"
                 )
             await connection.execute(
                 text(
