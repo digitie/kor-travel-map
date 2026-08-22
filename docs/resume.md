@@ -6,7 +6,8 @@ T-VN-41S의 generic snapshot `410`/admission 계약으로 재생성된 full/admi
 `openapi-diff-v1.json`·T-VN-40 pending receipt의 SHA를 일치시켰다. user/service
 표면과 PinVi vendor는 변하지 않았고, 교차 저장소 paired acceptance가 끝날 때까지
 T-VN-40 receipt는 `pending`으로 유지한다. `tasks.md`의 T-VN-41C·FINAL-REBUILD
-배리어와 M01~M05 활성화/paired 잔여 상태는 그대로다.
+배리어와 M01~M05 활성화/paired 잔여 상태는 그대로다. admin 생성 타입과
+`tasks.md`의 #1053 기준 SHA도 현재 tree에 맞췄다.
 
 ### 다음 한 작업
 
