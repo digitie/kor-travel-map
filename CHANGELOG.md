@@ -10,8 +10,11 @@
 - **ADDED (DB)**: migration `0236_tvn41s_compaction_drained`가
   `ops.poi_cache_target_snapshot_materials`에 `compaction_drained_at`과 partial index를 더한다.
   GC backlog 판정의 "표시됐고 item이 남은 material" 갈래가 item 존재 probe 대신 상태 조회가 되어
-  상수 시간으로 떨어진다. **같은 판정의 orphan 갈래는 아직 선형이다** — 그쪽은 `compacted_at`
-  필터가 없어 보존되는 audit material까지 anti-join한다(잔여 항목으로 남겼다). forward-only.
+  상수 시간으로 떨어진다. 후속 보강에서 마지막 receipt 삭제 trigger가 `orphaned_at`을 기록하고
+  orphan partial index를 사용해 같은 판정의 orphan 갈래도 상수 시간으로 떨어진다. forward-only.
+- **ADDED (DB)**: `orphaned_at` 단방향 상태와
+  `idx_cache_target_snapshot_materials_orphaned` partial index를 추가했다. orphan material에는
+  새 receipt를 붙일 수 없고, 두 backlog 질의가 receipt anti-join을 반복하지 않는다.
 - **CHANGED (DB)**: material append-only fence가 `compacted_at`과 `compaction_drained_at` 두
   표시를 각각 **한 방향**으로 허용한다. 나머지 열은 여전히 불변이며, 검사 순서(전제 → 표시 여부
   → 불변성 → 한 방향 → 이미 표시됨)가 계약이라 어느 규칙에 걸렸는지 메시지로 구분된다.

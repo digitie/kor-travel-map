@@ -163,6 +163,79 @@ async def test_gc_marks_a_material_drained_once_its_items_are_gone(
     assert await _drained_at(migrated_session) is not None
 
 
+async def test_last_receipt_marks_orphan_and_blocks_reuse(
+    migrated_session: AsyncSession,
+) -> None:
+    """마지막 receipt 삭제가 orphan 상태를 만들고 새 receipt를 거부한다."""
+
+    await migrated_session.execute(
+        text(
+            "INSERT INTO ops.poi_cache_target_streams ("
+            "external_system, consumer_id, restore_epoch) "
+            "VALUES (:system, 'drained-orphan', 1) ON CONFLICT DO NOTHING"
+        ),
+        {"system": _SYSTEM},
+    )
+    await migrated_session.execute(
+        text(
+            "INSERT INTO ops.poi_cache_target_snapshot_materials ("
+            "material_id, external_system, restore_epoch, "
+            "material_high_watermark_relay_order, safe_high_watermark_relay_order, "
+            "item_count, merkle_root, materialized_at) VALUES ("
+            "CAST(:material_id AS uuid), :system, 1, 0, 0, 1, :root, now())"
+        ),
+        {"material_id": _MATERIAL, "system": _SYSTEM, "root": _ROOT},
+    )
+    await migrated_session.execute(
+        text(
+            "INSERT INTO ops.poi_cache_target_snapshots ("
+            "snapshot_id, material_id, receipt_kind, external_system, "
+            "created_at, expires_at) VALUES ("
+            "CAST(:receipt_id AS uuid), CAST(:material_id AS uuid), 'generic', "
+            ":system, now(), now() + interval '2 hours')"
+        ),
+        {"receipt_id": _RECEIPT, "material_id": _MATERIAL, "system": _SYSTEM},
+    )
+    await migrated_session.execute(
+        text(
+            "DELETE FROM ops.poi_cache_target_snapshots "
+            "WHERE snapshot_id = CAST(:receipt_id AS uuid)"
+        ),
+        {"receipt_id": _RECEIPT},
+    )
+
+    orphaned_at = (
+        await migrated_session.execute(
+            text(
+                "SELECT orphaned_at "
+                "FROM ops.poi_cache_target_snapshot_materials "
+                "WHERE material_id = CAST(:material_id AS uuid)"
+            ),
+            {"material_id": _MATERIAL},
+        )
+    ).scalar_one()
+    assert orphaned_at is not None
+
+    reason = await _refused(
+        migrated_session,
+        "INSERT INTO ops.poi_cache_target_snapshots ("
+        "snapshot_id, material_id, receipt_kind, external_system, "
+        "created_at, expires_at) VALUES ("
+        "x_extension.gen_random_uuid(), "
+        f"CAST('{_MATERIAL}' AS uuid), 'generic', '{_SYSTEM}', "
+        "now(), now() + interval '2 hours')",
+    )
+    assert "already orphaned" in reason, reason
+
+    moved = await _refused(
+        migrated_session,
+        "UPDATE ops.poi_cache_target_snapshot_materials "
+        "SET orphaned_at = NULL "
+        f"WHERE material_id = CAST('{_MATERIAL}' AS uuid)",
+    )
+    assert "one-way" in moved or "receipt trigger" in moved, moved
+
+
 async def test_backlog_ignores_a_drained_material(
     migrated_session: AsyncSession,
 ) -> None:
@@ -331,6 +404,10 @@ def test_both_backlog_queries_ask_the_same_question_about_drained_materials() ->
     has_sql = repo._HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL  # noqa: SLF001
 
     for name, sql in (("select_system", select_sql), ("has_backlog", has_sql)):
+        assert "material.orphaned_at IS NOT NULL" in sql, (
+            f"{name}이 orphan 상태를 사용하지 않는다 — anti-join이 backlog tick으로 "
+            "되돌아간다"
+        )
         assert "material.compaction_drained_at IS NULL" in sql, (
             f"{name}이 배출 상태를 보지 않는다 — partial index가 쓰이지 않는다"
         )

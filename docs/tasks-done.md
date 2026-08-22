@@ -9,10 +9,11 @@
   server cursor 2-pass·incremental Merkle·bounded memory 경로, `0231` receipt/material/item
   정규화와 양방향 material 공유, terminal `410` repository 경로를 완료했다.
   `0236_tvn41s_compaction_drained`의 `compaction_drained_at`·partial index로 GC backlog를
-  배출 중인 material로 한정하고, one-way fence·fail-closed `ops` ACL remediation을 고정했다.
+  배출 중인 material로 한정하고, 마지막 receipt 삭제 trigger의 `orphaned_at`·partial index로
+  orphan backlog도 상태 조회로 한정했다. one-way fence·fail-closed `ops` ACL remediation을 고정했다.
   item 500,000/material 56 MiB admission과 EXPLAIN·n150 soak evidence도 반영했다.
 - [x] 검증 근거: snapshot repository·migration boundary unit 44건, compaction-drained
-  integration 6건, ACL/metadata integration 14건, cache-target stream integration 40건,
+  integration 7건, ACL/metadata integration 14건, cache-target stream integration 40건,
   EXPLAIN integration 1건, API router targeted 14건 통과. `ruff`, `mypy --strict`
   (147 source files), `lint-imports`, migration graph check 및 redaction check 통과.
 - [>] service spec의 도달 가능한 `410` 선언은 `T-VN-41C`의 cross-repo re-vendor에서

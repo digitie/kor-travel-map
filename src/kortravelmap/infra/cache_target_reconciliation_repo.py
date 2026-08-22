@@ -259,6 +259,7 @@ WHERE material.external_system = :external_system
   AND material.material_high_watermark_relay_order
       = :material_high_watermark_relay_order
   AND material.compacted_at IS NULL
+  AND material.orphaned_at IS NULL
 FOR SHARE OF material
 """
 
@@ -278,6 +279,7 @@ WITH candidates AS MATERIALIZED (
   FROM ops.poi_cache_target_snapshot_materials AS material
   WHERE material.external_system = :external_system
     AND material.compacted_at IS NULL
+    AND material.orphaned_at IS NULL
     AND EXISTS (
       SELECT 1
       FROM ops.poi_cache_target_snapshots AS receipt
@@ -365,7 +367,8 @@ RETURNING snapshot.snapshot_id
 #:
 #: 그리고 아래 둘 중 하나다.
 #:
-#: - **orphan** — 붙잡은 receipt가 하나도 없다. 표를 비운 뒤 행째 사라진다(phase 4).
+#: - **orphan** — 붙잡은 receipt가 하나도 없다. receipt 삭제 trigger가
+#:   `orphaned_at`을 찍고, 표를 비운 뒤 행째 사라진다(phase 4).
 #: - **terminal audit** — reconciliation이 참조하는 receipt가 있고, 미만료 receipt는
 #:   없으며, 참조하는 **모든** reconciliation이 terminal이고 `completed_at`이 보존
 #:   기간보다 오래됐다. 이쪽은 표시가 영구히 남는다 — root/count가 감사 증거이고
@@ -378,11 +381,7 @@ _COMPACTION_CANDIDATE_PREDICATE = """
     WHERE item.material_id = material.material_id
   )
   AND (
-    NOT EXISTS (
-      SELECT 1
-      FROM ops.poi_cache_target_snapshots AS receipt
-      WHERE receipt.material_id = material.material_id
-    )
+    material.orphaned_at IS NOT NULL
     OR (
       EXISTS (
         SELECT 1
@@ -469,15 +468,10 @@ WITH candidates AS (
   WHERE material.external_system = :external_system
     AND material.compacted_at IS NOT NULL
     AND material.compaction_drained_at IS NULL
-    -- orphan에는 찍지 않는다. 표시가 뜻을 갖는 것은 **살아남는** material 뿐이고,
     -- orphan은 바로 다음 단계에서 행째 지워진다 — 곧 사라질 행에 row version과 trigger
-    -- 호출을 태우는 것은 순수 비용이다. header_limit에 걸려 이번 batch에서 못 지운
-    -- orphan은 두 backlog 질의의 orphan 갈래가 계속 본다.
-    AND EXISTS (
-      SELECT 1
-      FROM ops.poi_cache_target_snapshots AS receipt
-      WHERE receipt.material_id = material.material_id
-    )
+    -- 호출을 태우는 것은 순수 비용이다. `orphaned_at`은 receipt 삭제 시점에 이미 찍혔고,
+    -- header_limit에 걸려 이번 batch에서 못 지운 orphan도 partial index로 bounded하게 본다.
+    AND material.orphaned_at IS NULL
     AND NOT EXISTS (
       SELECT 1
       FROM ops.poi_cache_target_snapshot_material_items AS item
@@ -505,11 +499,7 @@ WITH candidates AS (
   SELECT material.material_id
   FROM ops.poi_cache_target_snapshot_materials AS material
   WHERE material.external_system = :external_system
-    AND NOT EXISTS (
-      SELECT 1
-      FROM ops.poi_cache_target_snapshots AS receipt
-      WHERE receipt.material_id = material.material_id
-    )
+    AND material.orphaned_at IS NOT NULL
     AND NOT EXISTS (
       SELECT 1
       FROM ops.poi_cache_target_snapshot_material_items AS item
@@ -526,7 +516,7 @@ RETURNING material.material_id
 """
 
 #: backlog가 있는 system은 넷 중 하나다 — 지울 수 있는 만료 receipt가 있거나,
-#: receipt가 사라져 orphan이 된 material이 있거나, 이미 compaction으로 표시됐지만
+#: receipt 삭제 trigger가 표시한 orphan material이 있거나, 이미 compaction으로 표시됐지만
 #: item이 남은 material이 있거나, 새로 표시할 compaction 후보가 있거나.
 #: 앞의 것만 보면 마지막 receipt를 지운 batch 뒤 나머지가 영원히 남는다.
 _SELECT_EXPIRED_SNAPSHOT_GC_SYSTEM_SQL = f"""
@@ -543,11 +533,7 @@ FROM (
   UNION
   SELECT material.external_system
   FROM ops.poi_cache_target_snapshot_materials AS material
-  WHERE NOT EXISTS (
-    SELECT 1
-    FROM ops.poi_cache_target_snapshots AS receipt
-    WHERE receipt.material_id = material.material_id
-  )
+  WHERE material.orphaned_at IS NOT NULL
   UNION
   -- 아래 두 질의는 **같은 질문**을 한다. 한쪽만 고치면 이 변경은 아무것도 고치지 않는다 —
   -- 이 질의가 매 batch에서 먼저 돌고, 네 갈래가 `UNION`으로 합쳐진 뒤에야 `LIMIT 1`이
@@ -582,11 +568,7 @@ SELECT EXISTS (
 ) OR EXISTS (
   SELECT 1
   FROM ops.poi_cache_target_snapshot_materials AS material
-  WHERE NOT EXISTS (
-    SELECT 1
-    FROM ops.poi_cache_target_snapshots AS receipt
-    WHERE receipt.material_id = material.material_id
-  )
+  WHERE material.orphaned_at IS NOT NULL
 ) OR EXISTS (
   -- "표시됐지만 아직 배출 중"은 상태 열로 묻는다. item 존재를 직접 재면 compacted
   -- material 하나마다 index probe 한 번이고, audit material은 영구 보존이라 그 수가
@@ -634,11 +616,7 @@ WITH snapshot_inventory AS MATERIALIZED (
   SELECT material.material_id,
          (
            material.compacted_at IS NOT NULL
-           OR NOT EXISTS (
-             SELECT 1
-             FROM ops.poi_cache_target_snapshots AS receipt
-             WHERE receipt.material_id = material.material_id
-           )
+           OR material.orphaned_at IS NOT NULL
          ) AS reclaimable,
          EXISTS (
            SELECT 1

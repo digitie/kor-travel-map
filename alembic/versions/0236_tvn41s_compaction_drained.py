@@ -13,6 +13,11 @@ item 인덱스 probe 한 번**이다. audit material은 증거로 영구 보존�
 중"만 partial index에 들어가므로, backlog가 없을 때 판정이 상수 시간으로 떨어진다.
 배출이 끝난 material은 색인에서 빠지고 다시는 훑이지 않는다.
 
+orphan 갈래도 receipt anti-join을 backlog tick마다 반복하지 않는다. receipt가 마지막으로
+삭제되는 순간 orphaned_at을 단방향으로 기록하고 orphan partial index에서만 읽는다.
+표시된 material에는 새 receipt를 붙일 수 없게 해, 상태가 stale해지지 않는다는 것을
+DB trigger가 보장한다.
+
 두 시각은 각각 **한 방향**이다. ``compacted_at``은 "회수를 시작했다", ``compaction_drained_at``
 은 "item을 다 비웠다"이고 둘 다 NULL에서 한 번만 채워진다. 그래서 append-only fence를
 새로 쓴다 — 예전 fence는 ``OLD.compacted_at IS NOT NULL``이면 무조건 거부해서 배출 표시
@@ -43,7 +48,8 @@ depends_on: str | Sequence[str] | None = None
 
 _ADD_COLUMN_SQL = """
 ALTER TABLE ops.poi_cache_target_snapshot_materials
-    ADD COLUMN compaction_drained_at timestamptz
+    ADD COLUMN compaction_drained_at timestamptz,
+    ADD COLUMN orphaned_at timestamptz
 """
 
 #: 배출은 표시 이후에만 있을 수 있고, 표시보다 앞설 수 없다. 두 시각의 순서를 DB가 쥔다.
@@ -53,7 +59,9 @@ ALTER TABLE ops.poi_cache_target_snapshot_materials
     CHECK (
         compaction_drained_at IS NULL
         OR (compacted_at IS NOT NULL AND compaction_drained_at >= compacted_at)
-    )
+    ),
+    ADD CONSTRAINT ck_poi_cache_target_snapshot_materials_orphaned_at
+    CHECK (orphaned_at IS NULL OR orphaned_at >= materialized_at)
 """
 
 #: 이 index가 이 migration의 목적이다. "표시됐지만 아직 배출 중"만 담으므로 배출이 끝난
@@ -62,6 +70,16 @@ _ADD_INDEX_SQL = """
 CREATE INDEX idx_poi_cache_target_snapshot_materials_draining
     ON ops.poi_cache_target_snapshot_materials (material_id)
     WHERE compacted_at IS NOT NULL AND compaction_drained_at IS NULL
+"""
+
+_DROP_SWEEP_INDEX_SQL = """
+DROP INDEX ops.idx_cache_target_snapshot_materials_sweep
+"""
+
+_ADD_ORPHAN_INDEX_SQL = """
+CREATE INDEX idx_cache_target_snapshot_materials_orphaned
+    ON ops.poi_cache_target_snapshot_materials (external_system, materialized_at, material_id)
+    WHERE orphaned_at IS NOT NULL
 """
 
 #: 이미 비어 있는 compacted material을 배출 완료로 표시한다. 이것을 하지 않으면 기존
@@ -76,6 +94,17 @@ UPDATE ops.poi_cache_target_snapshot_materials AS material
      SELECT 1
      FROM ops.poi_cache_target_snapshot_material_items AS item
      WHERE item.material_id = material.material_id
+   )
+"""
+
+_BACKFILL_ORPHANED_SQL = """
+UPDATE ops.poi_cache_target_snapshot_materials AS material
+   SET orphaned_at = COALESCE(material.compacted_at, clock_timestamp())
+ WHERE material.orphaned_at IS NULL
+   AND NOT EXISTS (
+     SELECT 1
+     FROM ops.poi_cache_target_snapshots AS receipt
+     WHERE receipt.material_id = material.material_id
    )
 """
 
@@ -96,7 +125,24 @@ BEGIN
       USING ERRCODE = '55000';
   END IF;
 
+  IF NEW.orphaned_at IS NOT NULL
+     AND OLD.orphaned_at IS NULL
+     AND pg_trigger_depth() < 2 THEN
+    RAISE EXCEPTION 'snapshot material orphan mark is managed by the receipt trigger'
+      USING ERRCODE = '55000';
+  END IF;
+
+  IF OLD.orphaned_at IS NOT NULL
+     AND NEW.orphaned_at IS DISTINCT FROM OLD.orphaned_at THEN
+    RAISE EXCEPTION 'snapshot material orphan mark is one-way'
+      USING ERRCODE = '55000';
+  END IF;
+
   IF NEW.compacted_at IS NULL THEN
+    IF NEW.orphaned_at IS DISTINCT FROM OLD.orphaned_at
+       AND pg_trigger_depth() >= 2 THEN
+      RETURN NEW;
+    END IF;
     RAISE EXCEPTION 'snapshot material is append-only except compaction'
       USING ERRCODE = '55000';
   END IF;
@@ -107,9 +153,9 @@ BEGIN
   -- 더하는 순간 그 열은 아무 규칙도 보지 않아 compacted 행에서 조용히 쓰기 가능해지고,
   -- 어떤 테스트도 그것을 보지 못한다. 감사 증거를 지키는 fence에서 그 성질을 잃을 수
   -- 없으므로, 두 표시 열만 제외하고 **나머지 전부**를 비교한다.
-  IF to_jsonb(NEW) - 'compacted_at' - 'compaction_drained_at'
+  IF to_jsonb(NEW) - 'compacted_at' - 'compaction_drained_at' - 'orphaned_at'
      IS DISTINCT FROM
-     to_jsonb(OLD) - 'compacted_at' - 'compaction_drained_at' THEN
+     to_jsonb(OLD) - 'compacted_at' - 'compaction_drained_at' - 'orphaned_at' THEN
     RAISE EXCEPTION 'snapshot material compaction must not change the material'
       USING ERRCODE = '55000';
   END IF;
@@ -129,7 +175,9 @@ BEGIN
 
   -- 이미 표시된 행에 대한 UPDATE는 **배출 표시일 때만** 허용한다. 그 밖에는
   -- 예전과 같이 "이미 compaction됐다"로 거부한다.
-  IF OLD.compacted_at IS NOT NULL AND NEW.compaction_drained_at IS NULL THEN
+  IF OLD.compacted_at IS NOT NULL
+     AND NEW.compaction_drained_at IS NULL
+     AND NEW.orphaned_at IS NOT DISTINCT FROM OLD.orphaned_at THEN
     RAISE EXCEPTION 'snapshot material is already compacted'
       USING ERRCODE = '55000';
   END IF;
@@ -137,6 +185,60 @@ BEGIN
   RETURN NEW;
 END;
 $reject_snapshot_material_mutation$
+"""
+
+_RECEIPT_ORPHAN_GUARD_SQL = """
+CREATE OR REPLACE FUNCTION ops.reject_snapshot_receipt_for_orphaned_material() RETURNS trigger
+LANGUAGE plpgsql AS $reject_snapshot_receipt_for_orphaned_material$
+DECLARE
+  material_orphaned_at timestamptz;
+BEGIN
+  IF TG_OP = 'UPDATE' AND NEW.material_id IS DISTINCT FROM OLD.material_id THEN
+    RAISE EXCEPTION 'snapshot receipt material is immutable'
+      USING ERRCODE = '55000';
+  END IF;
+
+  SELECT material.orphaned_at
+    INTO material_orphaned_at
+    FROM ops.poi_cache_target_snapshot_materials AS material
+   WHERE material.material_id = NEW.material_id
+   FOR SHARE;
+
+  IF material_orphaned_at IS NOT NULL THEN
+    RAISE EXCEPTION 'snapshot material is already orphaned'
+      USING ERRCODE = '55000';
+  END IF;
+
+  RETURN NEW;
+END;
+$reject_snapshot_receipt_for_orphaned_material$
+"""
+
+_MARK_ORPHANED_MATERIAL_SQL = """
+CREATE OR REPLACE FUNCTION ops.mark_snapshot_material_orphaned() RETURNS trigger
+LANGUAGE plpgsql AS $mark_snapshot_material_orphaned$
+BEGIN
+  -- material row lock과 새 receipt의 FOR SHARE를 먼저 직렬화한다. 마지막 receipt 삭제와
+  -- 동시 receipt 발행이 엇갈려 orphan 표시가 stale해지는 것을 막는다.
+  PERFORM 1
+    FROM ops.poi_cache_target_snapshot_materials AS material
+   WHERE material.material_id = OLD.material_id
+   FOR UPDATE;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM ops.poi_cache_target_snapshots AS receipt
+    WHERE receipt.material_id = OLD.material_id
+  ) THEN
+    UPDATE ops.poi_cache_target_snapshot_materials AS material
+       SET orphaned_at = clock_timestamp()
+     WHERE material.material_id = OLD.material_id
+       AND material.orphaned_at IS NULL;
+  END IF;
+
+  RETURN OLD;
+END;
+$mark_snapshot_material_orphaned$
 """
 
 #: backfill은 위 fence를 통과할 수 없다(배출 표시 자체가 fence가 막던 전이다). 같은
@@ -169,6 +271,7 @@ def upgrade() -> None:
     op.execute(_DISABLE_FENCE_SQL)
     try:
         drained = connection.exec_driver_sql(_BACKFILL_SQL).rowcount
+        orphaned = connection.exec_driver_sql(_BACKFILL_ORPHANED_SQL).rowcount
     finally:
         op.execute(
             "ALTER TABLE ops.poi_cache_target_snapshot_materials "
@@ -185,12 +288,42 @@ def upgrade() -> None:
             f"{before_mode!r} -> {after_mode!r}"
         )
 
-    # index는 backfill 뒤에 만든다. 앞에서 만들면 곧 빠질 행까지 전부 색인한다.
+    op.execute(_RECEIPT_ORPHAN_GUARD_SQL)
+    op.execute(_MARK_ORPHANED_MATERIAL_SQL)
+    op.execute(
+        "ALTER FUNCTION ops.reject_snapshot_receipt_for_orphaned_material() "
+        "OWNER TO ktm_feature_schema_owner"
+    )
+    op.execute(
+        "ALTER FUNCTION ops.mark_snapshot_material_orphaned() "
+        "OWNER TO ktm_feature_schema_owner"
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_poi_cache_target_snapshots_no_orphaned_material
+            BEFORE INSERT OR UPDATE OF material_id ON ops.poi_cache_target_snapshots
+            FOR EACH ROW
+            EXECUTE FUNCTION ops.reject_snapshot_receipt_for_orphaned_material()
+        """
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_poi_cache_target_snapshots_mark_material_orphaned
+            AFTER DELETE ON ops.poi_cache_target_snapshots
+            FOR EACH ROW
+            EXECUTE FUNCTION ops.mark_snapshot_material_orphaned()
+        """
+    )
+
+    # 0231의 전체 sweep index는 상태 partial index로 교체한다. backfill 뒤에 만들어
+    # orphan 상태가 없는 행을 색인에 넣지 않는다.
+    op.execute(_DROP_SWEEP_INDEX_SQL)
     op.execute(_ADD_INDEX_SQL)
+    op.execute(_ADD_ORPHAN_INDEX_SQL)
 
     print(  # noqa: T201 — migration 로그는 배포 로그로 남는다.
         f"0236 tvn41s compaction drained: 이미 비어 있던 material {drained}건을 "
-        "배출 완료로 표시했다"
+        f"배출 완료로 표시했고 orphan {orphaned}건을 상태화했다"
     )
 
 

@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-22 — T-VN-41S / #922 완료, orphan GC backlog 상태화
+
+마지막으로 남아 있던 GC orphan 갈래를 닫았다. receipt가 마지막으로 삭제될 때
+DB trigger가 material의 `orphaned_at`을 단방향으로 기록하고, 새 receipt가 orphan material을
+되살리지 못하게 막는다. `_SELECT_EXPIRED_SNAPSHOT_GC_SYSTEM_SQL`과
+`_HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL`은 이제 receipt anti-join 대신 orphan partial index를
+사용한다. 완료 항목은 `docs/tasks-done.md`로 이관했다.
+
+- `tests/integration/test_tvn41s_compaction_drained.py`: 7 passed
+- `tests/integration/test_cache_target_stream_repo.py`: 40 passed
+- `tests/integration/test_tvn41s_snapshot_material_explain.py`: 1 passed
+- migration metadata gate: 8 passed, snapshot unit/migration boundary: 44 passed
+
+다음 한 작업은 `T-VN-41C`에서 service spec의 도달 가능한 `410` 선언과 cross-repo
+re-vendor를 처리하는 것이다.
+
 ## 2026-08-21 — T-VN-41S 잔여 셋 중 둘 처리, 하나는 이월 (task는 아직 열림)
 
 후속 종료선에 남아 있던 셋 중 둘을 고치고 하나는 lane을 옮겼다. **다만 적대 리뷰가

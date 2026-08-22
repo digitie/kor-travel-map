@@ -1,5 +1,22 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-22 — T-VN-41S / #922 orphan GC 갈래를 상태 partial index로 종결
+
+두 번째 적대 리뷰가 지적한 마지막 비용 경계를 실제 상태 전이로 닫았다. receipt 삭제 trigger가
+마지막 receipt를 확인한 뒤 `orphaned_at`을 한 번만 기록하고, material fence는 그 상태를
+되돌리거나 직접 쓰지 못하게 한다. orphan material에는 새 receipt를 붙일 수 없으므로
+`_GET_REUSABLE_MATERIAL_SQL`도 부분 배출/재사용 창을 만들지 않는다.
+
+`_SELECT_EXPIRED_SNAPSHOT_GC_SYSTEM_SQL`과 `_HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL`은
+`orphaned_at` partial index를 사용해 audit material마다 receipt anti-join을 반복하지 않는다.
+material migration 0236, ORM metadata, orphan fence/trigger, EXPLAIN 및 integration gate를
+함께 갱신했다. service spec `410` 선언은 기존 계획대로 `T-VN-41C` re-vendor에 남긴다.
+
+- compaction-drained integration: 7 passed
+- cache-target stream integration: 40 passed
+- snapshot-material EXPLAIN: 1 passed
+- migration metadata: 8 passed; snapshot unit/migration boundary: 44 passed
+
 ## 2026-08-21 — T-VN-41S 잔여를 처리하다 절반만 고친 것을 리뷰가 잡았다
 
 41S의 후속 종료선에 남아 있던 것은 셋이었다.

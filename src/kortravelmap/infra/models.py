@@ -6836,6 +6836,10 @@ class PoiCacheTargetSnapshotMaterialRow(Base):
                 "ck_poi_cache_target_snapshot_materials_drained_after_compacted"
             ),
         ),
+        CheckConstraint(
+            "orphaned_at IS NULL OR orphaned_at >= materialized_at",
+            name=conv("ck_poi_cache_target_snapshot_materials_orphaned_at"),
+        ),
         UniqueConstraint(
             "material_id",
             "external_system",
@@ -6849,10 +6853,16 @@ class PoiCacheTargetSnapshotMaterialRow(Base):
             unique=True,
             postgresql_where=text("compacted_at IS NULL"),
         ),
-        # GC의 orphan material 정리가 쓰는 훑기 순서다. 그 질의는 `compacted_at`을 보지
-        # 않아 위 partial index에 걸리지 못하고, `external_system` equality와
-        # `materialized_at` 순서를 함께 받는 인덱스가 없으면 다른 stream의 material까지
-        # 훑는다. 그래서 비-partial로 둔다.
+        # receipt 삭제 trigger가 찍은 orphan 상태를 GC가 훑는 순서다. 상태가 없는
+        # material은 색인에서 빠지므로 audit material이 쌓여도 orphan 갈래 비용이 늘지
+        # 않는다.
+        Index(
+            "idx_cache_target_snapshot_materials_orphaned",
+            "external_system",
+            "materialized_at",
+            "material_id",
+            postgresql_where=text("orphaned_at IS NOT NULL"),
+        ),
         # GC backlog 판정 전용. "표시됐지만 아직 배출 중"만 담으므로 배출이 끝난 material은
         # 빠진다 — audit material이 아무리 쌓여도 이 판정이 커지지 않는다(0236).
         Index(
@@ -6861,12 +6871,6 @@ class PoiCacheTargetSnapshotMaterialRow(Base):
             postgresql_where=text(
                 "compacted_at IS NOT NULL AND compaction_drained_at IS NULL"
             ),
-        ),
-        Index(
-            "idx_cache_target_snapshot_materials_sweep",
-            "external_system",
-            "materialized_at",
-            "material_id",
         ),
         {"schema": "ops"},
     )
@@ -6911,6 +6915,9 @@ class PoiCacheTargetSnapshotMaterialRow(Base):
     #: audit receipt가 붙은 material은 이 표시가 영구히 남아 page가 410이 되고, orphan은
     #: 표를 비운 뒤 행째 사라진다.
     compacted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    #: 마지막 receipt가 삭제된 순간 찍는 orphan 상태. 이 표시는 되돌리지 않고, 표시된
+    #: material에는 새 receipt를 붙일 수 없게 DB trigger가 막는다.
+    orphaned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     #: item을 다 비운 시각(0236). `compacted_at`이 "회수를 시작했다"라면 이것은 "다 비웠다"다.
     #: 둘을 나눠 두는 이유는 GC backlog 판정 때문이다 — item 존재를 직접 재면 compacted
     #: material 하나마다 index probe 한 번이고 audit material은 영구 보존이라 그 수가 단조
