@@ -221,14 +221,15 @@ DECLARE
   material_compacted_at timestamptz;
   material_drained_at timestamptz;
 BEGIN
-  -- compaction UPDATE와 item INSERT가 엇갈리지 않게 부모 material 행을 잠근다.
+  -- compaction UPDATE와 item INSERT가 엇갈리지 않게 부모 material 행을 FOR UPDATE로
+  -- 잠근다. (FOR KEY SHARE는 일반 UPDATE의 NO KEY UPDATE 잠금과 충돌하지 않는다.)
   -- UPDATE가 먼저면 여기서 terminal 상태를 보고 거부하고, INSERT가 먼저면
   -- compaction UPDATE가 잠금 해제 뒤 item 존재를 다시 보므로 drained 표기를 거부한다.
   SELECT material.compacted_at, material.compaction_drained_at
     INTO material_compacted_at, material_drained_at
     FROM ops.poi_cache_target_snapshot_materials AS material
    WHERE material.material_id = NEW.material_id
-   FOR KEY SHARE;
+   FOR UPDATE;
 
   IF material_compacted_at IS NOT NULL OR material_drained_at IS NOT NULL THEN
     RAISE EXCEPTION 'snapshot material items cannot be inserted after compaction'
