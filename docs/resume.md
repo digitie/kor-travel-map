@@ -8,15 +8,19 @@
 OpenAPI `SystemLogsResponse`·`ApiCallLogsResponse` 타입으로 BFF mock payload를 고정했고,
 targeted Playwright 1회 및 `--repeat-each=5`(총 6/6)가 통과했다.
 
+두 전문 적대 리뷰에서 P0~P3 이슈는 0건이었고, lint·OpenAPI drift·Python 3.11/3.12/3.13·
+fixture replay·PostGIS·type-check/Next build 전체 CI가 green인 것을 확인한 뒤 squash
+`813a8a76ffa84f281ad46c9fb0e9bd2462fe5e21`로 병합했다.
+
 따라서 mocked checkpoint 부분은 해소됐지만 `T-FE-MOCK-FLAKE`는 `[~]`로 유지한다.
 n150 live GET-only 로그 검증은 local-only 자격증명과 prod credential 불일치로 auth setup
 401에서 중단됐으므로, 최신 자격증명과 읽기 전용 실행 증거가 확보될 때까지 완료 처리하지 않는다.
 
 ### 다음 한 작업
 
-PR #1059의 원격 CI와 두 전문 적대 리뷰를 확인한 뒤, live credential 경계를 제외한
-mocked checkpoint 결과를 task 기록에 반영한다. 이후 `T-VN-41F1D-D1`/`D2`의 비파괴 증거와
-isolated acceptance 실행 가능성을 재대조한다.
+이제 live credential 경계를 제외한 `T-VN-41F1D-D1`/`D2`의 비파괴 증거와 isolated
+acceptance 실행 가능성을 재대조한다. n150 live GET-only 로그 검증은 최신 읽기 전용
+자격증명과 실행 증거가 확보될 때까지 보류한다.
 
 ## 2026-08-22 — Map #1057 계약 pair 기록 및 Docker-manager v5 pinset 병합
 
