@@ -47,17 +47,15 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     "tvn33-reference-ownership-v1.sql": (
         "2e72796b373691b4d6e10f71eceec4504df94af1a2582edbf445fb2390f20b6b"
     ),
-    # 2026-08-13 T-VN-40 — public legacy catalog 제거, scoped service snapshot/mapping,
-    # admin catalog/import/candidate ETag·412/428 목표 diff를 machine freeze했다.
+    # 2026-08-22 T-VN-41S — generic snapshot 410/admission 계약으로 재생성한
+    # admin/full OpenAPI의 현재 baseline을 machine freeze했다.
     "openapi-diff-v1.json": (
-        "c752d432d82317dab0f0b7abfeaeb858b26dccc460872b87f55a0ebd9138fe5b"
+        "3600b1c77b95e5d125c2035662e960748e93bf5121bb3059a0d02c27ccbe1b26"
     ),
-    # 2026-08-13 T-VN-36 — receipt가 리베이스로 폐기된 커밋(c1fa5a4d)과 그때의
-    # spec sha를 가리키고 있었다. 현재 head로 재핀했다.
-    # 2026-08-21 T-VN-40 — M04 이후 exact vendor bytes와 n150 격리 canonical
-    # import/refresh API 수용을 재검증해 receipt를 complete로 승격했다.
+    # 2026-08-22 T-VN-41S — pending T-VN-40 receipt가 현재 full OpenAPI를
+    # 기술하도록 SHA를 재고정했다. 교차 저장소 paired acceptance는 여전히 pending이다.
     "consumer-rollout-v1.json": (
-        "bbddda9b8ec714f68a9235f54295f479953463b9f9711ea0273c37ce64d3ace8"
+        "0d82d93259f026877b136040bb3028e961198850f276b0eabcebf32c556e7c39"
     ),
     "tvn40-live-acceptance-v1.json": (
         "b1e8ffdf05fe0b07b274f521305f1f8b4af0daed16d44c4a0b847ddf81402d0e"
