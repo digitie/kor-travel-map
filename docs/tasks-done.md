@@ -10,7 +10,14 @@
   운영자 확인에 따라 OPNsense HAProxy의 Map·Geo·PinVi 등 외부 노출 API backend에
   `timeout tunnel 1h`를 적용했다. H27은 저장소 코드나 PR 변경이 아닌 edge 설정 task이며,
   적용 완료를 #819에 기록하고 이슈를 닫았다. OPNsense 설정은 저장소 외부에 있으므로
-  완료 근거는 운영자 확인으로 남긴다.
+완료 근거는 운영자 확인으로 남긴다.
+
+## 2026-08-22 — #990 planner cost 경계 false-fail 종결
+
+- [x] **#990** — H50 dedup EXPLAIN gate의 relation별 semantic allowlist 수정은
+  [PR #1036](https://github.com/digitie/kor-travel-map/pull/1036)에서 병합됐다. 이번 후속
+회귀 단언은 작은 `source_entities` dimension의 정상 Seq Scan은 허용하고 대량
+`features` Seq Scan은 거부해 planner 비용 경계의 재발을 막는다.
 
 ## 2026-08-22 — T-VN-41S / #922 snapshot materialization 확장 완료
 
