@@ -138,13 +138,35 @@ BEGIN
       USING ERRCODE = '55000';
   END IF;
 
+  -- 배출 표시는 item이 모두 사라진 뒤에만 찍는다. 이 검사가 없으면
+  -- `SET compacted_at = ..., compaction_drained_at = ...` 한 문장이나
+  -- 이미 compacted된 행에 대한 직접 drained 표기가 partial index에서 빠지게 해
+  -- 남은 item을 영구히 놓친다. item INSERT fence가 material 행 잠금으로
+  -- 동시 삽입도 직렬화한다.
+  IF NEW.compaction_drained_at IS NOT NULL
+     AND OLD.compaction_drained_at IS NULL
+     AND EXISTS (
+       SELECT 1
+       FROM ops.poi_cache_target_snapshot_material_items AS item
+       WHERE item.material_id = NEW.material_id
+     ) THEN
+    RAISE EXCEPTION 'snapshot material cannot be marked drained while items remain'
+      USING ERRCODE = '55000';
+  END IF;
+
   IF NEW.compacted_at IS NULL THEN
     IF NOT (
       NEW.orphaned_at IS NOT DISTINCT FROM OLD.orphaned_at
+      AND to_jsonb(NEW) - 'compacted_at' - 'compaction_drained_at' - 'orphaned_at'
+        IS NOT DISTINCT FROM
+      to_jsonb(OLD) - 'compacted_at' - 'compaction_drained_at' - 'orphaned_at'
       OR (
         NEW.orphaned_at IS NOT NULL
         AND OLD.orphaned_at IS NULL
         AND pg_trigger_depth() >= 2
+        AND to_jsonb(NEW) - 'compacted_at' - 'compaction_drained_at' - 'orphaned_at'
+          IS NOT DISTINCT FROM
+        to_jsonb(OLD) - 'compacted_at' - 'compaction_drained_at' - 'orphaned_at'
       )
     ) THEN
       RAISE EXCEPTION 'snapshot material is append-only except compaction'
@@ -190,6 +212,32 @@ BEGIN
   RETURN NEW;
 END;
 $reject_snapshot_material_mutation$
+"""
+
+_MATERIAL_ITEM_INSERT_FENCE_SQL = """
+CREATE OR REPLACE FUNCTION ops.reject_snapshot_material_item_insert() RETURNS trigger
+LANGUAGE plpgsql AS $reject_snapshot_material_item_insert$
+DECLARE
+  material_compacted_at timestamptz;
+  material_drained_at timestamptz;
+BEGIN
+  -- compaction UPDATE와 item INSERT가 엇갈리지 않게 부모 material 행을 잠근다.
+  -- UPDATE가 먼저면 여기서 terminal 상태를 보고 거부하고, INSERT가 먼저면
+  -- compaction UPDATE가 잠금 해제 뒤 item 존재를 다시 보므로 drained 표기를 거부한다.
+  SELECT material.compacted_at, material.compaction_drained_at
+    INTO material_compacted_at, material_drained_at
+    FROM ops.poi_cache_target_snapshot_materials AS material
+   WHERE material.material_id = NEW.material_id
+   FOR KEY SHARE;
+
+  IF material_compacted_at IS NOT NULL OR material_drained_at IS NOT NULL THEN
+    RAISE EXCEPTION 'snapshot material items cannot be inserted after compaction'
+      USING ERRCODE = '55000';
+  END IF;
+
+  RETURN NEW;
+END;
+$reject_snapshot_material_item_insert$
 """
 
 _RECEIPT_ORPHAN_GUARD_SQL = """
@@ -318,6 +366,19 @@ def upgrade() -> None:
     op.execute(
         "ALTER FUNCTION ops.mark_snapshot_material_orphaned() "
         "OWNER TO ktm_feature_schema_owner"
+    )
+    op.execute(_MATERIAL_ITEM_INSERT_FENCE_SQL)
+    op.execute(
+        "ALTER FUNCTION ops.reject_snapshot_material_item_insert() "
+        "OWNER TO ktm_feature_schema_owner"
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_poi_cache_target_snapshot_material_items_no_compacted_insert
+            BEFORE INSERT ON ops.poi_cache_target_snapshot_material_items
+            FOR EACH ROW
+            EXECUTE FUNCTION ops.reject_snapshot_material_item_insert()
+        """
     )
     op.execute(
         """

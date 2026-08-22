@@ -84,17 +84,9 @@ async def _seed_compacted_material_with_items(
         ),
         {"receipt_id": _RECEIPT, "material_id": _MATERIAL, "system": _SYSTEM},
     )
-    # Receipt를 먼저 붙인 live material만 compaction한다. `0236`은 terminal material에
-    # 새 receipt를 붙이는 것을 차단하므로, 이미 compacted인 행에 receipt를 넣는 fixture는
-    # 정상 producer 순서를 거꾸로 재현하게 된다.
-    await session.execute(
-        text(
-            "UPDATE ops.poi_cache_target_snapshot_materials "
-            "SET compacted_at = now() - interval '1 minute' "
-            "WHERE material_id = CAST(:material_id AS uuid)"
-        ),
-        {"material_id": _MATERIAL},
-    )
+    # item을 material에 채운 뒤 compaction을 표시한다. 0236은 terminal material에
+    # 새 item을 넣는 것도 차단하므로, 이 순서가 producer와 raw INSERT fence 모두의
+    # 정상 경계다.
     for row_number in range(1, items + 1):
         await session.execute(
             text(
@@ -111,6 +103,14 @@ async def _seed_compacted_material_with_items(
                 "fingerprint": "b" * 64,
             },
         )
+    await session.execute(
+        text(
+            "UPDATE ops.poi_cache_target_snapshot_materials "
+            "SET compacted_at = now() - interval '1 minute' "
+            "WHERE material_id = CAST(:material_id AS uuid)"
+        ),
+        {"material_id": _MATERIAL},
+    )
 
 
 async def _refused(session: AsyncSession, sql: str) -> str:
@@ -304,6 +304,41 @@ async def test_compacted_material_blocks_new_receipt(
         "now(), now() + interval '2 hours')",
     )
     assert "already compacted" in reason, reason
+
+
+async def test_compacted_material_blocks_new_item(
+    migrated_session: AsyncSession,
+) -> None:
+    """terminal material에 raw item INSERT를 허용하면 drained fence가 무력해진다."""
+
+    await _seed_compacted_material_with_items(migrated_session, items=1)
+
+    reason = await _refused(
+        migrated_session,
+        "INSERT INTO ops.poi_cache_target_snapshot_material_items ("
+        "material_id, row_number, target_key, state, source_generation, "
+        "source_payload_fingerprint) VALUES ("
+        f"CAST('{_MATERIAL}' AS uuid), 2, 'k-0002', 'deleted', 1, "
+        "repeat('b', 64))",
+    )
+    assert "cannot be inserted after compaction" in reason, reason
+
+
+async def test_material_cannot_be_marked_drained_with_items(
+    migrated_session: AsyncSession,
+) -> None:
+    """compaction과 drained를 한 번에 표시해 남은 item을 backlog에서 숨길 수 없다."""
+
+    await _seed_compacted_material_with_items(migrated_session, items=1)
+
+    reason = await _refused(
+        migrated_session,
+        "UPDATE ops.poi_cache_target_snapshot_materials "
+        "SET compacted_at = clock_timestamp(), "
+        "compaction_drained_at = clock_timestamp() "
+        f"WHERE material_id = CAST('{_MATERIAL}' AS uuid)",
+    )
+    assert "while items remain" in reason, reason
 
 
 async def test_backlog_ignores_a_drained_material(

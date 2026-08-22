@@ -18,6 +18,9 @@
 - **CHANGED (DB)**: material append-only fence가 `compacted_at`과 `compaction_drained_at` 두
   표시를 각각 **한 방향**으로 허용한다. 나머지 열은 여전히 불변이며, 검사 순서(전제 → 표시 여부
   → 불변성 → 한 방향 → 이미 표시됨)가 계약이라 어느 규칙에 걸렸는지 메시지로 구분된다.
+- **ADDED (DB)**: item INSERT는 material 행 잠금과 terminal 상태 확인을 거치며, item이 남은
+  material에는 `compaction_drained_at`을 직접 찍을 수 없다. compaction·drained를 한 문장으로
+  건너뛰거나 동시 INSERT로 partial index에서 빠지는 경로를 차단한다.
 - **CHANGED (운영)**: 선언 없는 `ops` relation이 배포를 막을 때, 실패 메시지가 두 갈래 조치를
   직접 안내한다 — 애플리케이션 소유면 선언 목록에 추가하고, 운영자의 임시·백업 표라면 `public`에
   둔다(조정기는 `feature`/`provider_sync`/`ops` 셋만 관장한다). fence 자체는 그대로다.

@@ -33,7 +33,7 @@ material migration 0236, ORM metadata, orphan fence/trigger, EXPLAIN 및 integra
 material 56 MiB 상한을 service/full spec과 admin 타입에 반영했다. 교차 저장소 PinVi
 re-vendor와 paired acceptance 전까지 관련 receipt는 `pending`으로 fail-closed한다.
 
-- compaction-drained integration: 8 passed
+- compaction-drained integration: 10 passed
 - cache-target stream integration: 40 passed
 - snapshot-material EXPLAIN: 1 passed
 - migration metadata: 8 passed; snapshot unit/migration boundary: 44 passed

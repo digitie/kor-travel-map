@@ -31,7 +31,7 @@ DB trigger가 material의 `orphaned_at`을 단방향으로 기록하고, 새 rec
 `_HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL`은 이제 receipt anti-join 대신 orphan partial index를
 사용한다. 완료 항목은 `docs/tasks-done.md`로 이관했다.
 
-- `tests/integration/test_tvn41s_compaction_drained.py`: 8 passed
+- `tests/integration/test_tvn41s_compaction_drained.py`: 10 passed
 - `tests/integration/test_cache_target_stream_repo.py`: 40 passed
 - `tests/integration/test_tvn41s_snapshot_material_explain.py`: 1 passed
 - migration metadata gate: 8 passed, snapshot unit/migration boundary: 44 passed
