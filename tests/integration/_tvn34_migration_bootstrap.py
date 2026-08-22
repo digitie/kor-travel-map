@@ -788,10 +788,28 @@ async def restore_tvn_m05_role_graph(async_dsn: str) -> None:
             version = await connection.scalar(
                 text("SELECT version_num FROM public.alembic_version")
             )
-            if version != "0235_m05_reconciliation_delivery":
+            # "완료된 M05"의 증거는 head 동등이 아니라 **M05 relation이 서 있다**는 것이다.
+            # head로 재면 M05와 무관한 다음 migration이 붙는 순간 깨진다(`0236`에서 실제로
+            # 깨졌다). `:765`의 pristine-0233 검사는 그 자리에서 **의도적으로 staged한**
+            # 위치를 보는 것이라 다르다 — 그쪽은 그대로 둔다.
+            m05_relations = await connection.scalar(
+                text(
+                    "SELECT count(*) FROM unnest(CAST(:relations AS text[])) "
+                    "AS expected(relation_name) "
+                    "WHERE to_regclass(expected.relation_name) IS NOT NULL"
+                ),
+                {
+                    "relations": [
+                        "ops.manual_provider_dedup_cases",
+                        "ops.feature_reference_reconciliation_events",
+                        "ops.feature_reference_reconciliation_leases",
+                    ]
+                },
+            )
+            if version is None or m05_relations != 3:
                 raise RuntimeError(
-                    "M05 role graph restore requires the completed M05 head, "
-                    f"not {version!r}"
+                    "M05 role graph restore requires the completed M05 relations, "
+                    f"not version={version!r} relations={m05_relations}/3"
                 )
             await _apply_tvn_m05_role_graph(connection)
     finally:
