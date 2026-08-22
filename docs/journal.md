@@ -1,5 +1,16 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-22 — T-FE-MOCK-FLAKE mocked logs 응답 고정
+
+`admin/ops pages › /v1/ops/logs`에서 self-owned mock backend가 system/API logs 응답을
+주지 않아 `aria-busy`가 15초 유지되던 경계를 PR [#1059](https://github.com/digitie/kor-travel-map/pull/1059)로
+수정했다. 생성 OpenAPI `SystemLogsResponse`·`ApiCallLogsResponse` 타입 기반 BFF mock을
+추가했고 targeted Playwright 1회와 5회 반복을 모두 통과했다(총 6/6).
+
+mocked checkpoint는 해소됐지만 n150 live GET-only logs는 local-only 자격증명과 prod
+credential 불일치로 auth setup 401에서 중단되어 `[~]` 상태를 유지한다. 실데이터·운영
+권한 없이 live acceptance나 receipt 승격을 실행하지 않는다.
+
 ## 2026-08-22 — Map #1057 병합 및 Docker-manager v5 pinset 정합화
 
 Map [PR #1057](https://github.com/digitie/kor-travel-map/pull/1057)을 squash

@@ -36,7 +36,7 @@ barrier로 직렬화한다.
   - [~] `T-VN-41C`(#975 병합 / final exact-pair·prod consumer enable 잔여)
   - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환 — **저장소측 완료 2026-08-20**, live 실행은 배리어 대기)
   - **배리어**: [ ] `T-VN-FINAL-REBUILD`(주요 개발 완료 후 파괴적 재구축 — 사용자 결정 2026-08-20)
-  - [ ] `T-FE-MOCK-FLAKE`(`/v1/ops/logs`)
+  - [~] `T-FE-MOCK-FLAKE`(`/v1/ops/logs` — mocked checkpoint 고정, n150 live GET-only 잔여)
   - [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2` → `T-VN-41C` receipt 승격
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정)**
   - [~] `T-VN-M01`(API·`0226` DB/ACL 병합, route 활성화·restore 잔여) → [~] `T-VN-M02`(provenance reader/fence 병합, purge·restore 잔여)
@@ -487,23 +487,24 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 
 ### C7 후속 검증 잔여
 
-- [~] **T-FE-MOCK-FLAKE** — `e2e/admin-ops.spec.ts::admin/ops pages › /v1/ops/logs` 간헐 실패
+- [~] **T-FE-MOCK-FLAKE** — mocked checkpoint 해소, n150 live GET-only 잔여
 
-  System logs 표의 첫 columnheader `생성`이 15초 안에 보이지 않는다(`admin-ops.spec.ts:744`).
-  앞선 filter control 단언은 모두 통과하므로 표 mount 전에 header를 단언하는 순서 문제로
-  보인다. n150 5회 실행 중 2회 실패 — 부하가 높을 때 재현된다. mocked config가
-  `retries: process.env.CI ? 1 : 0`이라 **로컬은 재시도가 없어** 느린 렌더가 곧 실패가 된다.
+  **초기 관찰(2026-08-21)**: System logs 표의 첫 columnheader `생성`이 15초 안에
+  보이지 않았다(`admin-ops.spec.ts:744`, 당시 위치). 앞선 filter control 단언은 모두
+  통과하므로 표 mount 전에 header를 단언하는 순서 문제로 보였고, n150 5회 실행 중 2회
+  실패했다. 부하가 높을 때 재현됐으며 mocked config가 `retries: process.env.CI ? 1 : 0`이라
+  **로컬은 재시도가 없어** 느린 렌더가 곧 실패가 됐다.
 
-  이 spec은 완료된 C7 browser evidence 이식이 건드리지 않았고 mocked checkpoint는 CI 잡이
-  아니라 수동 게이트다 — 즉 **기존 flake**다. 표/행이 도착한 뒤 header를 단언하도록
-  고쳐야 하며, 재시도로 덮지 않는다.
+  당시 이 spec은 완료된 C7 browser evidence 이식이 건드리지 않았고 mocked checkpoint는
+  CI 잡이 아니라 수동 게이트였다. 따라서 표/행이 도착한 뒤 header를 단언하도록 고정하고,
+  재시도로 덮지 않는 방향으로 처리했다. 아래 PR #1059에서 실제 mock 응답 부재까지 해소했다.
   2026-08-21 PR #1045에서 표별 locator scope와 body row 준비 대기, `aria-busy` 해제 대기를
   추가했다(`09d47cf7` → `d208b76a`). 전문 리뷰어 2명이 누적 diff를 재검토해 P0/P1/P2
-  0건을 확인했다. n150 mocked checkpoint A는 281/285 passed였고 이 spec은 self-owned
-  mock backend의 응답 부재로 `aria-busy=true`가 15초 유지되어 실패했다. 나머지 3건도
-  기존 실패 표면이다. PR head `14db3b5c`의 CI 4개(`ci`, `lint`, `frontend`, `openapi`)는
-  모두 green이다. n150 live GET-only logs 스펙은 현재 local-only 자격증명과 prod credential
-  불일치로 재시도에서도 auth setup 401에서 중단되어, 최신 자격증명 확인 뒤 재개해야 한다.
+  0건을 확인했다. 이후 self-owned mock backend가 로그 두 stream을 응답하지 않아
+  `aria-busy=true`가 15초 유지되던 경계를 PR #1059에서 생성 OpenAPI 타입 기반 BFF mock으로
+  고정했다. targeted `/v1/ops/logs` 1회와 5회 반복(총 6/6)이 통과했다. mocked checkpoint
+  부분은 해소됐지만, n150 live GET-only logs 스펙은 local-only 자격증명과 prod credential
+  불일치로 auth setup 401에서 중단되어 최신 자격증명 확인 뒤 재개해야 한다.
 - `T-C7-SCOPE-REGISTRY`와 `T-C7-LIVE-SERIAL`은 PR #1038에서 완료했다. scope 선언
   주체·조회 표면을 `integration-map.md` §3.7과 ADR-088 결과에 정본화했고,
   `external_system:c7-e2e` live write 3종에는 cross-worker `mkdir` 잠금을 결선했다.
