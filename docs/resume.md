@@ -1,5 +1,24 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-22 — #922 후속 PR #1051 병합 및 백로그 정합성 감사
+
+T-VN-41S/#922 후속 무결성 게이트를 [PR #1051](https://github.com/digitie/kor-travel-map/pull/1051)로
+병합했다. merge commit은 `db319a4798229098d04e68e3ac64338183ad547f`이며 원격 CI 8/8이
+green이었다. 두 전문 적대 리뷰에서 P0/P1은 0건이었고, 남은 P2는 raw DELETE/parent
+CASCADE·reverse multi-material delete deadlock·planner 관찰과 migration lock 실측 같은
+운영 보강 메모로 분류했다.
+
+같은 기준으로 `tasks.md`와 `tasks-done.md`를 대조해 T-VN-M01~M05의 #1029 구현 병합분을
+완료 이력으로 옮기고, route 활성화·restore/purge·교차 저장소 re-vendor·격리 live acceptance만
+부분완료로 남겼다. T-VN-40 자체의 독립 잔여 task는 없으며 후속 검증은 T-VN-41C와 각 M lane이
+소유한다.
+
+### 다음 한 작업
+
+`T-VN-41C`에서 Map `410` service spec을 PinVi에 re-vendor하고, PinVi generic Feature request와
+M05 reconciliation을 포함한 격리 paired acceptance를 실행한다. 이 작업과 병행해 PinVi
+식별자 정렬 PR 및 docker-manager C6c 대체 PR의 CI·적대 리뷰를 마무리한다.
+
 ## 2026-08-22 — T-VN-H27/#819 완료
 
 운영자 확인으로 OPNsense HAProxy의 Map·Geo·PinVi 등 외부 노출 API backend에
@@ -19,11 +38,10 @@ H50 dedup EXPLAIN의 실제 수정은 [PR #1036](https://github.com/digitie/kor-
 - planner helper 회귀 단언: 2 passed
 - 대상 `test_t212d_perf_explain.py` ruff: 통과
 
-### 다음 한 작업
+### 당시 다음 한 작업
 
-T-VN-41S 본체는 #922에서 완료했다. 현재 후속 계약·마이그레이션 게이트 PR
-#1051의 CI와 적대적 리뷰를 마무리한 뒤, 다음 백로그 작업인 `T-VN-41C`의
-final exact-pair·prod consumer enable을 진행한다.
+이 시점의 #1051 CI·리뷰 대기는 상단 엔트리에서 병합으로 갱신했다. 현행 다음 작업은
+`T-VN-41C`의 final exact-pair·prod consumer enable이다.
 
 ## 2026-08-22 — T-VN-41S / #922 후속 무결성 게이트 보강
 
@@ -43,9 +61,9 @@ trigger를 추가했고, 실제 batch 크기·순서는 repository의 ordered `S
 - `tests/integration/test_tvn41s_snapshot_material_explain.py`: 1 passed
 - migration metadata gate: 8 passed, snapshot unit/migration boundary: 44 passed
 
-다음 한 작업은 #1051 후속 PR의 CI/리뷰를 마친 뒤 `T-VN-41C`에서 이번에 갱신한 service spec을 PinVi에 re-vendor하고
-paired acceptance를 다시 실행해 pending receipt를 승격하는 것이다. Map 쪽 runtime
-410 선언과 OpenAPI/admin 타입 갱신은 이번 PR에서 닫았다.
+다음 한 작업은 `T-VN-41C`에서 이번에 갱신한 service spec을 PinVi에 re-vendor하고 paired
+acceptance를 다시 실행해 pending receipt를 승격하는 것이다. Map 쪽 runtime 410 선언과
+OpenAPI/admin 타입 갱신은 이번 PR에서 닫았다.
 
 ## 2026-08-21 — T-VN-41S 잔여 셋 중 둘 처리, 하나는 이월 (task는 아직 열림)
 
@@ -516,10 +534,11 @@ repair, raw queue access preflight, direct procedure payload validation, termina
 M04가 바꾼 admin/service OpenAPI baseline과 active consumer receipt는 새 source pair의
 격리 paired live UI E2E 전까지 `pending`으로 유지한다.
 
-### 다음 한 작업
+### 당시 다음 한 작업
 
 Map의 exact OpenAPI commit을 PinVi 최초 consumer branch에 vendor하고 direct Feature create를
-generic request submit으로 cutover한다. 그 뒤 M05를 같은 순서로 진행한다.
+generic request submit으로 cutover하는 구현은 #458과 #1029에서 병합됐다. 남은 paired request→approval
+receipt와 M05 reconciliation activation은 `T-VN-41C`에서 진행한다.
 
 ## 2026-08-20 — T-VN-41F1D-E 저장소측 완료 (v4 퇴역 → v5/v7)
 

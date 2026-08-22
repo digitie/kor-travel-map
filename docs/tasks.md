@@ -5,13 +5,17 @@
 [`docs/resume.md`](resume.md)가 정본이다. 작성·유지 규약은
 [`docs/tasks-rule.md`](tasks-rule.md)를 따른다.
 
-## 진행 중인 작업 인덱스 (2026-08-21 완료 이관)
+## 진행 중인 작업 인덱스 (2026-08-22 완료 이관)
 
 완료한 `T-VN-32`·`T-VN-33`·`T-VN-37`·`T-VN-38`·`T-VN-40`과 선행 운영 task는
 [`tasks-done.md`](tasks-done.md)로 이관했다. 이후 완료된 `T-VN-H50`·`T-VN-C05A`~`C05D`·
 `T-C7-BROWSER-EVIDENCE`·`T-C7-SCOPE-REGISTRY`·`T-C7-LIVE-SERIAL`·`T-FE-MOCK-MANIFEST`·
 `T-VN-37D`도 같은 곳에 있다. **2026-08-21 `0229`~`0232` 묶음 prod 배포로 종결된
 `T-VN-40B`·`T-VN-C05-CATALOG-KEY`도 이관했다.** 아래에는 아직 닫히지 않은 실행 단위만 둔다.
+
+2026-08-22 대조 결과 **독립적인 `T-VN-40` 잔여 task는 없다.** 아래에 남은
+`T-VN-41C`·`T-VN-41F1D-*`·`T-VN-FINAL-REBUILD`·`T-VN-M01`~`M05`의 활성화/paired
+검증은 각각의 현재 계약을 소유하며, 완료된 T-VN-40 선행 작업을 다시 열지 않는다.
 
 **Lane A (Claude Code)**와 **Lane B (codex)**는 서로 병렬 실행한다. 각 lane 내부는 아래 순서를
 지키며, 같은 migration head·OpenAPI 정본·같은 cross-repo pair를 만지는 시점만 공통 규율의
@@ -28,8 +32,8 @@ barrier로 직렬화한다.
   - [ ] `T-FE-MOCK-FLAKE`(`/v1/ops/logs`)
   - [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2` → `T-VN-41C` receipt 승격
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정)**
-  - [~] `T-VN-M01`(admin Feature 생성 API foundation 병합, `0226` DB/ACL/route 잔여) → [ ] `T-VN-M02`(origin 보존·불변)
-  - [ ] `T-VN-M03`(curated 동시 생성) ∥ [ ] `T-VN-M04`(범용 Feature 요청 큐 — 첫 consumer는 PinVi)
+  - [~] `T-VN-M01`(API·`0226` DB/ACL 병합, route 활성화·restore 잔여) → [~] `T-VN-M02`(provenance reader/fence 병합, purge·restore 잔여)
+  - [~] `T-VN-M03`(curated 동시 생성 writer 병합, import/live acceptance 잔여) ∥ [~] `T-VN-M04`(범용 Feature 요청 큐 병합, paired consumer acceptance 잔여)
   - [~] `T-VN-M05`(provider 발행 시 중복 판정 — 자동 병합 금지, paired consumer reconciliation 설계 진행)
 - **Lane C — 사문화 정리·미구현 dataset (다른 lane과 무관, 아무 때나)**
 - **최종 cutover**
@@ -728,21 +732,6 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 > ADR-066~075가 목표 스펙 정본이다. 각 migration task는 forward-only 격리 clone에서 검증하고,
 > 명시적 downgrade 수용 조건이 없는 한 전진 뒤 rollback하지 않는다.
 
-### T-VN-37D — notice empty range 표현 (완료)
-
-> 계보 key 물화·인덱스 probe(`T-VN-37`, PR #968)는 완료 이력으로
-> [`tasks-done.md`](tasks-done.md)에 옮겼다. 이 후속은 ADR-095에서 제품 의미를
-> 확정하고 구현했다.
-
-- [x] T-VN-37D — **empty range 표현**
-
-  provider가 미래 시행 공지를 철회하면 `end < start`가 실재한다(실측
-  `start=2026-07-13/end=2026-06-02`). 결함이 아니라 "발효 전에 철회됨"이고, 35B가
-  CHECK를 두지 않은 이유다. `feature_notices.valid_during` generated column이
-  정상 범위는 `[start, end)`, 발효 전 철회는 `empty`로 표현한다. 모든 notice
-  유형의 미래 발효 공지는 계속 노출하고, active read는 기존 `valid_end_time`
-  술어를 유지한다(ADR-095, migration `0232_tvn37d_notice_empty_range`).
-
 - [ ] T-VN-39 — **KTM·PinVi write-fence cutover**
 
   consumer-first 배포, write fence와 순차 전환을 수행한다. **T-VN-33C의 legacy
@@ -918,25 +907,21 @@ proposed ADR-093에서 닫았고, exact checkpoint `2aa17c27`에 API·DB 전문 
 
 #### 후속 task
 
-- [~] **T-VN-M01 — admin Feature 생성 API clean cutover** (결정 1, 구현 진행). 이미 존재하는
-  `POST /v1/admin/features`를 서버 발급 UUIDv7, exact identity claim, `manual_admin` 단일 origin,
-  고정 initial state와 admin BFF 전용 인증 경계로 교정한다. **ADR-093 필요**.
-  Map PR #1016은 `14792385`로 병합되어 API/ORM foundation, Admin UI BFF/form/generated types와
-  runtime raw/digest 격리를 main에 반영했다. PinVi direct-create fail-close는 별도 paired PR
-  [#458](https://github.com/digitie/pinvi/pull/458)의 cross-repo 경계로 추적한다.
-  T-VN-34C 격리 fresh-live runner도 #1028(`021b20fc`)에서 raw UI token·API digest·off flag를 생성하고
-  `docker-compose.yml`의 모든 `:?` 필수 환경변수와의 집합 차이를 테스트하도록 보강했다.
-  이 보강은 runner preflight만 닫은 것이며 route flag는 계속 false다. DB/ACL/backup tranche는
-  `0226_m01_manual_feature_create`로만 잇고 실제 활성화·완료 이관은 그 검증 뒤에 한다.
-- [ ] **T-VN-M02 — origin 보존과 불변** (결정 4). origin/claim read model과 Feature 수정·purge,
-  backup/restore에서의 불변을 스키마·테스트로 고정한다. `manual_request`/`manual_curation` 값은 각
-  인증 writer가 생기는 M04/M03 전에는 등록하지 않는다.
-- [ ] **T-VN-M03 — curated 동시 생성** (결정 3). curation import/admin 편집에서 대상 Feature가
-  없을 때 M01을 호출해 만들고 `curation_items`에 잇는다. **T-VN-40의 write model과 같은
-  표면**이라 그 인수 뒤에 얹는다.
-- [ ] **T-VN-M04 — 범용 Feature 요청 큐** (결정 2). 외부 consumer가 HTTP로 요청하고 admin이 승인한다. 승인
-  시 Map이 Feature를 만들고 origin을 `manual_request`로 남긴다. PinVi는 첫 consumer이며 cross-repo 계약은
-  `docs/integration-map.md`에도 추가한다.
+- [~] **T-VN-M01 — admin Feature 생성 API clean cutover** (결정 1, 구현 병합). Map PR #1029
+  (merge `57c9d99a`)에 `0226_m01_manual_feature_create`의 DB/ACL/backup manifest와 API·Admin BFF가
+  함께 착지했다. PinVi direct-create fail-close는 [PinVi #458](https://github.com/digitie/pinvi/pull/458)로
+  완료됐다. 남은 것은 `KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED=false`를 유지한
+  route 활성화 전 fresh restore/ACL/live gate다.
+- [~] **T-VN-M02 — origin 보존과 불변** (결정 4, 구현 병합). #1029의 `0227` provenance reader,
+  immutable claim/origin ACL과 named hard-purge fence, unit/integration 회귀가 정본이다. evidence를
+  남긴 상태에서의 purge 정책·backup/restore 실측 및 live acceptance가 남아 있다.
+- [~] **T-VN-M03 — curated 동시 생성** (결정 3, 구현 병합). #1029의 `0228` combined
+  Feature+curation writer가 SERIALIZABLE 원자성, exact conflict, `manual_curation` origin과
+  runtime/Dagster 권한 분리를 고정했다. import 행별 child-command와 격리 live acceptance를 남긴다.
+- [~] **T-VN-M04 — 범용 Feature 요청 큐** (결정 2, 구현 병합). #1029의 `0233` service submit/admin
+  approve·reject queue와 `manual_request` origin, OpenAPI/ACL/restore gate가 정본이다. 첫 consumer
+  PinVi #458은 병합됐지만 새 Map service spec re-vendor와 paired request→approval receipt는
+  `T-VN-41C`에서 완료한다.
 - [~] **T-VN-M05 — provider 발행 시 중복 판정** (결정 4 후단). 수동 Feature와 같은 실체를
   provider가 발행하면 dedup 후보로 올리고 **자동 병합하지 않는다.** admin이 병합/유지/수동본
   폐기를 고른다. 2026-08-21 사용자 선택은 paired cutover이며, ADR-097과

@@ -1,5 +1,17 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-22 — #922 후속 PR #1051 병합 및 task 정합성 대조
+
+T-VN-41S/#922 후속 계약·migration gate를 [PR #1051](https://github.com/digitie/kor-travel-map/pull/1051),
+merge `db319a4798229098d04e68e3ac64338183ad547f`로 병합했다. 원격 CI 8/8과 두 전문 적대
+리뷰의 P0/P1=0을 확인했으며, P2 메모는 raw DELETE/parent CASCADE, reverse multi-material
+delete deadlock, planner 관찰 및 migration lock 실측의 후속 운영 보강으로 남겼다.
+
+병합 직후 `tasks.md`·`tasks-done.md`·`resume.md`를 대조했다. #1029의 M01~M05 구현과
+PinVi #458을 완료 이력으로 기록하고, route 활성화·restore/purge·paired acceptance만
+부분완료로 유지했다. 완료된 T-VN-37D 상세 블록을 진행 백로그에서 제거했으며, T-VN-40의
+독립 잔여 task가 없음을 명시했다.
+
 ## 2026-08-22 — T-VN-H27/#819 OPNsense HAProxy 설정 완료
 
 운영자 확인으로 OPNsense HAProxy의 Map·Geo·PinVi 등 외부 노출 API backend에

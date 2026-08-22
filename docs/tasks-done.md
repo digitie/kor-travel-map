@@ -40,6 +40,26 @@
   반영했다. `openapi.service.json`/`openapi.json`/admin 타입을 재생성했고, PinVi
   cross-repo re-vendor와 paired acceptance는 `T-VN-41C`가 소유하므로 관련 receipt는
   재검증 전까지 `pending`으로 유지한다.
+  후속 orphan/DELETE 무결성 게이트는 [PR #1051](https://github.com/digitie/kor-travel-map/pull/1051),
+  merge `db319a4798229098d04e68e3ac64338183ad547f`로 병합했다(CI 8/8, 전문 적대 리뷰 P0/P1=0).
+
+## 2026-08-22 — T-VN-M01~M05 구현 병합 이관
+
+- [x] **T-VN-M01~M05 구현 — Map PR #1029 (`57c9d99a`)**
+
+  `0226_m01_manual_feature_create`부터 `0227` provenance, `0228` curation combined
+  writer, `0233` 범용 Feature 요청 큐, `0234`~`0235` 수동/provider dedup evidence·delivery까지
+  단일 migration head로 병합됐다. API·Admin BFF·service OpenAPI/generated types·ACL/restore
+  manifest·ORM/repository와 M01/M03/M04/M05 통합 회귀가 같은 PR에 포함됐다.
+
+  구현 게이트는 fresh migration graph, immutable claim/origin 및 hard-purge fence, M03
+  SERIALIZABLE 원자성/exact conflict, M04 submit→approve/reject command, M05 event/lease/ACK
+  계약으로 고정됐다. 관련 PinVi direct-create fail-close와 최초 consumer 준비는
+  [PinVi #458](https://github.com/digitie/pinvi/pull/458)에서 병합됐다.
+
+  아래 잔여는 구현 미완료가 아니라 운영 활성화·교차 저장소 재결박·격리 live acceptance다.
+  `tasks.md`의 M01~M05 부분완료 항목과 `T-VN-41C`가 route flag, restore/purge 실측, import
+  child-command, paired request→approval/reconciliation receipt를 각각 소유한다.
 
 ## 2026-08-21 — T-VN-40·C7 완료 잔재를 진행 백로그에서 이관
 
@@ -264,8 +284,9 @@
 
   API 계약과 DB/동시성 전문 검토자는 네 차례 검토 끝에 같은 exact checkpoint
   `2aa17c27d4f09701a9639ea0ea449abbfefc0be2`에 각각 P0~P3 0건 최종 GO를 선언했다. 설계와 완료
-  이관은 draft PR [#1012](https://github.com/digitie/kor-travel-map/pull/1012)이 소유하며, 다음 열린
-  실행 단위는 T-VN-M01 clean cutover 구현이다.
+  이관은 draft PR [#1012](https://github.com/digitie/kor-travel-map/pull/1012)이 소유했다.
+  구현 병합은 아래 T-VN-M01~M05 이관 엔트리가 소유하며, 활성화·paired acceptance 잔여는
+  진행 백로그의 부분완료 항목으로 추적한다.
 
 ## 2026-08-19 — T-VN-H46G buildx image commit provenance 완료
 
