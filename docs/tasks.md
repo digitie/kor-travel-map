@@ -489,10 +489,11 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 
 - [~] **T-FE-MOCK-FLAKE** — `e2e/admin-ops.spec.ts::admin/ops pages › /v1/ops/logs` 간헐 실패
 
-  System logs 표의 첫 columnheader `생성`이 15초 안에 보이지 않는다(`admin-ops.spec.ts:744`).
-  앞선 filter control 단언은 모두 통과하므로 표 mount 전에 header를 단언하는 순서 문제로
-  보인다. n150 5회 실행 중 2회 실패 — 부하가 높을 때 재현된다. mocked config가
-  `retries: process.env.CI ? 1 : 0`이라 **로컬은 재시도가 없어** 느린 렌더가 곧 실패가 된다.
+  **초기 관찰(2026-08-21)**: System logs 표의 첫 columnheader `생성`이 15초 안에
+  보이지 않았다(`admin-ops.spec.ts:744`, 당시 위치). 앞선 filter control 단언은 모두
+  통과하므로 표 mount 전에 header를 단언하는 순서 문제로 보였고, n150 5회 실행 중 2회
+  실패했다. 부하가 높을 때 재현됐으며 mocked config가 `retries: process.env.CI ? 1 : 0`이라
+  **로컬은 재시도가 없어** 느린 렌더가 곧 실패가 됐다.
 
   이 spec은 완료된 C7 browser evidence 이식이 건드리지 않았고 mocked checkpoint는 CI 잡이
   아니라 수동 게이트다 — 즉 **기존 flake**다. 표/행이 도착한 뒤 header를 단언하도록
