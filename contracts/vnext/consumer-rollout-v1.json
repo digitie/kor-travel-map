@@ -165,19 +165,13 @@
         "admin-detail": "yes"
       },
       "pinvi_snapshot_receipt": {
-        "state": "complete",
-        "map_commit": "81835cf9d31df61169bd522fc16437d51d90fc35",
-        "pinvi_commit": "5f1c0a0a5568c236e32e6f6bd4c14ba23191817b",
+        "state": "pending",
         "map_user_openapi_sha256": "489b05d3e62e3531233e3e7eb8c97f9ddf92aa1ecf1573b7557a5951e7f6a61b",
-        "map_service_openapi_sha256": "e1152a058e176f4f3aaeb4bb0965434f657601639786463f873ac82c6f3018eb",
-        "map_full_openapi_sha256": "697a08c475fc28ba730af1dd14da89998a3a56cafbfb7676bfb3fa4a0b9ef6fd",
+        "map_service_openapi_sha256": "99ba6c178bf55401d3e1bb638a01b96f66bbac38d604534aa126a70f4be53d3d",
+        "map_full_openapi_sha256": "7ae7fbc68eaa666fb9c22d4d6e4bc554339a0eb878dd05d14df090a5c173fae6",
+        "blocking_reason": "T-VN-40 service contract changed with the generic snapshot 410 declaration and corrected admission ceilings. Re-run the paired Map/PinVi service acceptance before restoring the complete receipt.",
         "pinvi_user_vendor_sha256": "489b05d3e62e3531233e3e7eb8c97f9ddf92aa1ecf1573b7557a5951e7f6a61b",
-        "pinvi_service_vendor_sha256": "e1152a058e176f4f3aaeb4bb0965434f657601639786463f873ac82c6f3018eb",
-        "verification": [
-          "PinVi user/service vendor bytes are exact",
-          "PinVi canonical curation importer has no legacy admin snapshot consumer",
-          "paired Map/PinVi n150 canonical snapshot API live acceptance passed"
-        ]
+        "pinvi_service_vendor_sha256": "e1152a058e176f4f3aaeb4bb0965434f657601639786463f873ac82c6f3018eb"
       }
     },
     "T-VN-41": {
@@ -196,9 +190,9 @@
       },
       "pinvi_snapshot_receipt": {
         "state": "pending",
-        "map_service_openapi_sha256": "e1152a058e176f4f3aaeb4bb0965434f657601639786463f873ac82c6f3018eb",
+        "map_service_openapi_sha256": "99ba6c178bf55401d3e1bb638a01b96f66bbac38d604534aa126a70f4be53d3d",
         "pinvi_service_vendor_sha256": "e1152a058e176f4f3aaeb4bb0965434f657601639786463f873ac82c6f3018eb",
-        "blocking_reason": "T-VN-M04 generic Feature 요청 queue가 service 계약을 바꿨다. PinVi exact vendor는 갱신했지만 기존 77821001/e8e0fec 후보 archive·image·Live UI 증거는 이전 service bytes만 검증했으므로 새 Map/PinVi source pair의 isolated acceptance 전까지 candidate_verified로 승격하지 않는다."
+        "blocking_reason": "T-VN-41S added the reachable generic snapshot 410 and corrected the admission ceilings. PinVi must re-vendor the new service bytes before this pending receipt can be promoted."
       }
     },
     "T-VN-39": {

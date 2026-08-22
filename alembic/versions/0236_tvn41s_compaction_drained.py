@@ -138,13 +138,40 @@ BEGIN
       USING ERRCODE = '55000';
   END IF;
 
-  IF NEW.compacted_at IS NULL THEN
-    IF NEW.orphaned_at IS DISTINCT FROM OLD.orphaned_at
-       AND pg_trigger_depth() >= 2 THEN
-      RETURN NEW;
-    END IF;
-    RAISE EXCEPTION 'snapshot material is append-only except compaction'
+  -- 배출 표시는 item이 모두 사라진 뒤에만 찍는다. 이 검사가 없으면
+  -- `SET compacted_at = ..., compaction_drained_at = ...` 한 문장이나
+  -- 이미 compacted된 행에 대한 직접 drained 표기가 partial index에서 빠지게 해
+  -- 남은 item을 영구히 놓친다. item INSERT fence가 material 행 잠금으로
+  -- 동시 삽입도 직렬화한다.
+  IF NEW.compaction_drained_at IS NOT NULL
+     AND OLD.compaction_drained_at IS NULL
+     AND EXISTS (
+       SELECT 1
+       FROM ops.poi_cache_target_snapshot_material_items AS item
+       WHERE item.material_id = NEW.material_id
+     ) THEN
+    RAISE EXCEPTION 'snapshot material cannot be marked drained while items remain'
       USING ERRCODE = '55000';
+  END IF;
+
+  IF NEW.compacted_at IS NULL THEN
+    IF NOT (
+      NEW.orphaned_at IS NOT DISTINCT FROM OLD.orphaned_at
+      AND to_jsonb(NEW) - 'compacted_at' - 'compaction_drained_at' - 'orphaned_at'
+        IS NOT DISTINCT FROM
+      to_jsonb(OLD) - 'compacted_at' - 'compaction_drained_at' - 'orphaned_at'
+      OR (
+        NEW.orphaned_at IS NOT NULL
+        AND OLD.orphaned_at IS NULL
+        AND pg_trigger_depth() >= 2
+        AND to_jsonb(NEW) - 'compacted_at' - 'compaction_drained_at' - 'orphaned_at'
+          IS NOT DISTINCT FROM
+        to_jsonb(OLD) - 'compacted_at' - 'compaction_drained_at' - 'orphaned_at'
+      )
+    ) THEN
+      RAISE EXCEPTION 'snapshot material is append-only except compaction'
+        USING ERRCODE = '55000';
+    END IF;
   END IF;
 
   -- **열을 열거하지 않는다.** `0231` fence는 이미 표시된 행을 첫 문장에서 통째로
@@ -187,10 +214,65 @@ END;
 $reject_snapshot_material_mutation$
 """
 
+_MATERIAL_ITEM_INSERT_FENCE_SQL = """
+CREATE OR REPLACE FUNCTION ops.reject_snapshot_material_item_insert() RETURNS trigger
+LANGUAGE plpgsql AS $reject_snapshot_material_item_insert$
+DECLARE
+  material_compacted_at timestamptz;
+  material_drained_at timestamptz;
+BEGIN
+  -- compaction UPDATE와 item INSERT가 엇갈리지 않게 부모 material 행을 FOR UPDATE로
+  -- 잠근다. (FOR KEY SHARE는 일반 UPDATE의 NO KEY UPDATE 잠금과 충돌하지 않는다.)
+  -- UPDATE가 먼저면 여기서 terminal 상태를 보고 거부하고, INSERT가 먼저면
+  -- compaction UPDATE가 잠금 해제 뒤 item 존재를 다시 보므로 drained 표기를 거부한다.
+  SELECT material.compacted_at, material.compaction_drained_at
+    INTO material_compacted_at, material_drained_at
+    FROM ops.poi_cache_target_snapshot_materials AS material
+   WHERE material.material_id = NEW.material_id
+   FOR UPDATE;
+
+  IF material_compacted_at IS NOT NULL OR material_drained_at IS NOT NULL THEN
+    RAISE EXCEPTION 'snapshot material items cannot be inserted after compaction'
+      USING ERRCODE = '55000';
+  END IF;
+
+  RETURN NEW;
+END;
+$reject_snapshot_material_item_insert$
+"""
+
+_MATERIAL_ITEM_DELETE_FENCE_SQL = """
+CREATE OR REPLACE FUNCTION ops.reject_live_snapshot_material_item_delete() RETURNS trigger
+LANGUAGE plpgsql AS $reject_live_snapshot_material_item_delete$
+DECLARE
+  material_compacted_at timestamptz;
+BEGIN
+  -- compaction이 부모를 표시한 뒤에만 item을 되찾게 한다. 부모 행을 같은
+  -- 잠금으로 직렬화해야 compaction UPDATE와 임의 DELETE가 서로의 이전 상태를
+  -- 보지 않는다. 실제 batch 크기와 material 순서는 repository의 ordered
+  -- SKIP LOCKED query가 보장한다. 이 trigger는 raw DELETE를 batch writer로
+  -- 오인시키지 않고, 표시 전 삭제만 DB에서 fail-close한다.
+  SELECT material.compacted_at
+    INTO material_compacted_at
+    FROM ops.poi_cache_target_snapshot_materials AS material
+   WHERE material.material_id = OLD.material_id
+   FOR UPDATE;
+
+  IF material_compacted_at IS NULL THEN
+    RAISE EXCEPTION 'live snapshot material items cannot be deleted before compaction'
+      USING ERRCODE = '55000';
+  END IF;
+
+  RETURN OLD;
+END;
+$reject_live_snapshot_material_item_delete$
+"""
+
 _RECEIPT_ORPHAN_GUARD_SQL = """
 CREATE OR REPLACE FUNCTION ops.reject_snapshot_receipt_for_orphaned_material() RETURNS trigger
 LANGUAGE plpgsql AS $reject_snapshot_receipt_for_orphaned_material$
 DECLARE
+  material_compacted_at timestamptz;
   material_orphaned_at timestamptz;
 BEGIN
   IF TG_OP = 'UPDATE' AND NEW.material_id IS DISTINCT FROM OLD.material_id THEN
@@ -198,14 +280,19 @@ BEGIN
       USING ERRCODE = '55000';
   END IF;
 
-  SELECT material.orphaned_at
-    INTO material_orphaned_at
+  SELECT material.compacted_at, material.orphaned_at
+    INTO material_compacted_at, material_orphaned_at
     FROM ops.poi_cache_target_snapshot_materials AS material
    WHERE material.material_id = NEW.material_id
    FOR SHARE;
 
   IF material_orphaned_at IS NOT NULL THEN
     RAISE EXCEPTION 'snapshot material is already orphaned'
+      USING ERRCODE = '55000';
+  END IF;
+
+  IF material_compacted_at IS NOT NULL THEN
+    RAISE EXCEPTION 'snapshot material is already compacted'
       USING ERRCODE = '55000';
   END IF;
 
@@ -273,12 +360,22 @@ def upgrade() -> None:
         drained = connection.exec_driver_sql(_BACKFILL_SQL).rowcount
         orphaned = connection.exec_driver_sql(_BACKFILL_ORPHANED_SQL).rowcount
     finally:
-        op.execute(
-            "ALTER TABLE ops.poi_cache_target_snapshot_materials "
-            f"ENABLE {'ALWAYS ' if before_mode == 'A' else ''}"
-            f"{'REPLICA ' if before_mode == 'R' else ''}"
-            "TRIGGER trg_poi_cache_target_snapshot_materials_compaction_only"
-        )
+        if before_mode == "D":
+            op.execute(
+                "ALTER TABLE ops.poi_cache_target_snapshot_materials "
+                "DISABLE TRIGGER trg_poi_cache_target_snapshot_materials_compaction_only"
+            )
+        else:
+            trigger_mode = {"A": "ALWAYS ", "R": "REPLICA ", "O": ""}.get(
+                before_mode
+            )
+            if trigger_mode is None:
+                raise RuntimeError(f"알 수 없는 material fence trigger mode: {before_mode!r}")
+            op.execute(
+                "ALTER TABLE ops.poi_cache_target_snapshot_materials "
+                f"ENABLE {trigger_mode}TRIGGER "
+                "trg_poi_cache_target_snapshot_materials_compaction_only"
+            )
 
     after = connection.exec_driver_sql(_CAPTURE_TRIGGER_MODE_SQL).scalar_one()
     after_mode = after.decode() if isinstance(after, bytes) else str(after)
@@ -297,6 +394,32 @@ def upgrade() -> None:
     op.execute(
         "ALTER FUNCTION ops.mark_snapshot_material_orphaned() "
         "OWNER TO ktm_feature_schema_owner"
+    )
+    op.execute(_MATERIAL_ITEM_INSERT_FENCE_SQL)
+    op.execute(
+        "ALTER FUNCTION ops.reject_snapshot_material_item_insert() "
+        "OWNER TO ktm_feature_schema_owner"
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_poi_cache_target_snapshot_material_items_no_compacted_insert
+            BEFORE INSERT ON ops.poi_cache_target_snapshot_material_items
+            FOR EACH ROW
+            EXECUTE FUNCTION ops.reject_snapshot_material_item_insert()
+        """
+    )
+    op.execute(_MATERIAL_ITEM_DELETE_FENCE_SQL)
+    op.execute(
+        "ALTER FUNCTION ops.reject_live_snapshot_material_item_delete() "
+        "OWNER TO ktm_feature_schema_owner"
+    )
+    op.execute(
+        """
+        CREATE TRIGGER trg_poi_cache_target_snapshot_material_items_compaction_only_delete
+            BEFORE DELETE ON ops.poi_cache_target_snapshot_material_items
+            FOR EACH ROW
+            EXECUTE FUNCTION ops.reject_live_snapshot_material_item_delete()
+        """
     )
     op.execute(
         """

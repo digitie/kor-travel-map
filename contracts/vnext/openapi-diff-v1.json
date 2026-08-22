@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "697a08c475fc28ba730af1dd14da89998a3a56cafbfb7676bfb3fa4a0b9ef6fd"
+      "sha256": "7ae7fbc68eaa666fb9c22d4d6e4bc554339a0eb878dd05d14df090a5c173fae6"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -13,10 +13,15 @@
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
-      "sha256": "e1152a058e176f4f3aaeb4bb0965434f657601639786463f873ac82c6f3018eb"
+      "sha256": "99ba6c178bf55401d3e1bb638a01b96f66bbac38d604534aa126a70f4be53d3d"
     }
   },
   "revisions": [
+    {
+      "date": "2026-08-22",
+      "task": "T-VN-41S",
+      "change": "generic cache-target snapshot GET이 실제 runtime 410 SNAPSHOT_MATERIAL_COMPACTED를 OpenAPI에 선언하고, snapshot admission 설명을 실제 상한 item 500,000/material 56 MiB로 정정했다. service/full spec과 admin 타입을 재생성했으며 PinVi paired service receipt는 re-vendor 전까지 pending이다."
+    },
     {
       "date": "2026-08-21",
       "task": "T-VN-M04",

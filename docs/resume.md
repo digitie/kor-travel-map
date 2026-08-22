@@ -7,12 +7,14 @@
 `tasks-done.md`로 이관했고 GitHub issue #819를 닫았다. 라우터의 effective config와 quiet
 WebSocket 관찰 로그는 이 세션에서 직접 읽지 못했으므로 완료 근거는 운영자 확인이다.
 
-## 2026-08-22 — #990 planner false-fail 종결 준비
+## 2026-08-22 — #990 planner false-fail 종결 (#1049 병합)
 
 H50 dedup EXPLAIN의 실제 수정은 [PR #1036](https://github.com/digitie/kor-travel-map/pull/1036)에서
 이미 병합됐다. relation별 semantic gate와 작은 `source_entities` dimension의 정상 Seq Scan
-예외가 비용 경계에서 인덱스 이름을 잘못 단언하지 않도록 고정한다. 이번 PR은 그 경계를 순수
-회귀 단언으로 남겨 문서 전용 변경이 같은 false-fail을 되살리지 못하게 하고 #990을 닫는다.
+예외가 비용 경계에서 인덱스 이름을 잘못 단언하지 않도록 고정한다. 후속 회귀 단언 PR
+[#1049](https://github.com/digitie/kor-travel-map/pull/1049)은 `5dee44a3`으로 병합됐고,
+문서 전용 변경이 같은 false-fail을 되살리지 않도록 작은 dimension Seq Scan 허용과 대량
+`features` Seq Scan 거부를 함께 고정했다.
 
 - planner helper 회귀 단언: 2 passed
 - 대상 `test_t212d_perf_explain.py` ruff: 통과
@@ -23,21 +25,27 @@ T-VN-41S 본체는 #922에서 완료했다. 현재 후속 계약·마이그레�
 #1051의 CI와 적대적 리뷰를 마무리한 뒤, 다음 백로그 작업인 `T-VN-41C`의
 final exact-pair·prod consumer enable을 진행한다.
 
-## 2026-08-22 — T-VN-41S / #922 완료, orphan GC backlog 상태화
+## 2026-08-22 — T-VN-41S / #922 후속 무결성 게이트 보강
 
-마지막으로 남아 있던 GC orphan 갈래를 닫았다. receipt가 마지막으로 삭제될 때
+마지막으로 남아 있던 GC orphan 갈래를 닫았고, 적대 DB 리뷰가 찾은 live item DELETE
+우회도 막았다. receipt가 마지막으로 삭제될 때
 DB trigger가 material의 `orphaned_at`을 단방향으로 기록하고, 새 receipt가 orphan material을
 되살리지 못하게 막는다. `_SELECT_EXPIRED_SNAPSHOT_GC_SYSTEM_SQL`과
 `_HAS_EXPIRED_SNAPSHOT_GC_BACKLOG_SQL`은 이제 receipt anti-join 대신 orphan partial index를
-사용한다. 완료 항목은 `docs/tasks-done.md`로 이관했다.
+사용한다. live material item은 `compacted_at` 이후에만 삭제할 수 있게 부모 row lock 기반
+trigger를 추가했고, 실제 batch 크기·순서는 repository의 ordered `SKIP LOCKED` 경로가
+보장한다. 완료 항목은 `docs/tasks-done.md`로
+이관했다.
 
-- `tests/integration/test_tvn41s_compaction_drained.py`: 7 passed
+- `tests/integration/test_tvn41s_compaction_drained.py`: 10 passed
+- `tests/integration/test_tvn41s_material_fences.py`: 5 passed
 - `tests/integration/test_cache_target_stream_repo.py`: 40 passed
 - `tests/integration/test_tvn41s_snapshot_material_explain.py`: 1 passed
 - migration metadata gate: 8 passed, snapshot unit/migration boundary: 44 passed
 
-다음 한 작업은 `T-VN-41C`에서 service spec의 도달 가능한 `410` 선언과 cross-repo
-re-vendor를 처리하는 것이다.
+다음 한 작업은 #1051 후속 PR의 CI/리뷰를 마친 뒤 `T-VN-41C`에서 이번에 갱신한 service spec을 PinVi에 re-vendor하고
+paired acceptance를 다시 실행해 pending receipt를 승격하는 것이다. Map 쪽 runtime
+410 선언과 OpenAPI/admin 타입 갱신은 이번 PR에서 닫았다.
 
 ## 2026-08-21 — T-VN-41S 잔여 셋 중 둘 처리, 하나는 이월 (task는 아직 열림)
 

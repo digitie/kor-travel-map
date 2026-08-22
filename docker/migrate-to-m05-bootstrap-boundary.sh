@@ -56,6 +56,7 @@ async def main() -> int:
         if revision not in {
             "0234_m05_manual_provider_dedup",
             "0235_m05_reconciliation_delivery",
+            "0236_tvn41s_compaction_drained",
         }:
             print("M05 relation marker requires an M05 revision", file=sys.stderr)
             return 2
