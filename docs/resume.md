@@ -1,5 +1,16 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-22 — #1055 문서 병합 및 code baseline 표현 고정
+
+문서 전용 [PR #1055](https://github.com/digitie/kor-travel-map/pull/1055)를 두 전문 적대 리뷰
+P0~P3 0건과 로컬 문서/redaction gate 확인 후 병합했다. squash merge는
+`d92bd44da5dc91721abb4e6b0c3d8c0d8e3d1a00`이며 migration head와 code baseline은 #1054의
+`fadc029c`로 변하지 않았다. `tasks.md`는 docs-only merge마다 stale해지는
+`origin/main` 표현 대신 migration/code baseline을 명시한다.
+
+PinVi service vendor 대조 결과는 별도 draft PR #465에서 진행 중이며, T-VN-40/T-VN-41
+receipt와 M01~M05·FINAL-REBUILD·live 운영 잔여는 계속 `pending`/미완료로 유지한다.
+
 ## 2026-08-22 — #1054 병합 및 다음 실행 단위 재정렬
 
 `fix/ops-dataset-rollup-contract`의 [PR #1054](https://github.com/digitie/kor-travel-map/pull/1054)를

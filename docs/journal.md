@@ -1,5 +1,16 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-22 — #1055 문서 병합 및 migration baseline 표현 고정
+
+문서 전용 [PR #1055](https://github.com/digitie/kor-travel-map/pull/1055)를 병합했다
+(squash `d92bd44da5dc91721abb4e6b0c3d8c0d8e3d1a00`). 두 전문 적대 리뷰에서 P0~P3는
+모두 0건이었고, 문서/redaction gate를 통과했다. 이 PR은 code/migration을 바꾸지 않으므로
+`0236_tvn41s_compaction_drained`와 #1054 code baseline `fadc029c`를 그대로 유지한다.
+
+`tasks.md`의 기준 문구를 docs-only merge 뒤에도 반복해서 stale되지 않도록
+`origin/main` 대신 migration/code baseline으로 바꿨다. PinVi service re-vendor는 draft
+PR #465에서 별도 진행 중이며 paired receipt는 아직 `pending`이다.
+
 ## 2026-08-22 — #1054 병합 및 backlog 기준 SHA 갱신
 
 `fix/ops-dataset-rollup-contract`의 [PR #1054](https://github.com/digitie/kor-travel-map/pull/1054)를
