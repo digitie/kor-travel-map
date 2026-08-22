@@ -521,7 +521,8 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
     완료한다. 동일 key의 병렬 `201`/`200`도 terminal payload·ETag가 같으면 한 durable receipt로 수렴한다.
     T-VN-41S로 Map service OpenAPI SHA가 바뀌어 PinVi exact vendor를 새 Map head에 다시 고정한다.
 
-    **함께 실을 것 — service spec `410` 선언(T-VN-41S에서 이월).** 조사 결과(2026-08-21):
+    **조사 기록(2026-08-21) — service spec `410` 선언(T-VN-41S에서 이월)과 당시 대응안.**
+    아래의 “아직/막는 것” 표현은 조사 당시 상태를 기록한 것이며, 현재 반영 상태는 마지막 문단을 따른다.
 
     - 바뀌는 산출물은 **셋**이다. `openapi.service.json`, `openapi.json`(전체 spec도 service
       route를 담는다), 그리고 그 둘에서 생성되는 admin frontend `src/api/types.ts`
@@ -534,24 +535,24 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
       full SHA로 checkout하므로 **미머지 Map 브랜치에서도 vendoring이 성립한다**(실제로 PinVi가
       Map main에 없는 `037e2469`를 핀하고 있다). Map을 먼저 올리면 `pinvi_service_vendor_sha256`에
       PinVi main이 갖고 있지 않은 해시를 적게 되어 계약이 거짓이 된다.
-    - **함께 고쳐야 할 것 — spec이 지금 거짓을 말한다.** `0229`~ 이후 코드가 강제하는 admission
+    - **당시 함께 고쳐야 할 것 — spec이 거짓을 말했다.** `0229`~ 이후 코드가 강제하는 admission
       상한은 `item 500,000 / material 56 MiB`인데, route docstring 3곳
-      (`routers/cache_target_streams.py`)과 거기서 생성된 두 spec은 아직
-      `1,000,000 / 512 MiB`라고 적는다. 누락이 아니라 **틀린 서술**이고, 소비자가 읽을 수 있는
-      유일한 문서다. 고치는 비용은 410 선언과 정확히 같으므로(같은 spec bytes) 반드시 함께 싣는다.
-    - **막는 것 셋.** 아래 (1)만 truthfulness 문제이고 (2)(3)은 spec bytes가 움직이는 순간
-      바로 red가 되는 hard gate다.
+      (`routers/cache_target_streams.py`)과 거기서 생성된 두 spec은 당시
+      `1,000,000 / 512 MiB`라고 적었다. 누락이 아니라 **틀린 서술**이었고, 소비자가 읽을 수 있는
+      유일한 문서였다. 이 문제는 #1051에서 `410` 선언과 함께 Map service/full spec 및 admin
+      타입을 재생성해 해소했다.
+    - **당시 막힘 셋(현재 반영 상태는 마지막 문단 참조).** 당시 (1)만 truthfulness 문제였고
+      (2)(3)은 spec bytes가 움직이는 순간 바로 red가 되는 hard gate였다.
       1. `contracts/vnext/tvn40-live-acceptance-v1.json`이 T-VN-40 receipt의
-      `map_commit`/`pinvi_commit`과 결박돼 있는데 `pending` 가드가 없다. receipt는 `complete`이고
-         `map_commit`의 spec 해시는 옛 값이라, spec을 바꾸면 그 주장이 거짓이 된다. 둘 중 하나를
-         골라야 한다 — (a) 새 pair로 n150 paired live acceptance를 재실행해 재봉인, (b) 교차 결박에
-         `state == "complete"` 가드를 두고 T-VN-40을 `pending`으로. (b)는 서명된 acceptance를
-         미검증으로 되돌리므로 사용자 결정이 필요하다.
-      2. `tests/unit/test_vnext_contract_artifacts.py`가 세 spec 파일 해시를 T-VN-40
-         deployment receipt와 대조한다 — spec이 움직이면 그 receipt를 함께 옮겨야 한다.
-      3. 같은 파일이 T-VN-41 receipt에 대해 `map_service_openapi_sha256ㆍ== 현재 tree 해시`이고
-         `== pinvi_service_vendor_sha256`임을 **`pending` 갈래에서도** 단언한다. 그래서 PinVi를
-         먼저 머지해야 그 등식이 참인 채로 Map을 올릴 수 있다.
+         `map_commit`/`pinvi_commit`과 결박돼 있는데 당시 `pending` 가드가 없었다. receipt는
+         `complete`이고 `map_commit`의 spec 해시는 옛 값이라, spec을 바꾸면 그 주장이 거짓이 됐다.
+         대응안은 (a) 새 pair로 n150 paired live acceptance를 재실행해 재봉인하거나 (b) 교차 결박에
+         `state == "complete"` 가드를 두고 T-VN-40을 `pending`으로 되돌리는 것이었다.
+      2. 당시 `tests/unit/test_vnext_contract_artifacts.py`가 세 spec 파일 해시를 T-VN-40
+         deployment receipt와 대조했으므로 spec 변경 시 receipt 갱신이 필요했다.
+      3. 당시 같은 파일이 T-VN-41 receipt의 `map_service_openapi_sha256`를 현재 tree 해시 및
+         `pinvi_service_vendor_sha256`와 **`pending` 갈래에서도** 등치시켰다. 그래서 PinVi를
+         먼저 머지해야 한다고 판단했다.
 
     active paired receipt는 `pending`으로 되돌렸으며, 기존 `77821001`/`e8e0fec` 후보 archive·image·Live UI
     증거는 이전 service bytes의 이력일 뿐이다. Map 쪽은 이번 PR에서 실제 runtime 410 선언과 상한 설명을
