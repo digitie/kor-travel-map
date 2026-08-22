@@ -1,5 +1,17 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-22 — #922 후속 PR #1051 병합 및 task 정합성 대조
+
+T-VN-41S/#922 후속 계약·migration gate를 [PR #1051](https://github.com/digitie/kor-travel-map/pull/1051),
+merge `db319a4798229098d04e68e3ac64338183ad547f`로 병합했다. 원격 CI 8/8과 두 전문 적대
+리뷰의 P0/P1=0을 확인했으며, P2 메모는 raw DELETE/parent CASCADE, reverse multi-material
+delete deadlock, planner 관찰 및 migration lock 실측의 후속 운영 보강으로 남겼다.
+
+병합 직후 `tasks.md`·`tasks-done.md`·`resume.md`를 대조했다. #1029의 M01~M05 구현과
+PinVi #458을 완료 이력으로 기록하고, route 활성화·restore/purge·paired acceptance만
+부분완료로 유지했다. 완료된 T-VN-37D 상세 블록을 진행 백로그에서 제거했으며, T-VN-40의
+독립 잔여 task가 없음을 명시했다.
+
 ## 2026-08-22 — T-VN-H27/#819 OPNsense HAProxy 설정 완료
 
 운영자 확인으로 OPNsense HAProxy의 Map·Geo·PinVi 등 외부 노출 API backend에
@@ -155,13 +167,14 @@ logs 스펙은 prod auth setup 401로 본 스펙 실행 전에 중단됐다. 이
 자격증명 확인과 live 재실행이 남아 있어 PR은 draft로 유지한다.
 
 ## 2026-08-21 (codex) — 완료된 T-VN-40·C7 잔재를 task archive로 정리
-## 2026-08-21 (codex) — 완료된 T-VN-40·C7 잔재를 task archive로 정리
 
 - `tasks.md`에 중복으로 남은 T-VN-40B/C·인수 ①~⑤와 완료된 C7 증거 task의 상태 서술을
   `tasks-done.md`의 정본 근거로 이관했다. 진행 백로그에는 `T-VN-39`, Lane M/41과
   `T-FE-MOCK-FLAKE`만 남긴다.
-- migration 정본도 main `0232`와 draft #1029의 M01~M05 직렬 `0226`~`0235`를 명시해,
-  완료된 T-VN-40 revision을 활성 migration 계획처럼 읽지 않게 했다.
+- migration 정본도 당시 main `0232`와 draft #1029의 M01~M05 직렬 `0226`~`0235`를 명시해,
+  완료된 T-VN-40 revision을 활성 migration 계획처럼 읽지 않게 했다. 이후 #1029/#1051
+  병합으로 현재 정본은 `0236_tvn41s_compaction_drained`이며, 현행 표기는
+  `tasks.md` 상단 규율과 최신 resume 엔트리가 소유한다.
 ## 2026-08-21 — build 예산 vs 상한 결정을 닫고, 그 옆의 도달 가능한 장애를 고쳤다
 
 `_SNAPSHOT_ITEM_LIMIT = 1_000_000`과 `_SNAPSHOT_BUILD_TIMEOUT_SECONDS = 300`이 같은 사실을
