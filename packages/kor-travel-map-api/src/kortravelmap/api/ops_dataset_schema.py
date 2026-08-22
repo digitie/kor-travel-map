@@ -206,9 +206,13 @@ class OpsDatasetGridRow(BaseModel):
     무경고로 사라진다 — 실패 중인 operation이 형제에 가려 보이지 않는다.
 
     ``operation_key``가 null인 행은 **결박할 refresh membership이 없는 catalog 행**이다.
-    그 행에는 실행 identity가 아예 없으며, 운영자에게는 catalog 존재·orphan 사유·issue를
-    보이기 위해 남긴다. 개수는 DB마다 다르다 — ``0089_tvn33_expand_seed``가 legacy pair를
-    harvest하므로 개발/프로덕션 DB가 seed-only DB보다 많다.
+    exact membership 실행 identity는 없지만, orphan/policy-only placeholder에는 같은
+    scope의 실행을 ``latest_execution``/``active_execution`` scope rollup으로 붙일 수
+    있다. 이때 row의 null은 embedded execution의 identity까지 null이라는 뜻이 아니다 —
+    embedded execution 자체의 ``operation_key``는 항상 non-null이다. 운영자에게 catalog
+    존재·orphan 사유·issue와 scope 실행 현황을 함께 보이기 위해 남긴다. 개수는 DB마다
+    다르다 — ``0089_tvn33_expand_seed``가 legacy pair를 harvest하므로 개발/프로덕션 DB가
+    seed-only DB보다 많다.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -220,8 +224,10 @@ class OpsDatasetGridRow(BaseModel):
     sync_scope: str
     operation_key: str | None = Field(
         description=(
-            "이 행이 가리키는 실행 operation. null이면 실행 가능한 refresh "
-            "operation이 없는 catalog 전용 행이다."
+            "이 행이 가리키는 exact membership operation. null이면 결박할 refresh "
+            "membership가 없는 catalog 전용 행이다. 이 경우에도 latest_execution/"
+            "active_execution에는 같은 scope의 rollup이 들어갈 수 있으며, embedded "
+            "execution 자체 operation_key는 null이 아니다."
         )
     )
     status: str
