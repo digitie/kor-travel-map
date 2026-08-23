@@ -730,6 +730,35 @@ def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None
     assert 'result["summary_run_ids"] = list(summary_run_ids)' in fixture
 
 
+def test_provider_fixture_owns_exact_primary_source_lineage() -> None:
+    """provider procedure 뒤 primary link와 source-head cleanup을 함께 검증한다."""
+
+    fixture = _FIXTURE.read_text()
+    seed = fixture[
+        fixture.index("async def _seed(") : fixture.index(
+            "async def _cleanup("
+        )
+    ]
+    cleanup = fixture[
+        fixture.index("async def _cleanup(") : fixture.index(
+            "class _ApiOwnedInspection("
+        )
+    ]
+
+    assert "from kortravelmap.dto import SourceLink, SourceRecord, SourceRole" in fixture
+    assert "await feature_repo.upsert_source_link(" in seed
+    assert "source_role=SourceRole.PRIMARY" in seed
+    assert 'match_method="natural_key"' in seed
+    assert "confidence=100" in seed
+    assert "async def _assert_owned_source_links(" in fixture
+    assert "source_entity_type" in fixture
+    assert "head.current_source_record_key AS source_record_key" in fixture
+    assert "owned fixture primary source lineage가 다릅니다" in fixture
+    assert '"provider_sync.source_links.feature_id"] = len(present)' in fixture
+    assert "owned fixture source link cleanup이 완결되지 않아 dataset 삭제를 중단합니다" in fixture
+    assert "source_links_remaining" in cleanup
+
+
 def test_browser_lane_uses_direct_typed_state_commands_and_bff() -> None:
     spec = _SPEC.read_text()
     assert '"/v1/admin/features"' in spec

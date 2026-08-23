@@ -124,8 +124,17 @@ if [ "$bootstrap_phase" = "legacy" ]; then
       case "$m01_role_marker" in
         f) ;;
         t)
-          m01_revision="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc \
-            'SELECT version_num FROM public.alembic_version')"
+          # Role은 cluster-wide라서 다른 DB의 M01 role이 이미 존재할 수 있다.
+          # fresh DB에는 아직 ``public.alembic_version`` 자체가 없으므로, 그
+          # 경우에는 revision을 읽지 않고 legacy bootstrap을 계속한다. 없는
+          # relation을 직접 참조하면 psql이 role 변경 전에 종료된다.
+          if [ "$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc \
+            "SELECT to_regclass('public.alembic_version') IS NOT NULL")" = "t" ]; then
+            m01_revision="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc \
+              'SELECT version_num FROM public.alembic_version')"
+          else
+            m01_revision=""
+          fi
           case "$m01_revision" in
             0225_tvn40c_physical_removal)
               bootstrap_phase="m01"

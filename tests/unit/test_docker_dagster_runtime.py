@@ -582,6 +582,11 @@ def test_tvn_m01_role_phase_runs_only_after_legacy_0225_boundary() -> None:
     # 이 분기를 잘못 쓰면 fresh DB bootstrap이 partial marker로 중단된다.
     assert 'true\\|true) m01_repair_after_legacy=true' in phase_script
     assert 'false\\|false)' in phase_script
+    # PostgreSQL role catalog는 cluster-wide라 fresh DB에서도 M01 role marker가
+    # 이미 존재할 수 있다. 이때 ``public.alembic_version``이 없는 상태를
+    # revision 조회로 처리하면 role bootstrap이 시작 전에 종료된다.
+    assert "to_regclass('public.alembic_version') IS NOT NULL" in phase_script
+    assert 'm01_revision=""' in phase_script
     assert "bootstrap DSN did not accept connections within 30 seconds" in phase_script
     assert "until psql \"$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN\" -Atqc 'SELECT 1'" in phase_script
     assert 'm01_repair_after_legacy=true' in phase_script

@@ -28,7 +28,7 @@ from kortravelmap.core.ids import (
     make_payload_hash,
     make_source_record_key,
 )
-from kortravelmap.dto import SourceRecord
+from kortravelmap.dto import SourceLink, SourceRecord, SourceRole
 from kortravelmap.dto._time import kst_now
 from kortravelmap.dto.price import PriceValue
 from kortravelmap.dto.weather import WeatherValue
@@ -370,6 +370,100 @@ async def _assert_owned_or_absent(
     return present
 
 
+async def _assert_owned_source_links(
+    session: AsyncSession,
+    run_id: str,
+    feature_ids: tuple[str, str],
+    present: set[str],
+    *,
+    lock: bool = False,
+) -> None:
+    """fixture Feature의 primary source lineage를 exact fingerprint로 감사한다.
+
+    ``create_feature_with_initial_state``는 Feature/state만 만들고
+    ``provider_sync.source_links``는 만들지 않는다. 따라서 provider ingestion과
+    같은 transaction에서 별도로 primary link를 만든 뒤, source entity head가
+    fixture record를 가리키는지까지 확인해야 API detail/provider filter가 보는
+    계보와 실제 fixture 소유권이 일치한다.
+    """
+
+    expected: dict[str, dict[str, object]] = {}
+    for feature_id, kind in zip(feature_ids, ("weather", "price"), strict=True):
+        if feature_id not in present:
+            continue
+        expected[feature_id] = {
+            "provider": _E2E_PROVIDER,
+            "dataset_key": _dataset_key(run_id, kind),
+            "source_entity_type": f"{kind}_response",
+            "source_entity_id": f"run:{run_id}:{kind}",
+            "source_record_key": _response_record(
+                run_id=run_id,
+                kind=kind,
+                fetched_at=kst_now(),
+            ).source_record_key,
+            "source_role": SourceRole.PRIMARY.value,
+            "match_method": "natural_key",
+            "confidence": 100,
+        }
+    lock_clause = " FOR UPDATE OF link" if lock else ""
+    rows = (
+        await session.execute(
+            text(
+                """
+                SELECT
+                  link.feature_id,
+                  dataset.provider,
+                  dataset.dataset_key,
+                  entity.source_entity_type,
+                  entity.source_entity_id,
+                  head.current_source_record_key AS source_record_key,
+                  link.source_role,
+                  link.match_method,
+                  link.confidence
+                FROM provider_sync.source_links AS link
+                JOIN provider_sync.source_entities AS entity
+                  ON entity.source_entity_key = link.source_entity_key
+                JOIN provider_sync.provider_datasets AS dataset
+                  ON dataset.provider_dataset_id = entity.provider_dataset_id
+                JOIN provider_sync.source_entity_heads AS head
+                  ON head.source_entity_key = entity.source_entity_key
+                WHERE link.feature_id = ANY(CAST(:feature_ids AS text[]))
+                ORDER BY link.feature_id
+                """
+                + lock_clause
+            ),
+            {"feature_ids": list(feature_ids)},
+        )
+    ).mappings()
+    row_list = list(rows)
+    if len(row_list) != len(expected):
+        raise RuntimeError(
+            "owned fixture primary source lineage cardinality가 다릅니다: "
+            f"expected={len(expected)}, observed={len(row_list)}"
+        )
+    observed = {
+        str(row["feature_id"]): {
+            key: row[key]
+            for key in (
+                "provider",
+                "dataset_key",
+                "source_entity_type",
+                "source_entity_id",
+                "source_record_key",
+                "source_role",
+                "match_method",
+                "confidence",
+            )
+        }
+        for row in row_list
+    }
+    if observed != expected:
+        raise RuntimeError(
+            "owned fixture primary source lineage가 다릅니다: "
+            f"expected={expected!r}, observed={observed!r}"
+        )
+
+
 def _quote_identifier(value: str) -> str:
     return '"' + value.replace('"', '""') + '"'
 
@@ -542,6 +636,13 @@ async def _assert_owned_state(
     counts = await _counts(session, feature_ids)
     if counts["features"] != len(present):
         raise RuntimeError("owned fixture cardinality와 fingerprint가 다릅니다")
+    await _assert_owned_source_links(
+        session,
+        run_id,
+        feature_ids,
+        present,
+        lock=lock,
+    )
     await _assert_owned_values(session, run_id, feature_ids, present, lock=lock)
     foreign_keys = await _foreign_key_reference_counts(session, feature_ids)
     expected_references: dict[str, int] = {}
@@ -549,6 +650,10 @@ async def _assert_owned_state(
         # feature INSERT trigger가 canonical alias를 함께 만든다. alias는 direct
         # feature_id FK이므로 fixture cleanup의 cascade evidence에 포함한다.
         expected_references["feature.feature_aliases.feature_id"] = len(present)
+        # provider procedure는 source evidence를 잠그지만 source link를 만들지
+        # 않는다. fixture가 ingestion과 같은 primary lineage를 별도로 만들었는지
+        # 확인하고, Feature CASCADE 뒤에는 이 reference도 0이어야 한다.
+        expected_references["provider_sync.source_links.feature_id"] = len(present)
     if feature_ids[0] in present:
         expected_references["feature.feature_weather_values.feature_id"] = 1
         expected_references["feature.current_weather_summary.feature_id"] = 1
@@ -684,6 +789,23 @@ async def _seed(
             or not bool(row["o_inserted"])
         ):
             raise RuntimeError("provider fixture Feature procedure가 신규 행을 만들지 않았습니다")
+        # ``create_feature_with_initial_state`` deliberately does not mutate
+        # provider_sync.source_links.  Mirror ``feature_repo.load_bundle`` here:
+        # after the Feature FK exists, create the canonical primary lineage in
+        # the same transaction and fail closed if it was unexpectedly an update.
+        link_inserted = await feature_repo.upsert_source_link(
+            session,
+            SourceLink(
+                feature_id=feature_id,
+                source_record_key=source_record_key,
+                source_role=SourceRole.PRIMARY,
+                match_method="natural_key",
+                confidence=100,
+                created_at=record.fetched_at,
+            ),
+        )
+        if not link_inserted:
+            raise RuntimeError("provider fixture primary source link가 신규 행이 아닙니다")
 
     weather_id, price_id = feature_ids
     await create_provider_feature(
@@ -784,6 +906,31 @@ async def _delete_owned_datasets(session: AsyncSession, run_id: str) -> None:
 
     dataset_keys = [_dataset_key(run_id, kind) for kind in ("weather", "price")]
     params = {"provider": _E2E_PROVIDER, "dataset_keys": dataset_keys}
+    source_links_remaining = int(
+        (
+            await session.execute(
+                text(
+                    """
+                    SELECT count(*)
+                    FROM provider_sync.source_links AS link
+                    JOIN provider_sync.source_entities AS entity
+                      ON entity.source_entity_key = link.source_entity_key
+                    JOIN provider_sync.provider_datasets AS dataset
+                      ON dataset.provider_dataset_id = entity.provider_dataset_id
+                    WHERE dataset.provider = :provider
+                      AND dataset.dataset_key = ANY(CAST(:dataset_keys AS text[]))
+                    """
+                ),
+                params,
+            )
+        )
+        .scalars()
+        .one()
+    )
+    if source_links_remaining:
+        raise RuntimeError(
+            "owned fixture source link cleanup이 완결되지 않아 dataset 삭제를 중단합니다"
+        )
     # 0091의 entity-head 완결성 trigger 때문에 head → record → entity 순서가
     # 필수다. dataset은 모든 raw 계보와 policy가 사라진 뒤에만 지운다.
     for statement in (
