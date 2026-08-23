@@ -688,6 +688,7 @@ async def test_0202_rejects_membership_option_and_extra_edge_drift(
 
 async def test_0200_and_0202_accept_preserved_future_phase_memberships(
     gate_alembic_config: Config,
+    tvn_m01_m05_role_graph: None,
 ) -> None:
     """DB 재생성 뒤 남은 M01/M05 role edge는 base graph에서만 허용한다."""
 
@@ -829,6 +830,7 @@ async def test_0200_and_0202_accept_preserved_future_phase_memberships(
 async def test_0200_rejects_unlisted_application_role_edge(
     gate_alembic_config: Config,
     unknown_role_is_granted: bool,
+    tvn_m01_m05_role_graph: None,
 ) -> None:
     """future-role allowlist가 양방향의 미등록 application role을 숨기지 않아야 한다."""
 
