@@ -236,10 +236,36 @@ BEGIN
             FROM pg_catalog.pg_auth_members AS membership
             JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid
             JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
-            WHERE granted.rolname LIKE 'ktm_feature_%'
+            WHERE (
+                  granted.rolname LIKE 'ktm_feature_%'
                OR granted.rolname LIKE 'ktm_curation_%'
                OR member.rolname LIKE 'ktm_feature_%'
                OR member.rolname LIKE 'ktm_curation_%'
+            )
+              AND granted.rolname NOT IN (
+                  'ktm_manual_feature_procedure_owner',
+                  'ktm_manual_feature_admin_executor',
+                  'ktm_feature_create_provider_executor',
+                  'ktm_feature_request_procedure_owner',
+                  'ktm_feature_request_service_executor',
+                  'ktm_feature_request_admin_executor',
+                  'ktm_manual_provider_dedup_procedure_owner',
+                  'ktm_manual_provider_dedup_detector_executor',
+                  'ktm_manual_provider_dedup_admin_executor',
+                  'ktm_feature_reference_reconciliation_service_executor'
+              )
+              AND member.rolname NOT IN (
+                  'ktm_manual_feature_procedure_owner',
+                  'ktm_manual_feature_admin_executor',
+                  'ktm_feature_create_provider_executor',
+                  'ktm_feature_request_procedure_owner',
+                  'ktm_feature_request_service_executor',
+                  'ktm_feature_request_admin_executor',
+                  'ktm_manual_provider_dedup_procedure_owner',
+                  'ktm_manual_provider_dedup_detector_executor',
+                  'ktm_manual_provider_dedup_admin_executor',
+                  'ktm_feature_reference_reconciliation_service_executor'
+              )
         )
         (SELECT * FROM expected EXCEPT SELECT * FROM actual)
         UNION ALL

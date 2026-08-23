@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -325,6 +326,37 @@ def test_active_migrations_share_bootstrap_exact_role_contract() -> None:
     ):
         assert token in baseline_contract
         assert token in bootstrap
+
+    # PostgreSQL roles are cluster-wide.  After a database recreation, M01~M05
+    # memberships can remain while the fresh database is still at the frozen
+    # base graph.  The base assertion must ignore only this known future-phase
+    # set; any other application edge must continue to fail closed.
+    future_phase_roles = (
+        "ktm_manual_feature_procedure_owner",
+        "ktm_manual_feature_admin_executor",
+        "ktm_feature_create_provider_executor",
+        "ktm_feature_request_procedure_owner",
+        "ktm_feature_request_service_executor",
+        "ktm_feature_request_admin_executor",
+        "ktm_manual_provider_dedup_procedure_owner",
+        "ktm_manual_provider_dedup_detector_executor",
+        "ktm_manual_provider_dedup_admin_executor",
+        "ktm_feature_reference_reconciliation_service_executor",
+    )
+    for role in future_phase_roles:
+        assert f"'{role}'" in baseline_contract
+        assert f"'{role}'" in bootstrap
+    assert "AND granted.rolname NOT IN (" in baseline_contract
+    assert "AND member.rolname NOT IN (" in baseline_contract
+
+    def first_allowlist(source: str) -> tuple[str, ...]:
+        block = source.split("AND granted.rolname NOT IN (", 1)[1].split(
+            "AND member.rolname NOT IN (", 1
+        )[0]
+        return tuple(re.findall(r"'([^']+)'", block))
+
+    assert first_allowlist(baseline_contract) == future_phase_roles
+    assert first_allowlist(bootstrap) == future_phase_roles
 
 
 def test_legacy_archive_has_exact_109_file_digest() -> None:

@@ -661,3 +661,100 @@ async def test_0202_rejects_membership_option_and_extra_edge_drift(
             )
         finally:
             await _admin_execute(admin_dsn, restore)
+
+
+async def test_0200_and_0202_accept_preserved_future_phase_memberships(
+    gate_alembic_config: Config,
+) -> None:
+    """DB 재생성 뒤 남은 M01/M05 role edge는 base graph에서만 허용한다."""
+
+    from tests.integration._tvn34_migration_bootstrap import (
+        alembic_schema_owner_role,
+        bootstrapped_migrator_dsn,
+    )
+
+    cfg = gate_alembic_config
+    admin_dsn = cfg.get_main_option("sqlalchemy.url")
+    assert admin_dsn is not None
+    cfg.set_main_option("sqlalchemy.url", await bootstrapped_migrator_dsn(admin_dsn))
+
+    await _admin_execute(
+        admin_dsn,
+        """
+        DO $future_roles$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_catalog.pg_roles
+                WHERE rolname = 'ktm_manual_feature_procedure_owner'
+            ) THEN
+                CREATE ROLE ktm_manual_feature_procedure_owner NOLOGIN NOINHERIT;
+            END IF;
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_catalog.pg_roles
+                WHERE rolname = 'ktm_feature_create_provider_executor'
+            ) THEN
+                CREATE ROLE ktm_feature_create_provider_executor NOLOGIN NOINHERIT;
+            END IF;
+        END
+        $future_roles$;
+        GRANT ktm_manual_feature_procedure_owner TO ktm_feature_schema_owner
+            WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+        GRANT ktm_feature_create_provider_executor TO ktm_feature_dagster_runtime
+            WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+        """,
+    )
+    try:
+        with alembic_schema_owner_role():
+            await asyncio.to_thread(command.upgrade, cfg, "0200_schema_baseline")
+        with alembic_schema_owner_role():
+            await asyncio.to_thread(
+                command.upgrade,
+                cfg,
+                "0202_tvn40_curation_receipts",
+            )
+    finally:
+        await _admin_execute(
+            admin_dsn,
+            """
+            REVOKE ktm_manual_feature_procedure_owner FROM ktm_feature_schema_owner;
+            REVOKE ktm_feature_create_provider_executor FROM ktm_feature_dagster_runtime;
+            """,
+        )
+
+
+async def test_0200_rejects_unlisted_application_role_edge(
+    gate_alembic_config: Config,
+) -> None:
+    """future-role allowlist가 미등록 application role까지 숨기지 않아야 한다."""
+
+    from tests.integration._tvn34_migration_bootstrap import (
+        alembic_schema_owner_role,
+        bootstrapped_migrator_dsn,
+    )
+
+    cfg = gate_alembic_config
+    admin_dsn = cfg.get_main_option("sqlalchemy.url")
+    assert admin_dsn is not None
+    cfg.set_main_option("sqlalchemy.url", await bootstrapped_migrator_dsn(admin_dsn))
+
+    unknown_role = "ktm_feature_unlisted_role_contract_test"
+    await _admin_execute(
+        admin_dsn,
+        f"DROP ROLE IF EXISTS {unknown_role}; CREATE ROLE {unknown_role} NOLOGIN NOINHERIT; "
+        f"GRANT {unknown_role} TO ktm_feature_api_runtime "
+        "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;",
+    )
+    try:
+        with (
+            alembic_schema_owner_role(),
+            pytest.raises(
+                DBAPIError,
+                match="application role membership graph is not exact",
+            ),
+        ):
+            await asyncio.to_thread(command.upgrade, cfg, "0200_schema_baseline")
+    finally:
+        await _admin_execute(
+            admin_dsn,
+            f"REVOKE {unknown_role} FROM ktm_feature_api_runtime; DROP ROLE {unknown_role};",
+        )
