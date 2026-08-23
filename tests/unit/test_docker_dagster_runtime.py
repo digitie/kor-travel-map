@@ -587,6 +587,9 @@ def test_tvn_m01_role_phase_runs_only_after_legacy_0225_boundary() -> None:
     # revision 조회로 처리하면 role bootstrap이 시작 전에 종료된다.
     assert "to_regclass('public.alembic_version') IS NOT NULL" in phase_script
     assert 'm01_revision=""' in phase_script
+    assert "M01 version marker is absent after application relations" in phase_script
+    assert "M01 application relation marker is invalid" in phase_script
+    assert "M01 version table marker is invalid" in phase_script
     assert "bootstrap DSN did not accept connections within 30 seconds" in phase_script
     assert "until psql \"$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN\" -Atqc 'SELECT 1'" in phase_script
     assert 'm01_repair_after_legacy=true' in phase_script

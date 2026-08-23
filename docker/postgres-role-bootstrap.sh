@@ -127,14 +127,46 @@ if [ "$bootstrap_phase" = "legacy" ]; then
           # Role은 cluster-wide라서 다른 DB의 M01 role이 이미 존재할 수 있다.
           # fresh DB에는 아직 ``public.alembic_version`` 자체가 없으므로, 그
           # 경우에는 revision을 읽지 않고 legacy bootstrap을 계속한다. 없는
-          # relation을 직접 참조하면 psql이 role 변경 전에 종료된다.
-          if [ "$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc \
-            "SELECT to_regclass('public.alembic_version') IS NOT NULL")" = "t" ]; then
+          # relation을 직접 참조하면 psql이 role 변경 전에 종료된다. catalog
+          # probe 자체가 실패하면 빈 revision으로 삼지 않고 set -e로 중단한다.
+          m01_version_table_marker="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc \
+            "SELECT to_regclass('public.alembic_version') IS NOT NULL")"
+          case "$m01_version_table_marker" in
+            t)
             m01_revision="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc \
               'SELECT version_num FROM public.alembic_version')"
-          else
-            m01_revision=""
-          fi
+            ;;
+            f)
+              # version table이 없는데 application relation이 남아 있으면
+              # fresh DB가 아닌 partial/손상 상태다. cluster-wide role residue를
+              # 근거로 ownership sweep을 시작하지 않고 fail-closed한다.
+              m01_application_relation_marker="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc "
+                SELECT EXISTS (
+                  SELECT 1
+                  FROM pg_catalog.pg_class AS relation
+                  JOIN pg_catalog.pg_namespace AS namespace
+                    ON namespace.oid = relation.relnamespace
+                  WHERE namespace.nspname IN ('feature', 'provider_sync', 'ops')
+                    AND relation.relkind IN ('r', 'p', 'v', 'm', 'f', 'S')
+                )
+              ")"
+              case "$m01_application_relation_marker" in
+                f) m01_revision="" ;;
+                t)
+                  echo "M01 version marker is absent after application relations" >&2
+                  exit 1
+                  ;;
+                *)
+                  echo "M01 application relation marker is invalid" >&2
+                  exit 1
+                  ;;
+              esac
+              ;;
+            *)
+              echo "M01 version table marker is invalid" >&2
+              exit 1
+              ;;
+          esac
           case "$m01_revision" in
             0225_tvn40c_physical_removal)
               bootstrap_phase="m01"
