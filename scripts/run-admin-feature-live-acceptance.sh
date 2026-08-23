@@ -114,6 +114,13 @@ validate_runtime() {
   require_env NEXT_PUBLIC_KOR_TRAVEL_MAP_API
   require_env E2E_DAGSTER_URL
   require_env E2E_ADMIN_PASSWORD
+  # API runtime credentials remain read-only. The standalone root-owned helper
+  # receives this separate DSN only through the supervisor's process env and
+  # assumes ktm_feature_schema_owner inside its short-lived container.
+  require_env E2E_ADMIN_FEATURE_FIXTURE_PG_DSN
+  [[ "$E2E_ADMIN_FEATURE_FIXTURE_PG_DSN" == postgresql://* ||
+    "$E2E_ADMIN_FEATURE_FIXTURE_PG_DSN" == postgresql+asyncpg://* ]] ||
+    die "fixture DSN scheme is invalid"
   require_env E2E_C7_EXPECTED_GIT_COMMIT
   require_env E2E_C7_PINNED_RUNTIME_MANIFEST
   require_env E2E_C7_REBUILD_JOURNAL

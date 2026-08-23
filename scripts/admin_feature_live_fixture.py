@@ -32,8 +32,9 @@ from kortravelmap.dto import SourceRecord
 from kortravelmap.dto._time import kst_now
 from kortravelmap.dto.price import PriceValue
 from kortravelmap.dto.weather import WeatherValue
-from kortravelmap.infra import price_repo, weather_repo
+from kortravelmap.infra import feature_repo, price_repo, weather_repo
 from kortravelmap.infra.db import make_async_engine
+from kortravelmap.infra.feature_identity import candidate_feature_uuid
 from kortravelmap.infra.provider_refresh_policy_repo import (
     get_provider_refresh_policy,
     upsert_provider_refresh_policy,
@@ -569,45 +570,142 @@ async def _seed(
     if before != {"features": 0, "weather_values": 0, "price_values": 0}:
         raise RuntimeError("owned fixture ID가 이미 존재합니다; recovery를 먼저 실행하세요")
 
-    weather_id, price_id = feature_ids
-    await session.execute(
-        text(
-            """
-            INSERT INTO feature.features (
-                feature_id, kind, name, category, coord, coord_precision_digits,
-                lifecycle_state, publication_state, quality_state,
-                marker_icon, marker_color,
-                updated_at
-            ) VALUES
-              (
-                :weather_id, 'weather', :weather_name, '00000000',
-                x_extension.ST_SetSRID(
-                  x_extension.ST_MakePoint(:weather_lon, :lat), 4326
-                ),
-                6, 'active', 'suppressed', 'valid', 'weather', 'P-03', now()
-              ),
-              (
-                :price_id, 'price', :price_name, '00000000',
-                x_extension.ST_SetSRID(
-                  x_extension.ST_MakePoint(:price_lon, :lat), 4326
-                ),
-                6, 'active', 'suppressed', 'valid', 'fuel', 'P-04', now()
-              )
-            """
-        ),
-        {
-            "weather_id": weather_id,
-            "weather_name": f"E2E suppressed weather {run_id}",
-            "weather_lon": _LON + 0.002,
-            "price_id": price_id,
-            "price_name": f"E2E suppressed price {run_id}",
-            "price_lon": _LON - 0.002,
-            "lat": _LAT,
-        },
-    )
     now = kst_now().replace(microsecond=0)
     weather_dataset_id = await _ensure_dataset(session, run_id=run_id, kind="weather")
     price_dataset_id = await _ensure_dataset(session, run_id=run_id, kind="price")
+    weather_record = _response_record(
+        run_id=run_id,
+        kind="weather",
+        fetched_at=now,
+    )
+    price_record = _response_record(
+        run_id=run_id,
+        kind="price",
+        fetched_at=now,
+    )
+
+    async def create_provider_feature(
+        *,
+        feature_id: str,
+        kind: str,
+        dataset_id: int,
+        record: SourceRecord,
+        name: str,
+        lon: float,
+        marker_icon: str,
+        marker_color: str,
+    ) -> None:
+        # The API runtime is deliberately read-only after M01.  Register the
+        # fixture's immutable source evidence first, then let the same provider
+        # state procedure used by ingestion create the core Feature row.
+        await feature_repo.upsert_source_record(session, record)
+        membership = (
+            await session.execute(
+                text(
+                    """
+                    SELECT entity.source_entity_key,
+                           head.current_source_record_key
+                    FROM provider_sync.provider_datasets AS dataset
+                    JOIN provider_sync.source_entities AS entity
+                      ON entity.provider_dataset_id = dataset.provider_dataset_id
+                    JOIN provider_sync.source_entity_heads AS head
+                      ON head.source_entity_key = entity.source_entity_key
+                    WHERE dataset.provider_dataset_id = :dataset_id
+                      AND entity.provider = :provider
+                      AND entity.dataset_key = :dataset_key
+                      AND entity.source_entity_type = :source_entity_type
+                      AND entity.source_entity_id = :source_entity_id
+                    """
+                ),
+                {
+                    "dataset_id": dataset_id,
+                    "provider": record.provider,
+                    "dataset_key": record.dataset_key,
+                    "source_entity_type": record.source_entity_type,
+                    "source_entity_id": record.source_entity_id,
+                },
+            )
+        ).mappings().one()
+        source_entity_key = str(membership["source_entity_key"])
+        source_record_key = str(membership["current_source_record_key"])
+        if source_record_key != record.source_record_key:
+            raise RuntimeError("fixture source head가 방금 등록한 record를 가리키지 않습니다")
+        payload = {
+            "feature_id": feature_id,
+            "feature_uuid": str(candidate_feature_uuid()),
+            "kind": kind,
+            "name": name,
+            "category": "00000000",
+            "lon": lon,
+            "lat": _LAT,
+            "coord_precision_digits": 6,
+            "address": {},
+            "urls": {},
+            "marker_icon": marker_icon,
+            "marker_color": marker_color,
+            "raw_refs": [],
+        }
+        row = (
+            await session.execute(
+                text(
+                    """
+                    CALL feature.create_feature_with_initial_state(
+                        CAST(:feature_payload AS jsonb),
+                        CAST(:lifecycle_state AS text),
+                        CAST(:publication_state AS text),
+                        CAST(:quality_state AS text),
+                        CAST(:state_context AS jsonb),
+                        NULL, NULL, NULL, NULL
+                    )
+                    """
+                ),
+                {
+                    "feature_payload": json.dumps(payload, ensure_ascii=False),
+                    "lifecycle_state": "active",
+                    "publication_state": "suppressed",
+                    "quality_state": "valid",
+                    "state_context": json.dumps(
+                        {
+                            "transition_kind": "provider_sync",
+                            "reason_code": "admin_live_fixture",
+                            "provider_dataset_id": dataset_id,
+                            "source_entity_key": source_entity_key,
+                            "source_record_key": source_record_key,
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            )
+            .mappings()
+            .one()
+        )
+        if (
+            str(row["o_feature_id"]) != feature_id
+            or not bool(row["o_inserted"])
+        ):
+            raise RuntimeError("provider fixture Feature procedure가 신규 행을 만들지 않았습니다")
+
+    weather_id, price_id = feature_ids
+    await create_provider_feature(
+        feature_id=weather_id,
+        kind="weather",
+        dataset_id=weather_dataset_id,
+        record=weather_record,
+        name=f"E2E suppressed weather {run_id}",
+        lon=_LON + 0.002,
+        marker_icon="weather",
+        marker_color="P-03",
+    )
+    await create_provider_feature(
+        feature_id=price_id,
+        kind="price",
+        dataset_id=price_dataset_id,
+        record=price_record,
+        name=f"E2E suppressed price {run_id}",
+        lon=_LON - 0.002,
+        marker_icon="fuel",
+        marker_color="P-04",
+    )
     await weather_repo.load_weather_values(
         session,
         [
@@ -628,7 +726,7 @@ async def _seed(
             )
         ],
         provider_dataset_id=weather_dataset_id,
-        source_record=_response_record(run_id=run_id, kind="weather", fetched_at=now),
+        source_record=weather_record,
         selected_at=now,
     )
     await price_repo.load_price_values(
@@ -648,7 +746,7 @@ async def _seed(
             )
         ],
         provider_dataset_id=price_dataset_id,
-        source_record=_response_record(run_id=run_id, kind="price", fetched_at=now),
+        source_record=price_record,
     )
     observed, foreign_keys = await _assert_owned_state(session, run_id, feature_ids)
     if observed != {"features": 2, "weather_values": 1, "price_values": 1}:
@@ -1279,34 +1377,40 @@ async def _run(
     # 실패한다 (Codex PR #792 사후 적대 리뷰 R792-3).
     engine = make_async_engine(settings.pg_dsn)
     try:
-        async with AsyncSession(engine) as session, session.begin():
-            summary_run_ids: tuple[int, int] | None = None
-            api_owned_feature_uuids: tuple[str, ...] = ()
-            if action == "seed":
-                counts, foreign_keys, summary_run_ids = await _seed(session, run_id)
-            elif action == "cleanup":
-                counts, foreign_keys = await _cleanup(session, run_id)
-            elif action == "purge":
-                counts, foreign_keys, purged = await _purge_api_owned(
-                    session,
-                    run_id,
-                )
-            elif action == "api-audit":
-                (
-                    counts,
-                    foreign_keys,
-                    api_owned_feature_uuids,
-                ) = await _audit_complete_api_owned(session, run_id)
-            elif action == "auth-reset":
-                auth_counts = await _reset_auth_audit(session, run_id)
-            elif action == "auth-verify":
-                auth_counts = await _verify_auth_audit(session, run_id)
-            else:
-                counts, foreign_keys = await _assert_owned_state(
-                    session,
-                    run_id,
-                    _feature_ids(run_id),
-                )
+        # The supervisor replaces the API container's read-only DSN with the
+        # root-only fixture DSN.  Even that DSN must explicitly assume the
+        # schema-owner role; no application runtime role receives write grants.
+        async with engine.connect() as connection:
+            await connection.execute(text("SET ROLE ktm_feature_schema_owner"))
+            await connection.commit()
+            async with AsyncSession(bind=connection) as session, session.begin():
+                summary_run_ids: tuple[int, int] | None = None
+                api_owned_feature_uuids: tuple[str, ...] = ()
+                if action == "seed":
+                    counts, foreign_keys, summary_run_ids = await _seed(session, run_id)
+                elif action == "cleanup":
+                    counts, foreign_keys = await _cleanup(session, run_id)
+                elif action == "purge":
+                    counts, foreign_keys, purged = await _purge_api_owned(
+                        session,
+                        run_id,
+                    )
+                elif action == "api-audit":
+                    (
+                        counts,
+                        foreign_keys,
+                        api_owned_feature_uuids,
+                    ) = await _audit_complete_api_owned(session, run_id)
+                elif action == "auth-reset":
+                    auth_counts = await _reset_auth_audit(session, run_id)
+                elif action == "auth-verify":
+                    auth_counts = await _verify_auth_audit(session, run_id)
+                else:
+                    counts, foreign_keys = await _assert_owned_state(
+                        session,
+                        run_id,
+                        _feature_ids(run_id),
+                    )
     finally:
         await engine.dispose()
     if action in {"auth-reset", "auth-verify"}:

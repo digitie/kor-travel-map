@@ -278,6 +278,13 @@ class Supervisor:
         runtime_environment = _unique_environment(environment)
         process_environment = dict(os.environ)
         process_environment.update(runtime_environment)
+        fixture_dsn = os.environ.get("E2E_ADMIN_FEATURE_FIXTURE_PG_DSN", "")
+        if not fixture_dsn or "\0" in fixture_dsn:
+            raise RuntimeError("root-only fixture DSN is missing")
+        # Only the standalone helper receives this override. The browser
+        # executor keeps the API runtime environment unchanged, so a live
+        # acceptance cannot turn a read-only API credential into a write path.
+        process_environment["KOR_TRAVEL_MAP_PG_DSN"] = fixture_dsn
         environment_arguments = [
             value
             for name in sorted(runtime_environment)

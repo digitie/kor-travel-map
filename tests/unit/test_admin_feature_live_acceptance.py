@@ -581,6 +581,7 @@ def test_sigkill_safe_supervisor_owns_docker_lifecycle_and_barrier() -> None:
 def test_helper_is_standalone_labeled_and_recovery_leaves_zero_container_residue() -> None:
     runner = _RUNNER.read_text()
     supervisor = _SUPERVISOR.read_text()
+    fixture = _FIXTURE.read_text()
     assert "docker compose exec" not in (runner + supervisor)
     assert '"--volumes-from"' in supervisor
     assert 'f"{self.args.api_container}:ro"' in supervisor
@@ -588,6 +589,8 @@ def test_helper_is_standalone_labeled_and_recovery_leaves_zero_container_residue
     assert 'f".{self.args.operation}.env"' not in supervisor
     assert "runtime_environment = _unique_environment(environment)" in supervisor
     assert "process_environment.update(runtime_environment)" in supervisor
+    assert 'os.environ.get("E2E_ADMIN_FEATURE_FIXTURE_PG_DSN", "")' in supervisor
+    assert 'process_environment["KOR_TRAVEL_MAP_PG_DSN"] = fixture_dsn' in supervisor
     assert 'for value in ("--env", name)' in supervisor
     assert "process_environment=process_environment" in supervisor
     assert '"host" if host_networked else ordered_networks[0]' in supervisor
@@ -599,6 +602,10 @@ def test_helper_is_standalone_labeled_and_recovery_leaves_zero_container_residue
     assert "owned Docker container residue remains" in runner
     assert "deterministic Docker container name residue remains" in runner
     assert "recovery mode cannot seed fixtures" in runner
+    assert "require_env E2E_ADMIN_FEATURE_FIXTURE_PG_DSN" in runner
+    assert 'SET ROLE ktm_feature_schema_owner' in fixture
+    assert "CALL feature.create_feature_with_initial_state" in fixture
+    assert "INSERT INTO feature.features" not in fixture
 
 
 def test_helper_clones_host_network_mode_without_post_create_attachment() -> None:
