@@ -349,14 +349,26 @@ def test_active_migrations_share_bootstrap_exact_role_contract() -> None:
     assert "AND granted.rolname NOT IN (" in baseline_contract
     assert "AND member.rolname NOT IN (" in baseline_contract
 
-    def first_allowlist(source: str) -> tuple[str, ...]:
-        block = source.split("AND granted.rolname NOT IN (", 1)[1].split(
-            "AND member.rolname NOT IN (", 1
+    def first_allowlists(source: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
+        granted_block = source.split("AND granted.rolname NOT IN (", 1)[1].split(
+            ")", 1
         )[0]
-        return tuple(re.findall(r"'([^']+)'", block))
+        member_block = source.split("AND member.rolname NOT IN (", 1)[1].split(
+            ")", 1
+        )[0]
+        return (
+            tuple(re.findall(r"'([^']+)'", granted_block)),
+            tuple(re.findall(r"'([^']+)'", member_block)),
+        )
 
-    assert first_allowlist(baseline_contract) == future_phase_roles
-    assert first_allowlist(bootstrap) == future_phase_roles
+    assert first_allowlists(baseline_contract) == (
+        future_phase_roles,
+        future_phase_roles,
+    )
+    assert first_allowlists(bootstrap) == (
+        future_phase_roles,
+        future_phase_roles,
+    )
 
 
 def test_legacy_archive_has_exact_109_file_digest() -> None:
