@@ -1,4 +1,4 @@
-"""PR #978 squash 뒤 active/legacy Alembic 경계를 고정한다."""
+"""`300` root와 retired Alembic cohort의 실행 경계를 고정한다."""
 
 from __future__ import annotations
 
@@ -14,53 +14,13 @@ pytestmark = pytest.mark.unit
 _ROOT = Path(__file__).resolve().parents[2]
 _ACTIVE = _ROOT / "alembic" / "versions"
 _LEGACY = _ROOT / "alembic" / "legacy_versions"
+_RETIRED = _ROOT / "alembic" / "retired_versions" / "0200-0236"
 _ENV = _ROOT / "alembic" / "env.py"
-_BASELINE = _ACTIVE / "0200_schema_baseline.py"
-_RECEIPTS = _ACTIVE / "0202_tvn40_curation_receipts.py"
+_BASELINE = _ACTIVE / "300_schema_baseline.py"
 _ROLE_BOOTSTRAP = _ROOT / "docker" / "postgres-role-bootstrap.sh"
 _PRE_SQUASH_REVISIONS = _ROOT / "docker" / "pre-squash-revisions.txt"
 _GRAPH = _ROOT / "src" / "kortravelmap" / "_application_migration_graph.json"
-_EXPECTED_REVISIONS = (
-    "0200_schema_baseline",
-    "0104_tvn36_final_fence",
-    "0202_tvn40_curation_receipts",
-    "0203_tvn40_candidate_commands",
-    "0204_tvn40_candidate_promotion",
-    "0205_tvn40_rule_generation",
-    "0206_tvn40_rule_catalog_commands",
-    "0207_tvn40_theme_catalog",
-    "0208_tvn40_source_catalog",
-    "0209_tvn40_provider_seal",
-    "0210_tvn40_concierge_catalog",
-    "0211_tvn40_provider_ops_cmds",
-    "0212_tvn40_cancel_cmds",
-    "0213_tvn40_collection_cmds",
-    "0214_tvn40_item_cmds",
-    "0215_tvn40_import_quarantine",
-    "0216_tvn40_import_plans",
-    "0217_tvn40_import_item_cmd",
-    "0218_tvn40_metadata_check",
-    "0219_tvn40_routine_acl",
-    "0220_tvn40_snapshot_cap_index",
-    "0221_tvn40_snapshot_text_bounds",
-    "0222_tvn40a_merge_runtime_role",
-    "0223_tvn40_identity_mappings",
-    "0224_c7_external_system_scope",
-    "0225_tvn40c_physical_removal",
-    # M01 lane은 C05A가 같은 0229 기반으로 먼저 착지한 뒤 이어진다. revision ID의
-    # 숫자순이 아니라 down_revision graph가 실제 적용 순서를 정한다.
-    "0229_tvn40b_source_rule_action",
-    "0230_tvn_c05_krforest_datasets",
-    "0231_tvn41s_snapshot_material",
-    "0232_tvn37d_notice_empty_range",
-    "0226_m01_manual_feature_create",
-    "0227_m02_feature_provenance",
-    "0228_m03_manual_curation",
-    "0233_m04_feature_request_queue",
-    "0234_m05_manual_provider_dedup",
-    "0235_m05_reconciliation_delivery",
-    "0236_tvn41s_compaction_drained",
-)
+_EXPECTED_REVISIONS = ("300",)
 #: `alembic_version.version_num`의 컬럼 폭(alembic 기본값).
 _ALEMBIC_VERSION_NUM_LENGTH = 32
 _LEGACY_ARCHIVE_SHA256 = (
@@ -192,11 +152,7 @@ def _alembic_command_target_violations(source: str, *, filename: str) -> list[st
         call_source = "\n".join(
             source.splitlines()[node.lineno - 1 : node.end_lineno]
         )
-        if (
-            operation == "stamp"
-            and revision == "base"
-            and "intentional-squash-boundary-rejection" in call_source
-        ):
+        if "intentional-squash-boundary-rejection" in call_source:
             continue
         detail = revision if revision is not None else "dynamic/unresolved"
         violations.append(f"{filename}:{node.lineno}: {detail}")
@@ -206,12 +162,12 @@ def _alembic_command_target_violations(source: str, *, filename: str) -> list[st
 def _legacy_module_execution_violations(source: str, *, filename: str) -> list[str]:
     tree = ast.parse(source, filename=filename)
     constants = _string_constants(tree)
-    references_legacy = any(
+    references_retired = any(
         (value := _resolved_string(node, constants)) is not None
-        and "legacy_versions" in value
+        and ("legacy_versions" in value or "retired_versions" in value)
         for node in ast.walk(tree)
     )
-    if not references_legacy:
+    if not references_retired:
         return []
     return [
         f"{filename}:{node.lineno}: legacy module execution"
@@ -268,50 +224,39 @@ def test_revision_identifiers_fit_alembic_version_column() -> None:
     )
 
 
-def test_active_graph_is_only_0200_bridge_to_current_head() -> None:
+def test_active_graph_has_only_the_300_root() -> None:
     paths = sorted(_ACTIVE.glob("[0-9]*.py"))
     revisions = tuple(str(_literal(path, "revision")) for path in paths)
     parents_by_revision = {
         str(_literal(path, "revision")): _literal(path, "down_revision") for path in paths
     }
 
-    # 파일명 정렬은 과거 번호와 새 upstream 번호가 교차하면 실제 적용 순서가 될 수 없다.
-    # Alembic의 정본은 revision/down_revision graph이므로, 파일 집합과 parent map을 분리해
-    # 검증한다.
-    assert set(revisions) == set(_EXPECTED_REVISIONS)
-    assert len(revisions) == len(_EXPECTED_REVISIONS)
-    assert parents_by_revision == dict(
-        zip(_EXPECTED_REVISIONS, (None, *_EXPECTED_REVISIONS[:-1]), strict=True)
-    )
+    assert revisions == _EXPECTED_REVISIONS
+    assert parents_by_revision == {"300": None}
     assert json.loads(_GRAPH.read_text(encoding="utf-8"))["revisions"] == [
-        {
-            "revision": revision,
-            "down_revision": [] if parent is None else [parent],
-        }
-        for revision, parent in zip(
-            _EXPECTED_REVISIONS, (None, *_EXPECTED_REVISIONS[:-1]), strict=True
-        )
+        {"revision": "300", "down_revision": []}
     ]
 
 
-def test_active_forward_only_boundary_and_diagnostics_use_squash_revisions() -> None:
-    assert _literal(_ENV, "_FORWARD_ONLY_BOUNDARY") == "0200_schema_baseline"
-    for path in sorted(_ACTIVE.glob("02*.py")):
-        revision = str(_literal(path, "revision"))
-        source = path.read_text(encoding="utf-8")
-        if path.name == "0201_squash_bridge.py":
-            assert "squash bridge는 forward-only" in source
-            continue
-        assert f'"{revision} is forward-only' in source, (
-            f"{path.name}: forward-only 진단이 자기 revision을 가리켜야 한다"
-        )
+def test_active_forward_only_boundary_allows_only_exact_handoff() -> None:
+    assert _literal(_ENV, "_BASELINE_300_REVISION") == "300"
+    assert (
+        _literal(_ENV, "_BASELINE_300_HANDOFF_SOURCE")
+        == "0236_tvn41s_compaction_drained"
+    )
+    source = _ENV.read_text(encoding="utf-8")
+    assert "generic Alembic stamp is unsupported" in source
+    assert "300_schema_baseline is forward-only" in source
+    assert "stamp_baseline_300_after_purge" in source
+    assert "script._stamp_revs" not in source
+
+    baseline_source = _BASELINE.read_text(encoding="utf-8")
+    assert "300_schema_baseline is forward-only" in baseline_source
 
 
 def test_active_migrations_share_bootstrap_exact_role_contract() -> None:
-    baseline_contract = _literal(_BASELINE, "_APPLICATION_ROLE_ASSERTIONS_SQL")
-    receipts_contract = _literal(_RECEIPTS, "_APPLICATION_ROLE_ASSERTIONS_SQL")
+    baseline_contract = _literal(_BASELINE, "_FINAL_APPLICATION_ROLE_ASSERTIONS_SQL")
     assert isinstance(baseline_contract, str)
-    assert baseline_contract == receipts_contract
 
     bootstrap = _ROLE_BOOTSTRAP.read_text(encoding="utf-8")
     for token in (
@@ -326,12 +271,7 @@ def test_active_migrations_share_bootstrap_exact_role_contract() -> None:
         assert token in baseline_contract
         assert token in bootstrap
 
-    # PostgreSQL roles are cluster-wide. After a database recreation, M01~M05
-    # memberships can remain while the fresh database is still at the frozen
-    # base graph. The base assertion may subtract only the exact known
-    # future-phase edge (including its PG16 options); every other application
-    # edge, and unsafe future role attributes, must fail closed.
-    future_phase_roles = (
+    final_phase_roles = (
         "ktm_manual_feature_procedure_owner",
         "ktm_manual_feature_admin_executor",
         "ktm_feature_create_provider_executor",
@@ -343,16 +283,14 @@ def test_active_migrations_share_bootstrap_exact_role_contract() -> None:
         "ktm_manual_provider_dedup_admin_executor",
         "ktm_feature_reference_reconciliation_service_executor",
     )
-    for role in future_phase_roles:
+    for role in final_phase_roles:
         assert f"'{role}'" in baseline_contract
         assert f"'{role}'" in bootstrap
-    for source in (baseline_contract, bootstrap):
-        assert "allowed_future(granted_role, member_role" in source
-        assert "AND NOT EXISTS (" in source
-        assert "FROM allowed_future AS allowed" in source
-        assert "future application role is unsafe" in source
-        assert "AND granted.rolname NOT IN (" not in source
-        assert "AND member.rolname NOT IN (" not in source
+    assert (
+        "baseline-300 bootstrap found an unexpected application role membership edge"
+        in bootstrap
+    )
+    assert "baseline-300 bootstrap requires a fresh DB" in bootstrap
 
 
 def test_legacy_archive_has_exact_109_file_digest() -> None:
@@ -377,6 +315,20 @@ def test_pre_squash_revision_manifest_matches_archive_exactly() -> None:
     assert len(manifest_revisions) == len(set(manifest_revisions)) == 109
 
 
+def test_retired_0200_to_0236_manifest_matches_archive_exactly() -> None:
+    manifest = (_RETIRED / "manifest.sha256").read_text(encoding="utf-8").splitlines()
+    paths = sorted(_RETIRED.glob("[0-9]*.py"))
+    expected = [
+        f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.name}" for path in paths
+    ]
+    revisions = tuple(str(_literal(path, "revision")) for path in paths)
+
+    assert manifest == expected
+    assert len(revisions) == len(set(revisions)) == 37
+    assert revisions[0] == "0200_schema_baseline"
+    assert revisions[-1] == "0236_tvn41s_compaction_drained"
+
+
 def test_active_integration_suite_never_targets_legacy_revision() -> None:
     violations: list[str] = []
     for path in sorted((_ROOT / "tests" / "integration").glob("*.py")):
@@ -388,7 +340,7 @@ def test_active_integration_suite_never_targets_legacy_revision() -> None:
         violations.extend(_legacy_module_execution_violations(source, filename=relative))
 
     assert violations == [], (
-        "0200 이전 revision은 읽기 전용 archive다. active integration에서 실행하지 마라: "
+        "retired Alembic revision은 읽기 전용 archive다. active integration에서 실행하지 마라: "
         + ", ".join(violations)
     )
 
@@ -552,8 +504,6 @@ def test_production_docker_build_context_never_copies_legacy_migrations() -> Non
         source = path.read_text(encoding="utf-8")
         assert "COPY alembic ./alembic" not in source
         assert "COPY alembic/legacy_versions" not in source
+        assert "COPY alembic/retired_versions" not in source
     api = (_ROOT / "docker" / "api.Dockerfile").read_text(encoding="utf-8")
-    assert (
-        "COPY docker/pre-squash-revisions.txt ./docker/pre-squash-revisions.txt"
-        in api
-    )
+    assert "COPY alembic/versions ./alembic/versions" in api

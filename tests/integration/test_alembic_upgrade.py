@@ -669,12 +669,12 @@ async def _run_alembic_upgrade(dsn: str) -> None:
     project_root = Path(__file__).resolve().parents[2]  # noqa: ASYNC240  # sync IO is trivial path-arith here
     cfg = Config(str(project_root / "alembic.ini"))
     cfg.set_main_option("script_location", str(project_root / "alembic"))
-    # 배포와 같은 경로로 돈다 — bootstrap 후 migrator 자격으로 upgrade.
-    from tests.integration._tvn34_migration_bootstrap import (
-        upgrade_head_with_tvn_m01_phase,
+    # 배포와 같은 경로로 돈다 — final bootstrap 후 migrator 자격으로 upgrade.
+    from tests.integration._application_300_bootstrap import (
+        upgrade_head_with_application_300_bootstrap,
     )
 
-    await upgrade_head_with_tvn_m01_phase(cfg, dsn)
+    await upgrade_head_with_application_300_bootstrap(cfg, dsn)
 
 
 def _alembic_head_revision() -> str:

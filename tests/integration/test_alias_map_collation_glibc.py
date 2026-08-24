@@ -91,19 +91,14 @@ async def glibc_engine(glibc_pg_container: Any) -> AsyncIterator[AsyncEngine]:
         await autocommit.execute(text(f'CREATE DATABASE "{database}"'))
     await admin_engine.dispose()
 
-    # 0095부터 fresh DB는 배포와 같은 principal graph를 먼저 갖춰야 upgrade가 선다:
-    # 0095는 restricted migrator가 state/audit routine owner membership을 **스스로**
-    # 부여하지 않는지 검사하고, 없으면 42501로 죽는다. conftest의 공용 컨테이너는
-    # 그 준비를 이미 하지만, 이 모듈은 collation 판별을 위해 glibc 컨테이너에 자기
-    # DB를 따로 만들기 때문에 그 경로 밖이었다. 여기서만 다른 방식으로 올리면
-    # 검증 대상 스키마가 배포와 갈리므로 공유 helper를 그대로 쓴다 —
-    # bootstrap → migrator 자격 upgrade(ADR-090)까지 배포와 동일 경로다.
+    # 이 모듈은 collation 판별을 위해 glibc 컨테이너에 자기 DB를 만든다. final
+    # `300` bootstrap → migrator 자격 upgrade까지 production과 같은 경로로 적용한다.
     # collation 검증 축(alias 정렬)은 이 변경과 무관하며 그대로다.
-    from tests.integration._tvn34_migration_bootstrap import (
-        upgrade_head_with_tvn_m01_phase,
+    from tests.integration._application_300_bootstrap import (
+        upgrade_head_with_application_300_bootstrap,
     )
 
-    await upgrade_head_with_tvn_m01_phase(_alembic_config(dsn), dsn)
+    await upgrade_head_with_application_300_bootstrap(_alembic_config(dsn), dsn)
 
     engine = make_async_engine(dsn)
     try:

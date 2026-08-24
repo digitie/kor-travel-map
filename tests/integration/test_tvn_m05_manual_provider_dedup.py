@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from uuid import UUID, uuid4
 
@@ -551,65 +550,15 @@ async def test_runtime_reconciler_revokes_deployed_v1_decision_grant(
         )
 
 
-async def test_preview_reader_owner_can_run_0235_redefinition_before_repair(
+async def test_300_baseline_keeps_manual_provider_reader_ownership_and_schema_acl(
     migrated_engine: AsyncEngine,
 ) -> None:
-    """repair 전 dedicated owner reader가 있는 preview DB도 forward upgrade한다."""
+    """`300` 최종 catalog의 manual-provider reader 권한을 직접 고정한다.
 
-    migration_path = _ROOT / "alembic/versions/0235_m05_reconciliation_delivery.py"
-    spec = spec_from_file_location("_tvn_m05_delivery_migration", migration_path)
-    assert spec is not None
-    assert spec.loader is not None
-    migration = module_from_spec(spec)
-    spec.loader.exec_module(migration)
-    statements = migration._top_level_statements(migration._DDL_SQL)
-    start = next(
-        index
-        for index, statement in enumerate(statements)
-        if statement.endswith(
-            "GRANT USAGE, CREATE ON SCHEMA feature TO ktm_manual_provider_dedup_procedure_owner"
-        )
-    )
-    end = next(
-        index
-        for index, statement in enumerate(statements[start:], start)
-        if statement
-        == "REVOKE USAGE, CREATE ON SCHEMA feature "
-        "FROM ktm_manual_provider_dedup_procedure_owner"
-    )
-
-    # ``pg_restore --no-owner`` 뒤 legacy sweep이 만들 수 있는 schema owner 상태를
-    # 실제 routine에 적용한다. 이후 0235 범위는 restricted migrator login으로만
-    # 실행해 preview/restore 두 source ownership을 한 migration으로 복구한다.
-    async with migrated_engine.begin() as connection:
-        await connection.execute(
-            text(
-                "ALTER FUNCTION feature.list_manual_provider_dedup_cases("
-                "text, timestamptz, uuid, integer) "
-                "OWNER TO ktm_feature_schema_owner"
-            )
-        )
-        await connection.execute(
-            text(
-                "ALTER FUNCTION feature.read_manual_provider_dedup_case(uuid) "
-                "OWNER TO ktm_feature_schema_owner"
-            )
-        )
-
-    migrator = make_async_engine(
-        migrated_engine.url.set(
-            username="ktm_feature_migrator",
-            password="tvn34-test-only-migrator-password",
-        ).render_as_string(hide_password=False),
-        pool_size=1,
-    )
-    try:
-        async with migrator.begin() as connection:
-            await connection.execute(text("SET ROLE ktm_feature_schema_owner"))
-            for statement in statements[start : end + 1]:
-                await connection.exec_driver_sql(statement)
-    finally:
-        await migrator.dispose()
+    archived migration을 다시 import하거나 과거 restore 경로를 흉내 내지 않는다.
+    baseline이 보장해야 하는 현재 routine owner와 schema 권한만 live catalog에서
+    확인한다.
+    """
 
     async with migrated_engine.connect() as connection:
         for routine in (
@@ -625,24 +574,18 @@ async def test_preview_reader_owner_can_run_0235_redefinition_before_repair(
                 )
                 == "ktm_manual_provider_dedup_procedure_owner"
             )
-        assert (
-            await connection.scalar(
-                text(
-                    "SELECT has_schema_privilege("
-                    "'ktm_manual_provider_dedup_procedure_owner', 'feature', 'USAGE')"
-                )
-            )
-            is False
-        )
-
-    # 이후 integration이 기대하는 repair 완료 DB 상태로 되돌린다.
-    async with migrated_engine.begin() as connection:
-        await connection.execute(
+        assert await connection.scalar(
             text(
-                "GRANT USAGE, CREATE ON SCHEMA feature "
-                "TO ktm_manual_provider_dedup_procedure_owner"
+                "SELECT has_schema_privilege("
+                "'ktm_manual_provider_dedup_procedure_owner', 'feature', 'USAGE')"
             )
-        )
+        ) is True
+        assert await connection.scalar(
+            text(
+                "SELECT has_schema_privilege("
+                "'ktm_manual_provider_dedup_procedure_owner', 'feature', 'CREATE')"
+            )
+        ) is True
 
 
 async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_only(

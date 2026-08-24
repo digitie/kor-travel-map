@@ -156,21 +156,13 @@ async def _create_isolated_migrated_engine(
     finally:
         await admin_engine.dispose()
 
-    # T-VN-34 이후 fresh DB는 **먼저 배포와 같은 principal graph**를 갖춰야 upgrade가
-    # 선다. 0097은 state routine을 만들기 전에 ``SET ROLE
-    # ktm_feature_state_procedure_owner``로 내려간다(권한을 owner 자격에서만 쓰게
-    # 하는 ADR-090 경로). 그 role에 schema ``feature``의 CREATE를 주는 것은
-    # migration이 아니라 bootstrap이므로, bootstrap 없이 올리면 superuser DSN이어도
-    # ``permission denied for schema feature``로 죽는다 — SET ROLE 이후의 권한 판정은
-    # superuser 우회를 받지 못한다.
-    #
-    # 여기서만 다른 경로로 올리면 경합을 재는 대상 schema가 배포와 달라지므로,
-    # conftest·다른 자기-DB 테스트가 쓰는 공유 helper를 그대로 쓴다.
-    from tests.integration._tvn34_migration_bootstrap import (
-        upgrade_head_with_tvn_m01_phase,
+    # final `300` bootstrap과 같은 경로로 올려 active-scope 경합 대상 schema가
+    # conftest fixture와 갈라지지 않게 한다.
+    from tests.integration._application_300_bootstrap import (
+        upgrade_head_with_application_300_bootstrap,
     )
 
-    await upgrade_head_with_tvn_m01_phase(
+    await upgrade_head_with_application_300_bootstrap(
         Config(str(_ROOT / "alembic.ini")), target_dsn
     )
     # 테스트 본문은 계속 컨테이너 admin 자격으로 붙는다 — 검증 대상은 ACL이 아니라

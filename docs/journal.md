@@ -18,6 +18,23 @@ server-only manual Feature create token을 `POST /v1/admin/features`에만 주�
 
 아직 candidate frontend 이미지의 격리 Map BFF live 재검증과 적대 리뷰·원격 CI가 남아 있어
 PR은 Draft로 유지한다.
+
+## 2026-08-24 — T-VN-H46H active integration을 `300` fresh/handoff gate로 전환
+
+과거 `0200`~`0236` migration을 실행하던 shared integration bootstrap을 final `300`
+fresh bootstrap으로 교체했다. retired cohort는 active graph·runtime·test module import
+경로 어디에서도 실행하지 않으며, M01~M05 fixture 이름은 final role graph가 이미 존재하는
+호환 fixture로만 남긴다. 과거 0235 preview 재정의 검증도 제거하고, final catalog의
+manual-provider reader owner와 schema ACL을 직접 검증한다.
+
+새 Alembic gate는 fresh `300` upgrade 뒤 metadata drift와 ORM CHECK 정의를 PostgreSQL이
+재파싱한 catalog 정의로 함께 대조한다. logical raw `0236` fixture에 대해서는 authorized
+exact handoff만 raw version을 `300`으로 전진시키고, generic upgrade/stamp, 다른 source,
+downgrade, commit-time failure가 모두 source row를 보존하는지 실제 PostGIS에서 검증했다.
+`test_alembic_squash_boundary.py`·`test_migration_forward_only.py` 26건과 metadata/handoff
+integration 11건이 통과했다. runtime image·entrypoint·Compose 및 Docker Manager의 비파기
+transition은 아직 남아 있으므로 PR은 계속 Draft다.
+
 ## 2026-08-24 — T-VN-H46H `300` fresh bootstrap·exact handoff 첫 구현 checkpoint
 
 clean isolated `0236` reference에서 `schema.sql`과 9-table `seed.sql` sidecar를

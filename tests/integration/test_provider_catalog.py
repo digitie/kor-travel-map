@@ -126,15 +126,9 @@ async def seed_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
 
     module-scope인 이유는 alembic 적용이 이 파일당 한 번만 돌게 하기 위해서다.
 
-    ``CREATE DATABASE``로 갓 만든 DB는 principal graph가 비어 있다. 0095는 restricted
-    migrator가 state/audit routine owner membership을 **스스로** 부여하지 않는지
-    검증하므로, 배포 bootstrap이 먼저 그 membership과 schema 소유권을 세워두지 않으면
-    upgrade가 ``0095 requires bootstrap membership of schema owner in state/audit
-    owners``로 죽는다. 게다가 role은 cluster 전역이라, 형제 파일이 먼저 돌아 role만
-    이미 존재하는 경우에는 그 검사를 통과한 뒤 이 DB에 없는 schema 소유권 때문에
-    ``permission denied for schema feature``로 죽는다 — 즉 실행 순서에 따라 증상만
-    달라지는 같은 원인이다. ``bootstrapped_migrator_dsn``/``alembic_schema_owner_role``
-    (배포 경로와 같은 helper, ADR-090)로 그 선행조건을 이 DB에도 그대로 세운다.
+    `300` fresh bootstrap이 final role graph와 schema ownership을 함께 만든 뒤
+    restricted migrator로 root를 적용하므로, module fixture와 공유 fixture가 같은
+    deployment 경계를 사용한다.
     """
     from pathlib import Path
 
@@ -143,8 +137,8 @@ async def seed_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
     from sqlalchemy.engine import make_url
 
     from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
-    from tests.integration._tvn34_migration_bootstrap import (
-        upgrade_head_with_tvn_m01_phase,
+    from tests.integration._application_300_bootstrap import (
+        upgrade_head_with_application_300_bootstrap,
     )
 
     admin_dsn = normalize_async_dsn(pg_container.get_connection_url())
@@ -169,7 +163,7 @@ async def seed_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
     root = Path(__file__).resolve().parents[2]  # noqa: ASYNC240  # sync path-arith
     cfg = Config(str(root / "alembic.ini"))
     cfg.set_main_option("script_location", str(root / "alembic"))
-    await upgrade_head_with_tvn_m01_phase(cfg, seed_dsn)
+    await upgrade_head_with_application_300_bootstrap(cfg, seed_dsn)
 
     # 읽기용 engine은 계속 컨테이너 admin 자격이다. migrator LOGIN은 아무것도 소유하지
     # 않고(소유자는 ``ktm_feature_schema_owner``) runtime ACL도 받지 않으므로, 이 파일이

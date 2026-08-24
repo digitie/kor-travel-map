@@ -13,6 +13,22 @@ approve/reject 두 경로까지 정확히 넓히고, 그 밖의 경로에는 여
 candidate frontend 이미지를 격리 Map 스택에 적용해 정상 BFF 승인과 이어지는 M05 paired
 reconciliation을 실제 UI로 재검증한다. 그 뒤 적대 리뷰와 원격 CI green 전에는 머지하지
 않는다.
+
+## 2026-08-24 — T-VN-H46H `300` regression gate 완료, runtime transition 진행
+
+active integration fixture는 retired `0200`~`0236` chain을 replay하지 않고 final `300`
+fresh bootstrap으로 전환했다. unit archive/forward-only gate 26건, fresh metadata·CHECK
+semantic oracle·authorized handoff·generic operation rejection·commit rollback PostGIS gate
+11건이 통과했다. 이 테스트는 exact `0236` source의 raw version row만 논리 fixture로
+만들며, archive module 또는 old Docker phase를 실행하지 않는다.
+
+### 다음 한 작업
+
+Map runtime의 old staged bootstrap/Compose/entrypoint를 `baseline-300` normal path와
+explicit controlled handoff executable로 교체한다. 이어서 Docker Manager의 별도 비파기
+transition/journal PR, 누적 적대 리뷰, n150 candidate 배포 및 login POST를 포함한 live UI
+E2E를 실행한다. 이 모든 증거와 CI가 갖춰지기 전에는 Map baseline PR을 merge하지 않는다.
+
 ## 2026-08-24 — T-VN-H46H Alembic `300` baseline·n150 live UI E2E 준비
 
 Map [PR #1063](https://github.com/digitie/kor-travel-map/pull/1063)의 admin live fixture
