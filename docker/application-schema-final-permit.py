@@ -27,7 +27,7 @@ from sqlalchemy import text
 from kortravelmap.infra.db import make_async_engine
 
 _PERMIT_PATH: Final = Path("/run/kor-travel-map-application-final-permit/permit.json")
-_PERMIT_SCHEMA: Final = "kor-travel-docker-manager.map-application-final-permit.v1"
+_PERMIT_SCHEMA: Final = "kor-travel-docker-manager.map-application-final-permit.v2"
 _PERMIT_TRANSITIONS: Final = frozenset(
     {
         "map-application-schema-0236-to-300",
@@ -56,6 +56,8 @@ _CANDIDATE_FIELDS: Final = frozenset(
         "postgres_image_id",
         "application_head",
         "reference_manifest_sha256",
+        "source_alembic_version_sha256",
+        "destination_alembic_version_sha256",
         "runtime_invariants_sql_sha256",
     }
 )
@@ -71,6 +73,8 @@ _RECEIPT_FIELDS: Final = frozenset(
         "expected_privileged_residue_sha256",
         "pre_privileged_residue_sha256",
         "post_privileged_residue_sha256",
+        "expected_destination_alembic_version_sha256",
+        "observed_destination_alembic_version_sha256",
         "runtime_invariant_violation_count",
     }
 )
@@ -204,6 +208,10 @@ def _validate_permit(raw: bytes, *, consumer: str) -> Mapping[str, Any]:
     ):
         raise FinalPermitError("final permit candidate identity is invalid")
     _require_sha256(candidate["reference_manifest_sha256"], "reference manifest")
+    _require_sha256(candidate["source_alembic_version_sha256"], "source Alembic facet")
+    _require_sha256(
+        candidate["destination_alembic_version_sha256"], "destination Alembic facet"
+    )
     _require_sha256(candidate["runtime_invariants_sql_sha256"], "runtime invariants")
     if (
         not isinstance(database["name"], str)
@@ -247,6 +255,12 @@ def _validate_permit(raw: bytes, *, consumer: str) -> Mapping[str, Any]:
         "catalog": artifacts.get("catalog_contract_sha256"),
         "seed": artifacts.get("seed_contract_sha256"),
         "privileged_residue": artifacts.get("privileged_residue_contract_sha256"),
+        "source_alembic_version": artifacts.get(
+            "source_alembic_version_contract_sha256"
+        ),
+        "destination_alembic_version": artifacts.get(
+            "destination_alembic_version_contract_sha256"
+        ),
         "runtime_invariants": artifacts.get("runtime_invariants_sql_sha256"),
     }
     if not all(
@@ -263,6 +277,14 @@ def _validate_permit(raw: bytes, *, consumer: str) -> Mapping[str, Any]:
         or receipts["expected_privileged_residue_sha256"] != expected["privileged_residue"]
         or receipts["pre_privileged_residue_sha256"] != expected["privileged_residue"]
         or receipts["post_privileged_residue_sha256"] != expected["privileged_residue"]
+        or candidate["source_alembic_version_sha256"]
+        != expected["source_alembic_version"]
+        or candidate["destination_alembic_version_sha256"]
+        != expected["destination_alembic_version"]
+        or receipts["expected_destination_alembic_version_sha256"]
+        != expected["destination_alembic_version"]
+        or receipts["observed_destination_alembic_version_sha256"]
+        != expected["destination_alembic_version"]
         or candidate["runtime_invariants_sql_sha256"] != expected["runtime_invariants"]
     ):
         raise FinalPermitError("final permit receipt does not match installed baseline")
@@ -300,17 +322,28 @@ def _runtime_dsn(consumer: str) -> str:
 
 async def _verify_database(payload: Mapping[str, Any], *, consumer: str) -> None:
     dsn = _runtime_dsn(consumer)
+    expected_login = (
+        "ktm_feature_api_runtime"
+        if consumer == "api"
+        else "ktm_feature_dagster_runtime"
+    )
     engine = make_async_engine(dsn, pool_size=1)
     try:
         async with engine.connect() as connection:
             row = (
                 await connection.execute(
                     text(
-                        "SELECT database_row.datname, database_row.oid, "
+                        "SELECT session_user::text, current_user::text, "
+                        "role.rolsuper, "
+                        "pg_catalog.pg_has_role(session_user, "
+                        "'ktm_feature_schema_owner', 'SET'), "
+                        "database_row.datname, database_row.oid, "
                         "pg_catalog.pg_get_userbyid(database_row.datdba), "
                         "(SELECT system_identifier::text "
                         "FROM pg_catalog.pg_control_system()) "
                         "FROM pg_catalog.pg_database AS database_row "
+                        "JOIN pg_catalog.pg_roles AS role "
+                        "ON role.rolname = session_user "
                         "WHERE database_row.datname = current_database()"
                     )
                 )
@@ -326,28 +359,80 @@ async def _verify_database(payload: Mapping[str, Any], *, consumer: str) -> None
                     )
                 ).all()
             )
+            live_destination_facet = await _live_destination_facet_sha256(connection)
     except Exception as exc:  # database driver messages can contain an authority/host
         raise FinalPermitError("final permit database binding cannot be verified") from exc
     finally:
         await engine.dispose()
     database = payload["database"]
     observed_identity = _database_identity_sha256(
-        system_identifier=str(row[3]),
-        name=str(row[0]),
-        oid=int(row[1]),
-        owner=str(row[2]),
+        system_identifier=str(row[7]),
+        name=str(row[4]),
+        oid=int(row[5]),
+        owner=str(row[6]),
     )
     if (
-        str(row[0]) != database["name"]
-        or int(row[1]) != database["oid"]
-        or str(row[2]) != database["owner"]
-        or str(row[3]) != database["system_identifier"]
+        str(row[0]) != expected_login
+        or str(row[1]) != expected_login
+        or bool(row[2])
+        or bool(row[3])
+        or str(row[4]) != database["name"]
+        or int(row[5]) != database["oid"]
+        or str(row[6]) != database["owner"]
+        or str(row[7]) != database["system_identifier"]
         or observed_identity != database["identity_sha256"]
         or versions != ("300",)
+        or live_destination_facet
+        != payload["receipts"]["observed_destination_alembic_version_sha256"]
+        or live_destination_facet
+        != payload["candidate"]["destination_alembic_version_sha256"]
     ):
         raise FinalPermitError(
             "final permit database binding or raw revision does not match runtime DSN"
         )
+
+
+async def _live_destination_facet_sha256(connection: Any) -> str:
+    """runtime login으로 현재 public Alembic metadata ACL까지 다시 증명한다."""
+
+    baseline = _application_root() / "alembic" / "baseline"
+    reference_sha256, reference = _read_reference()
+    del reference_sha256
+    artifacts = reference.get("artifacts")
+    if not isinstance(artifacts, Mapping):
+        raise FinalPermitError("installed application baseline artifact map is invalid")
+    sql_path = baseline / "application-destination-alembic-version.sql"
+    receipt_path = baseline / "application-destination-alembic-version.sha256"
+    try:
+        sql_raw = sql_path.read_bytes()
+        receipt_raw = receipt_path.read_bytes()
+        receipt_value = receipt_raw.decode("ascii").strip()
+    except (OSError, UnicodeDecodeError) as exc:
+        raise FinalPermitError("installed destination Alembic facet is unavailable") from exc
+    if (
+        hashlib.sha256(sql_raw).hexdigest()
+        != artifacts.get("destination_alembic_version_contract_sql_sha256")
+        or hashlib.sha256(receipt_raw).hexdigest()
+        != artifacts.get("destination_alembic_version_contract_receipt_sha256")
+        or receipt_raw != f"{receipt_value}\n".encode("ascii")
+        or receipt_value
+        != artifacts.get("destination_alembic_version_contract_sha256")
+        or not _SHA256_PATTERN.fullmatch(receipt_value)
+    ):
+        raise FinalPermitError("installed destination Alembic facet is invalid")
+    try:
+        sql_value = sql_raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise FinalPermitError("installed destination Alembic facet is invalid") from exc
+    try:
+        rows = await connection.execute(text(sql_value))
+    except Exception as exc:
+        raise FinalPermitError("live destination Alembic facet cannot be verified") from exc
+    digest = hashlib.sha256()
+    for item in rows.scalars():
+        digest.update(str(item).encode("utf-8"))
+        digest.update(b"\n")
+    return digest.hexdigest()
 
 
 async def async_main(arguments: Sequence[str] | None = None) -> int:

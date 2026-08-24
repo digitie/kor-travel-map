@@ -78,7 +78,7 @@ async def _writer_fence_receipt(
     expected = module._verify_reference_artifacts()
     observed_privileged_residue = await _privileged_residue_receipt(module, admin_dsn)
     payload = {
-        "schema": "kor-travel-docker-manager.map-application-schema-handoff-fence.v3",
+        "schema": "kor-travel-docker-manager.map-application-schema-handoff-fence.v4",
         "transaction_id": str(uuid4()),
         "journal_sha256": "c" * 64,
         "operation": "map-application-schema-0236-to-300",
@@ -92,6 +92,12 @@ async def _writer_fence_receipt(
         "seed_sha256": expected["seed_sha256"],
         "privileged_residue_sha256": expected["privileged_residue_sha256"],
         "pre_privileged_residue_sha256": observed_privileged_residue,
+        "source_alembic_version_sha256": expected[
+            "source_alembic_version_sha256"
+        ],
+        "destination_alembic_version_sha256": expected[
+            "destination_alembic_version_sha256"
+        ],
         "runtime_invariants_sql_sha256": expected["runtime_invariants_sql_sha256"],
         "database_name": str(row[0]),
         "database_oid": int(row[1]),
@@ -256,6 +262,24 @@ async def test_handoff_executable_rejects_synthetic_0236_label_before_stamp(
         (
             "GRANT SELECT (version_num) ON TABLE public.alembic_version TO PUBLIC",
             "public Alembic column ACL",
+        ),
+        (
+            "GRANT USAGE ON TYPE public.alembic_version TO PUBLIC",
+            "public Alembic row type ACL",
+        ),
+        (
+            "GRANT USAGE ON TYPE public.alembic_version TO PUBLIC; "
+            "REVOKE USAGE ON TYPE public.alembic_version FROM PUBLIC",
+            "public Alembic row type explicit default ACL residue",
+        ),
+        (
+            "GRANT USAGE ON TYPE public._alembic_version TO PUBLIC",
+            "public Alembic array type ACL",
+        ),
+        (
+            "GRANT USAGE ON TYPE public._alembic_version TO PUBLIC; "
+            "REVOKE USAGE ON TYPE public._alembic_version FROM PUBLIC",
+            "public Alembic array type explicit default ACL residue",
         ),
         (
             "ALTER TABLE public.alembic_version "

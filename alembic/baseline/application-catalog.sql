@@ -1058,6 +1058,97 @@ WITH extension_member AS (
                     ELSE COALESCE(table_tablespace.spcname, '<missing>')
                 END
             ),
+            -- relation table ACL은 source/destination facet으로 분리되지만 implicit
+            -- composite row type은 두 상태에서 동일해야 한다. type ACL은 relation ACL과
+            -- 독립적으로 GRANT될 수 있으므로 typed ACL projection으로 exact receipt화한다.
+            'row_type', COALESCE((
+                SELECT jsonb_build_object(
+                    'acl', COALESCE((
+                        SELECT jsonb_agg(
+                            jsonb_build_object(
+                                'grantable', privilege.is_grantable,
+                                'grantee', CASE
+                                    WHEN privilege.grantee = 0 THEN 'PUBLIC'
+                                    ELSE privilege.grantee::regrole::text
+                                END,
+                                'grantor', privilege.grantor::regrole::text,
+                                'privilege', privilege.privilege_type
+                            )
+                            ORDER BY privilege.grantor,
+                                     privilege.grantee,
+                                     privilege.privilege_type,
+                                     privilege.is_grantable
+                        )
+                        FROM aclexplode(type_row.typacl) AS privilege
+                    ), '[]'::jsonb),
+                    'array_type', COALESCE((
+                        SELECT jsonb_build_object(
+                            'acl', COALESCE((
+                                SELECT jsonb_agg(
+                                    jsonb_build_object(
+                                        'grantable', privilege.is_grantable,
+                                        'grantee', CASE
+                                            WHEN privilege.grantee = 0 THEN 'PUBLIC'
+                                            ELSE privilege.grantee::regrole::text
+                                        END,
+                                        'grantor', privilege.grantor::regrole::text,
+                                        'privilege', privilege.privilege_type
+                                    )
+                                    ORDER BY privilege.grantor,
+                                             privilege.grantee,
+                                             privilege.privilege_type,
+                                             privilege.is_grantable
+                                )
+                                FROM aclexplode(type_array.typacl) AS privilege
+                            ), '[]'::jsonb),
+                            'collation', CASE
+                                WHEN type_array.typcollation = 0 THEN '<none>'
+                                ELSE array_collation_namespace.nspname || '.'
+                                    || array_collation.collname
+                            END,
+                            'defined', type_array.typisdefined,
+                            'element', type_array.typelem::regtype::text,
+                            'kind', type_array.typtype::text,
+                            'name', type_array.typname,
+                            'namespace', array_namespace.nspname,
+                            'owner', type_array.typowner::regrole::text,
+                            'relation_link', CASE
+                                WHEN type_array.typrelid = 0 THEN '<none>'
+                                ELSE type_array.typrelid::regclass::text
+                            END,
+                            'array_link', CASE
+                                WHEN type_array.typarray = 0 THEN '<none>'
+                                ELSE type_array.typarray::regtype::text
+                            END
+                        )
+                        FROM pg_catalog.pg_type AS type_array
+                        JOIN pg_catalog.pg_namespace AS array_namespace
+                          ON array_namespace.oid = type_array.typnamespace
+                        LEFT JOIN pg_catalog.pg_collation AS array_collation
+                          ON array_collation.oid = type_array.typcollation
+                        LEFT JOIN pg_catalog.pg_namespace AS array_collation_namespace
+                          ON array_collation_namespace.oid = array_collation.collnamespace
+                        WHERE type_array.oid = type_row.typarray
+                    ), '{}'::jsonb),
+                    'collation', CASE
+                        WHEN type_row.typcollation = 0 THEN '<none>'
+                        ELSE collation_namespace.nspname || '.' || type_collation.collname
+                    END,
+                    'defined', type_row.typisdefined,
+                    'kind', type_row.typtype::text,
+                    'name', type_row.typname,
+                    'namespace', type_namespace.nspname,
+                    'owner', type_row.typowner::regrole::text
+                )
+                FROM pg_catalog.pg_type AS type_row
+                JOIN pg_catalog.pg_namespace AS type_namespace
+                  ON type_namespace.oid = type_row.typnamespace
+                LEFT JOIN pg_catalog.pg_collation AS type_collation
+                  ON type_collation.oid = type_row.typcollation
+                LEFT JOIN pg_catalog.pg_namespace AS collation_namespace
+                  ON collation_namespace.oid = type_collation.collnamespace
+                WHERE type_row.typrelid = relation.oid
+            ), '{}'::jsonb),
             'attribute_slots', COALESCE((
                 SELECT jsonb_agg(
                     jsonb_build_object(

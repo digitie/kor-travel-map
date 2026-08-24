@@ -61,6 +61,7 @@ _FENCE_FIELDS: Final = frozenset(
         "seed_sha256",
         "privileged_residue_sha256",
         "pre_privileged_residue_sha256",
+        "destination_alembic_version_sha256",
         "runtime_invariants_sql_sha256",
         "database_name",
         "database_oid",
@@ -78,6 +79,8 @@ _CONTRACT_FIELDS: Final = frozenset(
         "catalog_sha256",
         "seed_sha256",
         "privileged_residue_sha256",
+        "source_alembic_version_sha256",
+        "destination_alembic_version_sha256",
         "runtime_invariants_sql_sha256",
     }
 )
@@ -163,6 +166,7 @@ def _require_fixed_fence() -> Mapping[str, Any]:
         "seed_sha256",
         "privileged_residue_sha256",
         "pre_privileged_residue_sha256",
+        "destination_alembic_version_sha256",
         "runtime_invariants_sql_sha256",
     ):
         _require_sha256(value[key], key)
@@ -326,6 +330,9 @@ async def _assert_raw_300_and_receipts(dsn: str, expected: Mapping[str, str]) ->
             seed = await module._contract_sha256(  # type: ignore[attr-defined]
                 connection, "application-seed.sql"
             )
+            destination_alembic_version = await module._contract_sha256(  # type: ignore[attr-defined]
+                connection, "application-destination-alembic-version.sql"
+            )
             await module._verify_runtime_projection_invariants(  # type: ignore[attr-defined]
                 connection
             )
@@ -337,6 +344,13 @@ async def _assert_raw_300_and_receipts(dsn: str, expected: Mapping[str, str]) ->
         raise FreshFinalizeError("fresh finalize requires exact raw revision 300")
     if catalog != expected["catalog_sha256"] or seed != expected["seed_sha256"]:
         raise FreshFinalizeError("fresh finalize catalog or seed receipt does not match baseline")
+    if (
+        destination_alembic_version
+        != expected["destination_alembic_version_sha256"]
+    ):
+        raise FreshFinalizeError(
+            "fresh finalize destination Alembic metadata facet does not match baseline"
+        )
 
 
 async def _finalize() -> None:
@@ -356,6 +370,8 @@ async def _finalize() -> None:
         or fence["seed_sha256"] != expected["seed_sha256"]
         or fence["privileged_residue_sha256"] != expected["privileged_residue_sha256"]
         or fence["pre_privileged_residue_sha256"] != expected["privileged_residue_sha256"]
+        or fence["destination_alembic_version_sha256"]
+        != expected["destination_alembic_version_sha256"]
         or fence["runtime_invariants_sql_sha256"]
         != expected["runtime_invariants_sql_sha256"]
     ):

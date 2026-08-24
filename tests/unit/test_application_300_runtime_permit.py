@@ -32,7 +32,7 @@ def _valid_permit(module: object) -> dict[str, object]:
     database_oid = 16384
     database_owner = "ktm_feature_schema_owner"
     return {
-        "schema": "kor-travel-docker-manager.map-application-final-permit.v1",
+        "schema": "kor-travel-docker-manager.map-application-final-permit.v2",
         "transition_kind": "map-application-schema-0236-to-300",
         "state": "finalized",
         "transaction_id": "b93bb7cf-7901-4790-88a8-2a7bbc07f3b7",
@@ -43,6 +43,12 @@ def _valid_permit(module: object) -> dict[str, object]:
             "postgres_image_id": reference["source"]["container_image_id"],
             "application_head": "300",
             "reference_manifest_sha256": reference_sha256,
+            "source_alembic_version_sha256": artifacts[
+                "source_alembic_version_contract_sha256"
+            ],
+            "destination_alembic_version_sha256": artifacts[
+                "destination_alembic_version_contract_sha256"
+            ],
             "runtime_invariants_sql_sha256": artifacts["runtime_invariants_sql_sha256"],
         },
         "database": {
@@ -70,6 +76,12 @@ def _valid_permit(module: object) -> dict[str, object]:
             ],
             "post_privileged_residue_sha256": artifacts[
                 "privileged_residue_contract_sha256"
+            ],
+            "expected_destination_alembic_version_sha256": artifacts[
+                "destination_alembic_version_contract_sha256"
+            ],
+            "observed_destination_alembic_version_sha256": artifacts[
+                "destination_alembic_version_contract_sha256"
             ],
             "runtime_invariant_violation_count": 0,
         },
@@ -295,6 +307,8 @@ def test_fresh_finalize_rechecks_live_fence_immediately_before_acl_mutation(
         "catalog_sha256": "e" * 64,
         "seed_sha256": "f" * 64,
         "privileged_residue_sha256": "1" * 64,
+        "source_alembic_version_sha256": "3" * 64,
+        "destination_alembic_version_sha256": "4" * 64,
         "runtime_invariants_sql_sha256": "2" * 64,
     }
     fence = {
@@ -307,6 +321,9 @@ def test_fresh_finalize_rechecks_live_fence_immediately_before_acl_mutation(
         "seed_sha256": contract["seed_sha256"],
         "privileged_residue_sha256": contract["privileged_residue_sha256"],
         "pre_privileged_residue_sha256": contract["privileged_residue_sha256"],
+        "destination_alembic_version_sha256": contract[
+            "destination_alembic_version_sha256"
+        ],
         "runtime_invariants_sql_sha256": contract["runtime_invariants_sql_sha256"],
     }
     calls = 0
@@ -369,6 +386,12 @@ def test_static_baseline_contract_attests_all_manager_consumed_receipts() -> Non
         "seed_sha256": artifacts["seed_contract_sha256"],
         "privileged_residue_sha256": artifacts[
             "privileged_residue_contract_sha256"
+        ],
+        "source_alembic_version_sha256": artifacts[
+            "source_alembic_version_contract_sha256"
+        ],
+        "destination_alembic_version_sha256": artifacts[
+            "destination_alembic_version_contract_sha256"
         ],
         "runtime_invariants_sql_sha256": artifacts["runtime_invariants_sql_sha256"],
     }

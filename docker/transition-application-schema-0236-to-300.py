@@ -41,9 +41,9 @@ _SCHEMA_OWNER_ROLE_ENV: Final = "KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE"
 _HANDOFF_CAPABILITY_ENV: Final = "KOR_TRAVEL_MAP_APPLICATION_HANDOFF_CAPABILITY_PATH"
 _HANDOFF_CAPABILITY_DIRECTORY: Final = Path("/run/kor-travel-map-application-handoff")
 _HANDOFF_CAPABILITY_FILE: Final = _HANDOFF_CAPABILITY_DIRECTORY / "capability"
-_RESULT_SCHEMA: Final = "kor-travel-map.application-baseline-handoff.v2"
+_RESULT_SCHEMA: Final = "kor-travel-map.application-baseline-handoff.v3"
 _FENCE_RECEIPT_SCHEMA: Final = (
-    "kor-travel-docker-manager.map-application-schema-handoff-fence.v3"
+    "kor-travel-docker-manager.map-application-schema-handoff-fence.v4"
 )
 _FENCE_OPERATION: Final = "map-application-schema-0236-to-300"
 _IMAGE_REVISION_ENV: Final = "KOR_TRAVEL_MAP_IMAGE_REVISION"
@@ -56,6 +56,18 @@ _SEED_CONTRACT_SQL: Final = "application-seed.sql"
 _SEED_CONTRACT_SHA256: Final = "application-seed.sha256"
 _PRIVILEGED_RESIDUE_CONTRACT_SQL: Final = "application-privileged-residue.sql"
 _PRIVILEGED_RESIDUE_CONTRACT_SHA256: Final = "application-privileged-residue.sha256"
+_SOURCE_ALEMBIC_VERSION_CONTRACT_SQL: Final = (
+    "application-source-alembic-version.sql"
+)
+_SOURCE_ALEMBIC_VERSION_CONTRACT_SHA256: Final = (
+    "application-source-alembic-version.sha256"
+)
+_DESTINATION_ALEMBIC_VERSION_CONTRACT_SQL: Final = (
+    "application-destination-alembic-version.sql"
+)
+_DESTINATION_ALEMBIC_VERSION_CONTRACT_SHA256: Final = (
+    "application-destination-alembic-version.sha256"
+)
 _RUNTIME_INVARIANTS_SQL: Final = "application-runtime-invariants.sql"
 _REFERENCE_MANIFEST: Final = "application-reference.json"
 _REFERENCE_MANIFEST_SHA256: Final = "application-reference.sha256"
@@ -94,6 +106,8 @@ _FENCE_RECEIPT_FIELDS: Final = frozenset(
         "seed_sha256",
         "privileged_residue_sha256",
         "pre_privileged_residue_sha256",
+        "source_alembic_version_sha256",
+        "destination_alembic_version_sha256",
         "runtime_invariants_sql_sha256",
         "database_name",
         "database_oid",
@@ -441,10 +455,22 @@ def _verify_reference_artifacts() -> dict[str, str]:
         _CATALOG_CONTRACT_SQL: "catalog_contract_sql_sha256",
         _SEED_CONTRACT_SQL: "seed_contract_sql_sha256",
         _PRIVILEGED_RESIDUE_CONTRACT_SQL: "privileged_residue_contract_sql_sha256",
+        _SOURCE_ALEMBIC_VERSION_CONTRACT_SQL: (
+            "source_alembic_version_contract_sql_sha256"
+        ),
+        _DESTINATION_ALEMBIC_VERSION_CONTRACT_SQL: (
+            "destination_alembic_version_contract_sql_sha256"
+        ),
         _RUNTIME_INVARIANTS_SQL: "runtime_invariants_sql_sha256",
         _CATALOG_CONTRACT_SHA256: "catalog_contract_receipt_sha256",
         _SEED_CONTRACT_SHA256: "seed_contract_receipt_sha256",
         _PRIVILEGED_RESIDUE_CONTRACT_SHA256: "privileged_residue_contract_receipt_sha256",
+        _SOURCE_ALEMBIC_VERSION_CONTRACT_SHA256: (
+            "source_alembic_version_contract_receipt_sha256"
+        ),
+        _DESTINATION_ALEMBIC_VERSION_CONTRACT_SHA256: (
+            "destination_alembic_version_contract_receipt_sha256"
+        ),
     }
     for name, manifest_key in file_digests.items():
         if _sha256_file(_baseline_artifact(name)) != _manifest_sha256(manifest, manifest_key):
@@ -458,6 +484,16 @@ def _verify_reference_artifacts() -> dict[str, str]:
             _PRIVILEGED_RESIDUE_CONTRACT_SHA256,
             "privileged_residue_contract_sha256",
             "privileged_residue_sha256",
+        ),
+        (
+            _SOURCE_ALEMBIC_VERSION_CONTRACT_SHA256,
+            "source_alembic_version_contract_sha256",
+            "source_alembic_version_sha256",
+        ),
+        (
+            _DESTINATION_ALEMBIC_VERSION_CONTRACT_SHA256,
+            "destination_alembic_version_contract_sha256",
+            "destination_alembic_version_sha256",
         ),
     ):
         try:
@@ -567,6 +603,8 @@ def _load_writer_fence_receipt(receipt_path: str) -> tuple[dict[str, Any], str]:
         "seed_sha256",
         "privileged_residue_sha256",
         "pre_privileged_residue_sha256",
+        "source_alembic_version_sha256",
+        "destination_alembic_version_sha256",
         "runtime_invariants_sql_sha256",
     ):
         if not _is_sha256(value.get(key)):
@@ -649,6 +687,10 @@ async def _verify_writer_fence_binding(
         or receipt["privileged_residue_sha256"] != expected["privileged_residue_sha256"]
         or receipt["pre_privileged_residue_sha256"]
         != expected["privileged_residue_sha256"]
+        or receipt["source_alembic_version_sha256"]
+        != expected["source_alembic_version_sha256"]
+        or receipt["destination_alembic_version_sha256"]
+        != expected["destination_alembic_version_sha256"]
         or receipt["runtime_invariants_sql_sha256"]
         != expected["runtime_invariants_sql_sha256"]
     ):
@@ -1252,10 +1294,33 @@ async def _verify_runtime_alembic_version_read_contract(connection: AsyncConnect
                 FROM pg_catalog.pg_class AS relation
                 JOIN pg_catalog.pg_namespace AS namespace
                   ON namespace.oid = relation.relnamespace
+                JOIN pg_catalog.pg_type AS row_type
+                  ON row_type.typrelid = relation.oid
+                JOIN pg_catalog.pg_type AS array_type
+                  ON array_type.oid = row_type.typarray
                 WHERE namespace.nspname = 'public'
                   AND relation.relname = 'alembic_version'
                   AND relation.relkind = 'r'
+                  AND relation.relowner = 'ktm_feature_schema_owner'::regrole
                   AND relation.relacl IS NOT NULL
+                  AND row_type.typnamespace = relation.relnamespace
+                  AND row_type.typname = relation.relname
+                  AND row_type.typowner = relation.relowner
+                  AND row_type.typtype = 'c'::"char"
+                  AND row_type.typisdefined
+                  AND row_type.typcollation = 0
+                  AND row_type.typacl IS NULL
+                  AND array_type.typnamespace = relation.relnamespace
+                  AND array_type.typname = '_alembic_version'
+                  AND array_type.typowner = relation.relowner
+                  AND array_type.typtype = 'b'::"char"
+                  AND array_type.typcategory = 'A'::"char"
+                  AND array_type.typisdefined
+                  AND array_type.typcollation = 0
+                  AND array_type.typacl IS NULL
+                  AND array_type.typrelid = 0
+                  AND array_type.typarray = 0
+                  AND array_type.typelem = row_type.oid
                   AND has_table_privilege(
                       'ktm_feature_runtime', relation.oid, 'SELECT'
                   )
@@ -1263,13 +1328,28 @@ async def _verify_runtime_alembic_version_read_contract(connection: AsyncConnect
                       'ktm_feature_runtime', relation.oid,
                       'INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER'
                   )
+                  AND (
+                      SELECT count(*)
+                      FROM aclexplode(relation.relacl)
+                  ) = 8
                   AND NOT EXISTS (
                       SELECT 1
                       FROM aclexplode(relation.relacl) AS privilege
                       WHERE NOT (
-                          privilege.grantee = relation.relowner
+                          (
+                              privilege.grantee = relation.relowner
+                              AND privilege.grantor = relation.relowner
+                              AND privilege.privilege_type = ANY (
+                                  ARRAY[
+                                      'INSERT', 'SELECT', 'UPDATE', 'DELETE',
+                                      'TRUNCATE', 'REFERENCES', 'TRIGGER'
+                                  ]::text[]
+                              )
+                              AND NOT privilege.is_grantable
+                          )
                           OR (
                               privilege.grantee = 'ktm_feature_runtime'::regrole
+                              AND privilege.grantor = relation.relowner
                               AND privilege.privilege_type = 'SELECT'
                               AND NOT privilege.is_grantable
                           )
@@ -1296,7 +1376,7 @@ def _map_visible_contract_matches(
 ) -> bool:
     """schema-owner가 볼 수 있는 catalog/seed 두 축만 exact 비교한다."""
 
-    return set(observed) == set(_MAP_VISIBLE_CONTRACT_KEYS) and all(
+    return all(
         observed[key] == reference[key] for key in _MAP_VISIBLE_CONTRACT_KEYS
     )
 
@@ -1317,9 +1397,17 @@ async def _preflight(connection: AsyncConnection, *, expected_head: str) -> dict
     await _verify_runtime_projection_invariants(connection)
     if expected_head == _DESTINATION_HEAD:
         await _verify_runtime_alembic_version_read_contract(connection)
+        alembic_version_contract_sql = _DESTINATION_ALEMBIC_VERSION_CONTRACT_SQL
+    elif expected_head == _SOURCE_HEAD:
+        alembic_version_contract_sql = _SOURCE_ALEMBIC_VERSION_CONTRACT_SQL
+    else:
+        raise HandoffError("unsupported application Alembic facet head")
     return {
         "catalog_sha256": await _catalog_sha256(connection),
         "seed_sha256": await _seed_sha256(connection),
+        "alembic_version_sha256": await _contract_sha256(
+            connection, alembic_version_contract_sql
+        ),
     }
 
 
@@ -1370,6 +1458,13 @@ async def _handoff(writer_fence_receipt_path: str) -> dict[str, str]:
                 raise HandoffError(
                     "0236 source catalog or seed does not match the immutable 300 reference"
                 )
+            if (
+                before["alembic_version_sha256"]
+                != expected["source_alembic_version_sha256"]
+            ):
+                raise HandoffError(
+                    "0236 source Alembic metadata facet does not match the immutable reference"
+                )
             # receipt를 읽은 뒤 long catalog/data preflight가 실행됐다. raw metadata를
             # 바꾸기 바로 전에 fence 만료를 다시 확인한다.
             _require_unexpired_writer_fence(writer_fence_receipt)
@@ -1379,6 +1474,13 @@ async def _handoff(writer_fence_receipt_path: str) -> dict[str, str]:
             if not _map_visible_contract_matches(after, expected):
                 raise HandoffError(
                     "300 destination catalog or seed does not match the immutable reference"
+                )
+            if (
+                after["alembic_version_sha256"]
+                != expected["destination_alembic_version_sha256"]
+            ):
+                raise HandoffError(
+                    "300 destination Alembic metadata facet does not match the immutable reference"
                 )
             # outer transaction commit 직전에도 살아 있어야 한다. 실패면 same transaction
             # rollback으로 source `0236` raw row가 보존된다.
@@ -1394,13 +1496,23 @@ async def _handoff(writer_fence_receipt_path: str) -> dict[str, str]:
         "expected_catalog_sha256": expected["catalog_sha256"],
         "expected_seed_sha256": expected["seed_sha256"],
         "expected_privileged_residue_sha256": expected["privileged_residue_sha256"],
+        "expected_source_alembic_version_sha256": expected[
+            "source_alembic_version_sha256"
+        ],
+        "expected_destination_alembic_version_sha256": expected[
+            "destination_alembic_version_sha256"
+        ],
         "pre_privileged_residue_sha256": writer_fence_receipt[
             "pre_privileged_residue_sha256"
         ],
         "pre_catalog_sha256": before["catalog_sha256"],
         "pre_seed_sha256": before["seed_sha256"],
+        "pre_source_alembic_version_sha256": before["alembic_version_sha256"],
         "post_catalog_sha256": after["catalog_sha256"],
         "post_seed_sha256": after["seed_sha256"],
+        "post_destination_alembic_version_sha256": after[
+            "alembic_version_sha256"
+        ],
         "writer_fence_receipt_sha256": writer_fence_receipt_sha256,
         "writer_fence_transaction_id": str(writer_fence_receipt["transaction_id"]),
     }

@@ -11,7 +11,7 @@
   "artifacts": {
     "schema_sql_sha256": "b1c07bdd046e1746c00ace1607832f0cbb5e5bd5a8247fac77c5c65eb1b007ac",
     "seed_sql_sha256": "77173ed79a6451790b027be8d3a8010f9e42910004e8e2dacaaa6f0e8c165681",
-    "catalog_contract_sql_sha256": "b5719d1a5347ddb2dc170043d71d93703d887ccfef2a7da40dae9c37eae4e7c1",
+    "catalog_contract_sql_sha256": "62dd43573592fef644aad989a3b327d6fe8bed12ff0adabbf7f435edd7eb9d82",
     "catalog_contract_sha256": "3f2b1459f0db7f725df32b067161b36200adbfd933e8cc200441985783471054",
     "catalog_contract_receipt_sha256": "6ba730fabf06c80ca3f2c467c86baeebb4c92da117b1789b0cb8d2dddb32ba9c",
     "seed_contract_sql_sha256": "7122f27734b74e9ea61817d98359179dcd6ed443d5ecd604254a423c1f851e2b",
@@ -20,6 +20,12 @@
     "privileged_residue_contract_sql_sha256": "eac31b780ca9092a431ebc6321c382b4b70e89bdd1d618e417ce5c796d10b628",
     "privileged_residue_contract_sha256": "baa8077f7c6427fc14ca30477f1febc0b81ba07478ef5031d893bbeae8942f71",
     "privileged_residue_contract_receipt_sha256": "ca482bef39b0a68c413e0e3c94dc393c955c884017133a3fc39777bb5842663e",
+    "source_alembic_version_contract_sql_sha256": "a64b1221255c234f98ffec969c9085201403e2905c8c7d3b82a4b8a86080b87e",
+    "source_alembic_version_contract_sha256": "cb6598a5f474b641749efa843826635d7d0c0c9afa695967ae5b2157cead7939",
+    "source_alembic_version_contract_receipt_sha256": "23ea228533b37ef02d54dce755c634a789697d226012f3b2e2c2ba4aa75bba8e",
+    "destination_alembic_version_contract_sql_sha256": "52d1d76b0bc3c035be5630171cc4819233413bb1159830e36d6dbc829d2fc784",
+    "destination_alembic_version_contract_sha256": "72eac11772cdd5428a856188405bd36bedfed03fd47dbb4550fc94b3e2cde32c",
+    "destination_alembic_version_contract_receipt_sha256": "1c6fd221d84c1eb8b45b6465a0f50637b85f25d122e3b7698475f9c74c25a35e",
     "runtime_invariants_sql_sha256": "2f77da06a61752fa5d2df9e3aa359d6e1689a6410805f92db92f0e4872cc8ad1"
   },
   "fresh_seed_relations": [

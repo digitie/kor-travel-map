@@ -39,6 +39,16 @@ _RECEIPT_ARTIFACTS: Final = {
         "privileged_residue_contract_receipt_sha256",
         "application-privileged-residue.sha256",
     ),
+    "source_alembic_version_sha256": (
+        "source_alembic_version_contract_sha256",
+        "source_alembic_version_contract_receipt_sha256",
+        "application-source-alembic-version.sha256",
+    ),
+    "destination_alembic_version_sha256": (
+        "destination_alembic_version_contract_sha256",
+        "destination_alembic_version_contract_receipt_sha256",
+        "application-destination-alembic-version.sha256",
+    ),
 }
 _SQL_ARTIFACTS: Final = {
     "schema_sql_sha256": "schema.sql",
@@ -46,6 +56,12 @@ _SQL_ARTIFACTS: Final = {
     "catalog_contract_sql_sha256": "application-catalog.sql",
     "seed_contract_sql_sha256": "application-seed.sql",
     "privileged_residue_contract_sql_sha256": "application-privileged-residue.sql",
+    "source_alembic_version_contract_sql_sha256": (
+        "application-source-alembic-version.sql"
+    ),
+    "destination_alembic_version_contract_sql_sha256": (
+        "application-destination-alembic-version.sql"
+    ),
     "runtime_invariants_sql_sha256": "application-runtime-invariants.sql",
 }
 

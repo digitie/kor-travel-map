@@ -336,6 +336,10 @@ for sidecar in \
   application-seed.sha256 \
   application-privileged-residue.sql \
   application-privileged-residue.sha256 \
+  application-source-alembic-version.sql \
+  application-source-alembic-version.sha256 \
+  application-destination-alembic-version.sql \
+  application-destination-alembic-version.sha256 \
   schema.sql \
   seed.sql; do
   host_sidecar_sha256="$(sha256sum "$CANDIDATE_SEALED_ROOT/alembic/baseline/$sidecar" | awk '{print $1}')"
@@ -926,6 +930,7 @@ contract_sha256() {
 fresh_catalog_sha256="$(contract_sha256 application-catalog.sql)"
 fresh_seed_sha256="$(contract_sha256 application-seed.sql)"
 fresh_privileged_residue_sha256="$(contract_sha256 application-privileged-residue.sql database-superuser)"
+fresh_destination_alembic_version_sha256="$(contract_sha256 application-destination-alembic-version.sql)"
 runtime_invariant_violations="$(
   {
     printf '%s\n' 'BEGIN;'
@@ -941,6 +946,11 @@ runtime_invariant_violations="$(
 [[ "$fresh_seed_sha256" =~ ^[0-9a-f]{64}$ ]] || die "fresh oracle seed receipt SHA-256을 얻지 못했다"
 [[ "$fresh_privileged_residue_sha256" =~ ^[0-9a-f]{64}$ ]] || \
   die "fresh oracle privileged residue receipt SHA-256을 얻지 못했다"
+[[ "$fresh_destination_alembic_version_sha256" =~ ^[0-9a-f]{64}$ ]] || \
+  die "fresh oracle destination Alembic metadata receipt SHA-256을 얻지 못했다"
+expected_destination_alembic_version_sha256="$(tr -d '\r\n' < "$CANDIDATE_SEALED_ROOT/alembic/baseline/application-destination-alembic-version.sha256")"
+[ "$fresh_destination_alembic_version_sha256" = "$expected_destination_alembic_version_sha256" ] || \
+  die "fresh oracle destination Alembic metadata facet이 candidate reference와 다르다"
 [ "$runtime_invariant_violations" = "0" ] || \
   die "candidate migration 뒤 runtime projection invariant가 실패했다"
 
@@ -957,7 +967,8 @@ python3 - "$receipt_tmp" "$container_id" "$DATABASE" "$database_oid" "$system_id
   "$raw_revision" "$application_relation_count" "$fresh_catalog_sha256" "$fresh_seed_sha256" \
   "$fresh_privileged_residue_sha256" "$runtime_invariant_violations" \
   "$candidate_proof_tools_manifest_sha256" "$FRESH_DATABASE_TEMPLATE" \
-  "$fresh_initial_virgin_inventory" "$fresh_initial_virgin_inventory_sha256" <<'PY'
+  "$fresh_initial_virgin_inventory" "$fresh_initial_virgin_inventory_sha256" \
+  "$fresh_destination_alembic_version_sha256" <<'PY'
 from __future__ import annotations
 
 import json
@@ -966,7 +977,7 @@ from pathlib import Path
 
 target = Path(sys.argv[1])
 value = {
-    "schema": "kor-travel-map.application-fresh-300-oracle.v6",
+    "schema": "kor-travel-map.application-fresh-300-oracle.v7",
     "container_id": sys.argv[2],
     "database": sys.argv[3],
     "database_oid": int(sys.argv[4]),
@@ -1004,6 +1015,7 @@ value = {
     "fresh_database_template": sys.argv[33],
     "fresh_initial_virgin_inventory": json.loads(sys.argv[34]),
     "fresh_initial_virgin_inventory_sha256": sys.argv[35],
+    "destination_alembic_version_sha256": sys.argv[36],
 }
 target.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
 PY

@@ -134,6 +134,9 @@ def test_catalog_contract_binds_public_alembic_exception_shape() -> None:
     ).read_text(encoding="utf-8")
 
     assert "'public_alembic_version_contract'" in contract
+    public_alembic_contract = contract.split(
+        "'public_alembic_version_contract'", maxsplit=1
+    )[1].split("'public_residue_routine'", maxsplit=1)[0]
     for field in (
         "'attribute_slots'",
         "'columns'",
@@ -142,8 +145,16 @@ def test_catalog_contract_binds_public_alembic_exception_shape() -> None:
         "'policies'",
         "'rules'",
         "'triggers'",
+        "'row_type'",
     ):
         assert field in contract
+    for field in ("'grantable'", "'grantee'", "'grantor'", "'privilege'"):
+        assert field in public_alembic_contract
+    assert "FROM aclexplode(type_row.typacl)" in public_alembic_contract
+    assert "'array_type'" in public_alembic_contract
+    assert "FROM aclexplode(type_array.typacl)" in public_alembic_contract
+    assert "type_array.typelem::regtype::text" in public_alembic_contract
+    assert "type_row.typrelid = relation.oid" in public_alembic_contract
     assert "'attribute_slot_count', relation.relnatts" in contract
     assert "WHEN relation.reltablespace = 0 THEN '<database-default>'" in contract
     assert "table_access_method.amname" in contract
@@ -157,6 +168,11 @@ def test_catalog_contract_binds_public_alembic_exception_shape() -> None:
     assert "index_relation.relname = 'alembic_version_pkc'" in migration
     assert "attribute.attname <> 'version_num'" in migration
     assert "object.relnatts = 1" in migration
+    assert "row_type.typrelid = object.oid" in migration
+    assert "row_type.typacl IS NULL" in migration
+    assert "array_type.typacl IS NULL" in migration
+    assert "array_type.typelem = row_type.oid" in migration
+    assert "privilege.grantor = object.relowner" in migration
     assert "attribute.attisdropped" in migration
     assert "table_access_method.amname = 'heap'" in migration
     assert "index_access_method.amname = 'btree'" in migration

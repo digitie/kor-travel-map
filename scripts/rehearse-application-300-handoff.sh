@@ -320,6 +320,8 @@ candidate_contract_receipt() {
 expected_catalog_sha256="$(candidate_contract_receipt application-catalog.sha256)"
 expected_seed_sha256="$(candidate_contract_receipt application-seed.sha256)"
 expected_privileged_residue_sha256="$(candidate_contract_receipt application-privileged-residue.sha256)"
+expected_source_alembic_version_sha256="$(candidate_contract_receipt application-source-alembic-version.sha256)"
+expected_destination_alembic_version_sha256="$(candidate_contract_receipt application-destination-alembic-version.sha256)"
 expected_runtime_invariants_sql_sha256="$(docker run --pull=never --rm --entrypoint python "$candidate_image_id" -c '
 from __future__ import annotations
 import json
@@ -330,6 +332,8 @@ for digest in \
   "$expected_catalog_sha256" \
   "$expected_seed_sha256" \
   "$expected_privileged_residue_sha256" \
+  "$expected_source_alembic_version_sha256" \
+  "$expected_destination_alembic_version_sha256" \
   "$expected_runtime_invariants_sql_sha256"; do
   [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || die "candidate contract receipt SHA-256을 읽지 못했다"
 done
@@ -371,6 +375,7 @@ raw_revision() {
 
 assert_contracts() {
   local database="$1"
+  local phase="$2"
   OBSERVED_CATALOG_SHA256="$(contract_sha256 "$database" application-catalog.sql schema-owner)"
   OBSERVED_SEED_SHA256="$(contract_sha256 "$database" application-seed.sql schema-owner)"
   OBSERVED_PRIVILEGED_RESIDUE_SHA256="$(contract_sha256 "$database" application-privileged-residue.sql database-superuser)"
@@ -378,6 +383,22 @@ assert_contracts() {
   [ "$OBSERVED_SEED_SHA256" = "$expected_seed_sha256" ] || die "source/clone seed receipt가 candidate와 다르다"
   [ "$OBSERVED_PRIVILEGED_RESIDUE_SHA256" = "$expected_privileged_residue_sha256" ] || \
     die "source/clone privileged residue receipt가 candidate와 다르다"
+  if [ "$phase" = "source" ] || [ "$phase" = "source-drift" ]; then
+    OBSERVED_ALEMBIC_VERSION_SHA256="$(contract_sha256 "$database" application-source-alembic-version.sql schema-owner)"
+    if [ "$phase" = "source" ]; then
+      [ "$OBSERVED_ALEMBIC_VERSION_SHA256" = "$expected_source_alembic_version_sha256" ] || \
+        die "source Alembic metadata facet이 candidate와 다르다"
+    else
+      [ "$OBSERVED_ALEMBIC_VERSION_SHA256" != "$expected_source_alembic_version_sha256" ] || \
+        die "negative source Alembic metadata facet drift가 만들어지지 않았다"
+    fi
+  elif [ "$phase" = "destination" ]; then
+    OBSERVED_ALEMBIC_VERSION_SHA256="$(contract_sha256 "$database" application-destination-alembic-version.sql schema-owner)"
+    [ "$OBSERVED_ALEMBIC_VERSION_SHA256" = "$expected_destination_alembic_version_sha256" ] || \
+      die "destination Alembic metadata facet이 candidate와 다르다"
+  else
+    die "unknown Alembic metadata contract phase: $phase"
+  fi
 }
 
 # Helper는 fence volume을 read-only로 mount한다. handoff 종료 뒤에도 root-owned 0444
@@ -412,10 +433,11 @@ print(f"{metadata.st_uid}:{stat.S_IMODE(metadata.st_mode):03o}")
 
 [ "$(raw_revision "$SOURCE_DATABASE")" = "0236_tvn41s_compaction_drained" ] || \
   die "source oracle DB raw Alembic revision이 exact 0236이 아니다"
-assert_contracts "$SOURCE_DATABASE"
+assert_contracts "$SOURCE_DATABASE" source
 source_catalog_sha256="$OBSERVED_CATALOG_SHA256"
 source_seed_sha256="$OBSERVED_SEED_SHA256"
 source_privileged_residue_sha256="$OBSERVED_PRIVILEGED_RESIDUE_SHA256"
+source_alembic_version_sha256="$OBSERVED_ALEMBIC_VERSION_SHA256"
 
 SOURCE_PASSWORD="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$SOURCE_CONTAINER" \
   | awk -F= '$1 == "POSTGRES_PASSWORD" {print substr($0, index($0, "=") + 1); exit}')"
@@ -455,7 +477,9 @@ write_root_fence_receipt() {
   python3 - "$target_json" "$identity" "$candidate_commit" "$candidate_image_id" \
     "$reference_manifest_sha256" "$expected_catalog_sha256" "$expected_seed_sha256" \
     "$expected_privileged_residue_sha256" "$privileged_digest" "$candidate_proof_tools_manifest_sha256" \
-    "$candidate_postgres_image_id" "$expected_runtime_invariants_sql_sha256" <<'PY'
+    "$candidate_postgres_image_id" "$expected_runtime_invariants_sql_sha256" \
+    "$expected_source_alembic_version_sha256" \
+    "$expected_destination_alembic_version_sha256" <<'PY'
 from __future__ import annotations
 
 import hashlib
@@ -477,7 +501,7 @@ journal_seed = json.dumps(
     separators=(",", ":"),
 ).encode("utf-8")
 value = {
-    "schema": "kor-travel-docker-manager.map-application-schema-handoff-fence.v3",
+    "schema": "kor-travel-docker-manager.map-application-schema-handoff-fence.v4",
     "transaction_id": str(uuid4()),
     "journal_sha256": hashlib.sha256(journal_seed).hexdigest(),
     "operation": "map-application-schema-0236-to-300",
@@ -492,6 +516,8 @@ value = {
     "privileged_residue_sha256": sys.argv[8],
     "pre_privileged_residue_sha256": sys.argv[9],
     "runtime_invariants_sql_sha256": sys.argv[12],
+    "source_alembic_version_sha256": sys.argv[13],
+    "destination_alembic_version_sha256": sys.argv[14],
     **identity,
     "writer_fence_expires_at": (datetime.now(UTC) + timedelta(minutes=15)).isoformat(),
 }
@@ -556,16 +582,21 @@ source_identity_json="$(clone_identity_json "$SOURCE_DATABASE")"
 
 clone_source_database "$NEGATIVE_DATABASE"
 negative_identity_json="$(clone_identity_json "$NEGATIVE_DATABASE")"
-assert_contracts "$NEGATIVE_DATABASE"
+assert_contracts "$NEGATIVE_DATABASE" source
+docker exec "$SOURCE_CONTAINER" psql -q -v ON_ERROR_STOP=1 -U postgres \
+  -d "$NEGATIVE_DATABASE" \
+  -c "GRANT SELECT ON TABLE public.alembic_version TO ktm_feature_runtime" >/dev/null
+assert_contracts "$NEGATIVE_DATABASE" source-drift
 negative_before_catalog_sha256="$OBSERVED_CATALOG_SHA256"
 negative_before_seed_sha256="$OBSERVED_SEED_SHA256"
 negative_before_privileged_residue_sha256="$OBSERVED_PRIVILEGED_RESIDUE_SHA256"
-write_root_fence_receipt "$NEGATIVE_DATABASE" "$(printf '0%.0s' {1..64})"
+negative_before_source_alembic_version_sha256="$OBSERVED_ALEMBIC_VERSION_SHA256"
+write_root_fence_receipt "$NEGATIVE_DATABASE" "$expected_privileged_residue_sha256"
 negative_fence_receipt_sha256="$FENCE_RECEIPT_SHA256"
 negative_fence_transaction_id="$FENCE_TRANSACTION_ID"
 negative_fence_file_metadata="$OBSERVED_FENCE_FILE_METADATA"
 if run_handoff "$NEGATIVE_DATABASE" "$TMPDIR_PATH/negative-result.json" 2>"$TMPDIR_PATH/negative-stderr.log"; then
-  die "invalid Manager-shaped fence receipt가 unexpectedly handoff를 통과했다"
+  die "source Alembic metadata facet drift가 unexpectedly handoff를 통과했다"
 fi
 [ ! -s "$TMPDIR_PATH/negative-result.json" ] || \
   die "negative handoff failure가 success result stdout을 남겼다"
@@ -574,14 +605,18 @@ fi
 assert_immutable_fence_file "$negative_fence_receipt_sha256"
 [ "$OBSERVED_FENCE_FILE_METADATA" = "$negative_fence_file_metadata" ] || \
   die "negative handoff 뒤 writer fence metadata가 변했다"
-assert_contracts "$NEGATIVE_DATABASE"
+assert_contracts "$NEGATIVE_DATABASE" source-drift
 negative_after_catalog_sha256="$OBSERVED_CATALOG_SHA256"
 negative_after_seed_sha256="$OBSERVED_SEED_SHA256"
 negative_after_privileged_residue_sha256="$OBSERVED_PRIVILEGED_RESIDUE_SHA256"
+negative_after_source_alembic_version_sha256="$OBSERVED_ALEMBIC_VERSION_SHA256"
 [ "$negative_before_catalog_sha256" = "$negative_after_catalog_sha256" ] \
   && [ "$negative_before_seed_sha256" = "$negative_after_seed_sha256" ] \
   && [ "$negative_before_privileged_residue_sha256" = "$negative_after_privileged_residue_sha256" ] || \
   die "negative handoff failure 뒤 source contract가 변했다"
+[ "$negative_before_source_alembic_version_sha256" = \
+  "$negative_after_source_alembic_version_sha256" ] || \
+  die "negative handoff failure 뒤 source Alembic metadata facet이 변했다"
 [ "$(clone_identity_json "$NEGATIVE_DATABASE")" = "$negative_identity_json" ] || \
   die "negative handoff failure 뒤 clone DB identity가 변했다"
 [ ! -e "$RECEIPT" ] && [ ! -L "$RECEIPT" ] || \
@@ -589,10 +624,11 @@ negative_after_privileged_residue_sha256="$OBSERVED_PRIVILEGED_RESIDUE_SHA256"
 
 clone_source_database "$POSITIVE_DATABASE"
 positive_identity_json="$(clone_identity_json "$POSITIVE_DATABASE")"
-assert_contracts "$POSITIVE_DATABASE"
+assert_contracts "$POSITIVE_DATABASE" source
 positive_before_catalog_sha256="$OBSERVED_CATALOG_SHA256"
 positive_before_seed_sha256="$OBSERVED_SEED_SHA256"
 positive_before_privileged_residue_sha256="$OBSERVED_PRIVILEGED_RESIDUE_SHA256"
+positive_before_source_alembic_version_sha256="$OBSERVED_ALEMBIC_VERSION_SHA256"
 write_root_fence_receipt "$POSITIVE_DATABASE" "$expected_privileged_residue_sha256"
 positive_fence_receipt_sha256="$FENCE_RECEIPT_SHA256"
 positive_fence_transaction_id="$FENCE_TRANSACTION_ID"
@@ -604,10 +640,11 @@ run_handoff "$POSITIVE_DATABASE" "$TMPDIR_PATH/positive-result.json" 2>"$TMPDIR_
 assert_immutable_fence_file "$positive_fence_receipt_sha256"
 [ "$OBSERVED_FENCE_FILE_METADATA" = "$positive_fence_file_metadata" ] || \
   die "positive handoff 뒤 writer fence metadata가 변했다"
-assert_contracts "$POSITIVE_DATABASE"
+assert_contracts "$POSITIVE_DATABASE" destination
 positive_after_catalog_sha256="$OBSERVED_CATALOG_SHA256"
 positive_after_seed_sha256="$OBSERVED_SEED_SHA256"
 positive_after_privileged_residue_sha256="$OBSERVED_PRIVILEGED_RESIDUE_SHA256"
+positive_after_destination_alembic_version_sha256="$OBSERVED_ALEMBIC_VERSION_SHA256"
 [ "$positive_before_catalog_sha256" = "$positive_after_catalog_sha256" ] \
   && [ "$positive_before_seed_sha256" = "$positive_after_seed_sha256" ] \
   && [ "$positive_before_privileged_residue_sha256" = "$positive_after_privileged_residue_sha256" ] || \
@@ -627,7 +664,14 @@ python3 - "$terminal_receipt_tmp" "$candidate_provenance_json" "$source_certific
   "$negative_before_catalog_sha256" "$negative_before_seed_sha256" \
   "$negative_before_privileged_residue_sha256" "$negative_after_catalog_sha256" \
   "$negative_after_seed_sha256" "$negative_after_privileged_residue_sha256" \
-  "$TMPDIR_PATH/negative-result.json" "$TMPDIR_PATH/negative-stderr.log" <<'PY'
+  "$TMPDIR_PATH/negative-result.json" "$TMPDIR_PATH/negative-stderr.log" \
+  "$expected_source_alembic_version_sha256" \
+  "$expected_destination_alembic_version_sha256" \
+  "$source_alembic_version_sha256" \
+  "$positive_before_source_alembic_version_sha256" \
+  "$positive_after_destination_alembic_version_sha256" \
+  "$negative_before_source_alembic_version_sha256" \
+  "$negative_after_source_alembic_version_sha256" <<'PY'
 from __future__ import annotations
 
 import hashlib
@@ -669,18 +713,22 @@ for key in (
     if key not in candidate:
         raise SystemExit(f"candidate provenance is missing: {key}")
 expected_positive_result = {
-    "schema": "kor-travel-map.application-baseline-handoff.v2",
+    "schema": "kor-travel-map.application-baseline-handoff.v3",
     "outcome": "stamped",
     "source_head": "0236_tvn41s_compaction_drained",
     "destination_head": "300",
     "expected_catalog_sha256": sys.argv[12],
     "expected_seed_sha256": sys.argv[13],
     "expected_privileged_residue_sha256": sys.argv[14],
+    "expected_source_alembic_version_sha256": sys.argv[31],
+    "expected_destination_alembic_version_sha256": sys.argv[32],
     "pre_privileged_residue_sha256": sys.argv[14],
     "pre_catalog_sha256": sys.argv[12],
     "pre_seed_sha256": sys.argv[13],
+    "pre_source_alembic_version_sha256": sys.argv[34],
     "post_catalog_sha256": sys.argv[12],
     "post_seed_sha256": sys.argv[13],
+    "post_destination_alembic_version_sha256": sys.argv[35],
     "writer_fence_receipt_sha256": sys.argv[9],
     "writer_fence_transaction_id": sys.argv[10],
 }
@@ -692,8 +740,8 @@ negative_result = Path(sys.argv[29]).read_bytes()
 if negative_result:
     raise SystemExit("negative fence mismatch produced a result payload")
 negative_error = Path(sys.argv[30]).read_text(encoding="utf-8")
-if "baseline contract" not in negative_error:
-    raise SystemExit("negative fence rejection did not fail at the baseline contract boundary")
+if "source Alembic metadata facet" not in negative_error:
+    raise SystemExit("negative handoff did not fail at the source Alembic facet boundary")
 for key in (
     "candidate_build_receipt_sha256", "candidate_proof_tools_manifest_sha256",
     "source_certificate_sha256", "positive_writer_fence_receipt_sha256",
@@ -710,7 +758,7 @@ for key in (
     if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
         raise SystemExit(f"terminal handoff receipt digest is invalid: {key}")
 value = {
-    "schema": "kor-travel-map.application-300-handoff-rehearsal.v2",
+    "schema": "kor-travel-map.application-300-handoff-rehearsal.v3",
     "candidate_commit": candidate["candidate_commit"],
     "candidate_image_id": candidate["candidate_image_id"],
     "candidate_build_receipt_sha256": candidate["candidate_build_receipt_sha256"],
@@ -720,9 +768,12 @@ value = {
     "source_catalog_sha256": sys.argv[5],
     "source_seed_sha256": sys.argv[6],
     "source_privileged_residue_sha256": sys.argv[7],
+    "source_alembic_version_sha256": sys.argv[33],
     "expected_catalog_sha256": sys.argv[12],
     "expected_seed_sha256": sys.argv[13],
     "expected_privileged_residue_sha256": sys.argv[14],
+    "expected_source_alembic_version_sha256": sys.argv[31],
+    "expected_destination_alembic_version_sha256": sys.argv[32],
     "positive_database_identity": positive_identity,
     "positive_writer_fence_receipt_sha256": sys.argv[9],
     "positive_writer_fence_transaction_id": sys.argv[10],
@@ -731,6 +782,8 @@ value = {
     "positive_catalog_sha256": sys.argv[15],
     "positive_seed_sha256": sys.argv[16],
     "positive_privileged_residue_sha256": sys.argv[17],
+    "positive_source_alembic_version_sha256": sys.argv[34],
+    "positive_destination_alembic_version_sha256": sys.argv[35],
     "positive_result_sha256": hashlib.sha256(positive_raw).hexdigest(),
     "negative_database_identity": negative_identity,
     "negative_writer_fence_receipt_sha256": sys.argv[20],
@@ -740,10 +793,12 @@ value = {
     "negative_catalog_sha256_before": sys.argv[23],
     "negative_seed_sha256_before": sys.argv[24],
     "negative_privileged_residue_sha256_before": sys.argv[25],
+    "negative_source_alembic_version_sha256_before": sys.argv[36],
     "negative_catalog_sha256_after": sys.argv[26],
     "negative_seed_sha256_after": sys.argv[27],
     "negative_privileged_residue_sha256_after": sys.argv[28],
-    "negative_failure": "manager-pre-privileged-residue-mismatch",
+    "negative_source_alembic_version_sha256_after": sys.argv[37],
+    "negative_failure": "source-alembic-version-facet-mismatch",
     "terminal_receipt_writer": "root-candidate-image-atomic-link",
 }
 Path(sys.argv[1]).write_text(

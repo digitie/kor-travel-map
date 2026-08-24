@@ -697,13 +697,28 @@ BEGIN
               'ktm_feature_runtime', object.oid, 'INSERT, UPDATE, DELETE, '
               || 'TRUNCATE, REFERENCES, TRIGGER'
           )
+          AND (
+              SELECT count(*)
+              FROM aclexplode(object.relacl)
+          ) = 8
           AND NOT EXISTS (
               SELECT 1
               FROM aclexplode(object.relacl) AS privilege
               WHERE NOT (
-                  privilege.grantee = object.relowner
+                  (
+                      privilege.grantee = object.relowner
+                      AND privilege.grantor = object.relowner
+                      AND privilege.privilege_type = ANY (
+                          ARRAY[
+                              'INSERT', 'SELECT', 'UPDATE', 'DELETE', 'TRUNCATE',
+                              'REFERENCES', 'TRIGGER'
+                          ]::text[]
+                      )
+                      AND NOT privilege.is_grantable
+                  )
                   OR (
                       privilege.grantee = 'ktm_feature_runtime'::regrole
+                      AND privilege.grantor = object.relowner
                       AND privilege.privilege_type = 'SELECT'
                       AND NOT privilege.is_grantable
                   )
@@ -711,6 +726,31 @@ BEGIN
           )
           AND object.reloptions IS NULL
           AND object.relnatts = 1
+          AND (
+              SELECT count(*)
+              FROM pg_catalog.pg_type AS row_type
+              JOIN pg_catalog.pg_type AS array_type
+                ON array_type.oid = row_type.typarray
+              WHERE row_type.typrelid = object.oid
+                AND row_type.typnamespace = object.relnamespace
+                AND row_type.typname = object.relname
+                AND row_type.typowner = 'ktm_feature_schema_owner'::regrole
+                AND row_type.typtype = 'c'::"char"
+                AND row_type.typisdefined
+                AND row_type.typcollation = 0
+                AND row_type.typacl IS NULL
+                AND array_type.typnamespace = object.relnamespace
+                AND array_type.typname = '_alembic_version'
+                AND array_type.typowner = object.relowner
+                AND array_type.typtype = 'b'::"char"
+                AND array_type.typcategory = 'A'::"char"
+                AND array_type.typisdefined
+                AND array_type.typcollation = 0
+                AND array_type.typacl IS NULL
+                AND array_type.typrelid = 0
+                AND array_type.typarray = 0
+                AND array_type.typelem = row_type.oid
+          ) = 1
           AND NOT EXISTS (
               SELECT 1
               FROM pg_catalog.pg_depend AS extension_member

@@ -333,6 +333,8 @@ for sidecar in \
   application-reference.json application-reference.sha256 \
   application-runtime-invariants.sql application-seed.sql application-seed.sha256 \
   application-privileged-residue.sql application-privileged-residue.sha256 \
+  application-source-alembic-version.sql application-source-alembic-version.sha256 \
+  application-destination-alembic-version.sql application-destination-alembic-version.sha256 \
   schema.sql seed.sql; do
   sealed_sidecar_sha256="$(sha256sum "$SEALED_ROOT/alembic/baseline/$sidecar" | awk '{print $1}')"
   image_sidecar_sha256="$(docker run --pull=never --rm --entrypoint sh "$image_id" -ec \
