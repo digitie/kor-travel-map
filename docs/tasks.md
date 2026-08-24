@@ -43,11 +43,37 @@ barrier로 직렬화한다.
   - [~] `T-VN-M01`(API·`0226` DB/ACL 병합, route 활성화·restore 잔여) → [~] `T-VN-M02`(provenance reader/fence 병합, purge·restore 잔여)
   - [~] `T-VN-M03`(curated 동시 생성 writer 병합, import/live acceptance 잔여) ∥ [~] `T-VN-M04`(범용 Feature 요청 큐 병합, paired consumer acceptance 잔여)
   - [~] `T-VN-M05`(provider 발행 시 중복 판정 — 자동 병합 금지, paired consumer reconciliation 설계 진행)
+- **Lane H — Alembic 세대 재정본화**
+  - [ ] `T-VN-H46H` — `0236_tvn41s_compaction_drained` → `300` 단일 root baseline·비파기 운영 handoff
 - **Lane C — 사문화 정리·미구현 dataset (다른 lane과 무관, 아무 때나)**
 - **최종 cutover**
   - [ ] `T-VN-39`
 - **보류/외부 추적**
   - [ ] `T-101` — Materialized View 도입 검토(조건 발생 시)
+
+### T-VN-H46H: Alembic `300` root baseline과 비파기 `0236 → 300` handoff
+
+- [ ] T-VN-H46H — **현재 Map application schema를 `300` 단일 root baseline으로 재정본화**
+
+  `0236_tvn41s_compaction_drained`까지의 active migration은 실행 graph 밖의 byte-pinned
+  archive로 보존하고, 새 DB는 final role·membership·ACL bootstrap 뒤 `300` 하나만 적용한다.
+  source sidecar는 provider 적재·live fixture·acceptance 잔재가 전혀 없는 격리 fresh
+  `0236` 참조 DB에서만 생성한다. n150 DB, n150 backup clone, live acceptance DB를
+  생성 source로 사용하지 않는다.
+
+  기존 운영 DB의 전환은 raw `alembic_version`이 정확히 한 행
+  `0236_tvn41s_compaction_drained`일 때만 허용한다. explicit handoff tag, `--purge`,
+  target `300`, writer quiesce, final role/ACL/extension/catalog/data semantic preflight를
+  같은 transaction에서 대조한 뒤 Alembic의 `stamp --purge 300`으로만 metadata를
+  전진시킨다. 일반 startup/upgrade/stamp/downgrade와 수동 version-table SQL은
+  계속 거부한다.
+
+  완료 조건은 Map baseline PR의 CI·두 전문 적대 리뷰·Docker Manager의 별도 비파기
+  candidate transition/journal 경로·n150 exact candidate 배포·로그인 POST를 포함한
+  live UI E2E·cleanup residue 0·redacted evidence다. 이 task는 Map PR이 실제 병합된
+  뒤에만 `tasks-done.md`로 이관하며, `T-VN-FINAL-REBUILD` 및 M01~M05의 독립 잔여를
+  완료 처리하지 않는다. 설계 정본은
+  [`docs/reports/t-vn-h46h-alembic-300-baseline-design-2026-08-24.md`](reports/t-vn-h46h-alembic-300-baseline-design-2026-08-24.md)다.
 
 ## 공통 규율 (2026-07-28 개정)
 

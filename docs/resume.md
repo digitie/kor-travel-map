@@ -13,7 +13,32 @@ approve/reject 두 경로까지 정확히 넓히고, 그 밖의 경로에는 여
 candidate frontend 이미지를 격리 Map 스택에 적용해 정상 BFF 승인과 이어지는 M05 paired
 reconciliation을 실제 UI로 재검증한다. 그 뒤 적대 리뷰와 원격 CI green 전에는 머지하지
 않는다.
+## 2026-08-24 — T-VN-H46H Alembic `300` baseline·n150 live UI E2E 준비
 
+Map [PR #1063](https://github.com/digitie/kor-travel-map/pull/1063)의 admin live fixture
+권한 경계를 squash `01d65b2ad4ee265a3ef6b01448f6abf573a906a8`로 병합했다. Python
+3.11/3.12/3.13, fixture replay, PostGIS integration, lint, OpenAPI drift, frontend
+type-check/build가 모두 green이었고, 누적 변경은 독립 적대 검토 두 건에서 GO였다.
+
+이후 작업은 새 열린 `T-VN-H46H`가 소유한다. 목표는 active graph를 `300` 단일 root로
+재정본화하고, n150의 exact `0236_tvn41s_compaction_drained` DB만 controlled
+`stamp --purge 300`으로 handoff하는 것이다. source sidecar는 data-free isolated
+`0236` reference DB에서만 생성한다. `rebuild-pinned`, raw production Compose,
+수동 `alembic_version` 편집, archive replay는 이 경로의 대안이 아니다.
+
+두 전문 설계·배포 적대 검토는 동일하게 다음을 P0로 판정했다: final 21-role
+membership/ACL bootstrap, exact handoff tag·단일 version row·동일 transaction
+pre/post catalog assertion, candidate image/head/source attestation, 그리고 destructive
+rebuild journal과 혼동하지 않는 Docker Manager typed transition journal. PinVi의 진행 중
+Alembic WIP는 이 candidate에 입력하지 않고 stable immutable revision만 유지한다.
+
+### 다음 한 작업
+
+`T-VN-H46H`의 첫 draft checkpoint를 push한 뒤, clean `0236` reference에서 final
+role/ACL 축을 포함하는 immutable `300` sidecar를 생성한다. 이어 active/archive graph,
+handoff guard, fresh/handoff role bootstrap, Docker image·entrypoint 및 regression gate를
+구현한다. Map baseline PR은 n150 exact candidate 배포와 login POST를 포함한 live UI E2E가
+통과하기 전에는 병합하지 않는다.
 ## 2026-08-24 — PR #1063 fixture writer DB 경계·role graph 보강 (재리뷰 대기)
 
 Draft [PR #1063](https://github.com/digitie/kor-travel-map/pull/1063)의 두 전문 적대 리뷰가

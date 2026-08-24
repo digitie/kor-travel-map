@@ -18,7 +18,26 @@ server-only manual Feature create token을 `POST /v1/admin/features`에만 주�
 
 아직 candidate frontend 이미지의 격리 Map BFF live 재검증과 적대 리뷰·원격 CI가 남아 있어
 PR은 Draft로 유지한다.
+## 2026-08-24 — T-VN-H46H `0236 → 300` baseline 전환 draft 착수
 
+Map [PR #1063](https://github.com/digitie/kor-travel-map/pull/1063)은 fixture writer의
+DB/login/head preflight, 최소 procedure-owner role 전환, exact future role graph를 포함해
+squash `01d65b2ad4ee265a3ef6b01448f6abf573a906a8`로 병합했다. Python 3.11/3.12/3.13,
+fixture replay, PostGIS integration, lint, OpenAPI drift, frontend type-check/build가 모두
+green이었고 두 독립 적대 리뷰도 GO였다.
+
+그 병합을 기준으로 `T-VN-H46H`를 새 열린 task로 추가했다. `0236` 이후의 현재
+application schema는 `300` 단일 root baseline으로 새 DB에 재현하고, 운영 DB는
+`0236_tvn41s_compaction_drained` exact single-row 상태에서만 controlled
+`alembic stamp --purge 300`을 허용한다. active graph 밖 archive, final 21-role
+bootstrap, full routine ACL grantee matrix, same-transaction pre/post catalog assertion,
+candidate source/image/head attestation을 모두 전환 계약으로 고정한다.
+
+baseline source는 n150, n150 backup clone, live acceptance DB에서 생성하지 않는다.
+provider 적재와 fixture가 전혀 없는 isolated fresh `0236` reference DB를 만들었고,
+head와 `0236` data semantic closure 세 query가 모두 0임을 확인했다. Docker Manager의
+기존 `rebuild-pinned`는 Map application·Dagster·PinVi DB를 재생성하므로 이번 경로에서
+금지한다. 별도 비파기 in-place transition과 truthful typed journal이 필요하다.
 ## 2026-08-24 — PR #1063 writer fixture preflight·procedure role·future role edge 보강
 
 Draft [PR #1063](https://github.com/digitie/kor-travel-map/pull/1063)의 두 전문 적대 리뷰에서
