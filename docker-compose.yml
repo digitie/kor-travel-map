@@ -56,131 +56,20 @@ services:
           echo "Dagster metadata DB created: $$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB"
         fi
 
-  # T-VN-34A / ADR-090 — local dedicated DB에서만 bootstrap owner가 LOGIN
-  # migrator/runtime principal과 NOLOGIN schema owner를 provision하고 기존 object
-  # ownership을 넘긴다. API/Dagster는 이 service 뒤에만 시작한다.
-  db-role-bootstrap:
+  # T-VN-H46H — local fresh DB는 final 21-role graph/extension namespace를 먼저
+  # 확정하고, API entrypoint가 active single root `300`을 적용한다. 기존 `0236`
+  # DB의 handoff는 이 normal startup 경로가 아니라 Docker Manager controlled
+  # transaction만 수행한다.
+  db-role-bootstrap-300:
     image: postgres:16-alpine
     depends_on:
       postgres:
         condition: service_healthy
     environment:
       KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_ENABLED: "true"
+      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE: baseline-300
       # `:?`는 profile-disabled external overlay도 interpolation 단계에서 막으므로
       # 여기서는 빈 값을 전달하고 script가 service 실행 시 fail-closed 한다.
-      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE: ${KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE:-}
-      KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN: ${KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN:-}
-      KOR_TRAVEL_MAP_POSTGRES_DB: ${KOR_TRAVEL_MAP_POSTGRES_DB:-kor_travel_map}
-      KOR_TRAVEL_MAP_POSTGRES_USER: ${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}
-      KOR_TRAVEL_MAP_MIGRATOR_PASSWORD: ${KOR_TRAVEL_MAP_MIGRATOR_PASSWORD:-}
-      KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD: ${KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD:-}
-      KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD: ${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD:-}
-    volumes:
-      - ./docker/postgres-role-bootstrap.sh:/usr/local/bin/postgres-role-bootstrap:ro
-    entrypoint: ["/bin/sh", "/usr/local/bin/postgres-role-bootstrap"]
-
-  # T-VN-M01은 frozen 0200/0202 membership graph를 보존해야 한다. 따라서
-  # 일반 bootstrap 뒤 restricted migrator가 0225까지만 올리고, 그 다음에만
-  # M01 procedure owner/executor role을 superuser boundary에서 만든다.
-  db-migrate-to-m01-bootstrap-boundary:
-    build:
-      context: .
-      dockerfile: docker/api.Dockerfile
-      args:
-        KOR_TRAVEL_MAP_GIT_COMMIT: ${KOR_TRAVEL_MAP_GIT_COMMIT:-development}
-    environment:
-      KOR_TRAVEL_MAP_MIGRATOR_PG_DSN: ${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required}
-    depends_on:
-      db-role-bootstrap:
-        condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
-    entrypoint: ["/bin/sh", "./docker/migrate-to-m01-bootstrap-boundary.sh"]
-
-  db-role-bootstrap-m01:
-    image: postgres:16-alpine
-    depends_on:
-      db-migrate-to-m01-bootstrap-boundary:
-        condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
-    environment:
-      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_ENABLED: "true"
-      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE: m01
-      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE: ${KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE:-}
-      KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN: ${KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN:-}
-      KOR_TRAVEL_MAP_POSTGRES_DB: ${KOR_TRAVEL_MAP_POSTGRES_DB:-kor_travel_map}
-      KOR_TRAVEL_MAP_POSTGRES_USER: ${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}
-      KOR_TRAVEL_MAP_MIGRATOR_PASSWORD: ${KOR_TRAVEL_MAP_MIGRATOR_PASSWORD:-}
-      KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD: ${KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD:-}
-      KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD: ${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD:-}
-    volumes:
-      - ./docker/postgres-role-bootstrap.sh:/usr/local/bin/postgres-role-bootstrap:ro
-    entrypoint: ["/bin/sh", "/usr/local/bin/postgres-role-bootstrap"]
-
-  # M05는 0230 graph가 완성된 뒤에만 role을 만들고, 그 role로 0231을 적용한
-  # 다음 별도 repair phase가 dedicated routine ownership을 확정한다.
-  db-migrate-to-m05-bootstrap-boundary:
-    build:
-      context: .
-      dockerfile: docker/api.Dockerfile
-      args:
-        KOR_TRAVEL_MAP_GIT_COMMIT: ${KOR_TRAVEL_MAP_GIT_COMMIT:-development}
-    environment:
-      KOR_TRAVEL_MAP_MIGRATOR_PG_DSN: ${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required}
-    depends_on:
-      db-role-bootstrap-m01:
-        condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
-    entrypoint: ["/bin/sh", "./docker/migrate-to-m05-bootstrap-boundary.sh"]
-
-  db-role-bootstrap-m05-pre:
-    image: postgres:16-alpine
-    depends_on:
-      db-migrate-to-m05-bootstrap-boundary:
-        condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
-    environment:
-      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_ENABLED: "true"
-      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE: m05-pre
-      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE: ${KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE:-}
-      KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN: ${KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN:-}
-      KOR_TRAVEL_MAP_POSTGRES_DB: ${KOR_TRAVEL_MAP_POSTGRES_DB:-kor_travel_map}
-      KOR_TRAVEL_MAP_POSTGRES_USER: ${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}
-      KOR_TRAVEL_MAP_MIGRATOR_PASSWORD: ${KOR_TRAVEL_MAP_MIGRATOR_PASSWORD:-}
-      KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD: ${KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD:-}
-      KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD: ${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD:-}
-    volumes:
-      - ./docker/postgres-role-bootstrap.sh:/usr/local/bin/postgres-role-bootstrap:ro
-    entrypoint: ["/bin/sh", "/usr/local/bin/postgres-role-bootstrap"]
-
-  db-migrate-m05:
-    build:
-      context: .
-      dockerfile: docker/api.Dockerfile
-      args:
-        KOR_TRAVEL_MAP_GIT_COMMIT: ${KOR_TRAVEL_MAP_GIT_COMMIT:-development}
-    environment:
-      KOR_TRAVEL_MAP_MIGRATOR_PG_DSN: ${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required}
-    depends_on:
-      db-role-bootstrap-m05-pre:
-        condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
-    entrypoint: ["/bin/sh", "./docker/migrate-m05.sh"]
-
-  db-role-bootstrap-m05-repair:
-    image: postgres:16-alpine
-    depends_on:
-      db-migrate-m05:
-        condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
-    environment:
-      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_ENABLED: "true"
-      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE: m05-repair
       KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE: ${KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE:-}
       KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN: ${KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN:-}
       KOR_TRAVEL_MAP_POSTGRES_DB: ${KOR_TRAVEL_MAP_POSTGRES_DB:-kor_travel_map}
@@ -335,7 +224,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      db-role-bootstrap-m05-repair:
+      db-role-bootstrap-300:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy
@@ -463,7 +352,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      db-role-bootstrap-m05-repair:
+      db-role-bootstrap-300:
         condition: service_completed_successfully
       dagster-db-init:
         condition: service_completed_successfully
@@ -538,7 +427,7 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      db-role-bootstrap-m05-repair:
+      db-role-bootstrap-300:
         condition: service_completed_successfully
       dagster-db-init:
         condition: service_completed_successfully

@@ -1,7 +1,7 @@
 """C7 인수 scope 상수가 migration과 live 스펙에서 같은 값인지 잠근다.
 
 이 값은 두 언어에 나뉘어 있다 — migration이 카탈로그에 **선언**하고
-(`alembic/versions/0224_c7_external_system_scope.py`), live 스펙이 그 선언을
+(`alembic/retired_versions/0200-0236/0224_c7_external_system_scope.py`), live 스펙이 그 선언을
 **제출**한다(`e2e/live/_ops-c7-admin-api.ts`). 주석으로만 묶여 있으면 드리프트했을 때
 증상이 "prod C7이 preview 422로 죽고 CI는 green"이다 — 이 저장소가 실제로 겪은,
 피드백이 가장 늦은 실패 계급 그대로다(`docs/journal.md` 2026-08-19).
@@ -21,7 +21,13 @@ from typing import Final
 import pytest
 
 _ROOT: Final = Path(__file__).resolve().parents[2]
-_MIGRATION: Final = _ROOT / "alembic" / "versions" / "0224_c7_external_system_scope.py"
+_MIGRATION: Final = (
+    _ROOT
+    / "alembic"
+    / "retired_versions"
+    / "0200-0236"
+    / "0224_c7_external_system_scope.py"
+)
 _TS_HELPER: Final = (
     _ROOT
     / "packages"
@@ -94,4 +100,3 @@ def test_live_base_rule_matches_the_provider_library_delay() -> None:
     matched = re.search(r"if \(kst\.getUTCMinutes\(\) < (\d+)\) \{", source)
     assert matched is not None, "currentKmaNowcastBaseDatetime의 분 비교를 찾지 못했다"
     assert int(matched.group(1)) == delay_minutes
-

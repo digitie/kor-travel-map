@@ -40,7 +40,7 @@ barrier로 직렬화한다.
   - [~] `T-FE-MOCK-FLAKE`(`/v1/ops/logs` — mocked checkpoint 고정, n150 live GET-only 잔여)
   - [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2` → `T-VN-41C` receipt 승격
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정)**
-  - [~] `T-VN-M01`(API·`0226` DB/ACL 병합, route 활성화·restore 잔여) → [~] `T-VN-M02`(provenance reader/fence 병합, purge·restore 잔여)
+  - [~] `T-VN-M01`(API·`0226` DB/ACL 병합, route 활성화 잔여) → [~] `T-VN-M02`(provenance reader/fence 병합, purge 잔여)
   - [~] `T-VN-M03`(curated 동시 생성 writer 병합, import/live acceptance 잔여) ∥ [~] `T-VN-M04`(범용 Feature 요청 큐 병합, paired consumer acceptance 잔여)
   - [~] `T-VN-M05`(provider 발행 시 중복 판정 — 자동 병합 금지, paired consumer reconciliation 설계 진행)
 - **Lane H — Alembic 세대 재정본화**
@@ -101,15 +101,14 @@ barrier로 직렬화한다.
   (AGENTS.md), 그 아래 설계적 우수성 > 확장성 > 성능 > 불필요한 코드 반복(래퍼류) 금지.
   **prod 환경 보전·호환성·기존 문서 계약·최소 수정은 비제약** — 필요 시 DB 스키마·문서
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
-- migration 정본: 단일 head 유지. **2026-08-22 현재 migration/code baseline은
-  `fadc029c`(#1054 병합)이고 head는 `0236_tvn41s_compaction_drained`다.** #1055는
-  문서 전용 병합이므로 migration head와 code baseline을 바꾸지 않는다.
-  Map PR #1029(`57c9d99a`)는 이미 병합됐으며 `0226`(M01)→`0227`(M02)→`0228`(M03)→
-  `0233`(M04)→`0234`·`0235`(M05) 뒤에 `0236`이 직렬로 연결돼 있다.
-  prod 적용 head는 배포 직전 live DB에서 다시 확인한다. 후속 migration 소유자는
-  PR 직전 단일 head를 재확인한 뒤 번호를 배정한다. 두 lane의 migration-bearing PR은 번호 예약부터
-  머지까지 직렬화한다. forward migration 뒤에는 수용 조건이나 실패 복구가 명시적으로 요구하지 않는
-  한 downgrade/rollback하지 않고 fresh clone·새 transaction으로 다음 검증을 이어간다.
+- migration 정본: T-VN-H46H candidate의 active graph는 `300` single root이고 source
+  archive terminal revision은 `0236_tvn41s_compaction_drained`다. Map `main`은 PR #1064가
+  merge되기 전까지 기존 head를 유지하며, 이 task의 n150 transition은 exact raw `0236` 한 행만
+  controlled `300` handoff할 수 있다. prod 적용 head는 배포 직전 live DB에서 다시 확인한다.
+  후속 migration 소유자는 PR 직전 single active head를 확인하고 `300`의 child로 번호를
+  배정한다. 두 lane의 migration-bearing PR은 번호 예약부터 merge까지 직렬화한다.
+  forward migration 뒤에는 수용 조건이나 실패 복구가 명시적으로 요구하지 않는 한
+  downgrade/rollback하지 않고 fresh clone·새 transaction으로 다음 검증을 이어간다.
 - **리뷰어 수(사용자 지시 2026-07-31)**: 코드·runtime·API·DB·migration·보안 동작을
   바꾸는 PR은 적대 리뷰어 **1명**이 전체 누적 delta를 검토한다. 리뷰 뒤 새 일반 코드 변경이
   누적되면 같은 리뷰어가 재검토한다. 리뷰 지적의 국소 반영, 문서 전용 추가 commit,

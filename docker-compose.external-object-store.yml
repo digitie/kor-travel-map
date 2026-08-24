@@ -13,7 +13,7 @@
 services:
   api:
     depends_on: !override
-      db-role-bootstrap-m01:
+      db-role-bootstrap-300:
         condition: service_completed_successfully
       postgres:
         condition: service_healthy

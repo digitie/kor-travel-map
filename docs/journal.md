@@ -19,6 +19,29 @@ server-only manual Feature create token을 `POST /v1/admin/features`에만 주�
 아직 candidate frontend 이미지의 격리 Map BFF live 재검증과 적대 리뷰·원격 CI가 남아 있어
 PR은 Draft로 유지한다.
 
+## 2026-08-24 — T-VN-H46H `300` runtime transition checkpoint
+
+old staged bootstrap/M01/M05 runtime helper를 제거하고 normal Compose를
+`baseline-300` fresh bootstrap 하나로 축소했다. API image에는 exact raw
+`0236_tvn41s_compaction_drained` source만 받는 controlled handoff executable을 넣었다.
+이 executable은 writer-fence receipt와 명시적 confirm을 요구하고, Alembic connection을
+caller outer transaction에 고정해 source/version/semantic closure 및 final role·ACL·extension·
+catalog fingerprint를 전후 대조한 뒤에만 `300` stamp를 수행한다. generic startup은 source를
+자동 stamp하거나 archive를 replay하지 않으며, 알려지지 않은 active-graph revision도 중단한다.
+
+backup restore는 기존 revision으로 돌아가는 경로를 제공하지 않는다. 현재 version `3` recovery
+artifact는 fence 획득 전 거부하며, 향후 `300` baseline recovery artifact 형식은 별도 설계가
+필요하다. 이는 이전 Alembic revision으로의 복구 계획이 없다는 운영 정책을 runtime에
+명시한 것이다.
+
+검증은 runtime/archive/backup targeted unit `199 passed`, executable handoff PostGIS
+integration `1 passed`, metadata consistency PostGIS integration `11 passed`였다. 또 격리된
+일회성 local PostGIS container에서 실제 role-bootstrap shell을 실행해 fresh DB가 application
+role 21개와 `x_extension` extension schema만 만들고 Alembic table을 만들지 않는 것을 확인한
+뒤 container를 제거했다. 이 local evidence는 n150 transition 또는 live UI E2E 증거가 아니며,
+Map PR은 두 전문 적대 재검토, Docker Manager typed transition/journal, fixed candidate n150
+deploy와 로그인·browser live E2E 전까지 Draft로 유지한다.
+
 ## 2026-08-24 — T-VN-H46H active integration을 `300` fresh/handoff gate로 전환
 
 과거 `0200`~`0236` migration을 실행하던 shared integration bootstrap을 final `300`

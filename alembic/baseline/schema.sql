@@ -3,6 +3,7 @@
 --
 
 
+
 SET statement_timeout = 0;
 SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;
@@ -23799,11 +23800,11 @@ GRANT ALL ON SCHEMA feature TO ktm_manual_provider_dedup_procedure_owner;
 -- Name: SCHEMA ops; Type: ACL; Schema: -; Owner: ktm_feature_schema_owner
 --
 
+GRANT ALL ON SCHEMA ops TO ktm_curation_audit_writer;
 GRANT USAGE ON SCHEMA ops TO ktm_feature_runtime;
 GRANT USAGE ON SCHEMA ops TO ktm_feature_state_procedure_owner;
 GRANT USAGE ON SCHEMA ops TO ktm_feature_audit_writer;
 GRANT USAGE ON SCHEMA ops TO ktm_curation_command_owner;
-GRANT ALL ON SCHEMA ops TO ktm_curation_audit_writer;
 GRANT USAGE ON SCHEMA ops TO ktm_manual_feature_procedure_owner;
 GRANT USAGE ON SCHEMA ops TO ktm_feature_request_procedure_owner;
 GRANT USAGE ON SCHEMA ops TO ktm_manual_provider_dedup_procedure_owner;
@@ -23818,6 +23819,22 @@ GRANT USAGE ON SCHEMA provider_sync TO ktm_feature_state_procedure_owner;
 GRANT USAGE ON SCHEMA provider_sync TO ktm_feature_audit_writer;
 GRANT USAGE ON SCHEMA provider_sync TO ktm_curation_command_owner;
 GRANT USAGE ON SCHEMA provider_sync TO ktm_manual_provider_dedup_procedure_owner;
+
+
+--
+-- Name: PROCEDURE ack_feature_reference_reconciliation_event(IN p_principal_id text, IN p_event_id uuid, IN p_worker_id uuid, IN p_lease_epoch bigint, IN p_event_sha256 text, IN p_local_receipt_sha256 text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_acked_through_sequence bigint); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+SELECT set_config('role', 'ktm_manual_provider_dedup_procedure_owner', true);
+
+REVOKE ALL ON PROCEDURE feature.ack_feature_reference_reconciliation_event(IN p_principal_id text, IN p_event_id uuid, IN p_worker_id uuid, IN p_lease_epoch bigint, IN p_event_sha256 text, IN p_local_receipt_sha256 text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_acked_through_sequence bigint) FROM PUBLIC;
+
+
+--
+-- Name: PROCEDURE ack_feature_reference_reconciliation_event_v2(IN p_principal_id text, IN p_event_id uuid, IN p_worker_id uuid, IN p_lease_epoch bigint, IN p_event_sha256 text, IN p_local_receipt_sha256 text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_acked_through_sequence bigint); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.ack_feature_reference_reconciliation_event_v2(IN p_principal_id text, IN p_event_id uuid, IN p_worker_id uuid, IN p_lease_epoch bigint, IN p_event_sha256 text, IN p_local_receipt_sha256 text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_acked_through_sequence bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.ack_feature_reference_reconciliation_event_v2(IN p_principal_id text, IN p_event_id uuid, IN p_worker_id uuid, IN p_lease_epoch bigint, IN p_event_sha256 text, IN p_local_receipt_sha256 text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_acked_through_sequence bigint) TO ktm_feature_reference_reconciliation_service_executor;
 
 
 --
@@ -23998,9 +24015,9 @@ REVOKE ALL ON FUNCTION feature.create_curation_rule_reconcile_receipt(p_rule_id 
 --
 SELECT set_config('role', 'ktm_feature_state_procedure_owner', true);
 
-GRANT ALL ON PROCEDURE feature.create_feature_with_initial_state(IN p_feature jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_inserted boolean) TO ktm_feature_request_procedure_owner;
 GRANT ALL ON PROCEDURE feature.create_feature_with_initial_state(IN p_feature jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_inserted boolean) TO ktm_manual_feature_procedure_owner;
 GRANT ALL ON PROCEDURE feature.create_feature_with_initial_state(IN p_feature jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_inserted boolean) TO ktm_curation_command_owner;
+GRANT ALL ON PROCEDURE feature.create_feature_with_initial_state(IN p_feature jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_inserted boolean) TO ktm_feature_request_procedure_owner;
 
 
 --
@@ -24061,12 +24078,37 @@ REVOKE ALL ON FUNCTION feature.has_active_feature_override(p_feature_id text, p_
 
 
 --
+-- Name: PROCEDURE lease_feature_reference_reconciliation_event(IN p_principal_id text, IN p_worker_id uuid, OUT o_outcome text, OUT o_lease_epoch bigint, OUT o_lease_expires_at timestamp with time zone, OUT o_event_id uuid, OUT o_event_sequence bigint, OUT o_case_id uuid, OUT o_resolution_id uuid, OUT o_action text, OUT o_event_payload jsonb, OUT o_event_sha256 text, OUT o_occurred_at timestamp with time zone); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+SELECT set_config('role', 'ktm_manual_provider_dedup_procedure_owner', true);
+
+REVOKE ALL ON PROCEDURE feature.lease_feature_reference_reconciliation_event(IN p_principal_id text, IN p_worker_id uuid, OUT o_outcome text, OUT o_lease_epoch bigint, OUT o_lease_expires_at timestamp with time zone, OUT o_event_id uuid, OUT o_event_sequence bigint, OUT o_case_id uuid, OUT o_resolution_id uuid, OUT o_action text, OUT o_event_payload jsonb, OUT o_event_sha256 text, OUT o_occurred_at timestamp with time zone) FROM PUBLIC;
+
+
+--
+-- Name: PROCEDURE lease_feature_reference_reconciliation_event_v2(IN p_principal_id text, IN p_worker_id uuid, OUT o_outcome text, OUT o_lease_epoch bigint, OUT o_lease_expires_at timestamp with time zone, OUT o_event_id uuid, OUT o_event_sequence bigint, OUT o_case_id uuid, OUT o_resolution_id uuid, OUT o_action text, OUT o_event_payload jsonb, OUT o_event_sha256 text, OUT o_occurred_at timestamp with time zone); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.lease_feature_reference_reconciliation_event_v2(IN p_principal_id text, IN p_worker_id uuid, OUT o_outcome text, OUT o_lease_epoch bigint, OUT o_lease_expires_at timestamp with time zone, OUT o_event_id uuid, OUT o_event_sequence bigint, OUT o_case_id uuid, OUT o_resolution_id uuid, OUT o_action text, OUT o_event_payload jsonb, OUT o_event_sha256 text, OUT o_occurred_at timestamp with time zone) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.lease_feature_reference_reconciliation_event_v2(IN p_principal_id text, IN p_worker_id uuid, OUT o_outcome text, OUT o_lease_epoch bigint, OUT o_lease_expires_at timestamp with time zone, OUT o_event_id uuid, OUT o_event_sequence bigint, OUT o_case_id uuid, OUT o_resolution_id uuid, OUT o_action text, OUT o_event_payload jsonb, OUT o_event_sha256 text, OUT o_occurred_at timestamp with time zone) TO ktm_feature_reference_reconciliation_service_executor;
+
+
+--
 -- Name: FUNCTION list_feature_requests(p_status text, p_limit integer); Type: ACL; Schema: feature; Owner: ktm_feature_request_procedure_owner
 --
 SELECT set_config('role', 'ktm_feature_request_procedure_owner', true);
 
 REVOKE ALL ON FUNCTION feature.list_feature_requests(p_status text, p_limit integer) FROM PUBLIC;
 GRANT ALL ON FUNCTION feature.list_feature_requests(p_status text, p_limit integer) TO ktm_feature_request_admin_executor;
+
+
+--
+-- Name: FUNCTION list_manual_provider_dedup_cases(p_status text, p_after_created_at timestamp with time zone, p_after_case_id uuid, p_limit integer); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+SELECT set_config('role', 'ktm_manual_provider_dedup_procedure_owner', true);
+
+REVOKE ALL ON FUNCTION feature.list_manual_provider_dedup_cases(p_status text, p_after_created_at timestamp with time zone, p_after_case_id uuid, p_limit integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.list_manual_provider_dedup_cases(p_status text, p_after_created_at timestamp with time zone, p_after_case_id uuid, p_limit integer) TO ktm_manual_provider_dedup_admin_executor;
 
 
 --
@@ -24151,11 +24193,37 @@ GRANT ALL ON PROCEDURE feature.patch_curation_item_command(IN p_collection_id uu
 
 
 --
+-- Name: FUNCTION preflight_feature_reference_reconciliation_ack(p_principal_id text, p_event_id uuid, p_event_sha256 text, p_local_receipt_sha256 text); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+SELECT set_config('role', 'ktm_manual_provider_dedup_procedure_owner', true);
+
+REVOKE ALL ON FUNCTION feature.preflight_feature_reference_reconciliation_ack(p_principal_id text, p_event_id uuid, p_event_sha256 text, p_local_receipt_sha256 text) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION preflight_feature_reference_reconciliation_ack_v2(p_principal_id text, p_event_id uuid, p_event_sha256 text, p_local_receipt_sha256 text); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature.preflight_feature_reference_reconciliation_ack_v2(p_principal_id text, p_event_id uuid, p_event_sha256 text, p_local_receipt_sha256 text) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.preflight_feature_reference_reconciliation_ack_v2(p_principal_id text, p_event_id uuid, p_event_sha256 text, p_local_receipt_sha256 text) TO ktm_feature_reference_reconciliation_service_executor;
+
+
+--
 -- Name: PROCEDURE promote_theme_feature_candidate(IN p_candidate_id uuid, IN p_collection_id uuid, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_item_title text, IN p_item_summary text, IN p_sort_order integer, IN p_curation_relation text, IN p_reuse_policy text, IN p_item_status text, IN p_expected_candidate_revision bigint, IN p_expected_collection_revision bigint, IN p_expected_item_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_candidate_id uuid, OUT o_candidate_revision bigint, OUT o_curation_item_id uuid, OUT o_curation_item_revision bigint, OUT o_transition_id bigint); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
 --
+SELECT set_config('role', 'ktm_curation_command_owner', true);
 
 REVOKE ALL ON PROCEDURE feature.promote_theme_feature_candidate(IN p_candidate_id uuid, IN p_collection_id uuid, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_item_title text, IN p_item_summary text, IN p_sort_order integer, IN p_curation_relation text, IN p_reuse_policy text, IN p_item_status text, IN p_expected_candidate_revision bigint, IN p_expected_collection_revision bigint, IN p_expected_item_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_candidate_id uuid, OUT o_candidate_revision bigint, OUT o_curation_item_id uuid, OUT o_curation_item_revision bigint, OUT o_transition_id bigint) FROM PUBLIC;
 GRANT ALL ON PROCEDURE feature.promote_theme_feature_candidate(IN p_candidate_id uuid, IN p_collection_id uuid, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_item_title text, IN p_item_summary text, IN p_sort_order integer, IN p_curation_relation text, IN p_reuse_policy text, IN p_item_status text, IN p_expected_candidate_revision bigint, IN p_expected_collection_revision bigint, IN p_expected_item_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_candidate_id uuid, OUT o_candidate_revision bigint, OUT o_curation_item_id uuid, OUT o_curation_item_revision bigint, OUT o_transition_id bigint) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: PROCEDURE provision_feature_reference_reconciliation_subscription(IN p_principal_id text, IN p_initial_event_sequence bigint, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_initial_event_sequence bigint); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+SELECT set_config('role', 'ktm_manual_provider_dedup_procedure_owner', true);
+
+REVOKE ALL ON PROCEDURE feature.provision_feature_reference_reconciliation_subscription(IN p_principal_id text, IN p_initial_event_sequence bigint, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_initial_event_sequence bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.provision_feature_reference_reconciliation_subscription(IN p_principal_id text, IN p_initial_event_sequence bigint, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_initial_event_sequence bigint) TO ktm_manual_provider_dedup_admin_executor;
 
 
 --
@@ -24177,6 +24245,15 @@ GRANT ALL ON FUNCTION feature.read_feature_request(p_request_id uuid) TO ktm_fea
 
 
 --
+-- Name: FUNCTION read_manual_provider_dedup_case(p_case_id uuid); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+SELECT set_config('role', 'ktm_manual_provider_dedup_procedure_owner', true);
+
+REVOKE ALL ON FUNCTION feature.read_manual_provider_dedup_case(p_case_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.read_manual_provider_dedup_case(p_case_id uuid) TO ktm_manual_provider_dedup_admin_executor;
+
+
+--
 -- Name: PROCEDURE reclassify_curation_quarantine_command(IN p_quarantine_collection_id uuid, IN p_expected_quarantine_revision bigint, IN p_action text, IN p_target_collection_id uuid, IN p_expected_target_revision bigint, IN p_item_ids uuid[], IN p_collection_key text, IN p_title text, IN p_command_id bigint, IN p_principal text, OUT o_moved_item_ids uuid[], OUT o_quarantine_deleted boolean, OUT o_collection_id uuid, OUT o_collection_key text, OUT o_collection_revision bigint, OUT o_conflicts jsonb); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
 --
 SELECT set_config('role', 'ktm_curation_command_owner', true);
@@ -24186,8 +24263,18 @@ GRANT ALL ON PROCEDURE feature.reclassify_curation_quarantine_command(IN p_quara
 
 
 --
+-- Name: PROCEDURE record_manual_provider_dedup_candidate(IN p_manual_feature_id text, IN p_provider_feature_id text, IN p_scores jsonb, IN p_detector_causation jsonb, OUT o_case_id uuid, OUT o_outcome text); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+SELECT set_config('role', 'ktm_manual_provider_dedup_procedure_owner', true);
+
+REVOKE ALL ON PROCEDURE feature.record_manual_provider_dedup_candidate(IN p_manual_feature_id text, IN p_provider_feature_id text, IN p_scores jsonb, IN p_detector_causation jsonb, OUT o_case_id uuid, OUT o_outcome text) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.record_manual_provider_dedup_candidate(IN p_manual_feature_id text, IN p_provider_feature_id text, IN p_scores jsonb, IN p_detector_causation jsonb, OUT o_case_id uuid, OUT o_outcome text) TO ktm_manual_provider_dedup_detector_executor;
+
+
+--
 -- Name: PROCEDURE refresh_curated_source_observation(IN p_provider_dataset_id bigint, IN p_import_job_id uuid, OUT o_source_id uuid, OUT o_source_revision bigint, OUT o_observation_revision bigint, OUT o_row_count integer); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
 --
+SELECT set_config('role', 'ktm_curation_command_owner', true);
 
 REVOKE ALL ON PROCEDURE feature.refresh_curated_source_observation(IN p_provider_dataset_id bigint, IN p_import_job_id uuid, OUT o_source_id uuid, OUT o_source_revision bigint, OUT o_observation_revision bigint, OUT o_row_count integer) FROM PUBLIC;
 
@@ -24266,6 +24353,22 @@ SELECT set_config('role', 'ktm_curation_command_owner', true);
 
 REVOKE ALL ON PROCEDURE feature.resolve_curation_import_collection_command(IN p_collection_key text, IN p_theme_id uuid, IN p_source_id uuid, IN p_title text, IN p_edition_key text, IN p_command_id bigint, IN p_principal text, OUT o_collection_id uuid, OUT o_collection_revision bigint, OUT o_created boolean) FROM PUBLIC;
 GRANT ALL ON PROCEDURE feature.resolve_curation_import_collection_command(IN p_collection_key text, IN p_theme_id uuid, IN p_source_id uuid, IN p_title text, IN p_edition_key text, IN p_command_id bigint, IN p_principal text, OUT o_collection_id uuid, OUT o_collection_revision bigint, OUT o_created boolean) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: PROCEDURE resolve_manual_provider_dedup_case(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id text, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id text, OUT o_manual_feature_row_revision bigint); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+SELECT set_config('role', 'ktm_manual_provider_dedup_procedure_owner', true);
+
+REVOKE ALL ON PROCEDURE feature.resolve_manual_provider_dedup_case(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id text, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id text, OUT o_manual_feature_row_revision bigint) FROM PUBLIC;
+
+
+--
+-- Name: PROCEDURE resolve_manual_provider_dedup_case_v2(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id text, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id text, OUT o_manual_feature_row_revision bigint); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.resolve_manual_provider_dedup_case_v2(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id text, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id text, OUT o_manual_feature_row_revision bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.resolve_manual_provider_dedup_case_v2(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id text, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id text, OUT o_manual_feature_row_revision bigint) TO ktm_manual_provider_dedup_admin_executor;
 
 
 --
@@ -26253,6 +26356,7 @@ GRANT UPDATE(source_entity_key) ON TABLE provider_sync.source_records TO ktm_fea
 --
 
 
+
 SELECT set_config('role', current_setting('ktm.baseline_prior_role'), true);
 
 DO $ktm_acl_grantee$
@@ -26278,11 +26382,14 @@ BEGIN
                              ('ktm_feature_schema_owner'),
                              ('ktm_feature_state_procedure_owner'),
                              ('ktm_feature_audit_writer'),
+                             ('ktm_feature_reference_reconciliation_service_executor'),
                              ('ktm_feature_runtime'),
                              ('ktm_feature_request_admin_executor'),
                              ('ktm_feature_request_procedure_owner'),
                              ('ktm_feature_request_service_executor'),
                              ('ktm_manual_feature_procedure_owner'),
+                             ('ktm_manual_provider_dedup_admin_executor'),
+                             ('ktm_manual_provider_dedup_detector_executor'),
                              ('ktm_manual_provider_dedup_procedure_owner')) AS known(name)
                     WHERE known.name = g.name));
     IF unknown <> '' THEN
@@ -26296,7 +26403,7 @@ $ktm_acl_grantee$;
 DO $ktm_acl$
 DECLARE
     observed text;
-    expected text := 'a84c39c13570d71ef46d869775b40cb0b8055b2e569a69b16bef4c8ab4492753';
+    expected text := 'bdf0aa14f6657627c9c9392c99cb56120d3ab53a2c074263f12cc94273929c90';
 BEGIN
     observed := (SELECT encode(sha256(convert_to(coalesce(string_agg(line, chr(10) ORDER BY line), ''), 'UTF8')), 'hex')
   FROM (SELECT grantee.name
@@ -26316,11 +26423,14 @@ BEGIN
                              ('ktm_feature_schema_owner'),
                              ('ktm_feature_state_procedure_owner'),
                              ('ktm_feature_audit_writer'),
+                             ('ktm_feature_reference_reconciliation_service_executor'),
                              ('ktm_feature_runtime'),
                              ('ktm_feature_request_admin_executor'),
                              ('ktm_feature_request_procedure_owner'),
                              ('ktm_feature_request_service_executor'),
                              ('ktm_manual_feature_procedure_owner'),
+                             ('ktm_manual_provider_dedup_admin_executor'),
+                             ('ktm_manual_provider_dedup_detector_executor'),
                              ('ktm_manual_provider_dedup_procedure_owner')) AS grantee(name)
          WHERE n.nspname IN ('feature','provider_sync','ops')) s);
     IF observed IS DISTINCT FROM expected THEN

@@ -14,20 +14,28 @@ candidate frontend 이미지를 격리 Map 스택에 적용해 정상 BFF 승인
 reconciliation을 실제 UI로 재검증한다. 그 뒤 적대 리뷰와 원격 CI green 전에는 머지하지
 않는다.
 
-## 2026-08-24 — T-VN-H46H `300` regression gate 완료, runtime transition 진행
 
-active integration fixture는 retired `0200`~`0236` chain을 replay하지 않고 final `300`
-fresh bootstrap으로 전환했다. unit archive/forward-only gate 26건, fresh metadata·CHECK
-semantic oracle·authorized handoff·generic operation rejection·commit rollback PostGIS gate
-11건이 통과했다. 이 테스트는 exact `0236` source의 raw version row만 논리 fixture로
-만들며, archive module 또는 old Docker phase를 실행하지 않는다.
+## 2026-08-24 — T-VN-H46H `300` runtime checkpoint 완료, 배포 전 적대 검토 진행
+
+active integration fixture와 runtime은 retired `0200`~`0236` chain을 replay하지 않는 final
+`300` 경로로 전환했다. normal Compose는 `baseline-300` fresh bootstrap만 실행하고,
+exact raw `0236_tvn41s_compaction_drained` DB는 candidate image 안의 explicit controlled
+handoff executable만 같은 transaction에서 catalog를 전후 대조한 뒤 `300`으로 stamp할 수
+있다. normal API/Dagster startup, archive replay, raw version-table 편집, 기존 migration
+helper, pre-`300` restore는 fail-closed한다.
+
+현재 local evidence는 runtime/archive/backup unit 199건, executable handoff PostGIS
+integration 1건, metadata consistency integration 11건의 통과다. 또한 격리된 일회성 local
+PostGIS container에서 실제 `docker/postgres-role-bootstrap.sh`를 실행해 fresh target에
+application role 21개와 `x_extension` PostGIS schema만 생성되고 Alembic table은 만들지
+않음을 확인한 뒤 container를 제거했다. 이는 n150 검증이나 배포 증거가 아니다.
 
 ### 다음 한 작업
 
-Map runtime의 old staged bootstrap/Compose/entrypoint를 `baseline-300` normal path와
-explicit controlled handoff executable로 교체한다. 이어서 Docker Manager의 별도 비파기
-transition/journal PR, 누적 적대 리뷰, n150 candidate 배포 및 login POST를 포함한 live UI
-E2E를 실행한다. 이 모든 증거와 CI가 갖춰지기 전에는 Map baseline PR을 merge하지 않는다.
+Docker Manager에 별도 비파기 transition/journal PR을 만들고, Map candidate의 정확한 commit과
+stable PinVi revision을 고정한다. 현재 diff를 대상으로 진행 중인 두 전문 적대 검토를 반영한
+뒤 n150에서 typed handoff → candidate deploy → login POST/cookie/invalid-auth 및 browser live
+UI E2E를 실행한다. 이 증거와 CI가 갖춰지기 전에는 Map baseline PR을 merge하지 않는다.
 
 ## 2026-08-24 — T-VN-H46H Alembic `300` baseline·n150 live UI E2E 준비
 

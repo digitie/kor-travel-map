@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -18,14 +19,58 @@ _RETIRED = _ROOT / "alembic" / "retired_versions" / "0200-0236"
 _ENV = _ROOT / "alembic" / "env.py"
 _BASELINE = _ACTIVE / "300_schema_baseline.py"
 _ROLE_BOOTSTRAP = _ROOT / "docker" / "postgres-role-bootstrap.sh"
-_PRE_SQUASH_REVISIONS = _ROOT / "docker" / "pre-squash-revisions.txt"
 _GRAPH = _ROOT / "src" / "kortravelmap" / "_application_migration_graph.json"
+_SOURCE_ORACLE = _ROOT / "scripts" / "create-application-0236-source-oracle.sh"
+_SOURCE_ORACLE_ARCHIVE_MANIFEST = "alembic/retired_versions/0200-0236/manifest.sha256"
 _EXPECTED_REVISIONS = ("300",)
 #: `alembic_version.version_num`의 컬럼 폭(alembic 기본값).
 _ALEMBIC_VERSION_NUM_LENGTH = 32
 _LEGACY_ARCHIVE_SHA256 = (
     "ae65901c78ea1d38ef6f5b7a7e8532744656e73c79392251452680d35f461e42"
 )
+
+
+def _runnable_python_paths() -> list[Path]:
+    """배포·CLI·integration helper까지 archive 실행 우회를 재귀적으로 막는다."""
+
+    roots = [
+        _ROOT / "src",
+        _ROOT / "docker",
+        _ROOT / "scripts",
+        _ROOT / "live-e2e-backup-runner",
+        _ROOT / "tests" / "integration",
+    ]
+    package_root = _ROOT / "packages"
+    if package_root.exists():
+        for package in package_root.iterdir():
+            if package.is_dir():
+                roots.extend((package / "src", package / "scripts"))
+    return sorted(
+        {
+            path
+            for root in roots
+            if root.exists()
+            for path in root.rglob("*.py")
+        }
+    )
+
+
+def _runnable_shell_paths() -> list[Path]:
+    """top-level만 보던 scanner를 nested deploy/live runner까지 넓힌다."""
+
+    roots = (
+        _ROOT / "docker",
+        _ROOT / "scripts",
+        _ROOT / "live-e2e-backup-runner",
+    )
+    return sorted(
+        {
+            path
+            for root in roots
+            if root.exists()
+            for path in root.rglob("*.sh")
+        }
+    )
 
 
 def _string_constants(tree: ast.Module) -> dict[str, str]:
@@ -176,6 +221,34 @@ def _legacy_module_execution_violations(source: str, *, filename: str) -> list[s
     ]
 
 
+def _shell_alembic_execution_violations(source: str, *, filename: str) -> list[str]:
+    """실행 가능한 shell wrapper도 retired migration target을 받을 수 없다."""
+
+    violations: list[str] = []
+    pattern = re.compile(
+        r"(?:^|[;|&()\s])(?:[A-Za-z_][A-Za-z0-9_]*=\S+\s+)*"
+        r"(?:[A-Za-z0-9_./$\"'-]+\s+-m\s+)?alembic\s+"
+        r"(?:upgrade|downgrade|stamp)\s+([^\s;|&)]+)"
+    )
+    for line_number, raw_line in enumerate(source.splitlines(), start=1):
+        line = raw_line.split("#", maxsplit=1)[0]
+        for match in pattern.finditer(line):
+            target = match.group(1).strip("\"'")
+            if target not in {"head", "300"}:
+                violations.append(f"{filename}:{line_number}: {target}")
+        archive_manifest_read = (
+            filename == "scripts/create-application-0236-source-oracle.sh"
+            and _SOURCE_ORACLE_ARCHIVE_MANIFEST in line
+            and "manifest=" in line
+        )
+        if (
+            ("retired_versions" in line or "legacy_versions" in line)
+            and not archive_manifest_read
+        ):
+            violations.append(f"{filename}:{line_number}: legacy archive path in runnable shell")
+    return violations
+
+
 def _is_module_execution_call(node: ast.Call) -> bool:
     if isinstance(node.func, ast.Name):
         return node.func.id in {"exec_module", "load_module"}
@@ -262,6 +335,10 @@ def test_active_migrations_share_bootstrap_exact_role_contract() -> None:
     for token in (
         "rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb",
         "OR rolcreaterole OR rolbypassrls OR rolreplication",
+        "rolconnlimit <> -1",
+        "rolvaliduntil IS DISTINCT FROM 'infinity'::timestamptz",
+        "pg_catalog.pg_db_role_setting",
+        "final database owner/search_path/role-settings contract",
         "membership.admin_option",
         "membership.inherit_option",
         "membership.set_option",
@@ -269,6 +346,15 @@ def test_active_migrations_share_bootstrap_exact_role_contract() -> None:
         "SELECT * FROM actual EXCEPT SELECT * FROM expected",
     ):
         assert token in baseline_contract
+
+    for token in (
+        "membership.admin_option",
+        "membership.inherit_option",
+        "membership.set_option",
+        "SELECT * FROM actual EXCEPT SELECT * FROM expected",
+        "CONNECTION LIMIT -1 VALID UNTIL ''infinity''",
+        "RESET ALL",
+    ):
         assert token in bootstrap
 
     final_phase_roles = (
@@ -305,16 +391,6 @@ def test_legacy_archive_has_exact_109_file_digest() -> None:
     assert hashlib.sha256(payload).hexdigest() == _LEGACY_ARCHIVE_SHA256
 
 
-def test_pre_squash_revision_manifest_matches_archive_exactly() -> None:
-    archived_revisions = sorted(
-        str(_literal(path, "revision")) for path in _LEGACY.glob("[0-9]*.py")
-    )
-    manifest_revisions = _PRE_SQUASH_REVISIONS.read_text(encoding="utf-8").splitlines()
-
-    assert manifest_revisions == archived_revisions
-    assert len(manifest_revisions) == len(set(manifest_revisions)) == 109
-
-
 def test_retired_0200_to_0236_manifest_matches_archive_exactly() -> None:
     manifest = (_RETIRED / "manifest.sha256").read_text(encoding="utf-8").splitlines()
     paths = sorted(_RETIRED.glob("[0-9]*.py"))
@@ -329,9 +405,9 @@ def test_retired_0200_to_0236_manifest_matches_archive_exactly() -> None:
     assert revisions[-1] == "0236_tvn41s_compaction_drained"
 
 
-def test_active_integration_suite_never_targets_legacy_revision() -> None:
+def test_active_runnable_paths_never_target_legacy_revision() -> None:
     violations: list[str] = []
-    for path in sorted((_ROOT / "tests" / "integration").glob("*.py")):
+    for path in _runnable_python_paths():
         relative = path.relative_to(_ROOT).as_posix()
         source = path.read_text(encoding="utf-8")
         violations.extend(
@@ -339,10 +415,42 @@ def test_active_integration_suite_never_targets_legacy_revision() -> None:
         )
         violations.extend(_legacy_module_execution_violations(source, filename=relative))
 
+    for path in _runnable_shell_paths():
+        relative = path.relative_to(_ROOT).as_posix()
+        violations.extend(
+            _shell_alembic_execution_violations(
+                path.read_text(encoding="utf-8"), filename=relative
+            )
+        )
+
     assert violations == [], (
-        "retired Alembic revision은 읽기 전용 archive다. active integration에서 실행하지 마라: "
+        "retired Alembic revision은 읽기 전용 archive다. active runnable path에서 실행하지 마라: "
         + ", ".join(violations)
     )
+
+
+def test_source_oracle_may_only_read_the_retired_manifest_for_hash_comparison() -> None:
+    """historical source builder는 archive 실행이 아니라 exact bytes 대조만 허용한다."""
+
+    source = _SOURCE_ORACLE.read_text(encoding="utf-8")
+    relative = _SOURCE_ORACLE.relative_to(_ROOT).as_posix()
+
+    assert source.count(_SOURCE_ORACLE_ARCHIVE_MANIFEST) == 1
+    assert f'manifest="$REPOSITORY_ROOT/{_SOURCE_ORACLE_ARCHIVE_MANIFEST}"' in source
+    assert "docker build --pull=false --no-cache" in source
+    assert "--entrypoint sh \"$source_image_id\"" in source
+    assert "alembic/retired_versions" not in (
+        _ROOT / "docker" / "api.Dockerfile"
+    ).read_text(encoding="utf-8")
+    assert _shell_alembic_execution_violations(source, filename=relative) == []
+
+    forbidden = source.replace(
+        _SOURCE_ORACLE_ARCHIVE_MANIFEST,
+        "alembic/retired_versions/0200-0236/0236_tvn41s_compaction_drained.py",
+    )
+    assert _shell_alembic_execution_violations(forbidden, filename=relative) == [
+        f"{relative}:99: legacy archive path in runnable shell"
+    ]
 
 
 def test_legacy_execution_scanner_rejects_multiline_constant_and_wrapper() -> None:
@@ -381,6 +489,18 @@ spec.loader.exec_module(module)
     assert any("0079_cache_target_writer_drain" in row for row in direct_violations)
     assert any("dynamic/unresolved" in row for row in wrapper_violations)
     assert archive_violations == ["archive.py:4: legacy module execution"]
+
+
+def test_shell_execution_scanner_rejects_retired_target_and_archive_path() -> None:
+    source = """
+python -m alembic upgrade 0231_tvn41s_snapshot_material
+python -m alembic upgrade head
+python tools/run.py alembic/retired_versions/0200-0236/0231.py
+"""
+    assert _shell_alembic_execution_violations(source, filename="runner.sh") == [
+        "runner.sh:2: 0231_tvn41s_snapshot_material",
+        "runner.sh:4: legacy archive path in runnable shell",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -507,3 +627,12 @@ def test_production_docker_build_context_never_copies_legacy_migrations() -> Non
         assert "COPY alembic/retired_versions" not in source
     api = (_ROOT / "docker" / "api.Dockerfile").read_text(encoding="utf-8")
     assert "COPY alembic/versions ./alembic/versions" in api
+    assert "transition-application-schema-0236-to-300.py" in api
+    assert "ktm-application-schema-handoff" in api
+    for retired_runtime_helper in (
+        "migrate-to-m01-bootstrap-boundary.sh",
+        "migrate-to-m05-bootstrap-boundary.sh",
+        "migrate-m05.sh",
+        "pre-squash-revisions.txt",
+    ):
+        assert retired_runtime_helper not in api

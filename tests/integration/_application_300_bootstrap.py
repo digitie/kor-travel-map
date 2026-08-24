@@ -209,6 +209,12 @@ async def bootstrap_application_300_roles(engine: AsyncEngine) -> str:
         await connection.execute(
             text(f"ALTER DATABASE {quoted_database} OWNER TO ktm_feature_schema_owner")
         )
+        await connection.execute(
+            text(
+                f"ALTER DATABASE {quoted_database} SET search_path TO "
+                "public, x_extension"
+            )
+        )
 
         postgis_schema = await connection.scalar(
             text(
@@ -219,8 +225,10 @@ async def bootstrap_application_300_roles(engine: AsyncEngine) -> str:
             )
         )
         if postgis_schema not in {None, "x_extension"}:
-            await connection.execute(text("DROP EXTENSION IF EXISTS postgis_topology CASCADE"))
-            await connection.execute(text("DROP EXTENSION postgis CASCADE"))
+            raise RuntimeError(
+                "application-300 test bootstrap requires postgis in x_extension; "
+                "existing DB repair/drop is unsupported"
+            )
         for extension in ("postgis", "pg_trgm", "pgcrypto"):
             await connection.execute(
                 text(f"CREATE EXTENSION IF NOT EXISTS {extension} WITH SCHEMA x_extension")

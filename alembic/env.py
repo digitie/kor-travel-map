@@ -17,8 +17,8 @@ import os
 from logging.config import fileConfig
 from typing import TYPE_CHECKING
 
-from alembic.script import ScriptDirectory
 from alembic.runtime.migration import StampStep
+from alembic.script import ScriptDirectory
 from sqlalchemy import pool, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
@@ -342,6 +342,15 @@ async def run_async_migrations() -> None:
 
 def run_migrations_online() -> None:
     """online mode — 실 DB connect (async)."""
+    existing_connection = config.attributes.get("connection")
+    if existing_connection is not None:
+        if not isinstance(existing_connection, Connection):
+            raise RuntimeError("Alembic external connection must be a SQLAlchemy Connection")
+        # controlled `0236 → 300` handoff는 caller가 연 outer transaction과 같은
+        # connection을 쓴다. 이를 새 AsyncEngine으로 바꾸면 pre/post catalog
+        # preflight와 stamp가 분리되어 postflight 실패 때 raw source row를 보존할 수 없다.
+        do_run_migrations(existing_connection)
+        return
     asyncio.run(run_async_migrations())
 
 

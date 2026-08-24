@@ -772,7 +772,7 @@ _NON_DAGSTER_REFRESH_OPERATION_KEYS = frozenset(
 )
 
 
-#: `alembic/versions/0224_c7_external_system_scope.py`와 같은 값이어야 한다.
+#: retired `0224_c7_external_system_scope.py`의 historical declaration과 같은 값이어야 한다.
 _C7_PROVIDER = "python-kma-api"
 _C7_DATASET_KEY = "kma_ultra_short_nowcast"
 _C7_SYNC_SCOPE = "external_system:c7-e2e"

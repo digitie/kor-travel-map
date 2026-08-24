@@ -19,26 +19,7 @@ services:
 
   # 공유 DB에서는 ownership transfer bootstrap을 절대 자동 실행하지 않는다.
   # 역할은 dedicated map DB에 대해 운영자가 사전 provision해야 한다.
-  db-role-bootstrap:
-    profiles: ["local-infra"]
-
-  db-migrate-to-m01-bootstrap-boundary:
-    profiles: ["local-infra"]
-
-  db-role-bootstrap-m01:
-    profiles: ["local-infra"]
-
-  # 외부 DB에서는 M05 전용 role/migration/repair도 운영자가 별도 수행한다.
-  db-migrate-to-m05-bootstrap-boundary:
-    profiles: ["local-infra"]
-
-  db-role-bootstrap-m05-pre:
-    profiles: ["local-infra"]
-
-  db-migrate-m05:
-    profiles: ["local-infra"]
-
-  db-role-bootstrap-m05-repair:
+  db-role-bootstrap-300:
     profiles: ["local-infra"]
 
   rustfs-perms:

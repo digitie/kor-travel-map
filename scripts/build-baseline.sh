@@ -27,19 +27,74 @@
 #   조용히 무시되는 결함은 조용히 잡히지 않는 검사기로 막을 수 없다.
 #
 # 사용:
-#   scripts/build-baseline.sh <container> <db> [--admin-user U] [--out DIR]
+#   # 1단계: isolated 0236에서 artifact/manifest를 기계 생성한다. 이 결과는 아직
+#   # deploy candidate가 아니며, 2단계 final oracle을 통과해야만 release evidence다.
+#   scripts/build-baseline.sh --mode materialize --isolated-0236-reference \
+#     --source-certificate PATH --receipt PATH --out NEW_DIR \
+#     <0236-container> <0236-db> [--admin-user U]
+#
+#   # 2단계: clean final candidate image가 실제 `300` migration을 적용한 fresh
+#   # oracle과 source를 대조하고, 1단계 output 및 현재 candidate artifact의 byte
+#   # 동등성을 재검증한다.
+#   scripts/build-baseline.sh --mode verify --isolated-0236-reference \
+#     --source-certificate PATH --receipt PATH --materialization-receipt PATH --out NEW_DIR \
+#     --fresh-300-container CONTAINER --fresh-300-db DB \
+#     --fresh-300-receipt PATH <0236-container> <0236-db> [--admin-user U]
+#
+# `300`는 `0236`의 clean/disposable reference에서만 생성한다. 실제 n150, clone,
+# fixture DB를 이 generator 입력으로 쓰는 것은 금지다. 아래 Docker label, raw head,
+# source image/PG identity, static seed projection 및 immutable receipt를 모두 통과하지
+# 않으면 dump 전에 중단한다.
 set -euo pipefail
 
 die() { printf 'build-baseline: %s\n' "$1" >&2; exit 1; }
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
-OUT_DIR="$SCRIPT_DIR/../alembic/baseline"
+REPOSITORY_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
+OUT_DIR=""
 ADMIN_USER=""
+ISOLATED_REFERENCE=0
+RECEIPT_PATH=""
+FRESH_300_CONTAINER=""
+FRESH_300_DB=""
+FRESH_300_RECEIPT=""
+MATERIALIZATION_RECEIPT=""
+SOURCE_CERTIFICATE=""
+MODE="verify"
+SOURCE_COMMIT="01d65b2ad4ee265a3ef6b01448f6abf573a906a8"
+SOURCE_HEAD="0236_tvn41s_compaction_drained"
+SOURCE_IMAGE="postgis/postgis:16-3.5-alpine"
+SOURCE_IMAGE_ID="sha256:dc17b064a946f64804d3b15e2ce90d01a444c02c9226a28a54764c083bd81a0c"
+SOURCE_PG_VERSION="160014"
+SOURCE_POSTGIS_VERSION="3.5.6"
+SOURCE_MIGRATION_TREE="cb52c39e3d0f37bfe229532d94c2c91ea289b725"
+RETIRED_MANIFEST_SHA256="3a3e96da12e8c8517fcac094749451307bb2b43e9bac249f2abe8864601d136e"
+SOURCE_CHOREOGRAPHY="legacy-bootstrap>0225>m01-bootstrap>0232>0233>m05-pre-bootstrap>0235>0236>m05-repair-bootstrap"
+SOURCE_WORKTREE_TREE="84cd91c38700bdad2e817605d4cb3bc480affc2b"
+SOURCE_DOCKERFILE_SHA256="882c042eb4a4b5f8bb66acc07301d7312a61e4377431b0627f6a5c906dda6975"
+SOURCE_BOOTSTRAP_SHA256="b76dfc0317622c659be6b690c057c47c968ee1ea9dafbb873ae97c8dc34eea5c"
+FRESH_BASELINE_SEED_RELATIONS=(
+  "feature.curated_source_rules"
+  "feature.curated_sources"
+  "feature.curated_themes"
+  "ops.feature_override_field_paths"
+  "provider_sync.provider_dataset_operation_scopes"
+  "provider_sync.provider_dataset_operations"
+  "provider_sync.provider_datasets"
+)
 ARGS=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --admin-user) ADMIN_USER="${2:?--admin-user needs a value}"; shift 2 ;;
     --out) OUT_DIR="${2:?--out needs a value}"; shift 2 ;;
+    --receipt) RECEIPT_PATH="${2:?--receipt needs a value}"; shift 2 ;;
+    --fresh-300-container) FRESH_300_CONTAINER="${2:?--fresh-300-container needs a value}"; shift 2 ;;
+    --fresh-300-db) FRESH_300_DB="${2:?--fresh-300-db needs a value}"; shift 2 ;;
+    --fresh-300-receipt) FRESH_300_RECEIPT="${2:?--fresh-300-receipt needs a value}"; shift 2 ;;
+    --materialization-receipt) MATERIALIZATION_RECEIPT="${2:?--materialization-receipt needs a value}"; shift 2 ;;
+    --source-certificate) SOURCE_CERTIFICATE="${2:?--source-certificate needs a value}"; shift 2 ;;
+    --mode) MODE="${2:?--mode needs a value}"; shift 2 ;;
+    --isolated-0236-reference) ISOLATED_REFERENCE=1; shift ;;
     -*) die "알 수 없는 옵션: $1" ;;
     *) ARGS+=("$1"); shift ;;
   esac
@@ -48,8 +103,471 @@ CONTAINER="${ARGS[0]:?container required}"
 DB="${ARGS[1]:?db required}"
 USER_NAME="${ADMIN_USER:-postgres}"
 
-mkdir -p "$OUT_DIR"
-RAW="$(mktemp)"; trap 'rm -f "$RAW"' EXIT
+[ "${#ARGS[@]}" -eq 2 ] || die "container와 db만 위치 인자로 허용한다"
+[ "$MODE" = "materialize" ] || [ "$MODE" = "verify" ] || \
+  die "--mode는 materialize 또는 verify여야 한다"
+[ "$ISOLATED_REFERENCE" = "1" ] || die "--isolated-0236-reference가 필요하다"
+[ -n "$SOURCE_CERTIFICATE" ] || die "--source-certificate PATH가 필요하다"
+[ -n "$RECEIPT_PATH" ] || die "--receipt PATH가 필요하다"
+[ -n "$OUT_DIR" ] || die "--out NEW_DIR가 필요하다 (기존 artifact directory 직접 수정 금지)"
+[[ "$RECEIPT_PATH" == /* ]] || die "--receipt는 absolute path여야 한다"
+[[ "$SOURCE_CERTIFICATE" == /* ]] || die "--source-certificate는 absolute path여야 한다"
+[[ "$OUT_DIR" == /* ]] || die "--out은 absolute path여야 한다"
+[[ ! -e "$OUT_DIR" && ! -L "$OUT_DIR" ]] || die "--out은 아직 존재하지 않는 새 directory여야 한다"
+[[ ! -e "$RECEIPT_PATH" && ! -L "$RECEIPT_PATH" ]] || die "--receipt target은 아직 존재하지 않아야 한다"
+[ -d "$(dirname -- "$OUT_DIR")" ] || die "--out parent directory가 없다"
+[ -d "$(dirname -- "$RECEIPT_PATH")" ] || die "--receipt parent directory가 없다"
+[[ -f "$SOURCE_CERTIFICATE" && ! -L "$SOURCE_CERTIFICATE" ]] || \
+  die "source 0236 provenance certificate가 없다"
+receipt_canonical="$(realpath -m -- "$RECEIPT_PATH")"
+out_canonical="$(realpath -m -- "$OUT_DIR")"
+source_certificate_canonical="$(realpath -m -- "$SOURCE_CERTIFICATE")"
+for external_path in "$receipt_canonical" "$out_canonical" "$source_certificate_canonical"; do
+  case "$external_path" in
+    "$REPOSITORY_ROOT"|"$REPOSITORY_ROOT"/*)
+      die "receipt와 generated artifact는 repository 밖 canonical path여야 한다"
+      ;;
+  esac
+done
+
+if [ "$MODE" = "materialize" ]; then
+  [ -z "$FRESH_300_CONTAINER$FRESH_300_DB$FRESH_300_RECEIPT$MATERIALIZATION_RECEIPT" ] || \
+    die "materialize 단계에는 fresh oracle 또는 materialization receipt를 넘길 수 없다"
+else
+  [ -n "$FRESH_300_CONTAINER" ] || die "--fresh-300-container가 필요하다"
+  [ -n "$FRESH_300_DB" ] || die "--fresh-300-db가 필요하다"
+  [ -n "$FRESH_300_RECEIPT" ] || die "--fresh-300-receipt PATH가 필요하다"
+  [ -n "$MATERIALIZATION_RECEIPT" ] || die "--materialization-receipt PATH가 필요하다"
+  [[ "$FRESH_300_RECEIPT" == /* ]] || die "--fresh-300-receipt는 absolute path여야 한다"
+  [[ "$MATERIALIZATION_RECEIPT" == /* ]] || \
+    die "--materialization-receipt는 absolute path여야 한다"
+  [[ -f "$FRESH_300_RECEIPT" && ! -L "$FRESH_300_RECEIPT" ]] || \
+    die "fresh 300 oracle provenance receipt가 없다"
+  [[ -f "$MATERIALIZATION_RECEIPT" && ! -L "$MATERIALIZATION_RECEIPT" ]] || \
+    die "materialization provenance receipt가 없다"
+  fresh_receipt_canonical="$(realpath -m -- "$FRESH_300_RECEIPT")"
+  materialization_receipt_canonical="$(realpath -m -- "$MATERIALIZATION_RECEIPT")"
+  for external_path in "$fresh_receipt_canonical" "$materialization_receipt_canonical"; do
+    case "$external_path" in
+      "$REPOSITORY_ROOT"|"$REPOSITORY_ROOT"/*)
+        die "oracle/materialization receipt는 repository 밖 canonical path여야 한다"
+        ;;
+    esac
+  done
+fi
+
+# Fresh oracle receipt는 repository 밖에서 generator가 one-shot으로 만든 immutable
+# evidence다. 대상 path 교체·symlink·group writable receipt는 provenance가 아니므로
+# DB를 읽기 전 fail-close한다. build와 creator는 같은 local operator UID로 실행한다.
+if [ "$MODE" = "verify" ]; then
+python3 - "$FRESH_300_RECEIPT" "$(id -u)" <<'PY'
+import os
+import stat
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+try:
+    metadata = path.lstat()
+except OSError as exc:
+    raise SystemExit(f"fresh 300 oracle receipt is unreadable: {exc}") from exc
+if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+    raise SystemExit("fresh 300 oracle receipt must be a regular non-symlink file")
+if stat.S_IMODE(metadata.st_mode) != 0o600:
+    raise SystemExit("fresh 300 oracle receipt must have exact mode 0600")
+if metadata.st_uid != int(sys.argv[2]):
+    raise SystemExit("fresh 300 oracle receipt owner does not match the build operator")
+PY
+python3 - "$MATERIALIZATION_RECEIPT" "$(id -u)" <<'PY'
+import stat
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+try:
+    metadata = path.lstat()
+except OSError as exc:
+    raise SystemExit(f"materialization receipt is unreadable: {exc}") from exc
+if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+    raise SystemExit("materialization receipt must be a regular non-symlink file")
+if stat.S_IMODE(metadata.st_mode) != 0o600:
+    raise SystemExit("materialization receipt must have exact mode 0600")
+if metadata.st_uid != int(sys.argv[2]):
+    raise SystemExit("materialization receipt owner does not match the build operator")
+PY
+fi
+
+python3 - "$SOURCE_CERTIFICATE" "$(id -u)" <<'PY'
+import stat
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+try:
+    metadata = path.lstat()
+except OSError as exc:
+    raise SystemExit(f"source 0236 certificate is unreadable: {exc}") from exc
+if not stat.S_ISREG(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+    raise SystemExit("source 0236 certificate must be a regular non-symlink file")
+if stat.S_IMODE(metadata.st_mode) != 0o600:
+    raise SystemExit("source 0236 certificate must have exact mode 0600")
+if metadata.st_uid != int(sys.argv[2]):
+    raise SystemExit("source 0236 certificate owner does not match the build operator")
+PY
+
+for relation in "${FRESH_BASELINE_SEED_RELATIONS[@]}"; do
+  [[ "$relation" =~ ^[a-z_]+\.[a-z_]+$ ]] || die "static seed relation이 잘못됐다: $relation"
+done
+
+if [ "$MODE" = "verify" ]; then
+reference_manifest="$SCRIPT_DIR/../alembic/baseline/application-reference.json"
+[[ -f "$reference_manifest" && ! -L "$reference_manifest" ]] || \
+  die "immutable application reference manifest가 없다"
+python3 - "$reference_manifest" "$SOURCE_COMMIT" "$SOURCE_HEAD" "$SOURCE_IMAGE" \
+  "$SOURCE_IMAGE_ID" "$SOURCE_PG_VERSION" "$SOURCE_POSTGIS_VERSION" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+expected = sys.argv[2:]
+try:
+    value = json.loads(path.read_text(encoding="utf-8"))
+    source = value["source"]
+    artifacts = value["artifacts"]
+except (KeyError, OSError, ValueError, TypeError) as exc:
+    raise SystemExit(f"invalid application reference manifest: {exc}") from exc
+actual = (
+    source.get("git_commit"),
+    source.get("raw_alembic_revision"),
+    source.get("container_image"),
+    source.get("container_image_id"),
+    source.get("postgres_server_version_num"),
+    source.get("postgis_extension_version"),
+)
+if value.get("schema") != "kor-travel-map.application-baseline-reference.v1" or actual != tuple(expected):
+    raise SystemExit("application reference manifest does not match the generator contract")
+required_artifacts = {
+    "schema_sql_sha256", "seed_sql_sha256", "catalog_contract_sql_sha256",
+    "catalog_contract_sha256", "catalog_contract_receipt_sha256",
+    "seed_contract_sql_sha256", "seed_contract_sha256",
+    "seed_contract_receipt_sha256", "runtime_invariants_sql_sha256",
+}
+if (
+    set(artifacts) != required_artifacts
+    or any(not isinstance(artifacts[key], str) or len(artifacts[key]) != 64
+           or set(artifacts[key]) - set("0123456789abcdef")
+           for key in required_artifacts)
+):
+    raise SystemExit("application reference manifest artifacts are incomplete")
+PY
+reference_manifest_sha256="$(sha256sum "$reference_manifest" | awk '{print $1}')"
+[ -z "$(git -C "$REPOSITORY_ROOT" status --porcelain)" ] || \
+  die "fresh 300 oracle provenance는 clean exact candidate commit에서만 생성·검증한다"
+candidate_commit_expected="$(git -C "$REPOSITORY_ROOT" rev-parse HEAD)"
+fi
+
+container_image_id="$(docker inspect -f '{{.Image}}' "$CONTAINER")"
+source_container_id="$(docker inspect -f '{{.Id}}' "$CONTAINER")"
+container_isolated="$(docker inspect -f '{{index .Config.Labels "io.kor-travel-map.application-baseline.isolated"}}' "$CONTAINER")"
+container_source_oracle="$(docker inspect -f '{{index .Config.Labels "io.kor-travel-map.application-baseline.source-0236-oracle"}}' "$CONTAINER")"
+container_commit="$(docker inspect -f '{{index .Config.Labels "io.kor-travel-map.application-baseline.source-commit"}}' "$CONTAINER")"
+container_head="$(docker inspect -f '{{index .Config.Labels "io.kor-travel-map.application-baseline.source-head"}}' "$CONTAINER")"
+container_source_image_id="$(docker inspect -f '{{index .Config.Labels "io.kor-travel-map.application-baseline.source-image-id"}}' "$CONTAINER")"
+container_source_migration_tree="$(docker inspect -f '{{index .Config.Labels "io.kor-travel-map.application-baseline.source-migration-tree"}}' "$CONTAINER")"
+container_source_worktree_tree="$(docker inspect -f '{{index .Config.Labels "io.kor-travel-map.application-baseline.source-worktree-tree"}}' "$CONTAINER")"
+container_source_dockerfile_sha256="$(docker inspect -f '{{index .Config.Labels "io.kor-travel-map.application-baseline.source-dockerfile-sha256"}}' "$CONTAINER")"
+container_source_image_app_manifest_sha256="$(docker inspect -f '{{index .Config.Labels "io.kor-travel-map.application-baseline.source-image-app-manifest-sha256"}}' "$CONTAINER")"
+container_source_image_runtime_manifest_sha256="$(docker inspect -f '{{index .Config.Labels "io.kor-travel-map.application-baseline.source-image-runtime-manifest-sha256"}}' "$CONTAINER")"
+container_source_builder_base_image_id="$(docker inspect -f '{{index .Config.Labels "io.kor-travel-map.application-baseline.source-builder-base-image-id"}}' "$CONTAINER")"
+container_source_builder_base_image_reference="$(docker inspect -f '{{index .Config.Labels "io.kor-travel-map.application-baseline.source-builder-base-image-reference"}}' "$CONTAINER")"
+container_source_build_dockerfile_sha256="$(docker inspect -f '{{index .Config.Labels "io.kor-travel-map.application-baseline.source-build-dockerfile-sha256"}}' "$CONTAINER")"
+container_source_image_dependency_sbom_sha256="$(docker inspect -f '{{index .Config.Labels "io.kor-travel-map.application-baseline.source-image-dependency-sbom-sha256"}}' "$CONTAINER")"
+[ "$container_image_id" = "$SOURCE_IMAGE_ID" ] || die "reference container image ID가 다르다"
+[ "$container_isolated" = "true" ] || die "reference container가 disposable/isolated label이 없다"
+[ "$container_source_oracle" = "true" ] || die "reference container가 source-oracle certificate label이 없다"
+[ "$container_commit" = "$SOURCE_COMMIT" ] || die "reference container source commit label이 다르다"
+[ "$container_head" = "$SOURCE_HEAD" ] || die "reference container source head label이 다르다"
+[ "$container_source_migration_tree" = "$SOURCE_MIGRATION_TREE" ] || \
+  die "reference container source migration tree label이 다르다"
+[ "$container_source_worktree_tree" = "$SOURCE_WORKTREE_TREE" ] || \
+  die "reference container source worktree tree label이 다르다"
+[ "$container_source_dockerfile_sha256" = "$SOURCE_DOCKERFILE_SHA256" ] || \
+  die "reference container source Dockerfile digest label이 다르다"
+for source_image_manifest_digest in \
+  "$container_source_image_app_manifest_sha256" \
+  "$container_source_image_runtime_manifest_sha256" \
+  "$container_source_build_dockerfile_sha256" \
+  "$container_source_image_dependency_sbom_sha256"; do
+  [[ "$source_image_manifest_digest" =~ ^[0-9a-f]{64}$ ]] || \
+    die "reference container source image manifest digest label이 잘못됐다"
+done
+[[ "$container_source_builder_base_image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || \
+  die "reference container source builder base image ID label이 잘못됐다"
+[[ "$container_source_builder_base_image_reference" =~ ^python@sha256:[0-9a-f]{64}$ ]] || \
+  die "reference container source builder immutable base image reference label이 잘못됐다"
+
+# certificate의 digest-pinned base reference는 단순 문자열이 아니다. daemon이 실제로
+# 그 reference를 같은 immutable image로 해석하고, source runtime image가 그 base의
+# RootFS layer를 그대로 prefix로 포함하는지 재관측한다. 이 검사가 없으면 `/app`와
+# Python distribution만 같게 만든 다른 OS/base image에 stale label/certificate를 붙인
+# 반례가 provenance gate를 통과할 수 있다.
+source_builder_base_image_id_actual="$(docker image inspect -f '{{.Id}}' "$container_source_builder_base_image_reference")"
+[ "$source_builder_base_image_id_actual" = "$container_source_builder_base_image_id" ] || \
+  die "reference source builder immutable base reference가 recorded image ID와 다르다"
+source_builder_base_image_layers="$(docker image inspect -f '{{json .RootFS.Layers}}' "$container_source_builder_base_image_reference")"
+source_image_rootfs_layers="$(docker image inspect -f '{{json .RootFS.Layers}}' "$container_source_image_id")"
+python3 - "$source_builder_base_image_layers" "$source_image_rootfs_layers" <<'PY'
+import json
+import sys
+
+try:
+    base_layers = json.loads(sys.argv[1])
+    source_layers = json.loads(sys.argv[2])
+except ValueError as exc:
+    raise SystemExit(f"source image RootFS layer metadata is invalid: {exc}") from exc
+if (
+    not isinstance(base_layers, list)
+    or not isinstance(source_layers, list)
+    or not base_layers
+    or any(not isinstance(layer, str) or not layer.startswith("sha256:") for layer in base_layers)
+    or any(not isinstance(layer, str) or not layer.startswith("sha256:") for layer in source_layers)
+):
+    raise SystemExit("source image RootFS layer metadata shape is invalid")
+if source_layers[: len(base_layers)] != base_layers:
+    raise SystemExit(
+        "source application image RootFS does not preserve the recorded builder base layer prefix"
+    )
+PY
+
+# source oracle creator가 label만 붙인 prebuilt image를 넘기는 경로를 막는다. detached
+# image 자체를 다시 inspect하고 installed distribution manifest를 재계산해야 cert의
+# range-dependency proof가 실제 runnable image와 연결된다.
+source_image_id_actual="$(docker image inspect -f '{{.Id}}' "$container_source_image_id")"
+[ "$source_image_id_actual" = "$container_source_image_id" ] || \
+  die "reference source application image ID가 현재 local immutable image와 다르다"
+[ "$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$container_source_image_id")" = "$SOURCE_COMMIT" ] || \
+  die "reference source application image OCI revision이 다르다"
+source_image_dependency_sbom_actual="$(
+  docker run --pull=never --rm --entrypoint python "$container_source_image_id" -c '
+from __future__ import annotations
+
+from importlib.metadata import distributions
+
+rows = []
+for distribution in distributions():
+    name = distribution.metadata.get("Name")
+    if not name:
+        raise SystemExit("installed distribution without a name")
+    rows.append((name.casefold(), name, distribution.version))
+for _, name, version in sorted(rows):
+    print(f"{name}=={version}")
+' | sha256sum | awk '{print $1}'
+)"
+[ "$source_image_dependency_sbom_actual" = "$container_source_image_dependency_sbom_sha256" ] || \
+  die "reference source image installed dependency SBOM이 container label과 다르다"
+
+source_revision="$(docker exec "$CONTAINER" psql -v ON_ERROR_STOP=1 -U "$USER_NAME" -d "$DB" -At \
+  -c "SELECT string_agg(version_num, ',' ORDER BY version_num) FROM public.alembic_version")"
+[ "$source_revision" = "$SOURCE_HEAD" ] || die "reference DB raw Alembic head가 exact 0236이 아니다"
+source_pg_version="$(docker exec "$CONTAINER" psql -v ON_ERROR_STOP=1 -U "$USER_NAME" -d "$DB" -At -c 'SHOW server_version_num')"
+source_postgis_version="$(docker exec "$CONTAINER" psql -v ON_ERROR_STOP=1 -U "$USER_NAME" -d "$DB" -At -c "SELECT extversion FROM pg_extension WHERE extname = 'postgis'")"
+source_system_identifier="$(docker exec "$CONTAINER" psql -v ON_ERROR_STOP=1 -U "$USER_NAME" -d "$DB" -At -c 'SELECT system_identifier FROM pg_catalog.pg_control_system()')"
+source_database_oid="$(docker exec "$CONTAINER" psql -v ON_ERROR_STOP=1 -U "$USER_NAME" -d "$DB" -At -c 'SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database()')"
+[ "$source_pg_version" = "$SOURCE_PG_VERSION" ] || die "reference PostgreSQL version이 다르다"
+[ "$source_postgis_version" = "$SOURCE_POSTGIS_VERSION" ] || die "reference PostGIS version이 다르다"
+[[ "$source_system_identifier" =~ ^[0-9]+$ ]] || die "source PostgreSQL system identifier를 얻지 못했다"
+[[ "$source_database_oid" =~ ^[0-9]+$ ]] || die "source database OID를 얻지 못했다"
+
+# source certificate는 old graph를 실제 runnable detached image로부터 만들었다는
+# evidence다. label/raw revision은 편의 정보일 뿐 certificate의 대체물이 아니다.
+python3 - "$SOURCE_CERTIFICATE" "$source_container_id" "$DB" "$source_database_oid" \
+  "$source_system_identifier" "$SOURCE_COMMIT" "$SOURCE_HEAD" "$SOURCE_MIGRATION_TREE" \
+  "$RETIRED_MANIFEST_SHA256" "$container_source_image_id" "$container_image_id" \
+  "$SOURCE_CHOREOGRAPHY" "$source_revision" "$SOURCE_PG_VERSION" "$SOURCE_POSTGIS_VERSION" \
+  "$SOURCE_WORKTREE_TREE" "$SOURCE_DOCKERFILE_SHA256" "$SOURCE_BOOTSTRAP_SHA256" \
+  "$container_source_image_app_manifest_sha256" "$container_source_image_runtime_manifest_sha256" \
+  "$container_source_builder_base_image_id" "$container_source_builder_base_image_reference" \
+  "$container_source_build_dockerfile_sha256" "$container_source_image_dependency_sbom_sha256" \
+  "$(sha256sum "$SCRIPT_DIR/create-application-0236-source-oracle.sh" | awk '{print $1}')" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+try:
+    value = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except (OSError, ValueError) as exc:
+    raise SystemExit(f"source 0236 certificate cannot be parsed: {exc}") from exc
+expected = {
+    "schema": "kor-travel-map.application-source-0236-oracle.v4",
+    "container_id": sys.argv[2],
+    "database": sys.argv[3],
+    "database_oid": int(sys.argv[4]),
+    "postgres_system_identifier": sys.argv[5],
+    "source_commit": sys.argv[6],
+    "source_head": sys.argv[7],
+    "source_migration_tree": sys.argv[8],
+    "retired_manifest_sha256": sys.argv[9],
+    "source_image_id": sys.argv[10],
+    "postgis_image_id": sys.argv[11],
+    "migration_choreography": sys.argv[12],
+    "raw_alembic_revision": sys.argv[13],
+    "postgres_server_version_num": sys.argv[14],
+    "postgis_extension_version": sys.argv[15],
+    "source_worktree_tree": sys.argv[16],
+    "source_dockerfile_sha256": sys.argv[17],
+    "source_bootstrap_sha256": sys.argv[18],
+    "source_image_app_manifest_sha256": sys.argv[19],
+    "source_image_runtime_manifest_sha256": sys.argv[20],
+    "source_builder_base_image_id": sys.argv[21],
+    "source_builder_base_image_reference": sys.argv[22],
+    "source_build_dockerfile_sha256": sys.argv[23],
+    "source_image_dependency_sbom_sha256": sys.argv[24],
+    "creator_script_sha256": sys.argv[25],
+}
+required = set(expected)
+if not isinstance(value, dict) or set(value) != required:
+    raise SystemExit("source 0236 certificate schema is invalid")
+if {key: value.get(key) for key in expected} != expected:
+    raise SystemExit("source 0236 certificate does not bind the observed source")
+for key in (
+    "source_dockerfile_sha256",
+    "source_bootstrap_sha256",
+    "source_image_app_manifest_sha256",
+    "source_image_runtime_manifest_sha256",
+    "source_build_dockerfile_sha256",
+    "source_image_dependency_sbom_sha256",
+    "creator_script_sha256",
+):
+    digest = value.get(key)
+    if not isinstance(digest, str) or len(digest) != 64 or set(digest) - set("0123456789abcdef"):
+        raise SystemExit(f"source 0236 certificate digest is invalid: {key}")
+base_image_id = value.get("source_builder_base_image_id")
+if not isinstance(base_image_id, str) or not __import__("re").fullmatch(r"sha256:[0-9a-f]{64}", base_image_id):
+    raise SystemExit("source 0236 certificate builder base image ID is invalid")
+base_image_reference = value.get("source_builder_base_image_reference")
+if not isinstance(base_image_reference, str) or not __import__("re").fullmatch(
+    r"python@sha256:[0-9a-f]{64}", base_image_reference
+):
+    raise SystemExit("source 0236 certificate builder immutable base image reference is invalid")
+PY
+source_certificate_sha256="$(sha256sum "$SOURCE_CERTIFICATE" | awk '{print $1}')"
+
+if [ "$MODE" = "verify" ]; then
+[ "$FRESH_300_DB" != "$DB" ] || die "fresh 300 oracle DB는 0236 source DB와 달라야 한다"
+[ "$FRESH_300_CONTAINER" != "$CONTAINER" ] || \
+  die "fresh 300 oracle은 0236 source와 다른 disposable PostgreSQL cluster여야 한다"
+fresh_image_id="$(docker inspect -f '{{.Image}}' "$FRESH_300_CONTAINER")"
+fresh_container_id="$(docker inspect -f '{{.Id}}' "$FRESH_300_CONTAINER")"
+fresh_candidate_image="$(docker inspect -f '{{index .Config.Labels "io.kor-travel-map.application-baseline.candidate-image"}}' "$FRESH_300_CONTAINER")"
+fresh_candidate_image_id="$(docker inspect -f '{{index .Config.Labels "io.kor-travel-map.application-baseline.candidate-image-id"}}' "$FRESH_300_CONTAINER")"
+fresh_candidate_commit="$(docker inspect -f '{{index .Config.Labels "io.kor-travel-map.application-baseline.candidate-commit"}}' "$FRESH_300_CONTAINER")"
+fresh_candidate_manifest_sha256="$(docker inspect -f '{{index .Config.Labels "io.kor-travel-map.application-baseline.candidate-manifest-sha256"}}' "$FRESH_300_CONTAINER")"
+fresh_postgis_image_id="$(docker inspect -f '{{index .Config.Labels "io.kor-travel-map.application-baseline.postgis-image-id"}}' "$FRESH_300_CONTAINER")"
+[ "$(docker inspect -f '{{index .Config.Labels "io.kor-travel-map.application-baseline.isolated"}}' "$FRESH_300_CONTAINER")" = "true" ] || \
+  die "fresh 300 oracle에 isolated label이 없다"
+[ "$(docker inspect -f '{{index .Config.Labels "io.kor-travel-map.application-baseline.fresh-300-oracle"}}' "$FRESH_300_CONTAINER")" = "true" ] || \
+  die "fresh 300 oracle label이 없다"
+[ "$fresh_image_id" = "$SOURCE_IMAGE_ID" ] || die "fresh 300 oracle image ID가 source image와 다르다"
+[ "$fresh_postgis_image_id" = "$SOURCE_IMAGE_ID" ] || die "fresh 300 oracle PostGIS receipt가 image ID와 다르다"
+source_cluster_mounts="$(docker inspect -f '{{range .Mounts}}{{.Source}} {{end}}' "$CONTAINER")"
+fresh_cluster_mounts="$(docker inspect -f '{{range .Mounts}}{{.Source}} {{end}}' "$FRESH_300_CONTAINER")"
+[ -n "$source_cluster_mounts" ] || die "source PostgreSQL cluster mount를 확인할 수 없다"
+[ -n "$fresh_cluster_mounts" ] || die "fresh PostgreSQL cluster mount를 확인할 수 없다"
+[ "$fresh_cluster_mounts" != "$source_cluster_mounts" ] || \
+  die "fresh 300 oracle이 source와 같은 PostgreSQL data volume을 사용한다"
+fresh_revision="$(docker exec "$FRESH_300_CONTAINER" psql -v ON_ERROR_STOP=1 -U "$USER_NAME" -d "$FRESH_300_DB" -At \
+  -c "SELECT string_agg(version_num, ',' ORDER BY version_num) FROM public.alembic_version")"
+[ "$fresh_revision" = "300" ] || die "fresh oracle DB raw Alembic head가 exact 300이 아니다"
+fresh_pg_version="$(docker exec "$FRESH_300_CONTAINER" psql -v ON_ERROR_STOP=1 -U "$USER_NAME" -d "$FRESH_300_DB" -At -c 'SHOW server_version_num')"
+fresh_postgis_version="$(docker exec "$FRESH_300_CONTAINER" psql -v ON_ERROR_STOP=1 -U "$USER_NAME" -d "$FRESH_300_DB" -At -c "SELECT extversion FROM pg_extension WHERE extname = 'postgis'")"
+fresh_system_identifier="$(docker exec "$FRESH_300_CONTAINER" psql -v ON_ERROR_STOP=1 -U "$USER_NAME" -d "$FRESH_300_DB" -At -c 'SELECT system_identifier FROM pg_catalog.pg_control_system()')"
+[ "$fresh_pg_version" = "$SOURCE_PG_VERSION" ] || die "fresh oracle PostgreSQL version이 다르다"
+[ "$fresh_postgis_version" = "$SOURCE_POSTGIS_VERSION" ] || die "fresh oracle PostGIS version이 다르다"
+[[ "$fresh_system_identifier" =~ ^[0-9]+$ ]] || die "fresh PostgreSQL system identifier를 얻지 못했다"
+[ "$fresh_system_identifier" != "$source_system_identifier" ] || \
+  die "fresh 300 oracle이 source와 같은 PostgreSQL system identifier를 사용한다"
+fresh_database_oid="$(docker exec "$FRESH_300_CONTAINER" psql -v ON_ERROR_STOP=1 -U "$USER_NAME" -d "$FRESH_300_DB" -At -c 'SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database()')"
+[[ "$fresh_database_oid" =~ ^[0-9]+$ ]] || die "fresh oracle database OID를 얻지 못했다"
+
+# `raw 300` row와 label만 만드는 것으로는 empty bootstrap→candidate migration을 증명할 수
+# 없다. Oracle creator가 bootstrap 성공 뒤 남긴 receipt를 container/database/system id,
+# exact candidate image와 image 안 manifest까지 모두 다시 묶는다. receipt만 위조하거나
+# tag가 다른 image로 이동하면 이 자리에서 dump 전에 멈춘다.
+[ "$fresh_candidate_commit" = "$candidate_commit_expected" ] || \
+  die "fresh 300 oracle candidate commit이 현재 clean repository head와 다르다"
+[ "$fresh_candidate_manifest_sha256" = "$reference_manifest_sha256" ] || \
+  die "fresh 300 oracle candidate manifest label이 current reference와 다르다"
+candidate_image_id_actual="$(docker image inspect -f '{{.Id}}' "$fresh_candidate_image_id")"
+candidate_image_commit_actual="$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$fresh_candidate_image_id")"
+[ "$fresh_candidate_image_id" = "$candidate_image_id_actual" ] || \
+  die "fresh 300 oracle candidate image ID label이 실제 image와 다르다"
+[ "$candidate_image_commit_actual" = "$candidate_commit_expected" ] || \
+  die "fresh 300 oracle candidate image revision이 current clean repository head와 다르다"
+candidate_image_manifest_sha256="$(docker run --pull=never --rm --entrypoint sh "$fresh_candidate_image_id" -ec \
+  'sha256sum /app/alembic/baseline/application-reference.json | awk '\''{print $1}'\''')"
+[ "$candidate_image_manifest_sha256" = "$reference_manifest_sha256" ] || \
+  die "fresh 300 oracle candidate image artifact manifest가 current reference와 다르다"
+creator_script_sha256="$(sha256sum "$SCRIPT_DIR/create-application-300-fresh-oracle.sh" | awk '{print $1}')"
+bootstrap_script_sha256="$(sha256sum "$REPOSITORY_ROOT/docker/postgres-role-bootstrap.sh" | awk '{print $1}')"
+candidate_migration_sha256="$(sha256sum "$REPOSITORY_ROOT/alembic/versions/300_schema_baseline.py" | awk '{print $1}')"
+python3 - "$FRESH_300_RECEIPT" "$fresh_container_id" "$FRESH_300_DB" \
+  "$fresh_database_oid" "$fresh_system_identifier" "$fresh_candidate_image" \
+  "$candidate_image_id_actual" "$candidate_commit_expected" "$reference_manifest_sha256" \
+  "$SOURCE_IMAGE" "$SOURCE_IMAGE_ID" "$creator_script_sha256" "$bootstrap_script_sha256" \
+  "$candidate_migration_sha256" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+expected = {
+    "container_id": sys.argv[2],
+    "database": sys.argv[3],
+    "database_oid": int(sys.argv[4]),
+    "postgres_system_identifier": sys.argv[5],
+    "candidate_image": sys.argv[6],
+    "candidate_image_id": sys.argv[7],
+    "candidate_commit": sys.argv[8],
+    "candidate_manifest_sha256": sys.argv[9],
+    "bootstrap_phase": "baseline-300",
+    "migration_command": "alembic upgrade head",
+    "postgis_image": sys.argv[10],
+    "postgis_image_id": sys.argv[11],
+    "creator_script_sha256": sys.argv[12],
+    "bootstrap_script_sha256": sys.argv[13],
+    "candidate_300_migration_sha256": sys.argv[14],
+    "raw_alembic_revision": "300",
+}
+try:
+    value = json.loads(path.read_text(encoding="utf-8"))
+except (OSError, ValueError) as exc:
+    raise SystemExit(f"invalid fresh 300 oracle receipt: {exc}") from exc
+required = {
+    "schema", *expected,
+    "application_relation_count", "catalog_sha256", "seed_sha256",
+    "runtime_invariant_violation_count",
+}
+if not isinstance(value, dict) or value.get("schema") != "kor-travel-map.application-fresh-300-oracle.v2":
+    raise SystemExit("fresh 300 oracle receipt schema is invalid")
+if {key: value.get(key) for key in expected} != expected:
+    raise SystemExit("fresh 300 oracle receipt is not bound to the observed candidate/database")
+if set(value) != required:
+    raise SystemExit("fresh 300 oracle receipt contains an unexpected field")
+if not isinstance(value["application_relation_count"], int) or value["application_relation_count"] < 1:
+    raise SystemExit("fresh 300 oracle receipt application relation count is invalid")
+if value["runtime_invariant_violation_count"] != 0:
+    raise SystemExit("fresh 300 oracle receipt runtime invariant result is invalid")
+for key in ("catalog_sha256", "seed_sha256"):
+    digest = value[key]
+    if not isinstance(digest, str) or len(digest) != 64 or set(digest) - set("0123456789abcdef"):
+        raise SystemExit(f"fresh 300 oracle receipt digest is invalid: {key}")
+PY
+fi
+
+BUILD_DIR="$(mktemp -d "$(dirname -- "$OUT_DIR")/.ktm300-baseline.XXXXXX")"
+RAW="$(mktemp)"
+trap 'rm -f "$RAW" "${RAW2:-}" "${SEED_LIST:-}"; [ -z "${BUILD_DIR:-}" ] || rm -rf -- "$BUILD_DIR"' EXIT
 
 printf '=== pg_dump --schema-only (feature / provider_sync / ops) ===\n'
 docker exec "$CONTAINER" pg_dump -U "$USER_NAME" -d "$DB" \
@@ -95,11 +613,14 @@ ROUTINE_ACL_GRANTEE_VALUES="('public'),
                              ('ktm_feature_schema_owner'),
                              ('ktm_feature_state_procedure_owner'),
                              ('ktm_feature_audit_writer'),
+                             ('ktm_feature_reference_reconciliation_service_executor'),
                              ('ktm_feature_runtime'),
                              ('ktm_feature_request_admin_executor'),
                              ('ktm_feature_request_procedure_owner'),
                              ('ktm_feature_request_service_executor'),
                              ('ktm_manual_feature_procedure_owner'),
+                             ('ktm_manual_provider_dedup_admin_executor'),
+                             ('ktm_manual_provider_dedup_detector_executor'),
                              ('ktm_manual_provider_dedup_procedure_owner')"
 
 ROUTINE_ACL_DIGEST_SQL="$(cat <<'SQL'
@@ -118,7 +639,7 @@ SQL
 )"
 ROUTINE_ACL_DIGEST_SQL="${ROUTINE_ACL_DIGEST_SQL/@GRANTEES@/$ROUTINE_ACL_GRANTEE_VALUES}"
 
-# grantee 축이 여전히 **완전한지** 묻는다. digest는 위 5개만 재므로, baseline이 미래에
+# grantee 축이 여전히 **완전한지** 묻는다. digest는 위 고정 목록만 재므로, baseline이 미래에
 # 새 role에 routine GRANT를 얻으면 그 축은 조용히 안 재진다 — digest는 한 글자도 안 변한다
 # (2026-08-14 적대 리뷰 지적). 그래서 "실제 ACL에 등장하는 grantee 집합 ⊆ 고정 목록"을
 # 별도로 단언한다. `pg_roles`를 긁지 않으므로 환경 role 수(테스트 5 / prod 7)와 무관하다.
@@ -157,7 +678,7 @@ UNKNOWN_GRANTEES="$(docker exec "$CONTAINER" psql -U "$USER_NAME" -d "$DB" -tA \
 printf '  목록 밖 grantee 없음\n'
 
 printf '=== 정규화 ===\n'
-python3 - "$RAW" "$OUT_DIR/schema.sql" "$ACL_DIGEST" "$ROUTINE_ACL_DIGEST_SQL" \
+python3 - "$RAW" "$BUILD_DIR/schema.sql" "$ACL_DIGEST" "$ROUTINE_ACL_DIGEST_SQL" \
   "$ROUTINE_ACL_GRANTEE_GUARD_SQL" <<'PY'
 import pathlib, re, sys
 
@@ -167,7 +688,7 @@ acl_digest = sys.argv[3]
 acl_digest_sql = sys.argv[4]
 acl_grantee_guard_sql = sys.argv[5]
 lines = raw.splitlines()
-kept, dropped = [], {"version": 0, "preamble": 0}
+kept, dropped = [], {"version": 0, "preamble": 0, "psql_restrict": 0}
 
 # 4. preamble에서 **search_path 고정만** 버린다. alembic/env.py가 트랜잭션 안에서
 #    search_path를 세우므로 dump의 `set_config('search_path','')`가 그걸 덮으면 안 된다.
@@ -182,8 +703,13 @@ PREAMBLE = re.compile(
     r"^SELECT pg_catalog\.set_config\('search_path'"
 )
 for line in lines:
-    # 6. psql 메타명령은 제거가 아니라 **거부**한다. pg_dump 판올림으로 `\restrict`
-    #    같은 것이 유입되면 조용히 지워지는 대신 빌드가 서야 한다.
+    # PostgreSQL 16의 pg_dump는 random token을 품은 `\restrict` / `\unrestrict`
+    # pair를 낸다. 이는 psql client-side injection fence이지 server catalog가 아니며,
+    # token이 매 dump마다 달라 그대로 두면 deterministic artifact가 될 수 없다.
+    # 허용 범위를 이 정확한 한 쌍으로만 닫아 두고, 다른 메타명령은 여전히 fail-close다.
+    if re.fullmatch(r"\\(?:un)?restrict [A-Za-z0-9]+", line):
+        dropped["psql_restrict"] += 1
+        continue
     if line.startswith("\\"):
         raise SystemExit(f"psql 메타명령이 dump에 있다 — 정규화 규칙을 갱신하라: {line[:60]!r}")
     # 3. 판올림마다 바뀌는 버전 주석 2줄
@@ -314,32 +840,56 @@ if not text.endswith("\n"):
 out_path.write_bytes(text.encode("utf-8"))
 print(f"  버전 주석 제거: {dropped['version']}줄")
 print(f"  preamble 제거:  {dropped['preamble']}줄")
+print(f"  psql restrict fence 제거: {dropped['psql_restrict']}줄")
 print(f"  CREATE SCHEMA IF NOT EXISTS 치환: {n_schema}개")
 print(f"  ACL role 전환 삽입: {n_role_switch}회")
 print(f"  결과: {len(text.splitlines())}줄")
 PY
 
 printf '=== seed 데이터 ===\n'
-# seed 대상은 **기계로** 고른다. 사람이 목록을 적으면 새 seed가 생겼을 때 조용히
-# 빠진다. 대상 DB는 provider 적재 전 상태여야 한다 — 그래야 남아 있는 행이 곧
-# 체인이 넣은 것이다. (인수 실행 잔재가 섞인 DB로 뽑으면 그 잔재까지 baseline에
-# 들어간다 — 실제로 처음에 그럴 뻔했다.)
+# fresh root seed는 allow-list다. 전체 nonempty table을 dump하면 provider 적재·fixture·
+# 운영 audit가 baseline으로 승격된다. 반대로 handoff receipt는 이 fresh seed 전체를
+# exact compare하지 않는다 — curated/provider catalog는 정상 admin/운영 command가 바꿀
+# 수 있기 때문이다. runtime revision projection 두 표는 migration이 0에서 초기화한다.
+#
+# disposable `0236` reference에는 아래 fresh seed와 runtime projection 외의 application
+# data가 하나도 없어야 한다. 그 전제를 SQL로 증명한 뒤에만 dump한다.
 SEED_LIST="$(mktemp)"
-docker exec "$CONTAINER" psql -U "$USER_NAME" -d "$DB" -tA -c "
+printf '%s\n' "${FRESH_BASELINE_SEED_RELATIONS[@]}" > "$SEED_LIST"
+
+unexpected_nonempty="$(docker exec "$CONTAINER" psql -v ON_ERROR_STOP=1 -q -U "$USER_NAME" -d "$DB" -tA -c "
 DO \$\$
-DECLARE r record; c bigint;
+DECLARE r record; has_rows boolean;
 BEGIN
-    CREATE TEMP TABLE IF NOT EXISTS ktm_seed_rel(rel text);
-    FOR r IN SELECT schemaname, tablename FROM pg_tables
-             WHERE schemaname IN ('feature','provider_sync','ops')
-             ORDER BY schemaname, tablename LOOP
-        EXECUTE format('SELECT count(*) FROM %I.%I', r.schemaname, r.tablename) INTO c;
-        IF c > 0 THEN
-            INSERT INTO ktm_seed_rel VALUES (r.schemaname || '.' || r.tablename);
+    CREATE TEMP TABLE ktm_unexpected_nonempty(rel text PRIMARY KEY);
+    FOR r IN
+        SELECT schemaname, tablename
+        FROM pg_catalog.pg_tables
+        WHERE schemaname IN ('feature', 'provider_sync', 'ops')
+          AND (schemaname || '.' || tablename) NOT IN (
+              'feature.curated_source_rules',
+              'feature.curated_sources',
+              'feature.curated_themes',
+              'ops.feature_override_field_paths',
+              'ops.import_job_event_clock',
+              'ops.ops_live_topic_revisions',
+              'provider_sync.provider_dataset_operation_scopes',
+              'provider_sync.provider_dataset_operations',
+              'provider_sync.provider_datasets'
+          )
+        ORDER BY schemaname, tablename
+    LOOP
+        EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I.%I)', r.schemaname, r.tablename)
+            INTO has_rows;
+        IF has_rows THEN
+            INSERT INTO ktm_unexpected_nonempty(rel)
+            VALUES (r.schemaname || '.' || r.tablename);
         END IF;
     END LOOP;
 END \$\$;
-SELECT rel FROM ktm_seed_rel ORDER BY rel;" 2>/dev/null | grep -E '^[a-z_]+\.[a-z_]+$' > "$SEED_LIST"
+SELECT coalesce(string_agg(rel, ',' ORDER BY rel), '') FROM ktm_unexpected_nonempty;")"
+[ -z "$unexpected_nonempty" ] || die "reference DB에 fresh seed 밖의 live/fixture data가 있다: $unexpected_nonempty"
+
 printf 'seed 대상 %s개:\n' "$(wc -l < "$SEED_LIST")"
 sed 's/^/  /' "$SEED_LIST"
 
@@ -351,15 +901,16 @@ if [ "${#SEED_ARGS[@]}" -gt 0 ]; then
   docker exec "$CONTAINER" pg_dump -U "$USER_NAME" -d "$DB" \
     --data-only --column-inserts --no-owner \
     "${SEED_ARGS[@]}" -f /tmp/ktm-baseline-seed.sql
-  docker cp "$CONTAINER":/tmp/ktm-baseline-seed.sql "$OUT_DIR/seed.sql" >/dev/null
+  docker cp "$CONTAINER":/tmp/ktm-baseline-seed.sql "$BUILD_DIR/seed.sql" >/dev/null
   docker exec "$CONTAINER" rm -f /tmp/ktm-baseline-seed.sql
-  python3 - "$OUT_DIR/seed.sql" <<'PY'
-import pathlib, sys
+  python3 - "$BUILD_DIR/seed.sql" <<'PY'
+import pathlib, re, sys
 p = pathlib.Path(sys.argv[1])
 lines = [
     line for line in p.read_text(encoding="utf-8").splitlines()
     if not line.startswith(("-- Dumped from database version", "-- Dumped by pg_dump version"))
     and not line.startswith("SELECT pg_catalog.set_config('search_path'")
+    and not re.fullmatch(r"\\(?:un)?restrict [A-Za-z0-9]+", line)
 ]
 while lines and not lines[-1].strip():
     lines.pop()
@@ -376,16 +927,334 @@ docker exec "$CONTAINER" pg_dump -U "$USER_NAME" -d "$DB" --schema-only \
   -f /tmp/ktm-baseline-raw2.sql
 docker cp "$CONTAINER":/tmp/ktm-baseline-raw2.sql "$RAW2" >/dev/null
 docker exec "$CONTAINER" rm -f /tmp/ktm-baseline-raw2.sql
-if diff -q <(grep -v '^-- Dumped' "$RAW") <(grep -v '^-- Dumped' "$RAW2") >/dev/null; then
+dump_without_volatile_preamble() {
+  grep -v '^-- Dumped' "$1" | sed -E '/^\\(un)?restrict [[:alnum:]]+$/d'
+}
+if diff -q <(dump_without_volatile_preamble "$RAW") <(dump_without_volatile_preamble "$RAW2") >/dev/null; then
   printf '  결정론 OK\n'
 else
   printf '  오류: 같은 DB에서 두 dump가 다르다 — baseline이 재현 가능하지 않다\n' >&2
-  diff <(grep -v '^-- Dumped' "$RAW") <(grep -v '^-- Dumped' "$RAW2") | head -5
+  diff <(dump_without_volatile_preamble "$RAW") <(dump_without_volatile_preamble "$RAW2") | head -5
   exit 1
 fi
 rm -f "$RAW2"
 
 printf '\nbaseline: %s (%s줄, sha256 %s)\n' \
-  "$OUT_DIR/schema.sql" \
-  "$(wc -l < "$OUT_DIR/schema.sql")" \
-  "$(sha256sum < "$OUT_DIR/schema.sql" | cut -c1-16)"
+  "$BUILD_DIR/schema.sql" \
+  "$(wc -l < "$BUILD_DIR/schema.sql")" \
+  "$(sha256sum < "$BUILD_DIR/schema.sql" | cut -c1-16)"
+
+# application handoff receipt query는 schema/seed dump와 같은 release artifact다.
+# query·expected SHA·reference manifest를 따로 고치면 version label만 맞는 DB가
+# 통과하거나(혹은 정상 source가 전부 거절되거나) 하는 split-brain이 생긴다. canonical
+# query source를 staging directory에 함께 복사하고, source/fresh 양쪽의 ordered UTF-8/LF
+# stream을 같은 경로로 실행한 뒤 한 manifest로 닫는다.
+CANONICAL_BASELINE_DIR="$SCRIPT_DIR/../alembic/baseline"
+for contract in application-catalog.sql application-seed.sql application-runtime-invariants.sql; do
+  [ -f "$CANONICAL_BASELINE_DIR/$contract" ] && [ ! -L "$CANONICAL_BASELINE_DIR/$contract" ] || \
+    die "canonical handoff contract가 없다: $contract"
+  cp "$CANONICAL_BASELINE_DIR/$contract" "$BUILD_DIR/$contract"
+done
+
+contract_sha256() { # container db contract
+  local container="$1"
+  local database="$2"
+  local contract="$3"
+  # handoff와 같은 schema owner/search_path에서 deparse한다. postgres default session으로
+  # receipt를 만들면 `pg_get_functiondef()` 등이 정상 handoff session과 다른 SQL을 낼 수
+  # 있어 source/fresh가 우연히 서로 같아도 production preflight와 달라질 수 있다.
+  {
+    printf '%s\n' 'BEGIN;'
+    printf '%s\n' 'SET LOCAL ROLE ktm_feature_schema_owner;'
+    printf '%s\n' 'SET LOCAL search_path = public, x_extension;'
+    cat "$BUILD_DIR/$contract"
+    printf '%s\n' 'ROLLBACK;'
+  } | docker exec -i "$container" psql -q -v ON_ERROR_STOP=1 -U "$USER_NAME" -d "$database" -tA \
+    | sha256sum | awk '{print $1}'
+}
+
+source_catalog_sha="$(contract_sha256 "$CONTAINER" "$DB" application-catalog.sql)"
+source_seed_sha="$(contract_sha256 "$CONTAINER" "$DB" application-seed.sql)"
+for digest in "$source_catalog_sha" "$source_seed_sha"; do
+  [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || die "contract receipt SHA-256을 얻지 못했다"
+done
+if [ "$MODE" = "verify" ]; then
+fresh_catalog_sha="$(contract_sha256 "$FRESH_300_CONTAINER" "$FRESH_300_DB" application-catalog.sql)"
+fresh_seed_sha="$(contract_sha256 "$FRESH_300_CONTAINER" "$FRESH_300_DB" application-seed.sql)"
+for digest in "$fresh_catalog_sha" "$fresh_seed_sha"; do
+  [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || die "fresh contract receipt SHA-256을 얻지 못했다"
+done
+[ "$source_catalog_sha" = "$fresh_catalog_sha" ] || \
+  die "fresh 300 oracle catalog receipt가 exact 0236 source와 다르다"
+[ "$source_seed_sha" = "$fresh_seed_sha" ] || \
+  die "fresh 300 oracle immutable handoff seed receipt가 exact 0236 source와 다르다"
+# Oracle creator가 후보 image의 실제 migration 뒤 남긴 receipt result도, 여기서
+# 재계산한 fresh DB result와 byte-exact여야 한다. receipt만 hand-edit하거나 raw `300`
+# row를 넣어 만든 DB는 이 independent recheck를 통과할 수 없다.
+python3 - "$FRESH_300_RECEIPT" "$fresh_catalog_sha" "$fresh_seed_sha" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+try:
+    receipt = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except (OSError, ValueError) as exc:
+    raise SystemExit(f"fresh 300 oracle receipt cannot be re-read: {exc}") from exc
+if (
+    receipt.get("catalog_sha256") != sys.argv[2]
+    or receipt.get("seed_sha256") != sys.argv[3]
+    or receipt.get("runtime_invariant_violation_count") != 0
+):
+    raise SystemExit("fresh 300 oracle receipt result does not match the observed fresh database")
+PY
+fi
+printf '%s\n' "$source_catalog_sha" > "$BUILD_DIR/application-catalog.sha256"
+printf '%s\n' "$source_seed_sha" > "$BUILD_DIR/application-seed.sha256"
+
+python3 - "$BUILD_DIR" "$SOURCE_COMMIT" "$SOURCE_HEAD" "$SOURCE_IMAGE" "$SOURCE_IMAGE_ID" \
+  "$SOURCE_PG_VERSION" "$SOURCE_POSTGIS_VERSION" "$source_catalog_sha" "$source_seed_sha" <<'PY'
+from __future__ import annotations
+
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+out = Path(sys.argv[1])
+source = {
+    "git_commit": sys.argv[2],
+    "raw_alembic_revision": sys.argv[3],
+    "container_image": sys.argv[4],
+    "container_image_id": sys.argv[5],
+    "postgres_server_version_num": sys.argv[6],
+    "postgis_extension_version": sys.argv[7],
+}
+catalog_receipt = sys.argv[8]
+seed_receipt = sys.argv[9]
+
+def digest(name: str) -> str:
+    return hashlib.sha256((out / name).read_bytes()).hexdigest()
+
+value = {
+    "schema": "kor-travel-map.application-baseline-reference.v1",
+    "source": source,
+    "artifacts": {
+        "schema_sql_sha256": digest("schema.sql"),
+        "seed_sql_sha256": digest("seed.sql"),
+        "catalog_contract_sql_sha256": digest("application-catalog.sql"),
+        "catalog_contract_sha256": catalog_receipt,
+        "catalog_contract_receipt_sha256": digest("application-catalog.sha256"),
+        "seed_contract_sql_sha256": digest("application-seed.sql"),
+        "seed_contract_sha256": seed_receipt,
+        "seed_contract_receipt_sha256": digest("application-seed.sha256"),
+        "runtime_invariants_sql_sha256": digest("application-runtime-invariants.sql"),
+    },
+    "fresh_seed_relations": [
+        "feature.curated_source_rules",
+        "feature.curated_sources",
+        "feature.curated_themes",
+        "ops.feature_override_field_paths",
+        "provider_sync.provider_dataset_operation_scopes",
+        "provider_sync.provider_dataset_operations",
+        "provider_sync.provider_datasets",
+    ],
+    "static_seed_relations": ["ops.feature_override_field_paths"],
+}
+(out / "application-reference.json").write_text(
+    json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+)
+(out / "application-reference.sha256").write_text(
+    hashlib.sha256((out / "application-reference.json").read_bytes()).hexdigest() + "\n",
+    encoding="ascii",
+)
+PY
+
+python3 - "$BUILD_DIR" "$SOURCE_COMMIT" "$SOURCE_HEAD" "$SOURCE_IMAGE" "$SOURCE_IMAGE_ID" \
+  "$SOURCE_PG_VERSION" "$SOURCE_POSTGIS_VERSION" <<'PY'
+from __future__ import annotations
+
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+out = Path(sys.argv[1])
+value = json.loads((out / "application-reference.json").read_text(encoding="utf-8"))
+reference_digest = (out / "application-reference.sha256").read_bytes()
+reference_sha256 = hashlib.sha256((out / "application-reference.json").read_bytes()).hexdigest()
+if reference_digest != f"{reference_sha256}\n".encode("ascii"):
+    raise SystemExit("generated reference manifest digest sidecar drifted")
+source = value.get("source")
+if value.get("schema") != "kor-travel-map.application-baseline-reference.v1" or source != {
+    "git_commit": sys.argv[2],
+    "raw_alembic_revision": sys.argv[3],
+    "container_image": sys.argv[4],
+    "container_image_id": sys.argv[5],
+    "postgres_server_version_num": sys.argv[6],
+    "postgis_extension_version": sys.argv[7],
+}:
+    raise SystemExit("generated reference manifest provenance is invalid")
+if value.get("fresh_seed_relations") != [
+    "feature.curated_source_rules", "feature.curated_sources", "feature.curated_themes",
+    "ops.feature_override_field_paths", "provider_sync.provider_dataset_operation_scopes",
+    "provider_sync.provider_dataset_operations", "provider_sync.provider_datasets",
+] or value.get("static_seed_relations") != ["ops.feature_override_field_paths"]:
+    raise SystemExit("generated reference manifest seed inventories are invalid")
+files = {
+    "schema.sql": "schema_sql_sha256",
+    "seed.sql": "seed_sql_sha256",
+    "application-catalog.sql": "catalog_contract_sql_sha256",
+    "application-catalog.sha256": "catalog_contract_receipt_sha256",
+    "application-seed.sql": "seed_contract_sql_sha256",
+    "application-seed.sha256": "seed_contract_receipt_sha256",
+    "application-runtime-invariants.sql": "runtime_invariants_sql_sha256",
+}
+for name, key in files.items():
+    actual = hashlib.sha256((out / name).read_bytes()).hexdigest()
+    if value["artifacts"].get(key) != actual:
+        raise SystemExit(f"generated reference artifact digest drifted: {name}")
+for name, key in (("application-catalog.sha256", "catalog_contract_sha256"),
+                  ("application-seed.sha256", "seed_contract_sha256")):
+    if (out / name).read_text(encoding="ascii").strip() != value["artifacts"].get(key):
+        raise SystemExit(f"generated contract receipt/manifest drifted: {name}")
+PY
+generated_reference_manifest_sha256="$(sha256sum "$BUILD_DIR/application-reference.json" | awk '{print $1}')"
+materializer_script_sha256="$(sha256sum "$SCRIPT_DIR/build-baseline.sh" | awk '{print $1}')"
+
+if [ "$MODE" = "materialize" ]; then
+  # Existing baseline directory를 부분 overwrite하지 않는다. source-only output은
+  # final candidate evidence가 아니며, 다음 verify 단계가 exact candidate/fresh oracle
+  # 과 다시 묶기 전에는 deploy input으로 쓸 수 없다.
+  mv "$BUILD_DIR" "$OUT_DIR"
+  BUILD_DIR=""
+  receipt_tmp="$(mktemp "$(dirname -- "$RECEIPT_PATH")/.ktm300-materialization-receipt.XXXXXX")"
+  python3 - "$receipt_tmp" "$OUT_DIR/application-reference.json" "$source_container_id" \
+    "$DB" "$source_database_oid" "$source_system_identifier" "$source_catalog_sha" \
+    "$source_seed_sha" "$source_certificate_sha256" "$materializer_script_sha256" <<'PY'
+from __future__ import annotations
+
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+target = Path(sys.argv[1])
+manifest = Path(sys.argv[2])
+value = {
+    "schema": "kor-travel-map.application-baseline-materialization-receipt.v1",
+    "reference_manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+    "source_container_id": sys.argv[3],
+    "source_database": sys.argv[4],
+    "source_database_oid": int(sys.argv[5]),
+    "source_postgres_system_identifier": sys.argv[6],
+    "source_catalog_sha256": sys.argv[7],
+    "source_seed_sha256": sys.argv[8],
+    "source_certificate_sha256": sys.argv[9],
+    "materializer_script_sha256": sys.argv[10],
+}
+target.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+PY
+  chmod 600 "$receipt_tmp"
+  mv "$receipt_tmp" "$RECEIPT_PATH"
+  printf 'application baseline materialized (not deploy evidence): %s\n' "$OUT_DIR"
+  printf 'materialization receipt (external): %s\n' "$RECEIPT_PATH"
+  exit 0
+fi
+
+[ "$generated_reference_manifest_sha256" = "$reference_manifest_sha256" ] || \
+  die "fresh candidate가 증명한 manifest와 새 generated baseline manifest가 다르다"
+
+# 1단계 source-only materialization은 현재 artifact가 어디에서 왔는지 남긴 외부
+# receipt다. verify는 같은 candidate artifact를 source에서 다시 생성해 비교하므로,
+# receipt를 바꿔치기하거나 다른 source DB로 만든 output을 final proof에 섞지 못한다.
+python3 - "$MATERIALIZATION_RECEIPT" "$generated_reference_manifest_sha256" \
+  "$source_container_id" "$DB" "$source_database_oid" "$source_system_identifier" \
+  "$source_catalog_sha" "$source_seed_sha" "$source_certificate_sha256" \
+  "$materializer_script_sha256" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+try:
+    value = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
+except (OSError, ValueError) as exc:
+    raise SystemExit(f"materialization receipt cannot be parsed: {exc}") from exc
+expected = {
+    "schema": "kor-travel-map.application-baseline-materialization-receipt.v1",
+    "reference_manifest_sha256": sys.argv[2],
+    "source_container_id": sys.argv[3],
+    "source_database": sys.argv[4],
+    "source_database_oid": int(sys.argv[5]),
+    "source_postgres_system_identifier": sys.argv[6],
+    "source_catalog_sha256": sys.argv[7],
+    "source_seed_sha256": sys.argv[8],
+    "source_certificate_sha256": sys.argv[9],
+    "materializer_script_sha256": sys.argv[10],
+}
+if not isinstance(value, dict) or value != expected:
+    raise SystemExit("materialization receipt does not bind this source/artifact generator")
+PY
+
+# verify는 final candidate image가 포함한 artifact directory와 source-only output의
+# 전 파일 byte 동등성을 본다. manifest만 같다는 비교는 sidecar 누락을 숨길 수 있다.
+for artifact in \
+  schema.sql seed.sql application-catalog.sql application-catalog.sha256 \
+  application-reference.json application-reference.sha256 \
+  application-runtime-invariants.sql application-seed.sql application-seed.sha256; do
+  candidate_artifact="$CANONICAL_BASELINE_DIR/$artifact"
+  [[ -f "$candidate_artifact" && ! -L "$candidate_artifact" ]] || \
+    die "candidate baseline artifact가 없다: $artifact"
+  cmp -s "$BUILD_DIR/$artifact" "$candidate_artifact" || \
+    die "source에서 다시 생성한 artifact가 current candidate와 다르다: $artifact"
+done
+
+# Existing baseline directory를 부분 overwrite하지 않는다. verified staging directory를
+# 한 번 rename해 publish하므로 실패 중간물이 review/commit 대상이 될 수 없다.
+mv "$BUILD_DIR" "$OUT_DIR"
+BUILD_DIR=""
+
+receipt_tmp="$(mktemp "$(dirname -- "$RECEIPT_PATH")/.ktm300-baseline-receipt.XXXXXX")"
+fresh_oracle_receipt_sha256="$(sha256sum "$FRESH_300_RECEIPT" | awk '{print $1}')"
+materialization_receipt_sha256="$(sha256sum "$MATERIALIZATION_RECEIPT" | awk '{print $1}')"
+python3 - "$receipt_tmp" "$OUT_DIR/application-reference.json" "$source_database_oid" \
+  "$fresh_database_oid" "$fresh_catalog_sha" "$fresh_seed_sha" "$source_container_id" \
+  "$source_system_identifier" "$fresh_container_id" "$fresh_system_identifier" \
+  "$fresh_candidate_image" "$candidate_image_id_actual" "$candidate_commit_expected" \
+  "$fresh_oracle_receipt_sha256" "$materialization_receipt_sha256" \
+  "$source_certificate_sha256" <<'PY'
+from __future__ import annotations
+
+import hashlib
+import json
+import sys
+from pathlib import Path
+
+target = Path(sys.argv[1])
+manifest = Path(sys.argv[2])
+value = {
+    "schema": "kor-travel-map.application-baseline-build-receipt.v1",
+    "reference_manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
+    "source_database_oid": int(sys.argv[3]),
+    "fresh_300_database_oid": int(sys.argv[4]),
+    "source_catalog_sha256": sys.argv[5],
+    "fresh_300_catalog_sha256": sys.argv[5],
+    "source_seed_sha256": sys.argv[6],
+    "fresh_300_seed_sha256": sys.argv[6],
+    "source_container_id": sys.argv[7],
+    "source_postgres_system_identifier": sys.argv[8],
+    "fresh_300_container_id": sys.argv[9],
+    "fresh_300_postgres_system_identifier": sys.argv[10],
+    "fresh_300_candidate_image": sys.argv[11],
+    "fresh_300_candidate_image_id": sys.argv[12],
+    "fresh_300_candidate_commit": sys.argv[13],
+    "fresh_300_oracle_receipt_sha256": sys.argv[14],
+    "materialization_receipt_sha256": sys.argv[15],
+    "source_certificate_sha256": sys.argv[16],
+}
+target.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
+PY
+chmod 600 "$receipt_tmp"
+mv "$receipt_tmp" "$RECEIPT_PATH"
+
+printf 'application reference published: %s\n' "$OUT_DIR"
+printf 'build receipt (external): %s\n' "$RECEIPT_PATH"

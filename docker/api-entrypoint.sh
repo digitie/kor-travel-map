@@ -366,42 +366,21 @@ if [ -n "$expected_head" ]; then
   fi
 fi
 
-# 영구 오류를 retry로 두드리지 않는다. DB의 revision이 이미지 chain에 없으면(= 이미지가
-# DB보다 뒤처짐 — stale 이미지 재배포) `alembic upgrade head`는 30회 내내 같은 이유로
-# 실패한다. `alembic current`는 같은 오류를 즉시 내므로 한 번 읽어 먼저 판정한다 —
-# 읽기 전용이고, 연결 실패 같은 일시 오류는 아래 retry 루프가 그대로 처리한다.
+# `300` image는 fresh DB 또는 raw `300`만 normal startup으로 처리한다. `0236`은
+# generic Alembic resolver가 active graph 밖 source를 해석할 수 없으므로, 이를 자동
+# stamp/upgrade로 고치지 않는다. Docker Manager가 writer fence와 same-transaction
+# catalog pre/postflight를 확보한 controlled executable만 handoff할 수 있다.
 if ! current_raw="$(alembic current 2>&1)"; then
   case "$current_raw" in
     *"Can't locate revision"*)
-      # 원인이 두 가지인데 진단이 하나뿐이면 오도한다. squash(`0200`) 이후 이미지는
-      # `alembic/versions/`에 baseline + bridge만 담고, 옛 세대는
-      # source의 `alembic/legacy_versions/`는 실행 이미지에 넣지 않는다. 대신 그
-      # archive에서 생성·검증한 revision id manifest만 복사한다. 그래서 **이미지가
-      # DB보다 새로운데도**
-      # 같은 오류가 난다 — `0104` 이전 복구점(예: H44 1회차 dump `0078`)으로 복원한 DB가
-      # 정확히 그 경우다. 옛 진단문("stale image")만 남기면 새벽에 그 로그를 보는 사람이
-      # 롤백을 시도하게 된다. DB의 revision이 아카이브에 있는지로 두 경우를 가른다.
-      # 판별자는 "아카이브에 있는가"만으로는 부족하다 — stale 이미지가 배포된 경우에도
-      # DB revision은 아카이브에 있을 수 있다. **이 이미지가 squash판인가**를 함께 본다:
-      # `alembic/versions/`에 baseline이 있으면 이 이미지는 `0200`에서 시작하므로,
-      # 아카이브 세대 DB를 앞으로 옮길 수 없다(= DB가 뒤처짐). baseline이 없으면
-      # 이 이미지는 옛 체인판이고 DB가 앞선 것이다(= 이미지가 뒤처짐).
       db_revision="$(printf '%s' "$current_raw" | sed -n 's/.*Can'"'"'t locate revision identified by '"'"'\([^'"'"']*\)'"'"'.*/\1/p' | head -1)"
-      archived=""
-      if [ -n "$db_revision" ] && [ -f alembic/versions/0200_schema_baseline.py ] \
-         && [ -f docker/pre-squash-revisions.txt ] \
-         && grep -Fqx "$db_revision" docker/pre-squash-revisions.txt; then
-        archived="alembic/legacy_versions/${db_revision}"
-      fi
-      echo "the DB alembic revision is not part of this image's migration chain" >&2
-      if [ -n "$archived" ]; then
-        echo "(the DB is at ${db_revision}, a **pre-squash** generation archived in ${archived};" >&2
-        echo " this image starts from 0200_schema_baseline and cannot migrate it forward." >&2
-        echo " Restore a 0104_tvn36_final_fence-or-later backup, or rebuild the DB from the" >&2
-        echo " baseline and reload providers. Do NOT hand-edit alembic_version." >&2
-        echo " See docs/backup-restore.md and alembic/legacy_versions/README.md.)" >&2
+      if [ "$db_revision" = "0236_tvn41s_compaction_drained" ]; then
+        echo "the DB is at 0236 and requires the controlled application-schema 0236-to-300 handoff" >&2
+        echo "normal API startup will not stamp or upgrade it; run the Docker Manager in-place transition" >&2
+        echo "(ktm-application-schema-handoff with writer fence receipt) before starting this candidate" >&2
       else
-        echo "(the image is older than the DB — a stale image was deployed; the DB was not touched)" >&2
+        echo "the DB Alembic revision is unsupported by the active 300-only image" >&2
+        echo "(raw revision: ${db_revision:-unknown}; no archive replay, downgrade, or manual version-table edit is supported)" >&2
       fi
       printf '%s\n' "$current_raw" >&2
       exit 1
@@ -413,21 +392,12 @@ retries="${KOR_TRAVEL_MAP_MIGRATION_RETRIES:-30}"
 sleep_seconds="${KOR_TRAVEL_MAP_MIGRATION_RETRY_SLEEP_SECONDS:-2}"
 attempt=1
 
-# `alembic upgrade head`의 stderr는 파일에 받았다가 그대로 다시 내보낸다(운영자가 원문을 봐야
-# 한다) — 그 사본으로 **영구 실패**를 판정한다. 0223(T-VN-40 identity mapping loader)의 fail-closed
-# 중단은 데이터 문제라 재시도로 풀리지 않는데, 30회 반복하면 매번 0202~0223 DDL을 다시 돌리며
-# lock만 흔든다. (POSIX sh — process substitution 없음.)
+# `0236` source와 알 수 없는 active-graph 밖 revision은 위에서 retry 전에 거부한다.
+# 여기서는 일시 연결 오류만 bounded retry로 흡수한다. (POSIX sh — process substitution 없음.)
 upgrade_log="$(mktemp)"
 trap 'rm -f "$upgrade_log"' EXIT
 while ! alembic upgrade head 2>"$upgrade_log"; do
   cat "$upgrade_log" >&2
-  if grep -Fq "tvn40 identity mapping:" "$upgrade_log"; then
-    echo "alembic upgrade head failed permanently: T-VN-40 identity mapping loader aborted" >&2
-    echo " (fail-closed by design — resolve on the canonical side per" >&2
-    echo "  docs/reports/t-vn-40-identity-mapping-loader-design-2026-08-18.md §5, then redeploy;" >&2
-    echo "  the whole 0202..0223 chain was rolled back, head is unchanged)" >&2
-    exit 1
-  fi
   if [ "$attempt" -ge "$retries" ]; then
     echo "alembic upgrade head failed after $attempt attempts" >&2
     exit 1

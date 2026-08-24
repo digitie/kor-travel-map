@@ -9,7 +9,13 @@ import pytest
 pytestmark = pytest.mark.unit
 
 _ROOT = Path(__file__).resolve().parents[2]
-_MIGRATION = _ROOT / "alembic" / "versions" / "0227_tvn_m02_manual_feature_provenance.py"
+_MIGRATION = (
+    _ROOT
+    / "alembic"
+    / "retired_versions"
+    / "0200-0236"
+    / "0227_tvn_m02_manual_feature_provenance.py"
+)
 
 
 def test_m02_migration_is_forward_only_and_closed_to_manual_admin_reader() -> None:

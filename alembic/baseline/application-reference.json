@@ -1,0 +1,34 @@
+{
+  "schema": "kor-travel-map.application-baseline-reference.v1",
+  "source": {
+    "git_commit": "01d65b2ad4ee265a3ef6b01448f6abf573a906a8",
+    "raw_alembic_revision": "0236_tvn41s_compaction_drained",
+    "container_image": "postgis/postgis:16-3.5-alpine",
+    "container_image_id": "sha256:dc17b064a946f64804d3b15e2ce90d01a444c02c9226a28a54764c083bd81a0c",
+    "postgres_server_version_num": "160014",
+    "postgis_extension_version": "3.5.6"
+  },
+  "artifacts": {
+    "schema_sql_sha256": "b1c07bdd046e1746c00ace1607832f0cbb5e5bd5a8247fac77c5c65eb1b007ac",
+    "seed_sql_sha256": "76736775080ca958cb558b116dc366f8b613450df8fab1b47f3e20459dcd14f4",
+    "catalog_contract_sql_sha256": "07ce7a92ed70df9ffbd2551b26e5265cd29e82ae44cfece259989ef8ed5f0afa",
+    "catalog_contract_sha256": "dd42b904a012bfa4cddabcd693c125bc01a3ca127d2dd42cc19a89bdcdbf5131",
+    "catalog_contract_receipt_sha256": "3a81402d5b7dcbef4e6b56d7b9d4f7b74edcd65c3f5a7c2cfafb8c6cd1ac5f1b",
+    "seed_contract_sql_sha256": "7122f27734b74e9ea61817d98359179dcd6ed443d5ecd604254a423c1f851e2b",
+    "seed_contract_sha256": "ba5cb6e8d051a713912278b111514f74bbd3a2aef7a74b0500ce999146e0dafb",
+    "seed_contract_receipt_sha256": "a8dc197e035ae2bf75ea709274934512ebfd41d513905b29f2597e76318dccef",
+    "runtime_invariants_sql_sha256": "2f77da06a61752fa5d2df9e3aa359d6e1689a6410805f92db92f0e4872cc8ad1"
+  },
+  "fresh_seed_relations": [
+    "feature.curated_source_rules",
+    "feature.curated_sources",
+    "feature.curated_themes",
+    "ops.feature_override_field_paths",
+    "provider_sync.provider_dataset_operation_scopes",
+    "provider_sync.provider_dataset_operations",
+    "provider_sync.provider_datasets"
+  ],
+  "static_seed_relations": [
+    "ops.feature_override_field_paths"
+  ]
+}

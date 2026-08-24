@@ -17,26 +17,55 @@ sidecar hash와 final role/ACL bootstrap assertion이 함께 이 baseline의 정
 from __future__ import annotations
 
 import hashlib
+import json
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Final
+from typing import Any, Final
 
 from sqlalchemy.util.concurrency import await_only
 
 from alembic import op
+
+# ruff: noqa: E501
 
 revision: str = "300"
 down_revision: str | Sequence[str] | None = None
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-_SCHEMA_SHA256: Final[str] = (
-    "01b5c8709145a31176ec3753fd32b4c91febc1011c0d7cbb4a931b4737f53d2c"
-)
-_SEED_SHA256: Final[str] = (
-    "1872473b75e79d940a8cae0821418e3e14f8f445a48aa144d6bb6cf8bfabd80f"
-)
 _BASELINE_DIR: Final[Path] = Path(__file__).resolve().parents[1] / "baseline"
+_REFERENCE_MANIFEST: Final[str] = "application-reference.json"
+_REFERENCE_MANIFEST_SHA256: Final[str] = "application-reference.sha256"
+_REFERENCE_SCHEMA: Final[str] = "kor-travel-map.application-baseline-reference.v1"
+_REFERENCE_SOURCE: Final[dict[str, str]] = {
+    "git_commit": "01d65b2ad4ee265a3ef6b01448f6abf573a906a8",
+    "raw_alembic_revision": "0236_tvn41s_compaction_drained",
+    "container_image": "postgis/postgis:16-3.5-alpine",
+    "container_image_id": "sha256:dc17b064a946f64804d3b15e2ce90d01a444c02c9226a28a54764c083bd81a0c",
+    "postgres_server_version_num": "160014",
+    "postgis_extension_version": "3.5.6",
+}
+_REFERENCE_FRESH_SEED_RELATIONS: Final[tuple[str, ...]] = (
+    "feature.curated_source_rules",
+    "feature.curated_sources",
+    "feature.curated_themes",
+    "ops.feature_override_field_paths",
+    "provider_sync.provider_dataset_operation_scopes",
+    "provider_sync.provider_dataset_operations",
+    "provider_sync.provider_datasets",
+)
+_REFERENCE_STATIC_SEED_RELATIONS: Final[tuple[str, ...]] = (
+    "ops.feature_override_field_paths",
+)
+_REFERENCE_ARTIFACTS: Final[dict[str, str]] = {
+    "schema.sql": "schema_sql_sha256",
+    "seed.sql": "seed_sql_sha256",
+    "application-catalog.sql": "catalog_contract_sql_sha256",
+    "application-catalog.sha256": "catalog_contract_receipt_sha256",
+    "application-seed.sql": "seed_contract_sql_sha256",
+    "application-seed.sha256": "seed_contract_receipt_sha256",
+    "application-runtime-invariants.sql": "runtime_invariants_sql_sha256",
+}
 
 
 def _read_sidecar(name: str, expected_sha256: str) -> str:
@@ -49,6 +78,78 @@ def _read_sidecar(name: str, expected_sha256: str) -> str:
             f"생성·catalog 동등성 증명 뒤 hash를 갱신하라 (observed {observed})"
         )
     return raw.decode("utf-8")
+
+
+def _is_sha256(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def _reference_manifest_sha256() -> str:
+    """materialize 단계가 함께 낸 manifest digest sidecar를 엄격히 읽는다.
+
+    `300` artifact는 source-only materialize 단계에서 한 directory로 생성되고, 그
+    결과는 final candidate image와 fresh-oracle receipt가 image digest/commit과 함께
+    고정한다. Python literal을 따로 고쳐야만 새 artifact를 후보로 만들 수 있게 하면
+    그 자체가 생성 증적의 순환 의존성이 된다. digest sidecar는 manifest와 함께 기계
+    생성되며, 빈 값·공백·여러 줄을 허용하지 않는다.
+    """
+
+    path = _BASELINE_DIR / _REFERENCE_MANIFEST_SHA256
+    raw = path.read_bytes()
+    try:
+        value = raw.decode("ascii").strip()
+    except UnicodeDecodeError as exc:
+        raise RuntimeError("300 baseline reference manifest digest is malformed") from exc
+    if not _is_sha256(value) or raw != f"{value}\n".encode("ascii"):
+        raise RuntimeError("300 baseline reference manifest digest is malformed")
+    return value
+
+
+def _baseline_reference() -> dict[str, Any]:
+    """생성 artifact가 한 immutable receipt인지 fresh migration 전에 검증한다."""
+
+    manifest_path = _BASELINE_DIR / _REFERENCE_MANIFEST
+    raw = manifest_path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != _reference_manifest_sha256():
+        raise RuntimeError("300 baseline reference manifest bytes drifted")
+    try:
+        manifest = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError("300 baseline reference manifest is malformed") from exc
+    if not isinstance(manifest, dict) or manifest.get("schema") != _REFERENCE_SCHEMA:
+        raise RuntimeError("300 baseline reference manifest schema is invalid")
+    source = manifest.get("source")
+    artifacts = manifest.get("artifacts")
+    if (
+        not isinstance(source, dict)
+        or not isinstance(artifacts, dict)
+        or {key: source.get(key) for key in _REFERENCE_SOURCE} != _REFERENCE_SOURCE
+        or tuple(manifest.get("fresh_seed_relations") or ())
+        != _REFERENCE_FRESH_SEED_RELATIONS
+        or tuple(manifest.get("static_seed_relations") or ())
+        != _REFERENCE_STATIC_SEED_RELATIONS
+    ):
+        raise RuntimeError("300 baseline reference manifest contract is invalid")
+    for name, key in _REFERENCE_ARTIFACTS.items():
+        expected = artifacts.get(key)
+        if not _is_sha256(expected):
+            raise RuntimeError(f"300 baseline reference artifact digest is invalid: {key}")
+        _read_sidecar(name, expected)
+    for receipt_name, receipt_key in (
+        ("application-catalog.sha256", "catalog_contract_sha256"),
+        ("application-seed.sha256", "seed_contract_sha256"),
+    ):
+        receipt = _read_sidecar(
+            receipt_name, artifacts[_REFERENCE_ARTIFACTS[receipt_name]]
+        ).strip()
+        expected_receipt = artifacts.get(receipt_key)
+        if not _is_sha256(expected_receipt) or receipt != expected_receipt:
+            raise RuntimeError("300 baseline reference receipt/manifest drifted")
+    return manifest
 
 
 def _execute_sql_script(sql: str) -> None:
@@ -81,7 +182,8 @@ BEGIN
             'ktm_feature_reference_reconciliation_service_executor'
         ) AND (
             rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb OR rolcreaterole
-            OR rolbypassrls OR rolreplication
+            OR rolbypassrls OR rolreplication OR rolconnlimit <> -1
+            OR rolvaliduntil IS DISTINCT FROM 'infinity'::timestamptz
         )
     ) OR (
         SELECT count(*)
@@ -115,7 +217,8 @@ BEGIN
             'ktm_feature_dagster_runtime'
         ) AND (
             NOT rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb
-            OR rolcreaterole OR rolbypassrls OR rolreplication
+            OR rolcreaterole OR rolbypassrls OR rolreplication OR rolconnlimit <> -1
+            OR rolvaliduntil IS DISTINCT FROM 'infinity'::timestamptz
         )
     ) OR (
         SELECT count(*)
@@ -186,8 +289,43 @@ BEGIN
         FROM pg_catalog.pg_namespace
         WHERE nspname IN ('feature', 'provider_sync', 'ops', 'x_extension')
           AND nspowner = 'ktm_feature_schema_owner'::regrole
-    ) <> 4 THEN
-        RAISE EXCEPTION '300 baseline requires the final database/schema owner contract'
+    ) <> 4 OR (
+        SELECT coalesce(array_agg(setting.value ORDER BY setting.value), ARRAY[]::text[])
+        FROM pg_catalog.pg_db_role_setting AS setting_row
+        CROSS JOIN LATERAL unnest(setting_row.setconfig) AS setting(value)
+        WHERE setting_row.setdatabase = (
+            SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database()
+        )
+          AND setting_row.setrole = 0
+    ) IS DISTINCT FROM ARRAY['search_path=public, x_extension']::text[] OR EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_db_role_setting AS setting_row
+        WHERE (
+            setting_row.setdatabase = 0
+            AND (
+                setting_row.setrole = 0
+                OR setting_row.setrole IN (
+                    SELECT role.oid
+                    FROM pg_catalog.pg_roles AS role
+                    WHERE role.rolname LIKE 'ktm_feature_%'
+                       OR role.rolname LIKE 'ktm_curation_%'
+                       OR role.rolname LIKE 'ktm_manual_%'
+                )
+            )
+        ) OR (
+            setting_row.setdatabase = (
+                SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database()
+            )
+            AND setting_row.setrole IN (
+                SELECT role.oid
+                FROM pg_catalog.pg_roles AS role
+                WHERE role.rolname LIKE 'ktm_feature_%'
+                   OR role.rolname LIKE 'ktm_curation_%'
+                   OR role.rolname LIKE 'ktm_manual_%'
+            )
+        )
+    ) THEN
+        RAISE EXCEPTION '300 baseline requires the final database owner/search_path/role-settings contract'
             USING ERRCODE = '42501';
     END IF;
 
@@ -300,13 +438,34 @@ GRANT USAGE ON SCHEMA ops TO
 """
 
 
+# live revision projection은 immutable seed가 아니다. 정상 운영 DML이 revision과
+# timestamp를 계속 바꾸므로 `0236 → 300` handoff에서 historical exact value를 강제하면
+# 정상 DB를 거절한다. fresh `300`만 최소 runtime row를 0에서 초기화하고, handoff는
+# `application-runtime-invariants.sql`로 존재·카디널리티·범위만 확인한다.
+_RUNTIME_PROJECTION_INITIALIZATION_SQL: Final[str] = r"""
+INSERT INTO ops.import_job_event_clock (clock_id, revision, updated_at)
+VALUES (true, 0, clock_timestamp())
+ON CONFLICT (clock_id) DO NOTHING;
+
+INSERT INTO ops.ops_live_topic_revisions (topic, revision, updated_at)
+VALUES
+    ('dagster_schedules', 0, clock_timestamp()),
+    ('dataset_projection', 0, clock_timestamp()),
+    ('provider_sync', 0, clock_timestamp())
+ON CONFLICT (topic) DO NOTHING;
+"""
+
+
 def upgrade() -> None:
     """final bootstrap이 완성된 fresh DB에 immutable sidecar를 적용한다."""
 
+    manifest = _baseline_reference()
+    artifacts = manifest["artifacts"]
     op.execute(_FINAL_APPLICATION_ROLE_ASSERTIONS_SQL)
-    _execute_sql_script(_read_sidecar("schema.sql", _SCHEMA_SHA256))
+    _execute_sql_script(_read_sidecar("schema.sql", artifacts["schema_sql_sha256"]))
     _execute_sql_script(_FINAL_SCHEMA_PRIVILEGE_NORMALIZATION_SQL)
-    _execute_sql_script(_read_sidecar("seed.sql", _SEED_SHA256))
+    _execute_sql_script(_read_sidecar("seed.sql", artifacts["seed_sql_sha256"]))
+    _execute_sql_script(_RUNTIME_PROJECTION_INITIALIZATION_SQL)
 
 
 def downgrade() -> None:

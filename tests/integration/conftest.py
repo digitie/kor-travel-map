@@ -107,11 +107,10 @@ async def pg_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
     async with engine.begin() as conn:
         for schema in _SCHEMAS:
             await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
-        # postgis/postgis Docker image는 initdb 단계에서 postgis + postgis_topology를
-        # `public` schema에 자동 설치한다. ADR-008에 따라 `x_extension` schema로
-        # 재배치한다. 이미 Alembic fixture가 같은 container DB에 테이블을 만든 뒤라면
-        # postgis를 CASCADE drop하면 geometry 컬럼이 삭제되므로, public에 있을 때만
-        # drop한다.
+        # 공식 `postgis/postgis:16-3.5-alpine`의 새 cluster에는 extension이 자동
+        # 생성되지 않는다. fixture도 production fresh bootstrap과 같은 방향으로
+        # `x_extension`에 명시 생성한다. public 등에 이미 존재하는 extension을 여기서
+        # drop/repair하면 actual fresh deployment의 precondition을 가리므로 허용하지 않는다.
         existing_extensions = {
             row.extname: row.nspname
             for row in (
@@ -124,10 +123,16 @@ async def pg_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
                 )
             )
         }
-        if existing_extensions.get("postgis_topology") not in {None, "x_extension"}:
-            await conn.execute(text("DROP EXTENSION IF EXISTS postgis_topology CASCADE"))
-        if existing_extensions.get("postgis") not in {None, "x_extension"}:
-            await conn.execute(text("DROP EXTENSION IF EXISTS postgis CASCADE"))
+        misplaced_extensions = {
+            name: schema
+            for name, schema in existing_extensions.items()
+            if schema != "x_extension"
+        }
+        if misplaced_extensions:
+            raise RuntimeError(
+                "integration PostGIS fixture requires extensions in x_extension; "
+                f"found {misplaced_extensions}"
+            )
         for ext in _EXTENSIONS:
             await conn.execute(
                 text(f"CREATE EXTENSION IF NOT EXISTS {ext} WITH SCHEMA x_extension")

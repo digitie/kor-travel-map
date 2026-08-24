@@ -152,6 +152,26 @@ data semantic closure를 재확인한다. 변경이 허용된 것은 Alembic met
 - normal `upgrade head`가 `0236` DB를 자동 handoff하려는 시도
 - 모든 downgrade 및 old archive replay
 
+## runtime 전환 checkpoint
+
+Compose의 normal startup은 `db-role-bootstrap-300` 하나만 거쳐 fresh DB를 준비한다.
+과거 M01~M05 boundary·pre/repair service와 image helper는 제거했고, 외부 DB/infra
+overlay도 fresh bootstrap을 자동 기동하지 않는다. `docker/api-entrypoint.sh`는 raw
+`300`만 normal migration으로 처리하며, exact `0236`이면 controlled handoff executable을
+명시적으로 안내하고 어떤 `upgrade`나 generic `stamp`도 실행하지 않는다.
+
+image에는 `/usr/local/bin/ktm-application-schema-handoff`가 포함된다. 이 executable은
+`--confirm-0236-to-300` 및 Docker Manager writer-fence receipt를 요구하고, migrator의
+동일 outer transaction 안에서 source row·role/membership·ACL/extension·catalog·data
+closure preflight, Alembic controlled stamp, target `300` postflight를 수행한다. 출력은
+receipt 자체가 아니라 SHA-256을 포함한 redacted JSON이다.
+
+로컬 일회성 PostGIS container에서 fresh `baseline-300` shell bootstrap을 실제 실행해
+`alembic_version` 부재, 21개 application role, `postgis`의 `x_extension` namespace를
+확인한 뒤 container를 폐기했다. 이는 n150 DB나 기존 reference DB를 사용하지 않은
+검증이다. 기존 `schema_version=3` backup evidence는 감사 보존용으로만 남기고, 이전
+Alembic revision restore/replay 및 old role repair는 fail-close한다.
+
 ## n150 candidate deployment
 
 Map PR을 merge하기 전 n150에서는 Docker Manager의 별도 Map in-place transition transaction을

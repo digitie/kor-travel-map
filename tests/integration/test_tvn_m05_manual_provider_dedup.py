@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
@@ -31,16 +30,6 @@ _SCORES = {
     "scorer_input_sha256": "a" * 64,
 }
 _CAUSATION = {"scope": "integration", "input_count": 1}
-_ROOT = Path(__file__).resolve().parents[2]
-
-
-def _restore_lease_rebuild_sql() -> str:
-    """운영 restore verifier가 실행하는 M05 reconciliation SQL을 그대로 검증한다."""
-
-    script = (_ROOT / "scripts/docker-restore-verify.sh").read_text(encoding="utf-8")
-    marker = "rebuild_feature_reference_reconciliation_leases() {"
-    fragment = script.split(marker, 1)[1]
-    return fragment.split("<<'SQL'\n", 1)[1].split("\nSQL\n", 1)[0]
 
 
 def _runtime_engine(engine: AsyncEngine, *, login: str) -> AsyncEngine:
@@ -960,46 +949,6 @@ async def test_manual_provider_candidate_is_executor_only_and_merge_is_append_on
         empty = await _lease_event(api, principal_id=principal_id, worker_id=worker_id)
         assert empty["o_outcome"] == "empty"
         assert empty["o_lease_epoch"] == leased["o_lease_epoch"]
-
-        async with migrated_engine.begin() as connection:
-            await connection.execute(text(_restore_lease_rebuild_sql()))
-        async with migrated_engine.connect() as connection:
-            rebuilt_lease = (
-                (
-                    await connection.execute(
-                        text(
-                            """
-                        SELECT acked_through_sequence, worker_id, lease_epoch,
-                               lease_expires_at
-                        FROM ops.feature_reference_reconciliation_leases
-                        WHERE principal_id = :principal_id
-                        """
-                        ),
-                        {"principal_id": principal_id},
-                    )
-                )
-                .mappings()
-                .one()
-            )
-        assert rebuilt_lease == {
-            "acked_through_sequence": event_sequence,
-            "worker_id": None,
-            "lease_epoch": int(leased["o_lease_epoch"]) + 1,
-            "lease_expires_at": None,
-        }
-        async with migrated_engine.begin() as connection:
-            await connection.execute(text(_restore_lease_rebuild_sql()))
-        async with migrated_engine.connect() as connection:
-            assert (
-                await connection.scalar(
-                    text(
-                        "SELECT lease_epoch FROM ops.feature_reference_reconciliation_leases "
-                        "WHERE principal_id = :principal_id"
-                    ),
-                    {"principal_id": principal_id},
-                )
-                == rebuilt_lease["lease_epoch"]
-            )
 
         replayed = await _ack_event(
             api,

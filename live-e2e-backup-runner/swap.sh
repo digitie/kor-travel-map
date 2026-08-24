@@ -1,19 +1,8 @@
 #!/usr/bin/env bash
+# live E2E에서 hot swap은 지원하지 않는다. recovery format이 설계·검증되기 전에는
+# `apply` 값을 포함한 모든 입력을 무시하고 mutation 없이 종료한다.
 set -euo pipefail
 
-app_db="${KOR_TRAVEL_MAP_RESTORE_APP_DB:-}"
-dagster_db="${KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB:-}"
-rustfs_volume="${KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME:-}"
-apply="${KOR_TRAVEL_MAP_RESTORE_SWAP_APPLY:-0}"
-
-if [[ "$apply" == "1" ]]; then
-  echo "n150 live-e2e runner refuses automatic swap apply" >&2
-  exit 2
-fi
-
-cat <<SUMMARY
-Restore swap env file generated:
-  app_db=${app_db}
-  dagster_db=${dagster_db}
-  rustfs_volume=${rustfs_volume}
-SUMMARY
+echo "live restore swap runner is disabled: backup artifacts are audit-only under the 300 baseline" >&2
+echo "Alembic archive replay, previous-revision restore, and hot swap are unsupported" >&2
+exit 2

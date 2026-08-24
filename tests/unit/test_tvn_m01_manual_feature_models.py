@@ -224,7 +224,8 @@ def test_m01_migration_audits_and_backfills_legacy_claims_before_ddl() -> None:
     source = (
         Path(__file__).resolve().parents[2]
         / "alembic"
-        / "versions"
+        / "retired_versions"
+        / "0200-0236"
         / "0226_m01_manual_feature_create.py"
     ).read_text(encoding="utf-8")
 

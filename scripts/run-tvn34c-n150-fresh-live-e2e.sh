@@ -702,7 +702,7 @@ run() {
   # 먼저 fresh PostgreSQL만 healthy까지 대기한 다음 나머지 boot path를 기동한다.
   compose_map up --detach --wait postgres
   compose_map up --detach --build --wait \
-    db-role-bootstrap dagster-db-init rustfs rustfs-init dagster-storage-migrate api frontend dagster
+    db-role-bootstrap-300 dagster-db-init rustfs rustfs-init dagster-storage-migrate api frontend dagster
   verify_map_schema
   seed_fresh_etl
   build_playwright_image

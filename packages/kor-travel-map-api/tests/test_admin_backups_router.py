@@ -392,12 +392,10 @@ def test_admin_backup_routes_mounted_in_openapi(client: TestClient) -> None:
     assert "/v1/admin/backups" in spec["paths"]
     assert "/v1/admin/backups/{backup_id}" in spec["paths"]
     assert "delete" in spec["paths"]["/v1/admin/backups/{backup_id}"]
-    assert "/v1/admin/restore/{backup_id}" in spec["paths"]
-    assert "/v1/admin/restore/{backup_id}/swap" in spec["paths"]
+    assert "/v1/admin/restore/{backup_id}" not in spec["paths"]
+    assert "/v1/admin/restore/{backup_id}/swap" not in spec["paths"]
     assert "/v1/admin/backups/restore/{backup_id}" not in spec["paths"]
-    assert "operator" not in spec["components"]["schemas"]["RestoreSwapRequest"][
-        "properties"
-    ]
+    assert "restore_url" not in spec["components"]["schemas"]["BackupRecord"]["properties"]
 
 
 @pytest.mark.unit
@@ -949,45 +947,36 @@ def test_create_backup_rejects_existing_unreserved_custom_destination_before_eff
 
 
 @pytest.mark.unit
-def test_restore_plan_and_swap_boundary(client: TestClient) -> None:
+def test_restore_and_swap_are_gone_until_a_300_recovery_format_exists(
+    client: TestClient,
+) -> None:
     restore = client.post(
         "/v1/admin/restore/backup-1",
         json={"recreate": True, "skip_rustfs": True},
     )
-    assert restore.status_code == 200
-    restore_body = restore.json()
-    assert restore_body["data"]["operation"] == "restore"
-    assert restore_body["data"]["status"] == "planned"
-    assert restore_body["data"]["command"]["env"]["KOR_TRAVEL_MAP_RESTORE_RECREATE"] == "1"
-    assert restore_body["data"]["command"]["env"]["KOR_TRAVEL_MAP_RESTORE_SKIP_RUSTFS"] == "1"
+    assert restore.status_code == 410
+    assert restore.json()["code"] == "RESTORE_UNSUPPORTED"
 
     swap = client.post("/v1/admin/restore/backup-1/swap", json={})
-    assert swap.status_code == 200
-    swap_body = swap.json()
-    assert swap_body["data"]["operation"] == "swap"
-    assert swap_body["data"]["status"] == "planned"
-    assert swap_body["data"]["command"]["env"]["KOR_TRAVEL_MAP_RESTORE_SWAP_APPLY"] == "0"
-    assert swap_body["data"]["command"]["env"]["KOR_TRAVEL_MAP_RESTORE_SWAP_SKIP_VERIFY"] == "0"
+    assert swap.status_code == 410
+    assert swap.json()["code"] == "RESTORE_UNSUPPORTED"
 
 
 @pytest.mark.unit
-def test_execute_restore_swap_requires_opt_in(client: TestClient) -> None:
+def test_execute_restore_swap_is_disabled_even_when_opted_in(client: TestClient) -> None:
     response = client.post(
         "/v1/admin/restore/backup-1/swap",
         json={"execute": True, "apply": True},
     )
 
-    assert response.status_code == 503
-    assert response.json()["code"] == "BACKUP_COMMAND_DISABLED"
+    assert response.status_code == 410
+    assert response.json()["code"] == "RESTORE_UNSUPPORTED"
 
 
 @pytest.mark.unit
-def test_execute_restore_swap_uses_command_runner(
+def test_restore_swap_rejects_removed_skip_verify_escape_hatch(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from kortravelmap.api.routers import admin_backups as router_mod
-
     _write_artifact(tmp_path, "backup-1")
     app = create_app(
         ApiSettings(
@@ -998,125 +987,36 @@ def test_execute_restore_swap_uses_command_runner(
             backup_command_enabled=True,
         )
     )
-    seen: dict[str, Any] = {}
-
-    async def _fake_run(plan: Any, *, timeout_seconds: float) -> Any:
-        seen["plan"] = plan
-        seen["timeout_seconds"] = timeout_seconds
-        return router_mod._CommandResult(returncode=0, stdout="swapped", stderr="")
-
-    monkeypatch.setattr(router_mod, "_run_command", _fake_run)
     response = TestClient(app, headers=_IDEMPOTENCY_HEADERS).post(
         "/v1/admin/restore/backup-1/swap",
         json={"execute": True, "apply": True, "skip_verify": True},
     )
 
-    assert response.status_code == 200
-    body = response.json()
-    assert body["data"]["status"] == "completed"
-    assert body["data"]["stdout"] == "swapped"
-    assert seen["plan"].env["KOR_TRAVEL_MAP_RESTORE_SWAP_APPLY"] == "1"
-    assert seen["plan"].env["KOR_TRAVEL_MAP_RESTORE_SWAP_SKIP_VERIFY"] == "1"
-    assert "KOR_TRAVEL_MAP_MAINTENANCE_LOCK_HELD" not in seen["plan"].env
+    assert response.status_code == 422
 
 
 @pytest.mark.unit
 @pytest.mark.parametrize(
-    ("path", "operation", "effect_kind", "payload"),
+    ("path", "payload"),
     [
         (
             "/v1/admin/restore/backup-1",
-            "admin.backup.restore",
-            "restore",
             {"execute": True},
         ),
         (
             "/v1/admin/restore/backup-1/swap",
-            "admin.backup.swap",
-            "swap",
             {"execute": True, "apply": True},
         ),
     ],
 )
-def test_restore_commands_fail_close_started_effect_without_marker(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+def test_restore_commands_do_not_claim_or_start_an_effect(
+    client: TestClient,
     path: str,
-    operation: str,
-    effect_kind: str,
     payload: dict[str, object],
 ) -> None:
-    from kortravelmap.infra.domain_command_execution_repo import (
-        BackupCommandExecution,
-    )
-    from kortravelmap.infra.domain_command_repo import DomainCommandClaim
-
-    from kortravelmap.api import domain_command_service
-    from kortravelmap.api.routers import admin_backups as router_mod
-
-    _write_artifact(tmp_path, "backup-1")
-    now = datetime(2026, 7, 31, tzinfo=UTC)
-    claim = DomainCommandClaim(
-        command_id=72,
-        actor="admin",
-        operation=operation,
-        idempotency_key=_IDEMPOTENCY_HEADERS["Idempotency-Key"],
-        fingerprint_version=1,
-        request_fingerprint="a" * 64,
-        created_at=now,
-    )
-    execution = BackupCommandExecution(
-        command_id=72,
-        effect_kind=effect_kind,
-        effect_token="3" * 64,
-        phase="effect_started",
-        backup_id="backup-1",
-        app_db="kor_travel_map_restore",
-        dagster_db="kor_travel_map_dagster_restore",
-        rustfs_volume="kor-travel-map-rustfs-restore",
-        marker_key="command-72",
-        input_digest="a" * 64,
-        prepared_result=None,
-        output_digest=None,
-        marker_sha256=None,
-        prepared_at=now,
-        effect_started_at=now,
-        effect_completed_at=None,
-    )
-
-    async def _pending(*_args: Any, **_kwargs: Any) -> Any:
-        raise domain_command_service.DomainCommandPending(claim)
-
-    run = AsyncMock()
-
-    monkeypatch.setattr(domain_command_service, "begin_domain_command", _pending)
-    monkeypatch.setattr(
-        router_mod,
-        "get_backup_command_execution",
-        AsyncMock(return_value=execution),
-    )
-    monkeypatch.setattr(router_mod, "_run_command", run)
-    app = create_app(
-        ApiSettings(
-            admin_destructive_enabled=True,
-            admin_proxy_secret=None,
-            backup_root=tmp_path,
-            backup_project_root=tmp_path,
-            backup_command_enabled=True,
-        )
-    )
-
-    response = TestClient(app, headers=_IDEMPOTENCY_HEADERS).post(
-        path,
-        json=payload,
-    )
-
-    assert response.status_code == 409
-    body = response.json()
-    assert body["code"] == "BACKUP_EFFECT_MANUAL_RECONCILIATION_REQUIRED"
-    assert body["details"]["command_id"] == 72
-    assert body["details"]["effect_token"] == "3" * 64
-    run.assert_not_awaited()
+    response = client.post(path, json=payload)
+    assert response.status_code == 410
+    assert response.json()["code"] == "RESTORE_UNSUPPORTED"
 
 
 @pytest.mark.unit
@@ -1227,19 +1127,17 @@ def test_backup_registry_events_use_each_authenticated_principal(
             "/v1/admin/restore/restore-me",
             json={"execute": True},
         )
-        assert restore.status_code == 200
+        assert restore.status_code == 410
 
         current_actor["value"] = "swap-principal"
         swap = principal_client.post(
             "/v1/admin/restore/swap-me/swap",
             json={"execute": True},
         )
-        assert swap.status_code == 200
+        assert swap.status_code == 410
 
     assert calls == [
         ("upsert", "create-principal", "downloaded"),
         ("upsert", "delete-principal", None),
         ("deleted", "delete-principal", None),
-        ("restored", "restore-principal", "restored"),
-        ("swap", "swap-principal", None),
     ]

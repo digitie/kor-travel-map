@@ -3,6 +3,7 @@
 --
 
 
+
 SET statement_timeout = 0;
 SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;
@@ -159,7 +160,7 @@ INSERT INTO feature.curated_source_rules (rule_id, theme_id, source_id, place_ki
 INSERT INTO feature.curated_source_rules (rule_id, theme_id, source_id, place_kind, category, region_scope, default_action, priority, enabled, metadata, created_at, updated_at, detail_selector, row_revision, archived_at, owner_kind, owner_provider_dataset_id) VALUES ('f821b933-4968-4a14-87dd-4b7eb06983e8', '25d7523a-20b0-4698-8cfb-1a6482623c45', 'b5a5c433-f007-471c-a9fa-62a508227b78', 'ansan_world_restaurant', NULL, '{}', 'candidate', 75, true, '{"seed": "T-223c-1", "reuse_policy": "allowed", "curation_relation": "food_stop"}', '2026-08-13 23:09:49.593355+00', '2026-08-13 23:09:49.593355+00', NULL, 1, NULL, NULL, NULL);
 INSERT INTO feature.curated_source_rules (rule_id, theme_id, source_id, place_kind, category, region_scope, default_action, priority, enabled, metadata, created_at, updated_at, detail_selector, row_revision, archived_at, owner_kind, owner_provider_dataset_id) VALUES ('a1978732-d9b7-4633-8fea-1f0f606f771f', '25d7523a-20b0-4698-8cfb-1a6482623c45', '8f2e4d27-705d-4dca-ac40-46af0d3eb501', 'jeju_local_restaurant', NULL, '{}', 'candidate', 70, true, '{"seed": "T-223c-1", "reuse_policy": "allowed", "curation_relation": "food_stop"}', '2026-08-13 23:09:49.593355+00', '2026-08-13 23:09:49.593355+00', NULL, 1, NULL, NULL, NULL);
 INSERT INTO feature.curated_source_rules (rule_id, theme_id, source_id, place_kind, category, region_scope, default_action, priority, enabled, metadata, created_at, updated_at, detail_selector, row_revision, archived_at, owner_kind, owner_provider_dataset_id) VALUES ('fd2d46a3-c6ea-4602-b58f-2549ac849097', '7d1ce8de-34fc-4018-9af2-49a3ba1ba3b6', '8cf34624-bdfa-4a22-9e3b-003f8977a0e8', 'theme_area_anchor', NULL, '{}', 'candidate', 60, true, '{"seed": "T-223c-1", "reuse_policy": "manual_review", "curation_relation": "theme_area_anchor"}', '2026-08-13 23:09:49.593355+00', '2026-08-13 23:09:49.593355+00', NULL, 1, NULL, NULL, NULL);
-INSERT INTO feature.curated_source_rules (rule_id, theme_id, source_id, place_kind, category, region_scope, default_action, priority, enabled, metadata, created_at, updated_at, detail_selector, row_revision, archived_at, owner_kind, owner_provider_dataset_id) VALUES ('364acac7-885a-4bf1-99bc-f68c1287e575', 'd22032fe-66db-4aee-ab71-6509d3993e24', '67b19fa5-9472-4425-8e27-4a881e6dfd1d', 'youtube_place_candidate', NULL, '{}', 'candidate', 90, true, '{"seed": "0031_concierge_curated_source", "reuse_policy": "allowed", "curation_relation": "primary_stop"}', '2026-08-13 23:09:49.593355+00', '2026-08-24 10:46:53.87265+00', NULL, 1, NULL, NULL, NULL);
+INSERT INTO feature.curated_source_rules (rule_id, theme_id, source_id, place_kind, category, region_scope, default_action, priority, enabled, metadata, created_at, updated_at, detail_selector, row_revision, archived_at, owner_kind, owner_provider_dataset_id) VALUES ('364acac7-885a-4bf1-99bc-f68c1287e575', 'd22032fe-66db-4aee-ab71-6509d3993e24', '67b19fa5-9472-4425-8e27-4a881e6dfd1d', 'youtube_place_candidate', NULL, '{}', 'candidate', 90, true, '{"seed": "0031_concierge_curated_source", "reuse_policy": "allowed", "curation_relation": "primary_stop"}', '2026-08-13 23:09:49.593355+00', '2026-08-24 15:21:40.909701+00', NULL, 1, NULL, NULL, NULL);
 
 
 --
@@ -230,22 +231,6 @@ INSERT INTO ops.feature_override_field_paths (field_path, feature_kind, target_r
 INSERT INTO ops.feature_override_field_paths (field_path, feature_kind, target_relation, target_column, value_kind, geometry_type, allows_null, requires_source, provider_writable, operator_writable, sort_order) VALUES ('area.administrative_office', 'area', 'feature_areas', 'administrative_office', 'text', NULL, true, true, true, true, 860);
 INSERT INTO ops.feature_override_field_paths (field_path, feature_kind, target_relation, target_column, value_kind, geometry_type, allows_null, requires_source, provider_writable, operator_writable, sort_order) VALUES ('area.description', 'area', 'feature_areas', 'description', 'text', NULL, true, true, true, true, 870);
 INSERT INTO ops.feature_override_field_paths (field_path, feature_kind, target_relation, target_column, value_kind, geometry_type, allows_null, requires_source, provider_writable, operator_writable, sort_order) VALUES ('area.payload', 'area', 'feature_areas', 'payload', 'json_object', NULL, false, true, true, false, 880);
-
-
---
--- Data for Name: import_job_event_clock; Type: TABLE DATA; Schema: ops; Owner: -
---
-
-INSERT INTO ops.import_job_event_clock (clock_id, revision, updated_at) VALUES (true, 3, '2026-08-13 23:09:52.842634+00');
-
-
---
--- Data for Name: ops_live_topic_revisions; Type: TABLE DATA; Schema: ops; Owner: -
---
-
-INSERT INTO ops.ops_live_topic_revisions (topic, revision, updated_at) VALUES ('dagster_schedules', 0, '2026-08-13 23:09:51.601776+00');
-INSERT INTO ops.ops_live_topic_revisions (topic, revision, updated_at) VALUES ('dataset_projection', 3, '2026-08-13 23:09:52.825795+00');
-INSERT INTO ops.ops_live_topic_revisions (topic, revision, updated_at) VALUES ('provider_sync', 3, '2026-08-13 23:09:53.057848+00');
 
 
 --

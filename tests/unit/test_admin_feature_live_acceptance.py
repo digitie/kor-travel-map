@@ -124,7 +124,7 @@ def _fixture_target_env(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setenv(
         "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION",
-        "0236_tvn41s_compaction_drained",
+        "300",
     )
 
 
@@ -136,7 +136,7 @@ def test_fixture_target_preflight_rejects_mismatch_before_role_or_mutation(
         "database_name": "kor_travel_map",
         "session_user": "ktm_fixture_writer",
         "current_user": "ktm_fixture_writer",
-        "alembic_revision": "0236_tvn41s_compaction_drained",
+        "alembic_revision": "300",
     }
     cases = (
         ("database_name", "wrong_database", "database confirmation"),
@@ -165,7 +165,7 @@ def test_fixture_target_preflight_confirms_schema_owner_before_action(
             "database_name": "kor_travel_map",
             "session_user": "ktm_fixture_writer",
             "current_user": "ktm_fixture_writer",
-            "alembic_revision": "0236_tvn41s_compaction_drained",
+            "alembic_revision": "300",
         },
         "ktm_feature_schema_owner",
     )

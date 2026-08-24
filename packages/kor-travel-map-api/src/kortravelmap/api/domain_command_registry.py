@@ -149,14 +149,6 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
         "admin.backup.delete",
         _DESTRUCTIVE_RESULT,
     ),
-    ("POST", "/v1/admin/restore/{backup_id}"): _domain(
-        "admin.backup.restore",
-        _DESTRUCTIVE_RESULT,
-    ),
-    ("POST", "/v1/admin/restore/{backup_id}/swap"): _domain(
-        "admin.backup.swap",
-        _DESTRUCTIVE_RESULT,
-    ),
     # ledger 유일성은 라우트 단위다 — claim은 ``(actor, operation,
     # Idempotency-Key)``로 잠기므로 서로 다른 라우트가 이름을 공유하면 한 actor의
     # 같은 키가 **다른 라우트의** terminal 결과로 replay된다. 내부 writer가

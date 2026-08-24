@@ -3,8 +3,8 @@
 같은 목록이 세 파일에 각자 적혀 있다:
 
 1. `docker/postgres-role-bootstrap.sh` — **정본.** 실제 배포가 GRANT를 거는 곳.
-2. `tests/integration/_tvn34_migration_bootstrap.py` — 통합 테스트용 거울.
-3. `alembic/versions/0200_schema_baseline.py` — baseline이 "이 역할들이 USAGE를
+2. `tests/integration/_application_300_bootstrap.py` — 통합 테스트용 거울.
+3. `alembic/versions/300_schema_baseline.py` — baseline이 "이 역할들이 USAGE를
    갖고 있는가"를 검사하는 전제 조건.
 
 (2)의 주석이 이미 위험을 적어 뒀다 — "정본은 bootstrap.sh이고 여기는 그 거울이다,
@@ -21,7 +21,7 @@
 **세 곳이 함께 틀리면 통과한다.** 여기서 보는 것은 일치이지 내용의 정당성이 아니다.
 이 테스트를 만들며 실제로 겪었다 — 변이 실험이 세 파일을 모두 바꿔 놓은 채 남았는데,
 셋이 서로 같으니 초록이었다. 그러니 "역할을 하나 빼도 된다"는 판단은 이 테스트가
-아니라 `0200_schema_baseline`의 런타임 전제 검사와 실제 배포가 막는다.
+아니라 `300_schema_baseline`의 런타임 전제 검사와 실제 배포가 막는다.
 """
 
 from __future__ import annotations
@@ -36,8 +36,8 @@ pytestmark = pytest.mark.unit
 _ROOT = Path(__file__).resolve().parents[2]
 
 _BOOTSTRAP_SH = _ROOT / "docker" / "postgres-role-bootstrap.sh"
-_TEST_BOOTSTRAP = _ROOT / "tests" / "integration" / "_tvn34_migration_bootstrap.py"
-_BASELINE = _ROOT / "alembic" / "versions" / "0200_schema_baseline.py"
+_TEST_BOOTSTRAP = _ROOT / "tests" / "integration" / "_application_300_bootstrap.py"
+_BASELINE = _ROOT / "alembic" / "versions" / "300_schema_baseline.py"
 
 #: 역할 이름 하나. 목록 추출 결과를 이 모양으로만 받는다 — 정규식이 빗나가 엉뚱한
 #: 토큰을 주워도 여기서 걸린다.
@@ -77,13 +77,18 @@ def _from_test_bootstrap() -> frozenset[str]:
 
 def _from_baseline() -> frozenset[str]:
     text = _BASELINE.read_text(encoding="utf-8")
-    # `FROM (VALUES ('a'), ('b'))` ~ `AS expected(role_name)` 사이의 리터럴만 줍는다.
-    # 괄호 모양을 정규식으로 흉내 내면 줄바꿈·간격에 쉽게 빗나가므로 구간을 먼저 자른다.
-    match = re.search(r"FROM \(VALUES(.*?)AS expected\(role_name\)", text, re.DOTALL)
+    # `WITH expected(role_name, should_have_usage) AS (VALUES ...)` 구간의 true role만
+    # 읽는다. false row까지 섞으면 grant 대상과 아닌 역할을 구별하지 못한다.
+    match = re.search(
+        r"WITH expected\(role_name, should_have_usage\) AS \(\s*VALUES(.*?)\)\s*\n"
+        r"\s*SELECT 1\s*\n\s*FROM expected",
+        text,
+        re.DOTALL,
+    )
     assert match is not None, (
         f"{_BASELINE.name}에서 x_extension USAGE 전제 검사의 VALUES 목록을 찾지 못했다"
     )
-    literals = re.findall(r"'([a-z_]+)'", match.group(1))
+    literals = re.findall(r"\('([a-z_]+)',\s*true\)", match.group(1))
     assert literals, f"{_BASELINE.name}: VALUES 구간에서 역할 리터럴을 하나도 못 찾았다"
     return _roles(",".join(literals), _BASELINE.name)
 
@@ -103,7 +108,7 @@ def test_all_three_sites_declare_the_same_roles() -> None:
         f"  {_TEST_BOOTSTRAP.name}: {sorted(mirror)}"
     )
     assert sh == baseline, (
-        "배포 bootstrap과 0200 baseline의 전제 검사 대상이 다르다 —"
+        "배포 bootstrap과 300 baseline의 전제 검사 대상이 다르다 —"
         " 배포는 되는데 baseline이 이유 없이 거부하거나, 반대로 결손을 못 본다.\n"
         f"  {_BOOTSTRAP_SH.name}: {sorted(sh)}\n"
         f"  {_BASELINE.name}: {sorted(baseline)}"

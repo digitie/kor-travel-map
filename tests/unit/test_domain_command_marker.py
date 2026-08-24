@@ -9,7 +9,6 @@ import os
 from pathlib import Path
 from types import ModuleType
 from typing import Any
-from urllib.parse import unquote, urlsplit
 
 import pytest
 
@@ -232,60 +231,10 @@ def test_backup_destination_reservation_survives_post_rename_crash(
     ).is_file()
 
 
-def test_restore_swap_env_is_fixed_secure_and_uri_encoded(
+def test_restore_swap_env_writer_is_disabled_without_creating_a_file(
     tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     writer = _load_swap_writer()
-    values = {
-        "KOR_TRAVEL_MAP_POSTGRES_USER": "user:name",
-        "KOR_TRAVEL_MAP_POSTGRES_PASSWORD": "p@ss/%#word",
-        "KOR_TRAVEL_MAP_RESTORE_APP_DB": "app/db",
-        "KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB": "dagster/db",
-        "KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME": "restore-volume",
-    }
-    for name, value in values.items():
-        monkeypatch.setenv(name, value)
-
-    path = writer.write_restore_swap_env(tmp_path)
-    lines = path.read_text(encoding="utf-8").splitlines()
-    app_url = urlsplit(lines[2].split("=", 1)[1])
-    dagster_url = urlsplit(lines[3].split("=", 1)[1])
-
-    assert path == tmp_path / ".env.restore-swap"
-    assert path.stat().st_mode & 0o777 == 0o600
-    assert unquote(app_url.username or "") == values["KOR_TRAVEL_MAP_POSTGRES_USER"]
-    assert unquote(app_url.password or "") == values["KOR_TRAVEL_MAP_POSTGRES_PASSWORD"]
-    assert unquote(app_url.path.removeprefix("/")) == values[
-        "KOR_TRAVEL_MAP_RESTORE_APP_DB"
-    ]
-    assert unquote(dagster_url.path.removeprefix("/")) == values[
-        "KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB"
-    ]
-
-
-def test_restore_swap_env_rejects_symlink_and_untrusted_root(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    writer = _load_swap_writer()
-    for name, value in {
-        "KOR_TRAVEL_MAP_POSTGRES_USER": "user",
-        "KOR_TRAVEL_MAP_POSTGRES_PASSWORD": "password",
-        "KOR_TRAVEL_MAP_RESTORE_APP_DB": "app",
-        "KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB": "dagster",
-        "KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME": "volume",
-    }.items():
-        monkeypatch.setenv(name, value)
-    foreign = tmp_path / "foreign"
-    foreign.write_text("foreign", encoding="utf-8")
-    (tmp_path / ".env.restore-swap").symlink_to(foreign)
-
-    with pytest.raises(PermissionError, match="not trusted"):
+    with pytest.raises(RuntimeError, match="no verified 300-baseline recovery format"):
         writer.write_restore_swap_env(tmp_path)
-    assert foreign.read_text(encoding="utf-8") == "foreign"
-
-    (tmp_path / ".env.restore-swap").unlink()
-    tmp_path.chmod(0o777)
-    with pytest.raises(PermissionError, match="root"):
-        writer.write_restore_swap_env(tmp_path)
+    assert not (tmp_path / ".env.restore-swap").exists()

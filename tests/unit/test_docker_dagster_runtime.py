@@ -91,7 +91,7 @@ def test_docker_compose_uses_persistent_dagster_storage_and_daemon() -> None:
     assert "dagster-db-init" in dagster["depends_on"]
     assert "dagster-db-init" in daemon["depends_on"]
     for service in (dagster, daemon):
-        assert service["depends_on"]["db-role-bootstrap-m05-repair"] == {
+        assert service["depends_on"]["db-role-bootstrap-300"] == {
             "condition": "service_completed_successfully"
         }
 
@@ -111,7 +111,7 @@ def test_tvn34_compose_never_derives_runtime_or_metadata_credentials_from_bootst
         assert compose[service_name]["environment"]["KOR_TRAVEL_MAP_PG_DSN"].endswith(
             "is required}"
         )
-        assert compose[service_name]["depends_on"]["db-role-bootstrap-m05-repair"] == {
+        assert compose[service_name]["depends_on"]["db-role-bootstrap-300"] == {
             "condition": "service_completed_successfully"
         }
 
@@ -134,7 +134,7 @@ def test_tvn34_compose_never_derives_runtime_or_metadata_credentials_from_bootst
     assert not any(line.strip().startswith("REASSIGN OWNED") for line in bootstrap.splitlines())
     assert "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES" not in bootstrap
     assert "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ktm_feature_runtime" not in bootstrap
-    assert "REVOKE ALL ON TABLES FROM ktm_feature_runtime" in bootstrap
+    assert "REVOKE ALL ON SCHEMA feature, provider_sync, ops FROM PUBLIC" in bootstrap
 
     # T-102 pg_prewarm의 **유일한** 설치 지점이다. migration 0022는 "current_user가
     # superuser일 때만 만든다"로 짜였는데 ADR-090 이후 alembic은 NOSUPERUSER
@@ -509,159 +509,51 @@ def test_tvn_m01_compose_keeps_manual_create_credentials_in_exact_runtimes() -> 
 
 
 @pytest.mark.unit
-def test_tvn_m01_role_phase_runs_only_after_legacy_0225_boundary() -> None:
-    """M01/M05 role graph는 각 migration boundary 뒤에서만 만들어진다."""
+def test_application_300_compose_uses_single_fresh_bootstrap() -> None:
+    """normal startup은 fresh DB의 baseline-300만 선행한다."""
 
     services = _compose()["services"]
-    boundary = services["db-migrate-to-m01-bootstrap-boundary"]
-    role_phase = services["db-role-bootstrap-m01"]
-    m05_boundary = services["db-migrate-to-m05-bootstrap-boundary"]
-    m05_pre = services["db-role-bootstrap-m05-pre"]
-    m05_migration = services["db-migrate-m05"]
-    m05_repair = services["db-role-bootstrap-m05-repair"]
-    api = services["api"]
-
-    assert boundary["depends_on"]["db-role-bootstrap"] == {
-        "condition": "service_completed_successfully"
-    }
-    assert boundary["entrypoint"] == [
+    bootstrap = services["db-role-bootstrap-300"]
+    assert bootstrap["environment"]["KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE"] == (
+        "baseline-300"
+    )
+    assert bootstrap["entrypoint"] == [
         "/bin/sh",
-        "./docker/migrate-to-m01-bootstrap-boundary.sh",
+        "/usr/local/bin/postgres-role-bootstrap",
     ]
-    assert set(boundary["environment"]) == {"KOR_TRAVEL_MAP_MIGRATOR_PG_DSN"}
-    assert role_phase["depends_on"]["db-migrate-to-m01-bootstrap-boundary"] == {
-        "condition": "service_completed_successfully"
-    }
-    assert role_phase["environment"]["KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE"] == "m01"
-    assert m05_boundary["depends_on"]["db-role-bootstrap-m01"] == {
-        "condition": "service_completed_successfully"
-    }
-    assert m05_boundary["entrypoint"] == [
-        "/bin/sh",
-        "./docker/migrate-to-m05-bootstrap-boundary.sh",
+    assert bootstrap["volumes"] == [
+        "./docker/postgres-role-bootstrap.sh:/usr/local/bin/postgres-role-bootstrap:ro"
     ]
-    assert m05_pre["depends_on"]["db-migrate-to-m05-bootstrap-boundary"] == {
-        "condition": "service_completed_successfully"
-    }
-    assert m05_pre["environment"]["KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE"] == "m05-pre"
-    assert m05_migration["depends_on"]["db-role-bootstrap-m05-pre"] == {
-        "condition": "service_completed_successfully"
-    }
-    assert m05_migration["entrypoint"] == ["/bin/sh", "./docker/migrate-m05.sh"]
-    assert m05_repair["depends_on"]["db-migrate-m05"] == {
-        "condition": "service_completed_successfully"
-    }
-    assert m05_repair["environment"]["KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE"] == "m05-repair"
-    assert api["depends_on"]["db-role-bootstrap-m05-repair"] == {
-        "condition": "service_completed_successfully"
-    }
-    for runtime_name in ("dagster", "dagster-daemon"):
-        assert services[runtime_name]["depends_on"]["db-role-bootstrap-m05-repair"] == {
+    for removed_service in (
+        "db-role-bootstrap",
+        "db-migrate-to-m01-bootstrap-boundary",
+        "db-role-bootstrap-m01",
+        "db-migrate-to-m05-bootstrap-boundary",
+        "db-role-bootstrap-m05-pre",
+        "db-migrate-m05",
+        "db-role-bootstrap-m05-repair",
+    ):
+        assert removed_service not in services
+    for runtime_name in ("api", "dagster", "dagster-daemon"):
+        assert services[runtime_name]["depends_on"]["db-role-bootstrap-300"] == {
             "condition": "service_completed_successfully"
         }
 
     phase_script = _script("docker/postgres-role-bootstrap.sh")
-    prerequisite = phase_script.index("M01 role bootstrap requires exactly 0225")
-    create_role = phase_script.index("CREATE ROLE ktm_manual_feature_procedure_owner")
-    assert prerequisite < create_role
-    assert "GRANT ktm_manual_feature_admin_executor TO ktm_feature_api_runtime" in phase_script
-    assert (
-        "GRANT ktm_feature_create_provider_executor TO ktm_feature_dagster_runtime"
-        in phase_script
-    )
-    assert (
-        "REVOKE ktm_manual_feature_admin_executor FROM ktm_feature_dagster_runtime"
-        in phase_script
-    )
-    assert (
-        "REVOKE ktm_feature_create_provider_executor FROM ktm_feature_api_runtime"
-        in phase_script
-    )
-    assert "M01 relation marker is partial; refusing role bootstrap" in phase_script
-    # PostgreSQL text 출력의 boolean은 ``t``/``f``가 아니라 ``true``/``false``다.
-    # 이 분기를 잘못 쓰면 fresh DB bootstrap이 partial marker로 중단된다.
-    assert 'true\\|true) m01_repair_after_legacy=true' in phase_script
-    assert 'false\\|false)' in phase_script
-    # PostgreSQL role catalog는 cluster-wide라 fresh DB에서도 M01 role marker가
-    # 이미 존재할 수 있다. 이때 ``public.alembic_version``이 없는 상태를
-    # revision 조회로 처리하면 role bootstrap이 시작 전에 종료된다.
-    assert "to_regclass('public.alembic_version') IS NOT NULL" in phase_script
-    assert 'm01_revision=""' in phase_script
-    assert "M01 version marker is absent after application relations" in phase_script
-    assert "M01 application relation marker is invalid" in phase_script
-    assert "M01 version table marker is invalid" in phase_script
-    assert "bootstrap DSN did not accept connections within 30 seconds" in phase_script
-    assert "until psql \"$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN\" -Atqc 'SELECT 1'" in phase_script
-    assert 'm01_repair_after_legacy=true' in phase_script
-    assert 'run_m01_phase' in phase_script
-    assert 'UPDATE(command_id) ON TABLE ops.domain_commands' in phase_script
-    assert "M04 feature request dependency inventory is incomplete" in phase_script
-    assert "feature.manual_feature_identity_key(" in phase_script
-    assert "feature.create_feature_with_initial_state(" in phase_script
-    assert "feature.manual_feature_identity_claims," in phase_script
-    assert "ops.feature_requests TO ktm_feature_request_procedure_owner" in phase_script
-    assert 'M01 role must not inherit any application privilege role' in phase_script
-    assert "membership.inherit_option IS FALSE" in phase_script
-    assert "membership.set_option IS TRUE" in phase_script
-    assert "M05 pre role bootstrap requires exactly 0233" in phase_script
-    assert "M05 relation marker is partial; refusing role bootstrap" in phase_script
-    assert "M05 post-upgrade marker is incomplete" in phase_script
-    assert "CREATE ROLE ktm_manual_provider_dedup_procedure_owner" in phase_script
-    assert (
-        "GRANT ktm_manual_provider_dedup_detector_executor "
-        "TO ktm_feature_dagster_runtime" in phase_script
-    )
-    assert (
-        "GRANT ktm_manual_provider_dedup_admin_executor "
-        "TO ktm_feature_api_runtime" in phase_script
-    )
-    assert "ktm_feature_reference_reconciliation_service_executor" in phase_script
-    assert "ALTER FUNCTION feature.reject_manual_provider_dedup_evidence_mutation()" in phase_script
-    legacy_membership_start = phase_script.index("WITH expected_base(granted_role")
-    legacy_membership_end = phase_script.index(
-        "-- ``REASSIGN OWNED BY``", legacy_membership_start
-    )
-    legacy_membership_oracle = phase_script[
-        legacy_membership_start:legacy_membership_end
-    ]
-    for m05_role in (
-        "ktm_manual_provider_dedup_procedure_owner",
-        "ktm_manual_provider_dedup_detector_executor",
-        "ktm_manual_provider_dedup_admin_executor",
-        "ktm_feature_reference_reconciliation_service_executor",
-    ):
-        # future role 전체를 granted/member 쪽에서 각각 빼던 옛 2회 등장 대신,
-        # 현재는 granted/member/options까지 정확한 allowed_future edge 하나만
-        # 제외한다. 같은 이름의 다른 edge는 base graph mismatch로 남아야 한다.
-        assert legacy_membership_oracle.count(f"'{m05_role}'") == 1
-    assert "allowed_future(granted_role, member_role" in legacy_membership_oracle
-    assert "FROM allowed_future AS allowed" in legacy_membership_oracle
-    assert "AND NOT EXISTS (" in legacy_membership_oracle
+    assert "must be exactly baseline-300" in phase_script
+    assert "baseline-300 bootstrap requires a fresh DB" in phase_script
+    assert "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE:-baseline-300" in phase_script
 
-    migration_script = _script("docker/migrate-to-m01-bootstrap-boundary.sh")
-    assert "alembic upgrade 0225_tvn40c_physical_removal" in migration_script
-    assert "M01 relation marker is partial" in migration_script
-    assert 'marker_status=$?' in migration_script
-    assert '2)' in migration_script
-    assert "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" not in migration_script
-    m05_boundary_script = _script("docker/migrate-to-m05-bootstrap-boundary.sh")
-    assert "alembic upgrade 0233_m04_feature_request_queue" in m05_boundary_script
-    assert "M05 relation marker is partial" in m05_boundary_script
-    assert "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" not in m05_boundary_script
-    m05_migration_script = _script("docker/migrate-m05.sh")
-    assert "M05 migration marker is not a retryable boundary" in m05_migration_script
-    assert "set +e" in m05_migration_script
-    assert "marker_status=$?" in m05_migration_script
-    assert "alembic upgrade 0235_m05_reconciliation_delivery" in m05_migration_script
-    assert "1|2) alembic upgrade 0235_m05_reconciliation_delivery" in m05_migration_script
-    assert 'revision == "0236_tvn41s_compaction_drained"' in m05_migration_script
-    assert '"0236_tvn41s_compaction_drained"' in m05_boundary_script
-    assert "0236_tvn41s_compaction_drained" in phase_script
-    assert "  3)" in m05_migration_script
     dockerfile = _script("docker/api.Dockerfile")
-    assert "migrate-to-m01-bootstrap-boundary.sh" in dockerfile
-    assert "migrate-to-m05-bootstrap-boundary.sh" in dockerfile
-    assert "migrate-m05.sh" in dockerfile
+    assert "transition-application-schema-0236-to-300.py" in dockerfile
+    assert "ktm-application-schema-handoff" in dockerfile
+    for removed_image_path in (
+        "migrate-to-m01-bootstrap-boundary.sh",
+        "migrate-to-m05-bootstrap-boundary.sh",
+        "migrate-m05.sh",
+        "pre-squash-revisions.txt",
+    ):
+        assert removed_image_path not in dockerfile
 
 
 @pytest.mark.unit
@@ -2546,18 +2438,15 @@ def _run_entrypoint(path: str, extra: dict[str, str]) -> subprocess.CompletedPro
     )
 
 
-def _image_layout_without_legacy_migrations(tmp_path: Path) -> Path:
-    """최종 API image처럼 실행 archive 없이 진단 manifest만 둔다."""
+def _image_layout_300_only(tmp_path: Path) -> Path:
+    """최종 API image처럼 active root 300만 둔다."""
     image_root = tmp_path / "image"
     (image_root / "docker").mkdir(parents=True)
     (image_root / "alembic" / "versions").mkdir(parents=True)
     (image_root / "docker" / "api-entrypoint.sh").write_bytes(
         (ROOT / "docker" / "api-entrypoint.sh").read_bytes()
     )
-    (image_root / "docker" / "pre-squash-revisions.txt").write_bytes(
-        (ROOT / "docker" / "pre-squash-revisions.txt").read_bytes()
-    )
-    (image_root / "alembic" / "versions" / "0200_schema_baseline.py").touch()
+    (image_root / "alembic" / "versions" / "300_schema_baseline.py").touch()
     return image_root
 
 
@@ -2577,15 +2466,10 @@ def _run_image_layout_entrypoint(
 
 
 @pytest.mark.unit
-def test_api_container_stops_retrying_when_tvn40_identity_mapping_loader_aborts(
+def test_api_container_bounds_generic_upgrade_failure_retries(
     tmp_path: Path,
 ) -> None:
-    """0223 loader의 fail-closed 중단은 데이터 문제라 재시도로 풀리지 않는다.
-
-    영구 실패를 30회 반복하면 매번 0202~0223 DDL을 다시 돌리며 lock만 흔든다. entrypoint는
-    upgrade stderr에서 loader의 중단 문장을 보면 즉시 exit 1이어야 하고, 원문 stderr는 운영자가
-    볼 수 있게 그대로 내보내야 한다.
-    """
+    """active 300 경로 밖의 historic failure 분류를 runtime에 남기지 않는다."""
     head = "0225_tvn40c_physical_removal"
     path, marker = _migration_stub_path(tmp_path, image_head=head)
     alembic = tmp_path / "bin" / "alembic"
@@ -2613,11 +2497,9 @@ def test_api_container_stops_retrying_when_tvn40_identity_mapping_loader_aborts(
         },
     )
     assert result.returncode != 0
-    assert marker.read_text(encoding="utf-8").count("ran") == 1, (
-        "loader 중단은 영구 실패다 — upgrade를 한 번만 시도해야 한다"
-    )
-    assert "retrying" not in result.stderr, result.stderr
-    assert "T-VN-40 identity mapping loader aborted" in result.stderr
+    assert marker.read_text(encoding="utf-8").count("ran") == 5
+    assert "retrying (1/5)" in result.stderr, result.stderr
+    assert "failed after 5 attempts" in result.stderr
     # 원문 stderr(원인별 count)가 그대로 보인다.
     assert "detached=1" in result.stderr
 
@@ -2703,17 +2585,8 @@ def test_api_container_rejects_set_but_empty_expected_head(tmp_path: Path) -> No
 
 
 @pytest.mark.unit
-def test_api_container_fails_fast_when_db_is_ahead_of_image(tmp_path: Path) -> None:
-    """DB revision이 이미지 chain에 없으면 retry 없이 즉시, 이유를 말하며 죽는다 (F3).
-
-    stale 이미지 재배포 — 사고의 원인이던 태그 드리프트 — 는 DB가 이미지보다 **앞선**
-    경우다. 종전에는 30회×2s 동안 같은 오류를 반복한 뒤 일시 오류와 같은 종말 메시지로
-    죽어 원인 판별이 늦었다. `alembic current`가 같은 오류를 즉시 내므로 먼저 판정한다.
-
-    squash(`0200`) 이후 이 분기의 원인이 둘로 갈렸으므로 revision도 그에 맞게 고른다:
-    아카이브에 **없는** 이름이라야 "이미지가 뒤처졌다"가 성립한다. 아카이브에 있는
-    이름은 아래 `…_predates_the_squash_baseline`이 맡는다.
-    """
+def test_api_container_fails_fast_for_unknown_active_graph_revision(tmp_path: Path) -> None:
+    """active 300 image 밖 revision은 retry나 archive replay 없이 거부한다."""
     path, marker = _migration_stub_path(
         tmp_path,
         image_head="0104_tvn36_final_fence",
@@ -2725,8 +2598,8 @@ def test_api_container_fails_fast_when_db_is_ahead_of_image(tmp_path: Path) -> N
     result = _run_entrypoint(path, {})
 
     assert result.returncode != 0, result.stdout
-    assert not marker.exists(), "stale 이미지인데 upgrade가 실행됐다."
-    assert "stale image" in result.stderr
+    assert not marker.exists(), "unsupported revision인데 upgrade가 실행됐다."
+    assert "unsupported by the active 300-only image" in result.stderr
     assert "Can't locate revision" in result.stderr, (
         "실제 alembic 오류 원문이 로그에 없다 — 운영자가 원인을 추적할 수 없다."
     )
@@ -2734,57 +2607,46 @@ def test_api_container_fails_fast_when_db_is_ahead_of_image(tmp_path: Path) -> N
 
 
 @pytest.mark.unit
-def test_api_container_says_so_when_the_db_predates_the_squash_baseline(tmp_path: Path) -> None:
-    """DB가 squash 이전 세대면 **그렇게** 말한다 — "stale image"라고 하지 않는다.
-
-    같은 `Can't locate revision` 오류가 정반대 두 원인에서 나온다. squash 이후 이미지는
-    `0200`에서 시작하므로 `0104` 이전 복구점(예: H44 1회차 dump `0078`)으로 복원한 DB를
-    앞으로 옮길 수 없다 — 이때는 **이미지가 더 새롭다.** 옛 진단문만 남기면 새벽에 그
-    로그를 보는 사람이 롤백을 시도한다(적대 리뷰 지적).
-    """
+def test_api_container_requires_controlled_handoff_for_exact_0236(tmp_path: Path) -> None:
+    """exact 0236은 normal startup이 아닌 controlled handoff만 허용한다."""
     path, marker = _migration_stub_path(
         tmp_path,
         image_head="0104_tvn36_final_fence",
         current_script=(
             "echo \"FAILED: Can't locate revision identified by "
-            "'0078_cache_target_gc_observe'\"; exit 255"
+            "'0236_tvn41s_compaction_drained'\"; exit 255"
         ),
     )
     result = _run_entrypoint(path, {})
 
     assert result.returncode != 0, result.stdout
-    assert not marker.exists(), "복구 불가 상태인데 upgrade가 실행됐다."
-    assert "pre-squash" in result.stderr, result.stderr
-    assert "stale image" not in result.stderr, (
-        "원인이 반대인데 stale-image로 진단했다 — 운영자를 롤백으로 오도한다."
-    )
-    assert "legacy_versions" in result.stderr, "아카이브 위치를 알려 주지 않는다."
+    assert not marker.exists(), "controlled handoff 전인데 upgrade가 실행됐다."
+    assert "requires the controlled application-schema 0236-to-300 handoff" in result.stderr
+    assert "ktm-application-schema-handoff" in result.stderr
     assert "retrying" not in result.stderr, "영구 오류를 retry 루프로 두드렸다."
 
 
 @pytest.mark.unit
-def test_api_image_without_legacy_modules_identifies_pre_squash_db(
+def test_api_image_with_only_300_root_rejects_archived_revision(
     tmp_path: Path,
 ) -> None:
-    """최종 image에 historical Python이 없어도 pre-squash 진단은 보존한다."""
+    """최종 image는 executable archive 없이 unsupported revision을 차단한다."""
     path, marker = _migration_stub_path(
         tmp_path,
-        image_head="0225_tvn40c_physical_removal",
+        image_head="300",
         current_script=(
             "echo \"FAILED: Can't locate revision identified by "
             "'0078_cache_target_gc_observe'\"; exit 255"
         ),
     )
-    image_root = _image_layout_without_legacy_migrations(tmp_path)
+    image_root = _image_layout_300_only(tmp_path)
 
     result = _run_image_layout_entrypoint(image_root, path, {})
 
     assert result.returncode != 0, result.stdout
-    assert not marker.exists(), "복구 불가 상태인데 upgrade가 실행됐다."
-    assert "pre-squash" in result.stderr, result.stderr
-    assert "stale image" not in result.stderr
-    assert "legacy_versions/0078_cache_target_gc_observe" in result.stderr
-    assert not (image_root / "alembic" / "legacy_versions").exists()
+    assert not marker.exists(), "unsupported revision인데 upgrade가 실행됐다."
+    assert "unsupported by the active 300-only image" in result.stderr
+    assert not (image_root / "alembic" / "retired_versions").exists()
 
 
 @pytest.mark.unit
@@ -3535,9 +3397,7 @@ def test_external_overlays_keep_candidate_storage_migration_ordering(
         # external DB/infra overlay는 ownership transfer bootstrap을 profile로
         # 비활성화한다. 따라서 runtime은 운영자가 사전 provision한 전용 DB에만
         # 연결하며, profile-disabled service를 readiness edge로 참조하지 않는다.
-        assert "db-role-bootstrap" not in depends, (overlay, name, depends)
-        assert "db-role-bootstrap-m01" not in depends, (overlay, name, depends)
-        assert "db-role-bootstrap-m05-repair" not in depends, (overlay, name, depends)
+        assert "db-role-bootstrap-300" not in depends, (overlay, name, depends)
         assert depends.get("dagster-storage-migrate", {}).get("condition") == (
             "service_completed_successfully"
         ), (overlay, name, depends)
@@ -3558,17 +3418,11 @@ def test_tvn_m05_external_db_overlays_do_not_start_local_phase_services() -> Non
     ):
         text = _script(overlay)
         for service_name in (
-            "db-role-bootstrap:",
-            "db-migrate-to-m01-bootstrap-boundary:",
-            "db-role-bootstrap-m01:",
-            "db-migrate-to-m05-bootstrap-boundary:",
-            "db-role-bootstrap-m05-pre:",
-            "db-migrate-m05:",
-            "db-role-bootstrap-m05-repair:",
+            "db-role-bootstrap-300:",
         ):
             assert (
                 f'{service_name}\n    profiles: ["local-infra"]' in text
             ), (overlay, service_name)
 
     object_store = _script("docker-compose.external-object-store.yml")
-    assert "db-role-bootstrap-m01:" in object_store
+    assert "db-role-bootstrap-300:" in object_store

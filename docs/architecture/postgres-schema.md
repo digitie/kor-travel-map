@@ -577,32 +577,28 @@ legacy에서 완전히 재구성할 수 없는 collection/item이나 감사값�
 - 4자리 순번으로 적용 순서를 가시화한다.
 - revision message(파일 docstring 첫 줄)는 commit summary와 일치시킨다.
 
-#### 지금 `alembic/versions/`에 있는 것
+#### 현재 `alembic/versions/`에 있는 것
 
-squash(2026-08-14) 이후 baseline과 bridge, T-VN-40 migration만 있다.
+T-VN-H46H baseline 이후 active graph는 `300_schema_baseline.py` 하나다.
 
-- `0200_schema_baseline.py` — revision id `0200_schema_baseline`, `down_revision=None`.
-  `alembic/baseline/{schema,seed}.sql`을 byte sha로 잠근 채 적용한다.
-- `0201_squash_bridge.py` — revision id는 파일명이 아니라 **`0104_tvn36_final_fence`**다.
-  이미 `0104`에 있는 DB가 이 그래프에서도 해석되게 하는 노드다.
-- `0202_tvn40_curation_receipts.py`부터 `0225_tvn40c_physical_removal.py`까지 —
-  bridge 뒤에 이어지는 T-VN-40 단일 체인이다. 그 뒤에 이미 적용된
-  `0229_tvn40b_source_rule_action`, `0230_tvn_c05_krforest_datasets`,
-  `0231_tvn41s_snapshot_material`, `0232_tvn37d_notice_empty_range`,
-  `0226_m01_manual_feature_create`, `0227_m02_feature_provenance`,
-  `0228_m03_manual_curation`, `0233_m04_feature_request_queue`,
-  `0234_m05_manual_provider_dedup`, `0235_m05_reconciliation_delivery`,
-  `0236_tvn41s_compaction_drained`가 dependency graph 순서로 이어지며 현재 head는
-  `0236_tvn41s_compaction_drained`다.
+- revision id `300`, `down_revision=None`이다.
+- `alembic/baseline/{schema,seed}.sql`의 byte SHA와 final role·ACL·extension contract를
+  검증한 뒤에만 fresh DB에 적용한다.
+- `0200`부터 `0236_tvn41s_compaction_drained`까지는
+  `alembic/retired_versions/0200-0236/`의 byte-pinned 실행 불가 archive다.
+  기존 109개 `legacy_versions/` archive와는 revision id 중복 때문에 합치거나
+  `version_locations`에 동시에 넣지 않는다.
 
-`0001~0104` 체인 109개는 `alembic/legacy_versions/`의 실행되지 않는 아카이브다
-([README](../../alembic/legacy_versions/README.md)). **`versions/`로 되돌리지 마라** —
-bridge와 아카이브가 `0104_tvn36_final_fence`를 둘 다 선언하면 Alembic graph가 손상된다.
+normal API image는 fresh DB 또는 raw revision `300`만 기동한다. exact raw
+`0236_tvn41s_compaction_drained` DB는 Docker Manager가 writer fence와 동일
+transaction pre/post catalog 검증을 확보한 controlled metadata handoff로만 `300`으로
+전진시킬 수 있다. 일반 `upgrade`, `stamp`, downgrade, archive replay, 수동
+`alembic_version` SQL은 지원하지 않는다.
 
 #### 다음 application migration 작성
 
-1. 새 revision ID와 파일명은 기존 것과 겹치지 않게 잡고, `down_revision`은 **현재 terminal
-    head**로 잇는다. **`0201`을 쓰지 마라** — 그건 bridge 파일명이고 revision id가 아니다.
+1. 새 revision ID와 파일명은 기존 것과 겹치지 않게 잡고, 첫 후속 migration의
+   `down_revision`은 정확히 `300`으로 잇는다. retired archive의 번호·ID를 재사용하지 않는다.
 2. 파일명 숫자는 편의일 뿐 적용 순서의 정본이 아니다. upstream이 높은 번호를 먼저
     사용했으면 새 lane은 충돌 없는 ID를 택하고 `down_revision` graph로 순서를 표현한다.
     package graph artifact는 이 dependency 순서로 생성된다.
@@ -614,12 +610,12 @@ bridge와 아카이브가 `0104_tvn36_final_fence`를 둘 다 선언하면 Alemb
    다 — CI 워크플로에 이 스크립트를 부르는 스텝은 없다.
 4. `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`(배포 env pin)를 새 head로 올린다.
    `docker/api-entrypoint.sh`가 이미지 head와 이 값을 대조해 fail-closed한다.
-5. baseline 자체는 건드리지 않는다. baseline 갱신은 별도 결정이며 절차는
-   `alembic/versions/0200_schema_baseline.py`의 `_SCHEMA_SHA256` 주석에 있다.
+5. baseline 자체는 건드리지 않는다. 새 baseline은 별도 설계·fresh catalog 비교·
+   controlled production handoff를 다시 갖춘 결정으로만 만든다.
 
-> **baseline 파일 명명 규약**: 다음에 squash를 한다면 파일 이름을
-> `NNNN_schema_baseline.py`로 지어라. `docker/api-entrypoint.sh`가 "이 이미지가
-> squash판인가"를 `alembic/versions/*_schema_baseline.py` 존재로 판별한다.
+> **baseline 파일 명명 규약**: 다음에 새 root를 만들면 별도 revision ID와
+> `NNNN_schema_baseline.py` 파일을 쓴다. active image의 허용 raw revision과
+> controlled handoff source는 entrypoint와 Alembic guard에 명시적으로 고정한다.
 ## 9. EXPLAIN 통합 테스트
 
 모든 hot path SQL은 `tests/integration/`에서 EXPLAIN 결과로 인덱스 사용 검증.

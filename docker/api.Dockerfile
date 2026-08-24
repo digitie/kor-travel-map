@@ -42,22 +42,22 @@ RUN apt-get update \
     && useradd --system --gid appuser --home-dir /app --shell /usr/sbin/nologin appuser
 
 COPY --from=builder /install /usr/local
-COPY alembic.ini ./
-COPY alembic/env.py alembic/script.py.mako ./alembic/
-COPY alembic/baseline ./alembic/baseline
-COPY alembic/versions ./alembic/versions
-COPY docker/api-entrypoint.sh ./docker/api-entrypoint.sh
-COPY docker/migrate-to-m01-bootstrap-boundary.sh ./docker/migrate-to-m01-bootstrap-boundary.sh
-COPY docker/migrate-to-m05-bootstrap-boundary.sh ./docker/migrate-to-m05-bootstrap-boundary.sh
-COPY docker/migrate-m05.sh ./docker/migrate-m05.sh
-COPY docker/pre-squash-revisions.txt ./docker/pre-squash-revisions.txt
+COPY --chown=root:root alembic.ini ./
+COPY --chown=root:root alembic/env.py alembic/script.py.mako ./alembic/
+COPY --chown=root:root alembic/baseline ./alembic/baseline
+COPY --chown=root:root alembic/versions ./alembic/versions
+COPY --chown=root:root docker/api-entrypoint.sh ./docker/api-entrypoint.sh
+COPY --chown=root:root docker/transition-application-schema-0236-to-300.py /usr/local/bin/ktm-application-schema-handoff
 COPY --chown=appuser:appuser docker/application-schema-head.py /usr/local/bin/ktm-application-schema
 COPY --chown=appuser:appuser resources/curations ./resources/curations
 
-RUN chmod 0755 /usr/local/bin/ktm-application-schema \
-    && chmod +x ./docker/api-entrypoint.sh ./docker/migrate-to-m01-bootstrap-boundary.sh \
-       ./docker/migrate-to-m05-bootstrap-boundary.sh ./docker/migrate-m05.sh \
-    && chown -R appuser:appuser /app
+RUN chown -R root:root /app/alembic /app/alembic.ini /app/docker/api-entrypoint.sh \
+    /usr/local/bin/ktm-application-schema-handoff \
+    && find /app/alembic -type d -exec chmod 0555 {} + \
+    && find /app/alembic -type f -exec chmod 0444 {} + \
+    && chmod 0444 /app/alembic.ini \
+    && chmod 0755 /usr/local/bin/ktm-application-schema \
+    && chmod 0555 /usr/local/bin/ktm-application-schema-handoff ./docker/api-entrypoint.sh
 
 USER appuser
 

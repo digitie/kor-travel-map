@@ -5437,7 +5437,7 @@
       },
       "BackupCommandPlan": {
         "additionalProperties": false,
-        "description": "Command plan returned by backup/restore endpoints.",
+        "description": "Command plan returned by the backup endpoint.",
         "properties": {
           "command": {
             "items": {
@@ -5574,7 +5574,7 @@
       },
       "BackupOperationData": {
         "additionalProperties": false,
-        "description": "Backup/restore/swap operation response data.",
+        "description": "Backup operation response data.",
         "properties": {
           "artifact": {
             "anyOf": [
@@ -5605,23 +5605,9 @@
             "type": "string"
           },
           "operation": {
-            "enum": [
-              "backup",
-              "restore",
-              "swap"
-            ],
+            "const": "backup",
             "title": "Operation",
             "type": "string"
-          },
-          "restore_targets": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/RestoreTargets"
-              },
-              {
-                "type": "null"
-              }
-            ]
           },
           "status": {
             "enum": [
@@ -5667,7 +5653,7 @@
       },
       "BackupOperationResponse": {
         "additionalProperties": false,
-        "description": "Backup/restore/swap operation response.",
+        "description": "Backup operation response.",
         "properties": {
           "data": {
             "$ref": "#/components/schemas/BackupOperationData"
@@ -5752,10 +5738,6 @@
           "path": {
             "title": "Path",
             "type": "string"
-          },
-          "restore_url": {
-            "title": "Restore Url",
-            "type": "string"
           }
         },
         "required": [
@@ -5767,8 +5749,7 @@
           "object_storage",
           "byte_size",
           "checksum_count",
-          "detail_url",
-          "restore_url"
+          "detail_url"
         ],
         "title": "BackupRecord",
         "type": "object"
@@ -27455,165 +27436,6 @@
         "title": "RescanRequest",
         "type": "object"
       },
-      "RestoreRunRequest": {
-        "additionalProperties": false,
-        "description": "Staging restore command request.",
-        "properties": {
-          "app_db": {
-            "anyOf": [
-              {
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "App Db"
-          },
-          "dagster_db": {
-            "anyOf": [
-              {
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dagster Db"
-          },
-          "execute": {
-            "default": false,
-            "title": "Execute",
-            "type": "boolean"
-          },
-          "recreate": {
-            "default": false,
-            "title": "Recreate",
-            "type": "boolean"
-          },
-          "rustfs_volume": {
-            "anyOf": [
-              {
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rustfs Volume"
-          },
-          "skip_checksum": {
-            "default": false,
-            "title": "Skip Checksum",
-            "type": "boolean"
-          },
-          "skip_rustfs": {
-            "default": false,
-            "title": "Skip Rustfs",
-            "type": "boolean"
-          }
-        },
-        "title": "RestoreRunRequest",
-        "type": "object"
-      },
-      "RestoreSwapRequest": {
-        "additionalProperties": false,
-        "description": "Restore hot-swap command request.",
-        "properties": {
-          "app_db": {
-            "anyOf": [
-              {
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "App Db"
-          },
-          "apply": {
-            "default": false,
-            "title": "Apply",
-            "type": "boolean"
-          },
-          "dagster_db": {
-            "anyOf": [
-              {
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dagster Db"
-          },
-          "execute": {
-            "default": false,
-            "title": "Execute",
-            "type": "boolean"
-          },
-          "note": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Note"
-          },
-          "rustfs_volume": {
-            "anyOf": [
-              {
-                "minLength": 1,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Rustfs Volume"
-          },
-          "skip_verify": {
-            "default": false,
-            "title": "Skip Verify",
-            "type": "boolean"
-          }
-        },
-        "title": "RestoreSwapRequest",
-        "type": "object"
-      },
-      "RestoreTargets": {
-        "additionalProperties": false,
-        "description": "Staging restore targets.",
-        "properties": {
-          "app_db": {
-            "title": "App Db",
-            "type": "string"
-          },
-          "dagster_db": {
-            "title": "Dagster Db",
-            "type": "string"
-          },
-          "rustfs_volume": {
-            "title": "Rustfs Volume",
-            "type": "string"
-          }
-        },
-        "required": [
-          "app_db",
-          "dagster_db",
-          "rustfs_volume"
-        ],
-        "title": "RestoreTargets",
-        "type": "object"
-      },
       "ReviewFeatureDetailRecord": {
         "additionalProperties": false,
         "description": "Review 상세 feature snapshot.",
@@ -39318,176 +39140,6 @@
         "summary": "Post Revoke Public Api Key",
         "tags": [
           "admin-auth"
-        ]
-      }
-    },
-    "/v1/admin/restore/{backup_id}": {
-      "post": {
-        "description": "Plan or run a staging restore command.",
-        "operationId": "restore_backup_v1_admin_restore__backup_id__post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "backup_id",
-            "required": true,
-            "schema": {
-              "title": "Backup Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Idempotency-Key",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/RestoreRunRequest"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Body"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BackupOperationResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "security": [
-          {
-            "AdminBFF": []
-          }
-        ],
-        "summary": "Restore Backup",
-        "tags": [
-          "admin-backups"
-        ]
-      }
-    },
-    "/v1/admin/restore/{backup_id}/swap": {
-      "post": {
-        "description": "Plan or run the restore hot-swap env switch.",
-        "operationId": "plan_restore_swap_v1_admin_restore__backup_id__swap_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "backup_id",
-            "required": true,
-            "schema": {
-              "title": "Backup Id",
-              "type": "string"
-            }
-          },
-          {
-            "in": "header",
-            "name": "Idempotency-Key",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Idempotency-Key",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "anyOf": [
-                  {
-                    "$ref": "#/components/schemas/RestoreSwapRequest"
-                  },
-                  {
-                    "type": "null"
-                  }
-                ],
-                "title": "Body"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/BackupOperationResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "Validation Error"
-          },
-          "default": {
-            "content": {
-              "application/problem+json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ProblemDetail"
-                }
-              }
-            },
-            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
-          }
-        },
-        "security": [
-          {
-            "AdminBFF": []
-          }
-        ],
-        "summary": "Plan Restore Swap",
-        "tags": [
-          "admin-backups"
         ]
       }
     },

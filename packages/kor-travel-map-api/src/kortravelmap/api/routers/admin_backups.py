@@ -1,8 +1,9 @@
 """``/admin/backups`` 운영 라우터 (T-209e-c).
 
-The router exposes backup artifacts and safe command plans. Running the host
-Docker backup/restore scripts is opt-in because the API container should not
-silently gain host Docker control in production.
+The router exposes audit-preserving cold backup artifacts and opt-in backup
+commands. `300` recovery has no supported restore or hot-swap format yet;
+retired URI handlers therefore fail closed and are intentionally absent from
+the public OpenAPI contract.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from time import perf_counter
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, NoReturn
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
@@ -80,7 +81,7 @@ __all__ = [
 router = APIRouter(prefix="/admin/backups", tags=["admin-backups"])
 restore_router = APIRouter(prefix="/admin/restore", tags=["admin-backups"])
 
-BackupOperation = Literal["backup", "restore", "swap"]
+BackupOperation = Literal["backup"]
 BackupOperationStatus = Literal["planned", "completed", "failed", "manual_required"]
 _SUPERVISED_COMMAND_COMMUNICATIONS: set[asyncio.Task[tuple[bytes, bytes]]] = set()
 _DOCKER_EFFECT_FENCE_NAME = "kor-travel-map-maintenance-effect-fence-v1"
@@ -153,7 +154,6 @@ class BackupRecord(BaseModel):
     byte_size: int
     checksum_count: int
     detail_url: str
-    restore_url: str
 
 
 class BackupListData(BaseModel):
@@ -232,7 +232,11 @@ class RestoreRunRequest(BaseModel):
 
 
 class RestoreSwapRequest(BaseModel):
-    """Restore hot-swap command request."""
+    """Retired restore hot-swap request shape.
+
+    T-VN-H46H 이후 endpoint 자체가 recovery format 부재로 410을 반환한다. 검증을
+    생략하는 public escape hatch는 의도적으로 제공하지 않는다.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -240,13 +244,12 @@ class RestoreSwapRequest(BaseModel):
     dagster_db: str | None = Field(default=None, min_length=1)
     rustfs_volume: str | None = Field(default=None, min_length=1)
     apply: bool = False
-    skip_verify: bool = False
     execute: bool = False
     note: str | None = None
 
 
 class BackupCommandPlan(BaseModel):
-    """Command plan returned by backup/restore endpoints."""
+    """Command plan returned by the backup endpoint."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -267,7 +270,7 @@ class RestoreTargets(BaseModel):
 
 
 class BackupOperationData(BaseModel):
-    """Backup/restore/swap operation response data."""
+    """Backup operation response data."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -276,14 +279,13 @@ class BackupOperationData(BaseModel):
     backup_id: str
     message: str
     artifact: BackupRecord | None = None
-    restore_targets: RestoreTargets | None = None
     command: BackupCommandPlan | None = None
     stdout: str | None = None
     stderr: str | None = None
 
 
 class BackupOperationResponse(BaseModel):
-    """Backup/restore/swap operation response."""
+    """Backup operation response."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -313,7 +315,6 @@ def _record(artifact: BackupArtifact) -> BackupRecord:
         byte_size=artifact.byte_size,
         checksum_count=artifact.checksum_count,
         detail_url=f"/v1/admin/backups/{artifact.backup_id}",
-        restore_url=f"/v1/admin/restore/{artifact.backup_id}",
     )
 
 
@@ -323,6 +324,22 @@ def _backup_error(exc: BackupArtifactError) -> HTTPException:
         detail={
             "code": "BACKUP_NOT_FOUND",
             "message": str(exc),
+            "details": {},
+        },
+    )
+
+
+def _restore_unsupported() -> HTTPException:
+    """old lineage restore/swap command surface는 format 설계 전까지 완전히 닫는다."""
+
+    return HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail={
+            "code": "RESTORE_UNSUPPORTED",
+            "message": (
+                "300 baseline recovery format이 아직 정의·검증되지 않아 restore와 "
+                "hot swap은 지원하지 않습니다."
+            ),
             "details": {},
         },
     )
@@ -1373,7 +1390,19 @@ def _restore_targets_from_values(
     )
 
 
-@restore_router.post("/{backup_id}", response_model=BackupOperationResponse)
+@restore_router.post(
+    "/{backup_id}",
+    status_code=status.HTTP_410_GONE,
+    deprecated=True,
+    include_in_schema=False,
+    response_model=None,
+    summary="사용 중단된 restore endpoint",
+    responses={
+        status.HTTP_410_GONE: {
+            "description": "300 baseline recovery format이 정의되기 전까지 restore는 지원하지 않음"
+        }
+    },
+)
 async def restore_backup(
     request: Request,
     backup_id: str,
@@ -1382,8 +1411,13 @@ async def restore_backup(
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
     body: RestoreRunRequest | None = None,
-) -> BackupOperationResponse:
-    """Plan or run a staging restore command."""
+) -> NoReturn:
+    """Retired restore endpoint — no plan or host command is issued."""
+    del request, backup_id, session, engine, context, idempotency_key, body
+    raise _restore_unsupported()
+
+    # 아래 legacy implementation은 `300` recovery format을 설계할 때까지 실행 불가다.
+    # Guard보다 뒤에 남긴 것은 old artifact audit context만 보존하기 위해서다.
     started_at = perf_counter()
     settings = _settings(request)
     try:
@@ -1560,7 +1594,19 @@ async def restore_backup(
     return response
 
 
-@restore_router.post("/{backup_id}/swap", response_model=BackupOperationResponse)
+@restore_router.post(
+    "/{backup_id}/swap",
+    status_code=status.HTTP_410_GONE,
+    deprecated=True,
+    include_in_schema=False,
+    response_model=None,
+    summary="사용 중단된 restore hot-swap endpoint",
+    responses={
+        status.HTTP_410_GONE: {
+            "description": "300 baseline recovery format이 정의되기 전까지 hot swap은 지원하지 않음"
+        }
+    },
+)
 async def plan_restore_swap(
     request: Request,
     backup_id: str,
@@ -1569,8 +1615,13 @@ async def plan_restore_swap(
     context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
     body: RestoreSwapRequest | None = None,
-) -> BackupOperationResponse:
-    """Plan or run the restore hot-swap env switch."""
+) -> NoReturn:
+    """Retired restore hot-swap endpoint — no plan or host command is issued."""
+    del request, backup_id, session, engine, context, idempotency_key, body
+    raise _restore_unsupported()
+
+    # 아래 legacy implementation은 `300` recovery format을 설계할 때까지 실행 불가다.
+    # Guard보다 뒤에 남긴 것은 old artifact audit context만 보존하기 위해서다.
     started_at = perf_counter()
     settings = _settings(request)
     try:
@@ -1598,7 +1649,7 @@ async def plan_restore_swap(
         "KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB": targets.dagster_db,
         "KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME": targets.rustfs_volume,
         "KOR_TRAVEL_MAP_RESTORE_SWAP_APPLY": "1" if payload.apply else "0",
-        "KOR_TRAVEL_MAP_RESTORE_SWAP_SKIP_VERIFY": "1" if payload.skip_verify else "0",
+        "KOR_TRAVEL_MAP_RESTORE_SWAP_SKIP_VERIFY": "0",
     }
     plan = _command_plan(
         settings=settings,
@@ -1672,7 +1723,7 @@ async def plan_restore_swap(
                 verification=verification,
             )
             for verification in (
-                ("skipped" if payload.skip_verify else "performed"),
+                "performed",
                 "recovery_performed",
             )
         )
@@ -1719,7 +1770,7 @@ async def plan_restore_swap(
                     verification=verification,
                 )
                 for verification in (
-                    ("skipped" if payload.skip_verify else "performed"),
+                    "performed",
                     "recovery_performed",
                 )
             )

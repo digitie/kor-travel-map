@@ -316,7 +316,7 @@ def _runtime_fixture() -> tuple[
             "image_id": image_id,
         }
     schema_heads = {
-        "map_application_head": "0225_tvn40c_physical_removal",
+        "map_application_head": "300",
         "map_dagster_head": "29b539ebc72a",
         "pinvi_head": "20260804_0049",
     }
