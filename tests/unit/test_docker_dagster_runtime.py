@@ -630,7 +630,13 @@ def test_tvn_m01_role_phase_runs_only_after_legacy_0225_boundary() -> None:
         "ktm_manual_provider_dedup_admin_executor",
         "ktm_feature_reference_reconciliation_service_executor",
     ):
-        assert legacy_membership_oracle.count(f"'{m05_role}'") == 2
+        # future role 전체를 granted/member 쪽에서 각각 빼던 옛 2회 등장 대신,
+        # 현재는 granted/member/options까지 정확한 allowed_future edge 하나만
+        # 제외한다. 같은 이름의 다른 edge는 base graph mismatch로 남아야 한다.
+        assert legacy_membership_oracle.count(f"'{m05_role}'") == 1
+    assert "allowed_future(granted_role, member_role" in legacy_membership_oracle
+    assert "FROM allowed_future AS allowed" in legacy_membership_oracle
+    assert "AND NOT EXISTS (" in legacy_membership_oracle
 
     migration_script = _script("docker/migrate-to-m01-bootstrap-boundary.sh")
     assert "alembic upgrade 0225_tvn40c_physical_removal" in migration_script
