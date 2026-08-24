@@ -327,7 +327,7 @@ facade는 단지 모듈 함수 namespace화. 상태/lifecycle 없음. provider c
 
 ```bash
 kor-travel-map healthz                       # DB ping + 객체저장소 ping
-kor-travel-map alembic upgrade head          # Alembic 위임
+# schema lifecycle은 Docker Manager의 fresh-300/handoff one-shot만 소유
 ktmctl import enqueue --kind ...     # import_job 등록
 ktmctl import claim                  # 워커 모드
 ```

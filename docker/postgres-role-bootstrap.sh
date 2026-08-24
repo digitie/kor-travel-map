@@ -105,9 +105,332 @@ run_baseline_300_phase() {
 -- --single-transaction이 아래 모든 mutation과 guard를 같은 transaction에 묶는다.
 DO $baseline_300_fresh_precondition$
 BEGIN
+    -- baseline-300은 dedicated PostGIS 16 image에서 새로 만든 database만 받는다.
+    -- later role/schema normalizer가 임의의 public ACL·extension·default privilege를
+    -- 정리하는 repair 도구가 되면 input provenance가 사라진다. 모든 검사는 이
+    -- transaction의 첫 mutation 이전에 끝내며, 실패 시 role/password도 남기지 않는다.
     IF to_regclass('public.alembic_version') IS NOT NULL THEN
         RAISE EXCEPTION
             'baseline-300 bootstrap requires a fresh DB; public.alembic_version exists'
+            USING ERRCODE = '55000';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_namespace AS namespace
+        WHERE namespace.nspname !~ '^pg_'
+          AND namespace.nspname NOT IN ('information_schema', 'public')
+    ) THEN
+        RAISE EXCEPTION
+            'baseline-300 bootstrap requires a fresh DB; non-system schema exists'
+            USING ERRCODE = '55000';
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_namespace AS namespace
+        WHERE namespace.nspname = 'public'
+          AND namespace.nspowner = 'pg_database_owner'::regrole
+          AND (
+              SELECT COALESCE(
+                  array_agg(entry::text ORDER BY entry::text),
+                  ARRAY[]::text[]
+              )
+              FROM unnest(namespace.nspacl) AS entry
+          ) IS NOT DISTINCT FROM ARRAY[
+              '=U/pg_database_owner',
+              'pg_database_owner=UC/pg_database_owner'
+          ]::text[]
+    ) THEN
+        RAISE EXCEPTION
+            'baseline-300 bootstrap requires a fresh DB; public schema ACL is not standard'
+            USING ERRCODE = '55000';
+    END IF;
+
+    -- fresh root가 최종 catalog receipt와 다른 DB 속성에서 시작하면 migration의
+    -- 마지막 receipt guard가 거절하더라도 이 bootstrap transaction만 이미 commit된
+    -- partial input이 된다. target DB owner와 per-DB setting은 아래 normalizer가
+    -- 의도적으로 소유하지만, 그 외 immutable database profile/ACL은 stock template1과
+    -- exact해야 한다. PostgreSQL의 ordinary ``CREATE DATABASE``는 template1의 own
+    -- ACL을 target에 그대로 복제하지 않고 target ``datacl``을 NULL(default)로
+    -- 만든다. 따라서 locale/provider/tablespace/connection-limit는 template1과
+    -- 비교하되 target ACL은 canonical fresh NULL로 닫는다.
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_database AS target_database
+        JOIN pg_catalog.pg_database AS template_database
+          ON template_database.datname = 'template1'
+        WHERE target_database.datname = current_database()
+          AND target_database.datistemplate IS FALSE
+          AND target_database.encoding = template_database.encoding
+          AND target_database.datlocprovider = template_database.datlocprovider
+          AND target_database.dattablespace = template_database.dattablespace
+          AND target_database.datcollate IS NOT DISTINCT FROM template_database.datcollate
+          AND target_database.datctype IS NOT DISTINCT FROM template_database.datctype
+          AND target_database.daticulocale IS NOT DISTINCT FROM template_database.daticulocale
+          AND target_database.daticurules IS NOT DISTINCT FROM template_database.daticurules
+          AND target_database.datcollversion IS NOT DISTINCT FROM template_database.datcollversion
+          AND target_database.datallowconn = template_database.datallowconn
+          AND target_database.datconnlimit = template_database.datconnlimit
+          AND target_database.datacl IS NULL
+    ) THEN
+        RAISE EXCEPTION
+            'baseline-300 bootstrap requires a fresh DB; database immutable profile is not standard'
+            USING ERRCODE = '55000';
+    END IF;
+
+    -- pristine stock PostGIS 16 Alpine database의 input inventory는 plpgsql 하나다.
+    -- source `0236`의 fuzzystrmatch는 아래 dedicated bootstrap이 명시적으로 만드는
+    -- final contract이지, pre-bootstrap input에 허용할 public residue가 아니다.
+    IF (
+        SELECT count(*)
+        FROM pg_catalog.pg_extension AS extension
+        JOIN pg_catalog.pg_namespace AS namespace
+          ON namespace.oid = extension.extnamespace
+        WHERE extension.extname = 'plpgsql' AND namespace.nspname = 'pg_catalog'
+    ) <> 1 OR EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_extension AS extension
+        JOIN pg_catalog.pg_namespace AS namespace
+          ON namespace.oid = extension.extnamespace
+        WHERE NOT (extension.extname = 'plpgsql' AND namespace.nspname = 'pg_catalog')
+    ) THEN
+        RAISE EXCEPTION
+            'baseline-300 bootstrap requires a fresh DB; nonstandard extension inventory exists'
+            USING ERRCODE = '55000';
+    END IF;
+
+    -- procedural language는 relation/extension inventory에 나타나지 않는다. 여기에
+    -- foreign language가 있으면 final `300` guard만 뒤늦게 거절해 role/schema가
+    -- 남을 수 있으므로, 첫 bootstrap mutation 전에 stock PostgreSQL 16 inventory를
+    -- exact하게 닫는다. final root migration의 language contract와 같은 네 언어만
+    -- 수용한다.
+    IF (
+        SELECT COALESCE(
+            array_agg(language.lanname::text ORDER BY language.lanname),
+            ARRAY[]::text[]
+        )
+        FROM pg_catalog.pg_language AS language
+    ) IS DISTINCT FROM ARRAY['c', 'internal', 'plpgsql', 'sql']::text[] THEN
+        RAISE EXCEPTION
+            'baseline-300 bootstrap requires a fresh DB; procedural language inventory is not standard'
+            USING ERRCODE = '55000';
+    END IF;
+
+    -- `pg_prewarm`은 final 300 extension inventory의 필수 구성원이다. image가 이를
+    -- 제공하지 않을 때 role·password·schema를 일부 만든 뒤에 실패하면 재시도 입력이
+    -- 변하므로, 모든 mutation보다 먼저 availability를 확인한다.
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_available_extensions
+        WHERE name = 'pg_prewarm'
+    ) THEN
+        RAISE EXCEPTION
+            'baseline-300 bootstrap requires pg_prewarm to be available'
+            USING ERRCODE = '55000';
+    END IF;
+
+    -- baseline root는 reserved application role inventory를 exact하게 닫는다. cluster에
+    -- 이미 final 21개가 있는 dedicated test/development topology는 재사용할 수 있지만,
+    -- partial set 또는 unlisted `ktm_*` NOLOGIN/LOGIN/superuser principal은 repair 대상이
+    -- 아니라 잘못된 fresh input이다. 모든 mutation 전에 한 transaction으로 거절한다.
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_roles AS role
+        WHERE role.rolname LIKE 'ktm\_%' ESCAPE '\'
+    ) AND (
+        (
+            SELECT count(*)
+            FROM pg_catalog.pg_roles AS role
+            WHERE role.rolname LIKE 'ktm\_%' ESCAPE '\'
+        ) <> 21
+        OR EXISTS (
+            SELECT 1
+            FROM pg_catalog.pg_roles AS role
+            WHERE role.rolname LIKE 'ktm\_%' ESCAPE '\'
+              AND role.rolname NOT IN (
+                  'ktm_feature_schema_owner',
+                  'ktm_feature_state_procedure_owner',
+                  'ktm_feature_audit_writer',
+                  'ktm_feature_runtime',
+                  'ktm_curation_command_owner',
+                  'ktm_curation_audit_writer',
+                  'ktm_curation_admin_executor',
+                  'ktm_curation_provider_executor',
+                  'ktm_manual_feature_procedure_owner',
+                  'ktm_manual_feature_admin_executor',
+                  'ktm_feature_create_provider_executor',
+                  'ktm_feature_request_procedure_owner',
+                  'ktm_feature_request_service_executor',
+                  'ktm_feature_request_admin_executor',
+                  'ktm_manual_provider_dedup_procedure_owner',
+                  'ktm_manual_provider_dedup_detector_executor',
+                  'ktm_manual_provider_dedup_admin_executor',
+                  'ktm_feature_reference_reconciliation_service_executor',
+                  'ktm_feature_migrator',
+                  'ktm_feature_api_runtime',
+                  'ktm_feature_dagster_runtime'
+              )
+        )
+    ) THEN
+        RAISE EXCEPTION
+            'baseline-300 bootstrap requires an exact reserved application role inventory'
+            USING ERRCODE = '55000';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_default_acl) THEN
+        RAISE EXCEPTION
+            'baseline-300 bootstrap requires a fresh DB; default privileges exist'
+            USING ERRCODE = '55000';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_db_role_setting AS setting_row
+        WHERE setting_row.setdatabase = (
+            SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database()
+        ) OR (
+            setting_row.setdatabase = 0
+            AND (
+                setting_row.setrole = 0
+                OR setting_row.setrole = current_user::regrole
+                OR setting_row.setrole IN (
+                    SELECT role.oid
+                    FROM pg_catalog.pg_roles AS role
+                    WHERE role.rolname LIKE 'ktm\_%' ESCAPE '\'
+                )
+            )
+        )
+    ) THEN
+        RAISE EXCEPTION
+            'baseline-300 bootstrap requires a fresh DB; database or role settings exist'
+            USING ERRCODE = '55000';
+    END IF;
+
+    -- pre-bootstrap input에는 extension member를 포함한 public object가 하나도 없어야
+    -- 한다. final fuzzystrmatch는 이 guard 뒤 dedicated bootstrap이 생성하므로, 여기서
+    -- extension-member 예외를 두지 않는다.
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_class AS object
+        JOIN pg_catalog.pg_namespace AS namespace
+          ON namespace.oid = object.relnamespace
+        WHERE namespace.nspname = 'public'
+        UNION ALL
+        SELECT 1
+        FROM pg_catalog.pg_proc AS object
+        JOIN pg_catalog.pg_namespace AS namespace
+          ON namespace.oid = object.pronamespace
+        WHERE namespace.nspname = 'public'
+        UNION ALL
+        SELECT 1
+        FROM pg_catalog.pg_type AS object
+        JOIN pg_catalog.pg_namespace AS namespace
+          ON namespace.oid = object.typnamespace
+        WHERE namespace.nspname = 'public'
+        UNION ALL
+        SELECT 1
+        FROM pg_catalog.pg_collation AS object
+        JOIN pg_catalog.pg_namespace AS namespace
+          ON namespace.oid = object.collnamespace
+        WHERE namespace.nspname = 'public'
+        UNION ALL
+        SELECT 1
+        FROM pg_catalog.pg_operator AS object
+        JOIN pg_catalog.pg_namespace AS namespace
+          ON namespace.oid = object.oprnamespace
+        WHERE namespace.nspname = 'public'
+        UNION ALL
+        SELECT 1
+        FROM pg_catalog.pg_cast AS object
+        JOIN pg_catalog.pg_type AS source_type ON source_type.oid = object.castsource
+        JOIN pg_catalog.pg_type AS target_type ON target_type.oid = object.casttarget
+        JOIN pg_catalog.pg_namespace AS source_namespace
+          ON source_namespace.oid = source_type.typnamespace
+        JOIN pg_catalog.pg_namespace AS target_namespace
+          ON target_namespace.oid = target_type.typnamespace
+        WHERE (source_namespace.nspname = 'public'
+           OR target_namespace.nspname = 'public')
+        UNION ALL
+        SELECT 1
+        FROM pg_catalog.pg_ts_config AS object
+        JOIN pg_catalog.pg_namespace AS namespace
+          ON namespace.oid = object.cfgnamespace
+        WHERE namespace.nspname = 'public'
+        UNION ALL
+        SELECT 1
+        FROM pg_catalog.pg_ts_dict AS object
+        JOIN pg_catalog.pg_namespace AS namespace
+          ON namespace.oid = object.dictnamespace
+        WHERE namespace.nspname = 'public'
+        UNION ALL
+        SELECT 1
+        FROM pg_catalog.pg_ts_parser AS object
+        JOIN pg_catalog.pg_namespace AS namespace
+          ON namespace.oid = object.prsnamespace
+        WHERE namespace.nspname = 'public'
+        UNION ALL
+        SELECT 1
+        FROM pg_catalog.pg_ts_template AS object
+        JOIN pg_catalog.pg_namespace AS namespace
+          ON namespace.oid = object.tmplnamespace
+        WHERE namespace.nspname = 'public'
+        UNION ALL
+        SELECT 1
+        FROM pg_catalog.pg_conversion AS object
+        JOIN pg_catalog.pg_namespace AS namespace
+          ON namespace.oid = object.connamespace
+        WHERE namespace.nspname = 'public'
+        UNION ALL
+        SELECT 1
+        FROM pg_catalog.pg_opfamily AS object
+        JOIN pg_catalog.pg_namespace AS namespace
+          ON namespace.oid = object.opfnamespace
+        WHERE namespace.nspname = 'public'
+        UNION ALL
+        SELECT 1
+        FROM pg_catalog.pg_opclass AS object
+        JOIN pg_catalog.pg_namespace AS namespace
+          ON namespace.oid = object.opcnamespace
+        WHERE namespace.nspname = 'public'
+        UNION ALL
+        SELECT 1
+        FROM pg_catalog.pg_amop AS object
+        JOIN pg_catalog.pg_opfamily AS family ON family.oid = object.amopfamily
+        JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = family.opfnamespace
+        WHERE namespace.nspname = 'public'
+        UNION ALL
+        SELECT 1
+        FROM pg_catalog.pg_amproc AS object
+        JOIN pg_catalog.pg_opfamily AS family ON family.oid = object.amprocfamily
+        JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = family.opfnamespace
+        WHERE namespace.nspname = 'public'
+        UNION ALL
+        SELECT 1
+        FROM pg_catalog.pg_transform AS object
+        JOIN pg_catalog.pg_type AS type_row ON type_row.oid = object.trftype
+        JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = type_row.typnamespace
+        WHERE namespace.nspname = 'public'
+    ) THEN
+        RAISE EXCEPTION
+            'baseline-300 bootstrap requires a fresh DB; public objects exist'
+            USING ERRCODE = '55000';
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_foreign_data_wrapper)
+       OR EXISTS (SELECT 1 FROM pg_catalog.pg_foreign_server)
+       OR EXISTS (SELECT 1 FROM pg_catalog.pg_user_mapping)
+       OR EXISTS (SELECT 1 FROM pg_catalog.pg_publication)
+       OR EXISTS (
+           SELECT 1
+           FROM pg_catalog.pg_subscription AS subscription
+           WHERE subscription.subdbid = (
+               SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database()
+           )
+       )
+       OR EXISTS (SELECT 1 FROM pg_catalog.pg_event_trigger) THEN
+        RAISE EXCEPTION
+            'baseline-300 bootstrap requires a fresh DB; extensibility objects exist'
             USING ERRCODE = '55000';
     END IF;
 
@@ -212,6 +535,50 @@ BEGIN
     END LOOP;
 END
 $baseline_300_roles$;
+
+-- 신규 prefix role을 role creation/normalization 뒤 다시 exact하게 닫는다. 전 단계의
+-- virgin fence와 함께 helper가 enumerated role만 만든다는 두 독립 조건을 제공한다.
+DO $baseline_300_role_inventory$
+BEGIN
+    IF EXISTS (
+        WITH expected(rolname) AS (
+            VALUES
+                ('ktm_curation_admin_executor'),
+                ('ktm_curation_audit_writer'),
+                ('ktm_curation_command_owner'),
+                ('ktm_curation_provider_executor'),
+                ('ktm_feature_api_runtime'),
+                ('ktm_feature_audit_writer'),
+                ('ktm_feature_create_provider_executor'),
+                ('ktm_feature_dagster_runtime'),
+                ('ktm_feature_migrator'),
+                ('ktm_feature_reference_reconciliation_service_executor'),
+                ('ktm_feature_request_admin_executor'),
+                ('ktm_feature_request_procedure_owner'),
+                ('ktm_feature_request_service_executor'),
+                ('ktm_feature_runtime'),
+                ('ktm_feature_schema_owner'),
+                ('ktm_feature_state_procedure_owner'),
+                ('ktm_manual_feature_admin_executor'),
+                ('ktm_manual_feature_procedure_owner'),
+                ('ktm_manual_provider_dedup_admin_executor'),
+                ('ktm_manual_provider_dedup_detector_executor'),
+                ('ktm_manual_provider_dedup_procedure_owner')
+        ),
+        actual AS (
+            SELECT role.rolname
+            FROM pg_catalog.pg_roles AS role
+            WHERE role.rolname LIKE 'ktm\_%' ESCAPE '\'
+        )
+        (SELECT rolname FROM expected EXCEPT SELECT rolname FROM actual)
+        UNION ALL
+        (SELECT rolname FROM actual EXCEPT SELECT rolname FROM expected)
+    ) THEN
+        RAISE EXCEPTION 'baseline-300 bootstrap final application role inventory is not exact'
+            USING ERRCODE = '42501';
+    END IF;
+END
+$baseline_300_role_inventory$;
 
 SELECT format(
     'ALTER ROLE %I LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE '
@@ -385,11 +752,11 @@ BEGIN
         SELECT 1
         FROM pg_catalog.pg_extension AS extension
         JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = extension.extnamespace
-        WHERE extension.extname IN ('pg_trgm', 'pgcrypto')
+        WHERE extension.extname IN ('pg_trgm', 'pgcrypto', 'pg_prewarm')
           AND namespace.nspname <> 'x_extension'
     ) THEN
         RAISE EXCEPTION
-            'baseline-300 bootstrap requires pg_trgm and pgcrypto in x_extension'
+            'baseline-300 bootstrap requires pg_trgm, pgcrypto, and pg_prewarm in x_extension'
             USING ERRCODE = '55000';
     END IF;
 END
@@ -397,13 +764,10 @@ $baseline_300_postgis$;
 CREATE EXTENSION IF NOT EXISTS postgis WITH SCHEMA x_extension;
 CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA x_extension;
 CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA x_extension;
-DO $baseline_300_prewarm$
-BEGIN
-    IF EXISTS (SELECT 1 FROM pg_catalog.pg_available_extensions WHERE name = 'pg_prewarm') THEN
-        CREATE EXTENSION IF NOT EXISTS pg_prewarm WITH SCHEMA x_extension;
-    END IF;
-END
-$baseline_300_prewarm$;
+-- exact 0236 source contract에는 legacy fuzzystrmatch가 public에 있다. 이 extension은
+-- public 밖으로 relocation하지 않으며, precondition을 통과한 virgin DB에서만 만든다.
+CREATE EXTENSION IF NOT EXISTS fuzzystrmatch WITH SCHEMA public;
+CREATE EXTENSION IF NOT EXISTS pg_prewarm WITH SCHEMA x_extension;
 
 REVOKE ALL ON SCHEMA x_extension FROM PUBLIC;
 REVOKE ALL ON SCHEMA x_extension FROM

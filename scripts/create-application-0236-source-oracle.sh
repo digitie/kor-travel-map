@@ -12,12 +12,16 @@ die() { printf 'create-application-0236-source-oracle: %s\n' "$1" >&2; exit 1; }
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 REPOSITORY_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 SOURCE_ROOT=""
+SOURCE_SEALED_ROOT=""
+SOURCE_SEALED_PARENT=""
 SOURCE_IMAGE=""
 CONTAINER=""
 DATABASE=""
 RECEIPT=""
 VOLUME=""
 POSTGIS_IMAGE="postgis/postgis:16-3.5-alpine"
+SOURCE_DATABASE_TEMPLATE="template1"
+POSTGIS_BOOTSTRAP_DATABASE="postgres"
 SOURCE_COMMIT="01d65b2ad4ee265a3ef6b01448f6abf573a906a8"
 SOURCE_HEAD="0236_tvn41s_compaction_drained"
 SOURCE_MIGRATION_TREE="cb52c39e3d0f37bfe229532d94c2c91ea289b725"
@@ -91,15 +95,51 @@ if [ -z "$VOLUME" ]; then VOLUME="${CONTAINER}-data"; fi
 docker container inspect "$CONTAINER" >/dev/null 2>&1 && die "container가 이미 존재한다"
 docker volume inspect "$VOLUME" >/dev/null 2>&1 && die "volume이 이미 존재한다"
 
-# source checkout/tree와 current repo의 retired archive manifest를 함께 고정한다.
-[ "$(git -C "$SOURCE_ROOT" rev-parse HEAD)" = "$SOURCE_COMMIT" ] || die "source root commit이 다르다"
-[ -z "$(git -C "$SOURCE_ROOT" status --porcelain)" ] || die "source root가 clean checkout이 아니다"
+# source root는 mutable checkout이 아니라 exact Git object를 읽을 수 있는 local object
+# store일 뿐이다. historical image build·bind·manifest의 physical input은 아래 detached
+# archive 한 벌만 사용한다. 이 경계를 두지 않으면 archive 대상 commit은 맞아도 checkout의
+# untracked/modified Dockerfile·bootstrap script를 source proof에 섞을 수 있다.
+git -C "$SOURCE_ROOT" cat-file -e "${SOURCE_COMMIT}^{commit}" || \
+  die "source root에 requested source commit object가 없다"
 [ "$(git -C "$SOURCE_ROOT" rev-parse "$SOURCE_COMMIT:alembic/versions")" = "$SOURCE_MIGRATION_TREE" ] || \
   die "source migration tree가 다르다"
+SOURCE_SEALED_PARENT="$(mktemp -d "${TMPDIR:-/tmp}/ktm300-source-sealed.XXXXXX")"
+SOURCE_SEALED_ROOT="$SOURCE_SEALED_PARENT/source"
+mkdir "$SOURCE_SEALED_ROOT"
+if ! git -C "$SOURCE_ROOT" archive --format=tar "$SOURCE_COMMIT" \
+  | tar -x -C "$SOURCE_SEALED_ROOT"; then
+  rm -rf -- "$SOURCE_SEALED_PARENT"
+  SOURCE_SEALED_PARENT=""
+  SOURCE_SEALED_ROOT=""
+  die "source Git archive를 만들지 못했다"
+fi
+python3 - "$SOURCE_SEALED_ROOT" <<'PY'
+from __future__ import annotations
+
+import os
+import stat
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+for path in [root, *root.rglob("*")]:
+    metadata = path.lstat()
+    if stat.S_ISLNK(metadata.st_mode):
+        raise SystemExit(f"sealed source contains a symlink: {path.relative_to(root)}")
+    if not (stat.S_ISDIR(metadata.st_mode) or stat.S_ISREG(metadata.st_mode)):
+        raise SystemExit(f"sealed source contains a non-regular entry: {path.relative_to(root)}")
+for path in sorted(root.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+    os.chmod(path, 0o555 if path.is_dir() else 0o444)
+os.chmod(root, 0o555)
+PY
+cleanup_source_seal() {
+  [ -z "$SOURCE_SEALED_PARENT" ] || rm -rf -- "$SOURCE_SEALED_PARENT"
+}
+trap cleanup_source_seal EXIT
 manifest="$REPOSITORY_ROOT/alembic/retired_versions/0200-0236/manifest.sha256"
 [ "$(sha256sum "$manifest" | awk '{print $1}')" = "$RETIRED_MANIFEST_SHA256" ] || \
   die "retired migration manifest digest가 다르다"
-python3 - "$SOURCE_ROOT" "$manifest" <<'PY'
+python3 - "$SOURCE_SEALED_ROOT" "$manifest" <<'PY'
 from __future__ import annotations
 
 import hashlib
@@ -114,15 +154,15 @@ for line in Path(sys.argv[2]).read_text(encoding="utf-8").splitlines():
         raise SystemExit(f"source migration does not match retired manifest: {name}")
 PY
 
-# arbitrary prebuilt image는 historical source의 증명이 아니다. exact clean detached
-# checkout의 Dockerfile을 oracle이 직접 no-cache build하고, 이후에는 그 immutable ID만
+# arbitrary prebuilt image는 historical source의 증명이 아니다. exact Git archive의
+# Dockerfile을 oracle이 직접 no-cache build하고, 이후에는 그 immutable ID만
 # 실행한다. Dockerfile의 과거 `python:3.12-slim` tag와 range dependency는 source를
 # 다시 쓰지 않고 그때 실제로 resolve된 base image와 installed distribution SBOM을
 # certificate에 묶는다. tag를 inspect한 뒤 그대로 build하면 pull race가 남으므로,
 # build에는 exact \`python@sha256:…\`만 넣은 외부 one-shot Dockerfile을 쓴다. image tag는
 # build output에 붙이는 편의 이름일 뿐 실행 입력이 아니다.
 SOURCE_BUILDER_BASE_IMAGE="python:3.12-slim"
-python3 - "$SOURCE_ROOT/docker/api.Dockerfile" "$SOURCE_BUILDER_BASE_IMAGE" <<'PY'
+python3 - "$SOURCE_SEALED_ROOT/docker/api.Dockerfile" "$SOURCE_BUILDER_BASE_IMAGE" <<'PY'
 import sys
 from pathlib import Path
 
@@ -142,7 +182,7 @@ source_builder_base_image_reference="$(docker image inspect -f '{{index .RepoDig
 [[ "$source_builder_base_image_reference" =~ ^python@sha256:[0-9a-f]{64}$ ]] || \
   die "source builder immutable base image reference를 얻지 못했다"
 source_build_dockerfile="$(mktemp "${TMPDIR:-/tmp}/ktm300-source-dockerfile.XXXXXX")"
-python3 - "$SOURCE_ROOT/docker/api.Dockerfile" "$source_builder_base_image_reference" \
+python3 - "$SOURCE_SEALED_ROOT/docker/api.Dockerfile" "$source_builder_base_image_reference" \
   "$source_build_dockerfile" <<'PY'
 import sys
 from pathlib import Path
@@ -164,7 +204,7 @@ source_build_dockerfile_sha256="$(sha256sum "$source_build_dockerfile" | awk '{p
 source_build_log="$(mktemp "${TMPDIR:-/tmp}/ktm300-source-build.XXXXXX")"
 if ! docker build --pull=false --no-cache \
   --build-arg "KOR_TRAVEL_MAP_GIT_COMMIT=$SOURCE_COMMIT" \
-  -t "$SOURCE_IMAGE" -f "$source_build_dockerfile" "$SOURCE_ROOT" \
+  -t "$SOURCE_IMAGE" -f "$source_build_dockerfile" "$SOURCE_SEALED_ROOT" \
   >"$source_build_log" 2>&1; then
   tail -n 80 "$source_build_log" >&2 || true
   rm -f -- "$source_build_log"
@@ -181,15 +221,15 @@ source_image_id="$(docker image inspect -f '{{.Id}}' "$SOURCE_IMAGE")"
 [ "$(docker image inspect -f '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$SOURCE_IMAGE")" = "$SOURCE_COMMIT" ] || \
   die "source image OCI revision이 다르다"
 postgis_image_id="$(docker image inspect -f '{{.Id}}' "$POSTGIS_IMAGE")"
-source_root_tree="$(git -C "$SOURCE_ROOT" rev-parse "$SOURCE_COMMIT^{tree}")"
-source_dockerfile_sha256="$(sha256sum "$SOURCE_ROOT/docker/api.Dockerfile" | awk '{print $1}')"
+source_git_tree="$(git -C "$SOURCE_ROOT" rev-parse "$SOURCE_COMMIT^{tree}")"
+source_dockerfile_sha256="$(sha256sum "$SOURCE_SEALED_ROOT/docker/api.Dockerfile" | awk '{print $1}')"
 
 # old graph가 실제 실행하는 모든 /app input을 one manifest로 비교한다. 이것은
 # env.py/versions 일부만 맞춘 변조 image가 helper SQL이나 alembic.ini로 raw 0236을
 # 위조하는 것을 막는다.
 source_app_manifest="$(mktemp "${TMPDIR:-/tmp}/ktm300-source-app.XXXXXX")"
 source_image_app_manifest="$(mktemp "${TMPDIR:-/tmp}/ktm300-source-image-app.XXXXXX")"
-python3 - "$SOURCE_ROOT" >"$source_app_manifest" <<'PY'
+python3 - "$SOURCE_SEALED_ROOT" >"$source_app_manifest" <<'PY'
 from __future__ import annotations
 
 import hashlib
@@ -246,7 +286,7 @@ for path in sorted(paths, key=lambda candidate: candidate.relative_to(root).as_p
     print(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.relative_to(root).as_posix()}")
 ' >"$source_image_app_manifest"
 cmp -s "$source_app_manifest" "$source_image_app_manifest" || \
-  die "source image /app 실행 입력이 detached source checkout과 다르다"
+  die "source image /app 실행 입력이 sealed Git archive와 다르다"
 source_image_app_manifest_sha256="$(sha256sum "$source_app_manifest" | awk '{print $1}')"
 
 # migration이 import하는 project runtime도 wheel install 결과가 source와 동일해야
@@ -254,40 +294,31 @@ source_image_app_manifest_sha256="$(sha256sum "$source_app_manifest" | awk '{pri
 # 비교한다.
 source_runtime_manifest="$(mktemp "${TMPDIR:-/tmp}/ktm300-source-runtime.XXXXXX")"
 source_image_runtime_manifest="$(mktemp "${TMPDIR:-/tmp}/ktm300-source-image-runtime.XXXXXX")"
-python3 - "$SOURCE_ROOT" >"$source_runtime_manifest" <<'PY'
+python3 - "$SOURCE_SEALED_ROOT" >"$source_runtime_manifest" <<'PY'
 from __future__ import annotations
 
 import hashlib
-import subprocess
 import sys
 from pathlib import Path
 
 root = Path(sys.argv[1])
 items: dict[str, Path] = {}
-tracked = subprocess.check_output(
-    [
-        "git", "-C", str(root), "ls-files", "-z", "--",
-        "src/kortravelmap", "packages/kor-travel-map-api/src/kortravelmap",
-    ]
-)
-for raw in tracked.split(b"\0"):
-    if not raw:
-        continue
-    relative = raw.decode("utf-8")
-    if relative.startswith("src/kortravelmap/"):
-        destination = relative.removeprefix("src/kortravelmap/")
-    elif relative.startswith("packages/kor-travel-map-api/src/kortravelmap/api/"):
-        destination = "api/" + relative.removeprefix(
-            "packages/kor-travel-map-api/src/kortravelmap/api/"
-        )
-    else:
-        raise SystemExit(f"unexpected runtime source path: {relative}")
-    source = root / relative
-    if not source.is_file() or source.is_symlink():
-        raise SystemExit(f"runtime source is missing or symlinked: {relative}")
-    if destination in items:
-        raise SystemExit(f"duplicate installed runtime destination: {destination}")
-    items[destination] = source
+for source_prefix, destination_prefix in (
+    ("src/kortravelmap", ""),
+    ("packages/kor-travel-map-api/src/kortravelmap/api", "api"),
+):
+    base = root / source_prefix
+    if not base.is_dir() or base.is_symlink():
+        raise SystemExit(f"runtime source directory is missing or symlinked: {source_prefix}")
+    for source in sorted(
+        (path for path in base.rglob("*") if path.is_file() and not path.is_symlink()),
+        key=lambda path: path.relative_to(base).as_posix(),
+    ):
+        relative = source.relative_to(base).as_posix()
+        destination = "/".join(part for part in (destination_prefix, relative) if part)
+        if destination in items:
+            raise SystemExit(f"duplicate installed runtime destination: {destination}")
+        items[destination] = source
 for destination, source in sorted(items.items()):
     print(f"{hashlib.sha256(source.read_bytes()).hexdigest()}  {destination}")
 PY
@@ -303,7 +334,7 @@ for path in sorted(candidate for candidate in root.rglob("*") if candidate.is_fi
     print(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {relative}")
 ' >"$source_image_runtime_manifest"
 cmp -s "$source_runtime_manifest" "$source_image_runtime_manifest" || \
-  die "source image migration runtime import tree가 detached source checkout과 다르다"
+  die "source image migration runtime import tree가 sealed Git archive와 다르다"
 source_image_runtime_manifest_sha256="$(sha256sum "$source_runtime_manifest" | awk '{print $1}')"
 
 # historical dependency spec에는 range가 있어 rebuild 결과를 image ID만으로 설명하기
@@ -338,6 +369,9 @@ cleanup() {
   [ -z "${source_image_runtime_manifest:-}" ] || rm -f -- "$source_image_runtime_manifest"
   [ -z "${source_image_dependency_sbom:-}" ] || rm -f -- "$source_image_dependency_sbom"
   [ -z "${source_build_dockerfile:-}" ] || rm -f -- "$source_build_dockerfile"
+  [ -z "${SOURCE_SEALED_PARENT:-}" ] || rm -rf -- "$SOURCE_SEALED_PARENT"
+  SOURCE_SEALED_PARENT=""
+  SOURCE_SEALED_ROOT=""
   if [ "$status" -ne 0 ]; then
     [ -z "$receipt_tmp" ] || rm -f -- "$receipt_tmp"
     [ "$created_container" = 0 ] || docker container rm -f "$CONTAINER" >/dev/null 2>&1 || true
@@ -357,7 +391,7 @@ docker run --pull=never -d --name "$CONTAINER" \
   --label "io.kor-travel-map.application-baseline.source-head=$SOURCE_HEAD" \
   --label "io.kor-travel-map.application-baseline.source-image-id=$source_image_id" \
   --label "io.kor-travel-map.application-baseline.source-migration-tree=$SOURCE_MIGRATION_TREE" \
-  --label "io.kor-travel-map.application-baseline.source-worktree-tree=$source_root_tree" \
+  --label "io.kor-travel-map.application-baseline.source-git-tree=$source_git_tree" \
   --label "io.kor-travel-map.application-baseline.source-dockerfile-sha256=$source_dockerfile_sha256" \
   --label "io.kor-travel-map.application-baseline.source-image-app-manifest-sha256=$source_image_app_manifest_sha256" \
   --label "io.kor-travel-map.application-baseline.source-image-runtime-manifest-sha256=$source_image_runtime_manifest_sha256" \
@@ -366,24 +400,284 @@ docker run --pull=never -d --name "$CONTAINER" \
   --label "io.kor-travel-map.application-baseline.source-build-dockerfile-sha256=$source_build_dockerfile_sha256" \
   --label "io.kor-travel-map.application-baseline.source-image-dependency-sbom-sha256=$source_image_dependency_sbom_sha256" \
   --mount "type=volume,source=$VOLUME,target=/var/lib/postgresql/data" \
-  -e POSTGRES_USER=postgres -e POSTGRES_DB="$DATABASE" -e POSTGRES_PASSWORD="$oracle_password" \
+  -e POSTGRES_USER=postgres -e POSTGRES_DB="$POSTGIS_BOOTSTRAP_DATABASE" -e POSTGRES_PASSWORD="$oracle_password" \
   "$postgis_image_id" >/dev/null
 created_container=1
 [ "$(docker inspect -f '{{.Image}}' "$CONTAINER")" = "$postgis_image_id" ] || \
   die "source oracle container image ID가 resolved PostGIS image와 다르다"
 
+# `pg_isready`는 entrypoint가 temporary postmaster를 올린 직후에도 성공한다. 그 시점에는
+# /docker-entrypoint-initdb.d의 PostGIS 초기화가 아직 끝나지 않았으므로, 새 source DB는
+# 반드시 official entrypoint의 init-complete marker 이후 template1에서 명시적으로 만든다.
 ready=0
 for attempt in $(seq 1 45); do
-  if docker exec "$CONTAINER" pg_isready -U postgres -d "$DATABASE" >/dev/null 2>&1; then ready=1; break; fi
+  if docker logs "$CONTAINER" 2>&1 | grep -Fq 'PostgreSQL init process complete' \
+    && docker exec "$CONTAINER" pg_isready -U postgres -d "$POSTGIS_BOOTSTRAP_DATABASE" >/dev/null 2>&1; then
+    ready=1
+    break
+  fi
   sleep 1
 done
-[ "$ready" = 1 ] || die "source oracle PostgreSQL이 준비되지 않았다"
+[ "$ready" = 1 ] || die "source oracle official PostGIS initialization이 준비되지 않았다"
+
+docker exec "$CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d "$POSTGIS_BOOTSTRAP_DATABASE" \
+  -c "CREATE DATABASE \"$DATABASE\" TEMPLATE $SOURCE_DATABASE_TEMPLATE" >/dev/null
+
+# legacy choreography에 들어가기 전 source DB가 정말 template1의 virgin 상태인지
+# fail-close한다. `postgres-role-bootstrap.sh`의 fresh precondition과 동일한 catalog
+# 영역을 빠짐없이 receipt에 담는다. relation 수만 0인 경우에는 routine/type/cast/FDW
+# 같은 residue를 놓칠 수 있으므로, 하나의 canonical JSON inventory와 digest를 모두
+# certificate에 고정한다. 이 inventory는 POSTGRES_DB 자동 생성 경로가 다시 섞여도
+# materializer가 받지 않게 하는 source provenance의 일부다.
+source_initial_virgin_inventory="$(docker exec "$CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d "$DATABASE" -At -c "
+WITH reserved_roles AS (
+  SELECT role.oid, role.rolname
+  FROM pg_catalog.pg_roles AS role
+  WHERE role.rolname LIKE 'ktm\\_%' ESCAPE '\\'
+),
+application_objects AS (
+  SELECT 1
+  FROM pg_catalog.pg_class AS object
+  JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.relnamespace
+  WHERE namespace.nspname IN ('feature', 'provider_sync', 'ops')
+    AND object.relkind IN ('r', 'p', 'v', 'm', 'f', 'S')
+  UNION ALL
+  SELECT 1
+  FROM pg_catalog.pg_proc AS object
+  JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.pronamespace
+  WHERE namespace.nspname IN ('feature', 'provider_sync', 'ops')
+  UNION ALL
+  SELECT 1
+  FROM pg_catalog.pg_type AS object
+  JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.typnamespace
+  WHERE namespace.nspname IN ('feature', 'provider_sync', 'ops')
+    AND object.typtype IN ('b', 'c', 'd', 'e', 'r')
+)
+SELECT jsonb_build_object(
+  'application_object_count', (SELECT count(*) FROM application_objects),
+  'application_schema_count', (
+    SELECT count(*) FROM pg_catalog.pg_namespace
+    WHERE nspname IN ('feature', 'provider_sync', 'ops', 'x_extension')
+  ),
+  'database_or_role_setting_count', (
+    SELECT count(*)
+    FROM pg_catalog.pg_db_role_setting AS setting_row
+    WHERE setting_row.setdatabase = (
+      SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database()
+    )
+       OR setting_row.setrole IN (SELECT oid FROM reserved_roles)
+  ),
+  'default_acl_count', (SELECT count(*) FROM pg_catalog.pg_default_acl),
+  'event_trigger_count', (SELECT count(*) FROM pg_catalog.pg_event_trigger),
+  'extension_inventory', COALESCE((
+    SELECT jsonb_agg(extension.extname || '@' || namespace.nspname ORDER BY extension.extname)
+    FROM pg_catalog.pg_extension AS extension
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = extension.extnamespace
+  ), '[]'::jsonb),
+  'foreign_data_wrapper_count', (SELECT count(*) FROM pg_catalog.pg_foreign_data_wrapper),
+  'foreign_server_count', (SELECT count(*) FROM pg_catalog.pg_foreign_server),
+  'non_system_schema_inventory', COALESCE((
+    SELECT jsonb_agg(namespace.nspname ORDER BY namespace.nspname)
+    FROM pg_catalog.pg_namespace AS namespace
+    WHERE namespace.nspname !~ '^pg_' AND namespace.nspname <> 'information_schema'
+  ), '[]'::jsonb),
+  'public_cast_count', (
+    SELECT count(*)
+    FROM pg_catalog.pg_cast AS object
+    JOIN pg_catalog.pg_type AS source_type ON source_type.oid = object.castsource
+    JOIN pg_catalog.pg_type AS target_type ON target_type.oid = object.casttarget
+    JOIN pg_catalog.pg_namespace AS source_namespace
+      ON source_namespace.oid = source_type.typnamespace
+    JOIN pg_catalog.pg_namespace AS target_namespace
+      ON target_namespace.oid = target_type.typnamespace
+    WHERE source_namespace.nspname = 'public' OR target_namespace.nspname = 'public'
+  ),
+  'public_collation_count', (
+    SELECT count(*)
+    FROM pg_catalog.pg_collation AS object
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.collnamespace
+    WHERE namespace.nspname = 'public'
+  ),
+  'public_operator_count', (
+    SELECT count(*)
+    FROM pg_catalog.pg_operator AS object
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.oprnamespace
+    WHERE namespace.nspname = 'public'
+  ),
+  'public_proc_count', (
+    SELECT count(*)
+    FROM pg_catalog.pg_proc AS object
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.pronamespace
+    WHERE namespace.nspname = 'public'
+  ),
+  'public_relation_count', (
+    SELECT count(*)
+    FROM pg_catalog.pg_class AS object
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.relnamespace
+    WHERE namespace.nspname = 'public'
+  ),
+  'public_schema_acl', COALESCE((
+    SELECT to_jsonb(ARRAY(
+      SELECT entry::text
+      FROM pg_catalog.pg_namespace AS namespace
+      CROSS JOIN LATERAL unnest(namespace.nspacl) AS entry
+      WHERE namespace.nspname = 'public'
+      ORDER BY entry::text
+    ))
+  ), '[]'::jsonb),
+  'public_schema_owner', COALESCE((
+    SELECT namespace.nspowner::regrole::text
+    FROM pg_catalog.pg_namespace AS namespace
+    WHERE namespace.nspname = 'public'
+  ), '<missing>'),
+  'public_text_search_config_count', (
+    SELECT count(*)
+    FROM pg_catalog.pg_ts_config AS object
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.cfgnamespace
+    WHERE namespace.nspname = 'public'
+  ),
+  'public_text_search_dict_count', (
+    SELECT count(*)
+    FROM pg_catalog.pg_ts_dict AS object
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.dictnamespace
+    WHERE namespace.nspname = 'public'
+  ),
+  'public_text_search_parser_count', (
+    SELECT count(*)
+    FROM pg_catalog.pg_ts_parser AS object
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.prsnamespace
+    WHERE namespace.nspname = 'public'
+  ),
+  'public_text_search_template_count', (
+    SELECT count(*)
+    FROM pg_catalog.pg_ts_template AS object
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.tmplnamespace
+    WHERE namespace.nspname = 'public'
+  ),
+  'public_conversion_count', (
+    SELECT count(*)
+    FROM pg_catalog.pg_conversion AS object
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.connamespace
+    WHERE namespace.nspname = 'public'
+  ),
+  'public_opfamily_count', (
+    SELECT count(*)
+    FROM pg_catalog.pg_opfamily AS object
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.opfnamespace
+    WHERE namespace.nspname = 'public'
+  ),
+  'public_opclass_count', (
+    SELECT count(*)
+    FROM pg_catalog.pg_opclass AS object
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.opcnamespace
+    WHERE namespace.nspname = 'public'
+  ),
+  'public_amop_count', (
+    SELECT count(*)
+    FROM pg_catalog.pg_amop AS object
+    JOIN pg_catalog.pg_opfamily AS family ON family.oid = object.amopfamily
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = family.opfnamespace
+    WHERE namespace.nspname = 'public'
+  ),
+  'public_amproc_count', (
+    SELECT count(*)
+    FROM pg_catalog.pg_amproc AS object
+    JOIN pg_catalog.pg_opfamily AS family ON family.oid = object.amprocfamily
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = family.opfnamespace
+    WHERE namespace.nspname = 'public'
+  ),
+  'public_transform_count', (
+    SELECT count(*)
+    FROM pg_catalog.pg_transform AS object
+    JOIN pg_catalog.pg_type AS type_row ON type_row.oid = object.trftype
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = type_row.typnamespace
+    WHERE namespace.nspname = 'public'
+  ),
+  'public_type_count', (
+    SELECT count(*)
+    FROM pg_catalog.pg_type AS object
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.typnamespace
+    WHERE namespace.nspname = 'public'
+  ),
+  'publication_count', (SELECT count(*) FROM pg_catalog.pg_publication),
+  'reserved_application_role_inventory', COALESCE((
+    SELECT jsonb_agg(role.rolname ORDER BY role.rolname) FROM reserved_roles AS role
+  ), '[]'::jsonb),
+  'subscription_count', (
+    SELECT count(*)
+    FROM pg_catalog.pg_subscription AS subscription
+    WHERE subscription.subdbid = (
+      SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database()
+    )
+  ),
+  'user_mapping_count', (SELECT count(*) FROM pg_catalog.pg_user_mapping)
+)::text
+")"
+source_initial_virgin_inventory="$(python3 - "$source_initial_virgin_inventory" <<'PY'
+from __future__ import annotations
+
+import json
+import sys
+
+print(json.dumps(json.loads(sys.argv[1]), sort_keys=True, separators=(",", ":")))
+PY
+)"
+source_initial_virgin_inventory_sha256="$(printf '%s' "$source_initial_virgin_inventory" | sha256sum | awk '{print $1}')"
+python3 - "$source_initial_virgin_inventory" "$source_initial_virgin_inventory_sha256" <<'PY'
+from __future__ import annotations
+
+import hashlib
+import json
+import sys
+
+expected = {
+    "application_object_count": 0,
+    "application_schema_count": 0,
+    "database_or_role_setting_count": 0,
+    "default_acl_count": 0,
+    "event_trigger_count": 0,
+    "extension_inventory": ["plpgsql@pg_catalog"],
+    "foreign_data_wrapper_count": 0,
+    "foreign_server_count": 0,
+    "non_system_schema_inventory": ["public"],
+    "public_cast_count": 0,
+    "public_collation_count": 0,
+    "public_conversion_count": 0,
+    "public_amop_count": 0,
+    "public_amproc_count": 0,
+    "public_opclass_count": 0,
+    "public_opfamily_count": 0,
+    "public_operator_count": 0,
+    "public_proc_count": 0,
+    "public_relation_count": 0,
+    "public_schema_acl": ["=U/pg_database_owner", "pg_database_owner=UC/pg_database_owner"],
+    "public_schema_owner": "pg_database_owner",
+    "public_text_search_config_count": 0,
+    "public_text_search_dict_count": 0,
+    "public_text_search_parser_count": 0,
+    "public_text_search_template_count": 0,
+    "public_transform_count": 0,
+    "public_type_count": 0,
+    "publication_count": 0,
+    "reserved_application_role_inventory": [],
+    "subscription_count": 0,
+    "user_mapping_count": 0,
+}
+try:
+    observed = json.loads(sys.argv[1])
+except ValueError as exc:
+    raise SystemExit(f"source initial virgin inventory is not JSON: {exc}") from exc
+if observed != expected:
+    raise SystemExit(f"source template1 DB is not virgin: {json.dumps(observed, sort_keys=True)}")
+if hashlib.sha256(sys.argv[1].encode("utf-8")).hexdigest() != sys.argv[2]:
+    raise SystemExit("source initial virgin inventory digest is inconsistent")
+PY
 
 bootstrap_dsn="postgresql://postgres:$oracle_password@127.0.0.1:5432/$DATABASE"
 migrator_dsn="postgresql+asyncpg://ktm_feature_migrator:$oracle_password@127.0.0.1:5432/$DATABASE"
 bootstrap() {
   docker run --pull=never --rm --network "container:$CONTAINER" \
-    --mount "type=bind,source=$SOURCE_ROOT/docker/postgres-role-bootstrap.sh,target=/bootstrap.sh,readonly" \
+    --mount "type=bind,source=$SOURCE_SEALED_ROOT/docker/postgres-role-bootstrap.sh,target=/bootstrap.sh,readonly" \
     -e KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_ENABLED=true \
     -e "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE=$1" \
     -e "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN=$bootstrap_dsn" \
@@ -422,22 +716,24 @@ system_identifier="$(docker exec "$CONTAINER" psql -v ON_ERROR_STOP=1 -U postgre
 [[ "$database_oid" =~ ^[0-9]+$ && "$system_identifier" =~ ^[0-9]+$ ]] || die "source oracle DB identity를 얻지 못했다"
 container_id="$(docker inspect -f '{{.Id}}' "$CONTAINER")"
 creator_sha="$(sha256sum "$SCRIPT_DIR/create-application-0236-source-oracle.sh" | awk '{print $1}')"
-bootstrap_sha="$(sha256sum "$SOURCE_ROOT/docker/postgres-role-bootstrap.sh" | awk '{print $1}')"
+bootstrap_sha="$(sha256sum "$SOURCE_SEALED_ROOT/docker/postgres-role-bootstrap.sh" | awk '{print $1}')"
 
 receipt_tmp="$(mktemp "$RECEIPT_PARENT/.ktm300-source-0236.XXXXXX")"
 python3 - "$receipt_tmp" "$container_id" "$DATABASE" "$database_oid" "$system_identifier" \
   "$source_image_id" "$postgis_image_id" "$creator_sha" "$bootstrap_sha" "$revision" \
-  "$server_version_num" "$postgis_extension_version" "$source_root_tree" "$source_dockerfile_sha256" \
+  "$server_version_num" "$postgis_extension_version" "$source_git_tree" "$source_dockerfile_sha256" \
   "$source_image_app_manifest_sha256" "$source_image_runtime_manifest_sha256" \
   "$source_builder_base_image_id" "$source_builder_base_image_reference" \
-  "$source_build_dockerfile_sha256" "$source_image_dependency_sbom_sha256" <<'PY'
+  "$source_build_dockerfile_sha256" "$source_image_dependency_sbom_sha256" \
+  "$SOURCE_DATABASE_TEMPLATE" "$source_initial_virgin_inventory" \
+  "$source_initial_virgin_inventory_sha256" <<'PY'
 import json
 import sys
 from pathlib import Path
 
 target = Path(sys.argv[1])
 value = {
-  "schema": "kor-travel-map.application-source-0236-oracle.v4",
+  "schema": "kor-travel-map.application-source-0236-oracle.v8",
   "container_id": sys.argv[2], "database": sys.argv[3], "database_oid": int(sys.argv[4]),
   "postgres_system_identifier": sys.argv[5], "source_commit": "01d65b2ad4ee265a3ef6b01448f6abf573a906a8",
   "source_head": "0236_tvn41s_compaction_drained", "source_migration_tree": "cb52c39e3d0f37bfe229532d94c2c91ea289b725",
@@ -446,13 +742,17 @@ value = {
   "creator_script_sha256": sys.argv[8], "source_bootstrap_sha256": sys.argv[9],
   "migration_choreography": "legacy-bootstrap>0225>m01-bootstrap>0232>0233>m05-pre-bootstrap>0235>0236>m05-repair-bootstrap",
   "raw_alembic_revision": sys.argv[10], "postgres_server_version_num": sys.argv[11],
-  "postgis_extension_version": sys.argv[12], "source_worktree_tree": sys.argv[13],
+  "postgis_extension_version": sys.argv[12], "source_git_tree": sys.argv[13],
   "source_dockerfile_sha256": sys.argv[14], "source_image_app_manifest_sha256": sys.argv[15],
   "source_image_runtime_manifest_sha256": sys.argv[16],
   "source_builder_base_image_id": sys.argv[17],
   "source_builder_base_image_reference": sys.argv[18],
   "source_build_dockerfile_sha256": sys.argv[19],
   "source_image_dependency_sbom_sha256": sys.argv[20],
+  "source_database_provisioning": "explicit-create-database-from-template1-after-official-entrypoint-complete",
+  "source_database_template": sys.argv[21],
+  "source_initial_virgin_inventory": json.loads(sys.argv[22]),
+  "source_initial_virgin_inventory_sha256": sys.argv[23],
 }
 target.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
 PY
@@ -470,5 +770,8 @@ source_image_app_manifest=""
 source_runtime_manifest=""
 source_image_runtime_manifest=""
 source_image_dependency_sbom=""
+cleanup_source_seal
+SOURCE_SEALED_PARENT=""
+SOURCE_SEALED_ROOT=""
 trap - EXIT
 printf '0236 source oracle created: container=%s database=%s source=%s\n' "$CONTAINER" "$DATABASE" "$SOURCE_COMMIT"

@@ -154,11 +154,14 @@ data semantic closure를 재확인한다. 변경이 허용된 것은 Alembic met
 
 ## runtime 전환 checkpoint
 
-Compose의 normal startup은 `db-role-bootstrap-300` 하나만 거쳐 fresh DB를 준비한다.
-과거 M01~M05 boundary·pre/repair service와 image helper는 제거했고, 외부 DB/infra
-overlay도 fresh bootstrap을 자동 기동하지 않는다. `docker/api-entrypoint.sh`는 raw
-`300`만 normal migration으로 처리하며, exact `0236`이면 controlled handoff executable을
-명시적으로 안내하고 어떤 `upgrade`나 generic `stamp`도 실행하지 않는다.
+새 dedicated DB는 `docker compose --profile fresh-init run --rm
+db-role-bootstrap-300`으로만 한 번 준비한다. Compose의 normal startup은 이 service를
+dependency로 두지 않으므로, persistent `300` DB의 recreate/restart가 fresh-only guard에
+막히지 않는다. 과거 M01~M05 boundary·pre/repair service와 image helper는 제거했고,
+외부 DB/infra overlay도 fresh bootstrap을 자동 기동하지 않는다.
+`docker/api-entrypoint.sh`는 raw `300`만 normal migration으로 처리하며, exact `0236`이면
+controlled handoff executable을 명시적으로 안내하고 어떤 `upgrade`나 generic `stamp`도
+실행하지 않는다.
 
 image에는 `/usr/local/bin/ktm-application-schema-handoff`가 포함된다. 이 executable은
 `--confirm-0236-to-300` 및 Docker Manager writer-fence receipt를 요구하고, migrator의

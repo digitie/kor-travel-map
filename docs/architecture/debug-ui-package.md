@@ -377,11 +377,10 @@ type drift 부채 0).
 | `KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_ENABLED` | Prometheus pull scrape용 `/metrics` endpoint와 HTTP 요청 count/duration/진행 중 요청/응답 크기, DB query count/duration 계측 활성화. 기본 `true` |
 | `KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_PATH` | Prometheus exposition path. 기본 `/metrics`, API 포트 `12701`에서 노출하며 OpenAPI에는 포함하지 않는다 |
 | `KOR_TRAVEL_MAP_API_BACKUP_ROOT` | backup artifact root. 기본 `data/backups` |
-| `KOR_TRAVEL_MAP_API_BACKUP_PROJECT_ROOT` | backup/restore script 상대 경로를 해석하고 command를 실행할 project root. 기본 `.` |
-| `KOR_TRAVEL_MAP_API_BACKUP_SCRIPT_PATH` / `KOR_TRAVEL_MAP_API_RESTORE_SCRIPT_PATH` | backup/restore command plan이 호출하는 script path. 기본 `scripts/docker-backup.sh`, `scripts/docker-restore.sh` |
-| `KOR_TRAVEL_MAP_API_BACKUP_COMMAND_ENABLED` | backup/restore host command 실행 허용 여부. 기본 `false`라 `/admin/backups` UI는 command plan만 생성한다 |
+| `KOR_TRAVEL_MAP_API_BACKUP_PROJECT_ROOT` | backup script 상대 경로를 해석하고 command를 실행할 project root. 기본 `.` |
+| `KOR_TRAVEL_MAP_API_BACKUP_SCRIPT_PATH` | backup command plan이 호출하는 script path. 기본 `scripts/docker-backup.sh` |
+| `KOR_TRAVEL_MAP_API_BACKUP_COMMAND_ENABLED` | backup host command 실행 허용 여부. 기본 `false`라 `/admin/backups` UI는 command plan만 생성한다 |
 | `KOR_TRAVEL_MAP_API_BACKUP_COMMAND_TIMEOUT_SECONDS` | opt-in host command 실행 timeout. 기본 `1800` |
-| `KOR_TRAVEL_MAP_API_RESTORE_APP_DB` / `KOR_TRAVEL_MAP_API_RESTORE_DAGSTER_DB` / `KOR_TRAVEL_MAP_API_RESTORE_RUSTFS_VOLUME` | staging restore target 기본값 |
 | `KOR_TRAVEL_MAP_DOCKER_API_DAGSTER_URL` | Docker compose가 API 컨테이너의 `KOR_TRAVEL_MAP_API_DAGSTER_URL`로 주입하는 내부 Dagster URL. `.env`의 로컬 `127.0.0.1` 값과 분리 |
 | `KOR_TRAVEL_MAP_DOCKER_API_DAGSTER_ALLOWED_HOSTS` | Docker compose가 API 컨테이너에 주입하는 Dagster host allowlist. 기본은 `["dagster","127.0.0.1","localhost","::1"]` |
 | `KOR_TRAVEL_MAP_DAGSTER_PG_URL` | Dagster metadata Postgres URL. Docker에서는 `KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL` 기본값(`postgres:5432/kor_travel_map_dagster`)을 `dagster`/`dagster-daemon`에 주입 |

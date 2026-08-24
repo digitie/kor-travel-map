@@ -23,7 +23,8 @@ a11y·e2e 커버 관점에서 점검**하기 위한 체크리스트다. T-218(ad
 - **빈 상태**: 0건일 때 안내 문구가 뜨는가.
 - **에러 상태**: 5xx/`problem+json`에서 `role=alert`(assertive) 배너가 뜨는가(T-218e).
 - **kill-switch**: 위험 액션이 서버 `admin_destructive_enabled`/`command_enabled`에 따라
-  plan-only로 안전하게 동작하는가(create/restore/swap/run-now/load 등).
+  plan-only 또는 거부로 안전하게 동작하는가(create/backup/run-now/load 등). restore/swap은
+  current UI action이 아니며 retire URI는 `410`이다.
 - **a11y**: 폼 입력이 `<label htmlFor>`로 연결되고(필요 시 `aria-invalid`/`aria-describedby`),
   성공 결과는 `role=status`(polite)로 안내되는가(T-218b/e).
 - **e2e**: Playwright 스펙 커버 여부(파일).
@@ -44,7 +45,7 @@ a11y·e2e 커버 관점에서 점검**하기 위한 체크리스트다. T-218(ad
 | `/admin/features/enrichment-reviews` | status/kind | — | ✓ | ✓ | ✓ | accept/reject/ignore | — | `admin-ops`(cursor) |
 | `/admin/poi-cache-targets` | external_system | — | ✓ | ✓ | ✓ | upsert/delete | ✓ FormField+검증(T-218b-1) | `admin-ops`(+검증/포커스) |
 | `/admin/offline-uploads` | status/provider/dataset | — | ✓ | ✓ | ✓ | upload→validate→load(Dagster) | ✓ FormField(T-218b-2) | `admin-ops`(mutation flow) |
-| `/admin/backups` | command_enabled 배지 | — | — | ✓ | ✓ | create/restore/swap(plan-only 기본) | label(기존) | `admin-ops`(T-218c, 렌더+액션) |
+| `/admin/backups` | command_enabled 배지 | — | — | ✓ | ✓ | backup create | label(기존) | `admin-ops`(T-218c, 렌더+액션) |
 | `/ops/pipeline` | kind/status/provider/dataset | — | ✓ | ✓ | ✓ | cancel/run-now/schedule | 필터·조작 라벨 | `ops-pipeline.spec` |
 | `/ops/datasets` | provider/dataset/status | — | —(bounded grid) | ✓ | ✓ | refresh policy/fixture preview | 필터·조작 라벨 | `ops-datasets.spec` |
 | `/ops/consistency` | status | — | — | ✓ | ✓ | — | — | `admin-ops`(smoke) |

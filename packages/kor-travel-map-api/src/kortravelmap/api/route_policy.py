@@ -313,6 +313,8 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/admin/poi-cache-targets/{external_system}/{target_key}": (RoutePolicy.OPERATOR),
     "/v1/admin/public-api-keys": RoutePolicy.OPERATOR,
     "/v1/admin/public-api-keys/{public_api_key_id}/revoke": RoutePolicy.OPERATOR,
+    # Retired restore URI도 router 조립 뒤 policy matrix의 인증 검사를 받아야 한다.
+    # OpenAPI에는 숨기지만, 인증된 operator에게만 compatibility 410을 반환한다.
     "/v1/admin/restore/{backup_id}": RoutePolicy.OPERATOR,
     "/v1/admin/restore/{backup_id}/swap": RoutePolicy.OPERATOR,
     # -- operator — canonical ops datasets/pipeline (BFF 또는 ops principal).

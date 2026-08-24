@@ -81,6 +81,22 @@ async def _snapshot(dsn: str) -> dict[str, object]:
                     )
                 )
             )
+            database_profile = tuple(
+                str(value)
+                for value in (
+                    await connection.execute(
+                        text(
+                            "SELECT encoding::text, datlocprovider::text, datistemplate::text, "
+                            "datallowconn::text, datconnlimit::text, "
+                            "dattablespace::regclass::text, "
+                            "datcollate, datctype, coalesce(daticulocale, '<null>'), "
+                            "coalesce(daticurules, '<null>'), coalesce(datcollversion, '<null>'), "
+                            "coalesce(datacl::text, '<null>') "
+                            "FROM pg_catalog.pg_database WHERE datname = current_database()"
+                        )
+                    )
+                ).one()
+            )
             relations = {
                 str(row.qualified): (str(row.relkind), str(row.owner))
                 for row in (
@@ -93,6 +109,41 @@ async def _snapshot(dsn: str) -> dict[str, object]:
                             "ON namespace.oid = object.relnamespace "
                             "WHERE namespace.nspname IN ('feature', 'provider_sync', 'ops', 'public') "
                             "AND object.relkind IN ('r', 'p', 'v', 'm', 'f', 'S') "
+                            "ORDER BY 1"
+                        )
+                    )
+                ).mappings()
+            }
+            routines = {
+                str(row.qualified): (str(row.owner), str(row.definition))
+                for row in (
+                    await connection.execute(
+                        text(
+                            "SELECT namespace.nspname || '.' || object.proname || ':' || "
+                            "pg_catalog.pg_get_function_identity_arguments(object.oid) "
+                            "AS qualified, pg_catalog.pg_get_userbyid(object.proowner) AS owner, "
+                            "object.prokind::text || ':' || CASE WHEN object.prokind = 'a' THEN '' "
+                            "ELSE pg_catalog.pg_get_functiondef(object.oid) END AS definition "
+                            "FROM pg_catalog.pg_proc AS object "
+                            "JOIN pg_catalog.pg_namespace AS namespace "
+                            "ON namespace.oid = object.pronamespace "
+                            "WHERE namespace.nspname = 'public' ORDER BY 1"
+                        )
+                    )
+                ).mappings()
+            }
+            types = {
+                str(row.typname): (str(row.typtype), str(row.owner))
+                for row in (
+                    await connection.execute(
+                        text(
+                            "SELECT object.typname, object.typtype, "
+                            "pg_catalog.pg_get_userbyid(object.typowner) AS owner "
+                            "FROM pg_catalog.pg_type AS object "
+                            "JOIN pg_catalog.pg_namespace AS namespace "
+                            "ON namespace.oid = object.typnamespace "
+                            "WHERE namespace.nspname = 'public' "
+                            "AND object.typrelid = 0 AND object.typelem = 0 "
                             "ORDER BY 1"
                         )
                     )
@@ -227,7 +278,10 @@ async def _snapshot(dsn: str) -> dict[str, object]:
         await engine.dispose()
     return {
         "database_owner": database_owner,
+        "database_profile": database_profile,
         "relations": relations,
+        "routines": routines,
+        "types": types,
         "schemas": schemas,
         "default_acls": default_acls,
         "extensions": extensions,
@@ -305,6 +359,8 @@ async def _drop_target_and_roles(raw_dsn: str, roles: tuple[str, ...] = ()) -> N
     try:
         async with admin_engine.connect() as connection:
             autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
+            for role in roles:
+                await autocommit.execute(text(f'DROP OWNED BY "{role}"'))
             await autocommit.execute(text(f'DROP DATABASE IF EXISTS "{_DATABASE}" WITH (FORCE)'))
             for role in roles:
                 await autocommit.execute(text(f'DROP ROLE IF EXISTS "{role}"'))
@@ -373,38 +429,78 @@ async def test_bootstrap_rejects_existing_application_db_before_any_mutation(
 
 
 @pytest.mark.integration
-async def test_bootstrap_rolls_back_all_mutation_when_existing_membership_is_unsafe(
+async def test_bootstrap_rolls_back_all_mutation_when_reserved_role_inventory_is_partial(
     pg_container: Any,
 ) -> None:
-    """late role graph rejection도 password/role/DB state를 남기지 않는다."""
+    """partial reserved role set도 password/role/DB state를 남기지 않고 거절한다."""
 
-    roles = ("ktm_feature_schema_owner", "ktm_feature_migrator")
+    roles = ("ktm_bootstrap_partial_role",)
     target_dsn, bootstrap_command, raw_dsn = await _recreate_fresh_target(pg_container)
     engine = make_async_engine(normalize_async_dsn(target_dsn), pool_size=1)
     try:
         async with engine.connect() as connection:
             autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
-            await autocommit.execute(
-                text("CREATE ROLE ktm_feature_schema_owner NOLOGIN NOINHERIT")
-            )
-            await autocommit.execute(
-                text("CREATE ROLE ktm_feature_migrator LOGIN NOINHERIT PASSWORD 'pre-bootstrap'")
-            )
-            await autocommit.execute(
-                text(
-                    "GRANT ktm_feature_schema_owner TO ktm_feature_migrator "
-                    "WITH ADMIN TRUE, INHERIT FALSE, SET TRUE"
-                )
-            )
+            await autocommit.execute(text("CREATE ROLE ktm_bootstrap_partial_role NOLOGIN"))
         before = await _snapshot(target_dsn)
         result = await asyncio.to_thread(_run_bootstrap, bootstrap_command)
 
         assert result.returncode != 0
-        assert "unexpected application role membership edge" in result.stderr
+        assert "exact reserved application role inventory" in result.stderr
         assert await _snapshot(target_dsn) == before
     finally:
         await engine.dispose()
         await _drop_target_and_roles(raw_dsn, roles)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "role_attributes", ("NOLOGIN", "LOGIN", "SUPERUSER NOLOGIN")
+)
+async def test_bootstrap_rejects_any_unlisted_reserved_role_before_mutation(
+    pg_container: Any,
+    role_attributes: str,
+) -> None:
+    """unknown ``ktm_*`` principal은 role class와 관계없이 virgin input이 아니다."""
+
+    role = "ktm_bootstrap_unlisted_role"
+    target_dsn, bootstrap_command, raw_dsn = await _recreate_fresh_target(pg_container)
+    engine = make_async_engine(normalize_async_dsn(target_dsn), pool_size=1)
+    try:
+        async with engine.connect() as connection:
+            autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
+            await autocommit.execute(text(f"CREATE ROLE {role} {role_attributes}"))
+        before = await _snapshot(target_dsn)
+        result = await asyncio.to_thread(_run_bootstrap, bootstrap_command)
+
+        assert result.returncode != 0
+        assert "exact reserved application role inventory" in result.stderr
+        assert await _snapshot(target_dsn) == before
+    finally:
+        await engine.dispose()
+        await _drop_target_and_roles(raw_dsn, (role,))
+
+
+@pytest.mark.integration
+async def test_bootstrap_rejects_foreign_namespace_before_any_mutation(
+    pg_container: Any,
+) -> None:
+    """application schema가 아닌 foreign user schema도 canonical fresh input이 아니다."""
+
+    target_dsn, bootstrap_command, raw_dsn = await _recreate_fresh_target(pg_container)
+    engine = make_async_engine(normalize_async_dsn(target_dsn), pool_size=1)
+    try:
+        async with engine.connect() as connection:
+            autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
+            await autocommit.execute(text("CREATE SCHEMA foreign_bootstrap_namespace"))
+        before = await _snapshot(target_dsn)
+        result = await asyncio.to_thread(_run_bootstrap, bootstrap_command)
+
+        assert result.returncode != 0
+        assert "non-system schema exists" in result.stderr
+        assert await _snapshot(target_dsn) == before
+    finally:
+        await engine.dispose()
+        await _drop_target_and_roles(raw_dsn)
 
 
 @pytest.mark.integration
@@ -413,7 +509,7 @@ async def test_bootstrap_rejects_precreated_application_schema_acl_before_mutati
 ) -> None:
     """빈 schema의 foreign ACL/default ACL도 canonical fresh bootstrap 입력이 아니다."""
 
-    role = "ktm_bootstrap_foreign_principal"
+    role = "baseline_300_foreign_principal"
     target_dsn, bootstrap_command, raw_dsn = await _recreate_fresh_target(pg_container)
     engine = make_async_engine(normalize_async_dsn(target_dsn), pool_size=1)
     try:
@@ -432,7 +528,7 @@ async def test_bootstrap_rejects_precreated_application_schema_acl_before_mutati
         result = await asyncio.to_thread(_run_bootstrap, bootstrap_command)
 
         assert result.returncode != 0
-        assert "application schemas exist" in result.stderr
+        assert "non-system schema exists" in result.stderr
         assert await _snapshot(target_dsn) == before
     finally:
         await engine.dispose()
@@ -447,7 +543,8 @@ async def test_bootstrap_creates_extensions_in_x_extension_on_stock_virgin_postg
 
     테스트 fixture가 미리 extension을 만들거나 public extension을 삭제하면 실제 fresh
     deployment 경로를 검증하지 못한다. 이 test는 새 database에서 role bootstrap만
-    실행하고, `postgis`/`pg_trgm`/`pgcrypto`가 모두 ADR-008 위치에 생성되는지 확인한다.
+    실행하고, source-certified full extension inventory가 각각의 정본 namespace에
+    생성되는지 확인한다.
     """
 
     target_dsn, bootstrap_command, raw_dsn = await _recreate_fresh_target(pg_container)
@@ -459,23 +556,25 @@ async def test_bootstrap_creates_extensions_in_x_extension_on_stock_virgin_postg
         assert result.returncode == 0, result.stderr
         async with engine.connect() as connection:
             extensions = {
-                str(row.extname): str(row.nspname)
+                (str(row.extname), str(row.nspname))
                 for row in (
                     await connection.execute(
                         text(
                             "SELECT extension.extname, namespace.nspname "
                             "FROM pg_catalog.pg_extension AS extension "
                             "JOIN pg_catalog.pg_namespace AS namespace "
-                            "ON namespace.oid = extension.extnamespace "
-                            "WHERE extension.extname IN ('postgis', 'pg_trgm', 'pgcrypto')"
+                            "ON namespace.oid = extension.extnamespace"
                         )
                     )
                 ).mappings()
             }
             assert extensions == {
-                "postgis": "x_extension",
-                "pg_trgm": "x_extension",
-                "pgcrypto": "x_extension",
+                ("fuzzystrmatch", "public"),
+                ("plpgsql", "pg_catalog"),
+                ("postgis", "x_extension"),
+                ("pg_trgm", "x_extension"),
+                ("pgcrypto", "x_extension"),
+                ("pg_prewarm", "x_extension"),
             }
             assert (
                 await connection.scalar(text("SELECT to_regclass('public.alembic_version') IS NULL"))
@@ -497,6 +596,72 @@ async def test_bootstrap_creates_extensions_in_x_extension_on_stock_virgin_postg
 
 
 @pytest.mark.integration
+async def test_bootstrap_rejects_missing_prewarm_before_any_mutation(
+    pg_container: Any,
+) -> None:
+    """필수 contrib extension이 없으면 role/schema/password 변경 전에 원자적으로 중단한다."""
+
+    target_dsn, bootstrap_command, raw_dsn = await _recreate_fresh_target(pg_container)
+    container_id = pg_container.get_wrapped_container().id
+    hidden = False
+    engine = make_async_engine(normalize_async_dsn(target_dsn), pool_size=1)
+    try:
+        await asyncio.to_thread(
+            subprocess.run,
+            [
+                "docker",
+                "exec",
+                "-u",
+                "0",
+                container_id,
+                "sh",
+                "-ec",
+                "sharedir=$(pg_config --sharedir); "
+                "mv \"$sharedir/extension/pg_prewarm.control\" "
+                "\"$sharedir/extension/pg_prewarm.control.baseline300-hidden\"",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        hidden = True
+        async with engine.connect() as connection:
+            available = await connection.scalar(
+                text(
+                    "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_available_extensions "
+                    "WHERE name = 'pg_prewarm')"
+                )
+            )
+        assert available is False
+        before = await _snapshot(target_dsn)
+        result = await asyncio.to_thread(_run_bootstrap, bootstrap_command)
+
+        assert result.returncode != 0
+        assert "requires pg_prewarm to be available" in result.stderr
+        assert await _snapshot(target_dsn) == before
+    finally:
+        if hidden:
+            await asyncio.to_thread(
+                subprocess.run,
+                [
+                    "docker",
+                    "exec",
+                    "-u",
+                    "0",
+                    container_id,
+                    "sh",
+                    "-ec",
+                    "sharedir=$(pg_config --sharedir); "
+                    "mv \"$sharedir/extension/pg_prewarm.control.baseline300-hidden\" "
+                    "\"$sharedir/extension/pg_prewarm.control\"",
+                ],
+                check=True,
+                capture_output=True,
+            )
+        await engine.dispose()
+        await _drop_target_and_roles(raw_dsn)
+
+
+@pytest.mark.integration
 async def test_bootstrap_rolls_back_all_mutation_when_extension_schema_is_wrong(
     pg_container: Any,
 ) -> None:
@@ -512,8 +677,161 @@ async def test_bootstrap_rolls_back_all_mutation_when_extension_schema_is_wrong(
         result = await asyncio.to_thread(_run_bootstrap, bootstrap_command)
 
         assert result.returncode != 0
-        assert "requires postgis in x_extension" in result.stderr
+        assert "nonstandard extension inventory exists" in result.stderr
         assert await _snapshot(target_dsn) == before
     finally:
         await engine.dispose()
         await _drop_target_and_roles(raw_dsn)
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("statement", "reason"),
+    [
+        ("CREATE TABLE public.foreign_bootstrap_relation (value integer)", "public objects exist"),
+        (
+            "CREATE FUNCTION public.foreign_bootstrap_routine() RETURNS integer "
+            "LANGUAGE sql AS 'SELECT 1'",
+            "public objects exist",
+        ),
+        ("CREATE TYPE public.foreign_bootstrap_type AS ENUM ('foreign')", "public objects exist"),
+        (
+            "CREATE TEXT SEARCH CONFIGURATION public.foreign_bootstrap_configuration "
+            "(PARSER = pg_catalog.default)",
+            "public objects exist",
+        ),
+    ],
+)
+async def test_bootstrap_rejects_public_object_before_any_mutation(
+    pg_container: Any,
+    statement: str,
+    reason: str,
+) -> None:
+    """relation/routine/type 어느 public residue도 fresh input으로 수용하지 않는다."""
+
+    target_dsn, bootstrap_command, raw_dsn = await _recreate_fresh_target(pg_container)
+    engine = make_async_engine(normalize_async_dsn(target_dsn), pool_size=1)
+    try:
+        async with engine.connect() as connection:
+            autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
+            await autocommit.execute(text(statement))
+        before = await _snapshot(target_dsn)
+        result = await asyncio.to_thread(_run_bootstrap, bootstrap_command)
+
+        assert result.returncode != 0
+        assert reason in result.stderr
+        assert await _snapshot(target_dsn) == before
+    finally:
+        await engine.dispose()
+        await _drop_target_and_roles(raw_dsn)
+
+
+@pytest.mark.integration
+async def test_bootstrap_rejects_public_hstore_before_any_mutation(
+    pg_container: Any,
+) -> None:
+    """허용하지 않은 public extension은 extension member까지 포함해 사전 거부한다."""
+
+    target_dsn, bootstrap_command, raw_dsn = await _recreate_fresh_target(pg_container)
+    engine = make_async_engine(normalize_async_dsn(target_dsn), pool_size=1)
+    try:
+        async with engine.connect() as connection:
+            autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
+            available = await autocommit.scalar(
+                text("SELECT 1 FROM pg_catalog.pg_available_extensions WHERE name = 'hstore'")
+            )
+            if available is None:
+                pytest.skip("PostGIS test image does not provide hstore")
+            await autocommit.execute(text("CREATE EXTENSION hstore WITH SCHEMA public"))
+        before = await _snapshot(target_dsn)
+        result = await asyncio.to_thread(_run_bootstrap, bootstrap_command)
+
+        assert result.returncode != 0
+        assert "nonstandard extension inventory exists" in result.stderr
+        assert await _snapshot(target_dsn) == before
+    finally:
+        await engine.dispose()
+        await _drop_target_and_roles(raw_dsn)
+
+
+@pytest.mark.integration
+async def test_bootstrap_rejects_extra_procedural_language_before_any_mutation(
+    pg_container: Any,
+) -> None:
+    """final 300 guard가 아니라 bootstrap precondition이 language residue를 먼저 막는다."""
+
+    target_dsn, bootstrap_command, raw_dsn = await _recreate_fresh_target(pg_container)
+    engine = make_async_engine(normalize_async_dsn(target_dsn), pool_size=1)
+    try:
+        async with engine.connect() as connection:
+            autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
+            await autocommit.execute(
+                text(
+                    "CREATE TRUSTED PROCEDURAL LANGUAGE baseline_300_extra_language "
+                    "HANDLER pg_catalog.plpgsql_call_handler "
+                    "INLINE pg_catalog.plpgsql_inline_handler "
+                    "VALIDATOR pg_catalog.plpgsql_validator"
+                )
+            )
+        before = await _snapshot(target_dsn)
+        result = await asyncio.to_thread(_run_bootstrap, bootstrap_command)
+
+        assert result.returncode != 0
+        assert "procedural language inventory is not standard" in result.stderr
+        assert await _snapshot(target_dsn) == before
+    finally:
+        await engine.dispose()
+        await _drop_target_and_roles(raw_dsn)
+
+
+@pytest.mark.integration
+async def test_bootstrap_rejects_noncanonical_database_profile_before_any_mutation(
+    pg_container: Any,
+) -> None:
+    """connection-limit/locale 같은 final receipt 외부 profile도 bootstrap 전에 닫는다."""
+
+    target_dsn, bootstrap_command, raw_dsn = await _recreate_fresh_target(pg_container)
+    engine = make_async_engine(normalize_async_dsn(target_dsn), pool_size=1)
+    try:
+        async with engine.connect() as connection:
+            autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
+            await autocommit.execute(text(f'ALTER DATABASE "{_DATABASE}" CONNECTION LIMIT 2'))
+        before = await _snapshot(target_dsn)
+        result = await asyncio.to_thread(_run_bootstrap, bootstrap_command)
+
+        assert result.returncode != 0
+        assert "database immutable profile is not standard" in result.stderr
+        assert await _snapshot(target_dsn) == before
+    finally:
+        await engine.dispose()
+        await _drop_target_and_roles(raw_dsn)
+
+
+@pytest.mark.integration
+async def test_bootstrap_rejects_application_default_privilege_before_any_mutation(
+    pg_container: Any,
+) -> None:
+    """role RESET으로 지워지지 않는 default ACL도 bootstrap 이전에 fail-close한다."""
+
+    role = "ktm_feature_schema_owner"
+    target_dsn, bootstrap_command, raw_dsn = await _recreate_fresh_target(pg_container)
+    engine = make_async_engine(normalize_async_dsn(target_dsn), pool_size=1)
+    try:
+        async with engine.connect() as connection:
+            autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
+            await autocommit.execute(text(f"CREATE ROLE {role} NOLOGIN"))
+            await autocommit.execute(
+                text(
+                    "ALTER DEFAULT PRIVILEGES FOR ROLE ktm_feature_schema_owner "
+                    "GRANT SELECT ON TABLES TO PUBLIC"
+                )
+            )
+        before = await _snapshot(target_dsn)
+        result = await asyncio.to_thread(_run_bootstrap, bootstrap_command)
+
+        assert result.returncode != 0
+        assert "default privileges exist" in result.stderr
+        assert await _snapshot(target_dsn) == before
+    finally:
+        await engine.dispose()
+        await _drop_target_and_roles(raw_dsn, (role,))

@@ -205,11 +205,12 @@ producer/consumer blocker를 닫고 main의 exact commit으로 image를 빌드�
 | cache target/refresh | **paired PR 전 미완** — generation·conditional ETag·Idempotency-Key·strict pull consumer | **producer foundation 진행** — service resource, restore fence, same-tx outbox, pull lease/replay/snapshot |
 | public/operator 분리 | 공개 DTO의 raw lineage 의존 0건, operator principal 사용 | route matrix·read-only DB role·표면별 OpenAPI SHA |
 
-Cutover는 consumer 배포 → contract/OpenAPI SHA 확인 → production clone 복구·shadow 검증 → KTM
-write fence → KTM API/DB 전환 → PinVi 활성화 → 양방향 smoke → soak 순서다. rollback window에는
-write fence를 유지하거나 검증된 forward journal/PITR로 fence 이후 delta를 되살릴 수 있어야 한다.
-단순 old snapshot 복원과 upstream 재수집은 rollback이 아니다. 어느 gate든 실패하면 consumer와 KTM을
-이전 pinned compatible pair로 유지하고 새 writer를 열지 않는다(ADR-075).
+Cutover는 consumer 배포 → contract/OpenAPI SHA 확인 → production clone의 **읽기 전용** shadow
+검증 → KTM write fence → KTM API/DB의 controlled forward handoff → PinVi 활성화 → 양방향
+smoke → soak 순서다. `300` baseline 이후 clone은 검증용 관측 입력일 뿐 production DB의
+복원원본이 아니다. PITR, dump restore, Alembic downgrade/stamp-back, 이전 pinned compatible
+pair로의 rollback은 지원하지 않는다. 어느 gate든 실패하면 새 writer를 열지 않고 해당 단계에서
+멈춘 뒤 새 forward-fix candidate와 controlled handoff로만 해소한다(ADR-075).
 
 `/v1/features/search` 전환에는 `include_total=false`의 COUNT 0회, `true`의 COUNT 1회,
 동일 정규화 query에서만 이어지는 signed cursor, 알 수 없는 version·변조·query mismatch의

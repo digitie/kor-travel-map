@@ -33,8 +33,8 @@ def _identity(module: ModuleType, *, token: str = "1" * 64) -> Any:
     return module.EffectIdentity(
         effect_token=token,
         command_id=17,
-        operation="admin.backup.restore",
-        effect_kind="restore",
+        operation="admin.backup.create",
+        effect_kind="create",
         input_digest="2" * 64,
         marker_key="command-17",
         backup_id="backup-17",

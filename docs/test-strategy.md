@@ -195,18 +195,10 @@ async def pg_container():
 
 @pytest.fixture(scope="session")
 async def pg_engine(pg_container):
-    engine = create_async_engine(pg_container.get_connection_url().replace("psycopg2", "asyncpg"))
-    async with engine.begin() as conn:
-        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS feature"))
-        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS provider_sync"))
-        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS ops"))
-        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS x_extension"))
-        await conn.execute(text("CREATE EXTENSION postgis WITH SCHEMA x_extension"))
-        await conn.execute(text("CREATE EXTENSION pg_trgm WITH SCHEMA x_extension"))
-        await conn.execute(text("CREATE EXTENSION pgcrypto WITH SCHEMA x_extension"))
-        await conn.execute(text("SET search_path = public, x_extension"))
-        # Alembic upgrade head
-        ...
+    admin_dsn = pg_container.get_connection_url().replace("psycopg2", "asyncpg")
+    config = Config("alembic.ini")
+    await upgrade_head_with_application_300_bootstrap(config, admin_dsn)
+    engine = create_async_engine(admin_dsn)
     yield engine
     await engine.dispose()
 

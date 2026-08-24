@@ -150,7 +150,7 @@ list 성공 예:
 | `admin-dedup` | `/admin/features/dedup-reviews` | 중복 검토 |
 | `admin-issues` | `/admin/issues` | 주소/정합성 이슈 운영 처리(목록/단건/PATCH 7 action). T-DA-13 구현 완료. admin UI는 T-212b 후속 |
 | `admin-offline` | `/admin/offline-uploads` | 오프라인 파일 업로드/검증/적재 |
-| `admin-backups` | `/admin/backups`, `/admin/restore` | standalone backup artifact 조회, backup/restore command plan, manual-required hot-swap 경계 |
+| `admin-backups` | `/admin/backups` | audit-only backup artifact 조회·생성. retire된 restore URI는 인증 뒤 `410` |
 | `ops-datasets` | `/ops/datasets` | provider×dataset 상태·정책·fixture preview 통합 |
 | `ops-pipeline` | `/ops/pipeline` | 실행·event·Dagster·schedule 조회와 조작 통합 |
 | `ops` | `/ops` | metrics, consistency, health-deep, system/API log 관측 read |
@@ -296,11 +296,11 @@ CSV/TSV는 load 전에 validation job이 저장한 column mapping과 성공 상�
 없거나 결과에도 법정동코드가 없으면 validation issue로 남기고 load를 막는다.
 offline upload `cancelled`는 현재 cancel API가 붙기 전까지 reserved terminal state다.
 
-## 4.3 Backup/restore
+## 4.3 Backup artifact (복원 비지원)
 
-T-209e-c 기준 admin UI가 쓰는 backup/restore API는 admin 전체 OpenAPI에만 포함한다.
-PinVi/user subset에는 포함하지 않는다. API는 standalone Docker app의 cold backup
-산출물을 읽고 command plan을 반환한다. host command 실행은 기본 비활성이며,
+`300` baseline부터 admin UI가 쓰는 current API는 backup artifact 조회·생성만 OpenAPI에
+포함한다. PinVi/user subset에는 포함하지 않는다. API는 standalone Docker app의 cold backup
+artifact를 읽고 backup command plan을 반환한다. host command 실행은 기본 비활성이며,
 `KOR_TRAVEL_MAP_API_BACKUP_COMMAND_ENABLED=true`와 요청 body `execute=true`가 모두 있어야
 실행된다.
 
@@ -309,16 +309,16 @@ PinVi/user subset에는 포함하지 않는다. API는 standalone Docker app의 
 | GET | `/admin/backups` | `data/backups/<backup_id>` artifact 목록. manifest status, created time, size, checksum count 포함 |
 | GET | `/admin/backups/{backup_id}` | artifact 단건 상세 |
 | POST | `/admin/backups` | cold backup command plan 생성 또는 opt-in 실행 |
-| POST | `/admin/restore/{backup_id}` | staging restore command plan 생성 또는 opt-in 실행 |
-| POST | `/admin/restore/{backup_id}/swap` | 운영 DSN/volume switch 자동 실행 없이 manual-required hot-swap 승인 경계 반환 |
 
-`POST /admin/backups`와 `POST /admin/restore/{backup_id}`의 성공 응답은
-`{data, meta}` envelope다. `data.command`는 `cwd`, `command`, `env`, `enabled`를 담아
+`POST /admin/backups`의 성공 응답은 `{data, meta}` envelope다. `data.command`는
+`cwd`, `command`, `env`, `enabled`를 담아
 운영자가 실행 전 실제 host command를 감사할 수 있게 한다. `execute=true`인데 서버
 설정이 비활성이면 `503 BACKUP_COMMAND_DISABLED` error envelope를 반환한다.
-`/admin/restore/{backup_id}/swap`은 staging restore smoke/count 검증 후 operator가
-수동으로 운영 DSN/volume switch를 승인해야 함을 알리는 `manual_required` 상태만
-반환한다.
+
+이전 `/admin/restore/{backup_id}`와 `/admin/restore/{backup_id}/swap`은 OpenAPI에서
+제거됐다. 인증된 admin request에도 `410 RESTORE_UNSUPPORTED`만 반환하며 plan, execute,
+staging target, hot-swap 계약은 없다. artifact의 의미와 금지된 수동 복원도
+[`../backup-restore.md`](../backup-restore.md)가 정본이다.
 
 ## 5. Feature update request application service
 

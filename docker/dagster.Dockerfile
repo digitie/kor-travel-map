@@ -46,7 +46,9 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     TMPDIR=/tmp \
     TEMP=/tmp \
     TMP=/tmp \
-    DAGSTER_HOME=/opt/dagster/dagster_home
+    DAGSTER_HOME=/opt/dagster/dagster_home \
+    KOR_TRAVEL_MAP_IMAGE_REVISION="$KOR_TRAVEL_MAP_GIT_COMMIT" \
+    KOR_TRAVEL_MAP_DAGSTER_PROFILE=production
 
 WORKDIR /app
 
@@ -62,10 +64,20 @@ COPY --from=builder /install /usr/local
 # Map application Alembic은 API image만 소유한다. Dagster metadata storage는 이
 # image에 설치된 Dagster package의 migration graph가 정본이며, one-shot command가
 # `dagster instance migrate` 뒤 strict version 검증을 수행한다.
+# Dagster는 Map application DB의 direct consumer다. API만 final permit을 확인하면
+# webserver/daemon이 permit 없는 DB에 직접 연결할 수 있으므로, immutable baseline receipt와
+# verifier를 same candidate image에 root-owned로 넣는다. Alembic graph 자체는 계속 API
+# image만 소유한다.
+COPY --chown=root:root alembic/baseline ./alembic/baseline
 COPY --chown=appuser:appuser docker/dagster.yaml /opt/dagster/dagster_home/dagster.yaml
 COPY --chown=appuser:appuser docker/dagster-entrypoint.sh /usr/local/bin/dagster-entrypoint.sh
 COPY --chown=appuser:appuser docker/dagster-storage-migrate.py /usr/local/bin/ktm-dagster-storage
-RUN chmod 0755 /usr/local/bin/dagster-entrypoint.sh /usr/local/bin/ktm-dagster-storage
+COPY --chown=root:root docker/application-schema-final-permit.py /usr/local/bin/ktm-application-schema-final-permit
+RUN chown -R root:root /app/alembic/baseline /usr/local/bin/ktm-application-schema-final-permit \
+    && find /app/alembic/baseline -type d -exec chmod 0555 {} + \
+    && find /app/alembic/baseline -type f -exec chmod 0444 {} + \
+    && chmod 0555 /usr/local/bin/ktm-application-schema-final-permit \
+    && chmod 0755 /usr/local/bin/dagster-entrypoint.sh /usr/local/bin/ktm-dagster-storage
 
 USER appuser
 

@@ -72,11 +72,13 @@ uv pip install -e ".[dev,geo,providers]"
 
 # PostgreSQL + PostGIS
 docker compose up -d postgres
-# role/schema/extension bootstrap — squash(`0200`) 이후 **필수**다.
-# 체인의 `0001`이 스키마와 extension을 만들어 주던 시절과 달리, baseline은
-# 그것을 재현하지 않고 **전제로 검증만** 한다(없으면 fail-closed로 선다).
-docker compose run --rm db-role-bootstrap
-alembic upgrade head
+# virgin dedicated DB의 bootstrap→restricted `300` root migration one-shot — 한 번만 실행한다.
+# normal restart는 이 service를 실행하지 않는다. production API는 Docker Manager final permit
+# 없이는 blank DB를 upgrade하지 않으며, 기존 `0236` DB에는 controlled handoff만 허용한다.
+docker compose --profile fresh-init run --rm db-application-schema-fresh-300
+
+# Docker full stack은 local-dev profile만 사용한다. production은 Docker Manager가 소유한다.
+KOR_TRAVEL_MAP_API_PROFILE=local-dev docker compose up -d
 
 # API/admin/Dagster stack — scoped API env 필수, root cwd 직접 uvicorn 금지
 uv pip install -e packages/kor-travel-map-api

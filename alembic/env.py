@@ -14,7 +14,10 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
+import stat
 from logging.config import fileConfig
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from alembic.runtime.migration import StampStep
@@ -66,9 +69,75 @@ _USE_SCHEMA_OWNER_ROLE_ENV = "KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE"
 _BASELINE_300_REVISION = "300"
 _BASELINE_300_HANDOFF_SOURCE = "0236_tvn41s_compaction_drained"
 _BASELINE_300_HANDOFF_TAG = "application-schema-0236-to-300"
-_BASELINE_300_HANDOFF_CONFIG_ATTRIBUTE = (
-    "application_schema_0236_to_300_handoff_authorized"
+_BASELINE_300_HANDOFF_CAPABILITY_ENV = (
+    "KOR_TRAVEL_MAP_APPLICATION_HANDOFF_CAPABILITY_PATH"
 )
+_BASELINE_300_HANDOFF_CAPABILITY_DIRECTORY = Path(
+    "/run/kor-travel-map-application-handoff"
+)
+_BASELINE_300_HANDOFF_CAPABILITY_FILE = (
+    _BASELINE_300_HANDOFF_CAPABILITY_DIRECTORY / "capability"
+)
+_BASELINE_300_HANDOFF_CAPABILITY_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
+
+
+def _require_application_handoff_capability() -> None:
+    """root helper가 만든 one-shot capability 없이는 metadata stamp를 금지한다.
+
+    ``Config.attributes``나 Alembic tag는 호출자가 자유롭게 만들 수 있으므로 권한
+    증명이 아니다. Docker Manager가 root user로 실행한 one-shot helper만 `/run`의
+    root-owned private directory에 capability를 만들고, helper가 끝나면 이를 제거한다.
+    API/Dagster의 non-root runtime과 generic Alembic 호출은 이 파일을 만들거나 읽을 수
+    없어야 한다.
+    """
+
+    configured = os.environ.get(_BASELINE_300_HANDOFF_CAPABILITY_ENV)
+    if configured != str(_BASELINE_300_HANDOFF_CAPABILITY_FILE):
+        raise RuntimeError(
+            "0236-to-300 handoff requires the root-owned one-shot capability"
+        )
+    try:
+        parent = _BASELINE_300_HANDOFF_CAPABILITY_DIRECTORY.lstat()
+        if (
+            not stat.S_ISDIR(parent.st_mode)
+            or parent.st_uid != 0
+            or stat.S_IMODE(parent.st_mode) != 0o700
+            or parent.st_nlink != 2
+        ):
+            raise PermissionError("handoff capability directory is not trusted")
+        metadata = _BASELINE_300_HANDOFF_CAPABILITY_FILE.lstat()
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != 0
+            or stat.S_IMODE(metadata.st_mode) != 0o400
+            or metadata.st_nlink != 1
+        ):
+            raise PermissionError("handoff capability is not trusted")
+        descriptor = os.open(
+            _BASELINE_300_HANDOFF_CAPABILITY_FILE,
+            os.O_RDONLY | os.O_NOFOLLOW,
+        )
+        try:
+            opened = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or opened.st_uid != 0
+                or stat.S_IMODE(opened.st_mode) != 0o400
+                or opened.st_nlink != 1
+            ):
+                raise PermissionError("opened handoff capability is not trusted")
+            token = os.read(descriptor, 65).decode("ascii")
+            if os.read(descriptor, 1) or not _BASELINE_300_HANDOFF_CAPABILITY_PATTERN.fullmatch(
+                token
+            ):
+                raise PermissionError("handoff capability token is invalid")
+        finally:
+            os.close(descriptor)
+    except (OSError, UnicodeDecodeError) as exc:
+        raise RuntimeError(
+            "0236-to-300 handoff requires the root-owned one-shot capability"
+        ) from exc
+
 
 def _raw_alembic_heads(connection: Connection) -> tuple[str, ...]:
     """활성 script graph를 해석하지 않은 version table 원문을 읽는다."""
@@ -118,19 +187,17 @@ def _guard_application_schema_operation() -> bool:
         return False
 
     # `stamp`는 version metadata를 바꾸므로 generic invocation을 모두 막는다.
-    # 도착 revision, purge, tag, private Config authorization, online mode 및 raw
+    # 도착 revision, purge, tag, root-owned one-shot capability, online mode 및 raw
     # source head가 함께 일치하는 one-shot handoff 하나만 예외다.
     destination = tuple(
         str(revision)
         for revision in migration_context.opts.get("destination_rev") or ()
     )
-    authorized = config.attributes.get(_BASELINE_300_HANDOFF_CONFIG_ATTRIBUTE) is True
     is_sanctioned = (
         not migration_context.as_sql
         and migration_context.opts.get("purge") is True
         and destination == (_BASELINE_300_REVISION,)
         and context.get_tag_argument() == _BASELINE_300_HANDOFF_TAG
-        and authorized
     )
     if not is_sanctioned:
         raise RuntimeError(
@@ -150,6 +217,7 @@ def _guard_application_schema_operation() -> bool:
     script = ScriptDirectory.from_config(config)
     if tuple(script.get_heads()) != (_BASELINE_300_REVISION,):
         raise RuntimeError("0236-to-300 handoff requires active graph head exactly 300")
+    _require_application_handoff_capability()
 
     def stamp_baseline_300_after_purge(
         current_heads: tuple[str, ...],

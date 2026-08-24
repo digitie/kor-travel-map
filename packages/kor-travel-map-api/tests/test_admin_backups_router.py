@@ -20,7 +20,12 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from kortravelmap.api.app import create_app
-from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
+from kortravelmap.api.auth import (
+    ADMIN_ACTOR_HEADER,
+    ADMIN_PROXY_SECRET_HEADER,
+    AdminProxyContext,
+    require_admin_frontend,
+)
 from kortravelmap.api.db import get_session
 from kortravelmap.api.settings import ApiSettings
 
@@ -205,11 +210,6 @@ def _domain_command_fakes(
         router_mod,
         "reserve_backup_destination",
         lambda *_args, **_kwargs: "d" * 64,
-    )
-    monkeypatch.setattr(
-        router_mod,
-        "swap_output_proof",
-        lambda *_args, **_kwargs: {"swap": "proof"},
     )
 
 
@@ -963,6 +963,31 @@ def test_restore_and_swap_are_gone_until_a_300_recovery_format_exists(
 
 
 @pytest.mark.unit
+def test_retired_restore_uri_requires_admin_frontend_before_410() -> None:
+    app = create_app(
+        ApiSettings(
+            admin_proxy_secret="retired-restore-test-secret",
+            admin_trusted_proxy_cidrs=["127.0.0.0/8"],
+        )
+    )
+    guarded_client = TestClient(app, client=("127.0.0.1", 50000))
+
+    unauthenticated = guarded_client.post("/v1/admin/restore/backup-1", json={})
+    assert unauthenticated.status_code == 403
+
+    authenticated = guarded_client.post(
+        "/v1/admin/restore/backup-1",
+        headers={
+            ADMIN_PROXY_SECRET_HEADER: "retired-restore-test-secret",
+            ADMIN_ACTOR_HEADER: "admin:operator",
+        },
+        json={},
+    )
+    assert authenticated.status_code == 410
+    assert authenticated.json()["code"] == "RESTORE_UNSUPPORTED"
+
+
+@pytest.mark.unit
 def test_execute_restore_swap_is_disabled_even_when_opted_in(client: TestClient) -> None:
     response = client.post(
         "/v1/admin/restore/backup-1/swap",
@@ -974,7 +999,7 @@ def test_execute_restore_swap_is_disabled_even_when_opted_in(client: TestClient)
 
 
 @pytest.mark.unit
-def test_restore_swap_rejects_removed_skip_verify_escape_hatch(
+def test_restore_swap_ignores_legacy_payload_without_starting_any_action(
     tmp_path: Path,
 ) -> None:
     _write_artifact(tmp_path, "backup-1")
@@ -992,7 +1017,8 @@ def test_restore_swap_rejects_removed_skip_verify_escape_hatch(
         json={"execute": True, "apply": True, "skip_verify": True},
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 410
+    assert response.json()["code"] == "RESTORE_UNSUPPORTED"
 
 
 @pytest.mark.unit
@@ -1020,23 +1046,25 @@ def test_restore_commands_do_not_claim_or_start_an_effect(
 
 
 @pytest.mark.unit
-def test_restore_swap_rejects_removed_operator_field(client: TestClient) -> None:
+def test_restore_swap_ignores_legacy_operator_field(client: TestClient) -> None:
     response = client.post(
         "/v1/admin/restore/backup-1/swap",
         json={"operator": "spoofed-principal"},
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 410
+    assert response.json()["code"] == "RESTORE_UNSUPPORTED"
 
 
 @pytest.mark.unit
-def test_restore_swap_rejects_removed_env_file_override(client: TestClient) -> None:
+def test_restore_swap_ignores_legacy_env_file_override(client: TestClient) -> None:
     response = client.post(
         "/v1/admin/restore/backup-1/swap",
         json={"env_file": "/tmp/foreign"},
     )
 
-    assert response.status_code == 422
+    assert response.status_code == 410
+    assert response.json()["code"] == "RESTORE_UNSUPPORTED"
 
 
 @pytest.mark.unit

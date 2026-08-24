@@ -51,12 +51,15 @@ def test_runner_uses_receipt_pinned_archives_not_its_checkout() -> None:
     assert 'namespace.get("_application_head")' in runner
     assert "known = {" not in runner
     assert 'KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD=$EXPECTED_HEAD' in runner
+    assert 'KOR_TRAVEL_MAP_API_PROFILE=local-dev' in runner
     assert "feature.features_detailed') IS NULL" in runner
     assert "T-VN-36 final legacy Feature columns remain" in runner
     assert "T-VN-36 final request/version bridge remains" in runner
     assert 'local log="$evidence/playwright.log"' in runner
     assert '2>&1 | tee "$log"' in runner
     assert 'compose_map up --detach --wait postgres' in runner
+    assert 'compose_map --profile fresh-init run --rm db-application-schema-fresh-300' in runner
+    assert 'compose_map up --detach --force-recreate --wait api' in runner
     assert "- candidate-ui" in runner
     assert 'E2E_BASE_URL=http://localhost:12705' in runner
     assert "PINVI_KOR_TRAVEL_MAP_CACHE_TARGET_COMMAND_TOKEN=$cache_target_command_token" in runner

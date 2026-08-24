@@ -91,9 +91,7 @@ def test_docker_compose_uses_persistent_dagster_storage_and_daemon() -> None:
     assert "dagster-db-init" in dagster["depends_on"]
     assert "dagster-db-init" in daemon["depends_on"]
     for service in (dagster, daemon):
-        assert service["depends_on"]["db-role-bootstrap-300"] == {
-            "condition": "service_completed_successfully"
-        }
+        assert "db-role-bootstrap-300" not in service["depends_on"]
 
 
 @pytest.mark.unit
@@ -111,9 +109,7 @@ def test_tvn34_compose_never_derives_runtime_or_metadata_credentials_from_bootst
         assert compose[service_name]["environment"]["KOR_TRAVEL_MAP_PG_DSN"].endswith(
             "is required}"
         )
-        assert compose[service_name]["depends_on"]["db-role-bootstrap-300"] == {
-            "condition": "service_completed_successfully"
-        }
+        assert "db-role-bootstrap-300" not in compose[service_name]["depends_on"]
 
     load_env = _script("scripts/load-env.sh")
     assert "KOR_TRAVEL_MAP_PG_DSN:-postgresql" not in load_env
@@ -251,7 +247,6 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
         "KOR_TRAVEL_MAP_OFFLINE_UPLOAD_PREFIX",
         "KOR_TRAVEL_MAP_MOIS_SOURCE_SYNC_TTL_HOURS",
         "KOR_TRAVEL_MAP_FILE_REGISTRY_E2E_BACKUP_TTL_DAYS",
-        "KOR_TRAVEL_MAP_FILE_REGISTRY_TEMP_TTL_DAYS",
     } <= set(api["environment"])
     assert {
         key for key in api["environment"] if key.startswith("KOR_TRAVEL_MAP_API_")
@@ -509,11 +504,12 @@ def test_tvn_m01_compose_keeps_manual_create_credentials_in_exact_runtimes() -> 
 
 
 @pytest.mark.unit
-def test_application_300_compose_uses_single_fresh_bootstrap() -> None:
-    """normal startup은 fresh DB의 baseline-300만 선행한다."""
+def test_application_300_compose_requires_explicit_fresh_bootstrap() -> None:
+    """fresh bootstrap은 normal startup dependency가 아니어야 한다."""
 
     services = _compose()["services"]
     bootstrap = services["db-role-bootstrap-300"]
+    assert bootstrap["profiles"] == ["fresh-init"]
     assert bootstrap["environment"]["KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE"] == (
         "baseline-300"
     )
@@ -524,6 +520,19 @@ def test_application_300_compose_uses_single_fresh_bootstrap() -> None:
     assert bootstrap["volumes"] == [
         "./docker/postgres-role-bootstrap.sh:/usr/local/bin/postgres-role-bootstrap:ro"
     ]
+    fresh_migration = services["db-application-schema-fresh-300"]
+    assert fresh_migration["profiles"] == ["fresh-init"]
+    assert fresh_migration["depends_on"]["db-role-bootstrap-300"]["condition"] == (
+        "service_completed_successfully"
+    )
+    assert fresh_migration["entrypoint"] == [
+        "/usr/local/bin/ktm-application-schema-fresh-300",
+        "migrate",
+    ]
+    assert set(fresh_migration["environment"]) == {
+        "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN",
+        "KOR_TRAVEL_MAP_PG_DSN",
+    }
     for removed_service in (
         "db-role-bootstrap",
         "db-migrate-to-m01-bootstrap-boundary",
@@ -535,18 +544,26 @@ def test_application_300_compose_uses_single_fresh_bootstrap() -> None:
     ):
         assert removed_service not in services
     for runtime_name in ("api", "dagster", "dagster-daemon"):
-        assert services[runtime_name]["depends_on"]["db-role-bootstrap-300"] == {
-            "condition": "service_completed_successfully"
-        }
+        assert "db-role-bootstrap-300" not in services[runtime_name]["depends_on"]
 
     phase_script = _script("docker/postgres-role-bootstrap.sh")
     assert "must be exactly baseline-300" in phase_script
     assert "baseline-300 bootstrap requires a fresh DB" in phase_script
     assert "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE:-baseline-300" in phase_script
 
+    launcher = _script("scripts/docker-up.sh")
+    assert "--profile fresh-init run --rm db-application-schema-fresh-300" in launcher
+    assert "services=(postgres dagster-db-init db-role-bootstrap-300" not in launcher
+
     dockerfile = _script("docker/api.Dockerfile")
     assert "transition-application-schema-0236-to-300.py" in dockerfile
     assert "ktm-application-schema-handoff" in dockerfile
+    assert "application-schema-fresh-300.py" in dockerfile
+    assert "ktm-application-schema-fresh-300" in dockerfile
+    assert "application-schema-fresh-finalize.py" in dockerfile
+    assert "ktm-application-schema-fresh-finalize" in dockerfile
+    assert "application-schema-final-permit.py" in dockerfile
+    assert "ktm-application-schema-final-permit" in dockerfile
     for removed_image_path in (
         "migrate-to-m01-bootstrap-boundary.sh",
         "migrate-to-m05-bootstrap-boundary.sh",
@@ -2370,7 +2387,7 @@ def test_api_container_rejects_invalid_ops_principal_pair(
 def _entrypoint_stub_path(tmp_path: Path) -> str:
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    for name in ("alembic", "python"):
+    for name in ("alembic", "python", "ktm-application-schema-final-permit"):
         command = bin_dir / name
         command.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
         command.chmod(0o755)
@@ -2424,6 +2441,9 @@ def _migration_stub_path(
     python = bin_dir / "python"
     python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
     python.chmod(0o755)
+    final_permit = bin_dir / "ktm-application-schema-final-permit"
+    final_permit.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    final_permit.chmod(0o755)
     return f"{bin_dir}:{os.environ['PATH']}", marker
 
 
@@ -2544,6 +2564,54 @@ def test_api_container_migrates_when_alembic_head_matches(tmp_path: Path) -> Non
 
     assert result.returncode == 0, result.stderr
     assert marker.exists(), "head가 일치하는데 migration이 실행되지 않았다."
+
+
+@pytest.mark.unit
+def test_production_api_refuses_blank_current_before_generic_upgrade(tmp_path: Path) -> None:
+    """production blank DB는 Manager fresh-300 permit 전에는 mutation하지 않는다."""
+
+    path, marker = _migration_stub_path(tmp_path, image_head="300", current_script="true")
+    result = _run_entrypoint(
+        path,
+        {
+            "KOR_TRAVEL_MAP_API_PROFILE": "production",
+            "KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD": "300",
+            "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED": "false",
+            "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED": "false",
+            "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256": "a" * 64,
+        },
+    )
+
+    assert result.returncode != 0, result.stdout
+    assert not marker.exists(), "production blank DB에서 generic upgrade가 실행됐다."
+    assert (
+        "blank application DB requires the Docker Manager fresh-300 initialization"
+        in result.stderr
+    )
+
+
+@pytest.mark.unit
+def test_production_api_with_final_permit_never_runs_generic_upgrade(tmp_path: Path) -> None:
+    """final permit + exact raw 300은 runtime start만 허용하고 upgrade는 하지 않는다."""
+
+    path, marker = _migration_stub_path(
+        tmp_path,
+        image_head="300",
+        current_script="echo '300 (head)'",
+    )
+    result = _run_entrypoint(
+        path,
+        {
+            "KOR_TRAVEL_MAP_API_PROFILE": "production",
+            "KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD": "300",
+            "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED": "false",
+            "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED": "false",
+            "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256": "a" * 64,
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert not marker.exists(), "production final permit 경로에서 generic upgrade가 실행됐다."
 
 
 @pytest.mark.unit
@@ -3155,6 +3223,53 @@ def _dagster_runtime_command_stub_path(tmp_path: Path) -> str:
     return f"{bin_dir}:{os.environ['PATH']}"
 
 
+def _dagster_production_runtime_stub_path(
+    tmp_path: Path,
+) -> tuple[str, Path, Path]:
+    """production permit argv와 실제 runtime DSN을 함께 기록하는 PATH다."""
+
+    bin_dir = tmp_path / "dagster-production-bin"
+    bin_dir.mkdir()
+    permit_marker = tmp_path / "dagster-final-permit-argv"
+    runtime_dsn_marker = tmp_path / "dagster-runtime-dsn"
+    (bin_dir / "python").write_text(
+        "#!/bin/sh\n"
+        "if [ \"${1:-}\" = \"-m\" ] "
+        "&& [ \"${2:-}\" = \"kortravelmap.dagster.runtime_preflight\" ]; then\n"
+        "  if [ \"${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN+x}\" = \"x\" ]; then\n"
+        "    echo named-runtime-dsn-leaked >&2\n"
+        "    exit 71\n"
+        "  fi\n"
+        f"  printf '%s' \"$KOR_TRAVEL_MAP_PG_DSN\" > '{runtime_dsn_marker}'\n"
+        "  echo runtime-preflight\n"
+        "  exit 0\n"
+        "fi\n"
+        "if [ \"${1:-}\" = \"-c\" ]; then\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 70\n",
+        encoding="utf-8",
+    )
+    final_permit = bin_dir / "ktm-application-schema-final-permit"
+    final_permit.write_text(
+        "#!/bin/sh\n"
+        "if [ \"$#\" -ne 1 ] || [ \"${1:-}\" != \"verify-dagster\" ]; then\n"
+        "  echo unexpected-final-permit-argv >&2\n"
+        "  exit 72\n"
+        "fi\n"
+        f"printf '%s\\n' \"$1\" > '{permit_marker}'\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    for command in ("dagster-webserver", "dagster-daemon"):
+        target = bin_dir / command
+        target.write_text(f"#!/bin/sh\necho {command}-started\n", encoding="utf-8")
+        target.chmod(0o755)
+    (bin_dir / "python").chmod(0o755)
+    final_permit.chmod(0o755)
+    return f"{bin_dir}:{os.environ['PATH']}", permit_marker, runtime_dsn_marker
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize(
     ("command", "requires_preflight"),
@@ -3185,7 +3300,10 @@ def test_dagster_entrypoint_preflights_only_actual_runtime_commands(
     result = subprocess.run(
         ["sh", "docker/dagster-entrypoint.sh", *command],
         cwd=ROOT,
-        env={"PATH": _dagster_runtime_command_stub_path(tmp_path)},
+        env={
+            "PATH": _dagster_runtime_command_stub_path(tmp_path),
+            "KOR_TRAVEL_MAP_DAGSTER_PROFILE": "local-dev",
+        },
         check=False,
         capture_output=True,
         text=True,
@@ -3193,6 +3311,80 @@ def test_dagster_entrypoint_preflights_only_actual_runtime_commands(
 
     assert result.returncode == 0, result.stderr
     assert ("runtime-preflight" in result.stdout) is requires_preflight
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["dagster-webserver", "-m", "kortravelmap.dagster.definitions"],
+        ["dagster-daemon", "run", "-m", "kortravelmap.dagster.definitions"],
+    ],
+)
+def test_dagster_production_rejects_runtime_dsn_split_brain(
+    tmp_path: Path,
+    command: list[str],
+) -> None:
+    """permit가 본 DB와 Dagster가 쓰는 DB가 갈라지는 우회를 막는다."""
+
+    verified_dsn = "postgresql://dagster@example.invalid/verified"
+    result = subprocess.run(
+        ["sh", "docker/dagster-entrypoint.sh", *command],
+        cwd=ROOT,
+        env={
+            "PATH": _dagster_runtime_command_stub_path(tmp_path),
+            "KOR_TRAVEL_MAP_DAGSTER_PROFILE": "production",
+            "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": verified_dsn,
+            "KOR_TRAVEL_MAP_PG_DSN": "postgresql://dagster@example.invalid/different",
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert (
+        "KOR_TRAVEL_MAP_PG_DSN must exactly equal "
+        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN in production" in result.stderr
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["dagster-webserver", "-m", "kortravelmap.dagster.definitions"],
+        ["dagster-daemon", "run", "-m", "kortravelmap.dagster.definitions"],
+    ],
+)
+def test_dagster_production_uses_verified_runtime_dsn_for_preflight_and_runtime(
+    tmp_path: Path,
+    command: list[str],
+) -> None:
+    """같은 DSN으로 verifier와 Dagster runtime을 순서대로 결박한다."""
+
+    path, permit_marker, runtime_dsn_marker = _dagster_production_runtime_stub_path(
+        tmp_path
+    )
+    verified_dsn = "postgresql://dagster@example.invalid/verified"
+    result = subprocess.run(
+        ["sh", "docker/dagster-entrypoint.sh", *command],
+        cwd=ROOT,
+        env={
+            "PATH": path,
+            "KOR_TRAVEL_MAP_DAGSTER_PROFILE": "production",
+            "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": verified_dsn,
+            # 직접 실행/overlay도 compose와 똑같이 맞춘 경우에는 허용한다.
+            "KOR_TRAVEL_MAP_PG_DSN": verified_dsn,
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert permit_marker.read_text(encoding="utf-8") == "verify-dagster\n"
+    assert runtime_dsn_marker.read_text(encoding="utf-8") == verified_dsn
 
 
 @pytest.mark.unit
@@ -3215,7 +3407,7 @@ def test_dagster_image_ships_storage_command_without_map_alembic_chain() -> None
 
 @pytest.mark.unit
 def test_api_image_ships_static_application_schema_head_command() -> None:
-    """Manager candidate attestation은 API image의 설치 graph command만 호출한다."""
+    """candidate image는 head/fresh/permit 전용 executable을 함께 봉인한다."""
     api = _dockerfile("api.Dockerfile")
     pyproject = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
 
@@ -3223,6 +3415,18 @@ def test_api_image_ships_static_application_schema_head_command() -> None:
         "docker/application-schema-head.py /usr/local/bin/ktm-application-schema" in api
     )
     assert "/usr/local/bin/ktm-application-schema" in api
+    assert (
+        "docker/application-schema-fresh-300.py "
+        "/usr/local/bin/ktm-application-schema-fresh-300" in api
+    )
+    assert (
+        "docker/application-schema-final-permit.py "
+        "/usr/local/bin/ktm-application-schema-final-permit" in api
+    )
+    assert (
+        "docker/application-schema-contract.py "
+        "/usr/local/bin/ktm-application-schema-contract" in api
+    )
     assert "_application_migration_graph.json" in pyproject["tool"]["setuptools"][
         "package-data"
     ]["kortravelmap"]
@@ -3281,8 +3485,9 @@ def test_runtime_docker_images_are_multistage_and_non_root() -> None:
     dagster = _dockerfile("dagster.Dockerfile")
     frontend = _dockerfile("frontend.Dockerfile")
 
-    assert "FROM python:3.12-slim AS builder" in api
-    assert "FROM python:3.12-slim AS runtime" in api
+    assert "FROM python@sha256:" in api
+    assert " AS builder" in api
+    assert " AS runtime" in api
     assert "USER appuser" in api
     assert "-e ." not in api
 
@@ -3425,4 +3630,4 @@ def test_tvn_m05_external_db_overlays_do_not_start_local_phase_services() -> Non
             ), (overlay, service_name)
 
     object_store = _script("docker-compose.external-object-store.yml")
-    assert "db-role-bootstrap-300:" in object_store
+    assert "db-role-bootstrap-300:" not in object_store

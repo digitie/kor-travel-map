@@ -2936,8 +2936,8 @@ make_price_value_key(*, feature_id: str, provider: str, price_domain: str,
 - 일반 online 인덱스 추가는 `CREATE INDEX CONCURRENTLY`로 하되 lock acquisition·INVALID
   잔여를 검증한다. dedup 뒤 semantic UNIQUE가 필요한 0060은 writer race를 허용하지 않도록
   `SHARE ROW EXCLUSIVE`→dedup→non-concurrent UNIQUE를 한 transaction으로 수행한다. 삭제된
-  loser를 DDL로 복원할 수 없으므로 0060 downgrade는 거부하고 backup/PITR+구 writer image를
-  하나의 복구 단위로 사용한다.
+  loser를 DDL로 복원할 수 없으므로 0060 downgrade는 거부한다. `300` baseline 이후에는
+  backup/PITR·구 writer image를 복구 단위로 쓰지 않으며 fenced forward-fix만 허용한다.
 - 인덱스 삭제는 `DROP INDEX CONCURRENTLY IF EXISTS`.
 - 컬럼 타입 변경은 `USING` cast + downtime 또는 새 컬럼 + 백필 + swap.
 
@@ -2970,20 +2970,16 @@ DB reservation 이전의 orphan object나 object write 이전의 terminal succes
 
 ### 13.3 Filesystem completion proof
 
-backup marker에는 schema version, command/operation/marker key, effect kind/state,
-backup/restore target identity, request input digest, effect-specific output proof와 그
-canonical SHA-256, UTC completion time을 넣는다. create proof는 manifest와
-`SHA256SUMS` logical digest 및 모든 checksum 검증, delete proof는 동결 snapshot digest와
-artifact 부재, restore proof는 source checksum과 검증된 target identity, swap proof는
-`planned|applied` 구분과 canonical `.env.restore-swap` 파일 digest다.
+backup marker에는 schema version, command/operation/marker key, effect kind/state, backup
+artifact identity, request input digest, effect-specific output proof와 그 canonical SHA-256,
+UTC completion time을 넣는다. create proof는 manifest와 `SHA256SUMS` logical digest 및 모든
+checksum 검증, delete proof는 동결 snapshot digest와 artifact 부재다.
 
-marker 파일은 root 밖 경로·symlink·hardlink·foreign owner/mode를 거부하고 최초 exact
-marker를 덮어쓰지 않는다. restore 재시작은 exact command/source marker가 있을 때만 완료를
-채택한다. marker 없는 기존 target은 전부 healthy여도 provenance가 아니므로 자동 복구 성공으로
-인증하지 않으며, target 부재면 실행하고 기존/부분 target은 명시적 recreate 또는 운영자
-reconciliation으로 보낸다. backup create도 command/input digest가 fsync된 destination
-reservation을 effect 전에 선점하고, 다른 artifact나 marker 없는 artifact는 채택하지 않는다.
-swap은 고정 project child `.env.restore-swap`만 쓰며 plan-only와 실제 apply proof를 분리한다.
+marker 파일은 root 밖 경로·symlink·hardlink·foreign owner/mode를 거부하고 최초 exact marker를
+덮어쓰지 않는다. backup create도 command/input digest가 fsync된 destination reservation을 effect
+전에 선점하고, 다른 artifact나 marker 없는 artifact는 채택하지 않는다. `300` baseline에서는
+restore target, restore 재시작, swap apply 또는 `.env.restore-swap` proof가 없다. retire된
+restore/swap URI와 shell entrypoint는 marker/registry/database mutation 전에 fail-close한다.
 
 ## 이관된 결정 (구 ADR)
 

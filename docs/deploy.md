@@ -1,10 +1,11 @@
 # 배포 메모
 
 본 문서는 ADR-045/047/056 기준 독립 kor-travel-map app 배포의 현재 1차 기준이다.
-`T-209e-a/b/c` 기준 cold backup script, staging restore script/runbook, admin
-backup/restore router와 plan-only UI가 제공된다. `T-108`로 N150 16GB(x86_64)와
-Odroid M1S(ARM64) 양쪽 배포를 위한 multi-platform Docker build 절차를 추가했다.
-사용자 재지시에 따라 **streaming replication은 하지 않는다**.
+`300` baseline부터 backup은 보존·감사 artifact이고 restore/hot-swap/PITR 경로는 지원하지
+않는다. current admin surface는 backup artifact 조회·생성만 제공하고 retire된 restore URI는
+인증 뒤 `410 RESTORE_UNSUPPORTED`를 반환한다. `T-108`로 N150 16GB(x86_64)와 Odroid
+M1S(ARM64) 양쪽 배포를 위한 multi-platform Docker build 절차를 추가했다. 사용자
+재지시에 따라 **streaming replication은 하지 않는다**.
 
 ## 서비스
 
@@ -185,11 +186,11 @@ KOR_TRAVEL_MAP_BUILDX_OCI_DIR=dist/kor-travel-map-images-oci \
   npm run docker:buildx
 ```
 
-두 노드에 같은 tag를 배포할 수 있게 image manifest만 맞춘다. Postgres
-streaming replication은 하지 않는다. 운영 DB 복구성은 cold backup/restore와
-hot-swap restore 훈련으로 검증하고, 공유 RustFS는 `kor-travel-docker-manager` 정본을 따른다.
+두 노드에 같은 tag를 배포할 수 있게 image manifest만 맞춘다. Postgres streaming
+replication은 하지 않는다. backup artifact는 감사·사고 분석용으로만 보존하며, 공유
+RustFS의 운영 절차는 `kor-travel-docker-manager` 정본을 따른다.
 
-## 백업
+## 백업 보존·감사 (복원 비지원)
 
 백업 대상은 PinVi와 분리된 `kor_travel_map` app DB, `kor_travel_map_dagster` Dagster
 metadata DB, RustFS volume의 3종 묶음이다. cold backup은 write path를 멈춘 뒤 실행한다.
@@ -197,19 +198,18 @@ metadata DB, RustFS volume의 3종 묶음이다. cold backup은 write path를 �
 ```bash
 docker compose stop api frontend dagster dagster-daemon rustfs
 npm run docker:backup
-npm run docker:restore -- <backup_id>
 ```
 
-restore 기본 대상은 `kor_travel_map_restore`, `kor_travel_map_dagster_restore`,
-`kor-travel-map-rustfs-restore`라 운영 DB/volume에 직접 쓰지 않는다. 산출물과 검증 절차는
-`docs/backup-restore.md`를 따른다.
+산출물의 의미·read-only 검증·금지된 수동 변경은 `docs/backup-restore.md`를 따른다.
+`npm run docker:restore`, dump import, volume 교체, hot-swap, PITR, archive Alembic replay와
+수동 version-table SQL은 지원되지 않는다.
 
-## vNext write-fence cutover와 rollback (ADR-075)
+## vNext write-fence cutover (forward-only)
 
-vNext schema/API 전환은 일반 image 교체가 아니라 데이터 보존 작업이다. 배포 전 정본·감사·파생
-데이터를 분류하고, production clone에서 restore/PITR 또는 forward journal replay와 shadow
-checksum을 검증한다. upstream 재수집은 닫힌 feed, quota, 3년 weather 이력을 복원하지 못하므로
-정본 복구책으로 인정하지 않는다.
+vNext schema/API 전환은 일반 image 교체가 아니라 forward-only data contract 전환이다. 배포 전
+정본·감사·파생 데이터를 분류하고, immutable candidate의 isolated fresh acceptance 또는
+controlled handoff와 shadow checksum을 검증한다. upstream 재수집은 closed feed, quota, 3년
+weather 이력을 대신하는 복구책으로 취급하지 않는다.
 
 배포 순서는 다음과 같다.
 
@@ -220,10 +220,9 @@ checksum을 검증한다. upstream 재수집은 닫힌 feed, quota, 3년 weather
 5. shadow backfill 검증 후 KTM DB/API를 전환하고 PinVi 기능을 활성화한다.
 6. 양방향 smoke와 reconciliation을 통과한 뒤 soak한다. legacy column/table/alias 제거는 별도 PR이다.
 
-Rollback은 fence 이후 write가 없을 때만 old snapshot restore를 허용한다. write가 있었다면 PITR 또는
-forward journal로 해당 delta를 이전 schema에 적용하고 checksum을 다시 맞춘 뒤 writer를 연다.
-복구 경로가 검증되지 않았거나 어느 쪽 identity/lineage라도 불일치하면 서비스를 read-only로 유지하고
-forward-fix한다. lock acquisition timeout과 실제 중단 시간은 별도로 기록한다.
+실패 또는 identity/lineage ambiguity가 생기면 writer fence를 유지하고 forward-fix candidate를
+새 transaction에서 검증한다. old snapshot, PITR, old image, Alembic downgrade를 통한 rollback은
+허용하지 않는다. lock acquisition timeout과 실제 중단 시간은 별도로 기록한다.
 
 ## T-VN-33 (0084~0091) 배포 — 단발·forward-only
 
@@ -239,7 +238,8 @@ DDL은 남고 stamp만 `0089`인** 상태가 된다. 재시도는 `0090`부터 �
 전제로 하며, `0090`의 DDL은 모두 그 재실행에 안전하도록 작성돼 있다
 (constraint는 `DROP ... IF EXISTS` 선행, index는 `DROP INDEX CONCURRENTLY IF EXISTS`
 선행, `ADD COLUMN`은 `IF NOT EXISTS`). **`alembic_version`을 손으로 고치지 말 것** —
-그대로 `alembic upgrade head`를 다시 실행하면 된다.
+당시에는 legacy migration 재실행으로 처리했다. 이 문단은 `0084`~`0091` 보존 이력이며,
+현재 `300` production에 실행 지침으로 적용하지 않는다.
 
 **`0091`은 중단될 수 있고, 그 경우 통째로 롤백된다.** `0091`은 preflight 4개를 갖고
 있고 어느 하나라도 걸리면 `RAISE`한다. `0091`에는 `autocommit_block`이 없으므로
@@ -299,7 +299,7 @@ cd ~/kor-travel-docker-manager
 sudo docker compose --env-file .env -f docker-compose.yml -f docker-compose.override.yml   build kor-travel-map-api kor-travel-map-ui kor-travel-map-dagster kor-travel-map-dagster-daemon
 # 3) **선행조건 A** — 0202 이후는 ktm_curation_* NOLOGIN role 4개를 요구한다
 sudo docker compose --env-file .env -f docker-compose.yml -f docker-compose.override.yml   --profile bootstrap run --rm --no-deps kor-travel-map-db-role-bootstrap
-# 4) api 재생성 → entrypoint가 alembic upgrade head (0104→0223 단일 트랜잭션)
+# 4) [보존 이력 · 실행 금지] 당시 API entrypoint가 legacy migration을 실행
 sudo docker compose --env-file .env -f ... up -d --no-deps kor-travel-map-api
 # 5) 나머지 서비스
 sudo docker compose --env-file .env -f ... up -d kor-travel-map-ui kor-travel-map-dagster kor-travel-map-dagster-daemon
@@ -432,9 +432,9 @@ localhost에만 열린다. API, Dagster, RustFS console처럼 코드 인증이 �
   이름으로 매핑하면 운영 실수가 준다(구 ADR-047, 위 §환경변수에서 결정).
 - Docker image는 `linux/amd64`(N150 16GB)와 `linux/arm64`(Odroid M1S)를 같은 tag로
   buildx 빌드하고, DB HA(streaming replication·자동 failover·VIP/DNS 전환·RustFS 다중
-  노드 복제)는 범위 밖으로 두며 운영 DB 복구성은 cold backup/restore와 hot-swap restore
-  훈련으로 확인한다 — 같은 manifest여야 두 노드 배포 절차가 갈라지지 않고, DB HA는 운영
-  토폴로지 확정 후 별도로 다루는 편이 낫기 때문이다(구 ADR-056, 위 §T-108에서 결정).
+  노드 복제)는 범위 밖으로 두며 backup artifact는 audit-only로 보존한다 — 같은 manifest여야
+  두 노드 배포 절차가 갈라지지 않고, DB HA는 운영 토폴로지 확정 후 별도로 다루는 편이 낫기
+  때문이다(구 ADR-056, 위 §T-108에서 결정).
 - admin UI(`kor-travel-map-admin`)를 디버그 전용에서 프로덕션 admin/유지보수 surface로 확장한
   결정은 유지한다. 과거에는 네트워크 계층만으로 보호했지만 ADR-060의 로그인/BFF와 ADR-066의
   production fail-closed app gate가 이를 supersede했다. 네트워크 SSO/IP allowlist와 bind host
@@ -445,7 +445,7 @@ localhost에만 열린다. API, Dagster, RustFS console처럼 코드 인증이 �
 ## 아직 남은 운영 확장
 
 - Dagster provider public client live fetcher 실제 연결(T-RV-04b).
-- staging restore smoke/count check와 hot-swap 자동 실행.
+- 지원되는 recovery format을 새로 설계할 때까지 backup artifact의 read-only 감사 검증만 유지.
 - T-RV-19/20/21 및 offline-upload 후속처럼 router/schema/운영 hardening에 남은 항목.
 - 자동 failover, Postgres streaming replication, RustFS 다중 노드 복제는 T-108 범위 밖이다.
   현재 T-108은 deterministic multi-platform build까지를 닫는다.

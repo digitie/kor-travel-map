@@ -4,7 +4,7 @@
 
 T-VN-41D는 cache-target diagnostic과 최초 cutover의 writer fence 앞에서 Map Dagster
 producer를 안전하게 비우는 **Map 소유** control plane이다. Docker Manager는 전역
-lock, frozen Compose, 전체 writer stop, backup/restore와 journal을 소유한다. 반면
+lock, frozen Compose, 전체 writer stop, audit-only backup artifact와 journal을 소유한다. 반면
 schedule/sensor의 원래 상태, Dagster run의 terminal-cancel 판단과 그 복구 증적은 Map만
 소유한다.
 
@@ -90,14 +90,12 @@ recreate하고(daemon은 계속 정지), private runner로 `restore`한다. 그 
 compatible pair attestation이 맞은 뒤에만 daemon을 포함한 writer를 재기동한다. 이 순서가
 없으면 schedule을 먼저 열어 새 run을 만들 수 있으므로 archive/resume하지 않는다.
 
-cutover에서 backup bundle이 commit되기 전 drain 실패는 DB restore나 full runtime coupled
-rollback으로 처리하지 않는다. Map lease exact restore와 pair re-attestation만 하는
-pre-backup recovery다. backup bundle 이후 실패만 기존 DB backup/restore coupled rollback을
-사용한다. 이 rollback이 Map application/Dagster DB를 `drained` lease와 paused instigation으로
-복원한 경우에도, Manager는 Map Dagster webserver만 먼저 세운 뒤 같은 lease의 `restore` receipt를
-durable journal에 기록한다. 그 뒤에만 daemon을 포함한 old runtime을 열고 prior pair를
-re-attest한다. 개발 중간 데이터는 recovery 대상이 아니며 file source 또는 ETL 재실행으로
-재생성한다. 단, 최종 schema의 backup/restore rehearsal은 계속 필수다.
+cutover에서 backup artifact를 남기기 전후 어느 drain 실패도 DB restore나 old runtime coupled
+rollback으로 처리하지 않는다. Map lease의 `restore`는 **writer schedule/sensor 상태를 원래대로
+되돌리는 control-plane operation**일 뿐 DB 복원이 아니다. pair re-attestation 뒤 writer를
+재개하거나, schema/contract failure이면 writer fence를 유지해 `300` 위의 forward fix를 새
+candidate로 검증한다. 개발 중간 데이터는 recovery 대상이 아니며 file source 또는 ETL 재실행으로
+재생성한다. backup artifact는 read-only 감사 검증만 한다.
 
 ## 5. 격리 검증
 

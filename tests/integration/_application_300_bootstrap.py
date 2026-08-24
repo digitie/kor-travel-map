@@ -154,7 +154,8 @@ async def bootstrap_application_300_roles(engine: AsyncEngine) -> str:
                         END IF;
                         EXECUTE format(
                             'ALTER ROLE %I NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB '
-                            || 'NOCREATEROLE NOBYPASSRLS NOREPLICATION',
+                            || 'NOCREATEROLE NOBYPASSRLS NOREPLICATION '
+                            || 'CONNECTION LIMIT -1 VALID UNTIL ''infinity''',
                             role_name
                         );
                     END LOOP;
@@ -189,7 +190,8 @@ async def bootstrap_application_300_roles(engine: AsyncEngine) -> str:
             await connection.execute(
                 text(
                     f"ALTER ROLE {role} LOGIN NOINHERIT NOSUPERUSER NOCREATEDB "
-                    "NOCREATEROLE NOBYPASSRLS NOREPLICATION "
+                    "NOCREATEROLE NOBYPASSRLS NOREPLICATION CONNECTION LIMIT -1 "
+                    "VALID UNTIL 'infinity' "
                     f"PASSWORD {quoted_password}"
                 )
             )
@@ -229,9 +231,46 @@ async def bootstrap_application_300_roles(engine: AsyncEngine) -> str:
                 "application-300 test bootstrap requires postgis in x_extension; "
                 "existing DB repair/drop is unsupported"
             )
-        for extension in ("postgis", "pg_trgm", "pgcrypto"):
+        # `baseline-300` fresh bootstrap와 같은 full source extension inventory를 만든다.
+        # 어떤 extension도 helper만 optional로 두지 않는다. 그러면 fresh test가 certified
+        # production bootstrap과 다른 database를 조용히 승인할 수 있다.
+        await connection.execute(
+            text("CREATE EXTENSION IF NOT EXISTS fuzzystrmatch WITH SCHEMA public")
+        )
+        for extension, schema in (
+            ("postgis", "x_extension"),
+            ("pg_trgm", "x_extension"),
+            ("pgcrypto", "x_extension"),
+            ("pg_prewarm", "x_extension"),
+        ):
             await connection.execute(
-                text(f"CREATE EXTENSION IF NOT EXISTS {extension} WITH SCHEMA x_extension")
+                text(f"CREATE EXTENSION IF NOT EXISTS {extension} WITH SCHEMA {schema}")
+            )
+        expected_extensions = {
+            ("fuzzystrmatch", "public"),
+            ("pgcrypto", "x_extension"),
+            ("pg_prewarm", "x_extension"),
+            ("pg_trgm", "x_extension"),
+            ("plpgsql", "pg_catalog"),
+            ("postgis", "x_extension"),
+        }
+        observed_extensions = {
+            (str(row.extname), str(row.nspname))
+            for row in (
+                await connection.execute(
+                    text(
+                        "SELECT extension.extname, namespace.nspname "
+                        "FROM pg_catalog.pg_extension AS extension "
+                        "JOIN pg_catalog.pg_namespace AS namespace "
+                        "ON namespace.oid = extension.extnamespace"
+                    )
+                )
+            ).mappings()
+        }
+        if observed_extensions != expected_extensions:
+            raise RuntimeError(
+                "application-300 test bootstrap extension inventory drifted: "
+                f"{sorted(observed_extensions)!r}"
             )
 
         await connection.execute(text("REVOKE ALL ON SCHEMA x_extension FROM PUBLIC"))

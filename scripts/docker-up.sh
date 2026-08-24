@@ -222,6 +222,21 @@ unset \
   KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256 \
   KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED
 
+# 이 launcher는 developer workstation stack 전용이다. production API profile은 final
+# permit과 Docker Manager transaction 없이는 기동하지 않아야 하므로, host가 production
+# 값을 넘겨도 그 의미를 덮어쓰지 않고 명시적으로 거절한 뒤 child compose에만 local-dev를
+# 고정한다.
+if [[ -n "${KOR_TRAVEL_MAP_API_PROFILE:-}" && "${KOR_TRAVEL_MAP_API_PROFILE}" != "local-dev" ]]; then
+  echo "scripts/docker-up.sh is local-dev only; production API profile is not accepted" >&2
+  exit 1
+fi
+if [[ -n "${KOR_TRAVEL_MAP_DAGSTER_PROFILE:-}" && "${KOR_TRAVEL_MAP_DAGSTER_PROFILE}" != "local-dev" ]]; then
+  echo "scripts/docker-up.sh is local-dev only; production Dagster profile is not accepted" >&2
+  exit 1
+fi
+export KOR_TRAVEL_MAP_API_PROFILE=local-dev
+export KOR_TRAVEL_MAP_DAGSTER_PROFILE=local-dev
+
 export KOR_TRAVEL_MAP_GIT_COMMIT="$(git -C "$ROOT_DIR" rev-parse HEAD)"
 
 # 외부(공유) 객체 저장소 모드 (#372, ADR-052 amendment):
@@ -237,7 +252,11 @@ external_db="${KOR_TRAVEL_MAP_DB_EXTERNAL:-false}"
 external_object_store="${KOR_TRAVEL_MAP_OBJECT_STORE_EXTERNAL:-false}"
 
 compose_files=(-f docker-compose.yml)
-services=(postgres dagster-db-init db-role-bootstrap-300 dagster-storage-migrate api frontend dagster dagster-daemon)
+# fresh baseline 준비는 normal launcher의 dependency가 아니다. 빈 dedicated DB는
+# 먼저 `docker compose --profile fresh-init run --rm db-application-schema-fresh-300`으로
+# bootstrap→restricted root migration one-shot을 끝내고, 이 launcher는 검증된 `300`
+# DB의 restart만 수행한다.
+services=(postgres dagster-db-init dagster-storage-migrate api frontend dagster dagster-daemon)
 ports=("$KOR_TRAVEL_MAP_API_PORT" "$KOR_TRAVEL_MAP_ADMIN_WEB_PORT" "$KOR_TRAVEL_MAP_DAGSTER_PORT")
 
 if [[ "$external_infra" == "true" ]]; then
@@ -250,7 +269,7 @@ elif [[ "$external_db" == "true" ]]; then
 elif [[ "$external_object_store" == "true" ]]; then
   compose_files+=(-f docker-compose.external-object-store.yml)
 else
-  services=(postgres dagster-db-init db-role-bootstrap-300 rustfs rustfs-init dagster-storage-migrate api frontend dagster dagster-daemon)
+  services=(postgres dagster-db-init rustfs rustfs-init dagster-storage-migrate api frontend dagster dagster-daemon)
   ports+=("$KOR_TRAVEL_MAP_RUSTFS_API_PORT" "$KOR_TRAVEL_MAP_RUSTFS_CONSOLE_PORT")
 fi
 

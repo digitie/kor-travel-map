@@ -46,8 +46,6 @@ from kortravelmap.infra.domain_command_marker import (
     backup_artifact_output_proof,
     delete_output_proof,
     reserve_backup_destination,
-    restore_output_proof,
-    swap_output_proof,
     verify_domain_command_marker,
     write_domain_command_marker,
 )
@@ -82,7 +80,7 @@ router = APIRouter(prefix="/admin/backups", tags=["admin-backups"])
 restore_router = APIRouter(prefix="/admin/restore", tags=["admin-backups"])
 
 BackupOperation = Literal["backup"]
-BackupOperationStatus = Literal["planned", "completed", "failed", "manual_required"]
+BackupOperationStatus = Literal["planned", "completed", "failed"]
 _SUPERVISED_COMMAND_COMMUNICATIONS: set[asyncio.Task[tuple[bytes, bytes]]] = set()
 _DOCKER_EFFECT_FENCE_NAME = "kor-travel-map-maintenance-effect-fence-v1"
 
@@ -217,37 +215,6 @@ class BackupRunRequest(BaseModel):
     execute: bool = False
 
 
-class RestoreRunRequest(BaseModel):
-    """Staging restore command request."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    app_db: str | None = Field(default=None, min_length=1)
-    dagster_db: str | None = Field(default=None, min_length=1)
-    rustfs_volume: str | None = Field(default=None, min_length=1)
-    recreate: bool = False
-    skip_checksum: bool = False
-    skip_rustfs: bool = False
-    execute: bool = False
-
-
-class RestoreSwapRequest(BaseModel):
-    """Retired restore hot-swap request shape.
-
-    T-VN-H46H 이후 endpoint 자체가 recovery format 부재로 410을 반환한다. 검증을
-    생략하는 public escape hatch는 의도적으로 제공하지 않는다.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    app_db: str | None = Field(default=None, min_length=1)
-    dagster_db: str | None = Field(default=None, min_length=1)
-    rustfs_volume: str | None = Field(default=None, min_length=1)
-    apply: bool = False
-    execute: bool = False
-    note: str | None = None
-
-
 class BackupCommandPlan(BaseModel):
     """Command plan returned by the backup endpoint."""
 
@@ -257,16 +224,6 @@ class BackupCommandPlan(BaseModel):
     command: list[str]
     env: dict[str, str]
     enabled: bool
-
-
-class RestoreTargets(BaseModel):
-    """Staging restore targets."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    app_db: str
-    dagster_db: str
-    rustfs_volume: str
 
 
 class BackupOperationData(BaseModel):
@@ -1376,20 +1333,6 @@ async def create_backup(
     return response
 
 
-def _restore_targets_from_values(
-    settings: ApiSettings,
-    *,
-    app_db: str | None,
-    dagster_db: str | None,
-    rustfs_volume: str | None,
-) -> RestoreTargets:
-    return RestoreTargets(
-        app_db=validate_backup_id(app_db or settings.restore_app_db),
-        dagster_db=validate_backup_id(dagster_db or settings.restore_dagster_db),
-        rustfs_volume=validate_backup_id(rustfs_volume or settings.restore_rustfs_volume),
-    )
-
-
 @restore_router.post(
     "/{backup_id}",
     status_code=status.HTTP_410_GONE,
@@ -1404,194 +1347,12 @@ def _restore_targets_from_values(
     },
 )
 async def restore_backup(
-    request: Request,
     backup_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
-    engine: Annotated[AsyncEngine, Depends(get_engine)],
-    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
-    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
-    body: RestoreRunRequest | None = None,
 ) -> NoReturn:
-    """Retired restore endpoint — no plan or host command is issued."""
-    del request, backup_id, session, engine, context, idempotency_key, body
-    raise _restore_unsupported()
+    """Retired compatibility URI — no body, DB access, or host command exists."""
 
-    # 아래 legacy implementation은 `300` recovery format을 설계할 때까지 실행 불가다.
-    # Guard보다 뒤에 남긴 것은 old artifact audit context만 보존하기 위해서다.
-    started_at = perf_counter()
-    settings = _settings(request)
-    try:
-        safe_id = validate_backup_id(backup_id)
-    except BackupArtifactError as exc:
-        raise _invalid_backup_id(exc) from exc
-    payload = body or RestoreRunRequest()
-    try:
-        artifact = _record(backup_artifact(settings.backup_root, safe_id))
-    except BackupArtifactError as exc:
-        raise _backup_error(exc) from exc
-    try:
-        targets = _restore_targets_from_values(
-            settings,
-            app_db=payload.app_db,
-            dagster_db=payload.dagster_db,
-            rustfs_volume=payload.rustfs_volume,
-        )
-    except BackupArtifactError as exc:
-        raise _invalid_backup_id(exc) from exc
-    env = {
-        "KOR_TRAVEL_MAP_BACKUP_ROOT": str(settings.backup_root),
-        "KOR_TRAVEL_MAP_RESTORE_BACKUP_ID": safe_id,
-        "KOR_TRAVEL_MAP_RESTORE_APP_DB": targets.app_db,
-        "KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB": targets.dagster_db,
-        "KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME": targets.rustfs_volume,
-        "KOR_TRAVEL_MAP_RESTORE_RECREATE": "1" if payload.recreate else "0",
-        "KOR_TRAVEL_MAP_RESTORE_SKIP_CHECKSUM": "1" if payload.skip_checksum else "0",
-        "KOR_TRAVEL_MAP_RESTORE_SKIP_RUSTFS": "1" if payload.skip_rustfs else "0",
-    }
-    plan = _command_plan(
-        settings=settings,
-        script=settings.restore_script_path,
-        env=env,
-        args=[safe_id],
-    )
-    command_payload = {
-        **payload.model_dump(mode="json"),
-        "backup_id": safe_id,
-        "targets": targets.model_dump(mode="json"),
-    }
-    if not payload.execute:
-        response = BackupOperationResponse(
-            data=BackupOperationData(
-                operation="restore",
-                status="planned",
-                backup_id=safe_id,
-                message="staging restore command plan을 생성했습니다.",
-                artifact=artifact,
-                restore_targets=targets,
-                command=plan,
-            ),
-            meta=make_meta(started_at=started_at),
-        )
-        return await _complete_planned_command(
-            session,
-            actor=context.actor,
-            operation="admin.backup.restore",
-            idempotency_key=idempotency_key,
-            payload=command_payload,
-            response=response,
-        )
-    if not settings.backup_command_enabled:
-        raise _command_disabled()
-    prepared = await _prepare_backup_command(
-        session,
-        actor=context.actor,
-        operation="admin.backup.restore",
-        idempotency_key=idempotency_key,
-        payload=command_payload,
-        effect_kind="restore",
-        backup_id=safe_id,
-        app_db=targets.app_db,
-        dagster_db=targets.dagster_db,
-        rustfs_volume=targets.rustfs_volume,
-        start_effect=False,
-    )
-    prepared = await _start_prepared_backup_command(
-        session,
-        engine,
-        settings,
-        prepared,
-    )
-    plan = _plan_with_marker(
-        plan,
-        prepared,
-        recovery=not prepared.started_now,
-    )
-    restore_proof = restore_output_proof(
-        settings.backup_root,
-        safe_id,
-        app_db=targets.app_db,
-        dagster_db=targets.dagster_db,
-        rustfs_volume=targets.rustfs_volume,
-        verification="performed",
-    )
-    marker_sha256 = await _marker_proof(
-        settings,
-        prepared,
-        effect_state="restored",
-        output_proof=restore_proof,
-    )
-    result: _CommandResult | None = None
-    if marker_sha256 is None:
-        if not prepared.started_now:
-            raise _effect_reconciliation_required(
-                prepared,
-                reason="effect_started command에 exact terminal marker가 없음",
-            )
-        result = await _run_command(
-            plan,
-            timeout_seconds=settings.backup_command_timeout_seconds,
-        )
-        if result.returncode != 0:
-            _raise_external_command_failure(
-                result,
-                prepared=prepared,
-                code="RESTORE_COMMAND_FAILED",
-                message="restore command 실행이 실패했습니다.",
-            )
-        marker_sha256 = await _marker_proof(
-            settings,
-            prepared,
-            effect_state="restored",
-            output_proof=restore_proof,
-        )
-        if marker_sha256 is None:
-            raise _pending_execution(prepared)
-    await _release_docker_effect_fence(settings, prepared)
-    response = BackupOperationResponse(
-        data=BackupOperationData(
-            operation="restore",
-            status="completed",
-            backup_id=safe_id,
-            message="staging restore command 실행이 완료됐습니다.",
-            artifact=artifact,
-            restore_targets=targets,
-            command=plan,
-            stdout=result.stdout if result is not None else None,
-            stderr=result.stderr if result is not None else None,
-        ),
-        meta=make_meta(started_at=started_at),
-    )
-    await _complete_backup_command(
-        session,
-        prepared=prepared,
-        response=response,
-        marker_sha256=marker_sha256,
-    )
-    # 파일 registry hook (H3) — 복원 = 소비이므로 last_loaded_at 갱신, 실패 무해.
-    async with file_registry.registry_guard("backup:restore"), session.begin():
-        touched = await file_registry.touch_loaded(
-            session,
-            storage_backend="filesystem",
-            location=MANAGED_FILE_LOCATION_BACKUP_ROOT,
-            path=safe_id,
-            event_kind="restored",
-            actor=context.actor,
-            detail={"targets": targets.model_dump()},
-        )
-        if not touched:
-            # 미등록 artifact(수동 생성분) — 등록 후 restored 기록.
-            try:
-                raw = backup_artifact(settings.backup_root, safe_id)
-            except BackupArtifactError:
-                raw = None
-            if raw is not None:
-                await _registry_upsert_backup(
-                    session,
-                    raw,
-                    actor=context.actor,
-                    event_kind="restored",
-                )
-    return response
+    del backup_id
+    raise _restore_unsupported()
 
 
 @restore_router.post(
@@ -1608,225 +1369,9 @@ async def restore_backup(
     },
 )
 async def plan_restore_swap(
-    request: Request,
     backup_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
-    engine: Annotated[AsyncEngine, Depends(get_engine)],
-    context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
-    idempotency_key: Annotated[UUID, Header(alias="Idempotency-Key")],
-    body: RestoreSwapRequest | None = None,
 ) -> NoReturn:
-    """Retired restore hot-swap endpoint — no plan or host command is issued."""
-    del request, backup_id, session, engine, context, idempotency_key, body
-    raise _restore_unsupported()
+    """Retired compatibility URI — no body, DB access, or host command exists."""
 
-    # 아래 legacy implementation은 `300` recovery format을 설계할 때까지 실행 불가다.
-    # Guard보다 뒤에 남긴 것은 old artifact audit context만 보존하기 위해서다.
-    started_at = perf_counter()
-    settings = _settings(request)
-    try:
-        safe_id = validate_backup_id(backup_id)
-    except BackupArtifactError as exc:
-        raise _invalid_backup_id(exc) from exc
-    payload = body or RestoreSwapRequest()
-    try:
-        artifact = _record(backup_artifact(settings.backup_root, safe_id))
-    except BackupArtifactError as exc:
-        raise _backup_error(exc) from exc
-    try:
-        targets = _restore_targets_from_values(
-            settings,
-            app_db=payload.app_db,
-            dagster_db=payload.dagster_db,
-            rustfs_volume=payload.rustfs_volume,
-        )
-    except BackupArtifactError as exc:
-        raise _invalid_backup_id(exc) from exc
-    env = {
-        "KOR_TRAVEL_MAP_BACKUP_ROOT": str(settings.backup_root),
-        "KOR_TRAVEL_MAP_RESTORE_BACKUP_ID": safe_id,
-        "KOR_TRAVEL_MAP_RESTORE_APP_DB": targets.app_db,
-        "KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB": targets.dagster_db,
-        "KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME": targets.rustfs_volume,
-        "KOR_TRAVEL_MAP_RESTORE_SWAP_APPLY": "1" if payload.apply else "0",
-        "KOR_TRAVEL_MAP_RESTORE_SWAP_SKIP_VERIFY": "0",
-    }
-    plan = _command_plan(
-        settings=settings,
-        script=settings.restore_swap_script_path,
-        env=env,
-    )
-    command_payload = {
-        **payload.model_dump(mode="json"),
-        "backup_id": safe_id,
-        "targets": targets.model_dump(mode="json"),
-    }
-    if not payload.execute:
-        response = BackupOperationResponse(
-            data=BackupOperationData(
-                operation="swap",
-                status="planned",
-                backup_id=safe_id,
-                message="restore hot-swap command plan을 생성했습니다.",
-                artifact=artifact,
-                restore_targets=targets,
-                command=plan,
-            ),
-            meta=make_meta(started_at=started_at),
-        )
-        return await _complete_planned_command(
-            session,
-            actor=context.actor,
-            operation="admin.backup.swap",
-            idempotency_key=idempotency_key,
-            payload=command_payload,
-            response=response,
-        )
-    if not settings.backup_command_enabled:
-        raise _command_disabled()
-    prepared = await _prepare_backup_command(
-        session,
-        actor=context.actor,
-        operation="admin.backup.swap",
-        idempotency_key=idempotency_key,
-        payload=command_payload,
-        effect_kind="swap",
-        backup_id=safe_id,
-        app_db=targets.app_db,
-        dagster_db=targets.dagster_db,
-        rustfs_volume=targets.rustfs_volume,
-        start_effect=False,
-    )
-    prepared = await _start_prepared_backup_command(
-        session,
-        engine,
-        settings,
-        prepared,
-    )
-    plan = _plan_with_marker(
-        plan,
-        prepared,
-        recovery=not prepared.started_now,
-    )
-    effect_state = "swap_applied" if payload.apply else "swap_planned"
-    swap_env_file = settings.backup_project_root / ".env.restore-swap"
-    try:
-        swap_proofs = tuple(
-            swap_output_proof(
-                settings.backup_root,
-                safe_id,
-                app_db=targets.app_db,
-                dagster_db=targets.dagster_db,
-                rustfs_volume=targets.rustfs_volume,
-                env_file=swap_env_file,
-                effect_state=effect_state,
-                verification=verification,
-            )
-            for verification in (
-                "performed",
-                "recovery_performed",
-            )
-        )
-    except (OSError, ValueError):
-        swap_proofs = ()
-    marker_sha256 = (
-        await _marker_proof_variants(
-            settings,
-            prepared,
-            effect_state=effect_state,
-            output_proofs=swap_proofs,
-        )
-        if swap_proofs
-        else None
-    )
-    result: _CommandResult | None = None
-    if marker_sha256 is None:
-        if not prepared.started_now:
-            raise _effect_reconciliation_required(
-                prepared,
-                reason="effect_started command에 exact terminal marker가 없음",
-            )
-        result = await _run_command(
-            plan,
-            timeout_seconds=settings.backup_command_timeout_seconds,
-        )
-        if result.returncode != 0:
-            _raise_external_command_failure(
-                result,
-                prepared=prepared,
-                code="RESTORE_SWAP_COMMAND_FAILED",
-                message="restore hot-swap command 실행이 실패했습니다.",
-            )
-        try:
-            swap_proofs = tuple(
-                swap_output_proof(
-                    settings.backup_root,
-                    safe_id,
-                    app_db=targets.app_db,
-                    dagster_db=targets.dagster_db,
-                    rustfs_volume=targets.rustfs_volume,
-                    env_file=swap_env_file,
-                    effect_state=effect_state,
-                    verification=verification,
-                )
-                for verification in (
-                    "performed",
-                    "recovery_performed",
-                )
-            )
-        except (OSError, ValueError) as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail={
-                    "code": "RESTORE_SWAP_OUTPUT_INVALID",
-                    "message": "restore hot-swap output 검증에 실패했습니다.",
-                    "details": {"error": str(exc)},
-                },
-            ) from exc
-        marker_sha256 = await _marker_proof_variants(
-            settings,
-            prepared,
-            effect_state=effect_state,
-            output_proofs=swap_proofs,
-        )
-        if marker_sha256 is None:
-            raise _pending_execution(prepared)
-    await _release_docker_effect_fence(settings, prepared)
-    response = BackupOperationResponse(
-        data=BackupOperationData(
-            operation="swap",
-            status="completed",
-            backup_id=safe_id,
-            message="restore hot-swap command 실행이 완료됐습니다.",
-            artifact=artifact,
-            restore_targets=targets,
-            command=plan,
-            stdout=result.stdout if result is not None else None,
-            stderr=result.stderr if result is not None else None,
-        ),
-        meta=make_meta(started_at=started_at),
-    )
-    await _complete_backup_command(
-        session,
-        prepared=prepared,
-        response=response,
-        marker_sha256=marker_sha256,
-    )
-    # 파일 registry hook (H10) — swap 스위치 파일(.env.restore-swap)을 temp로 등록.
-    async with file_registry.registry_guard("backup:swap-env-file"), session.begin():
-        env_file = str(settings.backup_project_root / ".env.restore-swap")
-        await file_registry.register_file(
-            session,
-            storage_backend="filesystem",
-            location=MANAGED_FILE_LOCATION_BACKUP_ROOT,
-            path=Path(env_file).name,
-            kind="temp",
-            actor=context.actor,
-            downloaded_at=datetime.now(UTC),
-            meta={
-                "physical": {"path": env_file},
-                "backup_id": safe_id,
-                "purpose": "restore hot-swap env switch",
-            },
-        )
-    return response
+    del backup_id
+    raise _restore_unsupported()

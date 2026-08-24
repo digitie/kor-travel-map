@@ -10,12 +10,19 @@ DB를 부트스트랩하고 내부 라이브러리 client를 초기화하는 절
 1. PostgreSQL 16 + PostGIS 3.5와 dedicated DB (`kor_travel_map`)를 준비한다.
 2. ignored deployment env/vault에서 bootstrap, migrator, API runtime, Dagster runtime의
    서로 다른 credential을 주입한다.
-3. `db-role-bootstrap`을 명시 confirmation과 함께 한 번 실행한다. 이 단계가 NOLOGIN
-   `ktm_feature_schema_owner`와 runtime group을 만들고 기존 object/DB ownership을 schema
-   owner로 forward transfer한다.
-4. LOGIN `ktm_feature_migrator`가 전용 Alembic connection에서 `SET ROLE ktm_feature_schema_owner`로 실행한다.
-5. 같은 migrator session 계열이 `python -m kortravelmap.infra.runtime_privileges`를 실행해
-   closed table ACL inventory를 다시 부여한다. PostgreSQL default privilege는 사용하지 않는다.
+3. virgin DB에만 `docker compose --profile fresh-init run --rm
+   db-application-schema-fresh-300`을 명시 confirmation과 함께 한 번 실행한다. 이 one-shot은
+   내부적으로 role/schema/extension bootstrap을 완료한 뒤 NOLOGIN `ktm_feature_schema_owner`와
+   runtime group의 final ownership을 설정하고, 다음 restricted root migration까지 실행한다.
+   기존 `0236` DB의 object/DB ownership transfer는 이 경로로 수행하지 않는다.
+4. candidate image의 고정 `ktm-application-schema-fresh-300 migrate`만 LOGIN
+   `ktm_feature_migrator` connection에서 `SET ROLE ktm_feature_schema_owner`로 실행한다. API
+   daemon entrypoint나 generic `alembic upgrade head`가 blank production DB를 처리하지 않는다.
+5. 같은 restricted migrator one-shot이 `python -m kortravelmap.infra.runtime_privileges`를 실행해
+   closed table ACL inventory를 다시 부여한다. 이 late ACL transaction이 중단되어 raw `300`만
+   남으면 final permit은 발급되지 않는다. Docker Manager가 candidate/reference/DB identity와
+   pre/post receipt를 다시 확인한 뒤 fixed `fresh-300-finalize` one-shot으로만 completion을
+   재시도할 수 있다. PostgreSQL default privilege는 사용하지 않는다.
 6. API/Dagster는 각 LOGIN runtime DSN으로만 연결하고 실제 catalog preflight를 통과한다.
 7. (선택) 객체 저장소 client + provider client를 주입하고 `AsyncKorTravelMapClient`를 만든다.
 ```
@@ -55,52 +62,32 @@ procedure만 사용하며 runtime의 raw override `UPDATE`/`DELETE`는 허용하
 ## 4. Alembic 마이그레이션
 
 ```bash
-# migration runner에서만: KOR_TRAVEL_MAP_MIGRATOR_PG_DSN을
-# KOR_TRAVEL_MAP_PG_DSN으로 export하고 아래 flag를 함께 준다.
-KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE=true alembic upgrade head
-
-# 같은 migrator DSN을 유지한 직후에만: closed runtime ACL inventory 적용
-python -m kortravelmap.infra.runtime_privileges
+# fresh DB: candidate image의 fixed one-shot만 migration과 ACL reconciliation을 함께 수행한다.
+ktm-application-schema-fresh-300 migrate
 
 # 현재 revision 확인
 alembic current
 
-# 롤백
-alembic downgrade -1
+# `300` 이후 downgrade/stamp-back/DB restore는 지원하지 않는다. 실패는 write fence 뒤
+# 새 forward-fix candidate의 controlled handoff로만 처리한다.
 ```
 
 `alembic/env.py`는 async DSN 정규화, migration connection 수명의
-`SET ROLE ktm_feature_schema_owner`(flag가 true일 때), `search_path`를 강제한다.
+`SET ROLE ktm_feature_schema_owner`(flag가 true일 때), 그리고
+`search_path = public, x_extension`를 강제한다. active `300` graph의 revision 정본은
+**정확히 하나의 `public.alembic_version`** 이며, `ops.alembic_version` 같은 별도
+version table은 생성하거나 수용하지 않는다. 이 physical contract는 baseline catalog
+receipt와 `300_schema_baseline.py`가 함께 검증한다.
 
-```python
-import asyncio
-from sqlalchemy import text
-from sqlalchemy.ext.asyncio import create_async_engine
-from alembic import context
-
-from kortravelmap.infra.models import metadata as target_metadata
-
-async def run_async():
-    connectable = create_async_engine(DATABASE_URL)
-    async with connectable.connect() as conn:
-        await conn.execute(text("SET search_path = public, x_extension"))
-        await conn.run_sync(_do_run, target_metadata)
-
-def _do_run(connection, target_metadata):
-    context.configure(
-        connection=connection,
-        target_metadata=target_metadata,
-        include_schemas=True,  # 다중 schema 지원
-        version_table_schema="ops",
-        version_table="alembic_version",
-    )
-    with context.begin_transaction():
-        context.run_migrations()
-
-asyncio.run(run_async())
-```
-
-`version_table_schema="ops"`로 Alembic revision 테이블도 ops에 격리.
+따라서 production에서는 일반 Alembic 명령을 운영 절차로 쓰지 않는다. virgin DB는
+`ktm-application-schema-fresh-300 migrate`만, exact `0236` DB의 전환은 Docker Manager가
+writer fence 아래 한 번만 실행하는 controlled handoff만 허용한다. 이 두 경우 외의
+`alembic stamp`, generic `upgrade`, version-table 수동 생성·수정은 `300` boundary를
+우회하므로 금지한다. fresh root의 ACL late failure 뒤에는 raw `300`·candidate·reference·DB
+identity·receipt를 Manager가 다시 exact 확인한 경우에만
+`ktm-application-schema-fresh-finalize finalize --writer-fence-receipt ...`가 허용된다.
+이 completion은 migration/restore/stamp가 아니며 성공 뒤에도 Manager의 privileged postflight와
+새 final permit 발급 전에는 runtime 기동 권한을 만들지 않는다.
 
 ## 5. KorTravelMapSettings 로드
 
@@ -275,39 +262,18 @@ async def healthz(self) -> HealthCheck:
 - engine ping: `SELECT 1`
 - object store ping: bucket HEAD
 - schema 존재: `pg_namespace` 조회
-- alembic head: `ops.alembic_version`이 현재 코드의 head revision과 일치
+- Alembic receipt: **정확히 하나의** `public.alembic_version` row가 `300`이고, API
+  production entrypoint가 Docker Manager의 root-owned final permit을 검증
 
 디버그 API `/health`가 이를 노출 (별도 패키지, ADR-020).
 
 ## 13. 통합 테스트 부트스트랩
 
-```python
-# tests/integration/conftest.py
-@pytest.fixture(scope="session")
-async def pg_container():
-    with PostgresContainer("postgis/postgis:16-3.5-alpine") as c:
-        c.start()
-        yield c
-
-@pytest.fixture(scope="session")
-async def pg_engine(pg_container):
-    dsn = pg_container.get_connection_url().replace("psycopg2", "asyncpg")
-    engine = create_async_engine(dsn)
-    async with engine.begin() as conn:
-        # schema + extensions
-        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS feature"))
-        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS provider_sync"))
-        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS ops"))
-        await conn.execute(text("CREATE SCHEMA IF NOT EXISTS x_extension"))
-        for ext in ("postgis", "pg_trgm", "pgcrypto"):
-            await conn.execute(text(f"CREATE EXTENSION IF NOT EXISTS {ext} SCHEMA x_extension"))
-        # search_path
-        await conn.execute(text("SET search_path = public, x_extension"))
-        # Alembic upgrade head (코드 작성 단계에서 alembic_upgrade helper 추가)
-        await alembic_upgrade(conn, "head")
-    yield engine
-    await engine.dispose()
-```
+통합 테스트도 운영 계약과 같은 fresh-300 helper를 사용한다. testcontainers의 disposable
+DB에서 `tests/integration/_application_300_bootstrap.py`가 final role/extension inventory를
+준비하고 restricted migrator로 root `300`을 적용한다. 테스트 helper는 production operator
+interface가 아니며, 직접 schema 생성, 수동 version table, generic Alembic command를 새
+fixture 예제로 추가하지 않는다.
 
 ## 14. 멀티-DB / 멀티-환경
 
@@ -327,7 +293,7 @@ Alembic과 그 직후 ACL 재조정은 `KOR_TRAVEL_MAP_MIGRATOR_PG_DSN`만 사�
 | runtime DSN 미설정 | Compose/API/Dagster startup | required interpolation 또는 privilege preflight가 기동 차단 |
 | DB 접근 거부 | `engine.connect()` | `OperationalError` → caller 처리 |
 | schema 부재 | `client.healthz()` | warning + 사용자에게 부트스트랩 안내 |
-| Alembic 미적용 | `client.healthz()` | warning + `alembic upgrade head` 안내 |
+| `300` receipt/final permit 불일치 | API production entrypoint | Map runtime을 기동하지 않고 writer fence 유지; Manager의 controlled fresh/handoff 또는 새 forward-fix candidate만 허용 |
 | 확장 미설치 | 첫 SQL 실행 시 (`function st_makepoint does not exist`) | error |
 | object store 접근 실패 | `client.upload_feature_files()` | `FileStoreError` |
 
@@ -342,7 +308,7 @@ graceful degradation:
 - [ ] schema 4종 존재
 - [ ] 확장 4종 존재
 - [ ] `search_path` 올바름 (`SHOW search_path` → `public, x_extension`)
-- [ ] Alembic at head
+- [ ] `public.alembic_version`이 raw `300` 하나이고 final permit의 DB/candidate/receipt와 일치
 - [ ] 객체 저장소 bucket healthy (RustFS healthcheck)
 - [ ] `KOR_TRAVEL_MAP_*` 환경변수 모두 설정
 - [ ] provider API 키 (kor-travel-map API/Dagster 환경)

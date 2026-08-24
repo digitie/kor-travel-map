@@ -531,7 +531,7 @@ def run_migrations_online():
             context.run_migrations()
 ```
 
-### 8.2 현행 migration 기준
+### 8.2 현행 migration 기준 (`300` 이후 forward-only)
 
 호환성 자체는 설계 목표가 아니다. 데이터 보존과 lock 특성에 따라 ADR-075의 DDL 유형을 고른다.
 
@@ -541,11 +541,13 @@ def run_migrations_online():
    UNIQUE 사이에 writer가 다시 중복을 만들 수 있는 cutover는 예외다. 호환성보다 원자성이
    우선이면 table writer lock을 먼저 잡고 dedup + non-concurrent UNIQUE를 한 transaction으로
    묶는다(0060). UNIQUE writer conflict target은 같은 배포 cutover에서 전환한다. dedup처럼
-   역연산으로 원본을 복원할 수 없는 migration은 거짓 downgrade를 제공하지 않고 검증된
-   backup/PITR과 구 writer image를 함께 복원하도록 fail-closed한다.
+   역연산으로 원본을 복원할 수 없는 migration은 거짓 downgrade를 제공하지 않는다. `300`
+   이후 backup artifact는 감사·증거 보존용이며 DB restore/PITR·구 writer image 재기동은
+   지원하지 않는다. 실패는 write fence를 유지한 채 새 forward-fix candidate로 해소한다.
 3. **소형 ops 수술형** — drain, lock acquisition timeout, 예상 보유 시간을 clone에서 각각 측정한다.
 4. **대형 rewrite/타입·identity 변경** — shadow column/table, batch backfill, checksum, write fence,
-   swap을 사용한다. rollback window에는 legacy 구조와 delta/PITR 복구 경로를 보존한다.
+   controlled handoff를 사용한다. 실패 시에는 legacy 구조·delta/PITR 복구 경로를 열지 않고
+   fenced state에서 검증 가능한 forward fix만 허용한다.
 
 ### 8.3 마이그레이션 net 검증
 
@@ -655,21 +657,16 @@ log_min_duration_statement = 1000  -- 1초 이상
 
 Grafana Loki에서 LogQL로 추적 (PinVi 측 wiring).
 
-## 11. 백업 / 복구
+## 11. 백업 artifact 감사 (`300` 이후 복원 비지원)
 
-```bash
-# 일 1회 custom format (SPEC V8 v8_0)
-pg_dump --format=custom --no-owner --no-privileges \
-        --schema=feature --schema=provider_sync --schema=ops \
-        kor_travel_map > /backup/kor_travel_map_$(date +%F).dump
+백업 artifact는 무결성·보존 기간·감사 evidence를 확인하는 용도다. `300` baseline 이후에는
+`pg_restore`, PITR, old writer image 재기동, snapshot swap을 recovery path로 사용하지 않는다.
+따라서 backup artifact가 존재해도 production DB에 적용하거나 새 DB를 그 artifact로 재구성하는
+운영 절차는 없다. failure는 writer fence를 유지하고 새 forward-fix candidate의 controlled
+handoff로만 처리한다.
 
-# PITR: wal-g + BackBlaze B2 (PinVi 측 운영)
-```
-
-복구:
-```bash
-pg_restore --no-owner --no-privileges -d kor_travel_map_new kor_travel_map_2026-05-24.dump
-```
+과거 `pg_dump`/`pg_restore`·wal-g 문서는 historical decision 기록에서만 보존하며 실행 지침이
+아니다.
 
 ## 12. 운영 체크리스트 (Sprint 5 진입 전)
 
@@ -681,4 +678,5 @@ pg_restore --no-owner --no-privileges -d kor_travel_map_new kor_travel_map_2026-
 - [ ] BRIN 인덱스 효율 측정 (1주 운영 후)
 - [ ] 인덱스 hit ratio 95%+ 확인
 - [ ] 부분 인덱스 vs 전체 인덱스 디스크 비교
-- [ ] Alembic upgrade/downgrade round-trip 및 표현력 손실 downgrade 거절 테스트 통과
+- [ ] isolated fresh-300 acceptance와 controlled `0236 → 300` handoff receipt 검증 통과
+- [ ] generic downgrade/stamp/restore 시도를 fail-closed로 거절하는 테스트 통과

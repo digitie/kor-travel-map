@@ -100,6 +100,103 @@ COPY (
     FROM pg_catalog.pg_namespace AS nsp
    WHERE nsp.nspname NOT LIKE 'pg\_%' AND nsp.nspname <> 'information_schema'
   UNION ALL
+  -- extension은 schema 이름만으로 scope를 자르지 않는다. `pg_catalog`은 implicit
+  -- search_path이고, public/x_extension 밖의 unknown extension도 member residue를
+  -- 숨길 수 있다. header의 owner/version/config/condition까지 full inventory로 비교한다.
+  SELECT 'extension' || nsp.nspname || ':' || ext.extname || ':' ||
+         pg_catalog.pg_get_userbyid(ext.extowner) || ':' || ext.extrelocatable::text || ':' ||
+         ext.extversion || ':' ||
+         COALESCE((SELECT string_agg(cfg_nsp.nspname || chr(30) || cfg_rel.relname,
+                                      chr(29) ORDER BY cfg.ordinality)
+                     FROM unnest(ext.extconfig) WITH ORDINALITY AS cfg(relid, ordinality)
+                     JOIN pg_catalog.pg_class AS cfg_rel ON cfg_rel.oid = cfg.relid
+                     JOIN pg_catalog.pg_namespace AS cfg_nsp ON cfg_nsp.oid = cfg_rel.relnamespace), '') || ':' ||
+         COALESCE(ext.extcondition::text, '')
+    FROM pg_catalog.pg_extension AS ext
+    JOIN pg_catalog.pg_namespace AS nsp ON nsp.oid = ext.extnamespace
+  UNION ALL
+  SELECT 'rule' || nsp.nspname || '.' || rel.relname || ':' || rule.rulename || ':' ||
+         pg_catalog.pg_get_ruledef(rule.oid, true)
+    FROM pg_catalog.pg_rewrite AS rule
+    JOIN pg_catalog.pg_class AS rel ON rel.oid = rule.ev_class
+    JOIN pg_catalog.pg_namespace AS nsp ON nsp.oid = rel.relnamespace
+   WHERE nsp.nspname IN ('feature', 'provider_sync', 'ops')
+     AND rule.rulename <> '_RETURN'
+  UNION ALL
+  SELECT 'inheritance' || child_nsp.nspname || '.' || child.relname || ':' ||
+         parent_nsp.nspname || '.' || parent.relname || ':' || inherit.inhseqno::text
+    FROM pg_catalog.pg_inherits AS inherit
+    JOIN pg_catalog.pg_class AS child ON child.oid = inherit.inhrelid
+    JOIN pg_catalog.pg_namespace AS child_nsp ON child_nsp.oid = child.relnamespace
+    JOIN pg_catalog.pg_class AS parent ON parent.oid = inherit.inhparent
+    JOIN pg_catalog.pg_namespace AS parent_nsp ON parent_nsp.oid = parent.relnamespace
+   WHERE child_nsp.nspname IN ('feature', 'provider_sync', 'ops')
+      OR parent_nsp.nspname IN ('feature', 'provider_sync', 'ops')
+  UNION ALL
+  SELECT 'partitioned' || nsp.nspname || '.' || rel.relname || ':' || part.partstrat::text || ':' ||
+         pg_catalog.pg_get_partkeydef(part.partrelid) || ':' ||
+         COALESCE(default_nsp.nspname || '.' || default_rel.relname, '')
+    FROM pg_catalog.pg_partitioned_table AS part
+    JOIN pg_catalog.pg_class AS rel ON rel.oid = part.partrelid
+    JOIN pg_catalog.pg_namespace AS nsp ON nsp.oid = rel.relnamespace
+    LEFT JOIN pg_catalog.pg_class AS default_rel ON default_rel.oid = part.partdefid
+    LEFT JOIN pg_catalog.pg_namespace AS default_nsp ON default_nsp.oid = default_rel.relnamespace
+   WHERE nsp.nspname IN ('feature', 'provider_sync', 'ops')
+  UNION ALL
+  SELECT 'foreigntable' || nsp.nspname || '.' || rel.relname || ':' || srv.srvname || ':' ||
+         fdw.fdwname || ':' || md5(COALESCE(array_to_string(ft.ftoptions, chr(30)), ''))
+    FROM pg_catalog.pg_foreign_table AS ft
+    JOIN pg_catalog.pg_class AS rel ON rel.oid = ft.ftrelid
+    JOIN pg_catalog.pg_namespace AS nsp ON nsp.oid = rel.relnamespace
+    JOIN pg_catalog.pg_foreign_server AS srv ON srv.oid = ft.ftserver
+    JOIN pg_catalog.pg_foreign_data_wrapper AS fdw ON fdw.oid = srv.srvfdw
+   WHERE nsp.nspname IN ('feature', 'provider_sync', 'ops')
+  UNION ALL
+  SELECT 'foreignserver' || srv.srvname || ':' || pg_catalog.pg_get_userbyid(srv.srvowner) || ':' ||
+         fdw.fdwname || ':' || COALESCE(srv.srvtype, '') || ':' || COALESCE(srv.srvversion, '') || ':' ||
+         md5(COALESCE(array_to_string(fdw.fdwoptions, chr(30)), '')) || ':' ||
+         md5(COALESCE(array_to_string(srv.srvoptions, chr(30)), ''))
+    FROM pg_catalog.pg_foreign_server AS srv
+    JOIN pg_catalog.pg_foreign_data_wrapper AS fdw ON fdw.oid = srv.srvfdw
+   WHERE EXISTS (
+       SELECT 1
+       FROM pg_catalog.pg_foreign_table AS ft
+       JOIN pg_catalog.pg_class AS rel ON rel.oid = ft.ftrelid
+       JOIN pg_catalog.pg_namespace AS nsp ON nsp.oid = rel.relnamespace
+       WHERE ft.ftserver = srv.oid
+         AND nsp.nspname IN ('feature', 'provider_sync', 'ops')
+   )
+  UNION ALL
+  SELECT 'usermapping' || srv.srvname || ':' ||
+         CASE WHEN mapping.umuser = 0 THEN 'public' ELSE mapping.umuser::regrole::text END || ':' ||
+         md5(COALESCE(array_to_string(mapping.umoptions, chr(30)), ''))
+    FROM pg_catalog.pg_user_mapping AS mapping
+    JOIN pg_catalog.pg_foreign_server AS srv ON srv.oid = mapping.umserver
+   WHERE EXISTS (
+       SELECT 1
+       FROM pg_catalog.pg_foreign_table AS ft
+       JOIN pg_catalog.pg_class AS rel ON rel.oid = ft.ftrelid
+       JOIN pg_catalog.pg_namespace AS nsp ON nsp.oid = rel.relnamespace
+       WHERE ft.ftserver = srv.oid
+         AND nsp.nspname IN ('feature', 'provider_sync', 'ops')
+   )
+  UNION ALL
+  SELECT 'publication' || publication.pubname || ':' ||
+         pg_catalog.pg_get_userbyid(publication.pubowner) || ':' || publication.puballtables::text || ':' ||
+         publication.pubinsert::text || ':' || publication.pubupdate::text || ':' ||
+         publication.pubdelete::text || ':' || publication.pubtruncate::text || ':' || publication.pubviaroot::text
+    FROM pg_catalog.pg_publication AS publication
+  UNION ALL
+  SELECT 'subscription' || subscription.subname || ':' ||
+         pg_catalog.pg_get_userbyid(subscription.subowner) || ':' || subscription.subenabled::text || ':' ||
+         subscription.subbinary::text || ':' || subscription.substream::text || ':' ||
+         subscription.subtwophasestate::text || ':' || subscription.subdisableonerr::text || ':' ||
+         subscription.subpasswordrequired::text || ':' || subscription.subrunasowner::text || ':' ||
+         md5(COALESCE(subscription.subconninfo, '')) || ':' || COALESCE(subscription.subslotname, '') || ':' ||
+         subscription.subsynccommit || ':' || COALESCE(array_to_string(subscription.subpublications, chr(30)), '') || ':' ||
+         COALESCE(subscription.suborigin, '')
+    FROM pg_catalog.pg_subscription AS subscription
+  UNION ALL
   SELECT 'publicrel' || cls.relkind::text || ':' || cls.relname || ':' ||
          pg_catalog.pg_get_userbyid(cls.relowner)
     FROM pg_catalog.pg_class AS cls

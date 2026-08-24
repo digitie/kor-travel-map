@@ -14,6 +14,7 @@ import asyncio
 import hashlib
 import json
 import os
+import secrets
 import stat
 import sys
 from collections.abc import Sequence
@@ -35,12 +36,14 @@ from kortravelmap.infra.db import make_async_engine
 _SOURCE_HEAD: Final = "0236_tvn41s_compaction_drained"
 _DESTINATION_HEAD: Final = "300"
 _HANDOFF_TAG: Final = "application-schema-0236-to-300"
-_HANDOFF_AUTHORIZATION: Final = "application_schema_0236_to_300_handoff_authorized"
 _SCHEMA_OWNER_ROLE: Final = "ktm_feature_schema_owner"
 _SCHEMA_OWNER_ROLE_ENV: Final = "KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE"
-_RESULT_SCHEMA: Final = "kor-travel-map.application-baseline-handoff.v1"
+_HANDOFF_CAPABILITY_ENV: Final = "KOR_TRAVEL_MAP_APPLICATION_HANDOFF_CAPABILITY_PATH"
+_HANDOFF_CAPABILITY_DIRECTORY: Final = Path("/run/kor-travel-map-application-handoff")
+_HANDOFF_CAPABILITY_FILE: Final = _HANDOFF_CAPABILITY_DIRECTORY / "capability"
+_RESULT_SCHEMA: Final = "kor-travel-map.application-baseline-handoff.v2"
 _FENCE_RECEIPT_SCHEMA: Final = (
-    "kor-travel-docker-manager.map-application-schema-handoff-fence.v1"
+    "kor-travel-docker-manager.map-application-schema-handoff-fence.v3"
 )
 _FENCE_OPERATION: Final = "map-application-schema-0236-to-300"
 _IMAGE_REVISION_ENV: Final = "KOR_TRAVEL_MAP_IMAGE_REVISION"
@@ -51,12 +54,29 @@ _CATALOG_CONTRACT_SQL: Final = "application-catalog.sql"
 _CATALOG_CONTRACT_SHA256: Final = "application-catalog.sha256"
 _SEED_CONTRACT_SQL: Final = "application-seed.sql"
 _SEED_CONTRACT_SHA256: Final = "application-seed.sha256"
+_PRIVILEGED_RESIDUE_CONTRACT_SQL: Final = "application-privileged-residue.sql"
+_PRIVILEGED_RESIDUE_CONTRACT_SHA256: Final = "application-privileged-residue.sha256"
 _RUNTIME_INVARIANTS_SQL: Final = "application-runtime-invariants.sql"
 _REFERENCE_MANIFEST: Final = "application-reference.json"
 _REFERENCE_MANIFEST_SHA256: Final = "application-reference.sha256"
 _REFERENCE_SCHEMA: Final = "kor-travel-map.application-baseline-reference.v1"
 _IMMUTABLE_SEED_RELATIONS: Final = (
     "ops.feature_override_field_paths",
+)
+_MAP_VISIBLE_CONTRACT_KEYS: Final = (
+    "catalog_sha256",
+    "seed_sha256",
+)
+_CANONICAL_CONTRACT_GUC_STATEMENTS: Final = (
+    "SET LOCAL quote_all_identifiers TO off",
+    "SET LOCAL DateStyle TO 'ISO, YMD'",
+    "SET LOCAL IntervalStyle TO 'postgres'",
+    "SET LOCAL TimeZone TO 'UTC'",
+    "SET LOCAL extra_float_digits TO 3",
+    "SET LOCAL lc_numeric TO 'C'",
+    "SET LOCAL bytea_output TO 'hex'",
+    "SET LOCAL standard_conforming_strings TO on",
+    "SET LOCAL xmlbinary TO 'base64'",
 )
 _FENCE_RECEIPT_FIELDS: Final = frozenset(
     {
@@ -66,11 +86,15 @@ _FENCE_RECEIPT_FIELDS: Final = frozenset(
         "operation",
         "map_candidate_commit",
         "map_candidate_image_id",
+        "postgres_image_id",
         "source_head",
         "destination_head",
         "reference_manifest_sha256",
         "catalog_sha256",
         "seed_sha256",
+        "privileged_residue_sha256",
+        "pre_privileged_residue_sha256",
+        "runtime_invariants_sql_sha256",
         "database_name",
         "database_oid",
         "database_owner",
@@ -297,7 +321,10 @@ def _parse_args(arguments: Sequence[str] | None) -> argparse.Namespace:
         "--writer-fence-receipt",
         required=True,
         metavar="PATH",
-        help="Docker Manager가 root-owned mode 0444로 read-only mount한 writer fence receipt JSON path",
+        help=(
+            "Docker Manager가 root-owned mode 0444로 read-only mount한 "
+            "writer fence receipt JSON path"
+        ),
     )
     parsed = parser.parse_args(arguments)
     if not parsed.confirm_0236_to_300:
@@ -413,9 +440,11 @@ def _verify_reference_artifacts() -> dict[str, str]:
         "seed.sql": "seed_sql_sha256",
         _CATALOG_CONTRACT_SQL: "catalog_contract_sql_sha256",
         _SEED_CONTRACT_SQL: "seed_contract_sql_sha256",
+        _PRIVILEGED_RESIDUE_CONTRACT_SQL: "privileged_residue_contract_sql_sha256",
         _RUNTIME_INVARIANTS_SQL: "runtime_invariants_sql_sha256",
         _CATALOG_CONTRACT_SHA256: "catalog_contract_receipt_sha256",
         _SEED_CONTRACT_SHA256: "seed_contract_receipt_sha256",
+        _PRIVILEGED_RESIDUE_CONTRACT_SHA256: "privileged_residue_contract_receipt_sha256",
     }
     for name, manifest_key in file_digests.items():
         if _sha256_file(_baseline_artifact(name)) != _manifest_sha256(manifest, manifest_key):
@@ -425,6 +454,11 @@ def _verify_reference_artifacts() -> dict[str, str]:
     for receipt_name, manifest_key, result_key in (
         (_CATALOG_CONTRACT_SHA256, "catalog_contract_sha256", "catalog_sha256"),
         (_SEED_CONTRACT_SHA256, "seed_contract_sha256", "seed_sha256"),
+        (
+            _PRIVILEGED_RESIDUE_CONTRACT_SHA256,
+            "privileged_residue_contract_sha256",
+            "privileged_residue_sha256",
+        ),
     ):
         try:
             receipt = _baseline_artifact(receipt_name).read_text(encoding="ascii").strip()
@@ -434,6 +468,9 @@ def _verify_reference_artifacts() -> dict[str, str]:
         if receipt != manifest_receipt:
             raise HandoffError("immutable application baseline receipt/manifest drifted")
         expected[result_key] = receipt
+    expected["runtime_invariants_sql_sha256"] = _manifest_sha256(
+        manifest, "runtime_invariants_sql_sha256"
+    )
     return expected
 
 
@@ -528,11 +565,15 @@ def _load_writer_fence_receipt(receipt_path: str) -> tuple[dict[str, Any], str]:
         "reference_manifest_sha256",
         "catalog_sha256",
         "seed_sha256",
+        "privileged_residue_sha256",
+        "pre_privileged_residue_sha256",
+        "runtime_invariants_sql_sha256",
     ):
         if not _is_sha256(value.get(key)):
             raise HandoffError(f"Docker Manager writer fence receipt digest is invalid: {key}")
     candidate_commit = value.get("map_candidate_commit")
     candidate_image_id = value.get("map_candidate_image_id")
+    postgres_image_id = value.get("postgres_image_id")
     if (
         not isinstance(candidate_commit, str)
         or len(candidate_commit) != 40
@@ -541,6 +582,10 @@ def _load_writer_fence_receipt(receipt_path: str) -> tuple[dict[str, Any], str]:
         or not candidate_image_id.startswith("sha256:")
         or len(candidate_image_id) != 71
         or any(character not in "0123456789abcdef" for character in candidate_image_id[7:])
+        or not isinstance(postgres_image_id, str)
+        or not postgres_image_id.startswith("sha256:")
+        or len(postgres_image_id) != 71
+        or any(character not in "0123456789abcdef" for character in postgres_image_id[7:])
     ):
         raise HandoffError("Docker Manager writer fence candidate identity is invalid")
     if (
@@ -592,10 +637,20 @@ async def _verify_writer_fence_binding(
     ):
         raise HandoffError("Docker Manager writer fence candidate does not match this Map image")
     if receipt["reference_manifest_sha256"] != _reference_manifest_sha256():
-        raise HandoffError("Docker Manager writer fence reference manifest does not match this Map image")
+        raise HandoffError(
+            "Docker Manager writer fence reference manifest does not match this Map image"
+        )
+    source = _reference_manifest()["source"]
+    if receipt["postgres_image_id"] != source["container_image_id"]:
+        raise HandoffError("Docker Manager writer fence database image does not match baseline")
     if (
         receipt["catalog_sha256"] != expected["catalog_sha256"]
         or receipt["seed_sha256"] != expected["seed_sha256"]
+        or receipt["privileged_residue_sha256"] != expected["privileged_residue_sha256"]
+        or receipt["pre_privileged_residue_sha256"]
+        != expected["privileged_residue_sha256"]
+        or receipt["runtime_invariants_sql_sha256"]
+        != expected["runtime_invariants_sql_sha256"]
     ):
         raise HandoffError("Docker Manager writer fence receipt does not match baseline contract")
     observed = (
@@ -646,6 +701,61 @@ def _schema_owner_role_enabled() -> Any:
             os.environ[_SCHEMA_OWNER_ROLE_ENV] = previous
 
 
+@contextmanager
+def _one_shot_handoff_capability() -> Any:
+    """root-only helper와 generic Alembic invocation을 분리하는 단발 capability."""
+
+    if os.geteuid() != 0:
+        raise HandoffError(
+            "controlled application-schema handoff must run as root in its one-shot container"
+        )
+    try:
+        _HANDOFF_CAPABILITY_DIRECTORY.mkdir(mode=0o700)
+    except FileExistsError as exc:
+        raise HandoffError("handoff capability directory already exists") from exc
+    capability_descriptor: int | None = None
+    previous = os.environ.get(_HANDOFF_CAPABILITY_ENV)
+    try:
+        capability_descriptor = os.open(
+            _HANDOFF_CAPABILITY_FILE,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o400,
+        )
+        token = secrets.token_hex(32).encode("ascii")
+        if os.write(capability_descriptor, token) != len(token):
+            raise HandoffError("could not write complete handoff capability")
+        os.fsync(capability_descriptor)
+        os.fchmod(capability_descriptor, 0o400)
+        os.close(capability_descriptor)
+        capability_descriptor = None
+        metadata = _HANDOFF_CAPABILITY_FILE.stat(follow_symlinks=False)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != 0
+            or stat.S_IMODE(metadata.st_mode) != 0o400
+            or metadata.st_nlink != 1
+        ):
+            raise HandoffError("handoff capability file did not become root-private")
+        os.environ[_HANDOFF_CAPABILITY_ENV] = str(_HANDOFF_CAPABILITY_FILE)
+        yield
+    except OSError as exc:
+        raise HandoffError("could not create root-owned handoff capability") from exc
+    finally:
+        if capability_descriptor is not None:
+            os.close(capability_descriptor)
+        if previous is None:
+            os.environ.pop(_HANDOFF_CAPABILITY_ENV, None)
+        else:
+            os.environ[_HANDOFF_CAPABILITY_ENV] = previous
+        try:
+            _HANDOFF_CAPABILITY_FILE.unlink(missing_ok=True)
+            _HANDOFF_CAPABILITY_DIRECTORY.rmdir()
+        except OSError:
+            # stale root-only state는 다음 execution을 fail-close하게 만들고, 여기서
+            # 원래 handoff 오류를 가리지 않는다.
+            pass
+
+
 async def _raw_version(connection: AsyncConnection) -> tuple[str, ...]:
     version_table = await connection.scalar(text("SELECT to_regclass('public.alembic_version')"))
     if version_table is None:
@@ -656,9 +766,17 @@ async def _raw_version(connection: AsyncConnection) -> tuple[str, ...]:
     return tuple(str(value) for value in rows.scalars())
 
 
+async def _set_canonical_contract_gucs(connection: AsyncConnection) -> None:
+    """deparse/formatting-sensitive catalog output을 session 설정에서 분리한다."""
+
+    for statement in _CANONICAL_CONTRACT_GUC_STATEMENTS:
+        await connection.execute(text(statement))
+
+
 async def _contract_sha256(connection: AsyncConnection, contract_sql: str) -> str:
     """contract query의 ordered rows를 canonical UTF-8/LF stream으로 receipt화한다."""
 
+    await _set_canonical_contract_gucs(connection)
     rows = await connection.execute(text(_contract_sql(contract_sql)))
     digest = hashlib.sha256()
     for item in rows.scalars():
@@ -676,6 +794,20 @@ async def _seed_sha256(connection: AsyncConnection) -> str:
 
 
 async def _verify_final_role_contract(connection: AsyncConnection) -> None:
+    prefixed_roles = tuple(
+        str(role)
+        for role in (
+            await connection.scalars(
+                text(
+                    "SELECT rolname FROM pg_catalog.pg_roles "
+                    "WHERE rolname LIKE 'ktm\\_%' ESCAPE '\\' ORDER BY rolname"
+                )
+            )
+        ).all()
+    )
+    if prefixed_roles != tuple(sorted(_APPLICATION_ROLES)):
+        raise HandoffError("final reserved application role inventory is not exact")
+
     rows = await connection.execute(
         text(
             """
@@ -734,8 +866,8 @@ async def _verify_final_role_contract(connection: AsyncConnection) -> None:
             FROM pg_catalog.pg_auth_members AS membership
             JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid
             JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
-            WHERE granted.rolname = ANY(CAST(:roles AS text[]))
-               OR member.rolname = ANY(CAST(:roles AS text[]))
+            WHERE granted.rolname LIKE 'ktm\\_%' ESCAPE '\\'
+               OR member.rolname LIKE 'ktm\\_%' ESCAPE '\\'
             """
         ),
         {"roles": list(_APPLICATION_ROLES)},
@@ -807,7 +939,7 @@ async def _verify_final_role_contract(connection: AsyncConnection) -> None:
                     OR setting_row.setrole IN (
                         SELECT role.oid
                         FROM pg_catalog.pg_roles AS role
-                        WHERE role.rolname = ANY(CAST(:roles AS text[]))
+                        WHERE role.rolname LIKE 'ktm\\_%' ESCAPE '\\'
                     )
                 )
             ) OR (
@@ -818,7 +950,7 @@ async def _verify_final_role_contract(connection: AsyncConnection) -> None:
                 AND setting_row.setrole IN (
                     SELECT role.oid
                     FROM pg_catalog.pg_roles AS role
-                    WHERE role.rolname = ANY(CAST(:roles AS text[]))
+                    WHERE role.rolname LIKE 'ktm\\_%' ESCAPE '\\'
                 )
             )
             ORDER BY 1, 2, 3
@@ -835,16 +967,167 @@ async def _verify_final_role_contract(connection: AsyncConnection) -> None:
             SELECT extension.extname, namespace.nspname
             FROM pg_catalog.pg_extension AS extension
             JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = extension.extnamespace
-            WHERE extension.extname IN ('postgis', 'pgcrypto', 'pg_trgm')
             """
         )
     )
-    if {tuple(map(str, row)) for row in extension_rows} != {
+    observed_extensions = {tuple(map(str, row)) for row in extension_rows}
+    required_extensions = {
+        ("fuzzystrmatch", "public"),
+        ("plpgsql", "pg_catalog"),
         ("postgis", "x_extension"),
         ("pgcrypto", "x_extension"),
         ("pg_trgm", "x_extension"),
-    }:
-        raise HandoffError("final extension namespace contract is not exact")
+        ("pg_prewarm", "x_extension"),
+    }
+    if observed_extensions != required_extensions:
+        raise HandoffError("final extension inventory contract is not exact")
+
+    extension_owners = await connection.execute(
+        text(
+            """
+            SELECT extension.extname, owner.rolname, owner.rolsuper
+            FROM pg_catalog.pg_extension AS extension
+            JOIN pg_catalog.pg_roles AS owner ON owner.oid = extension.extowner
+            ORDER BY extension.extname
+            """
+        )
+    )
+    if any(
+        not bool(row[2]) or str(row[1]).startswith("ktm_")
+        for row in extension_owners
+    ):
+        raise HandoffError(
+            "final extension owners must be non-application bootstrap superusers"
+        )
+
+    unexpected_postgis_auxiliary_schema = await connection.scalar(
+        text(
+            "SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_namespace "
+            "WHERE nspname IN ('topology', 'tiger'))"
+        )
+    )
+    if bool(unexpected_postgis_auxiliary_schema):
+        raise HandoffError(
+            "final extension inventory must not include PostGIS auxiliary schemas"
+        )
+
+    extension_member_owner_violation = await connection.scalar(
+        text(
+            """
+            WITH extension_member AS (
+                SELECT dependency.classid, dependency.objid
+                FROM pg_catalog.pg_depend AS dependency
+                WHERE dependency.refclassid = 'pg_catalog.pg_extension'::regclass
+                  AND dependency.deptype = 'e'
+                  AND dependency.objsubid = 0
+            ), member_owner AS (
+                SELECT member.classid, member.objid, relation.relowner AS owner_oid
+                FROM extension_member AS member
+                JOIN pg_catalog.pg_class AS relation
+                  ON member.classid = 'pg_catalog.pg_class'::regclass
+                 AND relation.oid = member.objid
+                UNION ALL
+                SELECT member.classid, member.objid, routine.proowner
+                FROM extension_member AS member
+                JOIN pg_catalog.pg_proc AS routine
+                  ON member.classid = 'pg_catalog.pg_proc'::regclass
+                 AND routine.oid = member.objid
+                UNION ALL
+                SELECT member.classid, member.objid, type_row.typowner
+                FROM extension_member AS member
+                JOIN pg_catalog.pg_type AS type_row
+                  ON member.classid = 'pg_catalog.pg_type'::regclass
+                 AND type_row.oid = member.objid
+                UNION ALL
+                SELECT member.classid, member.objid, operator_row.oprowner
+                FROM extension_member AS member
+                JOIN pg_catalog.pg_operator AS operator_row
+                  ON member.classid = 'pg_catalog.pg_operator'::regclass
+                 AND operator_row.oid = member.objid
+                UNION ALL
+                SELECT member.classid, member.objid, family.opfowner
+                FROM extension_member AS member
+                JOIN pg_catalog.pg_opfamily AS family
+                  ON member.classid = 'pg_catalog.pg_opfamily'::regclass
+                 AND family.oid = member.objid
+                UNION ALL
+                SELECT member.classid, member.objid, class.opcowner
+                FROM extension_member AS member
+                JOIN pg_catalog.pg_opclass AS class
+                  ON member.classid = 'pg_catalog.pg_opclass'::regclass
+                 AND class.oid = member.objid
+                UNION ALL
+                SELECT member.classid, member.objid, language.lanowner
+                FROM extension_member AS member
+                JOIN pg_catalog.pg_language AS language
+                  ON member.classid = 'pg_catalog.pg_language'::regclass
+                 AND language.oid = member.objid
+            )
+            SELECT EXISTS (
+                SELECT 1
+                FROM member_owner
+                JOIN pg_catalog.pg_roles AS owner ON owner.oid = member_owner.owner_oid
+                WHERE NOT owner.rolsuper
+                   OR owner.rolname LIKE 'ktm\\_%' ESCAPE '\\'
+            )
+            """
+        )
+    )
+    if bool(extension_member_owner_violation):
+        raise HandoffError(
+            "extension members must be owned by non-application bootstrap superusers"
+        )
+
+    unsupported_extension_member_class = await connection.scalar(
+        text(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_depend AS dependency
+                WHERE dependency.refclassid = 'pg_catalog.pg_extension'::regclass
+                  AND dependency.deptype = 'e'
+                  AND dependency.objsubid = 0
+                  AND dependency.classid <> ALL (ARRAY[
+                      'pg_catalog.pg_class'::regclass,
+                      'pg_catalog.pg_proc'::regclass,
+                      'pg_catalog.pg_type'::regclass,
+                      'pg_catalog.pg_operator'::regclass,
+                      'pg_catalog.pg_cast'::regclass,
+                      'pg_catalog.pg_opfamily'::regclass,
+                      'pg_catalog.pg_opclass'::regclass,
+                      'pg_catalog.pg_language'::regclass
+                  ])
+            )
+            """
+        )
+    )
+    if bool(unsupported_extension_member_class):
+        raise HandoffError("unsupported extension member class is not accepted")
+
+    language_rows = await connection.execute(
+        text("SELECT lanname FROM pg_catalog.pg_language ORDER BY lanname")
+    )
+    procedural_languages = tuple(str(value) for value in language_rows.scalars().all())
+    if procedural_languages != ("c", "internal", "plpgsql", "sql"):
+        raise HandoffError("final procedural language inventory is not exact")
+
+    replication_topology = await connection.scalar(
+        text(
+            """
+            SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_publication)
+                OR EXISTS (
+                    SELECT 1
+                    FROM pg_catalog.pg_subscription AS subscription
+                    WHERE subscription.subdbid = (
+                        SELECT oid FROM pg_catalog.pg_database
+                        WHERE datname = current_database()
+                    )
+                )
+            """
+        )
+    )
+    if bool(replication_topology):
+        raise HandoffError("final replication topology must be empty")
 
     for role, expected_usage in _X_EXTENSION_USAGE.items():
         observed = await connection.scalar(
@@ -958,13 +1241,82 @@ async def _verify_runtime_projection_invariants(connection: AsyncConnection) -> 
         )
 
 
+async def _verify_runtime_alembic_version_read_contract(connection: AsyncConnection) -> None:
+    """API/Dagster runtime이 raw head만 read할 수 있는 public metadata ACL을 고정한다."""
+
+    accepted = await connection.scalar(
+        text(
+            """
+            SELECT EXISTS (
+                SELECT 1
+                FROM pg_catalog.pg_class AS relation
+                JOIN pg_catalog.pg_namespace AS namespace
+                  ON namespace.oid = relation.relnamespace
+                WHERE namespace.nspname = 'public'
+                  AND relation.relname = 'alembic_version'
+                  AND relation.relkind = 'r'
+                  AND relation.relacl IS NOT NULL
+                  AND has_table_privilege(
+                      'ktm_feature_runtime', relation.oid, 'SELECT'
+                  )
+                  AND NOT has_table_privilege(
+                      'ktm_feature_runtime', relation.oid,
+                      'INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES, TRIGGER'
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM aclexplode(relation.relacl) AS privilege
+                      WHERE NOT (
+                          privilege.grantee = relation.relowner
+                          OR (
+                              privilege.grantee = 'ktm_feature_runtime'::regrole
+                              AND privilege.privilege_type = 'SELECT'
+                              AND NOT privilege.is_grantable
+                          )
+                      )
+                  )
+            )
+            """
+        )
+    )
+    if not bool(accepted):
+        raise HandoffError("final public Alembic runtime-read ACL is not exact")
+
+
+async def _grant_runtime_alembic_version_read(connection: AsyncConnection) -> None:
+    """metadata-only handoff도 fresh root와 같은 public read boundary를 만든다."""
+
+    await connection.execute(
+        text("GRANT SELECT ON TABLE public.alembic_version TO ktm_feature_runtime")
+    )
+
+
+def _map_visible_contract_matches(
+    observed: dict[str, str], reference: dict[str, str]
+) -> bool:
+    """schema-owner가 볼 수 있는 catalog/seed 두 축만 exact 비교한다."""
+
+    return set(observed) == set(_MAP_VISIBLE_CONTRACT_KEYS) and all(
+        observed[key] == reference[key] for key in _MAP_VISIBLE_CONTRACT_KEYS
+    )
+
+
 async def _preflight(connection: AsyncConnection, *, expected_head: str) -> dict[str, str]:
+    """migrator가 직접 관측 가능한 application contract만 재확인한다.
+
+    ``pg_user_mapping`` 같은 database-superuser 전용 residue는 의도적으로 이 session에
+    노출하지 않는다. 그 축은 Docker Manager가 별도 superuser pre/post receipt로 닫고,
+    여기서는 Manager가 image reference와 결박한 expected receipt만 받는다.
+    """
+
     if await _raw_version(connection) != (expected_head,):
         raise HandoffError(f"application raw version must be exactly {expected_head}")
     await _verify_final_role_contract(connection)
     await _verify_catalog_health(connection)
     await _verify_0236_data_closure(connection)
     await _verify_runtime_projection_invariants(connection)
+    if expected_head == _DESTINATION_HEAD:
+        await _verify_runtime_alembic_version_read_contract(connection)
     return {
         "catalog_sha256": await _catalog_sha256(connection),
         "seed_sha256": await _seed_sha256(connection),
@@ -975,9 +1327,8 @@ def _stamp_on_existing_connection(connection: Connection, config: Config) -> Non
     """env.py에 existing sync connection을 주입해 outer transaction을 계속 사용한다."""
 
     config.attributes["connection"] = connection
-    config.attributes[_HANDOFF_AUTHORIZATION] = True
     try:
-        with _schema_owner_role_enabled():
+        with _schema_owner_role_enabled(), _one_shot_handoff_capability():
             command.stamp(
                 config,
                 _DESTINATION_HEAD,
@@ -986,7 +1337,6 @@ def _stamp_on_existing_connection(connection: Connection, config: Config) -> Non
             )
     finally:
         config.attributes.pop("connection", None)
-        config.attributes.pop(_HANDOFF_AUTHORIZATION, None)
 
 
 async def _handoff(writer_fence_receipt_path: str) -> dict[str, str]:
@@ -1016,7 +1366,7 @@ async def _handoff(writer_fence_receipt_path: str) -> dict[str, str]:
             # 있으므로, env.py가 stamp 안에서 쓰는 path를 preflight에도 먼저 고정한다.
             await connection.execute(text("SET search_path = public, x_extension"))
             before = await _preflight(connection, expected_head=_SOURCE_HEAD)
-            if before != expected:
+            if not _map_visible_contract_matches(before, expected):
                 raise HandoffError(
                     "0236 source catalog or seed does not match the immutable 300 reference"
                 )
@@ -1024,8 +1374,9 @@ async def _handoff(writer_fence_receipt_path: str) -> dict[str, str]:
             # 바꾸기 바로 전에 fence 만료를 다시 확인한다.
             _require_unexpired_writer_fence(writer_fence_receipt)
             await connection.run_sync(_stamp_on_existing_connection, config)
+            await _grant_runtime_alembic_version_read(connection)
             after = await _preflight(connection, expected_head=_DESTINATION_HEAD)
-            if after != expected:
+            if not _map_visible_contract_matches(after, expected):
                 raise HandoffError(
                     "300 destination catalog or seed does not match the immutable reference"
                 )
@@ -1042,6 +1393,10 @@ async def _handoff(writer_fence_receipt_path: str) -> dict[str, str]:
         "destination_head": _DESTINATION_HEAD,
         "expected_catalog_sha256": expected["catalog_sha256"],
         "expected_seed_sha256": expected["seed_sha256"],
+        "expected_privileged_residue_sha256": expected["privileged_residue_sha256"],
+        "pre_privileged_residue_sha256": writer_fence_receipt[
+            "pre_privileged_residue_sha256"
+        ],
         "pre_catalog_sha256": before["catalog_sha256"],
         "pre_seed_sha256": before["seed_sha256"],
         "post_catalog_sha256": after["catalog_sha256"],

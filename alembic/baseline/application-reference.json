@@ -10,13 +10,16 @@
   },
   "artifacts": {
     "schema_sql_sha256": "b1c07bdd046e1746c00ace1607832f0cbb5e5bd5a8247fac77c5c65eb1b007ac",
-    "seed_sql_sha256": "76736775080ca958cb558b116dc366f8b613450df8fab1b47f3e20459dcd14f4",
-    "catalog_contract_sql_sha256": "07ce7a92ed70df9ffbd2551b26e5265cd29e82ae44cfece259989ef8ed5f0afa",
-    "catalog_contract_sha256": "dd42b904a012bfa4cddabcd693c125bc01a3ca127d2dd42cc19a89bdcdbf5131",
-    "catalog_contract_receipt_sha256": "3a81402d5b7dcbef4e6b56d7b9d4f7b74edcd65c3f5a7c2cfafb8c6cd1ac5f1b",
+    "seed_sql_sha256": "77173ed79a6451790b027be8d3a8010f9e42910004e8e2dacaaa6f0e8c165681",
+    "catalog_contract_sql_sha256": "b5719d1a5347ddb2dc170043d71d93703d887ccfef2a7da40dae9c37eae4e7c1",
+    "catalog_contract_sha256": "3f2b1459f0db7f725df32b067161b36200adbfd933e8cc200441985783471054",
+    "catalog_contract_receipt_sha256": "6ba730fabf06c80ca3f2c467c86baeebb4c92da117b1789b0cb8d2dddb32ba9c",
     "seed_contract_sql_sha256": "7122f27734b74e9ea61817d98359179dcd6ed443d5ecd604254a423c1f851e2b",
     "seed_contract_sha256": "ba5cb6e8d051a713912278b111514f74bbd3a2aef7a74b0500ce999146e0dafb",
     "seed_contract_receipt_sha256": "a8dc197e035ae2bf75ea709274934512ebfd41d513905b29f2597e76318dccef",
+    "privileged_residue_contract_sql_sha256": "eac31b780ca9092a431ebc6321c382b4b70e89bdd1d618e417ce5c796d10b628",
+    "privileged_residue_contract_sha256": "baa8077f7c6427fc14ca30477f1febc0b81ba07478ef5031d893bbeae8942f71",
+    "privileged_residue_contract_receipt_sha256": "ca482bef39b0a68c413e0e3c94dc393c955c884017133a3fc39777bb5842663e",
     "runtime_invariants_sql_sha256": "2f77da06a61752fa5d2df9e3aa359d6e1689a6410805f92db92f0e4872cc8ad1"
   },
   "fresh_seed_relations": [

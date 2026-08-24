@@ -232,12 +232,14 @@ $EDITOR packages/kor-travel-map-api/.env
 # data 링크
 ln -s /mnt/f/dev/kor-travel-map/data data
 
-# role/schema/extension bootstrap — squash(`0200`) 이후 필수.
-# baseline은 role/schema/extension을 만들지 않고 **전제로 검증만** 한다.
-docker compose run --rm db-role-bootstrap
+# virgin dedicated DB bootstrap→restricted `300` root migration one-shot — 한 번만 실행.
+# normal restart에는 실행하지 않고, production API는 Docker Manager final permit 없이는 blank
+# DB를 generic upgrade하지 않는다. legacy `0236` DB에는 Docker Manager handoff만 허용한다.
+docker compose --profile fresh-init run --rm db-application-schema-fresh-300
 
-# Alembic upgrade (스키마 적용 - 설정한 외부 DB에 반영)
-alembic upgrade head
+# Docker full stack은 workstation local-dev profile을 명시한다. production profile은
+# Docker Manager final permit transaction만 사용한다.
+KOR_TRAVEL_MAP_API_PROFILE=local-dev docker compose up -d
 
 # 단위 테스트 (DB 불필요)
 pytest tests/unit -q

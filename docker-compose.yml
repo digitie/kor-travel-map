@@ -56,12 +56,14 @@ services:
           echo "Dagster metadata DB created: $$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB"
         fi
 
-  # T-VN-H46H — local fresh DB는 final 21-role graph/extension namespace를 먼저
-  # 확정하고, API entrypoint가 active single root `300`을 적용한다. 기존 `0236`
-  # DB의 handoff는 이 normal startup 경로가 아니라 Docker Manager controlled
-  # transaction만 수행한다.
+  # T-VN-H46H — fresh DB에만 한 번 명시적으로 실행하는 bootstrap이다. normal
+  # `compose up` dependency로 두면 persistent `300` DB의 service recreate 때도 다시
+  # 실행되어 stack restart를 막으므로, `fresh-init` profile을 직접 target으로 실행한다.
+  # 기존 `0236` DB의 handoff는 이 경로가 아니라 Docker Manager controlled transaction만
+  # 수행한다.
   db-role-bootstrap-300:
     image: postgres:16-alpine
+    profiles: ["fresh-init"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -80,6 +82,24 @@ services:
     volumes:
       - ./docker/postgres-role-bootstrap.sh:/usr/local/bin/postgres-role-bootstrap:ro
     entrypoint: ["/bin/sh", "/usr/local/bin/postgres-role-bootstrap"]
+
+  # `fresh-init`은 production API entrypoint의 generic upgrade 우회가 아니다.
+  # bootstrap-superuser와 분리된 candidate image one-shot이 exact root `300`과
+  # runtime ACL을 적용한 뒤 종료한다. normal runtime은 이 service에 의존하지 않는다.
+  db-application-schema-fresh-300:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+      args:
+        KOR_TRAVEL_MAP_GIT_COMMIT: ${KOR_TRAVEL_MAP_GIT_COMMIT:-development}
+    profiles: ["fresh-init"]
+    depends_on:
+      db-role-bootstrap-300:
+        condition: service_completed_successfully
+    environment:
+      KOR_TRAVEL_MAP_MIGRATOR_PG_DSN: ${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required}
+      KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required}
+    entrypoint: ["/usr/local/bin/ktm-application-schema-fresh-300", "migrate"]
 
   rustfs-perms:
     image: alpine:3.20
@@ -196,6 +216,9 @@ services:
       KOR_TRAVEL_MAP_MIGRATOR_PG_DSN: ${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required}
       KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN: ${KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN:?KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN is required}
       KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN:?KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN is required}
+      # production은 Manager가 immutable API image ID를 permit과 함께 주입한다.
+      # local-dev에서는 verifier가 실행되지 않으므로 빈 값도 허용한다.
+      KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_API_IMAGE_ID: ${KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_API_IMAGE_ID:-}
       KOR_TRAVEL_MAP_RUNTIME_DB_PREFLIGHT_REQUIRED: "true"
       KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://rustfs:9000}
       KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET: ${KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET:-kor-travel-map}
@@ -224,12 +247,14 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      db-role-bootstrap-300:
-        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       rustfs-init:
         condition: service_completed_successfully
+    volumes:
+      # fixed read-only capability volume. 비어 있거나 stale한 permit은 production
+      # verifier가 candidate/DB binding에서 거부한다.
+      - kor-travel-map-application-final-permit:/run/kor-travel-map-application-final-permit:ro
     ports:
       - "${KOR_TRAVEL_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KOR_TRAVEL_MAP_API_PORT:-12701}:${KOR_TRAVEL_MAP_API_PORT:-12701}"
     networks:
@@ -324,9 +349,12 @@ services:
       TMP: /tmp
       DAGSTER_HOME: /opt/dagster/dagster_home
       DAGSTER_DISABLE_TELEMETRY: ${DAGSTER_DISABLE_TELEMETRY:-yes}
+      KOR_TRAVEL_MAP_DAGSTER_PROFILE: ${KOR_TRAVEL_MAP_DAGSTER_PROFILE:-${KOR_TRAVEL_MAP_API_PROFILE:-production}}
       KOR_TRAVEL_MAP_DAGSTER_PORT: ${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}
       KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL:-}
+      KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN: ${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN:?KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN is required}
       KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN:?KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN is required}
+      KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_DAGSTER_IMAGE_ID: ${KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_DAGSTER_IMAGE_ID:-}
       KOR_TRAVEL_MAP_RUNTIME_DB_PREFLIGHT_REQUIRED: "true"
       KOR_TRAVEL_MAP_DAGSTER_SCHEDULE_OVERRIDES_REQUIRED: "true"
       KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://rustfs:9000}
@@ -352,8 +380,6 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      db-role-bootstrap-300:
-        condition: service_completed_successfully
       dagster-db-init:
         condition: service_completed_successfully
       postgres:
@@ -370,6 +396,7 @@ services:
       - "${KOR_TRAVEL_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}"
     volumes:
       - kor-travel-map-mois-source:/app/data/mois
+      - kor-travel-map-application-final-permit:/run/kor-travel-map-application-final-permit:ro
     healthcheck:
       test:
         [
@@ -399,8 +426,11 @@ services:
       TMP: /tmp
       DAGSTER_HOME: /opt/dagster/dagster_home
       DAGSTER_DISABLE_TELEMETRY: ${DAGSTER_DISABLE_TELEMETRY:-yes}
+      KOR_TRAVEL_MAP_DAGSTER_PROFILE: ${KOR_TRAVEL_MAP_DAGSTER_PROFILE:-${KOR_TRAVEL_MAP_API_PROFILE:-production}}
       KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL:-}
+      KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN: ${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN:?KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN is required}
       KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN:?KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN is required}
+      KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_DAGSTER_IMAGE_ID: ${KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_DAGSTER_IMAGE_ID:-}
       KOR_TRAVEL_MAP_RUNTIME_DB_PREFLIGHT_REQUIRED: "true"
       KOR_TRAVEL_MAP_DAGSTER_SCHEDULE_OVERRIDES_REQUIRED: "true"
       KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://rustfs:9000}
@@ -427,8 +457,6 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      db-role-bootstrap-300:
-        condition: service_completed_successfully
       dagster-db-init:
         condition: service_completed_successfully
       postgres:
@@ -441,6 +469,7 @@ services:
         condition: service_healthy
     volumes:
       - kor-travel-map-mois-source:/app/data/mois
+      - kor-travel-map-application-final-permit:/run/kor-travel-map-application-final-permit:ro
     command: ["dagster-daemon", "run", "-m", "kortravelmap.dagster.definitions"]
 
   # 후보 image 안의 Dagster package migration graph를 그대로 실행·검증하는 유일한
@@ -474,6 +503,8 @@ volumes:
     name: ${KOR_TRAVEL_MAP_MOIS_SOURCE_DB_VOLUME:-kor-travel-map-mois-source}
   kor-travel-map-rustfs-data:
     name: ${KOR_TRAVEL_MAP_RUSTFS_VOLUME:-kor-travel-map-rustfs}
+  kor-travel-map-application-final-permit:
+    name: ${KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_VOLUME:-kor-travel-map-application-final-permit}
 
 # bridge 모드에서 API가 신뢰할 frontend BFF peer를 정확한 /32로 고정한다.
 # 다른 서비스는 이 control-plane network에 참여하지 않는다.

@@ -18,8 +18,9 @@ reconciliation을 실제 UI로 재검증한다. 그 뒤 적대 리뷰와 원격 
 ## 2026-08-24 — T-VN-H46H `300` runtime checkpoint 완료, 배포 전 적대 검토 진행
 
 active integration fixture와 runtime은 retired `0200`~`0236` chain을 replay하지 않는 final
-`300` 경로로 전환했다. normal Compose는 `baseline-300` fresh bootstrap만 실행하고,
-exact raw `0236_tvn41s_compaction_drained` DB는 candidate image 안의 explicit controlled
+`300` 경로로 전환했다. normal Compose는 fresh bootstrap을 자동 실행하지 않으며, 빈
+dedicated DB는 `fresh-init` profile을 명시해 한 번 준비한다. exact raw
+`0236_tvn41s_compaction_drained` DB는 candidate image 안의 explicit controlled
 handoff executable만 같은 transaction에서 catalog를 전후 대조한 뒤 `300`으로 stamp할 수
 있다. normal API/Dagster startup, archive replay, raw version-table 편집, 기존 migration
 helper, pre-`300` restore는 fail-closed한다.

@@ -366,7 +366,21 @@ if [ -n "$expected_head" ]; then
   fi
 fi
 
-# `300` image는 fresh DB 또는 raw `300`만 normal startup으로 처리한다. `0236`은
+if [ "$api_profile" = "production" ]; then
+  # production runtime은 Manager final permit 없이 DB를 mutation하지 않는다. final
+  # permit verifier가 이 API runtime DSN에서 candidate/DB identity와 exact raw ``300``을
+  # 한 번에 확인한다. 그 뒤 migrator DSN으로 별도 `alembic current`를 읽으면 서로 다른
+  # DB가 각각 통과하는 split-brain이 생기므로 production에는 generic Alembic probe가 없다.
+  if [ "$expected_head" != "300" ]; then
+    echo "production API requires KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD=300" >&2
+    exit 1
+  fi
+  if ! ktm-application-schema-final-permit verify-api; then
+    echo "production API requires a valid Docker Manager application final permit" >&2
+    exit 1
+  fi
+else
+# `300` image는 local-dev fresh DB 또는 raw `300`만 generic startup으로 처리한다. `0236`은
 # generic Alembic resolver가 active graph 밖 source를 해석할 수 없으므로, 이를 자동
 # stamp/upgrade로 고치지 않는다. Docker Manager가 writer fence와 same-transaction
 # catalog pre/postflight를 확보한 controlled executable만 handoff할 수 있다.
@@ -415,6 +429,7 @@ trap - EXIT
 # credential; default privileges are intentionally not used for feature state
 # or audit objects.
 python -m kortravelmap.infra.runtime_privileges
+fi
 
 # Uvicorn과 그 자식에는 runtime credential만 남긴다. migration credential은
 # application code·request handler가 읽을 수 없게 exec 직전에 제거한다.

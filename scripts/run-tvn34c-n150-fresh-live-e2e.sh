@@ -316,6 +316,9 @@ KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN=postgresql+asyncpg://ktm_feature_dagster_r
 KOR_TRAVEL_MAP_PG_DSN=postgresql+asyncpg://ktm_feature_dagster_runtime:$dagster_password@postgres:5432/kor_travel_map
 KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL=postgresql://kor_travel_map:$postgres_password@postgres:5432/kor_travel_map_dagster
 KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD=$EXPECTED_HEAD
+# 이 isolated acceptance stack은 Manager production permit을 발행하지 않는다. production
+# generic startup을 흉내 내지 않도록 explicit local-dev profile + fresh one-shot만 쓴다.
+KOR_TRAVEL_MAP_API_PROFILE=local-dev
 KOR_TRAVEL_MAP_DOCKER_BIND_HOST=127.0.0.1
 KOR_TRAVEL_MAP_API_PORT=$api_port
 KOR_TRAVEL_MAP_DAGSTER_PORT=$dagster_port
@@ -697,12 +700,16 @@ run() {
   configure_map_network_isolation
   write_blocked
   trap on_exit EXIT
-  # `docker compose up`가 의존 service의 health condition을 병렬 target 기동에서
-  # 앞질러 bootstrap one-shot이 connection-refused로 끝난 n150 재현을 막는다.
-  # 먼저 fresh PostgreSQL만 healthy까지 대기한 다음 나머지 boot path를 기동한다.
+  # fresh bootstrap은 normal `compose up` dependency가 아니다. 먼저 isolated
+  # PostgreSQL만 ready 상태로 만들고, profile을 명시해 bootstrap→restricted fresh root를
+  # 정확히 한 번 실행한다. 뒤의 recreate/up은 one-shot을 다시 실행하지 않으므로
+  # persistent `300` DB restart가 fresh-only guard에 막히지 않는다.
   compose_map up --detach --wait postgres
+  compose_map --profile fresh-init run --rm db-application-schema-fresh-300
   compose_map up --detach --build --wait \
-    db-role-bootstrap-300 dagster-db-init rustfs rustfs-init dagster-storage-migrate api frontend dagster
+    dagster-db-init rustfs rustfs-init dagster-storage-migrate api frontend dagster
+  verify_map_schema
+  compose_map up --detach --force-recreate --wait api
   verify_map_schema
   seed_fresh_etl
   build_playwright_image

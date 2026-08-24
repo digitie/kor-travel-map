@@ -1058,7 +1058,7 @@ class ApiSettings(BaseSettings):
         default=False,
         validation_alias="KOR_TRAVEL_MAP_API_DESTRUCTIVE_ENABLED",
         description=(
-            "파괴적 ``/admin`` 작업(restore/swap/feature deactivate/POI cache target "
+            "파괴적 ``/admin`` 작업(feature deactivate/POI cache target/backup/offline "
             "delete) 허용 여부 kill-switch(defense-in-depth). False면 해당 엔드포인트는 "
             "403. T-VN-H02로 기본값을 ``False``(fail-closed)로 내렸다 — 파괴적 작업이 "
             "필요한 배포(Docker compose·n150 prod)는 env "
@@ -1172,21 +1172,11 @@ class ApiSettings(BaseSettings):
     )
     backup_project_root: Path = Field(
         default=Path("."),
-        description="Host project root used as cwd for backup/restore command execution.",
+        description="Host project root used as cwd for backup command execution.",
     )
     backup_script_path: Path = Field(
         default=Path("scripts/docker-backup.sh"),
         description="Backup script path. Relative paths are resolved from backup_project_root.",
-    )
-    restore_script_path: Path = Field(
-        default=Path("scripts/docker-restore.sh"),
-        description="Restore script path. Relative paths are resolved from backup_project_root.",
-    )
-    restore_swap_script_path: Path = Field(
-        default=Path("scripts/docker-restore-swap.sh"),
-        description=(
-            "Restore hot-swap script path. Relative paths are resolved from backup_project_root."
-        ),
     )
     backup_command_enabled: bool = Field(
         default=False,
@@ -1198,22 +1188,7 @@ class ApiSettings(BaseSettings):
         default=1800.0,
         ge=1.0,
         le=21600.0,
-        description="Backup/restore command execution timeout seconds.",
-    )
-    restore_app_db: str = Field(
-        default="kor_travel_map_restore",
-        min_length=1,
-        description="Default staging app DB name for restore command plans.",
-    )
-    restore_dagster_db: str = Field(
-        default="kor_travel_map_dagster_restore",
-        min_length=1,
-        description="Default staging Dagster DB name for restore command plans.",
-    )
-    restore_rustfs_volume: str = Field(
-        default="kor-travel-map-rustfs-restore",
-        min_length=1,
-        description="Default staging RustFS Docker volume for restore command plans.",
+        description="Backup command execution timeout seconds.",
     )
 
     @property

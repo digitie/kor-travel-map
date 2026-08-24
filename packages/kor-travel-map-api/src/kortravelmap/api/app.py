@@ -47,7 +47,6 @@ from kortravelmap.api.auth import (
     ADMIN_FEATURE_CREATE_TOKEN_HEADER,
     OPS_SCOPE_HEADER,
     PUBLIC_API_KEY_HEADER,
-    require_admin_destructive_enabled,
     require_admin_frontend,
     require_metrics_token,
     require_ops_operator,
@@ -1184,14 +1183,12 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             prefix="/v1",
             dependencies=admin_dependencies,
         )
-        # restore/swap은 전부 파괴적 → kill-switch 게이트(admin_destructive_enabled).
+        # Retired compatibility URI는 인증된 요청에만 410을 반환한다. recovery format과
+        # 실행 경로가 없는 상태이므로 destructive gate나 DB dependency를 거치지 않는다.
         application.include_router(
             admin_restore_router,
             prefix="/v1",
-            dependencies=[
-                Depends(require_admin_frontend),
-                Depends(require_admin_destructive_enabled),
-            ],
+            dependencies=admin_dependencies,
         )
         # `/admin/features/{feature_id}`보다 구체적인 feature 하위 운영 route를
         # 먼저 mount해야 `dedup-reviews` 같은 segment가 feature_id로 잡히지 않는다.
