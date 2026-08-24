@@ -32,7 +32,7 @@ def _valid_permit(module: object) -> dict[str, object]:
     database_oid = 16384
     database_owner = "ktm_feature_schema_owner"
     return {
-        "schema": "kor-travel-docker-manager.map-application-final-permit.v2",
+        "schema": "kor-travel-docker-manager.map-application-final-permit.v4",
         "transition_kind": "map-application-schema-0236-to-300",
         "state": "finalized",
         "transaction_id": "b93bb7cf-7901-4790-88a8-2a7bbc07f3b7",
@@ -64,8 +64,12 @@ def _valid_permit(module: object) -> dict[str, object]:
             ),
         },
         "receipts": {
-            "expected_catalog_sha256": artifacts["catalog_contract_sha256"],
-            "observed_catalog_sha256": artifacts["catalog_contract_sha256"],
+            "expected_catalog_sha256": artifacts[
+                "destination_catalog_contract_sha256"
+            ],
+            "observed_catalog_sha256": artifacts[
+                "destination_catalog_contract_sha256"
+            ],
             "expected_seed_sha256": artifacts["seed_contract_sha256"],
             "observed_seed_sha256": artifacts["seed_contract_sha256"],
             "expected_privileged_residue_sha256": artifacts[
@@ -84,6 +88,28 @@ def _valid_permit(module: object) -> dict[str, object]:
                 "destination_alembic_version_contract_sha256"
             ],
             "runtime_invariant_violation_count": 0,
+        },
+        "operation_evidence": {
+            "schema": "kor-travel-docker-manager.map-final-permit-handoff-evidence.v2",
+            "journal_sha256": "d" * 64,
+            "journal_generation": 1,
+            "operation_result_sha256": "e" * 64,
+            "writer_fence_receipt_sha256": "f" * 64,
+            "writer_fence_transaction_id": (
+                "b93bb7cf-7901-4790-88a8-2a7bbc07f3b7"
+            ),
+            "pre_source_catalog_sha256": artifacts[
+                "source_catalog_contract_sha256"
+            ],
+            "post_destination_catalog_sha256": artifacts[
+                "destination_catalog_contract_sha256"
+            ],
+            "pre_source_alembic_version_sha256": artifacts[
+                "source_alembic_version_contract_sha256"
+            ],
+            "post_destination_alembic_version_sha256": artifacts[
+                "destination_alembic_version_contract_sha256"
+            ],
         },
     }
 
@@ -186,6 +212,64 @@ def test_final_permit_binds_each_runtime_consumer_to_its_own_immutable_image(
     )
     with pytest.raises(module.FinalPermitError, match="candidate"):
         module._validate_permit(json.dumps(payload).encode("utf-8"), consumer="dagster")
+
+
+def test_final_permit_requires_fresh_finalize_operation_lineage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """fresh root만으로 permit을 내지 않고 mandatory finalize lineage를 요구한다."""
+
+    module = _load_script(
+        "application_schema_final_permit_fresh_finalize",
+        "docker/application-schema-final-permit.py",
+    )
+    payload = _valid_permit(module)
+    _, reference = module._read_reference()
+    artifacts = reference["artifacts"]
+    destination = payload["candidate"]["destination_alembic_version_sha256"]
+    transaction_id = payload["transaction_id"]
+    payload["transition_kind"] = "map-fresh-300-finalize"
+    payload["operation_evidence"] = {
+        "schema": (
+            "kor-travel-docker-manager."
+            "map-final-permit-fresh-finalize-evidence.v2"
+        ),
+        "journal_sha256": "1" * 64,
+        "journal_generation": 2,
+        "finalize_result_sha256": "2" * 64,
+        "finalize_fence_receipt_sha256": "3" * 64,
+        "finalize_fence_transaction_id": transaction_id,
+        "prior_fresh_migration_result_sha256": "4" * 64,
+        "prior_fresh_migration_fence_sha256": "5" * 64,
+        "prior_fresh_migration_transaction_id": (
+            "b93bb7cf-7901-4790-88a8-2a7bbc07f3b8"
+        ),
+        "prior_fresh_migration_journal_sha256": "6" * 64,
+        "prior_fresh_migration_generation": 1,
+        "pre_source_catalog_sha256": artifacts[
+            "source_catalog_contract_sha256"
+        ],
+        "post_destination_catalog_sha256": artifacts[
+            "destination_catalog_contract_sha256"
+        ],
+        "post_destination_alembic_version_sha256": destination,
+    }
+    monkeypatch.setenv("KOR_TRAVEL_MAP_IMAGE_REVISION", "a" * 40)
+    monkeypatch.setenv(
+        "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_API_IMAGE_ID", "sha256:" + "b" * 64
+    )
+    assert module._validate_permit(
+        json.dumps(payload).encode("utf-8"), consumer="api"
+    )["transition_kind"] == "map-fresh-300-finalize"
+
+    payload["operation_evidence"] = _valid_permit(module)["operation_evidence"]
+    with pytest.raises(module.FinalPermitError, match="evidence"):
+        module._validate_permit(json.dumps(payload).encode("utf-8"), consumer="api")
+
+    payload = _valid_permit(module)
+    payload["transition_kind"] = "map-fresh-300"
+    with pytest.raises(module.FinalPermitError, match="transition"):
+        module._validate_permit(json.dumps(payload).encode("utf-8"), consumer="api")
 
 
 def test_final_permit_reader_rejects_inode_replacement_between_lstat_and_open(
@@ -296,7 +380,8 @@ def test_fresh_migration_rechecks_manager_fence_before_root_mutation(
         "application_head": "300",
         "reference_manifest_sha256": "1" * 64,
         "postgres_image_id": "sha256:" + "2" * 64,
-        "catalog_sha256": "3" * 64,
+        "source_catalog_sha256": "3" * 64,
+        "destination_catalog_sha256": "9" * 64,
         "seed_sha256": "4" * 64,
         "privileged_residue_sha256": "5" * 64,
         "source_alembic_version_sha256": "6" * 64,
@@ -394,7 +479,8 @@ def test_fresh_finalize_rechecks_live_fence_immediately_before_acl_mutation(
         "application_head": "300",
         "reference_manifest_sha256": "c" * 64,
         "postgres_image_id": "sha256:" + "d" * 64,
-        "catalog_sha256": "e" * 64,
+        "source_catalog_sha256": "e" * 64,
+        "destination_catalog_sha256": "0" * 64,
         "seed_sha256": "f" * 64,
         "privileged_residue_sha256": "1" * 64,
         "source_alembic_version_sha256": "3" * 64,
@@ -402,12 +488,21 @@ def test_fresh_finalize_rechecks_live_fence_immediately_before_acl_mutation(
         "runtime_invariants_sql_sha256": "2" * 64,
     }
     fence = {
+        "transaction_id": "b93bb7cf-7901-4790-88a8-2a7bbc07f3b7",
+        "journal_sha256": "5" * 64,
+        "journal_generation": 2,
+        "prior_fresh_migration_result_sha256": "6" * 64,
+        "prior_fresh_migration_fence_sha256": "7" * 64,
+        "prior_fresh_migration_transaction_id": "b93bb7cf-7901-4790-88a8-2a7bbc07f3b8",
+        "prior_fresh_migration_journal_sha256": "8" * 64,
+        "prior_fresh_migration_generation": 1,
         "map_candidate_commit": "a" * 40,
         "map_candidate_image_id": "sha256:" + "b" * 64,
         "postgres_image_id": contract["postgres_image_id"],
         "destination_head": "300",
         "reference_manifest_sha256": contract["reference_manifest_sha256"],
-        "catalog_sha256": contract["catalog_sha256"],
+        "source_catalog_sha256": contract["source_catalog_sha256"],
+        "destination_catalog_sha256": contract["destination_catalog_sha256"],
         "seed_sha256": contract["seed_sha256"],
         "privileged_residue_sha256": contract["privileged_residue_sha256"],
         "pre_privileged_residue_sha256": contract["privileged_residue_sha256"],
@@ -419,28 +514,52 @@ def test_fresh_finalize_rechecks_live_fence_immediately_before_acl_mutation(
     calls = 0
     reconciled = False
 
-    def _fence_once_then_expired() -> dict[str, object]:
+    def _fence_once_then_expired() -> tuple[dict[str, object], str]:
         nonlocal calls
         calls += 1
         if calls == 1:
-            return fence
+            return fence, "9" * 64
         raise module.FreshFinalizeError("fresh finalize writer fence has expired")
 
     async def _noop_restricted(_: str, __: object) -> None:
         return None
 
-    async def _noop_receipts(_: str, __: object) -> None:
-        return None
+    async def _noop_receipts(
+        _: object,
+        __: object,
+        *,
+        expected_catalog_sha256: str,
+    ) -> tuple[str, str]:
+        return expected_catalog_sha256, "4" * 64
 
-    async def _unexpected_reconcile() -> None:
+    async def _unexpected_reconcile(_: object) -> None:
         nonlocal reconciled
         reconciled = True
 
+    class _Transaction:
+        async def __aenter__(self) -> object:
+            return object()
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+    class _Engine:
+        def begin(self) -> _Transaction:
+            return _Transaction()
+
+        async def dispose(self) -> None:
+            return None
+
     monkeypatch.setattr(module, "_require_fixed_fence", _fence_once_then_expired)
     monkeypatch.setattr(module, "_static_contract", lambda: contract)
+    monkeypatch.setattr(module, "make_async_engine", lambda *_args, **_kwargs: _Engine())
     monkeypatch.setattr(module, "_assert_restricted_migrator_and_database", _noop_restricted)
     monkeypatch.setattr(module, "_assert_raw_300_and_receipts", _noop_receipts)
-    monkeypatch.setattr(module, "reconcile_runtime_privileges", _unexpected_reconcile)
+    monkeypatch.setattr(
+        module,
+        "reconcile_runtime_privileges_in_transaction",
+        _unexpected_reconcile,
+    )
     monkeypatch.delenv("KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN", raising=False)
     monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", "postgresql+asyncpg://unused")
     monkeypatch.setenv("KOR_TRAVEL_MAP_IMAGE_REVISION", "a" * 40)
@@ -472,7 +591,10 @@ def test_static_baseline_contract_attests_all_manager_consumed_receipts() -> Non
             (_ROOT / "alembic/baseline/application-reference.json").read_bytes()
         ),
         "postgres_image_id": reference["source"]["container_image_id"],
-        "catalog_sha256": artifacts["catalog_contract_sha256"],
+        "source_catalog_sha256": artifacts["source_catalog_contract_sha256"],
+        "destination_catalog_sha256": artifacts[
+            "destination_catalog_contract_sha256"
+        ],
         "seed_sha256": artifacts["seed_contract_sha256"],
         "privileged_residue_sha256": artifacts[
             "privileged_residue_contract_sha256"

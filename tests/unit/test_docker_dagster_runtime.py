@@ -21,6 +21,11 @@ _MANUAL_FEATURE_CREATE_TOKEN = "manual-feature-create-token-00000000000000000000
 _MANUAL_FEATURE_CREATE_DIGEST = hashlib.sha256(
     _MANUAL_FEATURE_CREATE_TOKEN.encode("utf-8")
 ).hexdigest()
+_SEALED_RUNTIME_PATH = "/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin"
+_API_IMAGE_ENV: Final = {
+    "PATH": _SEALED_RUNTIME_PATH,
+    "PYTHONNOUSERSITE": "1",
+}
 
 
 def _compose() -> dict[str, Any]:
@@ -70,7 +75,7 @@ def test_docker_compose_uses_persistent_dagster_storage_and_daemon() -> None:
     daemon = services["dagster-daemon"]
 
     assert dagster["command"] == [
-        "dagster-webserver",
+        "/usr/local/bin/dagster-webserver",
         "-m",
         "kortravelmap.dagster.definitions",
         "-h",
@@ -79,7 +84,7 @@ def test_docker_compose_uses_persistent_dagster_storage_and_daemon() -> None:
         "${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}",
     ]
     assert "dagster dev" not in _command_text(dagster["command"])
-    assert "dagster-daemon run" in _command_text(daemon["command"])
+    assert "/usr/local/bin/dagster-daemon run" in _command_text(daemon["command"])
     for service in (dagster, daemon):
         assert service["build"]["dockerfile"] == "docker/dagster.Dockerfile"
         assert "entrypoint" not in service
@@ -526,6 +531,8 @@ def test_application_300_compose_requires_explicit_fresh_bootstrap() -> None:
         "service_completed_successfully"
     )
     assert fresh_migration["entrypoint"] == [
+        "/usr/local/bin/python",
+        "-I",
         "/usr/local/bin/ktm-application-schema-fresh-300",
         "migrate",
     ]
@@ -1999,7 +2006,7 @@ def test_api_container_rejects_manual_create_raw_token_before_migration(
         ["sh", "docker/api-entrypoint.sh"],
         cwd=ROOT,
         env={
-            "PATH": os.environ["PATH"],
+            **_API_IMAGE_ENV,
             "KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN": raw_value,
         },
         check=False,
@@ -2020,7 +2027,7 @@ def test_api_container_requires_manual_create_digest_with_false_production_flag(
         ["sh", "docker/api-entrypoint.sh"],
         cwd=ROOT,
         env={
-            "PATH": os.environ["PATH"],
+            **_API_IMAGE_ENV,
             "KOR_TRAVEL_MAP_API_PROFILE": "production",
             "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": (
                 "shared-secret-at-least-32-characters"
@@ -2084,9 +2091,23 @@ def test_api_entrypoint_exposes_manual_create_settings_only_to_app_runtime(
         'printf "%s|%s|%s|%s|%s\\n" "$label" "$digest_state" '
         '"$digest_value" "$flag_state" "$flag_value" >>"$EVIDENCE"\n'
     )
+    alembic_stub = bin_dir / "alembic"
+    alembic_stub.write_text(
+        "#!/bin/sh\n"
+        'label="alembic-${1:-unknown}"\n'
+        f"{recorder}"
+        'if [ "${1:-}" = "current" ]; then echo "0224_c7_external_system_scope"; fi\n'
+        "exit 0\n",
+        encoding="utf-8",
+    )
     python_stub = bin_dir / "python"
     python_stub.write_text(
         "#!/bin/sh\n"
+        'if [ "${1:-}" = "-I" ]; then shift; fi\n'
+        'if [ "${1:-}" = "-m" ] && [ "${2:-}" = "alembic" ]; then\n'
+        "  shift 2\n"
+        f"  exec '{alembic_stub}' \"$@\"\n"
+        "fi\n"
         'if [ "${1:-}" = "-" ]; then\n'
         "  label=settings-preflight\n"
         "  cat >/dev/null\n"
@@ -2102,23 +2123,12 @@ def test_api_entrypoint_exposes_manual_create_settings_only_to_app_runtime(
         "exit 0\n",
         encoding="utf-8",
     )
-    alembic_stub = bin_dir / "alembic"
-    alembic_stub.write_text(
-        "#!/bin/sh\n"
-        'label="alembic-${1:-unknown}"\n'
-        f"{recorder}"
-        'if [ "${1:-}" = "current" ]; then echo "0224_c7_external_system_scope"; fi\n'
-        "exit 0\n",
-        encoding="utf-8",
-    )
     python_stub.chmod(0o755)
     alembic_stub.chmod(0o755)
 
-    result = subprocess.run(
-        ["sh", "docker/api-entrypoint.sh"],
-        cwd=ROOT,
-        env={
-            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+    result = _run_entrypoint(
+        f"{bin_dir}:{os.environ['PATH']}",
+        {
             "EVIDENCE": str(evidence),
             "KOR_TRAVEL_MAP_API_PROFILE": "local-dev",
             "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": (
@@ -2133,9 +2143,6 @@ def test_api_entrypoint_exposes_manual_create_settings_only_to_app_runtime(
             "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": "postgresql://migrator/db",
             "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN": "postgresql://api/db",
         },
-        check=False,
-        capture_output=True,
-        text=True,
     )
 
     assert result.returncode == 0, result.stderr
@@ -2160,7 +2167,7 @@ def test_api_entrypoint_exposes_manual_create_settings_only_to_app_runtime(
 @pytest.mark.unit
 def test_api_container_rejects_stale_provider_env_even_when_empty() -> None:
     process_env = {
-        "PATH": os.environ["PATH"],
+        **_API_IMAGE_ENV,
         "KOR_TRAVEL_MAP_API_OPINET_SERVICE_KEY": "",
     }
     result = subprocess.run(
@@ -2181,7 +2188,7 @@ def test_api_container_rejects_legacy_root_ops_principal() -> None:
         ["sh", "docker/api-entrypoint.sh"],
         cwd=ROOT,
         env={
-            "PATH": os.environ["PATH"],
+            **_API_IMAGE_ENV,
             "KOR_TRAVEL_MAP_OPS_TOKEN": "legacy-secret",
         },
         check=False,
@@ -2200,7 +2207,7 @@ def test_api_container_rejects_legacy_root_ops_principal() -> None:
 def test_api_container_requires_unambiguous_proxy_secret(
     proxy_secret: str | None,
 ) -> None:
-    process_env = {"PATH": os.environ["PATH"]}
+    process_env = dict(_API_IMAGE_ENV)
     if proxy_secret is not None:
         process_env["KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET"] = proxy_secret
     result = subprocess.run(
@@ -2223,7 +2230,7 @@ def test_api_container_rejects_legacy_duplicate_proxy_secret() -> None:
         ["sh", "docker/api-entrypoint.sh"],
         cwd=ROOT,
         env={
-            "PATH": os.environ["PATH"],
+            **_API_IMAGE_ENV,
             "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": "shared-secret",
             "KOR_TRAVEL_MAP_API_ADMIN_PROXY_SECRET": "shared-secret",
         },
@@ -2373,7 +2380,7 @@ def test_api_container_rejects_invalid_ops_principal_pair(
         ["sh", "docker/api-entrypoint.sh"],
         cwd=ROOT,
         env={
-            "PATH": os.environ["PATH"],
+            **_API_IMAGE_ENV,
             "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": (
                 "shared-secret-at-least-32-characters"
             ),
@@ -2418,6 +2425,7 @@ def _migration_stub_path(
     image_head: str,
     heads_script: str | None = None,
     current_script: str | None = None,
+    final_permit_script: str = "exit 0",
 ) -> tuple[str, Path]:
     """`alembic heads`가 ``image_head``를 내고, `upgrade`는 흔적을 남기는 stub.
 
@@ -2443,19 +2451,49 @@ def _migration_stub_path(
     )
     alembic.chmod(0o755)
     python = bin_dir / "python"
-    python.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    python.write_text(
+        "#!/bin/sh\n"
+        "if [ \"${1:-}\" = -I ] "
+        "&& [ \"${2##*/}\" = ktm-application-schema-final-permit ]; then\n"
+        "  shift 2\n"
+        "  exec \"$(dirname \"$0\")/ktm-application-schema-final-permit\" \"$@\"\n"
+        "fi\n"
+        "if [ \"${1:-}\" = -I ] && [ \"${2:-}\" = -m ] "
+        "&& [ \"${3:-}\" = alembic ]; then\n"
+        "  shift 3\n"
+        "  exec \"$(dirname \"$0\")/alembic\" \"$@\"\n"
+        "fi\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
     python.chmod(0o755)
     final_permit = bin_dir / "ktm-application-schema-final-permit"
-    final_permit.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    final_permit.write_text(
+        f"#!/bin/sh\n{final_permit_script}\n",
+        encoding="utf-8",
+    )
     final_permit.chmod(0o755)
     return f"{bin_dir}:{os.environ['PATH']}", marker
 
 
 def _run_entrypoint(path: str, extra: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    stub_bin = Path(path.split(":", 1)[0])
+    entrypoint = stub_bin.parent / "api-entrypoint-under-test.sh"
+    source = (ROOT / "docker" / "api-entrypoint.sh").read_text(encoding="utf-8")
+    source = source.replace("/usr/local/bin/", f"{stub_bin}/").replace(
+        "/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin",
+        path,
+    )
+    entrypoint.write_text(source, encoding="utf-8")
     return subprocess.run(
-        ["sh", "docker/api-entrypoint.sh"],
+        ["sh", str(entrypoint)],
         cwd=ROOT,
-        env={"PATH": path, **_MIGRATION_BASE_ENV, **extra},
+        env={
+            "PATH": path,
+            "PYTHONNOUSERSITE": "1",
+            **_MIGRATION_BASE_ENV,
+            **extra,
+        },
         check=False,
         capture_output=True,
         text=True,
@@ -2479,8 +2517,16 @@ def _run_image_layout_entrypoint(
     path: str,
     extra: dict[str, str],
 ) -> subprocess.CompletedProcess[str]:
+    stub_bin = Path(path.split(":", 1)[0])
+    entrypoint = stub_bin.parent / "image-api-entrypoint-under-test.sh"
+    entrypoint.write_text(
+        (image_root / "docker" / "api-entrypoint.sh")
+        .read_text(encoding="utf-8")
+        .replace("/usr/local/bin/", f"{stub_bin}/"),
+        encoding="utf-8",
+    )
     return subprocess.run(
-        ["sh", "docker/api-entrypoint.sh"],
+        ["sh", str(entrypoint)],
         cwd=image_root,
         env={"PATH": path, **_MIGRATION_BASE_ENV, **extra},
         check=False,
@@ -2571,10 +2617,17 @@ def test_api_container_migrates_when_alembic_head_matches(tmp_path: Path) -> Non
 
 
 @pytest.mark.unit
-def test_production_api_refuses_blank_current_before_generic_upgrade(tmp_path: Path) -> None:
-    """production blank DB는 Manager fresh-300 permit 전에는 mutation하지 않는다."""
+def test_production_api_refuses_failed_final_permit_without_generic_upgrade(
+    tmp_path: Path,
+) -> None:
+    """production DB 상태 판정은 final permit에 맡기고 generic mutation은 하지 않는다."""
 
-    path, marker = _migration_stub_path(tmp_path, image_head="300", current_script="true")
+    path, marker = _migration_stub_path(
+        tmp_path,
+        image_head="300",
+        current_script="true",
+        final_permit_script="exit 1",
+    )
     result = _run_entrypoint(
         path,
         {
@@ -2588,10 +2641,7 @@ def test_production_api_refuses_blank_current_before_generic_upgrade(tmp_path: P
 
     assert result.returncode != 0, result.stdout
     assert not marker.exists(), "production blank DB에서 generic upgrade가 실행됐다."
-    assert (
-        "blank application DB requires the Docker Manager fresh-300 initialization"
-        in result.stderr
-    )
+    assert "requires a valid Docker Manager application final permit" in result.stderr
 
 
 @pytest.mark.unit
@@ -2802,12 +2852,10 @@ def test_api_container_allows_empty_ops_tokens_when_not_required(
     # ADR-066 T-VN-02 (#742): 컨테이너 기본 profile은 production이므로 빈 ops
     # pair opt-out은 local-dev를 명시할 때만 유효하다(production은 아래
     # 전용 테스트에서 migration 전에 거부됨을 검증).
-    result = subprocess.run(
-        ["sh", "docker/api-entrypoint.sh"],
-        cwd=ROOT,
-        env={
-            "PATH": _entrypoint_stub_path(tmp_path),
-            **_MIGRATION_BASE_ENV,
+    path = _entrypoint_stub_path(tmp_path)
+    result = _run_entrypoint(
+        path,
+        {
             "KOR_TRAVEL_MAP_API_PROFILE": "local-dev",
             "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": ("shared-secret-at-least-32-characters"),
             "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": "",
@@ -2815,9 +2863,6 @@ def test_api_container_allows_empty_ops_tokens_when_not_required(
             "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN": "",
             "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED": "false",
         },
-        check=False,
-        capture_output=True,
-        text=True,
     )
 
     assert result.returncode == 0, result.stderr
@@ -2854,7 +2899,7 @@ def test_api_container_production_refuses_unconfigured_ops_pair_before_migration
         ["sh", "docker/api-entrypoint.sh"],
         cwd=ROOT,
         env={
-            "PATH": os.environ["PATH"],
+            **_API_IMAGE_ENV,
             "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": (
                 "shared-secret-at-least-32-characters"
             ),
@@ -2879,12 +2924,10 @@ def test_api_container_production_refuses_unconfigured_ops_pair_before_migration
 def test_api_container_production_allows_empty_ops_pair_when_ops_surface_off(
     tmp_path: Path,
 ) -> None:
-    result = subprocess.run(
-        ["sh", "docker/api-entrypoint.sh"],
-        cwd=ROOT,
-        env={
-            "PATH": _entrypoint_stub_path(tmp_path),
-            **_MIGRATION_BASE_ENV,
+    path = _entrypoint_stub_path(tmp_path)
+    result = _run_entrypoint(
+        path,
+        {
             "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": ("shared-secret-at-least-32-characters"),
             "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED": "false",
             "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN": "",
@@ -2893,9 +2936,6 @@ def test_api_container_production_allows_empty_ops_pair_when_ops_surface_off(
             "KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED": "false",
             "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET": _CURSOR_SIGNING_SECRET,
         },
-        check=False,
-        capture_output=True,
-        text=True,
     )
 
     assert result.returncode == 0, result.stderr
@@ -2919,7 +2959,7 @@ def test_api_container_rejects_invalid_cursor_secret_before_migration(
     expected_error: str,
 ) -> None:
     env = {
-        "PATH": os.environ["PATH"],
+        **_API_IMAGE_ENV,
         "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": (
             "shared-secret-at-least-32-characters"
         ),
@@ -2977,7 +3017,7 @@ def test_api_container_rejects_cursor_secret_reused_as_credential(
         ["sh", "docker/api-entrypoint.sh"],
         cwd=ROOT,
         env={
-            "PATH": os.environ["PATH"],
+            **_API_IMAGE_ENV,
             "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": (
                 "shared-secret-at-least-32-characters"
             ),
@@ -3001,18 +3041,13 @@ def test_api_container_production_ops_surface_follows_features_flag(
 ) -> None:
     # settings의 resolved_ops_routes_enabled와 같은 해석: OPS flag 미설정이면
     # FEATURES flag를 따른다 — features off면 ops pair 없이도 기동한다.
-    result = subprocess.run(
-        ["sh", "docker/api-entrypoint.sh"],
-        cwd=ROOT,
-        env={
-            "PATH": _entrypoint_stub_path(tmp_path),
-            **_MIGRATION_BASE_ENV,
+    path = _entrypoint_stub_path(tmp_path)
+    result = _run_entrypoint(
+        path,
+        {
             "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": ("shared-secret-at-least-32-characters"),
             "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED": "false",
         },
-        check=False,
-        capture_output=True,
-        text=True,
     )
 
     assert result.returncode == 0, result.stderr
@@ -3050,7 +3085,7 @@ def test_api_container_rejects_ambiguous_profile_or_surface_flags(
         ["sh", "docker/api-entrypoint.sh"],
         cwd=ROOT,
         env={
-            "PATH": os.environ["PATH"],
+            **_API_IMAGE_ENV,
             "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": (
                 "shared-secret-at-least-32-characters"
             ),
@@ -3141,15 +3176,13 @@ def test_cursor_signing_secret_messages_are_lockstep_across_runtime_layers() -> 
     ],
 )
 def test_dagster_entrypoint_rejects_any_root_or_api_ops_key_even_when_empty(
-    key: str,
+    key: str, tmp_path: Path,
 ) -> None:
-    result = subprocess.run(
-        ["sh", "docker/dagster-entrypoint.sh", "sh", "-c", "exit 0"],
-        cwd=ROOT,
-        env={"PATH": f"{Path(sys.executable).parent}:{os.environ['PATH']}", key: ""},
-        check=False,
-        capture_output=True,
-        text=True,
+    result = _run_dagster_entrypoint(
+        tmp_path,
+        f"{Path(sys.executable).parent}:{os.environ['PATH']}",
+        ["sh", "-c", "exit 0"],
+        {key: ""},
     )
 
     assert result.returncode != 0
@@ -3168,15 +3201,13 @@ def test_dagster_entrypoint_rejects_any_root_or_api_ops_key_even_when_empty(
     ],
 )
 def test_dagster_entrypoint_rejects_manual_create_keys_even_when_empty(
-    key: str,
+    key: str, tmp_path: Path,
 ) -> None:
-    result = subprocess.run(
-        ["sh", "docker/dagster-entrypoint.sh", "sh", "-c", "exit 0"],
-        cwd=ROOT,
-        env={"PATH": f"{Path(sys.executable).parent}:{os.environ['PATH']}", key: ""},
-        check=False,
-        capture_output=True,
-        text=True,
+    result = _run_dagster_entrypoint(
+        tmp_path,
+        f"{Path(sys.executable).parent}:{os.environ['PATH']}",
+        ["sh", "-c", "exit 0"],
+        {key: ""},
     )
 
     assert result.returncode != 0
@@ -3187,18 +3218,50 @@ def test_dagster_entrypoint_rejects_manual_create_keys_even_when_empty(
 
 
 @pytest.mark.unit
-def test_dagster_entrypoint_executes_command_without_api_ops_keys() -> None:
-    result = subprocess.run(
-        ["sh", "docker/dagster-entrypoint.sh", "sh", "-c", "echo dagster-started"],
-        cwd=ROOT,
-        env={"PATH": f"{Path(sys.executable).parent}:{os.environ['PATH']}"},
-        check=False,
-        capture_output=True,
-        text=True,
+def test_dagster_entrypoint_executes_command_without_api_ops_keys(
+    tmp_path: Path,
+) -> None:
+    result = _run_dagster_entrypoint(
+        tmp_path,
+        f"{Path(sys.executable).parent}:{os.environ['PATH']}",
+        ["sh", "-c", "echo dagster-started"],
+        {"KOR_TRAVEL_MAP_DAGSTER_PROFILE": "local-dev"},
     )
 
     assert result.returncode == 0, result.stderr
     assert "dagster-started" in result.stdout
+
+
+def _run_dagster_entrypoint(
+    tmp_path: Path,
+    path: str,
+    command: list[str],
+    extra: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    """이미지의 고정 executable 경계를 test-only stub directory로 옮긴다."""
+
+    stub_bin = Path(path.split(":", 1)[0])
+    entrypoint = tmp_path / "dagster-entrypoint-under-test.sh"
+    source = (ROOT / "docker" / "dagster-entrypoint.sh").read_text(encoding="utf-8")
+    source = source.replace("/usr/local/bin/", f"{stub_bin}/").replace(
+        "/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin",
+        path,
+    )
+    entrypoint.write_text(source, encoding="utf-8")
+    resolved_command = [
+        part.replace("/usr/local/bin/", f"{stub_bin}/", 1)
+        if part.startswith("/usr/local/bin/")
+        else part
+        for part in command
+    ]
+    return subprocess.run(
+        ["sh", str(entrypoint), *resolved_command],
+        cwd=ROOT,
+        env={"PATH": path, "PYTHONNOUSERSITE": "1", **extra},
+        check=False,
+        capture_output=True,
+        text=True,
+    )
 
 
 def _dagster_runtime_command_stub_path(tmp_path: Path) -> str:
@@ -3208,6 +3271,10 @@ def _dagster_runtime_command_stub_path(tmp_path: Path) -> str:
     bin_dir.mkdir()
     (bin_dir / "python").write_text(
         "#!/bin/sh\n"
+        "if [ \"${1:-}\" = \"-I\" ]; then\n"
+        f"  case \"${{2:-}}\" in '{bin_dir}'/*) exec '{sys.executable}' \"$@\" ;; esac\n"
+        "fi\n"
+        "if [ \"${1:-}\" = \"-I\" ]; then shift; fi\n"
         "if [ \"${1:-}\" = \"-m\" ] "
         "&& [ \"${2:-}\" = \"kortravelmap.dagster.runtime_preflight\" ]; then\n"
         "  echo runtime-preflight\n"
@@ -3221,7 +3288,10 @@ def _dagster_runtime_command_stub_path(tmp_path: Path) -> str:
     )
     for command in ("dagster-webserver", "dagster-daemon", "ktm-dagster-storage"):
         target = bin_dir / command
-        target.write_text(f"#!/bin/sh\necho {command}-started\n", encoding="utf-8")
+        target.write_text(
+            f"#!{sys.executable}\nprint('{command}-started')\n",
+            encoding="utf-8",
+        )
         target.chmod(0o755)
     (bin_dir / "python").chmod(0o755)
     return f"{bin_dir}:{os.environ['PATH']}"
@@ -3236,8 +3306,18 @@ def _dagster_production_runtime_stub_path(
     bin_dir.mkdir()
     permit_marker = tmp_path / "dagster-final-permit-argv"
     runtime_dsn_marker = tmp_path / "dagster-runtime-dsn"
+    final_permit = bin_dir / "ktm-application-schema-final-permit"
     (bin_dir / "python").write_text(
         "#!/bin/sh\n"
+        f"if [ \"${{1:-}}\" = \"-I\" ] "
+        f"&& [ \"${{2:-}}\" = \"{final_permit}\" ]; then\n"
+        "  shift 2\n"
+        f"  exec '{final_permit}' \"$@\"\n"
+        "fi\n"
+        "if [ \"${1:-}\" = \"-I\" ]; then\n"
+        f"  case \"${{2:-}}\" in '{bin_dir}'/*) exec '{sys.executable}' \"$@\" ;; esac\n"
+        "fi\n"
+        "if [ \"${1:-}\" = \"-I\" ]; then shift; fi\n"
         "if [ \"${1:-}\" = \"-m\" ] "
         "&& [ \"${2:-}\" = \"kortravelmap.dagster.runtime_preflight\" ]; then\n"
         "  if [ \"${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN+x}\" = \"x\" ]; then\n"
@@ -3254,7 +3334,6 @@ def _dagster_production_runtime_stub_path(
         "exit 70\n",
         encoding="utf-8",
     )
-    final_permit = bin_dir / "ktm-application-schema-final-permit"
     final_permit.write_text(
         "#!/bin/sh\n"
         "if [ \"$#\" -ne 1 ] || [ \"${1:-}\" != \"verify-dagster\" ]; then\n"
@@ -3267,7 +3346,10 @@ def _dagster_production_runtime_stub_path(
     )
     for command in ("dagster-webserver", "dagster-daemon"):
         target = bin_dir / command
-        target.write_text(f"#!/bin/sh\necho {command}-started\n", encoding="utf-8")
+        target.write_text(
+            f"#!{sys.executable}\nprint('{command}-started')\n",
+            encoding="utf-8",
+        )
         target.chmod(0o755)
     (bin_dir / "python").chmod(0o755)
     final_permit.chmod(0o755)
@@ -3301,16 +3383,12 @@ def test_dagster_entrypoint_preflights_only_actual_runtime_commands(
     *,
     requires_preflight: bool,
 ) -> None:
-    result = subprocess.run(
-        ["sh", "docker/dagster-entrypoint.sh", *command],
-        cwd=ROOT,
-        env={
-            "PATH": _dagster_runtime_command_stub_path(tmp_path),
-            "KOR_TRAVEL_MAP_DAGSTER_PROFILE": "local-dev",
-        },
-        check=False,
-        capture_output=True,
-        text=True,
+    path = _dagster_runtime_command_stub_path(tmp_path)
+    result = _run_dagster_entrypoint(
+        tmp_path,
+        path,
+        command,
+        {"KOR_TRAVEL_MAP_DAGSTER_PROFILE": "local-dev"},
     )
 
     assert result.returncode == 0, result.stderr
@@ -3321,8 +3399,21 @@ def test_dagster_entrypoint_preflights_only_actual_runtime_commands(
 @pytest.mark.parametrize(
     "command",
     [
-        ["dagster-webserver", "-m", "kortravelmap.dagster.definitions"],
-        ["dagster-daemon", "run", "-m", "kortravelmap.dagster.definitions"],
+        [
+            "/usr/local/bin/dagster-webserver",
+            "-m",
+            "kortravelmap.dagster.definitions",
+            "-h",
+            "0.0.0.0",
+            "-p",
+            "12702",
+        ],
+        [
+            "/usr/local/bin/dagster-daemon",
+            "run",
+            "-m",
+            "kortravelmap.dagster.definitions",
+        ],
     ],
 )
 def test_dagster_production_rejects_runtime_dsn_split_brain(
@@ -3332,18 +3423,16 @@ def test_dagster_production_rejects_runtime_dsn_split_brain(
     """permit가 본 DB와 Dagster가 쓰는 DB가 갈라지는 우회를 막는다."""
 
     verified_dsn = "postgresql://dagster@example.invalid/verified"
-    result = subprocess.run(
-        ["sh", "docker/dagster-entrypoint.sh", *command],
-        cwd=ROOT,
-        env={
-            "PATH": _dagster_runtime_command_stub_path(tmp_path),
+    path = _dagster_runtime_command_stub_path(tmp_path)
+    result = _run_dagster_entrypoint(
+        tmp_path,
+        path,
+        command,
+        {
             "KOR_TRAVEL_MAP_DAGSTER_PROFILE": "production",
             "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": verified_dsn,
             "KOR_TRAVEL_MAP_PG_DSN": "postgresql://dagster@example.invalid/different",
         },
-        check=False,
-        capture_output=True,
-        text=True,
     )
 
     assert result.returncode != 0
@@ -3357,8 +3446,21 @@ def test_dagster_production_rejects_runtime_dsn_split_brain(
 @pytest.mark.parametrize(
     "command",
     [
-        ["dagster-webserver", "-m", "kortravelmap.dagster.definitions"],
-        ["dagster-daemon", "run", "-m", "kortravelmap.dagster.definitions"],
+        [
+            "/usr/local/bin/dagster-webserver",
+            "-m",
+            "kortravelmap.dagster.definitions",
+            "-h",
+            "0.0.0.0",
+            "-p",
+            "12702",
+        ],
+        [
+            "/usr/local/bin/dagster-daemon",
+            "run",
+            "-m",
+            "kortravelmap.dagster.definitions",
+        ],
     ],
 )
 def test_dagster_production_uses_verified_runtime_dsn_for_preflight_and_runtime(
@@ -3371,19 +3473,16 @@ def test_dagster_production_uses_verified_runtime_dsn_for_preflight_and_runtime(
         tmp_path
     )
     verified_dsn = "postgresql://dagster@example.invalid/verified"
-    result = subprocess.run(
-        ["sh", "docker/dagster-entrypoint.sh", *command],
-        cwd=ROOT,
-        env={
-            "PATH": path,
+    result = _run_dagster_entrypoint(
+        tmp_path,
+        path,
+        command,
+        {
             "KOR_TRAVEL_MAP_DAGSTER_PROFILE": "production",
             "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": verified_dsn,
             # 직접 실행/overlay도 compose와 똑같이 맞춘 경우에는 허용한다.
             "KOR_TRAVEL_MAP_PG_DSN": verified_dsn,
         },
-        check=False,
-        capture_output=True,
-        text=True,
     )
 
     assert result.returncode == 0, result.stderr
@@ -3442,7 +3541,10 @@ def test_docker_compose_runs_storage_migration_before_dagster_services() -> None
     migration = services["dagster-storage-migrate"]
 
     assert migration["build"]["dockerfile"] == "docker/dagster.Dockerfile"
-    assert migration["command"] == ["ktm-dagster-storage", "migrate"]
+    assert migration["command"] == [
+        "/usr/local/bin/ktm-dagster-storage",
+        "migrate",
+    ]
     assert migration["environment"]["DAGSTER_HOME"] == "/opt/dagster/dagster_home"
     assert migration["environment"]["KOR_TRAVEL_MAP_DAGSTER_PG_URL"]
     assert migration["depends_on"]["dagster-db-init"]["condition"] == (
@@ -3495,10 +3597,11 @@ def test_runtime_docker_images_are_multistage_and_non_root() -> None:
     assert "USER appuser" in api
     assert "-e ." not in api
 
-    assert "FROM python:3.12-slim AS builder" in dagster
-    assert "FROM python:3.12-slim AS runtime" in dagster
+    assert "FROM python@sha256:" in dagster
+    assert " AS builder" in dagster
+    assert " AS runtime" in dagster
     assert "USER appuser" in dagster
-    assert 'ENTRYPOINT ["dagster-entrypoint.sh"]' in dagster
+    assert 'ENTRYPOINT ["/usr/local/bin/dagster-entrypoint.sh"]' in dagster
     assert "-e ." not in dagster
 
     node_base = (
@@ -3594,7 +3697,10 @@ def test_external_overlays_keep_candidate_storage_migration_ordering(
     )
     services = json.loads(resolved.stdout)["services"]
     migration = services["dagster-storage-migrate"]
-    assert migration["command"] == ["ktm-dagster-storage", "migrate"]
+    assert migration["command"] == [
+        "/usr/local/bin/ktm-dagster-storage",
+        "migrate",
+    ]
     assert migration["environment"]["KOR_TRAVEL_MAP_DAGSTER_PG_URL"]
     if overlay in {
         "docker-compose.external-db.yml",

@@ -20,12 +20,14 @@ from collections.abc import Mapping, Sequence
 from typing import cast
 
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from kortravelmap.infra.db import make_async_engine
 
 __all__ = [
     "RuntimePrivilegeReconciliationError",
     "reconcile_runtime_privileges",
+    "reconcile_runtime_privileges_in_transaction",
 ]
 
 
@@ -681,8 +683,92 @@ def _runtime_relation_grants(
     return grants, unknown_relations
 
 
+async def reconcile_runtime_privileges_in_transaction(
+    connection: AsyncConnection,
+) -> None:
+    """호출자가 소유한 transaction 안에서 exact runtime ACL을 적용한다."""
+
+    identity = (await connection.execute(text("SELECT session_user::text"))).scalar_one()
+    if identity != _MIGRATOR_ROLE:
+        raise RuntimePrivilegeReconciliationError(
+            "runtime ACL reconciliation requires the dedicated "
+            f"{_MIGRATOR_ROLE} login, not {identity!r}"
+        )
+    await connection.execute(text(f"SET ROLE {_SCHEMA_OWNER_ROLE}"))
+    # Clear stale broad grants left by the pre-ADR-090 bootstrap owner before
+    # applying the closed inventory. This also makes an existing 0236 → 300
+    # handoff atomic with the least-privilege destination catalog.
+    await connection.execute(
+        text(
+            "REVOKE ALL ON ALL TABLES IN SCHEMA feature, provider_sync, ops "
+            "FROM ktm_feature_runtime"
+        )
+    )
+    await connection.execute(
+        text(
+            "REVOKE ALL ON ALL SEQUENCES IN SCHEMA feature, provider_sync, ops "
+            "FROM ktm_feature_runtime"
+        )
+    )
+    rows = list((await connection.execute(_APPLICATION_RELATIONS_SQL)).mappings().all())
+    grants, unknown_relations = _runtime_relation_grants(
+        [cast(Mapping[str, object], row) for row in rows]
+    )
+    if unknown_relations:
+        raise RuntimePrivilegeReconciliationError(
+            _undeclared_relation_message(unknown_relations)
+        )
+    for statement in grants:
+        await connection.execute(text(statement))
+    for statement in _CORE_FEATURE_GRANTS:
+        await connection.execute(text(statement))
+    for statement in _ROUTE_AREA_RUNTIME_GRANTS:
+        await connection.execute(text(statement))
+    # Evidence tables remain owned by the schema owner. The manual SECURITY
+    # DEFINER owner only has the narrowly granted INSERT path.
+    for statement in _MANUAL_FEATURE_TABLE_ACL:
+        await connection.execute(text(statement))
+    for statement in _FEATURE_REQUEST_TABLE_ACL:
+        await connection.execute(text(statement))
+    for statement in _FEATURE_REQUEST_SCHEMA_OWNER_DEPENDENCY_ACL:
+        await connection.execute(text(statement))
+    for statement in _M05_SCHEMA_OWNER_DEPENDENCY_ACL:
+        await connection.execute(text(statement))
+
+    # Routine ownership is deliberately split from table ownership. Runtime
+    # identities never receive any of these SET ROLE paths.
+    await connection.execute(text("SET ROLE ktm_feature_state_procedure_owner"))
+    for statement in _STATE_OWNER_FUNCTION_ACL:
+        await connection.execute(text(statement))
+    for statement in _SUBTYPE_READY_FUNCTION_ACL:
+        await connection.execute(text(statement))
+    for statement in _FEATURE_REQUEST_STATE_OWNER_DEPENDENCY_ACL:
+        await connection.execute(text(statement))
+    for statement in _M05_STATE_OWNER_DEPENDENCY_ACL:
+        await connection.execute(text(statement))
+    await connection.execute(text("SET ROLE ktm_feature_audit_writer"))
+    for statement in _AUDIT_WRITER_FUNCTION_ACL:
+        await connection.execute(text(statement))
+    await connection.execute(text("SET ROLE ktm_manual_feature_procedure_owner"))
+    for statement in _MANUAL_FEATURE_WRITER_ACL:
+        await connection.execute(text(statement))
+    for statement in _FEATURE_REQUEST_MANUAL_OWNER_DEPENDENCY_ACL:
+        await connection.execute(text(statement))
+    await connection.execute(text("SET ROLE ktm_curation_command_owner"))
+    for statement in _MANUAL_CURATION_WRITER_ACL:
+        await connection.execute(text(statement))
+    await connection.execute(text("SET ROLE ktm_feature_request_procedure_owner"))
+    for statement in _FEATURE_REQUEST_WRITER_ACL:
+        await connection.execute(text(statement))
+    await connection.execute(text("SET ROLE ktm_manual_provider_dedup_procedure_owner"))
+    for statement in _M05_WRITER_ACL:
+        await connection.execute(text(statement))
+    # 호출자는 이어서 destination catalog receipt를 같은 transaction에서 읽는다.
+    await connection.execute(text(f"SET ROLE {_SCHEMA_OWNER_ROLE}"))
+
+
 async def reconcile_runtime_privileges() -> None:
-    """migrator session에서 state/audit 안전 ACL을 post-upgrade로 재조정한다."""
+    """migrator session에서 state/audit 안전 ACL을 atomic하게 재조정한다."""
 
     migrator_dsn = os.environ.get("KOR_TRAVEL_MAP_PG_DSN")
     if not migrator_dsn:
@@ -692,83 +778,7 @@ async def reconcile_runtime_privileges() -> None:
     engine = make_async_engine(migrator_dsn, pool_size=1)
     try:
         async with engine.begin() as connection:
-            identity = (await connection.execute(text("SELECT session_user::text"))).scalar_one()
-            if identity != _MIGRATOR_ROLE:
-                raise RuntimePrivilegeReconciliationError(
-                    "runtime ACL reconciliation requires the dedicated "
-                    f"{_MIGRATOR_ROLE} login, not {identity!r}"
-                )
-            await connection.execute(text(f"SET ROLE {_SCHEMA_OWNER_ROLE}"))
-            # Clear stale broad grants left by the pre-ADR-090 bootstrap owner
-            # before applying the closed inventory.  This makes a bootstrap of
-            # an already-migrated DB safe as well as a fresh DB.
-            await connection.execute(
-                text(
-                    "REVOKE ALL ON ALL TABLES IN SCHEMA feature, provider_sync, ops "
-                    "FROM ktm_feature_runtime"
-                )
-            )
-            await connection.execute(
-                text(
-                    "REVOKE ALL ON ALL SEQUENCES IN SCHEMA feature, provider_sync, ops "
-                    "FROM ktm_feature_runtime"
-                )
-            )
-            rows = list((await connection.execute(_APPLICATION_RELATIONS_SQL)).mappings().all())
-            grants, unknown_relations = _runtime_relation_grants(
-                [cast(Mapping[str, object], row) for row in rows]
-            )
-            if unknown_relations:
-                raise RuntimePrivilegeReconciliationError(
-                    _undeclared_relation_message(unknown_relations)
-                )
-            for statement in grants:
-                await connection.execute(text(statement))
-            for statement in _CORE_FEATURE_GRANTS:
-                await connection.execute(text(statement))
-            for statement in _ROUTE_AREA_RUNTIME_GRANTS:
-                await connection.execute(text(statement))
-            # Evidence tables remain owned by the schema owner.  The manual
-            # SECURITY DEFINER owner only has the narrowly granted INSERT
-            # path, so it cannot reconcile relation ACLs itself.
-            for statement in _MANUAL_FEATURE_TABLE_ACL:
-                await connection.execute(text(statement))
-            for statement in _FEATURE_REQUEST_TABLE_ACL:
-                await connection.execute(text(statement))
-            for statement in _FEATURE_REQUEST_SCHEMA_OWNER_DEPENDENCY_ACL:
-                await connection.execute(text(statement))
-            for statement in _M05_SCHEMA_OWNER_DEPENDENCY_ACL:
-                await connection.execute(text(statement))
-
-            # Routine ownership is deliberately split from table ownership.
-            # The schema owner has SET-only membership in each NOLOGIN routine
-            # owner; runtime identities never receive this path.
-            await connection.execute(text("SET ROLE ktm_feature_state_procedure_owner"))
-            for statement in _STATE_OWNER_FUNCTION_ACL:
-                await connection.execute(text(statement))
-            for statement in _SUBTYPE_READY_FUNCTION_ACL:
-                await connection.execute(text(statement))
-            for statement in _FEATURE_REQUEST_STATE_OWNER_DEPENDENCY_ACL:
-                await connection.execute(text(statement))
-            for statement in _M05_STATE_OWNER_DEPENDENCY_ACL:
-                await connection.execute(text(statement))
-            await connection.execute(text("SET ROLE ktm_feature_audit_writer"))
-            for statement in _AUDIT_WRITER_FUNCTION_ACL:
-                await connection.execute(text(statement))
-            await connection.execute(text("SET ROLE ktm_manual_feature_procedure_owner"))
-            for statement in _MANUAL_FEATURE_WRITER_ACL:
-                await connection.execute(text(statement))
-            for statement in _FEATURE_REQUEST_MANUAL_OWNER_DEPENDENCY_ACL:
-                await connection.execute(text(statement))
-            await connection.execute(text("SET ROLE ktm_curation_command_owner"))
-            for statement in _MANUAL_CURATION_WRITER_ACL:
-                await connection.execute(text(statement))
-            await connection.execute(text("SET ROLE ktm_feature_request_procedure_owner"))
-            for statement in _FEATURE_REQUEST_WRITER_ACL:
-                await connection.execute(text(statement))
-            await connection.execute(text("SET ROLE ktm_manual_provider_dedup_procedure_owner"))
-            for statement in _M05_WRITER_ACL:
-                await connection.execute(text(statement))
+            await reconcile_runtime_privileges_in_transaction(connection)
     finally:
         await engine.dispose()
 

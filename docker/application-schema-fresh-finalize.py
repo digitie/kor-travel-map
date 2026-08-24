@@ -1,4 +1,4 @@
-#!/usr/local/bin/python
+#!/usr/local/bin/python -I
 """Docker Manager 전용 fresh ``300`` runtime ACL completion one-shot.
 
 fresh root migration은 raw revision ``300``을 transaction으로 확정한 뒤 runtime ACL을
@@ -11,6 +11,7 @@ fresh root migration은 raw revision ``300``을 transaction으로 확정한 뒤 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import importlib.machinery
 import importlib.util
 import json
@@ -26,9 +27,12 @@ from typing import Any, Final
 from uuid import UUID
 
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from kortravelmap.infra.db import make_async_engine
-from kortravelmap.infra.runtime_privileges import reconcile_runtime_privileges
+from kortravelmap.infra.runtime_privileges import (
+    reconcile_runtime_privileges_in_transaction,
+)
 
 _DESTINATION_HEAD: Final = "300"
 _MIGRATOR_DSN_ENV: Final = "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN"
@@ -39,7 +43,7 @@ _MIGRATOR_ROLE: Final = "ktm_feature_migrator"
 _DATABASE_OWNER: Final = "ktm_feature_schema_owner"
 _FENCE_PATH: Final = Path("/run/kor-travel-map-application-fresh-finalize/fence.json")
 _INSTALLED_BIN_DIR: Final = Path("/usr/local/bin")
-_FENCE_SCHEMA: Final = "kor-travel-docker-manager.map-fresh-300-finalize-fence.v1"
+_FENCE_SCHEMA: Final = "kor-travel-docker-manager.map-fresh-300-finalize-fence.v3"
 _FENCE_OPERATION: Final = "map-fresh-300-finalize"
 _STATIC_CONTRACT_SCHEMA: Final = "kor-travel-map.application-baseline-contract.v1"
 _SHA256_PATTERN: Final = re.compile(r"^[0-9a-f]{64}$")
@@ -51,13 +55,20 @@ _FENCE_FIELDS: Final = frozenset(
         "schema",
         "transaction_id",
         "journal_sha256",
+        "journal_generation",
         "operation",
+        "prior_fresh_migration_result_sha256",
+        "prior_fresh_migration_fence_sha256",
+        "prior_fresh_migration_transaction_id",
+        "prior_fresh_migration_journal_sha256",
+        "prior_fresh_migration_generation",
         "map_candidate_commit",
         "map_candidate_image_id",
         "postgres_image_id",
         "destination_head",
         "reference_manifest_sha256",
-        "catalog_sha256",
+        "source_catalog_sha256",
+        "destination_catalog_sha256",
         "seed_sha256",
         "privileged_residue_sha256",
         "pre_privileged_residue_sha256",
@@ -76,7 +87,8 @@ _CONTRACT_FIELDS: Final = frozenset(
         "application_head",
         "reference_manifest_sha256",
         "postgres_image_id",
-        "catalog_sha256",
+        "source_catalog_sha256",
+        "destination_catalog_sha256",
         "seed_sha256",
         "privileged_residue_sha256",
         "source_alembic_version_sha256",
@@ -102,7 +114,7 @@ def _require_sha256(value: object, label: str) -> str:
     return value
 
 
-def _require_fixed_fence() -> Mapping[str, Any]:
+def _require_fixed_fence() -> tuple[Mapping[str, Any], str]:
     """host root가 publish한 fixed read-only fence만 source한다."""
 
     try:
@@ -159,10 +171,25 @@ def _require_fixed_fence() -> Mapping[str, Any]:
         UUID(str(value["transaction_id"]))
     except (TypeError, ValueError) as exc:
         raise FreshFinalizeError("fresh finalize writer fence transaction id is invalid") from exc
+    try:
+        UUID(str(value["prior_fresh_migration_transaction_id"]))
+    except (TypeError, ValueError) as exc:
+        raise FreshFinalizeError("fresh finalize prior migration transaction is invalid") from exc
+    if (
+        type(value["journal_generation"]) is not int
+        or type(value["prior_fresh_migration_generation"]) is not int
+        or value["prior_fresh_migration_generation"] <= 0
+        or value["journal_generation"] <= value["prior_fresh_migration_generation"]
+    ):
+        raise FreshFinalizeError("fresh finalize journal generation is invalid")
     for key in (
         "journal_sha256",
+        "prior_fresh_migration_result_sha256",
+        "prior_fresh_migration_fence_sha256",
+        "prior_fresh_migration_journal_sha256",
         "reference_manifest_sha256",
-        "catalog_sha256",
+        "source_catalog_sha256",
+        "destination_catalog_sha256",
         "seed_sha256",
         "privileged_residue_sha256",
         "pre_privileged_residue_sha256",
@@ -193,7 +220,7 @@ def _require_fixed_fence() -> Mapping[str, Any]:
         raise FreshFinalizeError("fresh finalize writer fence expiry is invalid") from exc
     if expires_at.tzinfo is None or expires_at.astimezone(UTC) <= datetime.now(UTC):
         raise FreshFinalizeError("fresh finalize writer fence has expired")
-    return value
+    return value, hashlib.sha256(raw).hexdigest()
 
 
 def _helper_path(source_name: str, installed_name: str) -> Path:
@@ -268,31 +295,28 @@ def _static_contract() -> Mapping[str, str]:
 
 
 async def _assert_restricted_migrator_and_database(
-    dsn: str, fence: Mapping[str, Any]
+    connection: AsyncConnection,
+    fence: Mapping[str, Any],
 ) -> None:
-    engine = make_async_engine(dsn, pool_size=1)
     try:
-        async with engine.connect() as connection:
-            row = (
-                await connection.execute(
-                    text(
-                        "SELECT session_user::text, current_user::text, role.rolsuper, "
-                        "current_database(), "
-                        "(SELECT oid FROM pg_catalog.pg_database "
-                        "WHERE datname = current_database()), "
-                        "(SELECT datdba::regrole::text FROM pg_catalog.pg_database "
-                        "WHERE datname = current_database()), "
-                        "(SELECT system_identifier::text "
-                        "FROM pg_catalog.pg_control_system()) "
-                        "FROM pg_catalog.pg_roles AS role "
-                        "WHERE role.rolname = session_user"
-                    )
+        row = (
+            await connection.execute(
+                text(
+                    "SELECT session_user::text, current_user::text, role.rolsuper, "
+                    "current_database(), "
+                    "(SELECT oid FROM pg_catalog.pg_database "
+                    "WHERE datname = current_database()), "
+                    "(SELECT datdba::regrole::text FROM pg_catalog.pg_database "
+                    "WHERE datname = current_database()), "
+                    "(SELECT system_identifier::text "
+                    "FROM pg_catalog.pg_control_system()) "
+                    "FROM pg_catalog.pg_roles AS role "
+                    "WHERE role.rolname = session_user"
                 )
-            ).one_or_none()
+            )
+        ).one_or_none()
     except Exception as exc:  # DSN authority/host는 error path에 노출하지 않는다.
         raise FreshFinalizeError("fresh finalize cannot verify restricted DB session") from exc
-    finally:
-        await engine.dispose()
     if (
         row is None
         or str(row[0]) != _MIGRATOR_ROLE
@@ -306,43 +330,43 @@ async def _assert_restricted_migrator_and_database(
         raise FreshFinalizeError("fresh finalize DB session or identity is invalid")
 
 
-async def _assert_raw_300_and_receipts(dsn: str, expected: Mapping[str, str]) -> None:
+async def _assert_raw_300_and_receipts(
+    connection: AsyncConnection,
+    expected: Mapping[str, str],
+    *,
+    expected_catalog_sha256: str,
+) -> tuple[str, str]:
     module = _load_handoff_contract_module()
-    engine = make_async_engine(dsn, pool_size=1)
     try:
-        async with engine.connect() as connection:
-            # migrator는 NOINHERIT LOGIN이다. receipt query는 runtime principal 권한으로
-            # 넓히지 않고, handoff와 같은 명시 schema-owner role과 canonical search_path에서
-            # 실행한다. session_user는 앞 단계의 dedicated migrator assertion으로 유지된다.
-            await connection.execute(text(f"SET ROLE {_DATABASE_OWNER}"))
-            await connection.execute(text("SET search_path = public, x_extension"))
-            versions = tuple(
-                str(item)
-                for item in (
-                    await connection.scalars(
-                        text("SELECT version_num FROM public.alembic_version ORDER BY version_num")
-                    )
-                ).all()
-            )
-            catalog = await module._contract_sha256(  # type: ignore[attr-defined]
-                connection, "application-catalog.sql"
-            )
-            seed = await module._contract_sha256(  # type: ignore[attr-defined]
-                connection, "application-seed.sql"
-            )
-            destination_alembic_version = await module._contract_sha256(  # type: ignore[attr-defined]
-                connection, "application-destination-alembic-version.sql"
-            )
-            await module._verify_runtime_projection_invariants(  # type: ignore[attr-defined]
-                connection
-            )
+        # migrator는 NOINHERIT LOGIN이다. receipt query는 handoff와 같은 명시
+        # schema-owner role과 canonical search_path에서 실행한다.
+        await connection.execute(text(f"SET ROLE {_DATABASE_OWNER}"))
+        await connection.execute(text("SET search_path = public, x_extension"))
+        versions = tuple(
+            str(item)
+            for item in (
+                await connection.scalars(
+                    text("SELECT version_num FROM public.alembic_version ORDER BY version_num")
+                )
+            ).all()
+        )
+        catalog = await module._contract_sha256(  # type: ignore[attr-defined]
+            connection, "application-catalog.sql"
+        )
+        seed = await module._contract_sha256(  # type: ignore[attr-defined]
+            connection, "application-seed.sql"
+        )
+        destination_alembic_version = await module._contract_sha256(  # type: ignore[attr-defined]
+            connection, "application-destination-alembic-version.sql"
+        )
+        await module._verify_runtime_projection_invariants(  # type: ignore[attr-defined]
+            connection
+        )
     except Exception as exc:
         raise FreshFinalizeError("fresh finalize cannot verify raw 300 receipts") from exc
-    finally:
-        await engine.dispose()
     if versions != (_DESTINATION_HEAD,):
         raise FreshFinalizeError("fresh finalize requires exact raw revision 300")
-    if catalog != expected["catalog_sha256"] or seed != expected["seed_sha256"]:
+    if catalog != expected_catalog_sha256 or seed != expected["seed_sha256"]:
         raise FreshFinalizeError("fresh finalize catalog or seed receipt does not match baseline")
     if (
         destination_alembic_version
@@ -351,22 +375,25 @@ async def _assert_raw_300_and_receipts(dsn: str, expected: Mapping[str, str]) ->
         raise FreshFinalizeError(
             "fresh finalize destination Alembic metadata facet does not match baseline"
         )
+    return catalog, destination_alembic_version
 
 
-async def _finalize() -> None:
+async def _finalize() -> Mapping[str, Any]:
     if os.environ.get(_BOOTSTRAP_DSN_ENV):
         raise FreshFinalizeError("bootstrap-superuser DSN must not enter fresh finalize")
     dsn = os.environ.get(_MIGRATOR_DSN_ENV)
     if not dsn:
         raise FreshFinalizeError(f"{_MIGRATOR_DSN_ENV} is required")
-    fence = _require_fixed_fence()
+    fence, fence_sha256 = _require_fixed_fence()
     expected = _static_contract()
     if (
         os.environ.get(_IMAGE_REVISION_ENV) != fence["map_candidate_commit"]
         or os.environ.get(_IMAGE_ID_ENV) != fence["map_candidate_image_id"]
         or fence["postgres_image_id"] != expected["postgres_image_id"]
         or fence["reference_manifest_sha256"] != expected["reference_manifest_sha256"]
-        or fence["catalog_sha256"] != expected["catalog_sha256"]
+        or fence["source_catalog_sha256"] != expected["source_catalog_sha256"]
+        or fence["destination_catalog_sha256"]
+        != expected["destination_catalog_sha256"]
         or fence["seed_sha256"] != expected["seed_sha256"]
         or fence["privileged_residue_sha256"] != expected["privileged_residue_sha256"]
         or fence["pre_privileged_residue_sha256"] != expected["privileged_residue_sha256"]
@@ -376,47 +403,85 @@ async def _finalize() -> None:
         != expected["runtime_invariants_sql_sha256"]
     ):
         raise FreshFinalizeError("fresh finalize fence does not match candidate baseline")
-    await _assert_restricted_migrator_and_database(dsn, fence)
-    await _assert_raw_300_and_receipts(dsn, expected)
-    # receipt/identity preflight가 오래 걸리는 동안 fence가 만료될 수 있다. 실제 ACL
-    # transaction 직전에 same-byte·unexpired fence를 다시 읽어, 만료된 Manager writer
-    # boundary 밖에서 권한을 변경하지 않는다.
-    active_fence = _require_fixed_fence()
-    if active_fence != fence:
-        raise FreshFinalizeError("fresh finalize writer fence changed before completion")
-    os.environ["KOR_TRAVEL_MAP_PG_DSN"] = dsn
+    engine = make_async_engine(dsn, pool_size=1)
     try:
-        await reconcile_runtime_privileges()
-    except Exception as exc:  # DB/ACL details는 operator stderr에 노출하지 않는다.
-        raise FreshFinalizeError("fresh finalize runtime ACL reconciliation failed") from exc
-    # reconcile는 자체 atomic transaction이다. late failure의 retry는 same fixed fence가
-    # 아직 유효한 동안만 가능하며, Manager는 이 뒤 privileged postflight와 final permit을
-    # 새로 발급해야 한다.
-    refreshed_fence = _require_fixed_fence()
-    if refreshed_fence != fence:
-        raise FreshFinalizeError("fresh finalize writer fence changed during completion")
-    await _assert_restricted_migrator_and_database(dsn, fence)
-    await _assert_raw_300_and_receipts(dsn, expected)
+        async with engine.begin() as connection:
+            # 이 transaction의 첫 SQL에서 restricted LOGIN과 DB identity를 고정한다.
+            await _assert_restricted_migrator_and_database(connection, fence)
+            pre_catalog, _ = await _assert_raw_300_and_receipts(
+                connection,
+                expected,
+                expected_catalog_sha256=expected["source_catalog_sha256"],
+            )
+            # source receipt가 오래 걸리는 동안 fence가 만료될 수 있다. 실제 ACL
+            # mutation 직전에 same-byte·unexpired generation을 다시 읽는다.
+            active_fence, active_fence_sha256 = _require_fixed_fence()
+            if active_fence != fence or active_fence_sha256 != fence_sha256:
+                raise FreshFinalizeError(
+                    "fresh finalize writer fence changed before completion"
+                )
+            try:
+                await reconcile_runtime_privileges_in_transaction(connection)
+            except Exception as exc:  # DB/ACL details는 stderr에 노출하지 않는다.
+                raise FreshFinalizeError(
+                    "fresh finalize runtime ACL reconciliation failed"
+                ) from exc
+            post_catalog, destination_facet = await _assert_raw_300_and_receipts(
+                connection,
+                expected,
+                expected_catalog_sha256=expected["destination_catalog_sha256"],
+            )
+            # destination receipt와 최종 fence 확인까지 같은 outer transaction이다.
+            # 여기서 실패하면 ACL과 catalog가 source facet으로 함께 rollback된다.
+            completed_fence, completed_fence_sha256 = _require_fixed_fence()
+            if completed_fence != fence or completed_fence_sha256 != fence_sha256:
+                raise FreshFinalizeError(
+                    "fresh finalize writer fence changed during completion"
+                )
+            await connection.execute(text("RESET ROLE"))
+            await _assert_restricted_migrator_and_database(connection, fence)
+    finally:
+        await engine.dispose()
+    return {
+        "schema": "kor-travel-map.application-fresh-300-finalize.v3",
+        "outcome": "finalized",
+        "destination_head": _DESTINATION_HEAD,
+        "map_candidate_commit": fence["map_candidate_commit"],
+        "map_candidate_image_id": fence["map_candidate_image_id"],
+        "reference_manifest_sha256": expected["reference_manifest_sha256"],
+        "writer_fence_receipt_sha256": fence_sha256,
+        "writer_fence_transaction_id": fence["transaction_id"],
+        "journal_sha256": fence["journal_sha256"],
+        "journal_generation": fence["journal_generation"],
+        "prior_fresh_migration_result_sha256": fence[
+            "prior_fresh_migration_result_sha256"
+        ],
+        "prior_fresh_migration_fence_sha256": fence[
+            "prior_fresh_migration_fence_sha256"
+        ],
+        "prior_fresh_migration_transaction_id": fence[
+            "prior_fresh_migration_transaction_id"
+        ],
+        "prior_fresh_migration_journal_sha256": fence[
+            "prior_fresh_migration_journal_sha256"
+        ],
+        "prior_fresh_migration_generation": fence[
+            "prior_fresh_migration_generation"
+        ],
+        "pre_source_catalog_sha256": pre_catalog,
+        "post_destination_catalog_sha256": post_catalog,
+        "post_destination_alembic_version_sha256": destination_facet,
+    }
 
 
 async def async_main(arguments: Sequence[str] | None = None) -> int:
     try:
         _parse_args(arguments)
-        await _finalize()
+        result = await _finalize()
     except FreshFinalizeError as exc:
         print(f"fresh application 300 finalize refused: {exc}", file=sys.stderr)
         return 1
-    print(
-        json.dumps(
-            {
-                "schema": "kor-travel-map.application-fresh-300-finalize.v1",
-                "outcome": "finalized",
-                "destination_head": _DESTINATION_HEAD,
-            },
-            separators=(",", ":"),
-            sort_keys=True,
-        )
-    )
+    print(json.dumps(result, separators=(",", ":"), sort_keys=True))
     return 0
 
 

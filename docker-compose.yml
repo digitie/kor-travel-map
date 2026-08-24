@@ -102,7 +102,11 @@ services:
       KOR_TRAVEL_MAP_APPLICATION_SCHEMA_PROFILE: local-dev
       KOR_TRAVEL_MAP_MIGRATOR_PG_DSN: ${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required}
       KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required}
-    entrypoint: ["/usr/local/bin/ktm-application-schema-fresh-300", "migrate"]
+    entrypoint:
+      - /usr/local/bin/python
+      - -I
+      - /usr/local/bin/ktm-application-schema-fresh-300
+      - migrate
 
   rustfs-perms:
     image: alpine:3.20
@@ -335,7 +339,7 @@ services:
       secrets:
         - github_token
     command:
-      - dagster-webserver
+      - /usr/local/bin/dagster-webserver
       - -m
       - kortravelmap.dagster.definitions
       - -h
@@ -473,7 +477,7 @@ services:
     volumes:
       - kor-travel-map-mois-source:/app/data/mois
       - kor-travel-map-application-final-permit:/run/kor-travel-map-application-final-permit:ro
-    command: ["dagster-daemon", "run", "-m", "kortravelmap.dagster.definitions"]
+    command: ["/usr/local/bin/dagster-daemon", "run", "-m", "kortravelmap.dagster.definitions"]
 
   # 후보 image 안의 Dagster package migration graph를 그대로 실행·검증하는 유일한
   # metadata storage writer다. application Alembic과 source SHA는 전혀 읽지 않는다.
@@ -485,7 +489,7 @@ services:
         KOR_TRAVEL_MAP_GIT_COMMIT: ${KOR_TRAVEL_MAP_GIT_COMMIT:-development}
       secrets:
         - github_token
-    command: ["ktm-dagster-storage", "migrate"]
+    command: ["/usr/local/bin/ktm-dagster-storage", "migrate"]
     environment:
       DAGSTER_HOME: /opt/dagster/dagster_home
       DAGSTER_DISABLE_TELEMETRY: ${DAGSTER_DISABLE_TELEMETRY:-yes}

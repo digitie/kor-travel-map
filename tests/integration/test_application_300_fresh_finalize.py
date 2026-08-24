@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
-from collections.abc import AsyncIterator
+import shutil
+import tempfile
+from collections.abc import AsyncIterator, Iterator
 from pathlib import Path
 from types import ModuleType
 from uuid import uuid4
@@ -27,6 +29,17 @@ pytestmark = pytest.mark.integration
 
 _ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _ROOT / "docker" / "application-schema-fresh-finalize.py"
+
+
+@pytest.fixture
+def safe_fence_directory() -> Iterator[Path]:
+    """NTFS pytest 임시 경로와 분리된 private Linux fence 디렉터리."""
+
+    path = Path(tempfile.mkdtemp(prefix="ktm-fresh-finalize-", dir="/tmp"))
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path)
 
 
 def _finalize_module() -> ModuleType:
@@ -90,19 +103,29 @@ async def _write_fence(
     finally:
         await engine.dispose()
     payload = {
-        "schema": "kor-travel-docker-manager.map-fresh-300-finalize-fence.v1",
+        "schema": "kor-travel-docker-manager.map-fresh-300-finalize-fence.v3",
         "transaction_id": str(uuid4()),
         "journal_sha256": "c" * 64,
+        "journal_generation": 2,
         "operation": "map-fresh-300-finalize",
+        "prior_fresh_migration_result_sha256": "d" * 64,
+        "prior_fresh_migration_fence_sha256": "e" * 64,
+        "prior_fresh_migration_transaction_id": str(uuid4()),
+        "prior_fresh_migration_journal_sha256": "f" * 64,
+        "prior_fresh_migration_generation": 1,
         "map_candidate_commit": "a" * 40,
         "map_candidate_image_id": "sha256:" + "b" * 64,
         "postgres_image_id": expected["postgres_image_id"],
         "destination_head": "300",
         "reference_manifest_sha256": expected["reference_manifest_sha256"],
-        "catalog_sha256": expected["catalog_sha256"],
+        "source_catalog_sha256": expected["source_catalog_sha256"],
+        "destination_catalog_sha256": expected["destination_catalog_sha256"],
         "seed_sha256": expected["seed_sha256"],
         "privileged_residue_sha256": expected["privileged_residue_sha256"],
         "pre_privileged_residue_sha256": expected["privileged_residue_sha256"],
+        "destination_alembic_version_sha256": expected[
+            "destination_alembic_version_sha256"
+        ],
         "runtime_invariants_sql_sha256": expected["runtime_invariants_sql_sha256"],
         "database_name": str(row[0]),
         "database_oid": int(row[1]),
@@ -119,34 +142,73 @@ async def _write_fence(
     monkeypatch.setenv(
         "KOR_TRAVEL_MAP_APPLICATION_FRESH_FINALIZE_IMAGE_ID", "sha256:" + "b" * 64
     )
-
-
 @pytest.mark.asyncio
 async def test_fresh_finalize_retries_only_fixed_raw_300_completion_after_late_acl_failure(
     fresh_300_database: tuple[str, str],
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    tmp_path: Path,
+    safe_fence_directory: Path,
 ) -> None:
     """ACL transaction late failure 뒤에도 raw 300을 generic migration 없이 completion한다."""
 
     admin_dsn, migrator_dsn = fresh_300_database
     module = _finalize_module()
-    fence = tmp_path / "fresh-finalize-fence.json"
+    fence = safe_fence_directory / "fence.json"
     await _write_fence(module, admin_dsn, fence, monkeypatch)
     monkeypatch.delenv("KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN", raising=False)
     monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", migrator_dsn)
-    original_reconcile = module.reconcile_runtime_privileges
+    original_reconcile = module.reconcile_runtime_privileges_in_transaction
 
-    async def _late_acl_failure() -> None:
+    async def _late_acl_failure(_: object) -> None:
         raise RuntimeError("controlled runtime ACL late failure")
 
-    monkeypatch.setattr(module, "reconcile_runtime_privileges", _late_acl_failure)
+    monkeypatch.setattr(
+        module,
+        "reconcile_runtime_privileges_in_transaction",
+        _late_acl_failure,
+    )
     command = ["finalize", "--writer-fence-receipt", str(fence)]
     assert await module.async_main(command) == 1
     assert await _raw_version(admin_dsn) == ("300",)
     assert "runtime ACL reconciliation failed" in capsys.readouterr().err
 
-    monkeypatch.setattr(module, "reconcile_runtime_privileges", original_reconcile)
+    monkeypatch.setattr(
+        module,
+        "reconcile_runtime_privileges_in_transaction",
+        original_reconcile,
+    )
+    original_receipts = module._assert_raw_300_and_receipts
+    receipt_calls = 0
+
+    async def _destination_postflight_failure(
+        connection: object,
+        expected: object,
+        *,
+        expected_catalog_sha256: str,
+    ) -> tuple[str, str]:
+        nonlocal receipt_calls
+        receipt_calls += 1
+        if receipt_calls == 2:
+            raise module.FreshFinalizeError(
+                "controlled destination catalog postflight failure"
+            )
+        return await original_receipts(
+            connection,
+            expected,
+            expected_catalog_sha256=expected_catalog_sha256,
+        )
+
+    monkeypatch.setattr(
+        module,
+        "_assert_raw_300_and_receipts",
+        _destination_postflight_failure,
+    )
+    assert await module.async_main(command) == 1
+    assert await _raw_version(admin_dsn) == ("300",)
+    assert "controlled destination catalog postflight failure" in capsys.readouterr().err
+
+    # ACL reconcile가 성공한 뒤 postflight가 실패해도 같은 outer transaction이
+    # source catalog로 rollback한다. 따라서 fixed finalizer를 그대로 재시도할 수 있다.
+    monkeypatch.setattr(module, "_assert_raw_300_and_receipts", original_receipts)
     assert await module.async_main(command) == 0
     assert await _raw_version(admin_dsn) == ("300",)

@@ -1,5 +1,38 @@
-#!/usr/bin/env sh
+#!/bin/sh
 set -eu
+
+# production은 첫 external command보다 먼저 image의 interpreter/import/command
+# resolution 경계를 고정한다. PATH override가 있으면 `sed` 등 credential-bearing
+# child를 permit 전에 바꿔치기할 수 있으므로 값이 정확히 같아야 한다.
+if [ "${KOR_TRAVEL_MAP_API_PROFILE+x}" = "x" ]; then
+  api_profile="$KOR_TRAVEL_MAP_API_PROFILE"
+else
+  api_profile="production"
+fi
+case "$api_profile" in
+  production | local-dev) ;;
+  *)
+    echo "KOR_TRAVEL_MAP_API_PROFILE must be exactly production or local-dev" >&2
+    exit 1
+    ;;
+esac
+if [ "$api_profile" = "production" ] \
+  && { [ "${PYTHONPATH+x}" = "x" ] \
+    || [ "${PYTHONHOME+x}" = "x" ] \
+    || [ "${PYTHONUSERBASE+x}" = "x" ]; }; then
+  echo "production API forbids PYTHONPATH, PYTHONHOME, and PYTHONUSERBASE overrides" >&2
+  exit 1
+fi
+if [ "$api_profile" = "production" ] \
+  && [ "${PYTHONNOUSERSITE:-}" != "1" ]; then
+  echo "production API requires PYTHONNOUSERSITE=1" >&2
+  exit 1
+fi
+if [ "$api_profile" = "production" ] \
+  && [ "${PATH:-}" != "/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin" ]; then
+  echo "production API requires the sealed runtime PATH" >&2
+  exit 1
+fi
 
 removed_provider_keys="
 KOR_TRAVEL_MAP_API_KMA_SERVICE_KEY
@@ -150,21 +183,8 @@ fi
 # 2단계 혼란을 만들므로, 같은 문구로 migration 전에 거부한다(메시지 lockstep).
 # 이 ops surface에는 datasets/pipeline뿐 아니라 metrics/log/consistency/deep-health
 # 관측 read도 포함하며 모두 같은 read principal pair를 사용한다.
-# profile 기본값은 Docker image ENV(production)와 같다. set-but-empty를 조용히
-# production으로 접지 않도록 set-vs-unset(+x)로 판정한다 — compose는 막지만
-# 직접 ``docker run``은 빈 값을 넘길 수 있고 settings도 빈 문자열을 거부한다.
-if [ "${KOR_TRAVEL_MAP_API_PROFILE+x}" = "x" ]; then
-  api_profile="$KOR_TRAVEL_MAP_API_PROFILE"
-else
-  api_profile="production"
-fi
-case "$api_profile" in
-  production | local-dev) ;;
-  *)
-    echo "KOR_TRAVEL_MAP_API_PROFILE must be exactly production or local-dev" >&2
-    exit 1
-    ;;
-esac
+# profile 값과 production interpreter/PATH 경계는 첫 external command보다 앞에서
+# 이미 검증했다.
 for flag_name in KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED; do
   eval "flag_is_set=\${$flag_name+x}"
   if [ "$flag_is_set" = "x" ]; then
@@ -271,7 +291,7 @@ fi
 # Shell은 raw 미유입과 단순 형태를 먼저 닫고, API settings 정본이 digest와 기존
 # credential/curation/cache-target 분리를 재검증한다. 예외 본문은 secret input을
 # 포함할 수 있어 밖으로 출력하지 않는다. 이 preflight는 alembic보다 반드시 앞선다.
-if ! python - <<'PY'
+if ! /usr/local/bin/python -I - <<'PY'
 from __future__ import annotations
 
 import sys
@@ -341,7 +361,7 @@ if [ -n "$expected_head" ]; then
   # `alembic heads`는 script 디렉터리만 읽는다 — DB 연결 전에 판정할 수 있다.
   # 주의: alembic은 CommandError를 **stdout**에 쓰고 비정상 종료한다(stderr 아님).
   # 출력 내용이 아니라 exit code로 실행 실패를 먼저 판정해야 오진 메시지가 나가지 않는다.
-  if ! heads_raw="$(alembic heads 2>/dev/null)"; then
+  if ! heads_raw="$(/usr/local/bin/python -I -m alembic heads 2>/dev/null)"; then
     echo "alembic heads failed; the image alembic configuration is broken" >&2
     echo "(cannot evaluate KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD; the DB was not touched)" >&2
     printf '%s\n' "$heads_raw" >&2
@@ -375,7 +395,8 @@ if [ "$api_profile" = "production" ]; then
     echo "production API requires KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD=300" >&2
     exit 1
   fi
-  if ! ktm-application-schema-final-permit verify-api; then
+  if ! /usr/local/bin/python -I \
+    /usr/local/bin/ktm-application-schema-final-permit verify-api; then
     echo "production API requires a valid Docker Manager application final permit" >&2
     exit 1
   fi
@@ -384,7 +405,7 @@ else
 # generic Alembic resolver가 active graph 밖 source를 해석할 수 없으므로, 이를 자동
 # stamp/upgrade로 고치지 않는다. Docker Manager가 writer fence와 same-transaction
 # catalog pre/postflight를 확보한 controlled executable만 handoff할 수 있다.
-if ! current_raw="$(alembic current 2>&1)"; then
+if ! current_raw="$(/usr/local/bin/python -I -m alembic current 2>&1)"; then
   case "$current_raw" in
     *"Can't locate revision"*)
       db_revision="$(printf '%s' "$current_raw" | sed -n 's/.*Can'"'"'t locate revision identified by '"'"'\([^'"'"']*\)'"'"'.*/\1/p' | head -1)"
@@ -410,7 +431,7 @@ attempt=1
 # 여기서는 일시 연결 오류만 bounded retry로 흡수한다. (POSIX sh — process substitution 없음.)
 upgrade_log="$(mktemp)"
 trap 'rm -f "$upgrade_log"' EXIT
-while ! alembic upgrade head 2>"$upgrade_log"; do
+while ! /usr/local/bin/python -I -m alembic upgrade head 2>"$upgrade_log"; do
   cat "$upgrade_log" >&2
   if [ "$attempt" -ge "$retries" ]; then
     echo "alembic upgrade head failed after $attempt attempts" >&2
@@ -428,7 +449,7 @@ trap - EXIT
 # inventory with the migrator-only SET ROLE path before this shell discards its
 # credential; default privileges are intentionally not used for feature state
 # or audit objects.
-python -m kortravelmap.infra.runtime_privileges
+/usr/local/bin/python -I -m kortravelmap.infra.runtime_privileges
 fi
 
 # Uvicorn과 그 자식에는 runtime credential만 남긴다. migration credential은
@@ -440,6 +461,6 @@ unset KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE
 export KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256="$manual_feature_create_digest"
 export KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED="$manual_feature_create_flag"
 
-exec python -m uvicorn kortravelmap.api.app:app \
+exec /usr/local/bin/python -I -m uvicorn kortravelmap.api.app:app \
   --host 0.0.0.0 \
   --port "${KOR_TRAVEL_MAP_API_PORT:-12701}"

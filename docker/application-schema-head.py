@@ -1,4 +1,4 @@
-#!/usr/local/bin/python
+#!/usr/local/bin/python -I
 """후보 API image가 설치된 application Alembic head를 DB 접속 없이 attest한다.
 
 이 command는 application package import, Alembic CLI, 환경변수, 현재 작업 디렉터리와

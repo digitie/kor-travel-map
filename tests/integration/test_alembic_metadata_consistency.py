@@ -211,13 +211,20 @@ async def application_300_config(
 
 
 async def _prepare_logical_0236(config: Config, admin_dsn: str) -> None:
-    """retired source를 실행하지 않고 exact raw source row만 fixture로 만든다."""
+    """retired source를 실행하지 않고 exact source version facet을 fixture로 만든다."""
 
     del config
     assert await _raw_version(admin_dsn) == (_HEAD,)
     await _admin_execute(
         admin_dsn,
-        f"UPDATE public.alembic_version SET version_num = '{_HANDOFF_SOURCE}'",
+        "SET ROLE ktm_feature_schema_owner; "
+        "DROP TABLE public.alembic_version; "
+        "CREATE TABLE public.alembic_version ("
+        "version_num varchar(32) NOT NULL, "
+        "CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num)"
+        "); "
+        f"INSERT INTO public.alembic_version VALUES ('{_HANDOFF_SOURCE}'); "
+        "RESET ROLE",
     )
     assert await _raw_version(admin_dsn) == (_HANDOFF_SOURCE,)
 

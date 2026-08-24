@@ -13,6 +13,8 @@ asyncpg driver로 정규화 후 `AsyncEngine`을 만들어 마이그레이션 �
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import os
 import re
 import stat
@@ -78,6 +80,42 @@ _BASELINE_300_HANDOFF_CAPABILITY_DIRECTORY = Path(
 _BASELINE_300_HANDOFF_CAPABILITY_FILE = (
     _BASELINE_300_HANDOFF_CAPABILITY_DIRECTORY / "capability"
 )
+_BASELINE_300_DIR = Path(__file__).resolve().parent / "baseline"
+
+
+def _verify_fresh_300_destination_facet(connection: Connection) -> None:
+    """Alembic version row 기록 뒤 outer transaction commit 전에 destination을 봉인한다."""
+
+    reference_raw = (_BASELINE_300_DIR / "application-reference.json").read_bytes()
+    reference_digest_raw = (
+        _BASELINE_300_DIR / "application-reference.sha256"
+    ).read_bytes()
+    reference_digest = reference_digest_raw.decode("ascii").strip()
+    if (
+        reference_digest_raw != f"{reference_digest}\n".encode("ascii")
+        or hashlib.sha256(reference_raw).hexdigest() != reference_digest
+    ):
+        raise RuntimeError("fresh 300 destination reference manifest is invalid")
+    reference = json.loads(reference_raw)
+    artifacts = reference.get("artifacts")
+    if not isinstance(artifacts, dict):
+        raise RuntimeError("fresh 300 destination artifact map is invalid")
+    sql_raw = (
+        _BASELINE_300_DIR / "application-destination-alembic-version.sql"
+    ).read_bytes()
+    if hashlib.sha256(sql_raw).hexdigest() != artifacts.get(
+        "destination_alembic_version_contract_sql_sha256"
+    ):
+        raise RuntimeError("fresh 300 destination facet SQL is invalid")
+    rows = connection.execute(text(sql_raw.decode("utf-8")))
+    digest = hashlib.sha256()
+    for item in rows.scalars():
+        digest.update(str(item).encode("utf-8"))
+        digest.update(b"\n")
+    if digest.hexdigest() != artifacts.get(
+        "destination_alembic_version_contract_sha256"
+    ):
+        raise RuntimeError("fresh 300 destination facet does not match immutable reference")
 _BASELINE_300_HANDOFF_CAPABILITY_PATTERN = re.compile(r"[0-9a-f]{64}\Z")
 
 
@@ -380,10 +418,12 @@ def do_run_migrations(connection: Connection) -> None:
         # 0002의 ``coord_5179`` STORED 생성 컬럼이 ``x_extension`` 의 PostGIS
         # ``ST_Transform`` 을 참조하므로 DDL 실행 전 search_path 필요.
         connection.execute(text("SET search_path = public, x_extension"))
+        raw_heads_before = _raw_alembic_heads(connection)
         context.run_migrations()
-        if sanctioned_handoff and _raw_alembic_heads(connection) != (
-            _BASELINE_300_REVISION,
-        ):
+        raw_heads_after = _raw_alembic_heads(connection)
+        if raw_heads_before == () and raw_heads_after == (_BASELINE_300_REVISION,):
+            _verify_fresh_300_destination_facet(connection)
+        if sanctioned_handoff and raw_heads_after != (_BASELINE_300_REVISION,):
             raise RuntimeError(
                 "0236-to-300 handoff did not leave exactly one raw 300 head"
             )

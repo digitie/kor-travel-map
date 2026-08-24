@@ -1,8 +1,8 @@
-#!/usr/bin/env sh
+#!/bin/sh
 set -eu
 
 api_only_name="$(
-  python -c '
+  /usr/local/bin/python -I -c '
 import os
 
 manual_create_names = {
@@ -52,6 +52,23 @@ case "$dagster_profile" in
     exit 1
     ;;
 esac
+if [ "$dagster_profile" = "production" ] \
+  && { [ "${PYTHONPATH+x}" = "x" ] \
+    || [ "${PYTHONHOME+x}" = "x" ] \
+    || [ "${PYTHONUSERBASE+x}" = "x" ]; }; then
+  echo "production Dagster forbids PYTHONPATH, PYTHONHOME, and PYTHONUSERBASE overrides" >&2
+  exit 1
+fi
+if [ "$dagster_profile" = "production" ] \
+  && [ "${PYTHONNOUSERSITE:-}" != "1" ]; then
+  echo "production Dagster requires PYTHONNOUSERSITE=1" >&2
+  exit 1
+fi
+if [ "$dagster_profile" = "production" ] \
+  && [ "${PATH:-}" != "/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin" ]; then
+  echo "production Dagster requires the sealed runtime PATH" >&2
+  exit 1
+fi
 
 runtime_preflight() {
   if [ "$dagster_profile" = "production" ]; then
@@ -71,42 +88,93 @@ runtime_preflight() {
     fi
     export KOR_TRAVEL_MAP_PG_DSN="$dagster_runtime_dsn"
 
-    if ! ktm-application-schema-final-permit verify-dagster; then
+    if ! /usr/local/bin/python -I \
+      /usr/local/bin/ktm-application-schema-final-permit verify-dagster; then
       echo "production Dagster requires a valid Docker Manager application final permit" >&2
       exit 1
     fi
     unset KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN
   fi
-  python -m kortravelmap.dagster.runtime_preflight
+  /usr/local/bin/python -I -m kortravelmap.dagster.runtime_preflight
 }
 
-case "${1:-}" in
-  # Compose는 exec-form으로 webserver를 전달한다.
-  dagster-webserver)
-    runtime_preflight
-    ;;
-  # daemon의 실제 runtime subcommand만 DB를 사용한다. help/version 등은
-  # metadata 또는 application runtime DSN 없이도 정상 동작해야 한다.
-  dagster-daemon)
-    if [ "${2:-}" = "run" ]; then
-      runtime_preflight
-    fi
-    ;;
-  # Dockerfile 기본 CMD는 port env를 확장하려고 `/bin/sh -c`를 쓴다. command
-  # 문자열이 실제 runtime executable로 시작할 때만 같은 preflight를 적용한다.
-  # `sh -c 'echo dagster-webserver'` 같은 maintenance command는 건드리지 않는다.
-  sh | /bin/sh)
-    if [ "${2:-}" = "-c" ]; then
-      case "${3:-}" in
-        dagster-webserver\ * | exec\ dagster-webserver\ *)
-          runtime_preflight
-          ;;
-        dagster-daemon\ run\ * | exec\ dagster-daemon\ run\ *)
-          runtime_preflight
+if [ "$dagster_profile" = "production" ]; then
+  # production은 fixed image executable과 한 가지 argv 형상만 허용한다. bare PATH
+  # lookup과 shell command override는 permit 뒤 다른 executable을 실행할 수 있으므로
+  # Manager launch attestation 이전에도 image 안에서 fail-close한다.
+  case "${1:-}" in
+    /usr/local/bin/dagster-webserver)
+      if [ "$#" -ne 7 ] \
+        || [ "${2:-}" != "-m" ] \
+        || [ "${3:-}" != "kortravelmap.dagster.definitions" ] \
+        || [ "${4:-}" != "-h" ] \
+        || [ "${5:-}" != "0.0.0.0" ] \
+        || [ "${6:-}" != "-p" ]; then
+        echo "production Dagster webserver argv does not match the sealed launch contract" >&2
+        exit 1
+      fi
+      case "${7:-}" in
+        "" | *[!0-9]*)
+          echo "production Dagster webserver port must be numeric" >&2
+          exit 1
           ;;
       esac
-    fi
-    ;;
-esac
+      if [ "$7" -lt 1 ] || [ "$7" -gt 65535 ]; then
+        echo "production Dagster webserver port is outside 1..65535" >&2
+        exit 1
+      fi
+      runtime_preflight
+      ;;
+    /usr/local/bin/dagster-daemon)
+      if [ "$#" -ne 4 ] \
+        || [ "${2:-}" != "run" ] \
+        || [ "${3:-}" != "-m" ] \
+        || [ "${4:-}" != "kortravelmap.dagster.definitions" ]; then
+        echo "production Dagster daemon argv does not match the sealed launch contract" >&2
+        exit 1
+      fi
+      runtime_preflight
+      ;;
+    /usr/local/bin/ktm-dagster-storage)
+      if [ "$#" -ne 2 ] || [ "${2:-}" != "migrate" ]; then
+        echo "production Dagster storage argv does not match the sealed launch contract" >&2
+        exit 1
+      fi
+      ;;
+    *)
+      echo "production Dagster requires a sealed absolute runtime command" >&2
+      exit 1
+      ;;
+  esac
+else
+  case "${1:-}" in
+    dagster-webserver | /usr/local/bin/dagster-webserver)
+      runtime_preflight
+      ;;
+    dagster-daemon | /usr/local/bin/dagster-daemon)
+      if [ "${2:-}" = "run" ]; then
+        runtime_preflight
+      fi
+      ;;
+    sh | /bin/sh)
+      if [ "${2:-}" = "-c" ]; then
+        case "${3:-}" in
+          dagster-webserver\ * | exec\ dagster-webserver\ *)
+            runtime_preflight
+            ;;
+          dagster-daemon\ run\ * | exec\ dagster-daemon\ run\ *)
+            runtime_preflight
+            ;;
+        esac
+      fi
+      ;;
+  esac
+fi
 
+if [ "$dagster_profile" = "production" ]; then
+  # Console-script shebang은 writable HOME의 user-site/sitecustomize를 읽을 수 있다.
+  # 검증한 fixed script 자체를 isolated interpreter로 실행해 candidate 밖 Python
+  # import 경로를 runtime/daemon/storage process에서도 끊는다.
+  exec /usr/local/bin/python -I "$@"
+fi
 exec "$@"

@@ -41,6 +41,8 @@ LABEL org.opencontainers.image.revision="$KOR_TRAVEL_MAP_GIT_COMMIT" \
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin \
+    PYTHONNOUSERSITE=1 \
     KOR_TRAVEL_MAP_IMAGE_REVISION="$KOR_TRAVEL_MAP_GIT_COMMIT" \
     KOR_TRAVEL_MAP_API_PROFILE=production
 
@@ -63,7 +65,7 @@ COPY --chown=root:root docker/application-schema-fresh-300.py /usr/local/bin/ktm
 COPY --chown=root:root docker/application-schema-fresh-finalize.py /usr/local/bin/ktm-application-schema-fresh-finalize
 COPY --chown=root:root docker/application-schema-final-permit.py /usr/local/bin/ktm-application-schema-final-permit
 COPY --chown=root:root docker/application-schema-contract.py /usr/local/bin/ktm-application-schema-contract
-COPY --chown=appuser:appuser docker/application-schema-head.py /usr/local/bin/ktm-application-schema
+COPY --chown=root:root docker/application-schema-head.py /usr/local/bin/ktm-application-schema
 COPY --chown=appuser:appuser resources/curations ./resources/curations
 
 RUN chown -R root:root /app/alembic /app/alembic.ini /app/docker/api-entrypoint.sh \
@@ -75,16 +77,20 @@ RUN chown -R root:root /app/alembic /app/alembic.ini /app/docker/api-entrypoint.
     && find /app/alembic -type d -exec chmod 0555 {} + \
     && find /app/alembic -type f -exec chmod 0444 {} + \
     && chmod 0444 /app/alembic.ini \
-    && chmod 0755 /usr/local/bin/ktm-application-schema \
+    && chmod 0555 /app /app/docker /usr/local/bin/ktm-application-schema \
     && chmod 0555 /usr/local/bin/ktm-application-schema-handoff \
         /usr/local/bin/ktm-application-schema-fresh-300 \
         /usr/local/bin/ktm-application-schema-fresh-finalize \
         /usr/local/bin/ktm-application-schema-final-permit \
         /usr/local/bin/ktm-application-schema-contract \
-        ./docker/api-entrypoint.sh
+        ./docker/api-entrypoint.sh \
+    && su -s /bin/sh -c 'test ! -w /app \
+        && test ! -w /app/docker/api-entrypoint.sh \
+        && test ! -w /app/alembic/baseline \
+        && test ! -w /usr/local/bin/ktm-application-schema-final-permit' appuser
 
 USER appuser
 
 EXPOSE 12701
 
-CMD ["./docker/api-entrypoint.sh"]
+ENTRYPOINT ["/app/docker/api-entrypoint.sh"]

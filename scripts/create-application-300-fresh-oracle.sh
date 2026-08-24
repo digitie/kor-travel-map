@@ -29,6 +29,7 @@ CANDIDATE_PROVENANCE_JSON=""
 RECEIPT=""
 VOLUME=""
 FRESH_MIGRATE_FENCE_VOLUME=""
+FRESH_FINALIZE_FENCE_VOLUME=""
 POSTGIS_IMAGE="postgis/postgis:16-3.5-alpine"
 FRESH_DATABASE_TEMPLATE="template1"
 POSTGIS_BOOTSTRAP_DATABASE="postgres"
@@ -329,7 +330,8 @@ host_migration_sha256="$(sha256sum "$CANDIDATE_SEALED_ROOT/alembic/versions/300_
   die "candidate image 300 migration source가 repository candidate와 다르다"
 for sidecar in \
   application-catalog.sql \
-  application-catalog.sha256 \
+  application-source-catalog.sha256 \
+  application-destination-catalog.sha256 \
   application-reference.json \
   application-reference.sha256 \
   application-runtime-invariants.sql \
@@ -546,8 +548,10 @@ PY
 created_container=0
 created_volume=0
 created_fresh_migrate_fence_volume=0
+created_fresh_finalize_fence_volume=0
 receipt_tmp=""
 fresh_migration_result_file=""
+fresh_finalize_result_file=""
 cleanup_on_failure() {
   status=$?
   if [ "$status" -ne 0 ]; then
@@ -560,8 +564,12 @@ cleanup_on_failure() {
     fi
   fi
   [ -z "$fresh_migration_result_file" ] || rm -f -- "$fresh_migration_result_file"
+  [ -z "$fresh_finalize_result_file" ] || rm -f -- "$fresh_finalize_result_file"
   if [ "$created_fresh_migrate_fence_volume" = 1 ]; then
     docker volume rm "$FRESH_MIGRATE_FENCE_VOLUME" >/dev/null 2>&1 || true
+  fi
+  if [ "$created_fresh_finalize_fence_volume" = 1 ]; then
+    docker volume rm "$FRESH_FINALIZE_FENCE_VOLUME" >/dev/null 2>&1 || true
   fi
   cleanup_candidate_seal
   exit "$status"
@@ -940,7 +948,7 @@ journal_preimage = (
     + sys.argv[8]
 )
 value = {
-    "schema": "kor-travel-docker-manager.map-fresh-300-migrate-fence.v1",
+    "schema": "kor-travel-docker-manager.map-fresh-300-migrate-fence.v2",
     "transaction_id": transaction_id,
     "journal_sha256": hashlib.sha256(journal_preimage.encode("utf-8")).hexdigest(),
     "journal_generation": 1,
@@ -950,7 +958,10 @@ value = {
     "postgres_image_id": sys.argv[4],
     "destination_head": "300",
     "reference_manifest_sha256": hashlib.sha256(reference_raw).hexdigest(),
-    "catalog_sha256": artifacts["catalog_contract_sha256"],
+    "source_catalog_sha256": artifacts["source_catalog_contract_sha256"],
+    "destination_catalog_sha256": artifacts[
+        "destination_catalog_contract_sha256"
+    ],
     "seed_sha256": artifacts["seed_contract_sha256"],
     "privileged_residue_sha256": artifacts["privileged_residue_contract_sha256"],
     "source_alembic_version_sha256": artifacts[
@@ -996,8 +1007,8 @@ except (UnicodeDecodeError, json.JSONDecodeError) as exc:
 if raw != (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode():
     raise SystemExit("fresh migration result is not one canonical JSON line")
 expected = {
-    "schema": "kor-travel-map.application-fresh-300-migration.v2",
-    "outcome": "migrated",
+    "schema": "kor-travel-map.application-fresh-300-root.v1",
+    "outcome": "root-committed",
     "authorization": "manager-fence",
     "destination_head": "300",
     "map_candidate_commit": sys.argv[2],
@@ -1071,7 +1082,7 @@ contract_sha256() {
   } | docker exec -i "$CONTAINER" psql -q -v ON_ERROR_STOP=1 -U postgres -d "$DATABASE" -tA \
     | sha256sum | awk '{print $1}'
 }
-fresh_catalog_sha256="$(contract_sha256 application-catalog.sql)"
+fresh_source_catalog_sha256="$(contract_sha256 application-catalog.sql)"
 fresh_seed_sha256="$(contract_sha256 application-seed.sql)"
 fresh_privileged_residue_sha256="$(contract_sha256 application-privileged-residue.sql database-superuser)"
 fresh_destination_alembic_version_sha256="$(contract_sha256 application-destination-alembic-version.sql)"
@@ -1086,17 +1097,167 @@ runtime_invariant_violations="$(
   } | docker exec -i "$CONTAINER" psql -q -v ON_ERROR_STOP=1 -U postgres -d "$DATABASE" -tA \
     | sed '/^$/d' | wc -l | tr -d ' '
 )"
-[[ "$fresh_catalog_sha256" =~ ^[0-9a-f]{64}$ ]] || die "fresh oracle catalog receipt SHA-256을 얻지 못했다"
+[[ "$fresh_source_catalog_sha256" =~ ^[0-9a-f]{64}$ ]] || \
+  die "fresh oracle source catalog receipt SHA-256을 얻지 못했다"
 [[ "$fresh_seed_sha256" =~ ^[0-9a-f]{64}$ ]] || die "fresh oracle seed receipt SHA-256을 얻지 못했다"
 [[ "$fresh_privileged_residue_sha256" =~ ^[0-9a-f]{64}$ ]] || \
   die "fresh oracle privileged residue receipt SHA-256을 얻지 못했다"
 [[ "$fresh_destination_alembic_version_sha256" =~ ^[0-9a-f]{64}$ ]] || \
   die "fresh oracle destination Alembic metadata receipt SHA-256을 얻지 못했다"
 expected_destination_alembic_version_sha256="$(tr -d '\r\n' < "$CANDIDATE_SEALED_ROOT/alembic/baseline/application-destination-alembic-version.sha256")"
+expected_source_catalog_sha256="$(tr -d '\r\n' < "$CANDIDATE_SEALED_ROOT/alembic/baseline/application-source-catalog.sha256")"
+expected_destination_catalog_sha256="$(tr -d '\r\n' < "$CANDIDATE_SEALED_ROOT/alembic/baseline/application-destination-catalog.sha256")"
+[ "$fresh_source_catalog_sha256" = "$expected_source_catalog_sha256" ] || \
+  die "fresh root source catalog facet이 candidate reference와 다르다"
 [ "$fresh_destination_alembic_version_sha256" = "$expected_destination_alembic_version_sha256" ] || \
   die "fresh oracle destination Alembic metadata facet이 candidate reference와 다르다"
 [ "$runtime_invariant_violations" = "0" ] || \
   die "candidate migration 뒤 runtime projection invariant가 실패했다"
+
+# production fresh root는 commit receipt를 먼저 남기고, runtime ACL completion은
+# 반드시 successor Manager generation의 fixed finalizer로 수행한다. 이렇게 해야
+# late ACL failure에도 합성 predecessor hash 없이 root-committed lineage를 복구할 수 있다.
+FRESH_FINALIZE_FENCE_VOLUME="${CONTAINER}-fresh-finalize-fence"
+docker volume inspect "$FRESH_FINALIZE_FENCE_VOLUME" >/dev/null 2>&1 && \
+  die "fresh finalize fence volume이 이미 존재한다"
+docker volume create "$FRESH_FINALIZE_FENCE_VOLUME" >/dev/null
+created_fresh_finalize_fence_volume=1
+python3 - "$reference_manifest" "$CANDIDATE_COMMIT" "$candidate_image_id" \
+  "$postgis_image_id" "$DATABASE" "$database_oid" "$database_owner" \
+  "$system_identifier" "$fresh_privileged_residue_sha256" \
+  "$fresh_migration_result_sha256" "$fresh_migration_evidence" <<'PY' \
+  | docker run --pull=never --rm -i --user root \
+    --mount "type=volume,source=$FRESH_FINALIZE_FENCE_VOLUME,target=/fresh-finalize-fence" \
+    --entrypoint sh "$postgis_image_id" -ec '
+set -eu
+target=/fresh-finalize-fence/fence.json
+[ ! -e "$target" ] && [ ! -L "$target" ] || exit 73
+temporary="$(mktemp /fresh-finalize-fence/.fence.XXXXXX)"
+trap '\''rm -f -- "$temporary"'\'' EXIT
+cat > "$temporary"
+chmod 0444 "$temporary"
+mv "$temporary" "$target"
+trap - EXIT
+'
+from __future__ import annotations
+
+import hashlib
+import json
+import sys
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from uuid import uuid4
+
+reference_raw = Path(sys.argv[1]).read_bytes()
+reference = json.loads(reference_raw)
+artifacts = reference["artifacts"]
+prior = json.loads(sys.argv[11])
+transaction_id = str(uuid4())
+journal_preimage = (
+    "kor-travel-map.fresh-oracle-finalize-generation.v1\0"
+    + prior["journal_sha256"]
+    + "\0"
+    + sys.argv[10]
+    + "\0"
+    + transaction_id
+)
+value = {
+    "schema": "kor-travel-docker-manager.map-fresh-300-finalize-fence.v3",
+    "transaction_id": transaction_id,
+    "journal_sha256": hashlib.sha256(journal_preimage.encode("utf-8")).hexdigest(),
+    "journal_generation": 2,
+    "operation": "map-fresh-300-finalize",
+    "prior_fresh_migration_result_sha256": sys.argv[10],
+    "prior_fresh_migration_fence_sha256": prior["writer_fence_receipt_sha256"],
+    "prior_fresh_migration_transaction_id": prior["writer_fence_transaction_id"],
+    "prior_fresh_migration_journal_sha256": prior["journal_sha256"],
+    "prior_fresh_migration_generation": prior["journal_generation"],
+    "map_candidate_commit": sys.argv[2],
+    "map_candidate_image_id": sys.argv[3],
+    "postgres_image_id": sys.argv[4],
+    "destination_head": "300",
+    "reference_manifest_sha256": hashlib.sha256(reference_raw).hexdigest(),
+    "source_catalog_sha256": artifacts["source_catalog_contract_sha256"],
+    "destination_catalog_sha256": artifacts[
+        "destination_catalog_contract_sha256"
+    ],
+    "seed_sha256": artifacts["seed_contract_sha256"],
+    "privileged_residue_sha256": artifacts["privileged_residue_contract_sha256"],
+    "pre_privileged_residue_sha256": sys.argv[9],
+    "destination_alembic_version_sha256": artifacts[
+        "destination_alembic_version_contract_sha256"
+    ],
+    "runtime_invariants_sql_sha256": artifacts["runtime_invariants_sql_sha256"],
+    "database_name": sys.argv[5],
+    "database_oid": int(sys.argv[6]),
+    "database_owner": sys.argv[7],
+    "postgres_system_identifier": sys.argv[8],
+    "writer_fence_expires_at": (datetime.now(UTC) + timedelta(minutes=30)).isoformat(),
+}
+print(json.dumps(value, sort_keys=True, separators=(",", ":")))
+PY
+
+fresh_finalize_result_file="$(mktemp "${TMPDIR:-/tmp}/ktm300-fresh-finalize-result.XXXXXX")"
+docker run --pull=never --rm --network "container:$CONTAINER" \
+  --mount "type=volume,source=$FRESH_FINALIZE_FENCE_VOLUME,target=/run/kor-travel-map-application-fresh-finalize,readonly" \
+  -e "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN=$migrator_dsn" \
+  -e "KOR_TRAVEL_MAP_IMAGE_REVISION=$CANDIDATE_COMMIT" \
+  -e "KOR_TRAVEL_MAP_APPLICATION_FRESH_FINALIZE_IMAGE_ID=$candidate_image_id" \
+  --entrypoint /usr/local/bin/ktm-application-schema-fresh-finalize "$candidate_image_id" \
+  finalize --writer-fence-receipt /run/kor-travel-map-application-fresh-finalize/fence.json \
+  >"$fresh_finalize_result_file"
+fresh_finalize_result_sha256="$(sha256sum "$fresh_finalize_result_file" | awk '{print $1}')"
+fresh_finalize_evidence="$(python3 - "$fresh_finalize_result_file" "$CANDIDATE_COMMIT" \
+  "$candidate_image_id" "$manifest_sha256" "$fresh_migration_result_sha256" \
+  "$fresh_migration_evidence" "$expected_source_catalog_sha256" \
+  "$expected_destination_catalog_sha256" \
+  "$expected_destination_alembic_version_sha256" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+raw = Path(sys.argv[1]).read_bytes()
+value = json.loads(raw)
+prior = json.loads(sys.argv[6])
+if raw != (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode():
+    raise SystemExit("fresh finalize result is not one canonical JSON line")
+expected = {
+    "schema": "kor-travel-map.application-fresh-300-finalize.v3",
+    "outcome": "finalized",
+    "destination_head": "300",
+    "map_candidate_commit": sys.argv[2],
+    "map_candidate_image_id": sys.argv[3],
+    "reference_manifest_sha256": sys.argv[4],
+    "journal_generation": 2,
+    "prior_fresh_migration_result_sha256": sys.argv[5],
+    "prior_fresh_migration_fence_sha256": prior["writer_fence_receipt_sha256"],
+    "prior_fresh_migration_transaction_id": prior["writer_fence_transaction_id"],
+    "prior_fresh_migration_journal_sha256": prior["journal_sha256"],
+    "prior_fresh_migration_generation": prior["journal_generation"],
+    "pre_source_catalog_sha256": sys.argv[7],
+    "post_destination_catalog_sha256": sys.argv[8],
+    "post_destination_alembic_version_sha256": sys.argv[9],
+}
+if not isinstance(value, dict) or any(value.get(key) != item for key, item in expected.items()):
+    raise SystemExit("fresh finalize result lineage binding drifted")
+for key in ("writer_fence_receipt_sha256", "journal_sha256"):
+    if not isinstance(value.get(key), str) or not re.fullmatch(r"[0-9a-f]{64}", value[key]):
+        raise SystemExit(f"fresh finalize result digest is invalid: {key}")
+if not isinstance(value.get("writer_fence_transaction_id"), str):
+    raise SystemExit("fresh finalize result transaction is invalid")
+print(json.dumps(value, sort_keys=True, separators=(",", ":")))
+PY
+)"
+
+# finalizer 이후 Manager postflight와 같은 privileged observation을 다시 취한다.
+fresh_destination_catalog_sha256="$(contract_sha256 application-catalog.sql)"
+[ "$fresh_destination_catalog_sha256" = "$expected_destination_catalog_sha256" ] || \
+  die "fresh finalize 뒤 destination catalog facet이 candidate reference와 다르다"
+fresh_privileged_residue_sha256="$(contract_sha256 application-privileged-residue.sql database-superuser)"
+expected_privileged_residue_sha256="$(tr -d '\r\n' < "$CANDIDATE_SEALED_ROOT/alembic/baseline/application-privileged-residue.sha256")"
+[ "$fresh_privileged_residue_sha256" = "$expected_privileged_residue_sha256" ] || \
+  die "fresh finalize 뒤 privileged residue가 candidate reference와 다르다"
 
 receipt_tmp="$(mktemp "$RECEIPT_PARENT/.ktm300-fresh-oracle.XXXXXX")"
 python3 - "$receipt_tmp" "$container_id" "$DATABASE" "$database_oid" "$system_identifier" \
@@ -1108,12 +1269,14 @@ python3 - "$receipt_tmp" "$container_id" "$DATABASE" "$database_oid" "$system_id
   "$CANDIDATE_FULL_ROOTFS_LAYERS_SHA256" "$CANDIDATE_BUILD_RECEIPT_SHA256" \
   "$POSTGIS_IMAGE" "$postgis_image_id" \
   "$creator_script_sha256" "$bootstrap_script_sha256" "$candidate_migration_sha256" \
-  "$raw_revision" "$application_relation_count" "$fresh_catalog_sha256" "$fresh_seed_sha256" \
+  "$raw_revision" "$application_relation_count" "$fresh_source_catalog_sha256" \
+  "$fresh_destination_catalog_sha256" "$fresh_seed_sha256" \
   "$fresh_privileged_residue_sha256" "$runtime_invariant_violations" \
   "$candidate_proof_tools_manifest_sha256" "$FRESH_DATABASE_TEMPLATE" \
   "$fresh_initial_virgin_inventory" "$fresh_initial_virgin_inventory_sha256" \
   "$fresh_destination_alembic_version_sha256" "$fresh_migration_result_sha256" \
-  "$fresh_migration_evidence" <<'PY'
+  "$fresh_migration_evidence" "$fresh_finalize_result_sha256" \
+  "$fresh_finalize_evidence" <<'PY'
 from __future__ import annotations
 
 import json
@@ -1122,7 +1285,7 @@ from pathlib import Path
 
 target = Path(sys.argv[1])
 value = {
-    "schema": "kor-travel-map.application-fresh-300-oracle.v8",
+    "schema": "kor-travel-map.application-fresh-300-oracle.v10",
     "container_id": sys.argv[2],
     "database": sys.argv[3],
     "database_oid": int(sys.argv[4]),
@@ -1154,18 +1317,21 @@ value = {
     "candidate_300_migration_sha256": sys.argv[25],
     "raw_alembic_revision": sys.argv[26],
     "application_relation_count": int(sys.argv[27]),
-    "catalog_sha256": sys.argv[28],
-    "seed_sha256": sys.argv[29],
-    "privileged_residue_sha256": sys.argv[30],
-    "runtime_invariant_violation_count": int(sys.argv[31]),
-    "candidate_proof_tools_manifest_sha256": sys.argv[32],
+    "source_catalog_sha256": sys.argv[28],
+    "destination_catalog_sha256": sys.argv[29],
+    "seed_sha256": sys.argv[30],
+    "privileged_residue_sha256": sys.argv[31],
+    "runtime_invariant_violation_count": int(sys.argv[32]),
+    "candidate_proof_tools_manifest_sha256": sys.argv[33],
     "fresh_database_provisioning": "explicit-create-database-from-template1-after-official-entrypoint-complete",
-    "fresh_database_template": sys.argv[33],
-    "fresh_initial_virgin_inventory": json.loads(sys.argv[34]),
-    "fresh_initial_virgin_inventory_sha256": sys.argv[35],
-    "destination_alembic_version_sha256": sys.argv[36],
-    "fresh_migration_result_sha256": sys.argv[37],
-    "fresh_migration_evidence": json.loads(sys.argv[38]),
+    "fresh_database_template": sys.argv[34],
+    "fresh_initial_virgin_inventory": json.loads(sys.argv[35]),
+    "fresh_initial_virgin_inventory_sha256": sys.argv[36],
+    "destination_alembic_version_sha256": sys.argv[37],
+    "fresh_migration_result_sha256": sys.argv[38],
+    "fresh_migration_evidence": json.loads(sys.argv[39]),
+    "fresh_finalize_result_sha256": sys.argv[40],
+    "fresh_finalize_evidence": json.loads(sys.argv[41]),
 }
 target.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
 PY

@@ -1,10 +1,10 @@
-#!/usr/local/bin/python
-"""Map application schema의 one-shot ``0236 → 300`` metadata handoff.
+#!/usr/local/bin/python -I
+"""Map application schema의 one-shot ``0236 → 300`` controlled handoff.
 
-이 executable은 Docker Manager가 writer fence를 확보한 뒤에만 호출한다. DDL, data
-rewrite, raw ``alembic_version`` SQL은 사용하지 않는다. 같은 connection/outer
-transaction 안에서 exact source preflight → Alembic controlled stamp → final-state
-postflight를 수행하므로 postflight가 실패하면 source ``0236`` row가 보존된다.
+이 executable은 Docker Manager가 writer fence를 확보한 뒤에만 호출한다. raw
+``alembic_version`` SQL은 사용하지 않는다. 같은 connection/outer transaction 안에서
+exact source preflight → Alembic controlled stamp → runtime ACL reconciliation →
+destination postflight를 수행하므로 어느 단계든 실패하면 source ``0236``가 보존된다.
 """
 
 from __future__ import annotations
@@ -32,6 +32,9 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from alembic import command
 from kortravelmap.infra.db import make_async_engine
+from kortravelmap.infra.runtime_privileges import (
+    reconcile_runtime_privileges_in_transaction,
+)
 
 _SOURCE_HEAD: Final = "0236_tvn41s_compaction_drained"
 _DESTINATION_HEAD: Final = "300"
@@ -41,9 +44,9 @@ _SCHEMA_OWNER_ROLE_ENV: Final = "KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE"
 _HANDOFF_CAPABILITY_ENV: Final = "KOR_TRAVEL_MAP_APPLICATION_HANDOFF_CAPABILITY_PATH"
 _HANDOFF_CAPABILITY_DIRECTORY: Final = Path("/run/kor-travel-map-application-handoff")
 _HANDOFF_CAPABILITY_FILE: Final = _HANDOFF_CAPABILITY_DIRECTORY / "capability"
-_RESULT_SCHEMA: Final = "kor-travel-map.application-baseline-handoff.v3"
+_RESULT_SCHEMA: Final = "kor-travel-map.application-baseline-handoff.v5"
 _FENCE_RECEIPT_SCHEMA: Final = (
-    "kor-travel-docker-manager.map-application-schema-handoff-fence.v4"
+    "kor-travel-docker-manager.map-application-schema-handoff-fence.v6"
 )
 _FENCE_OPERATION: Final = "map-application-schema-0236-to-300"
 _IMAGE_REVISION_ENV: Final = "KOR_TRAVEL_MAP_IMAGE_REVISION"
@@ -51,7 +54,10 @@ _HANDOFF_IMAGE_ID_ENV: Final = "KOR_TRAVEL_MAP_APPLICATION_HANDOFF_IMAGE_ID"
 _HANDOFF_ADVISORY_LOCK_KEY: Final[tuple[int, int]] = (300, 236)
 _APPLICATION_ROOT_CANDIDATES: Final = (Path("/app"), Path(__file__).resolve().parents[1])
 _CATALOG_CONTRACT_SQL: Final = "application-catalog.sql"
-_CATALOG_CONTRACT_SHA256: Final = "application-catalog.sha256"
+_SOURCE_CATALOG_CONTRACT_SHA256: Final = "application-source-catalog.sha256"
+_DESTINATION_CATALOG_CONTRACT_SHA256: Final = (
+    "application-destination-catalog.sha256"
+)
 _SEED_CONTRACT_SQL: Final = "application-seed.sql"
 _SEED_CONTRACT_SHA256: Final = "application-seed.sha256"
 _PRIVILEGED_RESIDUE_CONTRACT_SQL: Final = "application-privileged-residue.sql"
@@ -75,10 +81,6 @@ _REFERENCE_SCHEMA: Final = "kor-travel-map.application-baseline-reference.v1"
 _IMMUTABLE_SEED_RELATIONS: Final = (
     "ops.feature_override_field_paths",
 )
-_MAP_VISIBLE_CONTRACT_KEYS: Final = (
-    "catalog_sha256",
-    "seed_sha256",
-)
 _CANONICAL_CONTRACT_GUC_STATEMENTS: Final = (
     "SET LOCAL quote_all_identifiers TO off",
     "SET LOCAL DateStyle TO 'ISO, YMD'",
@@ -95,6 +97,7 @@ _FENCE_RECEIPT_FIELDS: Final = frozenset(
         "schema",
         "transaction_id",
         "journal_sha256",
+        "journal_generation",
         "operation",
         "map_candidate_commit",
         "map_candidate_image_id",
@@ -102,7 +105,8 @@ _FENCE_RECEIPT_FIELDS: Final = frozenset(
         "source_head",
         "destination_head",
         "reference_manifest_sha256",
-        "catalog_sha256",
+        "source_catalog_sha256",
+        "destination_catalog_sha256",
         "seed_sha256",
         "privileged_residue_sha256",
         "pre_privileged_residue_sha256",
@@ -462,7 +466,12 @@ def _verify_reference_artifacts() -> dict[str, str]:
             "destination_alembic_version_contract_sql_sha256"
         ),
         _RUNTIME_INVARIANTS_SQL: "runtime_invariants_sql_sha256",
-        _CATALOG_CONTRACT_SHA256: "catalog_contract_receipt_sha256",
+        _SOURCE_CATALOG_CONTRACT_SHA256: (
+            "source_catalog_contract_receipt_sha256"
+        ),
+        _DESTINATION_CATALOG_CONTRACT_SHA256: (
+            "destination_catalog_contract_receipt_sha256"
+        ),
         _SEED_CONTRACT_SHA256: "seed_contract_receipt_sha256",
         _PRIVILEGED_RESIDUE_CONTRACT_SHA256: "privileged_residue_contract_receipt_sha256",
         _SOURCE_ALEMBIC_VERSION_CONTRACT_SHA256: (
@@ -478,7 +487,16 @@ def _verify_reference_artifacts() -> dict[str, str]:
 
     expected: dict[str, str] = {}
     for receipt_name, manifest_key, result_key in (
-        (_CATALOG_CONTRACT_SHA256, "catalog_contract_sha256", "catalog_sha256"),
+        (
+            _SOURCE_CATALOG_CONTRACT_SHA256,
+            "source_catalog_contract_sha256",
+            "source_catalog_sha256",
+        ),
+        (
+            _DESTINATION_CATALOG_CONTRACT_SHA256,
+            "destination_catalog_contract_sha256",
+            "destination_catalog_sha256",
+        ),
         (_SEED_CONTRACT_SHA256, "seed_contract_sha256", "seed_sha256"),
         (
             _PRIVILEGED_RESIDUE_CONTRACT_SHA256,
@@ -510,8 +528,12 @@ def _verify_reference_artifacts() -> dict[str, str]:
     return expected
 
 
-def _expected_catalog_sha256() -> str:
-    return _verify_reference_artifacts()["catalog_sha256"]
+def _expected_source_catalog_sha256() -> str:
+    return _verify_reference_artifacts()["source_catalog_sha256"]
+
+
+def _expected_destination_catalog_sha256() -> str:
+    return _verify_reference_artifacts()["destination_catalog_sha256"]
 
 
 def _expected_seed_sha256() -> str:
@@ -596,10 +618,13 @@ def _load_writer_fence_receipt(receipt_path: str) -> tuple[dict[str, Any], str]:
         UUID(str(value["transaction_id"]))
     except (KeyError, TypeError, ValueError) as exc:
         raise HandoffError("Docker Manager writer fence transaction id is invalid") from exc
+    if type(value["journal_generation"]) is not int or value["journal_generation"] <= 0:
+        raise HandoffError("Docker Manager writer fence journal generation is invalid")
     for key in (
         "journal_sha256",
         "reference_manifest_sha256",
-        "catalog_sha256",
+        "source_catalog_sha256",
+        "destination_catalog_sha256",
         "seed_sha256",
         "privileged_residue_sha256",
         "pre_privileged_residue_sha256",
@@ -682,7 +707,9 @@ async def _verify_writer_fence_binding(
     if receipt["postgres_image_id"] != source["container_image_id"]:
         raise HandoffError("Docker Manager writer fence database image does not match baseline")
     if (
-        receipt["catalog_sha256"] != expected["catalog_sha256"]
+        receipt["source_catalog_sha256"] != expected["source_catalog_sha256"]
+        or receipt["destination_catalog_sha256"]
+        != expected["destination_catalog_sha256"]
         or receipt["seed_sha256"] != expected["seed_sha256"]
         or receipt["privileged_residue_sha256"] != expected["privileged_residue_sha256"]
         or receipt["pre_privileged_residue_sha256"]
@@ -1372,12 +1399,16 @@ async def _grant_runtime_alembic_version_read(connection: AsyncConnection) -> No
 
 
 def _map_visible_contract_matches(
-    observed: dict[str, str], reference: dict[str, str]
+    observed: dict[str, str],
+    reference: dict[str, str],
+    *,
+    catalog_key: str,
 ) -> bool:
-    """schema-owner가 볼 수 있는 catalog/seed 두 축만 exact 비교한다."""
+    """schema-owner가 볼 수 있는 phase catalog와 공통 seed를 exact 비교한다."""
 
-    return all(
-        observed[key] == reference[key] for key in _MAP_VISIBLE_CONTRACT_KEYS
+    return (
+        observed["catalog_sha256"] == reference[catalog_key]
+        and observed["seed_sha256"] == reference["seed_sha256"]
     )
 
 
@@ -1454,7 +1485,11 @@ async def _handoff(writer_fence_receipt_path: str) -> dict[str, str]:
             # 있으므로, env.py가 stamp 안에서 쓰는 path를 preflight에도 먼저 고정한다.
             await connection.execute(text("SET search_path = public, x_extension"))
             before = await _preflight(connection, expected_head=_SOURCE_HEAD)
-            if not _map_visible_contract_matches(before, expected):
+            if not _map_visible_contract_matches(
+                before,
+                expected,
+                catalog_key="source_catalog_sha256",
+            ):
                 raise HandoffError(
                     "0236 source catalog or seed does not match the immutable 300 reference"
                 )
@@ -1470,8 +1505,13 @@ async def _handoff(writer_fence_receipt_path: str) -> dict[str, str]:
             _require_unexpired_writer_fence(writer_fence_receipt)
             await connection.run_sync(_stamp_on_existing_connection, config)
             await _grant_runtime_alembic_version_read(connection)
+            await reconcile_runtime_privileges_in_transaction(connection)
             after = await _preflight(connection, expected_head=_DESTINATION_HEAD)
-            if not _map_visible_contract_matches(after, expected):
+            if not _map_visible_contract_matches(
+                after,
+                expected,
+                catalog_key="destination_catalog_sha256",
+            ):
                 raise HandoffError(
                     "300 destination catalog or seed does not match the immutable reference"
                 )
@@ -1493,7 +1533,10 @@ async def _handoff(writer_fence_receipt_path: str) -> dict[str, str]:
         "outcome": "stamped",
         "source_head": _SOURCE_HEAD,
         "destination_head": _DESTINATION_HEAD,
-        "expected_catalog_sha256": expected["catalog_sha256"],
+        "expected_source_catalog_sha256": expected["source_catalog_sha256"],
+        "expected_destination_catalog_sha256": expected[
+            "destination_catalog_sha256"
+        ],
         "expected_seed_sha256": expected["seed_sha256"],
         "expected_privileged_residue_sha256": expected["privileged_residue_sha256"],
         "expected_source_alembic_version_sha256": expected[
@@ -1515,6 +1558,8 @@ async def _handoff(writer_fence_receipt_path: str) -> dict[str, str]:
         ],
         "writer_fence_receipt_sha256": writer_fence_receipt_sha256,
         "writer_fence_transaction_id": str(writer_fence_receipt["transaction_id"]),
+        "journal_sha256": str(writer_fence_receipt["journal_sha256"]),
+        "journal_generation": int(writer_fence_receipt["journal_generation"]),
     }
 
 

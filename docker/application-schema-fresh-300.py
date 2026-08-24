@@ -1,4 +1,4 @@
-#!/usr/local/bin/python
+#!/usr/local/bin/python -I
 """Manager/local fresh-init 전용 application ``300`` migration executable.
 
 이 command는 daemon entrypoint의 "기동 중 Alembic" 경로가 아니다. 역할 bootstrap이
@@ -45,7 +45,7 @@ _DATABASE_OWNER: Final = "ktm_feature_schema_owner"
 _APPLICATION_ROOT_CANDIDATES: Final = (Path("/app"), Path(__file__).resolve().parents[1])
 _INSTALLED_BIN_DIR: Final = Path("/usr/local/bin")
 _FENCE_PATH: Final = Path("/run/kor-travel-map-application-fresh-migrate/fence.json")
-_FENCE_SCHEMA: Final = "kor-travel-docker-manager.map-fresh-300-migrate-fence.v1"
+_FENCE_SCHEMA: Final = "kor-travel-docker-manager.map-fresh-300-migrate-fence.v2"
 _FENCE_OPERATION: Final = "map-fresh-300"
 _STATIC_CONTRACT_SCHEMA: Final = "kor-travel-map.application-baseline-contract.v1"
 _SHA256_PATTERN: Final = re.compile(r"^[0-9a-f]{64}$")
@@ -64,7 +64,8 @@ _FENCE_FIELDS: Final = frozenset(
         "postgres_image_id",
         "destination_head",
         "reference_manifest_sha256",
-        "catalog_sha256",
+        "source_catalog_sha256",
+        "destination_catalog_sha256",
         "seed_sha256",
         "privileged_residue_sha256",
         "source_alembic_version_sha256",
@@ -83,7 +84,8 @@ _CONTRACT_FIELDS: Final = frozenset(
         "application_head",
         "reference_manifest_sha256",
         "postgres_image_id",
-        "catalog_sha256",
+        "source_catalog_sha256",
+        "destination_catalog_sha256",
         "seed_sha256",
         "privileged_residue_sha256",
         "source_alembic_version_sha256",
@@ -224,7 +226,8 @@ def _require_fixed_fence() -> tuple[Mapping[str, Any], str]:
     for key in (
         "journal_sha256",
         "reference_manifest_sha256",
-        "catalog_sha256",
+        "source_catalog_sha256",
+        "destination_catalog_sha256",
         "seed_sha256",
         "privileged_residue_sha256",
         "source_alembic_version_sha256",
@@ -265,7 +268,8 @@ def _verify_fence_candidate(
         "postgres_image_id": contract["postgres_image_id"],
         "destination_head": _DESTINATION_HEAD,
         "reference_manifest_sha256": contract["reference_manifest_sha256"],
-        "catalog_sha256": contract["catalog_sha256"],
+        "source_catalog_sha256": contract["source_catalog_sha256"],
+        "destination_catalog_sha256": contract["destination_catalog_sha256"],
         "seed_sha256": contract["seed_sha256"],
         "privileged_residue_sha256": contract["privileged_residue_sha256"],
         "source_alembic_version_sha256": contract["source_alembic_version_sha256"],
@@ -413,15 +417,14 @@ async def _migrate() -> Mapping[str, Any]:
     os.environ["KOR_TRAVEL_MAP_PG_DSN"] = dsn
     os.environ[_SCHEMA_OWNER_ROLE_ENV] = "true"
     await asyncio.to_thread(command.upgrade, config, "head")
-    if fence is not None:
-        live_fence, live_fence_sha256 = _require_fixed_fence()
-        if live_fence != fence or live_fence_sha256 != fence_sha256:
-            raise FreshMigrationError("fresh 300 migrate fence changed before ACL completion")
-    await reconcile_runtime_privileges()
     destination_facet = await _assert_exact_destination_version(
         dsn, contract["destination_alembic_version_sha256"]
     )
     if fence is None:
+        await reconcile_runtime_privileges()
+        destination_facet = await _assert_exact_destination_version(
+            dsn, contract["destination_alembic_version_sha256"]
+        )
         return {
             "schema": "kor-travel-map.application-fresh-300-migration.v2",
             "outcome": "migrated",
@@ -433,8 +436,8 @@ async def _migrate() -> Mapping[str, Any]:
     if live_fence != fence or live_fence_sha256 != fence_sha256:
         raise FreshMigrationError("fresh 300 migrate fence changed before result publication")
     return {
-        "schema": "kor-travel-map.application-fresh-300-migration.v2",
-        "outcome": "migrated",
+        "schema": "kor-travel-map.application-fresh-300-root.v1",
+        "outcome": "root-committed",
         "authorization": "manager-fence",
         "destination_head": _DESTINATION_HEAD,
         "map_candidate_commit": fence["map_candidate_commit"],

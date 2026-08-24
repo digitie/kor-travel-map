@@ -295,7 +295,7 @@ try:
     value = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 except (OSError, ValueError) as exc:
     raise SystemExit(f"fresh 300 oracle receipt cannot be parsed: {exc}") from exc
-if not isinstance(value, dict) or value.get("schema") != "kor-travel-map.application-fresh-300-oracle.v8":
+if not isinstance(value, dict) or value.get("schema") != "kor-travel-map.application-fresh-300-oracle.v10":
     raise SystemExit("fresh 300 oracle receipt schema is invalid")
 image = value.get("candidate_image")
 commit = value.get("candidate_commit")
@@ -475,7 +475,9 @@ if value.get("schema") != "kor-travel-map.application-baseline-reference.v1" or 
     raise SystemExit("application reference manifest does not match the generator contract")
 required_artifacts = {
     "schema_sql_sha256", "seed_sql_sha256", "catalog_contract_sql_sha256",
-    "catalog_contract_sha256", "catalog_contract_receipt_sha256",
+    "source_catalog_contract_sha256", "source_catalog_contract_receipt_sha256",
+    "destination_catalog_contract_sha256",
+    "destination_catalog_contract_receipt_sha256",
     "seed_contract_sql_sha256", "seed_contract_sha256",
     "seed_contract_receipt_sha256", "privileged_residue_contract_sql_sha256",
     "privileged_residue_contract_sha256", "privileged_residue_contract_receipt_sha256",
@@ -496,13 +498,16 @@ if (
     raise SystemExit("application reference manifest artifacts are incomplete")
 PY
   reference_manifest_sha256="$(sha256sum "$reference_manifest" | awk '{print $1}')"
-  candidate_catalog_receipt_sha256="$(tr -d '\r\n' < "$CANDIDATE_SEALED_ROOT/alembic/baseline/application-catalog.sha256")"
+  candidate_source_catalog_receipt_sha256="$(tr -d '\r\n' < "$CANDIDATE_SEALED_ROOT/alembic/baseline/application-source-catalog.sha256")"
+  candidate_destination_catalog_receipt_sha256="$(tr -d '\r\n' < "$CANDIDATE_SEALED_ROOT/alembic/baseline/application-destination-catalog.sha256")"
   candidate_seed_receipt_sha256="$(tr -d '\r\n' < "$CANDIDATE_SEALED_ROOT/alembic/baseline/application-seed.sha256")"
   candidate_privileged_residue_receipt_sha256="$(tr -d '\r\n' < "$CANDIDATE_SEALED_ROOT/alembic/baseline/application-privileged-residue.sha256")"
   candidate_source_alembic_version_receipt_sha256="$(tr -d '\r\n' < "$CANDIDATE_SEALED_ROOT/alembic/baseline/application-source-alembic-version.sha256")"
   candidate_destination_alembic_version_receipt_sha256="$(tr -d '\r\n' < "$CANDIDATE_SEALED_ROOT/alembic/baseline/application-destination-alembic-version.sha256")"
   for candidate_contract_receipt in \
-    "$candidate_catalog_receipt_sha256" "$candidate_seed_receipt_sha256" \
+    "$candidate_source_catalog_receipt_sha256" \
+    "$candidate_destination_catalog_receipt_sha256" \
+    "$candidate_seed_receipt_sha256" \
     "$candidate_privileged_residue_receipt_sha256" \
     "$candidate_source_alembic_version_receipt_sha256" \
     "$candidate_destination_alembic_version_receipt_sha256"; do
@@ -750,7 +755,8 @@ source_certificate_sha256="$(sha256sum "$SOURCE_CERTIFICATE" | awk '{print $1}')
 if [ "$MODE" = "verify" ]; then
 python3 - "$HANDOFF_REHEARSAL_RECEIPT" "$CANDIDATE_PROVENANCE_JSON" \
   "$source_certificate_sha256" "$DB" "$source_database_oid" "$source_database_owner" \
-  "$source_system_identifier" "$candidate_catalog_receipt_sha256" \
+  "$source_system_identifier" "$candidate_source_catalog_receipt_sha256" \
+  "$candidate_destination_catalog_receipt_sha256" \
   "$candidate_seed_receipt_sha256" "$candidate_privileged_residue_receipt_sha256" \
   "$candidate_source_alembic_version_receipt_sha256" \
   "$candidate_destination_alembic_version_receipt_sha256" <<'PY'
@@ -767,15 +773,16 @@ try:
     candidate = json.loads(sys.argv[2])
 except (OSError, ValueError) as exc:
     raise SystemExit(f"handoff rehearsal receipt/candidate cannot be parsed: {exc}") from exc
-catalog_sha, seed_sha, privileged_sha, source_alembic_sha, destination_alembic_sha = (
-    sys.argv[8:13]
+source_catalog_sha, destination_catalog_sha, seed_sha, privileged_sha, source_alembic_sha, destination_alembic_sha = (
+    sys.argv[8:14]
 )
 expected_fields = {
     "schema", "candidate_commit", "candidate_image_id", "candidate_build_receipt_sha256",
     "candidate_proof_tools_manifest_sha256", "source_certificate_sha256",
     "source_database_identity", "source_catalog_sha256", "source_seed_sha256",
     "source_privileged_residue_sha256", "source_alembic_version_sha256",
-    "expected_catalog_sha256", "expected_seed_sha256",
+    "expected_source_catalog_sha256", "expected_destination_catalog_sha256",
+    "expected_seed_sha256",
     "expected_privileged_residue_sha256", "positive_database_identity",
     "expected_source_alembic_version_sha256",
     "expected_destination_alembic_version_sha256",
@@ -795,7 +802,7 @@ expected_fields = {
 }
 if not isinstance(receipt, dict) or set(receipt) != expected_fields:
     raise SystemExit("handoff rehearsal receipt has an unexpected field set")
-if receipt["schema"] != "kor-travel-map.application-300-handoff-rehearsal.v3":
+if receipt["schema"] != "kor-travel-map.application-300-handoff-rehearsal.v5":
     raise SystemExit("handoff rehearsal receipt schema is invalid")
 for receipt_key, candidate_key in (
     ("candidate_commit", "candidate_commit"),
@@ -836,7 +843,8 @@ if (
     raise SystemExit("handoff rehearsal receipt clone identity separation is invalid")
 for key in (
     "source_catalog_sha256", "source_seed_sha256", "source_privileged_residue_sha256",
-    "expected_catalog_sha256", "expected_seed_sha256", "expected_privileged_residue_sha256",
+    "expected_source_catalog_sha256", "expected_destination_catalog_sha256",
+    "expected_seed_sha256", "expected_privileged_residue_sha256",
     "positive_catalog_sha256", "positive_seed_sha256", "positive_privileged_residue_sha256",
     "negative_catalog_sha256_before", "negative_seed_sha256_before",
     "negative_privileged_residue_sha256_before", "negative_catalog_sha256_after",
@@ -847,19 +855,20 @@ for key in (
     "positive_destination_alembic_version_sha256",
 ):
     expected = {
-        "source_catalog_sha256": catalog_sha,
+        "source_catalog_sha256": source_catalog_sha,
         "source_seed_sha256": seed_sha,
         "source_privileged_residue_sha256": privileged_sha,
-        "expected_catalog_sha256": catalog_sha,
+        "expected_source_catalog_sha256": source_catalog_sha,
+        "expected_destination_catalog_sha256": destination_catalog_sha,
         "expected_seed_sha256": seed_sha,
         "expected_privileged_residue_sha256": privileged_sha,
-        "positive_catalog_sha256": catalog_sha,
+        "positive_catalog_sha256": destination_catalog_sha,
         "positive_seed_sha256": seed_sha,
         "positive_privileged_residue_sha256": privileged_sha,
-        "negative_catalog_sha256_before": catalog_sha,
+        "negative_catalog_sha256_before": source_catalog_sha,
         "negative_seed_sha256_before": seed_sha,
         "negative_privileged_residue_sha256_before": privileged_sha,
-        "negative_catalog_sha256_after": catalog_sha,
+        "negative_catalog_sha256_after": source_catalog_sha,
         "negative_seed_sha256_after": seed_sha,
         "negative_privileged_residue_sha256_after": privileged_sha,
         "source_alembic_version_sha256": source_alembic_sha,
@@ -1057,12 +1066,14 @@ expected = {
     "fresh_initial_virgin_inventory_sha256": initial_virgin_inventory_sha256,
 }
 required = {
-    "schema", *expected, "application_relation_count", "catalog_sha256", "seed_sha256",
+    "schema", *expected, "application_relation_count", "source_catalog_sha256",
+    "destination_catalog_sha256", "seed_sha256",
     "privileged_residue_sha256", "destination_alembic_version_sha256",
     "runtime_invariant_violation_count", "fresh_migration_result_sha256",
-    "fresh_migration_evidence",
+    "fresh_migration_evidence", "fresh_finalize_result_sha256",
+    "fresh_finalize_evidence",
 }
-if not isinstance(receipt, dict) or receipt.get("schema") != "kor-travel-map.application-fresh-300-oracle.v8":
+if not isinstance(receipt, dict) or receipt.get("schema") != "kor-travel-map.application-fresh-300-oracle.v10":
     raise SystemExit("fresh 300 oracle receipt schema is invalid")
 if not isinstance(candidate, dict) or set(candidate) != candidate_keys:
     raise SystemExit("sealed candidate attestation schema is invalid")
@@ -1081,7 +1092,8 @@ if not isinstance(receipt["application_relation_count"], int) or receipt["applic
 if receipt["runtime_invariant_violation_count"] != 0:
     raise SystemExit("fresh 300 oracle receipt runtime invariant result is invalid")
 for key in (
-    "catalog_sha256",
+    "source_catalog_sha256",
+    "destination_catalog_sha256",
     "seed_sha256",
     "privileged_residue_sha256",
     "destination_alembic_version_sha256",
@@ -1090,8 +1102,8 @@ for key in (
         raise SystemExit(f"fresh 300 oracle receipt digest is invalid: {key}")
 evidence = receipt["fresh_migration_evidence"]
 expected_evidence = {
-    "schema": "kor-travel-map.application-fresh-300-migration.v2",
-    "outcome": "migrated",
+    "schema": "kor-travel-map.application-fresh-300-root.v1",
+    "outcome": "root-committed",
     "authorization": "manager-fence",
     "destination_head": "300",
     "map_candidate_commit": candidate["candidate_commit"],
@@ -1130,6 +1142,43 @@ if (
     != receipt["fresh_migration_result_sha256"]
 ):
     raise SystemExit("fresh 300 oracle migration result digest is invalid")
+finalize_evidence = receipt["fresh_finalize_evidence"]
+expected_finalize_evidence = {
+    "schema": "kor-travel-map.application-fresh-300-finalize.v3",
+    "outcome": "finalized",
+    "destination_head": "300",
+    "map_candidate_commit": candidate["candidate_commit"],
+    "map_candidate_image_id": candidate["candidate_image_id"],
+    "reference_manifest_sha256": candidate["candidate_manifest_sha256"],
+    "journal_generation": 2,
+    "prior_fresh_migration_result_sha256": receipt["fresh_migration_result_sha256"],
+    "prior_fresh_migration_fence_sha256": evidence["writer_fence_receipt_sha256"],
+    "prior_fresh_migration_transaction_id": evidence["writer_fence_transaction_id"],
+    "prior_fresh_migration_journal_sha256": evidence["journal_sha256"],
+    "prior_fresh_migration_generation": evidence["journal_generation"],
+    "pre_source_catalog_sha256": receipt["source_catalog_sha256"],
+    "post_destination_catalog_sha256": receipt["destination_catalog_sha256"],
+    "post_destination_alembic_version_sha256": sys.argv[12],
+}
+if not isinstance(finalize_evidence, dict) or any(
+    finalize_evidence.get(key) != value
+    for key, value in expected_finalize_evidence.items()
+):
+    raise SystemExit("fresh 300 oracle finalize evidence binding drifted")
+for key in ("writer_fence_receipt_sha256", "journal_sha256"):
+    if not isinstance(finalize_evidence.get(key), str) or not re.fullmatch(
+        r"[0-9a-f]{64}", finalize_evidence[key]
+    ):
+        raise SystemExit(f"fresh 300 oracle finalize evidence digest is invalid: {key}")
+canonical_finalize_evidence = (
+    json.dumps(finalize_evidence, sort_keys=True, separators=(",", ":")) + "\n"
+).encode("utf-8")
+if (
+    not isinstance(receipt["fresh_finalize_result_sha256"], str)
+    or hashlib.sha256(canonical_finalize_evidence).hexdigest()
+    != receipt["fresh_finalize_result_sha256"]
+):
+    raise SystemExit("fresh 300 oracle finalize result digest is invalid")
 PY
 candidate_image_id_actual="$(python3 - "$CANDIDATE_PROVENANCE_JSON" <<'PY'
 import json
@@ -1532,6 +1581,7 @@ else
 fi
 for contract in \
   application-catalog.sql application-seed.sql application-privileged-residue.sql \
+  application-destination-catalog.sha256 \
   application-source-alembic-version.sql \
   application-destination-alembic-version.sql \
   application-runtime-invariants.sql; do
@@ -1582,11 +1632,12 @@ source_catalog_sha="$(contract_sha256 "$CONTAINER" "$DB" application-catalog.sql
 source_seed_sha="$(contract_sha256 "$CONTAINER" "$DB" application-seed.sql)"
 source_privileged_residue_sha="$(contract_sha256 "$CONTAINER" "$DB" application-privileged-residue.sql database-superuser)"
 source_alembic_version_sha="$(contract_sha256 "$CONTAINER" "$DB" application-source-alembic-version.sql)"
+expected_destination_catalog_sha="$(tr -d '\r\n' < "$BUILD_DIR/application-destination-catalog.sha256")"
 expected_source_alembic_version_sha="$(printf '%s\n' 'kor-travel-map.application-source-alembic-version.v1' | sha256sum | awk '{print $1}')"
 expected_destination_alembic_version_sha="$(printf '%s\n' 'kor-travel-map.application-destination-alembic-version.v1' | sha256sum | awk '{print $1}')"
 for digest in "$source_catalog_sha" "$source_seed_sha" "$source_privileged_residue_sha" \
   "$source_alembic_version_sha" "$expected_source_alembic_version_sha" \
-  "$expected_destination_alembic_version_sha"; do
+  "$expected_destination_alembic_version_sha" "$expected_destination_catalog_sha"; do
   [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || die "contract receipt SHA-256을 얻지 못했다"
 done
 [ "$source_alembic_version_sha" = "$expected_source_alembic_version_sha" ] || \
@@ -1600,8 +1651,8 @@ for digest in "$fresh_catalog_sha" "$fresh_seed_sha" "$fresh_privileged_residue_
   "$fresh_destination_alembic_version_sha"; do
   [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || die "fresh contract receipt SHA-256을 얻지 못했다"
 done
-[ "$source_catalog_sha" = "$fresh_catalog_sha" ] || \
-  die "fresh 300 oracle catalog receipt가 exact 0236 source와 다르다"
+[ "$fresh_catalog_sha" = "$expected_destination_catalog_sha" ] || \
+  die "fresh 300 oracle destination catalog receipt가 candidate와 다르다"
 [ "$source_seed_sha" = "$fresh_seed_sha" ] || \
   die "fresh 300 oracle immutable handoff seed receipt가 exact 0236 source와 다르다"
 [ "$source_privileged_residue_sha" = "$fresh_privileged_residue_sha" ] || \
@@ -1611,8 +1662,9 @@ done
 # Oracle creator가 후보 image의 실제 migration 뒤 남긴 receipt result도, 여기서
 # 재계산한 fresh DB result와 byte-exact여야 한다. receipt만 hand-edit하거나 raw `300`
 # row를 넣어 만든 DB는 이 independent recheck를 통과할 수 없다.
-python3 - "$FRESH_300_RECEIPT" "$fresh_catalog_sha" "$fresh_seed_sha" \
-  "$fresh_privileged_residue_sha" "$fresh_destination_alembic_version_sha" <<'PY'
+python3 - "$FRESH_300_RECEIPT" "$source_catalog_sha" "$fresh_catalog_sha" \
+  "$fresh_seed_sha" "$fresh_privileged_residue_sha" \
+  "$fresh_destination_alembic_version_sha" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -1622,16 +1674,17 @@ try:
 except (OSError, ValueError) as exc:
     raise SystemExit(f"fresh 300 oracle receipt cannot be re-read: {exc}") from exc
 if (
-    receipt.get("catalog_sha256") != sys.argv[2]
-    or receipt.get("seed_sha256") != sys.argv[3]
-    or receipt.get("privileged_residue_sha256") != sys.argv[4]
-    or receipt.get("destination_alembic_version_sha256") != sys.argv[5]
+    receipt.get("source_catalog_sha256") != sys.argv[2]
+    or receipt.get("destination_catalog_sha256") != sys.argv[3]
+    or receipt.get("seed_sha256") != sys.argv[4]
+    or receipt.get("privileged_residue_sha256") != sys.argv[5]
+    or receipt.get("destination_alembic_version_sha256") != sys.argv[6]
     or receipt.get("runtime_invariant_violation_count") != 0
 ):
     raise SystemExit("fresh 300 oracle receipt result does not match the observed fresh database")
 PY
 fi
-printf '%s\n' "$source_catalog_sha" > "$BUILD_DIR/application-catalog.sha256"
+printf '%s\n' "$source_catalog_sha" > "$BUILD_DIR/application-source-catalog.sha256"
 printf '%s\n' "$source_seed_sha" > "$BUILD_DIR/application-seed.sha256"
 printf '%s\n' "$source_privileged_residue_sha" > "$BUILD_DIR/application-privileged-residue.sha256"
 printf '%s\n' "$source_alembic_version_sha" > "$BUILD_DIR/application-source-alembic-version.sha256"
@@ -1640,7 +1693,7 @@ printf '%s\n' "$expected_destination_alembic_version_sha" > "$BUILD_DIR/applicat
 python3 - "$BUILD_DIR" "$SOURCE_COMMIT" "$SOURCE_HEAD" "$SOURCE_IMAGE" "$SOURCE_IMAGE_ID" \
   "$SOURCE_PG_VERSION" "$SOURCE_POSTGIS_VERSION" "$source_catalog_sha" "$source_seed_sha" \
   "$source_privileged_residue_sha" "$source_alembic_version_sha" \
-  "$expected_destination_alembic_version_sha" <<'PY'
+  "$expected_destination_alembic_version_sha" "$expected_destination_catalog_sha" <<'PY'
 from __future__ import annotations
 
 import hashlib
@@ -1657,11 +1710,12 @@ source = {
     "postgres_server_version_num": sys.argv[6],
     "postgis_extension_version": sys.argv[7],
 }
-catalog_receipt = sys.argv[8]
+source_catalog_receipt = sys.argv[8]
 seed_receipt = sys.argv[9]
 privileged_residue_receipt = sys.argv[10]
 source_alembic_version_receipt = sys.argv[11]
 destination_alembic_version_receipt = sys.argv[12]
+destination_catalog_receipt = sys.argv[13]
 
 def digest(name: str) -> str:
     return hashlib.sha256((out / name).read_bytes()).hexdigest()
@@ -1673,8 +1727,10 @@ value = {
         "schema_sql_sha256": digest("schema.sql"),
         "seed_sql_sha256": digest("seed.sql"),
         "catalog_contract_sql_sha256": digest("application-catalog.sql"),
-        "catalog_contract_sha256": catalog_receipt,
-        "catalog_contract_receipt_sha256": digest("application-catalog.sha256"),
+        "source_catalog_contract_sha256": source_catalog_receipt,
+        "source_catalog_contract_receipt_sha256": digest("application-source-catalog.sha256"),
+        "destination_catalog_contract_sha256": destination_catalog_receipt,
+        "destination_catalog_contract_receipt_sha256": digest("application-destination-catalog.sha256"),
         "seed_contract_sql_sha256": digest("application-seed.sql"),
         "seed_contract_sha256": seed_receipt,
         "seed_contract_receipt_sha256": digest("application-seed.sha256"),
@@ -1744,7 +1800,8 @@ files = {
     "schema.sql": "schema_sql_sha256",
     "seed.sql": "seed_sql_sha256",
     "application-catalog.sql": "catalog_contract_sql_sha256",
-    "application-catalog.sha256": "catalog_contract_receipt_sha256",
+    "application-source-catalog.sha256": "source_catalog_contract_receipt_sha256",
+    "application-destination-catalog.sha256": "destination_catalog_contract_receipt_sha256",
     "application-seed.sql": "seed_contract_sql_sha256",
     "application-seed.sha256": "seed_contract_receipt_sha256",
     "application-privileged-residue.sql": "privileged_residue_contract_sql_sha256",
@@ -1759,7 +1816,8 @@ for name, key in files.items():
     actual = hashlib.sha256((out / name).read_bytes()).hexdigest()
     if value["artifacts"].get(key) != actual:
         raise SystemExit(f"generated reference artifact digest drifted: {name}")
-for name, key in (("application-catalog.sha256", "catalog_contract_sha256"),
+for name, key in (("application-source-catalog.sha256", "source_catalog_contract_sha256"),
+                  ("application-destination-catalog.sha256", "destination_catalog_contract_sha256"),
                   ("application-seed.sha256", "seed_contract_sha256"),
                   ("application-privileged-residue.sha256", "privileged_residue_contract_sha256"),
                   ("application-source-alembic-version.sha256", "source_alembic_version_contract_sha256"),
@@ -1781,7 +1839,8 @@ if [ "$MODE" = "materialize" ]; then
     "$DB" "$source_database_oid" "$source_system_identifier" "$source_catalog_sha" \
     "$source_seed_sha" "$source_privileged_residue_sha" "$source_certificate_sha256" \
     "$materializer_script_sha256" "$source_alembic_version_sha" \
-    "$expected_destination_alembic_version_sha" <<'PY'
+    "$expected_destination_alembic_version_sha" \
+    "$expected_destination_catalog_sha" <<'PY'
 from __future__ import annotations
 
 import hashlib
@@ -1792,7 +1851,7 @@ from pathlib import Path
 target = Path(sys.argv[1])
 manifest = Path(sys.argv[2])
 value = {
-    "schema": "kor-travel-map.application-baseline-materialization-receipt.v3",
+    "schema": "kor-travel-map.application-baseline-materialization-receipt.v5",
     "reference_manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
     "source_container_id": sys.argv[3],
     "source_database": sys.argv[4],
@@ -1805,6 +1864,7 @@ value = {
     "materializer_script_sha256": sys.argv[11],
     "source_alembic_version_sha256": sys.argv[12],
     "destination_alembic_version_sha256": sys.argv[13],
+    "candidate_expected_destination_catalog_sha256": sys.argv[14],
 }
 target.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
 PY
@@ -1825,7 +1885,8 @@ python3 - "$MATERIALIZATION_RECEIPT" "$generated_reference_manifest_sha256" \
   "$source_container_id" "$DB" "$source_database_oid" "$source_system_identifier" \
   "$source_catalog_sha" "$source_seed_sha" "$source_privileged_residue_sha" \
   "$source_certificate_sha256" "$materializer_script_sha256" \
-  "$source_alembic_version_sha" "$expected_destination_alembic_version_sha" <<'PY'
+  "$source_alembic_version_sha" "$expected_destination_alembic_version_sha" \
+  "$expected_destination_catalog_sha" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -1835,7 +1896,7 @@ try:
 except (OSError, ValueError) as exc:
     raise SystemExit(f"materialization receipt cannot be parsed: {exc}") from exc
 expected = {
-    "schema": "kor-travel-map.application-baseline-materialization-receipt.v3",
+    "schema": "kor-travel-map.application-baseline-materialization-receipt.v5",
     "reference_manifest_sha256": sys.argv[2],
     "source_container_id": sys.argv[3],
     "source_database": sys.argv[4],
@@ -1848,6 +1909,7 @@ expected = {
     "materializer_script_sha256": sys.argv[11],
     "source_alembic_version_sha256": sys.argv[12],
     "destination_alembic_version_sha256": sys.argv[13],
+    "candidate_expected_destination_catalog_sha256": sys.argv[14],
 }
 if not isinstance(value, dict) or value != expected:
     raise SystemExit("materialization receipt does not bind this source/artifact generator")
@@ -1856,7 +1918,8 @@ PY
 # verify는 final candidate image가 포함한 artifact directory와 source-only output의
 # 전 파일 byte 동등성을 본다. manifest만 같다는 비교는 sidecar 누락을 숨길 수 있다.
 for artifact in \
-  schema.sql seed.sql application-catalog.sql application-catalog.sha256 \
+  schema.sql seed.sql application-catalog.sql application-source-catalog.sha256 \
+  application-destination-catalog.sha256 \
   application-reference.json application-reference.sha256 \
   application-runtime-invariants.sql application-seed.sql application-seed.sha256 \
   application-privileged-residue.sql application-privileged-residue.sha256 \
@@ -1884,7 +1947,8 @@ python3 - "$receipt_tmp" "$OUT_DIR/application-reference.json" "$source_database
   "$candidate_image_id_actual" "$candidate_commit_expected" "$CANDIDATE_PROVENANCE_JSON" \
   "$fresh_oracle_receipt_sha256" "$materialization_receipt_sha256" \
   "$source_certificate_sha256" "$handoff_rehearsal_receipt_sha256" \
-  "$source_alembic_version_sha" "$fresh_destination_alembic_version_sha" <<'PY'
+  "$source_alembic_version_sha" "$fresh_destination_alembic_version_sha" \
+  "$source_catalog_sha" <<'PY'
 from __future__ import annotations
 
 import hashlib
@@ -1908,11 +1972,11 @@ candidate_keys = {
 if not isinstance(candidate, dict) or set(candidate) != candidate_keys:
     raise SystemExit("sealed candidate attestation cannot be propagated to build receipt")
 value = {
-    "schema": "kor-travel-map.application-baseline-build-receipt.v6",
+    "schema": "kor-travel-map.application-baseline-build-receipt.v7",
     "reference_manifest_sha256": hashlib.sha256(manifest.read_bytes()).hexdigest(),
     "source_database_oid": int(sys.argv[3]),
     "fresh_300_database_oid": int(sys.argv[4]),
-    "source_catalog_sha256": sys.argv[5],
+    "source_catalog_sha256": sys.argv[22],
     "fresh_300_catalog_sha256": sys.argv[5],
     "source_seed_sha256": sys.argv[6],
     "fresh_300_seed_sha256": sys.argv[6],

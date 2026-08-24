@@ -1,4 +1,4 @@
-#!/usr/local/bin/python
+#!/usr/local/bin/python -I
 """Docker Manager final permit을 검사하는 production runtime gate.
 
 permit은 DB 안의 application-writable flag가 아니다. Manager가 host root 경계에서
@@ -27,11 +27,10 @@ from sqlalchemy import text
 from kortravelmap.infra.db import make_async_engine
 
 _PERMIT_PATH: Final = Path("/run/kor-travel-map-application-final-permit/permit.json")
-_PERMIT_SCHEMA: Final = "kor-travel-docker-manager.map-application-final-permit.v2"
+_PERMIT_SCHEMA: Final = "kor-travel-docker-manager.map-application-final-permit.v4"
 _PERMIT_TRANSITIONS: Final = frozenset(
     {
         "map-application-schema-0236-to-300",
-        "map-fresh-300",
         "map-fresh-300-finalize",
     }
 )
@@ -46,7 +45,16 @@ _COMMIT_PATTERN: Final = re.compile(r"^[0-9a-f]{40}$")
 _DATABASE_PATTERN: Final = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _DATABASE_OWNER: Final = "ktm_feature_schema_owner"
 _TOP_LEVEL_FIELDS: Final = frozenset(
-    {"schema", "transition_kind", "state", "transaction_id", "candidate", "database", "receipts"}
+    {
+        "schema",
+        "transition_kind",
+        "state",
+        "transaction_id",
+        "candidate",
+        "database",
+        "receipts",
+        "operation_evidence",
+    }
 )
 _CANDIDATE_FIELDS: Final = frozenset(
     {
@@ -76,6 +84,38 @@ _RECEIPT_FIELDS: Final = frozenset(
         "expected_destination_alembic_version_sha256",
         "observed_destination_alembic_version_sha256",
         "runtime_invariant_violation_count",
+    }
+)
+_HANDOFF_EVIDENCE_FIELDS: Final = frozenset(
+    {
+        "schema",
+        "journal_sha256",
+        "journal_generation",
+        "operation_result_sha256",
+        "writer_fence_receipt_sha256",
+        "writer_fence_transaction_id",
+        "pre_source_catalog_sha256",
+        "post_destination_catalog_sha256",
+        "pre_source_alembic_version_sha256",
+        "post_destination_alembic_version_sha256",
+    }
+)
+_FRESH_FINALIZE_EVIDENCE_FIELDS: Final = frozenset(
+    {
+        "schema",
+        "journal_sha256",
+        "journal_generation",
+        "finalize_result_sha256",
+        "finalize_fence_receipt_sha256",
+        "finalize_fence_transaction_id",
+        "prior_fresh_migration_result_sha256",
+        "prior_fresh_migration_fence_sha256",
+        "prior_fresh_migration_transaction_id",
+        "prior_fresh_migration_journal_sha256",
+        "prior_fresh_migration_generation",
+        "pre_source_catalog_sha256",
+        "post_destination_catalog_sha256",
+        "post_destination_alembic_version_sha256",
     }
 )
 _APPLICATION_ROOT_CANDIDATES: Final = (Path("/app"), Path(__file__).resolve().parents[1])
@@ -175,6 +215,89 @@ def _require_fixed_file() -> bytes:
         raise FinalPermitError("final permit cannot be read") from exc
 
 
+def _validate_operation_evidence(
+    value: object,
+    *,
+    transition_kind: str,
+    transaction_id: str,
+    source_catalog_sha256: str,
+    destination_catalog_sha256: str,
+    source_alembic_version_sha256: str,
+    destination_alembic_version_sha256: str,
+) -> Mapping[str, Any]:
+    """transition 종류별 증거를 disjoint exact schema로 고정한다."""
+
+    if transition_kind == "map-application-schema-0236-to-300":
+        evidence = _require_exact_fields(value, _HANDOFF_EVIDENCE_FIELDS, "handoff evidence")
+        schema = "kor-travel-docker-manager.map-final-permit-handoff-evidence.v2"
+        transaction_field = "writer_fence_transaction_id"
+        digest_fields = _HANDOFF_EVIDENCE_FIELDS - {
+            "schema",
+            "journal_generation",
+            transaction_field,
+        }
+        if (
+            evidence.get("pre_source_alembic_version_sha256")
+            != source_alembic_version_sha256
+            or evidence.get("pre_source_catalog_sha256") != source_catalog_sha256
+            or evidence.get("post_destination_catalog_sha256")
+            != destination_catalog_sha256
+            or evidence.get("post_destination_alembic_version_sha256")
+            != destination_alembic_version_sha256
+        ):
+            raise FinalPermitError("final permit handoff evidence facet binding is invalid")
+    elif transition_kind == "map-fresh-300-finalize":
+        evidence = _require_exact_fields(
+            value, _FRESH_FINALIZE_EVIDENCE_FIELDS, "fresh finalize evidence"
+        )
+        schema = "kor-travel-docker-manager.map-final-permit-fresh-finalize-evidence.v2"
+        transaction_field = "finalize_fence_transaction_id"
+        digest_fields = _FRESH_FINALIZE_EVIDENCE_FIELDS - {
+            "schema",
+            "journal_generation",
+            "prior_fresh_migration_generation",
+            transaction_field,
+            "prior_fresh_migration_transaction_id",
+        }
+        if (
+            type(evidence.get("prior_fresh_migration_generation")) is not int
+            or evidence["prior_fresh_migration_generation"] <= 0
+            or type(evidence.get("journal_generation")) is not int
+            or evidence["journal_generation"]
+            <= evidence["prior_fresh_migration_generation"]
+            or evidence.get("pre_source_catalog_sha256") != source_catalog_sha256
+            or evidence.get("post_destination_catalog_sha256")
+            != destination_catalog_sha256
+            or evidence.get("post_destination_alembic_version_sha256")
+            != destination_alembic_version_sha256
+        ):
+            raise FinalPermitError("final permit fresh finalize generation is invalid")
+        try:
+            UUID(str(evidence["prior_fresh_migration_transaction_id"]))
+        except (TypeError, ValueError) as exc:
+            raise FinalPermitError(
+                "final permit prior fresh transaction is invalid"
+            ) from exc
+    else:  # transition_kind는 caller에서도 exact allow-list로 검사한다.
+        raise FinalPermitError("final permit transition evidence kind is invalid")
+    if evidence.get("schema") != schema:
+        raise FinalPermitError("final permit operation evidence schema is invalid")
+    if (
+        type(evidence.get("journal_generation")) is not int
+        or evidence["journal_generation"] <= 0
+    ):
+        raise FinalPermitError("final permit journal generation is invalid")
+    for field in digest_fields:
+        _require_sha256(evidence[field], f"operation evidence {field}")
+    try:
+        UUID(str(evidence[transaction_field]))
+    except (TypeError, ValueError) as exc:
+        raise FinalPermitError("final permit writer fence transaction is invalid") from exc
+    if str(evidence[transaction_field]) != transaction_id:
+        raise FinalPermitError("final permit transaction/evidence binding is invalid")
+    return evidence
+
+
 def _validate_permit(raw: bytes, *, consumer: str) -> Mapping[str, Any]:
     try:
         value = json.loads(raw)
@@ -213,6 +336,32 @@ def _validate_permit(raw: bytes, *, consumer: str) -> Mapping[str, Any]:
         candidate["destination_alembic_version_sha256"], "destination Alembic facet"
     )
     _require_sha256(candidate["runtime_invariants_sql_sha256"], "runtime invariants")
+    reference_sha256, reference = _read_reference()
+    reference_artifacts = reference.get("artifacts")
+    if not isinstance(reference_artifacts, Mapping):
+        raise FinalPermitError("installed application baseline artifact map is invalid")
+    source_catalog_sha256 = reference_artifacts.get("source_catalog_contract_sha256")
+    destination_catalog_sha256 = reference_artifacts.get(
+        "destination_catalog_contract_sha256"
+    )
+    if (
+        not isinstance(source_catalog_sha256, str)
+        or not _SHA256_PATTERN.fullmatch(source_catalog_sha256)
+        or not isinstance(destination_catalog_sha256, str)
+        or not _SHA256_PATTERN.fullmatch(destination_catalog_sha256)
+    ):
+        raise FinalPermitError("installed application baseline catalog facets are invalid")
+    _validate_operation_evidence(
+        payload["operation_evidence"],
+        transition_kind=str(payload["transition_kind"]),
+        transaction_id=str(payload["transaction_id"]),
+        source_catalog_sha256=source_catalog_sha256,
+        destination_catalog_sha256=destination_catalog_sha256,
+        source_alembic_version_sha256=str(candidate["source_alembic_version_sha256"]),
+        destination_alembic_version_sha256=str(
+            candidate["destination_alembic_version_sha256"]
+        ),
+    )
     if (
         not isinstance(database["name"], str)
         or not _DATABASE_PATTERN.fullmatch(database["name"])
@@ -239,7 +388,7 @@ def _validate_permit(raw: bytes, *, consumer: str) -> Mapping[str, Any]:
     ):
         raise FinalPermitError("final permit runtime invariant receipt is invalid")
 
-    reference_sha256, reference = _read_reference()
+    # 위 operation evidence와 같은 installed reference를 receipts에도 사용한다.
     artifacts = reference.get("artifacts")
     source = reference.get("source")
     if not isinstance(artifacts, Mapping) or not isinstance(source, Mapping):
@@ -252,7 +401,7 @@ def _validate_permit(raw: bytes, *, consumer: str) -> Mapping[str, Any]:
     ):
         raise FinalPermitError("final permit database image does not match installed baseline")
     expected = {
-        "catalog": artifacts.get("catalog_contract_sha256"),
+        "catalog": artifacts.get("destination_catalog_contract_sha256"),
         "seed": artifacts.get("seed_contract_sha256"),
         "privileged_residue": artifacts.get("privileged_residue_contract_sha256"),
         "source_alembic_version": artifacts.get(

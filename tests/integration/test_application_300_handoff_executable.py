@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -29,6 +30,18 @@ pytestmark = pytest.mark.integration
 
 _ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = _ROOT / "docker" / "transition-application-schema-0236-to-300.py"
+
+
+def _write_private_fence(payload: dict[str, object]) -> Path:
+    """NTFS pytest tmp 대신 실제 Linux mode를 보존하는 private fence를 쓴다."""
+
+    fence_dir = Path("/tmp/kor-travel-map-handoff-tests")
+    fence_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    fence_dir.chmod(0o700)
+    path = fence_dir / f"manager-fence-receipt-{uuid4().hex}.json"
+    path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+    path.chmod(0o600)
+    return path
 
 
 def _handoff_module() -> ModuleType:
@@ -73,14 +86,28 @@ async def _writer_fence_receipt(
 
     candidate_commit = "a" * 40
     candidate_image_id = "sha256:" + "b" * 64
+    # Production one-shot의 root-owned capability + Alembic guard는 container rehearsal이
+    # 실제로 검증한다. 일반 개발 사용자로 도는 integration process에서는 같은 outer
+    # transaction의 version-row mutation만 test double로 대체해 catalog/ACL rollback을
+    # 계속 검증한다.
+    if os.geteuid() != 0:
+        def _stamp_version_row(sync_connection: object, config: object) -> None:
+            del config
+            sync_connection.execute(text("DELETE FROM public.alembic_version"))  # type: ignore[attr-defined]
+            sync_connection.execute(  # type: ignore[attr-defined]
+                text("INSERT INTO public.alembic_version (version_num) VALUES ('300')")
+            )
+
+        monkeypatch.setattr(module, "_stamp_on_existing_connection", _stamp_version_row)
     monkeypatch.setenv("KOR_TRAVEL_MAP_IMAGE_REVISION", candidate_commit)
     monkeypatch.setenv("KOR_TRAVEL_MAP_APPLICATION_HANDOFF_IMAGE_ID", candidate_image_id)
     expected = module._verify_reference_artifacts()
     observed_privileged_residue = await _privileged_residue_receipt(module, admin_dsn)
     payload = {
-        "schema": "kor-travel-docker-manager.map-application-schema-handoff-fence.v4",
+        "schema": "kor-travel-docker-manager.map-application-schema-handoff-fence.v6",
         "transaction_id": str(uuid4()),
         "journal_sha256": "c" * 64,
+        "journal_generation": 1,
         "operation": "map-application-schema-0236-to-300",
         "map_candidate_commit": candidate_commit,
         "map_candidate_image_id": candidate_image_id,
@@ -88,7 +115,8 @@ async def _writer_fence_receipt(
         "source_head": _HANDOFF_SOURCE,
         "destination_head": "300",
         "reference_manifest_sha256": module._reference_manifest_sha256(),
-        "catalog_sha256": expected["catalog_sha256"],
+        "source_catalog_sha256": expected["source_catalog_sha256"],
+        "destination_catalog_sha256": expected["destination_catalog_sha256"],
         "seed_sha256": expected["seed_sha256"],
         "privileged_residue_sha256": expected["privileged_residue_sha256"],
         "pre_privileged_residue_sha256": observed_privileged_residue,
@@ -105,10 +133,10 @@ async def _writer_fence_receipt(
         "postgres_system_identifier": str(row[3]),
         "writer_fence_expires_at": (datetime.now(UTC) + timedelta(minutes=5)).isoformat(),
     }
-    path = tmp_path / "manager-fence-receipt.json"
-    path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
-    path.chmod(0o600)
-    return path
+    # Codex/Windows pytest tmp_path는 NTFS metadata translation 때문에 chmod(0600)가
+    # 실제 Linux mode로 반영되지 않는다. production helper의 strict mode gate를
+    # 약화하지 않고 검증하려면 fence만 private Linux tmpfs에 둔다.
+    return _write_private_fence(payload)
 
 
 async def _contract_receipts(module: ModuleType, dsn: str) -> tuple[str, str]:
@@ -193,7 +221,7 @@ async def application_300_config(
 
 
 @pytest.mark.asyncio
-async def test_handoff_executable_rejects_synthetic_0236_label_before_stamp(
+async def test_handoff_executable_accepts_exact_source_contract(
     application_300_config: tuple[Config, str],
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -210,13 +238,12 @@ async def test_handoff_executable_rejects_synthetic_0236_label_before_stamp(
         module, migrator_dsn
     )
 
-    expected_catalog_sha256 = module._expected_catalog_sha256()
+    expected_catalog_sha256 = module._expected_source_catalog_sha256()
     expected_seed_sha256 = module._expected_seed_sha256()
-    # The fixture is a fresh `300` DB with only its raw version label changed.
-    # It is not a runnable historical `0236` source, so CI must never use it as
-    # a false positive transition proof. The independent source→fresh-oracle
-    # protocol is the only positive handoff evidence.
-    assert observed_catalog_sha256 != expected_catalog_sha256
+    # Source 정본은 migration lineage가 아니라 exact physical catalog/seed facet이다.
+    # fresh root에서 destination ACL을 적용하기 전 상태는 실제 0236 source와 물리적으로
+    # 같아야 하며, 이 동등성은 별도 source→fresh oracle이 독립적으로 증명한다.
+    assert observed_catalog_sha256 == expected_catalog_sha256
     assert observed_seed_sha256 == expected_seed_sha256
     fence_receipt = await _writer_fence_receipt(
         module, admin_dsn, tmp_path, monkeypatch
@@ -228,9 +255,11 @@ async def test_handoff_executable_rejects_synthetic_0236_label_before_stamp(
             "--writer-fence-receipt",
             str(fence_receipt),
         ]
-    ) == 1
-    assert await _raw_version(admin_dsn) == (_HANDOFF_SOURCE,)
-    assert "immutable 300 reference" in capsys.readouterr().err
+    ) == 0
+    assert await _raw_version(admin_dsn) == ("300",)
+    result = json.loads(capsys.readouterr().out)
+    assert result["pre_catalog_sha256"] == expected_catalog_sha256
+    assert result["post_catalog_sha256"] == module._expected_destination_catalog_sha256()
 
 
 @pytest.mark.asyncio
@@ -348,11 +377,7 @@ async def test_mutable_provider_catalog_data_does_not_change_handoff_contract(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
-    """provider/curated 운영 데이터는 fresh seed이지 immutable handoff receipt가 아니다.
-
-    Synthetic raw-0236 labels are intentionally rejected below. Actual positive
-    handoff acceptance is proven only from the isolated historical source.
-    """
+    """provider/curated 운영 데이터는 immutable handoff receipt가 아니다."""
 
     config, admin_dsn = application_300_config
     await _prepare_logical_0236(config, admin_dsn)
@@ -385,9 +410,9 @@ async def test_mutable_provider_catalog_data_does_not_change_handoff_contract(
             "--writer-fence-receipt",
             str(fence_receipt),
         ]
-    ) == 1
-    assert await _raw_version(admin_dsn) == (_HANDOFF_SOURCE,)
-    assert "immutable 300 reference" in capsys.readouterr().err
+    ) == 0
+    assert await _raw_version(admin_dsn) == ("300",)
+    assert json.loads(capsys.readouterr().out)["outcome"] == "transitioned"
 
 
 @pytest.mark.asyncio
@@ -456,8 +481,11 @@ async def test_handoff_rolls_back_real_post_stamp_failure_to_exact_0236_state(
             first_preflight = False
             assert expected_head == _HANDOFF_SOURCE
             return {
-                "catalog_sha256": expected["catalog_sha256"],
+                "catalog_sha256": expected["source_catalog_sha256"],
                 "seed_sha256": expected["seed_sha256"],
+                "alembic_version_sha256": expected[
+                    "source_alembic_version_sha256"
+                ],
             }
         assert expected_head == "300"
         assert await module._raw_version(connection) == ("300",)
@@ -688,15 +716,15 @@ async def test_catalog_receipt_tracks_row_type_acl_and_composite_attribute_defin
         assert row_type_acl != baseline
 
         await _admin_execute(admin_dsn, "REVOKE USAGE ON TYPE feature.features FROM PUBLIC")
-        restored, _ = await _contract_receipts(module, migrator_dsn)
-        assert restored == baseline
+        explicit_default_acl_residue, _ = await _contract_receipts(module, migrator_dsn)
+        assert explicit_default_acl_residue != baseline
 
         await _admin_execute(
             admin_dsn,
             f"CREATE TYPE feature.{composite} AS (label text, ordinal integer)",
         )
         composite_created, _ = await _contract_receipts(module, migrator_dsn)
-        assert composite_created != baseline
+        assert composite_created != explicit_default_acl_residue
 
         await _admin_execute(
             admin_dsn,

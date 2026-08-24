@@ -329,7 +329,8 @@ image_migration_sha256="$(docker run --pull=never --rm --entrypoint sh "$image_i
 [ "$image_migration_sha256" = "$candidate_migration_sha256" ] || \
   die "candidate image 300 migration source가 sealed Git archive와 다르다"
 for sidecar in \
-  application-catalog.sql application-catalog.sha256 \
+  application-catalog.sql application-source-catalog.sha256 \
+  application-destination-catalog.sha256 \
   application-reference.json application-reference.sha256 \
   application-runtime-invariants.sql application-seed.sql application-seed.sha256 \
   application-privileged-residue.sql application-privileged-residue.sha256 \

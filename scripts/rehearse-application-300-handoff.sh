@@ -317,7 +317,8 @@ candidate_contract_receipt() {
     "/app/alembic/baseline/$name" | tr -d '\n'
 }
 
-expected_catalog_sha256="$(candidate_contract_receipt application-catalog.sha256)"
+expected_source_catalog_sha256="$(candidate_contract_receipt application-source-catalog.sha256)"
+expected_destination_catalog_sha256="$(candidate_contract_receipt application-destination-catalog.sha256)"
 expected_seed_sha256="$(candidate_contract_receipt application-seed.sha256)"
 expected_privileged_residue_sha256="$(candidate_contract_receipt application-privileged-residue.sha256)"
 expected_source_alembic_version_sha256="$(candidate_contract_receipt application-source-alembic-version.sha256)"
@@ -329,7 +330,8 @@ from pathlib import Path
 print(json.loads(Path("/app/alembic/baseline/application-reference.json").read_text(encoding="utf-8"))["artifacts"]["runtime_invariants_sql_sha256"])
 ')"
 for digest in \
-  "$expected_catalog_sha256" \
+  "$expected_source_catalog_sha256" \
+  "$expected_destination_catalog_sha256" \
   "$expected_seed_sha256" \
   "$expected_privileged_residue_sha256" \
   "$expected_source_alembic_version_sha256" \
@@ -379,7 +381,13 @@ assert_contracts() {
   OBSERVED_CATALOG_SHA256="$(contract_sha256 "$database" application-catalog.sql schema-owner)"
   OBSERVED_SEED_SHA256="$(contract_sha256 "$database" application-seed.sql schema-owner)"
   OBSERVED_PRIVILEGED_RESIDUE_SHA256="$(contract_sha256 "$database" application-privileged-residue.sql database-superuser)"
-  [ "$OBSERVED_CATALOG_SHA256" = "$expected_catalog_sha256" ] || die "source/clone catalog receipt가 candidate와 다르다"
+  if [ "$phase" = "destination" ]; then
+    [ "$OBSERVED_CATALOG_SHA256" = "$expected_destination_catalog_sha256" ] || \
+      die "destination catalog receipt가 candidate와 다르다"
+  else
+    [ "$OBSERVED_CATALOG_SHA256" = "$expected_source_catalog_sha256" ] || \
+      die "source catalog receipt가 candidate와 다르다"
+  fi
   [ "$OBSERVED_SEED_SHA256" = "$expected_seed_sha256" ] || die "source/clone seed receipt가 candidate와 다르다"
   [ "$OBSERVED_PRIVILEGED_RESIDUE_SHA256" = "$expected_privileged_residue_sha256" ] || \
     die "source/clone privileged residue receipt가 candidate와 다르다"
@@ -475,7 +483,8 @@ write_root_fence_receipt() {
   local identity
   identity="$(clone_identity_json "$database")"
   python3 - "$target_json" "$identity" "$candidate_commit" "$candidate_image_id" \
-    "$reference_manifest_sha256" "$expected_catalog_sha256" "$expected_seed_sha256" \
+    "$reference_manifest_sha256" "$expected_source_catalog_sha256" \
+    "$expected_destination_catalog_sha256" "$expected_seed_sha256" \
     "$expected_privileged_residue_sha256" "$privileged_digest" "$candidate_proof_tools_manifest_sha256" \
     "$candidate_postgres_image_id" "$expected_runtime_invariants_sql_sha256" \
     "$expected_source_alembic_version_sha256" \
@@ -495,29 +504,31 @@ journal_seed = json.dumps(
         "candidate_commit": sys.argv[3],
         "candidate_image_id": sys.argv[4],
         "database": identity,
-        "proof_tools_manifest_sha256": sys.argv[10],
+        "proof_tools_manifest_sha256": sys.argv[11],
     },
     sort_keys=True,
     separators=(",", ":"),
 ).encode("utf-8")
 value = {
-    "schema": "kor-travel-docker-manager.map-application-schema-handoff-fence.v4",
+    "schema": "kor-travel-docker-manager.map-application-schema-handoff-fence.v6",
     "transaction_id": str(uuid4()),
     "journal_sha256": hashlib.sha256(journal_seed).hexdigest(),
+    "journal_generation": 1,
     "operation": "map-application-schema-0236-to-300",
     "map_candidate_commit": sys.argv[3],
     "map_candidate_image_id": sys.argv[4],
-    "postgres_image_id": sys.argv[11],
+    "postgres_image_id": sys.argv[12],
     "source_head": "0236_tvn41s_compaction_drained",
     "destination_head": "300",
     "reference_manifest_sha256": sys.argv[5],
-    "catalog_sha256": sys.argv[6],
-    "seed_sha256": sys.argv[7],
-    "privileged_residue_sha256": sys.argv[8],
-    "pre_privileged_residue_sha256": sys.argv[9],
-    "runtime_invariants_sql_sha256": sys.argv[12],
-    "source_alembic_version_sha256": sys.argv[13],
-    "destination_alembic_version_sha256": sys.argv[14],
+    "source_catalog_sha256": sys.argv[6],
+    "destination_catalog_sha256": sys.argv[7],
+    "seed_sha256": sys.argv[8],
+    "privileged_residue_sha256": sys.argv[9],
+    "pre_privileged_residue_sha256": sys.argv[10],
+    "runtime_invariants_sql_sha256": sys.argv[13],
+    "source_alembic_version_sha256": sys.argv[14],
+    "destination_alembic_version_sha256": sys.argv[15],
     **identity,
     "writer_fence_expires_at": (datetime.now(UTC) + timedelta(minutes=15)).isoformat(),
 }
@@ -535,10 +546,15 @@ import sys
 from pathlib import Path
 
 value = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-for key in ("transaction_id", "database_name", "database_oid", "database_owner", "postgres_system_identifier"):
+for key in (
+    "transaction_id", "journal_sha256", "journal_generation", "database_name",
+    "database_oid", "database_owner", "postgres_system_identifier",
+):
     if key not in value:
         raise SystemExit(f"writer fence field is missing: {key}")
 print(value["transaction_id"])
+print(value["journal_sha256"])
+print(value["journal_generation"])
 print(json.dumps({
     "database_name": value["database_name"],
     "database_oid": value["database_oid"],
@@ -547,9 +563,11 @@ print(json.dumps({
 }, sort_keys=True, separators=(",", ":")))
 PY
 )
-  [ "${#fence_receipt_identity[@]}" -eq 2 ] || die "Manager-shaped writer fence identity를 읽지 못했다"
+  [ "${#fence_receipt_identity[@]}" -eq 4 ] || die "Manager-shaped writer fence identity를 읽지 못했다"
   FENCE_TRANSACTION_ID="${fence_receipt_identity[0]}"
-  FENCE_IDENTITY_JSON="${fence_receipt_identity[1]}"
+  FENCE_JOURNAL_SHA256="${fence_receipt_identity[1]}"
+  FENCE_JOURNAL_GENERATION="${fence_receipt_identity[2]}"
+  FENCE_IDENTITY_JSON="${fence_receipt_identity[3]}"
   [ "$FENCE_IDENTITY_JSON" = "$(python3 - "$identity" <<'PY'
 import json
 import sys
@@ -594,6 +612,8 @@ negative_before_source_alembic_version_sha256="$OBSERVED_ALEMBIC_VERSION_SHA256"
 write_root_fence_receipt "$NEGATIVE_DATABASE" "$expected_privileged_residue_sha256"
 negative_fence_receipt_sha256="$FENCE_RECEIPT_SHA256"
 negative_fence_transaction_id="$FENCE_TRANSACTION_ID"
+negative_fence_journal_sha256="$FENCE_JOURNAL_SHA256"
+negative_fence_journal_generation="$FENCE_JOURNAL_GENERATION"
 negative_fence_file_metadata="$OBSERVED_FENCE_FILE_METADATA"
 if run_handoff "$NEGATIVE_DATABASE" "$TMPDIR_PATH/negative-result.json" 2>"$TMPDIR_PATH/negative-stderr.log"; then
   die "source Alembic metadata facet drift가 unexpectedly handoff를 통과했다"
@@ -632,6 +652,8 @@ positive_before_source_alembic_version_sha256="$OBSERVED_ALEMBIC_VERSION_SHA256"
 write_root_fence_receipt "$POSITIVE_DATABASE" "$expected_privileged_residue_sha256"
 positive_fence_receipt_sha256="$FENCE_RECEIPT_SHA256"
 positive_fence_transaction_id="$FENCE_TRANSACTION_ID"
+positive_fence_journal_sha256="$FENCE_JOURNAL_SHA256"
+positive_fence_journal_generation="$FENCE_JOURNAL_GENERATION"
 positive_fence_file_metadata="$OBSERVED_FENCE_FILE_METADATA"
 run_handoff "$POSITIVE_DATABASE" "$TMPDIR_PATH/positive-result.json" 2>"$TMPDIR_PATH/positive-stderr.log"
 [ -s "$TMPDIR_PATH/positive-result.json" ] || die "positive handoff가 result stdout을 남기지 않았다"
@@ -645,7 +667,8 @@ positive_after_catalog_sha256="$OBSERVED_CATALOG_SHA256"
 positive_after_seed_sha256="$OBSERVED_SEED_SHA256"
 positive_after_privileged_residue_sha256="$OBSERVED_PRIVILEGED_RESIDUE_SHA256"
 positive_after_destination_alembic_version_sha256="$OBSERVED_ALEMBIC_VERSION_SHA256"
-[ "$positive_before_catalog_sha256" = "$positive_after_catalog_sha256" ] \
+[ "$positive_before_catalog_sha256" = "$expected_source_catalog_sha256" ] \
+  && [ "$positive_after_catalog_sha256" = "$expected_destination_catalog_sha256" ] \
   && [ "$positive_before_seed_sha256" = "$positive_after_seed_sha256" ] \
   && [ "$positive_before_privileged_residue_sha256" = "$positive_after_privileged_residue_sha256" ] || \
   die "positive handoff 뒤 contract가 immutable baseline에서 벗어났다"
@@ -656,7 +679,7 @@ terminal_receipt_tmp="$TMPDIR_PATH/terminal-receipt.json"
 python3 - "$terminal_receipt_tmp" "$candidate_provenance_json" "$source_certificate_sha256" \
   "$source_identity_json" "$source_catalog_sha256" "$source_seed_sha256" "$source_privileged_residue_sha256" \
   "$positive_identity_json" "$positive_fence_receipt_sha256" "$positive_fence_transaction_id" \
-  "$positive_fence_file_metadata" "$expected_catalog_sha256" "$expected_seed_sha256" \
+  "$positive_fence_file_metadata" "$expected_source_catalog_sha256" "$expected_seed_sha256" \
   "$expected_privileged_residue_sha256" "$positive_after_catalog_sha256" \
   "$positive_after_seed_sha256" "$positive_after_privileged_residue_sha256" \
   "$TMPDIR_PATH/positive-result.json" "$negative_identity_json" \
@@ -671,7 +694,9 @@ python3 - "$terminal_receipt_tmp" "$candidate_provenance_json" "$source_certific
   "$positive_before_source_alembic_version_sha256" \
   "$positive_after_destination_alembic_version_sha256" \
   "$negative_before_source_alembic_version_sha256" \
-  "$negative_after_source_alembic_version_sha256" <<'PY'
+  "$negative_after_source_alembic_version_sha256" \
+  "$positive_fence_journal_sha256" "$positive_fence_journal_generation" \
+  "$expected_destination_catalog_sha256" <<'PY'
 from __future__ import annotations
 
 import hashlib
@@ -713,11 +738,12 @@ for key in (
     if key not in candidate:
         raise SystemExit(f"candidate provenance is missing: {key}")
 expected_positive_result = {
-    "schema": "kor-travel-map.application-baseline-handoff.v3",
+    "schema": "kor-travel-map.application-baseline-handoff.v5",
     "outcome": "stamped",
     "source_head": "0236_tvn41s_compaction_drained",
     "destination_head": "300",
-    "expected_catalog_sha256": sys.argv[12],
+    "expected_source_catalog_sha256": sys.argv[12],
+    "expected_destination_catalog_sha256": sys.argv[40],
     "expected_seed_sha256": sys.argv[13],
     "expected_privileged_residue_sha256": sys.argv[14],
     "expected_source_alembic_version_sha256": sys.argv[31],
@@ -726,11 +752,13 @@ expected_positive_result = {
     "pre_catalog_sha256": sys.argv[12],
     "pre_seed_sha256": sys.argv[13],
     "pre_source_alembic_version_sha256": sys.argv[34],
-    "post_catalog_sha256": sys.argv[12],
+    "post_catalog_sha256": sys.argv[40],
     "post_seed_sha256": sys.argv[13],
     "post_destination_alembic_version_sha256": sys.argv[35],
     "writer_fence_receipt_sha256": sys.argv[9],
     "writer_fence_transaction_id": sys.argv[10],
+    "journal_sha256": sys.argv[38],
+    "journal_generation": int(sys.argv[39]),
 }
 if not isinstance(positive, dict) or positive != expected_positive_result:
     raise SystemExit("positive handoff result is not the exact fenced 0236-to-300 stamp")
@@ -758,7 +786,7 @@ for key in (
     if not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value):
         raise SystemExit(f"terminal handoff receipt digest is invalid: {key}")
 value = {
-    "schema": "kor-travel-map.application-300-handoff-rehearsal.v3",
+    "schema": "kor-travel-map.application-300-handoff-rehearsal.v5",
     "candidate_commit": candidate["candidate_commit"],
     "candidate_image_id": candidate["candidate_image_id"],
     "candidate_build_receipt_sha256": candidate["candidate_build_receipt_sha256"],
@@ -769,7 +797,8 @@ value = {
     "source_seed_sha256": sys.argv[6],
     "source_privileged_residue_sha256": sys.argv[7],
     "source_alembic_version_sha256": sys.argv[33],
-    "expected_catalog_sha256": sys.argv[12],
+    "expected_source_catalog_sha256": sys.argv[12],
+    "expected_destination_catalog_sha256": sys.argv[40],
     "expected_seed_sha256": sys.argv[13],
     "expected_privileged_residue_sha256": sys.argv[14],
     "expected_source_alembic_version_sha256": sys.argv[31],

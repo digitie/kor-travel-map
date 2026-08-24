@@ -1,4 +1,4 @@
-#!/usr/local/bin/python
+#!/usr/local/bin/python -I
 """설치된 candidate image의 immutable application ``300`` 계약을 DB 없이 증명한다.
 
 Docker Manager는 mutable tag나 source checkout을 application baseline authority로
@@ -24,10 +24,15 @@ _ERROR_SCHEMA: Final = "kor-travel-map.application-baseline-contract-error.v1"
 _SHA256_PATTERN: Final = re.compile(r"^[0-9a-f]{64}$")
 _HEAD: Final = "300"
 _RECEIPT_ARTIFACTS: Final = {
-    "catalog_sha256": (
-        "catalog_contract_sha256",
-        "catalog_contract_receipt_sha256",
-        "application-catalog.sha256",
+    "source_catalog_sha256": (
+        "source_catalog_contract_sha256",
+        "source_catalog_contract_receipt_sha256",
+        "application-source-catalog.sha256",
+    ),
+    "destination_catalog_sha256": (
+        "destination_catalog_contract_sha256",
+        "destination_catalog_contract_receipt_sha256",
+        "application-destination-catalog.sha256",
     ),
     "seed_sha256": (
         "seed_contract_sha256",

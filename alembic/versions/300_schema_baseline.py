@@ -72,7 +72,10 @@ _REFERENCE_ARTIFACTS: Final[dict[str, str]] = {
     "schema.sql": "schema_sql_sha256",
     "seed.sql": "seed_sql_sha256",
     "application-catalog.sql": "catalog_contract_sql_sha256",
-    "application-catalog.sha256": "catalog_contract_receipt_sha256",
+    "application-source-catalog.sha256": "source_catalog_contract_receipt_sha256",
+    "application-destination-catalog.sha256": (
+        "destination_catalog_contract_receipt_sha256"
+    ),
     "application-seed.sql": "seed_contract_sql_sha256",
     "application-seed.sha256": "seed_contract_receipt_sha256",
     "application-privileged-residue.sql": "privileged_residue_contract_sql_sha256",
@@ -157,7 +160,11 @@ def _baseline_reference() -> dict[str, Any]:
             raise RuntimeError(f"300 baseline reference artifact digest is invalid: {key}")
         _read_sidecar(name, expected)
     for receipt_name, receipt_key in (
-        ("application-catalog.sha256", "catalog_contract_sha256"),
+        ("application-source-catalog.sha256", "source_catalog_contract_sha256"),
+        (
+            "application-destination-catalog.sha256",
+            "destination_catalog_contract_sha256",
+        ),
         ("application-seed.sha256", "seed_contract_sha256"),
         ("application-privileged-residue.sha256", "privileged_residue_contract_sha256"),
         ("application-source-alembic-version.sha256", "source_alembic_version_contract_sha256"),
@@ -1176,17 +1183,12 @@ def upgrade() -> None:
     _verify_contract_receipt(
         "application-catalog.sql",
         artifacts["catalog_contract_sql_sha256"],
-        artifacts["catalog_contract_sha256"],
+        artifacts["source_catalog_contract_sha256"],
     )
     _verify_contract_receipt(
         "application-seed.sql",
         artifacts["seed_contract_sql_sha256"],
         artifacts["seed_contract_sha256"],
-    )
-    _verify_contract_receipt(
-        "application-destination-alembic-version.sql",
-        artifacts["destination_alembic_version_contract_sql_sha256"],
-        artifacts["destination_alembic_version_contract_sha256"],
     )
 
 
