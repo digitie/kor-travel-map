@@ -13,6 +13,8 @@ const ALLOWED_FORWARD_HEADERS = new Set([
 ]);
 const ADMIN_PROXY_SECRET_ENV = "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET";
 const ALLOWED_PROXY_BASE_PROTOCOLS = new Set(["http:", "https:"]);
+const ADMIN_FEATURE_REQUEST_RESOLUTION_PATH =
+  /^\/v1\/admin\/feature-requests\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\/(?:approve|reject)$/i;
 
 export type ProxyRequestInit = RequestInit & { duplex?: "half" };
 
@@ -155,7 +157,13 @@ export function appendManualFeatureCreateHeaders(
   pathname: string,
   env: Record<string, string | undefined> = process.env,
 ): Headers {
-  if (method.toUpperCase() !== "POST" || pathname !== ADMIN_FEATURE_CREATE_PATH) {
+  const requiresManualFeatureCreateCredential =
+    pathname === ADMIN_FEATURE_CREATE_PATH ||
+    ADMIN_FEATURE_REQUEST_RESOLUTION_PATH.test(pathname);
+  if (
+    method.toUpperCase() !== "POST" ||
+    !requiresManualFeatureCreateCredential
+  ) {
     return headers;
   }
   const token = manualFeatureCreateToken(env);
