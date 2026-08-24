@@ -52,6 +52,26 @@ source는 오직 disposable PostGIS에서 다음 순서로 만든 data-free isol
    relation·column·constraint·index·routine·trigger·owner·ACL·extension·seed 및
    role/membership contract를 독립 비교한다.
 
+## 현재 구현 checkpoint의 재현 증거
+
+isolated clean `0236` reference에서 생성한 sidecar는 다음 byte digest를 갖는다.
+
+| artifact | 줄 수 | SHA-256 |
+|---|---:|---|
+| `alembic/baseline/schema.sql` | 26,332 | `01b5c8709145a31176ec3753fd32b4c91febc1011c0d7cbb4a931b4737f53d2c` |
+| `alembic/baseline/seed.sql` | 426 | `1872473b75e79d940a8cae0821418e3e14f8f445a48aa144d6bb6cf8bfabd80f` |
+
+seed는 final catalog의 non-empty application table 9개만 포함한다. fresh `300` target은
+새 `baseline-300` role bootstrap 이후 restricted migrator → schema owner 경로로 실제
+`alembic upgrade head`를 통과했고, raw version row와 `alembic current`/`heads`가 모두
+`300` 하나임을 확인했다. reference와 target의 core catalog는 9,901행,
+`45e391eb0c6f4e136995fdd1d95b72cde09a0da3d743235fb3af880280100ec7`로 같았다.
+
+catalog comparator가 별도로 남긴 네 CHECK constraint의 여덟 deparse line은 PostgreSQL의
+AND 평탄화 표현 차이다. 이 차이를 comparator에서 지우지 않는다. ORM CHECK semantic
+oracle과 one-shot handoff regression으로 같은 의미임을 독립 검증한 뒤에만 이 checkpoint를
+완성으로 취급한다.
+
 ## active graph와 archive
 
 새 active graph는 아래 하나뿐이다.

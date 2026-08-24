@@ -18,6 +18,27 @@ server-only manual Feature create token을 `POST /v1/admin/features`에만 주�
 
 아직 candidate frontend 이미지의 격리 Map BFF live 재검증과 적대 리뷰·원격 CI가 남아 있어
 PR은 Draft로 유지한다.
+## 2026-08-24 — T-VN-H46H `300` fresh bootstrap·exact handoff 첫 구현 checkpoint
+
+clean isolated `0236` reference에서 `schema.sql`과 9-table `seed.sql` sidecar를
+생성했다. digest는 각각 `01b5c870…53d2c`, `1872473b…bd80f`이며, source의 `0236`
+compaction semantic closure 세 query는 모두 0이었다. active `alembic/versions/`에는
+single root `300`만 두고 `0200`~`0236` source는 byte manifest가 있는 retired cohort로
+분리했다.
+
+새 `baseline-300` bootstrap은 version table이나 application object가 있으면 role 변경 전에
+거부하고, final 21-role/PG16 membership/DB·schema owner/extension 및 x_extension direct
+ACL을 한 번에 확정한다. 실제 fresh target에 restricted migrator → schema owner로 `300`을
+적용했으며, reference와 core catalog 9,901행 SHA
+`45e391eb0c6f4e136995fdd1d95b72cde09a0da3d743235fb3af880280100ec7`가 일치했다.
+
+`alembic/env.py`는 generic upgrade/stamp/downgrade를 막고, private Config authorization,
+explicit tag, online `purge`, exact raw `0236` row, unique active `300` head가 모두 맞을 때만
+retired revision을 script graph에 재해석하지 않는 one-shot stamp callback을 설치한다. local
+clone에서 normal upgrade는 무변경 거부했고, sanctioned handoff는 catalog/data를 바꾸지 않고
+raw version row만 `300`으로 전진시켰다. 아직 regression test·runtime/Compose·Docker Manager
+transition·n150 candidate/live UI E2E가 남았으므로 task와 PR은 Draft를 유지한다.
+
 ## 2026-08-24 — T-VN-H46H `0236 → 300` baseline 전환 draft 착수
 
 Map [PR #1063](https://github.com/digitie/kor-travel-map/pull/1063)은 fixture writer의

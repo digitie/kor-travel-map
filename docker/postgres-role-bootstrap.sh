@@ -44,11 +44,11 @@ require_value KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD
 require_identifier KOR_TRAVEL_MAP_POSTGRES_DB
 require_identifier KOR_TRAVEL_MAP_POSTGRES_USER
 
-bootstrap_phase="${KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE:-legacy}"
+bootstrap_phase="${KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE:-baseline-300}"
 case "$bootstrap_phase" in
-  legacy | m01 | m05-pre | m05-repair) ;;
+  baseline-300 | legacy | m01 | m05-pre | m05-repair) ;;
   *)
-    echo "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE must be legacy, m01, m05-pre, or m05-repair" >&2
+    echo "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE must be baseline-300, legacy, m01, m05-pre, or m05-repair" >&2
     exit 1
     ;;
 esac
@@ -912,6 +912,337 @@ GRANT EXECUTE ON PROCEDURE feature.lease_feature_reference_reconciliation_event_
     ) TO ktm_feature_reference_reconciliation_service_executor;
 SQL
 }
+
+run_baseline_300_phase() {
+  # `300`은 새 DB용 단일 root다. 기존 0236 DB에는 이 bootstrap을 재실행하지
+  # 않는다. 그 전환은 Docker Manager가 소유하는 별도 one-shot handoff만 허용한다.
+  psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" \
+    -v ON_ERROR_STOP=1 \
+    -v migrator_password="$KOR_TRAVEL_MAP_MIGRATOR_PASSWORD" \
+    -v api_runtime_password="$KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD" \
+    -v dagster_runtime_password="$KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD" <<'SQL'
+DO $baseline_300_fresh_precondition$
+BEGIN
+    IF to_regclass('public.alembic_version') IS NOT NULL THEN
+        RAISE EXCEPTION
+            'baseline-300 bootstrap requires a fresh DB; public.alembic_version exists'
+            USING ERRCODE = '55000';
+    END IF;
+
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_class AS object
+        JOIN pg_catalog.pg_namespace AS namespace
+          ON namespace.oid = object.relnamespace
+        WHERE namespace.nspname IN ('feature', 'provider_sync', 'ops')
+          AND object.relkind IN ('r', 'p', 'v', 'm', 'f', 'S')
+        UNION ALL
+        SELECT 1
+        FROM pg_catalog.pg_proc AS object
+        JOIN pg_catalog.pg_namespace AS namespace
+          ON namespace.oid = object.pronamespace
+        WHERE namespace.nspname IN ('feature', 'provider_sync', 'ops')
+        UNION ALL
+        SELECT 1
+        FROM pg_catalog.pg_type AS object
+        JOIN pg_catalog.pg_namespace AS namespace
+          ON namespace.oid = object.typnamespace
+        WHERE namespace.nspname IN ('feature', 'provider_sync', 'ops')
+          AND object.typtype IN ('b', 'c', 'd', 'e', 'r')
+    ) THEN
+        RAISE EXCEPTION
+            'baseline-300 bootstrap requires a fresh DB; application objects exist'
+            USING ERRCODE = '55000';
+    END IF;
+END
+$baseline_300_fresh_precondition$;
+
+DO $baseline_300_roles$
+DECLARE
+    role_name text;
+BEGIN
+    FOREACH role_name IN ARRAY ARRAY[
+        'ktm_feature_schema_owner',
+        'ktm_feature_state_procedure_owner',
+        'ktm_feature_audit_writer',
+        'ktm_feature_runtime',
+        'ktm_curation_command_owner',
+        'ktm_curation_audit_writer',
+        'ktm_curation_admin_executor',
+        'ktm_curation_provider_executor',
+        'ktm_manual_feature_procedure_owner',
+        'ktm_manual_feature_admin_executor',
+        'ktm_feature_create_provider_executor',
+        'ktm_feature_request_procedure_owner',
+        'ktm_feature_request_service_executor',
+        'ktm_feature_request_admin_executor',
+        'ktm_manual_provider_dedup_procedure_owner',
+        'ktm_manual_provider_dedup_detector_executor',
+        'ktm_manual_provider_dedup_admin_executor',
+        'ktm_feature_reference_reconciliation_service_executor'
+    ] LOOP
+        IF to_regrole(role_name) IS NULL THEN
+            EXECUTE format('CREATE ROLE %I NOLOGIN NOINHERIT', role_name);
+        END IF;
+        EXECUTE format(
+            'ALTER ROLE %I NOLOGIN NOINHERIT NOSUPERUSER NOCREATEDB '
+            || 'NOCREATEROLE NOBYPASSRLS NOREPLICATION',
+            role_name
+        );
+    END LOOP;
+
+    FOREACH role_name IN ARRAY ARRAY[
+        'ktm_feature_migrator',
+        'ktm_feature_api_runtime',
+        'ktm_feature_dagster_runtime'
+    ] LOOP
+        IF to_regrole(role_name) IS NULL THEN
+            EXECUTE format(
+                'CREATE ROLE %I LOGIN NOINHERIT NOSUPERUSER NOCREATEDB '
+                || 'NOCREATEROLE NOBYPASSRLS NOREPLICATION',
+                role_name
+            );
+        END IF;
+    END LOOP;
+END
+$baseline_300_roles$;
+
+SELECT format(
+    'ALTER ROLE %I LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE '
+    || 'NOBYPASSRLS NOREPLICATION PASSWORD %L',
+    'ktm_feature_migrator',
+    :'migrator_password'
+)
+\gexec
+SELECT format(
+    'ALTER ROLE %I LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE '
+    || 'NOBYPASSRLS NOREPLICATION PASSWORD %L',
+    'ktm_feature_api_runtime',
+    :'api_runtime_password'
+)
+\gexec
+SELECT format(
+    'ALTER ROLE %I LOGIN NOINHERIT NOSUPERUSER NOCREATEDB NOCREATEROLE '
+    || 'NOBYPASSRLS NOREPLICATION PASSWORD %L',
+    'ktm_feature_dagster_runtime',
+    :'dagster_runtime_password'
+)
+\gexec
+
+-- Existing role principals are cluster-wide. Missing final memberships are
+-- provisioned below, but an unexpected edge is never silently removed: it
+-- could confer authority in another dedicated database on the same cluster.
+DO $baseline_300_membership_precondition$
+BEGIN
+    IF EXISTS (
+        WITH expected(granted_role, member_role, admin_option, inherit_option, set_option) AS (
+            VALUES
+                ('ktm_curation_admin_executor', 'ktm_feature_api_runtime', false, true, false),
+                ('ktm_curation_audit_writer', 'ktm_feature_schema_owner', false, false, true),
+                ('ktm_curation_command_owner', 'ktm_feature_schema_owner', false, false, true),
+                ('ktm_curation_provider_executor', 'ktm_feature_dagster_runtime', false, true, false),
+                ('ktm_feature_audit_writer', 'ktm_feature_schema_owner', false, false, true),
+                ('ktm_feature_create_provider_executor', 'ktm_feature_dagster_runtime', false, true, false),
+                ('ktm_feature_reference_reconciliation_service_executor', 'ktm_feature_api_runtime', false, true, false),
+                ('ktm_feature_request_admin_executor', 'ktm_feature_api_runtime', false, true, false),
+                ('ktm_feature_request_procedure_owner', 'ktm_feature_schema_owner', false, false, true),
+                ('ktm_feature_request_service_executor', 'ktm_feature_api_runtime', false, true, false),
+                ('ktm_feature_runtime', 'ktm_feature_api_runtime', false, true, false),
+                ('ktm_feature_runtime', 'ktm_feature_dagster_runtime', false, true, false),
+                ('ktm_feature_schema_owner', 'ktm_feature_migrator', false, false, true),
+                ('ktm_feature_state_procedure_owner', 'ktm_feature_schema_owner', false, false, true),
+                ('ktm_manual_feature_admin_executor', 'ktm_feature_api_runtime', false, true, false),
+                ('ktm_manual_feature_procedure_owner', 'ktm_feature_schema_owner', false, false, true),
+                ('ktm_manual_provider_dedup_admin_executor', 'ktm_feature_api_runtime', false, true, false),
+                ('ktm_manual_provider_dedup_detector_executor', 'ktm_feature_dagster_runtime', false, true, false),
+                ('ktm_manual_provider_dedup_procedure_owner', 'ktm_feature_schema_owner', false, false, true)
+        ), actual AS (
+            SELECT granted.rolname AS granted_role,
+                   member.rolname AS member_role,
+                   membership.admin_option,
+                   membership.inherit_option,
+                   membership.set_option
+            FROM pg_catalog.pg_auth_members AS membership
+            JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid
+            JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
+            WHERE granted.rolname IN (
+                'ktm_feature_schema_owner', 'ktm_feature_state_procedure_owner',
+                'ktm_feature_audit_writer', 'ktm_feature_runtime',
+                'ktm_curation_command_owner', 'ktm_curation_audit_writer',
+                'ktm_curation_admin_executor', 'ktm_curation_provider_executor',
+                'ktm_manual_feature_procedure_owner',
+                'ktm_manual_feature_admin_executor',
+                'ktm_feature_create_provider_executor',
+                'ktm_feature_request_procedure_owner',
+                'ktm_feature_request_service_executor',
+                'ktm_feature_request_admin_executor',
+                'ktm_manual_provider_dedup_procedure_owner',
+                'ktm_manual_provider_dedup_detector_executor',
+                'ktm_manual_provider_dedup_admin_executor',
+                'ktm_feature_reference_reconciliation_service_executor',
+                'ktm_feature_migrator', 'ktm_feature_api_runtime',
+                'ktm_feature_dagster_runtime'
+            ) OR member.rolname IN (
+                'ktm_feature_schema_owner', 'ktm_feature_state_procedure_owner',
+                'ktm_feature_audit_writer', 'ktm_feature_runtime',
+                'ktm_curation_command_owner', 'ktm_curation_audit_writer',
+                'ktm_curation_admin_executor', 'ktm_curation_provider_executor',
+                'ktm_manual_feature_procedure_owner',
+                'ktm_manual_feature_admin_executor',
+                'ktm_feature_create_provider_executor',
+                'ktm_feature_request_procedure_owner',
+                'ktm_feature_request_service_executor',
+                'ktm_feature_request_admin_executor',
+                'ktm_manual_provider_dedup_procedure_owner',
+                'ktm_manual_provider_dedup_detector_executor',
+                'ktm_manual_provider_dedup_admin_executor',
+                'ktm_feature_reference_reconciliation_service_executor',
+                'ktm_feature_migrator', 'ktm_feature_api_runtime',
+                'ktm_feature_dagster_runtime'
+            )
+        )
+        SELECT 1 FROM (SELECT * FROM actual EXCEPT SELECT * FROM expected) AS unexpected
+    ) THEN
+        RAISE EXCEPTION
+            'baseline-300 bootstrap found an unexpected application role membership edge'
+            USING ERRCODE = '42501';
+    END IF;
+END
+$baseline_300_membership_precondition$;
+
+GRANT ktm_feature_schema_owner TO ktm_feature_migrator
+    WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+GRANT ktm_feature_runtime TO ktm_feature_api_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+GRANT ktm_feature_runtime TO ktm_feature_dagster_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+GRANT ktm_feature_state_procedure_owner TO ktm_feature_schema_owner
+    WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+GRANT ktm_feature_audit_writer TO ktm_feature_schema_owner
+    WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+GRANT ktm_curation_command_owner TO ktm_feature_schema_owner
+    WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+GRANT ktm_curation_audit_writer TO ktm_feature_schema_owner
+    WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+GRANT ktm_curation_admin_executor TO ktm_feature_api_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+GRANT ktm_curation_provider_executor TO ktm_feature_dagster_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+GRANT ktm_manual_feature_procedure_owner TO ktm_feature_schema_owner
+    WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+GRANT ktm_manual_feature_admin_executor TO ktm_feature_api_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+GRANT ktm_feature_create_provider_executor TO ktm_feature_dagster_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+GRANT ktm_feature_request_procedure_owner TO ktm_feature_schema_owner
+    WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+GRANT ktm_feature_request_service_executor TO ktm_feature_api_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+GRANT ktm_feature_request_admin_executor TO ktm_feature_api_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+GRANT ktm_manual_provider_dedup_procedure_owner TO ktm_feature_schema_owner
+    WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+GRANT ktm_manual_provider_dedup_detector_executor TO ktm_feature_dagster_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+GRANT ktm_manual_provider_dedup_admin_executor TO ktm_feature_api_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+GRANT ktm_feature_reference_reconciliation_service_executor TO ktm_feature_api_runtime
+    WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+
+CREATE SCHEMA IF NOT EXISTS feature AUTHORIZATION ktm_feature_schema_owner;
+CREATE SCHEMA IF NOT EXISTS provider_sync AUTHORIZATION ktm_feature_schema_owner;
+CREATE SCHEMA IF NOT EXISTS ops AUTHORIZATION ktm_feature_schema_owner;
+CREATE SCHEMA IF NOT EXISTS x_extension AUTHORIZATION ktm_feature_schema_owner;
+ALTER DATABASE :"DBNAME" OWNER TO ktm_feature_schema_owner;
+ALTER SCHEMA feature OWNER TO ktm_feature_schema_owner;
+ALTER SCHEMA provider_sync OWNER TO ktm_feature_schema_owner;
+ALTER SCHEMA ops OWNER TO ktm_feature_schema_owner;
+ALTER SCHEMA x_extension OWNER TO ktm_feature_schema_owner;
+
+DO $baseline_300_postgis$
+DECLARE
+    postgis_schema text;
+BEGIN
+    SELECT namespace.nspname
+      INTO postgis_schema
+      FROM pg_catalog.pg_extension AS extension
+      JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = extension.extnamespace
+     WHERE extension.extname = 'postgis';
+    IF postgis_schema IS NOT NULL AND postgis_schema <> 'x_extension' THEN
+        EXECUTE 'DROP EXTENSION IF EXISTS postgis_topology CASCADE';
+        EXECUTE 'DROP EXTENSION postgis CASCADE';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_extension AS extension
+        JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = extension.extnamespace
+        WHERE extension.extname IN ('pg_trgm', 'pgcrypto')
+          AND namespace.nspname <> 'x_extension'
+    ) THEN
+        RAISE EXCEPTION
+            'baseline-300 bootstrap requires pg_trgm and pgcrypto in x_extension'
+            USING ERRCODE = '55000';
+    END IF;
+END
+$baseline_300_postgis$;
+CREATE EXTENSION IF NOT EXISTS postgis WITH SCHEMA x_extension;
+CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA x_extension;
+CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA x_extension;
+DO $baseline_300_prewarm$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_available_extensions WHERE name = 'pg_prewarm') THEN
+        CREATE EXTENSION IF NOT EXISTS pg_prewarm WITH SCHEMA x_extension;
+    END IF;
+END
+$baseline_300_prewarm$;
+
+REVOKE ALL ON SCHEMA x_extension FROM PUBLIC;
+REVOKE ALL ON SCHEMA x_extension FROM
+    ktm_feature_state_procedure_owner,
+    ktm_feature_audit_writer,
+    ktm_feature_runtime,
+    ktm_curation_command_owner,
+    ktm_curation_audit_writer,
+    ktm_curation_admin_executor,
+    ktm_curation_provider_executor,
+    ktm_feature_migrator,
+    ktm_feature_api_runtime,
+    ktm_feature_dagster_runtime,
+    ktm_manual_feature_procedure_owner,
+    ktm_manual_feature_admin_executor,
+    ktm_feature_create_provider_executor,
+    ktm_feature_request_procedure_owner,
+    ktm_feature_request_service_executor,
+    ktm_feature_request_admin_executor,
+    ktm_manual_provider_dedup_procedure_owner,
+    ktm_manual_provider_dedup_detector_executor,
+    ktm_manual_provider_dedup_admin_executor,
+    ktm_feature_reference_reconciliation_service_executor;
+GRANT USAGE ON SCHEMA x_extension TO
+    ktm_feature_state_procedure_owner,
+    ktm_feature_runtime,
+    ktm_curation_command_owner,
+    ktm_manual_provider_dedup_procedure_owner;
+
+-- sidecar routine ownership is applied by the schema-owner migration. Every
+-- possible target owner needs CREATE briefly; `300_schema_baseline.py` removes
+-- this bootstrap-only elevation and installs the exact final schema ACL.
+REVOKE ALL ON SCHEMA feature, provider_sync, ops FROM PUBLIC;
+GRANT USAGE, CREATE ON SCHEMA feature, provider_sync, ops TO
+    ktm_feature_state_procedure_owner,
+    ktm_feature_audit_writer,
+    ktm_curation_command_owner,
+    ktm_curation_audit_writer,
+    ktm_manual_feature_procedure_owner,
+    ktm_feature_request_procedure_owner,
+    ktm_manual_provider_dedup_procedure_owner;
+SQL
+}
+
+if [ "$bootstrap_phase" = "baseline-300" ]; then
+  run_baseline_300_phase
+  exit 0
+fi
 
 if [ "$bootstrap_phase" = "m01" ]; then
   run_m01_phase

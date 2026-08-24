@@ -78,20 +78,29 @@ printf '원본: %s줄\n' "$(wc -l < "$RAW")"
 # proacl을 물화시키든 말든 답이 같고, PUBLIC 부여는 그대로 드러난다.
 #
 # grantee 목록은 **고정**한다. 처음에는 `pg_roles`에서 `ktm_feature%`를 긁었는데, 그러면
-# digest가 **환경에 따라 달라진다** — 통합 테스트 부트스트랩은 role 5개를 만들고 prod
-# bootstrap은 7개(LOGIN principal 3종 포함)를 만든다. 실제로 그 차이로 CI가 죽었다.
-# 여기 넷은 `0200`의 DO block이 존재를 전제로 검증하는 role이고, LOGIN principal은
-# `ktm_feature_runtime`을 INHERIT하므로 유효 권한이 파생이라 더할 게 없다.
-# 이 목록은 **두 곳**에 들어간다: digest의 grantee 축과, 그 축이 여전히 완전한지 묻는
-# 아래 guard. 손으로 두 번 적으면 "guard가 digest와 다른 목록을 지키는" 상태가 생기므로
-# 한 번만 적고 `@GRANTEES@`로 심는다.
-# ⚠️ `scripts/compare-schema-catalogs.sh`의 `routineacl` 축도 같은 5개를 갖는다.
-#    거기가 드리프트하면 **A/B 비교라 양쪽 다 그 축을 안 보게 되어 초록이 유지된다.**
+# digest가 환경에 따라 달라지면 안 된다. `300` baseline은 M01/M04/M05까지 마친
+# final role graph를 재현하며, LOGIN principal도 일부 routine의 direct EXECUTE grantee다.
+# 따라서 `ktm_feature_runtime` 상속만으로 생략하면 안 된다. 아래는 clean `0236`
+# reference에서 관측한 direct grantee의 exact set이고, 새 grantee는 guard가 생성 단계에서
+# 거부한다. 이 목록은 **두 곳**에 들어간다: digest의 grantee 축과, 그 축이 여전히
+# 완전한지 묻는 아래 guard. 손으로 두 번 적으면 "guard가 digest와 다른 목록을 지키는"
+# 상태가 생기므로 한 번만 적고 `@GRANTEES@`로 심는다.
+# ⚠️ `scripts/compare-schema-catalogs.sh`의 `routineacl` 축은 이 값을 source로 읽는다.
 ROUTINE_ACL_GRANTEE_VALUES="('public'),
+                             ('ktm_curation_admin_executor'),
+                             ('ktm_curation_audit_writer'),
+                             ('ktm_curation_command_owner'),
+                             ('ktm_curation_provider_executor'),
+                             ('ktm_feature_api_runtime'),
                              ('ktm_feature_schema_owner'),
                              ('ktm_feature_state_procedure_owner'),
                              ('ktm_feature_audit_writer'),
-                             ('ktm_feature_runtime')"
+                             ('ktm_feature_runtime'),
+                             ('ktm_feature_request_admin_executor'),
+                             ('ktm_feature_request_procedure_owner'),
+                             ('ktm_feature_request_service_executor'),
+                             ('ktm_manual_feature_procedure_owner'),
+                             ('ktm_manual_provider_dedup_procedure_owner')"
 
 ROUTINE_ACL_DIGEST_SQL="$(cat <<'SQL'
 SELECT encode(sha256(convert_to(coalesce(string_agg(line, chr(10) ORDER BY line), ''), 'UTF8')), 'hex')
@@ -352,6 +361,8 @@ lines = [
     if not line.startswith(("-- Dumped from database version", "-- Dumped by pg_dump version"))
     and not line.startswith("SELECT pg_catalog.set_config('search_path'")
 ]
+while lines and not lines[-1].strip():
+    lines.pop()
 p.write_bytes(("\n".join(lines) + "\n").encode("utf-8"))
 print(f"  seed.sql {len(lines)}줄")
 PY
@@ -368,8 +379,9 @@ docker exec "$CONTAINER" rm -f /tmp/ktm-baseline-raw2.sql
 if diff -q <(grep -v '^-- Dumped' "$RAW") <(grep -v '^-- Dumped' "$RAW2") >/dev/null; then
   printf '  결정론 OK\n'
 else
-  printf '  경고: 같은 DB에서 두 dump가 다르다 — baseline이 재현 가능하지 않다\n'
+  printf '  오류: 같은 DB에서 두 dump가 다르다 — baseline이 재현 가능하지 않다\n' >&2
   diff <(grep -v '^-- Dumped' "$RAW") <(grep -v '^-- Dumped' "$RAW2") | head -5
+  exit 1
 fi
 rm -f "$RAW2"
 

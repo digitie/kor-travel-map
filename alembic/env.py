@@ -18,6 +18,7 @@ from logging.config import fileConfig
 from typing import TYPE_CHECKING
 
 from alembic.script import ScriptDirectory
+from alembic.runtime.migration import StampStep
 from sqlalchemy import pool, text
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
@@ -61,68 +62,115 @@ else:
 # autogenerate 대상 metadata.
 target_metadata = metadata
 
-_FORWARD_ONLY_BOUNDARY = "0200_schema_baseline"
 _USE_SCHEMA_OWNER_ROLE_ENV = "KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE"
+_BASELINE_300_REVISION = "300"
+_BASELINE_300_HANDOFF_SOURCE = "0236_tvn41s_compaction_drained"
+_BASELINE_300_HANDOFF_TAG = "application-schema-0236-to-300"
+_BASELINE_300_HANDOFF_CONFIG_ATTRIBUTE = (
+    "application_schema_0236_to_300_handoff_authorized"
+)
 
-def _revisions_include_forward_only_boundary(
-    script: ScriptDirectory,
-    revisions: tuple[str, ...],
-) -> bool:
-    """revision 집합 또는 그 조상에 0200 squash 경계가 있는지 반환한다."""
-    if not revisions:
-        return False
-    return any(
-        node.revision == _FORWARD_ONLY_BOUNDARY
-        for node in script.iterate_revisions(revisions, None, inclusive=True)
+def _raw_alembic_heads(connection: Connection) -> tuple[str, ...]:
+    """활성 script graph를 해석하지 않은 version table 원문을 읽는다."""
+
+    version_table = connection.scalar(
+        text("SELECT to_regclass('public.alembic_version')")
+    )
+    if version_table is None:
+        return ()
+    return tuple(
+        str(revision)
+        for revision in connection.execute(
+            text("SELECT version_num FROM public.alembic_version ORDER BY version_num")
+        ).scalars()
     )
 
 
-def _guard_forward_only_target() -> None:
-    """downgrade/stamp 계획이 0200 아래로 가면 첫 step 전에 거부한다."""
+def _guard_application_schema_operation() -> bool:
+    """`300` active graph 밖 lineage의 일반 조작을 시작 전에 거부한다.
+
+    반환값이 ``True``이면 `0236 → 300` one-shot handoff만을 위한 stamp callback이
+    설치된 상태다. 이 경로는 `command.stamp(..., purge=True)`의 generic resolver가
+    retired `0236`을 해석하기 **전**에 빈 head set에서 `300`을 삽입하도록 교체한다.
+    """
+
     migration_context = context.get_context()
     migration_fn = migration_context.opts.get("fn")
-    if migration_fn is None or migration_fn.__name__ not in {
-        "downgrade",
-        "do_stamp",
-    }:
-        # upgrade는 경계를 내리지 않는다. current/check/autogenerate callback은
-        # 여기서 실행하면 출력·reflection·hook이 두 번 실행되므로 건드리지 않는다.
-        return
-
-    current_heads = migration_context.get_current_heads()
-    script = ScriptDirectory.from_config(config)
-    destination = migration_context.opts.get("destination_rev")
-    if migration_fn.__name__ == "downgrade":
-        planned_steps = tuple(
-            script._downgrade_revs(  # type: ignore[arg-type]  # noqa: SLF001
-                destination,
-                current_heads,
-            )
-        )
-    else:
-        # stamp --purge는 run_migrations()가 version table을 비운 뒤 callback을
-        # 실행한다. guard는 purge 전 current head로 하향 경계만 판정하고 실제
-        # callback은 Alembic이 정상 시점에 정확히 한 번 실행하게 둔다.
-        planned_steps = tuple(
-            script._stamp_revs(destination, current_heads)  # noqa: SLF001
-        )
-    crosses_boundary = any(
-        step.is_downgrade
-        and _revisions_include_forward_only_boundary(
-            script,
-            step.from_revisions_no_deps,
-        )
-        and not _revisions_include_forward_only_boundary(
-            script,
-            step.to_revisions_no_deps,
-        )
-        for step in planned_steps
-    )
-    if crosses_boundary:
+    operation = getattr(migration_fn, "__name__", None)
+    if operation == "downgrade":
         raise RuntimeError(
-            "0200 is forward-only: recreate the application DB from the current "
-            "baseline and reload provider inputs under a writer fence"
+            "300_schema_baseline is forward-only; application schema downgrade is "
+            "unsupported"
         )
+    if operation != "do_stamp":
+        # 일반 fresh upgrade는 허용하되 retired `0236`을 발견하면 Alembic의
+        # `Can't locate revision`보다 먼저 operator에게 정확한 protocol을 보인다.
+        if operation == "upgrade" and not migration_context.as_sql:
+            connection = migration_context.connection
+            if connection is not None and _BASELINE_300_HANDOFF_SOURCE in _raw_alembic_heads(
+                connection
+            ):
+                raise RuntimeError(
+                    "0236 application schema requires the controlled "
+                    "application-schema 0236-to-300 handoff; generic upgrade is "
+                    "unsupported"
+                )
+        return False
+
+    # `stamp`는 version metadata를 바꾸므로 generic invocation을 모두 막는다.
+    # 도착 revision, purge, tag, private Config authorization, online mode 및 raw
+    # source head가 함께 일치하는 one-shot handoff 하나만 예외다.
+    destination = tuple(
+        str(revision)
+        for revision in migration_context.opts.get("destination_rev") or ()
+    )
+    authorized = config.attributes.get(_BASELINE_300_HANDOFF_CONFIG_ATTRIBUTE) is True
+    is_sanctioned = (
+        not migration_context.as_sql
+        and migration_context.opts.get("purge") is True
+        and destination == (_BASELINE_300_REVISION,)
+        and context.get_tag_argument() == _BASELINE_300_HANDOFF_TAG
+        and authorized
+    )
+    if not is_sanctioned:
+        raise RuntimeError(
+            "generic Alembic stamp is unsupported; use the controlled "
+            "application-schema 0236-to-300 handoff"
+        )
+
+    connection = migration_context.connection
+    if connection is None:
+        raise RuntimeError("0236-to-300 handoff requires an online DB connection")
+    if _raw_alembic_heads(connection) != (_BASELINE_300_HANDOFF_SOURCE,):
+        raise RuntimeError(
+            "0236-to-300 handoff requires exactly one raw source head "
+            "0236_tvn41s_compaction_drained"
+        )
+
+    script = ScriptDirectory.from_config(config)
+    if tuple(script.get_heads()) != (_BASELINE_300_REVISION,):
+        raise RuntimeError("0236-to-300 handoff requires active graph head exactly 300")
+
+    def stamp_baseline_300_after_purge(
+        current_heads: tuple[str, ...],
+        _migration_context: object,
+    ) -> tuple[StampStep, ...]:
+        # Alembic has already run `_ensure_version_table(purge=True)` here. Do
+        # not route the retired source revision through ScriptDirectory again.
+        if current_heads:
+            raise RuntimeError("0236-to-300 handoff expected purge to leave no heads")
+        return (
+            StampStep(
+                (),
+                _BASELINE_300_REVISION,
+                True,
+                True,
+                script.revision_map,
+            ),
+        )
+
+    migration_context._migrations_fn = stamp_baseline_300_after_purge  # noqa: SLF001
+    return True
 
 
 # ``alembic check`` 정합 필터 (ADR-075 D-12-2, T-VN-19).
@@ -220,6 +268,7 @@ def run_migrations_offline() -> None:
         dialect_opts={"paramstyle": "named"},
         include_schemas=True,
     )
+    _guard_application_schema_operation()
     with context.begin_transaction():
         context.run_migrations()
 
@@ -255,14 +304,21 @@ def do_run_migrations(connection: Connection) -> None:
             # 수명 동안의 session role을 쓴다. connection close 시 reset되며 runtime은
             # 이 group membership을 절대 얻지 않는다.
             connection.execute(text("SET ROLE ktm_feature_schema_owner"))
-        # 0201+ descendant의 downgrade가 일부 commit된 뒤 0200에서 멈추지 않도록
-        # destination 전체를 migration step 실행 전에 판정한다.
-        _guard_forward_only_target()
+        # version table purge 전 raw `0236`을 엄격히 검증하고, 일반
+        # stamp/downgrade를 차단한다. sanctioned handoff이면 이 call이 retire된
+        # revision을 ScriptDirectory에 다시 해석하지 않는 callback도 설치한다.
+        sanctioned_handoff = _guard_application_schema_operation()
         # ADR-008 — search_path를 Alembic이 소유한 트랜잭션 **안에서** 설정.
         # 0002의 ``coord_5179`` STORED 생성 컬럼이 ``x_extension`` 의 PostGIS
         # ``ST_Transform`` 을 참조하므로 DDL 실행 전 search_path 필요.
         connection.execute(text("SET search_path = public, x_extension"))
         context.run_migrations()
+        if sanctioned_handoff and _raw_alembic_heads(connection) != (
+            _BASELINE_300_REVISION,
+        ):
+            raise RuntimeError(
+                "0236-to-300 handoff did not leave exactly one raw 300 head"
+            )
 
 
 async def run_async_migrations() -> None:
