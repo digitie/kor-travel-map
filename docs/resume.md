@@ -1,5 +1,31 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-24 — PR #1063 fixture writer DB 경계·role graph 보강 (재리뷰 대기)
+
+Draft [PR #1063](https://github.com/digitie/kor-travel-map/pull/1063)의 두 전문 적대 리뷰가
+weather/price live fixture helper에서 두 P1을 찾았다. 별도 writer DSN이 API/browser와 다른
+DB를 가리켜도 쓰기를 시작할 수 있던 경계와, M01 이후 generic provider state procedure의
+`EXECUTE` 권한이 schema owner에는 없던 경계다.
+
+helper는 이제 `E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE`,
+`E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_LOGIN_ROLE`,
+`E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION`을 실제 DB·LOGIN role·Alembic head와
+mutation 전에 대조한다. 일치할 때만 schema owner를 설정하며, provider state procedure의
+한 `CALL`만 dedicated manual procedure owner로 `SET LOCAL ROLE`한다. API runtime에 write
+grant를 추가하지 않는다. M01~M05 shared-cluster role residue를 위해 넣었던 base graph 예외도
+이름 전체 제외가 아니라 exact membership edge와 PG16 option만 허용하도록 고쳤고 unsafe
+future role 속성도 거부한다.
+
+현재 로컬 검증은 fixture/role-contract unit 68건과 actual PostGIS Alembic metadata gate 15건이
+통과했다. PR은 아직 Draft이며, 수정 commit push 뒤 두 전문 리뷰어의 재검토와 원격 CI green
+전에는 Ready/merge하지 않는다.
+
+### 다음 한 작업
+
+PR #1063의 P1 보완을 commit·push하고 재리뷰·CI를 통과시켜 병합한다. 병합 뒤 clean `main`에서
+`0236_tvn41s_compaction_drained` schema의 새 `300` Alembic baseline을 정확한 catalog snapshot과
+forward-only stamp choreography로 별도 draft PR에 착수한다.
+
 ## 2026-08-22 — T-FE-MOCK-FLAKE 로그 mock 경계 고정
 
 `T-FE-MOCK-FLAKE`의 self-owned mocked checkpoint에서 `/v1/ops/system-logs`와

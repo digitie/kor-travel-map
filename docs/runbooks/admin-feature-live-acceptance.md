@@ -13,10 +13,14 @@ journal v7을 그대로 재사용한다. C7 성공을 대신하거나 C7보다 �
   transaction으로 만들고 물리 삭제한다.
 - Map API runtime role은 read-only를 유지한다. weather/price 두 행의 fixture seed·cleanup은
   `E2E_ADMIN_FEATURE_FIXTURE_PG_DSN`으로만 전달되는 root-only DSN을 helper가 사용하고,
-  helper connection에서 `ktm_feature_schema_owner`를 명시적으로 `SET ROLE`한다. 이 DSN은
-  browser executor나 API route에는 전달하지 않으며, fixture는 직접 `feature.features`를
-  INSERT하지 않고 provider source evidence와 `feature.create_feature_with_initial_state`
-  procedure를 사용한다.
+  helper는 mutation/role 전환 전에 `E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE`,
+  `E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_LOGIN_ROLE`,
+  `E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION`과 실제 DB·LOGIN role·head를 exact
+  대조한다. 확인 뒤 connection에서 `ktm_feature_schema_owner`를 명시적으로 `SET ROLE`하고,
+  provider state procedure 한 호출에만 `ktm_manual_feature_procedure_owner`로 임시 전환한다.
+  이 DSN은 browser executor나 API route에는 전달하지 않으며, fixture는 직접
+  `feature.features`를 INSERT하지 않고 provider source evidence와
+  `feature.create_feature_with_initial_state` procedure를 사용한다.
 - browser의 모든 API 호출은 same-origin `/api/proxy` BFF를 통한다. public API key를 URL이나
   browser state에 넣지 않는다.
 - `BLOCKED.json`과 `ACTIVE.json`은 고정 root state에만 원문 identity를 저장한다. 보존
@@ -77,6 +81,9 @@ export NEXT_PUBLIC_KOR_TRAVEL_MAP_API='<production-api-origin>'
 export E2E_DAGSTER_URL='<production-dagster-origin>'
 export E2E_ADMIN_PASSWORD='<admin-password>'
 export E2E_ADMIN_FEATURE_FIXTURE_PG_DSN='postgresql://<root-only-fixture-role>:<secret>@<db-host>/<db-name>'
+export E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE='<db-name>'
+export E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_LOGIN_ROLE='<root-only-fixture-login-role>'
+export E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION='<deployed-alembic-revision>'
 export E2E_LIVE_ALLOW_PROD=1
 export E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE=1
 export E2E_C7_EXPECTED_GIT_COMMIT='<40-hex>'
@@ -123,7 +130,7 @@ result에 hash로만 남는다.
 compose project directory에서 필요한 env를 보존해 commit별 runner를 실행한다.
 
 ```bash
-sudo --preserve-env=E2E_BASE_URL,NEXT_PUBLIC_KOR_TRAVEL_MAP_API,E2E_DAGSTER_URL,E2E_ADMIN_PASSWORD,E2E_ADMIN_FEATURE_FIXTURE_PG_DSN,E2E_ADMIN_USERNAME,E2E_LIVE_ALLOW_PROD,E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE,E2E_C7_EXPECTED_GIT_COMMIT,E2E_C7_PINNED_RUNTIME_MANIFEST,E2E_C7_REBUILD_JOURNAL,E2E_C7_PLAYWRIGHT_IMAGE,E2E_C7_EXPECTED_UI_ORIGIN_SHA256,E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256,E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256,E2E_C7_MAP_API_SERVICE,E2E_C7_UI_SERVICE,E2E_C7_DAGSTER_WEB_SERVICE,E2E_C7_DAGSTER_DAEMON_SERVICE,E2E_C7_PINVI_API_SERVICE,E2E_C7_PINVI_WEB_SERVICE,E2E_C7_PINVI_DAGSTER_SERVICE \
+sudo --preserve-env=E2E_BASE_URL,NEXT_PUBLIC_KOR_TRAVEL_MAP_API,E2E_DAGSTER_URL,E2E_ADMIN_PASSWORD,E2E_ADMIN_FEATURE_FIXTURE_PG_DSN,E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE,E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_LOGIN_ROLE,E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION,E2E_ADMIN_USERNAME,E2E_LIVE_ALLOW_PROD,E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE,E2E_C7_EXPECTED_GIT_COMMIT,E2E_C7_PINNED_RUNTIME_MANIFEST,E2E_C7_REBUILD_JOURNAL,E2E_C7_PLAYWRIGHT_IMAGE,E2E_C7_EXPECTED_UI_ORIGIN_SHA256,E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256,E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256,E2E_C7_MAP_API_SERVICE,E2E_C7_UI_SERVICE,E2E_C7_DAGSTER_WEB_SERVICE,E2E_C7_DAGSTER_DAEMON_SERVICE,E2E_C7_PINVI_API_SERVICE,E2E_C7_PINVI_WEB_SERVICE,E2E_C7_PINVI_DAGSTER_SERVICE \
   /usr/local/lib/kor-travel-map/admin-feature-live-acceptance/<40-hex>/run-admin-feature-live-acceptance.sh run
 ```
 
@@ -136,11 +143,13 @@ barrier를 잡은 뒤 다음 순서로 실행한다.
    cursor-secret 누락 문구가 정확히 나오는지 확인한다.
 3. exact API image의 env/volume/network를 복제한 standalone labeled helper가 hidden
    weather/price Feature와 value 각 1건을 seed한다. helper만 API runtime DSN 대신
-   root-only fixture DSN을 받고 schema-owner role을 명시적으로 설정한다. inspect한
-   environment는 중복 없는 name/value map으로 memory에서만 보유하고, Docker child
-   process env와 `--env NAME`으로 전달한다. 값이 argv·journal·파일에 기록되는 env
-   snapshot은 만들지 않으며 `docker compose exec`도 사용하지 않는다. Feature 생성은
-   source record/head를 먼저 기록한 뒤 provider state procedure로 수행한다.
+   root-only fixture DSN을 받고, supplied DB/login/head confirmation이 모두 실제 값과
+   일치할 때만 schema-owner role을 명시적으로 설정한다. generic provider procedure 호출은
+   dedicated manual procedure owner로 좁게 임시 전환한다. inspect한 environment는 중복 없는
+   name/value map으로 memory에서만 보유하고, Docker child process env와 `--env NAME`으로
+   전달한다. 값이 argv·journal·파일에 기록되는 env snapshot은 만들지 않으며
+   `docker compose exec`도 사용하지 않는다. Feature 생성은 source record/head를 먼저
+   기록한 뒤 provider state procedure로 수행한다.
 4. browser가 draft/inactive/hidden marker, correction, 같은 검색 이름을 공유하는 active
    search alpha/beta를 admin change request로 만들고 승인한다. idempotency key는 Feature ID의
    SHA256이라 각 생성이 충돌하지 않는다.
@@ -201,7 +210,7 @@ identity를 기록한다. recovery는 현재 runtime attestation에서 다시 �
 v3에는 exact identity의 canonical SHA256과 pair/attestation hash만 남기고 원문은 남기지 않는다.
 
 ```bash
-sudo --preserve-env=E2E_BASE_URL,NEXT_PUBLIC_KOR_TRAVEL_MAP_API,E2E_DAGSTER_URL,E2E_ADMIN_PASSWORD,E2E_ADMIN_FEATURE_FIXTURE_PG_DSN,E2E_ADMIN_USERNAME,E2E_LIVE_ALLOW_PROD,E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE,E2E_C7_EXPECTED_GIT_COMMIT,E2E_C7_PINNED_RUNTIME_MANIFEST,E2E_C7_REBUILD_JOURNAL,E2E_C7_PLAYWRIGHT_IMAGE,E2E_C7_EXPECTED_UI_ORIGIN_SHA256,E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256,E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256,E2E_C7_MAP_API_SERVICE,E2E_C7_UI_SERVICE,E2E_C7_DAGSTER_WEB_SERVICE,E2E_C7_DAGSTER_DAEMON_SERVICE,E2E_C7_PINVI_API_SERVICE,E2E_C7_PINVI_WEB_SERVICE,E2E_C7_PINVI_DAGSTER_SERVICE \
+sudo --preserve-env=E2E_BASE_URL,NEXT_PUBLIC_KOR_TRAVEL_MAP_API,E2E_DAGSTER_URL,E2E_ADMIN_PASSWORD,E2E_ADMIN_FEATURE_FIXTURE_PG_DSN,E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE,E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_LOGIN_ROLE,E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION,E2E_ADMIN_USERNAME,E2E_LIVE_ALLOW_PROD,E2E_ADMIN_FEATURE_ACCEPTANCE_WRITE,E2E_C7_EXPECTED_GIT_COMMIT,E2E_C7_PINNED_RUNTIME_MANIFEST,E2E_C7_REBUILD_JOURNAL,E2E_C7_PLAYWRIGHT_IMAGE,E2E_C7_EXPECTED_UI_ORIGIN_SHA256,E2E_C7_EXPECTED_API_WS_ORIGIN_SHA256,E2E_C7_EXPECTED_DAGSTER_ORIGIN_SHA256,E2E_C7_MAP_API_SERVICE,E2E_C7_UI_SERVICE,E2E_C7_DAGSTER_WEB_SERVICE,E2E_C7_DAGSTER_DAEMON_SERVICE,E2E_C7_PINVI_API_SERVICE,E2E_C7_PINVI_WEB_SERVICE,E2E_C7_PINVI_DAGSTER_SERVICE \
   /usr/local/lib/kor-travel-map/admin-feature-live-acceptance/<40-hex>/run-admin-feature-live-acceptance.sh recover
 ```
 
@@ -212,8 +221,8 @@ recovery attempt는 BLOCKED에서 원자적으로 증가한다. 새 fixture를 �
   exact search query의 `items=[]`, `total=0`, cursor null/absent
 - direct weather/price parent와 기존 weather/price child row를 모두 `SELECT ... FOR UPDATE`로 잠근
   같은 transaction 안에서 child value fingerprint·모든 FK reference를 audit하고 두 parent를 삭제
-- cleanup helper도 동일한 root-only fixture DSN/schema-owner connection을 사용한다. API
-  runtime role로 write grant를 추가하거나 provider executor role을 우회하지 않는다.
+- cleanup helper도 동일한 confirmed root-only fixture DSN/schema-owner connection을 사용한다.
+  API runtime role로 write grant를 추가하거나 provider executor role을 우회하지 않는다.
 - 삭제 후 direct 0/0/0·FK reference 0, label/name container 0, ACTIVE 없음 확인
 - recovery report/evidence exact 검증·fsync, recovered result 기록, 마지막 BLOCKED unlink
 

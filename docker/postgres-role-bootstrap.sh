@@ -1130,6 +1130,28 @@ BEGIN
     IF EXISTS (
         SELECT 1
         FROM pg_catalog.pg_roles
+        WHERE rolname IN (
+            'ktm_manual_feature_procedure_owner',
+            'ktm_manual_feature_admin_executor',
+            'ktm_feature_create_provider_executor',
+            'ktm_feature_request_procedure_owner',
+            'ktm_feature_request_service_executor',
+            'ktm_feature_request_admin_executor',
+            'ktm_manual_provider_dedup_procedure_owner',
+            'ktm_manual_provider_dedup_detector_executor',
+            'ktm_manual_provider_dedup_admin_executor',
+            'ktm_feature_reference_reconciliation_service_executor'
+        )
+          AND (
+              rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb
+              OR rolcreaterole OR rolbypassrls OR rolreplication
+          )
+    ) THEN
+        RAISE EXCEPTION 'future application role is unsafe';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_roles
         WHERE rolname IN ('ktm_feature_api_runtime', 'ktm_feature_dagster_runtime')
           AND (
               NOT rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb
@@ -1175,6 +1197,49 @@ BEGIN
         expected AS (
             SELECT * FROM expected_base
         ),
+        allowed_future(granted_role, member_role, admin_option, inherit_option, set_option) AS (
+            VALUES
+                (
+                    'ktm_manual_feature_procedure_owner',
+                    'ktm_feature_schema_owner', false, false, true
+                ),
+                (
+                    'ktm_manual_feature_admin_executor',
+                    'ktm_feature_api_runtime', false, true, false
+                ),
+                (
+                    'ktm_feature_create_provider_executor',
+                    'ktm_feature_dagster_runtime', false, true, false
+                ),
+                (
+                    'ktm_feature_request_procedure_owner',
+                    'ktm_feature_schema_owner', false, false, true
+                ),
+                (
+                    'ktm_feature_request_service_executor',
+                    'ktm_feature_api_runtime', false, true, false
+                ),
+                (
+                    'ktm_feature_request_admin_executor',
+                    'ktm_feature_api_runtime', false, true, false
+                ),
+                (
+                    'ktm_manual_provider_dedup_procedure_owner',
+                    'ktm_feature_schema_owner', false, false, true
+                ),
+                (
+                    'ktm_manual_provider_dedup_detector_executor',
+                    'ktm_feature_dagster_runtime', false, true, false
+                ),
+                (
+                    'ktm_manual_provider_dedup_admin_executor',
+                    'ktm_feature_api_runtime', false, true, false
+                ),
+                (
+                    'ktm_feature_reference_reconciliation_service_executor',
+                    'ktm_feature_api_runtime', false, true, false
+                )
+        ),
         actual AS (
             SELECT granted.rolname AS granted_role,
                    member.rolname AS member_role,
@@ -1190,29 +1255,14 @@ BEGIN
                OR member.rolname LIKE 'ktm_feature_%'
                OR member.rolname LIKE 'ktm_curation_%'
             )
-              AND granted.rolname NOT IN (
-                  'ktm_manual_feature_procedure_owner',
-                  'ktm_manual_feature_admin_executor',
-                  'ktm_feature_create_provider_executor',
-                  'ktm_feature_request_procedure_owner',
-                  'ktm_feature_request_service_executor',
-                  'ktm_feature_request_admin_executor',
-                  'ktm_manual_provider_dedup_procedure_owner',
-                  'ktm_manual_provider_dedup_detector_executor',
-                  'ktm_manual_provider_dedup_admin_executor',
-                  'ktm_feature_reference_reconciliation_service_executor'
-              )
-              AND member.rolname NOT IN (
-                  'ktm_manual_feature_procedure_owner',
-                  'ktm_manual_feature_admin_executor',
-                  'ktm_feature_create_provider_executor',
-                  'ktm_feature_request_procedure_owner',
-                  'ktm_feature_request_service_executor',
-                  'ktm_feature_request_admin_executor',
-                  'ktm_manual_provider_dedup_procedure_owner',
-                  'ktm_manual_provider_dedup_detector_executor',
-                  'ktm_manual_provider_dedup_admin_executor',
-                  'ktm_feature_reference_reconciliation_service_executor'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM allowed_future AS allowed
+                  WHERE allowed.granted_role = granted.rolname
+                    AND allowed.member_role = member.rolname
+                    AND allowed.admin_option = membership.admin_option
+                    AND allowed.inherit_option = membership.inherit_option
+                    AND allowed.set_option = membership.set_option
               )
         )
         (SELECT * FROM expected EXCEPT SELECT * FROM actual)

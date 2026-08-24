@@ -13,6 +13,7 @@ import argparse
 import asyncio
 import json
 import math
+import os
 import re
 from collections import Counter
 from datetime import datetime, timedelta
@@ -21,7 +22,7 @@ from typing import Final, NamedTuple
 
 from sqlalchemy import text
 from sqlalchemy.engine import RowMapping
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from kortravelmap.core.ids import (
     make_feature_id,
@@ -45,6 +46,17 @@ _RUN_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9-]{15,79}$")
 _LON: Final[float] = 127.5
 _LAT: Final[float] = 36.5
 _E2E_PROVIDER: Final[str] = "e2e-live-acceptance"
+_FIXTURE_SCHEMA_OWNER: Final[str] = "ktm_feature_schema_owner"
+_FIXTURE_PROCEDURE_EXECUTOR: Final[str] = "ktm_manual_feature_procedure_owner"
+_FIXTURE_CONFIRM_DATABASE_ENV: Final[str] = (
+    "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE"
+)
+_FIXTURE_CONFIRM_LOGIN_ROLE_ENV: Final[str] = (
+    "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_LOGIN_ROLE"
+)
+_FIXTURE_CONFIRM_ALEMBIC_REVISION_ENV: Final[str] = (
+    "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION"
+)
 
 
 def _dataset_key(run_id: str, kind: str) -> str:
@@ -750,6 +762,11 @@ async def _seed(
             "marker_color": marker_color,
             "raw_refs": [],
         }
+        # M01에서 generic provider state procedure의 EXECUTE는 schema owner가
+        # 아니라 dedicated manual procedure owner에만 준다. schema owner가
+        # SET 가능한 NOLOGIN role로 **이 CALL 하나만** 임시 전환한다. procedure는
+        # SECURITY DEFINER라 fixture helper에 테이블 write grant를 넓히지 않는다.
+        await session.execute(text(f"SET LOCAL ROLE {_FIXTURE_PROCEDURE_EXECUTOR}"))
         row = (
             await session.execute(
                 text(
@@ -784,6 +801,10 @@ async def _seed(
             .mappings()
             .one()
         )
+        # source_links와 value rows는 schema-owner SQL로만 계속 쓴다. CALL이
+        # 실패하면 transaction이 abort되어 SET LOCAL도 transaction 종료와 함께
+        # 사라지므로, 실패한 transaction에서 억지 reset을 시도하지 않는다.
+        await session.execute(text(f"SET LOCAL ROLE {_FIXTURE_SCHEMA_OWNER}"))
         if (
             str(row["o_feature_id"]) != feature_id
             or not bool(row["o_inserted"])
@@ -1513,6 +1534,65 @@ async def _verify_auth_audit(
     return counts
 
 
+def _required_fixture_target() -> tuple[str, str, str]:
+    """별도 writer DSN이 API/browser lane과 같은 DB를 가리키는지 확인할 입력.
+
+    DSN 자체를 journal이나 argv로 남기지 않고, caller가 root shell에서 읽은 세
+    비민감 식별자만 helper에 전달한다. 하나라도 없으면 role 전환 전 멈춘다.
+    """
+
+    names = (
+        _FIXTURE_CONFIRM_DATABASE_ENV,
+        _FIXTURE_CONFIRM_LOGIN_ROLE_ENV,
+        _FIXTURE_CONFIRM_ALEMBIC_REVISION_ENV,
+    )
+    values: list[str] = []
+    for name in names:
+        value = os.environ.get(name)
+        if not value or "\0" in value:
+            raise RuntimeError(f"fixture target confirmation is missing: {name}")
+        values.append(value)
+    return values[0], values[1], values[2]
+
+
+async def _prepare_fixture_connection(connection: AsyncConnection) -> None:
+    """mutation 전 fixture writer DB·LOGIN role·head·effective role을 fail-close한다."""
+
+    expected_database, expected_login_role, expected_revision = _required_fixture_target()
+    observed = (
+        await connection.execute(
+            text(
+                """
+                SELECT
+                    current_database() AS database_name,
+                    session_user AS session_user,
+                    current_user AS current_user,
+                    (SELECT version_num FROM public.alembic_version)
+                        AS alembic_revision
+                """
+            )
+        )
+    ).mappings().one()
+    if observed["database_name"] != expected_database:
+        raise RuntimeError("fixture target database confirmation mismatch")
+    if observed["session_user"] != expected_login_role:
+        raise RuntimeError("fixture target login-role confirmation mismatch")
+    if observed["current_user"] != expected_login_role:
+        raise RuntimeError("fixture target initial effective-role mismatch")
+    if observed["alembic_revision"] != expected_revision:
+        raise RuntimeError("fixture target Alembic revision confirmation mismatch")
+
+    await connection.execute(text(f"SET ROLE {_FIXTURE_SCHEMA_OWNER}"))
+    effective_role = (
+        await connection.execute(text("SELECT current_user"))
+    ).scalar_one()
+    if effective_role != _FIXTURE_SCHEMA_OWNER:
+        raise RuntimeError("fixture schema-owner role assumption failed")
+    # SET ROLE is session state. Persist only this read-only setup transaction;
+    # every fixture action itself is in the following explicit transaction.
+    await connection.commit()
+
+
 async def _run(
     action: str,
     run_id: str,
@@ -1525,11 +1605,11 @@ async def _run(
     engine = make_async_engine(settings.pg_dsn)
     try:
         # The supervisor replaces the API container's read-only DSN with the
-        # root-only fixture DSN.  Even that DSN must explicitly assume the
-        # schema-owner role; no application runtime role receives write grants.
+        # root-only fixture DSN. Before any role change or mutation, prove that
+        # this separate writer connection is the confirmed API target at the
+        # confirmed schema head. No application runtime role receives writes.
         async with engine.connect() as connection:
-            await connection.execute(text("SET ROLE ktm_feature_schema_owner"))
-            await connection.commit()
+            await _prepare_fixture_connection(connection)
             async with AsyncSession(bind=connection) as session, session.begin():
                 summary_run_ids: tuple[int, int] | None = None
                 api_owned_feature_uuids: tuple[str, ...] = ()

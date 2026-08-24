@@ -5,7 +5,6 @@ from __future__ import annotations
 import ast
 import hashlib
 import json
-import re
 from pathlib import Path
 
 import pytest
@@ -327,10 +326,11 @@ def test_active_migrations_share_bootstrap_exact_role_contract() -> None:
         assert token in baseline_contract
         assert token in bootstrap
 
-    # PostgreSQL roles are cluster-wide.  After a database recreation, M01~M05
+    # PostgreSQL roles are cluster-wide. After a database recreation, M01~M05
     # memberships can remain while the fresh database is still at the frozen
-    # base graph.  The base assertion must ignore only this known future-phase
-    # set; any other application edge must continue to fail closed.
+    # base graph. The base assertion may subtract only the exact known
+    # future-phase edge (including its PG16 options); every other application
+    # edge, and unsafe future role attributes, must fail closed.
     future_phase_roles = (
         "ktm_manual_feature_procedure_owner",
         "ktm_manual_feature_admin_executor",
@@ -346,29 +346,13 @@ def test_active_migrations_share_bootstrap_exact_role_contract() -> None:
     for role in future_phase_roles:
         assert f"'{role}'" in baseline_contract
         assert f"'{role}'" in bootstrap
-    assert "AND granted.rolname NOT IN (" in baseline_contract
-    assert "AND member.rolname NOT IN (" in baseline_contract
-
-    def first_allowlists(source: str) -> tuple[tuple[str, ...], tuple[str, ...]]:
-        granted_block = source.split("AND granted.rolname NOT IN (", 1)[1].split(
-            ")", 1
-        )[0]
-        member_block = source.split("AND member.rolname NOT IN (", 1)[1].split(
-            ")", 1
-        )[0]
-        return (
-            tuple(re.findall(r"'([^']+)'", granted_block)),
-            tuple(re.findall(r"'([^']+)'", member_block)),
-        )
-
-    assert first_allowlists(baseline_contract) == (
-        future_phase_roles,
-        future_phase_roles,
-    )
-    assert first_allowlists(bootstrap) == (
-        future_phase_roles,
-        future_phase_roles,
-    )
+    for source in (baseline_contract, bootstrap):
+        assert "allowed_future(granted_role, member_role" in source
+        assert "AND NOT EXISTS (" in source
+        assert "FROM allowed_future AS allowed" in source
+        assert "future application role is unsafe" in source
+        assert "AND granted.rolname NOT IN (" not in source
+        assert "AND member.rolname NOT IN (" not in source
 
 
 def test_legacy_archive_has_exact_109_file_digest() -> None:

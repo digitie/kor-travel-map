@@ -281,13 +281,23 @@ class Supervisor:
         fixture_dsn = os.environ.get("E2E_ADMIN_FEATURE_FIXTURE_PG_DSN", "")
         if not fixture_dsn or "\0" in fixture_dsn:
             raise RuntimeError("root-only fixture DSN is missing")
+        fixture_confirmation_names = (
+            "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE",
+            "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_LOGIN_ROLE",
+            "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION",
+        )
+        for name in fixture_confirmation_names:
+            value = os.environ.get(name, "")
+            if not value or "\0" in value:
+                raise RuntimeError("fixture target confirmation is missing")
+            process_environment[name] = value
         # Only the standalone helper receives this override. The browser
         # executor keeps the API runtime environment unchanged, so a live
         # acceptance cannot turn a read-only API credential into a write path.
         process_environment["KOR_TRAVEL_MAP_PG_DSN"] = fixture_dsn
         environment_arguments = [
             value
-            for name in sorted(runtime_environment)
+            for name in sorted(set(runtime_environment) | set(fixture_confirmation_names))
             for value in ("--env", name)
         ]
         command = [

@@ -876,3 +876,117 @@ async def test_0200_rejects_unlisted_application_role_edge(
             admin_dsn,
             f"{revoke}; DROP ROLE {unknown_role};",
         )
+
+
+@pytest.mark.parametrize(
+    "target_revision",
+    ["0200_schema_baseline", "0202_tvn40_curation_receipts"],
+)
+async def test_base_role_assertions_reject_future_edge_option_drift(
+    gate_alembic_config: Config,
+    target_revision: str,
+    tvn_m01_m05_role_graph: None,
+) -> None:
+    """future edge는 이름만 아니라 PG16 membership option까지 exact여야 한다."""
+
+    from tests.integration._tvn34_migration_bootstrap import (
+        alembic_schema_owner_role,
+        bootstrapped_migrator_dsn,
+    )
+
+    cfg = gate_alembic_config
+    admin_dsn = cfg.get_main_option("sqlalchemy.url")
+    assert admin_dsn is not None
+    cfg.set_main_option("sqlalchemy.url", await bootstrapped_migrator_dsn(admin_dsn))
+
+    if target_revision == "0202_tvn40_curation_receipts":
+        with alembic_schema_owner_role():
+            await asyncio.to_thread(command.upgrade, cfg, "0200_schema_baseline")
+
+    await _admin_execute(
+        admin_dsn,
+        "GRANT ktm_manual_feature_procedure_owner TO ktm_feature_schema_owner "
+        "WITH ADMIN FALSE, INHERIT FALSE, SET FALSE",
+    )
+    try:
+        if target_revision == "0200_schema_baseline":
+            with (
+                alembic_schema_owner_role(),
+                pytest.raises(
+                    DBAPIError,
+                    match="application role membership graph is not exact",
+                ),
+            ):
+                await asyncio.to_thread(command.upgrade, cfg, "0200_schema_baseline")
+        else:
+            with (
+                alembic_schema_owner_role(),
+                pytest.raises(
+                    DBAPIError,
+                    match="application role membership graph is not exact",
+                ),
+            ):
+                await asyncio.to_thread(
+                    command.upgrade,
+                    cfg,
+                    "0202_tvn40_curation_receipts",
+                )
+    finally:
+        await _admin_execute(
+            admin_dsn,
+            "GRANT ktm_manual_feature_procedure_owner TO ktm_feature_schema_owner "
+            "WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
+        )
+
+
+@pytest.mark.parametrize(
+    "target_revision",
+    ["0200_schema_baseline", "0202_tvn40_curation_receipts"],
+)
+async def test_base_role_assertions_reject_unsafe_future_role(
+    gate_alembic_config: Config,
+    target_revision: str,
+    tvn_m01_m05_role_graph: None,
+) -> None:
+    """known future NOLOGIN role도 unsafe attribute면 base phase에서 중단한다."""
+
+    from tests.integration._tvn34_migration_bootstrap import (
+        alembic_schema_owner_role,
+        bootstrapped_migrator_dsn,
+    )
+
+    cfg = gate_alembic_config
+    admin_dsn = cfg.get_main_option("sqlalchemy.url")
+    assert admin_dsn is not None
+    cfg.set_main_option("sqlalchemy.url", await bootstrapped_migrator_dsn(admin_dsn))
+
+    if target_revision == "0202_tvn40_curation_receipts":
+        with alembic_schema_owner_role():
+            await asyncio.to_thread(command.upgrade, cfg, "0200_schema_baseline")
+
+    await _admin_execute(
+        admin_dsn,
+        "ALTER ROLE ktm_manual_feature_procedure_owner REPLICATION",
+    )
+    try:
+        if target_revision == "0200_schema_baseline":
+            with (
+                alembic_schema_owner_role(),
+                pytest.raises(DBAPIError, match="future application role is unsafe"),
+            ):
+                await asyncio.to_thread(command.upgrade, cfg, "0200_schema_baseline")
+        else:
+            with (
+                alembic_schema_owner_role(),
+                pytest.raises(DBAPIError, match="future application role is unsafe"),
+            ):
+                await asyncio.to_thread(
+                    command.upgrade,
+                    cfg,
+                    "0202_tvn40_curation_receipts",
+                )
+    finally:
+        await _admin_execute(
+            admin_dsn,
+            "ALTER ROLE ktm_manual_feature_procedure_owner NOREPLICATION",
+        )

@@ -102,6 +102,13 @@ validate_sha256_env() {
   [[ "${!name}" =~ ^[0-9a-f]{64}$ ]] || die "SHA256 env is invalid: $name"
 }
 
+validate_fixture_target_env() {
+  local name="$1"
+  require_env "$name"
+  [[ "${!name}" =~ ^[A-Za-z0-9_]+$ ]] ||
+    die "fixture target confirmation is invalid: $name"
+}
+
 validate_runtime() {
   require_command docker
   require_command flock
@@ -116,11 +123,17 @@ validate_runtime() {
   require_env E2E_ADMIN_PASSWORD
   # API runtime credentials remain read-only. The standalone root-owned helper
   # receives this separate DSN only through the supervisor's process env and
-  # assumes ktm_feature_schema_owner inside its short-lived container.
+  # confirms its target before assuming ktm_feature_schema_owner inside its
+  # short-lived container.
   require_env E2E_ADMIN_FEATURE_FIXTURE_PG_DSN
   [[ "$E2E_ADMIN_FEATURE_FIXTURE_PG_DSN" == postgresql://* ||
     "$E2E_ADMIN_FEATURE_FIXTURE_PG_DSN" == postgresql+asyncpg://* ]] ||
     die "fixture DSN scheme is invalid"
+  # A separately privileged DSN must prove its target before the helper can
+  # SET ROLE or mutate. These values are identifiers only, never credentials.
+  validate_fixture_target_env E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE
+  validate_fixture_target_env E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_LOGIN_ROLE
+  validate_fixture_target_env E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION
   require_env E2E_C7_EXPECTED_GIT_COMMIT
   require_env E2E_C7_PINNED_RUNTIME_MANIFEST
   require_env E2E_C7_REBUILD_JOURNAL
