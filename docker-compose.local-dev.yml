@@ -1,0 +1,7 @@
+services:
+  api:
+    environment:
+      # developer launcher가 명시적으로 local-dev profile을 고정한 경우에만 API
+      # convenience migration credential을 전달한다. production/Manager 형상은 이
+      # overlay를 사용하지 않는다.
+      KOR_TRAVEL_MAP_MIGRATOR_PG_DSN: ${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required for local-dev}

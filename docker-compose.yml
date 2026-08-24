@@ -218,9 +218,8 @@ services:
       # bridge 모드의 BFF peer를 단일 고정 주소로 제한한다. 임의의 compose
       # container subnet 전체를 신뢰하지 않는다.
       KOR_TRAVEL_MAP_API_ADMIN_TRUSTED_PROXY_CIDRS: '["172.31.254.3/32"]'
-      # migration은 이 process가 시작될 때만 migrator DSN을 쓰고 exec 전 unset한다.
-      # API application에는 API runtime DSN만 남는다 (fallback 금지).
-      KOR_TRAVEL_MAP_MIGRATOR_PG_DSN: ${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required}
+      # production API consumer에는 migrator/bootstrap credential을 주입하지 않는다.
+      # local developer convenience migration은 docker-compose.local-dev.yml만 소유한다.
       KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN: ${KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN:?KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN is required}
       KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN:?KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN is required}
       # production은 Manager가 immutable API image ID를 permit과 함께 주입한다.

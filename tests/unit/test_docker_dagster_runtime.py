@@ -106,7 +106,13 @@ def test_tvn34_compose_never_derives_runtime_or_metadata_credentials_from_bootst
     """ADR-090 principal DSN은 ignored env 입력이며 bootstrap fallback이 아니다."""
 
     compose = _compose()["services"]
-    assert compose["api"]["environment"]["KOR_TRAVEL_MAP_MIGRATOR_PG_DSN"].endswith("is required}")
+    assert "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN" not in compose["api"]["environment"]
+    local_overlay = yaml.safe_load(
+        (ROOT / "docker-compose.local-dev.yml").read_text(encoding="utf-8")
+    )
+    assert local_overlay["services"]["api"]["environment"][
+        "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN"
+    ].endswith("is required for local-dev}")
     assert compose["api"]["environment"]["KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN"].endswith(
         "is required}"
     )
@@ -132,6 +138,9 @@ def test_tvn34_compose_never_derives_runtime_or_metadata_credentials_from_bootst
         assert "KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-kor_travel_map" not in raw, compose_path
 
     bootstrap = _script("docker/postgres-role-bootstrap.sh")
+    assert bootstrap.startswith("#!/bin/sh\n")
+    assert "PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin" in bootstrap
+    assert "until /usr/local/bin/psql" in bootstrap
     assert not any(line.strip().startswith("REASSIGN OWNED") for line in bootstrap.splitlines())
     assert "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES" not in bootstrap
     assert "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ktm_feature_runtime" not in bootstrap
@@ -2485,13 +2494,16 @@ def _run_entrypoint(path: str, extra: dict[str, str]) -> subprocess.CompletedPro
         path,
     )
     entrypoint.write_text(source, encoding="utf-8")
+    base_env = dict(_MIGRATION_BASE_ENV)
+    if extra.get("KOR_TRAVEL_MAP_API_PROFILE") == "production":
+        base_env.pop("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", None)
     return subprocess.run(
         ["sh", str(entrypoint)],
         cwd=ROOT,
         env={
             "PATH": path,
             "PYTHONNOUSERSITE": "1",
-            **_MIGRATION_BASE_ENV,
+            **base_env,
             **extra,
         },
         check=False,
@@ -2666,6 +2678,30 @@ def test_production_api_with_final_permit_never_runs_generic_upgrade(tmp_path: P
 
     assert result.returncode == 0, result.stderr
     assert not marker.exists(), "production final permit 경로에서 generic upgrade가 실행됐다."
+
+
+@pytest.mark.unit
+def test_production_api_rejects_migrator_credential_before_permit(
+    tmp_path: Path,
+) -> None:
+    path, marker = _migration_stub_path(tmp_path, image_head="300")
+    result = _run_entrypoint(
+        path,
+        {
+            "KOR_TRAVEL_MAP_API_PROFILE": "production",
+            "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": (
+                "postgresql://migrator@example.invalid/forbidden"
+            ),
+            "KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD": "300",
+            "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED": "false",
+            "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED": "false",
+            "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256": "a" * 64,
+        },
+    )
+
+    assert result.returncode != 0
+    assert "production API forbids KOR_TRAVEL_MAP_MIGRATOR_PG_DSN" in result.stderr
+    assert not marker.exists()
 
 
 @pytest.mark.unit
@@ -3595,12 +3631,14 @@ def test_runtime_docker_images_are_multistage_and_non_root() -> None:
     assert " AS builder" in api
     assert " AS runtime" in api
     assert "USER appuser" in api
+    assert _script("docker/api-entrypoint.sh").startswith("#!/bin/sh\n")
     assert "-e ." not in api
 
     assert "FROM python@sha256:" in dagster
     assert " AS builder" in dagster
     assert " AS runtime" in dagster
     assert "USER appuser" in dagster
+    assert _script("docker/dagster-entrypoint.sh").startswith("#!/bin/sh\n")
     assert 'ENTRYPOINT ["/usr/local/bin/dagster-entrypoint.sh"]' in dagster
     assert "-e ." not in dagster
 

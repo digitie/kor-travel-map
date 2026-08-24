@@ -251,7 +251,7 @@ external_infra="${KOR_TRAVEL_MAP_INFRA_EXTERNAL:-false}"
 external_db="${KOR_TRAVEL_MAP_DB_EXTERNAL:-false}"
 external_object_store="${KOR_TRAVEL_MAP_OBJECT_STORE_EXTERNAL:-false}"
 
-compose_files=(-f docker-compose.yml)
+compose_files=(-f docker-compose.yml -f docker-compose.local-dev.yml)
 # fresh baseline 준비는 normal launcher의 dependency가 아니다. 빈 dedicated DB는
 # 먼저 `docker compose --profile fresh-init run --rm db-application-schema-fresh-300`으로
 # bootstrap→restricted root migration one-shot을 끝내고, 이 launcher는 검증된 `300`

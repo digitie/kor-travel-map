@@ -337,13 +337,23 @@ if [ "${KOR_TRAVEL_MAP_MIGRATION_MODE+x}" = "x" ]; then
   exit 1
 fi
 
-# T-VN-34A (ADR-090) — Alembic은 migrator LOGIN으로만 접속한 뒤 NOLOGIN schema
-# owner role을 migration connection 수명 동안 활성화한다. API process에는 같은 DSN을 남기지 않고 runtime
-# LOGIN DSN만 전달한다. 두 DSN을 한 값으로 대체하는 fallback은 권한 경계를 지운다.
-migrator_dsn="${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required}"
 runtime_dsn="${KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN:?KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN is required}"
-export KOR_TRAVEL_MAP_PG_DSN="$migrator_dsn"
-export KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE=true
+if [ "$api_profile" = "production" ]; then
+  # Production API는 migration을 소유하지 않는다. Manager one-shot만 migrator DSN을
+  # 받고, consumer container는 set-but-empty까지 fail-close한다.
+  if [ "${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN+x}" = "x" ]; then
+    echo "production API forbids KOR_TRAVEL_MAP_MIGRATOR_PG_DSN" >&2
+    exit 1
+  fi
+  export KOR_TRAVEL_MAP_PG_DSN="$runtime_dsn"
+  unset KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE
+else
+  # local-dev의 명시적 developer launcher만 legacy convenience migration을 유지한다.
+  # fresh production과 controlled handoff는 이 분기를 사용하지 않는다.
+  migrator_dsn="${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required in local-dev}"
+  export KOR_TRAVEL_MAP_PG_DSN="$migrator_dsn"
+  export KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE=true
+fi
 
 # set-but-empty는 거부한다 — 위 profile 검사와 같은 규약이다. compose `${HOST:-}`
 # 패턴에서 host env 누락이 조용한 게이트 해제가 되면 안 된다.
