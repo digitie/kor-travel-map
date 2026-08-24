@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import importlib.util
 import json
@@ -76,6 +77,108 @@ _SUPERVISOR_MODULE = _load_script_module(
     "admin_feature_live_supervisor",
     _SUPERVISOR,
 )
+
+
+class _FixturePreflightResult:
+    def __init__(self, row: dict[str, object] | None = None, scalar: object = None) -> None:
+        self._row = row
+        self._scalar = scalar
+
+    def mappings(self) -> _FixturePreflightResult:
+        return self
+
+    def one(self) -> dict[str, object]:
+        assert self._row is not None
+        return self._row
+
+    def scalar_one(self) -> object:
+        return self._scalar
+
+
+class _FixturePreflightConnection:
+    def __init__(self, row: dict[str, object], effective_role: str) -> None:
+        self.row = row
+        self.effective_role = effective_role
+        self.statements: list[str] = []
+        self.committed = False
+
+    async def execute(self, statement: object) -> _FixturePreflightResult:
+        sql = str(statement)
+        self.statements.append(sql)
+        if "current_database()" in sql:
+            return _FixturePreflightResult(row=self.row)
+        if sql == "SELECT current_user":
+            return _FixturePreflightResult(scalar=self.effective_role)
+        assert sql == "SET ROLE ktm_feature_schema_owner"
+        return _FixturePreflightResult()
+
+    async def commit(self) -> None:
+        self.committed = True
+
+
+def _fixture_target_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE", "kor_travel_map")
+    monkeypatch.setenv(
+        "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_LOGIN_ROLE",
+        "ktm_fixture_writer",
+    )
+    monkeypatch.setenv(
+        "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION",
+        "0236_tvn41s_compaction_drained",
+    )
+
+
+def test_fixture_target_preflight_rejects_mismatch_before_role_or_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fixture_target_env(monkeypatch)
+    expected = {
+        "database_name": "kor_travel_map",
+        "session_user": "ktm_fixture_writer",
+        "current_user": "ktm_fixture_writer",
+        "alembic_revision": "0236_tvn41s_compaction_drained",
+    }
+    cases = (
+        ("database_name", "wrong_database", "database confirmation"),
+        ("session_user", "wrong_login", "login-role confirmation"),
+        ("current_user", "wrong_effective", "initial effective-role"),
+        ("alembic_revision", "wrong_revision", "Alembic revision confirmation"),
+    )
+    for field, value, message in cases:
+        observed = {**expected, field: value}
+        connection = _FixturePreflightConnection(
+            observed,
+            "ktm_feature_schema_owner",
+        )
+        with pytest.raises(RuntimeError, match=message):
+            asyncio.run(_FIXTURE_MODULE._prepare_fixture_connection(connection))  # noqa: SLF001
+        assert all("SET ROLE" not in statement for statement in connection.statements)
+        assert connection.committed is False
+
+
+def test_fixture_target_preflight_confirms_schema_owner_before_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _fixture_target_env(monkeypatch)
+    connection = _FixturePreflightConnection(
+        {
+            "database_name": "kor_travel_map",
+            "session_user": "ktm_fixture_writer",
+            "current_user": "ktm_fixture_writer",
+            "alembic_revision": "0236_tvn41s_compaction_drained",
+        },
+        "ktm_feature_schema_owner",
+    )
+
+    asyncio.run(_FIXTURE_MODULE._prepare_fixture_connection(connection))  # noqa: SLF001
+
+    assert "current_database()" in connection.statements[0]
+    assert "public.alembic_version" in connection.statements[0]
+    assert connection.statements[1:] == [
+        "SET ROLE ktm_feature_schema_owner",
+        "SELECT current_user",
+    ]
+    assert connection.committed is True
 
 
 def test_clone_recovery_purge_uses_name_keyed_api_owned_identity() -> None:
@@ -581,6 +684,7 @@ def test_sigkill_safe_supervisor_owns_docker_lifecycle_and_barrier() -> None:
 def test_helper_is_standalone_labeled_and_recovery_leaves_zero_container_residue() -> None:
     runner = _RUNNER.read_text()
     supervisor = _SUPERVISOR.read_text()
+    fixture = _FIXTURE.read_text()
     assert "docker compose exec" not in (runner + supervisor)
     assert '"--volumes-from"' in supervisor
     assert 'f"{self.args.api_container}:ro"' in supervisor
@@ -588,6 +692,8 @@ def test_helper_is_standalone_labeled_and_recovery_leaves_zero_container_residue
     assert 'f".{self.args.operation}.env"' not in supervisor
     assert "runtime_environment = _unique_environment(environment)" in supervisor
     assert "process_environment.update(runtime_environment)" in supervisor
+    assert 'os.environ.get("E2E_ADMIN_FEATURE_FIXTURE_PG_DSN", "")' in supervisor
+    assert 'process_environment["KOR_TRAVEL_MAP_PG_DSN"] = fixture_dsn' in supervisor
     assert 'for value in ("--env", name)' in supervisor
     assert "process_environment=process_environment" in supervisor
     assert '"host" if host_networked else ordered_networks[0]' in supervisor
@@ -599,6 +705,15 @@ def test_helper_is_standalone_labeled_and_recovery_leaves_zero_container_residue
     assert "owned Docker container residue remains" in runner
     assert "deterministic Docker container name residue remains" in runner
     assert "recovery mode cannot seed fixtures" in runner
+    assert "require_env E2E_ADMIN_FEATURE_FIXTURE_PG_DSN" in runner
+    assert '_FIXTURE_SCHEMA_OWNER: Final[str] = "ktm_feature_schema_owner"' in fixture
+    assert "SET ROLE {_FIXTURE_SCHEMA_OWNER}" in fixture
+    assert "SET LOCAL ROLE {_FIXTURE_PROCEDURE_EXECUTOR}" in fixture
+    assert "SET LOCAL ROLE {_FIXTURE_SCHEMA_OWNER}" in fixture
+    assert "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE" in runner
+    assert "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE" in supervisor
+    assert "CALL feature.create_feature_with_initial_state" in fixture
+    assert "INSERT INTO feature.features" not in fixture
 
 
 def test_helper_clones_host_network_mode_without_post_create_attachment() -> None:
@@ -721,6 +836,35 @@ def test_direct_cleanup_locks_owned_parents_before_fk_audit_and_delete() -> None
     assert "async def _owned_summary_run_ids(" in fixture
     assert "owned weather/price current-summary receipt가 정확하지 않습니다" in fixture
     assert 'result["summary_run_ids"] = list(summary_run_ids)' in fixture
+
+
+def test_provider_fixture_owns_exact_primary_source_lineage() -> None:
+    """provider procedure 뒤 primary link와 source-head cleanup을 함께 검증한다."""
+
+    fixture = _FIXTURE.read_text()
+    seed = fixture[
+        fixture.index("async def _seed(") : fixture.index(
+            "async def _cleanup("
+        )
+    ]
+    cleanup = fixture[
+        fixture.index("async def _cleanup(") : fixture.index(
+            "class _ApiOwnedInspection("
+        )
+    ]
+
+    assert "from kortravelmap.dto import SourceLink, SourceRecord, SourceRole" in fixture
+    assert "await feature_repo.upsert_source_link(" in seed
+    assert "source_role=SourceRole.PRIMARY" in seed
+    assert 'match_method="natural_key"' in seed
+    assert "confidence=100" in seed
+    assert "async def _assert_owned_source_links(" in fixture
+    assert "source_entity_type" in fixture
+    assert "head.current_source_record_key AS source_record_key" in fixture
+    assert "owned fixture primary source lineage가 다릅니다" in fixture
+    assert '"provider_sync.source_links.feature_id"] = len(present)' in fixture
+    assert "owned fixture source link cleanup이 완결되지 않아 dataset 삭제를 중단합니다" in fixture
+    assert "source_links_remaining" in cleanup
 
 
 def test_browser_lane_uses_direct_typed_state_commands_and_bff() -> None:

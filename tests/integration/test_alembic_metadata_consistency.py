@@ -84,6 +84,29 @@ async def _admin_fetchval(default_url: str, statement: str) -> object:
         await conn.close()
 
 
+async def _admin_fetchrow(
+    default_url: str,
+    statement: str,
+) -> dict[str, object] | None:
+    """컨테이너 기본 DB의 한 행을 admin 자격으로 읽는다."""
+
+    import asyncpg
+
+    parts = urlsplit(default_url)
+    conn = await asyncpg.connect(
+        user=parts.username,
+        password=parts.password,
+        host=parts.hostname,
+        port=parts.port,
+        database=(parts.path or "/postgres").lstrip("/"),
+    )
+    try:
+        row = await conn.fetchrow(statement)
+        return None if row is None else dict(row)
+    finally:
+        await conn.close()
+
+
 async def _upgrade_to_head_as_migrator(cfg: Config) -> str:
     """배포와 같은 경로로 head까지 올리고 **admin(superuser) DSN**을 돌려준다.
 
@@ -661,3 +684,309 @@ async def test_0202_rejects_membership_option_and_extra_edge_drift(
             )
         finally:
             await _admin_execute(admin_dsn, restore)
+
+
+async def test_0200_and_0202_accept_preserved_future_phase_memberships(
+    gate_alembic_config: Config,
+    tvn_m01_m05_role_graph: None,
+) -> None:
+    """DB 재생성 뒤 남은 M01/M05 role edge는 base graph에서만 허용한다."""
+
+    from tests.integration._tvn34_migration_bootstrap import (
+        alembic_schema_owner_role,
+        bootstrapped_migrator_dsn,
+    )
+
+    cfg = gate_alembic_config
+    admin_dsn = cfg.get_main_option("sqlalchemy.url")
+    assert admin_dsn is not None
+    cfg.set_main_option("sqlalchemy.url", await bootstrapped_migrator_dsn(admin_dsn))
+
+    future_roles = (
+        "ktm_manual_feature_procedure_owner",
+        "ktm_manual_provider_dedup_detector_executor",
+    )
+    future_edges = (
+        (
+            "ktm_manual_feature_procedure_owner",
+            "ktm_feature_schema_owner",
+            "ADMIN FALSE, INHERIT FALSE, SET TRUE",
+        ),
+        (
+            "ktm_manual_provider_dedup_detector_executor",
+            "ktm_feature_dagster_runtime",
+            "ADMIN FALSE, INHERIT TRUE, SET FALSE",
+        ),
+    )
+    roles_before = {
+        role: bool(
+            await _admin_fetchval(
+                admin_dsn,
+                f"SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = '{role}')",
+            )
+        )
+        for role in future_roles
+    }
+    edges_before = {
+        (granted, member): await _admin_fetchrow(
+            admin_dsn,
+            f"""
+            SELECT admin_option, inherit_option, set_option
+            FROM pg_catalog.pg_auth_members AS membership
+            JOIN pg_catalog.pg_roles AS granted_role
+              ON granted_role.oid = membership.roleid
+            JOIN pg_catalog.pg_roles AS member_role
+              ON member_role.oid = membership.member
+            WHERE granted_role.rolname = '{granted}'
+              AND member_role.rolname = '{member}'
+            """,
+        )
+        for granted, member, _ in future_edges
+    }
+
+    try:
+        await _admin_execute(
+            admin_dsn,
+            """
+            DO $future_roles$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_roles
+                    WHERE rolname = 'ktm_manual_feature_procedure_owner'
+                ) THEN
+                    CREATE ROLE ktm_manual_feature_procedure_owner NOLOGIN NOINHERIT;
+                END IF;
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_catalog.pg_roles
+                    WHERE rolname = 'ktm_manual_provider_dedup_detector_executor'
+                ) THEN
+                    CREATE ROLE ktm_manual_provider_dedup_detector_executor
+                        NOLOGIN NOINHERIT;
+                END IF;
+            END
+            $future_roles$;
+            GRANT ktm_manual_feature_procedure_owner TO ktm_feature_schema_owner
+                WITH ADMIN FALSE, INHERIT FALSE, SET TRUE;
+            GRANT ktm_manual_provider_dedup_detector_executor
+                TO ktm_feature_dagster_runtime
+                WITH ADMIN FALSE, INHERIT TRUE, SET FALSE;
+            """,
+        )
+        with alembic_schema_owner_role():
+            await asyncio.to_thread(command.upgrade, cfg, "0200_schema_baseline")
+        with alembic_schema_owner_role():
+            await asyncio.to_thread(
+                command.upgrade,
+                cfg,
+                "0202_tvn40_curation_receipts",
+            )
+    finally:
+        for granted, member, _ in future_edges:
+            await _admin_execute(admin_dsn, f"REVOKE {granted} FROM {member}")
+        for granted, member, _ in future_edges:
+            prior = edges_before[(granted, member)]
+            if prior is not None:
+                options = ", ".join(
+                    f"{name} {'TRUE' if bool(prior[name.lower() + '_option']) else 'FALSE'}"
+                    for name in ("ADMIN", "INHERIT", "SET")
+                )
+                await _admin_execute(
+                    admin_dsn,
+                    f"GRANT {granted} TO {member} WITH {options}",
+                )
+        for role, existed_before in roles_before.items():
+            if not existed_before:
+                await _admin_execute(admin_dsn, f"DROP ROLE {role}")
+
+    for granted, member, _ in future_edges:
+        restored = await _admin_fetchrow(
+            admin_dsn,
+            f"""
+            SELECT admin_option, inherit_option, set_option
+            FROM pg_catalog.pg_auth_members AS membership
+            JOIN pg_catalog.pg_roles AS granted_role
+              ON granted_role.oid = membership.roleid
+            JOIN pg_catalog.pg_roles AS member_role
+              ON member_role.oid = membership.member
+            WHERE granted_role.rolname = '{granted}'
+              AND member_role.rolname = '{member}'
+            """,
+        )
+        assert restored == edges_before[(granted, member)]
+    for role, existed_before in roles_before.items():
+        assert bool(
+            await _admin_fetchval(
+                admin_dsn,
+                f"SELECT EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = '{role}')",
+            )
+        ) is existed_before
+
+
+@pytest.mark.parametrize(
+    "unknown_role_is_granted",
+    [True, False],
+    ids=("unlisted-granted-role", "unlisted-member-role"),
+)
+async def test_0200_rejects_unlisted_application_role_edge(
+    gate_alembic_config: Config,
+    unknown_role_is_granted: bool,
+    tvn_m01_m05_role_graph: None,
+) -> None:
+    """future-role allowlist가 양방향의 미등록 application role을 숨기지 않아야 한다."""
+
+    from tests.integration._tvn34_migration_bootstrap import (
+        alembic_schema_owner_role,
+        bootstrapped_migrator_dsn,
+    )
+
+    cfg = gate_alembic_config
+    admin_dsn = cfg.get_main_option("sqlalchemy.url")
+    assert admin_dsn is not None
+    cfg.set_main_option("sqlalchemy.url", await bootstrapped_migrator_dsn(admin_dsn))
+
+    unknown_role = "ktm_feature_unlisted_role_contract_test"
+    if unknown_role_is_granted:
+        grant = (
+            f"GRANT {unknown_role} TO ktm_feature_api_runtime "
+            "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE"
+        )
+        revoke = f"REVOKE {unknown_role} FROM ktm_feature_api_runtime"
+    else:
+        grant = (
+            f"GRANT ktm_feature_api_runtime TO {unknown_role} "
+            "WITH ADMIN FALSE, INHERIT TRUE, SET FALSE"
+        )
+        revoke = f"REVOKE ktm_feature_api_runtime FROM {unknown_role}"
+    await _admin_execute(
+        admin_dsn,
+        f"DROP ROLE IF EXISTS {unknown_role}; CREATE ROLE {unknown_role} NOLOGIN NOINHERIT; "
+        f"{grant};",
+    )
+    try:
+        with (
+            alembic_schema_owner_role(),
+            pytest.raises(
+                DBAPIError,
+                match="application role membership graph is not exact",
+            ),
+        ):
+            await asyncio.to_thread(command.upgrade, cfg, "0200_schema_baseline")
+    finally:
+        await _admin_execute(
+            admin_dsn,
+            f"{revoke}; DROP ROLE {unknown_role};",
+        )
+
+
+@pytest.mark.parametrize(
+    "target_revision",
+    ["0200_schema_baseline", "0202_tvn40_curation_receipts"],
+)
+async def test_base_role_assertions_reject_future_edge_option_drift(
+    gate_alembic_config: Config,
+    target_revision: str,
+    tvn_m01_m05_role_graph: None,
+) -> None:
+    """future edge는 이름만 아니라 PG16 membership option까지 exact여야 한다."""
+
+    from tests.integration._tvn34_migration_bootstrap import (
+        alembic_schema_owner_role,
+        bootstrapped_migrator_dsn,
+    )
+
+    cfg = gate_alembic_config
+    admin_dsn = cfg.get_main_option("sqlalchemy.url")
+    assert admin_dsn is not None
+    cfg.set_main_option("sqlalchemy.url", await bootstrapped_migrator_dsn(admin_dsn))
+
+    if target_revision == "0202_tvn40_curation_receipts":
+        with alembic_schema_owner_role():
+            await asyncio.to_thread(command.upgrade, cfg, "0200_schema_baseline")
+
+    await _admin_execute(
+        admin_dsn,
+        "GRANT ktm_manual_feature_procedure_owner TO ktm_feature_schema_owner "
+        "WITH ADMIN FALSE, INHERIT FALSE, SET FALSE",
+    )
+    try:
+        if target_revision == "0200_schema_baseline":
+            with (
+                alembic_schema_owner_role(),
+                pytest.raises(
+                    DBAPIError,
+                    match="application role membership graph is not exact",
+                ),
+            ):
+                await asyncio.to_thread(command.upgrade, cfg, "0200_schema_baseline")
+        else:
+            with (
+                alembic_schema_owner_role(),
+                pytest.raises(
+                    DBAPIError,
+                    match="application role membership graph is not exact",
+                ),
+            ):
+                await asyncio.to_thread(
+                    command.upgrade,
+                    cfg,
+                    "0202_tvn40_curation_receipts",
+                )
+    finally:
+        await _admin_execute(
+            admin_dsn,
+            "GRANT ktm_manual_feature_procedure_owner TO ktm_feature_schema_owner "
+            "WITH ADMIN FALSE, INHERIT FALSE, SET TRUE",
+        )
+
+
+@pytest.mark.parametrize(
+    "target_revision",
+    ["0200_schema_baseline", "0202_tvn40_curation_receipts"],
+)
+async def test_base_role_assertions_reject_unsafe_future_role(
+    gate_alembic_config: Config,
+    target_revision: str,
+    tvn_m01_m05_role_graph: None,
+) -> None:
+    """known future NOLOGIN role도 unsafe attribute면 base phase에서 중단한다."""
+
+    from tests.integration._tvn34_migration_bootstrap import (
+        alembic_schema_owner_role,
+        bootstrapped_migrator_dsn,
+    )
+
+    cfg = gate_alembic_config
+    admin_dsn = cfg.get_main_option("sqlalchemy.url")
+    assert admin_dsn is not None
+    cfg.set_main_option("sqlalchemy.url", await bootstrapped_migrator_dsn(admin_dsn))
+
+    if target_revision == "0202_tvn40_curation_receipts":
+        with alembic_schema_owner_role():
+            await asyncio.to_thread(command.upgrade, cfg, "0200_schema_baseline")
+
+    await _admin_execute(
+        admin_dsn,
+        "ALTER ROLE ktm_manual_feature_procedure_owner REPLICATION",
+    )
+    try:
+        if target_revision == "0200_schema_baseline":
+            with (
+                alembic_schema_owner_role(),
+                pytest.raises(DBAPIError, match="future application role is unsafe"),
+            ):
+                await asyncio.to_thread(command.upgrade, cfg, "0200_schema_baseline")
+        else:
+            with (
+                alembic_schema_owner_role(),
+                pytest.raises(DBAPIError, match="future application role is unsafe"),
+            ):
+                await asyncio.to_thread(
+                    command.upgrade,
+                    cfg,
+                    "0202_tvn40_curation_receipts",
+                )
+    finally:
+        await _admin_execute(
+            admin_dsn,
+            "ALTER ROLE ktm_manual_feature_procedure_owner NOREPLICATION",
+        )

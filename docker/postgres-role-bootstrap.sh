@@ -124,8 +124,49 @@ if [ "$bootstrap_phase" = "legacy" ]; then
       case "$m01_role_marker" in
         f) ;;
         t)
-          m01_revision="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc \
-            'SELECT version_num FROM public.alembic_version')"
+          # Role은 cluster-wide라서 다른 DB의 M01 role이 이미 존재할 수 있다.
+          # fresh DB에는 아직 ``public.alembic_version`` 자체가 없으므로, 그
+          # 경우에는 revision을 읽지 않고 legacy bootstrap을 계속한다. 없는
+          # relation을 직접 참조하면 psql이 role 변경 전에 종료된다. catalog
+          # probe 자체가 실패하면 빈 revision으로 삼지 않고 set -e로 중단한다.
+          m01_version_table_marker="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc \
+            "SELECT to_regclass('public.alembic_version') IS NOT NULL")"
+          case "$m01_version_table_marker" in
+            t)
+            m01_revision="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc \
+              'SELECT version_num FROM public.alembic_version')"
+            ;;
+            f)
+              # version table이 없는데 application relation이 남아 있으면
+              # fresh DB가 아닌 partial/손상 상태다. cluster-wide role residue를
+              # 근거로 ownership sweep을 시작하지 않고 fail-closed한다.
+              m01_application_relation_marker="$(psql "$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" -Atqc "
+                SELECT EXISTS (
+                  SELECT 1
+                  FROM pg_catalog.pg_class AS relation
+                  JOIN pg_catalog.pg_namespace AS namespace
+                    ON namespace.oid = relation.relnamespace
+                  WHERE namespace.nspname IN ('feature', 'provider_sync', 'ops')
+                    AND relation.relkind IN ('r', 'p', 'v', 'm', 'f', 'S')
+                )
+              ")"
+              case "$m01_application_relation_marker" in
+                f) m01_revision="" ;;
+                t)
+                  echo "M01 version marker is absent after application relations" >&2
+                  exit 1
+                  ;;
+                *)
+                  echo "M01 application relation marker is invalid" >&2
+                  exit 1
+                  ;;
+              esac
+              ;;
+            *)
+              echo "M01 version table marker is invalid" >&2
+              exit 1
+              ;;
+          esac
           case "$m01_revision" in
             0225_tvn40c_physical_removal)
               bootstrap_phase="m01"
@@ -1089,6 +1130,28 @@ BEGIN
     IF EXISTS (
         SELECT 1
         FROM pg_catalog.pg_roles
+        WHERE rolname IN (
+            'ktm_manual_feature_procedure_owner',
+            'ktm_manual_feature_admin_executor',
+            'ktm_feature_create_provider_executor',
+            'ktm_feature_request_procedure_owner',
+            'ktm_feature_request_service_executor',
+            'ktm_feature_request_admin_executor',
+            'ktm_manual_provider_dedup_procedure_owner',
+            'ktm_manual_provider_dedup_detector_executor',
+            'ktm_manual_provider_dedup_admin_executor',
+            'ktm_feature_reference_reconciliation_service_executor'
+        )
+          AND (
+              rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb
+              OR rolcreaterole OR rolbypassrls OR rolreplication
+          )
+    ) THEN
+        RAISE EXCEPTION 'future application role is unsafe';
+    END IF;
+    IF EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_roles
         WHERE rolname IN ('ktm_feature_api_runtime', 'ktm_feature_dagster_runtime')
           AND (
               NOT rolcanlogin OR rolinherit OR rolsuper OR rolcreatedb
@@ -1134,6 +1197,49 @@ BEGIN
         expected AS (
             SELECT * FROM expected_base
         ),
+        allowed_future(granted_role, member_role, admin_option, inherit_option, set_option) AS (
+            VALUES
+                (
+                    'ktm_manual_feature_procedure_owner',
+                    'ktm_feature_schema_owner', false, false, true
+                ),
+                (
+                    'ktm_manual_feature_admin_executor',
+                    'ktm_feature_api_runtime', false, true, false
+                ),
+                (
+                    'ktm_feature_create_provider_executor',
+                    'ktm_feature_dagster_runtime', false, true, false
+                ),
+                (
+                    'ktm_feature_request_procedure_owner',
+                    'ktm_feature_schema_owner', false, false, true
+                ),
+                (
+                    'ktm_feature_request_service_executor',
+                    'ktm_feature_api_runtime', false, true, false
+                ),
+                (
+                    'ktm_feature_request_admin_executor',
+                    'ktm_feature_api_runtime', false, true, false
+                ),
+                (
+                    'ktm_manual_provider_dedup_procedure_owner',
+                    'ktm_feature_schema_owner', false, false, true
+                ),
+                (
+                    'ktm_manual_provider_dedup_detector_executor',
+                    'ktm_feature_dagster_runtime', false, true, false
+                ),
+                (
+                    'ktm_manual_provider_dedup_admin_executor',
+                    'ktm_feature_api_runtime', false, true, false
+                ),
+                (
+                    'ktm_feature_reference_reconciliation_service_executor',
+                    'ktm_feature_api_runtime', false, true, false
+                )
+        ),
         actual AS (
             SELECT granted.rolname AS granted_role,
                    member.rolname AS member_role,
@@ -1149,29 +1255,14 @@ BEGIN
                OR member.rolname LIKE 'ktm_feature_%'
                OR member.rolname LIKE 'ktm_curation_%'
             )
-              AND granted.rolname NOT IN (
-                  'ktm_manual_feature_procedure_owner',
-                  'ktm_manual_feature_admin_executor',
-                  'ktm_feature_create_provider_executor',
-                  'ktm_feature_request_procedure_owner',
-                  'ktm_feature_request_service_executor',
-                  'ktm_feature_request_admin_executor',
-                  'ktm_manual_provider_dedup_procedure_owner',
-                  'ktm_manual_provider_dedup_detector_executor',
-                  'ktm_manual_provider_dedup_admin_executor',
-                  'ktm_feature_reference_reconciliation_service_executor'
-              )
-              AND member.rolname NOT IN (
-                  'ktm_manual_feature_procedure_owner',
-                  'ktm_manual_feature_admin_executor',
-                  'ktm_feature_create_provider_executor',
-                  'ktm_feature_request_procedure_owner',
-                  'ktm_feature_request_service_executor',
-                  'ktm_feature_request_admin_executor',
-                  'ktm_manual_provider_dedup_procedure_owner',
-                  'ktm_manual_provider_dedup_detector_executor',
-                  'ktm_manual_provider_dedup_admin_executor',
-                  'ktm_feature_reference_reconciliation_service_executor'
+              AND NOT EXISTS (
+                  SELECT 1
+                  FROM allowed_future AS allowed
+                  WHERE allowed.granted_role = granted.rolname
+                    AND allowed.member_role = member.rolname
+                    AND allowed.admin_option = membership.admin_option
+                    AND allowed.inherit_option = membership.inherit_option
+                    AND allowed.set_option = membership.set_option
               )
         )
         (SELECT * FROM expected EXCEPT SELECT * FROM actual)

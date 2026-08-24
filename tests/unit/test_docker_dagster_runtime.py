@@ -582,6 +582,14 @@ def test_tvn_m01_role_phase_runs_only_after_legacy_0225_boundary() -> None:
     # 이 분기를 잘못 쓰면 fresh DB bootstrap이 partial marker로 중단된다.
     assert 'true\\|true) m01_repair_after_legacy=true' in phase_script
     assert 'false\\|false)' in phase_script
+    # PostgreSQL role catalog는 cluster-wide라 fresh DB에서도 M01 role marker가
+    # 이미 존재할 수 있다. 이때 ``public.alembic_version``이 없는 상태를
+    # revision 조회로 처리하면 role bootstrap이 시작 전에 종료된다.
+    assert "to_regclass('public.alembic_version') IS NOT NULL" in phase_script
+    assert 'm01_revision=""' in phase_script
+    assert "M01 version marker is absent after application relations" in phase_script
+    assert "M01 application relation marker is invalid" in phase_script
+    assert "M01 version table marker is invalid" in phase_script
     assert "bootstrap DSN did not accept connections within 30 seconds" in phase_script
     assert "until psql \"$KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN\" -Atqc 'SELECT 1'" in phase_script
     assert 'm01_repair_after_legacy=true' in phase_script
@@ -622,7 +630,13 @@ def test_tvn_m01_role_phase_runs_only_after_legacy_0225_boundary() -> None:
         "ktm_manual_provider_dedup_admin_executor",
         "ktm_feature_reference_reconciliation_service_executor",
     ):
-        assert legacy_membership_oracle.count(f"'{m05_role}'") == 2
+        # future role 전체를 granted/member 쪽에서 각각 빼던 옛 2회 등장 대신,
+        # 현재는 granted/member/options까지 정확한 allowed_future edge 하나만
+        # 제외한다. 같은 이름의 다른 edge는 base graph mismatch로 남아야 한다.
+        assert legacy_membership_oracle.count(f"'{m05_role}'") == 1
+    assert "allowed_future(granted_role, member_role" in legacy_membership_oracle
+    assert "FROM allowed_future AS allowed" in legacy_membership_oracle
+    assert "AND NOT EXISTS (" in legacy_membership_oracle
 
     migration_script = _script("docker/migrate-to-m01-bootstrap-boundary.sh")
     assert "alembic upgrade 0225_tvn40c_physical_removal" in migration_script

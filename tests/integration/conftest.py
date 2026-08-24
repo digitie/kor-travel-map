@@ -278,12 +278,13 @@ async def migrated_session(migrated_engine: AsyncEngine) -> AsyncIterator[AsyncS
 
 @pytest.fixture
 async def tvn_m01_m05_role_graph(migrated_engine: AsyncEngine) -> AsyncIterator[None]:
-    """독립 migration test가 해제한 cluster-wide M01~M05 edge를 다시 세운다.
+    """독립 migration test가 해제한 cluster-wide M01~M05 edge를 전후로 다시 세운다.
 
     테스트별 PostgreSQL database는 격리돼도 role/membership은 testcontainer cluster 전체에
     남는다. C05처럼 legacy frozen graph를 검증하는 독립 DB bootstrap은 post-legacy edge를
     의도적으로 해제한다. 이 fixture는 이미 head까지 올라간 공유 migrated DB에서 M01/M04/M05
-    runtime role graph만 다시 확정해 뒤따르는 lane 검증이 collection 순서에 의존하지 않게 한다.
+    runtime role graph를 setup과 teardown 양쪽에서 다시 확정해, 뒤따르는 lane
+    검증이 collection 순서 또는 실패한 gate test에 의존하지 않게 한다.
     """
     from tests.integration._tvn34_migration_bootstrap import (
         bootstrap_tvn_m01_role_phase,
@@ -291,10 +292,17 @@ async def tvn_m01_m05_role_graph(migrated_engine: AsyncEngine) -> AsyncIterator[
         restore_tvn_m05_role_graph,
     )
 
-    admin_dsn = migrated_engine.url.render_as_string(hide_password=False)
-    await bootstrap_tvn_m01_role_phase(admin_dsn)
-    await restore_tvn_m05_role_graph(admin_dsn)
-    await repair_tvn_m05_role_phase(admin_dsn)
+    async def _restore() -> None:
+        admin_dsn = migrated_engine.url.render_as_string(hide_password=False)
+        await bootstrap_tvn_m01_role_phase(admin_dsn)
+        await restore_tvn_m05_role_graph(admin_dsn)
+        await repair_tvn_m05_role_phase(admin_dsn)
+
+    await _restore()
+    try:
+        yield
+    finally:
+        await _restore()
 
 
 @pytest.fixture(scope="session")

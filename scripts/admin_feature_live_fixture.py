@@ -13,6 +13,7 @@ import argparse
 import asyncio
 import json
 import math
+import os
 import re
 from collections import Counter
 from datetime import datetime, timedelta
@@ -21,19 +22,20 @@ from typing import Final, NamedTuple
 
 from sqlalchemy import text
 from sqlalchemy.engine import RowMapping
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncSession
 
 from kortravelmap.core.ids import (
     make_feature_id,
     make_payload_hash,
     make_source_record_key,
 )
-from kortravelmap.dto import SourceRecord
+from kortravelmap.dto import SourceLink, SourceRecord, SourceRole
 from kortravelmap.dto._time import kst_now
 from kortravelmap.dto.price import PriceValue
 from kortravelmap.dto.weather import WeatherValue
-from kortravelmap.infra import price_repo, weather_repo
+from kortravelmap.infra import feature_repo, price_repo, weather_repo
 from kortravelmap.infra.db import make_async_engine
+from kortravelmap.infra.feature_identity import candidate_feature_uuid
 from kortravelmap.infra.provider_refresh_policy_repo import (
     get_provider_refresh_policy,
     upsert_provider_refresh_policy,
@@ -44,6 +46,17 @@ _RUN_ID_RE: Final[re.Pattern[str]] = re.compile(r"^[a-z0-9][a-z0-9-]{15,79}$")
 _LON: Final[float] = 127.5
 _LAT: Final[float] = 36.5
 _E2E_PROVIDER: Final[str] = "e2e-live-acceptance"
+_FIXTURE_SCHEMA_OWNER: Final[str] = "ktm_feature_schema_owner"
+_FIXTURE_PROCEDURE_EXECUTOR: Final[str] = "ktm_manual_feature_procedure_owner"
+_FIXTURE_CONFIRM_DATABASE_ENV: Final[str] = (
+    "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE"
+)
+_FIXTURE_CONFIRM_LOGIN_ROLE_ENV: Final[str] = (
+    "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_LOGIN_ROLE"
+)
+_FIXTURE_CONFIRM_ALEMBIC_REVISION_ENV: Final[str] = (
+    "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION"
+)
 
 
 def _dataset_key(run_id: str, kind: str) -> str:
@@ -369,6 +382,100 @@ async def _assert_owned_or_absent(
     return present
 
 
+async def _assert_owned_source_links(
+    session: AsyncSession,
+    run_id: str,
+    feature_ids: tuple[str, str],
+    present: set[str],
+    *,
+    lock: bool = False,
+) -> None:
+    """fixture Feature의 primary source lineage를 exact fingerprint로 감사한다.
+
+    ``create_feature_with_initial_state``는 Feature/state만 만들고
+    ``provider_sync.source_links``는 만들지 않는다. 따라서 provider ingestion과
+    같은 transaction에서 별도로 primary link를 만든 뒤, source entity head가
+    fixture record를 가리키는지까지 확인해야 API detail/provider filter가 보는
+    계보와 실제 fixture 소유권이 일치한다.
+    """
+
+    expected: dict[str, dict[str, object]] = {}
+    for feature_id, kind in zip(feature_ids, ("weather", "price"), strict=True):
+        if feature_id not in present:
+            continue
+        expected[feature_id] = {
+            "provider": _E2E_PROVIDER,
+            "dataset_key": _dataset_key(run_id, kind),
+            "source_entity_type": f"{kind}_response",
+            "source_entity_id": f"run:{run_id}:{kind}",
+            "source_record_key": _response_record(
+                run_id=run_id,
+                kind=kind,
+                fetched_at=kst_now(),
+            ).source_record_key,
+            "source_role": SourceRole.PRIMARY.value,
+            "match_method": "natural_key",
+            "confidence": 100,
+        }
+    lock_clause = " FOR UPDATE OF link" if lock else ""
+    rows = (
+        await session.execute(
+            text(
+                """
+                SELECT
+                  link.feature_id,
+                  dataset.provider,
+                  dataset.dataset_key,
+                  entity.source_entity_type,
+                  entity.source_entity_id,
+                  head.current_source_record_key AS source_record_key,
+                  link.source_role,
+                  link.match_method,
+                  link.confidence
+                FROM provider_sync.source_links AS link
+                JOIN provider_sync.source_entities AS entity
+                  ON entity.source_entity_key = link.source_entity_key
+                JOIN provider_sync.provider_datasets AS dataset
+                  ON dataset.provider_dataset_id = entity.provider_dataset_id
+                JOIN provider_sync.source_entity_heads AS head
+                  ON head.source_entity_key = entity.source_entity_key
+                WHERE link.feature_id = ANY(CAST(:feature_ids AS text[]))
+                ORDER BY link.feature_id
+                """
+                + lock_clause
+            ),
+            {"feature_ids": list(feature_ids)},
+        )
+    ).mappings()
+    row_list = list(rows)
+    if len(row_list) != len(expected):
+        raise RuntimeError(
+            "owned fixture primary source lineage cardinality가 다릅니다: "
+            f"expected={len(expected)}, observed={len(row_list)}"
+        )
+    observed = {
+        str(row["feature_id"]): {
+            key: row[key]
+            for key in (
+                "provider",
+                "dataset_key",
+                "source_entity_type",
+                "source_entity_id",
+                "source_record_key",
+                "source_role",
+                "match_method",
+                "confidence",
+            )
+        }
+        for row in row_list
+    }
+    if observed != expected:
+        raise RuntimeError(
+            "owned fixture primary source lineage가 다릅니다: "
+            f"expected={expected!r}, observed={observed!r}"
+        )
+
+
 def _quote_identifier(value: str) -> str:
     return '"' + value.replace('"', '""') + '"'
 
@@ -541,6 +648,13 @@ async def _assert_owned_state(
     counts = await _counts(session, feature_ids)
     if counts["features"] != len(present):
         raise RuntimeError("owned fixture cardinality와 fingerprint가 다릅니다")
+    await _assert_owned_source_links(
+        session,
+        run_id,
+        feature_ids,
+        present,
+        lock=lock,
+    )
     await _assert_owned_values(session, run_id, feature_ids, present, lock=lock)
     foreign_keys = await _foreign_key_reference_counts(session, feature_ids)
     expected_references: dict[str, int] = {}
@@ -548,6 +662,10 @@ async def _assert_owned_state(
         # feature INSERT trigger가 canonical alias를 함께 만든다. alias는 direct
         # feature_id FK이므로 fixture cleanup의 cascade evidence에 포함한다.
         expected_references["feature.feature_aliases.feature_id"] = len(present)
+        # provider procedure는 source evidence를 잠그지만 source link를 만들지
+        # 않는다. fixture가 ingestion과 같은 primary lineage를 별도로 만들었는지
+        # 확인하고, Feature CASCADE 뒤에는 이 reference도 0이어야 한다.
+        expected_references["provider_sync.source_links.feature_id"] = len(present)
     if feature_ids[0] in present:
         expected_references["feature.feature_weather_values.feature_id"] = 1
         expected_references["feature.current_weather_summary.feature_id"] = 1
@@ -569,45 +687,168 @@ async def _seed(
     if before != {"features": 0, "weather_values": 0, "price_values": 0}:
         raise RuntimeError("owned fixture ID가 이미 존재합니다; recovery를 먼저 실행하세요")
 
-    weather_id, price_id = feature_ids
-    await session.execute(
-        text(
-            """
-            INSERT INTO feature.features (
-                feature_id, kind, name, category, coord, coord_precision_digits,
-                lifecycle_state, publication_state, quality_state,
-                marker_icon, marker_color,
-                updated_at
-            ) VALUES
-              (
-                :weather_id, 'weather', :weather_name, '00000000',
-                x_extension.ST_SetSRID(
-                  x_extension.ST_MakePoint(:weather_lon, :lat), 4326
-                ),
-                6, 'active', 'suppressed', 'valid', 'weather', 'P-03', now()
-              ),
-              (
-                :price_id, 'price', :price_name, '00000000',
-                x_extension.ST_SetSRID(
-                  x_extension.ST_MakePoint(:price_lon, :lat), 4326
-                ),
-                6, 'active', 'suppressed', 'valid', 'fuel', 'P-04', now()
-              )
-            """
-        ),
-        {
-            "weather_id": weather_id,
-            "weather_name": f"E2E suppressed weather {run_id}",
-            "weather_lon": _LON + 0.002,
-            "price_id": price_id,
-            "price_name": f"E2E suppressed price {run_id}",
-            "price_lon": _LON - 0.002,
-            "lat": _LAT,
-        },
-    )
     now = kst_now().replace(microsecond=0)
     weather_dataset_id = await _ensure_dataset(session, run_id=run_id, kind="weather")
     price_dataset_id = await _ensure_dataset(session, run_id=run_id, kind="price")
+    weather_record = _response_record(
+        run_id=run_id,
+        kind="weather",
+        fetched_at=now,
+    )
+    price_record = _response_record(
+        run_id=run_id,
+        kind="price",
+        fetched_at=now,
+    )
+
+    async def create_provider_feature(
+        *,
+        feature_id: str,
+        kind: str,
+        dataset_id: int,
+        record: SourceRecord,
+        name: str,
+        lon: float,
+        marker_icon: str,
+        marker_color: str,
+    ) -> None:
+        # The API runtime is deliberately read-only after M01.  Register the
+        # fixture's immutable source evidence first, then let the same provider
+        # state procedure used by ingestion create the core Feature row.
+        await feature_repo.upsert_source_record(session, record)
+        membership = (
+            await session.execute(
+                text(
+                    """
+                    SELECT entity.source_entity_key,
+                           head.current_source_record_key
+                    FROM provider_sync.provider_datasets AS dataset
+                    JOIN provider_sync.source_entities AS entity
+                      ON entity.provider_dataset_id = dataset.provider_dataset_id
+                    JOIN provider_sync.source_entity_heads AS head
+                      ON head.source_entity_key = entity.source_entity_key
+                    WHERE dataset.provider_dataset_id = :dataset_id
+                      AND entity.provider = :provider
+                      AND entity.dataset_key = :dataset_key
+                      AND entity.source_entity_type = :source_entity_type
+                      AND entity.source_entity_id = :source_entity_id
+                    """
+                ),
+                {
+                    "dataset_id": dataset_id,
+                    "provider": record.provider,
+                    "dataset_key": record.dataset_key,
+                    "source_entity_type": record.source_entity_type,
+                    "source_entity_id": record.source_entity_id,
+                },
+            )
+        ).mappings().one()
+        source_entity_key = str(membership["source_entity_key"])
+        source_record_key = str(membership["current_source_record_key"])
+        if source_record_key != record.source_record_key:
+            raise RuntimeError("fixture source head가 방금 등록한 record를 가리키지 않습니다")
+        payload = {
+            "feature_id": feature_id,
+            "feature_uuid": str(candidate_feature_uuid()),
+            "kind": kind,
+            "name": name,
+            "category": "00000000",
+            "lon": lon,
+            "lat": _LAT,
+            "coord_precision_digits": 6,
+            "address": {},
+            "urls": {},
+            "marker_icon": marker_icon,
+            "marker_color": marker_color,
+            "raw_refs": [],
+        }
+        # M01에서 generic provider state procedure의 EXECUTE는 schema owner가
+        # 아니라 dedicated manual procedure owner에만 준다. schema owner가
+        # SET 가능한 NOLOGIN role로 **이 CALL 하나만** 임시 전환한다. procedure는
+        # SECURITY DEFINER라 fixture helper에 테이블 write grant를 넓히지 않는다.
+        await session.execute(text(f"SET LOCAL ROLE {_FIXTURE_PROCEDURE_EXECUTOR}"))
+        row = (
+            await session.execute(
+                text(
+                    """
+                    CALL feature.create_feature_with_initial_state(
+                        CAST(:feature_payload AS jsonb),
+                        CAST(:lifecycle_state AS text),
+                        CAST(:publication_state AS text),
+                        CAST(:quality_state AS text),
+                        CAST(:state_context AS jsonb),
+                        NULL, NULL, NULL, NULL
+                    )
+                    """
+                ),
+                {
+                    "feature_payload": json.dumps(payload, ensure_ascii=False),
+                    "lifecycle_state": "active",
+                    "publication_state": "suppressed",
+                    "quality_state": "valid",
+                    "state_context": json.dumps(
+                        {
+                            "transition_kind": "provider_sync",
+                            "reason_code": "admin_live_fixture",
+                            "provider_dataset_id": dataset_id,
+                            "source_entity_key": source_entity_key,
+                            "source_record_key": source_record_key,
+                        },
+                        ensure_ascii=False,
+                    ),
+                },
+            )
+            .mappings()
+            .one()
+        )
+        # source_links와 value rows는 schema-owner SQL로만 계속 쓴다. CALL이
+        # 실패하면 transaction이 abort되어 SET LOCAL도 transaction 종료와 함께
+        # 사라지므로, 실패한 transaction에서 억지 reset을 시도하지 않는다.
+        await session.execute(text(f"SET LOCAL ROLE {_FIXTURE_SCHEMA_OWNER}"))
+        if (
+            str(row["o_feature_id"]) != feature_id
+            or not bool(row["o_inserted"])
+        ):
+            raise RuntimeError("provider fixture Feature procedure가 신규 행을 만들지 않았습니다")
+        # ``create_feature_with_initial_state`` deliberately does not mutate
+        # provider_sync.source_links.  Mirror ``feature_repo.load_bundle`` here:
+        # after the Feature FK exists, create the canonical primary lineage in
+        # the same transaction and fail closed if it was unexpectedly an update.
+        link_inserted = await feature_repo.upsert_source_link(
+            session,
+            SourceLink(
+                feature_id=feature_id,
+                source_record_key=source_record_key,
+                source_role=SourceRole.PRIMARY,
+                match_method="natural_key",
+                confidence=100,
+                created_at=record.fetched_at,
+            ),
+        )
+        if not link_inserted:
+            raise RuntimeError("provider fixture primary source link가 신규 행이 아닙니다")
+
+    weather_id, price_id = feature_ids
+    await create_provider_feature(
+        feature_id=weather_id,
+        kind="weather",
+        dataset_id=weather_dataset_id,
+        record=weather_record,
+        name=f"E2E suppressed weather {run_id}",
+        lon=_LON + 0.002,
+        marker_icon="weather",
+        marker_color="P-03",
+    )
+    await create_provider_feature(
+        feature_id=price_id,
+        kind="price",
+        dataset_id=price_dataset_id,
+        record=price_record,
+        name=f"E2E suppressed price {run_id}",
+        lon=_LON - 0.002,
+        marker_icon="fuel",
+        marker_color="P-04",
+    )
     await weather_repo.load_weather_values(
         session,
         [
@@ -628,7 +869,7 @@ async def _seed(
             )
         ],
         provider_dataset_id=weather_dataset_id,
-        source_record=_response_record(run_id=run_id, kind="weather", fetched_at=now),
+        source_record=weather_record,
         selected_at=now,
     )
     await price_repo.load_price_values(
@@ -648,7 +889,7 @@ async def _seed(
             )
         ],
         provider_dataset_id=price_dataset_id,
-        source_record=_response_record(run_id=run_id, kind="price", fetched_at=now),
+        source_record=price_record,
     )
     observed, foreign_keys = await _assert_owned_state(session, run_id, feature_ids)
     if observed != {"features": 2, "weather_values": 1, "price_values": 1}:
@@ -686,6 +927,31 @@ async def _delete_owned_datasets(session: AsyncSession, run_id: str) -> None:
 
     dataset_keys = [_dataset_key(run_id, kind) for kind in ("weather", "price")]
     params = {"provider": _E2E_PROVIDER, "dataset_keys": dataset_keys}
+    source_links_remaining = int(
+        (
+            await session.execute(
+                text(
+                    """
+                    SELECT count(*)
+                    FROM provider_sync.source_links AS link
+                    JOIN provider_sync.source_entities AS entity
+                      ON entity.source_entity_key = link.source_entity_key
+                    JOIN provider_sync.provider_datasets AS dataset
+                      ON dataset.provider_dataset_id = entity.provider_dataset_id
+                    WHERE dataset.provider = :provider
+                      AND dataset.dataset_key = ANY(CAST(:dataset_keys AS text[]))
+                    """
+                ),
+                params,
+            )
+        )
+        .scalars()
+        .one()
+    )
+    if source_links_remaining:
+        raise RuntimeError(
+            "owned fixture source link cleanup이 완결되지 않아 dataset 삭제를 중단합니다"
+        )
     # 0091의 entity-head 완결성 trigger 때문에 head → record → entity 순서가
     # 필수다. dataset은 모든 raw 계보와 policy가 사라진 뒤에만 지운다.
     for statement in (
@@ -1268,6 +1534,65 @@ async def _verify_auth_audit(
     return counts
 
 
+def _required_fixture_target() -> tuple[str, str, str]:
+    """별도 writer DSN이 API/browser lane과 같은 DB를 가리키는지 확인할 입력.
+
+    DSN 자체를 journal이나 argv로 남기지 않고, caller가 root shell에서 읽은 세
+    비민감 식별자만 helper에 전달한다. 하나라도 없으면 role 전환 전 멈춘다.
+    """
+
+    names = (
+        _FIXTURE_CONFIRM_DATABASE_ENV,
+        _FIXTURE_CONFIRM_LOGIN_ROLE_ENV,
+        _FIXTURE_CONFIRM_ALEMBIC_REVISION_ENV,
+    )
+    values: list[str] = []
+    for name in names:
+        value = os.environ.get(name)
+        if not value or "\0" in value:
+            raise RuntimeError(f"fixture target confirmation is missing: {name}")
+        values.append(value)
+    return values[0], values[1], values[2]
+
+
+async def _prepare_fixture_connection(connection: AsyncConnection) -> None:
+    """mutation 전 fixture writer DB·LOGIN role·head·effective role을 fail-close한다."""
+
+    expected_database, expected_login_role, expected_revision = _required_fixture_target()
+    observed = (
+        await connection.execute(
+            text(
+                """
+                SELECT
+                    current_database() AS database_name,
+                    session_user AS session_user,
+                    current_user AS current_user,
+                    (SELECT version_num FROM public.alembic_version)
+                        AS alembic_revision
+                """
+            )
+        )
+    ).mappings().one()
+    if observed["database_name"] != expected_database:
+        raise RuntimeError("fixture target database confirmation mismatch")
+    if observed["session_user"] != expected_login_role:
+        raise RuntimeError("fixture target login-role confirmation mismatch")
+    if observed["current_user"] != expected_login_role:
+        raise RuntimeError("fixture target initial effective-role mismatch")
+    if observed["alembic_revision"] != expected_revision:
+        raise RuntimeError("fixture target Alembic revision confirmation mismatch")
+
+    await connection.execute(text(f"SET ROLE {_FIXTURE_SCHEMA_OWNER}"))
+    effective_role = (
+        await connection.execute(text("SELECT current_user"))
+    ).scalar_one()
+    if effective_role != _FIXTURE_SCHEMA_OWNER:
+        raise RuntimeError("fixture schema-owner role assumption failed")
+    # SET ROLE is session state. Persist only this read-only setup transaction;
+    # every fixture action itself is in the following explicit transaction.
+    await connection.commit()
+
+
 async def _run(
     action: str,
     run_id: str,
@@ -1279,34 +1604,40 @@ async def _run(
     # 실패한다 (Codex PR #792 사후 적대 리뷰 R792-3).
     engine = make_async_engine(settings.pg_dsn)
     try:
-        async with AsyncSession(engine) as session, session.begin():
-            summary_run_ids: tuple[int, int] | None = None
-            api_owned_feature_uuids: tuple[str, ...] = ()
-            if action == "seed":
-                counts, foreign_keys, summary_run_ids = await _seed(session, run_id)
-            elif action == "cleanup":
-                counts, foreign_keys = await _cleanup(session, run_id)
-            elif action == "purge":
-                counts, foreign_keys, purged = await _purge_api_owned(
-                    session,
-                    run_id,
-                )
-            elif action == "api-audit":
-                (
-                    counts,
-                    foreign_keys,
-                    api_owned_feature_uuids,
-                ) = await _audit_complete_api_owned(session, run_id)
-            elif action == "auth-reset":
-                auth_counts = await _reset_auth_audit(session, run_id)
-            elif action == "auth-verify":
-                auth_counts = await _verify_auth_audit(session, run_id)
-            else:
-                counts, foreign_keys = await _assert_owned_state(
-                    session,
-                    run_id,
-                    _feature_ids(run_id),
-                )
+        # The supervisor replaces the API container's read-only DSN with the
+        # root-only fixture DSN. Before any role change or mutation, prove that
+        # this separate writer connection is the confirmed API target at the
+        # confirmed schema head. No application runtime role receives writes.
+        async with engine.connect() as connection:
+            await _prepare_fixture_connection(connection)
+            async with AsyncSession(bind=connection) as session, session.begin():
+                summary_run_ids: tuple[int, int] | None = None
+                api_owned_feature_uuids: tuple[str, ...] = ()
+                if action == "seed":
+                    counts, foreign_keys, summary_run_ids = await _seed(session, run_id)
+                elif action == "cleanup":
+                    counts, foreign_keys = await _cleanup(session, run_id)
+                elif action == "purge":
+                    counts, foreign_keys, purged = await _purge_api_owned(
+                        session,
+                        run_id,
+                    )
+                elif action == "api-audit":
+                    (
+                        counts,
+                        foreign_keys,
+                        api_owned_feature_uuids,
+                    ) = await _audit_complete_api_owned(session, run_id)
+                elif action == "auth-reset":
+                    auth_counts = await _reset_auth_audit(session, run_id)
+                elif action == "auth-verify":
+                    auth_counts = await _verify_auth_audit(session, run_id)
+                else:
+                    counts, foreign_keys = await _assert_owned_state(
+                        session,
+                        run_id,
+                        _feature_ids(run_id),
+                    )
     finally:
         await engine.dispose()
     if action in {"auth-reset", "auth-verify"}:

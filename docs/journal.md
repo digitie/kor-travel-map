@@ -1,5 +1,27 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-24 — PR #1063 writer fixture preflight·procedure role·future role edge 보강
+
+Draft [PR #1063](https://github.com/digitie/kor-travel-map/pull/1063)의 두 전문 적대 리뷰에서
+live weather/price fixture의 P1 두 건을 확인했다. root-only writer DSN이 API/browser target과
+같은 DB인지 확인하지 않았고, schema owner가 M01 이후 `feature.create_feature_with_initial_state`
+procedure의 `EXECUTE` 권한을 상속하지 않아 실제 seed가 실패할 수 있었다.
+
+helper는 DB명·LOGIN role·Alembic revision의 supplied confirmation과 실제 연결을 mutation 전에
+exact 대조하며, mismatch면 `SET ROLE` 전에도 중단한다. schema owner 확인 뒤 generic provider
+procedure 호출 하나에만 `ktm_manual_feature_procedure_owner`로 `SET LOCAL ROLE`하고 즉시 schema
+owner로 돌아온다. application runtime에는 별도 write privilege를 추가하지 않았다.
+
+또한 shared PostgreSQL cluster의 M01~M05 future membership을 base graph에서 허용하는 로직을
+role 이름 전체 제외에서 **정확한 granted/member/admin/inherit/set edge** allowlist로 바꿨다.
+option drift, 미등록 application edge, known future NOLOGIN role의 unsafe attribute가 모두
+fail-closed한다. 동일 계약을 `0200`, `0202`, role bootstrap에 맞췄다.
+
+- fixture·squash-role unit: `68 passed`
+- PostGIS Alembic metadata consistency: `15 passed`
+
+아직 commit/push/재리뷰/원격 CI 전이므로 PR은 Draft로 유지한다.
+
 ## 2026-08-22 — T-FE-MOCK-FLAKE mocked logs 응답 고정
 
 `admin/ops pages › /v1/ops/logs`에서 self-owned mock backend가 system/API logs 응답을

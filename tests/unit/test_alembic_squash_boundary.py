@@ -326,6 +326,34 @@ def test_active_migrations_share_bootstrap_exact_role_contract() -> None:
         assert token in baseline_contract
         assert token in bootstrap
 
+    # PostgreSQL roles are cluster-wide. After a database recreation, M01~M05
+    # memberships can remain while the fresh database is still at the frozen
+    # base graph. The base assertion may subtract only the exact known
+    # future-phase edge (including its PG16 options); every other application
+    # edge, and unsafe future role attributes, must fail closed.
+    future_phase_roles = (
+        "ktm_manual_feature_procedure_owner",
+        "ktm_manual_feature_admin_executor",
+        "ktm_feature_create_provider_executor",
+        "ktm_feature_request_procedure_owner",
+        "ktm_feature_request_service_executor",
+        "ktm_feature_request_admin_executor",
+        "ktm_manual_provider_dedup_procedure_owner",
+        "ktm_manual_provider_dedup_detector_executor",
+        "ktm_manual_provider_dedup_admin_executor",
+        "ktm_feature_reference_reconciliation_service_executor",
+    )
+    for role in future_phase_roles:
+        assert f"'{role}'" in baseline_contract
+        assert f"'{role}'" in bootstrap
+    for source in (baseline_contract, bootstrap):
+        assert "allowed_future(granted_role, member_role" in source
+        assert "AND NOT EXISTS (" in source
+        assert "FROM allowed_future AS allowed" in source
+        assert "future application role is unsafe" in source
+        assert "AND granted.rolname NOT IN (" not in source
+        assert "AND member.rolname NOT IN (" not in source
+
 
 def test_legacy_archive_has_exact_109_file_digest() -> None:
     paths = sorted(_LEGACY.glob("[0-9]*.py"))
