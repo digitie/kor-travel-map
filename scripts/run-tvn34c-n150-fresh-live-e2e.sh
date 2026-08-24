@@ -442,7 +442,9 @@ EOF
 
 compose_map() {
   docker compose --project-name "$MAP_PROJECT" --env-file "$MAP_ENV" \
-    --file "$MAP_DIR/docker-compose.yml" --file "$MAP_COMPOSE_OVERRIDE" "$@"
+    --file "$MAP_DIR/docker-compose.yml" \
+    --file "$MAP_DIR/docker-compose.local-dev.yml" \
+    --file "$MAP_COMPOSE_OVERRIDE" "$@"
 }
 
 compose_pinvi() {

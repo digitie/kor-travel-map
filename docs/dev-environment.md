@@ -239,7 +239,8 @@ docker compose --profile fresh-init run --rm db-application-schema-fresh-300
 
 # Docker full stack은 workstation local-dev profile을 명시한다. production profile은
 # Docker Manager final permit transaction만 사용한다.
-KOR_TRAVEL_MAP_API_PROFILE=local-dev docker compose up -d
+KOR_TRAVEL_MAP_API_PROFILE=local-dev docker compose \
+  -f docker-compose.yml -f docker-compose.local-dev.yml up -d
 
 # 단위 테스트 (DB 불필요)
 pytest tests/unit -q

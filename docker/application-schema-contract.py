@@ -11,13 +11,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, Final, TextIO
 
 _APPLICATION_ROOT_CANDIDATES: Final = (Path("/app"), Path(__file__).resolve().parents[1])
+_INSTALLED_BIN_DIR: Final = Path("/usr/local/bin")
+_MAX_ARTIFACT_BYTES: Final = 4 * 1024 * 1024
 _REFERENCE_SCHEMA: Final = "kor-travel-map.application-baseline-reference.v1"
 _CONTRACT_SCHEMA: Final = "kor-travel-map.application-baseline-contract.v1"
 _ERROR_SCHEMA: Final = "kor-travel-map.application-baseline-contract-error.v1"
@@ -79,9 +83,40 @@ class ApplicationSchemaContractError(RuntimeError):
         self.code = code
 
 
+def _installed_mode() -> bool:
+    return Path(__file__).resolve().parent == _INSTALLED_BIN_DIR
+
+
+def _require_immutable_directory(path: Path) -> None:
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise ApplicationSchemaContractError(
+            "installed_application_baseline_unavailable"
+        ) from exc
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or metadata.st_uid != 0
+        or stat.S_IMODE(metadata.st_mode) != 0o555
+    ):
+        raise ApplicationSchemaContractError("installed_application_baseline_unsafe")
+
+
 def _application_root() -> Path:
     for candidate in _APPLICATION_ROOT_CANDIDATES:
         baseline = candidate / "alembic" / "baseline"
+        if _installed_mode():
+            try:
+                for directory in (candidate, candidate / "alembic", baseline):
+                    _require_immutable_directory(directory)
+                _read_immutable_bytes(baseline / "application-reference.json")
+                _read_immutable_bytes(baseline / "application-reference.sha256")
+            except ApplicationSchemaContractError as exc:
+                if exc.code == "installed_application_baseline_unsafe":
+                    raise
+                continue
+            return candidate
         if (baseline / "application-reference.json").is_file() and (
             baseline / "application-reference.sha256"
         ).is_file():
@@ -93,11 +128,73 @@ def _sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def _read_immutable_bytes(path: Path) -> bytes:
+    if not _installed_mode():
+        try:
+            return path.read_bytes()
+        except OSError as exc:
+            raise ApplicationSchemaContractError(
+                "installed_application_baseline_unavailable"
+            ) from exc
+
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise ApplicationSchemaContractError(
+            "installed_application_baseline_unavailable"
+        ) from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or metadata.st_uid != 0
+        or stat.S_IMODE(metadata.st_mode) != 0o444
+        or metadata.st_nlink != 1
+        or metadata.st_size > _MAX_ARTIFACT_BYTES
+    ):
+        raise ApplicationSchemaContractError("installed_application_baseline_unsafe")
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            opened = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or opened.st_uid != 0
+                or stat.S_IMODE(opened.st_mode) != 0o444
+                or opened.st_nlink != 1
+                or opened.st_size > _MAX_ARTIFACT_BYTES
+                or (opened.st_dev, opened.st_ino)
+                != (metadata.st_dev, metadata.st_ino)
+            ):
+                raise ApplicationSchemaContractError(
+                    "installed_application_baseline_unsafe"
+                )
+            chunks: list[bytes] = []
+            remaining = _MAX_ARTIFACT_BYTES + 1
+            while remaining:
+                chunk = os.read(descriptor, min(remaining, 262_144))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                remaining -= len(chunk)
+            raw = b"".join(chunks)
+            if len(raw) > _MAX_ARTIFACT_BYTES:
+                raise ApplicationSchemaContractError(
+                    "installed_application_baseline_unsafe"
+                )
+            return raw
+        finally:
+            os.close(descriptor)
+    except OSError as exc:
+        raise ApplicationSchemaContractError(
+            "installed_application_baseline_unavailable"
+        ) from exc
+
+
 def _read_sha256(path: Path) -> str:
     try:
-        raw = path.read_bytes()
+        raw = _read_immutable_bytes(path)
         value = raw.decode("ascii").strip()
-    except (OSError, UnicodeDecodeError) as exc:
+    except UnicodeDecodeError as exc:
         raise ApplicationSchemaContractError("installed_application_baseline_invalid") from exc
     if not _SHA256_PATTERN.fullmatch(value) or raw != f"{value}\n".encode("ascii"):
         raise ApplicationSchemaContractError("installed_application_baseline_invalid")
@@ -117,9 +214,9 @@ def application_contract() -> Mapping[str, str]:
     baseline = _application_root() / "alembic" / "baseline"
     reference_path = baseline / "application-reference.json"
     try:
-        reference_raw = reference_path.read_bytes()
+        reference_raw = _read_immutable_bytes(reference_path)
         reference = json.loads(reference_raw)
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise ApplicationSchemaContractError("installed_application_baseline_unavailable") from exc
     if not isinstance(reference, Mapping) or reference.get("schema") != _REFERENCE_SCHEMA:
         raise ApplicationSchemaContractError("installed_application_baseline_invalid")
@@ -130,12 +227,7 @@ def application_contract() -> Mapping[str, str]:
         raise ApplicationSchemaContractError("installed_application_baseline_invalid")
     for manifest_key, filename in _SQL_ARTIFACTS.items():
         path = baseline / filename
-        try:
-            raw = path.read_bytes()
-        except OSError as exc:
-            raise ApplicationSchemaContractError(
-                "installed_application_baseline_unavailable"
-            ) from exc
+        raw = _read_immutable_bytes(path)
         if _sha256_bytes(raw) != _artifact_digest(artifacts, manifest_key):
             raise ApplicationSchemaContractError("installed_application_baseline_invalid")
 
@@ -157,12 +249,7 @@ def application_contract() -> Mapping[str, str]:
         expected = _artifact_digest(artifacts, contract_key)
         receipt_digest = _artifact_digest(artifacts, receipt_key)
         path = baseline / filename
-        try:
-            content = path.read_bytes()
-        except OSError as exc:
-            raise ApplicationSchemaContractError(
-                "installed_application_baseline_unavailable"
-            ) from exc
+        content = _read_immutable_bytes(path)
         if _sha256_bytes(content) != receipt_digest or _read_sha256(path) != expected:
             raise ApplicationSchemaContractError("installed_application_baseline_invalid")
         output[output_key] = expected

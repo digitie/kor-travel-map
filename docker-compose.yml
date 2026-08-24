@@ -345,10 +345,6 @@ services:
       - 0.0.0.0
       - -p
       - "${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}"
-    env_file:
-      - path: .env
-        required: false
-        format: raw
     environment:
       TMPDIR: /tmp
       TEMP: /tmp
@@ -422,10 +418,6 @@ services:
         KOR_TRAVEL_MAP_GIT_COMMIT: ${KOR_TRAVEL_MAP_GIT_COMMIT:-development}
       secrets:
         - github_token
-    env_file:
-      - path: .env
-        required: false
-        format: raw
     environment:
       TMPDIR: /tmp
       TEMP: /tmp

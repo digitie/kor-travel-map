@@ -40,6 +40,41 @@ if [ -n "$api_only_name" ]; then
   exit 1
 fi
 
+application_privileged_name="$(
+  /usr/local/bin/python -I -c '
+import os
+
+exact_names = {
+    "KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE",
+    "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN",
+    "KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD",
+    "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN",
+    "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD",
+    "KOR_TRAVEL_MAP_MIGRATOR_PASSWORD",
+    "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN",
+    "KOR_TRAVEL_MAP_POSTGRES_DB",
+    "KOR_TRAVEL_MAP_POSTGRES_PASSWORD",
+    "KOR_TRAVEL_MAP_POSTGRES_USER",
+}
+print(
+    next(
+        (
+            name
+            for name in os.environ
+            if name in exact_names
+            or name.startswith("KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_")
+        ),
+        "",
+    ),
+    end="",
+)
+'
+)"
+if [ -n "$application_privileged_name" ]; then
+  echo "application migration/bootstrap credential key must not enter Dagster process: $application_privileged_name" >&2
+  exit 1
+fi
+
 if [ "${KOR_TRAVEL_MAP_DAGSTER_PROFILE+x}" = "x" ]; then
   dagster_profile="$KOR_TRAVEL_MAP_DAGSTER_PROFILE"
 else

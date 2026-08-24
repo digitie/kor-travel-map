@@ -38,8 +38,16 @@ RUN --mount=type=secret,id=github_token \
 FROM python@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de AS runtime
 
 ARG KOR_TRAVEL_MAP_GIT_COMMIT=development
+ARG KOR_TRAVEL_MAP_GIT_TREE=development
+ARG KOR_TRAVEL_MAP_DOCKERFILE_SHA256=development
+ARG KOR_TRAVEL_MAP_BASE_IMAGE_REFERENCE=python@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+ARG KOR_TRAVEL_MAP_BASE_IMAGE_ID=sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
 
-LABEL org.opencontainers.image.revision="$KOR_TRAVEL_MAP_GIT_COMMIT"
+LABEL org.opencontainers.image.revision="$KOR_TRAVEL_MAP_GIT_COMMIT" \
+    io.kor-travel-map.application-baseline.candidate-git-tree="$KOR_TRAVEL_MAP_GIT_TREE" \
+    io.kor-travel-map.application-baseline.candidate-dockerfile-sha256="$KOR_TRAVEL_MAP_DOCKERFILE_SHA256" \
+    io.kor-travel-map.application-baseline.candidate-base-image-reference="$KOR_TRAVEL_MAP_BASE_IMAGE_REFERENCE" \
+    io.kor-travel-map.application-baseline.candidate-base-image-id="$KOR_TRAVEL_MAP_BASE_IMAGE_ID"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -77,19 +85,25 @@ COPY --chown=root:root docker/dagster.yaml /opt/dagster/dagster_home/dagster.yam
 COPY --chown=root:root docker/dagster-entrypoint.sh /usr/local/bin/dagster-entrypoint.sh
 COPY --chown=root:root docker/dagster-storage-migrate.py /usr/local/bin/ktm-dagster-storage
 COPY --chown=root:root docker/application-schema-final-permit.py /usr/local/bin/ktm-application-schema-final-permit
+COPY --chown=root:root docker/application-schema-contract.py /usr/local/bin/ktm-application-schema-contract
 RUN chown -R root:root /app /opt/dagster/dagster_home \
         /usr/local/bin/dagster-entrypoint.sh /usr/local/bin/ktm-dagster-storage \
         /usr/local/bin/ktm-application-schema-final-permit \
+        /usr/local/bin/ktm-application-schema-contract \
     && chmod 0555 /app /opt/dagster /opt/dagster/dagster_home \
     && chmod 0444 /opt/dagster/dagster_home/dagster.yaml \
-    && find /app/alembic/baseline -type d -exec chmod 0555 {} + \
-    && find /app/alembic/baseline -type f -exec chmod 0444 {} + \
+    && find /app/alembic -type d -exec chmod 0555 {} + \
+    && find /app/alembic -type f -exec chmod 0444 {} + \
     && chmod 0555 /usr/local/bin/ktm-application-schema-final-permit \
+        /usr/local/bin/ktm-application-schema-contract \
     && chmod 0555 /usr/local/bin/dagster-entrypoint.sh /usr/local/bin/ktm-dagster-storage \
     && su -s /bin/sh -c 'test ! -w /app \
+        && test ! -w /app/alembic \
         && test ! -w /app/alembic/baseline \
+        && ! mv /app/alembic/baseline /app/alembic/replaced 2>/dev/null \
         && test ! -w /usr/local/bin/dagster-entrypoint.sh \
         && test ! -w /usr/local/bin/ktm-application-schema-final-permit \
+        && test ! -w /usr/local/bin/ktm-application-schema-contract \
         && test ! -w /opt/dagster/dagster_home/dagster.yaml' appuser
 
 USER appuser

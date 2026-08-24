@@ -107,16 +107,19 @@ docker compose --profile fresh-init run --rm db-application-schema-fresh-300
 이 service는 `KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE`가 실제
 `KOR_TRAVEL_MAP_POSTGRES_DB`와 완전히 같고 DB가 virgin일 때만 final 역할·schema와 exact
 `300` root를 준비한다. 이미 `300`인 persistent DB의 재기동은 이 service를 실행하지 않고
-`KOR_TRAVEL_MAP_API_PROFILE=local-dev docker compose up` 또는 `scripts/docker-up.sh`를 쓴다.
+`KOR_TRAVEL_MAP_API_PROFILE=local-dev docker compose -f docker-compose.yml -f
+docker-compose.local-dev.yml up` 또는 `scripts/docker-up.sh`를 쓴다.
 두 명령은 workstation local-dev 전용이다. production API는 Docker
 Manager final permit이 없으면 blank DB를 generic Alembic upgrade하지 않는다. 기존 `0236`
 DB를 이 명령으로 고치거나 ownership을 넘기는 것은 금지하며 Docker Manager의 별도 one-shot
 handoff만 허용한다. 비밀번호는
 `KOR_TRAVEL_MAP_{MIGRATOR,API_RUNTIME,DAGSTER_RUNTIME}_PASSWORD`로 ignored env에만 두며
-Alembic revision에는 만들거나 기록하지 않는다. API entrypoint는 migration 뒤
-`kortravelmap.infra.runtime_privileges`로 closed ACL inventory를 재조정한 뒤에만 migrator
-DSN을 쓰며, Uvicorn exec 직전에 제거한다. 이 재조정은 `ALTER DEFAULT PRIVILEGES`를 쓰지
-않아 state/audit future table이 runtime DML을 자동 상속할 수 없다.
+Alembic revision에는 만들거나 기록하지 않는다. local-dev API만
+`docker-compose.local-dev.yml` overlay에서 migrator DSN을 받아 기동 전 closed ACL inventory를
+재조정하고 Uvicorn exec 직전에 제거한다. production API는 migrator DSN을 받지 않으며,
+별도 Manager one-shot이 재조정과 final permit 발행을 끝낸다. 이 재조정은
+`ALTER DEFAULT PRIVILEGES`를 쓰지 않아 state/audit future table이 runtime DML을 자동 상속할
+수 없다.
 
 Dagster metadata는 같은 Postgres container 안의 별도 DB `kor_travel_map_dagster`를 쓴다.
 `dagster-db-init` 서비스가 기동 때마다 DB 존재를 보장하고, Dagster webserver/daemon은

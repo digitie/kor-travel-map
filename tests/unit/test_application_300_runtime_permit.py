@@ -366,6 +366,28 @@ def test_fresh_migration_accepts_only_fixed_one_shot_operation(
     assert "downgrade" not in source
 
 
+def test_fresh_migration_rejects_mutable_installed_contract_helper(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """installed fresh executable은 mutable helper를 import하지 않는다."""
+
+    module = _load_script(
+        "application_schema_fresh_300_unsafe_contract",
+        "docker/application-schema-fresh-300.py",
+    )
+    installed_bin = tmp_path / "bin"
+    installed_bin.mkdir()
+    helper = installed_bin / "ktm-application-schema-contract"
+    helper.write_text("def application_contract():\n    return {}\n", encoding="utf-8")
+    helper.chmod(0o777)
+    monkeypatch.setattr(module, "_INSTALLED_BIN_DIR", installed_bin)
+    monkeypatch.setattr(module, "__file__", str(installed_bin / "fresh"))
+
+    with pytest.raises(module.FreshMigrationError, match="helper is unsafe"):
+        module._static_contract_helper_path()
+
+
 def test_fresh_migration_rechecks_manager_fence_before_root_mutation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -609,3 +631,45 @@ def test_static_baseline_contract_attests_all_manager_consumed_receipts() -> Non
     }
 
     assert module.main(["unexpected"]) == 1
+
+
+def test_static_baseline_contract_rejects_mutable_installed_artifact(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """installed contract reader는 root-owned 0444가 아닌 artifact를 거부한다."""
+
+    module = _load_script(
+        "application_schema_contract_unsafe_artifact",
+        "docker/application-schema-contract.py",
+    )
+    installed_bin = tmp_path / "bin"
+    installed_bin.mkdir()
+    artifact = tmp_path / "mutable.sql"
+    artifact.write_text("SELECT 1;\n", encoding="utf-8")
+    artifact.chmod(0o666)
+    monkeypatch.setattr(module, "_INSTALLED_BIN_DIR", installed_bin)
+    monkeypatch.setattr(module, "__file__", str(installed_bin / "contract"))
+
+    with pytest.raises(
+        module.ApplicationSchemaContractError,
+        match="installed_application_baseline_unsafe",
+    ):
+        module._read_immutable_bytes(artifact)
+
+
+def test_final_permit_binds_all_static_contract_facets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """permit은 manifest 문자열뿐 아니라 검증된 sidecar contract에 결박된다."""
+
+    module = _load_script(
+        "application_schema_final_permit_static_contract",
+        "docker/application-schema-final-permit.py",
+    )
+    contract = dict(module._static_contract())
+    contract["seed_sha256"] = "0" * 64
+    monkeypatch.setattr(module, "_static_contract", lambda: contract)
+
+    with pytest.raises(module.FinalPermitError, match="contract is inconsistent"):
+        module._read_reference()

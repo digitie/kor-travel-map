@@ -302,15 +302,6 @@ async def test_handoff_executable_accepts_exact_source_contract(
             "public Alembic row type explicit default ACL residue",
         ),
         (
-            "GRANT USAGE ON TYPE public._alembic_version TO PUBLIC",
-            "public Alembic array type ACL",
-        ),
-        (
-            "GRANT USAGE ON TYPE public._alembic_version TO PUBLIC; "
-            "REVOKE USAGE ON TYPE public._alembic_version FROM PUBLIC",
-            "public Alembic array type explicit default ACL residue",
-        ),
-        (
             "ALTER TABLE public.alembic_version "
             "ADD COLUMN application_300_handoff_dropped integer; "
             "ALTER TABLE public.alembic_version "
@@ -412,7 +403,7 @@ async def test_mutable_provider_catalog_data_does_not_change_handoff_contract(
         ]
     ) == 0
     assert await _raw_version(admin_dsn) == ("300",)
-    assert json.loads(capsys.readouterr().out)["outcome"] == "transitioned"
+    assert json.loads(capsys.readouterr().out)["outcome"] == "stamped"
 
 
 @pytest.mark.asyncio

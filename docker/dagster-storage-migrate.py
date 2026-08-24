@@ -1,4 +1,4 @@
-#!/usr/local/bin/python
+#!/usr/local/bin/python -I
 """후보 이미지 안에서 Dagster metadata storage를 attest·migrate한다.
 
 이 파일은 의도적으로 ``kortravelmap`` package를 import하지 않는다. migration-only
@@ -28,6 +28,8 @@ _DAGSTER_PG_URL_ENV: Final = "KOR_TRAVEL_MAP_DAGSTER_PG_URL"
 _HEAD_SCHEMA: Final = "kor-travel-map.dagster-storage-head.v1"
 _MIGRATE_SCHEMA: Final = "kor-travel-map.dagster-storage-migration.v1"
 _ERROR_SCHEMA: Final = "kor-travel-map.dagster-storage-migration-error.v1"
+_ISOLATED_PYTHON: Final = "/usr/local/bin/python"
+_DAGSTER_EXECUTABLE: Final = "/usr/local/bin/dagster"
 
 
 class DagsterStorageMigrationError(RuntimeError):
@@ -80,7 +82,13 @@ def _run_dagster_instance_migrate(environment: Mapping[str, str]) -> None:
     """Dagster가 제공하는 migration entrypoint를 실행하되 민감 출력은 전달하지 않는다."""
     try:
         completed = subprocess.run(
-            ["dagster", "instance", "migrate"],
+            [
+                _ISOLATED_PYTHON,
+                "-I",
+                _DAGSTER_EXECUTABLE,
+                "instance",
+                "migrate",
+            ],
             check=False,
             capture_output=True,
             text=True,

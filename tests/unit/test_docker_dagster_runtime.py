@@ -182,6 +182,84 @@ def test_tvn34_compose_never_derives_runtime_or_metadata_credentials_from_bootst
 
 
 @pytest.mark.unit
+def test_resolved_dagster_services_exclude_application_privileged_credentials(
+    tmp_path: Path,
+) -> None:
+    """root deployment env의 bootstrap/migrator 값은 Dagster에 전달되지 않는다."""
+
+    reset_overlay = tmp_path / "reset-api-env-file.yml"
+    reset_overlay.write_text(
+        "services:\n  api:\n    env_file: !reset []\n",
+        encoding="utf-8",
+    )
+    poison = "privileged-value-must-not-enter-dagster"
+    environment = {
+        "PATH": os.environ["PATH"],
+        "COMPOSE_DISABLE_ENV_FILE": "1",
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": "resolver-dummy",
+        "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET": "resolver-dummy",
+        "KOR_TRAVEL_MAP_API_METRICS_TOKEN": "resolver-dummy",
+        "KOR_TRAVEL_MAP_API_SERVICE_TOKEN": "resolver-dummy",
+        "KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN": _MANUAL_FEATURE_CREATE_TOKEN,
+        "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256": (
+            _MANUAL_FEATURE_CREATE_DIGEST
+        ),
+        "KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH": "resolver-dummy",
+        "KOR_TRAVEL_MAP_UI_SESSION_SECRET": "resolver-dummy",
+        "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": poison,
+        "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN": poison,
+        "KOR_TRAVEL_MAP_MIGRATOR_PASSWORD": poison,
+        "KOR_TRAVEL_MAP_POSTGRES_PASSWORD": poison,
+        "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN": (
+            "postgresql://api@example.invalid/ktm"
+        ),
+        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": (
+            "postgresql://dagster@example.invalid/ktm"
+        ),
+        "KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL": (
+            "postgresql://metadata@example.invalid/ktm_dagster"
+        ),
+    }
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "-f",
+            str(ROOT / "docker-compose.yml"),
+            "-f",
+            str(reset_overlay),
+            "config",
+            "--format",
+            "json",
+        ],
+        cwd=ROOT,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    services = json.loads(result.stdout)["services"]
+    privileged_names = {
+        "KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE",
+        "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN",
+        "KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD",
+        "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN",
+        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD",
+        "KOR_TRAVEL_MAP_MIGRATOR_PASSWORD",
+        "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN",
+        "KOR_TRAVEL_MAP_POSTGRES_DB",
+        "KOR_TRAVEL_MAP_POSTGRES_PASSWORD",
+        "KOR_TRAVEL_MAP_POSTGRES_USER",
+    }
+    for service_name in ("dagster", "dagster-daemon", "dagster-storage-migrate"):
+        service = services[service_name]
+        assert privileged_names.isdisjoint(service.get("environment", {})), service_name
+        assert poison not in json.dumps(service, sort_keys=True), service_name
+
+
+@pytest.mark.unit
 def test_bridge_admin_bff_uses_exact_trusted_peer_address() -> None:
     compose = _compose()
     services = compose["services"]
@@ -417,9 +495,7 @@ def test_docker_compose_isolates_provider_credentials_from_api() -> None:
     for service_name in ("dagster", "dagster-daemon"):
         environment = services[service_name]["environment"]
         assert shared_provider_keys <= set(environment), service_name
-        assert services[service_name]["env_file"] == [
-            {"path": ".env", "required": False, "format": "raw"}
-        ]
+        assert "env_file" not in services[service_name]
 
     assert "KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH" in services["dagster-daemon"]["environment"]
 
@@ -3254,6 +3330,78 @@ def test_dagster_entrypoint_rejects_manual_create_keys_even_when_empty(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("command", "key"),
+    [
+        (
+            [
+                "/usr/local/bin/dagster-webserver",
+                "-m",
+                "kortravelmap.dagster.definitions",
+                "-h",
+                "0.0.0.0",
+                "-p",
+                "12702",
+            ],
+            "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN",
+        ),
+        (
+            [
+                "/usr/local/bin/dagster-daemon",
+                "run",
+                "-m",
+                "kortravelmap.dagster.definitions",
+            ],
+            "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN",
+        ),
+        (
+            ["/usr/local/bin/ktm-dagster-storage", "migrate"],
+            "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE",
+        ),
+    ],
+)
+def test_dagster_entrypoint_rejects_application_privileged_keys_even_when_empty(
+    tmp_path: Path,
+    command: list[str],
+    key: str,
+) -> None:
+    """webserver·daemon·metadata one-shot에는 application 특권 자격이 없다."""
+
+    path = f"{Path(sys.executable).parent}:{os.environ['PATH']}"
+    result = _run_dagster_entrypoint(
+        tmp_path,
+        path,
+        command,
+        {
+            "KOR_TRAVEL_MAP_DAGSTER_PROFILE": "production",
+            key: "",
+        },
+    )
+
+    assert result.returncode != 0
+    assert (
+        "application migration/bootstrap credential key must not enter "
+        f"Dagster process: {key}"
+    ) in result.stderr
+
+    entrypoint = _script("docker/dagster-entrypoint.sh")
+    for forbidden_name in (
+        "KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE",
+        "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN",
+        "KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD",
+        "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN",
+        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD",
+        "KOR_TRAVEL_MAP_MIGRATOR_PASSWORD",
+        "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN",
+        "KOR_TRAVEL_MAP_POSTGRES_DB",
+        "KOR_TRAVEL_MAP_POSTGRES_PASSWORD",
+        "KOR_TRAVEL_MAP_POSTGRES_USER",
+        "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_",
+    ):
+        assert forbidden_name in entrypoint
+
+
+@pytest.mark.unit
 def test_dagster_entrypoint_executes_command_without_api_ops_keys(
     tmp_path: Path,
 ) -> None:
@@ -3530,7 +3678,9 @@ def test_dagster_production_uses_verified_runtime_dsn_for_preflight_and_runtime(
 def test_dagster_entrypoint_does_not_read_map_application_alembic() -> None:
     entrypoint = _script("docker/dagster-entrypoint.sh")
 
-    assert "alembic" not in entrypoint
+    assert "python -I -m alembic" not in entrypoint
+    assert "alembic current" not in entrypoint
+    assert "alembic heads" not in entrypoint
     assert "KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD" not in entrypoint
     assert "KOR_TRAVEL_MAP_MIGRATION_MODE" not in entrypoint
 

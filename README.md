@@ -78,7 +78,8 @@ docker compose up -d postgres
 docker compose --profile fresh-init run --rm db-application-schema-fresh-300
 
 # Docker full stack은 local-dev profile만 사용한다. production은 Docker Manager가 소유한다.
-KOR_TRAVEL_MAP_API_PROFILE=local-dev docker compose up -d
+KOR_TRAVEL_MAP_API_PROFILE=local-dev docker compose \
+  -f docker-compose.yml -f docker-compose.local-dev.yml up -d
 
 # API/admin/Dagster stack — scoped API env 필수, root cwd 직접 uvicorn 금지
 uv pip install -e packages/kor-travel-map-api

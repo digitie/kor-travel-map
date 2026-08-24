@@ -12,6 +12,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import importlib.machinery
+import importlib.util
 import json
 import os
 import re
@@ -19,6 +21,7 @@ import stat
 import sys
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from types import ModuleType
 from typing import Any, Final
 from uuid import UUID
 
@@ -44,6 +47,8 @@ _IMAGE_ID_PATTERN: Final = re.compile(r"^sha256:[0-9a-f]{64}$")
 _COMMIT_PATTERN: Final = re.compile(r"^[0-9a-f]{40}$")
 _DATABASE_PATTERN: Final = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _DATABASE_OWNER: Final = "ktm_feature_schema_owner"
+_INSTALLED_BIN_DIR: Final = Path("/usr/local/bin")
+_STATIC_CONTRACT_SCHEMA: Final = "kor-travel-map.application-baseline-contract.v1"
 _TOP_LEVEL_FIELDS: Final = frozenset(
     {
         "schema",
@@ -119,6 +124,21 @@ _FRESH_FINALIZE_EVIDENCE_FIELDS: Final = frozenset(
     }
 )
 _APPLICATION_ROOT_CANDIDATES: Final = (Path("/app"), Path(__file__).resolve().parents[1])
+_CONTRACT_FIELDS: Final = frozenset(
+    {
+        "schema",
+        "application_head",
+        "reference_manifest_sha256",
+        "postgres_image_id",
+        "source_catalog_sha256",
+        "destination_catalog_sha256",
+        "seed_sha256",
+        "privileged_residue_sha256",
+        "source_alembic_version_sha256",
+        "destination_alembic_version_sha256",
+        "runtime_invariants_sql_sha256",
+    }
+)
 
 
 class FinalPermitError(RuntimeError):
@@ -144,6 +164,63 @@ def _application_root() -> Path:
     raise FinalPermitError("installed application baseline reference is unavailable")
 
 
+def _static_contract_helper_path() -> Path:
+    if Path(__file__).resolve().parent != _INSTALLED_BIN_DIR:
+        return Path(__file__).with_name("application-schema-contract.py")
+    path = _INSTALLED_BIN_DIR / "ktm-application-schema-contract"
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise FinalPermitError(
+            "installed application baseline contract is unavailable"
+        ) from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or metadata.st_uid != 0
+        or stat.S_IMODE(metadata.st_mode) != 0o555
+    ):
+        raise FinalPermitError("installed application baseline contract helper is unsafe")
+    return path
+
+
+def _load_static_contract_module() -> ModuleType:
+    path = _static_contract_helper_path()
+    try:
+        loader = importlib.machinery.SourceFileLoader(
+            "application_schema_contract", str(path)
+        )
+        spec = importlib.util.spec_from_loader("application_schema_contract", loader)
+        if spec is None or spec.loader is None:
+            raise ImportError("application schema contract loader is unavailable")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    except (ImportError, OSError) as exc:
+        raise FinalPermitError(
+            "installed application baseline contract is unavailable"
+        ) from exc
+
+
+def _static_contract() -> Mapping[str, str]:
+    module = _load_static_contract_module()
+    try:
+        value = module.application_contract()
+    except Exception as exc:
+        raise FinalPermitError("installed application baseline contract is invalid") from exc
+    if not isinstance(value, Mapping) or set(value) != _CONTRACT_FIELDS:
+        raise FinalPermitError("installed application baseline contract field set is invalid")
+    if value["schema"] != _STATIC_CONTRACT_SCHEMA or value["application_head"] != "300":
+        raise FinalPermitError("installed application baseline contract identity is invalid")
+    for key in _CONTRACT_FIELDS - {"schema", "application_head", "postgres_image_id"}:
+        _require_sha256(value[key], f"installed baseline {key}")
+    if not isinstance(value["postgres_image_id"], str) or not _IMAGE_ID_PATTERN.fullmatch(
+        value["postgres_image_id"]
+    ):
+        raise FinalPermitError("installed application baseline PostgreSQL image is invalid")
+    return {key: str(item) for key, item in value.items()}
+
+
 def _database_identity_sha256(
     *, system_identifier: str, name: str, oid: int, owner: str
 ) -> str:
@@ -157,6 +234,7 @@ def _database_identity_sha256(
 
 
 def _read_reference() -> tuple[str, Mapping[str, Any]]:
+    contract = _static_contract()
     path = _application_root() / "alembic" / "baseline" / "application-reference.json"
     try:
         raw = path.read_bytes()
@@ -167,7 +245,37 @@ def _read_reference() -> tuple[str, Mapping[str, Any]]:
         "kor-travel-map.application-baseline-reference.v1"
     ):
         raise FinalPermitError("installed application baseline reference is invalid")
-    return hashlib.sha256(raw).hexdigest(), value
+    reference_sha256 = hashlib.sha256(raw).hexdigest()
+    artifacts = value.get("artifacts")
+    source = value.get("source")
+    if not isinstance(artifacts, Mapping) or not isinstance(source, Mapping):
+        raise FinalPermitError("installed application baseline artifact map is invalid")
+    expected = {
+        "source_catalog_sha256": artifacts.get("source_catalog_contract_sha256"),
+        "destination_catalog_sha256": artifacts.get(
+            "destination_catalog_contract_sha256"
+        ),
+        "seed_sha256": artifacts.get("seed_contract_sha256"),
+        "privileged_residue_sha256": artifacts.get(
+            "privileged_residue_contract_sha256"
+        ),
+        "source_alembic_version_sha256": artifacts.get(
+            "source_alembic_version_contract_sha256"
+        ),
+        "destination_alembic_version_sha256": artifacts.get(
+            "destination_alembic_version_contract_sha256"
+        ),
+        "runtime_invariants_sql_sha256": artifacts.get(
+            "runtime_invariants_sql_sha256"
+        ),
+    }
+    if (
+        reference_sha256 != contract["reference_manifest_sha256"]
+        or source.get("container_image_id") != contract["postgres_image_id"]
+        or any(contract[key] != digest for key, digest in expected.items())
+    ):
+        raise FinalPermitError("installed application baseline contract is inconsistent")
+    return reference_sha256, value
 
 
 def _require_fixed_file() -> bytes:

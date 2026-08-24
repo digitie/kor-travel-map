@@ -133,10 +133,30 @@ def _require_sha256(value: object, label: str) -> str:
     return value
 
 
-def _load_static_contract_module() -> ModuleType:
+def _static_contract_helper_path() -> Path:
+    """installed image에서는 root-owned immutable contract helper만 허용한다."""
+
+    if Path(__file__).resolve().parent != _INSTALLED_BIN_DIR:
+        return _application_root() / "docker" / "application-schema-contract.py"
     path = _INSTALLED_BIN_DIR / "ktm-application-schema-contract"
-    if not path.is_file():
-        path = _application_root() / "docker" / "application-schema-contract.py"
+    try:
+        metadata = path.lstat()
+    except OSError as exc:
+        raise FreshMigrationError(
+            "installed application baseline contract is unavailable"
+        ) from exc
+    if (
+        not stat.S_ISREG(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or metadata.st_uid != 0
+        or stat.S_IMODE(metadata.st_mode) != 0o555
+    ):
+        raise FreshMigrationError("installed application baseline contract helper is unsafe")
+    return path
+
+
+def _load_static_contract_module() -> ModuleType:
+    path = _static_contract_helper_path()
     try:
         loader = importlib.machinery.SourceFileLoader("application_schema_contract", str(path))
         spec = importlib.util.spec_from_loader("application_schema_contract", loader)
