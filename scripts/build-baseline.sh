@@ -295,7 +295,7 @@ try:
     value = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
 except (OSError, ValueError) as exc:
     raise SystemExit(f"fresh 300 oracle receipt cannot be parsed: {exc}") from exc
-if not isinstance(value, dict) or value.get("schema") != "kor-travel-map.application-fresh-300-oracle.v7":
+if not isinstance(value, dict) or value.get("schema") != "kor-travel-map.application-fresh-300-oracle.v8":
     raise SystemExit("fresh 300 oracle receipt schema is invalid")
 image = value.get("candidate_image")
 commit = value.get("candidate_commit")
@@ -974,7 +974,7 @@ bootstrap_script_sha256="$(sha256sum "$CANDIDATE_SEALED_ROOT/docker/postgres-rol
 python3 - "$FRESH_300_RECEIPT" "$CANDIDATE_PROVENANCE_JSON" "$fresh_container_id" \
   "$FRESH_300_DB" "$fresh_database_oid" "$fresh_system_identifier" \
   "$SOURCE_IMAGE" "$SOURCE_IMAGE_ID" "$creator_script_sha256" "$bootstrap_script_sha256" \
-  "$fresh_candidate_labels_json" <<'PY'
+  "$fresh_candidate_labels_json" "$candidate_destination_alembic_version_receipt_sha256" <<'PY'
 from __future__ import annotations
 
 import hashlib
@@ -1042,7 +1042,10 @@ expected = {
     "postgres_system_identifier": sys.argv[6],
     **candidate,
     "bootstrap_phase": "baseline-300",
-    "migration_command": "ktm-application-schema-fresh-300 migrate",
+    "migration_command": (
+        "ktm-application-schema-fresh-300 migrate --writer-fence-receipt "
+        "/run/kor-travel-map-application-fresh-migrate/fence.json"
+    ),
     "postgis_image": sys.argv[7],
     "postgis_image_id": sys.argv[8],
     "creator_script_sha256": sys.argv[9],
@@ -1056,9 +1059,10 @@ expected = {
 required = {
     "schema", *expected, "application_relation_count", "catalog_sha256", "seed_sha256",
     "privileged_residue_sha256", "destination_alembic_version_sha256",
-    "runtime_invariant_violation_count",
+    "runtime_invariant_violation_count", "fresh_migration_result_sha256",
+    "fresh_migration_evidence",
 }
-if not isinstance(receipt, dict) or receipt.get("schema") != "kor-travel-map.application-fresh-300-oracle.v7":
+if not isinstance(receipt, dict) or receipt.get("schema") != "kor-travel-map.application-fresh-300-oracle.v8":
     raise SystemExit("fresh 300 oracle receipt schema is invalid")
 if not isinstance(candidate, dict) or set(candidate) != candidate_keys:
     raise SystemExit("sealed candidate attestation schema is invalid")
@@ -1084,6 +1088,48 @@ for key in (
 ):
     if not isinstance(receipt[key], str) or not re.fullmatch(r"[0-9a-f]{64}", receipt[key]):
         raise SystemExit(f"fresh 300 oracle receipt digest is invalid: {key}")
+evidence = receipt["fresh_migration_evidence"]
+expected_evidence = {
+    "schema": "kor-travel-map.application-fresh-300-migration.v2",
+    "outcome": "migrated",
+    "authorization": "manager-fence",
+    "destination_head": "300",
+    "map_candidate_commit": candidate["candidate_commit"],
+    "map_candidate_image_id": candidate["candidate_image_id"],
+    "reference_manifest_sha256": candidate["candidate_manifest_sha256"],
+    "database_identity": {
+        "database_name": sys.argv[4],
+        "database_oid": int(sys.argv[5]),
+        "database_owner": "ktm_feature_schema_owner",
+        "postgres_system_identifier": sys.argv[6],
+    },
+    "journal_generation": 1,
+    "expected_destination_alembic_version_sha256": sys.argv[12],
+    "post_destination_alembic_version_sha256": sys.argv[12],
+}
+if not isinstance(evidence, dict) or any(
+    evidence.get(key) != value for key, value in expected_evidence.items()
+):
+    raise SystemExit("fresh 300 oracle migration evidence binding drifted")
+for key in (
+    "writer_fence_receipt_sha256",
+    "journal_sha256",
+):
+    if not isinstance(evidence.get(key), str) or not re.fullmatch(
+        r"[0-9a-f]{64}", evidence[key]
+    ):
+        raise SystemExit(f"fresh 300 oracle migration evidence digest is invalid: {key}")
+if not isinstance(evidence.get("writer_fence_transaction_id"), str):
+    raise SystemExit("fresh 300 oracle migration fence transaction is invalid")
+canonical_evidence = (
+    json.dumps(evidence, sort_keys=True, separators=(",", ":")) + "\n"
+).encode("utf-8")
+if (
+    not isinstance(receipt["fresh_migration_result_sha256"], str)
+    or hashlib.sha256(canonical_evidence).hexdigest()
+    != receipt["fresh_migration_result_sha256"]
+):
+    raise SystemExit("fresh 300 oracle migration result digest is invalid")
 PY
 candidate_image_id_actual="$(python3 - "$CANDIDATE_PROVENANCE_JSON" <<'PY'
 import json

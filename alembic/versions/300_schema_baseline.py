@@ -77,6 +77,10 @@ _REFERENCE_ARTIFACTS: Final[dict[str, str]] = {
     "application-seed.sha256": "seed_contract_receipt_sha256",
     "application-privileged-residue.sql": "privileged_residue_contract_sql_sha256",
     "application-privileged-residue.sha256": "privileged_residue_contract_receipt_sha256",
+    "application-source-alembic-version.sql": "source_alembic_version_contract_sql_sha256",
+    "application-source-alembic-version.sha256": "source_alembic_version_contract_receipt_sha256",
+    "application-destination-alembic-version.sql": "destination_alembic_version_contract_sql_sha256",
+    "application-destination-alembic-version.sha256": "destination_alembic_version_contract_receipt_sha256",
     "application-runtime-invariants.sql": "runtime_invariants_sql_sha256",
 }
 
@@ -156,6 +160,11 @@ def _baseline_reference() -> dict[str, Any]:
         ("application-catalog.sha256", "catalog_contract_sha256"),
         ("application-seed.sha256", "seed_contract_sha256"),
         ("application-privileged-residue.sha256", "privileged_residue_contract_sha256"),
+        ("application-source-alembic-version.sha256", "source_alembic_version_contract_sha256"),
+        (
+            "application-destination-alembic-version.sha256",
+            "destination_alembic_version_contract_sha256",
+        ),
     ):
         receipt = _read_sidecar(
             receipt_name, artifacts[_REFERENCE_ARTIFACTS[receipt_name]]
@@ -1173,6 +1182,11 @@ def upgrade() -> None:
         "application-seed.sql",
         artifacts["seed_contract_sql_sha256"],
         artifacts["seed_contract_sha256"],
+    )
+    _verify_contract_receipt(
+        "application-destination-alembic-version.sql",
+        artifacts["destination_alembic_version_contract_sql_sha256"],
+        artifacts["destination_alembic_version_contract_sha256"],
     )
 
 

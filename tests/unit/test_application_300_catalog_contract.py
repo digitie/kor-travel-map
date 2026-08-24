@@ -173,6 +173,11 @@ def test_catalog_contract_binds_public_alembic_exception_shape() -> None:
     assert "array_type.typacl IS NULL" in migration
     assert "array_type.typelem = row_type.oid" in migration
     assert "privilege.grantor = object.relowner" in migration
+    assert '"application-source-alembic-version.sql"' in migration
+    assert '"application-source-alembic-version.sha256"' in migration
+    assert '"application-destination-alembic-version.sql"' in migration
+    assert '"application-destination-alembic-version.sha256"' in migration
+    assert "destination_alembic_version_contract_sha256" in migration
     assert "attribute.attisdropped" in migration
     assert "table_access_method.amname = 'heap'" in migration
     assert "index_access_method.amname = 'btree'" in migration

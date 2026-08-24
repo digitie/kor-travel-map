@@ -530,9 +530,13 @@ def test_application_300_compose_requires_explicit_fresh_bootstrap() -> None:
         "migrate",
     ]
     assert set(fresh_migration["environment"]) == {
+        "KOR_TRAVEL_MAP_APPLICATION_SCHEMA_PROFILE",
         "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN",
         "KOR_TRAVEL_MAP_PG_DSN",
     }
+    assert fresh_migration["environment"][
+        "KOR_TRAVEL_MAP_APPLICATION_SCHEMA_PROFILE"
+    ] == "local-dev"
     for removed_service in (
         "db-role-bootstrap",
         "db-migrate-to-m01-bootstrap-boundary",

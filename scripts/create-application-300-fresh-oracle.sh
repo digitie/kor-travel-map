@@ -28,6 +28,7 @@ CANDIDATE_BUILD_RECEIPT_SHA256=""
 CANDIDATE_PROVENANCE_JSON=""
 RECEIPT=""
 VOLUME=""
+FRESH_MIGRATE_FENCE_VOLUME=""
 POSTGIS_IMAGE="postgis/postgis:16-3.5-alpine"
 FRESH_DATABASE_TEMPLATE="template1"
 POSTGIS_BOOTSTRAP_DATABASE="postgres"
@@ -544,7 +545,9 @@ PY
 
 created_container=0
 created_volume=0
+created_fresh_migrate_fence_volume=0
 receipt_tmp=""
+fresh_migration_result_file=""
 cleanup_on_failure() {
   status=$?
   if [ "$status" -ne 0 ]; then
@@ -555,6 +558,10 @@ cleanup_on_failure() {
     if [ "$created_volume" = 1 ]; then
       docker volume rm "$VOLUME" >/dev/null 2>&1 || true
     fi
+  fi
+  [ -z "$fresh_migration_result_file" ] || rm -f -- "$fresh_migration_result_file"
+  if [ "$created_fresh_migrate_fence_volume" = 1 ]; then
+    docker volume rm "$FRESH_MIGRATE_FENCE_VOLUME" >/dev/null 2>&1 || true
   fi
   cleanup_candidate_seal
   exit "$status"
@@ -876,21 +883,158 @@ docker run --pull=never --rm --network "container:$CONTAINER" \
   "$postgis_image_id" sh /bootstrap.sh
 
 migrator_dsn="postgresql+asyncpg://ktm_feature_migrator:$oracle_password@127.0.0.1:5432/$DATABASE"
+database_oid="$(docker exec "$CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d "$DATABASE" -At \
+  -c 'SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database()')"
+database_owner="$(docker exec "$CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d "$DATABASE" -At \
+  -c 'SELECT datdba::regrole::text FROM pg_catalog.pg_database WHERE datname = current_database()')"
+system_identifier="$(docker exec "$CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d "$DATABASE" -At \
+  -c 'SELECT system_identifier FROM pg_catalog.pg_control_system()')"
+[[ "$database_oid" =~ ^[0-9]+$ ]] || die "fresh oracle database OID를 얻지 못했다"
+[ "$database_owner" = "ktm_feature_schema_owner" ] || \
+  die "fresh oracle database owner가 schema owner가 아니다"
+[[ "$system_identifier" =~ ^[0-9]+$ ]] || die "fresh oracle PostgreSQL system identifier를 얻지 못했다"
+
+FRESH_MIGRATE_FENCE_VOLUME="${CONTAINER}-fresh-migrate-fence"
+docker volume inspect "$FRESH_MIGRATE_FENCE_VOLUME" >/dev/null 2>&1 && \
+  die "fresh migrate fence volume이 이미 존재한다"
+docker volume create "$FRESH_MIGRATE_FENCE_VOLUME" >/dev/null
+created_fresh_migrate_fence_volume=1
+python3 - "$reference_manifest" "$CANDIDATE_COMMIT" "$candidate_image_id" \
+  "$postgis_image_id" "$DATABASE" "$database_oid" "$database_owner" \
+  "$system_identifier" <<'PY' | docker run --pull=never --rm -i --user root \
+    --mount "type=volume,source=$FRESH_MIGRATE_FENCE_VOLUME,target=/fresh-migrate-fence" \
+    --entrypoint sh "$postgis_image_id" -ec '
+set -eu
+target=/fresh-migrate-fence/fence.json
+[ ! -e "$target" ] && [ ! -L "$target" ] || exit 73
+temporary="$(mktemp /fresh-migrate-fence/.fence.XXXXXX)"
+trap '\''rm -f -- "$temporary"'\'' EXIT
+cat > "$temporary"
+chmod 0444 "$temporary"
+mv "$temporary" "$target"
+trap - EXIT
+'
+from __future__ import annotations
+
+import hashlib
+import json
+import sys
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from uuid import uuid4
+
+reference_raw = Path(sys.argv[1]).read_bytes()
+reference = json.loads(reference_raw)
+artifacts = reference["artifacts"]
+transaction_id = str(uuid4())
+journal_preimage = (
+    "kor-travel-map.fresh-oracle-manager-generation.v1\0"
+    + transaction_id
+    + "\0"
+    + sys.argv[2]
+    + "\0"
+    + sys.argv[5]
+    + "\0"
+    + sys.argv[6]
+    + "\0"
+    + sys.argv[8]
+)
+value = {
+    "schema": "kor-travel-docker-manager.map-fresh-300-migrate-fence.v1",
+    "transaction_id": transaction_id,
+    "journal_sha256": hashlib.sha256(journal_preimage.encode("utf-8")).hexdigest(),
+    "journal_generation": 1,
+    "operation": "map-fresh-300",
+    "map_candidate_commit": sys.argv[2],
+    "map_candidate_image_id": sys.argv[3],
+    "postgres_image_id": sys.argv[4],
+    "destination_head": "300",
+    "reference_manifest_sha256": hashlib.sha256(reference_raw).hexdigest(),
+    "catalog_sha256": artifacts["catalog_contract_sha256"],
+    "seed_sha256": artifacts["seed_contract_sha256"],
+    "privileged_residue_sha256": artifacts["privileged_residue_contract_sha256"],
+    "source_alembic_version_sha256": artifacts[
+        "source_alembic_version_contract_sha256"
+    ],
+    "destination_alembic_version_sha256": artifacts[
+        "destination_alembic_version_contract_sha256"
+    ],
+    "runtime_invariants_sql_sha256": artifacts["runtime_invariants_sql_sha256"],
+    "database_name": sys.argv[5],
+    "database_oid": int(sys.argv[6]),
+    "database_owner": sys.argv[7],
+    "postgres_system_identifier": sys.argv[8],
+    "writer_fence_expires_at": (datetime.now(UTC) + timedelta(minutes=30)).isoformat(),
+}
+print(json.dumps(value, sort_keys=True, separators=(",", ":")))
+PY
+
+fresh_migration_result_file="$(mktemp "${TMPDIR:-/tmp}/ktm300-fresh-migration-result.XXXXXX")"
 docker run --pull=never --rm --network "container:$CONTAINER" \
+  --mount "type=volume,source=$FRESH_MIGRATE_FENCE_VOLUME,target=/run/kor-travel-map-application-fresh-migrate,readonly" \
+  -e KOR_TRAVEL_MAP_APPLICATION_SCHEMA_PROFILE=production \
   -e "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN=$migrator_dsn" \
-  --entrypoint /usr/local/bin/ktm-application-schema-fresh-300 "$candidate_image_id" migrate
+  -e "KOR_TRAVEL_MAP_IMAGE_REVISION=$CANDIDATE_COMMIT" \
+  -e "KOR_TRAVEL_MAP_APPLICATION_FRESH_MIGRATE_IMAGE_ID=$candidate_image_id" \
+  --entrypoint /usr/local/bin/ktm-application-schema-fresh-300 "$candidate_image_id" \
+  migrate --writer-fence-receipt /run/kor-travel-map-application-fresh-migrate/fence.json \
+  >"$fresh_migration_result_file"
+fresh_migration_result_sha256="$(sha256sum "$fresh_migration_result_file" | awk '{print $1}')"
+fresh_migration_evidence="$(python3 - "$fresh_migration_result_file" "$CANDIDATE_COMMIT" \
+  "$candidate_image_id" "$manifest_sha256" "$DATABASE" "$database_oid" \
+  "$database_owner" "$system_identifier" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+raw = Path(sys.argv[1]).read_bytes()
+try:
+    value = json.loads(raw)
+except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+    raise SystemExit(f"fresh migration result is invalid: {exc}") from exc
+if raw != (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode():
+    raise SystemExit("fresh migration result is not one canonical JSON line")
+expected = {
+    "schema": "kor-travel-map.application-fresh-300-migration.v2",
+    "outcome": "migrated",
+    "authorization": "manager-fence",
+    "destination_head": "300",
+    "map_candidate_commit": sys.argv[2],
+    "map_candidate_image_id": sys.argv[3],
+    "reference_manifest_sha256": sys.argv[4],
+    "database_identity": {
+        "database_name": sys.argv[5],
+        "database_oid": int(sys.argv[6]),
+        "database_owner": sys.argv[7],
+        "postgres_system_identifier": sys.argv[8],
+    },
+}
+if not isinstance(value, dict) or any(value.get(key) != item for key, item in expected.items()):
+    raise SystemExit("fresh migration result candidate/database binding drifted")
+for key in (
+    "writer_fence_receipt_sha256", "journal_sha256",
+    "expected_destination_alembic_version_sha256",
+    "post_destination_alembic_version_sha256",
+):
+    if not isinstance(value.get(key), str) or not re.fullmatch(r"[0-9a-f]{64}", value[key]):
+        raise SystemExit(f"fresh migration result digest is invalid: {key}")
+if (
+    value["expected_destination_alembic_version_sha256"]
+    != value["post_destination_alembic_version_sha256"]
+    or not isinstance(value.get("writer_fence_transaction_id"), str)
+    or value.get("journal_generation") != 1
+):
+    raise SystemExit("fresh migration result generation/facet evidence is invalid")
+print(json.dumps(value, sort_keys=True, separators=(",", ":")))
+PY
+)"
 
 raw_revision="$(docker exec "$CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d "$DATABASE" -At \
   -c "SELECT string_agg(version_num, ',' ORDER BY version_num) FROM public.alembic_version")"
 [ "$raw_revision" = "300" ] || die "candidate migration 후 raw Alembic head가 exact 300이 아니다"
-database_oid="$(docker exec "$CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d "$DATABASE" -At \
-  -c 'SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database()')"
-system_identifier="$(docker exec "$CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d "$DATABASE" -At \
-  -c 'SELECT system_identifier FROM pg_catalog.pg_control_system()')"
 application_relation_count="$(docker exec "$CONTAINER" psql -v ON_ERROR_STOP=1 -U postgres -d "$DATABASE" -At \
   -c "SELECT count(*) FROM pg_catalog.pg_class AS relation JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = relation.relnamespace WHERE namespace.nspname IN ('feature','provider_sync','ops') AND relation.relkind IN ('r','p','v','m','f','S')")"
-[[ "$database_oid" =~ ^[0-9]+$ ]] || die "fresh oracle database OID를 얻지 못했다"
-[[ "$system_identifier" =~ ^[0-9]+$ ]] || die "fresh oracle PostgreSQL system identifier를 얻지 못했다"
 [[ "$application_relation_count" =~ ^[1-9][0-9]*$ ]] || die "candidate migration이 application relation을 만들지 않았다"
 container_id="$(docker inspect -f '{{.Id}}' "$CONTAINER")"
 
@@ -968,7 +1112,8 @@ python3 - "$receipt_tmp" "$container_id" "$DATABASE" "$database_oid" "$system_id
   "$fresh_privileged_residue_sha256" "$runtime_invariant_violations" \
   "$candidate_proof_tools_manifest_sha256" "$FRESH_DATABASE_TEMPLATE" \
   "$fresh_initial_virgin_inventory" "$fresh_initial_virgin_inventory_sha256" \
-  "$fresh_destination_alembic_version_sha256" <<'PY'
+  "$fresh_destination_alembic_version_sha256" "$fresh_migration_result_sha256" \
+  "$fresh_migration_evidence" <<'PY'
 from __future__ import annotations
 
 import json
@@ -977,7 +1122,7 @@ from pathlib import Path
 
 target = Path(sys.argv[1])
 value = {
-    "schema": "kor-travel-map.application-fresh-300-oracle.v7",
+    "schema": "kor-travel-map.application-fresh-300-oracle.v8",
     "container_id": sys.argv[2],
     "database": sys.argv[3],
     "database_oid": int(sys.argv[4]),
@@ -998,7 +1143,10 @@ value = {
     "candidate_full_rootfs_layers_sha256": sys.argv[19],
     "candidate_build_receipt_sha256": sys.argv[20],
     "bootstrap_phase": "baseline-300",
-    "migration_command": "ktm-application-schema-fresh-300 migrate",
+    "migration_command": (
+        "ktm-application-schema-fresh-300 migrate --writer-fence-receipt "
+        "/run/kor-travel-map-application-fresh-migrate/fence.json"
+    ),
     "postgis_image": sys.argv[21],
     "postgis_image_id": sys.argv[22],
     "creator_script_sha256": sys.argv[23],
@@ -1016,6 +1164,8 @@ value = {
     "fresh_initial_virgin_inventory": json.loads(sys.argv[34]),
     "fresh_initial_virgin_inventory_sha256": sys.argv[35],
     "destination_alembic_version_sha256": sys.argv[36],
+    "fresh_migration_result_sha256": sys.argv[37],
+    "fresh_migration_evidence": json.loads(sys.argv[38]),
 }
 target.write_text(json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n", encoding="utf-8")
 PY

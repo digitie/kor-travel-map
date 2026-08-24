@@ -249,7 +249,9 @@ def test_final_permit_reader_rejects_inode_replacement_between_lstat_and_open(
     assert stat.S_IMODE(permit_path.lstat().st_mode) == 0o444
 
 
-def test_fresh_migration_accepts_only_fixed_one_shot_operation() -> None:
+def test_fresh_migration_accepts_only_fixed_one_shot_operation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """fresh helper에는 daemon/repair/downgrade 분기가 없다."""
 
     module = _load_script(
@@ -257,9 +259,20 @@ def test_fresh_migration_accepts_only_fixed_one_shot_operation() -> None:
         "docker/application-schema-fresh-300.py",
     )
 
+    monkeypatch.setenv("KOR_TRAVEL_MAP_APPLICATION_SCHEMA_PROFILE", "local-dev")
     module._parse_args(["migrate"])
-    with pytest.raises(module.FreshMigrationError, match="fixed `migrate`"):
+    with pytest.raises(module.FreshMigrationError, match="profile-fixed `migrate`"):
         module._parse_args(["repair"])
+    monkeypatch.setenv("KOR_TRAVEL_MAP_APPLICATION_SCHEMA_PROFILE", "production")
+    module._parse_args(
+        [
+            "migrate",
+            "--writer-fence-receipt",
+            "/run/kor-travel-map-application-fresh-migrate/fence.json",
+        ]
+    )
+    with pytest.raises(module.FreshMigrationError, match="profile-fixed `migrate`"):
+        module._parse_args(["migrate"])
 
     source = (_ROOT / "docker/application-schema-fresh-300.py").read_text(encoding="utf-8")
     assert "_assert_restricted_migrator_session" in source
@@ -267,6 +280,83 @@ def test_fresh_migration_accepts_only_fixed_one_shot_operation() -> None:
     assert "_assert_virgin_version_table" in source
     assert "bootstrap-superuser DSN must not enter fresh migration" in source
     assert "downgrade" not in source
+
+
+def test_fresh_migration_rechecks_manager_fence_before_root_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """긴 preflight 중 만료한 generation은 Alembic root를 실행하지 않는다."""
+
+    module = _load_script(
+        "application_schema_fresh_300_fence_expiry",
+        "docker/application-schema-fresh-300.py",
+    )
+    contract = {
+        "schema": "kor-travel-map.application-baseline-contract.v1",
+        "application_head": "300",
+        "reference_manifest_sha256": "1" * 64,
+        "postgres_image_id": "sha256:" + "2" * 64,
+        "catalog_sha256": "3" * 64,
+        "seed_sha256": "4" * 64,
+        "privileged_residue_sha256": "5" * 64,
+        "source_alembic_version_sha256": "6" * 64,
+        "destination_alembic_version_sha256": "7" * 64,
+        "runtime_invariants_sql_sha256": "8" * 64,
+    }
+    fence = {
+        "transaction_id": "b93bb7cf-7901-4790-88a8-2a7bbc07f3b7",
+        "journal_sha256": "9" * 64,
+        "journal_generation": 1,
+        "map_candidate_commit": "a" * 40,
+        "map_candidate_image_id": "sha256:" + "b" * 64,
+    }
+    identity = {
+        "database_name": "kor_travel_map",
+        "database_oid": 16384,
+        "database_owner": "ktm_feature_schema_owner",
+        "postgres_system_identifier": "1234567890",
+    }
+    calls = 0
+    upgraded = False
+
+    class _Script:
+        @staticmethod
+        def get_heads() -> tuple[str, ...]:
+            return ("300",)
+
+    def _fence_once_then_expired() -> tuple[dict[str, object], str]:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return fence, "c" * 64
+        raise module.FreshMigrationError("fresh 300 migrate fence has expired")
+
+    async def _restricted(_: str, __: object) -> dict[str, object]:
+        return identity
+
+    async def _virgin(_: str) -> None:
+        return None
+
+    def _unexpected_upgrade(*_: object) -> None:
+        nonlocal upgraded
+        upgraded = True
+
+    monkeypatch.setenv("KOR_TRAVEL_MAP_APPLICATION_SCHEMA_PROFILE", "production")
+    monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", "postgresql+asyncpg://unused")
+    monkeypatch.delenv("KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN", raising=False)
+    monkeypatch.setattr(module, "_config", lambda _: object())
+    monkeypatch.setattr(module.ScriptDirectory, "from_config", lambda _: _Script())
+    monkeypatch.setattr(module, "_static_contract", lambda: contract)
+    monkeypatch.setattr(module, "_require_fixed_fence", _fence_once_then_expired)
+    monkeypatch.setattr(module, "_verify_fence_candidate", lambda *_: None)
+    monkeypatch.setattr(module, "_assert_restricted_migrator_session", _restricted)
+    monkeypatch.setattr(module, "_assert_virgin_version_table", _virgin)
+    monkeypatch.setattr(module.command, "upgrade", _unexpected_upgrade)
+
+    with pytest.raises(module.FreshMigrationError, match="has expired"):
+        asyncio.run(module._migrate())
+    assert calls == 2
+    assert not upgraded
 
 
 def test_fresh_finalize_accepts_only_manager_fixed_completion_operation() -> None:

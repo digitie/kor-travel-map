@@ -97,6 +97,9 @@ services:
       db-role-bootstrap-300:
         condition: service_completed_successfully
     environment:
+      # standalone compose fresh-init은 명시적인 비운영 개발 경로다. production은
+      # Docker Manager가 literal production profile + root-owned fixed fence를 만든다.
+      KOR_TRAVEL_MAP_APPLICATION_SCHEMA_PROFILE: local-dev
       KOR_TRAVEL_MAP_MIGRATOR_PG_DSN: ${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required}
       KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required}
     entrypoint: ["/usr/local/bin/ktm-application-schema-fresh-300", "migrate"]
