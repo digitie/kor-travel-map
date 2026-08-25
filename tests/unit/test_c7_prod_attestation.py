@@ -379,6 +379,10 @@ def _runtime_fixture() -> tuple[
             "create_role": False,
             "replication": False,
             "bypass_rls": False,
+            "connection_limit": -1,
+            "valid_until_is_null": True,
+            "role_config_count": 0,
+            "database_role_setting_count": 0,
             "granted_role_count": 0,
             "member_role_count": 0,
         },
@@ -423,6 +427,13 @@ def _runtime_fixture() -> tuple[
         "candidate": copy.deepcopy(generation),
         "map_application_300_candidate_evidence": copy.deepcopy(candidate_evidence),
         "map_application_300_execution_evidence": execution_evidence,
+        "pinvi_database_identity": {
+            "system_identifier": "9876543210987654321",
+            "name": "pinvi",
+            "oid": 16386,
+            "owner": "pinvi",
+            "login_role": "pinvi",
+        },
         "cancel_probe": {
             "cancellation_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
             "fixture_consumed_at": "2026-07-19T00:00:01+00:00",
@@ -748,6 +759,12 @@ def test_runtime_attestation_rejects_journal_from_another_rebuild_transaction() 
                 "dagster_metadata_database_identity"
             ]["login_role_attributes"].update({"inherit": True}),
             "journal Dagster metadata role privilege",
+        ),
+        (
+            lambda value: value["pinvi_database_identity"].update(
+                {"owner": "foreign_owner"}
+            ),
+            "journal PinVi database owner",
         ),
         (lambda value: value["cancel_probe"].update({"stage": "consumed"}), "cancel probe"),
         (

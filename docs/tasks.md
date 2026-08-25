@@ -645,6 +645,9 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   > 세 schema head와 pinset이 generation 값과 exact 대조된다. 2026-08-25에는 Manager의
   > manifest v6/journal v8에 맞춰 application `300` candidate evidence, application/Dagster
   > DB identity, root/finalize result, application/metadata permit까지 exact 검증하도록 올렸다.
+  > 최종 보강에서는 PinVi DB의 PostgreSQL system identifier·name/OID·owner-login identity와 Dagster
+  > metadata LOGIN role의 connection limit·password expiry·role/database-local setting 잔여까지
+  > 같은 journal/permit field set으로 결박해 **세 DB identity**를 committed resume에서 재대조한다.
   > journal은 phase `committed` + candidate 전체 동등 + cancel probe `finalized`를 요구한다. v4를 억지로
   > 넣어 통과하는 경로는 만들지 않았고, runner 계약 테스트가 v4 env 부재를 단언한다.
   > 변이(phase/candidate/candidate evidence/DB identity/result/permit/cancel probe/schema

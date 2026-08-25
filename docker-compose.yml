@@ -149,10 +149,10 @@ services:
           createdb -h "$$postgres_host" -U "$$KOR_TRAVEL_MAP_POSTGRES_USER" -O "$$KOR_TRAVEL_MAP_DAGSTER_METADATA_USER" "$$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB"
           echo "Dagster metadata DB created: $$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB"
         fi
-        dagster_identity="$$(psql "$$KOR_TRAVEL_MAP_DAGSTER_PG_URL" -At -F '|' -c "SELECT control.system_identifier::text, current_database(), database.oid::bigint, pg_get_userbyid(database.datdba), session_user, current_user, role.rolsuper, role.rolcanlogin, role.rolinherit, role.rolcreatedb, role.rolcreaterole, role.rolreplication, role.rolbypassrls, (SELECT count(*)::bigint FROM pg_auth_members AS membership WHERE membership.member = role.oid), (SELECT count(*)::bigint FROM pg_auth_members AS membership WHERE membership.roleid = role.oid) FROM pg_database AS database JOIN pg_roles AS role ON role.rolname = session_user CROSS JOIN pg_control_system() AS control WHERE database.datname = current_database()")"
+        dagster_identity="$$(psql "$$KOR_TRAVEL_MAP_DAGSTER_PG_URL" -At -F '|' -c "SELECT control.system_identifier::text, current_database(), database.oid::bigint, pg_get_userbyid(database.datdba), session_user, current_user, role.rolsuper, role.rolcanlogin, role.rolinherit, role.rolcreatedb, role.rolcreaterole, role.rolreplication, role.rolbypassrls, role.rolconnlimit, role.rolvaliduntil IS NULL, COALESCE(pg_catalog.cardinality(role.rolconfig), 0), (SELECT count(*)::bigint FROM pg_catalog.pg_db_role_setting AS setting WHERE setting.setrole = role.oid), (SELECT count(*)::bigint FROM pg_auth_members AS membership WHERE membership.member = role.oid), (SELECT count(*)::bigint FROM pg_auth_members AS membership WHERE membership.roleid = role.oid) FROM pg_database AS database JOIN pg_roles AS role ON role.rolname = session_user CROSS JOIN pg_control_system() AS control WHERE database.datname = current_database()")"
         application_identity="$$(psql -h "$$postgres_host" -U "$$KOR_TRAVEL_MAP_POSTGRES_USER" -d "$$KOR_TRAVEL_MAP_POSTGRES_DB" -At -F '|' -c "SELECT control.system_identifier::text, current_database(), database.oid::bigint, pg_get_userbyid(database.datdba) FROM pg_database AS database CROSS JOIN pg_control_system() AS control WHERE database.datname = current_database()")"
         old_ifs="$$IFS"
-        IFS='|' read -r dagster_system dagster_name dagster_oid dagster_owner dagster_login dagster_effective dagster_superuser dagster_canlogin dagster_inherit dagster_createdb dagster_createrole dagster_replication dagster_bypassrls dagster_granted_role_count dagster_member_role_count <<EOF
+        IFS='|' read -r dagster_system dagster_name dagster_oid dagster_owner dagster_login dagster_effective dagster_superuser dagster_canlogin dagster_inherit dagster_createdb dagster_createrole dagster_replication dagster_bypassrls dagster_connection_limit dagster_valid_until_is_null dagster_role_config_count dagster_database_role_setting_count dagster_granted_role_count dagster_member_role_count <<EOF
         $$dagster_identity
         EOF
         IFS='|' read -r application_system application_name application_oid application_owner <<EOF
@@ -177,6 +177,10 @@ services:
           || [ "$$dagster_createrole" != f ] \
           || [ "$$dagster_replication" != f ] \
           || [ "$$dagster_bypassrls" != f ] \
+          || [ "$$dagster_connection_limit" != -1 ] \
+          || [ "$$dagster_valid_until_is_null" != t ] \
+          || [ "$$dagster_role_config_count" != 0 ] \
+          || [ "$$dagster_database_role_setting_count" != 0 ] \
           || [ "$$dagster_granted_role_count" != 0 ] \
           || [ "$$dagster_member_role_count" != 0 ]; then
           echo "Dagster metadata login is not a dedicated least-privilege owner" >&2
@@ -201,7 +205,7 @@ services:
         fi
         echo "$$operation_id" | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$$' \
           || { echo "Dagster metadata operation id is invalid" >&2; exit 1; }
-        permit_json="{\"application_database\":{\"name\":\"$$application_name\",\"oid\":$$application_oid,\"owner\":\"$$application_owner\",\"system_identifier\":\"$$application_system\"},\"authority\":\"local-compose-db-init\",\"candidate\":null,\"dagster_database\":{\"login_role\":\"$$dagster_login\",\"login_role_attributes\":{\"bypass_rls\":false,\"can_login\":true,\"create_database\":false,\"create_role\":false,\"granted_role_count\":0,\"inherit\":false,\"member_role_count\":0,\"replication\":false,\"superuser\":false},\"name\":\"$$dagster_name\",\"oid\":$$dagster_oid,\"owner\":\"$$dagster_owner\",\"system_identifier\":\"$$dagster_system\"},\"operation_id\":\"$$operation_id\",\"schema\":\"kor-travel-map.dagster-storage-database-permit.v2\"}"
+        permit_json="{\"application_database\":{\"name\":\"$$application_name\",\"oid\":$$application_oid,\"owner\":\"$$application_owner\",\"system_identifier\":\"$$application_system\"},\"authority\":\"local-compose-db-init\",\"candidate\":null,\"dagster_database\":{\"login_role\":\"$$dagster_login\",\"login_role_attributes\":{\"bypass_rls\":false,\"can_login\":true,\"connection_limit\":-1,\"create_database\":false,\"create_role\":false,\"database_role_setting_count\":0,\"granted_role_count\":0,\"inherit\":false,\"member_role_count\":0,\"replication\":false,\"role_config_count\":0,\"superuser\":false,\"valid_until_is_null\":true},\"name\":\"$$dagster_name\",\"oid\":$$dagster_oid,\"owner\":\"$$dagster_owner\",\"system_identifier\":\"$$dagster_system\"},\"operation_id\":\"$$operation_id\",\"schema\":\"kor-travel-map.dagster-storage-database-permit.v2\"}"
         if [ "$$existing_metadata" = true ]; then
           [ "$$(cat "$$permit_path")" = "$$permit_json" ] \
             || { echo "existing Dagster metadata resources do not match the sealed prior permit" >&2; exit 1; }

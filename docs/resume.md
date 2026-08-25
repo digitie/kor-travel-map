@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-25 — T-VN-41F1D-E 세 DB·Dagster role residue attestation 보강 (Draft)
+
+Manager journal v8의 최종 계약에 맞춰 C7 verifier가 PinVi DB의 PostgreSQL system identifier,
+DB name/OID, owner-login identity까지 exact 검증한다. Dagster metadata LOGIN role은 기존 privilege와
+membership뿐 아니라 connection limit, password expiry 부재, role/database-local setting 잔여가 모두
+canonical한지도 permit producer·migration consumer·C7에서 같은 field set으로 대조한다. Manager가
+허용하는 operation UUID 계약보다 C7이 임의로 강했던 transaction/operation 불일치 제한도 제거했다.
+
+Dagster runtime과 C7 관련 회귀 `305 passed`, 변경 파일 Ruff를 통과했다. 완료된 `T-VN-40`은
+`tasks-done.md`에만 남고, 현재 저장소측 잔여는 Manager 최종 SHA pin과 exact-pair 재검토다.
+
+### 이 PR의 다음 한 작업
+
+Manager의 세 DB committed-resume 재검증과 journal v8 PinVi identity를 커밋한 뒤 새 Map SHA를 pinset에
+고정하고 두 전문리뷰어의 exact-commit P0/P1=0을 확인한다.
+
 ## 2026-08-25 — T-VN-41F1D-E manifest v6/journal v8 exact attestation (Draft)
 
 C7 live verifier를 구 manifest v5/journal v7에서 Manager의 canonical v6/v8로 올렸다. generation의

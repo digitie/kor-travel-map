@@ -38,6 +38,10 @@ _SAFE_DAGSTER_LOGIN_ATTRIBUTES: Final = {
     "create_role": False,
     "replication": False,
     "bypass_rls": False,
+    "connection_limit": -1,
+    "valid_until_is_null": True,
+    "role_config_count": 0,
+    "database_role_setting_count": 0,
     "granted_role_count": 0,
     "member_role_count": 0,
 }
@@ -4216,6 +4220,13 @@ def test_dagster_storage_rejects_appuser_writable_config_parent() -> None:
         ("create_role", True),
         ("replication", True),
         ("bypass_rls", True),
+        ("connection_limit", 0),
+        ("connection_limit", False),
+        ("valid_until_is_null", False),
+        ("role_config_count", 1),
+        ("role_config_count", False),
+        ("database_role_setting_count", 1),
+        ("database_role_setting_count", False),
         ("granted_role_count", 1),
         ("granted_role_count", False),
         ("member_role_count", 1),
@@ -4599,6 +4610,10 @@ def test_docker_compose_runs_storage_migration_before_dagster_services() -> None
     assert "rolcreaterole" in init_command
     assert "rolreplication" in init_command
     assert "rolbypassrls" in init_command
+    assert "rolconnlimit" in init_command
+    assert "rolvaliduntil IS NULL" in init_command
+    assert "rolconfig" in init_command
+    assert "pg_db_role_setting" in init_command
     assert "pg_auth_members" in init_command
     assert "membership.member = role.oid" in init_command
     assert "membership.roleid = role.oid" in init_command

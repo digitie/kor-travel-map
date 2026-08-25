@@ -1,5 +1,21 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-25 — T-VN-41F1D-E 최종 DB identity·role residue 결박 (Draft)
+
+전문 DB 적대 리뷰의 잔여 finding을 반영해 Dagster metadata LOGIN role의 권한 잔여 검사를
+`rolconnlimit=-1`, password expiry 부재, role-level/database-role setting 0까지 확장했다. compose의
+permit producer와 `dagster-storage-migrate.py` consumer가 동일 exact payload를 사용하며 한 필드라도
+다르면 writer 실행 전에 중단한다.
+
+C7 journal v8 parser에는 PinVi DB의 system identifier, name/OID, owner와 login role identity를 추가해
+Map application·Dagster metadata와 함께 세 DB 모두 고정되도록 했다. Manager canonical parser가
+허용하는 동일 transaction/operation UUID를 C7만 별도로 거부하던 과잉 제약은 제거했다.
+
+- Dagster runtime + C7 회귀: `305 passed`
+- 변경 파일 Ruff·`git diff --check`: 통과
+- 완료된 `T-VN-40` 잔여 task: `docs/tasks.md`에 없음
+- 범위 밖 untracked `uv.lock`: 열람·수정·stage하지 않음
+
 ## 2026-08-25 — T-VN-41F1D-E v6/v8 live attestation 정렬 (Draft)
 
 두 번째 전문 적대 리뷰에서 Map C7 verifier가 구 manifest v5/journal v7만 허용해 Manager의

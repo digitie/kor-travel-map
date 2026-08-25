@@ -87,6 +87,7 @@ _JOURNAL_KEYS = frozenset(
         "compose_sha256",
         "resolved_compose_sha256",
         "created_at",
+        "pinvi_database_identity",
         "journal_generation",
         "map_application_300_execution_evidence",
         "cancel_probe",
@@ -116,6 +117,9 @@ _APPLICATION_DATABASE_IDENTITY_KEYS = frozenset(
         "postgres_system_identifier",
     }
 )
+_PINNED_DATABASE_IDENTITY_KEYS = frozenset(
+    {"system_identifier", "name", "oid", "owner", "login_role"}
+)
 _DAGSTER_METADATA_DATABASE_IDENTITY_KEYS = frozenset(
     {
         "system_identifier",
@@ -135,6 +139,10 @@ _DAGSTER_METADATA_ROLE_ATTRIBUTE_KEYS = frozenset(
         "create_role",
         "replication",
         "bypass_rls",
+        "connection_limit",
+        "valid_until_is_null",
+        "role_config_count",
+        "database_role_setting_count",
         "granted_role_count",
         "member_role_count",
     }
@@ -540,7 +548,14 @@ def _validate_dagster_metadata_database_identity(value: object) -> None:
     ):
         raise AttestationError("journal Dagster metadata role privilege")
     if (
-        type(role["granted_role_count"]) is not int
+        type(role["connection_limit"]) is not int
+        or role["connection_limit"] != -1
+        or role["valid_until_is_null"] is not True
+        or type(role["role_config_count"]) is not int
+        or role["role_config_count"] != 0
+        or type(role["database_role_setting_count"]) is not int
+        or role["database_role_setting_count"] != 0
+        or type(role["granted_role_count"]) is not int
         or role["granted_role_count"] != 0
         or type(role["member_role_count"]) is not int
         or role["member_role_count"] != 0
@@ -565,6 +580,29 @@ def _validate_dagster_metadata_database_identity(value: object) -> None:
         raise AttestationError("journal Dagster metadata owner")
 
 
+def _validate_pinned_database_identity(value: object) -> None:
+    if not _exact_dict(value, set(_PINNED_DATABASE_IDENTITY_KEYS)):
+        raise AttestationError("journal PinVi database identity shape")
+    assert isinstance(value, dict)
+    if (
+        not isinstance(value["system_identifier"], str)
+        or POSTGRES_SYSTEM_IDENTIFIER_PATTERN.fullmatch(value["system_identifier"])
+        is None
+        or type(value["oid"]) is not int
+        or value["oid"] <= 0
+    ):
+        raise AttestationError("journal PinVi database identity")
+    for field in ("name", "owner", "login_role"):
+        identifier = value[field]
+        if (
+            not isinstance(identifier, str)
+            or DATABASE_IDENTIFIER_PATTERN.fullmatch(identifier) is None
+        ):
+            raise AttestationError("journal PinVi database identity")
+    if value["owner"] != value["login_role"]:
+        raise AttestationError("journal PinVi database owner")
+
+
 def _validate_operation_plan(value: object, *, label: str) -> None:
     if not _exact_dict(value, set(_APPLICATION_OPERATION_PLAN_KEYS)):
         raise AttestationError(f"journal {label} operation plan shape")
@@ -573,8 +611,6 @@ def _validate_operation_plan(value: object, *, label: str) -> None:
         identifier = value[field]
         if not isinstance(identifier, str) or UUID_PATTERN.fullmatch(identifier) is None:
             raise AttestationError(f"journal {label} operation identity")
-    if value["transaction_id"] == value["operation_id"]:
-        raise AttestationError(f"journal {label} operation identity")
     for field in ("basis_journal_sha256", "fence_sha256", "result_sha256"):
         digest = value[field]
         if not isinstance(digest, str) or SHA256_PATTERN.fullmatch(digest) is None:
@@ -653,7 +689,6 @@ def _validate_application_execution_evidence(
     assert isinstance(finalize_plan, dict)
     if (
         root_plan["operation_id"] == finalize_plan["operation_id"]
-        or root_plan["transaction_id"] == finalize_plan["transaction_id"]
         or root_plan["basis_journal_generation"] >= journal_generation
         or finalize_plan["basis_journal_generation"] >= journal_generation
     ):
@@ -715,6 +750,7 @@ def _validate_committed_journal(value: object, *, generation: Mapping[str, objec
         value["map_application_300_execution_evidence"],
         journal_generation=journal_generation,
     )
+    _validate_pinned_database_identity(value["pinvi_database_identity"])
     cancel_probe = value["cancel_probe"]
     if not _exact_dict(cancel_probe, set(_CANCEL_PROBE_KEYS)):
         raise AttestationError("journal cancel probe shape")

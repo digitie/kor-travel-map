@@ -88,6 +88,10 @@ _LOGIN_ROLE_ATTRIBUTE_FIELDS: Final = frozenset(
         "create_role",
         "replication",
         "bypass_rls",
+        "connection_limit",
+        "valid_until_is_null",
+        "role_config_count",
+        "database_role_setting_count",
         "granted_role_count",
         "member_role_count",
     }
@@ -267,11 +271,21 @@ def _require_database_identity(
                 )
             )
             or attributes["can_login"] is not True
+            or not isinstance(attributes["connection_limit"], int)
+            or isinstance(attributes["connection_limit"], bool)
+            or attributes["connection_limit"] != -1
+            or attributes["valid_until_is_null"] is not True
             or any(
                 not isinstance(attributes[key], int)
                 or isinstance(attributes[key], bool)
                 or attributes[key] != 0
                 for key in ("granted_role_count", "member_role_count")
+            )
+            or any(
+                not isinstance(attributes[key], int)
+                or isinstance(attributes[key], bool)
+                or attributes[key] != 0
+                for key in ("role_config_count", "database_role_setting_count")
             )
         ):
             raise DagsterStorageMigrationError("dagster_storage_login_role_unsafe")
@@ -409,6 +423,14 @@ def _read_observed_identity(
                            role.rolcreaterole AS login_create_role,
                            role.rolreplication AS login_replication,
                            role.rolbypassrls AS login_bypass_rls,
+                           role.rolconnlimit AS login_connection_limit,
+                           role.rolvaliduntil IS NULL AS login_valid_until_is_null,
+                           COALESCE(pg_catalog.cardinality(role.rolconfig), 0)
+                               AS login_role_config_count,
+                           (SELECT count(*)::bigint
+                              FROM pg_catalog.pg_db_role_setting AS setting
+                             WHERE setting.setrole = role.oid)
+                               AS login_database_role_setting_count,
                            (SELECT count(*)::bigint
                               FROM pg_auth_members AS membership
                              WHERE membership.member = role.oid) AS login_granted_role_count,
@@ -470,6 +492,12 @@ def _read_observed_identity(
                 "create_role": bool(row["login_create_role"]),
                 "replication": bool(row["login_replication"]),
                 "bypass_rls": bool(row["login_bypass_rls"]),
+                "connection_limit": int(row["login_connection_limit"]),
+                "valid_until_is_null": bool(row["login_valid_until_is_null"]),
+                "role_config_count": int(row["login_role_config_count"]),
+                "database_role_setting_count": int(
+                    row["login_database_role_setting_count"]
+                ),
                 "granted_role_count": int(row["login_granted_role_count"]),
                 "member_role_count": int(row["login_member_role_count"]),
             },
