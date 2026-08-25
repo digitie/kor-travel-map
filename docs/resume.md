@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-26 — T-FE-MOCK-FLAKE n150 실제 logs는 인증 승인 근거 대기
+
+n150의 배포된 Map source에서 `/ops/logs` `GET` 전용 실제 spec을 단일 워커·무재시도로
+실행했다. local-only 런북 자격증명은 auth setup에서 `401`으로 거부돼 로그 본문 두
+시나리오는 시작하지 않았다. 브라우저 세션·실패 산출물은 즉시 폐기했고 application row,
+건수, 업무상 무결성을 읽거나 쓰지 않았다.
+
+### 이 변경의 다음 한 작업
+
+배포 runtime과 일치하는 승인된 읽기 전용 자격증명과 허용 origin을 값 비노출으로 확보한 뒤
+`logs.live.spec.ts`만 재실행한다. 자격증명을 추측·회전·우회하거나 기존 스모크 자격증명을
+재사용하지 않는다. 이 인증 승인 근거와 별개로 D2/41C는 최종 고정 pair와 일회용 고정
+픽스처가 있어야 하며, off-box backup은 별도 외부 목적지·보존 승인 근거가 필요하다.
+
 ## 2026-08-26 — T-VN-H46H `300` baseline·n150 fresh rebuild 완료
 
 Map PR #1066 exact head `cc81081ff2e540a6ad9c428a296515e1d79bc316`와 Docker-manager PR #207

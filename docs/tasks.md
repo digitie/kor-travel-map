@@ -496,8 +496,12 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   0건을 확인했다. 이후 self-owned mock backend가 로그 두 stream을 응답하지 않아
   `aria-busy=true`가 15초 유지되던 경계를 PR #1059에서 생성 OpenAPI 타입 기반 BFF mock으로
   고정했다. targeted `/v1/ops/logs` 1회와 5회 반복(총 6/6)이 통과했다. mocked checkpoint
-  부분은 해소됐지만, n150 live GET-only logs 스펙은 local-only 자격증명과 prod credential
-  불일치로 auth setup 401에서 중단되어 최신 자격증명 확인 뒤 재개해야 한다.
+  부분은 해소됐다. 2026-08-26 n150에서 현재 local-only 런북 자격증명으로
+  `logs.live.spec.ts`만 `--workers=1 --retries=0`으로 다시 실행했으나, auth setup이
+  다시 `401`으로 중단되어 두 `GET` 전용 본문은 시작하지 않았다. 임시 브라우저 세션·실패
+  산출물은 즉시 폐기했다. 따라서 현 배포 runtime과 일치하는 승인된 읽기 전용 자격증명과
+  허용 origin을 값 비노출으로 제공받은 뒤에만 재개한다. 자격증명을 추측·회전·우회하거나
+  기존 스모크 자격증명을 재사용하지 않는다.
 - `T-C7-SCOPE-REGISTRY`와 `T-C7-LIVE-SERIAL`은 PR #1038에서 완료했다. scope 선언
   주체·조회 표면을 `integration-map.md` §3.7과 ADR-088 결과에 정본화했고,
   `external_system:c7-e2e` live write 3종에는 cross-worker `mkdir` 잠금을 결선했다.
