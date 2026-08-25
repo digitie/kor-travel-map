@@ -1,5 +1,25 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-26 — T-VN-H46H `300` baseline·n150 fresh rebuild 완료
+
+Map PR #1066 exact head `cc81081ff2e540a6ad9c428a296515e1d79bc316`와 Docker-manager PR #207
+merge `ecfbddb7b3d1afbd74646abbaa4082dd70b53a42`를 고정한 paired candidate를 trusted n150
+설치본에 반영했다. 승인된 `ktdctl pinvi-pair rebuild-pinned --confirm`은 durable journal
+`version=8`, generation `32`, transaction `5121a6d2-692d-4bd9-a5b0-d572d58c0f8f`,
+`phase=committed`로 완료됐다. Map·PinVi runtime, 세 DB identity/provenance/readiness와
+브라우저 login을 확인했고, data-independent live UI 11개 테스트가 모두 통과했다.
+
+사용자 결정에 따라 `300` 이후 application row/건수/업무상 무결성 비교는 하지 않았으며,
+이전 revision/기존 DB restore도 수행하지 않았다. 필요하면 fresh schema에 원천/ETL을 처음부터
+재적재한다. Features의 고정 ID·컬렉션·두 번째 페이지를 요구하는 data-dependent E2E는 별도
+데이터 적재 이후의 운영 검증으로 남긴다.
+
+### 이 변경의 다음 한 작업
+
+`T-VN-41C`의 exact pair consumer acceptance/reconciliation을 진행하고, `T-VN-M01`~`M05`의
+독립 live 잔여와 `T-VN-39` 최종 cutover 선행조건을 순서대로 정리한다. H46H baseline 완료와
+무관한 데이터 적재·이전 revision 복구는 수행하지 않는다.
+
 ## 2026-08-25 — T-VN-H46H paired builder 실행 모드 고정 (Draft)
 
 n150에서 exact `dd2ee61f…` source를 sealed한 뒤 outer paired builder가 내부 API

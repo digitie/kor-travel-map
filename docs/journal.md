@@ -1,5 +1,28 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-26 — T-VN-H46H `300` baseline·n150 fresh rebuild 최종 수락
+
+Map PR #1066 exact head `cc81081ff2e540a6ad9c428a296515e1d79bc316`와 Docker-manager PR #207
+merge `ecfbddb7b3d1afbd74646abbaa4082dd70b53a42`를 고정한 paired candidate를 n150 trusted
+Manager 설치본에 반영했다. PinVi `27fe2043b7b8e747fbb42d91e461ea462f930bb7`를 포함한
+canonical pinset digest는 `14a9a512836a48489146dc2bb0a04de309cf451b274b934d79805d171f83a193`다.
+
+승인된 `ktdctl pinvi-pair rebuild-pinned --confirm`은 세 DB를 fresh하게 재생성하고 runtime을
+재기동한 뒤 durable journal `version=8`, generation `32`, transaction
+`5121a6d2-692d-4bd9-a5b0-d572d58c0f8f`, 최종 `phase=committed`로 끝났다. Map·PinVi runtime과
+DB identity/provenance/readiness를 확인했으며, 일반 application row의 내용·건수·업무상
+무결성은 조회·대조하지 않았다. 이전 revision/기존 DB 복구도 수행하지 않았고, 필요하면
+fresh `300` schema에 source/ETL을 처음부터 재적재한다.
+
+n150 실제 브라우저 login setup과 data-independent live UI를 실행해 scenario catalog,
+backup-only 정책(`execute=false`), 운영 홈, 운영 로그 **11개 테스트를 모두 통과**했다. Features의
+초기 목록·검색·필터·정렬·반응형·딥링크도 통과했지만, 고정 ID·컬렉션·두 번째 페이지를 요구하는
+테스트는 빈 fresh schema의 데이터 의존 항목이므로 이 baseline 수락 게이트에서 제외했다.
+
+이 기록으로 H46H의 schema/bootstrap·runtime provenance·data-independent UI 조건은 완료한다.
+T-VN-41C, M01~M05, T-VN-FINAL-REBUILD의 별도 live/consumer/cutover 조건은 계속 열린 task로
+유지한다.
+
 ## 2026-08-25 — T-VN-H46H paired builder 실행 모드 고정 (Draft)
 
 n150의 exact Map `dd2ee61f…` sealed source에서 paired builder를 실행할 때 내부
