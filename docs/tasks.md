@@ -605,14 +605,36 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   > D1/F1D-E와 `T-VN-FINAL-REBUILD` current-candidate 확인 뒤에 실행한다. H46H baseline 완료만으로
   > 이 data-dependent acceptance를 완료 처리하지 않는다.
 
-  비어 있는 새 DB에서 **고정 curated/feature ID를 요구하는** admin live UI·PinVi mutating E2E를
-  재실행한다. D1이 적재한 final-schema 데이터 위에서 돈다.
+  D2는 H46H fresh rebuild를 다시 실행하거나 기존 application DB를 복구하지 않는다. production
+  DB·dump/export·자격증명은 fixture source로 사용할 수 없으며, synthetic 또는 승인된
+  non-production seed/ETL만 허용한다. current exact candidate와 같은 final `300` schema의
+  승인된 일회용 non-production DB에서, manifest가 밝힌 고정 ID 또는 run-scoped owned ID만
+  사용해 **고정 curated/feature ID를 요구하는** admin live UI·PinVi mutating E2E를 실행한다.
+  실행 직전 fixture DB의 identity/name/OID/owner와 schema head를 exact 대조하고, production
+  DB identity·자격증명과 같으면 즉시 중단한다. `fixed` mode에서는 allowlist의 fixture ID가
+  provisioning 뒤 정확히 존재하고 manifest checksum/content와 일치해야 하며, 누락·불일치·추가
+  ID가 있으면 중단하고 이 고정 fixture row를 run cleanup으로 삭제하지 않는다.
+  `run_scoped_owned` mode에서는 provisioning 전에 해당 ID가 없어야 하며 collision이면 중단하고,
+  이 mode가 생성한 allowlisted row·FK만 cleanup 대상이다. fixture provisioning·실행·cleanup은
+  [`admin-feature-live-acceptance.md`](runbooks/admin-feature-live-acceptance.md)의 Map-owned
+  root helper와 격리 DB 경계만 사용하며 direct table `INSERT`는 허용하지 않는다.
+
+  fixture manifest에는 source/seed identity와 checksum, 허용 ID 목록, active generation,
+  v6 manifest digest, v8 journal/host-attestation digest, exact Map/PinVi pair SHA, 일곱 image
+  ID, 세 schema head, service OpenAPI SHA를 기록한다. 이 값은 실행 직전 active v6/v8와
+  host attestation에 exact equality여야 하며, 누락·불일치·stale generation·이전 journal
+  재사용이면 E2E를 시작하지 않는다. manifest는 `fixed` 또는 `run_scoped_owned` ID mode 하나를
+  단일 선택하고 그 mode의 checksum·cleanup identity를 함께 결박한다. 종료 뒤에는 그 run이 만든
+  owned row·FK·container residue·pending/dead 상태만 정리·검증하고, cleanup과 evidence가 모두
+  통과하기 전에는 D2/41C receipt를 승격하지 않는다. 기존 application 전체의 내용·건수·업무상
+  무결성을 대조하지 않는다.
 
   **선행: T-VN-40 완료**(사용자 판단 2026-08-08). T-VN-40B가 admin/public/PinVi consumer를
-  `curation_collections/items` 정본만 읽도록 전환하므로, 그 전에 이 suite를 돌리면 증거가
-  T-VN-40 머지 즉시 낡는다. 이 acceptance의 비용은 파괴적 rebuild + 전량 ETL 재적재 + 일곱
-  image attestation이라 두 번 돌릴 값이 아니다. 반대로 D1은 curation read 경로와 무관하고
-  "rebuild-from-scratch가 실제로 되는가"를 보증하므로 join barrier까지 비워두지 않는다.
+  `curation_collections/items` 정본만 읽도록 전환했으므로, fixture도 그 final read 경로를
+  사용한다. 전량 provider/ETL 재적재는 D2 fixture를 준비하는 선택지일 수 있으나 H46H의
+  일반 release gate가 아니며, 새 candidate를 만들지 않는 한 `rebuild-pinned --confirm`을
+  다시 실행하지 않는다. D1은 데이터 비의존 provenance/UI 계약을, D2는 명시된 fixture의
+  data-dependent 계약을 각각 소유한다.
 
 - [~] **T-VN-41F1D-E — 구 generation 퇴역·v6/v8 attestation 전환**
 
@@ -662,17 +684,36 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   결박된다. 후보가 바뀌면 H46H rebuild를 새 generation으로 다시 수행해야 하지만, 현재
   committed generation에서는 data-dependent/consumer acceptance만 순서대로 진행한다.
 
-  **배리어 해제 조건 (전부 참이어야 착수).** "주요 개발 완료"를 사람 판단에 맡기지 않고
-  아래 셋으로 판정한다 — 셋 다 "세대를 낡게 만드는 변경"의 정의다.
-  - [ ] B1. **migration head를 올리는 열린 task가 없다.** 현재 걸려 있는 것은
-    `T-VN-41C`의 cross-repo exact-pair 재검증, `T-VN-M01`~`M05` 중 DB를 바꾸는 것,
-    `T-VN-C05A`~`C05D`(provider dataset 신설), `T-VN-39`(최종 cutover).
-  - [ ] B2. **service/user OpenAPI 정본을 바꾸는 열린 task가 없다.** PinVi exact vendor가
-    재-vendor를 요구하는 변경이 남아 있으면 pair가 다시 어긋난다.
-  - [ ] B3. **일곱 image 중 하나라도 바꾸는 열린 task가 없다** (Map API/UI/Dagster web·daemon,
-    PinVi API/web/dagster). frontend·Dockerfile·의존 pin 변경 포함.
+  **배리어 해제 조건 (각 acceptance 직전에 전부 참이어야 한다).** "주요 개발 완료"나 열린
+  task 수가 아니라, **현 exact candidate를 낡게 만드는 미반영 변경**만 아래 넷으로 판정한다.
+  따라서 구현이 이미 병합된 `T-VN-41C`·`T-VN-M01`~`M05`의 activation/paired acceptance,
+  완료 이관된 `T-VN-C05A`~`C05D`, 그리고 41C/M activation 뒤의 downstream `T-VN-39`는
+  그 자체로 candidate invalidation이 아니다. 단, 이 activation이 아래 candidate/runtime
+  입력을 바꾸면 해당 예외를 적용하지 않는다.
+  - [ ] B1. **현 candidate의 active migration head를 바꾸는 미반영 변경이 없다.** 새 child
+    migration이 병합되거나 pinset에 반영될 때만 false가 된다.
+  - [ ] B2. **현 candidate의 service/user OpenAPI bytes를 바꾸는 미반영 변경이 없다.** PinVi
+    vendor 또는 Map service 정본이 달라져 재-vendor가 필요할 때만 false가 된다.
+  - [ ] B3. **현 candidate의 일곱 image 입력을 바꾸는 미반영 변경이 없다.** Map API/UI/Dagster
+    web·daemon 또는 PinVi API/web/dagster의 source, Dockerfile, 의존 pin, Manager pinset이
+    달라질 때만 false가 된다.
+  - [ ] B4. **현 candidate의 runtime/attestation 입력을 바꾸는 미반영 변경이 없다.** raw/resolved
+    Compose hash, profile, container command, 값 비노출 environment/보안 환경 매핑 hash, mount/network,
+    runtime role·ACL, Manager runner와 attestation/verifier contract가 달라지면 false다.
+    image·migration·OpenAPI가 같아도 이 입력이 달라지면 이전 v6/v8 journal/evidence를 재사용하지
+    않는다.
 
-  **선행 준비.**
+  B1~B3 중 하나라도 false면 정확한 Map/PinVi source와 일곱 image를 새 pinset으로 고정하고
+  H46H rebuild를 새 generation으로 다시 수행해 새 immutable v6/v8 journal을 발행한다. B4만
+  false인 경우에도 기존 journal을 새 host attestation으로 덮거나 재사용할 수 없다. 이 경우
+  acceptance는 중단하고, 별도 검토된 runtime/generation 계약이 새 immutable v6/v8 journal을
+  exact 결박해 발행하기 전에는 재개하지 않는다. 모두 true면 이미 committed된 generation을
+  재구축하지 않고 D1/F1D-E → D2 → 41C acceptance만 진행한다. 각 실행은 candidate SHA·image
+  ID·schema head·OpenAPI SHA와 v6/v8/host-attestation digest를 단순 기록하지 않고 active
+  generation과 exact equality로 대조하며, 누락·불일치면 시작·receipt 승격·consumer enable을
+  모두 거부한다.
+
+  **새 candidate rebuild가 필요한 경우에만 하는 선행 준비.**
   - [ ] n150 디스크 여유 — 일곱 image 재빌드 분. 2026-08-20 기준 101G free(78%)이고
     dangling volume 52GB·구 playwright image 약 43GB가 추가 회수 가능하다.
   - [ ] 고정 release candidate(Map/PinVi 커밋과 일곱 image)를 먼저 확정한다.
