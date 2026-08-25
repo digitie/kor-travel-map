@@ -238,6 +238,17 @@ WITH extension_member AS (
     WHERE namespace.nspname IN ('feature', 'ops', 'provider_sync')
       AND relation.relkind = 'c'
     UNION ALL
+    -- Large objects are database-wide and therefore invisible to the application
+    -- schema relation branches above.  Their owner/ACL is part of the canonical
+    -- baseline receipt; an unexpected object emits a row and makes the digest drift.
+    SELECT
+        'large_object',
+        '<pg_catalog>',
+        metadata.oid::text,
+        metadata.lomowner::regrole::text || ':' ||
+        COALESCE(metadata.lomacl::text, '')
+    FROM pg_catalog.pg_largeobject_metadata AS metadata
+    UNION ALL
     SELECT
         'constraint', namespace.nspname, relation.relname,
         concat_ws(

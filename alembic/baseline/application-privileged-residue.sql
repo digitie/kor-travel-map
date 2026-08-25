@@ -18,4 +18,12 @@ WHERE subscription.subdbid = (
 UNION ALL
 SELECT 'pg_user_mapping:' || count(*)::text
 FROM pg_catalog.pg_user_mapping
+UNION ALL
+-- Large objects are database-wide and can carry a PUBLIC ACL even when application
+-- schemas are empty.  Emit rows only when present so the certified zero-residue
+-- baseline digest remains stable while any owner/ACL residue fails closed.
+SELECT 'pg_largeobject_metadata:' || metadata.oid::text || ':' ||
+       metadata.lomowner::regrole::text || ':' ||
+       COALESCE(metadata.lomacl::text, '')
+FROM pg_catalog.pg_largeobject_metadata AS metadata
 ORDER BY 1;

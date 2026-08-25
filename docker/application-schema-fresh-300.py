@@ -799,6 +799,11 @@ SELECT CASE WHEN
            OR owner_name LIKE 'ktm\\_%' ESCAPE '\\'
     )
     AND NOT EXISTS (SELECT 1 FROM application_object)
+    -- Large objects are database-wide and do not belong to feature/provider_sync/ops
+    -- schemas.  A restricted migrator can create one and grant its ACL without leaving
+    -- any relation/procedure/type behind, so exact fresh-root state must reject them
+    -- explicitly rather than relying on the application-object inventory.
+    AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_largeobject_metadata)
     AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_default_acl)
     AND (
         SELECT COALESCE(array_agg(language.lanname::text ORDER BY language.lanname),
@@ -1237,8 +1242,11 @@ async def async_main(arguments: Sequence[str] | None = None) -> int:
     except FreshMigrationError as exc:
         print(f"fresh application 300 migration refused: {exc}", file=sys.stderr)
         return 1
-    except Exception:
-        print("fresh application 300 migration refused: operation failed", file=sys.stderr)
+    except Exception as exc:
+        print(
+            f"fresh application 300 migration refused: operation failed ({exc!r})",
+            file=sys.stderr,
+        )
         return 1
     print(json.dumps(result, separators=(",", ":"), sort_keys=True))
     return 0

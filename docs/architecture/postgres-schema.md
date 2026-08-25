@@ -591,10 +591,9 @@ T-VN-H46H baseline 이후 active graph는 `300_schema_baseline.py` 하나다.
   기존 109개 `legacy_versions/` archive와는 revision id 중복 때문에 합치거나
   `version_locations`에 동시에 넣지 않는다.
 
-normal API image는 fresh DB 또는 raw revision `300`만 기동한다. exact raw
-`0236_tvn41s_compaction_drained` DB는 Docker Manager가 writer fence와 동일
-transaction pre/post catalog 검증을 확보한 controlled metadata handoff로만 `300`으로
-전진시킬 수 있다. 일반 `upgrade`, `stamp`, downgrade, archive replay, 수동
+normal API image는 fresh DB 또는 raw revision `300`만 기동한다. 기존 raw
+`0236_tvn41s_compaction_drained` DB를 `300`으로 전진시키는 in-place handoff는 지원하지 않는다.
+일반 `upgrade`, `stamp`, downgrade, archive replay, 수동
 `alembic_version` SQL은 지원하지 않는다.
 
 #### 다음 application migration 작성
@@ -678,5 +677,5 @@ handoff로만 처리한다.
 - [ ] BRIN 인덱스 효율 측정 (1주 운영 후)
 - [ ] 인덱스 hit ratio 95%+ 확인
 - [ ] 부분 인덱스 vs 전체 인덱스 디스크 비교
-- [ ] isolated fresh-300 acceptance와 controlled `0236 → 300` handoff receipt 검증 통과
+- [ ] isolated fresh-300 acceptance와 root/finalize receipt·final permit 검증 통과
 - [ ] generic downgrade/stamp/restore 시도를 fail-closed로 거절하는 테스트 통과

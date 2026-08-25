@@ -186,6 +186,19 @@ async def test_fresh_root_commits_and_recovers_same_immutable_operation_receipt(
 
         engine = make_async_engine(admin_dsn, pool_size=1)
         try:
+            # Large objects are database-wide and do not appear in the application
+            # schema relation/procedure/type inventory.  A PUBLIC ACL must still make
+            # the exact fresh-root probe fail closed.
+            async with engine.begin() as connection:
+                await connection.execute(text("SELECT lo_create(424242)"))
+                await connection.execute(
+                    text("GRANT SELECT ON LARGE OBJECT 424242 TO PUBLIC")
+                )
+            assert await module.async_main(probe_command) == 1
+            assert "pre-root state is not exact" in capsys.readouterr().err
+            async with engine.begin() as connection:
+                await connection.execute(text("SELECT lo_unlink(424242)"))
+
             async with engine.begin() as connection:
                 await connection.execute(text("CREATE TABLE ops.foreign_pre_root_drift(id bigint)"))
             assert await module.async_main(probe_command) == 1

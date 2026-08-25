@@ -266,8 +266,8 @@ legacy expected-head 주입, API startup migration, host의 직접 production Co
 
 현재 production의 유일한 경로는 [Docker app runbook의 Manager controlled
 transaction](runbooks/docker-app.md#4-docker-stack-기동)이다. Manager가 실제 API/Dagster
-container image ID와 paired receipt를 검증하고 writer fence 아래 virgin `fresh-300` 또는 exact
-`0236→300` handoff/중단된 fresh-finalize one-shot을 실행한다. application catalog/DB identity와
+container image ID와 paired receipt를 검증하고 writer fence 아래 virgin `fresh-300` root와
+필요한 `fresh-300-finalize` one-shot만 실행한다. application catalog/DB identity와
 별도 Dagster metadata DB identity를 확인한 뒤 두 root-owned read-only permit을 원자적으로
 발급하고, fixed storage migration→API→UI/Dagster webserver/daemon 순으로 기동한다. 이 current
 flow와 n150 live acceptance receipt가 없으면 배포 완료로 간주하지 않는다.

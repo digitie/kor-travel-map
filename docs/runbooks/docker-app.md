@@ -125,8 +125,8 @@ docker-compose.host.yml -f docker-compose.local-dev.yml up` 또는
 `scripts/docker-up.sh`를 쓴다.
 두 명령은 workstation local-dev 전용이다. production API는 Docker
 Manager final permit이 없으면 blank DB를 generic Alembic upgrade하지 않는다. 기존 `0236`
-DB를 이 명령으로 고치거나 ownership을 넘기는 것은 금지하며 Docker Manager의 별도 one-shot
-handoff만 허용한다. 비밀번호는
+DB를 이 명령으로 고치거나 ownership을 넘기는 것은 금지한다. production 전환은 Manager의
+승인된 fresh application `300` rebuild만 허용한다. 비밀번호는
 `KOR_TRAVEL_MAP_{MIGRATOR,API_RUNTIME,DAGSTER_RUNTIME}_PASSWORD`로 ignored env에만 두며
 Alembic revision에는 만들거나 기록하지 않는다. local-dev API만
 `docker-compose.local-dev.yml` overlay에서 migrator DSN을 받아 기동 전 closed ACL inventory를
@@ -369,8 +369,8 @@ Docker Manager의 Map-only controlled transaction이다.
 
 1. Manager가 candidate API image와 실제 PostGIS container image를 immutable ID로 확인하고,
    Map writer를 fence한다.
-2. virgin DB에는 fixed fresh-300 one-shot만, exact raw `0236` DB에는 fixed controlled
-   handoff만 실행한다. fresh root의 late ACL transaction이 끊겨 raw `300`만 남은 경우에는
+2. virgin DB에는 fixed fresh-300 root만 실행한다. fresh root의 late ACL transaction이 끊겨 raw
+   `300`만 남은 경우에는
    Manager가 candidate/reference/DB identity와 pre receipt를 다시 검증한 fixed
    fresh-300-finalize one-shot만 실행할 수 있다. generic Alembic command, `stamp`, backup
    restore, old image restart는 이 경계의 대안이 아니다.
@@ -484,8 +484,8 @@ docker compose down -v
 `npm run docker:restore`, staging restore, hot-swap, PITR, dump import, volume 교체,
 `alembic downgrade`와 수동 version-table 편집은 현재 배포물의 지원 경로가 아니다. retire된
 HTTP restore URI는 인증 뒤 `410 RESTORE_UNSUPPORTED`, retire된 shell entrypoint는 exit code
-`2`로 끝난다. 기존 `0236 → 300`은 backup restore가 아니라 Docker Manager가 소유하는
-one-shot metadata handoff다.
+`2`로 끝난다. 기존 `0236 → 300` in-place 전환은 지원하지 않으며, 이전 revision 복구도
+release 경로가 아니다.
 
 ### 8.1 vNext production cutover gate
 
@@ -673,7 +673,7 @@ current, 위 index, 세 constraint validity를 다시 캡처한다.
   사용하지 않고 새 forward-fix candidate와 fresh 검증 자원으로 진행한다.
 - current가 0059인데 valid UNIQUE와 NOT VALID/일부 VALID constraint가 있으면 VALIDATE lock timeout
   등 autocommit 뒤 실패였다는 과거 판정이다. 당시 `upgrade head` 재실행 절차는 active `300`에서
-  실행 금지다. 현재는 fixed fresh/handoff/finalize executable과 Manager journal만 허용한다.
+  실행 금지다. 현재는 fixed fresh root/finalize executable과 Manager journal만 허용한다.
 - 동명 INVALID index가 있으면 과거 concurrent 구현의 잔재다. 다음 원자 cleanup 뒤 preflight와 같은
   immutable image migration을 재실행한다.
 

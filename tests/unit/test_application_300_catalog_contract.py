@@ -146,6 +146,26 @@ def test_catalog_contract_tracks_custom_range_semantics() -> None:
     assert "range_row.rngmultitypid::regtype::text" in contract
 
 
+def test_catalog_contract_tracks_large_object_owner_and_acl() -> None:
+    """schema 밖 large object residue도 baseline digest에 포함한다."""
+
+    contract = (_ROOT / "alembic/baseline/application-catalog.sql").read_text(
+        encoding="utf-8"
+    )
+
+    assert "'large_object'" in contract
+    assert "pg_catalog.pg_largeobject_metadata" in contract
+    assert "metadata.lomowner::regrole::text" in contract
+    assert "metadata.lomacl::text" in contract
+
+    residue = (
+        _ROOT / "alembic/baseline/application-privileged-residue.sql"
+    ).read_text(encoding="utf-8")
+    assert "pg_largeobject_metadata" in residue
+    assert "metadata.lomowner::regrole::text" in residue
+    assert "metadata.lomacl::text" in residue
+
+
 def test_catalog_contract_rejects_all_public_semantic_residue_axes() -> None:
     """public text-search/operator semantic object가 handoff receipt에서 빠지지 않는다."""
 

@@ -664,6 +664,7 @@ def test_fresh_root_prestate_attestation_is_exact_and_read_only() -> None:
         "extension.extversion",
         "available.default_version",
         "search_path=public, x_extension",
+        "pg_catalog.pg_largeobject_metadata",
         "pg_catalog.pg_default_acl",
     ):
         assert required in sql
