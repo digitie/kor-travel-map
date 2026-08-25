@@ -185,7 +185,8 @@ exact-scope run/event 이력을 `{items,next_cursor,canonical_url}`로 제공한
 uv pip install -e .
 uv pip install -e packages/kor-travel-map-api
 
-# scoped API env 생성 후 검증된 local stack 기동
+# 위 Docker fresh/normal 경로로 application 300과 Dagster storage를 먼저 준비한 뒤,
+# 선택적인 loopback local-dev smoke 기동
 cp .env.example .env
 cp packages/kor-travel-map-api/.env.example packages/kor-travel-map-api/.env
 npm run admin:stack
@@ -193,7 +194,9 @@ npm run admin:stack
 ```
 
 root cwd 직접 `uvicorn`은 package `.env`와 process별 credential allowlist를 우회하므로
-지원하지 않는다.
+지원하지 않는다. `admin:stack`도 DB 생성/Alembic/Dagster storage migration 권한은 없고,
+loopback의 사전 준비된 application `300`과 dedicated metadata identity를 읽기 전용으로
+검증한 뒤에만 기동한다. production authority/permit 입력은 거부한다.
 
 ## 6. 엔드포인트
 
@@ -377,14 +380,13 @@ type drift 부채 0).
 | `KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_ENABLED` | Prometheus pull scrape용 `/metrics` endpoint와 HTTP 요청 count/duration/진행 중 요청/응답 크기, DB query count/duration 계측 활성화. 기본 `true` |
 | `KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_PATH` | Prometheus exposition path. 기본 `/metrics`, API 포트 `12701`에서 노출하며 OpenAPI에는 포함하지 않는다 |
 | `KOR_TRAVEL_MAP_API_BACKUP_ROOT` | backup artifact root. 기본 `data/backups` |
-| `KOR_TRAVEL_MAP_API_BACKUP_PROJECT_ROOT` | backup/restore script 상대 경로를 해석하고 command를 실행할 project root. 기본 `.` |
-| `KOR_TRAVEL_MAP_API_BACKUP_SCRIPT_PATH` / `KOR_TRAVEL_MAP_API_RESTORE_SCRIPT_PATH` | backup/restore command plan이 호출하는 script path. 기본 `scripts/docker-backup.sh`, `scripts/docker-restore.sh` |
-| `KOR_TRAVEL_MAP_API_BACKUP_COMMAND_ENABLED` | backup/restore host command 실행 허용 여부. 기본 `false`라 `/admin/backups` UI는 command plan만 생성한다 |
+| `KOR_TRAVEL_MAP_API_BACKUP_PROJECT_ROOT` | backup script 상대 경로를 해석하고 command를 실행할 project root. 기본 `.` |
+| `KOR_TRAVEL_MAP_API_BACKUP_SCRIPT_PATH` | backup command plan이 호출하는 script path. 기본 `scripts/docker-backup.sh` |
+| `KOR_TRAVEL_MAP_API_BACKUP_COMMAND_ENABLED` | backup host command 실행 허용 여부. 기본 `false`라 `/admin/backups` UI는 command plan만 생성한다 |
 | `KOR_TRAVEL_MAP_API_BACKUP_COMMAND_TIMEOUT_SECONDS` | opt-in host command 실행 timeout. 기본 `1800` |
-| `KOR_TRAVEL_MAP_API_RESTORE_APP_DB` / `KOR_TRAVEL_MAP_API_RESTORE_DAGSTER_DB` / `KOR_TRAVEL_MAP_API_RESTORE_RUSTFS_VOLUME` | staging restore target 기본값 |
 | `KOR_TRAVEL_MAP_DOCKER_API_DAGSTER_URL` | Docker compose가 API 컨테이너의 `KOR_TRAVEL_MAP_API_DAGSTER_URL`로 주입하는 내부 Dagster URL. `.env`의 로컬 `127.0.0.1` 값과 분리 |
 | `KOR_TRAVEL_MAP_DOCKER_API_DAGSTER_ALLOWED_HOSTS` | Docker compose가 API 컨테이너에 주입하는 Dagster host allowlist. 기본은 `["dagster","127.0.0.1","localhost","::1"]` |
-| `KOR_TRAVEL_MAP_DAGSTER_PG_URL` | Dagster metadata Postgres URL. Docker에서는 `KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL` 기본값(`postgres:5432/kor_travel_map_dagster`)을 `dagster`/`dagster-daemon`에 주입 |
+| `KOR_TRAVEL_MAP_DAGSTER_PG_URL` | Dagster metadata Postgres URL. Docker에서는 bootstrap과 분리된 최소권한 DB owner/login의 명시적 `KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL`을 `dagster-storage-migrate`/`dagster`/`dagster-daemon`에 동일하게 주입하며 기본 credential은 없다 |
 | `DAGSTER_DISABLE_TELEMETRY` | Dagster dev/webserver telemetry 비활성화 여부. admin UI embed 기본 운영값은 `yes`이며, 로컬 실행 스크립트와 Docker 이미지는 `dagster.yaml`의 `telemetry.enabled: false`도 함께 설정 |
 | `KOR_TRAVEL_MAP_API_FRONTEND_DIST` | (FastAPI 측) Next.js build 산출물 경로 — static export 모드 시에만 사용 (`.next/` 또는 `out/`) |
 
@@ -409,7 +411,8 @@ cd ~/dev/kor-travel-map
 uv pip install -e ".[dev]"
 uv pip install -e packages/kor-travel-map-api
 
-# 2. scoped env를 준비하고 backend/frontend/Dagster stack 기동
+# 2. Docker fresh/normal 경로로 DB를 준비하고 scoped env를 설정한 뒤,
+# 선택적인 loopback backend/frontend/Dagster smoke 기동
 cp .env.example .env
 cp packages/kor-travel-map-api/.env.example packages/kor-travel-map-api/.env
 npm run admin:stack

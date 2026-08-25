@@ -3,6 +3,33 @@
 > 완료(`[x]`)·폐기·머지 history 아카이브. **진행 중/예정 task는 [`docs/tasks.md`](tasks.md)**.
 > (2026-06-09 분리 — tasks.md 길이 축소. 분리 기준: 열린 `[ ]` 항목이 없는 섹션·Phase는 여기로.)
 
+## 2026-08-25 — active backlog 완료 하위 항목 정합성 이관
+
+- [x] **범용 Feature 갱신 식별자에서 PinVi 전용 이름 제거** — 일반 feature-update,
+  service-owned cache-target writer guard와 refresh protocol 검사는 relay-owned/service-owned
+  용어로 통일했다. 실제 외부 시스템 값과 PinVi 전용 인증·curation 계약은 그대로 유지하되,
+  범용 함수·상수·SQL 식별자에는 `pinvi`를 넣지 않는다.
+
+- [x] **T-VN-H43 완료 하위 항목** — 2026-08-05 기준선·write-fence dump와 배포 후
+  `0083` dump를 manifest/`pg_restore -l`/SHA-256으로 검증했고, 개발 장비 밖 사본도 대조했다.
+  신규 빈 DB에서 필요한 superuser extension 선생성 절차와 실제 grantee는
+  `docs/backup-restore.md` §2.2에 정본화했다. 현 n150은 손상 시 재적재 정책이므로 자동 주기화는
+  완료 항목이 아니며, 실 production 전환 시 Manager #148로 재개한다.
+- [x] **T-VN-41C 완료 하위 항목** — `cache-target:command` exact scope 분리와 양방향
+  wrong-role `403`, snapshot first-page transaction·material watermark·share barrier, outbox lock
+  order/DB relay sequence, bounded timeout·admission·foreground/hourly GC, inventory metric·alert를
+  구현했다. n150 격리 검증에서 처리량 65,214 items/s, 유입 12,951 items/s, backlog 0/0과
+  schedule 성공을 확인했고, 근거는
+  `docs/reports/t-vn-41c-cache-target-gc-verification-2026-08-20.md` 및
+  `scripts/verify-tvn41c-cache-target-gc.sh`가 소유한다.
+- [x] **T-VN-41C relay 종결성 보강** — PR #1026(`b2e9c43a`)에서 typed violation reason,
+  running cancel status event, stale generation 실패 event와 통합 테스트 격리를 완료했다. 열린
+  `T-VN-41C`에는 새 exact pair의 isolated live acceptance·reconciliation·production consumer
+  enable만 남긴다.
+- [x] **T-VN-40 잔여 재확인** — T-VN-40A·mapping·40B·40C·인수 ①~⑤는 아래
+  2026-08-19~21 완료 이력이 이미 소유하며, active backlog에는 독립 T-VN-40 실행 항목이 없다.
+  T-VN-40을 언급하는 남은 문장은 T-VN-41C와 Lane M의 선행 계약·과거 조사 맥락일 뿐이다.
+
 ## 2026-08-22 — T-VN-H27 OPNsense HAProxy WebSocket tunnel timeout
 
 - [x] **T-VN-H27 — #819 HAProxy WebSocket tunnel timeout 적용 완료**

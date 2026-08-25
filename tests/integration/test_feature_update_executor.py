@@ -536,7 +536,7 @@ async def test_execute_next_request_runs_provider_and_syncs_target_links(
     } <= {link.feature_id for link in links}
 
 
-async def test_execute_next_fails_historic_pinvi_generic_cache_target_request(
+async def test_execute_next_fails_historic_service_owned_cache_target_request(
     migrated_engine: AsyncEngine,
     execution_session: AsyncSession,
 ) -> None:

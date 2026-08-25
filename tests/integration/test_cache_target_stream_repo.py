@@ -30,8 +30,8 @@ from kortravelmap.infra.cache_target_event_repo import (
     CacheTargetRefreshProtocolViolation,
     append_cache_target_links_reconciled_events,
     append_cache_target_refresh_status_events,
+    cache_target_refresh_protocol_error,
     capture_cache_target_refresh_members_by_keys,
-    pinvi_cache_target_refresh_protocol_error,
 )
 from kortravelmap.infra.cache_target_outbox_repo import (
     CacheTargetAppliedReceipt,
@@ -4714,7 +4714,7 @@ async def test_restore_fence_rejects_previously_queued_service_refresh_status_ev
         request_fingerprint=fingerprint,
     )
 
-    protocol_error = await pinvi_cache_target_refresh_protocol_error(
+    protocol_error = await cache_target_refresh_protocol_error(
         migrated_session,
         request_id=request.request_id,
         external_system=system,

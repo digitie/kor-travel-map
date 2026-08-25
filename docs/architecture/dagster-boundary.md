@@ -60,17 +60,23 @@ ktm-dagster-storage migrate
   package의 단일 Postgres storage migration head를 한 줄 JSON으로 stdout에 낸다.
   head가 없거나 여러 개면 실패한다.
 - `migrate`는 `DAGSTER_HOME`과 그 아래 `dagster.yaml`,
-  `KOR_TRAVEL_MAP_DAGSTER_PG_URL`을 명시적으로 요구한다. 이 입력 그대로
+  `KOR_TRAVEL_MAP_DAGSTER_PG_URL`을 명시적으로 요구한다. production `DAGSTER_HOME`은
+  root-owned `/opt/dagster/dagster_home` exact path만 허용하고, `dagster.yaml`은 mode `0444`
+  regular non-symlink이며 storage target이 해당 env 하나인지 확인한다. 별도 root-owned metadata
+  identity permit의 system ID/name/OID/owner/login과 같은 DSN 관측값을 대조하고 application DB
+  identity·raw `300`·application schema이면 **쓰기 전에** 중단한다. production permit은
+  Docker Manager authority, paired candidate receipt SHA-256, exact Dagster image ID와
+  `dagster.yaml` SHA-256을 함께 결박한다. 검증 뒤 이 입력 그대로
   `dagster instance migrate`를 실행한 뒤, 같은 DSN으로
   `public.alembic_version`을 직접 읽는다. 행은 정확히 하나여야 하고
   `version_num`은 후보 이미지의 head와 같아야 성공한다.
 - 명령의 stdout은 성공 JSON만 내며, Dagster CLI·DB 드라이버가 DSN을 포함할 수 있는
   진단 출력은 전달하지 않는다. 실패는 DSN·비밀번호·token을 반사하지 않는 유형화된
   오류로 종료한다.
-- Dagster webserver/daemon entrypoint는 migration을 실행하거나 Map 애플리케이션
-  Alembic revision을 storage readiness로 검사하지 않는다. Compose의
-  `dagster-storage-migrate` one-shot service가 성공한 뒤에만 두 장기 실행 service를
-  시작한다.
+- Dagster webserver/daemon entrypoint는 migration을 실행하지 않는다. 다만 one-shot과 같은
+  canonical config/metadata identity permit verifier를 기동 전에 다시 실행하고, application
+  final permit도 별도로 확인한다. Compose의 `dagster-storage-migrate` one-shot service가
+  성공한 뒤에만 두 장기 실행 service를 시작한다.
 
 이 경계는 v5 pinned runtime candidate를 attest할 때 Manager가 이미지 내부에서 head를
 읽고, reset 뒤 같은 후보 이미지로 정확한 Dagster storage migration을 수행하도록 만든다.
@@ -635,16 +641,18 @@ kor-travel-map --dsn "$KOR_TRAVEL_MAP_PG_DSN" consistency-report \
 
 ## 14. 로컬/운영 Dagster 기동
 
-```bash
-# 운영/Docker compose 기준
-docker compose up dagster dagster-daemon
+로컬 venv 검증은 Docker fresh/normal 경로가 application `300`, dedicated
+`kor_travel_map_dagster` identity와 Dagster storage migration을 먼저 완료한 뒤에만
+`npm run admin:stack`을 사용한다. 이 launcher는 두 loopback DB를 읽기 전용으로 검증하고
+canonical `docker/dagster.yaml`을 설치한 뒤 webserver/daemon을 함께 관리한다. DB 생성,
+Alembic upgrade, Dagster storage migration은 수행하지 않으며 production profile·authority·
+permit 입력을 거부한다. bootstrap/application login을 metadata DSN으로 재사용하거나 임의
+`DAGSTER_HOME`·수동 명령으로 production을 기동하지 않는다.
 
-# 로컬 venv에서 webserver/daemon을 직접 나누어 띄울 때
-export DAGSTER_HOME=.dagster
-export KOR_TRAVEL_MAP_DAGSTER_PG_URL=postgresql://kor_travel_map:kor_travel_map@127.0.0.1:5432/kor_travel_map_dagster
-dagster-webserver -m kortravelmap.dagster.definitions -h 0.0.0.0 -p 12702
-dagster-daemon run -m kortravelmap.dagster.definitions
-```
+production은 일반 `docker compose up` 또는 직접 `dagster-webserver` 실행이 아니다. Docker
+Manager가 실제 candidate container image ID, paired receipt와 application/metadata permit을
+검증·결선한 뒤 같은 immutable image의 fixed absolute argv로 storage migration,
+webserver, daemon을 순서대로 기동한다.
 
 메인 라이브러리 단독으로는 Dagster를 띄우지 않는다 (의존성 X). Dagster 실행 코드는
 kor-travel-map 독립 프로그램 패키지에 둔다. 디버그 / 적재 검증은 admin API
@@ -701,9 +709,11 @@ Dagster tick의 skip 사유로 남긴다. 따라서 10분보다 실행이 길어
 장치는 아니며, 그 경우에도 DB advisory lock이 실제 동시 실행과 snapshot 적용 순서 역전을
 막는다. 이 coalescing은 다른 저빈도 provider schedule에는 적용하지 않는다.
 
-로컬 `npm run admin:stack`도 같은 기준을 따른다. 시작 전 `kor_travel_map_dagster` DB
-존재를 확인/생성하고, `docker/dagster.yaml`을 `$DAGSTER_HOME/dagster.yaml`로 설치한 뒤
-`dagster-webserver`와 `dagster-daemon`을 별도 프로세스로 띄운다. `$DAGSTER_HOME`에
+로컬 `npm run admin:stack`은 사전 준비된 loopback `kor_travel_map_dagster` DB의 dedicated
+login/owner/권한·membership·application DB 분리를 읽기 전용으로 확인하고,
+`docker/dagster.yaml`을 `$DAGSTER_HOME/dagster.yaml`로 설치한 뒤 `dagster-webserver`와
+`dagster-daemon`을 별도 프로세스로 띄운다. DB가 없거나 storage가 미적용이면 만들지 않고
+실패한다. `$DAGSTER_HOME`에
 `schedules/schedules.db*`가 생기면 Postgres instance config를 읽지 못한 회귀로 본다.
 
 feature update worker 실행에는 `kor_travel_map_client`와 `feature_update_runner` resource가

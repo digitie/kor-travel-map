@@ -124,7 +124,7 @@ def _fixture_target_env(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setenv(
         "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_ALEMBIC_REVISION",
-        "0236_tvn41s_compaction_drained",
+        "300",
     )
 
 
@@ -136,7 +136,7 @@ def test_fixture_target_preflight_rejects_mismatch_before_role_or_mutation(
         "database_name": "kor_travel_map",
         "session_user": "ktm_fixture_writer",
         "current_user": "ktm_fixture_writer",
-        "alembic_revision": "0236_tvn41s_compaction_drained",
+        "alembic_revision": "300",
     }
     cases = (
         ("database_name", "wrong_database", "database confirmation"),
@@ -165,7 +165,7 @@ def test_fixture_target_preflight_confirms_schema_owner_before_action(
             "database_name": "kor_travel_map",
             "session_user": "ktm_fixture_writer",
             "current_user": "ktm_fixture_writer",
-            "alembic_revision": "0236_tvn41s_compaction_drained",
+            "alembic_revision": "300",
         },
         "ktm_feature_schema_owner",
     )
@@ -600,7 +600,7 @@ def test_c7_module_bootstrap_rejects_non_v4_host_attestation(
         _STATE_MODULE._validate_c7_module(args)  # noqa: SLF001
 
 
-def test_runner_uses_trusted_c7_v4_v5_v7_runtime_attestation_before_state() -> None:
+def test_runner_uses_trusted_c7_v4_v6_v8_runtime_attestation_before_state() -> None:
     runner = _RUNNER.read_text()
     state = _STATE.read_text()
     attestation = _ATTESTATION.read_text()
@@ -611,10 +611,15 @@ def test_runner_uses_trusted_c7_v4_v5_v7_runtime_attestation_before_state() -> N
     assert 'readonly HOST_ATTESTATION_FILE="/etc/kor-travel-map/' in runner
     assert 'readonly C7_INSTALL_BASE="/usr/local/lib/kor-travel-map/c7-runner"' in runner
     assert 'attestation.get("version") != 4' in state
-    assert 'manifest["version"] != 5' in attestation
-    assert 'value["version"] != 7' in attestation
+    assert 'manifest["version"] != 6' in attestation
+    assert 'value["version"] != 8' in attestation
     assert 'value["phase"] != _JOURNAL_COMMITTED_PHASE' in attestation
     assert 'value["candidate"] != generation' in attestation
+    assert (
+        'candidate_evidence != generation["map_application_300_candidate_evidence"]'
+        in attestation
+    )
+    assert '_validate_application_execution_evidence(' in attestation
     assert 'active["map_source_revision"] != source_commits["map"]' in attestation
     assert 'compose_project_hashes != {attestation["compose_project_sha256"]}' in attestation
     assert 'environment_sha256 != expected["environment_sha256"]' in attestation

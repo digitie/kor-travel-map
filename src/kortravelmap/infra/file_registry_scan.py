@@ -100,15 +100,6 @@ def _is_e2e_backup(artifact: BackupArtifact) -> bool:
     return artifact.backup_id.startswith(_E2E_BACKUP_PREFIX)
 
 
-def _stat_temp_file(path: Path) -> tuple[int, datetime] | None:
-    """단일 파일(swap env 등) stat — blocking, to_thread용."""
-
-    if not path.is_file():
-        return None
-    stat = path.stat()
-    return stat.st_size, datetime.fromtimestamp(stat.st_mtime, tz=UTC)
-
-
 def _stat_mois_source(db_path: str) -> tuple[str, int, list[str]] | None:
     """MOIS 소스 DB 본체 stat + sidecar 열거 — blocking, to_thread용."""
 
@@ -164,8 +155,6 @@ async def scan_backup_root(
     *,
     backup_root: Path,
     e2e_backup_ttl_days: int,
-    temp_ttl_days: int,
-    swap_env_file: Path | None = None,
     actor: str = "scan:api",
     max_entries: int = 5000,
 ) -> ScanLocationResult:
@@ -223,39 +212,6 @@ async def scan_backup_root(
                 detail={"ttl_days": e2e_backup_ttl_days, "mode": artifact.mode},
             ):
                 result.orphaned += 1
-
-    # swap env 스위치 파일(.env.restore-swap) — kind='temp' + TTL rule.
-    swap_probe = (
-        await asyncio.to_thread(_stat_temp_file, swap_env_file)
-        if swap_env_file is not None
-        else None
-    )
-    if swap_env_file is not None and swap_probe is not None:
-        swap_size, modified_at = swap_probe
-        result.scanned += 1
-        managed = await file_registry.register_file(
-            session,
-            storage_backend="filesystem",
-            location=MANAGED_FILE_LOCATION_BACKUP_ROOT,
-            path=swap_env_file.name,
-            kind="temp",
-            registered_by="scan",
-            byte_size=swap_size,
-            downloaded_at=modified_at,
-            actor=actor,
-            meta={"physical": {"path": str(swap_env_file)}},
-        )
-        result.registered += 1
-        if now - modified_at > timedelta(days=temp_ttl_days) and (
-            await file_registry.mark_orphan(
-                session,
-                file_id=managed.file_id,
-                reason="temp_expired",
-                actor=actor,
-                detail={"ttl_days": temp_ttl_days},
-            )
-        ):
-            result.orphaned += 1
 
     # 열거를 무사히 마쳤으므로 이 location만 sweep.
     result.missing = await file_registry.sweep_missing(

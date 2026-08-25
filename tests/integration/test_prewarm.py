@@ -42,7 +42,7 @@ async def prewarm_ready_session(
     만들 수 없다. 실제 설치 지점은 ``docker/postgres-role-bootstrap.sh``의 dedicated
     superuser connection 하나뿐이다(이번에 그 한 줄이 빠져 있어 채웠다).
 
-    통합 테스트 DB를 만드는 공유 helper(``_tvn34_migration_bootstrap``)는 아직
+    통합 테스트 DB를 만드는 공유 helper(``_application_300_bootstrap``)는
     postgis/pg_trgm/pgcrypto만 심는다. 그래서 여기서 같은 superuser 단계를 재현한다 —
     ``migrated_session``은 컨테이너 superuser로 열린 per-test 트랜잭션이고 CREATE
     EXTENSION은 트랜잭션 안에서 되돌려지므로, session-scope DB를 오염시키지 않는다.

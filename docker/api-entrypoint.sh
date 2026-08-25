@@ -1,5 +1,38 @@
-#!/usr/bin/env sh
+#!/bin/sh
 set -eu
+
+# production은 첫 external command보다 먼저 image의 interpreter/import/command
+# resolution 경계를 고정한다. PATH override가 있으면 `sed` 등 credential-bearing
+# child를 permit 전에 바꿔치기할 수 있으므로 값이 정확히 같아야 한다.
+if [ "${KOR_TRAVEL_MAP_API_PROFILE+x}" = "x" ]; then
+  api_profile="$KOR_TRAVEL_MAP_API_PROFILE"
+else
+  api_profile="production"
+fi
+case "$api_profile" in
+  production | local-dev) ;;
+  *)
+    echo "KOR_TRAVEL_MAP_API_PROFILE must be exactly production or local-dev" >&2
+    exit 1
+    ;;
+esac
+if [ "$api_profile" = "production" ] \
+  && { [ "${PYTHONPATH+x}" = "x" ] \
+    || [ "${PYTHONHOME+x}" = "x" ] \
+    || [ "${PYTHONUSERBASE+x}" = "x" ]; }; then
+  echo "production API forbids PYTHONPATH, PYTHONHOME, and PYTHONUSERBASE overrides" >&2
+  exit 1
+fi
+if [ "$api_profile" = "production" ] \
+  && [ "${PYTHONNOUSERSITE:-}" != "1" ]; then
+  echo "production API requires PYTHONNOUSERSITE=1" >&2
+  exit 1
+fi
+if [ "$api_profile" = "production" ] \
+  && [ "${PATH:-}" != "/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin" ]; then
+  echo "production API requires the sealed runtime PATH" >&2
+  exit 1
+fi
 
 removed_provider_keys="
 KOR_TRAVEL_MAP_API_KMA_SERVICE_KEY
@@ -150,21 +183,8 @@ fi
 # 2단계 혼란을 만들므로, 같은 문구로 migration 전에 거부한다(메시지 lockstep).
 # 이 ops surface에는 datasets/pipeline뿐 아니라 metrics/log/consistency/deep-health
 # 관측 read도 포함하며 모두 같은 read principal pair를 사용한다.
-# profile 기본값은 Docker image ENV(production)와 같다. set-but-empty를 조용히
-# production으로 접지 않도록 set-vs-unset(+x)로 판정한다 — compose는 막지만
-# 직접 ``docker run``은 빈 값을 넘길 수 있고 settings도 빈 문자열을 거부한다.
-if [ "${KOR_TRAVEL_MAP_API_PROFILE+x}" = "x" ]; then
-  api_profile="$KOR_TRAVEL_MAP_API_PROFILE"
-else
-  api_profile="production"
-fi
-case "$api_profile" in
-  production | local-dev) ;;
-  *)
-    echo "KOR_TRAVEL_MAP_API_PROFILE must be exactly production or local-dev" >&2
-    exit 1
-    ;;
-esac
+# profile 값과 production interpreter/PATH 경계는 첫 external command보다 앞에서
+# 이미 검증했다.
 for flag_name in KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED; do
   eval "flag_is_set=\${$flag_name+x}"
   if [ "$flag_is_set" = "x" ]; then
@@ -271,7 +291,7 @@ fi
 # Shell은 raw 미유입과 단순 형태를 먼저 닫고, API settings 정본이 digest와 기존
 # credential/curation/cache-target 분리를 재검증한다. 예외 본문은 secret input을
 # 포함할 수 있어 밖으로 출력하지 않는다. 이 preflight는 alembic보다 반드시 앞선다.
-if ! python - <<'PY'
+if ! /usr/local/bin/python -I - <<'PY'
 from __future__ import annotations
 
 import sys
@@ -317,13 +337,23 @@ if [ "${KOR_TRAVEL_MAP_MIGRATION_MODE+x}" = "x" ]; then
   exit 1
 fi
 
-# T-VN-34A (ADR-090) — Alembic은 migrator LOGIN으로만 접속한 뒤 NOLOGIN schema
-# owner role을 migration connection 수명 동안 활성화한다. API process에는 같은 DSN을 남기지 않고 runtime
-# LOGIN DSN만 전달한다. 두 DSN을 한 값으로 대체하는 fallback은 권한 경계를 지운다.
-migrator_dsn="${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required}"
 runtime_dsn="${KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN:?KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN is required}"
-export KOR_TRAVEL_MAP_PG_DSN="$migrator_dsn"
-export KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE=true
+if [ "$api_profile" = "production" ]; then
+  # Production API는 migration을 소유하지 않는다. Manager one-shot만 migrator DSN을
+  # 받고, consumer container는 set-but-empty까지 fail-close한다.
+  if [ "${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN+x}" = "x" ]; then
+    echo "production API forbids KOR_TRAVEL_MAP_MIGRATOR_PG_DSN" >&2
+    exit 1
+  fi
+  export KOR_TRAVEL_MAP_PG_DSN="$runtime_dsn"
+  unset KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE
+else
+  # local-dev의 명시적 developer launcher만 legacy convenience migration을 유지한다.
+  # fresh production과 controlled handoff는 이 분기를 사용하지 않는다.
+  migrator_dsn="${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required in local-dev}"
+  export KOR_TRAVEL_MAP_PG_DSN="$migrator_dsn"
+  export KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE=true
+fi
 
 # set-but-empty는 거부한다 — 위 profile 검사와 같은 규약이다. compose `${HOST:-}`
 # 패턴에서 host env 누락이 조용한 게이트 해제가 되면 안 된다.
@@ -341,7 +371,7 @@ if [ -n "$expected_head" ]; then
   # `alembic heads`는 script 디렉터리만 읽는다 — DB 연결 전에 판정할 수 있다.
   # 주의: alembic은 CommandError를 **stdout**에 쓰고 비정상 종료한다(stderr 아님).
   # 출력 내용이 아니라 exit code로 실행 실패를 먼저 판정해야 오진 메시지가 나가지 않는다.
-  if ! heads_raw="$(alembic heads 2>/dev/null)"; then
+  if ! heads_raw="$(/usr/local/bin/python -I -m alembic heads 2>/dev/null)"; then
     echo "alembic heads failed; the image alembic configuration is broken" >&2
     echo "(cannot evaluate KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD; the DB was not touched)" >&2
     printf '%s\n' "$heads_raw" >&2
@@ -366,42 +396,33 @@ if [ -n "$expected_head" ]; then
   fi
 fi
 
-# 영구 오류를 retry로 두드리지 않는다. DB의 revision이 이미지 chain에 없으면(= 이미지가
-# DB보다 뒤처짐 — stale 이미지 재배포) `alembic upgrade head`는 30회 내내 같은 이유로
-# 실패한다. `alembic current`는 같은 오류를 즉시 내므로 한 번 읽어 먼저 판정한다 —
-# 읽기 전용이고, 연결 실패 같은 일시 오류는 아래 retry 루프가 그대로 처리한다.
-if ! current_raw="$(alembic current 2>&1)"; then
+if [ "$api_profile" = "production" ]; then
+  # production runtime은 Manager final permit 없이 DB를 mutation하지 않는다. final
+  # permit verifier가 이 API runtime DSN에서 candidate/DB identity와 exact raw ``300``을
+  # 한 번에 확인한다. 그 뒤 migrator DSN으로 별도 `alembic current`를 읽으면 서로 다른
+  # DB가 각각 통과하는 split-brain이 생기므로 production에는 generic Alembic probe가 없다.
+  if [ "$expected_head" != "300" ]; then
+    echo "production API requires KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD=300" >&2
+    exit 1
+  fi
+  if ! /usr/local/bin/python -I \
+    /usr/local/bin/ktm-application-schema-final-permit verify-api; then
+    echo "production API requires a valid Docker Manager application final permit" >&2
+    exit 1
+  fi
+else
+# `300` image는 local-dev fresh DB 또는 raw `300`만 generic startup으로 처리한다. `0236`은
+# active graph 밖의 퇴역 revision이며 in-place stamp/upgrade를 지원하지 않는다.
+if ! current_raw="$(/usr/local/bin/python -I -m alembic current 2>&1)"; then
   case "$current_raw" in
     *"Can't locate revision"*)
-      # 원인이 두 가지인데 진단이 하나뿐이면 오도한다. squash(`0200`) 이후 이미지는
-      # `alembic/versions/`에 baseline + bridge만 담고, 옛 세대는
-      # source의 `alembic/legacy_versions/`는 실행 이미지에 넣지 않는다. 대신 그
-      # archive에서 생성·검증한 revision id manifest만 복사한다. 그래서 **이미지가
-      # DB보다 새로운데도**
-      # 같은 오류가 난다 — `0104` 이전 복구점(예: H44 1회차 dump `0078`)으로 복원한 DB가
-      # 정확히 그 경우다. 옛 진단문("stale image")만 남기면 새벽에 그 로그를 보는 사람이
-      # 롤백을 시도하게 된다. DB의 revision이 아카이브에 있는지로 두 경우를 가른다.
-      # 판별자는 "아카이브에 있는가"만으로는 부족하다 — stale 이미지가 배포된 경우에도
-      # DB revision은 아카이브에 있을 수 있다. **이 이미지가 squash판인가**를 함께 본다:
-      # `alembic/versions/`에 baseline이 있으면 이 이미지는 `0200`에서 시작하므로,
-      # 아카이브 세대 DB를 앞으로 옮길 수 없다(= DB가 뒤처짐). baseline이 없으면
-      # 이 이미지는 옛 체인판이고 DB가 앞선 것이다(= 이미지가 뒤처짐).
       db_revision="$(printf '%s' "$current_raw" | sed -n 's/.*Can'"'"'t locate revision identified by '"'"'\([^'"'"']*\)'"'"'.*/\1/p' | head -1)"
-      archived=""
-      if [ -n "$db_revision" ] && [ -f alembic/versions/0200_schema_baseline.py ] \
-         && [ -f docker/pre-squash-revisions.txt ] \
-         && grep -Fqx "$db_revision" docker/pre-squash-revisions.txt; then
-        archived="alembic/legacy_versions/${db_revision}"
-      fi
-      echo "the DB alembic revision is not part of this image's migration chain" >&2
-      if [ -n "$archived" ]; then
-        echo "(the DB is at ${db_revision}, a **pre-squash** generation archived in ${archived};" >&2
-        echo " this image starts from 0200_schema_baseline and cannot migrate it forward." >&2
-        echo " Restore a 0104_tvn36_final_fence-or-later backup, or rebuild the DB from the" >&2
-        echo " baseline and reload providers. Do NOT hand-edit alembic_version." >&2
-        echo " See docs/backup-restore.md and alembic/legacy_versions/README.md.)" >&2
+      if [ "$db_revision" = "0236_tvn41s_compaction_drained" ]; then
+        echo "the DB is at unsupported retired revision 0236; in-place transition is not available" >&2
+        echo "use only the approved destructive fresh rebuild path for application 300" >&2
       else
-        echo "(the image is older than the DB — a stale image was deployed; the DB was not touched)" >&2
+        echo "the DB Alembic revision is unsupported by the active 300-only image" >&2
+        echo "(raw revision: ${db_revision:-unknown}; no archive replay, downgrade, or manual version-table edit is supported)" >&2
       fi
       printf '%s\n' "$current_raw" >&2
       exit 1
@@ -413,21 +434,12 @@ retries="${KOR_TRAVEL_MAP_MIGRATION_RETRIES:-30}"
 sleep_seconds="${KOR_TRAVEL_MAP_MIGRATION_RETRY_SLEEP_SECONDS:-2}"
 attempt=1
 
-# `alembic upgrade head`의 stderr는 파일에 받았다가 그대로 다시 내보낸다(운영자가 원문을 봐야
-# 한다) — 그 사본으로 **영구 실패**를 판정한다. 0223(T-VN-40 identity mapping loader)의 fail-closed
-# 중단은 데이터 문제라 재시도로 풀리지 않는데, 30회 반복하면 매번 0202~0223 DDL을 다시 돌리며
-# lock만 흔든다. (POSIX sh — process substitution 없음.)
+# `0236` source와 알 수 없는 active-graph 밖 revision은 위에서 retry 전에 거부한다.
+# 여기서는 일시 연결 오류만 bounded retry로 흡수한다. (POSIX sh — process substitution 없음.)
 upgrade_log="$(mktemp)"
 trap 'rm -f "$upgrade_log"' EXIT
-while ! alembic upgrade head 2>"$upgrade_log"; do
+while ! /usr/local/bin/python -I -m alembic upgrade head 2>"$upgrade_log"; do
   cat "$upgrade_log" >&2
-  if grep -Fq "tvn40 identity mapping:" "$upgrade_log"; then
-    echo "alembic upgrade head failed permanently: T-VN-40 identity mapping loader aborted" >&2
-    echo " (fail-closed by design — resolve on the canonical side per" >&2
-    echo "  docs/reports/t-vn-40-identity-mapping-loader-design-2026-08-18.md §5, then redeploy;" >&2
-    echo "  the whole 0202..0223 chain was rolled back, head is unchanged)" >&2
-    exit 1
-  fi
   if [ "$attempt" -ge "$retries" ]; then
     echo "alembic upgrade head failed after $attempt attempts" >&2
     exit 1
@@ -444,7 +456,8 @@ trap - EXIT
 # inventory with the migrator-only SET ROLE path before this shell discards its
 # credential; default privileges are intentionally not used for feature state
 # or audit objects.
-python -m kortravelmap.infra.runtime_privileges
+/usr/local/bin/python -I -m kortravelmap.infra.runtime_privileges
+fi
 
 # Uvicorn과 그 자식에는 runtime credential만 남긴다. migration credential은
 # application code·request handler가 읽을 수 없게 exec 직전에 제거한다.
@@ -455,6 +468,6 @@ unset KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE
 export KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256="$manual_feature_create_digest"
 export KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED="$manual_feature_create_flag"
 
-exec python -m uvicorn kortravelmap.api.app:app \
+exec /usr/local/bin/python -I -m uvicorn kortravelmap.api.app:app \
   --host 0.0.0.0 \
   --port "${KOR_TRAVEL_MAP_API_PORT:-12701}"

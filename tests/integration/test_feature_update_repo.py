@@ -225,7 +225,7 @@ async def test_preview_returns_plan_without_writes(
     assert await _count_rows(migrated_session, "ops.feature_update_requests") == 0
 
 
-async def test_generic_writer_rejects_pinvi_cache_target_scope(
+async def test_generic_writer_rejects_service_owned_cache_target_scope(
     migrated_session: AsyncSession,
 ) -> None:
     membership = await _canonical_membership(migrated_session)

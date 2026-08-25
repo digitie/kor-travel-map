@@ -3578,7 +3578,7 @@ def test_create_request_rejects_dry_run_flag(
 
 
 @pytest.mark.unit
-def test_create_request_rejects_pinvi_cache_target_generic_writer(
+def test_create_request_rejects_service_owned_cache_target_generic_writer(
     client: TestClient,
     session: _FakeSession,
 ) -> None:

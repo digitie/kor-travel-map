@@ -25,8 +25,8 @@ from kortravelmap.infra.models import (
     SourceLinkRow,
     SourceRecordRow,
 )
+from tests.integration._application_300_bootstrap import _TEST_RUNTIME_PASSWORD
 from tests.integration._db_cleanup import truncate_committed_test_rows
-from tests.integration._tvn34_migration_bootstrap import _TVN40_TEST_RUNTIME_PASSWORD
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -146,7 +146,7 @@ async def container_dsn(
     """
     dsn = migrated_engine.url.set(
         username="ktm_feature_api_runtime",
-        password=_TVN40_TEST_RUNTIME_PASSWORD,
+        password=_TEST_RUNTIME_PASSWORD,
     ).render_as_string(hide_password=False)
     yield dsn
     async with AsyncSession(migrated_engine) as session, session.begin():

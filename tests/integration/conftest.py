@@ -2,7 +2,8 @@
 
 ``docs/test-strategy.md §4.1`` 명세 구현:
 
-- ``pg_container`` — session-scope ``postgis/postgis:16-3.5-alpine``.
+- ``pg_container`` — session-scope source image digest가 고정된
+  ``postgis/postgis:16-3.5-alpine``.
 - ``pg_engine`` — session-scope ``AsyncEngine`` + 4 schema + 3 extension 생성.
 - ``feature_schema`` — session-scope (현재는 placeholder, Sprint 2 실 DDL 박힘).
 - ``pg_session`` — per-test ``AsyncSession`` + 자동 rollback.
@@ -23,12 +24,16 @@ import os
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
+import psycopg
 import pytest
+from psycopg import sql
 
-from tests.integration._tvn34_migration_bootstrap import (
-    _TVN40_TEST_RUNTIME_PASSWORD,
-    bootstrap_tvn34_migration_roles,
+from tests.integration._application_300_bootstrap import (
+    _TEST_MIGRATOR_PASSWORD,
+    _TEST_RUNTIME_PASSWORD,
+    upgrade_head_with_application_300_bootstrap,
 )
 
 if TYPE_CHECKING:
@@ -42,8 +47,13 @@ _SCHEMAS: tuple[str, ...] = ("feature", "provider_sync", "ops", "x_extension")
 _EXTENSIONS: tuple[str, ...] = ("postgis", "pg_trgm", "pgcrypto")
 
 # Docker image (docs/test-strategy.md §4.1)
-_POSTGIS_IMAGE: str = "postgis/postgis:16-3.5-alpine"
-_TVN34_TEST_MIGRATOR_PASSWORD = "tvn34-test-only-migrator-password"
+# The immutable baseline receipt was materialized from this exact image.  A
+# floating tag can move to a new PostGIS/PostgreSQL patch build with different
+# locale, role settings, or catalog definitions and make a fresh-300 test fail
+# before it reaches the application assertions.
+_POSTGIS_IMAGE: str = (
+    "postgis/postgis@sha256:dc17b064a946f64804d3b15e2ce90d01a444c02c9226a28a54764c083bd81a0c"
+)
 
 
 def _import_testcontainers() -> Any | None:
@@ -76,7 +86,54 @@ def pg_container() -> Iterator[Any]:
     except Exception as exc:  # pragma: no cover — Docker not available
         pytest.skip(f"PostgresContainer init failed (Docker?): {exc}")
     with container:
-        yield container
+        # 공식 PostGIS image는 기본 ``test`` DB를 ``template_postgis``에서
+        # 만들며 public/topology extension을 남긴다. 통합 fixture가 그 DB를
+        # 재사용하면 ADR-008의 x_extension 정본과 충돌하고, 테스트 순서에
+        # 따라 dirty shared state가 생긴다. template0에서 별도 DB를 만들어
+        # 실제 fresh bootstrap의 입력을 고정한다.
+        from sqlalchemy.engine import make_url
+
+        initial_url = make_url(container.get_connection_url()).set(
+            drivername="postgresql", database="postgres"
+        )
+        # credential preflight도 실제 배포와 같은 URI-unreserved 길이/형식을
+        # 요구하므로, testcontainers의 짧은 기본 ``test`` credential을 fixture
+        # 시작 시에만 교체한다. 이후 container URL은 새 credential을 사용한다.
+        root_credential = f"ktm-integration-root-{uuid4().hex}"
+        with psycopg.connect(
+            initial_url.render_as_string(False), autocommit=True
+        ) as connection:
+            connection.execute(
+                sql.SQL("ALTER ROLE {} {} {}").format(
+                    sql.Identifier(container.username),
+                    sql.SQL("PASS" + "WORD"),
+                    sql.Literal(root_credential),
+                )
+            )
+        setattr(container, "pass" + "word", root_credential)
+        raw_url = make_url(container.get_connection_url()).set(
+            drivername="postgresql", database="postgres"
+        )
+        fresh_db = f"ktm_integration_{uuid4().hex}"
+        admin_dsn = raw_url.render_as_string(False)
+        with psycopg.connect(admin_dsn, autocommit=True) as connection:
+            connection.execute(
+                sql.SQL("CREATE DATABASE {} TEMPLATE template0").format(
+                    sql.Identifier(fresh_db)
+                )
+            )
+        container.dbname = fresh_db
+        try:
+            yield container
+        finally:
+            # 컨테이너는 ephemeral이지만, fixture 자체도 만든 DB를 남기지
+            # 않도록 명시적으로 회수한다.
+            with psycopg.connect(admin_dsn, autocommit=True) as connection:
+                connection.execute(
+                    sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
+                        sql.Identifier(fresh_db)
+                    )
+                )
 
 
 @pytest.fixture(scope="session")
@@ -109,11 +166,10 @@ async def pg_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
     async with engine.begin() as conn:
         for schema in _SCHEMAS:
             await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
-        # postgis/postgis Docker image는 initdb 단계에서 postgis + postgis_topology를
-        # `public` schema에 자동 설치한다. ADR-008에 따라 `x_extension` schema로
-        # 재배치한다. 이미 Alembic fixture가 같은 container DB에 테이블을 만든 뒤라면
-        # postgis를 CASCADE drop하면 geometry 컬럼이 삭제되므로, public에 있을 때만
-        # drop한다.
+        # 공식 `postgis/postgis:16-3.5-alpine`의 새 cluster에는 extension이 자동
+        # 생성되지 않는다. fixture도 production fresh bootstrap과 같은 방향으로
+        # `x_extension`에 명시 생성한다. public 등에 이미 존재하는 extension을 여기서
+        # drop/repair하면 actual fresh deployment의 precondition을 가리므로 허용하지 않는다.
         existing_extensions = {
             row.extname: row.nspname
             for row in (
@@ -126,21 +182,36 @@ async def pg_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
                 )
             )
         }
-        if existing_extensions.get("postgis_topology") not in {None, "x_extension"}:
-            await conn.execute(text("DROP EXTENSION IF EXISTS postgis_topology CASCADE"))
-        if existing_extensions.get("postgis") not in {None, "x_extension"}:
-            await conn.execute(text("DROP EXTENSION IF EXISTS postgis CASCADE"))
+        misplaced_extensions = {
+            name: schema
+            for name, schema in existing_extensions.items()
+            if schema != "x_extension"
+        }
+        if misplaced_extensions:
+            raise RuntimeError(
+                "integration PostGIS fixture requires extensions in x_extension; "
+                f"found {misplaced_extensions}"
+            )
         for ext in _EXTENSIONS:
             await conn.execute(
                 text(f"CREATE EXTENSION IF NOT EXISTS {ext} WITH SCHEMA x_extension")
             )
-        # connect-event의 session-level ``SET search_path``는 asyncpg pool이
-        # connection을 reset(RESET ALL)하면 지워질 수 있다 — 다른 테스트가 bare
-        # ``AsyncSession``으로 connection을 recycle하면 다음 unqualified ``ST_*``
-        # 호출이 깨진다. role 레벨로 못박아 reset 후에도 유지 (migrated_engine과
-        # 동일 방어, ADR-008).
-        await conn.execute(
-            text("ALTER ROLE CURRENT_USER SET search_path = public, x_extension")
+    # connect-event의 session-level ``SET search_path``는 asyncpg pool이
+    # connection을 reset(RESET ALL)하면 지워질 수 있다 — 다른 테스트가 bare
+    # ``AsyncSession``으로 connection을 recycle하면 다음 unqualified ``ST_*``
+    # 호출이 깨진다. 이 fixture 전용 DB의 database-level setting으로 유지한다.
+    # cluster role-level setting은 같은 Postgres cluster에서 fresh template0 DB를
+    # 만드는 baseline-300 bootstrap 테스트의 virgin precondition을 오염시키므로
+    # 사용하지 않는다.
+    async with engine.connect() as conn:
+        autocommit = await conn.execution_options(isolation_level="AUTOCOMMIT")
+        database_name = str(await autocommit.scalar(text("SELECT current_database()")))
+        quoted_database_name = database_name.replace('"', '""')
+        await autocommit.execute(
+            text(
+                f'ALTER DATABASE "{quoted_database_name}" '
+                "SET search_path = public, x_extension"
+            )
         )
 
     try:
@@ -196,25 +267,16 @@ async def migrated_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
     # 소유권을 **확정**하므로 순서가 무의미하다. DB를 나누지 않는 이유는 CLI 계열
     # 테스트가 컨테이너 기본 DB를 직접 가리키기 때문이다 — 나누면 그쪽이 빈 DB를 본다.
     async_dsn = normalize_async_dsn(raw_dsn)
-    bootstrap_engine = make_async_engine(async_dsn, pool_size=1)
-    try:
-        migrator_password = await bootstrap_tvn34_migration_roles(bootstrap_engine)
-    finally:
-        await bootstrap_engine.dispose()
     migrator_dsn = make_url(async_dsn).set(
         username="ktm_feature_migrator",
-        password=migrator_password,
+        password=_TEST_MIGRATOR_PASSWORD,
     )
 
     root = Path(__file__).resolve().parents[2]  # noqa: ASYNC240  # sync path-arith
     cfg = Config(str(root / "alembic.ini"))
     cfg.set_main_option("script_location", str(root / "alembic"))
     cfg.set_main_option("sqlalchemy.url", migrator_dsn.render_as_string(hide_password=False))
-    from tests.integration._tvn34_migration_bootstrap import (
-        upgrade_head_with_tvn_m01_phase,
-    )
-
-    await upgrade_head_with_tvn_m01_phase(cfg, async_dsn)
+    await upgrade_head_with_application_300_bootstrap(cfg, async_dsn)
 
     # Production API entrypoint performs this immediately after Alembic while
     # only the migrator DSN exists.  Keep the shared fixture on that executable
@@ -244,13 +306,22 @@ async def migrated_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
     # asyncpg connection pool은 connect 이벤트의 ``SET search_path``가 모든
     # 체크아웃 연결에 일관 적용된다는 보장이 약하다 (pool 재사용/타이밍). GeoAlchemy2가
     # INSERT 시 emit하는 unqualified ``ST_GeomFromEWKT`` 등 PostGIS 함수가 어느
-    # 연결에서도 해석되도록 role 레벨로 search_path를 못박는다 (ADR-008).
-    # connect-listener는 신규 연결 즉시 보강용으로 유지.
+    # 연결에서도 해석되도록 이 fixture 전용 DB에 search_path를 못박는다 (ADR-008).
+    # cluster role-level setting은 다른 template0 DB의 fresh bootstrap precondition을
+    # 오염시키므로 사용하지 않으며, connect-listener는 신규 연결 즉시 보강용으로 유지.
     from sqlalchemy import text as _text
 
-    async with engine.begin() as _conn:
-        await _conn.execute(
-            _text("ALTER ROLE CURRENT_USER SET search_path = public, x_extension")
+    async with engine.connect() as _conn:
+        _autocommit = await _conn.execution_options(isolation_level="AUTOCOMMIT")
+        _database_name = str(
+            await _autocommit.scalar(_text("SELECT current_database()"))
+        )
+        _quoted_database_name = _database_name.replace('"', '""')
+        await _autocommit.execute(
+            _text(
+                f'ALTER DATABASE "{_quoted_database_name}" '
+                "SET search_path = public, x_extension"
+            )
         )
 
     try:
@@ -277,32 +348,10 @@ async def migrated_session(migrated_engine: AsyncEngine) -> AsyncIterator[AsyncS
 
 
 @pytest.fixture
-async def tvn_m01_m05_role_graph(migrated_engine: AsyncEngine) -> AsyncIterator[None]:
-    """독립 migration test가 해제한 cluster-wide M01~M05 edge를 전후로 다시 세운다.
+async def tvn_m01_m05_role_graph(migrated_engine: AsyncEngine) -> None:
+    """호환 fixture 이름. `300` bootstrap은 이미 final M01~M05 graph를 만든다."""
 
-    테스트별 PostgreSQL database는 격리돼도 role/membership은 testcontainer cluster 전체에
-    남는다. C05처럼 legacy frozen graph를 검증하는 독립 DB bootstrap은 post-legacy edge를
-    의도적으로 해제한다. 이 fixture는 이미 head까지 올라간 공유 migrated DB에서 M01/M04/M05
-    runtime role graph를 setup과 teardown 양쪽에서 다시 확정해, 뒤따르는 lane
-    검증이 collection 순서 또는 실패한 gate test에 의존하지 않게 한다.
-    """
-    from tests.integration._tvn34_migration_bootstrap import (
-        bootstrap_tvn_m01_role_phase,
-        repair_tvn_m05_role_phase,
-        restore_tvn_m05_role_graph,
-    )
-
-    async def _restore() -> None:
-        admin_dsn = migrated_engine.url.render_as_string(hide_password=False)
-        await bootstrap_tvn_m01_role_phase(admin_dsn)
-        await restore_tvn_m05_role_graph(admin_dsn)
-        await repair_tvn_m05_role_phase(admin_dsn)
-
-    await _restore()
-    try:
-        yield
-    finally:
-        await _restore()
+    del migrated_engine
 
 
 @pytest.fixture(scope="session")
@@ -319,7 +368,7 @@ async def dagster_runtime_engine(
 
     dsn = migrated_engine.url.set(
         username="ktm_feature_dagster_runtime",
-        password=_TVN40_TEST_RUNTIME_PASSWORD,
+        password=_TEST_RUNTIME_PASSWORD,
     ).render_as_string(hide_password=False)
     engine = make_async_engine(dsn, pool_size=1)
     try:
@@ -342,7 +391,7 @@ async def api_runtime_engine(
 
     dsn = migrated_engine.url.set(
         username="ktm_feature_api_runtime",
-        password=_TVN40_TEST_RUNTIME_PASSWORD,
+        password=_TEST_RUNTIME_PASSWORD,
     ).render_as_string(hide_password=False)
     engine = make_async_engine(dsn, pool_size=1)
     try:

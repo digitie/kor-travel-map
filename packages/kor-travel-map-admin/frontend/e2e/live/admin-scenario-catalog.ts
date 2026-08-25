@@ -332,8 +332,6 @@ export const ADMIN_SURFACES: readonly AdminSurface[] = [
     writeApis: [
       writeApi("POST", "/v1/admin/backups"),
       writeApi("DELETE", "/v1/admin/backups/{backup_id}", "destructive"),
-      writeApi("POST", "/v1/admin/restore/{backup_id}", "destructive"),
-      writeApi("POST", "/v1/admin/restore/{backup_id}/swap", "destructive"),
     ],
     reflectedSurfaces: ["/ops/logs", "/"],
   },

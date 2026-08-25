@@ -1,4 +1,4 @@
-FROM python:3.12-slim AS builder
+FROM python@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de AS builder
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -35,18 +35,31 @@ RUN --mount=type=secret,id=github_token \
     fi \
     && python -m pip install --no-cache-dir --prefix=/install ".[providers]" ./packages/kor-travel-map-dagster
 
-FROM python:3.12-slim AS runtime
+FROM python@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de AS runtime
 
 ARG KOR_TRAVEL_MAP_GIT_COMMIT=development
+ARG KOR_TRAVEL_MAP_GIT_TREE=development
+ARG KOR_TRAVEL_MAP_DOCKERFILE_SHA256=development
+ARG KOR_TRAVEL_MAP_BASE_IMAGE_REFERENCE=python@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
+ARG KOR_TRAVEL_MAP_BASE_IMAGE_ID=sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
 
-LABEL org.opencontainers.image.revision="$KOR_TRAVEL_MAP_GIT_COMMIT"
+LABEL org.opencontainers.image.revision="$KOR_TRAVEL_MAP_GIT_COMMIT" \
+    io.kor-travel-map.application-baseline.candidate-git-tree="$KOR_TRAVEL_MAP_GIT_TREE" \
+    io.kor-travel-map.application-baseline.candidate-dockerfile-sha256="$KOR_TRAVEL_MAP_DOCKERFILE_SHA256" \
+    io.kor-travel-map.application-baseline.candidate-base-image-reference="$KOR_TRAVEL_MAP_BASE_IMAGE_REFERENCE" \
+    io.kor-travel-map.application-baseline.candidate-base-image-id="$KOR_TRAVEL_MAP_BASE_IMAGE_ID"
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PATH=/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:/bin \
+    PYTHONNOUSERSITE=1 \
     TMPDIR=/tmp \
     TEMP=/tmp \
     TMP=/tmp \
-    DAGSTER_HOME=/opt/dagster/dagster_home
+    DAGSTER_HOME=/opt/dagster/dagster_home \
+    HOME=/opt/dagster/state \
+    KOR_TRAVEL_MAP_IMAGE_REVISION="$KOR_TRAVEL_MAP_GIT_COMMIT" \
+    KOR_TRAVEL_MAP_DAGSTER_PROFILE=production
 
 WORKDIR /app
 
@@ -54,22 +67,48 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --system appuser \
-    && useradd --system --gid appuser --home-dir /app --shell /usr/sbin/nologin appuser \
-    && mkdir -p "$DAGSTER_HOME" \
-    && chown -R appuser:appuser /app /opt/dagster
+    && useradd --system --gid appuser --home-dir /opt/dagster/state --shell /usr/sbin/nologin appuser \
+    && mkdir -p "$DAGSTER_HOME" /opt/dagster/state \
+    && chown -R root:root /app /opt/dagster \
+    && chown appuser:appuser /opt/dagster/state
 
 COPY --from=builder /install /usr/local
 # Map application Alembic은 API image만 소유한다. Dagster metadata storage는 이
 # image에 설치된 Dagster package의 migration graph가 정본이며, one-shot command가
 # `dagster instance migrate` 뒤 strict version 검증을 수행한다.
-COPY --chown=appuser:appuser docker/dagster.yaml /opt/dagster/dagster_home/dagster.yaml
-COPY --chown=appuser:appuser docker/dagster-entrypoint.sh /usr/local/bin/dagster-entrypoint.sh
-COPY --chown=appuser:appuser docker/dagster-storage-migrate.py /usr/local/bin/ktm-dagster-storage
-RUN chmod 0755 /usr/local/bin/dagster-entrypoint.sh /usr/local/bin/ktm-dagster-storage
+# Dagster는 Map application DB의 direct consumer다. API만 final permit을 확인하면
+# webserver/daemon이 permit 없는 DB에 직접 연결할 수 있으므로, immutable baseline receipt와
+# verifier를 same candidate image에 root-owned로 넣는다. Alembic graph 자체는 계속 API
+# image만 소유한다.
+COPY --chown=root:root alembic/baseline ./alembic/baseline
+COPY --chown=root:root docker/dagster.yaml /opt/dagster/dagster_home/dagster.yaml
+COPY --chown=root:root docker/dagster-entrypoint.sh /usr/local/bin/dagster-entrypoint.sh
+COPY --chown=root:root docker/dagster-storage-migrate.py /usr/local/bin/ktm-dagster-storage
+COPY --chown=root:root docker/application-schema-final-permit.py /usr/local/bin/ktm-application-schema-final-permit
+COPY --chown=root:root docker/application-schema-contract.py /usr/local/bin/ktm-application-schema-contract
+RUN chown -R root:root /app /opt/dagster/dagster_home \
+        /usr/local/bin/dagster-entrypoint.sh /usr/local/bin/ktm-dagster-storage \
+        /usr/local/bin/ktm-application-schema-final-permit \
+        /usr/local/bin/ktm-application-schema-contract \
+    && chmod 0555 /app /opt/dagster /opt/dagster/dagster_home \
+    && chmod 0444 /opt/dagster/dagster_home/dagster.yaml \
+    && find /app/alembic -type d -exec chmod 0555 {} + \
+    && find /app/alembic -type f -exec chmod 0444 {} + \
+    && chmod 0555 /usr/local/bin/ktm-application-schema-final-permit \
+        /usr/local/bin/ktm-application-schema-contract \
+    && chmod 0555 /usr/local/bin/dagster-entrypoint.sh /usr/local/bin/ktm-dagster-storage \
+    && su -s /bin/sh -c 'test ! -w /app \
+        && test ! -w /app/alembic \
+        && test ! -w /app/alembic/baseline \
+        && ! mv /app/alembic/baseline /app/alembic/replaced 2>/dev/null \
+        && test ! -w /usr/local/bin/dagster-entrypoint.sh \
+        && test ! -w /usr/local/bin/ktm-application-schema-final-permit \
+        && test ! -w /usr/local/bin/ktm-application-schema-contract \
+        && test ! -w /opt/dagster/dagster_home/dagster.yaml' appuser
 
 USER appuser
 
 EXPOSE 12702
 
-ENTRYPOINT ["dagster-entrypoint.sh"]
-CMD ["sh", "-c", "dagster-webserver -m kortravelmap.dagster.definitions -h 0.0.0.0 -p ${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}"]
+ENTRYPOINT ["/usr/local/bin/dagster-entrypoint.sh"]
+CMD ["/usr/local/bin/dagster-webserver", "-m", "kortravelmap.dagster.definitions", "-h", "0.0.0.0", "-p", "12702"]

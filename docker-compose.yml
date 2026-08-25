@@ -12,7 +12,10 @@ services:
       - "-c"
       - "pg_prewarm.autoprewarm=on"
     environment:
-      POSTGRES_DB: ${KOR_TRAVEL_MAP_POSTGRES_DB:-kor_travel_map}
+      # PostGIS image는 POSTGRES_DB에 extension/schema를 자동 설치한다. application DB는
+      # virgin `300` preflight가 받을 수 있도록 maintenance DB 초기화 뒤 template0에서
+      # 별도 fresh one-shot이 만든다.
+      POSTGRES_DB: postgres
       POSTGRES_USER: ${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}
       POSTGRES_PASSWORD: ${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-}
       KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB: ${KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB:-kor_travel_map_dagster}
@@ -24,7 +27,7 @@ services:
       test:
         [
           "CMD-SHELL",
-          "pg_isready -U ${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map} -d ${KOR_TRAVEL_MAP_POSTGRES_DB:-kor_travel_map}",
+          "test \"$$(cat /proc/1/comm)\" = postgres && pg_isready -U ${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map} -d postgres",
         ]
       interval: 5s
       timeout: 5s
@@ -40,157 +43,302 @@ services:
       KOR_TRAVEL_MAP_POSTGRES_USER: ${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}
       KOR_TRAVEL_MAP_POSTGRES_PASSWORD: ${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-}
       KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB: ${KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB:-kor_travel_map_dagster}
+      KOR_TRAVEL_MAP_DAGSTER_METADATA_USER: ${KOR_TRAVEL_MAP_DAGSTER_METADATA_USER:-}
+      KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD: ${KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD:-}
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL:-}
+      KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN: ${KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN:-}
+      KOR_TRAVEL_MAP_MIGRATOR_PASSWORD: ${KOR_TRAVEL_MAP_MIGRATOR_PASSWORD:-}
+      KOR_TRAVEL_MAP_MIGRATOR_PG_DSN: ${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:-}
+      KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD: ${KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD:-}
+      KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN: ${KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN:-}
+      KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD: ${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD:-}
+      KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN: ${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN:-}
+      KOR_TRAVEL_MAP_DAGSTER_PROFILE: ${KOR_TRAVEL_MAP_DAGSTER_PROFILE:-${KOR_TRAVEL_MAP_API_PROFILE:-production}}
+      KOR_TRAVEL_MAP_POSTGRES_INIT_HOST: ${KOR_TRAVEL_MAP_POSTGRES_INIT_HOST:-postgres}
       PGPASSWORD: ${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-}
+    volumes:
+      - kor-travel-map-dagster-storage-permit:/run/kor-travel-map-dagster-storage-permit
+      - ./scripts/database-credential-preflight.sh:/usr/local/lib/kor-travel-map/database-credential-preflight.sh:ro
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
         set -eu
-        if ! echo "$$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*$$'; then
-          echo "invalid KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB=$$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB" >&2
+        if [ "$$KOR_TRAVEL_MAP_DAGSTER_PROFILE" != local-dev ]; then
+          echo "dagster-db-init is local-dev only; production requires Docker Manager authority" >&2
           exit 1
         fi
-        if psql -h postgres -U "$$KOR_TRAVEL_MAP_POSTGRES_USER" -d "$$KOR_TRAVEL_MAP_POSTGRES_DB" -tAc "SELECT 1 FROM pg_database WHERE datname = '$$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB'" | grep -q 1; then
-          echo "Dagster metadata DB exists: $$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB"
+        . /usr/local/lib/kor-travel-map/database-credential-preflight.sh
+        validate_map_database_credentials KOR_TRAVEL_MAP_DAGSTER_PG_URL
+        postgres_host="$$KOR_TRAVEL_MAP_POSTGRES_INIT_HOST"
+        case "$$postgres_host" in ''|*[!A-Za-z0-9_.:-]*) echo "invalid PostgreSQL init host" >&2; exit 1 ;; esac
+        for variable_name in KOR_TRAVEL_MAP_POSTGRES_DB KOR_TRAVEL_MAP_POSTGRES_USER KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB KOR_TRAVEL_MAP_DAGSTER_METADATA_USER; do
+          eval "variable_value=\$$$${variable_name}"
+          if ! echo "$$variable_value" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]{0,62}$$'; then
+            echo "invalid database identity variable: $$variable_name" >&2
+            exit 1
+          fi
+        done
+        if [ "$$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB" = "$$KOR_TRAVEL_MAP_POSTGRES_DB" ]; then
+          echo "Dagster metadata DB must differ from the application DB" >&2
+          exit 1
+        fi
+        if [ "$$KOR_TRAVEL_MAP_DAGSTER_METADATA_USER" = "$$KOR_TRAVEL_MAP_POSTGRES_USER" ]; then
+          echo "Dagster metadata login must differ from the bootstrap login" >&2
+          exit 1
+        fi
+        if [ "$$KOR_TRAVEL_MAP_DAGSTER_METADATA_USER" != "$$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB" ]; then
+          echo "Dagster metadata login and database must share one dedicated identity" >&2
+          exit 1
+        fi
+        case "$$KOR_TRAVEL_MAP_DAGSTER_METADATA_USER" in
+          postgres|pg_*|ktm_*) echo "reserved role cannot be used for Dagster metadata" >&2; exit 1 ;;
+        esac
+        case "$$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB" in
+          postgres|template0|template1) echo "reserved database cannot be used for Dagster metadata" >&2; exit 1 ;;
+        esac
+        [ -n "$$KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD" ] || { echo "dedicated Dagster metadata password is required" >&2; exit 1; }
+        metadata_password_length=$${#KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD}
+        if [ "$$metadata_password_length" -lt 32 ] || [ "$$metadata_password_length" -gt 256 ]; then
+          echo "Dagster metadata password must be 32..256 URI-unreserved characters" >&2
+          exit 1
+        fi
+        case "$$KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD" in *[!A-Za-z0-9._~-]*) echo "Dagster metadata password must be 32..256 URI-unreserved characters" >&2; exit 1 ;; esac
+        if [ "$$KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD" = "$$KOR_TRAVEL_MAP_POSTGRES_PASSWORD" ]; then
+          echo "Dagster metadata password must differ from the bootstrap password" >&2
+          exit 1
+        fi
+        [ -n "$$KOR_TRAVEL_MAP_DAGSTER_PG_URL" ] || { echo "dedicated Dagster metadata DSN is required" >&2; exit 1; }
+        case "$$KOR_TRAVEL_MAP_DAGSTER_PG_URL" in *'?'*|*'#'*|*[![:graph:]]*) echo "Dagster metadata DSN must be a strict URI without query or fragment" >&2; exit 1 ;; esac
+        dsn_prefix="postgresql://$$KOR_TRAVEL_MAP_DAGSTER_METADATA_USER:$$KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD@"
+        case "$$KOR_TRAVEL_MAP_DAGSTER_PG_URL" in "$$dsn_prefix"*) dsn_server="$${KOR_TRAVEL_MAP_DAGSTER_PG_URL#"$$dsn_prefix"}" ;; *) echo "Dagster metadata DSN credential does not match the declared metadata login" >&2; exit 1 ;; esac
+        case "$$dsn_server" in */"$$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB") dsn_authority="$${dsn_server%/"$$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB"}" ;; *) echo "Dagster metadata DSN database does not match the declared metadata DB" >&2; exit 1 ;; esac
+        case "$$dsn_authority" in ''|*[!A-Za-z0-9_.:-]*) echo "Dagster metadata DSN authority is invalid" >&2; exit 1 ;; esac
+        role_count="$$(psql -h "$$postgres_host" -U "$$KOR_TRAVEL_MAP_POSTGRES_USER" -d "$$KOR_TRAVEL_MAP_POSTGRES_DB" -tAc "SELECT count(*) FROM pg_roles WHERE rolname = '$$KOR_TRAVEL_MAP_DAGSTER_METADATA_USER'")"
+        database_count="$$(psql -h "$$postgres_host" -U "$$KOR_TRAVEL_MAP_POSTGRES_USER" -d "$$KOR_TRAVEL_MAP_POSTGRES_DB" -tAc "SELECT count(*) FROM pg_database WHERE datname = '$$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB'")"
+        if { [ "$$role_count" = 0 ] && [ "$$database_count" = 0 ]; }; then
+          existing_metadata=false
+        elif { [ "$$role_count" = 1 ] && [ "$$database_count" = 1 ]; }; then
+          existing_metadata=true
         else
-          createdb -h postgres -U "$$KOR_TRAVEL_MAP_POSTGRES_USER" "$$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB"
+          echo "Dagster metadata role/database partial state is not recoverable automatically" >&2
+          exit 1
+        fi
+        permit_dir=/run/kor-travel-map-dagster-storage-permit
+        permit_path="$$permit_dir/permit.json"
+        if [ "$$existing_metadata" = true ]; then
+          [ -d "$$permit_dir" ] && [ ! -L "$$permit_dir" ] \
+            && [ "$$(stat -c '%u:%a' "$$permit_dir")" = 0:555 ] \
+            && [ -f "$$permit_path" ] && [ ! -L "$$permit_path" ] \
+            && [ "$$(stat -c '%u:%a:%h' "$$permit_path")" = 0:444:1 ] \
+            || { echo "existing Dagster metadata resources require a sealed prior permit" >&2; exit 1; }
+          permit_size="$$(wc -c <"$$permit_path")"
+          case "$$permit_size" in ''|*[!0-9]*) echo "invalid prior Dagster metadata permit size" >&2; exit 1 ;; esac
+          [ "$$permit_size" -le 1048576 ] || { echo "prior Dagster metadata permit is too large" >&2; exit 1; }
+        else
+          [ ! -e "$$permit_path" ] || { echo "stale Dagster metadata permit blocks first creation" >&2; exit 1; }
+          psql -h "$$postgres_host" -U "$$KOR_TRAVEL_MAP_POSTGRES_USER" -d "$$KOR_TRAVEL_MAP_POSTGRES_DB" \
+            -v ON_ERROR_STOP=1 \
+            -v metadata_user="$$KOR_TRAVEL_MAP_DAGSTER_METADATA_USER" <<'SQL'
+        \getenv metadata_password KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD
+        SELECT format(
+          'CREATE ROLE %I WITH LOGIN NOINHERIT PASSWORD %L NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS',
+          :'metadata_user', :'metadata_password'
+        )
+        \gexec
+        SQL
+          createdb -h "$$postgres_host" -U "$$KOR_TRAVEL_MAP_POSTGRES_USER" -O "$$KOR_TRAVEL_MAP_DAGSTER_METADATA_USER" "$$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB"
           echo "Dagster metadata DB created: $$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB"
         fi
+        dagster_identity="$$(psql "$$KOR_TRAVEL_MAP_DAGSTER_PG_URL" -At -F '|' -c "SELECT control.system_identifier::text, current_database(), database.oid::bigint, pg_get_userbyid(database.datdba), session_user, current_user, role.rolsuper, role.rolcanlogin, role.rolinherit, role.rolcreatedb, role.rolcreaterole, role.rolreplication, role.rolbypassrls, role.rolconnlimit, role.rolvaliduntil IS NULL, COALESCE(pg_catalog.cardinality(role.rolconfig), 0), (SELECT count(*)::bigint FROM pg_catalog.pg_db_role_setting AS setting WHERE setting.setrole = role.oid), (SELECT count(*)::bigint FROM pg_auth_members AS membership WHERE membership.member = role.oid), (SELECT count(*)::bigint FROM pg_auth_members AS membership WHERE membership.roleid = role.oid) FROM pg_database AS database JOIN pg_roles AS role ON role.rolname = session_user CROSS JOIN pg_control_system() AS control WHERE database.datname = current_database()")"
+        application_identity="$$(psql -h "$$postgres_host" -U "$$KOR_TRAVEL_MAP_POSTGRES_USER" -d "$$KOR_TRAVEL_MAP_POSTGRES_DB" -At -F '|' -c "SELECT control.system_identifier::text, current_database(), database.oid::bigint, pg_get_userbyid(database.datdba) FROM pg_database AS database CROSS JOIN pg_control_system() AS control WHERE database.datname = current_database()")"
+        old_ifs="$$IFS"
+        IFS='|' read -r dagster_system dagster_name dagster_oid dagster_owner dagster_login dagster_effective dagster_superuser dagster_canlogin dagster_inherit dagster_createdb dagster_createrole dagster_replication dagster_bypassrls dagster_connection_limit dagster_valid_until_is_null dagster_role_config_count dagster_database_role_setting_count dagster_granted_role_count dagster_member_role_count <<EOF
+        $$dagster_identity
+        EOF
+        IFS='|' read -r application_system application_name application_oid application_owner <<EOF
+        $$application_identity
+        EOF
+        IFS="$$old_ifs"
+        if [ "$$dagster_name" != "$$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB" ] \
+          || [ "$$application_name" != "$$KOR_TRAVEL_MAP_POSTGRES_DB" ]; then
+          echo "observed database names do not match the requested identities" >&2
+          exit 1
+        fi
+        for numeric_value in "$$dagster_system" "$$dagster_oid" "$$application_system" "$$application_oid"; do
+          case "$$numeric_value" in ''|*[!0-9]*) echo "invalid observed database numeric identity" >&2; exit 1 ;; esac
+        done
+        if [ "$$dagster_owner" != "$$KOR_TRAVEL_MAP_DAGSTER_METADATA_USER" ] \
+          || [ "$$dagster_login" != "$$KOR_TRAVEL_MAP_DAGSTER_METADATA_USER" ] \
+          || [ "$$dagster_effective" != "$$KOR_TRAVEL_MAP_DAGSTER_METADATA_USER" ] \
+          || [ "$$dagster_superuser" != f ] \
+          || [ "$$dagster_canlogin" != t ] \
+          || [ "$$dagster_inherit" != f ] \
+          || [ "$$dagster_createdb" != f ] \
+          || [ "$$dagster_createrole" != f ] \
+          || [ "$$dagster_replication" != f ] \
+          || [ "$$dagster_bypassrls" != f ] \
+          || [ "$$dagster_connection_limit" != -1 ] \
+          || [ "$$dagster_valid_until_is_null" != t ] \
+          || [ "$$dagster_role_config_count" != 0 ] \
+          || [ "$$dagster_database_role_setting_count" != 0 ] \
+          || [ "$$dagster_granted_role_count" != 0 ] \
+          || [ "$$dagster_member_role_count" != 0 ]; then
+          echo "Dagster metadata login is not a dedicated least-privilege owner" >&2
+          exit 1
+        fi
+        for identity_name in "$$dagster_name" "$$dagster_owner" "$$dagster_login" "$$application_name" "$$application_owner"; do
+          if ! echo "$$identity_name" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]{0,62}$$'; then
+            echo "invalid observed database text identity" >&2
+            exit 1
+          fi
+        done
+        if [ "$$dagster_system" != "$$application_system" ] \
+          || [ "$$dagster_owner" = "$$application_owner" ] \
+          || { [ "$$dagster_name" = "$$application_name" ] && [ "$$dagster_oid" = "$$application_oid" ]; }; then
+          echo "Dagster/application database identities are not isolated" >&2
+          exit 1
+        fi
+        if [ "$$existing_metadata" = true ]; then
+          operation_id="$$(sed -n 's/.*\"operation_id\":\"\([^\"]*\)\".*/\1/p' "$$permit_path")"
+        else
+          operation_id="$$(cat /proc/sys/kernel/random/uuid)"
+        fi
+        echo "$$operation_id" | grep -Eq '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$$' \
+          || { echo "Dagster metadata operation id is invalid" >&2; exit 1; }
+        permit_json="{\"application_database\":{\"name\":\"$$application_name\",\"oid\":$$application_oid,\"owner\":\"$$application_owner\",\"system_identifier\":\"$$application_system\"},\"authority\":\"local-compose-db-init\",\"candidate\":null,\"dagster_database\":{\"login_role\":\"$$dagster_login\",\"login_role_attributes\":{\"bypass_rls\":false,\"can_login\":true,\"connection_limit\":-1,\"create_database\":false,\"create_role\":false,\"database_role_setting_count\":0,\"granted_role_count\":0,\"inherit\":false,\"member_role_count\":0,\"replication\":false,\"role_config_count\":0,\"superuser\":false,\"valid_until_is_null\":true},\"name\":\"$$dagster_name\",\"oid\":$$dagster_oid,\"owner\":\"$$dagster_owner\",\"system_identifier\":\"$$dagster_system\"},\"operation_id\":\"$$operation_id\",\"schema\":\"kor-travel-map.dagster-storage-database-permit.v2\"}"
+        if [ "$$existing_metadata" = true ]; then
+          [ "$$(cat "$$permit_path")" = "$$permit_json" ] \
+            || { echo "existing Dagster metadata resources do not match the sealed prior permit" >&2; exit 1; }
+          echo "Dagster metadata DB and sealed permit already exist: $$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB"
+          exit 0
+        fi
+        chmod 0700 "$$permit_dir"
+        permit_tmp="$$(mktemp "$$permit_dir/.permit.XXXXXX")"
+        printf '%s\n' "$$permit_json" >"$$permit_tmp"
+        chmod 0444 "$$permit_tmp"
+        mv "$$permit_tmp" "$$permit_dir/permit.json"
+        chmod 0555 "$$permit_dir"
 
-  # T-VN-34A / ADR-090 — local dedicated DB에서만 bootstrap owner가 LOGIN
-  # migrator/runtime principal과 NOLOGIN schema owner를 provision하고 기존 object
-  # ownership을 넘긴다. API/Dagster는 이 service 뒤에만 시작한다.
-  db-role-bootstrap:
+  # fresh profile의 application 역할 bootstrap과 같은 Compose env snapshot으로 metadata
+  # DB/permit까지 먼저 만든다. 이를 normal up으로 미루면 두 one-shot 사이 credential
+  # 변경이 dedicated metadata isolation을 우회할 수 있다.
+  dagster-db-init-fresh-300:
+    extends:
+      service: dagster-db-init
+    profiles: ["fresh-init"]
+    environment:
+      KOR_TRAVEL_MAP_DAGSTER_PROFILE: local-dev
+    depends_on:
+      db-role-bootstrap-300:
+        condition: service_completed_successfully
+
+  # PostGIS image가 자동 확장한 maintenance DB를 application target으로 쓰지 않는다.
+  # virgin application DB는 template0에서 한 번만 만들며, 존재하면 repair하지 않고
+  # fresh volume으로 재시도하도록 mutation 전에 중단한다.
+  db-application-create-fresh-300:
     image: postgres:16-alpine
+    profiles: ["fresh-init"]
     depends_on:
       postgres:
         condition: service_healthy
     environment:
+      KOR_TRAVEL_MAP_POSTGRES_INIT_HOST: ${KOR_TRAVEL_MAP_POSTGRES_INIT_HOST:-postgres}
+      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE: ${KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE:-}
+      KOR_TRAVEL_MAP_POSTGRES_DB: ${KOR_TRAVEL_MAP_POSTGRES_DB:-kor_travel_map}
+      KOR_TRAVEL_MAP_POSTGRES_USER: ${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}
+      KOR_TRAVEL_MAP_POSTGRES_PASSWORD: ${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-}
+      KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN: ${KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN:-}
+      KOR_TRAVEL_MAP_MIGRATOR_PASSWORD: ${KOR_TRAVEL_MAP_MIGRATOR_PASSWORD:-}
+      KOR_TRAVEL_MAP_MIGRATOR_PG_DSN: ${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:-}
+      KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD: ${KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD:-}
+      KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN: ${KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN:-}
+      KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD: ${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD:-}
+      KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN: ${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN:-}
+      KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB: ${KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB:-kor_travel_map_dagster}
+      KOR_TRAVEL_MAP_DAGSTER_METADATA_USER: ${KOR_TRAVEL_MAP_DAGSTER_METADATA_USER:-}
+      KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD: ${KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD:-}
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL:-}
+      PGPASSWORD: ${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-}
+    volumes:
+      - ./scripts/database-credential-preflight.sh:/usr/local/lib/kor-travel-map/database-credential-preflight.sh:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -eu
+        if [ "$$KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE" != "$$KOR_TRAVEL_MAP_POSTGRES_DB" ]; then
+          echo "fresh application database creation requires exact database confirmation" >&2
+          exit 1
+        fi
+        . /usr/local/lib/kor-travel-map/database-credential-preflight.sh
+        validate_map_database_credentials KOR_TRAVEL_MAP_DAGSTER_PG_URL
+        case "$$KOR_TRAVEL_MAP_POSTGRES_INIT_HOST" in ''|*[!A-Za-z0-9_.:-]*) echo "invalid PostgreSQL init host" >&2; exit 1 ;; esac
+        case "$$KOR_TRAVEL_MAP_POSTGRES_DB" in ''|postgres|template0|template1|*[!A-Za-z0-9_]*) echo "invalid fresh application database" >&2; exit 1 ;; esac
+        case "$$KOR_TRAVEL_MAP_POSTGRES_USER" in ''|*[!A-Za-z0-9_]*) echo "invalid PostgreSQL bootstrap user" >&2; exit 1 ;; esac
+        database_count="$$(psql -h "$$KOR_TRAVEL_MAP_POSTGRES_INIT_HOST" -U "$$KOR_TRAVEL_MAP_POSTGRES_USER" -d postgres -Atqc "SELECT count(*) FROM pg_database WHERE datname = '$$KOR_TRAVEL_MAP_POSTGRES_DB'")"
+        [ "$$database_count" = 0 ] || { echo "fresh application database already exists" >&2; exit 1; }
+        createdb -h "$$KOR_TRAVEL_MAP_POSTGRES_INIT_HOST" -U "$$KOR_TRAVEL_MAP_POSTGRES_USER" --maintenance-db postgres --template template0 --owner "$$KOR_TRAVEL_MAP_POSTGRES_USER" "$$KOR_TRAVEL_MAP_POSTGRES_DB"
+
+  # T-VN-H46H — fresh DB에만 한 번 명시적으로 실행하는 bootstrap이다. normal
+  # `compose up` dependency로 두면 persistent `300` DB의 service recreate 때도 다시
+  # 실행되어 stack restart를 막으므로, `fresh-init` profile을 직접 target으로 실행한다.
+  # 기존 `0236` DB의 handoff는 이 경로가 아니라 Docker Manager controlled transaction만
+  # 수행한다.
+  db-role-bootstrap-300:
+    image: postgres:16-alpine
+    profiles: ["fresh-init"]
+    depends_on:
+      db-application-create-fresh-300:
+        condition: service_completed_successfully
+    environment:
       KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_ENABLED: "true"
+      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE: baseline-300
       # `:?`는 profile-disabled external overlay도 interpolation 단계에서 막으므로
       # 여기서는 빈 값을 전달하고 script가 service 실행 시 fail-closed 한다.
       KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE: ${KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE:-}
       KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN: ${KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN:-}
+      KOR_TRAVEL_MAP_POSTGRES_INIT_HOST: ${KOR_TRAVEL_MAP_POSTGRES_INIT_HOST:-postgres}
       KOR_TRAVEL_MAP_POSTGRES_DB: ${KOR_TRAVEL_MAP_POSTGRES_DB:-kor_travel_map}
       KOR_TRAVEL_MAP_POSTGRES_USER: ${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}
+      KOR_TRAVEL_MAP_POSTGRES_PASSWORD: ${KOR_TRAVEL_MAP_POSTGRES_PASSWORD:-}
       KOR_TRAVEL_MAP_MIGRATOR_PASSWORD: ${KOR_TRAVEL_MAP_MIGRATOR_PASSWORD:-}
+      KOR_TRAVEL_MAP_MIGRATOR_PG_DSN: ${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:-}
       KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD: ${KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD:-}
+      KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN: ${KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN:-}
       KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD: ${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD:-}
+      KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN: ${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN:-}
+      KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB: ${KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB:-kor_travel_map_dagster}
+      KOR_TRAVEL_MAP_DAGSTER_METADATA_USER: ${KOR_TRAVEL_MAP_DAGSTER_METADATA_USER:-}
+      KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD: ${KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD:-}
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL:-}
     volumes:
       - ./docker/postgres-role-bootstrap.sh:/usr/local/bin/postgres-role-bootstrap:ro
+      - ./scripts/database-credential-preflight.sh:/usr/local/lib/kor-travel-map/database-credential-preflight.sh:ro
     entrypoint: ["/bin/sh", "/usr/local/bin/postgres-role-bootstrap"]
 
-  # T-VN-M01은 frozen 0200/0202 membership graph를 보존해야 한다. 따라서
-  # 일반 bootstrap 뒤 restricted migrator가 0225까지만 올리고, 그 다음에만
-  # M01 procedure owner/executor role을 superuser boundary에서 만든다.
-  db-migrate-to-m01-bootstrap-boundary:
+  # `fresh-init`은 production API entrypoint의 generic upgrade 우회가 아니다.
+  # bootstrap-superuser와 분리된 candidate image one-shot이 exact root `300`과
+  # runtime ACL을 적용한 뒤 종료한다. normal runtime은 이 service에 의존하지 않는다.
+  db-application-schema-fresh-300:
     build:
       context: .
       dockerfile: docker/api.Dockerfile
       args:
         KOR_TRAVEL_MAP_GIT_COMMIT: ${KOR_TRAVEL_MAP_GIT_COMMIT:-development}
+    profiles: ["fresh-init"]
+    depends_on:
+      dagster-db-init-fresh-300:
+        condition: service_completed_successfully
     environment:
+      # standalone compose fresh-init은 명시적인 비운영 개발 경로다. production은
+      # Docker Manager가 literal production profile + root-owned fixed fence를 만든다.
+      KOR_TRAVEL_MAP_APPLICATION_SCHEMA_PROFILE: local-dev
       KOR_TRAVEL_MAP_MIGRATOR_PG_DSN: ${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required}
-    depends_on:
-      db-role-bootstrap:
-        condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
-    entrypoint: ["/bin/sh", "./docker/migrate-to-m01-bootstrap-boundary.sh"]
-
-  db-role-bootstrap-m01:
-    image: postgres:16-alpine
-    depends_on:
-      db-migrate-to-m01-bootstrap-boundary:
-        condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
-    environment:
-      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_ENABLED: "true"
-      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE: m01
-      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE: ${KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE:-}
-      KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN: ${KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN:-}
-      KOR_TRAVEL_MAP_POSTGRES_DB: ${KOR_TRAVEL_MAP_POSTGRES_DB:-kor_travel_map}
-      KOR_TRAVEL_MAP_POSTGRES_USER: ${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}
-      KOR_TRAVEL_MAP_MIGRATOR_PASSWORD: ${KOR_TRAVEL_MAP_MIGRATOR_PASSWORD:-}
-      KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD: ${KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD:-}
-      KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD: ${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD:-}
-    volumes:
-      - ./docker/postgres-role-bootstrap.sh:/usr/local/bin/postgres-role-bootstrap:ro
-    entrypoint: ["/bin/sh", "/usr/local/bin/postgres-role-bootstrap"]
-
-  # M05는 0230 graph가 완성된 뒤에만 role을 만들고, 그 role로 0231을 적용한
-  # 다음 별도 repair phase가 dedicated routine ownership을 확정한다.
-  db-migrate-to-m05-bootstrap-boundary:
-    build:
-      context: .
-      dockerfile: docker/api.Dockerfile
-      args:
-        KOR_TRAVEL_MAP_GIT_COMMIT: ${KOR_TRAVEL_MAP_GIT_COMMIT:-development}
-    environment:
-      KOR_TRAVEL_MAP_MIGRATOR_PG_DSN: ${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required}
-    depends_on:
-      db-role-bootstrap-m01:
-        condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
-    entrypoint: ["/bin/sh", "./docker/migrate-to-m05-bootstrap-boundary.sh"]
-
-  db-role-bootstrap-m05-pre:
-    image: postgres:16-alpine
-    depends_on:
-      db-migrate-to-m05-bootstrap-boundary:
-        condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
-    environment:
-      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_ENABLED: "true"
-      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE: m05-pre
-      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE: ${KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE:-}
-      KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN: ${KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN:-}
-      KOR_TRAVEL_MAP_POSTGRES_DB: ${KOR_TRAVEL_MAP_POSTGRES_DB:-kor_travel_map}
-      KOR_TRAVEL_MAP_POSTGRES_USER: ${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}
-      KOR_TRAVEL_MAP_MIGRATOR_PASSWORD: ${KOR_TRAVEL_MAP_MIGRATOR_PASSWORD:-}
-      KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD: ${KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD:-}
-      KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD: ${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD:-}
-    volumes:
-      - ./docker/postgres-role-bootstrap.sh:/usr/local/bin/postgres-role-bootstrap:ro
-    entrypoint: ["/bin/sh", "/usr/local/bin/postgres-role-bootstrap"]
-
-  db-migrate-m05:
-    build:
-      context: .
-      dockerfile: docker/api.Dockerfile
-      args:
-        KOR_TRAVEL_MAP_GIT_COMMIT: ${KOR_TRAVEL_MAP_GIT_COMMIT:-development}
-    environment:
-      KOR_TRAVEL_MAP_MIGRATOR_PG_DSN: ${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required}
-    depends_on:
-      db-role-bootstrap-m05-pre:
-        condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
-    entrypoint: ["/bin/sh", "./docker/migrate-m05.sh"]
-
-  db-role-bootstrap-m05-repair:
-    image: postgres:16-alpine
-    depends_on:
-      db-migrate-m05:
-        condition: service_completed_successfully
-      postgres:
-        condition: service_healthy
-    environment:
-      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_ENABLED: "true"
-      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE: m05-repair
-      KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE: ${KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE:-}
-      KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN: ${KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN:-}
-      KOR_TRAVEL_MAP_POSTGRES_DB: ${KOR_TRAVEL_MAP_POSTGRES_DB:-kor_travel_map}
-      KOR_TRAVEL_MAP_POSTGRES_USER: ${KOR_TRAVEL_MAP_POSTGRES_USER:-kor_travel_map}
-      KOR_TRAVEL_MAP_MIGRATOR_PASSWORD: ${KOR_TRAVEL_MAP_MIGRATOR_PASSWORD:-}
-      KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD: ${KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD:-}
-      KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD: ${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD:-}
-    volumes:
-      - ./docker/postgres-role-bootstrap.sh:/usr/local/bin/postgres-role-bootstrap:ro
-    entrypoint: ["/bin/sh", "/usr/local/bin/postgres-role-bootstrap"]
+      KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required}
+    entrypoint:
+      - /usr/local/bin/python
+      - -I
+      - /usr/local/bin/ktm-application-schema-fresh-300
+      - migrate
 
   rustfs-perms:
     image: alpine:3.20
@@ -302,11 +450,13 @@ services:
       # bridge 모드의 BFF peer를 단일 고정 주소로 제한한다. 임의의 compose
       # container subnet 전체를 신뢰하지 않는다.
       KOR_TRAVEL_MAP_API_ADMIN_TRUSTED_PROXY_CIDRS: '["172.31.254.3/32"]'
-      # migration은 이 process가 시작될 때만 migrator DSN을 쓰고 exec 전 unset한다.
-      # API application에는 API runtime DSN만 남는다 (fallback 금지).
-      KOR_TRAVEL_MAP_MIGRATOR_PG_DSN: ${KOR_TRAVEL_MAP_MIGRATOR_PG_DSN:?KOR_TRAVEL_MAP_MIGRATOR_PG_DSN is required}
+      # production API consumer에는 migrator/bootstrap credential을 주입하지 않는다.
+      # local developer convenience migration은 docker-compose.local-dev.yml만 소유한다.
       KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN: ${KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN:?KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN is required}
       KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN:?KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN is required}
+      # production은 Manager가 immutable API image ID를 permit과 함께 주입한다.
+      # local-dev에서는 verifier가 실행되지 않으므로 빈 값도 허용한다.
+      KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_API_IMAGE_ID: ${KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_API_IMAGE_ID:-}
       KOR_TRAVEL_MAP_RUNTIME_DB_PREFLIGHT_REQUIRED: "true"
       KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://rustfs:9000}
       KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET: ${KOR_TRAVEL_MAP_OBJECT_STORE_BUCKET:-kor-travel-map}
@@ -335,12 +485,14 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      db-role-bootstrap-m05-repair:
-        condition: service_completed_successfully
       postgres:
         condition: service_healthy
       rustfs-init:
         condition: service_completed_successfully
+    volumes:
+      # fixed read-only capability volume. 비어 있거나 stale한 permit은 production
+      # verifier가 candidate/DB binding에서 거부한다.
+      - kor-travel-map-application-final-permit:/run/kor-travel-map-application-final-permit:ro
     ports:
       - "${KOR_TRAVEL_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KOR_TRAVEL_MAP_API_PORT:-12701}:${KOR_TRAVEL_MAP_API_PORT:-12701}"
     networks:
@@ -418,26 +570,28 @@ services:
       secrets:
         - github_token
     command:
-      - dagster-webserver
+      - /usr/local/bin/dagster-webserver
       - -m
       - kortravelmap.dagster.definitions
       - -h
       - 0.0.0.0
       - -p
       - "${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}"
-    env_file:
-      - path: .env
-        required: false
-        format: raw
     environment:
       TMPDIR: /tmp
       TEMP: /tmp
       TMP: /tmp
       DAGSTER_HOME: /opt/dagster/dagster_home
       DAGSTER_DISABLE_TELEMETRY: ${DAGSTER_DISABLE_TELEMETRY:-yes}
+      KOR_TRAVEL_MAP_DAGSTER_PROFILE: ${KOR_TRAVEL_MAP_DAGSTER_PROFILE:-${KOR_TRAVEL_MAP_API_PROFILE:-production}}
       KOR_TRAVEL_MAP_DAGSTER_PORT: ${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}
       KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL:-}
+      KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_IMAGE_ID: ${KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_IMAGE_ID:-}
+      KOR_TRAVEL_MAP_DAGSTER_STORAGE_PAIRED_RECEIPT_SHA256: ${KOR_TRAVEL_MAP_DAGSTER_STORAGE_PAIRED_RECEIPT_SHA256:-}
+      KOR_TRAVEL_MAP_DAGSTER_STORAGE_CONFIG_SHA256: ${KOR_TRAVEL_MAP_DAGSTER_STORAGE_CONFIG_SHA256:-}
+      KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN: ${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN:?KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN is required}
       KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN:?KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN is required}
+      KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_DAGSTER_IMAGE_ID: ${KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_DAGSTER_IMAGE_ID:-}
       KOR_TRAVEL_MAP_RUNTIME_DB_PREFLIGHT_REQUIRED: "true"
       KOR_TRAVEL_MAP_DAGSTER_SCHEDULE_OVERRIDES_REQUIRED: "true"
       KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://rustfs:9000}
@@ -445,7 +599,9 @@ services:
       KOR_TRAVEL_MAP_OBJECT_STORE_REGION: ${KOR_TRAVEL_MAP_OBJECT_STORE_REGION:-us-east-1}
       KOR_TRAVEL_MAP_OBJECT_STORE_ACCESS_KEY_ID: ${KOR_TRAVEL_MAP_OBJECT_STORE_ACCESS_KEY_ID:-kor-travel-map-dev-access}
       KOR_TRAVEL_MAP_OBJECT_STORE_SECRET_ACCESS_KEY: ${KOR_TRAVEL_MAP_OBJECT_STORE_SECRET_ACCESS_KEY:-kor-travel-map-dev-secret}
+      KOR_TRAVEL_MAP_OBJECT_STORE_PREFIX: ${KOR_TRAVEL_MAP_OBJECT_STORE_PREFIX:-features}
       KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET: ${KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET:-kor-travel-map-uploads}
+      KOR_TRAVEL_MAP_OFFLINE_UPLOAD_PREFIX: ${KOR_TRAVEL_MAP_OFFLINE_UPLOAD_PREFIX:-offline-uploads}
       KOR_TRAVEL_MAP_OFFLINE_UPLOAD_MAX_BYTES: ${KOR_TRAVEL_MAP_OFFLINE_UPLOAD_MAX_BYTES:-104857600}
       KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY: ${KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY:-${DATA_GO_KR_SERVICE_KEY:-${DATAGOKR_API_KEY:-${PUBLIC_DATA_SERVICE_KEY:-${SERVICE_KEY:-}}}}}
       KOR_TRAVEL_MAP_OPINET_API_KEY: ${KOR_TRAVEL_MAP_OPINET_API_KEY:-${OPINET_API_KEY:-${OPINET_SERVICE_KEY:-}}}
@@ -459,12 +615,12 @@ services:
       # 거절하는데, `preflight()`는 존재·길이만 보므로 리소스 초기화는 통과하고 첫
       # 요청에서야 터진다. 2026-08-13 prod에서 정확히 그렇게 dagster/daemon이 죽은 키를
       # 들고 있었다(T-VN-H46B). 비어 있으면 비어 있는 채로 두고 fail-closed 한다.
+      KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL: ${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL:-http://host.docker.internal:12501}
       KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY: ${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-}
+      KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH: ${KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH:-/app/data/mois/mois.db}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      db-role-bootstrap-m05-repair:
-        condition: service_completed_successfully
       dagster-db-init:
         condition: service_completed_successfully
       postgres:
@@ -481,6 +637,8 @@ services:
       - "${KOR_TRAVEL_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}:${KOR_TRAVEL_MAP_DAGSTER_PORT:-12702}"
     volumes:
       - kor-travel-map-mois-source:/app/data/mois
+      - kor-travel-map-application-final-permit:/run/kor-travel-map-application-final-permit:ro
+      - kor-travel-map-dagster-storage-permit:/run/kor-travel-map-dagster-storage-permit:ro
     healthcheck:
       test:
         [
@@ -500,18 +658,20 @@ services:
         KOR_TRAVEL_MAP_GIT_COMMIT: ${KOR_TRAVEL_MAP_GIT_COMMIT:-development}
       secrets:
         - github_token
-    env_file:
-      - path: .env
-        required: false
-        format: raw
     environment:
       TMPDIR: /tmp
       TEMP: /tmp
       TMP: /tmp
       DAGSTER_HOME: /opt/dagster/dagster_home
       DAGSTER_DISABLE_TELEMETRY: ${DAGSTER_DISABLE_TELEMETRY:-yes}
+      KOR_TRAVEL_MAP_DAGSTER_PROFILE: ${KOR_TRAVEL_MAP_DAGSTER_PROFILE:-${KOR_TRAVEL_MAP_API_PROFILE:-production}}
       KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL:-}
+      KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_IMAGE_ID: ${KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_IMAGE_ID:-}
+      KOR_TRAVEL_MAP_DAGSTER_STORAGE_PAIRED_RECEIPT_SHA256: ${KOR_TRAVEL_MAP_DAGSTER_STORAGE_PAIRED_RECEIPT_SHA256:-}
+      KOR_TRAVEL_MAP_DAGSTER_STORAGE_CONFIG_SHA256: ${KOR_TRAVEL_MAP_DAGSTER_STORAGE_CONFIG_SHA256:-}
+      KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN: ${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN:?KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN is required}
       KOR_TRAVEL_MAP_PG_DSN: ${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN:?KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN is required}
+      KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_DAGSTER_IMAGE_ID: ${KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_DAGSTER_IMAGE_ID:-}
       KOR_TRAVEL_MAP_RUNTIME_DB_PREFLIGHT_REQUIRED: "true"
       KOR_TRAVEL_MAP_DAGSTER_SCHEDULE_OVERRIDES_REQUIRED: "true"
       KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://rustfs:9000}
@@ -519,7 +679,9 @@ services:
       KOR_TRAVEL_MAP_OBJECT_STORE_REGION: ${KOR_TRAVEL_MAP_OBJECT_STORE_REGION:-us-east-1}
       KOR_TRAVEL_MAP_OBJECT_STORE_ACCESS_KEY_ID: ${KOR_TRAVEL_MAP_OBJECT_STORE_ACCESS_KEY_ID:-kor-travel-map-dev-access}
       KOR_TRAVEL_MAP_OBJECT_STORE_SECRET_ACCESS_KEY: ${KOR_TRAVEL_MAP_OBJECT_STORE_SECRET_ACCESS_KEY:-kor-travel-map-dev-secret}
+      KOR_TRAVEL_MAP_OBJECT_STORE_PREFIX: ${KOR_TRAVEL_MAP_OBJECT_STORE_PREFIX:-features}
       KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET: ${KOR_TRAVEL_MAP_OFFLINE_UPLOAD_BUCKET:-kor-travel-map-uploads}
+      KOR_TRAVEL_MAP_OFFLINE_UPLOAD_PREFIX: ${KOR_TRAVEL_MAP_OFFLINE_UPLOAD_PREFIX:-offline-uploads}
       KOR_TRAVEL_MAP_OFFLINE_UPLOAD_MAX_BYTES: ${KOR_TRAVEL_MAP_OFFLINE_UPLOAD_MAX_BYTES:-104857600}
       KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY: ${KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY:-${DATA_GO_KR_SERVICE_KEY:-${DATAGOKR_API_KEY:-${PUBLIC_DATA_SERVICE_KEY:-${SERVICE_KEY:-}}}}}
       KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH: ${KOR_TRAVEL_MAP_MOIS_SOURCE_DB_PATH:-/app/data/mois/mois.db}
@@ -534,12 +696,11 @@ services:
       # 거절하는데, `preflight()`는 존재·길이만 보므로 리소스 초기화는 통과하고 첫
       # 요청에서야 터진다. 2026-08-13 prod에서 정확히 그렇게 dagster/daemon이 죽은 키를
       # 들고 있었다(T-VN-H46B). 비어 있으면 비어 있는 채로 두고 fail-closed 한다.
+      KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL: ${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_BASE_URL:-http://host.docker.internal:12501}
       KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY: ${KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_API_KEY:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      db-role-bootstrap-m05-repair:
-        condition: service_completed_successfully
       dagster-db-init:
         condition: service_completed_successfully
       postgres:
@@ -552,7 +713,9 @@ services:
         condition: service_healthy
     volumes:
       - kor-travel-map-mois-source:/app/data/mois
-    command: ["dagster-daemon", "run", "-m", "kortravelmap.dagster.definitions"]
+      - kor-travel-map-application-final-permit:/run/kor-travel-map-application-final-permit:ro
+      - kor-travel-map-dagster-storage-permit:/run/kor-travel-map-dagster-storage-permit:ro
+    command: ["/usr/local/bin/dagster-daemon", "run", "-m", "kortravelmap.dagster.definitions"]
 
   # 후보 image 안의 Dagster package migration graph를 그대로 실행·검증하는 유일한
   # metadata storage writer다. application Alembic과 source SHA는 전혀 읽지 않는다.
@@ -564,11 +727,17 @@ services:
         KOR_TRAVEL_MAP_GIT_COMMIT: ${KOR_TRAVEL_MAP_GIT_COMMIT:-development}
       secrets:
         - github_token
-    command: ["ktm-dagster-storage", "migrate"]
+    command: ["/usr/local/bin/ktm-dagster-storage", "migrate"]
     environment:
       DAGSTER_HOME: /opt/dagster/dagster_home
       DAGSTER_DISABLE_TELEMETRY: ${DAGSTER_DISABLE_TELEMETRY:-yes}
+      KOR_TRAVEL_MAP_DAGSTER_PROFILE: ${KOR_TRAVEL_MAP_DAGSTER_PROFILE:-${KOR_TRAVEL_MAP_API_PROFILE:-production}}
       KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL:-}
+      KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_IMAGE_ID: ${KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_IMAGE_ID:-}
+      KOR_TRAVEL_MAP_DAGSTER_STORAGE_PAIRED_RECEIPT_SHA256: ${KOR_TRAVEL_MAP_DAGSTER_STORAGE_PAIRED_RECEIPT_SHA256:-}
+      KOR_TRAVEL_MAP_DAGSTER_STORAGE_CONFIG_SHA256: ${KOR_TRAVEL_MAP_DAGSTER_STORAGE_CONFIG_SHA256:-}
+    volumes:
+      - kor-travel-map-dagster-storage-permit:/run/kor-travel-map-dagster-storage-permit:ro
     # external DB/infra overlay가 host.docker.internal DSN을 주입하므로 one-shot도
     # 장기 Dagster service와 같은 host gateway mapping을 가져야 한다.
     extra_hosts:
@@ -585,6 +754,10 @@ volumes:
     name: ${KOR_TRAVEL_MAP_MOIS_SOURCE_DB_VOLUME:-kor-travel-map-mois-source}
   kor-travel-map-rustfs-data:
     name: ${KOR_TRAVEL_MAP_RUSTFS_VOLUME:-kor-travel-map-rustfs}
+  kor-travel-map-application-final-permit:
+    name: ${KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_VOLUME:-kor-travel-map-application-final-permit}
+  kor-travel-map-dagster-storage-permit:
+    name: ${KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_VOLUME:-kor-travel-map-dagster-storage-permit}
 
 # bridge 모드에서 API가 신뢰할 frontend BFF peer를 정확한 /32로 고정한다.
 # 다른 서비스는 이 control-plane network에 참여하지 않는다.

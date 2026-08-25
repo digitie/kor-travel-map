@@ -3,6 +3,7 @@
 --
 
 
+
 SET statement_timeout = 0;
 SET lock_timeout = 0;
 SET idle_in_transaction_session_timeout = 0;
@@ -39,6 +40,569 @@ CREATE SCHEMA IF NOT EXISTS provider_sync;
 
 
 ALTER SCHEMA provider_sync OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: ack_feature_reference_reconciliation_event(text, uuid, uuid, bigint, text, text, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+
+CREATE PROCEDURE feature.ack_feature_reference_reconciliation_event(IN p_principal_id text, IN p_event_id uuid, IN p_worker_id uuid, IN p_lease_epoch bigint, IN p_event_sha256 text, IN p_local_receipt_sha256 text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_acked_through_sequence bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops'
+    AS $_$
+DECLARE
+    v_subscription ops.feature_reference_reconciliation_subscriptions%ROWTYPE;
+    v_lease ops.feature_reference_reconciliation_leases%ROWTYPE;
+    v_event ops.feature_reference_reconciliation_events%ROWTYPE;
+    v_existing_ack ops.feature_reference_reconciliation_acks%ROWTYPE;
+    v_command ops.domain_commands%ROWTYPE;
+BEGIN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'feature reference reconciliation ack requires READ COMMITTED'
+            USING ERRCODE = '25001', CONSTRAINT = 'ck_m05_reconciliation_ack_isolation';
+    END IF;
+    IF session_user <> 'ktm_feature_api_runtime'
+       OR NOT pg_has_role(
+           session_user, 'ktm_feature_reference_reconciliation_service_executor', 'member'
+       ) THEN
+        RAISE EXCEPTION 'feature reference reconciliation ack requires the service executor'
+            USING ERRCODE = '42501', CONSTRAINT = 'ck_m05_reconciliation_service_executor';
+    END IF;
+    IF nullif(btrim(p_principal_id), '') IS NULL
+       OR char_length(p_principal_id) > 200 OR p_event_id IS NULL OR p_worker_id IS NULL
+       OR p_lease_epoch IS NULL OR p_lease_epoch < 1
+       OR p_event_sha256 !~ '^[0-9a-f]{64}$'
+       OR p_local_receipt_sha256 !~ '^[0-9a-f]{64}$'
+       OR p_domain_command_id IS NULL OR p_domain_command_id < 1 THEN
+        RAISE EXCEPTION 'feature reference reconciliation ack input is invalid'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_reconciliation_ack_input';
+    END IF;
+    SELECT ack.* INTO v_existing_ack
+    FROM ops.feature_reference_reconciliation_acks AS ack
+    WHERE ack.event_id = p_event_id AND ack.principal_id = p_principal_id
+    FOR SHARE;
+    IF FOUND THEN
+        SELECT lease.acked_through_sequence INTO o_acked_through_sequence
+        FROM ops.feature_reference_reconciliation_leases AS lease
+        WHERE lease.principal_id = p_principal_id;
+        IF v_existing_ack.event_sha256 = p_event_sha256
+           AND v_existing_ack.local_receipt_sha256 = p_local_receipt_sha256 THEN
+            o_outcome := 'replayed';
+        ELSE
+            o_outcome := 'conflict';
+        END IF;
+        RETURN;
+    END IF;
+    SELECT subscription.* INTO v_subscription
+    FROM ops.feature_reference_reconciliation_subscriptions AS subscription
+    WHERE subscription.principal_id = p_principal_id
+      AND subscription.ack_scope = 'feature-reference-reconciliation:ack'
+    FOR SHARE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'feature reference reconciliation subscription is not provisioned'
+            USING ERRCODE = 'P0002';
+    END IF;
+    SELECT lease.* INTO v_lease
+    FROM ops.feature_reference_reconciliation_leases AS lease
+    WHERE lease.principal_id = p_principal_id
+    FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'feature reference reconciliation subscription lacks lease state'
+            USING ERRCODE = '55000';
+    END IF;
+    IF v_lease.worker_id IS DISTINCT FROM p_worker_id
+       OR v_lease.lease_epoch <> p_lease_epoch
+       OR v_lease.lease_expires_at IS NULL
+       OR v_lease.lease_expires_at <= clock_timestamp() THEN
+        o_outcome := 'lease_conflict';
+        o_acked_through_sequence := v_lease.acked_through_sequence;
+        RETURN;
+    END IF;
+    SELECT event.* INTO v_event
+    FROM ops.feature_reference_reconciliation_events AS event
+    WHERE event.event_sequence > v_lease.acked_through_sequence
+    ORDER BY event.event_sequence
+    LIMIT 1
+    FOR SHARE;
+    IF NOT FOUND OR v_event.event_id <> p_event_id THEN
+        o_outcome := 'not_next';
+        o_acked_through_sequence := v_lease.acked_through_sequence;
+        RETURN;
+    END IF;
+    IF v_event.event_sha256 <> p_event_sha256 THEN
+        o_outcome := 'conflict';
+        o_acked_through_sequence := v_lease.acked_through_sequence;
+        RETURN;
+    END IF;
+    SELECT command.* INTO v_command
+    FROM ops.domain_commands AS command
+    WHERE command.command_id = p_domain_command_id
+    FOR SHARE;
+    IF NOT FOUND
+       OR v_command.actor <> p_principal_id
+       OR v_command.operation <> 'service.feature-reference-reconciliation.ack.v1'
+       OR EXISTS (
+           SELECT 1 FROM ops.domain_command_results AS result
+           WHERE result.command_id = p_domain_command_id
+       ) THEN
+        RAISE EXCEPTION 'feature reference reconciliation ack command is not open'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_reconciliation_ack_command';
+    END IF;
+    INSERT INTO ops.feature_reference_reconciliation_acks (
+        event_id, principal_id, event_sha256, local_receipt_sha256, command_id
+    ) VALUES (
+        v_event.event_id, p_principal_id, p_event_sha256,
+        p_local_receipt_sha256, p_domain_command_id
+    );
+    UPDATE ops.feature_reference_reconciliation_leases
+    SET acked_through_sequence = v_event.event_sequence,
+        updated_at = clock_timestamp()
+    WHERE principal_id = p_principal_id;
+    o_outcome := 'acked';
+    o_acked_through_sequence := v_event.event_sequence;
+END
+$_$;
+
+
+ALTER PROCEDURE feature.ack_feature_reference_reconciliation_event(IN p_principal_id text, IN p_event_id uuid, IN p_worker_id uuid, IN p_lease_epoch bigint, IN p_event_sha256 text, IN p_local_receipt_sha256 text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_acked_through_sequence bigint) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+
+--
+-- Name: ack_feature_reference_reconciliation_event_v2(text, uuid, uuid, bigint, text, text, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+
+CREATE PROCEDURE feature.ack_feature_reference_reconciliation_event_v2(IN p_principal_id text, IN p_event_id uuid, IN p_worker_id uuid, IN p_lease_epoch bigint, IN p_event_sha256 text, IN p_local_receipt_sha256 text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_acked_through_sequence bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops'
+    AS $$
+BEGIN
+    -- The old 0234 writer remains callable only by this definer.  Preserve its
+    -- exact validation/receipt behavior while adding the common lease lock.
+    PERFORM 1
+    FROM ops.feature_reference_reconciliation_leases AS lease
+    WHERE lease.principal_id = p_principal_id
+    FOR UPDATE;
+    IF NOT FOUND THEN
+        CALL feature.ack_feature_reference_reconciliation_event(
+            p_principal_id, p_event_id, p_worker_id, p_lease_epoch, p_event_sha256,
+            p_local_receipt_sha256, p_domain_command_id,
+            o_outcome, o_acked_through_sequence
+        );
+        RETURN;
+    END IF;
+    CALL feature.ack_feature_reference_reconciliation_event(
+        p_principal_id, p_event_id, p_worker_id, p_lease_epoch, p_event_sha256,
+        p_local_receipt_sha256, p_domain_command_id,
+        o_outcome, o_acked_through_sequence
+    );
+END
+$$;
+
+
+ALTER PROCEDURE feature.ack_feature_reference_reconciliation_event_v2(IN p_principal_id text, IN p_event_id uuid, IN p_worker_id uuid, IN p_lease_epoch bigint, IN p_event_sha256 text, IN p_local_receipt_sha256 text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_acked_through_sequence bigint) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+
+--
+-- Name: append_theme_feature_candidate_transition(uuid, text, text, uuid, text, text, text, boolean, boolean, text, text, uuid, text, bigint, bigint, text, text, uuid, bigint, text, text, uuid, uuid, bigint, text, text, jsonb); Type: FUNCTION; Schema: feature; Owner: ktm_curation_audit_writer
+--
+
+CREATE FUNCTION feature.append_theme_feature_candidate_transition(p_candidate_id uuid, p_from_feature_id text, p_to_feature_id text, p_rule_id uuid, p_source_entity_key text, p_from_review_state text, p_to_review_state text, p_from_eligibility_present boolean, p_to_eligibility_present boolean, p_from_disposition text, p_to_disposition text, p_winner_candidate_id uuid, p_transition_kind text, p_candidate_row_revision bigint, p_rule_row_revision bigint, p_rule_input_hash text, p_candidate_input_hash text, p_generation_id uuid, p_provider_dataset_id bigint, p_source_record_key text, p_source_record_hash text, p_collection_id uuid, p_curation_item_id uuid, p_command_id bigint, p_actor text, p_reason_code text, p_causation_ref jsonb) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops'
+    AS $$
+DECLARE
+  v_transition_id bigint;
+BEGIN
+  INSERT INTO feature.theme_feature_candidate_transitions (
+    candidate_id, from_feature_id, to_feature_id, rule_id, source_entity_key,
+    from_review_state, to_review_state,
+    from_eligibility_present, to_eligibility_present,
+    from_disposition, to_disposition, winner_candidate_id, transition_kind,
+    candidate_row_revision, rule_row_revision, rule_input_hash,
+    candidate_input_hash, generation_id, provider_dataset_id,
+    source_record_key, source_record_hash, collection_id, curation_item_id,
+    command_id, actor, reason_code, causation_ref, invoker_role,
+    candidate_procedure_definer, audit_writer_definer
+  ) VALUES (
+    p_candidate_id, p_from_feature_id, p_to_feature_id, p_rule_id,
+    p_source_entity_key, p_from_review_state, p_to_review_state,
+    p_from_eligibility_present, p_to_eligibility_present,
+    p_from_disposition, p_to_disposition, p_winner_candidate_id,
+    p_transition_kind, p_candidate_row_revision, p_rule_row_revision,
+    p_rule_input_hash, p_candidate_input_hash, p_generation_id,
+    p_provider_dataset_id, p_source_record_key, p_source_record_hash,
+    p_collection_id, p_curation_item_id, p_command_id, p_actor,
+    p_reason_code, COALESCE(p_causation_ref, '{}'::jsonb), session_user,
+    'ktm_curation_command_owner', current_user
+  )
+  RETURNING transition_id INTO STRICT v_transition_id;
+  RETURN v_transition_id;
+END
+$$;
+
+
+ALTER FUNCTION feature.append_theme_feature_candidate_transition(p_candidate_id uuid, p_from_feature_id text, p_to_feature_id text, p_rule_id uuid, p_source_entity_key text, p_from_review_state text, p_to_review_state text, p_from_eligibility_present boolean, p_to_eligibility_present boolean, p_from_disposition text, p_to_disposition text, p_winner_candidate_id uuid, p_transition_kind text, p_candidate_row_revision bigint, p_rule_row_revision bigint, p_rule_input_hash text, p_candidate_input_hash text, p_generation_id uuid, p_provider_dataset_id bigint, p_source_record_key text, p_source_record_hash text, p_collection_id uuid, p_curation_item_id uuid, p_command_id bigint, p_actor text, p_reason_code text, p_causation_ref jsonb) OWNER TO ktm_curation_audit_writer;
+
+--
+-- Name: apply_curation_import_items_command(jsonb, text, text, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.apply_curation_import_items_command(IN p_items jsonb, IN p_content_sha256 text, IN p_batch_kind text, IN p_command_id bigint, IN p_principal text, OUT o_import_batch_id uuid, OUT o_inserted integer, OUT o_updated integer, OUT o_removed_item_ids uuid[])
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
+    AS $_$
+DECLARE
+  v_command ops.domain_commands%ROWTYPE;
+  v_adopted integer := 0;
+  v_collection_id uuid;
+  v_collection_revision bigint;
+  v_changed_collection_ids uuid[];
+  v_changed_item_ids uuid[] := ARRAY[]::uuid[];
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'curation import command requires SERIALIZABLE transaction'
+      USING ERRCODE = '25001';
+  END IF;
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    RAISE EXCEPTION 'curation import command requires the admin executor'
+      USING ERRCODE = '42501';
+  END IF;
+  IF jsonb_typeof(p_items) <> 'array'
+     OR p_content_sha256 !~ '^[0-9a-f]{64}$'
+     OR p_batch_kind NOT IN ('csv_upload','normalized_rows')
+     OR p_principal IS NULL OR p_principal <> btrim(p_principal) OR p_principal = '' THEN
+    RAISE EXCEPTION 'curation import item input is not canonical'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_item_input';
+  END IF;
+  SELECT command.* INTO STRICT v_command
+  FROM ops.domain_commands AS command WHERE command.command_id = p_command_id
+  FOR UPDATE;
+  IF v_command.actor <> p_principal OR v_command.operation <> 'admin.curation.import'
+     OR EXISTS (SELECT 1 FROM ops.domain_command_results AS result
+                WHERE result.command_id = p_command_id) THEN
+    RAISE EXCEPTION 'domain command does not match active curation import'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_domain_command';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM ops.curation_import_plan_claims AS claim
+    JOIN feature.curation_import_plans AS plan
+      ON plan.import_plan_id = claim.import_plan_id
+    WHERE claim.command_id = p_command_id
+      AND plan.actor = p_principal
+      AND plan.content_sha256 = p_content_sha256
+  ) THEN
+    RAISE EXCEPTION 'curation import plan must be claimed before apply'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_plan_claim';
+  END IF;
+  IF (
+    SELECT COALESCE(jsonb_agg(
+      jsonb_set(
+        row.normalized_payload,
+        '{provenance}',
+        COALESCE(
+          NULLIF(row.normalized_payload -> 'provenance', 'null'::jsonb),
+          '{}'::jsonb
+        ),
+        true
+      ) ORDER BY row.row_number
+    ), '[]'::jsonb)
+    FROM feature.curation_import_plan_rows AS row
+    JOIN ops.curation_import_plan_claims AS claim
+      ON claim.import_plan_id = row.import_plan_id
+    WHERE claim.command_id = p_command_id
+      AND row.normalized_payload IS NOT NULL
+  ) IS DISTINCT FROM (
+    SELECT COALESCE(jsonb_agg(
+      value.row_payload || jsonb_build_object(
+        'provenance', COALESCE(value.provenance, '{}'::jsonb)
+      ) ORDER BY value.row_number
+    ), '[]'::jsonb)
+    FROM jsonb_to_recordset(p_items) AS value(
+      row_number integer, row_payload jsonb, provenance jsonb
+    )
+  ) THEN
+    RAISE EXCEPTION 'curation import rows differ from the immutable claimed plan'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_plan_row_set';
+  END IF;
+  IF (SELECT count(*) FROM jsonb_array_elements(p_items)) <> (
+       SELECT count(DISTINCT value.row_number)
+       FROM jsonb_to_recordset(p_items) AS value(row_number integer)
+     ) OR (SELECT count(*) FROM jsonb_array_elements(p_items)) <> (
+       SELECT count(DISTINCT (value.collection_id, value.external_item_id,
+                              value.external_component_id))
+       FROM jsonb_to_recordset(p_items) AS value(
+         collection_id uuid, external_item_id text, external_component_id text
+       )
+     ) THEN
+    RAISE EXCEPTION 'curation import rows are not a unique closed set'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_item_unique_set';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_to_recordset(p_items) AS value(collection_id uuid)
+    LEFT JOIN ops.curation_import_collection_effects AS effect
+      ON effect.command_id = p_command_id
+     AND effect.collection_id = value.collection_id
+    WHERE effect.collection_id IS NULL
+  ) THEN
+    RAISE EXCEPTION 'import collection effect set is incomplete'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_collection_effect_set';
+  END IF;
+
+  PERFORM item.curation_item_id
+  FROM feature.curation_items AS item
+  WHERE item.collection_id = ANY(ARRAY(
+    SELECT DISTINCT value.collection_id
+    FROM jsonb_to_recordset(p_items) AS value(collection_id uuid)
+  ))
+  ORDER BY item.curation_item_id FOR UPDATE;
+
+  WITH incoming AS MATERIALIZED (
+    SELECT * FROM jsonb_to_recordset(p_items) AS value(
+      row_number integer, collection_id uuid, collection_key text,
+      feature_id text, external_item_id text, external_component_id text,
+      place_name text, address_hint text, sort_order integer,
+      item_title text, item_summary text, metadata jsonb,
+      provenance jsonb, row_payload jsonb
+    )
+  ), candidates AS MATERIALIZED (
+    SELECT existing.curation_item_id
+    FROM feature.curation_items AS existing
+    WHERE existing.collection_id = ANY(SELECT DISTINCT collection_id FROM incoming)
+      AND existing.archived_at IS NULL AND existing.source_present
+      AND NOT EXISTS (
+        SELECT 1 FROM incoming
+        WHERE incoming.collection_id = existing.collection_id
+          AND incoming.external_item_id = existing.external_item_id
+          AND (
+            incoming.external_component_id = existing.external_component_id
+            OR (incoming.feature_id IS NOT NULL
+                AND existing.feature_id = incoming.feature_id
+                AND existing.external_component_id LIKE 'legacy:%'
+                AND NOT EXISTS (
+                  SELECT 1 FROM feature.curation_items AS exact_identity
+                  WHERE exact_identity.collection_id = existing.collection_id
+                    AND exact_identity.external_item_id = incoming.external_item_id
+                    AND exact_identity.external_component_id = incoming.external_component_id
+                ))
+          )
+      )
+  ), removed AS (
+    UPDATE feature.curation_items AS existing
+    SET source_present = false, source_updated_at = clock_timestamp(),
+        updated_by = p_principal, row_revision = existing.row_revision + 1,
+        updated_at = clock_timestamp()
+    WHERE existing.curation_item_id = ANY(SELECT curation_item_id FROM candidates)
+    RETURNING existing.curation_item_id, existing.collection_id
+  )
+  SELECT COALESCE(array_agg(curation_item_id ORDER BY curation_item_id), ARRAY[]::uuid[]),
+         COALESCE(array_agg(DISTINCT collection_id ORDER BY collection_id), ARRAY[]::uuid[])
+  INTO STRICT o_removed_item_ids, v_changed_collection_ids
+  FROM removed;
+  v_changed_item_ids := o_removed_item_ids;
+
+  WITH incoming AS MATERIALIZED (
+    SELECT * FROM jsonb_to_recordset(p_items) AS value(
+      collection_id uuid, feature_id text, external_item_id text,
+      external_component_id text, place_name text, address_hint text,
+      sort_order integer, item_title text, item_summary text, metadata jsonb
+    )
+  ), matched AS MATERIALIZED (
+    SELECT legacy.curation_item_id, incoming.*
+    FROM incoming
+    JOIN feature.curation_items AS legacy
+      ON legacy.collection_id = incoming.collection_id
+     AND legacy.external_item_id = incoming.external_item_id
+     AND legacy.feature_id = incoming.feature_id
+     AND legacy.external_component_id LIKE 'legacy:%'
+    WHERE incoming.feature_id IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1 FROM feature.curation_items AS exact_identity
+        WHERE exact_identity.collection_id = legacy.collection_id
+          AND exact_identity.external_item_id = legacy.external_item_id
+          AND exact_identity.external_component_id = incoming.external_component_id
+      )
+  ), written AS (
+    UPDATE feature.curation_items AS legacy
+    SET external_component_id = matched.external_component_id,
+        place_name = CASE WHEN legacy.archived_at IS NULL THEN matched.place_name ELSE legacy.place_name END,
+        address_hint = CASE WHEN legacy.archived_at IS NULL THEN matched.address_hint ELSE legacy.address_hint END,
+        source_present = CASE WHEN legacy.archived_at IS NULL THEN true ELSE legacy.source_present END,
+        source_updated_at = CASE WHEN legacy.archived_at IS NULL THEN clock_timestamp() ELSE legacy.source_updated_at END,
+        sort_order = CASE WHEN legacy.archived_at IS NULL THEN matched.sort_order ELSE legacy.sort_order END,
+        item_title = CASE WHEN legacy.archived_at IS NULL THEN matched.item_title ELSE legacy.item_title END,
+        item_summary = CASE WHEN legacy.archived_at IS NULL THEN matched.item_summary ELSE legacy.item_summary END,
+        metadata = CASE WHEN legacy.archived_at IS NULL THEN matched.metadata ELSE legacy.metadata END,
+        updated_by = p_principal, row_revision = legacy.row_revision + 1,
+        updated_at = clock_timestamp()
+    FROM matched WHERE legacy.curation_item_id = matched.curation_item_id
+    RETURNING legacy.curation_item_id, legacy.collection_id
+  )
+  SELECT count(*)::integer,
+         array_cat(v_changed_collection_ids,
+                   COALESCE(array_agg(DISTINCT collection_id), ARRAY[]::uuid[])),
+         array_cat(v_changed_item_ids,
+                   COALESCE(array_agg(curation_item_id), ARRAY[]::uuid[]))
+  INTO STRICT v_adopted, v_changed_collection_ids, v_changed_item_ids FROM written;
+
+  WITH incoming AS MATERIALIZED (
+    SELECT * FROM jsonb_to_recordset(p_items) AS value(
+      collection_id uuid, feature_id text, external_item_id text,
+      external_component_id text, place_name text, address_hint text,
+      sort_order integer, item_title text, item_summary text, metadata jsonb
+    )
+  ), written AS (
+    INSERT INTO feature.curation_items (
+      collection_id, feature_id, external_item_id, external_component_id,
+      place_name, address_hint, source_present, source_updated_at, status,
+      sort_order, item_title, item_summary, curation_relation, reuse_policy,
+      metadata, created_by, updated_by, updated_at
+    )
+    SELECT collection_id, feature_id, external_item_id, external_component_id,
+           place_name, address_hint, true, clock_timestamp(), 'included',
+           sort_order, item_title, item_summary, 'nearby_option', 'manual_review',
+           metadata, p_principal, p_principal, clock_timestamp()
+    FROM incoming
+    WHERE NOT EXISTS (
+      SELECT 1 FROM feature.curation_items AS tombstone
+      WHERE tombstone.collection_id = incoming.collection_id
+        AND tombstone.external_item_id = incoming.external_item_id
+        AND tombstone.external_component_id = incoming.external_component_id
+        AND tombstone.archived_at IS NOT NULL
+    )
+    ON CONFLICT (collection_id, external_item_id, external_component_id)
+    DO UPDATE SET feature_id = EXCLUDED.feature_id, place_name = EXCLUDED.place_name,
+      address_hint = EXCLUDED.address_hint, source_present = true,
+      source_updated_at = clock_timestamp(), sort_order = EXCLUDED.sort_order,
+      item_title = EXCLUDED.item_title, item_summary = EXCLUDED.item_summary,
+      metadata = EXCLUDED.metadata, updated_by = EXCLUDED.updated_by,
+      row_revision = feature.curation_items.row_revision + 1,
+      updated_at = clock_timestamp()
+    WHERE (feature.curation_items.feature_id, feature.curation_items.source_present,
+           feature.curation_items.place_name, feature.curation_items.address_hint,
+           feature.curation_items.sort_order, feature.curation_items.item_title,
+           feature.curation_items.item_summary, feature.curation_items.metadata)
+      IS DISTINCT FROM
+          (EXCLUDED.feature_id, true, EXCLUDED.place_name, EXCLUDED.address_hint,
+           EXCLUDED.sort_order, EXCLUDED.item_title, EXCLUDED.item_summary,
+           EXCLUDED.metadata)
+    RETURNING curation_item_id, collection_id, (xmax = 0) AS inserted
+  )
+  SELECT count(*) FILTER (WHERE inserted)::integer,
+         v_adopted + count(*) FILTER (WHERE NOT inserted)::integer,
+         array_cat(v_changed_collection_ids,
+                   COALESCE(array_agg(DISTINCT collection_id), ARRAY[]::uuid[])),
+         array_cat(v_changed_item_ids,
+                   COALESCE(array_agg(curation_item_id), ARRAY[]::uuid[]))
+  INTO STRICT o_inserted, o_updated, v_changed_collection_ids, v_changed_item_ids
+  FROM written;
+
+  INSERT INTO feature.curation_import_batches (
+    content_sha256, batch_kind, row_count, actor, metadata, command_id
+  ) VALUES (
+    p_content_sha256, p_batch_kind, jsonb_array_length(p_items), p_principal,
+    jsonb_build_object(
+      'schema_version', 1,
+      'address_resolver', 'curation-address-v1'
+    ),
+    p_command_id
+  ) RETURNING import_batch_id INTO STRICT o_import_batch_id;
+
+  WITH incoming AS MATERIALIZED (
+    SELECT * FROM jsonb_to_recordset(p_items) AS value(
+      row_number integer, collection_id uuid, feature_id text,
+      external_item_id text, external_component_id text,
+      provenance jsonb, row_payload jsonb
+    )
+  ), identities AS MATERIALIZED (
+    SELECT incoming.*, item.curation_item_id, item.accepted_link_decision_id,
+           previous.feature_id AS previous_feature_id,
+           current_row.row_payload AS previous_row_payload,
+           current_row.provenance AS previous_provenance
+    FROM incoming JOIN feature.curation_items AS item
+      ON item.collection_id = incoming.collection_id
+     AND item.external_item_id = incoming.external_item_id
+     AND item.external_component_id = incoming.external_component_id
+    LEFT JOIN feature.curation_link_decisions AS previous
+      ON previous.decision_id = item.accepted_link_decision_id
+    LEFT JOIN feature.curation_import_rows AS current_row
+      ON current_row.import_row_id = item.current_import_row_id
+  ), inserted_rows AS MATERIALIZED (
+    INSERT INTO feature.curation_import_rows (
+      import_batch_id, curation_item_id, row_number, source_row_sha256,
+      row_payload, provenance
+    )
+    SELECT o_import_batch_id, curation_item_id, row_number,
+           encode(x_extension.digest(row_payload::text, 'sha256'), 'hex'),
+           row_payload, COALESCE(provenance, '{}'::jsonb)
+    FROM identities
+    RETURNING import_row_id, curation_item_id, row_number
+  ), decisions AS MATERIALIZED (
+    INSERT INTO feature.curation_link_decisions (
+      curation_item_id, feature_id, import_row_id, decision_kind, match_basis,
+      resolver_version, evidence, actor, supersedes_decision_id
+    )
+    SELECT identity.curation_item_id,
+           COALESCE(identity.feature_id, identity.previous_feature_id),
+           inserted.import_row_id,
+           CASE WHEN identity.feature_id IS NULL THEN 'revoked' ELSE 'accepted' END,
+           'csv_explicit_feature_id', 'explicit-feature-id-v1',
+           jsonb_build_object(
+             'source_row_sha256', encode(x_extension.digest(identity.row_payload::text, 'sha256'), 'hex'),
+             'requested_feature_id', identity.feature_id
+           ), p_principal, identity.accepted_link_decision_id
+    FROM identities AS identity
+    JOIN inserted_rows AS inserted
+      ON inserted.curation_item_id = identity.curation_item_id
+     AND inserted.row_number = identity.row_number
+    WHERE (identity.feature_id IS NOT NULL OR identity.accepted_link_decision_id IS NOT NULL)
+      AND (identity.previous_row_payload, identity.previous_provenance)
+          IS DISTINCT FROM (identity.row_payload, COALESCE(identity.provenance, '{}'::jsonb))
+    RETURNING decision_id, curation_item_id, decision_kind
+  ), pointer_updates AS (
+  UPDATE feature.curation_items AS item
+  SET current_import_row_id = inserted.import_row_id,
+      accepted_link_decision_id = CASE
+        WHEN decision.decision_kind = 'accepted' THEN decision.decision_id ELSE NULL END,
+      updated_by = p_principal,
+      row_revision = item.row_revision + CASE
+        WHEN item.curation_item_id = ANY(v_changed_item_ids) THEN 0 ELSE 1 END,
+      updated_at = clock_timestamp()
+  FROM inserted_rows AS inserted
+  LEFT JOIN decisions AS decision ON decision.curation_item_id = inserted.curation_item_id
+  WHERE item.curation_item_id = inserted.curation_item_id
+    AND EXISTS (
+      SELECT 1
+      FROM identities AS identity
+      WHERE identity.curation_item_id = inserted.curation_item_id
+        AND (identity.previous_row_payload, identity.previous_provenance)
+            IS DISTINCT FROM (
+              identity.row_payload,
+              COALESCE(identity.provenance, '{}'::jsonb)
+            )
+    )
+  RETURNING item.curation_item_id, item.collection_id,
+            NOT (item.curation_item_id = ANY(v_changed_item_ids)) AS provenance_only
+  )
+  SELECT o_updated + count(*) FILTER (WHERE provenance_only)::integer,
+         array_cat(v_changed_collection_ids,
+                   COALESCE(array_agg(DISTINCT collection_id), ARRAY[]::uuid[])),
+         array_cat(v_changed_item_ids,
+                   COALESCE(array_agg(curation_item_id), ARRAY[]::uuid[]))
+  INTO STRICT o_updated, v_changed_collection_ids, v_changed_item_ids
+  FROM pointer_updates;
+
+  FOR v_collection_id IN
+    SELECT DISTINCT changed_id FROM unnest(v_changed_collection_ids) AS changed_id
+  LOOP
+    CALL feature.touch_curation_import_collection_command(
+      v_collection_id, p_command_id, p_principal, v_collection_revision
+    );
+  END LOOP;
+END
+$_$;
+
+
+ALTER PROCEDURE feature.apply_curation_import_items_command(IN p_items jsonb, IN p_content_sha256 text, IN p_batch_kind text, IN p_command_id bigint, IN p_principal text, OUT o_import_batch_id uuid, OUT o_inserted integer, OUT o_updated integer, OUT o_removed_item_ids uuid[]) OWNER TO ktm_curation_command_owner;
 
 --
 -- Name: apply_provider_feature_field_patch(text, bigint, text, text, bigint, jsonb, jsonb); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
@@ -651,6 +1215,744 @@ $$;
 ALTER PROCEDURE feature.apply_provider_feature_field_patch(IN p_feature_id text, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_applied_field_count integer) OWNER TO ktm_feature_state_procedure_owner;
 
 --
+-- Name: approve_feature_request_with_initial_state(uuid, jsonb, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_request_procedure_owner
+--
+
+CREATE PROCEDURE feature.approve_feature_request_with_initial_state(IN p_request_id uuid, IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_existing_feature_uuid uuid)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
+    AS $$
+DECLARE
+    v_command ops.domain_commands%ROWTYPE;
+    v_request ops.feature_requests%ROWTYPE;
+    v_feature_id text;
+    v_feature_uuid uuid;
+    v_feature_kind text;
+    v_feature_name text;
+    v_lon numeric;
+    v_lat numeric;
+    v_key record;
+    v_claimed_feature_uuid uuid;
+    v_created_feature_id text;
+    v_created_feature_uuid uuid;
+    v_created_row_revision bigint;
+    v_created boolean;
+BEGIN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'Feature request approval writer requires READ COMMITTED'
+            USING ERRCODE = '25001', CONSTRAINT = 'ck_feature_request_isolation';
+    END IF;
+    IF session_user <> 'ktm_feature_api_runtime'
+       OR NOT pg_has_role(session_user, 'ktm_feature_request_admin_executor', 'member') THEN
+        RAISE EXCEPTION 'Feature request approval writer requires admin executor'
+            USING ERRCODE = '42501', CONSTRAINT = 'ck_feature_request_executor';
+    END IF;
+    SELECT command.* INTO v_command
+    FROM ops.domain_commands AS command WHERE command.command_id = p_domain_command_id FOR UPDATE;
+    IF NOT FOUND OR v_command.operation <> 'admin.feature-request.approve.v1'
+       OR btrim(v_command.actor) = ''
+       OR EXISTS (SELECT 1 FROM ops.domain_command_results AS result WHERE result.command_id = p_domain_command_id) THEN
+        RAISE EXCEPTION 'Feature request approval command does not match writer'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_request_command';
+    END IF;
+    SELECT request.* INTO v_request FROM ops.feature_requests AS request
+    WHERE request.request_id = p_request_id FOR UPDATE;
+    IF NOT FOUND OR v_request.status <> 'pending' THEN
+        RAISE EXCEPTION 'Feature request is not pending'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_request_pending';
+    END IF;
+    IF jsonb_typeof(p_feature_payload) IS DISTINCT FROM 'object'
+       OR EXISTS (SELECT 1 FROM jsonb_object_keys(p_feature_payload) AS key_name(key_name)
+                  WHERE key_name NOT IN ('feature_id','feature_uuid','kind','name','category','lon','lat','coord_precision_digits','address','legal_dong_code','road_name_code','road_address_management_no','admin_dong_code','sido_code','sigungu_code','urls','marker_icon','marker_color','parent_feature_id','sibling_group_id','raw_refs'))
+       OR jsonb_typeof(p_feature_payload -> 'feature_id') IS DISTINCT FROM 'string'
+       OR jsonb_typeof(p_feature_payload -> 'feature_uuid') IS DISTINCT FROM 'string'
+       OR jsonb_typeof(p_feature_payload -> 'kind') IS DISTINCT FROM 'string'
+       OR jsonb_typeof(p_feature_payload -> 'name') IS DISTINCT FROM 'string'
+       OR jsonb_typeof(p_feature_payload -> 'category') IS DISTINCT FROM 'string'
+       OR jsonb_typeof(p_feature_payload -> 'lon') IS DISTINCT FROM 'number'
+       OR jsonb_typeof(p_feature_payload -> 'lat') IS DISTINCT FROM 'number'
+       OR p_feature_payload ->> 'kind' IS DISTINCT FROM v_request.request_payload ->> 'kind'
+       OR p_feature_payload ->> 'name' IS DISTINCT FROM v_request.request_payload ->> 'name'
+       OR p_feature_payload ->> 'lon' IS DISTINCT FROM v_request.request_payload ->> 'lon'
+       OR p_feature_payload ->> 'lat' IS DISTINCT FROM v_request.request_payload ->> 'lat' THEN
+        RAISE EXCEPTION 'Feature request approval payload is not canonical request projection'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_request_payload';
+    END IF;
+    v_feature_id := nullif(btrim(p_feature_payload ->> 'feature_id'), '');
+    v_feature_kind := nullif(btrim(p_feature_payload ->> 'kind'), '');
+    v_feature_name := nullif(btrim(p_feature_payload ->> 'name'), '');
+    IF v_feature_id IS NULL OR v_feature_kind IS NULL OR v_feature_name IS NULL
+       OR nullif(btrim(p_feature_payload ->> 'category'), '') IS NULL THEN
+        RAISE EXCEPTION 'Feature request approval Feature lacks required core values'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_request_payload';
+    END IF;
+    BEGIN
+        v_feature_uuid := (p_feature_payload ->> 'feature_uuid')::uuid;
+        v_lon := (p_feature_payload ->> 'lon')::numeric;
+        v_lat := (p_feature_payload ->> 'lat')::numeric;
+    EXCEPTION WHEN invalid_text_representation OR numeric_value_out_of_range THEN
+        RAISE EXCEPTION 'Feature request approval Feature identity is invalid'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_request_payload';
+    END;
+    IF substring(v_feature_uuid::text FROM 15 FOR 1) <> '7' THEN
+        RAISE EXCEPTION 'Feature request approval Feature UUID must be UUIDv7'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_create_core_identity';
+    END IF;
+    PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || v_feature_id, 0));
+    SELECT * INTO v_key FROM feature.manual_feature_identity_key(v_feature_kind, v_feature_name, v_lon, v_lat);
+    INSERT INTO feature.manual_feature_identity_claims (feature_id, feature_kind, name_key, lon_e6, lat_e6, claimed_by_command_id, claim_basis, claimed_at)
+    VALUES (v_feature_uuid, v_key.feature_kind, v_key.name_key, v_key.lon_e6, v_key.lat_e6, p_domain_command_id, 'manual_create', clock_timestamp())
+    ON CONFLICT ON CONSTRAINT uq_manual_feature_identity_claims_exact DO NOTHING RETURNING feature_id INTO v_claimed_feature_uuid;
+    IF v_claimed_feature_uuid IS NULL THEN
+        SELECT claim.feature_id INTO o_existing_feature_uuid FROM feature.manual_feature_identity_claims AS claim
+        WHERE (claim.feature_kind, claim.name_key, claim.lon_e6, claim.lat_e6) = (v_key.feature_kind, v_key.name_key, v_key.lon_e6, v_key.lat_e6);
+        IF o_existing_feature_uuid IS NULL THEN
+            RAISE EXCEPTION 'Feature request exact winner disappeared' USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_create_core_identity';
+        END IF;
+        UPDATE ops.feature_requests SET status = 'exact_conflict', resolved_at = clock_timestamp(),
+            resolved_by_actor = v_command.actor, resolution_command_id = p_domain_command_id,
+            resolved_feature_id = o_existing_feature_uuid WHERE request_id = p_request_id;
+        o_outcome := 'exact_conflict';
+        RETURN;
+    END IF;
+    CALL feature.create_feature_with_initial_state(p_feature_payload, 'active', 'published', 'valid',
+        jsonb_build_object('transition_kind','initial','reason_code','feature_request_approved',
+            'principal',v_command.actor,'causation_ref','domain-command:' || p_domain_command_id::text),
+        v_created_feature_id, v_created_feature_uuid, v_created_row_revision, v_created);
+    IF v_created IS DISTINCT FROM true OR v_created_feature_id IS DISTINCT FROM v_feature_id
+       OR v_created_feature_uuid IS DISTINCT FROM v_feature_uuid OR v_created_row_revision IS NULL OR v_created_row_revision < 1 THEN
+        RAISE EXCEPTION 'Feature request approval core result does not match claim' USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_create_core_identity';
+    END IF;
+    INSERT INTO feature.feature_creation_origins (feature_id, origin_kind, creation_command_id, creator_principal_id, created_by_actor, created_at, invoker_role, procedure_definer)
+    VALUES (v_feature_uuid, 'manual_request', p_domain_command_id, 'feature-request.approval.v1', v_command.actor, clock_timestamp(), session_user, current_user);
+    UPDATE ops.feature_requests SET status = 'approved', resolved_at = clock_timestamp(),
+        resolved_by_actor = v_command.actor, resolution_command_id = p_domain_command_id,
+        resolved_feature_id = v_feature_uuid WHERE request_id = p_request_id;
+    o_outcome := 'created'; o_feature_id := v_created_feature_id; o_feature_uuid := v_created_feature_uuid; o_row_revision := v_created_row_revision;
+END
+$$;
+
+
+ALTER PROCEDURE feature.approve_feature_request_with_initial_state(IN p_request_id uuid, IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_existing_feature_uuid uuid) OWNER TO ktm_feature_request_procedure_owner;
+
+--
+-- Name: archive_curated_source_command(uuid, bigint, bigint, text, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.archive_curated_source_command(IN p_source_id uuid, IN p_expected_source_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_source_id uuid, OUT o_source_revision bigint, OUT o_observation_revision bigint, OUT o_generation_count bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
+    AS $$
+DECLARE
+  v_command ops.domain_commands%ROWTYPE;
+  v_source feature.curated_sources%ROWTYPE;
+  v_rule_id uuid;
+  v_rule_revision bigint;
+  v_feature_id text;
+  v_prelock_features text[];
+  v_current_features text[];
+  v_before_hashes jsonb := '{}'::jsonb;
+  v_before_hash text;
+  v_after_input jsonb;
+  v_after_hash text;
+  v_operation_id uuid;
+  v_generation_id uuid;
+  v_observed bigint;
+  v_removed bigint;
+  v_set_hash text;
+  v_replayed boolean;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'source command requires SERIALIZABLE transaction' USING ERRCODE = '25001';
+  END IF;
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    RAISE EXCEPTION 'source command requires the admin executor' USING ERRCODE = '42501';
+  END IF;
+  IF p_principal IS NULL OR p_principal <> btrim(p_principal) OR p_principal = ''
+     OR p_reason_code IS NULL OR p_reason_code <> btrim(p_reason_code) OR p_reason_code = '' THEN
+    RAISE EXCEPTION 'source archive input is not canonical'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_source_archive_input';
+  END IF;
+  SELECT command.* INTO STRICT v_command
+  FROM ops.domain_commands AS command WHERE command.command_id = p_command_id;
+  IF v_command.actor <> p_principal OR v_command.operation <> 'admin.curated-source.archive' THEN
+    RAISE EXCEPTION 'domain command does not match source archive'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_source_domain_command';
+  END IF;
+  SELECT COALESCE(array_agg(scope.feature_id ORDER BY scope.feature_id), ARRAY[]::text[])
+  INTO STRICT v_prelock_features
+  FROM (
+    SELECT candidate.feature_id FROM feature.curated_source_rules AS rule
+    JOIN feature.theme_feature_candidates AS candidate ON candidate.rule_id = rule.rule_id
+    WHERE rule.source_id = p_source_id AND rule.archived_at IS NULL AND candidate.disposition = 'active'
+    UNION
+    SELECT link.feature_id FROM feature.curated_sources AS source
+    JOIN provider_sync.source_entities AS entity ON entity.provider_dataset_id = source.provider_dataset_id
+    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
+    WHERE source.source_id = p_source_id
+  ) AS scope;
+  FOREACH v_feature_id IN ARRAY v_prelock_features LOOP
+    PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || v_feature_id, 0));
+  END LOOP;
+  PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
+  SELECT source.* INTO STRICT v_source FROM feature.curated_sources AS source
+  WHERE source.source_id = p_source_id FOR UPDATE;
+  IF v_source.row_revision <> p_expected_source_revision THEN
+    RAISE EXCEPTION 'source revision mismatch'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_expected_revision';
+  END IF;
+  IF v_source.archived_at IS NOT NULL THEN
+    RAISE EXCEPTION 'source is already archived'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_source_active';
+  END IF;
+  PERFORM feature.claim_curation_catalog_command_effect(
+    p_command_id, v_command.operation, 'source', v_source.source_id
+  );
+  PERFORM 1 FROM feature.curated_source_rules AS rule
+  WHERE rule.source_id = p_source_id AND rule.archived_at IS NULL
+  ORDER BY rule.rule_id FOR SHARE;
+  SELECT COALESCE(array_agg(scope.feature_id ORDER BY scope.feature_id), ARRAY[]::text[])
+  INTO STRICT v_current_features
+  FROM (
+    SELECT candidate.feature_id FROM feature.curated_source_rules AS rule
+    JOIN feature.theme_feature_candidates AS candidate ON candidate.rule_id = rule.rule_id
+    WHERE rule.source_id = p_source_id AND rule.archived_at IS NULL AND candidate.disposition = 'active'
+    UNION
+    SELECT link.feature_id FROM provider_sync.source_entities AS entity
+    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
+    WHERE entity.provider_dataset_id = v_source.provider_dataset_id
+  ) AS scope;
+  IF v_current_features <> v_prelock_features THEN
+    RAISE EXCEPTION 'source archive scope changed while acquiring the catalog lock' USING ERRCODE = '40001';
+  END IF;
+  FOR v_rule_id IN SELECT rule.rule_id FROM feature.curated_source_rules AS rule
+    WHERE rule.source_id = p_source_id AND rule.archived_at IS NULL ORDER BY rule.rule_id
+  LOOP
+    v_before_hashes := v_before_hashes || jsonb_build_object(
+      v_rule_id::text, encode(x_extension.digest(convert_to(
+        feature.current_curation_rule_input(v_rule_id)::text, 'UTF8'
+      ), 'sha256'), 'hex')
+    );
+  END LOOP;
+  UPDATE feature.curated_sources AS source
+  SET archived_at = clock_timestamp(), row_revision = source.row_revision + 1,
+      updated_at = clock_timestamp()
+  WHERE source.source_id = p_source_id
+  RETURNING source.source_id, source.row_revision, source.observation_revision
+    INTO STRICT o_source_id, o_source_revision, o_observation_revision;
+  o_generation_count := 0;
+  FOR v_rule_id IN SELECT rule.rule_id FROM feature.curated_source_rules AS rule
+    WHERE rule.source_id = p_source_id AND rule.archived_at IS NULL ORDER BY rule.rule_id
+  LOOP
+    SELECT rule.row_revision INTO STRICT v_rule_revision
+    FROM feature.curated_source_rules AS rule WHERE rule.rule_id = v_rule_id;
+    v_before_hash := v_before_hashes ->> v_rule_id::text;
+    v_after_input := feature.current_curation_rule_input(v_rule_id);
+    v_after_hash := encode(x_extension.digest(convert_to(v_after_input::text, 'UTF8'), 'sha256'), 'hex');
+    v_operation_id := feature.create_curation_rule_reconcile_receipt(
+      v_rule_id, 'archive', v_rule_revision, v_rule_revision,
+      v_before_hash, v_after_hash, p_command_id, p_principal
+    );
+    CALL feature.materialize_theme_candidate_generation(
+      v_rule_id, 'rule_reconcile', NULL, v_operation_id, p_command_id, NULL,
+      jsonb_build_object('schema_version', 1, 'catalog_action', 'source_archive',
+        'source_id', p_source_id::text, 'reason_code', p_reason_code),
+      v_generation_id, v_observed, v_removed, v_set_hash, v_replayed
+    );
+    o_generation_count := o_generation_count + 1;
+  END LOOP;
+END
+$$;
+
+
+ALTER PROCEDURE feature.archive_curated_source_command(IN p_source_id uuid, IN p_expected_source_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_source_id uuid, OUT o_source_revision bigint, OUT o_observation_revision bigint, OUT o_generation_count bigint) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: archive_curated_source_rule_command(uuid, bigint, bigint, text, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.archive_curated_source_rule_command(IN p_rule_id uuid, IN p_expected_rule_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_rule_id uuid, OUT o_rule_revision bigint, OUT o_generation_id uuid)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
+    AS $$
+DECLARE
+  v_command ops.domain_commands%ROWTYPE;
+  v_rule feature.curated_source_rules%ROWTYPE;
+  v_provider_dataset_id bigint;
+  v_prelock_count bigint;
+  v_prelock_hash text;
+  v_current_count bigint;
+  v_current_hash text;
+  v_before_input jsonb;
+  v_after_input jsonb;
+  v_before_hash text;
+  v_after_hash text;
+  v_operation_id uuid;
+  v_observed bigint;
+  v_removed bigint;
+  v_set_hash text;
+  v_replayed boolean;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'rule command requires SERIALIZABLE transaction'
+      USING ERRCODE = '25001';
+  END IF;
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    RAISE EXCEPTION 'rule command requires the admin executor'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_expected_rule_revision < 1 OR p_principal IS NULL
+     OR p_principal <> btrim(p_principal) OR p_principal = ''
+     OR p_reason_code IS NULL OR p_reason_code <> btrim(p_reason_code)
+     OR p_reason_code = '' THEN
+    RAISE EXCEPTION 'rule archive input is not canonical'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_rule_command_input';
+  END IF;
+  SELECT command.* INTO STRICT v_command
+  FROM ops.domain_commands AS command WHERE command.command_id = p_command_id;
+  IF v_command.actor <> p_principal
+     OR v_command.operation <> 'admin.curated-source-rule.archive' THEN
+    RAISE EXCEPTION 'domain command does not match rule archive'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_rule_domain_command';
+  END IF;
+  SELECT source.provider_dataset_id INTO STRICT v_provider_dataset_id
+  FROM feature.curated_source_rules AS rule
+  JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
+  WHERE rule.rule_id = p_rule_id;
+  SELECT count(*), encode(x_extension.digest(convert_to(
+    COALESCE(jsonb_agg(touched.feature_id ORDER BY touched.feature_id)::text, '[]'),
+    'UTF8'), 'sha256'), 'hex')
+  INTO STRICT v_prelock_count, v_prelock_hash
+  FROM (
+    SELECT candidate.feature_id FROM feature.theme_feature_candidates AS candidate
+    WHERE candidate.rule_id = p_rule_id AND candidate.disposition = 'active'
+    UNION
+    SELECT link.feature_id FROM provider_sync.source_entities AS entity
+    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
+    WHERE entity.provider_dataset_id = v_provider_dataset_id
+  ) AS touched;
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || touched.feature_id, 0))
+  FROM (
+    SELECT candidate.feature_id FROM feature.theme_feature_candidates AS candidate
+    WHERE candidate.rule_id = p_rule_id AND candidate.disposition = 'active'
+    UNION
+    SELECT link.feature_id FROM provider_sync.source_entities AS entity
+    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
+    WHERE entity.provider_dataset_id = v_provider_dataset_id
+  ) AS touched ORDER BY touched.feature_id;
+  PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
+  SELECT rule.* INTO STRICT v_rule FROM feature.curated_source_rules AS rule
+  WHERE rule.rule_id = p_rule_id FOR UPDATE;
+  SELECT count(*), encode(x_extension.digest(convert_to(
+    COALESCE(jsonb_agg(touched.feature_id ORDER BY touched.feature_id)::text, '[]'),
+    'UTF8'), 'sha256'), 'hex')
+  INTO STRICT v_current_count, v_current_hash
+  FROM (
+    SELECT candidate.feature_id FROM feature.theme_feature_candidates AS candidate
+    WHERE candidate.rule_id = p_rule_id AND candidate.disposition = 'active'
+    UNION
+    SELECT link.feature_id FROM provider_sync.source_entities AS entity
+    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
+    WHERE entity.provider_dataset_id = v_provider_dataset_id
+  ) AS touched;
+  IF v_current_count <> v_prelock_count OR v_current_hash <> v_prelock_hash THEN
+    RAISE EXCEPTION 'rule archive scope changed while acquiring the catalog lock'
+      USING ERRCODE = '40001';
+  END IF;
+  IF v_rule.row_revision <> p_expected_rule_revision THEN
+    RAISE EXCEPTION 'rule revision mismatch'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_expected_revision';
+  END IF;
+  IF v_rule.owner_kind IS DISTINCT FROM 'operator' THEN
+    RAISE EXCEPTION 'provider-owned rule cannot be archived by an admin command'
+      USING ERRCODE = '42501';
+  END IF;
+  IF v_rule.archived_at IS NOT NULL THEN
+    RAISE EXCEPTION 'rule is already archived'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_rule_active';
+  END IF;
+  PERFORM feature.claim_curation_catalog_command_effect(
+    p_command_id, v_command.operation, 'rule', v_rule.rule_id
+  );
+  v_before_input := feature.current_curation_rule_input(p_rule_id);
+  v_before_hash := encode(
+    x_extension.digest(convert_to(v_before_input::text, 'UTF8'), 'sha256'), 'hex'
+  );
+  UPDATE feature.curated_source_rules AS rule
+  SET archived_at = clock_timestamp(), enabled = false,
+      metadata = rule.metadata || jsonb_build_object('archive_reason', p_reason_code),
+      row_revision = rule.row_revision + 1, updated_at = clock_timestamp()
+  WHERE rule.rule_id = p_rule_id
+  RETURNING rule.rule_id, rule.row_revision INTO STRICT o_rule_id, o_rule_revision;
+  v_after_input := feature.current_curation_rule_input(p_rule_id);
+  v_after_hash := encode(
+    x_extension.digest(convert_to(v_after_input::text, 'UTF8'), 'sha256'), 'hex'
+  );
+  v_operation_id := feature.create_curation_rule_reconcile_receipt(
+    p_rule_id, 'archive', v_rule.row_revision, o_rule_revision,
+    v_before_hash, v_after_hash, p_command_id, p_principal
+  );
+  CALL feature.materialize_theme_candidate_generation(
+    p_rule_id, 'rule_reconcile', NULL, v_operation_id, p_command_id, NULL,
+    jsonb_build_object('schema_version', 1, 'catalog_action', 'archive'),
+    o_generation_id, v_observed, v_removed, v_set_hash, v_replayed
+  );
+END
+$$;
+
+
+ALTER PROCEDURE feature.archive_curated_source_rule_command(IN p_rule_id uuid, IN p_expected_rule_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_rule_id uuid, OUT o_rule_revision bigint, OUT o_generation_id uuid) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: archive_curated_theme_command(uuid, bigint, bigint, text, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.archive_curated_theme_command(IN p_theme_id uuid, IN p_expected_theme_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_theme_id uuid, OUT o_theme_revision bigint, OUT o_generation_count bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
+    AS $$
+DECLARE
+  v_command ops.domain_commands%ROWTYPE;
+  v_theme feature.curated_themes%ROWTYPE;
+  v_rule_id uuid;
+  v_rule_revision bigint;
+  v_feature_id text;
+  v_prelock_count bigint;
+  v_prelock_hash text;
+  v_current_count bigint;
+  v_current_hash text;
+  v_before_hashes jsonb := '{}'::jsonb;
+  v_before_hash text;
+  v_after_input jsonb;
+  v_after_hash text;
+  v_operation_id uuid;
+  v_generation_id uuid;
+  v_observed bigint;
+  v_removed bigint;
+  v_set_hash text;
+  v_replayed boolean;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'theme command requires SERIALIZABLE transaction' USING ERRCODE = '25001';
+  END IF;
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    RAISE EXCEPTION 'theme command requires the admin executor' USING ERRCODE = '42501';
+  END IF;
+  IF p_principal IS NULL OR p_principal <> btrim(p_principal) OR p_principal = ''
+     OR p_reason_code IS NULL OR p_reason_code <> btrim(p_reason_code) OR p_reason_code = '' THEN
+    RAISE EXCEPTION 'theme archive input is not canonical'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_theme_archive_input';
+  END IF;
+  SELECT command.* INTO STRICT v_command
+  FROM ops.domain_commands AS command WHERE command.command_id = p_command_id;
+  IF v_command.actor <> p_principal
+     OR v_command.operation <> 'admin.curated-theme.archive' THEN
+    RAISE EXCEPTION 'domain command does not match theme archive'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_theme_domain_command';
+  END IF;
+  SELECT count(*), encode(x_extension.digest(convert_to(
+    COALESCE(jsonb_agg(touched.feature_id ORDER BY touched.feature_id)::text, '[]'),
+    'UTF8'), 'sha256'), 'hex')
+  INTO STRICT v_prelock_count, v_prelock_hash
+  FROM (
+    SELECT candidate.feature_id
+    FROM feature.curated_source_rules AS rule
+    JOIN feature.theme_feature_candidates AS candidate ON candidate.rule_id = rule.rule_id
+    WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
+      AND candidate.disposition = 'active'
+    UNION
+    SELECT link.feature_id
+    FROM feature.curated_source_rules AS rule
+    JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
+    JOIN provider_sync.source_entities AS entity
+      ON entity.provider_dataset_id = source.provider_dataset_id
+    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
+    WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
+  ) AS touched;
+  FOR v_feature_id IN
+    SELECT touched.feature_id FROM (
+      SELECT candidate.feature_id
+      FROM feature.curated_source_rules AS rule
+      JOIN feature.theme_feature_candidates AS candidate ON candidate.rule_id = rule.rule_id
+      WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
+        AND candidate.disposition = 'active'
+      UNION
+      SELECT link.feature_id
+      FROM feature.curated_source_rules AS rule
+      JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
+      JOIN provider_sync.source_entities AS entity
+        ON entity.provider_dataset_id = source.provider_dataset_id
+      JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
+      WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
+    ) AS touched ORDER BY touched.feature_id
+  LOOP
+    PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || v_feature_id, 0));
+  END LOOP;
+  PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
+  SELECT theme.* INTO STRICT v_theme
+  FROM feature.curated_themes AS theme WHERE theme.theme_id = p_theme_id FOR UPDATE;
+  IF v_theme.row_revision <> p_expected_theme_revision THEN
+    RAISE EXCEPTION 'theme revision mismatch'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_expected_revision';
+  END IF;
+  IF v_theme.owner_kind IS DISTINCT FROM 'operator' THEN
+    RAISE EXCEPTION 'provider-owned theme cannot be archived by an admin command'
+      USING ERRCODE = '42501';
+  END IF;
+  IF v_theme.archived_at IS NOT NULL THEN
+    RAISE EXCEPTION 'theme is already archived'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_theme_active';
+  END IF;
+  PERFORM feature.claim_curation_catalog_command_effect(
+    p_command_id, v_command.operation, 'theme', v_theme.theme_id
+  );
+  PERFORM 1 FROM feature.curated_source_rules AS rule
+  WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
+  ORDER BY rule.rule_id FOR SHARE;
+  SELECT count(*), encode(x_extension.digest(convert_to(
+    COALESCE(jsonb_agg(touched.feature_id ORDER BY touched.feature_id)::text, '[]'),
+    'UTF8'), 'sha256'), 'hex')
+  INTO STRICT v_current_count, v_current_hash
+  FROM (
+    SELECT candidate.feature_id
+    FROM feature.curated_source_rules AS rule
+    JOIN feature.theme_feature_candidates AS candidate ON candidate.rule_id = rule.rule_id
+    WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
+      AND candidate.disposition = 'active'
+    UNION
+    SELECT link.feature_id
+    FROM feature.curated_source_rules AS rule
+    JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
+    JOIN provider_sync.source_entities AS entity
+      ON entity.provider_dataset_id = source.provider_dataset_id
+    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
+    WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
+  ) AS touched;
+  IF v_current_count <> v_prelock_count OR v_current_hash <> v_prelock_hash THEN
+    RAISE EXCEPTION 'theme archive scope changed while acquiring the catalog lock'
+      USING ERRCODE = '40001';
+  END IF;
+  FOR v_rule_id IN
+    SELECT rule.rule_id FROM feature.curated_source_rules AS rule
+    WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL ORDER BY rule.rule_id
+  LOOP
+    v_before_hashes := v_before_hashes || jsonb_build_object(
+      v_rule_id::text,
+      encode(x_extension.digest(convert_to(
+        feature.current_curation_rule_input(v_rule_id)::text, 'UTF8'
+      ), 'sha256'), 'hex')
+    );
+  END LOOP;
+  UPDATE feature.curated_themes AS theme
+  SET archived_at = clock_timestamp(), row_revision = theme.row_revision + 1,
+      updated_at = clock_timestamp()
+  WHERE theme.theme_id = p_theme_id
+  RETURNING theme.theme_id, theme.row_revision INTO STRICT o_theme_id, o_theme_revision;
+  o_generation_count := 0;
+  FOR v_rule_id IN
+    SELECT rule.rule_id FROM feature.curated_source_rules AS rule
+    WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL ORDER BY rule.rule_id
+  LOOP
+    SELECT rule.row_revision INTO STRICT v_rule_revision
+    FROM feature.curated_source_rules AS rule WHERE rule.rule_id = v_rule_id;
+    v_before_hash := v_before_hashes ->> v_rule_id::text;
+    v_after_input := feature.current_curation_rule_input(v_rule_id);
+    v_after_hash := encode(x_extension.digest(convert_to(v_after_input::text, 'UTF8'), 'sha256'), 'hex');
+    v_operation_id := feature.create_curation_rule_reconcile_receipt(
+      v_rule_id, 'archive',
+      v_rule_revision, v_rule_revision,
+      v_before_hash, v_after_hash, p_command_id, p_principal
+    );
+    CALL feature.materialize_theme_candidate_generation(
+      v_rule_id, 'rule_reconcile', NULL, v_operation_id, p_command_id, NULL,
+      jsonb_build_object('schema_version', 1, 'catalog_action', 'theme_archive',
+        'theme_id', p_theme_id::text, 'reason_code', p_reason_code),
+      v_generation_id, v_observed, v_removed, v_set_hash, v_replayed
+    );
+    o_generation_count := o_generation_count + 1;
+  END LOOP;
+END
+$$;
+
+
+ALTER PROCEDURE feature.archive_curated_theme_command(IN p_theme_id uuid, IN p_expected_theme_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_theme_id uuid, OUT o_theme_revision bigint, OUT o_generation_count bigint) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: archive_curation_collection_command(uuid, bigint, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.archive_curation_collection_command(IN p_collection_id uuid, IN p_expected_collection_revision bigint, IN p_command_id bigint, IN p_principal text, OUT o_collection_id uuid, OUT o_collection_revision bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops'
+    AS $$
+DECLARE
+  v_command ops.domain_commands%ROWTYPE;
+  v_collection feature.curation_collections%ROWTYPE;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'collection command requires SERIALIZABLE transaction'
+      USING ERRCODE = '25001';
+  END IF;
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    RAISE EXCEPTION 'collection command requires the admin executor'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_principal IS NULL OR p_principal <> btrim(p_principal) OR p_principal = ''
+     OR p_collection_id IS NULL OR p_expected_collection_revision IS NULL
+     OR p_expected_collection_revision < 1 THEN
+    RAISE EXCEPTION 'collection archive input is not canonical'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_collection_command_input';
+  END IF;
+  SELECT command.* INTO STRICT v_command
+  FROM ops.domain_commands AS command WHERE command.command_id = p_command_id;
+  IF v_command.actor <> p_principal
+     OR v_command.operation <> 'admin.curation-collection.archive' THEN
+    RAISE EXCEPTION 'domain command does not match collection archive'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_collection_domain_command';
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0));
+  SELECT collection.* INTO STRICT v_collection
+  FROM feature.curation_collections AS collection
+  WHERE collection.collection_id = p_collection_id FOR UPDATE;
+  IF v_collection.row_revision <> p_expected_collection_revision THEN
+    RAISE EXCEPTION 'collection revision mismatch'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_collection_expected_revision';
+  END IF;
+  PERFORM feature.claim_curation_catalog_command_effect(
+    p_command_id, v_command.operation, 'collection', p_collection_id
+  );
+  o_collection_id := v_collection.collection_id;
+  IF v_collection.archived_at IS NOT NULL THEN
+    o_collection_revision := v_collection.row_revision;
+    RETURN;
+  END IF;
+  UPDATE feature.curation_collections AS collection
+  SET status = 'archived', archived_at = clock_timestamp(),
+      updated_by = p_principal, row_revision = collection.row_revision + 1,
+      updated_at = clock_timestamp()
+  WHERE collection.collection_id = p_collection_id
+  RETURNING collection.collection_id, collection.row_revision
+  INTO STRICT o_collection_id, o_collection_revision;
+END
+$$;
+
+
+ALTER PROCEDURE feature.archive_curation_collection_command(IN p_collection_id uuid, IN p_expected_collection_revision bigint, IN p_command_id bigint, IN p_principal text, OUT o_collection_id uuid, OUT o_collection_revision bigint) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: archive_curation_item_command(uuid, uuid, bigint, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.archive_curation_item_command(IN p_collection_id uuid, IN p_curation_item_id uuid, IN p_expected_item_revision bigint, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops'
+    AS $$
+DECLARE
+  v_command ops.domain_commands%ROWTYPE;
+  v_collection feature.curation_collections%ROWTYPE;
+  v_hint feature.curation_items%ROWTYPE;
+  v_item feature.curation_items%ROWTYPE;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'item command requires SERIALIZABLE transaction'
+      USING ERRCODE = '25001';
+  END IF;
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    RAISE EXCEPTION 'item command requires the admin executor'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_principal IS NULL OR p_principal <> btrim(p_principal) OR p_principal = ''
+     OR p_collection_id IS NULL OR p_curation_item_id IS NULL
+     OR p_expected_item_revision IS NULL OR p_expected_item_revision < 1 THEN
+    RAISE EXCEPTION 'item archive input is not canonical'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_item_command_input';
+  END IF;
+  SELECT command.* INTO STRICT v_command
+  FROM ops.domain_commands AS command WHERE command.command_id = p_command_id;
+  IF v_command.actor <> p_principal
+     OR v_command.operation <> 'admin.curation-item.archive' THEN
+    RAISE EXCEPTION 'domain command does not match item archive'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_item_domain_command';
+  END IF;
+
+  SELECT item.* INTO STRICT v_hint FROM feature.curation_items AS item
+  WHERE item.collection_id = p_collection_id
+    AND item.curation_item_id = p_curation_item_id;
+  PERFORM pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0));
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write', 0));
+  IF v_hint.feature_id IS NOT NULL THEN
+    PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || v_hint.feature_id, 0));
+  END IF;
+  SELECT collection.* INTO STRICT v_collection
+  FROM feature.curation_collections AS collection
+  WHERE collection.collection_id = p_collection_id FOR UPDATE;
+  SELECT item.* INTO STRICT v_item FROM feature.curation_items AS item
+  WHERE item.collection_id = p_collection_id
+    AND item.curation_item_id = p_curation_item_id FOR UPDATE;
+  IF v_item.feature_id IS DISTINCT FROM v_hint.feature_id
+     OR v_item.row_revision <> p_expected_item_revision THEN
+    RAISE EXCEPTION 'item identity or revision changed while locking'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_item_expected_revision';
+  END IF;
+  PERFORM feature.claim_curation_catalog_command_effect(
+    p_command_id, v_command.operation, 'item', p_curation_item_id
+  );
+  o_curation_item_id := p_curation_item_id;
+  o_collection_revision := v_collection.row_revision;
+  IF v_item.archived_at IS NOT NULL THEN
+    o_item_revision := v_item.row_revision;
+    RETURN;
+  END IF;
+  UPDATE feature.curation_items AS item
+  SET status = 'archived', archived_at = clock_timestamp(),
+      operator_updated_by = p_principal, operator_updated_at = clock_timestamp(),
+      updated_by = p_principal, row_revision = item.row_revision + 1,
+      updated_at = clock_timestamp()
+  WHERE item.curation_item_id = p_curation_item_id
+  RETURNING item.row_revision INTO STRICT o_item_revision;
+  UPDATE feature.curation_collections AS collection
+  SET updated_by = p_principal, updated_at = clock_timestamp(),
+      row_revision = collection.row_revision + 1
+  WHERE collection.collection_id = p_collection_id
+  RETURNING collection.row_revision INTO STRICT o_collection_revision;
+END
+$$;
+
+
+ALTER PROCEDURE feature.archive_curation_item_command(IN p_collection_id uuid, IN p_curation_item_id uuid, IN p_expected_item_revision bigint, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: assert_feature_reference_reconciliation_lease_cursor(); Type: FUNCTION; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+
+CREATE FUNCTION feature.assert_feature_reference_reconciliation_lease_cursor() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'ops'
+    AS $$
+DECLARE
+    v_initial_event_sequence bigint;
+BEGIN
+    SELECT subscription.initial_event_sequence INTO v_initial_event_sequence
+    FROM ops.feature_reference_reconciliation_subscriptions AS subscription
+    WHERE subscription.principal_id = NEW.principal_id;
+    IF NOT FOUND OR NEW.acked_through_sequence < v_initial_event_sequence THEN
+        RAISE EXCEPTION 'reconciliation lease cursor precedes its subscription cursor'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_reconciliation_lease_initial_cursor';
+    END IF;
+    RETURN NEW;
+END
+$$;
+
+
+ALTER FUNCTION feature.assert_feature_reference_reconciliation_lease_cursor() OWNER TO ktm_manual_provider_dedup_procedure_owner;
+
+--
 -- Name: author_feature_field_overrides(text, bigint, text, text, bigint, jsonb, jsonb); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
@@ -702,7 +2004,7 @@ BEGIN
       )
     FOR SHARE;
     IF NOT FOUND OR v_operation NOT IN (
-        'admin.feature.override.author', 'admin.feature.create', 'admin.feature.patch'
+        'admin.feature.override.author', 'admin.feature.create.manual-v1', 'admin.feature.patch'
     ) THEN
         RAISE EXCEPTION 'field override author requires an open matching domain command'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_override_command';
@@ -1243,6 +2545,1046 @@ $$;
 ALTER PROCEDURE feature.author_lifecycle_override(IN p_feature_id text, IN p_source_lifecycle_state text, IN p_override_lifecycle_state text, IN p_prevent_provider_reactivation boolean, IN p_reason text, IN p_principal text, IN p_expected_row_revision bigint, OUT o_row_revision bigint) OWNER TO ktm_feature_state_procedure_owner;
 
 --
+-- Name: claim_curation_catalog_command_effect(bigint, text, text, uuid); Type: FUNCTION; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE FUNCTION feature.claim_curation_catalog_command_effect(p_command_id bigint, p_operation text, p_resource_kind text, p_resource_id uuid) RETURNS void
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'ops'
+    AS $$
+BEGIN
+  PERFORM 1 FROM ops.domain_commands AS command
+  WHERE command.command_id = p_command_id FOR UPDATE;
+  IF EXISTS (
+    SELECT 1 FROM ops.domain_command_results AS result
+    WHERE result.command_id = p_command_id
+  ) THEN
+    RAISE EXCEPTION 'curation catalog command is already terminal'
+      USING ERRCODE = '23514',
+        CONSTRAINT = 'ck_tvn40_curation_catalog_open_command';
+  END IF;
+  INSERT INTO ops.curation_catalog_command_effects (
+    command_id, operation, resource_kind, resource_id
+  ) VALUES (
+    p_command_id, p_operation, p_resource_kind, p_resource_id
+  );
+END
+$$;
+
+
+ALTER FUNCTION feature.claim_curation_catalog_command_effect(p_command_id bigint, p_operation text, p_resource_kind text, p_resource_id uuid) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: claim_curation_import_plan_command(uuid, text, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.claim_curation_import_plan_command(IN p_import_plan_id uuid, IN p_plan_sha256 text, IN p_command_id bigint, IN p_principal text, OUT o_content_sha256 text, OUT o_rows jsonb, OUT o_summary jsonb, OUT o_response_rows jsonb, OUT o_expires_at timestamp with time zone)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops'
+    AS $$
+DECLARE
+  v_command ops.domain_commands%ROWTYPE;
+  v_plan feature.curation_import_plans%ROWTYPE;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'curation import commit requires SERIALIZABLE transaction'
+      USING ERRCODE = '25001';
+  END IF;
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    RAISE EXCEPTION 'curation import commit requires the admin executor'
+      USING ERRCODE = '42501';
+  END IF;
+  PERFORM pg_advisory_xact_lock(
+    hashtextextended('curation-import-plan:' || p_import_plan_id::text, 0)
+  );
+  SELECT command.* INTO STRICT v_command
+  FROM ops.domain_commands AS command WHERE command.command_id = p_command_id
+  FOR UPDATE;
+  IF v_command.actor <> p_principal
+     OR v_command.operation <> 'admin.curation.import'
+     OR EXISTS (
+       SELECT 1 FROM ops.domain_command_results AS result
+       WHERE result.command_id = p_command_id
+     ) THEN
+    RAISE EXCEPTION 'domain command does not match active curation import commit'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_plan_commit_command';
+  END IF;
+  SELECT plan.* INTO STRICT v_plan
+  FROM feature.curation_import_plans AS plan
+  WHERE plan.import_plan_id = p_import_plan_id;
+  IF v_plan.actor <> p_principal OR v_plan.plan_sha256 <> p_plan_sha256 THEN
+    RAISE EXCEPTION 'curation import plan actor or ETag changed'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_plan_etag';
+  END IF;
+  IF v_plan.expires_at <= clock_timestamp() THEN
+    RAISE EXCEPTION 'curation import plan expired'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_plan_expired';
+  END IF;
+  IF COALESCE((v_plan.summary ->> 'has_errors')::boolean, true) THEN
+    RAISE EXCEPTION 'curation import plan contains unresolved validation errors'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_plan_has_errors';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM ops.curation_import_plan_commits AS committed
+    WHERE committed.import_plan_id = p_import_plan_id
+  ) THEN
+    RAISE EXCEPTION 'curation import plan already committed'
+      USING ERRCODE = '23505', CONSTRAINT = 'uq_tvn40_import_plan_commit';
+  END IF;
+
+  IF EXISTS (
+    SELECT 1
+    FROM feature.curation_import_plan_revisions AS expected
+    LEFT JOIN LATERAL (
+      SELECT current_row.row_revision
+      FROM (
+        SELECT theme.row_revision
+        FROM feature.curated_themes AS theme
+        WHERE expected.resource_kind = 'theme'
+          AND theme.theme_id = expected.resource_key::uuid
+          AND theme.archived_at IS NULL
+        UNION ALL
+        SELECT source.row_revision
+        FROM feature.curated_sources AS source
+        WHERE expected.resource_kind = 'source'
+          AND source.source_id = expected.resource_key::uuid
+          AND source.archived_at IS NULL
+        UNION ALL
+        SELECT collection.row_revision
+        FROM feature.curation_collections AS collection
+        WHERE expected.resource_kind = 'collection'
+          AND collection.collection_key = expected.resource_key
+          AND collection.archived_at IS NULL
+        UNION ALL
+        SELECT item.row_revision
+        FROM feature.curation_items AS item
+        JOIN feature.curation_collections AS collection
+          ON collection.collection_id = item.collection_id
+        WHERE expected.resource_kind = 'item'
+          AND collection.collection_key = expected.resource_key::jsonb ->> 0
+          AND item.external_item_id = expected.resource_key::jsonb ->> 1
+          AND item.external_component_id = expected.resource_key::jsonb ->> 2
+        UNION ALL
+        SELECT core.row_revision
+        FROM feature.features AS core
+        WHERE expected.resource_kind = 'feature'
+          AND core.feature_id = expected.resource_key
+      ) AS current_row
+    ) AS current ON true
+    WHERE expected.import_plan_id = p_import_plan_id
+      AND current.row_revision IS DISTINCT FROM expected.expected_revision
+  ) THEN
+    RAISE EXCEPTION 'curation import plan revision vector is stale'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_plan_revision_vector';
+  END IF;
+  o_content_sha256 := v_plan.content_sha256;
+  o_summary := v_plan.summary;
+  o_expires_at := v_plan.expires_at;
+  SELECT COALESCE(jsonb_agg(row.normalized_payload ORDER BY row.row_number)
+                  FILTER (WHERE row.normalized_payload IS NOT NULL), '[]'::jsonb)
+  INTO STRICT o_rows
+  FROM feature.curation_import_plan_rows AS row
+  WHERE row.import_plan_id = p_import_plan_id;
+  SELECT COALESCE(jsonb_agg(row.response_payload ORDER BY row.row_number), '[]'::jsonb)
+  INTO STRICT o_response_rows
+  FROM feature.curation_import_plan_rows AS row
+  WHERE row.import_plan_id = p_import_plan_id;
+  INSERT INTO ops.curation_import_plan_claims (
+    import_plan_id, command_id, plan_sha256
+  ) VALUES (
+    p_import_plan_id, p_command_id, p_plan_sha256
+  );
+END
+$$;
+
+
+ALTER PROCEDURE feature.claim_curation_import_plan_command(IN p_import_plan_id uuid, IN p_plan_sha256 text, IN p_command_id bigint, IN p_principal text, OUT o_content_sha256 text, OUT o_rows jsonb, OUT o_summary jsonb, OUT o_response_rows jsonb, OUT o_expires_at timestamp with time zone) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: complete_curation_import_plan_command(uuid, bigint, uuid, jsonb, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.complete_curation_import_plan_command(IN p_import_plan_id uuid, IN p_command_id bigint, IN p_import_batch_id uuid, IN p_result_payload jsonb, IN p_principal text)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops'
+    AS $$
+DECLARE
+  v_batch feature.curation_import_batches%ROWTYPE;
+BEGIN
+  IF jsonb_typeof(p_result_payload) <> 'object' THEN
+    RAISE EXCEPTION 'curation import terminal result must be an object'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_plan_result';
+  END IF;
+  PERFORM 1 FROM ops.domain_commands AS command
+  WHERE command.command_id = p_command_id
+    AND command.actor = p_principal
+    AND command.operation = 'admin.curation.import'
+    AND NOT EXISTS (
+      SELECT 1 FROM ops.domain_command_results AS result
+      WHERE result.command_id = command.command_id
+    ) FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'domain command does not match active curation import commit'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_plan_commit_command';
+  END IF;
+  SELECT batch.* INTO STRICT v_batch
+  FROM feature.curation_import_batches AS batch
+  JOIN ops.curation_import_plan_claims AS claim
+    ON claim.command_id = batch.command_id
+  JOIN feature.curation_import_plans AS plan
+    ON plan.import_plan_id = claim.import_plan_id
+  WHERE batch.import_batch_id = p_import_batch_id
+    AND batch.command_id = p_command_id
+    AND claim.import_plan_id = p_import_plan_id
+    AND batch.content_sha256 = plan.content_sha256;
+  INSERT INTO ops.curation_import_plan_commits (
+    import_plan_id, command_id, import_batch_id, result_payload
+  ) VALUES (
+    p_import_plan_id, p_command_id, p_import_batch_id,
+    p_result_payload || jsonb_build_object(
+      'db_receipt', jsonb_build_object(
+        'import_batch_id', v_batch.import_batch_id,
+        'command_id', v_batch.command_id,
+        'content_sha256', v_batch.content_sha256,
+        'row_count', v_batch.row_count
+      )
+    )
+  );
+END
+$$;
+
+
+ALTER PROCEDURE feature.complete_curation_import_plan_command(IN p_import_plan_id uuid, IN p_command_id bigint, IN p_import_batch_id uuid, IN p_result_payload jsonb, IN p_principal text) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: create_admin_manual_feature_with_initial_state(jsonb, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_manual_feature_procedure_owner
+--
+
+CREATE PROCEDURE feature.create_admin_manual_feature_with_initial_state(IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_existing_feature_uuid uuid)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+    v_command ops.domain_commands%ROWTYPE;
+    v_feature_id text;
+    v_feature_uuid uuid;
+    v_feature_kind text;
+    v_name text;
+    v_lon numeric;
+    v_lat numeric;
+    v_key record;
+    v_claimed_feature_uuid uuid;
+    v_created_feature_id text;
+    v_created_feature_uuid uuid;
+    v_created_row_revision bigint;
+    v_created boolean;
+BEGIN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'manual Feature writer requires READ COMMITTED'
+            USING ERRCODE = '25001', CONSTRAINT = 'ck_manual_feature_create_isolation';
+    END IF;
+    IF session_user <> 'ktm_feature_api_runtime'
+       OR NOT pg_has_role(session_user, 'ktm_manual_feature_admin_executor', 'member')
+       OR pg_has_role(session_user, 'ktm_feature_create_provider_executor', 'member') THEN
+        RAISE EXCEPTION 'manual Feature writer requires the API-only executor'
+            USING ERRCODE = '42501', CONSTRAINT = 'ck_manual_feature_create_executor';
+    END IF;
+    IF p_domain_command_id IS NULL OR p_domain_command_id < 1 THEN
+        RAISE EXCEPTION 'manual Feature domain command is invalid'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_create_command';
+    END IF;
+    SELECT command.* INTO v_command
+    FROM ops.domain_commands AS command
+    WHERE command.command_id = p_domain_command_id
+    FOR UPDATE;
+    IF NOT FOUND
+       OR v_command.operation <> 'admin.feature.create.manual-v1'
+       OR btrim(v_command.actor) = ''
+       OR EXISTS (
+           SELECT 1 FROM ops.domain_command_results AS result
+           WHERE result.command_id = p_domain_command_id
+       ) THEN
+        RAISE EXCEPTION 'manual Feature domain command does not match open writer'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_create_command';
+    END IF;
+    IF jsonb_typeof(p_feature_payload) IS DISTINCT FROM 'object'
+       OR EXISTS (
+           SELECT 1
+           FROM jsonb_object_keys(p_feature_payload) AS key_name(key_name)
+           WHERE key_name NOT IN (
+               'feature_id', 'feature_uuid', 'kind', 'name', 'category',
+               'lon', 'lat', 'coord_precision_digits', 'address',
+               'legal_dong_code', 'road_name_code', 'road_address_management_no',
+               'admin_dong_code', 'sido_code', 'sigungu_code', 'urls',
+               'marker_icon', 'marker_color', 'parent_feature_id', 'sibling_group_id',
+               'raw_refs'
+           )
+       )
+       OR jsonb_typeof(p_feature_payload -> 'feature_id') IS DISTINCT FROM 'string'
+       OR jsonb_typeof(p_feature_payload -> 'feature_uuid') IS DISTINCT FROM 'string'
+       OR jsonb_typeof(p_feature_payload -> 'kind') IS DISTINCT FROM 'string'
+       OR jsonb_typeof(p_feature_payload -> 'name') IS DISTINCT FROM 'string'
+       OR jsonb_typeof(p_feature_payload -> 'category') IS DISTINCT FROM 'string'
+       OR jsonb_typeof(p_feature_payload -> 'lon') IS DISTINCT FROM 'number'
+       OR jsonb_typeof(p_feature_payload -> 'lat') IS DISTINCT FROM 'number' THEN
+        RAISE EXCEPTION 'manual Feature payload is not canonical'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_create_payload';
+    END IF;
+    v_feature_id := nullif(btrim(p_feature_payload ->> 'feature_id'), '');
+    v_feature_kind := nullif(btrim(p_feature_payload ->> 'kind'), '');
+    v_name := nullif(btrim(p_feature_payload ->> 'name'), '');
+    IF v_feature_id IS NULL OR v_feature_kind IS NULL OR v_name IS NULL
+       OR nullif(btrim(p_feature_payload ->> 'category'), '') IS NULL THEN
+        RAISE EXCEPTION 'manual Feature payload lacks required core values'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_create_payload';
+    END IF;
+    BEGIN
+        v_feature_uuid := (p_feature_payload ->> 'feature_uuid')::uuid;
+        v_lon := (p_feature_payload ->> 'lon')::numeric;
+        v_lat := (p_feature_payload ->> 'lat')::numeric;
+    EXCEPTION WHEN invalid_text_representation OR numeric_value_out_of_range THEN
+        RAISE EXCEPTION 'manual Feature payload has invalid identity values'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_identity_coord_rounding';
+    END;
+    IF substring(v_feature_uuid::text FROM 15 FOR 1) <> '7' THEN
+        RAISE EXCEPTION 'manual Feature UUID must be UUIDv7'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_create_core_identity';
+    END IF;
+    SELECT * INTO v_key
+    FROM feature.manual_feature_identity_key(v_feature_kind, v_name, v_lon, v_lat);
+
+    INSERT INTO feature.manual_feature_identity_claims (
+        feature_id, feature_kind, name_key, lon_e6, lat_e6,
+        claimed_by_command_id, claim_basis, claimed_at
+    ) VALUES (
+        v_feature_uuid, v_key.feature_kind, v_key.name_key, v_key.lon_e6, v_key.lat_e6,
+        p_domain_command_id, 'manual_create', clock_timestamp()
+    ) ON CONFLICT ON CONSTRAINT uq_manual_feature_identity_claims_exact DO NOTHING
+    RETURNING feature_id INTO v_claimed_feature_uuid;
+
+    IF v_claimed_feature_uuid IS NULL THEN
+        SELECT claim.feature_id INTO o_existing_feature_uuid
+        FROM feature.manual_feature_identity_claims AS claim
+        WHERE (claim.feature_kind, claim.name_key, claim.lon_e6, claim.lat_e6)
+            = (v_key.feature_kind, v_key.name_key, v_key.lon_e6, v_key.lat_e6);
+        IF o_existing_feature_uuid IS NULL THEN
+            RAISE EXCEPTION 'manual Feature exact winner disappeared'
+                USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_create_core_identity';
+        END IF;
+        o_outcome := 'exact_conflict';
+        RETURN;
+    END IF;
+
+    CALL feature.create_feature_with_initial_state(
+        p_feature_payload,
+        'active',
+        'published',
+        'valid',
+        jsonb_build_object(
+            'transition_kind', 'initial',
+            'reason_code', 'admin_feature_create',
+            'principal', v_command.actor,
+            'causation_ref', 'domain-command:' || p_domain_command_id::text
+        ),
+        v_created_feature_id,
+        v_created_feature_uuid,
+        v_created_row_revision,
+        v_created
+    );
+    IF v_created IS DISTINCT FROM true
+       OR v_created_feature_id IS DISTINCT FROM v_feature_id
+       OR v_created_feature_uuid IS DISTINCT FROM v_feature_uuid
+       OR v_created_row_revision IS NULL OR v_created_row_revision < 1 THEN
+        RAISE EXCEPTION 'manual Feature core result does not match identity claim'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_create_core_identity';
+    END IF;
+    INSERT INTO feature.feature_creation_origins (
+        feature_id, origin_kind, creation_command_id, creator_principal_id,
+        created_by_actor, created_at, invoker_role, procedure_definer
+    ) VALUES (
+        v_feature_uuid,
+        'manual_admin',
+        p_domain_command_id,
+        'admin-ui-bff.manual-feature-create.v1',
+        v_command.actor,
+        clock_timestamp(),
+        session_user,
+        current_user
+    );
+    o_outcome := 'created';
+    o_feature_id := v_created_feature_id;
+    o_feature_uuid := v_created_feature_uuid;
+    o_row_revision := v_created_row_revision;
+END
+$$;
+
+
+ALTER PROCEDURE feature.create_admin_manual_feature_with_initial_state(IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_existing_feature_uuid uuid) OWNER TO ktm_manual_feature_procedure_owner;
+
+--
+-- Name: create_curated_source_command(bigint, text, text, text, text, text, text, text, jsonb, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.create_curated_source_command(IN p_provider_dataset_id bigint, IN p_source_name text, IN p_source_url text, IN p_source_kind text, IN p_license text, IN p_update_cycle text, IN p_freshness_note text, IN p_provider_status text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_source_id uuid, OUT o_source_revision bigint, OUT o_observation_revision bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops'
+    AS $$
+DECLARE
+  v_command ops.domain_commands%ROWTYPE;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'source command requires SERIALIZABLE transaction' USING ERRCODE = '25001';
+  END IF;
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    RAISE EXCEPTION 'source command requires the admin executor' USING ERRCODE = '42501';
+  END IF;
+  IF p_provider_dataset_id IS NULL OR p_provider_dataset_id <= 0
+     OR p_principal IS NULL OR p_principal <> btrim(p_principal) OR p_principal = ''
+     OR p_source_name IS NULL OR p_source_name <> btrim(p_source_name) OR p_source_name = ''
+     OR p_source_kind NOT IN ('openapi','filedata','standard','internal','manual')
+     OR p_update_cycle NOT IN ('realtime','daily','weekly','monthly','annual','one_time','unknown')
+     OR p_provider_status NOT IN ('implemented','provider_needed','manual_only','deprecated')
+     OR jsonb_typeof(p_metadata) <> 'object' THEN
+    RAISE EXCEPTION 'source command input is not canonical'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_source_command_input';
+  END IF;
+  SELECT command.* INTO STRICT v_command
+  FROM ops.domain_commands AS command WHERE command.command_id = p_command_id;
+  IF v_command.actor <> p_principal OR v_command.operation <> 'admin.curated-source.create' THEN
+    RAISE EXCEPTION 'domain command does not match source create'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_source_domain_command';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
+  INSERT INTO feature.curated_sources (
+    provider_dataset_id, source_name, source_url, source_kind, license,
+    update_cycle, freshness_note, provider_status, metadata,
+    row_revision, observation_revision, updated_at
+  ) VALUES (
+    p_provider_dataset_id, p_source_name, p_source_url, p_source_kind, p_license,
+    p_update_cycle, p_freshness_note, p_provider_status, p_metadata,
+    1, 1, clock_timestamp()
+  ) RETURNING source_id, row_revision, observation_revision
+    INTO STRICT o_source_id, o_source_revision, o_observation_revision;
+  PERFORM feature.claim_curation_catalog_command_effect(
+    p_command_id, v_command.operation, 'source', o_source_id
+  );
+END
+$$;
+
+
+ALTER PROCEDURE feature.create_curated_source_command(IN p_provider_dataset_id bigint, IN p_source_name text, IN p_source_url text, IN p_source_kind text, IN p_license text, IN p_update_cycle text, IN p_freshness_note text, IN p_provider_status text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_source_id uuid, OUT o_source_revision bigint, OUT o_observation_revision bigint) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: create_curated_source_rule_command(uuid, uuid, text, text, jsonb, jsonb, text, integer, boolean, jsonb, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.create_curated_source_rule_command(IN p_theme_id uuid, IN p_source_id uuid, IN p_place_kind text, IN p_category text, IN p_region_scope jsonb, IN p_detail_selector jsonb, IN p_default_action text, IN p_priority integer, IN p_enabled boolean, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_rule_id uuid, OUT o_rule_revision bigint, OUT o_generation_id uuid)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
+    AS $$
+DECLARE
+  v_command ops.domain_commands%ROWTYPE;
+  v_provider_dataset_id bigint;
+  v_prelock_count bigint;
+  v_prelock_hash text;
+  v_current_count bigint;
+  v_current_hash text;
+  v_rule_input jsonb;
+  v_rule_input_hash text;
+  v_operation_id uuid;
+  v_observed bigint;
+  v_removed bigint;
+  v_set_hash text;
+  v_replayed boolean;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'rule command requires SERIALIZABLE transaction'
+      USING ERRCODE = '25001';
+  END IF;
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    RAISE EXCEPTION 'rule command requires the admin executor'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_principal IS NULL OR p_principal <> btrim(p_principal) OR p_principal = ''
+     OR p_default_action NOT IN ('candidate','ignore')
+     OR jsonb_typeof(p_region_scope) <> 'object'
+     OR (p_detail_selector IS NOT NULL AND jsonb_typeof(p_detail_selector) <> 'object')
+     OR jsonb_typeof(p_metadata) <> 'object' THEN
+    RAISE EXCEPTION 'rule command input is not canonical'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_rule_command_input';
+  END IF;
+  SELECT command.* INTO STRICT v_command
+  FROM ops.domain_commands AS command WHERE command.command_id = p_command_id;
+  IF v_command.actor <> p_principal
+     OR v_command.operation <> 'admin.curated-source-rule.create' THEN
+    RAISE EXCEPTION 'domain command does not match rule create'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_rule_domain_command';
+  END IF;
+
+  SELECT source.provider_dataset_id INTO STRICT v_provider_dataset_id
+  FROM feature.curated_sources AS source WHERE source.source_id = p_source_id;
+  SELECT count(*), encode(x_extension.digest(convert_to(
+    COALESCE(jsonb_agg(link.feature_id ORDER BY link.feature_id)::text, '[]'),
+    'UTF8'), 'sha256'), 'hex')
+  INTO STRICT v_prelock_count, v_prelock_hash
+  FROM provider_sync.source_entities AS entity
+  JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
+  WHERE entity.provider_dataset_id = v_provider_dataset_id;
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || link.feature_id, 0))
+  FROM provider_sync.source_entities AS entity
+  JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
+  WHERE entity.provider_dataset_id = v_provider_dataset_id
+  ORDER BY link.feature_id;
+  PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
+
+  PERFORM 1 FROM feature.curated_themes AS theme
+  WHERE theme.theme_id = p_theme_id AND theme.archived_at IS NULL FOR SHARE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'theme is missing or archived'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_rule_theme_active';
+  END IF;
+  PERFORM 1 FROM feature.curated_sources AS source
+  WHERE source.source_id = p_source_id
+    AND source.provider_dataset_id = v_provider_dataset_id
+    AND source.archived_at IS NULL FOR SHARE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'source is missing, moved, or archived'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_rule_source_active';
+  END IF;
+  SELECT count(*), encode(x_extension.digest(convert_to(
+    COALESCE(jsonb_agg(link.feature_id ORDER BY link.feature_id)::text, '[]'),
+    'UTF8'), 'sha256'), 'hex')
+  INTO STRICT v_current_count, v_current_hash
+  FROM provider_sync.source_entities AS entity
+  JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
+  WHERE entity.provider_dataset_id = v_provider_dataset_id;
+  IF v_current_count <> v_prelock_count OR v_current_hash <> v_prelock_hash THEN
+    RAISE EXCEPTION 'rule create scope changed while acquiring the catalog lock'
+      USING ERRCODE = '40001';
+  END IF;
+
+  INSERT INTO feature.curated_source_rules (
+    theme_id, source_id, place_kind, category, region_scope, detail_selector,
+    default_action, priority, enabled, metadata, row_revision, owner_kind,
+    owner_provider_dataset_id, updated_at
+  ) VALUES (
+    p_theme_id, p_source_id, p_place_kind, p_category, p_region_scope,
+    p_detail_selector, p_default_action, p_priority, p_enabled, p_metadata,
+    1, 'operator', NULL, clock_timestamp()
+  ) RETURNING rule_id, row_revision INTO STRICT o_rule_id, o_rule_revision;
+  PERFORM feature.claim_curation_catalog_command_effect(
+    p_command_id, v_command.operation, 'rule', o_rule_id
+  );
+  v_rule_input := feature.current_curation_rule_input(o_rule_id);
+  v_rule_input_hash := encode(
+    x_extension.digest(convert_to(v_rule_input::text, 'UTF8'), 'sha256'), 'hex'
+  );
+  v_operation_id := feature.create_curation_rule_reconcile_receipt(
+    o_rule_id, 'create', NULL, o_rule_revision, NULL, v_rule_input_hash,
+    p_command_id, p_principal
+  );
+  CALL feature.materialize_theme_candidate_generation(
+    o_rule_id, 'rule_reconcile', NULL, v_operation_id, p_command_id, NULL,
+    jsonb_build_object('schema_version', 1, 'catalog_action', 'create'),
+    o_generation_id, v_observed, v_removed, v_set_hash, v_replayed
+  );
+END
+$$;
+
+
+ALTER PROCEDURE feature.create_curated_source_rule_command(IN p_theme_id uuid, IN p_source_id uuid, IN p_place_kind text, IN p_category text, IN p_region_scope jsonb, IN p_detail_selector jsonb, IN p_default_action text, IN p_priority integer, IN p_enabled boolean, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_rule_id uuid, OUT o_rule_revision bigint, OUT o_generation_id uuid) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: create_curated_theme_command(text, text, text, text, text, jsonb, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.create_curated_theme_command(IN p_theme_slug text, IN p_theme_name text, IN p_theme_description text, IN p_theme_group text, IN p_visibility text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_theme_id uuid, OUT o_theme_revision bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
+    AS $$
+DECLARE
+  v_command ops.domain_commands%ROWTYPE;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'theme command requires SERIALIZABLE transaction'
+      USING ERRCODE = '25001';
+  END IF;
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    RAISE EXCEPTION 'theme command requires the admin executor'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_principal IS NULL OR p_principal <> btrim(p_principal) OR p_principal = ''
+     OR p_theme_slug IS NULL OR p_theme_slug <> btrim(p_theme_slug) OR p_theme_slug = ''
+     OR p_theme_name IS NULL OR p_theme_name <> btrim(p_theme_name) OR p_theme_name = ''
+     OR p_theme_description IS NULL
+     OR p_theme_group IS NULL OR p_theme_group <> btrim(p_theme_group) OR p_theme_group = ''
+     OR p_visibility NOT IN ('admin_only','public')
+     OR jsonb_typeof(p_metadata) <> 'object' THEN
+    RAISE EXCEPTION 'theme command input is not canonical'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_theme_command_input';
+  END IF;
+  SELECT command.* INTO STRICT v_command
+  FROM ops.domain_commands AS command WHERE command.command_id = p_command_id;
+  IF v_command.actor <> p_principal
+     OR v_command.operation <> 'admin.curated-theme.create' THEN
+    RAISE EXCEPTION 'domain command does not match theme create'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_theme_domain_command';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
+  INSERT INTO feature.curated_themes (
+    theme_slug, theme_name, theme_description, theme_group, default_curated,
+    visibility, metadata, row_revision, owner_kind, owner_provider_dataset_id,
+    updated_at
+  ) VALUES (
+    p_theme_slug, p_theme_name, p_theme_description, p_theme_group, false,
+    p_visibility, p_metadata, 1, 'operator', NULL, clock_timestamp()
+  ) RETURNING theme_id, row_revision INTO STRICT o_theme_id, o_theme_revision;
+  PERFORM feature.claim_curation_catalog_command_effect(
+    p_command_id, v_command.operation, 'theme', o_theme_id
+  );
+END
+$$;
+
+
+ALTER PROCEDURE feature.create_curated_theme_command(IN p_theme_slug text, IN p_theme_name text, IN p_theme_description text, IN p_theme_group text, IN p_visibility text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_theme_id uuid, OUT o_theme_revision bigint) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: create_curation_collection_command(text, uuid, uuid, text, text, text, text, text, jsonb, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.create_curation_collection_command(IN p_collection_key text, IN p_theme_id uuid, IN p_source_id uuid, IN p_title text, IN p_edition_key text, IN p_description text, IN p_status text, IN p_visibility text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_collection_id uuid, OUT o_collection_revision bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
+    AS $$
+DECLARE
+  v_command ops.domain_commands%ROWTYPE;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'collection command requires SERIALIZABLE transaction'
+      USING ERRCODE = '25001';
+  END IF;
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    RAISE EXCEPTION 'collection command requires the admin executor'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_principal IS NULL OR p_principal <> btrim(p_principal) OR p_principal = ''
+     OR p_collection_key IS NULL OR p_collection_key <> btrim(p_collection_key)
+     OR p_collection_key = ''
+     OR p_theme_id IS NULL
+     OR p_title IS NULL OR p_title <> btrim(p_title) OR p_title = ''
+     OR p_edition_key IS NULL OR p_edition_key <> btrim(p_edition_key)
+     OR p_status NOT IN ('draft','published')
+     OR p_visibility NOT IN ('admin_only','public')
+     OR jsonb_typeof(p_metadata) <> 'object' THEN
+    RAISE EXCEPTION 'collection command input is not canonical'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_collection_command_input';
+  END IF;
+  SELECT command.* INTO STRICT v_command
+  FROM ops.domain_commands AS command WHERE command.command_id = p_command_id;
+  IF v_command.actor <> p_principal
+     OR v_command.operation <> 'admin.curation-collection.create' THEN
+    RAISE EXCEPTION 'domain command does not match collection create'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_collection_domain_command';
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0));
+  PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
+  PERFORM pg_advisory_xact_lock(hashtextextended('curation-collection:' || p_collection_key, 0));
+  PERFORM 1 FROM feature.curated_themes AS theme
+  WHERE theme.theme_id = p_theme_id AND theme.archived_at IS NULL FOR SHARE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'active curated theme does not exist'
+      USING ERRCODE = '23503', CONSTRAINT = 'fk_tvn40_collection_active_theme';
+  END IF;
+  IF p_source_id IS NOT NULL THEN
+    PERFORM 1 FROM feature.curated_sources AS source
+    WHERE source.source_id = p_source_id AND source.archived_at IS NULL FOR SHARE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'active curated source does not exist'
+        USING ERRCODE = '23503', CONSTRAINT = 'fk_tvn40_collection_active_source';
+    END IF;
+  END IF;
+
+  o_collection_id := x_extension.gen_random_uuid();
+  PERFORM feature.claim_curation_catalog_command_effect(
+    p_command_id, v_command.operation, 'collection', o_collection_id
+  );
+  INSERT INTO feature.curation_collections (
+    collection_id, collection_key, theme_id, source_id, title, edition_key,
+    description, status, visibility, metadata, created_by, updated_by,
+    row_revision, updated_at, archived_at
+  ) VALUES (
+    o_collection_id, p_collection_key, p_theme_id, p_source_id, p_title,
+    p_edition_key, p_description, p_status, p_visibility, p_metadata,
+    p_principal, p_principal, 1, clock_timestamp(), NULL
+  ) RETURNING row_revision INTO STRICT o_collection_revision;
+END
+$$;
+
+
+ALTER PROCEDURE feature.create_curation_collection_command(IN p_collection_key text, IN p_theme_id uuid, IN p_source_id uuid, IN p_title text, IN p_edition_key text, IN p_description text, IN p_status text, IN p_visibility text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_collection_id uuid, OUT o_collection_revision bigint) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: create_curation_import_plan_command(uuid, text, text, text, jsonb, jsonb, jsonb, timestamp with time zone, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.create_curation_import_plan_command(IN p_import_plan_id uuid, IN p_content_sha256 text, IN p_provenance_sha256 text, IN p_plan_sha256 text, IN p_summary jsonb, IN p_rows jsonb, IN p_revisions jsonb, IN p_expires_at timestamp with time zone, IN p_command_id bigint, IN p_principal text)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops'
+    AS $_$
+DECLARE
+  v_command ops.domain_commands%ROWTYPE;
+  v_row_count integer;
+  v_revision_count integer;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'curation import preview requires SERIALIZABLE transaction'
+      USING ERRCODE = '25001';
+  END IF;
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    RAISE EXCEPTION 'curation import preview requires the admin executor'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_import_plan_id IS NULL OR p_principal IS NULL
+     OR p_principal <> btrim(p_principal) OR p_principal = ''
+     OR p_content_sha256 !~ '^[0-9a-f]{64}$'
+     OR (p_provenance_sha256 IS NOT NULL AND p_provenance_sha256 !~ '^[0-9a-f]{64}$')
+     OR p_plan_sha256 !~ '^[0-9a-f]{64}$'
+     OR jsonb_typeof(p_summary) <> 'object'
+     OR jsonb_typeof(p_rows) <> 'array'
+     OR jsonb_typeof(p_revisions) <> 'array'
+     OR p_expires_at <= clock_timestamp() THEN
+    RAISE EXCEPTION 'curation import preview input is not canonical'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_plan_input';
+  END IF;
+  SELECT command.* INTO STRICT v_command
+  FROM ops.domain_commands AS command WHERE command.command_id = p_command_id
+  FOR UPDATE;
+  IF v_command.actor <> p_principal
+     OR v_command.operation <> 'admin.curation-import.preview'
+     OR EXISTS (
+       SELECT 1 FROM ops.domain_command_results AS result
+       WHERE result.command_id = p_command_id
+     ) THEN
+    RAISE EXCEPTION 'domain command does not match active curation import preview'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_plan_domain_command';
+  END IF;
+  SELECT count(*)::integer INTO STRICT v_row_count
+  FROM jsonb_array_elements(p_rows);
+  SELECT count(*)::integer INTO STRICT v_revision_count
+  FROM jsonb_array_elements(p_revisions);
+  INSERT INTO feature.curation_import_plans (
+    import_plan_id, preview_command_id, actor, content_sha256,
+    provenance_sha256, plan_sha256, summary, row_count, revision_count,
+    expires_at
+  ) VALUES (
+    p_import_plan_id, p_command_id, p_principal, p_content_sha256,
+    p_provenance_sha256, p_plan_sha256, p_summary, v_row_count,
+    v_revision_count, p_expires_at
+  );
+  INSERT INTO feature.curation_import_plan_rows (
+    import_plan_id, row_number, normalized_payload, response_payload
+  )
+  SELECT p_import_plan_id, value.row_number, value.normalized_payload,
+         value.response_payload
+  FROM jsonb_to_recordset(p_rows) AS value(
+    row_number integer, normalized_payload jsonb, response_payload jsonb
+  );
+  INSERT INTO feature.curation_import_plan_revisions (
+    import_plan_id, resource_kind, resource_key, expected_revision
+  )
+  SELECT p_import_plan_id, value.resource_kind, value.resource_key,
+         value.expected_revision
+  FROM jsonb_to_recordset(p_revisions) AS value(
+    resource_kind text, resource_key text, expected_revision bigint
+  );
+  IF (SELECT count(*) FROM feature.curation_import_plan_rows AS row
+      WHERE row.import_plan_id = p_import_plan_id) <> v_row_count
+     OR (SELECT count(*) FROM feature.curation_import_plan_revisions AS revision
+         WHERE revision.import_plan_id = p_import_plan_id) <> v_revision_count THEN
+    RAISE EXCEPTION 'curation import plan rows or revision vector are not unique'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_plan_unique_set';
+  END IF;
+END
+$_$;
+
+
+ALTER PROCEDURE feature.create_curation_import_plan_command(IN p_import_plan_id uuid, IN p_content_sha256 text, IN p_provenance_sha256 text, IN p_plan_sha256 text, IN p_summary jsonb, IN p_rows jsonb, IN p_revisions jsonb, IN p_expires_at timestamp with time zone, IN p_command_id bigint, IN p_principal text) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: create_curation_item_command(uuid, text, text, text, text, text, text, text, integer, text, text, text, text, jsonb, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.create_curation_item_command(IN p_collection_id uuid, IN p_feature_id text, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
+    AS $$
+DECLARE
+  v_command ops.domain_commands%ROWTYPE;
+  v_collection feature.curation_collections%ROWTYPE;
+  v_feature_name text;
+  v_place_name text;
+  v_decision_id uuid;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'item command requires SERIALIZABLE transaction'
+      USING ERRCODE = '25001';
+  END IF;
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    RAISE EXCEPTION 'item command requires the admin executor'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_principal IS NULL OR p_principal <> btrim(p_principal) OR p_principal = ''
+     OR p_collection_id IS NULL
+     OR p_external_item_id IS NULL
+     OR p_external_item_id <> btrim(p_external_item_id)
+     OR p_external_item_id = ''
+     OR p_external_component_id IS NULL
+     OR p_external_component_id <> btrim(p_external_component_id)
+     OR p_external_component_id = ''
+     OR p_address_hint IS DISTINCT FROM NULLIF(btrim(p_address_hint), '')
+     OR p_status NOT IN ('candidate','included','rejected')
+     OR p_sort_order IS NULL OR p_sort_order < 0
+     OR p_curation_relation NOT IN (
+       'primary_stop','food_stop','cafe_stop','bookstore_stop','nearby_option',
+       'accessibility_support','pet_support','family_support','theme_area_anchor'
+     )
+     OR p_reuse_policy NOT IN ('allowed','blocked','manual_review')
+     OR jsonb_typeof(p_metadata) <> 'object' THEN
+    RAISE EXCEPTION 'item command input is not canonical'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_item_command_input';
+  END IF;
+  SELECT command.* INTO STRICT v_command
+  FROM ops.domain_commands AS command WHERE command.command_id = p_command_id;
+  IF v_command.actor <> p_principal
+     OR v_command.operation <> 'admin.curation-item.create' THEN
+    RAISE EXCEPTION 'domain command does not match item create'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_item_domain_command';
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0));
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write', 0));
+  IF p_feature_id IS NOT NULL THEN
+    PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || p_feature_id, 0));
+  END IF;
+  SELECT collection.* INTO STRICT v_collection
+  FROM feature.curation_collections AS collection
+  WHERE collection.collection_id = p_collection_id FOR UPDATE;
+  IF v_collection.archived_at IS NOT NULL OR v_collection.status = 'archived' THEN
+    RAISE EXCEPTION 'target curation collection is archived'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_item_collection_active';
+  END IF;
+  IF p_feature_id IS NOT NULL THEN
+    SELECT feature.name INTO v_feature_name
+    FROM feature.features AS feature
+    WHERE feature.feature_id = p_feature_id
+      AND feature.lifecycle_state = 'active'
+      AND feature.publication_state <> 'suppressed'
+    FOR SHARE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'feature_id must reference an active Feature'
+        USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_item_active_feature';
+    END IF;
+  END IF;
+  v_place_name := NULLIF(btrim(p_place_name), '');
+  IF v_place_name IS NULL THEN
+    v_place_name := v_feature_name;
+  END IF;
+  IF v_place_name IS NULL THEN
+    RAISE EXCEPTION 'place_name or active feature is required'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_item_place_name';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM feature.curation_items AS item
+    WHERE item.collection_id = p_collection_id
+      AND item.external_item_id = p_external_item_id
+      AND item.external_component_id = p_external_component_id
+  ) THEN
+    RAISE EXCEPTION 'curation item identity already exists'
+      USING ERRCODE = '23505', CONSTRAINT = 'uq_curation_items_component_identity';
+  END IF;
+  IF p_feature_id IS NOT NULL AND EXISTS (
+    SELECT 1 FROM feature.curation_items AS item
+    WHERE item.collection_id = p_collection_id
+      AND item.external_item_id = p_external_item_id
+      AND item.feature_id = p_feature_id
+      AND item.source_present AND item.archived_at IS NULL
+  ) THEN
+    RAISE EXCEPTION 'active source feature identity already exists'
+      USING ERRCODE = '23505', CONSTRAINT = 'uq_curation_items_active_source_feature';
+  END IF;
+
+  o_curation_item_id := x_extension.gen_random_uuid();
+  PERFORM feature.claim_curation_catalog_command_effect(
+    p_command_id, v_command.operation, 'item', o_curation_item_id
+  );
+  INSERT INTO feature.curation_items (
+    curation_item_id, collection_id, feature_id, source_record_key,
+    external_item_id, external_component_id, place_name, address_hint,
+    source_present, source_updated_at, status, sort_order, item_title,
+    item_summary, curation_relation, reuse_policy, metadata, created_by,
+    updated_by, operator_updated_by, operator_updated_at, row_revision,
+    updated_at, archived_at
+  ) VALUES (
+    o_curation_item_id, p_collection_id, p_feature_id, p_source_record_key,
+    p_external_item_id, p_external_component_id, v_place_name, p_address_hint,
+    true, clock_timestamp(), p_status, p_sort_order, p_item_title,
+    p_item_summary, p_curation_relation, p_reuse_policy, p_metadata, p_principal,
+    p_principal, p_principal, clock_timestamp(), 1, clock_timestamp(), NULL
+  ) RETURNING row_revision INTO STRICT o_item_revision;
+  IF p_feature_id IS NOT NULL THEN
+    INSERT INTO feature.curation_link_decisions (
+      curation_item_id, feature_id, decision_kind, match_basis,
+      resolver_version, evidence, actor
+    ) VALUES (
+      o_curation_item_id, p_feature_id, 'accepted', 'admin_review',
+      'manual-admin-v1', jsonb_build_object(
+        'operation', 'create_curation_item_command',
+        'requested_feature_id', p_feature_id,
+        'command_id', p_command_id
+      ), p_principal
+    ) RETURNING decision_id INTO STRICT v_decision_id;
+    UPDATE feature.curation_items AS item
+    SET accepted_link_decision_id = v_decision_id
+    WHERE item.curation_item_id = o_curation_item_id;
+  END IF;
+  UPDATE feature.curation_collections AS collection
+  SET updated_by = p_principal, updated_at = clock_timestamp(),
+      row_revision = collection.row_revision + 1
+  WHERE collection.collection_id = p_collection_id
+  RETURNING collection.row_revision INTO STRICT o_collection_revision;
+END
+$$;
+
+
+ALTER PROCEDURE feature.create_curation_item_command(IN p_collection_id uuid, IN p_feature_id text, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: create_curation_rule_reconcile_receipt(uuid, text, bigint, bigint, text, text, bigint, text); Type: FUNCTION; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE FUNCTION feature.create_curation_rule_reconcile_receipt(p_rule_id uuid, p_operation_kind text, p_before_rule_revision bigint, p_after_rule_revision bigint, p_before_rule_input_hash text, p_after_rule_input_hash text, p_command_id bigint, p_actor text) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
+    AS $$
+DECLARE
+  v_operation_id uuid := x_extension.gen_random_uuid();
+  v_provider_dataset_id bigint;
+  v_scope_member_count bigint;
+  v_scope_members_hash text;
+BEGIN
+  SELECT source.provider_dataset_id INTO STRICT v_provider_dataset_id
+  FROM feature.curated_source_rules AS rule
+  JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
+  WHERE rule.rule_id = p_rule_id;
+
+  WITH scope AS (
+    SELECT 'source_entity'::text AS member_kind,
+           entity.source_entity_key AS member_key,
+           encode(x_extension.digest(convert_to(jsonb_build_array(
+             entity.source_entity_key, head.current_source_record_key
+           )::text, 'UTF8'), 'sha256'), 'hex') AS identity_hash
+    FROM provider_sync.source_entities AS entity
+    LEFT JOIN provider_sync.source_entity_heads AS head
+      ON head.source_entity_key = entity.source_entity_key
+    WHERE entity.provider_dataset_id = v_provider_dataset_id
+    UNION
+    SELECT 'feature'::text, link.feature_id,
+           encode(x_extension.digest(convert_to(jsonb_build_array(
+             link.feature_id, core.feature_uuid::text, core.row_revision,
+             core.lifecycle_state, core.publication_state, core.quality_state
+           )::text, 'UTF8'), 'sha256'), 'hex')
+    FROM provider_sync.source_entities AS entity
+    JOIN provider_sync.source_links AS link
+      ON link.source_entity_key = entity.source_entity_key
+    JOIN feature.features AS core ON core.feature_id = link.feature_id
+    WHERE entity.provider_dataset_id = v_provider_dataset_id
+  ), framed AS (
+    SELECT member_kind, member_key,
+           CASE WHEN p_operation_kind = 'create' THEN NULL ELSE identity_hash END
+             AS before_identity_hash,
+           identity_hash AS after_identity_hash
+    FROM scope
+  )
+  SELECT count(*), encode(
+    x_extension.digest(
+      COALESCE(
+        string_agg(
+          convert_to(member_kind, 'UTF8') || decode('00', 'hex') ||
+          convert_to(member_key, 'UTF8') || decode('00', 'hex') ||
+          convert_to(COALESCE(before_identity_hash, ''), 'UTF8') || decode('00', 'hex') ||
+          convert_to(COALESCE(after_identity_hash, ''), 'UTF8') ||
+          convert_to(E'\n', 'UTF8'),
+          ''::bytea ORDER BY member_kind, member_key
+        ),
+        ''::bytea
+      ),
+      'sha256'
+    ),
+    'hex'
+  ) INTO STRICT v_scope_member_count, v_scope_members_hash
+  FROM framed;
+
+  INSERT INTO ops.curation_rule_reconcile_operations (
+    operation_id, rule_id, operation_kind,
+    before_rule_revision, after_rule_revision,
+    before_rule_input_hash, after_rule_input_hash,
+    command_id, system_operation_key, actor,
+    scope_member_count, scope_members_hash
+  ) VALUES (
+    v_operation_id, p_rule_id, p_operation_kind,
+    p_before_rule_revision, p_after_rule_revision,
+    p_before_rule_input_hash, p_after_rule_input_hash,
+    p_command_id, NULL, p_actor,
+    v_scope_member_count, v_scope_members_hash
+  );
+
+  INSERT INTO ops.curation_rule_reconcile_scope_members (
+    operation_id, member_kind, member_key,
+    before_identity_hash, after_identity_hash
+  )
+  SELECT v_operation_id, scope.member_kind, scope.member_key,
+         CASE WHEN p_operation_kind = 'create' THEN NULL ELSE scope.identity_hash END,
+         scope.identity_hash
+  FROM (
+    SELECT 'source_entity'::text AS member_kind,
+           entity.source_entity_key AS member_key,
+           encode(x_extension.digest(convert_to(jsonb_build_array(
+             entity.source_entity_key, head.current_source_record_key
+           )::text, 'UTF8'), 'sha256'), 'hex') AS identity_hash
+    FROM provider_sync.source_entities AS entity
+    LEFT JOIN provider_sync.source_entity_heads AS head
+      ON head.source_entity_key = entity.source_entity_key
+    WHERE entity.provider_dataset_id = v_provider_dataset_id
+    UNION
+    SELECT 'feature'::text, link.feature_id,
+           encode(x_extension.digest(convert_to(jsonb_build_array(
+             link.feature_id, core.feature_uuid::text, core.row_revision,
+             core.lifecycle_state, core.publication_state, core.quality_state
+           )::text, 'UTF8'), 'sha256'), 'hex')
+    FROM provider_sync.source_entities AS entity
+    JOIN provider_sync.source_links AS link
+      ON link.source_entity_key = entity.source_entity_key
+    JOIN feature.features AS core ON core.feature_id = link.feature_id
+    WHERE entity.provider_dataset_id = v_provider_dataset_id
+  ) AS scope
+  ORDER BY scope.member_kind, scope.member_key;
+
+  RETURN v_operation_id;
+END
+$$;
+
+
+ALTER FUNCTION feature.create_curation_rule_reconcile_receipt(p_rule_id uuid, p_operation_kind text, p_before_rule_revision bigint, p_after_rule_revision bigint, p_before_rule_input_hash text, p_after_rule_input_hash text, p_command_id bigint, p_actor text) OWNER TO ktm_curation_command_owner;
+
+--
 -- Name: create_feature_with_initial_state(jsonb, text, text, text, jsonb); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
@@ -1354,6 +3696,579 @@ $$;
 
 
 ALTER PROCEDURE feature.create_feature_with_initial_state(IN p_feature jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_inserted boolean) OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: create_manual_curation_item_with_feature_command(jsonb, jsonb, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.create_manual_curation_item_with_feature_command(IN p_feature_payload jsonb, IN p_item_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_feature_row_revision bigint, OUT o_curation_item_id uuid, OUT o_item_row_revision bigint, OUT o_collection_row_revision bigint, OUT o_existing_feature_uuid uuid)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
+    AS $$
+DECLARE
+    v_command ops.domain_commands%ROWTYPE;
+    v_collection feature.curation_collections%ROWTYPE;
+    v_feature_id text;
+    v_feature_uuid uuid;
+    v_feature_kind text;
+    v_feature_name text;
+    v_lon numeric;
+    v_lat numeric;
+    v_key record;
+    v_claimed_feature_uuid uuid;
+    v_created_feature_id text;
+    v_created_feature_uuid uuid;
+    v_created_row_revision bigint;
+    v_created boolean;
+    v_collection_id uuid;
+    v_external_item_id text;
+    v_external_component_id text;
+    v_place_name text;
+    v_address_hint text;
+    v_status text;
+    v_sort_order integer;
+    v_item_title text;
+    v_item_summary text;
+    v_curation_relation text;
+    v_reuse_policy text;
+    v_metadata jsonb;
+    v_decision_id uuid;
+BEGIN
+    IF current_setting('transaction_isolation') <> 'serializable' THEN
+        RAISE EXCEPTION 'manual curation writer requires SERIALIZABLE'
+            USING ERRCODE = '25001', CONSTRAINT = 'ck_manual_curation_create_isolation';
+    END IF;
+    IF session_user <> 'ktm_feature_api_runtime'
+       OR NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+       OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+        RAISE EXCEPTION 'manual curation writer requires the admin executor'
+            USING ERRCODE = '42501', CONSTRAINT = 'ck_manual_curation_create_executor';
+    END IF;
+    IF p_domain_command_id IS NULL OR p_domain_command_id < 1 THEN
+        RAISE EXCEPTION 'manual curation domain command is invalid'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_curation_create_command';
+    END IF;
+    SELECT command.* INTO v_command
+    FROM ops.domain_commands AS command
+    WHERE command.command_id = p_domain_command_id
+    FOR UPDATE;
+    IF NOT FOUND
+       OR v_command.operation <> 'admin.curation-item.create.manual-feature-v1'
+       OR btrim(v_command.actor) = ''
+       OR EXISTS (
+           SELECT 1 FROM ops.domain_command_results AS result
+           WHERE result.command_id = p_domain_command_id
+       ) THEN
+        RAISE EXCEPTION 'manual curation domain command does not match open writer'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_curation_create_command';
+    END IF;
+    IF jsonb_typeof(p_feature_payload) IS DISTINCT FROM 'object'
+       OR EXISTS (
+           SELECT 1 FROM jsonb_object_keys(p_feature_payload) AS key_name(key_name)
+           WHERE key_name NOT IN (
+               'feature_id', 'feature_uuid', 'kind', 'name', 'category',
+               'lon', 'lat', 'coord_precision_digits', 'address',
+               'legal_dong_code', 'road_name_code', 'road_address_management_no',
+               'admin_dong_code', 'sido_code', 'sigungu_code', 'urls',
+               'marker_icon', 'marker_color', 'parent_feature_id', 'sibling_group_id',
+               'raw_refs'
+           )
+       )
+       OR jsonb_typeof(p_feature_payload -> 'feature_id') IS DISTINCT FROM 'string'
+       OR jsonb_typeof(p_feature_payload -> 'feature_uuid') IS DISTINCT FROM 'string'
+       OR jsonb_typeof(p_feature_payload -> 'kind') IS DISTINCT FROM 'string'
+       OR jsonb_typeof(p_feature_payload -> 'name') IS DISTINCT FROM 'string'
+       OR jsonb_typeof(p_feature_payload -> 'category') IS DISTINCT FROM 'string'
+       OR jsonb_typeof(p_feature_payload -> 'lon') IS DISTINCT FROM 'number'
+       OR jsonb_typeof(p_feature_payload -> 'lat') IS DISTINCT FROM 'number'
+       OR jsonb_typeof(p_item_payload) IS DISTINCT FROM 'object'
+       OR EXISTS (
+           SELECT 1 FROM jsonb_object_keys(p_item_payload) AS key_name(key_name)
+           WHERE key_name NOT IN (
+               'collection_id', 'external_item_id', 'external_component_id',
+               'place_name', 'address_hint', 'status', 'sort_order', 'item_title',
+               'item_summary', 'curation_relation', 'reuse_policy', 'metadata',
+               'source_record_key'
+           )
+       ) THEN
+        RAISE EXCEPTION 'manual curation payload is not canonical'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_curation_create_payload';
+    END IF;
+
+    v_feature_id := nullif(btrim(p_feature_payload ->> 'feature_id'), '');
+    v_feature_kind := nullif(btrim(p_feature_payload ->> 'kind'), '');
+    v_feature_name := nullif(btrim(p_feature_payload ->> 'name'), '');
+    IF v_feature_id IS NULL OR v_feature_kind IS NULL OR v_feature_name IS NULL
+       OR nullif(btrim(p_feature_payload ->> 'category'), '') IS NULL THEN
+        RAISE EXCEPTION 'manual curation Feature lacks required core values'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_curation_create_payload';
+    END IF;
+    BEGIN
+        v_feature_uuid := (p_feature_payload ->> 'feature_uuid')::uuid;
+        v_lon := (p_feature_payload ->> 'lon')::numeric;
+        v_lat := (p_feature_payload ->> 'lat')::numeric;
+        v_collection_id := (p_item_payload ->> 'collection_id')::uuid;
+        v_sort_order := (p_item_payload ->> 'sort_order')::integer;
+    EXCEPTION WHEN invalid_text_representation OR numeric_value_out_of_range THEN
+        RAISE EXCEPTION 'manual curation identity is invalid'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_curation_create_payload';
+    END;
+    IF substring(v_feature_uuid::text FROM 15 FOR 1) <> '7' THEN
+        RAISE EXCEPTION 'manual curation Feature UUID must be UUIDv7'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_create_core_identity';
+    END IF;
+    v_external_item_id := nullif(btrim(p_item_payload ->> 'external_item_id'), '');
+    v_external_component_id := nullif(btrim(p_item_payload ->> 'external_component_id'), '');
+    v_place_name := nullif(btrim(p_item_payload ->> 'place_name'), '');
+    v_address_hint := nullif(btrim(p_item_payload ->> 'address_hint'), '');
+    v_status := nullif(btrim(p_item_payload ->> 'status'), '');
+    v_item_title := nullif(btrim(p_item_payload ->> 'item_title'), '');
+    v_item_summary := nullif(btrim(p_item_payload ->> 'item_summary'), '');
+    v_curation_relation := nullif(btrim(p_item_payload ->> 'curation_relation'), '');
+    v_reuse_policy := nullif(btrim(p_item_payload ->> 'reuse_policy'), '');
+    v_metadata := p_item_payload -> 'metadata';
+    IF v_collection_id IS NULL
+       OR v_external_item_id IS NULL
+       OR v_external_component_id IS NULL
+       OR v_status NOT IN ('candidate', 'included', 'rejected')
+       OR v_sort_order IS NULL OR v_sort_order < 0
+       OR v_curation_relation NOT IN (
+           'primary_stop', 'food_stop', 'cafe_stop', 'bookstore_stop', 'nearby_option',
+           'accessibility_support', 'pet_support', 'family_support', 'theme_area_anchor'
+       )
+       OR v_reuse_policy NOT IN ('allowed', 'blocked', 'manual_review')
+       OR jsonb_typeof(v_metadata) IS DISTINCT FROM 'object'
+       OR (p_item_payload ? 'source_record_key' AND p_item_payload -> 'source_record_key' <> 'null'::jsonb) THEN
+        RAISE EXCEPTION 'manual curation item payload is not canonical'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_curation_create_payload';
+    END IF;
+
+    PERFORM pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0));
+    PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write', 0));
+    PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || v_feature_id, 0));
+    SELECT collection.* INTO STRICT v_collection
+    FROM feature.curation_collections AS collection
+    WHERE collection.collection_id = v_collection_id
+    FOR UPDATE;
+    IF v_collection.archived_at IS NOT NULL OR v_collection.status = 'archived' THEN
+        RAISE EXCEPTION 'target curation collection is archived'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_item_collection_active';
+    END IF;
+    IF EXISTS (
+        SELECT 1 FROM feature.curation_items AS item
+        WHERE item.collection_id = v_collection_id
+          AND item.external_item_id = v_external_item_id
+          AND item.external_component_id = v_external_component_id
+    ) THEN
+        RAISE EXCEPTION 'curation item identity already exists'
+            USING ERRCODE = '23505', CONSTRAINT = 'uq_curation_items_component_identity';
+    END IF;
+
+    SELECT * INTO v_key
+    FROM feature.manual_feature_identity_key(v_feature_kind, v_feature_name, v_lon, v_lat);
+    INSERT INTO feature.manual_feature_identity_claims (
+        feature_id, feature_kind, name_key, lon_e6, lat_e6,
+        claimed_by_command_id, claim_basis, claimed_at
+    ) VALUES (
+        v_feature_uuid, v_key.feature_kind, v_key.name_key, v_key.lon_e6, v_key.lat_e6,
+        p_domain_command_id, 'manual_create', clock_timestamp()
+    ) ON CONFLICT ON CONSTRAINT uq_manual_feature_identity_claims_exact DO NOTHING
+    RETURNING feature_id INTO v_claimed_feature_uuid;
+    IF v_claimed_feature_uuid IS NULL THEN
+        SELECT claim.feature_id INTO o_existing_feature_uuid
+        FROM feature.manual_feature_identity_claims AS claim
+        WHERE (claim.feature_kind, claim.name_key, claim.lon_e6, claim.lat_e6)
+            = (v_key.feature_kind, v_key.name_key, v_key.lon_e6, v_key.lat_e6);
+        IF o_existing_feature_uuid IS NULL THEN
+            RAISE EXCEPTION 'manual curation exact winner disappeared'
+                USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_create_core_identity';
+        END IF;
+        o_outcome := 'exact_conflict';
+        RETURN;
+    END IF;
+
+    CALL feature.create_feature_with_initial_state(
+        p_feature_payload,
+        'active',
+        'published',
+        'valid',
+        jsonb_build_object(
+            'transition_kind', 'initial',
+            'reason_code', 'admin_curation_manual_feature_create',
+            'principal', v_command.actor,
+            'causation_ref', 'domain-command:' || p_domain_command_id::text
+        ),
+        v_created_feature_id,
+        v_created_feature_uuid,
+        v_created_row_revision,
+        v_created
+    );
+    IF v_created IS DISTINCT FROM true
+       OR v_created_feature_id IS DISTINCT FROM v_feature_id
+       OR v_created_feature_uuid IS DISTINCT FROM v_feature_uuid
+       OR v_created_row_revision IS NULL OR v_created_row_revision < 1 THEN
+        RAISE EXCEPTION 'manual curation core result does not match identity claim'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_create_core_identity';
+    END IF;
+    INSERT INTO feature.feature_creation_origins (
+        feature_id, origin_kind, creation_command_id, creator_principal_id,
+        created_by_actor, created_at, invoker_role, procedure_definer
+    ) VALUES (
+        v_feature_uuid,
+        'manual_curation',
+        p_domain_command_id,
+        'admin-ui-bff.manual-curation-feature-create.v1',
+        v_command.actor,
+        clock_timestamp(),
+        session_user,
+        current_user
+    );
+    PERFORM feature.claim_curation_catalog_command_effect(
+        p_domain_command_id, v_command.operation, 'item', x_extension.gen_random_uuid()
+    );
+    SELECT effect.resource_id INTO o_curation_item_id
+    FROM ops.curation_catalog_command_effects AS effect
+    WHERE effect.command_id = p_domain_command_id;
+    INSERT INTO feature.curation_items (
+        curation_item_id, collection_id, feature_id, source_record_key,
+        external_item_id, external_component_id, place_name, address_hint,
+        source_present, source_updated_at, status, sort_order, item_title,
+        item_summary, curation_relation, reuse_policy, metadata, created_by,
+        updated_by, operator_updated_by, operator_updated_at, row_revision,
+        updated_at, archived_at
+    ) VALUES (
+        o_curation_item_id, v_collection_id, v_feature_id, NULL,
+        v_external_item_id, v_external_component_id, coalesce(v_place_name, v_feature_name),
+        v_address_hint, true, clock_timestamp(), v_status, v_sort_order, v_item_title,
+        v_item_summary, v_curation_relation, v_reuse_policy, v_metadata, v_command.actor,
+        v_command.actor, v_command.actor, clock_timestamp(), 1, clock_timestamp(), NULL
+    ) RETURNING row_revision INTO STRICT o_item_row_revision;
+    INSERT INTO feature.curation_link_decisions (
+        curation_item_id, feature_id, decision_kind, match_basis,
+        resolver_version, evidence, actor
+    ) VALUES (
+        o_curation_item_id, v_feature_id, 'accepted', 'admin_review',
+        'manual-curation-feature-v1', jsonb_build_object(
+            'operation', v_command.operation,
+            'command_id', p_domain_command_id,
+            'feature_uuid', v_feature_uuid
+        ), v_command.actor
+    ) RETURNING decision_id INTO STRICT v_decision_id;
+    UPDATE feature.curation_items AS item
+    SET accepted_link_decision_id = v_decision_id
+    WHERE item.curation_item_id = o_curation_item_id;
+    UPDATE feature.curation_collections AS collection
+    SET updated_by = v_command.actor, updated_at = clock_timestamp(),
+        row_revision = collection.row_revision + 1
+    WHERE collection.collection_id = v_collection_id
+    RETURNING collection.row_revision INTO STRICT o_collection_row_revision;
+    o_outcome := 'created';
+    o_feature_id := v_created_feature_id;
+    o_feature_uuid := v_created_feature_uuid;
+    o_feature_row_revision := v_created_row_revision;
+END
+$$;
+
+
+ALTER PROCEDURE feature.create_manual_curation_item_with_feature_command(IN p_feature_payload jsonb, IN p_item_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_feature_row_revision bigint, OUT o_curation_item_id uuid, OUT o_item_row_revision bigint, OUT o_collection_row_revision bigint, OUT o_existing_feature_uuid uuid) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: current_curation_rule_input(uuid); Type: FUNCTION; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE FUNCTION feature.current_curation_rule_input(p_rule_id uuid) RETURNS jsonb
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'provider_sync'
+    AS $$
+SELECT jsonb_build_object(
+  'schema_version', 3,
+  'rule', jsonb_build_object(
+    'rule_id', rule.rule_id::text,
+    'theme_id', rule.theme_id::text,
+    'source_id', rule.source_id::text,
+    'place_kind', rule.place_kind,
+    'category', rule.category,
+    'region_scope', rule.region_scope,
+    'detail_selector', rule.detail_selector,
+    'default_action', rule.default_action,
+    'priority', rule.priority,
+    'enabled', rule.enabled,
+    'archived_at', to_jsonb(rule.archived_at),
+    'owner_kind', rule.owner_kind,
+    'owner_provider_dataset_id', rule.owner_provider_dataset_id
+  ),
+  'theme', jsonb_build_object(
+    'theme_id', theme.theme_id::text,
+    'archived_at', to_jsonb(theme.archived_at),
+    'owner_kind', theme.owner_kind,
+    'owner_provider_dataset_id', theme.owner_provider_dataset_id
+  ),
+  'source', jsonb_build_object(
+    'source_id', source.source_id::text,
+    'provider_dataset_id', source.provider_dataset_id,
+    'archived_at', to_jsonb(source.archived_at)
+  )
+)
+FROM feature.curated_source_rules AS rule
+JOIN feature.curated_themes AS theme ON theme.theme_id = rule.theme_id
+JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
+WHERE rule.rule_id = p_rule_id
+$$;
+
+
+ALTER FUNCTION feature.current_curation_rule_input(p_rule_id uuid) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: current_provider_curation_input_set(bigint); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION feature.current_provider_curation_input_set(p_provider_dataset_id bigint) RETURNS TABLE(source_entity_count bigint, input_member_count bigint, last_source_modified_at date, source_input_set_hash text)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
+    AS $$
+  WITH canonical_input AS (
+    SELECT entity.source_entity_key, head.current_source_record_key,
+           record.raw_payload_hash, record.imported_at,
+           link.feature_id, link.source_role, link.match_method, link.confidence,
+           core.row_revision AS feature_row_revision,
+           core.lifecycle_state, core.publication_state, core.quality_state,
+           CASE core.kind
+             WHEN 'place' THEN COALESCE(to_jsonb(place), '{}'::jsonb)
+             WHEN 'event' THEN COALESCE(to_jsonb(event), '{}'::jsonb)
+             WHEN 'notice' THEN COALESCE(to_jsonb(notice), '{}'::jsonb)
+             WHEN 'route' THEN COALESCE(to_jsonb(route), '{}'::jsonb)
+             WHEN 'area' THEN COALESCE(to_jsonb(area_row), '{}'::jsonb)
+             ELSE '{}'::jsonb
+           END AS feature_detail,
+           COALESCE(override_input.override_lineage, '[]'::jsonb) AS override_lineage
+    FROM provider_sync.source_entities AS entity
+    LEFT JOIN provider_sync.source_entity_heads AS head
+      ON head.source_entity_key = entity.source_entity_key
+    LEFT JOIN provider_sync.source_records AS record
+      ON record.source_entity_key = head.source_entity_key
+     AND record.source_record_key = head.current_source_record_key
+    LEFT JOIN provider_sync.source_links AS link
+      ON link.source_entity_key = entity.source_entity_key
+    LEFT JOIN feature.features AS core ON core.feature_id = link.feature_id
+    LEFT JOIN feature.feature_places AS place ON place.feature_id = core.feature_id
+    LEFT JOIN feature.feature_events AS event ON event.feature_id = core.feature_id
+    LEFT JOIN feature.feature_notices AS notice ON notice.feature_id = core.feature_id
+    LEFT JOIN feature.feature_routes AS route ON route.feature_id = core.feature_id
+    LEFT JOIN feature.feature_areas AS area_row ON area_row.feature_id = core.feature_id
+    LEFT JOIN LATERAL (
+      SELECT jsonb_agg(jsonb_build_array(
+        override.override_id::text, override.field_path, override.override_value,
+        CASE WHEN override.value_geometry IS NULL THEN NULL
+             ELSE encode(x_extension.ST_AsEWKB(override.value_geometry), 'hex') END,
+        override.base_revision, override.command_id
+      ) ORDER BY override.field_path, override.override_id) AS override_lineage
+      FROM ops.feature_overrides AS override
+      WHERE override.feature_id = core.feature_id AND override.status = 'active'
+    ) AS override_input ON true
+    WHERE entity.provider_dataset_id = p_provider_dataset_id
+  )
+  SELECT count(DISTINCT input.source_entity_key)::bigint,
+         count(input.source_entity_key)::bigint,
+         max(input.imported_at)::date,
+         encode(x_extension.digest(convert_to(
+           COALESCE(jsonb_agg(jsonb_build_array(
+             input.source_entity_key, input.current_source_record_key,
+             input.raw_payload_hash, input.feature_id, input.source_role,
+             input.match_method, input.confidence, input.feature_row_revision,
+             input.lifecycle_state, input.publication_state, input.quality_state,
+             input.feature_detail, input.override_lineage
+           ) ORDER BY input.source_entity_key, input.feature_id)
+           FILTER (WHERE input.source_entity_key IS NOT NULL), '[]'::jsonb)::text,
+           'UTF8'), 'sha256'), 'hex')
+  FROM canonical_input AS input
+$$;
+
+
+ALTER FUNCTION feature.current_provider_curation_input_set(p_provider_dataset_id bigint) OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: current_theme_candidate_snapshot(uuid, text, text); Type: FUNCTION; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE FUNCTION feature.current_theme_candidate_snapshot(p_rule_id uuid, p_source_entity_key text, p_feature_id text) RETURNS TABLE(rule_row_revision bigint, rule_input_hash text, source_record_key text, source_record_hash text, candidate_input_hash text, match_evidence jsonb)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
+    AS $$
+WITH rule_scope AS MATERIALIZED (
+  SELECT
+    rule.*,
+    source.provider_dataset_id,
+    feature.current_curation_rule_input(rule.rule_id) AS rule_input
+  FROM feature.curated_source_rules AS rule
+  JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
+  JOIN feature.curated_themes AS theme ON theme.theme_id = rule.theme_id
+  JOIN provider_sync.provider_datasets AS dataset
+    ON dataset.provider_dataset_id = source.provider_dataset_id
+  WHERE rule.rule_id = p_rule_id
+    AND rule.archived_at IS NULL
+    AND source.archived_at IS NULL
+    AND theme.archived_at IS NULL
+    AND rule.enabled
+    AND rule.default_action = 'candidate'
+    AND dataset.is_active
+),
+effective_feature AS MATERIALIZED (
+  SELECT
+    core.feature_id,
+    core.feature_uuid,
+    core.row_revision AS feature_row_revision,
+    core.kind,
+    core.category,
+    core.sido_code,
+    core.sigungu_code,
+    core.lifecycle_state,
+    core.publication_state,
+    core.quality_state,
+    place.place_kind,
+    event.event_kind,
+    CASE core.kind
+      WHEN 'place' THEN COALESCE(to_jsonb(place), '{}'::jsonb)
+      WHEN 'event' THEN COALESCE(to_jsonb(event), '{}'::jsonb)
+      WHEN 'notice' THEN COALESCE(to_jsonb(notice), '{}'::jsonb)
+      WHEN 'route' THEN COALESCE(to_jsonb(route), '{}'::jsonb)
+      WHEN 'area' THEN COALESCE(to_jsonb(area_row), '{}'::jsonb)
+      ELSE '{}'::jsonb
+    END AS detail,
+    COALESCE((
+      SELECT jsonb_agg(
+        jsonb_build_object(
+          'override_id', override.override_id::text,
+          'field_path', override.field_path,
+          'override_value', override.override_value,
+          'value_geometry_ewkb', CASE
+            WHEN override.value_geometry IS NULL THEN NULL
+            ELSE encode(x_extension.ST_AsEWKB(override.value_geometry), 'hex')
+          END,
+          'base_revision', override.base_revision,
+          'command_id', override.command_id
+        ) ORDER BY override.field_path, override.override_id
+      )
+      FROM ops.feature_overrides AS override
+      WHERE override.feature_id = core.feature_id
+        AND override.status = 'active'
+    ), '[]'::jsonb) AS override_lineage
+  FROM feature.features AS core
+  LEFT JOIN feature.feature_places AS place ON place.feature_id = core.feature_id
+  LEFT JOIN feature.feature_events AS event ON event.feature_id = core.feature_id
+  LEFT JOIN feature.feature_notices AS notice ON notice.feature_id = core.feature_id
+  LEFT JOIN feature.feature_routes AS route ON route.feature_id = core.feature_id
+  LEFT JOIN feature.feature_areas AS area_row ON area_row.feature_id = core.feature_id
+  WHERE core.feature_id = p_feature_id
+    AND core.lifecycle_state = 'active'
+    AND core.publication_state = 'published'
+    AND core.quality_state = 'valid'
+),
+current_input AS MATERIALIZED (
+  SELECT
+    rule.row_revision AS current_rule_revision,
+    rule.rule_input,
+    head.current_source_record_key,
+    record.raw_payload_hash,
+    feature.feature_id,
+    feature.feature_uuid,
+    feature.feature_row_revision,
+    feature.kind,
+    feature.category,
+    feature.sido_code,
+    feature.sigungu_code,
+    feature.lifecycle_state,
+    feature.publication_state,
+    feature.quality_state,
+    feature.detail,
+    feature.override_lineage,
+    link.source_role,
+    link.match_method,
+    link.confidence,
+    jsonb_build_object(
+      'schema_version', 1,
+      'source_entity_key', entity.source_entity_key,
+      'source_record_key', head.current_source_record_key,
+      'source_record_hash', record.raw_payload_hash,
+      'source_link', jsonb_build_object(
+        'feature_id', link.feature_id,
+        'source_role', link.source_role,
+        'match_method', link.match_method,
+        'confidence', link.confidence
+      ),
+      'feature', jsonb_build_object(
+        'feature_id', feature.feature_id,
+        'feature_uuid', feature.feature_uuid::text,
+        'row_revision', feature.feature_row_revision,
+        'kind', feature.kind,
+        'category', feature.category,
+        'sido_code', feature.sido_code,
+        'sigungu_code', feature.sigungu_code,
+        'lifecycle_state', feature.lifecycle_state,
+        'publication_state', feature.publication_state,
+        'quality_state', feature.quality_state,
+        'detail', feature.detail,
+        'override_lineage', feature.override_lineage
+      )
+    ) AS candidate_input
+  FROM rule_scope AS rule
+  JOIN provider_sync.source_entities AS entity
+    ON entity.source_entity_key = p_source_entity_key
+   AND entity.provider_dataset_id = rule.provider_dataset_id
+  JOIN provider_sync.source_entity_heads AS head
+    ON head.source_entity_key = entity.source_entity_key
+  JOIN provider_sync.source_records AS record
+    ON record.source_entity_key = entity.source_entity_key
+   AND record.source_record_key = head.current_source_record_key
+  JOIN provider_sync.source_links AS link
+    ON link.source_entity_key = entity.source_entity_key
+   AND link.feature_id = p_feature_id
+  JOIN effective_feature AS feature ON feature.feature_id = link.feature_id
+  WHERE (rule.place_kind IS NULL
+         OR feature.place_kind = rule.place_kind
+         OR feature.event_kind = rule.place_kind)
+    AND (rule.category IS NULL OR feature.category = rule.category)
+    AND (
+      rule.region_scope = '{}'::jsonb
+      OR (
+        (NOT rule.region_scope ? 'sido_code'
+         OR feature.sido_code = rule.region_scope ->> 'sido_code')
+        AND (NOT rule.region_scope ? 'sigungu_code'
+         OR feature.sigungu_code = rule.region_scope ->> 'sigungu_code')
+      )
+    )
+    AND (
+      rule.detail_selector IS NULL
+      OR feature.detail #>> ARRAY(
+        SELECT jsonb_array_elements_text(rule.detail_selector -> 'path')
+      ) = rule.detail_selector ->> 'value'
+    )
+)
+SELECT
+  input.current_rule_revision,
+  encode(
+    x_extension.digest(convert_to(input.rule_input::text, 'UTF8'), 'sha256'),
+    'hex'
+  ),
+  input.current_source_record_key,
+  input.raw_payload_hash,
+  encode(
+    x_extension.digest(convert_to(input.candidate_input::text, 'UTF8'), 'sha256'),
+    'hex'
+  ),
+  jsonb_build_object(
+    'schema_version', 1,
+    'feature_row_revision', input.feature_row_revision,
+    'feature_uuid', input.feature_uuid::text,
+    'source_role', input.source_role,
+    'match_method', input.match_method,
+    'confidence', input.confidence,
+    'rule_input', input.rule_input
+  )
+FROM current_input AS input
+$$;
+
+
+ALTER FUNCTION feature.current_theme_candidate_snapshot(p_rule_id uuid, p_source_entity_key text, p_feature_id text) OWNER TO ktm_curation_command_owner;
 
 --
 -- Name: derive_subtype_public_ready(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
@@ -1554,6 +4469,507 @@ $$;
 ALTER FUNCTION feature.fill_features_feature_uuid() OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: finalize_provider_curation_receipts(bigint, uuid, text, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.finalize_provider_curation_receipts(IN p_provider_dataset_id bigint, IN p_import_job_id uuid, IN p_sync_scope text, IN p_operation_key text, OUT o_generation_count bigint, OUT o_generation_set_hash text, OUT o_replayed boolean)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
+    AS $_$
+DECLARE
+  v_job ops.import_jobs%ROWTYPE;
+  v_rule record;
+  v_generation_id uuid;
+  v_observed_candidate_count bigint;
+  v_removed_candidate_count bigint;
+  v_generation_input_set_hash text;
+  v_generation_replayed boolean;
+  v_source_id uuid;
+  v_source_revision bigint;
+  v_observation_revision bigint;
+  v_row_count integer;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'provider curation finalization requires SERIALIZABLE transaction'
+      USING ERRCODE = '25001';
+  END IF;
+  IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
+    RAISE EXCEPTION 'provider curation finalization requires the provider executor'
+      USING ERRCODE = '42501';
+  END IF;
+
+  SELECT job.* INTO STRICT v_job
+  FROM ops.import_jobs AS job
+  WHERE job.job_id = p_import_job_id
+  FOR UPDATE;
+  IF v_job.kind <> 'provider_feature_load'
+     OR v_job.status <> 'done'
+     OR v_job.finished_at IS NULL
+     OR v_job.parent_job_id IS NULL
+     OR v_job.cancellation_id IS NOT NULL
+     OR v_job.quarantined_at IS NOT NULL
+     OR COALESCE(
+       (v_job.payload ->> 'authoritative_snapshot_complete')::boolean,
+       false
+     ) IS NOT TRUE
+     OR NOT EXISTS (
+       SELECT 1
+       FROM ops.import_jobs AS root
+       WHERE root.job_id = v_job.parent_job_id
+         AND root.kind = 'provider_feature_load_run'
+         AND root.status = 'done'
+         AND root.dagster_run_status = 'SUCCESS'
+         AND root.dagster_run_id = v_job.dagster_run_id
+         AND root.cancellation_id IS NULL
+         AND root.quarantined_at IS NULL
+     )
+     OR (SELECT count(*) FROM ops.import_job_datasets AS member
+         WHERE member.job_id = p_import_job_id) <> 1
+     OR NOT EXISTS (
+       SELECT 1
+       FROM ops.import_job_datasets AS member
+       WHERE member.job_id = p_import_job_id
+         AND member.provider_dataset_id = p_provider_dataset_id
+         AND member.sync_scope = p_sync_scope
+         AND member.operation_key = p_operation_key
+     ) THEN
+    RAISE EXCEPTION 'provider curation finalization requires a done exact member'
+      USING ERRCODE = '23514',
+            CONSTRAINT = 'ck_tvn40_provider_curation_finalization_job';
+  END IF;
+
+  IF v_job.payload ? 'candidate_generation_sealed_at' THEN
+    o_generation_count := (v_job.payload ->> 'candidate_generation_count')::bigint;
+    o_generation_set_hash := v_job.payload ->> 'candidate_generation_set_hash';
+    IF o_generation_count IS NULL
+       OR COALESCE(o_generation_set_hash, '') !~ '^[0-9a-f]{64}$' THEN
+      RAISE EXCEPTION 'sealed provider curation receipt is malformed'
+        USING ERRCODE = '23514',
+              CONSTRAINT = 'ck_tvn40_provider_curation_finalization_seal';
+    END IF;
+    o_replayed := true;
+    RETURN;
+  END IF;
+
+  WITH observation AS (
+    SELECT
+      count(head.source_entity_key)::integer AS row_count,
+      max(record.imported_at)::date AS last_source_modified_at,
+      encode(
+        x_extension.digest(
+          convert_to(
+            COALESCE(
+              jsonb_agg(
+                jsonb_build_array(
+                  entity.source_entity_key,
+                  head.current_source_record_key,
+                  record.raw_payload_hash
+                ) ORDER BY entity.source_entity_key
+              ) FILTER (WHERE head.source_entity_key IS NOT NULL),
+              '[]'::jsonb
+            )::text,
+            'UTF8'
+          ),
+          'sha256'
+        ),
+        'hex'
+      ) AS input_set_hash
+    FROM provider_sync.source_entities AS entity
+    LEFT JOIN provider_sync.source_entity_heads AS head
+      ON head.source_entity_key = entity.source_entity_key
+    LEFT JOIN provider_sync.source_records AS record
+      ON record.source_entity_key = head.source_entity_key
+     AND record.source_record_key = head.current_source_record_key
+    WHERE entity.provider_dataset_id = p_provider_dataset_id
+  )
+  UPDATE ops.import_jobs AS job
+  SET payload = job.payload || jsonb_build_object(
+    'source_observation', jsonb_build_object(
+      'schema_version', 1,
+      'row_count', observation.row_count,
+      'last_source_modified_at', observation.last_source_modified_at,
+      'input_set_hash', observation.input_set_hash
+    )
+  )
+  FROM observation
+  WHERE job.job_id = p_import_job_id;
+
+  IF EXISTS (
+    SELECT 1
+    FROM feature.curated_sources AS source
+    WHERE source.provider_dataset_id = p_provider_dataset_id
+      AND source.archived_at IS NULL
+  ) THEN
+    CALL feature.refresh_curated_source_observation(
+      p_provider_dataset_id,
+      p_import_job_id,
+      v_source_id,
+      v_source_revision,
+      v_observation_revision,
+      v_row_count
+    );
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(
+    hashtextextended('feature-write:' || touched.feature_id, 0)
+  )
+  FROM (
+    SELECT link.feature_id
+    FROM provider_sync.source_entities AS entity
+    JOIN provider_sync.source_links AS link
+      ON link.source_entity_key = entity.source_entity_key
+    WHERE entity.provider_dataset_id = p_provider_dataset_id
+    UNION
+    SELECT candidate.feature_id
+    FROM feature.curated_source_rules AS rule
+    JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
+    JOIN feature.theme_feature_candidates AS candidate
+      ON candidate.rule_id = rule.rule_id
+     AND candidate.disposition = 'active'
+    WHERE source.provider_dataset_id = p_provider_dataset_id
+  ) AS touched
+  ORDER BY touched.feature_id;
+
+  FOR v_rule IN
+    SELECT rule.rule_id
+    FROM feature.curated_source_rules AS rule
+    JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
+    JOIN feature.curated_themes AS theme ON theme.theme_id = rule.theme_id
+    WHERE source.provider_dataset_id = p_provider_dataset_id
+      AND source.archived_at IS NULL
+      AND theme.archived_at IS NULL
+      AND rule.archived_at IS NULL
+      AND rule.enabled
+      AND rule.default_action = 'candidate'
+    ORDER BY rule.rule_id
+  LOOP
+    CALL feature.materialize_theme_candidate_generation(
+      v_rule.rule_id,
+      'provider_full_snapshot',
+      p_import_job_id,
+      NULL,
+      NULL,
+      NULL,
+      jsonb_build_object(
+        'schema_version', 1,
+        'sync_scope', p_sync_scope,
+        'operation_key', p_operation_key
+      ),
+      v_generation_id,
+      v_observed_candidate_count,
+      v_removed_candidate_count,
+      v_generation_input_set_hash,
+      v_generation_replayed
+    );
+  END LOOP;
+
+  SELECT
+    count(*)::bigint,
+    encode(
+      x_extension.digest(
+        convert_to(
+          COALESCE(
+            jsonb_agg(
+              jsonb_build_array(
+                generation.rule_id::text,
+                generation.generation_id::text,
+                generation.generation_input_set_hash
+              ) ORDER BY generation.rule_id
+            )::text,
+            '[]'
+          ),
+          'UTF8'
+        ),
+        'sha256'
+      ),
+      'hex'
+    )
+  INTO STRICT o_generation_count, o_generation_set_hash
+  FROM feature.theme_candidate_generations AS generation
+  WHERE generation.source_job_id = p_import_job_id
+    AND generation.generation_kind = 'provider_full_snapshot';
+
+  UPDATE ops.import_jobs AS job
+  SET payload = job.payload || jsonb_build_object(
+    'candidate_generation_count', o_generation_count,
+    'candidate_generation_set_hash', o_generation_set_hash,
+    'candidate_generation_sealed_at', clock_timestamp()
+  )
+  WHERE job.job_id = p_import_job_id;
+  o_replayed := false;
+END
+$_$;
+
+
+ALTER PROCEDURE feature.finalize_provider_curation_receipts(IN p_provider_dataset_id bigint, IN p_import_job_id uuid, IN p_sync_scope text, IN p_operation_key text, OUT o_generation_count bigint, OUT o_generation_set_hash text, OUT o_replayed boolean) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: finalize_provider_curation_root(uuid); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.finalize_provider_curation_root(IN p_root_job_id uuid, OUT o_generation_count bigint, OUT o_generation_set_hash text, OUT o_replayed boolean, OUT o_stale_input boolean)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
+    AS $$
+DECLARE
+  v_root ops.import_jobs%ROWTYPE;
+  v_seal ops.curation_provider_root_receipts%ROWTYPE;
+  v_child record;
+  v_rule record;
+  v_generation_id uuid;
+  v_observed bigint;
+  v_removed bigint;
+  v_input_hash text;
+  v_generation_replayed boolean;
+  v_source_id uuid;
+  v_source_revision bigint;
+  v_observation_revision bigint;
+  v_row_count integer;
+  v_current_count bigint;
+  v_current_member_count bigint;
+  v_current_hash text;
+  v_child_count bigint;
+  v_child_hash text;
+BEGIN
+  o_stale_input := false;
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'provider curation root requires SERIALIZABLE transaction'
+      USING ERRCODE = '25001';
+  END IF;
+  IF (
+       NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
+       OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     ) AND NOT (
+       session_user = 'ktm_feature_api_runtime'
+       AND current_setting('ktm.curation_cancellation_root', true)
+         = p_root_job_id::text
+     ) THEN
+    RAISE EXCEPTION 'provider curation root requires the provider executor'
+      USING ERRCODE = '42501';
+  END IF;
+  -- Provider load/retirement/notice/merge와 같은 global fence를 relation
+  -- lock보다 먼저 잡아 head→link와 Feature→link 경로의 ABBA를 제거한다.
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write', 0));
+  SELECT root.* INTO STRICT v_root FROM ops.import_jobs AS root
+  WHERE root.job_id = p_root_job_id FOR UPDATE;
+  IF v_root.kind <> 'provider_feature_load_run' OR v_root.status <> 'done'
+     OR v_root.dagster_run_status <> 'SUCCESS'
+     OR (
+       v_root.cancellation_id IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1
+         FROM ops.pipeline_cancellation_members AS member
+         JOIN ops.pipeline_cancellation_runs AS run
+           ON run.cancellation_id = member.cancellation_id
+          AND run.dagster_run_id = member.dagster_run_id
+         WHERE member.cancellation_id = v_root.cancellation_id
+           AND member.job_id = v_root.job_id
+           AND member.operation_kind = 'provider_feature_load_run'
+           AND member.result = 'already_terminal'
+           AND member.terminal_status = 'done'
+           AND run.result = 'already_terminal'
+           AND run.terminal_status = 'SUCCESS'
+       )
+     ) OR v_root.quarantined_at IS NOT NULL THEN
+    RAISE EXCEPTION 'provider curation root requires a successful terminal root'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_provider_curation_root';
+  END IF;
+
+  SELECT count(*)::bigint,
+         encode(x_extension.digest(convert_to(COALESCE(jsonb_agg(jsonb_build_array(
+           receipt.source_job_id::text, receipt.provider_dataset_id,
+           receipt.sync_scope, receipt.operation_key, receipt.input_member_count,
+           receipt.source_input_set_hash
+         ) ORDER BY receipt.provider_dataset_id, receipt.sync_scope, receipt.operation_key)::text, '[]'),
+         'UTF8'), 'sha256'), 'hex')
+  INTO STRICT v_child_count, v_child_hash
+  FROM ops.curation_provider_snapshot_receipts AS receipt
+  WHERE receipt.root_job_id = p_root_job_id;
+
+  IF EXISTS (
+    SELECT 1
+    FROM ops.import_jobs AS child
+    JOIN ops.import_job_datasets AS member ON member.job_id = child.job_id
+    WHERE child.parent_job_id = p_root_job_id
+      AND child.kind = 'provider_feature_load'
+      AND child.quarantined_at IS NULL
+      AND (child.payload ->> 'authoritative_snapshot_complete')::boolean
+      AND NOT EXISTS (
+        SELECT 1 FROM ops.curation_provider_snapshot_receipts AS receipt
+        WHERE receipt.source_job_id = child.job_id
+          AND receipt.root_job_id = p_root_job_id
+          AND receipt.provider_dataset_id = member.provider_dataset_id
+          AND receipt.sync_scope = member.sync_scope
+          AND receipt.operation_key = member.operation_key
+      )
+  ) OR EXISTS (
+    SELECT 1 FROM ops.curation_provider_snapshot_receipts AS receipt
+    WHERE receipt.root_job_id = p_root_job_id
+      AND NOT EXISTS (
+        SELECT 1
+        FROM ops.import_jobs AS child
+        JOIN ops.import_job_datasets AS member ON member.job_id = child.job_id
+        WHERE child.job_id = receipt.source_job_id
+          AND child.parent_job_id = p_root_job_id
+          AND child.kind = 'provider_feature_load'
+          AND child.status = 'done'
+          AND child.quarantined_at IS NULL
+          AND (child.payload ->> 'authoritative_snapshot_complete')::boolean
+          AND member.provider_dataset_id = receipt.provider_dataset_id
+          AND member.sync_scope = receipt.sync_scope
+          AND member.operation_key = receipt.operation_key
+      )
+  ) THEN
+    RAISE EXCEPTION 'provider curation root child receipt set is inconsistent'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_provider_curation_child_set';
+  END IF;
+  IF v_child_count = 0 THEN
+    o_generation_count := 0;
+    o_generation_set_hash := encode(
+      x_extension.digest(convert_to('[]', 'UTF8'), 'sha256'), 'hex'
+    );
+    o_replayed := false;
+    RETURN;
+  END IF;
+
+  SELECT root_receipt.* INTO v_seal FROM ops.curation_provider_root_receipts AS root_receipt
+  WHERE root_receipt.root_job_id = p_root_job_id;
+  IF FOUND THEN
+    SELECT count(*)::bigint,
+           encode(x_extension.digest(convert_to(COALESCE(jsonb_agg(jsonb_build_array(
+             generation.rule_id::text, generation.generation_id::text,
+             generation.generation_input_set_hash
+           ) ORDER BY generation.rule_id, generation.source_job_id)::text, '[]'),
+           'UTF8'), 'sha256'), 'hex')
+    INTO STRICT o_generation_count, o_generation_set_hash
+    FROM feature.theme_candidate_generations AS generation
+    JOIN ops.curation_provider_snapshot_receipts AS receipt
+      ON receipt.source_job_id = generation.source_job_id
+    WHERE receipt.root_job_id = p_root_job_id
+      AND generation.generation_kind = 'provider_full_snapshot';
+    IF v_seal.child_receipt_count <> v_child_count
+       OR v_seal.child_receipt_set_hash <> v_child_hash
+       OR v_seal.generation_count <> o_generation_count
+       OR v_seal.generation_set_hash <> o_generation_set_hash THEN
+      RAISE EXCEPTION 'provider curation root replay receipt is inconsistent'
+        USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_provider_curation_root_replay';
+    END IF;
+    o_replayed := true;
+    RETURN;
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || touched.feature_id, 0))
+  FROM (
+    SELECT link.feature_id
+    FROM ops.curation_provider_snapshot_receipts AS receipt
+    JOIN provider_sync.source_entities AS entity
+      ON entity.provider_dataset_id = receipt.provider_dataset_id
+    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
+    WHERE receipt.root_job_id = p_root_job_id
+    UNION
+    SELECT candidate.feature_id
+    FROM ops.curation_provider_snapshot_receipts AS receipt
+    JOIN feature.curated_sources AS source
+      ON source.provider_dataset_id = receipt.provider_dataset_id
+    JOIN feature.curated_source_rules AS rule ON rule.source_id = source.source_id
+    JOIN feature.theme_feature_candidates AS candidate ON candidate.rule_id = rule.rule_id
+    WHERE receipt.root_job_id = p_root_job_id AND candidate.disposition = 'active'
+  ) AS touched ORDER BY touched.feature_id;
+  PERFORM 1
+  FROM provider_sync.source_links AS link
+  JOIN provider_sync.source_entities AS entity
+    ON entity.source_entity_key = link.source_entity_key
+  JOIN ops.curation_provider_snapshot_receipts AS receipt
+    ON receipt.provider_dataset_id = entity.provider_dataset_id
+  WHERE receipt.root_job_id = p_root_job_id
+  ORDER BY link.source_entity_key, link.feature_id
+  FOR SHARE OF link;
+  PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
+
+  -- Validate every immutable child seal before the first catalog/candidate DML.
+  FOR v_child IN
+    SELECT receipt.* FROM ops.curation_provider_snapshot_receipts AS receipt
+    WHERE receipt.root_job_id = p_root_job_id
+    ORDER BY receipt.provider_dataset_id, receipt.sync_scope, receipt.operation_key
+  LOOP
+    SELECT input.source_entity_count, input.input_member_count,
+           input.source_input_set_hash
+    INTO STRICT v_current_count, v_current_member_count, v_current_hash
+    FROM feature.current_provider_curation_input_set(
+      v_child.provider_dataset_id
+    ) AS input;
+    IF v_current_count <> v_child.source_entity_count
+       OR v_current_member_count <> v_child.input_member_count
+       OR v_current_hash <> v_child.source_input_set_hash THEN
+      o_generation_count := 0;
+      o_generation_set_hash := encode(
+        x_extension.digest(convert_to('[]', 'UTF8'), 'sha256'), 'hex'
+      );
+      o_replayed := false;
+      o_stale_input := true;
+      RETURN;
+    END IF;
+  END LOOP;
+
+  FOR v_child IN
+    SELECT receipt.* FROM ops.curation_provider_snapshot_receipts AS receipt
+    WHERE receipt.root_job_id = p_root_job_id
+    ORDER BY receipt.provider_dataset_id, receipt.sync_scope, receipt.operation_key
+  LOOP
+    IF EXISTS (SELECT 1 FROM feature.curated_sources AS source
+               WHERE source.provider_dataset_id = v_child.provider_dataset_id
+                 AND source.archived_at IS NULL) THEN
+      CALL feature.refresh_curated_source_observation(
+        v_child.provider_dataset_id, v_child.source_job_id,
+        v_source_id, v_source_revision, v_observation_revision, v_row_count
+      );
+    END IF;
+    FOR v_rule IN
+      SELECT rule.rule_id FROM feature.curated_source_rules AS rule
+      JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
+      JOIN feature.curated_themes AS theme ON theme.theme_id = rule.theme_id
+      WHERE source.provider_dataset_id = v_child.provider_dataset_id
+        AND source.archived_at IS NULL AND theme.archived_at IS NULL
+        AND rule.archived_at IS NULL AND rule.enabled
+        AND rule.default_action = 'candidate'
+      ORDER BY rule.rule_id
+    LOOP
+      CALL feature.materialize_theme_candidate_generation(
+        v_rule.rule_id, 'provider_full_snapshot', v_child.source_job_id,
+        NULL, NULL, NULL,
+        jsonb_build_object('schema_version', 1, 'sync_scope', v_child.sync_scope,
+                           'operation_key', v_child.operation_key),
+        v_generation_id, v_observed, v_removed, v_input_hash, v_generation_replayed
+      );
+    END LOOP;
+  END LOOP;
+
+  SELECT count(*)::bigint,
+         encode(x_extension.digest(convert_to(COALESCE(jsonb_agg(jsonb_build_array(
+           generation.rule_id::text, generation.generation_id::text,
+           generation.generation_input_set_hash
+         ) ORDER BY generation.rule_id, generation.source_job_id)::text, '[]'),
+         'UTF8'), 'sha256'), 'hex')
+  INTO STRICT o_generation_count, o_generation_set_hash
+  FROM feature.theme_candidate_generations AS generation
+  JOIN ops.curation_provider_snapshot_receipts AS receipt
+    ON receipt.source_job_id = generation.source_job_id
+  WHERE receipt.root_job_id = p_root_job_id
+    AND generation.generation_kind = 'provider_full_snapshot';
+  INSERT INTO ops.curation_provider_root_receipts (
+    root_job_id, child_receipt_count, child_receipt_set_hash,
+    generation_count, generation_set_hash
+  ) VALUES (p_root_job_id, v_child_count, v_child_hash,
+            o_generation_count, o_generation_set_hash);
+  o_replayed := false;
+END
+$$;
+
+
+ALTER PROCEDURE feature.finalize_provider_curation_root(IN p_root_job_id uuid, OUT o_generation_count bigint, OUT o_generation_set_hash text, OUT o_replayed boolean, OUT o_stale_input boolean) OWNER TO ktm_curation_command_owner;
+
+--
 -- Name: force_features_row_revision(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -1591,98 +5007,222 @@ $$;
 ALTER FUNCTION feature.has_active_feature_override(p_feature_id text, p_field_path text) OWNER TO ktm_feature_state_procedure_owner;
 
 --
--- Name: issue_curation_source_rule_decision(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
+-- Name: lease_feature_reference_reconciliation_event(text, uuid); Type: PROCEDURE; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
 --
 
-CREATE FUNCTION feature.issue_curation_source_rule_decision() RETURNS trigger
-    LANGUAGE plpgsql
-    SET search_path TO 'pg_catalog'
+CREATE PROCEDURE feature.lease_feature_reference_reconciliation_event(IN p_principal_id text, IN p_worker_id uuid, OUT o_outcome text, OUT o_lease_epoch bigint, OUT o_lease_expires_at timestamp with time zone, OUT o_event_id uuid, OUT o_event_sequence bigint, OUT o_case_id uuid, OUT o_resolution_id uuid, OUT o_action text, OUT o_event_payload jsonb, OUT o_event_sha256 text, OUT o_occurred_at timestamp with time zone)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops'
     AS $$
-        DECLARE
-            projection feature.curated_features%ROWTYPE;
-            source_provider text;
-            source_dataset text;
-            new_decision_id uuid;
-        BEGIN
-            IF EXISTS (
-                SELECT 1
-                FROM feature.curation_link_decisions AS existing
-                WHERE existing.decision_id = NEW.accepted_link_decision_id
-                  AND existing.curation_item_id = NEW.curation_item_id
-                  AND existing.feature_id = NEW.feature_id
-                  AND existing.decision_kind = 'accepted'
-                  AND existing.match_basis <> 'legacy_unattributed'
-            ) THEN
-                RETURN NULL;
-            END IF;
+DECLARE
+    v_subscription ops.feature_reference_reconciliation_subscriptions%ROWTYPE;
+    v_lease ops.feature_reference_reconciliation_leases%ROWTYPE;
+    v_event ops.feature_reference_reconciliation_events%ROWTYPE;
+    v_now timestamptz := clock_timestamp();
+BEGIN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'feature reference reconciliation lease requires READ COMMITTED'
+            USING ERRCODE = '25001', CONSTRAINT = 'ck_m05_reconciliation_lease_isolation';
+    END IF;
+    IF session_user <> 'ktm_feature_api_runtime'
+       OR NOT pg_has_role(
+           session_user, 'ktm_feature_reference_reconciliation_service_executor', 'member'
+       ) THEN
+        RAISE EXCEPTION 'feature reference reconciliation lease requires the service executor'
+            USING ERRCODE = '42501', CONSTRAINT = 'ck_m05_reconciliation_service_executor';
+    END IF;
+    IF nullif(btrim(p_principal_id), '') IS NULL
+       OR char_length(p_principal_id) > 200 OR p_worker_id IS NULL THEN
+        RAISE EXCEPTION 'feature reference reconciliation lease input is invalid'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_reconciliation_lease_input';
+    END IF;
+    SELECT subscription.* INTO v_subscription
+    FROM ops.feature_reference_reconciliation_subscriptions AS subscription
+    WHERE subscription.principal_id = p_principal_id
+      AND subscription.read_scope = 'feature-reference-reconciliation:read'
+    FOR SHARE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'feature reference reconciliation subscription is not provisioned'
+            USING ERRCODE = 'P0002';
+    END IF;
+    SELECT lease.* INTO v_lease
+    FROM ops.feature_reference_reconciliation_leases AS lease
+    WHERE lease.principal_id = p_principal_id
+    FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'feature reference reconciliation subscription lacks lease state'
+            USING ERRCODE = '55000';
+    END IF;
+    IF v_lease.acked_through_sequence < v_subscription.initial_event_sequence THEN
+        RAISE EXCEPTION 'feature reference reconciliation lease cursor is below subscription cursor'
+            USING ERRCODE = '55000';
+    END IF;
+    SELECT event.* INTO v_event
+    FROM ops.feature_reference_reconciliation_events AS event
+    WHERE event.event_sequence > v_lease.acked_through_sequence
+    ORDER BY event.event_sequence
+    LIMIT 1
+    FOR SHARE;
+    IF NOT FOUND THEN
+        o_outcome := 'empty';
+        o_lease_epoch := v_lease.lease_epoch;
+        RETURN;
+    END IF;
+    IF v_lease.worker_id IS NOT NULL
+       AND v_lease.lease_expires_at > v_now
+       AND v_lease.worker_id <> p_worker_id THEN
+        o_outcome := 'lease_conflict';
+        o_lease_epoch := v_lease.lease_epoch;
+        o_lease_expires_at := v_lease.lease_expires_at;
+        RETURN;
+    END IF;
+    IF v_lease.worker_id IS DISTINCT FROM p_worker_id
+       OR v_lease.lease_expires_at IS NULL OR v_lease.lease_expires_at <= v_now THEN
+        v_lease.lease_epoch := v_lease.lease_epoch + 1;
+    END IF;
+    v_lease.worker_id := p_worker_id;
+    v_lease.lease_expires_at := v_now + interval '60 seconds';
+    UPDATE ops.feature_reference_reconciliation_leases
+    SET worker_id = v_lease.worker_id,
+        lease_epoch = v_lease.lease_epoch,
+        lease_expires_at = v_lease.lease_expires_at,
+        updated_at = v_now
+    WHERE principal_id = p_principal_id;
+    o_outcome := 'leased';
+    o_lease_epoch := v_lease.lease_epoch;
+    o_lease_expires_at := v_lease.lease_expires_at;
+    o_event_id := v_event.event_id;
+    o_event_sequence := v_event.event_sequence;
+    o_case_id := v_event.case_id;
+    o_resolution_id := v_event.resolution_id;
+    o_action := v_event.action;
+    o_event_payload := v_event.event_payload;
+    o_event_sha256 := v_event.event_sha256;
+    o_occurred_at := v_event.occurred_at;
+END
+$$;
 
-            IF EXISTS (
-                SELECT 1
-                FROM feature.curation_link_decisions AS revocation
-                WHERE revocation.curation_item_id = NEW.curation_item_id
-                  AND revocation.decision_kind = 'revoked'
-                  AND NOT EXISTS (
-                      SELECT 1
-                      FROM feature.curation_link_decisions AS successor
-                      WHERE successor.supersedes_decision_id = revocation.decision_id
-                  )
-            ) THEN
-                RETURN NULL;
-            END IF;
 
-            SELECT * INTO projection
-              FROM feature.curated_features AS cf
-             WHERE cf.curated_feature_id =
-                   COALESCE(NEW.legacy_projection_id, NEW.curation_item_id);
-            IF NOT FOUND
-               OR projection.selection_origin IS DISTINCT FROM 'source_rule'
-               OR projection.feature_id IS DISTINCT FROM NEW.feature_id
-               OR projection.source_record_key IS DISTINCT FROM NEW.source_record_key
-            THEN
-                RETURN NULL;
-            END IF;
+ALTER PROCEDURE feature.lease_feature_reference_reconciliation_event(IN p_principal_id text, IN p_worker_id uuid, OUT o_outcome text, OUT o_lease_epoch bigint, OUT o_lease_expires_at timestamp with time zone, OUT o_event_id uuid, OUT o_event_sequence bigint, OUT o_case_id uuid, OUT o_resolution_id uuid, OUT o_action text, OUT o_event_payload jsonb, OUT o_event_sha256 text, OUT o_occurred_at timestamp with time zone) OWNER TO ktm_manual_provider_dedup_procedure_owner;
 
-            SELECT dataset.provider, dataset.dataset_key
-              INTO source_provider, source_dataset
-              FROM provider_sync.source_records AS record
-              JOIN provider_sync.source_entities AS entity
-                ON entity.source_entity_key = record.source_entity_key
-              JOIN provider_sync.provider_datasets AS dataset
-                ON dataset.provider_dataset_id = entity.provider_dataset_id
-             WHERE record.source_record_key = projection.source_record_key;
-            IF source_provider IS NULL THEN
-                RETURN NULL;
-            END IF;
+--
+-- Name: lease_feature_reference_reconciliation_event_v2(text, uuid); Type: PROCEDURE; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
 
-            INSERT INTO feature.curation_link_decisions (
-                curation_item_id, feature_id, decision_kind, match_basis,
-                resolver_version, evidence, actor, decided_at, supersedes_decision_id
-            ) VALUES (
-                NEW.curation_item_id, NEW.feature_id, 'accepted', 'source_rule',
-                'source-rule-v' || projection.content_version::text,
-                jsonb_build_object(
-                    'writer', 'issue_curation_source_rule_decision',
-                    'source_record_key', projection.source_record_key,
-                    'selection_origin', projection.selection_origin,
-                    'content_version', projection.content_version,
-                    'provider', source_provider,
-                    'dataset_key', source_dataset
-                ),
-                COALESCE(NULLIF(btrim(projection.selected_by), ''),
-                         'source_rule:' || source_provider),
-                COALESCE(NEW.updated_at, now()),
-                NEW.accepted_link_decision_id
-            ) RETURNING decision_id INTO new_decision_id;
-
-            UPDATE feature.curation_items
-               SET accepted_link_decision_id = new_decision_id
-             WHERE curation_item_id = NEW.curation_item_id;
-            RETURN NULL;
-        END;
-        $$;
+CREATE PROCEDURE feature.lease_feature_reference_reconciliation_event_v2(IN p_principal_id text, IN p_worker_id uuid, OUT o_outcome text, OUT o_lease_epoch bigint, OUT o_lease_expires_at timestamp with time zone, OUT o_event_id uuid, OUT o_event_sequence bigint, OUT o_case_id uuid, OUT o_resolution_id uuid, OUT o_action text, OUT o_event_payload jsonb, OUT o_event_sha256 text, OUT o_occurred_at timestamp with time zone)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops'
+    AS $$
+BEGIN
+    -- Activation is explicit. A valid token before provisioning is retryable,
+    -- never an opaque P0002 that leaks through the HTTP boundary as a 500.
+    PERFORM 1
+    FROM ops.feature_reference_reconciliation_subscriptions AS subscription
+    WHERE subscription.principal_id = p_principal_id
+      AND subscription.read_scope = 'feature-reference-reconciliation:read'
+    FOR SHARE;
+    IF NOT FOUND THEN
+        o_outcome := 'not_ready';
+        RETURN;
+    END IF;
+    CALL feature.lease_feature_reference_reconciliation_event(
+        p_principal_id, p_worker_id, o_outcome, o_lease_epoch,
+        o_lease_expires_at, o_event_id, o_event_sequence, o_case_id,
+        o_resolution_id, o_action, o_event_payload, o_event_sha256, o_occurred_at
+    );
+END
+$$;
 
 
-ALTER FUNCTION feature.issue_curation_source_rule_decision() OWNER TO ktm_feature_schema_owner;
+ALTER PROCEDURE feature.lease_feature_reference_reconciliation_event_v2(IN p_principal_id text, IN p_worker_id uuid, OUT o_outcome text, OUT o_lease_epoch bigint, OUT o_lease_expires_at timestamp with time zone, OUT o_event_id uuid, OUT o_event_sequence bigint, OUT o_case_id uuid, OUT o_resolution_id uuid, OUT o_action text, OUT o_event_payload jsonb, OUT o_event_sha256 text, OUT o_occurred_at timestamp with time zone) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+
+--
+-- Name: list_feature_requests(text, integer); Type: FUNCTION; Schema: feature; Owner: ktm_feature_request_procedure_owner
+--
+
+CREATE FUNCTION feature.list_feature_requests(p_status text, p_limit integer) RETURNS TABLE(request_id uuid, request_payload jsonb, status text, submitted_at timestamp with time zone, submission_command_id bigint, resolved_at timestamp with time zone, resolved_by_actor text, resolved_feature_id uuid, rejection_reason text)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops'
+    AS $$
+    SELECT request_id, request_payload, status, submitted_at, submission_command_id, resolved_at, resolved_by_actor, resolved_feature_id, rejection_reason
+    FROM ops.feature_requests
+    WHERE p_status IS NULL OR status = p_status
+    ORDER BY submitted_at ASC, request_id ASC
+    LIMIT greatest(1, least(coalesce(p_limit, 50), 100))
+$$;
+
+
+ALTER FUNCTION feature.list_feature_requests(p_status text, p_limit integer) OWNER TO ktm_feature_request_procedure_owner;
+
+--
+-- Name: list_manual_provider_dedup_cases(text, timestamp with time zone, uuid, integer); Type: FUNCTION; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+
+CREATE FUNCTION feature.list_manual_provider_dedup_cases(p_status text, p_after_created_at timestamp with time zone, p_after_case_id uuid, p_limit integer) RETURNS TABLE(o_case_id uuid, o_status text, o_created_at timestamp with time zone, o_evidence_fingerprint text, o_manual_feature jsonb, o_provider_feature jsonb, o_scores jsonb)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops'
+    AS $$
+BEGIN
+    IF session_user <> 'ktm_feature_api_runtime'
+       OR NOT pg_has_role(
+           session_user, 'ktm_manual_provider_dedup_admin_executor', 'member'
+       ) THEN
+        RAISE EXCEPTION 'manual/provider dedup case read requires the admin-only executor'
+            USING ERRCODE = '42501', CONSTRAINT = 'ck_m05_case_read_executor';
+    END IF;
+    IF p_status NOT IN ('pending', 'terminal') AND p_status IS NOT NULL
+       OR p_limit IS NULL OR p_limit < 1 OR p_limit > 100
+       OR (p_after_created_at IS NULL) <> (p_after_case_id IS NULL) THEN
+        RAISE EXCEPTION 'manual/provider dedup case list input is invalid'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_case_read_input';
+    END IF;
+
+    RETURN QUERY
+    SELECT
+        candidate.case_id,
+        CASE WHEN resolution.case_id IS NULL THEN 'pending' ELSE 'terminal' END,
+        candidate.created_at,
+        candidate.evidence_fingerprint,
+        jsonb_build_object(
+            'feature_id', candidate.manual_feature_id,
+            'feature_uuid', candidate.manual_feature_uuid,
+            'row_revision', candidate.manual_feature_row_revision,
+            'snapshot', candidate.manual_feature_snapshot
+        ),
+        jsonb_build_object(
+            'feature_id', candidate.provider_feature_id,
+            'feature_uuid', candidate.provider_feature_uuid,
+            'row_revision', candidate.provider_feature_row_revision,
+            'snapshot', candidate.provider_feature_snapshot
+        ),
+        jsonb_build_object(
+            'scorer_id', candidate.scorer_id,
+            'scorer_input_sha256', candidate.scorer_input_sha256,
+            'name_score', candidate.name_score,
+            'spatial_score', candidate.spatial_score,
+            'category_score', candidate.category_score,
+            'total_score', candidate.total_score,
+            'distance_meters', candidate.distance_meters
+        )
+    FROM ops.manual_provider_dedup_cases AS candidate
+    LEFT JOIN ops.manual_provider_dedup_resolutions AS resolution
+      ON resolution.case_id = candidate.case_id
+    WHERE (
+        (p_status IS NULL)
+        OR (p_status = 'pending' AND resolution.case_id IS NULL)
+        OR (p_status = 'terminal' AND resolution.case_id IS NOT NULL)
+    )
+      AND (
+          p_after_created_at IS NULL
+          OR (candidate.created_at, candidate.case_id) < (p_after_created_at, p_after_case_id)
+      )
+    ORDER BY candidate.created_at DESC, candidate.case_id DESC
+    LIMIT p_limit;
+END
+$$;
+
+
+ALTER FUNCTION feature.list_manual_provider_dedup_cases(p_status text, p_after_created_at timestamp with time zone, p_after_case_id uuid, p_limit integer) OWNER TO ktm_manual_provider_dedup_procedure_owner;
 
 --
 -- Name: lock_current_provider_feature_source_evidence(text, bigint, text, text); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
@@ -1757,6 +5297,1636 @@ $$;
 
 
 ALTER FUNCTION feature.lock_current_provider_source_evidence(p_provider_dataset_id bigint, p_source_entity_key text, p_source_record_key text) OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: manual_feature_identity_key(text, text, numeric, numeric); Type: FUNCTION; Schema: feature; Owner: ktm_manual_feature_procedure_owner
+--
+
+CREATE FUNCTION feature.manual_feature_identity_key(p_feature_kind text, p_name text, p_lon numeric, p_lat numeric) RETURNS TABLE(feature_kind text, name_key text, lon_e6 integer, lat_e6 integer)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+    v_name_key text;
+BEGIN
+    IF p_feature_kind NOT IN ('place', 'event') THEN
+        RAISE EXCEPTION 'manual Feature kind is invalid'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_identity_claims_kind';
+    END IF;
+    v_name_key := translate(
+        normalize(btrim(p_name), NFC),
+        'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+        'abcdefghijklmnopqrstuvwxyz'
+    );
+    IF v_name_key IS NULL
+       OR char_length(v_name_key) NOT BETWEEN 1 AND 200
+       OR octet_length(v_name_key) > 512 THEN
+        RAISE EXCEPTION 'manual Feature exact name is invalid'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_identity_claims_name_key';
+    END IF;
+    IF p_lon IS NULL
+       OR p_lat IS NULL
+       OR p_lon IN ('NaN'::numeric, 'Infinity'::numeric, '-Infinity'::numeric)
+       OR p_lat IN ('NaN'::numeric, 'Infinity'::numeric, '-Infinity'::numeric)
+       OR p_lon < 124 OR p_lon > 132
+       OR p_lat < 33 OR p_lat > 39.5 THEN
+        RAISE EXCEPTION 'manual Feature coordinate is outside Korea'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_identity_coord_range';
+    END IF;
+    BEGIN
+        feature_kind := p_feature_kind;
+        name_key := v_name_key COLLATE "C";
+        lon_e6 := round(p_lon * 1000000, 0)::integer;
+        lat_e6 := round(p_lat * 1000000, 0)::integer;
+    EXCEPTION WHEN numeric_value_out_of_range THEN
+        RAISE EXCEPTION 'manual Feature coordinate cannot be rounded'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_identity_coord_rounding';
+    END;
+    RETURN NEXT;
+END
+$$;
+
+
+ALTER FUNCTION feature.manual_feature_identity_key(p_feature_kind text, p_name text, p_lon numeric, p_lat numeric) OWNER TO ktm_manual_feature_procedure_owner;
+
+--
+-- Name: materialize_theme_candidate_generation(uuid, text, uuid, uuid, bigint, text, jsonb); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.materialize_theme_candidate_generation(IN p_rule_id uuid, IN p_generation_kind text, IN p_source_job_id uuid, IN p_reconcile_operation_id uuid, IN p_command_id bigint, IN p_generation_key text, IN p_context jsonb, OUT o_generation_id uuid, OUT o_observed_candidate_count bigint, OUT o_eligibility_removed_candidate_count bigint, OUT o_generation_input_set_hash text, OUT o_replayed boolean)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
+    AS $$
+DECLARE
+  v_rule_hint feature.curated_source_rules%ROWTYPE;
+  v_rule feature.curated_source_rules%ROWTYPE;
+  v_source feature.curated_sources%ROWTYPE;
+  v_operation ops.curation_rule_reconcile_operations%ROWTYPE;
+  v_source_job ops.import_jobs%ROWTYPE;
+  v_existing_generation feature.theme_candidate_generations%ROWTYPE;
+  v_candidate feature.theme_feature_candidates%ROWTYPE;
+  v_expected record;
+  v_feature_id text;
+  v_provider_dataset_id bigint;
+  v_rule_input jsonb;
+  v_rule_input_hash text;
+  v_expected_generation_key text;
+  v_scope_member_count bigint;
+  v_scope_members_hash text;
+  v_expected_scope_member_count bigint;
+  v_expected_candidate_count bigint;
+  v_expected_removed_count bigint;
+  v_candidate_id uuid;
+  v_candidate_revision bigint;
+  v_transition_kind text;
+  v_reason_code text;
+  v_actor text;
+  v_is_provider boolean;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'candidate generation requires SERIALIZABLE transaction'
+      USING ERRCODE = '25001';
+  END IF;
+  v_is_provider := p_generation_kind = 'provider_full_snapshot';
+  IF NOT (
+       (v_is_provider
+        AND p_source_job_id IS NOT NULL
+        AND p_reconcile_operation_id IS NULL
+        AND p_command_id IS NULL)
+       OR
+       (p_generation_kind = 'rule_reconcile'
+        AND p_source_job_id IS NULL
+        AND p_reconcile_operation_id IS NOT NULL)
+     ) THEN
+    RAISE EXCEPTION 'generation origin does not match its typed receipt'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_generation_kind';
+  END IF;
+  IF (v_is_provider AND (
+        (
+          NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
+          OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+        ) AND NOT (
+          session_user = 'ktm_feature_api_runtime'
+          AND EXISTS (
+            SELECT 1 FROM ops.import_jobs AS source_job
+            WHERE source_job.job_id = p_source_job_id
+              AND source_job.parent_job_id::text = current_setting(
+                'ktm.curation_cancellation_root', true
+              )
+          )
+        )
+      )) OR (NOT v_is_provider AND (
+        NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+        OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
+      )) THEN
+    RAISE EXCEPTION 'generation receipt is not executable by this runtime principal'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_context IS NULL OR jsonb_typeof(p_context) <> 'object' THEN
+    RAISE EXCEPTION 'generation context must be an object'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_generation_context';
+  END IF;
+
+  -- These are discovery reads only.  No relation lock is taken before the
+  -- complete touched Feature set has acquired the common sorted advisory fence.
+  SELECT rule.* INTO STRICT v_rule_hint
+  FROM feature.curated_source_rules AS rule
+  WHERE rule.rule_id = p_rule_id;
+  SELECT source.provider_dataset_id INTO STRICT v_provider_dataset_id
+  FROM feature.curated_sources AS source
+  WHERE source.source_id = v_rule_hint.source_id;
+
+  FOR v_feature_id IN
+    SELECT touched.feature_id
+    FROM (
+      SELECT candidate.feature_id
+      FROM feature.theme_feature_candidates AS candidate
+      WHERE candidate.rule_id = p_rule_id
+        AND candidate.disposition = 'active'
+      UNION
+      SELECT link.feature_id
+      FROM provider_sync.source_entities AS entity
+      JOIN provider_sync.source_links AS link
+        ON link.source_entity_key = entity.source_entity_key
+      WHERE entity.provider_dataset_id = v_provider_dataset_id
+    ) AS touched
+    ORDER BY touched.feature_id
+  LOOP
+    PERFORM pg_advisory_xact_lock(
+      hashtextextended('feature-write:' || v_feature_id, 0)
+    );
+  END LOOP;
+  PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
+
+  -- Common order after every Feature advisory fence: catalog → source evidence
+  -- → link → Feature → candidate.
+  SELECT rule.* INTO STRICT v_rule
+  FROM feature.curated_source_rules AS rule
+  WHERE rule.rule_id = p_rule_id
+  FOR SHARE;
+  PERFORM 1 FROM feature.curated_themes AS theme
+  WHERE theme.theme_id = v_rule.theme_id FOR SHARE;
+  SELECT source.* INTO STRICT v_source
+  FROM feature.curated_sources AS source
+  WHERE source.source_id = v_rule.source_id
+  FOR SHARE;
+  v_provider_dataset_id := v_source.provider_dataset_id;
+  PERFORM 1 FROM provider_sync.provider_datasets AS dataset
+  WHERE dataset.provider_dataset_id = v_provider_dataset_id FOR SHARE;
+  PERFORM 1 FROM provider_sync.source_entities AS entity
+  WHERE entity.provider_dataset_id = v_provider_dataset_id
+  ORDER BY entity.source_entity_key FOR SHARE;
+  PERFORM 1 FROM provider_sync.source_entity_heads AS head
+  JOIN provider_sync.source_entities AS entity
+    ON entity.source_entity_key = head.source_entity_key
+  WHERE entity.provider_dataset_id = v_provider_dataset_id
+  ORDER BY head.source_entity_key FOR SHARE OF head;
+  PERFORM 1 FROM provider_sync.source_records AS record
+  JOIN provider_sync.source_entity_heads AS head
+    ON head.source_entity_key = record.source_entity_key
+   AND head.current_source_record_key = record.source_record_key
+  JOIN provider_sync.source_entities AS entity
+    ON entity.source_entity_key = head.source_entity_key
+  WHERE entity.provider_dataset_id = v_provider_dataset_id
+  ORDER BY record.source_entity_key, record.source_record_key FOR SHARE OF record;
+  PERFORM 1 FROM provider_sync.source_links AS link
+  JOIN provider_sync.source_entities AS entity
+    ON entity.source_entity_key = link.source_entity_key
+  WHERE entity.provider_dataset_id = v_provider_dataset_id
+  ORDER BY link.source_entity_key, link.feature_id FOR SHARE OF link;
+  PERFORM 1 FROM feature.features AS core
+  WHERE core.feature_id IN (
+    SELECT candidate.feature_id
+    FROM feature.theme_feature_candidates AS candidate
+    WHERE candidate.rule_id = p_rule_id AND candidate.disposition = 'active'
+    UNION
+    SELECT link.feature_id
+    FROM provider_sync.source_entities AS entity
+    JOIN provider_sync.source_links AS link
+      ON link.source_entity_key = entity.source_entity_key
+    WHERE entity.provider_dataset_id = v_provider_dataset_id
+  )
+  ORDER BY core.feature_id FOR SHARE;
+  PERFORM 1 FROM feature.theme_feature_candidates AS candidate
+  WHERE candidate.rule_id = p_rule_id
+  ORDER BY candidate.feature_id, candidate.candidate_id FOR UPDATE;
+
+  IF NOT v_is_provider THEN
+    SELECT operation.* INTO STRICT v_operation
+    FROM ops.curation_rule_reconcile_operations AS operation
+    WHERE operation.operation_id = p_reconcile_operation_id
+    FOR SHARE;
+    IF v_operation.rule_id <> p_rule_id
+     OR v_operation.after_rule_revision <> v_rule.row_revision
+     OR v_operation.command_id IS DISTINCT FROM p_command_id THEN
+    RAISE EXCEPTION 'reconcile operation does not match the locked rule/command'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_reconcile_operation';
+    END IF;
+    IF p_command_id IS NOT NULL AND NOT EXISTS (
+    SELECT 1
+    FROM ops.domain_commands AS command_receipt
+    WHERE command_receipt.command_id = p_command_id
+      AND command_receipt.actor = v_operation.actor
+    ) THEN
+      RAISE EXCEPTION 'reconcile command actor does not match its operation receipt'
+        USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_reconcile_command';
+    END IF;
+    v_actor := v_operation.actor;
+
+    SELECT count(*), encode(
+    x_extension.digest(
+      COALESCE(
+        string_agg(
+          convert_to(member.member_kind, 'UTF8') || decode('00', 'hex') ||
+          convert_to(member.member_key, 'UTF8') || decode('00', 'hex') ||
+          convert_to(COALESCE(member.before_identity_hash, ''), 'UTF8') || decode('00', 'hex') ||
+          convert_to(COALESCE(member.after_identity_hash, ''), 'UTF8') ||
+          convert_to(E'\n', 'UTF8'),
+          ''::bytea ORDER BY member.member_kind, member.member_key
+        ),
+        ''::bytea
+      ),
+      'sha256'
+    ),
+    'hex'
+  )
+  INTO STRICT v_scope_member_count, v_scope_members_hash
+  FROM ops.curation_rule_reconcile_scope_members AS member
+  WHERE member.operation_id = p_reconcile_operation_id;
+    IF v_scope_member_count <> v_operation.scope_member_count
+     OR v_scope_members_hash <> v_operation.scope_members_hash THEN
+    RAISE EXCEPTION 'reconcile operation scope receipt is not sealed'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_reconcile_scope_hash';
+    END IF;
+
+    SELECT count(*) INTO STRICT v_expected_scope_member_count
+  FROM (
+    SELECT 'source_entity'::text AS member_kind, entity.source_entity_key AS member_key
+    FROM provider_sync.source_entities AS entity
+    WHERE entity.provider_dataset_id = v_provider_dataset_id
+    UNION
+    SELECT 'feature'::text, link.feature_id
+    FROM provider_sync.source_entities AS entity
+    JOIN provider_sync.source_links AS link
+      ON link.source_entity_key = entity.source_entity_key
+    WHERE entity.provider_dataset_id = v_provider_dataset_id
+  ) AS expected_scope;
+    IF v_expected_scope_member_count <> v_scope_member_count
+     OR EXISTS (
+       (SELECT member.member_kind, member.member_key
+        FROM ops.curation_rule_reconcile_scope_members AS member
+        WHERE member.operation_id = p_reconcile_operation_id
+        EXCEPT
+        SELECT expected.member_kind, expected.member_key
+        FROM (
+          SELECT 'source_entity'::text AS member_kind,
+                 entity.source_entity_key AS member_key
+          FROM provider_sync.source_entities AS entity
+          WHERE entity.provider_dataset_id = v_provider_dataset_id
+          UNION
+          SELECT 'feature'::text, link.feature_id
+          FROM provider_sync.source_entities AS entity
+          JOIN provider_sync.source_links AS link
+            ON link.source_entity_key = entity.source_entity_key
+          WHERE entity.provider_dataset_id = v_provider_dataset_id
+        ) AS expected)
+       UNION ALL
+       (SELECT expected.member_kind, expected.member_key
+        FROM (
+          SELECT 'source_entity'::text AS member_kind,
+                 entity.source_entity_key AS member_key
+          FROM provider_sync.source_entities AS entity
+          WHERE entity.provider_dataset_id = v_provider_dataset_id
+          UNION
+          SELECT 'feature'::text, link.feature_id
+          FROM provider_sync.source_entities AS entity
+          JOIN provider_sync.source_links AS link
+            ON link.source_entity_key = entity.source_entity_key
+          WHERE entity.provider_dataset_id = v_provider_dataset_id
+        ) AS expected
+        EXCEPT
+        SELECT member.member_kind, member.member_key
+        FROM ops.curation_rule_reconcile_scope_members AS member
+        WHERE member.operation_id = p_reconcile_operation_id)
+     ) THEN
+    RAISE EXCEPTION 'reconcile operation scope does not equal the DB-derived scope'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_reconcile_scope_set';
+    END IF;
+  ELSE
+    SELECT job.* INTO STRICT v_source_job
+    FROM ops.import_jobs AS job
+    WHERE job.job_id = p_source_job_id
+    FOR SHARE;
+    IF v_source_job.kind <> 'provider_feature_load'
+       OR v_source_job.status <> 'done'
+       OR v_source_job.parent_job_id IS NULL
+       OR (
+         v_source_job.cancellation_id IS NOT NULL
+         AND NOT (
+           session_user = 'ktm_feature_api_runtime'
+           AND v_source_job.parent_job_id::text = current_setting(
+             'ktm.curation_cancellation_root', true
+           )
+           AND EXISTS (
+             SELECT 1
+             FROM ops.import_jobs AS root
+             JOIN ops.pipeline_cancellation_members AS cancellation_member
+               ON cancellation_member.cancellation_id = root.cancellation_id
+              AND cancellation_member.job_id = root.job_id
+             JOIN ops.pipeline_cancellation_runs AS cancellation_run
+               ON cancellation_run.cancellation_id = cancellation_member.cancellation_id
+              AND cancellation_run.dagster_run_id = cancellation_member.dagster_run_id
+             WHERE root.job_id = v_source_job.parent_job_id
+               AND root.cancellation_id = v_source_job.cancellation_id
+               AND cancellation_member.result = 'already_terminal'
+               AND cancellation_member.terminal_status = 'done'
+               AND cancellation_run.result = 'already_terminal'
+               AND cancellation_run.terminal_status = 'SUCCESS'
+           )
+         )
+       )
+       OR v_source_job.quarantined_at IS NOT NULL
+       OR COALESCE(
+         (v_source_job.payload ->> 'authoritative_snapshot_complete')::boolean,
+         false
+       ) IS NOT TRUE
+       OR NOT EXISTS (
+         SELECT 1
+         FROM ops.import_jobs AS root
+         WHERE root.job_id = v_source_job.parent_job_id
+           AND root.kind = 'provider_feature_load_run'
+           AND root.dagster_run_id = v_source_job.dagster_run_id
+           AND (
+             root.cancellation_id IS NULL
+             OR (
+               session_user = 'ktm_feature_api_runtime'
+               AND root.job_id::text = current_setting(
+                 'ktm.curation_cancellation_root', true
+               )
+               AND root.cancellation_id = v_source_job.cancellation_id
+             )
+           )
+           AND root.quarantined_at IS NULL
+       )
+       OR (SELECT count(*) FROM ops.import_job_datasets AS member
+           WHERE member.job_id = p_source_job_id) <> 1
+       OR NOT EXISTS (
+         SELECT 1
+         FROM ops.import_job_datasets AS member
+         WHERE member.job_id = p_source_job_id
+           AND member.provider_dataset_id = v_provider_dataset_id
+           AND member.sync_scope = 'dataset_wide'
+       )
+       OR (
+         v_source_job.payload ? 'candidate_generation_sealed_at'
+         AND NOT EXISTS (
+           SELECT 1
+           FROM feature.theme_candidate_generations AS generation
+           WHERE generation.rule_id = p_rule_id
+             AND generation.source_job_id = p_source_job_id
+             AND generation.generation_kind = 'provider_full_snapshot'
+         )
+       ) THEN
+      RAISE EXCEPTION 'provider generation requires an authoritative done single-member dataset snapshot'
+        USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_provider_job';
+    END IF;
+    v_actor := 'provider:' || v_provider_dataset_id::text;
+  END IF;
+
+  v_rule_input := feature.current_curation_rule_input(p_rule_id);
+  IF v_rule_input IS NULL THEN
+    RAISE EXCEPTION 'locked rule input could not be materialized'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_rule_input';
+  END IF;
+  v_rule_input_hash := encode(
+    x_extension.digest(convert_to(v_rule_input::text, 'UTF8'), 'sha256'), 'hex'
+  );
+  IF NOT v_is_provider
+     AND v_operation.after_rule_input_hash <> v_rule_input_hash THEN
+    RAISE EXCEPTION 'reconcile operation rule hash is stale'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_reconcile_rule_hash';
+  END IF;
+
+  SELECT count(*), encode(
+    x_extension.digest(
+      convert_to(
+        COALESCE(
+          jsonb_agg(
+            jsonb_build_array(
+              expected.source_entity_key,
+              expected.source_record_key,
+              expected.source_record_hash,
+              expected.feature_id,
+              expected.candidate_input_hash
+            ) ORDER BY expected.source_entity_key, expected.feature_id
+          )::text,
+          '[]'
+        ),
+        'UTF8'
+      ),
+      'sha256'
+    ),
+    'hex'
+  )
+  INTO STRICT v_expected_candidate_count, o_generation_input_set_hash
+  FROM (
+    SELECT entity.source_entity_key, snapshot.source_record_key,
+           snapshot.source_record_hash, link.feature_id,
+           snapshot.candidate_input_hash
+    FROM provider_sync.source_entities AS entity
+    JOIN provider_sync.source_links AS link
+      ON link.source_entity_key = entity.source_entity_key
+    CROSS JOIN LATERAL feature.current_theme_candidate_snapshot(
+      p_rule_id, entity.source_entity_key, link.feature_id
+    ) AS snapshot
+    WHERE entity.provider_dataset_id = v_provider_dataset_id
+  ) AS expected;
+
+  v_expected_generation_key := CASE
+    WHEN v_is_provider THEN 'provider-full-snapshot:'
+    ELSE 'rule-reconcile:'
+  END || encode(
+    x_extension.digest(
+      convert_to(
+        p_rule_id::text || ':' ||
+        COALESCE(p_source_job_id::text, p_reconcile_operation_id::text) || ':' ||
+        v_rule.row_revision::text || ':' || v_rule_input_hash || ':' ||
+        o_generation_input_set_hash,
+        'UTF8'
+      ),
+      'sha256'
+    ),
+    'hex'
+  );
+  IF p_generation_key IS NOT NULL
+     AND p_generation_key <> v_expected_generation_key THEN
+    RAISE EXCEPTION 'generation key is not the server-derived operation key'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_generation_key';
+  END IF;
+
+  SELECT generation.* INTO v_existing_generation
+  FROM feature.theme_candidate_generations AS generation
+  WHERE generation.rule_id = p_rule_id
+    AND (
+      (v_is_provider AND generation.source_job_id = p_source_job_id)
+      OR
+      (NOT v_is_provider
+       AND generation.reconcile_operation_id = p_reconcile_operation_id)
+    );
+  IF FOUND THEN
+    IF v_existing_generation.generation_kind <> p_generation_kind
+       OR v_existing_generation.source_job_id IS DISTINCT FROM p_source_job_id
+       OR v_existing_generation.reconcile_operation_id
+          IS DISTINCT FROM p_reconcile_operation_id
+       OR v_existing_generation.command_id IS DISTINCT FROM p_command_id
+       OR v_existing_generation.generation_key <> v_expected_generation_key
+       OR v_existing_generation.rule_row_revision <> v_rule.row_revision
+       OR v_existing_generation.rule_input_hash <> v_rule_input_hash
+       OR v_existing_generation.rule_input <> v_rule_input
+       OR v_existing_generation.generation_input_set_hash <> o_generation_input_set_hash
+       OR v_existing_generation.observed_candidate_count <> v_expected_candidate_count
+       OR EXISTS (
+         (SELECT candidate.candidate_id, candidate.source_entity_key,
+                 candidate.feature_id, candidate.source_record_key,
+                 candidate.candidate_input_hash
+          FROM provider_sync.source_entities AS entity
+          JOIN provider_sync.source_links AS link
+            ON link.source_entity_key = entity.source_entity_key
+          CROSS JOIN LATERAL feature.current_theme_candidate_snapshot(
+            p_rule_id, entity.source_entity_key, link.feature_id
+          ) AS snapshot
+          JOIN feature.theme_feature_candidates AS candidate
+            ON candidate.rule_id = p_rule_id
+           AND candidate.source_entity_key = entity.source_entity_key
+           AND candidate.feature_id = link.feature_id
+          WHERE entity.provider_dataset_id = v_provider_dataset_id
+          EXCEPT
+          SELECT observation.candidate_id, observation.source_entity_key,
+                 observation.feature_id, observation.source_record_key,
+                 observation.candidate_input_hash
+          FROM feature.theme_candidate_generation_observations AS observation
+          WHERE observation.generation_id = v_existing_generation.generation_id)
+         UNION ALL
+         (SELECT observation.candidate_id, observation.source_entity_key,
+                 observation.feature_id, observation.source_record_key,
+                 observation.candidate_input_hash
+          FROM feature.theme_candidate_generation_observations AS observation
+          WHERE observation.generation_id = v_existing_generation.generation_id
+          EXCEPT
+          SELECT candidate.candidate_id, candidate.source_entity_key,
+                 candidate.feature_id, candidate.source_record_key,
+                 candidate.candidate_input_hash
+          FROM provider_sync.source_entities AS entity
+          JOIN provider_sync.source_links AS link
+            ON link.source_entity_key = entity.source_entity_key
+          CROSS JOIN LATERAL feature.current_theme_candidate_snapshot(
+            p_rule_id, entity.source_entity_key, link.feature_id
+          ) AS snapshot
+          JOIN feature.theme_feature_candidates AS candidate
+            ON candidate.rule_id = p_rule_id
+           AND candidate.source_entity_key = entity.source_entity_key
+           AND candidate.feature_id = link.feature_id
+          WHERE entity.provider_dataset_id = v_provider_dataset_id)
+       ) OR EXISTS (
+         SELECT 1
+         FROM feature.theme_feature_candidates AS candidate
+         WHERE candidate.rule_id = p_rule_id
+           AND candidate.disposition = 'active'
+           AND candidate.eligibility_present
+           AND NOT EXISTS (
+             SELECT 1
+             FROM provider_sync.source_entities AS entity
+             JOIN provider_sync.source_links AS link
+               ON link.source_entity_key = entity.source_entity_key
+             CROSS JOIN LATERAL feature.current_theme_candidate_snapshot(
+               p_rule_id, entity.source_entity_key, link.feature_id
+             ) AS snapshot
+             WHERE entity.provider_dataset_id = v_provider_dataset_id
+               AND entity.source_entity_key = candidate.source_entity_key
+               AND link.feature_id = candidate.feature_id
+           )
+       ) THEN
+      RAISE EXCEPTION 'generation replay no longer matches current canonical input'
+        USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_generation_replay';
+    END IF;
+    o_generation_id := v_existing_generation.generation_id;
+    o_observed_candidate_count := v_existing_generation.observed_candidate_count;
+    o_eligibility_removed_candidate_count :=
+      v_existing_generation.eligibility_removed_candidate_count;
+    o_replayed := true;
+    RETURN;
+  END IF;
+
+  SELECT count(*) INTO STRICT v_expected_removed_count
+  FROM feature.theme_feature_candidates AS candidate
+  WHERE candidate.rule_id = p_rule_id
+    AND candidate.disposition = 'active'
+    AND candidate.eligibility_present
+    AND NOT EXISTS (
+      SELECT 1
+      FROM provider_sync.source_entities AS entity
+      JOIN provider_sync.source_links AS link
+        ON link.source_entity_key = entity.source_entity_key
+      CROSS JOIN LATERAL feature.current_theme_candidate_snapshot(
+        p_rule_id, entity.source_entity_key, link.feature_id
+      ) AS snapshot
+      WHERE entity.provider_dataset_id = v_provider_dataset_id
+        AND entity.source_entity_key = candidate.source_entity_key
+        AND link.feature_id = candidate.feature_id
+    );
+
+  o_generation_id := x_extension.gen_random_uuid();
+  INSERT INTO feature.theme_candidate_generations (
+    generation_id, rule_id, rule_row_revision, generation_kind,
+    source_job_id, reconcile_operation_id, command_id, generation_key,
+    rule_input_hash, rule_input, generation_input_set_hash,
+    observed_candidate_count, eligibility_removed_candidate_count
+  ) VALUES (
+    o_generation_id, p_rule_id, v_rule.row_revision, p_generation_kind,
+    p_source_job_id, p_reconcile_operation_id, p_command_id,
+    v_expected_generation_key,
+    v_rule_input_hash, v_rule_input, o_generation_input_set_hash,
+    v_expected_candidate_count, v_expected_removed_count
+  );
+
+  FOR v_expected IN
+    SELECT entity.source_entity_key, link.feature_id,
+           snapshot.rule_row_revision, snapshot.rule_input_hash,
+           snapshot.source_record_key, snapshot.source_record_hash,
+           snapshot.candidate_input_hash, snapshot.match_evidence
+    FROM provider_sync.source_entities AS entity
+    JOIN provider_sync.source_links AS link
+      ON link.source_entity_key = entity.source_entity_key
+    CROSS JOIN LATERAL feature.current_theme_candidate_snapshot(
+      p_rule_id, entity.source_entity_key, link.feature_id
+    ) AS snapshot
+    WHERE entity.provider_dataset_id = v_provider_dataset_id
+    ORDER BY entity.source_entity_key, link.feature_id
+  LOOP
+    SELECT candidate.* INTO v_candidate
+    FROM feature.theme_feature_candidates AS candidate
+    WHERE candidate.rule_id = p_rule_id
+      AND candidate.source_entity_key = v_expected.source_entity_key
+      AND candidate.feature_id = v_expected.feature_id
+    FOR UPDATE;
+    IF NOT FOUND THEN
+      v_candidate_id := x_extension.gen_random_uuid();
+      INSERT INTO feature.theme_feature_candidates (
+        candidate_id, rule_id, source_entity_key, feature_id,
+        source_record_key, rule_row_revision, rule_input_hash,
+        source_record_hash, candidate_input_hash, review_state,
+        eligibility_present, disposition, rank_score, match_evidence,
+        row_revision
+      ) VALUES (
+        v_candidate_id, p_rule_id, v_expected.source_entity_key,
+        v_expected.feature_id, v_expected.source_record_key,
+        v_expected.rule_row_revision, v_expected.rule_input_hash,
+        v_expected.source_record_hash, v_expected.candidate_input_hash,
+        'open', true, 'active', v_rule.priority,
+        v_expected.match_evidence, 1
+      );
+      v_candidate_revision := 1;
+      PERFORM feature.append_theme_feature_candidate_transition(
+        v_candidate_id, NULL, v_expected.feature_id, p_rule_id,
+        v_expected.source_entity_key, NULL, 'open', NULL, true,
+        NULL, 'active', NULL, 'eligibility_materialize',
+        v_candidate_revision, v_rule.row_revision, v_rule_input_hash,
+        v_expected.candidate_input_hash, o_generation_id,
+        v_provider_dataset_id, v_expected.source_record_key,
+        v_expected.source_record_hash, NULL, NULL, NULL,
+        v_actor, 'rule_match',
+        jsonb_strip_nulls(jsonb_build_object(
+          'schema_version', 1,
+          'generation_kind', p_generation_kind,
+          'source_job_id', p_source_job_id::text,
+          'reconcile_operation_id', p_reconcile_operation_id::text
+        ))
+      );
+    ELSE
+      IF v_candidate.disposition <> 'active' THEN
+        RAISE EXCEPTION 'generation cannot reactivate a merged candidate tombstone'
+          USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_active_generation';
+      END IF;
+      v_candidate_id := v_candidate.candidate_id;
+      v_candidate_revision := v_candidate.row_revision;
+      IF NOT v_candidate.eligibility_present
+         OR v_candidate.rule_input_hash <> v_expected.rule_input_hash
+         OR v_candidate.source_record_key <> v_expected.source_record_key
+         OR v_candidate.source_record_hash <> v_expected.source_record_hash
+         OR v_candidate.candidate_input_hash <> v_expected.candidate_input_hash THEN
+        v_transition_kind := CASE
+          WHEN v_candidate.eligibility_present THEN 'eligibility_refresh'
+          ELSE 'eligibility_restore'
+        END;
+        UPDATE feature.theme_feature_candidates AS candidate
+        SET source_record_key = v_expected.source_record_key,
+            rule_row_revision = v_expected.rule_row_revision,
+            rule_input_hash = v_expected.rule_input_hash,
+            source_record_hash = v_expected.source_record_hash,
+            candidate_input_hash = v_expected.candidate_input_hash,
+            eligibility_present = true,
+            rank_score = v_rule.priority,
+            match_evidence = v_expected.match_evidence,
+            row_revision = candidate.row_revision + 1,
+            updated_at = clock_timestamp()
+        WHERE candidate.candidate_id = v_candidate.candidate_id
+        RETURNING candidate.row_revision INTO STRICT v_candidate_revision;
+        PERFORM feature.append_theme_feature_candidate_transition(
+          v_candidate.candidate_id, v_candidate.feature_id,
+          v_candidate.feature_id, p_rule_id, v_candidate.source_entity_key,
+          v_candidate.review_state, v_candidate.review_state,
+          v_candidate.eligibility_present, true,
+          v_candidate.disposition, v_candidate.disposition, NULL,
+          v_transition_kind, v_candidate_revision, v_rule.row_revision,
+          v_rule_input_hash, v_expected.candidate_input_hash,
+          o_generation_id, v_provider_dataset_id,
+          v_expected.source_record_key, v_expected.source_record_hash,
+          NULL, NULL, NULL, v_actor, 'rule_match',
+          jsonb_strip_nulls(jsonb_build_object(
+            'schema_version', 1,
+            'generation_kind', p_generation_kind,
+            'source_job_id', p_source_job_id::text,
+            'reconcile_operation_id', p_reconcile_operation_id::text
+          ))
+        );
+      END IF;
+    END IF;
+
+    INSERT INTO feature.theme_candidate_generation_observations (
+      generation_id, candidate_id, source_entity_key, feature_id,
+      source_record_key, candidate_input_hash
+    ) VALUES (
+      o_generation_id, v_candidate_id, v_expected.source_entity_key,
+      v_expected.feature_id, v_expected.source_record_key,
+      v_expected.candidate_input_hash
+    );
+  END LOOP;
+
+  FOR v_candidate IN
+    SELECT candidate.*
+    FROM feature.theme_feature_candidates AS candidate
+    WHERE candidate.rule_id = p_rule_id
+      AND candidate.disposition = 'active'
+      AND candidate.eligibility_present
+      AND NOT EXISTS (
+        SELECT 1
+        FROM provider_sync.source_entities AS entity
+        JOIN provider_sync.source_links AS link
+          ON link.source_entity_key = entity.source_entity_key
+        CROSS JOIN LATERAL feature.current_theme_candidate_snapshot(
+          p_rule_id, entity.source_entity_key, link.feature_id
+        ) AS snapshot
+        WHERE entity.provider_dataset_id = v_provider_dataset_id
+          AND entity.source_entity_key = candidate.source_entity_key
+          AND link.feature_id = candidate.feature_id
+      )
+    ORDER BY candidate.feature_id, candidate.candidate_id
+    FOR UPDATE
+  LOOP
+    v_reason_code := CASE
+      WHEN NOT v_rule.enabled OR v_rule.default_action <> 'candidate'
+        OR v_rule.archived_at IS NOT NULL
+      THEN 'rule_disabled'
+      ELSE 'rule_no_match'
+    END;
+    UPDATE feature.theme_feature_candidates AS candidate
+    SET eligibility_present = false,
+        row_revision = candidate.row_revision + 1,
+        updated_at = clock_timestamp()
+    WHERE candidate.candidate_id = v_candidate.candidate_id
+    RETURNING candidate.row_revision INTO STRICT v_candidate_revision;
+    PERFORM feature.append_theme_feature_candidate_transition(
+      v_candidate.candidate_id, v_candidate.feature_id,
+      v_candidate.feature_id, p_rule_id, v_candidate.source_entity_key,
+      v_candidate.review_state, v_candidate.review_state,
+      true, false, v_candidate.disposition, v_candidate.disposition, NULL,
+      'eligibility_remove', v_candidate_revision, v_rule.row_revision,
+      v_rule_input_hash, v_candidate.candidate_input_hash,
+      o_generation_id, v_provider_dataset_id,
+      v_candidate.source_record_key, v_candidate.source_record_hash,
+      NULL, NULL, NULL, v_actor, v_reason_code,
+      jsonb_strip_nulls(jsonb_build_object(
+        'schema_version', 1,
+        'generation_kind', p_generation_kind,
+        'source_job_id', p_source_job_id::text,
+        'reconcile_operation_id', p_reconcile_operation_id::text
+      ))
+    );
+  END LOOP;
+
+  IF (SELECT count(*)
+      FROM feature.theme_candidate_generation_observations AS observation
+      WHERE observation.generation_id = o_generation_id)
+       <> v_expected_candidate_count
+     OR EXISTS (
+       SELECT 1
+       FROM feature.theme_feature_candidates AS candidate
+       WHERE candidate.rule_id = p_rule_id
+         AND candidate.disposition = 'active'
+         AND candidate.eligibility_present
+         AND NOT EXISTS (
+           SELECT 1
+           FROM feature.theme_candidate_generation_observations AS observation
+           WHERE observation.generation_id = o_generation_id
+             AND observation.candidate_id = candidate.candidate_id
+         )
+     ) THEN
+    RAISE EXCEPTION 'generation observation set is not complete'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_generation_complete';
+  END IF;
+
+  o_observed_candidate_count := v_expected_candidate_count;
+  o_eligibility_removed_candidate_count := v_expected_removed_count;
+  o_replayed := false;
+END
+$$;
+
+
+ALTER PROCEDURE feature.materialize_theme_candidate_generation(IN p_rule_id uuid, IN p_generation_kind text, IN p_source_job_id uuid, IN p_reconcile_operation_id uuid, IN p_command_id bigint, IN p_generation_key text, IN p_context jsonb, OUT o_generation_id uuid, OUT o_observed_candidate_count bigint, OUT o_eligibility_removed_candidate_count bigint, OUT o_generation_input_set_hash text, OUT o_replayed boolean) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: merge_lock_curation_collections(text, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.merge_lock_curation_collections(IN p_master text, IN p_loser text)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
+    AS $$
+BEGIN
+    -- 0214와 같은 executor 게이트. admin executor(api runtime이 상속)만 부를 수 있고
+    -- provider executor(dagster runtime)는 거부한다. EXECUTE grant와 이중이다.
+    IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+       OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+        RAISE EXCEPTION 'merge command requires the admin executor'
+            USING ERRCODE = '42501';
+    END IF;
+    PERFORM collection.collection_id
+    FROM feature.curation_collections AS collection
+    WHERE EXISTS (
+        SELECT 1
+        FROM feature.curation_items AS item
+        WHERE item.collection_id = collection.collection_id
+          AND item.feature_id IN (p_master, p_loser)
+    )
+    ORDER BY collection.collection_id
+    FOR UPDATE OF collection;
+END;
+$$;
+
+
+ALTER PROCEDURE feature.merge_lock_curation_collections(IN p_master text, IN p_loser text) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: patch_curated_source_command(uuid, bigint, text, text, text, text, text, text, text, jsonb, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.patch_curated_source_command(IN p_source_id uuid, IN p_expected_source_revision bigint, IN p_source_name text, IN p_source_url text, IN p_source_kind text, IN p_license text, IN p_update_cycle text, IN p_freshness_note text, IN p_provider_status text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_source_id uuid, OUT o_source_revision bigint, OUT o_observation_revision bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops'
+    AS $$
+DECLARE
+  v_command ops.domain_commands%ROWTYPE;
+  v_source feature.curated_sources%ROWTYPE;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'source command requires SERIALIZABLE transaction' USING ERRCODE = '25001';
+  END IF;
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    RAISE EXCEPTION 'source command requires the admin executor' USING ERRCODE = '42501';
+  END IF;
+  IF p_principal IS NULL OR p_principal <> btrim(p_principal) OR p_principal = ''
+     OR p_source_name IS NULL OR p_source_name <> btrim(p_source_name) OR p_source_name = ''
+     OR p_source_kind NOT IN ('openapi','filedata','standard','internal','manual')
+     OR p_update_cycle NOT IN ('realtime','daily','weekly','monthly','annual','one_time','unknown')
+     OR p_provider_status NOT IN ('implemented','provider_needed','manual_only','deprecated')
+     OR jsonb_typeof(p_metadata) <> 'object' THEN
+    RAISE EXCEPTION 'source command input is not canonical'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_source_command_input';
+  END IF;
+  SELECT command.* INTO STRICT v_command
+  FROM ops.domain_commands AS command WHERE command.command_id = p_command_id;
+  IF v_command.actor <> p_principal OR v_command.operation <> 'admin.curated-source.patch' THEN
+    RAISE EXCEPTION 'domain command does not match source patch'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_source_domain_command';
+  END IF;
+  PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
+  SELECT source.* INTO STRICT v_source FROM feature.curated_sources AS source
+  WHERE source.source_id = p_source_id FOR UPDATE;
+  IF v_source.row_revision <> p_expected_source_revision THEN
+    RAISE EXCEPTION 'source revision mismatch'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_expected_revision';
+  END IF;
+  IF v_source.archived_at IS NOT NULL THEN
+    RAISE EXCEPTION 'archived source cannot be patched'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_source_active';
+  END IF;
+  PERFORM feature.claim_curation_catalog_command_effect(
+    p_command_id, v_command.operation, 'source', v_source.source_id
+  );
+  IF v_source.source_name = p_source_name
+     AND v_source.source_url IS NOT DISTINCT FROM p_source_url
+     AND v_source.source_kind = p_source_kind
+     AND v_source.license IS NOT DISTINCT FROM p_license
+     AND v_source.update_cycle = p_update_cycle
+     AND v_source.freshness_note IS NOT DISTINCT FROM p_freshness_note
+     AND v_source.provider_status = p_provider_status
+     AND v_source.metadata = p_metadata THEN
+    o_source_id := v_source.source_id;
+    o_source_revision := v_source.row_revision;
+    o_observation_revision := v_source.observation_revision;
+    RETURN;
+  END IF;
+  UPDATE feature.curated_sources AS source
+  SET source_name = p_source_name, source_url = p_source_url,
+      source_kind = p_source_kind, license = p_license,
+      update_cycle = p_update_cycle, freshness_note = p_freshness_note,
+      provider_status = p_provider_status, metadata = p_metadata,
+      row_revision = source.row_revision + 1, updated_at = clock_timestamp()
+  WHERE source.source_id = p_source_id
+  RETURNING source.source_id, source.row_revision, source.observation_revision
+    INTO STRICT o_source_id, o_source_revision, o_observation_revision;
+END
+$$;
+
+
+ALTER PROCEDURE feature.patch_curated_source_command(IN p_source_id uuid, IN p_expected_source_revision bigint, IN p_source_name text, IN p_source_url text, IN p_source_kind text, IN p_license text, IN p_update_cycle text, IN p_freshness_note text, IN p_provider_status text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_source_id uuid, OUT o_source_revision bigint, OUT o_observation_revision bigint) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: patch_curated_source_rule_command(uuid, bigint, text, text, jsonb, jsonb, text, integer, boolean, jsonb, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.patch_curated_source_rule_command(IN p_rule_id uuid, IN p_expected_rule_revision bigint, IN p_place_kind text, IN p_category text, IN p_region_scope jsonb, IN p_detail_selector jsonb, IN p_default_action text, IN p_priority integer, IN p_enabled boolean, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_rule_id uuid, OUT o_rule_revision bigint, OUT o_generation_id uuid)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
+    AS $$
+DECLARE
+  v_command ops.domain_commands%ROWTYPE;
+  v_rule feature.curated_source_rules%ROWTYPE;
+  v_provider_dataset_id bigint;
+  v_prelock_count bigint;
+  v_prelock_hash text;
+  v_current_count bigint;
+  v_current_hash text;
+  v_before_input jsonb;
+  v_after_input jsonb;
+  v_before_hash text;
+  v_after_hash text;
+  v_operation_id uuid;
+  v_observed bigint;
+  v_removed bigint;
+  v_set_hash text;
+  v_replayed boolean;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'rule command requires SERIALIZABLE transaction'
+      USING ERRCODE = '25001';
+  END IF;
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    RAISE EXCEPTION 'rule command requires the admin executor'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_expected_rule_revision < 1 OR p_principal IS NULL
+     OR p_principal <> btrim(p_principal) OR p_principal = ''
+     OR p_default_action NOT IN ('candidate','ignore')
+     OR jsonb_typeof(p_region_scope) <> 'object'
+     OR (p_detail_selector IS NOT NULL AND jsonb_typeof(p_detail_selector) <> 'object')
+     OR jsonb_typeof(p_metadata) <> 'object' THEN
+    RAISE EXCEPTION 'rule command input is not canonical'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_rule_command_input';
+  END IF;
+  SELECT command.* INTO STRICT v_command
+  FROM ops.domain_commands AS command WHERE command.command_id = p_command_id;
+  IF v_command.actor <> p_principal
+     OR v_command.operation <> 'admin.curated-source-rule.patch' THEN
+    RAISE EXCEPTION 'domain command does not match rule patch'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_rule_domain_command';
+  END IF;
+
+  SELECT source.provider_dataset_id INTO STRICT v_provider_dataset_id
+  FROM feature.curated_source_rules AS rule
+  JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
+  WHERE rule.rule_id = p_rule_id;
+  SELECT count(*), encode(x_extension.digest(convert_to(
+    COALESCE(jsonb_agg(touched.feature_id ORDER BY touched.feature_id)::text, '[]'),
+    'UTF8'), 'sha256'), 'hex')
+  INTO STRICT v_prelock_count, v_prelock_hash
+  FROM (
+    SELECT candidate.feature_id FROM feature.theme_feature_candidates AS candidate
+    WHERE candidate.rule_id = p_rule_id AND candidate.disposition = 'active'
+    UNION
+    SELECT link.feature_id FROM provider_sync.source_entities AS entity
+    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
+    WHERE entity.provider_dataset_id = v_provider_dataset_id
+  ) AS touched;
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || touched.feature_id, 0))
+  FROM (
+    SELECT candidate.feature_id FROM feature.theme_feature_candidates AS candidate
+    WHERE candidate.rule_id = p_rule_id AND candidate.disposition = 'active'
+    UNION
+    SELECT link.feature_id FROM provider_sync.source_entities AS entity
+    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
+    WHERE entity.provider_dataset_id = v_provider_dataset_id
+  ) AS touched ORDER BY touched.feature_id;
+  PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
+
+  SELECT rule.* INTO STRICT v_rule FROM feature.curated_source_rules AS rule
+  WHERE rule.rule_id = p_rule_id FOR UPDATE;
+  PERFORM 1 FROM feature.curated_themes AS theme WHERE theme.theme_id = v_rule.theme_id FOR SHARE;
+  PERFORM 1 FROM feature.curated_sources AS source
+  WHERE source.source_id = v_rule.source_id
+    AND source.provider_dataset_id = v_provider_dataset_id FOR SHARE;
+  SELECT count(*), encode(x_extension.digest(convert_to(
+    COALESCE(jsonb_agg(touched.feature_id ORDER BY touched.feature_id)::text, '[]'),
+    'UTF8'), 'sha256'), 'hex')
+  INTO STRICT v_current_count, v_current_hash
+  FROM (
+    SELECT candidate.feature_id FROM feature.theme_feature_candidates AS candidate
+    WHERE candidate.rule_id = p_rule_id AND candidate.disposition = 'active'
+    UNION
+    SELECT link.feature_id FROM provider_sync.source_entities AS entity
+    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
+    WHERE entity.provider_dataset_id = v_provider_dataset_id
+  ) AS touched;
+  IF v_current_count <> v_prelock_count OR v_current_hash <> v_prelock_hash THEN
+    RAISE EXCEPTION 'rule patch scope changed while acquiring the catalog lock'
+      USING ERRCODE = '40001';
+  END IF;
+  IF v_rule.row_revision <> p_expected_rule_revision THEN
+    RAISE EXCEPTION 'rule revision mismatch'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_expected_revision';
+  END IF;
+  IF v_rule.archived_at IS NOT NULL THEN
+    RAISE EXCEPTION 'archived rule cannot be patched'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_rule_active';
+  END IF;
+  IF v_rule.owner_kind IS DISTINCT FROM 'operator' THEN
+    RAISE EXCEPTION 'provider-owned rule cannot be patched by an admin command'
+      USING ERRCODE = '42501';
+  END IF;
+  PERFORM feature.claim_curation_catalog_command_effect(
+    p_command_id, v_command.operation, 'rule', v_rule.rule_id
+  );
+  IF v_rule.place_kind IS NOT DISTINCT FROM p_place_kind
+     AND v_rule.category IS NOT DISTINCT FROM p_category
+     AND v_rule.region_scope = p_region_scope
+     AND v_rule.detail_selector IS NOT DISTINCT FROM p_detail_selector
+     AND v_rule.default_action = p_default_action
+     AND v_rule.priority = p_priority
+     AND v_rule.enabled = p_enabled
+     AND v_rule.metadata = p_metadata THEN
+    o_rule_id := v_rule.rule_id;
+    o_rule_revision := v_rule.row_revision;
+    o_generation_id := NULL;
+    RETURN;
+  END IF;
+  IF v_rule.place_kind IS NOT DISTINCT FROM p_place_kind
+     AND v_rule.category IS NOT DISTINCT FROM p_category
+     AND v_rule.region_scope = p_region_scope
+     AND v_rule.detail_selector IS NOT DISTINCT FROM p_detail_selector
+     AND v_rule.default_action = p_default_action
+     AND v_rule.priority = p_priority
+     AND v_rule.enabled = p_enabled THEN
+    UPDATE feature.curated_source_rules AS rule
+    SET metadata = p_metadata,
+        row_revision = rule.row_revision + 1,
+        updated_at = clock_timestamp()
+    WHERE rule.rule_id = p_rule_id
+    RETURNING rule.rule_id, rule.row_revision
+    INTO STRICT o_rule_id, o_rule_revision;
+    o_generation_id := NULL;
+    RETURN;
+  END IF;
+  v_before_input := feature.current_curation_rule_input(p_rule_id);
+  v_before_hash := encode(
+    x_extension.digest(convert_to(v_before_input::text, 'UTF8'), 'sha256'), 'hex'
+  );
+  UPDATE feature.curated_source_rules AS rule
+  SET place_kind = p_place_kind, category = p_category,
+      region_scope = p_region_scope, detail_selector = p_detail_selector,
+      default_action = p_default_action, priority = p_priority,
+      enabled = p_enabled, metadata = p_metadata,
+      row_revision = rule.row_revision + 1, updated_at = clock_timestamp()
+  WHERE rule.rule_id = p_rule_id
+  RETURNING rule.rule_id, rule.row_revision INTO STRICT o_rule_id, o_rule_revision;
+  v_after_input := feature.current_curation_rule_input(p_rule_id);
+  v_after_hash := encode(
+    x_extension.digest(convert_to(v_after_input::text, 'UTF8'), 'sha256'), 'hex'
+  );
+  v_operation_id := feature.create_curation_rule_reconcile_receipt(
+    p_rule_id, 'patch', v_rule.row_revision, o_rule_revision,
+    v_before_hash, v_after_hash, p_command_id, p_principal
+  );
+  CALL feature.materialize_theme_candidate_generation(
+    p_rule_id, 'rule_reconcile', NULL, v_operation_id, p_command_id, NULL,
+    jsonb_build_object('schema_version', 1, 'catalog_action', 'patch'),
+    o_generation_id, v_observed, v_removed, v_set_hash, v_replayed
+  );
+END
+$$;
+
+
+ALTER PROCEDURE feature.patch_curated_source_rule_command(IN p_rule_id uuid, IN p_expected_rule_revision bigint, IN p_place_kind text, IN p_category text, IN p_region_scope jsonb, IN p_detail_selector jsonb, IN p_default_action text, IN p_priority integer, IN p_enabled boolean, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_rule_id uuid, OUT o_rule_revision bigint, OUT o_generation_id uuid) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: patch_curated_theme_command(uuid, bigint, text, text, text, text, text, jsonb, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.patch_curated_theme_command(IN p_theme_id uuid, IN p_expected_theme_revision bigint, IN p_theme_slug text, IN p_theme_name text, IN p_theme_description text, IN p_theme_group text, IN p_visibility text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_theme_id uuid, OUT o_theme_revision bigint, OUT o_generation_count bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
+    AS $$
+DECLARE
+  v_command ops.domain_commands%ROWTYPE;
+  v_theme feature.curated_themes%ROWTYPE;
+  v_rule_id uuid;
+  v_feature_id text;
+  v_prelock_count bigint;
+  v_prelock_hash text;
+  v_current_count bigint;
+  v_current_hash text;
+  v_before_hashes jsonb := '{}'::jsonb;
+  v_before_hash text;
+  v_after_input jsonb;
+  v_after_hash text;
+  v_operation_id uuid;
+  v_generation_id uuid;
+  v_observed bigint;
+  v_removed bigint;
+  v_set_hash text;
+  v_replayed boolean;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'theme command requires SERIALIZABLE transaction'
+      USING ERRCODE = '25001';
+  END IF;
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    RAISE EXCEPTION 'theme command requires the admin executor'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_principal IS NULL OR p_principal <> btrim(p_principal) OR p_principal = ''
+     OR p_theme_slug IS NULL OR p_theme_slug <> btrim(p_theme_slug) OR p_theme_slug = ''
+     OR p_theme_name IS NULL OR p_theme_name <> btrim(p_theme_name) OR p_theme_name = ''
+     OR p_theme_description IS NULL
+     OR p_theme_group IS NULL OR p_theme_group <> btrim(p_theme_group) OR p_theme_group = ''
+     OR p_visibility NOT IN ('admin_only','public')
+     OR jsonb_typeof(p_metadata) <> 'object' THEN
+    RAISE EXCEPTION 'theme command input is not canonical'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_theme_command_input';
+  END IF;
+  SELECT command.* INTO STRICT v_command
+  FROM ops.domain_commands AS command WHERE command.command_id = p_command_id;
+  IF v_command.actor <> p_principal
+     OR v_command.operation <> 'admin.curated-theme.patch' THEN
+    RAISE EXCEPTION 'domain command does not match theme patch'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_theme_domain_command';
+  END IF;
+
+  SELECT count(*), encode(x_extension.digest(convert_to(
+    COALESCE(jsonb_agg(touched.feature_id ORDER BY touched.feature_id)::text, '[]'),
+    'UTF8'), 'sha256'), 'hex')
+  INTO STRICT v_prelock_count, v_prelock_hash
+  FROM (
+    SELECT DISTINCT candidate.feature_id
+    FROM feature.curated_source_rules AS rule
+    JOIN feature.theme_feature_candidates AS candidate ON candidate.rule_id = rule.rule_id
+    WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
+      AND candidate.disposition = 'active'
+    UNION
+    SELECT DISTINCT link.feature_id
+    FROM feature.curated_source_rules AS rule
+    JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
+    JOIN provider_sync.source_entities AS entity
+      ON entity.provider_dataset_id = source.provider_dataset_id
+    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
+    WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
+  ) AS touched;
+  FOR v_feature_id IN
+    SELECT touched.feature_id FROM (
+      SELECT candidate.feature_id
+      FROM feature.curated_source_rules AS rule
+      JOIN feature.theme_feature_candidates AS candidate ON candidate.rule_id = rule.rule_id
+      WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
+        AND candidate.disposition = 'active'
+      UNION
+      SELECT link.feature_id
+      FROM feature.curated_source_rules AS rule
+      JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
+      JOIN provider_sync.source_entities AS entity
+        ON entity.provider_dataset_id = source.provider_dataset_id
+      JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
+      WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
+    ) AS touched ORDER BY touched.feature_id
+  LOOP
+    PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || v_feature_id, 0));
+  END LOOP;
+  PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
+  SELECT theme.* INTO STRICT v_theme
+  FROM feature.curated_themes AS theme WHERE theme.theme_id = p_theme_id FOR UPDATE;
+  IF v_theme.row_revision <> p_expected_theme_revision THEN
+    RAISE EXCEPTION 'theme revision mismatch'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_expected_revision';
+  END IF;
+  IF v_theme.archived_at IS NOT NULL THEN
+    RAISE EXCEPTION 'archived theme cannot be patched'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_theme_active';
+  END IF;
+  IF v_theme.owner_kind IS DISTINCT FROM 'operator' THEN
+    RAISE EXCEPTION 'provider-owned theme cannot be patched by an admin command'
+      USING ERRCODE = '42501';
+  END IF;
+  PERFORM feature.claim_curation_catalog_command_effect(
+    p_command_id, v_command.operation, 'theme', v_theme.theme_id
+  );
+  PERFORM 1 FROM feature.curated_source_rules AS rule
+  WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
+  ORDER BY rule.rule_id FOR SHARE;
+  SELECT count(*), encode(x_extension.digest(convert_to(
+    COALESCE(jsonb_agg(touched.feature_id ORDER BY touched.feature_id)::text, '[]'),
+    'UTF8'), 'sha256'), 'hex')
+  INTO STRICT v_current_count, v_current_hash
+  FROM (
+    SELECT DISTINCT candidate.feature_id
+    FROM feature.curated_source_rules AS rule
+    JOIN feature.theme_feature_candidates AS candidate ON candidate.rule_id = rule.rule_id
+    WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
+      AND candidate.disposition = 'active'
+    UNION
+    SELECT DISTINCT link.feature_id
+    FROM feature.curated_source_rules AS rule
+    JOIN feature.curated_sources AS source ON source.source_id = rule.source_id
+    JOIN provider_sync.source_entities AS entity
+      ON entity.provider_dataset_id = source.provider_dataset_id
+    JOIN provider_sync.source_links AS link ON link.source_entity_key = entity.source_entity_key
+    WHERE rule.theme_id = p_theme_id AND rule.archived_at IS NULL
+  ) AS touched;
+  IF v_current_count <> v_prelock_count OR v_current_hash <> v_prelock_hash THEN
+    RAISE EXCEPTION 'theme patch scope changed while acquiring the catalog lock'
+      USING ERRCODE = '40001';
+  END IF;
+  IF v_theme.theme_slug = p_theme_slug AND v_theme.theme_name = p_theme_name
+     AND v_theme.theme_description = p_theme_description
+     AND v_theme.theme_group = p_theme_group AND v_theme.visibility = p_visibility
+     AND v_theme.metadata = p_metadata THEN
+    o_theme_id := v_theme.theme_id;
+    o_theme_revision := v_theme.row_revision;
+    o_generation_count := 0;
+    RETURN;
+  END IF;
+  UPDATE feature.curated_themes AS theme
+  SET theme_slug = p_theme_slug, theme_name = p_theme_name,
+      theme_description = p_theme_description, theme_group = p_theme_group,
+      visibility = p_visibility, metadata = p_metadata,
+      row_revision = theme.row_revision + 1, updated_at = clock_timestamp()
+  WHERE theme.theme_id = p_theme_id
+  RETURNING theme.theme_id, theme.row_revision INTO STRICT o_theme_id, o_theme_revision;
+  o_generation_count := 0;
+END
+$$;
+
+
+ALTER PROCEDURE feature.patch_curated_theme_command(IN p_theme_id uuid, IN p_expected_theme_revision bigint, IN p_theme_slug text, IN p_theme_name text, IN p_theme_description text, IN p_theme_group text, IN p_visibility text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_theme_id uuid, OUT o_theme_revision bigint, OUT o_generation_count bigint) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: patch_curation_collection_command(uuid, bigint, uuid, uuid, text, text, text, text, text, jsonb, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.patch_curation_collection_command(IN p_collection_id uuid, IN p_expected_collection_revision bigint, IN p_theme_id uuid, IN p_source_id uuid, IN p_title text, IN p_edition_key text, IN p_description text, IN p_status text, IN p_visibility text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_collection_id uuid, OUT o_collection_revision bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops'
+    AS $$
+DECLARE
+  v_command ops.domain_commands%ROWTYPE;
+  v_collection feature.curation_collections%ROWTYPE;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'collection command requires SERIALIZABLE transaction'
+      USING ERRCODE = '25001';
+  END IF;
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    RAISE EXCEPTION 'collection command requires the admin executor'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_principal IS NULL OR p_principal <> btrim(p_principal) OR p_principal = ''
+     OR p_collection_id IS NULL OR p_expected_collection_revision IS NULL
+     OR p_expected_collection_revision < 1 OR p_theme_id IS NULL
+     OR p_title IS NULL OR p_title <> btrim(p_title) OR p_title = ''
+     OR p_edition_key IS NULL OR p_edition_key <> btrim(p_edition_key)
+     OR p_status NOT IN ('draft','published')
+     OR p_visibility NOT IN ('admin_only','public')
+     OR jsonb_typeof(p_metadata) <> 'object' THEN
+    RAISE EXCEPTION 'collection command input is not canonical'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_collection_command_input';
+  END IF;
+  SELECT command.* INTO STRICT v_command
+  FROM ops.domain_commands AS command WHERE command.command_id = p_command_id;
+  IF v_command.actor <> p_principal
+     OR v_command.operation <> 'admin.curation-collection.patch' THEN
+    RAISE EXCEPTION 'domain command does not match collection patch'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_collection_domain_command';
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0));
+  PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
+  SELECT collection.* INTO STRICT v_collection
+  FROM feature.curation_collections AS collection
+  WHERE collection.collection_id = p_collection_id FOR UPDATE;
+  IF v_collection.row_revision <> p_expected_collection_revision THEN
+    RAISE EXCEPTION 'collection revision mismatch'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_collection_expected_revision';
+  END IF;
+  IF v_collection.archived_at IS NOT NULL THEN
+    RAISE EXCEPTION 'archived collection cannot be patched'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_collection_active';
+  END IF;
+  PERFORM 1 FROM feature.curated_themes AS theme
+  WHERE theme.theme_id = p_theme_id AND theme.archived_at IS NULL FOR SHARE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'active curated theme does not exist'
+      USING ERRCODE = '23503', CONSTRAINT = 'fk_tvn40_collection_active_theme';
+  END IF;
+  IF p_source_id IS NOT NULL THEN
+    PERFORM 1 FROM feature.curated_sources AS source
+    WHERE source.source_id = p_source_id AND source.archived_at IS NULL FOR SHARE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'active curated source does not exist'
+        USING ERRCODE = '23503', CONSTRAINT = 'fk_tvn40_collection_active_source';
+    END IF;
+  END IF;
+  PERFORM feature.claim_curation_catalog_command_effect(
+    p_command_id, v_command.operation, 'collection', p_collection_id
+  );
+
+  o_collection_id := v_collection.collection_id;
+  IF (v_collection.theme_id, v_collection.source_id, v_collection.title,
+      v_collection.edition_key, v_collection.description, v_collection.status,
+      v_collection.visibility, v_collection.metadata)
+     IS NOT DISTINCT FROM
+     (p_theme_id, p_source_id, p_title, p_edition_key, p_description, p_status,
+      p_visibility, p_metadata) THEN
+    o_collection_revision := v_collection.row_revision;
+    RETURN;
+  END IF;
+  UPDATE feature.curation_collections AS collection
+  SET theme_id = p_theme_id, source_id = p_source_id, title = p_title,
+      edition_key = p_edition_key, description = p_description, status = p_status,
+      visibility = p_visibility, metadata = p_metadata, updated_by = p_principal,
+      row_revision = collection.row_revision + 1, updated_at = clock_timestamp()
+  WHERE collection.collection_id = p_collection_id
+  RETURNING collection.collection_id, collection.row_revision
+  INTO STRICT o_collection_id, o_collection_revision;
+END
+$$;
+
+
+ALTER PROCEDURE feature.patch_curation_collection_command(IN p_collection_id uuid, IN p_expected_collection_revision bigint, IN p_theme_id uuid, IN p_source_id uuid, IN p_title text, IN p_edition_key text, IN p_description text, IN p_status text, IN p_visibility text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_collection_id uuid, OUT o_collection_revision bigint) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: patch_curation_item_command(uuid, uuid, bigint, text, text, text, text, text, text, text, integer, text, text, text, text, jsonb, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.patch_curation_item_command(IN p_collection_id uuid, IN p_curation_item_id uuid, IN p_expected_item_revision bigint, IN p_feature_id text, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops'
+    AS $$
+DECLARE
+  v_command ops.domain_commands%ROWTYPE;
+  v_collection feature.curation_collections%ROWTYPE;
+  v_hint feature.curation_items%ROWTYPE;
+  v_item feature.curation_items%ROWTYPE;
+  v_decision_id uuid;
+  v_source_owned_changed boolean;
+  v_operator_owned_changed boolean;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'item command requires SERIALIZABLE transaction'
+      USING ERRCODE = '25001';
+  END IF;
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    RAISE EXCEPTION 'item command requires the admin executor'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_principal IS NULL OR p_principal <> btrim(p_principal) OR p_principal = ''
+     OR p_collection_id IS NULL OR p_curation_item_id IS NULL
+     OR p_expected_item_revision IS NULL OR p_expected_item_revision < 1
+     OR p_external_item_id IS NULL
+     OR p_external_item_id <> btrim(p_external_item_id)
+     OR p_external_item_id = ''
+     OR p_external_component_id IS NULL
+     OR p_external_component_id <> btrim(p_external_component_id)
+     OR p_external_component_id = ''
+     OR p_place_name IS NULL OR p_place_name <> btrim(p_place_name)
+     OR p_place_name = ''
+     OR p_address_hint IS DISTINCT FROM NULLIF(btrim(p_address_hint), '')
+     OR p_status NOT IN ('candidate','included','rejected')
+     OR p_sort_order IS NULL OR p_sort_order < 0
+     OR p_curation_relation NOT IN (
+       'primary_stop','food_stop','cafe_stop','bookstore_stop','nearby_option',
+       'accessibility_support','pet_support','family_support','theme_area_anchor'
+     )
+     OR p_reuse_policy NOT IN ('allowed','blocked','manual_review')
+     OR jsonb_typeof(p_metadata) <> 'object' THEN
+    RAISE EXCEPTION 'item command input is not canonical'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_item_command_input';
+  END IF;
+  SELECT command.* INTO STRICT v_command
+  FROM ops.domain_commands AS command WHERE command.command_id = p_command_id;
+  IF v_command.actor <> p_principal
+     OR v_command.operation <> 'admin.curation-item.patch' THEN
+    RAISE EXCEPTION 'domain command does not match item patch'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_item_domain_command';
+  END IF;
+
+  SELECT item.* INTO STRICT v_hint FROM feature.curation_items AS item
+  WHERE item.collection_id = p_collection_id
+    AND item.curation_item_id = p_curation_item_id;
+  PERFORM pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0));
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write', 0));
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-write:' || touched.feature_id, 0))
+  FROM (
+    SELECT v_hint.feature_id AS feature_id
+    UNION SELECT p_feature_id WHERE p_feature_id IS NOT NULL
+  ) AS touched
+  WHERE touched.feature_id IS NOT NULL
+  ORDER BY touched.feature_id;
+  SELECT collection.* INTO STRICT v_collection
+  FROM feature.curation_collections AS collection
+  WHERE collection.collection_id = p_collection_id FOR UPDATE;
+  IF v_collection.archived_at IS NOT NULL OR v_collection.status = 'archived' THEN
+    RAISE EXCEPTION 'target curation collection is archived'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_item_collection_active';
+  END IF;
+  SELECT item.* INTO STRICT v_item FROM feature.curation_items AS item
+  WHERE item.collection_id = p_collection_id
+    AND item.curation_item_id = p_curation_item_id FOR UPDATE;
+  IF v_item.curation_item_id <> v_hint.curation_item_id
+     OR v_item.feature_id IS DISTINCT FROM v_hint.feature_id
+     OR v_item.row_revision <> p_expected_item_revision THEN
+    RAISE EXCEPTION 'item identity or revision changed while locking'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_item_expected_revision';
+  END IF;
+  IF v_item.archived_at IS NOT NULL THEN
+    RAISE EXCEPTION 'archived item cannot be patched'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_item_active';
+  END IF;
+  IF p_feature_id IS NOT NULL THEN
+    PERFORM 1 FROM feature.features AS feature
+    WHERE feature.feature_id = p_feature_id
+      AND feature.lifecycle_state = 'active'
+      AND feature.publication_state <> 'suppressed'
+    FOR SHARE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'feature_id must reference an active Feature'
+        USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_item_active_feature';
+    END IF;
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM feature.curation_items AS item
+    WHERE item.collection_id = p_collection_id
+      AND item.curation_item_id <> p_curation_item_id
+      AND item.external_item_id = p_external_item_id
+      AND item.external_component_id = p_external_component_id
+  ) THEN
+    RAISE EXCEPTION 'curation item identity already exists'
+      USING ERRCODE = '23505', CONSTRAINT = 'uq_curation_items_component_identity';
+  END IF;
+  IF p_feature_id IS NOT NULL AND EXISTS (
+    SELECT 1 FROM feature.curation_items AS item
+    WHERE item.collection_id = p_collection_id
+      AND item.curation_item_id <> p_curation_item_id
+      AND item.external_item_id = p_external_item_id
+      AND item.feature_id = p_feature_id
+      AND item.source_present AND item.archived_at IS NULL
+  ) THEN
+    RAISE EXCEPTION 'active source feature identity already exists'
+      USING ERRCODE = '23505', CONSTRAINT = 'uq_curation_items_active_source_feature';
+  END IF;
+  v_source_owned_changed := (
+    v_item.feature_id, v_item.source_record_key, v_item.external_item_id,
+    v_item.external_component_id, v_item.place_name, v_item.address_hint,
+    v_item.sort_order, v_item.item_title, v_item.item_summary, v_item.metadata
+  ) IS DISTINCT FROM (
+    p_feature_id, p_source_record_key, p_external_item_id,
+    p_external_component_id, p_place_name, p_address_hint,
+    p_sort_order, p_item_title, p_item_summary, p_metadata
+  );
+  v_operator_owned_changed := (
+    v_item.status, v_item.curation_relation, v_item.reuse_policy
+  ) IS DISTINCT FROM (
+    p_status, p_curation_relation, p_reuse_policy
+  );
+  PERFORM feature.claim_curation_catalog_command_effect(
+    p_command_id, v_command.operation, 'item', p_curation_item_id
+  );
+  o_curation_item_id := p_curation_item_id;
+  o_collection_revision := v_collection.row_revision;
+  IF NOT v_source_owned_changed AND NOT v_operator_owned_changed THEN
+    o_item_revision := v_item.row_revision;
+    RETURN;
+  END IF;
+  IF v_item.feature_id IS DISTINCT FROM p_feature_id THEN
+    IF p_feature_id IS NOT NULL THEN
+      INSERT INTO feature.curation_link_decisions (
+        curation_item_id, feature_id, decision_kind, match_basis,
+        resolver_version, evidence, actor, supersedes_decision_id
+      ) VALUES (
+        p_curation_item_id, p_feature_id, 'accepted', 'admin_review',
+        'manual-admin-v1', jsonb_build_object(
+          'operation', 'patch_curation_item_command',
+          'previous_feature_id', v_item.feature_id,
+          'requested_feature_id', p_feature_id,
+          'command_id', p_command_id
+        ), p_principal, v_item.accepted_link_decision_id
+      ) RETURNING decision_id INTO STRICT v_decision_id;
+    ELSIF v_item.feature_id IS NOT NULL THEN
+      INSERT INTO feature.curation_link_decisions (
+        curation_item_id, feature_id, decision_kind, match_basis,
+        resolver_version, evidence, actor, supersedes_decision_id
+      ) VALUES (
+        p_curation_item_id, v_item.feature_id, 'revoked', 'admin_review',
+        'manual-admin-v1', jsonb_build_object(
+          'operation', 'patch_curation_item_command',
+          'previous_feature_id', v_item.feature_id,
+          'reason', 'explicit feature_id=null',
+          'command_id', p_command_id
+        ), p_principal, v_item.accepted_link_decision_id
+      ) RETURNING decision_id INTO STRICT v_decision_id;
+    END IF;
+  END IF;
+  UPDATE feature.curation_items AS item
+  SET feature_id = p_feature_id,
+      source_record_key = p_source_record_key,
+      external_item_id = p_external_item_id,
+      external_component_id = p_external_component_id,
+      place_name = p_place_name,
+      address_hint = p_address_hint,
+      status = p_status,
+      sort_order = p_sort_order,
+      item_title = p_item_title,
+      item_summary = p_item_summary,
+      curation_relation = p_curation_relation,
+      reuse_policy = p_reuse_policy,
+      metadata = p_metadata,
+      accepted_link_decision_id = CASE
+        WHEN v_item.feature_id IS NOT DISTINCT FROM p_feature_id
+          THEN v_item.accepted_link_decision_id
+        WHEN p_feature_id IS NULL THEN NULL
+        ELSE v_decision_id
+      END,
+      source_updated_at = CASE WHEN v_source_owned_changed
+        THEN clock_timestamp() ELSE item.source_updated_at END,
+      operator_updated_by = CASE WHEN v_operator_owned_changed
+        THEN p_principal ELSE item.operator_updated_by END,
+      operator_updated_at = CASE WHEN v_operator_owned_changed
+        THEN clock_timestamp() ELSE item.operator_updated_at END,
+      updated_by = p_principal,
+      row_revision = item.row_revision + 1,
+      updated_at = clock_timestamp()
+  WHERE item.curation_item_id = p_curation_item_id
+  RETURNING item.row_revision INTO STRICT o_item_revision;
+  UPDATE feature.curation_collections AS collection
+  SET updated_by = p_principal, updated_at = clock_timestamp(),
+      row_revision = collection.row_revision + 1
+  WHERE collection.collection_id = p_collection_id
+  RETURNING collection.row_revision INTO STRICT o_collection_revision;
+END
+$$;
+
+
+ALTER PROCEDURE feature.patch_curation_item_command(IN p_collection_id uuid, IN p_curation_item_id uuid, IN p_expected_item_revision bigint, IN p_feature_id text, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: preflight_feature_reference_reconciliation_ack(text, uuid, text, text); Type: FUNCTION; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+
+CREATE FUNCTION feature.preflight_feature_reference_reconciliation_ack(p_principal_id text, p_event_id uuid, p_event_sha256 text, p_local_receipt_sha256 text) RETURNS TABLE(o_outcome text, o_acked_through_sequence bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops'
+    AS $_$
+DECLARE
+    v_existing_ack ops.feature_reference_reconciliation_acks%ROWTYPE;
+BEGIN
+    -- 이 read는 HTTP domain-command claim보다 먼저 호출된다. 응답 유실 뒤 새
+    -- Idempotency-Key로 같은 receipt를 재전송해도 빈 command claim을 만들지
+    -- 않도록, 이미 확정된 ACK만 server-owned principal로 판별한다.
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'feature reference reconciliation ack preflight requires READ COMMITTED'
+            USING ERRCODE = '25001', CONSTRAINT = 'ck_m05_reconciliation_ack_isolation';
+    END IF;
+    IF session_user <> 'ktm_feature_api_runtime'
+       OR NOT pg_has_role(
+           session_user, 'ktm_feature_reference_reconciliation_service_executor', 'member'
+       ) THEN
+        RAISE EXCEPTION 'feature reference reconciliation ack preflight requires the service executor'
+            USING ERRCODE = '42501', CONSTRAINT = 'ck_m05_reconciliation_service_executor';
+    END IF;
+    IF nullif(btrim(p_principal_id), '') IS NULL
+       OR char_length(p_principal_id) > 200 OR p_event_id IS NULL
+       OR p_event_sha256 !~ '^[0-9a-f]{64}$'
+       OR p_local_receipt_sha256 !~ '^[0-9a-f]{64}$' THEN
+        RAISE EXCEPTION 'feature reference reconciliation ack preflight input is invalid'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_reconciliation_ack_input';
+    END IF;
+
+    SELECT ack.* INTO v_existing_ack
+    FROM ops.feature_reference_reconciliation_acks AS ack
+    WHERE ack.event_id = p_event_id AND ack.principal_id = p_principal_id
+    FOR SHARE;
+    IF NOT FOUND THEN
+        o_outcome := 'absent';
+        RETURN NEXT;
+        RETURN;
+    END IF;
+
+    SELECT lease.acked_through_sequence INTO o_acked_through_sequence
+    FROM ops.feature_reference_reconciliation_leases AS lease
+    WHERE lease.principal_id = p_principal_id;
+    IF v_existing_ack.event_sha256 = p_event_sha256
+       AND v_existing_ack.local_receipt_sha256 = p_local_receipt_sha256 THEN
+        o_outcome := 'replayed';
+    ELSE
+        o_outcome := 'conflict';
+    END IF;
+    RETURN NEXT;
+END
+$_$;
+
+
+ALTER FUNCTION feature.preflight_feature_reference_reconciliation_ack(p_principal_id text, p_event_id uuid, p_event_sha256 text, p_local_receipt_sha256 text) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+
+--
+-- Name: preflight_feature_reference_reconciliation_ack_v2(text, uuid, text, text); Type: FUNCTION; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+
+CREATE FUNCTION feature.preflight_feature_reference_reconciliation_ack_v2(p_principal_id text, p_event_id uuid, p_event_sha256 text, p_local_receipt_sha256 text) RETURNS TABLE(o_outcome text, o_acked_through_sequence bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops'
+    AS $$
+BEGIN
+    -- Fresh-key semantic preflight and the writer hold this same lock through
+    -- transaction commit.  A later request therefore re-reads the durable ACK.
+    PERFORM 1
+    FROM ops.feature_reference_reconciliation_leases AS lease
+    WHERE lease.principal_id = p_principal_id
+    FOR UPDATE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'feature reference reconciliation subscription is absent'
+            USING ERRCODE = 'P0002';
+    END IF;
+    RETURN QUERY
+    SELECT *
+    FROM feature.preflight_feature_reference_reconciliation_ack(
+        p_principal_id, p_event_id, p_event_sha256, p_local_receipt_sha256
+    );
+END
+$$;
+
+
+ALTER FUNCTION feature.preflight_feature_reference_reconciliation_ack_v2(p_principal_id text, p_event_id uuid, p_event_sha256 text, p_local_receipt_sha256 text) OWNER TO ktm_manual_provider_dedup_procedure_owner;
 
 --
 -- Name: prepare_feature_state_context(jsonb, text); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
@@ -1896,6 +7066,455 @@ $_$;
 ALTER FUNCTION feature.prepare_feature_state_context(p_context jsonb, p_mode text) OWNER TO ktm_feature_state_procedure_owner;
 
 --
+-- Name: promote_theme_feature_candidate(uuid, uuid, text, text, text, text, text, text, integer, text, text, text, bigint, bigint, bigint, bigint, text, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.promote_theme_feature_candidate(IN p_candidate_id uuid, IN p_collection_id uuid, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_item_title text, IN p_item_summary text, IN p_sort_order integer, IN p_curation_relation text, IN p_reuse_policy text, IN p_item_status text, IN p_expected_candidate_revision bigint, IN p_expected_collection_revision bigint, IN p_expected_item_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_candidate_id uuid, OUT o_candidate_revision bigint, OUT o_curation_item_id uuid, OUT o_curation_item_revision bigint, OUT o_transition_id bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
+    AS $$
+DECLARE
+  v_candidate_hint feature.theme_feature_candidates%ROWTYPE;
+  v_candidate feature.theme_feature_candidates%ROWTYPE;
+  v_rule feature.curated_source_rules%ROWTYPE;
+  v_collection feature.curation_collections%ROWTYPE;
+  v_item feature.curation_items%ROWTYPE;
+  v_command ops.domain_commands%ROWTYPE;
+  v_source_dataset_id bigint;
+  v_current_source_record_key text;
+  v_current_source_record_hash text;
+  v_previous_decision_id uuid;
+  v_decision_id uuid;
+  v_item_found boolean := false;
+  v_snapshot record;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'candidate command requires SERIALIZABLE transaction'
+      USING ERRCODE = '25001';
+  END IF;
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    RAISE EXCEPTION 'candidate promotion requires the admin executor'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_expected_candidate_revision IS NULL OR p_expected_candidate_revision < 1
+     OR p_expected_collection_revision IS NULL OR p_expected_collection_revision < 1
+     OR (p_expected_item_revision IS NOT NULL AND p_expected_item_revision < 1) THEN
+    RAISE EXCEPTION 'expected revisions must be positive'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_expected_revision';
+  END IF;
+  IF p_external_item_id IS NULL OR p_external_item_id <> btrim(p_external_item_id)
+     OR p_external_item_id = '' OR char_length(p_external_item_id) > 512
+     OR p_external_component_id IS NULL
+     OR p_external_component_id <> btrim(p_external_component_id)
+     OR p_external_component_id = '' OR char_length(p_external_component_id) > 512
+     OR p_place_name IS NULL OR p_place_name <> btrim(p_place_name)
+     OR p_place_name = '' OR char_length(p_place_name) > 512
+     OR p_sort_order IS NULL OR p_sort_order < 0
+     OR p_item_status NOT IN ('candidate','included')
+     OR p_curation_relation NOT IN (
+       'primary_stop','food_stop','cafe_stop','bookstore_stop',
+       'nearby_option','accessibility_support','pet_support',
+       'family_support','theme_area_anchor'
+     )
+     OR p_reuse_policy NOT IN ('allowed','blocked','manual_review') THEN
+    RAISE EXCEPTION 'candidate promotion item payload is not canonical'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_promotion_payload';
+  END IF;
+  IF p_reason_code IS NULL OR p_reason_code <> btrim(p_reason_code)
+     OR p_reason_code = '' OR char_length(p_reason_code) > 128
+     OR p_principal IS NULL OR p_principal <> btrim(p_principal)
+     OR p_principal = '' OR char_length(p_principal) > 200 THEN
+    RAISE EXCEPTION 'promotion principal and reason must be canonical'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_promotion_actor';
+  END IF;
+
+  SELECT command.* INTO STRICT v_command
+  FROM ops.domain_commands AS command
+  WHERE command.command_id = p_command_id;
+  IF v_command.actor <> p_principal
+     OR v_command.operation <> 'admin.theme-feature-candidate.promote' THEN
+    RAISE EXCEPTION 'domain command does not match candidate promotion'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_domain_command';
+  END IF;
+
+  -- The first read discovers the advisory-fence identity only.  Every value is
+  -- read again after the common feature fence and exact relation locks.
+  SELECT candidate.* INTO STRICT v_candidate_hint
+  FROM feature.theme_feature_candidates AS candidate
+  WHERE candidate.candidate_id = p_candidate_id;
+  PERFORM pg_advisory_xact_lock(
+    hashtextextended('feature-write:' || v_candidate_hint.feature_id, 0)
+  );
+
+  SELECT rule.* INTO STRICT v_rule
+  FROM feature.curated_source_rules AS rule
+  WHERE rule.rule_id = v_candidate_hint.rule_id
+  FOR SHARE;
+
+  SELECT source.provider_dataset_id
+  INTO STRICT v_source_dataset_id
+  FROM feature.curated_sources AS source
+  WHERE source.source_id = v_rule.source_id
+    AND source.archived_at IS NULL
+  FOR SHARE;
+
+  PERFORM 1
+  FROM provider_sync.provider_datasets AS dataset
+  WHERE dataset.provider_dataset_id = v_source_dataset_id
+    AND dataset.is_active
+  FOR SHARE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'candidate source dataset is not active'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_current_source';
+  END IF;
+
+  PERFORM 1
+  FROM provider_sync.source_entities AS entity
+  WHERE entity.source_entity_key = v_candidate_hint.source_entity_key
+    AND entity.provider_dataset_id = v_source_dataset_id
+  FOR SHARE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'candidate source entity is not in the rule dataset'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_current_source';
+  END IF;
+
+  SELECT head.current_source_record_key
+  INTO STRICT v_current_source_record_key
+  FROM provider_sync.source_entity_heads AS head
+  WHERE head.source_entity_key = v_candidate_hint.source_entity_key
+  FOR SHARE;
+  SELECT record.raw_payload_hash
+  INTO STRICT v_current_source_record_hash
+  FROM provider_sync.source_records AS record
+  WHERE record.source_entity_key = v_candidate_hint.source_entity_key
+    AND record.source_record_key = v_current_source_record_key
+  FOR SHARE;
+
+  PERFORM 1
+  FROM provider_sync.source_links AS link
+  WHERE link.source_entity_key = v_candidate_hint.source_entity_key
+    AND link.feature_id = v_candidate_hint.feature_id
+  FOR SHARE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'candidate source link is no longer current'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_current_source';
+  END IF;
+
+  PERFORM 1
+  FROM feature.features AS current_feature
+  WHERE current_feature.feature_id = v_candidate_hint.feature_id
+    AND current_feature.lifecycle_state = 'active'
+    AND current_feature.publication_state = 'published'
+    AND current_feature.quality_state = 'valid'
+  FOR SHARE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'candidate Feature is not currently public-eligible'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_current_feature';
+  END IF;
+
+  SELECT candidate.* INTO STRICT v_candidate
+  FROM feature.theme_feature_candidates AS candidate
+  WHERE candidate.candidate_id = p_candidate_id
+  FOR UPDATE;
+  IF v_candidate.feature_id <> v_candidate_hint.feature_id
+     OR v_candidate.rule_id <> v_candidate_hint.rule_id
+     OR v_candidate.source_entity_key <> v_candidate_hint.source_entity_key
+     OR v_candidate.row_revision <> p_expected_candidate_revision THEN
+    RAISE EXCEPTION 'candidate identity or revision changed while locking'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_expected_revision';
+  END IF;
+  IF v_candidate.disposition <> 'active'
+     OR v_candidate.review_state <> 'open'
+     OR NOT v_candidate.eligibility_present THEN
+    RAISE EXCEPTION 'only an active open eligible candidate can be promoted'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_promote_state';
+  END IF;
+
+  SELECT snapshot.* INTO v_snapshot
+  FROM feature.current_theme_candidate_snapshot(
+    v_candidate.rule_id,
+    v_candidate.source_entity_key,
+    v_candidate.feature_id
+  ) AS snapshot;
+  IF NOT FOUND
+     OR v_snapshot.rule_input_hash <> v_candidate.rule_input_hash
+     OR v_snapshot.source_record_key <> v_candidate.source_record_key
+     OR v_snapshot.source_record_hash <> v_candidate.source_record_hash
+     OR v_snapshot.candidate_input_hash <> v_candidate.candidate_input_hash
+     OR v_current_source_record_key <> v_candidate.source_record_key
+     OR v_current_source_record_hash <> v_candidate.source_record_hash THEN
+    RAISE EXCEPTION 'candidate proof is stale'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_current_proof';
+  END IF;
+
+  SELECT collection.* INTO STRICT v_collection
+  FROM feature.curation_collections AS collection
+  WHERE collection.collection_id = p_collection_id
+  FOR UPDATE;
+  IF v_collection.archived_at IS NOT NULL OR v_collection.status = 'archived' THEN
+    RAISE EXCEPTION 'target curation collection is archived'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_collection_active';
+  END IF;
+  IF v_collection.row_revision <> p_expected_collection_revision THEN
+    RAISE EXCEPTION 'collection revision mismatch: expected %, current %',
+      p_expected_collection_revision, v_collection.row_revision
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_collection_revision';
+  END IF;
+
+  SELECT item.* INTO v_item
+  FROM feature.curation_items AS item
+  WHERE item.collection_id = p_collection_id
+    AND item.external_item_id = p_external_item_id
+    AND item.external_component_id = p_external_component_id
+  FOR UPDATE;
+  v_item_found := FOUND;
+  IF v_item_found AND p_expected_item_revision IS NULL THEN
+    RAISE EXCEPTION 'create-only curation item identity already exists'
+      USING ERRCODE = '23505', CONSTRAINT = 'uq_curation_items_component_identity';
+  ELSIF NOT v_item_found AND p_expected_item_revision IS NOT NULL THEN
+    RAISE EXCEPTION 'expected curation item does not exist'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_item_revision';
+  ELSIF v_item_found AND v_item.row_revision <> p_expected_item_revision THEN
+    RAISE EXCEPTION 'item revision mismatch: expected %, current %',
+      p_expected_item_revision, v_item.row_revision
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_item_revision';
+  END IF;
+
+  IF v_item_found THEN
+    o_curation_item_id := v_item.curation_item_id;
+    v_previous_decision_id := v_item.accepted_link_decision_id;
+    UPDATE feature.curation_items AS item
+    SET feature_id = v_candidate.feature_id,
+        source_record_key = v_candidate.source_record_key,
+        place_name = p_place_name,
+        address_hint = p_address_hint,
+        source_present = true,
+        source_updated_at = clock_timestamp(),
+        status = p_item_status,
+        sort_order = p_sort_order,
+        item_title = p_item_title,
+        item_summary = p_item_summary,
+        curation_relation = p_curation_relation,
+        reuse_policy = p_reuse_policy,
+        updated_by = p_principal,
+        operator_updated_by = p_principal,
+        operator_updated_at = clock_timestamp(),
+        archived_at = NULL,
+        updated_at = clock_timestamp(),
+        row_revision = item.row_revision + 1
+    WHERE item.curation_item_id = o_curation_item_id
+    RETURNING item.row_revision INTO STRICT o_curation_item_revision;
+  ELSE
+    o_curation_item_id := x_extension.gen_random_uuid();
+    INSERT INTO feature.curation_items (
+      curation_item_id, collection_id, feature_id, source_record_key,
+      external_item_id, external_component_id, place_name, address_hint,
+      source_present, source_updated_at, status, sort_order, item_title,
+      item_summary, curation_relation, reuse_policy, metadata, created_by,
+      updated_by, operator_updated_by, operator_updated_at, row_revision
+    ) VALUES (
+      o_curation_item_id, p_collection_id, v_candidate.feature_id,
+      v_candidate.source_record_key, p_external_item_id,
+      p_external_component_id, p_place_name, p_address_hint, true,
+      clock_timestamp(), p_item_status, p_sort_order, p_item_title,
+      p_item_summary, p_curation_relation, p_reuse_policy,
+      jsonb_build_object(
+        'schema_version', 1,
+        'promotion_candidate_id', p_candidate_id::text,
+        'promotion_command_id', p_command_id
+      ), p_principal, p_principal, p_principal, clock_timestamp(), 1
+    )
+    RETURNING row_revision INTO STRICT o_curation_item_revision;
+    v_previous_decision_id := NULL;
+  END IF;
+
+  -- A legacy source-rule trigger can only add an intermediate accepted pointer
+  -- while the old overlay still exists.  Chain the explicit admin decision to
+  -- the actual locked pointer so history remains linear during this one-release
+  -- migration; the final cutover drops that trigger.
+  SELECT item.accepted_link_decision_id
+  INTO v_previous_decision_id
+  FROM feature.curation_items AS item
+  WHERE item.curation_item_id = o_curation_item_id
+  FOR UPDATE;
+
+  INSERT INTO feature.curation_link_decisions (
+    curation_item_id, feature_id, import_row_id, decision_kind, match_basis,
+    resolver_version, evidence, actor, supersedes_decision_id
+  ) VALUES (
+    o_curation_item_id, v_candidate.feature_id, NULL, 'accepted',
+    'admin_review', 'tvn40-candidate-promotion-v1',
+    jsonb_build_object(
+      'schema_version', 1,
+      'candidate_id', p_candidate_id::text,
+      'candidate_revision', p_expected_candidate_revision,
+      'rule_revision', v_candidate.rule_row_revision,
+      'source_entity_key', v_candidate.source_entity_key,
+      'source_record_key', v_candidate.source_record_key,
+      'source_record_hash', v_candidate.source_record_hash,
+      'command_id', p_command_id
+    ),
+    p_principal, v_previous_decision_id
+  ) RETURNING decision_id INTO STRICT v_decision_id;
+
+  UPDATE feature.curation_items AS item
+  SET accepted_link_decision_id = v_decision_id
+  WHERE item.curation_item_id = o_curation_item_id;
+
+  -- collection detail은 ordered child set을 포함한다. item promotion으로 body가
+  -- 바뀌면 parent command/representation revision도 같은 transaction에서 전진한다.
+  UPDATE feature.curation_collections AS collection
+  SET row_revision = collection.row_revision + 1,
+      updated_by = p_principal,
+      updated_at = clock_timestamp()
+  WHERE collection.collection_id = p_collection_id;
+
+  UPDATE feature.theme_feature_candidates AS candidate
+  SET review_state = 'promoted',
+      row_revision = candidate.row_revision + 1,
+      updated_at = clock_timestamp()
+  WHERE candidate.candidate_id = p_candidate_id
+  RETURNING candidate.candidate_id, candidate.row_revision
+  INTO STRICT o_candidate_id, o_candidate_revision;
+
+  o_transition_id := feature.append_theme_feature_candidate_transition(
+    p_candidate_id,
+    v_candidate.feature_id,
+    v_candidate.feature_id,
+    v_candidate.rule_id,
+    v_candidate.source_entity_key,
+    v_candidate.review_state,
+    'promoted',
+    v_candidate.eligibility_present,
+    v_candidate.eligibility_present,
+    v_candidate.disposition,
+    v_candidate.disposition,
+    NULL,
+    'admin_promote',
+    o_candidate_revision,
+    v_candidate.rule_row_revision,
+    v_candidate.rule_input_hash,
+    v_candidate.candidate_input_hash,
+    NULL,
+    v_source_dataset_id,
+    v_candidate.source_record_key,
+    v_candidate.source_record_hash,
+    p_collection_id,
+    o_curation_item_id,
+    p_command_id,
+    p_principal,
+    p_reason_code,
+    jsonb_build_object(
+      'schema_version', 1,
+      'candidate_id', p_candidate_id::text,
+      'expected_candidate_revision', p_expected_candidate_revision,
+      'expected_collection_revision', p_expected_collection_revision,
+      'expected_item_revision', p_expected_item_revision,
+      'link_decision_id', v_decision_id::text
+    )
+  );
+END
+$$;
+
+
+ALTER PROCEDURE feature.promote_theme_feature_candidate(IN p_candidate_id uuid, IN p_collection_id uuid, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_item_title text, IN p_item_summary text, IN p_sort_order integer, IN p_curation_relation text, IN p_reuse_policy text, IN p_item_status text, IN p_expected_candidate_revision bigint, IN p_expected_collection_revision bigint, IN p_expected_item_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_candidate_id uuid, OUT o_candidate_revision bigint, OUT o_curation_item_id uuid, OUT o_curation_item_revision bigint, OUT o_transition_id bigint) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: provision_feature_reference_reconciliation_subscription(text, bigint, text, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+
+CREATE PROCEDURE feature.provision_feature_reference_reconciliation_subscription(IN p_principal_id text, IN p_initial_event_sequence bigint, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_initial_event_sequence bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops'
+    AS $$
+DECLARE
+    v_max_event_sequence bigint;
+    v_command ops.domain_commands%ROWTYPE;
+    v_subscription ops.feature_reference_reconciliation_subscriptions%ROWTYPE;
+    v_lease ops.feature_reference_reconciliation_leases%ROWTYPE;
+BEGIN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'feature reference reconciliation subscription provision requires READ COMMITTED'
+            USING ERRCODE = '25001', CONSTRAINT = 'ck_m05_subscription_provision_isolation';
+    END IF;
+    IF session_user <> 'ktm_feature_api_runtime'
+       OR NOT pg_has_role(
+           session_user, 'ktm_manual_provider_dedup_admin_executor', 'member'
+       ) THEN
+        RAISE EXCEPTION 'feature reference reconciliation subscription provision requires the admin executor'
+            USING ERRCODE = '42501', CONSTRAINT = 'ck_m05_subscription_provision_executor';
+    END IF;
+    IF p_principal_id <> 'service:feature-reference-reconciliation'
+       OR p_initial_event_sequence IS DISTINCT FROM 0
+       OR nullif(btrim(p_actor), '') IS NULL OR char_length(p_actor) > 200
+       OR p_domain_command_id IS NULL OR p_domain_command_id < 1 THEN
+        RAISE EXCEPTION 'feature reference reconciliation subscription provision input is invalid'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_subscription_provision_input';
+    END IF;
+    -- There is exactly one paired-consumer activation receipt.  A row-level
+    -- lock cannot serialize concurrent inserts while the row is absent.
+    PERFORM pg_advisory_xact_lock(
+        hashtextextended('feature-reference-reconciliation-subscription', 0)
+    );
+    SELECT command.* INTO v_command
+    FROM ops.domain_commands AS command
+    WHERE command.command_id = p_domain_command_id
+    FOR SHARE;
+    IF NOT FOUND
+       OR v_command.actor <> p_actor
+       OR v_command.operation <> 'admin.feature-reference-reconciliation-subscription.provision.v1'
+       OR EXISTS (
+           SELECT 1 FROM ops.domain_command_results AS result
+           WHERE result.command_id = p_domain_command_id
+       ) THEN
+        RAISE EXCEPTION 'feature reference reconciliation subscription provision command is not open'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_subscription_provision_command';
+    END IF;
+    SELECT coalesce(max(event.event_sequence), 0) INTO v_max_event_sequence
+    FROM ops.feature_reference_reconciliation_events AS event;
+    IF p_initial_event_sequence > v_max_event_sequence THEN
+        RAISE EXCEPTION 'feature reference reconciliation subscription cursor exceeds current event frontier'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_subscription_provision_input';
+    END IF;
+    SELECT subscription.* INTO v_subscription
+    FROM ops.feature_reference_reconciliation_subscriptions AS subscription
+    WHERE subscription.principal_id = p_principal_id
+    FOR UPDATE;
+    IF FOUND THEN
+        SELECT lease.* INTO v_lease
+        FROM ops.feature_reference_reconciliation_leases AS lease
+        WHERE lease.principal_id = p_principal_id
+        FOR SHARE;
+        IF NOT FOUND OR v_lease.acked_through_sequence < v_subscription.initial_event_sequence THEN
+            RAISE EXCEPTION 'feature reference reconciliation subscription lease state is inconsistent'
+                USING ERRCODE = '55000';
+        END IF;
+        o_outcome := 'already_provisioned';
+        o_initial_event_sequence := v_subscription.initial_event_sequence;
+        RETURN;
+    END IF;
+    INSERT INTO ops.feature_reference_reconciliation_subscriptions (
+        principal_id, initial_event_sequence, read_scope, ack_scope
+    ) VALUES (
+        p_principal_id, p_initial_event_sequence,
+        'feature-reference-reconciliation:read',
+        'feature-reference-reconciliation:ack'
+    );
+    INSERT INTO ops.feature_reference_reconciliation_leases (
+        principal_id, acked_through_sequence, worker_id, lease_epoch, lease_expires_at
+    ) VALUES (
+        p_principal_id, p_initial_event_sequence, NULL, 0, NULL
+    );
+    o_outcome := 'provisioned';
+    o_initial_event_sequence := p_initial_event_sequence;
+END
+$$;
+
+
+ALTER PROCEDURE feature.provision_feature_reference_reconciliation_subscription(IN p_principal_id text, IN p_initial_event_sequence bigint, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_initial_event_sequence bigint) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+
+--
 -- Name: reactivate_admin_feature_state(text, bigint, text, text, bigint, text, text); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
@@ -1993,6 +7612,747 @@ $$;
 ALTER PROCEDURE feature.reactivate_admin_feature_state(IN p_feature_id text, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_transition_id bigint) OWNER TO ktm_feature_state_procedure_owner;
 
 --
+-- Name: read_admin_manual_feature_provenance(uuid); Type: FUNCTION; Schema: feature; Owner: ktm_manual_feature_procedure_owner
+--
+
+CREATE FUNCTION feature.read_admin_manual_feature_provenance(p_feature_uuid uuid) RETURNS TABLE(feature_id uuid, feature_kind text, name_key text, lon_e6 integer, lat_e6 integer, claim_basis text, claimed_at timestamp with time zone, claimed_by_command_id bigint, origin_kind text, creation_command_id bigint, creator_principal_id text, created_by_actor text, origin_created_at timestamp with time zone, invoker_role text, procedure_definer text)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+    IF p_feature_uuid IS NULL THEN
+        RAISE EXCEPTION 'manual Feature provenance requires a canonical UUID'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_provenance_input';
+    END IF;
+
+    -- ``features``를 driving relation으로 고정한다. purge 뒤 evidence는 남아도
+    -- 일반 admin detail/read route로 그 snapshot을 탐색할 수 없다.
+    RETURN QUERY
+    SELECT
+        core.feature_uuid,
+        claim.feature_kind,
+        claim.name_key,
+        claim.lon_e6,
+        claim.lat_e6,
+        claim.claim_basis,
+        claim.claimed_at,
+        claim.claimed_by_command_id,
+        origin.origin_kind,
+        origin.creation_command_id,
+        origin.creator_principal_id,
+        origin.created_by_actor,
+        origin.created_at,
+        origin.invoker_role,
+        origin.procedure_definer
+    FROM feature.features AS core
+    LEFT JOIN feature.manual_feature_identity_claims AS claim
+      ON claim.feature_id = core.feature_uuid
+    LEFT JOIN feature.feature_creation_origins AS origin
+      ON origin.feature_id = claim.feature_id
+     AND origin.creation_command_id = claim.claimed_by_command_id
+    WHERE core.feature_uuid = p_feature_uuid;
+END
+$$;
+
+
+ALTER FUNCTION feature.read_admin_manual_feature_provenance(p_feature_uuid uuid) OWNER TO ktm_manual_feature_procedure_owner;
+
+--
+-- Name: read_feature_request(uuid); Type: FUNCTION; Schema: feature; Owner: ktm_feature_request_procedure_owner
+--
+
+CREATE FUNCTION feature.read_feature_request(p_request_id uuid) RETURNS TABLE(request_id uuid, request_payload jsonb, status text, submitted_at timestamp with time zone, submission_command_id bigint, resolved_at timestamp with time zone, resolved_by_actor text, resolved_feature_id uuid, rejection_reason text)
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops'
+    AS $$
+    SELECT request_id, request_payload, status, submitted_at, submission_command_id, resolved_at, resolved_by_actor, resolved_feature_id, rejection_reason
+    FROM ops.feature_requests WHERE request_id = p_request_id
+$$;
+
+
+ALTER FUNCTION feature.read_feature_request(p_request_id uuid) OWNER TO ktm_feature_request_procedure_owner;
+
+--
+-- Name: read_manual_provider_dedup_case(uuid); Type: FUNCTION; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+
+CREATE FUNCTION feature.read_manual_provider_dedup_case(p_case_id uuid) RETURNS TABLE(o_data jsonb)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops'
+    AS $$
+BEGIN
+    IF session_user <> 'ktm_feature_api_runtime'
+       OR NOT pg_has_role(
+           session_user, 'ktm_manual_provider_dedup_admin_executor', 'member'
+       ) THEN
+        RAISE EXCEPTION 'manual/provider dedup case read requires the admin-only executor'
+            USING ERRCODE = '42501', CONSTRAINT = 'ck_m05_case_read_executor';
+    END IF;
+    IF p_case_id IS NULL THEN
+        RAISE EXCEPTION 'manual/provider dedup case id is invalid'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_case_read_input';
+    END IF;
+
+    RETURN QUERY
+    SELECT jsonb_build_object(
+        'case_id', candidate.case_id,
+        'status', CASE WHEN resolution.case_id IS NULL THEN 'pending' ELSE 'terminal' END,
+        'created_at', candidate.created_at,
+        'evidence_fingerprint', candidate.evidence_fingerprint,
+        'manual_feature', jsonb_build_object(
+            'feature_id', candidate.manual_feature_id,
+            'feature_uuid', candidate.manual_feature_uuid,
+            'row_revision', candidate.manual_feature_row_revision,
+            'creation_command_id', candidate.manual_creation_command_id,
+            'snapshot', candidate.manual_feature_snapshot
+        ),
+        'provider_feature', jsonb_build_object(
+            'feature_id', candidate.provider_feature_id,
+            'feature_uuid', candidate.provider_feature_uuid,
+            'row_revision', candidate.provider_feature_row_revision,
+            'dataset_id', candidate.provider_dataset_id,
+            'source_entity_key', candidate.source_entity_key,
+            'source_record_key', candidate.source_record_key,
+            'source_record_raw_payload_hash', candidate.source_record_raw_payload_hash,
+            'source_head_observed_at', candidate.source_head_observed_at,
+            'snapshot', candidate.provider_feature_snapshot
+        ),
+        'scores', jsonb_build_object(
+            'scorer_id', candidate.scorer_id,
+            'scorer_input_sha256', candidate.scorer_input_sha256,
+            'name_score', candidate.name_score,
+            'spatial_score', candidate.spatial_score,
+            'category_score', candidate.category_score,
+            'total_score', candidate.total_score,
+            'distance_meters', candidate.distance_meters,
+            'detector_causation', candidate.detector_causation
+        ),
+        'resolution', CASE WHEN resolution.case_id IS NULL THEN NULL ELSE jsonb_build_object(
+            'resolution_id', resolution.resolution_id,
+            'decision', resolution.decision,
+            'command_id', resolution.command_id,
+            'actor', resolution.actor,
+            'reason', resolution.reason,
+            'superseded_by_case_id', resolution.superseded_by_case_id,
+            'resolved_at', resolution.resolved_at
+        ) END,
+        'event', event.event_payload,
+        'subscriptions', COALESCE((
+            SELECT jsonb_agg(jsonb_build_object(
+                'principal_id', subscription.principal_id,
+                'initial_event_sequence', subscription.initial_event_sequence,
+                'acked_through_sequence', lease.acked_through_sequence,
+                'lease_epoch', lease.lease_epoch,
+                'lease_expires_at', lease.lease_expires_at,
+                'oldest_unacked_at', (
+                    SELECT min(unacked_event.occurred_at)
+                    FROM ops.feature_reference_reconciliation_events AS unacked_event
+                    WHERE unacked_event.event_sequence > lease.acked_through_sequence
+                ),
+                'ack', CASE WHEN ack.event_id IS NULL THEN NULL ELSE jsonb_build_object(
+                    'event_id', ack.event_id,
+                    'event_sha256', ack.event_sha256,
+                    'local_receipt_sha256', ack.local_receipt_sha256,
+                    'command_id', ack.command_id,
+                    'acked_at', ack.acked_at
+                ) END
+            ) ORDER BY subscription.principal_id)
+            FROM ops.feature_reference_reconciliation_subscriptions AS subscription
+            JOIN ops.feature_reference_reconciliation_leases AS lease
+              ON lease.principal_id = subscription.principal_id
+            LEFT JOIN ops.feature_reference_reconciliation_acks AS ack
+              ON ack.principal_id = subscription.principal_id
+             AND ack.event_id = event.event_id
+        ), '[]'::jsonb)
+    )
+    FROM ops.manual_provider_dedup_cases AS candidate
+    LEFT JOIN ops.manual_provider_dedup_resolutions AS resolution
+      ON resolution.case_id = candidate.case_id
+    LEFT JOIN ops.feature_reference_reconciliation_events AS event
+      ON event.resolution_id = resolution.resolution_id
+    WHERE candidate.case_id = p_case_id;
+END
+$$;
+
+
+ALTER FUNCTION feature.read_manual_provider_dedup_case(p_case_id uuid) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+
+--
+-- Name: reclassify_curation_quarantine_command(uuid, bigint, text, uuid, bigint, uuid[], text, text, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.reclassify_curation_quarantine_command(IN p_quarantine_collection_id uuid, IN p_expected_quarantine_revision bigint, IN p_action text, IN p_target_collection_id uuid, IN p_expected_target_revision bigint, IN p_item_ids uuid[], IN p_collection_key text, IN p_title text, IN p_command_id bigint, IN p_principal text, OUT o_moved_item_ids uuid[], OUT o_quarantine_deleted boolean, OUT o_collection_id uuid, OUT o_collection_key text, OUT o_collection_revision bigint, OUT o_conflicts jsonb)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops'
+    AS $$
+DECLARE
+  v_command ops.domain_commands%ROWTYPE;
+  v_quarantine_hint feature.curation_collections%ROWTYPE;
+  v_quarantine feature.curation_collections%ROWTYPE;
+  v_target feature.curation_collections%ROWTYPE;
+  v_target_id uuid;
+  v_locked_item_ids uuid[];
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'quarantine command requires SERIALIZABLE transaction'
+      USING ERRCODE = '25001';
+  END IF;
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    RAISE EXCEPTION 'quarantine command requires the admin executor'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_principal IS NULL OR p_principal <> btrim(p_principal) OR p_principal = ''
+     OR p_quarantine_collection_id IS NULL
+     OR p_expected_quarantine_revision IS NULL OR p_expected_quarantine_revision < 1
+     OR p_action NOT IN ('move','confirm_standalone')
+     OR (p_action = 'move' AND (
+       p_collection_key IS NOT NULL OR p_title IS NOT NULL
+       OR p_expected_target_revision IS NULL OR p_expected_target_revision < 1
+     ))
+     OR (p_action = 'confirm_standalone' AND (
+       p_target_collection_id IS NOT NULL OR p_expected_target_revision IS NOT NULL
+       OR p_item_ids IS NOT NULL OR p_collection_key IS NULL
+       OR p_collection_key <> btrim(p_collection_key) OR p_collection_key = ''
+       OR p_title IS NULL OR p_title <> btrim(p_title) OR p_title = ''
+     )) THEN
+    RAISE EXCEPTION 'quarantine command input is not canonical'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_quarantine_command_input';
+  END IF;
+  SELECT command.* INTO STRICT v_command
+  FROM ops.domain_commands AS command WHERE command.command_id = p_command_id;
+  IF v_command.actor <> p_principal
+     OR v_command.operation <> 'admin.curation-quarantine.reclassify' THEN
+    RAISE EXCEPTION 'domain command does not match quarantine reclassify'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_quarantine_domain_command';
+  END IF;
+
+  SELECT collection.* INTO STRICT v_quarantine_hint
+  FROM feature.curation_collections AS collection
+  WHERE collection.collection_id = p_quarantine_collection_id;
+  IF v_quarantine_hint.created_by IS DISTINCT FROM 'migration:0065'
+     OR v_quarantine_hint.metadata ->> 'migration_quarantine' IS DISTINCT FROM '0065' THEN
+    RAISE EXCEPTION 'curation quarantine collection does not exist'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_quarantine_marker';
+  END IF;
+  IF p_action = 'move' THEN
+    v_target_id := COALESCE(
+      p_target_collection_id,
+      NULLIF(v_quarantine_hint.metadata ->> 'original_collection_id', '')::uuid
+    );
+    IF v_target_id IS NULL OR v_target_id = p_quarantine_collection_id THEN
+      RAISE EXCEPTION 'valid target collection is required'
+        USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_quarantine_target';
+    END IF;
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0));
+  PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write', 0));
+  IF p_action = 'confirm_standalone' THEN
+    PERFORM pg_advisory_xact_lock(hashtextextended('curation-collection:' || p_collection_key, 0));
+  END IF;
+  PERFORM collection.collection_id
+  FROM feature.curation_collections AS collection
+  WHERE collection.collection_id = ANY(
+    CASE WHEN v_target_id IS NULL
+      THEN ARRAY[p_quarantine_collection_id]
+      ELSE ARRAY[p_quarantine_collection_id, v_target_id]
+    END
+  )
+  ORDER BY collection.collection_id FOR UPDATE;
+  SELECT collection.* INTO STRICT v_quarantine
+  FROM feature.curation_collections AS collection
+  WHERE collection.collection_id = p_quarantine_collection_id;
+  IF v_quarantine.row_revision <> p_expected_quarantine_revision
+     OR v_quarantine.created_by IS DISTINCT FROM 'migration:0065'
+     OR v_quarantine.metadata ->> 'migration_quarantine' IS DISTINCT FROM '0065' THEN
+    RAISE EXCEPTION 'quarantine collection revision or marker changed'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_quarantine_expected_revision';
+  END IF;
+  PERFORM feature.claim_curation_catalog_command_effect(
+    p_command_id, v_command.operation, 'collection', p_quarantine_collection_id
+  );
+
+  IF p_action = 'confirm_standalone' THEN
+    UPDATE feature.curation_collections AS collection
+    SET collection_key = p_collection_key, title = p_title,
+        metadata = collection.metadata - 'migration_quarantine' - 'original_collection_id',
+        updated_by = p_principal, updated_at = clock_timestamp(),
+        row_revision = collection.row_revision + 1
+    WHERE collection.collection_id = p_quarantine_collection_id
+    RETURNING collection.collection_id, collection.collection_key,
+              collection.row_revision
+    INTO STRICT o_collection_id, o_collection_key, o_collection_revision;
+    o_moved_item_ids := NULL;
+    o_quarantine_deleted := NULL;
+    o_conflicts := '[]'::jsonb;
+    RETURN;
+  END IF;
+
+  SELECT collection.* INTO STRICT v_target
+  FROM feature.curation_collections AS collection
+  WHERE collection.collection_id = v_target_id;
+  IF v_target.row_revision <> p_expected_target_revision
+     OR v_target.archived_at IS NOT NULL OR v_target.status = 'archived'
+     OR (v_target.created_by = 'migration:0065'
+         AND v_target.metadata ->> 'migration_quarantine' = '0065') THEN
+    RAISE EXCEPTION 'target collection revision or state changed'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_quarantine_target_revision';
+  END IF;
+  PERFORM item.curation_item_id
+  FROM feature.curation_items AS item
+  WHERE item.collection_id = p_quarantine_collection_id
+  ORDER BY item.curation_item_id FOR UPDATE;
+  SELECT COALESCE(array_agg(item.curation_item_id ORDER BY item.curation_item_id), ARRAY[]::uuid[])
+  INTO STRICT v_locked_item_ids
+  FROM feature.curation_items AS item
+  WHERE item.collection_id = p_quarantine_collection_id;
+  IF p_item_ids IS NULL THEN
+    o_moved_item_ids := v_locked_item_ids;
+  ELSE
+    IF cardinality(p_item_ids) <> (
+      SELECT count(DISTINCT requested)::integer FROM unnest(p_item_ids) AS requested
+    ) OR EXISTS (
+      SELECT 1 FROM unnest(p_item_ids) AS requested
+      WHERE NOT requested = ANY(v_locked_item_ids)
+    ) THEN
+      RAISE EXCEPTION 'item_ids contain duplicates or non-members'
+        USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_quarantine_item_set';
+    END IF;
+    SELECT COALESCE(array_agg(requested ORDER BY requested), ARRAY[]::uuid[])
+    INTO STRICT o_moved_item_ids FROM unnest(p_item_ids) AS requested;
+  END IF;
+
+  SELECT COALESCE(jsonb_agg(jsonb_build_object(
+    'curation_item_id', moving.curation_item_id,
+    'conflict_kind', moving.conflict_kind,
+    'conflict_item_id', moving.conflict_item_id
+  ) ORDER BY moving.curation_item_id), '[]'::jsonb)
+  INTO STRICT o_conflicts
+  FROM (
+    SELECT item.curation_item_id,
+      CASE WHEN component.curation_item_id IS NOT NULL
+        THEN 'component_identity_conflict'
+        ELSE 'active_source_feature_conflict' END AS conflict_kind,
+      COALESCE(component.curation_item_id, active_feature.curation_item_id) AS conflict_item_id
+    FROM feature.curation_items AS item
+    LEFT JOIN LATERAL (
+      SELECT occupant.curation_item_id
+      FROM feature.curation_items AS occupant
+      WHERE occupant.collection_id = v_target_id
+        AND occupant.external_item_id = item.external_item_id
+        AND occupant.external_component_id = item.external_component_id
+      LIMIT 1
+    ) AS component ON true
+    LEFT JOIN LATERAL (
+      SELECT occupant.curation_item_id
+      FROM feature.curation_items AS occupant
+      WHERE item.source_present AND item.archived_at IS NULL
+        AND occupant.collection_id = v_target_id
+        AND occupant.external_item_id = item.external_item_id
+        AND occupant.feature_id = item.feature_id
+        AND occupant.source_present AND occupant.archived_at IS NULL
+      LIMIT 1
+    ) AS active_feature ON true
+    WHERE item.curation_item_id = ANY(o_moved_item_ids)
+      AND (component.curation_item_id IS NOT NULL
+           OR active_feature.curation_item_id IS NOT NULL)
+  ) AS moving;
+  IF jsonb_array_length(o_conflicts) > 0 THEN
+    RETURN;
+  END IF;
+  IF cardinality(o_moved_item_ids) > 0 THEN
+    UPDATE feature.curation_items AS item
+    SET collection_id = v_target_id, updated_by = p_principal,
+        updated_at = clock_timestamp(), row_revision = item.row_revision + 1
+    WHERE item.curation_item_id = ANY(o_moved_item_ids);
+    UPDATE feature.curation_collections AS collection
+    SET updated_by = p_principal, updated_at = clock_timestamp(),
+        row_revision = collection.row_revision + 1
+    WHERE collection.collection_id = v_target_id
+    RETURNING collection.row_revision INTO STRICT o_collection_revision;
+  ELSE
+    o_collection_revision := v_target.row_revision;
+  END IF;
+  DELETE FROM feature.curation_collections AS collection
+  WHERE collection.collection_id = p_quarantine_collection_id
+    AND NOT EXISTS (
+      SELECT 1 FROM feature.curation_items AS item
+      WHERE item.collection_id = p_quarantine_collection_id
+    );
+  o_quarantine_deleted := FOUND;
+  IF NOT o_quarantine_deleted THEN
+    UPDATE feature.curation_collections AS collection
+    SET updated_by = p_principal, updated_at = clock_timestamp(),
+        row_revision = collection.row_revision + 1
+    WHERE collection.collection_id = p_quarantine_collection_id;
+  END IF;
+  o_collection_id := v_target_id;
+  o_collection_key := v_target.collection_key;
+END
+$$;
+
+
+ALTER PROCEDURE feature.reclassify_curation_quarantine_command(IN p_quarantine_collection_id uuid, IN p_expected_quarantine_revision bigint, IN p_action text, IN p_target_collection_id uuid, IN p_expected_target_revision bigint, IN p_item_ids uuid[], IN p_collection_key text, IN p_title text, IN p_command_id bigint, IN p_principal text, OUT o_moved_item_ids uuid[], OUT o_quarantine_deleted boolean, OUT o_collection_id uuid, OUT o_collection_key text, OUT o_collection_revision bigint, OUT o_conflicts jsonb) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: record_manual_provider_dedup_candidate(text, text, jsonb, jsonb); Type: PROCEDURE; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+
+CREATE PROCEDURE feature.record_manual_provider_dedup_candidate(IN p_manual_feature_id text, IN p_provider_feature_id text, IN p_scores jsonb, IN p_detector_causation jsonb, OUT o_case_id uuid, OUT o_outcome text)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
+    AS $_$
+DECLARE
+    v_manual feature.features%ROWTYPE;
+    v_provider feature.features%ROWTYPE;
+    v_origin feature.feature_creation_origins%ROWTYPE;
+    v_source record;
+    v_manual_snapshot jsonb;
+    v_provider_snapshot jsonb;
+    v_input jsonb;
+    v_fingerprint text;
+    v_name_score numeric;
+    v_spatial_score numeric;
+    v_category_score numeric;
+    v_total_score numeric;
+    v_distance_meters numeric;
+    v_scorer_input_sha256 text;
+    v_primary_source_count integer;
+    v_prior_case_id uuid;
+BEGIN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'manual/provider dedup detector requires READ COMMITTED'
+            USING ERRCODE = '25001', CONSTRAINT = 'ck_m05_detector_isolation';
+    END IF;
+    IF session_user <> 'ktm_feature_dagster_runtime'
+       OR NOT pg_has_role(session_user, 'ktm_manual_provider_dedup_detector_executor', 'member')
+       OR pg_has_role(session_user, 'ktm_manual_provider_dedup_admin_executor', 'member')
+       OR pg_has_role(session_user, 'ktm_feature_reference_reconciliation_service_executor', 'member') THEN
+        RAISE EXCEPTION 'manual/provider dedup detector requires the Dagster-only executor'
+            USING ERRCODE = '42501', CONSTRAINT = 'ck_m05_detector_executor';
+    END IF;
+    IF p_manual_feature_id IS NULL OR btrim(p_manual_feature_id) = ''
+       OR p_provider_feature_id IS NULL OR btrim(p_provider_feature_id) = ''
+       OR p_manual_feature_id = p_provider_feature_id
+       OR jsonb_typeof(p_scores) IS DISTINCT FROM 'object'
+       OR jsonb_typeof(p_detector_causation) IS DISTINCT FROM 'object'
+       OR EXISTS (
+           SELECT 1 FROM jsonb_object_keys(p_scores) AS key_name(key_name)
+           WHERE key_name NOT IN (
+               'name_score', 'spatial_score', 'category_score', 'total_score',
+               'distance_meters', 'scorer_input_sha256'
+           )
+       )
+       OR jsonb_typeof(p_scores -> 'name_score') IS DISTINCT FROM 'number'
+       OR jsonb_typeof(p_scores -> 'spatial_score') IS DISTINCT FROM 'number'
+       OR jsonb_typeof(p_scores -> 'category_score') IS DISTINCT FROM 'number'
+       OR jsonb_typeof(p_scores -> 'total_score') IS DISTINCT FROM 'number'
+       OR jsonb_typeof(p_scores -> 'distance_meters') IS DISTINCT FROM 'number'
+       OR jsonb_typeof(p_scores -> 'scorer_input_sha256') IS DISTINCT FROM 'string'
+       OR p_scores ->> 'scorer_input_sha256' !~ '^[0-9a-f]{64}$' THEN
+        RAISE EXCEPTION 'manual/provider dedup candidate input is not canonical'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_candidate_input';
+    END IF;
+    BEGIN
+        v_name_score := (p_scores ->> 'name_score')::numeric;
+        v_spatial_score := (p_scores ->> 'spatial_score')::numeric;
+        v_category_score := (p_scores ->> 'category_score')::numeric;
+        v_total_score := (p_scores ->> 'total_score')::numeric;
+        v_distance_meters := (p_scores ->> 'distance_meters')::numeric;
+    EXCEPTION WHEN invalid_text_representation OR numeric_value_out_of_range THEN
+        RAISE EXCEPTION 'manual/provider dedup score is invalid'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_candidate_input';
+    END;
+    IF v_name_score NOT BETWEEN 0 AND 1 OR v_spatial_score NOT BETWEEN 0 AND 1
+       OR v_category_score NOT BETWEEN 0 AND 1 OR v_total_score NOT BETWEEN 0 AND 1
+       OR v_distance_meters < 0 THEN
+        RAISE EXCEPTION 'manual/provider dedup score is outside its canonical range'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_candidate_input';
+    END IF;
+    v_scorer_input_sha256 := p_scores ->> 'scorer_input_sha256';
+
+    -- event publication·decision과 같은 global fence가 case episode도 직렬화한다.
+    PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-m05', 0));
+    PERFORM 1
+    FROM feature.features AS locked
+    WHERE locked.feature_id IN (p_manual_feature_id, p_provider_feature_id)
+    ORDER BY locked.feature_uuid
+    FOR UPDATE;
+    SELECT * INTO v_manual
+    FROM feature.features WHERE feature_id = p_manual_feature_id FOR UPDATE;
+    SELECT * INTO v_provider
+    FROM feature.features WHERE feature_id = p_provider_feature_id FOR UPDATE;
+    IF NOT FOUND
+       OR v_manual.lifecycle_state <> 'active' OR v_manual.publication_state <> 'published'
+       OR v_manual.quality_state <> 'valid' OR v_provider.lifecycle_state <> 'active'
+       OR v_provider.publication_state <> 'published' OR v_provider.quality_state <> 'valid'
+       OR v_manual.coord IS NULL OR v_provider.coord IS NULL THEN
+        RAISE EXCEPTION 'manual/provider candidate Feature proof is not eligible'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_candidate_feature_proof';
+    END IF;
+    SELECT * INTO v_origin
+    FROM feature.feature_creation_origins AS origin
+    WHERE origin.feature_id = v_manual.feature_uuid
+      AND origin.origin_kind IN ('manual_admin', 'manual_curation', 'manual_request');
+    IF NOT FOUND OR NOT EXISTS (
+        SELECT 1 FROM feature.manual_feature_identity_claims AS claim
+        WHERE claim.feature_id = v_manual.feature_uuid
+          AND claim.claimed_by_command_id = v_origin.creation_command_id
+    ) THEN
+        RAISE EXCEPTION 'manual Feature lacks immutable creation evidence'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_candidate_manual_origin';
+    END IF;
+    SELECT count(*) INTO v_primary_source_count
+    FROM provider_sync.source_links AS link
+    JOIN provider_sync.source_entities AS entity
+      ON entity.source_entity_key = link.source_entity_key
+    JOIN provider_sync.source_entity_heads AS head
+      ON head.source_entity_key = entity.source_entity_key
+    JOIN provider_sync.source_records AS source
+      ON source.source_entity_key = head.source_entity_key
+     AND source.source_record_key = head.current_source_record_key
+    WHERE link.feature_id = v_provider.feature_id
+      AND link.source_role = 'primary';
+    IF v_primary_source_count <> 1 THEN
+        RAISE EXCEPTION 'provider Feature lacks one current primary source proof'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_candidate_provider_source';
+    END IF;
+    SELECT
+        link.source_entity_key,
+        head.current_source_record_key AS source_record_key,
+        head.observed_at AS source_head_observed_at,
+        source.raw_payload_hash AS source_record_raw_payload_hash,
+        entity.provider_dataset_id
+    INTO v_source
+    FROM provider_sync.source_links AS link
+    JOIN provider_sync.source_entities AS entity
+      ON entity.source_entity_key = link.source_entity_key
+    JOIN provider_sync.source_entity_heads AS head
+      ON head.source_entity_key = entity.source_entity_key
+    JOIN provider_sync.source_records AS source
+      ON source.source_entity_key = head.source_entity_key
+     AND source.source_record_key = head.current_source_record_key
+    WHERE link.feature_id = v_provider.feature_id
+      AND link.source_role = 'primary'
+    FOR SHARE OF link, entity, head, source;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'provider Feature lacks one current primary source proof'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_candidate_provider_source';
+    END IF;
+
+    v_manual_snapshot := jsonb_build_object(
+        'feature_id', v_manual.feature_id,
+        'feature_uuid', v_manual.feature_uuid,
+        'row_revision', v_manual.row_revision,
+        'kind', v_manual.kind,
+        'name', v_manual.name,
+        'category', v_manual.category,
+        'lon', ST_X(v_manual.coord),
+        'lat', ST_Y(v_manual.coord)
+    );
+    v_provider_snapshot := jsonb_build_object(
+        'feature_id', v_provider.feature_id,
+        'feature_uuid', v_provider.feature_uuid,
+        'row_revision', v_provider.row_revision,
+        'kind', v_provider.kind,
+        'name', v_provider.name,
+        'category', v_provider.category,
+        'lon', ST_X(v_provider.coord),
+        'lat', ST_Y(v_provider.coord)
+    );
+    v_input := jsonb_build_object(
+        'manual', v_manual_snapshot,
+        'manual_creation_command_id', v_origin.creation_command_id,
+        'provider', v_provider_snapshot,
+        'provider_dataset_id', v_source.provider_dataset_id,
+        'source_entity_key', v_source.source_entity_key,
+        'source_record_key', v_source.source_record_key,
+        'source_record_raw_payload_hash', v_source.source_record_raw_payload_hash,
+        'source_head_observed_at', v_source.source_head_observed_at,
+        'scorer_id', 'manual-provider-v1',
+        'scores', p_scores
+    );
+    v_fingerprint := encode(
+        x_extension.digest(convert_to(v_input::text, 'UTF8'), 'sha256'), 'hex'
+    );
+    SELECT candidate.case_id INTO o_case_id
+    FROM ops.manual_provider_dedup_cases AS candidate
+    LEFT JOIN ops.manual_provider_dedup_resolutions AS resolution
+      ON resolution.case_id = candidate.case_id
+    WHERE candidate.evidence_fingerprint = v_fingerprint
+      AND resolution.case_id IS NULL
+    FOR SHARE OF candidate;
+    IF FOUND THEN
+        o_outcome := 'idempotent';
+        RETURN;
+    END IF;
+    INSERT INTO ops.manual_provider_dedup_cases (
+        manual_feature_id, manual_feature_uuid, manual_creation_command_id,
+        manual_feature_row_revision, provider_feature_id, provider_feature_uuid,
+        provider_feature_row_revision, provider_dataset_id, source_entity_key,
+        source_record_key, source_record_raw_payload_hash, source_head_observed_at,
+        manual_feature_snapshot, provider_feature_snapshot, scorer_id,
+        scorer_input_sha256, name_score, spatial_score, category_score, total_score,
+        distance_meters, evidence_fingerprint, detector_causation
+    ) VALUES (
+        v_manual.feature_id, v_manual.feature_uuid, v_origin.creation_command_id,
+        v_manual.row_revision, v_provider.feature_id, v_provider.feature_uuid,
+        v_provider.row_revision, v_source.provider_dataset_id, v_source.source_entity_key,
+        v_source.source_record_key, v_source.source_record_raw_payload_hash,
+        v_source.source_head_observed_at, v_manual_snapshot, v_provider_snapshot,
+        'manual-provider-v1', v_scorer_input_sha256, v_name_score, v_spatial_score,
+        v_category_score, v_total_score, v_distance_meters, v_fingerprint,
+        p_detector_causation
+    ) RETURNING case_id INTO o_case_id;
+    FOR v_prior_case_id IN
+        SELECT candidate.case_id
+        FROM ops.manual_provider_dedup_cases AS candidate
+        LEFT JOIN ops.manual_provider_dedup_resolutions AS resolution
+          ON resolution.case_id = candidate.case_id
+        WHERE candidate.manual_feature_uuid = v_manual.feature_uuid
+          AND candidate.provider_feature_uuid = v_provider.feature_uuid
+          AND candidate.case_id <> o_case_id
+          AND resolution.case_id IS NULL
+        FOR UPDATE OF candidate
+    LOOP
+        INSERT INTO ops.manual_provider_dedup_resolutions (
+            case_id, decision, superseded_by_case_id, detector_causation
+        ) VALUES (
+            v_prior_case_id, 'superseded', o_case_id, p_detector_causation
+        );
+    END LOOP;
+    o_outcome := 'created';
+END
+$_$;
+
+
+ALTER PROCEDURE feature.record_manual_provider_dedup_candidate(IN p_manual_feature_id text, IN p_provider_feature_id text, IN p_scores jsonb, IN p_detector_causation jsonb, OUT o_case_id uuid, OUT o_outcome text) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+
+--
+-- Name: refresh_curated_source_observation(bigint, uuid); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.refresh_curated_source_observation(IN p_provider_dataset_id bigint, IN p_import_job_id uuid, OUT o_source_id uuid, OUT o_source_revision bigint, OUT o_observation_revision bigint, OUT o_row_count integer)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops'
+    AS $$
+DECLARE
+  v_source feature.curated_sources%ROWTYPE;
+  v_snapshot ops.curation_provider_snapshot_receipts%ROWTYPE;
+  v_receipt ops.curation_source_observation_receipts%ROWTYPE;
+  v_latest_receipt ops.curation_source_observation_receipts%ROWTYPE;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'source observation requires SERIALIZABLE transaction' USING ERRCODE = '25001';
+  END IF;
+  IF (
+       NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
+       OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     ) AND NOT (
+       session_user = 'ktm_feature_api_runtime'
+       AND current_setting('ktm.curation_cancellation_root', true) IS NOT NULL
+     ) THEN
+    RAISE EXCEPTION 'source observation requires the provider executor' USING ERRCODE = '42501';
+  END IF;
+  SELECT snapshot.* INTO STRICT v_snapshot
+  FROM ops.curation_provider_snapshot_receipts AS snapshot
+  WHERE snapshot.source_job_id = p_import_job_id
+    AND snapshot.provider_dataset_id = p_provider_dataset_id;
+  IF NOT EXISTS (
+    SELECT 1 FROM ops.import_jobs AS child
+    JOIN ops.import_jobs AS root ON root.job_id = child.parent_job_id
+    WHERE child.job_id = p_import_job_id AND child.status = 'done'
+      AND root.job_id = v_snapshot.root_job_id AND root.status = 'done'
+      AND root.dagster_run_status = 'SUCCESS'
+      AND child.quarantined_at IS NULL AND root.quarantined_at IS NULL
+      AND (
+        (child.cancellation_id IS NULL AND root.cancellation_id IS NULL)
+        OR (
+          session_user = 'ktm_feature_api_runtime'
+          AND root.job_id::text = current_setting(
+            'ktm.curation_cancellation_root', true
+          )
+          AND child.cancellation_id = root.cancellation_id
+          AND EXISTS (
+            SELECT 1
+            FROM ops.pipeline_cancellation_members AS member
+            JOIN ops.pipeline_cancellation_runs AS run
+              ON run.cancellation_id = member.cancellation_id
+             AND run.dagster_run_id = member.dagster_run_id
+            WHERE member.cancellation_id = root.cancellation_id
+              AND member.job_id = root.job_id
+              AND member.result = 'already_terminal'
+              AND member.terminal_status = 'done'
+              AND run.result = 'already_terminal'
+              AND run.terminal_status = 'SUCCESS'
+          )
+        )
+      )
+  ) THEN
+    RAISE EXCEPTION 'source observation requires a sealed terminal root member'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_source_observation_job';
+  END IF;
+  SELECT source.* INTO STRICT v_source FROM feature.curated_sources AS source
+  WHERE source.provider_dataset_id = p_provider_dataset_id FOR UPDATE;
+  SELECT receipt.* INTO v_receipt
+  FROM ops.curation_source_observation_receipts AS receipt
+  WHERE receipt.source_id = v_source.source_id AND receipt.import_job_id = p_import_job_id;
+  IF FOUND THEN
+    o_source_id := v_receipt.source_id;
+    o_source_revision := v_receipt.source_revision;
+    o_observation_revision := v_receipt.observation_revision;
+    o_row_count := v_receipt.row_count;
+    RETURN;
+  END IF;
+  IF v_source.archived_at IS NOT NULL THEN
+    RAISE EXCEPTION 'archived source cannot receive new observations'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_source_active';
+  END IF;
+  SELECT receipt.* INTO v_latest_receipt
+  FROM ops.curation_source_observation_receipts AS receipt
+  WHERE receipt.source_id = v_source.source_id
+  ORDER BY receipt.observed_at DESC, receipt.import_job_id DESC LIMIT 1;
+  IF FOUND AND (v_snapshot.observed_at, p_import_job_id)
+       <= (v_latest_receipt.observed_at, v_latest_receipt.import_job_id) THEN
+    RAISE EXCEPTION 'source observation job is older than the current receipt'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_source_observation_order';
+  END IF;
+  IF v_snapshot.source_entity_count > 2147483647 THEN
+    RAISE EXCEPTION 'source observation row count exceeds the catalog range'
+      USING ERRCODE = '22003';
+  END IF;
+  o_row_count := v_snapshot.source_entity_count::integer;
+  UPDATE feature.curated_sources AS source
+  SET last_checked_at = v_snapshot.observed_at, row_count = o_row_count,
+      last_source_modified_at = v_snapshot.last_source_modified_at,
+      next_expected_at = CASE source.update_cycle
+        WHEN 'realtime' THEN v_snapshot.observed_at::date
+        WHEN 'daily' THEN v_snapshot.observed_at::date + 1
+        WHEN 'weekly' THEN v_snapshot.observed_at::date + 7
+        WHEN 'monthly' THEN (v_snapshot.observed_at + interval '1 month')::date
+        WHEN 'annual' THEN (v_snapshot.observed_at + interval '1 year')::date
+        ELSE NULL END,
+      observation_revision = source.observation_revision + 1,
+      updated_at = clock_timestamp()
+  WHERE source.source_id = v_source.source_id
+  RETURNING source.source_id, source.row_revision, source.observation_revision
+    INTO STRICT o_source_id, o_source_revision, o_observation_revision;
+  INSERT INTO ops.curation_source_observation_receipts (
+    source_id, import_job_id, observed_at, source_revision,
+    observation_revision, row_count, last_source_modified_at, source_input_set_hash
+  ) VALUES (
+    o_source_id, p_import_job_id, v_snapshot.observed_at, o_source_revision,
+    o_observation_revision, o_row_count, v_snapshot.last_source_modified_at,
+    v_snapshot.source_input_set_hash
+  );
+END
+$$;
+
+
+ALTER PROCEDURE feature.refresh_curated_source_observation(IN p_provider_dataset_id bigint, IN p_import_job_id uuid, OUT o_source_id uuid, OUT o_source_revision bigint, OUT o_observation_revision bigint, OUT o_row_count integer) OWNER TO ktm_curation_command_owner;
+
+--
 -- Name: reject_curation_history_mutation(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -2000,26 +8360,7 @@ CREATE FUNCTION feature.reject_curation_history_mutation() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 BEGIN
-  -- merge의 legacy-conflict detach가 curation_items.curation_item_id를 재작성할 때,
-  -- 위 4개 FK의 ON UPDATE CASCADE가 같은 문장 안에서 이 행의 curation_item_id만
-  -- 따라오게 만든다. 그 부모-키 재작성은 이력 변경이 아니다 — curation_item_id
-  -- **하나만** 바뀌었을 때만 통과시키고, 다른 컬럼이 하나라도 같이 바뀌면 여전히
-  -- 거부한다.
-  --
-  -- 이 트리거 함수는 curation_import_batches(curation_item_id 컬럼이 없다)에도
-  -- 그대로 붙는다. plpgsql에서 `NEW.curation_item_id`처럼 정적으로 필드를 참조하면
-  -- 그 컬럼이 없는 테이블에 대해 함수가 실행될 때 UndefinedColumnError로 죽는다
-  -- (실행해서 확인함). 그래서 `to_jsonb(NEW) ? 'curation_item_id'`로 **동적**으로
-  -- 존재 여부를 먼저 확인하고, 나머지도 jsonb 경로로만 접근한다.
-  IF TG_OP = 'UPDATE'
-     AND to_jsonb(NEW) ? 'curation_item_id'
-     AND (to_jsonb(NEW) ->> 'curation_item_id')
-             IS DISTINCT FROM (to_jsonb(OLD) ->> 'curation_item_id')
-     AND to_jsonb(NEW) - 'curation_item_id' = to_jsonb(OLD) - 'curation_item_id'
-  THEN
-    RETURN NEW;
-  END IF;
-
+  -- T-VN-40C: merge의 legacy-conflict detach(rekey)가 사라져 curation_item_id 재작성 허용 분기도 없다.
   RAISE EXCEPTION 'curation import/link history is append-only'
     USING ERRCODE = '55000';
 END;
@@ -2027,6 +8368,23 @@ $$;
 
 
 ALTER FUNCTION feature.reject_curation_history_mutation() OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: reject_curation_provider_receipt_mutation(); Type: FUNCTION; Schema: feature; Owner: ktm_curation_audit_writer
+--
+
+CREATE FUNCTION feature.reject_curation_provider_receipt_mutation() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops'
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'provider curation receipts are append-only'
+    USING ERRCODE = '55000', CONSTRAINT = 'ck_tvn40_provider_curation_receipt_immutable';
+END
+$$;
+
+
+ALTER FUNCTION feature.reject_curation_provider_receipt_mutation() OWNER TO ktm_curation_audit_writer;
 
 --
 -- Name: reject_feature_change_request_receipt_mutation(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
@@ -2057,6 +8415,34 @@ $$;
 ALTER FUNCTION feature.reject_feature_change_request_receipt_mutation() OWNER TO ktm_feature_state_procedure_owner;
 
 --
+-- Name: reject_feature_request(uuid, text, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_request_procedure_owner
+--
+
+CREATE PROCEDURE feature.reject_feature_request(IN p_request_id uuid, IN p_reason text, IN p_domain_command_id bigint, OUT o_status text)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
+    AS $$
+DECLARE v_command ops.domain_commands%ROWTYPE;
+BEGIN
+    IF current_setting('transaction_isolation') <> 'read committed' OR session_user <> 'ktm_feature_api_runtime'
+       OR NOT pg_has_role(session_user, 'ktm_feature_request_admin_executor', 'member') THEN
+        RAISE EXCEPTION 'Feature request rejection requires admin executor at READ COMMITTED' USING ERRCODE = '42501', CONSTRAINT = 'ck_feature_request_executor';
+    END IF;
+    SELECT command.* INTO v_command FROM ops.domain_commands AS command WHERE command.command_id = p_domain_command_id FOR UPDATE;
+    IF NOT FOUND OR v_command.operation <> 'admin.feature-request.reject.v1' OR btrim(v_command.actor) = '' OR EXISTS (SELECT 1 FROM ops.domain_command_results AS result WHERE result.command_id = p_domain_command_id) THEN
+        RAISE EXCEPTION 'Feature request rejection command does not match writer' USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_request_command';
+    END IF;
+    UPDATE ops.feature_requests SET status = 'rejected', resolved_at = clock_timestamp(), resolved_by_actor = v_command.actor,
+        resolution_command_id = p_domain_command_id, rejection_reason = nullif(btrim(p_reason), '')
+    WHERE request_id = p_request_id AND status = 'pending' RETURNING status INTO o_status;
+    IF o_status IS NULL THEN RAISE EXCEPTION 'Feature request is not pending' USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_request_pending'; END IF;
+END
+$$;
+
+
+ALTER PROCEDURE feature.reject_feature_request(IN p_request_id uuid, IN p_reason text, IN p_domain_command_id bigint, OUT o_status text) OWNER TO ktm_feature_request_procedure_owner;
+
+--
 -- Name: reject_feature_state_transition_mutation(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_audit_writer
 --
 
@@ -2072,6 +8458,70 @@ $$;
 
 
 ALTER FUNCTION feature.reject_feature_state_transition_mutation() OWNER TO ktm_feature_audit_writer;
+
+--
+-- Name: reject_manual_feature_evidence_mutation(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_audit_writer
+--
+
+CREATE FUNCTION feature.reject_manual_feature_evidence_mutation() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+    IF TG_TABLE_NAME = 'manual_feature_identity_claims' THEN
+        RAISE EXCEPTION 'manual Feature identity claims are append-only'
+            USING ERRCODE = '42501',
+                CONSTRAINT = 'ck_manual_feature_identity_claims_append_only';
+    END IF;
+    RAISE EXCEPTION 'Feature creation origins are append-only'
+        USING ERRCODE = '42501',
+            CONSTRAINT = 'ck_feature_creation_origins_append_only';
+END
+$$;
+
+
+ALTER FUNCTION feature.reject_manual_feature_evidence_mutation() OWNER TO ktm_feature_audit_writer;
+
+--
+-- Name: reject_manual_feature_hard_purge(); Type: FUNCTION; Schema: feature; Owner: ktm_manual_feature_procedure_owner
+--
+
+CREATE FUNCTION feature.reject_manual_feature_hard_purge() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+    IF EXISTS (
+        SELECT 1
+        FROM feature.manual_feature_identity_claims AS claim
+        WHERE claim.feature_id = OLD.feature_uuid
+    ) THEN
+        RAISE EXCEPTION 'manual Feature hard purge is not ready'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_purge_not_ready';
+    END IF;
+    RETURN OLD;
+END
+$$;
+
+
+ALTER FUNCTION feature.reject_manual_feature_hard_purge() OWNER TO ktm_manual_feature_procedure_owner;
+
+--
+-- Name: reject_manual_provider_dedup_evidence_mutation(); Type: FUNCTION; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+
+CREATE FUNCTION feature.reject_manual_provider_dedup_evidence_mutation() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+    RAISE EXCEPTION 'manual/provider dedup evidence is append-only'
+        USING ERRCODE = '55000', CONSTRAINT = 'ck_manual_provider_dedup_append_only';
+END
+$$;
+
+
+ALTER FUNCTION feature.reject_manual_provider_dedup_evidence_mutation() OWNER TO ktm_manual_provider_dedup_procedure_owner;
 
 --
 -- Name: reject_price_value_mutation(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
@@ -2095,6 +8545,148 @@ CREATE FUNCTION feature.reject_price_value_mutation() RETURNS trigger
 
 
 ALTER FUNCTION feature.reject_price_value_mutation() OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: reject_theme_feature_candidate(uuid, bigint, bigint, text, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.reject_theme_feature_candidate(IN p_candidate_id uuid, IN p_expected_candidate_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_candidate_id uuid, OUT o_candidate_revision bigint, OUT o_transition_id bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops'
+    AS $$
+DECLARE
+  v_candidate feature.theme_feature_candidates%ROWTYPE;
+  v_command ops.domain_commands%ROWTYPE;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'candidate command requires SERIALIZABLE transaction'
+      USING ERRCODE = '25001';
+  END IF;
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    RAISE EXCEPTION 'candidate rejection requires the admin executor'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_expected_candidate_revision IS NULL OR p_expected_candidate_revision < 1 THEN
+    RAISE EXCEPTION 'expected candidate revision must be positive'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_expected_revision';
+  END IF;
+  IF p_reason_code IS NULL OR p_reason_code <> btrim(p_reason_code)
+     OR p_reason_code = '' OR char_length(p_reason_code) > 128 THEN
+    RAISE EXCEPTION 'reason_code must be canonical and non-empty'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_reason_code';
+  END IF;
+  IF p_principal IS NULL OR p_principal <> btrim(p_principal)
+     OR p_principal = '' OR char_length(p_principal) > 200 THEN
+    RAISE EXCEPTION 'principal must be canonical and non-empty'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_principal';
+  END IF;
+
+  SELECT command.* INTO STRICT v_command
+  FROM ops.domain_commands AS command
+  WHERE command.command_id = p_command_id;
+  IF v_command.actor <> p_principal
+     OR v_command.operation <> 'admin.theme-feature-candidate.reject' THEN
+    RAISE EXCEPTION 'domain command does not match candidate rejection'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_domain_command';
+  END IF;
+
+  SELECT candidate.* INTO STRICT v_candidate
+  FROM feature.theme_feature_candidates AS candidate
+  WHERE candidate.candidate_id = p_candidate_id
+  FOR UPDATE;
+  IF v_candidate.row_revision <> p_expected_candidate_revision THEN
+    RAISE EXCEPTION 'candidate revision mismatch: expected %, current %',
+      p_expected_candidate_revision, v_candidate.row_revision
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_expected_revision';
+  END IF;
+  IF v_candidate.disposition <> 'active'
+     OR v_candidate.review_state <> 'open'
+     OR NOT v_candidate.eligibility_present THEN
+    RAISE EXCEPTION 'only an active open eligible candidate can be rejected'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_candidate_reject_state';
+  END IF;
+
+  UPDATE feature.theme_feature_candidates AS candidate
+  SET review_state = 'rejected',
+      row_revision = candidate.row_revision + 1,
+      updated_at = clock_timestamp()
+  WHERE candidate.candidate_id = p_candidate_id
+  RETURNING candidate.candidate_id, candidate.row_revision
+  INTO STRICT o_candidate_id, o_candidate_revision;
+
+  o_transition_id := feature.append_theme_feature_candidate_transition(
+    p_candidate_id,
+    v_candidate.feature_id,
+    v_candidate.feature_id,
+    v_candidate.rule_id,
+    v_candidate.source_entity_key,
+    v_candidate.review_state,
+    'rejected',
+    v_candidate.eligibility_present,
+    v_candidate.eligibility_present,
+    v_candidate.disposition,
+    v_candidate.disposition,
+    NULL,
+    'admin_reject',
+    o_candidate_revision,
+    v_candidate.rule_row_revision,
+    v_candidate.rule_input_hash,
+    v_candidate.candidate_input_hash,
+    NULL,
+    NULL,
+    v_candidate.source_record_key,
+    v_candidate.source_record_hash,
+    NULL,
+    NULL,
+    p_command_id,
+    p_principal,
+    p_reason_code,
+    jsonb_build_object(
+      'schema_version', 1,
+      'candidate_id', p_candidate_id::text,
+      'expected_candidate_revision', p_expected_candidate_revision
+    )
+  );
+END
+$$;
+
+
+ALTER PROCEDURE feature.reject_theme_feature_candidate(IN p_candidate_id uuid, IN p_expected_candidate_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_candidate_id uuid, OUT o_candidate_revision bigint, OUT o_transition_id bigint) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: reject_tvn40_append_only_mutation(); Type: FUNCTION; Schema: feature; Owner: ktm_curation_audit_writer
+--
+
+CREATE FUNCTION feature.reject_tvn40_append_only_mutation() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+  RAISE EXCEPTION '% is append-only', TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME
+    USING ERRCODE = '42501';
+END
+$$;
+
+
+ALTER FUNCTION feature.reject_tvn40_append_only_mutation() OWNER TO ktm_curation_audit_writer;
+
+--
+-- Name: reject_tvn40_truncate(); Type: FUNCTION; Schema: feature; Owner: ktm_curation_audit_writer
+--
+
+CREATE FUNCTION feature.reject_tvn40_truncate() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+  RAISE EXCEPTION '% cannot be truncated', TG_TABLE_SCHEMA || '.' || TG_TABLE_NAME
+    USING ERRCODE = '42501';
+END
+$$;
+
+
+ALTER FUNCTION feature.reject_tvn40_truncate() OWNER TO ktm_curation_audit_writer;
 
 --
 -- Name: reject_user_feature_version_mutation(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
@@ -2160,6 +8752,385 @@ CREATE FUNCTION feature.reject_weather_value_mutation() RETURNS trigger
 
 
 ALTER FUNCTION feature.reject_weather_value_mutation() OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: resolve_curation_import_collection_command(text, uuid, uuid, text, text, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.resolve_curation_import_collection_command(IN p_collection_key text, IN p_theme_id uuid, IN p_source_id uuid, IN p_title text, IN p_edition_key text, IN p_command_id bigint, IN p_principal text, OUT o_collection_id uuid, OUT o_collection_revision bigint, OUT o_created boolean)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
+    AS $$
+DECLARE
+  v_command ops.domain_commands%ROWTYPE;
+  v_collection feature.curation_collections%ROWTYPE;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'curation import command requires SERIALIZABLE transaction'
+      USING ERRCODE = '25001';
+  END IF;
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    RAISE EXCEPTION 'curation import command requires the admin executor'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_principal IS NULL OR p_principal <> btrim(p_principal) OR p_principal = ''
+     OR p_collection_key IS NULL OR p_collection_key <> btrim(p_collection_key)
+     OR p_collection_key = '' OR p_theme_id IS NULL
+     OR p_title IS NULL OR p_title <> btrim(p_title) OR p_title = ''
+     OR p_edition_key IS NULL OR p_edition_key <> btrim(p_edition_key) THEN
+    RAISE EXCEPTION 'curation import collection input is not canonical'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_collection_input';
+  END IF;
+  SELECT command.* INTO STRICT v_command
+  FROM ops.domain_commands AS command WHERE command.command_id = p_command_id
+  FOR UPDATE;
+  IF v_command.actor <> p_principal
+     OR v_command.operation <> 'admin.curation.import'
+     OR EXISTS (
+       SELECT 1 FROM ops.domain_command_results AS result
+       WHERE result.command_id = p_command_id
+     ) THEN
+    RAISE EXCEPTION 'domain command does not match active curation import'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_domain_command';
+  END IF;
+
+  PERFORM pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0));
+  PERFORM pg_advisory_xact_lock(hashtextextended('curation-catalog-write', 0));
+  PERFORM pg_advisory_xact_lock(hashtextextended('curation-collection:' || p_collection_key, 0));
+  PERFORM 1 FROM feature.curated_themes AS theme
+  WHERE theme.theme_id = p_theme_id AND theme.archived_at IS NULL FOR SHARE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'active curated theme does not exist'
+      USING ERRCODE = '23503', CONSTRAINT = 'fk_tvn40_import_active_theme';
+  END IF;
+  IF p_source_id IS NOT NULL THEN
+    PERFORM 1 FROM feature.curated_sources AS source
+    WHERE source.source_id = p_source_id AND source.archived_at IS NULL FOR SHARE;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'active curated source does not exist'
+        USING ERRCODE = '23503', CONSTRAINT = 'fk_tvn40_import_active_source';
+    END IF;
+  END IF;
+
+  SELECT collection.* INTO v_collection
+  FROM feature.curation_collections AS collection
+  WHERE collection.collection_key = p_collection_key FOR UPDATE;
+  IF FOUND THEN
+    IF (v_collection.theme_id, v_collection.source_id, v_collection.title,
+        v_collection.edition_key, v_collection.status, v_collection.visibility,
+        v_collection.archived_at IS NULL)
+       IS DISTINCT FROM
+       (p_theme_id, p_source_id, p_title, p_edition_key,
+        'published'::text, 'public'::text, true) THEN
+      RAISE EXCEPTION 'existing collection differs from immutable import catalog input'
+        USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_collection_cas';
+    END IF;
+    o_collection_id := v_collection.collection_id;
+    o_collection_revision := v_collection.row_revision;
+    o_created := false;
+  ELSE
+    o_collection_id := x_extension.gen_random_uuid();
+    INSERT INTO feature.curation_collections (
+      collection_id, collection_key, theme_id, source_id, title, edition_key,
+      description, status, visibility, metadata, created_by, updated_by,
+      row_revision, updated_at, archived_at
+    ) VALUES (
+      o_collection_id, p_collection_key, p_theme_id, p_source_id, p_title,
+      p_edition_key, NULL, 'published', 'public', '{}'::jsonb,
+      p_principal, p_principal, 1, clock_timestamp(), NULL
+    ) RETURNING row_revision INTO STRICT o_collection_revision;
+    o_created := true;
+  END IF;
+  INSERT INTO ops.curation_import_collection_effects (
+    command_id, collection_id, operation, created
+  ) VALUES (p_command_id, o_collection_id, v_command.operation, o_created);
+END
+$$;
+
+
+ALTER PROCEDURE feature.resolve_curation_import_collection_command(IN p_collection_key text, IN p_theme_id uuid, IN p_source_id uuid, IN p_title text, IN p_edition_key text, IN p_command_id bigint, IN p_principal text, OUT o_collection_id uuid, OUT o_collection_revision bigint, OUT o_created boolean) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: resolve_manual_provider_dedup_case(uuid, text, text, bigint, bigint, text, text, text, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+
+CREATE PROCEDURE feature.resolve_manual_provider_dedup_case(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id text, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id text, OUT o_manual_feature_row_revision bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
+    AS $_$
+DECLARE
+    v_case ops.manual_provider_dedup_cases%ROWTYPE;
+    v_manual feature.features%ROWTYPE;
+    v_provider feature.features%ROWTYPE;
+    v_origin feature.feature_creation_origins%ROWTYPE;
+    v_source record;
+    v_primary_source_count integer;
+    v_command ops.domain_commands%ROWTYPE;
+    v_transition_feature_id text;
+    v_transition_row_revision bigint;
+    v_transition_id bigint;
+    v_action text;
+    v_payload jsonb;
+    v_event_sha256 text;
+    v_event_sequence bigint;
+    v_occurred_at timestamptz;
+BEGIN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'manual/provider dedup decision requires READ COMMITTED'
+            USING ERRCODE = '25001', CONSTRAINT = 'ck_m05_decision_isolation';
+    END IF;
+    IF session_user <> 'ktm_feature_api_runtime'
+       OR NOT pg_has_role(session_user, 'ktm_manual_provider_dedup_admin_executor', 'member')
+       OR pg_has_role(session_user, 'ktm_manual_provider_dedup_detector_executor', 'member') THEN
+        RAISE EXCEPTION 'manual/provider dedup decision requires the admin-only executor'
+            USING ERRCODE = '42501', CONSTRAINT = 'ck_m05_decision_executor';
+    END IF;
+    IF p_case_id IS NULL
+       OR p_decision NOT IN ('kept', 'merged', 'manual_retired')
+       OR p_expected_case_fingerprint !~ '^[0-9a-f]{64}$'
+       OR p_expected_manual_row_revision IS NULL OR p_expected_manual_row_revision < 1
+       OR p_expected_provider_row_revision IS NULL OR p_expected_provider_row_revision < 1
+       OR nullif(btrim(p_reason), '') IS NULL
+       OR nullif(btrim(p_actor), '') IS NULL
+       OR p_domain_command_id IS NULL OR p_domain_command_id < 1
+       OR (p_decision = 'merged' AND nullif(btrim(p_survivor_feature_id), '') IS NULL)
+       OR (p_decision <> 'merged' AND p_survivor_feature_id IS NOT NULL) THEN
+        RAISE EXCEPTION 'manual/provider dedup decision input is not canonical'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_decision_input';
+    END IF;
+    SELECT command.* INTO v_command
+    FROM ops.domain_commands AS command
+    WHERE command.command_id = p_domain_command_id
+    FOR SHARE;
+    IF NOT FOUND
+       OR v_command.actor <> p_actor
+       OR v_command.operation <> 'admin.manual-provider-dedup-case.resolve.v1'
+       OR EXISTS (
+           SELECT 1 FROM ops.domain_command_results AS result
+           WHERE result.command_id = p_domain_command_id
+       ) THEN
+        RAISE EXCEPTION 'manual/provider dedup decision command is not open'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_m05_decision_command';
+    END IF;
+
+    -- A sequence is allocated only while this fence is held.  Thus its commit
+    -- visibility order is the same as the reconciliation action order.
+    PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-m05', 0));
+    SELECT candidate.* INTO v_case
+    FROM ops.manual_provider_dedup_cases AS candidate
+    WHERE candidate.case_id = p_case_id
+    FOR UPDATE;
+    IF NOT FOUND
+       OR EXISTS (
+           SELECT 1 FROM ops.manual_provider_dedup_resolutions AS resolution
+           WHERE resolution.case_id = p_case_id
+       )
+       OR v_case.evidence_fingerprint <> p_expected_case_fingerprint
+       OR v_case.manual_feature_row_revision <> p_expected_manual_row_revision
+       OR v_case.provider_feature_row_revision <> p_expected_provider_row_revision THEN
+        o_outcome := 'stale';
+        RETURN;
+    END IF;
+
+    PERFORM 1
+    FROM feature.features AS locked
+    WHERE locked.feature_uuid IN (v_case.manual_feature_uuid, v_case.provider_feature_uuid)
+    ORDER BY locked.feature_uuid
+    FOR UPDATE;
+    SELECT * INTO v_manual
+    FROM feature.features
+    WHERE feature_id = v_case.manual_feature_id
+      AND feature_uuid = v_case.manual_feature_uuid
+    FOR UPDATE;
+    SELECT * INTO v_provider
+    FROM feature.features
+    WHERE feature_id = v_case.provider_feature_id
+      AND feature_uuid = v_case.provider_feature_uuid
+    FOR UPDATE;
+    IF NOT FOUND
+       OR v_manual.row_revision <> v_case.manual_feature_row_revision
+       OR v_provider.row_revision <> v_case.provider_feature_row_revision
+       OR v_manual.lifecycle_state <> 'active' OR v_manual.publication_state <> 'published'
+       OR v_manual.quality_state <> 'valid' OR v_provider.lifecycle_state <> 'active'
+       OR v_provider.publication_state <> 'published' OR v_provider.quality_state <> 'valid'
+       OR v_manual.coord IS NULL OR v_provider.coord IS NULL THEN
+        o_outcome := 'stale';
+        RETURN;
+    END IF;
+    SELECT origin.* INTO v_origin
+    FROM feature.feature_creation_origins AS origin
+    WHERE origin.feature_id = v_manual.feature_uuid
+      AND origin.creation_command_id = v_case.manual_creation_command_id
+      AND origin.origin_kind IN ('manual_admin', 'manual_curation', 'manual_request');
+    IF NOT FOUND OR NOT EXISTS (
+        SELECT 1 FROM feature.manual_feature_identity_claims AS claim
+        WHERE claim.feature_id = v_manual.feature_uuid
+          AND claim.claimed_by_command_id = v_origin.creation_command_id
+    ) THEN
+        o_outcome := 'stale';
+        RETURN;
+    END IF;
+    SELECT count(*) INTO v_primary_source_count
+    FROM provider_sync.source_links AS link
+    JOIN provider_sync.source_entities AS entity
+      ON entity.source_entity_key = link.source_entity_key
+    JOIN provider_sync.source_entity_heads AS head
+      ON head.source_entity_key = entity.source_entity_key
+    JOIN provider_sync.source_records AS source
+      ON source.source_entity_key = head.source_entity_key
+     AND source.source_record_key = head.current_source_record_key
+    WHERE link.feature_id = v_provider.feature_id
+      AND link.source_role = 'primary';
+    IF v_primary_source_count <> 1 THEN
+        o_outcome := 'stale';
+        RETURN;
+    END IF;
+    SELECT entity.provider_dataset_id, link.source_entity_key,
+           head.current_source_record_key AS source_record_key,
+           source.raw_payload_hash, head.observed_at
+    INTO v_source
+    FROM provider_sync.source_links AS link
+    JOIN provider_sync.source_entities AS entity
+      ON entity.source_entity_key = link.source_entity_key
+    JOIN provider_sync.source_entity_heads AS head
+      ON head.source_entity_key = entity.source_entity_key
+    JOIN provider_sync.source_records AS source
+      ON source.source_entity_key = head.source_entity_key
+     AND source.source_record_key = head.current_source_record_key
+    WHERE link.feature_id = v_provider.feature_id
+      AND link.source_role = 'primary'
+    FOR SHARE OF link, entity, head, source;
+    IF NOT FOUND
+       OR v_source.provider_dataset_id <> v_case.provider_dataset_id
+       OR v_source.source_entity_key <> v_case.source_entity_key
+       OR v_source.source_record_key <> v_case.source_record_key
+       OR v_source.raw_payload_hash <> v_case.source_record_raw_payload_hash
+       OR v_source.observed_at <> v_case.source_head_observed_at THEN
+        o_outcome := 'stale';
+        RETURN;
+    END IF;
+    IF p_decision = 'merged' AND p_survivor_feature_id <> v_provider.feature_id THEN
+        o_outcome := 'stale';
+        RETURN;
+    END IF;
+
+    INSERT INTO ops.manual_provider_dedup_resolutions (
+        case_id, decision, command_id, actor, reason
+    ) VALUES (
+        v_case.case_id, p_decision, p_domain_command_id, p_actor, btrim(p_reason)
+    ) RETURNING resolution_id INTO o_resolution_id;
+    o_manual_feature_id := v_manual.feature_id;
+    IF p_decision = 'kept' THEN
+        o_outcome := 'kept';
+        o_manual_feature_row_revision := v_manual.row_revision;
+        RETURN;
+    END IF;
+
+    CALL feature.transition_admin_feature_state(
+        v_manual.feature_id, NULL, NULL, NULL, v_manual.row_revision,
+        'manual-provider-dedup', p_actor, 'retire',
+        v_transition_feature_id, v_transition_row_revision, v_transition_id
+    );
+    IF v_transition_feature_id <> v_manual.feature_id
+       OR v_transition_row_revision <> v_manual.row_revision + 1
+       OR v_transition_id IS NULL THEN
+        RAISE EXCEPTION 'manual/provider dedup retirement transition is inconsistent'
+            USING ERRCODE = '55000';
+    END IF;
+    v_action := CASE WHEN p_decision = 'merged' THEN 'rebind' ELSE 'detach' END;
+    o_event_id := x_extension.gen_random_uuid();
+    SELECT nextval(pg_get_serial_sequence(
+        'ops.feature_reference_reconciliation_events', 'event_sequence'
+    )) INTO v_event_sequence;
+    v_occurred_at := clock_timestamp();
+    v_payload := jsonb_build_object(
+        'payload_schema_version', 1,
+        'event_id', o_event_id,
+        'event_sequence', v_event_sequence,
+        'occurred_at', to_char(
+            v_occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+        ),
+        'case_id', v_case.case_id,
+        'resolution_id', o_resolution_id,
+        'action', v_action,
+        'old_feature', jsonb_build_object(
+            'feature_id', v_manual.feature_id,
+            'feature_uuid', v_manual.feature_uuid,
+            'row_revision', v_manual.row_revision
+        ),
+        'replacement_feature', CASE WHEN v_action = 'rebind' THEN jsonb_build_object(
+            'feature_id', v_provider.feature_id,
+            'feature_uuid', v_provider.feature_uuid,
+            'row_revision', v_provider.row_revision
+        ) ELSE NULL END,
+        'manual_retire_transition_id', v_transition_id,
+        'manual_retire_row_revision_after_transition', v_transition_row_revision,
+        'command_id', p_domain_command_id
+    );
+    v_event_sha256 := encode(
+        x_extension.digest(convert_to(v_payload::text, 'UTF8'), 'sha256'), 'hex'
+    );
+    INSERT INTO ops.feature_reference_reconciliation_events (
+        event_id, event_sequence, case_id, resolution_id, action,
+        old_feature_id, old_feature_uuid, old_feature_row_revision_before_transition,
+        replacement_feature_id, replacement_feature_uuid, replacement_feature_row_revision,
+        manual_retire_transition_id, manual_retire_row_revision_after_transition,
+        command_id, payload_schema_version, event_payload, event_sha256, occurred_at
+    ) OVERRIDING SYSTEM VALUE VALUES (
+        o_event_id, v_event_sequence, v_case.case_id, o_resolution_id, v_action,
+        v_manual.feature_id, v_manual.feature_uuid, v_manual.row_revision,
+        CASE WHEN v_action = 'rebind' THEN v_provider.feature_id END,
+        CASE WHEN v_action = 'rebind' THEN v_provider.feature_uuid END,
+        CASE WHEN v_action = 'rebind' THEN v_provider.row_revision END,
+        v_transition_id, v_transition_row_revision, p_domain_command_id,
+        1, v_payload, v_event_sha256, v_occurred_at
+    );
+    o_manual_feature_row_revision := v_transition_row_revision;
+    o_outcome := p_decision;
+END
+$_$;
+
+
+ALTER PROCEDURE feature.resolve_manual_provider_dedup_case(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id text, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id text, OUT o_manual_feature_row_revision bigint) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+
+--
+-- Name: resolve_manual_provider_dedup_case_v2(uuid, text, text, bigint, bigint, text, text, text, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+
+CREATE PROCEDURE feature.resolve_manual_provider_dedup_case_v2(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id text, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id text, OUT o_manual_feature_row_revision bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops'
+    AS $$
+BEGIN
+    -- An immutable cursor-zero subscription is the paired-consumer activation
+    -- receipt. No M05 resolution (including "kept") can predate it.
+    PERFORM 1
+    FROM ops.feature_reference_reconciliation_subscriptions AS subscription
+    JOIN ops.feature_reference_reconciliation_leases AS lease
+      ON lease.principal_id = subscription.principal_id
+    WHERE subscription.principal_id = 'service:feature-reference-reconciliation'
+      AND subscription.initial_event_sequence = 0
+      AND subscription.read_scope = 'feature-reference-reconciliation:read'
+      AND subscription.ack_scope = 'feature-reference-reconciliation:ack'
+      AND lease.acked_through_sequence >= 0
+    FOR SHARE OF subscription, lease;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'feature reference reconciliation subscription is not provisioned'
+            USING ERRCODE = 'P0002';
+    END IF;
+    CALL feature.resolve_manual_provider_dedup_case(
+        p_case_id, p_decision, p_expected_case_fingerprint,
+        p_expected_manual_row_revision, p_expected_provider_row_revision,
+        p_survivor_feature_id, p_reason, p_actor, p_domain_command_id,
+        o_outcome, o_resolution_id, o_event_id, o_manual_feature_id,
+        o_manual_feature_row_revision
+    );
+END
+$$;
+
+
+ALTER PROCEDURE feature.resolve_manual_provider_dedup_case_v2(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id text, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id text, OUT o_manual_feature_row_revision bigint) OWNER TO ktm_manual_provider_dedup_procedure_owner;
 
 --
 -- Name: revoke_feature_field_overrides(text, bigint, text, text, bigint, text[]); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
@@ -2672,25 +9643,101 @@ $$;
 ALTER PROCEDURE feature.revoke_lifecycle_override(IN p_feature_id text, IN p_principal text, IN p_expected_row_revision bigint, OUT o_row_revision bigint) OWNER TO ktm_feature_state_procedure_owner;
 
 --
--- Name: set_curation_item_legacy_component_identity(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
+-- Name: seal_provider_curation_snapshot_receipt(uuid, bigint, text, text, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
 --
 
-CREATE FUNCTION feature.set_curation_item_legacy_component_identity() RETURNS trigger
-    LANGUAGE plpgsql
-    AS $$
+CREATE PROCEDURE feature.seal_provider_curation_snapshot_receipt(IN p_root_job_id uuid, IN p_provider_dataset_id bigint, IN p_sync_scope text, IN p_operation_key text, IN p_expected_input_member_count bigint, IN p_expected_input_set_hash text, OUT o_source_job_id uuid, OUT o_observed_at timestamp with time zone, OUT o_source_entity_count bigint, OUT o_source_input_set_hash text)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
+    AS $_$
+DECLARE
+  v_child ops.import_jobs%ROWTYPE;
+  v_input_member_count bigint;
+  v_last_source_modified_at date;
 BEGIN
-    IF NEW.legacy_projection_id IS NOT NULL
-       AND NEW.external_component_id = 'primary'
-    THEN
-        NEW.external_component_id :=
-            'legacy:' || NEW.legacy_projection_id::text;
-    END IF;
-    RETURN NEW;
-END;
-$$;
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'provider snapshot seal requires SERIALIZABLE transaction'
+      USING ERRCODE = '25001';
+  END IF;
+  IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
+    RAISE EXCEPTION 'provider snapshot seal requires the provider executor'
+      USING ERRCODE = '42501';
+  END IF;
+  SELECT child.* INTO STRICT v_child
+  FROM ops.import_jobs AS child
+  JOIN ops.import_job_datasets AS member ON member.job_id = child.job_id
+  WHERE child.parent_job_id = p_root_job_id
+    AND child.kind = 'provider_feature_load'
+    AND child.status IN ('queued','running')
+    AND child.cancellation_id IS NULL AND child.quarantined_at IS NULL
+    AND member.provider_dataset_id = p_provider_dataset_id
+    AND member.sync_scope = p_sync_scope
+    AND member.operation_key = p_operation_key
+  FOR UPDATE OF child;
+  IF NOT EXISTS (
+    SELECT 1 FROM ops.import_jobs AS root
+    WHERE root.job_id = p_root_job_id
+      AND root.kind = 'provider_feature_load_run'
+      AND root.status = 'running'
+      AND root.dagster_run_status IN ('STARTED','CANCELING')
+      AND root.dagster_run_id = v_child.dagster_run_id
+      AND root.cancellation_id IS NULL AND root.quarantined_at IS NULL
+  ) OR (SELECT count(*) FROM ops.import_job_datasets AS member
+        WHERE member.job_id = v_child.job_id) <> 1 THEN
+    RAISE EXCEPTION 'provider snapshot seal requires one exact running member'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_provider_snapshot_member';
+  END IF;
+
+  PERFORM 1 FROM provider_sync.source_entities AS entity
+  WHERE entity.provider_dataset_id = p_provider_dataset_id
+  ORDER BY entity.source_entity_key FOR SHARE;
+  PERFORM 1
+  FROM provider_sync.source_records AS record
+  JOIN provider_sync.source_entity_heads AS head
+    ON head.source_entity_key = record.source_entity_key
+   AND head.current_source_record_key = record.source_record_key
+  JOIN provider_sync.source_entities AS entity
+    ON entity.source_entity_key = head.source_entity_key
+  WHERE entity.provider_dataset_id = p_provider_dataset_id
+  ORDER BY record.source_entity_key, record.source_record_key
+  FOR SHARE OF record;
+  PERFORM 1
+  FROM provider_sync.source_entity_heads AS head
+  JOIN provider_sync.source_entities AS entity
+    ON entity.source_entity_key = head.source_entity_key
+  WHERE entity.provider_dataset_id = p_provider_dataset_id
+  ORDER BY head.source_entity_key FOR SHARE OF head;
+
+  o_source_job_id := v_child.job_id;
+  o_observed_at := clock_timestamp();
+  SELECT input.source_entity_count, input.input_member_count,
+         input.last_source_modified_at, input.source_input_set_hash
+  INTO STRICT o_source_entity_count, v_input_member_count,
+       v_last_source_modified_at, o_source_input_set_hash
+  FROM feature.current_provider_curation_input_set(p_provider_dataset_id) AS input;
+  IF p_expected_input_member_count IS NULL
+     OR p_expected_input_set_hash !~ '^[0-9a-f]{64}$'
+     OR p_expected_input_member_count <> v_input_member_count
+     OR p_expected_input_set_hash <> o_source_input_set_hash THEN
+    RAISE EXCEPTION 'provider load input changed before child completion'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_provider_snapshot_load_input';
+  END IF;
+
+  INSERT INTO ops.curation_provider_snapshot_receipts (
+    source_job_id, root_job_id, provider_dataset_id, sync_scope, operation_key,
+    observed_at, source_entity_count, input_member_count,
+    last_source_modified_at, source_input_set_hash
+  )
+  SELECT v_child.job_id, p_root_job_id, p_provider_dataset_id, p_sync_scope,
+         p_operation_key, o_observed_at, o_source_entity_count,
+         v_input_member_count, v_last_source_modified_at,
+         o_source_input_set_hash;
+END
+$_$;
 
 
-ALTER FUNCTION feature.set_curation_item_legacy_component_identity() OWNER TO ktm_feature_schema_owner;
+ALTER PROCEDURE feature.seal_provider_curation_snapshot_receipt(IN p_root_job_id uuid, IN p_provider_dataset_id bigint, IN p_sync_scope text, IN p_operation_key text, IN p_expected_input_member_count bigint, IN p_expected_input_set_hash text, OUT o_source_job_id uuid, OUT o_observed_at timestamp with time zone, OUT o_source_entity_count bigint, OUT o_source_input_set_hash text) OWNER TO ktm_curation_command_owner;
 
 --
 -- Name: set_feature_coord_precision(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
@@ -2713,814 +9760,420 @@ CREATE FUNCTION feature.set_feature_coord_precision() RETURNS trigger
 ALTER FUNCTION feature.set_feature_coord_precision() OWNER TO ktm_feature_schema_owner;
 
 --
--- Name: sync_curated_feature_collection(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
+-- Name: submit_feature_request(uuid, jsonb, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_request_procedure_owner
 --
 
-CREATE FUNCTION feature.sync_curated_feature_collection() RETURNS trigger
-    LANGUAGE plpgsql
+CREATE PROCEDURE feature.submit_feature_request(IN p_request_id uuid, IN p_request_payload jsonb, IN p_domain_command_id bigint, OUT o_status text, OUT o_submitted_at timestamp with time zone)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
+    AS $_$
+DECLARE
+    v_command ops.domain_commands%ROWTYPE;
+    v_existing ops.feature_requests%ROWTYPE;
+BEGIN
+    IF current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'Feature request submission requires READ COMMITTED'
+            USING ERRCODE = '25001', CONSTRAINT = 'ck_feature_request_isolation';
+    END IF;
+    IF session_user <> 'ktm_feature_api_runtime'
+       OR NOT pg_has_role(session_user, 'ktm_feature_request_service_executor', 'member') THEN
+        RAISE EXCEPTION 'Feature request submission requires service executor'
+            USING ERRCODE = '42501', CONSTRAINT = 'ck_feature_request_executor';
+    END IF;
+    SELECT command.* INTO v_command
+    FROM ops.domain_commands AS command WHERE command.command_id = p_domain_command_id FOR UPDATE;
+    IF NOT FOUND OR v_command.operation <> 'service.feature-request.submit.v1'
+       OR btrim(v_command.actor) <> 'service:feature-request'
+       OR EXISTS (SELECT 1 FROM ops.domain_command_results AS result WHERE result.command_id = p_domain_command_id) THEN
+        RAISE EXCEPTION 'Feature request submission command does not match writer'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_request_command';
+    END IF;
+    IF p_request_id IS NULL OR jsonb_typeof(p_request_payload) IS DISTINCT FROM 'object'
+       OR jsonb_typeof(p_request_payload -> 'kind') IS DISTINCT FROM 'string'
+       OR p_request_payload ->> 'kind' NOT IN ('place', 'event')
+       OR jsonb_typeof(p_request_payload -> 'name') IS DISTINCT FROM 'string'
+       OR nullif(btrim(p_request_payload ->> 'name'), '') IS NULL
+       OR char_length(p_request_payload ->> 'name') > 200
+       OR jsonb_typeof(p_request_payload -> 'lon') IS DISTINCT FROM 'number'
+       OR (p_request_payload ->> 'lon')::numeric NOT BETWEEN 124 AND 132
+       OR jsonb_typeof(p_request_payload -> 'lat') IS DISTINCT FROM 'number'
+       OR (p_request_payload ->> 'lat')::numeric NOT BETWEEN 33 AND 39.5
+       OR jsonb_typeof(p_request_payload -> 'categories') IS DISTINCT FROM 'array'
+       OR jsonb_array_length(p_request_payload -> 'categories') > 10
+       OR jsonb_path_exists(
+            p_request_payload,
+            '$.categories[*] ? (@.type() != "string")'
+       )
+       OR (
+            p_request_payload ? 'note'
+            AND (
+                jsonb_typeof(p_request_payload -> 'note') IS DISTINCT FROM 'string'
+                OR char_length(p_request_payload ->> 'note') > 2000
+            )
+       )
+       OR EXISTS (SELECT 1 FROM jsonb_object_keys(p_request_payload) AS key_name(key_name)
+                  WHERE key_name NOT IN ('kind', 'name', 'lon', 'lat', 'categories', 'note')) THEN
+        RAISE EXCEPTION 'Feature request payload is not canonical'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_requests_payload';
+    END IF;
+    INSERT INTO ops.feature_requests (request_id, request_payload, submission_command_id)
+    VALUES (p_request_id, p_request_payload, p_domain_command_id)
+    ON CONFLICT (request_id) DO NOTHING
+    RETURNING status, submitted_at INTO o_status, o_submitted_at;
+    IF o_status IS NULL THEN
+        SELECT request.* INTO v_existing
+        FROM ops.feature_requests AS request WHERE request.request_id = p_request_id;
+        IF NOT FOUND OR v_existing.request_payload IS DISTINCT FROM p_request_payload THEN
+        RAISE EXCEPTION 'Feature request id conflicts with a different payload'
+                USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_request_idempotency';
+        END IF;
+        o_status := v_existing.status;
+        o_submitted_at := v_existing.submitted_at;
+    END IF;
+END
+$_$;
+
+
+ALTER PROCEDURE feature.submit_feature_request(IN p_request_id uuid, IN p_request_payload jsonb, IN p_domain_command_id bigint, OUT o_status text, OUT o_submitted_at timestamp with time zone) OWNER TO ktm_feature_request_procedure_owner;
+
+--
+-- Name: sync_concierge_catalog_after_observation(); Type: FUNCTION; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE FUNCTION feature.sync_concierge_catalog_after_observation() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops'
     AS $$
 DECLARE
-    target_collection_id uuid;
-    target_collection_key text;
-    target_collection_base_key text;
-    target_key_conflict_ordinal integer;
-    target_title text;
-    mapped_collection_id uuid;
-    mapped_theme_id uuid;
-    mapped_source_id uuid;
-    mapped_title text;
-    mapped_archived boolean;
-    mapped_external_item_id text;
-    target_external_item_id text;
-    operator_change boolean;
-    source_change boolean;
-    source_presence_change boolean;
-    item_matched boolean;
-    direct_item_id uuid;
-    target_identity_item_id uuid;
-    target_projection_id uuid;
-    target_item_id uuid;
+  v_provider_dataset_id bigint;
+  v_themes_created bigint;
+  v_themes_updated bigint;
+  v_rules_created bigint;
+  v_rules_updated bigint;
+  v_rules_archived bigint;
 BEGIN
-    -- detach marker는 merge/trigger 내부 상태다. 일반 INSERT 또는 top-level
-    -- UPDATE로 주입해 canonical sync와 공개 projection을 우회할 수 없다.
-    IF TG_OP = 'INSERT'
-       AND NEW.metadata @> '{"merge_projection_detached": true}'::jsonb
-    THEN
-        RAISE EXCEPTION
-            'merge_projection_detached metadata is reserved'
-            USING ERRCODE = '23514';
-    END IF;
-    IF TG_OP = 'UPDATE'
-       AND NOT OLD.metadata @> '{"merge_projection_detached": true}'::jsonb
-       AND NEW.metadata @> '{"merge_projection_detached": true}'::jsonb
-       AND pg_trigger_depth() = 1
-    THEN
-        -- Merge가 허용받는 유일한 top-level 전이는 UUID mirror를 분리한
-        -- same-theme legacy conflict 또는 저장된 collection/external identity가
-        -- 같은 canonical pair의 loser를 archive하는 경우다. 호출자 토큰/GUC가
-        -- 아니라 transaction 안의 물리 불변식으로 권한을 판정한다.
-        IF NEW.feature_id IS DISTINCT FROM OLD.feature_id
-           AND NEW.curation_status = 'archived'
-           AND NEW.archived_at IS NOT NULL
-           AND NEW.metadata = OLD.metadata || jsonb_build_object(
-               'merge_projection_detached',
-               true
-           )
-           AND to_jsonb(NEW) - ARRAY[
-               'feature_id',
-               'curation_status',
-               'metadata',
-               'archived_at',
-               'updated_at'
-           ] = to_jsonb(OLD) - ARRAY[
-               'feature_id',
-               'curation_status',
-               'metadata',
-               'archived_at',
-               'updated_at'
-           ]
-           AND (
-               (
-                   NOT EXISTS (
-                       SELECT 1
-                       FROM feature.curation_items AS direct_item
-                       WHERE (
-                               direct_item.legacy_projection_id =
-                               NEW.curated_feature_id
-                               OR (
-                                   direct_item.legacy_projection_id IS NULL
-                                   AND direct_item.curation_item_id =
-                                       NEW.curated_feature_id
-                               )
-                           )
-                         AND direct_item.archived_at IS NULL
-                   )
-                   AND EXISTS (
-                       SELECT 1
-                       FROM feature.curated_features AS master_legacy
-                       WHERE master_legacy.curated_feature_id <>
-                             NEW.curated_feature_id
-                         AND master_legacy.theme_id = NEW.theme_id
-                         AND master_legacy.feature_id = NEW.feature_id
-                         AND master_legacy.archived_at IS NULL
-                         AND NOT master_legacy.metadata @>
-                             '{"merge_projection_detached": true}'::jsonb
-                   )
-               )
-               OR EXISTS (
-                   SELECT 1
-                   FROM feature.curation_items AS loser_item
-                   JOIN feature.curation_items AS master_item
-                     ON master_item.collection_id = loser_item.collection_id
-                    AND master_item.external_item_id =
-                        loser_item.external_item_id
-                   WHERE master_item.feature_id = NEW.feature_id
-                     AND loser_item.legacy_projection_id =
-                         NEW.curated_feature_id
-                     AND master_item.curation_item_id <>
-                         loser_item.curation_item_id
-               )
-           )
-        THEN
-            RETURN NEW;
-        END IF;
-        RAISE EXCEPTION
-            'merge_projection_detached metadata is reserved'
-            USING ERRCODE = '23514';
-    END IF;
-
-    -- Feature merge가 충돌 해소용으로 archive한 legacy projection은 더 이상
-    -- canonical membership의 source가 아니다. 이후 운영 도구가 이 projection의
-    -- 설명 등을 수정하거나 삭제해도 survivor를 되감지 않는다.
-    IF TG_OP = 'DELETE' THEN
-        IF OLD.metadata @> '{"merge_projection_detached": true}'::jsonb THEN
-            RETURN OLD;
-        END IF;
-    ELSE
-        IF TG_OP = 'UPDATE'
-           AND OLD.metadata @> '{"merge_projection_detached": true}'::jsonb
-        THEN
-            -- ``metadata`` PATCH가 내부 detach marker를 제거해도 즉시 복원한다.
-            -- 이 UPDATE의 재진입은 NEW marker 분기에서 끝나므로 canonical에는
-            -- 어떤 source/operator revision도 전파하지 않는다.
-            IF NOT NEW.metadata @> '{"merge_projection_detached": true}'::jsonb
-               OR NEW.curation_status <> 'archived'
-               OR NEW.archived_at IS NULL
-            THEN
-                UPDATE feature.curated_features
-                SET curation_status = 'archived',
-                    metadata = NEW.metadata || jsonb_build_object(
-                        'merge_projection_detached',
-                        true
-                    ),
-                    archived_at = COALESCE(
-                        NEW.archived_at,
-                        OLD.archived_at,
-                        clock_timestamp()
-                    )
-                WHERE curated_feature_id = NEW.curated_feature_id;
-            END IF;
-            RETURN NEW;
-        END IF;
-        IF NEW.metadata @> '{"merge_projection_detached": true}'::jsonb THEN
-            RETURN NEW;
-        END IF;
-    END IF;
-
-    IF TG_OP = 'DELETE' THEN
-        UPDATE feature.curation_items AS item
-        SET source_present = false,
-            source_updated_at = CASE
-                WHEN item.source_present THEN clock_timestamp()
-                ELSE item.source_updated_at
-            END,
-            legacy_projection_id = NULL,
-            updated_by = COALESCE(OLD.rejected_by, OLD.selected_by),
-            updated_at = now()
-        WHERE (
-              item.legacy_projection_id = OLD.curated_feature_id
-              OR (
-                  item.legacy_projection_id IS NULL
-                  AND item.curation_item_id = OLD.curated_feature_id
-              )
-          );
-        RETURN OLD;
-    END IF;
-
-    IF TG_OP = 'INSERT' THEN
-        operator_change := NEW.operator_updated_at IS NOT NULL;
-        source_change := true;
-        source_presence_change := true;
-    ELSE
-        operator_change :=
-            NEW.operator_updated_at IS DISTINCT FROM OLD.operator_updated_at
-            OR NEW.operator_updated_by IS DISTINCT FROM OLD.operator_updated_by;
-        source_change :=
-            NEW.theme_id IS DISTINCT FROM OLD.theme_id
-            OR NEW.source_id IS DISTINCT FROM OLD.source_id
-            OR NEW.feature_id IS DISTINCT FROM OLD.feature_id
-            OR NEW.source_record_key IS DISTINCT FROM OLD.source_record_key
-            OR NEW.rank_score IS DISTINCT FROM OLD.rank_score
-            OR NEW.display_title IS DISTINCT FROM OLD.display_title
-            OR NEW.display_summary IS DISTINCT FROM OLD.display_summary
-            OR NEW.metadata IS DISTINCT FROM OLD.metadata;
-        source_presence_change :=
-            NOT operator_change
-            AND NEW.archived_at IS DISTINCT FROM OLD.archived_at;
-    END IF;
-
-    target_external_item_id :=
-        COALESCE(NEW.source_record_key, NEW.curated_feature_id::text);
-
-    SELECT COALESCE(NULLIF(btrim(NEW.display_title), ''), s.source_name)
-    INTO target_title
-    FROM feature.curated_themes AS t
-    JOIN feature.curated_sources AS s ON s.source_id = NEW.source_id
-    WHERE t.theme_id = NEW.theme_id;
-
-    target_collection_base_key :=
-        'legacy:' || NEW.theme_id::text || ':' || NEW.source_id::text || ':' ||
-        md5(target_title);
-    target_collection_key := target_collection_base_key;
-    target_key_conflict_ordinal := 0;
-
-    -- 이미 projection과 연결된 membership은 semantic group
-    -- (theme_id/source_id/title)이 같으면 collection_id가 불변 identity다.
-    -- theme slug 같은 표시 필드가 바뀌어도 기존 collection을 유지한다. Item을
-    -- 먼저 잠그면 canonical writer의 legacy→collection→item 순서와 역전되므로
-    -- 여기서는 관계만 읽고, collection을 잠근 다음 아래에서 item을 잠근다.
-    SELECT
-        item.collection_id,
-        collection.theme_id,
-        collection.source_id,
-        collection.title,
-        item.archived_at IS NOT NULL,
-        item.external_item_id
-    INTO
-        mapped_collection_id,
-        mapped_theme_id,
-        mapped_source_id,
-        mapped_title,
-        mapped_archived,
-        mapped_external_item_id
-    FROM feature.curation_items AS item
-    JOIN feature.curation_collections AS collection
-      ON collection.collection_id = item.collection_id
-    WHERE (
-            item.legacy_projection_id = NEW.curated_feature_id
-            OR (
-                item.legacy_projection_id IS NULL
-                AND item.curation_item_id = NEW.curated_feature_id
-            )
-        )
-       OR (
-            collection.theme_id = NEW.theme_id
-            AND collection.source_id IS NOT DISTINCT FROM NEW.source_id
-            AND collection.metadata @>
-                '{"migrated_from": "feature.curated_features"}'::jsonb
-            AND item.source_record_key
-                IS NOT DISTINCT FROM NEW.source_record_key
-            AND item.feature_id IS NOT DISTINCT FROM NEW.feature_id
-        )
-    ORDER BY
-        (item.legacy_projection_id = NEW.curated_feature_id) DESC NULLS LAST,
-        (item.archived_at IS NOT NULL) DESC,
-        item.operator_updated_at DESC NULLS LAST,
-        item.source_updated_at DESC,
-        item.curation_item_id DESC
-    LIMIT 1;
-
-    IF NEW.source_record_key IS NULL
-       AND mapped_collection_id IS NOT NULL
-       AND mapped_theme_id = NEW.theme_id
-       AND mapped_source_id IS NOT DISTINCT FROM NEW.source_id
-    THEN
-        -- source_record가 없는 legacy projection도 theme/source/feature active
-        -- uniqueness 아래 같은 논리 membership이다. UUID fallback을 새로 만들지
-        -- 않고 durable item의 external identity를 재사용한다.
-        target_external_item_id := mapped_external_item_id;
-    END IF;
-
-    IF mapped_collection_id IS NOT NULL
-       AND mapped_theme_id = NEW.theme_id
-       AND mapped_source_id IS NOT DISTINCT FROM NEW.source_id
-       AND (mapped_title = target_title OR mapped_archived)
-    THEN
-        UPDATE feature.curation_collections AS collection
-        SET title = CASE
-                WHEN collection.updated_by IS NULL
-                 AND mapped_title = target_title
-                THEN target_title
-                ELSE collection.title
-            END,
-            description = CASE
-                WHEN collection.updated_by IS NULL
-                 AND mapped_title = target_title
-                THEN NEW.display_summary
-                ELSE collection.description
-            END,
-            status = CASE
-                WHEN collection.updated_by IS NULL
-                 AND mapped_title = target_title
-                THEN 'published'
-                ELSE collection.status
-            END,
-            visibility = CASE
-                WHEN collection.updated_by IS NOT NULL
-                  OR mapped_title <> target_title
-                THEN collection.visibility
-                WHEN theme.visibility = 'public' THEN 'public'
-                ELSE 'admin_only'
-            END,
-            updated_at = CASE
-                WHEN collection.updated_by IS NULL
-                 AND mapped_title = target_title
-                THEN NEW.updated_at
-                ELSE collection.updated_at
-            END,
-            archived_at = CASE
-                WHEN collection.updated_by IS NULL
-                 AND mapped_title = target_title
-                THEN NULL
-                ELSE collection.archived_at
-            END
-        FROM feature.curated_themes AS theme
-        WHERE collection.collection_id = mapped_collection_id
-          AND collection.theme_id = NEW.theme_id
-          AND collection.source_id IS NOT DISTINCT FROM NEW.source_id
-          AND theme.theme_id = NEW.theme_id
-        RETURNING collection.collection_id INTO target_collection_id;
-    ELSE
-        -- migration이 보존한 base/split key 형태와 무관하게 semantic group의
-        -- canonical collection을 먼저 찾는다. Admin이 base key를 선점했거나
-        -- 과거 duplicate가 split key로 남아도 신규 projection이 별도 published
-        -- collection을 만들어 collection-level tombstone을 우회하지 않는다.
-        SELECT collection.collection_id
-        INTO target_collection_id
-        FROM feature.curation_collections AS collection
-        WHERE collection.theme_id = NEW.theme_id
-          AND collection.source_id IS NOT DISTINCT FROM NEW.source_id
-          AND collection.title = target_title
-          AND collection.metadata @>
-              '{"migrated_from": "feature.curated_features"}'::jsonb
-        ORDER BY
-            EXISTS (
-                SELECT 1
-                FROM feature.curation_items AS grouped_item
-                WHERE grouped_item.collection_id =
-                      collection.collection_id
-            ) DESC,
-            collection.updated_at DESC,
-            collection.collection_id
-        LIMIT 1
-        FOR UPDATE OF collection;
-
-        IF target_collection_id IS NOT NULL THEN
-            UPDATE feature.curation_collections AS collection
-            SET description = CASE
-                    WHEN collection.updated_by IS NULL
-                    THEN NEW.display_summary
-                    ELSE collection.description
-                END,
-                status = CASE
-                    WHEN collection.updated_by IS NULL
-                    THEN 'published'
-                    ELSE collection.status
-                END,
-                visibility = CASE
-                    WHEN collection.updated_by IS NULL
-                     AND theme.visibility = 'public'
-                    THEN 'public'
-                    WHEN collection.updated_by IS NULL
-                    THEN 'admin_only'
-                    ELSE collection.visibility
-                END,
-                updated_at = CASE
-                    WHEN collection.updated_by IS NULL
-                    THEN NEW.updated_at
-                    ELSE collection.updated_at
-                END,
-                archived_at = CASE
-                    WHEN collection.updated_by IS NULL
-                    THEN NULL
-                    ELSE collection.archived_at
-                END
-            FROM feature.curated_themes AS theme
-            WHERE collection.collection_id = target_collection_id
-              AND theme.theme_id = NEW.theme_id;
-        ELSE
-            LOOP
-            INSERT INTO feature.curation_collections (
-                collection_key, theme_id, source_id, title, edition_key,
-                description, status, visibility, metadata,
-                created_at, updated_at, archived_at
-            )
-            SELECT
-                target_collection_key,
-                NEW.theme_id,
-                NEW.source_id,
-                target_title,
-                '',
-                NEW.display_summary,
-                'published',
-                CASE
-                    WHEN t.visibility = 'public' THEN 'public'
-                    ELSE 'admin_only'
-                END,
-                jsonb_build_object('migrated_from', 'feature.curated_features'),
-                NEW.created_at,
-                NEW.updated_at,
-                NULL
-            FROM feature.curated_themes AS t
-            WHERE t.theme_id = NEW.theme_id
-            ON CONFLICT (collection_key) DO UPDATE SET
-                title = CASE
-                    WHEN feature.curation_collections.updated_by IS NULL
-                    THEN EXCLUDED.title
-                    ELSE feature.curation_collections.title
-                END,
-                description = CASE
-                    WHEN feature.curation_collections.updated_by IS NULL
-                    THEN EXCLUDED.description
-                    ELSE feature.curation_collections.description
-                END,
-                status = CASE
-                    WHEN feature.curation_collections.updated_by IS NULL
-                    THEN 'published'
-                    ELSE feature.curation_collections.status
-                END,
-                visibility = CASE
-                    WHEN feature.curation_collections.updated_by IS NULL
-                    THEN EXCLUDED.visibility
-                    ELSE feature.curation_collections.visibility
-                END,
-                updated_at = CASE
-                    WHEN feature.curation_collections.updated_by IS NULL
-                    THEN EXCLUDED.updated_at
-                    ELSE feature.curation_collections.updated_at
-                END,
-                archived_at = CASE
-                    WHEN feature.curation_collections.updated_by IS NULL
-                    THEN NULL
-                    ELSE feature.curation_collections.archived_at
-                END
-            WHERE feature.curation_collections.theme_id = EXCLUDED.theme_id
-              AND feature.curation_collections.source_id
-                  IS NOT DISTINCT FROM EXCLUDED.source_id
-              AND feature.curation_collections.metadata @>
-                  '{"migrated_from": "feature.curated_features"}'::jsonb
-            RETURNING collection_id INTO target_collection_id;
-
-            EXIT WHEN target_collection_id IS NOT NULL;
-
-            -- collection_key는 admin이 임의 지정할 수 있다. 충돌 행을 덮지 않고
-            -- 같은 semantic group의 모든 projection이 공유하는 다음 free
-            -- legacy suffix를 찾는다. Projection UUID를 suffix로 쓰면 같은 title의
-            -- row마다 collection이 분절된다.
-            target_key_conflict_ordinal := target_key_conflict_ordinal + 1;
-            target_collection_key :=
-                target_collection_base_key || ':split:legacy' || CASE
-                    WHEN target_key_conflict_ordinal = 1 THEN ''
-                    ELSE ':conflict:' ||
-                         (target_key_conflict_ordinal - 1)::text
-                END;
-            END LOOP;
-        END IF;
-    END IF;
-
-    IF target_collection_id IS NULL THEN
-        RAISE EXCEPTION
-            'legacy collection identity conflict for theme %, source %',
-            NEW.theme_id,
-            NEW.source_id
-            USING ERRCODE = '23505';
-    END IF;
-
-    -- UUID mirror와 stable identity target을 먼저 하나씩 잠근 뒤 갱신 대상을
-    -- 단일화한다. 두 identity가 서로 다른 row를 가리키면 target owner를
-    -- 덮지 않고 기존 mirror만 source-absent로 내린 뒤 legacy projection을
-    -- 영구 detach한다.
-    SELECT item.curation_item_id
-    INTO direct_item_id
-    FROM feature.curation_items AS item
-    JOIN feature.curation_collections AS collection
-      ON collection.collection_id = item.collection_id
-    WHERE (
-            item.legacy_projection_id = NEW.curated_feature_id
-            OR (
-                item.legacy_projection_id IS NULL
-                AND item.curation_item_id = NEW.curated_feature_id
-            )
-        )
-       OR (
-            collection.theme_id = NEW.theme_id
-            AND collection.source_id IS NOT DISTINCT FROM NEW.source_id
-            AND collection.metadata @>
-                '{"migrated_from": "feature.curated_features"}'::jsonb
-            AND item.source_record_key
-                IS NOT DISTINCT FROM NEW.source_record_key
-            AND item.feature_id IS NOT DISTINCT FROM NEW.feature_id
-        )
-    ORDER BY
-        (item.legacy_projection_id = NEW.curated_feature_id) DESC NULLS LAST,
-        (item.archived_at IS NOT NULL) DESC,
-        item.operator_updated_at DESC NULLS LAST,
-        item.source_updated_at DESC,
-        item.curation_item_id DESC
-    LIMIT 1
-    FOR UPDATE OF item;
-
-    SELECT item.curation_item_id, item.legacy_projection_id
-    INTO target_identity_item_id, target_projection_id
-    FROM feature.curation_items AS item
-    WHERE item.collection_id = target_collection_id
-      AND item.external_item_id = target_external_item_id
-      AND item.feature_id IS NOT DISTINCT FROM NEW.feature_id
-    FOR UPDATE;
-
-    IF (
-           direct_item_id IS NOT NULL
-           AND target_identity_item_id IS NOT NULL
-           AND direct_item_id <> target_identity_item_id
-       )
-       OR (
-           target_projection_id IS NOT NULL
-           AND target_projection_id <> NEW.curated_feature_id
-       )
-    THEN
-        UPDATE feature.curation_items
-        SET source_present = false,
-            source_updated_at = CASE
-                WHEN source_present THEN clock_timestamp()
-                ELSE source_updated_at
-            END,
-            legacy_projection_id = NULL,
-            updated_by = COALESCE(NEW.rejected_by, NEW.selected_by),
-            updated_at = NEW.updated_at
-        WHERE curation_item_id = direct_item_id;
-
-        UPDATE feature.curated_features
-        SET curation_status = 'archived',
-            metadata = metadata || jsonb_build_object(
-                    'merge_projection_detached',
-                    true
-                ),
-            archived_at = COALESCE(archived_at, clock_timestamp()),
-            updated_at = clock_timestamp()
-        WHERE curated_feature_id = NEW.curated_feature_id;
-        RETURN NEW;
-    END IF;
-
-    target_item_id := COALESCE(direct_item_id, target_identity_item_id);
-
-    UPDATE feature.curation_items AS item
-    SET legacy_projection_id = NEW.curated_feature_id
-    WHERE item.curation_item_id = target_item_id
-      AND (
-          item.legacy_projection_id IS NULL
-          OR item.legacy_projection_id = NEW.curated_feature_id
-      );
-
-    -- collection owner 복구는 operator tombstone에도 적용한다. Provider 파생값은
-    -- 아래 active-row UPDATE에서 보존하지만, archived item을 탈취된 public
-    -- collection에 남겨 두면 stable identity 조회와 비공개 보장이 모두 깨진다.
-    UPDATE feature.curation_items AS item
-    SET collection_id = target_collection_id
-    WHERE item.curation_item_id = target_item_id
-      AND item.collection_id <> target_collection_id;
-
-    -- Legacy writer가 제공자 파생 필드를 갱신해도 operator-owned 상태는 보존한다.
-    -- UUID/stable identity 경로는 같은 projection UPDATE를 공유하며 archived
-    -- tombstone은 WHERE에서 제외해 계속 우선한다.
-    UPDATE feature.curation_items AS item
-    SET feature_id = CASE
-            WHEN source_change THEN NEW.feature_id
-            ELSE item.feature_id
-        END,
-        source_record_key = CASE
-            WHEN source_change THEN NEW.source_record_key
-            ELSE item.source_record_key
-        END,
-        external_item_id = CASE
-            WHEN source_change THEN target_external_item_id
-            ELSE item.external_item_id
-        END,
-        place_name = CASE
-            WHEN source_change THEN feature_row.name
-            ELSE item.place_name
-        END,
-        address_hint = CASE
-            WHEN source_change THEN COALESCE(
-                feature_row.address ->> 'road',
-                feature_row.address ->> 'legal'
-            )
-            ELSE item.address_hint
-        END,
-        source_present = CASE
-            WHEN source_change OR source_presence_change
-            THEN NEW.archived_at IS NULL
-            ELSE item.source_present
-        END,
-        source_updated_at = CASE
-            WHEN source_change OR source_presence_change THEN clock_timestamp()
-            ELSE item.source_updated_at
-        END,
-        sort_order = CASE
-            WHEN source_change THEN GREATEST(0, round(NEW.rank_score)::integer)
-            ELSE item.sort_order
-        END,
-        item_summary = CASE
-            WHEN source_change THEN NEW.display_summary
-            ELSE item.item_summary
-        END,
-        status = CASE
-            WHEN operator_change THEN CASE NEW.curation_status
-                WHEN 'curated' THEN 'included'
-                ELSE NEW.curation_status
-            END
-            ELSE item.status
-        END,
-        curation_relation = CASE
-            WHEN operator_change THEN NEW.curation_relation
-            ELSE item.curation_relation
-        END,
-        reuse_policy = CASE
-            WHEN operator_change THEN NEW.reuse_policy
-            ELSE item.reuse_policy
-        END,
-        metadata = CASE
-            WHEN source_change THEN NEW.metadata || jsonb_build_object(
-                'legacy_selection_origin', NEW.selection_origin,
-                'legacy_content_version', NEW.content_version
-            )
-            ELSE item.metadata
-        END,
-        updated_by = COALESCE(NEW.rejected_by, NEW.selected_by),
-        updated_at = NEW.updated_at,
-        operator_updated_by = CASE
-            WHEN operator_change
-            THEN COALESCE(
-                NEW.operator_updated_by,
-                item.operator_updated_by
-            )
-            ELSE item.operator_updated_by
-        END,
-        operator_updated_at = CASE
-            WHEN operator_change
-            THEN NEW.operator_updated_at
-            ELSE item.operator_updated_at
-        END,
-        archived_at = CASE
-            WHEN operator_change THEN NEW.archived_at
-            ELSE item.archived_at
-        END,
-        legacy_projection_id = NEW.curated_feature_id
-    FROM feature.features AS feature_row
-    WHERE item.curation_item_id = target_item_id
-      AND item.archived_at IS NULL
-      AND feature_row.feature_id = NEW.feature_id;
-
-    item_matched := FOUND;
-
-    -- stable identity가 기존 operator state/tombstone을 보존했다면 새 legacy
-    -- UUID의 공개 projection도 같은 상태로 교정한다. depth 1에서만 역동기화하고
-    -- 실제 값이 다를 때만 UPDATE해 trigger 재진입을 한 번으로 제한한다.
-    IF pg_trigger_depth() = 1 THEN
-        UPDATE feature.curated_features AS legacy
-        SET curation_status = CASE item.status
-                WHEN 'included' THEN 'curated'
-                ELSE item.status
-            END,
-            selection_origin = CASE
-                WHEN item.operator_updated_at IS NOT NULL THEN 'admin'
-                ELSE legacy.selection_origin
-            END,
-            selected_by = CASE
-                WHEN item.status = 'included' THEN item.operator_updated_by
-                ELSE legacy.selected_by
-            END,
-            selected_at = CASE
-                WHEN item.status = 'included' THEN item.operator_updated_at
-                ELSE legacy.selected_at
-            END,
-            rejected_by = CASE
-                WHEN item.status = 'rejected' THEN item.operator_updated_by
-                ELSE legacy.rejected_by
-            END,
-            rejected_at = CASE
-                WHEN item.status = 'rejected' THEN item.operator_updated_at
-                ELSE legacy.rejected_at
-            END,
-            curation_relation = item.curation_relation,
-            reuse_policy = item.reuse_policy,
-            operator_updated_by = item.operator_updated_by,
-            operator_updated_at = item.operator_updated_at,
-            archived_at = item.archived_at,
-            content_version = legacy.content_version + 1,
-            updated_at = clock_timestamp()
-        FROM feature.curation_items AS item
-        WHERE legacy.curated_feature_id = NEW.curated_feature_id
-          AND item.legacy_projection_id = NEW.curated_feature_id
-          AND (
-              legacy.curation_status,
-              legacy.curation_relation,
-              legacy.reuse_policy,
-              legacy.operator_updated_by,
-              legacy.operator_updated_at,
-              legacy.archived_at
-          ) IS DISTINCT FROM (
-              CASE item.status
-                  WHEN 'included' THEN 'curated'
-                  ELSE item.status
-              END,
-              item.curation_relation,
-              item.reuse_policy,
-              item.operator_updated_by,
-              item.operator_updated_at,
-              item.archived_at
-          );
-    END IF;
-
-    IF item_matched OR EXISTS (
-        SELECT 1
-        FROM feature.curation_items
-        WHERE collection_id = target_collection_id
-          AND external_item_id = target_external_item_id
-          AND feature_id IS NOT DISTINCT FROM NEW.feature_id
-    ) THEN
-        RETURN NEW;
-    END IF;
-
-    UPDATE feature.curation_items AS item
-    SET source_present = false,
-        source_updated_at = CASE
-            WHEN source_change OR source_presence_change THEN clock_timestamp()
-            ELSE item.source_updated_at
-        END,
-        legacy_projection_id = NULL,
-        updated_by = COALESCE(NEW.rejected_by, NEW.selected_by),
-        updated_at = NEW.updated_at
-    WHERE (
-            item.legacy_projection_id = NEW.curated_feature_id
-            OR (
-                item.legacy_projection_id IS NULL
-                AND item.curation_item_id = NEW.curated_feature_id
-            )
-        )
-      AND item.archived_at IS NULL
-      AND item.source_present;
-
-    IF FOUND OR EXISTS (
-        SELECT 1
-        FROM feature.curation_items
-        WHERE curation_item_id = NEW.curated_feature_id
-    ) THEN
-        RETURN NEW;
-    END IF;
-
-    INSERT INTO feature.curation_items (
-        curation_item_id, collection_id, feature_id, source_record_key,
-        legacy_projection_id,
-        external_item_id, place_name, address_hint, source_present,
-        source_updated_at,
-        status, sort_order, item_title, item_summary,
-        curation_relation, reuse_policy, metadata,
-        created_by, updated_by, operator_updated_by, operator_updated_at,
-        created_at, updated_at, archived_at
-    )
-    SELECT
-        NEW.curated_feature_id,
-        target_collection_id,
-        NEW.feature_id,
-        NEW.source_record_key,
-        NEW.curated_feature_id,
-        target_external_item_id,
-        feature_row.name,
-        COALESCE(feature_row.address ->> 'road', feature_row.address ->> 'legal'),
-        NEW.archived_at IS NULL,
-        clock_timestamp(),
-        CASE NEW.curation_status
-            WHEN 'curated' THEN 'included'
-            ELSE NEW.curation_status
-        END,
-        GREATEST(0, round(NEW.rank_score)::integer),
-        NULL,
-        NEW.display_summary,
-        NEW.curation_relation,
-        NEW.reuse_policy,
-        NEW.metadata || jsonb_build_object(
-            'legacy_selection_origin', NEW.selection_origin,
-            'legacy_content_version', NEW.content_version
-        ),
-        COALESCE(NEW.rejected_by, NEW.selected_by),
-        COALESCE(NEW.rejected_by, NEW.selected_by),
-        CASE
-            WHEN operator_change THEN NEW.operator_updated_by
-            ELSE NULL
-        END,
-        CASE
-            WHEN operator_change THEN NEW.operator_updated_at
-            ELSE NULL
-        END,
-        NEW.created_at,
-        NEW.updated_at,
-        NEW.archived_at
-    FROM feature.features AS feature_row
-    WHERE feature_row.feature_id = NEW.feature_id
-      AND NOT EXISTS (
-          SELECT 1
-          FROM feature.curation_items AS occupied
-          WHERE occupied.collection_id = target_collection_id
-            AND occupied.external_item_id = target_external_item_id
-            AND occupied.feature_id IS NOT DISTINCT FROM NEW.feature_id
-      )
-    ON CONFLICT DO NOTHING;
-    RETURN NEW;
-END;
+  SELECT source.provider_dataset_id INTO STRICT v_provider_dataset_id
+  FROM feature.curated_sources AS source WHERE source.source_id = NEW.source_id;
+  IF EXISTS (
+    SELECT 1 FROM provider_sync.provider_datasets AS dataset
+    WHERE dataset.provider_dataset_id = v_provider_dataset_id
+      AND dataset.provider = 'kor-travel-concierge-youtube'
+      AND dataset.dataset_key = 'youtube_place_candidates'
+  ) THEN
+    CALL feature.sync_concierge_theme_catalog(
+      v_provider_dataset_id, NEW.import_job_id,
+      v_themes_created, v_themes_updated,
+      v_rules_created, v_rules_updated, v_rules_archived
+    );
+  END IF;
+  RETURN NEW;
+END
 $$;
 
 
-ALTER FUNCTION feature.sync_curated_feature_collection() OWNER TO ktm_feature_schema_owner;
+ALTER FUNCTION feature.sync_concierge_catalog_after_observation() OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: sync_concierge_theme_catalog(bigint, uuid); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.sync_concierge_theme_catalog(IN p_provider_dataset_id bigint, IN p_import_job_id uuid, OUT o_themes_created bigint, OUT o_themes_updated bigint, OUT o_rules_created bigint, OUT o_rules_updated bigint, OUT o_rules_archived bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'provider_sync', 'ops', 'x_extension'
+    AS $$
+DECLARE
+  v_source_id uuid;
+  v_group record;
+  v_theme feature.curated_themes%ROWTYPE;
+  v_rule feature.curated_source_rules%ROWTYPE;
+  v_generation_id uuid;
+  v_observed bigint;
+  v_removed bigint;
+  v_input_hash text;
+  v_replayed boolean;
+  v_metadata jsonb;
+  v_selector jsonb;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'concierge catalog sync requires SERIALIZABLE transaction'
+      USING ERRCODE = '25001';
+  END IF;
+  IF current_user <> 'ktm_curation_command_owner'
+     OR NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
+    RAISE EXCEPTION 'concierge catalog sync is an internal provider command'
+      USING ERRCODE = '42501';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM ops.curation_provider_snapshot_receipts AS receipt
+    JOIN provider_sync.provider_datasets AS dataset
+      ON dataset.provider_dataset_id = receipt.provider_dataset_id
+    WHERE receipt.source_job_id = p_import_job_id
+      AND receipt.provider_dataset_id = p_provider_dataset_id
+      AND dataset.provider = 'kor-travel-concierge-youtube'
+      AND dataset.dataset_key = 'youtube_place_candidates'
+  ) THEN
+    o_themes_created := 0;
+    o_themes_updated := 0;
+    o_rules_created := 0;
+    o_rules_updated := 0;
+    o_rules_archived := 0;
+    RETURN;
+  END IF;
+
+  SELECT source.source_id INTO STRICT v_source_id
+  FROM feature.curated_sources AS source
+  WHERE source.provider_dataset_id = p_provider_dataset_id
+    AND source.archived_at IS NULL
+  FOR UPDATE;
+
+  CREATE TEMPORARY TABLE IF NOT EXISTS pg_temp.tvn40_concierge_groups (
+    grouping_kind text NOT NULL,
+    grouping_id text NOT NULL,
+    grouping_title text NOT NULL,
+    theme_slug text NOT NULL,
+    detail_selector jsonb NOT NULL,
+    feature_count bigint NOT NULL,
+    PRIMARY KEY (grouping_kind, grouping_id),
+    UNIQUE (theme_slug)
+  ) ON COMMIT DROP;
+  TRUNCATE pg_temp.tvn40_concierge_groups;
+
+  INSERT INTO pg_temp.tvn40_concierge_groups (
+    grouping_kind, grouping_id, grouping_title, theme_slug,
+    detail_selector, feature_count
+  )
+  WITH current_features AS (
+    SELECT DISTINCT feature.feature_id, place.payload
+    FROM provider_sync.source_entities AS entity
+    JOIN provider_sync.source_entity_heads AS head
+      ON head.source_entity_key = entity.source_entity_key
+    JOIN provider_sync.source_records AS record
+      ON record.source_entity_key = head.source_entity_key
+     AND record.source_record_key = head.current_source_record_key
+    JOIN provider_sync.source_links AS link
+      ON link.source_entity_key = entity.source_entity_key
+    JOIN feature.features AS feature ON feature.feature_id = link.feature_id
+    JOIN feature.feature_places AS place ON place.feature_id = feature.feature_id
+    WHERE entity.provider_dataset_id = p_provider_dataset_id
+      AND feature.lifecycle_state = 'active'
+      AND feature.publication_state = 'published'
+      AND feature.quality_state = 'valid'
+  ), expanded AS (
+    SELECT feature_id, 'channel'::text AS grouping_kind,
+           payload #>> '{kor_travel_concierge,youtube,channel_id}' AS grouping_id,
+           payload #>> '{kor_travel_concierge,youtube,channel_title}' AS grouping_title,
+           'concierge-yt-'::text AS slug_prefix,
+           ARRAY['payload','kor_travel_concierge','youtube','channel_id']::text[] AS selector_path
+    FROM current_features
+    UNION ALL
+    SELECT feature_id, 'playlist'::text,
+           payload #>> '{kor_travel_concierge,youtube,playlist_id}',
+           payload #>> '{kor_travel_concierge,youtube,playlist_title}',
+           'concierge-pl-'::text,
+           ARRAY['payload','kor_travel_concierge','youtube','playlist_id']::text[]
+    FROM current_features
+  )
+  SELECT grouping_kind, grouping_id,
+         COALESCE(max(NULLIF(btrim(grouping_title), '')), min(slug_prefix) || grouping_id),
+         min(slug_prefix) || grouping_id,
+         jsonb_build_object('path', min(selector_path), 'value', grouping_id),
+         count(DISTINCT feature_id)::bigint
+  FROM expanded
+  WHERE NULLIF(btrim(grouping_id), '') IS NOT NULL
+  GROUP BY grouping_kind, grouping_id;
+
+  -- Only exact legacy rows produced by the retired synchronizer may acquire
+  -- provider ownership.  A manually-created prefix collision remains fatal.
+  UPDATE feature.curated_themes AS theme
+  SET owner_kind = 'provider_dataset',
+      owner_provider_dataset_id = p_provider_dataset_id,
+      row_revision = theme.row_revision + 1,
+      updated_at = clock_timestamp()
+  WHERE theme.owner_kind IS NULL
+    AND theme.owner_provider_dataset_id IS NULL
+    AND EXISTS (
+      SELECT 1 FROM ops.curation_concierge_legacy_owner_manifest AS manifest
+      WHERE manifest.entity_kind = 'theme' AND manifest.entity_id = theme.theme_id
+        AND manifest.before_row_revision = theme.row_revision
+        AND manifest.before_input_hash = encode(x_extension.digest(convert_to(
+          jsonb_build_array(theme.theme_id::text, theme.row_revision,
+                            theme.theme_slug, theme.metadata)::text,
+          'UTF8'), 'sha256'), 'hex')
+    );
+  UPDATE feature.curated_source_rules AS rule
+  SET owner_kind = 'provider_dataset',
+      owner_provider_dataset_id = p_provider_dataset_id,
+      row_revision = rule.row_revision + 1,
+      updated_at = clock_timestamp()
+  WHERE rule.owner_kind IS NULL
+    AND rule.owner_provider_dataset_id IS NULL
+    AND rule.source_id = v_source_id
+    AND EXISTS (
+      SELECT 1 FROM ops.curation_concierge_legacy_owner_manifest AS manifest
+      WHERE manifest.entity_kind = 'rule' AND manifest.entity_id = rule.rule_id
+        AND manifest.before_row_revision = rule.row_revision
+        AND manifest.before_input_hash = encode(x_extension.digest(convert_to(
+          jsonb_build_array(rule.rule_id::text, rule.row_revision,
+                            rule.theme_id::text, rule.source_id::text,
+                            rule.metadata)::text,
+          'UTF8'), 'sha256'), 'hex')
+    )
+    AND EXISTS (
+      SELECT 1 FROM feature.curated_themes AS theme
+      WHERE theme.theme_id = rule.theme_id
+        AND theme.owner_kind = 'provider_dataset'
+        AND theme.owner_provider_dataset_id = p_provider_dataset_id
+    );
+
+  o_themes_created := 0;
+  o_themes_updated := 0;
+  o_rules_created := 0;
+  o_rules_updated := 0;
+  o_rules_archived := 0;
+  FOR v_group IN
+    SELECT * FROM pg_temp.tvn40_concierge_groups
+    ORDER BY grouping_kind, grouping_id
+  LOOP
+    v_metadata := jsonb_build_object(
+      'concierge_kind', v_group.grouping_kind,
+      'concierge_value', v_group.grouping_id,
+      'poi_count', v_group.feature_count,
+      'seed', 'sync_concierge_themes'
+    );
+    v_selector := v_group.detail_selector;
+    SELECT theme.* INTO v_theme
+    FROM feature.curated_themes AS theme
+    WHERE theme.theme_slug = v_group.theme_slug
+    FOR UPDATE;
+    IF NOT FOUND THEN
+      INSERT INTO feature.curated_themes (
+        theme_slug, theme_name, theme_description, theme_group,
+        default_curated, visibility, metadata, row_revision, archived_at,
+        owner_kind, owner_provider_dataset_id, updated_at
+      ) VALUES (
+        v_group.theme_slug, v_group.grouping_title, '', 'media', false, 'public',
+        v_metadata, 1, NULL, 'provider_dataset', p_provider_dataset_id,
+        clock_timestamp()
+      ) RETURNING * INTO STRICT v_theme;
+      o_themes_created := o_themes_created + 1;
+    ELSE
+      IF v_theme.owner_kind IS DISTINCT FROM 'provider_dataset'
+         OR v_theme.owner_provider_dataset_id IS DISTINCT FROM p_provider_dataset_id THEN
+        RAISE EXCEPTION 'concierge theme slug collides with another owner: %', v_group.theme_slug
+          USING ERRCODE = '23505', CONSTRAINT = 'uq_tvn40_concierge_theme_owner';
+      END IF;
+      IF (v_theme.theme_name, v_theme.theme_group, v_theme.visibility,
+          v_theme.metadata, v_theme.archived_at IS NULL)
+         IS DISTINCT FROM
+         (v_group.grouping_title, 'media'::text, 'public'::text,
+          v_metadata, true) THEN
+        UPDATE feature.curated_themes AS theme
+        SET theme_name = v_group.grouping_title,
+            theme_group = 'media', visibility = 'public', metadata = v_metadata,
+            archived_at = NULL, row_revision = theme.row_revision + 1,
+            updated_at = clock_timestamp()
+        WHERE theme.theme_id = v_theme.theme_id
+        RETURNING * INTO STRICT v_theme;
+        o_themes_updated := o_themes_updated + 1;
+      END IF;
+    END IF;
+
+    IF (SELECT count(*) FROM feature.curated_source_rules AS rule
+        WHERE rule.theme_id = v_theme.theme_id AND rule.source_id = v_source_id) > 1 THEN
+      RAISE EXCEPTION 'concierge theme has ambiguous source rules: %', v_theme.theme_id
+        USING ERRCODE = '23505', CONSTRAINT = 'uq_tvn40_concierge_theme_rule';
+    END IF;
+    SELECT rule.* INTO v_rule
+    FROM feature.curated_source_rules AS rule
+    WHERE rule.theme_id = v_theme.theme_id AND rule.source_id = v_source_id
+    FOR UPDATE;
+    IF NOT FOUND THEN
+      INSERT INTO feature.curated_source_rules (
+        theme_id, source_id, place_kind, category, region_scope,
+        detail_selector, default_action, priority, enabled, metadata,
+        row_revision, archived_at, owner_kind, owner_provider_dataset_id, updated_at
+      ) VALUES (
+        v_theme.theme_id, v_source_id, 'youtube_place_candidate', NULL, '{}'::jsonb,
+        v_selector, 'candidate',
+        LEAST(v_group.feature_count, 2147483647)::integer, true,
+        jsonb_build_object('curation_relation', 'theme_area_anchor'),
+        1, NULL, 'provider_dataset', p_provider_dataset_id, clock_timestamp()
+      ) RETURNING * INTO STRICT v_rule;
+      o_rules_created := o_rules_created + 1;
+    ELSE
+      IF v_rule.owner_kind IS DISTINCT FROM 'provider_dataset'
+         OR v_rule.owner_provider_dataset_id IS DISTINCT FROM p_provider_dataset_id THEN
+        RAISE EXCEPTION 'concierge rule collides with another owner: %', v_rule.rule_id
+          USING ERRCODE = '23505', CONSTRAINT = 'uq_tvn40_concierge_rule_owner';
+      END IF;
+      IF (v_rule.place_kind, v_rule.category, v_rule.region_scope,
+          v_rule.detail_selector, v_rule.default_action, v_rule.priority,
+          v_rule.enabled, v_rule.archived_at IS NULL)
+         IS DISTINCT FROM
+         ('youtube_place_candidate'::text, NULL::text, '{}'::jsonb,
+          v_selector, 'candidate'::text,
+          LEAST(v_group.feature_count, 2147483647)::integer,
+          true, true) THEN
+        UPDATE feature.curated_source_rules AS rule
+        SET place_kind = 'youtube_place_candidate', category = NULL,
+            region_scope = '{}'::jsonb, detail_selector = v_selector,
+            default_action = 'candidate',
+            priority = LEAST(v_group.feature_count, 2147483647)::integer,
+            enabled = true, archived_at = NULL,
+            row_revision = rule.row_revision + 1, updated_at = clock_timestamp()
+        WHERE rule.rule_id = v_rule.rule_id;
+        o_rules_updated := o_rules_updated + 1;
+      END IF;
+    END IF;
+  END LOOP;
+
+  -- Removed authoritative groups first materialize an empty expected set so
+  -- candidate eligibility is audited before their catalog rows are archived.
+  FOR v_rule IN
+    SELECT rule.*
+    FROM feature.curated_source_rules AS rule
+    JOIN feature.curated_themes AS theme ON theme.theme_id = rule.theme_id
+    WHERE rule.source_id = v_source_id
+      AND rule.owner_kind = 'provider_dataset'
+      AND rule.owner_provider_dataset_id = p_provider_dataset_id
+      AND rule.archived_at IS NULL
+      AND theme.owner_kind = 'provider_dataset'
+      AND theme.owner_provider_dataset_id = p_provider_dataset_id
+      AND NOT EXISTS (
+        SELECT 1 FROM pg_temp.tvn40_concierge_groups AS desired
+        WHERE desired.theme_slug = theme.theme_slug
+      )
+    ORDER BY rule.rule_id
+  LOOP
+    CALL feature.materialize_theme_candidate_generation(
+      v_rule.rule_id, 'provider_full_snapshot', p_import_job_id,
+      NULL, NULL, NULL, jsonb_build_object(
+        'schema_version', 1, 'reason_code', 'catalog_archived'
+      ), v_generation_id, v_observed, v_removed, v_input_hash, v_replayed
+    );
+    UPDATE feature.curated_source_rules AS rule
+    SET enabled = false, archived_at = clock_timestamp(),
+        row_revision = rule.row_revision + 1, updated_at = clock_timestamp()
+    WHERE rule.rule_id = v_rule.rule_id;
+    o_rules_archived := o_rules_archived + 1;
+  END LOOP;
+  UPDATE feature.curated_themes AS theme
+  SET archived_at = clock_timestamp(), row_revision = theme.row_revision + 1,
+      updated_at = clock_timestamp()
+  WHERE theme.owner_kind = 'provider_dataset'
+    AND theme.owner_provider_dataset_id = p_provider_dataset_id
+    AND theme.archived_at IS NULL
+    AND NOT EXISTS (
+      SELECT 1 FROM pg_temp.tvn40_concierge_groups AS desired
+      WHERE desired.theme_slug = theme.theme_slug
+    );
+END
+$$;
+
+
+ALTER PROCEDURE feature.sync_concierge_theme_catalog(IN p_provider_dataset_id bigint, IN p_import_job_id uuid, OUT o_themes_created bigint, OUT o_themes_updated bigint, OUT o_rules_created bigint, OUT o_rules_updated bigint, OUT o_rules_archived bigint) OWNER TO ktm_curation_command_owner;
 
 --
 -- Name: sync_subtype_public_ready(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
@@ -3553,6 +10206,61 @@ $$;
 
 
 ALTER FUNCTION feature.sync_subtype_public_ready() OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: touch_curation_import_collection_command(uuid, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE feature.touch_curation_import_collection_command(IN p_collection_id uuid, IN p_command_id bigint, IN p_principal text, OUT o_collection_revision bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops'
+    AS $$
+DECLARE
+  v_effect ops.curation_import_collection_effects%ROWTYPE;
+BEGIN
+  IF current_setting('transaction_isolation') <> 'serializable' THEN
+    RAISE EXCEPTION 'curation import command requires SERIALIZABLE transaction'
+      USING ERRCODE = '25001';
+  END IF;
+  IF NOT pg_has_role(session_user, 'ktm_curation_admin_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    RAISE EXCEPTION 'curation import command requires the admin executor'
+      USING ERRCODE = '42501';
+  END IF;
+  PERFORM 1 FROM ops.domain_commands AS command
+  WHERE command.command_id = p_command_id
+    AND command.actor = p_principal
+    AND command.operation = 'admin.curation.import'
+    AND NOT EXISTS (
+      SELECT 1 FROM ops.domain_command_results AS result
+      WHERE result.command_id = command.command_id
+    ) FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'domain command does not match active curation import'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_import_domain_command';
+  END IF;
+  SELECT effect.* INTO STRICT v_effect
+  FROM ops.curation_import_collection_effects AS effect
+  WHERE effect.command_id = p_command_id
+    AND effect.collection_id = p_collection_id;
+  IF v_effect.created THEN
+    SELECT collection.row_revision INTO STRICT o_collection_revision
+    FROM feature.curation_collections AS collection
+    WHERE collection.collection_id = p_collection_id;
+    RETURN;
+  END IF;
+  INSERT INTO ops.curation_import_collection_touches(command_id, collection_id)
+  VALUES (p_command_id, p_collection_id);
+  UPDATE feature.curation_collections AS collection
+  SET updated_by = p_principal, updated_at = clock_timestamp(),
+      row_revision = collection.row_revision + 1
+  WHERE collection.collection_id = p_collection_id
+  RETURNING collection.row_revision INTO STRICT o_collection_revision;
+END
+$$;
+
+
+ALTER PROCEDURE feature.touch_curation_import_collection_command(IN p_collection_id uuid, IN p_command_id bigint, IN p_principal text, OUT o_collection_revision bigint) OWNER TO ktm_curation_command_owner;
 
 --
 -- Name: transition_admin_feature_state(text, text, text, text, bigint, text, text, text); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
@@ -3934,6 +10642,37 @@ $$;
 ALTER FUNCTION feature.validate_feature_override_value() OWNER TO ktm_feature_state_procedure_owner;
 
 --
+-- Name: validate_theme_candidate_merge_target(); Type: FUNCTION; Schema: feature; Owner: ktm_curation_audit_writer
+--
+
+CREATE FUNCTION feature.validate_theme_candidate_merge_target() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature'
+    AS $$
+BEGIN
+  IF NEW.disposition = 'merged' THEN
+    IF NEW.merged_into_candidate_id = NEW.candidate_id OR NOT EXISTS (
+      SELECT 1
+      FROM feature.theme_feature_candidates AS winner
+      WHERE winner.candidate_id = NEW.merged_into_candidate_id
+        AND winner.rule_id = NEW.rule_id
+        AND winner.source_entity_key = NEW.source_entity_key
+        AND winner.disposition = 'active'
+        AND winner.merged_into_candidate_id IS NULL
+      FOR SHARE
+    ) THEN
+      RAISE EXCEPTION 'merged candidate requires an active same-identity winner'
+        USING ERRCODE = '23514', CONSTRAINT = 'ck_theme_feature_candidate_merge_target';
+    END IF;
+  END IF;
+  RETURN NEW;
+END
+$$;
+
+
+ALTER FUNCTION feature.validate_theme_candidate_merge_target() OWNER TO ktm_curation_audit_writer;
+
+--
 -- Name: write_feature_state_transition(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_audit_writer
 --
 
@@ -4029,6 +10768,60 @@ $$;
 
 
 ALTER FUNCTION feature.write_feature_state_transition() OWNER TO ktm_feature_audit_writer;
+
+--
+-- Name: append_provider_feature_attempt_event_command(text, bigint, text, text, integer, text, jsonb); Type: PROCEDURE; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE ops.append_provider_feature_attempt_event_command(IN p_dagster_run_id text, IN p_provider_dataset_id bigint, IN p_sync_scope text, IN p_operation_key text, IN p_attempt_number integer, IN p_outcome text, IN p_error jsonb, OUT o_event_id uuid, OUT o_job_id uuid, OUT o_import_job_dataset_id uuid, OUT o_stage text, OUT o_level text, OUT o_code text, OUT o_message text, OUT o_payload jsonb, OUT o_occurred_at timestamp with time zone)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'ops'
+    AS $$
+BEGIN
+  IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
+    RAISE EXCEPTION 'provider attempt event requires provider executor'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_attempt_number < 1 OR p_outcome NOT IN ('failed','retryable_failure')
+     OR jsonb_typeof(p_error) <> 'object' THEN
+    RAISE EXCEPTION 'invalid provider attempt event input'
+      USING ERRCODE = '22023';
+  END IF;
+  INSERT INTO ops.import_job_events (
+    job_id, import_job_dataset_id, stage, level, code, message, payload
+  )
+  SELECT child.job_id, member.import_job_dataset_id, child.current_stage,
+         'error', 'feature_operation.attempt',
+         'provider feature operation attempt recorded',
+         jsonb_build_object(
+           'attempt_number', p_attempt_number,
+           'outcome', p_outcome,
+           'error', p_error,
+           'provider_dataset_id', member.provider_dataset_id,
+           'sync_scope', member.sync_scope,
+           'operation_key', member.operation_key
+         )
+  FROM ops.import_jobs AS root
+  JOIN ops.import_jobs AS child
+    ON child.parent_job_id = root.job_id
+   AND child.kind = 'provider_feature_load'
+  JOIN ops.import_job_datasets AS member ON member.job_id = child.job_id
+  WHERE root.kind = 'provider_feature_load_run'
+    AND root.dagster_run_id = p_dagster_run_id
+    AND root.quarantined_at IS NULL AND child.quarantined_at IS NULL
+    AND member.provider_dataset_id = p_provider_dataset_id
+    AND member.sync_scope = p_sync_scope
+    AND member.operation_key = p_operation_key
+  RETURNING event_id, job_id, import_job_dataset_id, stage, level, code,
+            message, payload, occurred_at
+  INTO STRICT o_event_id, o_job_id, o_import_job_dataset_id, o_stage, o_level,
+              o_code, o_message, o_payload, o_occurred_at;
+END
+$$;
+
+
+ALTER PROCEDURE ops.append_provider_feature_attempt_event_command(IN p_dagster_run_id text, IN p_provider_dataset_id bigint, IN p_sync_scope text, IN p_operation_key text, IN p_attempt_number integer, IN p_outcome text, IN p_error jsonb, OUT o_event_id uuid, OUT o_job_id uuid, OUT o_import_job_dataset_id uuid, OUT o_stage text, OUT o_level text, OUT o_code text, OUT o_message text, OUT o_payload jsonb, OUT o_occurred_at timestamp with time zone) OWNER TO ktm_curation_command_owner;
 
 --
 -- Name: assert_feature_update_job_pair(uuid); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
@@ -4299,6 +11092,317 @@ CREATE FUNCTION ops.enforce_offline_upload_command_execution_transition() RETURN
 
 
 ALTER FUNCTION ops.enforce_offline_upload_command_execution_transition() OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: ensure_provider_feature_operation_command(text, text, text, jsonb, timestamp with time zone, timestamp with time zone, text); Type: PROCEDURE; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE ops.ensure_provider_feature_operation_command(IN p_dagster_run_id text, IN p_trigger_kind text, IN p_operation_key text, IN p_memberships jsonb, IN p_created_at timestamp with time zone, IN p_started_at timestamp with time zone, IN p_observed_status text, OUT o_root_job_id uuid, OUT o_inserted boolean, OUT o_changed boolean)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'ops', 'provider_sync'
+    AS $$
+DECLARE
+  v_member record;
+  v_base_status text;
+  v_stage text;
+  v_member_count bigint;
+  v_distinct_member_count bigint;
+BEGIN
+  IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
+    RAISE EXCEPTION 'provider operation command requires provider executor'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_dagster_run_id IS NULL OR btrim(p_dagster_run_id) = ''
+     OR p_operation_key IS NULL OR btrim(p_operation_key) = ''
+     OR p_trigger_kind NOT IN ('schedule','sensor','manual','retry','system')
+     OR p_observed_status NOT IN (
+       'QUEUED','NOT_STARTED','MANAGED','STARTING','STARTED','CANCELING'
+     )
+     OR jsonb_typeof(p_memberships) <> 'array'
+     OR jsonb_array_length(p_memberships) = 0 THEN
+    RAISE EXCEPTION 'invalid provider operation command input'
+      USING ERRCODE = '22023';
+  END IF;
+  IF p_observed_status IN ('STARTED','CANCELING') AND p_started_at IS NULL THEN
+    RAISE EXCEPTION 'running provider operation requires started_at'
+      USING ERRCODE = '22023';
+  END IF;
+  SELECT count(*), count(DISTINCT (member.provider_dataset_id, member.sync_scope, member.operation_key))
+  INTO STRICT v_member_count, v_distinct_member_count
+  FROM jsonb_to_recordset(p_memberships) AS member(
+    provider_dataset_id bigint, sync_scope text, operation_key text
+  );
+  IF v_member_count <> jsonb_array_length(p_memberships)
+     OR v_distinct_member_count <> v_member_count THEN
+    RAISE EXCEPTION 'provider operation memberships are not unique'
+      USING ERRCODE = '22023';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM jsonb_to_recordset(p_memberships) AS member(
+      provider_dataset_id bigint, sync_scope text, operation_key text
+    )
+    WHERE member.operation_key <> p_operation_key
+       OR member.sync_scope IS NULL OR btrim(member.sync_scope) = ''
+       OR NOT EXISTS (
+         SELECT 1
+         FROM provider_sync.provider_dataset_operation_scopes AS scope
+         JOIN provider_sync.provider_dataset_operations AS operation
+           ON operation.provider_dataset_id = scope.provider_dataset_id
+          AND operation.operation_key = scope.operation_key
+          AND operation.operation_kind = scope.operation_kind
+         JOIN provider_sync.provider_datasets AS dataset
+           ON dataset.provider_dataset_id = scope.provider_dataset_id
+         WHERE scope.provider_dataset_id = member.provider_dataset_id
+           AND scope.sync_scope = member.sync_scope
+           AND scope.operation_key = member.operation_key
+           AND operation.operation_kind = 'refresh'
+           AND operation.is_enabled AND dataset.is_active
+       )
+  ) THEN
+    RAISE EXCEPTION 'provider operation membership is not active canonical scope'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_provider_operation_membership';
+  END IF;
+
+  v_base_status := CASE WHEN p_observed_status IN (
+    'QUEUED','NOT_STARTED','MANAGED','STARTING'
+  ) THEN 'queued' ELSE 'running' END;
+  v_stage := CASE WHEN v_base_status = 'queued' THEN 'queued' ELSE 'loading' END;
+  INSERT INTO ops.import_jobs (
+    kind, payload, status, progress, current_stage, dagster_run_id,
+    dataset_membership_mode, trigger_kind, operation_key, dagster_run_status,
+    created_at, started_at, heartbeat_at
+  ) VALUES (
+    'provider_feature_load_run', '{}'::jsonb, v_base_status, 0, v_stage,
+    p_dagster_run_id, 'root', p_trigger_kind, p_operation_key,
+    p_observed_status, p_created_at,
+    CASE WHEN v_base_status = 'running' THEN p_started_at ELSE NULL END,
+    CASE WHEN v_base_status = 'running' THEN p_started_at ELSE NULL END
+  )
+  ON CONFLICT (dagster_run_id)
+    WHERE kind = 'provider_feature_load_run' AND parent_job_id IS NULL
+  DO NOTHING
+  RETURNING job_id INTO o_root_job_id;
+  o_inserted := FOUND;
+  IF NOT o_inserted THEN
+    SELECT root.job_id INTO o_root_job_id
+    FROM ops.import_jobs AS root
+    WHERE root.kind = 'provider_feature_load_run'
+      AND root.parent_job_id IS NULL
+      AND root.dagster_run_id = p_dagster_run_id
+      AND root.quarantined_at IS NULL
+    FOR UPDATE;
+  END IF;
+  IF o_root_job_id IS NULL THEN
+    RAISE EXCEPTION 'provider operation root is quarantined or missing'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_provider_operation_root';
+  END IF;
+  IF o_inserted THEN
+    FOR v_member IN
+      SELECT member.*
+      FROM jsonb_to_recordset(p_memberships) AS member(
+        provider_dataset_id bigint, sync_scope text, operation_key text
+      )
+      ORDER BY member.provider_dataset_id, member.sync_scope, member.operation_key
+    LOOP
+      WITH child AS (
+        INSERT INTO ops.import_jobs (
+          kind, parent_job_id, payload, status, progress, current_stage,
+          dagster_run_id, dataset_membership_mode, created_at, started_at, heartbeat_at
+        ) VALUES (
+          'provider_feature_load', o_root_job_id, '{}'::jsonb,
+          v_base_status, 0, v_stage, p_dagster_run_id, 'single', p_created_at,
+          CASE WHEN v_base_status = 'running' THEN p_started_at ELSE NULL END,
+          CASE WHEN v_base_status = 'running' THEN p_started_at ELSE NULL END
+        ) RETURNING job_id
+      )
+      INSERT INTO ops.import_job_datasets (
+        job_id, provider_dataset_id, sync_scope, operation_key
+      ) SELECT child.job_id, v_member.provider_dataset_id,
+               v_member.sync_scope, v_member.operation_key FROM child;
+    END LOOP;
+  END IF;
+  o_changed := o_inserted;
+  IF p_observed_status IN ('STARTED','CANCELING') THEN
+    UPDATE ops.import_jobs AS root
+    SET status = 'running', current_stage = 'loading',
+        dagster_run_status = p_observed_status,
+        started_at = COALESCE(root.started_at, p_started_at),
+        heartbeat_at = COALESCE(p_started_at, root.heartbeat_at)
+    WHERE root.job_id = o_root_job_id AND root.kind = 'provider_feature_load_run'
+      AND root.status = 'queued' AND root.cancellation_id IS NULL
+      AND root.quarantined_at IS NULL;
+    o_changed := o_changed OR FOUND;
+    IF p_observed_status = 'CANCELING' THEN
+      UPDATE ops.import_jobs AS root
+      SET dagster_run_status = 'CANCELING',
+          heartbeat_at = COALESCE(p_started_at, root.heartbeat_at)
+      WHERE root.job_id = o_root_job_id
+        AND root.kind = 'provider_feature_load_run'
+        AND root.status = 'running'
+        AND root.dagster_run_status = 'STARTED'
+        AND root.cancellation_id IS NULL
+        AND root.quarantined_at IS NULL;
+      o_changed := o_changed OR FOUND;
+    END IF;
+    UPDATE ops.import_jobs AS child
+    SET status = 'running', current_stage = 'loading',
+        started_at = COALESCE(child.started_at, p_started_at),
+        heartbeat_at = COALESCE(p_started_at, child.heartbeat_at)
+    WHERE child.parent_job_id = o_root_job_id AND child.kind = 'provider_feature_load'
+      AND child.status = 'queued' AND child.cancellation_id IS NULL
+      AND child.quarantined_at IS NULL;
+    o_changed := o_changed OR FOUND;
+  ELSIF p_observed_status = 'STARTING' THEN
+    UPDATE ops.import_jobs AS root SET dagster_run_status = 'STARTING'
+    WHERE root.job_id = o_root_job_id AND root.kind = 'provider_feature_load_run'
+      AND root.status = 'queued'
+      AND root.dagster_run_status IN ('QUEUED','NOT_STARTED','MANAGED')
+      AND root.quarantined_at IS NULL;
+    o_changed := o_changed OR FOUND;
+  END IF;
+END
+$$;
+
+
+ALTER PROCEDURE ops.ensure_provider_feature_operation_command(IN p_dagster_run_id text, IN p_trigger_kind text, IN p_operation_key text, IN p_memberships jsonb, IN p_created_at timestamp with time zone, IN p_started_at timestamp with time zone, IN p_observed_status text, OUT o_root_job_id uuid, OUT o_inserted boolean, OUT o_changed boolean) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: fill_provider_cancellation_starts_command(uuid, text, timestamp with time zone); Type: FUNCTION; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+CREATE FUNCTION ops.fill_provider_cancellation_starts_command(p_cancellation_id uuid, p_dagster_run_id text, p_engine_started_at timestamp with time zone) RETURNS TABLE(expected_count bigint, owned_count bigint, updated_job_ids uuid[])
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'ops'
+    AS $$
+BEGIN
+  IF session_user <> 'ktm_feature_api_runtime'
+     AND NOT EXISTS (
+       SELECT 1 FROM pg_catalog.pg_roles AS role
+       WHERE role.rolname = session_user AND role.rolsuper
+     ) THEN
+    RAISE EXCEPTION 'provider cancellation command requires API runtime'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_engine_started_at IS NULL OR p_dagster_run_id IS NULL OR btrim(p_dagster_run_id) = '' THEN
+    RAISE EXCEPTION 'invalid provider cancellation start command'
+      USING ERRCODE = '22023';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1
+    FROM ops.pipeline_cancellations AS attempt
+    JOIN ops.pipeline_cancellation_runs AS run
+      ON run.cancellation_id = attempt.cancellation_id
+     AND run.dagster_run_id = p_dagster_run_id
+    WHERE attempt.cancellation_id = p_cancellation_id
+      AND attempt.status = 'in_progress'
+      AND run.result IN ('cancelled','already_terminal')
+      AND run.engine_started_at = p_engine_started_at
+    FOR UPDATE OF attempt, run
+  ) THEN
+    RAISE EXCEPTION 'provider cancellation start proof is not current'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_provider_cancellation_start_proof';
+  END IF;
+  RETURN QUERY
+  WITH canonical_jobs AS (
+    SELECT job.job_id, job.cancellation_id, job.started_at
+    FROM ops.pipeline_cancellation_members AS member
+    JOIN ops.import_jobs AS job ON job.job_id = member.job_id
+    WHERE member.cancellation_id = p_cancellation_id
+      AND member.dagster_run_id = p_dagster_run_id
+      AND member.operation_kind IN ('provider_feature_load_run','provider_feature_load')
+  ),
+  updated AS (
+    UPDATE ops.import_jobs AS job
+    SET started_at = p_engine_started_at
+    FROM canonical_jobs AS candidate
+    WHERE job.job_id = candidate.job_id
+      AND candidate.cancellation_id = p_cancellation_id
+      AND job.cancellation_id = p_cancellation_id
+      AND job.started_at IS NULL
+    RETURNING job.job_id
+  )
+  SELECT
+    (SELECT count(*) FROM canonical_jobs),
+    (SELECT count(*) FROM canonical_jobs WHERE cancellation_id = p_cancellation_id),
+    COALESCE((SELECT array_agg(job_id ORDER BY job_id) FROM updated), '{}'::uuid[]);
+END
+$$;
+
+
+ALTER FUNCTION ops.fill_provider_cancellation_starts_command(p_cancellation_id uuid, p_dagster_run_id text, p_engine_started_at timestamp with time zone) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: finish_provider_feature_membership_command(uuid, bigint, text, text, boolean, timestamp with time zone); Type: PROCEDURE; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE ops.finish_provider_feature_membership_command(IN p_root_job_id uuid, IN p_provider_dataset_id bigint, IN p_sync_scope text, IN p_operation_key text, IN p_authoritative_snapshot_complete boolean, IN p_finished_at timestamp with time zone, OUT o_changed boolean)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'ops'
+    AS $$
+DECLARE
+  v_child_job_id uuid;
+  v_has_receipt boolean;
+BEGIN
+  IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
+    RAISE EXCEPTION 'provider membership command requires provider executor'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_authoritative_snapshot_complete IS NULL THEN
+    RAISE EXCEPTION 'provider membership completion kind is required'
+      USING ERRCODE = '22023';
+  END IF;
+  SELECT child.job_id INTO STRICT v_child_job_id
+  FROM ops.import_jobs AS child
+  JOIN ops.import_job_datasets AS member ON member.job_id = child.job_id
+  WHERE child.parent_job_id = p_root_job_id
+    AND child.kind = 'provider_feature_load'
+    AND member.provider_dataset_id = p_provider_dataset_id
+    AND member.sync_scope = p_sync_scope
+    AND member.operation_key = p_operation_key
+    AND child.cancellation_id IS NULL AND child.quarantined_at IS NULL
+  FOR UPDATE OF child;
+  SELECT EXISTS (
+    SELECT 1 FROM ops.curation_provider_snapshot_receipts AS receipt
+    WHERE receipt.source_job_id = v_child_job_id
+      AND receipt.root_job_id = p_root_job_id
+      AND receipt.provider_dataset_id = p_provider_dataset_id
+      AND receipt.sync_scope = p_sync_scope
+      AND receipt.operation_key = p_operation_key
+  ) INTO STRICT v_has_receipt;
+  IF p_authoritative_snapshot_complete IS DISTINCT FROM v_has_receipt THEN
+    RAISE EXCEPTION 'provider membership completion does not match its immutable seal'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_provider_membership_receipt';
+  END IF;
+  UPDATE ops.import_jobs AS child
+  SET status = 'done', progress = 100, current_stage = 'completed',
+      finished_at = COALESCE(child.finished_at, p_finished_at, clock_timestamp()),
+      heartbeat_at = clock_timestamp(), error_message = NULL,
+      payload = child.payload || jsonb_build_object(
+        'authoritative_snapshot_complete', p_authoritative_snapshot_complete
+      )
+  WHERE child.job_id = v_child_job_id
+    AND child.status IN ('queued','running')
+    AND child.cancellation_id IS NULL AND child.quarantined_at IS NULL;
+  o_changed := FOUND;
+  WITH counts AS (
+    SELECT count(*)::integer AS total,
+           count(*) FILTER (WHERE status = 'done')::integer AS done
+    FROM ops.import_jobs AS child
+    WHERE child.parent_job_id = p_root_job_id
+      AND child.kind = 'provider_feature_load' AND child.quarantined_at IS NULL
+  )
+  UPDATE ops.import_jobs AS root
+  SET progress = CASE WHEN counts.total = 0 THEN 0
+    ELSE floor(100.0 * counts.done / counts.total)::integer END
+  FROM counts WHERE root.job_id = p_root_job_id AND root.quarantined_at IS NULL;
+END
+$$;
+
+
+ALTER PROCEDURE ops.finish_provider_feature_membership_command(IN p_root_job_id uuid, IN p_provider_dataset_id bigint, IN p_sync_scope text, IN p_operation_key text, IN p_authoritative_snapshot_complete boolean, IN p_finished_at timestamp with time zone, OUT o_changed boolean) OWNER TO ktm_curation_command_owner;
 
 --
 -- Name: force_poi_cache_target_lock_version(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
@@ -4826,6 +11930,39 @@ CREATE FUNCTION ops.is_valid_feature_update_scope_0075(p_scope_type text, p_scop
 ALTER FUNCTION ops.is_valid_feature_update_scope_0075(p_scope_type text, p_scope jsonb) OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: mark_snapshot_material_orphaned(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION ops.mark_snapshot_material_orphaned() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  -- material row lock과 새 receipt의 FOR SHARE를 먼저 직렬화한다. 마지막 receipt 삭제와
+  -- 동시 receipt 발행이 엇갈려 orphan 표시가 stale해지는 것을 막는다.
+  PERFORM 1
+    FROM ops.poi_cache_target_snapshot_materials AS material
+   WHERE material.material_id = OLD.material_id
+   FOR UPDATE;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM ops.poi_cache_target_snapshots AS receipt
+    WHERE receipt.material_id = OLD.material_id
+  ) THEN
+    UPDATE ops.poi_cache_target_snapshot_materials AS material
+       SET orphaned_at = clock_timestamp()
+     WHERE material.material_id = OLD.material_id
+       AND material.orphaned_at IS NULL;
+  END IF;
+
+  RETURN OLD;
+END;
+$$;
+
+
+ALTER FUNCTION ops.mark_snapshot_material_orphaned() OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: reject_c6c_cancel_probe_event(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -4884,6 +12021,108 @@ CREATE FUNCTION ops.reject_canonical_feature_update_job_delete() RETURNS trigger
 
 
 ALTER FUNCTION ops.reject_canonical_feature_update_job_delete() OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: reject_curation_catalog_effect_mutation(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION ops.reject_curation_catalog_effect_mutation() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'curation catalog command effects are append-only'
+    USING ERRCODE = '55000';
+END
+$$;
+
+
+ALTER FUNCTION ops.reject_curation_catalog_effect_mutation() OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: reject_curation_import_collection_effect_mutation(); Type: FUNCTION; Schema: ops; Owner: ktm_curation_audit_writer
+--
+
+CREATE FUNCTION ops.reject_curation_import_collection_effect_mutation() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'curation import collection effects are append-only'
+    USING ERRCODE = '42501';
+END
+$$;
+
+
+ALTER FUNCTION ops.reject_curation_import_collection_effect_mutation() OWNER TO ktm_curation_audit_writer;
+
+--
+-- Name: reject_curation_import_collection_effect_truncate(); Type: FUNCTION; Schema: ops; Owner: ktm_curation_audit_writer
+--
+
+CREATE FUNCTION ops.reject_curation_import_collection_effect_truncate() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'curation import collection effects cannot be truncated'
+    USING ERRCODE = '42501';
+END
+$$;
+
+
+ALTER FUNCTION ops.reject_curation_import_collection_effect_truncate() OWNER TO ktm_curation_audit_writer;
+
+--
+-- Name: reject_curation_import_plan_mutation(); Type: FUNCTION; Schema: ops; Owner: ktm_curation_audit_writer
+--
+
+CREATE FUNCTION ops.reject_curation_import_plan_mutation() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'curation import plans and receipts are append-only'
+    USING ERRCODE = '42501';
+END
+$$;
+
+
+ALTER FUNCTION ops.reject_curation_import_plan_mutation() OWNER TO ktm_curation_audit_writer;
+
+--
+-- Name: reject_curation_import_plan_truncate(); Type: FUNCTION; Schema: ops; Owner: ktm_curation_audit_writer
+--
+
+CREATE FUNCTION ops.reject_curation_import_plan_truncate() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'curation import plans and receipts cannot be truncated'
+    USING ERRCODE = '42501';
+END
+$$;
+
+
+ALTER FUNCTION ops.reject_curation_import_plan_truncate() OWNER TO ktm_curation_audit_writer;
+
+--
+-- Name: reject_curation_source_observation_receipt_mutation(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION ops.reject_curation_source_observation_receipt_mutation() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+  RAISE EXCEPTION 'curation source observation receipts are append-only'
+    USING ERRCODE = '55000';
+END
+$$;
+
+
+ALTER FUNCTION ops.reject_curation_source_observation_receipt_mutation() OWNER TO ktm_feature_schema_owner;
 
 --
 -- Name: reject_dagster_schedule_audit_mutation(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
@@ -5010,6 +12249,166 @@ CREATE FUNCTION ops.reject_import_job_quarantine_mutation() RETURNS trigger
 ALTER FUNCTION ops.reject_import_job_quarantine_mutation() OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: reject_live_snapshot_material_item_delete(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION ops.reject_live_snapshot_material_item_delete() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  material_compacted_at timestamptz;
+BEGIN
+  -- compaction이 부모를 표시한 뒤에만 item을 되찾게 한다. 부모 행을 같은
+  -- 잠금으로 직렬화해야 compaction UPDATE와 임의 DELETE가 서로의 이전 상태를
+  -- 보지 않는다. 실제 batch 크기와 material 순서는 repository의 ordered
+  -- SKIP LOCKED query가 보장한다. 이 trigger는 raw DELETE를 batch writer로
+  -- 오인시키지 않고, 표시 전 삭제만 DB에서 fail-close한다.
+  SELECT material.compacted_at
+    INTO material_compacted_at
+    FROM ops.poi_cache_target_snapshot_materials AS material
+   WHERE material.material_id = OLD.material_id
+   FOR UPDATE;
+
+  IF material_compacted_at IS NULL THEN
+    RAISE EXCEPTION 'live snapshot material items cannot be deleted before compaction'
+      USING ERRCODE = '55000';
+  END IF;
+
+  RETURN OLD;
+END;
+$$;
+
+
+ALTER FUNCTION ops.reject_live_snapshot_material_item_delete() OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: reject_provider_feature_event_raw_dml(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION ops.reject_provider_feature_event_raw_dml() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'ops'
+    AS $$
+DECLARE
+  v_job_id uuid;
+BEGIN
+  IF current_user = 'ktm_curation_command_owner'
+     OR EXISTS (
+       SELECT 1 FROM pg_catalog.pg_roles AS role
+       WHERE role.rolname = session_user AND role.rolsuper
+     ) THEN
+    RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+  END IF;
+  v_job_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.job_id ELSE NEW.job_id END;
+  IF EXISTS (
+    SELECT 1 FROM ops.import_jobs AS job
+    WHERE job.job_id = v_job_id
+      AND job.kind IN ('provider_feature_load_run','provider_feature_load')
+  ) THEN
+    RAISE EXCEPTION 'provider feature events require a typed command'
+      USING ERRCODE = '42501', CONSTRAINT = 'ck_tvn40_provider_event_typed_command';
+  END IF;
+  RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+END
+$$;
+
+
+ALTER FUNCTION ops.reject_provider_feature_event_raw_dml() OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: reject_provider_feature_membership_raw_dml(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION ops.reject_provider_feature_membership_raw_dml() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'ops'
+    AS $$
+DECLARE
+  v_job_id uuid;
+BEGIN
+  IF current_user = 'ktm_curation_command_owner'
+     OR EXISTS (
+       SELECT 1 FROM pg_catalog.pg_roles AS role
+       WHERE role.rolname = session_user AND role.rolsuper
+     ) THEN
+    RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+  END IF;
+  v_job_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.job_id ELSE NEW.job_id END;
+  IF EXISTS (
+    SELECT 1 FROM ops.import_jobs AS job
+    WHERE job.job_id = v_job_id
+      AND job.kind = 'provider_feature_load'
+  ) OR (TG_OP = 'UPDATE' AND EXISTS (
+    SELECT 1 FROM ops.import_jobs AS job
+    WHERE job.job_id = OLD.job_id
+      AND job.kind = 'provider_feature_load'
+  )) THEN
+    RAISE EXCEPTION 'provider feature memberships require a typed command'
+      USING ERRCODE = '42501', CONSTRAINT = 'ck_tvn40_provider_membership_typed_command';
+  END IF;
+  RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+END
+$$;
+
+
+ALTER FUNCTION ops.reject_provider_feature_membership_raw_dml() OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: reject_provider_feature_operation_raw_dml(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION ops.reject_provider_feature_operation_raw_dml() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog', 'ops'
+    AS $$
+DECLARE
+  v_kind text;
+BEGIN
+  IF current_user = 'ktm_curation_command_owner'
+     OR EXISTS (
+       SELECT 1 FROM pg_catalog.pg_roles AS role
+       WHERE role.rolname = session_user AND role.rolsuper
+     ) THEN
+    RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+  END IF;
+  v_kind := CASE WHEN TG_OP = 'DELETE' THEN OLD.kind ELSE NEW.kind END;
+  IF v_kind IN ('provider_feature_load_run', 'provider_feature_load')
+     OR (TG_OP = 'UPDATE' AND OLD.kind IN (
+       'provider_feature_load_run', 'provider_feature_load'
+     )) THEN
+    IF TG_OP = 'UPDATE'
+       AND session_user = 'ktm_feature_api_runtime'
+       AND NEW.cancellation_id IS NOT NULL
+       AND EXISTS (
+         SELECT 1
+         FROM ops.pipeline_cancellation_members AS member
+         JOIN ops.pipeline_cancellations AS attempt
+           ON attempt.cancellation_id = member.cancellation_id
+         WHERE member.cancellation_id = NEW.cancellation_id
+           AND member.job_id = NEW.job_id
+           AND attempt.status = 'in_progress'
+       )
+       AND to_jsonb(NEW) - ARRAY[
+         'cancellation_id','cancellation_requested_at',
+         'cancellation_requested_by','cancellation_reason'
+       ]::text[]
+       = to_jsonb(OLD) - ARRAY[
+         'cancellation_id','cancellation_requested_at',
+         'cancellation_requested_by','cancellation_reason'
+       ]::text[] THEN
+      RETURN NEW;
+    END IF;
+    RAISE EXCEPTION 'provider feature operations require a typed command'
+      USING ERRCODE = '42501', CONSTRAINT = 'ck_tvn40_provider_operation_typed_command';
+  END IF;
+  RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
+END
+$$;
+
+
+ALTER FUNCTION ops.reject_provider_feature_operation_raw_dml() OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: reject_quarantined_cancellation_member(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -5080,6 +12479,188 @@ CREATE FUNCTION ops.reject_quarantined_import_job_event_mutation() RETURNS trigg
 
 
 ALTER FUNCTION ops.reject_quarantined_import_job_event_mutation() OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: reject_snapshot_material_item_insert(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION ops.reject_snapshot_material_item_insert() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  material_compacted_at timestamptz;
+  material_drained_at timestamptz;
+BEGIN
+  -- compaction UPDATE와 item INSERT가 엇갈리지 않게 부모 material 행을 FOR UPDATE로
+  -- 잠근다. (FOR KEY SHARE는 일반 UPDATE의 NO KEY UPDATE 잠금과 충돌하지 않는다.)
+  -- UPDATE가 먼저면 여기서 terminal 상태를 보고 거부하고, INSERT가 먼저면
+  -- compaction UPDATE가 잠금 해제 뒤 item 존재를 다시 보므로 drained 표기를 거부한다.
+  SELECT material.compacted_at, material.compaction_drained_at
+    INTO material_compacted_at, material_drained_at
+    FROM ops.poi_cache_target_snapshot_materials AS material
+   WHERE material.material_id = NEW.material_id
+   FOR UPDATE;
+
+  IF material_compacted_at IS NOT NULL OR material_drained_at IS NOT NULL THEN
+    RAISE EXCEPTION 'snapshot material items cannot be inserted after compaction'
+      USING ERRCODE = '55000';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION ops.reject_snapshot_material_item_insert() OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: reject_snapshot_material_mutation(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION ops.reject_snapshot_material_mutation() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+BEGIN
+  -- 검사 **순서가 계약이다**. "표시가 아예 아니다"를 불변성보다 먼저 본다.
+  -- 그래야 `SET item_count = 99`(표시 없이 내용만 바꿈)와
+  -- `SET compacted_at = now(), merkle_root = ...`(표시를 구실로 내용도 바꿈)이
+  -- 서로 다른 이유로 거부되고, 운영자가 어느 규칙에 걸렸는지 알 수 있다.
+  -- 배출 전제 위반을 가장 먼저 본다. 뒤에 두면 "표시가 아니다"가 먼저 잡아
+  -- 일반 문구로 거부되고, 무엇을 어겼는지가 메시지에서 사라진다.
+  IF NEW.compaction_drained_at IS NOT NULL AND NEW.compacted_at IS NULL THEN
+    RAISE EXCEPTION 'snapshot material cannot be drained before it is compacted'
+      USING ERRCODE = '55000';
+  END IF;
+
+  IF NEW.orphaned_at IS NOT NULL
+     AND OLD.orphaned_at IS NULL
+     AND pg_trigger_depth() < 2 THEN
+    RAISE EXCEPTION 'snapshot material orphan mark is managed by the receipt trigger'
+      USING ERRCODE = '55000';
+  END IF;
+
+  IF OLD.orphaned_at IS NOT NULL
+     AND NEW.orphaned_at IS DISTINCT FROM OLD.orphaned_at THEN
+    RAISE EXCEPTION 'snapshot material orphan mark is one-way'
+      USING ERRCODE = '55000';
+  END IF;
+
+  -- 배출 표시는 item이 모두 사라진 뒤에만 찍는다. 이 검사가 없으면
+  -- `SET compacted_at = ..., compaction_drained_at = ...` 한 문장이나
+  -- 이미 compacted된 행에 대한 직접 drained 표기가 partial index에서 빠지게 해
+  -- 남은 item을 영구히 놓친다. item INSERT fence가 material 행 잠금으로
+  -- 동시 삽입도 직렬화한다.
+  IF NEW.compaction_drained_at IS NOT NULL
+     AND OLD.compaction_drained_at IS NULL
+     AND EXISTS (
+       SELECT 1
+       FROM ops.poi_cache_target_snapshot_material_items AS item
+       WHERE item.material_id = NEW.material_id
+     ) THEN
+    RAISE EXCEPTION 'snapshot material cannot be marked drained while items remain'
+      USING ERRCODE = '55000';
+  END IF;
+
+  IF NEW.compacted_at IS NULL THEN
+    IF NOT (
+      NEW.orphaned_at IS NOT DISTINCT FROM OLD.orphaned_at
+      AND to_jsonb(NEW) - 'compacted_at' - 'compaction_drained_at' - 'orphaned_at'
+        IS NOT DISTINCT FROM
+      to_jsonb(OLD) - 'compacted_at' - 'compaction_drained_at' - 'orphaned_at'
+      OR (
+        NEW.orphaned_at IS NOT NULL
+        AND OLD.orphaned_at IS NULL
+        AND pg_trigger_depth() >= 2
+        AND to_jsonb(NEW) - 'compacted_at' - 'compaction_drained_at' - 'orphaned_at'
+          IS NOT DISTINCT FROM
+        to_jsonb(OLD) - 'compacted_at' - 'compaction_drained_at' - 'orphaned_at'
+      )
+    ) THEN
+      RAISE EXCEPTION 'snapshot material is append-only except compaction'
+        USING ERRCODE = '55000';
+    END IF;
+  END IF;
+
+  -- **열을 열거하지 않는다.** `0231` fence는 이미 표시된 행을 첫 문장에서 통째로
+  -- 거부해서 닫힌 기본값이었다. 배출 표시를 허용하려면 그 문을 열어야 하는데, 열면서
+  -- 불변 열을 손으로 열거하면 기본값이 **뒤집힌다** — 다음 migration이 이 표에 열을
+  -- 더하는 순간 그 열은 아무 규칙도 보지 않아 compacted 행에서 조용히 쓰기 가능해지고,
+  -- 어떤 테스트도 그것을 보지 못한다. 감사 증거를 지키는 fence에서 그 성질을 잃을 수
+  -- 없으므로, 두 표시 열만 제외하고 **나머지 전부**를 비교한다.
+  IF to_jsonb(NEW) - 'compacted_at' - 'compaction_drained_at' - 'orphaned_at'
+     IS DISTINCT FROM
+     to_jsonb(OLD) - 'compacted_at' - 'compaction_drained_at' - 'orphaned_at' THEN
+    RAISE EXCEPTION 'snapshot material compaction must not change the material'
+      USING ERRCODE = '55000';
+  END IF;
+
+  -- 두 표시는 각각 한 방향이다. 이미 찍힌 값을 바꾸거나 지우는 것을 막는다.
+  IF OLD.compacted_at IS NOT NULL
+     AND NEW.compacted_at IS DISTINCT FROM OLD.compacted_at THEN
+    RAISE EXCEPTION 'snapshot material compaction mark is one-way'
+      USING ERRCODE = '55000';
+  END IF;
+
+  IF OLD.compaction_drained_at IS NOT NULL
+     AND NEW.compaction_drained_at IS DISTINCT FROM OLD.compaction_drained_at THEN
+    RAISE EXCEPTION 'snapshot material drain mark is one-way'
+      USING ERRCODE = '55000';
+  END IF;
+
+  -- 이미 표시된 행에 대한 UPDATE는 **배출 표시일 때만** 허용한다. 그 밖에는
+  -- 예전과 같이 "이미 compaction됐다"로 거부한다.
+  IF OLD.compacted_at IS NOT NULL
+     AND NEW.compaction_drained_at IS NULL
+     AND NEW.orphaned_at IS NOT DISTINCT FROM OLD.orphaned_at THEN
+    RAISE EXCEPTION 'snapshot material is already compacted'
+      USING ERRCODE = '55000';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION ops.reject_snapshot_material_mutation() OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: reject_snapshot_receipt_for_orphaned_material(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION ops.reject_snapshot_receipt_for_orphaned_material() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+DECLARE
+  material_compacted_at timestamptz;
+  material_orphaned_at timestamptz;
+BEGIN
+  IF TG_OP = 'UPDATE' AND NEW.material_id IS DISTINCT FROM OLD.material_id THEN
+    RAISE EXCEPTION 'snapshot receipt material is immutable'
+      USING ERRCODE = '55000';
+  END IF;
+
+  SELECT material.compacted_at, material.orphaned_at
+    INTO material_compacted_at, material_orphaned_at
+    FROM ops.poi_cache_target_snapshot_materials AS material
+   WHERE material.material_id = NEW.material_id
+   FOR SHARE;
+
+  IF material_orphaned_at IS NOT NULL THEN
+    RAISE EXCEPTION 'snapshot material is already orphaned'
+      USING ERRCODE = '55000';
+  END IF;
+
+  IF material_compacted_at IS NOT NULL THEN
+    RAISE EXCEPTION 'snapshot material is already compacted'
+      USING ERRCODE = '55000';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION ops.reject_snapshot_receipt_for_orphaned_material() OWNER TO ktm_feature_schema_owner;
 
 --
 -- Name: reject_terminal_current_summary_run_mutation(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
@@ -5157,6 +12738,303 @@ $$;
 
 
 ALTER FUNCTION ops.stamp_import_job_root() OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: transition_provider_cancellation_job_command(uuid, uuid, text, text[], text, text, text, timestamp with time zone, timestamp with time zone, boolean, text, text[]); Type: FUNCTION; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+CREATE FUNCTION ops.transition_provider_cancellation_job_command(p_cancellation_id uuid, p_job_id uuid, p_dagster_run_id text, p_expected_statuses text[], p_target_status text, p_error_message text, p_dagster_terminal_status text, p_engine_started_at timestamp with time zone, p_engine_finished_at timestamp with time zone, p_success_tracking_invariant boolean, p_result text, p_expected_member_results text[]) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'ops'
+    AS $$
+DECLARE
+  v_member ops.pipeline_cancellation_members%ROWTYPE;
+  v_run ops.pipeline_cancellation_runs%ROWTYPE;
+  v_changed bigint;
+  v_finished_at timestamptz;
+  v_generation_count bigint;
+  v_generation_set_hash text;
+  v_replayed boolean;
+  v_stale_input boolean;
+BEGIN
+  IF session_user <> 'ktm_feature_api_runtime'
+     AND NOT EXISTS (
+       SELECT 1 FROM pg_catalog.pg_roles AS role
+       WHERE role.rolname = session_user AND role.rolsuper
+     ) THEN
+    RAISE EXCEPTION 'provider cancellation command requires API runtime'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_target_status NOT IN ('done','failed','cancelled')
+     OR p_result NOT IN ('cancelled','already_terminal')
+     OR p_expected_statuses IS NULL OR cardinality(p_expected_statuses) = 0
+     OR p_expected_member_results IS NULL OR cardinality(p_expected_member_results) = 0 THEN
+    RAISE EXCEPTION 'invalid provider cancellation terminal command'
+      USING ERRCODE = '22023';
+  END IF;
+  PERFORM 1 FROM ops.pipeline_cancellations
+  WHERE cancellation_id = p_cancellation_id AND status = 'in_progress'
+  FOR UPDATE;
+  IF NOT FOUND THEN
+    RETURN false;
+  END IF;
+  SELECT member.* INTO v_member
+  FROM ops.pipeline_cancellation_members AS member
+  WHERE member.cancellation_id = p_cancellation_id
+    AND member.job_id = p_job_id
+  FOR UPDATE;
+  IF NOT FOUND OR v_member.operation_kind NOT IN ('provider_feature_load_run','provider_feature_load')
+     OR NOT (v_member.result = ANY(p_expected_member_results))
+     OR v_member.dagster_run_id IS DISTINCT FROM p_dagster_run_id THEN
+    RETURN false;
+  END IF;
+  IF v_member.requires_run_termination THEN
+    SELECT run.* INTO v_run
+    FROM ops.pipeline_cancellation_runs AS run
+    WHERE run.cancellation_id = p_cancellation_id
+      AND run.dagster_run_id = p_dagster_run_id
+    FOR UPDATE;
+    IF NOT FOUND OR v_run.result <> p_result
+       OR v_run.engine_started_at IS DISTINCT FROM p_engine_started_at
+       OR v_run.engine_finished_at IS DISTINCT FROM p_engine_finished_at
+       OR p_engine_finished_at IS NULL
+       OR p_dagster_terminal_status IS DISTINCT FROM v_run.terminal_status
+       OR NOT (
+         (p_result = 'cancelled' AND v_run.terminal_status = 'CANCELED' AND p_target_status = 'cancelled')
+         OR (p_result = 'already_terminal' AND v_run.terminal_status = 'SUCCESS'
+             AND ((NOT p_success_tracking_invariant AND p_target_status = 'done')
+                  OR (p_success_tracking_invariant AND p_target_status = 'failed')))
+         OR (p_result = 'already_terminal' AND v_run.terminal_status = 'FAILURE'
+             AND NOT p_success_tracking_invariant AND p_target_status = 'failed')
+       ) THEN
+      RAISE EXCEPTION 'provider cancellation terminal proof does not match the command'
+        USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_provider_cancellation_terminal_proof';
+    END IF;
+  ELSIF v_member.initial_status <> 'queued'
+        OR p_expected_statuses <> ARRAY['queued']::text[]
+        OR p_result <> 'cancelled' OR p_target_status <> 'cancelled'
+        OR p_dagster_terminal_status IS NOT NULL
+        OR p_engine_started_at IS NOT NULL OR p_engine_finished_at IS NOT NULL
+        OR p_success_tracking_invariant THEN
+    RAISE EXCEPTION 'queued provider cancellation proof does not match the command'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_provider_cancellation_terminal_proof';
+  END IF;
+  v_finished_at := COALESCE(p_engine_finished_at, clock_timestamp());
+
+  UPDATE ops.import_jobs AS job
+  SET status = p_target_status,
+      error_message = COALESCE(p_error_message, job.error_message),
+      finished_at = v_finished_at,
+      started_at = COALESCE(job.started_at, p_engine_started_at),
+      heartbeat_at = CASE WHEN job.status IN ('queued', 'running')
+        THEN v_finished_at ELSE job.heartbeat_at END,
+      progress = CASE WHEN p_target_status = 'done' THEN 100 ELSE job.progress END,
+      current_stage = CASE p_target_status
+        WHEN 'done' THEN 'completed'
+        WHEN 'failed' THEN CASE WHEN p_success_tracking_invariant
+          THEN 'tracking_invariant' ELSE 'failed' END
+        WHEN 'cancelled' THEN 'cancelled'
+      END,
+      dagster_run_status = CASE WHEN job.kind = 'provider_feature_load_run'
+        THEN p_dagster_terminal_status ELSE job.dagster_run_status END
+  WHERE job.job_id = p_job_id
+    AND job.cancellation_id = p_cancellation_id
+    AND job.status = ANY(p_expected_statuses)
+    AND job.dagster_run_id IS NOT DISTINCT FROM p_dagster_run_id
+    AND job.kind = v_member.operation_kind
+    AND (p_engine_finished_at IS NULL OR job.created_at <= p_engine_finished_at)
+    AND (p_engine_started_at IS NULL OR job.created_at <= p_engine_started_at)
+    AND (p_engine_finished_at IS NULL OR job.started_at IS NULL OR job.started_at <= p_engine_finished_at)
+    AND (p_engine_started_at IS NULL OR job.started_at IS NULL OR job.started_at = p_engine_started_at);
+  GET DIAGNOSTICS v_changed = ROW_COUNT;
+  IF v_changed = 0 THEN
+    RETURN false;
+  END IF;
+  UPDATE ops.pipeline_cancellation_members AS member
+  SET result = p_result,
+      terminal_status = p_target_status,
+      error = NULL,
+      updated_at = clock_timestamp()
+  WHERE member.cancellation_id = p_cancellation_id
+    AND member.job_id = p_job_id
+    AND member.result = ANY(p_expected_member_results);
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'provider cancellation member CAS failed after base transition'
+      USING ERRCODE = '40001';
+  END IF;
+  IF v_member.operation_kind = 'provider_feature_load_run'
+     AND p_result = 'already_terminal'
+     AND p_dagster_terminal_status = 'SUCCESS'
+     AND p_target_status = 'done' THEN
+    PERFORM set_config(
+      'ktm.curation_cancellation_root', p_job_id::text, true
+    );
+    CALL feature.finalize_provider_curation_root(
+      p_job_id, v_generation_count, v_generation_set_hash,
+      v_replayed, v_stale_input
+    );
+    IF v_stale_input THEN
+      UPDATE ops.import_jobs AS root
+      SET status = 'failed', current_stage = 'stale_input', progress = 0,
+          error_message = 'provider curation input changed after child seal'
+      WHERE root.job_id = p_job_id
+        AND root.cancellation_id = p_cancellation_id
+        AND root.status = 'done';
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'provider cancellation stale-input transition was lost'
+          USING ERRCODE = '40001';
+      END IF;
+      UPDATE ops.pipeline_cancellation_members AS member
+      SET terminal_status = 'failed', updated_at = clock_timestamp()
+      WHERE member.cancellation_id = p_cancellation_id
+        AND member.job_id = p_job_id
+        AND member.result = 'already_terminal'
+        AND member.terminal_status = 'done';
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'provider cancellation stale-input member transition was lost'
+          USING ERRCODE = '40001';
+      END IF;
+    END IF;
+  END IF;
+  RETURN true;
+END
+$$;
+
+
+ALTER FUNCTION ops.transition_provider_cancellation_job_command(p_cancellation_id uuid, p_job_id uuid, p_dagster_run_id text, p_expected_statuses text[], p_target_status text, p_error_message text, p_dagster_terminal_status text, p_engine_started_at timestamp with time zone, p_engine_finished_at timestamp with time zone, p_success_tracking_invariant boolean, p_result text, p_expected_member_results text[]) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: transition_provider_feature_operation_terminal_command(uuid, text, text, text, text, timestamp with time zone, timestamp with time zone, boolean); Type: PROCEDURE; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE ops.transition_provider_feature_operation_terminal_command(IN p_root_job_id uuid, IN p_target_status text, IN p_dagster_terminal_status text, IN p_stage text, IN p_error_message text, IN p_started_at timestamp with time zone, IN p_finished_at timestamp with time zone, IN p_update_members boolean, OUT o_changed boolean)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'ops'
+    AS $$
+BEGIN
+  IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member')
+     OR pg_has_role(session_user, 'ktm_curation_admin_executor', 'member') THEN
+    RAISE EXCEPTION 'provider terminal command requires provider executor'
+      USING ERRCODE = '42501';
+  END IF;
+  IF p_target_status NOT IN ('done','failed','cancelled')
+     OR p_dagster_terminal_status NOT IN ('SUCCESS','FAILURE','CANCELED')
+     OR NOT (
+       (p_target_status = 'done' AND p_dagster_terminal_status = 'SUCCESS'
+        AND p_stage = 'completed')
+       OR (p_target_status = 'failed' AND p_stage IN (
+         'failed','tracking_invariant','stale_input'
+       ))
+       OR (p_target_status = 'cancelled' AND p_dagster_terminal_status = 'CANCELED'
+        AND p_stage = 'cancelled')
+     ) THEN
+    RAISE EXCEPTION 'invalid provider terminal transition'
+      USING ERRCODE = '22023';
+  END IF;
+  IF p_target_status = 'done' AND p_update_members THEN
+    RAISE EXCEPTION 'successful provider root cannot complete unfinished members'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_provider_terminal_members';
+  END IF;
+  IF p_target_status = 'done' AND (
+    EXISTS (
+      SELECT 1 FROM ops.import_jobs AS child
+      WHERE child.parent_job_id = p_root_job_id
+        AND child.kind = 'provider_feature_load'
+        AND child.quarantined_at IS NULL
+        AND (
+          child.status <> 'done'
+          OR jsonb_typeof(child.payload -> 'authoritative_snapshot_complete')
+             IS DISTINCT FROM 'boolean'
+        )
+    )
+    OR EXISTS (
+      SELECT 1
+      FROM ops.import_jobs AS child
+      JOIN ops.import_job_datasets AS member ON member.job_id = child.job_id
+      WHERE child.parent_job_id = p_root_job_id
+        AND child.kind = 'provider_feature_load'
+        AND child.quarantined_at IS NULL
+        AND (child.payload ->> 'authoritative_snapshot_complete')::boolean
+        AND NOT EXISTS (
+          SELECT 1 FROM ops.curation_provider_snapshot_receipts AS receipt
+          WHERE receipt.source_job_id = child.job_id
+            AND receipt.root_job_id = p_root_job_id
+            AND receipt.provider_dataset_id = member.provider_dataset_id
+            AND receipt.sync_scope = member.sync_scope
+            AND receipt.operation_key = member.operation_key
+        )
+    )
+    OR EXISTS (
+      SELECT 1 FROM ops.curation_provider_snapshot_receipts AS receipt
+      WHERE receipt.root_job_id = p_root_job_id
+        AND NOT EXISTS (
+          SELECT 1
+          FROM ops.import_jobs AS child
+          JOIN ops.import_job_datasets AS member ON member.job_id = child.job_id
+          WHERE child.job_id = receipt.source_job_id
+            AND child.parent_job_id = p_root_job_id
+            AND child.kind = 'provider_feature_load'
+            AND child.status = 'done'
+            AND child.quarantined_at IS NULL
+            AND (child.payload ->> 'authoritative_snapshot_complete')::boolean
+            AND member.provider_dataset_id = receipt.provider_dataset_id
+            AND member.sync_scope = receipt.sync_scope
+            AND member.operation_key = receipt.operation_key
+        )
+    )
+  ) THEN
+    RAISE EXCEPTION 'successful provider root has incomplete or mismatched evidence'
+      USING ERRCODE = '23514', CONSTRAINT = 'ck_tvn40_provider_terminal_receipts';
+  END IF;
+  UPDATE ops.import_jobs AS child
+  SET started_at = COALESCE(child.started_at, p_started_at)
+  WHERE child.parent_job_id = p_root_job_id
+    AND child.kind = 'provider_feature_load'
+    AND child.cancellation_id IS NULL AND child.quarantined_at IS NULL;
+  IF p_update_members THEN
+    UPDATE ops.import_jobs AS child
+    SET status = p_target_status, current_stage = p_stage,
+        error_message = COALESCE(p_error_message, child.error_message),
+        finished_at = COALESCE(child.finished_at, p_finished_at),
+        heartbeat_at = COALESCE(p_finished_at, child.heartbeat_at)
+    WHERE child.parent_job_id = p_root_job_id
+      AND child.kind = 'provider_feature_load'
+      AND child.status IN ('queued','running')
+      AND child.cancellation_id IS NULL AND child.quarantined_at IS NULL;
+  END IF;
+  WITH counts AS (
+    SELECT count(*)::integer AS total,
+           count(*) FILTER (WHERE status = 'done')::integer AS done
+    FROM ops.import_jobs AS child
+    WHERE child.parent_job_id = p_root_job_id
+      AND child.kind = 'provider_feature_load' AND child.quarantined_at IS NULL
+  )
+  UPDATE ops.import_jobs AS root
+  SET progress = CASE WHEN counts.total = 0 THEN 0
+    ELSE floor(100.0 * counts.done / counts.total)::integer END
+  FROM counts WHERE root.job_id = p_root_job_id AND root.quarantined_at IS NULL;
+  UPDATE ops.import_jobs AS root
+  SET status = p_target_status, dagster_run_status = p_dagster_terminal_status,
+      current_stage = p_stage,
+      error_message = COALESCE(p_error_message, root.error_message),
+      progress = CASE WHEN p_target_status = 'done' THEN 100
+                      WHEN p_stage = 'stale_input' THEN 0 ELSE root.progress END,
+      started_at = COALESCE(root.started_at, p_started_at),
+      finished_at = COALESCE(root.finished_at, p_finished_at),
+      heartbeat_at = COALESCE(p_finished_at, root.heartbeat_at)
+  WHERE root.job_id = p_root_job_id AND root.kind = 'provider_feature_load_run'
+    AND root.cancellation_id IS NULL AND root.quarantined_at IS NULL
+    AND (
+      root.status IN ('queued','running')
+      OR (root.status = 'done' AND p_target_status = 'failed'
+          AND p_stage = 'stale_input')
+    );
+  o_changed := FOUND;
+END
+$$;
+
+
+ALTER PROCEDURE ops.transition_provider_feature_operation_terminal_command(IN p_root_job_id uuid, IN p_target_status text, IN p_dagster_terminal_status text, IN p_stage text, IN p_error_message text, IN p_started_at timestamp with time zone, IN p_finished_at timestamp with time zone, IN p_update_members boolean, OUT o_changed boolean) OWNER TO ktm_curation_command_owner;
 
 --
 -- Name: validate_dagster_schedule_active_claim_delete(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
@@ -6738,64 +14616,6 @@ CREATE FUNCTION provider_sync.validate_data_integrity_violation_dataset() RETURN
 ALTER FUNCTION provider_sync.validate_data_integrity_violation_dataset() OWNER TO ktm_feature_schema_owner;
 
 --
--- Name: curated_feature_detail_snapshots; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE TABLE feature.curated_feature_detail_snapshots (
-    curated_feature_id uuid NOT NULL,
-    content_version integer NOT NULL,
-    etag text NOT NULL,
-    snapshot jsonb NOT NULL,
-    materialized_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT ck_curated_feature_detail_snapshots_snapshot CHECK ((jsonb_typeof(snapshot) = 'object'::text)),
-    CONSTRAINT ck_curated_feature_detail_snapshots_version CHECK ((content_version >= 1))
-);
-
-
-ALTER TABLE feature.curated_feature_detail_snapshots OWNER TO ktm_feature_schema_owner;
-
---
--- Name: curated_features; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE TABLE feature.curated_features (
-    curated_feature_id uuid DEFAULT x_extension.gen_random_uuid() NOT NULL,
-    theme_id uuid NOT NULL,
-    feature_id text NOT NULL,
-    source_id uuid NOT NULL,
-    source_record_key text,
-    curation_status text DEFAULT 'candidate'::text NOT NULL,
-    selection_origin text DEFAULT 'source_rule'::text NOT NULL,
-    selected_by text,
-    selected_at timestamp with time zone,
-    rejected_by text,
-    rejected_at timestamp with time zone,
-    rejection_reason text,
-    rank_score numeric(10,4) DEFAULT 0 NOT NULL,
-    display_title text,
-    display_summary text,
-    curation_relation text DEFAULT 'nearby_option'::text NOT NULL,
-    reuse_policy text DEFAULT 'manual_review'::text NOT NULL,
-    content_version integer DEFAULT 1 NOT NULL,
-    metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    archived_at timestamp with time zone,
-    operator_updated_by text,
-    operator_updated_at timestamp with time zone,
-    CONSTRAINT ck_curated_features_content_version CHECK ((content_version >= 1)),
-    CONSTRAINT ck_curated_features_curation_relation CHECK ((curation_relation = ANY (ARRAY['primary_stop'::text, 'food_stop'::text, 'cafe_stop'::text, 'bookstore_stop'::text, 'nearby_option'::text, 'accessibility_support'::text, 'pet_support'::text, 'family_support'::text, 'theme_area_anchor'::text]))),
-    CONSTRAINT ck_curated_features_metadata CHECK ((jsonb_typeof(metadata) = 'object'::text)),
-    CONSTRAINT ck_curated_features_reuse_policy CHECK ((reuse_policy = ANY (ARRAY['allowed'::text, 'blocked'::text, 'manual_review'::text]))),
-    CONSTRAINT ck_curated_features_selection_origin CHECK ((selection_origin = ANY (ARRAY['source_rule'::text, 'admin'::text, 'external_api'::text]))),
-    CONSTRAINT ck_curated_features_status CHECK ((curation_status = ANY (ARRAY['candidate'::text, 'curated'::text, 'rejected'::text, 'archived'::text])))
-);
-
-
-ALTER TABLE feature.curated_features OWNER TO ktm_feature_schema_owner;
-
---
 -- Name: curated_source_rules; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -6813,9 +14633,15 @@ CREATE TABLE feature.curated_source_rules (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     detail_selector jsonb,
-    CONSTRAINT ck_curated_source_rules_action CHECK ((default_action = ANY (ARRAY['candidate'::text, 'curated'::text, 'ignore'::text]))),
+    row_revision bigint DEFAULT 1 NOT NULL,
+    archived_at timestamp with time zone,
+    owner_kind text,
+    owner_provider_dataset_id bigint,
+    CONSTRAINT ck_curated_source_rules_action CHECK ((default_action = ANY (ARRAY['candidate'::text, 'ignore'::text]))),
     CONSTRAINT ck_curated_source_rules_detail_selector CHECK (((detail_selector IS NULL) OR (jsonb_typeof(detail_selector) = 'object'::text))),
-    CONSTRAINT ck_curated_source_rules_region_scope CHECK ((jsonb_typeof(region_scope) = 'object'::text))
+    CONSTRAINT ck_curated_source_rules_owner_shape CHECK ((((owner_kind IS NULL) AND (owner_provider_dataset_id IS NULL)) OR ((owner_kind = 'operator'::text) AND (owner_provider_dataset_id IS NULL)) OR ((owner_kind = 'provider_dataset'::text) AND (owner_provider_dataset_id IS NOT NULL)))),
+    CONSTRAINT ck_curated_source_rules_region_scope CHECK ((jsonb_typeof(region_scope) = 'object'::text)),
+    CONSTRAINT ck_curated_source_rules_revision_positive CHECK ((row_revision >= 1))
 );
 
 
@@ -6842,7 +14668,12 @@ CREATE TABLE feature.curated_sources (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     provider_dataset_id bigint NOT NULL,
+    row_revision bigint DEFAULT 1 NOT NULL,
+    observation_revision bigint DEFAULT 1 NOT NULL,
+    archived_at timestamp with time zone,
+    CONSTRAINT ck_curated_sources_observation_revision_positive CHECK ((observation_revision >= 1)),
     CONSTRAINT ck_curated_sources_provider_status CHECK ((provider_status = ANY (ARRAY['implemented'::text, 'provider_needed'::text, 'manual_only'::text, 'deprecated'::text]))),
+    CONSTRAINT ck_curated_sources_revision_positive CHECK ((row_revision >= 1)),
     CONSTRAINT ck_curated_sources_row_count CHECK (((row_count IS NULL) OR (row_count >= 0))),
     CONSTRAINT ck_curated_sources_source_kind CHECK ((source_kind = ANY (ARRAY['openapi'::text, 'filedata'::text, 'standard'::text, 'internal'::text, 'manual'::text]))),
     CONSTRAINT ck_curated_sources_update_cycle CHECK ((update_cycle = ANY (ARRAY['realtime'::text, 'daily'::text, 'weekly'::text, 'monthly'::text, 'annual'::text, 'one_time'::text, 'unknown'::text])))
@@ -6866,6 +14697,13 @@ CREATE TABLE feature.curated_themes (
     metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    row_revision bigint DEFAULT 1 NOT NULL,
+    archived_at timestamp with time zone,
+    owner_kind text,
+    owner_provider_dataset_id bigint,
+    CONSTRAINT ck_curated_themes_owner_shape CHECK ((((owner_kind IS NULL) AND (owner_provider_dataset_id IS NULL)) OR ((owner_kind = 'operator'::text) AND (owner_provider_dataset_id IS NULL)) OR ((owner_kind = 'provider_dataset'::text) AND (owner_provider_dataset_id IS NOT NULL)))),
+    CONSTRAINT ck_curated_themes_revision_positive CHECK ((row_revision >= 1)),
+    CONSTRAINT ck_curated_themes_snapshot_text_bounds CHECK ((((char_length(theme_slug) >= 1) AND (char_length(theme_slug) <= 128)) AND ((char_length(theme_name) >= 1) AND (char_length(theme_name) <= 200)))),
     CONSTRAINT ck_curated_themes_visibility CHECK ((visibility = ANY (ARRAY['admin_only'::text, 'public'::text])))
 );
 
@@ -6892,8 +14730,11 @@ CREATE TABLE feature.curation_collections (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     archived_at timestamp with time zone,
+    row_revision bigint DEFAULT 1 NOT NULL,
     CONSTRAINT ck_curation_collections_key CHECK ((btrim(collection_key) <> ''::text)),
     CONSTRAINT ck_curation_collections_metadata CHECK ((jsonb_typeof(metadata) = 'object'::text)),
+    CONSTRAINT ck_curation_collections_revision_positive CHECK ((row_revision >= 1)),
+    CONSTRAINT ck_curation_collections_snapshot_text_bounds CHECK ((((char_length(title) >= 1) AND (char_length(title) <= 300)) AND (char_length(edition_key) <= 100))),
     CONSTRAINT ck_curation_collections_status CHECK ((status = ANY (ARRAY['draft'::text, 'published'::text, 'archived'::text]))),
     CONSTRAINT ck_curation_collections_title CHECK ((btrim(title) <> ''::text)),
     CONSTRAINT ck_curation_collections_visibility CHECK ((visibility = ANY (ARRAY['admin_only'::text, 'public'::text])))
@@ -6914,6 +14755,7 @@ CREATE TABLE feature.curation_import_batches (
     actor text NOT NULL,
     metadata jsonb DEFAULT '{}'::jsonb NOT NULL,
     imported_at timestamp with time zone DEFAULT now() NOT NULL,
+    command_id bigint,
     CONSTRAINT ck_curation_import_batches_ck_curation_import_batches_actor CHECK (((actor = btrim(actor)) AND (actor <> ''::text))),
     CONSTRAINT ck_curation_import_batches_ck_curation_import_batches_kind CHECK ((batch_kind = ANY (ARRAY['csv_upload'::text, 'normalized_rows'::text, 'forward_recovery'::text]))),
     CONSTRAINT ck_curation_import_batches_ck_curation_import_batches_metadata CHECK ((jsonb_typeof(metadata) = 'object'::text)),
@@ -6923,6 +14765,69 @@ CREATE TABLE feature.curation_import_batches (
 
 
 ALTER TABLE feature.curation_import_batches OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: curation_import_plan_revisions; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE feature.curation_import_plan_revisions (
+    import_plan_id uuid NOT NULL,
+    resource_kind text NOT NULL,
+    resource_key text NOT NULL,
+    expected_revision bigint,
+    CONSTRAINT curation_import_plan_revisions_expected_revision_check CHECK (((expected_revision IS NULL) OR (expected_revision >= 1))),
+    CONSTRAINT curation_import_plan_revisions_resource_key_check CHECK ((resource_key <> ''::text)),
+    CONSTRAINT curation_import_plan_revisions_resource_kind_check CHECK ((resource_kind = ANY (ARRAY['theme'::text, 'source'::text, 'collection'::text, 'item'::text, 'feature'::text])))
+);
+
+
+ALTER TABLE feature.curation_import_plan_revisions OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: curation_import_plan_rows; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE feature.curation_import_plan_rows (
+    import_plan_id uuid NOT NULL,
+    row_number integer NOT NULL,
+    normalized_payload jsonb,
+    response_payload jsonb NOT NULL,
+    CONSTRAINT curation_import_plan_rows_normalized_payload_check CHECK (((normalized_payload IS NULL) OR (jsonb_typeof(normalized_payload) = 'object'::text))),
+    CONSTRAINT curation_import_plan_rows_response_payload_check CHECK ((jsonb_typeof(response_payload) = 'object'::text)),
+    CONSTRAINT curation_import_plan_rows_row_number_check CHECK ((row_number >= 2))
+);
+
+
+ALTER TABLE feature.curation_import_plan_rows OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: curation_import_plans; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE feature.curation_import_plans (
+    import_plan_id uuid NOT NULL,
+    preview_command_id bigint NOT NULL,
+    actor text NOT NULL,
+    content_sha256 text NOT NULL,
+    provenance_sha256 text,
+    plan_sha256 text NOT NULL,
+    summary jsonb NOT NULL,
+    row_count integer NOT NULL,
+    revision_count integer NOT NULL,
+    expires_at timestamp with time zone NOT NULL,
+    created_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT curation_import_plans_actor_check CHECK (((actor = btrim(actor)) AND (actor <> ''::text))),
+    CONSTRAINT curation_import_plans_check CHECK ((expires_at > created_at)),
+    CONSTRAINT curation_import_plans_content_sha256_check CHECK ((content_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT curation_import_plans_plan_sha256_check CHECK ((plan_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT curation_import_plans_provenance_sha256_check CHECK (((provenance_sha256 IS NULL) OR (provenance_sha256 ~ '^[0-9a-f]{64}$'::text))),
+    CONSTRAINT curation_import_plans_revision_count_check CHECK ((revision_count >= 0)),
+    CONSTRAINT curation_import_plans_row_count_check CHECK ((row_count >= 0)),
+    CONSTRAINT curation_import_plans_summary_check CHECK ((jsonb_typeof(summary) = 'object'::text))
+);
+
+
+ALTER TABLE feature.curation_import_plans OWNER TO ktm_feature_schema_owner;
 
 --
 -- Name: curation_import_rows; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
@@ -6974,16 +14879,17 @@ CREATE TABLE feature.curation_items (
     source_updated_at timestamp with time zone DEFAULT now() NOT NULL,
     operator_updated_by text,
     operator_updated_at timestamp with time zone,
-    legacy_projection_id uuid,
     external_component_id text DEFAULT 'primary'::text NOT NULL,
     current_import_row_id uuid,
     accepted_link_decision_id uuid,
+    row_revision bigint DEFAULT 1 NOT NULL,
     CONSTRAINT ck_curation_items_external_component_id_canonical CHECK (((external_component_id <> ''::text) AND (external_component_id = btrim(external_component_id)))),
     CONSTRAINT ck_curation_items_external_id CHECK ((btrim(external_item_id) <> ''::text)),
     CONSTRAINT ck_curation_items_metadata CHECK ((jsonb_typeof(metadata) = 'object'::text)),
     CONSTRAINT ck_curation_items_place_name CHECK ((btrim(place_name) <> ''::text)),
     CONSTRAINT ck_curation_items_relation CHECK ((curation_relation = ANY (ARRAY['primary_stop'::text, 'food_stop'::text, 'cafe_stop'::text, 'bookstore_stop'::text, 'nearby_option'::text, 'accessibility_support'::text, 'pet_support'::text, 'family_support'::text, 'theme_area_anchor'::text]))),
     CONSTRAINT ck_curation_items_reuse_policy CHECK ((reuse_policy = ANY (ARRAY['allowed'::text, 'blocked'::text, 'manual_review'::text]))),
+    CONSTRAINT ck_curation_items_revision_positive CHECK ((row_revision >= 1)),
     CONSTRAINT ck_curation_items_sort_order CHECK ((sort_order >= 0)),
     CONSTRAINT ck_curation_items_status CHECK ((status = ANY (ARRAY['candidate'::text, 'included'::text, 'rejected'::text, 'archived'::text])))
 );
@@ -7130,6 +15036,28 @@ CREATE TABLE feature.feature_base_field_values (
 ALTER TABLE feature.feature_base_field_values OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: feature_creation_origins; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE feature.feature_creation_origins (
+    feature_id uuid NOT NULL,
+    origin_kind text NOT NULL,
+    creation_command_id bigint NOT NULL,
+    creator_principal_id text NOT NULL,
+    created_by_actor text NOT NULL,
+    created_at timestamp with time zone NOT NULL,
+    invoker_role text NOT NULL,
+    procedure_definer text NOT NULL,
+    CONSTRAINT ck_feature_creation_origins_actor CHECK (((btrim(created_by_actor) <> ''::text) AND (char_length(created_by_actor) <= 200))),
+    CONSTRAINT ck_feature_creation_origins_kind CHECK ((origin_kind = ANY (ARRAY['manual_admin'::text, 'manual_curation'::text, 'manual_request'::text]))),
+    CONSTRAINT ck_feature_creation_origins_principal CHECK ((((origin_kind = 'manual_admin'::text) AND (creator_principal_id = 'admin-ui-bff.manual-feature-create.v1'::text)) OR ((origin_kind = 'manual_curation'::text) AND (creator_principal_id = 'admin-ui-bff.manual-curation-feature-create.v1'::text)) OR ((origin_kind = 'manual_request'::text) AND (creator_principal_id = 'feature-request.approval.v1'::text)))),
+    CONSTRAINT ck_feature_creation_origins_roles CHECK ((((origin_kind = 'manual_admin'::text) AND (invoker_role = 'ktm_feature_api_runtime'::text) AND (procedure_definer = 'ktm_manual_feature_procedure_owner'::text)) OR ((origin_kind = 'manual_curation'::text) AND (invoker_role = 'ktm_feature_api_runtime'::text) AND (procedure_definer = 'ktm_curation_command_owner'::text)) OR ((origin_kind = 'manual_request'::text) AND (invoker_role = 'ktm_feature_api_runtime'::text) AND (procedure_definer = 'ktm_feature_request_procedure_owner'::text))))
+);
+
+
+ALTER TABLE feature.feature_creation_origins OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: feature_events; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -7171,6 +15099,12 @@ CREATE TABLE feature.feature_notices (
     source_agency character varying,
     officer_name character varying,
     payload jsonb DEFAULT '{}'::jsonb NOT NULL,
+    valid_during tstzrange GENERATED ALWAYS AS (
+CASE
+    WHEN ((valid_start_time IS NULL) AND (valid_end_time IS NULL)) THEN NULL::tstzrange
+    WHEN ((valid_start_time IS NOT NULL) AND (valid_end_time IS NOT NULL) AND (valid_end_time < valid_start_time)) THEN 'empty'::tstzrange
+    ELSE tstzrange(valid_start_time, valid_end_time, '[)'::text)
+END) STORED,
     CONSTRAINT ck_feature_notices_kind CHECK (((kind)::text = 'notice'::text)),
     CONSTRAINT ck_feature_notices_severity CHECK (((severity IS NULL) OR ((severity >= 0) AND (severity <= 5))))
 );
@@ -7385,9 +15319,9 @@ END) STORED,
     lifecycle_state text DEFAULT 'active'::text NOT NULL,
     publication_state text DEFAULT 'published'::text NOT NULL,
     quality_state text DEFAULT 'valid'::text NOT NULL,
-    CONSTRAINT ck_features_ck_features_coord_pair CHECK (((coord IS NULL) OR (((x_extension.st_x(coord) >= (124.0)::double precision) AND (x_extension.st_x(coord) <= (132.0)::double precision)) AND ((x_extension.st_y(coord) >= (33.0)::double precision) AND (x_extension.st_y(coord) <= (39.5)::double precision))))),
+    CONSTRAINT ck_features_ck_features_coord_pair CHECK (((coord IS NULL) OR ((x_extension.st_x(coord) >= (124.0)::double precision) AND (x_extension.st_x(coord) <= (132.0)::double precision) AND ((x_extension.st_y(coord) >= (33.0)::double precision) AND (x_extension.st_y(coord) <= (39.5)::double precision))))),
     CONSTRAINT ck_features_ck_features_coord_precision CHECK ((((coord IS NULL) AND (coord_precision_digits IS NULL)) OR ((coord IS NOT NULL) AND ((coord_precision_digits >= 3) AND (coord_precision_digits <= 8))))),
-    CONSTRAINT ck_features_ck_features_kind CHECK (((kind)::text = ANY ((ARRAY['place'::character varying, 'event'::character varying, 'notice'::character varying, 'price'::character varying, 'weather'::character varying, 'route'::character varying, 'area'::character varying])::text[]))),
+    CONSTRAINT ck_features_ck_features_kind CHECK (((kind)::text = ANY (ARRAY[('place'::character varying)::text, ('event'::character varying)::text, ('notice'::character varying)::text, ('price'::character varying)::text, ('weather'::character varying)::text, ('route'::character varying)::text, ('area'::character varying)::text]))),
     CONSTRAINT ck_features_lifecycle_state CHECK ((lifecycle_state = ANY (ARRAY['active'::text, 'retired'::text]))),
     CONSTRAINT ck_features_publication_state CHECK ((publication_state = ANY (ARRAY['draft'::text, 'published'::text, 'suppressed'::text]))),
     CONSTRAINT ck_features_quality_state CHECK ((quality_state = ANY (ARRAY['valid'::text, 'quarantined'::text]))),
@@ -7397,6 +15331,29 @@ END) STORED,
 
 
 ALTER TABLE feature.features OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: manual_feature_identity_claims; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE feature.manual_feature_identity_claims (
+    feature_id uuid NOT NULL,
+    feature_kind text NOT NULL,
+    name_key text NOT NULL COLLATE pg_catalog."C",
+    lon_e6 integer NOT NULL,
+    lat_e6 integer NOT NULL,
+    claimed_by_command_id bigint NOT NULL,
+    claim_basis text NOT NULL,
+    claimed_at timestamp with time zone NOT NULL,
+    CONSTRAINT ck_manual_feature_identity_claims_basis CHECK ((claim_basis = ANY (ARRAY['manual_create'::text, 'legacy_admin_route'::text]))),
+    CONSTRAINT ck_manual_feature_identity_claims_kind CHECK ((feature_kind = ANY (ARRAY['place'::text, 'event'::text]))),
+    CONSTRAINT ck_manual_feature_identity_claims_lat_e6 CHECK (((lat_e6 >= 33000000) AND (lat_e6 <= 39500000))),
+    CONSTRAINT ck_manual_feature_identity_claims_lon_e6 CHECK (((lon_e6 >= 124000000) AND (lon_e6 <= 132000000))),
+    CONSTRAINT ck_manual_feature_identity_claims_name_key CHECK ((((char_length(name_key) >= 1) AND (char_length(name_key) <= 200)) AND (octet_length(name_key) <= 512)))
+);
+
+
+ALTER TABLE feature.manual_feature_identity_claims OWNER TO ktm_feature_schema_owner;
 
 --
 -- Name: public_features; Type: VIEW; Schema: feature; Owner: ktm_feature_schema_owner
@@ -7477,6 +15434,167 @@ CREATE VIEW feature.public_features AS
 ALTER VIEW feature.public_features OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: theme_candidate_generation_observations; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE feature.theme_candidate_generation_observations (
+    generation_id uuid NOT NULL,
+    candidate_id uuid NOT NULL,
+    source_entity_key text NOT NULL,
+    feature_id text NOT NULL,
+    source_record_key text NOT NULL,
+    candidate_input_hash text NOT NULL,
+    observed_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT theme_candidate_generation_observati_candidate_input_hash_check CHECK ((candidate_input_hash ~ '^[0-9a-f]{64}$'::text))
+);
+
+
+ALTER TABLE feature.theme_candidate_generation_observations OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: theme_candidate_generations; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE feature.theme_candidate_generations (
+    generation_id uuid DEFAULT x_extension.gen_random_uuid() NOT NULL,
+    rule_id uuid NOT NULL,
+    rule_row_revision bigint NOT NULL,
+    generation_kind text NOT NULL,
+    source_job_id uuid,
+    reconcile_operation_id uuid,
+    command_id bigint,
+    generation_key text NOT NULL,
+    rule_input_hash text NOT NULL,
+    rule_input jsonb NOT NULL,
+    generation_input_set_hash text NOT NULL,
+    observed_candidate_count bigint NOT NULL,
+    eligibility_removed_candidate_count bigint NOT NULL,
+    completed_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT ck_theme_candidate_generations_origin CHECK ((((generation_kind = 'provider_full_snapshot'::text) AND (source_job_id IS NOT NULL) AND (reconcile_operation_id IS NULL) AND (command_id IS NULL)) OR ((generation_kind = ANY (ARRAY['scoped_reconcile'::text, 'rule_reconcile'::text])) AND (source_job_id IS NULL) AND (reconcile_operation_id IS NOT NULL)) OR ((generation_kind = 'legacy_backfill'::text) AND (source_job_id IS NULL) AND (reconcile_operation_id IS NULL) AND (command_id IS NULL)))),
+    CONSTRAINT theme_candidate_generations_eligibility_removed_candidate_check CHECK ((eligibility_removed_candidate_count >= 0)),
+    CONSTRAINT theme_candidate_generations_generation_input_set_hash_check CHECK ((generation_input_set_hash ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT theme_candidate_generations_generation_key_check CHECK (((generation_key = btrim(generation_key)) AND (generation_key <> ''::text))),
+    CONSTRAINT theme_candidate_generations_generation_kind_check CHECK ((generation_kind = ANY (ARRAY['provider_full_snapshot'::text, 'scoped_reconcile'::text, 'rule_reconcile'::text, 'legacy_backfill'::text]))),
+    CONSTRAINT theme_candidate_generations_observed_candidate_count_check CHECK ((observed_candidate_count >= 0)),
+    CONSTRAINT theme_candidate_generations_rule_input_check CHECK ((jsonb_typeof(rule_input) = 'object'::text)),
+    CONSTRAINT theme_candidate_generations_rule_input_hash_check CHECK ((rule_input_hash ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT theme_candidate_generations_rule_row_revision_check CHECK ((rule_row_revision >= 1))
+);
+
+
+ALTER TABLE feature.theme_candidate_generations OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: theme_feature_candidate_transitions; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE feature.theme_feature_candidate_transitions (
+    transition_id bigint NOT NULL,
+    candidate_id uuid NOT NULL,
+    from_feature_id text,
+    to_feature_id text,
+    rule_id uuid NOT NULL,
+    source_entity_key text NOT NULL,
+    from_review_state text,
+    to_review_state text NOT NULL,
+    from_eligibility_present boolean,
+    to_eligibility_present boolean NOT NULL,
+    from_disposition text,
+    to_disposition text NOT NULL,
+    winner_candidate_id uuid,
+    transition_kind text NOT NULL,
+    candidate_row_revision bigint NOT NULL,
+    rule_row_revision bigint NOT NULL,
+    rule_input_hash text NOT NULL,
+    candidate_input_hash text NOT NULL,
+    generation_id uuid,
+    provider_dataset_id bigint,
+    source_record_key text,
+    source_record_hash text,
+    collection_id uuid,
+    curation_item_id uuid,
+    command_id bigint,
+    actor text NOT NULL,
+    reason_code text NOT NULL,
+    causation_ref jsonb DEFAULT '{}'::jsonb NOT NULL,
+    invoker_role text NOT NULL,
+    candidate_procedure_definer text NOT NULL,
+    audit_writer_definer text NOT NULL,
+    occurred_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT ck_candidate_transition_initial_shape CHECK ((((transition_kind = 'eligibility_materialize'::text) AND (from_review_state IS NULL) AND (from_eligibility_present IS NULL) AND (from_disposition IS NULL) AND (to_review_state = 'open'::text) AND to_eligibility_present AND (to_disposition = 'active'::text)) OR ((transition_kind = 'legacy_backfill'::text) AND (from_review_state IS NULL) AND (from_eligibility_present IS NULL) AND (from_disposition IS NULL) AND (to_disposition = 'active'::text)) OR ((transition_kind = 'eligibility_refresh'::text) AND (from_review_state = to_review_state) AND from_eligibility_present AND to_eligibility_present AND (from_disposition = 'active'::text) AND (to_disposition = 'active'::text)) OR ((transition_kind = 'eligibility_restore'::text) AND (from_review_state = to_review_state) AND (NOT from_eligibility_present) AND to_eligibility_present AND (from_disposition = 'active'::text) AND (to_disposition = 'active'::text)) OR ((transition_kind = 'eligibility_remove'::text) AND (from_review_state = to_review_state) AND from_eligibility_present AND (NOT to_eligibility_present) AND (from_disposition = 'active'::text) AND (to_disposition = 'active'::text)) OR ((transition_kind = 'admin_promote'::text) AND (from_review_state = 'open'::text) AND (to_review_state = 'promoted'::text) AND from_eligibility_present AND to_eligibility_present AND (from_disposition = 'active'::text) AND (to_disposition = 'active'::text)) OR ((transition_kind = 'admin_reject'::text) AND (from_review_state = 'open'::text) AND (to_review_state = 'rejected'::text) AND from_eligibility_present AND to_eligibility_present AND (from_disposition = 'active'::text) AND (to_disposition = 'active'::text)) OR ((transition_kind = 'merge_retarget'::text) AND (from_review_state IS NOT NULL) AND (from_eligibility_present IS NOT NULL) AND (from_disposition = 'active'::text) AND (to_disposition = 'active'::text) AND (from_feature_id IS DISTINCT FROM to_feature_id)) OR ((transition_kind = 'merge_collapse'::text) AND (from_review_state IS NOT NULL) AND (from_eligibility_present IS NOT NULL) AND (from_disposition = 'active'::text) AND (to_disposition = 'merged'::text) AND (winner_candidate_id IS NOT NULL)))),
+    CONSTRAINT ck_candidate_transition_kind_shape CHECK ((((transition_kind = ANY (ARRAY['eligibility_materialize'::text, 'eligibility_refresh'::text, 'eligibility_restore'::text, 'eligibility_remove'::text])) AND (generation_id IS NOT NULL) AND (provider_dataset_id IS NOT NULL) AND (source_record_key IS NOT NULL) AND (source_record_hash IS NOT NULL) AND (command_id IS NULL) AND (collection_id IS NULL) AND (curation_item_id IS NULL)) OR ((transition_kind = 'admin_promote'::text) AND (generation_id IS NULL) AND (command_id IS NOT NULL) AND (collection_id IS NOT NULL) AND (curation_item_id IS NOT NULL)) OR ((transition_kind = 'admin_reject'::text) AND (generation_id IS NULL) AND (command_id IS NOT NULL) AND (collection_id IS NULL) AND (curation_item_id IS NULL)) OR ((transition_kind = ANY (ARRAY['merge_retarget'::text, 'merge_collapse'::text])) AND (generation_id IS NULL) AND (command_id IS NOT NULL)) OR ((transition_kind = 'legacy_backfill'::text) AND (generation_id IS NOT NULL) AND (command_id IS NULL) AND (actor = 'migration:tvn40'::text)))),
+    CONSTRAINT theme_feature_candidate_transition_candidate_row_revision_check CHECK ((candidate_row_revision >= 1)),
+    CONSTRAINT theme_feature_candidate_transitions_actor_check CHECK (((actor = btrim(actor)) AND (actor <> ''::text))),
+    CONSTRAINT theme_feature_candidate_transitions_candidate_input_hash_check CHECK ((candidate_input_hash ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT theme_feature_candidate_transitions_causation_ref_check CHECK ((jsonb_typeof(causation_ref) = 'object'::text)),
+    CONSTRAINT theme_feature_candidate_transitions_from_disposition_check CHECK ((from_disposition = ANY (ARRAY['active'::text, 'merged'::text]))),
+    CONSTRAINT theme_feature_candidate_transitions_from_review_state_check CHECK ((from_review_state = ANY (ARRAY['open'::text, 'promoted'::text, 'rejected'::text]))),
+    CONSTRAINT theme_feature_candidate_transitions_reason_code_check CHECK (((reason_code = btrim(reason_code)) AND (reason_code <> ''::text))),
+    CONSTRAINT theme_feature_candidate_transitions_rule_input_hash_check CHECK ((rule_input_hash ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT theme_feature_candidate_transitions_rule_row_revision_check CHECK ((rule_row_revision >= 1)),
+    CONSTRAINT theme_feature_candidate_transitions_to_disposition_check CHECK ((to_disposition = ANY (ARRAY['active'::text, 'merged'::text]))),
+    CONSTRAINT theme_feature_candidate_transitions_to_review_state_check CHECK ((to_review_state = ANY (ARRAY['open'::text, 'promoted'::text, 'rejected'::text]))),
+    CONSTRAINT theme_feature_candidate_transitions_transition_kind_check CHECK ((transition_kind = ANY (ARRAY['eligibility_materialize'::text, 'eligibility_refresh'::text, 'eligibility_restore'::text, 'eligibility_remove'::text, 'admin_promote'::text, 'admin_reject'::text, 'merge_retarget'::text, 'merge_collapse'::text, 'legacy_backfill'::text])))
+);
+
+
+ALTER TABLE feature.theme_feature_candidate_transitions OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: theme_feature_candidate_transitions_transition_id_seq; Type: SEQUENCE; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE feature.theme_feature_candidate_transitions ALTER COLUMN transition_id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME feature.theme_feature_candidate_transitions_transition_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+--
+-- Name: theme_feature_candidates; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE feature.theme_feature_candidates (
+    candidate_id uuid DEFAULT x_extension.gen_random_uuid() NOT NULL,
+    rule_id uuid NOT NULL,
+    source_entity_key text NOT NULL,
+    feature_id text NOT NULL,
+    source_record_key text NOT NULL,
+    rule_row_revision bigint NOT NULL,
+    rule_input_hash text NOT NULL,
+    source_record_hash text NOT NULL,
+    candidate_input_hash text NOT NULL,
+    review_state text DEFAULT 'open'::text NOT NULL,
+    eligibility_present boolean DEFAULT true NOT NULL,
+    disposition text DEFAULT 'active'::text NOT NULL,
+    merged_into_candidate_id uuid,
+    retired_at timestamp with time zone,
+    rank_score numeric(10,4) DEFAULT 0 NOT NULL,
+    proposal_title text,
+    proposal_summary text,
+    match_evidence jsonb DEFAULT '{}'::jsonb NOT NULL,
+    row_revision bigint DEFAULT 1 NOT NULL,
+    created_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    updated_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT ck_theme_feature_candidates_disposition CHECK ((((disposition = 'active'::text) AND (merged_into_candidate_id IS NULL) AND (retired_at IS NULL)) OR ((disposition = 'merged'::text) AND (merged_into_candidate_id IS NOT NULL) AND (retired_at IS NOT NULL)))),
+    CONSTRAINT theme_feature_candidates_candidate_input_hash_check CHECK ((candidate_input_hash ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT theme_feature_candidates_disposition_check CHECK ((disposition = ANY (ARRAY['active'::text, 'merged'::text]))),
+    CONSTRAINT theme_feature_candidates_match_evidence_check CHECK ((jsonb_typeof(match_evidence) = 'object'::text)),
+    CONSTRAINT theme_feature_candidates_review_state_check CHECK ((review_state = ANY (ARRAY['open'::text, 'promoted'::text, 'rejected'::text]))),
+    CONSTRAINT theme_feature_candidates_row_revision_check CHECK ((row_revision >= 1)),
+    CONSTRAINT theme_feature_candidates_rule_input_hash_check CHECK ((rule_input_hash ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT theme_feature_candidates_rule_row_revision_check CHECK ((rule_row_revision >= 1)),
+    CONSTRAINT theme_feature_candidates_source_record_hash_check CHECK ((source_record_hash ~ '^[0-9a-f]{1,64}$'::text))
+);
+
+
+ALTER TABLE feature.theme_feature_candidates OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: admin_auth_events; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -7505,6 +15623,49 @@ CREATE TABLE ops.admin_auth_events (
 
 
 ALTER TABLE ops.admin_auth_events OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: application_schema_operation_receipts; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.application_schema_operation_receipts (
+    operation_id uuid NOT NULL,
+    operation text NOT NULL,
+    result_schema text NOT NULL,
+    result_sha256 text NOT NULL,
+    map_candidate_commit text NOT NULL,
+    map_candidate_image_id text NOT NULL,
+    postgres_image_id text NOT NULL,
+    writer_fence_receipt_sha256 text NOT NULL,
+    journal_sha256 text NOT NULL,
+    journal_generation bigint NOT NULL,
+    destination_head text NOT NULL,
+    database_name text NOT NULL,
+    database_oid bigint NOT NULL,
+    database_owner text NOT NULL,
+    postgres_system_identifier text NOT NULL,
+    result_payload jsonb NOT NULL,
+    committed_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT pk_application_schema_operation_receipts PRIMARY KEY (operation_id),
+    CONSTRAINT ck_application_schema_operation_receipts_operation CHECK ((operation = ANY (ARRAY['application-root-300'::text, 'application-finalize-300'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_result_schema CHECK ((result_schema = ANY (ARRAY['kor-travel-map.application-fresh-300-root.v2'::text, 'kor-travel-map.application-fresh-300-finalize.v4'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_result_sha256 CHECK ((result_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
+    CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
+    CONSTRAINT ck_application_schema_operation_receipts_postgres_image CHECK ((postgres_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
+    CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = '300'::text)),
+    CONSTRAINT ck_application_schema_operation_receipts_database_name CHECK ((database_name ~ '^[A-Za-z_][A-Za-z0-9_]{0,62}$'::text)),
+    CONSTRAINT ck_application_schema_operation_receipts_database_oid CHECK ((database_oid > 0)),
+    CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
+    CONSTRAINT ck_application_schema_operation_receipts_system_identifier CHECK ((postgres_system_identifier ~ '^[0-9]+$'::text)),
+    CONSTRAINT ck_application_schema_operation_receipts_payload CHECK ((jsonb_typeof(result_payload) = 'object'::text))
+);
+
+
+ALTER TABLE ops.application_schema_operation_receipts OWNER TO ktm_feature_schema_owner;
 
 --
 -- Name: api_call_log; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
@@ -7654,6 +15815,244 @@ CREATE TABLE ops.cache_target_writer_drain_runs (
 
 
 ALTER TABLE ops.cache_target_writer_drain_runs OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: curation_catalog_command_effects; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.curation_catalog_command_effects (
+    command_id bigint NOT NULL,
+    operation text NOT NULL,
+    resource_kind text NOT NULL,
+    resource_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT curation_catalog_command_effects_resource_kind_check CHECK ((resource_kind = ANY (ARRAY['theme'::text, 'source'::text, 'rule'::text, 'collection'::text, 'item'::text])))
+);
+
+
+ALTER TABLE ops.curation_catalog_command_effects OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: curation_concierge_legacy_owner_manifest; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.curation_concierge_legacy_owner_manifest (
+    entity_kind text NOT NULL,
+    entity_id uuid NOT NULL,
+    before_row_revision bigint NOT NULL,
+    before_input_hash text NOT NULL,
+    captured_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT curation_concierge_legacy_owner_manif_before_row_revision_check CHECK ((before_row_revision > 0)),
+    CONSTRAINT curation_concierge_legacy_owner_manifes_before_input_hash_check CHECK ((before_input_hash ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT curation_concierge_legacy_owner_manifest_entity_kind_check CHECK ((entity_kind = ANY (ARRAY['theme'::text, 'rule'::text])))
+);
+
+
+ALTER TABLE ops.curation_concierge_legacy_owner_manifest OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: TABLE curation_concierge_legacy_owner_manifest; Type: COMMENT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+COMMENT ON TABLE ops.curation_concierge_legacy_owner_manifest IS '검토 완료 ID만 허용하는 빈 manifest. metadata/prefix 추측 backfill은 금지한다.';
+
+
+--
+-- Name: curation_cutover_identity_mappings; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.curation_cutover_identity_mappings (
+    legacy_curated_feature_id uuid NOT NULL,
+    collection_id uuid NOT NULL,
+    curation_item_id uuid NOT NULL,
+    mapping_kind text NOT NULL,
+    source_row_hash text NOT NULL,
+    created_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT curation_cutover_identity_mappings_mapping_kind_check CHECK ((mapping_kind = ANY (ARRAY['legacy_projection'::text, 'official_membership'::text, 'manual_membership'::text]))),
+    CONSTRAINT curation_cutover_identity_mappings_source_row_hash_check CHECK ((source_row_hash ~ '^[0-9a-f]{64}$'::text))
+);
+
+
+ALTER TABLE ops.curation_cutover_identity_mappings OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: curation_import_collection_effects; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.curation_import_collection_effects (
+    command_id bigint NOT NULL,
+    collection_id uuid NOT NULL,
+    operation text NOT NULL,
+    created boolean NOT NULL,
+    created_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT curation_import_collection_effects_operation_check CHECK ((operation = 'admin.curation.import'::text))
+);
+
+
+ALTER TABLE ops.curation_import_collection_effects OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: curation_import_collection_touches; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.curation_import_collection_touches (
+    command_id bigint NOT NULL,
+    collection_id uuid NOT NULL,
+    touched_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL
+);
+
+
+ALTER TABLE ops.curation_import_collection_touches OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: curation_import_plan_claims; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.curation_import_plan_claims (
+    import_plan_id uuid NOT NULL,
+    command_id bigint NOT NULL,
+    plan_sha256 text NOT NULL,
+    claimed_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT curation_import_plan_claims_plan_sha256_check CHECK ((plan_sha256 ~ '^[0-9a-f]{64}$'::text))
+);
+
+
+ALTER TABLE ops.curation_import_plan_claims OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: curation_import_plan_commits; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.curation_import_plan_commits (
+    import_plan_id uuid NOT NULL,
+    command_id bigint NOT NULL,
+    import_batch_id uuid NOT NULL,
+    result_payload jsonb NOT NULL,
+    committed_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT curation_import_plan_commits_result_payload_check CHECK ((jsonb_typeof(result_payload) = 'object'::text))
+);
+
+
+ALTER TABLE ops.curation_import_plan_commits OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: curation_provider_root_receipts; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.curation_provider_root_receipts (
+    root_job_id uuid NOT NULL,
+    child_receipt_count bigint NOT NULL,
+    child_receipt_set_hash text NOT NULL,
+    generation_count bigint NOT NULL,
+    generation_set_hash text NOT NULL,
+    completed_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT curation_provider_root_receipts_child_receipt_count_check CHECK ((child_receipt_count >= 0)),
+    CONSTRAINT curation_provider_root_receipts_child_receipt_set_hash_check CHECK ((child_receipt_set_hash ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT curation_provider_root_receipts_generation_count_check CHECK ((generation_count >= 0)),
+    CONSTRAINT curation_provider_root_receipts_generation_set_hash_check CHECK ((generation_set_hash ~ '^[0-9a-f]{64}$'::text))
+);
+
+
+ALTER TABLE ops.curation_provider_root_receipts OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: curation_provider_snapshot_receipts; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.curation_provider_snapshot_receipts (
+    source_job_id uuid NOT NULL,
+    root_job_id uuid NOT NULL,
+    provider_dataset_id bigint NOT NULL,
+    sync_scope text NOT NULL,
+    operation_key text NOT NULL,
+    observed_at timestamp with time zone NOT NULL,
+    source_entity_count bigint NOT NULL,
+    input_member_count bigint NOT NULL,
+    last_source_modified_at date,
+    source_input_set_hash text NOT NULL,
+    CONSTRAINT curation_provider_snapshot_receipts_input_member_count_check CHECK ((input_member_count >= 0)),
+    CONSTRAINT curation_provider_snapshot_receipts_source_entity_count_check CHECK ((source_entity_count >= 0)),
+    CONSTRAINT curation_provider_snapshot_receipts_source_input_set_hash_check CHECK ((source_input_set_hash ~ '^[0-9a-f]{64}$'::text))
+);
+
+
+ALTER TABLE ops.curation_provider_snapshot_receipts OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: curation_rule_reconcile_operations; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.curation_rule_reconcile_operations (
+    operation_id uuid DEFAULT x_extension.gen_random_uuid() NOT NULL,
+    rule_id uuid NOT NULL,
+    operation_kind text NOT NULL,
+    before_rule_revision bigint,
+    after_rule_revision bigint NOT NULL,
+    before_rule_input_hash text,
+    after_rule_input_hash text NOT NULL,
+    command_id bigint,
+    system_operation_key text,
+    actor text NOT NULL,
+    scope_member_count bigint NOT NULL,
+    scope_members_hash text NOT NULL,
+    created_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT ck_curation_rule_reconcile_operation_origin CHECK ((((command_id IS NOT NULL) AND (system_operation_key IS NULL)) OR ((command_id IS NULL) AND (system_operation_key IS NOT NULL) AND (system_operation_key = btrim(system_operation_key)) AND (system_operation_key <> ''::text)))),
+    CONSTRAINT ck_curation_rule_reconcile_operation_revision_shape CHECK ((((operation_kind = 'create'::text) AND (before_rule_revision IS NULL) AND (before_rule_input_hash IS NULL) AND (after_rule_revision = 1)) OR ((operation_kind = ANY (ARRAY['patch'::text, 'archive'::text])) AND (before_rule_revision IS NOT NULL) AND (before_rule_input_hash IS NOT NULL) AND (after_rule_revision >= before_rule_revision) AND (after_rule_input_hash IS DISTINCT FROM before_rule_input_hash)))),
+    CONSTRAINT curation_rule_reconcile_operations_actor_check CHECK (((actor = btrim(actor)) AND (actor <> ''::text))),
+    CONSTRAINT curation_rule_reconcile_operations_after_rule_input_hash_check CHECK ((after_rule_input_hash ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT curation_rule_reconcile_operations_after_rule_revision_check CHECK ((after_rule_revision >= 1)),
+    CONSTRAINT curation_rule_reconcile_operations_before_rule_input_hash_check CHECK ((before_rule_input_hash ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT curation_rule_reconcile_operations_before_rule_revision_check CHECK ((before_rule_revision >= 1)),
+    CONSTRAINT curation_rule_reconcile_operations_operation_kind_check CHECK ((operation_kind = ANY (ARRAY['create'::text, 'patch'::text, 'archive'::text]))),
+    CONSTRAINT curation_rule_reconcile_operations_scope_member_count_check CHECK ((scope_member_count >= 0)),
+    CONSTRAINT curation_rule_reconcile_operations_scope_members_hash_check CHECK ((scope_members_hash ~ '^[0-9a-f]{64}$'::text))
+);
+
+
+ALTER TABLE ops.curation_rule_reconcile_operations OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: curation_rule_reconcile_scope_members; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.curation_rule_reconcile_scope_members (
+    operation_id uuid NOT NULL,
+    member_kind text NOT NULL,
+    member_key text NOT NULL,
+    before_identity_hash text,
+    after_identity_hash text,
+    CONSTRAINT ck_curation_rule_reconcile_scope_identity CHECK (((before_identity_hash IS NOT NULL) OR (after_identity_hash IS NOT NULL))),
+    CONSTRAINT curation_rule_reconcile_scope_member_before_identity_hash_check CHECK ((before_identity_hash ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT curation_rule_reconcile_scope_members_after_identity_hash_check CHECK ((after_identity_hash ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT curation_rule_reconcile_scope_members_member_key_check CHECK (((member_key = btrim(member_key)) AND (member_key <> ''::text))),
+    CONSTRAINT curation_rule_reconcile_scope_members_member_kind_check CHECK ((member_kind = ANY (ARRAY['source_entity'::text, 'feature'::text])))
+);
+
+
+ALTER TABLE ops.curation_rule_reconcile_scope_members OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: curation_source_observation_receipts; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.curation_source_observation_receipts (
+    source_id uuid NOT NULL,
+    import_job_id uuid NOT NULL,
+    observed_at timestamp with time zone NOT NULL,
+    source_revision bigint NOT NULL,
+    observation_revision bigint NOT NULL,
+    row_count integer NOT NULL,
+    last_source_modified_at date,
+    source_input_set_hash text NOT NULL,
+    created_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT curation_source_observation_receipt_source_input_set_hash_check CHECK ((source_input_set_hash ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT curation_source_observation_receipts_observation_revision_check CHECK ((observation_revision > 0)),
+    CONSTRAINT curation_source_observation_receipts_row_count_check CHECK ((row_count >= 0)),
+    CONSTRAINT curation_source_observation_receipts_source_revision_check CHECK ((source_revision > 0))
+);
+
+
+ALTER TABLE ops.curation_source_observation_receipts OWNER TO ktm_feature_schema_owner;
 
 --
 -- Name: current_summary_runs; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
@@ -7853,8 +16252,8 @@ CREATE TABLE ops.dedup_review_queue (
     reviewed_at timestamp with time zone,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT ck_dedup_review_queue_ck_dedup_pair_order CHECK (((feature_id_a)::text < (feature_id_b)::text)),
-    CONSTRAINT ck_dedup_review_queue_ck_dedup_scores CHECK ((((total_score >= (0)::numeric) AND (total_score <= (100)::numeric)) AND ((name_score >= (0)::numeric) AND (name_score <= (100)::numeric)) AND ((spatial_score >= (0)::numeric) AND (spatial_score <= (100)::numeric)) AND ((category_score >= (0)::numeric) AND (category_score <= (100)::numeric)))),
-    CONSTRAINT ck_dedup_review_queue_ck_dedup_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'accepted'::character varying, 'rejected'::character varying, 'merged'::character varying, 'ignored'::character varying])::text[])))
+    CONSTRAINT ck_dedup_review_queue_ck_dedup_scores CHECK (((total_score >= (0)::numeric) AND (total_score <= (100)::numeric) AND ((name_score >= (0)::numeric) AND (name_score <= (100)::numeric)) AND ((spatial_score >= (0)::numeric) AND (spatial_score <= (100)::numeric)) AND ((category_score >= (0)::numeric) AND (category_score <= (100)::numeric)))),
+    CONSTRAINT ck_dedup_review_queue_ck_dedup_status CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('accepted'::character varying)::text, ('rejected'::character varying)::text, ('merged'::character varying)::text, ('ignored'::character varying)::text])))
 );
 
 
@@ -7931,7 +16330,7 @@ CREATE TABLE ops.enrichment_review_queue (
     source_entity_key text NOT NULL,
     source_record_key text NOT NULL,
     CONSTRAINT ck_enrichment_review_queue_ck_enrichment_review_name_score CHECK (((name_score >= (0)::numeric) AND (name_score <= (100)::numeric))),
-    CONSTRAINT ck_enrichment_review_queue_ck_enrichment_review_status CHECK (((status)::text = ANY ((ARRAY['pending'::character varying, 'accepted'::character varying, 'rejected'::character varying, 'ignored'::character varying])::text[])))
+    CONSTRAINT ck_enrichment_review_queue_ck_enrichment_review_status CHECK (((status)::text = ANY (ARRAY[('pending'::character varying)::text, ('accepted'::character varying)::text, ('rejected'::character varying)::text, ('ignored'::character varying)::text])))
 );
 
 
@@ -7949,7 +16348,7 @@ CREATE TABLE ops.feature_consistency_reports (
     severity_max character varying NOT NULL,
     cases jsonb NOT NULL,
     summary jsonb NOT NULL,
-    CONSTRAINT ck_feature_consistency_reports_feature_consistency_repo_55c7 CHECK (((severity_max)::text = ANY ((ARRAY['OK'::character varying, 'WARN'::character varying, 'ERROR'::character varying])::text[])))
+    CONSTRAINT ck_feature_consistency_reports_feature_consistency_repo_55c7 CHECK (((severity_max)::text = ANY (ARRAY[('OK'::character varying)::text, ('WARN'::character varying)::text, ('ERROR'::character varying)::text])))
 );
 
 
@@ -8035,6 +16434,128 @@ CREATE TABLE ops.feature_overrides (
 
 
 ALTER TABLE ops.feature_overrides OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: feature_reference_reconciliation_acks; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.feature_reference_reconciliation_acks (
+    event_id uuid NOT NULL,
+    principal_id text NOT NULL,
+    event_sha256 text NOT NULL,
+    local_receipt_sha256 text NOT NULL,
+    command_id bigint NOT NULL,
+    acked_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT ck_feature_reference_reconciliation_acks_hashes CHECK (((event_sha256 ~ '^[0-9a-f]{64}$'::text) AND (local_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)))
+);
+
+
+ALTER TABLE ops.feature_reference_reconciliation_acks OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: feature_reference_reconciliation_events; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.feature_reference_reconciliation_events (
+    event_id uuid DEFAULT x_extension.gen_random_uuid() NOT NULL,
+    event_sequence bigint NOT NULL,
+    case_id uuid NOT NULL,
+    resolution_id uuid NOT NULL,
+    action text NOT NULL,
+    old_feature_id text NOT NULL,
+    old_feature_uuid uuid NOT NULL,
+    old_feature_row_revision_before_transition bigint NOT NULL,
+    replacement_feature_id text,
+    replacement_feature_uuid uuid,
+    replacement_feature_row_revision bigint,
+    manual_retire_transition_id bigint NOT NULL,
+    manual_retire_row_revision_after_transition bigint NOT NULL,
+    command_id bigint NOT NULL,
+    payload_schema_version integer NOT NULL,
+    event_payload jsonb NOT NULL,
+    event_sha256 text NOT NULL,
+    occurred_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT ck_feature_reference_reconciliation_events_action CHECK ((action = ANY (ARRAY['rebind'::text, 'detach'::text]))),
+    CONSTRAINT ck_feature_reference_reconciliation_events_payload CHECK (((payload_schema_version = 1) AND (event_sha256 ~ '^[0-9a-f]{64}$'::text) AND (jsonb_typeof(event_payload) = 'object'::text))),
+    CONSTRAINT ck_feature_reference_reconciliation_events_replacement CHECK ((((action = 'rebind'::text) AND (replacement_feature_id IS NOT NULL) AND (replacement_feature_uuid IS NOT NULL) AND (replacement_feature_row_revision IS NOT NULL)) OR ((action = 'detach'::text) AND (replacement_feature_id IS NULL) AND (replacement_feature_uuid IS NULL) AND (replacement_feature_row_revision IS NULL)))),
+    CONSTRAINT ck_feature_reference_reconciliation_events_revisions CHECK (((old_feature_row_revision_before_transition >= 1) AND (manual_retire_row_revision_after_transition >= 2)))
+);
+
+
+ALTER TABLE ops.feature_reference_reconciliation_events OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: feature_reference_reconciliation_events_event_sequence_seq; Type: SEQUENCE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ops.feature_reference_reconciliation_events ALTER COLUMN event_sequence ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME ops.feature_reference_reconciliation_events_event_sequence_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
+
+--
+-- Name: feature_reference_reconciliation_leases; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.feature_reference_reconciliation_leases (
+    principal_id text NOT NULL,
+    acked_through_sequence bigint NOT NULL,
+    worker_id uuid,
+    lease_epoch bigint NOT NULL,
+    lease_expires_at timestamp with time zone,
+    updated_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT ck_feature_reference_reconciliation_leases_cursor CHECK (((acked_through_sequence >= 0) AND (lease_epoch >= 0)))
+);
+
+
+ALTER TABLE ops.feature_reference_reconciliation_leases OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: feature_reference_reconciliation_subscriptions; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.feature_reference_reconciliation_subscriptions (
+    principal_id text NOT NULL,
+    initial_event_sequence bigint NOT NULL,
+    read_scope text NOT NULL,
+    ack_scope text NOT NULL,
+    activated_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT ck_feature_reference_reconciliation_subscriptions_principal CHECK (((btrim(principal_id) <> ''::text) AND (char_length(principal_id) <= 200))),
+    CONSTRAINT ck_ref_recon_subscriptions_initial_cursor CHECK ((initial_event_sequence >= 0))
+);
+
+
+ALTER TABLE ops.feature_reference_reconciliation_subscriptions OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: feature_requests; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.feature_requests (
+    request_id uuid NOT NULL,
+    submitted_by_principal text DEFAULT 'service:feature-request'::text NOT NULL,
+    request_payload jsonb NOT NULL,
+    status text DEFAULT 'pending'::text NOT NULL,
+    submitted_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    submission_command_id bigint NOT NULL,
+    resolved_at timestamp with time zone,
+    resolved_by_actor text,
+    resolution_command_id bigint,
+    resolved_feature_id uuid,
+    rejection_reason text,
+    CONSTRAINT ck_feature_requests_payload CHECK (((jsonb_typeof(request_payload) = 'object'::text) AND (jsonb_typeof((request_payload -> 'kind'::text)) = 'string'::text) AND ((request_payload ->> 'kind'::text) = ANY (ARRAY['place'::text, 'event'::text])) AND (jsonb_typeof((request_payload -> 'name'::text)) = 'string'::text) AND (NULLIF(btrim((request_payload ->> 'name'::text)), ''::text) IS NOT NULL) AND (char_length((request_payload ->> 'name'::text)) <= 200) AND (jsonb_typeof((request_payload -> 'lon'::text)) = 'number'::text) AND ((((request_payload ->> 'lon'::text))::numeric >= (124)::numeric) AND (((request_payload ->> 'lon'::text))::numeric <= (132)::numeric)) AND (jsonb_typeof((request_payload -> 'lat'::text)) = 'number'::text) AND ((((request_payload ->> 'lat'::text))::numeric >= (33)::numeric) AND (((request_payload ->> 'lat'::text))::numeric <= 39.5)) AND (jsonb_typeof((request_payload -> 'categories'::text)) = 'array'::text) AND (jsonb_array_length((request_payload -> 'categories'::text)) <= 10) AND (NOT jsonb_path_exists(request_payload, '$."categories"[*]?(@.type() != "string")'::jsonpath)) AND ((NOT (request_payload ? 'note'::text)) OR ((jsonb_typeof((request_payload -> 'note'::text)) = 'string'::text) AND (char_length((request_payload ->> 'note'::text)) <= 2000))))),
+    CONSTRAINT ck_feature_requests_principal CHECK ((submitted_by_principal = 'service:feature-request'::text)),
+    CONSTRAINT ck_feature_requests_resolution CHECK ((((status = 'pending'::text) AND (resolved_at IS NULL) AND (resolved_by_actor IS NULL) AND (resolution_command_id IS NULL) AND (resolved_feature_id IS NULL) AND (rejection_reason IS NULL)) OR ((status = ANY (ARRAY['approved'::text, 'exact_conflict'::text])) AND (resolved_at IS NOT NULL) AND (resolved_by_actor IS NOT NULL) AND (resolution_command_id IS NOT NULL) AND (resolved_feature_id IS NOT NULL) AND (rejection_reason IS NULL)) OR ((status = 'rejected'::text) AND (resolved_at IS NOT NULL) AND (resolved_by_actor IS NOT NULL) AND (resolution_command_id IS NOT NULL) AND (resolved_feature_id IS NULL) AND (NULLIF(btrim(rejection_reason), ''::text) IS NOT NULL)))),
+    CONSTRAINT ck_feature_requests_status CHECK ((status = ANY (ARRAY['pending'::text, 'approved'::text, 'rejected'::text, 'exact_conflict'::text])))
+);
+
+
+ALTER TABLE ops.feature_requests OWNER TO ktm_feature_schema_owner;
 
 --
 -- Name: feature_update_request_datasets; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
@@ -8403,6 +16924,67 @@ ALTER TABLE ops.managed_files ALTER COLUMN file_id ADD GENERATED ALWAYS AS IDENT
     CACHE 1
 );
 
+
+--
+-- Name: manual_provider_dedup_cases; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.manual_provider_dedup_cases (
+    case_id uuid DEFAULT x_extension.gen_random_uuid() NOT NULL,
+    manual_feature_id text NOT NULL,
+    manual_feature_uuid uuid NOT NULL,
+    manual_creation_command_id bigint NOT NULL,
+    manual_feature_row_revision bigint NOT NULL,
+    provider_feature_id text NOT NULL,
+    provider_feature_uuid uuid NOT NULL,
+    provider_feature_row_revision bigint NOT NULL,
+    provider_dataset_id bigint NOT NULL,
+    source_entity_key text NOT NULL,
+    source_record_key text NOT NULL,
+    source_record_raw_payload_hash text NOT NULL,
+    source_head_observed_at timestamp with time zone NOT NULL,
+    manual_feature_snapshot jsonb NOT NULL,
+    provider_feature_snapshot jsonb NOT NULL,
+    scorer_id text NOT NULL,
+    scorer_input_sha256 text NOT NULL,
+    name_score numeric(9,8) NOT NULL,
+    spatial_score numeric(9,8) NOT NULL,
+    category_score numeric(9,8) NOT NULL,
+    total_score numeric(9,8) NOT NULL,
+    distance_meters numeric(14,3) NOT NULL,
+    evidence_fingerprint text NOT NULL,
+    detector_causation jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT ck_manual_provider_dedup_cases_hashes CHECK (((evidence_fingerprint ~ '^[0-9a-f]{64}$'::text) AND (scorer_input_sha256 ~ '^[0-9a-f]{64}$'::text) AND (source_record_raw_payload_hash ~ '^[0-9a-f]{64}$'::text))),
+    CONSTRAINT ck_manual_provider_dedup_cases_json CHECK (((jsonb_typeof(manual_feature_snapshot) = 'object'::text) AND (jsonb_typeof(provider_feature_snapshot) = 'object'::text) AND (jsonb_typeof(detector_causation) = 'object'::text))),
+    CONSTRAINT ck_manual_provider_dedup_cases_revisions CHECK (((manual_feature_row_revision >= 1) AND (provider_feature_row_revision >= 1) AND (distance_meters >= (0)::numeric))),
+    CONSTRAINT ck_manual_provider_dedup_cases_scorer CHECK ((scorer_id = 'manual-provider-v1'::text)),
+    CONSTRAINT ck_manual_provider_dedup_cases_scores CHECK ((((name_score >= (0)::numeric) AND (name_score <= (1)::numeric)) AND ((spatial_score >= (0)::numeric) AND (spatial_score <= (1)::numeric)) AND ((category_score >= (0)::numeric) AND (category_score <= (1)::numeric)) AND ((total_score >= (0)::numeric) AND (total_score <= (1)::numeric))))
+);
+
+
+ALTER TABLE ops.manual_provider_dedup_cases OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: manual_provider_dedup_resolutions; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.manual_provider_dedup_resolutions (
+    resolution_id uuid DEFAULT x_extension.gen_random_uuid() NOT NULL,
+    case_id uuid NOT NULL,
+    decision text NOT NULL,
+    command_id bigint,
+    actor text,
+    reason text,
+    superseded_by_case_id uuid,
+    detector_causation jsonb,
+    resolved_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT ck_manual_provider_dedup_resolutions_causation CHECK ((((decision = 'superseded'::text) AND (command_id IS NULL) AND (actor IS NULL) AND (reason IS NULL) AND (superseded_by_case_id IS NOT NULL) AND (jsonb_typeof(detector_causation) = 'object'::text)) OR ((decision = ANY (ARRAY['kept'::text, 'merged'::text, 'manual_retired'::text])) AND (command_id IS NOT NULL) AND (NULLIF(btrim(actor), ''::text) IS NOT NULL) AND (NULLIF(btrim(reason), ''::text) IS NOT NULL) AND (superseded_by_case_id IS NULL) AND (detector_causation IS NULL)))),
+    CONSTRAINT ck_manual_provider_dedup_resolutions_decision CHECK ((decision = ANY (ARRAY['kept'::text, 'merged'::text, 'manual_retired'::text, 'superseded'::text])))
+);
+
+
+ALTER TABLE ops.manual_provider_dedup_resolutions OWNER TO ktm_feature_schema_owner;
 
 --
 -- Name: offline_upload_command_executions; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
@@ -8847,24 +17429,50 @@ ALTER TABLE ops.poi_cache_target_snapshot_gc_observations ALTER COLUMN observati
 
 
 --
--- Name: poi_cache_target_snapshot_items; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+-- Name: poi_cache_target_snapshot_material_items; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
-CREATE TABLE ops.poi_cache_target_snapshot_items (
-    snapshot_id uuid NOT NULL,
+CREATE TABLE ops.poi_cache_target_snapshot_material_items (
+    material_id uuid NOT NULL,
     row_number bigint NOT NULL,
-    external_system text NOT NULL,
     target_key text NOT NULL,
     state text NOT NULL,
     source_generation bigint NOT NULL,
     source_payload_fingerprint text NOT NULL,
-    CONSTRAINT ck_poi_cache_target_snapshot_items_ck_cache_target_snap_0ba2 CHECK (((row_number > 0) AND (source_generation > 0))),
-    CONSTRAINT ck_poi_cache_target_snapshot_items_ck_cache_target_snap_879d CHECK ((source_payload_fingerprint ~ '^[0-9a-f]{64}$'::text)),
-    CONSTRAINT ck_poi_cache_target_snapshot_items_ck_cache_target_snap_96c2 CHECK ((state = ANY (ARRAY['active'::text, 'deleted'::text])))
+    CONSTRAINT ck_poi_cache_target_snapshot_material_items_bounds CHECK (((row_number > 0) AND (source_generation > 0))),
+    CONSTRAINT ck_poi_cache_target_snapshot_material_items_digest CHECK ((source_payload_fingerprint ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT ck_poi_cache_target_snapshot_material_items_state CHECK ((state = ANY (ARRAY['active'::text, 'deleted'::text])))
 );
 
 
-ALTER TABLE ops.poi_cache_target_snapshot_items OWNER TO ktm_feature_schema_owner;
+ALTER TABLE ops.poi_cache_target_snapshot_material_items OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: poi_cache_target_snapshot_materials; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.poi_cache_target_snapshot_materials (
+    material_id uuid DEFAULT x_extension.gen_random_uuid() NOT NULL,
+    external_system text NOT NULL,
+    restore_epoch bigint NOT NULL,
+    material_high_watermark_relay_order bigint NOT NULL,
+    safe_high_watermark_relay_order bigint NOT NULL,
+    item_count bigint NOT NULL,
+    material_bytes bigint,
+    merkle_root text NOT NULL,
+    materialized_at timestamp with time zone DEFAULT now() NOT NULL,
+    compacted_at timestamp with time zone,
+    compaction_drained_at timestamp with time zone,
+    orphaned_at timestamp with time zone,
+    CONSTRAINT ck_poi_cache_target_snapshot_materials_compaction CHECK (((compacted_at IS NULL) OR (compacted_at >= materialized_at))),
+    CONSTRAINT ck_poi_cache_target_snapshot_materials_counts CHECK (((restore_epoch > 0) AND (material_high_watermark_relay_order >= 0) AND (safe_high_watermark_relay_order >= material_high_watermark_relay_order) AND (item_count >= 0) AND ((material_bytes IS NULL) OR (material_bytes >= 0)))),
+    CONSTRAINT ck_poi_cache_target_snapshot_materials_drained_after_compacted CHECK (((compaction_drained_at IS NULL) OR ((compacted_at IS NOT NULL) AND (compaction_drained_at >= compacted_at)))),
+    CONSTRAINT ck_poi_cache_target_snapshot_materials_orphaned_at CHECK (((orphaned_at IS NULL) OR (orphaned_at >= materialized_at))),
+    CONSTRAINT ck_poi_cache_target_snapshot_materials_root CHECK ((merkle_root ~ '^[0-9a-f]{64}$'::text))
+);
+
+
+ALTER TABLE ops.poi_cache_target_snapshot_materials OWNER TO ktm_feature_schema_owner;
 
 --
 -- Name: poi_cache_target_snapshots; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
@@ -8873,16 +17481,12 @@ ALTER TABLE ops.poi_cache_target_snapshot_items OWNER TO ktm_feature_schema_owne
 CREATE TABLE ops.poi_cache_target_snapshots (
     snapshot_id uuid DEFAULT x_extension.gen_random_uuid() NOT NULL,
     external_system text NOT NULL,
-    restore_epoch bigint NOT NULL,
-    high_watermark_relay_order bigint NOT NULL,
-    material_high_watermark_relay_order bigint NOT NULL,
-    item_count bigint NOT NULL,
-    merkle_root text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     expires_at timestamp with time zone NOT NULL,
-    CONSTRAINT ck_poi_cache_target_snapshots_ck_cache_target_snapshots_0ecd CHECK ((merkle_root ~ '^[0-9a-f]{64}$'::text)),
-    CONSTRAINT ck_poi_cache_target_snapshots_ck_cache_target_snapshots_counts CHECK (((restore_epoch > 0) AND (high_watermark_relay_order >= 0) AND (material_high_watermark_relay_order >= 0) AND (high_watermark_relay_order >= material_high_watermark_relay_order) AND (item_count >= 0))),
-    CONSTRAINT ck_poi_cache_target_snapshots_ck_cache_target_snapshots_expiry CHECK ((expires_at > created_at))
+    material_id uuid NOT NULL,
+    receipt_kind text NOT NULL,
+    CONSTRAINT ck_poi_cache_target_snapshots_ck_cache_target_snapshots_expiry CHECK ((expires_at > created_at)),
+    CONSTRAINT ck_poi_cache_target_snapshots_receipt_kind CHECK ((receipt_kind = ANY (ARRAY['generic'::text, 'reconciliation'::text])))
 );
 
 
@@ -9002,7 +17606,7 @@ CREATE TABLE ops.poi_cache_targets (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     lock_version bigint DEFAULT 1 NOT NULL,
-    CONSTRAINT ck_poi_cache_targets_ck_poi_cache_targets_coord CHECK ((((x_extension.st_x(coord) >= (124.0)::double precision) AND (x_extension.st_x(coord) <= (132.0)::double precision)) AND ((x_extension.st_y(coord) >= (33.0)::double precision) AND (x_extension.st_y(coord) <= (39.5)::double precision)))),
+    CONSTRAINT ck_poi_cache_targets_ck_poi_cache_targets_coord CHECK (((x_extension.st_x(coord) >= (124.0)::double precision) AND (x_extension.st_x(coord) <= (132.0)::double precision) AND ((x_extension.st_y(coord) >= (33.0)::double precision) AND (x_extension.st_y(coord) <= (39.5)::double precision)))),
     CONSTRAINT ck_poi_cache_targets_ck_poi_cache_targets_lock_version CHECK ((lock_version >= 1)),
     CONSTRAINT ck_poi_cache_targets_ck_poi_cache_targets_precision CHECK (((coord_precision_digits >= 3) AND (coord_precision_digits <= 8))),
     CONSTRAINT ck_poi_cache_targets_ck_poi_cache_targets_radius CHECK (((radius_km > (0)::numeric) AND (radius_km <= (100)::numeric))),
@@ -9248,7 +17852,7 @@ CREATE TABLE provider_sync.provider_sync_state (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     provider_dataset_id bigint NOT NULL,
     operation_key text NOT NULL,
-    CONSTRAINT ck_provider_sync_state_ck_provider_sync_state_status CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'paused'::character varying, 'disabled'::character varying, 'failed'::character varying])::text[])))
+    CONSTRAINT ck_provider_sync_state_ck_provider_sync_state_status CHECK (((status)::text = ANY (ARRAY[('active'::character varying)::text, ('paused'::character varying)::text, ('disabled'::character varying)::text, ('failed'::character varying)::text])))
 );
 
 
@@ -9283,7 +17887,7 @@ CREATE TABLE provider_sync.source_links (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     source_entity_key text NOT NULL,
     CONSTRAINT ck_source_links_ck_source_links_confidence CHECK (((confidence >= 0) AND (confidence <= 100))),
-    CONSTRAINT ck_source_links_ck_source_links_role CHECK (((source_role)::text = ANY ((ARRAY['primary'::character varying, 'base_address'::character varying, 'base_coordinate'::character varying, 'enrichment'::character varying, 'correction'::character varying, 'duplicate_candidate'::character varying, 'media'::character varying, 'weather_context'::character varying])::text[])))
+    CONSTRAINT ck_source_links_ck_source_links_role CHECK (((source_role)::text = ANY (ARRAY[('primary'::character varying)::text, ('base_address'::character varying)::text, ('base_coordinate'::character varying)::text, ('enrichment'::character varying)::text, ('correction'::character varying)::text, ('duplicate_candidate'::character varying)::text, ('media'::character varying)::text, ('weather_context'::character varying)::text])))
 );
 
 
@@ -9312,14 +17916,6 @@ ALTER TABLE provider_sync.source_records OWNER TO ktm_feature_schema_owner;
 --
 
 ALTER TABLE ONLY ops.import_jobs ALTER COLUMN queue_sequence SET DEFAULT nextval('ops.import_jobs_queue_sequence_seq'::regclass);
-
-
---
--- Name: curated_features curated_features_pkey; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.curated_features
-    ADD CONSTRAINT curated_features_pkey PRIMARY KEY (curated_feature_id);
 
 
 --
@@ -9355,19 +17951,51 @@ ALTER TABLE ONLY feature.curated_themes
 
 
 --
--- Name: curated_feature_detail_snapshots curated_tripmate_copy_snapshots_pkey; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.curated_feature_detail_snapshots
-    ADD CONSTRAINT curated_tripmate_copy_snapshots_pkey PRIMARY KEY (curated_feature_id);
-
-
---
 -- Name: curation_collections curation_collections_pkey; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
 ALTER TABLE ONLY feature.curation_collections
     ADD CONSTRAINT curation_collections_pkey PRIMARY KEY (collection_id);
+
+
+--
+-- Name: curation_import_plan_revisions curation_import_plan_revisions_pkey; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.curation_import_plan_revisions
+    ADD CONSTRAINT curation_import_plan_revisions_pkey PRIMARY KEY (import_plan_id, resource_kind, resource_key);
+
+
+--
+-- Name: curation_import_plan_rows curation_import_plan_rows_pkey; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.curation_import_plan_rows
+    ADD CONSTRAINT curation_import_plan_rows_pkey PRIMARY KEY (import_plan_id, row_number);
+
+
+--
+-- Name: curation_import_plans curation_import_plans_pkey; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.curation_import_plans
+    ADD CONSTRAINT curation_import_plans_pkey PRIMARY KEY (import_plan_id);
+
+
+--
+-- Name: curation_import_plans curation_import_plans_plan_sha256_key; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.curation_import_plans
+    ADD CONSTRAINT curation_import_plans_plan_sha256_key UNIQUE (plan_sha256);
+
+
+--
+-- Name: curation_import_plans curation_import_plans_preview_command_id_key; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.curation_import_plans
+    ADD CONSTRAINT curation_import_plans_preview_command_id_key UNIQUE (preview_command_id);
 
 
 --
@@ -9467,6 +18095,14 @@ ALTER TABLE ONLY feature.feature_base_field_values
 
 
 --
+-- Name: feature_creation_origins pk_feature_creation_origins; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.feature_creation_origins
+    ADD CONSTRAINT pk_feature_creation_origins PRIMARY KEY (feature_id);
+
+
+--
 -- Name: feature_events pk_feature_events; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -9507,6 +18143,62 @@ ALTER TABLE ONLY feature.features
 
 
 --
+-- Name: manual_feature_identity_claims pk_manual_feature_identity_claims; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.manual_feature_identity_claims
+    ADD CONSTRAINT pk_manual_feature_identity_claims PRIMARY KEY (feature_id);
+
+
+--
+-- Name: theme_candidate_generation_observations theme_candidate_generation_observations_pkey; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.theme_candidate_generation_observations
+    ADD CONSTRAINT theme_candidate_generation_observations_pkey PRIMARY KEY (generation_id, candidate_id);
+
+
+--
+-- Name: theme_candidate_generations theme_candidate_generations_generation_key_key; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.theme_candidate_generations
+    ADD CONSTRAINT theme_candidate_generations_generation_key_key UNIQUE (generation_key);
+
+
+--
+-- Name: theme_candidate_generations theme_candidate_generations_pkey; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.theme_candidate_generations
+    ADD CONSTRAINT theme_candidate_generations_pkey PRIMARY KEY (generation_id);
+
+
+--
+-- Name: theme_feature_candidate_transitions theme_feature_candidate_transitions_pkey; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.theme_feature_candidate_transitions
+    ADD CONSTRAINT theme_feature_candidate_transitions_pkey PRIMARY KEY (transition_id);
+
+
+--
+-- Name: theme_feature_candidates theme_feature_candidates_pkey; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.theme_feature_candidates
+    ADD CONSTRAINT theme_feature_candidates_pkey PRIMARY KEY (candidate_id);
+
+
+--
+-- Name: theme_feature_candidate_transitions uq_candidate_transition_candidate_revision; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.theme_feature_candidate_transitions
+    ADD CONSTRAINT uq_candidate_transition_candidate_revision UNIQUE (candidate_id, candidate_row_revision);
+
+
+--
 -- Name: curated_sources uq_curated_sources_dataset; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -9520,6 +18212,22 @@ ALTER TABLE ONLY feature.curated_sources
 
 ALTER TABLE ONLY feature.curation_collections
     ADD CONSTRAINT uq_curation_collections_collection_key UNIQUE (collection_key);
+
+
+--
+-- Name: curation_import_batches uq_curation_import_batches_command; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.curation_import_batches
+    ADD CONSTRAINT uq_curation_import_batches_command UNIQUE (command_id);
+
+
+--
+-- Name: curation_import_batches uq_curation_import_batches_identity_command; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.curation_import_batches
+    ADD CONSTRAINT uq_curation_import_batches_identity_command UNIQUE (import_batch_id, command_id);
 
 
 --
@@ -9563,6 +18271,22 @@ ALTER TABLE ONLY feature.curation_link_decisions
 
 
 --
+-- Name: feature_creation_origins uq_feature_creation_origins_command; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.feature_creation_origins
+    ADD CONSTRAINT uq_feature_creation_origins_command UNIQUE (creation_command_id);
+
+
+--
+-- Name: feature_creation_origins uq_feature_creation_origins_feature_command; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.feature_creation_origins
+    ADD CONSTRAINT uq_feature_creation_origins_feature_command UNIQUE (feature_id, creation_command_id);
+
+
+--
 -- Name: features uq_features_feature_uuid; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -9587,11 +18311,51 @@ ALTER TABLE ONLY feature.features
 
 
 --
+-- Name: manual_feature_identity_claims uq_manual_feature_identity_claims_command; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.manual_feature_identity_claims
+    ADD CONSTRAINT uq_manual_feature_identity_claims_command UNIQUE (claimed_by_command_id);
+
+
+--
+-- Name: manual_feature_identity_claims uq_manual_feature_identity_claims_exact; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.manual_feature_identity_claims
+    ADD CONSTRAINT uq_manual_feature_identity_claims_exact UNIQUE (feature_kind, name_key, lon_e6, lat_e6);
+
+
+--
+-- Name: manual_feature_identity_claims uq_manual_feature_identity_claims_feature_command; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.manual_feature_identity_claims
+    ADD CONSTRAINT uq_manual_feature_identity_claims_feature_command UNIQUE (feature_id, claimed_by_command_id);
+
+
+--
 -- Name: feature_price_values uq_price_value_identity; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
 ALTER TABLE ONLY feature.feature_price_values
     ADD CONSTRAINT uq_price_value_identity UNIQUE (feature_id, provider_dataset_id, price_domain, product_key, observed_at, source_record_key);
+
+
+--
+-- Name: theme_candidate_generation_observations uq_theme_candidate_generation_observation_identity; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.theme_candidate_generation_observations
+    ADD CONSTRAINT uq_theme_candidate_generation_observation_identity UNIQUE (generation_id, source_entity_key, feature_id);
+
+
+--
+-- Name: theme_feature_candidates uq_theme_feature_candidates_rule_entity_feature; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.theme_feature_candidates
+    ADD CONSTRAINT uq_theme_feature_candidates_rule_entity_feature UNIQUE (rule_id, source_entity_key, feature_id);
 
 
 --
@@ -9619,6 +18383,150 @@ ALTER TABLE ONLY ops.api_call_log
 
 
 --
+-- Name: curation_catalog_command_effects curation_catalog_command_effects_pkey; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_catalog_command_effects
+    ADD CONSTRAINT curation_catalog_command_effects_pkey PRIMARY KEY (command_id);
+
+
+--
+-- Name: curation_concierge_legacy_owner_manifest curation_concierge_legacy_owner_manifest_pkey; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_concierge_legacy_owner_manifest
+    ADD CONSTRAINT curation_concierge_legacy_owner_manifest_pkey PRIMARY KEY (entity_kind, entity_id);
+
+
+--
+-- Name: curation_cutover_identity_mappings curation_cutover_identity_mappings_curation_item_id_key; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_cutover_identity_mappings
+    ADD CONSTRAINT curation_cutover_identity_mappings_curation_item_id_key UNIQUE (curation_item_id);
+
+
+--
+-- Name: curation_cutover_identity_mappings curation_cutover_identity_mappings_pkey; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_cutover_identity_mappings
+    ADD CONSTRAINT curation_cutover_identity_mappings_pkey PRIMARY KEY (legacy_curated_feature_id);
+
+
+--
+-- Name: curation_import_collection_effects curation_import_collection_effects_pkey; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_import_collection_effects
+    ADD CONSTRAINT curation_import_collection_effects_pkey PRIMARY KEY (command_id, collection_id);
+
+
+--
+-- Name: curation_import_collection_touches curation_import_collection_touches_pkey; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_import_collection_touches
+    ADD CONSTRAINT curation_import_collection_touches_pkey PRIMARY KEY (command_id, collection_id);
+
+
+--
+-- Name: curation_import_plan_claims curation_import_plan_claims_command_id_key; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_import_plan_claims
+    ADD CONSTRAINT curation_import_plan_claims_command_id_key UNIQUE (command_id);
+
+
+--
+-- Name: curation_import_plan_claims curation_import_plan_claims_import_plan_id_command_id_key; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_import_plan_claims
+    ADD CONSTRAINT curation_import_plan_claims_import_plan_id_command_id_key UNIQUE (import_plan_id, command_id);
+
+
+--
+-- Name: curation_import_plan_claims curation_import_plan_claims_pkey; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_import_plan_claims
+    ADD CONSTRAINT curation_import_plan_claims_pkey PRIMARY KEY (import_plan_id);
+
+
+--
+-- Name: curation_import_plan_commits curation_import_plan_commits_command_id_key; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_import_plan_commits
+    ADD CONSTRAINT curation_import_plan_commits_command_id_key UNIQUE (command_id);
+
+
+--
+-- Name: curation_import_plan_commits curation_import_plan_commits_import_batch_id_key; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_import_plan_commits
+    ADD CONSTRAINT curation_import_plan_commits_import_batch_id_key UNIQUE (import_batch_id);
+
+
+--
+-- Name: curation_import_plan_commits curation_import_plan_commits_pkey; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_import_plan_commits
+    ADD CONSTRAINT curation_import_plan_commits_pkey PRIMARY KEY (import_plan_id);
+
+
+--
+-- Name: curation_provider_root_receipts curation_provider_root_receipts_pkey; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_provider_root_receipts
+    ADD CONSTRAINT curation_provider_root_receipts_pkey PRIMARY KEY (root_job_id);
+
+
+--
+-- Name: curation_provider_snapshot_receipts curation_provider_snapshot_re_root_job_id_provider_dataset__key; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_provider_snapshot_receipts
+    ADD CONSTRAINT curation_provider_snapshot_re_root_job_id_provider_dataset__key UNIQUE (root_job_id, provider_dataset_id, sync_scope, operation_key);
+
+
+--
+-- Name: curation_provider_snapshot_receipts curation_provider_snapshot_receipts_pkey; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_provider_snapshot_receipts
+    ADD CONSTRAINT curation_provider_snapshot_receipts_pkey PRIMARY KEY (source_job_id);
+
+
+--
+-- Name: curation_rule_reconcile_operations curation_rule_reconcile_operations_pkey; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_rule_reconcile_operations
+    ADD CONSTRAINT curation_rule_reconcile_operations_pkey PRIMARY KEY (operation_id);
+
+
+--
+-- Name: curation_rule_reconcile_scope_members curation_rule_reconcile_scope_members_pkey; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_rule_reconcile_scope_members
+    ADD CONSTRAINT curation_rule_reconcile_scope_members_pkey PRIMARY KEY (operation_id, member_kind, member_key);
+
+
+--
+-- Name: curation_source_observation_receipts curation_source_observation_receipts_pkey; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_source_observation_receipts
+    ADD CONSTRAINT curation_source_observation_receipts_pkey PRIMARY KEY (source_id, import_job_id);
+
+
+--
 -- Name: current_summary_runs current_summary_runs_pkey; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -9635,11 +18543,59 @@ ALTER TABLE ONLY ops.feature_override_field_paths
 
 
 --
+-- Name: feature_reference_reconciliation_events feature_reference_reconciliation_events_pkey; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_reference_reconciliation_events
+    ADD CONSTRAINT feature_reference_reconciliation_events_pkey PRIMARY KEY (event_id);
+
+
+--
+-- Name: feature_reference_reconciliation_leases feature_reference_reconciliation_leases_pkey; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_reference_reconciliation_leases
+    ADD CONSTRAINT feature_reference_reconciliation_leases_pkey PRIMARY KEY (principal_id);
+
+
+--
+-- Name: feature_reference_reconciliation_subscriptions feature_reference_reconciliation_subscriptions_pkey; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_reference_reconciliation_subscriptions
+    ADD CONSTRAINT feature_reference_reconciliation_subscriptions_pkey PRIMARY KEY (principal_id);
+
+
+--
+-- Name: feature_requests feature_requests_pkey; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_requests
+    ADD CONSTRAINT feature_requests_pkey PRIMARY KEY (request_id);
+
+
+--
 -- Name: import_job_events import_job_events_pkey; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
 ALTER TABLE ONLY ops.import_job_events
     ADD CONSTRAINT import_job_events_pkey PRIMARY KEY (event_id);
+
+
+--
+-- Name: manual_provider_dedup_cases manual_provider_dedup_cases_pkey; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.manual_provider_dedup_cases
+    ADD CONSTRAINT manual_provider_dedup_cases_pkey PRIMARY KEY (case_id);
+
+
+--
+-- Name: manual_provider_dedup_resolutions manual_provider_dedup_resolutions_pkey; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.manual_provider_dedup_resolutions
+    ADD CONSTRAINT manual_provider_dedup_resolutions_pkey PRIMARY KEY (resolution_id);
 
 
 --
@@ -9784,6 +18740,14 @@ ALTER TABLE ONLY ops.feature_merge_history
 
 ALTER TABLE ONLY ops.feature_overrides
     ADD CONSTRAINT pk_feature_overrides PRIMARY KEY (override_id);
+
+
+--
+-- Name: feature_reference_reconciliation_acks pk_feature_reference_reconciliation_acks; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_reference_reconciliation_acks
+    ADD CONSTRAINT pk_feature_reference_reconciliation_acks PRIMARY KEY (event_id, principal_id);
 
 
 --
@@ -9995,11 +18959,19 @@ ALTER TABLE ONLY ops.poi_cache_target_restore_fences
 
 
 --
--- Name: poi_cache_target_snapshot_items pk_poi_cache_target_snapshot_items; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+-- Name: poi_cache_target_snapshot_material_items pk_poi_cache_target_snapshot_material_items; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
-ALTER TABLE ONLY ops.poi_cache_target_snapshot_items
-    ADD CONSTRAINT pk_poi_cache_target_snapshot_items PRIMARY KEY (snapshot_id, row_number);
+ALTER TABLE ONLY ops.poi_cache_target_snapshot_material_items
+    ADD CONSTRAINT pk_poi_cache_target_snapshot_material_items PRIMARY KEY (material_id, row_number);
+
+
+--
+-- Name: poi_cache_target_snapshot_materials pk_poi_cache_target_snapshot_materials; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.poi_cache_target_snapshot_materials
+    ADD CONSTRAINT pk_poi_cache_target_snapshot_materials PRIMARY KEY (material_id);
 
 
 --
@@ -10179,19 +19151,19 @@ ALTER TABLE ONLY ops.poi_cache_target_snapshot_gc_observations
 
 
 --
--- Name: poi_cache_target_snapshot_items uq_cache_target_snapshot_items_key; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+-- Name: poi_cache_target_snapshot_material_items uq_cache_target_snapshot_material_items_key; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
-ALTER TABLE ONLY ops.poi_cache_target_snapshot_items
-    ADD CONSTRAINT uq_cache_target_snapshot_items_key UNIQUE (snapshot_id, external_system, target_key);
+ALTER TABLE ONLY ops.poi_cache_target_snapshot_material_items
+    ADD CONSTRAINT uq_cache_target_snapshot_material_items_key UNIQUE (material_id, target_key);
 
 
 --
--- Name: poi_cache_target_snapshots uq_cache_target_snapshots_stream; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+-- Name: poi_cache_target_snapshot_materials uq_cache_target_snapshot_materials_receipt; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
-ALTER TABLE ONLY ops.poi_cache_target_snapshots
-    ADD CONSTRAINT uq_cache_target_snapshots_stream UNIQUE (snapshot_id, external_system);
+ALTER TABLE ONLY ops.poi_cache_target_snapshot_materials
+    ADD CONSTRAINT uq_cache_target_snapshot_materials_receipt UNIQUE (material_id, external_system);
 
 
 --
@@ -10275,6 +19247,46 @@ ALTER TABLE ONLY ops.feature_override_field_paths
 
 
 --
+-- Name: feature_reference_reconciliation_acks uq_feature_reference_reconciliation_acks_command; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_reference_reconciliation_acks
+    ADD CONSTRAINT uq_feature_reference_reconciliation_acks_command UNIQUE (command_id);
+
+
+--
+-- Name: feature_reference_reconciliation_events uq_feature_reference_reconciliation_events_resolution; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_reference_reconciliation_events
+    ADD CONSTRAINT uq_feature_reference_reconciliation_events_resolution UNIQUE (resolution_id);
+
+
+--
+-- Name: feature_reference_reconciliation_events uq_feature_reference_reconciliation_events_sequence; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_reference_reconciliation_events
+    ADD CONSTRAINT uq_feature_reference_reconciliation_events_sequence UNIQUE (event_sequence);
+
+
+--
+-- Name: feature_requests uq_feature_requests_resolution_command; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_requests
+    ADD CONSTRAINT uq_feature_requests_resolution_command UNIQUE (resolution_command_id);
+
+
+--
+-- Name: feature_requests uq_feature_requests_submission_command; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_requests
+    ADD CONSTRAINT uq_feature_requests_submission_command UNIQUE (submission_command_id);
+
+
+--
 -- Name: feature_update_request_datasets uq_feature_update_request_datasets_identity; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -10336,6 +19348,22 @@ ALTER TABLE ONLY ops.integrity_observation_scopes
 
 ALTER TABLE ONLY ops.managed_files
     ADD CONSTRAINT uq_managed_files_backend_location_path UNIQUE (storage_backend, location, path);
+
+
+--
+-- Name: manual_provider_dedup_resolutions uq_manual_provider_dedup_resolutions_case; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.manual_provider_dedup_resolutions
+    ADD CONSTRAINT uq_manual_provider_dedup_resolutions_case UNIQUE (case_id);
+
+
+--
+-- Name: manual_provider_dedup_resolutions uq_manual_provider_dedup_resolutions_command; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.manual_provider_dedup_resolutions
+    ADD CONSTRAINT uq_manual_provider_dedup_resolutions_command UNIQUE (command_id);
 
 
 --
@@ -10491,45 +19519,17 @@ ALTER TABLE ONLY provider_sync.source_records
 
 
 --
--- Name: idx_curated_feature_detail_snapshots_etag; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
+-- Name: idx_candidate_transitions_candidate_keyset; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
-CREATE INDEX idx_curated_feature_detail_snapshots_etag ON feature.curated_feature_detail_snapshots USING btree (etag);
-
-
---
--- Name: idx_curated_feature_detail_snapshots_updated; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE INDEX idx_curated_feature_detail_snapshots_updated ON feature.curated_feature_detail_snapshots USING btree (updated_at DESC, curated_feature_id DESC);
+CREATE INDEX idx_candidate_transitions_candidate_keyset ON feature.theme_feature_candidate_transitions USING btree (candidate_id, transition_id DESC);
 
 
 --
--- Name: idx_curated_features_feature; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
+-- Name: idx_candidate_transitions_command; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
-CREATE INDEX idx_curated_features_feature ON feature.curated_features USING btree (feature_id);
-
-
---
--- Name: idx_curated_features_source_status; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE INDEX idx_curated_features_source_status ON feature.curated_features USING btree (source_id, curation_status);
-
-
---
--- Name: idx_curated_features_status_keyset; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE INDEX idx_curated_features_status_keyset ON feature.curated_features USING btree (curation_status, updated_at DESC, curated_feature_id DESC);
-
-
---
--- Name: idx_curated_features_theme_status_score; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE INDEX idx_curated_features_theme_status_score ON feature.curated_features USING btree (theme_id, curation_status, rank_score DESC, curated_feature_id DESC);
+CREATE INDEX idx_candidate_transitions_command ON feature.theme_feature_candidate_transitions USING btree (command_id) WHERE (command_id IS NOT NULL);
 
 
 --
@@ -10600,6 +19600,13 @@ CREATE INDEX idx_curation_items_collection_status_order ON feature.curation_item
 --
 
 CREATE INDEX idx_curation_items_feature_status_collection ON feature.curation_items USING btree (feature_id, source_present, status, collection_id);
+
+
+--
+-- Name: idx_curation_items_service_snapshot_candidates; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX idx_curation_items_service_snapshot_candidates ON feature.curation_items USING btree (collection_id, curation_item_id) INCLUDE (accepted_link_decision_id, feature_id, source_record_key) WHERE ((archived_at IS NULL) AND source_present AND (status = 'included'::text) AND (feature_id IS NOT NULL) AND (accepted_link_decision_id IS NOT NULL));
 
 
 --
@@ -10813,17 +19820,59 @@ CREATE INDEX idx_price_values_feature_observed_identity ON feature.feature_price
 
 
 --
+-- Name: idx_theme_candidate_generation_observations_candidate; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX idx_theme_candidate_generation_observations_candidate ON feature.theme_candidate_generation_observations USING btree (candidate_id, generation_id DESC);
+
+
+--
+-- Name: idx_theme_candidate_generations_rule_completed; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX idx_theme_candidate_generations_rule_completed ON feature.theme_candidate_generations USING btree (rule_id, completed_at DESC, generation_id DESC);
+
+
+--
+-- Name: idx_theme_feature_candidates_feature_state; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX idx_theme_feature_candidates_feature_state ON feature.theme_feature_candidates USING btree (feature_id, review_state, eligibility_present, candidate_id) WHERE (disposition = 'active'::text);
+
+
+--
+-- Name: idx_theme_feature_candidates_open_keyset; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX idx_theme_feature_candidates_open_keyset ON feature.theme_feature_candidates USING btree (updated_at DESC, candidate_id DESC) WHERE ((disposition = 'active'::text) AND (review_state = 'open'::text) AND eligibility_present);
+
+
+--
+-- Name: idx_theme_feature_candidates_rule_open_keyset; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX idx_theme_feature_candidates_rule_open_keyset ON feature.theme_feature_candidates USING btree (rule_id, updated_at DESC, candidate_id DESC) WHERE ((disposition = 'active'::text) AND (review_state = 'open'::text) AND eligibility_present);
+
+
+--
+-- Name: idx_theme_feature_candidates_source_entity; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX idx_theme_feature_candidates_source_entity ON feature.theme_feature_candidates USING btree (source_entity_key, candidate_id);
+
+
+--
+-- Name: idx_theme_feature_candidates_state_keyset; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX idx_theme_feature_candidates_state_keyset ON feature.theme_feature_candidates USING btree (review_state, eligibility_present, updated_at DESC, candidate_id DESC) WHERE (disposition = 'active'::text);
+
+
+--
 -- Name: idx_weather_values_feature_target_known; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
 CREATE INDEX idx_weather_values_feature_target_known ON feature.feature_weather_values USING btree (feature_id, target_at DESC, known_at DESC);
-
-
---
--- Name: uq_curated_features_theme_feature_active; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE UNIQUE INDEX uq_curated_features_theme_feature_active ON feature.curated_features USING btree (theme_id, feature_id) WHERE (archived_at IS NULL);
 
 
 --
@@ -10834,17 +19883,24 @@ CREATE UNIQUE INDEX uq_curation_items_active_source_feature ON feature.curation_
 
 
 --
--- Name: uq_curation_items_legacy_projection_id; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE UNIQUE INDEX uq_curation_items_legacy_projection_id ON feature.curation_items USING btree (legacy_projection_id) WHERE (legacy_projection_id IS NOT NULL);
-
-
---
 -- Name: uq_price_value_summary_reference; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
 CREATE UNIQUE INDEX uq_price_value_summary_reference ON feature.feature_price_values USING btree (price_value_key, feature_id, provider_dataset_id, price_domain, product_key);
+
+
+--
+-- Name: uq_theme_candidate_generation_provider_job; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE UNIQUE INDEX uq_theme_candidate_generation_provider_job ON feature.theme_candidate_generations USING btree (rule_id, source_job_id) WHERE (generation_kind = 'provider_full_snapshot'::text);
+
+
+--
+-- Name: uq_theme_candidate_generation_reconcile_operation; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE UNIQUE INDEX uq_theme_candidate_generation_reconcile_operation ON feature.theme_candidate_generations USING btree (rule_id, reconcile_operation_id) WHERE (generation_kind = ANY (ARRAY['scoped_reconcile'::text, 'rule_reconcile'::text]));
 
 
 --
@@ -10960,10 +20016,24 @@ CREATE INDEX idx_cache_target_snapshot_gc_observations_time ON ops.poi_cache_tar
 
 
 --
+-- Name: idx_cache_target_snapshot_materials_orphaned; Type: INDEX; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX idx_cache_target_snapshot_materials_orphaned ON ops.poi_cache_target_snapshot_materials USING btree (external_system, materialized_at, material_id) WHERE (orphaned_at IS NOT NULL);
+
+
+--
 -- Name: idx_cache_target_snapshots_expiry; Type: INDEX; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
 CREATE INDEX idx_cache_target_snapshots_expiry ON ops.poi_cache_target_snapshots USING btree (expires_at, snapshot_id);
+
+
+--
+-- Name: idx_cache_target_snapshots_material; Type: INDEX; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX idx_cache_target_snapshots_material ON ops.poi_cache_target_snapshots USING btree (material_id, expires_at, snapshot_id);
 
 
 --
@@ -11069,6 +20139,13 @@ CREATE INDEX idx_enrichment_review_queue_source_entity_record ON ops.enrichment_
 --
 
 CREATE INDEX idx_enrichment_review_status_score ON ops.enrichment_review_queue USING btree (status, name_score DESC, review_id DESC);
+
+
+--
+-- Name: idx_feature_reference_reconciliation_events_sequence; Type: INDEX; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX idx_feature_reference_reconciliation_events_sequence ON ops.feature_reference_reconciliation_events USING btree (event_sequence);
 
 
 --
@@ -11282,6 +20359,20 @@ CREATE INDEX idx_managed_files_upload ON ops.managed_files USING btree (upload_i
 
 
 --
+-- Name: idx_manual_provider_dedup_cases_manual_pending; Type: INDEX; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX idx_manual_provider_dedup_cases_manual_pending ON ops.manual_provider_dedup_cases USING btree (manual_feature_id, created_at DESC);
+
+
+--
+-- Name: idx_manual_provider_dedup_cases_provider_pending; Type: INDEX; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX idx_manual_provider_dedup_cases_provider_pending ON ops.manual_provider_dedup_cases USING btree (provider_feature_id, created_at DESC);
+
+
+--
 -- Name: idx_merge_history_loser; Type: INDEX; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -11370,6 +20461,13 @@ CREATE INDEX idx_poi_cache_links_feature ON ops.poi_cache_target_feature_links U
 --
 
 CREATE INDEX idx_poi_cache_target_feature_links_dataset ON ops.poi_cache_target_feature_links USING btree (provider_dataset_id) WHERE (active AND (provider_dataset_id IS NOT NULL));
+
+
+--
+-- Name: idx_poi_cache_target_snapshot_materials_draining; Type: INDEX; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX idx_poi_cache_target_snapshot_materials_draining ON ops.poi_cache_target_snapshot_materials USING btree (material_id) WHERE ((compacted_at IS NOT NULL) AND (compaction_drained_at IS NULL));
 
 
 --
@@ -11520,10 +20618,31 @@ CREATE UNIQUE INDEX uq_cache_target_reconciliation_requests_active_stream ON ops
 
 
 --
+-- Name: uq_cache_target_snapshot_materials_live_identity; Type: INDEX; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE UNIQUE INDEX uq_cache_target_snapshot_materials_live_identity ON ops.poi_cache_target_snapshot_materials USING btree (external_system, restore_epoch, material_high_watermark_relay_order) WHERE (compacted_at IS NULL);
+
+
+--
 -- Name: uq_cache_target_writer_drain_leases_active; Type: INDEX; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
 CREATE UNIQUE INDEX uq_cache_target_writer_drain_leases_active ON ops.cache_target_writer_drain_leases USING btree ((1)) WHERE (state = ANY (ARRAY['draining'::text, 'drained'::text, 'restoring'::text]));
+
+
+--
+-- Name: uq_curation_rule_reconcile_command; Type: INDEX; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE UNIQUE INDEX uq_curation_rule_reconcile_command ON ops.curation_rule_reconcile_operations USING btree (rule_id, command_id) WHERE (command_id IS NOT NULL);
+
+
+--
+-- Name: uq_curation_rule_reconcile_system_operation; Type: INDEX; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE UNIQUE INDEX uq_curation_rule_reconcile_system_operation ON ops.curation_rule_reconcile_operations USING btree (rule_id, system_operation_key) WHERE (system_operation_key IS NOT NULL);
 
 
 --
@@ -11702,6 +20821,48 @@ CREATE TRIGGER trg_curation_import_batches_no_truncate BEFORE TRUNCATE ON featur
 
 
 --
+-- Name: curation_import_plan_revisions trg_curation_import_plan_revisions_immutable; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_import_plan_revisions_immutable BEFORE DELETE OR UPDATE ON feature.curation_import_plan_revisions FOR EACH ROW EXECUTE FUNCTION ops.reject_curation_import_plan_mutation();
+
+
+--
+-- Name: curation_import_plan_revisions trg_curation_import_plan_revisions_no_truncate; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_import_plan_revisions_no_truncate BEFORE TRUNCATE ON feature.curation_import_plan_revisions FOR EACH STATEMENT EXECUTE FUNCTION ops.reject_curation_import_plan_truncate();
+
+
+--
+-- Name: curation_import_plan_rows trg_curation_import_plan_rows_immutable; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_import_plan_rows_immutable BEFORE DELETE OR UPDATE ON feature.curation_import_plan_rows FOR EACH ROW EXECUTE FUNCTION ops.reject_curation_import_plan_mutation();
+
+
+--
+-- Name: curation_import_plan_rows trg_curation_import_plan_rows_no_truncate; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_import_plan_rows_no_truncate BEFORE TRUNCATE ON feature.curation_import_plan_rows FOR EACH STATEMENT EXECUTE FUNCTION ops.reject_curation_import_plan_truncate();
+
+
+--
+-- Name: curation_import_plans trg_curation_import_plans_immutable; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_import_plans_immutable BEFORE DELETE OR UPDATE ON feature.curation_import_plans FOR EACH ROW EXECUTE FUNCTION ops.reject_curation_import_plan_mutation();
+
+
+--
+-- Name: curation_import_plans trg_curation_import_plans_no_truncate; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_import_plans_no_truncate BEFORE TRUNCATE ON feature.curation_import_plans FOR EACH STATEMENT EXECUTE FUNCTION ops.reject_curation_import_plan_truncate();
+
+
+--
 -- Name: curation_import_rows trg_curation_import_rows_append_only; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -11713,20 +20874,6 @@ CREATE TRIGGER trg_curation_import_rows_append_only BEFORE DELETE OR UPDATE ON f
 --
 
 CREATE TRIGGER trg_curation_import_rows_no_truncate BEFORE TRUNCATE ON feature.curation_import_rows FOR EACH STATEMENT EXECUTE FUNCTION feature.reject_curation_history_mutation();
-
-
---
--- Name: curation_items trg_curation_items_legacy_component_identity; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE TRIGGER trg_curation_items_legacy_component_identity BEFORE INSERT ON feature.curation_items FOR EACH ROW EXECUTE FUNCTION feature.set_curation_item_legacy_component_identity();
-
-
---
--- Name: curation_items trg_curation_items_source_rule_decision; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE TRIGGER trg_curation_items_source_rule_decision AFTER INSERT OR UPDATE ON feature.curation_items FOR EACH ROW WHEN (((new.feature_id IS NOT NULL) AND (new.source_record_key IS NOT NULL))) EXECUTE FUNCTION feature.issue_curation_source_rule_decision();
 
 
 --
@@ -11790,6 +20937,20 @@ CREATE TRIGGER trg_feature_areas_public_ready BEFORE INSERT OR UPDATE ON feature
 --
 
 CREATE TRIGGER trg_feature_base_field_values_validate BEFORE INSERT OR UPDATE ON feature.feature_base_field_values FOR EACH ROW EXECUTE FUNCTION feature.validate_feature_base_field_value();
+
+
+--
+-- Name: feature_creation_origins trg_feature_creation_origins_append_only; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_feature_creation_origins_append_only BEFORE DELETE OR UPDATE ON feature.feature_creation_origins FOR EACH ROW EXECUTE FUNCTION feature.reject_manual_feature_evidence_mutation();
+
+
+--
+-- Name: feature_creation_origins trg_feature_creation_origins_no_truncate; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_feature_creation_origins_no_truncate BEFORE TRUNCATE ON feature.feature_creation_origins FOR EACH STATEMENT EXECUTE FUNCTION feature.reject_manual_feature_evidence_mutation();
 
 
 --
@@ -11870,6 +21031,13 @@ CREATE TRIGGER trg_features_legacy_alias AFTER INSERT ON feature.features FOR EA
 
 
 --
+-- Name: features trg_features_manual_feature_hard_purge_fence; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_features_manual_feature_hard_purge_fence BEFORE DELETE ON feature.features FOR EACH ROW EXECUTE FUNCTION feature.reject_manual_feature_hard_purge();
+
+
+--
 -- Name: features trg_features_row_revision; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -11891,10 +21059,80 @@ CREATE TRIGGER trg_features_sync_subtype_public_ready AFTER UPDATE OF lifecycle_
 
 
 --
--- Name: curated_features trg_sync_curated_feature_collection; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+-- Name: manual_feature_identity_claims trg_manual_feature_identity_claims_append_only; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
-CREATE TRIGGER trg_sync_curated_feature_collection AFTER INSERT OR DELETE OR UPDATE ON feature.curated_features FOR EACH ROW EXECUTE FUNCTION feature.sync_curated_feature_collection();
+CREATE TRIGGER trg_manual_feature_identity_claims_append_only BEFORE DELETE OR UPDATE ON feature.manual_feature_identity_claims FOR EACH ROW EXECUTE FUNCTION feature.reject_manual_feature_evidence_mutation();
+
+
+--
+-- Name: manual_feature_identity_claims trg_manual_feature_identity_claims_no_truncate; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_manual_feature_identity_claims_no_truncate BEFORE TRUNCATE ON feature.manual_feature_identity_claims FOR EACH STATEMENT EXECUTE FUNCTION feature.reject_manual_feature_evidence_mutation();
+
+
+--
+-- Name: theme_candidate_generation_observations trg_theme_candidate_generation_observations_immutable; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_theme_candidate_generation_observations_immutable BEFORE DELETE OR UPDATE ON feature.theme_candidate_generation_observations FOR EACH ROW EXECUTE FUNCTION feature.reject_tvn40_append_only_mutation();
+
+
+--
+-- Name: theme_candidate_generation_observations trg_theme_candidate_generation_observations_no_truncate; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_theme_candidate_generation_observations_no_truncate BEFORE TRUNCATE ON feature.theme_candidate_generation_observations FOR EACH STATEMENT EXECUTE FUNCTION feature.reject_tvn40_truncate();
+
+
+--
+-- Name: theme_candidate_generations trg_theme_candidate_generations_immutable; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_theme_candidate_generations_immutable BEFORE DELETE OR UPDATE ON feature.theme_candidate_generations FOR EACH ROW EXECUTE FUNCTION feature.reject_tvn40_append_only_mutation();
+
+
+--
+-- Name: theme_candidate_generations trg_theme_candidate_generations_no_truncate; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_theme_candidate_generations_no_truncate BEFORE TRUNCATE ON feature.theme_candidate_generations FOR EACH STATEMENT EXECUTE FUNCTION feature.reject_tvn40_truncate();
+
+
+--
+-- Name: theme_feature_candidate_transitions trg_theme_feature_candidate_transitions_immutable; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_theme_feature_candidate_transitions_immutable BEFORE DELETE OR UPDATE ON feature.theme_feature_candidate_transitions FOR EACH ROW EXECUTE FUNCTION feature.reject_tvn40_append_only_mutation();
+
+
+--
+-- Name: theme_feature_candidate_transitions trg_theme_feature_candidate_transitions_no_truncate; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_theme_feature_candidate_transitions_no_truncate BEFORE TRUNCATE ON feature.theme_feature_candidate_transitions FOR EACH STATEMENT EXECUTE FUNCTION feature.reject_tvn40_truncate();
+
+
+--
+-- Name: theme_feature_candidates trg_theme_feature_candidates_merge_target; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_theme_feature_candidates_merge_target BEFORE INSERT OR UPDATE OF disposition, merged_into_candidate_id, rule_id, source_entity_key ON feature.theme_feature_candidates FOR EACH ROW EXECUTE FUNCTION feature.validate_theme_candidate_merge_target();
+
+
+--
+-- Name: theme_feature_candidates trg_theme_feature_candidates_no_delete; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_theme_feature_candidates_no_delete BEFORE DELETE ON feature.theme_feature_candidates FOR EACH ROW EXECUTE FUNCTION feature.reject_tvn40_append_only_mutation();
+
+
+--
+-- Name: theme_feature_candidates trg_theme_feature_candidates_no_truncate; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_theme_feature_candidates_no_truncate BEFORE TRUNCATE ON feature.theme_feature_candidates FOR EACH STATEMENT EXECUTE FUNCTION feature.reject_tvn40_truncate();
 
 
 --
@@ -11912,6 +21150,20 @@ CREATE TRIGGER trg_backup_command_execution_transition BEFORE UPDATE ON ops.back
 
 
 --
+-- Name: application_schema_operation_receipts trg_application_schema_operation_receipts_immutable; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_application_schema_operation_receipts_immutable BEFORE DELETE OR UPDATE ON ops.application_schema_operation_receipts FOR EACH ROW EXECUTE FUNCTION ops.reject_domain_command_history_mutation();
+
+
+--
+-- Name: application_schema_operation_receipts trg_application_schema_operation_receipts_no_truncate; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_application_schema_operation_receipts_no_truncate BEFORE TRUNCATE ON ops.application_schema_operation_receipts FOR EACH STATEMENT EXECUTE FUNCTION ops.reject_domain_command_history_mutation();
+
+
+--
 -- Name: backup_command_executions trg_backup_command_executions_no_delete; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -11923,6 +21175,160 @@ CREATE TRIGGER trg_backup_command_executions_no_delete BEFORE DELETE OR TRUNCATE
 --
 
 CREATE TRIGGER trg_cache_target_outbox_assign_relay_order BEFORE INSERT ON ops.poi_cache_target_outbox_events FOR EACH ROW EXECUTE FUNCTION ops.assign_cache_target_outbox_relay_order();
+
+
+--
+-- Name: curation_catalog_command_effects trg_curation_catalog_effects_immutable; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_catalog_effects_immutable BEFORE DELETE OR UPDATE ON ops.curation_catalog_command_effects FOR EACH ROW EXECUTE FUNCTION ops.reject_curation_catalog_effect_mutation();
+
+
+--
+-- Name: curation_catalog_command_effects trg_curation_catalog_effects_no_truncate; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_catalog_effects_no_truncate BEFORE TRUNCATE ON ops.curation_catalog_command_effects FOR EACH STATEMENT EXECUTE FUNCTION ops.reject_curation_catalog_effect_mutation();
+
+
+--
+-- Name: curation_concierge_legacy_owner_manifest trg_curation_concierge_legacy_owner_manifest_immutable; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_concierge_legacy_owner_manifest_immutable BEFORE DELETE OR UPDATE OR TRUNCATE ON ops.curation_concierge_legacy_owner_manifest FOR EACH STATEMENT EXECUTE FUNCTION feature.reject_curation_provider_receipt_mutation();
+
+
+--
+-- Name: curation_cutover_identity_mappings trg_curation_cutover_identity_mappings_immutable; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_cutover_identity_mappings_immutable BEFORE DELETE OR UPDATE ON ops.curation_cutover_identity_mappings FOR EACH ROW EXECUTE FUNCTION feature.reject_tvn40_append_only_mutation();
+
+
+--
+-- Name: curation_cutover_identity_mappings trg_curation_cutover_identity_mappings_no_truncate; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_cutover_identity_mappings_no_truncate BEFORE TRUNCATE ON ops.curation_cutover_identity_mappings FOR EACH STATEMENT EXECUTE FUNCTION feature.reject_tvn40_truncate();
+
+
+--
+-- Name: curation_import_collection_effects trg_curation_import_collection_effects_immutable; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_import_collection_effects_immutable BEFORE DELETE OR UPDATE ON ops.curation_import_collection_effects FOR EACH ROW EXECUTE FUNCTION ops.reject_curation_import_collection_effect_mutation();
+
+
+--
+-- Name: curation_import_collection_effects trg_curation_import_collection_effects_no_truncate; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_import_collection_effects_no_truncate BEFORE TRUNCATE ON ops.curation_import_collection_effects FOR EACH STATEMENT EXECUTE FUNCTION ops.reject_curation_import_collection_effect_truncate();
+
+
+--
+-- Name: curation_import_collection_touches trg_curation_import_collection_touches_immutable; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_import_collection_touches_immutable BEFORE DELETE OR UPDATE ON ops.curation_import_collection_touches FOR EACH ROW EXECUTE FUNCTION ops.reject_curation_import_collection_effect_mutation();
+
+
+--
+-- Name: curation_import_collection_touches trg_curation_import_collection_touches_no_truncate; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_import_collection_touches_no_truncate BEFORE TRUNCATE ON ops.curation_import_collection_touches FOR EACH STATEMENT EXECUTE FUNCTION ops.reject_curation_import_collection_effect_truncate();
+
+
+--
+-- Name: curation_import_plan_claims trg_curation_import_plan_claims_immutable; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_import_plan_claims_immutable BEFORE DELETE OR UPDATE ON ops.curation_import_plan_claims FOR EACH ROW EXECUTE FUNCTION ops.reject_curation_import_plan_mutation();
+
+
+--
+-- Name: curation_import_plan_claims trg_curation_import_plan_claims_no_truncate; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_import_plan_claims_no_truncate BEFORE TRUNCATE ON ops.curation_import_plan_claims FOR EACH STATEMENT EXECUTE FUNCTION ops.reject_curation_import_plan_truncate();
+
+
+--
+-- Name: curation_import_plan_commits trg_curation_import_plan_commits_immutable; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_import_plan_commits_immutable BEFORE DELETE OR UPDATE ON ops.curation_import_plan_commits FOR EACH ROW EXECUTE FUNCTION ops.reject_curation_import_plan_mutation();
+
+
+--
+-- Name: curation_import_plan_commits trg_curation_import_plan_commits_no_truncate; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_import_plan_commits_no_truncate BEFORE TRUNCATE ON ops.curation_import_plan_commits FOR EACH STATEMENT EXECUTE FUNCTION ops.reject_curation_import_plan_truncate();
+
+
+--
+-- Name: curation_provider_root_receipts trg_curation_provider_root_receipts_immutable; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_provider_root_receipts_immutable BEFORE DELETE OR UPDATE OR TRUNCATE ON ops.curation_provider_root_receipts FOR EACH STATEMENT EXECUTE FUNCTION feature.reject_curation_provider_receipt_mutation();
+
+
+--
+-- Name: curation_provider_snapshot_receipts trg_curation_provider_snapshot_receipts_immutable; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_provider_snapshot_receipts_immutable BEFORE DELETE OR UPDATE OR TRUNCATE ON ops.curation_provider_snapshot_receipts FOR EACH STATEMENT EXECUTE FUNCTION feature.reject_curation_provider_receipt_mutation();
+
+
+--
+-- Name: curation_rule_reconcile_operations trg_curation_rule_reconcile_operations_immutable; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_rule_reconcile_operations_immutable BEFORE DELETE OR UPDATE ON ops.curation_rule_reconcile_operations FOR EACH ROW EXECUTE FUNCTION feature.reject_tvn40_append_only_mutation();
+
+
+--
+-- Name: curation_rule_reconcile_operations trg_curation_rule_reconcile_operations_no_truncate; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_rule_reconcile_operations_no_truncate BEFORE TRUNCATE ON ops.curation_rule_reconcile_operations FOR EACH STATEMENT EXECUTE FUNCTION feature.reject_tvn40_truncate();
+
+
+--
+-- Name: curation_rule_reconcile_scope_members trg_curation_rule_reconcile_scope_members_immutable; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_rule_reconcile_scope_members_immutable BEFORE DELETE OR UPDATE ON ops.curation_rule_reconcile_scope_members FOR EACH ROW EXECUTE FUNCTION feature.reject_tvn40_append_only_mutation();
+
+
+--
+-- Name: curation_rule_reconcile_scope_members trg_curation_rule_reconcile_scope_members_no_truncate; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_rule_reconcile_scope_members_no_truncate BEFORE TRUNCATE ON ops.curation_rule_reconcile_scope_members FOR EACH STATEMENT EXECUTE FUNCTION feature.reject_tvn40_truncate();
+
+
+--
+-- Name: curation_source_observation_receipts trg_curation_source_observation_receipts_immutable; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_source_observation_receipts_immutable BEFORE DELETE OR UPDATE ON ops.curation_source_observation_receipts FOR EACH ROW EXECUTE FUNCTION ops.reject_curation_source_observation_receipt_mutation();
+
+
+--
+-- Name: curation_source_observation_receipts trg_curation_source_observation_receipts_no_truncate; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_source_observation_receipts_no_truncate BEFORE TRUNCATE ON ops.curation_source_observation_receipts FOR EACH STATEMENT EXECUTE FUNCTION ops.reject_curation_source_observation_receipt_mutation();
+
+
+--
+-- Name: curation_source_observation_receipts trg_curation_source_observation_sync_concierge; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_curation_source_observation_sync_concierge AFTER INSERT ON ops.curation_source_observation_receipts FOR EACH ROW EXECUTE FUNCTION feature.sync_concierge_catalog_after_observation();
 
 
 --
@@ -12077,6 +21483,55 @@ CREATE TRIGGER trg_enrichment_review_queue_active_dataset_write BEFORE INSERT OR
 --
 
 CREATE TRIGGER trg_feature_overrides_validate BEFORE INSERT OR UPDATE ON ops.feature_overrides FOR EACH ROW EXECUTE FUNCTION feature.validate_feature_override_value();
+
+
+--
+-- Name: feature_reference_reconciliation_acks trg_feature_reference_reconciliation_acks_append_only; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_feature_reference_reconciliation_acks_append_only BEFORE DELETE OR UPDATE ON ops.feature_reference_reconciliation_acks FOR EACH ROW EXECUTE FUNCTION feature.reject_manual_provider_dedup_evidence_mutation();
+
+
+--
+-- Name: feature_reference_reconciliation_acks trg_feature_reference_reconciliation_acks_no_truncate; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_feature_reference_reconciliation_acks_no_truncate BEFORE TRUNCATE ON ops.feature_reference_reconciliation_acks FOR EACH STATEMENT EXECUTE FUNCTION feature.reject_manual_provider_dedup_evidence_mutation();
+
+
+--
+-- Name: feature_reference_reconciliation_events trg_feature_reference_reconciliation_events_append_only; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_feature_reference_reconciliation_events_append_only BEFORE DELETE OR UPDATE ON ops.feature_reference_reconciliation_events FOR EACH ROW EXECUTE FUNCTION feature.reject_manual_provider_dedup_evidence_mutation();
+
+
+--
+-- Name: feature_reference_reconciliation_events trg_feature_reference_reconciliation_events_no_truncate; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_feature_reference_reconciliation_events_no_truncate BEFORE TRUNCATE ON ops.feature_reference_reconciliation_events FOR EACH STATEMENT EXECUTE FUNCTION feature.reject_manual_provider_dedup_evidence_mutation();
+
+
+--
+-- Name: feature_reference_reconciliation_leases trg_feature_reference_reconciliation_leases_initial_cursor; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_feature_reference_reconciliation_leases_initial_cursor BEFORE INSERT OR UPDATE OF principal_id, acked_through_sequence ON ops.feature_reference_reconciliation_leases FOR EACH ROW EXECUTE FUNCTION feature.assert_feature_reference_reconciliation_lease_cursor();
+
+
+--
+-- Name: feature_reference_reconciliation_subscriptions trg_feature_reference_reconciliation_subscriptions_append_only; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_feature_reference_reconciliation_subscriptions_append_only BEFORE DELETE OR UPDATE ON ops.feature_reference_reconciliation_subscriptions FOR EACH ROW EXECUTE FUNCTION feature.reject_manual_provider_dedup_evidence_mutation();
+
+
+--
+-- Name: feature_reference_reconciliation_subscriptions trg_feature_reference_reconciliation_subscriptions_no_truncate; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_feature_reference_reconciliation_subscriptions_no_truncate BEFORE TRUNCATE ON ops.feature_reference_reconciliation_subscriptions FOR EACH STATEMENT EXECUTE FUNCTION feature.reject_manual_provider_dedup_evidence_mutation();
 
 
 --
@@ -12283,6 +21738,34 @@ CREATE TRIGGER trg_managed_files_dataset_ownership BEFORE INSERT OR DELETE OR UP
 
 
 --
+-- Name: manual_provider_dedup_cases trg_manual_provider_dedup_cases_append_only; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_manual_provider_dedup_cases_append_only BEFORE DELETE OR UPDATE ON ops.manual_provider_dedup_cases FOR EACH ROW EXECUTE FUNCTION feature.reject_manual_provider_dedup_evidence_mutation();
+
+
+--
+-- Name: manual_provider_dedup_cases trg_manual_provider_dedup_cases_no_truncate; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_manual_provider_dedup_cases_no_truncate BEFORE TRUNCATE ON ops.manual_provider_dedup_cases FOR EACH STATEMENT EXECUTE FUNCTION feature.reject_manual_provider_dedup_evidence_mutation();
+
+
+--
+-- Name: manual_provider_dedup_resolutions trg_manual_provider_dedup_resolutions_append_only; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_manual_provider_dedup_resolutions_append_only BEFORE DELETE OR UPDATE ON ops.manual_provider_dedup_resolutions FOR EACH ROW EXECUTE FUNCTION feature.reject_manual_provider_dedup_evidence_mutation();
+
+
+--
+-- Name: manual_provider_dedup_resolutions trg_manual_provider_dedup_resolutions_no_truncate; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_manual_provider_dedup_resolutions_no_truncate BEFORE TRUNCATE ON ops.manual_provider_dedup_resolutions FOR EACH STATEMENT EXECUTE FUNCTION feature.reject_manual_provider_dedup_evidence_mutation();
+
+
+--
 -- Name: offline_upload_command_executions trg_offline_upload_command_execution_transition; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -12360,17 +21843,45 @@ CREATE TRIGGER trg_poi_cache_target_restore_fences_no_truncate BEFORE TRUNCATE O
 
 
 --
--- Name: poi_cache_target_snapshot_items trg_poi_cache_target_snapshot_items_append_only; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+-- Name: poi_cache_target_snapshot_material_items trg_poi_cache_target_snapshot_material_items_append_only; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
-CREATE TRIGGER trg_poi_cache_target_snapshot_items_append_only BEFORE UPDATE ON ops.poi_cache_target_snapshot_items FOR EACH ROW EXECUTE FUNCTION ops.reject_cache_target_history_mutation();
+CREATE TRIGGER trg_poi_cache_target_snapshot_material_items_append_only BEFORE UPDATE ON ops.poi_cache_target_snapshot_material_items FOR EACH ROW EXECUTE FUNCTION ops.reject_cache_target_history_mutation();
 
 
 --
--- Name: poi_cache_target_snapshot_items trg_poi_cache_target_snapshot_items_no_truncate; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+-- Name: poi_cache_target_snapshot_material_items trg_poi_cache_target_snapshot_material_items_compaction_only_de; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
-CREATE TRIGGER trg_poi_cache_target_snapshot_items_no_truncate BEFORE TRUNCATE ON ops.poi_cache_target_snapshot_items FOR EACH STATEMENT EXECUTE FUNCTION ops.reject_cache_target_history_mutation();
+CREATE TRIGGER trg_poi_cache_target_snapshot_material_items_compaction_only_de BEFORE DELETE ON ops.poi_cache_target_snapshot_material_items FOR EACH ROW EXECUTE FUNCTION ops.reject_live_snapshot_material_item_delete();
+
+
+--
+-- Name: poi_cache_target_snapshot_material_items trg_poi_cache_target_snapshot_material_items_no_compacted_inser; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_poi_cache_target_snapshot_material_items_no_compacted_inser BEFORE INSERT ON ops.poi_cache_target_snapshot_material_items FOR EACH ROW EXECUTE FUNCTION ops.reject_snapshot_material_item_insert();
+
+
+--
+-- Name: poi_cache_target_snapshot_material_items trg_poi_cache_target_snapshot_material_items_no_truncate; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_poi_cache_target_snapshot_material_items_no_truncate BEFORE TRUNCATE ON ops.poi_cache_target_snapshot_material_items FOR EACH STATEMENT EXECUTE FUNCTION ops.reject_cache_target_history_mutation();
+
+
+--
+-- Name: poi_cache_target_snapshot_materials trg_poi_cache_target_snapshot_materials_compaction_only; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_poi_cache_target_snapshot_materials_compaction_only BEFORE UPDATE ON ops.poi_cache_target_snapshot_materials FOR EACH ROW EXECUTE FUNCTION ops.reject_snapshot_material_mutation();
+
+
+--
+-- Name: poi_cache_target_snapshot_materials trg_poi_cache_target_snapshot_materials_no_truncate; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_poi_cache_target_snapshot_materials_no_truncate BEFORE TRUNCATE ON ops.poi_cache_target_snapshot_materials FOR EACH STATEMENT EXECUTE FUNCTION ops.reject_cache_target_history_mutation();
 
 
 --
@@ -12378,6 +21889,20 @@ CREATE TRIGGER trg_poi_cache_target_snapshot_items_no_truncate BEFORE TRUNCATE O
 --
 
 CREATE TRIGGER trg_poi_cache_target_snapshots_append_only BEFORE UPDATE ON ops.poi_cache_target_snapshots FOR EACH ROW EXECUTE FUNCTION ops.reject_cache_target_history_mutation();
+
+
+--
+-- Name: poi_cache_target_snapshots trg_poi_cache_target_snapshots_mark_material_orphaned; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_poi_cache_target_snapshots_mark_material_orphaned AFTER DELETE ON ops.poi_cache_target_snapshots FOR EACH ROW EXECUTE FUNCTION ops.mark_snapshot_material_orphaned();
+
+
+--
+-- Name: poi_cache_target_snapshots trg_poi_cache_target_snapshots_no_orphaned_material; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_poi_cache_target_snapshots_no_orphaned_material BEFORE INSERT OR UPDATE OF material_id ON ops.poi_cache_target_snapshots FOR EACH ROW EXECUTE FUNCTION ops.reject_snapshot_receipt_for_orphaned_material();
 
 
 --
@@ -12413,6 +21938,27 @@ CREATE TRIGGER trg_poi_cache_targets_lock_version BEFORE UPDATE ON ops.poi_cache
 --
 
 CREATE TRIGGER trg_poi_cache_targets_ops_live_revision AFTER INSERT OR DELETE OR UPDATE OR TRUNCATE ON ops.poi_cache_targets FOR EACH STATEMENT EXECUTE FUNCTION ops.bump_ops_live_topic_revision('dataset_projection');
+
+
+--
+-- Name: import_job_events trg_provider_feature_event_typed_command; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_provider_feature_event_typed_command BEFORE INSERT OR DELETE OR UPDATE ON ops.import_job_events FOR EACH ROW EXECUTE FUNCTION ops.reject_provider_feature_event_raw_dml();
+
+
+--
+-- Name: import_job_datasets trg_provider_feature_membership_typed_command; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_provider_feature_membership_typed_command BEFORE INSERT OR DELETE OR UPDATE ON ops.import_job_datasets FOR EACH ROW EXECUTE FUNCTION ops.reject_provider_feature_membership_raw_dml();
+
+
+--
+-- Name: import_jobs trg_provider_feature_operation_typed_command; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_provider_feature_operation_typed_command BEFORE INSERT OR DELETE OR UPDATE ON ops.import_jobs FOR EACH ROW EXECUTE FUNCTION ops.reject_provider_feature_operation_raw_dml();
 
 
 --
@@ -12565,38 +22111,6 @@ CREATE TRIGGER trg_source_records_immutable BEFORE UPDATE ON provider_sync.sourc
 
 
 --
--- Name: curated_features curated_features_feature_id_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.curated_features
-    ADD CONSTRAINT curated_features_feature_id_fkey FOREIGN KEY (feature_id) REFERENCES feature.features(feature_id) ON DELETE CASCADE;
-
-
---
--- Name: curated_features curated_features_source_id_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.curated_features
-    ADD CONSTRAINT curated_features_source_id_fkey FOREIGN KEY (source_id) REFERENCES feature.curated_sources(source_id) ON DELETE RESTRICT;
-
-
---
--- Name: curated_features curated_features_source_record_key_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.curated_features
-    ADD CONSTRAINT curated_features_source_record_key_fkey FOREIGN KEY (source_record_key) REFERENCES provider_sync.source_records(source_record_key) ON DELETE SET NULL;
-
-
---
--- Name: curated_features curated_features_theme_id_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.curated_features
-    ADD CONSTRAINT curated_features_theme_id_fkey FOREIGN KEY (theme_id) REFERENCES feature.curated_themes(theme_id) ON DELETE CASCADE;
-
-
---
 -- Name: curated_source_rules curated_source_rules_source_id_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -12613,14 +22127,6 @@ ALTER TABLE ONLY feature.curated_source_rules
 
 
 --
--- Name: curated_feature_detail_snapshots curated_tripmate_copy_snapshots_curated_feature_id_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.curated_feature_detail_snapshots
-    ADD CONSTRAINT curated_tripmate_copy_snapshots_curated_feature_id_fkey FOREIGN KEY (curated_feature_id) REFERENCES feature.curated_features(curated_feature_id) ON DELETE CASCADE;
-
-
---
 -- Name: curation_collections curation_collections_source_id_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -12634,6 +22140,38 @@ ALTER TABLE ONLY feature.curation_collections
 
 ALTER TABLE ONLY feature.curation_collections
     ADD CONSTRAINT curation_collections_theme_id_fkey FOREIGN KEY (theme_id) REFERENCES feature.curated_themes(theme_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_import_batches curation_import_batches_command_id_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.curation_import_batches
+    ADD CONSTRAINT curation_import_batches_command_id_fkey FOREIGN KEY (command_id) REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_import_plan_revisions curation_import_plan_revisions_import_plan_id_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.curation_import_plan_revisions
+    ADD CONSTRAINT curation_import_plan_revisions_import_plan_id_fkey FOREIGN KEY (import_plan_id) REFERENCES feature.curation_import_plans(import_plan_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_import_plan_rows curation_import_plan_rows_import_plan_id_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.curation_import_plan_rows
+    ADD CONSTRAINT curation_import_plan_rows_import_plan_id_fkey FOREIGN KEY (import_plan_id) REFERENCES feature.curation_import_plans(import_plan_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_import_plans curation_import_plans_preview_command_id_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.curation_import_plans
+    ADD CONSTRAINT curation_import_plans_preview_command_id_fkey FOREIGN KEY (preview_command_id) REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT;
 
 
 --
@@ -12725,11 +22263,27 @@ ALTER TABLE ONLY feature.feature_weather_values
 
 
 --
+-- Name: curated_source_rules fk_curated_source_rules_owner_provider_dataset; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.curated_source_rules
+    ADD CONSTRAINT fk_curated_source_rules_owner_provider_dataset FOREIGN KEY (owner_provider_dataset_id) REFERENCES provider_sync.provider_datasets(provider_dataset_id) ON DELETE RESTRICT;
+
+
+--
 -- Name: curated_sources fk_curated_sources_dataset; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
 ALTER TABLE ONLY feature.curated_sources
     ADD CONSTRAINT fk_curated_sources_dataset FOREIGN KEY (provider_dataset_id) REFERENCES provider_sync.provider_datasets(provider_dataset_id);
+
+
+--
+-- Name: curated_themes fk_curated_themes_owner_provider_dataset; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.curated_themes
+    ADD CONSTRAINT fk_curated_themes_owner_provider_dataset FOREIGN KEY (owner_provider_dataset_id) REFERENCES provider_sync.provider_datasets(provider_dataset_id) ON DELETE RESTRICT;
 
 
 --
@@ -12745,7 +22299,7 @@ ALTER TABLE ONLY feature.curation_import_rows
 --
 
 ALTER TABLE ONLY feature.curation_import_rows
-    ADD CONSTRAINT fk_curation_import_rows_item FOREIGN KEY (curation_item_id) REFERENCES feature.curation_items(curation_item_id) ON UPDATE CASCADE ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_curation_import_rows_item FOREIGN KEY (curation_item_id) REFERENCES feature.curation_items(curation_item_id) ON DELETE RESTRICT;
 
 
 --
@@ -12765,19 +22319,11 @@ ALTER TABLE ONLY feature.curation_items
 
 
 --
--- Name: curation_items fk_curation_items_legacy_projection_id_curated_features; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY feature.curation_items
-    ADD CONSTRAINT fk_curation_items_legacy_projection_id_curated_features FOREIGN KEY (legacy_projection_id) REFERENCES feature.curated_features(curated_feature_id) DEFERRABLE INITIALLY DEFERRED;
-
-
---
 -- Name: curation_link_decisions fk_curation_link_decisions_import_row; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
 ALTER TABLE ONLY feature.curation_link_decisions
-    ADD CONSTRAINT fk_curation_link_decisions_import_row FOREIGN KEY (import_row_id, curation_item_id) REFERENCES feature.curation_import_rows(import_row_id, curation_item_id) ON UPDATE CASCADE ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_curation_link_decisions_import_row FOREIGN KEY (import_row_id, curation_item_id) REFERENCES feature.curation_import_rows(import_row_id, curation_item_id) ON DELETE RESTRICT;
 
 
 --
@@ -12785,7 +22331,7 @@ ALTER TABLE ONLY feature.curation_link_decisions
 --
 
 ALTER TABLE ONLY feature.curation_link_decisions
-    ADD CONSTRAINT fk_curation_link_decisions_item FOREIGN KEY (curation_item_id) REFERENCES feature.curation_items(curation_item_id) ON UPDATE CASCADE ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_curation_link_decisions_item FOREIGN KEY (curation_item_id) REFERENCES feature.curation_items(curation_item_id) ON DELETE RESTRICT;
 
 
 --
@@ -12793,7 +22339,7 @@ ALTER TABLE ONLY feature.curation_link_decisions
 --
 
 ALTER TABLE ONLY feature.curation_link_decisions
-    ADD CONSTRAINT fk_curation_link_decisions_supersedes FOREIGN KEY (supersedes_decision_id, curation_item_id) REFERENCES feature.curation_link_decisions(decision_id, curation_item_id) ON UPDATE CASCADE ON DELETE RESTRICT;
+    ADD CONSTRAINT fk_curation_link_decisions_supersedes FOREIGN KEY (supersedes_decision_id, curation_item_id) REFERENCES feature.curation_link_decisions(decision_id, curation_item_id) ON DELETE RESTRICT;
 
 
 --
@@ -12901,6 +22447,22 @@ ALTER TABLE ONLY feature.feature_base_field_values
 
 
 --
+-- Name: feature_creation_origins fk_feature_creation_origins_claim; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.feature_creation_origins
+    ADD CONSTRAINT fk_feature_creation_origins_claim FOREIGN KEY (feature_id, creation_command_id) REFERENCES feature.manual_feature_identity_claims(feature_id, claimed_by_command_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: feature_creation_origins fk_feature_creation_origins_command; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.feature_creation_origins
+    ADD CONSTRAINT fk_feature_creation_origins_command FOREIGN KEY (creation_command_id) REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT;
+
+
+--
 -- Name: feature_events fk_feature_events_feature_kind; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -12973,6 +22535,14 @@ ALTER TABLE ONLY feature.features
 
 
 --
+-- Name: manual_feature_identity_claims fk_manual_feature_identity_claims_command; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.manual_feature_identity_claims
+    ADD CONSTRAINT fk_manual_feature_identity_claims_command FOREIGN KEY (claimed_by_command_id) REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT;
+
+
+--
 -- Name: feature_price_values fk_price_value_source_dataset; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -12989,6 +22559,14 @@ ALTER TABLE ONLY feature.feature_price_values
 
 
 --
+-- Name: theme_feature_candidates fk_theme_feature_candidates_source_record; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.theme_feature_candidates
+    ADD CONSTRAINT fk_theme_feature_candidates_source_record FOREIGN KEY (source_entity_key, source_record_key) REFERENCES provider_sync.source_records(source_entity_key, source_record_key) ON DELETE RESTRICT;
+
+
+--
 -- Name: feature_weather_values fk_weather_value_source_dataset; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -13002,6 +22580,294 @@ ALTER TABLE ONLY feature.feature_weather_values
 
 ALTER TABLE ONLY feature.feature_weather_values
     ADD CONSTRAINT fk_weather_value_source_lineage FOREIGN KEY (source_record_key, source_entity_key, known_at) REFERENCES provider_sync.source_records(source_record_key, source_entity_key, fetched_at) ON DELETE RESTRICT;
+
+
+--
+-- Name: theme_candidate_generation_observations theme_candidate_generation_observations_generation_id_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.theme_candidate_generation_observations
+    ADD CONSTRAINT theme_candidate_generation_observations_generation_id_fkey FOREIGN KEY (generation_id) REFERENCES feature.theme_candidate_generations(generation_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: theme_candidate_generations theme_candidate_generations_command_id_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.theme_candidate_generations
+    ADD CONSTRAINT theme_candidate_generations_command_id_fkey FOREIGN KEY (command_id) REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: theme_candidate_generations theme_candidate_generations_reconcile_operation_id_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.theme_candidate_generations
+    ADD CONSTRAINT theme_candidate_generations_reconcile_operation_id_fkey FOREIGN KEY (reconcile_operation_id) REFERENCES ops.curation_rule_reconcile_operations(operation_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: theme_candidate_generations theme_candidate_generations_rule_id_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.theme_candidate_generations
+    ADD CONSTRAINT theme_candidate_generations_rule_id_fkey FOREIGN KEY (rule_id) REFERENCES feature.curated_source_rules(rule_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: theme_candidate_generations theme_candidate_generations_source_job_id_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.theme_candidate_generations
+    ADD CONSTRAINT theme_candidate_generations_source_job_id_fkey FOREIGN KEY (source_job_id) REFERENCES ops.import_jobs(job_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: theme_feature_candidate_transitions theme_feature_candidate_transitions_command_id_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.theme_feature_candidate_transitions
+    ADD CONSTRAINT theme_feature_candidate_transitions_command_id_fkey FOREIGN KEY (command_id) REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: theme_feature_candidate_transitions theme_feature_candidate_transitions_generation_id_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.theme_feature_candidate_transitions
+    ADD CONSTRAINT theme_feature_candidate_transitions_generation_id_fkey FOREIGN KEY (generation_id) REFERENCES feature.theme_candidate_generations(generation_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: theme_feature_candidates theme_feature_candidates_feature_id_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.theme_feature_candidates
+    ADD CONSTRAINT theme_feature_candidates_feature_id_fkey FOREIGN KEY (feature_id) REFERENCES feature.features(feature_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: theme_feature_candidates theme_feature_candidates_merged_into_candidate_id_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.theme_feature_candidates
+    ADD CONSTRAINT theme_feature_candidates_merged_into_candidate_id_fkey FOREIGN KEY (merged_into_candidate_id) REFERENCES feature.theme_feature_candidates(candidate_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: theme_feature_candidates theme_feature_candidates_rule_id_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.theme_feature_candidates
+    ADD CONSTRAINT theme_feature_candidates_rule_id_fkey FOREIGN KEY (rule_id) REFERENCES feature.curated_source_rules(rule_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: theme_feature_candidates theme_feature_candidates_source_entity_key_fkey; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.theme_feature_candidates
+    ADD CONSTRAINT theme_feature_candidates_source_entity_key_fkey FOREIGN KEY (source_entity_key) REFERENCES provider_sync.source_entities(source_entity_key) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_catalog_command_effects curation_catalog_command_effects_command_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_catalog_command_effects
+    ADD CONSTRAINT curation_catalog_command_effects_command_id_fkey FOREIGN KEY (command_id) REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_cutover_identity_mappings curation_cutover_identity_mappings_collection_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_cutover_identity_mappings
+    ADD CONSTRAINT curation_cutover_identity_mappings_collection_id_fkey FOREIGN KEY (collection_id) REFERENCES feature.curation_collections(collection_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_cutover_identity_mappings curation_cutover_identity_mappings_curation_item_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_cutover_identity_mappings
+    ADD CONSTRAINT curation_cutover_identity_mappings_curation_item_id_fkey FOREIGN KEY (curation_item_id) REFERENCES feature.curation_items(curation_item_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_import_collection_effects curation_import_collection_effects_collection_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_import_collection_effects
+    ADD CONSTRAINT curation_import_collection_effects_collection_id_fkey FOREIGN KEY (collection_id) REFERENCES feature.curation_collections(collection_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_import_collection_effects curation_import_collection_effects_command_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_import_collection_effects
+    ADD CONSTRAINT curation_import_collection_effects_command_id_fkey FOREIGN KEY (command_id) REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_import_collection_touches curation_import_collection_touche_command_id_collection_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_import_collection_touches
+    ADD CONSTRAINT curation_import_collection_touche_command_id_collection_id_fkey FOREIGN KEY (command_id, collection_id) REFERENCES ops.curation_import_collection_effects(command_id, collection_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_import_plan_claims curation_import_plan_claims_command_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_import_plan_claims
+    ADD CONSTRAINT curation_import_plan_claims_command_id_fkey FOREIGN KEY (command_id) REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_import_plan_claims curation_import_plan_claims_import_plan_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_import_plan_claims
+    ADD CONSTRAINT curation_import_plan_claims_import_plan_id_fkey FOREIGN KEY (import_plan_id) REFERENCES feature.curation_import_plans(import_plan_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_import_plan_commits curation_import_plan_commits_command_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_import_plan_commits
+    ADD CONSTRAINT curation_import_plan_commits_command_id_fkey FOREIGN KEY (command_id) REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_import_plan_commits curation_import_plan_commits_import_batch_id_command_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_import_plan_commits
+    ADD CONSTRAINT curation_import_plan_commits_import_batch_id_command_id_fkey FOREIGN KEY (import_batch_id, command_id) REFERENCES feature.curation_import_batches(import_batch_id, command_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_import_plan_commits curation_import_plan_commits_import_batch_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_import_plan_commits
+    ADD CONSTRAINT curation_import_plan_commits_import_batch_id_fkey FOREIGN KEY (import_batch_id) REFERENCES feature.curation_import_batches(import_batch_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_import_plan_commits curation_import_plan_commits_import_plan_id_command_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_import_plan_commits
+    ADD CONSTRAINT curation_import_plan_commits_import_plan_id_command_id_fkey FOREIGN KEY (import_plan_id, command_id) REFERENCES ops.curation_import_plan_claims(import_plan_id, command_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_import_plan_commits curation_import_plan_commits_import_plan_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_import_plan_commits
+    ADD CONSTRAINT curation_import_plan_commits_import_plan_id_fkey FOREIGN KEY (import_plan_id) REFERENCES feature.curation_import_plans(import_plan_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_provider_root_receipts curation_provider_root_receipts_root_job_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_provider_root_receipts
+    ADD CONSTRAINT curation_provider_root_receipts_root_job_id_fkey FOREIGN KEY (root_job_id) REFERENCES ops.import_jobs(job_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_provider_snapshot_receipts curation_provider_snapshot_receipts_provider_dataset_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_provider_snapshot_receipts
+    ADD CONSTRAINT curation_provider_snapshot_receipts_provider_dataset_id_fkey FOREIGN KEY (provider_dataset_id) REFERENCES provider_sync.provider_datasets(provider_dataset_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_provider_snapshot_receipts curation_provider_snapshot_receipts_root_job_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_provider_snapshot_receipts
+    ADD CONSTRAINT curation_provider_snapshot_receipts_root_job_id_fkey FOREIGN KEY (root_job_id) REFERENCES ops.import_jobs(job_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_provider_snapshot_receipts curation_provider_snapshot_receipts_source_job_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_provider_snapshot_receipts
+    ADD CONSTRAINT curation_provider_snapshot_receipts_source_job_id_fkey FOREIGN KEY (source_job_id) REFERENCES ops.import_jobs(job_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_rule_reconcile_operations curation_rule_reconcile_operations_command_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_rule_reconcile_operations
+    ADD CONSTRAINT curation_rule_reconcile_operations_command_id_fkey FOREIGN KEY (command_id) REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_rule_reconcile_operations curation_rule_reconcile_operations_rule_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_rule_reconcile_operations
+    ADD CONSTRAINT curation_rule_reconcile_operations_rule_id_fkey FOREIGN KEY (rule_id) REFERENCES feature.curated_source_rules(rule_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_rule_reconcile_scope_members curation_rule_reconcile_scope_members_operation_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_rule_reconcile_scope_members
+    ADD CONSTRAINT curation_rule_reconcile_scope_members_operation_id_fkey FOREIGN KEY (operation_id) REFERENCES ops.curation_rule_reconcile_operations(operation_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_source_observation_receipts curation_source_observation_receipts_import_job_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_source_observation_receipts
+    ADD CONSTRAINT curation_source_observation_receipts_import_job_id_fkey FOREIGN KEY (import_job_id) REFERENCES ops.import_jobs(job_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: curation_source_observation_receipts curation_source_observation_receipts_source_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.curation_source_observation_receipts
+    ADD CONSTRAINT curation_source_observation_receipts_source_id_fkey FOREIGN KEY (source_id) REFERENCES feature.curated_sources(source_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: feature_requests feature_requests_resolution_command_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_requests
+    ADD CONSTRAINT feature_requests_resolution_command_id_fkey FOREIGN KEY (resolution_command_id) REFERENCES ops.domain_commands(command_id);
+
+
+--
+-- Name: feature_requests feature_requests_resolved_feature_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_requests
+    ADD CONSTRAINT feature_requests_resolved_feature_id_fkey FOREIGN KEY (resolved_feature_id) REFERENCES feature.features(feature_uuid);
+
+
+--
+-- Name: feature_requests feature_requests_submission_command_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_requests
+    ADD CONSTRAINT feature_requests_submission_command_id_fkey FOREIGN KEY (submission_command_id) REFERENCES ops.domain_commands(command_id);
 
 
 --
@@ -13197,11 +23063,27 @@ ALTER TABLE ONLY ops.poi_cache_target_restore_fences
 
 
 --
--- Name: poi_cache_target_snapshot_items fk_cache_target_snapshot_items_snapshot; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+-- Name: poi_cache_target_snapshot_material_items fk_cache_target_snapshot_material_items_material; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
-ALTER TABLE ONLY ops.poi_cache_target_snapshot_items
-    ADD CONSTRAINT fk_cache_target_snapshot_items_snapshot FOREIGN KEY (snapshot_id, external_system) REFERENCES ops.poi_cache_target_snapshots(snapshot_id, external_system) ON DELETE CASCADE;
+ALTER TABLE ONLY ops.poi_cache_target_snapshot_material_items
+    ADD CONSTRAINT fk_cache_target_snapshot_material_items_material FOREIGN KEY (material_id) REFERENCES ops.poi_cache_target_snapshot_materials(material_id) ON DELETE CASCADE;
+
+
+--
+-- Name: poi_cache_target_snapshot_materials fk_cache_target_snapshot_materials_stream; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.poi_cache_target_snapshot_materials
+    ADD CONSTRAINT fk_cache_target_snapshot_materials_stream FOREIGN KEY (external_system) REFERENCES ops.poi_cache_target_streams(external_system) ON DELETE RESTRICT;
+
+
+--
+-- Name: poi_cache_target_snapshots fk_cache_target_snapshots_material; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.poi_cache_target_snapshots
+    ADD CONSTRAINT fk_cache_target_snapshots_material FOREIGN KEY (material_id, external_system) REFERENCES ops.poi_cache_target_snapshot_materials(material_id, external_system) ON DELETE RESTRICT;
 
 
 --
@@ -13445,6 +23327,86 @@ ALTER TABLE ONLY ops.feature_overrides
 
 
 --
+-- Name: feature_reference_reconciliation_acks fk_feature_reference_reconciliation_acks_command; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_reference_reconciliation_acks
+    ADD CONSTRAINT fk_feature_reference_reconciliation_acks_command FOREIGN KEY (command_id) REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: feature_reference_reconciliation_acks fk_feature_reference_reconciliation_acks_event; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_reference_reconciliation_acks
+    ADD CONSTRAINT fk_feature_reference_reconciliation_acks_event FOREIGN KEY (event_id) REFERENCES ops.feature_reference_reconciliation_events(event_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: feature_reference_reconciliation_acks fk_feature_reference_reconciliation_acks_principal; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_reference_reconciliation_acks
+    ADD CONSTRAINT fk_feature_reference_reconciliation_acks_principal FOREIGN KEY (principal_id) REFERENCES ops.feature_reference_reconciliation_subscriptions(principal_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: feature_reference_reconciliation_events fk_feature_reference_reconciliation_events_case; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_reference_reconciliation_events
+    ADD CONSTRAINT fk_feature_reference_reconciliation_events_case FOREIGN KEY (case_id) REFERENCES ops.manual_provider_dedup_cases(case_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: feature_reference_reconciliation_events fk_feature_reference_reconciliation_events_command; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_reference_reconciliation_events
+    ADD CONSTRAINT fk_feature_reference_reconciliation_events_command FOREIGN KEY (command_id) REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: feature_reference_reconciliation_events fk_feature_reference_reconciliation_events_old_identity; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_reference_reconciliation_events
+    ADD CONSTRAINT fk_feature_reference_reconciliation_events_old_identity FOREIGN KEY (old_feature_id, old_feature_uuid) REFERENCES feature.features(feature_id, feature_uuid) ON DELETE RESTRICT;
+
+
+--
+-- Name: feature_reference_reconciliation_events fk_feature_reference_reconciliation_events_replacement_identity; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_reference_reconciliation_events
+    ADD CONSTRAINT fk_feature_reference_reconciliation_events_replacement_identity FOREIGN KEY (replacement_feature_id, replacement_feature_uuid) REFERENCES feature.features(feature_id, feature_uuid) ON DELETE RESTRICT;
+
+
+--
+-- Name: feature_reference_reconciliation_events fk_feature_reference_reconciliation_events_resolution; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_reference_reconciliation_events
+    ADD CONSTRAINT fk_feature_reference_reconciliation_events_resolution FOREIGN KEY (resolution_id) REFERENCES ops.manual_provider_dedup_resolutions(resolution_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: feature_reference_reconciliation_events fk_feature_reference_reconciliation_events_transition; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_reference_reconciliation_events
+    ADD CONSTRAINT fk_feature_reference_reconciliation_events_transition FOREIGN KEY (manual_retire_transition_id) REFERENCES feature.feature_state_transitions(transition_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: feature_reference_reconciliation_leases fk_feature_reference_reconciliation_leases_principal; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_reference_reconciliation_leases
+    ADD CONSTRAINT fk_feature_reference_reconciliation_leases_principal FOREIGN KEY (principal_id) REFERENCES ops.feature_reference_reconciliation_subscriptions(principal_id) ON DELETE RESTRICT;
+
+
+--
 -- Name: feature_update_request_datasets fk_feature_update_request_datasets_exact_operation_scope; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -13570,6 +23532,86 @@ ALTER TABLE ONLY ops.managed_files
 
 ALTER TABLE ONLY ops.managed_files
     ADD CONSTRAINT fk_managed_files_origin_import_job_id_import_jobs FOREIGN KEY (origin_import_job_id) REFERENCES ops.import_jobs(job_id) ON DELETE SET NULL;
+
+
+--
+-- Name: manual_provider_dedup_cases fk_manual_provider_dedup_cases_manual_claim; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.manual_provider_dedup_cases
+    ADD CONSTRAINT fk_manual_provider_dedup_cases_manual_claim FOREIGN KEY (manual_feature_uuid, manual_creation_command_id) REFERENCES feature.manual_feature_identity_claims(feature_id, claimed_by_command_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: manual_provider_dedup_cases fk_manual_provider_dedup_cases_manual_identity; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.manual_provider_dedup_cases
+    ADD CONSTRAINT fk_manual_provider_dedup_cases_manual_identity FOREIGN KEY (manual_feature_id, manual_feature_uuid) REFERENCES feature.features(feature_id, feature_uuid) ON DELETE RESTRICT;
+
+
+--
+-- Name: manual_provider_dedup_cases fk_manual_provider_dedup_cases_manual_origin; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.manual_provider_dedup_cases
+    ADD CONSTRAINT fk_manual_provider_dedup_cases_manual_origin FOREIGN KEY (manual_feature_uuid, manual_creation_command_id) REFERENCES feature.feature_creation_origins(feature_id, creation_command_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: manual_provider_dedup_cases fk_manual_provider_dedup_cases_provider_dataset; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.manual_provider_dedup_cases
+    ADD CONSTRAINT fk_manual_provider_dedup_cases_provider_dataset FOREIGN KEY (provider_dataset_id) REFERENCES provider_sync.provider_datasets(provider_dataset_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: manual_provider_dedup_cases fk_manual_provider_dedup_cases_provider_identity; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.manual_provider_dedup_cases
+    ADD CONSTRAINT fk_manual_provider_dedup_cases_provider_identity FOREIGN KEY (provider_feature_id, provider_feature_uuid) REFERENCES feature.features(feature_id, feature_uuid) ON DELETE RESTRICT;
+
+
+--
+-- Name: manual_provider_dedup_cases fk_manual_provider_dedup_cases_provider_link; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.manual_provider_dedup_cases
+    ADD CONSTRAINT fk_manual_provider_dedup_cases_provider_link FOREIGN KEY (provider_feature_id, source_entity_key) REFERENCES provider_sync.source_links(feature_id, source_entity_key) ON DELETE RESTRICT;
+
+
+--
+-- Name: manual_provider_dedup_cases fk_manual_provider_dedup_cases_source_record; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.manual_provider_dedup_cases
+    ADD CONSTRAINT fk_manual_provider_dedup_cases_source_record FOREIGN KEY (source_entity_key, source_record_key) REFERENCES provider_sync.source_records(source_entity_key, source_record_key) ON DELETE RESTRICT;
+
+
+--
+-- Name: manual_provider_dedup_resolutions fk_manual_provider_dedup_resolutions_case; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.manual_provider_dedup_resolutions
+    ADD CONSTRAINT fk_manual_provider_dedup_resolutions_case FOREIGN KEY (case_id) REFERENCES ops.manual_provider_dedup_cases(case_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: manual_provider_dedup_resolutions fk_manual_provider_dedup_resolutions_command; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.manual_provider_dedup_resolutions
+    ADD CONSTRAINT fk_manual_provider_dedup_resolutions_command FOREIGN KEY (command_id) REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: manual_provider_dedup_resolutions fk_manual_provider_dedup_resolutions_superseded_case; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.manual_provider_dedup_resolutions
+    ADD CONSTRAINT fk_manual_provider_dedup_resolutions_superseded_case FOREIGN KEY (superseded_by_case_id) REFERENCES ops.manual_provider_dedup_cases(case_id) ON DELETE RESTRICT;
 
 
 --
@@ -13803,16 +23845,26 @@ SELECT set_config('role', 'ktm_feature_schema_owner', true);
 
 GRANT ALL ON SCHEMA feature TO ktm_feature_state_procedure_owner;
 GRANT ALL ON SCHEMA feature TO ktm_feature_audit_writer;
+GRANT ALL ON SCHEMA feature TO ktm_curation_command_owner;
+GRANT ALL ON SCHEMA feature TO ktm_curation_audit_writer;
 GRANT USAGE ON SCHEMA feature TO ktm_feature_runtime;
+GRANT ALL ON SCHEMA feature TO ktm_manual_feature_procedure_owner;
+GRANT ALL ON SCHEMA feature TO ktm_feature_request_procedure_owner;
+GRANT ALL ON SCHEMA feature TO ktm_manual_provider_dedup_procedure_owner;
 
 
 --
 -- Name: SCHEMA ops; Type: ACL; Schema: -; Owner: ktm_feature_schema_owner
 --
 
+GRANT ALL ON SCHEMA ops TO ktm_curation_audit_writer;
 GRANT USAGE ON SCHEMA ops TO ktm_feature_runtime;
 GRANT USAGE ON SCHEMA ops TO ktm_feature_state_procedure_owner;
 GRANT USAGE ON SCHEMA ops TO ktm_feature_audit_writer;
+GRANT USAGE ON SCHEMA ops TO ktm_curation_command_owner;
+GRANT USAGE ON SCHEMA ops TO ktm_manual_feature_procedure_owner;
+GRANT USAGE ON SCHEMA ops TO ktm_feature_request_procedure_owner;
+GRANT USAGE ON SCHEMA ops TO ktm_manual_provider_dedup_procedure_owner;
 
 
 --
@@ -13822,6 +23874,42 @@ GRANT USAGE ON SCHEMA ops TO ktm_feature_audit_writer;
 GRANT USAGE ON SCHEMA provider_sync TO ktm_feature_runtime;
 GRANT USAGE ON SCHEMA provider_sync TO ktm_feature_state_procedure_owner;
 GRANT USAGE ON SCHEMA provider_sync TO ktm_feature_audit_writer;
+GRANT USAGE ON SCHEMA provider_sync TO ktm_curation_command_owner;
+GRANT USAGE ON SCHEMA provider_sync TO ktm_manual_provider_dedup_procedure_owner;
+
+
+--
+-- Name: PROCEDURE ack_feature_reference_reconciliation_event(IN p_principal_id text, IN p_event_id uuid, IN p_worker_id uuid, IN p_lease_epoch bigint, IN p_event_sha256 text, IN p_local_receipt_sha256 text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_acked_through_sequence bigint); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+SELECT set_config('role', 'ktm_manual_provider_dedup_procedure_owner', true);
+
+REVOKE ALL ON PROCEDURE feature.ack_feature_reference_reconciliation_event(IN p_principal_id text, IN p_event_id uuid, IN p_worker_id uuid, IN p_lease_epoch bigint, IN p_event_sha256 text, IN p_local_receipt_sha256 text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_acked_through_sequence bigint) FROM PUBLIC;
+
+
+--
+-- Name: PROCEDURE ack_feature_reference_reconciliation_event_v2(IN p_principal_id text, IN p_event_id uuid, IN p_worker_id uuid, IN p_lease_epoch bigint, IN p_event_sha256 text, IN p_local_receipt_sha256 text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_acked_through_sequence bigint); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.ack_feature_reference_reconciliation_event_v2(IN p_principal_id text, IN p_event_id uuid, IN p_worker_id uuid, IN p_lease_epoch bigint, IN p_event_sha256 text, IN p_local_receipt_sha256 text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_acked_through_sequence bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.ack_feature_reference_reconciliation_event_v2(IN p_principal_id text, IN p_event_id uuid, IN p_worker_id uuid, IN p_lease_epoch bigint, IN p_event_sha256 text, IN p_local_receipt_sha256 text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_acked_through_sequence bigint) TO ktm_feature_reference_reconciliation_service_executor;
+
+
+--
+-- Name: FUNCTION append_theme_feature_candidate_transition(p_candidate_id uuid, p_from_feature_id text, p_to_feature_id text, p_rule_id uuid, p_source_entity_key text, p_from_review_state text, p_to_review_state text, p_from_eligibility_present boolean, p_to_eligibility_present boolean, p_from_disposition text, p_to_disposition text, p_winner_candidate_id uuid, p_transition_kind text, p_candidate_row_revision bigint, p_rule_row_revision bigint, p_rule_input_hash text, p_candidate_input_hash text, p_generation_id uuid, p_provider_dataset_id bigint, p_source_record_key text, p_source_record_hash text, p_collection_id uuid, p_curation_item_id uuid, p_command_id bigint, p_actor text, p_reason_code text, p_causation_ref jsonb); Type: ACL; Schema: feature; Owner: ktm_curation_audit_writer
+--
+SELECT set_config('role', 'ktm_curation_audit_writer', true);
+
+REVOKE ALL ON FUNCTION feature.append_theme_feature_candidate_transition(p_candidate_id uuid, p_from_feature_id text, p_to_feature_id text, p_rule_id uuid, p_source_entity_key text, p_from_review_state text, p_to_review_state text, p_from_eligibility_present boolean, p_to_eligibility_present boolean, p_from_disposition text, p_to_disposition text, p_winner_candidate_id uuid, p_transition_kind text, p_candidate_row_revision bigint, p_rule_row_revision bigint, p_rule_input_hash text, p_candidate_input_hash text, p_generation_id uuid, p_provider_dataset_id bigint, p_source_record_key text, p_source_record_hash text, p_collection_id uuid, p_curation_item_id uuid, p_command_id bigint, p_actor text, p_reason_code text, p_causation_ref jsonb) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.append_theme_feature_candidate_transition(p_candidate_id uuid, p_from_feature_id text, p_to_feature_id text, p_rule_id uuid, p_source_entity_key text, p_from_review_state text, p_to_review_state text, p_from_eligibility_present boolean, p_to_eligibility_present boolean, p_from_disposition text, p_to_disposition text, p_winner_candidate_id uuid, p_transition_kind text, p_candidate_row_revision bigint, p_rule_row_revision bigint, p_rule_input_hash text, p_candidate_input_hash text, p_generation_id uuid, p_provider_dataset_id bigint, p_source_record_key text, p_source_record_hash text, p_collection_id uuid, p_curation_item_id uuid, p_command_id bigint, p_actor text, p_reason_code text, p_causation_ref jsonb) TO ktm_curation_command_owner;
+
+
+--
+-- Name: PROCEDURE apply_curation_import_items_command(IN p_items jsonb, IN p_content_sha256 text, IN p_batch_kind text, IN p_command_id bigint, IN p_principal text, OUT o_import_batch_id uuid, OUT o_inserted integer, OUT o_updated integer, OUT o_removed_item_ids uuid[]); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+SELECT set_config('role', 'ktm_curation_command_owner', true);
+
+REVOKE ALL ON PROCEDURE feature.apply_curation_import_items_command(IN p_items jsonb, IN p_content_sha256 text, IN p_batch_kind text, IN p_command_id bigint, IN p_principal text, OUT o_import_batch_id uuid, OUT o_inserted integer, OUT o_updated integer, OUT o_removed_item_ids uuid[]) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.apply_curation_import_items_command(IN p_items jsonb, IN p_content_sha256 text, IN p_batch_kind text, IN p_command_id bigint, IN p_principal text, OUT o_import_batch_id uuid, OUT o_inserted integer, OUT o_updated integer, OUT o_removed_item_ids uuid[]) TO ktm_curation_admin_executor;
 
 
 --
@@ -13834,58 +23922,570 @@ GRANT ALL ON PROCEDURE feature.apply_provider_feature_field_patch(IN p_feature_i
 
 
 --
+-- Name: PROCEDURE approve_feature_request_with_initial_state(IN p_request_id uuid, IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_existing_feature_uuid uuid); Type: ACL; Schema: feature; Owner: ktm_feature_request_procedure_owner
+--
+SELECT set_config('role', 'ktm_feature_request_procedure_owner', true);
+
+REVOKE ALL ON PROCEDURE feature.approve_feature_request_with_initial_state(IN p_request_id uuid, IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_existing_feature_uuid uuid) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.approve_feature_request_with_initial_state(IN p_request_id uuid, IN p_feature_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_existing_feature_uuid uuid) TO ktm_feature_request_admin_executor;
+
+
+--
+-- Name: PROCEDURE archive_curated_source_command(IN p_source_id uuid, IN p_expected_source_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_source_id uuid, OUT o_source_revision bigint, OUT o_observation_revision bigint, OUT o_generation_count bigint); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+SELECT set_config('role', 'ktm_curation_command_owner', true);
+
+REVOKE ALL ON PROCEDURE feature.archive_curated_source_command(IN p_source_id uuid, IN p_expected_source_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_source_id uuid, OUT o_source_revision bigint, OUT o_observation_revision bigint, OUT o_generation_count bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.archive_curated_source_command(IN p_source_id uuid, IN p_expected_source_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_source_id uuid, OUT o_source_revision bigint, OUT o_observation_revision bigint, OUT o_generation_count bigint) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: PROCEDURE archive_curated_source_rule_command(IN p_rule_id uuid, IN p_expected_rule_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_rule_id uuid, OUT o_rule_revision bigint, OUT o_generation_id uuid); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.archive_curated_source_rule_command(IN p_rule_id uuid, IN p_expected_rule_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_rule_id uuid, OUT o_rule_revision bigint, OUT o_generation_id uuid) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.archive_curated_source_rule_command(IN p_rule_id uuid, IN p_expected_rule_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_rule_id uuid, OUT o_rule_revision bigint, OUT o_generation_id uuid) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: PROCEDURE archive_curated_theme_command(IN p_theme_id uuid, IN p_expected_theme_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_theme_id uuid, OUT o_theme_revision bigint, OUT o_generation_count bigint); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.archive_curated_theme_command(IN p_theme_id uuid, IN p_expected_theme_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_theme_id uuid, OUT o_theme_revision bigint, OUT o_generation_count bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.archive_curated_theme_command(IN p_theme_id uuid, IN p_expected_theme_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_theme_id uuid, OUT o_theme_revision bigint, OUT o_generation_count bigint) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: PROCEDURE archive_curation_collection_command(IN p_collection_id uuid, IN p_expected_collection_revision bigint, IN p_command_id bigint, IN p_principal text, OUT o_collection_id uuid, OUT o_collection_revision bigint); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.archive_curation_collection_command(IN p_collection_id uuid, IN p_expected_collection_revision bigint, IN p_command_id bigint, IN p_principal text, OUT o_collection_id uuid, OUT o_collection_revision bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.archive_curation_collection_command(IN p_collection_id uuid, IN p_expected_collection_revision bigint, IN p_command_id bigint, IN p_principal text, OUT o_collection_id uuid, OUT o_collection_revision bigint) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: PROCEDURE archive_curation_item_command(IN p_collection_id uuid, IN p_curation_item_id uuid, IN p_expected_item_revision bigint, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.archive_curation_item_command(IN p_collection_id uuid, IN p_curation_item_id uuid, IN p_expected_item_revision bigint, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.archive_curation_item_command(IN p_collection_id uuid, IN p_curation_item_id uuid, IN p_expected_item_revision bigint, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: FUNCTION assert_feature_reference_reconciliation_lease_cursor(); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+SELECT set_config('role', 'ktm_manual_provider_dedup_procedure_owner', true);
+
+REVOKE ALL ON FUNCTION feature.assert_feature_reference_reconciliation_lease_cursor() FROM PUBLIC;
+
+
+--
 -- Name: PROCEDURE author_feature_field_overrides(IN p_feature_id text, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
+SELECT set_config('role', 'ktm_feature_state_procedure_owner', true);
 
 REVOKE ALL ON PROCEDURE feature.author_feature_field_overrides(IN p_feature_id text, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer) FROM PUBLIC;
 GRANT ALL ON PROCEDURE feature.author_feature_field_overrides(IN p_feature_id text, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer) TO ktm_feature_runtime;
 
 
 --
+-- Name: FUNCTION claim_curation_catalog_command_effect(p_command_id bigint, p_operation text, p_resource_kind text, p_resource_id uuid); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+SELECT set_config('role', 'ktm_curation_command_owner', true);
+
+REVOKE ALL ON FUNCTION feature.claim_curation_catalog_command_effect(p_command_id bigint, p_operation text, p_resource_kind text, p_resource_id uuid) FROM PUBLIC;
+
+
+--
+-- Name: PROCEDURE claim_curation_import_plan_command(IN p_import_plan_id uuid, IN p_plan_sha256 text, IN p_command_id bigint, IN p_principal text, OUT o_content_sha256 text, OUT o_rows jsonb, OUT o_summary jsonb, OUT o_response_rows jsonb, OUT o_expires_at timestamp with time zone); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.claim_curation_import_plan_command(IN p_import_plan_id uuid, IN p_plan_sha256 text, IN p_command_id bigint, IN p_principal text, OUT o_content_sha256 text, OUT o_rows jsonb, OUT o_summary jsonb, OUT o_response_rows jsonb, OUT o_expires_at timestamp with time zone) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.claim_curation_import_plan_command(IN p_import_plan_id uuid, IN p_plan_sha256 text, IN p_command_id bigint, IN p_principal text, OUT o_content_sha256 text, OUT o_rows jsonb, OUT o_summary jsonb, OUT o_response_rows jsonb, OUT o_expires_at timestamp with time zone) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: PROCEDURE complete_curation_import_plan_command(IN p_import_plan_id uuid, IN p_command_id bigint, IN p_import_batch_id uuid, IN p_result_payload jsonb, IN p_principal text); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.complete_curation_import_plan_command(IN p_import_plan_id uuid, IN p_command_id bigint, IN p_import_batch_id uuid, IN p_result_payload jsonb, IN p_principal text) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.complete_curation_import_plan_command(IN p_import_plan_id uuid, IN p_command_id bigint, IN p_import_batch_id uuid, IN p_result_payload jsonb, IN p_principal text) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: PROCEDURE create_curated_source_command(IN p_provider_dataset_id bigint, IN p_source_name text, IN p_source_url text, IN p_source_kind text, IN p_license text, IN p_update_cycle text, IN p_freshness_note text, IN p_provider_status text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_source_id uuid, OUT o_source_revision bigint, OUT o_observation_revision bigint); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.create_curated_source_command(IN p_provider_dataset_id bigint, IN p_source_name text, IN p_source_url text, IN p_source_kind text, IN p_license text, IN p_update_cycle text, IN p_freshness_note text, IN p_provider_status text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_source_id uuid, OUT o_source_revision bigint, OUT o_observation_revision bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.create_curated_source_command(IN p_provider_dataset_id bigint, IN p_source_name text, IN p_source_url text, IN p_source_kind text, IN p_license text, IN p_update_cycle text, IN p_freshness_note text, IN p_provider_status text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_source_id uuid, OUT o_source_revision bigint, OUT o_observation_revision bigint) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: PROCEDURE create_curated_source_rule_command(IN p_theme_id uuid, IN p_source_id uuid, IN p_place_kind text, IN p_category text, IN p_region_scope jsonb, IN p_detail_selector jsonb, IN p_default_action text, IN p_priority integer, IN p_enabled boolean, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_rule_id uuid, OUT o_rule_revision bigint, OUT o_generation_id uuid); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.create_curated_source_rule_command(IN p_theme_id uuid, IN p_source_id uuid, IN p_place_kind text, IN p_category text, IN p_region_scope jsonb, IN p_detail_selector jsonb, IN p_default_action text, IN p_priority integer, IN p_enabled boolean, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_rule_id uuid, OUT o_rule_revision bigint, OUT o_generation_id uuid) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.create_curated_source_rule_command(IN p_theme_id uuid, IN p_source_id uuid, IN p_place_kind text, IN p_category text, IN p_region_scope jsonb, IN p_detail_selector jsonb, IN p_default_action text, IN p_priority integer, IN p_enabled boolean, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_rule_id uuid, OUT o_rule_revision bigint, OUT o_generation_id uuid) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: PROCEDURE create_curated_theme_command(IN p_theme_slug text, IN p_theme_name text, IN p_theme_description text, IN p_theme_group text, IN p_visibility text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_theme_id uuid, OUT o_theme_revision bigint); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.create_curated_theme_command(IN p_theme_slug text, IN p_theme_name text, IN p_theme_description text, IN p_theme_group text, IN p_visibility text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_theme_id uuid, OUT o_theme_revision bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.create_curated_theme_command(IN p_theme_slug text, IN p_theme_name text, IN p_theme_description text, IN p_theme_group text, IN p_visibility text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_theme_id uuid, OUT o_theme_revision bigint) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: PROCEDURE create_curation_collection_command(IN p_collection_key text, IN p_theme_id uuid, IN p_source_id uuid, IN p_title text, IN p_edition_key text, IN p_description text, IN p_status text, IN p_visibility text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_collection_id uuid, OUT o_collection_revision bigint); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.create_curation_collection_command(IN p_collection_key text, IN p_theme_id uuid, IN p_source_id uuid, IN p_title text, IN p_edition_key text, IN p_description text, IN p_status text, IN p_visibility text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_collection_id uuid, OUT o_collection_revision bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.create_curation_collection_command(IN p_collection_key text, IN p_theme_id uuid, IN p_source_id uuid, IN p_title text, IN p_edition_key text, IN p_description text, IN p_status text, IN p_visibility text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_collection_id uuid, OUT o_collection_revision bigint) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: PROCEDURE create_curation_import_plan_command(IN p_import_plan_id uuid, IN p_content_sha256 text, IN p_provenance_sha256 text, IN p_plan_sha256 text, IN p_summary jsonb, IN p_rows jsonb, IN p_revisions jsonb, IN p_expires_at timestamp with time zone, IN p_command_id bigint, IN p_principal text); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.create_curation_import_plan_command(IN p_import_plan_id uuid, IN p_content_sha256 text, IN p_provenance_sha256 text, IN p_plan_sha256 text, IN p_summary jsonb, IN p_rows jsonb, IN p_revisions jsonb, IN p_expires_at timestamp with time zone, IN p_command_id bigint, IN p_principal text) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.create_curation_import_plan_command(IN p_import_plan_id uuid, IN p_content_sha256 text, IN p_provenance_sha256 text, IN p_plan_sha256 text, IN p_summary jsonb, IN p_rows jsonb, IN p_revisions jsonb, IN p_expires_at timestamp with time zone, IN p_command_id bigint, IN p_principal text) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: PROCEDURE create_curation_item_command(IN p_collection_id uuid, IN p_feature_id text, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.create_curation_item_command(IN p_collection_id uuid, IN p_feature_id text, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.create_curation_item_command(IN p_collection_id uuid, IN p_feature_id text, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: FUNCTION create_curation_rule_reconcile_receipt(p_rule_id uuid, p_operation_kind text, p_before_rule_revision bigint, p_after_rule_revision bigint, p_before_rule_input_hash text, p_after_rule_input_hash text, p_command_id bigint, p_actor text); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON FUNCTION feature.create_curation_rule_reconcile_receipt(p_rule_id uuid, p_operation_kind text, p_before_rule_revision bigint, p_after_rule_revision bigint, p_before_rule_input_hash text, p_after_rule_input_hash text, p_command_id bigint, p_actor text) FROM PUBLIC;
+
+
+--
+-- Name: PROCEDURE create_feature_with_initial_state(IN p_feature jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_inserted boolean); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+SELECT set_config('role', 'ktm_feature_state_procedure_owner', true);
+
+GRANT ALL ON PROCEDURE feature.create_feature_with_initial_state(IN p_feature jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_inserted boolean) TO ktm_manual_feature_procedure_owner;
+GRANT ALL ON PROCEDURE feature.create_feature_with_initial_state(IN p_feature jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_inserted boolean) TO ktm_curation_command_owner;
+GRANT ALL ON PROCEDURE feature.create_feature_with_initial_state(IN p_feature jsonb, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_context jsonb, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_row_revision bigint, OUT o_inserted boolean) TO ktm_feature_request_procedure_owner;
+
+
+--
+-- Name: PROCEDURE create_manual_curation_item_with_feature_command(IN p_feature_payload jsonb, IN p_item_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_feature_row_revision bigint, OUT o_curation_item_id uuid, OUT o_item_row_revision bigint, OUT o_collection_row_revision bigint, OUT o_existing_feature_uuid uuid); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+SELECT set_config('role', 'ktm_curation_command_owner', true);
+
+REVOKE ALL ON PROCEDURE feature.create_manual_curation_item_with_feature_command(IN p_feature_payload jsonb, IN p_item_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_feature_row_revision bigint, OUT o_curation_item_id uuid, OUT o_item_row_revision bigint, OUT o_collection_row_revision bigint, OUT o_existing_feature_uuid uuid) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.create_manual_curation_item_with_feature_command(IN p_feature_payload jsonb, IN p_item_payload jsonb, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_feature_id text, OUT o_feature_uuid uuid, OUT o_feature_row_revision bigint, OUT o_curation_item_id uuid, OUT o_item_row_revision bigint, OUT o_collection_row_revision bigint, OUT o_existing_feature_uuid uuid) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: FUNCTION current_curation_rule_input(p_rule_id uuid); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON FUNCTION feature.current_curation_rule_input(p_rule_id uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION current_provider_curation_input_set(p_provider_dataset_id bigint); Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+SELECT set_config('role', 'ktm_feature_schema_owner', true);
+
+REVOKE ALL ON FUNCTION feature.current_provider_curation_input_set(p_provider_dataset_id bigint) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.current_provider_curation_input_set(p_provider_dataset_id bigint) TO ktm_curation_command_owner;
+
+
+--
+-- Name: FUNCTION current_theme_candidate_snapshot(p_rule_id uuid, p_source_entity_key text, p_feature_id text); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+SELECT set_config('role', 'ktm_curation_command_owner', true);
+
+REVOKE ALL ON FUNCTION feature.current_theme_candidate_snapshot(p_rule_id uuid, p_source_entity_key text, p_feature_id text) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.current_theme_candidate_snapshot(p_rule_id uuid, p_source_entity_key text, p_feature_id text) TO ktm_feature_schema_owner;
+
+
+--
+-- Name: PROCEDURE finalize_provider_curation_receipts(IN p_provider_dataset_id bigint, IN p_import_job_id uuid, IN p_sync_scope text, IN p_operation_key text, OUT o_generation_count bigint, OUT o_generation_set_hash text, OUT o_replayed boolean); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.finalize_provider_curation_receipts(IN p_provider_dataset_id bigint, IN p_import_job_id uuid, IN p_sync_scope text, IN p_operation_key text, OUT o_generation_count bigint, OUT o_generation_set_hash text, OUT o_replayed boolean) FROM PUBLIC;
+
+
+--
+-- Name: PROCEDURE finalize_provider_curation_root(IN p_root_job_id uuid, OUT o_generation_count bigint, OUT o_generation_set_hash text, OUT o_replayed boolean, OUT o_stale_input boolean); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.finalize_provider_curation_root(IN p_root_job_id uuid, OUT o_generation_count bigint, OUT o_generation_set_hash text, OUT o_replayed boolean, OUT o_stale_input boolean) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.finalize_provider_curation_root(IN p_root_job_id uuid, OUT o_generation_count bigint, OUT o_generation_set_hash text, OUT o_replayed boolean, OUT o_stale_input boolean) TO ktm_curation_provider_executor;
+
+
+--
 -- Name: FUNCTION has_active_feature_override(p_feature_id text, p_field_path text); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
+SELECT set_config('role', 'ktm_feature_state_procedure_owner', true);
 
 REVOKE ALL ON FUNCTION feature.has_active_feature_override(p_feature_id text, p_field_path text) FROM PUBLIC;
 
 
 --
+-- Name: PROCEDURE lease_feature_reference_reconciliation_event(IN p_principal_id text, IN p_worker_id uuid, OUT o_outcome text, OUT o_lease_epoch bigint, OUT o_lease_expires_at timestamp with time zone, OUT o_event_id uuid, OUT o_event_sequence bigint, OUT o_case_id uuid, OUT o_resolution_id uuid, OUT o_action text, OUT o_event_payload jsonb, OUT o_event_sha256 text, OUT o_occurred_at timestamp with time zone); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+SELECT set_config('role', 'ktm_manual_provider_dedup_procedure_owner', true);
+
+REVOKE ALL ON PROCEDURE feature.lease_feature_reference_reconciliation_event(IN p_principal_id text, IN p_worker_id uuid, OUT o_outcome text, OUT o_lease_epoch bigint, OUT o_lease_expires_at timestamp with time zone, OUT o_event_id uuid, OUT o_event_sequence bigint, OUT o_case_id uuid, OUT o_resolution_id uuid, OUT o_action text, OUT o_event_payload jsonb, OUT o_event_sha256 text, OUT o_occurred_at timestamp with time zone) FROM PUBLIC;
+
+
+--
+-- Name: PROCEDURE lease_feature_reference_reconciliation_event_v2(IN p_principal_id text, IN p_worker_id uuid, OUT o_outcome text, OUT o_lease_epoch bigint, OUT o_lease_expires_at timestamp with time zone, OUT o_event_id uuid, OUT o_event_sequence bigint, OUT o_case_id uuid, OUT o_resolution_id uuid, OUT o_action text, OUT o_event_payload jsonb, OUT o_event_sha256 text, OUT o_occurred_at timestamp with time zone); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.lease_feature_reference_reconciliation_event_v2(IN p_principal_id text, IN p_worker_id uuid, OUT o_outcome text, OUT o_lease_epoch bigint, OUT o_lease_expires_at timestamp with time zone, OUT o_event_id uuid, OUT o_event_sequence bigint, OUT o_case_id uuid, OUT o_resolution_id uuid, OUT o_action text, OUT o_event_payload jsonb, OUT o_event_sha256 text, OUT o_occurred_at timestamp with time zone) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.lease_feature_reference_reconciliation_event_v2(IN p_principal_id text, IN p_worker_id uuid, OUT o_outcome text, OUT o_lease_epoch bigint, OUT o_lease_expires_at timestamp with time zone, OUT o_event_id uuid, OUT o_event_sequence bigint, OUT o_case_id uuid, OUT o_resolution_id uuid, OUT o_action text, OUT o_event_payload jsonb, OUT o_event_sha256 text, OUT o_occurred_at timestamp with time zone) TO ktm_feature_reference_reconciliation_service_executor;
+
+
+--
+-- Name: FUNCTION list_feature_requests(p_status text, p_limit integer); Type: ACL; Schema: feature; Owner: ktm_feature_request_procedure_owner
+--
+SELECT set_config('role', 'ktm_feature_request_procedure_owner', true);
+
+REVOKE ALL ON FUNCTION feature.list_feature_requests(p_status text, p_limit integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.list_feature_requests(p_status text, p_limit integer) TO ktm_feature_request_admin_executor;
+
+
+--
+-- Name: FUNCTION list_manual_provider_dedup_cases(p_status text, p_after_created_at timestamp with time zone, p_after_case_id uuid, p_limit integer); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+SELECT set_config('role', 'ktm_manual_provider_dedup_procedure_owner', true);
+
+REVOKE ALL ON FUNCTION feature.list_manual_provider_dedup_cases(p_status text, p_after_created_at timestamp with time zone, p_after_case_id uuid, p_limit integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.list_manual_provider_dedup_cases(p_status text, p_after_created_at timestamp with time zone, p_after_case_id uuid, p_limit integer) TO ktm_manual_provider_dedup_admin_executor;
+
+
+--
+-- Name: FUNCTION lock_current_provider_feature_source_evidence(p_feature_id text, p_provider_dataset_id bigint, p_source_entity_key text, p_source_record_key text); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+SELECT set_config('role', 'ktm_feature_state_procedure_owner', true);
+
+REVOKE ALL ON FUNCTION feature.lock_current_provider_feature_source_evidence(p_feature_id text, p_provider_dataset_id bigint, p_source_entity_key text, p_source_record_key text) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION lock_current_provider_source_evidence(p_provider_dataset_id bigint, p_source_entity_key text, p_source_record_key text); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature.lock_current_provider_source_evidence(p_provider_dataset_id bigint, p_source_entity_key text, p_source_record_key text) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION manual_feature_identity_key(p_feature_kind text, p_name text, p_lon numeric, p_lat numeric); Type: ACL; Schema: feature; Owner: ktm_manual_feature_procedure_owner
+--
+SELECT set_config('role', 'ktm_manual_feature_procedure_owner', true);
+
+GRANT ALL ON FUNCTION feature.manual_feature_identity_key(p_feature_kind text, p_name text, p_lon numeric, p_lat numeric) TO ktm_curation_command_owner;
+GRANT ALL ON FUNCTION feature.manual_feature_identity_key(p_feature_kind text, p_name text, p_lon numeric, p_lat numeric) TO ktm_feature_request_procedure_owner;
+
+
+--
+-- Name: PROCEDURE materialize_theme_candidate_generation(IN p_rule_id uuid, IN p_generation_kind text, IN p_source_job_id uuid, IN p_reconcile_operation_id uuid, IN p_command_id bigint, IN p_generation_key text, IN p_context jsonb, OUT o_generation_id uuid, OUT o_observed_candidate_count bigint, OUT o_eligibility_removed_candidate_count bigint, OUT o_generation_input_set_hash text, OUT o_replayed boolean); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+SELECT set_config('role', 'ktm_curation_command_owner', true);
+
+REVOKE ALL ON PROCEDURE feature.materialize_theme_candidate_generation(IN p_rule_id uuid, IN p_generation_kind text, IN p_source_job_id uuid, IN p_reconcile_operation_id uuid, IN p_command_id bigint, IN p_generation_key text, IN p_context jsonb, OUT o_generation_id uuid, OUT o_observed_candidate_count bigint, OUT o_eligibility_removed_candidate_count bigint, OUT o_generation_input_set_hash text, OUT o_replayed boolean) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.materialize_theme_candidate_generation(IN p_rule_id uuid, IN p_generation_kind text, IN p_source_job_id uuid, IN p_reconcile_operation_id uuid, IN p_command_id bigint, IN p_generation_key text, IN p_context jsonb, OUT o_generation_id uuid, OUT o_observed_candidate_count bigint, OUT o_eligibility_removed_candidate_count bigint, OUT o_generation_input_set_hash text, OUT o_replayed boolean) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: PROCEDURE merge_lock_curation_collections(IN p_master text, IN p_loser text); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.merge_lock_curation_collections(IN p_master text, IN p_loser text) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.merge_lock_curation_collections(IN p_master text, IN p_loser text) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: PROCEDURE patch_curated_source_command(IN p_source_id uuid, IN p_expected_source_revision bigint, IN p_source_name text, IN p_source_url text, IN p_source_kind text, IN p_license text, IN p_update_cycle text, IN p_freshness_note text, IN p_provider_status text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_source_id uuid, OUT o_source_revision bigint, OUT o_observation_revision bigint); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.patch_curated_source_command(IN p_source_id uuid, IN p_expected_source_revision bigint, IN p_source_name text, IN p_source_url text, IN p_source_kind text, IN p_license text, IN p_update_cycle text, IN p_freshness_note text, IN p_provider_status text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_source_id uuid, OUT o_source_revision bigint, OUT o_observation_revision bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.patch_curated_source_command(IN p_source_id uuid, IN p_expected_source_revision bigint, IN p_source_name text, IN p_source_url text, IN p_source_kind text, IN p_license text, IN p_update_cycle text, IN p_freshness_note text, IN p_provider_status text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_source_id uuid, OUT o_source_revision bigint, OUT o_observation_revision bigint) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: PROCEDURE patch_curated_source_rule_command(IN p_rule_id uuid, IN p_expected_rule_revision bigint, IN p_place_kind text, IN p_category text, IN p_region_scope jsonb, IN p_detail_selector jsonb, IN p_default_action text, IN p_priority integer, IN p_enabled boolean, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_rule_id uuid, OUT o_rule_revision bigint, OUT o_generation_id uuid); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.patch_curated_source_rule_command(IN p_rule_id uuid, IN p_expected_rule_revision bigint, IN p_place_kind text, IN p_category text, IN p_region_scope jsonb, IN p_detail_selector jsonb, IN p_default_action text, IN p_priority integer, IN p_enabled boolean, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_rule_id uuid, OUT o_rule_revision bigint, OUT o_generation_id uuid) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.patch_curated_source_rule_command(IN p_rule_id uuid, IN p_expected_rule_revision bigint, IN p_place_kind text, IN p_category text, IN p_region_scope jsonb, IN p_detail_selector jsonb, IN p_default_action text, IN p_priority integer, IN p_enabled boolean, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_rule_id uuid, OUT o_rule_revision bigint, OUT o_generation_id uuid) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: PROCEDURE patch_curated_theme_command(IN p_theme_id uuid, IN p_expected_theme_revision bigint, IN p_theme_slug text, IN p_theme_name text, IN p_theme_description text, IN p_theme_group text, IN p_visibility text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_theme_id uuid, OUT o_theme_revision bigint, OUT o_generation_count bigint); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.patch_curated_theme_command(IN p_theme_id uuid, IN p_expected_theme_revision bigint, IN p_theme_slug text, IN p_theme_name text, IN p_theme_description text, IN p_theme_group text, IN p_visibility text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_theme_id uuid, OUT o_theme_revision bigint, OUT o_generation_count bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.patch_curated_theme_command(IN p_theme_id uuid, IN p_expected_theme_revision bigint, IN p_theme_slug text, IN p_theme_name text, IN p_theme_description text, IN p_theme_group text, IN p_visibility text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_theme_id uuid, OUT o_theme_revision bigint, OUT o_generation_count bigint) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: PROCEDURE patch_curation_collection_command(IN p_collection_id uuid, IN p_expected_collection_revision bigint, IN p_theme_id uuid, IN p_source_id uuid, IN p_title text, IN p_edition_key text, IN p_description text, IN p_status text, IN p_visibility text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_collection_id uuid, OUT o_collection_revision bigint); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.patch_curation_collection_command(IN p_collection_id uuid, IN p_expected_collection_revision bigint, IN p_theme_id uuid, IN p_source_id uuid, IN p_title text, IN p_edition_key text, IN p_description text, IN p_status text, IN p_visibility text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_collection_id uuid, OUT o_collection_revision bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.patch_curation_collection_command(IN p_collection_id uuid, IN p_expected_collection_revision bigint, IN p_theme_id uuid, IN p_source_id uuid, IN p_title text, IN p_edition_key text, IN p_description text, IN p_status text, IN p_visibility text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_collection_id uuid, OUT o_collection_revision bigint) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: PROCEDURE patch_curation_item_command(IN p_collection_id uuid, IN p_curation_item_id uuid, IN p_expected_item_revision bigint, IN p_feature_id text, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.patch_curation_item_command(IN p_collection_id uuid, IN p_curation_item_id uuid, IN p_expected_item_revision bigint, IN p_feature_id text, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.patch_curation_item_command(IN p_collection_id uuid, IN p_curation_item_id uuid, IN p_expected_item_revision bigint, IN p_feature_id text, IN p_source_record_key text, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_status text, IN p_sort_order integer, IN p_item_title text, IN p_item_summary text, IN p_curation_relation text, IN p_reuse_policy text, IN p_metadata jsonb, IN p_command_id bigint, IN p_principal text, OUT o_curation_item_id uuid, OUT o_item_revision bigint, OUT o_collection_revision bigint) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: FUNCTION preflight_feature_reference_reconciliation_ack(p_principal_id text, p_event_id uuid, p_event_sha256 text, p_local_receipt_sha256 text); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+SELECT set_config('role', 'ktm_manual_provider_dedup_procedure_owner', true);
+
+REVOKE ALL ON FUNCTION feature.preflight_feature_reference_reconciliation_ack(p_principal_id text, p_event_id uuid, p_event_sha256 text, p_local_receipt_sha256 text) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION preflight_feature_reference_reconciliation_ack_v2(p_principal_id text, p_event_id uuid, p_event_sha256 text, p_local_receipt_sha256 text); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature.preflight_feature_reference_reconciliation_ack_v2(p_principal_id text, p_event_id uuid, p_event_sha256 text, p_local_receipt_sha256 text) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.preflight_feature_reference_reconciliation_ack_v2(p_principal_id text, p_event_id uuid, p_event_sha256 text, p_local_receipt_sha256 text) TO ktm_feature_reference_reconciliation_service_executor;
+
+
+--
+-- Name: PROCEDURE promote_theme_feature_candidate(IN p_candidate_id uuid, IN p_collection_id uuid, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_item_title text, IN p_item_summary text, IN p_sort_order integer, IN p_curation_relation text, IN p_reuse_policy text, IN p_item_status text, IN p_expected_candidate_revision bigint, IN p_expected_collection_revision bigint, IN p_expected_item_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_candidate_id uuid, OUT o_candidate_revision bigint, OUT o_curation_item_id uuid, OUT o_curation_item_revision bigint, OUT o_transition_id bigint); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+SELECT set_config('role', 'ktm_curation_command_owner', true);
+
+REVOKE ALL ON PROCEDURE feature.promote_theme_feature_candidate(IN p_candidate_id uuid, IN p_collection_id uuid, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_item_title text, IN p_item_summary text, IN p_sort_order integer, IN p_curation_relation text, IN p_reuse_policy text, IN p_item_status text, IN p_expected_candidate_revision bigint, IN p_expected_collection_revision bigint, IN p_expected_item_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_candidate_id uuid, OUT o_candidate_revision bigint, OUT o_curation_item_id uuid, OUT o_curation_item_revision bigint, OUT o_transition_id bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.promote_theme_feature_candidate(IN p_candidate_id uuid, IN p_collection_id uuid, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_item_title text, IN p_item_summary text, IN p_sort_order integer, IN p_curation_relation text, IN p_reuse_policy text, IN p_item_status text, IN p_expected_candidate_revision bigint, IN p_expected_collection_revision bigint, IN p_expected_item_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_candidate_id uuid, OUT o_candidate_revision bigint, OUT o_curation_item_id uuid, OUT o_curation_item_revision bigint, OUT o_transition_id bigint) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: PROCEDURE provision_feature_reference_reconciliation_subscription(IN p_principal_id text, IN p_initial_event_sequence bigint, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_initial_event_sequence bigint); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+SELECT set_config('role', 'ktm_manual_provider_dedup_procedure_owner', true);
+
+REVOKE ALL ON PROCEDURE feature.provision_feature_reference_reconciliation_subscription(IN p_principal_id text, IN p_initial_event_sequence bigint, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_initial_event_sequence bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.provision_feature_reference_reconciliation_subscription(IN p_principal_id text, IN p_initial_event_sequence bigint, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_initial_event_sequence bigint) TO ktm_manual_provider_dedup_admin_executor;
+
+
+--
 -- Name: PROCEDURE reactivate_admin_feature_state(IN p_feature_id text, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_transition_id bigint); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
+SELECT set_config('role', 'ktm_feature_state_procedure_owner', true);
 
 REVOKE ALL ON PROCEDURE feature.reactivate_admin_feature_state(IN p_feature_id text, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_transition_id bigint) FROM PUBLIC;
 GRANT ALL ON PROCEDURE feature.reactivate_admin_feature_state(IN p_feature_id text, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_transition_id bigint) TO ktm_feature_runtime;
 
 
 --
+-- Name: FUNCTION read_feature_request(p_request_id uuid); Type: ACL; Schema: feature; Owner: ktm_feature_request_procedure_owner
+--
+SELECT set_config('role', 'ktm_feature_request_procedure_owner', true);
+
+REVOKE ALL ON FUNCTION feature.read_feature_request(p_request_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.read_feature_request(p_request_id uuid) TO ktm_feature_request_admin_executor;
+
+
+--
+-- Name: FUNCTION read_manual_provider_dedup_case(p_case_id uuid); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+SELECT set_config('role', 'ktm_manual_provider_dedup_procedure_owner', true);
+
+REVOKE ALL ON FUNCTION feature.read_manual_provider_dedup_case(p_case_id uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.read_manual_provider_dedup_case(p_case_id uuid) TO ktm_manual_provider_dedup_admin_executor;
+
+
+--
+-- Name: PROCEDURE reclassify_curation_quarantine_command(IN p_quarantine_collection_id uuid, IN p_expected_quarantine_revision bigint, IN p_action text, IN p_target_collection_id uuid, IN p_expected_target_revision bigint, IN p_item_ids uuid[], IN p_collection_key text, IN p_title text, IN p_command_id bigint, IN p_principal text, OUT o_moved_item_ids uuid[], OUT o_quarantine_deleted boolean, OUT o_collection_id uuid, OUT o_collection_key text, OUT o_collection_revision bigint, OUT o_conflicts jsonb); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+SELECT set_config('role', 'ktm_curation_command_owner', true);
+
+REVOKE ALL ON PROCEDURE feature.reclassify_curation_quarantine_command(IN p_quarantine_collection_id uuid, IN p_expected_quarantine_revision bigint, IN p_action text, IN p_target_collection_id uuid, IN p_expected_target_revision bigint, IN p_item_ids uuid[], IN p_collection_key text, IN p_title text, IN p_command_id bigint, IN p_principal text, OUT o_moved_item_ids uuid[], OUT o_quarantine_deleted boolean, OUT o_collection_id uuid, OUT o_collection_key text, OUT o_collection_revision bigint, OUT o_conflicts jsonb) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.reclassify_curation_quarantine_command(IN p_quarantine_collection_id uuid, IN p_expected_quarantine_revision bigint, IN p_action text, IN p_target_collection_id uuid, IN p_expected_target_revision bigint, IN p_item_ids uuid[], IN p_collection_key text, IN p_title text, IN p_command_id bigint, IN p_principal text, OUT o_moved_item_ids uuid[], OUT o_quarantine_deleted boolean, OUT o_collection_id uuid, OUT o_collection_key text, OUT o_collection_revision bigint, OUT o_conflicts jsonb) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: PROCEDURE record_manual_provider_dedup_candidate(IN p_manual_feature_id text, IN p_provider_feature_id text, IN p_scores jsonb, IN p_detector_causation jsonb, OUT o_case_id uuid, OUT o_outcome text); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+SELECT set_config('role', 'ktm_manual_provider_dedup_procedure_owner', true);
+
+REVOKE ALL ON PROCEDURE feature.record_manual_provider_dedup_candidate(IN p_manual_feature_id text, IN p_provider_feature_id text, IN p_scores jsonb, IN p_detector_causation jsonb, OUT o_case_id uuid, OUT o_outcome text) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.record_manual_provider_dedup_candidate(IN p_manual_feature_id text, IN p_provider_feature_id text, IN p_scores jsonb, IN p_detector_causation jsonb, OUT o_case_id uuid, OUT o_outcome text) TO ktm_manual_provider_dedup_detector_executor;
+
+
+--
+-- Name: PROCEDURE refresh_curated_source_observation(IN p_provider_dataset_id bigint, IN p_import_job_id uuid, OUT o_source_id uuid, OUT o_source_revision bigint, OUT o_observation_revision bigint, OUT o_row_count integer); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+SELECT set_config('role', 'ktm_curation_command_owner', true);
+
+REVOKE ALL ON PROCEDURE feature.refresh_curated_source_observation(IN p_provider_dataset_id bigint, IN p_import_job_id uuid, OUT o_source_id uuid, OUT o_source_revision bigint, OUT o_observation_revision bigint, OUT o_row_count integer) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION reject_curation_provider_receipt_mutation(); Type: ACL; Schema: feature; Owner: ktm_curation_audit_writer
+--
+SELECT set_config('role', 'ktm_curation_audit_writer', true);
+
+REVOKE ALL ON FUNCTION feature.reject_curation_provider_receipt_mutation() FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION reject_feature_change_request_receipt_mutation(); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
+SELECT set_config('role', 'ktm_feature_state_procedure_owner', true);
 
 REVOKE ALL ON FUNCTION feature.reject_feature_change_request_receipt_mutation() FROM PUBLIC;
 GRANT ALL ON FUNCTION feature.reject_feature_change_request_receipt_mutation() TO ktm_feature_schema_owner;
 
 
 --
+-- Name: PROCEDURE reject_feature_request(IN p_request_id uuid, IN p_reason text, IN p_domain_command_id bigint, OUT o_status text); Type: ACL; Schema: feature; Owner: ktm_feature_request_procedure_owner
+--
+SELECT set_config('role', 'ktm_feature_request_procedure_owner', true);
+
+REVOKE ALL ON PROCEDURE feature.reject_feature_request(IN p_request_id uuid, IN p_reason text, IN p_domain_command_id bigint, OUT o_status text) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.reject_feature_request(IN p_request_id uuid, IN p_reason text, IN p_domain_command_id bigint, OUT o_status text) TO ktm_feature_request_admin_executor;
+
+
+--
+-- Name: FUNCTION reject_manual_provider_dedup_evidence_mutation(); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+SELECT set_config('role', 'ktm_manual_provider_dedup_procedure_owner', true);
+
+REVOKE ALL ON FUNCTION feature.reject_manual_provider_dedup_evidence_mutation() FROM PUBLIC;
+
+
+--
+-- Name: PROCEDURE reject_theme_feature_candidate(IN p_candidate_id uuid, IN p_expected_candidate_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_candidate_id uuid, OUT o_candidate_revision bigint, OUT o_transition_id bigint); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+SELECT set_config('role', 'ktm_curation_command_owner', true);
+
+REVOKE ALL ON PROCEDURE feature.reject_theme_feature_candidate(IN p_candidate_id uuid, IN p_expected_candidate_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_candidate_id uuid, OUT o_candidate_revision bigint, OUT o_transition_id bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.reject_theme_feature_candidate(IN p_candidate_id uuid, IN p_expected_candidate_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_candidate_id uuid, OUT o_candidate_revision bigint, OUT o_transition_id bigint) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: FUNCTION reject_tvn40_append_only_mutation(); Type: ACL; Schema: feature; Owner: ktm_curation_audit_writer
+--
+SELECT set_config('role', 'ktm_curation_audit_writer', true);
+
+REVOKE ALL ON FUNCTION feature.reject_tvn40_append_only_mutation() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION reject_tvn40_truncate(); Type: ACL; Schema: feature; Owner: ktm_curation_audit_writer
+--
+
+REVOKE ALL ON FUNCTION feature.reject_tvn40_truncate() FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION reject_user_feature_version_mutation(); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
+SELECT set_config('role', 'ktm_feature_state_procedure_owner', true);
 
 REVOKE ALL ON FUNCTION feature.reject_user_feature_version_mutation() FROM PUBLIC;
 GRANT ALL ON FUNCTION feature.reject_user_feature_version_mutation() TO ktm_feature_schema_owner;
 
 
 --
+-- Name: PROCEDURE resolve_curation_import_collection_command(IN p_collection_key text, IN p_theme_id uuid, IN p_source_id uuid, IN p_title text, IN p_edition_key text, IN p_command_id bigint, IN p_principal text, OUT o_collection_id uuid, OUT o_collection_revision bigint, OUT o_created boolean); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+SELECT set_config('role', 'ktm_curation_command_owner', true);
+
+REVOKE ALL ON PROCEDURE feature.resolve_curation_import_collection_command(IN p_collection_key text, IN p_theme_id uuid, IN p_source_id uuid, IN p_title text, IN p_edition_key text, IN p_command_id bigint, IN p_principal text, OUT o_collection_id uuid, OUT o_collection_revision bigint, OUT o_created boolean) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.resolve_curation_import_collection_command(IN p_collection_key text, IN p_theme_id uuid, IN p_source_id uuid, IN p_title text, IN p_edition_key text, IN p_command_id bigint, IN p_principal text, OUT o_collection_id uuid, OUT o_collection_revision bigint, OUT o_created boolean) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: PROCEDURE resolve_manual_provider_dedup_case(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id text, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id text, OUT o_manual_feature_row_revision bigint); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+SELECT set_config('role', 'ktm_manual_provider_dedup_procedure_owner', true);
+
+REVOKE ALL ON PROCEDURE feature.resolve_manual_provider_dedup_case(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id text, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id text, OUT o_manual_feature_row_revision bigint) FROM PUBLIC;
+
+
+--
+-- Name: PROCEDURE resolve_manual_provider_dedup_case_v2(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id text, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id text, OUT o_manual_feature_row_revision bigint); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.resolve_manual_provider_dedup_case_v2(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id text, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id text, OUT o_manual_feature_row_revision bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.resolve_manual_provider_dedup_case_v2(IN p_case_id uuid, IN p_decision text, IN p_expected_case_fingerprint text, IN p_expected_manual_row_revision bigint, IN p_expected_provider_row_revision bigint, IN p_survivor_feature_id text, IN p_reason text, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_resolution_id uuid, OUT o_event_id uuid, OUT o_manual_feature_id text, OUT o_manual_feature_row_revision bigint) TO ktm_manual_provider_dedup_admin_executor;
+
+
+--
 -- Name: PROCEDURE revoke_feature_field_overrides(IN p_feature_id text, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_field_paths text[], OUT o_feature_id text, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
+SELECT set_config('role', 'ktm_feature_state_procedure_owner', true);
 
 REVOKE ALL ON PROCEDURE feature.revoke_feature_field_overrides(IN p_feature_id text, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_field_paths text[], OUT o_feature_id text, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer) FROM PUBLIC;
 GRANT ALL ON PROCEDURE feature.revoke_feature_field_overrides(IN p_feature_id text, IN p_expected_row_revision bigint, IN p_principal text, IN p_reason_code text, IN p_command_id bigint, IN p_field_paths text[], OUT o_feature_id text, OUT o_row_revision bigint, OUT o_command_id bigint, OUT o_applied_field_count integer) TO ktm_feature_runtime;
 
 
 --
+-- Name: PROCEDURE seal_provider_curation_snapshot_receipt(IN p_root_job_id uuid, IN p_provider_dataset_id bigint, IN p_sync_scope text, IN p_operation_key text, IN p_expected_input_member_count bigint, IN p_expected_input_set_hash text, OUT o_source_job_id uuid, OUT o_observed_at timestamp with time zone, OUT o_source_entity_count bigint, OUT o_source_input_set_hash text); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+SELECT set_config('role', 'ktm_curation_command_owner', true);
+
+REVOKE ALL ON PROCEDURE feature.seal_provider_curation_snapshot_receipt(IN p_root_job_id uuid, IN p_provider_dataset_id bigint, IN p_sync_scope text, IN p_operation_key text, IN p_expected_input_member_count bigint, IN p_expected_input_set_hash text, OUT o_source_job_id uuid, OUT o_observed_at timestamp with time zone, OUT o_source_entity_count bigint, OUT o_source_input_set_hash text) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.seal_provider_curation_snapshot_receipt(IN p_root_job_id uuid, IN p_provider_dataset_id bigint, IN p_sync_scope text, IN p_operation_key text, IN p_expected_input_member_count bigint, IN p_expected_input_set_hash text, OUT o_source_job_id uuid, OUT o_observed_at timestamp with time zone, OUT o_source_entity_count bigint, OUT o_source_input_set_hash text) TO ktm_curation_provider_executor;
+
+
+--
+-- Name: PROCEDURE submit_feature_request(IN p_request_id uuid, IN p_request_payload jsonb, IN p_domain_command_id bigint, OUT o_status text, OUT o_submitted_at timestamp with time zone); Type: ACL; Schema: feature; Owner: ktm_feature_request_procedure_owner
+--
+SELECT set_config('role', 'ktm_feature_request_procedure_owner', true);
+
+REVOKE ALL ON PROCEDURE feature.submit_feature_request(IN p_request_id uuid, IN p_request_payload jsonb, IN p_domain_command_id bigint, OUT o_status text, OUT o_submitted_at timestamp with time zone) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.submit_feature_request(IN p_request_id uuid, IN p_request_payload jsonb, IN p_domain_command_id bigint, OUT o_status text, OUT o_submitted_at timestamp with time zone) TO ktm_feature_request_service_executor;
+
+
+--
+-- Name: FUNCTION sync_concierge_catalog_after_observation(); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+SELECT set_config('role', 'ktm_curation_command_owner', true);
+
+REVOKE ALL ON FUNCTION feature.sync_concierge_catalog_after_observation() FROM PUBLIC;
+
+
+--
+-- Name: PROCEDURE sync_concierge_theme_catalog(IN p_provider_dataset_id bigint, IN p_import_job_id uuid, OUT o_themes_created bigint, OUT o_themes_updated bigint, OUT o_rules_created bigint, OUT o_rules_updated bigint, OUT o_rules_archived bigint); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.sync_concierge_theme_catalog(IN p_provider_dataset_id bigint, IN p_import_job_id uuid, OUT o_themes_created bigint, OUT o_themes_updated bigint, OUT o_rules_created bigint, OUT o_rules_updated bigint, OUT o_rules_archived bigint) FROM PUBLIC;
+
+
+--
+-- Name: PROCEDURE touch_curation_import_collection_command(IN p_collection_id uuid, IN p_command_id bigint, IN p_principal text, OUT o_collection_revision bigint); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.touch_curation_import_collection_command(IN p_collection_id uuid, IN p_command_id bigint, IN p_principal text, OUT o_collection_revision bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.touch_curation_import_collection_command(IN p_collection_id uuid, IN p_command_id bigint, IN p_principal text, OUT o_collection_revision bigint) TO ktm_curation_admin_executor;
+
+
+--
 -- Name: PROCEDURE transition_admin_feature_state(IN p_feature_id text, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, IN p_action text, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_transition_id bigint); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
+SELECT set_config('role', 'ktm_feature_state_procedure_owner', true);
 
 REVOKE ALL ON PROCEDURE feature.transition_admin_feature_state(IN p_feature_id text, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, IN p_action text, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_transition_id bigint) FROM PUBLIC;
 GRANT ALL ON PROCEDURE feature.transition_admin_feature_state(IN p_feature_id text, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, IN p_action text, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_transition_id bigint) TO ktm_feature_runtime;
+GRANT ALL ON PROCEDURE feature.transition_admin_feature_state(IN p_feature_id text, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_reason_code text, IN p_principal text, IN p_action text, OUT o_feature_id text, OUT o_row_revision bigint, OUT o_transition_id bigint) TO ktm_manual_provider_dedup_procedure_owner;
 
 
 --
@@ -13905,11 +24505,100 @@ GRANT ALL ON FUNCTION feature.validate_feature_override_value() TO ktm_feature_s
 
 
 --
+-- Name: FUNCTION validate_theme_candidate_merge_target(); Type: ACL; Schema: feature; Owner: ktm_curation_audit_writer
+--
+SELECT set_config('role', 'ktm_curation_audit_writer', true);
+
+REVOKE ALL ON FUNCTION feature.validate_theme_candidate_merge_target() FROM PUBLIC;
+
+
+--
+-- Name: PROCEDURE append_provider_feature_attempt_event_command(IN p_dagster_run_id text, IN p_provider_dataset_id bigint, IN p_sync_scope text, IN p_operation_key text, IN p_attempt_number integer, IN p_outcome text, IN p_error jsonb, OUT o_event_id uuid, OUT o_job_id uuid, OUT o_import_job_dataset_id uuid, OUT o_stage text, OUT o_level text, OUT o_code text, OUT o_message text, OUT o_payload jsonb, OUT o_occurred_at timestamp with time zone); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
+--
+SELECT set_config('role', 'ktm_curation_command_owner', true);
+
+REVOKE ALL ON PROCEDURE ops.append_provider_feature_attempt_event_command(IN p_dagster_run_id text, IN p_provider_dataset_id bigint, IN p_sync_scope text, IN p_operation_key text, IN p_attempt_number integer, IN p_outcome text, IN p_error jsonb, OUT o_event_id uuid, OUT o_job_id uuid, OUT o_import_job_dataset_id uuid, OUT o_stage text, OUT o_level text, OUT o_code text, OUT o_message text, OUT o_payload jsonb, OUT o_occurred_at timestamp with time zone) FROM PUBLIC;
+GRANT ALL ON PROCEDURE ops.append_provider_feature_attempt_event_command(IN p_dagster_run_id text, IN p_provider_dataset_id bigint, IN p_sync_scope text, IN p_operation_key text, IN p_attempt_number integer, IN p_outcome text, IN p_error jsonb, OUT o_event_id uuid, OUT o_job_id uuid, OUT o_import_job_dataset_id uuid, OUT o_stage text, OUT o_level text, OUT o_code text, OUT o_message text, OUT o_payload jsonb, OUT o_occurred_at timestamp with time zone) TO ktm_curation_provider_executor;
+
+
+--
+-- Name: PROCEDURE ensure_provider_feature_operation_command(IN p_dagster_run_id text, IN p_trigger_kind text, IN p_operation_key text, IN p_memberships jsonb, IN p_created_at timestamp with time zone, IN p_started_at timestamp with time zone, IN p_observed_status text, OUT o_root_job_id uuid, OUT o_inserted boolean, OUT o_changed boolean); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE ops.ensure_provider_feature_operation_command(IN p_dagster_run_id text, IN p_trigger_kind text, IN p_operation_key text, IN p_memberships jsonb, IN p_created_at timestamp with time zone, IN p_started_at timestamp with time zone, IN p_observed_status text, OUT o_root_job_id uuid, OUT o_inserted boolean, OUT o_changed boolean) FROM PUBLIC;
+GRANT ALL ON PROCEDURE ops.ensure_provider_feature_operation_command(IN p_dagster_run_id text, IN p_trigger_kind text, IN p_operation_key text, IN p_memberships jsonb, IN p_created_at timestamp with time zone, IN p_started_at timestamp with time zone, IN p_observed_status text, OUT o_root_job_id uuid, OUT o_inserted boolean, OUT o_changed boolean) TO ktm_curation_provider_executor;
+
+
+--
+-- Name: FUNCTION fill_provider_cancellation_starts_command(p_cancellation_id uuid, p_dagster_run_id text, p_engine_started_at timestamp with time zone); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON FUNCTION ops.fill_provider_cancellation_starts_command(p_cancellation_id uuid, p_dagster_run_id text, p_engine_started_at timestamp with time zone) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.fill_provider_cancellation_starts_command(p_cancellation_id uuid, p_dagster_run_id text, p_engine_started_at timestamp with time zone) TO ktm_feature_api_runtime;
+
+
+--
+-- Name: PROCEDURE finish_provider_feature_membership_command(IN p_root_job_id uuid, IN p_provider_dataset_id bigint, IN p_sync_scope text, IN p_operation_key text, IN p_authoritative_snapshot_complete boolean, IN p_finished_at timestamp with time zone, OUT o_changed boolean); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE ops.finish_provider_feature_membership_command(IN p_root_job_id uuid, IN p_provider_dataset_id bigint, IN p_sync_scope text, IN p_operation_key text, IN p_authoritative_snapshot_complete boolean, IN p_finished_at timestamp with time zone, OUT o_changed boolean) FROM PUBLIC;
+GRANT ALL ON PROCEDURE ops.finish_provider_feature_membership_command(IN p_root_job_id uuid, IN p_provider_dataset_id bigint, IN p_sync_scope text, IN p_operation_key text, IN p_authoritative_snapshot_complete boolean, IN p_finished_at timestamp with time zone, OUT o_changed boolean) TO ktm_curation_provider_executor;
+
+
+--
+-- Name: FUNCTION reject_curation_import_collection_effect_mutation(); Type: ACL; Schema: ops; Owner: ktm_curation_audit_writer
+--
+SELECT set_config('role', 'ktm_curation_audit_writer', true);
+
+REVOKE ALL ON FUNCTION ops.reject_curation_import_collection_effect_mutation() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION reject_curation_import_collection_effect_truncate(); Type: ACL; Schema: ops; Owner: ktm_curation_audit_writer
+--
+
+REVOKE ALL ON FUNCTION ops.reject_curation_import_collection_effect_truncate() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION reject_curation_import_plan_mutation(); Type: ACL; Schema: ops; Owner: ktm_curation_audit_writer
+--
+
+REVOKE ALL ON FUNCTION ops.reject_curation_import_plan_mutation() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION reject_curation_import_plan_truncate(); Type: ACL; Schema: ops; Owner: ktm_curation_audit_writer
+--
+
+REVOKE ALL ON FUNCTION ops.reject_curation_import_plan_truncate() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION transition_provider_cancellation_job_command(p_cancellation_id uuid, p_job_id uuid, p_dagster_run_id text, p_expected_statuses text[], p_target_status text, p_error_message text, p_dagster_terminal_status text, p_engine_started_at timestamp with time zone, p_engine_finished_at timestamp with time zone, p_success_tracking_invariant boolean, p_result text, p_expected_member_results text[]); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
+--
+SELECT set_config('role', 'ktm_curation_command_owner', true);
+
+REVOKE ALL ON FUNCTION ops.transition_provider_cancellation_job_command(p_cancellation_id uuid, p_job_id uuid, p_dagster_run_id text, p_expected_statuses text[], p_target_status text, p_error_message text, p_dagster_terminal_status text, p_engine_started_at timestamp with time zone, p_engine_finished_at timestamp with time zone, p_success_tracking_invariant boolean, p_result text, p_expected_member_results text[]) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.transition_provider_cancellation_job_command(p_cancellation_id uuid, p_job_id uuid, p_dagster_run_id text, p_expected_statuses text[], p_target_status text, p_error_message text, p_dagster_terminal_status text, p_engine_started_at timestamp with time zone, p_engine_finished_at timestamp with time zone, p_success_tracking_invariant boolean, p_result text, p_expected_member_results text[]) TO ktm_feature_api_runtime;
+
+
+--
+-- Name: PROCEDURE transition_provider_feature_operation_terminal_command(IN p_root_job_id uuid, IN p_target_status text, IN p_dagster_terminal_status text, IN p_stage text, IN p_error_message text, IN p_started_at timestamp with time zone, IN p_finished_at timestamp with time zone, IN p_update_members boolean, OUT o_changed boolean); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE ops.transition_provider_feature_operation_terminal_command(IN p_root_job_id uuid, IN p_target_status text, IN p_dagster_terminal_status text, IN p_stage text, IN p_error_message text, IN p_started_at timestamp with time zone, IN p_finished_at timestamp with time zone, IN p_update_members boolean, OUT o_changed boolean) FROM PUBLIC;
+GRANT ALL ON PROCEDURE ops.transition_provider_feature_operation_terminal_command(IN p_root_job_id uuid, IN p_target_status text, IN p_dagster_terminal_status text, IN p_stage text, IN p_error_message text, IN p_started_at timestamp with time zone, IN p_finished_at timestamp with time zone, IN p_update_members boolean, OUT o_changed boolean) TO ktm_curation_provider_executor;
+
+
+--
 -- Name: TABLE source_entity_heads; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
 --
 SELECT set_config('role', 'ktm_feature_schema_owner', true);
 
 GRANT SELECT ON TABLE provider_sync.source_entity_heads TO ktm_feature_state_procedure_owner;
+GRANT SELECT ON TABLE provider_sync.source_entity_heads TO ktm_curation_command_owner;
+GRANT SELECT,UPDATE ON TABLE provider_sync.source_entity_heads TO ktm_manual_provider_dedup_procedure_owner;
 
 
 --
@@ -13917,6 +24606,504 @@ GRANT SELECT ON TABLE provider_sync.source_entity_heads TO ktm_feature_state_pro
 --
 
 GRANT UPDATE(source_entity_key) ON TABLE provider_sync.source_entity_heads TO ktm_feature_state_procedure_owner;
+GRANT UPDATE(source_entity_key) ON TABLE provider_sync.source_entity_heads TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE curated_source_rules; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT ON TABLE feature.curated_source_rules TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_source_rules.theme_id; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(theme_id) ON TABLE feature.curated_source_rules TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_source_rules.source_id; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(source_id) ON TABLE feature.curated_source_rules TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_source_rules.place_kind; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(place_kind),UPDATE(place_kind) ON TABLE feature.curated_source_rules TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_source_rules.category; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(category),UPDATE(category) ON TABLE feature.curated_source_rules TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_source_rules.region_scope; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(region_scope),UPDATE(region_scope) ON TABLE feature.curated_source_rules TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_source_rules.default_action; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(default_action),UPDATE(default_action) ON TABLE feature.curated_source_rules TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_source_rules.priority; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(priority),UPDATE(priority) ON TABLE feature.curated_source_rules TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_source_rules.enabled; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(enabled),UPDATE(enabled) ON TABLE feature.curated_source_rules TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_source_rules.metadata; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(metadata),UPDATE(metadata) ON TABLE feature.curated_source_rules TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_source_rules.updated_at; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(updated_at),UPDATE(updated_at) ON TABLE feature.curated_source_rules TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_source_rules.detail_selector; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(detail_selector),UPDATE(detail_selector) ON TABLE feature.curated_source_rules TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_source_rules.row_revision; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(row_revision),UPDATE(row_revision) ON TABLE feature.curated_source_rules TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_source_rules.archived_at; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(archived_at),UPDATE(archived_at) ON TABLE feature.curated_source_rules TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_source_rules.owner_kind; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(owner_kind),UPDATE(owner_kind) ON TABLE feature.curated_source_rules TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_source_rules.owner_provider_dataset_id; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(owner_provider_dataset_id),UPDATE(owner_provider_dataset_id) ON TABLE feature.curated_source_rules TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE curated_sources; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT ON TABLE feature.curated_sources TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_sources.source_name; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(source_name),UPDATE(source_name) ON TABLE feature.curated_sources TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_sources.source_url; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(source_url),UPDATE(source_url) ON TABLE feature.curated_sources TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_sources.source_kind; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(source_kind),UPDATE(source_kind) ON TABLE feature.curated_sources TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_sources.license; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(license),UPDATE(license) ON TABLE feature.curated_sources TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_sources.update_cycle; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(update_cycle),UPDATE(update_cycle) ON TABLE feature.curated_sources TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_sources.last_source_modified_at; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT UPDATE(last_source_modified_at) ON TABLE feature.curated_sources TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_sources.last_checked_at; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT UPDATE(last_checked_at) ON TABLE feature.curated_sources TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_sources.next_expected_at; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT UPDATE(next_expected_at) ON TABLE feature.curated_sources TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_sources.row_count; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT UPDATE(row_count) ON TABLE feature.curated_sources TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_sources.freshness_note; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(freshness_note),UPDATE(freshness_note) ON TABLE feature.curated_sources TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_sources.provider_status; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(provider_status),UPDATE(provider_status) ON TABLE feature.curated_sources TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_sources.metadata; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(metadata),UPDATE(metadata) ON TABLE feature.curated_sources TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_sources.updated_at; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(updated_at),UPDATE(updated_at) ON TABLE feature.curated_sources TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_sources.provider_dataset_id; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(provider_dataset_id) ON TABLE feature.curated_sources TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_sources.row_revision; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(row_revision),UPDATE(row_revision) ON TABLE feature.curated_sources TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_sources.observation_revision; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(observation_revision),UPDATE(observation_revision) ON TABLE feature.curated_sources TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_sources.archived_at; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT UPDATE(archived_at) ON TABLE feature.curated_sources TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE curated_themes; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT ON TABLE feature.curated_themes TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_themes.theme_slug; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(theme_slug),UPDATE(theme_slug) ON TABLE feature.curated_themes TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_themes.theme_name; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(theme_name),UPDATE(theme_name) ON TABLE feature.curated_themes TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_themes.theme_description; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(theme_description),UPDATE(theme_description) ON TABLE feature.curated_themes TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_themes.theme_group; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(theme_group),UPDATE(theme_group) ON TABLE feature.curated_themes TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_themes.default_curated; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(default_curated) ON TABLE feature.curated_themes TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_themes.visibility; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(visibility),UPDATE(visibility) ON TABLE feature.curated_themes TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_themes.metadata; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(metadata),UPDATE(metadata) ON TABLE feature.curated_themes TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_themes.updated_at; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(updated_at),UPDATE(updated_at) ON TABLE feature.curated_themes TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_themes.row_revision; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(row_revision),UPDATE(row_revision) ON TABLE feature.curated_themes TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_themes.archived_at; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(archived_at),UPDATE(archived_at) ON TABLE feature.curated_themes TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_themes.owner_kind; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(owner_kind),UPDATE(owner_kind) ON TABLE feature.curated_themes TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curated_themes.owner_provider_dataset_id; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(owner_provider_dataset_id),UPDATE(owner_provider_dataset_id) ON TABLE feature.curated_themes TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE curation_collections; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE feature.curation_collections TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curation_collections.collection_id; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(collection_id) ON TABLE feature.curation_collections TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curation_collections.collection_key; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(collection_key),UPDATE(collection_key) ON TABLE feature.curation_collections TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curation_collections.theme_id; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(theme_id),UPDATE(theme_id) ON TABLE feature.curation_collections TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curation_collections.source_id; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(source_id),UPDATE(source_id) ON TABLE feature.curation_collections TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curation_collections.title; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(title),UPDATE(title) ON TABLE feature.curation_collections TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curation_collections.edition_key; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(edition_key),UPDATE(edition_key) ON TABLE feature.curation_collections TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curation_collections.description; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(description),UPDATE(description) ON TABLE feature.curation_collections TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curation_collections.status; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(status),UPDATE(status) ON TABLE feature.curation_collections TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curation_collections.visibility; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(visibility),UPDATE(visibility) ON TABLE feature.curation_collections TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curation_collections.metadata; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(metadata),UPDATE(metadata) ON TABLE feature.curation_collections TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curation_collections.created_by; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(created_by) ON TABLE feature.curation_collections TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curation_collections.updated_by; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(updated_by),UPDATE(updated_by) ON TABLE feature.curation_collections TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curation_collections.created_at; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(created_at) ON TABLE feature.curation_collections TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curation_collections.updated_at; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(updated_at),UPDATE(updated_at) ON TABLE feature.curation_collections TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curation_collections.archived_at; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(archived_at),UPDATE(archived_at) ON TABLE feature.curation_collections TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curation_collections.row_revision; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT INSERT(row_revision),UPDATE(row_revision) ON TABLE feature.curation_collections TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE curation_import_batches; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT ON TABLE feature.curation_import_batches TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE curation_import_plan_revisions; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT ON TABLE feature.curation_import_plan_revisions TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE curation_import_plan_rows; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT ON TABLE feature.curation_import_plan_rows TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE curation_import_plans; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT ON TABLE feature.curation_import_plans TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE curation_import_rows; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT ON TABLE feature.curation_import_rows TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE curation_items; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT,UPDATE ON TABLE feature.curation_items TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE curation_link_decisions; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT,UPDATE ON TABLE feature.curation_link_decisions TO ktm_curation_command_owner;
 
 
 --
@@ -13932,6 +25119,7 @@ GRANT SELECT,INSERT ON TABLE feature.feature_aliases TO ktm_feature_state_proced
 
 GRANT SELECT ON TABLE feature.feature_areas TO ktm_feature_runtime;
 GRANT SELECT ON TABLE feature.feature_areas TO ktm_feature_state_procedure_owner;
+GRANT SELECT ON TABLE feature.feature_areas TO ktm_curation_command_owner;
 
 
 --
@@ -14035,10 +25223,21 @@ GRANT SELECT,INSERT,UPDATE ON TABLE feature.feature_base_field_values TO ktm_fea
 
 
 --
+-- Name: TABLE feature_creation_origins; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT ON TABLE feature.feature_creation_origins TO ktm_manual_feature_procedure_owner;
+GRANT SELECT,INSERT ON TABLE feature.feature_creation_origins TO ktm_curation_command_owner;
+GRANT SELECT,INSERT ON TABLE feature.feature_creation_origins TO ktm_feature_request_procedure_owner;
+GRANT SELECT ON TABLE feature.feature_creation_origins TO ktm_manual_provider_dedup_procedure_owner;
+
+
+--
 -- Name: TABLE feature_events; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
 GRANT SELECT ON TABLE feature.feature_events TO ktm_feature_state_procedure_owner;
+GRANT SELECT ON TABLE feature.feature_events TO ktm_curation_command_owner;
 
 
 --
@@ -14137,6 +25336,7 @@ GRANT UPDATE(payload) ON TABLE feature.feature_events TO ktm_feature_state_proce
 --
 
 GRANT SELECT ON TABLE feature.feature_notices TO ktm_feature_state_procedure_owner;
+GRANT SELECT ON TABLE feature.feature_notices TO ktm_curation_command_owner;
 
 
 --
@@ -14200,6 +25400,7 @@ GRANT UPDATE(payload) ON TABLE feature.feature_notices TO ktm_feature_state_proc
 --
 
 GRANT SELECT ON TABLE feature.feature_places TO ktm_feature_state_procedure_owner;
+GRANT SELECT ON TABLE feature.feature_places TO ktm_curation_command_owner;
 
 
 --
@@ -14271,6 +25472,7 @@ GRANT UPDATE(payload) ON TABLE feature.feature_places TO ktm_feature_state_proce
 
 GRANT SELECT ON TABLE feature.feature_routes TO ktm_feature_runtime;
 GRANT SELECT ON TABLE feature.feature_routes TO ktm_feature_state_procedure_owner;
+GRANT SELECT ON TABLE feature.feature_routes TO ktm_curation_command_owner;
 
 
 --
@@ -14420,6 +25622,8 @@ GRANT SELECT,USAGE ON SEQUENCE feature.feature_state_transitions_transition_id_s
 
 GRANT SELECT,INSERT ON TABLE feature.features TO ktm_feature_state_procedure_owner;
 GRANT SELECT ON TABLE feature.features TO ktm_feature_runtime;
+GRANT SELECT ON TABLE feature.features TO ktm_curation_command_owner;
+GRANT SELECT,UPDATE ON TABLE feature.features TO ktm_manual_provider_dedup_procedure_owner;
 
 
 --
@@ -14582,6 +25786,20 @@ GRANT UPDATE(coord_precision_digits) ON TABLE feature.features TO ktm_feature_st
 
 
 --
+-- Name: COLUMN features.row_revision; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT UPDATE(row_revision) ON TABLE feature.features TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN features.feature_uuid; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT(feature_uuid) ON TABLE feature.features TO ktm_manual_feature_procedure_owner;
+
+
+--
 -- Name: COLUMN features.lifecycle_state; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -14603,6 +25821,16 @@ GRANT UPDATE(quality_state) ON TABLE feature.features TO ktm_feature_state_proce
 
 
 --
+-- Name: TABLE manual_feature_identity_claims; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT ON TABLE feature.manual_feature_identity_claims TO ktm_manual_feature_procedure_owner;
+GRANT SELECT,INSERT ON TABLE feature.manual_feature_identity_claims TO ktm_curation_command_owner;
+GRANT SELECT,INSERT ON TABLE feature.manual_feature_identity_claims TO ktm_feature_request_procedure_owner;
+GRANT SELECT ON TABLE feature.manual_feature_identity_claims TO ktm_manual_provider_dedup_procedure_owner;
+
+
+--
 -- Name: TABLE public_features; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -14610,10 +25838,135 @@ GRANT SELECT ON TABLE feature.public_features TO ktm_feature_runtime;
 
 
 --
+-- Name: TABLE theme_candidate_generation_observations; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT ON TABLE feature.theme_candidate_generation_observations TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE theme_candidate_generations; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT ON TABLE feature.theme_candidate_generations TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE theme_feature_candidate_transitions; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT ON TABLE feature.theme_feature_candidate_transitions TO ktm_curation_command_owner;
+GRANT SELECT,INSERT ON TABLE feature.theme_feature_candidate_transitions TO ktm_curation_audit_writer;
+
+
+--
+-- Name: SEQUENCE theme_feature_candidate_transitions_transition_id_seq; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,USAGE ON SEQUENCE feature.theme_feature_candidate_transitions_transition_id_seq TO ktm_curation_audit_writer;
+
+
+--
+-- Name: TABLE theme_feature_candidates; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT,UPDATE ON TABLE feature.theme_feature_candidates TO ktm_curation_command_owner;
+GRANT SELECT ON TABLE feature.theme_feature_candidates TO ktm_curation_audit_writer;
+
+
+--
+-- Name: TABLE curation_catalog_command_effects; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT ON TABLE ops.curation_catalog_command_effects TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE curation_concierge_legacy_owner_manifest; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT ON TABLE ops.curation_concierge_legacy_owner_manifest TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE curation_import_collection_effects; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT ON TABLE ops.curation_import_collection_effects TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE curation_import_collection_touches; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT ON TABLE ops.curation_import_collection_touches TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE curation_import_plan_claims; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT ON TABLE ops.curation_import_plan_claims TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE curation_import_plan_commits; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT ON TABLE ops.curation_import_plan_commits TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE curation_provider_root_receipts; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT ON TABLE ops.curation_provider_root_receipts TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE curation_provider_snapshot_receipts; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT ON TABLE ops.curation_provider_snapshot_receipts TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE curation_rule_reconcile_operations; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT ON TABLE ops.curation_rule_reconcile_operations TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN curation_rule_reconcile_operations.operation_id; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT UPDATE(operation_id) ON TABLE ops.curation_rule_reconcile_operations TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE curation_rule_reconcile_scope_members; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT ON TABLE ops.curation_rule_reconcile_scope_members TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE curation_source_observation_receipts; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT ON TABLE ops.curation_source_observation_receipts TO ktm_curation_command_owner;
+
+
+--
 -- Name: TABLE domain_command_results; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
 GRANT SELECT ON TABLE ops.domain_command_results TO ktm_feature_state_procedure_owner;
+GRANT SELECT ON TABLE ops.domain_command_results TO ktm_curation_command_owner;
+GRANT SELECT ON TABLE ops.domain_command_results TO ktm_feature_request_procedure_owner;
+GRANT SELECT ON TABLE ops.domain_command_results TO ktm_manual_feature_procedure_owner;
+GRANT SELECT ON TABLE ops.domain_command_results TO ktm_manual_provider_dedup_procedure_owner;
 
 
 --
@@ -14621,6 +25974,10 @@ GRANT SELECT ON TABLE ops.domain_command_results TO ktm_feature_state_procedure_
 --
 
 GRANT SELECT ON TABLE ops.domain_commands TO ktm_feature_state_procedure_owner;
+GRANT SELECT ON TABLE ops.domain_commands TO ktm_curation_command_owner;
+GRANT SELECT ON TABLE ops.domain_commands TO ktm_feature_request_procedure_owner;
+GRANT SELECT ON TABLE ops.domain_commands TO ktm_manual_feature_procedure_owner;
+GRANT SELECT,UPDATE ON TABLE ops.domain_commands TO ktm_manual_provider_dedup_procedure_owner;
 
 
 --
@@ -14628,6 +25985,9 @@ GRANT SELECT ON TABLE ops.domain_commands TO ktm_feature_state_procedure_owner;
 --
 
 GRANT UPDATE(command_id) ON TABLE ops.domain_commands TO ktm_feature_state_procedure_owner;
+GRANT UPDATE(command_id) ON TABLE ops.domain_commands TO ktm_curation_command_owner;
+GRANT UPDATE(command_id) ON TABLE ops.domain_commands TO ktm_feature_request_procedure_owner;
+GRANT UPDATE(command_id) ON TABLE ops.domain_commands TO ktm_manual_feature_procedure_owner;
 
 
 --
@@ -14644,6 +26004,7 @@ GRANT SELECT ON TABLE ops.feature_override_field_paths TO ktm_feature_runtime;
 
 GRANT SELECT,INSERT ON TABLE ops.feature_overrides TO ktm_feature_state_procedure_owner;
 GRANT SELECT ON TABLE ops.feature_overrides TO ktm_feature_runtime;
+GRANT SELECT ON TABLE ops.feature_overrides TO ktm_curation_command_owner;
 
 
 --
@@ -14766,6 +26127,181 @@ GRANT UPDATE(revoked_reason) ON TABLE ops.feature_overrides TO ktm_feature_state
 
 
 --
+-- Name: TABLE feature_reference_reconciliation_acks; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT,UPDATE ON TABLE ops.feature_reference_reconciliation_acks TO ktm_manual_provider_dedup_procedure_owner;
+
+
+--
+-- Name: TABLE feature_reference_reconciliation_events; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT,UPDATE ON TABLE ops.feature_reference_reconciliation_events TO ktm_manual_provider_dedup_procedure_owner;
+
+
+--
+-- Name: SEQUENCE feature_reference_reconciliation_events_event_sequence_seq; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT USAGE ON SEQUENCE ops.feature_reference_reconciliation_events_event_sequence_seq TO ktm_manual_provider_dedup_procedure_owner;
+
+
+--
+-- Name: TABLE feature_reference_reconciliation_leases; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT,UPDATE ON TABLE ops.feature_reference_reconciliation_leases TO ktm_manual_provider_dedup_procedure_owner;
+
+
+--
+-- Name: TABLE feature_reference_reconciliation_subscriptions; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT,UPDATE ON TABLE ops.feature_reference_reconciliation_subscriptions TO ktm_manual_provider_dedup_procedure_owner;
+
+
+--
+-- Name: TABLE feature_requests; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT ON TABLE ops.feature_requests TO ktm_feature_request_procedure_owner;
+
+
+--
+-- Name: COLUMN feature_requests.status; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT UPDATE(status) ON TABLE ops.feature_requests TO ktm_feature_request_procedure_owner;
+
+
+--
+-- Name: COLUMN feature_requests.resolved_at; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT UPDATE(resolved_at) ON TABLE ops.feature_requests TO ktm_feature_request_procedure_owner;
+
+
+--
+-- Name: COLUMN feature_requests.resolved_by_actor; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT UPDATE(resolved_by_actor) ON TABLE ops.feature_requests TO ktm_feature_request_procedure_owner;
+
+
+--
+-- Name: COLUMN feature_requests.resolution_command_id; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT UPDATE(resolution_command_id) ON TABLE ops.feature_requests TO ktm_feature_request_procedure_owner;
+
+
+--
+-- Name: COLUMN feature_requests.resolved_feature_id; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT UPDATE(resolved_feature_id) ON TABLE ops.feature_requests TO ktm_feature_request_procedure_owner;
+
+
+--
+-- Name: COLUMN feature_requests.rejection_reason; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT UPDATE(rejection_reason) ON TABLE ops.feature_requests TO ktm_feature_request_procedure_owner;
+
+
+--
+-- Name: TABLE feature_update_requests; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT ON TABLE ops.feature_update_requests TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE import_job_datasets; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT,UPDATE ON TABLE ops.import_job_datasets TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE import_job_event_clock; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT,UPDATE ON TABLE ops.import_job_event_clock TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE import_job_events; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT,UPDATE ON TABLE ops.import_job_events TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE import_jobs; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT,UPDATE ON TABLE ops.import_jobs TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN import_jobs.job_id; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT UPDATE(job_id) ON TABLE ops.import_jobs TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN import_jobs.payload; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT UPDATE(payload) ON TABLE ops.import_jobs TO ktm_curation_command_owner;
+
+
+--
+-- Name: SEQUENCE import_jobs_queue_sequence_seq; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,USAGE ON SEQUENCE ops.import_jobs_queue_sequence_seq TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE manual_provider_dedup_cases; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT,UPDATE ON TABLE ops.manual_provider_dedup_cases TO ktm_manual_provider_dedup_procedure_owner;
+
+
+--
+-- Name: TABLE manual_provider_dedup_resolutions; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT,UPDATE ON TABLE ops.manual_provider_dedup_resolutions TO ktm_manual_provider_dedup_procedure_owner;
+
+
+--
+-- Name: TABLE pipeline_cancellation_members; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,UPDATE ON TABLE ops.pipeline_cancellation_members TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE pipeline_cancellation_runs; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,UPDATE ON TABLE ops.pipeline_cancellation_runs TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE pipeline_cancellations; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,UPDATE ON TABLE ops.pipeline_cancellations TO ktm_curation_command_owner;
+
+
+--
 -- Name: TABLE tvn36_legacy_freeze_preflight_manifest; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -14773,10 +26309,32 @@ GRANT SELECT,INSERT,DELETE ON TABLE ops.tvn36_legacy_freeze_preflight_manifest T
 
 
 --
+-- Name: TABLE provider_dataset_operation_scopes; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT ON TABLE provider_sync.provider_dataset_operation_scopes TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE provider_dataset_operations; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT ON TABLE provider_sync.provider_dataset_operations TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN provider_dataset_operations.provider_dataset_id; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+GRANT UPDATE(provider_dataset_id) ON TABLE provider_sync.provider_dataset_operations TO ktm_curation_command_owner;
+
+
+--
 -- Name: TABLE provider_datasets; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
 --
 
 GRANT SELECT ON TABLE provider_sync.provider_datasets TO ktm_feature_state_procedure_owner;
+GRANT SELECT ON TABLE provider_sync.provider_datasets TO ktm_curation_command_owner;
 
 
 --
@@ -14784,6 +26342,7 @@ GRANT SELECT ON TABLE provider_sync.provider_datasets TO ktm_feature_state_proce
 --
 
 GRANT UPDATE(provider_dataset_id) ON TABLE provider_sync.provider_datasets TO ktm_feature_state_procedure_owner;
+GRANT UPDATE(provider_dataset_id) ON TABLE provider_sync.provider_datasets TO ktm_curation_command_owner;
 
 
 --
@@ -14791,6 +26350,8 @@ GRANT UPDATE(provider_dataset_id) ON TABLE provider_sync.provider_datasets TO kt
 --
 
 GRANT SELECT ON TABLE provider_sync.source_entities TO ktm_feature_state_procedure_owner;
+GRANT SELECT ON TABLE provider_sync.source_entities TO ktm_curation_command_owner;
+GRANT SELECT,UPDATE ON TABLE provider_sync.source_entities TO ktm_manual_provider_dedup_procedure_owner;
 
 
 --
@@ -14798,6 +26359,7 @@ GRANT SELECT ON TABLE provider_sync.source_entities TO ktm_feature_state_procedu
 --
 
 GRANT UPDATE(source_entity_key) ON TABLE provider_sync.source_entities TO ktm_feature_state_procedure_owner;
+GRANT UPDATE(source_entity_key) ON TABLE provider_sync.source_entities TO ktm_curation_command_owner;
 
 
 --
@@ -14805,6 +26367,15 @@ GRANT UPDATE(source_entity_key) ON TABLE provider_sync.source_entities TO ktm_fe
 --
 
 GRANT SELECT ON TABLE provider_sync.source_links TO ktm_feature_state_procedure_owner;
+GRANT SELECT ON TABLE provider_sync.source_links TO ktm_curation_command_owner;
+GRANT SELECT,UPDATE ON TABLE provider_sync.source_links TO ktm_manual_provider_dedup_procedure_owner;
+
+
+--
+-- Name: COLUMN source_links.feature_id; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+GRANT UPDATE(feature_id) ON TABLE provider_sync.source_links TO ktm_curation_command_owner;
 
 
 --
@@ -14819,6 +26390,15 @@ GRANT UPDATE(source_entity_key) ON TABLE provider_sync.source_links TO ktm_featu
 --
 
 GRANT SELECT ON TABLE provider_sync.source_records TO ktm_feature_state_procedure_owner;
+GRANT SELECT ON TABLE provider_sync.source_records TO ktm_curation_command_owner;
+GRANT SELECT,UPDATE ON TABLE provider_sync.source_records TO ktm_manual_provider_dedup_procedure_owner;
+
+
+--
+-- Name: COLUMN source_records.source_record_key; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+GRANT UPDATE(source_record_key) ON TABLE provider_sync.source_records TO ktm_curation_command_owner;
 
 
 --
@@ -14831,6 +26411,7 @@ GRANT UPDATE(source_entity_key) ON TABLE provider_sync.source_records TO ktm_fea
 --
 -- PostgreSQL database dump complete
 --
+
 
 
 SELECT set_config('role', current_setting('ktm.baseline_prior_role'), true);
@@ -14850,10 +26431,23 @@ BEGIN
          WHERE n.nspname IN ('feature','provider_sync','ops')) g
  WHERE NOT EXISTS (SELECT 1
                      FROM (VALUES ('public'),
+                             ('ktm_curation_admin_executor'),
+                             ('ktm_curation_audit_writer'),
+                             ('ktm_curation_command_owner'),
+                             ('ktm_curation_provider_executor'),
+                             ('ktm_feature_api_runtime'),
                              ('ktm_feature_schema_owner'),
                              ('ktm_feature_state_procedure_owner'),
                              ('ktm_feature_audit_writer'),
-                             ('ktm_feature_runtime')) AS known(name)
+                             ('ktm_feature_reference_reconciliation_service_executor'),
+                             ('ktm_feature_runtime'),
+                             ('ktm_feature_request_admin_executor'),
+                             ('ktm_feature_request_procedure_owner'),
+                             ('ktm_feature_request_service_executor'),
+                             ('ktm_manual_feature_procedure_owner'),
+                             ('ktm_manual_provider_dedup_admin_executor'),
+                             ('ktm_manual_provider_dedup_detector_executor'),
+                             ('ktm_manual_provider_dedup_procedure_owner')) AS known(name)
                     WHERE known.name = g.name));
     IF unknown <> '' THEN
         RAISE EXCEPTION
@@ -14866,7 +26460,7 @@ $ktm_acl_grantee$;
 DO $ktm_acl$
 DECLARE
     observed text;
-    expected text := '5e155f38cff5d7e0eb56902eaf39336395b927f58fa46ce26a9076267023f1eb';
+    expected text := 'bdf0aa14f6657627c9c9392c99cb56120d3ab53a2c074263f12cc94273929c90';
 BEGIN
     observed := (SELECT encode(sha256(convert_to(coalesce(string_agg(line, chr(10) ORDER BY line), ''), 'UTF8')), 'hex')
   FROM (SELECT grantee.name
@@ -14878,10 +26472,23 @@ BEGIN
           FROM pg_proc p
           JOIN pg_namespace n ON n.oid = p.pronamespace
           CROSS JOIN (VALUES ('public'),
+                             ('ktm_curation_admin_executor'),
+                             ('ktm_curation_audit_writer'),
+                             ('ktm_curation_command_owner'),
+                             ('ktm_curation_provider_executor'),
+                             ('ktm_feature_api_runtime'),
                              ('ktm_feature_schema_owner'),
                              ('ktm_feature_state_procedure_owner'),
                              ('ktm_feature_audit_writer'),
-                             ('ktm_feature_runtime')) AS grantee(name)
+                             ('ktm_feature_reference_reconciliation_service_executor'),
+                             ('ktm_feature_runtime'),
+                             ('ktm_feature_request_admin_executor'),
+                             ('ktm_feature_request_procedure_owner'),
+                             ('ktm_feature_request_service_executor'),
+                             ('ktm_manual_feature_procedure_owner'),
+                             ('ktm_manual_provider_dedup_admin_executor'),
+                             ('ktm_manual_provider_dedup_detector_executor'),
+                             ('ktm_manual_provider_dedup_procedure_owner')) AS grantee(name)
          WHERE n.nspname IN ('feature','provider_sync','ops')) s);
     IF observed IS DISTINCT FROM expected THEN
         RAISE EXCEPTION

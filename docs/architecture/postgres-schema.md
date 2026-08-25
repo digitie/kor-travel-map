@@ -531,7 +531,7 @@ def run_migrations_online():
             context.run_migrations()
 ```
 
-### 8.2 현행 migration 기준
+### 8.2 현행 migration 기준 (`300` 이후 forward-only)
 
 호환성 자체는 설계 목표가 아니다. 데이터 보존과 lock 특성에 따라 ADR-075의 DDL 유형을 고른다.
 
@@ -541,11 +541,13 @@ def run_migrations_online():
    UNIQUE 사이에 writer가 다시 중복을 만들 수 있는 cutover는 예외다. 호환성보다 원자성이
    우선이면 table writer lock을 먼저 잡고 dedup + non-concurrent UNIQUE를 한 transaction으로
    묶는다(0060). UNIQUE writer conflict target은 같은 배포 cutover에서 전환한다. dedup처럼
-   역연산으로 원본을 복원할 수 없는 migration은 거짓 downgrade를 제공하지 않고 검증된
-   backup/PITR과 구 writer image를 함께 복원하도록 fail-closed한다.
+   역연산으로 원본을 복원할 수 없는 migration은 거짓 downgrade를 제공하지 않는다. `300`
+   이후 backup artifact는 감사·증거 보존용이며 DB restore/PITR·구 writer image 재기동은
+   지원하지 않는다. 실패는 write fence를 유지한 채 새 forward-fix candidate로 해소한다.
 3. **소형 ops 수술형** — drain, lock acquisition timeout, 예상 보유 시간을 clone에서 각각 측정한다.
 4. **대형 rewrite/타입·identity 변경** — shadow column/table, batch backfill, checksum, write fence,
-   swap을 사용한다. rollback window에는 legacy 구조와 delta/PITR 복구 경로를 보존한다.
+   controlled handoff를 사용한다. 실패 시에는 legacy 구조·delta/PITR 복구 경로를 열지 않고
+   fenced state에서 검증 가능한 forward fix만 허용한다.
 
 ### 8.3 마이그레이션 net 검증
 
@@ -577,32 +579,27 @@ legacy에서 완전히 재구성할 수 없는 collection/item이나 감사값�
 - 4자리 순번으로 적용 순서를 가시화한다.
 - revision message(파일 docstring 첫 줄)는 commit summary와 일치시킨다.
 
-#### 지금 `alembic/versions/`에 있는 것
+#### 현재 `alembic/versions/`에 있는 것
 
-squash(2026-08-14) 이후 baseline과 bridge, T-VN-40 migration만 있다.
+T-VN-H46H baseline 이후 active graph는 `300_schema_baseline.py` 하나다.
 
-- `0200_schema_baseline.py` — revision id `0200_schema_baseline`, `down_revision=None`.
-  `alembic/baseline/{schema,seed}.sql`을 byte sha로 잠근 채 적용한다.
-- `0201_squash_bridge.py` — revision id는 파일명이 아니라 **`0104_tvn36_final_fence`**다.
-  이미 `0104`에 있는 DB가 이 그래프에서도 해석되게 하는 노드다.
-- `0202_tvn40_curation_receipts.py`부터 `0225_tvn40c_physical_removal.py`까지 —
-  bridge 뒤에 이어지는 T-VN-40 단일 체인이다. 그 뒤에 이미 적용된
-  `0229_tvn40b_source_rule_action`, `0230_tvn_c05_krforest_datasets`,
-  `0231_tvn41s_snapshot_material`, `0232_tvn37d_notice_empty_range`,
-  `0226_m01_manual_feature_create`, `0227_m02_feature_provenance`,
-  `0228_m03_manual_curation`, `0233_m04_feature_request_queue`,
-  `0234_m05_manual_provider_dedup`, `0235_m05_reconciliation_delivery`,
-  `0236_tvn41s_compaction_drained`가 dependency graph 순서로 이어지며 현재 head는
-  `0236_tvn41s_compaction_drained`다.
+- revision id `300`, `down_revision=None`이다.
+- `alembic/baseline/{schema,seed}.sql`의 byte SHA와 final role·ACL·extension contract를
+  검증한 뒤에만 fresh DB에 적용한다.
+- `0200`부터 `0236_tvn41s_compaction_drained`까지는
+  `alembic/retired_versions/0200-0236/`의 byte-pinned 실행 불가 archive다.
+  기존 109개 `legacy_versions/` archive와는 revision id 중복 때문에 합치거나
+  `version_locations`에 동시에 넣지 않는다.
 
-`0001~0104` 체인 109개는 `alembic/legacy_versions/`의 실행되지 않는 아카이브다
-([README](../../alembic/legacy_versions/README.md)). **`versions/`로 되돌리지 마라** —
-bridge와 아카이브가 `0104_tvn36_final_fence`를 둘 다 선언하면 Alembic graph가 손상된다.
+normal API image는 fresh DB 또는 raw revision `300`만 기동한다. 기존 raw
+`0236_tvn41s_compaction_drained` DB를 `300`으로 전진시키는 in-place handoff는 지원하지 않는다.
+일반 `upgrade`, `stamp`, downgrade, archive replay, 수동
+`alembic_version` SQL은 지원하지 않는다.
 
 #### 다음 application migration 작성
 
-1. 새 revision ID와 파일명은 기존 것과 겹치지 않게 잡고, `down_revision`은 **현재 terminal
-    head**로 잇는다. **`0201`을 쓰지 마라** — 그건 bridge 파일명이고 revision id가 아니다.
+1. 새 revision ID와 파일명은 기존 것과 겹치지 않게 잡고, 첫 후속 migration의
+   `down_revision`은 정확히 `300`으로 잇는다. retired archive의 번호·ID를 재사용하지 않는다.
 2. 파일명 숫자는 편의일 뿐 적용 순서의 정본이 아니다. upstream이 높은 번호를 먼저
     사용했으면 새 lane은 충돌 없는 ID를 택하고 `down_revision` graph로 순서를 표현한다.
     package graph artifact는 이 dependency 순서로 생성된다.
@@ -614,12 +611,12 @@ bridge와 아카이브가 `0104_tvn36_final_fence`를 둘 다 선언하면 Alemb
    다 — CI 워크플로에 이 스크립트를 부르는 스텝은 없다.
 4. `KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD`(배포 env pin)를 새 head로 올린다.
    `docker/api-entrypoint.sh`가 이미지 head와 이 값을 대조해 fail-closed한다.
-5. baseline 자체는 건드리지 않는다. baseline 갱신은 별도 결정이며 절차는
-   `alembic/versions/0200_schema_baseline.py`의 `_SCHEMA_SHA256` 주석에 있다.
+5. baseline 자체는 건드리지 않는다. 새 baseline은 별도 설계·fresh catalog 비교·
+   controlled production handoff를 다시 갖춘 결정으로만 만든다.
 
-> **baseline 파일 명명 규약**: 다음에 squash를 한다면 파일 이름을
-> `NNNN_schema_baseline.py`로 지어라. `docker/api-entrypoint.sh`가 "이 이미지가
-> squash판인가"를 `alembic/versions/*_schema_baseline.py` 존재로 판별한다.
+> **baseline 파일 명명 규약**: 다음에 새 root를 만들면 별도 revision ID와
+> `NNNN_schema_baseline.py` 파일을 쓴다. active image의 허용 raw revision과
+> controlled handoff source는 entrypoint와 Alembic guard에 명시적으로 고정한다.
 ## 9. EXPLAIN 통합 테스트
 
 모든 hot path SQL은 `tests/integration/`에서 EXPLAIN 결과로 인덱스 사용 검증.
@@ -659,21 +656,16 @@ log_min_duration_statement = 1000  -- 1초 이상
 
 Grafana Loki에서 LogQL로 추적 (PinVi 측 wiring).
 
-## 11. 백업 / 복구
+## 11. 백업 artifact 감사 (`300` 이후 복원 비지원)
 
-```bash
-# 일 1회 custom format (SPEC V8 v8_0)
-pg_dump --format=custom --no-owner --no-privileges \
-        --schema=feature --schema=provider_sync --schema=ops \
-        kor_travel_map > /backup/kor_travel_map_$(date +%F).dump
+백업 artifact는 무결성·보존 기간·감사 evidence를 확인하는 용도다. `300` baseline 이후에는
+`pg_restore`, PITR, old writer image 재기동, snapshot swap을 recovery path로 사용하지 않는다.
+따라서 backup artifact가 존재해도 production DB에 적용하거나 새 DB를 그 artifact로 재구성하는
+운영 절차는 없다. failure는 writer fence를 유지하고 새 forward-fix candidate의 controlled
+handoff로만 처리한다.
 
-# PITR: wal-g + BackBlaze B2 (PinVi 측 운영)
-```
-
-복구:
-```bash
-pg_restore --no-owner --no-privileges -d kor_travel_map_new kor_travel_map_2026-05-24.dump
-```
+과거 `pg_dump`/`pg_restore`·wal-g 문서는 historical decision 기록에서만 보존하며 실행 지침이
+아니다.
 
 ## 12. 운영 체크리스트 (Sprint 5 진입 전)
 
@@ -685,4 +677,5 @@ pg_restore --no-owner --no-privileges -d kor_travel_map_new kor_travel_map_2026-
 - [ ] BRIN 인덱스 효율 측정 (1주 운영 후)
 - [ ] 인덱스 hit ratio 95%+ 확인
 - [ ] 부분 인덱스 vs 전체 인덱스 디스크 비교
-- [ ] Alembic upgrade/downgrade round-trip 및 표현력 손실 downgrade 거절 테스트 통과
+- [ ] isolated fresh-300 acceptance와 root/finalize receipt·final permit 검증 통과
+- [ ] generic downgrade/stamp/restore 시도를 fail-closed로 거절하는 테스트 통과

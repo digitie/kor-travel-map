@@ -83,6 +83,20 @@ def _canonical_json(value: object) -> bytes:
     return json.dumps(value, separators=(",", ":"), sort_keys=True).encode()
 
 
+def _canonical_document_sha256(value: object) -> str:
+    return _sha256_bytes(
+        (
+            json.dumps(
+                value,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            + "\n"
+        ).encode()
+    )
+
+
 def _snapshot_fixture(tmp_path: Path) -> tuple[dict[str, Path], Path, str, Callable]:
     commit = "a" * 40
     expected_base = tmp_path / "c7-runner"
@@ -316,9 +330,19 @@ def _runtime_fixture() -> tuple[
             "image_id": image_id,
         }
     schema_heads = {
-        "map_application_head": "0225_tvn40c_physical_removal",
+        "map_application_head": "300",
         "map_dagster_head": "29b539ebc72a",
         "pinvi_head": "20260804_0049",
+    }
+    candidate_evidence = {
+        "paired_receipt_sha256": "1" * 64,
+        "api_receipt_sha256": "2" * 64,
+        "candidate_git_tree": "3" * 40,
+        "postgres_image_id": "sha256:" + "9" * 64,
+        "dagster_config_sha256": "4" * 64,
+        "dagster_yaml_sha256": "5" * 64,
+        "application_contract_sha256": "6" * 64,
+        "launch_contract_sha256": "7" * 64,
     }
     generation = {
         **{field: role_images[role] for role, field in ATTESTATION.GENERATION_RUNTIME_IMAGE_FIELDS},
@@ -326,12 +350,90 @@ def _runtime_fixture() -> tuple[
         "map_source_revision": map_commit,
         "pinvi_source_revision": pinvi_commit,
         "pinset_sha256": pinset,
+        "map_application_300_candidate_evidence": candidate_evidence,
         "recorded_at": "2026-07-19T00:00:00+00:00",
     }
-    manifest = {"active_generation": generation, "version": 5}
+    manifest = {"active_generation": generation, "version": 6}
     transaction_id = "11111111-2222-3333-4444-555555555555"
+    application_create_identity = {
+        "database_name": "kor_travel_map",
+        "database_oid": 16384,
+        "database_owner": "ktm_admin",
+        "postgres_system_identifier": "1234567890123456789",
+    }
+    application_identity = {
+        **application_create_identity,
+        "database_owner": "ktm_feature_schema_owner",
+    }
+    dagster_identity = {
+        "system_identifier": "1234567890123456789",
+        "name": "kor_travel_map_dagster",
+        "oid": 16385,
+        "owner": "ktm_dagster",
+        "login_role": "ktm_dagster",
+        "login_role_attributes": {
+            "can_login": True,
+            "inherit": False,
+            "superuser": False,
+            "create_database": False,
+            "create_role": False,
+            "replication": False,
+            "bypass_rls": False,
+            "connection_limit": -1,
+            "valid_until_is_null": True,
+            "role_config_count": 0,
+            "database_role_setting_count": 0,
+            "granted_role_count": 0,
+            "member_role_count": 0,
+        },
+    }
+    root_plan = {
+        "transaction_id": "10000000-0000-0000-0000-000000000001",
+        "operation_id": "20000000-0000-0000-0000-000000000001",
+        "basis_journal_sha256": "8" * 64,
+        "basis_journal_generation": 7,
+        "writer_fence_expires_at": "2026-07-19T00:10:00+00:00",
+        "fence_sha256": "9" * 64,
+        "result_sha256": "a" * 64,
+    }
+    finalize_plan = {
+        "transaction_id": "10000000-0000-0000-0000-000000000002",
+        "operation_id": "20000000-0000-0000-0000-000000000002",
+        "basis_journal_sha256": "b" * 64,
+        "basis_journal_generation": 11,
+        "writer_fence_expires_at": "2026-07-19T00:20:00+00:00",
+        "fence_sha256": "c" * 64,
+        "result_sha256": "d" * 64,
+    }
+    execution_evidence = {
+        "application_create_database_identity": application_create_identity,
+        "application_create_database_identity_sha256": (
+            _canonical_document_sha256(application_create_identity)
+        ),
+        "application_database_identity": application_identity,
+        "application_database_identity_sha256": (
+            _canonical_document_sha256(application_identity)
+        ),
+        "fresh_root_operation_plan": root_plan,
+        "fresh_finalize_operation_plan": finalize_plan,
+        "app_final_permit_sha256": "e" * 64,
+        "dagster_metadata_database_identity": dagster_identity,
+        "dagster_metadata_database_identity_sha256": (
+            _canonical_document_sha256(dagster_identity)
+        ),
+        "metadata_permit_sha256": "f" * 64,
+    }
     journal = {
         "candidate": copy.deepcopy(generation),
+        "map_application_300_candidate_evidence": copy.deepcopy(candidate_evidence),
+        "map_application_300_execution_evidence": execution_evidence,
+        "pinvi_database_identity": {
+            "system_identifier": "9876543210987654321",
+            "name": "pinvi",
+            "oid": 16386,
+            "owner": "pinvi",
+            "login_role": "pinvi",
+        },
         "cancel_probe": {
             "cancellation_id": "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
             "fixture_consumed_at": "2026-07-19T00:00:01+00:00",
@@ -348,10 +450,11 @@ def _runtime_fixture() -> tuple[
         "compose_sha256": "d" * 64,
         "created_at": "2026-07-19T00:00:00+00:00",
         "environment_sha256": "e" * 64,
+        "journal_generation": 27,
         "phase": "committed",
         "resolved_compose_sha256": "f" * 64,
         "transaction_id": transaction_id,
-        "version": 7,
+        "version": 8,
     }
     manifest_bytes = _canonical_json(manifest)
     journal_bytes = _canonical_json(journal)
@@ -580,7 +683,7 @@ def test_runtime_attestation_rejects_each_pinned_generation_digest_mismatch(
         ),
     ],
 )
-def test_runtime_attestation_rejects_non_v5_or_inexact_generation_shape(
+def test_runtime_attestation_rejects_non_v6_or_inexact_generation_shape(
     mutation: Callable[[dict[str, object]], object],
     expected: str,
 ) -> None:
@@ -627,11 +730,42 @@ def test_runtime_attestation_rejects_journal_from_another_rebuild_transaction() 
 @pytest.mark.parametrize(
     ("mutation", "expected"),
     [
-        (lambda value: value.update({"version": 6}), "journal shape"),
+        (lambda value: value.update({"version": 7}), "journal shape"),
         (lambda value: value.pop("cancel_probe"), "journal shape"),
         (lambda value: value.update({"phase": "manifest_committing"}), "journal is not committed"),
         (lambda value: value.update({"transaction_id": "not-a-uuid"}), "journal transaction"),
         (lambda value: value.update({"environment_sha256": "short"}), "journal input digest"),
+        (lambda value: value.update({"journal_generation": 26}), "journal generation"),
+        (
+            lambda value: value["map_application_300_candidate_evidence"].update(
+                {"api_receipt_sha256": "0" * 64}
+            ),
+            "journal candidate evidence differs",
+        ),
+        (
+            lambda value: value["map_application_300_execution_evidence"].update(
+                {"application_database_identity_sha256": "0" * 64}
+            ),
+            "journal application identity digest",
+        ),
+        (
+            lambda value: value["map_application_300_execution_evidence"][
+                "fresh_finalize_operation_plan"
+            ].update({"result_sha256": None}),
+            "journal finalize operation digest",
+        ),
+        (
+            lambda value: value["map_application_300_execution_evidence"][
+                "dagster_metadata_database_identity"
+            ]["login_role_attributes"].update({"inherit": True}),
+            "journal Dagster metadata role privilege",
+        ),
+        (
+            lambda value: value["pinvi_database_identity"].update(
+                {"owner": "foreign_owner"}
+            ),
+            "journal PinVi database owner",
+        ),
         (lambda value: value["cancel_probe"].update({"stage": "consumed"}), "cancel probe"),
         (
             lambda value: value["cancel_probe"].update({"unexpected": True}),

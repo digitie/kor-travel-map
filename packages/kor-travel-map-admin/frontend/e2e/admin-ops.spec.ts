@@ -39,7 +39,6 @@ function makeBackup(overrides: Partial<BackupRecord> = {}): BackupRecord {
     mode: "cold",
     object_storage: {},
     path: `/var/backups/${MOCK_BACKUP_ID}`,
-    restore_url: `/v1/admin/restore/${MOCK_BACKUP_ID}`,
     ...overrides,
   };
 }
@@ -582,7 +581,7 @@ async function mockPoiCacheTargetMutations(page: Page) {
 }
 
 async function mockBackupOperations(page: Page) {
-  const requests = { create: 0, restore: 0, swap: 0 };
+  const requests = { create: 0 };
 
   await page.route("**/v1/admin/backups**", async (route) => {
     const request = route.request();
@@ -615,47 +614,6 @@ async function mockBackupOperations(page: Page) {
     }
 
     throw new Error(`Unhandled backups route: ${request.method()} ${apiPath}`);
-  });
-
-  await page.route("**/v1/admin/restore/**", async (route) => {
-    const request = route.request();
-    const apiPath = bffApiPath(request.url());
-    const restorePath = `/v1/admin/restore/${MOCK_BACKUP_ID}`;
-
-    if (request.method() === "POST" && apiPath === `${restorePath}/swap`) {
-      requests.swap += 1;
-      await fulfillJson(route, {
-        data: {
-          backup_id: MOCK_BACKUP_ID,
-          message: "swap command planned",
-          operation: "swap",
-          status: "planned",
-        },
-        meta: { duration_ms: 1 },
-      });
-      return;
-    }
-
-    if (request.method() === "POST" && apiPath === restorePath) {
-      requests.restore += 1;
-      await fulfillJson(route, {
-        data: {
-          backup_id: MOCK_BACKUP_ID,
-          message: "restore command planned",
-          operation: "restore",
-          status: "planned",
-          restore_targets: {
-            app_db: "kor_travel_map_staging",
-            dagster_db: "kor_travel_map_dagster_staging",
-            rustfs_volume: "rustfs_staging",
-          },
-        },
-        meta: { duration_ms: 1 },
-      });
-      return;
-    }
-
-    throw new Error(`Unhandled restore route: ${request.method()} ${apiPath}`);
   });
 
   return requests;
@@ -1061,7 +1019,7 @@ test.describe("admin/ops pages", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "백업" }),
     ).toBeVisible();
-    for (const column of ["백업 ID", "생성", "상태", "크기", "작업"]) {
+    for (const column of ["백업 ID", "생성", "상태", "크기"]) {
       await expect(
         page.getByRole("columnheader", { name: column }),
       ).toBeVisible();
@@ -1071,7 +1029,7 @@ test.describe("admin/ops pages", () => {
     await expect(page.getByText(MOCK_BACKUP_ID).first()).toBeVisible();
   });
 
-  test("/v1/admin/backups operations (T-218c)", async ({ page }) => {
+  test("/v1/admin/backups backup-only operation", async ({ page }) => {
     const requests = await mockBackupOperations(page);
 
     await page.goto("/admin/backups");
@@ -1088,15 +1046,7 @@ test.describe("admin/ops pages", () => {
       page.getByRole("status").filter({ hasText: "backup command planned" }),
     ).toBeVisible();
 
-    // restore command plan (staging target)
-    await page.getByRole("button", { name: "Restore" }).first().click();
-    await expect.poll(() => requests.restore).toBe(1);
-    await expect(page.getByText("restore command planned")).toBeVisible();
-    await expect(page.getByText("kor_travel_map_staging")).toBeVisible();
-
-    // hot-swap command plan
-    await page.getByRole("button", { name: "Swap" }).first().click();
-    await expect.poll(() => requests.swap).toBe(1);
-    await expect(page.getByText("swap command planned")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Restore" })).toHaveCount(0);
+    await expect(page.getByRole("button", { name: "Swap" })).toHaveCount(0);
   });
 });

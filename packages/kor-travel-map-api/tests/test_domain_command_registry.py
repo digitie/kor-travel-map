@@ -42,7 +42,7 @@ def test_every_openapi_write_operation_has_exact_static_policy() -> None:
     writes = _openapi_writes()
 
     assert set(COMMAND_REGISTRY) == set(writes)
-    assert len(writes) == 79
+    assert len(writes) == 77
 
 
 def test_registered_domain_and_specialized_ledgers_have_stable_operation_names() -> None:
@@ -86,8 +86,6 @@ def test_feature_curation_review_domain_routes_require_uuid_header() -> None:
     deferred_external_operations = {
         "admin.backup.create",
         "admin.backup.delete",
-        "admin.backup.restore",
-        "admin.backup.swap",
         "admin.offline-upload.create",
         "admin.offline-upload.delete",
         "admin.offline-upload.load",

@@ -1,5 +1,239 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-25 — T-VN-H46H full integration cluster 격리 보강 (Draft)
+
+PR #1064의 unit matrix는 통과했지만 full PostGIS integration에서 role-bootstrap 6건이
+실패했다. 원인은 application row가 아니라 session `pg_engine`·`migrated_engine`이 cluster 전역
+`ALTER ROLE CURRENT_USER SET search_path`를 남겨 fresh `template0` target의 database/role
+setting precondition을 오염시킨 것이었다. 두 fixture 모두 fixture 전용 database-level setting으로
+전환했다.
+
+role·membership·password·default ACL은 database가 아니라 cluster 전역이므로, bootstrap guard
+테스트는 shared integration cluster에서 분리한 동일 digest PostGIS module fixture를 사용한다.
+target DB를 먼저 `DROP DATABASE ... WITH (FORCE)`한 뒤 disposable role만 `DROP ROLE`하며, shared
+admin DB에서 `DROP OWNED`를 실행하지 않는다. 그 명령은 다른 fixture의 feature/ops/x_extension
+schema와 extension dependency를 건드릴 수 있다.
+
+- migrated_engine 선행 후 role-bootstrap 회귀: `20 passed`
+- 변경 파일 Ruff·`git diff --check`: 통과
+- 두 `uv.lock`은 열람·수정·stage하지 않음
+- 일반 application row 무결성은 여전히 release gate가 아니며, 필요하면 fresh `300` schema에
+  source/ETL을 처음부터 재적재한다.
+
+## 2026-08-25 — T-VN-H46H PostGIS CI image drift·teardown 재현 및 수정 (Draft)
+
+PR #1064의 최신 PostGIS 게이트는 단위 테스트는 통과했지만 통합 단계에서만 실패했다.
+원인은 행 데이터 검증이 아니라 `postgis/postgis:16-3.5-alpine` 부동 태그가 기준
+receipt를 만든 image와 달라져 catalog receipt·role setting precondition이 함께 달라진
+것이었다. 통합 fixture image를 기준 source image digest
+`sha256:dc17b064a946f64804d3b15e2ce90d01a444c02c9226a28a54764c083bd81a0c`로 고정해
+schema/bootstrap receipt가 동일한 PostgreSQL/PostGIS 입력에서 실행되도록 했다.
+
+성공적인 role bootstrap 뒤 extension이 `x_extension`에 남아 있는 상태에서 `DROP OWNED`
+를 먼저 실행하면 teardown이 의존성 오류를 냈다. fixture cleanup은 fresh database를
+먼저 강제 삭제한 뒤 cluster role을 정리하도록 순서를 고쳤다. 로컬 검증은
+role-bootstrap `19 passed`, fresh-300/Alembic `3 passed`다. 전체 integration은 로컬
+환경에 Dagster 패키지가 없어 collection 단계에서 중단됐고, Dagster가 설치되는 CI에서
+재실행한다.
+
+이번 수정은 사용자가 정한 대로 `300` 이후 application row의 무결성 검증을 추가하지
+않는다. immutable receipt는 image가 고정된 schema·role·ACL·extension·필수 고정 seed와
+operation replay 경계만 확인한다. 필요 시 새 schema에 원천 데이터를 처음부터 재적재한다.
+
+## 2026-08-25 — T-VN-H46H PostGIS fixture와 locale canonicalization CI 복구 (Draft)
+
+PR #1064의 PostGIS 실패를 조사해 공통 원인을 재현했다. `postgis/postgis:16-3.5-alpine`의
+image-created `test` DB는 `template_postgis`의 public/topology extension을 포함해
+ADR-008 `x_extension` precondition을 깨고, role-bootstrap 테스트는 새 preflight helper를
+컨테이너에 복사하지 않아 credential 검증 전에 중단됐다. session fixture가 `template0` fresh
+DB를 만들고 root credential을 URI-unreserved 길이로 교체하며, bootstrap과 preflight 파일을
+동시에 설치하도록 수정했다.
+
+glibc image는 baseline의 alpine PostGIS 3.5.6과 다른 3.5.2라 catalog receipt를 공유할 수
+없음을 확인했다. 해당 테스트는 baseline migration을 호출하지 않고 alias-map 최소 표면만
+생성해 실제 `COLLATE "C"` keyset·checksum을 검증한다. immutable catalog/seed sidecar의
+locale-sensitive ACL·text ordering은 `COLLATE "C"`로 고정하고 artifact/manifest hash를
+갱신했으며, alpine source receipt는 정본 `5d39…`를 유지했다. handoff 오류 문구 assertion도
+현재 보안 문구와 정합시켰다.
+
+- role-bootstrap 18개, fresh root/Alembic 3개, glibc alias 2개, handoff executable 27개,
+  관련 unit contract 86개 통과
+- Ruff와 `git diff --check` 통과
+- untracked `uv.lock`은 열람·수정·stage하지 않음
+
+사용자 결정에 따라 `300` 이후 기존 application row의 무결성 검증은 범위에서 제외한다.
+필요하면 새 schema에 원천 데이터를 재적재한다. immutable catalog/seed receipt는 데이터
+정합성 증명이 아니라 schema·role·ACL·extension·필수 고정 seed 및 operation replay 경계만
+확인하는 bootstrap 증명으로 유지한다.
+
+적대 Compose/security 리뷰의 P2를 반영해 통합 fixture의 credential-bearing 환경 파일은
+`docker exec` argv가 아닌 stdin으로 container에 설치하고, bootstrap 종료 시 삭제하도록
+보강했다.
+또한 role-bootstrap target을 `template0`으로 맞추고, large-object residue를 첫 mutation
+전에 거부하는 guard와 전후 snapshot 회귀를 추가했다.
+
+## 2026-08-25 — T-VN-H46H fresh-root missing-receipt typed proof (Draft)
+
+fresh root migration이 DB transaction과 operation receipt를 커밋한 뒤 stdout 또는 host artifact만
+유실되고 recover가 일시 실패하는 경우, bootstrap 상태만 보고 새 fence로 root를 재실행할 수 있던
+경계를 제거했다. production 전용 read-only `probe-missing --operation-id`가 동일 advisory lock
+snapshot에서 receipt 부재와 exact pre-root 상태를 확인하고, operation·writer fence·journal·DB
+identity·candidate/image·source catalog·seed·destination Alembic 기대값을 canonical wire에 결박한다.
+expired fence는 이 read-only 판정에만 허용하며, receipt가 있거나 role/schema/ACL/object/DB 설정이
+조금이라도 다르면 fail-close한다. Manager가 이 typed proof를 strict parse한 경우에만 fence 갱신과
+root 재실행을 허용하도록 다음 Manager 커밋에서 연결한다.
+
+- fresh-root unit/실제 disposable PostgreSQL 회귀: `23 passed`
+- 변경 파일 Ruff, strict mypy, `git diff --check`: 통과
+- 범위 밖 untracked `uv.lock`: 열람·수정·stage하지 않음
+
+## 2026-08-25 — T-VN-41F1D-E 최종 DB identity·role residue 결박 (Draft)
+
+전문 DB 적대 리뷰의 잔여 finding을 반영해 Dagster metadata LOGIN role의 권한 잔여 검사를
+`rolconnlimit=-1`, password expiry 부재, role-level/database-role setting 0까지 확장했다. compose의
+permit producer와 `dagster-storage-migrate.py` consumer가 동일 exact payload를 사용하며 한 필드라도
+다르면 writer 실행 전에 중단한다.
+
+C7 journal v8 parser에는 PinVi DB의 system identifier, name/OID, owner와 login role identity를 추가해
+Map application·Dagster metadata와 함께 세 DB 모두 고정되도록 했다. Manager canonical parser가
+허용하는 동일 transaction/operation UUID를 C7만 별도로 거부하던 과잉 제약은 제거했다.
+
+- Dagster runtime + C7 회귀: `305 passed`
+- 변경 파일 Ruff·`git diff --check`: 통과
+- 완료된 `T-VN-40` 잔여 task: `docs/tasks.md`에 없음
+- 범위 밖 untracked `uv.lock`: 열람·수정·stage하지 않음
+
+## 2026-08-25 — T-VN-41F1D-E v6/v8 live attestation 정렬 (Draft)
+
+두 번째 전문 적대 리뷰에서 Map C7 verifier가 구 manifest v5/journal v7만 허용해 Manager의
+canonical v6/v8 generation을 mutation 전에 무조건 거부하는 P1을 확인했다.
+
+- generation에 application `300` paired candidate evidence exact schema 추가
+- journal v8의 candidate evidence 중복 결박과 committed generation 전체 동등 확인
+- application create/final DB identity 및 canonical digest 검증
+- root/finalize operation ID·fence·result와 application final permit digest 검증
+- Dagster metadata DB·LOGIN role identity 및 metadata permit digest 검증
+- 구 manifest/journal version과 누락·추가 field를 compatibility shim 없이 거부
+- integration-map, Admin live runbook, backup policy, H46H 설계 보고서와 tasks 정본을
+  fresh-only/v6/v8로 정렬하고 backup/복구점 release gate 삭제
+
+실행형 C7 attestation 양·음수 회귀 `76 passed`와 Ruff를 통과했다. 실제 n150 실행은 고정
+release candidate와 Manager 최종 commit pair를 만든 뒤 수행한다.
+
+## 2026-08-25 — T-VN-H46H 퇴역 in-place production capability 제거 (Draft)
+
+두 번째 전문 적대 리뷰에서 fresh-only 결정 뒤에도 API image가 실제
+`ktm-application-schema-handoff` executable을 설치하고 builder가 이를 필수 artifact로 봉인하며,
+fresh root/finalize까지 그 mutation module을 import하는 P1을 확인했다.
+
+- API Dockerfile과 candidate/fresh-oracle executable manifest에서 handoff writer 제거
+- image에 퇴역 handoff 경로가 존재하면 candidate build를 fail-close
+- exact `0236` startup은 in-place 명령 없이 destructive fresh rebuild만 안내
+- final permit transition allow-list를 `map-fresh-300-finalize` 하나로 축소
+- catalog digest/runtime invariant를 root-owned `0444` 비실행 DB contract module로 분리
+- fresh root/finalize는 새 module의 read-only 함수만 호출하고 transition source를 import하지 않음
+- mutable checkout의 옛 handoff rehearsal/source-oracle/build-baseline을 candidate proof-tool
+  authority에서 제거
+
+검증은 final permit/catalog/squash `55 passed`, paired builder `16 passed`, API startup contract
+`9 passed`, 실제 PostgreSQL fresh root `2 passed`와 finalize/probe `1 passed`, Ruff·compile·shell
+syntax·`git diff --check`를 통과했다. 아직 active 운영 문서와 C7 live verifier의 v5/v7 drift는
+별도 P1으로 남아 있어 PR #1064는 Draft를 유지한다.
+
+## 2026-08-25 — T-VN-H46H Dagster 부분 초기화 성공 승격 제거 (Draft)
+
+전문 DB 적대 리뷰에서 Dagster run/event/schedule storage가 순차 초기화되는 도중 죽으면 일부
+table만 존재하는데 공유 `public.alembic_version`은 이미 final head일 수 있고, 기존 wrapper가
+이를 receipt로 승격하는 P1을 확인했다. 다음 경계를 적용했다.
+
+- receipt 없는 final head도 writer를 재실행하며, 같은 operation intent와 pre-state가 아니면 거부
+- session advisory lock을 prepare부터 외부 migrate+reindex와 receipt commit까지 유지
+- fresh 세 storage metadata와 head stamp를 한 transaction으로 생성
+- `should_autocreate_tables: false`로 장기 runtime의 암묵 수리 차단
+- 설치된 Dagster package 기반 exact public table·column nullability·index·required migration
+  postcondition과 catalog SHA-256을 migration result v3에 결박
+- `verify-identity`/explicit recover도 committed receipt와 현재 exact catalog를 같은 read-only
+  snapshot에서 검증
+
+일회용 PostgreSQL에서 receipt 직전 의도적 실패 후 intent 1개·receipt 0개·final head 상태를
+만들었다. 같은 operation의 실제 `dagster instance migrate`+`reindex`가 v3 receipt로 수렴했고,
+그 뒤 resume은 writer를 호출하지 않았다. 마지막으로 required index 하나를 제거하자 recover가
+`dagster_catalog_postcondition_mismatch`로 중단됨을 확인하고 테스트 컨테이너를 제거했다.
+
+- Dagster command 회귀: `9 passed`
+- Dagster runtime storage 회귀: `29 passed`
+- paired candidate 회귀: `16 passed`
+- 변경 파일 Ruff·compile·`git diff --check`: 통과
+- 범위 밖 untracked `uv.lock`: 열람·수정·stage하지 않음
+
+## 2026-08-25 — T-VN-H46H finalize missing-receipt typed proof (Draft)
+
+적대 리뷰에서 finalize container가 DB commit 뒤 응답만 유실했는데 `recover`가 일시 실패하면,
+Manager가 raw `300` head만 보고 만료 fence를 새 fence로 바꿔 영구적인 receipt/journal 불일치를
+만들 수 있는 P1을 확인했다. Map one-shot에 read-only `probe-missing --operation-id`를 추가했다.
+probe는 finalize와 같은 advisory lock 뒤에서 기존 finalize receipt가 없음을 확인하고, prior root
+receipt의 canonical payload와 operation·writer fence·journal·database identity, 고정 candidate와
+PostgreSQL image, source catalog·seed·Alembic facet이 모두 일치할 때만 typed
+`receipt-missing-exact-prestate` 결과를 반환한다. 만료 fence는 이 read-only 판정에만 허용한다.
+
+- 실제 PostgreSQL finalize/probe/recovery 통합 회귀: `1 passed`
+- probe parser/runtime permit unit 및 변경 파일 Ruff: 통과
+- 범위 밖 untracked `uv.lock`: 열람·수정·stage하지 않음
+
+Manager 쪽 strict parser와 recover-failure 결선, 외부 prerequisite 선행 gate의 unit 회귀도 통과했지만
+Map의 Dagster 부분복구 P1을 먼저 해결한 최종 SHA로 pinset을 회전하기 위해 아직 별도 커밋하지
+않았다. PR #1064와 Manager PR #197은 Draft를 유지한다.
+
+## 2026-08-25 — T-VN-H46H application `300` crash-resume outbox 보강 (Draft)
+
+PR #1065 merge `af719112` 위로 PR #1064의 19개 커밋을 rebase하고, Dagster storage
+identity preflight 때문에 Python 3.12에서 먼저 중단되던 오래된 테스트 fixture를 actual
+identity 경계에 맞췄다. 이어 적대 리뷰에서 API candidate receipt 발행 뒤 paired receipt 전에
+중단되면 같은 pinset을 재개할 수 없는 P1을 확인했다. paired builder는 이제 API-only partial
+상태를 strict `O_NOFOLLOW`·owner `0600`·`nlink=1`·stable inode/metadata·canonical JSON
+snapshot으로 검증한 뒤 Dagster 단계부터 재개한다. paired receipt 발행도 operator-only `0700`
+parent에서 atomic no-replace하고 post-publish bytes를 다시 대조한다. 수정 checkpoint
+`3547431a`는 원격에 push했고, 원 리뷰어 재검토는 P0/P1 없이 GO였다.
+
+DB mutation 응답 유실은 stdout만으로 복구하지 않는다. fresh root result v2와 finalize result
+v4는 Manager plan의 별도 `operation_id`를 기본키로 삼아 application DB transaction과 같은
+transaction에서 `ops.application_schema_operation_receipts` append-only row를 확정한다. 두
+operation은 같은 advisory lock namespace를 쓰며, `recover --operation-id`는 candidate/image,
+writer fence, journal, DB identity, full catalog·seed·Alembic facet을 read-only로 다시 대조한 뒤
+원 canonical result만 돌려준다. finalize는 prior root operation ID도 결박한다.
+
+Dagster storage permit/result는 v2로 올렸다. dedicated metadata DB의 immutable intent와 receipt가
+missing/old/final head를 구분하므로 실행 전 crash는 같은 migration을 재개하고, final head commit
+뒤 응답 유실은 writer 재호출 없이 receipt를 완성한다. permit은 canonical operation UUID,
+`LOGIN NOINHERIT`, exact DB identity와 paired candidate/config digest를 결박하며 foreign lookalike
+outbox catalog는 거부한다.
+
+- paired builder 회귀: `16 passed`, 원 적대 재리뷰 GO
+- Dagster command package 회귀: `8 passed`
+- Dagster/Compose targeted unit: `30 passed`
+- 실제 PostgreSQL: root receipt/recover/immutability, finalize rollback·success·recover,
+  baseline structural contract 통과
+- 관련 Ruff, shell syntax, baseline digest, `git diff --check`: 통과
+
+Docker Manager PR #197은 새 root/finalize·Dagster wire 소비, recover-first 재개, receipt가 없는
+exact pre-state에서만 허용하는 fence renewal까지 로컬 결선했다. Manager backend 전체
+`694 passed, 3 skipped`와 변경 source strict mypy가 통과했다.
+
+Map checkpoint `6b60fee0`의 원격 CI는 lint·OpenAPI·fixture·frontend가 통과했지만 Python 3개
+버전이 모두 `test_settings_default_values` 한 건에서 실패했다. 원인은 fresh root helper가 테스트
+프로세스에 내부 `KOR_TRAVEL_MAP_PG_DSN`과 schema-owner flag를 남긴 것이었다. helper는 이제
+성공·실패·engine 생성 실패 모두에서 두 임시 환경값을 원상복구한다. 오염 재현 순서 21건과 실제
+PostgreSQL root/finalize 3건을 다시 통과했다. 이 수정 원격 push와 새 SHA 기준 Manager pin 회전,
+paired image 실제 build, 누적 전문 적대 재리뷰, CI green, n150 배포와 live UI E2E가 남아 있으므로
+PR은 Draft로 유지한다.
+
+사용자 지시에 따라 범용 feature-update/cache-target 경계의 PinVi 전용 Python 식별자도 제거했다.
+일반 writer guard는 `service_owned`, relay protocol은 `cache_target_refresh_protocol` 용어를 쓰며,
+실제 외부 시스템 값과 PinVi 전용 인증·curation 계약은 바꾸지 않았다. codegraph 영향도 명령은
+기존 Alembic file index schema 오류로 실패해 `rg` 호출자 전수 대조로 대체했다. API guard 회귀,
+변경 source strict mypy와 Ruff는 통과했고 DB 통합 두 건은 로컬 재사용 PostGIS container가
+`public` extension residue를 가져 fixture bootstrap 전에 중단돼 CI의 fresh PostGIS gate로 다시 확인한다.
+
 ## 2026-08-25 — T-VN-M04 Admin BFF 결정 자격 결선 보완 (Draft)
 
 격리된 PinVi→Map M04 실제 브라우저 승인에서 PinVi의 queue receipt는 정상으로
@@ -19,6 +253,160 @@ server-only manual Feature create token을 `POST /v1/admin/features`에만 주�
 아직 candidate frontend 이미지의 격리 Map BFF live 재검증과 적대 리뷰·원격 CI가 남아 있어
 PR은 Draft로 유지한다.
 
+## 2026-08-25 — T-VN-H46H paired candidate와 v6 handoff 연속성
+
+API application-300 candidate receipt를 입력으로 받아 같은 commit·Git tree의 Dagster
+webserver/daemon image를 봉인하는 paired builder를 추가했다. Dagster image의 static
+application contract, provenance/RootFS/config/runtime manifest, proof tool, SBOM과 실제 image
+ID를 API 후보와 함께 재검증한다. webserver와 daemon은 같은 image ID를 쓰며 final permit
+consumer로 명시하고, Dagster metadata storage migration은 동일 image의 fixed argv를 쓰되
+application permit 범위에서는 제외했다.
+
+handoff rehearsal은 API receipt만 받지 않고 paired receipt도 필수로 받아 builder `--verify`를
+다시 실행한다. paired receipt 원문 SHA-256, Dagster image ID, candidate Git tree를 terminal
+receipt v6에 기록하고 `build-baseline.sh`가 API candidate provenance와 다시 결박한다. launch
+contract의 webserver port 정책·default argv·daemon argv·storage argv도 exact 값으로 검사한다.
+
+적대 리뷰에서 metadata-only 선언만으로는 DSN 오지정을 막지 못하며 alternate
+`DAGSTER_HOME`으로 storage target을 바꿀 수 있는 P0를 확인했다. 별도 root-owned metadata DB
+identity permit을 도입해 storage migration은 쓰기 전에, webserver/daemon은 기동 전에 canonical
+config와 같은 DSN의 system ID/name/OID/owner/login을 대조한다. application DB identity, raw
+`300`, application schema를 관측하면 중단한다. production permit은 Manager authority와 exact
+Dagster image ID·paired receipt SHA-256·`dagster.yaml` SHA-256을 결박한다. local-dev DB-init도
+bootstrap login이 아니라 dedicated metadata DSN으로 최종 login identity를 관측해 permit을 쓴다.
+후속 적대 리뷰 지적에 따라 metadata login은 DB owner와 같고 bootstrap과 다른 최소권한
+role이어야 한다. superuser/DB 생성/role 생성/replication/RLS 우회 권한과 role membership을
+모두 거부하고 `session_user=current_user`를 요구하며, permit과 실제 관측값을 exact 대조한다.
+Dagster config는 기존 `storage`뿐 아니라 alternate top-level storage key도 허용하지 않고,
+`/opt`부터 config까지 root-owned·비쓰기 가능 경로를 확인한다. Alembic version row가 여러
+개여도 raw `300`이 하나라도 있으면 metadata writer 전에 중단한다.
+기존 role/DB를 bootstrap 권한으로 자동 정상화하던 경로도 제거했다. 둘 다 새것일 때만
+최소권한 role과 owner DB를 만들며, 둘 다 기존이면 root-owned prior permit과 현재 identity가
+byte-exact로 같을 때 무변경 종료한다. 예약 application/system identity, role/DB partial state,
+permit 누락·drift는 어떤 `CREATE`/`ALTER`/`REVOKE`보다 먼저 거부한다.
+
+첫 실제 paired build는 API image 생성 뒤 sealed temp tree의 0444/0555 mode 때문에 cleanup이
+실패해 receipt 생성 전에 중단됐다. 실패 산출물을 성공으로 사용하지 않았고, 두 builder의
+cleanup이 mode를 복구하고 원래 실패 status를 보존하도록 수정했다. production Dagster 두
+service에는 누락됐던 geo URL, MOIS source path, object/offline prefix를 명시하고 root `.env`나
+application privileged credential은 허용하지 않는다. 실제 일회용 Postgres에서 전용 metadata
+role 생성·두 번째 실행의 idempotency·비슈퍼유저 `pg_control_system()` 조회·bootstrap login
+거부를 확인했다. 이때 공식 Postgres image의 초기화 임시 서버가 조기에 healthy로 보이는
+Compose 경합도 재현해, PID 1이 최종 Postgres가 된 뒤에만 healthcheck가 성공하도록 고쳤다.
+fresh live acceptance는 run별 고유 application/metadata permit volume을 쓰고 Dagster daemon도
+기동한다. storage migration/webserver/daemon의 same-image, 종료·running 상태, absolute argv,
+metadata/runtime DSN 일치와 read-only permit mount를 실컨테이너 형상에서 검사한다. 외부
+DB/인프라 standalone launcher는 production permit producer가 없어 fail-closed하고 Manager
+flow만 허용한다. metadata role이 다른 role을 받는 방향과 다른 member에게 부여되는 방향을
+각각 0으로 결박하며, metadata/application DB owner 재사용도 거부한다. local launcher는 다섯
+DB password를 32..256 URI-unreserved·상호 distinct로 제한하고 bootstrap/migrator/API/
+Dagster runtime/metadata DSN의 scheme/login/password/database를 선언값에 exact 결박한다.
+metadata storage one-shot에는 application runtime DSN·final permit env/mount를 전달하지 않는다.
+관련 targeted 신규 회귀 `18 passed`와 shell syntax·ruff가 통과했다. 전체 묶음 재실행과 n150
+Manager-shaped 배포·live UI E2E는 아직 남아 있다.
+
+후속 P0/P1 적대 검토에서는 virgin application DB가 PostGIS image의 자동 extension 대상과
+겹쳐 fresh preflight가 항상 실패하는 deadlock을 확인했다. base container는 maintenance DB
+`postgres`만 초기화하고 application DB는 `template0`에서 별도 생성하도록 분리했다. creator도
+exact database confirmation과 공통 credential preflight를 어떤 `psql`/`createdb`보다 먼저
+수행한다. 다섯 application/metadata DSN은 login/password/database뿐 아니라 canonical
+authority와 실제 init host까지 하나로 묶었으며, host topology의 creator/bootstrap/fresh metadata/
+schema migration 네 service는 모두 host network와 같은 metadata DSN을 받는다. 실제 disposable
+PostGIS에서 DB 생성→role bootstrap→metadata DB/permit이 모두 exit 0이었고, permit directory/file
+소유권·mode/link count `0:555`, `0:444:1`을 읽기 전용 컨테이너에서 확인한 뒤 고유 프로젝트와
+volume을 제거했다.
+
+controlled handoff는 첫 SQL에서 `session_user`, `current_user`, `rolsuper`를 함께 읽어 exact
+non-superuser migrator가 아니면 writer fence/lock 전에 거부한다. 로컬 `admin:stack`의 generic
+`alembic upgrade head`와 bare metadata `CREATE DATABASE`는 제거했으며, strict local-dev·loopback의
+사전 준비된 application single `300`, dedicated metadata owner/login/effective role·양방향
+membership 0·same system ID/distinct owner·migrated storage를 읽기 전용으로 검증하는 smoke만
+남겼다. source oracle의 read-only sealed tree cleanup은 permission 복구·failure 누적·원 exit status
+보존으로 고쳤고, candidate receipt 대상 `resources/curations`는 root-owned 0555/0444와 appuser
+touch/rename negative로 봉인했다. 최종 application-300/Dagster/candidate 계약 단일 묶음은
+`288 passed`였다. 두 전문
+리뷰는 Map 내부 P0/P1 없음, Docker Manager 동반 계약 구현 전 release NO-GO로 최종 판정했다.
+
+## 2026-08-24 — T-VN-H46H `300` runtime transition checkpoint
+
+old staged bootstrap/M01/M05 runtime helper를 제거하고 normal Compose를
+`baseline-300` fresh bootstrap 하나로 축소했다. API image에는 exact raw
+`0236_tvn41s_compaction_drained` source만 받는 controlled handoff executable을 넣었다.
+이 executable은 writer-fence receipt와 명시적 confirm을 요구하고, Alembic connection을
+caller outer transaction에 고정해 source/version/semantic closure 및 final role·ACL·extension·
+catalog fingerprint를 전후 대조한 뒤에만 `300` stamp를 수행한다. generic startup은 source를
+자동 stamp하거나 archive를 replay하지 않으며, 알려지지 않은 active-graph revision도 중단한다.
+
+backup restore는 기존 revision으로 돌아가는 경로를 제공하지 않는다. 현재 version `3` recovery
+artifact는 fence 획득 전 거부하며, 향후 `300` baseline recovery artifact 형식은 별도 설계가
+필요하다. 이는 이전 Alembic revision으로의 복구 계획이 없다는 운영 정책을 runtime에
+명시한 것이다.
+
+검증은 runtime/archive/backup targeted unit `199 passed`, executable handoff PostGIS
+integration `1 passed`, metadata consistency PostGIS integration `11 passed`였다. 또 격리된
+일회성 local PostGIS container에서 실제 role-bootstrap shell을 실행해 fresh DB가 application
+role 21개와 `x_extension` extension schema만 만들고 Alembic table을 만들지 않는 것을 확인한
+뒤 container를 제거했다. 이 local evidence는 n150 transition 또는 live UI E2E 증거가 아니며,
+Map PR은 두 전문 적대 재검토, Docker Manager typed transition/journal, fixed candidate n150
+deploy와 로그인·browser live E2E 전까지 Draft로 유지한다.
+
+## 2026-08-24 — T-VN-H46H active integration을 `300` fresh/handoff gate로 전환
+
+과거 `0200`~`0236` migration을 실행하던 shared integration bootstrap을 final `300`
+fresh bootstrap으로 교체했다. retired cohort는 active graph·runtime·test module import
+경로 어디에서도 실행하지 않으며, M01~M05 fixture 이름은 final role graph가 이미 존재하는
+호환 fixture로만 남긴다. 과거 0235 preview 재정의 검증도 제거하고, final catalog의
+manual-provider reader owner와 schema ACL을 직접 검증한다.
+
+새 Alembic gate는 fresh `300` upgrade 뒤 metadata drift와 ORM CHECK 정의를 PostgreSQL이
+재파싱한 catalog 정의로 함께 대조한다. logical raw `0236` fixture에 대해서는 authorized
+exact handoff만 raw version을 `300`으로 전진시키고, generic upgrade/stamp, 다른 source,
+downgrade, commit-time failure가 모두 source row를 보존하는지 실제 PostGIS에서 검증했다.
+`test_alembic_squash_boundary.py`·`test_migration_forward_only.py` 26건과 metadata/handoff
+integration 11건이 통과했다. runtime image·entrypoint·Compose 및 Docker Manager의 비파기
+transition은 아직 남아 있으므로 PR은 계속 Draft다.
+
+## 2026-08-24 — T-VN-H46H `300` fresh bootstrap·exact handoff 첫 구현 checkpoint
+
+clean isolated `0236` reference에서 `schema.sql`과 9-table `seed.sql` sidecar를
+생성했다. digest는 각각 `01b5c870…53d2c`, `1872473b…bd80f`이며, source의 `0236`
+compaction semantic closure 세 query는 모두 0이었다. active `alembic/versions/`에는
+single root `300`만 두고 `0200`~`0236` source는 byte manifest가 있는 retired cohort로
+분리했다.
+
+새 `baseline-300` bootstrap은 version table이나 application object가 있으면 role 변경 전에
+거부하고, final 21-role/PG16 membership/DB·schema owner/extension 및 x_extension direct
+ACL을 한 번에 확정한다. 실제 fresh target에 restricted migrator → schema owner로 `300`을
+적용했으며, reference와 core catalog 9,901행 SHA
+`45e391eb0c6f4e136995fdd1d95b72cde09a0da3d743235fb3af880280100ec7`가 일치했다.
+
+`alembic/env.py`는 generic upgrade/stamp/downgrade를 막고, private Config authorization,
+explicit tag, online `purge`, exact raw `0236` row, unique active `300` head가 모두 맞을 때만
+retired revision을 script graph에 재해석하지 않는 one-shot stamp callback을 설치한다. local
+clone에서 normal upgrade는 무변경 거부했고, sanctioned handoff는 catalog/data를 바꾸지 않고
+raw version row만 `300`으로 전진시켰다. 아직 regression test·runtime/Compose·Docker Manager
+transition·n150 candidate/live UI E2E가 남았으므로 task와 PR은 Draft를 유지한다.
+
+## 2026-08-24 — T-VN-H46H `0236 → 300` baseline 전환 draft 착수
+
+Map [PR #1063](https://github.com/digitie/kor-travel-map/pull/1063)은 fixture writer의
+DB/login/head preflight, 최소 procedure-owner role 전환, exact future role graph를 포함해
+squash `01d65b2ad4ee265a3ef6b01448f6abf573a906a8`로 병합했다. Python 3.11/3.12/3.13,
+fixture replay, PostGIS integration, lint, OpenAPI drift, frontend type-check/build가 모두
+green이었고 두 독립 적대 리뷰도 GO였다.
+
+그 병합을 기준으로 `T-VN-H46H`를 새 열린 task로 추가했다. `0236` 이후의 현재
+application schema는 `300` 단일 root baseline으로 새 DB에 재현하고, 운영 DB는
+`0236_tvn41s_compaction_drained` exact single-row 상태에서만 controlled
+`alembic stamp --purge 300`을 허용한다. active graph 밖 archive, final 21-role
+bootstrap, full routine ACL grantee matrix, same-transaction pre/post catalog assertion,
+candidate source/image/head attestation을 모두 전환 계약으로 고정한다.
+
+baseline source는 n150, n150 backup clone, live acceptance DB에서 생성하지 않는다.
+provider 적재와 fixture가 전혀 없는 isolated fresh `0236` reference DB를 만들었고,
+head와 `0236` data semantic closure 세 query가 모두 0임을 확인했다. Docker Manager의
+기존 `rebuild-pinned`는 Map application·Dagster·PinVi DB를 재생성하므로 이번 경로에서
+금지한다. 별도 비파기 in-place transition과 truthful typed journal이 필요하다.
 ## 2026-08-24 — PR #1063 writer fixture preflight·procedure role·future role edge 보강
 
 Draft [PR #1063](https://github.com/digitie/kor-travel-map/pull/1063)의 두 전문 적대 리뷰에서

@@ -58,7 +58,7 @@ WHERE head.external_system = :external_system AND head.target_key = :target_key
 
 # 요청한 key 중 stream의 활성 target(존재·미삭제·update_enabled·policy 활성)이 아닌 것.
 # PinVi service refresh는 **exact key set** 계약이다 — 실행자가 captured member set과 요청
-# key set이 같은지 검사하므로(`pinvi_cache_target_refresh_protocol_error`) intake에서 한 key라도
+# key set이 같은지 검사하므로(`cache_target_refresh_protocol_error`) intake에서 한 key라도
 # member가 될 수 없으면 queue에 넣지 않고 409로 돌려준다. 그렇지 않으면 202/queued 뒤 실행
 # 시점에 relay event 없이 fail-close되는 요청이 생긴다(#975 적대 재리뷰 P1).
 _INACTIVE_REFRESH_TARGET_KEYS_SQL = """

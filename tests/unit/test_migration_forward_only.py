@@ -7,9 +7,10 @@ revision은 되돌릴 수 있다 — 제약/함수 정의만 건드리기 때문
 것이 하필 같은 revision의 ``upgrade()``다. 저장소에는 downgrade 경로를 도는 테스트가
 한 건도 없어서 그 진술이 거짓이라는 사실이 적대 검증 전까지 드러나지 않았다.
 
-0090/0091/0092는 T-VN-33 cutover 3종이다. ADR-088의 재적재 전제(최종 스키마로 fresh
-PostGIS 재적재) 위에서만 성립하므로 되돌릴 수 없고, 되돌릴 수 없다면 **되돌리려는
-시도가 조용히 성공한 척해서는 안 된다**.
+`300_schema_baseline`은 final schema를 새 DB에만 적재하는 single root다. 과거 active
+lineage는 retired archive이며, downgrade가 허용되면 실제 운영 DB가 더는 존재하지 않는
+revision을 가리킬 수 있다. 따라서 되돌릴 수 없다면 **되돌리려는 시도가 조용히 성공한
+척해서는 안 된다**.
 """
 
 from __future__ import annotations
@@ -25,37 +26,19 @@ pytestmark = pytest.mark.unit
 
 _ALEMBIC = Path(__file__).resolve().parents[2] / "alembic"
 VERSIONS = _ALEMBIC / "versions"
-# squash(`0200`) 이후 체인은 실행되지 않는 아카이브다(`alembic/legacy_versions/README.md`).
-# 그래도 함께 훑는다 — 아카이브는 동결돼 있으니 비용이 0이고, 빼면 "선언과 구현이
-# 갈리지 않는다"는 이 파일의 명제가 조용히 절반짜리가 된다.
-LEGACY_VERSIONS = _ALEMBIC / "legacy_versions"
-_SEARCH_ROOTS = (VERSIONS, LEGACY_VERSIONS)
+_SEARCH_ROOTS = (VERSIONS,)
 
 # 되돌릴 수 없다고 스스로 선언한 revision. 목록을 박아 두는 이유는, 선언 문자열만
 # 검사하면 선언을 지우는 것으로 게이트를 통과할 수 있기 때문이다.
 FORWARD_ONLY_REVISIONS = (
-    "0090_tvn33_constraints",
-    "0091_tvn33_cutover_fence",
-    "0092_tvn33_offline_cleanup",
-    "0200_schema_baseline",
-    "0232_tvn37d_notice_empty_range",
-    # bridge도 forward-only다. 목록에 없으면 동적 스캔에만 걸리는데, 이 파일 자신이
-    # "선언 문자열만 검사하면 선언을 지우는 것으로 게이트를 통과할 수 있다"고 적어 둔
-    # 바로 그 무방비 상태가 된다. 파일 stem으로 적는다 — revision id는 옛 head다.
-    "0201_squash_bridge",
+    "300_schema_baseline",
 )
 
 
 def _path_for(stem: str) -> Path:
-    # 같은 stem이 양쪽에 있으면 **먼저 찾은 쪽을 조용히 검사**하게 된다. squash 이후
-    # 그 상태가 실제로 만들어질 수 있어(bridge가 옛 head id를 되살렸다) 모호하면 선다.
-    found = [root / f"{stem}.py" for root in _SEARCH_ROOTS if (root / f"{stem}.py").exists()]
-    assert found, f"{stem}.py를 versions/ 에도 legacy_versions/ 에도 찾지 못했다"
-    assert len(found) == 1, (
-        f"{stem}.py가 versions/와 legacy_versions/ 양쪽에 있다 — 어느 쪽을 검사하는지"
-        f" 이름만으로는 정해지지 않는다: {[str(path) for path in found]}"
-    )
-    return found[0]
+    path = VERSIONS / f"{stem}.py"
+    assert path.exists(), f"{stem}.py를 active alembic/versions에서 찾지 못했다"
+    return path
 
 
 def _load(stem: str) -> ModuleType:

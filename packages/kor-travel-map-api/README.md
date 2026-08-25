@@ -99,19 +99,15 @@ shadcn/ui generated source + `@kor-travel-map/map-marker-react` (ADR-029). 자�
 | `KOR_TRAVEL_MAP_API_DAGSTER_REPOSITORY_NAME` | `__repository__` | offline upload load GraphQL launch selector의 repositoryName |
 | `KOR_TRAVEL_MAP_API_DAGSTER_REPOSITORY_LOCATION_NAME` | `kortravelmap.dagster.definitions` | offline upload load GraphQL launch selector의 repositoryLocationName |
 | `KOR_TRAVEL_MAP_API_BACKUP_ROOT` | `data/backups` | `/admin/backups`가 조회하는 backup artifact root |
-| `KOR_TRAVEL_MAP_API_BACKUP_PROJECT_ROOT` | `.` | backup/restore script 상대 경로를 해석하고 command를 실행할 project root |
+| `KOR_TRAVEL_MAP_API_BACKUP_PROJECT_ROOT` | `.` | backup script 상대 경로를 해석하고 command를 실행할 project root |
 | `KOR_TRAVEL_MAP_API_BACKUP_SCRIPT_PATH` | `scripts/docker-backup.sh` | backup command plan이 호출하는 script path |
-| `KOR_TRAVEL_MAP_API_RESTORE_SCRIPT_PATH` | `scripts/docker-restore.sh` | restore command plan이 호출하는 script path |
-| `KOR_TRAVEL_MAP_API_BACKUP_COMMAND_ENABLED` | `false` | `POST /admin/backups`, `POST /admin/restore/{backup_id}`의 host command 실행 허용 여부. false면 plan-only |
+| `KOR_TRAVEL_MAP_API_BACKUP_COMMAND_ENABLED` | `false` | `POST /admin/backups`의 host command 실행 허용 여부. false면 plan-only |
 | `KOR_TRAVEL_MAP_API_BACKUP_COMMAND_TIMEOUT_SECONDS` | `1800` | opt-in host command 실행 timeout |
 | `KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET` | (운영 필수, root `.env`) | API와 frontend가 함께 읽는 admin REST BFF 검증·ops-live 60초 ticket HMAC server-only secret(32자 이상). API package `.env`에는 두지 않음 |
 | `KOR_TRAVEL_MAP_API_OPS_PRINCIPAL_REQUIRED` | `false` | `true`면 API 시작 시 non-empty read/cancel/fixture token 3종을 필수로 요구한다. n150 production은 `true`, 로컬 opt-out만 `false` |
 | `KOR_TRAVEL_MAP_API_OPS_READ_TOKEN` | (선택, API package `.env`) | PinVi server의 canonical datasets/pipeline `GET` 전용 token. 로컬 `required=false`에서는 3종을 모두 비워야 비활성이다. 활성화 시 cancel/fixture token과 함께 모든 공백을 금지한 32자 이상이며 admin BFF/service token과도 서로 달라야 한다 |
 | `KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN` | (선택, API package `.env`) | `POST /v1/ops/pipeline/executions/import_job/{id}/cancel` 한 곳 전용 token. local `required=false` opt-out 외에는 read/fixture token과 함께 non-empty 3종을 요구하며 schedule/policy/request 등 다른 mutation은 항상 거부 |
 | `KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN` | (선택, API package `.env`) | Docker Manager만 쓰는 `ops:fixture` token. exact C6c contract-fixture route와 finalize만 허용하며 PinVi, Admin BFF, read/cancel token은 사용할 수 없다 |
-| `KOR_TRAVEL_MAP_API_RESTORE_APP_DB` | `kor_travel_map_restore` | staging restore app DB 기본값 |
-| `KOR_TRAVEL_MAP_API_RESTORE_DAGSTER_DB` | `kor_travel_map_dagster_restore` | staging restore Dagster DB 기본값 |
-| `KOR_TRAVEL_MAP_API_RESTORE_RUSTFS_VOLUME` | `kor-travel-map-rustfs-restore` | staging restore RustFS volume 기본값 |
 | `KOR_TRAVEL_MAP_API_FRONTEND_DIST` | (auto) | static export 모드 시 `frontend/out/` 경로 |
 
 Ops service principal의 감사 actor는 코드 상수 `service:pinvi`다. actor 설정 env는 없으며,

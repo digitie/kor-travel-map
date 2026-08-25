@@ -2,10 +2,9 @@
 #
 # kor-travel-docker-manager가 소유한 map 전용 PostgreSQL(`kor-travel-map-postgres`,
 # **:12700** — `5432`가 아니다, docker-manager ADR-37)과 RustFS(S3 :12101)를 쓸 때
-# kor-travel-map compose의 local postgres/rustfs 계열을 시작하지 않는다.
-# 적용:
-#
-#   KOR_TRAVEL_MAP_INFRA_EXTERNAL=true bash scripts/docker-up.sh
+# kor-travel-map compose의 local postgres/rustfs 계열을 시작하지 않는다. 이 overlay는
+# Manager-owned production composition의 내부 입력이다. standalone `scripts/docker-up.sh`는
+# permit producer가 없으므로 external DB/infra 모드를 명시적으로 거부한다.
 #
 # 공유 DB에는 `kor_travel_map`과 `kor_travel_map_dagster` DB가 있어야 한다.
 # API/Dagster runtime·migrator·Dagster metadata DSN은 모두 ignored deployment env/vault로
@@ -17,28 +16,15 @@ services:
   dagster-db-init:
     profiles: ["local-infra"]
 
+  dagster-db-init-fresh-300:
+    profiles: ["local-infra"]
+
+  db-application-create-fresh-300:
+    profiles: ["local-infra"]
+
   # 공유 DB에서는 ownership transfer bootstrap을 절대 자동 실행하지 않는다.
   # 역할은 dedicated map DB에 대해 운영자가 사전 provision해야 한다.
-  db-role-bootstrap:
-    profiles: ["local-infra"]
-
-  db-migrate-to-m01-bootstrap-boundary:
-    profiles: ["local-infra"]
-
-  db-role-bootstrap-m01:
-    profiles: ["local-infra"]
-
-  # 외부 DB에서는 M05 전용 role/migration/repair도 운영자가 별도 수행한다.
-  db-migrate-to-m05-bootstrap-boundary:
-    profiles: ["local-infra"]
-
-  db-role-bootstrap-m05-pre:
-    profiles: ["local-infra"]
-
-  db-migrate-m05:
-    profiles: ["local-infra"]
-
-  db-role-bootstrap-m05-repair:
+  db-role-bootstrap-300:
     profiles: ["local-infra"]
 
   rustfs-perms:
@@ -58,7 +44,7 @@ services:
   dagster-storage-migrate:
     depends_on: !override {}
     environment:
-      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:?KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL is required}
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:-}
 
   dagster:
     depends_on: !override
@@ -67,7 +53,7 @@ services:
       api:
         condition: service_healthy
     environment:
-      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:?KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL is required}
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:-}
       KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://host.docker.internal:${KOR_TRAVEL_MAP_RUSTFS_API_PORT:-12101}}
 
   dagster-daemon:
@@ -77,5 +63,5 @@ services:
       api:
         condition: service_healthy
     environment:
-      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:?KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL is required}
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:-}
       KOR_TRAVEL_MAP_OBJECT_STORE_ENDPOINT_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_OBJECT_STORE_ENDPOINT_URL:-http://host.docker.internal:${KOR_TRAVEL_MAP_RUSTFS_API_PORT:-12101}}

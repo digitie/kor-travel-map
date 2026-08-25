@@ -260,7 +260,7 @@ in-bounds/search · `page_size` 그 외 · `run_limit`/`event_limit` dagster), �
   함께 commit한다. authoritative `NoSuchKey`만 exact PUT 재개를 허용하고 transport/5xx
   ambiguity는 fail-close한다. delete는 `deleting + delete_command_id`를 원자 예약하므로
   다른 key의 경쟁 요청은 claim까지 rollback된 `409`로 끝난다.
-- backup/restore/swap은 host wrapper가 `maintenance:backup-restore` session lock을
+- backup create/delete는 host wrapper가 `maintenance:backup-restore` session lock을
   `pg_try_advisory_lock`으로 잡고 child process 전체 수명 동안 보유한다. 그 전에 API는 같은
   lock 안에서 execution의 immutable `effect_token`에 묶인 고정 이름 global Docker fence를
   생성·inspect한 뒤에만 `effect_started`로 전이한다. fence는 canonical compose service의
@@ -284,7 +284,7 @@ in-bounds/search · `page_size` 그 외 · `run_limit`/`event_limit` dagster), �
   operation, effect token, input digest, fence name과 안전한 수동 절차를 제공한다. missing/
   foreign/mismatched fence나 marker는 자동 채택하지 않는다. API 내부 backup delete는 같은 lock을
   effect·proof·terminal DB commit까지 직접 보유한다. exact command marker/reservation 없는
-  기존 backup artifact나 restore target은 새 command 결과로 채택하지 않는다. wrapper가
+  기존 backup artifact는 새 command 결과로 채택하지 않는다. wrapper가
   exact marker를 만든 뒤 동일 command를 재시도하면 외부 효과를 반복하지 않고 marker proof로
   terminal result를 확정한다. hard crash 뒤 marker는 외부 운영자가 실제 workload terminal과
   output identity를 확인한 경우에만 만들며, marker proof 전에 fence를 해제하지 않는다.
@@ -570,7 +570,8 @@ GET/PUT/DELETE /v1/admin/poi-cache-targets/{external_system}/{target_key}  # 복
 # PinVi는 admin/AdminBFF를 사용하지 않고 아래 ServiceToken resource만 사용한다.
 GET/POST /v1/admin/backups   GET /v1/admin/backups/{backup_id}
 DELETE /v1/admin/backups/{backup_id}                   # 🆕 정리 lifecycle
-POST   /v1/admin/restore/{backup_id}[/swap]            # kill-switch
+# retired POST /v1/admin/restore/{backup_id}[/swap]는 OpenAPI 밖 compatibility URI이며
+# 인증 뒤 410 RESTORE_UNSUPPORTED만 반환한다. backup artifact는 audit-only다.
 GET    /v1/admin/features/dedup-reviews   PATCH /v1/admin/features/dedup-reviews/{review_id}        # 🔁 복수+param
 GET    /v1/admin/features/enrichment-reviews   PATCH /v1/admin/features/enrichment-reviews/{review_id} # 🔁
 GET    /v1/admin/issues   GET/PATCH /v1/admin/issues/{issue_id}                  # 🔁 noun 일치
@@ -819,11 +820,11 @@ PATCH/DELETE correction UI는 `GET .../{feature_id}/revision`의 body `row_revis
 stale basis의 PATCH/DELETE는 `412 Precondition Failed`다. consumer는 draft를 보존하고 자동
 재시도하지 않으며, 운영자의 명시적 reload가 성공한 경우에만 최신 detail과 새 basis로 교체한다.
 이 규칙은 기존 REST/OpenAPI request·response schema와 DB schema를 변경하지 않는다.
-- **backup/restore 감사 actor**: backup create/delete/restore/swap의 managed-file registry
-  event actor는 router body가 아니라 admin BFF 인증에서 얻은 `AdminProxyContext.actor`만
-  사용한다. `RestoreSwapRequest`는 실행 계획 필드와 `note`만 받고 `operator`/`actor`를 받지
-  않으며 포함하면 `422 VALIDATION_ERROR`다. standalone compose는 destructive enablement를
-  기본 `false`로 해석하고 shell/root project interpolation 환경의 명시적 `true`만 허용한다.
+- **backup 감사 actor**: backup create/delete의 managed-file registry event actor는 router
+  body가 아니라 admin BFF 인증에서 얻은 `AdminProxyContext.actor`만 사용한다. restore/swap은
+  request model·execution plan·managed-file event가 없고, retire URI는 인증 뒤
+  `410 RESTORE_UNSUPPORTED`만 반환한다. standalone compose는 destructive enablement를 기본
+  `false`로 해석하고 shell/root project interpolation 환경의 명시적 `true`만 허용한다.
   package API `env_file`은 compose opt-in 근거가 아니다. 승인된 Manager production 형상은
   별도 canonical literal `true`와 raw/resolved/runtime attestation을 소유한다(T-VN-H02R, #796).
 - **admin 공간·카드 read**: admin 지도는 공개 `/v1/features*`를 재사용하지 않는다.

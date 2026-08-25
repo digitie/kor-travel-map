@@ -51,7 +51,8 @@ def test_docker_backup_script_captures_standalone_backup_bundle() -> None:
     assert "feature_reference_reconciliation_events.jsonl" in script
     assert "feature_reference_reconciliation_acks.jsonl" in script
     assert "feature_reference_reconciliation_subscriptions.jsonl" in script
-    assert '"schema_version": 3' in script
+    assert '"schema_version": 4' in script
+    assert '"recovery_status": "audit_only_no_restore"' in script
     assert '"manual_feature_evidence"' in script
     assert "with-pg-advisory-lock.py" in script
     assert "maintenance:backup-restore" in script
@@ -59,13 +60,11 @@ def test_docker_backup_script_captures_standalone_backup_bundle() -> None:
 
 
 @pytest.mark.unit
-def test_maintenance_lock_handoff_is_not_environment_spoofable() -> None:
+def test_backup_maintenance_lock_is_not_environment_spoofable() -> None:
     scripts = "\n".join(
         _read(path)
         for path in (
             "scripts/docker-backup.sh",
-            "scripts/docker-restore.sh",
-            "scripts/docker-restore-swap.sh",
             "scripts/with-pg-advisory-lock.py",
         )
     )
@@ -76,7 +75,7 @@ def test_maintenance_lock_handoff_is_not_environment_spoofable() -> None:
 
 
 @pytest.mark.unit
-def test_all_backup_effect_scripts_require_preacquired_durable_docker_fence() -> None:
+def test_backup_effect_requires_preacquired_durable_docker_fence() -> None:
     common = _read("scripts/domain-command-fence.sh")
     helper = _read("scripts/docker-domain-command-fence.py")
     assert "KOR_TRAVEL_MAP_COMMAND_FENCE_PREACQUIRED" in common
@@ -91,20 +90,30 @@ def test_all_backup_effect_scripts_require_preacquired_durable_docker_fence() ->
     assert "fence-image-id" in helper
     assert "source-revision" in helper
 
-    for path, first_mutation in (
-        ("scripts/docker-backup.sh", "rm -rf --"),
-        ("scripts/docker-restore.sh", 'prepare_database "$KOR_TRAVEL_MAP_RESTORE_APP_DB"'),
-        (
-            "scripts/docker-restore-swap.sh",
-            '"$python_bin" "$ROOT_DIR/scripts/write-restore-swap-env.py"',
-        ),
+    script = _read("scripts/docker-backup.sh")
+    assert 'source "$ROOT_DIR/scripts/domain-command-fence.sh"' in script
+    assert script.index("acquire_domain_command_fence") < script.index("rm -rf --")
+    assert script.index("write-domain-command-marker.py") < script.index(
+        "release_domain_command_fence"
+    )
+
+    for path in (
+        "scripts/docker-restore.sh",
+        "scripts/docker-restore-swap.sh",
+        "scripts/docker-restore-verify.sh",
+        "live-e2e-backup-runner/restore.sh",
+        "live-e2e-backup-runner/swap.sh",
     ):
-        script = _read(path)
-        assert 'source "$ROOT_DIR/scripts/domain-command-fence.sh"' in script
-        assert script.index("acquire_domain_command_fence") < script.index(first_mutation)
-        assert script.index("write-domain-command-marker.py") < script.index(
-            "release_domain_command_fence"
-        )
+        disabled = _read(path)
+        assert "is disabled" in disabled
+        for mutation in (
+            "acquire_domain_command_fence",
+            "pg_restore",
+            "write-restore-swap-env.py",
+            "docker compose",
+        ):
+            if mutation in disabled:
+                assert disabled.index("exit 2") < disabled.index(mutation)
 
 
 @pytest.mark.unit
@@ -118,84 +127,35 @@ def test_docker_backup_script_is_non_destructive() -> None:
 
 
 @pytest.mark.unit
-def test_docker_restore_script_restores_backup_into_staging_targets() -> None:
-    script = _read("scripts/docker-restore.sh")
-
-    assert 'source "$ROOT_DIR/scripts/load-env.sh"' in script
-    assert "KOR_TRAVEL_MAP_RESTORE_BACKUP_ID" in script
-    assert "KOR_TRAVEL_MAP_RESTORE_BACKUP_DIR" in script
-    assert (
-        'KOR_TRAVEL_MAP_RESTORE_APP_DB="${KOR_TRAVEL_MAP_RESTORE_APP_DB:-'
-        '${KOR_TRAVEL_MAP_POSTGRES_DB}_restore}"'
-    ) in script
-    assert (
-        'KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB="${KOR_TRAVEL_MAP_RESTORE_DAGSTER_DB:-'
-        '${KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB}_restore}"'
-    ) in script
-    assert "KOR_TRAVEL_MAP_RESTORE_RUSTFS_VOLUME" in script
-    assert "sha256sum -c meta/SHA256SUMS" in script
-    assert "pg_restore" in script
-    assert "--clean" in script
-    assert "--if-exists" in script
-    assert "--no-owner" in script
-    assert "--no-privileges" in script
-    assert "vacuumdb" in script
-    assert "--analyze-in-stages" in script
-    assert "rustfs-data.tar.gz" in script
-    assert "docker run --rm" in script
-    assert "KOR_TRAVEL_MAP_RESTORE_SKIP_VERIFY" in script
-    assert "docker-restore-verify.sh" in script
-    assert '"$evidence_schema_version" == "3"' in script
-    assert "repair_v3_restored_manual_feature_boundary" in script
-    repair = script.index("repair_v3_restored_manual_feature_boundary()")
-    legacy = script.index('run_restore_bootstrap_phase legacy "$restore_bootstrap_dsn"', repair)
-    m05_pre = script.index('run_restore_bootstrap_phase m05-pre "$restore_bootstrap_dsn"', legacy)
-    migration = script.index("api ./docker/migrate-m05.sh", m05_pre)
-    m05_repair = script.index(
-        'run_restore_bootstrap_phase m05-repair "$restore_bootstrap_dsn"', migration
-    )
-    assert legacy < m05_pre < migration < m05_repair
-    assert "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN" in script
-    assert "kortravelmap.infra.runtime_privileges" in script
-    assert "assert_runtime_db_privilege_boundary" in script
-    assert script.index("repair_v3_restored_manual_feature_boundary") < script.index(
-        'if [[ "$KOR_TRAVEL_MAP_RESTORE_SKIP_RUSTFS" != "1" ]]'
-    )
-    assert "with-pg-advisory-lock.py" in script
-    assert "maintenance:backup-restore" in script
-    assert "KOR_TRAVEL_MAP_COMMAND_RECOVERY" in script
-    assert "recovering completed restore" not in script
-    assert "recovery_complete" not in script
-    assert "write-domain-command-marker.py" in script
-
-
-@pytest.mark.unit
-def test_docker_restore_script_refuses_production_targets_by_default() -> None:
-    script = _read("scripts/docker-restore.sh")
-
-    assert "refusing to restore into production app DB" in script
-    assert "refusing to restore into production Dagster DB" in script
-    assert "KOR_TRAVEL_MAP_RESTORE_RECREATE" in script
-    assert "set KOR_TRAVEL_MAP_RESTORE_RECREATE=1" in script
-    assert "docker compose down" not in script
-    assert "KOR_TRAVEL_MAP_RESTORE_ALLOW_PRODUCTION" not in script
-
-
-@pytest.mark.unit
-def test_restore_recovery_does_not_adopt_healthy_stale_targets(
-    tmp_path: Path,
-) -> None:
-    backup = tmp_path / "backups" / "backup-1"
-    for relative_path in (
-        "postgres/kor_travel_map.dump",
-        "postgres/kor_travel_map_dagster.dump",
-        "rustfs/rustfs-data.tar.gz",
-        "meta/manifest.json",
-        "meta/SHA256SUMS",
+def test_restore_scripts_fail_closed_before_any_legacy_operation() -> None:
+    for path in (
+        "scripts/docker-restore.sh",
+        "scripts/docker-restore-swap.sh",
+        "scripts/docker-restore-verify.sh",
     ):
-        target = backup / relative_path
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(b"fixture")
+        script = _read(path)
+        assert "is disabled" in script
+        assert "backup artifacts are audit-only under the 300 baseline" in script
+        assert "previous-revision restore" in script
+        assert script.rstrip().endswith("exit 2")
+        assert "KOR_TRAVEL_MAP_" not in script
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "relative_path",
+    [
+        "scripts/docker-restore.sh",
+        "scripts/docker-restore-swap.sh",
+        "scripts/docker-restore-verify.sh",
+        "live-e2e-backup-runner/restore.sh",
+        "live-e2e-backup-runner/swap.sh",
+    ],
+)
+def test_restore_entrypoints_do_not_touch_docker_even_with_escape_flags(
+    tmp_path: Path,
+    relative_path: str,
+) -> None:
     binary_dir = tmp_path / "bin"
     binary_dir.mkdir()
     docker_log = tmp_path / "docker.log"
@@ -232,7 +192,7 @@ def test_restore_recovery_does_not_adopt_healthy_stale_targets(
     completed = subprocess.run(
         [
             "bash",
-            str(ROOT / "scripts/docker-restore.sh"),
+            str(ROOT / relative_path),
             "--maintenance-lock-child",
             "backup-1",
         ],
@@ -243,76 +203,21 @@ def test_restore_recovery_does_not_adopt_healthy_stale_targets(
         check=False,
     )
 
-    assert completed.returncode != 0
-    assert "restore target DB already exists: stale_app" in completed.stderr
-    assert "pg_restore" not in docker_log.read_text(encoding="utf-8")
+    assert completed.returncode == 2
+    assert "disabled" in completed.stderr
+    assert not docker_log.exists()
     assert not (tmp_path / "backups" / ".domain-command-markers").exists()
 
 
 @pytest.mark.unit
-def test_restore_verify_script_checks_staging_counts() -> None:
-    script = _read("scripts/docker-restore-verify.sh")
-
-    assert "feature.features" in script
-    assert "last_analyze" in script
-    assert "last_autoanalyze" in script
-    assert "feature_stats=ready" in script
-    assert "information_schema.tables" in script
-    assert "docker volume inspect" in script
-    assert "file_count" in script
-    assert "verify_manual_feature_evidence" in script
-    assert "manual_feature_evidence" in script
-    assert "manual evidence root mismatch" in script
-    assert "schema_version not in {1, 2, 3}" in script
-    assert "feature_requests" in script
-    assert "manual_provider_dedup_cases" in script
-    assert "manual_provider_dedup_resolutions" in script
-    assert "feature_reference_reconciliation_events" in script
-    assert "feature_reference_reconciliation_acks" in script
-    assert "feature_reference_reconciliation_subscriptions" in script
-    assert "event envelope/row mismatch" in script
-    assert "rebuild_feature_reference_reconciliation_leases" in script
-    assert "M05 restore has a non-prefix reconciliation ACK" in script
-    assert "M05 restore has an ACK/event hash mismatch" in script
-    assert "M05 restore has an event payload hash mismatch" in script
-    assert "lease_epoch = CASE" in script
-    assert "KOR_TRAVEL_MAP_RESTORE_BACKUP_DIR" in script
-
-
-@pytest.mark.unit
-def test_n150_restore_runner_analyzes_restored_databases() -> None:
-    script = _read("live-e2e-backup-runner/restore.sh")
-    readme = _read("live-e2e-backup-runner/README.md")
-
-    assert script.index("pg_restore") < script.index("vacuumdb")
-    assert "--analyze-in-stages" in script
-    assert "vacuumdb --analyze-in-stages" in readme
-
-
-@pytest.mark.unit
-def test_restore_swap_script_generates_env_switch_and_can_apply() -> None:
-    script = _read("scripts/docker-restore-swap.sh")
-    writer = _read("scripts/write-restore-swap-env.py")
-
-    assert "docker-restore-verify.sh" in script
-    assert "fence-cache-target-restored-db.py" in script
-    assert "write-restore-swap-env.py" in script
-    assert script.index("acquire_domain_command_fence") < script.index(
-        "fence-cache-target-restored-db.py"
-    )
-    assert script.index("fence-cache-target-restored-db.py") < script.index(
-        "write-restore-swap-env.py"
-    )
-    assert "KOR_TRAVEL_MAP_DOCKER_PG_DSN" in writer
-    assert "KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL" in writer
-    assert "KOR_TRAVEL_MAP_RUSTFS_VOLUME" in writer
-    assert "KOR_TRAVEL_MAP_RESTORE_SWAP_APPLY" in script
-    assert "docker compose" in script
-    assert "with-pg-advisory-lock.py" in script
-    assert "KOR_TRAVEL_MAP_RESTORE_SWAP_ENV_FILE" not in script
-    assert 'marker_effect_state="swap_applied"' in script
-    assert 'marker_effect_state="swap_planned"' in script
-    assert "write-domain-command-marker.py" in script
+def test_live_restore_runners_are_disabled_with_the_root_restore_surface() -> None:
+    for path in ("live-e2e-backup-runner/restore.sh", "live-e2e-backup-runner/swap.sh"):
+        script = _read(path)
+        assert "is disabled" in script
+        assert "backup artifacts are audit-only under the 300 baseline" in script
+        assert script.rstrip().endswith("exit 2")
+        if "pg_restore" in script:
+            assert script.index("exit 2") < script.index("pg_restore")
 
 
 @pytest.mark.unit
@@ -324,7 +229,7 @@ def test_docker_compose_supports_restore_rustfs_volume_swap() -> None:
 
 
 @pytest.mark.unit
-def test_backup_restore_runbook_documents_three_part_bundle_and_restore_boundary() -> None:
+def test_backup_restore_runbook_documents_audit_only_bundle_and_handoff_boundary() -> None:
     runbook = _read("docs/backup-restore.md")
 
     assert "kor_travel_map" in runbook
@@ -336,9 +241,12 @@ def test_backup_restore_runbook_documents_three_part_bundle_and_restore_boundary
     assert "meta/manifest.json" in runbook
     assert "meta/SHA256SUMS" in runbook
     assert "외부 서비스" in runbook
-    assert "npm run docker:restore" in runbook
-    assert "kor_travel_map_restore" in runbook
-    assert "kor_travel_map_dagster_restore" in runbook
+    assert 'schema_version: 4' in runbook
+    assert 'recovery_status: "audit_only_no_restore"' in runbook
+    assert "scripts/docker-restore.sh" in runbook
+    assert "RESTORE_UNSUPPORTED" in runbook
+    assert "0236_tvn41s_compaction_drained → 300" in runbook
+    assert "Docker Manager" in runbook
+    assert "npm run docker:restore" not in runbook
+    assert "kor_travel_map_restore" not in runbook
     assert "docker-restore-verify.sh" in runbook
-    assert "docker-restore-swap.sh" in runbook
-    assert "T-209e" in runbook

@@ -96,8 +96,8 @@ _FEATURE_UPDATE_POLICY_KEYS: Final[frozenset[str]] = frozenset(
 _TERMINAL_STATES: Final[frozenset[str]] = frozenset({"done", "failed"})
 _MAX_LIST_LIMIT: Final[int] = 200
 _MAX_PEEK_LIMIT: Final[int] = 50
-_PINVI_CACHE_TARGET_SYSTEM: Final[str] = "pinvi"
-_PINVI_CACHE_TARGET_SERVICE_REQUEST_MESSAGE: Final[str] = (
+_RELAY_OWNED_EXTERNAL_SYSTEM: Final[str] = "pinvi"
+_SERVICE_OWNED_CACHE_TARGET_REQUEST_MESSAGE: Final[str] = (
     "PinVi cache target refresh는 cache-target ServiceToken writer로만 요청할 수 있습니다."
 )
 
@@ -1157,10 +1157,10 @@ async def preview_feature_update_request(
     )
 
 
-def _is_pinvi_cache_target_scope(scope: Mapping[str, Any]) -> bool:
+def _is_service_owned_cache_target_scope(scope: Mapping[str, Any]) -> bool:
     return (
         scope.get("type") == "cache_target_keys"
-        and scope.get("external_system") == _PINVI_CACHE_TARGET_SYSTEM
+        and scope.get("external_system") == _RELAY_OWNED_EXTERNAL_SYSTEM
     )
 
 
@@ -1177,8 +1177,8 @@ async def enqueue_feature_update_request(
     sigungu_resolver: SigunguByRadiusResolver | None = None,
 ) -> FeatureUpdateRequest:
     """일반 writer로 정규화한 scope와 canonical import job을 영속화한다."""
-    if _is_pinvi_cache_target_scope(scope):
-        raise ValueError(_PINVI_CACHE_TARGET_SERVICE_REQUEST_MESSAGE)
+    if _is_service_owned_cache_target_scope(scope):
+        raise ValueError(_SERVICE_OWNED_CACHE_TARGET_REQUEST_MESSAGE)
     return await _enqueue_feature_update_request(
         session,
         scope=scope,

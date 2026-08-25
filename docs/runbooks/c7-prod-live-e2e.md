@@ -1,4 +1,9 @@
-# C7 production live E2E 실행·복구
+# [보존 이력 · 실행 금지] C7 production live E2E 실행·복구
+
+> 이 문서는 retired C7/rebuildable workflow의 과거 기록이다. `300` baseline의 n150 배포에는
+> 사용하지 않는다. `pinvi-pair rebuild-pinned`, DB restore/PITR, old image restart, raw Alembic
+> 편집은 H46H handoff의 대안이 아니다. 현행 sequence는 `T-VN-H46H` 설계 문서와
+> `docs/backup-restore.md`를 따른다.
 
 이 문서는 `T-ADM-C7`의 n150 파괴적 live UI E2E를 실행하는 유일한 운영 순서를
 정의한다. 실제 host, URL, 계정, 비밀번호, token, hash는 gitignore된
@@ -36,14 +41,14 @@ C7은 다음 조건을 모두 만족해야 완료다.
 
 1. Map API·Dagster writer를 maintenance fence로 막고 동일 배포 mutation window를
    독점한다.
-2. DB backup/PITR recovery point와 기존 env/compose bytes·mode·owner, 모든 대상
-   container image/command/environment hash를 기록한다.
+2. audit-only DB backup artifact와 기존 env/compose bytes·mode·owner, 모든 대상
+   container image/command/environment hash를 기록한다. 이 artifact는 restore/PITR 입력이 아니다.
 3. 배포할 clean commit에서 Map API image를 먼저 만든다.
    `KOR_TRAVEL_MAP_GIT_COMMIT=$(git rev-parse HEAD)`를 build arg로 전달해 API·UI·Dagster
    image의 `org.opencontainers.image.revision`을 같은 commit으로 고정한다.
-4. 해당 image의 migration-only 경로로 `alembic upgrade head`를 실행한다. 이 시점부터
-   구 image 재시작은 rollback이 아니다. 실패하면 새 image forward-fix 또는 DB
-   restore/PITR만 허용한다.
+4. **[보존 이력 · 실행 금지]** 당시에는 image migration-only path를 실행했다. 현재 `300`
+   deployment에는 이 legacy command를 사용하지 않으며, Manager controlled fresh/handoff와
+   final permit path만 허용한다.
 5. `current == unique heads`와 `alembic check`를 확인한다.
 6. `start_unpaired_import_job(kind="c6c_cancel_probe", trigger_kind="system")` 정식
    repository 경로로 owned cancel fixture를 만들고 transaction을 commit한다. raw SQL

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Docker daemon에 backup/restore domain command의 durable global fence를 둔다."""
+"""Docker daemon에 backup 생성 command의 durable global fence를 둔다."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ FENCE_COMMAND: Final = (
 _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _IMAGE_ID = re.compile(r"^sha256:[0-9a-f]{64}$")
 _OPERATION = re.compile(r"^[a-z][a-z0-9_.-]{0,127}$")
-_EFFECT_KIND = re.compile(r"^(create|restore|swap)$")
+_EFFECT_KIND = re.compile(r"^create$")
 _MARKER_KEY = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,127}$")
 _BACKUP_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 _FENCE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")

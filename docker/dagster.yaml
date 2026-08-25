@@ -12,6 +12,9 @@ storage:
   postgres:
     postgres_url:
       env: KOR_TRAVEL_MAP_DAGSTER_PG_URL
+    # runtime process가 누락 table을 암묵 생성해 불완전한 one-shot을 숨기지 못하게 한다.
+    # fresh 생성과 schema/data migration은 ktm-dagster-storage만 수행한다.
+    should_autocreate_tables: false
 
 # pool을 선언한 provider asset은 instance 전역에서 동시에 1개 run만 실행한다.
 # OpiNet place/price는 ``opinet_api``, KREX notice는 ``krex_notice_snapshot`` pool을

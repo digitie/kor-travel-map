@@ -321,7 +321,8 @@ cat > "$backup_dir/meta/manifest.json" <<EOF
     "volume_service": "rustfs-perms:/data"
   },
   "manual_feature_evidence": {
-    "schema_version": 3,
+    "schema_version": 4,
+    "recovery_status": "audit_only_no_restore",
     "snapshot_consistency": "pg_export_snapshot",
     "relations": {
       "manual_feature_identity_claims": {"path": "$claim_jsonl", "row_count": $claim_count, "sha256": "$claim_sha256"},

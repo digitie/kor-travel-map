@@ -45,7 +45,7 @@ _QUOTE = "[\"']"
 #: `baseline`도 본다 — `alembic/baseline/{schema,seed}.sql`은 **모든 fresh DB에서 실제로
 #: 실행되는** 764KB다. 지금은 `0200`이 디렉터리와 파일명을 나눠 들고 있어 리터럴이
 #: 없지만(그래서 이 가드가 세는 것도 0건이다), 누가 경로를 한 줄로 적는 순간 대상이 된다.
-_DIRECTORY = "(versions|legacy_versions|baseline)"
+_DIRECTORY = "(versions|legacy_versions|retired_versions/0200-0236|baseline)"
 _LEAF = r"([^\"']+\.(?:py|sql))"
 _PATH_STYLE = re.compile(
     rf"{_QUOTE}alembic{_QUOTE}\s*/\s*{_QUOTE}{_DIRECTORY}{_QUOTE}\s*/\s*{_QUOTE}{_LEAF}{_QUOTE}"

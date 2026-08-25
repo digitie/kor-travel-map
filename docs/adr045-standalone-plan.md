@@ -198,13 +198,17 @@ run_*_job/dedup/status), provider 변환기 9종, debug-ui `create_app` + 라우
 ## 5. Phase 5 — Docker Compose / 배포
 
 > 정본 서비스 목록: `openapi-admin-contract.md §2`. 파일 자체가 없음 → 신규.
+>
+> **보존 이력**: 아래 T-209b의 generic Alembic/Dagster 자동 초기화 순서는 ADR-045 당시
+> 계획이며 active `300` production 절차가 아니다. 현재는 Docker Manager의 fixed
+> fresh/handoff/finalize와 application/Dagster metadata identity permit을 따른다.
 
 - **T-209a** `docker-compose.yml` — 서비스 6종(api/frontend/dagster-webserver/
   dagster-daemon/postgres/선택 rustfs) + 네트워크 + 볼륨 + 포트(`api` 12701,
   `frontend` 12705, Dagster 12702, RustFS API 12101/console 12105, Postgres host 5432) +
   env(`KOR_TRAVEL_MAP_PG_DSN`/provider keys/RUSTFS). healthcheck + depends_on(기동 순서:
   postgres → migrate → api/dagster).
-- **T-209b** 기동 순서 스크립트 — postgres ready → `alembic upgrade head`(app DB
+- **T-209b** 당시 기동 순서 스크립트 — postgres ready → `alembic upgrade head`(app DB
   `kor_travel_map`) → `kor_travel_map_dagster` DB 생성 + Dagster 자체 schema init → api/
   dagster 기동. entrypoint/Makefile.
   - **T-209b-a (즉시)**: Dagster가 `.dagster/schedules/schedules.db-*` SQLite 파일을

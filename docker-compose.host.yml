@@ -19,28 +19,30 @@ services:
 
   dagster-db-init:
     network_mode: host
-    # base와 동일하되 `-h postgres` → `-h 127.0.0.1` (host 모드 = DNS 없음).
-    command:
-      - |
-        set -eu
-        if ! echo "$$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB" | grep -Eq '^[A-Za-z_][A-Za-z0-9_]*$$'; then
-          echo "invalid KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB=$$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB" >&2
-          exit 1
-        fi
-        if psql -h 127.0.0.1 -U "$$KOR_TRAVEL_MAP_POSTGRES_USER" -d "$$KOR_TRAVEL_MAP_POSTGRES_DB" -tAc "SELECT 1 FROM pg_database WHERE datname = '$$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB'" | grep -q 1; then
-          echo "Dagster metadata DB exists: $$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB"
-        else
-          createdb -h 127.0.0.1 -U "$$KOR_TRAVEL_MAP_POSTGRES_USER" "$$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB"
-          echo "Dagster metadata DB created: $$KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB"
-        fi
+    # base의 identity-permit producer를 그대로 쓰고 host/DSN만 바꾼다.
+    environment:
+      KOR_TRAVEL_MAP_POSTGRES_INIT_HOST: 127.0.0.1
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL:?KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL is required}
 
-  db-role-bootstrap:
+  dagster-db-init-fresh-300:
     network_mode: host
+    environment:
+      KOR_TRAVEL_MAP_POSTGRES_INIT_HOST: 127.0.0.1
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL:?KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL is required}
 
-  db-migrate-to-m01-bootstrap-boundary:
+  db-application-create-fresh-300:
     network_mode: host
+    environment:
+      KOR_TRAVEL_MAP_POSTGRES_INIT_HOST: 127.0.0.1
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL:?KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL is required}
 
-  db-role-bootstrap-m01:
+  db-role-bootstrap-300:
+    network_mode: host
+    environment:
+      KOR_TRAVEL_MAP_POSTGRES_INIT_HOST: 127.0.0.1
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL:?KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL is required}
+
+  db-application-schema-fresh-300:
     network_mode: host
 
   rustfs-perms:

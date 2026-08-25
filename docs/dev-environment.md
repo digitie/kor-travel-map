@@ -17,7 +17,7 @@ n150에서 실행할 수 없을 때만 Windows 호스트 브라우저를 fallbac
 
 | | dev (기본, 여기서 실행) | prod |
 |---|---|---|
-| 기동 | 여기서 직접 실행(`npm run admin:stack`) 또는 `npm run docker:up` | `kor-travel-docker-manager`로 Docker 기동 |
+| 기동 | `npm run docker:up`; 사전 준비된 loopback DB smoke만 `npm run admin:stack` | `kor-travel-docker-manager`로 Docker 기동 |
 | 주소 | **내부 `127.0.0.1`** | 공식 도메인(reverse proxy) — `docs/deploy.md` §프로덕션 도메인 |
 | 포트 | **`12xxx` 고정 포트** (API `12701` · admin UI `12705` · Dagster `12702` · RustFS `12101`/`12105` · geo `12501`/`12505`) | reverse proxy 도메인 뒤 동일 host 포트 |
 | Docker 네트워크 | **host 모드 기본** (`docker-compose.host.yml`) | docker-manager 정책 |
@@ -41,9 +41,9 @@ bind host 기본도 `127.0.0.1`이다. Windows fallback Playwright e2e처럼 WSL
 KOR_TRAVEL_MAP_DOCKER_NETWORK=bridge npm run docker:up
 ```
 
-host override는 bridge용 기본값(`dagster`, `rustfs:9000`)을 쓰지 않는다. 외부 공유 DB/객체 저장소를
-쓰는 경우에도 `127.0.0.1:<12xxx>` 기본값을 적용하되, 운영자가 명시한 external DSN/endpoint와
-external Postgres host port override는 보존한다.
+host override는 bridge용 기본값(`dagster`, `rustfs:9000`)을 쓰지 않는다. 외부 공유 DB/infra는
+standalone `npm run docker:up` 경로가 아니라 Docker Manager의 production permit flow만
+사용한다. 외부 객체 저장소만 쓰는 local-dev 형상은 별도 object-store overlay 계약을 따른다.
 
 ### 이미 떠 있는 경우 — 포트 가드 (강제종료 안 물어보고 새 포트로 열지 않음)
 
@@ -232,12 +232,18 @@ $EDITOR packages/kor-travel-map-api/.env
 # data 링크
 ln -s /mnt/f/dev/kor-travel-map/data data
 
-# role/schema/extension bootstrap — squash(`0200`) 이후 필수.
-# baseline은 role/schema/extension을 만들지 않고 **전제로 검증만** 한다.
-docker compose run --rm db-role-bootstrap
+# virgin dedicated DB application role bootstrap→metadata DB/permit→restricted `300` root
+# migration 연속 one-shot — 한 번만 실행.
+# normal restart에는 실행하지 않고, production API는 Docker Manager final permit 없이는 blank
+# DB를 generic upgrade하지 않는다. legacy `0236` DB에는 Docker Manager handoff만 허용한다.
+docker compose -f docker-compose.yml -f docker-compose.host.yml \
+  --profile fresh-init run --rm db-application-schema-fresh-300
 
-# Alembic upgrade (스키마 적용 - 설정한 외부 DB에 반영)
-alembic upgrade head
+# Docker full stack은 workstation local-dev profile을 명시한다. production profile은
+# Docker Manager final permit transaction만 사용한다.
+KOR_TRAVEL_MAP_API_PROFILE=local-dev docker compose \
+  -f docker-compose.yml -f docker-compose.host.yml \
+  -f docker-compose.local-dev.yml up -d
 
 # 단위 테스트 (DB 불필요)
 pytest tests/unit -q
@@ -246,29 +252,22 @@ pytest tests/unit -q
 pytest tests/integration -q
 ```
 
+위 fresh/normal 명령은 workstation 기본인 host topology다. bridge를 쓸 때만
+`KOR_TRAVEL_MAP_DOCKER_NETWORK=bridge`를 명시하고 DB DSN authority를 전부
+`postgres:5432`로 맞춘 뒤 `docker-compose.host.yml`을 제외한다. host와 bridge authority가
+섞인 credential bundle은 DB writer 실행 전에 거부된다.
+
 ## 4. PostgreSQL 및 RustFS 인프라 설정
 
 kor-travel-map 에서 rustfs, postgresql 등 인프라는 kor-travel-geo가 아니라 어딘가에서 잘 동작하는 db, bucket 에 접속하여 활용하며, 그러기 위해서는 설정을 이 프로젝트에 잘 저장해두고 써야 합니다.
 
-## 5. 스키마 초기화 (수동)
+## 5. 스키마 초기화
 
-Alembic 사용 전에 schema 부트스트랩:
-
-```sql
-CREATE SCHEMA IF NOT EXISTS feature;
-CREATE SCHEMA IF NOT EXISTS provider_sync;
-CREATE SCHEMA IF NOT EXISTS ops;
-CREATE SCHEMA IF NOT EXISTS x_extension;
-
-CREATE EXTENSION IF NOT EXISTS postgis           SCHEMA x_extension;
-CREATE EXTENSION IF NOT EXISTS postgis_topology  SCHEMA x_extension;
-CREATE EXTENSION IF NOT EXISTS pg_trgm           SCHEMA x_extension;
-CREATE EXTENSION IF NOT EXISTS pgcrypto          SCHEMA x_extension;
-
-ALTER DATABASE kor_travel_map SET search_path = public, x_extension;
-```
-
-이 후 Alembic이 schema-aware migration을 적용한다.
+schema·extension·database `search_path`를 수동 DDL로 만들지 않는다. 이런 residue가 있으면
+virgin `300` preflight가 mutation 전에 의도적으로 거부한다. 새 local dedicated DB는 위 §3의
+`fresh-init` 연속 one-shot만 사용한다. 이 경로가 application role, metadata DB/identity permit,
+`feature`/`provider_sync`/`ops` schema, `x_extension` extension과 restricted `300` root를 한
+Compose env snapshot으로 만든다. production은 Docker Manager controlled transaction만 쓴다.
 
 ## 6. IDE / 편집기
 

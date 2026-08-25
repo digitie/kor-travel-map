@@ -1355,46 +1355,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/admin/restore/{backup_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Restore Backup
-         * @description Plan or run a staging restore command.
-         */
-        post: operations["restore_backup_v1_admin_restore__backup_id__post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/admin/restore/{backup_id}/swap": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Plan Restore Swap
-         * @description Plan or run the restore hot-swap env switch.
-         */
-        post: operations["plan_restore_swap_v1_admin_restore__backup_id__swap_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/admin/theme-feature-candidates": {
         parameters: {
             query?: never;
@@ -4997,7 +4957,7 @@ export interface components {
         };
         /**
          * BackupCommandPlan
-         * @description Command plan returned by backup/restore endpoints.
+         * @description Command plan returned by the backup endpoint.
          */
         BackupCommandPlan: {
             /** Command */
@@ -5058,7 +5018,7 @@ export interface components {
         };
         /**
          * BackupOperationData
-         * @description Backup/restore/swap operation response data.
+         * @description Backup operation response data.
          */
         BackupOperationData: {
             artifact?: components["schemas"]["BackupRecord"] | null;
@@ -5069,15 +5029,14 @@ export interface components {
             message: string;
             /**
              * Operation
-             * @enum {string}
+             * @constant
              */
-            operation: "backup" | "restore" | "swap";
-            restore_targets?: components["schemas"]["RestoreTargets"] | null;
+            operation: "backup";
             /**
              * Status
              * @enum {string}
              */
-            status: "planned" | "completed" | "failed" | "manual_required";
+            status: "planned" | "completed" | "failed";
             /** Stderr */
             stderr?: string | null;
             /** Stdout */
@@ -5085,7 +5044,7 @@ export interface components {
         };
         /**
          * BackupOperationResponse
-         * @description Backup/restore/swap operation response.
+         * @description Backup operation response.
          */
         BackupOperationResponse: {
             data: components["schemas"]["BackupOperationData"];
@@ -5124,8 +5083,6 @@ export interface components {
             };
             /** Path */
             path: string;
-            /** Restore Url */
-            restore_url: string;
         };
         /**
          * BackupRunRequest
@@ -13388,79 +13345,6 @@ export interface components {
             locations?: string[] | null;
         };
         /**
-         * RestoreRunRequest
-         * @description Staging restore command request.
-         */
-        RestoreRunRequest: {
-            /** App Db */
-            app_db?: string | null;
-            /** Dagster Db */
-            dagster_db?: string | null;
-            /**
-             * Execute
-             * @default false
-             */
-            execute: boolean;
-            /**
-             * Recreate
-             * @default false
-             */
-            recreate: boolean;
-            /** Rustfs Volume */
-            rustfs_volume?: string | null;
-            /**
-             * Skip Checksum
-             * @default false
-             */
-            skip_checksum: boolean;
-            /**
-             * Skip Rustfs
-             * @default false
-             */
-            skip_rustfs: boolean;
-        };
-        /**
-         * RestoreSwapRequest
-         * @description Restore hot-swap command request.
-         */
-        RestoreSwapRequest: {
-            /** App Db */
-            app_db?: string | null;
-            /**
-             * Apply
-             * @default false
-             */
-            apply: boolean;
-            /** Dagster Db */
-            dagster_db?: string | null;
-            /**
-             * Execute
-             * @default false
-             */
-            execute: boolean;
-            /** Note */
-            note?: string | null;
-            /** Rustfs Volume */
-            rustfs_volume?: string | null;
-            /**
-             * Skip Verify
-             * @default false
-             */
-            skip_verify: boolean;
-        };
-        /**
-         * RestoreTargets
-         * @description Staging restore targets.
-         */
-        RestoreTargets: {
-            /** App Db */
-            app_db: string;
-            /** Dagster Db */
-            dagster_db: string;
-            /** Rustfs Volume */
-            rustfs_volume: string;
-        };
-        /**
          * ReviewFeatureDetailRecord
          * @description Review 상세 feature snapshot.
          */
@@ -19387,98 +19271,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PublicApiKeyResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
-    restore_backup_v1_admin_restore__backup_id__post: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": string;
-            };
-            path: {
-                backup_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["RestoreRunRequest"] | null;
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BackupOperationResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
-            default: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/problem+json": components["schemas"]["ProblemDetail"];
-                };
-            };
-        };
-    };
-    plan_restore_swap_v1_admin_restore__backup_id__swap_post: {
-        parameters: {
-            query?: never;
-            header: {
-                "Idempotency-Key": string;
-            };
-            path: {
-                backup_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: {
-            content: {
-                "application/json": components["schemas"]["RestoreSwapRequest"] | null;
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BackupOperationResponse"];
                 };
             };
             /** @description Validation Error */

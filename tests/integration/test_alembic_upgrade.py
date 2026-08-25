@@ -274,6 +274,25 @@ _UNMAPPED_TABLE_COLUMNS: dict[
         ("source_input_set_hash", "text", True),
         ("created_at", "timestamp with time zone", True),
     },
+    ("ops", "application_schema_operation_receipts"): {
+        ("operation_id", "uuid", True),
+        ("operation", "text", True),
+        ("result_schema", "text", True),
+        ("result_sha256", "text", True),
+        ("map_candidate_commit", "text", True),
+        ("map_candidate_image_id", "text", True),
+        ("postgres_image_id", "text", True),
+        ("writer_fence_receipt_sha256", "text", True),
+        ("journal_sha256", "text", True),
+        ("journal_generation", "bigint", True),
+        ("destination_head", "text", True),
+        ("database_name", "text", True),
+        ("database_oid", "bigint", True),
+        ("database_owner", "text", True),
+        ("postgres_system_identifier", "text", True),
+        ("result_payload", "jsonb", True),
+        ("committed_at", "timestamp with time zone", True),
+    },
 }
 
 _UNMAPPED_TABLE_CONSTRAINTS: dict[tuple[str, str], set[tuple[str, str]]] = {
@@ -455,6 +474,24 @@ _UNMAPPED_TABLE_CONSTRAINTS: dict[tuple[str, str], set[tuple[str, str]]] = {
         ("curation_source_observation_receipts_row_count_check", "c"),
         ("curation_source_observation_receipt_source_input_set_hash_check", "c"),
     },
+    ("ops", "application_schema_operation_receipts"): {
+        ("pk_application_schema_operation_receipts", "p"),
+        ("ck_application_schema_operation_receipts_operation", "c"),
+        ("ck_application_schema_operation_receipts_result_schema", "c"),
+        ("ck_application_schema_operation_receipts_result_sha256", "c"),
+        ("ck_application_schema_operation_receipts_map_commit", "c"),
+        ("ck_application_schema_operation_receipts_map_image", "c"),
+        ("ck_application_schema_operation_receipts_postgres_image", "c"),
+        ("ck_application_schema_operation_receipts_fence", "c"),
+        ("ck_application_schema_operation_receipts_journal", "c"),
+        ("ck_application_schema_operation_receipts_generation", "c"),
+        ("ck_application_schema_operation_receipts_head", "c"),
+        ("ck_application_schema_operation_receipts_database_name", "c"),
+        ("ck_application_schema_operation_receipts_database_oid", "c"),
+        ("ck_application_schema_operation_receipts_database_owner", "c"),
+        ("ck_application_schema_operation_receipts_system_identifier", "c"),
+        ("ck_application_schema_operation_receipts_payload", "c"),
+    },
 }
 
 _UNMAPPED_TABLE_INDEXES: dict[tuple[str, str], set[str]] = {
@@ -555,6 +592,9 @@ _UNMAPPED_TABLE_INDEXES: dict[tuple[str, str], set[str]] = {
     },
     ("ops", "curation_source_observation_receipts"): {
         "curation_source_observation_receipts_pkey",
+    },
+    ("ops", "application_schema_operation_receipts"): {
+        "pk_application_schema_operation_receipts",
     },
 }
 
@@ -669,12 +709,12 @@ async def _run_alembic_upgrade(dsn: str) -> None:
     project_root = Path(__file__).resolve().parents[2]  # noqa: ASYNC240  # sync IO is trivial path-arith here
     cfg = Config(str(project_root / "alembic.ini"))
     cfg.set_main_option("script_location", str(project_root / "alembic"))
-    # 배포와 같은 경로로 돈다 — bootstrap 후 migrator 자격으로 upgrade.
-    from tests.integration._tvn34_migration_bootstrap import (
-        upgrade_head_with_tvn_m01_phase,
+    # 배포와 같은 경로로 돈다 — final bootstrap 후 migrator 자격으로 upgrade.
+    from tests.integration._application_300_bootstrap import (
+        upgrade_head_with_application_300_bootstrap,
     )
 
-    await upgrade_head_with_tvn_m01_phase(cfg, dsn)
+    await upgrade_head_with_application_300_bootstrap(cfg, dsn)
 
 
 def _alembic_head_revision() -> str:

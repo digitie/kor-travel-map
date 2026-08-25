@@ -447,14 +447,6 @@ class KorTravelMapSettings(BaseSettings):
             "``KOR_TRAVEL_MAP_FILE_REGISTRY_E2E_BACKUP_TTL_DAYS``."
         ),
     )
-    file_registry_temp_ttl_days: int = Field(
-        default=14,
-        description=(
-            "파일 registry scan의 orphan rule: kind='temp' 파일이 이 일수를 넘기면 "
-            "``orphan(temp_expired)``. env "
-            "``KOR_TRAVEL_MAP_FILE_REGISTRY_TEMP_TTL_DAYS``."
-        ),
-    )
     file_registry_extra_roots: str | None = Field(
         default=None,
         description=(

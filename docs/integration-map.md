@@ -176,19 +176,24 @@ production compatible pair에 반영됐다. sparse weather batch처럼 생산자
 cache target처럼 미완인 항목은 각 T-VN task와 PinVi consumer가 함께 준비된 compatible
 pair에서만 활성화한다. 현재 계약은 배포 source에 결박된 OpenAPI snapshot으로 판정한다.
 
-**2026-08-20(ADR-094) 이후 정본은 docker-manager의 pinned runtime manifest version 5와
-rebuild journal version 7이다.** v4 compatible-pair manifest는 C7 신뢰 경계에서 퇴역했다.
+**2026-08-25 이후 정본은 docker-manager의 pinned runtime manifest version 6과 rebuild
+journal version 8이다.** v4 compatible-pair와 manifest v5/journal v7은 C7 신뢰 경계에서
+호환 변환 없이 퇴역했다.
 
-- v5 manifest는 `{version, active_generation}` 두 키만 갖는다. `active_generation`은 일곱
+- v6 manifest는 `{version, active_generation}` 두 키만 갖는다. `active_generation`은 일곱
   image ID(Map API·UI·Dagster web·Dagster daemon, PinVi API·web·dagster), Map/PinVi source
   revision, 세 schema head(`map_application_head`·`map_dagster_head`·`pinvi_head`),
-  `pinset_sha256`, `recorded_at`의 exact 14-field다. rollback slot은 v5에 없다.
-- v7 journal은 그 세대를 commit한 transaction의 receipt다. C7은 phase `committed`,
-  candidate가 manifest `active_generation`과 **전체 동등**, cancel probe `finalized`를 요구한다.
+  `pinset_sha256`, application `300` paired candidate evidence와 `recorded_at`의 exact
+  15-field다. rollback slot은 없다.
+- v8 journal은 그 세대를 commit한 transaction의 receipt다. C7은 phase `committed`,
+  candidate가 manifest `active_generation`과 **전체 동등**, candidate evidence의 중복 결박,
+  application create/final DB identity, root/finalize operation result, application/metadata
+  permit digest, Dagster metadata DB/LOGIN role identity, cancel probe `finalized`를 exact
+  schema로 요구한다.
 - Map C7 attestation(host document version 4)은 일곱 image ID를 실제 compose runtime과 각각
   비교하고, 세 schema head·`pinset_sha256`·journal `transaction_id`를 generation과 exact
   대조한다. Map application head는 runner가 측정한 실제 Alembic head와도 대조한다.
-  v4 manifest나 누락·추가 필드는 호환 변환 없이 거부한다.
+  v4/v5 manifest, v7 journal이나 누락·추가 필드는 호환 변환 없이 거부한다.
 
 C7P 코드 병합만으로 production 활성화가 되지는 않는다. initial C6c/C7 cutover는
 producer/consumer blocker를 닫고 main의 exact commit으로 image를 빌드한 뒤 2026-07-27
@@ -205,11 +210,12 @@ producer/consumer blocker를 닫고 main의 exact commit으로 image를 빌드�
 | cache target/refresh | **paired PR 전 미완** — generation·conditional ETag·Idempotency-Key·strict pull consumer | **producer foundation 진행** — service resource, restore fence, same-tx outbox, pull lease/replay/snapshot |
 | public/operator 분리 | 공개 DTO의 raw lineage 의존 0건, operator principal 사용 | route matrix·read-only DB role·표면별 OpenAPI SHA |
 
-Cutover는 consumer 배포 → contract/OpenAPI SHA 확인 → production clone 복구·shadow 검증 → KTM
-write fence → KTM API/DB 전환 → PinVi 활성화 → 양방향 smoke → soak 순서다. rollback window에는
-write fence를 유지하거나 검증된 forward journal/PITR로 fence 이후 delta를 되살릴 수 있어야 한다.
-단순 old snapshot 복원과 upstream 재수집은 rollback이 아니다. 어느 gate든 실패하면 consumer와 KTM을
-이전 pinned compatible pair로 유지하고 새 writer를 열지 않는다(ADR-075).
+Cutover는 consumer 배포 → contract/OpenAPI SHA 확인 → production clone의 **읽기 전용** shadow
+검증 → KTM write fence → KTM API/DB의 controlled forward handoff → PinVi 활성화 → 양방향
+smoke → soak 순서다. `300` baseline 이후 clone은 검증용 관측 입력일 뿐 production DB의
+복원원본이 아니다. PITR, dump restore, Alembic downgrade/stamp-back, 이전 pinned compatible
+pair로의 rollback은 지원하지 않는다. 어느 gate든 실패하면 새 writer를 열지 않고 해당 단계에서
+멈춘 뒤 새 forward-fix candidate와 controlled handoff로만 해소한다(ADR-075).
 
 `/v1/features/search` 전환에는 `include_total=false`의 COUNT 0회, `true`의 COUNT 1회,
 동일 정규화 query에서만 이어지는 signed cursor, 알 수 없는 version·변조·query mismatch의

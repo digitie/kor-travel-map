@@ -47,15 +47,15 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     "tvn33-reference-ownership-v1.sql": (
         "2e72796b373691b4d6e10f71eceec4504df94af1a2582edbf445fb2390f20b6b"
     ),
-    # 2026-08-22 T-VN-41S — generic snapshot 410/admission 계약으로 재생성한
+    # 2026-08-25 PR-1064 — application 300 baseline 재배치 뒤
     # admin/full OpenAPI의 현재 baseline을 machine freeze했다.
     "openapi-diff-v1.json": (
-        "5dedb2344c495e43d001e82dab29a28daa3841b32822f138e7d310efc05d7ee5"
+        "e4df249158f99c89e04de760a03687e82cfd94a66fa962a695931dd01dd97357"
     ),
-    # 2026-08-22 T-VN-41S — pending T-VN-40 receipt가 현재 full OpenAPI를
+    # 2026-08-25 PR-1064 — pending T-VN-40 receipt가 현재 full OpenAPI를
     # 기술하도록 SHA를 재고정했다. 교차 저장소 paired acceptance는 여전히 pending이다.
     "consumer-rollout-v1.json": (
-        "fc00cf1ed80eb215287241a6266ce0e496c70aef150104526e19454a6a96630f"
+        "4c7e2c940e03661fd08519dd25ef640d6e6fe9f10ebb76d9c12c3411c88a1929"
     ),
     "tvn40-live-acceptance-v1.json": (
         "b1e8ffdf05fe0b07b274f521305f1f8b4af0daed16d44c4a0b847ddf81402d0e"

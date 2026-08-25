@@ -660,7 +660,10 @@ COPY (
       namespace.nspname,
       namespace.nspname,
       namespace.nspowner::regrole::text || ':' ||
-        COALESCE(namespace.nspacl::text, '')
+        COALESCE((
+          SELECT string_agg(entry::text, ',' ORDER BY entry::text)
+          FROM unnest(namespace.nspacl) AS entry
+        ), '')
     FROM pg_catalog.pg_namespace AS namespace
     WHERE namespace.nspname IN ('feature', 'ops', 'provider_sync')
     UNION ALL

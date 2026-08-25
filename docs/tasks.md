@@ -35,19 +35,50 @@ barrier로 직렬화한다.
   - [~] `T-VN-H49`(4분할 baseline·primitive 완료 / 주기 실행·보존·off-box 증거 잔여)
 - **Lane B — frontend hardening·PinVi 소비 API**
   - [~] `T-VN-41C`(#975 병합 / final exact-pair·prod consumer enable 잔여)
-  - [~] `T-VN-41F1D-E`(v5/v7 attestation 전환 — **저장소측 완료 2026-08-20**, live 실행은 배리어 대기)
+  - [~] `T-VN-41F1D-E`(v6/v8 attestation 전환 — **저장소측 갱신 중 2026-08-25**, live 실행은 배리어 대기)
   - **배리어**: [ ] `T-VN-FINAL-REBUILD`(주요 개발 완료 후 파괴적 재구축 — 사용자 결정 2026-08-20)
   - [~] `T-FE-MOCK-FLAKE`(`/v1/ops/logs` — mocked checkpoint 고정, n150 live GET-only 잔여)
   - [~] `T-VN-41F1D-D1` → [ ] `T-VN-41F1D-D2` → `T-VN-41C` receipt 승격
 - **Lane M — 수동 Feature 생성 (2026-08-18 결정)**
-  - [~] `T-VN-M01`(API·`0226` DB/ACL 병합, route 활성화·restore 잔여) → [~] `T-VN-M02`(provenance reader/fence 병합, purge·restore 잔여)
+  - [~] `T-VN-M01`(API·`0226` DB/ACL 병합, route 활성화 잔여) → [~] `T-VN-M02`(provenance reader/fence 병합, purge 잔여)
   - [~] `T-VN-M03`(curated 동시 생성 writer 병합, import/live acceptance 잔여) ∥ [~] `T-VN-M04`(범용 Feature 요청 큐 병합, paired consumer acceptance 잔여)
   - [~] `T-VN-M05`(provider 발행 시 중복 판정 — 자동 병합 금지, paired consumer reconciliation 설계 진행)
+- **Lane H — Alembic 세대 재정본화**
+  - [ ] `T-VN-H46H` — `0236_tvn41s_compaction_drained` 정본에서 생성한 `300` 단일 root baseline·fresh 재구축
 - **Lane C — 사문화 정리·미구현 dataset (다른 lane과 무관, 아무 때나)**
 - **최종 cutover**
   - [ ] `T-VN-39`
 - **보류/외부 추적**
   - [ ] `T-101` — Materialized View 도입 검토(조건 발생 시)
+
+### T-VN-H46H: Alembic `300` root baseline과 fresh application 재구축
+
+- [ ] T-VN-H46H — **현재 Map application schema를 `300` 단일 root baseline으로 재정본화**
+
+  `0236_tvn41s_compaction_drained`까지의 active migration은 실행 graph 밖의 byte-pinned
+  archive로 보존하고, 새 DB는 final role·membership·ACL bootstrap 뒤 `300` 하나만 적용한다.
+  source sidecar는 provider 적재·live fixture·acceptance 잔재가 전혀 없는 격리 fresh
+  `0236` 참조 DB에서만 생성한다. n150 DB, n150 backup clone, live acceptance DB를
+  생성 source로 사용하지 않는다.
+
+  n150을 포함한 기존 application DB를 `0236 → 300`으로 stamp하거나 in-place upgrade하지
+  않는다. Docker Manager의 승인된 `rebuild-pinned --confirm`이 exact candidate를 먼저
+  봉인한 뒤 application DB를 새로 만들고, final role bootstrap → restricted root `300` →
+  DB-atomic operation receipt → finalize·permit 순서로만 완성한다. 응답 유실은 같은 operation
+  ID의 append-only DB receipt를 read-only recover하고, receipt 부재와 exact pre-state가 함께
+  증명될 때만 같은 operation을 재실행한다. downgrade·이전 revision restore·수동 version-table
+  SQL은 범위 밖이다.
+
+  완료 조건은 Map baseline PR의 CI·두 전문 적대 리뷰·Docker Manager의 destructive fresh
+  candidate/journal/outbox 경로·n150 exact candidate 배포·로그인 POST를 포함한
+  live UI E2E·cleanup residue 0·redacted evidence다. 이 task는 Map PR이 실제 병합된
+  뒤에만 `tasks-done.md`로 이관하며, 데이터 재적재와 M01~M05의 독립 live 잔여를
+  완료 처리하지 않는다. `300` cutover 뒤 기존 application row의 데이터 무결성 검증은
+  완료 조건에 포함하지 않으며, 필요하면 새 schema에 원천 데이터를 처음부터 재적재한다.
+  이때 immutable catalog/seed receipt는 row 데이터의 정합성 증명이 아니라 fresh DB의
+  schema·role·ACL·extension과 필수 고정 seed 계약 및 operation replay 경계를 확인하는
+  bootstrap 증명으로만 유지한다. 설계 정본은
+  [`docs/reports/t-vn-h46h-alembic-300-baseline-design-2026-08-24.md`](reports/t-vn-h46h-alembic-300-baseline-design-2026-08-24.md)다.
 
 ## 공통 규율 (2026-07-28 개정)
 
@@ -75,15 +106,15 @@ barrier로 직렬화한다.
   (AGENTS.md), 그 아래 설계적 우수성 > 확장성 > 성능 > 불필요한 코드 반복(래퍼류) 금지.
   **prod 환경 보전·호환성·기존 문서 계약·최소 수정은 비제약** — 필요 시 DB 스키마·문서
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
-- migration 정본: 단일 head 유지. **2026-08-22 현재 migration/code baseline은
-  `fadc029c`(#1054 병합)이고 head는 `0236_tvn41s_compaction_drained`다.** #1055는
-  문서 전용 병합이므로 migration head와 code baseline을 바꾸지 않는다.
-  Map PR #1029(`57c9d99a`)는 이미 병합됐으며 `0226`(M01)→`0227`(M02)→`0228`(M03)→
-  `0233`(M04)→`0234`·`0235`(M05) 뒤에 `0236`이 직렬로 연결돼 있다.
-  prod 적용 head는 배포 직전 live DB에서 다시 확인한다. 후속 migration 소유자는
-  PR 직전 단일 head를 재확인한 뒤 번호를 배정한다. 두 lane의 migration-bearing PR은 번호 예약부터
-  머지까지 직렬화한다. forward migration 뒤에는 수용 조건이나 실패 복구가 명시적으로 요구하지 않는
-  한 downgrade/rollback하지 않고 fresh clone·새 transaction으로 다음 검증을 이어간다.
+- migration 정본: T-VN-H46H candidate의 active graph는 `300` single root이고 source
+  archive terminal revision은 `0236_tvn41s_compaction_drained`다. Map `main`은 PR #1064가
+  merge되기 전까지 기존 head를 유지한다. n150 application DB는 기존 head를 handoff하지 않고
+  approved Manager rebuild가 새 DB로 교체해 exact `300`만 적용한다. 배포 전에는 candidate의
+  active head·PostgreSQL image·paired receipt를 다시 확인한다.
+  후속 migration 소유자는 PR 직전 single active head를 확인하고 `300`의 child로 번호를
+  배정한다. 두 lane의 migration-bearing PR은 번호 예약부터 merge까지 직렬화한다.
+  forward migration 뒤에는 수용 조건이나 실패 복구가 명시적으로 요구하지 않는 한
+  downgrade/rollback하지 않고 fresh clone·새 transaction으로 다음 검증을 이어간다.
 - **리뷰어 수(사용자 지시 2026-07-31)**: 코드·runtime·API·DB·migration·보안 동작을
   바꾸는 PR은 적대 리뷰어 **1명**이 전체 누적 delta를 검토한다. 리뷰 뒤 새 일반 코드 변경이
   누적되면 같은 리뷰어가 재검토한다. 리뷰 지적의 국소 반영, 문서 전용 추가 commit,
@@ -432,22 +463,13 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   절차 정본은 `docs/backup-restore.md` §9(2026-08-05 신설 — n150 수동 기준선,
   TCP 경로 강제·manifest 필수 항목 `ops.public_api_keys` 포함).
 
-  - [x] 기준선 dump — `2026-08-05-h43-baseline.dump`(435MB, sha `717790c0…`,
-    manifest·`pg_restore -l` 검증) + 배포 직전 **write-fence rollback 기준점**
-    `2026-08-05-prefence-0082.dump`(sha `d367fbd1…`, write path 정지 후 생성 —
-    ADR-075 기준점 규칙 정합).
-  - [x] 배포 후 기준점 — `2026-08-05-h43-postdeploy-0083.dump`(489MB, 0083
-    적용·값 전환 배포 후, manifest: features/aliases/public 731,765 동수 ·
-    pair_mismatch 0 · orphan_alias 0)와 **dev box 외부 사본 1회 반출**
-    (`~/ktm-h43-external/`, sha256 대조 OK) — 오프박스 사본의 첫 실물.
+  완료된 기준선 dump·배포 후 기준점·외부 사본·신규 DB 프로비저닝 문서화는
+  `tasks-done.md`의 2026-08-25 정합성 이관 항목이 소유한다.
   - [보류] 정기화 — 보존 정책·주기 실행·2차 외부 사본 자동화는 **현 환경에서
     수행하지 않는다**. n150은 실 production이 아니며 손상 시 재적재가 정책이다
     (사용자 지시 2026-08-06). 복원 가능성 자체는 H44가 실증했으므로 열린
     리스크가 아니다. 실 prod 전환 시 manager **#148**(일 1회 dump+sha256+
     manifest·retention·오프박스 반출·배포 직전 fence dump)로 재개한다.
-  - [x] 신규 DB 프로비저닝 함정 참조 링크 — superuser 확장 4종 사전 생성
-    (manager #109 절차)을 restore 문서에서 링크한다.
-    **해소(2026-08-18)**: `docs/backup-restore.md` **§2.2**를 신설했다 — 빈 DB 재생성이 n150의 1차 복구 경로("손상 시 재적재가 정책")이므로 그 첫 단계인 superuser 확장 선생성 SQL을 넣고 #109를 링크했다. 그 이슈의 **본문은 이미지↔pin 사고**이고 절차는 2026-08-04 코멘트에 있어 본문만 보면 놓친다는 점, 원문 식별자(`krtour_map`)가 낡았다는 점도 적었다. GRANT grantee는 정본(`docker/postgres-role-bootstrap.sh:521-522`)에서 직접 읽어 `ktm_feature_state_procedure_owner, ktm_feature_runtime`으로 썼다 — 조사 초안은 `ktm_feature_migrator`로 틀렸다.
 
 ## 이슈 종결 추적
 
@@ -524,11 +546,8 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 
   lease/retry/dead-letter/replay가 있는 relay와 DB 대조 reconciliation을 추가한다. backfill checksum
   뒤 critical path 밖에서 PinVi 소비를 enable하고 누락·중복·restore epoch 전환을 live로 증명한다.
-  - [x] source PUT/DELETE·refresh create를 exact `cache-target:command`로 분리하고 기존 consumer umbrella를
-    clean cut 제거한다. command→consumer/snapshot/recovery와 consumer exact scope→command 양방향 `403` 회귀,
-    exact 4-role binding과 consumer ID 단일 canonical system owner 검증, public API key digest 분리,
-    17 operation의 machine-readable/runtime scope와 wrong-role zero-call 계약, service OpenAPI 재export를
-    완료한다.
+  완료된 command scope 분리, snapshot materialization, outbox ordering·GC, n150 GC 실측과 relay
+  종결성 회귀는 `tasks-done.md`의 2026-08-25 정합성 이관 항목이 소유한다.
   - [~] PinVi command writer가 CAS source GET과 refresh `Location` polling에서 consumer credential로
     전환하고, restore clone은 sync disabled 상태에서 immutable pre-CAS receipt를 써 응답 유실 exact replay까지
     완료한다. 동일 key의 병렬 `201`/`200`도 terminal payload·ETag가 같으면 한 durable receipt로 수렴한다.
@@ -574,47 +593,8 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
     service/full spec에 반영했고, PinVi #465 vendor 병합·적대 재리뷰·CI는 완료됐다. 새 exact pair의
     Docker-manager pinset과 n150 isolated evidence를 통과한 뒤에만 `candidate_verified` 승격과
     후속 reconciliation/cutover로 진행한다.
-  - [x] 일반 snapshot first page를 route transaction으로 durable commit하고 실제 만료 시각을 노출한다.
-  - [x] source-material watermark reuse와 75분 server handoff/1시간 client receipt gate를 구현한다.
-  - [x] stream share barrier와 snapshot 내부 exact material watermark로 lock-wait stale MVCC 누락을 막는다.
-  - [x] 모든 outbox writer transaction을 stream → head/target/link 잠금 순서로 직렬화해 system별 relay
-    cursor를 해당 stream의 commit-safe contiguous prefix로 만든다.
-  - [x] DB trigger가 stream lock 뒤 relay sequence를 배정해 raw/future writer에도 같은 순서를 강제한다.
-  - [x] barrier 5초 lock timeout/5분 statement timeout과 retryable `503`으로 hung writer를 bound한다.
-  - [x] server cursor의 per-FETCH timeout과 별도로 두 scan/모든 INSERT의 누적 5분 deadline을 두고
-    capture/persist 초과를 retryable `snapshot_build_timeout`으로 구분한다.
-  - [x] system별 미만료 generic snapshot을 2개로 제한하고 동적 `429 + Retry-After` admission을 구현한다.
-  - [x] 단일 snapshot 500,000 item/56 MiB 독립 ceiling과 초과 `413` fail-close로 process
-    memory와 canonical material 크기를 bound한다.
-  - [x] 만료·미참조 snapshot의 reader-safe foreground bounded GC를 구현한다.
-  - [x] 전역 mutex·system round-robin·batch commit·시간/statement/no-progress 예산을 가진 hourly
-    background GC와 exact 종료 backlog/total/unexpired/referenced metric을 구현한다.
-  - [x] acquired GC run별 referenced item/header count를 Map DB에 멱등 영속화하고 직전 적격 baseline
-    대비 시간당 증가율·보존 ceiling, 직전 acquired 대비 간격 무관 inventory loss 및 관측 불능을 Dagster metadata와
-    warning alert로 노출한다.
-  - [x] n150 격리 DB에서 migration → 수동 GC → schedule ON → 다음 tick 순서로 검증하고,
-    GC 처리량이 유입률을 상회하며 remaining backlog가 0인지 증명한다. referenced snapshot 증가율과
-    보존 임계치 alert도 함께 확인한다.
-    → 6개 축 전부 PASS. 처리량 65,214 items/s vs 유입 12,951 items/s, tick t+21초 생성·t+26초
-    SUCCESS, backlog 0/0, alert는 조인 임계치에서 발화·기본값에서 침묵.
-    실측 기록 `docs/reports/t-vn-41c-cache-target-gc-verification-2026-08-20.md`,
-    재실행 게이트 `scripts/verify-tvn41c-cache-target-gc.sh`(일회성 절차로 두지 않았다 —
-    스키마·GC 예산이 바뀌면 다시 돌려야 한다). Dagster storage DB는 애플리케이션 DB와
-    분리해야 한다(storage가 자기 alembic 계보를 같은 `public.alembic_version`에 stamp한다).
-  - [x] (#975 적대 재리뷰 P2) relay 종결성 보강 — PR #1026(merge `b2e9c43a`). 착수 전 조사에서
-    넷 다 미구현으로 확인됐고, (c)는 '향후 위험'이 아니라 이미 현재 위험이었다. typed reason
-    도입 + 억제/삼킴을 `epoch_moved`에만 한정, running 취소 전이에 relay event 추가, 생산자
-    모듈의 autouse truncate로 순서 의존 제거. 적대 리뷰 2명이 NO_GO를 냈고, 검증을 통과한
-    P1(내 변경이 `done`을 `failed`로 접던 것)과 공허했던 새 테스트를 고쳐 재검증했다.
-    원래 항목 서술: (a) run 중 source generation 변경으로 실패할 때
-    stale generation tuple에도 `failed` status event를 내는 것이 안전하다(`_append_result_event`는
-    generation을 검사하지 않음) → 억제 대신 emit; (b) running member의 operator cancel 전이
-    (`_TRANSITION_JOB_MEMBER_SQL`)에도 queued 경로처럼 savepoint-guarded status event append.
-    (c) 실패/취소 append의 violation 삼킴은 epoch precheck(또는 typed reason)로 gate해 향후
-    `_append_result_event`에 검사가 추가돼도 조용히 삼키지 않게. (d) 통합 suite 순서 의존
-    (`test_cache_target_stream_repo` commit 잔여 → `test_feature_update_repo`)은 main부터의 기존 문제.
   - [~] Map/PinVi exact head로 n150 isolated live UI recovery와 최종 prod gate를 통과한다.
-    **선행: `T-VN-FINAL-REBUILD`** — v5/v7 문서가 없으면 새 live runner가 읽을 attested
+    **선행: `T-VN-FINAL-REBUILD`** — 현 candidate의 v6/v8 문서가 없으면 새 live runner가 읽을 attested
     input 자체가 없다(사용자 결정 2026-08-20으로 주요 개발 완료 후로 미뤘다).
     후보 Live UI recovery와 `blocked → ready` stream/replay/reconciliation 결박은 통과했다. 최종 prod
     gate는 별도 final main C7·production consumer enable 경계이며, PinVi system별 snapshot concurrency 1,
@@ -644,7 +624,7 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   source/ETL을 새로 적재한다. 이전 C3의 pin·smoke는 새 schema acceptance 증거로 재사용하지
   않는다. Manager의 tracked Map source가 병합 SHA와 같고, Map API/UI/Dagster/daemon 및 PinVi
   API/Web/Dagster 일곱 image의 immutable ID·각 schema head·resolved compose/pinset/OpenAPI
-  provenance가 candidate에 attest되어야 한다. v5 active generation과 v7 journal만 실행
+  provenance가 candidate에 attest되어야 한다. v6 active generation과 v8 journal만 실행
   authority이며 이전 compatible-pair manifest를 재사용하지 않는다.
 
 - [ ] **T-VN-41F1D-D2 — data-dependent admin/PinVi live E2E** *(공동, docs-only)*
@@ -660,30 +640,31 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   image attestation이라 두 번 돌릴 값이 아니다. 반대로 D1은 curation read 경로와 무관하고
   "rebuild-from-scratch가 실제로 되는가"를 보증하므로 join barrier까지 비워두지 않는다.
 
-- [~] **T-VN-41F1D-E — v4 compatible-pair live runner 퇴역·v5/v7 attestation 전환**
+- [~] **T-VN-41F1D-E — 구 generation 퇴역·v6/v8 attestation 전환**
 
-  > 2026-08-20 — **저장소측(unit·script contract) 완료**. 남은 것은 F1D-D 순서를 따르는
+  > 2026-08-25 — **저장소측(unit·script contract) 완료**. 남은 것은 F1D-D 순서를 따르는
   > n150 data-dependent 실행뿐이다. `E2E_C7_COMPATIBLE_PAIR_MANIFEST`가
   > `E2E_C7_PINNED_RUNTIME_MANIFEST` + `E2E_C7_REBUILD_JOURNAL`로 바뀌었고, runtime role은
   > 다섯에서 **일곱**으로(PinVi web/dagster 추가), host attestation은 version 3 → 4로,
-  > 세 schema head와 pinset이 generation 값과 exact 대조된다. journal은 phase
-  > `committed` + candidate 전체 동등 + cancel probe `finalized`를 요구한다. v4를 억지로
+  > 세 schema head와 pinset이 generation 값과 exact 대조된다. 2026-08-25에는 Manager의
+  > manifest v6/journal v8에 맞춰 application `300` candidate evidence, application/Dagster
+  > DB identity, root/finalize result, application/metadata permit까지 exact 검증하도록 올렸다.
+  > 최종 보강에서는 PinVi DB의 PostgreSQL system identifier·name/OID·owner-login identity와 Dagster
+  > metadata LOGIN role의 connection limit·password expiry·role/database-local setting 잔여까지
+  > 같은 journal/permit field set으로 결박해 **세 DB identity**를 committed resume에서 재대조한다.
+  > journal은 phase `committed` + candidate 전체 동등 + cancel probe `finalized`를 요구한다. v4를 억지로
   > 넣어 통과하는 경로는 만들지 않았고, runner 계약 테스트가 v4 env 부재를 단언한다.
-  > 변이 8종(phase/candidate/cancel probe/schema head/journal digest/pinset/image 대조/
-  > manifest version)이 전부 red임을 실측했다. 실행 전제: v5/v7은
+  > 변이(phase/candidate/candidate evidence/DB identity/result/permit/cancel probe/schema
+  > head/journal digest/pinset/image 대조/manifest version)가 전부 red임을 실측했다. 실행 전제: v6/v8은
   > `require_rebuildable_mode`가 걸려 rehearsal/rebuildable에서만 생성된다(n150은 해당).
-  > **2026-08-20 정정**: 앞서 "n150에 두 파일이 없다"고 적었으나 틀렸다. `digitie` 홈만
-  > 봤고 실제로는 **root 홈**(`/root/.local/state/kor-travel-docker-manager/…`)에
-  > `pinned-runtime-generation-v5.json`·`pinned-runtime-rebuild-v7-93dd4ac0….json`이
-  > root:root `0600`으로 실재한다 — runner의 소유권 요구는 이미 만족한다. 다만 그
-  > generation은 `map_application_head=0087_route_area_subtypes`인 2026-08-06 리허설
-  > 세대라 현 prod head `0225`와 exact 대조에서 red다. **재사용할 수 없을 뿐 없는 것이
-  > 아니다.** 현 세대 문서는 D1의 파괴적 rebuild가 만든다.
+  > 과거 v5/v7 파일은 보존 이력일 뿐 current runner 입력이 아니며, 현 세대 v6/v8 문서는
+  > D1의 파괴적 rebuild가 새로 만든다.
 
   `run-c7-prod-live-e2e.sh`와 `run-admin-feature-live-acceptance.sh`가 요구하는 v4
-  `E2E_C7_COMPATIBLE_PAIR_MANIFEST`를 제거한다. root-owned snapshot은 v5
+  `E2E_C7_COMPATIBLE_PAIR_MANIFEST`를 제거한다. root-owned snapshot은 v6
   `PinnedRuntimeManifest.active_generation`, 일곱 immutable image·Map/PinVi revision·세 schema
-  head·pinset을 확인하고 v7 journal/host attestation과 함께 발행한다. v4 manifest를 억지 입력해
+  head·pinset·application `300` candidate evidence를 확인하고 v8 journal/host attestation과
+  함께 발행한다. v4/v5 manifest와 v7 journal을 억지 입력해
   통과하는 compatibility 경로는 만들지 않는다. final schema merge/재적재와 독립적으로 unit·script
   contract까지 완료하고, 실제 n150 data-dependent 실행은 위 F1D-D 순서를 따른다
   (그 순서는 `T-VN-FINAL-REBUILD` 배리어 뒤에 열린다).
@@ -697,11 +678,11 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 - [ ] **T-VN-FINAL-REBUILD — 파괴적 재구축 + 전량 재적재 배리어**
 
   `ktdctl pinvi-pair rebuild-pinned --confirm`은 Map application·Map Dagster·PinVi **세 DB를
-  파기형으로 재생성**하고 일곱 runtime을 고정 candidate로 재기동한 뒤 v5
-  `pinned-runtime-generation-v5.json`과 v7 `pinned-runtime-rebuild-v7-<pinset>.json`을 남긴다.
+  파기형으로 재생성**하고 일곱 runtime을 고정 candidate로 재기동한 뒤 v6
+  `pinned-runtime-generation-v6.json`과 v8 `pinned-runtime-rebuild-v8-<pinset>.json`을 남긴다.
   이어서 final schema 위로 provider source·ETL을 전량 재적재한다.
 
-  **왜 미루는가.** v5 generation은 Map/PinVi source revision과 일곱 image ID에 결박된다. 개발이
+  **왜 미루는가.** v6 generation은 Map/PinVi source revision과 일곱 image ID에 결박된다. 개발이
   계속되는 동안 실행하면 (a) 다음 머지 즉시 세대가 낡아 attestation 증거가 무효가 되고,
   (b) 전량 재적재 비용을 그때마다 다시 낸다. 이 acceptance는 두 번 돌릴 값이 아니다.
 
@@ -716,26 +697,20 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
     PinVi API/web/dagster). frontend·Dockerfile·의존 pin 변경 포함.
 
   **선행 준비.**
-  - [ ] 세 DB의 백업/복구점 확보. 파기형이므로 되돌리기는 백업뿐이다(`ktdctl db-backup create`).
   - [ ] n150 디스크 여유 — 일곱 image 재빌드 분. 2026-08-20 기준 101G free(78%)이고
     dangling volume 52GB·구 playwright image 약 43GB가 추가 회수 가능하다.
   - [ ] 고정 release candidate(Map/PinVi 커밋과 일곱 image)를 먼저 확정한다.
 
   **이 배리어가 푸는 것 (순서대로).**
-  1. **현 세대 기준의** v5/v7 문서가 생긴다. (2026-08-20 정정 — 앞선 "두 파일 모두 부재"는
-     틀렸다. `digitie` 홈만 봤고 실제로는 **root 홈**에 있다:
-     `/root/.local/state/kor-travel-docker-manager/kor-travel-docker-manager/`에
-     `pinned-runtime-generation-v5.json`과 `pinned-runtime-rebuild-v7-93dd4ac0….json`이
-     root:root `0600`으로 실재한다.) 다만 그 generation은
-     `map_application_head=0087_route_area_subtypes`인 2026-08-06 리허설 세대라 현 prod
-     head `0225`와 exact 대조에서 red다 — **재사용할 수 없을 뿐 없는 것이 아니다.**
+  1. **현 세대 기준의** v6/v8 문서가 생긴다. 구 v5/v7 문서는 퇴역 입력이며 현재
+     verifier에 사용할 수 없다.
   2. `T-VN-41F1D-D1` — 일곱 image·세 schema head·pinset attestation과 데이터 비의존 UI smoke.
   3. `T-VN-41F1D-E`의 n150 data-dependent 실행(저장소측 계약은 2026-08-20 완료).
   4. `T-VN-41F1D-D2` — 고정 ID를 요구하는 admin/PinVi mutating live E2E.
   5. `T-VN-41C` receipt `pending → candidate_verified` → 최종 prod gate·production
      consumer enable.
 
-  **실행 전제.** v5/v7은 `require_rebuildable_mode` 아래에서만 생성된다(n150은
+  **실행 전제.** v6/v8은 `require_rebuildable_mode` 아래에서만 생성된다(n150은
   `rehearsal`/`rebuildable`이라 해당). ktdm의 state root는 Manager owner 소유 `0700`이라
   runner가 요구하는 root 소유 `0600`을 그대로 만족하지 않으므로, 두 문서의 root 소유 사본을
   만들어 `E2E_C7_PINNED_RUNTIME_MANIFEST`/`E2E_C7_REBUILD_JOURNAL`로 넘긴다(runbook 참조).

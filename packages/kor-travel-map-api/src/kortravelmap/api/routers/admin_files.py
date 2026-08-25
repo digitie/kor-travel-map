@@ -550,8 +550,6 @@ async def rescan_files(
                     e2e_backup_ttl_days=(
                         core_settings.file_registry_e2e_backup_ttl_days
                     ),
-                    temp_ttl_days=core_settings.file_registry_temp_ttl_days,
-                    swap_env_file=settings.backup_root / ".env.restore-swap",
                     actor="scan:api:rescan",
                 )
             )

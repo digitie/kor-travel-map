@@ -1,0 +1,45 @@
+{
+  "schema": "kor-travel-map.application-baseline-reference.v1",
+  "source": {
+    "git_commit": "01d65b2ad4ee265a3ef6b01448f6abf573a906a8",
+    "raw_alembic_revision": "0236_tvn41s_compaction_drained",
+    "container_image": "postgis/postgis:16-3.5-alpine",
+    "container_image_id": "sha256:dc17b064a946f64804d3b15e2ce90d01a444c02c9226a28a54764c083bd81a0c",
+    "postgres_server_version_num": "160014",
+    "postgis_extension_version": "3.5.6"
+  },
+  "artifacts": {
+    "schema_sql_sha256": "adc023d0df9c0c27719cfa5003a71cf6551ee6a697ee40921222f8efb29143a8",
+    "seed_sql_sha256": "77173ed79a6451790b027be8d3a8010f9e42910004e8e2dacaaa6f0e8c165681",
+    "catalog_contract_sql_sha256": "8e9429a6bc89205f8d92542ea6398cc8bde79c55f5fbbff1e0bfe7b49f977bce",
+    "source_catalog_contract_sha256": "5d39c2b29c82740f7bc395f0e2aef63eb082d130a4e07e0088081e2997174162",
+    "source_catalog_contract_receipt_sha256": "467f3e8cee5402ec47eb59a86b768352047c2731b381683bd8347dd7f92b60cf",
+    "destination_catalog_contract_sha256": "e7fbf7e76a89db5a5ac6c305a1d23f7b15bbc353065b5cf53521d685f1358caf",
+    "destination_catalog_contract_receipt_sha256": "39c2f979c8805f881113e8f8408a5ed7c38417d964ec4aac4130a207d527fd33",
+    "seed_contract_sql_sha256": "f8e7bd767130af73aaf3dcea812e6c7af2896c9bf59878886a7aa6eca96cdb27",
+    "seed_contract_sha256": "ba5cb6e8d051a713912278b111514f74bbd3a2aef7a74b0500ce999146e0dafb",
+    "seed_contract_receipt_sha256": "a8dc197e035ae2bf75ea709274934512ebfd41d513905b29f2597e76318dccef",
+    "privileged_residue_contract_sql_sha256": "0b61e2e475241c3d4215a51d55c5c9323c75eda2b1da56ef2ea3dcc6294fb6cb",
+    "privileged_residue_contract_sha256": "baa8077f7c6427fc14ca30477f1febc0b81ba07478ef5031d893bbeae8942f71",
+    "privileged_residue_contract_receipt_sha256": "ca482bef39b0a68c413e0e3c94dc393c955c884017133a3fc39777bb5842663e",
+    "source_alembic_version_contract_sql_sha256": "a64b1221255c234f98ffec969c9085201403e2905c8c7d3b82a4b8a86080b87e",
+    "source_alembic_version_contract_sha256": "cb6598a5f474b641749efa843826635d7d0c0c9afa695967ae5b2157cead7939",
+    "source_alembic_version_contract_receipt_sha256": "23ea228533b37ef02d54dce755c634a789697d226012f3b2e2c2ba4aa75bba8e",
+    "destination_alembic_version_contract_sql_sha256": "52d1d76b0bc3c035be5630171cc4819233413bb1159830e36d6dbc829d2fc784",
+    "destination_alembic_version_contract_sha256": "72eac11772cdd5428a856188405bd36bedfed03fd47dbb4550fc94b3e2cde32c",
+    "destination_alembic_version_contract_receipt_sha256": "1c6fd221d84c1eb8b45b6465a0f50637b85f25d122e3b7698475f9c74c25a35e",
+    "runtime_invariants_sql_sha256": "2f77da06a61752fa5d2df9e3aa359d6e1689a6410805f92db92f0e4872cc8ad1"
+  },
+  "fresh_seed_relations": [
+    "feature.curated_source_rules",
+    "feature.curated_sources",
+    "feature.curated_themes",
+    "ops.feature_override_field_paths",
+    "provider_sync.provider_dataset_operation_scopes",
+    "provider_sync.provider_dataset_operations",
+    "provider_sync.provider_datasets"
+  ],
+  "static_seed_relations": [
+    "ops.feature_override_field_paths"
+  ]
+}

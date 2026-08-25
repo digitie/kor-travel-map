@@ -1,6 +1,6 @@
 """`scripts/compare-schema-catalogs.sh --self-test` — 오라클 자체를 CI에서 재증명한다.
 
-squash 동등성 증명의 오라클은 이 스크립트다(`alembic/versions/0200_schema_baseline.py`
+squash 동등성 증명의 오라클은 이 스크립트다(`alembic/versions/300_schema_baseline.py`
 docstring "동등성 증명"). 그런데 오라클은 CI 어디에도 걸려 있지 않았다 —
 `.github/workflows/` 다섯 파일 어느 것도 이 스크립트를 부르지 않는다. 누가 카탈로그
 축을 지우거나 namespace 필터를 좁히면, 다음 baseline 갱신은 **아무것도 보지 않는
@@ -10,7 +10,7 @@ docstring "동등성 증명"). 그런데 오라클은 CI 어디에도 걸려 있
 `--self-test`는 기준 DB를 두 벌 복제해 한쪽에만 알려진 변조를 주입하고 비교기가
 그것을 잡는지 본다. 대조는 **항상 자기 복제본끼리**이므로(스크립트 :170-183, :212-213)
 기준 DB가 어느 경로로 만들어졌는지는 정확성에 영향이 없다 — 아카이브가 된 체인이
-아니라 `alembic upgrade head`(=`0200`+`0201`)로 세워도 된다.
+아니라 `alembic upgrade head`(=`300`)로 세워도 된다.
 
 **다만 커버리지에는 영향이 있다.** 변조 SQL이 대상 DB에 적용되지 않으면 스크립트는
 `SKIP`만 찍고 `놓침`으로 세지 않는다(:214-217). 빈 DB를 기준으로 주면 13종 전부
@@ -116,14 +116,14 @@ async def _build_base_database(raw_dsn: str) -> None:
     from alembic.config import Config
 
     from kortravelmap.infra.db import normalize_async_dsn
-    from tests.integration._tvn34_migration_bootstrap import (
-        upgrade_head_with_tvn_m01_phase,
+    from tests.integration._application_300_bootstrap import (
+        upgrade_head_with_application_300_bootstrap,
     )
 
     base_dsn = normalize_async_dsn(_with_database(raw_dsn, _BASE_DB))
     cfg = Config(str(_ROOT / "alembic.ini"))
     cfg.set_main_option("script_location", str(_ROOT / "alembic"))
-    await upgrade_head_with_tvn_m01_phase(cfg, base_dsn)
+    await upgrade_head_with_application_300_bootstrap(cfg, base_dsn)
 
 
 def _run(command: list[str]) -> subprocess.CompletedProcess[str]:

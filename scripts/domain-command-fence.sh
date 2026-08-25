@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# backup/restore/swap host script의 공통 durable Docker effect fence 계약.
+# backup 생성 host script의 공통 durable Docker effect fence 계약.
 
 require_domain_command_effect_identity() {
   local name
@@ -14,7 +14,7 @@ require_domain_command_effect_identity() {
     KOR_TRAVEL_MAP_COMMAND_INPUT_DIGEST; do
     if [[ -z "${!name:-}" ]]; then
       echo "domain command effect identity가 없습니다: $name" >&2
-      echo "backup/restore/swap mutation은 admin REST command로만 실행하세요." >&2
+      echo "backup 생성은 admin REST command로만 실행하세요." >&2
       exit 2
     fi
   done

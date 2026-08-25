@@ -12,11 +12,7 @@ import {
 import { useRevokePublicApiKeyMutation } from "./adminSettings";
 import {
   useCreateBackupMutation,
-  useRestoreBackupMutation,
-  useRestoreSwapMutation,
   type BackupRunRequest,
-  type RestoreRunRequest,
-  type RestoreSwapRequest,
 } from "./backups";
 import {
 } from "./curated";
@@ -139,22 +135,6 @@ describe("admin domain idempotency consumers", () => {
         name: "backup create",
         run: () =>
           runMutation(context, useCreateBackupMutation, {} as BackupRunRequest),
-      },
-      {
-        name: "backup restore",
-        run: () =>
-          runMutation(context, useRestoreBackupMutation, {
-            backupId: "backup-1",
-            body: {} as RestoreRunRequest,
-          }),
-      },
-      {
-        name: "backup swap",
-        run: () =>
-          runMutation(context, useRestoreSwapMutation, {
-            backupId: "backup-1",
-            body: {} as RestoreSwapRequest,
-          }),
       },
       {
         name: "offline create",

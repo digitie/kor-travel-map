@@ -4,9 +4,7 @@
 import { type ColumnDef } from "@tanstack/react-table";
 import {
   ArchiveIcon,
-  PlayIcon,
   RefreshCwIcon,
-  RotateCcwIcon,
   XIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -17,11 +15,8 @@ import {
   type BackupRecord,
   useBackups,
   useCreateBackupMutation,
-  useRestoreBackupMutation,
-  useRestoreSwapMutation,
 } from "@/api/backups";
 import { AdminShell } from "@/components/admin-shell";
-import { useConfirm } from "@/components/confirm-dialog";
 import { DetailList, type DetailItem } from "@/components/detail-list";
 import { JsonViewer } from "@/components/json-viewer";
 import { SectionCard } from "@/components/section-card";
@@ -119,7 +114,7 @@ function BackupDetail({ backup }: { backup: BackupRecord | null }) {
   if (!backup) {
     return (
       <SectionCard
-        description="백업 행을 선택하면 manifest와 restore target을 확인합니다."
+        description="백업 행을 선택하면 manifest와 보존 범위를 확인합니다."
         headingLevel={2}
         title="선택 없음"
       >
@@ -168,7 +163,6 @@ function OperationResult({
   if (!result) {
     return null;
   }
-  const targets = result.data.restore_targets;
   return (
     <Alert>
       <AlertTitle>
@@ -176,17 +170,6 @@ function OperationResult({
       </AlertTitle>
       <AlertDescription>
         <p>{result.data.message}</p>
-        {targets ? (
-          <DetailList
-            className="mt-2"
-            items={[
-              { label: "app DB", value: targets.app_db, mono: true },
-              { label: "Dagster DB", value: targets.dagster_db, mono: true },
-              { label: "RustFS 볼륨", value: targets.rustfs_volume, mono: true },
-            ]}
-            layout="inline"
-          />
-        ) : null}
         {result.data.command ? (
           <JsonViewer
             aria-label="backup command"
@@ -223,19 +206,11 @@ function OperationResult({
 type BackupExecutionOptions = {
   backupId: string;
   executeBackup: boolean;
-  executeRestore: boolean;
-  recreateRestore: boolean;
-  executeSwap: boolean;
-  applySwap: boolean;
 };
 
 const DEFAULT_EXECUTION_OPTIONS: BackupExecutionOptions = {
   backupId: "",
   executeBackup: false,
-  executeRestore: false,
-  recreateRestore: false,
-  executeSwap: false,
-  applySwap: false,
 };
 
 function ExecutionOptionsPanel({
@@ -247,7 +222,7 @@ function ExecutionOptionsPanel({
 }) {
   return (
     <SectionCard
-      description="기본은 command plan만 생성합니다. 실행은 아래에서 명시적으로 켭니다."
+      description="기본은 command plan만 생성합니다. restore와 hot swap은 300 recovery 형식이 정의될 때까지 지원하지 않습니다."
       headingLevel={2}
       title="실행 옵션"
     >
@@ -264,44 +239,12 @@ function ExecutionOptionsPanel({
           label="백업 command 실행"
           onCheckedChange={(checked) => onChange({ executeBackup: checked })}
         />
-        <OptionToggle
-          checked={options.executeRestore}
-          label="restore command 실행"
-          onCheckedChange={(checked) => onChange({ executeRestore: checked })}
-        />
-        <OptionToggle
-          checked={options.recreateRestore}
-          hint="staging DB/볼륨을 지우고 다시 만든 뒤 복원합니다."
-          label="staging 대상 재생성"
-          onCheckedChange={(checked) => onChange({ recreateRestore: checked })}
-        />
-        <OptionToggle
-          checked={options.executeSwap}
-          label="swap command 실행"
-          onCheckedChange={(checked) => onChange({ executeSwap: checked })}
-        />
-        <OptionToggle
-          checked={options.applySwap}
-          hint="실행과 함께 켜면 운영 대상이 즉시 교체됩니다 — 확인 대화상자를 거칩니다."
-          label="swap 즉시 적용"
-          onCheckedChange={(checked) => onChange({ applySwap: checked })}
-        />
       </div>
     </SectionCard>
   );
 }
 
-function useBackupColumns({
-  restoreBackup,
-  swapRestore,
-  submitRestore,
-  submitSwap,
-}: {
-  restoreBackup: ReturnType<typeof useRestoreBackupMutation>;
-  swapRestore: ReturnType<typeof useRestoreSwapMutation>;
-  submitRestore: (backup: BackupRecord) => void;
-  submitSwap: (backup: BackupRecord) => void;
-}): ColumnDef<BackupRecord, unknown>[] {
+function useBackupColumns(): ColumnDef<BackupRecord, unknown>[] {
   return useMemo<ColumnDef<BackupRecord, unknown>[]>(
     () => [
       {
@@ -332,79 +275,17 @@ function useBackupColumns({
         meta: { align: "right" } satisfies DataTableColumnMeta,
         cell: ({ row }) => formatBytes(row.original.byte_size),
       },
-      {
-        id: "action",
-        header: "작업",
-        enableSorting: false,
-        meta: { align: "right" } satisfies DataTableColumnMeta,
-        cell: ({ row }) => {
-          const backup = row.original;
-          const restoring =
-            restoreBackup.isPending &&
-            restoreBackup.variables?.backupId === backup.backup_id;
-          const swapping =
-            swapRestore.isPending && swapRestore.variables?.backupId === backup.backup_id;
-          return (
-            <div className="flex flex-wrap justify-end gap-1">
-              <Button
-                disabled={restoreBackup.isPending}
-                disabledReason="다른 restore 요청을 처리하는 중입니다"
-                loading={restoring}
-                size="sm"
-                type="button"
-                variant="outline"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  submitRestore(backup);
-                }}
-              >
-                <RotateCcwIcon data-icon="inline-start" />
-                Restore
-              </Button>
-              <Button
-                disabled={swapRestore.isPending}
-                disabledReason="다른 swap 요청을 처리하는 중입니다"
-                loading={swapping}
-                size="sm"
-                type="button"
-                variant="ghost"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  submitSwap(backup);
-                }}
-              >
-                <PlayIcon data-icon="inline-start" />
-                Swap
-              </Button>
-            </div>
-          );
-        },
-      },
     ],
-    // 행의 Restore/Swap 버튼 onClick은 submitRestore/submitSwap을 통해 execute/recreate/
-    // apply 체크박스 state를 읽는다. 이 state들이 바뀔 때 컬럼을 재생성하지 않으면 onClick이
-    // 최초 렌더의 stale closure를 잡아 항상 execute:false를 보낸다(실행 옵션 무효 버그).
-    [
-      restoreBackup.isPending,
-      restoreBackup.variables?.backupId,
-      submitRestore,
-      submitSwap,
-      swapRestore.isPending,
-      swapRestore.variables?.backupId,
-    ],
+    [],
   );
 }
 
 export function BackupsClient() {
   const backups = useBackups();
   const createBackup = useCreateBackupMutation();
-  const restoreBackup = useRestoreBackupMutation();
-  const swapRestore = useRestoreSwapMutation();
-  const confirm = useConfirm();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [options, setOptions] = useState<BackupExecutionOptions>(DEFAULT_EXECUTION_OPTIONS);
-  const { applySwap, backupId, executeBackup, executeRestore, executeSwap, recreateRestore } =
-    options;
+  const { backupId, executeBackup } = options;
   const updateOptions = useCallback((patch: Partial<BackupExecutionOptions>) => {
     setOptions((prev) => ({ ...prev, ...patch }));
   }, []);
@@ -420,66 +301,7 @@ export function BackupsClient() {
     void backups.refetch();
   };
 
-  const submitRestore = useCallback(
-    (backup: BackupRecord) => {
-      restoreBackup.mutate(
-        {
-          backupId: backup.backup_id,
-          body: {
-            app_db: null,
-            dagster_db: null,
-            rustfs_volume: null,
-            recreate: recreateRestore,
-            skip_checksum: false,
-            skip_rustfs: false,
-            execute: executeRestore,
-          },
-        },
-        { onSuccess: setLastResult },
-      );
-    },
-    [executeRestore, recreateRestore, restoreBackup],
-  );
-
-  const submitSwap = useCallback(
-    (backup: BackupRecord) => {
-      const run = () =>
-        swapRestore.mutate(
-          {
-            backupId: backup.backup_id,
-            body: {
-              app_db: null,
-              dagster_db: null,
-              rustfs_volume: null,
-              apply: applySwap,
-              execute: executeSwap,
-              skip_verify: false,
-              note: null,
-            },
-          },
-          { onSuccess: setLastResult },
-        );
-      // 실행 + 즉시 적용만 비가역(운영 대상 교체) — plan/execute-only는 확인 없이 진행한다.
-      if (executeSwap && applySwap) {
-        void (async () => {
-          const ok = await confirm({
-            title: `${backup.backup_id} 백업으로 운영 대상을 교체할까요?`,
-            description:
-              "실행 즉시 staging 대상이 운영 대상으로 교체됩니다. 되돌리려면 이전 백업으로 다시 복원해야 합니다.",
-            confirmLabel: "교체 적용",
-            destructive: true,
-          });
-          if (!ok) return;
-          run();
-        })();
-        return;
-      }
-      run();
-    },
-    [applySwap, confirm, executeSwap, swapRestore],
-  );
-
-  const columns = useBackupColumns({ restoreBackup, swapRestore, submitRestore, submitSwap });
+  const columns = useBackupColumns();
 
   const submitBackup = () => {
     createBackup.mutate(
@@ -495,8 +317,6 @@ export function BackupsClient() {
   const errorLines = [
     backups.error ? `목록: ${backups.error.message}` : null,
     createBackup.error ? `백업: ${createBackup.error.message}` : null,
-    restoreBackup.error ? `restore: ${restoreBackup.error.message}` : null,
-    swapRestore.error ? `swap: ${swapRestore.error.message}` : null,
   ].filter((line): line is string => line !== null);
   const commandEnabled = backups.data?.data.command_enabled;
 
@@ -514,7 +334,7 @@ export function BackupsClient() {
           </Button>
         </>
       }
-      description="cold backup artifact와 staging restore command를 확인합니다."
+      description="cold backup artifact를 확인하고 필요한 백업 command를 실행합니다."
       meta={
         backups.data ? (
           <>
@@ -527,7 +347,7 @@ export function BackupsClient() {
       <div className="flex flex-col gap-6">
         {errorLines.length > 0 ? (
           <Alert variant="destructive">
-            <AlertTitle>backup/restore 요청 실패</AlertTitle>
+            <AlertTitle>백업 요청 실패</AlertTitle>
             <AlertDescription>
               {errorLines.map((line) => (
                 <p key={line}>{line}</p>

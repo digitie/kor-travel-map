@@ -70,20 +70,33 @@ ln -sfn /mnt/f/dev/kor-travel-map/data data
 uv venv
 uv pip install -e ".[dev,geo,providers]"
 
-# PostgreSQL + PostGIS
-docker compose up -d postgres
-# role/schema/extension bootstrap — squash(`0200`) 이후 **필수**다.
-# 체인의 `0001`이 스키마와 extension을 만들어 주던 시절과 달리, baseline은
-# 그것을 재현하지 않고 **전제로 검증만** 한다(없으면 fail-closed로 선다).
-docker compose run --rm db-role-bootstrap
-alembic upgrade head
+# PostgreSQL + PostGIS — workstation 기본 topology는 host network다.
+docker compose -f docker-compose.yml -f docker-compose.host.yml up -d postgres
+# virgin dedicated DB의 application role bootstrap→metadata DB/permit→restricted `300`
+# root migration 연속 one-shot — 한 번만 실행한다.
+# normal restart는 이 service를 실행하지 않는다. production API는 Docker Manager final permit
+# 없이는 blank DB를 upgrade하지 않으며, 기존 `0236` DB에는 controlled handoff만 허용한다.
+docker compose -f docker-compose.yml -f docker-compose.host.yml \
+  --profile fresh-init run --rm db-application-schema-fresh-300
 
-# API/admin/Dagster stack — scoped API env 필수, root cwd 직접 uvicorn 금지
+# Docker full stack은 local-dev profile만 사용한다. production은 Docker Manager가 소유한다.
+KOR_TRAVEL_MAP_API_PROFILE=local-dev docker compose \
+  -f docker-compose.yml -f docker-compose.host.yml \
+  -f docker-compose.local-dev.yml up -d
+
+# 선택적 loopback venv smoke — 먼저 위 Docker fresh/normal 경로로 두 DB와
+# Dagster storage migration을 준비해야 하며 이 명령 자체는 DB를 만들거나 migrate하지 않는다.
+# scoped API env 필수, root cwd 직접 uvicorn 금지
 uv pip install -e packages/kor-travel-map-api
 cp .env.example .env
 cp packages/kor-travel-map-api/.env.example packages/kor-travel-map-api/.env
 npm run admin:stack
 ```
+
+위 fresh/normal 명령은 기본 host topology다. bridge를 선택할 때만
+`KOR_TRAVEL_MAP_DOCKER_NETWORK=bridge`를 명시하고 모든 DB DSN authority를
+`postgres:5432`로 맞춘 뒤 `docker-compose.host.yml`을 제외한다. 두 topology의 DSN을
+한 credential bundle에 섞으면 writer 실행 전에 거부된다.
 
 Admin frontend는 WSL Node/npm으로 실행한다. Windows Node/npm은 사용하지 않는다.
 

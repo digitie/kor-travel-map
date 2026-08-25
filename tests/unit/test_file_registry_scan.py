@@ -16,7 +16,6 @@ from kortravelmap.infra.file_registry_scan import (
     _enumerate_extra_root,
     _is_e2e_backup,
     _stat_mois_source,
-    _stat_temp_file,
     parse_extra_roots,
 )
 
@@ -78,22 +77,6 @@ def test_is_e2e_backup_by_prefix() -> None:
 def test_is_e2e_backup_false_for_regular() -> None:
     artifact = SimpleNamespace(mode="manual", backup_id="20260704-full")
     assert _is_e2e_backup(artifact) is False
-
-
-def test_stat_temp_file_returns_size_and_mtime(tmp_path: Path) -> None:
-    f = tmp_path / "swap.env"
-    f.write_bytes(b"KEY=value\n")
-    stat = _stat_temp_file(f)
-    assert stat is not None
-    size, mtime = stat
-    assert size == len(b"KEY=value\n")
-    assert mtime.tzinfo is not None
-
-
-def test_stat_temp_file_none_for_missing_or_dir(tmp_path: Path) -> None:
-    assert _stat_temp_file(tmp_path / "nope.env") is None
-    # 디렉터리는 파일이 아니므로 None.
-    assert _stat_temp_file(tmp_path) is None
 
 
 def test_stat_mois_source_collects_existing_sidecars(tmp_path: Path) -> None:

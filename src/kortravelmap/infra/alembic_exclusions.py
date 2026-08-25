@@ -17,6 +17,9 @@ UNMAPPED_APP_TABLES = frozenset(
         ("ops", "api_call_log"),
         ("ops", "public_api_keys"),
         ("ops", "admin_auth_events"),
+        # application root/finalize one-shot의 DB-atomic immutable outbox.
+        # ORM entity가 아니며 migration/recovery executable만 exact operation ID로 읽는다.
+        ("ops", "application_schema_operation_receipts"),
         ("ops", "ops_live_ticket_claims"),
         ("ops", "ops_live_topic_revisions"),
         # 0103이 legacy whole-row freeze replay의 fail-closed preflight 결과를
