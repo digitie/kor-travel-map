@@ -105,12 +105,14 @@ async def _write_fence(
     payload = {
         "schema": "kor-travel-docker-manager.map-fresh-300-finalize-fence.v3",
         "transaction_id": str(uuid4()),
+        "operation_id": str(uuid4()),
         "journal_sha256": "c" * 64,
         "journal_generation": 2,
         "operation": "map-fresh-300-finalize",
         "prior_fresh_migration_result_sha256": "d" * 64,
         "prior_fresh_migration_fence_sha256": "e" * 64,
         "prior_fresh_migration_transaction_id": str(uuid4()),
+        "prior_fresh_migration_operation_id": str(uuid4()),
         "prior_fresh_migration_journal_sha256": "f" * 64,
         "prior_fresh_migration_generation": 1,
         "map_candidate_commit": "a" * 40,
@@ -185,7 +187,7 @@ async def test_fresh_finalize_retries_only_fixed_raw_300_completion_after_late_a
         expected: object,
         *,
         expected_catalog_sha256: str,
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, str]:
         nonlocal receipt_calls
         receipt_calls += 1
         if receipt_calls == 2:
@@ -212,3 +214,8 @@ async def test_fresh_finalize_retries_only_fixed_raw_300_completion_after_late_a
     monkeypatch.setattr(module, "_assert_raw_300_and_receipts", original_receipts)
     assert await module.async_main(command) == 0
     assert await _raw_version(admin_dsn) == ("300",)
+    finalized = json.loads(capsys.readouterr().out)
+    assert await module.async_main(
+        ["recover", "--operation-id", finalized["operation_id"]]
+    ) == 0
+    assert json.loads(capsys.readouterr().out) == finalized

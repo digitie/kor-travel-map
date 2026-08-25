@@ -1,5 +1,39 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-25 — T-VN-H46H application `300` crash-resume outbox 보강 (Draft)
+
+PR #1065 merge `af719112` 위로 PR #1064의 19개 커밋을 rebase하고, Dagster storage
+identity preflight 때문에 Python 3.12에서 먼저 중단되던 오래된 테스트 fixture를 actual
+identity 경계에 맞췄다. 이어 적대 리뷰에서 API candidate receipt 발행 뒤 paired receipt 전에
+중단되면 같은 pinset을 재개할 수 없는 P1을 확인했다. paired builder는 이제 API-only partial
+상태를 strict `O_NOFOLLOW`·owner `0600`·`nlink=1`·stable inode/metadata·canonical JSON
+snapshot으로 검증한 뒤 Dagster 단계부터 재개한다. paired receipt 발행도 operator-only `0700`
+parent에서 atomic no-replace하고 post-publish bytes를 다시 대조한다. 수정 checkpoint
+`3547431a`는 원격에 push했고, 원 리뷰어 재검토는 P0/P1 없이 GO였다.
+
+DB mutation 응답 유실은 stdout만으로 복구하지 않는다. fresh root result v2와 finalize result
+v4는 Manager plan의 별도 `operation_id`를 기본키로 삼아 application DB transaction과 같은
+transaction에서 `ops.application_schema_operation_receipts` append-only row를 확정한다. 두
+operation은 같은 advisory lock namespace를 쓰며, `recover --operation-id`는 candidate/image,
+writer fence, journal, DB identity, full catalog·seed·Alembic facet을 read-only로 다시 대조한 뒤
+원 canonical result만 돌려준다. finalize는 prior root operation ID도 결박한다.
+
+Dagster storage permit/result는 v2로 올렸다. dedicated metadata DB의 immutable intent와 receipt가
+missing/old/final head를 구분하므로 실행 전 crash는 같은 migration을 재개하고, final head commit
+뒤 응답 유실은 writer 재호출 없이 receipt를 완성한다. permit은 canonical operation UUID,
+`LOGIN NOINHERIT`, exact DB identity와 paired candidate/config digest를 결박하며 foreign lookalike
+outbox catalog는 거부한다.
+
+- paired builder 회귀: `16 passed`, 원 적대 재리뷰 GO
+- Dagster command package 회귀: `8 passed`
+- Dagster/Compose targeted unit: `30 passed`
+- 실제 PostgreSQL: root receipt/recover/immutability, finalize rollback·success·recover,
+  baseline structural contract 통과
+- 관련 Ruff, shell syntax, baseline digest, `git diff --check`: 통과
+
+아직 Docker Manager의 새 wire 소비·fence renewal, 새 commit 기준 paired image 실제 build,
+누적 전문 적대 재리뷰, CI green, n150 배포와 live UI E2E가 남아 있으므로 PR은 Draft로 유지한다.
+
 ## 2026-08-25 — T-VN-M04 Admin BFF 결정 자격 결선 보완 (Draft)
 
 격리된 PinVi→Map M04 실제 브라우저 승인에서 PinVi의 queue receipt는 정상으로

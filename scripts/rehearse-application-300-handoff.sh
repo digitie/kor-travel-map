@@ -421,11 +421,16 @@ if (
         "/usr/local/bin/dagster-daemon", "run", "-m", "kortravelmap.dagster.definitions",
     ]
     or launch["metadata_database_identity_permit"] != {
-        "schema": "kor-travel-map.dagster-storage-database-permit.v1",
+        "schema": "kor-travel-map.dagster-storage-database-permit.v2",
         "path": "/run/kor-travel-map-dagster-storage-permit/permit.json",
         "production_authority": "docker-manager",
         "canonical_dagster_home": "/opt/dagster/dagster_home",
         "canonical_storage_env": "KOR_TRAVEL_MAP_DAGSTER_PG_URL",
+        "operation_id_binding": {
+            "field": "operation_id",
+            "format": "canonical-lowercase-uuid",
+            "authority": "docker-manager-durable-journal",
+        },
         "candidate_binding_fields": [
             "dagster_image_id", "paired_candidate_build_receipt_sha256",
             "dagster_config_sha256",
@@ -437,6 +442,8 @@ if (
         ],
         "required_login_role_attributes": {
             "superuser": False,
+            "can_login": True,
+            "inherit": False,
             "create_database": False,
             "create_role": False,
             "replication": False,

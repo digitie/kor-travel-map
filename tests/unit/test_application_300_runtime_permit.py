@@ -345,7 +345,7 @@ def test_fresh_migration_accepts_only_fixed_one_shot_operation(
 
     monkeypatch.setenv("KOR_TRAVEL_MAP_APPLICATION_SCHEMA_PROFILE", "local-dev")
     module._parse_args(["migrate"])
-    with pytest.raises(module.FreshMigrationError, match="profile-fixed `migrate`"):
+    with pytest.raises(module.FreshMigrationError, match="profile-fixed migrate/recover"):
         module._parse_args(["repair"])
     monkeypatch.setenv("KOR_TRAVEL_MAP_APPLICATION_SCHEMA_PROFILE", "production")
     module._parse_args(
@@ -355,7 +355,7 @@ def test_fresh_migration_accepts_only_fixed_one_shot_operation(
             "/run/kor-travel-map-application-fresh-migrate/fence.json",
         ]
     )
-    with pytest.raises(module.FreshMigrationError, match="profile-fixed `migrate`"):
+    with pytest.raises(module.FreshMigrationError, match="profile-fixed migrate/recover"):
         module._parse_args(["migrate"])
 
     source = (_ROOT / "docker/application-schema-fresh-300.py").read_text(encoding="utf-8")
@@ -444,9 +444,26 @@ def test_fresh_migration_rechecks_manager_fence_before_root_mutation(
     async def _virgin(_: str) -> None:
         return None
 
+    async def _noop_lock(_: object) -> None:
+        return None
+
     def _unexpected_upgrade(*_: object) -> None:
         nonlocal upgraded
         upgraded = True
+
+    class _Transaction:
+        async def __aenter__(self) -> object:
+            return object()
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+    class _Engine:
+        def begin(self) -> _Transaction:
+            return _Transaction()
+
+        async def dispose(self) -> None:
+            return None
 
     monkeypatch.setenv("KOR_TRAVEL_MAP_APPLICATION_SCHEMA_PROFILE", "production")
     monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", "postgresql+asyncpg://unused")
@@ -456,7 +473,9 @@ def test_fresh_migration_rechecks_manager_fence_before_root_mutation(
     monkeypatch.setattr(module, "_static_contract", lambda: contract)
     monkeypatch.setattr(module, "_require_fixed_fence", _fence_once_then_expired)
     monkeypatch.setattr(module, "_verify_fence_candidate", lambda *_: None)
+    monkeypatch.setattr(module, "make_async_engine", lambda *_args, **_kwargs: _Engine())
     monkeypatch.setattr(module, "_assert_restricted_migrator_session", _restricted)
+    monkeypatch.setattr(module, "_acquire_operation_lock", _noop_lock)
     monkeypatch.setattr(module, "_assert_virgin_version_table", _virgin)
     monkeypatch.setattr(module.command, "upgrade", _unexpected_upgrade)
 
@@ -551,8 +570,11 @@ def test_fresh_finalize_rechecks_live_fence_immediately_before_acl_mutation(
         __: object,
         *,
         expected_catalog_sha256: str,
-    ) -> tuple[str, str]:
-        return expected_catalog_sha256, "4" * 64
+    ) -> tuple[str, str, str]:
+        return expected_catalog_sha256, "f" * 64, "4" * 64
+
+    async def _noop_lock(_: object) -> None:
+        return None
 
     async def _unexpected_reconcile(_: object) -> None:
         nonlocal reconciled
@@ -576,6 +598,7 @@ def test_fresh_finalize_rechecks_live_fence_immediately_before_acl_mutation(
     monkeypatch.setattr(module, "_static_contract", lambda: contract)
     monkeypatch.setattr(module, "make_async_engine", lambda *_args, **_kwargs: _Engine())
     monkeypatch.setattr(module, "_assert_restricted_migrator_and_database", _noop_restricted)
+    monkeypatch.setattr(module, "_acquire_operation_lock", _noop_lock)
     monkeypatch.setattr(module, "_assert_raw_300_and_receipts", _noop_receipts)
     monkeypatch.setattr(
         module,

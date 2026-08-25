@@ -119,10 +119,16 @@ def test_paired_builder_seals_both_images_and_one_dagster_launch_image() -> None
     assert '["/usr/local/bin/ktm-dagster-storage", "migrate"]' in script
     assert '"metadata_database_identity_permit": {' in script
     assert '"production_authority": "docker-manager"' in script
+    assert '"schema": "kor-travel-map.dagster-storage-database-permit.v2"' in script
+    assert '"operation_id_binding": {' in script
+    assert '"format": "canonical-lowercase-uuid"' in script
+    assert '"authority": "docker-manager-durable-journal"' in script
     assert '"forbidden_application_raw_revision": "300"' in script
     assert '"dagster_config_receipt_field": "candidate_dagster_yaml_sha256"' in script
     assert '"login_role_attributes"' in script
     assert '"required_login_role_attributes": {' in script
+    assert '"can_login": True' in script
+    assert '"inherit": False' in script
     assert '"requires_owner_login_and_effective_role_equality": True' in script
     assert '"candidate_commit"' in script
     assert '"candidate_git_tree"' in script

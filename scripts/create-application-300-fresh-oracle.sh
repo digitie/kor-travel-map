@@ -935,9 +935,12 @@ reference_raw = Path(sys.argv[1]).read_bytes()
 reference = json.loads(reference_raw)
 artifacts = reference["artifacts"]
 transaction_id = str(uuid4())
+operation_id = str(uuid4())
 journal_preimage = (
     "kor-travel-map.fresh-oracle-manager-generation.v1\0"
     + transaction_id
+    + "\0"
+    + operation_id
     + "\0"
     + sys.argv[2]
     + "\0"
@@ -950,6 +953,7 @@ journal_preimage = (
 value = {
     "schema": "kor-travel-docker-manager.map-fresh-300-migrate-fence.v2",
     "transaction_id": transaction_id,
+    "operation_id": operation_id,
     "journal_sha256": hashlib.sha256(journal_preimage.encode("utf-8")).hexdigest(),
     "journal_generation": 1,
     "operation": "map-fresh-300",
@@ -993,7 +997,9 @@ docker run --pull=never --rm --network "container:$CONTAINER" \
 fresh_migration_result_sha256="$(sha256sum "$fresh_migration_result_file" | awk '{print $1}')"
 fresh_migration_evidence="$(python3 - "$fresh_migration_result_file" "$CANDIDATE_COMMIT" \
   "$candidate_image_id" "$manifest_sha256" "$DATABASE" "$database_oid" \
-  "$database_owner" "$system_identifier" <<'PY'
+  "$database_owner" "$system_identifier" "$postgis_image_id" \
+  "$expected_source_catalog_sha256" "$expected_seed_sha256" \
+  "$expected_privileged_residue_sha256" <<'PY'
 import json
 import re
 import sys
@@ -1007,12 +1013,13 @@ except (UnicodeDecodeError, json.JSONDecodeError) as exc:
 if raw != (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode():
     raise SystemExit("fresh migration result is not one canonical JSON line")
 expected = {
-    "schema": "kor-travel-map.application-fresh-300-root.v1",
+    "schema": "kor-travel-map.application-fresh-300-root.v2",
     "outcome": "root-committed",
     "authorization": "manager-fence",
     "destination_head": "300",
     "map_candidate_commit": sys.argv[2],
     "map_candidate_image_id": sys.argv[3],
+    "postgres_image_id": sys.argv[9],
     "reference_manifest_sha256": sys.argv[4],
     "database_identity": {
         "database_name": sys.argv[5],
@@ -1020,6 +1027,9 @@ expected = {
         "database_owner": sys.argv[7],
         "postgres_system_identifier": sys.argv[8],
     },
+    "post_source_catalog_sha256": sys.argv[10],
+    "post_seed_sha256": sys.argv[11],
+    "expected_privileged_residue_sha256": sys.argv[12],
 }
 if not isinstance(value, dict) or any(value.get(key) != item for key, item in expected.items()):
     raise SystemExit("fresh migration result candidate/database binding drifted")
@@ -1030,10 +1040,18 @@ for key in (
 ):
     if not isinstance(value.get(key), str) or not re.fullmatch(r"[0-9a-f]{64}", value[key]):
         raise SystemExit(f"fresh migration result digest is invalid: {key}")
+try:
+    from uuid import UUID
+
+    operation_id = UUID(value["operation_id"])
+    transaction_id = UUID(value["writer_fence_transaction_id"])
+except (KeyError, TypeError, ValueError) as exc:
+    raise SystemExit("fresh migration result operation identity is invalid") from exc
 if (
-    value["expected_destination_alembic_version_sha256"]
+    value["operation_id"] != str(operation_id)
+    or value["writer_fence_transaction_id"] != str(transaction_id)
+    or value["expected_destination_alembic_version_sha256"]
     != value["post_destination_alembic_version_sha256"]
-    or not isinstance(value.get("writer_fence_transaction_id"), str)
     or value.get("journal_generation") != 1
 ):
     raise SystemExit("fresh migration result generation/facet evidence is invalid")
@@ -1153,6 +1171,7 @@ reference = json.loads(reference_raw)
 artifacts = reference["artifacts"]
 prior = json.loads(sys.argv[11])
 transaction_id = str(uuid4())
+operation_id = str(uuid4())
 journal_preimage = (
     "kor-travel-map.fresh-oracle-finalize-generation.v1\0"
     + prior["journal_sha256"]
@@ -1160,16 +1179,20 @@ journal_preimage = (
     + sys.argv[10]
     + "\0"
     + transaction_id
+    + "\0"
+    + operation_id
 )
 value = {
     "schema": "kor-travel-docker-manager.map-fresh-300-finalize-fence.v3",
     "transaction_id": transaction_id,
+    "operation_id": operation_id,
     "journal_sha256": hashlib.sha256(journal_preimage.encode("utf-8")).hexdigest(),
     "journal_generation": 2,
     "operation": "map-fresh-300-finalize",
     "prior_fresh_migration_result_sha256": sys.argv[10],
     "prior_fresh_migration_fence_sha256": prior["writer_fence_receipt_sha256"],
     "prior_fresh_migration_transaction_id": prior["writer_fence_transaction_id"],
+    "prior_fresh_migration_operation_id": prior["operation_id"],
     "prior_fresh_migration_journal_sha256": prior["journal_sha256"],
     "prior_fresh_migration_generation": prior["journal_generation"],
     "map_candidate_commit": sys.argv[2],
@@ -1211,7 +1234,8 @@ fresh_finalize_evidence="$(python3 - "$fresh_finalize_result_file" "$CANDIDATE_C
   "$candidate_image_id" "$manifest_sha256" "$fresh_migration_result_sha256" \
   "$fresh_migration_evidence" "$expected_source_catalog_sha256" \
   "$expected_destination_catalog_sha256" \
-  "$expected_destination_alembic_version_sha256" <<'PY'
+  "$expected_destination_alembic_version_sha256" "$postgis_image_id" \
+  "$expected_seed_sha256" "$expected_privileged_residue_sha256" <<'PY'
 import json
 import re
 import sys
@@ -1223,29 +1247,42 @@ prior = json.loads(sys.argv[6])
 if raw != (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode():
     raise SystemExit("fresh finalize result is not one canonical JSON line")
 expected = {
-    "schema": "kor-travel-map.application-fresh-300-finalize.v3",
+    "schema": "kor-travel-map.application-fresh-300-finalize.v4",
     "outcome": "finalized",
     "destination_head": "300",
     "map_candidate_commit": sys.argv[2],
     "map_candidate_image_id": sys.argv[3],
+    "postgres_image_id": sys.argv[10],
     "reference_manifest_sha256": sys.argv[4],
     "journal_generation": 2,
     "prior_fresh_migration_result_sha256": sys.argv[5],
     "prior_fresh_migration_fence_sha256": prior["writer_fence_receipt_sha256"],
     "prior_fresh_migration_transaction_id": prior["writer_fence_transaction_id"],
+    "prior_fresh_migration_operation_id": prior["operation_id"],
     "prior_fresh_migration_journal_sha256": prior["journal_sha256"],
     "prior_fresh_migration_generation": prior["journal_generation"],
     "pre_source_catalog_sha256": sys.argv[7],
+    "pre_seed_sha256": sys.argv[11],
     "post_destination_catalog_sha256": sys.argv[8],
+    "post_seed_sha256": sys.argv[11],
+    "expected_privileged_residue_sha256": sys.argv[12],
     "post_destination_alembic_version_sha256": sys.argv[9],
+    "database_identity": prior["database_identity"],
 }
 if not isinstance(value, dict) or any(value.get(key) != item for key, item in expected.items()):
     raise SystemExit("fresh finalize result lineage binding drifted")
 for key in ("writer_fence_receipt_sha256", "journal_sha256"):
     if not isinstance(value.get(key), str) or not re.fullmatch(r"[0-9a-f]{64}", value[key]):
         raise SystemExit(f"fresh finalize result digest is invalid: {key}")
-if not isinstance(value.get("writer_fence_transaction_id"), str):
-    raise SystemExit("fresh finalize result transaction is invalid")
+try:
+    from uuid import UUID
+
+    operation_id = UUID(value["operation_id"])
+    transaction_id = UUID(value["writer_fence_transaction_id"])
+except (KeyError, TypeError, ValueError) as exc:
+    raise SystemExit("fresh finalize result operation identity is invalid") from exc
+if value["operation_id"] != str(operation_id) or value["writer_fence_transaction_id"] != str(transaction_id):
+    raise SystemExit("fresh finalize result operation identity is not canonical")
 print(json.dumps(value, sort_keys=True, separators=(",", ":")))
 PY
 )"

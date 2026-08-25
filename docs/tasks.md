@@ -457,22 +457,13 @@ H24가 stable component 기반 미연결 membership으로 무손실 보존하므
   절차 정본은 `docs/backup-restore.md` §9(2026-08-05 신설 — n150 수동 기준선,
   TCP 경로 강제·manifest 필수 항목 `ops.public_api_keys` 포함).
 
-  - [x] 기준선 dump — `2026-08-05-h43-baseline.dump`(435MB, sha `717790c0…`,
-    manifest·`pg_restore -l` 검증) + 배포 직전 **write-fence rollback 기준점**
-    `2026-08-05-prefence-0082.dump`(sha `d367fbd1…`, write path 정지 후 생성 —
-    ADR-075 기준점 규칙 정합).
-  - [x] 배포 후 기준점 — `2026-08-05-h43-postdeploy-0083.dump`(489MB, 0083
-    적용·값 전환 배포 후, manifest: features/aliases/public 731,765 동수 ·
-    pair_mismatch 0 · orphan_alias 0)와 **dev box 외부 사본 1회 반출**
-    (`~/ktm-h43-external/`, sha256 대조 OK) — 오프박스 사본의 첫 실물.
+  완료된 기준선 dump·배포 후 기준점·외부 사본·신규 DB 프로비저닝 문서화는
+  `tasks-done.md`의 2026-08-25 정합성 이관 항목이 소유한다.
   - [보류] 정기화 — 보존 정책·주기 실행·2차 외부 사본 자동화는 **현 환경에서
     수행하지 않는다**. n150은 실 production이 아니며 손상 시 재적재가 정책이다
     (사용자 지시 2026-08-06). 복원 가능성 자체는 H44가 실증했으므로 열린
     리스크가 아니다. 실 prod 전환 시 manager **#148**(일 1회 dump+sha256+
     manifest·retention·오프박스 반출·배포 직전 fence dump)로 재개한다.
-  - [x] 신규 DB 프로비저닝 함정 참조 링크 — superuser 확장 4종 사전 생성
-    (manager #109 절차)을 restore 문서에서 링크한다.
-    **해소(2026-08-18)**: `docs/backup-restore.md` **§2.2**를 신설했다 — 빈 DB 재생성이 n150의 1차 복구 경로("손상 시 재적재가 정책")이므로 그 첫 단계인 superuser 확장 선생성 SQL을 넣고 #109를 링크했다. 그 이슈의 **본문은 이미지↔pin 사고**이고 절차는 2026-08-04 코멘트에 있어 본문만 보면 놓친다는 점, 원문 식별자(`krtour_map`)가 낡았다는 점도 적었다. GRANT grantee는 정본(`docker/postgres-role-bootstrap.sh:521-522`)에서 직접 읽어 `ktm_feature_state_procedure_owner, ktm_feature_runtime`으로 썼다 — 조사 초안은 `ktm_feature_migrator`로 틀렸다.
 
 ## 이슈 종결 추적
 
@@ -549,11 +540,8 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
 
   lease/retry/dead-letter/replay가 있는 relay와 DB 대조 reconciliation을 추가한다. backfill checksum
   뒤 critical path 밖에서 PinVi 소비를 enable하고 누락·중복·restore epoch 전환을 live로 증명한다.
-  - [x] source PUT/DELETE·refresh create를 exact `cache-target:command`로 분리하고 기존 consumer umbrella를
-    clean cut 제거한다. command→consumer/snapshot/recovery와 consumer exact scope→command 양방향 `403` 회귀,
-    exact 4-role binding과 consumer ID 단일 canonical system owner 검증, public API key digest 분리,
-    17 operation의 machine-readable/runtime scope와 wrong-role zero-call 계약, service OpenAPI 재export를
-    완료한다.
+  완료된 command scope 분리, snapshot materialization, outbox ordering·GC, n150 GC 실측과 relay
+  종결성 회귀는 `tasks-done.md`의 2026-08-25 정합성 이관 항목이 소유한다.
   - [~] PinVi command writer가 CAS source GET과 refresh `Location` polling에서 consumer credential로
     전환하고, restore clone은 sync disabled 상태에서 immutable pre-CAS receipt를 써 응답 유실 exact replay까지
     완료한다. 동일 key의 병렬 `201`/`200`도 terminal payload·ETag가 같으면 한 durable receipt로 수렴한다.
@@ -599,45 +587,6 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
     service/full spec에 반영했고, PinVi #465 vendor 병합·적대 재리뷰·CI는 완료됐다. 새 exact pair의
     Docker-manager pinset과 n150 isolated evidence를 통과한 뒤에만 `candidate_verified` 승격과
     후속 reconciliation/cutover로 진행한다.
-  - [x] 일반 snapshot first page를 route transaction으로 durable commit하고 실제 만료 시각을 노출한다.
-  - [x] source-material watermark reuse와 75분 server handoff/1시간 client receipt gate를 구현한다.
-  - [x] stream share barrier와 snapshot 내부 exact material watermark로 lock-wait stale MVCC 누락을 막는다.
-  - [x] 모든 outbox writer transaction을 stream → head/target/link 잠금 순서로 직렬화해 system별 relay
-    cursor를 해당 stream의 commit-safe contiguous prefix로 만든다.
-  - [x] DB trigger가 stream lock 뒤 relay sequence를 배정해 raw/future writer에도 같은 순서를 강제한다.
-  - [x] barrier 5초 lock timeout/5분 statement timeout과 retryable `503`으로 hung writer를 bound한다.
-  - [x] server cursor의 per-FETCH timeout과 별도로 두 scan/모든 INSERT의 누적 5분 deadline을 두고
-    capture/persist 초과를 retryable `snapshot_build_timeout`으로 구분한다.
-  - [x] system별 미만료 generic snapshot을 2개로 제한하고 동적 `429 + Retry-After` admission을 구현한다.
-  - [x] 단일 snapshot 500,000 item/56 MiB 독립 ceiling과 초과 `413` fail-close로 process
-    memory와 canonical material 크기를 bound한다.
-  - [x] 만료·미참조 snapshot의 reader-safe foreground bounded GC를 구현한다.
-  - [x] 전역 mutex·system round-robin·batch commit·시간/statement/no-progress 예산을 가진 hourly
-    background GC와 exact 종료 backlog/total/unexpired/referenced metric을 구현한다.
-  - [x] acquired GC run별 referenced item/header count를 Map DB에 멱등 영속화하고 직전 적격 baseline
-    대비 시간당 증가율·보존 ceiling, 직전 acquired 대비 간격 무관 inventory loss 및 관측 불능을 Dagster metadata와
-    warning alert로 노출한다.
-  - [x] n150 격리 DB에서 migration → 수동 GC → schedule ON → 다음 tick 순서로 검증하고,
-    GC 처리량이 유입률을 상회하며 remaining backlog가 0인지 증명한다. referenced snapshot 증가율과
-    보존 임계치 alert도 함께 확인한다.
-    → 6개 축 전부 PASS. 처리량 65,214 items/s vs 유입 12,951 items/s, tick t+21초 생성·t+26초
-    SUCCESS, backlog 0/0, alert는 조인 임계치에서 발화·기본값에서 침묵.
-    실측 기록 `docs/reports/t-vn-41c-cache-target-gc-verification-2026-08-20.md`,
-    재실행 게이트 `scripts/verify-tvn41c-cache-target-gc.sh`(일회성 절차로 두지 않았다 —
-    스키마·GC 예산이 바뀌면 다시 돌려야 한다). Dagster storage DB는 애플리케이션 DB와
-    분리해야 한다(storage가 자기 alembic 계보를 같은 `public.alembic_version`에 stamp한다).
-  - [x] (#975 적대 재리뷰 P2) relay 종결성 보강 — PR #1026(merge `b2e9c43a`). 착수 전 조사에서
-    넷 다 미구현으로 확인됐고, (c)는 '향후 위험'이 아니라 이미 현재 위험이었다. typed reason
-    도입 + 억제/삼킴을 `epoch_moved`에만 한정, running 취소 전이에 relay event 추가, 생산자
-    모듈의 autouse truncate로 순서 의존 제거. 적대 리뷰 2명이 NO_GO를 냈고, 검증을 통과한
-    P1(내 변경이 `done`을 `failed`로 접던 것)과 공허했던 새 테스트를 고쳐 재검증했다.
-    원래 항목 서술: (a) run 중 source generation 변경으로 실패할 때
-    stale generation tuple에도 `failed` status event를 내는 것이 안전하다(`_append_result_event`는
-    generation을 검사하지 않음) → 억제 대신 emit; (b) running member의 operator cancel 전이
-    (`_TRANSITION_JOB_MEMBER_SQL`)에도 queued 경로처럼 savepoint-guarded status event append.
-    (c) 실패/취소 append의 violation 삼킴은 epoch precheck(또는 typed reason)로 gate해 향후
-    `_append_result_event`에 검사가 추가돼도 조용히 삼키지 않게. (d) 통합 suite 순서 의존
-    (`test_cache_target_stream_repo` commit 잔여 → `test_feature_update_repo`)은 main부터의 기존 문제.
   - [~] Map/PinVi exact head로 n150 isolated live UI recovery와 최종 prod gate를 통과한다.
     **선행: `T-VN-FINAL-REBUILD`** — v5/v7 문서가 없으면 새 live runner가 읽을 attested
     input 자체가 없다(사용자 결정 2026-08-20으로 주요 개발 완료 후로 미뤘다).

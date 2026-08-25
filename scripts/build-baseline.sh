@@ -1132,12 +1132,13 @@ for key in (
         raise SystemExit(f"fresh 300 oracle receipt digest is invalid: {key}")
 evidence = receipt["fresh_migration_evidence"]
 expected_evidence = {
-    "schema": "kor-travel-map.application-fresh-300-root.v1",
+    "schema": "kor-travel-map.application-fresh-300-root.v2",
     "outcome": "root-committed",
     "authorization": "manager-fence",
     "destination_head": "300",
     "map_candidate_commit": candidate["candidate_commit"],
     "map_candidate_image_id": candidate["candidate_image_id"],
+    "postgres_image_id": sys.argv[8],
     "reference_manifest_sha256": candidate["candidate_manifest_sha256"],
     "database_identity": {
         "database_name": sys.argv[4],
@@ -1146,6 +1147,9 @@ expected_evidence = {
         "postgres_system_identifier": sys.argv[6],
     },
     "journal_generation": 1,
+    "post_source_catalog_sha256": receipt["source_catalog_sha256"],
+    "post_seed_sha256": receipt["seed_sha256"],
+    "expected_privileged_residue_sha256": receipt["privileged_residue_sha256"],
     "expected_destination_alembic_version_sha256": sys.argv[12],
     "post_destination_alembic_version_sha256": sys.argv[12],
 }
@@ -1161,8 +1165,15 @@ for key in (
         r"[0-9a-f]{64}", evidence[key]
     ):
         raise SystemExit(f"fresh 300 oracle migration evidence digest is invalid: {key}")
-if not isinstance(evidence.get("writer_fence_transaction_id"), str):
-    raise SystemExit("fresh 300 oracle migration fence transaction is invalid")
+try:
+    from uuid import UUID
+
+    operation_id = UUID(evidence["operation_id"])
+    transaction_id = UUID(evidence["writer_fence_transaction_id"])
+except (KeyError, TypeError, ValueError) as exc:
+    raise SystemExit("fresh 300 oracle migration operation identity is invalid") from exc
+if evidence["operation_id"] != str(operation_id) or evidence["writer_fence_transaction_id"] != str(transaction_id):
+    raise SystemExit("fresh 300 oracle migration operation identity is not canonical")
 canonical_evidence = (
     json.dumps(evidence, sort_keys=True, separators=(",", ":")) + "\n"
 ).encode("utf-8")
@@ -1174,21 +1185,27 @@ if (
     raise SystemExit("fresh 300 oracle migration result digest is invalid")
 finalize_evidence = receipt["fresh_finalize_evidence"]
 expected_finalize_evidence = {
-    "schema": "kor-travel-map.application-fresh-300-finalize.v3",
+    "schema": "kor-travel-map.application-fresh-300-finalize.v4",
     "outcome": "finalized",
     "destination_head": "300",
     "map_candidate_commit": candidate["candidate_commit"],
     "map_candidate_image_id": candidate["candidate_image_id"],
+    "postgres_image_id": sys.argv[8],
     "reference_manifest_sha256": candidate["candidate_manifest_sha256"],
     "journal_generation": 2,
     "prior_fresh_migration_result_sha256": receipt["fresh_migration_result_sha256"],
     "prior_fresh_migration_fence_sha256": evidence["writer_fence_receipt_sha256"],
     "prior_fresh_migration_transaction_id": evidence["writer_fence_transaction_id"],
+    "prior_fresh_migration_operation_id": evidence["operation_id"],
     "prior_fresh_migration_journal_sha256": evidence["journal_sha256"],
     "prior_fresh_migration_generation": evidence["journal_generation"],
     "pre_source_catalog_sha256": receipt["source_catalog_sha256"],
+    "pre_seed_sha256": receipt["seed_sha256"],
     "post_destination_catalog_sha256": receipt["destination_catalog_sha256"],
+    "post_seed_sha256": receipt["seed_sha256"],
+    "expected_privileged_residue_sha256": receipt["privileged_residue_sha256"],
     "post_destination_alembic_version_sha256": sys.argv[12],
+    "database_identity": evidence["database_identity"],
 }
 if not isinstance(finalize_evidence, dict) or any(
     finalize_evidence.get(key) != value
@@ -1200,6 +1217,16 @@ for key in ("writer_fence_receipt_sha256", "journal_sha256"):
         r"[0-9a-f]{64}", finalize_evidence[key]
     ):
         raise SystemExit(f"fresh 300 oracle finalize evidence digest is invalid: {key}")
+try:
+    finalize_operation_id = UUID(finalize_evidence["operation_id"])
+    finalize_transaction_id = UUID(finalize_evidence["writer_fence_transaction_id"])
+except (KeyError, TypeError, ValueError) as exc:
+    raise SystemExit("fresh 300 oracle finalize operation identity is invalid") from exc
+if (
+    finalize_evidence["operation_id"] != str(finalize_operation_id)
+    or finalize_evidence["writer_fence_transaction_id"] != str(finalize_transaction_id)
+):
+    raise SystemExit("fresh 300 oracle finalize operation identity is not canonical")
 canonical_finalize_evidence = (
     json.dumps(finalize_evidence, sort_keys=True, separators=(",", ":")) + "\n"
 ).encode("utf-8")

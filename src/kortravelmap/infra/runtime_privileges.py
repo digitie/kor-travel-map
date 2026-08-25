@@ -166,6 +166,9 @@ _OPS_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     # reconcile이 순회하는 것이 DB이지 metadata가 아니고, 실제로 모델에 없는 ops 표가
     # 17개 있다(`tests/integration/test_runtime_privileges_acl.py`가 양방향으로 고정한다).
     "admin_auth_events": _ORDINARY_OPS,
+    # application schema root/finalize의 DB-atomic immutable outbox다. runtime은
+    # 직접 읽거나 쓰지 않고 restricted migrator의 recovery command만 조회한다.
+    "application_schema_operation_receipts": (),
     "api_call_log": _ORDINARY_OPS,
     "backup_command_executions": _ORDINARY_OPS,
     "c6c_cancel_probe_fixtures": _ORDINARY_OPS,

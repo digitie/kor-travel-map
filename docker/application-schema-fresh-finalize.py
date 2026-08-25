@@ -50,16 +50,22 @@ _SHA256_PATTERN: Final = re.compile(r"^[0-9a-f]{64}$")
 _IMAGE_ID_PATTERN: Final = re.compile(r"^sha256:[0-9a-f]{64}$")
 _COMMIT_PATTERN: Final = re.compile(r"^[0-9a-f]{40}$")
 _DATABASE_PATTERN: Final = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
+_OPERATION_RECEIPT_TABLE: Final = "ops.application_schema_operation_receipts"
+_OPERATION_KIND: Final = "application-finalize-300"
+_RESULT_SCHEMA: Final = "kor-travel-map.application-fresh-300-finalize.v4"
+_OPERATION_LOCK_KEY: Final = "kor-travel-map:application-schema-300-operation"
 _FENCE_FIELDS: Final = frozenset(
     {
         "schema",
         "transaction_id",
+        "operation_id",
         "journal_sha256",
         "journal_generation",
         "operation",
         "prior_fresh_migration_result_sha256",
         "prior_fresh_migration_fence_sha256",
         "prior_fresh_migration_transaction_id",
+        "prior_fresh_migration_operation_id",
         "prior_fresh_migration_journal_sha256",
         "prior_fresh_migration_generation",
         "map_candidate_commit",
@@ -102,10 +108,16 @@ class FreshFinalizeError(RuntimeError):
     """Manager fence 밖의 fresh completion을 fail-close한다."""
 
 
-def _parse_args(arguments: Sequence[str] | None) -> None:
+def _parse_args(arguments: Sequence[str] | None) -> tuple[str, UUID | None]:
     values = list(sys.argv[1:] if arguments is None else arguments)
-    if values != ["finalize", "--writer-fence-receipt", str(_FENCE_PATH)]:
-        raise FreshFinalizeError("only the fixed fresh-300 finalize operation is accepted")
+    if values == ["finalize", "--writer-fence-receipt", str(_FENCE_PATH)]:
+        return "finalize", None
+    if len(values) == 3 and values[:2] == ["recover", "--operation-id"]:
+        try:
+            return "recover", UUID(values[2])
+        except ValueError as exc:
+            raise FreshFinalizeError("fresh finalize recovery operation id is invalid") from exc
+    raise FreshFinalizeError("only the fixed fresh-300 finalize/recover operation is accepted")
 
 
 def _require_sha256(value: object, label: str) -> str:
@@ -169,10 +181,12 @@ def _require_fixed_fence() -> tuple[Mapping[str, Any], str]:
         raise FreshFinalizeError("fresh finalize writer fence schema is invalid")
     try:
         UUID(str(value["transaction_id"]))
+        UUID(str(value["operation_id"]))
     except (TypeError, ValueError) as exc:
         raise FreshFinalizeError("fresh finalize writer fence transaction id is invalid") from exc
     try:
         UUID(str(value["prior_fresh_migration_transaction_id"]))
+        UUID(str(value["prior_fresh_migration_operation_id"]))
     except (TypeError, ValueError) as exc:
         raise FreshFinalizeError("fresh finalize prior migration transaction is invalid") from exc
     if (
@@ -335,7 +349,7 @@ async def _assert_raw_300_and_receipts(
     expected: Mapping[str, str],
     *,
     expected_catalog_sha256: str,
-) -> tuple[str, str]:
+) -> tuple[str, str, str]:
     module = _load_handoff_contract_module()
     try:
         # migrator는 NOINHERIT LOGIN이다. receipt query는 handoff와 같은 명시
@@ -367,7 +381,10 @@ async def _assert_raw_300_and_receipts(
     if versions != (_DESTINATION_HEAD,):
         raise FreshFinalizeError("fresh finalize requires exact raw revision 300")
     if catalog != expected_catalog_sha256 or seed != expected["seed_sha256"]:
-        raise FreshFinalizeError("fresh finalize catalog or seed receipt does not match baseline")
+        raise FreshFinalizeError(
+            "fresh finalize catalog or seed receipt does not match baseline "
+            f"(catalog={catalog}, seed={seed})"
+        )
     if (
         destination_alembic_version
         != expected["destination_alembic_version_sha256"]
@@ -375,7 +392,94 @@ async def _assert_raw_300_and_receipts(
         raise FreshFinalizeError(
             "fresh finalize destination Alembic metadata facet does not match baseline"
         )
-    return catalog, destination_alembic_version
+    return catalog, seed, destination_alembic_version
+
+
+async def _acquire_operation_lock(connection: AsyncConnection) -> None:
+    """root/finalize를 같은 DB transaction advisory lock으로 직렬화한다."""
+
+    await connection.execute(
+        text(
+            "SELECT pg_catalog.pg_advisory_xact_lock("
+            "(SELECT oid::integer FROM pg_catalog.pg_database "
+            "WHERE datname = current_database()), pg_catalog.hashtext(:lock_key))"
+        ),
+        {"lock_key": _OPERATION_LOCK_KEY},
+    )
+
+
+def _canonical_result_bytes(result: Mapping[str, Any]) -> bytes:
+    return (json.dumps(result, separators=(",", ":"), sort_keys=True) + "\n").encode()
+
+
+async def _insert_operation_receipt(
+    connection: AsyncConnection,
+    *,
+    fence: Mapping[str, Any],
+    fence_sha256: str,
+    expected: Mapping[str, str],
+    result: Mapping[str, Any],
+) -> None:
+    canonical = _canonical_result_bytes(result)
+    inserted = await connection.scalar(
+        text(
+            f"INSERT INTO {_OPERATION_RECEIPT_TABLE} ("
+            "operation_id, operation, result_schema, result_sha256, "
+            "map_candidate_commit, map_candidate_image_id, postgres_image_id, "
+            "writer_fence_receipt_sha256, journal_sha256, journal_generation, "
+            "destination_head, database_name, database_oid, database_owner, "
+            "postgres_system_identifier, result_payload) VALUES ("
+            "CAST(:operation_id AS uuid), :operation, :result_schema, :result_sha256, "
+            ":map_commit, :map_image, :postgres_image, :fence_sha256, :journal_sha256, "
+            ":journal_generation, :destination_head, :database_name, :database_oid, "
+            ":database_owner, :system_identifier, CAST(:result_payload AS jsonb)) "
+            "RETURNING operation_id::text"
+        ),
+        {
+            "operation_id": fence["operation_id"],
+            "operation": _OPERATION_KIND,
+            "result_schema": _RESULT_SCHEMA,
+            "result_sha256": hashlib.sha256(canonical).hexdigest(),
+            "map_commit": fence["map_candidate_commit"],
+            "map_image": fence["map_candidate_image_id"],
+            "postgres_image": expected["postgres_image_id"],
+            "fence_sha256": fence_sha256,
+            "journal_sha256": fence["journal_sha256"],
+            "journal_generation": fence["journal_generation"],
+            "destination_head": _DESTINATION_HEAD,
+            "database_name": fence["database_name"],
+            "database_oid": fence["database_oid"],
+            "database_owner": fence["database_owner"],
+            "system_identifier": fence["postgres_system_identifier"],
+            "result_payload": canonical.decode().rstrip("\n"),
+        },
+    )
+    if inserted != fence["operation_id"]:
+        raise FreshFinalizeError("fresh finalize operation receipt was not committed")
+
+
+async def _read_operation_receipt(
+    connection: AsyncConnection, operation_id: UUID
+) -> Mapping[str, Any]:
+    try:
+        row = (
+            await connection.execute(
+                text(
+                    f"SELECT operation_id::text, operation, result_schema, result_sha256, "
+                    "map_candidate_commit, map_candidate_image_id, postgres_image_id, "
+                    "writer_fence_receipt_sha256, journal_sha256, journal_generation, "
+                    "destination_head, database_name, database_oid, database_owner, "
+                    f"postgres_system_identifier, result_payload FROM {_OPERATION_RECEIPT_TABLE} "
+                    "WHERE operation_id = :operation_id"
+                ),
+                {"operation_id": operation_id},
+            )
+        ).mappings().one_or_none()
+    except Exception as exc:
+        raise FreshFinalizeError("fresh finalize operation receipt is unavailable") from exc
+    if row is None:
+        raise FreshFinalizeError("fresh finalize operation receipt does not exist")
+    return row
 
 
 async def _finalize() -> Mapping[str, Any]:
@@ -408,7 +512,8 @@ async def _finalize() -> Mapping[str, Any]:
         async with engine.begin() as connection:
             # 이 transaction의 첫 SQL에서 restricted LOGIN과 DB identity를 고정한다.
             await _assert_restricted_migrator_and_database(connection, fence)
-            pre_catalog, _ = await _assert_raw_300_and_receipts(
+            await _acquire_operation_lock(connection)
+            pre_catalog, pre_seed, _ = await _assert_raw_300_and_receipts(
                 connection,
                 expected,
                 expected_catalog_sha256=expected["source_catalog_sha256"],
@@ -426,7 +531,7 @@ async def _finalize() -> Mapping[str, Any]:
                 raise FreshFinalizeError(
                     "fresh finalize runtime ACL reconciliation failed"
                 ) from exc
-            post_catalog, destination_facet = await _assert_raw_300_and_receipts(
+            post_catalog, post_seed, destination_facet = await _assert_raw_300_and_receipts(
                 connection,
                 expected,
                 expected_catalog_sha256=expected["destination_catalog_sha256"],
@@ -438,46 +543,160 @@ async def _finalize() -> Mapping[str, Any]:
                 raise FreshFinalizeError(
                     "fresh finalize writer fence changed during completion"
                 )
+            result: Mapping[str, Any] = {
+                "schema": _RESULT_SCHEMA,
+                "outcome": "finalized",
+                "operation_id": fence["operation_id"],
+                "destination_head": _DESTINATION_HEAD,
+                "map_candidate_commit": fence["map_candidate_commit"],
+                "map_candidate_image_id": fence["map_candidate_image_id"],
+                "postgres_image_id": expected["postgres_image_id"],
+                "reference_manifest_sha256": expected["reference_manifest_sha256"],
+                "writer_fence_receipt_sha256": fence_sha256,
+                "writer_fence_transaction_id": fence["transaction_id"],
+                "journal_sha256": fence["journal_sha256"],
+                "journal_generation": fence["journal_generation"],
+                "database_identity": {
+                    "database_name": fence["database_name"],
+                    "database_oid": fence["database_oid"],
+                    "database_owner": fence["database_owner"],
+                    "postgres_system_identifier": fence["postgres_system_identifier"],
+                },
+                "prior_fresh_migration_result_sha256": fence[
+                    "prior_fresh_migration_result_sha256"
+                ],
+                "prior_fresh_migration_fence_sha256": fence[
+                    "prior_fresh_migration_fence_sha256"
+                ],
+                "prior_fresh_migration_transaction_id": fence[
+                    "prior_fresh_migration_transaction_id"
+                ],
+                "prior_fresh_migration_operation_id": fence[
+                    "prior_fresh_migration_operation_id"
+                ],
+                "prior_fresh_migration_journal_sha256": fence[
+                    "prior_fresh_migration_journal_sha256"
+                ],
+                "prior_fresh_migration_generation": fence[
+                    "prior_fresh_migration_generation"
+                ],
+                "pre_source_catalog_sha256": pre_catalog,
+                "pre_seed_sha256": pre_seed,
+                "post_destination_catalog_sha256": post_catalog,
+                "post_seed_sha256": post_seed,
+                "expected_privileged_residue_sha256": expected[
+                    "privileged_residue_sha256"
+                ],
+                "post_destination_alembic_version_sha256": destination_facet,
+            }
+            await _insert_operation_receipt(
+                connection,
+                fence=fence,
+                fence_sha256=fence_sha256,
+                expected=expected,
+                result=result,
+            )
             await connection.execute(text("RESET ROLE"))
             await _assert_restricted_migrator_and_database(connection, fence)
     finally:
         await engine.dispose()
-    return {
-        "schema": "kor-travel-map.application-fresh-300-finalize.v3",
-        "outcome": "finalized",
-        "destination_head": _DESTINATION_HEAD,
-        "map_candidate_commit": fence["map_candidate_commit"],
-        "map_candidate_image_id": fence["map_candidate_image_id"],
-        "reference_manifest_sha256": expected["reference_manifest_sha256"],
-        "writer_fence_receipt_sha256": fence_sha256,
-        "writer_fence_transaction_id": fence["transaction_id"],
-        "journal_sha256": fence["journal_sha256"],
-        "journal_generation": fence["journal_generation"],
-        "prior_fresh_migration_result_sha256": fence[
-            "prior_fresh_migration_result_sha256"
-        ],
-        "prior_fresh_migration_fence_sha256": fence[
-            "prior_fresh_migration_fence_sha256"
-        ],
-        "prior_fresh_migration_transaction_id": fence[
-            "prior_fresh_migration_transaction_id"
-        ],
-        "prior_fresh_migration_journal_sha256": fence[
-            "prior_fresh_migration_journal_sha256"
-        ],
-        "prior_fresh_migration_generation": fence[
-            "prior_fresh_migration_generation"
-        ],
-        "pre_source_catalog_sha256": pre_catalog,
-        "post_destination_catalog_sha256": post_catalog,
-        "post_destination_alembic_version_sha256": destination_facet,
-    }
+    return result
+
+
+async def _recover(operation_id: UUID) -> Mapping[str, Any]:
+    """exact finalize row를 read-only로 재검증해 원 canonical result를 돌려준다."""
+
+    if os.environ.get(_BOOTSTRAP_DSN_ENV):
+        raise FreshFinalizeError("bootstrap-superuser DSN must not enter fresh recovery")
+    dsn = os.environ.get(_MIGRATOR_DSN_ENV)
+    if not dsn:
+        raise FreshFinalizeError(f"{_MIGRATOR_DSN_ENV} is required")
+    expected = _static_contract()
+    engine = make_async_engine(dsn, pool_size=1)
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text("SET TRANSACTION READ ONLY"))
+            # fence는 응답 유실 뒤 만료될 수 있으므로 row의 DB identity를 live session과
+            # 직접 비교한다. mutation 권한은 쓰지 않는다.
+            row = await connection.execute(
+                text(
+                    "SELECT session_user::text, current_user::text, role.rolsuper, "
+                    "current_database(), database_row.oid, "
+                    "pg_catalog.pg_get_userbyid(database_row.datdba), "
+                    "(SELECT system_identifier::text FROM pg_catalog.pg_control_system()) "
+                    "FROM pg_catalog.pg_roles AS role "
+                    "JOIN pg_catalog.pg_database AS database_row "
+                    "ON database_row.datname = current_database() "
+                    "WHERE role.rolname = session_user"
+                )
+            )
+            identity_row = row.one_or_none()
+            if (
+                identity_row is None
+                or str(identity_row[0]) != _MIGRATOR_ROLE
+                or str(identity_row[1]) != _MIGRATOR_ROLE
+                or bool(identity_row[2])
+            ):
+                raise FreshFinalizeError("fresh finalize recovery session is invalid")
+            live_identity = {
+                "database_name": str(identity_row[3]),
+                "database_oid": int(identity_row[4]),
+                "database_owner": str(identity_row[5]),
+                "postgres_system_identifier": str(identity_row[6]),
+            }
+            await connection.execute(text(f"SET ROLE {_DATABASE_OWNER}"))
+            receipt = await _read_operation_receipt(connection, operation_id)
+            payload = receipt["result_payload"]
+            if not isinstance(payload, Mapping):
+                raise FreshFinalizeError("fresh finalize receipt payload is invalid")
+            canonical = _canonical_result_bytes(payload)
+            expected_columns = {
+                "operation_id": str(operation_id),
+                "operation": _OPERATION_KIND,
+                "result_schema": _RESULT_SCHEMA,
+                "result_sha256": hashlib.sha256(canonical).hexdigest(),
+                "map_candidate_commit": os.environ.get(_IMAGE_REVISION_ENV),
+                "map_candidate_image_id": os.environ.get(_IMAGE_ID_ENV),
+                "postgres_image_id": expected["postgres_image_id"],
+                "destination_head": _DESTINATION_HEAD,
+                **live_identity,
+            }
+            if any(
+                str(receipt[key]) != str(value) for key, value in expected_columns.items()
+            ):
+                raise FreshFinalizeError("fresh finalize operation receipt binding is invalid")
+            if (
+                payload.get("operation_id") != str(operation_id)
+                or payload.get("writer_fence_receipt_sha256")
+                != receipt["writer_fence_receipt_sha256"]
+                or payload.get("journal_sha256") != receipt["journal_sha256"]
+                or payload.get("journal_generation") != receipt["journal_generation"]
+                or payload.get("database_identity") != live_identity
+            ):
+                raise FreshFinalizeError("fresh finalize operation receipt payload drifted")
+            catalog, seed, _ = await _assert_raw_300_and_receipts(
+                connection,
+                expected,
+                expected_catalog_sha256=expected["destination_catalog_sha256"],
+            )
+            if (
+                payload.get("post_destination_catalog_sha256") != catalog
+                or payload.get("post_seed_sha256") != seed
+            ):
+                raise FreshFinalizeError("fresh finalize live attestation drifted")
+            return dict(payload)
+    finally:
+        await engine.dispose()
 
 
 async def async_main(arguments: Sequence[str] | None = None) -> int:
     try:
-        _parse_args(arguments)
-        result = await _finalize()
+        operation, operation_id = _parse_args(arguments)
+        result = (
+            await _finalize()
+            if operation == "finalize"
+            else await _recover(operation_id)  # type: ignore[arg-type]
+        )
     except FreshFinalizeError as exc:
         print(f"fresh application 300 finalize refused: {exc}", file=sys.stderr)
         return 1

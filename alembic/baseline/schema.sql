@@ -15625,6 +15625,49 @@ CREATE TABLE ops.admin_auth_events (
 ALTER TABLE ops.admin_auth_events OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: application_schema_operation_receipts; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.application_schema_operation_receipts (
+    operation_id uuid NOT NULL,
+    operation text NOT NULL,
+    result_schema text NOT NULL,
+    result_sha256 text NOT NULL,
+    map_candidate_commit text NOT NULL,
+    map_candidate_image_id text NOT NULL,
+    postgres_image_id text NOT NULL,
+    writer_fence_receipt_sha256 text NOT NULL,
+    journal_sha256 text NOT NULL,
+    journal_generation bigint NOT NULL,
+    destination_head text NOT NULL,
+    database_name text NOT NULL,
+    database_oid bigint NOT NULL,
+    database_owner text NOT NULL,
+    postgres_system_identifier text NOT NULL,
+    result_payload jsonb NOT NULL,
+    committed_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT pk_application_schema_operation_receipts PRIMARY KEY (operation_id),
+    CONSTRAINT ck_application_schema_operation_receipts_operation CHECK ((operation = ANY (ARRAY['application-root-300'::text, 'application-finalize-300'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_result_schema CHECK ((result_schema = ANY (ARRAY['kor-travel-map.application-fresh-300-root.v2'::text, 'kor-travel-map.application-fresh-300-finalize.v4'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_result_sha256 CHECK ((result_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
+    CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
+    CONSTRAINT ck_application_schema_operation_receipts_postgres_image CHECK ((postgres_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
+    CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = '300'::text)),
+    CONSTRAINT ck_application_schema_operation_receipts_database_name CHECK ((database_name ~ '^[A-Za-z_][A-Za-z0-9_]{0,62}$'::text)),
+    CONSTRAINT ck_application_schema_operation_receipts_database_oid CHECK ((database_oid > 0)),
+    CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
+    CONSTRAINT ck_application_schema_operation_receipts_system_identifier CHECK ((postgres_system_identifier ~ '^[0-9]+$'::text)),
+    CONSTRAINT ck_application_schema_operation_receipts_payload CHECK ((jsonb_typeof(result_payload) = 'object'::text))
+);
+
+
+ALTER TABLE ops.application_schema_operation_receipts OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: api_call_log; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -21104,6 +21147,20 @@ CREATE CONSTRAINT TRIGGER ck_import_jobs_feature_operation_parent AFTER INSERT O
 --
 
 CREATE TRIGGER trg_backup_command_execution_transition BEFORE UPDATE ON ops.backup_command_executions FOR EACH ROW EXECUTE FUNCTION ops.enforce_backup_command_execution_transition();
+
+
+--
+-- Name: application_schema_operation_receipts trg_application_schema_operation_receipts_immutable; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_application_schema_operation_receipts_immutable BEFORE DELETE OR UPDATE ON ops.application_schema_operation_receipts FOR EACH ROW EXECUTE FUNCTION ops.reject_domain_command_history_mutation();
+
+
+--
+-- Name: application_schema_operation_receipts trg_application_schema_operation_receipts_no_truncate; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_application_schema_operation_receipts_no_truncate BEFORE TRUNCATE ON ops.application_schema_operation_receipts FOR EACH STATEMENT EXECUTE FUNCTION ops.reject_domain_command_history_mutation();
 
 
 --

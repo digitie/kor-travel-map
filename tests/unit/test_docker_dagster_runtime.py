@@ -32,6 +32,8 @@ _API_IMAGE_ENV: Final = {
 }
 _SAFE_DAGSTER_LOGIN_ATTRIBUTES: Final = {
     "superuser": False,
+    "can_login": True,
+    "inherit": False,
     "create_database": False,
     "create_role": False,
     "replication": False,
@@ -4204,6 +4206,8 @@ def test_dagster_storage_rejects_appuser_writable_config_parent() -> None:
     ("attribute", "value"),
     [
         ("superuser", True),
+        ("can_login", False),
+        ("inherit", True),
         ("create_database", True),
         ("create_role", True),
         ("replication", True),
@@ -4299,7 +4303,15 @@ def test_dagster_storage_rejects_application_database_before_migration(
     monkeypatch.setattr(
         module,
         "_read_permit",
-        lambda environment, **kwargs: (dagster_identity, application_identity),
+        lambda environment, **kwargs: (
+            dagster_identity,
+            application_identity,
+            {
+                "operation_id": "12345678-1234-5678-9234-567812345678",
+                "permit_sha256": "b" * 64,
+                "config_sha256": "a" * 64,
+            },
+        ),
     )
     monkeypatch.setattr(
         module,
@@ -4350,7 +4362,15 @@ def test_dagster_storage_rejects_300_among_multiple_version_rows_before_migratio
     monkeypatch.setattr(
         module,
         "_read_permit",
-        lambda environment, **kwargs: (dagster_identity, application_identity),
+        lambda environment, **kwargs: (
+            dagster_identity,
+            application_identity,
+            {
+                "operation_id": "12345678-1234-5678-9234-567812345678",
+                "permit_sha256": "b" * 64,
+                "config_sha256": "a" * 64,
+            },
+        ),
     )
     monkeypatch.setattr(
         module,
@@ -4386,46 +4406,59 @@ def test_dagster_storage_migrates_only_after_metadata_identity_match(
         "login_role": "dagster_metadata",
         "login_role_attributes": _SAFE_DAGSTER_LOGIN_ATTRIBUTES,
     }
-    application_identity = {
-        "system_identifier": "123456789",
-        "name": "kor_travel_map",
-        "oid": 100,
-        "owner": "ktm_feature_schema_owner",
+    operation_id = "12345678-1234-5678-9234-567812345678"
+    binding = {
+        "operation_id": operation_id,
+        "permit_sha256": "b" * 64,
+        "candidate_sha256": "c" * 64,
+    }
+    expected = {
+        "schema": "kor-travel-map.dagster-storage-migration.v2",
+        "status": "migrated",
+        "operation_id": operation_id,
+        "permit_sha256": "b" * 64,
+        "head": "dagster_head",
+        "version_num": "dagster_head",
+        "database_name": "kor_travel_map_dagster",
+        "database_oid": "200",
     }
     calls: list[str] = []
 
     monkeypatch.setattr(module, "_dagster_storage_head", lambda: "dagster_head")
     monkeypatch.setattr(
         module,
-        "_require_migration_environment",
-        lambda environment: ("postgresql://redacted/metadata", "production", "a" * 64),
+        "_verify_database_identity",
+        lambda environment: ("postgresql://redacted/metadata", dagster_identity),
     )
     monkeypatch.setattr(
         module,
-        "_read_permit",
-        lambda environment, **kwargs: (dagster_identity, application_identity),
+        "_read_operation_binding",
+        lambda environment: (
+            "postgresql://redacted/metadata",
+            dagster_identity,
+            binding,
+        ),
     )
     monkeypatch.setattr(
         module,
-        "_read_observed_identity",
-        lambda dsn: (dagster_identity, (), (False, False, False), False),
+        "_prepare_operation",
+        lambda *args, **kwargs: ("execute", None),
     )
     monkeypatch.setattr(
         module,
         "_run_dagster_instance_migrate",
         lambda environment: calls.append("migrate"),
     )
-    monkeypatch.setattr(module, "_read_version_rows", lambda dsn: ("dagster_head",))
+    monkeypatch.setattr(
+        module,
+        "_complete_operation",
+        lambda *args, **kwargs: expected,
+    )
 
     result = module._migrate({})
 
     assert calls == ["migrate"]
-    assert result == {
-        "schema": "kor-travel-map.dagster-storage-migration.v1",
-        "status": "migrated",
-        "head": "dagster_head",
-        "version_num": "dagster_head",
-    }
+    assert result == expected
 
 
 @pytest.mark.unit
@@ -4519,11 +4552,15 @@ def test_docker_compose_runs_storage_migration_before_dagster_services() -> None
     )
     assert "pg_control_system()" in init_command
     assert "local-compose-db-init" in init_command
-    assert "dagster-storage-database-permit.v1" in init_command
+    assert "dagster-storage-database-permit.v2" in init_command
+    assert 'operation_id=' in init_command
+    assert '\\"operation_id\\":\\"$$operation_id\\"' in init_command
     assert 'psql "$$KOR_TRAVEL_MAP_DAGSTER_PG_URL"' in init_command
     assert 'session_user' in init_command
     assert "current_user" in init_command
     assert "rolsuper" in init_command
+    assert "rolcanlogin" in init_command
+    assert "rolinherit" in init_command
     assert "rolcreatedb" in init_command
     assert "rolcreaterole" in init_command
     assert "rolreplication" in init_command
@@ -4541,6 +4578,7 @@ def test_docker_compose_runs_storage_migration_before_dagster_services() -> None
         "existing Dagster metadata resources do not match the sealed prior permit"
         in init_command
     )
+    assert "LOGIN NOINHERIT" in init_command
     assert "NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS" in init_command
     assert "\\getenv metadata_password KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD" in init_command
     assert '-v metadata_password="$$KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD"' not in init_command
