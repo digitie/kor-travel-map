@@ -24,6 +24,11 @@ backup-only 정책(`execute=false`), 운영 홈, 운영 로그 **11개 테스트
 실행은 application row를 쓰지 않았다. PinVi WebSocket/mutating loop·consumer reconciliation과
 data-dependent D2는 별도 순서의 active acceptance로 남긴다.
 
+같은 파일에서 행 쓰기 없이 ticket 없는/서명 변조 `4401`, expired ticket `4408` 뒤 fresh BFF
+lease 복구, healthy socket의 자연 `4408` rotation 세 시나리오도 n150에서 통과했다. 이 결과는
+Map ops-live WebSocket wire/재연결 계약만 증명하며, PinVi mutating loop·consumer reconciliation과
+data-dependent D2의 완료를 의미하지 않는다.
+
 이 기록으로 H46H의 schema/bootstrap·runtime provenance·data-independent UI 조건은 완료한다.
 전체 운영 순서는 `T-VN-FINAL-REBUILD` 후속 barrier → `T-VN-41F1D-D1`/`T-VN-41F1D-E`
 → `T-VN-41F1D-D2` → `T-VN-41C`이며, logout/re-block·PinVi paired/WebSocket·consumer
