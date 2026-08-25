@@ -59,7 +59,6 @@ _TOMBSTONE_PROSE: dict[tuple[str, str], str] = {
         "docs/architecture/openapi-admin-contract.md",
         "/v1/admin/features/curated",
     ): "§8.2 제거 고지",
-    ("docs/deploy.md", "legacy_projection_id"): "2026-08-18 실행 기록(당시 사실)",
     (
         "docs/runbooks/tvn40-pinvi-cutover.md",
         "/v1/curated-features",

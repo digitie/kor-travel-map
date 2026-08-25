@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "2c02ecfead95b06306db7189278c975ec83a9e2a793f3f0e18ca0bd96240f3cb"
+      "sha256": "e1e38dda9cf170b95e990062d40c70523056f63d357a7a8fd8977042ba04a015"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -17,6 +17,11 @@
     }
   },
   "revisions": [
+    {
+      "date": "2026-08-25",
+      "task": "PR-1064 rebase",
+      "change": "application 300 baseline 재배치 뒤 full admin OpenAPI bytes만 현재 head로 재고정했다. user/service spec bytes와 Wave 2 목표 operation 집합은 변하지 않으며, paired Map/PinVi acceptance 전까지 consumer rollout receipt는 pending으로 유지한다."
+    },
     {
       "date": "2026-08-22",
       "task": "T-VN-41S",

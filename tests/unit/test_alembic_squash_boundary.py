@@ -536,7 +536,7 @@ def test_shell_execution_scanner_rejects_retired_target_and_archive_path() -> No
     source = """
 python -m alembic upgrade 0231_tvn41s_snapshot_material
 python -m alembic upgrade head
-python tools/run.py alembic/retired_versions/0200-0236/0231.py
+python tools/run.py alembic/retired_versions/0200-0236/0231_tvn41s_snapshot_material.py
 """
     assert _shell_alembic_execution_violations(source, filename="runner.sh") == [
         "runner.sh:2: 0231_tvn41s_snapshot_material",

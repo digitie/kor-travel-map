@@ -285,8 +285,9 @@ async def bootstrap_application_300_roles(engine: AsyncEngine) -> str:
         await connection.execute(
             text(
                 "GRANT USAGE ON SCHEMA x_extension TO "
-                "ktm_feature_state_procedure_owner, ktm_feature_runtime, "
-                "ktm_curation_command_owner, "
+                "ktm_feature_schema_owner, ktm_feature_state_procedure_owner, "
+                "ktm_feature_runtime, ktm_feature_api_runtime, "
+                "ktm_feature_dagster_runtime, ktm_curation_command_owner, "
                 "ktm_manual_provider_dedup_procedure_owner"
             )
         )
