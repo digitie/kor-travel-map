@@ -1,5 +1,17 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-26 — H46H 후속 Map protected-route 재차단 확인
+
+n150 Map UI에서 현재 Manager smoke credential로 login한 뒤 `/ops/datasets`를 열고 logout을
+실행했다. login 응답은 `200`, logout 응답은 `200`이었고, 같은 session으로 protected
+`/ops/datasets`를 다시 열었을 때 최종 경로가 `/login`으로 유지됐다. 이 수동 browser check는
+session/auth 상태만 확인하고 application row나 PinVi 데이터를 쓰지 않았다.
+
+PinVi equivalent reblock, PinVi WebSocket/mutating loop와 consumer reconciliation은
+Manager의 `MAP-LIVE-FOLLOWUP` 및 이 저장소의 `T-VN-41C`·`T-VN-41F1D-D2` 후속 조건으로
+남긴다. 300 이후 일반 application row의 내용·건수·업무상 무결성 검증은 수행하지 않으며,
+필요하면 fresh schema에 source/ETL을 처음부터 재적재한다.
+
 ## 2026-08-26 — T-VN-H46H `300` baseline·n150 fresh rebuild 최종 수락
 
 Map PR #1066 exact head `cc81081ff2e540a6ad9c428a296515e1d79bc316`와 Docker-manager PR #207
