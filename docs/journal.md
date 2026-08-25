@@ -31,8 +31,17 @@ outbox catalog는 거부한다.
   baseline structural contract 통과
 - 관련 Ruff, shell syntax, baseline digest, `git diff --check`: 통과
 
-아직 Docker Manager의 새 wire 소비·fence renewal, 새 commit 기준 paired image 실제 build,
-누적 전문 적대 재리뷰, CI green, n150 배포와 live UI E2E가 남아 있으므로 PR은 Draft로 유지한다.
+Docker Manager PR #197은 새 root/finalize·Dagster wire 소비, recover-first 재개, receipt가 없는
+exact pre-state에서만 허용하는 fence renewal까지 로컬 결선했다. Manager backend 전체
+`694 passed, 3 skipped`와 변경 source strict mypy가 통과했다.
+
+Map checkpoint `6b60fee0`의 원격 CI는 lint·OpenAPI·fixture·frontend가 통과했지만 Python 3개
+버전이 모두 `test_settings_default_values` 한 건에서 실패했다. 원인은 fresh root helper가 테스트
+프로세스에 내부 `KOR_TRAVEL_MAP_PG_DSN`과 schema-owner flag를 남긴 것이었다. helper는 이제
+성공·실패·engine 생성 실패 모두에서 두 임시 환경값을 원상복구한다. 오염 재현 순서 21건과 실제
+PostgreSQL root/finalize 3건을 다시 통과했다. 이 수정 원격 push와 새 SHA 기준 Manager pin 회전,
+paired image 실제 build, 누적 전문 적대 재리뷰, CI green, n150 배포와 live UI E2E가 남아 있으므로
+PR은 Draft로 유지한다.
 
 ## 2026-08-25 — T-VN-M04 Admin BFF 결정 자격 결선 보완 (Draft)
 

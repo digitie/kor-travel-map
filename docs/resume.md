@@ -1,6 +1,6 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
-## 2026-08-25 — T-VN-H46H DB-atomic operation receipt checkpoint (Draft)
+## 2026-08-25 — T-VN-H46H DB-atomic operation receipt·CI 환경 격리 checkpoint (Draft)
 
 PR #1065 merge 위 rebase와 CI fixture 보정을 완료했고, API-only partial paired candidate는
 원본 receipt 삭제·재빌드 없이 strict exact verify 뒤 재개하도록 원격 checkpoint `3547431a`에
@@ -9,12 +9,16 @@ intent/result outbox 및 explicit read-only recovery로 전환했다. root/final
 별도 operation UUID를 쓰며 writer-fence transaction ID와 혼용하지 않는다. Dagster metadata
 identity는 canonical operation UUID와 `LOGIN NOINHERIT`까지 exact하게 검증한다.
 
+outbox·문서 정리는 `6b60fee0`으로 원격 push했고 Manager의 새 wire·fence renewal 소비도 로컬
+결선했다. 이 Map SHA의 Python CI 공통 실패는 fresh root helper가 임시 Alembic 환경을 테스트
+프로세스에 남긴 것이 원인이었다. helper가 모든 종료 경로에서 원상복구하도록 고쳤으며 오염 재현
+순서와 실제 PostgreSQL root/finalize를 다시 통과했다.
+
 ### 이 PR의 다음 한 작업
 
-Docker Manager가 root/finalize result v2/v4와 Dagster permit/result v2를 소비하고, 만료 plan을
-exact pre-state에서만 안전하게 갱신하도록 결선한다. 그 뒤 새 Map commit으로 API+Dagster paired
-candidate를 실제 빌드하고 두 전문 리뷰어의 누적 GO와 CI green을 받은 후 n150 배포·login
-POST+cookie·protected route·logout·PinVi paired live UI E2E를 수행한다.
+CI 환경 격리 수정을 커밋·push하고 새 Map SHA로 Manager pinset을 다시 회전한다. 그 뒤
+API+Dagster paired candidate를 실제 빌드하고 두 전문 리뷰어의 누적 GO와 CI green을 받은 후 n150
+배포·login POST+cookie·protected route·logout·PinVi paired live UI E2E를 수행한다.
 
 ## 2026-08-25 — T-VN-M04 Admin BFF 결정 자격 결선 보완 (Draft)
 

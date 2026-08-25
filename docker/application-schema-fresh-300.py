@@ -584,85 +584,102 @@ async def _migrate() -> Mapping[str, Any]:
     if profile == "production":
         fence, fence_sha256 = _require_fixed_fence()
         _verify_fence_candidate(fence, contract)
+    temporary_environment = {
+        "KOR_TRAVEL_MAP_PG_DSN": os.environ.get("KOR_TRAVEL_MAP_PG_DSN"),
+        _SCHEMA_OWNER_ROLE_ENV: os.environ.get(_SCHEMA_OWNER_ROLE_ENV),
+    }
     os.environ["KOR_TRAVEL_MAP_PG_DSN"] = dsn
     os.environ[_SCHEMA_OWNER_ROLE_ENV] = "true"
-    engine = make_async_engine(dsn, pool_size=1)
     try:
-        async with engine.begin() as connection:
-            database_identity = await _assert_restricted_migrator_session(connection, fence)
-            await _acquire_operation_lock(connection)
-            await _assert_virgin_version_table(connection)
-            if fence is not None:
-                live_fence, live_fence_sha256 = _require_fixed_fence()
-                if live_fence != fence or live_fence_sha256 != fence_sha256:
-                    raise FreshMigrationError(
-                        "fresh 300 migrate fence changed before root migration"
+        engine = make_async_engine(dsn, pool_size=1)
+        try:
+            async with engine.begin() as connection:
+                database_identity = await _assert_restricted_migrator_session(
+                    connection, fence
+                )
+                await _acquire_operation_lock(connection)
+                await _assert_virgin_version_table(connection)
+                if fence is not None:
+                    live_fence, live_fence_sha256 = _require_fixed_fence()
+                    if live_fence != fence or live_fence_sha256 != fence_sha256:
+                        raise FreshMigrationError(
+                            "fresh 300 migrate fence changed before root migration"
+                        )
+                await connection.run_sync(_upgrade_on_existing_connection, config)
+                destination_facet = await _assert_exact_destination_version(
+                    connection, contract["destination_alembic_version_sha256"]
+                )
+                if fence is None:
+                    result: Mapping[str, Any] = {
+                        "schema": "kor-travel-map.application-fresh-300-migration.v2",
+                        "outcome": "migrated",
+                        "authorization": "local-dev",
+                        "destination_head": _DESTINATION_HEAD,
+                        "post_destination_alembic_version_sha256": destination_facet,
+                    }
+                else:
+                    source_catalog, seed_sha256, destination_facet = (
+                        await _assert_application_receipts(
+                            connection,
+                            contract,
+                            expected_catalogs=frozenset(
+                                {contract["source_catalog_sha256"]}
+                            ),
+                        )
                     )
-            await connection.run_sync(_upgrade_on_existing_connection, config)
-            destination_facet = await _assert_exact_destination_version(
-                connection, contract["destination_alembic_version_sha256"]
-            )
-            if fence is None:
-                result: Mapping[str, Any] = {
-                    "schema": "kor-travel-map.application-fresh-300-migration.v2",
-                    "outcome": "migrated",
-                    "authorization": "local-dev",
-                    "destination_head": _DESTINATION_HEAD,
-                    "post_destination_alembic_version_sha256": destination_facet,
-                }
-            else:
-                source_catalog, seed_sha256, destination_facet = (
-                    await _assert_application_receipts(
+                    live_fence, live_fence_sha256 = _require_fixed_fence()
+                    if live_fence != fence or live_fence_sha256 != fence_sha256:
+                        raise FreshMigrationError(
+                            "fresh 300 migrate fence changed before receipt commit"
+                        )
+                    result = {
+                        "schema": _RESULT_SCHEMA,
+                        "outcome": "root-committed",
+                        "authorization": "manager-fence",
+                        "operation_id": fence["operation_id"],
+                        "destination_head": _DESTINATION_HEAD,
+                        "map_candidate_commit": fence["map_candidate_commit"],
+                        "map_candidate_image_id": fence["map_candidate_image_id"],
+                        "postgres_image_id": contract["postgres_image_id"],
+                        "reference_manifest_sha256": contract[
+                            "reference_manifest_sha256"
+                        ],
+                        "writer_fence_receipt_sha256": fence_sha256,
+                        "writer_fence_transaction_id": fence["transaction_id"],
+                        "journal_sha256": fence["journal_sha256"],
+                        "journal_generation": fence["journal_generation"],
+                        "database_identity": database_identity,
+                        "post_source_catalog_sha256": source_catalog,
+                        "post_seed_sha256": seed_sha256,
+                        "expected_privileged_residue_sha256": contract[
+                            "privileged_residue_sha256"
+                        ],
+                        "expected_destination_alembic_version_sha256": contract[
+                            "destination_alembic_version_sha256"
+                        ],
+                        "post_destination_alembic_version_sha256": destination_facet,
+                    }
+                    await _insert_operation_receipt(
                         connection,
-                        contract,
-                        expected_catalogs=frozenset({contract["source_catalog_sha256"]}),
+                        fence=fence,
+                        fence_sha256=fence_sha256,
+                        contract=contract,
+                        database_identity=database_identity,
+                        result=result,
                     )
-                )
-                live_fence, live_fence_sha256 = _require_fixed_fence()
-                if live_fence != fence or live_fence_sha256 != fence_sha256:
-                    raise FreshMigrationError(
-                        "fresh 300 migrate fence changed before receipt commit"
-                    )
-                result = {
-                    "schema": _RESULT_SCHEMA,
-                    "outcome": "root-committed",
-                    "authorization": "manager-fence",
-                    "operation_id": fence["operation_id"],
-                    "destination_head": _DESTINATION_HEAD,
-                    "map_candidate_commit": fence["map_candidate_commit"],
-                    "map_candidate_image_id": fence["map_candidate_image_id"],
-                    "postgres_image_id": contract["postgres_image_id"],
-                    "reference_manifest_sha256": contract["reference_manifest_sha256"],
-                    "writer_fence_receipt_sha256": fence_sha256,
-                    "writer_fence_transaction_id": fence["transaction_id"],
-                    "journal_sha256": fence["journal_sha256"],
-                    "journal_generation": fence["journal_generation"],
-                    "database_identity": database_identity,
-                    "post_source_catalog_sha256": source_catalog,
-                    "post_seed_sha256": seed_sha256,
-                    "expected_privileged_residue_sha256": contract[
-                        "privileged_residue_sha256"
-                    ],
-                    "expected_destination_alembic_version_sha256": contract[
-                        "destination_alembic_version_sha256"
-                    ],
-                    "post_destination_alembic_version_sha256": destination_facet,
-                }
-                await _insert_operation_receipt(
-                    connection,
-                    fence=fence,
-                    fence_sha256=fence_sha256,
-                    contract=contract,
-                    database_identity=database_identity,
-                    result=result,
-                )
-            await connection.execute(text("RESET ROLE"))
-            await _assert_restricted_migrator_session(connection, fence)
+                await connection.execute(text("RESET ROLE"))
+                await _assert_restricted_migrator_session(connection, fence)
+        finally:
+            await engine.dispose()
+        if fence is None:
+            await reconcile_runtime_privileges()
+        return result
     finally:
-        await engine.dispose()
-    if fence is None:
-        await reconcile_runtime_privileges()
-    return result
+        for name, previous in temporary_environment.items():
+            if previous is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = previous
 
 
 async def _recover(operation_id: UUID) -> Mapping[str, Any]:

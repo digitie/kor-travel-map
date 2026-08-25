@@ -483,6 +483,8 @@ def test_fresh_migration_rechecks_manager_fence_before_root_mutation(
         asyncio.run(module._migrate())
     assert calls == 2
     assert not upgraded
+    assert "KOR_TRAVEL_MAP_PG_DSN" not in os.environ
+    assert "KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE" not in os.environ
 
 
 def test_fresh_finalize_accepts_only_manager_fixed_completion_operation() -> None:
