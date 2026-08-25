@@ -25,6 +25,9 @@ PROOF_MANIFEST=""
 IMAGE_PROOF_MANIFEST=""
 DEPENDENCY_SBOM=""
 RECEIPT_TMP=""
+API_RECEIPT_PREEXISTED=0
+API_RECEIPT_FOR_VERIFY=""
+RECEIPT_FOR_VERIFY=""
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -58,6 +61,8 @@ canonicalize_private_output() {
   local raw_parent raw_name canonical_parent canonical_path
   raw_parent="$(dirname -- "$raw_path")"
   raw_name="$(basename -- "$raw_path")"
+  [ "$raw_name" != "." ] && [ "$raw_name" != ".." ] || \
+    die "$description file name이 잘못됐다"
   [ -d "$raw_parent" ] || die "$description parent directory가 없다"
   canonical_parent="$(realpath -e -- "$raw_parent")"
   [ "$canonical_parent" = "$raw_parent" ] || \
@@ -71,10 +76,12 @@ path = Path(sys.argv[1])
 metadata = path.lstat()
 if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
     raise SystemExit("receipt parent must be a regular directory")
-if metadata.st_uid != int(sys.argv[2]) or stat.S_IMODE(metadata.st_mode) & 0o022:
+if metadata.st_uid != int(sys.argv[2]) or stat.S_IMODE(metadata.st_mode) & 0o077:
     raise SystemExit("receipt parent must be private to the invoking operator")
 PY
-  canonical_path="$(realpath -m -- "$canonical_parent/$raw_name")"
+  # parent만 physical path로 확정하고 final component는 절대 follow하지 않는다.
+  # 기존 receipt는 아래 O_NOFOLLOW open이 symlink를 거부해야 한다.
+  canonical_path="$canonical_parent/$raw_name"
   case "$canonical_path" in
     "$REPOSITORY_ROOT"|"$REPOSITORY_ROOT"/*)
       die "$description path는 repository 밖이어야 한다"
@@ -88,27 +95,183 @@ RECEIPT="$(canonicalize_private_output "$RECEIPT" "paired receipt")"
 [ "$API_RECEIPT" != "$RECEIPT" ] || die "API receipt와 paired receipt path는 달라야 한다"
 RECEIPT_PARENT="$(dirname -- "$RECEIPT")"
 if [ "$MODE" = "build" ]; then
-  [[ ! -e "$API_RECEIPT" && ! -L "$API_RECEIPT" ]] || die "API receipt target이 이미 존재한다"
   [[ ! -e "$RECEIPT" && ! -L "$RECEIPT" ]] || die "paired receipt target이 이미 존재한다"
+  if [[ -e "$API_RECEIPT" || -L "$API_RECEIPT" ]]; then
+    API_RECEIPT_PREEXISTED=1
+  fi
 else
-  for existing_receipt in "$API_RECEIPT" "$RECEIPT"; do
-    python3 - "$existing_receipt" "$(id -u)" <<'PY'
+  [[ -e "$API_RECEIPT" || -L "$API_RECEIPT" ]] || die "API receipt가 없다"
+  [[ -e "$RECEIPT" || -L "$RECEIPT" ]] || die "paired receipt가 없다"
+fi
+
+snapshot_strict_receipt() {
+  local source_path="$1"
+  local snapshot_path="$2"
+  local description="$3"
+  python3 - "$source_path" "$snapshot_path" "$(id -u)" "$description" <<'PY'
+from __future__ import annotations
+
+import json
+import os
 import stat
 import sys
 from pathlib import Path
 
-path = Path(sys.argv[1])
-metadata = path.lstat()
-if (
-    not stat.S_ISREG(metadata.st_mode)
-    or stat.S_ISLNK(metadata.st_mode)
-    or stat.S_IMODE(metadata.st_mode) != 0o600
-    or metadata.st_uid != int(sys.argv[2])
+source = Path(sys.argv[1])
+snapshot = Path(sys.argv[2])
+expected_uid = int(sys.argv[3])
+description = sys.argv[4]
+maximum_size = 1024 * 1024
+
+parent = source.parent
+try:
+    named_parent = parent.lstat()
+    if parent.resolve(strict=True) != parent:
+        raise SystemExit(f"{description} parent is not a canonical physical directory")
+except OSError as exc:
+    raise SystemExit(f"{description} parent cannot be inspected safely: {exc}") from exc
+
+parent_flags = os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW
+try:
+    parent_fd = os.open(parent, parent_flags)
+except OSError as exc:
+    raise SystemExit(f"{description} parent cannot be opened safely: {exc}") from exc
+
+try:
+    opened_parent = os.fstat(parent_fd)
+    if (
+        not stat.S_ISDIR(opened_parent.st_mode)
+        or stat.S_ISLNK(named_parent.st_mode)
+        or opened_parent.st_uid != expected_uid
+        or stat.S_IMODE(opened_parent.st_mode) & 0o077
+        or (opened_parent.st_dev, opened_parent.st_ino)
+        != (named_parent.st_dev, named_parent.st_ino)
+    ):
+        raise SystemExit(f"{description} parent is not a private operator-owned directory")
+
+    flags = os.O_RDONLY | os.O_NONBLOCK | os.O_CLOEXEC | os.O_NOFOLLOW
+    try:
+        source_fd = os.open(source.name, flags, dir_fd=parent_fd)
+    except OSError as exc:
+        raise SystemExit(f"{description} cannot be opened safely: {exc}") from exc
+
+    with os.fdopen(source_fd, "rb", closefd=True) as stream:
+        opened = os.fstat(stream.fileno())
+        try:
+            named_before = os.stat(source.name, dir_fd=parent_fd, follow_symlinks=False)
+        except OSError as exc:
+            raise SystemExit(f"{description} path changed before inspection: {exc}") from exc
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or stat.S_ISLNK(named_before.st_mode)
+            or stat.S_IMODE(opened.st_mode) != 0o600
+            or opened.st_uid != expected_uid
+            or opened.st_nlink != 1
+            or (opened.st_dev, opened.st_ino) != (named_before.st_dev, named_before.st_ino)
+        ):
+            raise SystemExit(
+                f"{description} must be one mode 0600 regular non-symlink file "
+                "owned by the operator"
+            )
+        payload = stream.read(maximum_size + 1)
+        if len(payload) > maximum_size:
+            raise SystemExit(f"{description} exceeds the maximum trusted size")
+        try:
+            parsed = json.loads(payload)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise SystemExit(f"{description} is not valid UTF-8 JSON: {exc}") from exc
+        canonical = (
+            json.dumps(parsed, sort_keys=True, separators=(",", ":")).encode("utf-8") + b"\n"
+        )
+        if not isinstance(parsed, dict) or payload != canonical:
+            raise SystemExit(f"{description} is not one canonical JSON object")
+        opened_after = os.fstat(stream.fileno())
+
+    try:
+        named_after = os.stat(source.name, dir_fd=parent_fd, follow_symlinks=False)
+    except OSError as exc:
+        raise SystemExit(f"{description} path changed during inspection: {exc}") from exc
+finally:
+    os.close(parent_fd)
+
+stable_fields = ("st_dev", "st_ino", "st_uid", "st_mode", "st_nlink", "st_size", "st_mtime_ns", "st_ctime_ns")
+if any(getattr(opened, field) != getattr(opened_after, field) for field in stable_fields) or any(
+    getattr(opened_after, field) != getattr(named_after, field) for field in stable_fields
 ):
-    raise SystemExit("receipt must be a mode 0600 regular non-symlink file owned by the operator")
+    raise SystemExit(f"{description} changed during inspection")
+
+destination_flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC | os.O_NOFOLLOW
+destination_fd = os.open(snapshot, destination_flags, 0o600)
+with os.fdopen(destination_fd, "wb", closefd=True) as stream:
+    os.fchmod(stream.fileno(), 0o600)
+    stream.write(payload)
+    stream.flush()
+    os.fsync(stream.fileno())
 PY
-  done
-fi
+}
+
+publish_private_receipt_no_replace() {
+  local source_path="$1"
+  local destination_path="$2"
+  python3 - "$source_path" "$destination_path" "$(id -u)" <<'PY'
+from __future__ import annotations
+
+import os
+import stat
+import sys
+from pathlib import Path
+
+source = Path(sys.argv[1])
+destination = Path(sys.argv[2])
+expected_uid = int(sys.argv[3])
+if source.parent != destination.parent:
+    raise SystemExit("receipt staging and destination must share one directory")
+
+parent_fd = os.open(
+    source.parent,
+    os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+)
+try:
+    parent_metadata = os.fstat(parent_fd)
+    if (
+        parent_metadata.st_uid != expected_uid
+        or stat.S_IMODE(parent_metadata.st_mode) & 0o077
+    ):
+        raise SystemExit("receipt parent must remain private to the invoking operator")
+
+    source_fd = os.open(
+        source.name,
+        os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+        dir_fd=parent_fd,
+    )
+    try:
+        source_metadata = os.fstat(source_fd)
+        if (
+            not stat.S_ISREG(source_metadata.st_mode)
+            or source_metadata.st_uid != expected_uid
+            or stat.S_IMODE(source_metadata.st_mode) != 0o600
+            or source_metadata.st_nlink != 1
+        ):
+            raise SystemExit("staged receipt is not one private regular file")
+        os.fsync(source_fd)
+        try:
+            os.link(
+                source.name,
+                destination.name,
+                src_dir_fd=parent_fd,
+                dst_dir_fd=parent_fd,
+                follow_symlinks=False,
+            )
+        except FileExistsError as exc:
+            raise SystemExit("paired receipt target appeared during publication") from exc
+        os.unlink(source.name, dir_fd=parent_fd)
+        os.fsync(parent_fd)
+    finally:
+        os.close(source_fd)
+finally:
+    os.close(parent_fd)
+PY
+}
 
 SEALED_PARENT="$(mktemp -d "${TMPDIR:-/tmp}/ktm300-paired-candidate.XXXXXX")"
 SEALED_ROOT="$SEALED_PARENT/source"
@@ -183,18 +346,36 @@ cmp -s "$sealed_builder" "$SCRIPT_DIR/build-application-300-paired-candidate.sh"
   die "executing paired builder가 sealed candidate commit과 다르다"
 builder_script_sha256="$(sha256sum "$sealed_builder" | awk '{print $1}')"
 
+# API receipt가 원자적으로 발행된 뒤 paired 단계가 중단된 경우는
+# 원본을 삭제하거나 그대로 신뢰하지 않는다. O_NOFOLLOW로 열고 owner/mode/
+# link count와 inode/metadata가 안정적인 한 번의 byte snapshot만 아래 verifier에
+# 넘긴다. 그러면 같은 commit/image/receipt가 아닌 partial artifact는 닫힌다.
+if [ "$MODE" = "build" ] && [ "$API_RECEIPT_PREEXISTED" -eq 0 ]; then
+  api_builder=(
+    "$SCRIPT_DIR/build-application-300-candidate.sh"
+    --candidate-commit "$CANDIDATE_COMMIT"
+    --image "$API_IMAGE"
+    --git-root "$GIT_ROOT"
+    --receipt "$API_RECEIPT"
+  )
+  "${api_builder[@]}" >&2
+fi
+API_RECEIPT_FOR_VERIFY="$SEALED_PARENT/api-receipt.snapshot"
+snapshot_strict_receipt "$API_RECEIPT" "$API_RECEIPT_FOR_VERIFY" "API receipt"
+if [ "$MODE" = "verify" ]; then
+  RECEIPT_FOR_VERIFY="$SEALED_PARENT/paired-receipt.snapshot"
+  snapshot_strict_receipt "$RECEIPT" "$RECEIPT_FOR_VERIFY" "paired receipt"
+fi
+
 api_builder=(
   "$SCRIPT_DIR/build-application-300-candidate.sh"
   --candidate-commit "$CANDIDATE_COMMIT"
   --image "$API_IMAGE"
   --git-root "$GIT_ROOT"
-  --receipt "$API_RECEIPT"
+  --receipt "$API_RECEIPT_FOR_VERIFY"
 )
-if [ "$MODE" = "build" ]; then
-  "${api_builder[@]}" >&2
-fi
 api_candidate_json="$("${api_builder[@]}" --verify)" || die "API candidate 검증에 실패했다"
-api_receipt_sha256="$(sha256sum "$API_RECEIPT" | awk '{print $1}')"
+api_receipt_sha256="$(sha256sum "$API_RECEIPT_FOR_VERIFY" | awk '{print $1}')"
 
 candidate_tree="$(git -C "$GIT_ROOT" rev-parse "${CANDIDATE_COMMIT}^{tree}")"
 candidate_dockerfile_sha256="$(sha256sum "$SEALED_ROOT/docker/dagster.Dockerfile" | awk '{print $1}')"
@@ -597,15 +778,23 @@ if [ "$MODE" = "build" ]; then
   RECEIPT_TMP="$(mktemp "$RECEIPT_PARENT/.ktm300-paired-build.XXXXXX")"
   cp "$EXPECTED_RECEIPT" "$RECEIPT_TMP"
   chmod 600 "$RECEIPT_TMP"
-  mv "$RECEIPT_TMP" "$RECEIPT"
+  publish_private_receipt_no_replace "$RECEIPT_TMP" "$RECEIPT"
   RECEIPT_TMP=""
 else
-  cmp -s "$EXPECTED_RECEIPT" "$RECEIPT" || \
+  cmp -s "$EXPECTED_RECEIPT" "$RECEIPT_FOR_VERIFY" || \
     die "paired candidate receipt가 현재 관측한 API + Dagster images와 다르다"
 fi
 
+# 최종 출력도 build/verify가 검증한 동일한 안정 snapshot에서만 읽는다.
+if [ "$MODE" = "build" ]; then
+  RECEIPT_FOR_VERIFY="$SEALED_PARENT/paired-receipt.snapshot"
+  snapshot_strict_receipt "$RECEIPT" "$RECEIPT_FOR_VERIFY" "paired receipt"
+  cmp -s "$EXPECTED_RECEIPT" "$RECEIPT_FOR_VERIFY" || \
+    die "published paired candidate receipt가 expected receipt와 다르다"
+fi
+
 # build/verify 모두 stdout에는 strict receipt JSON 한 줄만 남긴다.
-python3 - "$RECEIPT" <<'PY'
+python3 - "$RECEIPT_FOR_VERIFY" <<'PY'
 import json
 import sys
 from pathlib import Path

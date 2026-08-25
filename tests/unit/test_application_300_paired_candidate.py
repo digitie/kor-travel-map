@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -12,6 +14,68 @@ from typing import Any
 import pytest
 
 ROOT = Path(__file__).resolve().parents[2]
+
+
+def _strict_receipt_snapshot_program() -> str:
+    source = (
+        ROOT / "scripts" / "build-application-300-paired-candidate.sh"
+    ).read_text(encoding="utf-8")
+    marker = (
+        '  python3 - "$source_path" "$snapshot_path" "$(id -u)" '
+        '"$description" <<\'PY\'\n'
+    )
+    _, found, remainder = source.partition(marker)
+    assert found
+    program, found, _ = remainder.partition("\nPY\n}")
+    assert found
+    return program
+
+
+def _snapshot_receipt(source: Path, destination: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            _strict_receipt_snapshot_program(),
+            str(source),
+            str(destination),
+            str(os.getuid()),
+            "API receipt",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def _private_receipt_publish_program() -> str:
+    source = (
+        ROOT / "scripts" / "build-application-300-paired-candidate.sh"
+    ).read_text(encoding="utf-8")
+    marker = (
+        '  python3 - "$source_path" "$destination_path" "$(id -u)" <<\'PY\'\n'
+    )
+    _, found, remainder = source.partition(marker)
+    assert found
+    program, found, _ = remainder.partition("\nPY\n}")
+    assert found
+    return program
+
+
+def _publish_receipt(source: Path, destination: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            _private_receipt_publish_program(),
+            str(source),
+            str(destination),
+            str(os.getuid()),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
 
 
 def _load_storage_helper(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
@@ -111,6 +175,152 @@ def test_paired_builder_seals_both_images_and_one_dagster_launch_image() -> None
     assert 'launch["image_default_webserver_argv"] != [' in rehearsal
     assert 'launch["daemon_argv"] != [' in rehearsal
     assert 'launch["metadata_database_identity_permit"] != {' in rehearsal
+
+
+@pytest.mark.unit
+def test_api_only_partial_receipt_resumes_only_through_exact_verifier() -> None:
+    """API publish 뒤 중단은 삭제 없이 exact verify 뒤 Dagster로 재개한다."""
+    script = (
+        ROOT / "scripts" / "build-application-300-paired-candidate.sh"
+    ).read_text(encoding="utf-8")
+
+    detects_partial = 'API_RECEIPT_PREEXISTED=1'
+    fresh_api_build = (
+        'if [ "$MODE" = "build" ] && [ "$API_RECEIPT_PREEXISTED" -eq 0 ]; then'
+    )
+    stable_snapshot = (
+        'snapshot_strict_receipt "$API_RECEIPT" "$API_RECEIPT_FOR_VERIFY" '
+        '"API receipt"'
+    )
+    exact_verify = (
+        'api_candidate_json="$("${api_builder[@]}" --verify)" || '
+        'die "API candidate 검증에 실패했다"'
+    )
+    dagster_build = "docker build --pull=false"
+
+    assert script.index(detects_partial) < script.index(fresh_api_build)
+    assert script.index(fresh_api_build) < script.index(stable_snapshot)
+    assert script.index(stable_snapshot) < script.index(exact_verify)
+    assert script.index(exact_verify) < script.index(dagster_build)
+    assert '--receipt "$API_RECEIPT_FOR_VERIFY"' in script
+    assert 'rm -f -- "$API_RECEIPT"' not in script
+    assert 'rm -- "$API_RECEIPT"' not in script
+
+
+@pytest.mark.unit
+def test_partial_receipt_snapshot_is_stable_private_and_does_not_mutate_source(
+    tmp_path: Path,
+) -> None:
+    tmp_path.chmod(0o700)
+    source = tmp_path / "api-candidate-build.json"
+    source.write_bytes(b'{"candidate":"exact"}\n')
+    source.chmod(0o600)
+    source_inode = source.stat().st_ino
+    destination = tmp_path / "verified.snapshot"
+
+    result = _snapshot_receipt(source, destination)
+
+    assert result.returncode == 0, result.stderr
+    assert source.read_bytes() == b'{"candidate":"exact"}\n'
+    assert source.stat().st_ino == source_inode
+    assert destination.read_bytes() == source.read_bytes()
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o600
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("hostile_kind", ["symlink", "hardlink", "malformed-mode"])
+def test_partial_receipt_snapshot_rejects_unsafe_files(
+    tmp_path: Path,
+    hostile_kind: str,
+) -> None:
+    """final symlink·hardlink·mode drift는 exact API verifier 전에 fail-close한다."""
+    tmp_path.chmod(0o700)
+    source = tmp_path / "api-candidate-build.json"
+    target = tmp_path / "foreign.json"
+    target.write_bytes(b'{"candidate":"foreign-or-malformed"}\n')
+    target.chmod(0o600)
+    if hostile_kind == "symlink":
+        source.symlink_to(target)
+    elif hostile_kind == "hardlink":
+        source.hardlink_to(target)
+    else:
+        source.write_bytes(target.read_bytes())
+        source.chmod(0o640)
+
+    destination = tmp_path / "must-not-exist.snapshot"
+    result = _snapshot_receipt(source, destination)
+
+    assert result.returncode != 0
+    assert not destination.exists()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "malformed_payload",
+    [
+        b"not-json\n",
+        b'{"duplicate":1, "duplicate":2}\n',
+        b'{"valid":true}',
+        b"[]\n",
+    ],
+)
+def test_partial_receipt_snapshot_rejects_malformed_content(
+    tmp_path: Path,
+    malformed_payload: bytes,
+) -> None:
+    tmp_path.chmod(0o700)
+    source = tmp_path / "api-candidate-build.json"
+    source.write_bytes(malformed_payload)
+    source.chmod(0o600)
+    destination = tmp_path / "must-not-exist.snapshot"
+
+    result = _snapshot_receipt(source, destination)
+
+    assert result.returncode != 0
+    assert not destination.exists()
+
+
+@pytest.mark.unit
+def test_paired_receipt_publish_is_no_replace_and_fsync_ready(tmp_path: Path) -> None:
+    tmp_path.chmod(0o700)
+    source = tmp_path / ".paired.staged"
+    source.write_bytes(b'{"candidate":"exact"}\n')
+    source.chmod(0o600)
+    destination = tmp_path / "paired-candidate-build.json"
+
+    result = _publish_receipt(source, destination)
+
+    assert result.returncode == 0, result.stderr
+    assert not source.exists()
+    assert destination.read_bytes() == b'{"candidate":"exact"}\n'
+    assert stat.S_IMODE(destination.stat().st_mode) == 0o600
+    assert destination.stat().st_nlink == 1
+
+    replacement = tmp_path / ".paired.replacement"
+    replacement.write_bytes(b'{"candidate":"foreign"}\n')
+    replacement.chmod(0o600)
+    refused = _publish_receipt(replacement, destination)
+
+    assert refused.returncode != 0
+    assert replacement.exists()
+    assert destination.read_bytes() == b'{"candidate":"exact"}\n'
+
+
+@pytest.mark.unit
+def test_receipt_helpers_reject_group_or_world_visible_parent(tmp_path: Path) -> None:
+    tmp_path.chmod(0o750)
+    source = tmp_path / "api-candidate-build.json"
+    source.write_bytes(b'{"candidate":"exact"}\n')
+    source.chmod(0o600)
+
+    snapshot = _snapshot_receipt(source, tmp_path / "snapshot")
+    publish = _publish_receipt(source, tmp_path / "paired-candidate-build.json")
+
+    assert snapshot.returncode != 0
+    assert publish.returncode != 0
+    assert source.exists()
+    assert not (tmp_path / "snapshot").exists()
+    assert not (tmp_path / "paired-candidate-build.json").exists()
 
 
 @pytest.mark.unit
