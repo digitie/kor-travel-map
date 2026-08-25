@@ -1,5 +1,18 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-26 — H46H 후속 PinVi protected-route 재차단 교차 기록
+
+Manager PR #213 merge `0fb41f9c626fb2bdd82b818b62da25f87c3de057`의 n150 PinVi exact runtime
+검증 결과를 교차 기록한다. 현재 admin live credential로 `/admin`에 로그인한 뒤 브라우저
+context의 `/auth/logout` 응답 `204`를 확인하고, 같은 context에서 `/admin/features`에
+재진입했을 때 최종 경로가 `/admin/login`으로 유지됐다. 이 검증은 인증·세션 상태만 확인하고
+application row나 PinVi 업무 데이터를 쓰지 않았다.
+
+PinVi WebSocket/mutating loop와 consumer reconciliation은 `T-VN-41C`·
+`T-VN-41F1D-D2` 및 Manager `MAP-LIVE-FOLLOWUP`의 남은 active 조건이다. 300 이후 일반
+application row의 내용·건수·업무상 무결성 검증은 수행하지 않으며, 필요하면 fresh schema에
+source/ETL을 처음부터 재적재한다.
+
 ## 2026-08-26 — H46H 후속 Map protected-route 재차단 확인
 
 n150 Map UI에서 현재 Manager smoke credential로 login한 뒤 `/ops/datasets`를 열고 logout을
