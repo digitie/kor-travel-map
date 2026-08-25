@@ -1,5 +1,18 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-25 — T-VN-H46H paired builder 실행 모드 고정 (Draft)
+
+n150에서 exact `dd2ee61f…` source를 sealed한 뒤 outer paired builder가 내부 API
+candidate builder를 직접 실행하는 경로가 Git 모드 `0644`에서 막혔다. 내부 builder를
+`100755`로 정본에 고정하고 회귀 테스트를 추가한다. 변경은 실행 모드뿐이며, 사용자가
+정한 대로 `300` 이후 application row/건수 무결성 비교는 하지 않는다. 새 schema가
+필요한 데이터는 원천/ETL을 처음부터 재적재한다.
+
+### 이 변경의 다음 한 작업
+
+원격 CI와 두 전문 적대 리뷰어의 exact head 확인 후 새 Map SHA를 Docker Manager v5
+release pinset으로 회전하고, n150에서 승인된 `rebuild-pinned --confirm`을 재개한다.
+
 ## 2026-08-25 — T-VN-H46H full integration cluster 격리 보강 (Draft)
 
 PostGIS full integration에서 role-bootstrap만 먼저 실패한 원인을 재현했다. `pg_engine`와
