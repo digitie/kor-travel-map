@@ -1,5 +1,25 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-25 — T-VN-H46H PostGIS CI image drift·teardown 재현 및 수정 (Draft)
+
+PR #1064의 최신 PostGIS 게이트는 단위 테스트는 통과했지만 통합 단계에서만 실패했다.
+원인은 행 데이터 검증이 아니라 `postgis/postgis:16-3.5-alpine` 부동 태그가 기준
+receipt를 만든 image와 달라져 catalog receipt·role setting precondition이 함께 달라진
+것이었다. 통합 fixture image를 기준 source image digest
+`sha256:dc17b064a946f64804d3b15e2ce90d01a444c02c9226a28a54764c083bd81a0c`로 고정해
+schema/bootstrap receipt가 동일한 PostgreSQL/PostGIS 입력에서 실행되도록 했다.
+
+성공적인 role bootstrap 뒤 extension이 `x_extension`에 남아 있는 상태에서 `DROP OWNED`
+를 먼저 실행하면 teardown이 의존성 오류를 냈다. fixture cleanup은 fresh database를
+먼저 강제 삭제한 뒤 cluster role을 정리하도록 순서를 고쳤다. 로컬 검증은
+role-bootstrap `19 passed`, fresh-300/Alembic `3 passed`다. 전체 integration은 로컬
+환경에 Dagster 패키지가 없어 collection 단계에서 중단됐고, Dagster가 설치되는 CI에서
+재실행한다.
+
+이번 수정은 사용자가 정한 대로 `300` 이후 application row의 무결성 검증을 추가하지
+않는다. immutable receipt는 image가 고정된 schema·role·ACL·extension·필수 고정 seed와
+operation replay 경계만 확인한다. 필요 시 새 schema에 원천 데이터를 처음부터 재적재한다.
+
 ## 2026-08-25 — T-VN-H46H PostGIS fixture와 locale canonicalization CI 복구 (Draft)
 
 PR #1064의 PostGIS 실패를 조사해 공통 원인을 재현했다. `postgis/postgis:16-3.5-alpine`의

@@ -1,5 +1,27 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-25 — T-VN-H46H PostGIS CI image drift·teardown 수정 (Draft)
+
+PR #1064 최신 CI에서 단위 게이트는 모두 통과했으나 PostGIS 통합 fixture가 부동
+`postgis/postgis:16-3.5-alpine` 태그를 사용해 source receipt와 다른 catalog·role setting을
+받는 문제가 드러났다. fixture를 기준 source image digest
+`sha256:dc17b064a946f64804d3b15e2ce90d01a444c02c9226a28a54764c083bd81a0c`로 고정했고,
+성공 bootstrap의 extension 의존성 때문에 `DROP OWNED`가 실패하던 teardown 순서도
+database 삭제 후 role 정리로 교정했다.
+
+로컬 role-bootstrap `19 passed`, fresh-300/Alembic `3 passed`. 전체 integration은 현재
+환경에 Dagster 패키지가 없어 collection에서 중단됐으므로, 변경을 push한 뒤 CI 통합
+재실행 결과를 확인한다.
+
+이번 PR의 row-level application 데이터 무결성은 release gate가 아니다. immutable receipt는
+고정 image에서의 schema·role·ACL·extension·필수 고정 seed 및 operation replay 경계만
+검증하며, 데이터가 필요하면 새 `300` schema로 원천 재적재한다.
+
+### 이 PR의 다음 한 작업
+
+변경을 보안 감사 후 원격에 커밋·푸시하고, PR #1064의 전체 CI가 green인지 확인한다. 두
+전문 적대 리뷰어의 exact-commit P0/P1=0을 다시 확인한 뒤 Draft를 해제하고 머지한다.
+
 ## 2026-08-25 — T-VN-H46H PostGIS 통합 fixture·locale 계약 정렬 (Draft)
 
 PR #1064 PostGIS 게이트의 실제 실패를 fixture/environment로 숨기지 않고 고쳤다. 공식 PostGIS

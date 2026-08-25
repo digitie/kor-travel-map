@@ -493,9 +493,13 @@ async def _drop_target_and_roles(raw_dsn: str, roles: tuple[str, ...] = ()) -> N
     try:
         async with admin_engine.connect() as connection:
             autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
+            await autocommit.execute(text(f'DROP DATABASE IF EXISTS "{_DATABASE}" WITH (FORCE)'))
+            # A successful bootstrap makes the extension objects depend on
+            # ``x_extension``. Drop the database before DROP OWNED so role
+            # cleanup cannot try to remove that schema while its extensions
+            # still exist.
             for role in roles:
                 await autocommit.execute(text(f'DROP OWNED BY "{role}"'))
-            await autocommit.execute(text(f'DROP DATABASE IF EXISTS "{_DATABASE}" WITH (FORCE)'))
             for role in roles:
                 await autocommit.execute(text(f'DROP ROLE IF EXISTS "{role}"'))
     finally:

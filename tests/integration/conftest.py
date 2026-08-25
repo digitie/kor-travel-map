@@ -2,7 +2,8 @@
 
 ``docs/test-strategy.md §4.1`` 명세 구현:
 
-- ``pg_container`` — session-scope ``postgis/postgis:16-3.5-alpine``.
+- ``pg_container`` — session-scope source image digest가 고정된
+  ``postgis/postgis:16-3.5-alpine``.
 - ``pg_engine`` — session-scope ``AsyncEngine`` + 4 schema + 3 extension 생성.
 - ``feature_schema`` — session-scope (현재는 placeholder, Sprint 2 실 DDL 박힘).
 - ``pg_session`` — per-test ``AsyncSession`` + 자동 rollback.
@@ -46,7 +47,15 @@ _SCHEMAS: tuple[str, ...] = ("feature", "provider_sync", "ops", "x_extension")
 _EXTENSIONS: tuple[str, ...] = ("postgis", "pg_trgm", "pgcrypto")
 
 # Docker image (docs/test-strategy.md §4.1)
-_POSTGIS_IMAGE: str = "postgis/postgis:16-3.5-alpine"
+# The immutable baseline receipt was materialized from this exact image.  A
+# floating tag can move to a new PostGIS/PostgreSQL patch build with different
+# locale, role settings, or catalog definitions and make a fresh-300 test fail
+# before it reaches the application assertions.
+_POSTGIS_IMAGE: str = (
+    "postgis/postgis@sha256:dc17b064a946f64804d3b15e2ce90d01a444c02c9226a28a54764c083bd81a0c"
+)
+
+
 def _import_testcontainers() -> Any | None:
     """testcontainers가 설치된 경우 import, 아니면 None.
 

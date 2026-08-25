@@ -12,7 +12,8 @@ tests/
   unit/           — DB 없음. Fake repo (in-memory Protocol 구현).
                     pytest + pytest-asyncio + hypothesis.
                     실행 시간: < 5초/전체.
-  integration/    — testcontainers PostGIS (postgis/postgis:16-3.5-alpine).
+  integration/    — testcontainers PostGIS (postgis/postgis:16-3.5-alpine,
+                    source baseline digest 고정).
                     DDL fixture 세션 단위 적용. raw SQL + 인덱스 EXPLAIN 검증.
                     실행 시간: < 5분/전체.
   e2e/            — 디버그 API + integration DB.
@@ -189,7 +190,9 @@ Phase 1은 **관측만**(Dagster swap 차단 없음).
 # conftest.py
 @pytest.fixture(scope="session")
 async def pg_container():
-    with PostgresContainer("postgis/postgis:16-3.5-alpine") as c:
+    with PostgresContainer(
+        "postgis/postgis@sha256:dc17b064a946f64804d3b15e2ce90d01a444c02c9226a28a54764c083bd81a0c"
+    ) as c:
         c.start()
         yield c
 
@@ -813,7 +816,7 @@ provider/ETL·process·테스트 운영 결정이라 ADR에서 분리해 본 문
 
 - **4단계 테스트 구조 + 계층별 coverage 목표** (구 ADR-014): `tests/`를
   unit(DB 없음, Fake repo, hypothesis) / integration(testcontainers PostGIS
-  `postgis/postgis:16-3.5-alpine`, raw SQL EXPLAIN 인덱스 검증) /
+  `postgis/postgis:16-3.5-alpine` source digest 고정, raw SQL EXPLAIN 인덱스 검증) /
   e2e(httpx.AsyncClient) / fixtures(provider 호출 녹화·재생) 4단계로 분리하고
   `core/ 90%·infra/ 80%·providers/ 70%·전체 80%`를 목표로 두며, 모든 provider
   변환 함수는 정상/엣지/실패 ≥3 fixture를 강제한다. kor-travel-geo 테스트 분리
