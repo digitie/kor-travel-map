@@ -14,6 +14,9 @@ outbox·문서 정리는 `6b60fee0`으로 원격 push했고 Manager의 새 wire�
 프로세스에 남긴 것이 원인이었다. helper가 모든 종료 경로에서 원상복구하도록 고쳤으며 오염 재현
 순서와 실제 PostgreSQL root/finalize를 다시 통과했다.
 
+범용 feature-update/cache-target 함수·상수·SQL 이름의 `pinvi`도 `service_owned`/`relay_owned`
+용어로 정리했다. 실제 외부 시스템 값과 PinVi 전용 auth/curation contract는 변경하지 않았다.
+
 ### 이 PR의 다음 한 작업
 
 CI 환경 격리 수정을 커밋·push하고 새 Map SHA로 Manager pinset을 다시 회전한다. 그 뒤

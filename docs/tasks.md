@@ -44,14 +44,14 @@ barrier로 직렬화한다.
   - [~] `T-VN-M03`(curated 동시 생성 writer 병합, import/live acceptance 잔여) ∥ [~] `T-VN-M04`(범용 Feature 요청 큐 병합, paired consumer acceptance 잔여)
   - [~] `T-VN-M05`(provider 발행 시 중복 판정 — 자동 병합 금지, paired consumer reconciliation 설계 진행)
 - **Lane H — Alembic 세대 재정본화**
-  - [ ] `T-VN-H46H` — `0236_tvn41s_compaction_drained` → `300` 단일 root baseline·비파기 운영 handoff
+  - [ ] `T-VN-H46H` — `0236_tvn41s_compaction_drained` 정본에서 생성한 `300` 단일 root baseline·fresh 재구축
 - **Lane C — 사문화 정리·미구현 dataset (다른 lane과 무관, 아무 때나)**
 - **최종 cutover**
   - [ ] `T-VN-39`
 - **보류/외부 추적**
   - [ ] `T-101` — Materialized View 도입 검토(조건 발생 시)
 
-### T-VN-H46H: Alembic `300` root baseline과 비파기 `0236 → 300` handoff
+### T-VN-H46H: Alembic `300` root baseline과 fresh application 재구축
 
 - [ ] T-VN-H46H — **현재 Map application schema를 `300` 단일 root baseline으로 재정본화**
 
@@ -61,17 +61,18 @@ barrier로 직렬화한다.
   `0236` 참조 DB에서만 생성한다. n150 DB, n150 backup clone, live acceptance DB를
   생성 source로 사용하지 않는다.
 
-  기존 운영 DB의 전환은 raw `alembic_version`이 정확히 한 행
-  `0236_tvn41s_compaction_drained`일 때만 허용한다. explicit handoff tag, `--purge`,
-  target `300`, writer quiesce, final role/ACL/extension/catalog/data semantic preflight를
-  같은 transaction에서 대조한 뒤 Alembic의 `stamp --purge 300`으로만 metadata를
-  전진시킨다. 일반 startup/upgrade/stamp/downgrade와 수동 version-table SQL은
-  계속 거부한다.
+  n150을 포함한 기존 application DB를 `0236 → 300`으로 stamp하거나 in-place upgrade하지
+  않는다. Docker Manager의 승인된 `rebuild-pinned --confirm`이 exact candidate를 먼저
+  봉인한 뒤 application DB를 새로 만들고, final role bootstrap → restricted root `300` →
+  DB-atomic operation receipt → finalize·permit 순서로만 완성한다. 응답 유실은 같은 operation
+  ID의 append-only DB receipt를 read-only recover하고, receipt 부재와 exact pre-state가 함께
+  증명될 때만 같은 operation을 재실행한다. downgrade·이전 revision restore·수동 version-table
+  SQL은 범위 밖이다.
 
-  완료 조건은 Map baseline PR의 CI·두 전문 적대 리뷰·Docker Manager의 별도 비파기
-  candidate transition/journal 경로·n150 exact candidate 배포·로그인 POST를 포함한
+  완료 조건은 Map baseline PR의 CI·두 전문 적대 리뷰·Docker Manager의 destructive fresh
+  candidate/journal/outbox 경로·n150 exact candidate 배포·로그인 POST를 포함한
   live UI E2E·cleanup residue 0·redacted evidence다. 이 task는 Map PR이 실제 병합된
-  뒤에만 `tasks-done.md`로 이관하며, `T-VN-FINAL-REBUILD` 및 M01~M05의 독립 잔여를
+  뒤에만 `tasks-done.md`로 이관하며, 데이터 재적재와 M01~M05의 독립 live 잔여를
   완료 처리하지 않는다. 설계 정본은
   [`docs/reports/t-vn-h46h-alembic-300-baseline-design-2026-08-24.md`](reports/t-vn-h46h-alembic-300-baseline-design-2026-08-24.md)다.
 
@@ -103,8 +104,9 @@ barrier로 직렬화한다.
   계약 수정 가능. AGENTS.md vNext 우선순위 단락에 동일 취지의 dated note를 둔다.
 - migration 정본: T-VN-H46H candidate의 active graph는 `300` single root이고 source
   archive terminal revision은 `0236_tvn41s_compaction_drained`다. Map `main`은 PR #1064가
-  merge되기 전까지 기존 head를 유지하며, 이 task의 n150 transition은 exact raw `0236` 한 행만
-  controlled `300` handoff할 수 있다. prod 적용 head는 배포 직전 live DB에서 다시 확인한다.
+  merge되기 전까지 기존 head를 유지한다. n150 application DB는 기존 head를 handoff하지 않고
+  approved Manager rebuild가 새 DB로 교체해 exact `300`만 적용한다. 배포 전에는 candidate의
+  active head·PostgreSQL image·paired receipt를 다시 확인한다.
   후속 migration 소유자는 PR 직전 single active head를 확인하고 `300`의 child로 번호를
   배정한다. 두 lane의 migration-bearing PR은 번호 예약부터 merge까지 직렬화한다.
   forward migration 뒤에는 수용 조건이나 실패 복구가 명시적으로 요구하지 않는 한

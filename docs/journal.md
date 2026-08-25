@@ -43,6 +43,13 @@ PostgreSQL root/finalize 3건을 다시 통과했다. 이 수정 원격 push와 
 paired image 실제 build, 누적 전문 적대 재리뷰, CI green, n150 배포와 live UI E2E가 남아 있으므로
 PR은 Draft로 유지한다.
 
+사용자 지시에 따라 범용 feature-update/cache-target 경계의 PinVi 전용 Python 식별자도 제거했다.
+일반 writer guard는 `service_owned`, relay protocol은 `cache_target_refresh_protocol` 용어를 쓰며,
+실제 외부 시스템 값과 PinVi 전용 인증·curation 계약은 바꾸지 않았다. codegraph 영향도 명령은
+기존 Alembic file index schema 오류로 실패해 `rg` 호출자 전수 대조로 대체했다. API guard 회귀,
+변경 source strict mypy와 Ruff는 통과했고 DB 통합 두 건은 로컬 재사용 PostGIS container가
+`public` extension residue를 가져 fixture bootstrap 전에 중단돼 CI의 fresh PostGIS gate로 다시 확인한다.
+
 ## 2026-08-25 — T-VN-M04 Admin BFF 결정 자격 결선 보완 (Draft)
 
 격리된 PinVi→Map M04 실제 브라우저 승인에서 PinVi의 queue receipt는 정상으로

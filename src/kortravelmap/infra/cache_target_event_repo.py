@@ -38,7 +38,7 @@ __all__ = [
     "capture_cache_target_refresh_members",
     "capture_cache_target_refresh_members_by_keys",
     "lock_cache_target_result_streams",
-    "pinvi_cache_target_refresh_protocol_error",
+    "cache_target_refresh_protocol_error",
 ]
 
 CacheTargetResultEventType = Literal[
@@ -121,7 +121,7 @@ class CacheTargetRefreshProtocolViolation(RuntimeError):
         self.reason: CacheTargetRefreshReason = reason
 
 
-_PINVI_CACHE_TARGET_SYSTEM = "pinvi"
+_RELAY_OWNED_EXTERNAL_SYSTEM = "pinvi"
 
 
 _CAPTURE_REFRESH_MEMBERS_SQL = """
@@ -215,7 +215,7 @@ WHERE member.request_id = CAST(:request_id AS uuid)
 ORDER BY member.external_system, member.target_key, member.target_id
 """
 
-_SELECT_PINVI_REFRESH_PROTOCOL_SQL = """
+_SELECT_REFRESH_PROTOCOL_SQL = """
 SELECT member.target_key, member.restore_epoch, stream.restore_epoch AS stream_restore_epoch
 FROM ops.poi_cache_target_refresh_members AS member
 JOIN ops.poi_cache_target_streams AS stream
@@ -555,21 +555,21 @@ async def assert_cache_target_refresh_members_current(
     return members
 
 
-async def pinvi_cache_target_refresh_protocol_error(
+async def cache_target_refresh_protocol_error(
     session: AsyncSession,
     *,
     request_id: str,
     external_system: str,
     target_keys: Sequence[str],
 ) -> str | None:
-    """PinVi queued refresh가 service snapshot과 현 restore epoch를 지키는지 확인한다.
+    """relay-owned queued refresh가 service snapshot과 현 restore epoch를 지키는지 확인한다.
 
-    일반 writer로 과거에 영속된 PinVi request는 member가 없으므로 실행 전에 terminal
+    일반 writer로 과거에 영속된 service-owned request는 member가 없으므로 실행 전에 terminal
     fail-close한다. 이 검사는 stream ``FOR UPDATE``를 같은 transaction 끝까지 유지해
     fence와 status event append 사이에 epoch가 바뀌지 않게 한다.
     """
 
-    if external_system != _PINVI_CACHE_TARGET_SYSTEM:
+    if external_system != _RELAY_OWNED_EXTERNAL_SYSTEM:
         return None
     request_id = _canonical_uuid(request_id, field="request_id")
     canonical_keys = tuple(sorted(set(target_keys)))
@@ -589,7 +589,7 @@ async def pinvi_cache_target_refresh_protocol_error(
         return "PinVi refresh request에 cache target stream이 없습니다."
     rows = (
         await session.execute(
-            text(_SELECT_PINVI_REFRESH_PROTOCOL_SQL),
+            text(_SELECT_REFRESH_PROTOCOL_SQL),
             {"request_id": request_id, "external_system": external_system},
         )
     ).all()

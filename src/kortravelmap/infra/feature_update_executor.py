@@ -26,9 +26,9 @@ from kortravelmap.infra.cache_target_event_repo import (
     append_cache_target_links_reconciled_events,
     append_cache_target_refresh_status_events,
     assert_cache_target_refresh_members_current,
+    cache_target_refresh_protocol_error,
     capture_cache_target_refresh_members_by_keys,
     lock_cache_target_result_streams,
-    pinvi_cache_target_refresh_protocol_error,
 )
 from kortravelmap.infra.feature_update_repo import (
     FeatureUpdateLockBusy,
@@ -1062,7 +1062,7 @@ async def _execute_feature_update_request_locked(
             if started.scope_type == "cache_target_keys":
                 external_system = str(started.scope["external_system"])
                 target_keys = tuple(str(value) for value in started.scope["target_keys"])
-                protocol_error = await pinvi_cache_target_refresh_protocol_error(
+                protocol_error = await cache_target_refresh_protocol_error(
                     session,
                     request_id=started.request_id,
                     external_system=external_system,

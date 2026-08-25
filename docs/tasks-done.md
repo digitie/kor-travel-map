@@ -5,6 +5,11 @@
 
 ## 2026-08-25 — active backlog 완료 하위 항목 정합성 이관
 
+- [x] **범용 Feature 갱신 식별자에서 PinVi 전용 이름 제거** — 일반 feature-update,
+  service-owned cache-target writer guard와 refresh protocol 검사는 relay-owned/service-owned
+  용어로 통일했다. 실제 외부 시스템 값과 PinVi 전용 인증·curation 계약은 그대로 유지하되,
+  범용 함수·상수·SQL 식별자에는 `pinvi`를 넣지 않는다.
+
 - [x] **T-VN-H43 완료 하위 항목** — 2026-08-05 기준선·write-fence dump와 배포 후
   `0083` dump를 manifest/`pg_restore -l`/SHA-256으로 검증했고, 개발 장비 밖 사본도 대조했다.
   신규 빈 DB에서 필요한 superuser extension 선생성 절차와 실제 grantee는
