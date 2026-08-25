@@ -640,22 +640,24 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   contract까지 완료하고, 실제 n150 data-dependent 실행은 위 F1D-D 순서를 따른다
   (그 순서는 `T-VN-FINAL-REBUILD` 배리어 뒤에 열린다).
 
-### T-VN-FINAL-REBUILD — 주요 개발 완료 후 파괴적 재구축 배리어 (2026-08-20 신설)
+### T-VN-FINAL-REBUILD — 주요 개발 완료 후 최종 acceptance 배리어 (2026-08-20 신설)
 
-> **사용자 결정 2026-08-20**: `T-VN-41F1D-D1`의 파괴적 rebuild는 **모든 주요 개발이 끝난 뒤에**
-> 실행한다. 그 실행 시점과 선행조건을 이 task가 소유하고, D1/D2와 F1D-E의 live 실행은 여기에
-> 매단다.
+> **범위 정정(2026-08-26)**: H46H baseline의 파괴적 fresh rebuild는 사용자 승인에 따라
+> 이미 실행·committed됐다. 이 task는 후보가 바뀌어 rebuild를 다시 해야 하는 경우가 아니면
+> 재실행하지 않고, 남은 D1/D2/F1D-E와 41C의 최종 acceptance 순서·barrier를 소유한다.
 
-- [ ] **T-VN-FINAL-REBUILD — 파괴적 재구축 + 전량 재적재 배리어**
+- [~] **T-VN-FINAL-REBUILD — fresh rebuild 완료 후 최종 acceptance 배리어**
 
-  `ktdctl pinvi-pair rebuild-pinned --confirm`은 Map application·Map Dagster·PinVi **세 DB를
-  파기형으로 재생성**하고 일곱 runtime을 고정 candidate로 재기동한 뒤 v6
-  `pinned-runtime-generation-v6.json`과 v8 `pinned-runtime-rebuild-v8-<pinset>.json`을 남긴다.
-  이어서 final schema 위로 provider source·ETL을 전량 재적재한다.
+  H46H가 승인된 `ktdctl pinvi-pair rebuild-pinned --confirm`으로 Map application·Map Dagster·PinVi
+  **세 DB를 fresh 재생성**하고 일곱 runtime을 고정 candidate로 재기동했으며, v6
+  `pinned-runtime-generation-v6.json`과 v8 `pinned-runtime-rebuild-v8-<pinset>.json`을 남겼다.
+  이 task는 해당 committed generation을 D1/F1D-E/D2/41C acceptance에 연결한다. provider
+  source·ETL 전량 재적재는 사용자가 정한 대로 release gate가 아니며, 필요할 때만 별도 운영
+  데이터 준비로 수행한다.
 
-  **왜 미루는가.** v6 generation은 Map/PinVi source revision과 일곱 image ID에 결박된다. 개발이
-  계속되는 동안 실행하면 (a) 다음 머지 즉시 세대가 낡아 attestation 증거가 무효가 되고,
-  (b) 전량 재적재 비용을 그때마다 다시 낸다. 이 acceptance는 두 번 돌릴 값이 아니다.
+  **왜 후속을 분리하는가.** v6 generation은 Map/PinVi source revision과 일곱 image ID에
+  결박된다. 후보가 바뀌면 H46H rebuild를 새 generation으로 다시 수행해야 하지만, 현재
+  committed generation에서는 data-dependent/consumer acceptance만 순서대로 진행한다.
 
   **배리어 해제 조건 (전부 참이어야 착수).** "주요 개발 완료"를 사람 판단에 맡기지 않고
   아래 셋으로 판정한다 — 셋 다 "세대를 낡게 만드는 변경"의 정의다.
@@ -673,8 +675,8 @@ AC: 필요한 외부 DB마다 최신 dump + sha256 + manifest, 주기 실행과 
   - [ ] 고정 release candidate(Map/PinVi 커밋과 일곱 image)를 먼저 확정한다.
 
   **이 배리어가 푸는 것 (순서대로).**
-  1. **현 세대 기준의** v6/v8 문서가 생긴다. 구 v5/v7 문서는 퇴역 입력이며 현재
-     verifier에 사용할 수 없다.
+  1. **완료** — 현 세대 기준의 v6/v8 문서가 H46H committed generation으로 생성됐다. 구 v5/v7
+     문서는 퇴역 입력이며 현재 verifier에 사용할 수 없다.
   2. `T-VN-41F1D-D1` — 일곱 image·세 schema head·pinset attestation과 데이터 비의존 UI smoke.
   3. `T-VN-41F1D-E`의 n150 data-dependent 실행(저장소측 계약은 2026-08-20 완료).
   4. `T-VN-41F1D-D2` — 고정 ID를 요구하는 admin/PinVi mutating live E2E.

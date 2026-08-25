@@ -21,7 +21,9 @@
   사용자가 정한 정책에 따라 기존 application row의 내용·건수·업무상 무결성은 검증하지 않았고,
   이전 revision/기존 DB restore도 수행하지 않았다. 필요하면 fresh `300` schema에 source/ETL을
   처음부터 재적재한다. Features의 고정 ID·두 번째 페이지·컬렉션을 요구하는 data-dependent
-  시나리오는 이 baseline 수락 범위에 포함하지 않는다. M01~M05·41C·최종 cutover의 독립 운영
+  시나리오는 이 baseline 수락 범위에 포함하지 않는다. 전체 운영 acceptance는
+  `T-VN-FINAL-REBUILD` 후속 barrier → `T-VN-41F1D-D1`/`T-VN-41F1D-E` →
+  `T-VN-41F1D-D2` → `T-VN-41C` 순서로 별도 진행하며, M01~M05·최종 cutover의 독립 운영
   잔여도 이 task의 완료로 닫지 않는다.
 
 ## 2026-08-25 — active backlog 완료 하위 항목 정합성 이관
