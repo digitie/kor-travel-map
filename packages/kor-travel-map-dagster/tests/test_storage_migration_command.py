@@ -66,7 +66,16 @@ def test_migrate_runs_dagster_cli_then_requires_exact_single_version_row(
     module = _command_module()
     environment = _migration_environment(tmp_path)
     invoked_with: list[Mapping[str, str]] = []
+    verified_with: list[Mapping[str, str]] = []
     monkeypatch.setattr(module, "_dagster_storage_head", lambda: "candidate-head")
+
+    def _verify_identity(
+        current_environment: Mapping[str, str],
+    ) -> tuple[str, dict[str, object]]:
+        verified_with.append(current_environment)
+        return _SENTINEL_DSN, {}
+
+    monkeypatch.setattr(module, "_verify_database_identity", _verify_identity)
     monkeypatch.setattr(
         module,
         "_run_dagster_instance_migrate",
@@ -85,6 +94,7 @@ def test_migrate_runs_dagster_cli_then_requires_exact_single_version_row(
         "version_num": "candidate-head",
     }
     assert invoked_with == [environment]
+    assert verified_with == [environment, environment]
 
 
 @pytest.mark.parametrize(
@@ -105,6 +115,11 @@ def test_migrate_rejects_missing_multiple_or_mismatched_version_rows(
     module = _command_module()
     environment = _migration_environment(tmp_path)
     monkeypatch.setattr(module, "_dagster_storage_head", lambda: "candidate-head")
+    monkeypatch.setattr(
+        module,
+        "_verify_database_identity",
+        lambda _environment: (_SENTINEL_DSN, {}),
+    )
     monkeypatch.setattr(module, "_run_dagster_instance_migrate", lambda _environment: None)
     monkeypatch.setattr(module, "_read_version_rows", lambda _dsn: rows)
     monkeypatch.setattr(module.os, "environ", environment)
@@ -125,6 +140,11 @@ def test_migrate_failure_never_reflects_metadata_dsn(
     module = _command_module()
     environment = _migration_environment(tmp_path)
     monkeypatch.setattr(module, "_dagster_storage_head", lambda: "candidate-head")
+    monkeypatch.setattr(
+        module,
+        "_verify_database_identity",
+        lambda _environment: (_SENTINEL_DSN, {}),
+    )
 
     def _fail(_environment: Mapping[str, str]) -> None:
         raise module.DagsterStorageMigrationError("dagster_instance_migrate_failed")
