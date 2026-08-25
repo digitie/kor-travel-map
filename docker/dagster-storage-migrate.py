@@ -41,7 +41,8 @@ _PERMIT_PATH: Final = Path("/run/kor-travel-map-dagster-storage-permit/permit.js
 _PERMIT_SCHEMA: Final = "kor-travel-map.dagster-storage-database-permit.v2"
 _IDENTITY_SCHEMA: Final = "kor-travel-map.dagster-storage-database-identity.v1"
 _HEAD_SCHEMA: Final = "kor-travel-map.dagster-storage-head.v1"
-_MIGRATE_SCHEMA: Final = "kor-travel-map.dagster-storage-migration.v2"
+_MIGRATE_SCHEMA: Final = "kor-travel-map.dagster-storage-migration.v3"
+_CATALOG_SCHEMA: Final = "kor-travel-map.dagster-storage-catalog.v1"
 _ERROR_SCHEMA: Final = "kor-travel-map.dagster-storage-migration-error.v1"
 _ISOLATED_PYTHON: Final = "/usr/local/bin/python"
 _DAGSTER_EXECUTABLE: Final = "/usr/local/bin/dagster"
@@ -132,8 +133,14 @@ def _validate_dagster_config(raw: bytes) -> None:
     except (KeyError, TypeError, UnicodeError, yaml.YAMLError) as exc:
         raise DagsterStorageMigrationError("invalid_dagster_yaml") from exc
     if storage != {
-        "postgres": {"postgres_url": {"env": _DAGSTER_PG_URL_ENV}}
-    } or postgres != {"postgres_url": {"env": _DAGSTER_PG_URL_ENV}}:
+        "postgres": {
+            "postgres_url": {"env": _DAGSTER_PG_URL_ENV},
+            "should_autocreate_tables": False,
+        }
+    } or postgres != {
+        "postgres_url": {"env": _DAGSTER_PG_URL_ENV},
+        "should_autocreate_tables": False,
+    }:
         raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
 
 
@@ -496,27 +503,30 @@ def _verify_database_identity(
 
 
 def _run_dagster_instance_migrate(environment: Mapping[str, str]) -> None:
-    """Dagster가 제공하는 migration entrypoint를 실행하되 민감 출력은 전달하지 않는다."""
-    try:
-        completed = subprocess.run(
-            [
-                _ISOLATED_PYTHON,
-                "-I",
-                _DAGSTER_EXECUTABLE,
-                "instance",
-                "migrate",
-            ],
-            check=False,
-            capture_output=True,
-            text=True,
-            env=dict(environment),
-        )
-    except OSError as exc:
-        raise DagsterStorageMigrationError("dagster_instance_migrate_unavailable") from exc
-    if completed.returncode != 0:
-        # Dagster의 info 출력이나 DB driver 예외에는 DSN이 포함될 수 있다. 이 명령은
-        # container log로도 원문을 넘기지 않고, 호출자가 stable error code만 받게 한다.
-        raise DagsterStorageMigrationError("dagster_instance_migrate_failed")
+    """Dagster의 schema/data migration과 필수 reindex를 민감 출력 없이 실행한다."""
+    for operation in ("migrate", "reindex"):
+        try:
+            completed = subprocess.run(
+                [
+                    _ISOLATED_PYTHON,
+                    "-I",
+                    _DAGSTER_EXECUTABLE,
+                    "instance",
+                    operation,
+                ],
+                check=False,
+                capture_output=True,
+                text=True,
+                env=dict(environment),
+            )
+        except OSError as exc:
+            raise DagsterStorageMigrationError(
+                "dagster_instance_migrate_unavailable"
+            ) from exc
+        if completed.returncode != 0:
+            # Dagster의 info 출력이나 DB driver 예외에는 DSN이 포함될 수 있다. 이 명령은
+            # container log로도 원문을 넘기지 않고, 호출자가 stable error code만 받게 한다.
+            raise DagsterStorageMigrationError("dagster_instance_migrate_failed")
 
 
 def _read_operation_binding(
@@ -543,10 +553,38 @@ def _read_operation_binding(
     )
 
 
-def _acquire_operation_lock(connection: Any) -> None:
+def _acquire_session_operation_lock(connection: Any) -> None:
     connection.execute(
         text(
-            "SELECT pg_catalog.pg_advisory_xact_lock("
+            "SELECT pg_catalog.pg_advisory_lock("
+            "(SELECT oid::integer FROM pg_catalog.pg_database "
+            "WHERE datname = current_database()), pg_catalog.hashtext(:lock_key))"
+        ),
+        {"lock_key": _OPERATION_LOCK_KEY},
+    )
+    # session lock은 transaction 밖에서도 external Dagster subprocess가 끝날 때까지
+    # 유지한다. autobegin transaction만 여기서 닫는다.
+    connection.commit()
+
+
+def _release_session_operation_lock(connection: Any) -> None:
+    unlocked = connection.execute(
+        text(
+            "SELECT pg_catalog.pg_advisory_unlock("
+            "(SELECT oid::integer FROM pg_catalog.pg_database "
+            "WHERE datname = current_database()), pg_catalog.hashtext(:lock_key))"
+        ),
+        {"lock_key": _OPERATION_LOCK_KEY},
+    ).scalar_one()
+    connection.commit()
+    if unlocked is not True:
+        raise DagsterStorageMigrationError("dagster_operation_lock_release_failed")
+
+
+def _acquire_shared_transaction_operation_lock(connection: Any) -> None:
+    connection.execute(
+        text(
+            "SELECT pg_catalog.pg_advisory_xact_lock_shared("
             "(SELECT oid::integer FROM pg_catalog.pg_database "
             "WHERE datname = current_database()), pg_catalog.hashtext(:lock_key))"
         ),
@@ -614,7 +652,7 @@ def _ensure_operation_outbox(connection: Any) -> None:
                 FOREIGN KEY (operation_id) REFERENCES {_INTENT_TABLE}(operation_id)
                 ON DELETE RESTRICT,
             CONSTRAINT ck_ktm_dagster_storage_receipt_schema CHECK (
-                result_schema = 'kor-travel-map.dagster-storage-migration.v2'
+                result_schema = 'kor-travel-map.dagster-storage-migration.v3'
             ),
             CONSTRAINT ck_ktm_dagster_storage_receipt_sha256
                 CHECK (result_sha256 ~ '^[0-9a-f]{{64}}$'),
@@ -787,12 +825,12 @@ def _ensure_operation_outbox(connection: Any) -> None:
         or triggers
         != {
             (
-                _INTENT_TABLE,
+                _INTENT_TABLE.removeprefix("public."),
                 "trg_ktm_dagster_storage_intent_immutable",
                 "O",
             ),
             (
-                _RECEIPT_TABLE,
+                _RECEIPT_TABLE.removeprefix("public."),
                 "trg_ktm_dagster_storage_receipt_immutable",
                 "O",
             ),
@@ -822,6 +860,208 @@ def _read_version_state(connection: Any, head: str) -> tuple[str, tuple[str, ...
 
 def _canonical_result_bytes(result: Mapping[str, Any]) -> bytes:
     return (json.dumps(result, sort_keys=True, separators=(",", ":")) + "\n").encode()
+
+
+def _dagster_metadata_contract() -> tuple[
+    tuple[Any, ...],
+    dict[str, tuple[tuple[str, bool], ...]],
+    dict[str, tuple[str, ...]],
+    tuple[str, ...],
+]:
+    """설치된 Dagster package에서 fresh storage의 exact 구조를 만든다."""
+
+    try:
+        from dagster._core.storage.event_log.migration import (
+            ASSET_DATA_MIGRATIONS,
+            EVENT_LOG_DATA_MIGRATIONS,
+        )
+        from dagster._core.storage.event_log.schema import SqlEventLogStorageMetadata
+        from dagster._core.storage.runs.migration import REQUIRED_DATA_MIGRATIONS
+        from dagster._core.storage.runs.schema import RunStorageSqlMetadata
+        from dagster._core.storage.schedules.migration import (
+            REQUIRED_SCHEDULE_DATA_MIGRATIONS,
+        )
+        from dagster._core.storage.schedules.schema import ScheduleStorageSqlMetadata
+        from sqlalchemy import PrimaryKeyConstraint, UniqueConstraint
+    except Exception as exc:
+        raise DagsterStorageMigrationError("dagster_catalog_contract_unavailable") from exc
+
+    metadatas = (
+        RunStorageSqlMetadata,
+        SqlEventLogStorageMetadata,
+        ScheduleStorageSqlMetadata,
+    )
+    columns: dict[str, tuple[tuple[str, bool], ...]] = {}
+    indexes: dict[str, tuple[str, ...]] = {}
+    for metadata in metadatas:
+        for table in metadata.sorted_tables:
+            table_columns = tuple(
+                (str(column.name), not bool(column.nullable)) for column in table.columns
+            )
+            table_indexes = {str(index.name) for index in table.indexes if index.name}
+            for constraint in table.constraints:
+                constraint_columns = tuple(str(column.name) for column in constraint.columns)
+                if isinstance(constraint, PrimaryKeyConstraint) and constraint_columns:
+                    table_indexes.add(
+                        str(constraint.name or f"{table.name}_pkey")
+                    )
+                elif isinstance(constraint, UniqueConstraint) and constraint_columns:
+                    table_indexes.add(
+                        str(
+                            constraint.name
+                            or f"{table.name}_{'_'.join(constraint_columns)}_key"
+                        )
+                    )
+            table_index_names = tuple(sorted(table_indexes))
+            if table.name in columns and (
+                columns[table.name] != table_columns
+                or indexes[table.name] != table_index_names
+            ):
+                raise DagsterStorageMigrationError("dagster_catalog_contract_ambiguous")
+            columns[table.name] = table_columns
+            indexes[table.name] = table_index_names
+
+    required_migrations = tuple(
+        sorted(
+            {
+                *REQUIRED_DATA_MIGRATIONS,
+                *REQUIRED_SCHEDULE_DATA_MIGRATIONS,
+                *EVENT_LOG_DATA_MIGRATIONS,
+                *ASSET_DATA_MIGRATIONS,
+            }
+        )
+    )
+    return metadatas, columns, indexes, required_migrations
+
+
+def _bootstrap_fresh_dagster_catalog(connection: Any, *, version_state: str) -> None:
+    """fresh metadata catalog 전체와 head stamp를 한 DB transaction으로 만든다."""
+
+    metadatas, _, _, _ = _dagster_metadata_contract()
+    try:
+        for metadata in metadatas:
+            metadata.create_all(connection, checkfirst=True)
+        if version_state == "missing":
+            from dagster._core.storage.sql import stamp_alembic_rev
+            from dagster_postgres.run_storage import run_storage
+            from dagster_postgres.utils import pg_alembic_config
+
+            stamp_alembic_rev(pg_alembic_config(run_storage.__file__), connection)
+    except DagsterStorageMigrationError:
+        raise
+    except Exception as exc:
+        raise DagsterStorageMigrationError("dagster_catalog_bootstrap_failed") from exc
+
+
+def _verify_dagster_catalog(connection: Any, *, head: str) -> str:
+    """세 storage의 exact table/column/index와 필수 migration marker를 검증한다."""
+
+    _, expected_columns, expected_indexes, required_migrations = (
+        _dagster_metadata_contract()
+    )
+    expected_tables = {
+        *expected_columns,
+        "alembic_version",
+        _INTENT_TABLE.removeprefix("public."),
+        _RECEIPT_TABLE.removeprefix("public."),
+    }
+    try:
+        actual_tables = {
+            str(row[0])
+            for row in connection.execute(
+                text(
+                    "SELECT relation.relname FROM pg_catalog.pg_class AS relation "
+                    "JOIN pg_catalog.pg_namespace AS namespace "
+                    "ON namespace.oid = relation.relnamespace "
+                    "WHERE namespace.nspname = 'public' "
+                    "AND relation.relkind IN ('r', 'p')"
+                )
+            ).all()
+        }
+        column_rows = connection.execute(
+            text(
+                "SELECT relation.relname, attribute.attname, attribute.attnotnull "
+                "FROM pg_catalog.pg_class AS relation "
+                "JOIN pg_catalog.pg_namespace AS namespace "
+                "ON namespace.oid = relation.relnamespace "
+                "JOIN pg_catalog.pg_attribute AS attribute "
+                "ON attribute.attrelid = relation.oid "
+                "WHERE namespace.nspname = 'public' "
+                "AND relation.relname = ANY(CAST(:tables AS text[])) "
+                "AND attribute.attnum > 0 AND NOT attribute.attisdropped "
+                "ORDER BY relation.relname, attribute.attnum"
+            ),
+            {"tables": sorted(expected_columns)},
+        ).all()
+        actual_columns = {
+            table_name: tuple(
+                (str(row[1]), bool(row[2]))
+                for row in column_rows
+                if str(row[0]) == table_name
+            )
+            for table_name in expected_columns
+        }
+        index_rows = connection.execute(
+            text(
+                "SELECT source.relname, target.relname, index_row.indisvalid, "
+                "index_row.indisready, index_row.indislive "
+                "FROM pg_catalog.pg_index AS index_row "
+                "JOIN pg_catalog.pg_class AS source ON source.oid = index_row.indrelid "
+                "JOIN pg_catalog.pg_class AS target ON target.oid = index_row.indexrelid "
+                "JOIN pg_catalog.pg_namespace AS namespace "
+                "ON namespace.oid = source.relnamespace "
+                "WHERE namespace.nspname = 'public' "
+                "AND source.relname = ANY(CAST(:tables AS text[]))"
+            ),
+            {"tables": sorted(expected_columns)},
+        ).all()
+        actual_indexes = {
+            table_name: tuple(
+                sorted(
+                    str(row[1])
+                    for row in index_rows
+                    if str(row[0]) == table_name
+                    and bool(row[2])
+                    and bool(row[3])
+                    and bool(row[4])
+                )
+            )
+            for table_name in expected_indexes
+        }
+        marker_rows = connection.execute(
+            text("SELECT name, migration_completed FROM public.secondary_indexes")
+        ).all()
+        completed_markers = {
+            str(row[0]) for row in marker_rows if bool(row[1])
+        }
+    except Exception as exc:
+        raise DagsterStorageMigrationError("dagster_catalog_unavailable") from exc
+    state, rows = _read_version_state(connection, head)
+    if (
+        actual_tables != expected_tables
+        or actual_columns != expected_columns
+        or actual_indexes != expected_indexes
+        or state != "final"
+        or rows != (head,)
+        or not set(required_migrations).issubset(completed_markers)
+    ):
+        raise DagsterStorageMigrationError("dagster_catalog_postcondition_mismatch")
+    payload = {
+        "schema": _CATALOG_SCHEMA,
+        "head": head,
+        "tables": {
+            table_name: {
+                "columns": [
+                    {"name": column_name, "not_null": not_null}
+                    for column_name, not_null in expected_columns[table_name]
+                ],
+                "indexes": list(expected_indexes[table_name]),
+            }
+            for table_name in sorted(expected_columns)
+        },
+        "required_migrations": list(required_migrations),
+    }
+    return hashlib.sha256(_canonical_result_bytes(payload)).hexdigest()
 
 
 def _validate_intent(
@@ -868,152 +1108,178 @@ def _read_receipt(connection: Any, operation_id: str) -> Mapping[str, Any] | Non
     ).mappings().one_or_none()
 
 
+def _migration_result(
+    *,
+    binding: Mapping[str, str],
+    identity: Mapping[str, Any],
+    head: str,
+    catalog_sha256: str,
+) -> dict[str, str]:
+    return {
+        "schema": _MIGRATE_SCHEMA,
+        "status": "migrated",
+        "operation_id": binding["operation_id"],
+        "permit_sha256": binding["permit_sha256"],
+        "candidate_sha256": binding["candidate_sha256"],
+        "head": head,
+        "version_num": head,
+        "database_name": str(identity["name"]),
+        "database_oid": str(identity["oid"]),
+        "database_owner": str(identity["owner"]),
+        "postgres_system_identifier": str(identity["system_identifier"]),
+        "catalog_sha256": catalog_sha256,
+    }
+
+
 def _validate_receipt(
-    receipt: Mapping[str, Any], *, operation_id: str, head: str
+    receipt: Mapping[str, Any],
+    *,
+    binding: Mapping[str, str],
+    identity: Mapping[str, Any],
+    head: str,
+    catalog_sha256: str,
 ) -> dict[str, str]:
     payload = receipt["result_payload"]
     if not isinstance(payload, Mapping):
         raise DagsterStorageMigrationError("dagster_operation_receipt_invalid")
     canonical = _canonical_result_bytes(payload)
+    expected = _migration_result(
+        binding=binding,
+        identity=identity,
+        head=head,
+        catalog_sha256=catalog_sha256,
+    )
     if (
-        str(receipt["operation_id"]) != operation_id
+        str(receipt["operation_id"]) != binding["operation_id"]
         or receipt["result_schema"] != _MIGRATE_SCHEMA
         or receipt["final_head"] != head
         or receipt["result_sha256"] != hashlib.sha256(canonical).hexdigest()
-        or payload.get("operation_id") != operation_id
-        or payload.get("head") != head
-        or payload.get("version_num") != head
+        or dict(payload) != expected
     ):
         raise DagsterStorageMigrationError("dagster_operation_receipt_invalid")
-    return {str(key): str(value) for key, value in payload.items()}
+    return expected
 
 
 def _prepare_operation(
-    dagster_pg_url: str,
+    connection: Any,
     *,
     binding: Mapping[str, str],
     identity: Mapping[str, Any],
     head: str,
 ) -> tuple[str, dict[str, str] | None]:
-    engine = None
     try:
-        engine = create_engine(dagster_pg_url)
-        with engine.begin() as connection:
-            _acquire_operation_lock(connection)
-            _ensure_operation_outbox(connection)
-            receipt = _read_receipt(connection, binding["operation_id"])
-            if receipt is not None:
-                return "done", _validate_receipt(
-                    receipt, operation_id=binding["operation_id"], head=head
-                )
-            state, rows = _read_version_state(connection, head)
-            intent = _read_intent(connection, binding["operation_id"])
-            if intent is not None:
-                _validate_intent(intent, binding=binding, identity=identity, head=head)
-                if state == "final":
-                    return "complete", None
-                if state != intent["pre_state"] or list(rows) != intent["pre_version_rows"]:
-                    raise DagsterStorageMigrationError(
-                        "dagster_operation_resume_state_mismatch"
-                    )
-                return "execute", None
-            if state == "final":
+        _ensure_operation_outbox(connection)
+        receipt = _read_receipt(connection, binding["operation_id"])
+        if receipt is not None:
+            catalog_sha256 = _verify_dagster_catalog(connection, head=head)
+            return "done", _validate_receipt(
+                receipt,
+                binding=binding,
+                identity=identity,
+                head=head,
+                catalog_sha256=catalog_sha256,
+            )
+        state, rows = _read_version_state(connection, head)
+        intent = _read_intent(connection, binding["operation_id"])
+        if intent is not None:
+            _validate_intent(intent, binding=binding, identity=identity, head=head)
+            if state != "final" and (
+                state != intent["pre_state"]
+                or list(rows) != intent["pre_version_rows"]
+            ):
                 raise DagsterStorageMigrationError(
-                    "dagster_final_head_without_operation_intent"
+                    "dagster_operation_resume_state_mismatch"
                 )
-            inserted = connection.execute(
-                text(
-                    f"INSERT INTO {_INTENT_TABLE} (operation_id, permit_sha256, "
-                    "candidate_sha256, target_head, pre_state, pre_version_rows, "
-                    "database_name, database_oid, database_owner, postgres_system_identifier) "
-                    "VALUES (CAST(:operation_id AS uuid), :permit_sha256, :candidate_sha256, "
-                    ":target_head, :pre_state, CAST(:pre_rows AS jsonb), :database_name, "
-                    ":database_oid, :database_owner, :system_identifier) "
-                    "RETURNING operation_id::text"
-                ),
-                {
-                    **binding,
-                    "target_head": head,
-                    "pre_state": state,
-                    "pre_rows": json.dumps(rows, separators=(",", ":")),
-                    "database_name": identity["name"],
-                    "database_oid": identity["oid"],
-                    "database_owner": identity["owner"],
-                    "system_identifier": identity["system_identifier"],
-                },
-            ).scalar_one()
-            if inserted != binding["operation_id"]:
-                raise DagsterStorageMigrationError("dagster_operation_intent_not_committed")
+            if intent["pre_state"] == "missing" and state in {"missing", "final"}:
+                _bootstrap_fresh_dagster_catalog(connection, version_state=state)
             return "execute", None
+        if state == "final":
+            raise DagsterStorageMigrationError(
+                "dagster_final_head_without_operation_intent"
+            )
+        inserted = connection.execute(
+            text(
+                f"INSERT INTO {_INTENT_TABLE} (operation_id, permit_sha256, "
+                "candidate_sha256, target_head, pre_state, pre_version_rows, "
+                "database_name, database_oid, database_owner, postgres_system_identifier) "
+                "VALUES (CAST(:operation_id AS uuid), :permit_sha256, :candidate_sha256, "
+                ":target_head, :pre_state, CAST(:pre_rows AS jsonb), :database_name, "
+                ":database_oid, :database_owner, :system_identifier) "
+                "RETURNING operation_id::text"
+            ),
+            {
+                **binding,
+                "target_head": head,
+                "pre_state": state,
+                "pre_rows": json.dumps(rows, separators=(",", ":")),
+                "database_name": identity["name"],
+                "database_oid": identity["oid"],
+                "database_owner": identity["owner"],
+                "system_identifier": identity["system_identifier"],
+            },
+        ).scalar_one()
+        if inserted != binding["operation_id"]:
+            raise DagsterStorageMigrationError("dagster_operation_intent_not_committed")
+        if state == "missing":
+            _bootstrap_fresh_dagster_catalog(connection, version_state=state)
+        return "execute", None
     except DagsterStorageMigrationError:
         raise
     except Exception as exc:
         raise DagsterStorageMigrationError("dagster_operation_prepare_failed") from exc
-    finally:
-        if engine is not None:
-            engine.dispose()
 
 
 def _complete_operation(
-    dagster_pg_url: str,
+    connection: Any,
     *,
     binding: Mapping[str, str],
     identity: Mapping[str, Any],
     head: str,
 ) -> dict[str, str]:
-    engine = None
     try:
-        engine = create_engine(dagster_pg_url)
-        with engine.begin() as connection:
-            _acquire_operation_lock(connection)
-            intent = _read_intent(connection, binding["operation_id"])
-            if intent is None:
-                raise DagsterStorageMigrationError("dagster_operation_intent_missing")
-            _validate_intent(intent, binding=binding, identity=identity, head=head)
-            state, rows = _read_version_state(connection, head)
-            if state != "final" or rows != (head,):
-                raise DagsterStorageMigrationError("dagster_version_mismatch")
-            existing = _read_receipt(connection, binding["operation_id"])
-            if existing is not None:
-                return _validate_receipt(
-                    existing, operation_id=binding["operation_id"], head=head
-                )
-            result = {
-                "schema": _MIGRATE_SCHEMA,
-                "status": "migrated",
+        intent = _read_intent(connection, binding["operation_id"])
+        if intent is None:
+            raise DagsterStorageMigrationError("dagster_operation_intent_missing")
+        _validate_intent(intent, binding=binding, identity=identity, head=head)
+        catalog_sha256 = _verify_dagster_catalog(connection, head=head)
+        existing = _read_receipt(connection, binding["operation_id"])
+        if existing is not None:
+            return _validate_receipt(
+                existing,
+                binding=binding,
+                identity=identity,
+                head=head,
+                catalog_sha256=catalog_sha256,
+            )
+        result = _migration_result(
+            binding=binding,
+            identity=identity,
+            head=head,
+            catalog_sha256=catalog_sha256,
+        )
+        canonical = _canonical_result_bytes(result)
+        inserted = connection.execute(
+            text(
+                f"INSERT INTO {_RECEIPT_TABLE} (operation_id, result_schema, "
+                "result_sha256, final_head, result_payload) VALUES ("
+                "CAST(:operation_id AS uuid), :result_schema, :result_sha256, "
+                ":final_head, CAST(:result_payload AS jsonb)) RETURNING operation_id::text"
+            ),
+            {
                 "operation_id": binding["operation_id"],
-                "permit_sha256": binding["permit_sha256"],
-                "head": head,
-                "version_num": head,
-                "database_name": str(identity["name"]),
-                "database_oid": str(identity["oid"]),
-            }
-            canonical = _canonical_result_bytes(result)
-            inserted = connection.execute(
-                text(
-                    f"INSERT INTO {_RECEIPT_TABLE} (operation_id, result_schema, "
-                    "result_sha256, final_head, result_payload) VALUES ("
-                    "CAST(:operation_id AS uuid), :result_schema, :result_sha256, "
-                    ":final_head, CAST(:result_payload AS jsonb)) RETURNING operation_id::text"
-                ),
-                {
-                    "operation_id": binding["operation_id"],
-                    "result_schema": _MIGRATE_SCHEMA,
-                    "result_sha256": hashlib.sha256(canonical).hexdigest(),
-                    "final_head": head,
-                    "result_payload": canonical.decode().rstrip("\n"),
-                },
-            ).scalar_one()
-            if inserted != binding["operation_id"]:
-                raise DagsterStorageMigrationError("dagster_operation_receipt_not_committed")
-            return result
+                "result_schema": _MIGRATE_SCHEMA,
+                "result_sha256": hashlib.sha256(canonical).hexdigest(),
+                "final_head": head,
+                "result_payload": canonical.decode().rstrip("\n"),
+            },
+        ).scalar_one()
+        if inserted != binding["operation_id"]:
+            raise DagsterStorageMigrationError("dagster_operation_receipt_not_committed")
+        return result
     except DagsterStorageMigrationError:
         raise
     except Exception as exc:
         raise DagsterStorageMigrationError("dagster_operation_complete_failed") from exc
-    finally:
-        if engine is not None:
-            engine.dispose()
 
 
 def _migrate(environment: Mapping[str, str]) -> dict[str, str]:
@@ -1022,21 +1288,45 @@ def _migrate(environment: Mapping[str, str]) -> dict[str, str]:
     bound_pg_url, bound_identity, binding = _read_operation_binding(environment)
     if bound_pg_url != dagster_pg_url or dict(bound_identity) != identity:
         raise DagsterStorageMigrationError("dagster_storage_dsn_changed")
-    action, recovered = _prepare_operation(
-        dagster_pg_url, binding=binding, identity=identity, head=head
-    )
-    if action == "done":
-        if recovered is None:
-            raise DagsterStorageMigrationError("dagster_operation_receipt_invalid")
-        return recovered
-    if action == "execute":
+    engine = create_engine(dagster_pg_url)
+    connection = None
+    locked = False
+    try:
+        connection = engine.connect()
+        _acquire_session_operation_lock(connection)
+        locked = True
+        verified_dagster_pg_url, verified_identity = _verify_database_identity(environment)
+        if verified_dagster_pg_url != dagster_pg_url or verified_identity != identity:
+            raise DagsterStorageMigrationError("dagster_storage_dsn_changed")
+        with connection.begin():
+            action, recovered = _prepare_operation(
+                connection, binding=binding, identity=identity, head=head
+            )
+        if action == "done":
+            if recovered is None:
+                raise DagsterStorageMigrationError("dagster_operation_receipt_invalid")
+            return recovered
         _run_dagster_instance_migrate(environment)
-    verified_dagster_pg_url, verified_identity = _verify_database_identity(environment)
-    if verified_dagster_pg_url != dagster_pg_url or verified_identity != identity:
-        raise DagsterStorageMigrationError("dagster_storage_dsn_changed")
-    return _complete_operation(
-        dagster_pg_url, binding=binding, identity=identity, head=head
-    )
+        verified_dagster_pg_url, verified_identity = _verify_database_identity(environment)
+        if verified_dagster_pg_url != dagster_pg_url or verified_identity != identity:
+            raise DagsterStorageMigrationError("dagster_storage_dsn_changed")
+        with connection.begin():
+            return _complete_operation(
+                connection, binding=binding, identity=identity, head=head
+            )
+    finally:
+        active_exception = sys.exc_info()[0] is not None
+        release_failure: Exception | None = None
+        if connection is not None:
+            if locked:
+                try:
+                    _release_session_operation_lock(connection)
+                except Exception as exc:
+                    release_failure = exc
+            connection.close()
+        engine.dispose()
+        if release_failure is not None and not active_exception:
+            raise release_failure
 
 
 def _recover(environment: Mapping[str, str], operation_id: UUID) -> dict[str, str]:
@@ -1052,8 +1342,9 @@ def _recover(environment: Mapping[str, str], operation_id: UUID) -> dict[str, st
     engine = None
     try:
         engine = create_engine(dagster_pg_url)
-        with engine.connect() as connection:
+        with engine.begin() as connection:
             connection.execute(text("SET TRANSACTION READ ONLY"))
+            _acquire_shared_transaction_operation_lock(connection)
             state, rows = _read_version_state(connection, head)
             if state != "final" or rows != (head,):
                 raise DagsterStorageMigrationError("dagster_version_mismatch")
@@ -1062,8 +1353,13 @@ def _recover(environment: Mapping[str, str], operation_id: UUID) -> dict[str, st
             if intent is None or receipt is None:
                 raise DagsterStorageMigrationError("dagster_operation_receipt_missing")
             _validate_intent(intent, binding=binding, identity=identity, head=head)
+            catalog_sha256 = _verify_dagster_catalog(connection, head=head)
             return _validate_receipt(
-                receipt, operation_id=binding["operation_id"], head=head
+                receipt,
+                binding=binding,
+                identity=identity,
+                head=head,
+                catalog_sha256=catalog_sha256,
             )
     except DagsterStorageMigrationError:
         raise
@@ -1086,13 +1382,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             _emit({"schema": _HEAD_SCHEMA, "head": _dagster_storage_head()})
             return 0
         if arguments == ["verify-identity"]:
-            _, identity = _verify_database_identity(os.environ)
+            _, _, binding = _read_operation_binding(os.environ)
+            result = _recover(os.environ, UUID(binding["operation_id"]))
             _emit(
                 {
                     "schema": _IDENTITY_SCHEMA,
                     "status": "verified",
-                    "database_name": str(identity["name"]),
-                    "database_oid": str(identity["oid"]),
+                    "database_name": result["database_name"],
+                    "database_oid": result["database_oid"],
                 }
             )
             return 0

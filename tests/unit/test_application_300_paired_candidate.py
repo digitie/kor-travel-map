@@ -407,10 +407,10 @@ def test_storage_helper_ignores_fake_path_for_dagster_executable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     helper = _load_storage_helper(monkeypatch)
-    observed: dict[str, Any] = {}
+    observed: dict[str, Any] = {"commands": []}
 
     def fake_run(command: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
-        observed["command"] = command
+        observed["commands"].append(command)
         observed["environment"] = kwargs["env"]
         return subprocess.CompletedProcess(command, 0, "", "")
 
@@ -418,12 +418,21 @@ def test_storage_helper_ignores_fake_path_for_dagster_executable(
     environment = {"PATH": "/tmp/operator-controlled-bin"}
     helper._run_dagster_instance_migrate(environment)
 
-    assert observed["command"] == [
-        "/usr/local/bin/python",
-        "-I",
-        "/usr/local/bin/dagster",
-        "instance",
-        "migrate",
+    assert observed["commands"] == [
+        [
+            "/usr/local/bin/python",
+            "-I",
+            "/usr/local/bin/dagster",
+            "instance",
+            "migrate",
+        ],
+        [
+            "/usr/local/bin/python",
+            "-I",
+            "/usr/local/bin/dagster",
+            "instance",
+            "reindex",
+        ],
     ]
     assert observed["environment"] == environment
     source = (ROOT / "docker" / "dagster-storage-migrate.py").read_text(

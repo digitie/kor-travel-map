@@ -4413,7 +4413,7 @@ def test_dagster_storage_migrates_only_after_metadata_identity_match(
         "candidate_sha256": "c" * 64,
     }
     expected = {
-        "schema": "kor-travel-map.dagster-storage-migration.v2",
+        "schema": "kor-travel-map.dagster-storage-migration.v3",
         "status": "migrated",
         "operation_id": operation_id,
         "permit_sha256": "b" * 64,
@@ -4424,7 +4424,37 @@ def test_dagster_storage_migrates_only_after_metadata_identity_match(
     }
     calls: list[str] = []
 
+    class FakeConnection:
+        def begin(self) -> FakeConnection:
+            return self
+
+        def __enter__(self) -> FakeConnection:
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def close(self) -> None:
+            return None
+
+    class FakeEngine:
+        def __init__(self) -> None:
+            self.connection = FakeConnection()
+
+        def connect(self) -> FakeConnection:
+            return self.connection
+
+        def dispose(self) -> None:
+            return None
+
     monkeypatch.setattr(module, "_dagster_storage_head", lambda: "dagster_head")
+    monkeypatch.setattr(module, "create_engine", lambda _dsn: FakeEngine())
+    monkeypatch.setattr(
+        module, "_acquire_session_operation_lock", lambda _connection: None
+    )
+    monkeypatch.setattr(
+        module, "_release_session_operation_lock", lambda _connection: None
+    )
     monkeypatch.setattr(
         module,
         "_verify_database_identity",

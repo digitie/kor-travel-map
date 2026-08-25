@@ -1,5 +1,25 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-25 — T-VN-H46H Dagster crash-safe exact catalog checkpoint (Draft)
+
+Dagster metadata storage는 더 이상 receipt 없는 final head를 성공으로 승격하지 않는다. wrapper가
+session-level PostgreSQL advisory lock을 intent 생성부터 외부 `dagster instance migrate`와
+`reindex`, exact postcondition, receipt commit까지 유지한다. fresh 세 storage metadata와 head는 한
+transaction으로 생성하며, 응답 유실이나 프로세스 종료 뒤 receipt가 없으면 같은 candidate
+operation을 다시 실행한다. runtime의 implicit table autocreate는 비활성화했고 webserver/daemon
+preflight도 committed operation receipt와 exact catalog를 요구한다.
+
+postcondition은 설치된 Dagster package에서 생성한 run/event/schedule table·column nullability·index
+계약, 단일 head, 필수 data migration marker를 대조해 catalog digest를 v3 receipt에 결박한다.
+일회용 PostgreSQL에서 receipt 직전 강제 실패 → final-head/no-receipt 재실행 → committed
+writer-free resume → index 손상 거부를 실제로 확인했다.
+
+### 이 PR의 다음 한 작업
+
+fresh-only 정책과 충돌하는 퇴역 `0236→300` 실행 표면을 candidate image에서 제거하고, live
+attestation을 Manager manifest v6/journal v8 exact 계약으로 올린다. 이어 Manager의 orphan
+bootstrap credential·candidate tag·committed DB/image 재검증 finding을 닫는다.
+
 ## 2026-08-25 — T-VN-H46H finalize 응답 유실 재실행 증명 checkpoint (Draft)
 
 application fresh finalize의 응답 유실 뒤 단순 실패 문자열이나 raw `300` head만 보고 새 fence로

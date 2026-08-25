@@ -1,5 +1,31 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-25 — T-VN-H46H Dagster 부분 초기화 성공 승격 제거 (Draft)
+
+전문 DB 적대 리뷰에서 Dagster run/event/schedule storage가 순차 초기화되는 도중 죽으면 일부
+table만 존재하는데 공유 `public.alembic_version`은 이미 final head일 수 있고, 기존 wrapper가
+이를 receipt로 승격하는 P1을 확인했다. 다음 경계를 적용했다.
+
+- receipt 없는 final head도 writer를 재실행하며, 같은 operation intent와 pre-state가 아니면 거부
+- session advisory lock을 prepare부터 외부 migrate+reindex와 receipt commit까지 유지
+- fresh 세 storage metadata와 head stamp를 한 transaction으로 생성
+- `should_autocreate_tables: false`로 장기 runtime의 암묵 수리 차단
+- 설치된 Dagster package 기반 exact public table·column nullability·index·required migration
+  postcondition과 catalog SHA-256을 migration result v3에 결박
+- `verify-identity`/explicit recover도 committed receipt와 현재 exact catalog를 같은 read-only
+  snapshot에서 검증
+
+일회용 PostgreSQL에서 receipt 직전 의도적 실패 후 intent 1개·receipt 0개·final head 상태를
+만들었다. 같은 operation의 실제 `dagster instance migrate`+`reindex`가 v3 receipt로 수렴했고,
+그 뒤 resume은 writer를 호출하지 않았다. 마지막으로 required index 하나를 제거하자 recover가
+`dagster_catalog_postcondition_mismatch`로 중단됨을 확인하고 테스트 컨테이너를 제거했다.
+
+- Dagster command 회귀: `9 passed`
+- Dagster runtime storage 회귀: `29 passed`
+- paired candidate 회귀: `16 passed`
+- 변경 파일 Ruff·compile·`git diff --check`: 통과
+- 범위 밖 untracked `uv.lock`: 열람·수정·stage하지 않음
+
 ## 2026-08-25 — T-VN-H46H finalize missing-receipt typed proof (Draft)
 
 적대 리뷰에서 finalize container가 DB commit 뒤 응답만 유실했는데 `recover`가 일시 실패하면,
