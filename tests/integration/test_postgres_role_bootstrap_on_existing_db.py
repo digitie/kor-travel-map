@@ -107,7 +107,8 @@ async def _snapshot(dsn: str) -> dict[str, object]:
                             "FROM pg_catalog.pg_class AS object "
                             "JOIN pg_catalog.pg_namespace AS namespace "
                             "ON namespace.oid = object.relnamespace "
-                            "WHERE namespace.nspname IN ('feature', 'provider_sync', 'ops', 'public') "
+                            "WHERE namespace.nspname IN "
+                            "('feature', 'provider_sync', 'ops', 'public') "
                             "AND object.relkind IN ('r', 'p', 'v', 'm', 'f', 'S') "
                             "ORDER BY 1"
                         )
@@ -176,7 +177,8 @@ async def _snapshot(dsn: str) -> dict[str, object]:
                     await connection.execute(
                         text(
                             "SELECT defaclrole::regrole::text AS role_name, "
-                            "coalesce(defaclnamespace::regnamespace::text, '<global>') AS schema_name, "
+                            "coalesce(defaclnamespace::regnamespace::text, '<global>') "
+                            "AS schema_name, "
                             "defaclobjtype, defaclacl::text AS defaclacl "
                             "FROM pg_catalog.pg_default_acl ORDER BY 1, 2, 3, 4"
                         )
@@ -198,13 +200,18 @@ async def _snapshot(dsn: str) -> dict[str, object]:
                 ).mappings()
             ]
             has_alembic_version = bool(
-                await connection.scalar(text("SELECT to_regclass('public.alembic_version') IS NOT NULL"))
+                await connection.scalar(
+                    text("SELECT to_regclass('public.alembic_version') IS NOT NULL")
+                )
             )
             alembic_versions = (
                 list(
                     (
                         await connection.scalars(
-                            text("SELECT version_num FROM public.alembic_version ORDER BY version_num")
+                            text(
+                                "SELECT version_num FROM public.alembic_version "
+                                "ORDER BY version_num"
+                            )
                         )
                     ).all()
                 )
@@ -229,7 +236,8 @@ async def _snapshot(dsn: str) -> dict[str, object]:
                     await connection.execute(
                         text(
                             "SELECT rolname, rolcanlogin, rolsuper, rolinherit, rolcreaterole, "
-                            "rolcreatedb, rolreplication, rolbypassrls, rolconnlimit, rolvaliduntil, rolconfig "
+                            "rolcreatedb, rolreplication, rolbypassrls, rolconnlimit, "
+                            "rolvaliduntil, rolconfig "
                             "FROM pg_catalog.pg_roles "
                             "WHERE rolname LIKE 'ktm\\_%' ESCAPE '\\' ORDER BY rolname"
                         )
@@ -248,9 +256,11 @@ async def _snapshot(dsn: str) -> dict[str, object]:
                     await connection.execute(
                         text(
                             "SELECT granted.rolname AS granted, member.rolname AS member, "
-                            "membership.admin_option, membership.inherit_option, membership.set_option "
+                            "membership.admin_option, membership.inherit_option, "
+                            "membership.set_option "
                             "FROM pg_catalog.pg_auth_members AS membership "
-                            "JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid "
+                            "JOIN pg_catalog.pg_roles AS granted "
+                            "ON granted.oid = membership.roleid "
                             "JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member "
                             "WHERE granted.rolname LIKE 'ktm\\_%' ESCAPE '\\' "
                             "OR member.rolname LIKE 'ktm\\_%' ESCAPE '\\' "
@@ -454,7 +464,7 @@ async def test_bootstrap_rolls_back_all_mutation_when_reserved_role_inventory_is
 
 @pytest.mark.integration
 @pytest.mark.parametrize(
-    "role_attributes", ("NOLOGIN", "LOGIN", "SUPERUSER NOLOGIN")
+    "role_attributes", ["NOLOGIN", "LOGIN", "SUPERUSER NOLOGIN"]
 )
 async def test_bootstrap_rejects_any_unlisted_reserved_role_before_mutation(
     pg_container: Any,
@@ -577,7 +587,9 @@ async def test_bootstrap_creates_extensions_in_x_extension_on_stock_virgin_postg
                 ("pg_prewarm", "x_extension"),
             }
             assert (
-                await connection.scalar(text("SELECT to_regclass('public.alembic_version') IS NULL"))
+                await connection.scalar(
+                    text("SELECT to_regclass('public.alembic_version') IS NULL")
+                )
             ) is True
             created_roles = tuple(
                 str(role)

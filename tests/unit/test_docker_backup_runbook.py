@@ -144,13 +144,13 @@ def test_restore_scripts_fail_closed_before_any_legacy_operation() -> None:
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "relative_path",
-    (
+    [
         "scripts/docker-restore.sh",
         "scripts/docker-restore-swap.sh",
         "scripts/docker-restore-verify.sh",
         "live-e2e-backup-runner/restore.sh",
         "live-e2e-backup-runner/swap.sh",
-    ),
+    ],
 )
 def test_restore_entrypoints_do_not_touch_docker_even_with_escape_flags(
     tmp_path: Path,

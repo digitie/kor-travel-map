@@ -5036,7 +5036,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "planned" | "completed" | "failed" | "manual_required";
+            status: "planned" | "completed" | "failed";
             /** Stderr */
             stderr?: string | null;
             /** Stdout */

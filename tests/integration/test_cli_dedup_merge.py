@@ -25,8 +25,8 @@ from kortravelmap.infra.models import (
     SourceLinkRow,
     SourceRecordRow,
 )
-from tests.integration._db_cleanup import truncate_committed_test_rows
 from tests.integration._application_300_bootstrap import _TEST_RUNTIME_PASSWORD
+from tests.integration._db_cleanup import truncate_committed_test_rows
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
