@@ -449,8 +449,49 @@ def test_source_oracle_may_only_read_the_retired_manifest_for_hash_comparison() 
         "alembic/retired_versions/0200-0236/0236_tvn41s_compaction_drained.py",
     )
     assert _shell_alembic_execution_violations(forbidden, filename=relative) == [
-        f"{relative}:99: legacy archive path in runnable shell"
+        f"{relative}:153: legacy archive path in runnable shell"
     ]
+
+
+def test_source_oracle_early_seal_cleanup_recovers_permissions_and_status() -> None:
+    """봉인 직후 실패해도 read-only archive를 지우고 원래 실패를 보존한다."""
+
+    source = _SOURCE_ORACLE.read_text(encoding="utf-8")
+    remover = source.split("remove_source_seal() {", maxsplit=1)[1].split(
+        "cleanup_source_seal() {", maxsplit=1
+    )[0]
+    early_cleanup = source.split("cleanup_source_seal() {", maxsplit=1)[1].split(
+        'SOURCE_SEALED_PARENT="$(mktemp', maxsplit=1
+    )[0]
+
+    assert remover.index("chmod -R u+rwX") < remover.index("rm -rf")
+    assert '[ ! -e "$SOURCE_SEALED_PARENT" ]' in remover
+    assert "local status=$?" in early_cleanup
+    assert "remove_source_seal || cleanup_failed=1" in early_cleanup
+    assert 'if [ "$status" -ne 0 ]; then\n    exit "$status"' in early_cleanup
+    assert source.index("trap cleanup_source_seal EXIT") < source.index(
+        'git -C "$SOURCE_ROOT" archive'
+    )
+
+
+def test_source_oracle_full_cleanup_accumulates_failures() -> None:
+    """전체 cleanup은 성공을 거짓 보고하지 않고 기존 nonzero를 덮지 않는다."""
+
+    source = _SOURCE_ORACLE.read_text(encoding="utf-8")
+    cleanup = source.split("\ncleanup() {", maxsplit=1)[1].split(
+        "\ntrap cleanup EXIT", maxsplit=1
+    )[0]
+
+    assert "local status=$?" in cleanup
+    assert "local cleanup_failed=0" in cleanup
+    assert "remove_source_seal || cleanup_failed=1" in cleanup
+    assert "docker container rm" in cleanup
+    assert "docker volume rm" in cleanup
+    assert cleanup.count("|| cleanup_failed=1") >= 9
+    assert 'if [ "$status" -ne 0 ]; then' in cleanup
+    assert cleanup.index('exit "$status"') < cleanup.index(
+        '[ "$cleanup_failed" -eq 0 ] || exit 1'
+    )
 
 
 def test_legacy_execution_scanner_rejects_multiline_constant_and_wrapper() -> None:

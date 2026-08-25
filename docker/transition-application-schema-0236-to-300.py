@@ -668,9 +668,26 @@ def _load_writer_fence_receipt(receipt_path: str) -> tuple[dict[str, Any], str]:
 async def _verify_migrator_session(connection: AsyncConnection) -> None:
     """`SET ROLE` 전에 LOGIN principal을 고정한다 — superuser 우회 금지."""
 
-    session_user = await connection.scalar(text("SELECT session_user"))
-    if session_user != "ktm_feature_migrator":
-        raise HandoffError("controlled handoff must connect as ktm_feature_migrator")
+    identity = (
+        await connection.execute(
+            text(
+                """
+                SELECT session_user::text, current_user::text, role.rolsuper
+                FROM pg_catalog.pg_roles AS role
+                WHERE role.rolname = session_user
+                """
+            )
+        )
+    ).one()
+    if tuple(identity) != (
+        "ktm_feature_migrator",
+        "ktm_feature_migrator",
+        False,
+    ):
+        raise HandoffError(
+            "controlled handoff requires the exact non-superuser "
+            "ktm_feature_migrator session and effective role"
+        )
 
 
 async def _acquire_handoff_advisory_lock(connection: AsyncConnection) -> None:

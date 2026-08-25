@@ -66,6 +66,14 @@ if [ "${KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE:-}" \
   exit 1
 fi
 
+if [ -r /usr/local/lib/kor-travel-map/database-credential-preflight.sh ]; then
+  . /usr/local/lib/kor-travel-map/database-credential-preflight.sh
+else
+  script_directory="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
+  . "$script_directory/../scripts/database-credential-preflight.sh"
+fi
+validate_map_database_credentials KOR_TRAVEL_MAP_DAGSTER_PG_URL
+
 # Compose healthcheck가 PostgreSQL의 Unix socket을 먼저 확인할 수 있어, 같은
 # network에서 오는 첫 TCP connection은 잠시 뒤에야 accept되는 경우가 있다. role
 # 변경 전에는 bounded probe로 그 짧은 경합만 흡수하고, 계속 실패하면 fail-closed한다.

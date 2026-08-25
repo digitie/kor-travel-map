@@ -404,6 +404,13 @@ for path in sorted(
 ' >"$IMAGE_APP_MANIFEST"
 cmp -s "$APP_MANIFEST" "$IMAGE_APP_MANIFEST" || \
   die "candidate image /app execution tree가 sealed Git archive와 다르다"
+docker run --pull=never --rm --entrypoint sh "$image_id" -ec '
+  [ "$(stat -c "%u:%a" /app/resources/curations)" = 0:555 ]
+  [ -z "$(find /app/resources/curations -type d \( ! -user root -o ! -perm 0555 \) -print -quit)" ]
+  [ -z "$(find /app/resources/curations -type f \( ! -user root -o ! -perm 0444 \) -print -quit)" ]
+  ! touch /app/resources/curations/.candidate-mutation
+  ! mv /app/resources/curations/manifest.json /app/resources/curations/replaced.json
+' || die "candidate image curation execution tree가 appuser에게 writable하다"
 candidate_app_manifest_sha256="$(sha256sum "$APP_MANIFEST" | awk '{print $1}')"
 
 RUNTIME_MANIFEST="$(mktemp "${TMPDIR:-/tmp}/ktm300-candidate-runtime.XXXXXX")"

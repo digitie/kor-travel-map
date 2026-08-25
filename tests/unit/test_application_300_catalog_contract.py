@@ -2,9 +2,73 @@
 
 from __future__ import annotations
 
+import asyncio
+import importlib.util
 from pathlib import Path
+from types import ModuleType
+
+import pytest
 
 _ROOT = Path(__file__).resolve().parents[2]
+
+
+def _load_handoff() -> ModuleType:
+    path = _ROOT / "docker/transition-application-schema-0236-to-300.py"
+    spec = importlib.util.spec_from_file_location("application_300_handoff", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class _IdentityResult:
+    def __init__(self, identity: tuple[str, str, bool]) -> None:
+        self._identity = identity
+
+    def one(self) -> tuple[str, str, bool]:
+        return self._identity
+
+
+class _IdentityConnection:
+    def __init__(self, identity: tuple[str, str, bool]) -> None:
+        self.identity = identity
+        self.sql = ""
+
+    async def execute(self, statement: object) -> _IdentityResult:
+        self.sql = str(statement)
+        return _IdentityResult(self.identity)
+
+
+@pytest.mark.parametrize(
+    "identity",
+    [
+        ("other_login", "ktm_feature_migrator", False),
+        ("ktm_feature_migrator", "ktm_feature_schema_owner", False),
+        ("ktm_feature_migrator", "ktm_feature_migrator", True),
+    ],
+)
+def test_handoff_rejects_inexact_migrator_effective_identity(
+    identity: tuple[str, str, bool],
+) -> None:
+    module = _load_handoff()
+    connection = _IdentityConnection(identity)
+
+    with pytest.raises(module.HandoffError, match="exact non-superuser"):
+        asyncio.run(module._verify_migrator_session(connection))
+
+    assert "session_user::text" in connection.sql
+    assert "current_user::text" in connection.sql
+    assert "role.rolsuper" in connection.sql
+
+
+def test_handoff_accepts_exact_non_superuser_migrator_identity() -> None:
+    module = _load_handoff()
+    connection = _IdentityConnection(
+        ("ktm_feature_migrator", "ktm_feature_migrator", False)
+    )
+
+    asyncio.run(module._verify_migrator_session(connection))
 
 
 def test_catalog_contract_tracks_relation_access_method_and_named_tablespace() -> None:

@@ -240,7 +240,7 @@ random_secret() {
 }
 
 write_env_files() {
-  local postgres_password migrator_password api_password dagster_password
+  local postgres_password migrator_password api_password dagster_password metadata_password
   local admin_proxy_secret service_token cursor_secret metrics_token
   local cache_target_command_token cache_target_consumer_token
   local curation_snapshot_token curation_cutover_mapping_token
@@ -250,6 +250,7 @@ write_env_files() {
   migrator_password="$(random_secret)"
   api_password="$(random_secret)"
   dagster_password="$(random_secret)"
+  metadata_password="$(random_secret)"
   admin_proxy_secret="$(random_secret)"
   service_token="$(random_secret)"
   cursor_secret="$(random_secret)"
@@ -310,11 +311,13 @@ KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN=postgresql://kor_travel_map:$postgres_password@p
 KOR_TRAVEL_MAP_MIGRATOR_PASSWORD=$migrator_password
 KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD=$api_password
 KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD=$dagster_password
+KOR_TRAVEL_MAP_DAGSTER_METADATA_USER=kor_travel_map_dagster
+KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD=$metadata_password
 KOR_TRAVEL_MAP_MIGRATOR_PG_DSN=postgresql+asyncpg://ktm_feature_migrator:$migrator_password@postgres:5432/kor_travel_map
 KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN=postgresql+asyncpg://ktm_feature_api_runtime:$api_password@postgres:5432/kor_travel_map
 KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN=postgresql+asyncpg://ktm_feature_dagster_runtime:$dagster_password@postgres:5432/kor_travel_map
 KOR_TRAVEL_MAP_PG_DSN=postgresql+asyncpg://ktm_feature_dagster_runtime:$dagster_password@postgres:5432/kor_travel_map
-KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL=postgresql://kor_travel_map:$postgres_password@postgres:5432/kor_travel_map_dagster
+KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL=postgresql://kor_travel_map_dagster:$metadata_password@postgres:5432/kor_travel_map_dagster
 KOR_TRAVEL_MAP_MIGRATION_EXPECTED_HEAD=$EXPECTED_HEAD
 # 이 isolated acceptance stack은 Manager production permit을 발행하지 않는다. production
 # generic startup을 흉내 내지 않도록 explicit local-dev profile + fresh one-shot만 쓴다.
@@ -328,6 +331,8 @@ KOR_TRAVEL_MAP_RUSTFS_API_PORT=$rustfs_port
 KOR_TRAVEL_MAP_RUSTFS_CONSOLE_PORT=$((rustfs_port + 1))
 KOR_TRAVEL_MAP_MOIS_SOURCE_DB_VOLUME=$MAP_PROJECT-mois
 KOR_TRAVEL_MAP_RUSTFS_VOLUME=$MAP_PROJECT-rustfs
+KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_VOLUME=$MAP_PROJECT-application-final-permit
+KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_VOLUME=$MAP_PROJECT-dagster-storage-permit
 KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET=$admin_proxy_secret
 KOR_TRAVEL_MAP_API_SERVICE_TOKEN=$service_token
 KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET=$cursor_secret
@@ -602,6 +607,98 @@ verify_map_schema() {
     die "T-VN-36 final request/version bridge remains"
 }
 
+verify_dagster_processes() {
+  local storage_container webserver_container daemon_container
+  storage_container="$(compose_map ps --all -q dagster-storage-migrate)"
+  webserver_container="$(compose_map ps --all -q dagster)"
+  daemon_container="$(compose_map ps --all -q dagster-daemon)"
+  [[ -n "$storage_container" && -n "$webserver_container" && -n "$daemon_container" ]] ||
+    die "Dagster storage/webserver/daemon container set is incomplete"
+  python3 - "$storage_container" "$webserver_container" "$daemon_container" <<'PY'
+import json
+import subprocess
+import sys
+
+completed = subprocess.run(
+    ["docker", "inspect", *sys.argv[1:]],
+    check=True,
+    capture_output=True,
+    text=True,
+)
+containers = {
+    item["Config"]["Labels"]["com.docker.compose.service"]: item
+    for item in json.loads(completed.stdout)
+}
+if set(containers) != {"dagster-storage-migrate", "dagster", "dagster-daemon"}:
+    raise SystemExit("Dagster acceptance container labels are invalid")
+storage = containers["dagster-storage-migrate"]
+webserver = containers["dagster"]
+daemon = containers["dagster-daemon"]
+if len({storage["Image"], webserver["Image"], daemon["Image"]}) != 1:
+    raise SystemExit("Dagster acceptance processes do not share one image")
+if storage["State"]["Status"] != "exited" or storage["State"]["ExitCode"] != 0:
+    raise SystemExit("Dagster metadata migration did not finish successfully")
+for name, item in (("webserver", webserver), ("daemon", daemon)):
+    if item["State"]["Status"] != "running" or not item["State"]["Running"]:
+        raise SystemExit(f"Dagster {name} did not remain running after preflight")
+if storage["Config"]["Cmd"] != ["/usr/local/bin/ktm-dagster-storage", "migrate"]:
+    raise SystemExit("Dagster metadata migration argv is invalid")
+if daemon["Config"]["Cmd"] != [
+    "/usr/local/bin/dagster-daemon", "run", "-m", "kortravelmap.dagster.definitions"
+]:
+    raise SystemExit("Dagster daemon argv is invalid")
+web_argv = webserver["Config"]["Cmd"]
+if len(web_argv) != 7 or web_argv[:6] != [
+    "/usr/local/bin/dagster-webserver", "-m", "kortravelmap.dagster.definitions",
+    "-h", "0.0.0.0", "-p",
+] or not str(web_argv[6]).isdigit() or not 1 <= int(web_argv[6]) <= 65535:
+    raise SystemExit("Dagster webserver argv is invalid")
+for item in (storage, webserver, daemon):
+    if item["Config"]["Entrypoint"] != ["/usr/local/bin/dagster-entrypoint.sh"]:
+        raise SystemExit("Dagster acceptance entrypoint is invalid")
+
+def environment(item):
+    return dict(value.split("=", 1) for value in item["Config"]["Env"] if "=" in value)
+
+storage_env, web_env, daemon_env = map(environment, (storage, webserver, daemon))
+for forbidden in (
+    "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN",
+    "KOR_TRAVEL_MAP_PG_DSN",
+    "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_DAGSTER_IMAGE_ID",
+    "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_API_IMAGE_ID",
+):
+    if forbidden in storage_env:
+        raise SystemExit("Dagster metadata migration received an application input")
+if len({item["KOR_TRAVEL_MAP_DAGSTER_PG_URL"] for item in (storage_env, web_env, daemon_env)}) != 1:
+    raise SystemExit("Dagster metadata DSN split-brain detected")
+if len({item["KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN"] for item in (web_env, daemon_env)}) != 1:
+    raise SystemExit("Dagster application runtime DSN split-brain detected")
+for item in (storage_env, web_env, daemon_env):
+    if item.get("DAGSTER_HOME") != "/opt/dagster/dagster_home":
+        raise SystemExit("Dagster home is not canonical")
+    if item.get("KOR_TRAVEL_MAP_DAGSTER_PROFILE") != "local-dev":
+        raise SystemExit("fresh acceptance must use the explicit local-dev permit authority")
+for item in (web_env, daemon_env):
+    if item.get("KOR_TRAVEL_MAP_PG_DSN") != item.get("KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN"):
+        raise SystemExit("Dagster runtime preflight DSN is not the runtime DSN")
+
+def require_read_only_mount(item, destination):
+    matches = [mount for mount in item["Mounts"] if mount["Destination"] == destination]
+    if len(matches) != 1 or matches[0]["RW"]:
+        raise SystemExit(f"required read-only mount is invalid: {destination}")
+
+for item in (storage, webserver, daemon):
+    require_read_only_mount(item, "/run/kor-travel-map-dagster-storage-permit")
+for item in (webserver, daemon):
+    require_read_only_mount(item, "/run/kor-travel-map-application-final-permit")
+if any(
+    mount["Destination"] == "/run/kor-travel-map-application-final-permit"
+    for mount in storage["Mounts"]
+):
+    raise SystemExit("Dagster metadata migration received the application permit mount")
+PY
+}
+
 build_playwright_image() {
   MAP_PLAYWRIGHT_IMAGE="tvn34c-playwright:${RUN_KEY:0:12}"
   local image_id
@@ -703,14 +800,17 @@ run() {
   write_blocked
   trap on_exit EXIT
   # fresh bootstrap은 normal `compose up` dependency가 아니다. 먼저 isolated
-  # PostgreSQL만 ready 상태로 만들고, profile을 명시해 bootstrap→restricted fresh root를
-  # 정확히 한 번 실행한다. 뒤의 recreate/up은 one-shot을 다시 실행하지 않으므로
+  # PostgreSQL만 ready 상태로 만들고, profile을 명시해 application role bootstrap→metadata
+  # DB/permit→restricted fresh root를 같은 env snapshot으로 정확히 한 번 실행한다. 뒤의
+  # recreate/up은 one-shot을 다시 실행하지 않으므로
   # persistent `300` DB restart가 fresh-only guard에 막히지 않는다.
   compose_map up --detach --wait postgres
   compose_map --profile fresh-init run --rm db-application-schema-fresh-300
   compose_map up --detach --build --wait \
-    dagster-db-init rustfs rustfs-init dagster-storage-migrate api frontend dagster
+    dagster-db-init rustfs rustfs-init dagster-storage-migrate api frontend dagster \
+    dagster-daemon
   verify_map_schema
+  verify_dagster_processes
   compose_map up --detach --force-recreate --wait api
   verify_map_schema
   seed_fresh_etl

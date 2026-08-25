@@ -133,7 +133,7 @@ REST/OpenAPI는 `kor-travel-map`이 아니라 **별도 Python 패키지**
 │ kor-travel-map API (별도 Python 패키지)                                │
 │ packages/kor-travel-map-api/src/kortravelmap/api/                      │
 │                                                                  │
-│  npm run admin:stack (scoped API env + process allowlist)       │
+│  npm run admin:stack (준비된 loopback DB의 read-only smoke)     │
 │                                                                  │
 │   ├── /health, /version                  (public status)      │
 │   ├── /features*, /public*, /providers*  (public read)        │

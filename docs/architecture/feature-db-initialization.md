@@ -10,8 +10,9 @@ DB를 부트스트랩하고 내부 라이브러리 client를 초기화하는 절
 1. PostgreSQL 16 + PostGIS 3.5와 dedicated DB (`kor_travel_map`)를 준비한다.
 2. ignored deployment env/vault에서 bootstrap, migrator, API runtime, Dagster runtime의
    서로 다른 credential을 주입한다.
-3. virgin DB에만 `docker compose --profile fresh-init run --rm
-   db-application-schema-fresh-300`을 명시 confirmation과 함께 한 번 실행한다. 이 one-shot은
+3. virgin DB에만 `docker compose -f docker-compose.yml -f docker-compose.host.yml
+   --profile fresh-init run --rm db-application-schema-fresh-300`을 명시 confirmation과 함께
+   한 번 실행한다. 이 one-shot은
    내부적으로 role/schema/extension bootstrap을 완료한 뒤 NOLOGIN `ktm_feature_schema_owner`와
    runtime group의 final ownership을 설정하고, 다음 restricted root migration까지 실행한다.
    기존 `0236` DB의 object/DB ownership transfer는 이 경로로 수행하지 않는다.

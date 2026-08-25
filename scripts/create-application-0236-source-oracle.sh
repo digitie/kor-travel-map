@@ -103,14 +103,32 @@ git -C "$SOURCE_ROOT" cat-file -e "${SOURCE_COMMIT}^{commit}" || \
   die "source root에 requested source commit object가 없다"
 [ "$(git -C "$SOURCE_ROOT" rev-parse "$SOURCE_COMMIT:alembic/versions")" = "$SOURCE_MIGRATION_TREE" ] || \
   die "source migration tree가 다르다"
+remove_source_seal() {
+  [ -n "${SOURCE_SEALED_PARENT:-}" ] || return 0
+  local source_cleanup_failed=0
+  chmod -R u+rwX -- "$SOURCE_SEALED_PARENT" || source_cleanup_failed=1
+  rm -rf -- "$SOURCE_SEALED_PARENT" || source_cleanup_failed=1
+  [ ! -e "$SOURCE_SEALED_PARENT" ] || source_cleanup_failed=1
+  [ "$source_cleanup_failed" -eq 0 ]
+}
+cleanup_source_seal() {
+  local status=$?
+  local cleanup_failed=0
+  trap - EXIT
+  remove_source_seal || cleanup_failed=1
+  SOURCE_SEALED_PARENT=""
+  SOURCE_SEALED_ROOT=""
+  if [ "$status" -ne 0 ]; then
+    exit "$status"
+  fi
+  [ "$cleanup_failed" -eq 0 ] || exit 1
+}
 SOURCE_SEALED_PARENT="$(mktemp -d "${TMPDIR:-/tmp}/ktm300-source-sealed.XXXXXX")"
 SOURCE_SEALED_ROOT="$SOURCE_SEALED_PARENT/source"
+trap cleanup_source_seal EXIT
 mkdir "$SOURCE_SEALED_ROOT"
 if ! git -C "$SOURCE_ROOT" archive --format=tar "$SOURCE_COMMIT" \
   | tar -x -C "$SOURCE_SEALED_ROOT"; then
-  rm -rf -- "$SOURCE_SEALED_PARENT"
-  SOURCE_SEALED_PARENT=""
-  SOURCE_SEALED_ROOT=""
   die "source Git archive를 만들지 못했다"
 fi
 python3 - "$SOURCE_SEALED_ROOT" <<'PY'
@@ -132,10 +150,6 @@ for path in sorted(root.rglob("*"), key=lambda item: len(item.parts), reverse=Tr
     os.chmod(path, 0o555 if path.is_dir() else 0o444)
 os.chmod(root, 0o555)
 PY
-cleanup_source_seal() {
-  [ -z "$SOURCE_SEALED_PARENT" ] || rm -rf -- "$SOURCE_SEALED_PARENT"
-}
-trap cleanup_source_seal EXIT
 manifest="$REPOSITORY_ROOT/alembic/retired_versions/0200-0236/manifest.sha256"
 [ "$(sha256sum "$manifest" | awk '{print $1}')" = "$RETIRED_MANIFEST_SHA256" ] || \
   die "retired migration manifest digest가 다르다"
@@ -362,22 +376,26 @@ created_container=0
 created_volume=0
 receipt_tmp=""
 cleanup() {
-  status=$?
-  [ -z "${source_app_manifest:-}" ] || rm -f -- "$source_app_manifest"
-  [ -z "${source_image_app_manifest:-}" ] || rm -f -- "$source_image_app_manifest"
-  [ -z "${source_runtime_manifest:-}" ] || rm -f -- "$source_runtime_manifest"
-  [ -z "${source_image_runtime_manifest:-}" ] || rm -f -- "$source_image_runtime_manifest"
-  [ -z "${source_image_dependency_sbom:-}" ] || rm -f -- "$source_image_dependency_sbom"
-  [ -z "${source_build_dockerfile:-}" ] || rm -f -- "$source_build_dockerfile"
-  [ -z "${SOURCE_SEALED_PARENT:-}" ] || rm -rf -- "$SOURCE_SEALED_PARENT"
+  local status=$?
+  local cleanup_failed=0
+  trap - EXIT
+  [ -z "${source_app_manifest:-}" ] || rm -f -- "$source_app_manifest" || cleanup_failed=1
+  [ -z "${source_image_app_manifest:-}" ] || rm -f -- "$source_image_app_manifest" || cleanup_failed=1
+  [ -z "${source_runtime_manifest:-}" ] || rm -f -- "$source_runtime_manifest" || cleanup_failed=1
+  [ -z "${source_image_runtime_manifest:-}" ] || rm -f -- "$source_image_runtime_manifest" || cleanup_failed=1
+  [ -z "${source_image_dependency_sbom:-}" ] || rm -f -- "$source_image_dependency_sbom" || cleanup_failed=1
+  [ -z "${source_build_dockerfile:-}" ] || rm -f -- "$source_build_dockerfile" || cleanup_failed=1
+  remove_source_seal || cleanup_failed=1
   SOURCE_SEALED_PARENT=""
   SOURCE_SEALED_ROOT=""
   if [ "$status" -ne 0 ]; then
-    [ -z "$receipt_tmp" ] || rm -f -- "$receipt_tmp"
-    [ "$created_container" = 0 ] || docker container rm -f "$CONTAINER" >/dev/null 2>&1 || true
-    [ "$created_volume" = 0 ] || docker volume rm "$VOLUME" >/dev/null 2>&1 || true
+    [ -z "$receipt_tmp" ] || rm -f -- "$receipt_tmp" || cleanup_failed=1
+    [ "$created_container" = 0 ] || docker container rm -f "$CONTAINER" >/dev/null 2>&1 || cleanup_failed=1
+    [ "$created_volume" = 0 ] || docker volume rm "$VOLUME" >/dev/null 2>&1 || cleanup_failed=1
+    exit "$status"
   fi
-  exit "$status"
+  [ "$cleanup_failed" -eq 0 ] || exit 1
+  exit 0
 }
 trap cleanup EXIT
 
@@ -770,7 +788,7 @@ source_image_app_manifest=""
 source_runtime_manifest=""
 source_image_runtime_manifest=""
 source_image_dependency_sbom=""
-cleanup_source_seal
+remove_source_seal || die "sealed source cleanup에 실패했다"
 SOURCE_SEALED_PARENT=""
 SOURCE_SEALED_ROOT=""
 trap - EXIT

@@ -146,6 +146,20 @@ runtime_preflight() {
   /usr/local/bin/python -I -m kortravelmap.dagster.runtime_preflight
 }
 
+storage_input_preflight() {
+  if [ "${KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN+x}" = "x" ] \
+    || [ "${KOR_TRAVEL_MAP_PG_DSN+x}" = "x" ] \
+    || [ "${KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_DAGSTER_IMAGE_ID+x}" = "x" ] \
+    || [ "${KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_API_IMAGE_ID+x}" = "x" ]; then
+    echo "Dagster metadata migration forbids application runtime/final-permit inputs" >&2
+    exit 1
+  fi
+  if [ -e /run/kor-travel-map-application-final-permit ]; then
+    echo "Dagster metadata migration forbids the application final-permit mount" >&2
+    exit 1
+  fi
+}
+
 if [ "$dagster_profile" = "production" ]; then
   # production은 fixed image executable과 한 가지 argv 형상만 허용한다. bare PATH
   # lookup과 shell command override는 permit 뒤 다른 executable을 실행할 수 있으므로
@@ -188,6 +202,7 @@ if [ "$dagster_profile" = "production" ]; then
         echo "production Dagster storage argv does not match the sealed launch contract" >&2
         exit 1
       fi
+      storage_input_preflight
       ;;
     *)
       echo "production Dagster requires a sealed absolute runtime command" >&2
@@ -196,6 +211,11 @@ if [ "$dagster_profile" = "production" ]; then
   esac
 else
   case "${1:-}" in
+    /usr/local/bin/ktm-dagster-storage)
+      if [ "${2:-}" = "migrate" ]; then
+        storage_input_preflight
+      fi
+      ;;
     dagster-webserver | /usr/local/bin/dagster-webserver)
       runtime_preflight
       ;;

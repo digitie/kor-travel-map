@@ -57,6 +57,9 @@ def test_paired_builder_seals_both_images_and_one_dagster_launch_image() -> None
     assert '"production_authority": "docker-manager"' in script
     assert '"forbidden_application_raw_revision": "300"' in script
     assert '"dagster_config_receipt_field": "candidate_dagster_yaml_sha256"' in script
+    assert '"login_role_attributes"' in script
+    assert '"required_login_role_attributes": {' in script
+    assert '"requires_owner_login_and_effective_role_equality": True' in script
     assert '"candidate_commit"' in script
     assert '"candidate_git_tree"' in script
     assert "candidate_full_rootfs_layers_sha256" in script
@@ -76,6 +79,12 @@ def test_paired_builder_seals_both_images_and_one_dagster_launch_image() -> None
         source = (ROOT / builder).read_text(encoding="utf-8")
         assert 'chmod -R u+rwX -- "$SEALED_PARENT"' in source
         assert 'rm -rf -- "$SEALED_PARENT"' in source
+    api_builder = (ROOT / "scripts/build-application-300-candidate.sh").read_text(
+        encoding="utf-8"
+    )
+    assert 'stat -c "%u:%a" /app/resources/curations' in api_builder
+    assert "! touch /app/resources/curations/.candidate-mutation" in api_builder
+    assert "! mv /app/resources/curations/manifest.json" in api_builder
 
     rehearsal = (ROOT / "scripts" / "rehearse-application-300-handoff.sh").read_text(
         encoding="utf-8"
@@ -124,6 +133,12 @@ def test_dagster_image_has_symmetric_provenance_and_immutable_contract_tool() ->
     ).read_text(encoding="utf-8")
     assert "--network=none --entrypoint /bin/sh" in paired_builder
     assert "! mv /app/alembic/baseline /app/alembic/replaced" in paired_builder
+
+    api_dockerfile = (ROOT / "docker" / "api.Dockerfile").read_text(encoding="utf-8")
+    assert "COPY --chown=root:root resources/curations" in api_dockerfile
+    assert "find /app/resources/curations -type d -exec chmod 0555" in api_dockerfile
+    assert "find /app/resources/curations -type f -exec chmod 0444" in api_dockerfile
+    assert "! mv /app/resources/curations/manifest.json" in api_dockerfile
 
 
 @pytest.mark.unit

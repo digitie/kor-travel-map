@@ -24,7 +24,25 @@ services:
       KOR_TRAVEL_MAP_POSTGRES_INIT_HOST: 127.0.0.1
       KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL:?KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL is required}
 
+  dagster-db-init-fresh-300:
+    network_mode: host
+    environment:
+      KOR_TRAVEL_MAP_POSTGRES_INIT_HOST: 127.0.0.1
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL:?KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL is required}
+
+  db-application-create-fresh-300:
+    network_mode: host
+    environment:
+      KOR_TRAVEL_MAP_POSTGRES_INIT_HOST: 127.0.0.1
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL:?KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL is required}
+
   db-role-bootstrap-300:
+    network_mode: host
+    environment:
+      KOR_TRAVEL_MAP_POSTGRES_INIT_HOST: 127.0.0.1
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL:?KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL is required}
+
+  db-application-schema-fresh-300:
     network_mode: host
 
   rustfs-perms:

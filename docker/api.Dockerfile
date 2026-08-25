@@ -66,9 +66,10 @@ COPY --chown=root:root docker/application-schema-fresh-finalize.py /usr/local/bi
 COPY --chown=root:root docker/application-schema-final-permit.py /usr/local/bin/ktm-application-schema-final-permit
 COPY --chown=root:root docker/application-schema-contract.py /usr/local/bin/ktm-application-schema-contract
 COPY --chown=root:root docker/application-schema-head.py /usr/local/bin/ktm-application-schema
-COPY --chown=appuser:appuser resources/curations ./resources/curations
+COPY --chown=root:root resources/curations ./resources/curations
 
 RUN chown -R root:root /app/alembic /app/alembic.ini /app/docker/api-entrypoint.sh \
+    /app/resources/curations \
     /usr/local/bin/ktm-application-schema-handoff \
     /usr/local/bin/ktm-application-schema-fresh-300 \
     /usr/local/bin/ktm-application-schema-fresh-finalize \
@@ -76,6 +77,8 @@ RUN chown -R root:root /app/alembic /app/alembic.ini /app/docker/api-entrypoint.
     /usr/local/bin/ktm-application-schema-contract \
     && find /app/alembic -type d -exec chmod 0555 {} + \
     && find /app/alembic -type f -exec chmod 0444 {} + \
+    && find /app/resources/curations -type d -exec chmod 0555 {} + \
+    && find /app/resources/curations -type f -exec chmod 0444 {} + \
     && chmod 0444 /app/alembic.ini \
     && chmod 0555 /app /app/docker /usr/local/bin/ktm-application-schema \
     && chmod 0555 /usr/local/bin/ktm-application-schema-handoff \
@@ -87,6 +90,8 @@ RUN chown -R root:root /app/alembic /app/alembic.ini /app/docker/api-entrypoint.
     && su -s /bin/sh -c 'test ! -w /app \
         && test ! -w /app/docker/api-entrypoint.sh \
         && test ! -w /app/alembic/baseline \
+        && test ! -w /app/resources/curations \
+        && ! mv /app/resources/curations/manifest.json /app/resources/curations/replaced.json \
         && test ! -w /usr/local/bin/ktm-application-schema-final-permit' appuser
 
 USER appuser

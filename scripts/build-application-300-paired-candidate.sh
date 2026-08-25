@@ -543,6 +543,13 @@ value = {
         "storage_migration": {
             "scope": "dagster-metadata-only-excluded-from-application-final-permit",
             "argv": ["/usr/local/bin/ktm-dagster-storage", "migrate"],
+            "forbidden_application_environment": [
+                "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN",
+                "KOR_TRAVEL_MAP_PG_DSN",
+                "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_DAGSTER_IMAGE_ID",
+                "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_API_IMAGE_ID",
+            ],
+            "forbids_application_final_permit_mount": True,
         },
         "metadata_database_identity_permit": {
             "schema": "kor-travel-map.dagster-storage-database-permit.v1",
@@ -557,7 +564,18 @@ value = {
             "dagster_config_receipt_field": "candidate_dagster_yaml_sha256",
             "database_identity_fields": [
                 "system_identifier", "name", "oid", "owner", "login_role",
+                "login_role_attributes",
             ],
+            "required_login_role_attributes": {
+                "superuser": False,
+                "create_database": False,
+                "create_role": False,
+                "replication": False,
+                "bypass_rls": False,
+                "granted_role_count": 0,
+                "member_role_count": 0,
+            },
+            "requires_owner_login_and_effective_role_equality": True,
             "forbidden_application_identity_fields": [
                 "system_identifier", "name", "oid", "owner",
             ],

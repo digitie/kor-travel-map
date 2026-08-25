@@ -52,13 +52,31 @@ _PERMIT_FIELDS: Final = frozenset(
     {"schema", "authority", "candidate", "dagster_database", "application_database"}
 )
 _DAGSTER_DATABASE_FIELDS: Final = frozenset(
-    {"system_identifier", "name", "oid", "owner", "login_role"}
+    {
+        "system_identifier",
+        "name",
+        "oid",
+        "owner",
+        "login_role",
+        "login_role_attributes",
+    }
 )
 _APPLICATION_DATABASE_FIELDS: Final = frozenset(
     {"system_identifier", "name", "oid", "owner"}
 )
 _CANDIDATE_FIELDS: Final = frozenset(
     {"dagster_image_id", "paired_candidate_build_receipt_sha256", "dagster_config_sha256"}
+)
+_LOGIN_ROLE_ATTRIBUTE_FIELDS: Final = frozenset(
+    {
+        "superuser",
+        "create_database",
+        "create_role",
+        "replication",
+        "bypass_rls",
+        "granted_role_count",
+        "member_role_count",
+    }
 )
 
 
@@ -88,6 +106,14 @@ def _validate_dagster_config(raw: bytes) -> None:
     """Dagster storage target이 canonical DSN env 외에는 읽지 못하게 한다."""
     try:
         config = yaml.safe_load(raw)
+        if set(config) != {
+            "telemetry",
+            "python_logs",
+            "storage",
+            "concurrency",
+            "run_monitoring",
+        }:
+            raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
         storage = config["storage"]
         postgres = storage["postgres"]
     except (KeyError, TypeError, UnicodeError, yaml.YAMLError) as exc:
@@ -96,6 +122,17 @@ def _validate_dagster_config(raw: bytes) -> None:
         "postgres": {"postgres_url": {"env": _DAGSTER_PG_URL_ENV}}
     } or postgres != {"postgres_url": {"env": _DAGSTER_PG_URL_ENV}}:
         raise DagsterStorageMigrationError("dagster_storage_target_not_sealed")
+
+
+def _validate_root_owned_directory(metadata: os.stat_result) -> None:
+    """appuser가 config를 rename/replace할 수 있는 상위 directory를 거부한다."""
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or stat.S_ISLNK(metadata.st_mode)
+        or metadata.st_uid != 0
+        or stat.S_IMODE(metadata.st_mode) & 0o022
+    ):
+        raise DagsterStorageMigrationError("unsafe_dagster_home_parent")
 
 
 def _safe_dagster_config(environment: Mapping[str, str]) -> str:
@@ -107,6 +144,12 @@ def _safe_dagster_config(environment: Mapping[str, str]) -> str:
     dagster_home = Path(dagster_home_raw)
     if dagster_home != _DAGSTER_HOME:
         raise DagsterStorageMigrationError("invalid_dagster_home")
+
+    for directory in (Path("/opt"), Path("/opt/dagster"), _DAGSTER_HOME):
+        try:
+            _validate_root_owned_directory(directory.lstat())
+        except OSError as exc:
+            raise DagsterStorageMigrationError("unsafe_dagster_home_parent") from exc
 
     dagster_yaml = dagster_home / "dagster.yaml"
     try:
@@ -184,7 +227,48 @@ def _require_database_identity(
         or not _ROLE_NAME_PATTERN.fullmatch(identity["login_role"])
     ):
         raise DagsterStorageMigrationError("dagster_storage_permit_identity_invalid")
+    if dagster:
+        attributes = _require_fields(
+            identity["login_role_attributes"],
+            _LOGIN_ROLE_ATTRIBUTE_FIELDS,
+            "dagster_storage_permit_identity_invalid",
+        )
+        if (
+            identity["owner"] != identity["login_role"]
+            or any(
+                attributes[key] is not False
+                for key in (
+                    "superuser",
+                    "create_database",
+                    "create_role",
+                    "replication",
+                    "bypass_rls",
+                )
+            )
+            or any(
+                not isinstance(attributes[key], int)
+                or isinstance(attributes[key], bool)
+                or attributes[key] != 0
+                for key in ("granted_role_count", "member_role_count")
+            )
+        ):
+            raise DagsterStorageMigrationError("dagster_storage_login_role_unsafe")
     return identity
+
+
+def _require_isolated_database_identities(
+    dagster_identity: Mapping[str, Any],
+    application_identity: Mapping[str, Any],
+) -> None:
+    """metadata owner/DB가 application identity와 겹치지 않음을 강제한다."""
+    if (
+        dagster_identity["system_identifier"]
+        != application_identity["system_identifier"]
+        or dagster_identity["owner"] == application_identity["owner"]
+        or (dagster_identity["name"], dagster_identity["oid"])
+        == (application_identity["name"], application_identity["oid"])
+    ):
+        raise DagsterStorageMigrationError("dagster_storage_permit_identity_invalid")
 
 
 def _read_permit(
@@ -230,13 +314,7 @@ def _read_permit(
     application_identity = _require_database_identity(
         permit["application_database"], dagster=False
     )
-    if (
-        dagster_identity["system_identifier"]
-        != application_identity["system_identifier"]
-        or (dagster_identity["name"], dagster_identity["oid"])
-        == (application_identity["name"], application_identity["oid"])
-    ):
-        raise DagsterStorageMigrationError("dagster_storage_permit_identity_invalid")
+    _require_isolated_database_identities(dagster_identity, application_identity)
 
     if profile == "production":
         if permit["authority"] != "docker-manager":
@@ -268,7 +346,7 @@ def _read_permit(
 
 def _read_observed_identity(
     dagster_pg_url: str,
-) -> tuple[dict[str, Any], tuple[str, ...], tuple[bool, bool, bool]]:
+) -> tuple[dict[str, Any], tuple[str, ...], tuple[bool, bool, bool], bool]:
     """migration과 같은 DSN에서 DB identity와 application residue를 읽는다."""
     engine = None
     try:
@@ -282,17 +360,31 @@ def _read_observed_identity(
                            database.oid::bigint AS oid,
                            pg_get_userbyid(database.datdba) AS owner,
                            session_user AS login_role,
+                           current_user AS effective_role,
+                           role.rolsuper AS login_superuser,
+                           role.rolcreatedb AS login_create_database,
+                           role.rolcreaterole AS login_create_role,
+                           role.rolreplication AS login_replication,
+                           role.rolbypassrls AS login_bypass_rls,
+                           (SELECT count(*)::bigint
+                              FROM pg_auth_members AS membership
+                             WHERE membership.member = role.oid) AS login_granted_role_count,
+                           (SELECT count(*)::bigint
+                              FROM pg_auth_members AS membership
+                             WHERE membership.roleid = role.oid) AS login_member_role_count,
                            to_regclass('public.alembic_version') IS NOT NULL AS has_version,
                            to_regnamespace('feature') IS NOT NULL AS has_feature,
                            to_regnamespace('provider_sync') IS NOT NULL AS has_provider_sync,
                            to_regnamespace('ops') IS NOT NULL AS has_ops
                     FROM pg_database AS database
+                    JOIN pg_roles AS role ON role.rolname = session_user
                     CROSS JOIN pg_control_system() AS control
                     WHERE database.datname = current_database()
                     """
                 )
             ).mappings().one()
             versions: tuple[str, ...] = ()
+            has_application_300 = False
             if bool(row["has_version"]):
                 versions = tuple(
                     str(item[0])
@@ -303,11 +395,23 @@ def _read_observed_identity(
                         )
                     ).all()
                 )
+                has_application_300 = bool(
+                    connection.execute(
+                        text(
+                            "SELECT EXISTS ("
+                            "SELECT 1 FROM public.alembic_version "
+                            "WHERE version_num::text = '300'"
+                            ")"
+                        )
+                    ).scalar_one()
+                )
     except Exception as exc:
         raise DagsterStorageMigrationError("dagster_storage_identity_unavailable") from exc
     finally:
         if engine is not None:
             engine.dispose()
+    if str(row["login_role"]) != str(row["effective_role"]):
+        raise DagsterStorageMigrationError("dagster_storage_login_role_unsafe")
     return (
         {
             "system_identifier": str(row["system_identifier"]),
@@ -315,9 +419,19 @@ def _read_observed_identity(
             "oid": int(row["oid"]),
             "owner": str(row["owner"]),
             "login_role": str(row["login_role"]),
+            "login_role_attributes": {
+                "superuser": bool(row["login_superuser"]),
+                "create_database": bool(row["login_create_database"]),
+                "create_role": bool(row["login_create_role"]),
+                "replication": bool(row["login_replication"]),
+                "bypass_rls": bool(row["login_bypass_rls"]),
+                "granted_role_count": int(row["login_granted_role_count"]),
+                "member_role_count": int(row["login_member_role_count"]),
+            },
         },
         versions,
         (bool(row["has_feature"]), bool(row["has_provider_sync"]), bool(row["has_ops"])),
+        has_application_300,
     )
 
 
@@ -328,13 +442,15 @@ def _verify_database_identity(
     expected, forbidden = _read_permit(
         environment, profile=profile, config_sha256=config_sha256
     )
-    observed, versions, application_schemas = _read_observed_identity(dagster_pg_url)
+    observed, _, application_schemas, has_application_300 = _read_observed_identity(
+        dagster_pg_url
+    )
     if all(
         observed[key] == forbidden[key]
         for key in ("system_identifier", "name", "oid", "owner")
     ):
         raise DagsterStorageMigrationError("dagster_storage_targets_application_database")
-    if versions == ("300",) or any(application_schemas):
+    if has_application_300 or any(application_schemas):
         raise DagsterStorageMigrationError("dagster_storage_targets_application_schema")
     if observed != dict(expected):
         raise DagsterStorageMigrationError("dagster_storage_database_identity_mismatch")

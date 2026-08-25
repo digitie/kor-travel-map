@@ -360,6 +360,21 @@ if [[ "$api_profile" != "production" && "$api_profile" != "local-dev" ]]; then
   echo "KOR_TRAVEL_MAP_API_PROFILE must be exactly production or local-dev" >&2
   exit 1
 fi
+if [[ "$api_profile" != "local-dev" \
+  || "${KOR_TRAVEL_MAP_API_PROFILE:-local-dev}" != "local-dev" \
+  || "${KOR_TRAVEL_MAP_DAGSTER_PROFILE:-local-dev}" != "local-dev" ]]; then
+  echo "admin:stack is a loopback local-dev smoke launcher; production requires Docker Manager" >&2
+  exit 1
+fi
+while IFS= read -r authority_key; do
+  case "$authority_key" in
+    KOR_TRAVEL_MAP_*PERMIT* | KOR_TRAVEL_MAP_*WRITER_FENCE* | \
+      KOR_TRAVEL_MAP_*HANDOFF*)
+      echo "admin:stack rejects production authority input: $authority_key" >&2
+      exit 1
+      ;;
+  esac
+done < <(compgen -A variable KOR_TRAVEL_MAP_)
 if [[ "$features_routes_enabled" != "true" && "$features_routes_enabled" != "false" ]]; then
   echo "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED must be exactly true or false" >&2
   exit 1
@@ -605,45 +620,100 @@ else
   fi
 fi
 
-echo "alembic upgrade head"
-(
-  cd "$ROOT_DIR"
-  "$PYTHON_BIN" -m alembic upgrade head
-)
-
-echo "ensure dagster metadata database: $KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB"
+echo "verify pre-provisioned local application and Dagster databases"
 (
   "$PYTHON_BIN" - <<'PY'
 from __future__ import annotations
 
 import os
-import re
 from urllib.parse import urlsplit
 
 import psycopg
-from psycopg import sql
 
 
 def _psycopg_dsn(value: str) -> str:
-    return value.replace("postgresql+psycopg://", "postgresql://", 1)
+    for scheme in ("postgresql+psycopg://", "postgresql+asyncpg://"):
+        if value.startswith(scheme):
+            return value.replace(scheme, "postgresql://", 1)
+    return value
 
 
-dagster_url = os.environ["KOR_TRAVEL_MAP_DAGSTER_PG_URL"]
-dagster_db = urlsplit(dagster_url).path.lstrip("/").split("?", 1)[0]
-if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", dagster_db):
-    raise SystemExit(f"invalid KOR_TRAVEL_MAP_DAGSTER_PG_URL database name: {dagster_db!r}")
+def _require_loopback_dsn(name: str) -> str:
+    value = os.environ.get(name, "")
+    parsed = urlsplit(value)
+    if (
+        parsed.scheme not in {"postgresql", "postgresql+psycopg", "postgresql+asyncpg"}
+        or parsed.hostname not in {"127.0.0.1", "localhost"}
+        or parsed.port not in {None, 5432}
+        or not parsed.username
+        or not parsed.password
+        or not parsed.path.startswith("/")
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise SystemExit(f"{name} must be one strict loopback PostgreSQL DSN")
+    return _psycopg_dsn(value)
 
-app_dsn = _psycopg_dsn(os.environ["KOR_TRAVEL_MAP_PG_DSN_SYNC"])
-with psycopg.connect(app_dsn, autocommit=True) as conn:
-    exists = conn.execute(
-        "SELECT 1 FROM pg_database WHERE datname = %s",
-        (dagster_db,),
+
+app_dsn = _require_loopback_dsn("KOR_TRAVEL_MAP_PG_DSN_SYNC")
+metadata_dsn = _require_loopback_dsn("KOR_TRAVEL_MAP_DAGSTER_PG_URL")
+metadata_url = urlsplit(os.environ["KOR_TRAVEL_MAP_DAGSTER_PG_URL"])
+metadata_identity = os.environ["KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB"]
+if metadata_url.username != metadata_identity or metadata_url.path != f"/{metadata_identity}":
+    raise SystemExit("Dagster metadata DSN must use its dedicated DB identity")
+
+with psycopg.connect(app_dsn) as connection:
+    application_identity = connection.execute(
+        """
+        SELECT current_database(), pg_control_system().system_identifier::text,
+               owner.rolname
+        FROM pg_database AS database
+        JOIN pg_roles AS owner ON owner.oid = database.datdba
+        WHERE database.datname = current_database()
+        """
     ).fetchone()
-    if exists is None:
-        conn.execute(sql.SQL("CREATE DATABASE {}").format(sql.Identifier(dagster_db)))
-        print(f"Dagster metadata DB created: {dagster_db}")
-    else:
-        print(f"Dagster metadata DB exists: {dagster_db}")
+    revisions = connection.execute(
+        "SELECT version_num FROM public.alembic_version ORDER BY version_num"
+    ).fetchall()
+if application_identity is None or revisions != [("300",)]:
+    raise SystemExit("admin:stack requires a pre-provisioned exact application revision 300")
+
+with psycopg.connect(metadata_dsn) as connection:
+    metadata = connection.execute(
+        """
+        SELECT current_database(), session_user::text, current_user::text,
+               owner.rolname, role.rolsuper, role.rolcreatedb, role.rolcreaterole,
+               role.rolreplication, role.rolbypassrls,
+               (SELECT count(*) FROM pg_auth_members WHERE member = role.oid),
+               (SELECT count(*) FROM pg_auth_members WHERE roleid = role.oid),
+               pg_control_system().system_identifier::text,
+               (SELECT count(*) FROM pg_tables WHERE schemaname = 'public')
+        FROM pg_database AS database
+        JOIN pg_roles AS owner ON owner.oid = database.datdba
+        JOIN pg_roles AS role ON role.rolname = session_user
+        WHERE database.datname = current_database()
+        """
+    ).fetchone()
+expected_prefix = (
+    metadata_identity,
+    metadata_identity,
+    metadata_identity,
+    metadata_identity,
+    False,
+    False,
+    False,
+    False,
+    False,
+    0,
+    0,
+)
+if metadata is None or metadata[:11] != expected_prefix:
+    raise SystemExit("Dagster metadata database identity is not dedicated and restricted")
+if metadata[11] != application_identity[1] or metadata[3] == application_identity[2]:
+    raise SystemExit("application and Dagster metadata database isolation is invalid")
+if not isinstance(metadata[12], int) or metadata[12] < 1:
+    raise SystemExit("Dagster metadata storage must be migrated before admin:stack")
+print("pre-provisioned local application and Dagster database identities verified")
 PY
 )
 

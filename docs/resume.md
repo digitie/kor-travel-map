@@ -25,26 +25,60 @@ Compose의 장기 실행 Dagster service에는 root `.env`와 application privil
 
 별도 metadata DB 경계는 root-owned identity permit으로 보강했다. storage migration은 쓰기
 전에, webserver/daemon은 기동 전에 canonical `DAGSTER_HOME`/root-owned `dagster.yaml`, 같은
-DSN의 system ID/name/OID/owner/login을 확인한다. application DB identity·raw `300`·application
-schema를 가리키면 중단한다. production permit은 Docker Manager authority, exact Dagster image,
+DSN의 system ID/name/OID/owner/login과 최소권한 role 속성을 확인한다. metadata login은 DB
+owner와 같고 bootstrap과 다른 `NOSUPERUSER/NOCREATEDB/NOCREATEROLE/NOREPLICATION/
+NOBYPASSRLS`, membership 0개여야 하며 `session_user=current_user`도 요구한다. application DB
+identity·여러 version row 중 하나라도 raw `300`·application schema를 가리키면 중단한다.
+production permit은 Docker Manager authority, exact Dagster image,
 paired receipt와 `dagster.yaml` digest를 결박하고, local-dev permit은 dedicated metadata DSN으로
 관측한 identity만 별도 local authority로 기록한다.
+local DB-init은 role과 DB가 모두 새것일 때만 생성하며, 기존 pair는 root-owned prior permit과
+현재 identity의 byte-exact 일치만 무변경 재사용한다. 예약 application/system identity,
+role/DB partial state, permit 누락·drift를 자동 `ALTER`/`REVOKE`로 수리하지 않는다.
 
-fresh production 경로는 이제 두 단계다. fixed `fresh-300 migrate`가 restricted root
-migration과 source receipt를 남기고, Docker Manager가 외부 durable journal과 writer fence
-아래 fixed `fresh-300-finalize`를 실행해 ACL 재조정과 destination catalog 확인을 한 DB
-transaction으로 완료한다. raw `300` 중간 상태에는 permit을 발급하거나 runtime을 기동하지
-않는다. exact `0236` 경로는 별도 controlled handoff만 허용하며 downgrade·old restore는 없다.
+로컬 virgin 경로는 PostGIS 자동 확장이 들어간 maintenance DB `postgres`와 application DB를
+분리하고, `template0`에서 application DB 생성 → role/bootstrap → dedicated metadata DB/permit →
+restricted `300` migration 순으로 같은 Compose snapshot에서 실행한다. Docker Manager production
+finalization은 fixed `fresh-300 migrate`가 restricted root migration과 source receipt를 남긴 뒤,
+외부 durable journal과 writer fence 아래 fixed `fresh-300-finalize`가 ACL 재조정과 destination
+catalog 확인을 한 DB transaction으로 완료하는 두 단계다. raw `300` 중간 상태에는 permit을
+발급하거나 runtime을 기동하지 않는다. exact `0236` 경로는 별도 controlled handoff만 허용하며
+downgrade·old restore는 없다.
 
 첫 실제 paired build는 sealed source를 0444/0555로 만든 뒤 임시 디렉터리를 원래 mode로
 복구하지 못해 cleanup에서 중단됐다. 해당 실패는 image/receipt 성공으로 승격하지 않았고,
-cleanup이 원래 exit status를 보존하면서 mode 복구 후 제거하도록 고쳤다. 관련 application
-300·Dagster unit 최신 묶음은 `203 passed`다. n150 배포나 live UI E2E 증거는 아직 아니다.
+cleanup이 원래 exit status를 보존하면서 mode 복구 후 제거하도록 고쳤다. alternate top-level
+Dagster storage key, appuser 쓰기 가능 config 상위 경로, bootstrap/superuser metadata login,
+다중 version row의 raw `300`을 모두 negative gate로 고정했다. 초기화 중 임시 Postgres가
+healthy로 보이던 Compose 경합도 최종 PID 1 확인으로 제거했다. 격리된 실제 Postgres에서 전용 role 생성·sealed permit
+재실행·identity 조회, bootstrap login 거부, role만 남은 partial state의 mutation 전 거부를
+확인했다. fresh live acceptance에는 고유 permit volume과 Dagster daemon을 포함하고 세
+process의 same-image/state/absolute argv/DSN/read-only mount를 검사한다. n150 배포나 live UI
+E2E 증거는 아직 아니다.
+추가 적대 리뷰에 따라 external DB/infra standalone launcher는 Manager permit producer가 없어
+즉시 중단한다. metadata role의 양방향 membership, metadata/application owner 분리, storage
+one-shot의 application runtime/final-permit 입력 부재를 결박했다. local launcher는 다섯 DB
+password를 URI-unreserved·상호 distinct로 제한하고 각 application/metadata DSN의 실제
+login/password/database를 선언값과 exact 대조한다. 다섯 DSN authority와 실제 writer init
+host도 한 canonical PostgreSQL endpoint로 결박해 target 분산을 mutation 전에 거부한다.
+host/bridge fresh topology의 네 one-shot도 각각 같은 network/DSN을 받는다.
+
+추가 P0/P1 재검토로 controlled handoff의 첫 SQL을 exact non-superuser migrator
+`session_user=current_user` 검증으로 강화했다. `admin:stack`의 generic Alembic/metadata DB 생성은
+제거하고, strict local-dev·loopback의 사전 준비된 application `300`/dedicated metadata identity와
+migrated storage를 읽기 전용으로 확인하는 smoke 경로로 축소했다. source oracle과 API candidate의
+봉인된 tree cleanup은 원 exit status를 보존하며, receipt 대상 `resources/curations`는
+root-owned 0555/0444와 appuser mutation-negative로 고정했다. 실제 disposable PostGIS에서
+application DB 생성·role bootstrap·metadata DB/permit 세 one-shot이 모두 exit 0이고 permit
+directory/file이 `0:555`/`0:444:1`임을 확인한 뒤 정확한 프로젝트/volume을 제거했다. 이는 n150
+production 증거가 아니다. 최종 application-300/Dagster/candidate 계약 단일 묶음은
+`288 passed`이고 ruff·shell syntax·Python compile·`git diff --check`가 통과했다.
 
 ### 다음 한 작업
 
-두 전문 적대 리뷰의 최종 P0/P1을 반영해 checkpoint를 push한 뒤, 새 commit으로 API+Dagster
-paired candidate를 실제 재빌드하고 receipt를 검증한다. 이어 Docker Manager의 Map-only
+두 전문 적대 리뷰는 Map 내부 P0/P1 없음으로 판정했고 Docker Manager 동반 변경 전 release는
+NO-GO다. checkpoint를 push한 뒤 새 commit으로 API+Dagster paired candidate를 실제 재빌드하고
+receipt를 검증한다. 이어 Docker Manager의 Map-only
 transition/journal과 v6 handoff rehearsal을 같은 candidate pair에 결박한다. n150 exact
 deploy, 로그인 POST+cookie, browser live UI E2E와 CI green 전에는 PR #1064를 병합하지 않는다.
 

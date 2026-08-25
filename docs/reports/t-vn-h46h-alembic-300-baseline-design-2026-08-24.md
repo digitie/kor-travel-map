@@ -155,8 +155,9 @@ data semantic closure를 재확인한다. 변경이 허용된 것은 Alembic met
 
 ## runtime 전환 checkpoint
 
-새 dedicated DB는 `docker compose --profile fresh-init run --rm
-db-role-bootstrap-300`으로만 한 번 준비한다. Compose의 normal startup은 이 service를
+새 dedicated DB는 `docker compose -f docker-compose.yml -f docker-compose.host.yml
+--profile fresh-init run --rm db-application-schema-fresh-300`으로만 한 번 준비한다.
+Compose의 normal startup은 이 연속 one-shot을
 dependency로 두지 않으므로, persistent `300` DB의 recreate/restart가 fresh-only guard에
 막히지 않는다. 과거 M01~M05 boundary·pre/repair service와 image helper는 제거했고,
 외부 DB/infra overlay도 fresh bootstrap을 자동 기동하지 않는다.

@@ -10,11 +10,9 @@
 # 포트를 정하는 별도 변수는 없다. 이 overlay는 포트를 조합하지 않고 아래
 # `..._PG_DSN`을 그대로 주입하므로 포트는 각 DSN 문자열 안에 있다.
 #
-# 이 모드는 kor-travel-map local Postgres만 띄우지 않고,
-# RustFS는 kor-travel-map compose의 local 서비스를 계속 사용한다.
-# 적용:
-#
-#   KOR_TRAVEL_MAP_DB_EXTERNAL=true bash scripts/docker-up.sh
+# 이 overlay는 Manager-owned production composition의 내부 입력이다. standalone
+# `scripts/docker-up.sh`는 application/metadata permit producer가 없으므로 이 모드를
+# 명시적으로 거부한다. 운영자는 Docker Manager controlled transaction만 사용한다.
 #
 # 공유 DB에는 `kor_travel_map`과 `kor_travel_map_dagster` DB가 있어야 한다.
 # API/Dagster runtime·migrator·Dagster metadata DSN은 모두 ignored deployment env/vault로
@@ -24,6 +22,12 @@ services:
     profiles: ["local-infra"]
 
   dagster-db-init:
+    profiles: ["local-infra"]
+
+  dagster-db-init-fresh-300:
+    profiles: ["local-infra"]
+
+  db-application-create-fresh-300:
     profiles: ["local-infra"]
 
   # 공유 DB에서는 ownership transfer bootstrap을 절대 자동 실행하지 않는다.
@@ -40,7 +44,7 @@ services:
   dagster-storage-migrate:
     depends_on: !override {}
     environment:
-      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:?KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL is required}
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:-}
 
   dagster:
     depends_on: !override
@@ -51,7 +55,7 @@ services:
       api:
         condition: service_healthy
     environment:
-      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:?KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL is required}
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:-}
 
   dagster-daemon:
     depends_on: !override
@@ -62,4 +66,4 @@ services:
       api:
         condition: service_healthy
     environment:
-      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:?KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL is required}
+      KOR_TRAVEL_MAP_DAGSTER_PG_URL: ${KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL:-}

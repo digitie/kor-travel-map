@@ -5,9 +5,9 @@
 PC 개발 환경에서 `kor-travel-docker-manager`가 띄우는 map 전용 PostgreSQL은
 host **`12700`**이다(2026-08-17, docker-manager ADR-37 — 프로젝트마다 전용
 instance이고 포트는 대역의 `x00`이다). **`5432`를 듣는 것은 없다.** RustFS S3 API는
-`12101`, console은 `12105`다. 공유 PostGIS만 쓰고 RustFS는 local로 띄우려면
-`KOR_TRAVEL_MAP_DB_EXTERNAL=true`를 사용한다. 공유 PostGIS/RustFS를 모두 쓰면
-`KOR_TRAVEL_MAP_INFRA_EXTERNAL=true`로 local infra 서비스를 띄우지 않는다.
+`12101`, console은 `12105`다. 공유 PostGIS/RustFS를 쓰는 external DB/infra 형상은
+standalone local launcher가 아니라 application/metadata permit을 발급하는 Docker Manager
+production flow만 사용한다.
 
 ## 0. 실행 셸
 
@@ -95,20 +95,34 @@ T-VN-34A부터 bootstrap owner DSN을 API/Dagster application DSN으로 재사�
 | Alembic | `KOR_TRAVEL_MAP_MIGRATOR_PG_DSN` | `ktm_feature_migrator` |
 | API runtime | `KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN` | `ktm_feature_api_runtime` |
 | Dagster runtime | `KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN` | `ktm_feature_dagster_runtime` |
-| Dagster metadata | `KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL` | 별도 metadata login |
+| Dagster metadata | `KOR_TRAVEL_MAP_DAGSTER_METADATA_USER`, `KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD`, `KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL` | 별도 metadata DB owner/login |
+
+다섯 password는 각각 32..256 URI-unreserved 문자이며 서로 달라야 한다. launcher는 bootstrap,
+migrator, API runtime, Dagster runtime, metadata DSN의 scheme/login/password/database를 선언한
+값과 exact 대조한다. 선언용 password만 다르게 두고 실제 DSN에서 같은 password를 재사용하는
+형상도 container 생성 전에 거부한다.
 
 로컬 dedicated **빈 DB**는 normal `docker compose up` 전에 `fresh-init` profile의
-bootstrap→restricted root migration one-shot을 한 번만 명시적으로 실행한다.
+application role bootstrap→metadata DB/identity permit→restricted root migration 연속
+one-shot을 한 번만 명시적으로 실행한다. 세 단계는 한 Compose env snapshot을 공유하므로
+중간에 credential bundle을 바꿀 수 없다.
 
 ```bash
-docker compose --profile fresh-init run --rm db-application-schema-fresh-300
+docker compose -f docker-compose.yml -f docker-compose.host.yml \
+  --profile fresh-init run --rm db-application-schema-fresh-300
 ```
+
+이는 기본 host topology 명령이다. bridge를 고르면
+`KOR_TRAVEL_MAP_DOCKER_NETWORK=bridge`와 `postgres:5432` authority의 단일 DB DSN bundle을
+사용하고 `docker-compose.host.yml`을 제외한다. host/bridge authority 혼합은 모든 writer보다
+먼저 공통 preflight가 거부한다.
 
 이 service는 `KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE`가 실제
 `KOR_TRAVEL_MAP_POSTGRES_DB`와 완전히 같고 DB가 virgin일 때만 final 역할·schema와 exact
 `300` root를 준비한다. 이미 `300`인 persistent DB의 재기동은 이 service를 실행하지 않고
 `KOR_TRAVEL_MAP_API_PROFILE=local-dev docker compose -f docker-compose.yml -f
-docker-compose.local-dev.yml up` 또는 `scripts/docker-up.sh`를 쓴다.
+docker-compose.host.yml -f docker-compose.local-dev.yml up` 또는
+`scripts/docker-up.sh`를 쓴다.
 두 명령은 workstation local-dev 전용이다. production API는 Docker
 Manager final permit이 없으면 blank DB를 generic Alembic upgrade하지 않는다. 기존 `0236`
 DB를 이 명령으로 고치거나 ownership을 넘기는 것은 금지하며 Docker Manager의 별도 one-shot
@@ -123,55 +137,39 @@ Alembic revision에는 만들거나 기록하지 않는다. local-dev API만
 
 Dagster metadata는 같은 Postgres container 안의 별도 DB `kor_travel_map_dagster`를 쓴다.
 local-dev의 `dagster-db-init` 서비스는 DB 존재를 보장하고 dedicated metadata DSN으로 관측한
-system ID/name/OID/owner/login identity를 root-owned read-only permit으로 기록한다. production은
+system ID/name/OID/owner/login identity와 login role 속성을 root-owned read-only permit으로
+기록한다. metadata login은 bootstrap login과 달라야 하고 DB owner와 같아야 하며,
+`NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS`와 role membership 0개를
+만족해야 한다. local DB-init은 role과 DB가 모두 없을 때만 처음 생성한다. 둘 다 기존이면
+root-owned `0555/0444`, single-link prior permit과 현재 두 DB identity가 exact 일치할 때만
+아무것도 변경하지 않고 재사용한다. role/DB 중 하나만 있거나 예약 role·DB, stale/missing
+permit, 권한 drift이면 `ALTER ROLE`·membership revoke·DB owner 변경으로 자동 수리하지 않고
+mutation 전에 중단한다. production은
 Docker Manager가 paired receipt의 Dagster image ID·config digest와 DB identity를 결박한
 `docker-manager` authority permit을 별도 volume에 발급한다. Dagster storage migration은 쓰기
 전에, webserver/daemon은 기동 전에 같은 permit과 canonical root-owned
-`/opt/dagster/dagster_home/dagster.yaml`을 검증한다. application DB identity, raw `300`,
+`/opt`부터 `/opt/dagster/dagster_home/dagster.yaml`까지 root-owned·비쓰기 가능 경로와 exact
+top-level config key 집합을 검증한다. application DB identity, 여러 version row 중 하나라도
+raw `300`인 상태,
 `feature`/`provider_sync`/`ops` schema를 관측하면 중단한다. 세 process는 검증된
 `KOR_TRAVEL_MAP_DAGSTER_PG_URL`(`KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL`)을 통해
 `dagster-postgres` storage에 연결한다. 이 login도 bootstrap owner와 재사용하지 않으며
-ignored deployment env/vault에만 둔다. host network overlay는 같은 값을
+ignored deployment env/vault에만 둔다. host network local-dev는 같은 값을
 `KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL`로 요구한다.
 
-공유 DB 모드는 `kor-travel-docker-manager`가 이미 `kor-travel-map-postgres:12700`을
-띄운 상태에서 사용한다(옛 `kor-travel-geo-postgres:5432`가 아니다 — 그 컨테이너는
-이제 geo 전용이고 `12500`에서 loopback만 듣는다). 이때 kor-travel-map compose는 local Postgres를 띄우지 않고,
-local RustFS와 API/frontend/Dagster만 띄운다.
-
-```bash
-KOR_TRAVEL_MAP_DB_EXTERNAL=true bash scripts/docker-up.sh
-```
-
-공유 인프라 모드는 `kor-travel-docker-manager`가 이미 `kor-travel-map-postgres:12700`과
-`tripmate-rustfs:12101`을 모두 띄운 상태에서 사용한다. 이때 kor-travel-map compose는 API,
-frontend, Dagster webserver/daemon만 띄운다.
-
-```bash
-KOR_TRAVEL_MAP_INFRA_EXTERNAL=true bash scripts/docker-up.sh
-```
-
-공유 DB에서는 `db-role-bootstrap`이 profile로 비활성화되며 ownership transfer를 절대
-자동 실행하지 않는다. 운영자가 dedicated `kor_travel_map` DB에 위 NOLOGIN/LOGIN 역할,
-ownership transfer와 runtime DSN을 사전 provision해야 한다. 공유 Postgres에는
-`kor_travel_map`과 `kor_travel_map_dagster` DB가 미리 있어야 한다.
-공유 DB의 host 포트를 정하는 **별도 변수는 없다.** external overlay는 포트를 조합하지
-않고 아래 완성된 DSN을 그대로 주입하므로, 포트는 각 DSN 문자열 안에 있다(prod 기준
-`127.0.0.1:12700`). standalone local Postgres publish 포트
-`KOR_TRAVEL_MAP_POSTGRES_HOST_PORT`(기본 `5432`)는 이 경로와 무관하다.
+external DB/infra overlay는 Manager-owned production composition의 내부 입력이다.
+`scripts/docker-up.sh`에 `KOR_TRAVEL_MAP_DB_EXTERNAL=true` 또는
+`KOR_TRAVEL_MAP_INFRA_EXTERNAL=true`를 주면 permit producer가 없는 우회를 만들지 않고 즉시
+중단한다. 공유 `kor-travel-map-postgres:12700` 및 RustFS 형상은 Docker Manager가 dedicated
+application role/DB와 `kor_travel_map_dagster` metadata role/DB를 확인하고, actual image ID와
+paired receipt를 결박한 두 root-owned permit을 원자적으로 publish한 뒤에만 기동한다.
+external overlay가 포트를 조합하지 않는다는 점은 유지되며 포트는 Manager가 검증한 완성 DSN
+안에 있다.
 
 > 2026-08-17에 `KOR_TRAVEL_MAP_EXTERNAL_POSTGRES_HOST_PORT`를 제거했다. 이 변수는
 > `load-env.sh`가 export하고 문서 3곳이 "override한다"고 설명했지만 **읽는 곳이
 > 하나도 없었다** — 값을 바꿔도 접속 대상은 그대로였다. 죽은 포트를 가리키는 것보다
 > 효과 없는 손잡이가 더 나쁘다.
-
-```bash
-KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN=<ignored API runtime DSN>
-KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN=<ignored Dagster runtime DSN>
-KOR_TRAVEL_MAP_MIGRATOR_PG_DSN=<ignored migrator DSN>
-KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL=<ignored Dagster metadata DSN>
-KOR_TRAVEL_MAP_EXTERNAL_DOCKER_OBJECT_STORE_ENDPOINT_URL=http://host.docker.internal:12101
-```
 
 `docker-compose.yml`의 host publish는 기본
 `KOR_TRAVEL_MAP_DOCKER_BIND_HOST=127.0.0.1`이다. API/frontend/Dagster/Postgres/RustFS
@@ -349,10 +347,10 @@ npm run docker:up
 # 내부 실행: 비밀값 대신 build 전용 placeholder로 docker compose build
 # 이어서 검증된 UI raw/API digest+flag를 해당 no-build up 프로세스에만 주입
 # docker compose up -d --no-build postgres dagster-db-init rustfs rustfs-init api frontend dagster dagster-daemon
-
-KOR_TRAVEL_MAP_INFRA_EXTERNAL=true bash scripts/docker-up.sh
-# 내부 실행도 build와 no-build up을 같은 방식으로 분리한다.
 ```
+
+이 standalone 명령은 local DB 또는 external object-store-only local-dev에만 쓴다. external
+DB/infra는 위 명령에 flag를 추가하지 않고 Docker Manager production flow로 기동한다.
 
 M01 수동 Feature 생성 자격은 frontend raw와 API digest/flag로 분리된다. launcher는 세 값을
 검증한 직후 일반 process environment에서 제거하므로 Git 조회·포트 preflight·image build에는 실제
@@ -378,7 +376,8 @@ Docker Manager의 Map-only controlled transaction이다.
    restore, old image restart는 이 경계의 대안이 아니다.
 3. Manager가 catalog/seed/privileged/runtime receipt와 application DB identity를 다시 확인한 뒤
    root-owned read-only final permit을 atomically publish한다.
-4. Manager가 별도 Dagster metadata DB system ID/name/OID/owner/login, paired receipt,
+4. Manager가 별도 Dagster metadata DB system ID/name/OID/owner/login과 최소권한 role 속성,
+   paired receipt,
    Dagster image/config digest를 확인해 metadata identity permit을 publish한다. 같은 candidate
    image의 fixed storage migration이 그 permit을 검증한 뒤에만 Dagster metadata를 전진시킨다.
 5. API가 application permit과 raw `public.alembic_version = 300`을 확인해 health가 된 뒤,
@@ -391,9 +390,8 @@ Map service는 fail-closed하며 writer fence를 유지한 새 forward-fix candi
 local-dev `dagster-db-init`는 `kor_travel_map_dagster` metadata DB 존재와 local identity permit만
 보장하며 production authority가 아니다. `dagster`는
 Dagster webserver, `dagster-daemon`은 schedule/sensor daemon이다. `rustfs-init`는
-`kor-travel-map`과 `kor-travel-map-uploads` bucket을 생성한다. host `12700` 공유 DB를 쓰려면
-`KOR_TRAVEL_MAP_DB_EXTERNAL=true` 또는 `KOR_TRAVEL_MAP_INFRA_EXTERNAL=true` 모드로
-local Postgres를 띄우지 않는다.
+`kor-travel-map`과 `kor-travel-map-uploads` bucket을 생성한다. host `12700` 공유 DB 형상은
+Docker Manager production flow만 기동하며 standalone local launcher에서는 거부한다.
 
 Compose healthcheck 기준은 다음과 같다.
 
@@ -404,21 +402,26 @@ Compose healthcheck 기준은 다음과 같다.
 `frontend`는 `api`가 `service_healthy`가 된 뒤 시작한다. `docker compose ps`에서
 `api`, `frontend`, `dagster`가 `healthy`인지 확인한 뒤 smoke를 진행한다.
 
-## 5. 로컬 venv stack 기동
+## 5. 사전 준비된 로컬 venv smoke 기동
 
-Docker 대신 현재 `.venv`와 npm workspace로 띄울 때는 다음을 사용한다.
+Docker fresh/normal 경로로 application `300`, dedicated metadata DB와 Dagster storage
+migration을 먼저 완료한 뒤 현재 `.venv`와 npm workspace를 smoke할 때만 다음을 사용한다.
 
 ```bash
 npm run admin:stack
 ```
 
-이 명령도 먼저 `12701`, `12705`, `12702` 점유 프로세스를 종료한 뒤 API, Next.js dev,
+이 명령은 strict `local-dev`와 loopback DB만 허용하고, application revision/metadata
+identity·storage 준비 상태를 읽기 전용으로 검사한다. DB 생성, Alembic upgrade, Dagster
+storage migration 또는 production permit 소비는 하지 않는다. 검증 뒤 `12701`, `12705`,
+`12702` 점유 프로세스를 종료하고 API, Next.js dev,
 Dagster webserver, Dagster daemon을 백그라운드로 시작한다. 로컬 `DAGSTER_HOME`
 기본값은 `.dagster`이며, 실행 때마다 `docker/dagster.yaml`을
 `$DAGSTER_HOME/dagster.yaml`로 설치해 Docker와 같은 `storage.postgres`
-(`KOR_TRAVEL_MAP_DAGSTER_PG_URL`) instance config를 공유한다. 시작 전에
-`kor_travel_map_dagster` DB 존재도 확인/생성하므로 schedule/run/event metadata가
-`$DAGSTER_HOME` 아래 SQLite로 폴백하면 회귀다. 로그는 기본 `.codex_tmp/admin-stack/`에
+(`KOR_TRAVEL_MAP_DAGSTER_PG_URL`) instance config를 공유한다. 사전 준비된
+`kor_travel_map_dagster`가 없거나 identity/storage 검증에 실패하면 즉시 중단하므로
+schedule/run/event metadata가 `$DAGSTER_HOME` 아래 SQLite로 폴백하면 회귀다. 로그는 기본
+`.codex_tmp/admin-stack/`에
 남는다.
 
 `admin:stack`도 API 전용 `packages/kor-travel-map-api/.env`를 필수로 읽는다. API는

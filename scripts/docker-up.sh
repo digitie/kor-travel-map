@@ -4,6 +4,8 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # shellcheck source=load-env.sh
 source "$ROOT_DIR/scripts/load-env.sh"
+# shellcheck source=database-credential-preflight.sh
+source "$ROOT_DIR/scripts/database-credential-preflight.sh"
 
 API_ENV_FILE="${KOR_TRAVEL_MAP_API_ENV_FILE:-$ROOT_DIR/packages/kor-travel-map-api/.env}"
 FRONTEND_ENV_FILE="${KOR_TRAVEL_MAP_FRONTEND_ENV_FILE:-$ROOT_DIR/packages/kor-travel-map-admin/frontend/.env.local}"
@@ -250,12 +252,16 @@ export KOR_TRAVEL_MAP_GIT_COMMIT="$(git -C "$ROOT_DIR" rev-parse HEAD)"
 external_infra="${KOR_TRAVEL_MAP_INFRA_EXTERNAL:-false}"
 external_db="${KOR_TRAVEL_MAP_DB_EXTERNAL:-false}"
 external_object_store="${KOR_TRAVEL_MAP_OBJECT_STORE_EXTERNAL:-false}"
+if [[ "$external_infra" == "true" || "$external_db" == "true" ]]; then
+  echo "external Map DB/infra requires the Docker Manager production permit flow" >&2
+  exit 1
+fi
 
 compose_files=(-f docker-compose.yml -f docker-compose.local-dev.yml)
 # fresh baseline 준비는 normal launcher의 dependency가 아니다. 빈 dedicated DB는
 # 먼저 `docker compose --profile fresh-init run --rm db-application-schema-fresh-300`으로
-# bootstrap→restricted root migration one-shot을 끝내고, 이 launcher는 검증된 `300`
-# DB의 restart만 수행한다.
+# application role bootstrap→metadata DB/permit→restricted root migration 연속 one-shot을
+# 끝내고, 이 launcher는 검증된 `300` DB의 restart만 수행한다.
 services=(postgres dagster-db-init dagster-storage-migrate api frontend dagster dagster-daemon)
 ports=("$KOR_TRAVEL_MAP_API_PORT" "$KOR_TRAVEL_MAP_ADMIN_WEB_PORT" "$KOR_TRAVEL_MAP_DAGSTER_PORT")
 
@@ -306,6 +312,8 @@ if [[ "$external_infra" != "true" && "$external_db" != "true" ]]; then
     KOR_TRAVEL_MAP_MIGRATOR_PASSWORD \
     KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD \
     KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD \
+    KOR_TRAVEL_MAP_DAGSTER_METADATA_USER \
+    KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD \
     KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE; do
     require_env "$name"
   done
@@ -313,10 +321,21 @@ fi
 
 if [[ "$docker_network" == "host" ]]; then
   require_env KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL
+  metadata_dsn_name=KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL
 elif [[ "$external_infra" == "true" || "$external_db" == "true" ]]; then
   require_env KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL
+  metadata_dsn_name=KOR_TRAVEL_MAP_EXTERNAL_DOCKER_DAGSTER_PG_URL
 else
   require_env KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL
+  metadata_dsn_name=KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL
+fi
+if [[ "$external_infra" != "true" && "$external_db" != "true" ]]; then
+  if [[ "$docker_network" == "host" ]]; then
+    export KOR_TRAVEL_MAP_POSTGRES_INIT_HOST=127.0.0.1
+  else
+    export KOR_TRAVEL_MAP_POSTGRES_INIT_HOST=postgres
+  fi
+  validate_map_database_credentials "$metadata_dsn_name"
 fi
 
 # dev(기본) 기동. 고정 포트가 이미 사용 중이면 새 포트로 열지 않고 강제종료 여부를

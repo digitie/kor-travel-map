@@ -38,8 +38,11 @@ def test_candidate_image_excludes_legacy_migration_code() -> None:
     assert "COPY alembic/legacy_versions" not in dockerfile
     assert "COPY alembic/versions ./alembic/versions" in dockerfile
     assert (
-        "COPY --chown=appuser:appuser resources/curations ./resources/curations" in dockerfile
+        "COPY --chown=root:root resources/curations ./resources/curations" in dockerfile
     )
+    assert "find /app/resources/curations -type d -exec chmod 0555" in dockerfile
+    assert "find /app/resources/curations -type f -exec chmod 0444" in dockerfile
+    assert "! mv /app/resources/curations/manifest.json" in dockerfile
     assert "USER appuser" in dockerfile
 
 

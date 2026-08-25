@@ -40,13 +40,58 @@ config와 같은 DSN의 system ID/name/OID/owner/login을 대조한다. applicat
 `300`, application schema를 관측하면 중단한다. production permit은 Manager authority와 exact
 Dagster image ID·paired receipt SHA-256·`dagster.yaml` SHA-256을 결박한다. local-dev DB-init도
 bootstrap login이 아니라 dedicated metadata DSN으로 최종 login identity를 관측해 permit을 쓴다.
+후속 적대 리뷰 지적에 따라 metadata login은 DB owner와 같고 bootstrap과 다른 최소권한
+role이어야 한다. superuser/DB 생성/role 생성/replication/RLS 우회 권한과 role membership을
+모두 거부하고 `session_user=current_user`를 요구하며, permit과 실제 관측값을 exact 대조한다.
+Dagster config는 기존 `storage`뿐 아니라 alternate top-level storage key도 허용하지 않고,
+`/opt`부터 config까지 root-owned·비쓰기 가능 경로를 확인한다. Alembic version row가 여러
+개여도 raw `300`이 하나라도 있으면 metadata writer 전에 중단한다.
+기존 role/DB를 bootstrap 권한으로 자동 정상화하던 경로도 제거했다. 둘 다 새것일 때만
+최소권한 role과 owner DB를 만들며, 둘 다 기존이면 root-owned prior permit과 현재 identity가
+byte-exact로 같을 때 무변경 종료한다. 예약 application/system identity, role/DB partial state,
+permit 누락·drift는 어떤 `CREATE`/`ALTER`/`REVOKE`보다 먼저 거부한다.
 
 첫 실제 paired build는 API image 생성 뒤 sealed temp tree의 0444/0555 mode 때문에 cleanup이
 실패해 receipt 생성 전에 중단됐다. 실패 산출물을 성공으로 사용하지 않았고, 두 builder의
 cleanup이 mode를 복구하고 원래 실패 status를 보존하도록 수정했다. production Dagster 두
 service에는 누락됐던 geo URL, MOIS source path, object/offline prefix를 명시하고 root `.env`나
-application privileged credential은 허용하지 않는다. 관련 application-300·Dagster unit
-`203 passed`, shell syntax·diff check가 통과했다. 아직 n150 배포·live UI E2E 증거는 아니다.
+application privileged credential은 허용하지 않는다. 실제 일회용 Postgres에서 전용 metadata
+role 생성·두 번째 실행의 idempotency·비슈퍼유저 `pg_control_system()` 조회·bootstrap login
+거부를 확인했다. 이때 공식 Postgres image의 초기화 임시 서버가 조기에 healthy로 보이는
+Compose 경합도 재현해, PID 1이 최종 Postgres가 된 뒤에만 healthcheck가 성공하도록 고쳤다.
+fresh live acceptance는 run별 고유 application/metadata permit volume을 쓰고 Dagster daemon도
+기동한다. storage migration/webserver/daemon의 same-image, 종료·running 상태, absolute argv,
+metadata/runtime DSN 일치와 read-only permit mount를 실컨테이너 형상에서 검사한다. 외부
+DB/인프라 standalone launcher는 production permit producer가 없어 fail-closed하고 Manager
+flow만 허용한다. metadata role이 다른 role을 받는 방향과 다른 member에게 부여되는 방향을
+각각 0으로 결박하며, metadata/application DB owner 재사용도 거부한다. local launcher는 다섯
+DB password를 32..256 URI-unreserved·상호 distinct로 제한하고 bootstrap/migrator/API/
+Dagster runtime/metadata DSN의 scheme/login/password/database를 선언값에 exact 결박한다.
+metadata storage one-shot에는 application runtime DSN·final permit env/mount를 전달하지 않는다.
+관련 targeted 신규 회귀 `18 passed`와 shell syntax·ruff가 통과했다. 전체 묶음 재실행과 n150
+Manager-shaped 배포·live UI E2E는 아직 남아 있다.
+
+후속 P0/P1 적대 검토에서는 virgin application DB가 PostGIS image의 자동 extension 대상과
+겹쳐 fresh preflight가 항상 실패하는 deadlock을 확인했다. base container는 maintenance DB
+`postgres`만 초기화하고 application DB는 `template0`에서 별도 생성하도록 분리했다. creator도
+exact database confirmation과 공통 credential preflight를 어떤 `psql`/`createdb`보다 먼저
+수행한다. 다섯 application/metadata DSN은 login/password/database뿐 아니라 canonical
+authority와 실제 init host까지 하나로 묶었으며, host topology의 creator/bootstrap/fresh metadata/
+schema migration 네 service는 모두 host network와 같은 metadata DSN을 받는다. 실제 disposable
+PostGIS에서 DB 생성→role bootstrap→metadata DB/permit이 모두 exit 0이었고, permit directory/file
+소유권·mode/link count `0:555`, `0:444:1`을 읽기 전용 컨테이너에서 확인한 뒤 고유 프로젝트와
+volume을 제거했다.
+
+controlled handoff는 첫 SQL에서 `session_user`, `current_user`, `rolsuper`를 함께 읽어 exact
+non-superuser migrator가 아니면 writer fence/lock 전에 거부한다. 로컬 `admin:stack`의 generic
+`alembic upgrade head`와 bare metadata `CREATE DATABASE`는 제거했으며, strict local-dev·loopback의
+사전 준비된 application single `300`, dedicated metadata owner/login/effective role·양방향
+membership 0·same system ID/distinct owner·migrated storage를 읽기 전용으로 검증하는 smoke만
+남겼다. source oracle의 read-only sealed tree cleanup은 permission 복구·failure 누적·원 exit status
+보존으로 고쳤고, candidate receipt 대상 `resources/curations`는 root-owned 0555/0444와 appuser
+touch/rename negative로 봉인했다. 최종 application-300/Dagster/candidate 계약 단일 묶음은
+`288 passed`였다. 두 전문
+리뷰는 Map 내부 P0/P1 없음, Docker Manager 동반 계약 구현 전 release NO-GO로 최종 판정했다.
 
 ## 2026-08-24 — T-VN-H46H `300` runtime transition checkpoint
 

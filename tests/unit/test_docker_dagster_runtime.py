@@ -6,11 +6,12 @@ import hashlib
 import importlib.util
 import json
 import os
+import stat
 import subprocess
 import sys
 import tomllib
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any, Final
 from unittest.mock import patch
 
@@ -28,6 +29,15 @@ _SEALED_RUNTIME_PATH = "/usr/local/bin:/usr/local/sbin:/usr/sbin:/usr/bin:/sbin:
 _API_IMAGE_ENV: Final = {
     "PATH": _SEALED_RUNTIME_PATH,
     "PYTHONNOUSERSITE": "1",
+}
+_SAFE_DAGSTER_LOGIN_ATTRIBUTES: Final = {
+    "superuser": False,
+    "create_database": False,
+    "create_role": False,
+    "replication": False,
+    "bypass_rls": False,
+    "granted_role_count": 0,
+    "member_role_count": 0,
 }
 
 
@@ -73,6 +83,10 @@ def test_docker_compose_uses_persistent_dagster_storage_and_daemon() -> None:
 
     assert "dagster-db-init" in services
     assert "dagster-daemon" in services
+    assert services["postgres"]["environment"]["POSTGRES_DB"] == "postgres"
+    postgres_healthcheck = services["postgres"]["healthcheck"]["test"]
+    assert 'test "$$(cat /proc/1/comm)" = postgres' in postgres_healthcheck[1]
+    assert "-d postgres" in postgres_healthcheck[1]
 
     dagster = services["dagster"]
     daemon = services["dagster-daemon"]
@@ -163,6 +177,24 @@ def test_tvn34_compose_never_derives_runtime_or_metadata_credentials_from_bootst
     # 관리형 Postgres에는 contrib이 없을 수 있다. 없을 때 기동을 막지 않도록
     # available 여부를 먼저 본다는 것도 계약의 일부다.
     assert "pg_available_extensions" in bootstrap
+    assert "validate_map_database_credentials KOR_TRAVEL_MAP_DAGSTER_PG_URL" in bootstrap
+    role_service = compose["db-role-bootstrap-300"]
+    for required_name in (
+        "KOR_TRAVEL_MAP_POSTGRES_INIT_HOST",
+        "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN",
+        "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN",
+        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN",
+        "KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB",
+        "KOR_TRAVEL_MAP_DAGSTER_METADATA_USER",
+        "KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD",
+        "KOR_TRAVEL_MAP_DAGSTER_PG_URL",
+    ):
+        assert required_name in role_service["environment"]
+    assert any(
+        "database-credential-preflight.sh:/usr/local/lib/kor-travel-map/"
+        "database-credential-preflight.sh:ro" in volume
+        for volume in role_service["volumes"]
+    )
 
     # wrong target confirmation must fail before a network/psql side effect.
     result = subprocess.run(
@@ -186,6 +218,62 @@ def test_tvn34_compose_never_derives_runtime_or_metadata_credentials_from_bootst
     assert result.returncode != 0
     assert "must equal KOR_TRAVEL_MAP_POSTGRES_DB" in result.stderr
     assert "psql" not in result.stderr
+
+
+@pytest.mark.unit
+def test_fresh_role_bootstrap_rejects_dsn_credential_reuse_before_psql() -> None:
+    bootstrap_password = "bootstrap0000000000000000000000000000000000000000000000000000000"
+    migrator_password = "migrator00000000000000000000000000000000000000000000000000000000"
+    api_password = "api00000000000000000000000000000000000000000000000000000000000"
+    dagster_password = "dagster00000000000000000000000000000000000000000000000000000000"
+    metadata_password = "metadata0000000000000000000000000000000000000000000000000000000"
+    result = subprocess.run(
+        ["sh", "docker/postgres-role-bootstrap.sh"],
+        cwd=ROOT,
+        env={
+            "PATH": os.environ["PATH"],
+            "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_ENABLED": "true",
+            "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_PHASE": "baseline-300",
+            "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE": "kor_travel_map",
+            "KOR_TRAVEL_MAP_POSTGRES_DB": "kor_travel_map",
+            "KOR_TRAVEL_MAP_POSTGRES_USER": "kor_travel_map",
+            "KOR_TRAVEL_MAP_POSTGRES_PASSWORD": bootstrap_password,
+            "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN": (
+                "postgresql://kor_travel_map:"
+                f"{bootstrap_password}@postgres:5432/kor_travel_map"
+            ),
+            "KOR_TRAVEL_MAP_MIGRATOR_PASSWORD": migrator_password,
+            "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": (
+                "postgresql+asyncpg://ktm_feature_migrator:"
+                f"{migrator_password}@postgres:5432/kor_travel_map"
+            ),
+            "KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD": api_password,
+            "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN": (
+                "postgresql+asyncpg://ktm_feature_api_runtime:"
+                f"{api_password}@postgres:5432/kor_travel_map"
+            ),
+            "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD": dagster_password,
+            "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": (
+                "postgresql+asyncpg://ktm_feature_dagster_runtime:"
+                f"{dagster_password}@postgres:5432/kor_travel_map"
+            ),
+            "KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB": "kor_travel_map_dagster",
+            "KOR_TRAVEL_MAP_DAGSTER_METADATA_USER": "kor_travel_map_dagster",
+            "KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD": metadata_password,
+            # 실제 metadata DSN만 application bootstrap password를 재사용한다.
+            "KOR_TRAVEL_MAP_DAGSTER_PG_URL": (
+                "postgresql://kor_travel_map_dagster:"
+                f"{bootstrap_password}@postgres:5432/kor_travel_map_dagster"
+            ),
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "credential does not match" in result.stderr
+    assert "bootstrap DSN did not accept connections" not in result.stderr
 
 
 @pytest.mark.unit
@@ -622,13 +710,54 @@ def test_application_300_compose_requires_explicit_fresh_bootstrap() -> None:
         "/usr/local/bin/postgres-role-bootstrap",
     ]
     assert bootstrap["volumes"] == [
-        "./docker/postgres-role-bootstrap.sh:/usr/local/bin/postgres-role-bootstrap:ro"
+        "./docker/postgres-role-bootstrap.sh:/usr/local/bin/postgres-role-bootstrap:ro",
+        "./scripts/database-credential-preflight.sh:/usr/local/lib/kor-travel-map/"
+        "database-credential-preflight.sh:ro",
     ]
-    fresh_migration = services["db-application-schema-fresh-300"]
-    assert fresh_migration["profiles"] == ["fresh-init"]
-    assert fresh_migration["depends_on"]["db-role-bootstrap-300"]["condition"] == (
+    fresh_database = services["db-application-create-fresh-300"]
+    assert fresh_database["profiles"] == ["fresh-init"]
+    assert fresh_database["depends_on"]["postgres"]["condition"] == (
+        "service_healthy"
+    )
+    fresh_database_command = _command_text(fresh_database["command"])
+    assert fresh_database["volumes"] == [
+        "./scripts/database-credential-preflight.sh:/usr/local/lib/kor-travel-map/"
+        "database-credential-preflight.sh:ro"
+    ]
+    assert (
+        "validate_map_database_credentials KOR_TRAVEL_MAP_DAGSTER_PG_URL"
+        in fresh_database_command
+    )
+    assert (
+        fresh_database_command.index("requires exact database confirmation")
+        < fresh_database_command.index("database_count=")
+    )
+    assert (
+        fresh_database_command.index("validate_map_database_credentials")
+        < fresh_database_command.index("database_count=")
+    )
+    assert "fresh application database already exists" in fresh_database_command
+    assert "--template template0" in fresh_database_command
+    assert bootstrap["depends_on"]["db-application-create-fresh-300"][
+        "condition"
+    ] == "service_completed_successfully"
+    fresh_metadata = services["dagster-db-init-fresh-300"]
+    assert fresh_metadata["profiles"] == ["fresh-init"]
+    assert fresh_metadata["environment"]["KOR_TRAVEL_MAP_DAGSTER_PROFILE"] == (
+        "local-dev"
+    )
+    assert services["dagster-db-init"]["environment"][
+        "KOR_TRAVEL_MAP_DAGSTER_PROFILE"
+    ] == "${KOR_TRAVEL_MAP_DAGSTER_PROFILE:-${KOR_TRAVEL_MAP_API_PROFILE:-production}}"
+    assert fresh_metadata["depends_on"]["db-role-bootstrap-300"]["condition"] == (
         "service_completed_successfully"
     )
+    fresh_migration = services["db-application-schema-fresh-300"]
+    assert fresh_migration["profiles"] == ["fresh-init"]
+    assert "db-role-bootstrap-300" not in fresh_migration["depends_on"]
+    assert fresh_migration["depends_on"]["dagster-db-init-fresh-300"][
+        "condition"
+    ] == "service_completed_successfully"
     assert fresh_migration["entrypoint"] == [
         "/usr/local/bin/python",
         "-I",
@@ -664,6 +793,34 @@ def test_application_300_compose_requires_explicit_fresh_bootstrap() -> None:
     launcher = _script("scripts/docker-up.sh")
     assert "--profile fresh-init run --rm db-application-schema-fresh-300" in launcher
     assert "services=(postgres dagster-db-init db-role-bootstrap-300" not in launcher
+    assert "KOR_TRAVEL_MAP_DAGSTER_METADATA_USER" in launcher
+    assert "KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD" in launcher
+
+    fresh_acceptance = _script("scripts/run-tvn34c-n150-fresh-live-e2e.sh")
+    assert "KOR_TRAVEL_MAP_DAGSTER_METADATA_USER=kor_travel_map_dagster" in fresh_acceptance
+    assert "KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD=$metadata_password" in fresh_acceptance
+    assert (
+        "KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL="
+        "postgresql://kor_travel_map_dagster:$metadata_password@postgres:5432/"
+        "kor_travel_map_dagster" in fresh_acceptance
+    )
+    assert (
+        "KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL="
+        "postgresql://kor_travel_map:$postgres_password" not in fresh_acceptance
+    )
+    assert (
+        "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_VOLUME="
+        "$MAP_PROJECT-application-final-permit" in fresh_acceptance
+    )
+    assert (
+        "KOR_TRAVEL_MAP_DAGSTER_STORAGE_PERMIT_VOLUME="
+        "$MAP_PROJECT-dagster-storage-permit" in fresh_acceptance
+    )
+    assert "dagster-daemon\n  verify_map_schema" in fresh_acceptance
+    assert "verify_dagster_processes" in fresh_acceptance
+    assert 'containers["dagster-daemon"]' in fresh_acceptance
+    assert 'item["State"]["Status"] != "running"' in fresh_acceptance
+    assert "Dagster metadata DSN split-brain detected" in fresh_acceptance
 
     dockerfile = _script("docker/api.Dockerfile")
     assert "transition-application-schema-0236-to-300.py" in dockerfile
@@ -938,7 +1095,12 @@ def test_local_admin_stack_uses_same_dagster_postgres_config_and_daemon() -> Non
     assert 'KOR_TRAVEL_MAP_API_BACKUP_ROOT="$api_backup_root"' in script
     assert 'KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET="$frontend_proxy_secret"' in script
     assert 'install -m 0644 "$ROOT_DIR/docker/dagster.yaml"' in script
-    assert "CREATE DATABASE" in script
+    assert "CREATE DATABASE" not in script
+    assert "alembic upgrade head" not in script
+    assert "loopback local-dev smoke launcher" in script
+    assert "must be one strict loopback PostgreSQL DSN" in script
+    assert "pre-provisioned exact application revision 300" in script
+    assert "Dagster metadata database identity is not dedicated" in script
     assert "dagster-webserver" in script
     assert "dagster-daemon" in script
     assert "dagster dev" not in script
@@ -1063,7 +1225,6 @@ def test_local_admin_stack_env_validation_rejects_ambiguous_secrets(tmp_path: Pa
 @pytest.mark.parametrize(
     ("extra_lines", "expected_error"),
     [
-        ("", "must be configured while the public features surface is enabled"),
         (
             "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET=short\n",
             "must be at least 32 characters",
@@ -1115,7 +1276,7 @@ def test_local_admin_stack_validates_cursor_signing_secret(
         encoding="utf-8",
     )
     api_env.write_text(
-        "KOR_TRAVEL_MAP_API_PROFILE=production\n"
+        "KOR_TRAVEL_MAP_API_PROFILE=local-dev\n"
         "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED=true\n"
         "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED=false\n"
         + extra_lines,
@@ -1142,7 +1303,7 @@ def test_local_admin_stack_validates_cursor_signing_secret(
 
 
 @pytest.mark.unit
-def test_local_admin_stack_accepts_production_cursor_signing_secret(
+def test_local_admin_stack_accepts_local_cursor_signing_secret(
     tmp_path: Path,
 ) -> None:
     root_env = tmp_path / "root.env"
@@ -1153,7 +1314,7 @@ def test_local_admin_stack_accepts_production_cursor_signing_secret(
         encoding="utf-8",
     )
     api_env.write_text(
-        "KOR_TRAVEL_MAP_API_PROFILE=production\n"
+        "KOR_TRAVEL_MAP_API_PROFILE=local-dev\n"
         "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED=true\n"
         "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED=false\n"
         "KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED=false\n"
@@ -1187,6 +1348,58 @@ def test_local_admin_stack_accepts_production_cursor_signing_secret(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("api_profile", "root_extra", "expected_error"),
+    [
+        ("production", "", "loopback local-dev smoke launcher"),
+        (
+            "local-dev",
+            "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_PATH=/run/forbidden\n",
+            "rejects production authority input",
+        ),
+    ],
+)
+def test_local_admin_stack_rejects_production_authority_before_children(
+    tmp_path: Path,
+    api_profile: str,
+    root_extra: str,
+    expected_error: str,
+) -> None:
+    root_env = tmp_path / "root.env"
+    api_env = tmp_path / "api.env"
+    root_env.write_text(
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET="
+        "shared-secret-at-least-32-characters\n"
+        + root_extra,
+        encoding="utf-8",
+    )
+    api_env.write_text(
+        f"KOR_TRAVEL_MAP_API_PROFILE={api_profile}\n"
+        "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED=false\n"
+        "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED=false\n",
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        ["bash", "scripts/run-admin-stack.sh"],
+        cwd=ROOT,
+        env={
+            "PATH": os.environ["PATH"],
+            "HOME": str(tmp_path),
+            "KOR_TRAVEL_MAP_ENV_FILE": str(root_env),
+            "KOR_TRAVEL_MAP_API_ENV_FILE": str(api_env),
+            "KOR_TRAVEL_MAP_ADMIN_STACK_VALIDATE_ONLY": "1",
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert expected_error in result.stderr
+
+
+@pytest.mark.unit
 def test_manual_feature_create_launcher_validates_scoped_credential_parity(
     tmp_path: Path,
 ) -> None:
@@ -1198,7 +1411,7 @@ def test_manual_feature_create_launcher_validates_scoped_credential_parity(
         encoding="utf-8",
     )
     api_env.write_text(
-        "KOR_TRAVEL_MAP_API_PROFILE=production\n"
+        "KOR_TRAVEL_MAP_API_PROFILE=local-dev\n"
         "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED=false\n"
         "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED=false\n"
         "KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED=false\n"
@@ -1231,7 +1444,7 @@ def test_manual_feature_create_launcher_validates_scoped_credential_parity(
     assert valid.stdout.strip() == "admin stack environment is valid"
 
     api_env.write_text(
-        "KOR_TRAVEL_MAP_API_PROFILE=production\n"
+        "KOR_TRAVEL_MAP_API_PROFILE=local-dev\n"
         "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED=false\n"
         "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED=false\n"
         "KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED=false\n"
@@ -1265,7 +1478,7 @@ def test_admin_launcher_unsets_secret_store_manual_create_env_before_children(
         encoding="utf-8",
     )
     api_env.write_text(
-        "KOR_TRAVEL_MAP_API_PROFILE=production\n"
+        "KOR_TRAVEL_MAP_API_PROFILE=local-dev\n"
         "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED=false\n"
         "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED=false\n",
         encoding="utf-8",
@@ -1311,9 +1524,11 @@ def test_admin_launcher_unsets_secret_store_manual_create_env_before_children(
     )
     validate_only = launcher.index("KOR_TRAVEL_MAP_ADMIN_STACK_VALIDATE_ONLY")
     preflight_ports = launcher.index('"$ROOT_DIR/scripts/preflight-ports.sh"')
-    migration = launcher.index('echo "alembic upgrade head"')
+    database_preflight = launcher.index(
+        'echo "verify pre-provisioned local application and Dagster databases"'
+    )
     assert max(raw_capture, digest_capture) < unset_boundary
-    assert unset_boundary < min(validate_only, preflight_ports, migration)
+    assert unset_boundary < min(validate_only, preflight_ports, database_preflight)
 
 
 @pytest.mark.unit
@@ -1343,7 +1558,7 @@ def test_admin_launcher_rejects_process_only_manual_create_alias(
         encoding="utf-8",
     )
     api_env.write_text(
-        "KOR_TRAVEL_MAP_API_PROFILE=production\n"
+        "KOR_TRAVEL_MAP_API_PROFILE=local-dev\n"
         "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED=false\n"
         "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED=false\n",
         encoding="utf-8",
@@ -1396,7 +1611,7 @@ def test_admin_launcher_rejects_api_scoped_manual_create_alias(
         encoding="utf-8",
     )
     api_env.write_text(
-        "KOR_TRAVEL_MAP_API_PROFILE=production\n"
+        "KOR_TRAVEL_MAP_API_PROFILE=local-dev\n"
         "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED=false\n"
         "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED=false\n"
         "KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED=false\n"
@@ -1567,7 +1782,7 @@ def test_admin_launcher_rejects_public_manual_create_credential_alias(
         encoding="utf-8",
     )
     api_env.write_text(
-        "KOR_TRAVEL_MAP_API_PROFILE=production\n"
+        "KOR_TRAVEL_MAP_API_PROFILE=local-dev\n"
         "KOR_TRAVEL_MAP_API_FEATURES_ROUTES_ENABLED=false\n"
         "KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED=false\n"
         "KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED=false\n"
@@ -1948,6 +2163,145 @@ def test_docker_up_rejects_manual_create_mismatch_before_build(tmp_path: Path) -
     combined_output = result.stdout + result.stderr
     assert _MANUAL_FEATURE_CREATE_TOKEN not in combined_output
     assert _MANUAL_FEATURE_CREATE_DIGEST not in combined_output
+
+
+def _run_docker_up_with_database_env(
+    tmp_path: Path,
+    *,
+    overrides: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    root_env = tmp_path / "root.env"
+    api_env = tmp_path / "api.env"
+    frontend_env = tmp_path / "frontend.env"
+    root_env.write_text("", encoding="utf-8")
+    api_env.write_text(
+        "KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED=false\n"
+        "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256="
+        f"{_MANUAL_FEATURE_CREATE_DIGEST}\n",
+        encoding="utf-8",
+    )
+    frontend_env.write_text(
+        f"KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN={_MANUAL_FEATURE_CREATE_TOKEN}\n",
+        encoding="utf-8",
+    )
+    bootstrap_password = "bootstrap0000000000000000000000000000000000000000000000000000000"
+    migrator_password = "migrator00000000000000000000000000000000000000000000000000000000"
+    api_password = "api00000000000000000000000000000000000000000000000000000000000"
+    dagster_password = "dagster00000000000000000000000000000000000000000000000000000000"
+    metadata_password = "metadata0000000000000000000000000000000000000000000000000000000"
+    environment = {
+        "PATH": os.environ["PATH"],
+        "KOR_TRAVEL_MAP_ENV_FILE": str(root_env),
+        "KOR_TRAVEL_MAP_API_ENV_FILE": str(api_env),
+        "KOR_TRAVEL_MAP_FRONTEND_ENV_FILE": str(frontend_env),
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": "proxy-secret-000000000000000000000000000000000000",
+        "KOR_TRAVEL_MAP_POSTGRES_DB": "kor_travel_map",
+        "KOR_TRAVEL_MAP_POSTGRES_USER": "kor_travel_map",
+        "KOR_TRAVEL_MAP_POSTGRES_PASSWORD": bootstrap_password,
+        "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN": (
+            "postgresql://kor_travel_map:"
+            f"{bootstrap_password}@postgres:5432/kor_travel_map"
+        ),
+        "KOR_TRAVEL_MAP_MIGRATOR_PASSWORD": migrator_password,
+        "KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD": api_password,
+        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD": dagster_password,
+        "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": (
+            "postgresql+asyncpg://ktm_feature_migrator:"
+            f"{migrator_password}@postgres:5432/kor_travel_map"
+        ),
+        "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN": (
+            "postgresql+asyncpg://ktm_feature_api_runtime:"
+            f"{api_password}@postgres:5432/kor_travel_map"
+        ),
+        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": (
+            "postgresql+asyncpg://ktm_feature_dagster_runtime:"
+            f"{dagster_password}@postgres:5432/kor_travel_map"
+        ),
+        "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE": "kor_travel_map",
+        "KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB": "kor_travel_map_dagster",
+        "KOR_TRAVEL_MAP_DAGSTER_METADATA_USER": "kor_travel_map_dagster",
+        "KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD": metadata_password,
+        "KOR_TRAVEL_MAP_DOCKER_NETWORK": "host",
+        "KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL": (
+            "postgresql://kor_travel_map_dagster:"
+            f"{metadata_password}@127.0.0.1:5432/kor_travel_map_dagster"
+        ),
+    }
+    environment.update(overrides or {})
+    return subprocess.run(
+        ["bash", "scripts/docker-up.sh"],
+        cwd=ROOT,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("dsn_name", "dsn"),
+    [
+        (
+            "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN",
+            "postgresql+asyncpg://ktm_feature_api_runtime:"
+            "metadata0000000000000000000000000000000000000000000000000000000@"
+            "postgres:5432/kor_travel_map",
+        ),
+        (
+            "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN",
+            "postgresql+asyncpg://wrong_login:"
+            "api00000000000000000000000000000000000000000000000000000000000@"
+            "postgres:5432/kor_travel_map",
+        ),
+        (
+            "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN",
+            "postgresql+asyncpg://ktm_feature_api_runtime:"
+            "api00000000000000000000000000000000000000000000000000000000000@"
+            "postgres:5432/wrong_database",
+        ),
+        (
+            "KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL",
+            "postgresql://kor_travel_map_dagster:"
+            "bootstrap0000000000000000000000000000000000000000000000000000000@"
+            "127.0.0.1:5432/kor_travel_map_dagster",
+        ),
+    ],
+)
+def test_docker_up_binds_each_database_dsn_to_declared_credential_before_launch(
+    tmp_path: Path,
+    dsn_name: str,
+    dsn: str,
+) -> None:
+    result = _run_docker_up_with_database_env(
+        tmp_path,
+        overrides={dsn_name: dsn},
+    )
+
+    assert result.returncode != 0
+    assert (
+        "credential does not match" in result.stderr
+        or "database does not match" in result.stderr
+    )
+    assert "preflight-ports" not in result.stdout + result.stderr
+
+
+@pytest.mark.unit
+def test_docker_up_rejects_declared_database_credential_reuse_before_launch(
+    tmp_path: Path,
+) -> None:
+    shared_password = "shared000000000000000000000000000000000000000000000000000000000"
+    result = _run_docker_up_with_database_env(
+        tmp_path,
+        overrides={
+            "KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD": shared_password,
+            "KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD": shared_password,
+        },
+    )
+
+    assert result.returncode != 0
+    assert "database credentials must be pairwise distinct" in result.stderr
+    assert "preflight-ports" not in result.stdout + result.stderr
 
 
 @pytest.mark.unit
@@ -3416,6 +3770,41 @@ def test_dagster_entrypoint_rejects_application_privileged_keys_even_when_empty(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "key",
+    [
+        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN",
+        "KOR_TRAVEL_MAP_PG_DSN",
+        "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_DAGSTER_IMAGE_ID",
+        "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_API_IMAGE_ID",
+    ],
+)
+@pytest.mark.parametrize("profile", ["production", "local-dev"])
+def test_dagster_storage_entrypoint_rejects_application_inputs_even_when_empty(
+    tmp_path: Path,
+    key: str,
+    profile: str,
+) -> None:
+    """metadata writer one-shot은 application runtime/permit 값을 받지 않는다."""
+
+    environment = {"KOR_TRAVEL_MAP_DAGSTER_PROFILE": profile, key: ""}
+    if profile == "production":
+        environment["DAGSTER_HOME"] = "/opt/dagster/dagster_home"
+    result = _run_dagster_entrypoint(
+        tmp_path,
+        _dagster_runtime_command_stub_path(tmp_path),
+        ["/usr/local/bin/ktm-dagster-storage", "migrate"],
+        environment,
+    )
+
+    assert result.returncode != 0
+    assert (
+        "Dagster metadata migration forbids application runtime/final-permit inputs"
+        in result.stderr
+    )
+
+
+@pytest.mark.unit
 def test_dagster_entrypoint_executes_command_without_api_ops_keys(
     tmp_path: Path,
 ) -> None:
@@ -3778,6 +4167,102 @@ def test_dagster_storage_rejects_literal_alternate_config_target() -> None:
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "alternate_key",
+    ["run_storage", "event_log_storage", "schedule_storage"],
+)
+def test_dagster_storage_rejects_alternate_top_level_storage_keys(
+    alternate_key: str,
+) -> None:
+    module = _load_dagster_storage_module()
+    config = yaml.safe_load((ROOT / "docker" / "dagster.yaml").read_bytes())
+    config[alternate_key] = {
+        "module": "dagster_postgres.run_storage",
+        "class": "PostgresRunStorage",
+        "config": {"postgres_url": "postgresql://alternate.invalid/db"},
+    }
+
+    with pytest.raises(module.DagsterStorageMigrationError) as caught:
+        module._validate_dagster_config(yaml.safe_dump(config).encode("utf-8"))
+
+    assert caught.value.code == "dagster_storage_target_not_sealed"
+
+
+@pytest.mark.unit
+def test_dagster_storage_rejects_appuser_writable_config_parent() -> None:
+    module = _load_dagster_storage_module()
+    writable_parent = SimpleNamespace(st_mode=stat.S_IFDIR | 0o777, st_uid=0)
+
+    with pytest.raises(module.DagsterStorageMigrationError) as caught:
+        module._validate_root_owned_directory(writable_parent)
+
+    assert caught.value.code == "unsafe_dagster_home_parent"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("attribute", "value"),
+    [
+        ("superuser", True),
+        ("create_database", True),
+        ("create_role", True),
+        ("replication", True),
+        ("bypass_rls", True),
+        ("granted_role_count", 1),
+        ("granted_role_count", False),
+        ("member_role_count", 1),
+        ("member_role_count", False),
+    ],
+)
+def test_dagster_storage_rejects_privileged_metadata_login(
+    attribute: str, value: object
+) -> None:
+    module = _load_dagster_storage_module()
+    attributes = {**_SAFE_DAGSTER_LOGIN_ATTRIBUTES, attribute: value}
+    identity = {
+        "system_identifier": "123456789",
+        "name": "kor_travel_map_dagster",
+        "oid": 200,
+        "owner": "dagster_metadata",
+        "login_role": "dagster_metadata",
+        "login_role_attributes": attributes,
+    }
+
+    with pytest.raises(module.DagsterStorageMigrationError) as caught:
+        module._require_database_identity(identity, dagster=True)
+
+    assert caught.value.code == "dagster_storage_login_role_unsafe"
+
+
+@pytest.mark.unit
+def test_dagster_storage_rejects_metadata_owner_reused_by_application() -> None:
+    module = _load_dagster_storage_module()
+    shared_owner = "shared_database_owner"
+    dagster_identity = {
+        "system_identifier": "123456789",
+        "name": "kor_travel_map_dagster",
+        "oid": 200,
+        "owner": shared_owner,
+        "login_role": shared_owner,
+        "login_role_attributes": _SAFE_DAGSTER_LOGIN_ATTRIBUTES,
+    }
+    application_identity = {
+        "system_identifier": "123456789",
+        "name": "kor_travel_map",
+        "oid": 100,
+        "owner": shared_owner,
+    }
+
+    with pytest.raises(module.DagsterStorageMigrationError) as caught:
+        module._require_isolated_database_identities(
+            dagster_identity,
+            application_identity,
+        )
+
+    assert caught.value.code == "dagster_storage_permit_identity_invalid"
+
+
+@pytest.mark.unit
 def test_dagster_storage_rejects_application_database_before_migration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3788,8 +4273,9 @@ def test_dagster_storage_rejects_application_database_before_migration(
         "system_identifier": "123456789",
         "name": "kor_travel_map_dagster",
         "oid": 200,
-        "owner": "dagster_owner",
-        "login_role": "dagster_runtime",
+        "owner": "dagster_metadata",
+        "login_role": "dagster_metadata",
+        "login_role_attributes": _SAFE_DAGSTER_LOGIN_ATTRIBUTES,
     }
     application_identity = {
         "system_identifier": "123456789",
@@ -3797,7 +4283,11 @@ def test_dagster_storage_rejects_application_database_before_migration(
         "oid": 100,
         "owner": "ktm_feature_schema_owner",
     }
-    observed_application = {**application_identity, "login_role": "dagster_runtime"}
+    observed_application = {
+        **application_identity,
+        "login_role": "dagster_metadata",
+        "login_role_attributes": _SAFE_DAGSTER_LOGIN_ATTRIBUTES,
+    }
     migrated = False
 
     monkeypatch.setattr(module, "_dagster_storage_head", lambda: "dagster_head")
@@ -3814,7 +4304,7 @@ def test_dagster_storage_rejects_application_database_before_migration(
     monkeypatch.setattr(
         module,
         "_read_observed_identity",
-        lambda dsn: (observed_application, ("300",), (True, True, True)),
+        lambda dsn: (observed_application, ("300",), (True, True, True), True),
     )
 
     def record_migration(environment: dict[str, str]) -> None:
@@ -3831,6 +4321,57 @@ def test_dagster_storage_rejects_application_database_before_migration(
 
 
 @pytest.mark.unit
+def test_dagster_storage_rejects_300_among_multiple_version_rows_before_migration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_dagster_storage_module()
+    dagster_identity = {
+        "system_identifier": "123456789",
+        "name": "kor_travel_map_dagster",
+        "oid": 200,
+        "owner": "dagster_metadata",
+        "login_role": "dagster_metadata",
+        "login_role_attributes": _SAFE_DAGSTER_LOGIN_ATTRIBUTES,
+    }
+    application_identity = {
+        "system_identifier": "123456789",
+        "name": "kor_travel_map",
+        "oid": 100,
+        "owner": "ktm_feature_schema_owner",
+    }
+    migrated = False
+
+    monkeypatch.setattr(module, "_dagster_storage_head", lambda: "dagster_head")
+    monkeypatch.setattr(
+        module,
+        "_require_migration_environment",
+        lambda environment: ("postgresql://redacted/metadata", "production", "a" * 64),
+    )
+    monkeypatch.setattr(
+        module,
+        "_read_permit",
+        lambda environment, **kwargs: (dagster_identity, application_identity),
+    )
+    monkeypatch.setattr(
+        module,
+        "_read_observed_identity",
+        lambda dsn: (dagster_identity, ("other", "third"), (False, False, False), True),
+    )
+
+    def record_migration(environment: dict[str, str]) -> None:
+        nonlocal migrated
+        migrated = True
+
+    monkeypatch.setattr(module, "_run_dagster_instance_migrate", record_migration)
+
+    with pytest.raises(module.DagsterStorageMigrationError) as caught:
+        module._migrate({})
+
+    assert caught.value.code == "dagster_storage_targets_application_schema"
+    assert migrated is False
+
+
+@pytest.mark.unit
 def test_dagster_storage_migrates_only_after_metadata_identity_match(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -3841,8 +4382,9 @@ def test_dagster_storage_migrates_only_after_metadata_identity_match(
         "system_identifier": "123456789",
         "name": "kor_travel_map_dagster",
         "oid": 200,
-        "owner": "dagster_owner",
-        "login_role": "dagster_runtime",
+        "owner": "dagster_metadata",
+        "login_role": "dagster_metadata",
+        "login_role_attributes": _SAFE_DAGSTER_LOGIN_ATTRIBUTES,
     }
     application_identity = {
         "system_identifier": "123456789",
@@ -3866,7 +4408,7 @@ def test_dagster_storage_migrates_only_after_metadata_identity_match(
     monkeypatch.setattr(
         module,
         "_read_observed_identity",
-        lambda dsn: (dagster_identity, (), (False, False, False)),
+        lambda dsn: (dagster_identity, (), (False, False, False), False),
     )
     monkeypatch.setattr(
         module,
@@ -3965,12 +4507,64 @@ def test_docker_compose_runs_storage_migration_before_dagster_services() -> None
         "kor-travel-map-dagster-storage-permit:"
         "/run/kor-travel-map-dagster-storage-permit" in db_init["volumes"]
     )
+    assert any(
+        "database-credential-preflight.sh:/usr/local/lib/kor-travel-map/"
+        "database-credential-preflight.sh:ro" in volume
+        for volume in db_init["volumes"]
+    )
     init_command = _command_text(db_init["command"])
+    assert "dagster-db-init is local-dev only" in init_command
+    assert "validate_map_database_credentials KOR_TRAVEL_MAP_DAGSTER_PG_URL" in (
+        init_command
+    )
     assert "pg_control_system()" in init_command
     assert "local-compose-db-init" in init_command
     assert "dagster-storage-database-permit.v1" in init_command
     assert 'psql "$$KOR_TRAVEL_MAP_DAGSTER_PG_URL"' in init_command
     assert 'session_user' in init_command
+    assert "current_user" in init_command
+    assert "rolsuper" in init_command
+    assert "rolcreatedb" in init_command
+    assert "rolcreaterole" in init_command
+    assert "rolreplication" in init_command
+    assert "rolbypassrls" in init_command
+    assert "pg_auth_members" in init_command
+    assert "membership.member = role.oid" in init_command
+    assert "membership.roleid = role.oid" in init_command
+    assert "granted_role_count" in init_command
+    assert "member_role_count" in init_command
+    assert "Dagster metadata login must differ from the bootstrap login" in init_command
+    assert "Dagster metadata login and database must share one dedicated identity" in init_command
+    assert "reserved role cannot be used for Dagster metadata" in init_command
+    assert "existing Dagster metadata resources require a sealed prior permit" in init_command
+    assert (
+        "existing Dagster metadata resources do not match the sealed prior permit"
+        in init_command
+    )
+    assert "NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS" in init_command
+    assert "\\getenv metadata_password KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD" in init_command
+    assert '-v metadata_password="$$KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD"' not in init_command
+    assert "login_role_attributes" in init_command
+    assert "ALTER ROLE" not in init_command
+    assert "ALTER DATABASE" not in init_command
+    assert "REVOKE" not in init_command
+    assert init_command.index("role_count=") < init_command.index("CREATE ROLE")
+    assert init_command.index("database_count=") < init_command.index("createdb ")
+
+    fresh_metadata = services["dagster-db-init-fresh-300"]
+    assert fresh_metadata["extends"] == {"service": "dagster-db-init"}
+    assert fresh_metadata["profiles"] == ["fresh-init"]
+    assert fresh_metadata["depends_on"]["db-role-bootstrap-300"]["condition"] == (
+        "service_completed_successfully"
+    )
+    assert fresh_metadata["environment"]["KOR_TRAVEL_MAP_DAGSTER_PROFILE"] == (
+        "local-dev"
+    )
+    fresh_application = services["db-application-schema-fresh-300"]
+    assert "db-role-bootstrap-300" not in fresh_application["depends_on"]
+    assert fresh_application["depends_on"]["dagster-db-init-fresh-300"][
+        "condition"
+    ] == "service_completed_successfully"
 
     host_overlay = _script("docker-compose.host.yml")
     host_init_block = host_overlay.split("  db-role-bootstrap-300:", maxsplit=1)[0]
@@ -3988,6 +4582,374 @@ def test_docker_compose_runs_storage_migration_before_dagster_services() -> None
             "service_completed_successfully"
         )
         assert depends_on["api"]["condition"] == "service_healthy", service_name
+
+
+@pytest.mark.unit
+def test_fresh_profile_resolves_metadata_permit_before_application_schema(
+    tmp_path: Path,
+) -> None:
+    reset_overlay = tmp_path / "reset-api-env-file.yml"
+    reset_overlay.write_text(
+        "services:\n  api:\n    env_file: !reset []\n",
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "--env-file",
+            "/dev/null",
+            "--profile",
+            "fresh-init",
+            "-f",
+            str(ROOT / "docker-compose.yml"),
+            "-f",
+            str(reset_overlay),
+            "config",
+            "--format",
+            "json",
+        ],
+        cwd=ROOT,
+        env={
+            "PATH": os.environ["PATH"],
+            "COMPOSE_DISABLE_ENV_FILE": "1",
+            "KOR_TRAVEL_MAP_API_PROFILE": "local-dev",
+            "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": "resolver-dummy",
+            "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET": "resolver-dummy",
+            "KOR_TRAVEL_MAP_API_METRICS_TOKEN": "resolver-dummy",
+            "KOR_TRAVEL_MAP_API_SERVICE_TOKEN": "resolver-dummy",
+            "KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN": _MANUAL_FEATURE_CREATE_TOKEN,
+            "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256": (
+                _MANUAL_FEATURE_CREATE_DIGEST
+            ),
+            "KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH": "resolver-dummy",
+            "KOR_TRAVEL_MAP_UI_SESSION_SECRET": "resolver-dummy",
+            "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": "postgresql://migrator.invalid/map",
+            "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN": "postgresql://api.invalid/map",
+            "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": "postgresql://dagster.invalid/map",
+        },
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    services = json.loads(result.stdout)["services"]
+    normal_metadata = services["dagster-db-init"]
+    fresh_metadata = services["dagster-db-init-fresh-300"]
+    assert normal_metadata["environment"]["KOR_TRAVEL_MAP_DAGSTER_PROFILE"] == (
+        "local-dev"
+    )
+    assert fresh_metadata["command"] == normal_metadata["command"]
+    assert fresh_metadata["environment"] == {
+        **normal_metadata["environment"],
+        "KOR_TRAVEL_MAP_DAGSTER_PROFILE": "local-dev",
+    }
+    assert fresh_metadata["volumes"] == normal_metadata["volumes"]
+    assert services["db-application-create-fresh-300"]["depends_on"]["postgres"][
+        "condition"
+    ] == "service_healthy"
+    assert services["db-role-bootstrap-300"]["depends_on"][
+        "db-application-create-fresh-300"
+    ]["condition"] == "service_completed_successfully"
+    assert fresh_metadata["depends_on"]["db-role-bootstrap-300"]["condition"] == (
+        "service_completed_successfully"
+    )
+    assert services["db-application-schema-fresh-300"]["depends_on"][
+        "dagster-db-init-fresh-300"
+    ]["condition"] == "service_completed_successfully"
+
+
+def _local_database_environment(*, metadata_identity: str) -> dict[str, str]:
+    bootstrap_password = "bootstrap0000000000000000000000000000000000000000000000000000000"
+    migrator_password = "migrator00000000000000000000000000000000000000000000000000000000"
+    api_password = "api00000000000000000000000000000000000000000000000000000000000"
+    dagster_password = "dagster00000000000000000000000000000000000000000000000000000000"
+    metadata_password = "metadata0000000000000000000000000000000000000000000000000000000"
+    return {
+        "KOR_TRAVEL_MAP_POSTGRES_INIT_HOST": "postgres",
+        "KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE": "kor_travel_map",
+        "KOR_TRAVEL_MAP_POSTGRES_DB": "kor_travel_map",
+        "KOR_TRAVEL_MAP_POSTGRES_USER": "bootstrap",
+        "KOR_TRAVEL_MAP_POSTGRES_PASSWORD": bootstrap_password,
+        "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN": (
+            "postgresql://bootstrap:"
+            f"{bootstrap_password}@postgres:5432/kor_travel_map"
+        ),
+        "KOR_TRAVEL_MAP_MIGRATOR_PASSWORD": migrator_password,
+        "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": (
+            "postgresql+asyncpg://ktm_feature_migrator:"
+            f"{migrator_password}@postgres:5432/kor_travel_map"
+        ),
+        "KOR_TRAVEL_MAP_API_RUNTIME_PASSWORD": api_password,
+        "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN": (
+            "postgresql+asyncpg://ktm_feature_api_runtime:"
+            f"{api_password}@postgres:5432/kor_travel_map"
+        ),
+        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PASSWORD": dagster_password,
+        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": (
+            "postgresql+asyncpg://ktm_feature_dagster_runtime:"
+            f"{dagster_password}@postgres:5432/kor_travel_map"
+        ),
+        "KOR_TRAVEL_MAP_DAGSTER_PROFILE": "local-dev",
+        "KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB": metadata_identity,
+        "KOR_TRAVEL_MAP_DAGSTER_METADATA_USER": metadata_identity,
+        "KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD": metadata_password,
+        "KOR_TRAVEL_MAP_DAGSTER_PG_URL": (
+            f"postgresql://{metadata_identity}:{metadata_password}@"
+            f"postgres:5432/{metadata_identity}"
+        ),
+        "PGPASSWORD": bootstrap_password,
+    }
+
+
+def _run_fresh_database_creator(
+    tmp_path: Path,
+    *,
+    overrides: dict[str, str],
+) -> tuple[subprocess.CompletedProcess[str], bool, bool]:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    psql_marker = tmp_path / "psql.called"
+    createdb_marker = tmp_path / "createdb.called"
+    psql = bin_dir / "psql"
+    psql.write_text(
+        f"#!/bin/sh\nprintf called > {str(psql_marker)!r}\nexit 92\n",
+        encoding="utf-8",
+    )
+    createdb = bin_dir / "createdb"
+    createdb.write_text(
+        f"#!/bin/sh\nprintf called > {str(createdb_marker)!r}\nexit 93\n",
+        encoding="utf-8",
+    )
+    psql.chmod(0o755)
+    createdb.chmod(0o755)
+    command = _command_text(
+        _compose()["services"]["db-application-create-fresh-300"]["command"]
+    ).replace(
+        "/usr/local/lib/kor-travel-map/database-credential-preflight.sh",
+        str(ROOT / "scripts" / "database-credential-preflight.sh"),
+    )
+    environment = {
+        **_local_database_environment(
+            metadata_identity="kor_travel_map_dagster"
+        ),
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        **overrides,
+    }
+    result = subprocess.run(
+        ["sh", "-c", command.replace("$$", "$")],
+        cwd=ROOT,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return result, psql_marker.exists(), createdb_marker.exists()
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("overrides", "expected_error"),
+    [
+        (
+            {"KOR_TRAVEL_MAP_DB_ROLE_BOOTSTRAP_CONFIRM_DATABASE": "wrong_db"},
+            "requires exact database confirmation",
+        ),
+        (
+            {
+                "KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN": (
+                    "postgresql://bootstrap:wrong@postgres:5432/kor_travel_map"
+                )
+            },
+            "credential does not match",
+        ),
+        (
+            {
+                "KOR_TRAVEL_MAP_DAGSTER_PG_URL": (
+                    "postgresql://kor_travel_map_dagster:"
+                    "metadata0000000000000000000000000000000000000000000000000000000"
+                    "@other-postgres:5432/kor_travel_map_dagster"
+                )
+            },
+            "must share one canonical authority",
+        ),
+        (
+            {"KOR_TRAVEL_MAP_POSTGRES_INIT_HOST": "other-postgres"},
+            "must match KOR_TRAVEL_MAP_POSTGRES_INIT_HOST",
+        ),
+    ],
+)
+def test_fresh_database_creator_rejects_unbound_inputs_before_mutation(
+    tmp_path: Path,
+    overrides: dict[str, str],
+    expected_error: str,
+) -> None:
+    result, psql_called, createdb_called = _run_fresh_database_creator(
+        tmp_path,
+        overrides=overrides,
+    )
+
+    assert result.returncode != 0
+    assert expected_error in result.stderr
+    assert psql_called is False
+    assert createdb_called is False
+
+
+def _run_dagster_db_init_command(
+    tmp_path: Path,
+    *,
+    metadata_identity: str,
+    role_count: int,
+    database_count: int,
+    overrides: dict[str, str] | None = None,
+) -> tuple[subprocess.CompletedProcess[str], str, bool]:
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    psql_log = tmp_path / "psql.log"
+    createdb_marker = tmp_path / "createdb.called"
+    psql = bin_dir / "psql"
+    psql.write_text(
+        "#!/bin/sh\n"
+        f"printf '%s\\n' \"$*\" >> {str(psql_log)!r}\n"
+        + "case \"$*\" in\n"
+        + f"  *'FROM pg_roles'*) printf '{role_count}\\n' ;;\n"
+        + f"  *'FROM pg_database'*) printf '{database_count}\\n' ;;\n"
+        + "  *) exit 91 ;;\n"
+        + "esac\n",
+        encoding="utf-8",
+    )
+    createdb = bin_dir / "createdb"
+    createdb.write_text(
+        f"#!/bin/sh\nprintf called > {str(createdb_marker)!r}\nexit 93\n",
+        encoding="utf-8",
+    )
+    psql.chmod(0o755)
+    createdb.chmod(0o755)
+    command = _command_text(_compose()["services"]["dagster-db-init"]["command"])
+    command = command.replace(
+        "/usr/local/lib/kor-travel-map/database-credential-preflight.sh",
+        str(ROOT / "scripts" / "database-credential-preflight.sh"),
+    )
+    environment = {
+        **_local_database_environment(metadata_identity=metadata_identity),
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+    }
+    environment.update(overrides or {})
+    result = subprocess.run(
+        ["sh", "-c", command.replace("$$", "$")],
+        cwd=ROOT,
+        env=environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    return (
+        result,
+        psql_log.read_text(encoding="utf-8") if psql_log.exists() else "",
+        createdb_marker.exists(),
+    )
+
+
+@pytest.mark.unit
+def test_dagster_db_init_rejects_production_before_database_mutation(
+    tmp_path: Path,
+) -> None:
+    result, psql_log, createdb_called = _run_dagster_db_init_command(
+        tmp_path,
+        metadata_identity="kor_travel_map_dagster",
+        role_count=0,
+        database_count=0,
+        overrides={"KOR_TRAVEL_MAP_DAGSTER_PROFILE": "production"},
+    )
+
+    assert result.returncode != 0
+    assert "dagster-db-init is local-dev only" in result.stderr
+    assert psql_log == ""
+    assert createdb_called is False
+
+
+@pytest.mark.unit
+def test_dagster_db_init_rejects_changed_metadata_credential_before_psql(
+    tmp_path: Path,
+) -> None:
+    reused_application_password = (
+        "bootstrap0000000000000000000000000000000000000000000000000000000"
+    )
+    result, psql_log, createdb_called = _run_dagster_db_init_command(
+        tmp_path,
+        metadata_identity="kor_travel_map_dagster",
+        role_count=0,
+        database_count=0,
+        overrides={
+            "KOR_TRAVEL_MAP_DAGSTER_PG_URL": (
+                "postgresql://kor_travel_map_dagster:"
+                f"{reused_application_password}@unused.invalid/kor_travel_map_dagster"
+            )
+        },
+    )
+
+    assert result.returncode != 0
+    assert "credential does not match" in result.stderr
+    assert psql_log == ""
+    assert createdb_called is False
+
+
+@pytest.mark.unit
+def test_dagster_db_init_rejects_application_role_before_database_mutation(
+    tmp_path: Path,
+) -> None:
+    result, psql_log, createdb_called = _run_dagster_db_init_command(
+        tmp_path,
+        metadata_identity="ktm_feature_dagster_runtime",
+        role_count=0,
+        database_count=0,
+    )
+
+    assert result.returncode != 0
+    assert "reserved role cannot be used for Dagster metadata" in result.stderr
+    assert psql_log == ""
+    assert createdb_called is False
+
+
+@pytest.mark.unit
+def test_dagster_db_init_rejects_unsealed_existing_resources_without_mutation(
+    tmp_path: Path,
+) -> None:
+    result, psql_log, createdb_called = _run_dagster_db_init_command(
+        tmp_path,
+        metadata_identity="kor_travel_map_dagster",
+        role_count=1,
+        database_count=1,
+    )
+
+    assert result.returncode != 0
+    assert "existing Dagster metadata resources require a sealed prior permit" in result.stderr
+    assert "CREATE ROLE" not in psql_log
+    assert "ALTER ROLE" not in psql_log
+    assert "REVOKE" not in psql_log
+    assert "ALTER DATABASE" not in psql_log
+    assert createdb_called is False
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(("role_count", "database_count"), [(1, 0), (0, 1)])
+def test_dagster_db_init_rejects_partial_resources_without_mutation(
+    tmp_path: Path, role_count: int, database_count: int
+) -> None:
+    result, psql_log, createdb_called = _run_dagster_db_init_command(
+        tmp_path,
+        metadata_identity="kor_travel_map_dagster",
+        role_count=role_count,
+        database_count=database_count,
+    )
+
+    assert result.returncode != 0
+    assert "partial state is not recoverable automatically" in result.stderr
+    assert "CREATE ROLE" not in psql_log
+    assert "ALTER ROLE" not in psql_log
+    assert "ALTER DATABASE" not in psql_log
+    assert createdb_called is False
 
 
 @pytest.mark.unit
@@ -4022,6 +4984,8 @@ def test_host_overlay_inherits_dagster_identity_permit_producer(
         "KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL": (
             "postgresql://metadata@example.invalid/ktm_dagster"
         ),
+        "KOR_TRAVEL_MAP_DAGSTER_METADATA_USER": "metadata",
+        "KOR_TRAVEL_MAP_DAGSTER_METADATA_PASSWORD": "resolver-dummy",
         "KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL": (
             "postgresql://metadata@127.0.0.1:12700/ktm_dagster"
         ),
@@ -4032,6 +4996,8 @@ def test_host_overlay_inherits_dagster_identity_permit_producer(
             "compose",
             "--env-file",
             "/dev/null",
+            "--profile",
+            "fresh-init",
             "-f",
             str(ROOT / "docker-compose.yml"),
             "-f",
@@ -4048,7 +5014,8 @@ def test_host_overlay_inherits_dagster_identity_permit_producer(
         capture_output=True,
         text=True,
     )
-    init = json.loads(resolved.stdout)["services"]["dagster-db-init"]
+    services = json.loads(resolved.stdout)["services"]
+    init = services["dagster-db-init"]
     command = _command_text(init["command"])
 
     assert "local-compose-db-init" in command
@@ -4057,6 +5024,20 @@ def test_host_overlay_inherits_dagster_identity_permit_producer(
     assert init["environment"]["KOR_TRAVEL_MAP_DAGSTER_PG_URL"].endswith(
         "/ktm_dagster"
     )
+    assert init["environment"]["KOR_TRAVEL_MAP_DAGSTER_METADATA_USER"] == "metadata"
+    host_metadata_dsn = env["KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL"]
+    for service_name in (
+        "dagster-db-init",
+        "dagster-db-init-fresh-300",
+        "db-application-create-fresh-300",
+        "db-role-bootstrap-300",
+    ):
+        service = services[service_name]
+        assert service["network_mode"] == "host"
+        assert service["environment"]["KOR_TRAVEL_MAP_DAGSTER_PG_URL"] == (
+            host_metadata_dsn
+        )
+    assert services["db-application-schema-fresh-300"]["network_mode"] == "host"
 
 
 @pytest.mark.unit
@@ -4222,6 +5203,80 @@ def test_external_overlays_keep_candidate_storage_migration_ordering(
             overlay,
             name,
             depends,
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "overlay",
+    ["docker-compose.external-db.yml", "docker-compose.external-infra.yml"],
+)
+def test_host_external_overlays_use_only_the_final_host_metadata_dsn(
+    overlay: str, tmp_path: Path
+) -> None:
+    """host가 final override이면 중간 external DSN secret은 요구하지 않는다."""
+
+    reset_overlay = tmp_path / "reset-env-file.yml"
+    reset_overlay.write_text(
+        "services:\n  api:\n    env_file: !reset []\n",
+        encoding="utf-8",
+    )
+    host_dsn = "postgresql://metadata@127.0.0.1:12700/kor_travel_map_dagster"
+    env = {
+        "PATH": os.environ["PATH"],
+        "COMPOSE_DISABLE_ENV_FILE": "1",
+        "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET": "resolver-dummy",
+        "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET": "resolver-dummy",
+        "KOR_TRAVEL_MAP_API_METRICS_TOKEN": "resolver-dummy",
+        "KOR_TRAVEL_MAP_API_SERVICE_TOKEN": "resolver-dummy",
+        "KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN": _MANUAL_FEATURE_CREATE_TOKEN,
+        "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256": (
+            _MANUAL_FEATURE_CREATE_DIGEST
+        ),
+        "KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH": "resolver-dummy",
+        "KOR_TRAVEL_MAP_UI_SESSION_SECRET": "resolver-dummy",
+        "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": "postgresql://migrator@example.invalid/ktm",
+        "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN": "postgresql://api@example.invalid/ktm",
+        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": (
+            "postgresql://dagster@example.invalid/ktm"
+        ),
+        "KOR_TRAVEL_MAP_DOCKER_DAGSTER_PG_URL": (
+            "postgresql://unused@example.invalid/ktm_dagster"
+        ),
+        "KOR_TRAVEL_MAP_HOST_DAGSTER_PG_URL": host_dsn,
+    }
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "--env-file",
+            "/dev/null",
+            "-f",
+            str(ROOT / "docker-compose.yml"),
+            "-f",
+            str(ROOT / "docker-compose.local-dev.yml"),
+            "-f",
+            str(ROOT / overlay),
+            "-f",
+            str(ROOT / "docker-compose.host.yml"),
+            "-f",
+            str(reset_overlay),
+            "config",
+            "--format",
+            "json",
+        ],
+        cwd=ROOT,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    services = json.loads(result.stdout)["services"]
+    for name in ("dagster-storage-migrate", "dagster", "dagster-daemon"):
+        assert services[name]["environment"]["KOR_TRAVEL_MAP_DAGSTER_PG_URL"] == (
+            host_dsn
         )
 
 
