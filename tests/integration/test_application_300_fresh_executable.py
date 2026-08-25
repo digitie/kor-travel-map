@@ -58,7 +58,7 @@ async def test_fresh_one_shot_rejects_superuser_dsn_before_version_table_mutatio
 
     raw_dsn = pg_container.get_connection_url()  # type: ignore[attr-defined]
     database = f"application_300_fresh_{uuid4().hex}"
-    await _admin_execute(raw_dsn, f'CREATE DATABASE "{database}"')
+    await _admin_execute(raw_dsn, f'CREATE DATABASE "{database}" TEMPLATE template0')
     admin_dsn = normalize_async_dsn(_with_database(raw_dsn, database))
     engine = make_async_engine(admin_dsn, pool_size=1)
     try:
@@ -94,7 +94,7 @@ async def test_fresh_root_commits_and_recovers_same_immutable_operation_receipt(
 
     raw_dsn = pg_container.get_connection_url()  # type: ignore[attr-defined]
     database = f"application_300_root_receipt_{uuid4().hex}"
-    await _admin_execute(raw_dsn, f'CREATE DATABASE "{database}"')
+    await _admin_execute(raw_dsn, f'CREATE DATABASE "{database}" TEMPLATE template0')
     admin_dsn = normalize_async_dsn(_with_database(raw_dsn, database))
     try:
         migrator_dsn = await bootstrapped_application_300_migrator_dsn(admin_dsn)
@@ -164,6 +164,41 @@ async def test_fresh_root_commits_and_recovers_same_immutable_operation_receipt(
             "sha256:" + "b" * 64,
         )
 
+        probe_command = ["probe-missing", "--operation-id", str(operation_id)]
+        assert await module.async_main(probe_command) == 0
+        missing = json.loads(capsys.readouterr().out)
+        assert missing["schema"].endswith("root-missing-receipt.v1")
+        assert missing["outcome"] == "receipt-missing-exact-prestate"
+        assert missing["operation_id"] == str(operation_id)
+        assert missing["database_identity"] == {
+            "database_name": str(identity[0]),
+            "database_oid": int(identity[1]),
+            "database_owner": str(identity[2]),
+            "postgres_system_identifier": str(identity[3]),
+        }
+        assert missing["expected_post_source_catalog_sha256"] == expected[
+            "source_catalog_sha256"
+        ]
+        assert missing["expected_post_seed_sha256"] == expected["seed_sha256"]
+        assert missing["expected_post_destination_alembic_version_sha256"] == expected[
+            "destination_alembic_version_sha256"
+        ]
+
+        engine = make_async_engine(admin_dsn, pool_size=1)
+        try:
+            async with engine.begin() as connection:
+                await connection.execute(text("CREATE TABLE ops.foreign_pre_root_drift(id bigint)"))
+            assert await module.async_main(probe_command) == 1
+            assert "pre-root state is not exact" in capsys.readouterr().err
+            async with engine.begin() as connection:
+                await connection.execute(text("DROP TABLE ops.foreign_pre_root_drift"))
+        finally:
+            await engine.dispose()
+        assert await module.async_main(probe_command) == 0
+        assert json.loads(capsys.readouterr().out)["outcome"] == (
+            "receipt-missing-exact-prestate"
+        )
+
         migrate_command = ["migrate", "--writer-fence-receipt", str(fence)]
         assert await module.async_main(migrate_command) == 0
         migrated = json.loads(capsys.readouterr().out)
@@ -174,6 +209,8 @@ async def test_fresh_root_commits_and_recovers_same_immutable_operation_receipt(
         ) == 0
         recovered = json.loads(capsys.readouterr().out)
         assert recovered == migrated
+        assert await module.async_main(probe_command) == 1
+        assert "existing operation receipt" in capsys.readouterr().err
 
         engine = make_async_engine(admin_dsn, pool_size=1)
         try:

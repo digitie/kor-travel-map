@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-25 — T-VN-H46H fresh-root 응답 유실 재실행 경계 보강 (Draft)
+
+fresh root가 operation receipt까지 커밋했지만 응답만 유실된 뒤 recover가 일시 실패하는 경우를
+bootstrap 상태 문자열로 판정하던 경계를 제거했다. Map의 production-only read-only
+`probe-missing`은 같은 PostgreSQL advisory lock 아래에서 receipt 부재와 exact pre-root role·
+membership·schema·ACL·extension·DB 설정·object 상태를 확인하고, 기존 fence·journal·DB identity와
+candidate/contract 기대 digest를 typed `receipt-missing-exact-prestate` 결과로 반환한다. receipt가
+존재하거나 foreign/partial drift가 있으면 중단하며 expired fence는 probe 판정에만 허용한다.
+
+실제 disposable PostgreSQL 및 관련 unit 회귀 `23 passed`, 변경 파일 Ruff·strict mypy를 통과했다.
+
+### 이 PR의 다음 한 작업
+
+Manager에서 root `recover` 실패 뒤 typed probe를 strict parse·plan 결박한 경우에만 fence 갱신과
+root 재실행을 허용하도록 연결하고, 새 Map SHA를 Manager pinset에 반영한 뒤 두 전문리뷰어의
+exact-commit P0/P1=0을 확인한다.
+
 ## 2026-08-25 — T-VN-41F1D-E 세 DB·Dagster role residue attestation 보강 (Draft)
 
 Manager journal v8의 최종 계약에 맞춰 C7 verifier가 PinVi DB의 PostgreSQL system identifier,

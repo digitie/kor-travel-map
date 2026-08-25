@@ -332,6 +332,11 @@ def test_fresh_migration_accepts_only_fixed_one_shot_operation(
             "/run/kor-travel-map-application-fresh-migrate/fence.json",
         ]
     )
+    operation_id = "00000000-0000-4000-8000-000000000001"
+    assert module._parse_args(["probe-missing", "--operation-id", operation_id]) == (
+        "probe-missing",
+        module.UUID(operation_id),
+    )
     with pytest.raises(module.FreshMigrationError, match="profile-fixed migrate/recover"):
         module._parse_args(["migrate"])
 
@@ -462,6 +467,207 @@ def test_fresh_migration_rechecks_manager_fence_before_root_mutation(
     assert not upgraded
     assert "KOR_TRAVEL_MAP_PG_DSN" not in os.environ
     assert "KOR_TRAVEL_MAP_ALEMBIC_USE_SCHEMA_OWNER_ROLE" not in os.environ
+
+
+def test_fresh_root_missing_receipt_probe_returns_strict_candidate_bound_wire(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script(
+        "application_schema_fresh_300_missing_receipt",
+        "docker/application-schema-fresh-300.py",
+    )
+    operation_id = module.UUID("00000000-0000-4000-8000-000000000001")
+    fence = {
+        "operation_id": str(operation_id),
+        "transaction_id": "00000000-0000-4000-8000-000000000002",
+        "journal_sha256": "1" * 64,
+        "journal_generation": 3,
+        "map_candidate_commit": "a" * 40,
+        "map_candidate_image_id": "sha256:" + "b" * 64,
+    }
+    contract = {
+        "postgres_image_id": "sha256:" + "c" * 64,
+        "reference_manifest_sha256": "2" * 64,
+        "source_catalog_sha256": "3" * 64,
+        "seed_sha256": "4" * 64,
+        "destination_alembic_version_sha256": "5" * 64,
+    }
+    identity = {
+        "database_name": "kor_travel_map",
+        "database_oid": 16384,
+        "database_owner": "ktm_feature_schema_owner",
+        "postgres_system_identifier": "1234567890",
+    }
+    calls: list[str] = []
+
+    class _Connection:
+        async def execute(self, statement: object) -> None:
+            calls.append(str(statement))
+
+    class _ConnectionContext:
+        async def __aenter__(self) -> _Connection:
+            return _Connection()
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+    class _Engine:
+        def connect(self) -> _ConnectionContext:
+            return _ConnectionContext()
+
+        async def dispose(self) -> None:
+            calls.append("disposed")
+
+    fence_reads: list[bool] = []
+
+    def _fence(*, allow_expired_for_read_only_probe: bool = False):
+        fence_reads.append(allow_expired_for_read_only_probe)
+        return fence, "6" * 64
+
+    async def _restricted(*_: object) -> dict[str, object]:
+        return identity
+
+    async def _locked(_: object) -> None:
+        calls.append("locked")
+
+    async def _missing(*_: object) -> None:
+        return None
+
+    async def _exact(_: object) -> str:
+        return "kor-travel-map.application-fresh-300-pre-root.v1"
+
+    monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", "postgresql+asyncpg://unused")
+    monkeypatch.delenv("KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN", raising=False)
+    monkeypatch.setattr(module, "_require_fixed_fence", _fence)
+    monkeypatch.setattr(module, "_static_contract", lambda: contract)
+    monkeypatch.setattr(module, "_verify_fence_candidate", lambda *_: None)
+    monkeypatch.setattr(module, "make_async_engine", lambda *_args, **_kwargs: _Engine())
+    monkeypatch.setattr(module, "_assert_restricted_migrator_session", _restricted)
+    monkeypatch.setattr(module, "_acquire_operation_lock", _locked)
+    monkeypatch.setattr(module, "_find_operation_receipt_if_present", _missing)
+    monkeypatch.setattr(module, "_assert_exact_pre_root_state", _exact)
+
+    result = asyncio.run(module._probe_missing(operation_id))
+
+    assert set(result) == {
+        "schema",
+        "outcome",
+        "operation_id",
+        "destination_head",
+        "map_candidate_commit",
+        "map_candidate_image_id",
+        "postgres_image_id",
+        "reference_manifest_sha256",
+        "writer_fence_receipt_sha256",
+        "writer_fence_transaction_id",
+        "journal_sha256",
+        "journal_generation",
+        "database_identity",
+        "pre_root_state_schema",
+        "expected_post_source_catalog_sha256",
+        "expected_post_seed_sha256",
+        "expected_post_destination_alembic_version_sha256",
+    }
+    assert result["schema"].endswith("root-missing-receipt.v1")
+    assert result["outcome"] == "receipt-missing-exact-prestate"
+    assert result["operation_id"] == str(operation_id)
+    assert result["database_identity"] == identity
+    assert result["expected_post_source_catalog_sha256"] == "3" * 64
+    assert result["expected_post_seed_sha256"] == "4" * 64
+    assert result["expected_post_destination_alembic_version_sha256"] == "5" * 64
+    assert fence_reads == [True, True]
+    assert calls[0] == "SET TRANSACTION READ ONLY"
+    assert "locked" in calls
+    assert calls[-1] == "disposed"
+
+
+@pytest.mark.parametrize("failure", ["existing-receipt", "pre-root-drift"])
+def test_fresh_root_missing_receipt_probe_fails_closed(
+    failure: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    module = _load_script(
+        f"application_schema_fresh_300_probe_{failure}",
+        "docker/application-schema-fresh-300.py",
+    )
+    operation_id = module.UUID("00000000-0000-4000-8000-000000000001")
+    fence = {"operation_id": str(operation_id)}
+
+    class _Connection:
+        async def execute(self, _: object) -> None:
+            return None
+
+    class _ConnectionContext:
+        async def __aenter__(self) -> _Connection:
+            return _Connection()
+
+        async def __aexit__(self, *_: object) -> None:
+            return None
+
+    class _Engine:
+        def connect(self) -> _ConnectionContext:
+            return _ConnectionContext()
+
+        async def dispose(self) -> None:
+            return None
+
+    async def _restricted(*_: object) -> dict[str, object]:
+        return {}
+
+    async def _noop(_: object) -> None:
+        return None
+
+    async def _receipt(*_: object) -> dict[str, object] | None:
+        return {"operation_id": str(operation_id)} if failure == "existing-receipt" else None
+
+    async def _prestate(_: object) -> str:
+        if failure == "pre-root-drift":
+            raise module.FreshMigrationError("fresh 300 pre-root state is not exact")
+        raise AssertionError("pre-root attestation must not run after an existing receipt")
+
+    monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", "postgresql+asyncpg://unused")
+    monkeypatch.delenv("KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN", raising=False)
+    monkeypatch.setattr(
+        module,
+        "_require_fixed_fence",
+        lambda **_: (fence, "6" * 64),
+    )
+    monkeypatch.setattr(module, "_static_contract", dict)
+    monkeypatch.setattr(module, "_verify_fence_candidate", lambda *_: None)
+    monkeypatch.setattr(module, "make_async_engine", lambda *_args, **_kwargs: _Engine())
+    monkeypatch.setattr(module, "_assert_restricted_migrator_session", _restricted)
+    monkeypatch.setattr(module, "_acquire_operation_lock", _noop)
+    monkeypatch.setattr(module, "_find_operation_receipt_if_present", _receipt)
+    monkeypatch.setattr(module, "_assert_exact_pre_root_state", _prestate)
+
+    expected = "existing operation receipt" if failure == "existing-receipt" else "not exact"
+    with pytest.raises(module.FreshMigrationError, match=expected):
+        asyncio.run(module._probe_missing(operation_id))
+
+
+def test_fresh_root_prestate_attestation_is_exact_and_read_only() -> None:
+    module = _load_script(
+        "application_schema_fresh_300_prestate_sql",
+        "docker/application-schema-fresh-300.py",
+    )
+
+    sql = module._pre_root_attestation_sql()
+
+    for required in (
+        "transaction_read_only",
+        "application_schema_operation_receipts",
+        "public.alembic_version",
+        "membership.admin_option",
+        "membership.inherit_option",
+        "membership.set_option",
+        "pg_catalog.aclexplode",
+        "extension.extversion",
+        "available.default_version",
+        "search_path=public, x_extension",
+        "pg_catalog.pg_default_acl",
+    ):
+        assert required in sql
+    assert not any(token in sql for token in ("INSERT ", "UPDATE ", "DELETE ", "ALTER "))
 
 
 def test_fresh_finalize_accepts_only_manager_fixed_completion_operation() -> None:

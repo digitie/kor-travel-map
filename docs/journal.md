@@ -1,5 +1,20 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-25 — T-VN-H46H fresh-root missing-receipt typed proof (Draft)
+
+fresh root migration이 DB transaction과 operation receipt를 커밋한 뒤 stdout 또는 host artifact만
+유실되고 recover가 일시 실패하는 경우, bootstrap 상태만 보고 새 fence로 root를 재실행할 수 있던
+경계를 제거했다. production 전용 read-only `probe-missing --operation-id`가 동일 advisory lock
+snapshot에서 receipt 부재와 exact pre-root 상태를 확인하고, operation·writer fence·journal·DB
+identity·candidate/image·source catalog·seed·destination Alembic 기대값을 canonical wire에 결박한다.
+expired fence는 이 read-only 판정에만 허용하며, receipt가 있거나 role/schema/ACL/object/DB 설정이
+조금이라도 다르면 fail-close한다. Manager가 이 typed proof를 strict parse한 경우에만 fence 갱신과
+root 재실행을 허용하도록 다음 Manager 커밋에서 연결한다.
+
+- fresh-root unit/실제 disposable PostgreSQL 회귀: `23 passed`
+- 변경 파일 Ruff, strict mypy, `git diff --check`: 통과
+- 범위 밖 untracked `uv.lock`: 열람·수정·stage하지 않음
+
 ## 2026-08-25 — T-VN-41F1D-E 최종 DB identity·role residue 결박 (Draft)
 
 전문 DB 적대 리뷰의 잔여 finding을 반영해 Dagster metadata LOGIN role의 권한 잔여 검사를

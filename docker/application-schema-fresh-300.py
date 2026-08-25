@@ -57,6 +57,9 @@ _DATABASE_PATTERN: Final = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _OPERATION_RECEIPT_TABLE: Final = "ops.application_schema_operation_receipts"
 _OPERATION_KIND: Final = "application-root-300"
 _RESULT_SCHEMA: Final = "kor-travel-map.application-fresh-300-root.v2"
+_MISSING_RECEIPT_SCHEMA: Final = (
+    "kor-travel-map.application-fresh-300-root-missing-receipt.v1"
+)
 _OPERATION_LOCK_KEY: Final = "kor-travel-map:application-schema-300-operation"
 _FENCE_FIELDS: Final = frozenset(
     {
@@ -100,6 +103,123 @@ _CONTRACT_FIELDS: Final = frozenset(
         "runtime_invariants_sql_sha256",
     }
 )
+_PRE_ROOT_NOLOGIN_ROLES: Final = (
+    "ktm_curation_admin_executor",
+    "ktm_curation_audit_writer",
+    "ktm_curation_command_owner",
+    "ktm_curation_provider_executor",
+    "ktm_feature_audit_writer",
+    "ktm_feature_create_provider_executor",
+    "ktm_feature_reference_reconciliation_service_executor",
+    "ktm_feature_request_admin_executor",
+    "ktm_feature_request_procedure_owner",
+    "ktm_feature_request_service_executor",
+    "ktm_feature_runtime",
+    "ktm_feature_schema_owner",
+    "ktm_feature_state_procedure_owner",
+    "ktm_manual_feature_admin_executor",
+    "ktm_manual_feature_procedure_owner",
+    "ktm_manual_provider_dedup_admin_executor",
+    "ktm_manual_provider_dedup_detector_executor",
+    "ktm_manual_provider_dedup_procedure_owner",
+)
+_PRE_ROOT_LOGIN_ROLES: Final = (
+    "ktm_feature_api_runtime",
+    "ktm_feature_dagster_runtime",
+    "ktm_feature_migrator",
+)
+_PRE_ROOT_MEMBERSHIPS: Final = (
+    ("ktm_curation_admin_executor", "ktm_feature_api_runtime", False, True, False),
+    ("ktm_curation_audit_writer", _DATABASE_OWNER, False, False, True),
+    ("ktm_curation_command_owner", _DATABASE_OWNER, False, False, True),
+    (
+        "ktm_curation_provider_executor",
+        "ktm_feature_dagster_runtime",
+        False,
+        True,
+        False,
+    ),
+    ("ktm_feature_audit_writer", _DATABASE_OWNER, False, False, True),
+    (
+        "ktm_feature_create_provider_executor",
+        "ktm_feature_dagster_runtime",
+        False,
+        True,
+        False,
+    ),
+    (
+        "ktm_feature_reference_reconciliation_service_executor",
+        "ktm_feature_api_runtime",
+        False,
+        True,
+        False,
+    ),
+    (
+        "ktm_feature_request_admin_executor",
+        "ktm_feature_api_runtime",
+        False,
+        True,
+        False,
+    ),
+    ("ktm_feature_request_procedure_owner", _DATABASE_OWNER, False, False, True),
+    (
+        "ktm_feature_request_service_executor",
+        "ktm_feature_api_runtime",
+        False,
+        True,
+        False,
+    ),
+    ("ktm_feature_runtime", "ktm_feature_api_runtime", False, True, False),
+    ("ktm_feature_runtime", "ktm_feature_dagster_runtime", False, True, False),
+    (_DATABASE_OWNER, _MIGRATOR_ROLE, False, False, True),
+    ("ktm_feature_state_procedure_owner", _DATABASE_OWNER, False, False, True),
+    (
+        "ktm_manual_feature_admin_executor",
+        "ktm_feature_api_runtime",
+        False,
+        True,
+        False,
+    ),
+    ("ktm_manual_feature_procedure_owner", _DATABASE_OWNER, False, False, True),
+    (
+        "ktm_manual_provider_dedup_admin_executor",
+        "ktm_feature_api_runtime",
+        False,
+        True,
+        False,
+    ),
+    (
+        "ktm_manual_provider_dedup_detector_executor",
+        "ktm_feature_dagster_runtime",
+        False,
+        True,
+        False,
+    ),
+    (
+        "ktm_manual_provider_dedup_procedure_owner",
+        _DATABASE_OWNER,
+        False,
+        False,
+        True,
+    ),
+)
+_PRE_ROOT_SCHEMA_CREATORS: Final = (
+    "ktm_curation_audit_writer",
+    "ktm_curation_command_owner",
+    "ktm_feature_audit_writer",
+    "ktm_feature_request_procedure_owner",
+    "ktm_feature_state_procedure_owner",
+    "ktm_manual_feature_procedure_owner",
+    "ktm_manual_provider_dedup_procedure_owner",
+)
+_PRE_ROOT_EXTENSION_SCHEMA_USERS: Final = (
+    "ktm_curation_command_owner",
+    "ktm_feature_api_runtime",
+    "ktm_feature_dagster_runtime",
+    "ktm_feature_runtime",
+    "ktm_feature_state_procedure_owner",
+    "ktm_manual_provider_dedup_procedure_owner",
+)
 
 
 class FreshMigrationError(RuntimeError):
@@ -117,12 +237,19 @@ def _parse_args(arguments: Sequence[str] | None) -> tuple[str, UUID | None]:
                 return "recover", UUID(values[2])
             except ValueError as exc:
                 raise FreshMigrationError("fresh 300 recovery operation id is invalid") from exc
+        if len(values) == 3 and values[:2] == ["probe-missing", "--operation-id"]:
+            try:
+                return "probe-missing", UUID(values[2])
+            except ValueError as exc:
+                raise FreshMigrationError("fresh 300 probe operation id is invalid") from exc
     elif profile == "local-dev":
         if values == ["migrate"]:
             return "migrate", None
     else:
         raise FreshMigrationError(f"{_PROFILE_ENV} must be exact production or local-dev")
-    raise FreshMigrationError("only the profile-fixed migrate/recover operation is accepted")
+    raise FreshMigrationError(
+        "only the profile-fixed migrate/recover/probe operation is accepted"
+    )
 
 
 def _application_root() -> Path:
@@ -235,7 +362,9 @@ def _static_contract() -> Mapping[str, str]:
     return {key: str(item) for key, item in value.items()}
 
 
-def _require_fixed_fence() -> tuple[Mapping[str, Any], str]:
+def _require_fixed_fence(
+    *, allow_expired_for_read_only_probe: bool = False
+) -> tuple[Mapping[str, Any], str]:
     """host root가 fixed mount에 발행한 production generation만 읽는다."""
 
     try:
@@ -324,7 +453,10 @@ def _require_fixed_fence() -> tuple[Mapping[str, Any], str]:
         expires_at = datetime.fromisoformat(str(value["writer_fence_expires_at"]))
     except ValueError as exc:
         raise FreshMigrationError("fresh 300 migrate fence expiry is invalid") from exc
-    if expires_at.tzinfo is None or expires_at.astimezone(UTC) <= datetime.now(UTC):
+    if expires_at.tzinfo is None or (
+        not allow_expired_for_read_only_probe
+        and expires_at.astimezone(UTC) <= datetime.now(UTC)
+    ):
         raise FreshMigrationError("fresh 300 migrate fence has expired")
     return value, hashlib.sha256(raw).hexdigest()
 
@@ -458,6 +590,289 @@ async def _acquire_operation_lock(connection: AsyncConnection) -> None:
     )
 
 
+def _pre_root_attestation_sql() -> str:
+    expected_roles = ", ".join(
+        f"('{role}', {'TRUE' if role in _PRE_ROOT_LOGIN_ROLES else 'FALSE'})"
+        for role in (*_PRE_ROOT_NOLOGIN_ROLES, *_PRE_ROOT_LOGIN_ROLES)
+    )
+    role_names = ", ".join(
+        f"'{role}'" for role in (*_PRE_ROOT_NOLOGIN_ROLES, *_PRE_ROOT_LOGIN_ROLES)
+    )
+    expected_memberships = ", ".join(
+        "(" + ", ".join(
+            (
+                f"'{granted_role}'",
+                f"'{member_role}'",
+                "TRUE" if admin_option else "FALSE",
+                "TRUE" if inherit_option else "FALSE",
+                "TRUE" if set_option else "FALSE",
+            )
+        ) + ")"
+        for granted_role, member_role, admin_option, inherit_option, set_option in (
+            _PRE_ROOT_MEMBERSHIPS
+        )
+    )
+    expected_acl_rows = [
+        ("public", "PUBLIC", "USAGE"),
+        ("public", "pg_database_owner", "USAGE"),
+        ("public", "pg_database_owner", "CREATE"),
+    ]
+    for schema_name in ("feature", "provider_sync", "ops"):
+        expected_acl_rows.extend(
+            (
+                (schema_name, _DATABASE_OWNER, "USAGE"),
+                (schema_name, _DATABASE_OWNER, "CREATE"),
+            )
+        )
+        for role in _PRE_ROOT_SCHEMA_CREATORS:
+            expected_acl_rows.extend(
+                (
+                    (schema_name, role, "USAGE"),
+                    (schema_name, role, "CREATE"),
+                )
+            )
+    expected_acl_rows.extend(
+        (
+            ("x_extension", _DATABASE_OWNER, "USAGE"),
+            ("x_extension", _DATABASE_OWNER, "CREATE"),
+        )
+    )
+    expected_acl_rows.extend(
+        ("x_extension", role, "USAGE")
+        for role in _PRE_ROOT_EXTENSION_SCHEMA_USERS
+    )
+    expected_acls = ", ".join(
+        f"('{schema_name}', '{role}', '{privilege}')"
+        for schema_name, role, privilege in expected_acl_rows
+    )
+    return f"""
+WITH expected_role(rolname, can_login) AS (VALUES {expected_roles}),
+expected_membership(
+    granted_role, member_role, admin_option, inherit_option, set_option
+) AS (VALUES {expected_memberships}),
+actual_membership AS (
+    SELECT granted.rolname AS granted_role,
+           member.rolname AS member_role,
+           membership.admin_option,
+           membership.inherit_option,
+           membership.set_option
+    FROM pg_catalog.pg_auth_members AS membership
+    JOIN pg_catalog.pg_roles AS granted ON granted.oid = membership.roleid
+    JOIN pg_catalog.pg_roles AS member ON member.oid = membership.member
+    WHERE granted.rolname IN ({role_names}) OR member.rolname IN ({role_names})
+),
+expected_acl(schema_name, role_name, privilege_type, is_grantable) AS (
+    SELECT schema_name, role_name, privilege_type, FALSE
+    FROM (VALUES {expected_acls}) AS expected(
+        schema_name, role_name, privilege_type
+    )
+),
+actual_acl AS (
+    SELECT namespace.nspname AS schema_name,
+           CASE WHEN privilege.grantee = 0 THEN 'PUBLIC' ELSE grantee.rolname END,
+           privilege.privilege_type,
+           privilege.is_grantable
+    FROM pg_catalog.pg_namespace AS namespace
+    CROSS JOIN LATERAL pg_catalog.aclexplode(namespace.nspacl) AS privilege
+    LEFT JOIN pg_catalog.pg_roles AS grantee ON grantee.oid = privilege.grantee
+    WHERE namespace.nspname IN ('public', 'feature', 'provider_sync', 'ops', 'x_extension')
+),
+expected_extension(extension_name, schema_name) AS (VALUES
+    ('fuzzystrmatch', 'public'),
+    ('pg_prewarm', 'x_extension'),
+    ('pg_trgm', 'x_extension'),
+    ('pgcrypto', 'x_extension'),
+    ('plpgsql', 'pg_catalog'),
+    ('postgis', 'x_extension')
+),
+actual_extension AS (
+    SELECT extension.extname AS extension_name,
+           namespace.nspname AS schema_name,
+           extension.extversion,
+           available.default_version,
+           owner.rolname AS owner_name,
+           owner.rolsuper AS owner_is_superuser
+    FROM pg_catalog.pg_extension AS extension
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = extension.extnamespace
+    JOIN pg_catalog.pg_roles AS owner ON owner.oid = extension.extowner
+    LEFT JOIN pg_catalog.pg_available_extensions AS available
+      ON available.name = extension.extname
+),
+application_object AS (
+    SELECT object.oid
+    FROM pg_catalog.pg_class AS object
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.relnamespace
+    WHERE namespace.nspname IN ('feature', 'provider_sync', 'ops')
+      AND object.relkind IN ('r', 'p', 'v', 'm', 'f', 'S')
+    UNION ALL
+    SELECT object.oid
+    FROM pg_catalog.pg_proc AS object
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.pronamespace
+    WHERE namespace.nspname IN ('feature', 'provider_sync', 'ops')
+    UNION ALL
+    SELECT object.oid
+    FROM pg_catalog.pg_type AS object
+    JOIN pg_catalog.pg_namespace AS namespace ON namespace.oid = object.typnamespace
+    WHERE namespace.nspname IN ('feature', 'provider_sync', 'ops')
+      AND object.typtype IN ('b', 'c', 'd', 'e', 'r')
+)
+SELECT CASE WHEN
+    current_setting('transaction_read_only') = 'on'
+    AND to_regclass('ops.application_schema_operation_receipts') IS NULL
+    AND to_regclass('public.alembic_version') IS NULL
+    AND EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_database AS target_database
+        JOIN pg_catalog.pg_database AS template_database
+          ON template_database.datname = 'template1'
+        WHERE target_database.datname = current_database()
+          AND target_database.datistemplate IS FALSE
+          AND target_database.encoding = template_database.encoding
+          AND target_database.datlocprovider = template_database.datlocprovider
+          AND target_database.dattablespace = template_database.dattablespace
+          AND target_database.datcollate IS NOT DISTINCT FROM template_database.datcollate
+          AND target_database.datctype IS NOT DISTINCT FROM template_database.datctype
+          AND target_database.daticulocale IS NOT DISTINCT FROM template_database.daticulocale
+          AND target_database.daticurules IS NOT DISTINCT FROM template_database.daticurules
+          AND target_database.datcollversion IS NOT DISTINCT FROM template_database.datcollversion
+          AND target_database.datallowconn = template_database.datallowconn
+          AND target_database.datconnlimit = template_database.datconnlimit
+          AND target_database.datacl IS NULL
+    )
+    AND NOT EXISTS (
+        SELECT 1
+        FROM expected_role
+        LEFT JOIN pg_catalog.pg_roles AS role USING (rolname)
+        WHERE role.rolname IS NULL
+           OR role.rolcanlogin IS DISTINCT FROM expected_role.can_login
+           OR role.rolinherit
+           OR role.rolsuper
+           OR role.rolcreatedb
+           OR role.rolcreaterole
+           OR role.rolreplication
+           OR role.rolbypassrls
+           OR role.rolconnlimit <> -1
+           OR role.rolvaliduntil IS DISTINCT FROM 'infinity'::timestamptz
+           OR role.rolconfig IS NOT NULL
+           OR (expected_role.can_login AND role.rolpassword IS NULL)
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_roles AS role
+        WHERE role.rolname LIKE 'ktm\\_%' ESCAPE '\\'
+          AND role.rolname NOT IN ({role_names})
+    )
+    AND NOT EXISTS (SELECT * FROM expected_membership EXCEPT SELECT * FROM actual_membership)
+    AND NOT EXISTS (SELECT * FROM actual_membership EXCEPT SELECT * FROM expected_membership)
+    AND NOT EXISTS (
+        (SELECT namespace.nspname
+         FROM pg_catalog.pg_namespace AS namespace
+         WHERE namespace.nspname !~ '^pg_' AND namespace.nspname <> 'information_schema')
+        EXCEPT VALUES ('public'), ('feature'), ('provider_sync'), ('ops'), ('x_extension')
+    )
+    AND NOT EXISTS (
+        (VALUES ('public'), ('feature'), ('provider_sync'), ('ops'), ('x_extension'))
+        EXCEPT
+        (SELECT namespace.nspname
+         FROM pg_catalog.pg_namespace AS namespace
+         WHERE namespace.nspname !~ '^pg_' AND namespace.nspname <> 'information_schema')
+    )
+    AND EXISTS (
+        SELECT 1 FROM pg_catalog.pg_namespace AS namespace
+        WHERE namespace.nspname = 'public'
+          AND namespace.nspowner = 'pg_database_owner'::regrole
+    )
+    AND (
+        SELECT count(*) FROM pg_catalog.pg_namespace AS namespace
+        WHERE namespace.nspname IN ('feature', 'provider_sync', 'ops', 'x_extension')
+          AND namespace.nspowner = '{_DATABASE_OWNER}'::regrole
+    ) = 4
+    AND NOT EXISTS (SELECT * FROM expected_acl EXCEPT SELECT * FROM actual_acl)
+    AND NOT EXISTS (SELECT * FROM actual_acl EXCEPT SELECT * FROM expected_acl)
+    AND NOT EXISTS (SELECT * FROM expected_extension EXCEPT
+                    SELECT extension_name, schema_name FROM actual_extension)
+    AND NOT EXISTS (SELECT extension_name, schema_name FROM actual_extension EXCEPT
+                    SELECT * FROM expected_extension)
+    AND NOT EXISTS (
+        SELECT 1 FROM actual_extension
+        WHERE extversion IS DISTINCT FROM default_version
+           OR NOT owner_is_superuser
+           OR owner_name LIKE 'ktm\\_%' ESCAPE '\\'
+    )
+    AND NOT EXISTS (SELECT 1 FROM application_object)
+    AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_default_acl)
+    AND (
+        SELECT COALESCE(array_agg(language.lanname::text ORDER BY language.lanname),
+                        ARRAY[]::text[])
+        FROM pg_catalog.pg_language AS language
+    ) IS NOT DISTINCT FROM ARRAY['c', 'internal', 'plpgsql', 'sql']::text[]
+    AND (SELECT count(*) FROM pg_catalog.pg_db_role_setting AS setting_row
+         WHERE setting_row.setdatabase = (
+             SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database()
+         )) = 1
+    AND EXISTS (
+        SELECT 1 FROM pg_catalog.pg_db_role_setting AS setting_row
+        WHERE setting_row.setdatabase = (
+                  SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database()
+              )
+          AND setting_row.setrole = 0
+          AND setting_row.setconfig = ARRAY['search_path=public, x_extension']::text[]
+    )
+    AND NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_db_role_setting AS setting_row
+        WHERE setting_row.setdatabase = 0
+          AND (setting_row.setrole = 0 OR setting_row.setrole IN (
+              SELECT role.oid FROM pg_catalog.pg_roles AS role
+              WHERE role.rolname LIKE 'ktm\\_%' ESCAPE '\\'
+          ))
+    )
+    AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_foreign_data_wrapper)
+    AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_foreign_server)
+    AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_publication)
+    AND NOT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_subscription AS subscription
+        WHERE subscription.subdbid = (
+            SELECT oid FROM pg_catalog.pg_database WHERE datname = current_database()
+        )
+    )
+    AND NOT EXISTS (SELECT 1 FROM pg_catalog.pg_event_trigger)
+THEN 'kor-travel-map.application-fresh-300-pre-root.v1'
+ELSE 'drift' END
+"""
+
+
+async def _assert_exact_pre_root_state(connection: AsyncConnection) -> str:
+    try:
+        marker = await connection.scalar(text(_pre_root_attestation_sql()))
+    except Exception as exc:
+        raise FreshMigrationError("fresh 300 pre-root state cannot be attested") from exc
+    if marker != "kor-travel-map.application-fresh-300-pre-root.v1":
+        raise FreshMigrationError("fresh 300 pre-root state is not exact")
+    return str(marker)
+
+
+async def _find_operation_receipt_if_present(
+    connection: AsyncConnection, operation_id: UUID
+) -> Mapping[str, Any] | None:
+    try:
+        if await connection.scalar(
+            text(f"SELECT to_regclass('{_OPERATION_RECEIPT_TABLE}') IS NOT NULL")
+        ) is not True:
+            return None
+        row = (
+            await connection.execute(
+                text(
+                    f"SELECT operation_id::text, operation, result_schema "
+                    f"FROM {_OPERATION_RECEIPT_TABLE} "
+                    "WHERE operation_id = :operation_id"
+                ),
+                {"operation_id": operation_id},
+            )
+        ).mappings().one_or_none()
+        return None if row is None else dict(row)
+    except Exception as exc:
+        raise FreshMigrationError("fresh 300 operation receipt cannot be inspected") from exc
+
+
 def _upgrade_on_existing_connection(connection: Connection, config: Config) -> None:
     """Alembic root와 receipt insert가 하나의 outer transaction을 공유한다."""
 
@@ -480,18 +895,16 @@ async def _assert_application_receipts(
     try:
         await connection.execute(text(f"SET ROLE {_DATABASE_OWNER}"))
         await connection.execute(text("SET search_path = public, x_extension"))
-        catalog = await module.contract_sha256(  # type: ignore[attr-defined]
+        catalog = await module.contract_sha256(
             connection, "application-catalog.sql"
         )
-        seed = await module.contract_sha256(  # type: ignore[attr-defined]
+        seed = await module.contract_sha256(
             connection, "application-seed.sql"
         )
-        destination = await module.contract_sha256(  # type: ignore[attr-defined]
+        destination = await module.contract_sha256(
             connection, "application-destination-alembic-version.sql"
         )
-        await module.verify_runtime_projection_invariants(  # type: ignore[attr-defined]
-            connection
-        )
+        await module.verify_runtime_projection_invariants(connection)
     except Exception as exc:
         raise FreshMigrationError("fresh 300 cannot verify committed application receipts") from exc
     if catalog not in expected_catalogs or seed != expected["seed_sha256"]:
@@ -571,7 +984,7 @@ async def _read_operation_receipt(
         raise FreshMigrationError("fresh 300 operation receipt is unavailable") from exc
     if row is None:
         raise FreshMigrationError("fresh 300 operation receipt does not exist")
-    return row
+    return dict(row)
 
 
 async def _migrate() -> Mapping[str, Any]:
@@ -746,14 +1159,81 @@ async def _recover(operation_id: UUID) -> Mapping[str, Any]:
         await engine.dispose()
 
 
+async def _probe_missing(operation_id: UUID) -> Mapping[str, Any]:
+    """root 재실행이 안전한 exact bootstrap-complete pre-state만 증명한다."""
+
+    if os.environ.get(_BOOTSTRAP_DSN_ENV):
+        raise FreshMigrationError("bootstrap-superuser DSN must not enter fresh probe")
+    dsn = os.environ.get(_MIGRATOR_DSN_ENV)
+    if not dsn:
+        raise FreshMigrationError(f"{_MIGRATOR_DSN_ENV} is required")
+    fence, fence_sha256 = _require_fixed_fence(
+        allow_expired_for_read_only_probe=True
+    )
+    contract = _static_contract()
+    _verify_fence_candidate(fence, contract)
+    if str(operation_id) != fence["operation_id"]:
+        raise FreshMigrationError("fresh 300 probe operation does not match fence")
+
+    engine = make_async_engine(dsn, pool_size=1)
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text("SET TRANSACTION READ ONLY"))
+            database_identity = await _assert_restricted_migrator_session(
+                connection, fence
+            )
+            # root와 finalize가 쓰는 동일 xact lock 뒤 한 read-only snapshot에서
+            # 이전 container transaction의 commit/rollback 결과를 판정한다.
+            await _acquire_operation_lock(connection)
+            await connection.execute(text(f"SET ROLE {_DATABASE_OWNER}"))
+            if await _find_operation_receipt_if_present(connection, operation_id) is not None:
+                raise FreshMigrationError(
+                    "fresh 300 probe found an existing operation receipt"
+                )
+            pre_root_state = await _assert_exact_pre_root_state(connection)
+            active_fence, active_fence_sha256 = _require_fixed_fence(
+                allow_expired_for_read_only_probe=True
+            )
+            if active_fence != fence or active_fence_sha256 != fence_sha256:
+                raise FreshMigrationError("fresh 300 probe fence changed during attestation")
+            return {
+                "schema": _MISSING_RECEIPT_SCHEMA,
+                "outcome": "receipt-missing-exact-prestate",
+                "operation_id": str(operation_id),
+                "destination_head": _DESTINATION_HEAD,
+                "map_candidate_commit": fence["map_candidate_commit"],
+                "map_candidate_image_id": fence["map_candidate_image_id"],
+                "postgres_image_id": contract["postgres_image_id"],
+                "reference_manifest_sha256": contract[
+                    "reference_manifest_sha256"
+                ],
+                "writer_fence_receipt_sha256": fence_sha256,
+                "writer_fence_transaction_id": fence["transaction_id"],
+                "journal_sha256": fence["journal_sha256"],
+                "journal_generation": fence["journal_generation"],
+                "database_identity": database_identity,
+                "pre_root_state_schema": pre_root_state,
+                "expected_post_source_catalog_sha256": contract[
+                    "source_catalog_sha256"
+                ],
+                "expected_post_seed_sha256": contract["seed_sha256"],
+                "expected_post_destination_alembic_version_sha256": contract[
+                    "destination_alembic_version_sha256"
+                ],
+            }
+    finally:
+        await engine.dispose()
+
+
 async def async_main(arguments: Sequence[str] | None = None) -> int:
     try:
         operation, operation_id = _parse_args(arguments)
-        result = (
-            await _migrate()
-            if operation == "migrate"
-            else await _recover(operation_id)  # type: ignore[arg-type]
-        )
+        if operation == "migrate":
+            result = await _migrate()
+        elif operation == "recover":
+            result = await _recover(operation_id)  # type: ignore[arg-type]
+        else:
+            result = await _probe_missing(operation_id)  # type: ignore[arg-type]
     except FreshMigrationError as exc:
         print(f"fresh application 300 migration refused: {exc}", file=sys.stderr)
         return 1
