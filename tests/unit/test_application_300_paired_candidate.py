@@ -105,6 +105,21 @@ def test_paired_builder_candidate_builder_is_executable() -> None:
     assert builder.is_file()
     assert stat.S_IMODE(builder.stat().st_mode) & stat.S_IXUSR
 
+    tracked_mode = subprocess.run(
+        [
+            "git",
+            "ls-tree",
+            "HEAD",
+            "--",
+            str(builder.relative_to(ROOT)),
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.split(maxsplit=1)[0]
+    assert tracked_mode == "100755"
+
 
 @pytest.mark.unit
 def test_paired_builder_seals_both_images_and_one_dagster_launch_image() -> None:
