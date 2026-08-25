@@ -269,6 +269,46 @@ describe("admin API proxy response headers", () => {
     expect(response.headers.get("location")).toBe(redirectLocation);
   });
 
+  it.each(["approve", "reject"] as const)(
+    "M04 Feature 요청 %s 결정에도 server-only raw token을 주입한다",
+    async (action) => {
+      const manualCreateToken = "manual-feature-create-token-route-test-0001";
+      vi.stubEnv(
+        "KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN",
+        manualCreateToken,
+      );
+      const requestId = "0198d9f1-7a31-7e52-8ea8-cb2548d3a891";
+      const fetchMock = vi.fn().mockResolvedValue(
+        Response.json({ data: { status: action } }),
+      );
+      vi.stubGlobal("fetch", fetchMock);
+      const request = new NextRequest(
+        `http://127.0.0.1:12705/api/proxy/v1/admin/feature-requests/${requestId}/${action}`,
+        {
+          body: JSON.stringify({ reason: "M04 admin decision" }),
+          headers: {
+            "Content-Type": "application/json",
+            "X-Kor-Travel-Map-Admin-Feature-Create-Token":
+              "browser-token-must-not-win",
+          },
+          method: "POST",
+        },
+      );
+
+      const response = await POST(request, {
+        params: Promise.resolve({
+          path: ["v1", "admin", "feature-requests", requestId, action],
+        }),
+      });
+
+      expect(response.status).toBe(200);
+      const forwarded = new Headers(fetchMock.mock.calls[0]?.[1]?.headers);
+      expect(forwarded.get("x-kor-travel-map-admin-feature-create-token")).toBe(
+        manualCreateToken,
+      );
+    },
+  );
+
   it.each([
     ["encoded double slash", "%2F%2Fevil.example", "//evil.example"],
     ["encoded backslash", "%5C%5Cevil.example", "\\\\evil.example"],
@@ -317,7 +357,7 @@ describe("admin API proxy response headers", () => {
     },
   );
 
-  it("exact create 경로가 아닌 POST에는 manual create token을 주입하지 않는다", async () => {
+  it("M04 결정 경로 밖 POST에는 manual create token을 주입하지 않는다", async () => {
     vi.stubEnv(
       "KOR_TRAVEL_MAP_ADMIN_FEATURE_CREATE_TOKEN",
       "manual-feature-create-token-route-test-0001",
@@ -326,8 +366,9 @@ describe("admin API proxy response headers", () => {
       Response.json({ data: { accepted: true } }, { status: 202 }),
     );
     vi.stubGlobal("fetch", fetchMock);
+    const requestId = "0198d9f1-7a31-7e52-8ea8-cb2548d3a891";
     const request = new NextRequest(
-      "http://127.0.0.1:12705/api/proxy/v1/admin/features/some-command",
+      `http://127.0.0.1:12705/api/proxy/v1/admin/feature-requests/${requestId}/inspect`,
       {
         body: JSON.stringify({ reason: "not-create" }),
         headers: {
@@ -341,7 +382,7 @@ describe("admin API proxy response headers", () => {
 
     const response = await POST(request, {
       params: Promise.resolve({
-        path: ["v1", "admin", "features", "some-command"],
+        path: ["v1", "admin", "feature-requests", requestId, "inspect"],
       }),
     });
 

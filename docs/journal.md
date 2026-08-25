@@ -1,5 +1,24 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-25 — T-VN-M04 Admin BFF 결정 자격 결선 보완 (Draft)
+
+격리된 PinVi→Map M04 실제 브라우저 승인에서 PinVi의 queue receipt는 정상으로
+보존됐지만, Map Admin BFF의 최종 승인 요청은 `403`으로 끝났다. 원인은 BFF가
+server-only manual Feature create token을 `POST /v1/admin/features`에만 주입하고,
+동일한 `require_admin_manual_feature_create` 경계를 쓰는
+`/v1/admin/feature-requests/{request_id}/approve|reject`에는 주입하지 않은 것이었다.
+
+프록시는 이제 canonical UUID 형태의 두 M04 결정 경로에만 같은 token을 붙인다. browser가
+보낸 동명 header는 계속 폐기하며, 인접하지만 허용되지 않은 경로로 token이 넓어지지 않도록
+회귀 테스트를 추가했다. OpenAPI·DB 계약은 바꾸지 않는다.
+
+- proxy 회귀: `16 passed`
+- frontend lint·type-check: 통과
+- CI와 같은 공개 build-time URL로 Next production build: 통과
+
+아직 candidate frontend 이미지의 격리 Map BFF live 재검증과 적대 리뷰·원격 CI가 남아 있어
+PR은 Draft로 유지한다.
+
 ## 2026-08-24 — PR #1063 writer fixture preflight·procedure role·future role edge 보강
 
 Draft [PR #1063](https://github.com/digitie/kor-travel-map/pull/1063)의 두 전문 적대 리뷰에서

@@ -1,5 +1,19 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-25 — T-VN-M04 Admin BFF 결정 자격 결선 보완 (Draft)
+
+PinVi의 격리 M04 실제 UI 승인 뒤 Map pending receipt까지는 정상으로 확인했다. 다만
+Map BFF가 feature request approve/reject 경로에 manual Feature create 전용 token을
+주입하지 않아 API가 의도대로 `403`을 반환했다. BFF의 token 주입 범위를 canonical UUID
+approve/reject 두 경로까지 정확히 넓히고, 그 밖의 경로에는 여전히 주입하지 않는 회귀를
+추가했다. OpenAPI·DB migration 변경은 없다.
+
+### 이 PR의 다음 한 작업
+
+candidate frontend 이미지를 격리 Map 스택에 적용해 정상 BFF 승인과 이어지는 M05 paired
+reconciliation을 실제 UI로 재검증한다. 그 뒤 적대 리뷰와 원격 CI green 전에는 머지하지
+않는다.
+
 ## 2026-08-24 — PR #1063 fixture writer DB 경계·role graph 보강 (재리뷰 대기)
 
 Draft [PR #1063](https://github.com/digitie/kor-travel-map/pull/1063)의 두 전문 적대 리뷰가
