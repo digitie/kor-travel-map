@@ -1,5 +1,31 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-25 — T-VN-H46H PostGIS fixture와 locale canonicalization CI 복구 (Draft)
+
+PR #1064의 PostGIS 실패를 조사해 공통 원인을 재현했다. `postgis/postgis:16-3.5-alpine`의
+image-created `test` DB는 `template_postgis`의 public/topology extension을 포함해
+ADR-008 `x_extension` precondition을 깨고, role-bootstrap 테스트는 새 preflight helper를
+컨테이너에 복사하지 않아 credential 검증 전에 중단됐다. session fixture가 `template0` fresh
+DB를 만들고 root credential을 URI-unreserved 길이로 교체하며, bootstrap과 preflight 파일을
+동시에 설치하도록 수정했다.
+
+glibc image는 baseline의 alpine PostGIS 3.5.6과 다른 3.5.2라 catalog receipt를 공유할 수
+없음을 확인했다. 해당 테스트는 baseline migration을 호출하지 않고 alias-map 최소 표면만
+생성해 실제 `COLLATE "C"` keyset·checksum을 검증한다. immutable catalog/seed sidecar의
+locale-sensitive ACL·text ordering은 `COLLATE "C"`로 고정하고 artifact/manifest hash를
+갱신했으며, alpine source receipt는 정본 `5d39…`를 유지했다. handoff 오류 문구 assertion도
+현재 보안 문구와 정합시켰다.
+
+- role-bootstrap 18개, fresh root/Alembic 3개, glibc alias 2개, handoff executable 27개,
+  관련 unit contract 86개 통과
+- Ruff와 `git diff --check` 통과
+- untracked `uv.lock`은 열람·수정·stage하지 않음
+
+사용자 결정에 따라 `300` 이후 기존 application row의 무결성 검증은 범위에서 제외한다.
+필요하면 새 schema에 원천 데이터를 재적재한다. immutable catalog/seed receipt는 데이터
+정합성 증명이 아니라 schema·role·ACL·extension·필수 고정 seed 및 operation replay 경계만
+확인하는 bootstrap 증명으로 유지한다.
+
 ## 2026-08-25 — T-VN-H46H fresh-root missing-receipt typed proof (Draft)
 
 fresh root migration이 DB transaction과 operation receipt를 커밋한 뒤 stdout 또는 host artifact만

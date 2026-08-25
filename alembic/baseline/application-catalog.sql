@@ -63,12 +63,12 @@ WITH extension_member AS (
         COALESCE(pg_catalog.pg_get_expr(default_row.adbin, default_row.adrelid), '') || ':' ||
         attribute.attstattarget::text || ':' ||
         COALESCE(
-            (SELECT string_agg(option, ',' ORDER BY option)
+            (SELECT string_agg(option, ',' ORDER BY option COLLATE "C")
              FROM unnest(attribute.attoptions) AS option),
             ''
         ) || ':' ||
         COALESCE(
-            (SELECT string_agg(option, ',' ORDER BY option)
+            (SELECT string_agg(option, ',' ORDER BY option COLLATE "C")
              FROM unnest(attribute.attfdwoptions) AS option),
             ''
         ) || ':' ||
@@ -161,7 +161,7 @@ WITH extension_member AS (
             relation.relowner::regrole::text,
             COALESCE(
                 (
-                    SELECT string_agg(entry::text, ',' ORDER BY entry::text)
+                    SELECT string_agg(entry::text, ',' ORDER BY entry::text COLLATE "C")
                     FROM unnest(relation.relacl) AS entry
                     WHERE entry::text <> ALL (
                         SELECT default_entry::text
@@ -185,19 +185,22 @@ WITH extension_member AS (
             relation.relpersistence,
             relation.relreplident,
             COALESCE(
-                (SELECT string_agg(option, ',' ORDER BY option)
+                (SELECT string_agg(option, ',' ORDER BY option COLLATE "C")
                  FROM unnest(relation.reloptions) AS option),
                 ''
             ),
             COALESCE(
-                (SELECT string_agg(option, ',' ORDER BY option)
+                (SELECT string_agg(option, ',' ORDER BY option COLLATE "C")
                  FROM pg_catalog.pg_class AS toast_relation
                  CROSS JOIN LATERAL unnest(toast_relation.reloptions) AS option
                  WHERE toast_relation.oid = relation.reltoastrelid),
                 ''
             ),
             COALESCE(
-                (SELECT string_agg(index_relation.relname, ',' ORDER BY index_relation.relname)
+                (SELECT string_agg(
+                    index_relation.relname,
+                    ',' ORDER BY index_relation.relname COLLATE "C"
+                )
                  FROM pg_catalog.pg_index AS index_link
                  JOIN pg_catalog.pg_class AS index_relation
                    ON index_relation.oid = index_link.indexrelid
@@ -227,7 +230,7 @@ WITH extension_member AS (
             COALESCE(relation.relacl::text, ''),
             relation.relpersistence,
             COALESCE(
-                (SELECT string_agg(option, ',' ORDER BY option)
+                (SELECT string_agg(option, ',' ORDER BY option COLLATE "C")
                  FROM unnest(relation.reloptions) AS option),
                 ''
             )
@@ -316,7 +319,7 @@ WITH extension_member AS (
         index_link.indislive::text || ':' ||
         index_link.indisreplident::text || ':' ||
         COALESCE(
-            (SELECT string_agg(option, ',' ORDER BY option)
+            (SELECT string_agg(option, ',' ORDER BY option COLLATE "C")
              FROM unnest(index_row.reloptions) AS option),
             ''
         ) || ':' ||
@@ -360,18 +363,18 @@ WITH extension_member AS (
                         CASE
                             WHEN privilege.grantee = 0 THEN 'public'
                             ELSE pg_catalog.pg_get_userbyid(privilege.grantee)
-                        END,
-                        pg_catalog.pg_get_userbyid(privilege.grantor),
-                        privilege.privilege_type,
+                        END COLLATE "C",
+                        pg_catalog.pg_get_userbyid(privilege.grantor) COLLATE "C",
+                        privilege.privilege_type COLLATE "C",
                         privilege.is_grantable
                     ),
                     ',' ORDER BY
                         CASE
                             WHEN privilege.grantee = 0 THEN 'public'
                             ELSE pg_catalog.pg_get_userbyid(privilege.grantee)
-                        END,
-                        pg_catalog.pg_get_userbyid(privilege.grantor),
-                        privilege.privilege_type,
+                        END COLLATE "C",
+                        pg_catalog.pg_get_userbyid(privilege.grantor) COLLATE "C",
+                        privilege.privilege_type COLLATE "C",
                         privilege.is_grantable
                 )
                 FROM aclexplode(
@@ -520,7 +523,7 @@ WITH extension_member AS (
                         CASE
                             WHEN policy_role.role_oid = 0 THEN 'public'
                             ELSE pg_catalog.pg_get_userbyid(policy_role.role_oid)
-                        END
+                        END COLLATE "C"
                 )
                 FROM unnest(policy.polroles) AS policy_role(role_oid)
             ),
@@ -552,9 +555,10 @@ WITH extension_member AS (
                         owner_namespace.nspname || '.' || owner_relation.relname || '.' ||
                         COALESCE(owner_attribute.attname, '<whole-relation>') || ':' ||
                         dependency.deptype::text,
-                        ',' ORDER BY owner_namespace.nspname, owner_relation.relname,
-                                   COALESCE(owner_attribute.attname, '<whole-relation>'),
-                                   dependency.deptype::text
+                        ',' ORDER BY owner_namespace.nspname COLLATE "C",
+                                   owner_relation.relname COLLATE "C",
+                                   COALESCE(owner_attribute.attname, '<whole-relation>') COLLATE "C",
+                                   dependency.deptype::text COLLATE "C"
                     )
                     FROM pg_catalog.pg_depend AS dependency
                     JOIN pg_catalog.pg_class AS owner_relation
@@ -586,7 +590,7 @@ WITH extension_member AS (
             relation_namespace.nspname || '.' || relation.relname,
             statistics.stxowner::regrole::text,
             COALESCE(
-                (SELECT string_agg(kind::text, ',' ORDER BY kind::text)
+                (SELECT string_agg(kind::text, ',' ORDER BY kind::text COLLATE "C")
                  FROM unnest(statistics.stxkind) AS kind),
                 ''
             ),
@@ -991,7 +995,7 @@ WITH extension_member AS (
             event_trigger.evtenabled,
             event_trigger.evtowner::regrole::text,
             COALESCE(
-                (SELECT string_agg(tag, ',' ORDER BY tag)
+                (SELECT string_agg(tag, ',' ORDER BY tag COLLATE "C")
                  FROM unnest(event_trigger.evttags) AS tag),
                 ''
             ),
@@ -1057,7 +1061,7 @@ WITH extension_member AS (
                 'force_row_security', relation.relforcerowsecurity,
                 'kind', relation.relkind::text,
                 'options', COALESCE((
-                    SELECT jsonb_agg(option ORDER BY option)
+                    SELECT jsonb_agg(option ORDER BY option COLLATE "C")
                     FROM unnest(relation.reloptions) AS option
                 ), '[]'::jsonb),
                 'owner', relation.relowner::regrole::text,
@@ -1087,7 +1091,7 @@ WITH extension_member AS (
                             )
                             ORDER BY privilege.grantor,
                                      privilege.grantee,
-                                     privilege.privilege_type,
+                                     privilege.privilege_type COLLATE "C",
                                      privilege.is_grantable
                         )
                         FROM aclexplode(type_row.typacl) AS privilege
@@ -1107,7 +1111,7 @@ WITH extension_member AS (
                                     )
                                     ORDER BY privilege.grantor,
                                              privilege.grantee,
-                                             privilege.privilege_type,
+                                             privilege.privilege_type COLLATE "C",
                                              privilege.is_grantable
                                 )
                                 FROM aclexplode(type_array.typacl) AS privilege
@@ -1190,7 +1194,7 @@ WITH extension_member AS (
                         ),
                         'dimensions', attribute.attndims,
                         'fdw_options', COALESCE((
-                            SELECT jsonb_agg(option ORDER BY option)
+                            SELECT jsonb_agg(option ORDER BY option COLLATE "C")
                             FROM unnest(attribute.attfdwoptions) AS option
                         ), '[]'::jsonb),
                         'generated', attribute.attgenerated::text,
@@ -1199,7 +1203,7 @@ WITH extension_member AS (
                         'not_null', attribute.attnotnull,
                         'number', attribute.attnum,
                         'options', COALESCE((
-                            SELECT jsonb_agg(option ORDER BY option)
+                            SELECT jsonb_agg(option ORDER BY option COLLATE "C")
                             FROM unnest(attribute.attoptions) AS option
                         ), '[]'::jsonb),
                         'statistics_target', attribute.attstattarget,
@@ -1261,7 +1265,7 @@ WITH extension_member AS (
                         'name', index_relation.relname,
                         'nulls_not_distinct', index_row.indnullsnotdistinct,
                         'options', COALESCE((
-                            SELECT jsonb_agg(option ORDER BY option)
+                            SELECT jsonb_agg(option ORDER BY option COLLATE "C")
                             FROM unnest(index_relation.reloptions) AS option
                         ), '[]'::jsonb),
                         'owner', index_relation.relowner::regrole::text,
@@ -1296,7 +1300,7 @@ WITH extension_member AS (
                             ''
                         ),
                         'roles', COALESCE((
-                            SELECT jsonb_agg(role.rolname ORDER BY role.rolname)
+                            SELECT jsonb_agg(role.rolname ORDER BY role.rolname COLLATE "C")
                             FROM unnest(policy.polroles) AS role_oid
                             JOIN pg_catalog.pg_roles AS role ON role.oid = role_oid
                         ), '[]'::jsonb),
@@ -1922,17 +1926,17 @@ WITH extension_member AS (
                     SELECT string_agg(
                         concat_ws(
                             '/',
-                            CASE WHEN privilege.grantee = 0 THEN 'public'
-                                 ELSE grantee.canonical_name END,
-                            grantor.canonical_name,
-                            privilege.privilege_type,
+                            (CASE WHEN privilege.grantee = 0 THEN 'public'
+                                  ELSE grantee.canonical_name END) COLLATE "C",
+                            grantor.canonical_name COLLATE "C",
+                            privilege.privilege_type COLLATE "C",
                             privilege.is_grantable
                         ),
                         ',' ORDER BY
-                            CASE WHEN privilege.grantee = 0 THEN 'public'
-                                 ELSE grantee.canonical_name END,
-                            grantor.canonical_name,
-                            privilege.privilege_type,
+                            (CASE WHEN privilege.grantee = 0 THEN 'public'
+                                  ELSE grantee.canonical_name END) COLLATE "C",
+                            grantor.canonical_name COLLATE "C",
+                            privilege.privilege_type COLLATE "C",
                             privilege.is_grantable
                     )
                     FROM aclexplode(relation.relacl) AS privilege
@@ -1949,7 +1953,7 @@ WITH extension_member AS (
                  ELSE COALESCE(tablespace.spcname, '<missing>') END,
             COALESCE(pg_catalog.pg_get_expr(relation.relpartbound, relation.oid, true), ''),
             COALESCE(
-                (SELECT string_agg(option, ',' ORDER BY option)
+                (SELECT string_agg(option, ',' ORDER BY option COLLATE "C")
                  FROM unnest(relation.reloptions) AS option),
                 ''
             ),
@@ -1983,17 +1987,17 @@ WITH extension_member AS (
                 SELECT string_agg(
                     concat_ws(
                         '/',
-                        CASE WHEN privilege.grantee = 0 THEN 'public'
-                             ELSE grantee.canonical_name END,
-                        grantor.canonical_name,
-                        privilege.privilege_type,
+                        (CASE WHEN privilege.grantee = 0 THEN 'public'
+                              ELSE grantee.canonical_name END) COLLATE "C",
+                        grantor.canonical_name COLLATE "C",
+                        privilege.privilege_type COLLATE "C",
                         privilege.is_grantable
                     ),
                     ',' ORDER BY
-                        CASE WHEN privilege.grantee = 0 THEN 'public'
-                             ELSE grantee.canonical_name END,
-                        grantor.canonical_name,
-                        privilege.privilege_type,
+                        (CASE WHEN privilege.grantee = 0 THEN 'public'
+                              ELSE grantee.canonical_name END) COLLATE "C",
+                        grantor.canonical_name COLLATE "C",
+                        privilege.privilege_type COLLATE "C",
                         privilege.is_grantable
                 )
                 FROM aclexplode(attribute.attacl) AS privilege
@@ -2004,9 +2008,9 @@ WITH extension_member AS (
         ) || ':' ||
         COALESCE(pg_catalog.pg_get_expr(default_row.adbin, default_row.adrelid), '') || ':' ||
         attribute.attstattarget::text || ':' ||
-        COALESCE((SELECT string_agg(option, ',' ORDER BY option)
+        COALESCE((SELECT string_agg(option, ',' ORDER BY option COLLATE "C")
                   FROM unnest(attribute.attoptions) AS option), '') || ':' ||
-        COALESCE((SELECT string_agg(option, ',' ORDER BY option)
+        COALESCE((SELECT string_agg(option, ',' ORDER BY option COLLATE "C")
                   FROM unnest(attribute.attfdwoptions) AS option), '') || ':' ||
         attribute.attstorage::text || ':' || COALESCE(attribute.attcompression::text, '')
     FROM extension_member AS member
@@ -2157,7 +2161,7 @@ WITH extension_member AS (
             index_link.indisready,
             index_link.indislive,
             index_link.indisreplident,
-            COALESCE((SELECT string_agg(option, ',' ORDER BY option)
+            COALESCE((SELECT string_agg(option, ',' ORDER BY option COLLATE "C")
                       FROM unnest(index_relation.reloptions) AS option), ''),
             pg_catalog.pg_get_indexdef(index_relation.oid)
         )
@@ -2208,17 +2212,17 @@ WITH extension_member AS (
                     SELECT string_agg(
                         concat_ws(
                             '/',
-                            CASE WHEN privilege.grantee = 0 THEN 'public'
-                                 ELSE grantee.canonical_name END,
-                            grantor.canonical_name,
-                            privilege.privilege_type,
+                            (CASE WHEN privilege.grantee = 0 THEN 'public'
+                                  ELSE grantee.canonical_name END) COLLATE "C",
+                            grantor.canonical_name COLLATE "C",
+                            privilege.privilege_type COLLATE "C",
                             privilege.is_grantable
                         ),
                         ',' ORDER BY
-                            CASE WHEN privilege.grantee = 0 THEN 'public'
-                                 ELSE grantee.canonical_name END,
-                            grantor.canonical_name,
-                            privilege.privilege_type,
+                            (CASE WHEN privilege.grantee = 0 THEN 'public'
+                                  ELSE grantee.canonical_name END) COLLATE "C",
+                            grantor.canonical_name COLLATE "C",
+                            privilege.privilege_type COLLATE "C",
                             privilege.is_grantable
                     )
                     FROM aclexplode(routine.proacl) AS privilege
@@ -2300,17 +2304,17 @@ WITH extension_member AS (
                     SELECT string_agg(
                         concat_ws(
                             '/',
-                            CASE WHEN privilege.grantee = 0 THEN 'public'
-                                 ELSE grantee.canonical_name END,
-                            grantor.canonical_name,
-                            privilege.privilege_type,
+                            (CASE WHEN privilege.grantee = 0 THEN 'public'
+                                  ELSE grantee.canonical_name END) COLLATE "C",
+                            grantor.canonical_name COLLATE "C",
+                            privilege.privilege_type COLLATE "C",
                             privilege.is_grantable
                         ),
                         ',' ORDER BY
-                            CASE WHEN privilege.grantee = 0 THEN 'public'
-                                 ELSE grantee.canonical_name END,
-                            grantor.canonical_name,
-                            privilege.privilege_type,
+                            (CASE WHEN privilege.grantee = 0 THEN 'public'
+                                  ELSE grantee.canonical_name END) COLLATE "C",
+                            grantor.canonical_name COLLATE "C",
+                            privilege.privilege_type COLLATE "C",
                             privilege.is_grantable
                     )
                     FROM aclexplode(type_row.typacl) AS privilege
@@ -2465,10 +2469,10 @@ WITH extension_member AS (
                             privilege.is_grantable
                         ),
                         ',' ORDER BY
-                            CASE WHEN privilege.grantee = 0 THEN 'public'
-                                 ELSE grantee.canonical_name END,
-                            grantor.canonical_name,
-                            privilege.privilege_type,
+                            (CASE WHEN privilege.grantee = 0 THEN 'public'
+                                  ELSE grantee.canonical_name END) COLLATE "C",
+                            grantor.canonical_name COLLATE "C",
+                            privilege.privilege_type COLLATE "C",
                             privilege.is_grantable
                     )
                     FROM aclexplode(language.lanacl) AS privilege
@@ -2520,10 +2524,10 @@ WITH extension_member AS (
                             privilege.is_grantable
                         ),
                         ',' ORDER BY
-                            CASE WHEN privilege.grantee = 0 THEN 'public'
-                                 ELSE grantee.canonical_name END,
-                            grantor.canonical_name,
-                            privilege.privilege_type,
+                            (CASE WHEN privilege.grantee = 0 THEN 'public'
+                                  ELSE grantee.canonical_name END) COLLATE "C",
+                            grantor.canonical_name COLLATE "C",
+                            privilege.privilege_type COLLATE "C",
                             privilege.is_grantable
                     )
                     FROM aclexplode(language.lanacl) AS privilege
@@ -2584,7 +2588,7 @@ WITH extension_member AS (
         namespace.nspowner::regrole::text || ':' ||
         COALESCE(
             (
-                SELECT string_agg(entry::text, ',' ORDER BY entry::text)
+                SELECT string_agg(entry::text, ',' ORDER BY entry::text COLLATE "C")
                 FROM unnest(namespace.nspacl) AS entry
             ),
             ''
@@ -2774,4 +2778,7 @@ WITH extension_member AS (
 )
 SELECT concat_ws(chr(31), kind, schema_name, object_name, definition) AS item
 FROM objects
-ORDER BY kind, schema_name, object_name, definition;
+ORDER BY kind COLLATE "C",
+         schema_name COLLATE "C",
+         object_name COLLATE "C",
+         definition COLLATE "C";

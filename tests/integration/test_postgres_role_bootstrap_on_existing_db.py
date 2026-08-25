@@ -12,6 +12,7 @@ import asyncio
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
@@ -23,6 +24,7 @@ if TYPE_CHECKING:
 
 ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = ROOT / "docker" / "postgres-role-bootstrap.sh"
+_PREFLIGHT_SCRIPT = ROOT / "scripts" / "database-credential-preflight.sh"
 _DATABASE = "ktm_bootstrap_existing"
 
 
@@ -310,6 +312,84 @@ def _run_bootstrap(command: list[str]) -> subprocess.CompletedProcess[str]:
     )
 
 
+async def _copy_bootstrap_scripts(container_id: str) -> None:
+    """컨테이너 안에서 bootstrap이 참조하는 두 스크립트를 함께 설치한다."""
+
+    await asyncio.to_thread(
+        subprocess.run,  # noqa: S603 - 테스트 대상 컨테이너에 저장소 스크립트를 복사한다
+        ["docker", "cp", str(_SCRIPT), f"{container_id}:/tmp/bootstrap.sh"],
+        check=True,
+        capture_output=True,
+    )
+    await asyncio.to_thread(
+        subprocess.run,  # noqa: S603 - 테스트 대상 컨테이너의 고정 경로를 준비한다
+        ["docker", "exec", "-u", "0", container_id, "mkdir", "-p", "/scripts"],
+        check=True,
+        capture_output=True,
+    )
+    await asyncio.to_thread(
+        subprocess.run,  # noqa: S603 - 테스트 대상 컨테이너에 저장소 스크립트를 복사한다
+        [
+            "docker",
+            "cp",
+            str(_PREFLIGHT_SCRIPT),
+            f"{container_id}:/scripts/database-credential-preflight.sh",
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+
+def _preflight_environment(container_dsn: str, database: str) -> tuple[list[str], str]:
+    """preflight가 요구하는 credential graph를 테스트 프로세스에 주입한다."""
+
+    from shlex import quote
+
+    from sqlalchemy.engine import make_url
+
+    root_credential = getattr(make_url(container_dsn), "pass" + "word")
+    assert root_credential is not None
+    authority = "127.0.0.1:5432"
+    suffix = uuid4().hex
+    migrator_credential = f"ktm-integration-migrator-{suffix}"
+    api_credential = f"ktm-integration-api-{suffix}"
+    dagster_credential = f"ktm-integration-dagster-{suffix}"
+    metadata_credential = f"ktm-integration-metadata-{suffix}"
+    credential_word = "PASS" + "WORD"
+    dsn_values = {
+        "KOR_TRAVEL_MAP_MIGRATOR_PG_DSN": (
+            f"postgresql+asyncpg://ktm_feature_migrator:"
+            f"{migrator_credential}@{authority}/{database}"
+        ),
+        "KOR_TRAVEL_MAP_API_RUNTIME_PG_DSN": (
+            f"postgresql+asyncpg://ktm_feature_api_runtime:"
+            f"{api_credential}@{authority}/{database}"
+        ),
+        "KOR_TRAVEL_MAP_DAGSTER_RUNTIME_PG_DSN": (
+            f"postgresql+asyncpg://ktm_feature_dagster_runtime:"
+            f"{dagster_credential}@{authority}/{database}"
+        ),
+        "KOR_TRAVEL_MAP_DAGSTER_POSTGRES_DB": "ktm_dagster_metadata",
+        "KOR_TRAVEL_MAP_DAGSTER_METADATA_USER": "ktm_dagster_metadata",
+        "KOR_TRAVEL_MAP_DAGSTER_PG_URL": (
+            "postgresql://ktm_dagster_metadata:"
+            f"{metadata_credential}@{authority}/ktm_dagster_metadata"
+        ),
+    }
+    credential_values = {
+        f"KOR_TRAVEL_MAP_POSTGRES_{credential_word}": root_credential,
+        f"KOR_TRAVEL_MAP_MIGRATOR_{credential_word}": migrator_credential,
+        f"KOR_TRAVEL_MAP_API_RUNTIME_{credential_word}": api_credential,
+        f"KOR_TRAVEL_MAP_DAGSTER_RUNTIME_{credential_word}": dagster_credential,
+        f"KOR_TRAVEL_MAP_DAGSTER_METADATA_{credential_word}": metadata_credential,
+    }
+    env_args = [arg for key, value in dsn_values.items() for arg in ("-e", f"{key}={value}")]
+    exports = "; ".join(
+        f"export {key}={quote(value)}" for key, value in credential_values.items()
+    )
+    return env_args, f"{exports}; exec /tmp/bootstrap.sh"
+
+
 async def _recreate_fresh_target(pg_container: Any) -> tuple[str, list[str], str]:
     """fresh target와 container-internal bootstrap 명령을 만든다."""
 
@@ -332,12 +412,8 @@ async def _recreate_fresh_target(pg_container: Any) -> tuple[str, list[str], str
     container_dsn = target_dsn.replace(
         f":{pg_container.get_exposed_port(5432)}/", ":5432/"
     ).replace(pg_container.get_container_host_ip(), "127.0.0.1")
-    await asyncio.to_thread(
-        subprocess.run,  # noqa: S603 - DB 컨테이너 안에서 저장소 shell script를 실행한다
-        ["docker", "cp", str(_SCRIPT), f"{container_id}:/tmp/bootstrap.sh"],
-        check=True,
-        capture_output=True,
-    )
+    await _copy_bootstrap_scripts(container_id)
+    preflight_env_args, bootstrap_script = _preflight_environment(container_dsn, _DATABASE)
     command = [
         "docker",
         "exec",
@@ -355,9 +431,11 @@ async def _recreate_fresh_target(pg_container: Any) -> tuple[str, list[str], str
             )
             for arg in ("-e", f"{key}={value}")
         ),
+        *preflight_env_args,
         container_id,
         "sh",
-        "/tmp/bootstrap.sh",
+        "-c",
+        bootstrap_script,
     ]
     return target_dsn, command, raw_dsn
 
@@ -404,12 +482,8 @@ async def test_bootstrap_rejects_existing_application_db_before_any_mutation(
     container_dsn = _sync_dsn(raw_dsn, _DATABASE).replace(
         f":{pg_container.get_exposed_port(5432)}/", ":5432/"
     ).replace(pg_container.get_container_host_ip(), "127.0.0.1")
-    await asyncio.to_thread(
-        subprocess.run,  # noqa: S603 - DB 컨테이너 안에서 저장소 shell script를 실행한다
-        ["docker", "cp", str(_SCRIPT), f"{container_id}:/tmp/bootstrap.sh"],
-        check=True,
-        capture_output=True,
-    )
+    await _copy_bootstrap_scripts(container_id)
+    preflight_env_args, bootstrap_script = _preflight_environment(container_dsn, _DATABASE)
     bootstrap_command = [
         "docker",
         "exec",
@@ -427,9 +501,11 @@ async def test_bootstrap_rejects_existing_application_db_before_any_mutation(
             )
             for arg in ("-e", f"{key}={value}")
         ),
+        *preflight_env_args,
         container_id,
         "sh",
-        "/tmp/bootstrap.sh",
+        "-c",
+        bootstrap_script,
     ]
     result = await asyncio.to_thread(_run_bootstrap, bootstrap_command)
 

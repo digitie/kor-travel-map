@@ -14,12 +14,10 @@ default collation ``en_US.utf8``)를 별도로 띄워:
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Final
 from uuid import uuid4
 
 import pytest
-from alembic.config import Config
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
 
@@ -40,7 +38,6 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.integration
 
-_ROOT: Final = Path(__file__).resolve().parents[2]
 _GLIBC_POSTGIS_IMAGE: Final = "postgis/postgis:16-3.5"
 
 # 리뷰 보고의 판별 세트 수준 — ASCII 대/소문자·기호·비-ASCII가 byte 순서와
@@ -56,13 +53,6 @@ _SEED_IDS: Final[tuple[str, ...]] = (
     "é-cafe-probe",
     "가나다-probe",
 )
-
-
-def _alembic_config(dsn: str) -> Config:
-    config = Config(str(_ROOT / "alembic.ini"))
-    config.set_main_option("script_location", str(_ROOT / "alembic"))
-    config.set_main_option("sqlalchemy.url", dsn)
-    return config
 
 
 @pytest.fixture(scope="module")
@@ -88,28 +78,39 @@ async def glibc_engine(glibc_pg_container: Any) -> AsyncIterator[AsyncEngine]:
     admin_engine = make_async_engine(admin_dsn)
     async with admin_engine.connect() as connection:
         autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
-        await autocommit.execute(text(f'CREATE DATABASE "{database}"'))
+        # 이 축은 immutable 300/PostGIS receipt가 아니라 alias SQL의 collation
+        # 판별만 검증한다. glibc image는 alpine baseline과 PostGIS patch level이
+        # 다를 수 있으므로 전체 baseline을 끌어오지 않고 최소 격리 표면만 만든다.
+        await autocommit.execute(text(f'CREATE DATABASE "{database}" TEMPLATE template0'))
     await admin_engine.dispose()
-
-    # 이 모듈은 collation 판별을 위해 glibc 컨테이너에 자기 DB를 만든다. final
-    # `300` bootstrap → migrator 자격 upgrade까지 production과 같은 경로로 적용한다.
-    # collation 검증 축(alias 정렬)은 이 변경과 무관하며 그대로다.
-    from tests.integration._application_300_bootstrap import (
-        upgrade_head_with_application_300_bootstrap,
-    )
-
-    await upgrade_head_with_application_300_bootstrap(_alembic_config(dsn), dsn)
 
     engine = make_async_engine(dsn)
     try:
         async with engine.begin() as connection:
+            await connection.execute(text("CREATE SCHEMA feature"))
+            await connection.execute(
+                text(
+                    "CREATE TABLE feature.feature_aliases ("
+                    "alias text PRIMARY KEY, "
+                    "feature_uuid uuid NOT NULL, "
+                    "alias_kind text NOT NULL"
+                    ")"
+                )
+            )
+        import uuid
+
+        async with engine.begin() as connection:
             for feature_id in _SEED_IDS:
                 await connection.execute(
                     text(
-                        "INSERT INTO feature.features (feature_id, kind, name, category) "
-                        "VALUES (:fid, 'place', :name, '01070100')"
+                        "INSERT INTO feature.feature_aliases "
+                        "(alias, feature_uuid, alias_kind) "
+                        "VALUES (:alias, :feature_uuid, 'legacy_feature_id')"
                     ),
-                    {"fid": feature_id, "name": f"glibc-{feature_id[:16]}"},
+                    {
+                        "alias": feature_id,
+                        "feature_uuid": str(uuid.uuid5(uuid.NAMESPACE_URL, feature_id)),
+                    },
                 )
         yield engine
     finally:
@@ -180,16 +181,13 @@ async def test_keyset_pages_and_checksum_follow_byte_order_on_glibc(
         checksum = await compute_feature_alias_map_checksum(connection)  # type: ignore[arg-type]
 
     assert collected == expected_order
-    # 0083 이후 저장 uuid는 비파생 v7이라 파생 재계산으로 기대값을 만들 수 없다 —
-    # 정본(features) 저장값을 읽어 재계산한다(collation 검증 축은 무변경).
+    # 최소 격리 표면의 저장 uuid를 읽어 merkle root를 재계산한다.
     async with glibc_engine.connect() as connection:
         stored = (
             await connection.execute(
                 text(
-                    "SELECT a.alias AS alias, a.alias_kind AS alias_kind, "
-                    "       CAST(f.feature_uuid AS text) AS feature_uuid "
-                    "FROM feature.feature_aliases AS a "
-                    "JOIN feature.features AS f ON f.feature_id = a.feature_id"
+                    "SELECT alias, alias_kind, CAST(feature_uuid AS text) AS feature_uuid "
+                    "FROM feature.feature_aliases"
                 )
             )
         ).mappings().all()

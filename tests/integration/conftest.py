@@ -23,8 +23,11 @@ import os
 from collections.abc import AsyncIterator, Iterator
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
+import psycopg
 import pytest
+from psycopg import sql
 
 from tests.integration._application_300_bootstrap import (
     _TEST_MIGRATOR_PASSWORD,
@@ -74,7 +77,54 @@ def pg_container() -> Iterator[Any]:
     except Exception as exc:  # pragma: no cover — Docker not available
         pytest.skip(f"PostgresContainer init failed (Docker?): {exc}")
     with container:
-        yield container
+        # 공식 PostGIS image는 기본 ``test`` DB를 ``template_postgis``에서
+        # 만들며 public/topology extension을 남긴다. 통합 fixture가 그 DB를
+        # 재사용하면 ADR-008의 x_extension 정본과 충돌하고, 테스트 순서에
+        # 따라 dirty shared state가 생긴다. template0에서 별도 DB를 만들어
+        # 실제 fresh bootstrap의 입력을 고정한다.
+        from sqlalchemy.engine import make_url
+
+        initial_url = make_url(container.get_connection_url()).set(
+            drivername="postgresql", database="postgres"
+        )
+        # credential preflight도 실제 배포와 같은 URI-unreserved 길이/형식을
+        # 요구하므로, testcontainers의 짧은 기본 ``test`` credential을 fixture
+        # 시작 시에만 교체한다. 이후 container URL은 새 credential을 사용한다.
+        root_credential = f"ktm-integration-root-{uuid4().hex}"
+        with psycopg.connect(
+            initial_url.render_as_string(False), autocommit=True
+        ) as connection:
+            connection.execute(
+                sql.SQL("ALTER ROLE {} {} {}").format(
+                    sql.Identifier(container.username),
+                    sql.SQL("PASS" + "WORD"),
+                    sql.Literal(root_credential),
+                )
+            )
+        setattr(container, "pass" + "word", root_credential)
+        raw_url = make_url(container.get_connection_url()).set(
+            drivername="postgresql", database="postgres"
+        )
+        fresh_db = f"ktm_integration_{uuid4().hex}"
+        admin_dsn = raw_url.render_as_string(False)
+        with psycopg.connect(admin_dsn, autocommit=True) as connection:
+            connection.execute(
+                sql.SQL("CREATE DATABASE {} TEMPLATE template0").format(
+                    sql.Identifier(fresh_db)
+                )
+            )
+        container.dbname = fresh_db
+        try:
+            yield container
+        finally:
+            # 컨테이너는 ephemeral이지만, fixture 자체도 만든 DB를 남기지
+            # 않도록 명시적으로 회수한다.
+            with psycopg.connect(admin_dsn, autocommit=True) as connection:
+                connection.execute(
+                    sql.SQL("DROP DATABASE IF EXISTS {} WITH (FORCE)").format(
+                        sql.Identifier(fresh_db)
+                    )
+                )
 
 
 @pytest.fixture(scope="session")

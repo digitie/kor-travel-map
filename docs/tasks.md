@@ -73,7 +73,11 @@ barrier로 직렬화한다.
   candidate/journal/outbox 경로·n150 exact candidate 배포·로그인 POST를 포함한
   live UI E2E·cleanup residue 0·redacted evidence다. 이 task는 Map PR이 실제 병합된
   뒤에만 `tasks-done.md`로 이관하며, 데이터 재적재와 M01~M05의 독립 live 잔여를
-  완료 처리하지 않는다. 설계 정본은
+  완료 처리하지 않는다. `300` cutover 뒤 기존 application row의 데이터 무결성 검증은
+  완료 조건에 포함하지 않으며, 필요하면 새 schema에 원천 데이터를 처음부터 재적재한다.
+  이때 immutable catalog/seed receipt는 row 데이터의 정합성 증명이 아니라 fresh DB의
+  schema·role·ACL·extension과 필수 고정 seed 계약 및 operation replay 경계를 확인하는
+  bootstrap 증명으로만 유지한다. 설계 정본은
   [`docs/reports/t-vn-h46h-alembic-300-baseline-design-2026-08-24.md`](reports/t-vn-h46h-alembic-300-baseline-design-2026-08-24.md)다.
 
 ## 공통 규율 (2026-07-28 개정)

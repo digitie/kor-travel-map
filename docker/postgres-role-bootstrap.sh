@@ -146,7 +146,7 @@ BEGIN
           AND namespace.nspowner = 'pg_database_owner'::regrole
           AND (
               SELECT COALESCE(
-                  array_agg(entry::text ORDER BY entry::text),
+                  array_agg(entry::text ORDER BY entry::text COLLATE "C"),
                   ARRAY[]::text[]
               )
               FROM unnest(namespace.nspacl) AS entry
@@ -243,6 +243,14 @@ BEGIN
             USING ERRCODE = '55000';
     END IF;
 
+    -- role RESET으로 지워지지 않는 default ACL은 reserved role inventory와 무관하게
+    -- fresh input이 아니다. 어느 role/credential/schema mutation보다 먼저 거부한다.
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_default_acl) THEN
+        RAISE EXCEPTION
+            'baseline-300 bootstrap requires a fresh DB; default privileges exist'
+            USING ERRCODE = '55000';
+    END IF;
+
     -- baseline root는 reserved application role inventory를 exact하게 닫는다. cluster에
     -- 이미 final 21개가 있는 dedicated test/development topology는 재사용할 수 있지만,
     -- partial set 또는 unlisted `ktm_*` NOLOGIN/LOGIN/superuser principal은 repair 대상이
@@ -288,12 +296,6 @@ BEGIN
     ) THEN
         RAISE EXCEPTION
             'baseline-300 bootstrap requires an exact reserved application role inventory'
-            USING ERRCODE = '55000';
-    END IF;
-
-    IF EXISTS (SELECT 1 FROM pg_catalog.pg_default_acl) THEN
-        RAISE EXCEPTION
-            'baseline-300 bootstrap requires a fresh DB; default privileges exist'
             USING ERRCODE = '55000';
     END IF;
 

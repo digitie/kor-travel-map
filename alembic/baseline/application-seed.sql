@@ -18,4 +18,4 @@ FROM (
         (to_jsonb(row) - ARRAY['created_at', 'updated_at'])::text AS row_json
     FROM ops.feature_override_field_paths AS row
 ) AS seed_rows
-ORDER BY table_name, row_json;
+ORDER BY table_name COLLATE "C", row_json COLLATE "C";

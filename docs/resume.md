@@ -1,5 +1,27 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-25 — T-VN-H46H PostGIS 통합 fixture·locale 계약 정렬 (Draft)
+
+PR #1064 PostGIS 게이트의 실제 실패를 fixture/environment로 숨기지 않고 고쳤다. 공식 PostGIS
+image가 만든 `test` DB 대신 `template0` 기반 session DB를 사용하고, testcontainers 기본
+superuser credential을 credential-preflight 길이·형식 계약에 맞춘 뒤 bootstrap 스크립트와
+`database-credential-preflight.sh`를 함께 주입한다. fresh root/role-bootstrap의 ACL·catalog·seed
+정렬은 `COLLATE "C"`로 고정하고 변경된 sidecar/manifest digest를 동기화했다. 다른 PostGIS
+patch level의 glibc 이미지는 immutable 300 receipt를 검증하지 않고 alias-map 최소 표면만
+검증하도록 분리했다.
+
+role-bootstrap `18 passed`, fresh-300/Alembic `3 passed`, glibc alias `2 passed`, handoff
+executable `27 passed`, 관련 unit contract `86 passed`, Ruff와 `git diff --check`를 통과했다.
+
+이번 cutover는 기존 application row의 데이터 무결성을 검증하는 작업이 아니다. 필요하면
+새 `300` schema에 원천 데이터를 처음부터 재적재한다. immutable catalog/seed receipt는
+schema·role·ACL·extension·필수 고정 seed와 operation replay의 bootstrap 계약만 확인한다.
+
+### 이 PR의 다음 한 작업
+
+변경을 보안 감사 후 원격에 커밋·푸시하고, Map/Manager SHA exact pair를 두 전문 적대 리뷰어에게
+재검토시킨다. PR #1064 PostGIS CI가 green인지 확인한 뒤에만 Draft 해제·머지를 진행한다.
+
 ## 2026-08-25 — T-VN-H46H fresh-root 응답 유실 재실행 경계 보강 (Draft)
 
 fresh root가 operation receipt까지 커밋했지만 응답만 유실된 뒤 recover가 일시 실패하는 경우를

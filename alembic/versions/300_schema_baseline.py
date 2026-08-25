@@ -647,7 +647,7 @@ BEGIN
           AND namespace.nspowner = 'pg_database_owner'::regrole
           AND (
               SELECT COALESCE(
-                  array_agg(entry::text ORDER BY entry::text),
+                  array_agg(entry::text ORDER BY entry::text COLLATE "C"),
                   ARRAY[]::text[]
               )
               FROM unnest(namespace.nspacl) AS entry

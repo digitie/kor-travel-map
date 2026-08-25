@@ -208,7 +208,7 @@ async def application_300_config(
 
     raw_dsn = pg_container.get_connection_url()  # type: ignore[attr-defined]
     database = f"application_300_executable_{uuid4().hex}"
-    await _admin_execute(raw_dsn, f'CREATE DATABASE "{database}"')
+    await _admin_execute(raw_dsn, f'CREATE DATABASE "{database}" TEMPLATE template0')
     admin_dsn = normalize_async_dsn(_with_database(raw_dsn, database))
     config = Config(str(_ROOT / "alembic.ini"))
     config.set_main_option("script_location", str(_ROOT / "alembic"))
@@ -431,7 +431,7 @@ async def test_handoff_rejects_superuser_even_with_a_valid_manager_receipt(
         ]
     ) == 1
     assert await _raw_version(admin_dsn) == (_HANDOFF_SOURCE,)
-    assert "must connect as ktm_feature_migrator" in capsys.readouterr().err
+    assert "exact non-superuser ktm_feature_migrator session" in capsys.readouterr().err
 
 
 @pytest.mark.asyncio
