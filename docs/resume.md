@@ -1,5 +1,21 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-25 — T-VN-H46H finalize 응답 유실 재실행 증명 checkpoint (Draft)
+
+application fresh finalize의 응답 유실 뒤 단순 실패 문자열이나 raw `300` head만 보고 새 fence로
+재실행하던 경계를 제거했다. 새 `probe-missing`은 같은 PostgreSQL advisory lock 뒤의 read-only
+snapshot에서 finalize receipt 부재, prior root receipt의 operation·fence·journal·DB identity,
+candidate commit/image, source catalog·seed·Alembic facet을 모두 exact 대조하고 typed
+`receipt-missing-exact-prestate`만 반환한다. Manager는 이 증명을 strict parse·plan 결박한 경우에만
+fence를 갱신하고 finalize를 재실행하도록 결선 중이다. 실제 PostgreSQL finalize 통합 회귀와 관련
+unit·Ruff를 통과했으며 PR #1064는 계속 Draft다.
+
+### 이 PR의 다음 한 작업
+
+Dagster storage의 부분 초기화·receipt 없는 final-head 오인과 session lock 공백을 제거하고,
+runtime autocreate를 닫은 뒤 full catalog/required migration postcondition을 receipt에 결박한다.
+이후 새 Map SHA로 Manager pinset을 회전하고 전문 적대 리뷰 두 건의 P0/P1=0을 확인한다.
+
 ## 2026-08-25 — T-VN-H46H DB-atomic operation receipt·CI 환경 격리 checkpoint (Draft)
 
 PR #1065 merge 위 rebase와 CI fixture 보정을 완료했고, API-only partial paired candidate는

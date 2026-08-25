@@ -1,5 +1,23 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-25 — T-VN-H46H finalize missing-receipt typed proof (Draft)
+
+적대 리뷰에서 finalize container가 DB commit 뒤 응답만 유실했는데 `recover`가 일시 실패하면,
+Manager가 raw `300` head만 보고 만료 fence를 새 fence로 바꿔 영구적인 receipt/journal 불일치를
+만들 수 있는 P1을 확인했다. Map one-shot에 read-only `probe-missing --operation-id`를 추가했다.
+probe는 finalize와 같은 advisory lock 뒤에서 기존 finalize receipt가 없음을 확인하고, prior root
+receipt의 canonical payload와 operation·writer fence·journal·database identity, 고정 candidate와
+PostgreSQL image, source catalog·seed·Alembic facet이 모두 일치할 때만 typed
+`receipt-missing-exact-prestate` 결과를 반환한다. 만료 fence는 이 read-only 판정에만 허용한다.
+
+- 실제 PostgreSQL finalize/probe/recovery 통합 회귀: `1 passed`
+- probe parser/runtime permit unit 및 변경 파일 Ruff: 통과
+- 범위 밖 untracked `uv.lock`: 열람·수정·stage하지 않음
+
+Manager 쪽 strict parser와 recover-failure 결선, 외부 prerequisite 선행 gate의 unit 회귀도 통과했지만
+Map의 Dagster 부분복구 P1을 먼저 해결한 최종 SHA로 pinset을 회전하기 위해 아직 별도 커밋하지
+않았다. PR #1064와 Manager PR #197은 Draft를 유지한다.
+
 ## 2026-08-25 — T-VN-H46H application `300` crash-resume outbox 보강 (Draft)
 
 PR #1065 merge `af719112` 위로 PR #1064의 19개 커밋을 rebase하고, Dagster storage

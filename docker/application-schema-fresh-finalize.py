@@ -52,7 +52,12 @@ _COMMIT_PATTERN: Final = re.compile(r"^[0-9a-f]{40}$")
 _DATABASE_PATTERN: Final = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,62}$")
 _OPERATION_RECEIPT_TABLE: Final = "ops.application_schema_operation_receipts"
 _OPERATION_KIND: Final = "application-finalize-300"
+_ROOT_OPERATION_KIND: Final = "application-root-300"
+_ROOT_RESULT_SCHEMA: Final = "kor-travel-map.application-fresh-300-root.v2"
 _RESULT_SCHEMA: Final = "kor-travel-map.application-fresh-300-finalize.v4"
+_MISSING_RECEIPT_SCHEMA: Final = (
+    "kor-travel-map.application-fresh-300-finalize-missing-receipt.v1"
+)
 _OPERATION_LOCK_KEY: Final = "kor-travel-map:application-schema-300-operation"
 _FENCE_FIELDS: Final = frozenset(
     {
@@ -117,7 +122,14 @@ def _parse_args(arguments: Sequence[str] | None) -> tuple[str, UUID | None]:
             return "recover", UUID(values[2])
         except ValueError as exc:
             raise FreshFinalizeError("fresh finalize recovery operation id is invalid") from exc
-    raise FreshFinalizeError("only the fixed fresh-300 finalize/recover operation is accepted")
+    if len(values) == 3 and values[:2] == ["probe-missing", "--operation-id"]:
+        try:
+            return "probe-missing", UUID(values[2])
+        except ValueError as exc:
+            raise FreshFinalizeError("fresh finalize probe operation id is invalid") from exc
+    raise FreshFinalizeError(
+        "only the fixed fresh-300 finalize/recover/probe operation is accepted"
+    )
 
 
 def _require_sha256(value: object, label: str) -> str:
@@ -126,7 +138,9 @@ def _require_sha256(value: object, label: str) -> str:
     return value
 
 
-def _require_fixed_fence() -> tuple[Mapping[str, Any], str]:
+def _require_fixed_fence(
+    *, allow_expired_for_read_only_probe: bool = False
+) -> tuple[Mapping[str, Any], str]:
     """host root가 publish한 fixed read-only fence만 source한다."""
 
     try:
@@ -232,7 +246,10 @@ def _require_fixed_fence() -> tuple[Mapping[str, Any], str]:
         expires_at = datetime.fromisoformat(str(value["writer_fence_expires_at"]))
     except ValueError as exc:
         raise FreshFinalizeError("fresh finalize writer fence expiry is invalid") from exc
-    if expires_at.tzinfo is None or expires_at.astimezone(UTC) <= datetime.now(UTC):
+    if expires_at.tzinfo is None or (
+        not allow_expired_for_read_only_probe
+        and expires_at.astimezone(UTC) <= datetime.now(UTC)
+    ):
         raise FreshFinalizeError("fresh finalize writer fence has expired")
     return value, hashlib.sha256(raw).hexdigest()
 
@@ -461,6 +478,15 @@ async def _insert_operation_receipt(
 async def _read_operation_receipt(
     connection: AsyncConnection, operation_id: UUID
 ) -> Mapping[str, Any]:
+    row = await _find_operation_receipt(connection, operation_id)
+    if row is None:
+        raise FreshFinalizeError("fresh finalize operation receipt does not exist")
+    return row
+
+
+async def _find_operation_receipt(
+    connection: AsyncConnection, operation_id: UUID
+) -> Mapping[str, Any] | None:
     try:
         row = (
             await connection.execute(
@@ -477,9 +503,32 @@ async def _read_operation_receipt(
         ).mappings().one_or_none()
     except Exception as exc:
         raise FreshFinalizeError("fresh finalize operation receipt is unavailable") from exc
-    if row is None:
-        raise FreshFinalizeError("fresh finalize operation receipt does not exist")
     return row
+
+
+def _verify_fence_candidate(
+    fence: Mapping[str, Any], expected: Mapping[str, str]
+) -> None:
+    if (
+        os.environ.get(_IMAGE_REVISION_ENV) != fence["map_candidate_commit"]
+        or os.environ.get(_IMAGE_ID_ENV) != fence["map_candidate_image_id"]
+        or fence["postgres_image_id"] != expected["postgres_image_id"]
+        or fence["reference_manifest_sha256"]
+        != expected["reference_manifest_sha256"]
+        or fence["source_catalog_sha256"] != expected["source_catalog_sha256"]
+        or fence["destination_catalog_sha256"]
+        != expected["destination_catalog_sha256"]
+        or fence["seed_sha256"] != expected["seed_sha256"]
+        or fence["privileged_residue_sha256"]
+        != expected["privileged_residue_sha256"]
+        or fence["pre_privileged_residue_sha256"]
+        != expected["privileged_residue_sha256"]
+        or fence["destination_alembic_version_sha256"]
+        != expected["destination_alembic_version_sha256"]
+        or fence["runtime_invariants_sql_sha256"]
+        != expected["runtime_invariants_sql_sha256"]
+    ):
+        raise FreshFinalizeError("fresh finalize fence does not match candidate baseline")
 
 
 async def _finalize() -> Mapping[str, Any]:
@@ -490,23 +539,7 @@ async def _finalize() -> Mapping[str, Any]:
         raise FreshFinalizeError(f"{_MIGRATOR_DSN_ENV} is required")
     fence, fence_sha256 = _require_fixed_fence()
     expected = _static_contract()
-    if (
-        os.environ.get(_IMAGE_REVISION_ENV) != fence["map_candidate_commit"]
-        or os.environ.get(_IMAGE_ID_ENV) != fence["map_candidate_image_id"]
-        or fence["postgres_image_id"] != expected["postgres_image_id"]
-        or fence["reference_manifest_sha256"] != expected["reference_manifest_sha256"]
-        or fence["source_catalog_sha256"] != expected["source_catalog_sha256"]
-        or fence["destination_catalog_sha256"]
-        != expected["destination_catalog_sha256"]
-        or fence["seed_sha256"] != expected["seed_sha256"]
-        or fence["privileged_residue_sha256"] != expected["privileged_residue_sha256"]
-        or fence["pre_privileged_residue_sha256"] != expected["privileged_residue_sha256"]
-        or fence["destination_alembic_version_sha256"]
-        != expected["destination_alembic_version_sha256"]
-        or fence["runtime_invariants_sql_sha256"]
-        != expected["runtime_invariants_sql_sha256"]
-    ):
-        raise FreshFinalizeError("fresh finalize fence does not match candidate baseline")
+    _verify_fence_candidate(fence, expected)
     engine = make_async_engine(dsn, pool_size=1)
     try:
         async with engine.begin() as connection:
@@ -689,14 +722,117 @@ async def _recover(operation_id: UUID) -> Mapping[str, Any]:
         await engine.dispose()
 
 
+async def _probe_missing(operation_id: UUID) -> Mapping[str, Any]:
+    """finalize 재실행이 안전한 exact source pre-state만 typed evidence로 돌려준다."""
+
+    if os.environ.get(_BOOTSTRAP_DSN_ENV):
+        raise FreshFinalizeError("bootstrap-superuser DSN must not enter fresh probe")
+    dsn = os.environ.get(_MIGRATOR_DSN_ENV)
+    if not dsn:
+        raise FreshFinalizeError(f"{_MIGRATOR_DSN_ENV} is required")
+    fence, _ = _require_fixed_fence(allow_expired_for_read_only_probe=True)
+    expected = _static_contract()
+    _verify_fence_candidate(fence, expected)
+    if str(operation_id) != fence["operation_id"]:
+        raise FreshFinalizeError("fresh finalize probe operation does not match fence")
+
+    engine = make_async_engine(dsn, pool_size=1)
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text("SET TRANSACTION READ ONLY"))
+            await _assert_restricted_migrator_and_database(connection, fence)
+            # 응답 유실로 이전 container가 아직 transaction을 끝내는 중이어도 같은
+            # advisory lock 뒤의 한 snapshot에서 committed/rolled-back 상태를 판정한다.
+            await _acquire_operation_lock(connection)
+            await connection.execute(text(f"SET ROLE {_DATABASE_OWNER}"))
+            if await _find_operation_receipt(connection, operation_id) is not None:
+                raise FreshFinalizeError(
+                    "fresh finalize probe found an existing operation receipt"
+                )
+
+            prior_operation_id = UUID(
+                str(fence["prior_fresh_migration_operation_id"])
+            )
+            prior = await _read_operation_receipt(connection, prior_operation_id)
+            prior_payload = prior["result_payload"]
+            if not isinstance(prior_payload, Mapping):
+                raise FreshFinalizeError("fresh finalize prior receipt payload is invalid")
+            prior_canonical = _canonical_result_bytes(prior_payload)
+            live_identity = {
+                "database_name": fence["database_name"],
+                "database_oid": fence["database_oid"],
+                "database_owner": fence["database_owner"],
+                "postgres_system_identifier": fence["postgres_system_identifier"],
+            }
+            expected_prior_columns = {
+                "operation_id": str(prior_operation_id),
+                "operation": _ROOT_OPERATION_KIND,
+                "result_schema": _ROOT_RESULT_SCHEMA,
+                "result_sha256": fence["prior_fresh_migration_result_sha256"],
+                "map_candidate_commit": fence["map_candidate_commit"],
+                "map_candidate_image_id": fence["map_candidate_image_id"],
+                "postgres_image_id": expected["postgres_image_id"],
+                "destination_head": _DESTINATION_HEAD,
+                **live_identity,
+            }
+            if (
+                hashlib.sha256(prior_canonical).hexdigest()
+                != fence["prior_fresh_migration_result_sha256"]
+                or any(
+                    str(prior[key]) != str(value)
+                    for key, value in expected_prior_columns.items()
+                )
+                or prior_payload.get("operation_id") != str(prior_operation_id)
+                or prior_payload.get("writer_fence_receipt_sha256")
+                != fence["prior_fresh_migration_fence_sha256"]
+                or prior_payload.get("writer_fence_transaction_id")
+                != fence["prior_fresh_migration_transaction_id"]
+                or prior_payload.get("journal_sha256")
+                != fence["prior_fresh_migration_journal_sha256"]
+                or prior_payload.get("journal_generation")
+                != fence["prior_fresh_migration_generation"]
+                or prior_payload.get("database_identity") != live_identity
+            ):
+                raise FreshFinalizeError("fresh finalize prior receipt binding is invalid")
+
+            catalog, seed, destination_facet = await _assert_raw_300_and_receipts(
+                connection,
+                expected,
+                expected_catalog_sha256=expected["source_catalog_sha256"],
+            )
+            return {
+                "schema": _MISSING_RECEIPT_SCHEMA,
+                "outcome": "receipt-missing-exact-prestate",
+                "operation_id": str(operation_id),
+                "prior_fresh_migration_operation_id": str(prior_operation_id),
+                "prior_fresh_migration_result_sha256": prior[
+                    "result_sha256"
+                ],
+                "destination_head": _DESTINATION_HEAD,
+                "map_candidate_commit": fence["map_candidate_commit"],
+                "map_candidate_image_id": fence["map_candidate_image_id"],
+                "postgres_image_id": expected["postgres_image_id"],
+                "reference_manifest_sha256": expected[
+                    "reference_manifest_sha256"
+                ],
+                "database_identity": live_identity,
+                "pre_source_catalog_sha256": catalog,
+                "pre_seed_sha256": seed,
+                "pre_destination_alembic_version_sha256": destination_facet,
+            }
+    finally:
+        await engine.dispose()
+
+
 async def async_main(arguments: Sequence[str] | None = None) -> int:
     try:
         operation, operation_id = _parse_args(arguments)
-        result = (
-            await _finalize()
-            if operation == "finalize"
-            else await _recover(operation_id)  # type: ignore[arg-type]
-        )
+        if operation == "finalize":
+            result = await _finalize()
+        elif operation == "recover":
+            result = await _recover(operation_id)  # type: ignore[arg-type]
+        else:
+            result = await _probe_missing(operation_id)  # type: ignore[arg-type]
     except FreshFinalizeError as exc:
         print(f"fresh application 300 finalize refused: {exc}", file=sys.stderr)
         return 1

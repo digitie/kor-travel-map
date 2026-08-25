@@ -78,7 +78,7 @@ async def _write_fence(
     admin_dsn: str,
     path: Path,
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+) -> dict[str, object]:
     """Manager가 finalizer에 mount할 minimal fixed fence를 disposable test로 만든다."""
 
     from kortravelmap.infra.db import make_async_engine
@@ -144,6 +144,104 @@ async def _write_fence(
     monkeypatch.setenv(
         "KOR_TRAVEL_MAP_APPLICATION_FRESH_FINALIZE_IMAGE_ID", "sha256:" + "b" * 64
     )
+    return payload
+
+
+async def _insert_prior_root_receipt(
+    module: ModuleType,
+    admin_dsn: str,
+    fence: dict[str, object],
+) -> None:
+    """production root one-shot이 남기는 append-only row를 fixture에도 결박한다."""
+
+    from kortravelmap.infra.db import make_async_engine
+
+    database_identity = {
+        "database_name": fence["database_name"],
+        "database_oid": fence["database_oid"],
+        "database_owner": fence["database_owner"],
+        "postgres_system_identifier": fence["postgres_system_identifier"],
+    }
+    payload = {
+        "schema": "kor-travel-map.application-fresh-300-root.v2",
+        "outcome": "root-committed",
+        "authorization": "manager-fence",
+        "operation_id": fence["prior_fresh_migration_operation_id"],
+        "destination_head": "300",
+        "map_candidate_commit": fence["map_candidate_commit"],
+        "map_candidate_image_id": fence["map_candidate_image_id"],
+        "postgres_image_id": fence["postgres_image_id"],
+        "reference_manifest_sha256": fence["reference_manifest_sha256"],
+        "writer_fence_receipt_sha256": fence[
+            "prior_fresh_migration_fence_sha256"
+        ],
+        "writer_fence_transaction_id": fence[
+            "prior_fresh_migration_transaction_id"
+        ],
+        "journal_sha256": fence["prior_fresh_migration_journal_sha256"],
+        "journal_generation": fence["prior_fresh_migration_generation"],
+        "database_identity": database_identity,
+        "post_source_catalog_sha256": fence["source_catalog_sha256"],
+        "post_seed_sha256": fence["seed_sha256"],
+        "expected_privileged_residue_sha256": fence[
+            "privileged_residue_sha256"
+        ],
+        "expected_destination_alembic_version_sha256": fence[
+            "destination_alembic_version_sha256"
+        ],
+        "post_destination_alembic_version_sha256": fence[
+            "destination_alembic_version_sha256"
+        ],
+    }
+    canonical = module._canonical_result_bytes(payload)
+    result_sha256 = module.hashlib.sha256(canonical).hexdigest()
+    fence["prior_fresh_migration_result_sha256"] = result_sha256
+    await asyncio.to_thread(
+        module._FENCE_PATH.write_text,
+        json.dumps(fence, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    await asyncio.to_thread(module._FENCE_PATH.chmod, 0o600)
+    engine = make_async_engine(admin_dsn, pool_size=1)
+    try:
+        async with engine.begin() as connection:
+            await connection.execute(
+                text(
+                    "INSERT INTO ops.application_schema_operation_receipts ("
+                    "operation_id, operation, result_schema, result_sha256, "
+                    "map_candidate_commit, map_candidate_image_id, postgres_image_id, "
+                    "writer_fence_receipt_sha256, journal_sha256, journal_generation, "
+                    "destination_head, database_name, database_oid, database_owner, "
+                    "postgres_system_identifier, result_payload) VALUES ("
+                    "CAST(:operation_id AS uuid), 'application-root-300', "
+                    "'kor-travel-map.application-fresh-300-root.v2', :result_sha256, "
+                    ":map_commit, :map_image, :postgres_image, :fence_sha256, "
+                    ":journal_sha256, :journal_generation, '300', :database_name, "
+                    ":database_oid, :database_owner, :system_identifier, "
+                    "CAST(:result_payload AS jsonb))"
+                ),
+                {
+                    "operation_id": fence["prior_fresh_migration_operation_id"],
+                    "result_sha256": result_sha256,
+                    "map_commit": fence["map_candidate_commit"],
+                    "map_image": fence["map_candidate_image_id"],
+                    "postgres_image": fence["postgres_image_id"],
+                    "fence_sha256": fence["prior_fresh_migration_fence_sha256"],
+                    "journal_sha256": fence[
+                        "prior_fresh_migration_journal_sha256"
+                    ],
+                    "journal_generation": fence[
+                        "prior_fresh_migration_generation"
+                    ],
+                    **database_identity,
+                    "system_identifier": fence["postgres_system_identifier"],
+                    "result_payload": canonical.decode().rstrip("\n"),
+                },
+            )
+    finally:
+        await engine.dispose()
+
+
 @pytest.mark.asyncio
 async def test_fresh_finalize_retries_only_fixed_raw_300_completion_after_late_acl_failure(
     fresh_300_database: tuple[str, str],
@@ -156,9 +254,19 @@ async def test_fresh_finalize_retries_only_fixed_raw_300_completion_after_late_a
     admin_dsn, migrator_dsn = fresh_300_database
     module = _finalize_module()
     fence = safe_fence_directory / "fence.json"
-    await _write_fence(module, admin_dsn, fence, monkeypatch)
+    fence_payload = await _write_fence(module, admin_dsn, fence, monkeypatch)
+    await _insert_prior_root_receipt(module, admin_dsn, fence_payload)
     monkeypatch.delenv("KOR_TRAVEL_MAP_BOOTSTRAP_PG_DSN", raising=False)
     monkeypatch.setenv("KOR_TRAVEL_MAP_MIGRATOR_PG_DSN", migrator_dsn)
+    assert await module.async_main(
+        ["probe-missing", "--operation-id", str(fence_payload["operation_id"])]
+    ) == 0
+    missing = json.loads(capsys.readouterr().out)
+    assert missing["schema"].endswith("finalize-missing-receipt.v1")
+    assert missing["outcome"] == "receipt-missing-exact-prestate"
+    assert missing["prior_fresh_migration_result_sha256"] == fence_payload[
+        "prior_fresh_migration_result_sha256"
+    ]
     original_reconcile = module.reconcile_runtime_privileges_in_transaction
 
     async def _late_acl_failure(_: object) -> None:
@@ -219,3 +327,7 @@ async def test_fresh_finalize_retries_only_fixed_raw_300_completion_after_late_a
         ["recover", "--operation-id", finalized["operation_id"]]
     ) == 0
     assert json.loads(capsys.readouterr().out) == finalized
+    assert await module.async_main(
+        ["probe-missing", "--operation-id", finalized["operation_id"]]
+    ) == 1
+    assert "existing operation receipt" in capsys.readouterr().err

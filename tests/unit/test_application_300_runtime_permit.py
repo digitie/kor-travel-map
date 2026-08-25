@@ -499,6 +499,15 @@ def test_fresh_finalize_accepts_only_manager_fixed_completion_operation() -> Non
         module._parse_args(["finalize"])
     with pytest.raises(module.FreshFinalizeError, match="fixed fresh-300 finalize"):
         module._parse_args(["migrate"])
+    operation_id = "00000000-0000-4000-8000-000000000001"
+    assert module._parse_args(["recover", "--operation-id", operation_id]) == (
+        "recover",
+        module.UUID(operation_id),
+    )
+    assert module._parse_args(["probe-missing", "--operation-id", operation_id]) == (
+        "probe-missing",
+        module.UUID(operation_id),
+    )
 
     source = (_ROOT / "docker/application-schema-fresh-finalize.py").read_text(
         encoding="utf-8"
