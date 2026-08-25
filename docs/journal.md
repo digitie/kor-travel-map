@@ -1,5 +1,20 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-26 — T-FE-MOCK-FLAKE n150 logs live 인증 blocker 재확인
+
+n150의 현재 Map source에서 `logs.live.spec.ts` 하나를 실제 공개 UI 대상으로 단일 워커,
+재시도 없이 실행했다. 이 spec은 로그인 뒤 `/v1/ops/system-logs`와
+`/v1/ops/api-call-logs`를 `GET`으로만 조회하고 UI 필터도 `GET` 전용 상태만 바꾼다.
+그러나 local-only 런북의 현 자격증명으로 auth setup 로그인 응답이 다시 `401`이어서 두
+본문 시나리오는 시작하지 않았다.
+
+이는 mocked `/v1/ops/logs` 6/6 checkpoint나 H46H의 data-independent 실제 UI 11개 통과를
+무효화하지 않지만, 실제 logs acceptance를 완료로 승격할 근거도 아니다. 현 배포 runtime과
+일치하는 승인된 읽기 전용 자격증명·허용 origin을 별도 승인 근거가 제공할 때만 재개한다.
+자격증명 추측·회전·우회 및 기존 스모크 자격증명 재사용은 하지 않았다. 전용 임시 경로의
+브라우저 storage state·screenshot·error context는 실행 종료와 함께 폐기했고 application row나
+업무 데이터는 쓰거나 대조하지 않았다.
+
 ## 2026-08-26 — H46H 후속 PinVi protected-route 재차단 교차 기록
 
 Manager PR #213 merge `0fb41f9c626fb2bdd82b818b62da25f87c3de057`의 n150 PinVi exact runtime
