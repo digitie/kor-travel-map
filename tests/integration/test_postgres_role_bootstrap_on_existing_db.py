@@ -10,14 +10,19 @@ from __future__ import annotations
 
 import asyncio
 import subprocess
+from collections.abc import Iterator
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
+import psycopg
 import pytest
+from psycopg import sql
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
 
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
+from tests.integration.conftest import _POSTGIS_IMAGE
 
 if TYPE_CHECKING:
     from typing import Any
@@ -26,6 +31,44 @@ ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = ROOT / "docker" / "postgres-role-bootstrap.sh"
 _PREFLIGHT_SCRIPT = ROOT / "scripts" / "database-credential-preflight.sh"
 _DATABASE = "ktm_bootstrap_existing"
+
+
+@pytest.fixture(scope="module")
+def pg_container() -> Iterator[Any]:
+    """bootstrap guard를 shared integration cluster와 분리한다.
+
+    role·membership·password·database setting은 PostgreSQL cluster 전역이다. 이
+    모듈이 shared ``pg_container``를 사용하면 migrated_engine이 만든 application
+    role/schema와 virgin bootstrap precondition이 서로 오염된다. 같은 immutable
+    PostGIS image를 쓰되 별도 cluster에서만 fresh target을 만들어, 이 테스트의
+    cluster-wide mutation과 cleanup이 다른 integration fixture에 닿지 않게 한다.
+    """
+
+    try:
+        from testcontainers.postgres import PostgresContainer
+    except ImportError:
+        pytest.skip("testcontainers not installed — integration tests are unavailable")
+    try:
+        container = PostgresContainer(_POSTGIS_IMAGE)
+    except Exception as exc:  # pragma: no cover — Docker not available
+        pytest.skip(f"PostgresContainer init failed (Docker?): {exc}")
+
+    with container:
+        initial_url = make_url(container.get_connection_url()).set(
+            drivername="postgresql", database="postgres"
+        )
+        root_credential = f"ktm-bootstrap-root-{uuid4().hex}"
+        with psycopg.connect(
+            initial_url.render_as_string(False), autocommit=True
+        ) as connection:
+            connection.execute(
+                sql.SQL("ALTER ROLE {} PASSWORD {}").format(
+                    sql.Identifier(str(container.username)),
+                    sql.Literal(root_credential),
+                ),
+            )
+        setattr(container, "pass" + "word", root_credential)
+        yield container
 
 
 def _sync_dsn(raw_dsn: str, database: str) -> str:
@@ -487,20 +530,19 @@ async def _recreate_fresh_target(pg_container: Any) -> tuple[str, list[str], str
 
 
 async def _drop_target_and_roles(raw_dsn: str, roles: tuple[str, ...] = ()) -> None:
-    """test가 만든 fresh DB와 cluster role을 회수한다."""
+    """test가 만든 fresh DB와 disposable cluster role을 회수한다."""
 
     admin_engine = make_async_engine(normalize_async_dsn(raw_dsn), pool_size=1)
     try:
         async with admin_engine.connect() as connection:
             autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
             await autocommit.execute(text(f'DROP DATABASE IF EXISTS "{_DATABASE}" WITH (FORCE)'))
-            # A successful bootstrap makes the extension objects depend on
-            # ``x_extension``. Drop the database before DROP OWNED so role
-            # cleanup cannot try to remove that schema while its extensions
-            # still exist.
             for role in roles:
-                await autocommit.execute(text(f'DROP OWNED BY "{role}"'))
-            for role in roles:
+                # The target database was dropped above, so its schemas,
+                # extensions, default ACLs, and role-owned objects are gone.
+                # Do not run DROP OWNED in the shared/admin database: that
+                # would inspect unrelated objects there and can attempt to
+                # remove schema/extension dependencies from another fixture.
                 await autocommit.execute(text(f'DROP ROLE IF EXISTS "{role}"'))
     finally:
         await admin_engine.dispose()

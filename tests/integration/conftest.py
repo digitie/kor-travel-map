@@ -306,13 +306,22 @@ async def migrated_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
     # asyncpg connection pool은 connect 이벤트의 ``SET search_path``가 모든
     # 체크아웃 연결에 일관 적용된다는 보장이 약하다 (pool 재사용/타이밍). GeoAlchemy2가
     # INSERT 시 emit하는 unqualified ``ST_GeomFromEWKT`` 등 PostGIS 함수가 어느
-    # 연결에서도 해석되도록 role 레벨로 search_path를 못박는다 (ADR-008).
-    # connect-listener는 신규 연결 즉시 보강용으로 유지.
+    # 연결에서도 해석되도록 이 fixture 전용 DB에 search_path를 못박는다 (ADR-008).
+    # cluster role-level setting은 다른 template0 DB의 fresh bootstrap precondition을
+    # 오염시키므로 사용하지 않으며, connect-listener는 신규 연결 즉시 보강용으로 유지.
     from sqlalchemy import text as _text
 
-    async with engine.begin() as _conn:
-        await _conn.execute(
-            _text("ALTER ROLE CURRENT_USER SET search_path = public, x_extension")
+    async with engine.connect() as _conn:
+        _autocommit = await _conn.execution_options(isolation_level="AUTOCOMMIT")
+        _database_name = str(
+            await _autocommit.scalar(_text("SELECT current_database()"))
+        )
+        _quoted_database_name = _database_name.replace('"', '""')
+        await _autocommit.execute(
+            _text(
+                f'ALTER DATABASE "{_quoted_database_name}" '
+                "SET search_path = public, x_extension"
+            )
         )
 
     try:
