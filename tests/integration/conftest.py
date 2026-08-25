@@ -196,13 +196,22 @@ async def pg_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
             await conn.execute(
                 text(f"CREATE EXTENSION IF NOT EXISTS {ext} WITH SCHEMA x_extension")
             )
-        # connect-event의 session-level ``SET search_path``는 asyncpg pool이
-        # connection을 reset(RESET ALL)하면 지워질 수 있다 — 다른 테스트가 bare
-        # ``AsyncSession``으로 connection을 recycle하면 다음 unqualified ``ST_*``
-        # 호출이 깨진다. role 레벨로 못박아 reset 후에도 유지 (migrated_engine과
-        # 동일 방어, ADR-008).
-        await conn.execute(
-            text("ALTER ROLE CURRENT_USER SET search_path = public, x_extension")
+    # connect-event의 session-level ``SET search_path``는 asyncpg pool이
+    # connection을 reset(RESET ALL)하면 지워질 수 있다 — 다른 테스트가 bare
+    # ``AsyncSession``으로 connection을 recycle하면 다음 unqualified ``ST_*``
+    # 호출이 깨진다. 이 fixture 전용 DB의 database-level setting으로 유지한다.
+    # cluster role-level setting은 같은 Postgres cluster에서 fresh template0 DB를
+    # 만드는 baseline-300 bootstrap 테스트의 virgin precondition을 오염시키므로
+    # 사용하지 않는다.
+    async with engine.connect() as conn:
+        autocommit = await conn.execution_options(isolation_level="AUTOCOMMIT")
+        database_name = str(await autocommit.scalar(text("SELECT current_database()")))
+        quoted_database_name = database_name.replace('"', '""')
+        await autocommit.execute(
+            text(
+                f'ALTER DATABASE "{quoted_database_name}" '
+                "SET search_path = public, x_extension"
+            )
         )
 
     try:
