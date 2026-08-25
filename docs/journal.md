@@ -1,5 +1,19 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-25 — T-VN-H46H paired builder 실행 모드 고정 (Draft)
+
+n150의 exact Map `dd2ee61f…` sealed source에서 paired builder를 실행할 때 내부
+`scripts/build-application-300-candidate.sh`가 Git 모드 `0644`로 materialize되어
+`Permission denied`가 발생했다. outer paired builder가 이 파일을 직접 실행하므로
+파일 모드를 `100755`로 정본에 고정하고 실행 가능 회귀 테스트를 추가한다. 이는 source
+bytes·application contract·300 schema semantics를 바꾸지 않으며, application row
+무결성 검증을 release gate에 추가하지 않는다.
+
+- 변경: `scripts/build-application-300-candidate.sh` 실행 모드 `100755`
+- 검증: paired candidate unit static contract와 `git diff --check`
+- 후속: 새 exact Map SHA를 Manager v5 release pinset으로 회전한 뒤 n150 rebuild 재개
+- 두 `uv.lock`은 열람·수정·stage하지 않음
+
 ## 2026-08-25 — T-VN-H46H full integration cluster 격리 보강 (Draft)
 
 PR #1064의 unit matrix는 통과했지만 full PostGIS integration에서 role-bootstrap 6건이

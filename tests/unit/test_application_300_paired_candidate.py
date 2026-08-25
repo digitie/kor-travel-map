@@ -98,6 +98,30 @@ def _load_storage_helper(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 
 
 @pytest.mark.unit
+def test_paired_builder_candidate_builder_is_executable() -> None:
+    """sealed source가 내부 API candidate builder를 직접 실행할 수 있어야 한다."""
+
+    builder = ROOT / "scripts" / "build-application-300-candidate.sh"
+    assert builder.is_file()
+    assert stat.S_IMODE(builder.stat().st_mode) & stat.S_IXUSR
+
+    tracked_mode = subprocess.run(
+        [
+            "git",
+            "ls-tree",
+            "HEAD",
+            "--",
+            str(builder.relative_to(ROOT)),
+        ],
+        cwd=ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.split(maxsplit=1)[0]
+    assert tracked_mode == "100755"
+
+
+@pytest.mark.unit
 def test_paired_builder_seals_both_images_and_one_dagster_launch_image() -> None:
     script = (ROOT / "scripts" / "build-application-300-paired-candidate.sh").read_text(
         encoding="utf-8"
