@@ -182,31 +182,38 @@ def _load_static_contract_module() -> ModuleType:
         raise FreshMigrationError("installed application baseline contract is unavailable") from exc
 
 
-def _load_handoff_contract_module() -> ModuleType:
-    """catalog/seed/runtime invariant verifier는 controlled handoff와 공유한다."""
+def _load_database_contract_module() -> ModuleType:
+    """fresh-only read-only DB contract module만 고정 경로에서 읽는다."""
 
-    if Path(__file__).resolve().parent == _INSTALLED_BIN_DIR:
-        path = _INSTALLED_BIN_DIR / "ktm-application-schema-handoff"
-    else:
-        path = _application_root() / "docker" / "transition-application-schema-0236-to-300.py"
+    installed = Path(__file__).resolve().parent == _INSTALLED_BIN_DIR
+    path = (
+        Path("/app/docker/application-schema-db-contract.py")
+        if installed
+        else _application_root() / "docker" / "application-schema-db-contract.py"
+    )
     try:
         metadata = path.lstat()
-        if Path(__file__).resolve().parent == _INSTALLED_BIN_DIR and (
+        if installed and (
             not stat.S_ISREG(metadata.st_mode)
             or stat.S_ISLNK(metadata.st_mode)
             or metadata.st_uid != 0
-            or stat.S_IMODE(metadata.st_mode) != 0o555
+            or stat.S_IMODE(metadata.st_mode) != 0o444
+            or metadata.st_nlink != 1
         ):
-            raise OSError("unsafe installed handoff helper")
-        loader = importlib.machinery.SourceFileLoader("application_schema_handoff", str(path))
-        spec = importlib.util.spec_from_loader("application_schema_handoff", loader)
+            raise OSError("unsafe installed database contract module")
+        loader = importlib.machinery.SourceFileLoader(
+            "application_schema_db_contract", str(path)
+        )
+        spec = importlib.util.spec_from_loader("application_schema_db_contract", loader)
         if spec is None or spec.loader is None:
-            raise ImportError("application receipt loader is unavailable")
+            raise ImportError("application database contract loader is unavailable")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
         return module
     except (ImportError, OSError) as exc:
-        raise FreshMigrationError("installed application receipt contract is unavailable") from exc
+        raise FreshMigrationError(
+            "installed application database contract is unavailable"
+        ) from exc
 
 
 def _static_contract() -> Mapping[str, str]:
@@ -469,20 +476,20 @@ async def _assert_application_receipts(
 ) -> tuple[str, str, str]:
     """full catalog/seed/version와 live projection invariant를 같은 snapshot에서 읽는다."""
 
-    module = _load_handoff_contract_module()
+    module = _load_database_contract_module()
     try:
         await connection.execute(text(f"SET ROLE {_DATABASE_OWNER}"))
         await connection.execute(text("SET search_path = public, x_extension"))
-        catalog = await module._contract_sha256(  # type: ignore[attr-defined]
+        catalog = await module.contract_sha256(  # type: ignore[attr-defined]
             connection, "application-catalog.sql"
         )
-        seed = await module._contract_sha256(  # type: ignore[attr-defined]
+        seed = await module.contract_sha256(  # type: ignore[attr-defined]
             connection, "application-seed.sql"
         )
-        destination = await module._contract_sha256(  # type: ignore[attr-defined]
+        destination = await module.contract_sha256(  # type: ignore[attr-defined]
             connection, "application-destination-alembic-version.sql"
         )
-        await module._verify_runtime_projection_invariants(  # type: ignore[attr-defined]
+        await module.verify_runtime_projection_invariants(  # type: ignore[attr-defined]
             connection
         )
     except Exception as exc:

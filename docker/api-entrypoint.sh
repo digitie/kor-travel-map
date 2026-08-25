@@ -412,17 +412,14 @@ if [ "$api_profile" = "production" ]; then
   fi
 else
 # `300` image는 local-dev fresh DB 또는 raw `300`만 generic startup으로 처리한다. `0236`은
-# generic Alembic resolver가 active graph 밖 source를 해석할 수 없으므로, 이를 자동
-# stamp/upgrade로 고치지 않는다. Docker Manager가 writer fence와 same-transaction
-# catalog pre/postflight를 확보한 controlled executable만 handoff할 수 있다.
+# active graph 밖의 퇴역 revision이며 in-place stamp/upgrade를 지원하지 않는다.
 if ! current_raw="$(/usr/local/bin/python -I -m alembic current 2>&1)"; then
   case "$current_raw" in
     *"Can't locate revision"*)
       db_revision="$(printf '%s' "$current_raw" | sed -n 's/.*Can'"'"'t locate revision identified by '"'"'\([^'"'"']*\)'"'"'.*/\1/p' | head -1)"
       if [ "$db_revision" = "0236_tvn41s_compaction_drained" ]; then
-        echo "the DB is at 0236 and requires the controlled application-schema 0236-to-300 handoff" >&2
-        echo "normal API startup will not stamp or upgrade it; run the Docker Manager in-place transition" >&2
-        echo "(ktm-application-schema-handoff with writer fence receipt) before starting this candidate" >&2
+        echo "the DB is at unsupported retired revision 0236; in-place transition is not available" >&2
+        echo "use only the approved destructive fresh rebuild path for application 300" >&2
       else
         echo "the DB Alembic revision is unsupported by the active 300-only image" >&2
         echo "(raw revision: ${db_revision:-unknown}; no archive replay, downgrade, or manual version-table edit is supported)" >&2

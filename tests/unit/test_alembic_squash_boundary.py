@@ -668,8 +668,9 @@ def test_production_docker_build_context_never_copies_legacy_migrations() -> Non
         assert "COPY alembic/retired_versions" not in source
     api = (_ROOT / "docker" / "api.Dockerfile").read_text(encoding="utf-8")
     assert "COPY alembic/versions ./alembic/versions" in api
-    assert "transition-application-schema-0236-to-300.py" in api
-    assert "ktm-application-schema-handoff" in api
+    assert "transition-application-schema-0236-to-300.py" not in api
+    assert "ktm-application-schema-handoff" not in api
+    assert "application-schema-db-contract.py" in api
     for retired_runtime_helper in (
         "migrate-to-m01-bootstrap-boundary.sh",
         "migrate-to-m05-bootstrap-boundary.sh",

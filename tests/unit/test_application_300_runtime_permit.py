@@ -33,7 +33,7 @@ def _valid_permit(module: object) -> dict[str, object]:
     database_owner = "ktm_feature_schema_owner"
     return {
         "schema": "kor-travel-docker-manager.map-application-final-permit.v4",
-        "transition_kind": "map-application-schema-0236-to-300",
+        "transition_kind": "map-fresh-300-finalize",
         "state": "finalized",
         "transaction_id": "b93bb7cf-7901-4790-88a8-2a7bbc07f3b7",
         "candidate": {
@@ -90,22 +90,29 @@ def _valid_permit(module: object) -> dict[str, object]:
             "runtime_invariant_violation_count": 0,
         },
         "operation_evidence": {
-            "schema": "kor-travel-docker-manager.map-final-permit-handoff-evidence.v2",
+            "schema": (
+                "kor-travel-docker-manager."
+                "map-final-permit-fresh-finalize-evidence.v2"
+            ),
             "journal_sha256": "d" * 64,
-            "journal_generation": 1,
-            "operation_result_sha256": "e" * 64,
-            "writer_fence_receipt_sha256": "f" * 64,
-            "writer_fence_transaction_id": (
+            "journal_generation": 2,
+            "finalize_result_sha256": "e" * 64,
+            "finalize_fence_receipt_sha256": "f" * 64,
+            "finalize_fence_transaction_id": (
                 "b93bb7cf-7901-4790-88a8-2a7bbc07f3b7"
             ),
+            "prior_fresh_migration_result_sha256": "1" * 64,
+            "prior_fresh_migration_fence_sha256": "2" * 64,
+            "prior_fresh_migration_transaction_id": (
+                "b93bb7cf-7901-4790-88a8-2a7bbc07f3b8"
+            ),
+            "prior_fresh_migration_journal_sha256": "3" * 64,
+            "prior_fresh_migration_generation": 1,
             "pre_source_catalog_sha256": artifacts[
                 "source_catalog_contract_sha256"
             ],
             "post_destination_catalog_sha256": artifacts[
                 "destination_catalog_contract_sha256"
-            ],
-            "pre_source_alembic_version_sha256": artifacts[
-                "source_alembic_version_contract_sha256"
             ],
             "post_destination_alembic_version_sha256": artifacts[
                 "destination_alembic_version_contract_sha256"
@@ -224,36 +231,6 @@ def test_final_permit_requires_fresh_finalize_operation_lineage(
         "docker/application-schema-final-permit.py",
     )
     payload = _valid_permit(module)
-    _, reference = module._read_reference()
-    artifacts = reference["artifacts"]
-    destination = payload["candidate"]["destination_alembic_version_sha256"]
-    transaction_id = payload["transaction_id"]
-    payload["transition_kind"] = "map-fresh-300-finalize"
-    payload["operation_evidence"] = {
-        "schema": (
-            "kor-travel-docker-manager."
-            "map-final-permit-fresh-finalize-evidence.v2"
-        ),
-        "journal_sha256": "1" * 64,
-        "journal_generation": 2,
-        "finalize_result_sha256": "2" * 64,
-        "finalize_fence_receipt_sha256": "3" * 64,
-        "finalize_fence_transaction_id": transaction_id,
-        "prior_fresh_migration_result_sha256": "4" * 64,
-        "prior_fresh_migration_fence_sha256": "5" * 64,
-        "prior_fresh_migration_transaction_id": (
-            "b93bb7cf-7901-4790-88a8-2a7bbc07f3b8"
-        ),
-        "prior_fresh_migration_journal_sha256": "6" * 64,
-        "prior_fresh_migration_generation": 1,
-        "pre_source_catalog_sha256": artifacts[
-            "source_catalog_contract_sha256"
-        ],
-        "post_destination_catalog_sha256": artifacts[
-            "destination_catalog_contract_sha256"
-        ],
-        "post_destination_alembic_version_sha256": destination,
-    }
     monkeypatch.setenv("KOR_TRAVEL_MAP_IMAGE_REVISION", "a" * 40)
     monkeypatch.setenv(
         "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_API_IMAGE_ID", "sha256:" + "b" * 64
@@ -262,8 +239,8 @@ def test_final_permit_requires_fresh_finalize_operation_lineage(
         json.dumps(payload).encode("utf-8"), consumer="api"
     )["transition_kind"] == "map-fresh-300-finalize"
 
-    payload["operation_evidence"] = _valid_permit(module)["operation_evidence"]
-    with pytest.raises(module.FinalPermitError, match="evidence"):
+    payload["transition_kind"] = "map-application-schema-0236-to-300"
+    with pytest.raises(module.FinalPermitError, match="transition"):
         module._validate_permit(json.dumps(payload).encode("utf-8"), consumer="api")
 
     payload = _valid_permit(module)
@@ -665,6 +642,32 @@ def test_static_baseline_contract_attests_all_manager_consumed_receipts() -> Non
     }
 
     assert module.main(["unexpected"]) == 1
+
+
+def test_fresh_database_contract_module_has_no_handoff_or_cli_surface() -> None:
+    """fresh receipt helper는 읽기 전용 module이며 직접 실행·stamp할 수 없다."""
+
+    contract = (
+        _ROOT / "docker/application-schema-db-contract.py"
+    ).read_text(encoding="utf-8")
+    root = (_ROOT / "docker/application-schema-fresh-300.py").read_text(
+        encoding="utf-8"
+    )
+    finalize = (_ROOT / "docker/application-schema-fresh-finalize.py").read_text(
+        encoding="utf-8"
+    )
+    assert "def main(" not in contract
+    assert "if __name__" not in contract
+    assert "from alembic" not in contract
+    assert "import alembic" not in contract
+    assert "make_async_engine" not in contract
+    assert "INSERT " not in contract
+    assert "UPDATE " not in contract
+    assert "DELETE " not in contract
+    assert "application-schema-db-contract.py" in root
+    assert "application-schema-db-contract.py" in finalize
+    assert "transition-application-schema-0236-to-300.py" not in root
+    assert "transition-application-schema-0236-to-300.py" not in finalize
 
 
 def test_static_baseline_contract_rejects_mutable_installed_artifact(

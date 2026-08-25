@@ -288,21 +288,37 @@ def _load_static_contract_module() -> ModuleType:
     return module
 
 
-def _load_handoff_contract_module() -> ModuleType:
-    """canonical SQL receipt/GUC implementation은 controlled handoff와 공유한다."""
+def _load_database_contract_module() -> ModuleType:
+    """fresh-only read-only DB contract module만 고정 경로에서 읽는다."""
 
-    path = _helper_path(
-        "transition-application-schema-0236-to-300.py", "ktm-application-schema-handoff"
+    installed = Path(__file__).resolve().parent == _INSTALLED_BIN_DIR
+    path = (
+        Path("/app/docker/application-schema-db-contract.py")
+        if installed
+        else Path(__file__).with_name("application-schema-db-contract.py")
     )
     try:
-        loader = importlib.machinery.SourceFileLoader("application_schema_handoff", str(path))
-        spec = importlib.util.spec_from_loader("application_schema_handoff", loader)
+        metadata = path.lstat()
+        if installed and (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_ISLNK(metadata.st_mode)
+            or metadata.st_uid != 0
+            or stat.S_IMODE(metadata.st_mode) != 0o444
+            or metadata.st_nlink != 1
+        ):
+            raise OSError("unsafe installed database contract module")
+        loader = importlib.machinery.SourceFileLoader(
+            "application_schema_db_contract", str(path)
+        )
+        spec = importlib.util.spec_from_loader("application_schema_db_contract", loader)
         if spec is None or spec.loader is None:
-            raise ImportError("application schema handoff loader is unavailable")
+            raise ImportError("application database contract loader is unavailable")
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
     except (ImportError, OSError) as exc:
-        raise FreshFinalizeError("installed application receipt contract is unavailable") from exc
+        raise FreshFinalizeError(
+            "installed application database contract is unavailable"
+        ) from exc
     return module
 
 
@@ -367,7 +383,7 @@ async def _assert_raw_300_and_receipts(
     *,
     expected_catalog_sha256: str,
 ) -> tuple[str, str, str]:
-    module = _load_handoff_contract_module()
+    module = _load_database_contract_module()
     try:
         # migrator는 NOINHERIT LOGIN이다. receipt query는 handoff와 같은 명시
         # schema-owner role과 canonical search_path에서 실행한다.
@@ -381,16 +397,16 @@ async def _assert_raw_300_and_receipts(
                 )
             ).all()
         )
-        catalog = await module._contract_sha256(  # type: ignore[attr-defined]
+        catalog = await module.contract_sha256(  # type: ignore[attr-defined]
             connection, "application-catalog.sql"
         )
-        seed = await module._contract_sha256(  # type: ignore[attr-defined]
+        seed = await module.contract_sha256(  # type: ignore[attr-defined]
             connection, "application-seed.sql"
         )
-        destination_alembic_version = await module._contract_sha256(  # type: ignore[attr-defined]
+        destination_alembic_version = await module.contract_sha256(  # type: ignore[attr-defined]
             connection, "application-destination-alembic-version.sql"
         )
-        await module._verify_runtime_projection_invariants(  # type: ignore[attr-defined]
+        await module.verify_runtime_projection_invariants(  # type: ignore[attr-defined]
             connection
         )
     except Exception as exc:

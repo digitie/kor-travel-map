@@ -1,5 +1,22 @@
 # resume.md — 현재 진척도와 다음 한 작업
 
+## 2026-08-25 — T-VN-H46H production in-place writer 제거 checkpoint (Draft)
+
+fresh-only 정책과 충돌하던 `0236→300` production mutation surface를 제거했다. API candidate
+image는 더 이상 `ktm-application-schema-handoff`를 복사·실행·attest하지 않으며, exact `0236`
+startup도 in-place transition 대신 승인된 destructive fresh rebuild만 안내하고 중단한다. final
+permit은 이제 `map-fresh-300-finalize` lineage만 허용해 이전 handoff permit을 호환하지 않는다.
+
+fresh root/finalize가 공유하던 catalog digest와 runtime invariant는 CLI/main·Alembic·DB engine·
+write statement가 없는 root-owned `0444` 비실행 module로 분리했다. candidate/fresh-oracle builder는
+이 module을 `/app/docker` 읽기 전용 contract tree에 byte-exact 결박하고 퇴역 handoff binary가 image에
+존재하면 거부한다. 실제 PostgreSQL fresh root/finalize 회귀를 다시 통과했다.
+
+### 이 PR의 다음 한 작업
+
+live attestation parser와 운영 문서를 Manager manifest v6/journal v8 및 fresh-only 정본으로
+정렬한다. 이후 Manager의 orphan credential·candidate tag·committed DB/image 재검증을 닫는다.
+
 ## 2026-08-25 — T-VN-H46H Dagster crash-safe exact catalog checkpoint (Draft)
 
 Dagster metadata storage는 더 이상 receipt 없는 final head를 성공으로 승격하지 않는다. wrapper가

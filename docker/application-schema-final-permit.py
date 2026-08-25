@@ -31,12 +31,7 @@ from kortravelmap.infra.db import make_async_engine
 
 _PERMIT_PATH: Final = Path("/run/kor-travel-map-application-final-permit/permit.json")
 _PERMIT_SCHEMA: Final = "kor-travel-docker-manager.map-application-final-permit.v4"
-_PERMIT_TRANSITIONS: Final = frozenset(
-    {
-        "map-application-schema-0236-to-300",
-        "map-fresh-300-finalize",
-    }
-)
+_PERMIT_TRANSITION: Final = "map-fresh-300-finalize"
 _IMAGE_REVISION_ENV: Final = "KOR_TRAVEL_MAP_IMAGE_REVISION"
 _API_IMAGE_ID_ENV: Final = "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_API_IMAGE_ID"
 _DAGSTER_IMAGE_ID_ENV: Final = "KOR_TRAVEL_MAP_APPLICATION_FINAL_PERMIT_DAGSTER_IMAGE_ID"
@@ -89,20 +84,6 @@ _RECEIPT_FIELDS: Final = frozenset(
         "expected_destination_alembic_version_sha256",
         "observed_destination_alembic_version_sha256",
         "runtime_invariant_violation_count",
-    }
-)
-_HANDOFF_EVIDENCE_FIELDS: Final = frozenset(
-    {
-        "schema",
-        "journal_sha256",
-        "journal_generation",
-        "operation_result_sha256",
-        "writer_fence_receipt_sha256",
-        "writer_fence_transaction_id",
-        "pre_source_catalog_sha256",
-        "post_destination_catalog_sha256",
-        "pre_source_alembic_version_sha256",
-        "post_destination_alembic_version_sha256",
     }
 )
 _FRESH_FINALIZE_EVIDENCE_FIELDS: Final = frozenset(
@@ -330,64 +311,41 @@ def _validate_operation_evidence(
     transaction_id: str,
     source_catalog_sha256: str,
     destination_catalog_sha256: str,
-    source_alembic_version_sha256: str,
     destination_alembic_version_sha256: str,
 ) -> Mapping[str, Any]:
     """transition 종류별 증거를 disjoint exact schema로 고정한다."""
 
-    if transition_kind == "map-application-schema-0236-to-300":
-        evidence = _require_exact_fields(value, _HANDOFF_EVIDENCE_FIELDS, "handoff evidence")
-        schema = "kor-travel-docker-manager.map-final-permit-handoff-evidence.v2"
-        transaction_field = "writer_fence_transaction_id"
-        digest_fields = _HANDOFF_EVIDENCE_FIELDS - {
-            "schema",
-            "journal_generation",
-            transaction_field,
-        }
-        if (
-            evidence.get("pre_source_alembic_version_sha256")
-            != source_alembic_version_sha256
-            or evidence.get("pre_source_catalog_sha256") != source_catalog_sha256
-            or evidence.get("post_destination_catalog_sha256")
-            != destination_catalog_sha256
-            or evidence.get("post_destination_alembic_version_sha256")
-            != destination_alembic_version_sha256
-        ):
-            raise FinalPermitError("final permit handoff evidence facet binding is invalid")
-    elif transition_kind == "map-fresh-300-finalize":
-        evidence = _require_exact_fields(
-            value, _FRESH_FINALIZE_EVIDENCE_FIELDS, "fresh finalize evidence"
-        )
-        schema = "kor-travel-docker-manager.map-final-permit-fresh-finalize-evidence.v2"
-        transaction_field = "finalize_fence_transaction_id"
-        digest_fields = _FRESH_FINALIZE_EVIDENCE_FIELDS - {
-            "schema",
-            "journal_generation",
-            "prior_fresh_migration_generation",
-            transaction_field,
-            "prior_fresh_migration_transaction_id",
-        }
-        if (
-            type(evidence.get("prior_fresh_migration_generation")) is not int
-            or evidence["prior_fresh_migration_generation"] <= 0
-            or type(evidence.get("journal_generation")) is not int
-            or evidence["journal_generation"]
-            <= evidence["prior_fresh_migration_generation"]
-            or evidence.get("pre_source_catalog_sha256") != source_catalog_sha256
-            or evidence.get("post_destination_catalog_sha256")
-            != destination_catalog_sha256
-            or evidence.get("post_destination_alembic_version_sha256")
-            != destination_alembic_version_sha256
-        ):
-            raise FinalPermitError("final permit fresh finalize generation is invalid")
-        try:
-            UUID(str(evidence["prior_fresh_migration_transaction_id"]))
-        except (TypeError, ValueError) as exc:
-            raise FinalPermitError(
-                "final permit prior fresh transaction is invalid"
-            ) from exc
-    else:  # transition_kind는 caller에서도 exact allow-list로 검사한다.
+    if transition_kind != _PERMIT_TRANSITION:
         raise FinalPermitError("final permit transition evidence kind is invalid")
+    evidence = _require_exact_fields(
+        value, _FRESH_FINALIZE_EVIDENCE_FIELDS, "fresh finalize evidence"
+    )
+    schema = "kor-travel-docker-manager.map-final-permit-fresh-finalize-evidence.v2"
+    transaction_field = "finalize_fence_transaction_id"
+    digest_fields = _FRESH_FINALIZE_EVIDENCE_FIELDS - {
+        "schema",
+        "journal_generation",
+        "prior_fresh_migration_generation",
+        transaction_field,
+        "prior_fresh_migration_transaction_id",
+    }
+    if (
+        type(evidence.get("prior_fresh_migration_generation")) is not int
+        or evidence["prior_fresh_migration_generation"] <= 0
+        or type(evidence.get("journal_generation")) is not int
+        or evidence["journal_generation"]
+        <= evidence["prior_fresh_migration_generation"]
+        or evidence.get("pre_source_catalog_sha256") != source_catalog_sha256
+        or evidence.get("post_destination_catalog_sha256")
+        != destination_catalog_sha256
+        or evidence.get("post_destination_alembic_version_sha256")
+        != destination_alembic_version_sha256
+    ):
+        raise FinalPermitError("final permit fresh finalize generation is invalid")
+    try:
+        UUID(str(evidence["prior_fresh_migration_transaction_id"]))
+    except (TypeError, ValueError) as exc:
+        raise FinalPermitError("final permit prior fresh transaction is invalid") from exc
     if evidence.get("schema") != schema:
         raise FinalPermitError("final permit operation evidence schema is invalid")
     if (
@@ -414,7 +372,7 @@ def _validate_permit(raw: bytes, *, consumer: str) -> Mapping[str, Any]:
     payload = _require_exact_fields(value, _TOP_LEVEL_FIELDS, "top-level")
     if payload["schema"] != _PERMIT_SCHEMA:
         raise FinalPermitError("final permit schema is invalid")
-    if payload["transition_kind"] not in _PERMIT_TRANSITIONS:
+    if payload["transition_kind"] != _PERMIT_TRANSITION:
         raise FinalPermitError("final permit transition kind is invalid")
     if payload["state"] != "finalized":
         raise FinalPermitError("final permit is not finalized")
@@ -465,7 +423,6 @@ def _validate_permit(raw: bytes, *, consumer: str) -> Mapping[str, Any]:
         transaction_id=str(payload["transaction_id"]),
         source_catalog_sha256=source_catalog_sha256,
         destination_catalog_sha256=destination_catalog_sha256,
-        source_alembic_version_sha256=str(candidate["source_alembic_version_sha256"]),
         destination_alembic_version_sha256=str(
             candidate["destination_alembic_version_sha256"]
         ),

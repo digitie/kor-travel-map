@@ -157,17 +157,13 @@ root = Path(sys.argv[1])
 required = (
     "docker/api.Dockerfile",
     "docker/postgres-role-bootstrap.sh",
-    "docker/transition-application-schema-0236-to-300.py",
+    "docker/application-schema-db-contract.py",
     "docker/application-schema-fresh-300.py",
     "docker/application-schema-fresh-finalize.py",
     "docker/application-schema-final-permit.py",
     "docker/application-schema-contract.py",
     "docker/application-schema-head.py",
     "scripts/build-application-300-candidate.sh",
-    "scripts/create-application-0236-source-oracle.sh",
-    "scripts/create-application-300-fresh-oracle.sh",
-    "scripts/build-baseline.sh",
-    "scripts/rehearse-application-300-handoff.sh",
     "alembic.ini",
     "alembic/env.py",
     "alembic/versions/300_schema_baseline.py",
@@ -201,17 +197,14 @@ cmp -s "$sealed_builder_script" "$current_builder_script" || \
   die "executing candidate builder script가 sealed candidate commit과 다르다"
 builder_script_sha256="$(sha256sum "$sealed_builder_script" | awk '{print $1}')"
 
-# Baseline proof는 candidate image 안의 migration뿐 아니라 source oracle, fresh
-# oracle, artifact materializer가 함께 이룬다. 이 셋이 caller의 mutable checkout에서
-# 바뀌면 sealed image의 byte가 맞아도 receipt를 임의의 probe tool로 만들 수 있다.
+# Candidate proof는 sealed image와 fresh oracle이 함께 이룬다. caller의 mutable
+# checkout에서 oracle이 바뀌면 sealed image의 byte가 맞아도 receipt를 임의의 probe
+# tool로 만들 수 있다.
 # 모든 tool의 sealed path+digest manifest를 receipt에 남기고, 지금 실행하는 사본이
 # candidate archive와 byte-exact가 아니면 build/verify를 시작하지 않는다.
 PROOF_TOOLS_MANIFEST="$(mktemp "${TMPDIR:-/tmp}/ktm300-candidate-proof-tools.XXXXXX")"
 for proof_relative in \
-  scripts/create-application-0236-source-oracle.sh \
-  scripts/create-application-300-fresh-oracle.sh \
-  scripts/build-baseline.sh \
-  scripts/rehearse-application-300-handoff.sh; do
+  scripts/create-application-300-fresh-oracle.sh; do
   sealed_proof_tool="$SEALED_ROOT/$proof_relative"
   current_proof_tool="$REPOSITORY_ROOT/$proof_relative"
   [ -f "$sealed_proof_tool" ] && [ ! -L "$sealed_proof_tool" ] || \
@@ -376,7 +369,13 @@ def add(source_rel: str, destination_rel: str) -> None:
         raise SystemExit(f"duplicate candidate /app destination: {destination_rel}")
     items[destination_rel] = source
 
-for name in ("alembic.ini", "alembic/env.py", "alembic/script.py.mako", "docker/api-entrypoint.sh"):
+for name in (
+    "alembic.ini",
+    "alembic/env.py",
+    "alembic/script.py.mako",
+    "docker/api-entrypoint.sh",
+    "docker/application-schema-db-contract.py",
+):
     add(name, name)
 for directory in ("alembic/baseline", "alembic/versions", "resources/curations"):
     base = root / directory
@@ -470,7 +469,6 @@ from pathlib import Path
 
 root = Path(sys.argv[1])
 for source_rel, destination in (
-    ("docker/transition-application-schema-0236-to-300.py", "usr/local/bin/ktm-application-schema-handoff"),
     ("docker/application-schema-fresh-300.py", "usr/local/bin/ktm-application-schema-fresh-300"),
     ("docker/application-schema-fresh-finalize.py", "usr/local/bin/ktm-application-schema-fresh-finalize"),
     ("docker/application-schema-final-permit.py", "usr/local/bin/ktm-application-schema-final-permit"),
@@ -488,7 +486,6 @@ import hashlib
 from pathlib import Path
 filesystem_root = Path("/")
 for path in (
-    Path("/usr/local/bin/ktm-application-schema-handoff"),
     Path("/usr/local/bin/ktm-application-schema-fresh-300"),
     Path("/usr/local/bin/ktm-application-schema-fresh-finalize"),
     Path("/usr/local/bin/ktm-application-schema-final-permit"),
@@ -498,6 +495,9 @@ for path in (
     if not path.is_file() or path.is_symlink():
         raise SystemExit(f"candidate executable is missing or symlinked: {path}")
     print(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.relative_to(filesystem_root)}" )
+retired = Path("/usr/local/bin/ktm-application-schema-handoff")
+if retired.exists() or retired.is_symlink():
+    raise SystemExit("retired in-place handoff executable is present")
 ' >"$IMAGE_ENTRYPOINT_MANIFEST"
 cmp -s "$ENTRYPOINT_MANIFEST" "$IMAGE_ENTRYPOINT_MANIFEST" || \
   die "candidate image migration executable tree가 sealed Git archive와 다르다"

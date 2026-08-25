@@ -154,16 +154,13 @@ root = Path(sys.argv[1])
 required = (
     "docker/api.Dockerfile",
     "docker/postgres-role-bootstrap.sh",
-    "docker/transition-application-schema-0236-to-300.py",
+    "docker/application-schema-db-contract.py",
     "docker/application-schema-fresh-300.py",
     "docker/application-schema-fresh-finalize.py",
     "docker/application-schema-final-permit.py",
     "docker/application-schema-contract.py",
     "docker/application-schema-head.py",
-    "scripts/create-application-0236-source-oracle.sh",
     "scripts/create-application-300-fresh-oracle.sh",
-    "scripts/build-baseline.sh",
-    "scripts/rehearse-application-300-handoff.sh",
     "alembic.ini",
     "alembic/env.py",
     "alembic/versions/300_schema_baseline.py",
@@ -188,10 +185,7 @@ PY
 # manufacture a receipt for an intact candidate image.
 proof_tools_manifest="$(mktemp "${TMPDIR:-/tmp}/ktm300-fresh-proof-tools.XXXXXX")"
 for proof_relative in \
-  scripts/create-application-0236-source-oracle.sh \
-  scripts/create-application-300-fresh-oracle.sh \
-  scripts/build-baseline.sh \
-  scripts/rehearse-application-300-handoff.sh; do
+  scripts/create-application-300-fresh-oracle.sh; do
   sealed_proof_tool="$CANDIDATE_SEALED_ROOT/$proof_relative"
   current_proof_tool="$REPOSITORY_ROOT/$proof_relative"
   [ -f "$sealed_proof_tool" ] && [ ! -L "$sealed_proof_tool" ] || \
@@ -375,7 +369,13 @@ def add(source_rel: str, destination_rel: str) -> None:
         raise SystemExit(f"duplicate candidate /app destination: {destination_rel}")
     items[destination_rel] = source
 
-for name in ("alembic.ini", "alembic/env.py", "alembic/script.py.mako", "docker/api-entrypoint.sh"):
+for name in (
+    "alembic.ini",
+    "alembic/env.py",
+    "alembic/script.py.mako",
+    "docker/api-entrypoint.sh",
+    "docker/application-schema-db-contract.py",
+):
     add(name, name)
 for directory in ("alembic/baseline", "alembic/versions", "resources/curations"):
     base = root / directory
@@ -462,7 +462,6 @@ from pathlib import Path
 
 root = Path(sys.argv[1])
 for source_rel, destination in (
-    ("docker/transition-application-schema-0236-to-300.py", "usr/local/bin/ktm-application-schema-handoff"),
     ("docker/application-schema-fresh-300.py", "usr/local/bin/ktm-application-schema-fresh-300"),
     ("docker/application-schema-fresh-finalize.py", "usr/local/bin/ktm-application-schema-fresh-finalize"),
     ("docker/application-schema-final-permit.py", "usr/local/bin/ktm-application-schema-final-permit"),
@@ -479,7 +478,6 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 for path in (
-    Path("/usr/local/bin/ktm-application-schema-handoff"),
     Path("/usr/local/bin/ktm-application-schema-fresh-300"),
     Path("/usr/local/bin/ktm-application-schema-fresh-finalize"),
     Path("/usr/local/bin/ktm-application-schema-final-permit"),
@@ -489,6 +487,9 @@ for path in (
     if not path.is_file() or path.is_symlink():
         raise SystemExit(f"candidate executable is missing or symlinked: {path}")
     print(f"{hashlib.sha256(path.read_bytes()).hexdigest()}  {path.relative_to('/')}")
+retired = Path("/usr/local/bin/ktm-application-schema-handoff")
+if retired.exists() or retired.is_symlink():
+    raise SystemExit("retired in-place handoff executable is present")
 ' >"$candidate_image_entrypoint_manifest"
 cmp -s "$candidate_entrypoint_manifest" "$candidate_image_entrypoint_manifest" || \
   die "candidate image migration executable tree가 sealed Git archive와 다르다"

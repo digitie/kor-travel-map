@@ -168,19 +168,10 @@ def test_paired_builder_seals_both_images_and_one_dagster_launch_image() -> None
     assert 'filesystem_root = Path("/")' in paired_builder
     assert "relative_to(filesystem_root).as_posix()" in paired_builder
     assert "relative_to('/').as_posix()" not in paired_builder
-
-    rehearsal = (ROOT / "scripts" / "rehearse-application-300-handoff.sh").read_text(
-        encoding="utf-8"
-    )
-    assert "--paired-build-receipt" in rehearsal
-    assert "build-application-300-paired-candidate.sh" in rehearsal
-    assert "paired_candidate_build_receipt_sha256" in rehearsal
-    assert "paired_dagster_image_id" in rehearsal
-    assert "kor-travel-map.application-300-handoff-rehearsal.v6" in rehearsal
-    assert 'launch["webserver_argv_policy"] != {' in rehearsal
-    assert 'launch["image_default_webserver_argv"] != [' in rehearsal
-    assert 'launch["daemon_argv"] != [' in rehearsal
-    assert 'launch["metadata_database_identity_permit"] != {' in rehearsal
+    assert "rehearse-application-300-handoff.sh" not in api_builder
+    assert "transition-application-schema-0236-to-300.py" not in api_builder
+    assert "retired in-place handoff executable is present" in api_builder
+    assert "application-schema-db-contract.py" in api_builder
 
 
 @pytest.mark.unit

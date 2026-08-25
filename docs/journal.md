@@ -1,5 +1,25 @@
 # journal.md — 작업 일지 (역시간순)
 
+## 2026-08-25 — T-VN-H46H 퇴역 in-place production capability 제거 (Draft)
+
+두 번째 전문 적대 리뷰에서 fresh-only 결정 뒤에도 API image가 실제
+`ktm-application-schema-handoff` executable을 설치하고 builder가 이를 필수 artifact로 봉인하며,
+fresh root/finalize까지 그 mutation module을 import하는 P1을 확인했다.
+
+- API Dockerfile과 candidate/fresh-oracle executable manifest에서 handoff writer 제거
+- image에 퇴역 handoff 경로가 존재하면 candidate build를 fail-close
+- exact `0236` startup은 in-place 명령 없이 destructive fresh rebuild만 안내
+- final permit transition allow-list를 `map-fresh-300-finalize` 하나로 축소
+- catalog digest/runtime invariant를 root-owned `0444` 비실행 DB contract module로 분리
+- fresh root/finalize는 새 module의 read-only 함수만 호출하고 transition source를 import하지 않음
+- mutable checkout의 옛 handoff rehearsal/source-oracle/build-baseline을 candidate proof-tool
+  authority에서 제거
+
+검증은 final permit/catalog/squash `55 passed`, paired builder `16 passed`, API startup contract
+`9 passed`, 실제 PostgreSQL fresh root `2 passed`와 finalize/probe `1 passed`, Ruff·compile·shell
+syntax·`git diff --check`를 통과했다. 아직 active 운영 문서와 C7 live verifier의 v5/v7 drift는
+별도 P1으로 남아 있어 PR #1064는 Draft를 유지한다.
+
 ## 2026-08-25 — T-VN-H46H Dagster 부분 초기화 성공 승격 제거 (Draft)
 
 전문 DB 적대 리뷰에서 Dagster run/event/schedule storage가 순차 초기화되는 도중 죽으면 일부

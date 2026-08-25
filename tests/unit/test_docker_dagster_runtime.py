@@ -825,8 +825,9 @@ def test_application_300_compose_requires_explicit_fresh_bootstrap() -> None:
     assert "Dagster metadata DSN split-brain detected" in fresh_acceptance
 
     dockerfile = _script("docker/api.Dockerfile")
-    assert "transition-application-schema-0236-to-300.py" in dockerfile
-    assert "ktm-application-schema-handoff" in dockerfile
+    assert "transition-application-schema-0236-to-300.py" not in dockerfile
+    assert "ktm-application-schema-handoff" not in dockerfile
+    assert "application-schema-db-contract.py" in dockerfile
     assert "application-schema-fresh-300.py" in dockerfile
     assert "ktm-application-schema-fresh-300" in dockerfile
     assert "application-schema-fresh-finalize.py" in dockerfile
@@ -3211,8 +3212,10 @@ def test_api_container_fails_fast_for_unknown_active_graph_revision(tmp_path: Pa
 
 
 @pytest.mark.unit
-def test_api_container_requires_controlled_handoff_for_exact_0236(tmp_path: Path) -> None:
-    """exact 0236은 normal startup이 아닌 controlled handoff만 허용한다."""
+def test_api_container_rejects_retired_0236_and_requires_fresh_rebuild(
+    tmp_path: Path,
+) -> None:
+    """exact 0236도 in-place로 수리하지 않고 destructive fresh만 안내한다."""
     path, marker = _migration_stub_path(
         tmp_path,
         image_head="0104_tvn36_final_fence",
@@ -3224,9 +3227,10 @@ def test_api_container_requires_controlled_handoff_for_exact_0236(tmp_path: Path
     result = _run_entrypoint(path, {})
 
     assert result.returncode != 0, result.stdout
-    assert not marker.exists(), "controlled handoff 전인데 upgrade가 실행됐다."
-    assert "requires the controlled application-schema 0236-to-300 handoff" in result.stderr
-    assert "ktm-application-schema-handoff" in result.stderr
+    assert not marker.exists(), "퇴역 revision인데 upgrade가 실행됐다."
+    assert "unsupported retired revision 0236" in result.stderr
+    assert "approved destructive fresh rebuild" in result.stderr
+    assert "ktm-application-schema-handoff" not in result.stderr
     assert "retrying" not in result.stderr, "영구 오류를 retry 루프로 두드렸다."
 
 
