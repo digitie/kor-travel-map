@@ -85,6 +85,9 @@ def test_paired_builder_seals_both_images_and_one_dagster_launch_image() -> None
     assert 'stat -c "%u:%a" /app/resources/curations' in api_builder
     assert "! touch /app/resources/curations/.candidate-mutation" in api_builder
     assert "! mv /app/resources/curations/manifest.json" in api_builder
+    assert "--entrypoint sha256sum" in api_builder
+    assert "image_sidecar_sha256=\"${image_sidecar_digest_line%% *}\"" in api_builder
+    assert "awk '{print \\\\\\$1}'" not in api_builder
 
     rehearsal = (ROOT / "scripts" / "rehearse-application-300-handoff.sh").read_text(
         encoding="utf-8"

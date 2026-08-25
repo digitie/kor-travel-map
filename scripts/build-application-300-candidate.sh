@@ -349,8 +349,9 @@ for sidecar in \
   application-destination-alembic-version.sql application-destination-alembic-version.sha256 \
   schema.sql seed.sql; do
   sealed_sidecar_sha256="$(sha256sum "$SEALED_ROOT/alembic/baseline/$sidecar" | awk '{print $1}')"
-  image_sidecar_sha256="$(docker run --pull=never --rm --entrypoint sh "$image_id" -ec \
-    "sha256sum /app/alembic/baseline/$sidecar | awk '{print \\\$1}'")"
+  image_sidecar_digest_line="$(docker run --pull=never --rm --entrypoint sha256sum \
+    "$image_id" "/app/alembic/baseline/$sidecar")"
+  image_sidecar_sha256="${image_sidecar_digest_line%% *}"
   [ "$image_sidecar_sha256" = "$sealed_sidecar_sha256" ] || \
     die "candidate image baseline sidecar가 sealed Git archive와 다르다: $sidecar"
 done
